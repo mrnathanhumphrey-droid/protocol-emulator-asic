@@ -1,0 +1,70 @@
+system:uart_loop
+
+event:fall
+event:tau
+
+# shared line level, written by the executor, sampled by the monitor
+int:1:0:1:1:line
+
+process:E
+clock:1:xe
+location:E:eIdle{initial:}
+location:E:eStart{invariant: xe<=478}
+location:E:eD0{invariant: xe<=478}
+location:E:eD1{invariant: xe<=478}
+location:E:eD2{invariant: xe<=478}
+location:E:eD3{invariant: xe<=478}
+location:E:eD4{invariant: xe<=478}
+location:E:eD5{invariant: xe<=478}
+location:E:eD6{invariant: xe<=478}
+location:E:eD7{invariant: xe<=478}
+location:E:eStop{invariant: xe<=478}
+edge:E:eIdle:eStart:fall{do: line=0; xe=0}
+edge:E:eStart:eD0:tau{provided: xe==478 : do: line=0; xe=0}
+edge:E:eStart:eD0:tau{provided: xe==478 : do: line=1; xe=0}
+edge:E:eD0:eD1:tau{provided: xe==478 : do: line=0; xe=0}
+edge:E:eD0:eD1:tau{provided: xe==478 : do: line=1; xe=0}
+edge:E:eD1:eD2:tau{provided: xe==478 : do: line=0; xe=0}
+edge:E:eD1:eD2:tau{provided: xe==478 : do: line=1; xe=0}
+edge:E:eD2:eD3:tau{provided: xe==478 : do: line=0; xe=0}
+edge:E:eD2:eD3:tau{provided: xe==478 : do: line=1; xe=0}
+edge:E:eD3:eD4:tau{provided: xe==478 : do: line=0; xe=0}
+edge:E:eD3:eD4:tau{provided: xe==478 : do: line=1; xe=0}
+edge:E:eD4:eD5:tau{provided: xe==478 : do: line=0; xe=0}
+edge:E:eD4:eD5:tau{provided: xe==478 : do: line=1; xe=0}
+edge:E:eD5:eD6:tau{provided: xe==478 : do: line=0; xe=0}
+edge:E:eD5:eD6:tau{provided: xe==478 : do: line=1; xe=0}
+edge:E:eD6:eD7:tau{provided: xe==478 : do: line=0; xe=0}
+edge:E:eD6:eD7:tau{provided: xe==478 : do: line=1; xe=0}
+edge:E:eD7:eStop:tau{provided: xe==478 : do: line=1; xe=0}
+edge:E:eStop:eIdle:tau{provided: xe==478 : do: line=1; xe=0}
+
+process:M
+clock:1:xm
+location:M:mIdle{initial:}
+location:M:mStart{invariant: xm<=217}
+location:M:mD0{invariant: xm<=434}
+location:M:mD1{invariant: xm<=434}
+location:M:mD2{invariant: xm<=434}
+location:M:mD3{invariant: xm<=434}
+location:M:mD4{invariant: xm<=434}
+location:M:mD5{invariant: xm<=434}
+location:M:mD6{invariant: xm<=434}
+location:M:mD7{invariant: xm<=434}
+location:M:mStop{invariant: xm<=434}
+location:M:bad{labels: bad}
+edge:M:mIdle:mStart:fall{do: xm=0}
+edge:M:mStart:mD0:tau{provided: xm==217 && line==0 : do: xm=0}
+edge:M:mStart:bad:tau{provided: xm==217 && line==1}
+edge:M:mD0:mD1:tau{provided: xm==434 : do: xm=0}
+edge:M:mD1:mD2:tau{provided: xm==434 : do: xm=0}
+edge:M:mD2:mD3:tau{provided: xm==434 : do: xm=0}
+edge:M:mD3:mD4:tau{provided: xm==434 : do: xm=0}
+edge:M:mD4:mD5:tau{provided: xm==434 : do: xm=0}
+edge:M:mD5:mD6:tau{provided: xm==434 : do: xm=0}
+edge:M:mD6:mD7:tau{provided: xm==434 : do: xm=0}
+edge:M:mD7:mStop:tau{provided: xm==434 : do: xm=0}
+edge:M:mStop:mIdle:tau{provided: xm==434 && line==1 : do: xm=0}
+edge:M:mStop:bad:tau{provided: xm==434 && line==0}
+
+sync:E@fall:M@fall

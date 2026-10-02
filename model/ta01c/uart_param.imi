@@ -1,0 +1,102 @@
+(************************************************************
+ * TA-01c -- parametric UART framing conformance.
+ *
+ * THE ONE CLAIM: the tolerance band is SYNTHESIZED, not tested.
+ * Imitator returns the constraint on (U, Te) for which the monitor never
+ * reaches `bad` -- a continuous region, which enumeration cannot phrase.
+ *
+ * DECIDABILITY, PRE-REGISTERED:
+ *   ONE clock `x`, reset only at the frame's falling edge and never within the
+ *   frame. Both the executor's bit boundaries and the monitor's sample points
+ *   are therefore ABSOLUTE constraints on that single clock. Single-clock PTA
+ *   reachability is decidable. Giving executor and monitor independent clocks
+ *   AND parametrizing both is the undecidable region -- deliberately avoided.
+ *
+ * THE FLOOR IS GONE BY DESIGN RULE, NOT BY APPROXIMATION:
+ *   the monitor's half-period U is the parameter and the bit period is T = 2U,
+ *   so the centre-sample guards are U, 3U, ..., 19U -- LINEAR in the parameter.
+ *   floor(T/2) never appears. Even bit periods are a DESIGN RULE for the
+ *   emulator (costs <0.2% baud accuracy at 115200, far inside the tolerance),
+ *   which makes the theorem total over the design space instead of restricted
+ *   within it.
+ *
+ * FRAMING ONLY, AND SAID SO: this synthesizes the FRAMING band. The data
+ * conjunct is integer bookkeeping that zones and parameters do not help with;
+ * the fixpoint carries it. Claiming otherwise would claim independence we do
+ * not have.
+ *
+ * THE SAMPLE MUST LAND IN ITS WINDOW -- the monitor checks the executor's
+ * PHASE, not merely the line level. Checking the level alone is too permissive:
+ * a stop sample landing after the frame would read idle-high and pass, which
+ * would widen the synthesized band on one side for a reason that is a modelling
+ * artefact rather than real tolerance.
+ ************************************************************)
+
+var
+	x : clock;
+
+	U,          (* monitor half bit-period; bit period T = 2U *)
+	Te          (* executor's ACTUAL bit period -- drift lives here *)
+		: parameter;
+
+	phase : int;   (* 0 = start bit, 1 = data, 2 = stop bit, 3 = after frame *)
+
+(************************************************************)
+(* The executor: drives start, 8 data bits, stop, then idle. *)
+(* Boundaries at Te, 9Te, 10Te -- absolute on the shared clock. *)
+(************************************************************)
+automaton Exec
+
+	loc eStart: invariant x <= Te
+		when x = Te do {phase := 1} goto eData;
+
+	loc eData: invariant x <= 9*Te
+		when x = 9*Te do {phase := 2} goto eStop;
+
+	loc eStop: invariant x <= 10*Te
+		when x = 10*Te do {phase := 3} goto eIdle;
+
+	loc eIdle: invariant True
+
+end (* Exec *)
+
+(************************************************************)
+(* The monitor: samples the start bit at U and the stop bit at 19U.  *)
+(* 19U = U + 9*(2U): the centre of the 10th bit, counting the start. *)
+(************************************************************)
+automaton Mon
+
+	loc m0: invariant x <= U
+		(* start sample must land INSIDE the start bit *)
+		when x = U & phase = 0 goto m1;
+		when x = U & phase >= 1 goto bad;
+
+	loc m1: invariant x <= 19*U
+		(* stop sample must land INSIDE the stop bit *)
+		when x = 19*U & phase = 2 goto mOk;
+		when x = 19*U & phase <= 1 goto bad;
+		when x = 19*U & phase >= 3 goto bad;
+
+	loc mOk: invariant True
+
+	loc bad: invariant True
+
+end (* Mon *)
+
+(************************************************************)
+init := {
+
+	discrete =
+		loc[Exec] := eStart,
+		loc[Mon]  := m0,
+		phase     := 0
+	;
+
+	continuous =
+		x = 0
+		(* both periods strictly positive; no upper bound imposed, so the
+		   synthesized region is not an artefact of a box we drew *)
+		& U  > 0
+		& Te > 0
+	;
+}

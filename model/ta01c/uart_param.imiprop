@@ -1,0 +1,3 @@
+(* Synthesize the constraint on (U, Te) for which `bad` is UNREACHABLE.
+   The output is a REGION, not a verdict -- that is the whole point of the rung. *)
+property := #synth AGnot(loc[Mon] = bad);

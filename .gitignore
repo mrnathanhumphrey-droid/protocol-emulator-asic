@@ -15,3 +15,8 @@ test/gate_level_netlist.v
 # TA-01 waveforms are regenerable by `python model/ta01/run_ta01.py`
 model/ta01/*.bin
 __pycache__/
+
+# TA-01b/c generated artifacts (regenerable)
+model/ta01b/*.bin
+model/ta01b/zone/tax_*.tck
+model/ta01c/*.res

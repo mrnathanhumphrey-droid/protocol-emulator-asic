@@ -1,0 +1,9 @@
+system:smoke
+
+event:tau
+
+process:P
+clock:1:x
+location:P:a{initial:}
+location:P:b{labels:bad}
+edge:P:a:b:tau{provided: x>=5 : do: x=0}
