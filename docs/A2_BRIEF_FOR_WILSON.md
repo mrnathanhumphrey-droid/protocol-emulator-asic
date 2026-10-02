@@ -299,6 +299,82 @@ the reason is the result.
 
 ---
 
+## 12. ⛔⛔ SPURI RR-2772 IS DECODED — AND IT BREAKS THE CRITICAL-INSTANT SHORTCUT
+
+`SPURI_RR2772_EXTRACT.md` is in `docs/`. One finding in it **changes the derivation
+method**, and it is the most important thing in this brief.
+
+### Lemma 4.1 — for EDF the worst case is NOT necessarily the first busy period
+
+Unlike fixed priority, EDF's worst-case response time **may not occur at the
+synchronous release**. Spuri's own worked example (Tables 1–2, pp. 10–11) has
+`r_3` maximised at **`a = 9`**, not in the first busy period. So the release offset
+`a` must be **searched**, not assumed.
+
+⛔ **Consequence: "derive `L ≤ (Q-1)k + (k-1)` by critical instant" is NOT a sound
+derivation for EDF on its own.** The critical-instant theorem is a *fixed-priority*
+result — Joseph & Pandya Thm 1, proved *"as in Liu and Layland"*, and L&L is
+rate-monotonic. Carrying it to EDF unexamined is precisely the kind of step a
+scheduling reviewer removes.
+
+### ✅ But RR-2966 already does the search, so we are not stuck
+
+I checked: RR-2966 **§5.1.2 is Dynamic priority (EDF) + Non-preemptive case** —
+exactly ours — and its response time is
+
+```
+r_i      =  max over q = 0 .. Q  { w(i,q) + C_i − q·T_i }        ← the search
+w(i,q)   =  q·C_i + 1 + Σ(j∈hp(i)) ⌈(w(i,q)+J_j)/T_j⌉·C_j
+                       + max(k∈lp(i)){ C_k − 1 }
+Q        =  ⌈ L_i / T_i ⌉
+```
+
+**That `max over q` IS Lemma 4.1's search.** The exact procedure is sound and in
+hand. Two independent sources agreeing on the need for the search is the
+corroboration; neither is a same-hand re-derivation.
+
+### ⚠️ NAMING COLLISION — fix this before writing anything down
+
+**`Q` means two different things** and both appear in A2:
+
+| symbol | in RR-2966 | in our A2 |
+|---|---|---|
+| `Q` | `⌈L_i/T_i⌉` — number of **instances** in the busy period | number of **lanes** |
+
+Pick different letters now. I suggest `Q` = lanes (as pre-registered) and `m` for
+the instance index, or the derivation will quietly say something false.
+
+### So the revised A2b plan
+
+1. **The recurrence above is the sound procedure.** Evaluate it — periods are
+   concrete integers and the instance is small.
+2. **The closed form `(Q-1)k + (k-1)` is now a CONJECTURE to be proved as an upper
+   bound on that recurrence**, not a derivation in its own right. Either prove
+   `q = 0` dominates for our instance, or prove the closed form dominates all `q`.
+3. ⭐ `L ≤ H` (hyperperiod) bounds the search, so for our `U ≈ 0.117`, small lane
+   count and integer baud-derived periods, the **exhaustive check is cheap and
+   exact**. Spuri's extract makes the useful observation that **Jeffay's NP-hardness
+   is asymptotic** — it scopes an "arbitrary-N lanes" claim, not our concrete
+   instance.
+
+### ⭐ And a better model for the reactive lanes (P1)
+
+Spuri §6 gives **bursty / sporadically-periodic** tasks: `n_i` arrivals per outer
+period `T_i` at inner spacing `t_i` (assumes `n_i·t_i ≤ T_i`), with `I_i(t)`,
+`W(t)` and `H_i(t)` all transcribed in the extract.
+
+**That is a much better fit for reactive protocol events than pure sporadic.** A
+UART receive burst is exactly *n bytes at minimum spacing, then a gap* — not an
+arbitrary-rate stream. So P1 may be satisfiable for lanes that would fail a naive
+"single minimum inter-arrival" test. **Try the bursty model before declaring the
+named obstacle.**
+
+### ⚠️ One discipline note from the extract
+
+Spuri **Eq (2) is necessary and sufficient**, but **Thm 7.1 with blocking is
+SUFFICIENT ONLY.** Same shape as dropping "exactly" from A2 — report `≤`, and say
+"sufficient" where that is what we have.
+
 ## 11. What I could NOT transcribe — your two jobs in the PDFs
 
 1. **RR-2966 Annex B, Theorems 21–24** — "Polynomial sufficient conditions".
