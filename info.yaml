@@ -25,34 +25,34 @@ project:
 # This section is for the datasheet/website. Use descriptive names (e.g., RX, TX, MOSI, SCL, SEG_A, etc.).
 pinout:
   # Inputs
-  ui[0]: ""
-  ui[1]: ""
-  ui[2]: ""
-  ui[3]: ""
-  ui[4]: ""
-  ui[5]: ""
-  ui[6]: ""
-  ui[7]: ""
+  ui[0]: "unused"
+  ui[1]: "unused"
+  ui[2]: "unused"
+  ui[3]: "unused"
+  ui[4]: "unused"
+  ui[5]: "PTR_RST - reset the program write pointer (load mode)"
+  ui[6]: "WR - rising edge writes uio[7:0] at the pointer, then auto-increments"
+  ui[7]: "PROG_MODE - 1 = load a program, 0 = run"
 
   # Outputs
-  uo[0]: ""
-  uo[1]: ""
-  uo[2]: ""
-  uo[3]: ""
-  uo[4]: ""
-  uo[5]: ""
-  uo[6]: ""
-  uo[7]: ""
+  uo[0]: "pointer echo bit 0 (load mode) / program readback bit 0 (run mode)"
+  uo[1]: "pointer echo bit 1 / program readback bit 1"
+  uo[2]: "pointer echo bit 2 / program readback bit 2"
+  uo[3]: "pointer echo bit 3 / program readback bit 3"
+  uo[4]: "pointer echo bit 4 / program readback bit 4"
+  uo[5]: "pointer echo bit 5 / program readback bit 5"
+  uo[6]: "program readback bit 6 (run mode)"
+  uo[7]: "program readback bit 7 (run mode)"
 
   # Bidirectional pins
-  uio[0]: ""
-  uio[1]: ""
-  uio[2]: ""
-  uio[3]: ""
-  uio[4]: ""
-  uio[5]: ""
-  uio[6]: ""
-  uio[7]: ""
+  uio[0]: "load data bit 0 (load mode) / I2C SCL, open-drain (run mode)"
+  uio[1]: "load data bit 1 (load mode) / I2C SDA, open-drain (run mode)"
+  uio[2]: "load data bit 2 (load mode) / reserved for protocol pins"
+  uio[3]: "load data bit 3 (load mode) / reserved for protocol pins"
+  uio[4]: "load data bit 4 (load mode) / reserved for protocol pins"
+  uio[5]: "load data bit 5 (load mode) / reserved for protocol pins"
+  uio[6]: "load data bit 6 (load mode) / reserved for protocol pins"
+  uio[7]: "load data bit 7 (load mode) / reserved for protocol pins"
 
 # Do not change!
 yaml_version: 6
