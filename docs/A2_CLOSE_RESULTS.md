@@ -97,6 +97,16 @@ d = 2    demand 2 + B 1 = 3  >  2
 
 ## Part C — A2b the bound
 
+> ⛔⛔ **EVERY `r_i` BELOW IS SUPERSEDED BY `A2_GREEN_RESULTS.md`.** They were
+> computed with an over-counted interference sum (no deadline limiting), a
+> spurious `+1`, a degenerate zero fixpoint, and a release-count convention that
+> made the recurrence **unsound at `m_i > 1``. Final values: UART 6, SPI 3, I²C 5
+> (three required); UART 10, SPI 5, I²C 9, Ethernet 3 (with Ethernet). The SPI
+> zero-margin warning below was an **artefact of the over-count** and does not
+> survive. `D_i` (Part A) and the structural Ethernet verdict both stand; the
+> derived buffer width does **not** — it is `w = 1`, not `w = 4`. Kept as written
+> because the record is the point.
+
 **Three required protocols — A2 GREEN:**
 
 | lane | `m_i` | `r_i` | `D_i` | margin |
