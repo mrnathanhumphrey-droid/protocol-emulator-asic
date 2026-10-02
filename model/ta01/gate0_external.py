@@ -49,9 +49,20 @@ def wsl_path(p: str) -> str:
 
 
 def sigrok_decode(binpath: str, baud: int = BAUD_DEFAULT) -> dict:
-    """Run sigrok's uart PD over our waveform. Returns its view of the frame."""
-    cmd = ("sigrok-cli -i %s -I binary:numchannels=1:samplerate=%d "
-           "-P uart:baudrate=%d:rx=0 -A uart" % (wsl_path(binpath), F_CLK, baud))
+    """Run sigrok's uart PD over our waveform. Returns its view of the frame.
+
+    ⭐ The binary is taken from `$SIGROK_CLI` so that "tool absent => gate red"
+    is a testable proposition rather than a hope. `price_gates.sh` points it at a
+    path that does not exist and requires every gate that depends on sigrok to go
+    red; a gate that stays green with its foreign authority removed was never
+    using it. The returned `rc` is what makes that detectable -- callers MUST
+    check it, because a failed invocation produces no annotations, which is
+    indistinguishable from a legitimate refusal unless the status is read.
+    """
+    exe = os.environ.get("SIGROK_CLI", "sigrok-cli")
+    cmd = ("%s -i %s -I binary:numchannels=1:samplerate=%d "
+           "-P uart:baudrate=%d:rx=0 -A uart"
+           % (exe, wsl_path(binpath), F_CLK, baud))
     r = subprocess.run(["wsl.exe", "-d", "Ubuntu", "--", "bash", "-lc", cmd],
                        capture_output=True, text=True)
     out = (r.stdout or "") + (r.stderr or "")

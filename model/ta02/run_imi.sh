@@ -17,14 +17,34 @@ echo "=== the derived close-out model differs from the general one by: ==="
 diff table_guard.imi table_guard_closeout.imi
 echo
 
+# Tool path overridable so `price_gates.sh` can prove this gate goes RED when
+# the foreign tool is absent. A gate that stays green without its tool was
+# never using it.
+IMITATOR="${IMITATOR:-/opt/ta/bin/imitator}"
+
 RC=0
 for m in table_guard_closeout table_guard; do
     echo "============================================================"
     echo "=== $m"
     echo "============================================================"
-    /opt/ta/bin/imitator "${m}.imi" "${m}.imiprop" 2>&1 \
-        | grep -vE "^\s*$" \
-        | sed -n '1,200p'
+    # ⛔⛔ DELETE THE ARTEFACT FIRST, THEN CHECK THE PRODUCER'S EXIT STATUS.
+    # Without both, a failed or absent Imitator leaves the PREVIOUS run's .res
+    # in place and every assertion below passes against a stale file -- the gate
+    # then certifies a region this run never produced. The assertions themselves
+    # were always strong; what was missing was any guarantee they were reading
+    # this run's output.
+    rm -f "${m}.res"
+    "$IMITATOR" "${m}.imi" "${m}.imiprop" > "${m}.stdout" 2>&1
+    IRC=$?
+    grep -vE "^[[:space:]]*$" "${m}.stdout" | sed -n '1,200p'
+    if [ "$IRC" != 0 ]; then
+        echo "    *** ${m}: imitator exited ${IRC} -- that is not a result"
+        RC=1
+    fi
+    if [ ! -f "${m}.res" ]; then
+        echo "    *** ${m}: no .res produced by THIS run -- nothing to assert on"
+        RC=1
+    fi
     echo
 done
 

@@ -66,6 +66,8 @@ def main() -> int:
 
     ladder = [0, 1, 108, 214, 215, 216, 217, 218, 250, 300, 433]
     rows = []
+    tool_failures = []
+    SHIFTED = 0xD5          # 0x55 with the sample grid one bit position late
     for v in ladder:
         deltas = [v] + [0] * 9
         ours = conforms_under(BYTE, T, deltas, rx)
@@ -75,6 +77,24 @@ def main() -> int:
         path = os.path.join(HERE, "wave_jit_%03d.bin" % v)
         dump_jittered(BYTE, T, deltas, path)
         theirs_raw = sigrok_decode(path)
+        # ⛔⛔ THE EXIT STATUS IS CHECKED, AND THIS GATE PASSED WITHOUT IT.
+        # `sigrok_decode` has always returned `rc`, and nothing in the repo ever
+        # read it. A sigrok that failed to run on ONLY the above-band rungs
+        # yields no annotations there, so `theirs` is False == VIOL -- exactly
+        # what condition (b) expects -- while the below-band rungs satisfy
+        # non-vacuity. All four conditions passed with the foreign authority
+        # broken on the half of the ladder that carries the finding. A tool
+        # failure is NOT a verdict and is now a hard gate failure.
+        if theirs_raw["rc"] != 0:
+            tool_failures.append((v, theirs_raw["rc"]))
+            print("  %-6d %-10s %s" % (v, "CONF" if ours else "VIOL",
+                  "*** SIGROK FAILED TO RUN (rc=%s) -- not a verdict ***"
+                  % theirs_raw["rc"]))
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+            continue
         decoded = int(theirs_raw["bytes"][0], 16) if theirs_raw["bytes"] else None
         theirs = bool(theirs_raw["start"] and theirs_raw["stop"]
                       and decoded == BYTE and not theirs_raw["frame_error"])
@@ -108,10 +128,41 @@ def main() -> int:
           and any(r[2] for r in rows) and any(not r[2] for r in rows))
     print("  non-vacuity -- both authorities produced BOTH verdicts somewhere: %s"
           % ("PASS" if nv else "*** FAIL: a one-sided ladder proves nothing ***"))
-    ok = a and b and c and nv
+
+    # ---- (d) sigrok must refuse FOR THE STATED REASON -------------------
+    # ⛔⛔ THIS WAS PRINTED AND NEVER ASSERTED. "Above the band sigrok decodes
+    # 0xD5 not 0x55" is the gate's advertised finding -- the one-bit sample-grid
+    # shift the derivation predicts -- and the gate was scored purely on
+    # CONF/VIOL, so sigrok could have refused above the band for ANY reason
+    # (truncated file, wrong baud, no annotations at all) and passed. The
+    # project's own rule is that a mutant must die for its stated reason; it had
+    # never been applied to our own flagship foreign gate.
+    above = [r for r in rows if r[0] > D]
+    shifted = [r for r in above if r[3] == SHIFTED]
+    wrong_reason = [r for r in above if r[3] != SHIFTED]
+    print("  (d) above the band sigrok decodes 0x%02X (the predicted one-bit"
+          % SHIFTED)
+    print("      grid shift) on every rung: %s"
+          % ("PASS -- %d of %d" % (len(shifted), len(above)) if not wrong_reason
+             else "*** FAIL: %s refused for an UNNAMED reason (decoded %s) ***"
+             % ([r[0] for r in wrong_reason],
+                ["0x%02X" % r[3] if r[3] is not None else None
+                 for r in wrong_reason])))
+    d_ok = bool(above) and not wrong_reason
+
+    tf_ok = not tool_failures
+    if tool_failures:
+        print()
+        print("  *** SIGROK FAILED TO RUN on %d rung(s): %s"
+              % (len(tool_failures), tool_failures))
+        print("      A tool failure is not a verdict. Without this check those")
+        print("      rungs would have read as VIOL and the gate would be GREEN.")
+
+    ok = a and b and c and nv and d_ok and tf_ok
     print()
     print("  GATE A-FOREIGN: %s" % (
-        "PASSED -- D_UART = %d is UART's jitter tolerance, not our monitor's" % D
+        "PASSED -- D_UART = %d is UART's jitter tolerance, not our monitor's,"
+        " and sigrok refuses above it for the predicted reason" % D
         if ok else "FAILED -- the computed band is not corroborated; do not use it"))
     return 0 if ok else 1
 

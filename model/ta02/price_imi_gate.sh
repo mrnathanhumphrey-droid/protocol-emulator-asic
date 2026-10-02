@@ -22,12 +22,33 @@ cp table_guard.imiprop "$D/m2.imiprop"
 echo "=== pricing the re-synthesis gate ==="
 echo "  the real general region asserts: 19*U > G0 + 8*G | G0 + 9*G > 19*U | G0 > U"
 echo
+IMITATOR="${IMITATOR:-/opt/ta/bin/imitator}"
+
 for m in m1 m2; do
-    ( cd "$D" && /opt/ta/bin/imitator "${m}.imi" "${m}.imiprop" >/dev/null 2>&1 )
+    ( cd "$D" && "$IMITATOR" "${m}.imi" "${m}.imiprop" >/dev/null 2>&1 )
+    IRC=$?
+    # ⛔⛔ A MISSING .res IS NOT A MUTANT KILL, AND THIS SCRIPT SCORED IT AS ONE.
+    # With the Imitator binary absent or failing, `body` came back empty, all
+    # three conjuncts counted as "absent", and the mutant read as REJECTED -- so
+    # the PRICING gate reported that its assertions discriminate while nothing
+    # had been evaluated at all. A guard passing because of the breakage it
+    # screens for. Absence of evidence is now COULD-NOT-EVALUATE, and red.
+    if [ "$IRC" != 0 ] || [ ! -f "$D/${m}.res" ]; then
+        if [ -f "$D/${m}.res" ]; then HAVE=yes; else HAVE=no; fi
+        echo "  --- ${m}: *** COULD NOT EVALUATE (imitator rc=${IRC}, .res: ${HAVE})"
+        echo "        This is NOT a mutant kill. The gate is unpriced, not passed."
+        RC=1
+        echo
+        continue
+    fi
     body=$(sed -n '/BEGIN CONSTRAINT/,/END CONSTRAINT/p' "$D/${m}.res" 2>/dev/null \
-           | grep -vE "BEGIN CONSTRAINT|END CONSTRAINT|^\s*$")
+           | grep -vE "BEGIN CONSTRAINT|END CONSTRAINT|^[[:space:]]*$")
     echo "  --- ${m}: synthesized"
     echo "$body" | sed 's/^/        /'
+    if [ -z "$body" ]; then
+        echo "        *** COULD NOT EVALUATE: .res carries no CONSTRAINT block"
+        RC=1; echo; continue
+    fi
     miss=0
     for pat in "19*U > G0 + 8*G" "G0 + 9*G > 19*U" "G0 > U"; do
         echo "$body" | grep -qF "$pat" || miss=$((miss+1))

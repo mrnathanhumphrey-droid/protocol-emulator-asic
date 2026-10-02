@@ -20,7 +20,7 @@
 # SCRIPT FILE, never `bash -lc` -- inline $VAR expansion across the Git-Bash/WSL
 # boundary has eaten these before.
 set -uo pipefail
-TK=/opt/ta/tchecker/bin
+TK="${TCHECKER_BIN:-/opt/ta/tchecker/bin}"
 cd /mnt/d/ProtocolEmulator/model/ta02
 
 T=434
@@ -37,7 +37,17 @@ for TE in 455 456 457 458 459 460 461; do
     # A generated model whose period is not the one the filename claims would
     # make every row below a confident wrong answer.
     F="uart_T${T}_Te${TE}"
+    # DELETE FIRST, THEN CHECK THE GENERATOR'S EXIT STATUS. The content greps
+    # below cannot detect staleness on their own: the filename encodes Te, so a
+    # leftover file from an earlier run has exactly the content the grep wants.
+    # Freshness has to come from deletion plus the producer's status.
+    rm -f "${F}.tck"
     python3 ../ta01b/zone/gen_tck.py --t "${T}" --te "${TE}" -o "${F}.tck" >/dev/null
+    GRC=$?
+    if [ "$GRC" != 0 ] || [ ! -f "${F}.tck" ]; then
+        echo "${F}: *** GENERATOR FAILED (rc=${GRC}) -- no model produced this run"
+        RC=1; continue
+    fi
     grep -q "xe<=${TE}" "${F}.tck" || { echo "${F}: GEN MISMATCH -- no xe<=${TE}"; RC=1; continue; }
     grep -q "xm<=${T}"  "${F}.tck" || { echo "${F}: GEN MISMATCH -- no xm<=${T}";  RC=1; continue; }
     OUT=$(timeout 600 "$TK/tck-reach" -a reach -l bad "${F}.tck" 2>&1)
