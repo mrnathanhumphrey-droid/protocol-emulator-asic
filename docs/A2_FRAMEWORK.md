@@ -86,6 +86,71 @@ So condition (2) is exactly what non-preemption costs us. Our engine is
 non-preemptive by design (one event serviced to completion in ≤ k cycles), so (2)
 must be checked, not assumed.
 
+## 3b. ⭐⭐ THE BLOCKING TERM, FROM RR-2966 — CONFIRMED, AND REFINED
+
+RR-2966 obtained (Nate pulled it past the bot-wall). **George, Rivierre & Spuri
+1996, §5.1.1** — EDF with non-preemption. The recurrence, as it extracts:
+
+```
+w(i,q) = q·Ci + 1 + Σ_{j ∈ hp(i)} ⌈(w(i,q) + Jj)/Tj⌉·Cj  +  max_{k ∈ lp(i)} {Ck − 1}
+r(i)   = max_q ( w(i,q) + Ci + Ji − q·Ti )
+```
+
+⭐ **The blocking term is `max_{k ∈ lp(i)} (Ck − 1)`** — so the `(k−1)` is real and
+it is exactly where Wilson put it. **Figure 6** gives the construction: the
+blocking task is the lower-priority task with the largest `C`, **released at
+`t1 − 1`** — one tick before the critical instant, hence already in flight and
+blocking for `Ck − 1`. That is the "at most one non-preemptible job already
+running" argument, with the picture.
+
+### ⛔ Two refinements that change what we must write down
+
+**R-a — it is a max over the OTHER lanes, not `k−1` of the lane being analysed.**
+The term is `max over lower-priority tasks of THEIR Ck, minus 1`. Writing
+`(Q−1)k + (k−1)` is only right when **every lane has the same worst-case service
+time `k`**. Our lanes will not: a UART bit-action, an SPI edge and an I²C action
+have different `C`. So the honest general form is
+
+```
+L  ≤  Σ_{other lanes} C_j  +  max_{k ∈ lp(i)} (C_k − 1)
+```
+
+which collapses to `(Q−1)k + (k−1)` only under equal service times. ⛔ **Assume
+equal `k` and the bound is wrong in the direction that flatters us** whenever the
+slowest lane is slower than the lane being analysed.
+
+**R-b — EDF is ONE CYCLE BETTER than static priority here, and that is an argument
+for the choice already made.** For fixed-priority the report uses
+`Bi = max_{j ∈ lp(i)} {Cj}` — **no `−1`**. `ARCH_PREREG` already chose EDF
+("deadline-ordered action queue, earliest deadline served first"), so we get the
+`−1`. Small, but it is a real consequence of the discipline rather than a
+preference.
+
+## 3c. ⭐⭐ P3 IS RELAXED — non-preemption gives mutual exclusion for free
+
+Wilson's P3: *"Shared resources beyond the engine pull in priority-ceiling/blocking
+analysis. Keep lanes resource-independent except for the engine and this never
+arises."* **Two foreign authorities say the constraint is unnecessary** — it is a
+*consequence* of non-preemption, not a design rule we must impose:
+
+> **George, Rivierre & Spuri, §5.1.2:** "it is also interesting to notice that
+> resource sharing is quite simple to manage in non-preemptive context since, owing
+> to the absence of preemption, **there is no need of any particular protocol**. The
+> only possible priority inversions are caused by the absence of preemption."
+
+> **Jeffay, Stanat & Martel, §1:** "Non-preemptive scheduling on a uni-processor
+> **naturally guarantees exclusive access to shared resources and data**, thus
+> eliminating both the need for synchronization and its associated overhead."
+
+⭐ Different authors, different years, different papers, and **neither is a
+same-hand re-derivation** — real corroboration under standing law 1.
+
+**Design consequence for rung 4: lanes MAY share a shift register or a memory port
+without paying a priority-ceiling blocking term.** The only inversion is
+non-preemption itself, already counted in `max(Ck − 1)`. P3 stops being a
+constraint on the architecture and becomes a note that the architecture already
+satisfies it. Sha/Rajkumar/Lehoczky is therefore **not needed** — do not fetch it.
+
 ## 4. ⛔⛔ A2 AS PRE-REGISTERED IS WRONG ON TWO COUNTS
 
 `ARCH_PREREG_01` A2: *"worst-case queue lateness is **exactly** `(Q-1) × k` cycles
@@ -174,22 +239,37 @@ bound or are flagged as the named obstacle; the TA cross-check agrees for small 
 + Jeffay (1) and (2) checked on the real tables + TA cross-check agreeing for Q ≤ 4
 ⇒ **A2 green on the model, rung 4 unblocked.**
 
-## 8. Texts — what is on disk, and what is still missing
+## 8. Texts — READ vs DOWNLOADED, kept separate on purpose
 
-| paper | role | status |
+⛔⛔ **"On disk" is not "read", and conflating them is how an unverified guess got
+into this document.** The first version of this table said MPI-SWS 2018-003 "may
+carry an equivalent result" to RR-2966. **Reading it refuted that.** The column
+below is now what was actually read.
+
+| paper | read? | role / what it gave |
 |---|---|---|
-| **Jeffay, Stanat & Martel 1991**, *On Non-Preemptive Scheduling of Periodic and Sporadic Tasks*, RTSS, pp. 129–139 | conditions C; the sporadic min-inter-arrival requirement; the NP-hardness result | ✅ on disk, text extracted, **§3/§5 above quoted from it** |
-| **Liu & Layland 1973**, *Scheduling Algorithms for Multiprogramming in a Hard Real-Time Environment*, CACM 20(1) | the foundation; utilization bound; the preemptive contrast | ✅ on disk |
-| **MPI-SWS TR 2018-003**, *A Response-Time Analysis for Non-Preemptive Job Sets* | modern non-preemptive RTA; the closest thing on disk to the blocking term | ✅ on disk |
-| Audsley & Burns, *Real-Time System Scheduling* (survey) | RTA recurrence, critical instant | ✅ on disk (survey, not the 1993 paper) |
-| TU/e, *WCRT under FPS with deferred preemption* | non-preemptive region blocking | ✅ on disk |
-| **George, Rivierre & Spuri 1996, INRIA RR-2966** | ⭐ Wilson names this as carrying *our exact* blocking term | ⛔ **NOT obtained** — HAL is behind Anubis bot protection (403/HTML on every path), CiteSeerX rate-limited (429) |
-| Spuri 1996, RTA for EDF specifically | EDF response times | ⛔ not obtained |
-| Joseph & Pandya 1986 | the original RTA recurrence | ⛔ not obtained |
-| Sha, Rajkumar & Lehoczky 1990 | priority ceiling — **only if P3 is violated** | not fetched, deliberately |
+| **George, Rivierre & Spuri 1996, INRIA RR-2966** | ✅ **read** (56 pp, text extracted) | ⭐ **the blocking term** `max_{k∈lp(i)}(Ck−1)`, Figure 6's critical-instant construction, the EDF-vs-FP difference, and the P3 relaxation. §3b/§3c quoted from it |
+| **Jeffay, Stanat & Martel 1991**, RTSS pp. 129–139 | ✅ **read** (11 pp) | conditions C (Thm 4.1, Cor 4.2), the sporadic min-inter-arrival requirement, the NP-hardness result, the shared-resource corroboration |
+| **Liu & Layland 1973**, CACM 20(1) | ⚠️ **extracted, not yet read** | cited so far only via Jeffay's footnote (condition (1) alone suffices under preemption) — that footnote WAS read |
+| MPI-SWS TR 2018-003, *RTA for Non-Preemptive Job Sets* | ✅ **read enough to reject** | ⛔ **NOT a substitute for RR-2966.** It is **global multiprocessor** non-preemptive scheduling by **schedule-space exploration** — zero occurrences of "critical instant". Wrong problem, wrong method |
+| Audsley & Burns, *Real-Time System Scheduling* (survey) | ✅ **read enough to reject for A2b** | its 31 "blocking" hits are all **resource** blocking — priority inheritance, ceiling protocols, remote blocking. P3 territory, and P3 is now closed (§3c) |
+| TU/e, *WCRT under FPS with deferred preemption* | ⚠️ extracted, not read | 25 "critical instant" / 17 "non-preemptive" hits — best remaining on-disk cross-read for the blocking argument |
+| Spuri 1996 (INRIA RR-2772), RTA for EDF | ⛔ not obtained | EDF response times specifically. Still wanted |
+| Joseph & Pandya 1986, *Comp. J.* 29(5) 390–395 | ⛔ not obtained | the original RTA recurrence |
+| Audsley, Burns, Richardson, Tindell & Wellings 1993, *SEJ* 8(5) 284–292 | ⛔ not obtained | ⚠️ the survey on disk is **not** this paper |
+| Sha, Rajkumar & Lehoczky 1990 | — **no longer needed** | priority ceiling. §3c closes P3, so this is off the list |
 
-⛔ **The gap that matters is RR-2966**, since it is the named source for the
-`(k-1)` term. The MPI-SWS report covers non-preemptive RTA and may carry an
-equivalent result, but **it is not the same source and must not be cited as if it
-were.** Routes not yet tried: an institutional proxy, the ACM/IEEE versions of
-Spuri's and George's journal papers, or asking Wilson to pull it.
+### ⛔ A limitation of how these were read, stated plainly
+
+The formulas in RR-2966 **extract badly** — the PDF's math is symbol-positioned, so
+`pypdf` returns it scrambled (`maxk lp i( )∈ Ck 1±{ }` is the blocking term
+surviving, barely). I recovered the blocking term, the FP-vs-EDF difference and
+Figure 6's construction because those survive as near-ASCII. **Theorem 22 and
+Theorem 23's closed-form upper bounds did NOT survive extraction**, and I have not
+read them as rendered pages (`pdftoppm` is not installed here).
+
+⭐ **So: the blocking term is confirmed from the source; the closed-form bound of
+Theorem 23 is NOT yet transcribed and must be read off the rendered page before it
+is quoted.** Annex B ("Polynomial sufficient conditions") is where the
+closed-forms live — Theorems 21–24 — and that is the part for Wilson to read
+directly.
