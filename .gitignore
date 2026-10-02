@@ -21,6 +21,10 @@ model/ta01b/*.bin
 model/ta01b/zone/tax_*.tck
 model/ta01c/*.res
 
+# Imitator stdout captured by run_imi.sh so the gate can read the exit status
+# without losing the output to a pipe (regenerable)
+model/ta02/*.stdout
+
 # A2 generated artifacts (regenerable)
 #   .tck models are emitted per bisection step by model/a2/zone/run_edf.py
 #   -- 49 of them for one full cross-check. gen_edf.py is the source of truth.

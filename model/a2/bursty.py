@@ -357,6 +357,60 @@ def classify(lanes: list) -> None:
     print("     unvalidated bound for a case that does not arise.")
 
 
+def ethernet_width(lanes: list) -> None:
+    """THE AUTHORITATIVE Ethernet shadow-register width, on a NAMED lane set.
+
+    ⛔⛔ THIS EXISTS BECAUSE THE FIRST ANSWER WAS COMPUTED ON THE WRONG TASK SET.
+    `a2_close.REQUIRED` is TX-ONLY (3 lanes), so the original w-sweep answered
+    "what width works if the chip only transmits" -- and its `w = 1` row was
+    relayed as the derived minimum for a design that carries FIVE lanes in both
+    directions. The arc was:
+
+        w = 4   from the loose (pre-O9) interference sum
+        w = 1   "cheaper" correction -- WRONG LANE SET, and wrong in the UNSAFE
+                direction: on the real set it is margin 1 with m_Eth = 4, which
+                is inside the regime Part 3 proved the recurrence can
+                UNDER-estimate in, and the bursty foreign check only reaches m=2
+        w = 2   minimum on the shipped set; w = 4 clears m_i > 1 entirely
+
+    Every row prints its lane set. A buffer width quoted without one is not a
+    result -- see the run-condition-in-the-name rule.
+    """
+    print("=" * 78)
+    print("ETHERNET SHADOW-REGISTER WIDTH -- authoritative, on the shipped set")
+    print("=" * 78)
+    print("  LANE SET (%d): %s" % (len(lanes), ", ".join(l.name for l in lanes)))
+    print()
+    print("  %-4s %-7s %-6s %-9s %-7s %-7s %-8s %-9s %s"
+          % ("w", "T=5w", "D", "U", "r_Eth", "margin", "m_Eth", "min marg", "verdict"))
+    for w in (1, 2, 4, 8):
+        eth = BLane("Ethernet w=%d" % w, 5 * w, 2, 5 * w - 1)
+        ls = lanes + [eth]
+        U = sum(l.util for l in ls)
+        L = busy_period_b(ls)
+        rs = [response_time_b(l, ls) for l in ls]
+        bad = [r["lane"] for r in rs if not r["feasible"]]
+        mm = min(r["D"] - r["r"] for r in rs)
+        m_eth = eth.N(L)
+        # ⛔ m_i > 1 ANYWHERE is a caveat, not just infeasibility
+        unsafe = [l.name for l in ls if l.N(L) > 1]
+        if bad:
+            v = "infeasible: " + ",".join(bad)
+        elif unsafe:
+            v = "feasible BUT m>1: %s" % ",".join(unsafe)
+        else:
+            v = "CLEAR (all m_i = 1)"
+        print("  %-4d %-7d %-6d %-9.5f %-7d %-7d %-8d %-9d %s"
+              % (w, 5 * w, 5 * w - 1, U, rs[-1]["r"], eth.D - rs[-1]["r"],
+                 m_eth, mm, v))
+    print()
+    print("  ⭐ w = 2 is the MINIMUM that is both feasible and inside the")
+    print("     foreign-validated regime (m_Eth = 2, which run_bursty.py covers).")
+    print("     w = 4 is the first width with every lane back at m_i = 1.")
+    print("  ⛔ w = 1 is feasible by margin 1 with m_Eth = 4 -- NOT covered by any")
+    print("     foreign check, and one cycle of registration latency kills it.")
+
+
 def main() -> int:
     print()
     print("A2-GREEN PART 4 -- the receiving direction")
@@ -382,6 +436,8 @@ def main() -> int:
     print("  (That run: 9/9 lane-instances agree, 3 of them with m_i > 1.)")
     print()
     classify(full)
+    print()
+    ethernet_width(full)
     print()
     clock_stretch()
     return 0

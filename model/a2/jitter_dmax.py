@@ -134,27 +134,61 @@ def conforms_under(byte: int, T: int, deltas: list, rx: UartReceiver) -> bool:
 # ============================================================================
 # THE SEARCH -- per-shape bisection, then a randomized attempt to beat it
 # ============================================================================
+def assert_distinct_shapes(out, n_seg: int) -> None:
+    """⛔⛔ THE CLASS FIX FOR A COVERAGE CLAIM THAT WAS HALF WHAT IT READ.
+
+    The previous `shapes()` emitted 39 NAMES but only 22 DISTINCT VECTORS:
+    `early_1 … early_9` were written `[0 if k == j else 0 …]`, which is
+    constantly 0, so all nine were the same vector `[v,0,…,0]`; and
+    `late_j_others_lo` was byte-identical to `late_j`. The reported witness was
+    still correct and `D_UART = 216` did not move -- but "39 structured shapes"
+    overstated the search by 1.8x, and nothing in the file could notice.
+
+    Naming the invariant once is the fix for the class rather than the instance:
+    two shapes that collapse to the same vector are now a hard error, so a
+    future edit cannot quietly shrink the family again.
+    """
+    seen = {}
+    for name, fn in out:
+        v = tuple(fn(7))                 # 7: distinct from 0 and 1, no accidental ties
+        if v in seen:
+            raise AssertionError(
+                "shape family collapsed: %r and %r are the same vector %r "
+                "-- the coverage claim would be overstated" % (seen[v], name, v))
+        seen[v] = name
+    if len(seen) != len(out):
+        raise AssertionError("distinct-vector count %d != name count %d"
+                             % (len(seen), len(out)))
+
+
 def shapes(n_seg: int):
     """Structured delta shapes, each a function of the scale v.
 
-    The two that matter are named: `early_j` is the start edge late while edge j
-    is on time (the receiver's grid slides right, the data edge does not), and
-    `late_j` is the reverse. The derivation says `early` binds by one cycle; if
-    the search disagrees with that it is a finding, not a rounding detail.
+    Four families, each genuinely varying in j, plus three whole-vector probes:
+      start_only          the start edge late, every later edge on time -- the
+                          receiver's grid slides right and the data does not.
+                          This is the binding witness (`early` side).
+      late_j              edge j late, everything else on time -- the reverse.
+      early_j_others_hi   start late AND every later edge late EXCEPT j.
+      late_j_others_hi    every edge late EXCEPT j, start on time.
+
+    ⭐ `start_only` replaces the nine degenerate `early_j`: with every later edge
+    on time, WHICH edge is "the one on time" is not a distinction, so that family
+    was always one probe. Saying so is the honest version. The j-dependence that
+    the name promised lives in `early_j_others_hi`, which was always correct.
     """
-    out = []
+    out = [("start_only", lambda v, n=n_seg: [v] + [0] * (n - 1))]
     for j in range(1, n_seg):
-        out.append(("early_%d" % j, lambda v, j=j, n=n_seg:
-                    [v] + [0 if k == j else 0 for k in range(1, n)]))
         out.append(("late_%d" % j, lambda v, j=j, n=n_seg:
                     [0] + [v if k == j else 0 for k in range(1, n)]))
         out.append(("early_%d_others_hi" % j, lambda v, j=j, n=n_seg:
                     [v] + [0 if k == j else v for k in range(1, n)]))
-        out.append(("late_%d_others_lo" % j, lambda v, j=j, n=n_seg:
-                    [0] + [v if k == j else 0 for k in range(1, n)]))
+        out.append(("late_%d_others_hi" % j, lambda v, j=j, n=n_seg:
+                    [0] + [0 if k == j else v for k in range(1, n)]))
     out.append(("all", lambda v, n=n_seg: [v] * n))
     out.append(("alt", lambda v, n=n_seg: [v if k % 2 == 0 else 0 for k in range(n)]))
     out.append(("alt_inv", lambda v, n=n_seg: [0 if k % 2 == 0 else v for k in range(n)]))
+    assert_distinct_shapes(out, n_seg)
     return out
 
 
@@ -223,6 +257,9 @@ def main() -> int:
 
     # ---- UART first, because it is the method's validation -----------------
     print("--- UART 115200, T = %d cycles/bit ---" % T)
+    _sh = shapes(10)
+    print("  search family: %d names, %d DISTINCT vectors (asserted equal)"
+          % (len(_sh), len({tuple(f(7)) for _, f in _sh})))
     r = search_D(T, byte=0x55)
     print("  predicted D = min(half, T-half-1) = min(%d, %d) = %d"
           % (r["half"], T - r["half"] - 1, r["D_pred"]))

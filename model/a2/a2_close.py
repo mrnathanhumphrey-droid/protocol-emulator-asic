@@ -276,6 +276,18 @@ def main() -> int:
     print("=" * 78)
     print("THE ESCAPE -- a shift register turns the rate down by its width")
     print("=" * 78)
+    # ⛔⛔ RUN CONDITION IN THE OUTPUT, BECAUSE THIS TABLE WAS QUOTED OFF THE
+    # WRONG LANE SET. `REQUIRED` is TX-ONLY (3 lanes). The sweep below therefore
+    # answers "what width works if the chip only ever transmits" -- and its
+    # `w = 1` row was relayed as the derived minimum for the real design, which
+    # carries five lanes in both directions. On the five-lane set `w = 1` has
+    # margin 1 AND m_Eth = 4, i.e. it sits inside the regime Part 3 proved this
+    # recurrence can UNDER-estimate in. The authoritative sweep is
+    # `model/a2/bursty.py::ethernet_width()`, on the shipped five-lane set,
+    # which gives w = 2 as the minimum and w = 4 as fully clear.
+    print("  ⛔ LANE SET FOR THIS SWEEP: %s" % ", ".join(l.name for l in REQUIRED))
+    print("     This is the TX-ONLY set. SUPERSEDED for the shipped design --")
+    print("     see model/a2/bursty.py (five lanes, both directions): w = 2 min.")
     print("  If the Ethernet lane owns a w-bit shift register clocked at the bit")
     print("  rate, the ENGINE's event is no longer 'emit one bit' but 'refill w")
     print("  bits'. T becomes w*5 cycles. With ping-pong buffering the engine has a")
@@ -309,9 +321,8 @@ def main() -> int:
               % (w, 5 * w, 5 * w - 1, U, "pass" if c2w["passes"] else "FAIL",
                  detail, verdict))
     print()
-    print("  ⭐ w = 4 is the DERIVED minimum shift-register width: the smallest w at")
-    print("     which every lane satisfies r_i <= D_i and condition (2) holds. That")
-    print("     is a number the architecture has to honour, not a tuning knob.")
+    print("  ⛔ DO NOT QUOTE A MINIMUM w FROM THIS TABLE. It is the TX-only set.")
+    print("     The shipped answer is in bursty.py: w = 2 minimum, w = 4 clear.")
     print()
     print("  ⛔ THIS IS P1's BUFFER RUNG, APPLIED WHERE THE SPEC DOES NOT PUT IT.")
     print("     A2-CLOSE scopes the 'derive the FIFO depth' escape to REACTIVE INPUT")
