@@ -73,14 +73,28 @@ def subsets(xs):
 
 
 def gen(lanes, target: int, R: int, tag: str = "edf") -> str:
-    """lanes = [(name, T, C, D)]; target = index of the analysed lane; R = bound.
+    """lanes = [(name, T, C, D)] or [(name, T, C, D, n, t)]; target = analysed
+    lane index; R = bound.
 
     BAD is reachable iff some schedule gives the target lane a response > R.
+
+    ⭐ THE n == 1 PATH IS EMITTED BYTE-IDENTICALLY to the version validated in
+    Part 3. A bursty lane needs two timers (age since its last event, and time
+    since its burst began) where a periodic lane needs one, so the bursty edges
+    are a SEPARATE branch rather than a generalisation of the periodic ones.
+    Rewriting the periodic path to share code would have put the one artefact
+    that is already foreign-validated back into doubt for no gain.
     """
     N = len(lanes)
     T = [l[1] for l in lanes]
     C = [l[2] for l in lanes]
     D = [l[3] for l in lanes]
+    nb = [(l[4] if len(l) > 4 else 1) for l in lanes]
+    tb = [(l[5] if len(l) > 5 else l[1]) for l in lanes]
+    for i in range(N):
+        if nb[i] * tb[i] > T[i]:
+            raise ValueError("lane %d: burst n*t=%d exceeds T=%d"
+                             % (i, nb[i] * tb[i], T[i]))
     cmax = max(C)
     L = []
     w = L.append
@@ -91,8 +105,12 @@ def gen(lanes, target: int, R: int, tag: str = "edf") -> str:
     w("")
     for i in range(N):
         w("int:1:0:1:0:p%d" % i)          # pending
-        w("int:1:0:%d:0:a%d" % (max(1, T[i]), i))   # age since release
-        w("int:1:0:1:0:st%d" % i)         # has this lane started releasing yet
+        w("int:1:0:%d:0:a%d" % (max(1, T[i]), i))   # age since this lane's last event
+        if nb[i] == 1:
+            w("int:1:0:1:0:st%d" % i)     # periodic: has it started releasing yet
+        else:
+            w("int:1:0:%d:0:b%d" % (max(1, T[i]), i))   # time since burst start
+            w("int:1:0:%d:0:k%d" % (nb[i], i))          # events so far this burst
     w("int:1:0:%d:0:rem" % cmax)          # remaining service of running job
     w("int:1:0:%d:0:cur" % N)             # 1..N = running lane, 0 = idle
     w("int:1:0:1:0:ovr")                  # a release arrived while pending
@@ -116,6 +134,30 @@ def gen(lanes, target: int, R: int, tag: str = "edf") -> str:
     w("# --- releases: nondeterministic first release, then periodic ---")
     for i in range(N):
         nxt = ("R%d" % (i + 1)) if i + 1 < N else "SC"
+        if nb[i] > 1:
+            # ---- bursty lane: n events at inner spacing t, outer period T ----
+            n, t = nb[i], tb[i]
+            # burst not begun: start it at any step (all phases explored)
+            w("edge:P:R%d:%s:tau{provided: k%d==0 : do: k%d=1; p%d=1; a%d=0; b%d=0}"
+              % (i, nxt, i, i, i, i, i))
+            w("edge:P:R%d:%s:tau{provided: k%d==0}" % (i, nxt, i))
+            # mid-burst: next event one inner spacing after the previous
+            w("edge:P:R%d:%s:tau{provided: k%d>=1 && k%d<%d && a%d<%d}"
+              % (i, nxt, i, i, n, i, t))
+            w("edge:P:R%d:%s:tau{provided: k%d>=1 && k%d<%d && a%d==%d && p%d==0 : "
+              "do: k%d=k%d+1; p%d=1; a%d=0}" % (i, nxt, i, i, n, i, t, i, i, i, i, i))
+            w("edge:P:R%d:OVR:tau{provided: k%d>=1 && k%d<%d && a%d==%d && p%d==1 : "
+              "do: ovr=1}" % (i, i, i, n, i, t, i))
+            # burst exhausted: wait out the outer period, then start the next
+            w("edge:P:R%d:%s:tau{provided: k%d==%d && b%d<%d}"
+              % (i, nxt, i, n, i, T[i]))
+            w("edge:P:R%d:%s:tau{provided: k%d==%d && b%d==%d && p%d==0 : "
+              "do: k%d=1; p%d=1; a%d=0; b%d=0}"
+              % (i, nxt, i, n, i, T[i], i, i, i, i, i))
+            w("edge:P:R%d:OVR:tau{provided: k%d==%d && b%d==%d && p%d==1 : do: ovr=1}"
+              % (i, i, n, i, T[i], i))
+            continue
+        # ---- periodic lane: unchanged from the Part 3 validated model ----
         # not started yet: either release now, or keep waiting
         w("edge:P:R%d:%s:tau{provided: st%d==0 : do: st%d=1; p%d=1; a%d=0}"
           % (i, nxt, i, i, i, i))
@@ -180,6 +222,20 @@ def gen(lanes, target: int, R: int, tag: str = "edf") -> str:
     w("edge:P:TK:A0:tau{provided: c==1 : do: c=0}")
     for i in range(N):
         nxt = ("A%d" % (i + 1)) if i + 1 < N else "R0"
+        if nb[i] > 1:
+            # a bursty lane carries two timers; each saturates independently, so
+            # all four cap combinations get an edge (a missing one would silently
+            # stall the cycle and drop behaviours -- empty-reads-as-pass again)
+            w("edge:P:A%d:%s:tau{provided: a%d<%d && b%d<%d : "
+              "do: a%d=a%d+1; b%d=b%d+1}"
+              % (i, nxt, i, T[i], i, T[i], i, i, i, i))
+            w("edge:P:A%d:%s:tau{provided: a%d<%d && b%d==%d : do: a%d=a%d+1}"
+              % (i, nxt, i, T[i], i, T[i], i, i))
+            w("edge:P:A%d:%s:tau{provided: a%d==%d && b%d<%d : do: b%d=b%d+1}"
+              % (i, nxt, i, T[i], i, T[i], i, i))
+            w("edge:P:A%d:%s:tau{provided: a%d==%d && b%d==%d}"
+              % (i, nxt, i, T[i], i, T[i]))
+            continue
         w("edge:P:A%d:%s:tau{provided: a%d<%d : do: a%d=a%d+1}"
           % (i, nxt, i, T[i], i, i))
         w("edge:P:A%d:%s:tau{provided: a%d==%d}" % (i, nxt, i, T[i]))
