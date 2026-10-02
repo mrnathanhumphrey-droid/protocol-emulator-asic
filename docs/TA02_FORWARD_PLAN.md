@@ -199,6 +199,26 @@ falsifier it had pre-registered itself.
    downstream inherits its pin budget and its memory shape.
 2. **Tri-state, settled against the RTL stub.** F5 demands it first and it is a
    20-line test, not a rung.
+### ⭐ WHAT THE LITERATURE PULL CHANGED (see `A2_FRAMEWORK.md`)
+
+Four things moved, and three of them change this rung list:
+
+1. **P3 is CLOSED, not a constraint.** Non-preemption gives mutual exclusion for
+   free — corroborated by two foreign sources. **Rung 4 may share a shift register
+   or a memory port across lanes with no extra blocking term.** That is an area
+   saving we were about to forbid ourselves on a false premise.
+2. **The FIFO stops being a convenience and becomes the SCHEDULABILITY REMEDY.**
+   Joseph & Pandya: when a lane's response time exceeds its inter-arrival time,
+   *"buffers can be added"* — with a method for computing **how many**. So the data
+   source is no longer "a real emulator wants one"; it is what makes a reactive lane
+   provable, and its depth must be **derived, not guessed**.
+3. **The blocking term is a max over the OTHER lanes' service times**, not `(k-1)`
+   of the lane analysed. Our lanes have heterogeneous `C` by construction (a UART
+   bit-action, an SPI edge and an I²C action differ), so the engine's spec must
+   record a per-lane worst-case service time, not one global `k`.
+4. **EDF buys one cycle over static priority** on that term. The discipline was
+   already chosen; this is a consequence, not a preference.
+
 3. **⭐⭐ A2 DERIVED AND PROVED ON THE MODEL — THE GATING PREMISE.** Not inside the
    RTL rung; ahead of it, as its gate. A concurrent multi-lane queue engine is a
    much harder formal object than single-clock UART and may not sit in a clean
@@ -216,6 +236,8 @@ falsifier it had pre-registered itself.
    `.github/workflows/fpga.yaml` — yet it appeared in no rung. It is also the only
    place finding 2's level-check hazard meets a real receiver.
 7. **The remaining protocols**, then the band re-synthesized over the descriptor.
+   ⭐ The **FIFO depth per lane comes out of A2**, not out of taste — build it only
+   for the lanes A2 says need it, sized by Joseph & Pandya's method.
 8. **Lean, for soundness** — the `BAD`-unreachable ⟺ conformance equivalence is
    still argued in prose.
 
