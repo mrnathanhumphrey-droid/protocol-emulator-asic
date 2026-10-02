@@ -1,8 +1,74 @@
 # TA-01b / TA-01c — the infinite run, and the band that was computed rather than tested
 
-**Both GREEN.** Re-run: `python model/ta01b/run_ta01b.py` (fixpoint),
+**Both GREEN, and both RE-DERIVED after a receiver fix.** Re-run:
+`python model/ta01b/run_ta01b.py` (fixpoint),
 `bash model/ta01b/zone/run_zone.sh uart_nominal uart_drift10` (zones),
 `bash model/ta01c/run_imi.sh uart_param.imi uart_param.imiprop` (synthesis).
+
+---
+
+## ⛔⛔ CORRECTIONS — a receiver defect, and a runner that never existed
+
+**C1 — `run_ta01b.py` did not exist when this document said to run it.** The line
+above has pointed at that file since TA-01b was written; `git log --all` has no
+record of it ever being committed. Every number below was produced by ad-hoc
+invocation and was **not re-runnable as documented**. The runner now exists and
+re-derives all of them mechanically.
+
+**C2 — `StreamReceiver` sampled one cycle late per bit, and so did TA-01's
+`UartReceiver`.** `if x < t` then sampling at `x == t` counts `0..t` **inclusive** —
+`t+1` cycles per bit, an effective 435-cycle bit period at `T = 434`
+(114,943 baud against a nominal 115,200) and **+10 cycles of accumulated offset by
+the stop sample**. Fixed: the thresholds are now named **once** per receiver
+(`s_start`, `s_bit`) and shared by every call site.
+
+⛔⛔ **This document announced the defect and explained it away.** The reset
+diagnostic below read: *"max clock `== T`, not `< T`; the clock reaches `T` at the
+sample then resets. Off-by-one in the spec's phrasing, not a failure."* **It was the
+defect.** It is also load-bearing for the BFS-termination argument, so it was a
+guard that passed *because of* the thing it screened for.
+
+⛔ **It was in three receivers at once** — `UartReceiver.step`, `_enabled` (the
+*deliberately independent* re-derivation, so TA-01's determinism/totality gate
+passed because both copies shared the defect), and `StreamReceiver.step`. Agreement
+is not corroboration unless the copies can fail independently.
+
+### What the re-derivation changed, and what it did not
+
+| diagnostic | published | re-derived | |
+|---|---|---|---|
+| max reachable clock | `434` (`== T`) | **`433` (`== T-1`)** | ⭐ the receipt for the fix |
+| fixpoint states @ T=434 | 13,023 | **13,023** | unchanged |
+| determinism × totality combinations | 34,086 | **34,086** | unchanged |
+| state-count law | "30 per clock tick" | **slope exactly 30.0000**, `30T + 3` | sharpened |
+| zone verdicts | `false` / `true`, 37 / 36 states | **identical** | unchanged |
+| TA-01c constraint | `9Te < 19U < 10Te`, exact | **identical** | unchanged |
+
+⛔ **A claim made while diagnosing this, now REFUTED by the re-derivation:** that
+the 13,023-state count and the 30-per-tick law were "defect-derived". They are
+**defect-invariant** — identical before and after. The reachable set counts
+`(executor, monitor)` pairs along a phase-locked trajectory plus idle branching, and
+moving *where within a bit* the sample fires does not change how many distinct pairs
+occur. Only `max_clock` ever depended on the threshold. ⭐ The honest version of
+"re-derive, don't re-word" includes re-deriving the things you predicted would move
+and reporting that they did not.
+
+### ⭐ And the level/phase question was half a category error
+
+The companion claim — "the receiver checks the level where the formal models check
+the phase" — conflated two objects. A **receiver model** samples levels because
+real silicon has no access to the transmitter's phase; a **conformance oracle**
+checks that every sample landed in its own bit window. TA-01 built the first and
+claimed the second. `model/ta01/phase_oracle.py` adds the missing object rather than
+bending the receiver into it, and **the oracle's band is `[413, 458]` — exactly
+Imitator's synthesized band.** So the three routes now agree **at the edge**, which
+is what the "triple cross-check" below claimed and did not have.
+
+⭐ The receiver's own band is **payload-dependent, and correctly so**: `0xFF` leaves
+the line high from the start bit onward, so a level-checked stop sample cannot fail
+however far it drifts — band `[344, 651]` against `0x55`'s `[410, 458]`, **6.4×
+too permissive**. **Timing conformance must be tested on `0x55`-class payloads;
+"not its own bit-reversal" is necessary but not sufficient.**
 
 ---
 
@@ -23,9 +89,15 @@ independence but cannot speak for *arbitrary*.
 ⛔ **Reset diagnostics (these replaced the bogus "flat in frame count", which is
 trivially true of a fixpoint and tests nothing):** BFS **terminates** — a
 non-resetting clock makes the state space unbounded and it simply would not — and
-**max reachable clock is bounded by T**. Precisely: max clock `== T`, not `< T`;
-the clock reaches `T` at the sample then resets. Off-by-one in the spec's
-phrasing, not a failure.
+**max reachable clock is bounded by T**.
+
+> ⛔⛔ **RETRACTED — the original text here read:** *"Precisely: max clock `== T`,
+> not `< T`; the clock reaches `T` at the sample then resets. Off-by-one in the
+> spec's phrasing, not a failure."* **That was the defect, not a phrasing problem**
+> (see C2 at the top). Under the fixed thresholds the counter runs `0..T-1` and the
+> measured max reachable clock is **433 = T-1**, as it should always have been.
+> This sentence is the clearest instance in the project of a diagnostic firing
+> correctly and being argued away.
 
 ## Both conjuncts load-bearing over the loop
 

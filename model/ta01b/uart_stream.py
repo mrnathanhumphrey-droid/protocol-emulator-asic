@@ -160,6 +160,14 @@ class StreamReceiver:
         self.t = t_bit if t_bit is not None else bit_period()
         self.half = self.t // 2
         self.n = n
+        # ⛔⛔ SAME DEFECT AS TA-01's `UartReceiver`, CARRIED INDEPENDENTLY HERE.
+        # `x < self.t` then sampling at `x == self.t` counts 0..t inclusive, i.e.
+        # t+1 cycles per bit. This is the receiver the TA-01b FIXPOINT ran on, so
+        # the 13,023-state count and the "30 states per clock tick" law were both
+        # derived under it and have to be RE-DERIVED, not re-worded.
+        # Thresholds named once; see the long note in ta01/uart_ta.py.
+        self.s_start = self.half - 1
+        self.s_bit = self.t - 1
 
     def initial(self):
         return (M_IDLE, 0, (), 0)
@@ -177,26 +185,26 @@ class StreamReceiver:
             return (M_START, 0, (), pos) if level == 0 else (M_IDLE, 0, (), pos)
 
         if st == M_START:
-            if x < self.half:
+            if x < self.s_start:
                 return (M_START, x + 1, bits, pos)
-            if x == self.half:
+            if x == self.s_start:
                 # FRAMING conjunct -- value-independent
                 return (mD(0), 0, (), pos) if level == 0 else (M_BAD_FRAME, 0, bits, pos)
             return (M_BAD_FRAME, 0, bits, pos)                      # catch-all
 
         for k in range(self.n):
             if st == mD(k):
-                if x < self.t:
+                if x < self.s_bit:
                     return (st, x + 1, bits, pos)
-                if x == self.t:
+                if x == self.s_bit:
                     nxt = mD(k + 1) if k + 1 < self.n else M_STOP
                     return (nxt, 0, bits + (level,), pos)
                 return (M_BAD_FRAME, 0, bits, pos)                  # catch-all
 
         if st == M_STOP:
-            if x < self.t:
+            if x < self.s_bit:
                 return (M_STOP, x + 1, bits, pos)
-            if x == self.t:
+            if x == self.s_bit:
                 if level != 1:
                     return (M_BAD_FRAME, 0, bits, pos)        # FRAMING conjunct
                 got = self.decode(bits)

@@ -1,4 +1,25 @@
-"""BAND-EDGE PROBE -- why the swept band is WIDER than the synthesized band.
+"""BAND-EDGE PROBE -- level check vs phase check.
+
+⛔⛔ HISTORICAL NOTE, READ FIRST. This probe was written to DIAGNOSE a defect that
+has since been FIXED (see `model/ta01/uart_ta.py`, the named sample thresholds).
+Every number quoted in the prose below is PRE-FIX. The probe itself MEASURES rather
+than asserts, so its output is current and now reports the fixed state:
+
+    pre-fix : gaps {435}, offset +10, level [411,459], phase [414,459]
+    post-fix: gaps {434}, offset  +0,  level [410,458], phase [413,458]
+              -- and the phase band now EQUALS the synthesized band exactly.
+
+It is kept because the diagnosis is the record of how the defect was found, and
+because it is the regression gate on the sample schedule: if the thresholds ever
+drift back, the gaps go to 435 and the offset to +10 right at the top of the output.
+
+⭐ AND THE REMAINING LEVEL/PHASE GAP IS NOT A DEFECT. A real receiver samples
+LEVELS -- it has no access to the transmitter phase -- so accepting a stop sample
+that drifted past the frame and read idle-high is what real silicon does. The
+PhaseOracle in `model/ta01/phase_oracle.py` is the object that refuses it. The
+prose further down still calls that gap an "artefact"; that word was wrong and the
+oracle file explains why.
+
 
 ⛔⛔ THE DISCREPANCY. B5 swept the executor's bit period and both executors agreed:
 conforming for Te in [411, 459], i.e. eps in [-5.2995%, +5.7604%]. TA-01c

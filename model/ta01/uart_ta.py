@@ -110,6 +110,27 @@ class UartReceiver:
         self.t = t_bit
         self.half = t_bit // 2
         self.n = data_bits
+        # ⛔⛔ THE SAMPLE THRESHOLDS, DEFINED ONCE AND SHARED BY EVERY CALL SITE.
+        # The original code guarded `x < self.t` then sampled at `x == self.t`,
+        # which counts 0..t INCLUSIVE -- t+1 cycles per bit. At t=434 that is an
+        # effective 435-cycle bit period (114,943 baud against a nominal 115,200)
+        # and +10 cycles of accumulated offset by the stop sample, which moved the
+        # conformance band off the edge Imitator and TChecker both agree on.
+        #
+        # ⛔ IT WAS IN THREE RECEIVERS AT ONCE -- `step` here, `_enabled` below
+        # (the supposedly INDEPENDENT re-derivation, so the determinism/totality
+        # gate passed because both copies shared the defect), and TA-01b's
+        # `StreamReceiver`. Naming the threshold once is the fix for the CLASS,
+        # not just the instance: there is now nowhere for two copies to disagree.
+        self.s_start = self.half - 1    # start-bit centre: `half` cycles after the edge
+        self.s_bit = self.t - 1         # every later bit: exactly `t` cycles apart
+
+    def sample_cycles(self) -> list:
+        """The absolute cycles, from the falling edge, at which the 10 samples
+        land. ⭐ This is the SCHEDULE `run_ta01.py::first_wrong_data_bit` assumes
+        (`half + t*(k+1)`); it is asserted against the receiver's live behaviour in
+        gate 1 rather than left to agree by luck, which is how the two drifted."""
+        return [self.half + self.t * k for k in range(self.n + 2)]
 
     def initial(self):
         # (state, clock, bits_so_far)
@@ -131,26 +152,26 @@ class UartReceiver:
             return (START, 0, ()) if level == 0 else (IDLE, 0, ())
 
         if state == START:
-            if x < self.half:
+            if x < self.s_start:
                 return (START, x + 1, bits)
-            if x == self.half:
+            if x == self.s_start:
                 # sample the start bit: must be low
                 return (data_state(0), 0, ()) if level == 0 else (BAD_FRAME, 0, bits)
             return (BAD_FRAME, 0, bits)                  # catch-all: totality
 
         for k in range(self.n):
             if state == data_state(k):
-                if x < self.t:
+                if x < self.s_bit:
                     return (state, x + 1, bits)
-                if x == self.t:
+                if x == self.s_bit:
                     nxt = data_state(k + 1) if k + 1 < self.n else STOP
                     return (nxt, 0, bits + (level,))
                 return (BAD_FRAME, 0, bits)              # catch-all
 
         if state == STOP:
-            if x < self.t:
+            if x < self.s_bit:
                 return (STOP, x + 1, bits)
-            if x == self.t:
+            if x == self.s_bit:
                 # sample the stop bit: must be high
                 return (DONE, 0, bits) if level == 1 else (BAD_FRAME, 0, bits)
             return (BAD_FRAME, 0, bits)                  # catch-all
@@ -217,25 +238,25 @@ def _enabled(rx: UartReceiver, cfg, level: int) -> list:
     elif state == IDLE:
         out.append((START, 0, ()) if level == 0 else (IDLE, 0, ()))
     elif state == START:
-        if x < rx.half:
+        if x < rx.s_start:
             out.append((START, x + 1, bits))
-        elif x == rx.half:
+        elif x == rx.s_start:
             out.append((data_state(0), 0, ()) if level == 0 else (BAD_FRAME, 0, bits))
         else:
             out.append((BAD_FRAME, 0, bits))
     elif state == STOP:
-        if x < rx.t:
+        if x < rx.s_bit:
             out.append((STOP, x + 1, bits))
-        elif x == rx.t:
+        elif x == rx.s_bit:
             out.append((DONE, 0, bits) if level == 1 else (BAD_FRAME, 0, bits))
         else:
             out.append((BAD_FRAME, 0, bits))
     else:
         for k in range(rx.n):
             if state == data_state(k):
-                if x < rx.t:
+                if x < rx.s_bit:
                     out.append((state, x + 1, bits))
-                elif x == rx.t:
+                elif x == rx.s_bit:
                     nxt = data_state(k + 1) if k + 1 < rx.n else STOP
                     out.append((nxt, 0, bits + (level,)))
                 else:

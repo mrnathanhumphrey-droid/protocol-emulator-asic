@@ -262,6 +262,15 @@ band turned out to be wrong on both columns, for reasons that are TA-01's.**
 
 ## ⛔⛔ FINDING 1 — TA-01's receiver is not a 115200-baud receiver
 
+> ✅ **FIXED.** The thresholds are now named once per receiver (`s_start`, `s_bit`)
+> and shared by every call site, in all three receivers that carried the defect:
+> `UartReceiver.step`, `_enabled`, and TA-01b's `StreamReceiver.step`. Re-derived:
+> sample cycles **217 … 4123**, gaps **{434}**, offset **+0**, max reachable clock
+> **433 = T-1**, and the level check's high edge now **458** — agreeing with both
+> Imitator and TChecker. Full certificate re-run green: TA-01, TA-01b (13,023
+> states, slope exactly 30.0000), zones (37/36), TA-01c (`9Te < 19U < 10Te`, exact),
+> and all 8 TA-02 gates. Details in `docs/TA01bc_RESULTS.md` §C1–C2.
+
 B5's bands agreed with each other and **disagreed with TA-01c's synthesized band**.
 Three different answers:
 
@@ -332,6 +341,23 @@ single frame is far inside UART's own tolerance. **A foreign authority bounds wh
 it can resolve.**
 
 ## ⛔ FINDING 2 — the receiver checks the level, the model checks the phase
+
+> ⚠️ **HALF-RETRACTED — this was partly a CATEGORY ERROR, not a defect.** A
+> **receiver model** samples levels because real silicon has no access to the
+> transmitter's phase; a **conformance oracle** checks that every sample landed in
+> its own bit window. TA-01 built the first and claimed the second.
+> `model/ta01/phase_oracle.py` adds the missing object instead of bending the
+> receiver into it — bending it would have retired the level check exactly when
+> RTL, which reads levels and not phases, is about to need it.
+> ⭐ **The oracle's band is `[413, 458]`, exactly Imitator's synthesized band**, so
+> the three routes now agree AT THE EDGE. The residual level/phase gap (level low
+> edge 410 vs oracle 413) is real receiver behaviour, not an artefact.
+> ⭐ **And the payload dependence of R3 is a property of UART:** `0xFF` leaves the
+> line high from the start bit onward, so a level-checked stop sample cannot fail
+> however far it drifts — `[344, 651]` against `0x55`'s `[410, 458]`, **6.4× too
+> permissive**. **Test timing conformance on `0x55`-class payloads; "not its own
+> bit-reversal" is necessary but NOT sufficient — the byte must also be able to
+> make a mis-timed sample read the wrong value.**
 
 The three `Te` values where the two checks disagree are `411, 412, 413`, and the
 reason is identical in all three:
