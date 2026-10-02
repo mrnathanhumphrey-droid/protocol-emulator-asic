@@ -51,7 +51,9 @@ L_i(a)   = floor(a/T_i)·C_i + B_i(a) + W_i(a, L_i(a))
 r_i      = max over a ∈ A_i ( L_i(a) + C_i + J_i − a )
 ```
 
-| lane | `r` loose | `r` Spuri | delta |
+**Stage: Part 1 only — the `+1` is still present. Shipped values are in Final.**
+
+| lane | `r` loose | `r` Spuri (Part 1) | delta |
 |---|---|---|---|
 | UART | 7 | 7 | 0 |
 | **SPI** | **8** | **4** | **−4** |
@@ -60,6 +62,13 @@ r_i      = max over a ∈ A_i ( L_i(a) + C_i + J_i − a )
 **`r_SPI` is settled: a genuine pass, not a buffered one.** Margin 4→8 on the
 three required lanes, and 0→6 with Ethernet. **SPI's zero margin was an artefact
 of the over-count, not a property of the design.**
+
+> ⚠ **Two values of `r_SPI` appear in this document and both are correct — for
+> different stages.** `r_SPI = 4` is Part 1 alone (deadline-limited interference,
+> `+1` still present). `r_SPI = 3` is Parts 1 **and** 2 (`+1` removed) and is the
+> **shipped** value, which is what the gate table and the Final section quote.
+> Stated here because the two numbers otherwise read as a contradiction in the
+> flagship result document. Every table below carries its stage in the heading.
 
 Why SPI gains most: it holds the **earliest** deadline (12 < 30 < 216), so under
 EDF no UART or I²C instance released in the busy period can carry a deadline
@@ -118,7 +127,8 @@ each link is separately checkable:
    inner spacing of any lane is 25. `m_i = 1` for all five lanes in both
    directions, including the two bursty receive lanes.
 3. **Therefore the corrected and uncorrected recurrences agree on the real
-   tables** — and they do, identically, which is why Part 1's `r_SPI = 4` survived
+   tables** — and they do, identically, which is why Part 1's `r_SPI = 4` (that
+   stage's value, before Part 2 removes the `+1`) survived
    the Part 3 fix unchanged.
 4. **Both are foreign-validated** — the corrected one directly (9/9 periodic,
    9/9 bursty), and the agreement in (3) transfers that validation to the shipped
@@ -338,7 +348,7 @@ any ceiling large enough to matter.
 
 | part | state |
 |---|---|
-| 1 — O9 deadline-limited interference, `r_SPI` settled | ✅ `r_SPI = 3`, margin 9, genuine pass |
+| 1 — O9 deadline-limited interference, `r_SPI` settled | ✅ `r_SPI = 3` with Part 2 applied (4 at Part 1 alone), margin 9, genuine pass |
 | 2 — O8 the `+1` | ✅ spurious, removed; **O8 dissolves** — ours, validated, not borrowed |
 | 3 — foreign cross-check, N=2,3,4 | ✅ 9/9, model validated first, `m_i>1` and distinct `C` covered |
 | 4 — P1 reactive lanes | ✅ both classified FEASIBLE; bursty path 9/9 foreign-checked with 3 lanes at `m_i>1` |
