@@ -121,6 +121,69 @@ built so far runs two lanes at once. Five of five planned rungs were verificatio
 rungs for a machine that is now retracted. **That is the single largest hole in the
 plan, and it is larger than any individual defect the red team found.**
 
+## 2c. WILSON'S RULINGS — accepted, and two are now standing law
+
+**STANDING LAW 1 — agreement is not corroboration unless the copies can fail
+independently.** `_enabled` was built *specifically* to be the independent
+re-derivation that stops the determinism/totality gate proving the implementation
+against itself — and it carried the identical off-by-one, so the gate passed
+because both copies shared the bug. Look at what actually caught things in this
+project: **sigrok, Imitator, TChecker — the foreign authorities.** Our own
+"independent" re-derivations caught nothing, because they were the same hand.
+Therefore: **a same-author re-derivation is weak corroboration; foreign authority
+is the real thing.** And never file a boundary signal as "just phrasing" without
+re-deriving it from scratch.
+⭐ This also matters in the room we are aiming at: *"independently re-derived" gets
+eaten alive by a verification reviewer unless you can show the copies CAN diverge.*
+So every independence claim in the write-up must come with a demonstration that the
+two routes are capable of disagreeing.
+
+**STANDING LAW 2 — the plan is checked against the pre-reg falsifiers before it is
+a plan.** Three instances now of generating a good pre-registered guard and then
+not honouring it: the off-by-one waved off as phrasing, F5 ordering (tri-state
+behind two rungs of protocol work), and `ARCH_PREREG_01`'s tile count "closed in
+the wrong direction by omission."
+
+**CONFIRMED STANDING — the method survives and transfers; only the architecture is
+retracted.** Conformance-as-a-decidable-query, the band proved over a
+reprogrammable field, and foreign-authority adjudication all carry forward. The 24×
+budget error made a minimal, no-arithmetic, one-`pc` machine look *necessary* when
+it never was. Concurrency plus the **provable jitter bound were always the
+differentiator** — the thing the six-repo prior-art sweep found unclaimed — so the
+red team corrected a **target error**, not a bug. The method was never the thing
+that was wrong.
+
+### ⭐⭐ THE RULING THAT RESHAPES THE NEXT RUNG: A2 comes out of the RTL rung
+
+I had "A2 derived then proved" *inside* the queue-engine RTL rung. **Wilson pulled
+it out and ahead, and gated the RTL on it.**
+
+Reason: A2 — the lateness bound, which F2 calls the entry's premise — has never
+been derived, and **a concurrent, arithmetic, multi-lane queue engine is a far
+harder formal object than single-clock UART.** It may not sit in a clean decidable
+fragment, and the bound is precisely the thing that could fail to be provable on
+it. So prove the bound exists and holds **on the abstraction** — the way Imitator
+synthesized the UART band — *before* building the engine in silicon. If A2 is not
+derivable on the model, we learn the entry's premise is unsupported **now and
+cheaply**, instead of after building the engine around it.
+
+**That is the TA-01c discipline — band on the model before any RTL — applied to the
+one claim the whole submission rests on. Method before machine, and here the method
+IS the bound.**
+
+### Load path (§6) — ACCEPTED, with three amendments
+
+1. **Mode-select and pointer-reset come from the DEDICATED inputs (`ui_in` / `ena`),
+   never from the 8 `uio`** — so the protocol pins stay free. (This is what §6
+   already specifies; it is now a hard constraint rather than a convenience.)
+2. **Mutual exclusion is an explicit SCOPE CHOICE, stated as such:** reprogram =
+   **halt, reload, resume**. No mid-transaction swap. Writing it down as a choice is
+   what stops it being read later as an oversight.
+3. **Pre-register the load readback / checksum even if it is not built yet.**
+   "Reprogrammable" + "provably correct" implies **"provably loaded correctly"**,
+   and the load path is a new surface where that can go wrong. §6's L3 falsifier
+   already names it; it is now pre-registered rather than optional.
+
 ## 3. Rungs intended next — REORDERED
 
 ⛔ The previous order put RTL fourth of five. The brief says *"**Run synthesis
@@ -136,18 +199,24 @@ falsifier it had pre-registered itself.
    downstream inherits its pin budget and its memory shape.
 2. **Tri-state, settled against the RTL stub.** F5 demands it first and it is a
    20-line test, not a rung.
-3. **The queue engine in RTL, with A2 derived and then proved.** This is the
-   premise. It has never been attempted.
-4. **One protocol end-to-end through RTL** — model, Verilog, gate level — bridged by
+3. **⭐⭐ A2 DERIVED AND PROVED ON THE MODEL — THE GATING PREMISE.** Not inside the
+   RTL rung; ahead of it, as its gate. A concurrent multi-lane queue engine is a
+   much harder formal object than single-clock UART and may not sit in a clean
+   decidable fragment — so if the bound is not derivable on the abstraction, the
+   entry's premise is unsupported and we find out cheaply. Same discipline as
+   TA-01c: the band on the model before any RTL.
+4. **The queue engine in RTL, REFINING the A2-carrying model.** Gated on rung 3.
+   It has never been attempted.
+5. **One protocol end-to-end through RTL** — model, Verilog, gate level — bridged by
    the existing foreign decoders: dump the cocotb waveform into the *same* sigrok
    PDs and `cmp` against the model's bytes, at RTL **and** gate level, in CI. That
    bridge does not exist today; `test/test.py` is still the stock stub asserting
    `uo_out == 50`.
-5. **FPGA.** In the brief, owed in both results docs, and there is an unused
+6. **FPGA.** In the brief, owed in both results docs, and there is an unused
    `.github/workflows/fpga.yaml` — yet it appeared in no rung. It is also the only
    place finding 2's level-check hazard meets a real receiver.
-6. **The remaining protocols**, then the band re-synthesized over the descriptor.
-7. **Lean, for soundness** — the `BAD`-unreachable ⟺ conformance equivalence is
+7. **The remaining protocols**, then the band re-synthesized over the descriptor.
+8. **Lean, for soundness** — the `BAD`-unreachable ⟺ conformance equivalence is
    still argued in prose.
 
 ⚠️ **TA-03 (full SPI conformance) is deliberately no longer rung 1.** It would have
@@ -179,10 +248,16 @@ settled. A recorded open question was closed by omission.
 
 - module `tt_um_*`, pins `ui_in[7:0]`, `uo_out[7:0]`, `uio_in|out|oe[7:0]`
 - **`tiles: "6x4"` = 24 tiles ≈ 24K logic cells**; `info.yaml` currently says `1x1`
-- ⚠️ **The two primary sources conflict.** The `cmos5l` template's own `info.yaml`
-  reads *"Valid values: 1x1, 1x2, 2x2, 3x2, 4x2, 6x2 or 8x2"* — **`6x4` is not in
-  the list**, so precheck may reject the instructed setting. Resolve with the
-  organizers, not by arithmetic (the mistake above).
+- ✅ **The conflict is RESOLVED BY MEASUREMENT, not by arithmetic.** The template's
+  own `info.yaml` reads *"Valid values: 1x1, 1x2, 2x2, 3x2, 4x2, 6x2 or 8x2"* —
+  `6x4` is not in that list — but **`precheck` PASSED at `6x4`** (run 37043643942,
+  14m27s). The TT tooling itself is a primary source and it accepts the brief's
+  instruction; the comment is stale. No organizer mail needed.
+  ⛔ **Wilson's instruction to keep this soft still stands and was written without
+  this datum:** the cell budget stays a **soft target with margin** and the tile
+  allocation stays **parameterizable**. One precheck pass licenses proceeding at
+  `6x4`; it does not license re-locking a contested number, which is how the 24×
+  error happened in the first place.
 - ⚠️ `CLOCK_PERIOD: 20` → 50 MHz is a **template default** in a file headed "DO NOT
   EDIT THIS FILE unless you know what you are doing", and the brief mandates no
   frequency — it says "too slow at **your chosen** clock frequency". `T = 434`, the
@@ -191,12 +266,52 @@ settled. A recorded open question was closed by omission.
 - submission deadline **2027-01-18**; the brief "strongly recommend[s] working in
   teams"
 
-**On fitting:** no longer the live worry. Paper estimate: 64 entries × (g 16 + out 8
-+ in_pin 4 + in_pol 1 + next_a 6 + next_b 6) = **2,624 bits**; Tiny Tapeout
-publishes ~**320 DFFs per tile**, so ≈**8 tiles in flops**, ≈2 in SRAM — and the
-brief itself says "For instruction memory, **SRAM can be more area-efficient than
-flip-flops**." Comfortable in 24; impossible in 1. ⛔ Still an estimate: one `gds`
-run reporting mapped cell area is what would make it a measurement.
+### ✅ MEASURED — the flow has now been run at `6x4`
+
+`gds` run 37043643942, 51m52s, on the template stub. **The two primary sources'
+conflict is resolved empirically: `precheck` PASSED at `6x4`** (14m27s), despite
+`info.yaml`'s own comment listing only `1x1 … 8x2`. The comment is stale; the
+brief's instruction works. GDS built, `tt_submission` artefact produced, gate-level
+test green.
+
+| measured | value |
+|---|---|
+| die area @ `6x4` | **916,214 µm² (0.916 mm²)** |
+| core area | 902,417 µm² |
+| instances (stub) | 53 — 52 multi-input combinational + 1 inverter |
+| std-cell utilization | **0.0573 %** |
+| avg cell area, this mix | 9.76 µm² |
+
+⭐⭐ **The measured die is ~31 % LARGER than Jane Street's own "about 0.7 mm²"
+nominal figure, and ~2.1× the 0.43 mm² that the template's 167×108 µm comment
+implies.** `ARCH_PREREG_01`'s unresolved discrepancy #1 is therefore settled by
+measurement, and **the real number is bigger than either side of the argument** —
+which is exactly why it was logged as "not to be resolved by arithmetic".
+
+**Capacity, derived from this run rather than from published per-tile guidance:**
+902,417 µm² core ÷ 9.76 µm² ≈ **92 K cells at 100 % utilization for this cell mix**.
+⛔ That is an upper bound tied to the mix: a flop-heavy design has cells 2–3× larger,
+so realistically ≈30–45 K at 100 % and ≈15–25 K at a routable ~50 %. That brackets
+the 24 K paper estimate and confirms the conclusion: **comfortable at 24 tiles,
+impossible at 1.**
+
+The table-memory point survives and is now sharper: 64 entries × 41 bits =
+**2,624 bits**, which at Tiny Tapeout's published ~320 DFFs/tile is ≈8 tiles — a
+third of the chip in flip-flops. **That is the measured case for SRAM**, and the
+brief agrees: "For instruction memory, **SRAM can be more area-efficient than
+flip-flops**."
+
+⛔⛔ **A4 ("closes timing at 50 MHz") IS NOT TESTED BY THIS RUN, and the reports
+look like it is.** Post-PnR WNS (setup) reads **0.0 at all three corners**
+(`nom_slow_1p08V_125C`, `nom_typ_1p20V_25C`, `nom_fast_1p32V_m40C`) — but the stub
+is *purely combinational*, 53 cells and **zero flip-flops**, so there is no
+registered path to time. `0.0` here means "no path", not "met with zero margin".
+Banking that as a green would be reading the wrong field, the way `metrics.csv`'s
+`wns` was once mistaken for a CTS worst slack. **A4 stays open until real
+sequential logic goes through the flow.**
+
+⚠️ `viewer` failed, and it is **not** a design failure: "Failed to deploy to GitHub
+Pages." The repo is private and Pages is not enabled. Cosmetic.
 
 ## 6. THE PROGRAM-LOAD PATH — spec, for review
 
