@@ -41,9 +41,10 @@ except Exception:
 WSL_DIR = "/mnt/d/ProtocolEmulator/model/a2/zone"
 
 
-def check(lanes, target: int, R: int, label: str, tag: str) -> dict:
+def check(lanes, target: int, R: int, label: str, tag: str,
+          tie_mode: str = "nondet") -> dict:
     """One tck-reach call. Returns {'reachable': bool, 'states': int|None}."""
-    src = gen(lanes, target, R, tag=tag)
+    src = gen(lanes, target, R, tag=tag, tie=tie_mode)
     path = os.path.join(HERE, "%s.tck" % tag)
     tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8", newline="\n") as fh:
@@ -68,25 +69,26 @@ def check(lanes, target: int, R: int, label: str, tag: str) -> dict:
     return {"reachable": reachable, "states": states, "raw": out.strip()[:200]}
 
 
-def foreign_r(lanes, target: int, tag: str, rmax: int | None = None) -> dict:
+def foreign_r(lanes, target: int, tag: str, rmax: int | None = None,
+              tie_mode: str = "nondet") -> dict:
     """r_target by bisection on the foreign checker."""
     if rmax is None:
         rmax = sum(l[2] for l in lanes) + max(l[2] for l in lanes) + 4
-    ovr = check(lanes, target, rmax, "ovr", tag + "_ovr")
+    ovr = check(lanes, target, rmax, "ovr", tag + "_ovr", tie_mode)
     lo, hi = 0, rmax
-    top = check(lanes, target, hi, "bad", tag + "_hi")
+    top = check(lanes, target, hi, "bad", tag + "_hi", tie_mode)
     if top["reachable"] is None:
         return {"r": None, "err": top["raw"], "ovr": ovr}
     if top["reachable"]:
         return {"r": None, "err": "BAD still reachable at R=%d: no bound found" % hi,
                 "ovr": ovr}
-    bot = check(lanes, target, 0, "bad", tag + "_lo")
+    bot = check(lanes, target, 0, "bad", tag + "_lo", tie_mode)
     if not bot["reachable"]:
         return {"r": 0, "ovr": ovr, "calls": 2, "states": top["states"]}
     calls = 2
     while lo + 1 < hi:
         mid = (lo + hi) // 2
-        res = check(lanes, target, mid, "bad", tag + "_m")
+        res = check(lanes, target, mid, "bad", tag + "_m", tie_mode)
         calls += 1
         if res["reachable"] is None:
             return {"r": None, "err": res["raw"], "ovr": ovr}

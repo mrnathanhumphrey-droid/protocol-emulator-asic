@@ -72,7 +72,7 @@ def subsets(xs):
     return out
 
 
-def gen(lanes, target: int, R: int, tag: str = "edf") -> str:
+def gen(lanes, target: int, R: int, tag: str = "edf", tie: str = "nondet") -> str:
     """lanes = [(name, T, C, D)] or [(name, T, C, D, n, t)]; target = analysed
     lane index; R = bound.
 
@@ -196,7 +196,23 @@ def gen(lanes, target: int, R: int, tag: str = "edf") -> str:
             g += ["p%d==1" % j for j in S]
             g += ["p%d==0" % j for j in notS]
             # EDF: D_k - a_k <= D_j - a_j  <=>  a_j - a_k <= D_j - D_k
-            g += ["a%d-a%d<=%d" % (j, k, D[j] - D[k]) for j in S]
+            #
+            # ⭐ `tie` SELECTS THE TIE-BREAK, AND THAT IS THE WHOLE POINT OF
+            # RUNG 4's PART 0. "nondet" uses <= for every rival, so on an equal
+            # deadline EVERY candidate edge is enabled and the checker explores
+            # all tie-breaks -- the reported r is the max over all of them.
+            # "index" is a deterministic lowest-lane-index-wins rule: lane k
+            # keeps <= against higher-indexed rivals (it wins those ties) and
+            # takes a strict < against lower-indexed ones (it loses those).
+            # Comparing the two answers is how we find out whether the proved
+            # bound constrains the hardware's tie-break or covers any of them.
+            if tie == "index":
+                g += ["a%d-a%d<=%d" % (j, k, D[j] - D[k] - (0 if k < j else 1))
+                      for j in S]
+            elif tie == "nondet":
+                g += ["a%d-a%d<=%d" % (j, k, D[j] - D[k]) for j in S]
+            else:
+                raise ValueError("tie must be 'nondet' or 'index'")
             w("edge:P:SC:EX:tau{provided: %s : do: cur=%d; rem=%d}"
               % (" && ".join(g), k + 1, C[k]))
     w("")
