@@ -1,0 +1,106 @@
+(************************************************************
+ * TA-02 -- THE PARAMETRIC RE-SYNTHESIS, WITH THE GUARD AS A TABLE FIELD.
+ *
+ * THE ONE CLAIM: the tolerance band is a constraint on `G`, THE TABLE'S OWN
+ * GUARD FIELD -- so the knob an operator reprograms IS the knob the proof is
+ * quantified over. Reloading the table with a different G moves inside a region
+ * that has already been proved, instead of needing a new proof per baud rate.
+ * TA-01c synthesized over `Te`, "the executor's actual bit period", which was a
+ * parameter of the MODEL and not a field of anything.
+ *
+ * TWO INSTANCES, AND THE FIRST IS THE CLOSE-OUT:
+ *   G0 = G  -- the table convention (every UART entry carries the same guard).
+ *              Must reproduce TA-01c's 9*G < 19*U < 10*G exactly. If it does
+ *              not, the re-parametrization changed the model and the result
+ *              does not transfer.
+ *   G0 free -- the start bit gets its OWN guard field, which a reprogrammable
+ *              table can obviously do. ASKS A QUESTION ARITHMETIC CANNOT PHRASE:
+ *              can a table BUY drift tolerance by sizing the start bit
+ *              differently from the data bits? Still ONE clock, so still
+ *              decidable (single-clock PTA reachability is decidable for any
+ *              number of parameters).
+ *
+ * WHY A SINGLE NON-RESETTING CLOCK IS STILL A FAITHFUL MODEL OF THE
+ * INTERPRETER, WHICH RESETS ITS CLOCK AT EVERY ENTRY:
+ *   The UART table is traversed in sequence with no branching, so per-entry
+ *   resets with equal guards and a non-resetting clock with guards at multiples
+ *   of G produce THE SAME BOUNDARIES. That is not asserted here -- B5 measured
+ *   it: the interpreter's waveform is BYTE-IDENTICAL to the bespoke executor
+ *   whose boundaries are multiples of t_bit, on all 24 (byte, idle) pairs.
+ *   Giving the executor its own resetting clock AND parametrizing both clocks
+ *   is the undecidable region; this avoids it by licence rather than by luck.
+ *
+ * MONITOR CHECKS PHASE, NOT LEVEL -- and TA-02's band-edge probe is why this
+ * line is no longer merely a precaution. The Python receiver in TA-01 checks
+ * the LEVEL, and that is measurably why its band is wider on the slow side:
+ * a stop sample that has drifted past the end of the frame reads idle-high and
+ * is accepted. See docs/TA02_RESULTS.md.
+ ************************************************************)
+
+var
+	x : clock;
+
+	U,          (* monitor half bit-period; the monitor's bit period is 2U *)
+	G0,         (* TABLE FIELD: the guard on the start-bit entry *)
+	G           (* TABLE FIELD: the guard on every data and stop entry *)
+		: parameter;
+
+	phase : int;   (* 0 = start bit, 1 = data, 2 = stop bit, 3 = after frame *)
+
+(************************************************************)
+(* The executor = the table interpreter running the UART table.            *)
+(* Boundaries at G0, G0+8G, G0+9G -- absolute on the shared clock.         *)
+(************************************************************)
+automaton Exec
+
+	loc eStart: invariant x <= G0
+		when x = G0 do {phase := 1} goto eData;
+
+	loc eData: invariant x <= G0 + 8*G
+		when x = G0 + 8*G do {phase := 2} goto eStop;
+
+	loc eStop: invariant x <= G0 + 9*G
+		when x = G0 + 9*G do {phase := 3} goto eIdle;
+
+	loc eIdle: invariant True
+
+end (* Exec *)
+
+(************************************************************)
+(* The monitor: start sample at U, stop sample at 19U = U + 9*(2U).        *)
+(************************************************************)
+automaton Mon
+
+	loc m0: invariant x <= U
+		when x = U & phase = 0 goto m1;
+		when x = U & phase >= 1 goto bad;
+
+	loc m1: invariant x <= 19*U
+		when x = 19*U & phase = 2 goto mOk;
+		when x = 19*U & phase <= 1 goto bad;
+		when x = 19*U & phase >= 3 goto bad;
+
+	loc mOk: invariant True
+
+	loc bad: invariant True
+
+end (* Mon *)
+
+(************************************************************)
+init := {
+
+	discrete =
+		loc[Exec] := eStart,
+		loc[Mon]  := m0,
+		phase     := 0
+	;
+
+	continuous =
+		x = 0
+		(* all periods strictly positive; NO upper bound imposed, so the
+		   synthesized region is not an artefact of a box we drew *)
+		& U  > 0
+		& G  > 0
+		& G0 > 0
+	;
+}

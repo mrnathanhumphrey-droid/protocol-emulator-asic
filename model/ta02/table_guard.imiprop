@@ -1,0 +1,4 @@
+(* Synthesize the constraint on (U, G0, G) for which `bad` is UNREACHABLE.
+   The output is a REGION over TABLE FIELDS, not a verdict -- which is what makes
+   "reprogrammable within a proved envelope" a theorem rather than a feature. *)
+property := #synth AGnot(loc[Mon] = bad);

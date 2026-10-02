@@ -1,0 +1,10 @@
+# Regenerable artefacts. `python model/ta02/run_ta02.py` rebuilds all of them.
+# The close-out model is DERIVED from table_guard.imi by run_imi.sh adding exactly
+# one constraint -- committing it would let the two drift apart silently, which is
+# the whole reason it is generated rather than retyped.
+*.bin
+*.bin.tmp
+*.tck
+*.res
+table_guard_closeout.imi
+table_guard_closeout.imiprop
