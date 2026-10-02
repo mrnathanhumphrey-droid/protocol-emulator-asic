@@ -151,6 +151,81 @@ non-preemption itself, already counted in `max(Ck − 1)`. P3 stops being a
 constraint on the architecture and becomes a note that the architecture already
 satisfies it. Sha/Rajkumar/Lehoczky is therefore **not needed** — do not fetch it.
 
+## 3d. ⛔⛔ THREE DIFFERENT THINGS ARE CALLED "BLOCKING". ONLY ONE IS OURS.
+
+All three papers use `B` and all three mean something different. I conflated two of
+them once already in this document; the distinction is the whole of A2b.
+
+| source | its blocking term | is it ours? |
+|---|---|---|
+| **Joseph & Pandya 1986** | none — tasks are independent, preemptive | no |
+| **Audsley et al. 1993** | `Bi` = **resource** blocking: *"the longest critical section of any lower priority task accessing a semaphore with ceiling of equal or higher priority"*, per Sha et al. | **no** |
+| **George, Rivierre & Spuri 1996** | `max_{k ∈ lp(i)}(Ck − 1)` — **non-preemption** blocking: a lower-priority job already in service | ⭐ **YES** |
+
+⭐ **And Audsley's `Bi` is ZERO for us.** It is semaphore/priority-ceiling blocking,
+and §3c established that a non-preemptive uniprocessor needs no such protocol. We
+have no semaphores and no preemption, so that whole term vanishes — and with it the
+reason to read Sha, Rajkumar & Lehoczky.
+
+## 3e. Joseph & Pandya 1986 — the recurrence, and an unexpected remedy
+
+The original exact RTA (*Computer Journal* 29(5), p. 391), **preemptive**, which is
+the shape RR-2966 extends:
+
+```
+                 ( i-1                  )
+    RT_i    =    ( Σ   ⌈ RT_i / T_j ⌉ * C_j )  +  C_i                     (1)
+                 ( j=1                  )
+
+    Inputs([t,t'), j)  =  ⌈ t'/T_j ⌉  −  ⌈ t/T_j ⌉                        (2)
+```
+
+> **Theorem 1.** "A critical instant for level *i* occurs whenever an input at this
+> level occurs simultaneously with the inputs of all higher-priority tasks."
+> *Proof. As in Liu and Layland.*
+
+⭐ So the critical-instant argument Wilson named is **Liu & Layland's**, restated
+here and reused by RR-2966 (Figure 6) with the lower-priority job released at
+`t1 − 1`. The three papers chain cleanly.
+
+### ⭐⭐ AND A SECOND ESCAPE FROM THE NAMED OBSTACLE: BUFFERS
+
+> "a common requirement is for `RT_i` to be less than `T_i`. **If this condition
+> cannot be met, buffers can be added to store successive inputs coming from
+> devices**, or additional processors can be added"
+
+and from the abstract: *"When the condition cannot be met, we show how the addition
+of buffers for inputs can be useful"* — including **how to find the number of
+buffers** that makes a given assignment feasible.
+
+⛔ **This changes the fallback story in §6.** A reactive lane whose response time
+exceeds its inter-arrival time was going to be the named obstacle, dropping to
+"measured, not proved". It now has a **principled, provable third option: buffer it,
+and compute how many buffers are required.**
+
+⭐ And that lands exactly on a descriptor extension already on the rung list — the
+**data source / FIFO**, previously justified only as "a real emulator wants one".
+It is not a convenience feature. **It is the schedulability remedy, and the
+literature gives a method for sizing it.** That is a much better reason to build it,
+and it should be built with the buffer count derived rather than guessed.
+
+## 3f. P1 is corroborated by FOUR independent sources
+
+The minimum-inter-arrival requirement is not a quirk of one framing — it is the
+universal precondition of the field:
+
+- **Jeffay et al.:** *"if T is sporadic, `p` specifies a **minimum** interval between
+  invocations"*
+- **Joseph & Pandya:** *"let `T_i` be the **minimum time** between successive inputs
+  from the device connected at priority level *i*"*
+- **Audsley et al.:** `Ti` = the **lower bound** on the interval between releases
+- **Liu & Layland**, via the periodic model both of the above build on
+
+⛔ So P1 is not negotiable and not a modelling choice: **a reactive lane with no
+minimum inter-arrival time has no bound in any of these theories.** For us that
+means UART-receive and I²C clock-stretch must each either carry a minimum
+inter-arrival (from the peer's own protocol spec) or be buffered per §3e.
+
 ## 4. ⛔⛔ A2 AS PRE-REGISTERED IS WRONG ON TWO COUNTS
 
 `ARCH_PREREG_01` A2: *"worst-case queue lateness is **exactly** `(Q-1) × k` cycles
@@ -250,13 +325,13 @@ below is now what was actually read.
 |---|---|---|
 | **George, Rivierre & Spuri 1996, INRIA RR-2966** | ✅ **read** (56 pp, text extracted) | ⭐ **the blocking term** `max_{k∈lp(i)}(Ck−1)`, Figure 6's critical-instant construction, the EDF-vs-FP difference, and the P3 relaxation. §3b/§3c quoted from it |
 | **Jeffay, Stanat & Martel 1991**, RTSS pp. 129–139 | ✅ **read** (11 pp) | conditions C (Thm 4.1, Cor 4.2), the sporadic min-inter-arrival requirement, the NP-hardness result, the shared-resource corroboration |
-| **Liu & Layland 1973**, CACM 20(1) | ⚠️ **extracted, not yet read** | cited so far only via Jeffay's footnote (condition (1) alone suffices under preemption) — that footnote WAS read |
+| **Liu & Layland 1973**, CACM 20(1) | ⚠️ **extracted, not yet read directly** | cited via Jeffay's footnote (condition (1) alone suffices under preemption) and via Joseph & Pandya's Theorem 1 (*"proof as in Liu and Layland"*). Both citing passages WERE read; the paper itself still owes a direct read |
 | MPI-SWS TR 2018-003, *RTA for Non-Preemptive Job Sets* | ✅ **read enough to reject** | ⛔ **NOT a substitute for RR-2966.** It is **global multiprocessor** non-preemptive scheduling by **schedule-space exploration** — zero occurrences of "critical instant". Wrong problem, wrong method |
 | Audsley & Burns, *Real-Time System Scheduling* (survey) | ✅ **read enough to reject for A2b** | its 31 "blocking" hits are all **resource** blocking — priority inheritance, ceiling protocols, remote blocking. P3 territory, and P3 is now closed (§3c) |
 | TU/e, *WCRT under FPS with deferred preemption* | ⚠️ extracted, not read | 25 "critical instant" / 17 "non-preemptive" hits — best remaining on-disk cross-read for the blocking argument |
-| Spuri 1996 (INRIA RR-2772), RTA for EDF | ⛔ not obtained | EDF response times specifically. Still wanted |
-| Joseph & Pandya 1986, *Comp. J.* 29(5) 390–395 | ⛔ not obtained | the original RTA recurrence |
-| Audsley, Burns, Richardson, Tindell & Wellings 1993, *SEJ* 8(5) 284–292 | ⛔ not obtained | ⚠️ the survey on disk is **not** this paper |
+| **Spuri 1996, INRIA RR-2772**, *Analysis of Deadline Scheduled Real-Time Systems* | ⚠️ **obtained, NOT readable as text** | EDF RTA. ⛔ Its PDF uses a subset font with **no usable encoding** — both pypdf and MuPDF return unmapped bytes (0 keyword hits across 106k chars). Needs page-image reading, 34 pp. **Deferred**: RR-2966 already supplies the EDF non-preemptive recurrence |
+| **Joseph & Pandya 1986**, *Comp. J.* 29(5) 390–395 | ✅ **read** (pp. 390–391, as rendered images — it is a **scan** with no text layer) | eq (1) the exact RTA recurrence, eq (2), Theorem 1 (critical instant, *proof as in Liu & Layland*), and ⭐ **buffering as the remedy when `RT_i > T_i`** (§3e) |
+| **Audsley, Burns, Richardson, Tindell & Wellings 1993**, *SEJ* 8(5) | ✅ **read enough to classify** | static-priority **preemptive** RTA, `R_i = C_i + B_i + I_i`. ⛔ **Its `Bi` is RESOURCE blocking (Sha et al.), not ours** — see §3d — and it is **zero for us** since §3c removes the need for any locking protocol |
 | Sha, Rajkumar & Lehoczky 1990 | — **no longer needed** | priority ceiling. §3c closes P3, so this is off the list |
 
 ### ⛔ A limitation of how these were read, stated plainly
