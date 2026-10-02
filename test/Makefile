@@ -22,6 +22,16 @@ COMPILE_ARGS    += -DGL_TEST
 COMPILE_ARGS    += -DFUNCTIONAL
 COMPILE_ARGS    += -DSIM
 VERILOG_SOURCES += $(PDK_ROOT)/ihp-sg13cmos5l/libs.ref/sg13cmos5l_io/verilog/sg13cmos5l_io.v
+# The UDP definitions MUST come before the cell models that instantiate them.
+# sg13cmos5l_stdcell.v instantiates ihp_dff_r, ihp_mux2 and other ihp_* user-defined
+# primitives but defines NONE of them. They live in sg13cmos5l_udp.v, in the SAME PDK
+# directory, which this template never included. Without it iverilog fails elaboration
+# with 1,050 'Unknown module type' errors and NO test runs at all.
+# The stub design hid this: it had ZERO flip-flops, so the flop/mux cell models were
+# never elaborated and gl_test passed vacuously. The first design with sequential
+# logic exposed it. Verified against IHP-Open-PDK dev branch: that directory holds
+# exactly sg13cmos5l_stdcell.v and sg13cmos5l_udp.v.
+VERILOG_SOURCES += $(PDK_ROOT)/ihp-sg13cmos5l/libs.ref/sg13cmos5l_stdcell/verilog/sg13cmos5l_udp.v
 VERILOG_SOURCES += $(PDK_ROOT)/ihp-sg13cmos5l/libs.ref/sg13cmos5l_stdcell/verilog/sg13cmos5l_stdcell.v
 
 # this gets copied in by the GDS action workflow
