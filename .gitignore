@@ -11,3 +11,7 @@ test/sim_build
 test/__pycache__/
 test/results.xml
 test/gate_level_netlist.v
+
+# TA-01 waveforms are regenerable by `python model/ta01/run_ta01.py`
+model/ta01/*.bin
+__pycache__/
