@@ -82,14 +82,23 @@ independent reason not to put it near them.
     50 um pitch spanning the die, so a 236.8 um wide macro intercepts ~5 of
     them WHEREVER IT SITS.
 
-⭐ And for power that INVERTS the risk: straps over a macro are how its VDD/VSS
-pins get tapped, so a guaranteed >= 4 means the macro cannot be MISSED by the
-PDN. The failure mode was never "no strap reaches it".
+⛔⛔ AND THE STRAP LAYER IS RESOLVED -- IT IS THE BAD CASE. IHP's own
+ihp-sg13cmos5l/libs.tech/librelane/config.tcl (@ 2bbec75) sets
+FP_PDN_VERTICAL_LAYER = Metal4, which is exactly the layer the macro's OBS
+blocks; FP_PDN_HORIZONTAL_LAYER = TopMetal1 is the one layer that could cross
+it, and our own template sets FP_PDN_MULTILAYER = 0. So the ~5 guaranteed
+crossings become guaranteed CONFLICTS. ⭐ I had this argument's SIGN backwards
+while the layer was unread -- I called the guaranteed crossing good news.
 
-⛔⛔ THE REMAINING PDN QUESTION IS QUARANTINED -- SEE SECTION 2. It is not
-unresolved for lack of trying; it is unresolved because the only search that
-reached it returned a competitor's diagnosis and fix, and that must not enter
-this repo.
+⛔⛔ AND TWO EARLIER "PRIMARY FULL-TREE READS" WERE TRUNCATION ARTEFACTS. The
+GitHub recursive-tree API truncates large trees, and the summariser did not say
+so, so "no SRAM library in cmos5l" and "no librelane config in cmos5l" were both
+FALSE -- both claiming ABSENCE. `libs.ref/sg13cmos5l_sram` is a SYMLINK to
+`../../ihp-sg13g2/libs.ref/sg13g2_sram` (so IHP itself ships those macros under
+the CMOS5L name, and "cross-PDK" is RETRACTED), and the librelane config is in
+`libs.tech/librelane/config.tcl` (so the strap layer was readable all along).
+⇒ FOR AN EXISTENCE QUESTION, USE THE CONTENTS API ON THE SPECIFIC DIRECTORY --
+a short definite listing -- NEVER a recursive tree plus a summary. See section 3.
 """
 
 from __future__ import annotations
@@ -220,7 +229,7 @@ def main() -> int:
 
     # ---- 2. the PDN, and the quarantine --------------------------------
     print()
-    print("  --- 2. THE PDN: position-independent, and QUARANTINED ---")
+    print("  --- 2. THE PDN: position-independent, and the strap layer RESOLVED ---")
     if multi != 0:
         print("    ⚠ FP_PDN_MULTILAYER is %s, not 0 -- there ARE horizontal"
               % multi)
@@ -243,68 +252,112 @@ def main() -> int:
     print("    ⛔ THE COUNT DOES NOT DEPEND ON WHERE THE MACRO SITS, so EDGE")
     print("    PLACEMENT CHANGES NOTHING HERE. >= %d straps cross the" % lo)
     print("    footprint under every placement, by phase alone.")
-    print("    ⭐ And for power that INVERTS the risk -- straps over a macro are")
-    print("    how its VDD/VSS get tapped, so it CANNOT BE MISSED by the PDN.")
     print()
-    print("    ⛔⛔ THE REMAINING QUESTION -- which LAYER the vertical straps")
-    print("    land on -- IS QUARANTINED, AND NOT FOR LACK OF TRYING.")
-    print("    Ruled OUT by primary reads (full tree listings, first-party):")
-    print("      * IHP-Open-PDK @ 2bbec75, ihp-sg13cmos5l tree: libs.ref has")
-    print("        only sg13cmos5l_stdcell and sg13cmos5l_io; libs.tech has")
-    print("        only klayout and gnucap. NO openlane/librelane config,")
-    print("        NO tech LEF, and NO SRAM macro library.")
-    print("      * TinyTapeout/tt-support-tools @ ihp-sg13cmos5l: no PDN config")
-    print("      * TinyTapeout/tt-gds-action @ ihp-cmos5l: only an install")
-    print("        script (PDK = IHP-Open-PDK @ 2bbec75) + action.yml")
-    print("        (librelane 3.1.0.dev3)")
-    print("    ⇒ it therefore lives in LIBRELANE's own built-in PDK config.")
+    print("    ⛔⛔ AND THE STRAP LAYER IS NOW RESOLVED -- IT IS THE BAD CASE.")
+    print("    ORIGIN (primary, first-party, with its ref): IHP-Open-PDK @")
+    print("    2bbec75, ihp-sg13cmos5l/libs.tech/librelane/config.tcl:")
+    print("        set ::env(FP_PDN_RAIL_LAYER)       Metal1")
+    print("        set ::env(FP_PDN_VERTICAL_LAYER)   Metal4")
+    print("        set ::env(FP_PDN_HORIZONTAL_LAYER) TopMetal1")
+    print("        set ::env(RT_MAX_LAYER)            \"TopMetal1\"")
+    print("    and our own src/config.json sets FP_PDN_MULTILAYER = %s." % multi)
     print()
-    print("    ⛔ WHY THE WORK STOPPED THERE. The one search that reached it")
-    print("    returned a paraphrase of ANOTHER COMPETITION ENTRY's issue and")
-    print("    pull request -- their diagnosis AND their fix. That must not")
-    print("    enter an open-source submission, so it was not read, not used,")
-    print("    and is not recorded here. ⇒ NATE RULES on how to proceed; the")
-    print("    legitimate route is LibreLane's own config or our own run's log.")
-    print("    ⚠ The same applies to the 'observed public GeneratePDN failure'")
-    print("    this project has cited since PART5: it traces to that entry's")
-    print("    issue tracker, singular. It needs re-labelling, not repeating.")
+    print("    ⇒ THE VERTICAL PDN STRAPS ARE ON Metal4, WHICH IS EXACTLY THE")
+    print("      LAYER THE MACRO'S OBS BLOCKS (it blocks M1-M4).")
+    print()
+    print("    ⛔⛔ SO MY 'GOOD NEWS' READING INVERTS. I argued that >= %d straps"
+          % lo)
+    print("    crossing the footprint meant the macro COULD NOT BE MISSED by")
+    print("    the PDN. On Metal4 that guarantee becomes a guaranteed CONFLICT:")
+    print("    ~%d straps that MUST cross a footprint they CANNOT cross. The"
+          % hi)
+    print("    position-independence argument was right and I had its SIGN")
+    print("    backwards, because I had not read the layer.")
+    print()
+    print("    ⚠ ONE STEP IS AN INFERENCE AND IS LABELLED AS ONE: that")
+    print("    FP_PDN_MULTILAYER=0 keeps the VERTICAL layer and drops the")
+    print("    TopMetal1 horizontals. ⭐ Supporting evidence from our OWN file:")
+    print("    src/config.json overrides FP_PDN_VWIDTH to %.1f where the PDK"
+          % vwidth)
+    print("    says 1.0, and overriding the VERTICAL width only matters if the")
+    print("    vertical straps are the ones generated.")
+    print()
+    print("    ⇒ ⭐ THE ONE LAYER THAT COULD CROSS THE MACRO IS TopMetal1, AND")
+    print("      OUR OWN TEMPLATE SWITCHES IT OFF. That is the shape of the")
+    print("      problem, stated from primary config alone.")
+    print()
+    print("    ⛔ WHAT REMAINS QUARANTINED, NARROWLY. The DIAGNOSIS above is")
+    print("    independently derived from IHP's config and our own, so it is")
+    print("    ours and facts are not ownable. What is NOT ours is any FIX read")
+    print("    from another competition entry's pull request -- that was never")
+    print("    opened and must not be reconstructed from memory of a search")
+    print("    summary. Any remedy here gets built FROM THE PROBLEM.")
+    print("    ⚠ And the 'observed public GeneratePDN failure' cited since")
+    print("    PART5 traces to that entry's issue tracker -- SINGULAR, not")
+    print("    'public issue titles'. ⭐ It is also now SUPERSEDED as evidence:")
+    print("    we no longer need anyone's bug report, because the PDK's own")
+    print("    config says Metal4 and the LEF's own OBS says M1-M4 blocked.")
+    print()
+    print("    --- the remedies this gate can name from the problem alone ---")
+    print("      A. turn the TopMetal1 horizontal straps ON (multilayer), so a")
+    print("         layer exists above the macro. ⚠ UNVERIFIED: whether TT's")
+    print("         CMOS5L precheck allowlist admits TopMetal1 for power, and")
+    print("         why TT's template disables it. Both are readable.")
+    print("      B. exclude the macro's footprint from the vertical PDN and")
+    print("         power it from the layer above. ⚠ needs A to be viable.")
+    print("      C. ✅ THE FLOP STORE. No PDN question at all, and F1's")
+    print("         encoding already fits one transaction per protocol into 62")
+    print("         of 64 bytes at the existing AW=6.")
+    print("    ⇒ ⭐ THIS MATERIALLY RAISES THE CHANCE THAT C IS WHAT SHIPS, and")
+    print("      that is a RESULT, not a retreat: Part 1 should default")
+    print("      MEM_TYPE=flops and keep sram as the parameterised option,")
+    print("      rather than the other way round.")
 
     # ---- 3. SRAM is a CROSS-PDK instantiation --------------------------
     print()
-    print("  --- 3. ⛔ NEW, AND IT CHANGES WHAT 'MEM_TYPE=sram' MEANS ---")
-    print("    The ihp-sg13cmos5l PDK tree contains NO SRAM macro library")
-    print("    (primary: its own libs.ref listing at the pinned commit). The")
-    print("    RM_IHPSG13_1P_* family lives in the ihp-sg13g2 tree.")
-    print("    ⇒ USING THE MACRO HERE IS A CROSS-PDK INSTANTIATION: its LEF,")
-    print("      GDS and LIB are SG13G2 artefacts dropped into a CMOS5L design.")
-    print("    ⭐ Geometrically that is defensible -- CMOS5L is the same process")
-    print("    minus HBTs and minus Metal5/TopMetal2, and the macro tops out at")
-    print("    Metal4, BELOW both removed layers. And TT's own precheck")
-    print("    allowlist change (tt-support-tools PR #187) is layer-based and")
-    print("    was tested with an RM_IHPSG13_1P_* part, which is consistent")
-    print("    with exactly this workflow.")
-    print("    ⛔ BUT IT MUST BE SAID AS WHAT IT IS, not as 'the PDK's SRAM'.")
-    print("    A cross-PDK macro is a claim that needs the harden to back it,")
-    print("    and it is one more reason MEM_TYPE stays a parameter.")
+    print("  --- 3. ⛔⛔ RETRACTED: 'MEM_TYPE=sram IS A CROSS-PDK CLAIM' ---")
+    print("    I claimed the ihp-sg13cmos5l tree contains NO SRAM library and")
+    print("    that instantiating RM_IHPSG13_1P_* was therefore a CROSS-PDK")
+    print("    act needing a sponsor's blessing. THAT IS FALSE. Primary, via")
+    print("    the GitHub CONTENTS API on the directory itself (small, no")
+    print("    truncation), IHP-Open-PDK @ 2bbec75:")
+    print("        ihp-sg13cmos5l/libs.ref/  ->  sg13cmos5l_io      dir")
+    print("                                      sg13cmos5l_sram    SYMLINK")
+    print("                                      sg13cmos5l_stdcell dir")
+    print("        sg13cmos5l_sram target = \"../../ihp-sg13g2/libs.ref/"
+          "sg13g2_sram\"")
     print()
-    print("    ⛔⛔ AND PRECHECK IS NOT ACCEPTANCE -- THESE ARE TWO GATES AND I")
-    print("    HAD ONLY CLEARED ONE. PR #187 passing TT precheck is TT's")
-    print("    AUTOMATED gate: the layer allowlist plus DRC with the SRAM")
-    print("    waivers. Whether an sg13g2-library macro is ACCEPTED ON THE")
-    print("    CMOS5L SHUTTLE is a different question, and it is not ours to")
-    print("    answer by inference -- it belongs to TT, IHP, and ultimately to")
-    print("    Jane Street as sponsor.")
-    print("    ⇒ ⏸ OPEN, AND IT IS NATE'S TO SEND: one question to")
-    print("      asic-competition@janestreet.com, or the TT Discord. It is")
-    print("      CHEAP and it DECIDES whether MEM_TYPE='sram' is the shipped")
-    print("      design or only a scaling-tier option.")
-    print("    ⭐ Note what the question is NOT: it is not asking permission to")
-    print("    do something unusual. It is a precise technical question with a")
-    print("    yes/no answer, asked early, which is the cheapest form of")
-    print("    de-risking there is.")
-    print("    ⛔ UNTIL IT COMES BACK, PART 1 STAYS REVERSIBLE: MEM_TYPE")
-    print("      parameterised, the flop store as the fallback, and NO design")
-    print("      decision that only works if the answer is yes.")
+    print("    ⭐⭐ SO THE MACROS *ARE* THE SG13G2 ONES -- AND IHP ITSELF SHIPS")
+    print("    THEM UNDER THE CMOS5L NAME. The symlink is the PDK VENDOR'S OWN")
+    print("    STATEMENT that this library serves CMOS5L. Using it is using")
+    print("    the PDK's own SRAM library, not importing a foreign one.")
+    print("    ⇒ There is nothing unusual to get blessed. Combined with TT's")
+    print("      layer allowlist (PR #187, tested with an RM_IHPSG13_1P_* part,")
+    print("      'full Tiny Tapeout precheck passes'), BOTH halves of the")
+    print("      admissibility question now have FIRST-PARTY answers.")
+    print("    ⛔ The shuttle-acceptance email is therefore MOOT as drafted --")
+    print("      its central premise was my error. Not sent.")
+    print()
+    print("    ⛔⛔ HOW I GOT IT WRONG, BECAUSE THE METHOD IS THE LESSON. I")
+    print("    called two GitHub *recursive tree* API responses 'primary")
+    print("    full-tree reads'. The tree API TRUNCATES large trees, and the")
+    print("    answers came back through a SUMMARISER that did not say so. The")
+    print("    same method also told me the sg13g2 tree has no SRAM -- while I")
+    print("    HAD ALREADY FETCHED A MACRO LEF OUT OF THAT VERY TREE. That")
+    print("    contradiction is what exposed it.")
+    print("    ⭐ My own standing rule says a zero-hit search proves the STRING")
+    print("    absent, not the THING. This was weaker still: a zero-hit search")
+    print("    over an UNKNOWN SUBSET, reported as exhaustive.")
+    print("    ⇒ FIX, applied here: for an EXISTENCE question use the CONTENTS")
+    print("      API on the specific directory -- a short, definite listing --")
+    print("      never a recursive tree plus a summary. And never call a")
+    print("      summarised API response a 'full-tree read'.")
+    print("    ⛔ TWO FINDINGS RESTED ON IT, AND BOTH WERE WRONG IN THE SAME")
+    print("      DIRECTION -- claiming something was ABSENT: 'no SRAM library'")
+    print("      (above) and 'no librelane config' (which sent me looking in")
+    print("      LibreLane's repo, and was the stated reason the strap layer")
+    print("      was unresolved). The config was in libs.tech/librelane all")
+    print("      along, and section 2 now reads it.")
     print()
     print("    ⛔⛔ AND IT CORRECTS PART5's FINDING #1, WHICH I RECORDED AS")
     print("    *PRIMARY*: 'IHP-Open-PDK has exactly one PDK directory,")

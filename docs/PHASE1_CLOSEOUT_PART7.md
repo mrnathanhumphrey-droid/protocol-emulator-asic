@@ -317,3 +317,113 @@ for async-reset cells · the glitch term isolated from the assert warm-up.
 
 **Status:** 21 of 21, digest `8ea5756203e1` unchanged, `price_gates.sh` 9 of 9,
 1.6 at 18 conditions.
+
+---
+
+# Addendum 2 — the strap layer resolved, and two retractions
+
+## ⛔⛔ Method failure first: two "primary full-tree reads" were truncation artefacts
+
+The GitHub **recursive-tree API truncates large trees**, and the responses came
+back through a summariser that did not say so. I called them *"primary full-tree
+reads"*. Two findings rested on them and **both were wrong in the same direction
+— claiming something was ABSENT:**
+
+| claim | status | truth |
+|---|---|---|
+| "the cmos5l tree has **no SRAM library**" | **FALSE** | `libs.ref/sg13cmos5l_sram` is a **symlink** |
+| "the cmos5l tree has **no librelane config**" | **FALSE** | `libs.tech/librelane/config.tcl` |
+
+⭐ **What exposed it:** the same method told me the **sg13g2** tree had no SRAM —
+while I had **already fetched a macro LEF out of that very tree**. The
+contradiction was in my own transcript.
+
+⭐ My own standing rule says *a zero-hit search proves the string absent, not the
+thing.* This was weaker still: **a zero-hit search over an unknown subset,
+reported as exhaustive.**
+
+⇒ **Fix, applied:** for an **existence** question use the **contents API on the
+specific directory** — a short, definite listing — never a recursive tree plus a
+summary. And never call a summarised API response a "full-tree read".
+
+## ⛔ RETRACTED: "`MEM_TYPE=sram` is a cross-PDK instantiation"
+
+```
+ihp-sg13cmos5l/libs.ref/   sg13cmos5l_io       dir
+                           sg13cmos5l_sram     SYMLINK
+                           sg13cmos5l_stdcell  dir
+sg13cmos5l_sram -> "../../ihp-sg13g2/libs.ref/sg13g2_sram"
+```
+
+⭐⭐ **The macros *are* the sg13g2 ones — and IHP itself ships them under the
+CMOS5L name.** The symlink is the PDK vendor's own statement that this library
+serves CMOS5L. Using it is using **the PDK's own SRAM library**, not importing a
+foreign one.
+
+⇒ There is nothing unusual to get blessed. With TT's layer allowlist (PR #187,
+tested with an `RM_IHPSG13_1P_*` part, *"full Tiny Tapeout precheck passes"*),
+**both halves of the admissibility question now have first-party answers.**
+⛔ **The shuttle-acceptance email is moot as drafted — its central premise was my
+error. Not sent.**
+
+## ⛔⛔ The strap layer: RESOLVED, and it is the bad case
+
+ORIGIN: IHP-Open-PDK @ `2bbec75`,
+`ihp-sg13cmos5l/libs.tech/librelane/config.tcl`:
+
+```
+set ::env(FP_PDN_RAIL_LAYER)       Metal1
+set ::env(FP_PDN_VERTICAL_LAYER)   Metal4
+set ::env(FP_PDN_HORIZONTAL_LAYER) TopMetal1
+set ::env(RT_MAX_LAYER)            "TopMetal1"
+```
+
+**The vertical PDN straps are on `Metal4` — exactly the layer the macro's `OBS`
+blocks (M1–M4).** `TopMetal1` is the one layer that could cross it, and our own
+`src/config.json` sets `FP_PDN_MULTILAYER: 0`.
+
+⛔⛔ **So my "good news" reading inverts.** I argued that ≥4 straps crossing the
+footprint meant the macro **could not be missed** by the PDN. On Metal4 that
+guarantee becomes a guaranteed **conflict**: ~5 straps that *must* cross a
+footprint they *cannot* cross. The position-independence argument was right and I
+had its **sign** backwards, because I had not read the layer.
+
+⚠ **One step is an inference and is labelled:** that `FP_PDN_MULTILAYER=0` keeps
+the vertical layer and drops the TopMetal1 horizontals. ⭐ Supporting evidence
+from our own file: `config.json` overrides `FP_PDN_VWIDTH` to **2.1** where the
+PDK says **1.0**, and overriding the *vertical* width only matters if the
+vertical straps are the ones generated.
+
+### What remains quarantined, narrowly
+
+The **diagnosis** above is independently derived from IHP's config and our own,
+so it is ours — facts are not ownable. What is **not** ours is any **fix** read
+from another entry's pull request; that was never opened and must not be
+reconstructed from memory of a search summary. Any remedy gets built **from the
+problem**.
+
+⚠ And the "observed public GeneratePDN failure" cited since PART5 is **singular**,
+from that entry's tracker. ⭐ It is now **superseded as evidence** anyway: we no
+longer need anyone's bug report, because **the PDK's own config says Metal4 and
+the LEF's own `OBS` says M1-M4 blocked.**
+
+### Remedies namable from the problem alone
+
+| | remedy | status |
+|---|---|---|
+| A | turn the TopMetal1 horizontal straps **on**, so a layer exists above the macro | ⚠ unverified: whether TT's CMOS5L precheck allowlist admits TopMetal1 for power, and why TT's template disables it. Both readable. |
+| B | exclude the footprint from the vertical PDN, power from above | ⚠ needs A |
+| C | ✅ **the flop store** | no PDN question at all; F1 fits one txn per protocol in 62/64 B at `AW=6` |
+
+⇒ ⭐ **This materially raises the chance that C is what ships — and that is a
+result, not a retreat.** Part 1 should default `MEM_TYPE=flops` and keep `sram`
+as the parameterised option, rather than the other way round.
+
+## Quarantine scope, stated in one line as asked
+
+**"Quarantine" never meant the memory split.** It meant the rival-repo
+contamination, and it gates exactly one contingent thing: whether a
+Metal4-bridge-shaped *fix* would be ours. It never gated reading LibreLane's
+config or running the harden — I wrote "the legitimate route is LibreLane's own
+config" and then marked the whole line blocked, which cannot both be true.
+**The harden was never blocked.**
