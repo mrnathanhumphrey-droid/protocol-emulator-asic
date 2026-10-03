@@ -1,5 +1,10 @@
 # Phase 1 close-out — H1–H4, R1–R3, 1.2
 
+> **Continued in [`PHASE1_CLOSEOUT_PART2.md`](PHASE1_CLOSEOUT_PART2.md)** —
+> Rulings 1 and 2, the A1 lane-table digest, and the 1.5 / 1.6 freeze. The
+> shipped lane table below is unchanged by that work; the suite entry point is
+> now `python model/a2/run_a2.py`.
+
 Answers spec v3.1 (housekeeping → the three pre-1.2 corrections → the `(C, J)`
 frontier). **Supersedes the `r_i` and margin tables in `A2_GREEN_RESULTS.md`**
 and in `A2_CLOSE_RESULTS.md`. The methods in both stand; the numbers do not.

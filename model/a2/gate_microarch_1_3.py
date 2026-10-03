@@ -45,6 +45,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
+import lane_digest                                                 # noqa: E402
 from bursty import (L_JIT, L_SYNC, OUT_REG, TSU_MASTER,            # noqa: E402
                     abs_tolerance)
 from frontier import BAR, evaluate                                 # noqa: E402
@@ -116,6 +117,12 @@ def main() -> int:
     print("SPEC 1.3 -- microarchitecture sketch, checked against 1.2")
     print("=" * 78)
     rc_gate = 0
+    from frontier import build as _fbuild
+    lane_digest.announce(
+        "gate_microarch_1_3.py (1.3)", _fbuild(2, 1, False),
+        variant="evaluates candidate (C, J) points via frontier.build; shown at "
+                "the ruled point (C=2, J_pipe=1, C9=START)")
+    print()
 
     # ---- items 1 + 3, together, because they are one decision ----------
     print()
@@ -274,10 +281,22 @@ def main() -> int:
     print("        ⛔ requires max programmed delay < 2^(N-1) = %d, which becomes"
           % (2 ** (N - 1)))
     print("           an admissibility condition (1.6) rather than disappearing.")
-    print("    RECOMMENDATION (b), on the adder count and the descriptor field --")
-    print("    but this is a FLAG-BACK item: the wrap condition is a new")
-    print("    obligation on the programmer and that is a spec decision, not an")
-    print("    implementation one.")
+    print("    ✅ RULED (b) -- WITH THE OBLIGATION MOVED OFF THE PROGRAMMER.")
+    print("    My framing was that (b) imposes a wrap bound on whoever writes")
+    print("    the program, which made it a spec decision. The ruling removes")
+    print("    the premise instead of accepting it: a long delay becomes a CHAIN")
+    print("    of no-op re-arm actions split by the assembler/loader, so the")
+    print("    bound is a PER-ACTION property checked at load and the programmer")
+    print("    never sees %d cycles as a limit. ⭐ That is the same move as the"
+          % (2 ** (N - 1)))
+    print("    rest of the admissibility work -- a condition the tooling")
+    print("    enforces, not a promise someone has to keep -- and it costs one")
+    print("    opcode. Priced in gate_rearm.py: 0 cycles of minimum margin at")
+    print("    every rate checked, 5 simultaneous chains included, and a new")
+    print("    requirement fell out (the re-arm must add to the STORED")
+    print("    timestamp, never to `now`, or the chain drifts by k*(r-C)).")
+    print("    (a) is held in reserve: widen only if Part 1 shows the compare")
+    print("    has slack AND a reason appears.")
 
     # ---- item 6 ---------------------------------------------------------
     print()
@@ -321,15 +340,91 @@ def main() -> int:
     print("       the one path that is nearly full is a pad-to-pad feedthrough,")
     print("       and that is exactly the shape not to add to.")
 
+    # ---- RULING 1's conditions, carried as checks ----------------------
+    print()
+    print("  RULING 1 -- ADOPTED: pipelined C=2, J=1, C9=START. Its conditions:")
+    print("  " + "-" * 74)
+    print("    (i) EDF KEYS LIVE IN PER-LANE REGISTERS, NEVER THE PROGRAM STORE.")
+    print("        ~%d x %d = %d flops, off the critical path. ⭐ WITHOUT THIS THE"
+          % (5, 16, 5 * 16))
+    print("        PIPELINE BUYS NOTHING: winner selection would have to read")
+    print("        memory, so the fetch would move one stage rather than leave")
+    print("        the critical path -- the pipeline register would sit AFTER a")
+    print("        mux access it was added to avoid. For scale, the whole design")
+    print("        is 2,946 logic cells at 6.28% utilisation and 535 flops, 512")
+    print("        of which are the program store; 80 more is ~15% of the")
+    print("        non-store flops and invisible in area.")
+    print("    (ii) MUST-FIRE -- the stale-prefetch mutant, named now:")
+    print("        M-PREFETCH-STALE: stage 1 drives the pin from the descriptor")
+    print("        prefetched for the PREVIOUS winner instead of the current")
+    print("        one, i.e. `desc_q` is loaded from `winner_d1` rather than")
+    print("        `winner`. Survives any check that only looks at WHETHER a pin")
+    print("        moved; killed by BYTE-EXACTNESS, because the wrong lane's")
+    print("        bit pattern appears on the wrong pin at the right time.")
+    print("        ⛔ It must be killed by the UART byte-identity test")
+    print("        specifically (gate_uart_identity.py's successor): a")
+    print("        single-lane test cannot distinguish the two, since with one")
+    print("        live lane the previous winner IS the current winner. The")
+    print("        mutant is only reachable with >= 2 lanes live simultaneously,")
+    print("        so the arm has to run the multi-lane program or it is vacuous.")
+    sp_ruled = [l for l in _fbuild(2, 1, False)
+                if l.name.startswith("SPI-target")][0]
+    sp_ship = [l for l in lane_digest.shipped()
+               if l.name.startswith("SPI-target")][0]
+    print("    (iii) D_tol(SPI-target) STAYS 18, not the 20 that START allows.")
+    print("        Labelled conservative + C9-independent; it lifts to 20 only")
+    print("        when Phase 2 MEASURES the pin moving at service start.")
+    print("        shipped table D_tol = %d; C9=START would allow %d"
+          % (sp_ship.D_tol, sp_ruled.D_tol))
+    if sp_ship.D_tol != abs_tolerance(25, True, sp_ship.C):
+        print("        *** FAIL: the shipped D_tol is not the C9-independent")
+        print("            (COMPLETION) value %d ***"
+              % abs_tolerance(25, True, sp_ship.C))
+        rc_gate = 1
+    else:
+        print("        => the shipped value is the conservative one, asserted")
+        print("           against the derivation rather than against the literal")
+        print("           18, so it tracks tSU/L_sync/out_reg if any of them move.")
+
+    # ---- the 2 MHz reopening, PRE-REGISTERED ---------------------------
+    print()
+    print("  PRE-REGISTERED: when SPI-target 2 MHz REOPENS")
+    print("  " + "-" * 74)
+    m2 = [v for r, v in spi_target_rate_margins(pip[2], pip[3], False)
+          if r == 2][0]
+    print("    2 MHz fails TODAY at margin %d against a bar of %d -- and the bar"
+          % (m2, BAR))
+    print("    is a RESERVE AGAINST UNMEASURED C, not a property of the lane.")
+    print("    So the condition is written down now, before the measurement, so")
+    print("    it cannot be chosen afterwards:")
+    print()
+    print("      SPI-target 2 MHz is ADMISSIBLE iff")
+    print("        (a) Phase 2 measures C = 2 exactly on every lane, AND")
+    print("        (b) the recomputed absolute margin at 2 MHz is > 0, AND")
+    print("        (c) C9 = START is MEASURED in the built RTL (not assumed),")
+    print("            which is the same evidence that lifts D_tol 18 -> 20.")
+    print("      If C measures > 2, 2 MHz stays closed and 1 MHz is the rate.")
+    print()
+    print("    ⛔ (c) IS NOT DECORATION. At the ruled point the 2 MHz margin is")
+    print("    %d WITH C9=START and %d with COMPLETION, so the reopening depends"
+          % (m2, [v for r, v in spi_target_rate_margins(
+              results[("pipelined", True)][2], 2, True) if r == 2][0]))
+    print("    on the C9 property actually holding in silicon. Pre-registering")
+    print("    (a) and (b) alone would let a measured C = 2 reopen 2 MHz on a")
+    print("    design whose pin turns out to move at completion.")
+    print("    ⭐ This is a sharper position than giving 2 MHz up: the claim is")
+    print("    'declared at 1 MHz, with a written condition for 2 MHz', and the")
+    print("    condition is falsifiable before anyone is tempted to relax it.")
+
     print()
     print("=" * 78)
     print("  GATE 1.3: %s" % ("PASSED -- every candidate's (C, J) is inside the "
                               "1.2 frontier, and the recommended point is "
                               "pipelined C=2 J=1 with C9=START"
                               if rc_gate == 0 else "FAILED"))
-    print("  ⛔ FLAG-BACK: the recommendation is not adopted. Two items need a")
-    print("     ruling before RTL -- the pipeline/C9 pair (items 1+3, coupled)")
-    print("     and C2's counter representation (item 5).")
+    print("  ✅ RULED: pipelined C=2, J=1, C9=START (items 1+3), and the")
+    print("     absolute counter with chained no-op re-arms (item 5, priced in")
+    print("     gate_rearm.py). Both carry conditions into 1.5 and 1.6.")
     return rc_gate
 
 

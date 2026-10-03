@@ -42,6 +42,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
+import lane_digest                                               # noqa: E402
 from bursty import BLane, TX, UART_RX, SPI_RX, response_time_b   # noqa: E402
 
 try:
@@ -55,9 +56,13 @@ T_SU_DAT = 5                     # cycles, fast-mode tSU;DAT min (100 ns)
 TR, TF = 15, 15                  # cycles, fast-mode MAXIMA
 PERIOD = 125                     # 400 kHz in cycles
 
-# every lane except I2C, so the I2C lane can be varied
-OTHERS = [BLane(l.name, l.T, l.C, l.D, n=l.n, t=l.t)
-          for l in (TX[0], TX[1], UART_RX, SPI_RX)]
+# every lane except I2C, so the I2C lane can be varied.
+# ⛔ SELECTED from the shipped table, not REBUILT from it. This line used to be
+# `BLane(l.name, l.T, l.C, l.D, ...)` -- a legacy-shape rebuild that round-trips
+# D_tol correctly only by arithmetic accident (D_tol = D - C) and SILENTLY DROPS
+# `J`. It happened to be harmless because every lane here has J = 0; the first
+# lane to carry release jitter would have had it quietly removed.
+OTHERS = [l for l in (TX[0], TX[1], UART_RX, SPI_RX)]
 
 
 def solve(n_low: int):
@@ -76,6 +81,14 @@ def main() -> int:
     print("=" * 78)
     print("SPEC N1 -- the I2C SCL phase split (UM10204 Rev 7.0, Table 11)")
     print("=" * 78)
+    # ⛔ SPEC A1 -- declared variant: this gate REPLACES the I2C lane at each
+    # candidate split, so `used` is the four others plus the shipped I2C lane
+    # as the reference point. `base` must still match the rest of the run.
+    lane_digest.announce(
+        "gate_i2c_phase.py (N1)", list(OTHERS) + [TX[2]],
+        variant="substitutes the I2C lane at each candidate SCL split; shown "
+                "with the shipped I2C lane as the reference point")
+    print()
 
     # ---- MUST-FIRE: the shipped symmetric split has to FAIL --------------
     print("  --- must-fire arm: a SYMMETRIC split must be rejected ---")

@@ -98,6 +98,28 @@ run_must_be_red \
     "gate_twin_pair.py with PYRTA_SRC removed" \
     env PYRTA_SRC="$NOPE" python model/a2/gate_twin_pair.py
 
+run_must_be_red \
+    "gate_rearm.py with PYRTA_SRC removed (Ruling 2's 6-lane check)" \
+    env PYRTA_SRC="$NOPE" python model/a2/gate_rearm.py
+
+# --- the A1 digest meta-check, priced by MUTATING THE ARTEFACT ------------
+# ⛔ Not "remove a tool" like the arms above -- this one injects a gate that
+# analyses a STALE hand-typed lane table, which is the defect A1 screens for,
+# and requires the suite to go red. `run_a2.py --price` inverts its own verdict,
+# so a ZERO exit here means the suite correctly went red.
+echo "------------------------------------------------------------"
+echo "  run_a2.py --price : a gate analysing a STALE lane table must take the run down"
+if python model/a2/run_a2.py --price > /tmp/price_gate.out 2>&1; then
+    echo "    RED detected by the meta-check (probe killed the run). PASS"
+    PASS=$((PASS+1))
+else
+    echo "    *** the suite stayed GREEN with a stale lane table in it -- the"
+    echo "        digest meta-check does not detect the defect it exists for. FAIL"
+    sed -n '/META-CHECK/,$p' /tmp/price_gate.out | sed -n '1,20p' | sed 's/^/        | /'
+    FAIL=$((FAIL+1))
+    RC=1
+fi
+
 # --- TChecker-backed gate ------------------------------------------------
 run_must_be_red \
     "ta02/run_zone_edge.sh with TCHECKER_BIN removed" \

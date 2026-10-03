@@ -49,6 +49,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
+import lane_digest                                                   # noqa: E402
 from bursty import (BLane, L_JIT, L_SYNC, OUT_REG, TSU_MASTER,       # noqa: E402
                     abs_tolerance, response_time_b)
 
@@ -156,6 +157,15 @@ def main() -> int:
     print("  constants: L_sync=%d  L_jit=%d  out_reg=%d  tSU(master)=%d  bar=%d"
           % (L_SYNC, L_JIT, OUT_REG, TSU_MASTER, BAR))
     print("  J_i = J_pipe + L_jit on the REACTIVE-J lane (I2C), J_pipe elsewhere")
+    print()
+    # ⛔ SPEC A1 -- this gate's whole job is to analyse VARIANTS, so `used` is
+    # declared as one. The point of printing it anyway is that `base` must still
+    # match every other gate in the run: a frontier swept from the wrong table
+    # is the failure mode here, not a mismatched sweep point.
+    lane_digest.announce(
+        "frontier.py (1.2)", build(2, 1, True),
+        variant="sweeps C and J by construction; shown at the target (C=2, "
+                "J_pipe=1, C9=COMPLETION). D_tol(SPI-target) is a FUNCTION of C")
 
     rc = 0
     for c9 in (False, True):

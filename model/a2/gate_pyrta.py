@@ -57,6 +57,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
+import lane_digest                                                 # noqa: E402
 from bursty import TX, UART_RX, SPI_RX, response_time_b            # noqa: E402
 from pyrta_src import require_pyrta                                # noqa: E402
 
@@ -172,6 +173,12 @@ def main() -> int:
     print("=" * 78)
     print("SPEC 1.4b -- third-party check of the SHIPPED five-lane numbers")
     print("=" * 78)
+    # ⛔ SPEC A1 -- digest the set ACTUALLY ANALYSED. This gate is the one that
+    # carried a hand-typed second table, so `used` here is `LANES`, the object
+    # handed to the analyser, and not a re-digest of what was imported. A copy
+    # would move `used` and leave `base` alone, which is the whole signature.
+    lane_digest.announce("gate_pyrta.py", LANES)
+
     # ---- arm 0: OUR numbers vs the typed literal, before the tool ---------
     # ⛔ Run this FIRST and unconditionally. It needs no foreign tool, so if the
     # typed answers have drifted from the table we learn it even on a machine

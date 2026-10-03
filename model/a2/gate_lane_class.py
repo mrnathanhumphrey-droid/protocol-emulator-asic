@@ -37,6 +37,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
+import lane_digest                                                  # noqa: E402
 from bursty import (BLane, F_CLK, L_JIT, L_SYNC, OUT_REG, SPI_RX,   # noqa: E402
                     TSU_MASTER, TX, UART_RX, abs_tolerance, response_time_b)
 
@@ -132,6 +133,8 @@ def main() -> int:
     print()
     print("  from src/project.v: L_sync <= %d cycles, uncertainty %d, out reg %d"
           % (L_SYNC, L_JIT, OUT_REG))
+    print()
+    lane_digest.announce("gate_lane_class.py (0.9b)", five_lanes())
     print()
     rc_gate = 0 if assert_budget_consistent() else 1
 

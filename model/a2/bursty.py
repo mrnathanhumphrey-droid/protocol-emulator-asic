@@ -36,6 +36,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
 from a2_close import Lane                                     # noqa: E402
+import lane_digest                                            # noqa: E402
 from rta_spuri import blocking_at, floor_div, response_time_spuri, w_contribution  # noqa: E402
 
 try:
@@ -494,10 +495,12 @@ UART_RX = BLane("UART-rx 115200", T=4140, C=2, D_tol=216 - L_SYNC, n=10, t=414,
 #   C9 = pin at START       D_tol = 25 - 1 - 3 - 1     = 20
 #   C9 = pin at COMPLETION  D_tol = 25 - 1 - 3 - 1 - 2 = 18
 #
-# ⛔ THE SHIPPED VALUE IS THE COMPLETION ONE, 18. Not because C9 is decided --
-# 1.3 decides it -- but because 18 is the SMALLER of the two, so the table is
-# correct under either outcome and cannot be made worse by the decision. START
-# is priced in `gate_spi_target_D.py` and in the 1.2 frontier.
+# ⛔ THE SHIPPED VALUE IS 18 AND IT STAYS 18 EVEN THOUGH C9 = START IS NOW RULED
+# AND WOULD ALLOW 20. The label is "CONSERVATIVE, C9-INDEPENDENT": 18 is correct
+# under either C9 outcome, so the number does not depend on a decision the RTL
+# has not yet honoured. It lifts to 20 only when Phase 2 MEASURES the pin moving
+# at service start -- measure first, then widen. Taking the 2 cycles now would
+# be billing the schedule for a property of a design that does not exist.
 #
 # ⭐ IT REORDERS, AND THE FALSIFIER DID NOT FIRE: the derived budget is looser
 # than the stand-in (18 > 12), so I2C (15) takes the highest priority and
@@ -755,6 +758,7 @@ def main() -> int:
     report(TX, "DRIVING DIRECTION ONLY (Parts 1-3, restated as bursty with n=1)")
     print()
     full = TX + [UART_RX, SPI_RX]
+    lane_digest.announce("bursty.py (A2 Part 4, both directions)", full)
     res = report(full, "BOTH DIRECTIONS -- required protocols, tx + rx")
     print()
     print("=" * 78)

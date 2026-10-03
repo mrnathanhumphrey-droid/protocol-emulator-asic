@@ -76,6 +76,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
+import lane_digest                                                 # noqa: E402
 from bursty import (BLane, L_JIT, L_SYNC, TX, SPI_RX, UART_RX,     # noqa: E402
                     response_time_b)
 
@@ -154,6 +155,7 @@ def main() -> int:
     print("=" * 78)
     print("SPEC R3 -- the I2C SDA read: released on the observed SCL rise")
     print("=" * 78)
+    lane_digest.announce("gate_i2c_sda_read.py", LANES)
     d, r, sd = delta_max()
     print("  mechanism: FOLDED into the existing REACTIVE-J high-phase release")
     print("    r_I2C = %d, C = %d  ->  start delay (r-C) = %d" % (r, I2C.C, sd))
