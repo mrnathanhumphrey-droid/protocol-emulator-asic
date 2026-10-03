@@ -129,34 +129,92 @@ def oe_glitchy(step, cs_asserted, hist):
 
 
 def oe_registered_release(step, cs_asserted, hist):
-    """FACE 3 -- the RULED design, modelled WITH its release latency.
+    """SUPERSEDED -- fully synchronous enable, so release costs L_sync+out_reg.
 
     CS arrives on `uio` as an asynchronous input, so it is synchronised
     (L_SYNC) and the enable is registered (OUT_REG) per F2. The enable
     therefore follows CS by L_SYNC + OUT_REG cycles IN BOTH DIRECTIONS, and the
     deassert direction is the one that matters: for that many cycles after the
     master deselects us, we are still driving.
+
+    ⛔ THIS IS NOW A MUTANT, NOT THE DESIGN. It was the design for one batch,
+    and its cost was being pushed onto the host as "the master must leave >= N
+    cycles". That is a fallback, not a fix: a 4-cycle contention window is real
+    and the host cannot be relied on to avoid it.
     """
     lat = L_SYNC + OUT_REG
     past = hist["cs"][max(0, step - lat)] if step - lat >= 0 else False
     return bool(past)
 
 
-def run_bus(ours_policy, cs_ours, cs_other, glitch_at=-1):
-    """Walk a trace of a shared MISO with our target and the FRAM on it."""
+def oe_async_clear(step, cs_asserted, hist):
+    """✅ RULED -- ASYNC-ASSERT / SYNC-DEASSERT on the enable.
+
+    ⭐ The reset-synchroniser pattern, applied to `uio_oe` instead of to a
+    reset. The asymmetry is the whole idea, and it is principled rather than
+    clever:
+
+      RELEASE (oe -> 0)  CS rising ASYNCHRONOUSLY CLEARS the enable flop. No
+                         clock, no synchroniser: the lag is the pad plus the
+                         flop's clear delay, nanoseconds rather than 80 ns.
+      ASSERT  (oe -> 1)  goes through the synchroniser exactly as before, so
+                         nothing metastable ever reaches the pad.
+
+    ⭐⭐ AND IT KEEPS F2. The pin is still driven by a flop's Q -- an
+    async-clear flop is a flop. So the ruling does not trade a correctness
+    property for a timing one; F2's checker simply has to recognise the cell,
+    which is a classification question and not a waiver.
+
+    ⛔ THE DIRECTION OF THE RESIDUAL RISK IS THE SAFE ONE, AND THAT IS WHY THE
+    ASYMMETRY IS ALLOWED AT ALL. A glitch on CS now releases MISO for a moment.
+    That costs a CORRUPTED BIT (the master samples a floating line) and it can
+    NEVER cause contention, because the glitch can only turn a driver OFF. The
+    superseded design had the opposite failure: it could only ever turn a
+    driver ON late, which is contention. Priced in section 4.
+    """
+    lat = L_SYNC + OUT_REG
+    if not cs_asserted:
+        return False            # async clear: no clock needed, no latency
+    if step == hist.get("cs_glitch_at"):
+        return False            # a glitch on CS releases -- safe direction
+    past = hist["cs"][max(0, step - lat)] if step - lat >= 0 else False
+    return bool(past)
+
+
+def run_bus(ours_policy, cs_ours, cs_other, glitch_at=-1, cs_glitch_at=-1):
+    """Walk a trace of a shared MISO with our target and the FRAM on it.
+
+    Returns (contention_steps, float_while_selected_steps).
+
+    ⛔⛔ THE BUS IS MODELLED AS ONE RESOLVED NET CARRYING BOTH DRIVERS, AND THAT
+    IS THE LOAD-BEARING PART OF THE MODEL. If our MISO and the FRAM's SO were
+    separate signals that a bench merely compared, contention would be
+    INVISIBLE even with the FRAM present -- each driver would look fine on its
+    own wire. Contention is not a property of a driver, it is a property of the
+    NET, so the net is what gets modelled and `resolve` is what reports X.
+    ⭐ This is the shape the Phase-2 cocotb bench has to copy.
+    """
     n = len(cs_ours)
-    hist = {"cs": cs_ours, "glitch_at": glitch_at}
+    hist = {"cs": cs_ours, "glitch_at": glitch_at,
+            "cs_glitch_at": cs_glitch_at}
     ours = Target("ours", [1, 0, 1, 1, 0, 0, 1, 0], ours_policy)
     # the FRAM: a correct target, by its own datasheet
     fram = Target("MB85RS64V", [0, 1, 0, 0, 1, 1, 0, 1], oe_correct)
-    bad = []
+    bad, floating = [], []
     for s in range(n):
-        d = {"ours": ours.drive(s, cs_ours[s], hist),
+        mine = ours.drive(s, cs_ours[s], hist)
+        d = {"ours": mine,
              "MB85RS64V": fram.drive(s, cs_other[s], hist)}
         val, conf = resolve(d)
         if conf:
             bad.append((s, conf))
-    return bad
+        # selected but not driving = the master samples a float = a lost bit.
+        # ⭐ Tracked separately from contention because they are different
+        # failures with different severities, and the async-clear ruling trades
+        # one for the other ON PURPOSE.
+        if cs_ours[s] and mine is Z:
+            floating.append(s)
+    return bad, floating
 
 
 def main() -> int:
@@ -239,7 +297,9 @@ def main() -> int:
     cs_other = [False] * 8 + [True] * 8
 
     faces = [
-        ("RULED: uio_oe = our CS", oe_correct, -1, False),
+        ("RULED: async-clear OE, CS never asserted", oe_async_clear, -1,
+         False),
+        ("reference: ideal uio_oe = our CS", oe_correct, -1, False),
         ("MUTANT: MISO on uo_out (always driven)", oe_always, -1, True),
         ("MUTANT: combinational uio_oe (glitch at step 10)", oe_glitchy, 10,
          True),
@@ -247,7 +307,7 @@ def main() -> int:
     print()
     print("    %-48s %-10s %s" % ("face", "contends", "verdict"))
     for label, pol, gl, want_bad in faces:
-        bad = run_bus(pol, cs_ours, cs_other, glitch_at=gl)
+        bad, _ = run_bus(pol, cs_ours, cs_other, glitch_at=gl)
         got_bad = bool(bad)
         ok = (got_bad == want_bad)
         print("    %-48s %-10s %s"
@@ -268,95 +328,177 @@ def main() -> int:
     print("    list already includes it, and why F2 now carries a face whose")
     print("    data outputs are flopped and whose ENABLE is combinational.")
 
-    # ---- 4. the part of the fix that is not done ------------------------
+    # ---- 4. release latency, FIXED IN HARDWARE -------------------------
     print()
-    print("  --- 4. ⛔ THE FIX IS NOT COMPLETE AT 'uio_oe = CS': RELEASE TAKES")
-    print("          TIME, AND THAT IS A HOST-FACING REQUIREMENT ---")
+    print("  --- 4. ✅ RELEASE LATENCY: FIXED IN HARDWARE, NOT PUSHED ONTO THE")
+    print("          MASTER (async-assert / sync-deassert) ---")
     lat = L_SYNC + OUT_REG
     ns = lat / HZ * 1e9
-    print("    CS is an asynchronous input on `uio`, so it is synchronised")
-    print("    (L_sync = %d) and the enable is registered per F2 (out_reg = %d)."
-          % (L_SYNC, OUT_REG))
-    print("    The enable follows CS by %d cycles IN BOTH DIRECTIONS, and the"
-          % lat)
-    print("    deassert direction is the one that bites: for %d cycles = %.0f ns"
-          % (lat, ns))
-    print("    after the master deselects us, WE ARE STILL DRIVING.")
-    print()
-    print("    ⭐ This is a real, named quantity on real parts -- the MB85RS64V")
-    print("    AC table has an 'Output disable time' and a 'Deselect time'. ⛔ Its")
-    print("    VALUES are not quoted: that table's text layer is scrambled (the")
-    print("    1.1 evidence boundary for this very part), so the parameter names")
-    print("    are evidence and the numbers are not.")
-    print()
-    print("    So the threshold is NOT taken from the datasheet. It is stated as")
-    print("    a requirement on the MASTER, and then priced against our own")
-    print("    lane table, which we do own:")
     spi_t = next(l for l in LANES if l.name.startswith("SPI-target"))
     half = spi_t.t
-    print("      our release latency              %d cyc  %.0f ns"
+    print("    A FULLY SYNCHRONOUS enable costs L_sync %d + out_reg %d = %d"
+          % (L_SYNC, OUT_REG, lat))
+    print("    cycles = %.0f ns of release lag, IN BOTH DIRECTIONS. ⛔ Writing"
+          % ns)
+    print("    'the master must leave >= %d cycles' into the host spec is a"
+          % (lat + 1))
+    print("    FALLBACK, NOT A FIX: the contention window is real and a host")
+    print("    cannot be relied on to avoid it.")
+    print()
+    print("    ✅ THE FIX -- the reset-synchroniser pattern on the ENABLE:")
+    print("      RELEASE  CS rising ASYNCHRONOUSLY CLEARS the uio_oe flop.")
+    print("               No clock, no synchroniser -> lag is the pad plus the")
+    print("               flop's clear delay. NANOSECONDS, not %.0f ns." % ns)
+    print("      ASSERT   re-enable on CS falling goes through the")
+    print("               synchroniser as before, so nothing metastable ever")
+    print("               reaches the pad.")
+    print()
+    print("    ⭐⭐ AND F2 STILL HOLDS. The pin is driven by a flop's Q -- an")
+    print("    async-clear flop IS a flop. So this does not trade a")
+    print("    correctness property for a timing one. F2's checker only has to")
+    print("    RECOGNISE the cell, which is classification, not a waiver, and")
+    print("    F2 now carries a face that proves it does.")
+
+    # ---- the two-sided must-fire Wilson specified ----------------------
+    print()
+    print("    --- MUST-FIRE: a ZERO-GAP master. The fix must show 0 cycles,")
+    print("        and the superseded synchronous design must FAIL ---")
+    cs_fast_ours = [True] * 4 + [False] * 12
+    cs_fast_other = [False] * 4 + [True] * 12
+    print()
+    print("    %-40s %-12s %s" % ("enable design", "contends", "verdict"))
+    two_sided = True
+    for label, pol, want in (
+            ("✅ async-clear (RULED)", oe_async_clear, 0),
+            ("⛔ fully synchronous (SUPERSEDED)", oe_registered_release, lat)):
+        bad, _ = run_bus(pol, cs_fast_ours, cs_fast_other)
+        ok = len(bad) == want
+        print("    %-40s %-12s %s"
+              % (label, "%d cyc" % len(bad),
+                 "as expected" if ok else "*** WRONG, wanted %d" % want))
+        if not ok:
+            rc = 1
+            two_sided = False
+    if two_sided:
+        print()
+        print("    ⭐⭐ TWO-SIDED, WHICH IS WHAT MAKES IT A REAL MUST-FIRE. The")
+        print("    fix shows ZERO contention beyond pad delay and the design it")
+        print("    replaces shows exactly %d cycles. A one-sided arm would only" % lat)
+        print("    show the new design passing, which any design that never")
+        print("    drives would also do.")
+
+    # ---- the risk the asymmetry introduces, priced ---------------------
+    print()
+    print("    --- ⚠ THE RISK THE ASYMMETRY BUYS, PRICED ---")
+    print("    A glitch on CS now RELEASES MISO mid-transfer. Modelled: our CS")
+    print("    asserted throughout, one spurious CS glitch at step 6.")
+    cs_sel = [True] * 12
+    cs_idle = [False] * 12
+    # ⛔ ISOLATE THE TERM. The same trace WITHOUT a glitch already floats for
+    # the first L_sync+out_reg steps, because the ASSERT path is synchronised.
+    # Reporting the raw count would charge the glitch for the assert warm-up
+    # and overstate the risk this arm exists to price, so the cost is the
+    # DIFFERENCE between the two runs.
+    base_bad, base_float = run_bus(oe_async_clear, cs_sel, cs_idle)
+    g_bad, g_float = run_bus(oe_async_clear, cs_sel, cs_idle, cs_glitch_at=6)
+    only_glitch = sorted(set(g_float) - set(base_float))
+    print("      contention cycles, no glitch   %d" % len(base_bad))
+    print("      contention cycles, WITH glitch %d" % len(g_bad))
+    print("      floating, no glitch            %d  (steps %s -- the ASSERT"
+          % (len(base_float), base_float))
+    print("                                         path's synchroniser)")
+    print("      floating, WITH glitch          %d  (steps %s)"
+          % (len(g_float), g_float))
+    print("      ⇒ COST OF THE GLITCH ALONE     %d  (steps %s)"
+          % (len(only_glitch), only_glitch))
+    print()
+    print("    ⭐ THE DIRECTION IS THE SAFE ONE, AND THAT IS THE WHOLE")
+    print("    JUSTIFICATION FOR THE ASYMMETRY. A glitch can only turn a")
+    print("    driver OFF, so it costs a CORRUPTED BIT (the master samples a")
+    print("    float) and can NEVER cause contention. The superseded design")
+    print("    failed the other way -- it could only turn a driver ON late,")
+    print("    which IS contention. ⛔ A corrupted bit is a detected,")
+    print("    retryable protocol error; contention is two output stages")
+    print("    fighting. Not the same severity.")
+    if len(g_bad) != 0:
+        print("    *** the async-clear path produced contention -- the safety")
+        print("        argument for the asymmetry does not hold")
+        rc = 1
+    if not only_glitch:
+        print("    *** UNPRICED: the CS glitch cost nothing ON TOP OF the")
+        print("        assert warm-up, so this arm is not measuring the risk")
+        print("        it names")
+        rc = 1
+    print()
+    print("    ⇒ MITIGATION, and it is a CHOICE to record not to assume: either")
+    print("      FILTER CS before the async clear (a 2-3 cycle digital filter,")
+    print("      which re-introduces part of the lag it removed), or RECORD the")
+    print("      glitch sensitivity as a limitation. ⛔ Part 1 must pick one")
+    print("      explicitly; silently doing neither is how this becomes a")
+    print("      field failure nobody predicted.")
+    print()
+    print("    ⛔ AND STA MUST CONSTRAIN THE ASYNC PATH. An asynchronous clear")
+    print("    needs RECOVERY and REMOVAL checks on its DEASSERT edge -- the")
+    print("    clear releasing too near a clock edge is its own metastability")
+    print("    hazard, moved rather than removed. That is an SDC obligation and")
+    print("    it joins the Phase-4 design SDC, named here so it is not")
+    print("    discovered by a timing report nobody read.")
+
+    # ---- what remains on the host, which is only the assert side -------
+    print()
+    print("    --- what REMAINS in the host-facing spec: the ASSERT side only")
+    print("    MISO becomes valid ~%d cycles (%.0f ns) after CS falls, because"
           % (lat, ns))
-    print("      SPI-target SCK half-period       %d cyc  %.0f ns"
-          % (half, half / HZ * 1e9))
-    print("      release as a fraction of a HALF  %.0f%%"
-          % (100.0 * lat / half))
-    print("      release as a fraction of a BIT   %.0f%%"
-          % (100.0 * lat / (2 * half)))
+    print("    the assert direction still goes through the synchroniser. So the")
+    print("    requirement on the master is a SETUP, not a gap:")
+    print("      CS setup >= %d cycles before the first SCLK edge" % lat)
+    print("      against the SCK half-period of %d cyc (%.0f ns) = %.0f%%"
+          % (half, half / HZ * 1e9, 100.0 * lat / half))
     ok_margin = lat < half
-    print("    ⇒ release completes inside ONE SCK half-period: %s"
+    print("    ⇒ inside one SCK half-period: %s"
           % ("yes" if ok_margin else "*** NO"))
     if not ok_margin:
         rc = 1
+    print("    ⭐ CS-setup-before-first-clock is ROUTINE for an SPI target --")
+    print("    every target has one. That is the difference between this and")
+    print("    what it replaces: an inter-select GAP is an unusual demand on a")
+    print("    master, a CS setup time is what masters already provide.")
     print()
-    print("    ⭐ WHY THAT IS THE RIGHT COMPARISON. A master that deselects us")
-    print("    and selects another target has to move two of its own GPIOs; it")
-    print("    cannot plausibly do so faster than it clocks SCK. So a gap of at")
-    print("    least one half-period is implied by the master being able to run")
-    print("    the bus at all. ⚠ IMPLIED, NOT GUARANTEED -- so it goes in the")
-    print("    host-facing spec next to the serial format, as 1.6r.")
-
-    print()
-    print("    --- the firing witness for 1.6r ---")
-    # a master that re-selects the other target IMMEDIATELY on deselecting us
-    cs_fast_ours = [True] * 4 + [False] * 12
-    cs_fast_other = [False] * 4 + [True] * 12
-    bad = run_bus(oe_registered_release, cs_fast_ours, cs_fast_other)
-    print("    master deselects us at step 4 and selects the FRAM at step 4")
-    print("    (gap = 0), RULED design including its release latency:")
-    print("      contention on %d cycles%s"
-          % (len(bad), (" -- steps %s" % [s for s, _ in bad]) if bad else ""))
-    if not bad:
-        print("    *** UNPRICED: a zero-gap master must contend, or the")
-        print("        condition is not testing release latency at all")
-        rc = 1
-    else:
-        print("    ⭐ FIRES, and the count IS the latency: %d cycles of overlap"
-              % len(bad))
-        print("    for a %d-cycle release. ⛔ Note the RULED design is what"
-              % lat)
-        print("    contends here -- this is not a mutant. The condition is on")
-        print("    the MASTER, and that is what makes it host-facing spec.")
-        need = lat
-        print("    ⇒ 1.6r: the master must leave >= %d cycles (%.0f ns) between"
-              % (need, ns))
-        print("      deasserting SPI-target CS and asserting another target's.")
+    print("    ⛔ ONE NUMBER IS STILL DELIBERATELY NOT QUOTED. The MB85RS64V AC")
+    print("    table NAMES an 'Output disable time' and a 'Deselect time', so")
+    print("    release latency is a budgeted quantity on real parts rather than")
+    print("    something this gate invented. But that table's text layer is")
+    print("    SCRAMBLED (the 1.1 boundary for this very part): it reads 'Clock")
+    print("    low time tCSH 25' and 'Chip select hold time tODV', with the")
+    print("    parameter and symbol columns misaligned. ⇒ The parameter NAMES")
+    print("    are evidence; the VALUES are not, and none is used.")
 
     # ---- 5. what Part 1 owes -------------------------------------------
     print()
     print("  --- 5. what Part 1 and Phase 2 owe ---")
     print("    Part 1 RTL:")
-    print("      * MISO on `uio`, `uio_oe[MISO] = synchronised target CS`,")
-    print("        REGISTERED (F2 covers uio_oe)")
+    print("      * MISO on `uio`; `uio_oe[MISO]` is a flop with an ASYNC CLEAR")
+    print("        driven by CS rising, and a synchronised ASSERT path")
+    print("      * pick ONE of: filter CS before the async clear, or record the")
+    print("        glitch sensitivity. Not neither.")
     print("      * every other `uio_oe` bit for an INPUT pin held at 0")
     print("      * I2C SCL/SDA stay open-drain on `uio`: drive 0, release for 1")
+    print("    Phase 4 SDC:")
+    print("      * RECOVERY/REMOVAL on the async clear's deassert edge")
     print("    Phase 2 cocotb must-fire:")
     print("      * with our CS deasserted, MISO reads high-Z (not 0, not 1)")
-    print("      * a mutant driving MISO while deselected FAILS, and fails for")
-    print("        CONTENTION with a second modelled target -- not merely for a")
-    print("        wrong data value, which a single-target bench cannot tell")
-    print("        apart. ⛔ A one-target bench CANNOT kill this mutant: with")
-    print("        nothing else driving, an always-driven MISO reads correct.")
-    print("        That is why the bench needs the FRAM model on the line.")
+    print("      * ⛔⛔ THE BUS MUST BE ONE RESOLVED TRI-STATE NET CARRYING BOTH")
+    print("        DRIVERS (our MISO + the FRAM's SO), contention resolving to")
+    print("        X, and the bench asserting NO X. If the bench wires the two")
+    print("        drivers to SEPARATE signals and compares them, contention is")
+    print("        INVISIBLE even with the FRAM present -- each driver looks")
+    print("        fine on its own wire. Contention is a property of the NET.")
+    print("      * the always-driven mutant must fail WITH X ON THE SHARED NET,")
+    print("        not merely with a wrong data value. ⛔ A single-target bench")
+    print("        cannot kill it at all: with nothing else driving, an")
+    print("        always-driven MISO reads correct.")
+    print("      * the zero-gap master arm: 0 contention cycles with the")
+    print("        async-clear enable, and the fully synchronous enable FAILS it")
 
     print()
     print("=" * 78)
@@ -367,10 +509,14 @@ def main() -> int:
           % (o + N_SERIAL, N_UO, N_UO - o - N_SERIAL))
     print("    * %d of %d subsets still feasible -- COUNTED, not assumed"
           % (n_ruled, n_all))
-    print("    * 3 bus faces: always-driven and combinational-OE both contend")
-    print("    * ⛔ NEW: release latency %d cyc = %.0f ns -> 1.6r, a condition"
-          % (lat, ns))
-    print("      on the MASTER, not on us")
+    print("    * 4 bus faces on ONE RESOLVED NET: always-driven and")
+    print("      combinational-OE both contend; the async-clear enable does not")
+    print("    * ✅ release FIXED IN HARDWARE: async-clear enable -> 0 cycles of")
+    print("      contention under a zero-gap master, where the fully")
+    print("      synchronous design shows %d. Two-sided must-fire." % lat)
+    print("    * ⚠ priced: a CS glitch costs a floating bit, NEVER contention")
+    print("    * host spec keeps the ASSERT side only: CS setup >= %d cyc"
+          % lat)
     return rc
 
 

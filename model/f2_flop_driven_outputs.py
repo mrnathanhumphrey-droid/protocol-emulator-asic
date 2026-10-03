@@ -238,6 +238,29 @@ module tt_um_x (uo_out, uio_out, uio_oe, clk);
 endmodule
 """
 
+# ✅ THE ASYNC-CLEAR FACE -- this must PASS.
+# The 1.6r ruling fixes shared-MISO release with the reset-synchroniser pattern
+# applied to the enable: CS rising ASYNCHRONOUSLY CLEARS the uio_oe flop, while
+# the assert path stays synchronised. ⭐ The pin is still a flop's Q, so F2
+# holds -- an async-clear flop IS a flop, and recognising it is CLASSIFICATION,
+# not a waiver.
+# ⛔⛔ AND THIS FACE EXISTS BECAUSE THE ACCEPTANCE WAS ONLY INCIDENTAL. The flop
+# pattern already contains `dfr`, so `dfrbpq`-style async-reset cells happened
+# to classify correctly -- but nothing TESTED that, which is the same defect as
+# `uio_oe` being in OUT_PORTS with no face exercising it. A property that holds
+# by accident is a property that can be lost by a pattern edit nobody connects
+# to MISO. ⚠ If a future narrowing of the flop pattern breaks this, THIS face
+# is what says so, rather than a shared bus in silicon.
+MUTANT_ASYNC_OK = """
+module tt_um_x (uo_out, uio_out, uio_oe, clk);
+  sg13cmos5l_dfrbpq_1 ff0 (.CLK(clk), .D(d0), .RESET_B(rb), .Q(uo_out[0]));
+  sg13cmos5l_dfrbpq_1 ff1 (.CLK(clk), .D(d1), .RESET_B(rb), .Q(uio_out[0]));
+  sg13cmos5l_dfrbpq_1 ff2 (.CLK(clk), .D(cs_pad), .RESET_B(rb), .Q(cs_s1));
+  sg13cmos5l_dfrbpq_1 ff3 (.CLK(clk), .D(cs_s1), .RESET_B(rb), .Q(cs_s2));
+  sg13cmos5l_dfrbpq_1 ff4 (.CLK(clk), .D(cs_s2), .RESET_B(cs_n), .Q(uio_oe[0]));
+endmodule
+"""
+
 # ⛔⛔ THE MISO FACE. Every DATA output is correctly flopped and only the
 # ENABLE is combinational -- so a checker that looked at `uo_out`/`uio_out` and
 # stopped would call this compliant. It is the worst of the four:
@@ -311,7 +334,26 @@ def selftest() -> int:
         print("    cannot glitch. The shipped design ties it LOW, same reason.")
 
     print()
-    print("  --- face 4: MUST-FIRE, a combinational ENABLE with every data")
+    print("  --- face 4: the 1.6r ASYNC-CLEAR ENABLE must PASS ---")
+    if check(MUTANT_ASYNC_OK, "1.6r: uio_oe from a flop with an async clear"
+                              " (RESET_B = cs_n), assert path synchronised") != 0:
+        print("    *** FAIL: the async-clear enable was rejected. The 1.6r fix")
+        print("        would be blocked by F2, and the two rulings would be in")
+        print("        conflict.")
+        rc = 1
+    else:
+        print("    ⭐ AN ASYNC-CLEAR FLOP IS A FLOP -- recognising it is")
+        print("    CLASSIFICATION, not a waiver, so 1.6r's hardware fix and")
+        print("    F2 hold at the same time.")
+        print("    ⛔ THIS FACE EXISTS BECAUSE THE ACCEPTANCE WAS INCIDENTAL:")
+        print("    the flop pattern already contains `dfr`, so these cells")
+        print("    happened to classify right and NOTHING TESTED IT -- the same")
+        print("    defect as uio_oe being in scope with no face. A property")
+        print("    that holds by accident can be lost by a pattern edit nobody")
+        print("    connects to MISO.")
+
+    print()
+    print("  --- face 5: MUST-FIRE, a combinational ENABLE with every data")
     print("      output correctly flopped (the MISO face) ---")
     if check(MUTANT_COMB_OE, "mutant: nand2+inv drive uio_oe[0], data flopped",
              expect_verdict="COMBINATIONAL") != 1:
@@ -329,7 +371,7 @@ def selftest() -> int:
         print("    no face had ever tested it.")
 
     print()
-    print("  --- face 5: an unknown cell must FAIL CLOSED ---")
+    print("  --- face 6: an unknown cell must FAIL CLOSED ---")
     if check(MUTANT_UNKNOWN, "mutant: an unclassified cell drives uo_out[0]",
              expect_verdict="UNKNOWN-CELL") != 1:
         print("    *** FAIL: an unrecognised cell was treated as compliant.")
@@ -341,7 +383,7 @@ def selftest() -> int:
 
     print()
     print("=" * 78)
-    print("  GATE F2-selftest: %s" % ("PASSED -- compliant passes, four "
+    print("  GATE F2-selftest: %s" % ("PASSED -- compliant + async-clear pass, four "
                                       "mutants die incl. a combinational "
                                       "ENABLE, unknown fails closed"
                                       if rc == 0 else "FAILED"))

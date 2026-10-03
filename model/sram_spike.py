@@ -150,7 +150,19 @@ def main() -> int:
     sc = store_cost()
     cell_um2 = (CORE_UM2 * UTIL_PCT / 100.0) / CELLS_TOTAL
     um2_per_bit_flops = sc["per_bit_itemised"] * cell_um2
-    budget_um2 = TILE_UM2 * TILES
+    # ⛔⛔ THE 6x4 BUDGET WAS WRONG BY 2.1x, AND THE PRIMARY ARTEFACT NOW EXISTS.
+    # `TILE_UM2 * TILES` = 167 x 108 x 24 = 432,864 um^2 came from
+    # ARCH_PREREG_01 s110's per-tile figure. The tile DEF this flow actually
+    # uses -- tt_block_6x4_pgvdd.def in TinyTapeout/tt-support-tools @
+    # ihp-sg13cmos5l -- states `DIEAREA ( 0 0 ) ( 1289280 710640 )` at UNITS
+    # 1000, i.e. 1289.28 x 710.64 = 916,214 um^2. ⭐ AND THAT RECONCILES THE
+    # DISCREPANCY info.yaml FLAGGED: our own shipped run reports a 902,417 um^2
+    # CORE, which is impossible inside a 432,864 um^2 die and sits perfectly
+    # inside a 916,214 um^2 one (the difference is the core-to-die margin).
+    # ⇒ the tile-multiple arithmetic is superseded; the DEF is primary.
+    DIE_W, DIE_H = 1289.28, 710.64            # DEF DIEAREA, see above
+    budget_um2 = DIE_W * DIE_H
+    budget_old = TILE_UM2 * TILES
 
     print()
     print("  --- the flop baseline, from OUR OWN shipped silicon ---")
@@ -161,8 +173,20 @@ def main() -> int:
     print("                             a %s um^2 core)" % f"{CORE_UM2:,}")
     print("    => flops cost            %.1f um^2 per stored bit"
           % um2_per_bit_flops)
-    print("    6x4 budget               %d tiles x %d um^2 = %s um^2"
-          % (TILES, TILE_UM2, f"{budget_um2:,.0f}"))
+    print("    6x4 die, PRIMARY         %.2f x %.2f um = %s um^2"
+          % (DIE_W, DIE_H, f"{budget_um2:,.0f}"))
+    print("                             (DEF DIEAREA, tt_block_6x4_pgvdd.def,")
+    print("                              tt-support-tools @ ihp-sg13cmos5l)")
+    print("    ⛔ SUPERSEDES             %d tiles x %d um^2 = %s um^2, which"
+          % (TILES, TILE_UM2, f"{budget_old:,.0f}"))
+    print("                             was WRONG BY %.1fx. ⭐ And the DEF"
+          % (budget_um2 / budget_old))
+    print("                             reconciles info.yaml's flagged")
+    print("                             conflict: our own run reports a")
+    print("                             %s um^2 CORE, impossible inside"
+          % f"{CORE_UM2:,}")
+    print("                             %s and consistent with %s."
+          % (f"{budget_old:,.0f}", f"{budget_um2:,.0f}"))
     print("    today's 64 B store       %d bits = %s um^2 = %.1f%% of 6x4"
           % (STORE_BITS_TODAY, f"{STORE_BITS_TODAY * um2_per_bit_flops:,.0f}",
              100 * STORE_BITS_TODAY * um2_per_bit_flops / budget_um2))

@@ -561,21 +561,35 @@ def c_idle_fire():
 
 
 def c_miso_release(lanes):
-    """RULED -- the master must leave a gap before selecting another target.
+    """RULED -- shared-MISO release is fixed IN HARDWARE, and what is left on
+    the master is a CS SETUP, not an inter-select gap.
 
-    ⛔⛔ THIS CONDITION EXISTS BECAUSE THE MISO FIX IS NOT COMPLETE AT
-    "uio_oe = CS". CS is an asynchronous input on `uio`, so it is synchronised
-    and the enable is registered per F2. The enable therefore follows CS by
-    L_sync + out_reg cycles IN BOTH DIRECTIONS -- and the DEASSERT direction is
-    the one that bites: for that many cycles after the master deselects us we
-    are still driving the shared MISO.
+    ⛔⛔ THIS CONDITION CHANGED SHAPE ONCE ALREADY, AND THE FIRST SHAPE WAS THE
+    FALLBACK DRESSED AS THE FIX. A fully synchronous enable follows CS by
+    L_sync + out_reg cycles in BOTH directions, so for 4 cycles after the
+    master deselects us we are still driving the shared line. The first version
+    of this condition wrote "the master must leave >= 5 cycles" into the host
+    spec. ⛔ That is not a fix: the contention window is real and a host cannot
+    be relied on to avoid it.
 
-    ⭐ The threshold is a requirement on the MASTER, not on us, which is what
-    makes it host-facing spec rather than a design bound. It is priced against
-    our own lane table (which we own) and NOT against the MB85RS64V AC table:
-    that table names an "Output disable time" and a "Deselect time", so the
-    quantity is real, but its text layer is scrambled and no value from it is
-    quoted. ⛔ The evidence is the parameter NAMES; the numbers are not evidence.
+    ✅ THE FIX IS THE RESET-SYNCHRONISER PATTERN ON THE ENABLE -- CS rising
+    ASYNCHRONOUSLY CLEARS the `uio_oe` flop (no clock, no synchroniser, so the
+    lag is pad + clear delay), while the ASSERT path stays synchronised so
+    nothing metastable reaches the pad. F2 still holds because the pin is still
+    a flop's Q; an async-clear flop IS a flop.
+
+    ⭐ SO WHAT REMAINS ON THE MASTER IS ONLY THE ASSERT SIDE: MISO becomes
+    valid ~L_sync + out_reg cycles after CS falls, i.e. a CS SETUP before the
+    first SCLK edge. That is ROUTINE for an SPI target -- every target has one
+    -- whereas an inter-select gap is an unusual demand. The requirement got
+    smaller AND more ordinary.
+
+    ⚠ THE RESIDUAL RISK IS PRICED AND POINTS THE SAFE WAY. A glitch on CS now
+    RELEASES MISO, costing one floating bit and NEVER contention, because a
+    glitch can only turn a driver OFF. The superseded design could only turn a
+    driver ON late, which is contention. ⛔ Part 1 must explicitly either filter
+    CS before the async clear or record the sensitivity, and Phase 4 owes
+    RECOVERY/REMOVAL constraints on the clear's deassert edge.
     """
     from gate_miso_tristate import HZ
     lat = L_SYNC + OUT_REG
@@ -584,31 +598,46 @@ def c_miso_release(lanes):
         return True, ("no SPI-target lane in this set, so no shared MISO and "
                       "the condition is vacuous -- correctly so")
     ok = lat < spi_t.t
-    return ok, ("release latency = L_sync %d + out_reg %d = %d cyc (%.0f ns at "
-                "%.0f MHz) against the SPI-target SCK half-period of %d cyc "
-                "(%.0f ns) = %.0f%%; release completes inside one half-period, "
-                "which a master that moves two of its own GPIOs cannot beat"
-                % (L_SYNC, OUT_REG, lat, lat / HZ * 1e9, HZ / 1e6, spi_t.t,
+    return ok, ("release is ASYNC (pad + clear delay, sub-cycle), so the only "
+                "host requirement is a CS SETUP of >= %d cyc (%.0f ns at "
+                "%.0f MHz) before the first SCLK edge, against the SPI-target "
+                "SCK half-period of %d cyc (%.0f ns) = %.0f%%. ⭐ A CS setup is "
+                "routine for an SPI target; the inter-select GAP this replaces "
+                "was not"
+                % (lat, lat / HZ * 1e9, HZ / 1e6, spi_t.t,
                    spi_t.t / HZ * 1e9, 100.0 * lat / spi_t.t))
 
 
 def c_miso_release_fire():
-    """⛔ The RULED design itself contends under a zero-gap master. That is the
-    point: the firing witness is not a mutant, it is a HOST that moves too
-    fast, which is why the condition belongs in the host-facing spec."""
-    from gate_miso_tristate import run_bus, oe_registered_release
+    """⛔ TWO-SIDED: the fix must show ZERO contention under a zero-gap master
+    AND the design it replaces must FAIL that same arm.
+
+    ⭐ A one-sided arm would only show the new design passing, which a design
+    that never drives at all would also do. The arm is only evidence because
+    the SUPERSEDED design is run through it and dies.
+    """
+    from gate_miso_tristate import (run_bus, oe_registered_release,
+                                    oe_async_clear)
     lat = L_SYNC + OUT_REG
     ours = [True] * 4 + [False] * 12
     other = [False] * 4 + [True] * 12
-    bad = run_bus(oe_registered_release, ours, other)
-    return len(bad) == lat, (
-        "a master that deselects SPI-target and selects another target in the "
-        "SAME cycle (gap = 0) causes %d cycles of CONTENTION on the shared "
-        "MISO -- exactly the release latency. ⛔ The contending design is the "
-        "RULED one, not a mutant: two output stages at opposing levels because "
-        "the host moved faster than the synchroniser. ⇒ the master must leave "
-        ">= %d cycles between deasserting our CS and asserting another's"
-        % (len(bad), lat))
+    fixed, _ = run_bus(oe_async_clear, ours, other)
+    old, _ = run_bus(oe_registered_release, ours, other)
+    # and the glitch cost, isolated from the assert warm-up
+    sel, idle = [True] * 12, [False] * 12
+    _, base_f = run_bus(oe_async_clear, sel, idle)
+    gb, gf = run_bus(oe_async_clear, sel, idle, cs_glitch_at=6)
+    glitch_only = sorted(set(gf) - set(base_f))
+    ok = (len(fixed) == 0 and len(old) == lat and len(gb) == 0
+          and len(glitch_only) == 1)
+    return ok, (
+        "ZERO-GAP MASTER, on one resolved net carrying both drivers: the RULED "
+        "async-clear enable contends on %d cycles, the SUPERSEDED fully "
+        "synchronous enable on %d -- so the arm kills the design it replaced "
+        "and is not merely satisfied by the new one. ⚠ And the asymmetry is "
+        "priced: a CS glitch costs %d floating bit(s) and %d contention "
+        "cycles, because a glitch can only turn a driver OFF"
+        % (len(fixed), len(old), len(glitch_only), len(gb)))
 
 
 CONDITIONS = [
@@ -642,8 +671,8 @@ CONDITIONS = [
              "flag IN the stream", c_rx, c_rx_fire),
     ("1.6q", "pin-role reset/idle: protocol outputs reset HIGH, held at idle "
              "in load mode, CS asserted LAST", c_idle, c_idle_fire),
-    ("1.6r", "shared MISO: master leaves >= L_sync+out_reg cycles between "
-             "deasserting our CS and selecting another target", c_miso_release,
+    ("1.6r", "shared MISO: release is ASYNC (async-clear enable); host owes "
+             "only a CS SETUP before the first SCLK edge", c_miso_release,
      c_miso_release_fire),
 ]
 

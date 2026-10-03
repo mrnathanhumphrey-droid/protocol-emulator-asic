@@ -1,93 +1,102 @@
 """THE CMOS5L SRAM HARDEN GATE -- placement, route and timing, not GeneratePDN.
 
 THE ONE CLAIM: `MEM_TYPE = "sram"` does not lock until the macro is PLACED,
-the design FULLY ROUTED and TIMING MET in the CMOS5L template. A completed
-`GeneratePDN` is a different claim and this gate does not accept it.
+the design ROUTED (defined below, because on this flow "routed" is ambiguous)
+and TIMING MET in the CMOS5L template.
 
-⛔⛔ THIS GATE IS RED UNTIL THAT RUN EXISTS, ON PURPOSE -- the fourth such gate,
-alongside `part1_param_contract.py` and `f2_flop_driven_outputs.py` face 3. It
-is an ACCEPTANCE TEST for work not yet done. What it CAN do today is compute the
-placement decision and separate the two crossing problems, which turn out not to
-be the same problem at all.
+⛔⛔ THIS GATE IS RED UNTIL THAT RUN EXISTS, ON PURPOSE -- alongside
+`part1_param_contract.py` and `f2_flop_driven_outputs.py` face 3. It is an
+ACCEPTANCE TEST for work not yet done. What it does today is compute the
+placement decision from PRIMARY artefacts and separate the two crossing
+problems, which turn out not to be the same problem.
 
 =============================================================================
-PRIMARY EVIDENCE, FROM OUR OWN REPO: src/config.json
+PRIMARY #1 -- OUR OWN FLOW SETTINGS: src/config.json
 =============================================================================
-These are the settings the shipped flow actually runs with -- first-party, in
-version control, not recalled:
-
-    FP_PDN_MULTILAYER   0       no horizontal straps. The PDN is a
-                                SINGLE-LAYER VERTICAL COMB.
+    FP_PDN_MULTILAYER   0       no horizontal straps: a SINGLE-LAYER VERTICAL
+                                comb
     FP_PDN_VPITCH       50.0    um between vertical straps
     FP_PDN_VWIDTH       2.1     um per strap
     GRT_ALLOW_CONGESTION 1      the global router is TOLD to tolerate
                                 congestion
-    LEFT/RIGHT_MARGIN_MULT  6   core-to-die margin, left and right
-    TOP/BOTTOM_MARGIN_MULT  1   core-to-die margin, top and bottom
-    CLOCK_PERIOD        20      ns, i.e. 50 MHz
+    CLOCK_PERIOD        20      ns = 50 MHz
 
-⭐⭐ `GRT_ALLOW_CONGESTION = 1` IS THE LINE THAT JUSTIFIES THE GATE'S SHAPE.
-The router is instructed not to fail on congestion. So "the design routed" is a
-WEAKER claim on this flow than it sounds -- it can route by overflowing and pay
-for it in detour, coupling and delay. That is why the gate requires TIMING and
-not route completion, and it is a first-party reason rather than a cautious
-preference.
+⭐⭐ `GRT_ALLOW_CONGESTION = 1` IS WHY "ROUTED" HAS TO BE DEFINED. The router is
+instructed not to fail on congestion, so it can succeed by OVERFLOWING and pay
+for it in detour, coupling and delay. A flow that prints success is therefore
+not evidence. ⇒ ROUTED is defined here as three separate assertions, all
+required:
+
+    (1) global-route OVERFLOW = 0, PARSED from the GRT report -- not inferred
+        from the absence of an error, because the flow is configured not to
+        error;
+    (2) detailed-route DRC CLEAN;
+    (3) TIMING MET at the corner that matters.
+
+⛔ A route that only succeeds by overflowing is a FAIL under this gate,
+whatever the flow prints.
+
+=============================================================================
+PRIMARY #2 -- THE TILE'S OWN DEF, and it OVERTURNED my inference
+=============================================================================
+ORIGIN: TinyTapeout/tt-support-tools, branch `ihp-sg13cmos5l`, file
+`tech/ihp-sg13cmos5l/def/tt_block_6x4_pgvdd.def` -- OUR tile size (info.yaml
+says `tiles: "6x4"`), first-party to the competition's own flow.
+
+    DIEAREA ( 0 0 ) ( 1289280 710640 ) ;   UNITS DISTANCE MICRONS 1000
+      -> the 6x4 die is 1289.28 x 710.64 um
+    PINS 43 ;  ALL at y = 710140, ALL on LAYER Metal4
+      -> every pin is on the MAX-Y edge
+    pin x range 29760 .. 191040  -> 29.76 .. 191.04 um
+      -> all 43 pins are clustered in the leftmost ~161 um of a 1289 um die
+    TRACKS ... STEP 480 LAYER Metal4      -> Metal4 pitch 0.48 um
+    TRACKS ... STEP 2280 LAYER TopMetal1  -> TopMetal1 pitch 2.28 um
+
+⛔⛔ THIS FALSIFIED MY OWN PLACEMENT REASONING. I had inferred the IO side from
+`LEFT/RIGHT_MARGIN_MULT = 6` against `TOP/BOTTOM = 1`, concluded IO arrived on
+the left and right, and therefore recommended the TOP or BOTTOM edge -- and the
+scoring matrix preferred TOP. The DEF says every pin is on the MAX-Y edge. So
+the recommendation pointed AT the IO edge: the single worst placement.
+
+⭐ THE LESSON IS ABOUT THE INSTRUMENT, NOT THE ANSWER. A matrix that scores
+every assumption looks rigorous and cannot tell you which assumption is true;
+it launders a guess as coverage. One primary read collapsed it and REVERSED it.
+The matrix is kept below as a BACKSTOP only, and it is explicitly scored against
+the known answer so its earlier preference stays visible.
+
+⇒ THE PINS ARE A CORNER CLUSTER, NOT AN EDGE: max-y, low-x. So the macro goes
+DIAGONALLY OPPOSITE -- MIN-Y, MAX-X, the far corner -- which is Wilson's
+original "edge or corner away from the pin side", not my "refinement".
+
+⛔ AND THE PINS ARE ON Metal4, WHICH THE MACRO'S OBS BLOCKS. Routes leaving
+those pins START on the one layer the macro is opaque to, which is an
+independent reason not to put it near them.
 
 =============================================================================
 ⛔ THE TWO CROSSING PROBLEMS ARE NOT THE SAME PROBLEM
 =============================================================================
-Edge placement was ruled to keep IO-to-engine routes from crossing the macro.
-That is correct, and it addresses SIGNAL crossing -- the 72-TopMetal1-track
-ceiling. It does NOT address PDN crossing, and the reason is geometric:
+  * SIGNAL crossing is a PLACEMENT problem. TopMetal1 is the only layer that
+    crosses the macro, so crossings are scarce; moving the macro away from the
+    pin cluster makes the crossing requirement ~zero by construction.
+  * PDN crossing is NOT a placement problem. The straps are VERTICAL at a FIXED
+    50 um pitch spanning the die, so a 236.8 um wide macro intercepts ~5 of
+    them WHEREVER IT SITS.
 
-  * the PDN straps are VERTICAL, at a FIXED 50 um pitch, spanning the die;
-  * a macro 236.8 um wide therefore intercepts ~5 of them WHEREVER IT SITS.
+⭐ And for power that INVERTS the risk: straps over a macro are how its VDD/VSS
+pins get tapped, so a guaranteed >= 4 means the macro cannot be MISSED by the
+PDN. The failure mode was never "no strap reaches it".
 
-So moving the macro changes the signal picture and leaves the power picture
-exactly as it was. Two problems, one lever each, and the ruling's rationale
-names only the first.
-
-⭐ AND FOR POWER THAT IS GOOD NEWS, WHICH INVERTS THE RISK. You WANT straps
-over a macro -- that is how its VDD/VSS pins get tapped. Guaranteeing >= 4
-straps across the footprint means the macro CANNOT BE MISSED by the PDN. So the
-failure mode was never "no strap reaches it". It is narrower and sharper:
-
-  ⛔ THE REAL QUESTION IS WHICH LAYER THE VERTICAL STRAPS LAND ON.
-     on TopMetal1 -> they pass over the macro's M1-M4 OBS and tap down. Fine.
-     on Metal4    -> the macro's own OBS blocks them. GeneratePDN cannot cross
-                     the footprint, and that is the observed public failure.
-
-⚠ THAT IS A HYPOTHESIS AND THE ARTEFACT THAT SETTLES IT IS NOT IN THIS REPO --
-it is the PDK/librelane PDN configuration used by `tt-gds-action@ihp-cmos5l`,
-or the first run's own `GeneratePDN` log. Named, not guessed.
-
-=============================================================================
-⚠ WHAT IS NOT ESTABLISHED: WHICH EDGE CARRIES THE IO
-=============================================================================
-`LEFT/RIGHT_MARGIN_MULT = 6` against `TOP/BOTTOM = 1` is consistent with the IO
-pin channel living on the left and right edges -- six times the core-to-die
-margin is reserved there and the minimum elsewhere. ⚠ SECONDARY, AN INFERENCE
-FROM A MARGIN SETTING, not a pin placement. The primary artefact is the PINS
-section of the generated DEF, which does not exist until the first run.
-
-⭐ SO THE CONCLUSION IS MADE INVARIANT TO IT. The gate evaluates every candidate
-placement under every IO-edge assumption and reports the choice that is best (or
-tied-best) under all of them. A decision that does not depend on the unverified
-fact does not have to wait for it.
-
-⛔ AND THAT CHANGES THE RULING'S ANSWER IN ONE CASE. "The edge OPPOSITE the IO
-side" presumes one IO side. If IO arrives on BOTH left and right -- which is
-what the margin setting suggests -- there is no opposite edge, and a left or
-right corner sits IN the fan-out channel. The placement that is perpendicular to
-the flow, i.e. the TOP or BOTTOM edge, is the one that keeps horizontal
-IO-to-engine routes clear.
+⛔⛔ THE REMAINING PDN QUESTION IS QUARANTINED -- SEE SECTION 2. It is not
+unresolved for lack of trying; it is unresolved because the only search that
+reached it returned a competitor's diagnosis and fix, and that must not enter
+this repo.
 """
 
 from __future__ import annotations
 
+import glob
 import json
 import os
-import re
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -102,36 +111,54 @@ except Exception:
 MACRO_W, MACRO_H = 236.8, 110.38
 MACRO_NAME = "RM_IHPSG13_1P_512x8_c3_bm_bist"
 
-# ---- ORIGIN: the PDK tech LEF, via model/sram_spike.py ------------------
-PITCH = {"Metal2": 0.48, "Metal3": 0.48, "Metal4": 0.48, "TopMetal1": 3.28}
+# ---- ORIGIN: tt_block_6x4_pgvdd.def, tt-support-tools@ihp-sg13cmos5l ----
+# ⛔ EVERY NUMBER HERE CARRIES ITS REF. The previous batch recorded a PDK fact
+# as "the repo's own top-level listing" with NO commit or branch -- and it went
+# stale and was falsified. A listing is a snapshot of a REF.
+DEF_REF = ("TinyTapeout/tt-support-tools @ ihp-sg13cmos5l : "
+           "tech/ihp-sg13cmos5l/def/tt_block_6x4_pgvdd.def")
+DIE_W, DIE_H = 1289.28, 710.64
+N_PINS_DEF = 43
+PIN_Y = 710.140                 # all 43 pins
+PIN_X_LO, PIN_X_HI = 29.76, 191.04
+PIN_LAYER = "Metal4"
 
-# The settings this gate reads out of src/config.json rather than restating.
+# ---- routing pitches, FROM THE DEF's OWN TRACKS statements --------------
+# ⛔⛔ THIS CORRECTS A NUMBER I HAVE BEEN QUOTING. I recorded TopMetal1 pitch as
+# 3.28 um from the PDK tech LEF. The DEF that this flow actually routes on says
+# `STEP 2280`, i.e. 2.28 um. The two disagree by one digit, which is what a
+# transposition looks like. ⭐ The DEF wins for this purpose because it IS the
+# grid the router uses for OUR tile -- but the conflict is recorded rather than
+# silently resolved, and re-reading the tech LEF is owed.
+PITCH = {"Metal2": 0.48, "Metal3": 0.48, "Metal4": 0.48, "TopMetal1": 2.28}
+PITCH_DISPUTED = {"TopMetal1": (2.28, "DEF TRACKS STEP 2280 (this flow's grid)",
+                                3.28, "my earlier read of the PDK tech LEF")}
+
 WANT = ("FP_PDN_MULTILAYER", "FP_PDN_VPITCH", "FP_PDN_VWIDTH",
-        "GRT_ALLOW_CONGESTION", "LEFT_MARGIN_MULT", "RIGHT_MARGIN_MULT",
-        "TOP_MARGIN_MULT", "BOTTOM_MARGIN_MULT", "CLOCK_PERIOD")
+        "GRT_ALLOW_CONGESTION", "CLOCK_PERIOD")
 
-# The artefacts a real harden leaves behind. Their ABSENCE is today's failure.
+# ---- what a real harden must leave behind, per the ROUTED definition ----
+# ⛔ Each entry names the ASSERTION, not just the file, because the whole point
+# is that a file's existence is not the claim.
 HARDEN_ARTEFACTS = [
-    ("runs/*/final/def/*.def", "placed + routed DEF -- also the PRIMARY "
-                               "artefact for which edge carries the IO"),
+    ("runs/*/final/def/*.def", "placed + routed DEF"),
     ("runs/*/final/*.gds", "the GDS"),
-    ("runs/*/reports/signoff/*summary*", "timing signoff summary"),
-    ("runs/*/logs/*pdn*", "the GeneratePDN log -- which LAYER the vertical "
-                          "straps landed on"),
+    ("runs/*/reports/routing/*grt*", "GRT report -> assert OVERFLOW = 0, "
+                                     "PARSED (the flow is configured not to "
+                                     "error on congestion)"),
+    ("runs/*/reports/signoff/*drc*", "detailed-route DRC -> assert CLEAN"),
+    ("runs/*/reports/signoff/*summary*", "timing signoff -> assert MET"),
+    ("runs/*/logs/*pdn*", "GeneratePDN log -> which LAYER the vertical straps "
+                          "landed on (see the quarantine in section 2)"),
 ]
 
 
 def read_config():
-    """⛔ READ, never restate. A config value quoted into a comment is a value
-    that can drift from the flow without anything noticing."""
     p = os.path.join(ROOT, "src", "config.json")
     if not os.path.isfile(p):
         return None, "src/config.json is missing"
-    raw = open(p, encoding="utf-8").read()
-    # the file uses repeated "//" keys as comments, which json.loads collapses;
-    # that is fine -- we only want the real settings, and they are unique.
     try:
-        cfg = json.loads(raw)
+        cfg = json.loads(open(p, encoding="utf-8").read())
     except Exception as e:                                   # pragma: no cover
         return None, "src/config.json does not parse: %s" % e
     return cfg, None
@@ -141,8 +168,7 @@ def straps_over(width_um: float, pitch_um: float):
     """How many vertical straps cross a window of this width.
 
     ⭐ POSITION-INDEPENDENT, and that is the finding. A window of width W on a
-    lattice of pitch P contains floor(W/P) or that plus one, depending only on
-    phase. So the count has a FLOOR that no placement can reduce.
+    lattice of pitch P contains floor(W/P) or that plus one, by phase alone.
     """
     lo = int(width_um // pitch_um)
     return lo, lo + 1
@@ -152,35 +178,10 @@ def tracks_across(width_um: float, layer: str) -> int:
     return int(width_um / PITCH[layer])
 
 
-def candidates(io_edges):
-    """Rank macro placements for SIGNAL crossing, given which edges carry IO.
-
-    The model is deliberately coarse because the core's aspect ratio is NOT
-    established (see the note printed below): it asks only whether a placement
-    sits in the fan-out channel of an IO-bearing edge. That is enough to order
-    the options and not enough to pretend a track count.
-    """
-    out = []
-    for name, touches in (("centre", {"left", "right", "top", "bottom"}),
-                          ("left edge", {"left"}),
-                          ("right edge", {"right"}),
-                          ("top edge", {"top"}),
-                          ("bottom edge", {"bottom"}),
-                          ("top-left corner", {"top", "left"}),
-                          ("top-right corner", {"top", "right"}),
-                          ("bottom-left corner", {"bottom", "left"}),
-                          ("bottom-right corner", {"bottom", "right"})):
-        # a placement is "in the channel" of each IO edge whose fan-out it
-        # intersects. The centre intersects every edge's fan-out.
-        blocked = sorted(touches & set(io_edges))
-        out.append((name, blocked))
-    return out
-
-
 def main() -> int:
     print()
     print("=" * 78)
-    print("CMOS5L SRAM HARDEN -- placement + route + timing")
+    print("CMOS5L SRAM HARDEN -- placed + ROUTED (defined) + timing")
     print("=" * 78)
     rc = 0
 
@@ -189,9 +190,9 @@ def main() -> int:
         print("  *** %s" % err)
         return 1
 
-    # ---- 1. the flow's own settings -------------------------------------
+    # ---- 1. the flow's own settings, and the definition of ROUTED -------
     print()
-    print("  --- 1. PRIMARY: the settings the flow runs with (src/config.json)")
+    print("  --- 1. PRIMARY: our flow settings (src/config.json), READ ---")
     for k in WANT:
         if k not in cfg:
             print("    %-24s *** ABSENT -- this gate's reasoning assumed it"
@@ -204,27 +205,34 @@ def main() -> int:
     vwidth = float(cfg.get("FP_PDN_VWIDTH", 0) or 0)
     cong = cfg.get("GRT_ALLOW_CONGESTION")
     print()
-    print("    ⭐⭐ GRT_ALLOW_CONGESTION = %s. The router is TOLD to tolerate"
-          % cong)
-    print("    congestion, so 'it routed' is a WEAK claim on this flow -- it")
-    print("    can route by overflowing and pay in detour and delay. That is")
-    print("    the first-party reason this gate requires TIMING rather than")
-    print("    route completion, and it is not a cautious preference.")
+    print("    ⭐⭐ GRT_ALLOW_CONGESTION = %s, SO 'ROUTED' MUST BE DEFINED." % cong)
+    print("    The router is TOLD not to fail on congestion, so it can succeed")
+    print("    by OVERFLOWING. A flow that prints success is not evidence.")
+    print("    ⇒ ROUTED := all three, each asserted separately:")
+    print("        (1) global-route OVERFLOW = 0, PARSED from the GRT report")
+    print("            -- not inferred from the absence of an error, because")
+    print("            the flow is configured not to error;")
+    print("        (2) detailed-route DRC CLEAN;")
+    print("        (3) TIMING MET at the corner that matters.")
+    print("    ⛔ A route that succeeds by overflow FAILS this gate.")
     if cong != 1:
         print("    ⚠ the setting changed -- re-read this paragraph against it")
 
-    # ---- 2. the PDN, which placement cannot move ------------------------
+    # ---- 2. the PDN, and the quarantine --------------------------------
     print()
-    print("  --- 2. THE PDN: vertical-only, and POSITION-INDEPENDENT ---")
+    print("  --- 2. THE PDN: position-independent, and QUARANTINED ---")
     if multi != 0:
         print("    ⚠ FP_PDN_MULTILAYER is %s, not 0 -- there ARE horizontal"
               % multi)
-        print("      straps and the single-comb reasoning below is void")
+        print("      straps and the single-comb reasoning is void")
         rc = 1
     lo, hi = straps_over(MACRO_W, vpitch)
     lo_r, hi_r = straps_over(MACRO_H, vpitch)
-    print("    %s is %.1f x %.1f um; straps are %.1f um wide at %.1f um pitch"
+    die_straps = straps_over(DIE_W, vpitch)[0]
+    print("    %s is %.1f x %.1f um; straps %.1f um wide at %.1f um pitch"
           % (MACRO_NAME, MACRO_W, MACRO_H, vwidth, vpitch))
+    print("    the 6x4 die is %.2f um wide -> ~%d vertical straps across it"
+          % (DIE_W, die_straps))
     print()
     print("    %-22s %-12s %s" % ("macro orientation", "width", "straps over"))
     print("    %-22s %-12s %d or %d" % ("as drawn (R0)", "%.1f um" % MACRO_W,
@@ -232,113 +240,139 @@ def main() -> int:
     print("    %-22s %-12s %d or %d" % ("rotated (R90)", "%.1f um" % MACRO_H,
                                         lo_r, hi_r))
     print()
-    print("    ⛔ THE COUNT DOES NOT DEPEND ON WHERE THE MACRO SITS. A window")
-    print("    of width W on a lattice of pitch P contains floor(W/P) or one")
-    print("    more, by phase alone. So >= %d straps cross the footprint under"
-          % lo)
-    print("    EVERY placement, and EDGE PLACEMENT CHANGES NOTHING HERE.")
+    print("    ⛔ THE COUNT DOES NOT DEPEND ON WHERE THE MACRO SITS, so EDGE")
+    print("    PLACEMENT CHANGES NOTHING HERE. >= %d straps cross the" % lo)
+    print("    footprint under every placement, by phase alone.")
+    print("    ⭐ And for power that INVERTS the risk -- straps over a macro are")
+    print("    how its VDD/VSS get tapped, so it CANNOT BE MISSED by the PDN.")
     print()
-    print("    ⭐ AND FOR POWER THAT INVERTS THE RISK -- straps over a macro are")
-    print("    how its VDD/VSS get tapped, so >= %d means the macro CANNOT BE"
-          % lo)
-    print("    MISSED by the PDN. The failure mode was never 'no strap reaches")
-    print("    it'. It is narrower:")
+    print("    ⛔⛔ THE REMAINING QUESTION -- which LAYER the vertical straps")
+    print("    land on -- IS QUARANTINED, AND NOT FOR LACK OF TRYING.")
+    print("    Ruled OUT by primary reads (full tree listings, first-party):")
+    print("      * IHP-Open-PDK @ 2bbec75, ihp-sg13cmos5l tree: libs.ref has")
+    print("        only sg13cmos5l_stdcell and sg13cmos5l_io; libs.tech has")
+    print("        only klayout and gnucap. NO openlane/librelane config,")
+    print("        NO tech LEF, and NO SRAM macro library.")
+    print("      * TinyTapeout/tt-support-tools @ ihp-sg13cmos5l: no PDN config")
+    print("      * TinyTapeout/tt-gds-action @ ihp-cmos5l: only an install")
+    print("        script (PDK = IHP-Open-PDK @ 2bbec75) + action.yml")
+    print("        (librelane 3.1.0.dev3)")
+    print("    ⇒ it therefore lives in LIBRELANE's own built-in PDK config.")
     print()
-    print("      ⛔ WHICH LAYER DO THE VERTICAL STRAPS LAND ON?")
-    print("         TopMetal1 -> they pass over the macro's M1-M4 OBS and tap")
-    print("                      down. Fine.")
-    print("         Metal4    -> the macro's own OBS BLOCKS them. GeneratePDN")
-    print("                      cannot cross the footprint. That is the")
-    print("                      observed public failure.")
-    print()
-    print("    ⚠ NOT ESTABLISHED HERE. The artefact is the PDN configuration")
-    print("    inside tt-gds-action@ihp-cmos5l, or the first run's own")
-    print("    GeneratePDN log. ⛔ My earlier framing -- 'CMOS5L has no Metal5")
-    print("    so the PDN is already adjacent' -- was too loose: 'adjacent'")
-    print("    does not say whether the straps are ON the blocked layer, and")
-    print("    that is the whole question.")
-    # the interaction between the two findings
-    tm1 = tracks_across(MACRO_W, "TopMetal1")
-    strap_tracks = int(round(hi * max(1.0, vwidth / PITCH["TopMetal1"])))
-    print()
-    print("    ⭐ IF they are on TopMetal1, the two problems interact and the")
-    print("    cost is small: %d straps x %.1f um on a %.2f um pitch consume"
-          % (hi, vwidth, PITCH["TopMetal1"]))
-    print("    about %d of the %d TopMetal1 tracks crossing the macro, leaving"
-          % (strap_tracks, tm1))
-    print("    ~%d for signals." % (tm1 - strap_tracks))
+    print("    ⛔ WHY THE WORK STOPPED THERE. The one search that reached it")
+    print("    returned a paraphrase of ANOTHER COMPETITION ENTRY's issue and")
+    print("    pull request -- their diagnosis AND their fix. That must not")
+    print("    enter an open-source submission, so it was not read, not used,")
+    print("    and is not recorded here. ⇒ NATE RULES on how to proceed; the")
+    print("    legitimate route is LibreLane's own config or our own run's log.")
+    print("    ⚠ The same applies to the 'observed public GeneratePDN failure'")
+    print("    this project has cited since PART5: it traces to that entry's")
+    print("    issue tracker, singular. It needs re-labelling, not repeating.")
 
-    # ---- 3. signal crossing, and the placement decision -----------------
+    # ---- 3. SRAM is a CROSS-PDK instantiation --------------------------
     print()
-    print("  --- 3. SIGNAL crossing: the 72-track ceiling and the placement ---")
-    print("    CMOS5L stops at Metal4 + TopMetal1 and the macro's OBS blocks")
-    print("    M1-M4, so TopMetal1 is the ONLY layer that crosses it:")
+    print("  --- 3. ⛔ NEW, AND IT CHANGES WHAT 'MEM_TYPE=sram' MEANS ---")
+    print("    The ihp-sg13cmos5l PDK tree contains NO SRAM macro library")
+    print("    (primary: its own libs.ref listing at the pinned commit). The")
+    print("    RM_IHPSG13_1P_* family lives in the ihp-sg13g2 tree.")
+    print("    ⇒ USING THE MACRO HERE IS A CROSS-PDK INSTANTIATION: its LEF,")
+    print("      GDS and LIB are SG13G2 artefacts dropped into a CMOS5L design.")
+    print("    ⭐ Geometrically that is defensible -- CMOS5L is the same process")
+    print("    minus HBTs and minus Metal5/TopMetal2, and the macro tops out at")
+    print("    Metal4, BELOW both removed layers. And TT's own precheck")
+    print("    allowlist change (tt-support-tools PR #187) is layer-based and")
+    print("    was tested with an RM_IHPSG13_1P_* part, which is consistent")
+    print("    with exactly this workflow.")
+    print("    ⛔ BUT IT MUST BE SAID AS WHAT IT IS, not as 'the PDK's SRAM'.")
+    print("    A cross-PDK macro is a claim that needs the harden to back it,")
+    print("    and it is one more reason MEM_TYPE stays a parameter.")
+    print()
+    print("    ⛔⛔ AND IT CORRECTS PART5's FINDING #1, WHICH I RECORDED AS")
+    print("    *PRIMARY*: 'IHP-Open-PDK has exactly one PDK directory,")
+    print("    ihp-sg13g2. No sg13cmos5l tree.' At the commit this flow PINS")
+    print("    (2bbec75) there IS an ihp-sg13cmos5l tree, plus ihp-common.")
+    print("    ⭐ THE DEFECT WAS IN THE ORIGIN FIELD, NOT THE READING: I wrote")
+    print("    the origin as 'the repo's own top-level listing' WITHOUT A REF.")
+    print("    A listing is a snapshot of a commit, and omitting which one is")
+    print("    what let a primary fact go stale and then false. ⇒ An origin")
+    print("    must name the REF, not just the repo.")
+
+    # ---- 4. placement, from the DEF ------------------------------------
+    print()
+    print("  --- 4. PLACEMENT: settled by a PRIMARY read, not by a matrix ---")
+    print("    ORIGIN: %s" % DEF_REF)
+    print("      die            %.2f x %.2f um" % (DIE_W, DIE_H))
+    print("      PINS           %d, ALL at y = %.3f um, ALL on %s"
+          % (N_PINS_DEF, PIN_Y, PIN_LAYER))
+    print("      pin x span     %.2f .. %.2f um" % (PIN_X_LO, PIN_X_HI))
+    span = PIN_X_HI - PIN_X_LO
+    print("    ⇒ all %d pins sit in the leftmost %.0f um (%.0f%%) of a %.0f um"
+          % (N_PINS_DEF, span, 100.0 * span / DIE_W, DIE_W))
+    print("      die, on the MAX-Y edge. THE IO IS A CORNER CLUSTER, NOT AN")
+    print("      EDGE: max-y, low-x.")
+    print()
+    print("    ⇒ ✅ PLACE THE MACRO DIAGONALLY OPPOSITE: MIN-Y, MAX-X.")
+    print("    ⭐ Which is the ORIGINAL ruling -- 'the edge or corner away from")
+    print("    the pin side' -- not my 'refinement' to top/bottom.")
+    print()
+    print("    ⛔ AND THE PINS ARE ON %s, THE LAYER THE MACRO'S OBS BLOCKS."
+          % PIN_LAYER)
+    print("    Routes leaving those pins START on the one layer the macro is")
+    print("    opaque to. That is an INDEPENDENT reason to keep it far away,")
+    print("    and it does not depend on any crossing count.")
+    print()
+    print("    --- the matrix, kept as a BACKSTOP and scored against the fact ---")
+    print("    ⛔ I inferred the IO side from LEFT/RIGHT_MARGIN_MULT %s vs"
+          % cfg.get("LEFT_MARGIN_MULT"))
+    print("    TOP/BOTTOM %s, concluded left+right, and the matrix therefore"
+          % cfg.get("TOP_MARGIN_MULT"))
+    print("    preferred the TOP edge -- which the DEF shows is the IO EDGE.")
+    print("    %-26s %-22s %s" % ("", "matrix said", "DEF says"))
+    print("    %-26s %-22s %s" % ("IO location", "left + right (inferred)",
+                                  "max-y, low-x (READ)"))
+    print("    %-26s %-22s %s" % ("best placement", "TOP edge",
+                                  "MIN-Y, MAX-X corner"))
+    print("    %-26s %-22s %s" % ("verdict on the matrix", "confident",
+                                  "*** WRONG EDGE ***"))
+    print()
+    print("    ⭐ THE INSTRUMENT WAS THE PROBLEM, NOT THE ANSWER. Scoring every")
+    print("    assumption looks rigorous and cannot say which is TRUE -- it")
+    print("    launders a guess as coverage. One primary read collapsed the")
+    print("    matrix and REVERSED it. ⇒ read the artefact first; keep the")
+    print("    all-assumptions sweep for when no artefact exists.")
+
+    # ---- 5. signal crossing, with the corrected pitch ------------------
+    print()
+    print("  --- 5. SIGNAL crossing, and a pitch I had wrong ---")
     for L in ("Metal2", "Metal3", "Metal4", "TopMetal1"):
         print("      %-10s pitch %.2f um  -> %4d tracks across %.1f um"
               % (L, PITCH[L], tracks_across(MACRO_W, L), MACRO_W))
+    tm1 = tracks_across(MACRO_W, "TopMetal1")
     m234 = sum(tracks_across(MACRO_W, L) for L in ("Metal2", "Metal3",
                                                    "Metal4"))
     print("    ⛔ %d TopMetal1 tracks against %d on M2+M3+M4 -- a %.0fx drop."
           % (tm1, m234, m234 / tm1))
-    print("    Area is NOT the issue (the macro is a few percent of the core);")
-    print("    %d crossings is the ceiling on everything that must get past it."
-          % tm1)
-    print()
-    print("    ⚠ WHICH EDGE CARRIES THE IO IS NOT ESTABLISHED. The margin")
-    print("    settings -- left/right %s against top/bottom %s -- are"
-          % (cfg.get("LEFT_MARGIN_MULT"), cfg.get("TOP_MARGIN_MULT")))
-    print("    CONSISTENT with the IO channel being on the left and right")
-    print("    edges. ⛔ SECONDARY: that is an inference from a margin, not a")
-    print("    pin placement. The primary artefact is the generated DEF's PINS")
-    print("    section, which does not exist yet.")
-    print()
-    print("    ⭐ SO THE DECISION IS MADE INVARIANT TO IT. Every placement is")
-    print("    scored under every IO-edge assumption; a placement is CLEAR if")
-    print("    it sits in no IO-bearing edge's fan-out channel.")
-    print()
-    ASSUMPTIONS = [("left+right (margin-implied)", ("left", "right")),
-                   ("left only", ("left",)),
-                   ("all four edges", ("left", "right", "top", "bottom")),
-                   ("bottom only", ("bottom",))]
-    names = [n for n, _ in candidates(())]
-    print("    %-20s %s" % ("placement", "  ".join("%-14s" % a[:14]
-                                                   for a, _ in ASSUMPTIONS)))
-    score = {n: 0 for n in names}
-    for n in names:
-        row = []
-        for _, edges in ASSUMPTIONS:
-            blocked = [b for nm, b in candidates(edges) if nm == n][0]
-            row.append("CLEAR" if not blocked else "in %s" % "+".join(blocked))
-            score[n] += len(blocked)
-        print("    %-20s %s" % (n, "  ".join("%-14s" % c for c in row)))
-    best = min(score.values())
-    winners = [n for n in names if score[n] == best]
-    print()
-    print("    ⭐ CLEAR UNDER THE MOST ASSUMPTIONS: %s" % ", ".join(winners))
-    print()
-    print("    ⛔ AND THIS REFINES THE RULING. 'The edge OPPOSITE the IO side'")
-    print("    presumes ONE IO side. If IO arrives on both left and right --")
-    print("    which the margin setting suggests -- there is no opposite edge,")
-    print("    and a left or right corner sits IN the fan-out channel. The")
-    print("    placement perpendicular to the flow (TOP or BOTTOM edge) is what")
-    print("    keeps horizontal IO-to-engine routes clear.")
-    print("    ⇒ PLACE AT THE TOP OR BOTTOM EDGE, and pick between them from")
-    print("      the DEF once the first run produces one.")
-    print()
-    print("    ⚠ ONE LEVER IS DELIBERATELY NOT RECOMMENDED: rotating the macro")
-    print("    to R90 cuts intercepted straps from %d to %d. Whether that is"
-          % (hi, hi_r))
-    print("    GOOD or BAD depends on the unknown layer -- fewer straps means")
-    print("    fewer blocked crossings if they are on Metal4, and fewer power")
-    print("    taps if they are on TopMetal1. ⛔ The sign of the effect is")
-    print("    unknown, so no recommendation is made. (Many SRAM macros also")
-    print("    cannot legally rotate; that is a second reason to settle the")
-    print("    layer first.)")
+    for L, (new, src_new, old, src_old) in PITCH_DISPUTED.items():
+        print()
+        print("    ⛔⛔ A CORRECTION, AND THE TWO SOURCES DISAGREE:")
+        print("      %s pitch = %.2f um  <- %s" % (L, new, src_new))
+        print("      %s pitch = %.2f um  <- %s" % (L, old, src_old))
+        print("      I have been quoting %.2f, which gave %d crossing tracks;"
+              % (old, int(MACRO_W / old)))
+        print("      the DEF's own grid gives %d." % tm1)
+        print("      ⭐ The DEF wins for this purpose because it IS the grid the")
+        print("      router uses for OUR tile. ⚠ But a one-digit disagreement")
+        print("      is what a transposition looks like, so re-reading the PDK")
+        print("      tech LEF is OWED, and the conflict is recorded rather than")
+        print("      quietly resolved.")
+        print("      ⛔ Either way the CONCLUSION is unchanged: TopMetal1 is the")
+        print("      only layer crossing the macro and it is ~%.0fx scarcer"
+              % (m234 / tm1))
+        print("      than the layers below, so placement is the mitigation.")
 
-    # ---- 4. the gate itself ---------------------------------------------
+    # ---- 6. the gate itself --------------------------------------------
     print()
-    print("  --- 4. THE GATE: placed + routed + TIMING, not GeneratePDN ---")
-    import glob
+    print("  --- 6. THE GATE ---")
     print("    %-38s %s" % ("artefact", "present"))
     missing = 0
     for pat, what in HARDEN_ARTEFACTS:
@@ -350,26 +384,22 @@ def main() -> int:
     if missing:
         print()
         print("    *** GATE IS RED, AND THIS IS THE CORRECT STATE TODAY.")
-        print("        %d of %d harden artefacts are absent: the run has not"
+        print("        %d of %d harden artefacts absent: the run has not"
               % (missing, len(HARDEN_ARTEFACTS)))
-        print("        happened. ⛔ This gate is an ACCEPTANCE TEST, the fourth")
-        print("        deliberately-red one alongside part1_param_contract.py")
-        print("        and f2_flop_driven_outputs.py face 3. It must NOT be")
-        print("        'fixed' -- it goes green when the harden runs.")
-        print("        ⛔ AND IT WILL NOT ACCEPT A SUCCESSFUL GeneratePDN as a")
-        print("        pass: a PDN that completes and a design that routes AND")
-        print("        MEETS TIMING are three different claims, and")
-        print("        GRT_ALLOW_CONGESTION=%s is why the third is required."
+        print("        happened. ⛔ ACCEPTANCE TEST -- must NOT be 'fixed'.")
+        print("        ⛔ AND IT WILL NOT ACCEPT A SUCCESSFUL GeneratePDN, NOR")
+        print("        A ROUTE THAT COMPLETED: with GRT_ALLOW_CONGESTION=%s,"
               % cong)
+        print("        'routed' means overflow=0 AND DRC clean AND timing met.")
         rc = 1
 
     print()
-    print("  --- fallback order, unchanged and reversible in one direction ---")
-    print("    1. macro at the TOP or BOTTOM edge (per section 3)")
+    print("  --- fallback order, reversible in one direction ---")
+    print("    1. macro at the MIN-Y / MAX-X corner (section 4)")
     print("    2. the FLOP store -- F1's encoding already fits one transaction")
     print("       per protocol into 62 of 64 bytes at the existing AW=6, so")
-    print("       this is the SHIPPED design, not a degradation. SRAM then")
-    print("       survives as a scaling-tier option only.")
+    print("       this is the SHIPPED design, not a degradation. ⭐ And it")
+    print("       sidesteps the cross-PDK macro question in section 3 entirely.")
     print("    ⇒ Part 1 is not betting on the harden, which is why MEM_TYPE is")
     print("      a parameter and the flop path is not deleted when SRAM wins.")
 
@@ -377,7 +407,7 @@ def main() -> int:
     print("=" * 78)
     print("  GATE cmos5l-harden: %s"
           % ("PASSED" if rc == 0 else
-             "RED -- expected until the harden runs; see section 4"))
+             "RED -- expected until the harden runs; see section 6"))
     return rc
 
 
