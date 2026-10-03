@@ -178,8 +178,60 @@ module pe_engine #(
   // so looping reuses an opcode and a field that already existed, and costs
   // only this register.
   reg [AW-1:0]    l_base   [0:N_LANES-1];
-  reg [ACT_W-1:0] l_act    [0:N_LANES-1];
-  reg             l_actv   [0:N_LANES-1];   // prefetch VALID
+
+  // ---------------------------------------------------------------------
+  // ⭐⭐ DOUBLE-BUFFERED ACTION FETCH. Two slots per lane, not one.
+  // ---------------------------------------------------------------------
+  // ⛔ WHY, IN ONE LINE: with a single slot, the slot is invalidated at
+  // writeback and the lane's NEXT dispatch waits for a full refill -- that wait
+  // IS the jitter term J, it measured 5, and the derived bound is 8. The
+  // jitter-sound analysis then showed the design one cycle outside its own
+  // margin bar at J = 8 under our bound (docs/SPEC_V4_J_SOUND.md), so reducing
+  // J stopped being an optimisation.
+  //
+  // ⛔⛔ AND A SINGLE SHARED FETCH PORT CANNOT BE SCHEDULED OUT OF IT. That was
+  // measured, not assumed: kicking a refill at writeback to overlap it with the
+  // lane's own delay took J from 5 to 7, because a busy port makes a DIFFERENT
+  // lane wait. The record is in the writeback block below. Two slots are the
+  // structural answer; a better refill policy is not.
+  //
+  //   l_act[lane][slot]   the action words. `l_sel` picks the HEAD -- the one
+  //                       that dispatches next. The other is the FILL slot.
+  //   l_actv[lane][slot]  per-slot valid
+  //   l_sel[lane]         which slot is the head. Flips at writeback, so the
+  //                       already-fetched successor becomes head with NO refill
+  //                       on the dispatch path.
+  //   l_fpc[lane]         the FETCH pointer, which runs AHEAD of l_pc.
+  //
+  // INVARIANT (checked by the bench, see M-BUF-SWAP): the head slot always
+  // holds the action at `l_pc`, and the fill slot -- when valid -- holds the
+  // action at the address the head's own semantics select next.
+  //
+  // ⛔⛔⛔ THE PRE-REGISTERED DECOMPOSITION MISSED A TERM, AND IT IS RECORDED
+  // RATHER THAN QUIETLY FIXED. `bursty.DOUBLE_BUFFER_PREREG` predicts J = 2 by
+  // zeroing the two refill terms. It did not account for OP_REARM with
+  // level = 1, which jumps `l_pc` to `l_base`: a plain double buffer has
+  // already prefetched `l_pc + ACT_BYTES`, which after a loop is the WRONG
+  // action, so both slots must flush and the next dispatch pays a FULL refill.
+  // A periodic program loops once per iteration, so J would have landed near 7
+  // and the falsifier would have fired -- on an incomplete decomposition, not
+  // on the double buffer.
+  // ⭐ THE REMEDY IS CHEAP BECAUSE THE LOOP TARGET IS ALREADY A REGISTER: the
+  // prefetcher decodes the HEAD slot and, when it is a looping re-arm, fetches
+  // `l_base` instead of `l_fpc`. See `fetch_addr` below. So the loop is
+  // prefetched like any other control flow and never flushes anything.
+  // ⛔ FLAT ARRAYS INDEXED `lane*2 + slot`, NOT `[0:N_LANES-1][0:1]`. A 2-D
+  // UNPACKED array is legal Verilog-2001 and iverilog takes it happily -- and
+  // that is exactly the trap this project already fell into once. The
+  // multi-driver bug passed the local bench and died in Yosys, because a
+  // simulator and a synthesiser do not accept the same language. A flat array
+  // with explicit index arithmetic is accepted by both, so the construct is not
+  // the thing being tested here.
+  localparam integer NSLOT = 2 * N_LANES;
+  reg [ACT_W-1:0] l_act    [0:NSLOT-1];
+  reg             l_actv   [0:NSLOT-1];
+  reg             l_sel    [0:N_LANES-1];   // 0/1: which slot is the HEAD
+  reg [AW-1:0]    l_fpc    [0:N_LANES-1];   // the FETCH pointer, ahead of l_pc
 
   // =====================================================================
   // GLOBAL STATE -- one incrementer, not N_LANES decrementers (Ruling 2)
@@ -305,8 +357,78 @@ module pe_engine #(
   localparam [2:0] P_SCAN = 3'd0, P_REQ = 3'd1, P_WAIT = 3'd2, P_CAP = 3'd3;
   reg [2:0]             pst;
   reg [LW-1:0]          pl;
+  reg                   pslot;        // which slot this refill is filling
+  reg [AW-1:0]          paddr;        // and from which address -- both latched
+                                      // at the scan, see the arbiter comment
 
   integer i;
+
+  // =====================================================================
+  // THE FETCH ADDRESS -- loop-aware, so a looping re-arm never flushes
+  // =====================================================================
+  // ⛔⛔ THE TERM THE PRE-REGISTRATION MISSED. Without this, a plain double
+  // buffer prefetches `l_pc + ACT_BYTES` while the head action is a looping
+  // re-arm whose successor is `l_base`. The prefetched word would be wrong, so
+  // both slots would have to flush at the loop and the next dispatch would pay
+  // a full refill -- once per program iteration, which for a 10-action UART
+  // byte is 1 dispatch in 10 and would have put measured J near 7.
+  //
+  // ⭐ The loop target is ALREADY a per-lane register (`l_base`, added in S3
+  // for Ruling 2), so the whole remedy is to decode the head slot's opcode and
+  // pick the address the head's own semantics imply. No new storage.
+  //
+  // THREE CASES, which are exactly the three PC behaviours in the writeback:
+  //   head is a looping re-arm  (OP_REARM, level 1) -> successor is l_base
+  //   head is a chaining re-arm (OP_REARM, level 0) -> PC does NOT advance, so
+  //                                the successor IS the head: nothing to fetch
+  //   anything else                                 -> l_fpc, the running
+  //                                successor pointer
+  // ⛔ The `head valid` guard matters: with an INVALID head there is no opcode
+  // to decode, and the slot being filled is the head itself, at `l_pc`.
+  function [AW-1:0] fetch_addr(input [LW-1:0] ln);
+    reg [ACT_W-1:0] hact;
+    reg             hvalid;
+    begin
+      hvalid = l_actv[ln*2 + (l_sel[ln] ? 1 : 0)];
+      hact   = l_act [ln*2 + (l_sel[ln] ? 1 : 0)];
+      if (!hvalid)
+        fetch_addr = l_pc[ln];                       // filling the head itself
+      else if (hact[ACT_W-1 -: 3] == OP_REARM && hact[ACT_W-4-PINW])
+        fetch_addr = l_base[ln];                     // the loop, prefetched
+      else
+        fetch_addr = l_fpc[ln];
+    end
+  endfunction
+
+  // Is there anything worth fetching for this lane?
+  // ⛔⛔ A CHAINING RE-ARM IS NOT PREFETCHED PAST -- AND THE REASON IS CHEAPER
+  // THAN THE ONE THIS COMMENT FIRST GAVE. It claimed that flipping on a
+  // chaining re-arm would "dispatch the WRONG action", i.e. a correctness
+  // break. ⛔ THAT WAS WRONG, and the mutant is what showed it: with
+  // `M_BUF_CHAINFLIP` the flip makes an unfilled slot the head, `fetch_addr`
+  // sees an invalid head and reloads it from `l_pc` -- which, because a
+  // chaining re-arm does NOT advance the PC, is the SAME action. Behaviour is
+  // correct, the buffer-swap invariant holds, and the pins are right.
+  // ⇒ The asymmetry is a PERFORMANCE choice: it avoids one needless refill per
+  //   park dispatch. Recorded as such rather than left overstated, because a
+  //   comment that calls an optimisation a correctness requirement is how a
+  //   later simplification gets rejected for a reason that is not true.
+  function want_fetch(input [LW-1:0] ln);
+    reg [ACT_W-1:0] hact;
+    reg             hvalid, fvalid;
+    begin
+      hvalid = l_actv[ln*2 + (l_sel[ln] ? 1 : 0)];
+      fvalid = l_actv[ln*2 + (l_sel[ln] ? 0 : 1)];
+      hact   = l_act [ln*2 + (l_sel[ln] ? 1 : 0)];
+      if (!hvalid)
+        want_fetch = 1'b1;                           // head is empty: urgent
+      else if (hact[ACT_W-1 -: 3] == OP_REARM && !hact[ACT_W-4-PINW])
+        want_fetch = 1'b0;                           // chaining: successor is
+                                                     // the head; spare unused
+      else
+        want_fetch = !fvalid;                        // fill the spare
+    end
+  endfunction
 
   // ---- the one arbiter for the shared store read port ----------------
   // ⭐ Header load has priority, then prefetch. The engine's own dispatch does
@@ -337,7 +459,13 @@ module pe_engine #(
       s_wre <= 1'b0;
       if (pst == P_REQ) begin
         s_wre    <= 1'b1;
-        s_wraddr <= l_pc[pl];
+        // ⛔ `paddr` IS LATCHED AT THE SCAN, NOT RECOMPUTED HERE. `fetch_addr`
+        // reads l_pc / l_sel / l_actv, and a writeback in the intervening cycle
+        // moves all three -- so recomputing at P_REQ could request one address
+        // while P_CAP files the word into the slot chosen for a different one.
+        // Latching the (lane, slot, address) triple together is what keeps the
+        // refill atomic with respect to the dispatch pipeline.
+        s_wraddr <= paddr;
       end
     end
   end
@@ -382,8 +510,16 @@ module pe_engine #(
         l_live[i]   <= 1'b0;
         l_pc[i]     <= {AW{1'b0}};
         l_base[i]   <= {AW{1'b0}};
-        l_act[i]    <= {ACT_W{1'b0}};
-        l_actv[i]   <= 1'b0;
+        l_fpc[i]    <= {AW{1'b0}};
+        l_sel[i]    <= 1'b0;
+      end
+      // ⛔ A SEPARATE LOOP, because the slot arrays are 2*N_LANES long and
+      // reusing the lane loop would leave the odd slots unreset -- X on the
+      // valid bit of every spare, which in simulation reads as "maybe valid"
+      // and in synthesis as a don't-care the tools may resolve either way.
+      for (i = 0; i < NSLOT; i = i + 1) begin
+        l_act[i]  <= {ACT_W{1'b0}};
+        l_actv[i] <= 1'b0;
       end
     end else if (!run) begin
       // HALT, RELOAD, RESUME -- an explicit scope choice, never a mid
@@ -395,9 +531,11 @@ module pe_engine #(
       rx_push  <= 1'b0;
       for (i = 0; i < N_LANES; i = i + 1) begin
         l_live[i] <= 1'b0;
-        l_actv[i] <= 1'b0;
         l_pc[i]   <= {AW{1'b0}};
+        l_fpc[i]  <= {AW{1'b0}};
+        l_sel[i]  <= 1'b0;
       end
+      for (i = 0; i < NSLOT; i = i + 1) l_actv[i] <= 1'b0;
     end else begin
       rx_push <= 1'b0;
 
@@ -429,6 +567,11 @@ module pe_engine #(
                     l_d[hl]      <= hsh_n[HDR_BYTES*8-2-2*PINW-DLY_W-CW -: D_W];
                     l_pc[hl]     <= hsh_n[HDR_BYTES*8-2-2*PINW-DLY_W-CW-D_W-D_W -: AW];
                     l_base[hl]   <= hsh_n[HDR_BYTES*8-2-2*PINW-DLY_W-CW-D_W-D_W -: AW];
+                    // ⭐ the fetch pointer starts WITH the PC, not ahead of it:
+                    // both slots are empty, so the first refill targets the
+                    // head at `l_pc` and `fetch_addr` reads `l_pc` directly.
+                    // `l_fpc` then takes over from P_CAP onward.
+                    l_fpc[hl]    <= hsh_n[HDR_BYTES*8-2-2*PINW-DLY_W-CW-D_W-D_W -: AW];
                     l_live[hl]   <= 1'b1;
                     hb <= 4'd0;
                     if (hl == N_LANES-1) begin
@@ -454,10 +597,21 @@ module pe_engine #(
             // ⭐ THE EDF WINNER IS SERVED FIRST. A round-robin refill makes the
             // jitter above depend on scan position rather than on the schedule,
             // which is how a prefetch policy silently becomes the scheduler.
-            if (winner_v && !l_actv[winner]) begin
-              pl <= winner; pst <= P_REQ;
-            end else if (l_live[pl] && !l_actv[pl]) begin
-              pst <= P_REQ;
+            // ⭐ WITH TWO SLOTS THE PRIORITY IS SHARPER, not just inherited: an
+            // EMPTY HEAD on the EDF winner is the only case that can still
+            // stall a dispatch, so it is served first; filling a SPARE is
+            // speculative work that can wait. `want_fetch` folds both.
+            if (winner_v && !l_actv[winner*2 + (l_sel[winner] ? 1 : 0)]) begin
+              pl    <= winner;
+              pslot <= l_sel[winner];        // the head: it is what stalls
+              paddr <= l_pc[winner];
+              pst   <= P_REQ;
+            end else if (l_live[pl] && want_fetch(pl)) begin
+              // fill the head if empty, otherwise the spare
+              pslot <= l_actv[pl*2 + (l_sel[pl] ? 1 : 0)] ? (!l_sel[pl])
+                                                          : l_sel[pl];
+              paddr <= fetch_addr(pl);
+              pst   <= P_REQ;
             end else begin
               pl <= (pl == N_LANES-1) ? {LW{1'b0}} : pl + 1'b1;
             end
@@ -466,10 +620,15 @@ module pe_engine #(
           P_WAIT: pst <= P_CAP;          // store read registered
           P_CAP:  begin
             // MSB-aligned: byte0 = {opcode, pin, level}, 2 spare at the bottom
-            l_act[pl]  <= s_wrdata[ACT_BYTES*8-1 -: ACT_W];
-            l_actv[pl] <= 1'b1;
-            pst        <= P_SCAN;
-            pl         <= (pl == N_LANES-1) ? {LW{1'b0}} : pl + 1'b1;
+            l_act [pl*2 + (pslot ? 1 : 0)] <= s_wrdata[ACT_BYTES*8-1 -: ACT_W];
+            l_actv[pl*2 + (pslot ? 1 : 0)] <= 1'b1;
+            // ⭐ THE SUCCESSOR POINTER ADVANCES FROM THE ADDRESS JUST FETCHED,
+            // which is what makes the loop case need no special handling here:
+            // after a `l_base` fetch, `l_fpc` becomes `l_base + ACT_BYTES`,
+            // exactly the successor of the action now resident.
+            l_fpc[pl] <= paddr + ACT_BYTES[AW-1:0];
+            pst       <= P_SCAN;
+            pl        <= (pl == N_LANES-1) ? {LW{1'b0}} : pl + 1'b1;
           end
           default: pst <= P_SCAN;
         endcase
@@ -478,9 +637,12 @@ module pe_engine #(
       // ---------------- dispatch, C = 2 ------------------------------
       case (st)
         ST_IDLE: if (hdr_done && winner_v) begin
-                   if (l_actv[winner]) begin
+                   // ⭐ dispatch reads the HEAD slot. With the spare already
+                   // filled, the usual case after a writeback is that the head
+                   // is valid IMMEDIATELY -- which is the whole J reduction.
+                   if (l_actv[winner*2 + (l_sel[winner] ? 1 : 0)]) begin
                      cur     <= winner;
-                     cur_act <= l_act[winner];
+                     cur_act <= l_act[winner*2 + (l_sel[winner] ? 1 : 0)];
                      st      <= ST_DRIVE;
                    end else begin
                      // ⭐⭐ THIS STALL IS THE JITTER TERM J. The EDF winner is
@@ -557,13 +719,60 @@ module pe_engine #(
           // ⭐ A no-op re-arm does NOT advance the PC: that is what makes a
           //   chained re-arm re-execute the same action at a later timestamp,
           //   which is Ruling 2's mechanism for long delays.
+          // ⭐⭐ THE SWAP. The head is consumed, so it is invalidated AND
+          // `l_sel` flips: the spare -- already holding this action's successor
+          // -- becomes the head, and the next dispatch of this lane finds a
+          // valid head with NO refill on its path. The freed slot becomes the
+          // new spare and the prefetcher refills it in the background.
+          // ⛔ BOTH PC-ADVANCING BRANCHES SWAP, and a CHAINING re-arm swaps
+          // NEITHER: its PC does not move, so its successor IS the head, and
+          // flipping would dispatch the spare's unrelated word. That asymmetry
+          // is the buffer-swap invariant, and M-BUF-SWAP mutates it.
+          // ⛔⛔ THE THREE MUTANTS ARE WIRED HERE, not described in a comment.
+          // `M-PREFETCH-STALE` was NAMED in this file for the single-buffer
+          // design and never mechanically runnable -- so it was a mutant nobody
+          // had ever seen kill anything. `test/run_mutants.py` builds each of
+          // these and REQUIRES the bench to fail; a mutant that survives means
+          // the bench does not test the thing the mutant breaks.
+          //   M_BUF_NOINVAL   swap without invalidating -> after two
+          //                   writebacks the lane dispatches the CONSUMED
+          //                   action again. Correctness; the invariant catches it.
+          //   M_BUF_SWAP      invalidate without swapping -> correct action,
+          //                   but every dispatch pays a full refill. The J
+          //                   split catches it, which is the point: it proves
+          //                   the SWAP is what buys the J reduction.
+          //   M_BUF_CHAINFLIP swap on a CHAINING re-arm too. ⛔ A CHARACTERISED
+          //                   SURVIVOR, not a kill: it takes effect (the sel
+          //                   flip count changes) but costs only one needless
+          //                   refill per park dispatch, which no program the
+          //                   bench can build makes visible in the worst-case
+          //                   stall. So the chaining asymmetry is correct by
+          //                   DERIVATION and unevidenced by TEST, and that is
+          //                   recorded rather than papered over with a
+          //                   program contrived to kill it.
           if (a_op != OP_REARM) begin
             l_pc[cur]   <= l_pc[cur] + ACT_BYTES[AW-1:0];
-            l_actv[cur] <= 1'b0;                // ⛔ THE INVALIDATION
+`ifndef M_BUF_NOINVAL
+            l_actv[cur*2 + (l_sel[cur] ? 1 : 0)] <= 1'b0;   // ⛔ INVALIDATION
+`endif
+`ifndef M_BUF_SWAP
+            l_sel[cur]  <= !l_sel[cur];                     // ⭐ THE SWAP
+`endif
           end else if (a_lvl) begin
             l_pc[cur]   <= l_base[cur];         // loop back to the start
-            l_actv[cur] <= 1'b0;                // ⛔ and invalidate, same reason
+`ifndef M_BUF_NOINVAL
+            l_actv[cur*2 + (l_sel[cur] ? 1 : 0)] <= 1'b0;
+`endif
+`ifndef M_BUF_SWAP
+            l_sel[cur]  <= !l_sel[cur];
+`endif
           end
+`ifdef M_BUF_CHAINFLIP
+          else begin
+            // the chaining re-arm: PC unchanged, so swapping is wrong
+            l_sel[cur] <= !l_sel[cur];
+          end
+`endif
 
           // ⛔⛔ A "CHEAP WIN" THAT MADE IT WORSE, KEPT AS A RECORD.
           // The J decomposition said the dominant terms were the prefetch

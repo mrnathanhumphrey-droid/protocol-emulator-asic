@@ -86,6 +86,65 @@ J_SOURCES = [
      "If that gate were removed this term would become N_LANES*HDR_BYTES*3", True),
 ]
 
+# =========================================================================
+# ⛔⛔⛔ THE DOUBLE BUFFER LANDED, AND ITS PRE-REGISTERED FALSIFIER FIRED.
+# =========================================================================
+# `bursty.DOUBLE_BUFFER_PREREG` predicted J_pipe = 2 after double buffering, by
+# taking the two refill terms above to ZERO. MEASURED: the worst-case
+# steady-state prefetch stall is 6, so J = 6 + 1 (winner registration) = 7.
+# ⛔ 7 > 2. THE FALSIFIER HAS FIRED. Reported, not re-argued -- the
+# pre-registration says so in as many words.
+#
+# WHY THE DECOMPOSITION WAS WRONG, which is the useful part:
+#   The two refill terms do NOT go to zero, because ONE SHARED FETCH PORT still
+#   serves every lane. Double buffering converts a per-dispatch LATENCY into a
+#   QUEUEING delay: each lane gets a whole extra action period of slack, but
+#   when several lanes demand refills inside one window the queue delay
+#   survives. ⭐ THIS IS THE SAME STRUCTURAL FACT THAT KILLED THE "CHEAP WIN"
+#   (refill-at-writeback took J from 5 to 7): with one port, J is bounded by
+#   port THROUGHPUT, and no buffering or scheduling policy changes throughput.
+#
+# WHAT IT DID BUY, measured the same way for both designs:
+#   worst-case steady-state stall over d in [2,30], five active lanes:
+#       single buffer (M_BUF_SWAP)  10   -> J = 11
+#       double buffer                6   -> J =  7
+#   so J 11 -> 7, which on gate_j_sound's sweep is min margin 1 (FAIL) -> 4
+#   (PASS, exactly) under our own bound, and 5 -> 6 under pyRTA's.
+#
+# ⛔⛔ AND THE MEASUREMENT THAT MATTERS MOST IS A NEGATIVE ONE. At the SHIPPED
+# inner action spacings (25, 45, 434, 414, 25 cycles) with all five lanes
+# active, the steady-state stall is ZERO -- for the double buffer AND for the
+# single buffer. The shipped program never occupies the regime where buffering
+# matters. ⇒ The entire measured `J = 5` this project has been quoting since S3
+# is a COLD START: each lane's first action after `hdr_done`, once per run.
+# It was never a steady-state property of the shipped lane set.
+#   cold-start stall, default program:  single 9  ->  double 5
+# ⚠ WHETHER THE COLD START BELONGS IN THE PUBLISHED J IS WILSON'S TO RULE.
+#   Spuri's RTA bounds EVERY job, including the first, so on the letter of the
+#   analysis it does. The counter-argument is that a uniform offset on each
+#   lane's FIRST action, before the protocol has begun, is a start-up latency
+#   and not inter-action jitter -- and the host controls when the program
+#   starts. That is a modelling claim, so it is stated and not assumed.
+J_PIPE_MEASURED_DOUBLE = 7      # 6 stall + 1 winner registration
+J_PIPE_MEASURED_SINGLE = 11     # 10 stall + 1
+J_PIPE_PREREGISTERED = 2
+DOUBLE_BUFFER_COST = {
+    # Yosys 0.52, plain Verilog, `synth -flatten`, generic cells.
+    # ⛔ THE PRE-REGISTERED ESTIMATE WAS ~110 AND IT WAS LOW BY 54%. It counted
+    # the second action word (N_LANES * ACT_W = 110) and missed every piece of
+    # bookkeeping the second slot needs: l_fpc (5*AW = 40), l_sel (5), the
+    # refill's latched slot and address (1 + 8). A flop estimate that counts the
+    # DATA and forgets the POINTERS is the same error as sizing a store by its
+    # payload and forgetting the program.
+    # measured by test/yosys_check.sh on both trees, same script, same passes
+    "flops_before": 2685,
+    "flops_after": 2854,
+    "flops_delta": 169,
+    "preregistered_estimate": 110,
+    "generic_cells_before": 14370,
+    "generic_cells_after": 15611,
+}
+
 
 def read_measured():
     if not os.path.isfile(MEAS):
@@ -100,8 +159,28 @@ def read_measured():
         if p[0] == "op":
             d["ops"][int(p[1])] = {"n": int(p[3]), "min": int(p[5]),
                                    "max": int(p[7])}
+        elif p[0] == "image":
+            d["image"] = p[1]
         else:
             d[p[0]] = int(p[1])
+    # ⛔⛔ WHICH PROGRAM PRODUCED THESE NUMBERS? The bench now takes an IMAGE
+    # argument and still writes ONE constant path, which is the clobber hazard
+    # this project has a standing rule about -- and it bit immediately: a
+    # refill-stress run overwrote the default program's measurements and this
+    # gate reported `sim 7` for a program it was not measuring, while looking
+    # perfectly green. The provenance is now IN the file and asserted here, so
+    # the failure mode is a RED gate instead of a wrong number.
+    want = "test/smoke_image.hex"
+    got = d.get("image")
+    if got is None:
+        return None, ("%s carries no `image` line, so which program produced "
+                      "these numbers is unknown. Re-run the smoke bench." % MEAS)
+    if got != want:
+        return None, ("%s was written by `%s`, not the default program `%s`. "
+                      "The stress and chain images exist to exercise the refill "
+                      "path and their C/J figures are NOT the shipped ones. "
+                      "Re-run: python test/make_smoke_image.py && vvp ... "
+                      "(no +IMG)" % (MEAS, got, want))
     return d, None
 
 
@@ -192,6 +271,48 @@ def main() -> int:
     print()
     print("    ⇒ ⭐ J_max = %d for A2, = the derived total." % j_total)
 
+    # ---- the double buffer, and its falsifier --------------------------
+    print()
+    print("  --- ⛔ THE DOUBLE BUFFER: PRE-REGISTERED 2, MEASURED %d ---"
+          % J_PIPE_MEASURED_DOUBLE)
+    print("    pre-registered prediction        : %d" % J_PIPE_PREREGISTERED)
+    print("    measured, double buffer          : %d  (6 stall + 1 winner reg)"
+          % J_PIPE_MEASURED_DOUBLE)
+    print("    measured, single buffer          : %d  (10 stall + 1)"
+          % J_PIPE_MEASURED_SINGLE)
+    fired = J_PIPE_MEASURED_DOUBLE > J_PIPE_PREREGISTERED
+    print("    falsifier 'derived > 2'          : %s"
+          % ("*** FIRED ***" if fired else "did not fire"))
+    if fired:
+        print("      ⛔ Reported, NOT re-argued. The two refill terms do not go")
+        print("         to zero because ONE SHARED PORT still serves every lane:")
+        print("         double buffering turns a per-dispatch LATENCY into a")
+        print("         QUEUEING delay, and queueing survives. Same structural")
+        print("         fact that made the refill-at-writeback 'cheap win' worse.")
+        print("      ⭐ It still bought J %d -> %d, which on gate_j_sound's sweep"
+              % (J_PIPE_MEASURED_SINGLE, J_PIPE_MEASURED_DOUBLE))
+        print("         is min margin 1 (FAIL) -> 4 (PASS, exactly) on our bound.")
+    print()
+    print("    ⛔⛔ AND THE NEGATIVE RESULT, which outranks both: at the SHIPPED")
+    print("    inner spacings (25,45,434,414,25) with all five lanes active the")
+    print("    steady-state stall is ZERO -- for the double buffer AND the")
+    print("    single one. The shipped program never enters the regime where")
+    print("    buffering matters, so the `J = 5` quoted since S3 is entirely a")
+    print("    COLD START (single 9 -> double 5), not a steady-state property.")
+    print("    ⚠ Whether the cold start belongs in the published J is Wilson's")
+    print("    to rule: Spuri bounds every job including the first, while a")
+    print("    uniform offset on each lane's FIRST action is arguably start-up")
+    print("    latency rather than inter-action jitter. Stated, not assumed.")
+    print()
+    print("    cost: %d flops (%d -> %d), vs a pre-registered estimate of %d."
+          % (DOUBLE_BUFFER_COST["flops_delta"],
+             DOUBLE_BUFFER_COST["flops_before"],
+             DOUBLE_BUFFER_COST["flops_after"],
+             DOUBLE_BUFFER_COST["preregistered_estimate"]))
+    print("    ⛔ the estimate was low by 54%: it counted the second action word")
+    print("    and forgot the pointers the second slot needs (l_fpc, l_sel, the")
+    print("    latched refill slot and address).")
+
     # ---- the optimisation that failed, recorded -------------------------
     print()
     print("  --- ⛔ THE DOMINANT TERM, AND AN ATTEMPT THAT MADE IT WORSE ---")
@@ -211,8 +332,18 @@ def main() -> int:
     print("      BUFFERING -- hold current AND next, about %d more flops -- so a"
           % (22 * len(lane_digest.shipped())))
     print("      dispatch never waits on a fetch at all.")
-    print("    ⭐ Margin at the derived J still clears the bar, so (b) is")
-    print("      OPTIMISATION, NOT RESCUE. Wilson's call, with numbers below.")
+    # ⛔⛔ RETRACTED. This used to print "margin at the derived J still clears
+    # the bar, so (b) is OPTIMISATION, NOT RESCUE". Both halves are now false.
+    # The margin table below was computed with the UNSOUND interference term
+    # (jitter absent from the interference a jittery lane imposes on others);
+    # with the term restored, J = 8 gives min margin 1 on our bound and FAILS
+    # the >= 4 bar. And the flop estimate said "about 110"; measured 169.
+    print("    ⛔ RETRACTED: this line used to read 'margin at the derived J")
+    print("      still clears the bar, so (b) is OPTIMISATION, NOT RESCUE'.")
+    print("      Both halves were wrong. The table below is a J = 0-interference")
+    print("      computation; gate_j_sound.py carries the sound one, where")
+    print("      J = 8 is min margin 1 and FAILS the bar. And the double buffer")
+    print("      cost 169 flops, not 'about 110'.")
 
     # ---- what the baseline becomes --------------------------------------
     print()

@@ -1,5 +1,11 @@
+image test/smoke_image.hex
 jobs 354
 svc_cycles 708
 jmiss_max 5
+jmiss_cold 5
+jmiss_steady 0
+steady_stall_events 0
+cycles 4000
+hdr_cyc 92
 op 0 n 220 min 2 max 2
 op 7 n 133 min 2 max 2
