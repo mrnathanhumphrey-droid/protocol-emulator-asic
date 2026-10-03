@@ -40,6 +40,15 @@ jobs:
   viewer:
     needs: gds
     runs-on: ubuntu-24.04
+    # The repo is PRIVATE until submission and GitHub Pages is therefore not
+    # enabled, so this job always fails with
+    #   "Failed to create deployment (status: 404) ... Ensure GitHub Pages has
+    #    been enabled"
+    # It is kept (it works once Pages is on at submission) but made
+    # non-blocking, because a PERMANENTLY RED JOB TRAINS YOU TO IGNORE CI -- and
+    # the gds/precheck/gl_test results now matter, since real RTL has landed.
+    # A standing red X is exactly where a genuine failure hides.
+    continue-on-error: true
     permissions:
       pages: write # to deploy to Pages
       id-token: write # to verify the deployment originates from an appropriate source

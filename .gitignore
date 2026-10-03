@@ -34,3 +34,6 @@ model/ta02/*.stdout
 model/a2/zone/*.tck
 model/a2/*.bin
 model/a2/wave_jit_*.bin
+
+# iverilog/vvp build artefacts from the smoke bench
+*.vvp
