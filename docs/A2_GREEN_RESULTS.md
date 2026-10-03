@@ -1,5 +1,30 @@
 # A2-GREEN — Parts 1, 2, 3 closed. Part 4 outstanding.
 
+> ## ⛔⛔ SUPERSEDED NUMBERS — read `PHASE1_CLOSEOUT.md` for the shipped table
+>
+> **Every `r_i` and every margin below is stale.** The *method* in this file
+> stands and is not retracted; four deadlines have moved since it was written,
+> and three of them reordered the EDF priorities, so the response times no
+> longer match the lane set they were computed on:
+>
+> | spec | lane | `D_tol` | why |
+> |---|---|---|---|
+> | 1.1 | SPI-tx | 12 → **23** | derived from the MB85RS64V AC table |
+> | N1 | I²C | 30 → **15** | derived from UM10204 Table 11, asymmetric 80/45 split |
+> | H3 | UART-rx | 216 → **213** | REACTIVE-anchor: the sample grid lags by `L_sync` |
+> | R1 | SPI-target | 12 → **18** | derived from the absolute budget — **the last stand-in** |
+>
+> Shipped `r_i` is now **`{10, 7, 3, 9, 5}`** on `{UART-tx, SPI-tx, I²C, UART-rx,
+> SPI-target}`, minimum admissibility margin **14**, reproduced by pyRTA 5/5.
+>
+> ⛔ Two further reading corrections apply to the tables below:
+> * the `margin` column is `D_i − r_i`; the margin that **decides** is
+>   `D_tol − (r_i − C_i)`, which is larger by `C_i`. Both numbers were quoted
+>   as "the minimum margin" in the same arc (9 and 11, same run).
+> * `D_i` here is both the tolerance and the EDF key. Spec R2 split them:
+>   `D_tol` is the requirement, `D_sched` is the design choice, and the key the
+>   recurrence schedules on is `D_sched + C_i`.
+
 Answers A2-GREEN. **Supersedes the `r_i` values in `A2_CLOSE_RESULTS.md`** —
 every response time there was computed with an over-counted interference sum and
 a spurious `+1`, and two further bugs were found on the way. `D_i` (Part A) is

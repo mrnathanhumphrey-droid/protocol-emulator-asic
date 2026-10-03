@@ -45,15 +45,82 @@ except Exception:
 
 
 class BLane:
-    """A lane with a bursty arrival curve. n = 1 is an ordinary periodic lane."""
+    """A lane with a bursty arrival curve. n = 1 is an ordinary periodic lane.
 
-    def __init__(self, name, T, C, D, n=1, t=None, J=0, note=""):
-        self.name, self.T, self.C, self.D, self.n = name, T, C, D, n
+    ⛔⛔ SPEC R2 -- THE SCHEDULING DEADLINE AND THE TOLERANCE ARE TWO OBJECTS,
+    AND THIS PROJECT TREATED THEM AS ONE UNTIL A TOLERANCE CORRECTION RESHUFFLED
+    THE SCHEDULE BY ACCIDENT. Deriving `D_SPI-master = 23` (1.1, from the FRAM
+    AC table) was a change to a TOLERANCE, but because the same field was also
+    the EDF key it silently re-ordered the priorities of all five lanes and moved
+    every `r_i`. The result happened to improve, which is exactly why it needed
+    separating: the next correction has no such guarantee.
+
+        D_tol    the lane's real jitter tolerance, in START-DELAY terms.
+                 Admissibility only:   (r_i - C_i) <= D_tol.
+                 An INPUT -- derived from a datasheet or a protocol table.
+        D_sched  the EDF key, also in start-delay terms. A DESIGN CHOICE: any
+                 assignment with D_sched <= D_tol is sound, because the schedule
+                 then enforces something at least as strong as the requirement.
+                 Defaults to D_tol. Not optimised anywhere in Part 1.
+        D        the ABSOLUTE deadline the recurrence schedules on, = D_sched +
+                 C_i. The recurrence compares completion times, the tolerances
+                 bound start delays, and `+C_i` is the conversion.
+
+    ⭐ `assert D_sched <= D_tol` is the soundness condition and it is checked in
+    the constructor, not at a call site: scheduling to a deadline LOOSER than the
+    tolerance would let a lane meet its EDF deadline while missing its real one,
+    and no downstream gate looks at both fields at once.
+
+    LEGACY CALLERS. `BLane(name, T, C, D)` still means "D is the absolute
+    scheduling deadline", and `D_tol` then defaults to `D - C` so that
+    `(r - C) <= D_tol` is EXACTLY `r <= D`. Every constructed instance in every
+    existing gate therefore keeps its verdict bit-for-bit; only the real lane
+    table, which passes `D_tol=` explicitly, moves.
+    """
+
+    def __init__(self, name, T, C, D=None, n=1, t=None, J=0, note="",
+                 D_tol=None, D_sched=None):
+        self.name, self.T, self.C, self.n = name, T, C, n
         self.t = t if t is not None else T
         self.J, self.note = J, note
+        if D is None and D_tol is None:
+            raise ValueError("%s: give either D (absolute) or D_tol (start-delay)"
+                             % name)
+        if D_tol is None:
+            # legacy shape: D is the absolute deadline; the tolerance it implies
+            # is D - C, which makes (r-C) <= D_tol identical to r <= D.
+            self.D_tol = D - C
+            self.D_sched = D_sched if D_sched is not None else self.D_tol
+            self.D = D
+        else:
+            self.D_tol = D_tol
+            self.D_sched = D_sched if D_sched is not None else D_tol
+            self.D = self.D_sched + C
+            if D is not None and D != self.D:
+                raise ValueError(
+                    "%s: D=%d contradicts D_sched+C=%d. Pass one or the other."
+                    % (name, D, self.D))
+        if self.D_sched > self.D_tol:
+            raise AssertionError(
+                "%s: D_sched=%d > D_tol=%d. Scheduling to a deadline LOOSER than "
+                "the tolerance is unsound -- the lane could meet its EDF deadline "
+                "and still miss its real one. Any D_sched <= D_tol is sound; "
+                "equality is the default." % (name, self.D_sched, self.D_tol))
         if n > 1 and self.n * self.t > self.T:
             raise ValueError("%s: burst does not fit its period (n*t=%d > T=%d)"
                              % (name, self.n * self.t, self.T))
+
+    def margin(self, r: int) -> int:
+        """The ADMISSIBILITY margin: D_tol - (r - C). The one that decides.
+
+        ⛔ Not `D - r`. That is the recurrence's own slack against the EDF key,
+        and with D_sched = D_tol the two differ by exactly C_i -- which is how
+        `D - r` came to be printed in the lane-table column while the minimum
+        margin quoted in prose was computed the other way. Same five lanes, two
+        different "minimum margin" figures (9 and 11), both derived from the same
+        run. One function now, so they cannot drift again.
+        """
+        return self.D_tol - (r - self.C)
 
     def N(self, delta: int) -> int:
         """Events arriving in the closed interval [0, delta]. 0 for delta < 0."""
@@ -80,8 +147,9 @@ class BLane:
         return self.n * self.C / self.T
 
     def __repr__(self):
-        return "%s(T=%d,C=%d,D=%d,n=%d,t=%d)" % (
-            self.name, self.T, self.C, self.D, self.n, self.t)
+        return "%s(T=%d,C=%d,D_tol=%d,D_sched=%d,D=%d,n=%d,t=%d)" % (
+            self.name, self.T, self.C, self.D_tol, self.D_sched, self.D,
+            self.n, self.t)
 
 
 # ============================================================================
@@ -154,8 +222,15 @@ def response_time_b(lane: BLane, lanes: list, horizon: int | None = None) -> dic
             return {"lane": lane.name, "diverged": True, "r": None}
         r = L + lane.C + lane.J - a
         if best is None or r > best["r"]:
+            # ⛔ R2: two verdicts, not one. `sched_ok` is the EDF deadline being
+            # met; `feasible` is ADMISSIBILITY, the start delay fitting the real
+            # tolerance. They coincide only while D_sched == D_tol, and the one
+            # that decides whether the chip works is `feasible`.
             best = {"lane": lane.name, "r": r, "a": a, "L": L, "B": B,
-                    "blockers": who, "D": lane.D, "feasible": r <= lane.D,
+                    "blockers": who, "D": lane.D, "D_tol": lane.D_tol,
+                    "D_sched": lane.D_sched, "margin": lane.margin(r),
+                    "sched_ok": r <= lane.D,
+                    "feasible": (r - lane.C) <= lane.D_tol,
                     "diverged": False}
     best["n_cands"] = len(cands)
     best["L_busy"] = L_busy
@@ -205,6 +280,79 @@ def assert_reduces_to_periodic(verbose: bool = True) -> bool:
     return not bad
 
 
+def assert_r2_order_neutral(verbose: bool = True) -> bool:
+    """SPEC R2 -- THE RESTRUCTURE MUST BE INERT BEFORE ANY DEADLINE MOVES.
+
+    ⛔⛔ R2 and R1 landed in the same edit, and that is the shape in which a
+    structural change hides a numerical one. If the D_sched/D_tol split were to
+    shift any r_i by itself, then R1's reorder could not be attributed to the
+    derived deadline -- and R1's falsifier ("if it reorders and drops a margin,
+    report it") would be unreadable, because we could not tell which change did
+    it. So the split is required to be a no-op first, on the OLD numbers.
+
+    TWO CHECKS, because one of them is the reason and the other is the fact:
+
+    (a) THE REASON -- a uniform shift of every key by the same k cannot move any
+        r_i. The recurrence touches deadlines only through DIFFERENCES: the
+        eligibility term is `floor((a + J + D_i - D_j)/T_j) + 1` and the blocking
+        filter is `D_j > a + D_i`. Add k to both D_i and D_j and neither moves.
+        With C uniform at 2, `key = D_tol + C` IS a uniform shift. Checked on
+        constructed sets at several k, because "the algebra says so" is how the
+        `a == T-1` period bug survived.
+
+    (b) THE FACT -- the real five-lane table at its PRE-R1 deadlines, under both
+        conventions, lane by lane. This is the one that would catch a mistake in
+        the constructor rather than in the algebra.
+    """
+    bad = []
+    # ---- (a) uniform shift invariance -----------------------------------
+    sets = [[("P", 100, 2, 40), ("Q", 37, 2, 15), ("R", 61, 2, 25)],
+            [("P", 10, 2, 4), ("Q", 7, 2, 3), ("R", 7, 2, 3)],
+            [("P", 434, 2, 216), ("Q", 25, 2, 12), ("R", 45, 2, 15),
+             ("S", 400, 2, 12)]]
+    for spec in sets:
+        base = [BLane(n, T, C, D) for n, T, C, D in spec]
+        r0 = [response_time_b(l, base)["r"] for l in base]
+        for k in (1, 2, 5, 97):
+            sh = [BLane(n, T, C, D + k) for n, T, C, D in spec]
+            r1 = [response_time_b(l, sh)["r"] for l in sh]
+            if r0 != r1:
+                bad.append(("uniform shift k=%d" % k, r0, r1))
+    # ---- (b) the real table, both conventions ---------------------------
+    #   PRE-R1/H3 deadlines, as shipped at e586ad4.
+    old = [("UART-tx 115200", 434, 2, 216, 1, 434),
+           ("SPI-tx 1 MHz", 25, 2, 23, 1, 25),
+           ("I2C 400 kHz", 45, 2, 15, 1, 45),
+           ("UART-rx 115200", 4140, 2, 216, 10, 414),
+           ("SPI-target 1 MHz", 400, 2, 12, 16, 25)]
+    pre = [BLane(nm, T, C, D, n=n, t=t) for nm, T, C, D, n, t in old]
+    post = [BLane(nm, T, C, D_tol=D, n=n, t=t) for nm, T, C, D, n, t in old]
+    rp = [response_time_b(l, pre)["r"] for l in pre]
+    rq = [response_time_b(l, post)["r"] for l in post]
+    if rp != rq:
+        bad.append(("real table pre-R1", rp, rq))
+    # ---- the must-fire: an unsound assignment must RAISE -----------------
+    fired = False
+    try:
+        BLane("unsound", 100, 2, D_tol=10, D_sched=11)
+    except AssertionError:
+        fired = True
+    if not fired:
+        bad.append(("must-fire D_sched > D_tol", "raise", "accepted"))
+
+    if verbose:
+        print("  R2 order-neutrality gate: %s"
+              % ("PASS -- the D_sched/D_tol split moves no r_i (uniform-shift "
+                 "invariance at 4 values of k on 3 sets, and the real five-lane "
+                 "table identical under both conventions: r = %s)" % (rp,)
+                 if not bad else "*** FAIL: %s ***" % (bad[0],)))
+        print("  R2 must-fire (D_sched > D_tol must raise): %s"
+              % ("PASS" if fired else "*** FAIL -- an unsound assignment was "
+                 "ACCEPTED; nothing stops a lane being scheduled looser than "
+                 "its tolerance ***"))
+    return not bad
+
+
 # ============================================================================
 # THE REACTIVE LANES
 # ============================================================================
@@ -223,8 +371,62 @@ def assert_reduces_to_periodic(verbose: bool = True) -> bool:
 #     the peer judges inter-edge intervals, so D is how much differential jitter
 #     a phase can absorb: min(N_low - tLOW, N_high - tHIGH) = min(15, 15) = 15.
 #     DERIVED, not modelled -- one of the three O4 labels comes off here.
+#
+# ============================================================================
+# THE RTL LATENCIES -- read off `src/project.v`, kept in ONE place
+# ============================================================================
+# `reg [2:0] wr_sync` -- "Two flops to resolve metastability, a third to see the
+# edge" -- with `wr_rise = (wr_sync[2:1] == 2'b01)`. Detection lands at t+2 and
+# the asynchronous capture can miss by a cycle.
+#   ⛔ These lived in gate_lane_class.py, which imports FROM here, so the
+#   reactive budget in the lane table could not read them without a cycle. They
+#   are inputs to the lane table (spec R1 derives a DEADLINE from them), so this
+#   is their home and 0.9b now imports them back.
+L_SYNC = 3          # cycles, worst-case edge-detection latency (3-FF chain)
+L_JIT = 1           # cycles, async-capture uncertainty (the only part that is jitter)
+OUT_REG = 1         # cycles, output register to pad
+TSU_MASTER = 1      # cycles, the PEER master's setup requirement. ⚠ PARAMETRIC:
+                    # no SPI master device is picked, so 1 cycle (20 ns) stands
+                    # in. Generous for a real master; the R1 gate sweeps it.
+F_CLK = 50_000_000
+
+
+def abs_tolerance(half_period: int, c9_at_completion: bool, C: int,
+                  tsu: int = TSU_MASTER) -> int:
+    """SPEC R1 -- the START-DELAY tolerance of a REACTIVE lane-action.
+
+    A reactive output has no peer re-synchronisation to hide behind (gate 0.9b):
+    the peer samples at a fixed phase of ITS OWN clock, so our whole accumulated
+    latency eats its setup window directly. Everything between the peer's edge
+    and our pin moving has to fit inside half a bit period:
+
+        L_sync + start_delay + out_reg + [C_i if the pin moves at COMPLETION]
+            <=  half_period - tSU(peer)
+
+    Rearranged into the start-delay terms every other tolerance in this project
+    is expressed in:
+
+        D_tol = half_period - tSU - L_sync - out_reg - [C_i]
+
+    ⭐ THE C9 TERM IS THE DESIGN DECISION, AND IT IS A SUBTRACTION FROM A
+    TOLERANCE, which is why it was invisible while C9 was "dissolved": driving
+    the pin at service COMPLETION rather than at START spends C_i cycles of a
+    budget that only reactive lanes have.
+    """
+    return half_period - tsu - L_SYNC - OUT_REG - (C if c9_at_completion else 0)
+
+
+# ⛔⛔ EVERY D BELOW IS NOW `D_tol=` -- A START-DELAY TOLERANCE, NOT AN ABSOLUTE
+# DEADLINE (spec R2). The EDF key the recurrence schedules on is D_tol + C_i,
+# which for a uniform C = 2 is a uniform +2 and therefore leaves every priority
+# ORDER and every r_i unchanged from the pre-R2 table. That is checked, not
+# assumed, by `assert_r2_order_neutral()` below: the restructure had to be
+# provably inert before any deadline was allowed to move.
+#
+# ⭐ L_SYNC / OUT_REG / TSU are imported from the one place they are read off the
+# RTL, so the reactive budget below cannot drift from gate 0.9b's.
 TX = [
-    BLane("UART-tx 115200", 434, 2, 216, note="periodic, one event/bit"),
+    BLane("UART-tx 115200", 434, 2, D_tol=216, note="periodic, one event/bit"),
     # ⭐ D = 23 DERIVED from the MB85RS64V AC table (DS501-00015-6v1-E, refs/),
     # replacing the modelled centre-sample 12. We are the MASTER here, so the
     # peer judges setup/hold against the clock WE generate, not a bit centre:
@@ -234,8 +436,9 @@ TX = [
     # to IMPROVE the set: a too-tight deadline had been distorting EDF into
     # prioritising SPI-tx over lanes that needed it more. Minimum margin across
     # all five lanes rises 9 -> 11; I2C r 7 -> 5, SPI-target r 5 -> 3.
-    BLane("SPI-tx 1 MHz", 25, 2, 23, note="D derived from MB85RS64V tSU/tCH/tCL"),
-    BLane("I2C 400 kHz", 45, 2, 15,
+    BLane("SPI-tx 1 MHz", 25, 2, D_tol=23,
+          note="D derived from MB85RS64V tSU/tCH/tCL"),
+    BLane("I2C 400 kHz", 45, 2, D_tol=15,
           note="asymmetric SCL 80/45; D derived from UM10204 T11, not modelled"),
 ]
 
@@ -257,14 +460,56 @@ TX = [
 # job for this lane is to certify r - C <= Dj_assumed, and the reserve lives in
 # the BAND WIDTH: the integer band holds at [414,458] for Dj up to 13, so r - C
 # can grow by 5 (about five C increments) before the band narrows.
-UART_RX = BLane("UART-rx 115200", T=4140, C=2, D=216, n=10, t=414,
+#
+# ⭐ SPEC H3 -- D_tol IS 213, NOT 216, AND THE TWO UART DIRECTIONS ARE NOT ONE
+# LANE. UART-tx sources its own timing and its 216 is sigrok-adjudicated.
+# UART-rx is REACTIVE-anchor: the sample grid hangs off a DETECTED start edge,
+# and detection lags the true edge by L_sync, so the whole grid slides and the
+# early-side constraint tightens to T - half - L_sync = 216 - 3 = 213. Gate 0.9b
+# derived that and printed it; the lane table kept 216, so the ledger and the
+# model disagreed by 3 cycles on a 206-cycle margin. Costs nothing here -- and
+# that is exactly why it survived: a difference that changes no verdict is the
+# kind that stays wrong.
+UART_RX = BLane("UART-rx 115200", T=4140, C=2, D_tol=216 - L_SYNC, n=10, t=414,
                 note="10 samples/frame at the fastest admitted peer (414, the "
-                     "sampler-realistic band floor); n*t == T, gapless")
+                     "sampler-realistic band floor); n*t == T, gapless; "
+                     "D_tol = 216 - L_sync (REACTIVE-anchor, 0.9b)")
 
 # SPI-target: the MASTER supplies SCK, so our events are its edges -- two per bit,
 # 16 per byte, and back-to-back bytes again make n*t == T.
-SPI_RX = BLane("SPI-target 1 MHz", T=400, C=2, D=12, n=16, t=25,
-               note="master-clocked, 16 edges/byte, back-to-back: n*t == T")
+#
+# ⭐⭐ SPEC R1 -- D_tol IS DERIVED, AND O4 IS CLOSED. The last stand-in deadline
+# in the table was this lane's 12, carried over from the centre-sampling geometry
+# `min(T//2, T - T//2 - 1)` at T = 25. It was reported as "non-load-bearing,
+# because the binding test is 0.9b's absolute budget rather than D" -- and that
+# reading was WRONG. Under EDF a deadline is a PRIORITY, and 12 was the tightest
+# number in the table, so the stand-in was making SPI-target the highest-priority
+# lane and therefore setting every other lane's r_i. A modelled number was the
+# scheduling key for the whole set.
+#
+# The fix is to derive it from the same absolute budget that already governs the
+# lane, expressed in start-delay terms (`abs_tolerance` above, half-period 25 at
+# 1 MHz):
+#
+#   C9 = pin at START       D_tol = 25 - 1 - 3 - 1     = 20
+#   C9 = pin at COMPLETION  D_tol = 25 - 1 - 3 - 1 - 2 = 18
+#
+# ⛔ THE SHIPPED VALUE IS THE COMPLETION ONE, 18. Not because C9 is decided --
+# 1.3 decides it -- but because 18 is the SMALLER of the two, so the table is
+# correct under either outcome and cannot be made worse by the decision. START
+# is priced in `gate_spi_target_D.py` and in the 1.2 frontier.
+#
+# ⭐ IT REORDERS, AND THE FALSIFIER DID NOT FIRE: the derived budget is looser
+# than the stand-in (18 > 12), so I2C (15) takes the highest priority and
+# SPI-target drops to second. No margin falls -- I2C r goes 5 -> 3 and
+# SPI-target 3 -> 5, and the MINIMUM admissibility margin across the set rises
+# 11 -> 14. Both C9 variants clear the >= 4 bar at 1 MHz by more than 15 cycles,
+# so C9 is NOT decided by 1 MHz feasibility; it is decided by the frequency
+# ceiling, which is 1.3's question and not this lane's.
+SPI_RX = BLane("SPI-target 1 MHz", T=400, C=2, n=16, t=25,
+               D_tol=abs_tolerance(25, c9_at_completion=True, C=2),
+               note="master-clocked, 16 edges/byte, back-to-back: n*t == T; "
+                    "D_tol DERIVED from the absolute budget (R1), C9=COMPLETION")
 
 
 def report(lanes: list, label: str) -> dict:
@@ -272,31 +517,46 @@ def report(lanes: list, label: str) -> dict:
     print(label)
     print("=" * 78)
     U = sum(l.util for l in lanes)
-    print("  %-20s %-7s %-5s %-5s %-4s %-6s %-8s %s"
-          % ("lane", "T_i", "C_i", "D_i", "n_i", "t_i", "n*C/T", "note"))
+    print("  %-20s %-7s %-5s %-7s %-7s %-5s %-4s %-6s %-8s"
+          % ("lane", "T_i", "C_i", "D_tol", "D_sched", "key", "n_i", "t_i", "n*C/T"))
     for l in lanes:
-        print("  %-20s %-7d %-5d %-5d %-4d %-6d %-8.5f %s"
-              % (l.name, l.T, l.C, l.D, l.n, l.t, l.util, l.note))
-    print("  %-20s %-7s %-5s %-5s %-4s %-6s %-8.5f  %s"
-          % ("TOTAL U", "", "", "", "", "", U,
+        print("  %-20s %-7d %-5d %-7d %-7d %-5d %-4d %-6d %-8.5f"
+              % (l.name, l.T, l.C, l.D_tol, l.D_sched, l.D, l.n, l.t, l.util))
+    print("  %-20s %-7s %-5s %-7s %-7s %-5s %-4s %-6s %-8.5f  %s"
+          % ("TOTAL U", "", "", "", "", "", "", "", U,
              "FEASIBLE (<=1)" if U <= 1 else "*** U > 1 ***"))
+    print("  notes:")
+    for l in lanes:
+        print("    %-20s %s" % (l.name, l.note))
+    print()
+    print("  EDF priority order (by key = D_sched + C_i, most urgent first):")
+    print("    %s" % "  <  ".join("%s(%d)" % (l.name.split()[0], l.D)
+                                  for l in sorted(lanes, key=lambda x: x.D)))
     print()
     Lb = busy_period_b(lanes)
     print("  busy period L = %s" % Lb)
-    print("  %-20s %-7s %-6s %-6s %-7s %-7s %-6s %s"
-          % ("lane", "m_i", "r_i", "D_i", "margin", "arg a", "B(a)", "verdict"))
+    print("  %-20s %-5s %-5s %-6s %-7s %-8s %-6s %-6s %s"
+          % ("lane", "m_i", "r_i", "r-C_i", "D_tol", "margin", "arg a", "B(a)",
+             "verdict"))
     rows = []
     for l in lanes:
         rr = response_time_b(l, lanes)
         m = l.N(Lb) if Lb else None
         rows.append({"lane": l.name, **rr, "m": m})
-        print("  %-20s %-7s %-6s %-6d %-7s %-7s %-6s %s"
-              % (l.name, m, rr["r"], l.D,
-                 (l.D - rr["r"]) if rr["r"] is not None else "-",
+        r = rr["r"]
+        print("  %-20s %-5s %-5s %-6s %-7d %-8s %-6s %-6s %s"
+              % (l.name, m, r, (r - l.C) if r is not None else "-", l.D_tol,
+                 rr.get("margin") if r is not None else "-",
                  rr.get("a"), rr.get("B"),
                  "OK" if rr.get("feasible") else "*** INFEASIBLE ***"))
+    # ⛔ the margin is D_tol - (r - C), NOT D - r. See BLane.margin().
+    print("  margin = D_tol - (r - C_i), the ADMISSIBILITY margin (spec R2)")
+    mm = [r["margin"] for r in rows if r.get("margin") is not None]
+    if mm:
+        print("  minimum admissibility margin = %d   (bar >= 4: %s)"
+              % (min(mm), "clears" if min(mm) >= 4 else "*** BELOW BAR ***"))
     bad = [r for r in rows if not r.get("feasible")]
-    zero = [r for r in rows if r.get("feasible") and r["D"] - r["r"] == 0]
+    zero = [r for r in rows if r.get("feasible") and r["margin"] == 0]
     many = [r for r in rows if r["m"] and r["m"] > 1]
     print()
     print("  lanes with m_i > 1 (the regime the bound was unsound in): %s"
@@ -304,8 +564,11 @@ def report(lanes: list, label: str) -> dict:
              if many else "none"))
     print("  A2-F6 zero margin: %s"
           % (", ".join(r["lane"] for r in zero) if zero else "no lane"))
-    print("  r_i <= D_i for every lane: %s"
+    print("  (r_i - C_i) <= D_tol for every lane: %s"
           % ("YES" if not bad else "NO -- " + ", ".join(r["lane"] for r in bad)))
+    sched = [r for r in rows if not r.get("sched_ok")]
+    print("  r_i <= D_sched + C_i (the EDF deadline) for every lane: %s"
+          % ("YES" if not sched else "NO -- " + ", ".join(r["lane"] for r in sched)))
     return {"U": U, "rows": rows, "bad": bad, "zero": zero, "many": many}
 
 
@@ -352,8 +615,11 @@ def clock_stretch() -> dict:
             ("hardware wait", 2, "the lane blocks on SCL; the engine moves on"),
             ("engine busy-wait", 5000, "engine holds while SCL is low (5000 cyc "
                                        "= 100 us, a SHORT stretch)")):
-        lanes = [BLane("UART-tx", 434, 2, 216), BLane("SPI-tx", 25, 2, 12),
-                 BLane("I2C", 62, c_i2c, 30)]
+        # the CURRENT table's three driving lanes, so the demonstration is on
+        # the shipped deadlines rather than the retracted T=62 / D=30 pair.
+        lanes = [BLane("UART-tx", 434, 2, D_tol=216),
+                 BLane("SPI-tx", 25, 2, D_tol=23),
+                 BLane("I2C", 45, c_i2c, D_tol=15)]
         U = sum(l.util for l in lanes)
         rows = [(l, response_time_b(l, lanes)) for l in lanes]
         bad = [l.name for l, r in rows if not r.get("feasible")]
@@ -362,8 +628,8 @@ def clock_stretch() -> dict:
                  else "INFEASIBLE: " + (", ".join(bad) if bad else "U > 1")))
         print("      %s" % note)
         for l, r in rows:
-            print("      %-10s r = %-8s D = %-5d B = %-6s %s"
-                  % (l.name, r["r"], l.D, r.get("B"),
+            print("      %-10s r = %-8s D_tol = %-5d B = %-6s %s"
+                  % (l.name, r["r"], l.D_tol, r.get("B"),
                      "OK" if r.get("feasible") else "*** INFEASIBLE ***"))
         out[label] = {"U": U, "bad": bad}
     print()
@@ -391,22 +657,23 @@ def classify(lanes: list) -> None:
     print("=" * 78)
     print("CLASSIFICATION -- every reactive lane, no 'probably fine'")
     print("=" * 78)
-    print("  %-20s %-6s %-6s %-6s %-7s %s"
-          % ("lane", "r_i", "D_i", "t_i", "queues?", "classification"))
+    print("  %-20s %-6s %-6s %-7s %-6s %-7s %s"
+          % ("lane", "r_i", "r-C_i", "D_tol", "t_i", "queues?", "classification"))
     for l in lanes:
         rr = response_time_b(l, lanes)
         r = rr["r"]
         queues = (l.n > 1 and r is not None and r > l.t)
         if r is None:
             cls = "NAMED OBSTACLE (no bound)"
-        elif r > l.D:
-            cls = "NAMED OBSTACLE (r > D)"
+        elif not rr["feasible"]:
+            cls = "NAMED OBSTACLE (r - C > D_tol)"
         elif queues:
             cls = "DERIVED BUFFER (r > t: events accumulate)"
         else:
             cls = "FEASIBLE"
-        print("  %-20s %-6s %-6d %-6d %-7s %s"
-              % (l.name, r, l.D, l.t, "yes" if queues else "no", cls))
+        print("  %-20s %-6s %-6s %-7d %-6d %-7s %s"
+              % (l.name, r, r - l.C, l.D_tol, l.t,
+                 "yes" if queues else "no", cls))
     print()
     print("  ⛔ NO reactive lane reaches the derived-buffer rung, so the FIFO-depth")
     print("     derivation is UNEXERCISED and is deliberately not shipped here.")
@@ -442,13 +709,15 @@ def ethernet_width(lanes: list) -> None:
     print("  %-4s %-7s %-6s %-9s %-7s %-7s %-8s %-9s %s"
           % ("w", "T=5w", "D", "U", "r_Eth", "margin", "m_Eth", "min marg", "verdict"))
     for w in (1, 2, 4, 8):
+        # legacy shape on purpose: the Ethernet stand-in D is an absolute
+        # deadline from the centre-sample geometry, not a derived tolerance.
         eth = BLane("Ethernet w=%d" % w, 5 * w, 2, 5 * w - 1)
         ls = lanes + [eth]
         U = sum(l.util for l in ls)
         L = busy_period_b(ls)
         rs = [response_time_b(l, ls) for l in ls]
         bad = [r["lane"] for r in rs if not r["feasible"]]
-        mm = min(r["D"] - r["r"] for r in rs)
+        mm = min(r["margin"] for r in rs)
         m_eth = eth.N(L)
         # ⛔ m_i > 1 ANYWHERE is a caveat, not just infeasibility
         unsafe = [l.name for l in ls if l.N(L) > 1]
@@ -459,7 +728,7 @@ def ethernet_width(lanes: list) -> None:
         else:
             v = "CLEAR (all m_i = 1)"
         print("  %-4d %-7d %-6d %-9.5f %-7d %-7d %-8d %-9d %s"
-              % (w, 5 * w, 5 * w - 1, U, rs[-1]["r"], eth.D - rs[-1]["r"],
+              % (w, 5 * w, 5 * w - 1, U, rs[-1]["r"], rs[-1]["margin"],
                  m_eth, mm, v))
     print()
     print("  ⭐ w = 2 is the MINIMUM that is both feasible and inside the")
@@ -476,6 +745,11 @@ def main() -> int:
     if not assert_reduces_to_periodic():
         print("\nABORTING: the bursty generalisation does not reproduce the")
         print("periodic recurrence at n=1, so it is not a generalisation.")
+        return 1
+    if not assert_r2_order_neutral():
+        print("\nABORTING: the D_sched/D_tol split is NOT inert, so no deadline")
+        print("change below can be attributed to the deadline rather than to the")
+        print("restructure. Fix the split before reading any number here.")
         return 1
     print()
     report(TX, "DRIVING DIRECTION ONLY (Parts 1-3, restated as bursty with n=1)")

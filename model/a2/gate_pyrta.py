@@ -57,41 +57,77 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
+from bursty import TX, UART_RX, SPI_RX, response_time_b            # noqa: E402
+from pyrta_src import require_pyrta                                # noqa: E402
+
 try:
     sys.stdout.reconfigure(encoding="utf-8")
 except Exception:
     pass
 
-# The five-lane table and OUR numbers.
-# ⛔ Two corrections are baked in and the foreign check was re-run after each:
-#   N1  I2C is T=45, D=15. The symmetric 62-cycle phase violated tLOW at nominal
-#       and D=30 was the centre-sample stand-in. See gate_i2c_phase.py.
-#   N2+P1  UART-rx is T=414. The proved band [413,458] assumed an EXACT sampler
-#       and double-counted the per-bit slack; re-synthesized with the sampler
-#       displaced by L_sync=3 and uncertain by Dj=r-C=8, Imitator gives exactly
-#       5*Te > 2067 & 4126 > 9*Te, i.e. [414, 458]. Te=413 is now REJECTED.
-# pyRTA still agrees 5/5 on the corrected table.
-SPEC = [("UART-tx 115200", 434, 2, 216, 10),
-        ("SPI-tx 1 MHz", 25, 2, 23, 7),     # 1.1: D derived from MB85RS64V
-        ("I2C 400 kHz", 45, 2, 15, 5),
-        ("UART-rx 115200", 414, 2, 216, 10),   # N2+P1: sampler-realistic band floor
-        ("SPI-target 1 MHz", 25, 2, 12, 3)]  # still modelled; governed by 0.9b absolute budget
+# ============================================================================
+# THE SUBJECT: lane PARAMETERS from the one table, expected r_i hand-typed
+# ============================================================================
+# ⛔⛔ THE PARAMETERS ARE IMPORTED, THE ANSWERS ARE TYPED, AND THAT SPLIT IS
+# DELIBERATE. This file used to carry a hand-copied second copy of the lane
+# table, which is a transcription-error class with nothing watching it: when 1.1
+# moved D_SPI and R1/H3 moved two more, the copy had to be found and edited by
+# memory, and a copy that is edited by memory is a copy that is eventually wrong.
+# So the T/C/D now come from `bursty.py` -- the SAME table A2 reports on, which
+# is the point: pyRTA's independence is of the ANALYSIS, never of the inputs.
+#
+# ⭐ The expected `r_i` stay hand-typed, because that is the actual pin. A gate
+# that imported the answers too would compare our recurrence against itself and
+# agree by construction. Three things must line up: the typed literal, our
+# recurrence, and pyRTA. Any disagreement is a finding, including a `r_i` we
+# changed on purpose and forgot to retype here.
+#
+# ⛔ THE DEADLINE pyRTA IS GIVEN IS THE EDF KEY `D_sched + C_i`, not the
+# tolerance (spec R2). pyRTA schedules on absolute deadlines; the tolerances
+# bound start delays. Feeding it a tolerance would schedule the set C_i cycles
+# tighter than the design asks for -- conservative, but a different task set
+# from the one we ship.
+#
+# CORRECTIONS BAKED INTO THE TABLE THIS READS, each re-checked here afterwards:
+#   N1   I2C is T=45, D_tol=15 -- the symmetric 62-cycle phase violated tLOW at
+#        nominal and D=30 was the centre-sample stand-in (gate_i2c_phase.py).
+#   N2+P1 UART-rx is T=414 -- the band [413,458] assumed an EXACT sampler and
+#        double-counted the per-bit slack; re-synthesized with the sampler
+#        displaced by L_sync=3 and uncertain by Dj=8, Imitator gives exactly
+#        5*Te > 2067 & 4126 > 9*Te, i.e. [414,458]. Te=413 is REJECTED.
+#   1.1  D_tol(SPI-tx) = 23, derived from the MB85RS64V AC table.
+#   H3   D_tol(UART-rx) = 213 = 216 - L_sync, the REACTIVE-anchor correction.
+#   R1   D_tol(SPI-target) = 18, derived from the absolute budget -- the last
+#        stand-in deadline, and the one that was the EDF key for the whole set.
+EXPECTED_R = {"UART-tx 115200": 10,
+              "SPI-tx 1 MHz": 7,
+              "I2C 400 kHz": 3,
+              "UART-rx 115200": 9,
+              "SPI-target 1 MHz": 5}
+
+# ⛔ ONE lane set, built once and selected from -- never a second builder call.
+# `response_time_b` filters interference BY IDENTITY, so an equal-but-distinct
+# copy is not excluded and the subject interferes with itself (see
+# gate_twin_pair.py).
+LANES = list(TX) + [UART_RX, SPI_RX]
 
 
-def find_pyrta() -> str | None:
-    env = os.environ.get("PYRTA_SRC")
-    if env and os.path.isdir(env):
-        return env
-    # a clone beside the scratchpad is the documented convenience path
-    for base in (os.environ.get("TEMP", ""), os.path.expanduser("~")):
-        for root, dirs, _ in os.walk(base):
-            if os.path.basename(root) == "pyrta" and "src" in dirs:
-                cand = os.path.join(root, "src")
-                if os.path.isdir(os.path.join(cand, "response_time_analysis")):
-                    return cand
-            if root.count(os.sep) - base.count(os.sep) > 6:
-                dirs[:] = []
-    return None
+def spec_rows():
+    """(name, period pyRTA sees, C, EDF key, our r, typed r) per lane.
+
+    ⭐ THE PERIOD pyRTA SEES IS THE INNER SPACING `t`, NOT THE OUTER `T`, AND
+    THAT IS SOUND ONLY BECAUSE `n*t == T` ON BOTH BURSTY LANES. pyRTA has no
+    bursty arrival model; `periodic_equivalence()` below checks on our own
+    arrival curve that the burst is gapless and therefore IS a plain period at
+    the inner spacing. Were a lane to have idle gaps between frames, this
+    substitution would silently analyse a denser task set -- conservative, but
+    not the shipped one, and the gate would stop being a check of our numbers.
+    """
+    out = []
+    for l in LANES:
+        r_ours = response_time_b(l, LANES)["r"]
+        out.append((l.name, l.t, l.C, l.D, r_ours, EXPECTED_R.get(l.name)))
+    return out
 
 
 def periodic_equivalence() -> bool:
@@ -110,15 +146,22 @@ def periodic_equivalence() -> bool:
     """
     from bursty import BLane
     print("  --- our bursty lanes vs a plain period, on our own curve ---")
+    # ⛔⛔ THESE PARAMETERS WERE HARD-CODED HERE AND WENT STALE: this check ran
+    # at UART-rx (n=10, t=434, T=4340) long after P1 re-synthesized the lane to
+    # t=414, T=4140. It passed -- n*t == T holds for both -- so a green check was
+    # certifying the gaplessness of a lane the project no longer ships, which is
+    # the whole substitution the pyRTA comparison rests on. Read off the objects.
     ok = True
-    for name, n, t, T in (("UART-rx", 10, 434, 4340), ("SPI-target", 16, 25, 400)):
+    for lane in (l for l in LANES if l.n > 1):
+        name, n, t, T = lane.name, lane.n, lane.t, lane.T
         b = BLane(name, T, 2, 1, n=n, t=t)
         p = BLane(name, t, 2, 1)
         diff = [d for d in range(0, 3 * T) if b.N(d) != p.N(d)]
-        print("    %-12s n*t = %d*%d = %d == T = %d ; curve mismatches over "
+        print("    %-20s n*t = %d*%d = %d %s T = %d ; curve mismatches over "
               "[0,%d): %d"
-              % (name, n, t, n * t, T, 3 * T, len(diff)))
-        ok = ok and not diff
+              % (name, n, t, n * t, "==" if n * t == T else "!=", T, 3 * T,
+                 len(diff)))
+        ok = ok and not diff and n * t == T
     print("    => the burst model is IDENTICAL to Periodic(inner) here: %s"
           % ("confirmed" if ok else "*** NOT identical -- investigate ***"))
     return ok
@@ -129,14 +172,36 @@ def main() -> int:
     print("=" * 78)
     print("SPEC 1.4b -- third-party check of the SHIPPED five-lane numbers")
     print("=" * 78)
-    src = find_pyrta()
-    if not src:
-        print("  *** pyRTA NOT FOUND. Set PYRTA_SRC to a clone's src/ directory:")
-        print("        git clone https://github.com/PROSA-Project/pyRTA")
-        print("        PYRTA_SRC=<clone>/src python model/a2/gate_pyrta.py")
-        print("  Gate is RED: a foreign check that cannot run has not run.")
+    # ---- arm 0: OUR numbers vs the typed literal, before the tool ---------
+    # ⛔ Run this FIRST and unconditionally. It needs no foreign tool, so if the
+    # typed answers have drifted from the table we learn it even on a machine
+    # with no pyRTA clone -- rather than hiding a stale literal behind a red
+    # that looks like a missing dependency.
+    print()
+    print("  --- arm 0: the lane table vs the typed answers (no tool needed) ---")
+    print("    %-20s %-6s %-5s %-6s %-7s %-7s %s"
+          % ("lane", "t_i", "C_i", "key", "ours", "typed", "agree"))
+    drift = []
+    for name, t, C, key, r_ours, r_typed in spec_rows():
+        ok = (r_ours == r_typed)
+        if not ok:
+            drift.append((name, r_ours, r_typed))
+        print("    %-20s %-6d %-5d %-6d %-7s %-7s %s"
+              % (name, t, C, key, r_ours, r_typed,
+                 "yes" if ok else "*** NO ***"))
+    if drift:
+        print("    *** ABORT: the typed answers no longer match the table.")
+        for name, a, b in drift:
+            print("        %s: table says %s, this file says %s" % (name, a, b))
+        print("        Either the table moved and this literal was not retyped,")
+        print("        or the recurrence changed. Nothing below is interpretable")
+        print("        until it is known which.")
         return 1
-    print("  pyRTA source: %s" % src)
+    print("    => the typed answers ARE the current table's answers")
+
+    src = require_pyrta("gate_pyrta.py")
+    if not src:
+        return 1
     sys.path.insert(0, src)
     from response_time_analysis import edf                              # noqa
     from response_time_analysis.model import (WCET, Deadline,           # noqa
@@ -144,7 +209,7 @@ def main() -> int:
                                               Periodic, Priority, Task, taskset)
 
     tasks, names, ours = [], [], []
-    for i, (n, T, C, D, r) in enumerate(SPEC):
+    for i, (n, T, C, D, r, _typed) in enumerate(spec_rows()):
         # ⛔ Priority is an IDENTITY TAG, not a scheduling input: `edf.rta` reads
         # deadlines only. It is required because pyRTA filters interferers by
         # VALUE on a frozen dataclass, so two parameter-identical lanes would

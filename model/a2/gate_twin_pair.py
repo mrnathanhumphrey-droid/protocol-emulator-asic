@@ -43,6 +43,7 @@ sys.path.insert(0, HERE)
 
 from a2_close import Lane                                      # noqa: E402
 from bursty import BLane, response_time_b                      # noqa: E402
+from pyrta_src import require_pyrta                            # noqa: E402
 from rta_spuri import response_time_spuri                      # noqa: E402
 
 try:
@@ -112,11 +113,19 @@ def main() -> int:
     # ---- path 3: the foreign tool, which filters BY VALUE ---------------
     print()
     print("  --- path 3: pyRTA (foreign, filters BY VALUE) ---")
-    src = os.environ.get("PYRTA_SRC")
-    if not src or not os.path.isdir(src):
-        print("    *** pyRTA not found (set PYRTA_SRC). This path is UNPINNED,")
-        print("        and it is the one where the by-VALUE direction lives.")
-        print("    Gate is RED: the regression does not cover both directions.")
+    # ⛔⛔ SPEC H1 -- THIS WAS A FALSE RED FOR AS LONG AS IT EXISTED. The line
+    # here used to be `os.environ.get("PYRTA_SRC")` and nothing else, while
+    # `gate_pyrta.py` carried a discovery function that also searched TEMP and
+    # ~. So with a clone on disk and importable, THIS gate reported "pyRTA not
+    # found ... the by-VALUE direction is UNPINNED" and that gate reported
+    # PASSED, off the same library, in the same run. A red whose message is a
+    # plausible description of a real gap is the worst kind: it reads as a known
+    # limitation rather than as a bug, so nobody goes looking. One function now,
+    # in `pyrta_src.py`, with both faces exercised.
+    src = require_pyrta("gate_twin_pair.py")
+    if not src:
+        print("    This path is the one where the by-VALUE direction lives, so")
+        print("    the regression does NOT cover both directions here.")
         return 1
     sys.path.insert(0, src)
     from response_time_analysis import edf                                  # noqa

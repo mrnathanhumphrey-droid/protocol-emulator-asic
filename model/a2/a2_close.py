@@ -40,12 +40,32 @@ def D_of(T: int) -> int:
 
 
 class Lane:
-    def __init__(self, name, T, C=C_EVENT, J=0, D=None):
+    """⛔ SPEC R2 mirrors `bursty.BLane`: `D` is the ABSOLUTE scheduling deadline
+    (the EDF key), `D_tol` is the START-DELAY tolerance that admissibility tests
+    against, and `D_sched` is the key in start-delay terms. The periodic path
+    only ever carries constructed instances and the three-lane legacy set, so
+    `D_tol` defaults to `D - C`, which makes `(r - C) <= D_tol` identical to
+    `r <= D` and keeps every existing verdict bit-for-bit. The fields exist here
+    so the two recurrences cannot disagree about what a deadline MEANS.
+    """
+
+    def __init__(self, name, T, C=C_EVENT, J=0, D=None, D_tol=None, D_sched=None):
         self.name, self.T, self.C, self.J = name, T, C, J
         self.D = D_of(T) if D is None else D
+        self.D_tol = (self.D - C) if D_tol is None else D_tol
+        self.D_sched = self.D_tol if D_sched is None else D_sched
+        if self.D_sched > self.D_tol:
+            raise AssertionError(
+                "%s: D_sched=%d > D_tol=%d -- scheduling looser than the "
+                "tolerance is unsound." % (name, self.D_sched, self.D_tol))
+
+    def margin(self, r: int) -> int:
+        """The ADMISSIBILITY margin, D_tol - (r - C). Not D - r."""
+        return self.D_tol - (r - self.C)
 
     def __repr__(self):
-        return "%s(T=%d,C=%d,D=%d)" % (self.name, self.T, self.C, self.D)
+        return "%s(T=%d,C=%d,D=%d,D_tol=%d)" % (
+            self.name, self.T, self.C, self.D, self.D_tol)
 
 
 REQUIRED = [Lane("UART 115200", 434), Lane("SPI 1 MHz", 25), Lane("I2C 400 kHz", 62)]

@@ -76,6 +76,28 @@ run_must_be_red \
     env MSYS_NO_PATHCONV=1 wsl.exe -d Ubuntu -- env IMITATOR="$NOPE" \
         bash /mnt/d/ProtocolEmulator/model/ta02/price_imi_gate.sh
 
+# --- pyRTA-backed gates (SPEC H1) ----------------------------------------
+# ⛔⛔ THESE TWO WERE UNPRICEABLE UNTIL H1. `gate_pyrta.py`'s discovery function
+# fell back to walking TEMP and ~ for a clone whenever PYRTA_SRC was not a
+# directory, so setting PYRTA_SRC to a non-path did NOT remove the authority --
+# the walk found the clone anyway and the gate went green. An arm here would
+# have reported "GREEN with the tool removed" and the fix would have looked like
+# weakening the arm. `pyrta_src.find_pyrta` now honours an explicit setting
+# exactly, refusal included, which is what makes these two lines mean anything.
+# ⚠ `pyrta_src.py` itself is deliberately NOT priced here. It manages PYRTA_SRC
+#   internally to exercise both faces, so an outer setting cannot take the
+#   authority away from it -- the attempt exits 0 and would be scored as a
+#   failure of the wrong thing. Its must-fire faces are self-contained; run it
+#   as an ordinary gate (`python model/a2/pyrta_src.py`), where it is red unless
+#   BOTH the success and the refusal path have run.
+run_must_be_red \
+    "gate_pyrta.py with PYRTA_SRC removed" \
+    env PYRTA_SRC="$NOPE" python model/a2/gate_pyrta.py
+
+run_must_be_red \
+    "gate_twin_pair.py with PYRTA_SRC removed" \
+    env PYRTA_SRC="$NOPE" python model/a2/gate_twin_pair.py
+
 # --- TChecker-backed gate ------------------------------------------------
 run_must_be_red \
     "ta02/run_zone_edge.sh with TCHECKER_BIN removed" \

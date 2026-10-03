@@ -37,17 +37,19 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
-from bursty import BLane, TX, UART_RX, SPI_RX, response_time_b   # noqa: E402
+from bursty import (BLane, F_CLK, L_JIT, L_SYNC, OUT_REG, SPI_RX,   # noqa: E402
+                    TSU_MASTER, TX, UART_RX, abs_tolerance, response_time_b)
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")
 except Exception:
     pass
 
-L_SYNC = 3          # cycles, worst-case edge-detection latency (3-FF chain)
-L_JIT = 1           # cycles, async-capture uncertainty
-OUT_REG = 1         # cycles, output register to pad
-F_CLK = 50_000_000
+# ⛔ L_SYNC / L_JIT / OUT_REG were DEFINED HERE and are now imported from
+# `bursty`, where the lane table can see them. Spec R1 derives SPI-target's
+# DEADLINE from exactly these three numbers, so a copy here and a copy there
+# would be two numbers that must agree for the lane table to mean anything --
+# and nothing would have been checking.
 
 # ---- the classification, which is the deliverable -----------------------
 # (lane, action, who sources the timing, test to apply)
@@ -57,6 +59,12 @@ ACTIONS = [
     ("SPI-master", "sample MISO", "US (we clock it)", "SOURCE"),
     ("I2C", "drive SCL low / SDA", "US", "SOURCE"),
     ("I2C", "release SCL, high phase", "PEER (observed rise)", "REACTIVE-J"),
+    # ⭐ SPEC R3 -- this action was MISSING from the classification, which is how
+    # a counted-offset placement rule got proposed for it without the table ever
+    # disagreeing. It is FOLDED into the high-phase release above: same release,
+    # same 3-FF sync, no new event. See gate_i2c_sda_read.py.
+    ("I2C", "sample SDA (folded into the rise)", "PEER (observed rise)",
+     "REACTIVE-J"),
     ("UART-rx", "detect start edge", "PEER", "REACTIVE-anchor"),
     ("UART-rx", "sample bit k", "US (from detection)", "SOURCE+anchor"),
     ("SPI-target", "sample MOSI", "PEER (master SCLK)", "REACTIVE-abs"),
@@ -75,8 +83,36 @@ def five_lanes(i2c_j: int = 0):
 
 
 def abs_budget(r_minus_c: int, c9_at_completion: bool, C: int) -> int:
-    """The ABSOLUTE latency a reactive output accumulates before the pin moves."""
+    """The ABSOLUTE latency a reactive output accumulates before the pin moves.
+
+    ⛔ This is the SAME relation as `bursty.abs_tolerance`, rearranged: that one
+    solves for the start-delay tolerance given a half period, this one adds up
+    the latency given a start delay. `assert_budget_consistent()` below pins
+    them to each other, because R1 turns one of them into a shipped DEADLINE and
+    two rearrangements of one equation drifting apart is how a lane table ends
+    up disagreeing with the gate that justified it.
+    """
     return L_SYNC + r_minus_c + OUT_REG + (C if c9_at_completion else 0)
+
+
+def assert_budget_consistent(verbose: bool = True) -> bool:
+    """`abs_budget` and `abs_tolerance` must be inverses, at every input."""
+    bad = []
+    for half in range(8, 40):
+        for c9 in (False, True):
+            for C in (1, 2, 3, 5):
+                for tsu in (0, 1, 3):
+                    tol = abs_tolerance(half, c9, C, tsu)
+                    # a start delay of exactly `tol` must just fit
+                    if abs_budget(tol, c9, C) != half - tsu:
+                        bad.append((half, c9, C, tsu, tol))
+    if verbose:
+        print("  budget/tolerance inverse gate: %s"
+              % ("PASS -- abs_tolerance(half) is exactly the start delay at "
+                 "which abs_budget() equals half - tSU, over %d combinations"
+                 % (32 * 2 * 4 * 3) if not bad
+                 else "*** FAIL: %d mismatches, first %s ***" % (len(bad), bad[0])))
+    return not bad
 
 
 def main() -> int:
@@ -96,6 +132,8 @@ def main() -> int:
     print()
     print("  from src/project.v: L_sync <= %d cycles, uncertainty %d, out reg %d"
           % (L_SYNC, L_JIT, OUT_REG))
+    print()
+    rc_gate = 0 if assert_budget_consistent() else 1
 
     # ---- REACTIVE-anchor: UART-rx ---------------------------------------
     print()
@@ -116,6 +154,22 @@ def main() -> int:
     print("    D_UART-rx = %d - %d = %d   (was %d)" % (d_nom, L_SYNC, d_anchored, d_nom))
     print("    delta_max = r - C = %d - %d = %d  ->  margin %d"
           % (r_rx, rx.C, r_rx - rx.C, d_anchored - (r_rx - rx.C)))
+    # ⭐ SPEC H3 -- the derivation and the LANE TABLE must agree, asserted.
+    # This gate printed 213 while the table carried 216 for as long as both
+    # existed, and nothing compared them: the derived value was a line of
+    # output, not an input to anything. A number that is only ever printed is
+    # not in the model.
+    if rx.D_tol != d_anchored:
+        print("    *** FAIL (H3): the lane table says D_tol = %d, this"
+              % rx.D_tol)
+        print("        derivation says %d. One of them is not the shipped"
+              % d_anchored)
+        print("        number, and every UART-rx result is ambiguous. ***")
+        rc_gate = 1
+    else:
+        print("    H3: the lane table's D_tol for this lane IS %d -- derivation"
+              % rx.D_tol)
+        print("        and table agree, and now they are compared.")
     print("  ⭐ costs 3 of 216; nowhere near binding. Recorded because the lane")
     print("     class is different even where the number does not care.")
 
@@ -124,16 +178,22 @@ def main() -> int:
     print("=" * 78)
     print("  REACTIVE-J -- I2C high phase released on the OBSERVED rise")
     print("=" * 78)
-    print("  %-26s %-7s %-7s %s" % ("config", "r_I2C", "r-C", "margin vs D=15"))
+    _i2c0 = [l for l in five_lanes() if l.name.startswith("I2C")][0]
+    print("  %-26s %-7s %-7s %s"
+          % ("config", "r_I2C", "r-C", "margin vs D_tol = %d" % _i2c0.D_tol))
     for j in (0, L_JIT, L_SYNC):
         ls = five_lanes(i2c_j=j)
         i2c = [l for l in ls if l.name.startswith("I2C")][0]
         r = response_time_b(i2c, ls)["r"]
+        # ⛔ D_tol, not D. `D` is now the EDF key (= D_sched + C), so this column
+        # read "margin vs D=15" while printing 17 - (r - C). Same bug class as
+        # the lane table's old `D - r` column: a label naming one quantity over
+        # an arithmetic using another.
         print("  %-26s %-7d %-7d %d"
               % ("J = %d (%s)" % (j, "ideal" if j == 0 else
                                   "sync uncertainty" if j == L_JIT else
                                   "full sync latency"),
-                 r, r - i2c.C, i2c.D - (r - i2c.C)))
+                 r, r - i2c.C, i2c.margin(r)))
     print("  ⭐ J = %d is the honest figure: the LATENCY is %d but it is constant,"
           % (L_JIT, L_SYNC))
     print("     and only the 1-cycle async-capture AMBIGUITY is jitter. A constant")
@@ -157,12 +217,25 @@ def main() -> int:
               % ("COMPLETION" if c9 else "START", L_SYNC, rc, OUT_REG,
                  sp.C if c9 else 0, b))
     print()
-    print("  ⚠ tSU(master) is parametric -- no device picked. Shown at 1 cycle")
-    print("    (20 ns), which is generous for a real master.")
+    print()
+    print("  ⭐ SPEC R1 -- THIS BUDGET IS NOW THE LANE'S DEADLINE, NOT JUST A")
+    print("     CHECK ON IT. At 1 MHz the same relation rearranged gives")
+    print("     D_tol = half - tSU - L_sync - out_reg - [C9] = %d (START) / %d"
+          % (abs_tolerance(25, False, sp.C), abs_tolerance(25, True, sp.C)))
+    print("     (COMPLETION), and the table ships the smaller so it is correct")
+    print("     under either C9 outcome. The lane table's D_tol is %d."
+          % sp.D_tol)
+    if sp.D_tol != abs_tolerance(25, True, sp.C):
+        print("     *** FAIL (R1): table says %d, derivation says %d ***"
+              % (sp.D_tol, abs_tolerance(25, True, sp.C)))
+        rc_gate = 1
+    print("  ⚠ tSU(master) is parametric -- no device picked. Shown at %d cycle"
+          % TSU_MASTER)
+    print("    (%d ns), which is generous for a real master." % (TSU_MASTER * 20))
     print()
     print("  %-9s %-7s %-9s %-11s %-11s %s"
           % ("f_SCLK", "T", "half", "differential", "absolute", "binding test"))
-    tsu = 1
+    tsu = TSU_MASTER
     ceil_start = ceil_compl = None
     for mhz in (1, 2, 2.5, 3, 4, 5, 6):
         T = int(round(25.0 / mhz))
@@ -211,9 +284,35 @@ def main() -> int:
              if fired else
              "*** FAIL -- no case separates the two tests; arm is vacuous ***"))
 
+    # ---- what R1 COST this lane, which the minimum margin does not show ---
+    print()
+    print("  --- R1's cost on THIS lane, reported because it is a loss ---")
+    print("    R1's reorder moved SPI-target from the most urgent lane to the")
+    print("    second, so its start delay (r - C) went 1 -> %d. That is a GAIN"
+          % rc)
+    print("    of 3 cycles on the minimum margin across the set (11 -> 14) and a")
+    print("    LOSS of %d cycles of absolute budget on this lane. Both at once:"
+          % (rc - 1))
+    print("    %-9s %-14s %-14s %s"
+          % ("f_SCLK", "margin (r-C=1)", "margin (r-C=%d)" % rc, "effect"))
+    for mhz in (1, 2, 2.5, 3):
+        half = 25.0 / mhz
+        was = int(half - tsu - abs_budget(1, True, sp.C))
+        now = int(half - tsu - abs_budget(rc, True, sp.C))
+        eff = ("both clear the >= 4 bar" if was >= 4 and now >= 4
+               else "*** dropped below the bar ***" if was >= 4 > now
+               else "below the bar either way")
+        print("    %-9s %-14d %-14d %s" % ("%g MHz" % mhz, was, now, eff))
+    print("    ⛔ AT 2 MHz THE MARGIN FELL FROM 4 TO 2 -- from exactly at the bar")
+    print("    to below it. 1 MHz is unaffected (margin %d) and 1 MHz is what is"
+          % int(25.0 - tsu - abs_budget(rc, True, sp.C)))
+    print("    declared, so nothing shipped moves. But the 2 MHz option is now")
+    print("    out of reach without a C9 decision or a C measurement, and that")
+    print("    is a consequence of R1, not of anything measured since.")
+
     print()
     print("=" * 78)
-    print("  GATE 0.9b: %s" % ("PASSED" if fired else "FAILED"))
+    print("  GATE 0.9b: %s" % ("PASSED" if fired and not rc_gate else "FAILED"))
     print("    * every lane-action classified SOURCE / REACTIVE")
     print("    * C9 is LOAD-BEARING again for REACTIVE outputs, worth ~%g MHz"
           % (ceil_start - ceil_compl))
@@ -233,7 +332,7 @@ def main() -> int:
     print("  ⛔ Wilson's recommendation to declare 1 MHz STANDS: at 2 MHz the")
     print("     absolute margin is %d cycles, below the >= 4 bar."
           % int(25.0 / 2 - tsu - abs_budget(rc, True, sp.C)))
-    return 0 if fired else 1
+    return 0 if (fired and not rc_gate) else 1
 
 
 if __name__ == "__main__":

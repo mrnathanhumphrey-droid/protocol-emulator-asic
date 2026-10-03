@@ -30,8 +30,14 @@ except Exception:
 GATES = [
     ("gate0-spi      behavioural genericity (the falsifier that can fail)",
      "gate", [sys.executable, "-u", os.path.join(HERE, "gate0_spi.py")]),
-    ("gate0-branches structural genericity + mutation pricing",
-     "gate", [sys.executable, "-u", os.path.join(HERE, "audit_branches.py")]),
+    # ⛔ SPEC H2 -- RECLASSIFIED FROM "gate" TO "lint". It audits one callable of
+    # the RETRACTED TA-02 interpreter and passes 9 of 11 adversarial mutants
+    # (RT1 1-3). Left in the runner so the record keeps running, but its colour
+    # no longer contributes to a gate count, because a green from it was being
+    # read as structural evidence it cannot supply. See the file's scope banner.
+    ("gate0-branches structural lint, SCOPED (retracted subject; 9/11 mutants "
+     "pass) -- NOT evidence about the engine",
+     "lint", [sys.executable, "-u", os.path.join(HERE, "audit_branches.py")]),
     ("fields         input-branch exerciser + descriptor coverage + size budget",
      "gate", [sys.executable, "-u", os.path.join(HERE, "gate_fields.py")]),
     ("B5             byte-identical UART reproduction of TA-01",
@@ -79,6 +85,18 @@ def main() -> int:
     probes = [x for x in results if x[1] == "probe"]
     print("  PROBES: %d run (probes MEASURE; they do not pass or fail)"
           % len(probes))
+    # ⛔ SPEC H2 -- a "lint" is counted and named, never silently dropped. The
+    # gate count moved from 8 to 7 when the branch-point audit was reclassified,
+    # and a headline number that changes without saying so is how a scoping
+    # decision turns into a quiet subtraction.
+    lints = [x for x in results if x[1] == "lint"]
+    if lints:
+        print("  LINTS: %d run, %d clean -- SCOPED, and their colour does NOT"
+              % (len(lints), len([x for x in lints if x[2] == 0])))
+        print("         enter the gate count. Each one names what it is not")
+        print("         evidence of in its own scope banner:")
+        for label, _k, rc, _dt, _o in lints:
+            print("           [%s] %s" % ("clean" if rc == 0 else "DIRTY", label))
     for label, kind, rc, dt, out in results:
         if rc != 0:
             print()

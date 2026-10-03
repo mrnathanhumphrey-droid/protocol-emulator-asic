@@ -1,5 +1,43 @@
 """THE BRANCH-POINT AUDIT -- the structural half of Gate 0.
 
+⛔⛔⛔ SCOPED, NOT RETIRED (spec H2). READ THIS BEFORE ANY VERDICT BELOW.
+
+THIS FILE IS NOT EVIDENCE ABOUT THE ENGINE WE ARE BUILDING. It reads
+`model/ta02/interp.py`, the TA-02 table interpreter, and TA-02's architecture
+claim is RETRACTED (docs/TA02_FORWARD_PLAN.md s2b; the QUEUE architecture
+stands). So a green here says something about a machine that is not the design
+-- and the genericity question it was written to answer has to be re-asked
+against the engine's RTL when that exists, by an audit that reads Verilog.
+
+AND WITHIN ITS OWN SUBJECT IT IS A LINT WITH FOUR KNOWN, UNFIXED BLIND SPOTS
+(docs/redteam/RT1_BUILT.md findings 1-3, all CONFIRMED):
+
+  * it passes 9 of 11 adversarial mutants that branch on non-table state --
+    subscript-as-mux `[nxt,0][self.nbits==8]`, rebinding, AugAssign, table
+    lookahead `self.table[pc+1]`, `match`, `assert`, `try`, and an arithmetic
+    literal `pc == (1+1+...)`;
+  * it equates "branch point" with `If`/`IfExp` nodes, so a subscript mux,
+    `match`, `assert` and exception dispatch -- all branches in silicon -- are
+    invisible to it;
+  * it kills `self.table.phase == 2` for the WRONG STATED REASON ("the bare
+    constant 2", not the attribute), which is the exact mutant-dies-for-a-stale-
+    reason failure its own docstring claims to have fixed;
+  * it reads only `step`, one of six callables. UART baked into `output()`
+    leaves its verdict byte-identical.
+
+⭐ THE CORRECT STANDING OF THE GENERICITY CLAIM is therefore: it rests on the
+BEHAVIOURAL gate (`gate0_spi.py`, SPI off the unchanged machine), which is
+independent of this file. This audit is kept because deleting it would delete
+the record of how a structural check can be green and weak at the same time --
+which is a result -- and because its mutation harness is the reusable part.
+
+⛔ DO NOT cite "the branch-point audit is green" anywhere. The only citable
+statements are RT1's three findings and the behavioural gate.
+
+Everything below this line is the file as written BEFORE the retraction, kept
+verbatim so the overclaim stays legible rather than being quietly edited away.
+---------------------------------------------------------------------------
+
 ⛔⛔ WHAT IT IS FOR. The behavioural gate (SPI off the unchanged machine) is the
 falsifier that can fail, but it is a test of OUTPUT. A machine could emit correct
 SPI and still be protocol-shaped inside -- a bit counter, a frame-phase register,
