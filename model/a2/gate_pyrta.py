@@ -72,10 +72,10 @@ except Exception:
 #       5*Te > 2067 & 4126 > 9*Te, i.e. [414, 458]. Te=413 is now REJECTED.
 # pyRTA still agrees 5/5 on the corrected table.
 SPEC = [("UART-tx 115200", 434, 2, 216, 10),
-        ("SPI-tx 1 MHz", 25, 2, 12, 5),
-        ("I2C 400 kHz", 45, 2, 15, 7),
+        ("SPI-tx 1 MHz", 25, 2, 23, 7),     # 1.1: D derived from MB85RS64V
+        ("I2C 400 kHz", 45, 2, 15, 5),
         ("UART-rx 115200", 414, 2, 216, 10),   # N2+P1: sampler-realistic band floor
-        ("SPI-target 1 MHz", 25, 2, 12, 5)]
+        ("SPI-target 1 MHz", 25, 2, 12, 3)]  # still modelled; governed by 0.9b absolute budget
 
 
 def find_pyrta() -> str | None:

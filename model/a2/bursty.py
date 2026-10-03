@@ -225,7 +225,16 @@ def assert_reduces_to_periodic(verbose: bool = True) -> bool:
 #     DERIVED, not modelled -- one of the three O4 labels comes off here.
 TX = [
     BLane("UART-tx 115200", 434, 2, 216, note="periodic, one event/bit"),
-    BLane("SPI-tx 1 MHz", 25, 2, 12, note="periodic, two events/bit"),
+    # ⭐ D = 23 DERIVED from the MB85RS64V AC table (DS501-00015-6v1-E, refs/),
+    # replacing the modelled centre-sample 12. We are the MASTER here, so the
+    # peer judges setup/hold against the clock WE generate, not a bit centre:
+    #   D = min(N - tSU, N - tCL, N - tCH) = min(25-1, 25-2, 25-2) = 23
+    # ⭐ P1.1a CONFIRMED -- the derived value is LOOSER than the stand-in. And
+    # adopting it REORDERS the EDF deadlines (23 > D_I2C = 15), which turns out
+    # to IMPROVE the set: a too-tight deadline had been distorting EDF into
+    # prioritising SPI-tx over lanes that needed it more. Minimum margin across
+    # all five lanes rises 9 -> 11; I2C r 7 -> 5, SPI-target r 5 -> 3.
+    BLane("SPI-tx 1 MHz", 25, 2, 23, note="D derived from MB85RS64V tSU/tCH/tCL"),
     BLane("I2C 400 kHz", 45, 2, 15,
           note="asymmetric SCL 80/45; D derived from UM10204 T11, not modelled"),
 ]
