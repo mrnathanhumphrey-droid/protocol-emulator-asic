@@ -326,6 +326,82 @@ def c_2mhz_fire():
         % (", ".join("C=%d:%d" % x for x in out), c3))
 
 
+def _channel():
+    """(pushes per byte, cycles per push, channel capacity in pushes/cycle).
+
+    From ruling F1's pin map: a byte crosses as 2 nibbles on ui_in[4:1], and a
+    host strobe cannot be sampled faster than the 3-FF synchroniser resolves it,
+    so one push costs L_sync + 1 cycles at best.
+    """
+    pushes_per_byte = 2
+    cycles_per_push = L_SYNC + 1
+    return pushes_per_byte, cycles_per_push, 1.0 / cycles_per_push
+
+
+def c_feed(lanes):
+    """RULING F1 -- the host must keep the TX data registers fed.
+
+    ⭐⭐ THIS CONDITION EXISTS BECAUSE F1 MOVED THE PAYLOAD OUT OF THE PROGRAM.
+    Once a shift action emits from a register the host refills, the host is part
+    of the timing chain. That obligation did not exist when the program spelled
+    out every bit, so F1 bought program size with a new liveness requirement --
+    and the requirement has to be priced, not just noted.
+
+    ⛔ THE RIGHT QUANTITY IS AGGREGATE, NOT PER LANE, AND I HAD IT WRONG FIRST.
+    I wrote this as "each lane's 8 bit-times must exceed the strobe time", which
+    no realistic lane can violate -- so the condition never bound and its
+    must-fire needed an absurd 1-cycle bit period to fire. But the pin map gives
+    all five lanes ONE shared FIFO, so the host must sustain the SUM of every
+    lane's byte rate. That is a UTILISATION, exactly like `U` for the engine:
+
+        U_chan = sum_i ( pushes_per_byte / (8 * t_i) )   must be <= 1/(L_sync+1)
+
+    ⛔ AND THE RESPONSE TO A VIOLATION IS FIXED BY A2, NOT CHOSEN. An empty
+    register at a shift edge raises a STICKY FLAG and the lane continues with a
+    defined value; it must NEVER stall the engine. A stall makes `C` unbounded,
+    and `B_i = max{C_j - 1}` over later-deadline lanes, so ONE stall makes EVERY
+    lane infeasible -- the identical conclusion the I2C clock-stretch analysis
+    reached for a busy-wait, arrived at from the opposite end.
+    """
+    ppb, cpp, cap = _channel()
+    u = sum(ppb / (8.0 * l.t) for l in lanes)
+    return u <= cap, ("U_chan = %.4f pushes/cycle against a capacity of %.4f "
+                      "(1 push per %d cycles) = %.1f%% utilised; host must "
+                      "strobe every %.0f cycles (%.2f MHz)"
+                      % (u, cap, cpp, 100 * u / cap, 1.0 / u,
+                         50.0 * u))
+
+
+def c_feed_fire():
+    """⛔ THE FIRING CASE IS AGGREGATE, AND FINDING THAT OUT TOOK TWO TRIES.
+
+    A SINGLE lane cannot violate this: solving `2/(8t) <= 1/(L_sync+1)` gives
+    t >= 1 cycle/bit, i.e. 50 Mbit/s on one lane, which is the clock itself. So
+    a per-lane threshold is unreachable and a must-fire built on one is vacuous
+    -- which is what my first two attempts were.
+
+    ⭐ What DOES bind is the shared FIFO. Sweeping how many 10 Mbit Ethernet
+    lanes (t = 5) the channel can feed gives a real capability number, and it
+    lands exactly on the stretch goal: the nibble channel saturates at a handful
+    of Ethernet-rate lanes. That is a finding about the roadmap, not a
+    contrived threshold.
+    """
+    ppb, cpp, cap = _channel()
+    rows, first_bad = [], None
+    for n in range(1, 9):
+        u = n * ppb / (8.0 * 5)          # t = 5 cycles/bit = 10 Mbit/s
+        rows.append((n, u))
+        if u > cap and first_bad is None:
+            first_bad = n
+    return first_bad is not None, (
+        "aggregate: %s -- %d lanes at 10 Mbit (t=5) EXCEED the %.2f "
+        "pushes/cycle capacity, so a program declaring that many is rejected "
+        "at load. ⭐ The channel saturates at %d Ethernet-rate lanes, which is "
+        "a ceiling on the Ethernet extension, not on the required set"
+        % (", ".join("%dx:%.3f" % r for r in rows[:6]), first_bad, cap,
+           first_bad - 1))
+
+
 CONDITIONS = [
     ("1.6a", "r_i <= t_i (one queue slot per lane)", c_queue, c_queue_fire),
     ("1.6b", "live-deadline spread + max r < 2^(N-1)", c_spread, c_spread_fire),
@@ -349,6 +425,8 @@ CONDITIONS = [
      c_part_scope_fire),
     ("1.6m", "PRE-REG: SPI-target 2 MHz reopening condition", c_2mhz,
      c_2mhz_fire),
+    ("1.6n", "data channel: the host keeps TX data registers fed "
+             "(underrun = sticky flag, NEVER a stall)", c_feed, c_feed_fire),
 ]
 
 

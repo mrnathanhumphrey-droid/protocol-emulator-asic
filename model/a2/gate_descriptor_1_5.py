@@ -135,10 +135,20 @@ def fields(N: int, d_width: int, include_dtol: bool) -> list:
          "%d uio pins" % N_PINS),
         ("drive mode", 1, "lane-reg", "1.5 drive mode / F5",
          "push-pull vs open-drain, one bit per pin"),
-        ("shift register", 8, "lane-reg", "ARCH_PREREG descriptor",
-         "one byte, the largest frame payload in the required set"),
-        ("bit counter", bits_for(8), "lane-reg", "ARCH_PREREG descriptor",
-         "0..8 bits per frame"),
+        # ⛔ MERGED, not added. ARCH_PREREG's "shift reg" and ruling F1's
+        # "data register" are the SAME register, and its "bit counter" and F1's
+        # "bit pointer" are the same counter. Listing both pairs cost 12 bits x
+        # 5 lanes = 60 flops for nothing, and would have shipped a descriptor
+        # with two names for one thing -- which is how a second implementation
+        # of the same state later disagrees with the first.
+        ("data/shift register", 8, "lane-reg",
+         "ARCH_PREREG descriptor + ruling F1",
+         "⭐ THE PAYLOAD LIVES HERE, not in the program. Fed by the host "
+         "channel; the shift action emits from it. ONE register, two names "
+         "in two specs"),
+        ("bit pointer / counter", bits_for(8), "lane-reg",
+         "ARCH_PREREG descriptor + ruling F1",
+         "0..8; which bit of the data register the shifter is on"),
         ("next-action timestamp", N, "lane-reg", "ARCH_PREREG descriptor",
          "DERIVED floor is %d (wrap-safe compare); %d ships as headroom"
          % (derive_N()["floor"], N)),
@@ -147,8 +157,18 @@ def fields(N: int, d_width: int, include_dtol: bool) -> list:
         ("D_sched (EDF key)", d_width, "lane-reg", "spec R2 + Ruling 1",
          "max key %d; REGISTER not store (Ruling 1 (i))" % max(l.D for l in LANES)),
         # ---- the program ------------------------------------------------
-        ("action opcode", 3, "prog", "1.5 + Ruling 2",
-         "drive / sample / wait / NO-OP RE-ARM / atomic-group / stop = 6 of 8"),
+        ("TX underrun (sticky)", 1, "lane-reg", "ruling F1 + 1.6",
+         "⛔ a sticky FLAG, never a stall: a stall makes C unbounded, which is "
+         "the clock-stretch failure again"),
+        ("action opcode", 3, "prog", "1.5 + Ruling 2 + F1",
+         "drive / sample / wait / NO-OP RE-ARM / SHIFT-REPEAT / atomic-group / "
+         "stop = 7 of 8"),
+        ("shift bit count N", bits_for(8), "prog", "ruling F1",
+         "emit N bits from the data register; 1..8"),
+        ("shift clock pin", bits_for(N_PINS - 1), "prog", "ruling F1",
+         "the shifter drives its OWN clock, or data and clock become two "
+         "actions in lockstep and P-ORDER applies per bit"),
+        ("shift direction", 1, "prog", "ruling F1", "LSB-first or MSB-first"),
         ("action pin", bits_for(N_PINS - 1), "prog", "ARCH_PREREG",
          "which pin this action touches"),
         ("action level", 1, "prog", "ARCH_PREREG", "the value to drive"),
@@ -165,12 +185,13 @@ def fields(N: int, d_width: int, include_dtol: bool) -> list:
         ("sticky ovr", 1, "global", "1.5 sticky ovr",
          "registered, pin-observable, set-only until reset"),
     ]
-    if include_dtol:
-        f.append(("D_tol (tolerance)", d_width, "lane-reg", "spec R2",
-                  "⚠ NOT read by the engine datapath -- see the flag-back"))
-    else:
-        f.append(("D_tol (tolerance)", d_width, "load", "spec R2",
-                  "loader metadata; the engine never reads it"))
+    # ⭐ RULING F3: D_tol is NOT a silicon register. It stays in the program
+    # IMAGE FORMAT as loader metadata, so a 5.3 load-time admissibility screen
+    # reads it from the store -- the certificate path stays open at zero
+    # runtime cost, and the 40 flops are not spent.
+    f.append(("D_tol (tolerance)", d_width, "image", "spec R2 + ruling F3",
+              "program-image metadata, read by the load-time screen; the "
+              "engine datapath never reads it"))
     return f
 
 
@@ -218,7 +239,7 @@ def main() -> int:
 
     # ---- the field table ------------------------------------------------
     for include_dtol in (True,):
-        fl = fields(N, d_width, include_dtol)
+        fl = fields(N, d_width, include_dtol)   # F3 decided: D_tol -> image
         print()
         print("  --- the fields, each priced and traced ---")
         print("    %-24s %-6s %-10s %-26s %s"
@@ -240,14 +261,14 @@ def main() -> int:
         lane_bits = sum(b for _n, b, w, _t, _y in fl if w == "lane-reg")
         prog_bits = sum(b for _n, b, w, _t, _y in fl if w == "prog")
         glob_bits = sum(b for _n, b, w, _t, _y in fl if w == "global")
-        load_bits = sum(b for _n, b, w, _t, _y in fl if w == "load")
+        load_bits = sum(b for _n, b, w, _t, _y in fl if w in ("load", "image"))
         print()
         print("  --- the DERIVED encoding ---")
         print("    per-lane register state : %3d bits x %d lanes = %d flops"
               % (lane_bits, N_LANES, lane_bits * N_LANES))
         print("    global                  : %3d bits" % glob_bits)
-        print("    loader metadata (not silicon): %3d bits x %d lanes"
-              % (load_bits, N_LANES))
+        print("    program-image metadata (NOT silicon, ruling F3): %3d bits "
+              "x %d lanes" % (load_bits, N_LANES))
         print("    engine flops (new)      : %d" % (lane_bits * N_LANES + glob_bits))
         print("      vs %d flops today, of which %d are the program store"
               % (FLOPS_TODAY, STORE_FLOPS_TODAY))
@@ -256,54 +277,75 @@ def main() -> int:
                  FLOPS_TODAY - STORE_FLOPS_TODAY + lane_bits * N_LANES + glob_bits,
                  UTIL_TODAY))
 
-        # a program action word: the non-atomic common case
-        act_bits = sum(b for n, b, w, _t, _y in fl
-                       if w == "prog" and not n.startswith("P-ATOMIC"))
+        # ⛔⛔ THE ACTION WORD IS THE MAX OVER OPCODE VARIANTS, NOT THE SUM OF
+        # EVERY PROG FIELD. Summing them gave 31 bits -> 4 bytes and
+        # CONTRADICTED gate_encoding_f1.py's 24 bits -> 3 bytes off the same
+        # field list, because the fields are mutually exclusive by opcode: a
+        # SHIFT action has no `level`, a DRIVE action has no `count`/`dir`, and
+        # only an ATOMIC action carries mask+data. An encoding costed as the sum
+        # of all variants is an encoding nobody would build, and the two files
+        # disagreeing about the same word is exactly the drift A1 exists to stop.
+        DELAY_BITS = 10          # F1's derived width; see that file
+        common = 3 + bits_for(N_PINS - 1) + DELAY_BITS      # opcode, pin, delay
+        variants = {
+            "drive (level)": common + 1,
+            "shift/repeat": common + bits_for(8) + bits_for(N_PINS - 1) + 1,
+            "wait / no-op re-arm": common,
+            "atomic group": common + 2 * N_PINS,
+        }
+        act_bits = max(variants[k] for k in ("drive (level)", "shift/repeat",
+                                             "wait / no-op re-arm"))
         act_bytes = -(-act_bits // 8)
-        atom_bits = act_bits + sum(b for n, b, w, _t, _y in fl
-                                   if n.startswith("P-ATOMIC"))
+        atom_bits = variants["atomic group"]
         atom_bytes = -(-atom_bits // 8)
         print()
-        print("    program action word     : %d bits -> %d bytes"
+        print("    action word, PER OPCODE VARIANT (delay field %d bits):"
+              % DELAY_BITS)
+        for k in ("drive (level)", "shift/repeat", "wait / no-op re-arm",
+                  "atomic group"):
+            print("      %-22s %2d bits -> %d bytes"
+                  % (k, variants[k], -(-variants[k] // 8)))
+        print("    common word (non-atomic): %d bits -> %d bytes"
               % (act_bits, act_bytes))
-        print("    P-ATOMIC action word    : %d bits -> %d bytes"
+        print("    P-ATOMIC word           : %d bits -> %d bytes"
               % (atom_bits, atom_bytes))
+        print("    ⭐ matches gate_encoding_f1.py's %d-bit word; the two files"
+              % act_bits)
+        print("       now derive the same number from the same fields.")
         store_bytes = 2 ** AW_TODAY
+        # ⛔⛔ THIS SECTION USED TO READ "THE PROGRAM STORE IS AN ORDER OF
+        # MAGNITUDE TOO SMALL, RECOMMEND AW >= 8". That finding is SUPERSEDED by
+        # ruling F1 and the recommendation is WITHDRAWN. The count was right and
+        # the root cause was wrong: the action word carried a LEVEL BIT, so the
+        # program spelled out the data one action per bit, and program size grew
+        # LINEARLY WITH MESSAGE LENGTH -- a waveform player, not a protocol
+        # emulator. The store was never the problem.
+        #
+        # ⛔ AND THE FIX I PROPOSED WOULD HAVE COST THE CHIP. At ~4 cells per
+        # stored bit (itemised from the shipped cell inventory in
+        # gate_encoding_f1.py), AW = 9 is ~17,000 cells -- over half a practical
+        # tile budget -- spent holding payload. "Area is free at 6.28%" was
+        # wrong: 6.28% is DIE-AREA utilisation including 68,161 filler
+        # instances, not a cell budget.
+        need_actions = sum(sh for _n, _pb, sh, _w in ())  # see gate_encoding_f1
         print()
-        print("  ⛔⛔ --- AND HERE IS THE PROBLEM, DERIVED ---")
-        print("    store at AW = %d            : %d bytes" % (AW_TODAY, store_bytes))
-        print("    actions it holds            : %d" % (store_bytes // act_bytes))
-        print("    one UART frame (10 edges)   : %d actions" % 10)
-        print("    one SPI byte (16 edges)     : %d actions" % 16)
-        print("    the required set, one frame each on 3 protocols:")
-        need_actions = 10 + 16 + 2 * 9        # UART 10, SPI 16, I2C ~2 per bit
-        print("      ~%d actions = %d bytes" % (need_actions, need_actions * act_bytes))
-        fits = need_actions * act_bytes <= store_bytes
-        print("    FITS at AW = %d? %s" % (AW_TODAY, "yes" if fits else "*** NO ***"))
-        if not fits:
-            aw_need = next(a for a in range(AW_TODAY, 16)
-                           if need_actions * act_bytes <= 2 ** a)
-            print("    => AW >= %d (%d bytes) for ONE frame on each protocol;"
-                  % (aw_need, 2 ** aw_need))
-            print("       AW >= %d (%d bytes) for a program with room to be"
-                  % (aw_need + 1, 2 ** (aw_need + 1)))
-            print("       interesting. Store flops go %d -> %d."
-                  % (STORE_FLOPS_TODAY, 8 * 2 ** (aw_need + 1)))
-            print()
-            print("    ⛔ THIS IS A FLAG-BACK, NOT A FIX I SHOULD TAKE. Widening")
-            print("    the store deepens the `mem[...]` mux, and that mux is on")
-            print("    the %.4f-of-%.1f ns COMBINATIONAL PAD FEEDTHROUGH that is"
-                  % (SLOW_PERIOD_NS - WNS_NS, SLOW_PERIOD_NS))
-            print("    already the worst path in the design. Store depth and the")
-            print("    critical path are ONE decision.")
-            print("    ⭐ AND THEY HAVE ONE FIX: REGISTER THE READBACK. The")
-            print("    feedthrough exists only because `uo_out` presents")
-            print("    `mem[rd_ptr]` combinationally. A register there costs 8")
-            print("    flops, retires the only nearly-full path on the chip, and")
-            print("    makes the store depth a question about area alone.")
-            print("    ⚠ It changes the readback TIMING, so the cocotb readback")
-            print("    test moves by one cycle -- which is why it is a ruling and")
-            print("    not a tidy-up.")
+        print("  --- the store, AFTER ruling F1 (see gate_encoding_f1.py) ---")
+        print("    store at AW = %d : %d bytes" % (AW_TODAY, store_bytes))
+        print("    ⛔ MY EARLIER FINDING HERE IS SUPERSEDED AND MY FIX WITHDRAWN.")
+        print("    I reported 'the store is an order of magnitude too small,")
+        print("    recommend AW >= 8'. The count was right, the root cause was")
+        print("    not: the LEVEL BIT put payload in the program, so program")
+        print("    size grew with MESSAGE LENGTH. With F1's shift/repeat action")
+        print("    and a host data channel, one transaction on each required")
+        print("    protocol fits in 62 of these %d bytes." % store_bytes)
+        print("    ⛔ And AW = 9 would have cost ~17,000 cells at ~4 cells per")
+        print("    stored bit -- over half a practical tile budget -- to hold")
+        print("    data that should not be in the store. 'Area is free at")
+        print("    6.28%' was wrong: that is die-area utilisation INCLUDING")
+        print("    68,161 filler instances, not a cell budget.")
+        print("    ⚠ The fit is 2 bytes spare, so SRAM (the TT IHP examples) is")
+        print("    the next step for anything beyond one transaction each --")
+        print("    not more flops.")
 
     # ---- the structural claims, as claims ------------------------------
     print()
@@ -331,18 +373,51 @@ def main() -> int:
     print("    1.6 condition: N_sep - (r_i - C_i) >= t_min")
 
     print()
-    print("  --- P-ATOMIC, priced from scratch ---")
-    atom_flops = 2 * N_PINS
-    atom_comb = 3 * N_PINS + bits_for(N_PINS - 1) * 2
-    print("    mask + data registers      : %d flops" % atom_flops)
-    print("    apply network (AND/OR/mux) : ~%d cells" % atom_comb)
-    print("    total                      : ~%d cells" % (atom_flops + atom_comb))
-    print("    ⚠ I was handed 'about 350 cells' for this field and can find NO")
-    print("      basis for it in this repo. My derivation is ~%d, about %dx"
-          % (atom_flops + atom_comb, round(350 / (atom_flops + atom_comb))))
-    print("      smaller. Either 350 is scoping something bigger than the field")
-    print("      (a whole atomic-group action path, perhaps) or it is stale.")
-    print("      Recorded as a DISCREPANCY rather than reconciled by guesswork.")
+    print("  --- P-ATOMIC: the 350-vs-46 discrepancy, RECONCILED ---")
+    print("    ⛔ CORRECTION FIRST. I reported 'I was handed about 350 cells and")
+    print("    can find no basis for it in this repo'. The repo part is true and")
+    print("    the framing was wrong: 350 WAS MY OWN FIGURE from an earlier")
+    print("    round (~60 bits x ~5.8 cells/bit, 5 lanes of mask+data). I had")
+    print("    treated my own estimate as an external one and asked where it")
+    print("    came from. It came from me.")
+    print()
+    print("    The two numbers differ on TWO axes, not one:")
+    print("      SCOPE          : 5 PER-LANE groups  vs  1 SHARED group")
+    print("      CELLS PER BIT  : 5.8 (a STORE bit: flop + mux tree + tie +")
+    print("                       hold-fix) vs ~2 (a plain register bit)")
+    print("    ⛔ The 5.8 figure is the store's, and it is dominated by the")
+    print("    64-entry readback MUX TREE. A 16-bit register has no such mux, so")
+    print("    carrying 5.8 into it over-prices the field about 3x.")
+    print()
+    w = N_PINS
+    per_bit_reg = 2           # flop + its pro-rata hold-fix buffer
+    apply_net = 3 * N_PINS + bits_for(N_PINS - 1) * 2
+    print("    %-26s %-8s %-10s %-10s %s"
+          % ("variant", "bits", "@2/bit", "+apply", "total"))
+    for label, groups, width in (("1 shared group", 1, w),
+                                 ("5 per-lane groups", N_LANES, w),
+                                 ("5 per-lane, w=6", N_LANES, 6)):
+        bits = groups * 2 * width
+        tot = bits * per_bit_reg + groups * apply_net
+        print("    %-26s %-8d %-10d %-10d ~%d"
+              % (label, bits, bits * per_bit_reg, groups * apply_net, tot))
+    print("    => the earlier ~350 lands on the PER-LANE row; the ~46 was the")
+    print("       SHARED row costed with flops at 1 cell. Both arithmetics were")
+    print("       fine; they were pricing different designs.")
+    print()
+    print("    ⭐⭐ AND THE RECONCILIATION SETTLES THE DESIGN QUESTION. P-ATOMIC")
+    print("    needs ONE SHARED mask+data register, not five, BECAUSE THE")
+    print("    SCHEDULER IS NON-PREEMPTIVE: exactly one job is in service at any")
+    print("    instant, so at most one atomic group can be mid-apply. Five")
+    print("    registers would be four copies that provably cannot be live")
+    print("    together. The per-lane variant is ~%d cells for nothing."
+          % ((N_LANES * 2 * w * per_bit_reg + N_LANES * apply_net)
+             - (2 * w * per_bit_reg + apply_net)))
+    print("    ⛔ The condition that makes it true is worth naming, because it")
+    print("    is a property we could lose: if the engine ever overlapped two")
+    print("    services (a deeper pipeline than Ruling 1's two stages), the")
+    print("    shared register stops being sufficient. 1.5 freezes ONE group")
+    print("    and the pipeline depth is what guards it.")
 
     print()
     print("  --- sticky ovr ---")
@@ -370,33 +445,34 @@ def main() -> int:
     # ---- the flag-backs -------------------------------------------------
     print()
     print("=" * 78)
-    print("  1.5 FLAG-BACKS -- three, and the first two are design decisions")
+    print("  1.5 -- ALL THREE FLAG-BACKS NOW RULED")
     print("=" * 78)
-    # ⛔ the recommendation is COMPUTED, not typed. A literal here said "AW >= 10"
-    # while the derivation three lines up said 8 for one frame each and 9 for
-    # headroom -- a number in prose disagreeing with the number in the run,
-    # which is the whole class this project keeps tripping on.
-    aw_one = next(a for a in range(AW_TODAY, 16)
-                  if need_actions * act_bytes <= 2 ** a)
-    print("   F1  PROGRAM STORE DEPTH. AW = %d holds %d actions; one frame on"
-          % (AW_TODAY, store_bytes // act_bytes))
-    print("       each required protocol needs ~%d (%d bytes). Recommend"
-          % (need_actions, need_actions * act_bytes))
-    print("       AW >= %d minimum, AW = %d for headroom (store flops %d -> %d)."
-          % (aw_one, aw_one + 1, STORE_FLOPS_TODAY, 8 * 2 ** (aw_one + 1)))
-    print("   F2  REGISTER THE READBACK. Retires the %.4f ns feedthrough and"
+    print("   F2  ✅ RULED + EXTENDED. Register the readback: retires the")
+    print("       %.4f ns feedthrough and decouples store depth from the"
           % (SLOW_PERIOD_NS - WNS_NS))
-    print("       decouples store depth from the critical path. Moves the")
-    print("       existing cocotb readback test by one cycle.")
-    print("   F3  IS D_tol A FLOP OR LOADER METADATA? The engine datapath never")
-    print("       reads it -- only an admissibility checker would. In silicon it")
-    print("       costs %d flops; as loader metadata it costs nothing and"
+    print("       critical path. EXTENSION: every engine-driven output bit")
+    print("       (uo_out, uio_out, uio_oe) comes from a flop -- the reason is")
+    print("       CORRECTNESS, not timing: a glitch on SCLK is an extra clock")
+    print("       edge, and I2C's T_SP filter is the device's mercy, not ours.")
+    print("       Checked statically by model/f2_flop_driven_outputs.py, which")
+    print("       is EXPECTED RED on today's netlist.")
+    print("   F3  ✅ RULED: D_tol is NOT a silicon register. It lives in the")
+    print("       PROGRAM-IMAGE FORMAT as loader metadata, so a 5.3 load-time")
+    print("       screen reads it from the store. %d flops not spent, and the"
           % (d_width * N_LANES))
-    print("       the check runs at load. The ruling said 'separate fields';")
-    print("       this asks whether 'field' means silicon.")
+    print("       certificate path stays open at zero runtime cost.")
+    print("   F1  ✅ RULED, and the root cause was not store size -- see")
+    print("       model/a2/gate_encoding_f1.py. The level bit put PAYLOAD in")
+    print("       the program; with a shift/repeat action and a host data")
+    print("       channel, one transaction each fits the EXISTING 64 B store.")
+    print("       ⛔ My AW>=8 recommendation is WITHDRAWN: at ~4 cells per")
+    print("       stored bit, AW=9 is ~17K cells -- over half a practical tile")
+    print("       budget, to hold data that should not be in the store.")
     print()
-    print("  GATE 1.5: %s" % ("PASSED -- every field traced and priced, encoding "
-                              "derived, three flag-backs raised"
+    print("  GATE 1.5: %s" % ("PASSED -- every field traced and priced, the "
+                              "encoding derived per opcode variant, and all "
+                              "three flag-backs RULED (F1 withdrew my own "
+                              "store-size fix)"
                               if rc == 0 else "FAILED"))
     return rc
 

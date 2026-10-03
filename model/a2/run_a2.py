@@ -57,6 +57,7 @@ GATES = [
     ("grid_quantization.py", "C3   clock-grid quantization (Ethernet)", False),
     ("gate_twin_pair.py", "P3   twin-pair self-exclusion, both directions", False),
     ("gate_rearm.py", "R2   chained waits: the re-arm task in A2", True),
+    ("gate_encoding_f1.py", "F1   program vs payload; store sized after", True),
     ("gate_descriptor_1_5.py", "1.5  descriptor freeze, encoding derived", True),
     ("gate_admissibility_1_6.py", "1.6  admissibility conditions, each priced", True),
     ("gate_pyrta.py", "1.4b third-party check of the shipped r_i", True),
