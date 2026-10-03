@@ -105,10 +105,30 @@ def blocking_at_b(lane: BLane, lanes: list, a: int) -> tuple:
 def response_time_b(lane: BLane, lanes: list, horizon: int | None = None) -> dict:
     """r_i for a bursty lane set. The generalisation of `response_time_spuri`.
 
+    ⛔⛔ THE ANALYSED LANE MUST BE AN ELEMENT OF `lanes` BY IDENTITY, AND THIS IS
+    ASSERTED BECAUSE I GOT IT WRONG. Interference is filtered with `o is not
+    lane`, so passing a lane object that is merely EQUAL to one in the list --
+    e.g. from a second call to a lane-set builder -- excludes nothing, the
+    analysed lane interferes with itself, and the bound comes out INFLATED
+    (SPI-target read 7 instead of 5).
+
+    It is the mirror image of pyRTA's footgun, which `gate_pyrta.py` already
+    guards: pyRTA filters by VALUE (`t != excluded`) and so OVER-excludes two
+    parameter-identical lanes; this filters by IDENTITY and so UNDER-excludes a
+    copy. Both produce a silently wrong number, in opposite directions. Having
+    written the guard for theirs and then tripped over ours, the check belongs
+    here rather than in each caller.
+
         L_i(a) = (N_i(a) - 1)*C_i + B_i(a)
                  + sum_{j!=i} min( N_j(L), N_j(a + D_i - D_j) ) * C_j
         r_i    = max over arrivals a ( L_i(a) + C_i + J_i - a )
     """
+    if not any(o is lane for o in lanes):
+        raise AssertionError(
+            "response_time_b: %r is not an element of `lanes` by identity. "
+            "Build the lane set ONCE and select from it -- a second builder "
+            "call yields equal-but-distinct objects, which `is not` will not "
+            "exclude, inflating the bound." % (lane.name,))
     L_busy = busy_period_b(lanes)
     if L_busy is None:
         return {"lane": lane.name, "diverged": True, "r": None}
