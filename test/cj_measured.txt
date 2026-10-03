@@ -1,0 +1,5 @@
+jobs 354
+svc_cycles 708
+jmiss_max 5
+op 0 n 220 min 2 max 2
+op 7 n 133 min 2 max 2

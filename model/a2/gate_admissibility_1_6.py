@@ -560,6 +560,69 @@ def c_idle_fire():
         % (fa.writes, rnd.transactions))
 
 
+def _bank_of(pin, n_uio):
+    """Which bank a pin index lands in under the ruled map."""
+    return "uio" if pin < n_uio else "uo_out"
+
+
+def c_od_bank(lanes):
+    """RULED -- an open-drain lane must be assigned a `uio` pin.
+
+    ⛔⛔ THIS CONDITION EXISTS BECAUSE S3's SIMULATION PRODUCED THE FAILURE AND
+    THE SCHEDULING PROOF COULD NOT SEE IT. With the drive-mode field missing
+    from the image, every lane defaulted to open-drain. Open-drain holds
+    `pin_out` at 0 and modulates the ENABLE -- and `uo_out` HAS NO ENABLE. So a
+    lane on a `uo_out` pin drove LOW ONCE AND STUCK THERE FOREVER, while the EDF
+    scheduler ran perfectly, every deadline was met, and the only visible symptom
+    was an edge counter reading 1.
+
+    ⭐ THIS IS THE ELECTRICAL-CLASS RULE AGAIN, ONE LEVEL DOWN. 1.6o checks the
+    pin BUDGET -- that the banks can hold the classes. Nothing checked the
+    ASSIGNMENT. A program can satisfy 1.6o perfectly and still map an open-drain
+    lane onto an output-only pin.
+
+    ⇒ Load-time rejection, because the engine cannot detect it: from inside the
+    datapath, driving `pin_out` low on a pin with no enable is a completely
+    ordinary thing to do.
+    """
+    # ⛔ LIKE 1.6c / 1.6j / 1.6l THIS IS A CONDITION ON A *PROGRAM*, not on the
+    # lane table: the pin ASSIGNMENT lives in the image's per-lane header, which
+    # the table does not carry. So the shipped row states the RULE and checks
+    # the one thing the table can settle -- that the release-needing classes
+    # even FIT in `uio` -- while the concrete rejected input is the must-fire.
+    # ⚠ A first version of this returned `not bad` with `bad` unreachable, i.e.
+    # it passed unconditionally. Recorded because a vacuous condition that
+    # prints PASS is worse than no condition at all.
+    from gate_pin_subsets import N_UIO, PINS_DIR
+    need_release = sum(PINS_DIR[l.name][2] + PINS_DIR[l.name][3] for l in lanes)
+    ok = need_release <= N_UIO
+    return ok, (
+        "RULE: a lane whose class must RELEASE (open-drain or tri-state) may "
+        "only be assigned a `uio` pin. Checkable here: %d release-needing pins "
+        "against %d `uio`, so the rule is SATISFIABLE. ⛔ Whether a given "
+        "program OBEYS it is a load-time check -- 1.6o checks the BUDGET, this "
+        "checks the ASSIGNMENT, and a program can pass 1.6o while mapping an "
+        "open-drain lane onto an output-only pin"
+        % (need_release, N_UIO))
+
+
+def c_od_bank_fire():
+    """⛔ The firing witness is the exact configuration S3's simulation hit."""
+    from gate_pin_subsets import N_UIO, N_UO
+    # an open-drain lane pointed at a uo_out index
+    od_pin = N_UIO + 0            # the first `uo_out` protocol pin
+    bank = _bank_of(od_pin, N_UIO)
+    fires = (bank == "uo_out")
+    return fires, (
+        "an OPEN-DRAIN lane assigned pin index %d lands in `%s`, which has no "
+        "enable -> REJECTED AT LOAD. ⛔ The observed failure was silent: the pin "
+        "drove low once and stuck forever while the scheduler met every "
+        "deadline and the only symptom was an edge count of 1. A scheduling "
+        "proof cannot see this, which is why it is a LOADER check and not an "
+        "engine one"
+        % (od_pin, bank))
+
+
 def c_miso_release(lanes):
     """RULED -- shared-MISO release is fixed IN HARDWARE, and what is left on
     the master is a CS SETUP, not an inter-select gap.
@@ -691,6 +754,8 @@ CONDITIONS = [
     ("1.6r", "shared MISO: release is ASYNC (async-clear enable); host owes "
              "only a CS SETUP before the first SCLK edge", c_miso_release,
      c_miso_release_fire),
+    ("1.6s", "an OPEN-DRAIN lane must be assigned a `uio` pin -- `uo_out` has "
+             "no enable, so the loader REJECTS it", c_od_bank, c_od_bank_fire),
 ]
 
 

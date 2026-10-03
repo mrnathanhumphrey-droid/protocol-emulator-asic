@@ -47,6 +47,17 @@ module tb_smoke;
   // design intent -- which this project has already recorded is not an
   // independent witness. So the bench counts cycles.
   integer   svc_cycles, svc_jobs, svc_max, prev_st;
+  // ⛔⛔ PER-OPCODE MIN *AND* MAX, NOT A MEAN. A mean of 2.00 is consistent with
+  // every job taking exactly 2 AND with some taking 1 and some taking 3. A2
+  // needs C_max, so the bench records both bounds per action type and a
+  // separate gate checks them against a derivation from the RTL's structure.
+  integer   op_min [0:7];
+  integer   op_max [0:7];
+  integer   op_n   [0:7];
+  integer   cur_svc, cur_op, j, fd;
+  // J, decomposed. `jitter_max` counts only the PREFETCH-MISS stall; the
+  // winner-registration cycle is structural and is derived, not counted.
+  integer   jmiss_max;
 
   initial begin
     $readmemh("test/smoke_image.hex", img);
@@ -90,14 +101,29 @@ module tb_smoke;
     ui_in[7] = 1'b0;
     prev_proto = uo_out[3:0];
     svc_cycles = 0; svc_jobs = 0; svc_max = 0; prev_st = 0;
+    cur_svc = 0; cur_op = 0;
+    for (j = 0; j < 8; j = j + 1) begin
+      op_min[j] = 9999; op_max[j] = 0; op_n[j] = 0;
+    end
     for (i = 0; i < 4000; i = i + 1) begin
       @(posedge clk);
       if (uo_out[0] !== prev_proto[0]) edges0 = edges0 + 1;
       if (uo_out[1] !== prev_proto[1]) edges1 = edges1 + 1;
       prev_proto = uo_out[3:0];
       // service time: cycles with the dispatch FSM out of IDLE, per job
-      if (dut.u_eng.st != 0) svc_cycles = svc_cycles + 1;
+      if (dut.u_eng.st != 0) begin
+        svc_cycles = svc_cycles + 1;
+        cur_svc = cur_svc + 1;
+        if (prev_st == 0) cur_op = dut.u_eng.a_op;
+      end
       if (prev_st == 0 && dut.u_eng.st != 0) svc_jobs = svc_jobs + 1;
+      // a service ENDED this cycle: record its length against its opcode
+      if (prev_st != 0 && dut.u_eng.st == 0) begin
+        if (cur_svc < op_min[cur_op]) op_min[cur_op] = cur_svc;
+        if (cur_svc > op_max[cur_op]) op_max[cur_op] = cur_svc;
+        op_n[cur_op] = op_n[cur_op] + 1;
+        cur_svc = 0;
+      end
       prev_st = dut.u_eng.st;
     end
 
@@ -152,6 +178,26 @@ module tb_smoke;
       $display("      at this architecture. Reported, never absorbed.");
       errors = errors + 1;
     end
+    $display("");
+
+    // ---- write the measurements for the derivation gate to check ------
+    jmiss_max = dut.u_eng.jitter_max;
+    fd = $fopen("test/cj_measured.txt", "w");
+    $fwrite(fd, "jobs %0d\n", svc_jobs);
+    $fwrite(fd, "svc_cycles %0d\n", svc_cycles);
+    $fwrite(fd, "jmiss_max %0d\n", jmiss_max);
+    for (j = 0; j < 8; j = j + 1)
+      if (op_n[j] > 0)
+        $fwrite(fd, "op %0d n %0d min %0d max %0d\n", j, op_n[j],
+                op_min[j], op_max[j]);
+    $fclose(fd);
+    $display("");
+    $display("==== PER-OPCODE SERVICE, MIN AND MAX ====");
+    for (j = 0; j < 8; j = j + 1)
+      if (op_n[j] > 0)
+        $display("  opcode %0d : n=%0d  min=%0d  max=%0d", j, op_n[j],
+                 op_min[j], op_max[j]);
+    $display("  (written to test/cj_measured.txt for the bounds gate)");
     $display("");
 
     if (errors == 0) $display("  SMOKE: PASS");

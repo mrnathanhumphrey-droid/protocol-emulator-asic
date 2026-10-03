@@ -385,6 +385,43 @@ def assert_r2_order_neutral(verbose: bool = True) -> bool:
 #   is their home and 0.9b now imports them back.
 L_SYNC = 3          # cycles, worst-case edge-detection latency (3-FF chain)
 L_JIT = 1           # cycles, async-capture uncertainty (the only part that is jitter)
+
+# ⛔⛔ J_PIPE -- DERIVED AND *NOT APPLIED*. READ THIS BEFORE QUOTING ANY r_i.
+# =============================================================================
+# THE SHIPPED LANES BELOW CARRY NO `J` AT ALL, SO EVERY PUBLISHED r_i AND THE
+# "min margin 14" ARE A J = 0 ANALYSIS -- while the stated design point has
+# always been "(C = 2, J_pipe = 1)" (frontier.py: "registering the EDF winner
+# makes every release uncertain by 1"). So the published numbers match NEITHER
+# 1.3 candidate. Logged as an ERROR, not a footnote.
+#
+# ⭐ S3 then MEASURED the engine and DERIVED the real bound from
+# src/pe_engine.v's structure (decomposed in gate_cj_bounds.py):
+#     winner registration                1   (frontier.py's original J_pipe)
+#     prefetch scan notice               1
+#     own refill  (P_REQ/P_WAIT/P_CAP)   3
+#     in-flight refill for another lane  3
+#     header load                        0   (dispatch is gated on hdr_done)
+#                                       ---
+#     J_PIPE_DERIVED                      8
+# with I2C alone carrying J_PIPE + L_JIT, as the REACTIVE-J lane.
+# At that bound the set is still FEASIBLE: r = {18, 15, 12, 17, 13}, MIN MARGIN
+# 5, which still clears the margin >= 4 bar. Digest would move to 10b327701c7c.
+#
+# ⛔⛔ APPLYING IT IS BLOCKED ON TWO THINGS FOUND WHILE TRYING TO:
+#   1. pyRTA's task model HAS NO JITTER PARAMETER. Its tasks are
+#      Periodic(t)/FullyNonPreemptive(C)/Deadline(D)/Priority -- nowhere to put
+#      J. So the foreign witness this project quotes ("pyRTA 5/5,
+#      foreign-checked") has only ever covered the J = 0 set, and at J > 0 the
+#      numbers would rest on our OWN recurrence alone.
+#   2. `response_time_b` adds J to the SUBJECT's response (r = L + C + J - a)
+#      and adds NOTHING to the interference the jittery lane imposes on OTHERS.
+#      A lane releasable up to J early can interfere EARLIER, so this may be
+#      OPTIMISTIC -- the forbidden direction. Unverified either way.
+#
+# ⇒ Publishing 8 would replace a KNOWN error with an UNVERIFIED one, and would
+#   quote a weaker foreign check as if it were the same one. The error stays
+#   recorded and visible instead. WILSON RULES.
+J_PIPE_DERIVED = 8
 OUT_REG = 1         # cycles, output register to pad
 TSU_MASTER = 1      # cycles, the PEER master's setup requirement. ⚠ PARAMETRIC:
                     # no SPI master device is picked, so 1 cycle (20 ns) stands

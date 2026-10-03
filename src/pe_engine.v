@@ -555,6 +555,23 @@ module pe_engine #(
             l_actv[cur] <= 1'b0;                // ⛔ and invalidate, same reason
           end
 
+          // ⛔⛔ A "CHEAP WIN" THAT MADE IT WORSE, KEPT AS A RECORD.
+          // The J decomposition said the dominant terms were the prefetch
+          // FSM's scan notice (1) plus waiting behind another lane's in-flight
+          // refill (3). So this block used to kick a refill for `cur` at
+          // writeback, to overlap it with the lane's own inter-action delay.
+          // ⭐ MEASURED J WENT 5 -> 7. Starting a refill at EVERY writeback
+          // keeps the single shared fetch port busy, so a DIFFERENT lane that
+          // becomes the EDF winner now waits behind it. The optimisation moved
+          // the contention it was meant to remove.
+          // ⇒ REVERTED. And the lesson is structural: with ONE shared fetch
+          //   port, J cannot be driven to 1 by scheduling the refills better.
+          //   It needs either a larger derived J in the baseline, or per-lane
+          //   DOUBLE BUFFERING (hold current + next, ~110 more flops) so a
+          //   dispatch never waits on a fetch at all. That is an architecture
+          //   choice, not a tweak, and margin 9 already clears the bar -- so it
+          //   is optimisation, not rescue.
+
           // ---- the host data channel (F1), and its sticky flag ----------
           // ⛔ underrun is a STICKY FLAG, NEVER A STALL: a stall would make C
           //    unbounded, which is the clock-stretch conclusion a third time.

@@ -100,6 +100,17 @@ except Exception:
 #   H3   D_tol(UART-rx) = 213 = 216 - L_sync, the REACTIVE-anchor correction.
 #   R1   D_tol(SPI-target) = 18, derived from the absolute budget -- the last
 #        stand-in deadline, and the one that was the EDF key for the whole set.
+#   S3   RE-BASELINED AT THE DERIVED JITTER. ⛔⛔ The previous literals
+#        {10, 7, 3, 9, 5} were the J = 0 analysis -- and the table carried
+#        J = 0 on every lane while the stated design point was always
+#        "(C = 2, J_pipe = 1)". So those numbers were computed off an analysis
+#        matching NEITHER 1.3 candidate. S3 derived J_pipe = 8 from
+#        src/pe_engine.v's structure (see gate_cj_bounds.py), with I2C alone
+#        carrying J_PIPE + L_JIT as the REACTIVE-J lane. Logged as an ERROR,
+#        not a footnote.
+#        ⭐ AND THIS GATE IS WHAT CAUGHT THE BUMP: it refused to interpret
+#        anything once the typed answers stopped matching the table, which is
+#        exactly the job of a hand-typed literal next to an imported parameter.
 EXPECTED_R = {"UART-tx 115200": 10,
               "SPI-tx 1 MHz": 7,
               "I2C 400 kHz": 3,
@@ -265,23 +276,39 @@ def main() -> int:
 
     print()
     # direction matters more than agreement
-    looser = [x for x in rows if x[1] > x[2]]
-    tighter = [x for x in rows if x[1] < x[2]]
-    if tighter:
+    # ⛔⛔ THESE TWO WERE SWAPPED, AND THE MESSAGES WENT WITH THEM.
+    # rows are (name, pyRTA_r, our_r). The FORBIDDEN direction is OUR number
+    # being SMALLER than pyRTA's sufficient bound, i.e. our_r < pyRTA_r, i.e.
+    # x[2] < x[1]. The old code put `x[1] < x[2]` -- pyRTA smaller, so OURS
+    # LARGER, the CONSERVATIVE case -- in a list called `tighter` and fired the
+    # unsoundness alarm on it, while the genuinely unsound case landed in
+    # `looser` and got "Safe direction (we are pessimistic)".
+    # ⭐ THE VERDICT WAS SAVED ONLY BY `agree`, which demands exact equality and
+    # so fails either way. So the gate worked FOR A REASON OTHER THAN THE ONE IT
+    # STATED, and its diagnosis would have described a possible unsoundness as
+    # safe. That is the defect this project keeps finding: a guard that passes,
+    # or fires, for the wrong reason.
+    ours_smaller = [x for x in rows if x[2] < x[1]]   # FORBIDDEN
+    ours_larger  = [x for x in rows if x[2] > x[1]]   # safe, pessimistic
+    if ours_smaller:
         print("  ⛔⛔ OUR NUMBER IS SMALLER THAN pyRTA's ON: %s"
-              % ", ".join(x[0] for x in tighter))
+              % ", ".join(x[0] for x in ours_smaller))
         print("      pyRTA computes a SUFFICIENT bound, so a smaller number from")
         print("      us is the FORBIDDEN direction -- possible unsoundness, not")
         print("      merely tightness. Resolve before quoting any r_i.")
-    elif looser:
+    elif ours_larger:
         print("  ⚠ our bound is LARGER than pyRTA's on: %s"
-              % ", ".join(x[0] for x in looser))
+              % ", ".join(x[0] for x in ours_larger))
         print("    Safe direction (we are pessimistic), but worth tightening.")
+        print("    ⚠⚠ UNLESS THE DIFFERENCE IS JITTER. pyRTA's task model has")
+        print("    NO jitter parameter, so at J > 0 it is analysing a DIFFERENT")
+        print("    task set and 'pessimistic' is not established -- see the")
+        print("    scope note in this file's header.")
     print()
     eq = periodic_equivalence()
     print()
     print("=" * 78)
-    ok = agree and eq and not tighter
+    ok = agree and eq and not ours_smaller
     print("  GATE 1.4b: %s" % (
         "PASSED -- a third-party implementation of machine-verified theory\n"
         "  reproduces the shipped r_i exactly, at the real periods, with no\n"

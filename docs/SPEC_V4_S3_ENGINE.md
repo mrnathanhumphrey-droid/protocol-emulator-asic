@@ -209,3 +209,134 @@ re-baseline · a 1.6 condition for open-drain-on-`uio` · per-lane fetch or a
 delay condition if `J ≤ 1` is required · the protocol opcode *semantics*
 verified per protocol (Phase 2 cocotb) · the area/timing numbers from the first
 real `gds` run · re-read the TopMetal1 pitch · H4.
+
+---
+
+# Addendum — C and J as BOUNDS, and why the re-baseline is BLOCKED
+
+## ⛔⛔ The catch was right: I reported a mean and a sample as bounds
+
+`C = 2.00` was **708 / 354, a mean** — consistent with every job taking 2 *and*
+with a mix of 1s and 3s. `J = 5` was **the largest value in one run**, one
+program at one phase alignment: a **floor** on the true maximum, not a bound.
+
+New gate **`model/a2/gate_cj_bounds.py`** holds the derivations; simulation is
+only the **check**. ⛔ A measurement can **falsify** a bound, never raise one.
+
+### `C_max = 2`, derived
+
+From the FSM: `ST_IDLE -> ST_DRIVE -> ST_WB -> ST_IDLE`, with **both exits
+unconditional and no opcode-dependent branch** — the opcode selects what is
+written *inside* a state, never how many states are visited.
+
+| opcode | derived | sim n | sim min | sim max |
+|---|---|---|---|---|
+| LEVEL | 2 | 220 | **2** | **2** |
+| REARM/loop | 2 | 133 | **2** | **2** |
+| SHIFT, SHIFTIN, READBIT, START, STOP, ARM | 2 | — | — | ⚠ **UNEXERCISED** |
+
+⭐ `min == max == 2` is the evidence a mean could not give.
+⛔ **6 of 8 action types are unexercised and therefore unmeasured.** The
+structural argument covers them; nothing has checked it — which is exactly what
+reverse traceability fixes, since the census programs need all six.
+
+### `J_max = 8`, derived by source
+
+| source | cycles | counted by the RTL? |
+|---|---|---|
+| winner registration | 1 | no — structural; this *is* frontier.py's `J_pipe` |
+| prefetch scan notice | 1 | yes |
+| own refill (`P_REQ/P_WAIT/P_CAP`) | 3 | yes |
+| in-flight refill for another lane | 3 | yes |
+| header load | 0 | yes — zero *only* because dispatch is gated on `hdr_done` |
+| **total** | **8** | countable portion **7** |
+
+Simulated max **5 ≤ 7** ⇒ the derivation is **not contradicted**. ⚠ Not confirmed
+either.
+
+### ⛔ The "cheap win" made it worse — and that is the structural answer
+
+Scan notice + in-flight refill = 4 of the 7 countable cycles, so I kicked a
+refill at **writeback** to overlap it with the lane's own delay. **Measured J
+went 5 -> 7.** Refilling at every writeback keeps the single shared fetch port
+busy, so a *different* lane that becomes winner waits behind it — the
+optimisation **moved** the contention it was meant to remove. Reverted, recorded
+in the RTL.
+
+⇒ **With one shared fetch port, J cannot be driven to 1 by scheduling refills
+better.** It needs per-lane **double buffering** (current + next, ~110 more
+flops). Margin still clears the bar, so this is **optimisation, not rescue**.
+
+## ⛔⛔ The re-baseline is BLOCKED, and the blockers are the finding
+
+The table was re-baselined at the derived bound and then **reverted**. What it
+would have been: `J = 8` (I²C `J + L_JIT = 9`, as `frontier.py` assigns it),
+`r = {18, 15, 12, 17, 13}`, **min margin 5** — still feasible, still clearing the
+>= 4 bar, digest moving to `10b327701c7c`.
+
+⚠ **5, not the 6 I first estimated** — I²C carries the extra `L_JIT`.
+
+**1. pyRTA has no jitter parameter.** Its tasks are
+`Periodic(t) / FullyNonPreemptive(C) / Deadline(D) / Priority` — nowhere to put
+`J`. At the re-baseline it returned the **old** `{10, 7, 3, 9, 5}`, because it
+was analysing a different task set. ⇒ **The foreign witness this project quotes,
+"pyRTA 5/5, foreign-checked", has only ever covered the `J = 0` set.**
+
+**2. Our own jitter handling may be optimistic.** `response_time_b` computes
+`r = L + C + J - a`: it adds `J` to the **subject's** response and **nothing** to
+the interference the jittery lane imposes on **others**. A lane releasable up to
+`J` early can interfere **earlier**. That is the *forbidden* direction, and it is
+unverified.
+
+⇒ Publishing `8` would replace a **known** error with an **unverified** one and
+quote a weaker foreign check as if it were the same one. The derivation stays in
+`bursty.py` as `J_PIPE_DERIVED = 8`, **not applied**. **Wilson rules.**
+
+**Ledger, as an error:** the shipped table carries `J = 0` while the stated
+design point has always been `(C = 2, J_pipe = 1)`, so the published *"min margin
+14"* was computed off an analysis matching **neither** 1.3 candidate.
+
+## ⛔⛔ A bug in the soundness check itself — inverted
+
+```python
+looser  = [x for x in rows if x[1] > x[2]]   # pyRTA > ours -> OURS SMALLER
+tighter = [x for x in rows if x[1] < x[2]]   # pyRTA < ours -> OURS LARGER
+if tighter: print("OUR NUMBER IS SMALLER ... FORBIDDEN direction")
+```
+
+The list named `tighter` held the cases where **ours is larger** — the
+*conservative* direction — and fired the unsoundness alarm on them, while the
+genuinely forbidden case landed in `looser` and got *"Safe direction (we are
+pessimistic)."*
+
+⭐ **The verdict was saved only by `agree`**, which demands exact equality and so
+fails either way. The guard **fired for a reason other than the one it stated**,
+and would have described a possible unsoundness as safe. Fixed, with the jitter
+scope note attached to the "pessimistic" branch.
+
+## ✅ 1.6s — open-drain must map to `uio`
+
+**19 conditions now.** Loader rejection, must-fire = the exact configuration S3
+hit.
+
+⛔ **The failure was silent in the worst way:** the pin drove low once and stuck
+forever while the EDF scheduler met every deadline, and the only symptom was an
+edge count of 1. **A scheduling proof cannot see this.** 1.6o checks the
+**budget**; 1.6s checks the **assignment**, and a program can pass 1.6o while
+violating 1.6s.
+
+⚠ A first version returned `not bad` with `bad` unreachable — it passed
+unconditionally. Recorded, because **a vacuous condition that prints PASS is
+worse than no condition at all.**
+
+## Status
+
+**23 of 23** in-suite green, digest `8ea5756203e1` **unchanged** (re-baseline
+reverted), `price_gates.sh` 9 of 9, 1.6 at **19 conditions**.
+Out-of-suite: `part1_param_contract.py` **green**, `gate_cj_bounds.py` **green**,
+`f2_flop_driven_outputs.py` green (self-test), `macro_harden_gate.py` red on
+purpose.
+
+**Owed:** Wilson's ruling on the two J blockers · reverse traceability (census
+programs on the golden model, which also exercises the 6 unmeasured opcodes) ·
+F2 against CI's netlist · the double-buffer decision.
