@@ -73,17 +73,43 @@ def subsets(xs):
 
 
 def gen(lanes, target: int, R: int, tag: str = "edf", tie: str = "nondet") -> str:
-    """lanes = [(name, T, C, D)] or [(name, T, C, D, n, t)]; target = analysed
-    lane index; R = bound.
+    """lanes = [(name, T, C, D)], [(name,T,C,D,n,t)] or [(name,T,C,D,n,t,J)];
+    target = analysed lane index; R = bound.
 
     BAD is reachable iff some schedule gives the target lane a response > R.
 
-    ⭐ THE n == 1 PATH IS EMITTED BYTE-IDENTICALLY to the version validated in
-    Part 3. A bursty lane needs two timers (age since its last event, and time
-    since its burst began) where a periodic lane needs one, so the bursty edges
-    are a SEPARATE branch rather than a generalisation of the periodic ones.
-    Rewriting the periodic path to share code would have put the one artefact
-    that is already foreign-validated back into doubt for no gain.
+    ⭐ THE n == 1, J == 0 PATH IS EMITTED BYTE-IDENTICALLY to the version
+    validated in Part 3. A bursty lane needs two timers (age since its last
+    event, and time since its burst began) where a periodic lane needs one, so
+    the bursty edges are a SEPARATE branch rather than a generalisation of the
+    periodic ones. Rewriting the periodic path to share code would have put the
+    one artefact that is already foreign-validated back into doubt for no gain.
+    The same rule now applies to jitter: `J > 0` is a third branch, and a lane
+    with `J == 0` declares no jitter variables at all, so every existing .tck
+    this generator produced is reproducible from this file.
+
+    ⛔⛔ RELEASE JITTER IS PER-JOB, NOT A PHASE. The existing model already
+    explores every first-release PHASE, and it would be easy to mistake that for
+    jitter coverage. It is not: a phase offset is chosen ONCE and then the lane
+    is exactly periodic forever, whereas release jitter re-rolls on EVERY job,
+    so consecutive releases can close up to `T - J` apart and bunch. Bunching is
+    precisely the effect the recurrence's inflated arrival count exists to bound,
+    so the phase nondeterminism cannot witness it.
+
+    THE ENCODING, and why the deadline stays on the NOMINAL release:
+      a_i   time since this lane's last NOMINAL release. Drives the period, the
+            EDF guard, and the response test -- all three must be measured from
+            the nominal release, because `D` is relative to it and `r_i` is what
+            `(r - C) <= D_tol` tests as a start delay.
+      w_i   1 while a released-but-delayed job waits out its jitter
+      q_i   that job's remaining delay, chosen nondeterministically in [0, J_i]
+            at the nominal release and counted down once per tick
+      p_i   pending AND schedulable -- set when the delay expires, so the
+            scheduler sees the ACTUAL release while the deadline tracks nominal
+
+    ⭐ A job delayed past its own next nominal release sets `ovr`, exactly as an
+    overrun does: the single-pending assumption is the model's, and jitter is a
+    new way to break it, so it is flagged rather than absorbed.
     """
     N = len(lanes)
     T = [l[1] for l in lanes]
@@ -91,10 +117,24 @@ def gen(lanes, target: int, R: int, tag: str = "edf", tie: str = "nondet") -> st
     D = [l[3] for l in lanes]
     nb = [(l[4] if len(l) > 4 else 1) for l in lanes]
     tb = [(l[5] if len(l) > 5 else l[1]) for l in lanes]
+    Jv = [(l[6] if len(l) > 6 else 0) for l in lanes]
     for i in range(N):
         if nb[i] * tb[i] > T[i]:
             raise ValueError("lane %d: burst n*t=%d exceeds T=%d"
                              % (i, nb[i] * tb[i], T[i]))
+        if Jv[i] and nb[i] > 1:
+            # ⛔ NOT a limitation worth hiding: the bursty-with-jitter cross
+            # product is untested, and emitting it would produce a model whose
+            # agreement or disagreement I could not attribute.
+            raise ValueError(
+                "lane %d: jitter on a BURSTY lane (n=%d, J=%d) is not emitted. "
+                "The bursty branch carries two timers and the jitter branch a "
+                "third; their interaction has no validated reference, so a "
+                "result from it would be uninterpretable." % (i, nb[i], Jv[i]))
+        if Jv[i] >= T[i]:
+            raise ValueError("lane %d: J=%d >= T=%d -- a job would be delayed "
+                             "past its own successor and every release would "
+                             "set ovr." % (i, Jv[i], T[i]))
     cmax = max(C)
     L = []
     w = L.append
@@ -108,6 +148,10 @@ def gen(lanes, target: int, R: int, tag: str = "edf", tie: str = "nondet") -> st
         w("int:1:0:%d:0:a%d" % (max(1, T[i]), i))   # age since this lane's last event
         if nb[i] == 1:
             w("int:1:0:1:0:st%d" % i)     # periodic: has it started releasing yet
+            if Jv[i]:
+                # ⛔ declared ONLY when J > 0, so a J = 0 model is byte-identical
+                w("int:1:0:1:0:w%d" % i)              # a job awaits its delay
+                w("int:1:0:%d:0:q%d" % (Jv[i], i))    # remaining delay
         else:
             w("int:1:0:%d:0:b%d" % (max(1, T[i]), i))   # time since burst start
             w("int:1:0:%d:0:k%d" % (nb[i], i))          # events so far this burst
@@ -156,6 +200,49 @@ def gen(lanes, target: int, R: int, tag: str = "edf", tie: str = "nondet") -> st
               % (i, nxt, i, n, i, T[i], i, i, i, i, i))
             w("edge:P:R%d:OVR:tau{provided: k%d==%d && b%d==%d && p%d==1 : do: ovr=1}"
               % (i, i, n, i, T[i], i))
+            continue
+        if Jv[i]:
+            # ---- periodic lane WITH RELEASE JITTER ----
+            # The delay delta is re-rolled at EVERY nominal release, which is
+            # what makes this jitter rather than a phase: one edge per value of
+            # delta in [0, J], all enabled, so the checker explores every
+            # combination over the whole run.
+            Ji = Jv[i]
+            # (1) not started: wait, or take the first nominal release now
+            w("edge:P:R%d:%s:tau{provided: st%d==0}" % (i, nxt, i))
+            w("edge:P:R%d:%s:tau{provided: st%d==0 : do: st%d=1; p%d=1; a%d=0}"
+              % (i, nxt, i, i, i, i))                       # delta = 0
+            for d in range(1, Ji + 1):
+                w("edge:P:R%d:%s:tau{provided: st%d==0 : "
+                  "do: st%d=1; w%d=1; q%d=%d; a%d=0}"
+                  % (i, nxt, i, i, i, i, d, i))             # delta = d
+            # (2) a delayed job's wait expires -> it becomes schedulable NOW.
+            #     `p%d==0` is required: if the previous job were still pending
+            #     this would be two pending jobs, which is `ovr`, flagged at the
+            #     nominal boundary in (4) rather than silently merged here.
+            w("edge:P:R%d:%s:tau{provided: st%d==1 && w%d==1 && q%d==0 && p%d==0 "
+              ": do: p%d=1; w%d=0}" % (i, nxt, i, i, i, i, i, i))
+            w("edge:P:R%d:OVR:tau{provided: st%d==1 && w%d==1 && q%d==0 && p%d==1 "
+              ": do: ovr=1}" % (i, i, i, i, i))
+            # (3) still mid-period and nothing due: pass through
+            w("edge:P:R%d:%s:tau{provided: st%d==1 && a%d<%d && w%d==0}"
+              % (i, nxt, i, i, T[i], i))
+            w("edge:P:R%d:%s:tau{provided: st%d==1 && a%d<%d && w%d==1 && q%d>0}"
+              % (i, nxt, i, i, T[i], i, i))
+            # (4) the next NOMINAL release. The single-pending assumption needs
+            #     BOTH p==0 and w==0 -- a job still waiting out its jitter when
+            #     its successor is released is the assumption breaking, and
+            #     jitter is a new way to break it.
+            w("edge:P:R%d:%s:tau{provided: st%d==1 && a%d==%d && p%d==0 && w%d==0 "
+              ": do: p%d=1; a%d=0}" % (i, nxt, i, i, T[i], i, i, i, i))
+            for d in range(1, Ji + 1):
+                w("edge:P:R%d:%s:tau{provided: st%d==1 && a%d==%d && p%d==0 && "
+                  "w%d==0 : do: w%d=1; q%d=%d; a%d=0}"
+                  % (i, nxt, i, i, T[i], i, i, i, i, d, i))
+            w("edge:P:R%d:OVR:tau{provided: st%d==1 && a%d==%d && p%d==1 : "
+              "do: ovr=1}" % (i, i, i, T[i], i))
+            w("edge:P:R%d:OVR:tau{provided: st%d==1 && a%d==%d && w%d==1 : "
+              "do: ovr=1}" % (i, i, i, T[i], i))
             continue
         # ---- periodic lane: unchanged from the Part 3 validated model ----
         # not started yet: either release now, or keep waiting
@@ -251,6 +338,20 @@ def gen(lanes, target: int, R: int, tag: str = "edf", tie: str = "nondet") -> st
               % (i, nxt, i, T[i], i, T[i], i, i))
             w("edge:P:A%d:%s:tau{provided: a%d==%d && b%d==%d}"
               % (i, nxt, i, T[i], i, T[i]))
+            continue
+        if Jv[i]:
+            # the nominal age and the release-delay countdown advance on the
+            # SAME tick, so all four cap/countdown combinations need an edge --
+            # a missing one stalls the cycle and silently drops behaviours,
+            # which is how a reachability model passes by exploring less.
+            w("edge:P:A%d:%s:tau{provided: a%d<%d && q%d>0 : "
+              "do: a%d=a%d+1; q%d=q%d-1}" % (i, nxt, i, T[i], i, i, i, i, i))
+            w("edge:P:A%d:%s:tau{provided: a%d<%d && q%d==0 : do: a%d=a%d+1}"
+              % (i, nxt, i, T[i], i, i, i))
+            w("edge:P:A%d:%s:tau{provided: a%d==%d && q%d>0 : do: q%d=q%d-1}"
+              % (i, nxt, i, T[i], i, i, i))
+            w("edge:P:A%d:%s:tau{provided: a%d==%d && q%d==0}"
+              % (i, nxt, i, T[i], i))
             continue
         w("edge:P:A%d:%s:tau{provided: a%d<%d : do: a%d=a%d+1}"
           % (i, nxt, i, T[i], i, i))

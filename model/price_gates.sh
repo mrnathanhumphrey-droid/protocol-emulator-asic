@@ -102,6 +102,26 @@ run_must_be_red \
     "gate_rearm.py with PYRTA_SRC removed (Ruling 2's 6-lane check)" \
     env PYRTA_SRC="$NOPE" python model/a2/gate_rearm.py
 
+run_must_be_red \
+    "gate_pyrta_jitter.py with PYRTA_SRC removed (the J>0 witness)" \
+    env PYRTA_SRC="$NOPE" python model/a2/gate_pyrta_jitter.py
+
+# ⛔⛔ THE JITTER FIX, PRICED BY REVERTING IT. Removing a tool prices a gate's
+# AUTHORITY; this prices the FIX. `BURSTY_NOMINAL_INTERFERENCE=1` makes
+# `response_time_b` default to the old nominal-curve sum -- the unsound form --
+# and the must-fire in `bursty.py` is then REQUIRED to fail. ⭐ Without this arm
+# the must-fire is a check that has only ever been seen pass, which is the same
+# unmeasured artefact as an audit that has never rejected anything: it would
+# still read PASS if someone deleted the jitter term from `N_J` and left the
+# three printed faces computing the same number twice.
+run_must_be_red \
+    "bursty.py with the jitter interference term REVERTED (must-fire must fail)" \
+    env BURSTY_NOMINAL_INTERFERENCE=1 python model/a2/bursty.py
+
+run_must_be_red \
+    "gate_j_sound.py with the jitter interference term REVERTED" \
+    env BURSTY_NOMINAL_INTERFERENCE=1 python model/a2/gate_j_sound.py
+
 # --- the A1 digest meta-check, priced by MUTATING THE ARTEFACT ------------
 # ⛔ Not "remove a tool" like the arms above -- this one injects a gate that
 # analyses a STALE hand-typed lane table, which is the defect A1 screens for,

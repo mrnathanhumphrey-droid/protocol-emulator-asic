@@ -44,6 +44,15 @@ try:
 except Exception:
     pass
 
+# ⛔ SET ONLY BY `price_gates.sh`, to revert the jitter fix and require the
+# must-fire to go red. Read once at import so it cannot be flipped mid-run and
+# leave half a table computed each way.
+_NOMINAL_ONLY = os.environ.get("BURSTY_NOMINAL_INTERFERENCE") == "1"
+if _NOMINAL_ONLY:
+    print("  ⚠⚠ BURSTY_NOMINAL_INTERFERENCE=1 -- the jitter interference term "
+          "is REVERTED to the unsound nominal curve. This is the pricing arm; "
+          "every number below is the OLD, WRONG one by construction.")
+
 
 class BLane:
     """A lane with a bursty arrival curve. n = 1 is an ordinary periodic lane.
@@ -124,12 +133,62 @@ class BLane:
         return self.D_tol - (r - self.C)
 
     def N(self, delta: int) -> int:
-        """Events arriving in the closed interval [0, delta]. 0 for delta < 0."""
+        """NOMINAL events arriving in the closed interval [0, delta]. 0 if < 0.
+
+        ⛔⛔ THIS IS THE JITTER-FREE CURVE AND IT MUST NOT BE USED FOR
+        INTERFERENCE. Use `N_J`. See its docstring for the bug this caused.
+        """
         if delta < 0:
             return 0
         full = delta // self.T
         rem = delta % self.T
         return self.n * full + min(self.n, rem // self.t + 1)
+
+    def N_J(self, delta: int) -> int:
+        """JITTER-INFLATED arrival count -- the one the interference sum needs.
+
+        ⛔⛔⛔ THE BUG THIS REPLACES, AND ITS DIRECTION. `response_time_b` summed
+        `min(o.N(L), o.N(a + D_i - D_j)) * o.C` -- the NOMINAL curve, with no
+        `J` anywhere. So release jitter entered the subject's own response
+        (`r = L + C + J - a`) and entered NOTHING in the interference that a
+        jittery lane imposes on the others. A lane whose releases can bunch up
+        by `J` can deliver more jobs into a window than its period allows, so
+        dropping the term UNDER-counts interference and UNDER-estimates `r_i`.
+        That is the one direction a bound may not err in.
+
+        ⭐ IT WAS NOT A GENERALISATION GAP -- THE PERIODIC FORM IT WAS GATED
+        AGAINST ALREADY HAD THE TERM. `rta_spuri.w_contribution` reads
+        `floor((t + J_j)/T_j) + 1` and `floor((a + J_j + D_i - D_j)/T_j) + 1`.
+        The bursty rewrite dropped both while keeping the vocabulary, and
+        `assert_reduces_to_periodic` -- the mechanical gate whose entire job is
+        to catch exactly this -- passed, because EVERY lane it constructs takes
+        the default `J = 0`. At J = 0 the two curves are identically equal, so
+        the gate compared them on the one slice where no disagreement can
+        exist. An identity filter, in the soundness checker. The gate is now
+        required to run a non-zero J (see `assert_reduces_to_periodic`).
+
+        THE DERIVATION. A job's release may be delayed by up to `J` after its
+        nominal release, so an event nominally at time `s` can be observed
+        anywhere in `[s, s + J]`. The observed events in `[0, delta]` are
+        therefore a subset of the events NOMINALLY in `[-J, delta]`, and by
+        periodicity that window has the same count as `[0, delta + J]`:
+
+            N_J(delta) = N(delta + J)
+
+        ⭐ AT n = 1 THIS IS EXACTLY SPURI'S TERM: `floor((delta + J)/T) + 1`.
+        That identity is what `assert_reduces_to_periodic` now checks at J > 0,
+        so the two implementations can no longer drift apart in silence.
+        """
+        if _NOMINAL_ONLY:
+            # ⛔ THE PRICING ARM, AND IT IS NOT A DEBUG SWITCH. `price_gates.sh`
+            # sets BURSTY_NOMINAL_INTERFERENCE=1 to REVERT the fix and then
+            # REQUIRES the must-fire to fail. A must-fire that has only ever
+            # been seen pass has unknown strength -- it would read PASS just the
+            # same if the jitter term were deleted and its three faces ended up
+            # comparing one number against itself. This is how the fix is shown
+            # to be load-bearing rather than merely present.
+            return self.N(delta)
+        return self.N(delta + self.J)
 
     def arrivals(self, horizon: int) -> list:
         """Every event arrival time in [0, horizon] -- the candidate offsets."""
@@ -155,9 +214,20 @@ class BLane:
 
 # ============================================================================
 def busy_period_b(lanes: list, cap: int = 2_000_000):
+    """L = the synchronous busy period, on the JITTER-INFLATED curve.
+
+    ⛔ `N` HERE WOULD BE WRONG FOR A SECOND, QUIETER REASON than the
+    interference sum. `L_busy` is only used as a HORIZON -- it sets how far
+    `arrivals()` is searched for the offset `a`. Understating it does not
+    understate any single `r_i` directly; it drops CANDIDATE OFFSETS, and
+    Spuri's Lemma 4.1 is precisely the statement that the worst `a` need not be
+    the first one. So the error would surface as a `max` taken over too small a
+    set -- an under-estimate with no term visibly missing from the recurrence.
+    Inflating the curve can only lengthen the horizon, which is safe.
+    """
     L = sum(l.C for l in lanes)
     for _ in range(100_000):
-        nxt = sum(l.N(L) * l.C for l in lanes)
+        nxt = sum(l.N_J(L) * l.C for l in lanes)
         if nxt == L:
             return L
         if nxt > cap:
@@ -167,11 +237,80 @@ def busy_period_b(lanes: list, cap: int = 2_000_000):
 
 
 def blocking_at_b(lane: BLane, lanes: list, a: int) -> tuple:
+    """B_i(a) = max{C_j - 1 : j != i, D_j > a + D_i}.
+
+    ⭐ WHY THERE IS NO `J` IN THIS FILTER, DERIVED RATHER THAN INHERITED. The
+    ruling asked for jitter in the blocking eligibility as well as in the
+    interference. Worked through, the term is ALREADY the conservative one, and
+    adding `J` here would move it in the wrong direction:
+
+      * deadlines in this project are relative to the NOMINAL release -- that is
+        what makes `r = L + C + J - a` a response measured from `a`, and
+        `(r - C) <= D_tol` a start delay the datasheet can bound;
+      * a job of lane j with nominal release `s` therefore has absolute deadline
+        `s + D_j` NO MATTER how late its actual release lands;
+      * to block, it must already be executing at the analysed release, so its
+        actual release precedes it, which under jitter admits nominal releases
+        as early as `s = -J_j`;
+      * those jobs carry deadlines in `[D_j - J_j, D_j]`, and the filter
+        qualifies a blocker when its deadline EXCEEDS `a + D_i`. The largest
+        deadline in that range is `D_j`, at `s = 0` -- which is the un-inflated
+        value already tested.
+
+    So jitter widens the set of j-jobs that can be mid-execution, but every one
+    it adds carries an EARLIER deadline than the one already admitted, and a
+    `max` over a set cannot grow by adding members that fail its filter.
+    Inflating by `+J_j` here would admit blockers whose deadlines are too early
+    to invert priority -- conservative, but by an amount with no derivation, and
+    `price_jitter_blocking()` measures it rather than arguing it.
+    """
     who = [l for l in lanes if l is not lane and l.D > a + lane.D]
     return (max(l.C - 1 for l in who) if who else 0), [l.name for l in who]
 
 
-def response_time_b(lane: BLane, lanes: list, horizon: int | None = None) -> dict:
+def blocking_at_b_from_jitter_model(lane: BLane, lanes: list, a: int) -> tuple:
+    """The blocking filter rebuilt FROM the jitter model, to check the shipped one.
+
+    ⛔⛔ THE FIRST VERSION OF THIS WAS A STRAWMAN AND IT FIRED FALSELY. It tested
+    `D_j + J_j > a + D_i` and reported that 184 of 432 swept instances changed
+    their blocking term -- which read as "the derivation is wrong, escalate".
+    It was the PROBE that was wrong. `D_j` is a RELATIVE deadline; `D_j + J_j`
+    is not the absolute deadline of any job in the model, under jitter or
+    without it. Adding a release delay to a relative deadline does not delay the
+    deadline at all -- a job released late has LESS time left, not more. So the
+    strawman admitted blockers that cannot exist, and its 184 disagreements
+    measured nothing but its own construction. A dramatic number out of my own
+    helper, again.
+
+    THE DERIVED FORM. Enumerate what jitter actually admits. A j-job can block
+    the analysed instance only if it is already executing when that instance
+    arrives, so its ACTUAL release precedes the arrival; with a delay of up to
+    `J_j`, the nominal releases that can land at or before the busy-period start
+    are `s in [-J_j, 0]`. Deadlines are relative to the NOMINAL release, so such
+    a job's absolute deadline is `s + D_j`, and it inverts priority only when
+    that exceeds `a + D_i`:
+
+        qualifies  <=>  max_{s in [-J_j, 0]} (s + D_j) > a + D_i
+                   <=>  D_j > a + D_i                  (the max is at s = 0)
+
+    ⭐ SO THE SHIPPED FILTER IS THE WIDEST CASE ALREADY, and jitter adds only
+    j-jobs whose deadlines are EARLIER -- members that fail the filter, which a
+    `max` cannot grow by. This function computes the max explicitly instead of
+    asserting the algebra, so a sign slip in either place shows up as a
+    disagreement rather than as agreement by construction.
+    """
+    who = []
+    for l in lanes:
+        if l is lane:
+            continue
+        latest = max(s + l.D for s in range(-l.J, 1))     # the max, enumerated
+        if latest > a + lane.D:
+            who.append(l)
+    return (max(l.C - 1 for l in who) if who else 0), [l.name for l in who]
+
+
+def response_time_b(lane: BLane, lanes: list, horizon: int | None = None,
+                    jitter_in_interference: bool = True) -> dict:
     """r_i for a bursty lane set. The generalisation of `response_time_spuri`.
 
     ⛔⛔ THE ANALYSED LANE MUST BE AN ELEMENT OF `lanes` BY IDENTITY, AND THIS IS
@@ -189,8 +328,17 @@ def response_time_b(lane: BLane, lanes: list, horizon: int | None = None) -> dic
     here rather than in each caller.
 
         L_i(a) = (N_i(a) - 1)*C_i + B_i(a)
-                 + sum_{j!=i} min( N_j(L), N_j(a + D_i - D_j) ) * C_j
+                 + sum_{j!=i} min( N_J_j(L), N_J_j(a + D_i - D_j) ) * C_j
         r_i    = max over arrivals a ( L_i(a) + C_i + J_i - a )
+
+    where `N_J_j(x) = N_j(x + J_j)` is the jitter-inflated arrival count. ⛔ Both
+    branches of the min() carry it; see `BLane.N_J` for why using the nominal
+    `N_j` here was UNSOUND and how the reduction gate failed to catch it.
+
+    `jitter_in_interference=False` reproduces the OLD, unsound sum. It exists so
+    the must-fire can show the old form under-reporting on a constructed
+    instance -- a fix with no failing case is a fix on no evidence -- and is used
+    nowhere else.
     """
     if not any(o is lane for o in lanes):
         raise AssertionError(
@@ -205,13 +353,23 @@ def response_time_b(lane: BLane, lanes: list, horizon: int | None = None) -> dic
         horizon = L_busy + max(l.T for l in lanes)
     best = None
     cands = lane.arrivals(horizon)
+    cnt = (lambda o, x: o.N_J(x)) if jitter_in_interference else (lambda o, x: o.N(x))
     for a in cands:
         B, who = blocking_at_b(lane, lanes, a)
+        # ⭐ THE SUBJECT'S OWN EARLIER-INSTANCE TERM IS DELIBERATELY *NOT*
+        # JITTER-INFLATED, matching `rta_spuri`'s `floor(a/T_i)*C_i`. `a` is the
+        # subject's own NOMINAL offset, so its predecessors in the busy period
+        # are exactly the nominal releases in [0, a) -- a set jitter cannot add
+        # to from the future, because a release can only be delayed, never
+        # advanced. The subject's own delay is accounted once, in `+ lane.J`
+        # below; inflating here as well would charge the same uncertainty twice
+        # on the lanes that already pay it. `price_subject_inflation()` measures
+        # the variant rather than leaving the choice as a remark.
         base = (lane.N(a) - 1) * lane.C + B
         L = max(base, 1)
         for _ in range(100_000):
             nxt = base + sum(
-                min(o.N(L), o.N(a + lane.D - o.D)) * o.C
+                min(cnt(o, L), cnt(o, a + lane.D - o.D)) * o.C
                 for o in lanes if o is not lane)
             if nxt == L:
                 break
@@ -247,38 +405,226 @@ def assert_reduces_to_periodic(verbose: bool = True) -> bool:
     ⛔ Without this, `n=1` in the bursty path could quietly mean something other
     than the periodic lane it claims to be, and Part 4 would be analysing a
     different task set from Parts 1-3 while reusing their vocabulary.
+
+    ⛔⛔⛔ THIS GATE PASSED WHILE THE BUG IT EXISTS TO CATCH WAS PRESENT, AND THE
+    REASON IS THE REASON, NOT AN ACCIDENT. Every lane it built took the default
+    `J = 0`. The bursty interference sum had dropped BOTH jitter terms that
+    `w_contribution` carries -- and at `J = 0` the two expressions are
+    identically equal, for every T, every delta, and every deadline. So the gate
+    sampled thousands of points, all of them inside the subspace where no
+    disagreement can exist, and reported PASS on a sound-looking comparison of
+    one correct function against one unsound one. An IDENTITY FILTER sitting in
+    the soundness checker itself.
+
+    ⭐ THE FIX IS A SWEEP OVER `J`, NOT ONE MORE CASE. `J = 0` is retained (the
+    old behaviour must not move) and every positive J in range is added, with
+    the J > 0 cell count asserted NON-ZERO -- so a future refactor that drops
+    the jitter arm fails here instead of passing vacuously. That assertion is
+    the part a "add a J=2 test" fix would have left out, and it is the part that
+    makes this gate unable to repeat its own failure.
     """
     bad = []
-    # (a) the arrival curve against the corrected release count
+    n_j_pos = 0           # cells actually exercised at J > 0 -- asserted below
+    # (a) the arrival curve against the corrected release count, SWEPT OVER J
     for T in (3, 5, 7, 25, 62, 434):
-        bl = BLane("x", T, 2, T // 2, n=1)
-        pl = Lane("x", T, C=2, D=T // 2)
-        for delta in range(0, 3 * T + 5):
-            got = bl.N(delta)
-            want = floor_div(delta, T) + 1
-            if got != want:
-                bad.append(("curve", T, delta, got, want))
-            # and against the real interference term, deadline cap and all
-            g2 = min(bl.N(delta), bl.N(0 + 50 - bl.D)) * bl.C
-            w2 = w_contribution(pl, 0, delta, 50)
-            if g2 != w2:
-                bad.append(("w_contribution", T, delta, g2, w2))
-    # (b) whole-recurrence equality on the real required set
-    per = [Lane("UART", 434, C=2, D=216), Lane("SPI", 25, C=2, D=12),
-           Lane("I2C", 62, C=2, D=30)]
-    bur = [BLane("UART", 434, 2, 216), BLane("SPI", 25, 2, 12),
-           BLane("I2C", 62, 2, 30)]
-    for i in range(3):
-        a = response_time_spuri(per[i], per, plus_one=0)["r"]
-        b = response_time_b(bur[i], bur)["r"]
-        if a != b:
-            bad.append(("recurrence", per[i].name, None, b, a))
+        for J in (0, 1, 2, 3, 7, 11):
+            bl = BLane("x", T, 2, T // 2, n=1, J=J)
+            pl = Lane("x", T, C=2, J=J, D=T // 2)
+            for delta in range(0, 3 * T + 5):
+                # the NOMINAL curve is jitter-free by definition
+                got = bl.N(delta)
+                want = floor_div(delta, T) + 1
+                if got != want:
+                    bad.append(("curve", (T, J), delta, got, want))
+                # the INFLATED curve is Spuri's release count, J and all
+                gotJ = bl.N_J(delta)
+                wantJ = floor_div(delta + J, T) + 1
+                if gotJ != wantJ:
+                    bad.append(("curve_J", (T, J), delta, gotJ, wantJ))
+                # and the real interference term, deadline cap and all
+                g2 = min(bl.N_J(delta), bl.N_J(0 + 50 - bl.D)) * bl.C
+                w2 = w_contribution(pl, 0, delta, 50)
+                if g2 != w2:
+                    bad.append(("w_contribution", (T, J), delta, g2, w2))
+                if J > 0:
+                    n_j_pos += 1
+    # (b) whole-recurrence equality on the real required set, AT J > 0 TOO
+    for J in (0, 1, 4):
+        per = [Lane("UART", 434, C=2, J=J, D=216), Lane("SPI", 25, C=2, J=J, D=12),
+               Lane("I2C", 62, C=2, J=J, D=30)]
+        bur = [BLane("UART", 434, 2, 216, J=J), BLane("SPI", 25, 2, 12, J=J),
+               BLane("I2C", 62, 2, 30, J=J)]
+        for i in range(3):
+            a = response_time_spuri(per[i], per, plus_one=0)["r"]
+            b = response_time_b(bur[i], bur)["r"]
+            if a != b:
+                bad.append(("recurrence", (per[i].name, J), None, b, a))
+    # ⛔ THE ANTI-VACUITY ASSERTION. Without it this gate can go back to being
+    # green-by-construction the moment the J arm is dropped or short-circuited.
+    if n_j_pos == 0:
+        bad.append(("VACUOUS", "no J>0 cell was exercised -- this gate is the "
+                    "identity filter again", None, 0, 1))
     if verbose:
         print("  n=1 reduction gate: %s"
               % ("PASS -- bursty form is the periodic form at n=1 "
-                 "(curve, interference term, and whole recurrence)" if not bad
+                 "(curve, inflated curve, interference term, and whole "
+                 "recurrence), over J in {0,1,2,3,7,11}: %d cells at J>0"
+                 % n_j_pos if not bad
                  else "*** FAIL: %d mismatches, first %s ***" % (len(bad), bad[0])))
     return not bad
+
+
+def assert_jitter_reaches_interference(verbose: bool = True) -> bool:
+    """MUST-FIRE: one lane's jitter has to be able to move ANOTHER lane's r.
+
+    ⛔⛔ THE FACE THAT MATTERS IS THE SECOND ONE. It is not enough that the fixed
+    recurrence produces a larger number -- a bound that is merely bigger proves
+    nothing, since multiplying every `r` by two would also pass. What has to be
+    shown is that the OLD form was BLIND: that with the nominal curve in the
+    interference sum, lane j's jitter changed lane i's response by exactly
+    nothing, so the term was not understated but ABSENT.
+
+    THE CONSTRUCTION. The subject carries `J_i = 0` and the interferer carries
+    all the jitter. That isolates the direction under test: `r_i = L + C_i +
+    J_i - a` cannot move through `J_i`, so any change in `r_i` is attributable
+    to the interference lane j imposes, which is the only thing the fix touched.
+
+    THREE FACES:
+      (1) jitter must MATTER         r_new(J_j>0) >  r(J_j=0)
+      (2) the old form must be BLIND r_old(J_j>0) == r(J_j=0)
+      (3) the direction must be the UNSAFE one  r_old < r_new
+    """
+    # T_i=8, T_j=7, C=2, D_i=4, D_j=5, J_j=1 -- smallest instance found by a
+    # sweep of 181 such cases, so this is a representative and not a curiosity.
+    def build(J_j):
+        li = BLane("subject", 8, 2, 4, J=0)
+        lj = BLane("jittery", 7, 2, 5, J=J_j)
+        return li, [li, lj]
+
+    li1, set1 = build(1)
+    li0, set0 = build(0)
+    r_nojit = response_time_b(li0, set0)["r"]
+    r_old = response_time_b(li1, set1, jitter_in_interference=False)["r"]
+    r_new = response_time_b(li1, set1, jitter_in_interference=True)["r"]
+
+    f1 = r_new > r_nojit
+    f2 = r_old == r_nojit
+    f3 = r_old < r_new
+    ok = f1 and f2 and f3
+    if verbose:
+        print("  jitter-reaches-interference MUST-FIRE  "
+              "(subject J=0, interferer J=1, T=8/7, C=2, D=4/5)")
+        print("      r with J_j = 0                  %d" % r_nojit)
+        print("      r with J_j = 1, OLD nominal sum  %d   %s"
+              % (r_old, "BLIND -- identical to J=0" if f2 else "(moved)"))
+        print("      r with J_j = 1, jitter-inflated  %d" % r_new)
+        print("      face 1 jitter matters      %s" % ("PASS" if f1 else "FAIL"))
+        print("      face 2 old form was blind  %s" % ("PASS" if f2 else "FAIL"))
+        print("      face 3 error was UNSAFE    %s" % ("PASS" if f3 else "FAIL"))
+        if ok:
+            print("      ⛔ the old sum under-reported by %d cycles = %d whole "
+                  "j-jobs. Not a rounding gap: an absent term."
+                  % (r_new - r_old, (r_new - r_old) // 2))
+        print("      ⚠ EXACT TRUTH IS NOT CLAIMED HERE. This shows the old form "
+              "unsound and the new form larger; that the new form is CORRECT is "
+              "TChecker's to say (zone/run_jitter.py), not this gate's.")
+    return ok
+
+
+def price_jitter_blocking(verbose: bool = True) -> dict:
+    """Does the blocking filter need jitter? Checked against the jitter model.
+
+    ⛔ WHAT THIS CAN AND CANNOT SETTLE. It checks the shipped filter against the
+    SAME jitter model re-expressed -- which catches a sign slip or an off-by-one
+    between the algebra and the code, and nothing more. It is a same-author
+    re-derivation and is labelled as one. Whether the blocking TERM itself is a
+    sound bound under jitter is TChecker's question, because non-preemption is
+    emergent in that model and B is not encoded at all: if B were wrong under
+    jitter, the foreign checker would disagree on a constructed instance.
+    """
+    moved = []
+    n = 0
+    for T_i in (4, 5, 8, 11):
+        for T_j in (3, 5, 7, 13):
+            for D_i in (3, 5, 9):
+                for D_j in (4, 6, 11):
+                    for J_j in (1, 3, 8):
+                        li = BLane("i", T_i, 2, D_i, J=0)
+                        lj = BLane("j", T_j, 3, D_j, J=J_j)
+                        ls = [li, lj]
+                        n += 1
+                        for a in li.arrivals(2 * max(T_i, T_j)):
+                            b0 = blocking_at_b(li, ls, a)[0]
+                            b1 = blocking_at_b_from_jitter_model(li, ls, a)[0]
+                            if b0 != b1:
+                                moved.append((T_i, T_j, D_i, D_j, J_j, a, b0, b1))
+                                break
+    out = {"n": n, "moved": moved}
+    if verbose:
+        print("  blocking filter vs the jitter model: %d instances swept, "
+              "%d disagree" % (n, len(moved)))
+        if moved:
+            print("      *** the shipped filter and the model-derived filter "
+                  "DISAGREE, first %s -- one of the two is wrong ***"
+                  % (moved[0],))
+        else:
+            print("      the shipped `D_j > a + D_i` IS the widest case the "
+                  "jitter model admits (the max over s in [-J_j,0] is at s=0),")
+            print("      so jitter adds only blockers with EARLIER deadlines, "
+                  "which the filter rejects. ⚠ same-author check: soundness of")
+            print("      the B term under jitter is TChecker's to confirm.")
+        print("      ⛔ RETRACTED: the first version of this probe tested "
+              "`D_j + J_j > a + D_i` and reported 184/432 instances moved.")
+        print("         That is not a jittered deadline -- a late release has "
+              "LESS slack, not a later deadline. The probe was the bug.")
+    return out
+
+
+def price_subject_inflation(verbose: bool = True) -> dict:
+    """Would inflating the SUBJECT's own earlier-instance count change r?
+
+    The recurrence deliberately leaves `(N_i(a) - 1)*C_i` un-inflated. This
+    reports what the alternative would cost, so "not inflated" is a priced
+    decision rather than an unexamined one.
+    """
+    rows = []
+    for J in (1, 3, 8):
+        for T_i in (5, 8, 25):
+            li = BLane("i", T_i, 2, 6, J=J)
+            lj = BLane("j", 7, 2, 9, J=J)
+            ls = [li, lj]
+            r = response_time_b(li, ls)["r"]
+            # the inflated-subject variant, computed inline so the production
+            # path keeps ONE recurrence and no mode flag it could be run in.
+            best = None
+            L_busy = busy_period_b(ls)
+            for a in li.arrivals(L_busy + max(l.T for l in ls)):
+                B = blocking_at_b(li, ls, a)[0]
+                base = (li.N_J(a) - 1) * li.C + B        # <- the variant
+                L = max(base, 1)
+                for _ in range(100_000):
+                    nxt = base + sum(min(o.N_J(L), o.N_J(a + li.D - o.D)) * o.C
+                                     for o in ls if o is not li)
+                    if nxt == L:
+                        break
+                    if nxt < L:
+                        L = nxt
+                        break
+                    L = nxt
+                rr = L + li.C + li.J - a
+                if best is None or rr > best:
+                    best = rr
+            rows.append((J, T_i, r, best, best - r))
+    if verbose:
+        print("  subject-own-inflation pricing (NOT applied):")
+        print("      %-5s %-6s %-9s %-11s %s"
+              % ("J", "T_i", "r shipped", "r inflated", "cost"))
+        for J, T_i, r, b, d in rows:
+            print("      %-5d %-6d %-9d %-11d %+d" % (J, T_i, r, b, d))
+        print("      ⭐ the gap is the SAME uncertainty charged twice: once as an"
+              " extra own-instance, once in `+ lane.J`. Recorded, not applied;")
+        print("      TChecker decides it on the constructed instances.")
+    return {"rows": rows}
 
 
 def assert_r2_order_neutral(verbose: bool = True) -> bool:
@@ -407,21 +753,86 @@ L_JIT = 1           # cycles, async-capture uncertainty (the only part that is j
 # At that bound the set is still FEASIBLE: r = {18, 15, 12, 17, 13}, MIN MARGIN
 # 5, which still clears the margin >= 4 bar. Digest would move to 10b327701c7c.
 #
-# ⛔⛔ APPLYING IT IS BLOCKED ON TWO THINGS FOUND WHILE TRYING TO:
-#   1. pyRTA's task model HAS NO JITTER PARAMETER. Its tasks are
-#      Periodic(t)/FullyNonPreemptive(C)/Deadline(D)/Priority -- nowhere to put
-#      J. So the foreign witness this project quotes ("pyRTA 5/5,
-#      foreign-checked") has only ever covered the J = 0 set, and at J > 0 the
-#      numbers would rest on our OWN recurrence alone.
-#   2. `response_time_b` adds J to the SUBJECT's response (r = L + C + J - a)
-#      and adds NOTHING to the interference the jittery lane imposes on OTHERS.
-#      A lane releasable up to J early can interfere EARLIER, so this may be
-#      OPTIMISTIC -- the forbidden direction. Unverified either way.
+# ⛔⛔ BOTH BLOCKERS ARE NOW RESOLVED, AND THE ANSWER REVERSED THE VERDICT.
 #
-# ⇒ Publishing 8 would replace a KNOWN error with an UNVERIFIED one, and would
-#   quote a weaker foreign check as if it were the same one. The error stays
-#   recorded and visible instead. WILSON RULES.
+#   1. RETRACTED -- pyRTA DOES have jitter. The claim "pyRTA's task model has no
+#      jitter parameter" was FALSE. It ships `PeriodicWithJitter(period, jitter)`
+#      with `max_arrivals(d) = ceil((d + jitter)/period)`, which is Spuri's
+#      inflated release count exactly. I read the TASK constructor, saw four
+#      fields, and claimed an absence about the MODULE -- the jitter lives in a
+#      sibling arrival model, one import away. Same error as the two "full-tree
+#      reads" that were truncation artefacts: an ABSENCE claimed from a partial
+#      read of the place it would have been. See gate_pyrta_jitter.py.
+#
+#   2. CONFIRMED AND FIXED -- the recurrence really was unsound. The old sum
+#      used the NOMINAL arrival curve in the interference term, so a jittery
+#      lane's bunching was invisible to every other lane. TChecker: on the
+#      must-fire instance the old sum returns 3 where the true worst case is 4.
+#      Not conservative -- wrong, in the forbidden direction. `BLane.N_J` is the
+#      fix; `assert_jitter_reaches_interference` is the must-fire; three engines
+#      agree on 11 lane-instances (zone/run_jitter.py, gate_pyrta_jitter.py).
+#
+# ⛔⛔⛔ AND THE NUMBER ABOVE IS WRONG BECAUSE OF (2). "r = {18,15,12,17,13},
+# MIN MARGIN 5, still clears the margin >= 4 bar" was computed with the UNSOUND
+# sum. With jitter in the interference term:
+#
+#     J_pipe = 8   r = {18, 15, 16, 19, 15}   MIN MARGIN 1   ⛔ FAILS the bar
+#     J_pipe = 7   r = {17, 14, 13, 18, 14}   min margin 4   (passes, exactly)
+#     J_pipe = 2   r = {12,  9,  6, 11,  7}   min margin 11
+#
+# So the design sits ONE cycle outside its own pre-registered margin >= 4 bar at
+# the derived J, and the only reason J = 8 ever looked acceptable was the bug.
+# The tightest lane is I2C throughout -- it is the one carrying J_PIPE + L_JIT.
+# ⭐ THE DROP FROM 4 TO 1 BETWEEN J=7 AND J=8 IS A WHOLE INTERFERER JOB crossing
+# into I2C's window, not a rounding effect, which is why no amount of tightening
+# elsewhere recovers it.
+#
+# ⇒ J_PIPE_DERIVED = 8 IS NOT PUBLISHABLE, and not because it is unverified --
+#   because verifying it refuted it. The remedy is to reduce J, which is what
+#   the double buffer does (DOUBLE_BUFFER_PREREG below).
 J_PIPE_DERIVED = 8
+
+# ⭐⭐ DOUBLE BUFFER -- PRE-REGISTERED BEFORE THE RTL IS WRITTEN.
+# =============================================================================
+# Nathan's call (yes), Wilson's lean (yes), and the sequencing is Wilson's: the
+# jitter-sound analysis came FIRST because it is needed at any J. It is now done,
+# and it is what turned the double buffer from an optimisation into a
+# REQUIREMENT -- at the derived J = 8 the sound recurrence gives min margin 1
+# against a pre-registered bar of 4.
+#
+# THE PREDICTION, WRITTEN DOWN BEFORE THE MEASUREMENT (the whole point):
+#   With a second action buffer per lane, the two refill terms disappear from
+#   the J decomposition in gate_cj_bounds.py, because a lane's next action is
+#   already resident when its current one is dispatched:
+#       winner registration                1   stays -- the EDF key is registered
+#       prefetch scan notice               1   stays -- the scan is still a cycle
+#       own refill  (P_REQ/P_WAIT/P_CAP)   3 -> 0   absorbed by the spare buffer
+#       in-flight refill for another lane  3 -> 0   the shared port is no longer
+#                                                   on the dispatch path
+#       header load                        0   unchanged
+#                                         ---
+#       J_PIPE_PREDICTED                    2
+#
+# ⛔ FALSIFIER: if the derivation after the RTL lands comes out ABOVE 2, the
+# double buffer did not buy what it was costed for and the ~110 flops are not
+# justified by this argument. Report it, do not re-argue the decomposition to
+# reach 2 -- that is the same-author re-derivation this project keeps catching.
+#
+# ⛔ AND IT IS NOT FREE IN VERIFICATION, which is the part a flop count hides:
+#   * a buffer-swap invariant (exactly one buffer is the live one per lane, and
+#     the swap happens at dispatch, not at refill completion);
+#   * a STALE-BUFFER MUTANT -- dispatch from the buffer that was NOT refilled.
+#     If the suite stays green with that mutation, the double buffer is
+#     untested and its J reduction is unevidenced.
+J_PIPE_PREDICTED = 2
+DOUBLE_BUFFER_PREREG = {
+    "predicted_J_pipe": 2,
+    "falsifier": "derived J_pipe > 2 after the RTL lands",
+    "owes": ["buffer-swap invariant", "stale-buffer mutant"],
+    "cost_flops_estimate": 110,
+    "margin_at_predicted_J": 11,      # from the J sweep, bar is >= 4
+}
+
 OUT_REG = 1         # cycles, output register to pad
 TSU_MASTER = 1      # cycles, the PEER master's setup requirement. ⚠ PARAMETRIC:
                     # no SPI master device is picked, so 1 cycle (20 ns) stands
@@ -791,6 +1202,17 @@ def main() -> int:
         print("change below can be attributed to the deadline rather than to the")
         print("restructure. Fix the split before reading any number here.")
         return 1
+    print()
+    # ---- the jitter-sound recurrence: the fix, and the evidence it needed ----
+    print("JITTER IN THE INTERFERENCE TERM (the W-1 recurrence fix)")
+    if not assert_jitter_reaches_interference():
+        print("\nABORTING: the must-fire for the jitter fix does not fire. Either")
+        print("the fix is not in the interference sum, or the constructed")
+        print("instance no longer distinguishes the two forms -- and in both")
+        print("cases the fix is unevidenced. Do not read any J > 0 number.")
+        return 1
+    price_jitter_blocking()
+    price_subject_inflation()
     print()
     report(TX, "DRIVING DIRECTION ONLY (Parts 1-3, restated as bursty with n=1)")
     print()
