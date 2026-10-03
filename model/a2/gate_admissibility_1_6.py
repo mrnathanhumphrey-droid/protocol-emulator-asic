@@ -402,6 +402,48 @@ def c_feed_fire():
            first_bad - 1))
 
 
+def c_pins(lanes):
+    """PIN-MAP RULING -- the pins of all ACTIVE lanes must fit the device.
+
+    ⛔⛔ THIS CONDITION EXISTS BECAUSE NOBODY HAD COUNTED. The required set needs
+    12 protocol pins (UART 1+1, SPI master 4, I2C 2, SPI target 4) against 8
+    `uio`, so A2's five-lane analysis is a worst-case ENVELOPE over the subsets
+    a pin assignment can realise -- checked against pyRTA on all 24 of them in
+    `gate_pin_subsets.py`, not argued from monotonicity alone.
+
+    ⭐ So this is the condition that makes the envelope legitimate: the engine
+    may be ANALYSED on five lanes and may only be PROGRAMMED with a subset that
+    fits. The analysis is sound for every such subset precisely because
+    non-preemptive EDF is monotone under lane removal.
+    """
+    # ⛔ EVALUATED ON A PROGRAM'S DECLARED SUBSET, NOT ON THE ENVELOPE. My first
+    # version applied it to the five-lane table, which it is SUPPOSED to reject
+    # -- and that turned the whole 1.6 gate red for the one condition working
+    # correctly. Like 1.6c/1.6j/1.6l, this is a condition on a PROGRAM; the
+    # envelope's rejection is the must-fire, not the failure.
+    from gate_pin_subsets import PINS, N_UIO, feasible_subsets
+    subs = feasible_subsets()
+    widest = max(subs, key=len)
+    total = sum(PINS[l.name][0] for l in widest)
+    return total <= N_UIO, (
+        "a widest programmable subset is {%s} = %d pins of %d uio. The "
+        "ENVELOPE table needs 12 and is correctly NOT programmable"
+        % (", ".join(x.name.split()[0] for x in widest), total, N_UIO))
+
+
+def c_pins_fire():
+    from gate_pin_subsets import PINS, N_UIO, feasible_subsets
+    subs = feasible_subsets()
+    allsub = 2 ** 5 - 1
+    tot = sum(PINS[n][0] for n in PINS)
+    return tot > N_UIO, (
+        "the full five-lane set (%d pins) is REJECTED at load; %d of %d "
+        "non-empty subsets fit %d uio, and the largest has %d lanes. ⭐ With "
+        "push-pull outputs moved to uo_out all %d subsets fit (see the priced "
+        "flag-back in gate_pin_subsets.py)"
+        % (tot, len(subs), allsub, N_UIO, max(len(x) for x in subs), allsub))
+
+
 CONDITIONS = [
     ("1.6a", "r_i <= t_i (one queue slot per lane)", c_queue, c_queue_fire),
     ("1.6b", "live-deadline spread + max r < 2^(N-1)", c_spread, c_spread_fire),
@@ -427,6 +469,8 @@ CONDITIONS = [
      c_2mhz_fire),
     ("1.6n", "data channel: the host keeps TX data registers fed "
              "(underrun = sticky flag, NEVER a stall)", c_feed, c_feed_fire),
+    ("1.6o", "pin budget: active-lane pins <= 8 uio "
+             "(+ uo_out if push-pull outputs move there)", c_pins, c_pins_fire),
 ]
 
 

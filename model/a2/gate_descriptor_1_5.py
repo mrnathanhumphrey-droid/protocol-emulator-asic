@@ -59,6 +59,9 @@ N_LANES = len(LANES)
 N_PINS = 8                      # tt_um_* gives 8 bidirectional uio
 AW_TODAY = 6                    # src/project.v parameter AW
 # silicon as built, docs/SILICON_EVIDENCE.md
+# ORIGIN: every constant below is READ from docs/SILICON_EVIDENCE.md, which
+# records the tt-gds-action artifact of the shipped run at the slow corner
+# (nom_slow_1p08V_125C). Measured, not estimated. Per the standing origin rule.
 CELLS_TODAY = 2946
 FLOPS_TODAY = 535
 STORE_FLOPS_TODAY = 512
@@ -390,7 +393,21 @@ def main() -> int:
     print("    carrying 5.8 into it over-prices the field about 3x.")
     print()
     w = N_PINS
-    per_bit_reg = 2           # flop + its pro-rata hold-fix buffer
+    # ⛔⛔ STANDING RULE, adopted after I asked where my OWN 350-cell estimate
+    # came from: EVERY ESTIMATE CARRIES ITS ORIGIN -- where computed, from what.
+    # An unsourced number is UNVERIFIED, including ours. That episode was a
+    # compaction artefact, not a slip: a figure produced in one round and quoted
+    # in the next with no provenance is indistinguishable from one handed to us
+    # by someone else, and I treated my own as external.
+    #
+    # ORIGIN per_bit_reg: 1 flop cell + ~1 pro-rata hold-fix buffer, from the
+    #   shipped inventory's 555 dlygate4sd3_1 against 535 dfrbpq_1 (ratio 1.04).
+    #   MEASURED, from docs/SILICON_EVIDENCE.md.
+    # ORIGIN apply_net: MY ESTIMATE, unmeasured -- 3 cells per pin for the
+    #   AND/OR/mux network plus two decoders. It is the one number in this block
+    #   a trial synthesis would move, and it is labelled so rather than mixed in
+    #   with the measured one.
+    per_bit_reg = 2
     apply_net = 3 * N_PINS + bits_for(N_PINS - 1) * 2
     print("    %-26s %-8s %-10s %-10s %s"
           % ("variant", "bits", "@2/bit", "+apply", "total"))
@@ -413,11 +430,16 @@ def main() -> int:
     print("    together. The per-lane variant is ~%d cells for nothing."
           % ((N_LANES * 2 * w * per_bit_reg + N_LANES * apply_net)
              - (2 * w * per_bit_reg + apply_net)))
-    print("    ⛔ The condition that makes it true is worth naming, because it")
-    print("    is a property we could lose: if the engine ever overlapped two")
+    print("    ⛔ THE GUARDING CONDITION BECOMES AN INVARIANT, because it is a")
+    print("    property we could lose: if the engine ever overlapped two")
     print("    services (a deeper pipeline than Ruling 1's two stages), the")
-    print("    shared register stops being sufficient. 1.5 freezes ONE group")
-    print("    and the pipeline depth is what guards it.")
+    print("    shared register stops being sufficient.")
+    print("      INV-ATOMIC-1: at most one atomic apply in flight.")
+    print("    Into the INV set for Phase 4 k-induction, so the thing that makes")
+    print("    one register sufficient is CHECKED rather than remembered.")
+    print("    ⭐ And it is the cheapest kind of invariant to prove: it follows")
+    print("    from the pipeline having exactly two stages, which is a")
+    print("    STRUCTURAL fact about the RTL rather than a behavioural one.")
 
     print()
     print("  --- sticky ovr ---")

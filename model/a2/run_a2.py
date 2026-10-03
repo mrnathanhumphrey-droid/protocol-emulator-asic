@@ -59,6 +59,7 @@ GATES = [
     ("gate_rearm.py", "R2   chained waits: the re-arm task in A2", True),
     ("gate_encoding_f1.py", "F1   program vs payload; store sized after", True),
     ("gate_descriptor_1_5.py", "1.5  descriptor freeze, encoding derived", True),
+    ("gate_pin_subsets.py", "PIN  12 pins vs 8 uio; envelope checked on every subset", True),
     ("gate_admissibility_1_6.py", "1.6  admissibility conditions, each priced", True),
     ("gate_pyrta.py", "1.4b third-party check of the shipped r_i", True),
 ]
