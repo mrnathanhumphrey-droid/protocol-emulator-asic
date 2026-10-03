@@ -221,6 +221,15 @@ def main() -> int:
     print("    * UART-rx D drops by L_sync to %d, not binding" % d_anchored)
     print("    * N2' ceiling %g MHz (completion) supersedes the 5 MHz figure"
           % ceil_compl)
+    print()
+    print("  ⛔ THE >= 4 MARGIN BAR, AND WHY IT IS NOT TASTE (spec P2). Every margin")
+    print("     here is computed at C = 2, which is STILL UNMEASURED -- it traces to")
+    print("     one ARCH_PREREG sentence. The reserve has to cover that measurement")
+    print("     risk: one C increment (2 -> 3) costs about 2 cycles of margin on the")
+    print("     tight lanes, and a registered EDF winner costs J = 1. That is 3-4,")
+    print("     so the bar is the measurement reserve, not a preference.")
+    print("     ⭐ IT RETIRES once Phase 2 measures C: after that, margins are quoted")
+    print("     on the measured value and only A2-F6 (zero margin) is a hard stop.")
     print("  ⛔ Wilson's recommendation to declare 1 MHz STANDS: at 2 MHz the")
     print("     absolute margin is %d cycles, below the >= 4 bar."
           % int(25.0 / 2 - tsu - abs_budget(rc, True, sp.C)))

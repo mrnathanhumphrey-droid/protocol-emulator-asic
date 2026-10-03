@@ -1,0 +1,116 @@
+(************************************************************
+ * SPEC P1 -- re-synthesize the UART-rx admitted peer band WITH a realistic
+ * sampler, instead of an exact one.
+ *
+ * THE ONE CLAIM: the band [413, 458] that TA-01c synthesized assumed the
+ * monitor samples at EXACTLY the nominal instants. It does not. Two separate
+ * effects displace every sample, and both were accounted for elsewhere in the
+ * project while this band went on being quoted as if neither existed:
+ *
+ *   L_sync = 3   a CONSTANT lag: the grid is anchored to the receiver's
+ *                DETECTION of the start edge, and src/project.v's 3-flop
+ *                synchroniser detects at t+2 with 1 cycle of async-capture
+ *                ambiguity, so 3 is the worst case (spec 0.9b, REACTIVE-anchor)
+ *   Dj     = 8   a PER-SAMPLE delay in [0, Dj]: the sampling action is a
+ *                scheduled engine action, so it can start up to r - C late
+ *                (gate 0.9's differential bound, UART-rx r = 10, C = 2)
+ *
+ * ⛔⛔ SO THE BAND AND THE SCHEDULING BOUND WERE DOUBLE-COUNTING THE SAME
+ * PER-BIT SLACK. Admitting a peer at Te = 413 means the peer's own rate error
+ * has already consumed the bit window; there is then nothing left for our
+ * sampler. "Admit [413, 458]" and "D_rx = 213 with r - C = 8" cannot both hold.
+ *
+ * WHAT CHANGED IN THE MODEL, AND NOTHING ELSE: the two sample guards are now
+ * NONDETERMINISTIC WINDOWS rather than equalities.
+ *     start sample   x = U          ->  x in [U + L_sync, U + L_sync + Dj]
+ *     stop  sample   x = 19U        ->  x in [19U + L_sync, 19U + L_sync + Dj]
+ * The executor is untouched. `A[] not bad` therefore holds only for peer rates
+ * that survive EVERY sample instant in those windows, which is the worst case
+ * rather than a sampled one.
+ *
+ * U is fixed at 217 and the lag/delay at 3/8, so the synthesized region is over
+ * Te alone and is directly the admitted band. TA-01c keeps the symbolic (U, Te)
+ * version; this is the instantiated, sampler-realistic one.
+ *
+ * ⭐ PREDICTED BEFORE RUNNING: [414, 458]. The lower edge should move up by
+ * one and the upper edge should NOT move, because a late sample is
+ * indistinguishable from a slower peer -- the lag pushes the whole band UP
+ * rather than squeezing both ends. A result that narrows both ends would mean
+ * the displacement is not acting the way 0.9b says it does.
+ *
+ * SCOPE, unchanged from TA-01c: this is the FRAMING band. The data conjunct is
+ * integer bookkeeping that zones do not help with, and the binding constraint
+ * for the band edges is the stop sample (k = 9), which this model does check.
+ ************************************************************)
+
+var
+	x : clock;
+
+	Te          (* the PEER's actual bit period -- the only parameter *)
+		: parameter;
+
+	phase : int;   (* 0 = start bit, 1 = data, 2 = stop bit, 3 = after frame *)
+
+(************************************************************)
+(* The peer: start, 8 data bits, stop, then idle.           *)
+(* Boundaries at Te, 9Te, 10Te -- absolute on the shared clock. *)
+(* UNTOUCHED from uart_param.imi.                           *)
+(************************************************************)
+automaton Exec
+
+	loc eStart: invariant x <= Te
+		when x = Te do {phase := 1} goto eData;
+
+	loc eData: invariant x <= 9*Te
+		when x = 9*Te do {phase := 2} goto eStop;
+
+	loc eStop: invariant x <= 10*Te
+		when x = 10*Te do {phase := 3} goto eIdle;
+
+	loc eIdle: invariant True
+
+end (* Exec *)
+
+(************************************************************)
+(* The monitor, now with a DISPLACED and UNCERTAIN sampler.  *)
+(*   U = 217, L_sync = 3, Dj = 8                             *)
+(*   start window  [220, 228]      = [U+3,   U+3+8]          *)
+(*   stop  window  [4126, 4134]    = [19U+3, 19U+3+8]        *)
+(* The invariant forces the sample to be taken by the end of  *)
+(* its window; the guard lets it be taken anywhere inside.    *)
+(************************************************************)
+automaton Mon
+
+	loc m0: invariant x <= 228
+		(* start sample must land INSIDE the start bit, wherever in the window *)
+		when x >= 220 & x <= 228 & phase = 0 goto m1;
+		when x >= 220 & x <= 228 & phase >= 1 goto bad;
+
+	loc m1: invariant x <= 4134
+		(* stop sample must land INSIDE the stop bit, wherever in the window *)
+		when x >= 4126 & x <= 4134 & phase = 2 goto mOk;
+		when x >= 4126 & x <= 4134 & phase <= 1 goto bad;
+		when x >= 4126 & x <= 4134 & phase >= 3 goto bad;
+
+	loc mOk: invariant True
+
+	loc bad: invariant True
+
+end (* Mon *)
+
+(************************************************************)
+init := {
+
+	discrete =
+		loc[Exec] := eStart,
+		loc[Mon]  := m0,
+		phase     := 0
+	;
+
+	continuous =
+		x = 0
+		(* no upper bound imposed on Te, so the synthesized band is not an
+		   artefact of a box we drew *)
+		& Te > 0
+	;
+}

@@ -1,0 +1,4 @@
+(* SPEC P1 -- synthesize the peer-rate band for which `bad` is UNREACHABLE,
+   with the sampler displaced by L_sync = 3 and uncertain by Dj = 8.
+   The output is the ADMITTED BAND. *)
+property := #synth AGnot(loc[Mon] = bad);
