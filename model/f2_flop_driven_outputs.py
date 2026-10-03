@@ -238,6 +238,26 @@ module tt_um_x (uo_out, uio_out, uio_oe, clk);
 endmodule
 """
 
+# ⛔⛔ THE MISO FACE. Every DATA output is correctly flopped and only the
+# ENABLE is combinational -- so a checker that looked at `uo_out`/`uio_out` and
+# stopped would call this compliant. It is the worst of the four:
+#   * a glitch on a DATA pin is a wrong level for a few hundred ps;
+#   * a glitch on an ENABLE turns a second DRIVER on, so a shared MISO gets two
+#     output stages fighting -- contention, not a wrong value.
+# ⭐ This face exists because the MISO ruling put a REAL enable in the design
+# for the first time (uio_oe[MISO] = target CS). Before that ruling `uio_oe` was
+# in OUT_PORTS but no face exercised it, so the coverage was untested -- a guard
+# whose scope was right and whose evidence was absent.
+MUTANT_COMB_OE = """
+module tt_um_x (uo_out, uio_out, uio_oe, clk);
+  sg13cmos5l_dfrbpq_1 ff0 (.CLK(clk), .D(d0), .RESET_B(rb), .Q(uo_out[0]));
+  sg13cmos5l_dfrbpq_1 ff1 (.CLK(clk), .D(d1), .RESET_B(rb), .Q(uio_out[0]));
+  sg13cmos5l_dfrbpq_1 ff2 (.CLK(clk), .D(d2), .RESET_B(rb), .Q(cs_sync));
+  sg13cmos5l_nand2_1  n0  (.A(cs_sync), .B(sel), .Y(cs_n));
+  sg13cmos5l_inv_1    i0  (.A(cs_n), .Y(uio_oe[0]));
+endmodule
+"""
+
 # a netlist using a cell the classifier has never seen
 MUTANT_UNKNOWN = """
 module tt_um_x (uo_out, uio_out, uio_oe, clk);
@@ -291,7 +311,25 @@ def selftest() -> int:
         print("    cannot glitch. The shipped design ties it LOW, same reason.")
 
     print()
-    print("  --- face 4: an unknown cell must FAIL CLOSED ---")
+    print("  --- face 4: MUST-FIRE, a combinational ENABLE with every data")
+    print("      output correctly flopped (the MISO face) ---")
+    if check(MUTANT_COMB_OE, "mutant: nand2+inv drive uio_oe[0], data flopped",
+             expect_verdict="COMBINATIONAL") != 1:
+        print("    *** FAIL: a combinational uio_oe survived. `uio_oe` is in")
+        print("        OUT_PORTS but was never EXERCISED -- scope without")
+        print("        evidence, and a shared MISO is what pays for it.")
+        rc = 1
+    else:
+        print("    ⭐⭐ THE WORST OF THE MUTANTS, AND THE ONLY ONE WHOSE DATA")
+        print("    PINS ARE ALL CORRECT. A glitch on a data output is a wrong")
+        print("    level; a glitch on an ENABLE switches a second DRIVER on, so")
+        print("    a shared MISO gets two output stages at opposing levels.")
+        print("    ⛔ This face exists because the MISO ruling put the first")
+        print("    real enable in the design. `uio_oe` was already in scope and")
+        print("    no face had ever tested it.")
+
+    print()
+    print("  --- face 5: an unknown cell must FAIL CLOSED ---")
     if check(MUTANT_UNKNOWN, "mutant: an unclassified cell drives uo_out[0]",
              expect_verdict="UNKNOWN-CELL") != 1:
         print("    *** FAIL: an unrecognised cell was treated as compliant.")
@@ -303,8 +341,9 @@ def selftest() -> int:
 
     print()
     print("=" * 78)
-    print("  GATE F2-selftest: %s" % ("PASSED -- compliant passes, three "
-                                      "mutants die, unknown fails closed"
+    print("  GATE F2-selftest: %s" % ("PASSED -- compliant passes, four "
+                                      "mutants die incl. a combinational "
+                                      "ENABLE, unknown fails closed"
                                       if rc == 0 else "FAILED"))
     return rc
 

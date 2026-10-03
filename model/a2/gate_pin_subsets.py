@@ -73,19 +73,73 @@ PINS = {
 }
 
 
-# ---- the same pins, split by DIRECTION (for the uo_out trade-off) -------
-# ⛔ ORIGIN: derived here from each protocol's signal directions. The split
-# matters because `uo_out` is OUTPUT-ONLY, so it can carry a push-pull output
-# and CANNOT carry an input or an open-drain line (which must be able to
-# release). I2C is therefore pinned to `uio` no matter what.
-#   lane: (push-pull outputs, inputs, open-drain bidirectional)
+# ---- the same pins, split by ELECTRICAL CLASS ---------------------------
+# ⛔⛔ THIS TABLE WAS WRONG AND THE ERROR WAS IN ITS CATEGORIES, NOT ITS
+# ARITHMETIC. It used to split pins by DIRECTION -- (push-pull, inputs,
+# open-drain) -- and on that axis SPI-target's MISO is simply "an output", so it
+# went to `uo_out` with the other outputs. ⛔ But a target's MISO MUST BE ABLE
+# TO RELEASE THE LINE: that is how several targets share one MISO. `uo_out` is
+# output-only and ALWAYS DRIVEN, so a target MISO there would fight every other
+# device on the bus. Direction was never the constraint; the ability to STOP
+# driving is. An open-drain line and a tri-stated target output are different
+# protocols and the same requirement.
+#
+# ⭐ PRIMARY EVIDENCE, and it is the part this project already ships against:
+# MB85RS64V (the FRAM that IS the rung-5 oracle) pin 1 CS -- "When CS is the 'H'
+# level, device is in deselect (standby) status and SO becomes High-Z"; pin 2 SO
+# -- "This is High-Z during standby." So the convention is not an abstraction we
+# chose, it is the observable behaviour of the device our target sits beside.
+# ORIGIN: refs/mb85rs64v_ramxeed.txt, the RAMXEED datasheet's own pin table.
+#
+# ⚠ The fix is CHEAP and it BUYS A PIN BACK, which is why the error survived so
+# long -- nothing downstream complained. It moved a pin from the full bank to
+# the bank that had the spare.
+#   lane: (push-pull out, inputs, open-drain, tri-state out needing an OE)
+#
+# bank rule:  uio  must carry inputs + open-drain + tri-state-out  (uio_oe)
+#             uo_out carries push-pull only, and 3 of its 8 are the serial view
 PINS_DIR = {
-    "UART-tx 115200":   (1, 0, 0),      # TX
-    "UART-rx 115200":   (0, 1, 0),      # RX
-    "SPI-tx 1 MHz":     (3, 1, 0),      # out SCLK/MOSI/CS, in MISO
-    "I2C 400 kHz":      (0, 0, 2),      # SCL/SDA -- open-drain, uio only
-    "SPI-target 1 MHz": (1, 3, 0),      # out MISO, in SCLK/MOSI/CS
+    "UART-tx 115200":   (1, 0, 0, 0),   # TX                     push-pull
+    "UART-rx 115200":   (0, 1, 0, 0),   # RX                     input
+    "SPI-tx 1 MHz":     (3, 1, 0, 0),   # out SCLK/MOSI/CS, in MISO
+    "I2C 400 kHz":      (0, 0, 2, 0),   # SCL/SDA  open-drain -- must release
+    "SPI-target 1 MHz": (0, 3, 0, 1),   # in SCLK/MOSI/CS, MISO tri-state
 }
+
+N_SERIAL = 3            # RX bit-serial host view: data, strobe, valid
+N_UO = 8
+
+
+def bank_need(subset):
+    """(uio pins, uo_out protocol pins) for a lane subset under the RULED map.
+
+    ⛔ The tri-state column goes on the `uio` side. That is the whole MISO
+    correction in one line: `uio_oe` is the only thing on this device that can
+    release a line, and it exists only on `uio`.
+    """
+    uio = sum(PINS_DIR[l.name][1] + PINS_DIR[l.name][2] + PINS_DIR[l.name][3]
+              for l in subset)
+    uo = sum(PINS_DIR[l.name][0] for l in subset)
+    return uio, uo
+
+
+def feasible_ruled(subset) -> bool:
+    uio, uo = bank_need(subset)
+    return uio <= N_UIO and uo + N_SERIAL <= N_UO
+
+
+def feasible_subsets_ruled():
+    """Every non-empty subset that fits the RULED two-bank map.
+
+    ⛔ Built by SELECTING from the one lane list, never by rebuilding lanes --
+    the identity-filter rule, the same as `feasible_subsets`.
+    """
+    out = []
+    for r in range(1, len(LANES) + 1):
+        for combo in itertools.combinations(LANES, r):
+            if feasible_ruled(combo):
+                out.append(list(combo))
+    return out
 
 
 def pin_cost(subset) -> int:
@@ -158,16 +212,32 @@ def main() -> int:
     for l in LANES:
         print("    %-20s r_envelope = %d" % (l.name, env[l.name]))
 
-    subs = feasible_subsets()
+    # ⛔ THE SWEEP RUNS ON THE RULED MAP, WHICH IS WHAT SHIPS. The all-on-uio
+    # set (24) is a STRICT SUBSET of the ruled set (31), so analysing the ruled
+    # set covers both; analysing only the 24 would leave the 7 subsets that
+    # became feasible under the ruling unchecked by the foreign tool, which is
+    # precisely the gap the ruling opened.
+    subs_preruling = feasible_subsets()
+    subs = feasible_subsets_ruled()
     print()
-    print("  --- pin-feasible subsets: %d of %d non-empty subsets ---"
+    print("  --- pin-feasible subsets under the RULED two-bank map: %d of %d ---"
           % (len(subs), 2 ** len(LANES) - 1))
+    print("      (pre-ruling, all pins on uio: %d of %d -- a strict subset, so"
+          % (len(subs_preruling), 2 ** len(LANES) - 1))
+    print("       sweeping the ruled set covers it)")
+    missing = [s for s in subs_preruling
+               if not any(set(s) == set(x) for x in subs)]
+    if missing:
+        print("    *** the pre-ruling set is NOT a subset of the ruled set --")
+        print("        %d subsets would go unchecked" % len(missing))
+        rc = 1
     maximal = [s for s in subs
                if not any(set(x) > set(s) for x in subs)]
     print("    MAXIMAL ones (nothing more can be added):")
     for s in maximal:
-        print("      %-2d pins  %s" % (pin_cost(s),
-                                       ", ".join(x.name.split()[0] for x in s)))
+        u, o = bank_need(s)
+        print("      uio %d, uo_out %d+%d  %s"
+              % (u, o, N_SERIAL, ", ".join(x.name.split()[0] for x in s)))
 
     # ---- our recurrence on every subset, then the foreign check ---------
     print()
@@ -276,60 +346,89 @@ def main() -> int:
 
     # ---- the uo_out trade-off, PRICED (flag-back, not decided) ---------
     print()
-    print("  --- PRICED FLAG-BACK: push-pull outputs on uo_out ---")
-    for n, (o, i, b) in PINS_DIR.items():
-        tot = o + i + b
-        assert tot == PINS[n][0], "direction split disagrees with the pin count"
-    print("    %-20s %-9s %-7s %-12s %s"
-          % ("lane", "push-pull", "inputs", "open-drain", "total"))
+    print("  --- RULED placement, by ELECTRICAL CLASS (not by direction) ---")
+    for n, (o, i, b, z) in PINS_DIR.items():
+        tot = o + i + b + z
+        assert tot == PINS[n][0], (
+            "electrical split disagrees with the pin count for %s" % n)
+    print("    %-20s %-9s %-7s %-11s %-9s %s"
+          % ("lane", "push-pull", "inputs", "open-drain", "tri-state", "total"))
     for l in LANES:
-        o, i, b = PINS_DIR[l.name]
-        print("    %-20s %-9d %-7d %-12d %d" % (l.name, o, i, b, o + i + b))
+        o, i, b, z = PINS_DIR[l.name]
+        print("    %-20s %-9d %-7d %-11d %-9d %d"
+              % (l.name, o, i, b, z, o + i + b + z))
     o_all = sum(PINS_DIR[l.name][0] for l in LANES)
     i_all = sum(PINS_DIR[l.name][1] for l in LANES)
     b_all = sum(PINS_DIR[l.name][2] for l in LANES)
-    print("    %-20s %-9d %-7d %-12d %d" % ("TOTAL", o_all, i_all, b_all,
-                                            o_all + i_all + b_all))
+    z_all = sum(PINS_DIR[l.name][3] for l in LANES)
+    print("    %-20s %-9d %-7d %-11d %-9d %d"
+          % ("TOTAL", o_all, i_all, b_all, z_all,
+             o_all + i_all + b_all + z_all))
     print()
-    print("    ⛔ I2C IS PINNED TO uio EITHER WAY. `uo_out` is output-only, and")
-    print("    an open-drain line must be able to RELEASE. So SCL/SDA cannot")
-    print("    move, whatever is decided about the rest.")
+    print("    ⛔ TWO CLASSES ARE PINNED TO uio, FOR ONE REASON: they must be")
+    print("    able to STOP DRIVING. `uo_out` is output-only and always driven.")
+    print("      open-drain (I2C SCL/SDA) -- releases so the pull-up wins")
+    print("      tri-state (SPI-target MISO) -- releases so another target can")
+    print("        drive the shared MISO line")
+    print("    ⭐ DIRECTION WAS NEVER THE CONSTRAINT. On a direction axis a")
+    print("    target MISO is just 'an output' and lands on uo_out -- which is")
+    print("    exactly the error this table used to contain.")
     print()
+    all_uio = o_all + i_all + b_all + z_all
     print("    %-34s %-10s %-10s %s"
           % ("placement", "uio used", "uo_out", "all 5 lanes?"))
     print("    %-34s %-10d %-10s %s"
-          % ("everything on uio (today)", o_all + i_all + b_all, "0 (free)",
-             "NO -- needs %d of %d" % (o_all + i_all + b_all, N_UIO)))
-    uio_split = i_all + b_all
+          % ("everything on uio (pre-ruling)", all_uio, "0 (free)",
+             "NO -- needs %d of %d" % (all_uio, N_UIO)))
+    # ⛔ THE SUPERSEDED MAP, kept visible because it is what the MISO catch
+    # corrected: it counted the target's MISO as push-pull and so put 5 pins on
+    # uo_out, filling it to 8 of 8 with the serial view and leaving uio at 7.
     print("    %-34s %-10d %-10d %s"
-          % ("push-pull outputs -> uo_out", uio_split, o_all,
-             "YES" if uio_split <= N_UIO and o_all <= 8 else "no"))
+          % ("outputs->uo_out, MISO as push-pull", i_all + b_all,
+             o_all + z_all,
+             "wireable but ELECTRICALLY WRONG -- target MISO cannot release"))
+    uio_split, uo_split = bank_need(LANES)
+    print("    %-34s %-10d %-10d %s"
+          % ("RULED: MISO tri-state on uio", uio_split, uo_split,
+             "YES" if feasible_ruled(LANES) else "no"))
     print()
-    if uio_split <= N_UIO and o_all <= 8:
-        print("    ⭐⭐ THIS IS BIGGER THAN A SERIALISATION COST: MOVING THE")
-        print("    PUSH-PULL OUTPUTS MAKES THE WHOLE FIVE-LANE SET WIREABLE.")
-        print("    uio drops to %d of %d (inputs + open-drain) and uo_out carries"
+    if feasible_ruled(LANES):
+        print("    ⭐⭐ THIS IS BIGGER THAN A SERIALISATION COST: SPLITTING THE")
+        print("    PINS BY ELECTRICAL CLASS MAKES THE WHOLE FIVE-LANE SET")
+        print("    WIREABLE. uio carries %d of %d (inputs + open-drain +"
               % (uio_split, N_UIO))
-        print("    %d outputs of 8. The envelope stops being an envelope and"
-              % o_all)
-        print("    becomes a configuration -- every r_i in A2 is then attained")
-        print("    by a chip you can actually wire.")
+        print("    tri-state) and uo_out carries %d protocol + %d serial = %d of"
+              % (uo_split, N_SERIAL, uo_split + N_SERIAL))
+        print("    %d. The envelope stops being an envelope and becomes a"
+              % N_UO)
+        print("    CONFIGURATION -- every r_i in A2 is attained by a chip you")
+        print("    can actually wire.")
         print()
-        print("    ⚠ AND THE COST IS SHARPER THAN 'SERIALISE THE VIEW'. With %d"
-              % o_all)
-        print("    of 8 uo_out pins spent on protocol outputs, %d remain. The"
-              % (8 - o_all))
-        print("    F1 data channel wanted a PARALLEL RX byte there (8 bits).")
-        print("    %d pins cannot carry a nibble (4) plus a valid flag, so the"
-              % (8 - o_all))
-        print("    RX path would go BIT-serial, or the view would time-multiplex")
-        print("    against the protocol outputs -- which F2 forbids on a pin")
-        print("    that is also driving a protocol line, because switching the")
-        print("    view would glitch SCLK.")
-        print("    ⛔ THE TRADE: 5 lanes + bit-serial host readback, against 4")
-        print("    lanes + a parallel one.")
+        print("    ⛔ AND THE TIGHT BANK IS NOW uio, NOT uo_out. The MISO")
+        print("    correction moved one pin from the bank with a spare to the")
+        print("    bank that was full:")
+        print("      uio    %d of %d  -- EXACTLY FULL, zero spare" % (uio_split,
+                                                                      N_UIO))
+        print("      uo_out %d of %d  -- %d spare"
+              % (uo_split + N_SERIAL, N_UO, N_UO - uo_split - N_SERIAL))
+        print("    ⭐ So the spare that the superseded map had spent is restored,")
+        print("    but it is restored on the OUTPUT bank -- it cannot absorb a")
+        print("    further input, open-drain or tri-state line. The constraint")
+        print("    did not get looser, it MOVED.")
         print()
-        print("    ✅✅ RULED: 5 LANES, PUSH-PULL OUTPUTS ON uo_out, RX BIT-SERIAL.")
+        print("    ⚠ THE RX VIEW IS STILL BIT-SERIAL, FOR THE SAME REASON. With")
+        print("    %d of %d uo_out pins on protocol outputs, %d remain and the"
+              % (uo_split, N_UO, N_UO - uo_split))
+        print("    F1 data channel wanted a PARALLEL RX byte (8 bits) there. The")
+        print("    %d spare beyond the serial trio cannot carry a nibble plus a"
+              % (N_UO - uo_split - N_SERIAL))
+        print("    valid flag, and time-multiplexing the view against a protocol")
+        print("    output is what F2 forbids -- switching the view would glitch")
+        print("    SCLK. ⛔ THE TRADE IS UNCHANGED: 5 lanes + bit-serial host")
+        print("    readback, against 4 lanes + a parallel one.")
+        print()
+        print("    ✅✅ RULED: 5 LANES, PUSH-PULL OUTPUTS ON uo_out, TARGET MISO")
+        print("    TRI-STATED ON uio, RX BIT-SERIAL.")
         print("    The reason is that it closes the gap between what we PROVE and")
         print("    what you can WIRE: every lane in A2 becomes a lane that runs,")
         print("    all %d subsets feasible instead of %d. 'We proved five and you"
@@ -389,31 +488,48 @@ def main() -> int:
         print("          reading.")
     print()
     print("    ⭐ maximal lane sets under each placement:")
-    for label, budget in (("uio only (today)", N_UIO),
-                          ("outputs on uo_out", N_UIO)):
-        if label.startswith("uio only"):
-            subs2 = feasible_subsets(budget)
-        else:
-            subs2 = [s for s in
-                     (list(c) for r in range(1, len(LANES) + 1)
-                      for c in itertools.combinations(LANES, r))
-                     if sum(PINS_DIR[x.name][1] + PINS_DIR[x.name][2]
-                            for x in s) <= budget
-                     and sum(PINS_DIR[x.name][0] for x in s) <= 8]
+    ALL_SUBS = [list(c) for r in range(1, len(LANES) + 1)
+                for c in itertools.combinations(LANES, r)]
+    # ⛔ The superseded map is kept as a row so the MISO correction is visible
+    # as a CHANGE OF COUNT and not only as prose. It put the target's MISO on
+    # uo_out as if it were push-pull.
+    def _superseded(s):
+        return (sum(PINS_DIR[x.name][1] + PINS_DIR[x.name][2] for x in s)
+                <= N_UIO
+                and sum(PINS_DIR[x.name][0] + PINS_DIR[x.name][3]
+                        for x in s) + N_SERIAL <= N_UO)
+    for label, subs2 in (("all pins on uio", feasible_subsets(N_UIO)),
+                         ("MISO as push-pull", [s for s in ALL_SUBS
+                                                if _superseded(s)]),
+                         ("RULED (MISO tri-state)", feasible_subsets_ruled())):
         mx = [s for s in subs2 if not any(set(x) > set(s) for x in subs2)]
-        print("      %-22s %d feasible subsets, largest has %d lanes"
-              % (label, len(subs2), max(len(s) for s in mx)))
+        print("      %-24s %2d of %d subsets, largest has %d lanes"
+              % (label, len(subs2), len(ALL_SUBS),
+                 max(len(s) for s in mx)))
+    print("    ⭐ THE RULED MAP AND THE SUPERSEDED ONE ADMIT THE SAME SUBSETS.")
+    print("    That is the result Wilson predicted and it had to be COUNTED,")
+    print("    not assumed: only WHICH BANK a pin sits on moved, and both banks")
+    print("    still fit, so no subset gained or lost feasibility. ⛔ The pin")
+    print("    map changed for CORRECTNESS, and the schedulability evidence is")
+    print("    untouched -- which is exactly why nothing downstream complained")
+    print("    and the error survived a full batch.")
 
     print()
     print("=" * 78)
     print("  GATE pin-subsets: %s" % ("PASSED" if rc == 0 else "FAILED"))
-    print("    * 12 protocol pins needed, %d available -- the five-lane set is"
+    print("    * 12 protocol pins needed against %d uio -- so the pins split by"
           % N_UIO)
-    print("      an ENVELOPE, not a configuration")
+    print("      ELECTRICAL CLASS across two banks, not by direction")
     print("    * monotonicity CHECKED, not argued: %d subsets, %d (lane, subset)"
           % (len(subs), checked))
     print("      results, foreign-confirmed, zero violations")
-    print("  -> 1.6 condition: sum of active-lane pins <= %d uio" % N_UIO)
+    _u, _o = bank_need(LANES)
+    print("    * RULED map: uio %d of %d (EXACTLY FULL), uo_out %d protocol + %d"
+          % (_u, N_UIO, _o, N_SERIAL))
+    print("      serial = %d of %d, %d spare"
+          % (_o + N_SERIAL, N_UO, N_UO - _o - N_SERIAL))
+    print("  -> 1.6o: uio >= inputs + open-drain + tri-state; uo_out >=")
+    print("           push-pull + %d serial" % N_SERIAL)
     return rc
 
 

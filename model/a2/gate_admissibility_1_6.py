@@ -423,16 +423,23 @@ def c_pins(lanes):
     # envelope's rejection is the must-fire, not the failure.
     # ✅ RULED PLACEMENT: push-pull outputs on uo_out, so ALL FIVE lanes are
     # programmable at once. The condition becomes a check on TWO budgets.
-    from gate_pin_subsets import PINS_DIR, N_UIO
-    uio = sum(PINS_DIR[l.name][1] + PINS_DIR[l.name][2] for l in lanes)
-    out = sum(PINS_DIR[l.name][0] for l in lanes)
-    SERIAL = 3                      # RX bit-serial: data, strobe, valid
-    ok = uio <= N_UIO and out + SERIAL <= 8
-    return ok, ("ruled placement: uio = %d of %d (inputs + open-drain), "
-                "uo_out = %d protocol outputs + %d serial = %d of 8. "
-                "⛔ uo_out is EXACTLY FULL -- zero spare, so any further output "
-                "pin breaks the placement"
-                % (uio, N_UIO, out, SERIAL, out + SERIAL))
+    # ✅ MISO RULING: the split is by ELECTRICAL CLASS, not direction. `uio` has
+    # to carry everything that must be able to STOP DRIVING -- inputs,
+    # open-drain, AND tri-state target outputs -- because `uio_oe` is the only
+    # thing on this device that can release a line.
+    # ⛔ THE TIGHT BANK CHANGED HANDS. This condition used to say uo_out was
+    # exactly full with zero spare. After the MISO move it is `uio` that is
+    # exactly full, and uo_out's spare is restored but can only absorb another
+    # PUSH-PULL output. The constraint moved; it did not loosen.
+    from gate_pin_subsets import N_UIO, N_UO, N_SERIAL, bank_need
+    uio, out = bank_need(lanes)
+    ok = uio <= N_UIO and out + N_SERIAL <= N_UO
+    return ok, ("ruled placement: uio = %d of %d (inputs + open-drain + "
+                "tri-state MISO) -- EXACTLY FULL; uo_out = %d push-pull + %d "
+                "serial = %d of %d, %d spare but PUSH-PULL ONLY. ⛔ a further "
+                "input, open-drain or tri-state line has nowhere to go"
+                % (uio, N_UIO, out, N_SERIAL, out + N_SERIAL, N_UO,
+                   N_UO - out - N_SERIAL))
 
 
 def c_rx(lanes):
@@ -475,18 +482,33 @@ def c_pins_fire():
     31 subsets fit, so the thing that must be REJECTED is putting the push-pull
     outputs back on `uio`, which is what the ruling moved away from.
     """
-    from gate_pin_subsets import PINS, PINS_DIR, N_UIO, feasible_subsets
+    # ⛔ TWO FACES NOW, AND BOTH MUST FIRE. The second one is the MISO catch:
+    # the superseded map was WIREABLE -- it admitted all 31 subsets and every
+    # count balanced -- and it was still wrong, because a target MISO on
+    # output-only `uo_out` can never release the shared line. A pin-budget
+    # condition that only counts pins cannot reject it, so this arm rejects it
+    # on the ELECTRICAL class instead.
+    from gate_pin_subsets import (PINS, PINS_DIR, N_UIO, N_UO, N_SERIAL,
+                                  feasible_subsets)
     subs = feasible_subsets()           # the all-on-uio placement
     tot = sum(PINS[n][0] for n in PINS)
-    out = sum(PINS_DIR[n][0] for n in PINS_DIR)
-    return tot > N_UIO, (
-        "putting all %d protocol pins on uio is REJECTED (%d > %d), which is "
-        "the pre-ruling placement: it admits only %d of 31 subsets, max %d "
-        "lanes. ⭐ Moving the %d push-pull outputs to uo_out admits all 31 -- "
-        "and uo_out is then EXACTLY full at %d of 8 with the 3 serial pins, so "
-        "a further output pin re-breaks it"
-        % (tot, tot, N_UIO, len(subs), max(len(x) for x in subs), out,
-           out + 3))
+    face_a = tot > N_UIO
+
+    # face (b): would the superseded "MISO is push-pull" map be admitted?
+    z_all = sum(PINS_DIR[n][3] for n in PINS_DIR)
+    pp_all = sum(PINS_DIR[n][0] for n in PINS_DIR)
+    superseded_uo = pp_all + z_all + N_SERIAL
+    face_b = z_all > 0 and superseded_uo <= N_UO
+    return face_a and face_b, (
+        "(a) all %d protocol pins on uio is REJECTED (%d > %d) -- the "
+        "pre-ruling map, which admits only %d of 31 subsets, max %d lanes. "
+        "(b) ⛔ THE SUPERSEDED MAP WAS WIREABLE AND STILL WRONG: counting the "
+        "%d tri-state MISO as push-pull puts %d on uo_out (%d of %d, fits) and "
+        "admits all 31 subsets, so NO PIN COUNT REJECTS IT. It is rejected on "
+        "ELECTRICAL class -- `uo_out` is always driven and a target MISO must "
+        "release so another target can drive the shared line"
+        % (tot, tot, N_UIO, len(subs), max(len(x) for x in subs),
+           z_all, pp_all + z_all, superseded_uo, N_UO))
 
 
 def c_idle(lanes):
@@ -538,6 +560,57 @@ def c_idle_fire():
         % (fa.writes, rnd.transactions))
 
 
+def c_miso_release(lanes):
+    """RULED -- the master must leave a gap before selecting another target.
+
+    ⛔⛔ THIS CONDITION EXISTS BECAUSE THE MISO FIX IS NOT COMPLETE AT
+    "uio_oe = CS". CS is an asynchronous input on `uio`, so it is synchronised
+    and the enable is registered per F2. The enable therefore follows CS by
+    L_sync + out_reg cycles IN BOTH DIRECTIONS -- and the DEASSERT direction is
+    the one that bites: for that many cycles after the master deselects us we
+    are still driving the shared MISO.
+
+    ⭐ The threshold is a requirement on the MASTER, not on us, which is what
+    makes it host-facing spec rather than a design bound. It is priced against
+    our own lane table (which we own) and NOT against the MB85RS64V AC table:
+    that table names an "Output disable time" and a "Deselect time", so the
+    quantity is real, but its text layer is scrambled and no value from it is
+    quoted. ⛔ The evidence is the parameter NAMES; the numbers are not evidence.
+    """
+    from gate_miso_tristate import HZ
+    lat = L_SYNC + OUT_REG
+    spi_t = next((l for l in lanes if l.name.startswith("SPI-target")), None)
+    if spi_t is None:
+        return True, ("no SPI-target lane in this set, so no shared MISO and "
+                      "the condition is vacuous -- correctly so")
+    ok = lat < spi_t.t
+    return ok, ("release latency = L_sync %d + out_reg %d = %d cyc (%.0f ns at "
+                "%.0f MHz) against the SPI-target SCK half-period of %d cyc "
+                "(%.0f ns) = %.0f%%; release completes inside one half-period, "
+                "which a master that moves two of its own GPIOs cannot beat"
+                % (L_SYNC, OUT_REG, lat, lat / HZ * 1e9, HZ / 1e6, spi_t.t,
+                   spi_t.t / HZ * 1e9, 100.0 * lat / spi_t.t))
+
+
+def c_miso_release_fire():
+    """⛔ The RULED design itself contends under a zero-gap master. That is the
+    point: the firing witness is not a mutant, it is a HOST that moves too
+    fast, which is why the condition belongs in the host-facing spec."""
+    from gate_miso_tristate import run_bus, oe_registered_release
+    lat = L_SYNC + OUT_REG
+    ours = [True] * 4 + [False] * 12
+    other = [False] * 4 + [True] * 12
+    bad = run_bus(oe_registered_release, ours, other)
+    return len(bad) == lat, (
+        "a master that deselects SPI-target and selects another target in the "
+        "SAME cycle (gap = 0) causes %d cycles of CONTENTION on the shared "
+        "MISO -- exactly the release latency. ⛔ The contending design is the "
+        "RULED one, not a mutant: two output stages at opposing levels because "
+        "the host moved faster than the synchroniser. ⇒ the master must leave "
+        ">= %d cycles between deasserting our CS and asserting another's"
+        % (len(bad), lat))
+
+
 CONDITIONS = [
     ("1.6a", "r_i <= t_i (one queue slot per lane)", c_queue, c_queue_fire),
     ("1.6b", "live-deadline spread + max r < 2^(N-1)", c_spread, c_spread_fire),
@@ -563,12 +636,15 @@ CONDITIONS = [
      c_2mhz_fire),
     ("1.6n", "data channel: the host keeps TX data registers fed "
              "(underrun = sticky flag, NEVER a stall)", c_feed, c_feed_fire),
-    ("1.6o", "pin budget, RULED placement: uio >= inputs+open-drain, "
-             "uo_out >= push-pull outputs + 3 serial", c_pins, c_pins_fire),
+    ("1.6o", "pin budget by ELECTRICAL CLASS: uio >= inputs + open-drain + "
+             "tri-state; uo_out >= push-pull + 3 serial", c_pins, c_pins_fire),
     ("1.6p", "RX serial channel: host pops fast enough; overflow = sticky "
              "flag IN the stream", c_rx, c_rx_fire),
     ("1.6q", "pin-role reset/idle: protocol outputs reset HIGH, held at idle "
              "in load mode, CS asserted LAST", c_idle, c_idle_fire),
+    ("1.6r", "shared MISO: master leaves >= L_sync+out_reg cycles between "
+             "deasserting our CS and selecting another target", c_miso_release,
+     c_miso_release_fire),
 ]
 
 
