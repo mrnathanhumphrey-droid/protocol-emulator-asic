@@ -63,13 +63,16 @@ except Exception:
     pass
 
 # The five-lane table and OUR numbers.
-# ⛔ I2C is T=45, D=15 after spec N1 -- the symmetric 62-cycle phase violated
-# tLOW at nominal and D=30 was the centre-sample stand-in. See gate_i2c_phase.py.
-# The foreign check was re-run after that correction and still agrees 5/5.
+# ⛔ Two corrections are baked in and the foreign check was re-run after each:
+#   N1  I2C is T=45, D=15. The symmetric 62-cycle phase violated tLOW at nominal
+#       and D=30 was the centre-sample stand-in. See gate_i2c_phase.py.
+#   N2  UART-rx is T=413, not 434: the admitted peer band is the PROVED receiver
+#       band [413, 458], so the fastest admitted peer bits every 413 cycles.
+# pyRTA still agrees 5/5 on the corrected table.
 SPEC = [("UART-tx 115200", 434, 2, 216, 10),
         ("SPI-tx 1 MHz", 25, 2, 12, 5),
         ("I2C 400 kHz", 45, 2, 15, 7),
-        ("UART-rx 115200", 434, 2, 216, 10),
+        ("UART-rx 115200", 413, 2, 216, 10),   # N2: fastest admitted peer
         ("SPI-target 1 MHz", 25, 2, 12, 5)]
 
 

@@ -51,6 +51,7 @@ except Exception:
 
 CY_PER_US = 50.0                 # 50 MHz
 T_LOW, T_HIGH = 65, 30           # cycles, fast-mode minima
+T_SU_DAT = 5                     # cycles, fast-mode tSU;DAT min (100 ns)
 TR, TF = 15, 15                  # cycles, fast-mode MAXIMA
 PERIOD = 125                     # 400 kHz in cycles
 
@@ -131,58 +132,126 @@ def main() -> int:
           % (dm, D_I2C, D_I2C - dm))
     ok_feas = dm <= D_I2C
 
-    # ---- the whole-period budget, which is the real squeeze --------------
+    # ---- N1a: tr leaves the budget, because of clock synchronization ----
     print()
     print("=" * 78)
-    print("  THE WHOLE-PERIOD BUDGET -- and it is already spent")
+    print("  N1a -- WHY THERE IS NO BOARD REQUIREMENT (clock synchronization)")
     print("=" * 78)
-    print("  An I2C clock period is tLOW + tHIGH + tr + tf. With the Table 11")
-    print("  minima for the phases and MAXIMA for the edges:")
+    print("  The naive budget looks fatal: a period is tLOW + tHIGH + tr + tf,")
     total = T_LOW + T_HIGH + TR + TF
-    print("    %d + %d + %d + %d = %d cycles,  against a period of %d"
-          % (T_LOW, T_HIGH, TR, TF, total, PERIOD))
-    print("    slack = %d cycles" % (PERIOD - total))
+    print("  and with the phase MINIMA and the edge MAXIMA that is")
+    print("    %d + %d + %d + %d = %d cycles against a %d-cycle period -> slack %d."
+          % (T_LOW, T_HIGH, TR, TF, total, PERIOD, PERIOD - total))
+    print("  Read that way, 400 kHz leaves no room for any jitter and the board")
+    print("  would have to beat the spec's own edge maxima. ⛔ THAT READING IS")
+    print("  WRONG, and UM10204 says so itself.")
     print()
-    print("  ⛔⛔ AT 400 kHz WITH WORST-CASE RISE AND FALL THE BUDGET IS EXACTLY")
-    print("     CONSUMED, before any scheduler jitter. Our delta_max of %d cycles"
-          % dm)
-    print("     has nowhere to come from. This is NOT an RTL problem.")
+    print("  Rev 7.0, clock synchronization, VERBATIM from refs/UM10204.txt:")
+    print('    "When all controllers concerned have counted off their LOW')
+    print('     period, the clock line is released and goes HIGH. There is then')
+    print('     no difference between the controller clocks and the state of the')
+    print('     SCL line, and all the controllers start counting their HIGH')
+    print('     periods."')
     print()
-    budget = PERIOD - T_LOW - T_HIGH - dm
-    print("  What the board must deliver:")
-    print("    tr + tf <= period - tLOW - tHIGH - delta_max = %d cycles = %d ns"
-          % (budget, budget * 20))
-    print("    The spec permits up to 600 ns (300+300), so rise+fall must beat")
-    print("    the spec maximum by %d ns. That is a pull-up resistor and bus"
-          % (600 - budget * 20))
-    print("    capacitance requirement, owned by the BOARD rung.")
+    print("  The HIGH count starts when SCL *goes* HIGH, not when the controller")
+    print("  released it. So a slow rise LENGTHENS THE PERIOD instead of eating")
+    print("  tHIGH, and `tr` is outside the controller's budget entirely. Since")
+    print("  Table 11 gives f_SCL as 0..400 kHz -- a MAXIMUM -- a longer period is")
+    print("  compliant. ⭐ The same sampled-SCL-high condition is already required")
+    print("  by A2 Part 4 for clock stretching, so no new mechanism is needed.")
     print()
-    print("  Or run the lane slower -- where worst-case tr/tf fits unaided:")
-    print("    %-9s %-11s %-9s %s" % ("f_SCL", "period", "slack", "verdict"))
-    for khz in (400, 350, 300, 250, 200, 100):
-        per = 1000.0 / khz
-        slack = (per - 1.3 - 0.6 - 0.3 - 0.3) * CY_PER_US
-        v = ("ok, delta_max=%d fits" % dm if slack >= dm
-             else "no room for jitter" if slack >= 0 else "ILLEGAL")
-        print("    %-9s %-11s %-9s %s"
-              % ("%d kHz" % khz, "%.2f us" % per, "%.0f cyc" % slack, v))
+    print("  ⭐ f_SCL therefore becomes an OUTCOME, not a target: the controller")
+    print("  picks N_low and N_high, and the wire decides the rate. Margin m above")
+    print("  the spec minima is the real knob:")
+    print("    %-4s %-7s %-8s %-6s %-7s %-10s %s"
+          % ("m", "N_low", "N_high", "T", "D_I2C", "f worst", "margin"))
+    for m in (0, 5, 10, 15):
+        nl, nh = T_LOW + dm + m, T_HIGH + dm + m
+        Tm = min(nl, nh)                      # conservative: assumes tr -> 0
+        Dm = min(nl - T_LOW, nh - T_HIGH, (nl - T_SU_DAT) // 2)
+        f = 50e6 / (TF + nl + TR + nh) / 1000
+        print("    %-4d %-7d %-8d %-6d %-7d %-10.0f %-3d %s"
+              % (m, nl, nh, Tm, Dm, f, Dm - dm,
+                 "<- A2-F6 zero margin" if Dm == dm else ""))
     print()
-    print("  ⭐ 350 kHz is the first rate that carries worst-case edges AND our")
-    print("     jitter with no board requirement at all (18 cycles of slack).")
+    print("  ⛔ THE BOARD REQUIREMENT IS WITHDRAWN. The earlier conclusion -- that")
+    print("     tr+tf must beat the spec maximum by 100 ns, or the lane drop to")
+    print("     350 kHz -- was an artefact of charging tr to the controller.")
+    print("     What replaces it is a DECLARED SCOPE POINT: at m=%d the lane runs"
+          % 10)
+    print("     at ~%d kHz worst-case rise, faster with better pull-ups."
+          % (50e6 / (TF + 80 + TR + 45) / 1000))
+    print("     Only tf stays in the controller's budget.")
+
+    # ---- N1b: D over EVERY Table 11 constraint, not the phases only ------
+    print()
+    print("=" * 78)
+    print("  N1b -- D_I2C over EVERY Table 11 differential constraint")
+    print("=" * 78)
+    sda_tol = (NL - T_SU_DAT) // 2
+    fixed = [("SCL low phase", NL - T_LOW, "bounded above by the f_SCL target"),
+             ("SCL high phase", NH - T_HIGH, "bounded above by the f_SCL target"),
+             ("SDA placement", sda_tol, "boxed inside the low phase")]
+    free = [("tSU;STA separation", 30), ("tHD;STA separation", 30),
+            ("tSU;STO separation", 30), ("tBUF separation", 65)]
+    print("  %-22s %-13s %s" % ("constraint", "tolerance", "note"))
+    for n, v, note in fixed:
+        print("  %-22s %-13s %s" % (n, "%d cyc" % v, note))
+    for n, tmin in free:
+        print("  %-22s %-13s FREE timestamp offset (Q2): set it generously"
+              % (n, "unbounded"))
+    D_all = min(v for _, v, _ in fixed)
+    binds = [n for n, v, _ in fixed if v == D_all]
+    print()
+    print("  D_I2C = min over the BINDING constraints = %d cycles, set by: %s"
+          % (D_all, ", ".join(binds)))
+    print()
+    print("  ⛔ P1.1b IS FALSIFIED, NOT MERELY UNTESTED. The prediction was that a")
+    print("     START/STOP separation would bind. It cannot: per Q2 those")
+    print("     separations are FREE TIMESTAMP OFFSETS, so they are CHOSEN rather")
+    print("     than given, and a chosen parameter is never the binding one -- we")
+    print("     just set it generously at zero cell cost. Only a constraint with")
+    print("     competing UPWARD pressure can bind, which here means the SCL")
+    print("     phases (pushed up by the f_SCL target) and the SDA placement")
+    print("     (boxed inside the low phase).")
+
+    # ---- N1b must-fire: SDA inside tSU;DAT of the rise must FAIL --------
+    print()
+    print("  --- must-fire arm: SDA placed inside tSU;DAT of the rise ---")
+    bad_offsets = [NL - T_SU_DAT + 1, NL - 1, NL]
+    mf = True
+    for s in bad_offsets:
+        setup_left = NL - s - dm
+        rejected = setup_left < T_SU_DAT
+        mf = mf and rejected
+        print("    SDA at offset %-3d -> setup left %-4d vs tSU;DAT %d : %s"
+              % (s, setup_left, T_SU_DAT,
+                 "REJECTED" if rejected else "*** ACCEPTED -- check is blind ***"))
+    s_ok = (NL - T_SU_DAT) // 2
+    print("    SDA at offset %-3d -> setup left %-4d vs tSU;DAT %d : %s"
+          % (s_ok, NL - s_ok - dm, T_SU_DAT,
+             "accepted (the legal centre)" if NL - s_ok - dm >= T_SU_DAT
+             else "*** rejected -- the legal case fails ***"))
+    mf = mf and (NL - s_ok - dm >= T_SU_DAT)
+    print("    must-fire: %s"
+          % ("PASS -- illegal SDA placements are caught and the legal one is not"
+             if mf else "*** FAIL ***"))
 
     print()
     print("=" * 78)
-    print("  GATE N1: %s" % ("PASSED" if ok_feas else "FAILED"))
+    ok = ok_feas and mf
+    print("  GATE N1: %s" % ("PASSED" if ok else "FAILED"))
     print("    * symmetric split rejected (must-fire fired)")
-    print("    * legal split chosen on balanced margin: %d/%d" % (NL, NH))
-    print("    * D_I2C = %d, DERIVED -- one O4 label removed" % D_I2C)
+    print("    * split chosen on balanced margin: %d/%d" % (NL, NH))
+    print("    * D_I2C = %d over ALL Table 11 constraints, DERIVED" % D_all)
     print("    * T_I2C = %d, down from the shipped 62: the lane is DENSER" % T)
-    print("  ⛔ LEDGER (board rung, not ours): tr+tf <= %d ns required at"
-          % (budget * 20))
-    print("     400 kHz, or drop to 350 kHz. Open-drain edge rates are wire")
-    print("     physics and are labelled MODELLED until the board rung measures")
-    print("     them.")
-    return 0 if ok_feas else 1
+    print("    * P1.1b falsified: free offsets cannot bind")
+    print("    * board requirement WITHDRAWN (clock synchronization)")
+    print("  ⛔ LEDGER: f_SCL ~%d kHz worst-case is a DECLARED SCOPE POINT, not"
+          % (50e6 / (TF + NL + TR + NH) / 1000))
+    print("     400 kHz. Open-drain edge rates remain MODELLED until the board")
+    print("     rung measures them; only tf is in the controller's budget.")
+    return 0 if ok else 1
 
 
 if __name__ == "__main__":

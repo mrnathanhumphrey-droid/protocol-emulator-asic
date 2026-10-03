@@ -213,8 +213,15 @@ TX = [
 # UART-rx: 10 samples per frame (start + 8 data + stop) at one bit period apart;
 # back-to-back frames make the outer period exactly 10 bit periods. n*t == T, so
 # the burst is GAPLESS -- the densest arrival the protocol permits.
-UART_RX = BLane("UART-rx 115200", T=4340, C=2, D=216, n=10, t=434,
-                note="10 samples/frame, back-to-back frames: n*t == T, gapless")
+# ⛔ T is 413, not 434 -- spec N2. The admitted peer band is exactly the band our
+# receiver is PROVED to decode, the synthesized [413, 458] cycles/bit, so the
+# fastest admitted peer sends a bit every 413 cycles (+5.1% against nominal).
+# Admitting a faster peer than we can decode would be meaningless; admitting a
+# narrower band would throw away proved coverage. The admissibility condition
+# and the conformance theorem are the same object, which needs no scope call.
+UART_RX = BLane("UART-rx 115200", T=4130, C=2, D=216, n=10, t=413,
+                note="10 samples/frame at the FASTEST admitted peer (413, the "
+                     "proved band floor); n*t == T, gapless")
 
 # SPI-target: the MASTER supplies SCK, so our events are its edges -- two per bit,
 # 16 per byte, and back-to-back bytes again make n*t == T.
