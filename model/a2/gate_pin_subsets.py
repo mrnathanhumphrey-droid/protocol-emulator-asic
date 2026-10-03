@@ -326,10 +326,67 @@ def main() -> int:
         print("    against the protocol outputs -- which F2 forbids on a pin")
         print("    that is also driving a protocol line, because switching the")
         print("    view would glitch SCLK.")
-        print("    ⛔ THAT IS THE REAL TRADE: 5 lanes and a bit-serial host")
-        print("    readback, against 4 lanes and a parallel one. It is a")
-        print("    PRODUCT decision about what the demo shows, so it is flagged")
-        print("    back and not taken here.")
+        print("    ⛔ THE TRADE: 5 lanes + bit-serial host readback, against 4")
+        print("    lanes + a parallel one.")
+        print()
+        print("    ✅✅ RULED: 5 LANES, PUSH-PULL OUTPUTS ON uo_out, RX BIT-SERIAL.")
+        print("    The reason is that it closes the gap between what we PROVE and")
+        print("    what you can WIRE: every lane in A2 becomes a lane that runs,")
+        print("    all %d subsets feasible instead of %d. 'We proved five and you"
+              % (2 ** len(LANES) - 1, len(subs)))
+        print("    can run all five' is a different claim from 'we proved five,")
+        print("    pick four'.")
+        print()
+        print("    ⛔ THE SERIALISER IS OFF THE ENGINE, AND THAT IS THE")
+        print("    LOAD-BEARING PART. If the RX serialiser were an engine lane it")
+        print("    would take a scheduling slot, enter every other lane's")
+        print("    interference sum, and -- being the longest action -- become the")
+        print("    blocking term max{C_j - 1} for all of them. That is the re-arm")
+        print("    lesson and the clock-stretch lesson in a third place. As")
+        print("    dedicated hardware it costs ZERO schedulability budget, so")
+        print("    nothing in A2, the frontier or 1.6 moves.")
+        # ⛔ EVENTS ARE NOT BITS, AND I CONFLATED THEM FIRST. `t` is the inner
+        # spacing of scheduled EVENTS. UART-rx samples once per bit, so one
+        # event IS one bit. SPI-target is clocked by the master and sees TWO
+        # edges per bit, so one event is HALF a bit. Reading `t` as a bit period
+        # made SPI-target 2.00 Mb/s instead of 1.00 and the total 2.12 instead
+        # of 1.12 -- a payload rate that would have gone straight into a
+        # host-facing spec at double its real value.
+        #   (lane prefix, bits per scheduled event, why)
+        BITS_PER_EVENT = {"UART-rx": (1.0, "one sample per bit"),
+                          "SPI-target": (0.5, "two SCK edges per bit")}
+        rx_lanes = [l for l in LANES
+                    if l.name.startswith(tuple(BITS_PER_EVENT))]
+        print()
+        print("    aggregate RX payload rate, from the lane table:")
+        agg = 0.0
+        for l in rx_lanes:
+            key = next(k for k in BITS_PER_EVENT if l.name.startswith(k))
+            bpe, why = BITS_PER_EVENT[key]
+            rate = bpe / (l.t * 20e-9)
+            agg += rate
+            print("      %-20s %.1f bit / event, event every %d cyc = %.2f Mb/s"
+                  % (l.name, bpe, l.t, rate / 1e6))
+            print("        (%s)" % why)
+        print("      %-20s %.2f Mb/s total" % ("TOTAL", agg / 1e6))
+        print("    3 pins (data, strobe, valid) at one bit per cycle carry up to")
+        print("    50 Mb/s, so the serial channel is %.1f%% utilised."
+              % (100 * agg / 50e6))
+        print("    ⭐ An RP2040 PIO on the TT board reads that without effort.")
+        print()
+        print("    ⛔ TWO COSTS, carried to 1.5 as flag-backs:")
+        print("      (a) THE STATUS FLAGS LOSE THEIR VIEW MODE. Sticky ovr, TX")
+        print("          underrun and RX overflow had an 8-bit parallel view on")
+        print("          uo_out; it is gone. They must be FRAMED INTO THE SERIAL")
+        print("          STREAM -- a status byte per frame -- so the frame format")
+        print("          carries liveness information, not just payload.")
+        print("      (b) THE SERIAL FORMAT BECOMES HOST-FACING SPEC: framing, bit")
+        print("          order, and what happens when the host STOPS READING.")
+        print("          That last one is RX overflow, the mirror of TX underrun,")
+        print("          and it takes the same answer: a sticky flag, never a")
+        print("          stall. ⛔ And it has to be IN the stream -- a host that")
+        print("          has stopped reading cannot be told by a pin it is not")
+        print("          reading.")
     print()
     print("    ⭐ maximal lane sets under each placement:")
     for label, budget in (("uio only (today)", N_UIO),

@@ -21,12 +21,78 @@ needs TWO TRANSACTION SHAPES, not one shape looped --
 -- so the demo the plan depends on does not fit. "If it doesn't fit" was the
 wrong framing; it already doesn't.
 
+⛔⛔⛔ PROVENANCE CORRECTION -- READ THIS BEFORE THE AREA NUMBERS.
+
+THE GEOMETRY BELOW COMES FROM THE **SG13G2** PDK TREE, NOT FROM SG13CMOS5L.
+I fetched it from `IHP-Open-PDK/ihp-sg13g2/libs.ref/sg13g2_sram/lef/`. I wrote
+that path down honestly and then reasoned as if it were ours -- and this
+competition targets **sg13cmos5l**, a different library (our own netlist's cells
+are `sg13cmos5l_*`, not `sg13g2_*`). A macro that exists for SG13G2 does not
+automatically exist for, or route in, CMOS5L.
+
+⭐ THE ORIGIN RULE IS WHAT CAUGHT THIS. The path was recorded, so the question
+"which PDK tree?" was askable. Had the number been quoted as "26,138 um^2" with
+no provenance, nothing would have exposed it.
+
+WHAT IS NOW ESTABLISHED, AND FROM WHERE:
+
+  (1) `IHP-Open-PDK` has exactly ONE PDK directory, `ihp-sg13g2`. There is no
+      sg13cmos5l tree in it. So the LEF is definitively SG13G2's.
+      SOURCE: the repository's own top-level listing.
+
+  (2) SG13CMOS5L is documented as the same process MINUS the HBTs and MINUS
+      Metal5 and TopMetal2 -- i.e. a 5-metal CMOS-only variant, Metal1..Metal4
+      plus TopMetal1.
+      SOURCE: secondary (project/tooling documentation summaries), NOT a
+      primary IHP datasheet. Labelled accordingly.
+
+  (3) ⭐ THE MACRO'S TOP ROUTING LAYER IS METAL4, which is BELOW both removed
+      layers. So the macro does not use what CMOS5L lacks, and its GDS/geometry
+      has no reason to differ.
+      SOURCE: the LEF's own OBS section, read directly.
+
+  (4) ⭐⭐ AND TINY TAPEOUT'S OWN TOOLING SUPPORTS SRAM MACROS IN CMOS5L.
+      `TinyTapeout/tt-support-tools` PR #187, MERGED into the branch
+      `TinyTapeout:ihp-sg13cmos5l`, adds the `SRAM.drawing` and `DigiBnd.drawing`
+      marker layers to the **SG13CMOS5L** valid-layer list, because "the
+      SG13CMOS5L DRC deck" uses them and "without these layers, the macro is
+      either rejected by the layer check or incorrectly checked under non-SRAM
+      DRC rules". It states: "Tested with RM_IHPSG13_1P_1024x8_c2_bm_bist; full
+      Tiny Tapeout precheck passes."
+      SOURCE: TinyTapeout's repository -- first-party to the competition's own
+      flow, not a competitor's claim. ⭐ And the change is LAYER-based, not
+      macro-based, so it admits the whole RM_IHPSG13_1P_* family rather than one
+      part number.
+
+  => PRECHECK, which I had named as the risk that "kills the approach regardless
+     of the area argument", IS ANSWERED. The remaining risks are PLACEMENT and
+     POWER, not admissibility.
+
+⛔ WHAT IS STILL NOT VERIFIED, AND IS THE GATE BEFORE `MEM_TYPE=SRAM` LOCKS:
+  a hardening run with the macro actually INSTANTIATED in the CMOS5L template --
+  DRC and LVS with macro placement, and the PDN reaching its Metal4-only power
+  pins. ⚠ That last one is a NAMED, OBSERVED failure mode in public issue titles
+  for this macro family ("PDN cannot reach the SRAM macro's Metal4-only power
+  pins -- gds blocked at GeneratePDN"), which I have NOT reproduced. It is the
+  single most likely way this falls over.
+  ⭐ One hypothesis worth testing first, because it would be good news: in
+  CMOS5L there IS no Metal5, so the PDN must already live on Metal4/TopMetal1 --
+  adjacent to the macro's pins rather than two layers above them. The bridging
+  problem may be SG13G2-specific. Hypothesis, not a finding.
+
+⛔ IF THE HARDEN FAILS, THE FALLBACK IS NOT A DEGRADATION: the flop store becomes
+the SHIPPED design, and F1's encoding work is exactly what makes 64 bytes enough
+(one transaction per protocol in 62 of 64). SRAM then survives only as a
+scaling-tier option.
+
 ⭐ ORIGIN OF EVERY NUMBER BELOW (standing rule: an unsourced estimate is
 unverified, including our own):
   * macro names        -- read from the PDK tree, IHP-Open-PDK
                           ihp-sg13g2/libs.ref/sg13g2_sram/gds (30 macros)
+                          ⛔ SG13G2's tree -- see the correction above
   * macro geometry     -- the `SIZE` line of each macro's LEF in
                           ihp-sg13g2/libs.ref/sg13g2_sram/lef, fetched directly
+                          ⛔ SG13G2's tree -- see the correction above
   * cells/bit for flops-- ITEMISED from this project's own shipped cell
                           inventory in docs/SILICON_EVIDENCE.md
                           (gate_encoding_f1.store_cost), not a rule of thumb
@@ -154,13 +220,20 @@ def main() -> int:
 
     print()
     print("  --- integration risks, named rather than discovered later ---")
-    print("    1. METAL4 TOP, AND POWER PINS ON METAL4. The LEF's top routing")
-    print("       layer is Metal4 and its VDD/VSS pins are Metal4-only, while a")
-    print("       TT PDN typically lands on Metal5/TopMetal1. Bridging that is a")
-    print("       known integration step, not a surprise -- ⚠ I have seen it")
-    print("       referenced in public OpenROAD/TT issue titles for this exact")
-    print("       macro family but have NOT reproduced it here, so it is a RISK")
-    print("       to check in the spike, not a measured fact.")
+    print("    1. ⛔ THE LIKELIEST WAY THIS FALLS OVER: Metal4-only POWER PINS.")
+    print("       The LEF's top routing layer is Metal4 and its VDD/VSS pins are")
+    print("       Metal4-only. ⚠ 'PDN cannot reach the SRAM macro's Metal4-only")
+    print("       power pins -- blocked at GeneratePDN' is a NAMED, OBSERVED")
+    print("       failure for this macro family in public issue titles, which I")
+    print("       have NOT reproduced. Treated as the primary risk, not a fact.")
+    print("       ⭐ AND ONE HYPOTHESIS WORTH TESTING FIRST, because it would be")
+    print("       good news: CMOS5L HAS NO METAL5. So its PDN must already live")
+    print("       on Metal4/TopMetal1 -- ADJACENT to the macro's pins rather than")
+    print("       two layers above them. The reports are against SG13G2, where")
+    print("       Metal5 sits in between. The problem may not transfer.")
+    print("       ⛔ Hypothesis, not a finding. It is the first thing the harden")
+    print("       should answer because it is cheap to check and decides the")
+    print("       whole approach.")
     print("    2. BIST PINS. The macro carries A_BIST_* inputs (EN, CLK, REN,")
     print("       WEN, MEN, ADDR, DIN, BM). They must be tied off deliberately;")
     print("       a floating BIST enable is a write port nobody declared.")
@@ -171,10 +244,21 @@ def main() -> int:
     print("       more than one tile row. It fits a 6x4 (%d x %d um) with room,"
           % (6 * 167, 4 * 108))
     print("       but it is NOT a drop-in inside one tile.")
-    print("    4. PRECHECK. ⚠ Whether the macro's GDS layers pass the CMOS5L")
-    print("       precheck allowlist is NOT verified here. It is the first thing")
-    print("       the spike should run, because a precheck failure kills the")
-    print("       approach regardless of the area argument.")
+    print("    4. PRECHECK -- ✅ RESOLVED, and not by us. TinyTapeout's own")
+    print("       tt-support-tools PR #187 is MERGED into the ihp-sg13cmos5l")
+    print("       branch, adding SRAM.drawing + DigiBnd.drawing to the")
+    print("       SG13CMOS5L valid-layer list, 'Tested with")
+    print("       RM_IHPSG13_1P_1024x8_c2_bm_bist; full Tiny Tapeout precheck")
+    print("       passes.' ⭐ It is LAYER-based, not macro-based, so it admits")
+    print("       the whole RM_IHPSG13_1P_* family. First-party to the")
+    print("       competition's flow -- not a competitor's claim.")
+    print("    ⛔ 5. PROVENANCE OF THE GEOMETRY. The LEF above is from the")
+    print("       **SG13G2** tree; IHP-Open-PDK has no sg13cmos5l directory at")
+    print("       all. CMOS5L is documented as the same process minus the HBTs")
+    print("       and minus Metal5/TopMetal2, and this macro tops out at Metal4")
+    print("       -- BELOW both removed layers -- so its geometry has no reason")
+    print("       to differ. ⚠ Strong inference, NOT verification. The harden is")
+    print("       what settles it.")
 
     print()
     print("  --- the cheap reclaim, which applies either way ---")
@@ -203,10 +287,16 @@ def main() -> int:
     print("    * one-cycle synchronous read FITS Ruling 1's prefetch stage")
     print("    * (C, J) frontier unaffected: the SRAM is on the program path,")
     print("      not the EDF path")
-    print("  ⛔ BEFORE RTL, the spike still owes: CMOS5L precheck on the macro")
-    print("     GDS, a trial harden for routability beside the engine, and the")
-    print("     Metal4 PDN bridge. Those are build steps, not estimates, and")
-    print("     none of them is assumed above.")
+    print("  ⛔ BEFORE Part 1 LOCKS MEM_TYPE=SRAM, the gate is a HARDENING RUN")
+    print("     with the macro INSTANTIATED in the CMOS5L template: DRC + LVS")
+    print("     with macro placement, and a PDN that reaches its Metal4-only")
+    print("     power pins. Precheck is already answered (risk 4); placement and")
+    print("     power are not. Those are build steps, not estimates.")
+    print("  ⭐ AND IF IT FAILS THAT IS NOT A DEGRADATION: the flop store becomes")
+    print("     the SHIPPED design, because F1's encoding already fits one")
+    print("     transaction per protocol into 62 of 64 bytes. SRAM would survive")
+    print("     only as a scaling-tier option. The decision is therefore")
+    print("     reversible in one direction and we are not betting Part 1 on it.")
     return 0
 
 

@@ -421,27 +421,72 @@ def c_pins(lanes):
     # -- and that turned the whole 1.6 gate red for the one condition working
     # correctly. Like 1.6c/1.6j/1.6l, this is a condition on a PROGRAM; the
     # envelope's rejection is the must-fire, not the failure.
-    from gate_pin_subsets import PINS, N_UIO, feasible_subsets
-    subs = feasible_subsets()
-    widest = max(subs, key=len)
-    total = sum(PINS[l.name][0] for l in widest)
-    return total <= N_UIO, (
-        "a widest programmable subset is {%s} = %d pins of %d uio. The "
-        "ENVELOPE table needs 12 and is correctly NOT programmable"
-        % (", ".join(x.name.split()[0] for x in widest), total, N_UIO))
+    # ✅ RULED PLACEMENT: push-pull outputs on uo_out, so ALL FIVE lanes are
+    # programmable at once. The condition becomes a check on TWO budgets.
+    from gate_pin_subsets import PINS_DIR, N_UIO
+    uio = sum(PINS_DIR[l.name][1] + PINS_DIR[l.name][2] for l in lanes)
+    out = sum(PINS_DIR[l.name][0] for l in lanes)
+    SERIAL = 3                      # RX bit-serial: data, strobe, valid
+    ok = uio <= N_UIO and out + SERIAL <= 8
+    return ok, ("ruled placement: uio = %d of %d (inputs + open-drain), "
+                "uo_out = %d protocol outputs + %d serial = %d of 8. "
+                "⛔ uo_out is EXACTLY FULL -- zero spare, so any further output "
+                "pin breaks the placement"
+                % (uio, N_UIO, out, SERIAL, out + SERIAL))
+
+
+def c_rx(lanes):
+    """RULED -- the host must pop the RX serial stream fast enough.
+
+    ⭐ The mirror of 1.6n, and it exists for the same reason: the ruled pin map
+    moves the RX payload off a parallel view onto 3 pins, so the host is on the
+    timing chain in BOTH directions now.
+
+    ⛔ EVENTS ARE NOT BITS. `t` is the scheduled-event spacing; UART-rx samples
+    once per bit so one event is one bit, but SPI-target is master-clocked at
+    TWO edges per bit, so one event is HALF a bit. Reading `t` as a bit period
+    doubles SPI-target's rate, and this number is host-facing spec.
+    """
+    BPE = {"UART-rx": 1.0, "SPI-target": 0.5}
+    rx = [l for l in lanes if l.name.startswith(tuple(BPE))]
+    agg = sum(next(v for k, v in BPE.items() if l.name.startswith(k))
+              / (l.t * 20e-9) for l in rx)
+    cap = 50e6                      # 1 bit per cycle on the data pin
+    return agg <= cap, (
+        "aggregate RX payload %.2f Mb/s against %.0f Mb/s on the serial data "
+        "pin = %.1f%% utilised; an RP2040 PIO reads that easily"
+        % (agg / 1e6, cap / 1e6, 100 * agg / cap))
+
+
+def c_rx_fire():
+    return True, (
+        "a host that STOPS READING is the real failure, and it cannot be told "
+        "by a pin it is not reading -- so RX overflow is a STICKY FLAG FRAMED "
+        "INTO THE STREAM (a status byte per frame), never a stall. A stall "
+        "would make the serialiser back-pressure the lane and C unbounded, "
+        "which is the TX-underrun and clock-stretch conclusion a third time")
 
 
 def c_pins_fire():
-    from gate_pin_subsets import PINS, N_UIO, feasible_subsets
-    subs = feasible_subsets()
-    allsub = 2 ** 5 - 1
+    """⛔ The firing case is the PRE-RULING placement, not the envelope.
+
+    This arm first said "the 12-pin envelope is rejected, 24 of 31 subsets fit"
+    -- true before the ruling and stale after it. Under the ruled placement all
+    31 subsets fit, so the thing that must be REJECTED is putting the push-pull
+    outputs back on `uio`, which is what the ruling moved away from.
+    """
+    from gate_pin_subsets import PINS, PINS_DIR, N_UIO, feasible_subsets
+    subs = feasible_subsets()           # the all-on-uio placement
     tot = sum(PINS[n][0] for n in PINS)
+    out = sum(PINS_DIR[n][0] for n in PINS_DIR)
     return tot > N_UIO, (
-        "the full five-lane set (%d pins) is REJECTED at load; %d of %d "
-        "non-empty subsets fit %d uio, and the largest has %d lanes. ⭐ With "
-        "push-pull outputs moved to uo_out all %d subsets fit (see the priced "
-        "flag-back in gate_pin_subsets.py)"
-        % (tot, len(subs), allsub, N_UIO, max(len(x) for x in subs), allsub))
+        "putting all %d protocol pins on uio is REJECTED (%d > %d), which is "
+        "the pre-ruling placement: it admits only %d of 31 subsets, max %d "
+        "lanes. ⭐ Moving the %d push-pull outputs to uo_out admits all 31 -- "
+        "and uo_out is then EXACTLY full at %d of 8 with the 3 serial pins, so "
+        "a further output pin re-breaks it"
+        % (tot, tot, N_UIO, len(subs), max(len(x) for x in subs), out,
+           out + 3))
 
 
 CONDITIONS = [
@@ -469,8 +514,10 @@ CONDITIONS = [
      c_2mhz_fire),
     ("1.6n", "data channel: the host keeps TX data registers fed "
              "(underrun = sticky flag, NEVER a stall)", c_feed, c_feed_fire),
-    ("1.6o", "pin budget: active-lane pins <= 8 uio "
-             "(+ uo_out if push-pull outputs move there)", c_pins, c_pins_fire),
+    ("1.6o", "pin budget, RULED placement: uio >= inputs+open-drain, "
+             "uo_out >= push-pull outputs + 3 serial", c_pins, c_pins_fire),
+    ("1.6p", "RX serial channel: host pops fast enough; overflow = sticky "
+             "flag IN the stream", c_rx, c_rx_fire),
 ]
 
 

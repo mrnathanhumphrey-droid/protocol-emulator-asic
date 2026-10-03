@@ -70,7 +70,11 @@ REQUIRED_PARAMS = [
      "scales with the deadline spread, which scales with the lane set"),
     ("MEM_TYPE", "\"sram\" | \"flops\"",
      "⭐ THE PORTABILITY PARAMETER -- without it the Nangate45/ASAP7 runs "
-     "cannot be built at all"),
+     "cannot be built at all, AND it is the fallback if the CMOS5L macro "
+     "harden fails"),
+    ("RX_SERIAL", "0 = parallel RX view, 1 = 3-pin bit-serial",
+     "the ruled pin map needs serial; the sweep needs to be able to turn it "
+     "off to measure what it costs"),
 ]
 
 # ⛔ Protocol-specific constants that must appear NOWHERE in the engine. These
