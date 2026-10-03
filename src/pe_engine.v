@@ -313,9 +313,21 @@ module pe_engine #(
   //   NOT read the store -- that is the whole point of the prefetch registers,
   //   and it is what keeps C at 2.
   always @(posedge clk or negedge rst_n) begin
+    // ⛔⛔ THIS BLOCK IS THE SOLE DRIVER OF ALL FOUR STORE-REQUEST REGS, AND
+    // THAT HAD TO BE FIXED. `s_wre`/`s_wraddr` were ALSO reset in the main
+    // sequential block below, so two always blocks drove them: 1 + AW = 9 nets,
+    // which Yosys reported as exactly "9 multiple conflicting drivers" and
+    // LibreLane refused to harden.
+    // ⭐⭐ AND iverilog ACCEPTED IT SILENTLY. Multiple procedural drivers are
+    // last-write-wins in simulation and a hard error in synthesis, so the local
+    // smoke bench passed -- with correct edge counts and correct C -- on a
+    // design that CANNOT BE BUILT. ⇒ A simulation bench cannot see multi-driver;
+    // only synthesis can. That is why CI is a gate and not a formality.
     if (!rst_n) begin
-      s_re    <= 1'b0;
-      s_raddr <= {AW{1'b0}};
+      s_re     <= 1'b0;
+      s_raddr  <= {AW{1'b0}};
+      s_wre    <= 1'b0;
+      s_wraddr <= {AW{1'b0}};
     end else begin
       s_re <= 1'b0;
       if (hst == H_REQ) begin
@@ -347,8 +359,6 @@ module pe_engine #(
       hdr_done <= 1'b0;
       pst      <= P_SCAN;
       pl       <= {LW{1'b0}};
-      s_wre    <= 1'b0;
-      s_wraddr <= {AW{1'b0}};
       // ⭐ RESET-HIGH on the pins is handled in the TOP module, not here:
       //   which pins can RELEASE differs between the two banks, and this
       //   module does not know the banks. See pe_top's reset comment.
