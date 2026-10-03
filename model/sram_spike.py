@@ -260,6 +260,51 @@ def main() -> int:
     print("       to differ. ⚠ Strong inference, NOT verification. The harden is")
     print("       what settles it.")
 
+    # ---- ROUTABILITY AROUND THE MACRO, quantified ------------------------
+    # ORIGIN: PITCH and WIDTH values read verbatim from the PDK's own tech LEF,
+    # ihp-sg13g2/libs.ref/sg13g2_stdcell/lef/sg13g2_tech.lef. Primary.
+    PITCH = {"Metal1": 0.48, "Metal2": 0.48, "Metal3": 0.48, "Metal4": 0.48,
+             "Metal5": 0.48, "TopMetal1": 3.28, "TopMetal2": 4.0}
+    print()
+    print("  --- ROUTABILITY AROUND THE MACRO: the second harden risk ---")
+    print("    CMOS5L's stack is Metal1..Metal4 + TopMetal1 (no Metal5, no")
+    print("    TopMetal2). The macro's OBS blocks M1-M4 across its footprint.")
+    print("    ⛔ SO THE ONLY LAYER THAT CROSSES THE MACRO IS TopMetal1 -- and")
+    print("    it is COARSE. From the PDK's tech LEF:")
+    for L in ("Metal2", "Metal3", "Metal4", "TopMetal1"):
+        print("      %-10s pitch %.2f um" % (L, PITCH[L]))
+    w, h = MACROS[1][3], MACROS[1][4]
+    tm1_v = int(w / PITCH["TopMetal1"])
+    tm1_h = int(h / PITCH["TopMetal1"])
+    m_v = int(w / PITCH["Metal2"])
+    print()
+    print("    crossing the macro's %.1f um width:" % w)
+    print("      TopMetal1 only        : %d tracks" % tm1_v)
+    print("      M2+M3+M4 if it were not blocked: %d tracks (%d x 3)"
+          % (m_v * 3, m_v))
+    print("      => crossing capacity falls about %.0fx, to %d tracks"
+          % (m_v * 3 / tm1_v, tm1_v))
+    print("    crossing its %.2f um height: %d TopMetal1 tracks" % (h, tm1_h))
+    print()
+    print("    ⛔ A %.0f x %.0f um hole in a %s um^2 core with ONE coarse layer"
+          % (w, h, f"{CORE_UM2:,}"))
+    print("    over it is a CONGESTION risk independent of the PDN. The macro")
+    print("    occupies only %.1f%% of the core area, so area is not the issue"
+          % (100 * w * h / CORE_UM2))
+    print("    -- the issue is that %d tracks is a hard ceiling on everything" % tm1_v)
+    print("    that needs to get from one side of it to the other.")
+    print()
+    print("    ⭐ WHICH IS WHY PLACEMENT IS THE MITIGATION, AND IT FALLS OUT OF")
+    print("    THE NUMBER: put the macro at an EDGE or CORNER and the crossing")
+    print("    requirement goes to ~zero, because nothing needs to pass through")
+    print("    it. Centre it and %d tracks is all you get." % tm1_v)
+    print("    FALLBACK ORDER: (1) macro at an edge/corner; (2) the flop store.")
+    print()
+    print("    ⛔ SO THE GATE IS MACRO PLACED + FULL ROUTE + TIMING, not a")
+    print("    successful GeneratePDN. A PDN that completes and a design that")
+    print("    routes are different claims, and only the second one is the")
+    print("    decision. ⚠ Neither has been run.")
+
     print()
     print("  --- the cheap reclaim, which applies either way ---")
     from lane_digest import shipped                                 # noqa

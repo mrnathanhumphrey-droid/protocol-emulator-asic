@@ -489,6 +489,55 @@ def c_pins_fire():
            out + 3))
 
 
+def c_idle(lanes):
+    """RULED -- the pin-role reset/idle convention.
+
+    ⛔⛔ THIS CONDITION EXISTS BECAUSE THE PRODUCT RULING CREATED A BUG. Putting
+    protocol outputs on `uo_out` put SPI-master's CS/SCLK/MOSI on pins that
+    `src/project.v` already drives from `mem[]` -- so the load-mode readback
+    became a peripheral driver. `gate_load_pin_safety.py` CONSTRUCTS a 64-byte
+    image whose readback walk clocks WREN then WRITE into the FRAM: 4 writes,
+    on an image that fits the store.
+
+    ⭐ RESET-HIGH IS FORCED, NOT CHOSEN, and the reason is the condition:
+    `uo_out` cannot go high-Z, and pin ROLES are per program, so reset cannot
+    know which pin is CS. HIGH is simultaneously inactive for every role on the
+    map -- UART TX idles high, CS is inactive high, and SCLK/MOSI edges are
+    ignored while CS is high. It is the only constant that is safe for all of
+    them at once.
+    """
+    from gate_load_pin_safety import (PROTOCOL_BITS, scenario_fixed,
+                                      scenario_reset)
+    f = scenario_fixed([i * 7 % 256 for i in range(64)])
+    r = scenario_reset()
+    ok = f.transactions == 0 and r.transactions == 1
+    return ok, ("load mode: %d peripheral selections (must be 0); reset + "
+                "program start: %d (must be exactly 1, the program's own, with "
+                "CS asserted LAST after every other level is correct); all %d "
+                "protocol outputs reset HIGH"
+                % (f.transactions, r.transactions, len(PROTOCOL_BITS)))
+
+
+def c_idle_fire():
+    from gate_load_pin_safety import (FramModel, build_write_image,
+                                      drive_from_byte, scenario_today)
+    adv = build_write_image()
+    fa = FramModel()
+    for _ in range(4):
+        for b in adv:
+            drive_from_byte(fa, b)
+    rnd = scenario_today([i * 37 % 256 for i in range(64)])
+    return fa.writes > 0, (
+        "readback left on the protocol pins is REJECTED: a constructed 64-byte "
+        "image clocks WREN+WRITE and performs %d WRITES to the FRAM oracle, "
+        "and an ordinary image still issues %d spurious selections. ⛔ Random "
+        "bytes reach 0 opcodes (CS and SCLK move on the same readback step, so "
+        "CS-low runs are too short) -- so the claim is CONSTRUCTIBLE, not "
+        "probable, and an encoded field holding one bit constant across a run "
+        "is exactly what constructs it"
+        % (fa.writes, rnd.transactions))
+
+
 CONDITIONS = [
     ("1.6a", "r_i <= t_i (one queue slot per lane)", c_queue, c_queue_fire),
     ("1.6b", "live-deadline spread + max r < 2^(N-1)", c_spread, c_spread_fire),
@@ -518,6 +567,8 @@ CONDITIONS = [
              "uo_out >= push-pull outputs + 3 serial", c_pins, c_pins_fire),
     ("1.6p", "RX serial channel: host pops fast enough; overflow = sticky "
              "flag IN the stream", c_rx, c_rx_fire),
+    ("1.6q", "pin-role reset/idle: protocol outputs reset HIGH, held at idle "
+             "in load mode, CS asserted LAST", c_idle, c_idle_fire),
 ]
 
 
