@@ -110,6 +110,28 @@ N_SERIAL = 3            # RX bit-serial host view: data, strobe, valid
 N_UO = 8
 
 
+def addressable_pins() -> int:
+    """How many pins a PROGRAM ACTION must be able to name, under the ruled map.
+
+    ⛔⛔ THIS EXISTS BECAUSE TWO GATES HARDCODED `N_PINS = 8` WITH THE COMMENT
+    "tt_um_* gives 8 bidirectional uio" -- true before the two-bank ruling and
+    FALSE after it. The ruling put 4 push-pull protocol outputs on `uo_out`, so
+    a program that can only name 8 pins CANNOT NAME THEM AT ALL. That is a
+    functional break, not a sizing nicety: `bits_for(7) = 3` where the ruled map
+    needs `bits_for(11) = 4`.
+
+    ⭐ So it is DERIVED from the pin map rather than written down twice. A
+    constant that has to be updated in two files when a ruling lands is a
+    constant that will be updated in one.
+
+    Addressable = every `uio` pin (inputs, open-drain, tri-state MISO) plus the
+    push-pull protocol outputs on `uo_out`. ⛔ NOT the 3 serial pins -- the
+    serialiser owns those and no program action may touch them, which is also
+    what stops a program glitching SCLK by switching the host view (F2).
+    """
+    return N_UIO + bank_need(LANES)[1]
+
+
 def bank_need(subset):
     """(uio pins, uo_out protocol pins) for a lane subset under the RULED map.
 

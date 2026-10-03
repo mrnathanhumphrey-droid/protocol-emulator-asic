@@ -51,7 +51,13 @@ except Exception:
 
 LANES = lane_digest.shipped()
 N_LANES = len(LANES)
-N_PINS = 8
+# ⛔⛔ WAS `N_PINS = 8` WITH THE COMMENT "tt_um_* gives 8 uio" -- stale from the
+# moment the two-bank pin ruling put 4 push-pull protocol outputs on `uo_out`.
+# At 8 the action word's pin field is bits_for(7) = 3, and A PROGRAM CANNOT NAME
+# THE uo_out PROTOCOL PINS AT ALL. Now DERIVED from the ruled pin map, in one
+# place, so a future pin ruling cannot leave it behind.
+from gate_pin_subsets import addressable_pins                      # noqa: E402
+N_PINS = addressable_pins()
 AW_TODAY = 6
 STORE_BYTES = 2 ** AW_TODAY
 
@@ -121,9 +127,22 @@ def action_word(delay_bits: int, with_clock_pin: bool, with_count: bool) -> dict
     f = [("opcode", 3), ("pin", bits_for(N_PINS - 1)), ("level/dir", 1),
          ("delay/period", delay_bits)]
     if with_clock_pin:
-        # ⭐ a clocked protocol needs the shifter to drive its OWN clock, or
-        # the data and clock become two actions that must stay in lockstep --
-        # which is P-ORDER on every bit, i.e. the problem moved rather than left.
+        # ⛔⛔ CUT FROM THE SHIPPED WORD BY S2, AS A DUPLICATE. The original
+        # rationale was right about the MECHANISM and wrong about the SCOPE:
+        # "a clocked protocol needs the shifter to drive its OWN clock, or the
+        # data and clock become two actions that must stay in lockstep -- which
+        # is P-ORDER on every bit". True. But that says the SHIFT ACTION must
+        # DRIVE a clock; it does not say the clock pin must be named PER ACTION.
+        # ⭐ The clock pin is a LANE property, and the per-lane image header
+        # ALREADY CARRIES IT. A lane cannot drive two different clocked buses --
+        # the ruled pin map gives SPI-tx exactly one SCLK -- so the per-action
+        # copy can never differ from the header's.
+        # ⇒ This is the same cut 1.5 already made once, when "shift reg" and
+        #   "data register" turned out to be one register under two names and
+        #   listing both cost 60 flops for nothing. S2's rule is that a field
+        #   must trace to a ruling AND not duplicate another field.
+        # ⚠ Kept as an OPTION so the comparison below can price it, never in
+        #   the shipped call.
         f.append(("clock pin", bits_for(N_PINS - 1)))
     if with_count:
         f.append(("bit count N", bits_for(8)))
@@ -164,7 +183,7 @@ def image_layout(delay_bits: int, dtol_in_image: bool) -> dict:
     hdr_bits = sum(b for _n, b in hdr_fields)
     hdr_bytes = -(-hdr_bits // 8) * N_LANES
 
-    aw = action_word(delay_bits, with_clock_pin=True, with_count=True)
+    aw = action_word(delay_bits, with_clock_pin=False, with_count=True)
     acts = sum(s for _n, _p, s, _w in TRANSACTIONS)
     prog_bytes = acts * aw["bytes"]
     return {"hdr_fields": hdr_fields, "hdr_bits": hdr_bits,

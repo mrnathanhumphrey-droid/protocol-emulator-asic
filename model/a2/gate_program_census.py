@@ -195,7 +195,7 @@ def main() -> int:
     lane_digest.announce("gate_program_census.py (S1)", LANES)
     rc = 0
 
-    aw = action_word(DELAY_BITS, with_clock_pin=True, with_count=True)
+    aw = action_word(DELAY_BITS, with_clock_pin=False, with_count=True)
     hdr_f, hdr_bits, hdr_bytes = header_bytes()
 
     print()

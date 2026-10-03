@@ -61,6 +61,7 @@ GATES = [
     ("gate_descriptor_1_5.py", "1.5  descriptor freeze, encoding derived", True),
     ("gate_pin_subsets.py", "PIN  12 pins vs 8 uio; envelope checked on every subset", True),
     ("gate_program_census.py", "S1   program-size census -> AW, from enumerated actions", True),
+    ("gate_spec_freeze_s2.py", "S2   spec freeze: every field traces to a ruling", True),
     ("gate_load_pin_safety.py", "PIN  load-mode readback must not drive peripherals", True),
     ("gate_miso_tristate.py", "PIN  target MISO must release; uo_out cannot", True),
     ("gate_admissibility_1_6.py", "1.6  admissibility conditions, each priced", True),
