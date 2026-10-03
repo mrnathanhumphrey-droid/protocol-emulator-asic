@@ -20,6 +20,9 @@ __pycache__/
 model/ta01b/*.bin
 model/ta01b/zone/tax_*.tck
 model/ta01c/*.res
+# Imitator stdout captured by run_sampled.sh so the gate can read its exit
+# status without losing the output to a pipe (regenerable)
+model/ta01c/*.stdout
 
 # Imitator stdout captured by run_imi.sh so the gate can read the exit status
 # without losing the output to a pipe (regenerable)
