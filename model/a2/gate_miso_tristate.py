@@ -181,6 +181,39 @@ def oe_async_clear(step, cs_asserted, hist):
     return bool(past)
 
 
+CS_FILTER_N = 3         # the digital filter's depth, if one existed
+
+
+def oe_filtered_release(step, cs_asserted, hist):
+    """⛔ THE REJECTED MITIGATION -- a DIGITAL filter on CS before the clear.
+
+    ⛔⛔ IT CONTRADICTS THE FIX BY CONSTRUCTION, AND THAT IS WHY IT IS REJECTED
+    ON STRUCTURE RATHER THAN ON PREFERENCE. To filter a glitch you must observe
+    CS high for N consecutive SAMPLES before believing it -- and samples need
+    the CLOCK. So the release path becomes synchronous again and the lag comes
+    straight back. A filter deep enough to suppress a glitch is a filter deep
+    enough to re-open the contention window the async clear exists to close.
+
+    ⭐ A digital CS filter and an asynchronous release are MUTUALLY EXCLUSIVE.
+    This is not an argument: the face below runs it through the same zero-gap
+    master and the contention returns, scaling with the filter depth.
+
+    ⇒ The only filter compatible with an async release is ANALOG, which is a
+    board-level part and off this chip. Hence: RECORD the sensitivity, and ship
+    a board note.
+    """
+    n = CS_FILTER_N
+    # release only once CS has read deasserted for N consecutive samples
+    if not cs_asserted:
+        window = [hist["cs"][j] for j in range(max(0, step - n + 1), step + 1)]
+        if len(window) == n and not any(window):
+            return False
+        return True             # still driving: the filter has not believed it
+    lat = L_SYNC + OUT_REG
+    past = hist["cs"][max(0, step - lat)] if step - lat >= 0 else False
+    return bool(past)
+
+
 def run_bus(ours_policy, cs_ours, cs_other, glitch_at=-1, cs_glitch_at=-1):
     """Walk a trace of a shared MISO with our target and the FRAM on it.
 
@@ -429,13 +462,53 @@ def main() -> int:
         print("        assert warm-up, so this arm is not measuring the risk")
         print("        it names")
         rc = 1
+    # ---- the mitigation, RULED -- and ruled on structure ---------------
     print()
-    print("    ⇒ MITIGATION, and it is a CHOICE to record not to assume: either")
-    print("      FILTER CS before the async clear (a 2-3 cycle digital filter,")
-    print("      which re-introduces part of the lag it removed), or RECORD the")
-    print("      glitch sensitivity as a limitation. ⛔ Part 1 must pick one")
-    print("      explicitly; silently doing neither is how this becomes a")
-    print("      field failure nobody predicted.")
+    print("    --- ✅ MITIGATION RULED: *RECORD*, NOT FILTER. And the reason is")
+    print("        STRUCTURAL, so it is checked rather than argued ---")
+    print("    To filter a glitch you must see CS deasserted for N consecutive")
+    print("    SAMPLES before believing it -- and samples need the CLOCK. So a")
+    print("    digital filter makes the release path synchronous again and the")
+    print("    lag comes back. ⛔ A DIGITAL CS FILTER AND AN ASYNC RELEASE ARE")
+    print("    MUTUALLY EXCLUSIVE. Run it through the same zero-gap master:")
+    print()
+    print("    %-44s %-12s %s" % ("release path", "contends", "glitch cost"))
+    for label, pol in (("✅ async clear, NO filter (RULED)", oe_async_clear),
+                       ("⛔ async clear + %d-sample digital filter"
+                        % CS_FILTER_N, oe_filtered_release),
+                       ("⛔ fully synchronous (superseded)",
+                        oe_registered_release)):
+        zb, _ = run_bus(pol, cs_fast_ours, cs_fast_other)
+        _, bf = run_bus(pol, cs_sel, cs_idle)
+        _, gf2 = run_bus(pol, cs_sel, cs_idle, cs_glitch_at=6)
+        gonly = sorted(set(gf2) - set(bf))
+        print("    %-44s %-12s %s"
+              % (label, "%d cyc" % len(zb), "%d bit" % len(gonly)))
+    filt_bad, _ = run_bus(oe_filtered_release, cs_fast_ours, cs_fast_other)
+    if not filt_bad:
+        print("    *** the filter did NOT re-introduce contention, so the")
+        print("        structural argument for rejecting it is not supported")
+        rc = 1
+    else:
+        print()
+        print("    ⭐⭐ THE FILTER BUYS THE GLITCH BACK BY PAYING THE CONTENTION")
+        print("    AGAIN -- %d cycles for an %d-sample filter (N-1: it releases"
+              % (len(filt_bad), CS_FILTER_N))
+        print("    on the Nth agreeing sample), AND IT SCALES WITH DEPTH. It")
+        print("    suppresses a 1-BIT corruption by re-opening a MULTI-CYCLE")
+        print("    window of two output stages fighting. A strictly worse")
+        print("    trade, and the SAME trade the fully synchronous design")
+        print("    already lost.")
+    print()
+    print("    ⇒ ✅ RULED: ASYNC RELEASE, NO DIGITAL FILTER.")
+    print("      * the glitch sensitivity is RECORDED, not engineered away:")
+    print("        1 floating bit, SAFE DIRECTION (driver off, 0 contention)")
+    print("      * the only filter compatible with an async release is ANALOG,")
+    print("        which is a board part and OFF THIS CHIP")
+    print("      * ⇒ BOARD NOTE, shipped with the datasheet: KEEP CS CLEAN.")
+    print("    ⭐ This settles Part 1's open choice BY STRUCTURE, not by")
+    print("    preference -- which is the only kind of settlement that survives")
+    print("    somebody re-opening it later.")
     print()
     print("    ⛔ AND STA MUST CONSTRAIN THE ASYNC PATH. An asynchronous clear")
     print("    needs RECOVERY and REMOVAL checks on its DEASSERT edge -- the")
@@ -479,8 +552,10 @@ def main() -> int:
     print("    Part 1 RTL:")
     print("      * MISO on `uio`; `uio_oe[MISO]` is a flop with an ASYNC CLEAR")
     print("        driven by CS rising, and a synchronised ASSERT path")
-    print("      * pick ONE of: filter CS before the async clear, or record the")
-    print("        glitch sensitivity. Not neither.")
+    print("      * ✅ NO digital CS filter -- RULED, on structure: a filter")
+    print("        needs the clock and so re-introduces the release lag")
+    print("      * the glitch sensitivity is RECORDED (1 floating bit, safe")
+    print("        direction) + a BOARD NOTE: keep CS clean")
     print("      * every other `uio_oe` bit for an INPUT pin held at 0")
     print("      * I2C SCL/SDA stay open-drain on `uio`: drive 0, release for 1")
     print("    Phase 4 SDC:")

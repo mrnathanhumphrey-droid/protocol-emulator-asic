@@ -252,3 +252,68 @@ source → the harden run (placed + **ROUTED as defined** + timing) → re-close
 **Still owed:** `C` unmeasured; the engine is not built; `nptest` exactness;
 re-read the PDK tech LEF for TopMetal1's pitch; H4 (`refs/ieee_try.bin`,
 `refs/t2.bin` — safe to delete, Nate's hand).
+
+---
+
+# Addendum — rulings after `8b26f8b`
+
+## ✅ 1.6r mitigation: **record, not filter** — and the reason is *checked*
+
+**A digital CS filter contradicts the fix by construction.** To suppress a glitch
+you must observe CS deasserted for N consecutive **samples**, and samples need
+the **clock** — so the release path becomes synchronous again and the lag comes
+straight back.
+
+⭐ That is a structural argument, so it is **run** rather than asserted. Same
+zero-gap master, same resolved net:
+
+| release path | contends | glitch cost |
+|---|---|---|
+| ✅ async clear, no filter (**ruled**) | **0 cyc** | 1 bit |
+| ⛔ async clear + 3-sample digital filter | **2 cyc** (N−1) | 0 bit |
+| ⛔ fully synchronous (superseded) | **4 cyc** | 0 bit |
+
+⛔ **The filter buys the glitch back by paying the contention again**, and it
+scales with depth. It suppresses a **1-bit** corruption by re-opening a
+**multi-cycle** window of two output stages fighting — a strictly worse trade,
+and the *same* trade the fully synchronous design already lost.
+
+The only filter compatible with an async release is **analog**, which is a board
+part and off this chip.
+
+⇒ **Ruled:** async release · glitch sensitivity **recorded** (1 floating bit,
+safe direction: driver off, 0 contention) · **board note shipped with the
+datasheet: keep CS clean.**
+
+⭐ **This settles Part 1's open choice by structure, not preference** — the only
+kind of settlement that survives somebody re-opening it later. The 1.6r
+must-fire is now **three-sided**: the fix passes, the design it replaced dies,
+*and* the mitigation that was considered dies.
+
+⛔ Phase 4 still owes **recovery/removal** on the async clear's deassert edge.
+
+## ⏸ `MEM_TYPE="sram"`: precheck is not acceptance
+
+⛔⛔ **Two gates, and only one was cleared.** TT precheck passing (PR #187) is
+TT's **automated** gate — the layer allowlist plus DRC with the SRAM waivers.
+Whether an **sg13g2-library macro is accepted on the CMOS5L shuttle** belongs to
+TT, IHP and ultimately **Jane Street as sponsor**. It is not ours to settle by
+inference, and this project had been treating one as the other.
+
+⇒ **Open, and Nate's to send:** one question to `asic-competition@janestreet.com`
+or the TT Discord. Cheap, and it **decides** whether `MEM_TYPE="sram"` is the
+shipped design or only a scaling-tier option.
+
+⛔ **Until it returns, Part 1 stays reversible:** `MEM_TYPE` parameterised, the
+flop store as fallback, and **no design decision that only works if the answer
+is yes.**
+
+## Accepted without change
+
+DEF-driven placement at **MIN-Y / MAX-X** · die area **916,214 µm²** · the
+TopMetal1 pitch conflict recorded with the tech-LEF re-read **owed** · origin
+fields must cite a **commit ref** · `ROUTED` with **parsed** overflow · F2 face 4
+for async-reset cells · the glitch term isolated from the assert warm-up.
+
+**Status:** 21 of 21, digest `8ea5756203e1` unchanged, `price_gates.sh` 9 of 9,
+1.6 at 18 conditions.

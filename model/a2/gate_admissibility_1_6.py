@@ -587,9 +587,18 @@ def c_miso_release(lanes):
     ⚠ THE RESIDUAL RISK IS PRICED AND POINTS THE SAFE WAY. A glitch on CS now
     RELEASES MISO, costing one floating bit and NEVER contention, because a
     glitch can only turn a driver OFF. The superseded design could only turn a
-    driver ON late, which is contention. ⛔ Part 1 must explicitly either filter
-    CS before the async clear or record the sensitivity, and Phase 4 owes
-    RECOVERY/REMOVAL constraints on the clear's deassert edge.
+    driver ON late, which is contention.
+
+    ✅ AND THE MITIGATION IS RULED ON STRUCTURE: *RECORD*, NOT FILTER. A digital
+    CS filter must observe N consecutive SAMPLES, and samples need the CLOCK --
+    so it makes the release path synchronous again and the lag comes back. ⛔ A
+    digital filter and an async release are MUTUALLY EXCLUSIVE, which
+    `gate_miso_tristate.py` CHECKS rather than argues: the filtered path
+    contends for N-1 cycles under the same zero-gap master, trading a 1-BIT
+    corruption for a MULTI-CYCLE window of two output stages fighting. The only
+    filter compatible with an async release is ANALOG and therefore off-chip.
+    ⇒ async release; glitch recorded; BOARD NOTE: keep CS clean.
+    ⛔ Phase 4 still owes RECOVERY/REMOVAL on the clear's deassert edge.
     """
     from gate_miso_tristate import HZ
     lat = L_SYNC + OUT_REG
@@ -617,27 +626,35 @@ def c_miso_release_fire():
     the SUPERSEDED design is run through it and dies.
     """
     from gate_miso_tristate import (run_bus, oe_registered_release,
-                                    oe_async_clear)
+                                    oe_async_clear, oe_filtered_release,
+                                    CS_FILTER_N)
     lat = L_SYNC + OUT_REG
     ours = [True] * 4 + [False] * 12
     other = [False] * 4 + [True] * 12
     fixed, _ = run_bus(oe_async_clear, ours, other)
     old, _ = run_bus(oe_registered_release, ours, other)
+    filt, _ = run_bus(oe_filtered_release, ours, other)
     # and the glitch cost, isolated from the assert warm-up
     sel, idle = [True] * 12, [False] * 12
     _, base_f = run_bus(oe_async_clear, sel, idle)
     gb, gf = run_bus(oe_async_clear, sel, idle, cs_glitch_at=6)
     glitch_only = sorted(set(gf) - set(base_f))
-    ok = (len(fixed) == 0 and len(old) == lat and len(gb) == 0
-          and len(glitch_only) == 1)
+    # ⛔ THREE-SIDED NOW: the fix passes, the design it replaced dies, AND the
+    # rejected mitigation dies. The third arm is what makes "record, not
+    # filter" a checked ruling instead of a preference.
+    ok = (len(fixed) == 0 and len(old) == lat and len(filt) > 0
+          and len(gb) == 0 and len(glitch_only) == 1)
     return ok, (
         "ZERO-GAP MASTER, on one resolved net carrying both drivers: the RULED "
-        "async-clear enable contends on %d cycles, the SUPERSEDED fully "
-        "synchronous enable on %d -- so the arm kills the design it replaced "
-        "and is not merely satisfied by the new one. ⚠ And the asymmetry is "
-        "priced: a CS glitch costs %d floating bit(s) and %d contention "
-        "cycles, because a glitch can only turn a driver OFF"
-        % (len(fixed), len(old), len(glitch_only), len(gb)))
+        "async-clear enable contends on %d cycles; the SUPERSEDED fully "
+        "synchronous enable on %d; and the REJECTED %d-sample digital CS "
+        "filter on %d -- so the arm kills both the design it replaced AND the "
+        "mitigation that was considered, rather than merely being satisfied by "
+        "the new one. ⚠ The asymmetry is priced: a CS glitch costs %d floating "
+        "bit(s) and %d contention cycles, because a glitch can only turn a "
+        "driver OFF. ⇒ record + board note, never a digital filter"
+        % (len(fixed), len(old), CS_FILTER_N, len(filt), len(glitch_only),
+           len(gb)))
 
 
 CONDITIONS = [
