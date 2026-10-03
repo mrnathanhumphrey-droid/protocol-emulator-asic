@@ -191,10 +191,23 @@ def assert_reduces_to_periodic(verbose: bool = True) -> bool:
 # ⛔ D_i for every lane below EXCEPT UART is MODELED, not sigrok-derived (O4).
 #    The centre-sampling geometry D = min(T//2, T - T//2 - 1) is applied at each
 #    lane's inner spacing. TA-03's conformance oracles upgrade these.
+# ⛔⛔ I2C IS T=45, D=15 -- CORRECTED, see spec N1 and model/a2/gate_i2c_phase.py.
+# It used to be T=62, D=30, and both were wrong:
+#   * T=62 came from 125/2 = 62.5 rounded DOWN, which the pre-reg called
+#     conservative. It is not: it presumes a SYMMETRIC phase split, and a
+#     symmetric 400 kHz low phase is 1.25 us against tLOW(min) = 1.3 us -- a
+#     spec violation at NOMINAL (UM10204 Rev 7.0 Table 11). The legal split is
+#     asymmetric (N_low=80, N_high=45 on balanced margin) and its minimum
+#     inter-event spacing is 45, so the lane is DENSER than modelled.
+#   * D=30 was the centre-sampling stand-in. For a lane whose clock we generate
+#     the peer judges inter-edge intervals, so D is how much differential jitter
+#     a phase can absorb: min(N_low - tLOW, N_high - tHIGH) = min(15, 15) = 15.
+#     DERIVED, not modelled -- one of the three O4 labels comes off here.
 TX = [
     BLane("UART-tx 115200", 434, 2, 216, note="periodic, one event/bit"),
     BLane("SPI-tx 1 MHz", 25, 2, 12, note="periodic, two events/bit"),
-    BLane("I2C 400 kHz", 62, 2, 30, note="periodic, two events/bit, we clock it"),
+    BLane("I2C 400 kHz", 45, 2, 15,
+          note="asymmetric SCL 80/45; D derived from UM10204 T11, not modelled"),
 ]
 
 # UART-rx: 10 samples per frame (start + 8 data + stop) at one bit period apart;
