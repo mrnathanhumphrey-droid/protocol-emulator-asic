@@ -108,22 +108,60 @@ def main() -> int:
     print("    grid %.0f ns + schedule %.0f ns = %.0f ns of a %.0f ns half-bit (%.0f%%)"
           % (err, NS / F_CLK, total, half_bit_ns, total / half_bit_ns * 100))
     print()
-    print("  ⛔ REINSTATEMENT CONDITION, derived rather than guessed. The mid-bit")
-    print("     instant is on the grid iff 50 ns * f_clk is an integer, i.e. iff")
-    print("     f_clk is a multiple of 20 MHz:")
-    for f in (20, 40, 50, 60, 80, 100):
-        c = Fraction(50e-9).limit_denominator(10 ** 12) * f * 1_000_000
-        print("       %3d MHz -> half-bit = %-6s %s"
-              % (f, str(c), "ON GRID" if c.denominator == 1 else "off grid"))
-    print("     So 60, 80 or 100 MHz place it exactly; 50 MHz cannot. The")
-    print("     alternative is fractional edge placement (a delay line or DDR")
-    print("     output), which a single-clock-domain 130 nm tile does not give.")
+    # ---- the spec window, now sourced -----------------------------------
+    print("=" * 78)
+    print("  THE 802.3 WINDOW -- sourced, and it decides the question")
+    print("=" * 78)
+    print("  IEEE Std 802.3-2015, Section One (refs/8023_2015_section1.pdf).")
+    print("  Annex B.4.3.3, the ABSOLUTE placement form of 14.3.1.2.3:")
+    print('    mid-bit zero crossings constrained to "46.5 ns to 53.5 ns"')
+    print("      -> +/- 3.5 ns, EXTERNAL MAU")
+    print('    "when measuring an integrated MAU ... 44.5 ns to 55.5 ns"')
+    print("      -> +/- 5.5 ns, INTEGRATED MAU (the generous reading, and ours)")
+    print("  14.3.1.2.3 itself: jitter added through the twisted-pair model")
+    print('    shall be "no more than +/-3.5 ns".')
     print()
-    print("  ⚠ THE DECISION NEEDS THE TEXT. If IEEE 802.3 Clause 14's transmit")
-    print("     jitter allowance at the MDI is below %.0f ns, Ethernet is OUT AT" % err)
-    print("     50 MHz for a GRID reason -- independent of gate 0.9, and not")
-    print("     repairable by any buffer width. That number is not in refs/ and")
-    print("     is deliberately not guessed here.")
+    EXT, INT = 3.5, 5.5
+    print("  %-28s %-10s %-10s %s" % ("budget", "ours", "allowed", "verdict"))
+    print("  %-28s %-10s %-10s %s"
+          % ("grid error alone", "%.0f ns" % err, "%.1f ns" % INT,
+             "*** NON-CONFORMANT (%.1fx over)" % (err / INT)))
+    print("  %-28s %-10s %-10s %s"
+          % ("grid + schedule (d_max=1)", "%.0f ns" % total, "%.1f ns" % INT,
+             "*** NON-CONFORMANT (%.1fx over)" % (total / INT)))
+    print()
+    print("  ⛔⛔ THE GRID ERROR ALONE IS %.1fx THE MOST GENEROUS WINDOW." % (err / INT))
+    print("     So this is NOT repairable by a shadow register. Buffering removes")
+    print("     the SCHEDULER's 20 ns and leaves the grid's 10 ns, which is still")
+    print("     outside +/-5.5 ns. 10BASE-T transmit is OUT OF SCOPE AT 50 MHz.")
+    print()
+    print("  ⛔ AND IT CANNOT BE DITHERED. B.4.3.3 requires that *all* zero")
+    print("     crossings fall within the interval, so alternating 40/60 ns to")
+    print("     average 50 ns does not conform -- the mean is not the constraint.")
+    print()
+    print("  REINSTATEMENT, now computable against a real window. With bit period")
+    print("  B = f/10 cycles, an EVEN B places the mid-bit exactly; an ODD B")
+    print("  misses by P/2 = 50/B ns:")
+    print("    %-9s %-5s %-11s %-9s %s"
+          % ("f_clk", "B", "mid-bit", "err ns", "conforms?"))
+    for f in (50, 60, 70, 80, 90, 100, 110, 150):
+        B = Fraction(f, 10)
+        if B.denominator != 1:
+            continue
+        B = int(B)
+        e = 0.0 if B % 2 == 0 else 50.0 / B
+        v = ("exact" if e == 0 else
+             "ok (integrated)" if e <= INT else "NO")
+        print("    %-9s %-5d %-11s %-9.2f %s"
+              % ("%d MHz" % f, B, "%s cyc" % Fraction(B, 2), e, v))
+    print("    => any multiple of 20 MHz is exact; 60 MHz is the cheapest fix.")
+    print("       Odd multiples of 10 MHz only conform from 110 MHz up.")
+    print()
+    print("  ⚠ EDITION BOUNDARY: this is 802.3-2015 (title page verified, approved")
+    print("    3 Sep 2015). 802.3-2022 Section One could not be obtained -- IEEE's")
+    print("    GET program now serves through Xplore, which refuses non-browser")
+    print("    clients. Clause 14 has been editorially stable for decades, but the")
+    print("    2022 wording was NOT read. Cite the 2015 edition.")
     return 0
 
 
