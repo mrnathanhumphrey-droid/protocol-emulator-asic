@@ -36,8 +36,29 @@ module tb_smoke;
   always #10 clk = ~clk;                   // 50 MHz, the shipped clock
 
   // ---- image ----------------------------------------------------------
-  localparam integer IMG_BYTES = 51;
-  reg [7:0] img [0:IMG_BYTES-1];
+  // ⛔⛔⛔ THIS WAS `localparam IMG_BYTES = 51` AND IT SILENTLY TRUNCATED. The
+  // loader shifted in exactly 51 bytes regardless of the image's real size, so
+  // a longer program had its tail left UNWRITTEN in the store -- and the
+  // engine then fetched an X action word, `l_timestamp` took
+  // `l_timestamp + a_dly` with `a_dly` = X in ST_WB, and the lane went
+  // PERMANENTLY unready because `ready` tests `now - l_timestamp`. One lane
+  // died, the other kept running, and the bench reported its results as if the
+  // program were complete.
+  //
+  // ⭐⭐ IT HAD NEVER FIRED BECAUSE EVERY IMAGE SO FAR WAS EXACTLY 51 BYTES.
+  // The default, stress, five-lane and chain programs all have 5 headers plus
+  // 7 actions = 30 + 21 = 51, so the constant matched by coincidence of
+  // construction. The census image -- the first one with a different action
+  // count -- broke on its first run. ⇒ A constant that encodes the shape of
+  // one artefact is a trap that waits for the second artefact, and this is the
+  // same class as the must-fire whose witness was a hard-coded 3 MHz.
+  //
+  // The length is now DERIVED: `$readmemh` leaves unwritten entries X, so the
+  // highest initialised index + 1 is the image size. The array is sized to the
+  // STORE (2**AW = 256) so no image can overflow it either.
+  localparam integer IMG_MAX = 256;
+  reg [7:0] img [0:IMG_MAX-1];
+  integer img_bytes;
 
   integer i, errors;
   reg [3:0] prev_proto;
@@ -88,6 +109,20 @@ module tb_smoke;
     // image exists -- see make_smoke_image.build_stress.
     if (!$value$plusargs("IMG=%s", imgfile)) imgfile = "test/smoke_image.hex";
     $readmemh(imgfile, img);
+    // derive the real length: highest initialised byte + 1
+    img_bytes = 0;
+    for (i = 0; i < IMG_MAX; i = i + 1)
+      if (^img[i] !== 1'bx) img_bytes = i + 1;
+    $display("image %0s: %0d bytes", imgfile, img_bytes);
+    // ⛔ ASSERTED, not trusted: a zero-length read means the path was wrong and
+    // every result below would be about an empty store. $readmemh warns on a
+    // missing file but does NOT stop the run.
+    if (img_bytes < 20) begin
+      $display("FAIL: image is %0d bytes -- too short to contain %0d lane headers.",
+               img_bytes, 5);
+      $display("      Either the path is wrong or the generator did not run.");
+      errors = errors + 1;
+    end
     errors = 0; edges0 = 0; edges1 = 0;
     load_drive_viol = 0; load_oe_viol = 0;
     cyc = 0; stall = 0; jcold = 0; jwarm = 0; jwarm_at = 0;
@@ -114,7 +149,7 @@ module tb_smoke;
     ui_in[5] = 1'b1;  @(posedge clk);      // pointer reset
     ui_in[5] = 1'b0;  @(posedge clk);
 
-    for (i = 0; i < IMG_BYTES; i = i + 1) begin
+    for (i = 0; i < img_bytes; i = i + 1) begin
       uio_drv  = img[i];
       @(posedge clk); @(posedge clk);
       ui_in[6] = 1'b1;                     // WR rising edge

@@ -218,8 +218,57 @@ def build_chain(d_tog: int, d_park: int):
     return b"".join(headers) + b"".join(prog)
 
 
+def build_census(d: int = 25):
+    """A program that executes ALL EIGHT opcodes on the RTL.
+
+    ⛔⛔ WHY THIS IS NOT THE SAME AS THE GOLDEN MODEL'S COVERAGE.
+    `model/gate_reverse_trace.py` runs the S1 census on an executable ISA
+    semantics and exercises all 8 opcodes -- which settles "is any opcode
+    unneeded by the required protocols". It settles NOTHING about the RTL:
+    `gate_cj_bounds` derives C_max for all 8 action types and measures it on
+    TWO, because the default smoke program only uses LEVEL and re-arm. A model
+    exercising an opcode is not the silicon exercising it.
+    ⇒ This image makes the RTL execute every opcode, so the per-opcode C
+    measurement covers 8 of 8 instead of 2 of 8.
+
+    ⚠ IT IS A COVERAGE PROGRAM, NOT A PROTOCOL. The opcodes run in an order
+    chosen to reach them all, not to speak UART or I2C -- so its pin waveform
+    means nothing and only the per-opcode service times should be read from it.
+    Claiming otherwise would be the "exact answer to the wrong question" shape.
+    """
+    prog, headers, base = [], [], []
+    off = ACT_BASE
+    # lane 0 walks the OUTPUT-side opcodes; lane 1 the INPUT-side ones. Two
+    # lanes because a single live lane makes the scheduler degenerate and the
+    # dispatch path is part of what C measures.
+    seq0 = [(OP_LEVEL, UO0, 0), (OP_LEVEL, UO0, 1), (OP_SHIFT, UO0, 0),
+            (OP_START, UO0, 1), (OP_STOP, UO0, 0), (OP_REARM, 0, 1)]
+    seq1 = [(OP_SHIFTIN, UO1, 0), (OP_READBIT, UO1, 0), (OP_ARM, UO1, 0),
+            (OP_REARM, 0, 1)]
+    for seq in (seq0, seq1):
+        base.append(off)
+        for op, pin, lvl in seq:
+            prog.append(act(op, pin, lvl, d, count=8))
+            off += ACT_BYTES
+    lp = off
+    prog.append(act(OP_REARM, 0, 0, 500))
+    headers.append(hdr(UO0, UO0, 1, d, 2, 2 * d, 3 * d, base[0]))
+    headers.append(hdr(UO1, UO1, 1, d + 1, 2, 2 * d, 3 * d, base[1]))
+    for n in range(2, N_LANES):
+        headers.append(hdr(n, n, 0, 500, 2, 200, 240, lp))
+    return b"".join(headers) + b"".join(prog)
+
+
 def main() -> int:
     here = os.path.dirname(os.path.abspath(__file__))
+    if "--census" in sys.argv:
+        img = build_census()
+        out = os.path.join(here, "census_image.hex")
+        with open(out, "w", encoding="ascii") as fh:
+            for b in img:
+                fh.write("%02x\n" % b)
+        print("census image (all 8 opcodes), %d bytes -> %s" % (len(img), out))
+        return 0
     if "--chain" in sys.argv:
         k = sys.argv.index("--chain")
         img = build_chain(int(sys.argv[k + 1]), int(sys.argv[k + 2]))

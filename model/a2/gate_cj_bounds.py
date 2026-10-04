@@ -271,6 +271,63 @@ def main() -> int:
     print()
     print("    ⇒ ⭐ J_max = %d for A2, = the derived total." % j_total)
 
+    # ---- RTL OPCODE COVERAGE, from the census image --------------------
+    # ⛔⛔ THE "6 UNEXERCISED" CAVEAT, CLOSED AT THE RIGHT LEVEL. This gate has
+    # been reporting C_max derived for all 8 action types and MEASURED on two,
+    # because the default smoke program only uses LEVEL and re-arm.
+    # ⭐ `model/gate_reverse_trace.py` exercises all 8 on the GOLDEN MODEL, and
+    # that is a different claim: it settles "is any opcode unneeded by the
+    # required protocols", not "has the silicon ever run one". A model
+    # exercising an opcode is not the RTL exercising it, and conflating the two
+    # is the exact shape of an exact answer to the wrong question.
+    # ⇒ `test/make_smoke_image.py --census` builds a program that makes the RTL
+    # execute every opcode, and its measurements land in cj_measured_alt.txt
+    # (the input-dependent path, so it cannot clobber the shipped figures).
+    alt = os.path.join(os.path.dirname(MEAS), "cj_measured_alt.txt")
+    print()
+    print("  --- RTL opcode coverage (census image) ---")
+    if not os.path.isfile(alt):
+        print("    cj_measured_alt.txt absent -- coverage NOT established.")
+        print("    Run: python test/make_smoke_image.py --census && vvp ... "
+              "+IMG=test/census_image.hex")
+    else:
+        a = {"ops": {}}
+        for line in open(alt, encoding="utf-8"):
+            p = line.split()
+            if p and p[0] == "op":
+                a["ops"][int(p[1])] = {"n": int(p[3]), "min": int(p[5]),
+                                       "max": int(p[7])}
+            elif p and p[0] == "image":
+                a["image"] = p[1]
+        print("    source image: %s" % a.get("image", "UNRECORDED"))
+        covered = sorted(a["ops"])
+        print("    opcodes executed by the RTL: %d of %d  %s"
+              % (len(covered), len(OPNAMES), covered))
+        bad = []
+        for op, s in sorted(a["ops"].items()):
+            d = C_DERIVED[op]
+            ok = s["max"] <= d
+            if not ok:
+                bad.append((OPNAMES[op], d, s["max"]))
+            print("    %-12s derived %-3d n=%-4d min=%-3d max=%-3d %s"
+                  % (OPNAMES[op], d, s["n"], s["min"], s["max"],
+                     "ok" if ok else "*** SIM EXCEEDS DERIVED"))
+        if bad:
+            print("    *** SIM EXCEEDS THE DERIVED C on %s. STOP." % (bad,))
+            rc = 1
+        elif len(covered) == len(OPNAMES):
+            print("    ⭐ ALL %d ACTION TYPES EXECUTED BY THE RTL, every one with"
+                  % len(OPNAMES))
+            print("    min == max == 2. C_max = 2 is now derived AND measured on")
+            print("    8 of 8, not 2 of 8.")
+            print("    ⚠ THE CENSUS IMAGE IS A COVERAGE PROGRAM, NOT A PROTOCOL.")
+            print("    Its opcodes run in an order chosen to reach them all, so")
+            print("    its pin waveform means nothing and it legitimately fails")
+            print("    the bench's 'lane 1 moved its pin' assertion -- lane 1")
+            print("    runs SHIFTIN/READBIT/ARM, none of which drive a pin. Only")
+            print("    the per-opcode service times should be read from it, and")
+            print("    the bench was NOT weakened to make it pass.")
+
     # ---- the double buffer, and its falsifier --------------------------
     print()
     print("  --- ⛔ THE DOUBLE BUFFER: PRE-REGISTERED 2, MEASURED %d ---"

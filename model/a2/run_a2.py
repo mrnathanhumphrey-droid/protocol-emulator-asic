@@ -73,6 +73,12 @@ GATES = [
     # plus run_jitter's own stale-record check are what keep the record honest.
     ("jitter_instances.py", "J0   one jitter instance list + recorded verdicts", False),
     ("gate_j_program.py", "J1b  J(d_min) derived; shipped J=1, universal J=8", False),
+    # ⛔ `../` because this one lives in model/ with the other RTL-FACING gates
+    # (part1_param_contract, f2_flop_driven_outputs), not in model/a2/ with the
+    # analysis. It is in THIS list anyway: an out-of-suite gate is a gate nobody
+    # runs, and `golden.py` carries prediction A3 and falsifier F1.
+    ("../gate_reverse_trace.py",
+     "RT   reverse traceability: the census on the golden model", False),
     ("gate_j_sound.py", "J4   the J sweep; the bar verdict is bound-dependent", True),
     ("gate_pyrta_jitter.py", "J3   pyRTA witness at J>0; the naive arm is a trap", True),
 ]
