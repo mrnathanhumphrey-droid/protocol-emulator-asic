@@ -87,6 +87,32 @@ DIGEST_LEDGER = [
      "case over admissible programs (J = 8) is published ALONGSIDE this table, "
      "not inside it: J is a program property, and gate_j_program.py derives it "
      "from d_min."),
+    # ⛔⛔ THE DIGEST IS UNCHANGED ON PURPOSE, AND THIS ENTRY IS STILL
+    # REQUIRED. The SHIPPED lane table did not move: every lane still carries
+    # its derived J (1, and 2 on I2C). What changed is a PUBLISHED CLAIM ABOUT
+    # it -- the universal worst case over admissible programs, published as
+    # J = 8, is RETRACTED as unsound.
+    # ⚠ Live measurement exceeded the derivation at TEN admissible points
+    # (d = 8..18). The cause: `j_of` capped the stall at L_CAP = 7, while the
+    # witness chain gives (refills queued ahead + 1) x L_REFILL, up to
+    # k x L_REFILL = 20. The cap sat below what the chain can produce.
+    # ⭐ REPLACED BY A SCOPED CLAIM: d_min >= D* = k*L_REFILL = 20 -> J = 1,
+    # live-measured 0 at d = 20,21,22,25,30,40,60 on 200k-cycle runs with
+    # asserted windows. The shipped program (d_min = 25) is inside it.
+    # ⛔ The `J_pipe = 8` lane-table VARIANT that gate_pyrta_jitter declared
+    # for its arm 3 is withdrawn with it -- that subject no longer exists.
+    # ⚠ NO replacement universal number is published: k*L_REFILL + 1 = 21
+    # rests on an underived premise about the scan's arbitration order.
+    # ⇒ Recorded against the unchanged digest because bumping a hash that
+    # nothing hashed would be a fabricated provenance, and the ledger's job is
+    # to say WHY a published number moved -- which this one did.
+    ("b4e51034e283",
+     "RETRACTION, table unchanged: universal J = 8 withdrawn as unsound "
+     "(ten admissible points measured above the derivation; L_CAP = 7 capped "
+     "a chain that reaches k*L_REFILL = 20). Replaced by the scoped claim "
+     "d_min >= D* = 20 -> J = 1. The gate_pyrta_jitter J=8 variant is "
+     "withdrawn with it. Shipped J = 1 unaffected and measured clean."),
+
 ]
 
 

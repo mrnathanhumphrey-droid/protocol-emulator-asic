@@ -224,3 +224,64 @@ is published on the strength of two traces: if a universal `J` is wanted, the
 sound-but-loose value implied here is `k · L_REFILL + J_WINNER_REG = 21`, far
 above the retracted 8, and that is Wilson's call rather than a number I should
 quote into the lane table.
+
+---
+
+# ARBITRATION, READ FROM THE RTL — and what the stall counter actually counts
+
+Wilson's ruling 2 asked for the scan's arbitration order and the maximum
+outstanding refills per lane, before `k · L_REFILL + 1 = 21` can be a theorem.
+Both read out of `pe_engine.v`'s `P_SCAN`:
+
+- **Winner-first, strict.** `if (winner_v && !l_actv[winner_head])` is tested
+  *before* the round-robin branch, so the EDF winner's **empty head** pre-empts
+  everything, including speculative spare fills. ⭐ **The cheap design fix in
+  the ruling — "demand refills strictly pre-empt spare fills" — is already
+  built.**
+- **One refill in flight, engine-wide.** There is a single prefetch FSM with a
+  single `pl`/`pslot`/`paddr`. The maximum outstanding refills is **1 for the
+  whole engine**, not 2 per lane — a lane cannot have its head and its spare in
+  flight together.
+- **Non-preemptible once started.** `P_REQ → P_WAIT → P_CAP` runs to completion;
+  nothing diverts it.
+
+So the naive bound is **one in-flight refill ahead of you plus your own**:
+`2 · L_REFILL = 8`, not `k · L_REFILL = 20`. Both witness chains show exactly
+that shape (8 and 7).
+
+## ⛔ But the measured maximum is 12, and the ring shows why
+
+In chain 1 the `winner` column **changes during the stall** — lane 0 at cycles
+4863–4864, lane 1 from 4865 on. The stall counter increments on
+"`st == IDLE` ∧ `winner_v` ∧ the **current** winner's head is empty", and it is
+only reset when that condition breaks. So a run of 12 is **12 consecutive cycles
+in which *some* winner was blocked**, not one lane waiting 12 cycles.
+
+⚠ **That means the measured quantity is not per-lane release jitter.** `J` is
+how late *one lane's* release is; this counter is the run length of a global
+condition that can span several lanes' waits back to back. The engine's own
+`jitter_max` uses the same condition, so the hardware counter carries the same
+caveat.
+
+⇒ **Consequences, none of them a number to publish yet:**
+
+- `2 · L_REFILL = 8` is the candidate **per-lane** bound, and it is consistent
+  with both witness chains and with `D*` (at `d ≥ 20` the port is never the
+  blocker, so nothing waits at all).
+- `k · L_REFILL + 1 = 21` is **not** the right shape after all: with one refill
+  in flight engine-wide, `k − 1` refills cannot be queued ahead of you. It was
+  arithmetic on a premise the RTL contradicts.
+- The measured 11–12 does **not** falsify a per-lane bound of 8, because it does
+  not measure a per-lane wait. Nor does it confirm one.
+- **The retraction stands regardless.** The old derivation capped at
+  `L_CAP = 7`, and the *measured counter* exceeded 7 at ten admissible points.
+  Whatever that counter is, the gate compared it against the bound and the
+  comparison failed, so the universal claim was never checked by what it
+  claimed to be checked by.
+
+**Owed before any universal number returns:** separate the per-lane wait from
+the global run length — instrument the wait of one identified lane from its
+release to its dispatch — and derive the per-lane bound from the arbitration
+above. The scoped claim (`d_min ≥ D*` → `J = 1`) is unaffected: at or above
+`D*` the measured run length is 0, and a global run length of 0 bounds every
+per-lane wait inside it.

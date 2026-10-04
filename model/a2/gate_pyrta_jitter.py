@@ -148,12 +148,18 @@ def main() -> int:
     lane_digest.announce(
         "gate_pyrta_jitter.py",
         [BLane(l.name, l.T, l.C, D_tol=l.D_tol, n=l.n, t=l.t,
-               J=8 + (_LJ if l.name.startswith("I2C") else 0))
-         for l in _TX + [_RX, _SRX]],
-        variant="arm 3 analyses the shipped lanes at the UNIVERSAL worst-case "
-                "J_pipe=8 (I2C +L_JIT); the shipped table carries its derived "
-                "J=1, so this is a declared variant and the universal-J set is "
-                "the subject")
+                 J=l.J)
+           for l in _TX + [_RX, _SRX]],
+          variant="arm 3 analyses the SHIPPED lanes at their own derived J. "
+                  "⛔ IT USED TO ANALYSE A UNIVERSAL WORST-CASE J_pipe=8 "
+                  "SET, AND THAT SUBJECT NO LONGER EXISTS: the universal J was "
+                  "found UNSOUND by live measurement at ten admissible points, "
+                  "because `j_of` capped the stall at L_CAP=7 while the witness "
+                  "chain gives (queued ahead + 1) x L_REFILL, up to 20. It is "
+                  "RETRACTED, and the published claim is SCOPED: d_min >= D* = "
+                  "k*L_REFILL = 20 -> J = 1. No replacement universal number is "
+                  "analysed here: k*L_REFILL+1 = 21 still rests on an underived "
+                  "premise about the scan's arbitration order.")
     print()
     print("  ⛔ RETRACTED: 'pyRTA's task model has no jitter parameter'.")
     print("     It ships PeriodicWithJitter(period, jitter) with")

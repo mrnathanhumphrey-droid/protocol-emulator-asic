@@ -263,34 +263,46 @@ def main() -> int:
         print("      ⛔ Including them would manufacture a worse J than any")
         print("      admissible program can produce.")
 
-    # ---- the two published numbers -------------------------------------
+    # ---- THE PUBLISHED CLAIM, NOW SCOPED -------------------------------
+    # THE UNIVERSAL NUMBER IS WITHDRAWN. It was max(j_of(d)) over the
+    # admissible range, and j_of caps the stall at L_CAP = 7 -- which the
+    # witness traces show is BELOW what the refill chain can produce:
+    # (queued ahead + 1) x L_REFILL, up to k x L_REFILL = 20. Live
+    # measurement exceeded the derivation at TEN admissible points, so the
+    # universal claim was unsound and is RETRACTED rather than re-fitted.
+    # AND NO REPLACEMENT UNIVERSAL NUMBER IS PRINTED. The chain implies
+    # k*L_REFILL + J_WINNER_REG = 21, but that rests on "at most one refill
+    # per lane ahead of you", which is NOT yet derived from the scan's
+    # arbitration -- a lane may have a head AND a spare outstanding. Until
+    # that is a theorem, 21 is arithmetic, not a bound.
     adm_ds = [d for d in SWEEP if admissible(d)]
-    d_worst = min(adm_ds)
-    universal_derived = max(j_of(d) for d in adm_ds)
-    universal_measured = max(SWEEP[d] for d in adm_ds) + J_WINNER_REG
     shipped = j_of(D_MIN_SHIPPED)
 
     print()
-    print("  --- THE TWO PUBLISHED NUMBERS ---")
-    print("    SHIPPED PROGRAM   d_min = %d  ->  J = %d"
+    print("  --- THE PUBLISHED CLAIM, SCOPED ---")
+    print("    PROGRAMS WITH d_min >= D* = %d  ->  J = 1" % D_STAR)
+    print("      D* = k * L_REFILL = %d * %d: the ONE fetch port must serve"
+          % (N_LANES, L_REFILL))
+    print("      every live lane's refill inside the shortest action period,")
+    print("      so nothing is ever found missing and the stall is 0.")
+    print("      live-measured 0 at every port-feasible point swept")
+    print("        (d = 20,21,22,25,30,40,60), each on a 200k-cycle run")
+    print("        with an asserted >=100k-cycle steady window.")
+    print("    SHIPPED PROGRAM   d_min = %d  ->  J = %d   [inside the claim]"
           % (D_MIN_SHIPPED, shipped))
-    print("      stall %d (shortfall max(0, %d - %d) = 0) + winner reg %d."
-          % (j_stall(D_MIN_SHIPPED), N_LANES * L_REFILL,
-             D_MIN_SHIPPED + C_SVC, J_WINNER_REG))
-    print("      ⭐ derived, and the measurement agrees: steady stall 0.")
-    print("    UNIVERSAL WORST CASE over admissible programs  ->  J = %d"
-          % universal_derived)
-    print("      attained at the tightest admissible d = %d (U = %.3f)"
-          % (d_worst, utilisation(d_worst)))
-    print("      measured maximum over the same range: J = %d"
-          % universal_measured)
-    print("      ⚠ THE PUBLISHED NUMBER IS THE DERIVED ONE (%d), NOT THE"
-          % universal_derived)
-    print("      MEASURED ONE (%d). A measurement is a FLOOR on the true"
-          % universal_measured)
-    print("      maximum -- one program, one lane mix, one phase -- and this")
-    print("      project already shipped `C = 2.00` as a mean and `J = 5` as a")
-    print("      bound once. The derivation is what the proof uses.")
+    print("      measured steady stall 0 over 195,908 cycles, bench PASSING.")
+    print()
+    print("    RETRACTED: the universal worst case over admissible programs,")
+    print("      published as J = 8. j_of capped the stall at L_CAP = %d; the"
+          % L_CAP)
+    print("      witness chain gives (queued ahead + 1) x %d, up to %d. Ten"
+          % (L_REFILL, N_LANES * L_REFILL))
+    print("      admissible points measured ABOVE the derivation.")
+    print("      NOT re-fitted -- withdrawn.")
+    print("    UNCLAIMED: d_min in [%d, %d] -- admissible (the dispatcher"
+          % (min(adm_ds), D_STAR - 1))
+    print("      keeps up) but NOT port-feasible; measured stalls 7..12.")
+    print("      pe_asm REFUSES such programs rather than quoting a bound.")
 
     # ---- what the double buffer buys, in the same units ----------------
     print()
@@ -325,12 +337,23 @@ def main() -> int:
 
     print()
     print("=" * 78)
-    print("  GATE j-program: PASSED")
-    print("    * J(d_min, k) derived from the refill FSM, not fitted to the sweep")
-    print("    * sim <= derived at every admissible swept point")
-    print("    * published: shipped J = %d, universal derived J = %d"
-          % (shipped, universal_derived))
-    print("    * ⛔ a measurement can falsify this bound, never raise it")
+    print("  GATE j-program: PASSED -- on the SCOPED claim")
+    print("    * D* = k * L_REFILL derived from the refill FSM and the")
+    print("      single fetch port, not fitted to the sweep")
+    print("    * published: d_min >= D* = %d -> J = 1; shipped d_min"
+          % D_STAR)
+    print("      = %d -> J = %d, measured 0 over 195,908 cycles"
+          % (D_MIN_SHIPPED, shipped))
+    print("    * RETRACTED: universal J = 8, unsound by live")
+    print("      measurement at ten admissible points")
+    print("    * ⛔ THE SWEEP BELOW IS A RECORD, NOT A LIVE READING.")
+    print("      `sim <= derived` holds against the RECORDED values and")
+    print("      FAILS against live measurement -- which is exactly how")
+    print("      the unsoundness survived: this gate compared a stored")
+    print("      number with the derivation and the script that would")
+    print("      have re-measured it did not exist. Run")
+    print("      `bash model/a2/price_j_sweep.sh` for the live check.")
+    print("    * a measurement can falsify a bound, never raise it")
     return 0
 
 
