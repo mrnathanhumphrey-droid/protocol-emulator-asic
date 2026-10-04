@@ -107,6 +107,53 @@ for behavioural gate-level sim — it needs the real cells.
 
 ---
 
+## A2 RESEARCH RESULT — no vendor HDL model found
+
+Wilson's amendment A2 asked whether a vendor ships one. Searched:
+
+| part | result |
+|---|---|
+| MB85RS64V / MB85RC256V (RAMXEED, ex-Fujitsu) | datasheets only, **no HDL model** |
+| Infineon F-RAM FM25V02 / FM24V10 | **no HDL model found** |
+| Infineon **NOR flash** S25FL… | Verilog/VHDL models **are** published — a *different device class* |
+
+> ⚠ The search was not exhaustive — a vendor may supply one on request to a
+> registered account — so this records **"not found"**, never "does not exist".
+
+⇒ Per A2, the foreign peer arrives at **rung 5: the real part on the Artix**.
+
+> ⛔⛔ **And a vendor model could not be committed even if found.** The
+> submission is open source and a vendor model is third-party code under its own
+> licence — like the datasheets already quarantined in the gitignored `refs/`.
+> It would have to follow **pyRTA's pattern exactly**: not vendored, located
+> through an env var, and the gate RED without it so the dependency stays
+> priceable. That is worth knowing *before* anyone goes looking, because
+> "we found a foreign model" would not by itself mean we could ship with it.
+
+---
+
+## ⛔⛔ Finding 6 (new) — Verilator caught the multi-driver class in the peer model
+
+The first `fram_spi.v` drove six signals from four blocks (`negedge cs_n`,
+`posedge cs_n`, `posedge sck`, `negedge sck`) — the natural way to write a peer
+model. **iverilog accepted it silently. Verilator rejected all six as
+MULTIDRIVEN.**
+
+⭐ That is the *same defect class* that made the engine unsynthesizable and
+killed a harden after three minutes: multiple procedural drivers are
+last-write-wins in simulation and an error in synthesis.
+
+⇒ **The engine's "one sequential block" discipline applies to the peers too**,
+and a second simulator is what enforced it. CS is now a *synchronous* reset
+inside each block, and the one genuinely asynchronous requirement — release on
+deselect — is a combinational gate on `so_oe` rather than a second always block.
+
+⭐ `fram_spi.v` is now clean in **both** simulators. Note the engine is **not**
+yet (Finding 1's six width warnings), so the peer model reached two-simulator
+cleanliness first.
+
+---
+
 ## Finding 4 — the FRAM models are mine to write, and the datasheets must not travel
 
 Arm (c) needs behavioural models for **MB85RS64V** (SPI) and **MB85RC256V**
