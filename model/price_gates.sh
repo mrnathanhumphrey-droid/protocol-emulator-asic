@@ -122,6 +122,14 @@ run_must_be_red \
     "gate_j_sound.py with the jitter interference term REVERTED" \
     env BURSTY_NOMINAL_INTERFERENCE=1 python model/a2/gate_j_sound.py
 
+# --- the DIGEST LEDGER, priced by MUTATING THE SHIPPED TABLE --------------
+# ⛔ A new guard that has only ever been seen PASS is unmeasured, and this
+# project has already shipped a condition that printed PASS unconditionally
+# because its failure branch was unreachable. The mutation is the realistic
+# one: one lane, one field, one cycle of J -- the shape of the two near-misses
+# that motivated the ledger.
+run_must_be_red     "lane_digest DIGEST_LEDGER with the shipped table MUTATED"     python model/a2/_price_digest_ledger.py
+
 # --- the A1 digest meta-check, priced by MUTATING THE ARTEFACT ------------
 # ⛔ Not "remove a tool" like the arms above -- this one injects a gate that
 # analyses a STALE hand-typed lane table, which is the defect A1 screens for,

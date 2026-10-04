@@ -88,6 +88,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
 import lane_digest                                                 # noqa: E402
+import pyrta_bound                                                 # noqa: E402
 from bursty import BLane, response_time_b                          # noqa: E402
 from jitter_instances import (JINSTANCES, MUSTFIRE, key_of,        # noqa: E402
                               recorded)
@@ -108,95 +109,27 @@ def ours(lanes, k, jitter_in_interference=True):
                            jitter_in_interference=jitter_in_interference)["r"]
 
 
-def build(mod, lanes, k, shift: bool, delta: int = 0):
-    """pyRTA task set for subject `k`. `shift=False` is the NAIVE arm.
+def as_lanes(tup):
+    """The 7-tuples (name,T,C,D,n,t,J) as BLane objects.
 
-    `delta` is the subject's assumed release delay -- see `pyrta_r`.
+    ⭐ Built ONCE per instance and selected by index, never rebuilt per subject:
+    `response_time_b` filters interference BY IDENTITY, so an equal-but-distinct
+    copy is not excluded and the subject interferes with itself.
     """
-    (WCET, Deadline, FullyNonPreemptive, Periodic, PeriodicWithJitter,
-     Priority, Task, taskset) = mod
-    tasks = []
-    for i, l in enumerate(lanes):
-        T, C, D, J = l[1], l[2], l[3], l[6]
-        arr = PeriodicWithJitter(period=T, jitter=J) if J else Periodic(period=T)
-        if not shift:
-            D_eff = D
-        elif i == k:
-            D_eff = D - delta
-        else:
-            D_eff = D - J
-        if D_eff <= 0:
-            raise ValueError(
-                "%s: effective deadline %d <= 0. The lane's whole tolerance is "
-                "release jitter, so there is no deadline left to schedule "
-                "against and this construction cannot express it." % (l[0], D_eff))
-        # ⛔ Priority is an IDENTITY TAG, not a scheduling input. pyRTA filters
-        # interferers by VALUE on a frozen dataclass, so two parameter-identical
-        # lanes would BOTH be excluded and the bound would be optimistic.
-        tasks.append(Task(arr, FullyNonPreemptive(WCET(C)), Deadline(D_eff),
-                          Priority(i)))
-    return tasks, taskset(*tasks)
+    return [BLane(l[0], l[1], l[2], l[3], n=l[4], t=l[5], J=l[6]) for l in tup]
 
 
-def pyrta_r(mod, edf, IdealProcessor, lanes, k, shift: bool):
-    """pyRTA's bound on OUR quantity: the response measured from the NOMINAL
-    release, maximised over the subject's own release delay.
-
-    ⛔⛔⛔ THE FIRST VERSION OF THIS DOUBLE-COUNTED THE SUBJECT'S JITTER AND
-    RAISED A FALSE UNSOUNDNESS ALARM. It gave the subject deadline `D_k` and
-    then added `J_k` to the answer. Those are CONTRADICTORY STATEMENTS ABOUT THE
-    SAME JOB: deadline `D_k` from the arrival says the job was NOT delayed
-    (absolute deadline = nominal + D_k only when arrival == nominal), while
-    `+ J_k` says it was delayed by the full J. Assuming a job is simultaneously
-    the least urgent it can be and the most delayed it can be inflates the
-    bound, and the inflation landed ABOVE our own number -- which printed as
-    "*** OURS SMALLER ***", i.e. as possible unsoundness in OUR recurrence, on
-    I2C at J_pipe = 2 and 7. It was this function.
-    ⭐ Both of those resolve on the corrected form: at J_pipe = 2 pyRTA gives 6
-    and ours is 6 (exact); at J_pipe = 7 pyRTA gives 11 and ours 13 (ours
-    pessimistic, the safe side).
-    ⛔ SECOND BROKEN PROBE OF THIS WORK -- `price_jitter_blocking` was the first.
-    Both produced dramatic findings about the recurrence and both were bugs in
-    the measuring instrument. The standing rule is to look for what makes a
-    five-alarm result impossible before believing it, and in both cases what
-    made it impossible was that the probe asserted something no schedule does.
-
-    THE CORRECT CONSTRUCTION. A subject job delayed by `delta` has, from its own
-    arrival, relative deadline `D_k - delta`, and its response from the NOMINAL
-    release is pyRTA's response plus `delta`. `delta` is not ours to choose, so
-    the bound is the MAX over every value it can take:
-
-        r_k  =  max over delta in [0, J_k] of ( pyRTA(D_k - delta) + delta )
-
-    ⭐ Sweeping is not a refinement, it is the difference between a bound and a
-    guess: each `delta` is a consistent scenario, and picking one would be
-    assuming which scenario is worst. At J_pipe = 7 the max is at delta = J,
-    but at J_pipe = 2 it is also at delta = J while the intermediate values are
-    strictly smaller -- so the shape is not monotone in general and the max
-    cannot be replaced by an endpoint.
-    """
-    J_k = lanes[k][6]
-    deltas = range(0, J_k + 1) if shift else [0]
-    best, err = None, None
-    for d in deltas:
-        try:
-            tasks, ts = build(mod, lanes, k, shift, delta=d)
-        except ValueError as e:
-            err = str(e)
-            continue
-        # the interferer-count footgun, asserted not trusted
-        if len(list(ts.excluding_iter(tasks[k]))) != len(tasks) - 1:
-            return None, "parameter-identical lanes were MERGED by pyRTA"
-        sol = edf.rta(ts, tasks[k], IdealProcessor())
-        R = getattr(sol.response_time_bound, "value", sol.response_time_bound)
-        if R is None:
-            err = "pyRTA returned no bound at delta=%d" % d
-            continue
-        # convert from the ARRIVAL back to the NOMINAL release
-        v = R + (d if shift else J_k)
-        if best is None or v > best:
-            best = v
-    return best, (None if best is not None else (err or "no feasible delta"))
+# ⛔⛔ THE FRAMING LIVES IN `pyrta_bound`, NOT HERE, AND THAT IS THE POINT OF
+# RULING 2. This gate used to carry its own copy of the correct construction
+# while three OTHER gates carried the naive one -- and the J = 1 re-baseline
+# made all three fail at once. A bound that is quoted as the published number
+# cannot have four private implementations. So `bound` and `bound_naive` are
+# imported, and what remains here is the EVIDENCE: that the naive framing is
+# optimistic, and that the correct one matches TChecker.
+def pyrta_r(src, lanes, k, shift: bool):
+    if shift:
+        return pyrta_bound.bound(src, lanes, k)
+    return pyrta_bound.bound_naive(src, lanes, k)
 
 
 def main() -> int:
@@ -217,9 +150,10 @@ def main() -> int:
         [BLane(l.name, l.T, l.C, D_tol=l.D_tol, n=l.n, t=l.t,
                J=8 + (_LJ if l.name.startswith("I2C") else 0))
          for l in _TX + [_RX, _SRX]],
-        variant="arm 3 analyses the shipped lanes AT J_pipe=8 (I2C +L_JIT); the "
-                "shipped table is J=0, so this is a declared variant and the "
-                "J>0 set is the subject")
+        variant="arm 3 analyses the shipped lanes at the UNIVERSAL worst-case "
+                "J_pipe=8 (I2C +L_JIT); the shipped table carries its derived "
+                "J=1, so this is a declared variant and the universal-J set is "
+                "the subject")
     print()
     print("  ⛔ RETRACTED: 'pyRTA's task model has no jitter parameter'.")
     print("     It ships PeriodicWithJitter(period, jitter) with")
@@ -282,7 +216,7 @@ def main() -> int:
     trap = []
     for label, lanes in JINSTANCES:
         for k, l in enumerate(lanes):
-            R, err = pyrta_r(mod, edf, IdealProcessor, lanes, k, shift=False)
+            R, err = pyrta_r(src, as_lanes(lanes), k, shift=False)
             rec = recorded(label, l[0])
             if R is None or rec is None:
                 print("    %-6s %-10s %s" % (key_of(label), l[0], err or "no record"))
@@ -325,7 +259,7 @@ def main() -> int:
     rows = []
     for label, lanes in JINSTANCES:
         for k, l in enumerate(lanes):
-            R, err = pyrta_r(mod, edf, IdealProcessor, lanes, k, shift=True)
+            R, err = pyrta_r(src, as_lanes(lanes), k, shift=True)
             rec = recorded(label, l[0])
             o = ours(lanes, k)
             if R is None or rec is None:
@@ -386,32 +320,15 @@ def main() -> int:
         print("    J_pipe = %d   (horizon %d)" % (j_pipe, H))
         print("      %-22s %-4s %-5s %-8s %-8s %-8s %s"
               % ("lane", "n", "J", "ours", "pyRTA", "margin", "direction"))
-        # ⭐ the ACP objects are built ONCE per J, not once per subject: they
-        # depend only on the lane, and rebuilding them inside the subject loop
-        # made this arm 5x slower for nothing.
-        curves = [acp_for(m, H) for m in ls]
         for k, l in enumerate(ls):
-            # the same max-over-delta as `pyrta_r`; see its docstring for why a
-            # single delta double-counts the subject's own jitter.
-            R = None
-            for d in range(0, l.J + 1):
-                tasks = []
-                for i, m in enumerate(ls):
-                    D_eff = (m.D - d) if i == k else (m.D - m.J)
-                    if D_eff <= 0:
-                        raise ValueError("%s: effective deadline %d <= 0"
-                                         % (m.name, D_eff))
-                    tasks.append(Task(curves[i], FullyNonPreemptive(WCET(m.C)),
-                                      Deadline(D_eff), Priority(i)))
-                ts = taskset(*tasks)
-                if len(list(ts.excluding_iter(tasks[k]))) != len(tasks) - 1:
-                    print("      *** %s: lanes MERGED by pyRTA ***" % l.name)
-                    return 1
-                sol = edf.rta(ts, tasks[k], IdealProcessor())
-                v = getattr(sol.response_time_bound, "value",
-                            sol.response_time_bound)
-                if v is not None and (R is None or v + d > R):
-                    R = v + d
+            # ⭐ the bursty lanes go through the SAME `pyrta_bound.bound`: it
+            # builds an ArrivalCurvePrefix from `N_J` and VERIFIES it pointwise
+            # against that curve, so pyRTA cannot be handed a different task
+            # set from the one we analysed.
+            R, err3 = pyrta_bound.bound(src, ls, k, horizon=H)
+            if R is None:
+                print("      *** %s: %s ***" % (l.name, err3))
+                return 1
             o = response_time_b(l, ls)["r"]
             good = R is not None and o >= R
             if not good:

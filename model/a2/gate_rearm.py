@@ -48,6 +48,7 @@ sys.path.insert(0, HERE)
 
 import lane_digest                                                 # noqa: E402
 from bursty import BLane, SPI_RX, TX, UART_RX, response_time_b     # noqa: E402
+import pyrta_bound                                                 # noqa: E402
 from pyrta_src import require_pyrta                                # noqa: E402
 
 try:
@@ -222,32 +223,31 @@ def main() -> int:
     if not src:
         print("    The schedulability claim above is OURS ALONE without this.")
         return 1
-    sys.path.insert(0, src)
-    from response_time_analysis import edf                              # noqa
-    from response_time_analysis.model import (WCET, Deadline,            # noqa
-                                              FullyNonPreemptive, IdealProcessor,
-                                              Periodic, Priority, Task, taskset)
+    # ⛔⛔ THIS BUILT ITS OWN TASK SET WITH PLAIN `Periodic`, and the J = 1
+    # re-baseline broke it: pyRTA reported the J = 0 answers (11/7/3/9/5)
+    # against ours (12/8/5/10/6) and every protocol lane disagreed. The re-arm
+    # lane itself agreed, because it carries J = 0 -- so the ONE lane this gate
+    # is about was the one the defect spared.
+    # ⭐ Framing now comes from `pyrta_bound`, the single implementation, since
+    # under Ruling 2 pyRTA's bound is the published number.
     aug = LANES + [rearm_lane(CONSERVATIVE_T)]
-    tasks = [Task(Periodic(period=l.t), FullyNonPreemptive(WCET(l.C)),
-                  Deadline(l.D), Priority(i)) for i, l in enumerate(aug)]
-    ts = taskset(*tasks)
-    want = len(tasks) - 1
-    for l, t in zip(aug, tasks):
-        k = len(list(ts.excluding_iter(t)))
-        if k != want:
-            print("    *** ABORT: %s sees %d of %d interferers" % (l.name, k, want))
+    print("    %-26s %-8s %-8s %s" % ("lane", "pyRTA", "ours", "direction"))
+    rows = []
+    for i, l in enumerate(aug):
+        R, err = pyrta_bound.bound(src, aug, i)
+        if R is None:
+            print("    *** ABORT: %s: %s" % (l.name, err))
             return 1
-    print("    %-26s %-8s %-8s %s" % ("lane", "pyRTA", "ours", "agree"))
-    agree = True
-    for l, t in zip(aug, tasks):
-        sol = edf.rta(ts, t, IdealProcessor())
-        R = getattr(sol.response_time_bound, "value", sol.response_time_bound)
         ours = response_time_b(l, aug)["r"]
-        ok = R == ours
-        agree = agree and ok
+        rows.append((l.name, R, ours))
         print("    %-26s %-8s %-8d %s"
-              % (l.name, R, ours, "yes" if ok else "*** NO ***"))
-    if not agree:
+              % (l.name, R, ours,
+                 "exact" if R == ours else
+                 ("ours +%d (safe)" % (ours - R) if ours > R
+                  else "*** OURS SMALLER ***")))
+    # Ruling 2's gate: ours >= pyRTA. Exact agreement is NOT required -- pyRTA
+    # is the published bound and ours is the cross-check in the safe direction.
+    if not pyrta_bound.check_direction(rows, "re-arm augmented set:"):
         rc = 1
 
     print()

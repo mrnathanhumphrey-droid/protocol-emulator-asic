@@ -74,6 +74,8 @@ module tb_smoke;
   // hundred cycles after the header load and never recurs.
   integer   cyc, stall, jcold, jwarm, jwarm_at, warm_from, hdr_cyc, n_warm_ev;
   integer   win_slot, lk, inv_viol, inv_checks, nflip;
+  reg       now_running;
+  reg [31:0] prev_now;
   reg [4:0] prev_sel;
   reg [8*64-1:0] imgfile;
   reg [23:0] exp_act;
@@ -91,6 +93,7 @@ module tb_smoke;
     cyc = 0; stall = 0; jcold = 0; jwarm = 0; jwarm_at = 0;
     warm_from = 0; hdr_cyc = -1; n_warm_ev = 0;
     inv_viol = 0; inv_checks = 0; nflip = 0; prev_sel = 5'b0;
+    now_running = 0; prev_now = 32'hFFFFFFFF;
 
     repeat (4) @(posedge clk);
     rst_n = 1;
@@ -201,7 +204,24 @@ module tb_smoke;
       for (lk = 0; lk < 5; lk = lk + 1) prev_sel[lk] = dut.u_eng.l_sel[lk];
       win_slot = dut.u_eng.winner * 2 +
                  (dut.u_eng.l_sel[dut.u_eng.winner] ? 1 : 0);
-      if (dut.u_eng.st == 0 && dut.u_eng.hdr_done && dut.u_eng.winner_v
+      // ⛔⛔ THE GATE IS "SCHEDULE TIME IS RUNNING", NOT `hdr_done`, AND THE
+      // DIFFERENCE IS A WHOLE RULING. With `hdr_done` this counted the
+      // PRIMING refills as jitter -- it reported cold = 4 while the engine's
+      // own counter said 0, and the cross-check below fired on the
+      // disagreement. The engine is right: before priming completes `now` is
+      // frozen, no job has been released, and a cycle in which nothing is
+      // dispatched is not a release-to-dispatch delay.
+      // ⭐ IT KEYS OFF `now` ADVANCING RATHER THAN OFF `primed`, deliberately.
+      // Reading `primed` would make this a copy of the engine's control signal
+      // instead of an independent reconstruction -- and worse, it would make
+      // the M_NO_PRIME mutant INVISIBLE: that mutant releases jobs while the
+      // schedule runs unprimed, and a bench keyed on `primed` would simply not
+      // look during the window where the mutant does its damage. `now` moving
+      // is the datapath fact that the schedule has started, under the design
+      // and under the mutant alike.
+      now_running = (dut.u_eng.now !== prev_now);
+      prev_now = dut.u_eng.now;
+      if (dut.u_eng.st == 0 && now_running && dut.u_eng.winner_v
           && !dut.u_eng.l_actv[win_slot]) begin
         stall = stall + 1;
         if (stall > jcold) jcold = stall;
@@ -292,11 +312,15 @@ module tb_smoke;
       errors = errors + 1;
     end
     if (jcold != dut.u_eng.jitter_max) begin
-      $display("  *** the bench's cold max (%0d) disagrees with the engine's");
-      $display("      own jitter_max (%0d). One of the two reconstructions of");
-      $display("      the stall condition is wrong, and neither number is");
-      $display("      usable until it is known which.", jcold,
+      // ⛔ the arguments used to sit on the LAST $display while the format
+      // specifiers were on the first two, so iverilog warned and printed
+      // "(<%0d>)" -- a diagnostic that fires correctly and then cannot be read.
+      $display("  *** the bench's cold max (%0d) disagrees with the engine's own",
+               jcold);
+      $display("      jitter_max (%0d). One of the two reconstructions of the",
                dut.u_eng.jitter_max);
+      $display("      stall condition is wrong, and neither number is usable");
+      $display("      until it is known which.");
       errors = errors + 1;
     end
     // ⛔⛔ THE BUDGET IS CHECKED AGAINST THE STEADY STATE, AND THE COLD START IS
@@ -307,6 +331,25 @@ module tb_smoke;
     // ⚠ THAT IS A MODELLING CLAIM AND IT IS WILSON'S TO RULE, not mine to
     // assume: Spuri's RTA bounds EVERY job including the first. So the cold
     // number is printed, written to cj_measured.txt, and left visible.
+    // ⭐⭐ RULING 1(a) MUST-FIRE: FIRST-EDGE JITTER == STEADY-STATE JITTER.
+    // This is what makes excluding the start-up latency EARNED rather than
+    // asserted. The old design had cold = 5 against steady = 0, so a lane's
+    // first edge was late while its second was on time -- and on a SOURCE lane
+    // that difference IS differential jitter against D_tol: the peer sees a
+    // short first bit. Declaring the first job out of scope would have excluded
+    // a real timing error for the sole reason that it happened first.
+    // ⛔ Prime-before-release removes it structurally instead: no lane is
+    // released until every live lane's buffers are primed, and `now` does not
+    // advance until then, so the refill latency elapses before job 1 exists.
+    // The equality below is the evidence that it worked. M_NO_PRIME breaks it.
+    if (jcold != jwarm) begin
+      $display("  *** PRIME-BEFORE-RELEASE MUST-FIRE FAILED: cold %0d != steady %0d.",
+               jcold, jwarm);
+      $display("      A lane's FIRST action is delayed differently from its");
+      $display("      later ones, so the start-up latency is NOT outside every");
+      $display("      job's response time and cannot be excluded from J.");
+      errors = errors + 1;
+    end
     if (jwarm > 2) begin
       $display("  *** STEADY-STATE J EXCEEDS THE PRE-REGISTERED 2. The double");
       $display("      buffer's falsifier (bursty.DOUBLE_BUFFER_PREREG) has");
@@ -317,7 +360,22 @@ module tb_smoke;
 
     // ---- write the measurements for the derivation gate to check ------
     jmiss_max = dut.u_eng.jitter_max;
-    fd = $fopen("test/cj_measured.txt", "w");
+    // ⛔⛔ THE OUTPUT PATH DEPENDS ON THE INPUT, so the default program's
+    // measurements CANNOT be overwritten by a stress run. Detecting the clobber
+    // (the `image` line below, asserted by gate_cj_bounds) was the first fix,
+    // and it worked -- it caught `sim 7` from a program the gate was not
+    // measuring. But detection leaves the hazard in place: running
+    // `test/run_mutants.py` legitimately exercises the stress images and then
+    // left the C/J gate RED until someone re-ran the default bench. The
+    // standing rule is to make N+1 IMPOSSIBLE, not merely visible, so a
+    // non-default image writes somewhere else entirely.
+    // ⭐ The `image` provenance line is KEPT anyway: two independent guards on
+    // the same hazard, one structural and one asserted, and the asserted one is
+    // what would catch a future third image path added without thinking.
+    if (imgfile == "test/smoke_image.hex")
+      fd = $fopen("test/cj_measured.txt", "w");
+    else
+      fd = $fopen("test/cj_measured_alt.txt", "w");
     // ⛔⛔ THE IMAGE IS RECORDED IN THE FILE, and the gate asserts it. This file
     // has ONE constant path while the bench now takes an IMAGE argument, which
     // is the textbook clobber hazard -- and it bit immediately: a refill-stress

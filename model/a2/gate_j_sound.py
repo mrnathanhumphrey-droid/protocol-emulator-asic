@@ -36,13 +36,31 @@ differs in THREE further places that we do not implement:
       `[0, horizon]`. His is `a in [-J_i, L - J_i - C_i]` -- it starts NEGATIVE,
       and we never evaluate a negative offset at all.
 
-⛔ THESE ARE NOT ADOPTED HERE, DELIBERATELY. Replacing the subject term, the
-response formula and the offset range is a rewrite of the core recurrence, and
-every number in this project rests on it. It would need its own must-fire, its
-own TChecker re-validation, and a digest bump -- and doing it in the same breath
-as discovering that the current form fails a bar is precisely the shape of
-"tighten the bound until the verdict improves". The looseness is LOCATED and
-reported; closing it is Wilson's call.
+⛔⛔ NOT ADOPTED -- AND UNDER RULING 2, NO LONGER NECESSARY. The restraint was
+right for the stated reason: replacing the subject term, the response formula
+and the offset range is a rewrite of the core recurrence that every number
+rests on, and doing it in the same breath as discovering the current form fails
+a bar is exactly "tighten the bound until the verdict improves".
+
+⭐ BUT THE DATA GAVE A CLEANER ANSWER THAN TIGHTENING. Correctly framed, pyRTA
+was EXACT 11 of 11 against TChecker's ground truth where ours was 9 of 11. So
+pyRTA's bound is now the PUBLISHED number and ours is the independent
+cross-check in the safe direction -- `pyrta_bound.check_direction` requires
+ours >= pyRTA on every lane, and ours SMALLER means STOP: either we are unsound
+or pyRTA is misframed, and the naive arm kept red in `gate_pyrta_jitter` proves
+misframing is a live risk rather than a theoretical one.
+
+⇒ OUR RECURRENCE SETS NO PUBLISHED NUMBER, SO THERE IS NOTHING TO TIGHTEN. The
+three gaps stay recorded as the REASON our form is loose, not as work owed.
+⛔ If Spuri's full form is ever adopted it needs a PRE-REGISTERED rationale,
+decided BEFORE margins are computed -- otherwise the adoption cannot be told
+apart from choosing the recurrence that gives the answer we wanted.
+
+⭐ AND AT THE SHIPPED PROGRAM THE QUESTION DISSOLVES. With J re-baselined to its
+derived 1, the two bounds AGREE EXACTLY on all five lanes: r = {11, 8, 5, 10, 6},
+min margin 12. The bound-dependence below is a LARGE-J phenomenon and the
+shipped program is not in that regime -- which is also why Ruling 1(b) publishes
+the program's J and the universal worst case as two separate numbers.
 
 THE TWO FACES STILL ASSERTED HERE:
   (a) THE SWEEP. Our bound's minimum margin at each J, checked against a
@@ -267,6 +285,12 @@ def main() -> int:
         print("        'the design fails' -- it is 'our bound cannot show it")
         print("        passes, and the looseness is located' (see the three")
         print("        structural gaps in this file's header).")
+        print("    ⭐⭐ RULING 2 SETTLES IT: pyRTA's bound is the PUBLISHED")
+        print("        number, so the verdict at J = %d is PASS. Ours stays as"
+              % J_PIPE_DERIVED)
+        print("        the cross-check in the safe direction, and Spuri's full")
+        print("        jitter form is NOT adopted -- our form sets no published")
+        print("        number, so there is nothing to tighten.")
     print("    ⭐ AND AT J_pipe = 2 THE TWO BOUNDS AGREE EXACTLY on every lane.")
     print("       Reducing J buys a margin that does not depend on which sound")
     print("       bound is quoted -- a stronger reason for the double buffer")

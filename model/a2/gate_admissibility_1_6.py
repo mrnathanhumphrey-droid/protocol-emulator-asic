@@ -720,6 +720,66 @@ def c_miso_release_fire():
            len(gb)))
 
 
+def c_dmin(lanes):
+    """RULED (1(b)) -- `d_min` is an admissibility INPUT, and J is computed from it.
+
+    ⛔⛔ WHY J CANNOT BE A CONSTANT IN THE SPEC. This project quoted `J = 5`,
+    then derived `J = 8`, and presented both as properties of the DESIGN. They
+    are properties of a PROGRAM running on it: the refill stall is 5 cycles at
+    `d = 8`, ZERO from `d = 11` upward, and the shipped lanes sit at `d >= 25`.
+    A single published J either overstates the program we ship or understates
+    the ones we have not written.
+
+    ⭐ SO THE LOADER COMPUTES IT, which is the same move as every other
+    condition here: a property the loader CHECKS, never a promise the
+    programmer makes. The program declares its action delays; the loader takes
+    the minimum, derives `J(d_min, N_LANES)` from the refill/queueing
+    structure, and that J is what the schedulability check uses.
+
+    ⛔ AND IT COMPOSES WITH CONDITION (1), IN THAT ORDER. A program with
+    `d_min` below the utilisation floor is REJECTED as overloaded before J is
+    even asked about -- `U = N*C/(d+C) <= 1` gives `d_min >= 8` for five lanes
+    at C = 2. Asking for J outside the feasible region would produce a number
+    for a program that cannot run, and the universal worst case is taken over
+    the ADMISSIBLE range for exactly that reason.
+    """
+    import gate_j_program as jp
+    d_ship = jp.D_MIN_SHIPPED
+    j_ship = jp.j_of(d_ship)
+    j_univ = max(jp.j_of(d) for d in jp.SWEEP if jp.admissible(d))
+    floor = min(d for d in range(1, 200) if jp.admissible(d))
+    # the shipped lanes must actually carry the J the rule derives for them
+    carried = sorted({l.J for l in lanes})
+    expected = {j_ship, j_ship + 1}      # +1 on I2C only: async capture (L_JIT)
+    ok = set(carried).issubset(expected) and j_ship in carried
+    return ok, (
+        "d_min(shipped) = %d -> J = %d, which is what the shipped table "
+        "carries (lane J values %s; I2C pays +L_JIT for async capture). "
+        "Universal worst case over admissible programs: J = %d at the "
+        "utilisation floor d_min = %d. ⛔ A program below that floor is "
+        "rejected by condition (1) BEFORE J is computed"
+        % (d_ship, j_ship, carried, j_univ, floor))
+
+
+def c_dmin_fire():
+    """⛔ The witness: a program whose d_min lands in the refill window."""
+    import gate_j_program as jp
+    # tightest ADMISSIBLE delay -- feasible by condition (1), yet its J is the
+    # universal worst case rather than the shipped 1.
+    d_bad = min(d for d in range(1, 200) if jp.admissible(d))
+    j_bad = jp.j_of(d_bad)
+    j_ship = jp.j_of(jp.D_MIN_SHIPPED)
+    fires = j_bad > j_ship
+    return fires, (
+        "a program with d_min = %d is FEASIBLE by condition (1) (U = %.3f <= 1) "
+        "and yet carries J = %d, not the shipped %d -- %d cycles more, because "
+        "its inter-action delay sits inside the refill window. ⭐ The loader "
+        "must RECOMPUTE J rather than inherit the shipped value: a program that "
+        "passes every other admissibility condition can still invalidate every "
+        "published r_i by being tighter than the one we measured"
+        % (d_bad, jp.utilisation(d_bad), j_bad, j_ship, j_bad - j_ship))
+
+
 CONDITIONS = [
     ("1.6a", "r_i <= t_i (one queue slot per lane)", c_queue, c_queue_fire),
     ("1.6b", "live-deadline spread + max r < 2^(N-1)", c_spread, c_spread_fire),
@@ -756,6 +816,8 @@ CONDITIONS = [
      c_miso_release_fire),
     ("1.6s", "an OPEN-DRAIN lane must be assigned a `uio` pin -- `uo_out` has "
              "no enable, so the loader REJECTS it", c_od_bank, c_od_bank_fire),
+    ("1.6t", "the program's MINIMUM INTER-ACTION DELAY `d_min` is an input: the "
+             "loader COMPUTES the program's J from it", c_dmin, c_dmin_fire),
 ]
 
 

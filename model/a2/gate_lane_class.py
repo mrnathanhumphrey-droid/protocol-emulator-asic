@@ -73,13 +73,30 @@ ACTIONS = [
 ]
 
 
-def five_lanes(i2c_j: int = 0):
-    ls = [BLane(l.name, l.T, l.C, l.D, n=l.n, t=l.t) for l in TX]
-    ls[2] = BLane(TX[2].name, TX[2].T, TX[2].C, TX[2].D, J=i2c_j)
+def five_lanes(i2c_j: int | None = None):
+    """A rebuild of the shipped five, with I2C's J optionally overridden.
+
+    ⛔⛔ THIS BUILDER DROPPED `J` AND THE DIGEST META-CHECK CAUGHT IT. It copied
+    name/T/C/D/n/t out of the shipped lanes and simply did not carry `J`. While
+    the shipped table was J = 0 everywhere that was invisible -- the copy and
+    the original agreed by coincidence. The moment the table was re-baselined to
+    its derived J = 1 this gate reported `used = 8ea5756203e1`, the OLD digest,
+    as an UNDECLARED VARIANT: it was analysing the previous table under the
+    current table's name.
+    ⭐ That is precisely the failure the A1 digest cross-check exists for, and
+    it is the second time a SECOND BUILDER has caused one here (the first was
+    `response_time_b` filtering interference by identity, where a copy
+    under-excluded and inflated the bound). A field added to the lane table must
+    be carried by every rebuild of it, so `J=l.J` is now explicit.
+    """
+    ls = [BLane(l.name, l.T, l.C, l.D, n=l.n, t=l.t, J=l.J) for l in TX]
+    if i2c_j is not None:
+        # the SWEEP arm: override I2C's J only, keeping everything else
+        ls[2] = BLane(TX[2].name, TX[2].T, TX[2].C, TX[2].D, J=i2c_j)
     ls += [BLane(UART_RX.name, UART_RX.T, UART_RX.C, UART_RX.D,
-                 n=UART_RX.n, t=UART_RX.t),
+                 n=UART_RX.n, t=UART_RX.t, J=UART_RX.J),
            BLane(SPI_RX.name, SPI_RX.T, SPI_RX.C, SPI_RX.D,
-                 n=SPI_RX.n, t=SPI_RX.t)]
+                 n=SPI_RX.n, t=SPI_RX.t, J=SPI_RX.J)]
     return ls
 
 
@@ -269,19 +286,39 @@ def main() -> int:
     print()
     print("  --- must-fire: a REACTIVE action that passes differential but")
     print("      fails absolute MUST be rejected ---")
+    # ⛔⛔ THIS ARM WAS TUNED TO THE J = 0 NUMBERS AND WENT VACUOUS ON THE
+    # RE-BASELINE. It checked exactly two hard-coded rates, 3 and 4 MHz, which
+    # were separating cases while `r - C` was one cycle smaller. With the shipped
+    # table carrying its derived J = 1, `r - C` grows by 1, the DIFFERENTIAL test
+    # starts failing at those rates too, and `diff_ok and not a_ok` became
+    # unreachable -- the arm reported "no case separates the two tests" about a
+    # separation that had simply moved to a lower frequency (2.5 MHz, visible in
+    # the table printed above).
+    # ⭐ A must-fire whose witness is a hard-coded constant is a must-fire with a
+    # shelf life. It now SEARCHES for the separating case and NAMES the one it
+    # finds, so the arm survives any change that moves the boundary instead of
+    # silently going vacuous -- which is the standing rule that a spec fix must
+    # audit its own suite for arms that encoded the old numbers.
     fired = False
-    for mhz in (3, 4):
+    candidates = [6.0, 5.0, 4.0, 3.0, 2.5, 2.0, 1.5, 1.25, 1.0]
+    scanned = []
+    for mhz in candidates:
         T = int(round(25.0 / mhz))
         half = 25.0 / mhz
+        if T < 2:
+            continue
         D = min(T // 2, T - T // 2 - 1)
         diff_ok = rc <= D
         a_ok = abs_budget(rc, True, sp.C) <= half - tsu
-        if diff_ok and not a_ok:
+        scanned.append((mhz, diff_ok, a_ok))
+        if diff_ok and not a_ok and not fired:
             fired = True
             print("    %g MHz: differential PASSES (%d <= %d) but absolute FAILS"
                   % (mhz, rc, D))
             print("            (%d > %.1f - %d) -> REJECTED by the absolute test"
                   % (abs_budget(rc, True, sp.C), half, tsu))
+    print("    scanned %d rates; separating cases: %d"
+          % (len(scanned), sum(1 for _m, d, a in scanned if d and not a)))
     print("    must-fire: %s"
           % ("PASS -- the absolute test catches what the differential one misses"
              if fired else

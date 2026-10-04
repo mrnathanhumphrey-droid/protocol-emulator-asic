@@ -51,6 +51,7 @@ sys.path.insert(0, HERE)
 
 import lane_digest                                                 # noqa: E402
 from bursty import response_time_b                                 # noqa: E402
+import pyrta_bound                                                 # noqa: E402
 from pyrta_src import require_pyrta                                # noqa: E402
 
 try:
@@ -179,24 +180,26 @@ def feasible_subsets(budget: int = N_UIO):
     return out
 
 
-def pyrta_on(subset, mod) -> dict:
-    """r_i per lane from pyRTA, on this subset."""
-    (edf, WCET, Deadline, FullyNonPreemptive, IdealProcessor, Periodic,
-     Priority, Task, taskset) = mod
-    tasks = [Task(Periodic(period=l.t), FullyNonPreemptive(WCET(l.C)),
-                  Deadline(l.D), Priority(i)) for i, l in enumerate(subset)]
-    ts = taskset(*tasks)
-    # the by-VALUE footgun: assert the interferer count rather than trust tags
-    want = len(tasks) - 1
-    for l, t in zip(subset, tasks):
-        if len(list(ts.excluding_iter(t))) != want:
-            raise AssertionError("pyRTA merged a parameter-identical pair on "
-                                 "subset %s" % [x.name for x in subset])
+def pyrta_on(subset, src) -> dict:
+    """r_i per lane from pyRTA, on this subset.
+
+    ⛔⛔ THIS USED TO BUILD ITS OWN TASK SET WITH PLAIN `Periodic`, AND THE
+    J = 1 RE-BASELINE BROKE IT. With the shipped table carrying its derived
+    jitter, this gate reported pyRTA 2 against our 3 on every singleton subset
+    -- pyRTA was answering the J = 0 question. The same happened in
+    `gate_rearm` and `gate_pyrta`: FOUR gates each had a private pyRTA framing
+    and three of them were the naive one.
+    ⭐ Under Ruling 2 pyRTA is the PUBLISHED bound, so its framing lives in ONE
+    place: `pyrta_bound.bound`. Jitter in the arrivals, deadlines converted from
+    nominal-release to arrival semantics, and the subject's own delay swept.
+    """
     out = {}
-    for l, t in zip(subset, tasks):
-        sol = edf.rta(ts, t, IdealProcessor())
-        out[l.name] = getattr(sol.response_time_bound, "value",
-                              sol.response_time_bound)
+    for i, l in enumerate(subset):
+        r, err = pyrta_bound.bound(src, list(subset), i)
+        if r is None:
+            raise AssertionError("pyRTA on subset %s, lane %s: %s"
+                                 % ([x.name for x in subset], l.name, err))
+        out[l.name] = r
     return out
 
 
@@ -309,17 +312,10 @@ def main() -> int:
         print("    The envelope claim is OURS ALONE without this, which is the")
         print("    one thing the ruling asked it not to be.")
         return 1
-    sys.path.insert(0, src)
-    from response_time_analysis import edf                              # noqa
-    from response_time_analysis.model import (WCET, Deadline,            # noqa
-                                              FullyNonPreemptive, IdealProcessor,
-                                              Periodic, Priority, Task, taskset)
-    mod = (edf, WCET, Deadline, FullyNonPreemptive, IdealProcessor, Periodic,
-           Priority, Task, taskset)
     dis = fviol = 0
     checked = 0
     for s in subs:
-        got = pyrta_on(s, mod)
+        got = pyrta_on(s, src)
         for l in s:
             checked += 1
             ours = response_time_b(l, s)["r"]

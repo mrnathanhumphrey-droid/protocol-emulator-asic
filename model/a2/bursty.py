@@ -874,8 +874,37 @@ def abs_tolerance(half_period: int, c9_at_completion: bool, C: int,
 #
 # ⭐ L_SYNC / OUT_REG / TSU are imported from the one place they are read off the
 # RTL, so the reactive budget below cannot drift from gate 0.9b's.
+# ⭐⭐⭐ THE RE-BASELINE: EVERY LANE NOW CARRIES ITS DERIVED J. Until now the
+# shipped table carried J = 0 on all five lanes while the stated design point
+# was "(C = 2, J_pipe = 1)" -- so every published r_i was a J = 0 analysis that
+# matched NEITHER 1.3 candidate. That is fixed here, and the fix is a DERIVATION
+# rather than a measurement:
+#
+#   J_SHIPPED = gate_j_program.j_of(d_min = 25) = 1
+#
+# from the refill structure given the shipped program's tightest inner action
+# spacing (25 cycles -- SPI and SPI-target at 1 MHz on a 50 MHz clock). The
+# shortfall term is max(0, N*L_REFILL - (d_min + C)) = max(0, 20 - 27) = 0, so
+# only the winner-registration cycle survives. ⭐ The measurement AGREES: steady
+# -state prefetch stall 0 over 3,700 cycles, cold start 0 after
+# prime-before-release.
+#
+# ⛔ J IS A PROGRAM PROPERTY, NOT A CHIP PROPERTY, which is why this is 1 and
+# not 8. The UNIVERSAL worst case over every admissible program is 8 (attained
+# at the tightest admissible d_min = 8, where U = 1.0), and it is published
+# alongside this table rather than inside it -- see `gate_j_program.py`. Putting
+# the universal bound in the shipped table would overstate the thing we ship;
+# putting the shipped value in the universal claim would understate the things
+# we have not written. Both numbers, both labelled.
+#
+# ⭐ I2C IS THE ONE EXCEPTION AND IT IS NOT AN EXCEPTION TO THE RULE: it carries
+# J_SHIPPED + L_JIT, because it is the lane whose release is captured
+# asynchronously. An earlier estimate that forgot this was wrong by exactly one.
+J_SHIPPED = 1
+
 TX = [
-    BLane("UART-tx 115200", 434, 2, D_tol=216, note="periodic, one event/bit"),
+    BLane("UART-tx 115200", 434, 2, D_tol=216, J=J_SHIPPED,
+          note="periodic, one event/bit"),
     # ⭐ D = 23 DERIVED from the MB85RS64V AC table (DS501-00015-6v1-E, refs/),
     # replacing the modelled centre-sample 12. We are the MASTER here, so the
     # peer judges setup/hold against the clock WE generate, not a bit centre:
@@ -885,10 +914,13 @@ TX = [
     # to IMPROVE the set: a too-tight deadline had been distorting EDF into
     # prioritising SPI-tx over lanes that needed it more. Minimum margin across
     # all five lanes rises 9 -> 11; I2C r 7 -> 5, SPI-target r 5 -> 3.
-    BLane("SPI-tx 1 MHz", 25, 2, D_tol=23,
+    BLane("SPI-tx 1 MHz", 25, 2, D_tol=23, J=J_SHIPPED,
           note="D derived from MB85RS64V tSU/tCH/tCL"),
-    BLane("I2C 400 kHz", 45, 2, D_tol=15,
-          note="asymmetric SCL 80/45; D derived from UM10204 T11, not modelled"),
+    # ⭐ J_SHIPPED + L_JIT -- the only lane with an ASYNCHRONOUSLY captured
+    # release, so it pays the async-capture cycle on top of the pipeline term.
+    BLane("I2C 400 kHz", 45, 2, D_tol=15, J=J_SHIPPED + L_JIT,
+          note="asymmetric SCL 80/45; D derived from UM10204 T11, not modelled; "
+               "J = J_SHIPPED + L_JIT (async capture)"),
 ]
 
 # UART-rx: 10 samples per frame (start + 8 data + stop) at one bit period apart;
@@ -920,6 +952,7 @@ TX = [
 # that is exactly why it survived: a difference that changes no verdict is the
 # kind that stays wrong.
 UART_RX = BLane("UART-rx 115200", T=4140, C=2, D_tol=216 - L_SYNC, n=10, t=414,
+                J=J_SHIPPED,
                 note="10 samples/frame at the fastest admitted peer (414, the "
                      "sampler-realistic band floor); n*t == T, gapless; "
                      "D_tol = 216 - L_sync (REACTIVE-anchor, 0.9b)")
@@ -957,7 +990,7 @@ UART_RX = BLane("UART-rx 115200", T=4140, C=2, D_tol=216 - L_SYNC, n=10, t=414,
 # 11 -> 14. Both C9 variants clear the >= 4 bar at 1 MHz by more than 15 cycles,
 # so C9 is NOT decided by 1 MHz feasibility; it is decided by the frequency
 # ceiling, which is 1.3's question and not this lane's.
-SPI_RX = BLane("SPI-target 1 MHz", T=400, C=2, n=16, t=25,
+SPI_RX = BLane("SPI-target 1 MHz", T=400, C=2, n=16, t=25, J=J_SHIPPED,
                D_tol=abs_tolerance(25, c9_at_completion=True, C=2),
                note="master-clocked, 16 edges/byte, back-to-back: n*t == T; "
                     "D_tol DERIVED from the absolute budget (R1), C9=COMPLETION")

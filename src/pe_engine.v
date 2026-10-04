@@ -245,7 +245,20 @@ module pe_engine #(
 
   always @(posedge clk or negedge rst_n) begin
     if (!rst_n)      now <= {TS_W{1'b0}};
+    // ⭐⭐ `now` DOES NOT ADVANCE UNTIL PRIMED, and that is the half of
+    // prime-before-release that actually removes the cold start. Gating only
+    // DISPATCH would relocate the problem, not remove it: `now` would run on
+    // through the priming refills, every lane's absolute timestamp would fall
+    // behind, and the first job would be released ALREADY LATE -- the same
+    // delay, now charged to the schedule instead of to start-up. Freezing the
+    // clock makes the refill latency elapse before t = 0 of the schedule
+    // exists, so no job's response time can contain it.
+    // ⛔ M_NO_PRIME removes both halves and the bench must fail.
+`ifdef M_NO_PRIME
     else if (run)    now <= now + 1'b1;
+`else
+    else if (run && primed) now <= now + 1'b1;
+`endif
   end
 
   // =====================================================================
@@ -400,6 +413,7 @@ module pe_engine #(
     end
   endfunction
 
+
   // Is there anything worth fetching for this lane?
   // ⛔⛔ A CHAINING RE-ARM IS NOT PREFETCHED PAST -- AND THE REASON IS CHEAPER
   // THAN THE ONE THIS COMMENT FIRST GAVE. It claimed that flipping on a
@@ -429,6 +443,76 @@ module pe_engine #(
         want_fetch = !fvalid;                        // fill the spare
     end
   endfunction
+
+  // =====================================================================
+  // ⭐⭐ PRIME BEFORE RELEASE -- the cold start removed, not redefined
+  // =====================================================================
+  // ⛔⛔ WHY NOT JUST EXCLUDE IT. The measured J = 5 this project quoted since
+  // S3 turned out to be entirely a COLD START: at `hdr_done` both slots of
+  // every lane are empty, so each lane's FIRST action waits for a full refill.
+  // The tempting move is to declare the first job out of scope. ⛔ THAT WOULD BE
+  // WRONG, and the reason is specific: on a SOURCE lane a late first edge
+  // followed by an on-time second edge IS differential jitter against `D_tol` --
+  // the peer sees a short first bit. Excluding it by definition would be
+  // excluding a real timing error because it happens to be first.
+  //
+  // ⭐ SO IT IS REMOVED STRUCTURALLY INSTEAD. No lane is released until EVERY
+  // live lane's buffers are primed, and `now` does not advance until then. The
+  // refill latency becomes a fixed START-UP LATENCY that elapses entirely
+  // BEFORE job 1 exists, so it is outside every job's response time -- and the
+  // exclusion is then earned by the design rather than asserted in the model.
+  //
+  // ⭐ `!want_fetch(i)` IS THE PRIMING CONDITION, and reusing it is not a
+  // shortcut: that function already encodes exactly "this lane needs nothing
+  // more fetched", including the chaining-re-arm case where the spare is
+  // DELIBERATELY left unfilled. A hand-written "both slots valid" would deadlock
+  // on precisely that case, waiting forever for a slot the design never fills.
+  //
+  // ⛔ PRIMING WAITS FOR THE SPARE, NOT JUST THE HEAD. With only the head
+  // primed, the first dispatch is clean and then the first WRITEBACK empties it
+  // with no successor resident -- so the stall reappears on action 2 and
+  // first-edge jitter would still differ from steady state. The must-fire is
+  // `cold == steady`, which only holds if the steady-state invariant (spare
+  // resident) holds at the first dispatch too.
+  // ⛔⛔ PRIMING IS A ONE-SHOT, AND A CONTINUOUS GATE DEADLOCKED THE ENGINE.
+  // "every lane wants nothing fetched" is true at start-up and then FALSE again
+  // one cycle after every writeback, because the swap leaves the freed slot
+  // empty. Used as a continuous gate it de-asserted immediately after the first
+  // dispatch, froze `now`, and the design produced ZERO EDGES -- the first
+  // smoke run of prime-before-release was a total stall, not a jitter result.
+  // ⭐ "Primed" is a START-UP MILESTONE, not an invariant: latched once, and the
+  // ordinary refill churn afterwards must not revoke it.
+  //
+  // ⛔⛔⛔ AND THE SECOND BUG HERE IS A VERILOG TRAP WORTH THE COMMENT. The
+  // first version computed this with a generate + CONTINUOUS ASSIGN:
+  //     assign lane_unprimed[gi] = l_live[gi] & want_fetch(gi);
+  // A function call in a continuous assignment is sensitive ONLY TO ITS
+  // ARGUMENTS. `gi` is a genvar constant, so `want_fetch` was evaluated once at
+  // time 0 -- when every array was still X -- and NEVER RE-EVALUATED.
+  // `lane_unprimed` sat at `xxxxx` for the whole run, `prime_now` never
+  // asserted, and the engine produced zero edges again, for an entirely
+  // different reason than the first time.
+  // ⭐ EVALUATING IT IN THE CLOCKED BLOCK FIXES IT PROPERLY, and is better than
+  // an `always @(*)`: `@*`'s sensitivity to signals read INSIDE a called
+  // function is tool-dependent, so that would have been the same latent bug
+  // with a different trigger. Here the function is called at a clock edge with
+  // current values, and -- importantly -- `want_fetch` stays the SINGLE
+  // definition of "this lane needs nothing more fetched", rather than being
+  // duplicated into a priming-specific copy that could drift from it.
+  reg primed_q;
+  reg prime_unp;
+  integer pi;
+  always @(posedge clk or negedge rst_n) begin
+    if (!rst_n)      primed_q <= 1'b0;
+    else if (!run)   primed_q <= 1'b0;      // HALT re-primes on the next run
+    else if (!primed_q) begin
+      prime_unp = 1'b0;
+      for (pi = 0; pi < N_LANES; pi = pi + 1)
+        if (l_live[pi] && want_fetch(pi[LW-1:0])) prime_unp = 1'b1;
+      if (hdr_done && !prime_unp) primed_q <= 1'b1;
+    end
+  end
+  wire primed = primed_q;
 
   // ---- the one arbiter for the shared store read port ----------------
   // ⭐ Header load has priority, then prefetch. The engine's own dispatch does
@@ -636,7 +720,11 @@ module pe_engine #(
 
       // ---------------- dispatch, C = 2 ------------------------------
       case (st)
+`ifdef M_NO_PRIME
         ST_IDLE: if (hdr_done && winner_v) begin
+`else
+        ST_IDLE: if (primed && winner_v) begin
+`endif
                    // ⭐ dispatch reads the HEAD slot. With the spare already
                    // filled, the usual case after a writeback is that the head
                    // is valid IMMEDIATELY -- which is the whole J reduction.

@@ -53,6 +53,67 @@ except Exception:
 
 MARKER = "LANE-DIGEST"          # what `run_a2.py` greps for
 
+# =========================================================================
+# THE DIGEST LEDGER -- every bump, with its reason, newest LAST
+# =========================================================================
+# ⛔⛔ THIS EXISTS BECAUSE A DIGEST BUMP IS THE ONE CHANGE THAT INVALIDATES
+# EVERY PUBLISHED NUMBER AT ONCE, and until now it was recorded only in prose
+# across seven closeout documents. A bump that is merely described can be done
+# twice, or done and not described, and the cross-check cannot tell: it only
+# ever compares gates against EACH OTHER within one run, so a whole run can
+# agree on a table nobody authorised.
+#
+# ⭐ `assert_current()` turns that into a check: the live shipped table must
+# hash to the newest entry here. A bump therefore requires an explicit, reviewed
+# line in this list -- and an UNINTENDED bump (a lane edited in passing, a
+# second builder that drops a field) goes RED instead of propagating quietly.
+# The second case is not hypothetical: `gate_lane_class.five_lanes` dropped `J`
+# and reported the previous digest under the current table's name.
+DIGEST_LEDGER = [
+    ("8ea5756203e1",
+     "the J = 0 table. Five lanes with R1's derived deadlines and R2's "
+     "D_sched/D_tol split, every lane carrying J = 0. ⛔ RECORDED AS AN ERROR: "
+     "the stated design point was always (C = 2, J_pipe = 1), so every r_i "
+     "published against this digest was a J = 0 analysis matching NEITHER 1.3 "
+     "candidate. r = {10, 7, 3, 9, 5}, min margin 14."),
+    ("b4e51034e283",
+     "THE J = 1 RE-BASELINE (Wilson's Ruling 1(b), after 78d8f40). Every lane "
+     "now carries its DERIVED J: J_SHIPPED = j_of(d_min = 25) = 1 from the "
+     "refill structure, with I2C at 1 + L_JIT = 2 for asynchronous capture. "
+     "r = {11, 8, 5, 10, 6}, min margin 12, identical under our bound and "
+     "pyRTA's on all five lanes. ⭐ This is the digest `frontier.py` had been "
+     "declaring as its (C=2, J=1) VARIANT, so that gate now MATCHES -- the "
+     "design point and the shipped table finally agree. The universal worst "
+     "case over admissible programs (J = 8) is published ALONGSIDE this table, "
+     "not inside it: J is a program property, and gate_j_program.py derives it "
+     "from d_min."),
+]
+
+
+def assert_current(verbose: bool = True) -> bool:
+    """The live shipped table must hash to the newest ledger entry."""
+    want, why = DIGEST_LEDGER[-1]
+    got = base_digest()
+    ok = (got == want)
+    if verbose:
+        if ok:
+            print("  %s LEDGER ok: shipped table is %s (entry %d of %d)"
+                  % (MARKER, got, len(DIGEST_LEDGER), len(DIGEST_LEDGER)))
+        else:
+            known = dict(DIGEST_LEDGER)
+            print("  %s *** LEDGER MISMATCH: shipped table hashes to %s, the "
+                  "newest ledger entry is %s ***" % (MARKER, got, want))
+            if got in known:
+                print("      %s is an OLDER ledger entry -- the table has been "
+                      "reverted, or a second builder is dropping a field."
+                      % got)
+            else:
+                print("      %s is in NO ledger entry: this is an "
+                      "UNAUTHORISED bump. Either add a reviewed line to "
+                      "DIGEST_LEDGER saying what changed and why, or revert "
+                      "the edit that moved the table." % got)
+    return ok
+
 
 def _fields(lane) -> tuple:
     """Every field that can change a response time. Order is part of the hash.
@@ -113,6 +174,10 @@ def announce(gate: str, used=None, variant: str | None = None) -> str:
 # ============================================================================
 def selftest() -> int:
     """⛔ A digest that has never been seen to DIFFER is not a check.
+
+    ⭐ Also runs `assert_current()`: the ledger has to agree with the live
+    table, or the suite is cross-checking gates against each other on a table
+    nobody authorised.
 
     Both faces, plus the one that matters most: a single-field change in the
     field most recently added to the model must move the hash. R2's `D_sched`
@@ -176,9 +241,34 @@ def selftest() -> int:
     else:
         print("      => every result-changing field is inside the hash")
 
+    # ---- the ledger: the live table must be the authorised one ----------
+    print()
+    print("  --- digest ledger (%d entries, newest last) ---"
+          % len(DIGEST_LEDGER))
+    for i, (d, why) in enumerate(DIGEST_LEDGER):
+        print("    %d. %s%s" % (i + 1, d, "  <- CURRENT"
+                                if i == len(DIGEST_LEDGER) - 1 else ""))
+        for line in _wrap(why, 68):
+            print("       %s" % line)
+    if not assert_current():
+        rc = 1
+
     print()
     print("  GATE A1-selftest: %s" % ("PASSED" if rc == 0 else "FAILED"))
     return rc
+
+
+def _wrap(text: str, width: int) -> list:
+    out, cur = [], ""
+    for w in text.split():
+        if cur and len(cur) + 1 + len(w) > width:
+            out.append(cur)
+            cur = w
+        else:
+            cur = (cur + " " + w) if cur else w
+    if cur:
+        out.append(cur)
+    return out
 
 
 if __name__ == "__main__":

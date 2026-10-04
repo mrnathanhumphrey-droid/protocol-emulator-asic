@@ -72,6 +72,7 @@ GATES = [
     # Its verdicts are RECORDED in jitter_instances.py, and that file's selftest
     # plus run_jitter's own stale-record check are what keep the record honest.
     ("jitter_instances.py", "J0   one jitter instance list + recorded verdicts", False),
+    ("gate_j_program.py", "J1b  J(d_min) derived; shipped J=1, universal J=8", False),
     ("gate_j_sound.py", "J4   the J sweep; the bar verdict is bound-dependent", True),
     ("gate_pyrta_jitter.py", "J3   pyRTA witness at J>0; the naive arm is a trap", True),
 ]

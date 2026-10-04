@@ -46,3 +46,7 @@ model/a2/wave_jit_*.bin
 test/stress_image.hex
 test/five_image.hex
 test/chain_image.hex
+
+# Written when the bench runs a NON-default image; the default program's
+# measurements live in test/cj_measured.txt and are tracked.
+test/cj_measured_alt.txt

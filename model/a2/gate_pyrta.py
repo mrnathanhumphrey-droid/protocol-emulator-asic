@@ -59,6 +59,7 @@ sys.path.insert(0, HERE)
 
 import lane_digest                                                 # noqa: E402
 from bursty import TX, UART_RX, SPI_RX, response_time_b            # noqa: E402
+import pyrta_bound                                                 # noqa: E402
 from pyrta_src import require_pyrta                                # noqa: E402
 
 try:
@@ -111,11 +112,20 @@ except Exception:
 #        ⭐ AND THIS GATE IS WHAT CAUGHT THE BUMP: it refused to interpret
 #        anything once the typed answers stopped matching the table, which is
 #        exactly the job of a hand-typed literal next to an imported parameter.
-EXPECTED_R = {"UART-tx 115200": 10,
-              "SPI-tx 1 MHz": 7,
-              "I2C 400 kHz": 3,
-              "UART-rx 115200": 9,
-              "SPI-target 1 MHz": 5}
+# ⭐⭐ RETYPED FOR THE J = 1 RE-BASELINE, and the gate caught the staleness
+# itself: arm 0 reported all five lanes as drifted (table 11 / file 10, 8/7,
+# 5/3, 10/9, 6/5) and aborted before touching pyRTA. That is the whole reason
+# the answers are TYPED while the parameters are IMPORTED -- a gate that
+# recomputed both sides would have silently re-blessed whatever the recurrence
+# now produces.
+# ⛔ The previous values {10, 7, 3, 9, 5} were the J = 0 analysis. The shipped
+# table now carries its DERIVED J (1, and 2 on I2C for async capture), so these
+# are the J = 1 answers: r = {11, 8, 5, 10, 6}, min margin 12.
+EXPECTED_R = {"UART-tx 115200": 11,
+              "SPI-tx 1 MHz": 8,
+              "I2C 400 kHz": 5,
+              "UART-rx 115200": 10,
+              "SPI-target 1 MHz": 6}
 
 # ⛔ ONE lane set, built once and selected from -- never a second builder call.
 # `response_time_b` filters interference BY IDENTITY, so an equal-but-distinct
@@ -220,59 +230,31 @@ def main() -> int:
     src = require_pyrta("gate_pyrta.py")
     if not src:
         return 1
-    sys.path.insert(0, src)
-    from response_time_analysis import edf                              # noqa
-    from response_time_analysis.model import (WCET, Deadline,           # noqa
-                                              FullyNonPreemptive, IdealProcessor,
-                                              Periodic, Priority, Task, taskset)
-
-    tasks, names, ours = [], [], []
-    for i, (n, T, C, D, r, _typed) in enumerate(spec_rows()):
-        # ⛔ Priority is an IDENTITY TAG, not a scheduling input: `edf.rta` reads
-        # deadlines only. It is required because pyRTA filters interferers by
-        # VALUE on a frozen dataclass, so two parameter-identical lanes would
-        # both be excluded -- and UART-tx/UART-rx and SPI-tx/SPI-target ARE
-        # parameter-identical pairs here.
-        tasks.append(Task(Periodic(period=T), FullyNonPreemptive(WCET(C)),
-                          Deadline(D), Priority(i)))
-        names.append(n)
-        ours.append(r)
-    ts = taskset(*tasks)
-
-    # ---- the footgun, checked mechanically rather than trusted ----------
-    print()
-    print("  --- interferer-count check (the identity footgun) ---")
-    want = len(tasks) - 1
-    dropped = 0
-    for n, t in zip(names, tasks):
-        k = len(list(ts.excluding_iter(t)))
-        if k != want:
-            dropped += 1
-        print("    %-20s sees %d of %d interferers  %s"
-              % (n, k, want, "ok" if k == want else "*** %d DROPPED ***" % (want - k)))
-    if dropped:
-        print("    *** ABORT: parameter-identical lanes were silently merged.")
-        print("        Every bound below would be optimistic. This is why the")
-        print("        count is asserted instead of the tags being trusted.")
-        return 1
-    print("    => no lane was merged; the task set pyRTA analysed is ours")
-
-    # ---- the comparison ------------------------------------------------
+    # ⭐⭐ RULING 2: pyRTA'S BOUND IS NOW THE PUBLISHED NUMBER, so its framing
+    # comes from `pyrta_bound` -- the single implementation -- instead of being
+    # rebuilt here. This gate's own private version used plain `Periodic`, and
+    # when the shipped table was re-baselined to its derived J = 1 it reported
+    # the J = 0 answers against ours on all five lanes. The interferer-count
+    # footgun is asserted inside `pyrta_bound.bound`, on every delta it tries.
     print()
     print("  --- pyRTA non-preemptive EDF, ideal uniprocessor ---")
-    print("    %-20s %-6s %-8s %-8s %-8s %s"
-          % ("lane", "D_i", "pyRTA", "ours", "agree", "busy window"))
-    agree, rows = True, []
-    for n, t, r_ours in zip(names, tasks, ours):
-        sol = edf.rta(ts, t, IdealProcessor())
-        R = getattr(sol.response_time_bound, "value", sol.response_time_bound)
-        L = getattr(sol.busy_window_bound, "value", sol.busy_window_bound)
-        D = getattr(t.deadline, "value", None)
-        ok = (R == r_ours)
-        agree = agree and ok
+    print("    ⭐ PRIMARY BOUND (Ruling 2). Ours is the cross-check, and the")
+    print("    requirement is DIRECTION (ours >= pyRTA), not exact agreement.")
+    print("    %-20s %-6s %-8s %-8s %s"
+          % ("lane", "D_i", "pyRTA", "ours", "direction"))
+    rows = []
+    for i, (n, _t, _C, D, r_ours, _typed) in enumerate(spec_rows()):
+        R, err = pyrta_bound.bound(src, LANES, i)
+        if R is None:
+            print("    *** ABORT: %s: %s" % (n, err))
+            return 1
         rows.append((n, R, r_ours))
-        print("    %-20s %-6s %-8s %-8d %-8s %s"
-              % (n, D, R, r_ours, "yes" if ok else "*** NO ***", L))
+        print("    %-20s %-6s %-8s %-8d %s"
+              % (n, D, R, r_ours,
+                 "exact" if R == r_ours else
+                 ("ours +%d (safe)" % (r_ours - R) if r_ours > R
+                  else "*** OURS SMALLER ***")))
+    agree = all(x[1] == x[2] for x in rows)
 
     print()
     # direction matters more than agreement

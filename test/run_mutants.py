@@ -81,6 +81,22 @@ MUTANTS = [
     # It would not -- the refill reloads `l_pc`, which a chaining re-arm has not
     # advanced, so the same action comes back. The mutant is what established
     # that, which is a mutant earning its place by surviving.
+    # ⭐⭐ RULING 1(a)'s mutant. Releasing jobs before the buffers are primed is
+    # the thing prime-before-release exists to prevent, and it must be visible.
+    # ⛔ MEASURED cold = 76, not the 5 this project had been quoting. The old
+    # engine counter AND the old bench both gated on `hdr_done`, so BOTH were
+    # blind to the header-load window -- during which `now` ran, lanes were
+    # released, and nothing could dispatch. Two independent reconstructions
+    # sharing one blind spot read as agreement.
+    ("M_NO_PRIME", "assert", DEFAULT_IMG,
+     "release jobs before every lane's buffers are primed",
+     "prime-before-release must-fire",
+     "Without priming, `now` advances through the header load and the initial "
+     "refills, so every lane's first job is released ALREADY LATE and the "
+     "first-edge delay (76) differs from the steady-state one (0). That "
+     "difference is differential jitter against D_tol on a source lane, which "
+     "is why the cold start had to be removed rather than declared out of "
+     "scope."),
     ("M_BUF_CHAINFLIP", "effect", DEFAULT_IMG,
      "swap on a chaining re-arm (PC does not advance)",
      "select-bit flip count must differ from the baseline",
@@ -136,6 +152,8 @@ def verdict(out):
         fired.append("C")
     if "never moved its pin" in out:
         fired.append("edges")
+    if "PRIME-BEFORE-RELEASE MUST-FIRE FAILED" in out:
+        fired.append("prime-before-release must-fire")
     if "THE INVARIANT RAN" in out:
         fired.append("invariant vacuous")
     if "disagrees with the engine's" in out:
