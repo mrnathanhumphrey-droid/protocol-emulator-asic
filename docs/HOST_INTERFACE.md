@@ -43,9 +43,9 @@ hold SCL low and stretch the clock.
 | pin | name | meaning |
 | --- | --- | --- |
 | `ui_in[7]` | `prog` | 1 = load mode, 0 = run |
-| `ui_in[6]` | `wr` | write strobe, **asynchronous** |
+| `ui_in[6]` | `wr` / `push` | load: write strobe. run: TX payload PUSH. **Asynchronous** either way |
 | `ui_in[5]` | `ptr` | load-pointer reset |
-| `ui_in[0]` | `host_valid` | latch `uio` as the dispatching lane's payload |
+| `ui_in[4:1]` | `tx_nibble` | TX payload nibble, 2 pushes per byte (run mode) |
 
 `wr` is treated as an asynchronous pin strobe: two flops to resolve
 metastability and a third to see the edge. **Hold it for at least 3 clocks**, and
@@ -129,19 +129,40 @@ readback now **primes** — its first two visits issue the read and let it land
 without queueing a frame — so every frame carries the byte its own request
 fetched. A pipeline's first output is not data.
 
-## Supplying a payload byte
+## Supplying a payload byte — the TX nibble channel
 
-`ui_in[0]` latches `uio[7:0]` as the payload for the lane that is **currently
-dispatching**. ⚠ Two consequences a host must plan around:
+| pin | run-mode use |
+| --- | --- |
+| `ui_in[4:1]` | TX payload nibble, **2 pushes per byte, HIGH nibble first** |
+| `ui_in[6]` | TX payload **PUSH** (rising edge; it is `WR` in load mode) |
 
-- The payload arrives on the **same `uio` bank the protocol pins use**, so the
-  host must choose a moment when the pins it drives are not needed by a peer.
-- It targets whichever lane is dispatching, so with more than one live lane the
-  host must know the schedule to aim it.
+Push the high nibble, then the low nibble. The assembled byte enters a **2-deep
+FIFO**; the engine pops one byte each time a lane's `SHIFT` consumes data. There
+is **one** FIFO, not one per lane: the shift action already names its lane, so
+the host pushes bytes and the program does the routing — the same trick that
+deleted the address bus.
 
-⛔ **This is why `corpus_spim` is an open item**: a program cannot yet conduct an
-addressed transaction with a peer, because the command byte has to come from the
-host over the shared bank and the SHIFT/clock phase the ISA intends is unruled.
-With the payload register at its reset `0x00` an SPI master clocks out an invalid
-opcode and a conforming device stays High-Z — correctly. The same blocks an I²C
-ACK, and therefore any peer-driven clock-stretch test.
+- **`uio` carries protocol pins only.** Nothing of the data channel is spent on
+  it, which is what lets the host feed a lane while a protocol is live.
+- **A push on a full FIFO is reported, never stalled** — sticky **TX-full** in
+  the status frame (bit 4). The host has no back-pressure pin, so a flag in the
+  stream is the only honest answer, the same reasoning as RX overflow.
+- **A lane that consumes with the FIFO empty records an underrun** (status
+  bit 1), per lane. Staging one byte ahead is what the FIFO is for.
+
+⛔ **This section previously described something else, and that was a real
+defect rather than loose wording.** The RTL took `host_data` from `uio_q1` —
+*eight bits of the protocol bus* — and pushed on `ui_in[0]`, while `ui_in[4:1]`
+sat in the `_unused` concatenation and no FIFO existed at all. Both halves of
+F1's ruled channel (`PHASE1_CLOSEOUT_PART3`) were unbuilt, and the consequence
+was not cosmetic: **a host could not deliver a payload byte without driving the
+very pins a live protocol was using.** That is why no program could address the
+SPI FRAM, and therefore why no I²C ACK — and no peer-driven clock stretch — was
+reachable. Fixed; this document now describes the ruling rather than the
+deviation.
+
+⚠ PART4 superseded the **RX** half of that table (three spare `uo_out` pins
+cannot carry a nibble plus a valid, so RX went bit-serial — the serial host view
+above), and PART5 framed status **into** the stream, which retires the
+`ui_in[5]` pop and the `ui_in[0]` view select. Neither supersedes the TX nibble
+or "zero `uio` spent".

@@ -104,6 +104,12 @@ module pe_engine #(
     // host data channel (F1): payload enters here, never through the program
     input  wire [7:0]           host_data,
     input  wire                 host_valid,
+    // ⭐ host_pop: the engine tells the host channel it CONSUMED a byte.
+    // ⛔⛔ F1 ruled ONE FIFO that "the engine routes as the program consumes"
+    // and no FIFO was ever built: the byte had to be present in the exact cycle
+    // a lane needed it or that lane recorded an underrun, which no real host can
+    // meet. Popping on consumption is what lets a byte be staged ahead.
+    output reg                  host_pop,
     output reg  [N_LANES-1:0]   lane_underrun,
     output reg  [N_LANES-1:0]   lane_overflow,
     output reg                  sticky_ovr,
@@ -766,6 +772,7 @@ module pe_engine #(
       rx_data  <= 8'h00;
       rx_push  <= 1'b0;
       sticky_ovr    <= 1'b0;
+      host_pop      <= 1'b0;
       lane_underrun <= {N_LANES{1'b0}};
       lane_overflow <= {N_LANES{1'b0}};
       for (i = 0; i < N_LANES; i = i + 1) begin
@@ -841,6 +848,7 @@ module pe_engine #(
       for (i = 0; i < NSLOT; i = i + 1) l_actv[i] <= 1'b0;
     end else begin
       rx_push <= 1'b0;
+        host_pop <= 1'b0;   // one-cycle pulse; the consume site re-asserts
 
       // ---------------- header load ----------------------------------
       case (hst)
@@ -1227,8 +1235,12 @@ module pe_engine #(
           // ⛔ underrun is a STICKY FLAG, NEVER A STALL: a stall would make C
           //    unbounded, which is the clock-stretch conclusion a third time.
           if (a_op == OP_SHIFT && l_bitp[cur] == a_cnt) begin
-            if (host_valid) l_data[cur] <= host_data;
-            else            lane_underrun[cur] <= 1'b1;
+            if (host_valid) begin
+              l_data[cur] <= host_data;
+              host_pop    <= 1'b1;        // consumed: advance the host FIFO
+            end else begin
+              lane_underrun[cur] <= 1'b1;
+            end
             l_bitp[cur] <= {BPW{1'b0}};
           end
 

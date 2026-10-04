@@ -27,34 +27,34 @@ project:
 # This section is for the datasheet/website. Use descriptive names (e.g., RX, TX, MOSI, SCL, SEG_A, etc.).
 pinout:
   # Inputs
-  ui[0]: "unused"
-  ui[1]: "unused"
-  ui[2]: "unused"
-  ui[3]: "unused"
-  ui[4]: "unused"
+  ui[0]: "unused (F1 view-select, retired when status moved into the stream)"
+  ui[1]: "TX payload nibble bit 0 (run mode) - 2 pushes per byte, HIGH nibble first"
+  ui[2]: "TX payload nibble bit 1"
+  ui[3]: "TX payload nibble bit 2"
+  ui[4]: "TX payload nibble bit 3"
   ui[5]: "PTR_RST - reset the program write pointer (load mode)"
-  ui[6]: "WR - rising edge writes uio[7:0] at the pointer, then auto-increments"
+  ui[6]: "load: WR - rising edge writes uio[7:0] at the pointer, then auto-increments | run: TX payload PUSH"
   ui[7]: "PROG_MODE - 1 = load a program, 0 = run"
 
   # Outputs
-  uo[0]: "pointer echo bit 0 (load mode) / program readback bit 0 (run mode)"
-  uo[1]: "pointer echo bit 1 / program readback bit 1"
-  uo[2]: "pointer echo bit 2 / program readback bit 2"
-  uo[3]: "pointer echo bit 3 / program readback bit 3"
-  uo[4]: "pointer echo bit 4 / program readback bit 4"
-  uo[5]: "pointer echo bit 5 / program readback bit 5"
-  uo[6]: "program readback bit 6 (run mode)"
-  uo[7]: "program readback bit 7 (run mode)"
+  uo[0]: "UART-tx TX, push-pull"
+  uo[1]: "SPI-master SCLK, push-pull"
+  uo[2]: "SPI-master MOSI, push-pull"
+  uo[3]: "SPI-master CS, push-pull"
+  uo[4]: "serial host view: DATA"
+  uo[5]: "serial host view: STROBE"
+  uo[6]: "serial host view: VALID"
+  uo[7]: "spare (reads 0)"
 
   # Bidirectional pins
-  uio[0]: "load data bit 0 (load mode) / I2C SCL, open-drain (run mode)"
-  uio[1]: "load data bit 1 (load mode) / I2C SDA, open-drain (run mode)"
-  uio[2]: "load data bit 2 (load mode) / reserved for protocol pins"
-  uio[3]: "load data bit 3 (load mode) / reserved for protocol pins"
-  uio[4]: "load data bit 4 (load mode) / reserved for protocol pins"
-  uio[5]: "load data bit 5 (load mode) / reserved for protocol pins"
-  uio[6]: "load data bit 6 (load mode) / reserved for protocol pins"
-  uio[7]: "load data bit 7 (load mode) / reserved for protocol pins"
+  uio[0]: "load data bit 0 (load mode) / SPI-master MISO, input"
+  uio[1]: "load data bit 1 (load mode) / I2C SCL, open-drain"
+  uio[2]: "load data bit 2 (load mode) / I2C SDA, open-drain"
+  uio[3]: "load data bit 3 (load mode) / UART-rx RX, input"
+  uio[4]: "load data bit 4 (load mode) / SPI-target SCLK, input"
+  uio[5]: "load data bit 5 (load mode) / SPI-target MOSI, input"
+  uio[6]: "load data bit 6 (load mode) / SPI-target CS, input"
+  uio[7]: "load data bit 7 (load mode) / SPI-target MISO, tri-state (async release on CS)"
 
 # Do not change!
 yaml_version: 6

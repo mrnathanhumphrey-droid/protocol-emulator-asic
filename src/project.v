@@ -256,7 +256,89 @@ module tt_um_protocol_emulator #(
   wire [N_PINS-1:0]  e_pin_out, e_pin_oe;
   wire [N_LANES-1:0] e_under, e_ovf;
   wire               e_ovr, e_busy, e_rx_push;
+  wire               e_host_pop;
   wire [7:0]         e_rx_data;
+
+  // =====================================================================
+  // THE HOST TX DATA CHANNEL -- F1's nibble channel, AS RULED
+  // =====================================================================
+  // ⛔⛔⛔ THIS WAS THE FOURTH DAY-ONE COMMITMENT FOUND UNBUILT, after edge
+  // capture, the no-op half-bit and ruling 1.5 -- and unlike those it was the
+  // direct CAUSE of a blocked work item. PHASE1_CLOSEOUT_PART3 ruled:
+  //     ui_in[6]   prog: WR strobe / run: TX payload PUSH
+  //     ui_in[4:1] TX payload nibble (2 pushes per byte)
+  //     uio[7:0]   protocol pins ONLY -- zero spent on the data channel
+  // What was built instead took `host_data` from `uio_q1` -- EIGHT BITS OF THE
+  // PROTOCOL BUS -- and pushed on `ui_in[0]`, while `ui_in[4:1]` sat in the
+  // `_unused` concatenation. So a host could not deliver a payload byte without
+  // driving the very pins a live protocol was using, which is exactly why
+  // `corpus_spim` could not address the SPI FRAM and why no I2C ACK (and
+  // therefore no peer-driven clock stretch) was reachable.
+  // ⚠ PART4 superseded the RX HALF of that table -- 3 spare `uo_out` pins
+  // cannot carry a nibble plus a valid, so RX went bit-serial -- and PART5 framed
+  // status INTO the stream, which retires the `ui_in[5]` pop and the `ui_in[0]`
+  // view select. Neither supersedes the TX nibble or "zero uio spent".
+  //
+  // ⭐ AND ONE FIFO, which was also unbuilt. The engine's consume site read
+  // `if (host_valid) l_data[cur] <= host_data; else underrun`, so the byte had to
+  // be present in the EXACT cycle a lane wanted it. No real host can meet that;
+  // it would simply log underruns. Two entries is enough to stage a byte ahead
+  // of the lane that consumes it, and the engine pops what it takes.
+  // ⛔ ONE FIFO, NOT ONE PER LANE, per the ruling: "the shift action names its
+  // lane, so the host pushes bytes into one FIFO and the engine routes them as
+  // the program consumes them" -- the same trick that deleted the address bus.
+  localparam integer TXD = 2;                 // FIFO depth, bytes
+
+  wire push_rise = run & wr_rise;             // `ui_in[6]` is WR in load mode
+  reg  [7:0] tx_fifo [0:TXD-1];
+  reg  [7:0] tx_asm;                          // the half-assembled byte
+  reg        tx_half;                         // 0 = expect HIGH nibble
+  reg  [1:0] tx_cnt;
+  reg        tx_wp, tx_rp;
+  reg        tx_full_sticky;
+
+  wire       tx_valid = (tx_cnt != 2'd0);
+  wire [7:0] tx_head  = tx_fifo[tx_rp];
+
+  // ⭐ ONE ASSIGNMENT PER REGISTER, AND THE SIMULTANEOUS CASE IS EXPLICIT. The
+  // first version updated `tx_cnt` from three overlapping `if`s and relied on
+  // last-write-wins to net out a same-cycle push and pop. That is the kind of
+  // ordering argument this project has repeatedly had to retract, so the four
+  // combinations are enumerated instead.
+  wire nib_lo  = push_rise & tx_half;         // the push that completes a byte
+  wire do_pop  = e_host_pop & (tx_cnt != 2'd0);
+  wire do_push = nib_lo & ((tx_cnt != TXD[1:0]) | do_pop);
+
+  always @(posedge clk or negedge rst_n) begin
+    if (!rst_n) begin
+      tx_asm <= 8'h00; tx_half <= 1'b0; tx_cnt <= 2'd0;
+      tx_wp  <= 1'b0;  tx_rp   <= 1'b0; tx_full_sticky <= 1'b0;
+    end else begin
+      // ⭐ HIGH NIBBLE FIRST, ruled here so a host and a bench cannot disagree
+      // about it: it matches the MSB-first bit order the SPI and I²C lanes use,
+      // so a byte reads the same way on the wire as it was pushed.
+      if (push_rise) tx_half <= ~tx_half;
+      if (push_rise && !tx_half) tx_asm[7:4] <= ui_in[4:1];
+
+      if (do_push) begin
+        tx_fifo[tx_wp] <= {tx_asm[7:4], ui_in[4:1]};
+        tx_wp          <= ~tx_wp;
+      end
+      if (do_pop) tx_rp <= ~tx_rp;
+
+      case ({do_push, do_pop})
+        2'b10:   tx_cnt <= tx_cnt + 2'd1;
+        2'b01:   tx_cnt <= tx_cnt - 2'd1;
+        default: ;                            // 00, or one in and one out
+      endcase
+
+      // ⛔ A PUSH ON FULL IS REPORTED, NEVER A STALL. The host has no
+      // back-pressure pin, so the only honest answer is a sticky flag in the
+      // status frame -- the same reasoning as RX overflow: a host that has
+      // stopped reading cannot be told by a pin it is not reading.
+      if (nib_lo && !do_push) tx_full_sticky <= 1'b1;
+    end
+  end
 
   pe_engine #(
       .N_LANES(N_LANES), .AW(AW), .N_PINS(N_PINS),
@@ -267,7 +349,7 @@ module tt_um_protocol_emulator #(
       .s_wraddr(e_wraddr), .s_wre(e_wre), .s_wrdata(s_wrdata),
       .pin_out(e_pin_out), .pin_oe(e_pin_oe), .pin_in(pin_in),
       .pin_rise(pin_rise), .pin_fall(pin_fall),
-      .host_data(uio_q1), .host_valid(run & ui_in[0]),
+      .host_data(tx_head), .host_valid(tx_valid), .host_pop(e_host_pop),
       .lane_underrun(e_under), .lane_overflow(e_ovf), .sticky_ovr(e_ovr),
       .rx_data(e_rx_data), .rx_push(e_rx_push), .busy(e_busy)
   );
@@ -302,7 +384,8 @@ module tt_um_protocol_emulator #(
       rb_prime <= 2'd0;
     end else begin
       // the sticky status, assembled once so both modes frame the same byte
-      status_byte <= {4'b0000, e_ovr, |e_ovf, |e_under, 1'b1};
+      // ⭐ bit 4 = TX-FULL, which F1's status list named and nothing carried.
+      status_byte <= {3'b000, tx_full_sticky, e_ovr, |e_ovf, |e_under, 1'b1};
       rb_re <= 1'b0;
 
       if (ser_cnt != 4'd0) begin
@@ -434,6 +517,8 @@ module tt_um_protocol_emulator #(
   assign uo_out = uo_q;
 
   // ---- unused -----------------------------------------------------------
-  wire _unused = &{ui_in[4:1], ena, e_busy, 1'b0};
+  // ⭐ `ui_in[4:1]` IS NO LONGER UNUSED -- it is the TX payload nibble, which
+  // is the whole point of the fix above. `uio_q2` is the edge-detect tail.
+  wire _unused = &{ena, e_busy, uio_q2, 1'b0};
 
 endmodule
