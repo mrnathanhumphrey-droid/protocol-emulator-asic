@@ -78,7 +78,21 @@ module pe_engine #(
     parameter integer N_UIO    = 8,
     parameter integer TS_W    = 16,
     parameter integer DLY_W   = 10,
-    parameter integer D_W     = 8
+    parameter integer D_W     = 8,
+    // ⭐⭐ SLOTS PER LANE -- the action buffer depth, 2 = double, 1 = single.
+    // ⛔ WHY IT IS A PARAMETER AND NOT A MUTANT `ifdef`. The single-buffer
+    // configuration is a DESIGN ALTERNATIVE that has to be measured against
+    // the shipped one, not a defect to be killed. It was previously neither:
+    // `NSLOT = 2 * N_LANES` was fixed in this file, so the stored
+    // single-buffer sweep (`SWEEP_SINGLE`) described a configuration with no
+    // build option at all -- a recorded measurement that could not be
+    // reproduced even in principle, while the double buffer's advertised
+    // "11 -> 7" benefit was computed from it. A parameter puts both
+    // configurations in the parametric contract where either can be built and
+    // measured. An `ifdef` would have left the alternative un-buildable by
+    // anything except a mutation run, which is the wrong frame for a
+    // 169-flop decision.
+    parameter integer SPL     = 2
 ) (
     input  wire                 clk,
     input  wire                 rst_n,
@@ -384,19 +398,77 @@ module pe_engine #(
   reg             l_notmo  [0:N_LANES-1];   // "no timeout": wait indefinitely
   reg             l_timeout[0:N_LANES-1];   // STICKY: the peer went silent
 
-  localparam integer NSLOT = 2 * N_LANES;
+  localparam integer NSLOT = SPL * N_LANES;
+  // index width for a slot number 0..NSLOT-1
+  localparam integer SIW   = (NSLOT <= 2)  ? 1 : (NSLOT <= 4)  ? 2 :
+                             (NSLOT <= 8)  ? 3 : (NSLOT <= 16) ? 4 :
+                             (NSLOT <= 32) ? 5 : 6;
   reg [ACT_W-1:0] l_act    [0:NSLOT-1];
   reg             l_actv   [0:NSLOT-1];
   reg             l_sel    [0:N_LANES-1];   // 0/1: which slot is the HEAD
   reg [AW-1:0]    l_fpc    [0:N_LANES-1];   // the FETCH pointer, ahead of l_pc
+
+  // ⭐⭐ ONE EXPRESSION FOR "WHICH SLOT", IN ONE PLACE. The index
+  // `ln*2 + (l_sel[ln] ? 1 : 0)` was written out at TEN separate sites, which
+  // is the shape of defect this project keeps paying for: `tb_smoke`'s private
+  // action-word slice, `run_local.py`'s third source list, three gates each
+  // building their own pyRTA task set. Ten copies of an index cannot be made
+  // depth-independent one at a time.
+  // ⛔ AND THE WIDTH IS WHY IT MATTERS HERE SPECIFICALLY: with N_LANES = 5 and
+  // SPL = 2 the slot index runs 0..9 and needs FOUR bits, so a 3-bit copy of
+  // this expression silently aliases lane 4's slots onto lane 0's. That is
+  // exactly the bug the per-lane instrument hit when it declared `l_head` as
+  // [2:0].
+  // ⛔⛔ WIRES, NOT A FUNCTION, AND YOSYS DECIDED THAT. A `slot_ix(ln, sel)`
+  // function was the obvious form and iverilog plus the smoke bench accepted
+  // it -- but `fetch_addr` and `want_fetch` are themselves functions, and the
+  // Verilog-2005 frontend rejects A FUNCTION CALL INSIDE A FUNCTION BODY:
+  // "Non-constant function call in constant expression". Two rounds of that
+  // error, one per calling function.
+  // ⇒ The index becomes a combinational wire per lane, computed in ONE place.
+  //   `hix[ln]` the HEAD slot, `six[ln]` the SPARE (SPL > 1 only), `fix` the
+  //   slot a refill in flight is filling.
+  // ⭐ This is strictly better than the function was: there is now exactly one
+  //   arithmetic site instead of one function with three call forms, and the
+  //   `*2` literal that was written out at TEN sites is gone from all of them.
+  //   With N_LANES = 5 and SPL = 2 the index runs 0..9 and needs FOUR bits, so
+  //   a 3-bit copy aliases lane 4's slots onto lane 0's -- which is exactly
+  //   the bug the per-lane instrument hit with `l_head` declared [2:0].
+  genvar gs;
+  wire [SIW-1:0] hix [0:N_LANES-1];
+  wire [SIW-1:0] six [0:N_LANES-1];
+  generate
+    for (gs = 0; gs < N_LANES; gs = gs + 1) begin : g_slot
+      assign hix[gs] = gs * SPL + (((SPL > 1) &&  l_sel[gs]) ? 1 : 0);
+      assign six[gs] = gs * SPL + (((SPL > 1) && !l_sel[gs]) ? 1 : 0);
+    end
+  endgenerate
 
   // =====================================================================
   // GLOBAL STATE -- one incrementer, not N_LANES decrementers (Ruling 2)
   // =====================================================================
   reg [TS_W-1:0] now;
 
-  // ⭐ J IS MEASURED, NOT ASSERTED. `jitter_max` is the largest dispatch delay
-  // caused purely by a prefetch miss, in cycles. A2 ships J = 1.
+  // ⭐ J IS MEASURED, NOT ASSERTED. A2 ships J = 1.
+  //
+  // ⛔⛔ WHAT `jitter_max` IS: THE LONGEST **ANY-WINNER-BLOCKED RUN LENGTH**,
+  // engine-wide, in cycles. It is NOT a per-lane jitter term, and it must not
+  // be quoted as one.
+  //   `jitter_cnt` is a SINGLE counter shared by all lanes. It increments
+  //   whenever the CURRENT winner is blocked on its head slot, and clears only
+  //   when no lane is winner or at writeback -- so if the winner CHANGES
+  //   mid-stall, the count carries straight on across two different lanes'
+  //   waits and reports their sum as one run. The witness ring
+  //   (`test/tb_witness.v`) shows exactly that happening.
+  // ⇒ It is an upper bound on any single lane's prefetch-miss wait, which is
+  //   the safe direction, but it is a LOOSE one, and the earlier description
+  //   ("the largest dispatch delay caused purely by a prefetch miss") read as
+  //   though it were per-lane. The per-lane quantity is measured separately by
+  //   `test/tb_jlane.v` against the pre-registration in
+  //   `docs/PREREG_J_LANE.md`.
+  // ⚠ It is also a WHOLE-RUN max, so one startup transient pins it forever --
+  //   see `tb_smoke`, which splits cold start from steady state for that
+  //   reason.
   localparam integer JW = 8;
   reg [JW-1:0] jitter_cnt, jitter_max;
 
@@ -594,6 +666,11 @@ module pe_engine #(
   reg                   pslot;        // which slot this refill is filling
   reg [AW-1:0]          paddr;        // and from which address -- both latched
                                       // at the scan, see the arbiter comment
+  // ⭐ The slot the in-flight refill targets. Same one arithmetic form as
+  // `hix`/`six`, but keyed on the LATCHED `pl`/`pslot` rather than on a lane's
+  // current select -- a refill must land in the slot that was chosen when it
+  // was issued, not in whatever is the head by the time it completes.
+  wire [SIW-1:0]        fix = pl * SPL + (((SPL > 1) && pslot) ? 1 : 0);
 
   integer i;
 
@@ -623,8 +700,8 @@ module pe_engine #(
     reg [ACT_W-1:0] hact;
     reg             hvalid;
     begin
-      hvalid = l_actv[ln*2 + (l_sel[ln] ? 1 : 0)];
-      hact   = l_act [ln*2 + (l_sel[ln] ? 1 : 0)];
+      hvalid = l_actv[hix[ln]];
+      hact   = l_act [hix[ln]];
       if (!hvalid)
         fetch_addr = l_pc[ln];                       // filling the head itself
       else if (hact[ACT_W-1 -: 3] == OP_REARM && hact[ACT_W-4-PINW])
@@ -652,11 +729,19 @@ module pe_engine #(
     reg [ACT_W-1:0] hact;
     reg             hvalid, fvalid;
     begin
-      hvalid = l_actv[ln*2 + (l_sel[ln] ? 1 : 0)];
-      fvalid = l_actv[ln*2 + (l_sel[ln] ? 0 : 1)];
-      hact   = l_act [ln*2 + (l_sel[ln] ? 1 : 0)];
+      hvalid = l_actv[hix[ln]];
+      fvalid = l_actv[six[ln]];
+      hact   = l_act [hix[ln]];
       if (!hvalid)
         want_fetch = 1'b1;                           // head is empty: urgent
+      // ⭐⭐ SINGLE BUFFER: THERE IS NO SPARE TO FILL, so a valid head means
+      // nothing to fetch. ⛔ This branch must come BEFORE the spare logic:
+      // with SPL = 1 the spare index aliases the head, so `!fvalid` would read
+      // HEAD's own valid bit, answer "already full", and happen to be right --
+      // by coincidence, through an index that means something else. A
+      // coincidence in an index is how lane 4's slots aliased onto lane 0's.
+      else if (SPL == 1)
+        want_fetch = 1'b0;
       else if (hact[ACT_W-1 -: 3] == OP_REARM && !hact[ACT_W-4-PINW])
         want_fetch = 1'b0;                           // chaining: successor is
                                                      // the head; spare unused
@@ -982,14 +1067,14 @@ module pe_engine #(
             // EMPTY HEAD on the EDF winner is the only case that can still
             // stall a dispatch, so it is served first; filling a SPARE is
             // speculative work that can wait. `want_fetch` folds both.
-            if (winner_v && !l_actv[winner*2 + (l_sel[winner] ? 1 : 0)]) begin
+            if (winner_v && !l_actv[hix[winner]]) begin
               pl    <= winner;
               pslot <= l_sel[winner];        // the head: it is what stalls
               paddr <= l_pc[winner];
               pst   <= P_REQ;
             end else if (l_live[pl] && want_fetch(pl)) begin
               // fill the head if empty, otherwise the spare
-              pslot <= l_actv[pl*2 + (l_sel[pl] ? 1 : 0)] ? (!l_sel[pl])
+              pslot <= l_actv[hix[pl]] ? (!l_sel[pl])
                                                           : l_sel[pl];
               paddr <= fetch_addr(pl);
               pst   <= P_REQ;
@@ -1015,8 +1100,8 @@ module pe_engine #(
           P_WAIT: pst <= P_CAP;          // store read registered
           P_CAP:  begin
             // MSB-aligned: byte0 = {opcode, pin, level}, 2 spare at the bottom
-            l_act [pl*2 + (pslot ? 1 : 0)] <= s_wrdata[ACT_BYTES*8-1 -: ACT_W];
-            l_actv[pl*2 + (pslot ? 1 : 0)] <= 1'b1;
+            l_act [fix] <= s_wrdata[ACT_BYTES*8-1 -: ACT_W];
+            l_actv[fix] <= 1'b1;
             // ⭐ THE SUCCESSOR POINTER ADVANCES FROM THE ADDRESS JUST FETCHED,
             // which is what makes the loop case need no special handling here:
             // after a `l_base` fetch, `l_fpc` becomes `l_base + ACT_BYTES`,
@@ -1073,9 +1158,9 @@ module pe_engine #(
                    // ⭐ dispatch reads the HEAD slot. With the spare already
                    // filled, the usual case after a writeback is that the head
                    // is valid IMMEDIATELY -- which is the whole J reduction.
-                   if (l_actv[winner*2 + (l_sel[winner] ? 1 : 0)]) begin
+                   if (l_actv[hix[winner]]) begin
                      cur     <= winner;
-                     cur_act <= l_act[winner*2 + (l_sel[winner] ? 1 : 0)];
+                     cur_act <= l_act[hix[winner]];
                      st      <= ST_DRIVE;
                    end else begin
                      // ⭐⭐ THIS STALL IS THE JITTER TERM J. The EDF winner is
@@ -1084,6 +1169,10 @@ module pe_engine #(
                      // ⛔ A2 budgets J = 1. If this can exceed 1, the shipped
                      // r_i do not hold -- so it is COUNTED, not assumed, and
                      // the maximum is observable for the bench to assert on.
+                     // ⚠ ONE COUNTER FOR ALL LANES: `winner` may change while
+                     // this is counting, so the run it measures can span two
+                     // lanes' waits. That is why it is an AGGREGATE and why
+                     // `tb_jlane.v` exists.
                      jitter_cnt <= jitter_cnt + 1'b1;
                      if (jitter_cnt >= jitter_max) jitter_max <= jitter_cnt + 1'b1;
                    end
@@ -1261,18 +1350,29 @@ module pe_engine #(
           if (a_op != OP_REARM) begin
             l_pc[cur]   <= l_pc[cur] + ACT_BYTES[AW-1:0];
 `ifndef M_BUF_NOINVAL
-            l_actv[cur*2 + (l_sel[cur] ? 1 : 0)] <= 1'b0;   // ⛔ INVALIDATION
+            l_actv[hix[cur]] <= 1'b0;   // ⛔ INVALIDATION
 `endif
+          // ⭐ THE SWAP IS GUARDED ON DEPTH. With SPL = 1 `l_sel` must stay
+          // 0: `hix` ignores it at that depth, so a toggling select would be
+          // harmless BY ACCIDENT, and a bit that changes while nothing reads
+          // it is how a later reader inherits a value nobody maintained.
+          // ⛔ THIS COMMENT SITS OUTSIDE THE `ifndef`, AND THE DRIFT GUARD IS
+          // WHY. It was written inside the arm and `gate_mutant_arms.py` went
+          // red: "5 COMMENT line(s) inside an arm ... DRIFT: 7 diff lines,
+          // expected 2". A mutant arm wraps the MINIMAL DELTA and nothing
+          // else -- the same rule that caught the 1.6s config guard landing
+          // in an `M_NO_PRIME` arm, where a fix that is inside a mutant arm
+          // is not in the design.
 `ifndef M_BUF_SWAP
-            l_sel[cur]  <= !l_sel[cur];                     // ⭐ THE SWAP
+            if (SPL > 1) l_sel[cur] <= !l_sel[cur];
 `endif
           end else if (a_lvl) begin
             l_pc[cur]   <= l_base[cur];         // loop back to the start
 `ifndef M_BUF_NOINVAL
-            l_actv[cur*2 + (l_sel[cur] ? 1 : 0)] <= 1'b0;
+            l_actv[hix[cur]] <= 1'b0;
 `endif
 `ifndef M_BUF_SWAP
-            l_sel[cur]  <= !l_sel[cur];
+            if (SPL > 1) l_sel[cur] <= !l_sel[cur];
 `endif
           end
           // ⛔ M_BUF_CHAINFLIP swaps the slot on a CHAINING re-arm, where the

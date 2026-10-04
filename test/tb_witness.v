@@ -35,6 +35,20 @@ module tb_witness;
   reg  [7:0] img [0:IMG_MAX-1];
   integer    img_bytes, i, cyc, ncyc, warmup, warm_from, best, best_at;
   integer    stall, head, n;
+  // ⛔⛔ THE DUMP TASK GETS ITS OWN LOOP INDEX, and it did not. `dump` shared
+  // `i` with the main run loop below, so every dump reset `i` to RING and THIS
+  // BENCH RAN LONGER THAN `NCYC` -- by whatever multiple the number of dumps
+  // happened to produce. ⚠ WHAT THAT DOES AND DOES NOT INVALIDATE: `cyc`
+  // counts iterations actually executed, so the printed cycle numbers and the
+  // chains themselves are real observations, and the run was LONGER than
+  // requested rather than shorter -- the safe direction for a worst-case
+  // search. What was wrong is the RUN LENGTH CONTROL: a bench whose duration
+  // depends on how often it printed is not reproducible, and the "window"
+  // figure it reported was not the window that was asked for.
+  // ⭐ Found in `tb_jlane.v`, which was written from this file's structure and
+  // inherited the defect; it showed up there only because that bench prints
+  // its window as a precondition with a known ceiling.
+  integer    di, dn;
   reg [8*64-1:0] imgfile;
 
   // the ring: what the fetch port was doing, cycle by cycle
@@ -70,11 +84,12 @@ module tb_witness;
       $display("    port was serving, `pst` its state (0=SCAN 1=REQ 2=WAIT 3=CAP):");
       $display("      %-8s %-5s %-5s %-7s %-6s %s",
                "cycle", "pst", "pl", "winner", "head?", "stall");
-      for (i = 0; i < RING; i = i + 1) begin
-        n = (head + i) % RING;
-        if (r_cyc[n] > 0)
+      for (di = 0; di < RING; di = di + 1) begin
+        dn = (head + di) % RING;
+        if (r_cyc[dn] > 0)
           $display("      %-8d %-5d %-5d %-7d %-6d %0d",
-                   r_cyc[n], r_pst[n], r_pl[n], r_win[n], r_act[n], r_st[n]);
+                   r_cyc[dn], r_pst[dn], r_pl[dn], r_win[dn], r_act[dn],
+                   r_st[dn]);
       end
     end
   endtask

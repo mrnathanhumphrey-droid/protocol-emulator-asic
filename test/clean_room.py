@@ -37,6 +37,7 @@ except Exception:
     pass
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)          # so `toolchain` imports from any cwd
 ROOT = os.path.dirname(HERE)
 QUAR = os.environ.get(
     "PE_QUARANTINE",
@@ -117,6 +118,82 @@ def suite():
     return out
 
 
+def explain_toolchain(tc_stored, tc_live, tc_diff):
+    """⭐⭐ WHICH CAUSE A HASH MISMATCH HAS, printed where the decision is made.
+
+    A mismatch with no toolchain reading leaves "it must be the tools"
+    available as an unfalsifiable excuse for re-pinning a hash -- which is how
+    a real recipe change gets laundered. So the comparison goes in front of
+    whoever is about to edit the manifest.
+
+    ⚠ It names a CANDIDATE, never a verdict: a differing tool is a hypothesis
+    to be confirmed by rebuilding on the stored version, not a licence.
+    """
+    import toolchain as _tc
+    print()
+    print("        --- toolchain: stored (manifest) vs live ---")
+    if not tc_stored:
+        print("        NO TOOLCHAIN HEADER in the manifest, so it cannot vouch")
+        print("        for what built these hashes. Re-run")
+        print("        `make_smoke_image.py --all` to record one; until then a")
+        print("        recipe change and a tool change are indistinguishable.")
+    elif not tc_diff:
+        for name, _c in _tc.PROBES:
+            print("        %-10s %s" % (name, tc_live.get(name, _tc.MISSING)))
+        print("        IDENTICAL on every tool -- the toolchain does NOT")
+        print("        explain this mismatch. Treat it as a RECIPE CHANGE")
+        print("        until shown otherwise.")
+    else:
+        for name, s, l in tc_diff:
+            print("        %-10s stored %s" % (name, s))
+            print("        %-10s live   %s" % ("", l))
+        print("        A tool reads differently: a CANDIDATE explanation, not")
+        print("        a verdict. Confirm by rebuilding on the stored version")
+        print("        before re-pinning any hash.")
+
+
+def selftest() -> int:
+    """⛔ PRICE THE EXPLANATION (standing rule 3), without touching the real
+    manifest -- mutating `artefacts.sha256` to test the gate that reads it is
+    the one experiment that could leave the reference wrong.
+    """
+    import io
+    import contextlib
+    rc = 0
+    full = {"python": "1", "iverilog": "2", "verilator": "3", "yosys": "4"}
+    cases = (
+        ("no header",      {},   full, "NO TOOLCHAIN HEADER"),
+        ("identical",      full, full, "RECIPE CHANGE"),
+        ("one tool moved", full, dict(full, yosys="9"), "CANDIDATE"),
+    )
+    print("  --- must-fire: the mismatch explanation says which cause ---")
+    for name, stored, live, needle in cases:
+        import toolchain as _tc
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            explain_toolchain(stored, live, _tc.compare(stored, live))
+        got = needle in buf.getvalue()
+        print("    %-16s -> says %-20s %s"
+              % (name, needle, "yes" if got else "*** NO"))
+        if not got:
+            rc = 1
+    # and the three cases must not all print the same thing
+    outs = []
+    for _n, stored, live, _needle in cases:
+        import toolchain as _tc
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            explain_toolchain(stored, live, _tc.compare(stored, live))
+        outs.append(buf.getvalue())
+    if len(set(outs)) != 3:
+        print("    *** the three causes do not print distinctly, so the")
+        print("        explanation cannot be separating them")
+        rc = 1
+    else:
+        print("    the three causes print distinctly")
+    return rc
+
+
 def main() -> int:
     rc = 0
     print()
@@ -173,6 +250,12 @@ def main() -> int:
         print("      `python test/make_smoke_image.py --all` to write it.")
         return 1
 
+    # ---- the toolchain the manifest was written with -----------------------
+    import toolchain
+    tc_stored = toolchain.parse(mpath)
+    tc_live = toolchain.probe()
+    tc_diff = toolchain.compare(tc_stored, tc_live)
+
     back, absent, differ, unpinned = [], [], [], []
     for f in files:
         base = os.path.basename(f)
@@ -206,9 +289,25 @@ def main() -> int:
         print("        Either a recipe changed without updating the manifest in")
         print("        the same commit, or this artefact is not reproducible on")
         print("        this machine. Both are findings.")
+        # ⭐⭐ WHICH OF THE TWO IT IS, PRINTED HERE. A mismatch with no
+        # toolchain reading leaves "it must be the tools" available as an
+        # unfalsifiable excuse for re-pinning a hash, so the comparison is put
+        # in front of whoever is about to edit the manifest.
+        explain_toolchain(tc_stored, tc_live, tc_diff)
         rc = 1
     if not absent and not differ and not unpinned:
         print("    every file reproduced and matches its pinned hash")
+        print("    toolchain: %s"
+              % ("as recorded in the manifest" if (tc_stored and not tc_diff)
+                 else "NOT confirmed -- " + ("no header recorded" if not
+                      tc_stored else "%d tool(s) differ from the header"
+                      % len(tc_diff))))
+        # ⚠ A MATCHING HASH UNDER A DIFFERENT TOOLCHAIN IS NOT A FAILURE: it is
+        # the stronger result (the artefact is reproducible across tools), and
+        # failing on it would punish the good case. But it is still printed,
+        # because a header nobody checks drifts into decoration.
+        for name, s, l in tc_diff:
+            print("      note  %-10s header %s / here %s" % (name, s, l))
 
     print()
     print("  --- the suite, on freshly generated images ---")
@@ -253,4 +352,6 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    if "--selftest" in sys.argv:
+        raise SystemExit(selftest())
     raise SystemExit(main())

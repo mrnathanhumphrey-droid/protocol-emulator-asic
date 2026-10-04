@@ -6,6 +6,26 @@ fired**, twice over, in ways that matter more than the feature.
 
 ---
 
+> ## ⛔⛔ RETRACTION — the "11 → 7" benefit cannot be re-measured
+>
+> The single-buffer half of that comparison came from `SWEEP_SINGLE`, which
+> **described a configuration that cannot be built**: there is no parameter or
+> switch that produces a single-buffer engine, so the "11" has no recipe and
+> the arm cannot be re-run. A stored number whose generator does not exist is
+> not a measurement, and the fact that it sat in a passing gate is exactly the
+> failure the stored-number audit (T4) exists to find.
+>
+> Both figures are additionally **aggregate** readings — the longest
+> any-winner-blocked run, engine-wide — and the per-lane instrument reads **7**
+> per lane on the same `d = 12` program where the aggregate reads 11. So even
+> the "11" does not mean "one lane waited 11 cycles".
+>
+> ⇒ The benefit claim is withdrawn, not restated with different numbers. T3
+> replaces it: `NSLOT` becomes a real **parameter** (not a mutant `ifdef`), and
+> `D*`, the aggregate stall and the per-lane wait are measured under both
+> configurations. ⚠ If double buffering lowers none of them, the
+> recommendation is **removal** — 169 flops — and that is Nathan's call.
+
 ## The headline, before the detail
 
 | claim | status |
@@ -13,7 +33,7 @@ fired**, twice over, in ways that matter more than the feature.
 | double buffer built, synthesises, behaviour bit-identical | ✅ 134/86 edges, C = 2.00, `check -assert` clean |
 | predicted `J_pipe = 2` | ⛔ **FALSIFIED — measured 7** |
 | predicted cost ~110 flops | ⛔ **measured 169** (+54 %) |
-| it reduces worst-case `J` | ✅ **11 → 7** |
+| it reduces worst-case `J` | ⛔ **RETRACTED — "11 → 7" is unverified** (see below) |
 | it helps the **shipped** lane set | ⛔ **no — both buffers give steady-state stall 0** |
 | the `J = 5` quoted since S3 | ⛔ **was a cold-start transient all along** |
 
@@ -114,6 +134,18 @@ property. It is each lane's **first** action after `hdr_done`, once per run:
 > as one would have made the double buffer look like it had done nothing.
 > The bench now reports cold and steady separately, and cross-checks its cold
 > figure against the engine's own counter.
+
+> ⛔⛔ **A second caveat on the same counter, recorded later: it is an
+> AGGREGATE.** `jitter_cnt` is one counter shared by all lanes and does not
+> clear when the winner changes, so the run it reports can span two lanes'
+> waits back to back. It is the longest **any-winner-blocked run length**,
+> engine-wide — an upper bound on any single lane's prefetch-miss wait (the
+> safe direction) but not that quantity. The per-lane measurement is
+> `test/tb_jlane.v`, against `docs/PREREG_J_LANE.md`. ⚠ So the "9 vs 5" cold
+> figures in the table above are aggregate readings too, and the
+> single-vs-double comparison they support is **re-measured per lane in T3**,
+> where the `NSLOT` parameter replaces the unbuildable `SWEEP_SINGLE`
+> configuration.
 
 > ⚠ **Whether the cold start belongs in the published `J` is Wilson's to rule.**
 > Spuri's RTA bounds **every** job including the first, so on the letter of the

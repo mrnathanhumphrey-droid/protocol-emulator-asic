@@ -65,6 +65,13 @@ C_DERIVATION = ("ST_DRIVE then ST_WB, both exited UNCONDITIONALLY and with no "
 # ⭐ `jitter_max` in the RTL counts ONLY the prefetch-miss stall. The
 # winner-registration cycle is structural and never appears in that counter, so
 # it is derived and added here rather than measured.
+# ⛔⛔ AND IT IS AN AGGREGATE, NOT A PER-LANE TERM. `jitter_cnt` is one counter
+# shared by every lane and does not clear when the winner changes, so the run
+# it reports can span two lanes' waits back to back -- it is the longest
+# "any-winner-blocked run length", engine-wide. It upper-bounds any single
+# lane's prefetch-miss wait (the safe direction for a bound) but it is not that
+# quantity. The per-lane measurement is `test/tb_jlane.v`, against the
+# pre-registration in `docs/PREREG_J_LANE.md`.
 J_SOURCES = [
     ("winner registration", 1, True,
      "`cur`/`cur_act` are registered on the ST_IDLE -> ST_DRIVE edge, so a lane "

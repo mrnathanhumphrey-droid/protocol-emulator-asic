@@ -113,6 +113,14 @@ D_MIN_SHIPPED = 25
 # ⭐ TWO INDEPENDENT READINGS AGREE at d = 12: the engine's own `jitter_max`
 # is 11 and the bench's independently reconstructed steady max is 11, with
 # 13,558 stall events and the last at cycle 84,814. Not a transient.
+# ⛔⛔ BUT BOTH READINGS ARE OF THE **AGGREGATE**, and agreeing with each other
+# does not make either one a per-lane J. `jitter_cnt` is one counter for all
+# lanes and does not clear when the winner changes, so 11 is the longest
+# any-winner-blocked run and may be several lanes' waits laid end to end. The
+# per-lane instrument (`test/tb_jlane.v`) measures the same program and reads
+# 7 per lane -- so the 11 does decompose, and quoting it as one lane's jitter
+# would have overstated it by 4 cycles in the unsafe direction for a claim and
+# the safe one for a bound. See `docs/PREREG_J_LANE.md`.
 #
 # ⚠⚠ AND IT TOOK FOUR BROKEN PROBES TO GET HERE, every one of which produced
 # a confident, plausible number. Recorded so the next reader does not repeat
@@ -155,6 +163,34 @@ SWEEP = {
 #   reproducible, or RETRACT the benefit claim. The double buffer costs ~169
 #   flops; keeping it on the strength of an unrepeatable measurement is the
 #   thing this project keeps finding and fixing.
+#
+# ⭐⭐ UPDATE -- IT IS NOW BUILDABLE, AND THE RECORD BELOW IS CONTRADICTED.
+# `SPL` (slots per lane) is a real parameter in `pe_engine.v`, so the
+# single-buffer engine elaborates: `iverilog -Ptb_smoke.SPL_CFG=1`. Recipe:
+# `python test/run_spl_compare.py`, which runs THIS sweep's recipe at both
+# depths after proving both correct with `tb_smoke`.
+#
+# ⛔⛔ THE LIVE MEASUREMENT DISAGREES WITH THE STORED VALUES, in the same
+# direction and for the same reason as `SWEEP` did:
+#
+#     d      stored single     live single
+#     8          8                 8          agrees
+#     12         4                11          +7
+#     16         0                 9          +9
+#     18         0                 8          +8
+#     20         0                 6          +6
+#     25         0                 1          +1
+#     30         -                 1
+#
+# The record said the single buffer reached 0 at d = 16; live measurement finds
+# it still stalling at d = 30. ⇒ THE STORED ARM IS WITHDRAWN, not re-fitted.
+#
+# ⭐ AND THE CONCLUSION IT WAS USED FOR WAS BACKWARDS. The retracted claim was
+# "169 flops buys 11 -> 7". The measured effect is larger and somewhere else:
+# in the SCOPED region (d >= D* = 20) the double buffer stalls 0 while the
+# single buffer stalls up to 6, so `d_min >= D* -> J = 1` -- the only published
+# timing claim -- HOLDS ONLY AT SPL = 2. The double buffer is not insurance for
+# programs we have not written; it is what makes the shipped claim true.
 SWEEP_SINGLE = {
     2: 5, 3: 5, 4: 5, 5: 5, 6: 5, 7: 8, 8: 8, 9: 8, 10: 8,
     11: 3, 12: 4, 13: 3, 14: 2, 15: 1, 16: 0, 18: 0, 20: 0, 25: 0,
@@ -304,20 +340,30 @@ def main() -> int:
     print("      keeps up) but NOT port-feasible; measured stalls 7..12.")
     print("      pe_asm REFUSES such programs rather than quoting a bound.")
 
-    # ---- what the double buffer buys, in the same units ----------------
+    # ---- the double buffer: the benefit claim is WITHDRAWN --------------
+    # ⛔⛔ THIS BLOCK USED TO COMPUTE AND PRINT THE BENEFIT from SWEEP and
+    # SWEEP_SINGLE: "169 flops for N cycles of universal worst-case J". It is
+    # removed rather than re-stated, for two independent reasons:
+    #   1. SWEEP_SINGLE describes a configuration THAT CANNOT BE BUILT. There
+    #      is no parameter or define that produces a single-buffer engine, so
+    #      the arm has no recipe and cannot be re-measured. A number whose
+    #      generator does not exist is not a measurement.
+    #   2. Both arms are AGGREGATE readings (the any-winner-blocked run
+    #      length), and the per-lane instrument reads 7 per lane on the same
+    #      d = 12 program where the aggregate reads 11. So the subtraction was
+    #      between two numbers that are not per-lane J either.
+    # ⚠ A RETRACTION IN THE DOCS WHILE THE GATE STILL PRINTS THE CLAIM is the
+    # two-copies defect: whoever runs the gate sees the withdrawn number. So
+    # the computation goes, and the stored dicts stay ONLY as a labelled
+    # record for comparison.
     print()
-    print("  --- the double buffer, priced on the same sweep ---")
-    worst_d = max(SWEEP[d] for d in adm_ds)
-    worst_s = max(SWEEP_SINGLE[d] for d in adm_ds)
-    print("    worst measured stall, admissible d:  double %d   single %d"
-          % (worst_d, worst_s))
-    print("    ⇒ J (measured floor):                double %d   single %d"
-          % (worst_d + J_WINNER_REG, worst_s + J_WINNER_REG))
-    print("    ⭐ 169 flops for %d cycles of universal worst-case J. At the"
-          % (worst_s - worst_d))
-    print("    SHIPPED program both are 0, so this is insurance for programs")
-    print("    we have not written -- which is exactly what a bound over")
-    print("    admissible programs is for.")
+    print("  --- the double buffer: benefit claim WITHDRAWN ---")
+    print("    the stored single-buffer arm (SWEEP_SINGLE) describes a")
+    print("    configuration with no build option, so it cannot be")
+    print("    re-measured, and no benefit is computed from it here.")
+    print("    T3 replaces it: NSLOT becomes a parameter and both")
+    print("    configurations are measured with the per-lane instrument.")
+    print("    (the stored dicts are retained as a labelled record only)")
 
     # ---- the admissibility hook ---------------------------------------
     print()
@@ -325,15 +371,38 @@ def main() -> int:
     print("    The loader computes the program's J from its own d_min, the way")
     print("    every other admissibility condition is a property the loader")
     print("    CHECKS rather than a promise the programmer makes.")
-    print("    %-10s %-8s %-8s %s" % ("d_min", "J", "adm?", "note"))
+    # ⛔⛔ THIS TABLE USED TO PRINT `j_of(d)` FOR EVERY ROW, INCLUDING THE
+    # SUB-D* ONES -- so it published J = 8 at d_min = 8 and J = 7 at d_min = 12
+    # two sections below a RETRACTION of exactly those numbers. A retraction
+    # that one section of the same gate contradicts is not a retraction.
+    # ⇒ The rows now answer what the loader ACTUALLY does, which is what
+    #   `pe_asm.compute_j` implements: port feasibility FIRST, and a program
+    #   below D* is REFUSED with the port arithmetic named rather than quoted
+    #   a bound. The three columns are the two independent screens and the
+    #   verdict, so the weaker test (U <= 1) can no longer be mistaken for the
+    #   binding one.
+    print("    %-8s %-9s %-14s %s"
+          % ("d_min", "adm (U<=1)", "port (d>=D*)", "loader verdict"))
     for d in (4, 8, 10, 12, 18, 25, 434):
-        print("    %-10d %-8d %-8s %s"
-              % (d, j_of(d), "yes" if admissible(d) else "NO -- U>1",
-                 "the shipped program" if d == D_MIN_SHIPPED else
-                 ("tightest admissible" if d == 8 else "")))
-    print("    ⛔ A program with d_min below the admissible floor is REJECTED by")
-    print("    condition (1) before J is even asked about -- the two checks")
-    print("    compose, and J is only meaningful inside the feasible region.")
+        adm = admissible(d)
+        pf = port_feasible(d)
+        if not adm:
+            verdict = "REFUSED -- U > 1"
+        elif not pf:
+            verdict = ("REFUSED -- admissible but d < D* = %d, so the one "
+                       "fetch port saturates" % D_STAR)
+        else:
+            verdict = "J = %d%s" % (j_of(d),
+                                    "   (the shipped program)"
+                                    if d == D_MIN_SHIPPED else "")
+        print("    %-8d %-9s %-14s %s"
+              % (d, "yes" if adm else "NO", "yes" if pf else "NO", verdict))
+    print("    ⛔ TWO SCREENS, AND THE PORT ONE IS THE BINDING ONE. U <= 1 asks")
+    print("    only whether the DISPATCHER keeps up and admits d >= 8; the")
+    print("    fetch port needs d >= D* = %d. The gap d in [8, %d] is exactly"
+          % (D_STAR, D_STAR - 1))
+    print("    where the retracted universal J was unsound, and the loader")
+    print("    refuses there instead of quoting a number.")
 
     print()
     print("=" * 78)

@@ -40,6 +40,16 @@ module param_dump;
     $display("PARAM CW=%0d",        dut.u_eng.CW);
     $display("PARAM D_W=%0d",       dut.u_eng.D_W);
     $display("PARAM N_UIO=%0d",     dut.u_eng.N_UIO);
+    // ⭐ THE BUFFER DEPTH AND WHAT DERIVES FROM IT. `SPL` is a design
+    // alternative worth 169 flops, so the slot count and the index width are
+    // resolved BY THE TOOLS (standing rule 8: iverilog and Verilator both),
+    // not by a regex over the source. `SIW` is why that matters: at SPL = 2
+    // and N_LANES = 5 the slot index runs 0..9 and needs FOUR bits, and a
+    // three-bit copy of it aliases lane 4's slots onto lane 0's -- which is
+    // a bug this project has now hit once, in the per-lane instrument.
+    $display("PARAM SPL=%0d",       dut.u_eng.SPL);
+    $display("PARAM NSLOT=%0d",     dut.u_eng.NSLOT);
+    $display("PARAM SIW=%0d",       dut.u_eng.SIW);
     $finish;
   end
 endmodule

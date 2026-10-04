@@ -98,7 +98,14 @@ module tt_um_protocol_emulator #(
     parameter integer RX_SERIAL = 1,    // 1 = 3-pin serial host view
     // ⛔ fixed at build time because the async release path cannot be muxed
     parameter integer MISO_PIN = 7,     // uio index of the SPI-target MISO
-    parameter integer CS_PIN   = 6      // uio index of its CS input
+    parameter integer CS_PIN   = 6,     // uio index of its CS input
+    // ⭐ ACTION SLOTS PER LANE: 2 = double buffer (shipped), 1 = single.
+    // ⛔ IN THE PARAMETRIC CONTRACT, NOT AN `ifdef`. The single-buffer engine
+    // is a design alternative worth 169 flops, so it has to be BUILDABLE to
+    // be measured; the stored `SWEEP_SINGLE` sweep described a configuration
+    // that no command could produce. Passed through here so a bench can
+    // elaborate either depth without editing the engine.
+    parameter integer SPL      = 2
 ) (
     input  wire [7:0] ui_in,
     output wire [7:0] uo_out,
@@ -401,7 +408,7 @@ module tt_um_protocol_emulator #(
 
   pe_engine #(
       .N_LANES(N_LANES), .AW(AW), .N_PINS(N_PINS), .N_UIO(8),
-      .TS_W(TS_W), .DLY_W(DLY_W), .D_W(D_W)
+      .TS_W(TS_W), .DLY_W(DLY_W), .D_W(D_W), .SPL(SPL)
   ) u_eng (
       .clk(clk), .rst_n(rst_n), .run(run),
       .s_raddr(e_raddr), .s_re(e_re), .s_rdata(s_rdata),

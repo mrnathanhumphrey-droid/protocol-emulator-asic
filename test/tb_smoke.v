@@ -27,7 +27,17 @@ module tb_smoke;
   // the host drives uio where the DUT has released it
   wire [7:0] uio_in = (uio_oe & uio_out) | (~uio_oe & uio_drv);
 
-  tt_um_protocol_emulator dut (
+  // ⭐ BUFFER DEPTH, SELECTED AT ELABORATION: `iverilog -Ptb_smoke.SPL_CFG=1`
+  // builds the single-buffer engine. ⛔⛔ WHY THE SMOKE BENCH NEEDS IT AT ALL:
+  // the single-buffer configuration's PERFORMANCE cannot be quoted until its
+  // CORRECTNESS is established, and this is the bench that asserts pin
+  // movement, edge counts and C. A slower engine is a design alternative; a
+  // broken one producing a smaller stall number is a measurement of nothing,
+  // and the retracted "11 -> 7" benefit was computed from an arm whose
+  // correctness had never been established because it could not be built.
+  parameter integer SPL_CFG = 2;
+
+  tt_um_protocol_emulator #(.SPL(SPL_CFG)) dut (
       .ui_in(ui_in), .uo_out(uo_out),
       .uio_in(uio_in), .uio_out(uio_out), .uio_oe(uio_oe),
       .ena(ena), .clk(clk), .rst_n(rst_n)
@@ -248,11 +258,21 @@ module tb_smoke;
       // a lane dispatching a stale action can still toggle its pin.
       for (lk = 0; lk < 2; lk = lk + 1) begin
         if (dut.u_eng.hdr_done && dut.u_eng.l_live[lk]
-            && dut.u_eng.l_actv[lk*2 + (dut.u_eng.l_sel[lk] ? 1 : 0)]
+            // ⛔⛔ THE ENGINE'S OWN HEAD INDEX, NOT A COPY OF IT. This bench
+            // used to write out `lk*2 + (l_sel[lk] ? 1 : 0)` itself, and at
+            // SPL = 1 that is the WRONG SLOT: lane 1's head is slot 1, while
+            // the formula gives 2 -- so the invariant compared lane 1's PC
+            // against lane 2's action word and failed 3207 times on a design
+            // that was behaving correctly. ⭐ Exactly the defect class this
+            // file has already supplied once, with its private `exp_act[23:2]`
+            // slice of the action word, which broke the moment a field used
+            // the padding. `hix` is the single arithmetic site in the engine;
+            // reading it makes the bench depth-independent for free.
+            && dut.u_eng.l_actv[dut.u_eng.hix[lk]]
             && dut.u_eng.st == 0) begin
           exp_act = {img[dut.u_eng.l_pc[lk]], img[dut.u_eng.l_pc[lk] + 1],
                      img[dut.u_eng.l_pc[lk] + 2]};
-          got_act = dut.u_eng.l_act[lk*2 + (dut.u_eng.l_sel[lk] ? 1 : 0)];
+          got_act = dut.u_eng.l_act[dut.u_eng.hix[lk]];
           inv_checks = inv_checks + 1;
           if (got_act !== exp_act) begin
             if (inv_viol == 0)
@@ -341,7 +361,14 @@ module tb_smoke;
     if (svc_jobs > 0)
       $display("  measured C (x100 cycles/job): %0d  [A2 ships C = 2 -> 200]",
                (svc_cycles * 100) / svc_jobs);
-    $display("  measured J (max prefetch stall) : %0d  [A2 ships J = 1]", dut.u_eng.jitter_max);
+    // ⛔ LABELLED AS THE AGGREGATE IT IS. This printed "measured J (max
+    // prefetch stall)", which reads as a per-lane jitter term. `jitter_cnt` is
+    // one counter for all lanes and does not clear when the winner changes, so
+    // the run it reports can span two lanes' waits. It upper-bounds any single
+    // lane's wait (the safe direction) but is not that quantity; the per-lane
+    // measurement is `tb_jlane.v` / `docs/PREREG_J_LANE.md`.
+    $display("  any-winner-blocked run (aggregate, NOT per-lane J) : %0d  [A2 ships J = 1]",
+             dut.u_eng.jitter_max);
     if (svc_jobs > 0 && ((svc_cycles * 100) / svc_jobs < 195 ||
                          (svc_cycles * 100) / svc_jobs > 205)) begin
       $display("  *** C IS NOT 2. A2's shipped r_i are scoped to C = 2, so this");
