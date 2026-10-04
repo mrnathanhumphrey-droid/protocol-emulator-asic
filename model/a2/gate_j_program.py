@@ -90,6 +90,40 @@ D_MIN_SHIPPED = 25
 # gate must have an opinion on a machine with no iverilog. `price_j_sweep.sh`
 # is what re-measures it, and a sim value ABOVE the derivation stops everything.
 #
+# ⛔⛔⛔ THE RECORD DOES NOT REPRODUCE, AND IT HAD NEVER BEEN RE-MEASURED.
+# `price_j_sweep.sh` -- named four lines above as the thing that re-measures
+# this -- DID NOT EXIST until 2026-10-04. It does now, and re-running every
+# point from its own per-point recipe gives:
+#
+#   d        2..11   12   13   14   15   16   18   20   25
+#   recorded 5/0     0    0    0    0    0    0    0    0
+#   measured 7       7    7    11   11   11   8    0    0
+#
+# 16 of 18 points differ, all upward. SIX OF THEM ARE ADMISSIBLE POINTS WHERE
+# THE MEASUREMENT EXCEEDS THE DERIVATION (d = 12, 13, 14, 15, 16, 18), which is
+# the condition this file calls "stops everything".
+#
+# ⚠⚠ BUT THE NUMBER IS NOT YET TRUSTWORTHY, AND NO CORRECTION TO THE
+# PUBLISHED J FOLLOWS FROM IT YET. The probe reads a bench that reports THREE
+# FAILURES on this image, with `COLD == STEADY == 7` and the last stall event at
+# cycle 299 -- so the cold-start value may simply be landing inside the steady
+# window for a program whose periods are 12..16. A dramatic result is first of
+# all a reason to doubt the probe.
+#
+# ⭐ WHAT IS ESTABLISHED, with evidence:
+#   * 7 is NOT a regression: with ONE fixed stimulus, 2031cdd, 69f94ee, 8d77377
+#     and bc4c9f4 all measure 7. (A first bisect appeared to show 0 on the older
+#     commits -- it passed an absolute Git-Bash path to `+IMG`, `$readmemh`
+#     failed to open it, and "0" was a measurement of an empty program.)
+#   * the encoder move did not change the bytes: old and new generators produce
+#     byte-identical `five_image.hex` for the same delays.
+#   * THE SHIPPED POINT IS UNAFFECTED. `smoke_image` measures J = 0, and d = 20
+#     and 25 reproduce 0 exactly. The shipped claim rests on d_min = 25.
+# ⇒ OWED BEFORE ANY CORRECTION IS PUBLISHED: a clean steady-state measurement
+#   on a passing bench for this program class. Until then this record is marked
+#   NOT REPRODUCED rather than replaced, because substituting numbers from a
+#   suspect probe would be the same error in the other direction.
+#
 # d -> measured steady-state stall (double buffer, primed)
 SWEEP = {
     2: 5, 3: 5, 4: 5, 5: 5, 6: 5, 7: 5, 8: 5, 9: 5, 10: 4,
