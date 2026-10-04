@@ -25,8 +25,13 @@ a SUPERSEDED LOAD PATH:
 ⇒ The load-path tests are RETIRED, readback is ported onto the serial path, and
   the open-drain and engine arms now load REAL PROGRAMS from the trace corpus.
 
-⚠ AND ONE TEST IS AN `expect_fail` RECORDING A MEASURED DEFECT, not a stylistic
-choice -- see `test_readback_reaches_byte_zero`.
+⭐ TWO OF THESE TESTS WERE `expect_fail` ARMS RECORDING MEASURED DEFECTS, and
+both defects are now FIXED IN THE RTL -- D1 (program byte 0 unreadable) and D2
+(an open-drain lane's clock pin driven push-pull). The self-announcing mechanism
+worked as designed: once fixed, each arm reported "passed but we expected a
+failure" and told whoever fixed it to delete the marker. The markers are gone
+and the tests now assert the corrected behaviour; their docstrings keep the
+defect description, because that is why each test exists.
 """
 
 import os
@@ -229,11 +234,11 @@ async def test_serial_readback_walks_the_image(dut):
     payload frame with a sticky STATUS frame so liveness is in the stream even
     when no payload is moving.
 
-    ⚠ THE ASSERTION STARTS AT image[1] AND DROPS THE FIRST FRAME, AND NEITHER IS
-    A CONVENIENCE. Byte 0 is not reachable through this path, and the first
-    payload frame carries data from no requested address -- both measured, both
-    recorded in `test_readback_reaches_byte_zero` below. This test asserts what
-    the hardware guarantees today; that one asserts what it should.
+    ⭐ IT ASSERTS THE WHOLE IMAGE, INCLUDING BYTE 0. It did not always: byte 0
+    was unreachable and the first frame carried data from no requested address,
+    so this test asserted image[1:] with the first frame discarded and the
+    defect was recorded as an expect_fail. Both are now fixed in the RTL, and
+    `test_readback_reaches_byte_zero` holds the specific must-fire.
     """
     await start(dut)
     img = [0xAA, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88]
@@ -248,16 +253,14 @@ async def test_serial_readback_walks_the_image(dut):
 
     assert len(frames) >= 8, "only %d frames in 900 cycles" % len(frames)
 
-    # ⚠ THE FIRST PAYLOAD FRAME IS DISCARDED, AND IT IS THE SAME DEFECT. The
-    # load-mode branch queues the frame from `s_rdata` BEFORE its own read
-    # lands, so frame 1 carries whatever that register held from the previous
-    # walk -- X on a cold part, or a stale byte after a rewind (measured: 0x33
-    # where the image's second byte is 0x22). It is not a sampling artefact of
-    # this bench: the frame genuinely carries data from no requested address.
-    want = img[1:]
-    got = known[1:1 + len(want)]
-    assert got == want, ("serial readback after the stale first frame = %s, "
-                         "image[1:] = %s"
+    # ⭐ THE WHOLE IMAGE, FROM THE FIRST PAYLOAD FRAME. This assertion used to
+    # start at image[1] and discard frame 1, because byte 0 was unreachable and
+    # the first frame carried data from no requested address. Both are fixed:
+    # `rb_addr` latches the pre-increment pointer and the readback primes before
+    # it frames, so frame 1 IS byte 0.
+    want = img
+    got = known[:len(want)]
+    assert got == want, ("serial readback = %s, image = %s"
                          % ([hex(x) for x in got], [hex(x) for x in want]))
 
     # the status frames must alternate with the payloads and carry the alive bit
@@ -270,11 +273,11 @@ async def test_serial_readback_walks_the_image(dut):
 
 
 # =====================================================================
-# 4. THE DEFECT, recorded as an executable expect_fail
+# 4. D1's MUST-FIRE: byte 0 is the first payload
 # =====================================================================
-@cocotb.test(expect_fail=True)
+@cocotb.test()
 async def test_readback_reaches_byte_zero(dut):
-    """⛔⛔ EXPECTED TO FAIL: program byte 0 is NOT observable through readback.
+    """D1's MUST-FIRE: a distinctive byte 0 arrives as the FIRST payload frame.
 
     MEASURED, not inferred. Loading `[0xAA, 0x22, 0x33, ...]` and harvesting the
     serial stream from the first cycle after a readback rewind yields payload
@@ -303,11 +306,14 @@ async def test_readback_reaches_byte_zero(dut):
     walk, `rb_addr <= rb_ptr` alongside `rb_ptr <= rb_ptr + 1`, and point the
     store at `rb_addr` so the read uses the PRE-increment pointer.
 
-    ⭐ THIS TEST IS THE RECORD. It is `expect_fail` so CI is honest rather than
-    permanently red, and it ANNOUNCES ITS OWN OBSOLESCENCE: the moment the
-    readback is fixed this test passes unexpectedly, CI goes red, and whoever
-    fixed it is told to delete the marker. A defect recorded only in prose does
-    not do that.
+    ⭐ FIXED, AND THIS IS THE MUST-FIRE. `rb_addr` latches the pre-increment
+    pointer so address 0 is requested, and the readback PRIMES before it frames
+    -- the first two visits issue the read and let it land without queueing a
+    frame -- so the stream now opens with byte 0 instead of a stale register.
+    Measured: frame 0 is `payload 0xAA`.
+    ⚠ THE FIX WAS TWO PARTS AND THE FIRST ALONE WAS NOT ENOUGH. With only
+    `rb_addr`, byte 0 became REACHABLE but arrived SECOND, behind one stale
+    frame: 0x22(stale), 0xAA, 0x22, ... A pipeline's first output is not data.
     """
     await start(dut)
     img = [0xAA, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88]
@@ -382,11 +388,11 @@ async def test_open_drain_data_pin(dut):
 
 
 # =====================================================================
-# 5b. THE SECOND DEFECT, recorded as an executable expect_fail
+# 5b. D2's must-fire: the open-drain clock pin is released
 # =====================================================================
-@cocotb.test(expect_fail=True)
+@cocotb.test()
 async def test_open_drain_clock_pin_is_released(dut):
-    """⛔⛔ EXPECTED TO FAIL: an open-drain lane's CLOCK pin is driven push-pull.
+    """D2: an open-drain lane's CLOCK pin is RELEASED, never driven high.
 
     MEASURED on `corpus_i2c.hex`, whose lane declares open-drain with SDA as its
     data pin and SCL as its clock: `uio_oe=00000110 uio_out=11111011` -- SCL has
@@ -416,10 +422,12 @@ async def test_open_drain_clock_pin_is_released(dut):
     driving the clock there -- "so data and clock never need P-ORDER per bit" --
     is about ORDERING, and holds under either drive style.
 
-    ⭐ `expect_fail`, so CI is honest rather than permanently red, and so this
-    ANNOUNCES ITS OWN OBSOLESCENCE: the moment the clock pin honours the mode,
-    this passes unexpectedly, CI goes red, and whoever fixed it is told to
-    delete the marker.
+    ⭐ FIXED. The clock pin now takes the same `l_mode` branch as the data pin,
+    so an open-drain lane pulls SCL low with oe=1/out=0 and RELEASES it with
+    oe=0, leaving the high phase to the observed rise through edge capture --
+    which is what N1a requires. Ruling 1.5's per-pin drive mask (`pin_pp`) was
+    also built, so the hard-1 is now unsatisfiable at the flop's D input
+    whatever a future opcode path does.
     """
     await start(dut)
     img = read_hex("corpus_i2c.hex")

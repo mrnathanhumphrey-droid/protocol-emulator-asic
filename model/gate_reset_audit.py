@@ -63,8 +63,17 @@ ALLOWED = {
         "`l_timestamp + a_dly` with a_dly X made a lane PERMANENTLY unready."),
     "s_rdata": (
         8,
-        "the store's BYTE read, for the header FSM. Same write-before-read "
-        "argument: H_CAP only runs after H_REQ."),
+        "the store's BYTE read, for the header FSM AND for the load-mode "
+        "serial readback. H_CAP only runs after H_REQ, and the readback now "
+        "PRIMES -- its first two visits issue the read and let it land without "
+        "queueing a frame -- so both consumers read it only after a real read. "
+        "⛔⛔ THIS REASON WAS FALSE UNTIL D1 WAS FIXED, and the "
+        "entry named only the header FSM. The load-mode readback also consumed "
+        "s_rdata, and there the H_REQ ordering said nothing: the first frame "
+        "carried the register unwritten, which put X on uo_out[4] on a cold "
+        "part and a stale byte after a rewind. An allowlist entry is only as "
+        "good as the set of consumers it names, and a second consumer added "
+        "later inherits a reason that was never about it."),
     "u_eng.paddr": (
         8,
         "the refill address, LATCHED AT THE SCAN and consumed at P_REQ. It is "

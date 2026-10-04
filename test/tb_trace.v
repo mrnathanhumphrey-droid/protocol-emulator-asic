@@ -79,11 +79,31 @@ module tb_trace;
   reg  [7:0] mst_val = 8'hFF;         // the bench acting as a peer MASTER;
   reg  [7:0] mst_oe  = 8'h00;         //   idle high = CS deselected, RX idle
   reg        en_i2c  = 1'b0;
+  reg        en_i2cs = 1'b0;   // the STRETCHING peer
+  // ⛔⛔ A BENCH-DRIVEN SCL HOLD, AND IT EXISTS BECAUSE THE PEER-DRIVEN STRETCH
+  // ARM CAME OUT VACUOUS. `fram_i2c` stretches per ACK, and it never ACKs: it
+  // needs a START plus a matching device address, which no program can send yet
+  // for exactly the reason `corpus_spim` is OPEN -- the payload arrives from the
+  // HOST over the same `uio` bank, and the SHIFT/clock phase is unruled. With
+  // the peer silent, the mutant arm produced no contention either and all four
+  // measurements were identical: a must-fire that fires on nothing.
+  // ⭐ The bench can pull SCL low unconditionally, which tests the ELECTRICAL
+  // claim directly and needs no transaction: against a RELEASED SCL the hold
+  // simply wins, and against a push-pull HIGH it is a short, which the resolved
+  // bus shows as X.
+  reg        hold_scl = 1'b0;
+  integer    sclhold;
+  // ⭐ STAYLOAD keeps the part in LOAD MODE for the trace window, so the
+  // SERIAL READBACK STREAM is what gets compared -- D1's ruling asks for the
+  // readback to sit under the seed sweep, because randomised init is exactly
+  // what would have caught the stale first frame that `rb_addr` alone left.
+  integer    stayload;
   reg        en_spi  = 1'b0;
   reg        en_tgt  = 1'b0;
   reg        en_rx   = 1'b0;
 
   wire i2c_scl_oe, i2c_sda_oe;        // PULL-LOW enables, never drive high
+  wire i2cs_scl_oe, i2cs_sda_oe;      // the stretching peer's, same shape
   wire spi_so, spi_so_oe;
 
   // ⭐ ONE DRIVER PER BIT, STRUCTURALLY. Each `uio` bit below is assigned
@@ -93,9 +113,12 @@ module tb_trace;
   wire [7:0] peer_oe, peer_val;
   assign peer_oe [P_M_MISO] = en_spi & spi_so_oe;
   assign peer_val[P_M_MISO] = spi_so;
-  assign peer_oe [P_SCL]    = en_i2c & i2c_scl_oe;
+  assign peer_oe [P_SCL]    = (en_i2c  & i2c_scl_oe)
+                            | (en_i2cs & i2cs_scl_oe)
+                            | hold_scl;
   assign peer_val[P_SCL]    = 1'b0;             // open-drain: pull low or let go
-  assign peer_oe [P_SDA]    = en_i2c & i2c_sda_oe;
+  assign peer_oe [P_SDA]    = (en_i2c  & i2c_sda_oe)
+                            | (en_i2cs & i2cs_sda_oe);
   assign peer_val[P_SDA]    = 1'b0;
   assign peer_oe [P_RX]     = en_rx  & mst_oe[P_RX];
   assign peer_val[P_RX]     = mst_val[P_RX];
@@ -196,6 +219,20 @@ module tb_trace;
       .sda_oe(i2c_sda_oe), .scl_oe(i2c_scl_oe)
   );
 
+  // ⭐ THE SAME PEER WITH CLOCK STRETCHING ENABLED, which is D2's second
+  // must-fire. STRETCH is a module PARAMETER, so it cannot be switched at run
+  // time -- hence a second instance, selected by `+PEER=i2cs`. Only one of the
+  // two is ever enabled, so they never both drive.
+  // ⛔ A STRETCH IS ONLY POSSIBLE AGAINST A RELEASED SCL. Before D2's fix the
+  // engine drove SCL push-pull HIGH, so a peer pulling low met an active
+  // driver: the resolved bus turns that into X, which is the simulator telling
+  // you it is a SHORT rather than a stretch.
+  fram_i2c #(.STRETCH(12)) u_i2cs (
+      .clk(clk),
+      .scl_in(uio_in[P_SCL]), .sda_in(uio_in[P_SDA]),
+      .sda_oe(i2cs_sda_oe), .scl_oe(i2cs_scl_oe)
+  );
+
   fram_spi u_spi (
       .cs_n(uo_out[P_M_CS_UO]),
       .sck (uo_out[P_M_SCLK_UO]),
@@ -277,6 +314,8 @@ module tb_trace;
     if (!$value$plusargs("NCYC=%d", ncyc))   ncyc = 2000;
     if (!$value$plusargs("SEED=%d", seed))   seed = 1;
     if (!$value$plusargs("ASYNC=%d", async_arm)) async_arm = 0;
+    if (!$value$plusargs("SCLHOLD=%d", sclhold)) sclhold = 0;
+    if (!$value$plusargs("STAYLOAD=%d", stayload)) stayload = 0;
     if (!$value$plusargs("PEER=%s", peersel)) peersel = "none";
 
     // ⛔⛔ THE LENGTH IS PASSED IN, NOT DERIVED FROM UNINITIALISED STATE, AND
@@ -313,6 +352,7 @@ module tb_trace;
     // "everything on", because a peer driving a pin the program never touches
     // is a second driver on a line nobody is watching.
     if (peersel == "i2c") en_i2c = 1'b1;
+    if (peersel == "i2cs") en_i2cs = 1'b1;
     if (peersel == "spi") en_spi = 1'b1;
     if (peersel == "tgt") begin
       en_tgt = 1'b1;
@@ -335,8 +375,9 @@ module tb_trace;
     // ⛔ PEER, SEED AND ASYNC ARE IN IT. Two runs of the same image with
     // different peers or a different seed are DIFFERENT EXPERIMENTS, and
     // comparing them would read as a design disagreement.
-    $fwrite(fd, "# img=%0s bytes=%0d ncyc=%0d peer=%0s seed=%0d async=%0d\n",
-            imgfile, img_bytes, ncyc, peersel, seed, async_arm);
+    $fwrite(fd, "# img=%0s bytes=%0d ncyc=%0d peer=%0s seed=%0d async=%0d stayload=%0d sclhold=%0d\n",
+            imgfile, img_bytes, ncyc, peersel, seed, async_arm,
+            stayload, sclhold);
 
     // ⛔⛔⛔ EVERY EDGE IN THIS BENCH IS A NEGEDGE, AND THAT IS WHAT MAKES THE
     //    TWO SIMULATORS COMPARABLE AT ALL. Driving stimulus in the SAME
@@ -383,12 +424,19 @@ module tb_trace;
     end
 
     // ---- RUN, tracing every cycle --------------------------------------
-    ui_in[PIN_PROG] = 1'b0;
+    // ⛔ STAYLOAD TRACES THE READBACK INSTEAD OF THE ENGINE. In load mode the
+    // protocol pins idle high and `uo_out[6:4]` carries the framed readback, so
+    // the trace is the host-visible stream. The bus stays released either way.
+    if (stayload == 0) ui_in[PIN_PROG] = 1'b0;
     ld_en  = 1'b0;                  // release the bus; engine and peers own it
-    run_go = 1'b1;                  // the peer masters start
+    run_go = (stayload == 0);       // the peer masters start
     for (i = 0; i < ncyc; i = i + 1) begin
       @(negedge clk);
       cyc = cyc + 1;
+      // ⭐ the hold window: a peer holding SCL LOW, which is what an I2C
+      // stretch physically is. Outside it the bench leaves the line alone.
+      if (sclhold != 0)
+        hold_scl = (cyc > 100) && (cyc <= 100 + sclhold);
       emit;
     end
 

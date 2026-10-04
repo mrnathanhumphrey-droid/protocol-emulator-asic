@@ -53,6 +53,8 @@ PEER="${6:-none}"
 ASYNCA="${7:-0}"
 PHASE="${8:-1}"
 DEFS="${9:-}"
+STAYLOAD="${10:-0}"
+SCLHOLD="${11:-0}"
 SEEDS="1 7 12345"          # ⭐ recorded here and echoed with every result
 
 cd "$ROOT" || exit 1
@@ -102,6 +104,7 @@ fi
 echo "  verilator  : $(verilator --version)"
 echo "  image      : $IMG  peer=$PEER  async=$ASYNCA"
 echo "  phase seed : $PHASE  (the STIMULUS seed, held FIXED)"
+echo "  stayload=$STAYLOAD  sclhold=$SCLHOLD"
 echo "  defines    : ${DEFS:-<none>}"
 echo "  x-initial  : unique + runtime +verilator+rand+reset+2"
 echo "               (NOT 0, and NOT the compile flag alone)"
@@ -154,6 +157,7 @@ for S in $SEEDS; do
     "$OBJ/tr" "+IMG=$IMG" "+NBYTES=$NBYTES" \
               "+OUT=$OUTDIR/s$S.txt" "+NCYC=$NCYC" \
               "+PEER=$PEER" "+ASYNC=$ASYNCA" "+SEED=$PHASE" \
+              "+STAYLOAD=$STAYLOAD" "+SCLHOLD=$SCLHOLD" \
               "+verilator+rand+reset+2" "+verilator+seed+$S" \
               > "$OUTDIR/run_s$S.log" 2>&1
               > "$OUTDIR/run_s$S.log" 2>&1

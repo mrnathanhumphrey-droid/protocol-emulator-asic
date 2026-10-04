@@ -227,7 +227,8 @@ def build_i2c(d: int = 9):
     img = _assemble([(0, seq)],
                     {0: (P_SDA, P_SCL, MODE_OD, d, 2 * d, 3 * d)},
                     park_at=P_SCL)
-    return img, {"uio_oe": True, "uio_out": False, "uo_out": False}
+    return img, {"uio_oe": True, "uio_out": False, "uo_out": False,
+                 "od_pins": (P_SCL, P_SDA)}
 
 
 def build_spi_master(d: int = 7):
@@ -253,7 +254,7 @@ def build_spi_master(d: int = 7):
                     {0: (P_M_MOSI, P_M_SCLK, MODE_PP, d, 2 * d, 3 * d)},
                     park_at=P_SCL)
     return img, {"uio_oe": False, "uio_out": False, "uo_out": True,
-                 "uio_in": True}
+                 "uio_in": True, "od_pins": (P_SCL,)}
 
 
 def build_spi_target(d: int = 6):
@@ -276,7 +277,8 @@ def build_spi_target(d: int = 6):
     img = _assemble([(0, seq)],
                     {0: (P_T_MISO, P_T_MISO, MODE_PP, d, 2 * d, 3 * d)},
                     park_at=P_SCL)
-    return img, {"uio_oe": True, "uio_out": True, "uo_out": False}
+    return img, {"uio_oe": True, "uio_out": True, "uo_out": False,
+                 "od_pins": (P_SCL,)}
 
 
 def build_uart_rx(d: int = 11, timeout: int = 300):
@@ -297,7 +299,7 @@ def build_uart_rx(d: int = 11, timeout: int = 300):
                     {0: (P_TX, P_TX, MODE_PP, d, 2 * d, 3 * d)},
                     park_at=P_SCL)
     return img, {"uio_oe": False, "uio_out": False, "uo_out": True,
-                 "uio_in": True}
+                 "uio_in": True, "od_pins": (P_SCL,)}
 
 
 def build_all5(d: int = 9):
@@ -329,8 +331,20 @@ def build_all5(d: int = 9):
     }
     img = _assemble(seqs, spec, park_at=P_SCL)
     return img, {"uio_oe": True, "uio_out": True, "uo_out": True,
-                 "uio_in": True}
+                 "uio_in": True, "od_pins": (P_SCL, P_SDA)}
 
+
+
+# ---------------------------------------------------------------------------
+# `od_pins` -- THE OPEN-DRAIN INVARIANT'S SUBJECT
+# ---------------------------------------------------------------------------
+# Every builder names the pins ITS headers declare open-drain, so the invariant
+# below is checked against what each program actually asked for rather than
+# against a separately-maintained list that could drift from the programs.
+# ⛔ NOTE `P_SCL` APPEARS IN EVERY PROGRAM: the parked lanes are declared
+# open-drain on it, so even a program whose active lane is push-pull still has
+# an open-drain pin whose invariant must hold. That is the case D2 escaped
+# through -- a lane mode respected on the data pin and ignored on the clock.
 
 # ---------------------------------------------------------------------------
 # KNOWN-OPEN ARMS, with the reason stated

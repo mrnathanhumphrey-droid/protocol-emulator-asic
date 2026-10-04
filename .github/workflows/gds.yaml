@@ -9,11 +9,27 @@ on:
     # ⭐ `test/**` IS IN THE LIST because `gl_test` runs inside THIS workflow --
     # a testbench change has to re-run it, and filtering it out would silently
     # stop gate-level testing on test-only commits.
+    # ⛔⛔ AND NOW A BRANCH FILTER TOO, BECAUSE THE PATH FILTER WAS NOT
+    # THE WHOLE PROBLEM. The harden takes ~3.5 h and the concurrency group
+    # below cancels it on the next push, so in practice GATE-LEVEL RESULTS
+    # ONLY LANDED IF NOBODY PUSHED FOR THREE AND A HALF HOURS -- three
+    # hardens in a row were cancelled that way, each after real progress.
+    # That made gate-level coverage a function of typing discipline rather
+    # than of policy.
+    # ⇒ Develop on `dev`, where `test` and the fast gates still run on
+    #   every push; merge to `cmos5l` at a CHECKPOINT when a harden is
+    #   wanted. The cancel behaviour then becomes a FEATURE: it only ever
+    #   cancels a harden a newer checkpoint has superseded.
+    branches:
+      - cmos5l
     paths:
       - 'src/**'
       - 'test/**'
       - 'info.yaml'
       - '.github/workflows/gds.yaml'
+  # ⭐ UNCHANGED, AND THE SUBMISSION CHECKLIST DEPENDS ON IT: a
+  # manual dispatch on the final SHA is how the submission gets its
+  # harden regardless of the branch or path filter.
   workflow_dispatch:
 
 # ⭐ SUPERSEDED RUNS CANCEL THEMSELVES NOW. Three were cancelled by hand today;

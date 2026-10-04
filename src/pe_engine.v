@@ -212,6 +212,35 @@ module pe_engine #(
   reg [PINW-1:0]  l_clkpin [0:N_LANES-1];   // ⭐ a LANE property; the per-ACTION
                                             //   copy was cut by S2 as a duplicate
   reg             l_mode   [0:N_LANES-1];   // 0 = open-drain, 1 = push-pull
+
+  // ⛔⛔⛔ RULING 1.5, THE DRIVE-MODE CONSTRUCTION -- AND IT HAD NEVER BEEN
+  // BUILT. 1.5 ruled that the output be formed as `out[i] = data[i] &
+  // pushpull[i]`, so "an open-drain pin drives a 1" is unsatisfiable BY
+  // CONSTRUCTION whatever the opcode paths do. Nothing of the kind existed:
+  // `uio_out` was `e_pin_out[7:0]` raw, and the only open-drain discipline was
+  // an `if (l_mode[cur])` inside two opcode branches -- per LANE, where 1.5
+  // specified per PIN. D2 is exactly the predicted consequence: a third branch
+  // (the clock pin) was added later without the test, and drove a hard 1.
+  // ⚠ THIS IS THE THIRD DAY-ONE COMMITMENT FOUND UNBUILT, after edge capture
+  // and the no-op half-bit.
+  //
+  // ⭐ PER PIN, DERIVED FROM THE HEADERS AT LOAD. A pin's drive class follows
+  // the lane that owns it, so `pin_pp` is set for a lane's `pin` AND `clkpin`
+  // when its header lands -- before `hdr_done`, hence before any dispatch.
+  // ⛔ NOT a build-time constant, though the ruled pin map would allow one:
+  // `five_image` and `chain_image` legitimately drive `uio` pins PUSH-PULL
+  // (`hdr(n, n, 1, ...)` on pins 0..4), so a compile-time mask of the ruled map
+  // would freeze those synthetic refill-load programs dead. ⚠ That also means
+  // those two images are NOT pin-map-legal: they need five push-pull pins and
+  // the ruled map provides four. Reported rather than silently changed, because
+  // their numbers feed published refill-contention results.
+  //
+  // ⭐ APPLIED AT THE FLOP'S D INPUT, which is what keeps F2 intact. ANDing
+  // after the flop would put a gate on the pin and fail F2's structural check;
+  // a separate output stage would add a cycle of latency to every protocol pin
+  // and move measured timing. At the D input the pin stays a flop Q and the
+  // mask costs nothing.
+  reg [N_PINS-1:0] pin_pp;                  // 1 = this pin may drive a 1
   reg [7:0]       l_data   [0:N_LANES-1];   // THE PAYLOAD lives here, not in
                                             //   the program (ruling F1)
   reg [BPW-1:0]   l_bitp   [0:N_LANES-1];
@@ -727,6 +756,12 @@ module pe_engine #(
       //   which pins can RELEASE differs between the two banks, and this
       //   module does not know the banks. See pe_top's reset comment.
       pin_out  <= {N_PINS{1'b1}};
+      // ⛔ RESET TO ALL PUSH-PULL, matching `pin_out`'s reset-high: at reset
+      // `pin_oe` is 0 so nothing is driven, and a lane cannot drive until its
+      // header has set this pin's class. Resetting to 0 instead would mask the
+      // reset-HIGH value of the `uo_out` protocol pins to 0 and break the
+      // forced idle-high that bank requires.
+      pin_pp   <= {N_PINS{1'b1}};
       pin_oe   <= {N_PINS{1'b0}};
       rx_data  <= 8'h00;
       rx_push  <= 1'b0;
@@ -830,6 +865,22 @@ module pe_engine #(
                     l_pin[hl]    <= hsh_n[HDR_BYTES*8-1 -: PINW];
                     l_clkpin[hl] <= hsh_n[HDR_BYTES*8-1-PINW -: PINW];
                     l_mode[hl]   <= hsh_n[HDR_BYTES*8-1-2*PINW];
+                    // ⭐ RULING 1.5: the per-PIN drive class, derived here from
+                    // the lane that owns the pin. Both the data pin and the
+                    // clock pin take the lane's mode, and this lands during the
+                    // header window -- before `hdr_done`, so before any
+                    // dispatch can read it.
+                    // ⛔ RANGE-GUARDED. PINW = 4 addresses 0..15 while
+                    // N_PINS = 12, and a header may legitimately name the
+                    // reserved non-driving index -- an unguarded write here
+                    // would be the out-of-range `pin_out[12]` class this
+                    // project has already paid for once.
+                    if (hsh_n[HDR_BYTES*8-1 -: PINW] < N_PINS[PINW-1:0])
+                      pin_pp[hsh_n[HDR_BYTES*8-1 -: PINW]]
+                          <= hsh_n[HDR_BYTES*8-1-2*PINW];
+                    if (hsh_n[HDR_BYTES*8-1-PINW -: PINW] < N_PINS[PINW-1:0])
+                      pin_pp[hsh_n[HDR_BYTES*8-1-PINW -: PINW]]
+                          <= hsh_n[HDR_BYTES*8-1-2*PINW];
                     l_t[hl]      <= hsh_n[HDR_BYTES*8-2-2*PINW -: DLY_W];
                     l_c[hl]      <= hsh_n[HDR_BYTES*8-2-2*PINW-DLY_W -: CW];
                     l_d[hl]      <= hsh_n[HDR_BYTES*8-2-2*PINW-DLY_W-CW -: D_W];
@@ -989,7 +1040,11 @@ module pe_engine #(
           case (a_op)
             OP_LEVEL, OP_START, OP_STOP: if (pin_real) begin
               if (l_mode[cur]) begin
-                pin_out[a_pin] <= a_lvl;        // push-pull: drive both levels
+                // push-pull: drive both levels. ⭐ `& pin_pp[...]` is RULING
+                // 1.5 -- see the `pin_pp` declaration. It makes "an open-drain
+                // pin drives a 1" unsatisfiable at the flop's D input rather
+                // than relying on this branch being written correctly.
+                pin_out[a_pin] <= a_lvl & pin_pp[a_pin];
                 pin_oe[a_pin]  <= 1'b1;
               end else begin
                 pin_out[a_pin] <= 1'b0;         // open-drain: NEVER drives 1
@@ -998,15 +1053,47 @@ module pe_engine #(
             end
             OP_SHIFT: if (pin_real) begin
               if (l_mode[cur]) begin
-                pin_out[a_pin] <= l_data[cur][0];
+                pin_out[a_pin] <= l_data[cur][0] & pin_pp[a_pin];
                 pin_oe[a_pin]  <= 1'b1;
               end else begin
                 pin_out[a_pin] <= 1'b0;
                 pin_oe[a_pin]  <= ~l_data[cur][0];
               end
-              pin_out[l_clkpin[cur]] <= a_lvl;  // the shifter drives its OWN
-              pin_oe[l_clkpin[cur]]  <= 1'b1;   //   clock, so data and clock
-                                                //   never need P-ORDER per bit
+              // ⛔⛔⛔ D2: THE CLOCK PIN HONOURS `l_mode` TOO, AND IT DID NOT.
+              // It was driven `pin_out <= a_lvl; pin_oe <= 1` unconditionally,
+              // so an OPEN-DRAIN lane drove a HARD 1 on its clock. Measured on
+              // the I2C program: `uio_oe=00000110 uio_out=11111011` -- SDA
+              // correctly pulled low, SCL actively driven high.
+              // ⚠ THAT IS AN ELECTRICAL HAZARD, NOT A MISSING FEATURE. A peer
+              // stretches I2C by holding SCL LOW; against a push-pull high that
+              // is a SHORT. `test/fram_i2c.v` exports `scl_oe` as a pull-low
+              // stretch enable and the A2 stretch reasoning assumes a
+              // releasable SCL, so the peer model and the schedulability
+              // argument both relied on something the engine could not do. It
+              // also broke I2C compliance and made N1a's observed-rise release
+              // meaningless: there is no rise to observe if we drive it.
+              // ⭐ Open-drain now pulls low with oe=1/out=0 and RELEASES with
+              // oe=0; the high phase comes from the observed SCL rise through
+              // edge capture, which is what N1a says it should.
+              // ⚠ The comment this replaces justified driving the clock HERE --
+              // "so data and clock never need P-ORDER per bit" -- which is
+              // about ORDERING and holds under either drive style.
+              // ⛔ M_OD_CLK_PUSHPULL restores the defect exactly as it was, so
+              // the cross-program open-drain invariant is PRICED rather than
+              // only ever seen to pass. A guard that has never been observed to
+              // fail has unknown strength, and this one is new.
+`ifdef M_OD_CLK_PUSHPULL
+              pin_out[l_clkpin[cur]] <= a_lvl;
+              pin_oe[l_clkpin[cur]]  <= 1'b1;
+`else
+              if (l_mode[cur]) begin
+                pin_out[l_clkpin[cur]] <= a_lvl & pin_pp[l_clkpin[cur]];
+                pin_oe[l_clkpin[cur]]  <= 1'b1;
+              end else begin
+                pin_out[l_clkpin[cur]] <= 1'b0;
+                pin_oe[l_clkpin[cur]]  <= ~a_lvl;
+              end
+`endif
             end
             OP_SHIFTIN, OP_READBIT: if (pin_real) begin
               pin_oe[a_pin] <= 1'b0;            // release to sample

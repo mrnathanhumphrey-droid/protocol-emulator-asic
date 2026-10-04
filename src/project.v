@@ -211,6 +211,29 @@ module tt_um_protocol_emulator #(
 
   // readback walk for load-mode verification
   reg [AW-1:0] rb_ptr;
+  // ⛔⛔ D1: `rb_addr` IS THE ADDRESS ACTUALLY READ, AND IT EXISTS BECAUSE
+  // PROGRAM BYTE 0 WAS UNREADABLE WITHOUT IT. The readback branch queues a
+  // frame, increments `rb_ptr` and asserts `rb_re` on the SAME EDGE; with the
+  // store's `raddr` wired to `rb_ptr` the read therefore used the
+  // ALREADY-INCREMENTED pointer, so address 0 was never requested and the first
+  // frame carried `s_rdata` from before any read at all.
+  // ⭐ Measured, not inferred: loading [0xAA,0x22,0x33,...] and harvesting the
+  // serial stream yielded 0x22,0x33,... and 0xAA never appeared.
+  // ⚠ IT ALSO MADE THE RESET ALLOWLIST'S REASON FOR `s_rdata` FALSE. That entry
+  // argues write-before-read because "H_CAP only runs after H_REQ", which says
+  // nothing about this path; the first readback frame consumed `s_rdata`
+  // unwritten. With the pre-increment address latched here, `s_rdata` is
+  // consumed only after a real read and the stated reason becomes true.
+  reg [AW-1:0] rb_addr;
+  // ⭐ THE READBACK PRIME COUNTER, and the HOST CONTRACT it implements:
+  //   * readback starts at ADDRESS 0 and the first payload frame IS byte 0;
+  //   * the rewind trigger is `rst_n` -- NOT entering load mode, because the
+  //     stream runs CONCURRENTLY with loading, so by the last write the walk is
+  //     already past the image. The program store is deliberately unreset, so a
+  //     reset rewinds the walk and keeps the image;
+  //   * the stream is only meaningful once the load is COMPLETE.
+  // This is written into docs/ as the host-facing contract next to the framing.
+  reg [1:0]    rb_prime;
   reg [2:0]    rb_bit;
   reg          rb_re;
 
@@ -222,7 +245,7 @@ module tt_um_protocol_emulator #(
       .clk(clk), .rst_n(rst_n),
       .we(prog_mode & wr_rise), .waddr(ptr), .wdata(uio_q1),
       .re(prog_mode ? rb_re : e_re),
-      .raddr(prog_mode ? rb_ptr : e_raddr),
+      .raddr(prog_mode ? rb_addr : e_raddr),
       .rdata(s_rdata),
       .wre(e_wre & run), .wraddr(e_wraddr), .wrdata(s_wrdata)
   );
@@ -275,7 +298,8 @@ module tt_um_protocol_emulator #(
       ser_d <= 1'b0; ser_s <= 1'b0; ser_v <= 1'b0;
       ser_sh <= 9'h000; ser_cnt <= 4'd0; ser_phase <= 1'b0;
       status_byte <= 8'h00; status_turn <= 1'b0;
-      rb_ptr <= {AW{1'b0}}; rb_bit <= 3'd0; rb_re <= 1'b0;
+      rb_ptr <= {AW{1'b0}}; rb_addr <= {AW{1'b0}}; rb_bit <= 3'd0; rb_re <= 1'b0;
+      rb_prime <= 2'd0;
     end else begin
       // the sticky status, assembled once so both modes frame the same byte
       status_byte <= {4'b0000, e_ovr, |e_ovf, |e_under, 1'b1};
@@ -305,11 +329,32 @@ module tt_um_protocol_emulator #(
           status_turn <= 1'b0;
         end else if (prog_mode) begin
           if (RX_SERIAL != 0) begin
-            ser_sh  <= {1'b0, s_rdata};
-            ser_cnt <= 4'd9;
-            rb_ptr  <= rb_ptr + 1'b1;
-            rb_re   <= 1'b1;
-            status_turn <= 1'b1;
+            // ⛔⛔ PRIME BEFORE FRAMING, and `rb_addr` alone was not enough.
+            // Latching the pre-increment address made byte 0 REACHABLE, but a
+            // frame is queued from `s_rdata` in the same breath as the read is
+            // REQUESTED, so frame 1 still carried whatever the register held
+            // from the previous walk: the stream read 0x22(stale), 0xAA, 0x22,
+            // ... with the image's own byte 0 arriving SECOND.
+            // ⭐ So the first two visits issue the read and let it land,
+            // queueing NO frame; from then on every frame carries the byte its
+            // own request fetched and byte 0 is the FIRST payload. This is the
+            // same prime-before-release shape the engine already uses, for the
+            // same reason: a pipeline's first output is not data.
+            if (rb_prime != 2'd2) begin
+              if (rb_prime == 2'd0) begin
+                rb_addr <= rb_ptr;            // address 0, pre-increment
+                rb_ptr  <= rb_ptr + 1'b1;
+                rb_re   <= 1'b1;
+              end
+              rb_prime <= rb_prime + 2'd1;
+            end else begin
+              ser_sh  <= {1'b0, s_rdata};
+              ser_cnt <= 4'd9;
+              rb_addr <= rb_ptr;          // THE PRE-INCREMENT ADDRESS
+              rb_ptr  <= rb_ptr + 1'b1;
+              rb_re   <= 1'b1;
+              status_turn <= 1'b1;
+            end
           end
         end else if (e_rx_push) begin
           ser_sh      <= {1'b0, e_rx_data};
