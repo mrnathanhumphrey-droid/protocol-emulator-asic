@@ -186,6 +186,52 @@ def main() -> int:
         print("    cheapest available check that the model of the chain matches")
         print("    the chain.")
 
+    # ---- condition 3: the FIRST SAMPLE pinned against 0.9b -------------
+    print()
+    print("  --- condition 3: the first sample lands at t_edge + half ---")
+    from bursty import UART_RX                                    # noqa
+    DLY_W, C_A = 10, 2
+    t = UART_RX.t
+    half = t // 2
+    lo_s = int(_m.floor(lo)) + C_A + half + 1
+    hi_s = l_sync_derived + C_A + half + 1
+    print("    UART-rx bit cell t = %d, centre = %d, D_tol = %d"
+          % (t, half, UART_RX.D_tol))
+    print("    first sample = L_sync + C(no-op) + half + 1 dispatch")
+    print("                 = %d..%d cycles after the TRUE edge" % (lo_s, hi_s))
+    print("    offset from the bit centre : %+d .. %+d  (half-cell margin %d)"
+          % (lo_s - half, hi_s - half, half))
+    inside = (hi_s - half) < half and (half - (lo_s - half)) > 0
+    spread_ok = (hi_s - lo_s) <= L_JIT
+    print("    lands INSIDE the bit cell        : %s"
+          % ("PASS" if inside else "*** FAIL"))
+    print("    spread <= L_JIT (%d)              : %s  (%d cycle)"
+          % (L_JIT, "PASS" if spread_ok else "*** FAIL", hi_s - lo_s))
+    if not (inside and spread_ok):
+        print("    *** the first sample is not reliably inside the bit cell, so")
+        print("        the idiom does not deliver what 0.9b's anchor assumes.")
+        return 1
+    # ⭐ AND THE FIELD MUST BE ABLE TO EXPRESS BOTH ANCHORS. 0.5t confirms the
+    # START bit (a framing check); 1.5t is the first DATA bit's centre, which is
+    # what the census's p_uart_rx (ARM, SHIFTIN 8, READBIT) actually implies.
+    # Which one a program uses is a PROGRAM choice; the mechanism must not
+    # constrain it.
+    dmax = (1 << DLY_W) - 1
+    a05, a15 = half, 3 * t // 2
+    print("    delay field: DLY_W = %d -> max %d cycles" % (DLY_W, dmax))
+    print("      start-bit centre  0.5t = %-5d fits: %s" % (a05, a05 <= dmax))
+    print("      first DATA centre 1.5t = %-5d fits: %s" % (a15, a15 <= dmax))
+    if a15 > dmax:
+        print("    *** the DATA anchor does NOT fit the delay field, so the")
+        print("        idiom cannot express what the census's p_uart_rx needs.")
+        return 1
+    print("    ⭐ BOTH anchors fit, so the offset is a PROGRAM choice and not a")
+    print("    mechanism constraint. ⚠ The census's p_uart_rx implies the DATA")
+    print("    anchor (1.5t = %d); 0.5t confirms the START bit instead. The" % a15)
+    print("    idiom is indifferent -- which is what makes it the cheap option.")
+    print("    ⚠ NOT CHECKED HERE: that the SHIPPED image uses the right one.")
+    print("    That is a program property, and 1.6 is where a program is judged.")
+
     print()
     print("=" * 78)
     print("  GATE edge-capture: PASSED")

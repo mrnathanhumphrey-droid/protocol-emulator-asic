@@ -87,8 +87,19 @@ def p_uart_tx():
 
 
 def p_uart_rx():
+    # ⛔⛔ THE NO-OP IS AN ACTION AND THE CENSUS HAD MISSED IT. The original line
+    # said SHIFTIN was "centred by the lane's phase", which assumed the centring
+    # was FREE. It is not: the edge rebase lands the first action AT the edge,
+    # ARM's delay field is the TIMEOUT, and a delay only takes effect at an
+    # action's WRITEBACK -- so the half-bit offset needs an action of its own.
+    # ⭐ The idiom is the reserved non-driving pin index (no new opcode), and
+    # Ruling 2 makes it exact: writeback adds to the STORED timestamp, so the
+    # sample lands at `edge + offset` however late the no-op was serviced.
     return [(ARM, "wait for the START edge (REACTIVE lane)"),
-            (SHIFTIN, "sample 8 bits at T, centred by the lane's phase"),
+            (LEVEL, "NO-OP on the reserved non-driving pin index, delay = the "
+                    "first-sample offset (1.5 bit periods = 621 for the first "
+                    "DATA bit centre; fits DLY_W = 10)"),
+            (SHIFTIN, "sample 8 bits at T, anchored to the captured edge"),
             (READBIT, "sample the stop bit -- framing check, sets sticky ovr")]
 
 
@@ -157,6 +168,8 @@ def p_spi_target():
     # data and release. ⭐ The RELEASE is not an action -- 1.6r made it an
     # async-clear on uio_oe, i.e. HARDWARE, which is why it costs 0 bytes here.
     return [(ARM, "arm on CS falling (REACTIVE lane)"),
+            (LEVEL, "NO-OP on the reserved non-driving pin index -- the "
+                    "setup offset from CS fall to the first MISO bit"),
             (SHIFT, "8 bits out on MISO, clocked by the observed SCK")]
 
 

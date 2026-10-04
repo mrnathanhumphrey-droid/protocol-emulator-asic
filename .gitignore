@@ -47,6 +47,9 @@ test/stress_image.hex
 test/five_image.hex
 test/chain_image.hex
 test/census_image.hex
+test/noop_image_h19.hex
+test/noop_image_bad.hex
+test/noop_image.hex
 test/edge_image_rise.hex
 test/edge_image_noto.hex
 test/edge_image.hex

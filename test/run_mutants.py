@@ -57,6 +57,19 @@ EDGE_MUTANTS = [
      "A program then cannot tell 'the peer answered' from 'the peer never "
      "answered' and would read a frame out of an idle line -- the forbidden "
      "direction one level up from an unsound bound."),
+    ("M_NOOP_DRIVES",
+     "remove the pin_real guard: a no-op drives its pin",
+     "(characterised survivor -- structural only)",
+     "⛔ NOT KILLABLE BY SIMULATION, and the reason is specific: with "
+     "PIN_NONE = 15 on 12-wide vectors an out-of-range write is SILENTLY "
+     "IGNORED by iverilog, so removing the guard changes nothing the bench can "
+     "see. It DOES take effect -- the local netlist gains 3 cells, so the "
+     "comparator is real logic, not documentation. ⭐ The guard's value is "
+     "SYNTHESIS portability: out-of-range indexing is where tool behaviour "
+     "diverges, which is the class that passed iverilog and died in Yosys "
+     "once already. ⚠ The OBSERVABLE failure is a BAD PROGRAM, not this "
+     "mutant: a no-op naming a real input pin, which tb_edge catches (135 "
+     "drive cycles) and 1.6w rejects at load."),
     ("M_COMB_OUT",
      "restore the combinational prog_mode mux on the uio outputs",
      "(structural, checked by F2 on the local netlist)",
@@ -314,7 +327,7 @@ def main() -> int:
         else:
             print("    baseline: PASS (4 of 4 must-fires)")
             for define, breaks, want, why in EDGE_MUTANTS:
-                if define == "M_COMB_OUT":
+                if define in ("M_COMB_OUT", "M_NOOP_DRIVES"):
                     print("    %-19s %-40s %s"
                           % (define, breaks[:40], "structural -- see F2"))
                     print("        %s" % why)

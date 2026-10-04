@@ -411,6 +411,24 @@ module pe_engine #(
   wire [DLY_W-1:0] a_dly   = cur_act[BPW +: DLY_W];
   wire [BPW-1:0]   a_cnt   = cur_act[0 +: BPW];
 
+  // ⭐⭐ THE RESERVED NON-DRIVING PIN INDEX. PINW encodes 2**PINW codes and only
+  // N_PINS are real, so `PIN_NONE` costs nothing: it is a value that already
+  // existed and had no meaning.
+  // ⛔ `pin_real` GUARDS ON THE WHOLE OUT-OF-RANGE SET, not just on PIN_NONE,
+  // and that is deliberate: an index of 12..14 would otherwise write
+  // `pin_out[12]` on a 12-wide vector, which is an out-of-range write whose
+  // behaviour differs between simulators and synthesis -- exactly the class of
+  // thing that passed iverilog and died in Yosys once already. Treating every
+  // out-of-range code as non-driving is the safe reading; 1.6w REJECTS the
+  // unreserved ones at load, so a typo'd pin index is a loader error rather
+  // than a silent no-op.
+  localparam [PINW-1:0] PIN_NONE = {PINW{1'b1}};
+`ifdef M_NOOP_DRIVES
+  wire pin_real = 1'b1;           // the mutant: a no-op DRIVES its pin
+`else
+  wire pin_real = (a_pin < N_PINS[PINW-1:0]);
+`endif
+
   // =====================================================================
   // HEADER LOAD -- on entering run, pull N_LANES headers out of the image.
   // ⛔ D_tol is in the image and is NOT loaded into any register (ruling F3):
@@ -882,8 +900,28 @@ module pe_engine #(
 
         ST_DRIVE: begin
           // ⭐ C9 = START: the pin moves in the FIRST cycle of service.
+          // ⛔⛔ EVERY DRIVING CASE IS GUARDED BY `pin_real`, WHICH IS THE
+          // NON-DRIVING NO-OP (the half-bit offset ruling, option (b)).
+          // `PIN_NONE` is a RESERVED pin index: PINW = 4 encodes 16 values and
+          // only N_PINS = 12 are real, so the code was already there and the
+          // whole mechanism is a decode tweak -- no new opcode, no new field.
+          // ⭐ WHY A NO-OP IS NEEDED AT ALL: the edge rebase sets
+          // `l_timestamp := now`, so the FIRST action after ARM dispatches AT
+          // the edge -- while UART-rx needs its first sample at `edge + half`.
+          // ARM's delay field is the TIMEOUT, and a delay only takes effect at
+          // an action's WRITEBACK, so it delays the NEXT action and not its
+          // own. The idiom is therefore `ARM -> no-op(delay = half) -> sample`.
+          // ⭐⭐ AND RULING 2 IS WHAT MAKES IT EXACT: writeback adds to the
+          // STORED timestamp, so the sample lands at `t_edge + half` however
+          // late the no-op itself is serviced. The no-op's own service jitter
+          // never reaches the sampling grid.
+          // ⛔ IT MUST BE GUARANTEED NON-DRIVING, not merely intended to be:
+          // on a reactive lane the lane's pin is an INPUT, and a no-op that
+          // drove it would fight the peer -- the same contention class 1.6r
+          // closed on MISO. `pin_real` is that guarantee, and
+          // `M_NOOP_DRIVES` removes it so the bench can show the difference.
           case (a_op)
-            OP_LEVEL, OP_START, OP_STOP: begin
+            OP_LEVEL, OP_START, OP_STOP: if (pin_real) begin
               if (l_mode[cur]) begin
                 pin_out[a_pin] <= a_lvl;        // push-pull: drive both levels
                 pin_oe[a_pin]  <= 1'b1;
@@ -892,7 +930,7 @@ module pe_engine #(
                 pin_oe[a_pin]  <= ~a_lvl;       // low = drive, high = release
               end
             end
-            OP_SHIFT: begin
+            OP_SHIFT: if (pin_real) begin
               if (l_mode[cur]) begin
                 pin_out[a_pin] <= l_data[cur][0];
                 pin_oe[a_pin]  <= 1'b1;
@@ -904,7 +942,7 @@ module pe_engine #(
               pin_oe[l_clkpin[cur]]  <= 1'b1;   //   clock, so data and clock
                                                 //   never need P-ORDER per bit
             end
-            OP_SHIFTIN, OP_READBIT: begin
+            OP_SHIFTIN, OP_READBIT: if (pin_real) begin
               pin_oe[a_pin] <= 1'b0;            // release to sample
             end
             // ⭐ OP_ARM moves no pin -- it RELEASES the lane on a peer edge.

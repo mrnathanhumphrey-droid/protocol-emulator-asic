@@ -299,8 +299,59 @@ def build_edge(timeout: int, d1: int = 12, arm_pin: int = 0,
     return b"".join(headers) + b"".join(prog)
 
 
+PIN_NONE = 15          # the reserved non-driving index (PINW=4, N_PINS=12)
+
+
+def build_noop(timeout: int, half: int, d1: int = 12, arm_pin: int = 0,
+               noop_pin: int = PIN_NONE):
+    """The HALF-BIT OFFSET IDIOM: ARM -> no-op(delay=half) -> first sample.
+
+    ⭐ WHY IT IS EXACT. The edge rebase sets `l_timestamp := now`, so the first
+    action after ARM dispatches AT the edge -- but a UART receiver needs its
+    first sample at `edge + half`. ARM's delay field is the TIMEOUT, and a delay
+    only takes effect at an action's WRITEBACK (so it delays the NEXT action,
+    not its own). Hence a no-op carrying `half`.
+    ⭐⭐ And Ruling 2 is what makes the landing exact: writeback adds to the
+    STORED timestamp, so the sample lands at `t_edge + half` HOWEVER LATE the
+    no-op itself is serviced. The no-op's own service jitter never reaches the
+    grid.
+
+    `noop_pin` exists to build the BAD program: a no-op that names the lane's
+    ARM pin -- a real INPUT -- instead of the reserved index. That one drives
+    against the peer and must show up as X on the resolved bus, which is the
+    contention class 1.6r closed on MISO.
+    """
+    prog, headers = [], []
+    l0 = ACT_BASE
+    prog.append(act(OP_ARM, arm_pin, 0, timeout))        # arm on FALL
+    prog.append(act(OP_LEVEL, noop_pin, 0, half))        # the NO-OP: half a bit
+    prog.append(act(OP_LEVEL, UO0, 0, d1))               # "first sample"
+    prog.append(act(OP_LEVEL, UO0, 1, d1))
+    prog.append(act(OP_REARM, 0, 1, d1))
+    lp = l0 + 5 * ACT_BYTES
+    prog.append(act(OP_REARM, 0, 0, 500))
+    headers.append(hdr(UO0, UO0, 1, d1, 2, 2 * d1, 3 * d1, l0))
+    for n in range(1, N_LANES):
+        headers.append(hdr(n, n, 0, 500, 2, 200, 240, lp))
+    return b"".join(headers) + b"".join(prog)
+
+
 def main() -> int:
     here = os.path.dirname(os.path.abspath(__file__))
+    if "--noop" in sys.argv:
+        # --noop <timeout> <half> [bad] -- `bad` points the no-op at the arm pin
+        k = sys.argv.index("--noop")
+        to, half = int(sys.argv[k + 1]), int(sys.argv[k + 2])
+        bad = len(sys.argv) > k + 3 and sys.argv[k + 3] == "bad"
+        img = build_noop(to, half, noop_pin=(0 if bad else PIN_NONE))
+        name = "noop_image_bad" if bad else "noop_image"
+        out = os.path.join(here, name + ".hex")
+        with open(out, "w", encoding="ascii") as fh:
+            for b in img:
+                fh.write("%02x\n" % b)
+        print("%s (timeout=%d half=%d noop_pin=%d), %d bytes -> %s"
+              % (name, to, half, 0 if bad else PIN_NONE, len(img), out))
+        return 0
     if "--edge" in sys.argv:
         # --edge <timeout> [edge_polarity] [basename]
         # ⭐ THREE VARIANTS, because the four must-fires need different stimuli:

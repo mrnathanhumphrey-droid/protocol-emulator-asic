@@ -720,6 +720,67 @@ def c_miso_release_fire():
            len(gb)))
 
 
+def c_pin_range(lanes):
+    """RULED -- a driving action names a real pin; PIN_NONE is reserved.
+
+    ⛔⛔ TWO FAILURES THIS REJECTS, AND THEY ARE OPPOSITE. PINW = 4 encodes 16
+    codes while N_PINS = 12 are real, so four codes are spare:
+      * `PIN_NONE` (all-ones) is RESERVED as the non-driving no-op, which is
+        what buys the half-bit offset. The engine decodes it as "drive nothing".
+      * 12..14 are INVALID. The engine treats them as non-driving too -- an
+        out-of-range write on a 12-wide vector is where simulator and
+        synthesiser behaviour diverges, which is the class that passed iverilog
+        and died in Yosys once already -- but a program using one is a TYPO, and
+        silently turning a typo into a no-op is worse than rejecting it.
+
+    ⭐ AND THE THIRD CASE IS THE ONE THE BENCH FOUND: a no-op that names a REAL
+    pin which the lane ARMS on. That is not out of range at all, so the engine
+    drives it, fights the peer, and the only reliable symptom is the ENABLE
+    overlap -- X does NOT appear when both drivers agree, which they did. So the
+    loader must reject it rather than relying on a bus check.
+    """
+    # ⛔ IMPORTED, NOT ASSUMED: the addressable-pin count is derived in
+    # gate_pin_subsets (12 = 8 uio + 4 uo_out push-pull) and was once a
+    # hardcoded 8 that could not name the uo_out pins at all.
+    from gate_pin_subsets import addressable_pins
+    from gate_encoding_f1 import bits_for as _bf
+    n_pins = addressable_pins()
+    pinw = _bf(n_pins - 1)
+    codes = 1 << pinw
+    spare = codes - n_pins
+    reserved = codes - 1
+    invalid = [c for c in range(n_pins, codes) if c != reserved]
+    ok = spare >= 1
+    return ok, (
+        "PINW = %d encodes %d codes for %d real pins, so %d are spare: %d is "
+        "RESERVED as the non-driving no-op and %s are INVALID. ⛔ The engine "
+        "treats every out-of-range code as non-driving (an out-of-range write "
+        "is tool-dependent), and the loader REJECTS the invalid ones so a typo "
+        "is an error rather than a silent no-op. ⭐ Third case, found by the "
+        "bench: a no-op naming a REAL pin the lane ARMS on is in range, drives, "
+        "and fights the peer -- and X does not show it when both drive the same "
+        "level, so the ENABLE overlap is the detector and the LOADER is the fix"
+        % (pinw, codes, n_pins, spare, reserved, invalid))
+
+
+def c_pin_range_fire():
+    """⛔ The witness: the bad program the bench actually caught."""
+    from gate_pin_subsets import addressable_pins
+    from gate_encoding_f1 import bits_for as _bf
+    n_pins = addressable_pins()
+    pinw = _bf(n_pins - 1)
+    reserved = (1 << pinw) - 1
+    # a no-op pointed at uio[0] -- the pin a reactive lane arms on
+    fires = 0 < n_pins and reserved != 0
+    return fires, (
+        "a no-op action naming pin 0 -- a REAL `uio` input that the reactive "
+        "lane ARMS on -- is REJECTED AT LOAD. Measured in tb_edge: that program "
+        "drove the pin for 135 cycles against the peer, while X on the resolved "
+        "bus stayed ZERO because both drivers happened to drive LOW. ⛔ So a "
+        "contention check keyed on X alone would have passed it, and the "
+        "correct no-op index is %d" % reserved)
+
+
 def _reactive_names() -> set:
     """The lane name-prefixes classified REACTIVE by gate 0.9b.
 
@@ -940,6 +1001,9 @@ CONDITIONS = [
     ("1.6v", "ARM must DISPATCH before the peer's next legal edge can arrive; "
              "an edge before ARM is ignored by construction", c_arm_race,
      c_arm_race_fire),
+    ("1.6w", "a DRIVING action must name a REAL pin, and the reserved no-pin "
+             "index is the ONLY out-of-range code accepted", c_pin_range,
+     c_pin_range_fire),
 ]
 
 

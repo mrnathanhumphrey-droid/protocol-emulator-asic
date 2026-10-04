@@ -74,6 +74,8 @@ GATES = [
     ("jitter_instances.py", "J0   one jitter instance list + recorded verdicts", False),
     ("gate_edge_capture.py",
      "EC   L_sync derived from the sync chain; <= A2's 3, jitter <= 1", False),
+    ("gate_noop_job.py",
+     "NOP  the half-bit no-op as a real job; A2 + pyRTA re-quoted", True),
     ("gate_j_program.py", "J1b  J(d_min) derived; shipped J=1, universal J=8", False),
     # ⛔ `../` because this one lives in model/ with the other RTL-FACING gates
     # (part1_param_contract, f2_flop_driven_outputs), not in model/a2/ with the

@@ -50,7 +50,15 @@ module tb_edge;
   genvar b;
   generate
     for (b = 0; b < 8; b = b + 1) begin : g_bus
-      assign uio_in[b] = uio_oe[b]    ? uio_out[b]
+      // ⛔⛔ TWO ACTIVE DRIVERS RESOLVE TO X, WHICH IS THE POINT. The first
+      // version gave the ENGINE priority -- `uio_oe ? uio_out : uio_drv` --
+      // so a no-op driving against the peer produced a clean value and the
+      // bad program showed ZERO X. A bus model that silently picks a winner
+      // cannot detect contention, which is the single thing a resolved bus is
+      // for, and it is the class 1.6r closed on MISO.
+      assign uio_in[b] = (uio_oe[b] && uio_oe_tb[b])
+                       ? ((uio_out[b] === uio_drv[b]) ? uio_out[b] : 1'bx)
+                       : uio_oe[b]    ? uio_out[b]
                        : uio_oe_tb[b] ? uio_drv[b]
                        : 1'b1;                       // idle high (pull-up)
     end
@@ -136,6 +144,11 @@ module tb_edge;
       for (i = 0; i < n; i = i + 1) begin
         @(posedge clk);
         cyc = cyc + 1;
+        // ⛔ the engine must drive NO uio bit on a reactive-lane program, and
+        // the resolved bus must never go X. Counted every cycle rather than
+        // sampled, because a one-cycle contention is still a corrupted bit.
+        if (uio_oe !== 8'h00) oe_viol = oe_viol + 1;
+        if (^uio_in === 1'bx) x_viol = x_viol + 1;
         if (uo_out[0] !== prev_uo0 && seen_out == 0 && t_edge >= 0
             && cyc > t_edge) begin
           t_out = cyc; seen_out = 1;
@@ -147,10 +160,11 @@ module tb_edge;
 
   // ------------------------------------------------------------------
   integer k, phase, delta, delta0, mismatch, armed_at;
+  integer oe_viol, x_viol, noop_a, noop_b;
   integer to_lane_live, to_flag, acts_after;
 
   initial begin
-    errors = 0;
+    errors = 0; oe_viol = 0; x_viol = 0;
     if (!$value$plusargs("IMG=%s", imgfile)) imgfile = "test/edge_image.hex";
     $readmemh(imgfile, img);
     img_bytes = 0;
@@ -318,8 +332,149 @@ module tb_edge;
       $display("      stretching a LATENCY question rather than a C_i one.");
     end
 
+    // =================================================================
+    // MUST-FIRE 5 -- THE NON-DRIVING NO-OP, and the half-bit landing
+    // =================================================================
+    // ⛔⛔ TWO CLAIMS, AND THEY NEED DIFFERENT EVIDENCE.
+    //   (a) the no-op DRIVES NOTHING: on a reactive lane the lane's pin is an
+    //       INPUT, so a no-op that drove it would fight the peer -- the
+    //       contention class 1.6r closed on MISO. Checked as `uio_oe == 0`
+    //       throughout AND as no X on the resolved bus.
+    //   (b) the first sample lands at `t_edge + half`, not at the edge. That is
+    //       the whole reason the idiom exists, and it is checked
+    //       DIFFERENTIALLY against must-fire 1's figure: the same program
+    //       WITHOUT the no-op measured 18 cycles, so with a half of 7 it must
+    //       measure 18 + 7 = 25, and the DIFFERENCE is the offset the no-op
+    //       bought. An absolute number could be right for the wrong reason.
     $display("");
-    if (errors == 0) $display("  tb_edge: PASS (4 of 4 must-fires)");
+    $display("  --- 5 NO-OP: non-driving, and it buys the half-bit offset ---");
+    $readmemh("test/noop_image.hex", img);
+    img_bytes = 0;
+    for (i = 0; i < IMG_MAX; i = i + 1)
+      if (^img[i] !== 1'bx) img_bytes = i + 1;
+    cyc = 0; t_edge = -1; t_out = -1; seen_out = 0; prev_uo0 = 1;
+    oe_viol = 0; x_viol = 0;
+    load_and_run;
+    wait_armed(400);
+    if (armed_at < 0) begin
+      $display("      *** the lane never ARMED");
+      errors = errors + 1;
+    end
+    run_cycles(20);
+    uio_drv[arm_pin] = 1'b0;          // the peer edge
+    t_edge = cyc;
+    run_cycles(140);
+    $display("      uio_oe non-zero cycles  : %0d (want 0)", oe_viol);
+    $display("      X on the resolved bus   : %0d (want 0)", x_viol);
+    $display("      t_out - t_edge (half=7) : %0d", t_out - t_edge);
+    noop_a = t_out - t_edge;
+    if (oe_viol != 0 || x_viol != 0) begin
+      $display("      *** MUST-FIRE 5a FAILED: the no-op DROVE a pin. On a");
+      $display("          reactive lane that pin is an INPUT, so the engine is");
+      $display("          fighting the peer -- the contention class 1.6r closed.");
+      errors = errors + 1;
+    end else begin
+      $display("      5a PASS -- drove nothing, no X on the resolved bus.");
+    end
+
+    // ⛔⛔ 5b IS DIFFERENTIAL IN `half`, AND THE FIRST VERSION WAS NOT -- it
+    // compared against must-fire 1's 18 cycles, which is a DIFFERENT PROGRAM:
+    // there the first LEVEL drives HIGH (invisible, reset already drives the
+    // protocol outputs high) and the visible edge is the SECOND action, while
+    // here the first LEVEL drives LOW and is visible immediately. 13 was the
+    // CORRECT answer and my expectation of 18 + 7 was apples-to-oranges.
+    // ⭐ Running the SAME program at two values of `half` removes every term
+    // except the one under test: the difference in landing must equal the
+    // difference in `half`, whatever the fixed overhead is.
+    $display("");
+    $display("      --- 5b differential: half=7 vs half=19 ---");
+    $readmemh("test/noop_image_h19.hex", img);
+    img_bytes = 0;
+    for (i = 0; i < IMG_MAX; i = i + 1)
+      if (^img[i] !== 1'bx) img_bytes = i + 1;
+    cyc = 0; t_edge = -1; t_out = -1; seen_out = 0; prev_uo0 = 1;
+    oe_viol = 0; x_viol = 0;
+    load_and_run;
+    wait_armed(400);
+    run_cycles(20);
+    uio_drv[arm_pin] = 1'b0;
+    t_edge = cyc;
+    run_cycles(160);
+    noop_b = t_out - t_edge;
+    $display("      half=7  -> %0d cycles", noop_a);
+    $display("      half=19 -> %0d cycles", noop_b);
+    $display("      difference %0d, programmed difference 12", noop_b - noop_a);
+    if ((noop_b - noop_a) != 12) begin
+      $display("      *** MUST-FIRE 5b FAILED: the landing did not move by the");
+      $display("          programmed amount, so the no-op's delay is not");
+      $display("          reaching the sampling grid.");
+      errors = errors + 1;
+    end else begin
+      $display("      5b PASS -- the sample moves by EXACTLY the programmed");
+      $display("      half. ⭐ Ruling 2 is why: writeback adds to the STORED");
+      $display("      timestamp, so the landing is edge + half however late the");
+      $display("      no-op itself was serviced -- its own service jitter never");
+      $display("      reaches the grid.");
+    end
+
+    // ---- and the BAD program must be caught -------------------------
+    // ⛔ THE RTL MUTANT `M_NOOP_DRIVES` CANNOT BE SEEN HERE, and that is stated
+    // rather than worked around: with `PIN_NONE = 15` on 12-wide vectors, an
+    // out-of-range write is SILENTLY IGNORED by iverilog, so removing the
+    // `pin_real` guard changes nothing in simulation. The guard's value is
+    // SYNTHESIS safety -- out-of-range indexing is where tool behaviour
+    // diverges, which is the class that passed iverilog and died in Yosys once
+    // already -- and it is checked structurally, not here.
+    // ⭐ WHAT *IS* OBSERVABLE is the BAD PROGRAM: a no-op that names the lane's
+    // ARM pin, a real input. That drives against the peer and must show as X on
+    // the resolved bus. It is also what 1.6w rejects at load.
+    $display("");
+    $display("      --- the BAD program (no-op on a real input pin) ---");
+    $readmemh("test/noop_image_bad.hex", img);
+    img_bytes = 0;
+    for (i = 0; i < IMG_MAX; i = i + 1)
+      if (^img[i] !== 1'bx) img_bytes = i + 1;
+    cyc = 0; t_edge = -1; t_out = -1; seen_out = 0; prev_uo0 = 1;
+    oe_viol = 0; x_viol = 0;
+    load_and_run;
+    wait_armed(400);
+    run_cycles(20);
+    uio_drv[arm_pin] = 1'b0;
+    t_edge = cyc;
+    run_cycles(140);
+    $display("      uio_oe non-zero cycles  : %0d (want > 0 -- it DRIVES)",
+             oe_viol);
+    $display("      X on the resolved bus   : %0d  <- see below", x_viol);
+    // ⛔⛔ X IS A SYMPTOM OF DISAGREEMENT, NOT OF CONTENTION, AND THE RULING'S
+    // "contention -> X; bench asserts no-X" WOULD MISS THIS CASE. Here the
+    // peer drives the arm pin LOW (that is the edge) and the bad program's
+    // no-op drives it LOW as well, so two drivers are fighting and the
+    // resolved value is a clean 0. A bus check that keys only on X reports
+    // nothing.
+    // ⭐ THE RELIABLE DETECTOR IS THE ENABLE, not the value: the engine
+    // asserting `uio_oe` on a pin the program arms on is a fight whether or
+    // not the values agree. X is kept as a second, weaker signal -- it catches
+    // the disagreeing case and says nothing about the agreeing one.
+    // ⇒ Phase 2's resolved-bus arm must assert on ENABLE OVERLAP as well as on
+    //   X, or it will pass a design that drives against its peer in agreement.
+    $display("      ⚠ X requires the two drivers to DISAGREE. Here both drive");
+    $display("        LOW, so the bus resolves cleanly and X stays 0 -- the");
+    $display("        contention is real and X cannot see it. The ENABLE");
+    $display("        overlap is what catches it.");
+    if (oe_viol == 0 && x_viol == 0) begin
+      $display("      *** THE BAD PROGRAM WAS NOT CAUGHT. A no-op pointed at a");
+      $display("          real input pin produced neither a drive nor an X, so");
+      $display("          this bench cannot tell the reserved index from a");
+      $display("          real one and must-fire 5a proves nothing.");
+      errors = errors + 1;
+    end else begin
+      $display("      caught -- the bench distinguishes the reserved index from");
+      $display("      a real pin, so 5a above is a real check. ⛔ 1.6w rejects");
+      $display("      this program at LOAD rather than relying on the bench.");
+    end
+
+    $display("");
+    if (errors == 0) $display("  tb_edge: PASS (5 of 5 must-fires)");
     else             $display("  tb_edge: %0d FAILURE(S)", errors);
     $finish;
   end
