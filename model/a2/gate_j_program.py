@@ -139,6 +139,22 @@ SWEEP = {
     11: 0, 12: 0, 13: 0, 14: 0, 15: 0, 16: 0, 18: 0, 20: 0, 25: 0,
 }
 # The single-buffer arm, same sweep, for the double buffer's price.
+# ⛔⛔ THIS ARM CANNOT BE RE-MEASURED, AND THE BENEFIT CLAIM RESTS ON IT.
+# `NSLOT = 2 * N_LANES` is hardcoded in pe_engine.v and there is NO
+# single-buffer build option -- no define, no parameter. So these numbers
+# describe a configuration that cannot be rebuilt, while `worst_s` below still
+# computes the double buffer's advertised benefit from them.
+# ⚠ WORSE THAN THE J SWEEP, which at least had a script that *could* have
+# re-measured it once written. Here there is nothing to run.
+# ⭐ AND THE J ARM'S VALUES WERE WRONG, so these have no claim to be right:
+# the double-buffer "universal worst case 11 -> 7" was computed from the same
+# recorded sweep that live measurement has now contradicted at ten admissible
+# points. The benefit is therefore UNVERIFIED, not merely stale.
+# ⇒ OWED, and Wilson's call which way: either add an `M_SINGLE_BUF` build
+#   option (head-only fill, no spare, no swap) so the comparison becomes
+#   reproducible, or RETRACT the benefit claim. The double buffer costs ~169
+#   flops; keeping it on the strength of an unrepeatable measurement is the
+#   thing this project keeps finding and fixing.
 SWEEP_SINGLE = {
     2: 5, 3: 5, 4: 5, 5: 5, 6: 5, 7: 8, 8: 8, 9: 8, 10: 8,
     11: 3, 12: 4, 13: 3, 14: 2, 15: 1, 16: 0, 18: 0, 20: 0, 25: 0,
