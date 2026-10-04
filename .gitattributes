@@ -1,0 +1,12 @@
+# Shell scripts MUST check out with LF, on every platform.
+#
+# WHY: core.autocrlf is true on the Windows development machine, so without
+# this a fresh clone converts these files to CRLF -- and a CRLF shell script
+# does not run under WSL bash, it dies on the shebang or on a stray carriage
+# return inside a here-document. The scripts in test/ are invoked precisely
+# that way (`wsl.exe -d Ubuntu -- bash .../test/verilator_trace.sh`), so the
+# breakage would appear only after a re-checkout, on a tree that had always
+# worked, and would look like a WSL or toolchain problem.
+#
+# The files are already STORED with LF; this pins the checkout side too.
+*.sh text eol=lf

@@ -28,7 +28,7 @@ cat > /tmp/pe_check.ys <<'YS'
 read_verilog src/pe_store.v
 read_verilog src/pe_engine.v
 read_verilog src/project.v
-hierarchy -top tt_um_protocol_emulator
+hierarchy -top tt_um_protocol_emulator -check
 proc
 opt
 check -assert
@@ -58,6 +58,33 @@ if [ "$RC" -ne 0 ] || [ "$MD" -ne 0 ] || [ "$ER" -ne 0 ]; then
     echo "  *** NOT SYNTHESISABLE -- do not push. Full log /tmp/pe_full.log"
     exit 1
 fi
+# ---- price the elaboration-time static assertion, IN YOSYS -------------
+# ⛔⛔ IT WAS SILENT HERE UNTIL NOW, which is the whole reason Wilson asked.
+# `hierarchy` without `-check` treats an unknown module as a BLACK BOX, so the
+# undefined-module assertion elaborated cleanly at AW=4 and yosys exited 0 --
+# an assertion that fires in iverilog and Verilator and says NOTHING in the
+# tool that builds the chip. With `-check` it errors by name.
+# ⚠ WHAT THIS DOES AND DOES NOT ESTABLISH: it proves OUR synthesis gate catches
+# it. Whether LibreLane's own synth script passes `-check` is NOT verified
+# here, so the guarantee is ours, not the flow's.
+echo
+echo "  --- static assertion, priced in yosys ---"
+cat > /tmp/pe_assert_bad.ys <<'YS'
+read_verilog src/pe_engine.v
+chparam -set AW 4 pe_engine
+hierarchy -top pe_engine -check
+YS
+yosys -s /tmp/pe_assert_bad.ys > /tmp/pe_assert_bad.log 2>&1
+AB=$?
+if [ "$AB" -ne 0 ] && grep -qi 'HEADER_REGION_DOES_NOT_FIT' /tmp/pe_assert_bad.log; then
+    echo "  AW=4 fails elaboration with the diagnostic: PASS"
+else
+    echo "  *** AW=4 did NOT fail with the diagnostic (exit $AB). The static"
+    echo "      assertion is SILENT in the synthesis path, so it guards"
+    echo "      simulation only."
+    exit 1
+fi
+
 echo "  PASS -- elaborates in plain Verilog, check -assert clean, no"
 echo "  multiple drivers. ⚠ This is NOT a timing or area verdict: only the"
 echo "  real harden in CI produces PDK cells, congestion and slack."

@@ -884,7 +884,21 @@ module pe_engine #(
               pl <= (pl == LANE_LAST) ? {LW{1'b0}} : pl + 1'b1;
             end
           end
+          // ⛔⛔ M_PFETCH_NOWAIT IS THE PRICE OF ALLOWLIST ENTRY #2. The reset
+          //    audit allows `s_wrdata` unreset because "captured at P_CAP,
+          //    which only runs after a real P_REQ -- so it is
+          //    write-before-read". THIS WAIT STATE IS THAT SENTENCE. Deleting
+          //    it makes P_CAP sample `s_wrdata` in the cycle the store is
+          //    still registering the read, so the FIRST refill captures a
+          //    never-written register: X in iverilog, a per-seed random
+          //    pattern under `--x-initial unique`, and therefore traces that
+          //    DISAGREE ACROSS SEEDS. That disagreement is the detector the
+          //    allowlist's prose otherwise only asserts.
+`ifdef M_PFETCH_NOWAIT
+          P_REQ:  pst <= P_CAP;
+`else
           P_REQ:  pst <= P_WAIT;         // request registered
+`endif
           P_WAIT: pst <= P_CAP;          // store read registered
           P_CAP:  begin
             // MSB-aligned: byte0 = {opcode, pin, level}, 2 spare at the bottom
