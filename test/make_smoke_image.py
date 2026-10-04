@@ -259,8 +259,65 @@ def build_census(d: int = 25):
     return b"".join(headers) + b"".join(prog)
 
 
+def build_edge(timeout: int, d1: int = 12, arm_pin: int = 0,
+               arm_edge: int = 0):
+    """A REACTIVE lane: arm on a peer edge, then move a pin.
+
+    lane 0:  ARM(arm_pin, edge=arm_edge, dly=timeout)
+             LEVEL(UO0, 1, d1)        <- dispatches AT the edge (see note)
+             LEVEL(UO0, 0, d1)        <- at edge + d1
+             REARM(level=1, d1)       <- loop, re-arms for the next frame
+    lanes 1-4: parked on a chaining re-arm.
+
+    `timeout = 0` encodes NO TIMEOUT (wait indefinitely), which is how UART-rx
+    idles between frames.
+
+    ⛔⛔ A SPEC GAP THIS EXPOSES, FLAGGED NOT PAPERED OVER. The rebase sets
+    `l_timestamp := now` at the edge, so the FIRST action after ARM dispatches
+    AT the edge. UART-rx needs its first sample at `edge + half`, and there is
+    nowhere to put that offset: ARM's delay field is the TIMEOUT, and a delay
+    only takes effect at an action's WRITEBACK, so it delays the NEXT action
+    rather than its own. The ISA has no pure-delay opcode -- the census's
+    p_uart_rx lists only (ARM, SHIFTIN, READBIT) and assumed "centred by the
+    lane's phase" was free. It is not. Needs a ruling: a pure-delay opcode, a
+    no-op LEVEL as the idiom, or a rebase of `now + offset`.
+    ⭐ The must-fire below does NOT depend on resolving it: varying the edge's
+    phase and requiring `t_out - t_edge` to be CONSTANT proves the anchor is the
+    edge, whatever the offset turns out to be.
+    """
+    prog, headers = [], []
+    l0 = ACT_BASE
+    prog.append(act(OP_ARM, arm_pin, arm_edge, timeout))
+    prog.append(act(OP_LEVEL, UO0, 1, d1))
+    prog.append(act(OP_LEVEL, UO0, 0, d1))
+    prog.append(act(OP_REARM, 0, 1, d1))
+    lp = l0 + 4 * ACT_BYTES
+    prog.append(act(OP_REARM, 0, 0, 500))
+    headers.append(hdr(UO0, UO0, 1, d1, 2, 2 * d1, 3 * d1, l0))
+    for n in range(1, N_LANES):
+        headers.append(hdr(n, n, 0, 500, 2, 200, 240, lp))
+    return b"".join(headers) + b"".join(prog)
+
+
 def main() -> int:
     here = os.path.dirname(os.path.abspath(__file__))
+    if "--edge" in sys.argv:
+        # --edge <timeout> [edge_polarity] [basename]
+        # ⭐ THREE VARIANTS, because the four must-fires need different stimuli:
+        #   edge_image       timeout=200, arm on FALL  -> rebase + timeout
+        #   edge_image_noto  timeout=0,   arm on FALL  -> no edge, no release
+        #   edge_image_rise  timeout=0,   arm on RISE  -> I2C clock stretch
+        k = sys.argv.index("--edge")
+        to = int(sys.argv[k + 1])
+        pol = int(sys.argv[k + 2]) if len(sys.argv) > k + 2 else 0
+        name = sys.argv[k + 3] if len(sys.argv) > k + 3 else "edge_image"
+        img = build_edge(to, arm_edge=pol)
+        out = os.path.join(here, name + ".hex")
+        with open(out, "w", encoding="ascii") as fh:
+            for b in img:
+                fh.write("%02x\n" % b)
+        print("edge image (timeout=%d), %d bytes -> %s" % (to, len(img), out))
+        return 0
     if "--census" in sys.argv:
         img = build_census()
         out = os.path.join(here, "census_image.hex")

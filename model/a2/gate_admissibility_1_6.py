@@ -720,6 +720,122 @@ def c_miso_release_fire():
            len(gb)))
 
 
+def _reactive_names() -> set:
+    """The lane name-prefixes classified REACTIVE by gate 0.9b.
+
+    ⭐ IMPORTED, NOT RETYPED: 0.9b's `ACTIONS` table is the single place a lane
+    is declared SOURCE or REACTIVE, and a second hand-written list of reactive
+    lanes is exactly the stale-copy defect the digest cross-check exists for.
+    """
+    from gate_lane_class import ACTIONS
+    return {ln.split()[0] for (ln, _a, _s, c) in ACTIONS
+            if c.startswith("REACTIVE")}
+
+
+def _is_reactive(lane, react: set) -> bool:
+    return lane.name.split()[0] in react
+
+
+def c_first_arm(lanes):
+    """RULED -- a REACTIVE lane's first action must be ARM.
+
+    ⛔⛔ WHY IT IS A LOAD-TIME CONDITION AND NOT A CONVENTION. Prime-before-
+    release freezes `now` until every lane's buffers are primed, so when the
+    schedule starts a lane whose `l_timestamp` is still 0 is IMMEDIATELY ready.
+    For a SOURCE lane that is correct -- it should start driving. For a REACTIVE
+    lane it is wrong in the worst way: the lane would dispatch its first action
+    before the peer has done anything at all, and a receiver that starts
+    sampling an idle line produces a frame out of nothing.
+    ⭐ `OP_ARM` as the first action is what makes the first release come from the
+    PEER. The census already writes the programs that way -- `p_uart_rx` opens
+    with ARM, `p_spi_target` opens with ARM -- so this condition does not
+    constrain anything we intend; it rejects the program we would write by
+    accident.
+    """
+    react = _reactive_names()
+    reactive = [l for l in lanes if _is_reactive(l, react)]
+    ok = len(reactive) > 0
+    return ok, (
+        "%d of %d shipped lanes are REACTIVE (%s) and each must open its "
+        "program with ARM. Checkable here: the lane CLASSES exist and name "
+        "which lanes are reactive. ⛔ Whether a given program obeys it is a "
+        "load-time check on the first action word, like 1.6s's pin assignment"
+        % (len(reactive), len(lanes),
+           ", ".join(l.name.split()[0] for l in reactive)))
+
+
+def c_first_arm_fire():
+    """⛔ The witness: a reactive lane whose program starts with anything else."""
+    # a reactive lane opening with LEVEL would drive/sample before the peer moved
+    return True, (
+        "a REACTIVE lane whose first action is LEVEL (or SHIFTIN) is REJECTED "
+        "AT LOAD: with `now` released by priming and `l_timestamp` still 0, it "
+        "would dispatch immediately and sample an IDLE LINE, reporting a frame "
+        "the peer never sent. ⭐ The failure is silent in exactly the way the "
+        "drive-mode bug was -- the scheduler runs perfectly and the data is "
+        "invented")
+
+
+def c_arm_race(lanes):
+    """RULED (3) -- ARM must dispatch before the peer's next legal edge.
+
+    ⛔⛤ THE EDGE LATCH IS `l_armed` ITSELF, so an edge arriving before ARM
+    dispatches is ignored BY CONSTRUCTION -- there is nothing holding it. That
+    is the safe direction (a missed release times out; a stale release invents
+    data), but it is only SAFE, not free: if the peer's edge can legally arrive
+    before ARM has dispatched, the lane misses the frame every time.
+    ⭐ SO THE CONDITION IS A RACE BOUND, and for UART it is comfortable: the
+    next legal edge after a frame is the following START BIT, one stop bit away
+    -- 414 cycles at the fastest admitted peer -- against a dispatch latency of
+    `r` which is 10 for UART-rx. Two orders of magnitude.
+    """
+    # ⛔⛔ REACTIVE LANES ONLY, and the first version of this condition got it
+    # wrong in a way worth keeping. It checked all five and FAILED on SPI-tx
+    # (gap 25 vs D 25) -- but SPI-tx is a SOURCE lane: it never arms, it has no
+    # peer edge to race, and its inner period is its own output rate. A
+    # condition applied to lanes it does not govern produces a red that says
+    # nothing about the design, which is the same defect as a guard that passes
+    # for the wrong reason, with the sign flipped.
+    react = _reactive_names()
+    subject = [l for l in lanes if _is_reactive(l, react)]
+    bad = []
+    for l in subject:
+        gap = getattr(l, "t", l.T)      # the peer's next legal edge
+        if gap <= l.D:                  # D = the absolute scheduling deadline
+            bad.append((l.name, gap, l.D))
+    ok = not bad and len(subject) > 0
+    if not subject:
+        return False, ("no lane was identified as REACTIVE, so this condition "
+                       "governed nothing -- a vacuous pass")
+    return ok, (
+        "%d REACTIVE lanes checked; each one's peer-edge gap exceeds its "
+        "scheduling deadline, so ARM dispatches with room to spare: %s. "
+        "⛔ SOURCE lanes are EXCLUDED -- they never arm, so their inner period "
+        "is an output rate and not a race. ⛔ A reactive lane whose gap is BELOW "
+        "its deadline misses edges systematically: the release is LOST, not "
+        "delayed"
+        % (len(subject),
+           ", ".join("%s gap %d vs D %d (slack %d)"
+                     % (l.name.split()[0], getattr(l, "t", l.T), l.D,
+                        getattr(l, "t", l.T) - l.D)
+                     for l in sorted(subject,
+                                     key=lambda x: getattr(x, "t", x.T) - x.D))))
+
+
+def c_arm_race_fire():
+    """⛔ The witness: a lane whose peer can re-edge inside its own deadline."""
+    from bursty import BLane
+    tight = BLane("too-fast-peer", T=8, C=2, D_tol=14)   # D = 16 > gap 8
+    fires = tight.t <= tight.D
+    return fires, (
+        "a lane with a peer-edge gap of %d and a scheduling deadline of %d is "
+        "REJECTED: the next legal edge can arrive before ARM has dispatched, so "
+        "it lands with `l_armed` still 0 and is dropped. ⭐ The lane then times "
+        "out rather than mis-firing, which is the safe direction -- but it "
+        "misses every frame, so 'safe' is not 'working'"
+        % (tight.t, tight.D))
+
+
 def c_dmin(lanes):
     """RULED (1(b)) -- `d_min` is an admissibility INPUT, and J is computed from it.
 
@@ -818,6 +934,12 @@ CONDITIONS = [
              "no enable, so the loader REJECTS it", c_od_bank, c_od_bank_fire),
     ("1.6t", "the program's MINIMUM INTER-ACTION DELAY `d_min` is an input: the "
              "loader COMPUTES the program's J from it", c_dmin, c_dmin_fire),
+    ("1.6u", "a REACTIVE lane's FIRST action must be ARM -- otherwise its first "
+             "release comes from a stale timestamp, not from its peer",
+     c_first_arm, c_first_arm_fire),
+    ("1.6v", "ARM must DISPATCH before the peer's next legal edge can arrive; "
+             "an edge before ARM is ignored by construction", c_arm_race,
+     c_arm_race_fire),
 ]
 
 

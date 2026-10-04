@@ -37,6 +37,33 @@ ROOT = os.path.dirname(HERE)
 SCRATCH = os.environ.get("TEMP", "/tmp")
 
 SRC = ["test/tb_smoke.v", "src/pe_engine.v", "src/pe_store.v", "src/project.v"]
+# ⭐ The reactive-release mutants run against a DIFFERENT bench: tb_edge drives
+# protocol inputs during run, which tb_smoke never does. One runner, two
+# benches, because a mutant has to be judged by the bench that can see it.
+SRC_EDGE = ["test/tb_edge.v", "src/pe_engine.v", "src/pe_store.v",
+            "src/project.v"]
+EDGE_MUTANTS = [
+    ("M_NO_REBASE",
+     "edge release leaves the timestamp at the ARM's DEADLINE",
+     "MUST-FIRE 1 FAILED",
+     "The sample grid then anchors to an arbitrary timeout instant instead of "
+     "to the peer's edge, which for UART-rx misses every bit (0.9b derives the "
+     "grid as edge + half + m*T). ⚠ Must-fire 4 does NOT catch this -- it still "
+     "reports a constant offset, because its program uses timeout=0. Only the "
+     "finite-deadline case distinguishes them."),
+    ("M_TIMEOUT_PROCEED",
+     "a timeout lets the lane carry on instead of halting",
+     "MUST-FIRE 3 FAILED",
+     "A program then cannot tell 'the peer answered' from 'the peer never "
+     "answered' and would read a frame out of an idle line -- the forbidden "
+     "direction one level up from an unsound bound."),
+    ("M_COMB_OUT",
+     "restore the combinational prog_mode mux on the uio outputs",
+     "(structural, checked by F2 on the local netlist)",
+     "Not a simulation mutant: it is caught by model/f2_flop_driven_outputs.py "
+     "on a yosys JSON netlist, where it shows up as $_ANDNOT_ driving the uio "
+     "bits. Listed here so the full mutant inventory is in one place."),
+]
 
 DEFAULT_IMG = "test/smoke_image.hex"
 # ⛔⛔ THE STRESS IMAGE IS NOT AN EXTRA, IT IS WHAT MAKES ONE MUTANT KILLABLE.
@@ -123,18 +150,33 @@ def flips(out):
     return int(m.group(1)) if m else None
 
 
-def build(defines, out):
-    cmd = ["iverilog", "-g2012", "-o", out, "-s", "tb_smoke"]
+def build(defines, out, src=None):
+    top = "tb_edge" if (src is not None and src is SRC_EDGE) else "tb_smoke"
+    cmd = ["iverilog", "-g2012", "-o", out, "-s", top]
     for d in defines:
         cmd += ["-D%s" % d]
-    cmd += SRC
-    r = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True)
+    cmd += (src if src is not None else SRC)
+    # ⛔⛔ UTF-8, EXPLICITLY. `text=True` uses the locale codec, which on this
+    # box is cp1252 -- and every bench prints ⭐/⛔, so the reader thread raised
+    # UnicodeDecodeError, DIED, and left the captured output TRUNCATED. The
+    # verdicts below are parsed from that output, so a mutant could be judged
+    # killed or survived from a partial stream. It presented as "the unmutated
+    # tb_edge does not pass" while the same command passed by hand.
+    r = subprocess.run(cmd, cwd=ROOT, capture_output=True,
+                       encoding="utf-8", errors="replace")
     return r.returncode, (r.stdout or "") + (r.stderr or "")
 
 
 def run(vvp, img=DEFAULT_IMG):
-    r = subprocess.run(["vvp", vvp, "+IMG=%s" % img], cwd=ROOT,
-                       capture_output=True, text=True)
+    cmd = ["vvp", vvp] + ([] if img is None else ["+IMG=%s" % img])
+    # ⛔⛔ UTF-8, EXPLICITLY. `text=True` uses the locale codec, which on this
+    # box is cp1252 -- and every bench prints ⭐/⛔, so the reader thread raised
+    # UnicodeDecodeError, DIED, and left the captured output TRUNCATED. The
+    # verdicts below are parsed from that output, so a mutant could be judged
+    # killed or survived from a partial stream. It presented as "the unmutated
+    # tb_edge does not pass" while the same command passed by hand.
+    r = subprocess.run(cmd, cwd=ROOT, capture_output=True,
+                       encoding="utf-8", errors="replace")
     return (r.stdout or "") + (r.stderr or "")
 
 
@@ -254,6 +296,47 @@ def main() -> int:
             print("          for the wrong reason is not evidence about this")
             print("          mutation. ***")
             wrong_reason.append((define, fired))
+
+    # ---- the REACTIVE-RELEASE mutants, on tb_edge -------------------
+    print()
+    print("  --- edge-capture mutants (bench: tb_edge) ---")
+    base_e = os.path.join(SCRATCH, "mut_edge_base.vvp")
+    rc, log = build([], base_e, src=SRC_EDGE)
+    if rc != 0:
+        print("    *** tb_edge does not compile: %s" % log[:300])
+        survivors.append("tb_edge build")
+    else:
+        out_e = run(base_e, img=None)
+        if "tb_edge: PASS" not in out_e:
+            print("    *** the UNMUTATED tb_edge does not pass -- nothing below")
+            print("        is interpretable.")
+            survivors.append("tb_edge baseline")
+        else:
+            print("    baseline: PASS (4 of 4 must-fires)")
+            for define, breaks, want, why in EDGE_MUTANTS:
+                if define == "M_COMB_OUT":
+                    print("    %-19s %-40s %s"
+                          % (define, breaks[:40], "structural -- see F2"))
+                    print("        %s" % why)
+                    continue
+                v = os.path.join(SCRATCH, "mut_e_%s.vvp" % define.lower())
+                rc, log = build([define], v, src=SRC_EDGE)
+                if rc != 0:
+                    print("    %-19s BUILD FAIL -- not a kill" % define)
+                    wrong_reason.append((define, "build"))
+                    continue
+                o = run(v, img=None)
+                killed = "tb_edge: PASS" not in o
+                right = want in o
+                print("    %-19s %-40s %s"
+                      % (define, breaks[:40],
+                         "RED" if killed else "*** SURVIVED ***"))
+                print("        %s" % why)
+                if not killed:
+                    survivors.append(define)
+                elif not right:
+                    print("        *** died, but not of `%s` ***" % want)
+                    wrong_reason.append((define, "wrong reason"))
 
     print()
     print("=" * 78)

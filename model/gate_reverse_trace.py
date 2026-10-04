@@ -152,64 +152,113 @@ def main() -> int:
             for line in _wrap(m.missing[k], 66):
                 print("         %s" % line)
 
-    # ---- what the `armed` gap means in the RTL, CHECKED not asserted ----
-    # ⛔⛔ THE NEW FINDING, AND IT IS NOT JUST A MISSING FREEZE ROW. `armed` was
-    # not on S3's list of five; this gate found it from the spec side. Chased
-    # into the RTL it is worse than a descriptor gap, so the two facts that
-    # make it real are scanned for rather than described.
+    # ---- `armed` chased into the RTL, and then CLOSED ------------------
+    # ⛔⛔ THIS SECTION ONCE REPORTED THE OPPOSITE, AND THE STALENESS IS A
+    # FINDING IN ITSELF. The first version scanned for `pin_sync` / `pin_in_q`
+    # and concluded "no edge capture on any protocol input pin" -- correctly, at
+    # the time. Edge capture was then BUILT, with different names
+    # (`uio_q2`, `pin_rise`/`pin_fall`, `arm_hit`, `l_armed`), and the scan went
+    # on reporting the absence because it was looking for identifiers nobody had
+    # written. ⇒ A grep for a MECHANISM is a grep for the names you expected the
+    # mechanism to have, and it fails in BOTH directions: it missed the absence
+    # first (the RTL said `OP_ARM, OP_REARM: ;` for a release and nothing
+    # noticed), then missed the presence. It now checks for every name the
+    # mechanism actually uses and REPORTS WHICH ONES IT FOUND, so a future
+    # rename produces a partial match -- visible -- rather than a clean wrong
+    # answer.
     print()
-    print("  --- `armed` chased into the RTL (scan, not argument) ---")
+    print("  --- `armed` in the RTL: scanned, and the names are listed ---")
     eng = open(os.path.join(os.path.dirname(HERE), "src", "pe_engine.v"),
                encoding="utf-8").read()
     top = open(os.path.join(os.path.dirname(HERE), "src", "project.v"),
                encoding="utf-8").read()
-    # (a) is OP_ARM's case body empty?
-    arm_noop = "OP_ARM, OP_REARM: ;" in eng or "OP_ARM,OP_REARM: ;" in eng
-    # (b) is there ANY edge detect on a protocol input pin? The loader's own
-    #     write strobe (`wr_sync`/`wr_rise` on ui_in) does not count -- that is
-    #     the HOST interface, not a peer protocol pin.
-    has_pin_sync = ("pin_in_q" in eng or "pin_sync" in eng
-                    or "pin_in_d" in eng or "pin_prev" in eng)
-    loader_only = ("wr_rise" in top and not has_pin_sync)
-    print("    OP_ARM's case body is empty (a no-op)      : %s" % arm_noop)
-    print("    any edge capture on a PROTOCOL input pin   : %s"
-          % ("none found" if not has_pin_sync else "yes"))
-    print("    only edge detect is the loader's wr_rise   : %s" % loader_only)
-    if arm_noop and not has_pin_sync:
+    marks = [
+        ("3rd sync stage (uio_q2)",        "uio_q2" in top),
+        ("edge detect rise",               "uio_rise" in top),
+        ("edge detect fall",               "uio_fall" in top),
+        ("engine port pin_rise",           "pin_rise" in eng),
+        ("engine port pin_fall",           "pin_fall" in eng),
+        ("arm hit term",                   "arm_hit" in eng),
+        ("armed state",                    "l_armed" in eng),
+        ("armed pin latch",                "l_armpin" in eng),
+        ("edge polarity latch",            "l_armedge" in eng),
+        ("no-timeout encoding",            "l_notmo" in eng),
+        ("sticky TIMEOUT flag",            "l_timeout" in eng),
+        ("rebase on edge",                 "l_timestamp[i] <= now" in eng),
+    ]
+    for name, present in marks:
+        print("    %-26s %s" % (name, "found" if present else "*** ABSENT"))
+    n_found = sum(1 for _n, p in marks if p)
+    print("    %d of %d mechanism markers present" % (n_found, len(marks)))
+    if n_found == len(marks):
         print()
-        print("    ⛔⛔ SO A REACTIVE LANE CANNOT BE RELEASED BY ITS PEER.")
-        print("    UART-rx and SPI-target are both REACTIVE -- their releases")
-        print("    come from a peer edge (a start bit, a CS fall) -- and the")
-        print("    engine has no edge capture, no armed state, and an ARM that")
-        print("    does nothing. Those two lanes would run OPEN-LOOP on their")
-        print("    programmed delays and drift against the peer.")
-        print("    ⚠ THE SCHEDULING ANALYSIS IS NOT INVALIDATED: it bounds")
-        print("    release-to-completion GIVEN a release, and models reactive")
-        print("    releases as an arrival curve, which is sound. What is absent")
-        print("    is the mechanism that makes a release HAPPEN.")
-        print("    ⛔ AND IT IS THE SECOND DAY-ONE COMMITMENT FOUND UNBUILT.")
-        print("    ARCH_PREREG_01 commitment 1 is 'edge timestamping on input")
-        print("    pins -- cheap, and the entire substrate for protocol")
-        print("    discovery. Built even though nothing consumes it yet.'")
-        print("    Commitment 3 was this golden model. Neither existed.")
+        print("    ⭐⭐ THE GAP IS CLOSED. `OP_ARM` releases the lane on a chosen")
+        print("    pin's chosen edge, the timestamp REBASES to the edge so the")
+        print("    grid anchors to the peer rather than to a timeout instant,")
+        print("    and a silent peer HALTS the lane with a sticky flag instead")
+        print("    of letting it invent a frame.")
+        print("    ⛔ RECORDED: this was the SECOND day-one commitment found")
+        print("    unbuilt. ARCH_PREREG_01 commitment 1 is 'edge timestamping")
+        print("    on input pins -- cheap, and the entire substrate for")
+        print("    protocol discovery. Built even though nothing consumes it")
+        print("    yet.' Commitment 3 was the golden model. Neither existed,")
+        print("    and three I2C rulings plus two reactive lanes had been")
+        print("    resting on the first one.")
+        print("    ⚠ Behavioural evidence is tb_edge's 4 must-fires, not this")
+        print("    scan: a name being present is not a mechanism working.")
+    elif n_found == 0:
+        print()
+        print("    ⛔⛔ NO EDGE CAPTURE AT ALL -- reactive lanes cannot be")
+        print("    released by their peer. UART-rx, SPI-target and three I2C")
+        print("    rulings depend on it.")
+    else:
+        print()
+        print("    *** PARTIAL: %d of %d markers. Either the mechanism is half"
+              % (n_found, len(marks)))
+        print("        built or something was renamed. A partial match is")
+        print("        reported rather than rounded to present or absent.")
 
-    # ⭐ THE MUST-FIRE. This gate is only evidence if it CAN find a gap, and
-    # the gap it should find is already known independently: S3 named five
-    # fields the freeze lacks. If the run reports NONE, the field-access
-    # recording is not working and a green result means nothing.
+    # ⭐⭐ THE MUST-FIRE IS NOW SYNTHETIC, AND THE CHANGE IS THE POINT.
+    # It used to assert that `program counter` and `program base` -- the two
+    # fields S3 named independently -- were reported missing. That worked while
+    # the freeze was stale, and it would have gone VACUOUS the moment the gap
+    # was closed: the guard would have depended, for its own strength, on the
+    # defect it exists to find never being fixed.
+    # ⛔ The gap IS now closed -- `gate_spec_freeze_s2` carries all five S3
+    # fields plus the five ARM fields, 36 fields all traced -- so the probe
+    # injects a field name that is deliberately absent instead. A guard priced
+    # by an INJECTED defect keeps working after the real one is repaired.
     print()
-    print("  --- must-fire: the known-missing fields MUST be reported ---")
-    known = {"program counter", "program base"}
-    found = known & set(m.missing)
-    print("    known missing (from S3, independently): %s" % sorted(known))
-    print("    reported by this run                  : %s" % sorted(found))
-    ok = (found == known)
+    print("  --- must-fire: an absent field MUST be reported (injected) ---")
+    probe = golden.FieldSet("probe", strict=False)
+    sentinel = "__a_field_that_is_deliberately_not_frozen__"
+    probe.need(sentinel, "injected by the must-fire")
+    probe.need("program counter", "a field that IS frozen, as the control")
+    caught = sentinel in probe.missing
+    control_clean = "program counter" not in probe.missing
+    print("    injected absent field reported : %s" % ("yes" if caught else "NO"))
+    print("    a FROZEN field stays unreported: %s"
+          % ("yes" if control_clean else "NO -- it flags everything"))
+    ok = caught and control_clean
     print("    must-fire: %s"
-          % ("PASS -- the mechanism detects fields known to be absent"
+          % ("PASS -- the recorder distinguishes absent from present, so a "
+             "'none' result above means something"
              if ok else
-             "*** FAIL -- it did not report fields that are KNOWN absent, so "
-             "the field-access recording is not working and a 'none' result "
-             "would be meaningless ***"))
+             "*** FAIL -- the recorder either misses an absent field or flags "
+             "a present one, and in both cases a 'none' result is "
+             "meaningless ***"))
+    if m.missing:
+        print()
+        print("    ⚠ %d behaviour(s) STILL have no field (listed above). Those"
+              % len(m.missing))
+        print("    are real findings, not failures of this gate.")
+    else:
+        print()
+        print("    ⭐ AND THE REAL GAP IS CLOSED: every piece of state the")
+        print("    census needs is now in the freeze. S3 found five of these by")
+        print("    writing RTL and watching it fail; this found them -- plus")
+        print("    `armed`, which S3's list did not have -- by executing the")
+        print("    census against the spec.")
 
     print()
     print("=" * 78)

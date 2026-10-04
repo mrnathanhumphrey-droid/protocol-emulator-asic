@@ -107,6 +107,18 @@ module tb_smoke;
     // and the REFILL-STRESS program. The default cannot measure J at all (its
     // delays are 20/31 against a ~4-cycle refill), which is why the stress
     // image exists -- see make_smoke_image.build_stress.
+    // ⛔ COUNTERS ZEROED FIRST. They used to be cleared AFTER the short-image
+    // check below, which wiped that check's own increment -- a guard whose
+    // failure was erased one line later by initialisation. Found by reading the
+    // order rather than by it firing, which is the only way it could be found:
+    // the guard reports correctly and then the count is thrown away.
+    errors = 0; edges0 = 0; edges1 = 0;
+    load_drive_viol = 0; load_oe_viol = 0;
+    cyc = 0; stall = 0; jcold = 0; jwarm = 0; jwarm_at = 0;
+    warm_from = 0; hdr_cyc = -1; n_warm_ev = 0;
+    inv_viol = 0; inv_checks = 0; nflip = 0; prev_sel = 5'b0;
+    now_running = 0; prev_now = 32'hFFFFFFFF;
+
     if (!$value$plusargs("IMG=%s", imgfile)) imgfile = "test/smoke_image.hex";
     $readmemh(imgfile, img);
     // derive the real length: highest initialised byte + 1
@@ -123,13 +135,6 @@ module tb_smoke;
       $display("      Either the path is wrong or the generator did not run.");
       errors = errors + 1;
     end
-    errors = 0; edges0 = 0; edges1 = 0;
-    load_drive_viol = 0; load_oe_viol = 0;
-    cyc = 0; stall = 0; jcold = 0; jwarm = 0; jwarm_at = 0;
-    warm_from = 0; hdr_cyc = -1; n_warm_ev = 0;
-    inv_viol = 0; inv_checks = 0; nflip = 0; prev_sel = 5'b0;
-    now_running = 0; prev_now = 32'hFFFFFFFF;
-
     repeat (4) @(posedge clk);
     rst_n = 1;
     @(posedge clk);

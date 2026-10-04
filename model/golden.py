@@ -208,14 +208,43 @@ def sem_stop(lane, a, bus):
 
 
 def sem_arm(lane, a, bus):
-    """ARM -- arm an edge-triggered RX lane; the lane then waits for the edge.
+    """ARM -- release the lane on a peer edge, with a bounded wait.
 
-    ⛔ THIS IS WHERE A REACTIVE LANE'S NEXT TIMESTAMP COMES FROM AN EXTERNAL
-    EVENT rather than from the action's delay, so the model needs somewhere to
-    record "armed, waiting" distinct from "next action at time T".
+    ⭐ THIS SEMANTICS GREW AFTER THE FIRST RUN OF THIS MODEL FOUND `armed`
+    MISSING. The original version recorded a single "armed" bit and stopped
+    there; the field was absent from the freeze, the gate reported it, and
+    chasing it into the RTL showed `OP_ARM` was a NO-OP with no edge capture
+    anywhere in the design. The full semantics below is Wilson's ARMED ruling,
+    and every field it touches is now in the freeze.
+
+    THE FOUR PIECES, each with its own reason:
+      armed               the lane waits on an edge -- NOT the same state as a
+                          pending timestamp. It is also the EDGE LATCH, so an
+                          edge before ARM has nothing holding it (Ruling 3).
+      armed pin           full width: SPI-target needs MISO, SCK and CS.
+      armed edge polarity the action's level bit. UART-rx arms on a start-bit
+                          FALL, SPI-target on CS FALL, I2C on the SCL RISE --
+                          so it cannot be fixed in hardware.
+      no-timeout          delay == 0 means wait indefinitely (UART-rx idle).
+
+    ⛔ AND THE REBASE IS THE PART THAT WOULD BREAK UART IF OMITTED: on an edge
+    release the lane's timestamp becomes the EDGE TIME, not the ARM's deadline.
+    0.9b derives the sample grid as `edge + half + m*T`; anchored to an
+    arbitrary timeout instant it misses every bit.
     """
-    lane.set("armed", 1, "ARM must record that the lane is waiting on an edge, "
+    lane.set("armed", 1, "ARM records that the lane is waiting on an edge, "
                          "which is not the same state as a pending timestamp")
+    lane.set("armed pin", a.pin, "which pin's edge releases the lane")
+    lane.set("armed edge polarity", a.level,
+             "rise or fall -- the three reactive releases disagree")
+    lane.set("no-timeout", 1 if a.delay == 0 else 0,
+             "ARM with delay 0 waits indefinitely")
+    # ⛔ A TIMEOUT IS AN ERROR, so the model needs somewhere to say so. If the
+    # wait expires the lane HALTS; it must not carry on as though the peer had
+    # answered.
+    lane.need("TIMEOUT (sticky)",
+              "a timeout must be distinguishable from an edge release, or a "
+              "program reads a frame out of an idle line")
     return [], 1
 
 

@@ -114,6 +114,52 @@ def frozen_fields():
          "lands after the mux it was added to avoid"),
         ("TX underrun (sticky)", 1, "lane-reg", "F1 + 1.6n",
          "⛔ sticky FLAG, never a stall -- a stall makes C unbounded"),
+        # ---- ⭐⭐ THE FIELDS THE FREEZE WAS MISSING, FOLDED IN ----------
+        # ⛔⛔ THIS TABLE WAS STALE FROM S3 UNTIL NOW, and the reverse-
+        # traceability gate is what established it mechanically rather than by
+        # someone remembering. S3 found FIVE fields by writing RTL and watching
+        # it fail; `model/gate_reverse_trace.py` found them again by executing
+        # the census on an ISA semantics built from THIS table, plus one S3's
+        # list did not have (`armed`). Forward traceability cannot find these --
+        # it detects a field with no ruling, never a ruling with no field.
+        ("program counter", AW, "lane-reg", "S3 + Ruling 2",
+         "⛔ which action is NEXT. Without it a lane cannot execute a SEQUENCE, "
+         "and nothing in the original freeze held it"),
+        ("program base", AW, "lane-reg", "S3 loop / OP_REARM level=1",
+         "⛔ the loop target. A PC advanced linearly falls off the end, so a "
+         "PERIODIC protocol could not repeat -- found by the PC running past "
+         "the program"),
+        ("action buffer + valid (x2)", 2 * (action_word(DELAY_BITS, False, True)["bits"] + 1),
+         "lane-reg", "Ruling 1 C=2 + double buffer",
+         "⭐ DOUBLED by the double buffer: head + spare, so a dispatch never "
+         "waits on a fetch. 169 flops measured, against a ~110 estimate that "
+         "counted the words and forgot the pointers"),
+        ("fetch pointer", AW, "lane-reg", "double buffer",
+         "runs AHEAD of the PC; loop-aware, so a looping re-arm is prefetched "
+         "from `program base` rather than flushing both slots"),
+        ("buffer select", 1, "lane-reg", "double buffer",
+         "which slot is the head. Flips at writeback -- M_BUF_SWAP proves the "
+         "FLIP, not merely the second slot, is what buys the J reduction"),
+        # ---- the REACTIVE release (Wilson's ARMED ruling) --------------
+        ("armed", 1, "lane-reg", "ARMED ruling (edge capture)",
+         "⛔ THE FIELD THAT WAS NOT ON S3'S LIST. It is also the EDGE LATCH: an "
+         "edge arriving before ARM dispatches has nothing holding it, which is "
+         "Ruling 3's policy by construction rather than by an explicit clear"),
+        ("armed pin", bits_for(N_PINS - 1), "lane-reg", "ARMED ruling",
+         "⛔ FULL WIDTH, not a choice of {pin, clkpin}: SPI-target needs THREE "
+         "pins -- MISO, SCK and CS -- so narrowing it would erode 'pins are "
+         "assigned per program' for 15 flops"),
+        ("armed edge polarity", 1, "lane-reg", "ARMED ruling",
+         "the action's EXISTING level bit. The three reactive releases do not "
+         "agree on a polarity: UART-rx arms on a start-bit FALL, SPI-target on "
+         "CS FALL, I2C on the SCL RISE"),
+        ("no-timeout", 1, "lane-reg", "ARMED ruling 2",
+         "ARM with delay == 0 waits indefinitely (UART-rx idling). An encoding "
+         "in an existing field, not a new one"),
+        ("TIMEOUT (sticky)", 1, "lane-reg", "ARMED ruling 2",
+         "⛔ A TIMEOUT IS AN ERROR, NEVER A SUCCESS. Without a flag a program "
+         "cannot tell 'the peer answered' from 'the peer never answered' and "
+         "would read a frame out of an idle line"),
         ("RX overflow (sticky)", 1, "lane-reg", "1.6p",
          "⛔ must be FRAMED INTO THE SERIAL STREAM: a host that stopped "
          "reading cannot be told by a pin it is not reading"),
@@ -146,6 +192,17 @@ def frozen_fields():
         ("AW", 0, "image", "S1 census",
          "build parameter = %d; demo is 178 B of %d" % (AW, 2 ** AW)),
         # ---- dedicated hardware, costed so it is not invisible ---------
+        ("primed (one-shot)", 1, "global", "prime-before-release (Ruling 1a)",
+         "⭐ LATCHED, not continuous: 'every lane wants nothing fetched' is true "
+         "at start-up and false again one cycle after every writeback, so a "
+         "continuous gate froze `now` and produced ZERO EDGES"),
+        ("input sync chain + edge detect", 3 * N_UIO, "hw",
+         "ARCH_PREREG commitment 1 + ARMED ruling",
+         "⛔ THE SECOND DAY-ONE COMMITMENT FOUND UNBUILT. 3 stages per uio pin; "
+         "`rise = q1 & ~q2` is combinational off the chain, so the edge detect "
+         "costs no flops and only the third stage does. L_sync = 3 and "
+         "uncertainty 1 are now DERIVED from this structure "
+         "(gate_edge_capture.py) rather than assumed by A2"),
         ("uio_oe[MISO] async-clear flop", 1, "hw", "1.6r",
          "⛔ CS rising ASYNC-CLEARS it; assert path synchronised. Release = "
          "pad + clear delay, not %d cycles" % (L_SYNC + OUT_REG)),
