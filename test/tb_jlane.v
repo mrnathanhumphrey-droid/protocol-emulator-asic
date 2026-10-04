@@ -92,6 +92,19 @@ module tb_jlane;
   //   not cover the delay RTA needs, and the sound bound is the full
   //   non-execution wait `sum + gap`.
   integer    iv_gap, iv_exec, max_gap, max_full, max_full_at;
+  // ⛔⛔ `gap` SPLITS, AND THE D* THEOREM IS ABOUT ONLY HALF OF IT. An idle
+  // cycle in which I am not the winner is one of two quite different things:
+  //   RQ  the winner's HEAD IS INVALID -- the engine is idle because the one
+  //       fetch port is refilling for a lane that outranks me. This is R1's
+  //       uncounted term, the one measured at 40 cycles below D*.
+  //   DD  the winner's head is VALID -- it is about to dispatch, and this is
+  //       its ST_IDLE decision cycle. Ordinary EDF ordering, not refill
+  //       queueing at all.
+  // ⚠ CONFLATING THEM UNDERSTATES THE D* THEOREM AND OVERSTATES R1. At d = 20
+  // the first spot check read `gap` = 1..3 with the winner-blocked stall at
+  // ZERO, which looked like a nonzero refill wait above D* -- and would have
+  // falsified the published claim. It is DD: other lanes taking their turn.
+  integer    iv_rq, iv_dd, max_rq, max_rq_at, max_dd;
   reg        prev_ready, live_seen, primed_seen, cfgerr_seen, halt_seen;
 
   // ---- the witness ring, so a FALSIFYING interval arrives with its chain --
@@ -244,6 +257,7 @@ module tb_jlane;
     n_rdy = 0; n_blk = 0; free_run = 0; cur_free = 0; free_at = 0;
     mid = 0; n_iv_h1 = 0; n_iv_h2 = 0;
     iv_gap = 0; iv_exec = 0; max_gap = 0; max_full = 0; max_full_at = 0;
+    iv_rq = 0; iv_dd = 0; max_rq = 0; max_rq_at = 0; max_dd = 0;
     prev_ready = 1'b0;
     live_seen = 1'b0; primed_seen = 1'b0; cfgerr_seen = 1'b0; halt_seen = 1'b0;
 
@@ -312,7 +326,15 @@ module tb_jlane;
         // ⭐ the three buckets, mutually exclusive by construction
         if (dut.u_eng.st != 0)        iv_exec = iv_exec + 1;
         else if (!(dut.u_eng.winner_v
-                   && dut.u_eng.winner == lane[2:0])) iv_gap = iv_gap + 1;
+                   && dut.u_eng.winner == lane[2:0])) begin
+          iv_gap = iv_gap + 1;
+          // ⭐ which kind of idle: refill queueing, or someone else's turn
+          if (dut.u_eng.winner_v
+              && !dut.u_eng.l_actv[dut.u_eng.hix[dut.u_eng.winner]])
+            iv_rq = iv_rq + 1;
+          else
+            iv_dd = iv_dd + 1;
+        end
         if (blocked) begin
           iv_sum  = iv_sum + 1;
           cur_run = cur_run + 1;
@@ -337,6 +359,11 @@ module tb_jlane;
             end
             if (iv_run > max_run) max_run = iv_run;
             if (iv_gap > max_gap) max_gap = iv_gap;
+            if (iv_dd > max_dd) max_dd = iv_dd;
+            if (iv_rq > max_rq) begin
+              max_rq    = iv_rq;
+              max_rq_at = cyc;
+            end
             if ((iv_sum + iv_gap) > max_full) begin
               max_full    = iv_sum + iv_gap;
               max_full_at = cyc;
@@ -360,7 +387,7 @@ module tb_jlane;
         end
       end else if (rdy && !prev_ready) begin
         in_iv = 1'b1; iv_start = cyc; iv_sum = 0; iv_run = 0; cur_run = 0;
-        iv_gap = 0; iv_exec = 0;
+        iv_gap = 0; iv_exec = 0; iv_rq = 0; iv_dd = 0;
         if (blocked) begin iv_sum = 1; iv_run = 1; cur_run = 1; end
       end
 
@@ -437,7 +464,16 @@ module tb_jlane;
     // so nothing executes (pyRTA charges nothing) and the winner is not me
     // (`sum` skips it). If it is non-zero, the bound RTA needs is `sum + gap`,
     // not `sum`.
-    $display("    max gap (idle, not mine): %0d", max_gap);
+    $display("    max gap (idle, not mine): %0d   = RQ %0d + DD %0d (per-interval maxima, not additive)",
+             max_gap, max_rq, max_dd);
+    // ⛔⛔ THE NUMBER BOTH THEOREMS TURN ON. RQ is idle time spent refilling
+    // for a lane that outranks me: uncounted by pyRTA (nothing executes) and
+    // by `sum` (the winner is not me). The D* theorem says RQ = 0 for
+    // d_min >= D*; R1 measured it at 40 below D*.
+    $display("    max RQ (refill queueing): %0d  at cycle %0d",
+             max_rq, max_rq_at);
+    $display("    max DD (others' turn)   : %0d  -- EDF ordering, not refill",
+             max_dd);
     $display("    max FULL non-exec wait  : %0d  at cycle %0d",
              max_full, max_full_at);
     $display("      ^ sum + gap. This is the delay a response-time analysis");
@@ -476,11 +512,11 @@ module tb_jlane;
       $display("    consistency: max_run %0d <= jitter_max %0d  ok",
                max_run, dut.u_eng.jitter_max);
     end
-    $display("  JLANE lane=%0d sum=%0d run=%0d wall=%0d iv=%0d drop=%0d fire=%0d win=%0d agg=%0d rdy=%0d blk=%0d free=%0d gap=%0d full=%0d",
+    $display("  JLANE lane=%0d sum=%0d run=%0d wall=%0d iv=%0d drop=%0d fire=%0d win=%0d agg=%0d rdy=%0d blk=%0d free=%0d gap=%0d full=%0d rq=%0d dd=%0d",
              lane, max_sum, max_run, max_wall, n_iv, n_drop, n_fire,
              (warm_from > 0 && cyc > warm_from) ? (cyc - warm_from) : 0,
              dut.u_eng.jitter_max, n_rdy, n_blk, free_run, max_gap,
-             max_full);
+             max_full, max_rq, max_dd);
     $finish;
   end
 

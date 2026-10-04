@@ -220,6 +220,9 @@ SPEC_SYMBOLS = {
     # recording: the coverage check's value is that it does not care whose file
     # it is, and it has now never once been triggered by someone else.
     ("model/gate_j_proof_anchors.py", "PREMISES"),
+    # the D* theorem's check: which programs to BUILD, not readings from them
+    ("test/run_dstar_check.py", "D_POINTS"),
+    ("test/run_dstar_check.py", "CONTROL"),
     # ⚠ A DELIBERATELY WRONG FIXTURE: a stale lane table kept to price a gate.
     ("model/a2/_price_stale_lane_table.py", "STALE"),
     # this audit's own table

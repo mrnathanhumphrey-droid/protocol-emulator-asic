@@ -58,6 +58,18 @@ PREMISES = [
     # proof's subject matter, not just of the measurement.
     ("S", "the stall branch the winner-blocked bound is about",
      "jitter_cnt <= jitter_cnt + 1'b1;"),
+    # ---- Theorem 3 (D*), now the load-bearing claim --------------------
+    # ⛔⛔ P8 IS THE ONE THAT CARRIES THE PUBLISHED GUARANTEE. If the
+    # timestamp advance ever became RELATIVE (from completion rather than
+    # from the previous timestamp) a lane's period would be d + r instead of
+    # d, the refill demand per period would change, and D* = k*L_REFILL
+    # would no longer be the right threshold. The RTL comment at that line
+    # says the relative form drifts k*(r-C); the theorem needs the absolute
+    # form for a different reason, and both want the same line.
+    ("P8", "a lane's period is exactly d -- ABSOLUTE timestamp advance",
+     "l_timestamp[cur] <= l_timestamp[cur] + {{(TS_W-DLY_W){1'b0}}, a_dly};"),
+    ("P9", "readiness is that timestamp arriving",
+     "assign ready[gi] = l_live[gi] & ~diff[TS_W-1]"),
 ]
 
 # the two bounds the document states -- if either number changes in the RTL's
@@ -150,7 +162,15 @@ def main() -> int:
             ("does not proceed", "the verdict must still be a refusal"),
             ("40", "the measured counter-example must still appear"),
             ("no fixed `J` is available",
-             "the document must still say no constant J exists below D*")):
+             "the document must still say no constant J exists below D*"),
+            # ⛔ Theorem 3 must still be stated, and stated as ZERO. "bounded"
+            # would be a materially weaker claim than the published guarantee
+            # needs, and the difference is the whole point of §5.
+            ("Theorem 3", "the D* theorem must still be in the document"),
+            ("is **zero**", "Theorem 3 must still claim ZERO, not bounded"),
+            # ⚠ the document writes the Unicode "≥", not ">=" -- the needle
+            # has to match the prose as written, not as I would type it
+            ("d_min ≥ D*", "its scope must still be stated")):
         if needle not in doc:
             print("    *** %s -- %r is gone from the document" % (why, needle))
             rc = 1

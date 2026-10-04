@@ -671,3 +671,124 @@ to a substring that must be present in `src/pe_engine.v` (line numbers moved
 twice while the document was being written, and one citation pointed at the
 wrong block by the time it was first saved), the refuted figures must still
 appear, and the verdict must still read as a refusal.
+
+---
+
+# `D*` written as a theorem, and the 2 MHz reopening route recorded
+
+## 1 — Theorem 3: the `D*` claim is now proved, not just measured
+
+`docs/J_LANE_PROOF.md`, **Theorem 3**, with three new premises anchored by
+substring through `model/gate_j_proof_anchors.py` (now 12 anchors):
+
+- **P8** — a lane's period is exactly `d`: the timestamp advance is
+  **absolute**, `l_timestamp[cur] <= l_timestamp[cur] + a_dly`
+  (`src/pe_engine.v:1278`). ⛔ This is the premise that carries the published
+  guarantee: a *relative* advance would make the period `d + r`, change the
+  refill demand per period, and `D* = k·L_REFILL` would no longer be the
+  threshold.
+- **P9** — readiness is that timestamp arriving.
+- **P10** — at `SPL = 2` the dispatched slot is the head and the refill owed is
+  for the *spare*.
+
+> **In steady state, for `d_min ≥ D*`, every lane's head is valid at every
+> release, so no lane is ever winner-blocked and `RQ = 0`.**
+
+The demand is `k` refills per `d` cycles, each `L_REFILL`, so `d ≥ k·L_REFILL`
+makes demand ≤ capacity and every refill issued at a writeback completes before
+that lane's next release. ⭐ **No extra `L_REFILL` term is owed for speculative
+spare fills**: by P4 a spare fill only starts when the winner's head is already
+valid, and by P10 the spare fill *is* the one unit of work counted per lane per
+period — not additional traffic.
+
+⚠ "In steady state" is part of the statement, not a hedge: on a lane's first
+action both slots are empty by construction.
+
+### The check, and the quantity it had to get right
+
+`test/run_dstar_check.py` — per-lane `RQ` at the **seven port-feasible points**
+`price_j_sweep.sh` uses × five lanes, plus **two controls below `D*`** that must
+come out **non-zero**, because a gate that only looks above the threshold cannot
+show the threshold is where anything happens.
+
+⛔⛔ **`gap` had to be split first, and not splitting it would have falsified a
+true claim.** At d = 20 the first spot check read `gap` = 1…3 with the stall at
+zero. That is **DD** — other lanes' dispatch-decision cycles — not refill
+waiting, and it rises **1, 1, 2, 3, 3** across lanes in exact EDF deadline
+order. Ordering, not refill. `RQ` is the term the theorem is about, and it is 0.
+
+### Result
+
+```
+PORT-FEASIBLE (the theorem predicts 0)      RQ per lane
+  d = 20, 21, 22, 25, 30, 40, 60            0 0 0 0 0   -- all seven points
+CONTROL below D* (must be non-zero)
+  arm C (8, 100, 100, 100, 100)             0 3 5 7 29
+```
+
+**35 port-feasible cells, RQ = 0 on every one. The falsifier did not fire.**
+
+⭐ **And the control is the more interesting line.** RQ rises **0, 3, 5, 7, 29**
+across arm C's lanes in exact EDF deadline order: lane 0 holds the earliest
+deadline and **never waits for anyone** (RQ = 0), and the queue deepens
+monotonically down the order. That is the signature of a queue, measured — the
+same shape §4 used to refute the constant bound, now seen as a clean gradient
+rather than a single worst case.
+
+⚠ **The control is arm C, not a uniform sub-`D*` sweep, and that is a measured
+choice.** Uniform d = 12…18 programs are **non-stationary** — T1 found lanes
+starving and trading places on a beat longer than a million cycles — so those
+cells read NO READING on the stationarity precondition, which is the
+precondition working rather than a result. Arm C is sub-`D*` *and* stationary,
+and it is the arm that produced R1's 29, so the gate's control and R1's
+headline measurement are about the **same program**.
+
+### ⚠ The same split corrects R1's headline number
+
+R1 quoted the uncounted term as **40**. With `gap` split it is **RQ = 29** plus
+**DD = 11**; the 40 overstated it by the 11 cycles of ordinary EDF ordering.
+**29 still exceeds both 9 and 21, so no verdict moves** — but `docs/J_LANE_PROOF.md`
+now quotes the right number.
+
+## 2 — 2 MHz is closed *structurally*, and the reopening route is architectural
+
+R2 fails by **−3 at the optimistic `J = 9`**, and the binding term is the
+**start delay** (`r − C`, 10 of the 14). So:
+
+⛔ **A fetch-port response-time analysis cannot reopen 2 MHz.** It would tighten
+`J`, but `J` is not what the absolute budget is short of — the start delay is
+scheduling latency from the engine's dispatch, and no tighter jitter bound
+removes it.
+
+⭐ **The reopening route is architectural: a per-lane hardware serializer for
+reactive SPI.** MISO shifts on the **observed SCLK edge directly**, instead of
+through an engine dispatch — so the engine schedules **bytes, not edges**, and
+the absolute budget stops containing a `r − C` term at all. Recorded as the
+route and **parked**.
+
+**Deferred, not dropped:** the fetch-port RTA stays a research item for
+admitting **mixed programs below `D*`**, which is a different and smaller prize.
+It is explicitly *not* a 2 MHz path.
+
+## 3 — Flagged while proving Theorem 3, and queued per the interrupt rule
+
+P8 says the period is exactly `d`, but `gate_j_program.py:231` computes
+`utilisation(d) = k·C/(d + C)` — a period of `d + C`. And separately the
+dispatch FSM is a **three**-state cycle (`ST_IDLE → ST_DRIVE → ST_WB`, the exit
+from `ST_WB` unconditional), so the engine cannot dispatch two actions less than
+**3** cycles apart while `C = 2` counts only the two busy ones.
+
+⚠ Both would tighten the `admissible` floor from `d ≥ 8` to `d ≥ 15`, and
+**neither changes the published claim** — `D* = 20` dominates and the whole
+affected band `[8, 19]` is already refused. So this **queues**: it does not
+change the descriptor. It is recorded because `gate_j_program`'s 1.6t table
+prints `adm (U≤1) = yes` for d = 8, 10, 12 and 18, which on this reading is an
+optimistic label inside a region nothing is claimed for — and a label is still a
+statement. **Not changed without a ruling**, since `admissible` feeds the A2
+suite.
+
+⚠ I could not settle the 3-cycle occupancy by measurement: arm A is
+**refill**-bound (4.79 cycles per dispatch), not throughput-bound, so it does
+not exercise the limit. The claim above is structural, from the `case (st)`
+arms. (My first attempt to measure it parsed `svc_cycles` where it meant
+`cycles` and printed a confident 2.000.)
