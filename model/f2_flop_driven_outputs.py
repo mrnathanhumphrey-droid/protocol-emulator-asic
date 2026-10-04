@@ -93,6 +93,16 @@ CELL_KINDS = [
     (r"(^|_)(dly|dlygate|dlymetal|dlclkp|buf|bufbuf|clkbuf|clkdly)", "buffer"),
     (r"(^|_)(inv|clkinv|einvp|einvn)", "inverter"),
     (r"(^|_)(conb|tiehi|tielo|tie)", "constant"),
+    # ⛔ PHYSICAL-ONLY CELLS, named so the UNKNOWN list stays empty of EXPECTED
+    # entries. The first real netlist contained 124 `sg13cmos5l_antennanp`
+    # (antenna-effect protection diodes) and F2 reported them as unclassified.
+    # It failed CLOSED and the verdict was unaffected -- none of them sits in an
+    # output path -- but an unknown list that always has one expected member
+    # trains you to skip reading it, and the next genuinely new cell would be
+    # skipped with it. ⭐ `physical` is NOT a driver: it is still fail-closed if
+    # anything ever traces THROUGH one, which would mean a protection diode had
+    # landed in a signal path.
+    (r"(^|_)(antenna|diode|fill|decap|tapvpwrvgnd|tap)", "physical"),
     # flops and latches: narrowed so it cannot swallow `dly*`
     (r"(^|_)(dfr|dfs|dfb|dfx|dfbb|dff|sdfr|sdfs|sdff|dlxt|dlrt|dlyt|sdl)",
      "flop"),
