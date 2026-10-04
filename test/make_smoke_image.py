@@ -26,50 +26,19 @@ from __future__ import annotations
 import os
 import sys
 
-N_LANES, AW, DLY_W, PINW, CW, D_W = 5, 8, 10, 4, 4, 8
-HDR_BITS = PINW * 2 + 1 + DLY_W + CW + D_W + D_W + AW   # +1 = drive mode
-HDR_BYTES = (HDR_BITS + 7) // 8
-BQW   = 2                  # TX queue index, in what used to be padding
-ACT_W = 3 + PINW + 1 + DLY_W + 4 + BQW
-ACT_BYTES = (ACT_W + 7) // 8
-ACT_BASE = N_LANES * HDR_BYTES
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-OP_LEVEL, OP_SHIFT, OP_SHIFTIN, OP_READBIT = 0, 1, 2, 3
-OP_START, OP_STOP, OP_ARM, OP_REARM = 4, 5, 6, 7
-
-# pin indices: 0..7 = uio, 8..11 = uo_out[0..3]
-UO0, UO1, UO2, UO3 = 8, 9, 10, 11
-
-
-def hdr(pin, clkpin, mode, t, c, dsched, dtol, base) -> bytes:
-    """`mode`: 1 = push-pull, 0 = open-drain. ⛔ open-drain is only MEANINGFUL on
-    a `uio` pin -- `uo_out` has no enable, so an open-drain lane there drives
-    low once and sticks."""
-    w = 0
-    for val, width in ((pin, PINW), (clkpin, PINW), (mode, 1), (t, DLY_W), (c, CW),
-                       (dsched, D_W), (dtol, D_W), (base, AW)):
-        w = (w << width) | (val & ((1 << width) - 1))
-    w <<= (HDR_BYTES * 8 - HDR_BITS)            # MSB-align, spare at the bottom
-    return w.to_bytes(HDR_BYTES, "big")
-
-
-def act(op, pin, level, delay, count=0, q=0) -> bytes:
-    """`q` names the TX QUEUE this action draws its payload from.
-
-    ⭐ IT COSTS NOTHING: the action word was 22 bits inside 3 bytes, so the
-    bottom 2 bits were zero padding. ACT_W is now 24, the word is still 3 bytes,
-    and every image written before this field existed is bit-identical to one
-    written with q = 0.
-    ⛔ PER ACTION, NOT PER LANE, so no lane number is baked into hardware --
-    see the BQW comment in pe_engine.v for why it is not in the header.
-    """
-    w = 0
-    for val, width in ((op, 3), (pin, PINW), (level, 1), (delay, DLY_W),
-                       (count, 4), (q, BQW)):
-        w = (w << width) | (val & ((1 << width) - 1))
-    w <<= (ACT_BYTES * 8 - ACT_W)
-    return w.to_bytes(ACT_BYTES, "big")
-
+# ⛔⛔ THE ENCODER IS IMPORTED, NOT DEFINED HERE. Field widths, `hdr`, `act`
+# and the host push sequence all live in `pe_isa`, because this file used to own
+# them and `tb_smoke` kept a private slice of the same layout that broke the
+# moment a field used the padding. R1/R2's host model and `pe_asm` need the
+# identical encoding, and three copies of a bit-packer is this project's most
+# reliable bug.
+from pe_isa import (                      # noqa: F401,E402
+    ACT_BASE, ACT_BYTES, ACT_W, AW, BQW, CW, DLY_W, D_W, HDR_BITS, HDR_BYTES,
+    N_LANES, OP_ARM, OP_LEVEL, OP_READBIT, OP_REARM, OP_SHIFT, OP_SHIFTIN,
+    OP_START, OP_STOP, PINW, PIN_NONE, UO0, UO1, UO2, UO3, act, hdr,
+)
 
 def build():
     """Lane 0 toggles uo_out[0]; lane 1 toggles uo_out[1] at a different rate.
@@ -344,7 +313,6 @@ def build_edge(timeout: int, d1: int = 12, arm_pin: int = 0,
     return b"".join(headers) + b"".join(prog)
 
 
-PIN_NONE = 15          # the reserved non-driving index (PINW=4, N_PINS=12)
 
 
 def build_noop(timeout: int, half: int, d1: int = 12, arm_pin: int = 0,
@@ -383,13 +351,50 @@ def build_noop(timeout: int, half: int, d1: int = 12, arm_pin: int = 0,
 
 def main() -> int:
     here = os.path.dirname(os.path.abspath(__file__))
+    if "--all" in sys.argv:
+        # ⛔⛔ EVERY IMAGE THE SUITE LOADS, WITH ITS ARGUMENTS RECORDED HERE.
+        # `tb_edge` reads `noop_image_h19.hex` and NO COMMAND IN THE REPO
+        # PRODUCED IT -- it was made by hand and then gitignored, so the suite
+        # depended on an artefact with no recipe. Regenerating the images after
+        # an encoder change duly broke must-fire 5b, because the half values are
+        # a DIFFERENTIAL (19 - 7 = 12) and nothing said so.
+        # ⇒ One target rebuilds all of them, and the arguments are the record.
+        specs = [
+            ([], "default smoke"),
+            (["--census"], "all 8 opcodes"),
+            (["--cfgerr"], "1.6s violation"),
+            (["--five", "434", "25", "45", "414", "25"], "5-lane refill load"),
+            (["--chain", "12", "40"], "chaining re-arm"),
+            (["--stress", "25", "31"], "single-buffer stress"),
+            (["--edge", "200", "0", "edge_image"], "timeout 200, FALL"),
+            (["--edge", "0", "0", "edge_image_noto"], "no timeout, FALL"),
+            (["--edge", "0", "1", "edge_image_rise"], "no timeout, RISE"),
+            (["--noop", "0", "7", "noop_image"], "half = 7"),
+            (["--noop", "0", "19", "noop_image_h19"], "half = 19 (5b pairs with 7: difference 12)"),
+            (["--noop", "0", "7", "bad"], "no-op on a real input pin"),
+        ]
+        import subprocess
+        rc = 0
+        for args, why in specs:
+            r = subprocess.run([sys.executable, __file__] + args,
+                               capture_output=True, text=True,
+                               encoding="utf-8", errors="replace")
+            ok = r.returncode == 0
+            rc |= 0 if ok else 1
+            print("  %-46s %-44s %s"
+                  % (" ".join(args) or "(default)", why,
+                     "ok" if ok else "*** FAILED"))
+        return rc
     if "--noop" in sys.argv:
         # --noop <timeout> <half> [bad] -- `bad` points the no-op at the arm pin
         k = sys.argv.index("--noop")
         to, half = int(sys.argv[k + 1]), int(sys.argv[k + 2])
-        bad = len(sys.argv) > k + 3 and sys.argv[k + 3] == "bad"
+        arg4 = sys.argv[k + 3] if len(sys.argv) > k + 3 else ""
+        bad = arg4 == "bad"
         img = build_noop(to, half, noop_pin=(0 if bad else PIN_NONE))
-        name = "noop_image_bad" if bad else "noop_image"
+        # ⭐ an explicit BASENAME, so `noop_image_h19.hex` has a command
+        name = ("noop_image_bad" if bad
+                else (arg4 if arg4 else "noop_image"))
         out = os.path.join(here, name + ".hex")
         with open(out, "w", encoding="ascii") as fh:
             for b in img:

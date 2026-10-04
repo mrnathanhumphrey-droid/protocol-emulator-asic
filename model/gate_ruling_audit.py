@@ -175,6 +175,17 @@ RULINGS = [
      "it in silicon needs cross-action tracking over a whole program; here it "
      "costs a loop."),
 
+    ("one-encoder", "toolchain", BUILT_TC, "test/pe_isa.py", "def host_pushes",
+     "model/gate_one_encoder.py: no second packer, digests agree, and the RTL's "
+     "own widths are extracted and checked",
+     "one module owns the action/header encoding AND the host push sequence. "
+     "⛔ THE TWO-COPIES DEFECT IS THIS PROJECT'S MOST RELIABLE BUG -- "
+     "tb_smoke's private action slice, run_local's third source list, three "
+     "pyRTA gates each building their own task set. ⭐ The cross-LANGUAGE "
+     "check is the valuable half: a testbench cannot import Python, so the "
+     "Verilog localparams are evaluated and compared, which closes the window "
+     "where ACT_W was 24 in one language and 22 in the other."),
+
     # ---- known-open, already recorded ----------------------------------
     ("TX-routing", "rtl", PARTIAL, "src/pe_engine.v", "a_q     = cur_act",
      "⚠ MISSING: the interleave must-fire -- two TX lanes live, bytes "
