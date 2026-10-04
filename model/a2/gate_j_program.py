@@ -145,6 +145,37 @@ SWEEP_SINGLE = {
 }
 
 
+# =========================================================================
+# D* -- THE PORT-FEASIBILITY THRESHOLD, AND THE SCOPED CLAIM
+# =========================================================================
+# ⛔⛔ ADMISSIBILITY IS WEAKER THAN PORT FEASIBILITY, AND THAT GAP IS THE
+# WHOLE BUG. `admissible` asks whether the DISPATCHER keeps up:
+# U = k*C/(d+C) <= 1, which allows d >= 8. But every dispatched action must
+# also be REFILLED through ONE SHARED FETCH PORT, and a refill occupies it for
+# L_REFILL cycles. k lanes each consuming one action per d cycles demand
+# k*L_REFILL cycles of port time per d cycles, so the port saturates unless
+#
+#       d >= D_STAR = k * L_REFILL = 5 * 4 = 20
+#
+# Admissible-but-port-saturated programs are d in [8, 19], and those are
+# EXACTLY the ten points where the old derivation was found unsound.
+#
+# ⭐ MEASURED CHECK, NOT MEASURED SOURCE: the live sweep puts the cliff
+# between d = 18 (stall 11) and d = 19 (stall 0), so D_STAR = 20 is
+# CONSERVATIVE BY ONE CYCLE against the observation.
+# ⚠ ITS TIGHTNESS IS THEREFORE UNCLAIMED. 19 measures 0 and the structure
+# says 20; rather than move the constant to 19 to fit the data -- which would
+# make the measurement the source and leave the off-by-one unexplained -- the
+# claim is stated at the structural number and the gap is recorded. Explaining
+# why 19 suffices needs the witness trace, and is owed.
+D_STAR = N_LANES * L_REFILL
+
+
+def port_feasible(d: int, k: int = N_LANES) -> bool:
+    """Can the single fetch port serve k refills per action period?"""
+    return d >= k * L_REFILL
+
+
 def utilisation(d: int, k: int = N_LANES) -> float:
     return k * C_SVC / float(d + C_SVC)
 

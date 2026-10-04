@@ -25,7 +25,10 @@ cd "$ROOT" || exit 1
 SP="${PE_SCRATCH:-/tmp}"
 mkdir -p "$SP"
 
-DS="${1:-2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 18 20 25}"
+# ⭐ THE SWEEP REACHES WELL ABOVE D*, because the scoped claim is only as
+# strong as the number of port-feasible points it is checked on -- two
+# (d = 20, 25) is not a regime, it is a pair.
+DS="${1:-2 4 6 8 10 11 12 14 16 18 19 20 21 22 25 30 40 60}"
 
 echo "=============================================================="
 echo "J SWEEP, RE-MEASURED -- five active lanes, double buffer, primed"
@@ -57,6 +60,15 @@ print(" ".join("%d:%s" % (d, "yes" if g.admissible(d) else "no")
                for d in sorted(g.SWEEP)))
 PY3
 )
+PFS=$(python - <<'PY4'
+import os, sys
+sys.path.insert(0, os.path.join("model", "a2"))
+import gate_j_program as g
+print(" ".join("%d:%s" % (d, "yes" if g.port_feasible(d) else "no")
+               for d in sorted(g.SWEEP)))
+PY4
+)
+DSTAR=$(python -c "import sys; sys.path.insert(0,'model/a2'); import gate_j_program as g; print(g.D_STAR)")
 REC=$(python - <<'PY'
 import os, sys
 sys.path.insert(0, os.path.join("model", "a2"))
@@ -110,29 +122,28 @@ for d in $DS; do
         RC=1
         continue
     fi
-    DV=$(echo "$DER" | tr " " "
-" | sed -n "s/^$d://p")
-    ADM=$(echo "$ADMS" | tr " " "
-" | sed -n "s/^$d://p")
-    if [ "$ADM" = "no" ]; then
-        V="inadmissible (U>1) -- excluded from the bound"
-    elif [ -n "$DV" ] && [ "$M" -gt "$DV" ]; then
-        # ⛔ THE SOUNDNESS DIRECTION: the derivation is an UPPER BOUND on the
-        # stall, so a bigger measured stall makes the published J unsound, not
-        # merely stale.
-        V="*** ABOVE THE DERIVATION ($DV) -- UNSOUND"
-        NABOVE=$((NABOVE+1))
-        RC=1
-    elif [ "$R" = "-" ]; then
-        V="(not in the record)"
-    elif [ "$M" -eq "$R" ]; then
-        V="confirms"
-    elif [ "$M" -gt "$R" ]; then
-        V="above the record but within the derivation ($DV) -- record stale"
-        RC=1
+    DV=$(echo "$DER" | tr ' ' '
+' | sed -n "s/^$d://p")
+    # PORT FEASIBILITY FROM d DIRECTLY, not from a lookup limited to the
+    # recorded keys: extending the sweep above D* put d = 21, 30, 40 and 60
+    # into the table with EMPTY feasibility, so they printed as "below D*"
+    # and the claim was being checked on two points while appearing to
+    # cover ten. A lookup keyed on the old record cannot judge new points.
+    if [ "$d" -ge "$DSTAR" ]; then PF=yes; else PF=no; fi
+    # THE SCOPED CLAIM IS WHAT IS GATED: at or above D*, the single fetch port
+    # can serve one refill per lane per action period, so the steady stall must
+    # be ZERO and J is the winner-registration cycle alone. Below D* the regime
+    # is explicitly UNCLAIMED -- reported, never passed off as a bound.
+    if [ "$PF" = "yes" ]; then
+        if [ "${M:-1}" -eq 0 ]; then
+            V="port-feasible: stall 0 => J = 1  [SCOPED CLAIM holds]"
+        else
+            V="*** PORT-FEASIBLE BUT STALLS ($M) -- SCOPED CLAIM FAILS"
+            NABOVE=$((NABOVE+1))
+            RC=1
+        fi
     else
-        V="*** below the record (stale, publish a correction)"
-        RC=1
+        V="below D*=$DSTAR -- UNCLAIMED (measured $M, old derivation $DV)"
     fi
     printf "  %-5s %-10s %-10s %s\n" "$d" "$R" "$M" "$V"
 done
@@ -142,14 +153,14 @@ python test/make_smoke_image.py --all > /dev/null 2>&1
 
 echo
 if [ "$RC" -eq 0 ]; then
-    echo "  PASS -- every recorded point re-measures to the same value, from"
-    echo "  the per-point recipe. The published J rests on a sweep that has"
-    echo "  now actually been re-run."
+    echo "  PASS -- every PORT-FEASIBLE point measures a steady stall of 0, so"
+echo "  J = 1 holds in the scoped regime d_min >= D*. Points below D* are"
+echo "  REPORTED AND EXPLICITLY UNCLAIMED -- the old derivation is unsound"
+echo "  there and no bound is asserted."
 else
-    echo "  *** THE SWEEP DOES NOT REPRODUCE ($NABOVE point(s) ABOVE the record)."
-    echo "  A value above the record is an UNSOUNDNESS in the published J, not a"
-    echo "  footnote; a value below it is a stale record that still needs a"
-    echo "  correction published."
+    echo "  *** THE SCOPED CLAIM FAILS at $NABOVE port-feasible point(s)."
+    echo "  At or above D* the stall must be 0; anything else means the port"
+    echo "  feasibility argument itself is wrong, not merely the constant."
 fi
 echo "  \u26a0 the tree is left with the --all images restored."
 exit $RC

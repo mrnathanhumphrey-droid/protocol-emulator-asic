@@ -117,6 +117,25 @@ def compute_j(lanes):
     # below the feasible floor the set is overloaded and a J derived there would
     # manufacture a worse number than any runnable program can produce -- the
     # exclusion that kept the universal J at 8 rather than something larger.
+    # ⛔⛔ PORT FEASIBILITY FIRST, AND IT IS STRICTLY STRONGER THAN
+    # ADMISSIBILITY. `admissible` only asks whether the DISPATCHER keeps up
+    # (U = k*C/(d+C) <= 1, so d >= 8). Every dispatched action must also be
+    # REFILLED through ONE shared fetch port, which needs d >= k*L_REFILL.
+    # ⚠ THE GAP IS WHERE THE PUBLISHED UNIVERSAL J WAS FOUND UNSOUND: live
+    # measurement puts the steady stall at 8..12 for admissible-but-saturated
+    # programs (d = 8..18) where the old derivation predicted 0..7. The chip
+    # has no bound there, so the assembler REFUSES rather than quoting one.
+    if not jp.port_feasible(d_min):
+        worst = min((d, ln) for ln in lanes
+                    for (_o, _p, _l, d, _q) in lanes[ln] if d > 0)
+        raise Reject(
+            "d_min = %d is below D* = %d: with %d lanes a refill occupies the "
+            "single fetch port for %d cycles, so %d lanes consuming one action "
+            "every %d cycles saturate it. LANE %d carries the tightest spacing. "
+            "The timing guarantee is SCOPED to d_min >= D*; below it the "
+            "steady-state jitter is measured at 8..12 and no bound is published."
+            % (d_min, jp.D_STAR, N_LANES, jp.L_REFILL, N_LANES, d_min,
+               worst[1]))
     if not jp.admissible(d_min):
         raise Reject(
             "d_min = %d is INADMISSIBLE: utilisation %.3f > 1 with %d lanes, so "
@@ -196,6 +215,13 @@ def _demo_switching():
     return lanes, headers
 
 
+def _demo_tight():
+    """A program inside the regime where the published J was found unsound."""
+    lanes, headers = _demo_ok()
+    lanes[0] = [(OP_SHIFT, 8, 1, 12, 0), (OP_REARM, 0, 1, 12, 0)]
+    return lanes, headers
+
+
 def main() -> int:
     rc = report(*_demo_ok())
 
@@ -205,9 +231,12 @@ def main() -> int:
     for name, build, want in (
             ("two lanes on one queue", _demo_shared_queue,
              ("queue 0", "lane 0", "lane 2")),
-            ("one lane, two queues", _demo_switching, ("lane 0",))):
+            ("one lane, two queues", _demo_switching, ("lane 0",)),
+            ("d_min below D*", _demo_tight, ("D* = 20", "LANE"))):
         try:
-            check_queue_ownership(build()[0])
+            lanes_b = build()[0]
+            check_queue_ownership(lanes_b)
+            compute_j(lanes_b)
             print("    *** %s was ACCEPTED -- the check does not fire" % name)
             rc = 1
         except Reject as e:
