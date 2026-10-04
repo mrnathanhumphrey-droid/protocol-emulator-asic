@@ -499,3 +499,59 @@ async def test_engine_runs_at_the_pins(dut):
                            "open-drain / tri-state bank, so this program's "
                            "lanes are not running" % oes)
     dut._log.info("the engine is alive at the pins on all five lanes")
+
+
+# =====================================================================
+# 7. 1.6s IN SILICON: a bad configuration must REFUSE TO RUN
+# =====================================================================
+ST_CFG_ERR = 5          # status byte bit 5
+
+
+@cocotb.test()
+async def test_config_error_refuses_to_run(dut):
+    """1.6s MUST-FIRE: an open-drain lane on a `uo_out` pin never runs.
+
+    `uo_out` has no output enable, so an open-drain lane assigned there can
+    never release -- it drives low once and sticks. 1.6s ruled that the loader
+    REJECTS such a program.
+
+    ⛔⛔ AND NOTHING REJECTED IT. The ruling existed, the model gate checked the
+    condition against programs WE author, and there was no load-time screen
+    anywhere -- not in the RTL, and not asserted in the toolchain, whose
+    `hdr()` only stated the rule in a docstring. Two RTL comments deferred to a
+    screen that did not exist. Being inside a passing model gate is what let it
+    read as built.
+
+    Now the header load sets a sticky CONFIG_ERR and the engine refuses to
+    dispatch. Both halves are asserted here, because either alone is weak:
+      (a) the protocol pins never move -- the program really did not run;
+      (b) CONFIG_ERR appears in the status stream -- the host is told WHY,
+          rather than being left with a part that sits silent.
+    """
+    await start(dut)
+    img = read_hex("cfgerr_image.hex")
+    await load_image(dut, img)
+    dut.ui_in.value = ctrl(prog=0)
+    dut.uio_in.value = 0xFF
+    await ClockCycles(dut.clk, 8)
+
+    # (a) the program must not run: its lane drives uo_out[0], which must not move
+    seen = set()
+    for _ in range(1200):
+        b = str(dut.uo_out.value)
+        seen.add(bit(b, PROTO_LO))
+        await ClockCycles(dut.clk, 1)
+    assert seen <= {"1"}, (
+        "uo_out[0] took values %s -- a program that violates 1.6s DISPATCHED"
+        % sorted(seen))
+
+    # (b) and the host is told why, in the stream
+    frames = await harvest_frames(dut, 900)
+    status = [p for m, p in frames if m == MARK_STATUS and p is not None]
+    assert status, "no status frame in the stream, so CONFIG_ERR is unreadable"
+    assert any((p >> ST_CFG_ERR) & 1 for p in status), (
+        "CONFIG_ERR never set in %d status frames (%s) -- the part refuses to "
+        "run and does not say why"
+        % (len(status), [hex(p) for p in status[:4]]))
+    dut._log.info("1.6s: the violating program never dispatched, and "
+                  "CONFIG_ERR is set in the status stream")

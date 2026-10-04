@@ -63,8 +63,14 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 DOCS = os.path.join(ROOT, "docs")
 
-BUILT, PARTIAL, UNBUILT, SUPERSEDED, ANALYSIS = (
-    "built", "partial", "unbuilt", "superseded", "analysis")
+# ⭐ "built (RTL)" AND "built (toolchain)" ARE DIFFERENT STATUSES, and keeping
+# them apart is a ruling: 1.6s and 1.6t both said "the loader", one meant
+# silicon and one meant the assembler, and conflating them is how both read as
+# built while neither was. OWED_TC is a toolchain obligation with no
+# implementation yet.
+BUILT, BUILT_TC, OWED_TC, PARTIAL, UNBUILT, SUPERSEDED, ANALYSIS = (
+    "built(RTL)", "built(tool)", "owed(tool)", "partial", "unbuilt",
+    "superseded", "analysis")
 
 # (id, kind, status, anchor_file, anchor_substring, exercised_by, note)
 #   kind: rtl | toolchain | model | host | process
@@ -137,28 +143,37 @@ RULINGS = [
      "payload alternating with a sticky status frame."),
 
     # ---- ruled as LOADER behaviour, and absent from the chip ------------
-    ("1.6s", "rtl", UNBUILT, None, None,
-     "model/a2/gate_admissibility_1_6.py (on programs WE author)",
-     "⛔ ruled as 'the loader REJECTS an open-drain lane assigned a uo_out "
-     "pin'. There is NO load-time rejection in the RTL and the image "
-     "toolchain only states the rule in a docstring -- make_smoke_image's "
-     "hdr() says open-drain 'is only MEANINGFUL on a uio pin' and asserts "
-     "nothing. Two RTL comments defer to '1.6's load-time screen', which does "
-     "not exist. The condition is checked only against our own programs."),
-    ("1.6t", "rtl", UNBUILT, None, None,
-     "model/a2/gate_j_program.py (derives J offline)",
-     "⛔ ruled as 'the loader COMPUTES the program's J from d_min'. No RTL "
-     "site; the derivation lives in the model. A host loading an arbitrary "
-     "program gets no J and no admissibility verdict from the chip."),
+    ("1.6s", "rtl", BUILT, "src/pe_engine.v", "config_err",
+     "test.py::test_config_error_refuses_to_run (never dispatches + "
+     "CONFIG_ERR in the stream) + gate_admissibility_1_6",
+     "NOW IN SILICON: header load sets a sticky CONFIG_ERR when an "
+     "open-drain lane names a pin in the uo_out range -- checked on BOTH the "
+     "data and clock pins, since the clock pin is as unreleasable as the data "
+     "pin, which is the asymmetry D2 was -- and the engine REFUSES to "
+     "dispatch. ⚠ WAS UNBUILT: no load-time rejection existed in the RTL "
+     "and the toolchain only stated the rule in a docstring, while two RTL "
+     "comments deferred to a 'load-time screen' that did not exist."),
+    ("1.6t", "toolchain", OWED_TC, None, None,
+     "model/a2/gate_j_program.py derives J, but for OUR programs only",
+     "REWORDED per the ruling: the ASSEMBLER computes the program's J and "
+     "admissibility; the chip enforces only what is structural. Computing J "
+     "on-chip buys nothing -- THE CHIP NEVER USES J; it is an input to the "
+     "schedulability argument, not to the hardware. ⚠ OWED: `pe_asm` does "
+     "not exist, so a user cannot get a J or an admissibility verdict for a "
+     "program they wrote. The claim now says TOOLCHAIN wherever it means "
+     "toolchain."),
 
     # ---- known-open, already recorded ----------------------------------
-    ("TX-routing", "rtl", PARTIAL, "src/project.v", "TXD",
-     "none yet -- must-fires owed",
-     "⚠ ONE SHARED FIFO WITH NO LANE TAG is only correct with ONE "
-     "TX-consuming lane. With more than one, consumption order is the EDF "
-     "interleave, which is timing-dependent, so a host cannot order its "
-     "pushes and the wrong lane transmits the wrong byte SILENTLY. Awaiting a "
-     "decision between a 2-bit lane tag and an admissibility limit."),
+    ("TX-routing", "rtl", PARTIAL, "src/pe_engine.v", "a_q     = cur_act",
+     "⚠ MISSING: the interleave must-fire -- two TX lanes live, bytes "
+     "pushed in HOST order, each lane emitting only its own",
+     "ROUTING IS BUILT: per-lane queues, and the 2-bit tag names a QUEUE "
+     "while each SHIFT action names the queue it draws from, so no lane "
+     "number is baked into hardware and any lane may transmit. ⚠ THE ONE "
+     "THING MISSING IS ITS MUST-FIRE: nothing yet drives two TX lanes "
+     "concurrently and checks that host-ordered pushes reach the right lane. "
+     "Until it exists the routing is argued, not demonstrated -- which is "
+     "exactly the state 1.5 and F1 were in."),
     ("RX-attribution", "rtl", UNBUILT, None, None,
      "none yet -- must-fires owed",
      "⚠ the mirror: serial frames carry payload or status but NO LANE "
@@ -360,10 +375,11 @@ def main() -> int:
     print()
     print("=" * 78)
     print("  GATE ruling-audit: %s" % ("PASSED" if rc == 0 else "FAILED"))
-    print("    * %d rulings tabled: %d built, %d partial, %d unbuilt, "
-          "%d superseded, %d analysis"
-          % (len(RULINGS), by_status[BUILT], by_status[PARTIAL],
-             by_status[UNBUILT], by_status[SUPERSEDED], by_status[ANALYSIS]))
+    tally = ", ".join("%d %s" % (by_status[k], k) for k in
+                      (BUILT, BUILT_TC, OWED_TC, PARTIAL, UNBUILT,
+                       SUPERSEDED, ANALYSIS) if by_status[k])
+    assert sum(by_status.values()) == len(RULINGS)      # nothing falls out
+    print("    * %d rulings tabled: %s" % (len(RULINGS), tally))
     print("    * every `built` claim is backed by a resolvable anchor, so")
     print("      deleting the logic turns this red instead of waiting for")
     print("      somebody to rediscover the ruling.")

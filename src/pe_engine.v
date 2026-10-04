@@ -70,6 +70,12 @@ module pe_engine #(
     parameter integer N_LANES = 5,
     parameter integer AW      = 8,
     parameter integer N_PINS  = 12,
+    // ⭐ THE BANK BOUNDARY, PASSED IN. This module otherwise does not know the
+    // banks -- see the reset comment -- and 1.6s is the one check that needs to:
+    // an open-drain lane assigned a `uo_out` pin can never release, because that
+    // bank has no enable. So the boundary is a parameter rather than knowledge
+    // the engine helps itself to.
+    parameter integer N_UIO    = 8,
     parameter integer TS_W    = 16,
     parameter integer DLY_W   = 10,
     parameter integer D_W     = 8
@@ -116,9 +122,13 @@ module pe_engine #(
     // interleave -- timing-dependent -- so a host cannot order its pushes and
     // the wrong lane transmits the wrong byte SILENTLY.
     output wire [LW-1:0]        host_lane,
+    // ⭐ WHICH QUEUE the consuming action names. The lane index is exported
+    // only for diagnostics now; the ROUTING is by queue.
+    output wire [1:0]           host_q,
     output reg  [N_LANES-1:0]   lane_underrun,
     output reg  [N_LANES-1:0]   lane_overflow,
     output reg                  sticky_ovr,
+    output reg                  cfg_err,
 
     // RX payload out to the serialiser (which is NOT a lane -- zero budget)
     output reg  [7:0]           rx_data,
@@ -137,7 +147,22 @@ module pe_engine #(
                              (N_LANES <= 8) ? 3 : 4;
   localparam integer BPW   = 4;                      // bit pointer 0..8
   localparam integer CW    = 4;                      // C_i 1..8
-  localparam integer ACT_W = 3 + PINW + 1 + DLY_W + BPW;   // the action word
+  // ⭐⭐ BQW: THE TX QUEUE FIELD, AND IT COSTS NO IMAGE LAYOUT. The action word
+  // was 22 bits inside 3 bytes, so the bottom 2 bits were ZERO PADDING that the
+  // engine dropped. Widening ACT_W to 24 absorbs them as a queue index: the word
+  // is still 3 bytes, ACT_BASE does not move, and because the padding was zeros
+  // EVERY EXISTING IMAGE STAYS BIT-COMPATIBLE with queue 0.
+  // ⛔ WHY HERE AND NOT IN THE HEADER, which is where the ruling put it: the
+  // header is 47 bits inside 48, so it has ONE spare bit per lane, not two. A
+  // 2-bit-per-lane field needs HDR_BYTES 6 -> 7, which moves ACT_BASE from 30 to
+  // 35 and regenerates every image in the repo. Measured, not assumed.
+  // ⭐ AND THE ACTION FIELD IS STRICTLY MORE GENERAL. The ruling's goal was that
+  // the tag name a QUEUE rather than a lane, so any lane may transmit and the
+  // program does the assigning. An action already names its lane and its pin;
+  // naming its queue too is the same idea one level finer, and it drops the
+  // baked lane->queue mapping entirely.
+  localparam integer BQW   = 2;                      // TX queue index
+  localparam integer ACT_W = 3 + PINW + 1 + DLY_W + BPW + BQW;
 
   // ---- opcodes. ⭐ Eight, which is exactly the 3-bit field: level, shift,
   // shift-in, read-bit, start, stop, arm, no-op re-arm.
@@ -253,6 +278,7 @@ module pe_engine #(
   // and move measured timing. At the D input the pin stays a flop Q and the
   // mask costs nothing.
   reg [N_PINS-1:0] pin_pp;                  // 1 = this pin may drive a 1
+  reg              config_err;              // sticky: 1.6s violation
   reg [7:0]       l_data   [0:N_LANES-1];   // THE PAYLOAD lives here, not in
                                             //   the program (ruling F1)
   reg [BPW-1:0]   l_bitp   [0:N_LANES-1];
@@ -490,6 +516,8 @@ module pe_engine #(
   reg [1:0]       st;
   reg [LW-1:0]    cur;
   assign host_lane = cur;
+  assign host_q    = a_q;
+  always @(*) cfg_err = config_err;
   reg [ACT_W-1:0] cur_act;
 
   assign busy = (st != ST_IDLE);
@@ -498,8 +526,11 @@ module pe_engine #(
   wire [2:0]       a_op    = cur_act[ACT_W-1 -: 3];
   wire [PINW-1:0]  a_pin   = cur_act[ACT_W-4 -: PINW];
   wire             a_lvl   = cur_act[ACT_W-4-PINW];
-  wire [DLY_W-1:0] a_dly   = cur_act[BPW +: DLY_W];
-  wire [BPW-1:0]   a_cnt   = cur_act[0 +: BPW];
+  wire [DLY_W-1:0] a_dly   = cur_act[BQW+BPW +: DLY_W];
+  wire [BPW-1:0]   a_cnt   = cur_act[BQW +: BPW];
+  // ⭐ WHICH TX QUEUE THIS ACTION DRAWS FROM. Per-ACTION, so a lane's queue is
+  // assigned by the PROGRAM and no lane number is baked into the hardware.
+  wire [BQW-1:0]   a_q     = cur_act[0 +: BQW];
 
   // ⭐⭐ THE RESERVED NON-DRIVING PIN INDEX. PINW encodes 2**PINW codes and only
   // N_PINS are real, so `PIN_NONE` costs nothing: it is a value that already
@@ -779,6 +810,7 @@ module pe_engine #(
       rx_data  <= 8'h00;
       rx_push  <= 1'b0;
       sticky_ovr    <= 1'b0;
+      config_err    <= 1'b0;
       host_pop      <= 1'b0;
       lane_underrun <= {N_LANES{1'b0}};
       lane_overflow <= {N_LANES{1'b0}};
@@ -880,6 +912,21 @@ module pe_engine #(
                     l_pin[hl]    <= hsh_n[HDR_BYTES*8-1 -: PINW];
                     l_clkpin[hl] <= hsh_n[HDR_BYTES*8-1-PINW -: PINW];
                     l_mode[hl]   <= hsh_n[HDR_BYTES*8-1-2*PINW];
+                    // ⛔⛔ 1.6s IN SILICON. It was ruled as "the loader REJECTS"
+                    // and no load-time rejection existed anywhere -- not in the
+                    // RTL, and not asserted in the toolchain, which only stated
+                    // it in a docstring. An open-drain lane on a `uo_out` pin
+                    // cannot release, so it drives low once and sticks; that is
+                    // a configuration the chip must refuse, not emulate.
+                    // ⭐ CHECKED ON BOTH PINS the header names, because the
+                    // clock pin is as unreleasable as the data pin -- which is
+                    // exactly the asymmetry D2 was.
+                    if (hsh_n[HDR_BYTES*8-1-2*PINW] == 1'b0) begin
+                      if (hsh_n[HDR_BYTES*8-1 -: PINW] >= N_UIO[PINW-1:0])
+                        config_err <= 1'b1;
+                      if (hsh_n[HDR_BYTES*8-1-PINW -: PINW] >= N_UIO[PINW-1:0])
+                        config_err <= 1'b1;
+                    end
                     // ⭐ RULING 1.5: the per-PIN drive class, derived here from
                     // the lane that owns the pin. Both the data pin and the
                     // clock pin take the lane's mode, and this lands during the
@@ -985,9 +1032,13 @@ module pe_engine #(
       // ---------------- dispatch, C = 2 ------------------------------
       case (st)
 `ifdef M_NO_PRIME
-        ST_IDLE: if (hdr_done && winner_v) begin
+        // ⛔ REFUSES TO RUN on a 1.6s violation. Not a warning: the program
+        //    names a pin that physically cannot do what the program asked, so
+        //    dispatching it would emulate a protocol incorrectly rather than
+        //    fail visibly. The host sees CONFIG_ERR in the status stream.
+        ST_IDLE: if (hdr_done && !config_err && winner_v) begin
 `else
-        ST_IDLE: if (primed && winner_v) begin
+        ST_IDLE: if (primed && !config_err && winner_v) begin
 `endif
                    // ⛔⛔ RULING 2: ARRIVING READY WHILE STILL ARMED IS A
                    // TIMEOUT, AND A TIMEOUT IS AN ERROR. The lane armed, its

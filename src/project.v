@@ -257,6 +257,7 @@ module tt_um_protocol_emulator #(
   wire [N_LANES-1:0] e_under, e_ovf;
   wire               e_ovr, e_busy, e_rx_push;
   wire               e_host_pop;
+  wire               e_cfg_err;
   wire [7:0]         e_rx_data;
 
   // =====================================================================
@@ -323,13 +324,6 @@ module tt_um_protocol_emulator #(
   localparam integer TXD  = 2;                // depth per lane, bytes
   localparam integer TXN  = 4;                // queues = TX-consuming lanes
 
-  // ⭐ THE LANE ROLES THIS MAPPING BAKES IN, NAMED so the restriction is
-  // legible and changeable rather than a bare literal. Only two input pins came
-  // free, so one of the five lanes cannot have a queue, and it has to be the
-  // receive-only one.
-  localparam [LW-1:0] L_RXONLY = 3;           // UART-rx: no TX queue
-  localparam [LW-1:0] L_TGT    = 4;           // SPI-target: takes tag 3
-
   wire push_rise = run & wr_rise;             // `ui_in[6]` is WR in load mode
   wire [1:0] tx_tag_pins = {ui_in[5], ui_in[0]};
 
@@ -345,24 +339,16 @@ module tt_um_protocol_emulator #(
   reg        tx_full_sticky;
   integer    ti;
 
-  // ---- lane <-> queue mapping ----------------------------------------
-  // tag 0,1,2,3 -> lanes 0,1,2,4. Lane 3 (UART-rx) has no queue.
-  function [1:0] q_of_lane;
-    input [LW-1:0] ln;
-    begin
-      q_of_lane = (ln == L_TGT) ? 2'd3 : ln[1:0];
-    end
-  endfunction
-  function fed_lane;                          // may this lane be fed at all?
-    input [LW-1:0] ln;
-    begin
-      fed_lane = (ln != L_RXONLY);
-    end
-  endfunction
-
-  wire [LW-1:0] e_host_lane;
-  wire [1:0]    q_sel    = q_of_lane(e_host_lane);
-  wire          tx_valid = fed_lane(e_host_lane) && (tx_cnt[q_sel] != 2'd0);
+  // ---- the queue is named by the ACTION, not by the lane ---------------
+  // ⛔⛔ THE FIRST VERSION BAKED LANE NUMBERS INTO HARDWARE: tag -> lanes
+  // {0,1,2,4}, which made "lane 3 cannot be fed" a hardware fact in a chip whose
+  // whole premise is that roles are assigned per program. A protocol constant in
+  // disguise. Now the 2-bit tag names a QUEUE, each SHIFT action names the queue
+  // it draws from, and ANY lane may transmit.
+  wire [LW-1:0] e_host_lane;                  // diagnostics only
+  wire [1:0]    e_host_q;
+  wire [1:0]    q_sel    = e_host_q;
+  wire          tx_valid = (tx_cnt[q_sel] != 2'd0);
   wire [7:0]    tx_head  = tx_mem[{q_sel, tx_rp[q_sel]}];
 
   wire nib_lo  = push_rise & tx_half;         // the push that completes a byte
@@ -414,7 +400,7 @@ module tt_um_protocol_emulator #(
   end
 
   pe_engine #(
-      .N_LANES(N_LANES), .AW(AW), .N_PINS(N_PINS),
+      .N_LANES(N_LANES), .AW(AW), .N_PINS(N_PINS), .N_UIO(8),
       .TS_W(TS_W), .DLY_W(DLY_W), .D_W(D_W)
   ) u_eng (
       .clk(clk), .rst_n(rst_n), .run(run),
@@ -423,8 +409,9 @@ module tt_um_protocol_emulator #(
       .pin_out(e_pin_out), .pin_oe(e_pin_oe), .pin_in(pin_in),
       .pin_rise(pin_rise), .pin_fall(pin_fall),
       .host_data(tx_head), .host_valid(tx_valid), .host_pop(e_host_pop),
-        .host_lane(e_host_lane),
+        .host_lane(e_host_lane), .host_q(e_host_q),
       .lane_underrun(e_under), .lane_overflow(e_ovf), .sticky_ovr(e_ovr),
+        .cfg_err(e_cfg_err),
       .rx_data(e_rx_data), .rx_push(e_rx_push), .busy(e_busy)
   );
 
@@ -448,6 +435,10 @@ module tt_um_protocol_emulator #(
   reg       ser_phase;
   reg [7:0] status_byte;
   reg       status_turn;
+  // the ERROR bits only -- status_byte[0] is the always-1 alive bit, so
+  // including it would make the stream permanently busy.
+  wire      status_pending = e_cfg_err | tx_full_sticky | e_ovr
+                           | (|e_ovf) | (|e_under);
 
   always @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
@@ -459,7 +450,11 @@ module tt_um_protocol_emulator #(
     end else begin
       // the sticky status, assembled once so both modes frame the same byte
       // ⭐ bit 4 = TX-FULL, which F1's status list named and nothing carried.
-      status_byte <= {3'b000, tx_full_sticky, e_ovr, |e_ovf, |e_under, 1'b1};
+      // ⭐ bit 5 = CONFIG_ERR (1.6s): the program named an open-drain lane on
+      // a `uo_out` pin, so the chip REFUSED TO RUN it. The host learns why
+      // from the stream rather than from a part that sits silent.
+      status_byte <= {2'b00, e_cfg_err, tx_full_sticky,
+                      e_ovr, |e_ovf, |e_under, 1'b1};
       rb_re <= 1'b0;
 
       if (ser_cnt != 4'd0) begin
@@ -517,6 +512,22 @@ module tt_um_protocol_emulator #(
           ser_sh      <= {1'b0, e_rx_data};
           ser_cnt     <= 4'd9;
           status_turn <= 1'b1;
+        end else if (status_pending) begin
+          // ⛔⛔ A SILENT PART CANNOT REPORT WHY IT IS SILENT. In run mode the
+          // stream only ever carried a status frame AFTER a payload frame, so
+          // with no RX traffic NOTHING was emitted at all -- and a program the
+          // chip REFUSES to run produces no traffic by definition. CONFIG_ERR
+          // was therefore unreadable exactly when it mattered.
+          // ⚠ The comment above claims "liveness is in the stream even when no
+          // payload is moving". That was true of the intent and not of the code.
+          // ⭐ RATE-LIMITED BY THE FLAGS THEMSELVES, not by a timer: status is
+          // self-started only while a sticky error is set. An unconditional
+          // idle heartbeat would emit a frame every 18 cycles and, because
+          // `e_rx_push` is a PULSE that is lost while a frame shifts, would
+          // turn the heartbeat into RX overflow -- paying for liveness with the
+          // data it exists to report. 1.6p prices that channel at 2.2 %.
+          ser_sh      <= {1'b1, status_byte};
+          ser_cnt     <= 4'd9;
         end
       end
     end

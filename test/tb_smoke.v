@@ -100,7 +100,13 @@ module tb_smoke;
   reg [4:0] prev_sel;
   reg [8*64-1:0] imgfile;
   reg [23:0] exp_act;
-  reg [21:0] got_act;
+  // ⛔ 24, NOT 22, AND IT USED TO BE 22. The action word's bottom 2 bits were
+  // zero padding and this bench compared `exp_act[23:2]` to match. Those bits
+  // are now the TX QUEUE field, so the comparison is the WHOLE word -- and this
+  // is a second copy of the action layout living in a bench, which is why the
+  // invariant failed the moment the field was added rather than silently
+  // ignoring it.
+  reg [23:0] got_act;
 
   initial begin
     // ⭐ THE IMAGE IS SELECTABLE so the same bench can run the default program
@@ -227,11 +233,11 @@ module tb_smoke;
                      img[dut.u_eng.l_pc[lk] + 2]};
           got_act = dut.u_eng.l_act[lk*2 + (dut.u_eng.l_sel[lk] ? 1 : 0)];
           inv_checks = inv_checks + 1;
-          if (got_act !== exp_act[23:2]) begin
+          if (got_act !== exp_act) begin
             if (inv_viol == 0)
               $display("FAIL buffer-swap invariant: cyc %0d lane %0d pc %0d sel %0d -- head holds %h, image says %h",
                        cyc, lk, dut.u_eng.l_pc[lk], dut.u_eng.l_sel[lk],
-                       got_act, exp_act[23:2]);
+                       got_act, exp_act);
             inv_viol = inv_viol + 1;
           end
         end

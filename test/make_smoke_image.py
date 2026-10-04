@@ -29,7 +29,8 @@ import sys
 N_LANES, AW, DLY_W, PINW, CW, D_W = 5, 8, 10, 4, 4, 8
 HDR_BITS = PINW * 2 + 1 + DLY_W + CW + D_W + D_W + AW   # +1 = drive mode
 HDR_BYTES = (HDR_BITS + 7) // 8
-ACT_W = 3 + PINW + 1 + DLY_W + 4
+BQW   = 2                  # TX queue index, in what used to be padding
+ACT_W = 3 + PINW + 1 + DLY_W + 4 + BQW
 ACT_BYTES = (ACT_W + 7) // 8
 ACT_BASE = N_LANES * HDR_BYTES
 
@@ -52,10 +53,19 @@ def hdr(pin, clkpin, mode, t, c, dsched, dtol, base) -> bytes:
     return w.to_bytes(HDR_BYTES, "big")
 
 
-def act(op, pin, level, delay, count=0) -> bytes:
+def act(op, pin, level, delay, count=0, q=0) -> bytes:
+    """`q` names the TX QUEUE this action draws its payload from.
+
+    ⭐ IT COSTS NOTHING: the action word was 22 bits inside 3 bytes, so the
+    bottom 2 bits were zero padding. ACT_W is now 24, the word is still 3 bytes,
+    and every image written before this field existed is bit-identical to one
+    written with q = 0.
+    ⛔ PER ACTION, NOT PER LANE, so no lane number is baked into hardware --
+    see the BQW comment in pe_engine.v for why it is not in the header.
+    """
     w = 0
     for val, width in ((op, 3), (pin, PINW), (level, 1), (delay, DLY_W),
-                       (count, 4)):
+                       (count, 4), (q, BQW)):
         w = (w << width) | (val & ((1 << width) - 1))
     w <<= (ACT_BYTES * 8 - ACT_W)
     return w.to_bytes(ACT_BYTES, "big")
@@ -235,6 +245,24 @@ def build_chain(d_tog: int, d_park: int):
     return b"".join(headers) + b"".join(prog)
 
 
+def build_cfgerr(d: int = 20):
+    """1.6s MUST-FIRE: an OPEN-DRAIN lane assigned a `uo_out` pin.
+
+    `uo_out` has no output enable, so an open-drain lane there can never
+    release -- it drives low once and sticks. The chip must REFUSE to run this,
+    not emulate it, and must say why in the status stream (CONFIG_ERR).
+    """
+    prog = [act(OP_LEVEL, UO0, 0, d), act(OP_LEVEL, UO0, 1, d),
+            act(OP_REARM, 0, 1, d)]
+    l0 = ACT_BASE
+    lp = l0 + 3 * ACT_BYTES
+    prog.append(act(OP_REARM, 0, 0, 500))
+    headers = [hdr(UO0, UO0, 0, d, 2, 2 * d, 3 * d, l0)]   # mode 0 on uo_out!
+    for n in range(1, N_LANES):
+        headers.append(hdr(n, n, 0, 500, 2, 200, 240, lp))
+    return b"".join(headers) + b"".join(prog)
+
+
 def build_census(d: int = 25):
     """A program that executes ALL EIGHT opcodes on the RTL.
 
@@ -385,6 +413,14 @@ def main() -> int:
             for b in img:
                 fh.write("%02x\n" % b)
         print("edge image (timeout=%d), %d bytes -> %s" % (to, len(img), out))
+        return 0
+    if "--cfgerr" in sys.argv:
+        img = build_cfgerr()
+        out = os.path.join(here, "cfgerr_image.hex")
+        with open(out, "w", encoding="ascii") as fh:
+            for b in img:
+                fh.write("%02x" % b + chr(10))
+        print("cfgerr image (1.6s violation), %d bytes -> %s" % (len(img), out))
         return 0
     if "--census" in sys.argv:
         img = build_census()

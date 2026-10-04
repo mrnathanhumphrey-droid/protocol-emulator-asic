@@ -55,8 +55,11 @@ ALLOWED = {
         "program that reads past its end looks correct. The image loader "
         "asserts its own length for the same reason."),
     "s_wrdata": (
-        22,
-        "the store's WIDE action read. Written by the store on a read and "
+        24,          # was 22: ACT_W absorbed the 2-bit TX queue field
+        "the store's WIDE action read, now 24 bits. ⭐ THE WIDTH CHECK "
+        "EARNED ITS KEEP HERE: it went 22 -> 24 when ACT_W absorbed the TX "
+        "queue field, and the gate refused to absorb two new bits nobody "
+        "had classified. Written by the store on a read and "
         "captured at P_CAP, which only runs after a real P_REQ -- so it is "
         "write-before-read. ⛔ If that ordering ever broke, an X action word "
         "would reach `l_act`, and the engine has already shown what that costs: "
