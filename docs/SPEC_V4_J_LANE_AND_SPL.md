@@ -85,21 +85,35 @@ release interval:
 
 ### Four instrument defects, each caught by a printed precondition
 
-0. **The bench kept its own copy of the head index** — `lane*2 + l_sel` — and
-   that copy failed **twice**. First as a 3-bit declaration, aliasing lane 4's
-   slots (8, 9) onto lane 0's, found before any measurement. Then, at SPL = 1,
-   where lane 1's head is slot 1 while `1*2` reads **lane 2's** slot: the
-   instrument reported a per-interval sum of **1870** against a bound of 9.
-   ⛔ A five-alarm result that was entirely the probe's own bug, and it was
-   caught by the impossibility of the shape — `sum = 1870` with
-   `longest run = 6` requires a lane to be winner-blocked ~300 times inside one
-   release interval without ever dispatching, which the winner-first refill
-   policy does not permit.
-   ⚠ **And it is a fix reproduced on the unexamined axis.** `tb_smoke` had the
-   identical copy, was found and fixed in this same session — and `tb_jlane`,
-   the file carrying the warning comment about exactly this, was not. Both now
-   read `dut.u_eng.hix[...]`. At SPL = 2 the copy was arithmetically identical,
-   so the SPL = 2 results stand and were re-confirmed after the fix.
+0. **FOUR private copies of the slot index, in two benches, found one at a
+   time — after the RTL's ten had already been collapsed into `hix`.** This is
+   the session's main lesson and it cost a published claim.
+
+   | # | site | how it failed |
+   |---|---|---|
+   | 1 | `tb_jlane` head index, declared `[2:0]` | `NSLOT = 10` needs 4 bits, so lane 4's slots (8, 9) aliased onto lane 0's. Found before measuring. |
+   | 2 | `tb_smoke` buffer-swap invariant | at SPL = 1, `lk*2` reads lane 2's slot when checking lane 1 — **3207 invariant failures on a correct design** |
+   | 3 | `tb_jlane` head index again, now 4 bits | still `lane*2`, so at SPL = 1 it reported a per-interval sum of **1870** against a bound of 9 |
+   | 4 | `tb_smoke` steady-stall reconstruction | **the one that mattered**: it produced the `STEADY` number, so the whole single-buffer column of T3 was measured against the wrong slot, and the first published comparison is retracted |
+
+   ⛔ **#3 was caught by the impossibility of its shape, not by a gate.**
+   `sum = 1870` with `longest run = 6` requires a lane to be winner-blocked
+   ~300 times inside one release interval without ever dispatching, which the
+   winner-first refill policy does not permit. A dramatic result is first a
+   suspicion about the probe.
+
+   ⚠ **#2 and #3 are the same fix reproduced on the unexamined axis**: both
+   found in one sitting, in two files, and the file carrying the warning
+   comment about exactly this bug was the one left unfixed. **#4 then showed
+   that fixing two copies is not fixing the class** — a grep for the pattern
+   across every bench is what finally closed it. No bench computes a slot
+   index any more; they read `dut.u_eng.hix[...]`.
+
+   ⭐ **`tb_witness` was also carrying a 3-bit copy**, so the worst-case search
+   behind the published chains ran with an aliasing index. The chains
+   themselves have winners 0 and 1, where three bits suffice, and chain 1 still
+   reproduces **stall 8 at cycle 4870** exactly after the fix — so
+   `PREREG_U_PORT.md`'s record stands.
 
 1. **The dump task shared the run loop's index.** Every chain dump reset `i` to
    `RING`, so the bench ran **2.3× longer than `NCYC`** — a reported window of
@@ -214,27 +228,75 @@ is precisely what the retracted benefit claim was.
 
 ### Measured, on the J sweep's own recipe
 
-| d | double (SPL = 2) | single (SPL = 1) |
-|---|---|---|
-| 8 | 10 | 8 |
-| 12 | 11 | 11 |
-| 16 | 11 | 9 |
-| 18 | 11 | 8 |
-| **19** | **0** | 8 |
-| **20** | **0** | 6 |
-| **21** | **0** | 4 |
-| **25** | **0** | 1 |
-| **30** | **0** | 1 |
+⛔⛔ **THESE NUMBERS ARE THE SECOND MEASUREMENT. The first set was published in
+`6598d66` and is RETRACTED.** `tb_smoke`'s steady-stall reconstruction kept its
+**own copy** of the slot index — `winner * 2 + l_sel` — so at SPL = 1 it read
+the wrong lane's valid bit, and the entire single-buffer column was measured
+against it. The fourth copy of that index found in one session (see defect 0
+below); no bench computes a slot index any more.
+
+⭐ **What makes the correction trustworthy is that the double-buffer column did
+not move at all** — 10, 11, 11, 11, 0, 0, 0, 0, 0 before and after. At SPL = 2
+the private copy was arithmetically identical to `hix`, so it could only have
+been wrong at SPL = 1, and the unchanged column is the evidence of that.
+
+| d | double (SPL = 2) | single (SPL = 1) | retracted single |
+|---|---|---|---|
+| 8 | 10 | 9 | ~~8~~ |
+| 12 | 11 | 10 | ~~11~~ |
+| 16 | 11 | 13 | ~~9~~ |
+| 18 | 11 | 11 | ~~8~~ |
+| **19** | **0** | 7 | ~~8~~ |
+| **20** | **0** | 5 | ~~6~~ |
+| **21** | **0** | 4 | ~~4~~ |
+| **25** | **0** | **0** | ~~1~~ |
+| **30** | **0** | **0** | ~~1~~ |
 
 - **double**: the cliff lies in (18, 19]; stall 0 at and above it.
-- **single**: the stall **never reaches 0** anywhere in the swept range. Its
-  cliff is **above 30** — not located, and not absent.
+- **single**: the cliff lies in (21, 25]. ⚠ The retracted reading had it
+  "above 30 — not located"; the single buffer **does** reach 0, later.
 
 ### ⇒ The double buffer is what makes the published claim true
 
 In the scoped region (`d ≥ D* = 20`) the double buffer stalls **0** and the
-single buffer stalls up to **6**. So `d_min ≥ D* → J = 1` **holds only at
-SPL = 2**; at SPL = 1 the same programs stall and `J` would be at least 7.
+single buffer stalls up to **5**. So `d_min ≥ D* → J = 1` **holds only at
+SPL = 2**; at SPL = 1 the same programs stall and `J` would be at least 6.
+
+The cliff moves too: **19 with the double buffer, 25 without it.**
+
+⚠ **The direction of this conclusion survived the retraction; two of its
+figures did not.** The corrected single-buffer numbers are smaller at d = 19–20
+and reach 0 by d = 25, so the benefit is real but narrower than first
+published — and it is the *cliff* shift (19 vs 25) that straddles `D* = 20`,
+which is what makes the claim depth-dependent.
+
+### The per-lane instrument under both configurations
+
+`python test/run_jlane.py --spl 1` runs the T1 instrument on the single-buffer
+engine. This is the half of T3 that the aggregate sweep above cannot answer.
+
+| | per-lane `J_lane` | aggregate | cells adjudicated | cliff | scoped stall (`d ≥ D*`) |
+|---|---|---|---|---|---|
+| SPL = 2 | **7** | 11 | 9 of 10 | 19 | **0** |
+| SPL = 1 | **7** | 13 | **10 of 10** | 25 | 5 |
+
+⭐ **The double buffer does NOT lower the per-lane wait on these arms — it is 7
+at both depths.** Its measured effect is entirely in the other three columns:
+the aggregate run (11 vs 13), the cliff (19 vs 25), and the stall in the scoped
+region (0 vs 5). So the benefit is about *how often* a lane is made to wait and
+*at which delays*, not about how long any single wait is.
+
+⚠ **And `jitter_max` would have hidden that distinction**, which is T2's point
+arriving as a result rather than as an argument: the only column where the two
+depths differ by a visible margin at sub-`D*` delays is the aggregate, and
+quoting it as a per-lane `J` would have attributed a 2-cycle whole-engine
+difference to a single lane whose wait did not change.
+
+⚠ Note the single-buffer engine **adjudicates all ten cells** while the shipped
+depth leaves one open. Fewer prefetch states makes it more stationary, so this
+is not evidence that SPL = 1 is better behaved in any sense that matters — it is
+a reminder that "the measurement converged" and "the design is good" are
+different properties.
 
 **RECOMMENDATION: KEEP IT** — the opposite of what T3 anticipated, and larger
 and in a different place than the retracted "11 → 7" claimed. ⚠ Nathan rules.

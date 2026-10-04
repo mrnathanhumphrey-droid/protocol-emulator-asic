@@ -227,9 +227,12 @@ def main() -> int:
           % (w2_all, w1_all))
     print("      ⚠ this range includes d < D* = %d, where NEITHER depth is"
           % D_STAR_STRUCTURAL)
-    print("        port-feasible and the claim is not made. The two tie here,")
-    print("        and reading the verdict off this line is how the first")
-    print("        version of this gate recommended removal.")
+    print("        port-feasible and the claim is not made, so this line is")
+    print("        NOT the verdict. Reading it off this line is how the first")
+    print("        version of this gate recommended removal: the two columns")
+    print("        came out equal over the whole range while differing by %d"
+          % (w1 - w2))
+    print("        cycles in the scoped region below.")
     print("    worst stall, d >= D* = %-3d (SCOPED): double %d   single %d"
           % (D_STAR_STRUCTURAL, w2, w1))
     print("    cliff                            : double %s   single %s"

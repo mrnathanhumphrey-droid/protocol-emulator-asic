@@ -70,8 +70,19 @@ module tb_witness;
   // ⛔ THE SAME STALL CONDITION THE ENGINE COUNTS ON, reconstructed here:
   // winner chosen, schedule running, and waiting ONLY on its own head slot.
   // Reading a different condition would witness a different event.
-  wire [2:0] w_sel  = dut.u_eng.winner * 2
-                      + (dut.u_eng.l_sel[dut.u_eng.winner] ? 1 : 0);
+  // ⛔⛔ THIS WAS A 3-BIT PRIVATE COPY OF THE SLOT INDEX, AND 3 BITS IS TOO
+  // FEW. `NSLOT = SPL * N_LANES = 10`, so when lane 4 is the winner its head
+  // slot is 8 or 9 and a 3-bit index WRAPS TO 0 OR 1 -- this bench then read
+  // LANE 0's valid bit while reporting lane 4 as the winner. ⚠ The published
+  // chains in `docs/PREREG_U_PORT.md` both have winners 0 and 1, where three
+  // bits suffice, and they still reproduce exactly (chain 1: stall 8 at cycle
+  // 4870) -- but the worst-case SEARCH that found them ran with this index, so
+  // the fix is required before any further number comes out of here.
+  // ⭐ FOURTH COPY OF THIS INDEX FOUND IN ONE SESSION, after the RTL's ten
+  // were collapsed into `hix`: the swap invariant and the stall
+  // reconstruction in `tb_smoke`, `tb_jlane`'s head index, and this. Reading
+  // the engine's own wire is the only form that cannot drift or alias.
+  wire [3:0] w_sel  = dut.u_eng.hix[dut.u_eng.winner];
   wire       waiting = (dut.u_eng.st == 0) && dut.u_eng.winner_v
                        && !dut.u_eng.l_actv[w_sel];
 

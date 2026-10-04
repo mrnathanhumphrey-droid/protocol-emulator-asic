@@ -289,8 +289,17 @@ module tb_smoke;
       for (lk = 0; lk < 5; lk = lk + 1)
         if (dut.u_eng.l_sel[lk] !== prev_sel[lk]) nflip = nflip + 1;
       for (lk = 0; lk < 5; lk = lk + 1) prev_sel[lk] = dut.u_eng.l_sel[lk];
-      win_slot = dut.u_eng.winner * 2 +
-                 (dut.u_eng.l_sel[dut.u_eng.winner] ? 1 : 0);
+      // ⛔⛔ THE THIRD PRIVATE COPY OF THE SLOT INDEX IN THIS SESSION, and
+      // the one that mattered most: THIS is the slot the steady-stall
+      // reconstruction below reads, so at SPL = 1 it read the WRONG LANE's
+      // slot and the single-buffer column of the T3 comparison was measured
+      // against it. The other two were the buffer-swap invariant in this same
+      // file and `tb_jlane`'s head index.
+      // ⚠ Three copies, found one at a time, in two files, in one sitting --
+      // after the RTL's ten copies had already been collapsed into `hix`. A
+      // fix on one axis repeats the error on the parallel one unless the whole
+      // class is swept, so: no bench computes a slot index any more.
+      win_slot = dut.u_eng.hix[dut.u_eng.winner];
       // ⛔⛔ THE GATE IS "SCHEDULE TIME IS RUNNING", NOT `hdr_done`, AND THE
       // DIFFERENCE IS A WHOLE RULING. With `hdr_done` this counted the
       // PRIMING refills as jitter -- it reported cold = 4 while the engine's
