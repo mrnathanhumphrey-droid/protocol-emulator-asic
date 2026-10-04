@@ -287,52 +287,125 @@ module tt_um_protocol_emulator #(
   // ⛔ ONE FIFO, NOT ONE PER LANE, per the ruling: "the shift action names its
   // lane, so the host pushes bytes into one FIFO and the engine routes them as
   // the program consumes them" -- the same trick that deleted the address bus.
-  localparam integer TXD = 2;                 // FIFO depth, bytes
+  // ⛔⛔⛔ PER-LANE QUEUES WITH A TAG ON PUSH, and a single shared queue was
+  // WRONG. The one-FIFO design rested on "the shift action already names its
+  // lane, so the program does the addressing" -- which holds only if the HOST
+  // CAN PREDICT WHICH LANE CONSUMES THE NEXT BYTE. With more than one
+  // TX-consuming lane active, consumption order is the EDF dispatch interleave,
+  // which depends on phase and timing, so the host would have to simulate the
+  // scheduler. Get it wrong and the wrong lane transmits the wrong byte, and
+  // NOTHING FLAGS IT.
+  //
+  // ⚠ AND THERE ARE FOUR TX-CONSUMING LANES, NOT THREE. `OP_SHIFT` reads
+  // `l_data[cur][0]`, so any lane that shifts consumes payload -- and the
+  // SPI-TARGET transmits on MISO. The shipped set is lanes 0 (UART-tx),
+  // 1 (SPI-master MOSI), 2 (I2C SDA) and 4 (SPI-target MISO); lane 3 (UART-rx)
+  // is the only receive-only lane.
+  // ⛔ SO THE TAG IS EXACTLY FULL AT 2 BITS, with no headroom, and "lane 3
+  // cannot be fed" is baked into hardware. That is a real restriction on a
+  // table-driven design, and it is here because only two input pins came free
+  // (the retired RX pop and view select). ⭐ THE ESCAPE HATCH, if a fifth
+  // transmitter is ever wanted, is to carry the tag IN THE DATA STREAM rather
+  // than on pins -- 1.6n measures the channel at 10.7 % utilised, so a third
+  // push per byte is affordable and the tag width stops being pin-limited.
+  //
+  // ⭐ PER-LANE QUEUES RATHER THAN ONE TAGGED QUEUE, and the difference is
+  // correctness, not cost. A single queue whose entries carry a tag HEAD-OF-LINE
+  // BLOCKS: if the head is tagged for lane A and lane B consumes first, B
+  // underruns while A's byte sits in front of it -- the ordering problem back in
+  // another form. Each lane popping its own queue cannot do that.
+  // ⛔ THE SAME DERIVATION AS pe_engine.v, COPIED VERBATIM rather than
+  // written as a literal 3: a lane-index width kept in two files as two
+  // different expressions is the drift this project keeps paying for, and a
+  // bare literal would also break the no-bare-widths rule the RTL follows.
+  localparam integer LW    = (N_LANES <= 2) ? 1 : (N_LANES <= 4) ? 2 :
+                             (N_LANES <= 8) ? 3 : 4;
+  localparam integer TXD  = 2;                // depth per lane, bytes
+  localparam integer TXN  = 4;                // queues = TX-consuming lanes
+
+  // ⭐ THE LANE ROLES THIS MAPPING BAKES IN, NAMED so the restriction is
+  // legible and changeable rather than a bare literal. Only two input pins came
+  // free, so one of the five lanes cannot have a queue, and it has to be the
+  // receive-only one.
+  localparam [LW-1:0] L_RXONLY = 3;           // UART-rx: no TX queue
+  localparam [LW-1:0] L_TGT    = 4;           // SPI-target: takes tag 3
 
   wire push_rise = run & wr_rise;             // `ui_in[6]` is WR in load mode
-  reg  [7:0] tx_fifo [0:TXD-1];
+  wire [1:0] tx_tag_pins = {ui_in[5], ui_in[0]};
+
+  // flat arrays with index arithmetic: a 2-D unpacked array is legal
+  // Verilog-2001 but risks the non-SystemVerilog reader the synthesis gate uses.
+  reg  [7:0] tx_mem [0:TXN*TXD-1];
+  reg  [1:0] tx_cnt [0:TXN-1];
+  reg        tx_wp  [0:TXN-1];
+  reg        tx_rp  [0:TXN-1];
   reg  [7:0] tx_asm;                          // the half-assembled byte
   reg        tx_half;                         // 0 = expect HIGH nibble
-  reg  [1:0] tx_cnt;
-  reg        tx_wp, tx_rp;
+  reg  [1:0] tx_tag;                          // LATCHED at the first push
   reg        tx_full_sticky;
+  integer    ti;
 
-  wire       tx_valid = (tx_cnt != 2'd0);
-  wire [7:0] tx_head  = tx_fifo[tx_rp];
+  // ---- lane <-> queue mapping ----------------------------------------
+  // tag 0,1,2,3 -> lanes 0,1,2,4. Lane 3 (UART-rx) has no queue.
+  function [1:0] q_of_lane;
+    input [LW-1:0] ln;
+    begin
+      q_of_lane = (ln == L_TGT) ? 2'd3 : ln[1:0];
+    end
+  endfunction
+  function fed_lane;                          // may this lane be fed at all?
+    input [LW-1:0] ln;
+    begin
+      fed_lane = (ln != L_RXONLY);
+    end
+  endfunction
 
-  // ⭐ ONE ASSIGNMENT PER REGISTER, AND THE SIMULTANEOUS CASE IS EXPLICIT. The
-  // first version updated `tx_cnt` from three overlapping `if`s and relied on
-  // last-write-wins to net out a same-cycle push and pop. That is the kind of
-  // ordering argument this project has repeatedly had to retract, so the four
-  // combinations are enumerated instead.
+  wire [LW-1:0] e_host_lane;
+  wire [1:0]    q_sel    = q_of_lane(e_host_lane);
+  wire          tx_valid = fed_lane(e_host_lane) && (tx_cnt[q_sel] != 2'd0);
+  wire [7:0]    tx_head  = tx_mem[{q_sel, tx_rp[q_sel]}];
+
   wire nib_lo  = push_rise & tx_half;         // the push that completes a byte
-  wire do_pop  = e_host_pop & (tx_cnt != 2'd0);
-  wire do_push = nib_lo & ((tx_cnt != TXD[1:0]) | do_pop);
+  wire do_pop  = e_host_pop & tx_valid;
+  wire do_push = nib_lo & ((tx_cnt[tx_tag] != TXD[1:0])
+                           | (do_pop & (q_sel == tx_tag)));
 
   always @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
-      tx_asm <= 8'h00; tx_half <= 1'b0; tx_cnt <= 2'd0;
-      tx_wp  <= 1'b0;  tx_rp   <= 1'b0; tx_full_sticky <= 1'b0;
+      tx_asm <= 8'h00; tx_half <= 1'b0; tx_tag <= 2'd0;
+      tx_full_sticky <= 1'b0;
+      for (ti = 0; ti < TXN; ti = ti + 1) begin
+        tx_cnt[ti] <= 2'd0;
+        tx_wp[ti]  <= 1'b0;
+        tx_rp[ti]  <= 1'b0;
+      end
     end else begin
-      // ⭐ HIGH NIBBLE FIRST, ruled here so a host and a bench cannot disagree
-      // about it: it matches the MSB-first bit order the SPI and I²C lanes use,
-      // so a byte reads the same way on the wire as it was pushed.
+      // ⭐ HIGH NIBBLE FIRST, and THE TAG IS LATCHED WITH IT. A host that
+      // changed the tag pins between the two pushes of one byte would otherwise
+      // split that byte across two queues; latching at the first push makes the
+      // byte and its destination one object.
       if (push_rise) tx_half <= ~tx_half;
-      if (push_rise && !tx_half) tx_asm[7:4] <= ui_in[4:1];
+      if (push_rise && !tx_half) begin
+        tx_asm[7:4] <= ui_in[4:1];
+        tx_tag      <= tx_tag_pins;
+      end
 
       if (do_push) begin
-        tx_fifo[tx_wp] <= {tx_asm[7:4], ui_in[4:1]};
-        tx_wp          <= ~tx_wp;
+        tx_mem[{tx_tag, tx_wp[tx_tag]}] <= {tx_asm[7:4], ui_in[4:1]};
+        tx_wp[tx_tag]                   <= ~tx_wp[tx_tag];
       end
-      if (do_pop) tx_rp <= ~tx_rp;
+      if (do_pop) tx_rp[q_sel] <= ~tx_rp[q_sel];
 
-      case ({do_push, do_pop})
-        2'b10:   tx_cnt <= tx_cnt + 2'd1;
-        2'b01:   tx_cnt <= tx_cnt - 2'd1;
-        default: ;                            // 00, or one in and one out
-      endcase
+      // ⭐ ONE ASSIGNMENT PER COUNTER, with the same-queue push+pop enumerated.
+      // Different queues are independent, so each updates on its own.
+      if (do_push && do_pop && (q_sel == tx_tag)) begin
+        tx_cnt[tx_tag] <= tx_cnt[tx_tag];     // one in, one out
+      end else begin
+        if (do_push) tx_cnt[tx_tag] <= tx_cnt[tx_tag] + 2'd1;
+        if (do_pop)  tx_cnt[q_sel]  <= tx_cnt[q_sel]  - 2'd1;
+      end
 
-      // ⛔ A PUSH ON FULL IS REPORTED, NEVER A STALL. The host has no
+      // ⛔ A PUSH ON A FULL QUEUE IS REPORTED, NEVER A STALL. The host has no
       // back-pressure pin, so the only honest answer is a sticky flag in the
       // status frame -- the same reasoning as RX overflow: a host that has
       // stopped reading cannot be told by a pin it is not reading.
@@ -350,6 +423,7 @@ module tt_um_protocol_emulator #(
       .pin_out(e_pin_out), .pin_oe(e_pin_oe), .pin_in(pin_in),
       .pin_rise(pin_rise), .pin_fall(pin_fall),
       .host_data(tx_head), .host_valid(tx_valid), .host_pop(e_host_pop),
+        .host_lane(e_host_lane),
       .lane_underrun(e_under), .lane_overflow(e_ovf), .sticky_ovr(e_ovr),
       .rx_data(e_rx_data), .rx_push(e_rx_push), .busy(e_busy)
   );

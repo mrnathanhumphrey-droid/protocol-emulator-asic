@@ -74,12 +74,13 @@ ALLOWED = {
         "part and a stale byte after a rewind. An allowlist entry is only as "
         "good as the set of consumers it names, and a second consumer added "
         "later inherits a reason that was never about it."),
-    "tx_fifo": (
-        16,
-        "the HOST TX FIFO, 2 bytes. ⭐ ONE CONSUMER, NAMED: `tx_head = "
-        "tx_fifo[tx_rp]` feeds the engine's `host_data`, and the engine reads it "
+    "tx_mem": (
+        64,
+        "the HOST TX QUEUES: 4 lanes x 2 bytes. ⭐ ONE CONSUMER, NAMED: `tx_head "
+        "= tx_mem[{q_sel, tx_rp[q_sel]}]` feeds the engine's `host_data`, and the engine reads it "
         "only when `host_valid`, which is `tx_cnt != 0`. `tx_cnt` becomes "
-        "non-zero only on a push that wrote `tx_fifo[tx_wp]`, and with depth 2 "
+        "non-zero only on a push that wrote `tx_mem[{tx_tag, tx_wp[tx_tag]}]`, and "
+        "with depth 2 "
         "and one producer and one consumer the entry at `tx_rp` whenever "
         "`tx_cnt != 0` is one that was written -- so it is write-before-read. "
         "⛔ THE CONSUMER IS NAMED ON PURPOSE: the `s_rdata` entry argued "

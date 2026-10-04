@@ -110,6 +110,12 @@ module pe_engine #(
     // a lane needed it or that lane recorded an underrun, which no real host can
     // meet. Popping on consumption is what lets a byte be staged ahead.
     output reg                  host_pop,
+    // ⭐ host_lane: WHICH lane is consuming, so the host channel can serve that
+    // lane's own queue. ⛔ A single shared queue with no routing is only correct
+    // with ONE TX-consuming lane; with more, consumption order is the EDF
+    // interleave -- timing-dependent -- so a host cannot order its pushes and
+    // the wrong lane transmits the wrong byte SILENTLY.
+    output wire [LW-1:0]        host_lane,
     output reg  [N_LANES-1:0]   lane_underrun,
     output reg  [N_LANES-1:0]   lane_overflow,
     output reg                  sticky_ovr,
@@ -483,6 +489,7 @@ module pe_engine #(
   localparam [1:0] ST_IDLE = 2'd0, ST_DRIVE = 2'd1, ST_WB = 2'd2;
   reg [1:0]       st;
   reg [LW-1:0]    cur;
+  assign host_lane = cur;
   reg [ACT_W-1:0] cur_act;
 
   assign busy = (st != ST_IDLE);

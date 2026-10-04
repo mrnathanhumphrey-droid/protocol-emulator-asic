@@ -71,9 +71,10 @@ BUILT, PARTIAL, UNBUILT, SUPERSEDED, ANALYSIS = (
 #   anchor: None for host/process/superseded items, which have no code site
 RULINGS = [
     # ---- the F series: the pin abstraction -----------------------------
-    ("F1", "rtl", BUILT, "src/project.v", "tx_fifo",
+    ("F1", "rtl", BUILT, "src/project.v", "tx_mem",
      "cocotb + HOST_INTERFACE.md",
-     "the host data channel: nibble on ui_in[4:1], push on ui_in[6], ONE FIFO. "
+     "the host data channel: nibble on ui_in[4:1], push on ui_in[6], and "
+     "PER-LANE queues with a 2-bit tag. "
      "WAS UNBUILT until R0 -- the payload came from uio_q1, i.e. eight bits of "
      "the protocol bus, and no FIFO existed. That is why no program could "
      "address a peer."),
