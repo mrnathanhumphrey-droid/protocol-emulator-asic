@@ -541,3 +541,39 @@ image: any non-default value on **either** axis writes elsewhere entirely
 line that the gate asserts is 2. Priced by four cases — no `spl` line, an
 SPL = 1 build, the wrong image, and the shipped configuration — the first three
 refused and the fourth accepted.
+
+## ⭐⭐ Pricing the CI wiring found that the new guard missed the worst defect
+
+Ruling 3 required the wiring to be priced: one deliberately broken input on a
+scratch branch must turn the `test` job red. The break chosen was **defect 4
+verbatim** — the slot index computed into a variable,
+`win_slot = winner * 2 + (l_sel[winner] ? 1 : 0)` — because **cocotb cannot see
+it**: at `SPL = 2` that expression is arithmetically identical to `hix`, so the
+suite stays 8/8 green. If `test` went red, only the new step could have done it.
+
+**The first attempt did not go red, and that is the finding.**
+`gate_bench_indices` reported **PASSED** with the defect present, because its
+use-site check only sees an index written *inline* and this one is computed into
+a variable several lines earlier. ⛔ **The gate's own closing note had documented
+exactly that limitation** — and documenting it had not closed it.
+
+So a second, construction-side check was added: **`l_sel` must not be combined
+arithmetically**, wherever that happens. The precise signature is a **ternary
+whose condition is `l_sel[...]`** — the `? 1 : 0` conversion that exists only to
+turn a select bit into a slot number, and the form all four historical defects
+used.
+
+⚠ The first version of that pattern was **line-scoped** and flagged `tb_smoke`'s
+legitimate select-bit flip counter, where the `+ 1` belongs to an unrelated
+sub-expression. A guard that fires on a correct read has to be silenced, and a
+silenced guard is worse than none — so it is expression-scoped, and "the flip
+counter must NOT fire" is now one of the seven must-fires.
+
+**Result on the scratch branch:** `test` **failed at the Model gates step**, and
+the log names the line and the defect. `Run tests` was skipped because the gate
+step precedes it, so cocotb's 8/8 on the same break is recorded from the local
+run rather than from CI.
+
+⇒ The wiring is priced, the guard is stronger than when it was written, and the
+scratch branch is deleted. ⭐ This is what pricing buys over writing a check and
+believing it: the hole was known, named in a comment, and still open.

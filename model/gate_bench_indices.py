@@ -76,6 +76,36 @@ ARRAYS = ("l_actv", "l_act")
 # dut.u_eng.hix[lane] -- anything with arithmetic or a ternary is a RECOMPUTE
 BAD_IN_INDEX = re.compile(r"[*+?]|\s-\s")
 
+# ⛔⛔ CHECK B2 -- THE HOLE THAT CHECK A LEFT, AND PRICING FOUND IT. The use-site
+# check above only sees an index written INLINE. Defect 4 -- the one that cost
+# a published column -- computed the index into a variable several lines
+# earlier (`win_slot = winner * 2 + (l_sel[winner] ? 1 : 0);`) and then indexed
+# with the bare name, which passes check A cleanly. The gate's own closing note
+# admitted that limitation, and then the deliberate break written to PRICE the
+# CI wiring landed in exactly it: cocotb stayed 8/8 green and this gate said
+# PASSED.
+# ⇒ So the forbidden thing is named directly: COMBINING `l_sel` ARITHMETICALLY.
+#   A bench may READ `l_sel[x]` -- tb_smoke counts select-bit flips with it --
+#   but the moment it is multiplied or added it is being used to build a slot
+#   index, and that index belongs to the RTL.
+# ⭐ This is what a priced guard buys over an unpriced one: the hole was
+#   documented, and documenting it had not closed it.
+# ⚠ EXPRESSION-SCOPED, NOT LINE-SCOPED, and the first version was the latter:
+# `l_sel` anywhere on a line containing `*` or `+` flagged tb_smoke's
+# select-bit FLIP COUNTER, where the `+ 1` belongs to an unrelated
+# sub-expression. A guard that fires on a legitimate read has to be silenced,
+# and a silenced guard is worse than none.
+# ⇒ Three precise signatures, all of which mean "turning a select bit into a
+#   slot number", and none of which a legitimate read uses:
+#     1. a TERNARY whose condition is `l_sel[...]` -- the `? 1 : 0` conversion
+#        that exists only to build an index. This is the form in all four
+#        historical defects.
+#     2/3. `l_sel[...]` as a direct operand of `*` or `+`.
+SEL_ARITH = re.compile(
+    r"l_sel\s*\[[^\]]*\]\s*\?"            # (l_sel[x] ? 1 : 0)
+    r"|[*+]\s*\(*\s*l_sel\s*\["           # ... + l_sel[x]
+    r"|l_sel\s*\[[^\]]*\]\s*[*+]")        # l_sel[x] * ...
+
 
 def find_indices(text):
     """[(array, index_expr, line_no)] for every l_act/l_actv index, skipping
@@ -108,6 +138,12 @@ def check_file(path, siw):
     for arr, expr, n in find_indices(text):
         if BAD_IN_INDEX.search(expr):
             recomputes.append((n, arr, expr))
+    # B2: `l_sel` combined arithmetically, wherever it happens -- the form that
+    # computes a slot index into a variable and so escapes the use-site check
+    for n, line in enumerate(text.splitlines(), 1):
+        code = line.split("//", 1)[0]
+        if SEL_ARITH.search(code):
+            recomputes.append((n, "l_sel (arith)", code.strip()[:52]))
     narrow = []
     # B: a wire holding a slot index must be wide enough for it
     for n, line in enumerate(text.splitlines(), 1):
@@ -142,6 +178,25 @@ def selftest(siw):
         ("defect 1: a 3-bit destination",
          "  wire [2:0] l_head = dut.u_eng.hix[lane];",
          False, True),
+        # ⛔⛔ DEFECT 4 IN ITS REAL FORM, AND CHECK A MISSES IT. The index is
+        # computed into a VARIABLE and the use site is a bare name, so the
+        # use-site check passes cleanly -- which is what the deliberate break
+        # written to price the CI wiring did, with cocotb 8/8 green and this
+        # gate reporting PASSED. The ternary-on-`l_sel` signature is what
+        # closes it.
+        ("defect 4 as written: index into a variable",
+         "      win_slot = dut.u_eng.winner * 2 +\n"
+         "                 (dut.u_eng.l_sel[dut.u_eng.winner] ? 1 : 0);\n"
+         "      wire q = dut.u_eng.l_actv[win_slot];",
+         True, False),
+        # ⚠ AND THE LEGITIMATE READ MUST NOT FIRE. tb_smoke counts select-bit
+        # flips, which reads `l_sel` with no arithmetic on it. The first
+        # version of the B2 pattern was line-scoped and flagged exactly this.
+        ("the select-bit flip counter must NOT fire",
+         "      if (dut.u_eng.l_sel[lk] !== prev_sel[lk]) nflip = nflip + 1;\n"
+         "      for (lk = 0; lk < 5; lk = lk + 1)"
+         " prev_sel[lk] = dut.u_eng.l_sel[lk];",
+         False, False),
         ("the fix: hierarchical ref, wide enough",
          "  wire [3:0] l_head = dut.u_eng.hix[lane];\n"
          "  wire z = dut.u_eng.l_actv[l_head];",
@@ -209,12 +264,19 @@ def main() -> int:
     print()
     print("=" * 78)
     print("  BENCH INDEX GUARD: %s" % ("PASSED" if rc == 0 else "FAILED"))
-    print("    ⚠ IT CHECKS THE USE SITE, not every possible way a bench could")
-    print("      arrive at a slot number. A bench that computed one into an")
-    print("      integer variable several lines earlier and indexed with the")
-    print("      bare name would pass -- so the companion check is the")
-    print("      PARAMETER SWEEP (`test/run_param_points.py`), which catches")
-    print("      a hidden SPL = 2 assumption by making SPL vary.")
+    print("    two checks: the USE SITE (an index must be a bare name or a")
+    print("    hierarchical ref) and the CONSTRUCTION (`l_sel` must not be")
+    print("    combined arithmetically, wherever that happens).")
+    print("    ⚠ THE SECOND ONE EXISTS BECAUSE THE FIRST WAS NOT ENOUGH, and")
+    print("      pricing is what showed it: the use-site check alone passed a")
+    print("      verbatim copy of defect 4, which computes the index into a")
+    print("      variable. The limitation had been WRITTEN DOWN here and")
+    print("      writing it down had not closed it.")
+    print("    ⚠ STILL NOT EXHAUSTIVE: a bench could reach a slot number by")
+    print("      some third route neither pattern names. The companion check")
+    print("      is the PARAMETER SWEEP (`test/run_param_points.py`), which")
+    print("      catches a hidden SPL = 2 assumption by making SPL vary --")
+    print("      every one of the four real defects would have failed it.")
     return rc
 
 
