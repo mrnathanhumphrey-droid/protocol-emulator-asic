@@ -42,6 +42,21 @@ if [ ! -f "$VVP" ]; then
 fi
 
 # the recorded values, read OUT OF the gate so this cannot drift from it
+DER=$(python - <<'PY2'
+import os, sys
+sys.path.insert(0, os.path.join("model", "a2"))
+import gate_j_program as g
+print(" ".join("%d:%d" % (d, g.j_stall(d)) for d in sorted(g.SWEEP)))
+PY2
+)
+ADMS=$(python - <<'PY3'
+import os, sys
+sys.path.insert(0, os.path.join("model", "a2"))
+import gate_j_program as g
+print(" ".join("%d:%s" % (d, "yes" if g.admissible(d) else "no")
+               for d in sorted(g.SWEEP)))
+PY3
+)
 REC=$(python - <<'PY'
 import os, sys
 sys.path.insert(0, os.path.join("model", "a2"))
@@ -57,8 +72,37 @@ NABOVE=0
 for d in $DS; do
     python test/make_smoke_image.py --five "$d" $((d+1)) $((d+2)) $((d+3)) $((d+4)) \
         > /dev/null 2>&1
-    OUT=$(vvp "$VVP" +IMG=test/five_image.hex 2>&1)
-    M=$(echo "$OUT" | sed -n 's/.*max prefetch stall, STEADY *: *\([0-9]*\).*/\1/p' | head -1)
+    # CONVERGE THE WARM-UP WINDOW; DO NOT PICK A CONSTANT. The bench default
+    # of 200 cycles was sized for the SHIPPED program (periods 25..4140). A
+    # 5-lane stress set at periods 12..16 has a contended transient running
+    # past cycle 1270, so at the default window a TRANSIENT reads as steady
+    # state -- which is how this script first reported 7 where the record says
+    # 0, and nearly had me call the published universal J unsound.
+    # The window is DOUBLED until two successive lengths agree: a convergence
+    # criterion rather than a magic number. If the value still moves, the
+    # transient has not ended.
+    # A LONG RUN WITH AN ASSERTED NON-EMPTY WINDOW. Two vacuity traps were hit
+    # before this settled, and both produced confident numbers:
+    #   * the bench observed only 4000 cycles, so pushing the warm-up out to
+    #     escape the transient left warm_from > run length -- ZERO EVENTS,
+    #     which reads exactly like "no stalls" and is really "no window";
+    #   * doubling the window until two readings agreed converged INSIDE the
+    #     transient, because 500 and 1000 both saw it.
+    # So: a 200k-cycle run, a fixed warm-up well inside it, and the window
+    # length is CHECKED. A number from an empty window is refused.
+    M=""; WINDOW=""
+    OUT=$(vvp "$VVP" +IMG=test/five_image.hex +NCYC=200000 +WARMUP=4000 2>&1)
+    NB=$(echo "$OUT" | grep -o "five_image.hex: [0-9]* bytes" | grep -o "[0-9]*" | head -1)
+    WINDOW=$(echo "$OUT" | grep -o "window length *: *[0-9]*" | grep -o "[0-9]*$" | head -1)
+    CUR=$(echo "$OUT" | grep -o "STEADY *: *[0-9]*" | grep -o "[0-9]*$" | head -1)
+    EV=$(echo "$OUT" | grep -o "EVENTS in steady state *: *[0-9]*" | grep -o "[0-9]*$" | head -1)
+    if [ -z "$NB" ] || [ "$NB" -lt 30 ]; then
+        M=""            # the image never loaded
+    elif [ -z "${WINDOW:-}" ] || [ "${WINDOW:-0}" -lt 100000 ]; then
+        M=""            # the window is empty or too short to mean anything
+    else
+        M="$CUR"
+    fi
     R=$(echo "$REC" | tr ' ' '\n' | sed -n "s/^$d://p")
     [ -z "$R" ] && R="-"
     if [ -z "$M" ]; then
@@ -66,16 +110,25 @@ for d in $DS; do
         RC=1
         continue
     fi
-    if [ "$R" = "-" ]; then
+    DV=$(echo "$DER" | tr " " "
+" | sed -n "s/^$d://p")
+    ADM=$(echo "$ADMS" | tr " " "
+" | sed -n "s/^$d://p")
+    if [ "$ADM" = "no" ]; then
+        V="inadmissible (U>1) -- excluded from the bound"
+    elif [ -n "$DV" ] && [ "$M" -gt "$DV" ]; then
+        # ⛔ THE SOUNDNESS DIRECTION: the derivation is an UPPER BOUND on the
+        # stall, so a bigger measured stall makes the published J unsound, not
+        # merely stale.
+        V="*** ABOVE THE DERIVATION ($DV) -- UNSOUND"
+        NABOVE=$((NABOVE+1))
+        RC=1
+    elif [ "$R" = "-" ]; then
         V="(not in the record)"
     elif [ "$M" -eq "$R" ]; then
         V="confirms"
     elif [ "$M" -gt "$R" ]; then
-        # ⛔ A MEASURED VALUE ABOVE THE RECORD IS THE DIRECTION THAT MATTERS:
-        # the derivation is an upper bound on the stall, so a bigger stall means
-        # the published J is UNSOUND, not merely stale.
-        V="*** ABOVE THE RECORD -- the published J may be unsound"
-        NABOVE=$((NABOVE+1))
+        V="above the record but within the derivation ($DV) -- record stale"
         RC=1
     else
         V="*** below the record (stale, publish a correction)"

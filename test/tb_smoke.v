@@ -94,6 +94,7 @@ module tb_smoke;
   // contended with the other lanes' first refills. It is confined to a few
   // hundred cycles after the header load and never recurs.
   integer   cyc, stall, jcold, jwarm, jwarm_at, warm_from, hdr_cyc, n_warm_ev;
+  integer   warmup, ncyc_run;
   integer   win_slot, lk, inv_viol, inv_checks, nflip;
   reg       now_running;
   reg [31:0] prev_now;
@@ -125,6 +126,8 @@ module tb_smoke;
     inv_viol = 0; inv_checks = 0; nflip = 0; prev_sel = 5'b0;
     now_running = 0; prev_now = 32'hFFFFFFFF;
 
+    if (!$value$plusargs("WARMUP=%d", warmup)) warmup = 200;
+    if (!$value$plusargs("NCYC=%d", ncyc_run)) ncyc_run = 4000;
     if (!$value$plusargs("IMG=%s", imgfile)) imgfile = "test/smoke_image.hex";
     $readmemh(imgfile, img);
     // derive the real length: highest initialised byte + 1
@@ -182,7 +185,16 @@ module tb_smoke;
     for (j = 0; j < 8; j = j + 1) begin
       op_min[j] = 9999; op_max[j] = 0; op_n[j] = 0;
     end
-    for (i = 0; i < 4000; i = i + 1) begin
+    // ⛔⛔ THE RUN LENGTH IS SETTABLE, AND 4000 WAS A SILENT CEILING ON WHAT
+    //    "STEADY STATE" COULD MEAN. With the warm-up at 200 that is a 3.4k
+    //    window, which is ample for the shipped program -- and far too short
+    //    for a 5-lane stress set whose contended transient outlives it. Worse,
+    //    pushing the warm-up out to find the end of the transient silently
+    //    emptied the window: `warm_from > 4000` reports ZERO EVENTS, which
+    //    reads exactly like "no stalls" and is really "no measurement".
+    // ⚠ That vacuity cost me two wrong conclusions in a row -- first that the
+    //    record was unsound, then that it reproduced.
+    for (i = 0; i < ncyc_run; i = i + 1) begin
       @(posedge clk);
       if (uo_out[0] !== prev_proto[0]) edges0 = edges0 + 1;
       if (uo_out[1] !== prev_proto[1]) edges1 = edges1 + 1;
@@ -212,7 +224,16 @@ module tb_smoke;
       cyc = cyc + 1;
       if (hdr_cyc < 0 && dut.u_eng.hdr_done) begin
         hdr_cyc   = cyc;
-        warm_from = cyc + 200;        // the warm-up window, named not implied
+        // ⛔⛔ THE WARM-UP IS SETTABLE, AND 200 WAS SIZED FOR THE SHIPPED
+        //    PROGRAM. The shipped lanes have periods 25..4140, so a few hundred
+        //    cycles covers five first refills. A 5-lane STRESS program at
+        //    periods 12..16 has a longer contended transient, and its last
+        //    stall event landed at cycle 299 -- just inside a window that
+        //    starts around 250. A fixed constant is a steady-state definition
+        //    that silently depends on the program.
+        // ⚠ Reading a transient as steady state is exactly the error this
+        //    cold/warm split exists to prevent, one program class over.
+        warm_from = cyc + warmup;
       end
 
       // ---- THE BUFFER-SWAP INVARIANT, against the IMAGE -----------------
@@ -331,6 +352,12 @@ module tb_smoke;
     $display("  --- J SPLIT: cold start vs steady state (the double buffer) ---");
     $display("  hdr_done at cycle            : %0d", hdr_cyc);
     $display("  warm-up window ends at cycle : %0d", warm_from);
+    // ⭐ THE WINDOW LENGTH IS PRINTED, so an empty one cannot be read as a
+    //    clean zero. A steady-state number from a zero-length window is not a
+    //    measurement, and nothing downstream can tell unless it is stated.
+    $display("  steady window length         : %0d cycles%0s",
+             (cyc > warm_from) ? (cyc - warm_from) : 0,
+             (cyc > warm_from) ? "" : "   *** EMPTY -- no measurement");
     $display("  cycles observed              : %0d", cyc);
     $display("  max prefetch stall, COLD     : %0d", jcold);
     $display("  max prefetch stall, STEADY   : %0d  (last at cycle %0d)",

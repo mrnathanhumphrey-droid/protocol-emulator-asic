@@ -90,41 +90,50 @@ D_MIN_SHIPPED = 25
 # gate must have an opinion on a machine with no iverilog. `price_j_sweep.sh`
 # is what re-measures it, and a sim value ABOVE the derivation stops everything.
 #
-# ⛔⛔⛔ THE RECORD DOES NOT REPRODUCE, AND IT HAD NEVER BEEN RE-MEASURED.
+# ⛔⛔⛔ CONFIRMED: THE RECORD IS WRONG AND THE DERIVATION IS VIOLATED.
 # `price_j_sweep.sh` -- named four lines above as the thing that re-measures
-# this -- DID NOT EXIST until 2026-10-04. It does now, and re-running every
-# point from its own per-point recipe gives:
+# this, and which DID NOT EXIST until 2026-10-04 -- now runs. On a 200,000-cycle
+# run with an asserted steady window of 195,908 cycles:
 #
-#   d        2..11   12   13   14   15   16   18   20   25
-#   recorded 5/0     0    0    0    0    0    0    0    0
-#   measured 7       7    7    11   11   11   8    0    0
+#   d          2..7      8    9   10   11   12   13   14   15   16   18   20   25
+#   recorded   5         5    5    4    0    0    0    0    0    0    0    0    0
+#   derived    7         7    7    7    7    6    5    4    3    2    0    0    0
+#   measured   7..11    10    9    8    8   11   11   11   11   11   11    0    0
+#   admissible no       yes  yes  yes  yes  yes  yes  yes  yes  yes  yes  yes  yes
 #
-# 16 of 18 points differ, all upward. SIX OF THEM ARE ADMISSIBLE POINTS WHERE
-# THE MEASUREMENT EXCEEDS THE DERIVATION (d = 12, 13, 14, 15, 16, 18), which is
-# the condition this file calls "stops everything".
+# TEN ADMISSIBLE POINTS MEASURE ABOVE THE DERIVATION (d = 8..18). The derivation
+# is an UPPER BOUND on the stall, so this is an unsoundness, not a stale record.
+# ⇒ THE UNIVERSAL J = 8 DOES NOT HOLD. It must not be quoted until re-derived.
 #
-# ⚠⚠ BUT THE NUMBER IS NOT YET TRUSTWORTHY, AND NO CORRECTION TO THE
-# PUBLISHED J FOLLOWS FROM IT YET. The probe reads a bench that reports THREE
-# FAILURES on this image, with `COLD == STEADY == 7` and the last stall event at
-# cycle 299 -- so the cold-start value may simply be landing inside the steady
-# window for a program whose periods are 12..16. A dramatic result is first of
-# all a reason to doubt the probe.
+# ⭐ THE SHIPPED CLAIM STANDS, and is unaffected: `smoke_image` measures a
+# steady stall of 0 over a 195,908-cycle window with the bench PASSING, and the
+# sweep reproduces 0 exactly at d = 20 and d = 25. The shipped program is
+# d_min = 25.
 #
-# ⭐ WHAT IS ESTABLISHED, with evidence:
-#   * 7 is NOT a regression: with ONE fixed stimulus, 2031cdd, 69f94ee, 8d77377
-#     and bc4c9f4 all measure 7. (A first bisect appeared to show 0 on the older
-#     commits -- it passed an absolute Git-Bash path to `+IMG`, `$readmemh`
-#     failed to open it, and "0" was a measurement of an empty program.)
-#   * the encoder move did not change the bytes: old and new generators produce
-#     byte-identical `five_image.hex` for the same delays.
-#   * THE SHIPPED POINT IS UNAFFECTED. `smoke_image` measures J = 0, and d = 20
-#     and 25 reproduce 0 exactly. The shipped claim rests on d_min = 25.
-# ⇒ OWED BEFORE ANY CORRECTION IS PUBLISHED: a clean steady-state measurement
-#   on a passing bench for this program class. Until then this record is marked
-#   NOT REPRODUCED rather than replaced, because substituting numbers from a
-#   suspect probe would be the same error in the other direction.
+# ⭐ TWO INDEPENDENT READINGS AGREE at d = 12: the engine's own `jitter_max`
+# is 11 and the bench's independently reconstructed steady max is 11, with
+# 13,558 stall events and the last at cycle 84,814. Not a transient.
+#
+# ⚠⚠ AND IT TOOK FOUR BROKEN PROBES TO GET HERE, every one of which produced
+# a confident, plausible number. Recorded so the next reader does not repeat
+# them:
+#   1. an absolute Git-Bash path passed to `+IMG`: `$readmemh` failed silently,
+#      the program was EMPTY, and "stall 0" looked like a clean bisect result;
+#   2. a reading taken from a bench reporting three failures -- two of which
+#      turned out to be IMAGE-SPECIFIC (it counts edges on `uo_out[0:1]`, which
+#      this image does not drive) and harmless, but unexamined at the time;
+#   3. "converged" by doubling the warm-up until two readings agreed -- 500 and
+#      1000 both read 7 because the TRANSIENT SPANNED BOTH;
+#   4. pushing the warm-up past the bench's 4000-cycle run length, which
+#      emptied the window: ZERO EVENTS reads exactly like "no stalls" and is
+#      really "no measurement". That one produced the opposite wrong answer.
+# ⇒ The bench now takes `+NCYC` and `+WARMUP`, and PRINTS THE WINDOW LENGTH,
+#   so an empty window cannot be read as a clean zero. The sweep refuses any
+#   point whose image did not load or whose window is under 100k cycles.
 #
 # d -> measured steady-state stall (double buffer, primed)
+# ⚠ THE VALUES BELOW ARE THE ORIGINAL RECORD, KEPT FOR COMPARISON. They are
+#   NOT a measurement of this design: see the table above.
 SWEEP = {
     2: 5, 3: 5, 4: 5, 5: 5, 6: 5, 7: 5, 8: 5, 9: 5, 10: 4,
     11: 0, 12: 0, 13: 0, 14: 0, 15: 0, 16: 0, 18: 0, 20: 0, 25: 0,
