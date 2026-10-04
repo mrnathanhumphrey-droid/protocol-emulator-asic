@@ -82,7 +82,7 @@ printf "  %-5s %-10s %-10s %s\n" "-----" "--------" "--------" "-------"
 RC=0
 NABOVE=0
 for d in $DS; do
-    python test/make_smoke_image.py --five "$d" $((d+1)) $((d+2)) $((d+3)) $((d+4)) \
+    python test/make_smoke_image.py --five "$d" $((d+1)) $((d+2)) $((d+3)) $((d+4)) probe_five \
         > /dev/null 2>&1
     # CONVERGE THE WARM-UP WINDOW; DO NOT PICK A CONSTANT. The bench default
     # of 200 cycles was sized for the SHIPPED program (periods 25..4140). A
@@ -103,8 +103,8 @@ for d in $DS; do
     # So: a 200k-cycle run, a fixed warm-up well inside it, and the window
     # length is CHECKED. A number from an empty window is refused.
     M=""; WINDOW=""
-    OUT=$(vvp "$VVP" +IMG=test/five_image.hex +NCYC=200000 +WARMUP=4000 2>&1)
-    NB=$(echo "$OUT" | grep -o "five_image.hex: [0-9]* bytes" | grep -o "[0-9]*" | head -1)
+    OUT=$(vvp "$VVP" +IMG=test/probe_five.hex +NCYC=200000 +WARMUP=4000 2>&1)
+    NB=$(echo "$OUT" | grep -o "probe_five.hex: [0-9]* bytes" | grep -o "[0-9]*" | head -1)
     WINDOW=$(echo "$OUT" | grep -o "window length *: *[0-9]*" | grep -o "[0-9]*$" | head -1)
     CUR=$(echo "$OUT" | grep -o "STEADY *: *[0-9]*" | grep -o "[0-9]*$" | head -1)
     EV=$(echo "$OUT" | grep -o "EVENTS in steady state *: *[0-9]*" | grep -o "[0-9]*$" | head -1)
@@ -148,8 +148,10 @@ for d in $DS; do
     printf "  %-5s %-10s %-10s %s\n" "$d" "$R" "$M" "$V"
 done
 
-# leave the tree holding the recipe run_mutants expects
-python test/make_smoke_image.py --all > /dev/null 2>&1
+# ⭐ NOTHING TO RESTORE ANY MORE: this sweep writes only probe_five.hex,
+# so it cannot leave a reserved artefact holding an experiment's program.
+# It used to end with `--all` to undo its own clobber, and a probe that
+# has to clean up after itself is one interrupted run from drift.
 
 echo
 if [ "$RC" -eq 0 ]; then
@@ -162,5 +164,5 @@ else
     echo "  At or above D* the stall must be 0; anything else means the port"
     echo "  feasibility argument itself is wrong, not merely the constant."
 fi
-echo "  \u26a0 the tree is left with the --all images restored."
+echo "  the sweep wrote only test/probe_five.hex; no reserved name touched."
 exit $RC

@@ -57,3 +57,10 @@ test/edge_image.hex
 # Written when the bench runs a NON-default image; the default program's
 # measurements live in test/cj_measured.txt and are tracked.
 test/cj_measured_alt.txt
+
+# ⛔ PROBE OUTPUTS. Experiments and sweeps write only to these names; the
+# reserved artefact names belong to their generators and the manifest. The
+# J investigation overwrote test/five_image.hex with an experiment set and the
+# clean room caught it only afterwards -- the rule is what stops it.
+test/probe_*.hex
+test/artefacts.sha256.probe

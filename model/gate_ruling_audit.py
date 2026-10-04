@@ -204,6 +204,28 @@ RULINGS = [
      "DIFFERENT content, because `--all` and `run_mutants` were two recipes for "
      "one filename. ⛔ Files are QUARANTINED, never deleted."),
 
+    ("manifest", "toolchain", BUILT_TC, "test/artefacts.sha256", "corpus.py",
+     "test/clean_room.py compares regenerated content against the pinned "
+     "hashes, and refuses to run at all if the manifest is missing",
+     "every reserved artefact is pinned by sha256 NEXT TO THE RECIPE that "
+     "makes it, in a TRACKED file, so a recipe change must show as a diff in "
+     "the same commit. ⛔ IT REPLACED COMPARING AGAINST THE QUARANTINED "
+     "COPY, which was never a valid reference: the clean room duly 'found' a "
+     "difference that was the OLD copy's fault. A manifest also catches an "
+     "artefact that comes out differently on another machine or tool version, "
+     "which a local stale file never could."),
+    ("probe-paths", "process", BUILT, "test/make_smoke_image.py",
+     "probe_", "price_j_sweep.sh writes only probe_five.hex; clean_room "
+     "excludes probe_* from the reserved set",
+     "experiments write ONLY scratch-named files; reserved artefact names "
+     "belong to their generators. ⛔ THE J INVESTIGATION SWEPT DOZENS OF "
+     "DELAY SETS THROUGH `--five` AND EVERY ONE LANDED ON `five_image.hex`, so "
+     "the tree was left holding arm C's program under the stress image's name "
+     "and the clean room caught it only afterwards -- same root as the earlier "
+     "cj_measured.txt clobber. The sweep no longer needs to restore anything, "
+     "and a probe that must clean up after itself is one interrupted run from "
+     "drift."),
+
     # ---- known-open, already recorded ----------------------------------
     ("TX-routing", "rtl", PARTIAL, "src/pe_engine.v", "a_q     = cur_act",
      "⚠ MISSING: the interleave must-fire -- two TX lanes live, bytes "

@@ -25,6 +25,7 @@ quarantine is the user's to remove.
 from __future__ import annotations
 
 import os
+import hashlib
 import shutil
 import subprocess
 import sys
@@ -62,7 +63,12 @@ def ignored_artefacts():
         rel = ln[3:].strip()
         if rel.endswith("/"):
             continue
-        if rel.endswith(".hex"):
+        # ⛔ PROBE OUTPUTS ARE NOT SUITE ARTEFACTS. Experiments write
+        # `probe_*` by rule, and nothing in the suite loads them, so demanding
+        # a recipe for one would make this gate red on a leftover scratch file
+        # -- and the fix would be to delete evidence rather than to fix a
+        # dependency. Reserved names are the subject here.
+        if rel.endswith(".hex") and not os.path.basename(rel).startswith("probe_"):
             out.append(rel)
     return sorted(out)
 
@@ -142,29 +148,67 @@ def main() -> int:
         return 1
     print("    generators ran")
 
-    back, absent, differ = [], [], []
+    # ---- compare against the TRACKED MANIFEST, not the quarantined copy ----
+    # ⛔⛔ THE OLD COPY WAS NEVER A VALID REFERENCE. This gate first compared
+    # regenerated content with the file it had just quarantined, and duly
+    # "found" a difference that was the OLD copy's fault -- a stale file is
+    # only authoritative if it was right, which is exactly what is in question.
+    # A tracked `artefacts.sha256` has provenance: a recipe change must show up
+    # as a diff in the same commit, and an artefact that comes out differently
+    # on another machine or tool version is visible too, which a local old copy
+    # could never reveal.
+    man = {}
+    mpath = os.path.join(HERE, "artefacts.sha256")
+    if os.path.isfile(mpath):
+        with open(mpath, encoding="ascii") as fh:
+            for ln in fh:
+                if ln.startswith("#") or not ln.strip():
+                    continue
+                parts = ln.split()
+                man[parts[1]] = parts[0]
+    if not man:
+        print()
+        print("  *** no artefacts.sha256 -- nothing to compare against, so this")
+        print("      gate would pass by having no reference. Run")
+        print("      `python test/make_smoke_image.py --all` to write it.")
+        return 1
+
+    back, absent, differ, unpinned = [], [], [], []
     for f in files:
+        base = os.path.basename(f)
         now = os.path.join(ROOT, f)
-        old = os.path.join(d, os.path.basename(f))
         if not os.path.isfile(now):
             absent.append(f)
             continue
         back.append(f)
-        with open(now, "rb") as a, open(old, "rb") as b:
-            if a.read() != b.read():
-                differ.append(f)
-    print("    reproduced : %d of %d" % (len(back), len(files)))
+        with open(now, "rb") as fh:
+            h = hashlib.sha256(fh.read()).hexdigest()
+        if base not in man:
+            unpinned.append(base)
+        elif man[base] != h:
+            differ.append(base)
+    print()
+    print("  --- regenerated content vs the tracked manifest ---")
+    print("    manifest pins : %d artefacts" % len(man))
+    print("    reproduced    : %d of %d" % (len(back), len(files)))
     if absent:
         print("    *** NO RECIPE PRODUCES: %s" % ", ".join(absent))
         print("        That is the h19 class: a dependency with no source.")
         rc = 1
-    if differ:
-        print("    *** REPRODUCED WITH DIFFERENT CONTENT: %s" % ", ".join(differ))
-        print("        A recipe exists but does not make the file the suite")
-        print("        was using -- which is how a hand-made artefact hides.")
+    if unpinned:
+        print("    *** NOT IN THE MANIFEST: %s" % ", ".join(unpinned))
+        print("        An artefact the suite loads with no pinned hash is")
+        print("        unreviewable -- a recipe change to it would show as")
+        print("        nothing in a diff.")
         rc = 1
-    if not absent and not differ:
-        print("    every file reproduced BYTE-IDENTICAL from its recipe")
+    if differ:
+        print("    *** HASH MISMATCH vs the manifest: %s" % ", ".join(differ))
+        print("        Either a recipe changed without updating the manifest in")
+        print("        the same commit, or this artefact is not reproducible on")
+        print("        this machine. Both are findings.")
+        rc = 1
+    if not absent and not differ and not unpinned:
+        print("    every file reproduced and matches its pinned hash")
 
     print()
     print("  --- the suite, on freshly generated images ---")
