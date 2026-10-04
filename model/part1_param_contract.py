@@ -229,6 +229,44 @@ def main() -> int:
     print("       store at 7 nm measures the ENGINE's Fmax, not the shipped")
     print("       SRAM design's. The ledger entry has to say which.")
 
+    # ---- the parameter-scaling static assertions must EXIST -----------
+    # ⛔⛔ A PARAMETRIC DESIGN NEEDS ITS SCALING LIMITS ASSERTED IN THE RTL, not
+    # just satisfied by today's numbers. `hl * HDR_BYTES + hb` addresses the
+    # header region into an AW-wide register: 29 against 256 at the shipped
+    # configuration, and NOTHING CHECKED IT until now. The scaling sweeps move
+    # N_LANES and AW, so the truncation would wrap exactly when someone swept
+    # upward -- the same class as the wrap-safe timestamp compare.
+    # ⭐ THIS GATE ASSERTS THE ASSERTION IS PRESENT, which is the part a future
+    # edit can silently remove. The assertion's own firing is priced separately
+    # (instantiate pe_engine with AW=4 and elaboration must fail).
+    print()
+    print("  --- parameter-scaling static assertions present in the RTL ---")
+    want_asserts = {
+        "HEADER_REGION_DOES_NOT_FIT_IN_AW":
+            "N_LANES*HDR_BYTES + HDR_BYTES < 2**AW -- the header region must "
+            "address inside AW, or s_raddr truncates silently",
+    }
+    missing = []
+    for name, why in sorted(want_asserts.items()):
+        here = [os.path.basename(f) for f, b in bodies.items() if name in b]
+        print("    %-36s %s" % (name, ", ".join(here) if here else "*** ABSENT"))
+        print("        %s" % why)
+        if not here:
+            missing.append(name)
+    if missing:
+        print("    *** %d scaling assertion(s) are GONE from the RTL. A"
+              % len(missing))
+        print("        parametric design whose limits are only satisfied and")
+        print("        not asserted breaks on the first sweep past them.")
+        rc = 1
+    else:
+        print("    ⭐ present. ⛔ AND THE IDIOM MATTERS: a `localparam = 1/0`")
+        print("    and a negative vector range BOTH elaborate cleanly in")
+        print("    iverilog with the condition false -- static assertions that")
+        print("    assert nothing. An undefined module inside a `generate if`")
+        print("    fires in iverilog and Verilator both, and its NAME is the")
+        print("    diagnostic.")
+
     print()
     print("=" * 78)
     print("  GATE part1-params: %s"

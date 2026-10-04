@@ -154,6 +154,54 @@ module pe_engine #(
   // stuck there forever while the scheduler ran perfectly.
   localparam integer HDR_BITS  = PINW + PINW + 1 + DLY_W + CW + D_W + D_W + AW;
   localparam integer HDR_BYTES = (HDR_BITS + 7) / 8;
+  // ⭐⭐ SIZED COMPARISON CONSTANTS, so every comparison is width-matched.
+  // ⛔ WHY, AND WHY NOT A LINT WAIVER. Verilator rejects the design on six
+  // width warnings at five sites -- `hl == N_LANES-1`, `hb == HDR_BYTES-1`,
+  // `pl == N_LANES-1` (x2) and the `s_raddr` assign below. NONE of them is a
+  // bug today: the narrow side zero-extends and the truncation cannot
+  // overflow at the shipped configuration. But `/* verilator lint_off WIDTH */`
+  // would hide a REAL overflow if one ever appeared, and the `s_raddr`
+  // truncation is exactly where one could -- see HDR_FITS_AW below.
+  // ⭐ Widths stay PARAMETER-DERIVED. `part1_param_contract` forbids the
+  // protocol constants (434, 414, 216, 213, 23, 18, 15, 80, 45, 125...) as
+  // bare literals anywhere in the RTL, so a `[15:0]` would be rejected for
+  // containing 15 -- the D_tol of I2C.
+  localparam integer HBW      = 4;                       // width of `hb`
+  localparam [HBW-1:0] HB_LAST = HDR_BYTES[HBW-1:0] - {{(HBW-1){1'b0}}, 1'b1};
+  localparam [LW-1:0]  LANE_LAST = N_LANES[LW-1:0] - {{(LW-1){1'b0}}, 1'b1};
+
+  // ⛔⛔ THE STATIC ASSERTION, AND IT IS THE REASON THE WIDTH FIX IS NOT
+  // COSMETIC. `hl * HDR_BYTES + hb` addresses the header region and lands in
+  // an AW-wide register. At the shipped configuration the maximum is
+  // 4*6 + 5 = 29 against 2**8 = 256, so it fits -- and NOTHING CHECKED THAT.
+  // The scaling sweeps move N_LANES and AW, and the truncation would wrap
+  // silently exactly when someone swept upward. Same class as the wrap-safe
+  // timestamp compare: an arithmetic edge invisible until the parameter hiding
+  // it changes.
+  //
+  // ⛔⛔⛔ THE FIRST TWO IDIOMS I TRIED DO NOT FIRE, AND PRICING IS THE ONLY
+  // REASON I KNOW THAT. Both of these ELABORATE CLEANLY in iverilog with the
+  // condition false -- a static assertion that asserts nothing:
+  //     localparam integer A = COND ? 0 : (1/0);     // divide by zero
+  //     reg [ (COND ? 0 : -1) : 0 ] b;               // negative vector range
+  // ⭐ Instantiating an UNDEFINED MODULE inside a `generate if` does fire, in
+  // iverilog ("error: Unknown module type") and in Verilator, and the module
+  // NAME carries the diagnostic. No $fatal (runtime, not elaboration), no SVA
+  // (not plain Verilog), nothing synthesis has to ignore.
+  localparam integer HDR_SPAN = N_LANES * HDR_BYTES + HDR_BYTES;
+  generate
+    if (HDR_SPAN >= (1 << AW)) begin : g_hdr_fits
+      HEADER_REGION_DOES_NOT_FIT_IN_AW _static_assert ();
+    end
+  endgenerate
+
+  function [AW-1:0] hdr_byte_addr(input [LW-1:0] ln, input [HBW-1:0] by);
+    reg [AW-1:0] base;
+    begin
+      base          = ln * HDR_BYTES[AW-1:0];
+      hdr_byte_addr = base + {{(AW-HBW){1'b0}}, by};
+    end
+  endfunction
   localparam integer ACT_BYTES = (ACT_W + 7) / 8;
   localparam integer ACT_BASE  = N_LANES * HDR_BYTES;
 
@@ -638,7 +686,11 @@ module pe_engine #(
       s_re <= 1'b0;
       if (hst == H_REQ) begin
         s_re    <= 1'b1;
-        s_raddr <= hl * HDR_BYTES + hb;
+        // ⭐ SIZED: the product and the sum are formed at AW, not at the
+        // 32 bits an unsized integer parameter forces, so the assign cannot
+        // silently truncate. HDR_FITS_AW is what guarantees it cannot
+        // overflow either -- and that assertion is the load-bearing half.
+        s_raddr <= hdr_byte_addr(hl, hb);
       end
       s_wre <= 1'b0;
       if (pst == P_REQ) begin
@@ -764,7 +816,7 @@ module pe_engine #(
         H_WAIT: hst <= H_RD;             // the registered read's dead cycle
         H_RD:   begin
                   hsh <= {hsh[HDR_BYTES*8-9:0], s_rdata};
-                  if (hb == HDR_BYTES-1) begin
+                  if (hb == HB_LAST) begin
                     // ⭐ unpack: pin, clkpin, t, C_i, D_sched. D_tol is the
                     //   remaining field and is DELIBERATELY NOT STORED.
                     // ⛔⛔ MSB-ALIGNED INSIDE HDR_BYTES*8, NOT HDR_BITS.
@@ -790,7 +842,7 @@ module pe_engine #(
                     l_fpc[hl]    <= hsh_n[HDR_BYTES*8-2-2*PINW-DLY_W-CW-D_W-D_W -: AW];
                     l_live[hl]   <= 1'b1;
                     hb <= 4'd0;
-                    if (hl == N_LANES-1) begin
+                    if (hl == LANE_LAST) begin
                       hst <= H_DONE; hdr_done <= 1'b1;
                     end else begin
                       hl <= hl + 1'b1; hst <= H_REQ;
@@ -829,7 +881,7 @@ module pe_engine #(
               paddr <= fetch_addr(pl);
               pst   <= P_REQ;
             end else begin
-              pl <= (pl == N_LANES-1) ? {LW{1'b0}} : pl + 1'b1;
+              pl <= (pl == LANE_LAST) ? {LW{1'b0}} : pl + 1'b1;
             end
           end
           P_REQ:  pst <= P_WAIT;         // request registered
@@ -844,7 +896,7 @@ module pe_engine #(
             // exactly the successor of the action now resident.
             l_fpc[pl] <= paddr + ACT_BYTES[AW-1:0];
             pst       <= P_SCAN;
-            pl        <= (pl == N_LANES-1) ? {LW{1'b0}} : pl + 1'b1;
+            pl        <= (pl == LANE_LAST) ? {LW{1'b0}} : pl + 1'b1;
           end
           default: pst <= P_SCAN;
         endcase
