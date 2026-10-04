@@ -23,6 +23,17 @@ jobs:
         shell: bash
         run: pip install -r test/requirements.txt
 
+      # ⛔⛔ info.yaml AND test/Makefile MUST NAME THE SAME SOURCES. The Makefile
+      # builds what CI TESTS; info.yaml lists what the flow HARDENS. A
+      # divergence means the tests pass on one design and the chip is built from
+      # another, and neither tool would say so. A third, STALE copy in
+      # test/run_local.py had already broken the local runner outright.
+      - name: Source lists agree (info.yaml vs test/Makefile)
+        run: |
+          python -c "import sys; sys.path.insert(0, 'test'); import run_local; \
+            s = run_local.project_sources(); run_local.assert_info_yaml_agrees(s); \
+            print('source lists agree:', ' '.join(s))"
+
       - name: Run tests
         run: |
           cd test
