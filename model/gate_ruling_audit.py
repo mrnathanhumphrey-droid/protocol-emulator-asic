@@ -186,6 +186,24 @@ RULINGS = [
      "Verilog localparams are evaluated and compared, which closes the window "
      "where ACT_W was 24 in one language and 22 in the other."),
 
+    ("param-authority", "model", BUILT, "test/param_dump.v", "dut.u_eng.ACT_W",
+     "model/gate_one_encoder.py check 3: iverilog AND Verilator both elaborate "
+     "the dump and must agree with pe_isa and with each other",
+     "the TOOLS are the authority on what the Verilog parameters resolve to. "
+     "⛔ It was a regex plus a hand-written ternary translator -- a second, "
+     "same-hand implementation of Verilog constant semantics -- whose failure "
+     "mode was a parsing miss that reads exactly like a drift finding, chased "
+     "twice. The parser survives as a reported third reading only."),
+    ("recipes", "toolchain", BUILT_TC, "test/clean_room.py",
+     "def ignored_artefacts",
+     "clean_room must-fire: dropping noop_image_h19's recipe makes tb_edge FAIL "
+     "rather than reuse a stale copy",
+     "every artefact the suite loads has a recorded recipe, checked by removing "
+     "all gitignored generated files and rebuilding. ⭐ CONTENT, NOT JUST "
+     "PRESENCE -- it immediately found `five_image.hex` reproducing with "
+     "DIFFERENT content, because `--all` and `run_mutants` were two recipes for "
+     "one filename. ⛔ Files are QUARANTINED, never deleted."),
+
     # ---- known-open, already recorded ----------------------------------
     ("TX-routing", "rtl", PARTIAL, "src/pe_engine.v", "a_q     = cur_act",
      "⚠ MISSING: the interleave must-fire -- two TX lanes live, bytes "

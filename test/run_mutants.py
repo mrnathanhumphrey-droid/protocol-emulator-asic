@@ -85,7 +85,10 @@ DEFAULT_IMG = "test/smoke_image.hex"
 # TWO. Against it, M_BUF_SWAP SURVIVED -- and a bench that cannot tell the
 # design from the mutant cannot evidence the design. Five active lanes at
 # d = 12..16 is the regime where the buffering is observable at all.
-STRESS_FIVE = (12, 13, 14, 15, 16)
+# ⛔ IMPORTED, NOT RESTATED. These delays and `--all`'s were two recipes for
+# one filename, which the clean-room check caught as the same file reproducing
+# with different content. The generator owns them.
+from make_smoke_image import FIVE_STRESS as STRESS_FIVE   # noqa: E402
 STRESS_IMG = "test/five_image.hex"
 
 # mode "assert": a named bench assertion must fire.

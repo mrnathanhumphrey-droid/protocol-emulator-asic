@@ -126,6 +126,15 @@ def build_stress(d0: int, d1: int):
     return b"".join(headers) + b"".join(prog)
 
 
+# ⛔⛔ ONE RECIPE PER FILENAME. The clean-room check found `five_image.hex`
+# reproducing with DIFFERENT CONTENT: `--all` generated it from the shipped
+# periods while `run_mutants` regenerated it from a tight stress set, so the
+# same filename meant two different programs depending on who ran last. Only
+# run_mutants consumes it, so ITS delays are the recipe -- defined here, in the
+# generator, and imported by the consumer.
+FIVE_STRESS = (12, 13, 14, 15, 16)
+
+
 def build_five(delays):
     """SCHEDULER STRESS IMAGE -- five active lanes at the shipped inter-action
     delays. Representative of the real design's REFILL DEMAND.
@@ -363,7 +372,8 @@ def main() -> int:
             ([], "default smoke"),
             (["--census"], "all 8 opcodes"),
             (["--cfgerr"], "1.6s violation"),
-            (["--five", "434", "25", "45", "414", "25"], "5-lane refill load"),
+            (["--five"] + [str(x) for x in FIVE_STRESS],
+             "5-lane refill load (the run_mutants stress set)"),
             (["--chain", "12", "40"], "chaining re-arm"),
             (["--stress", "25", "31"], "single-buffer stress"),
             (["--edge", "200", "0", "edge_image"], "timeout 200, FALL"),

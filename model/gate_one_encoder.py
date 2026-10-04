@@ -84,6 +84,53 @@ def find_second_definitions():
     return hits
 
 
+
+PARAM_DUMP = ["test/param_dump.v", "src/pe_engine.v", "src/pe_store.v",
+              "src/project.v"]
+
+
+def dump_iverilog(src_root=None):
+    """Elaborate the param dump with iverilog and read back what it resolved.
+
+    ⭐ THE TOOL IS THE AUTHORITY ON WHAT VERILOG MEANS. This replaced a regex
+    plus a hand-written ternary translator -- a second, same-hand implementation
+    of Verilog constant semantics, whose failure mode was a parsing miss that
+    reads exactly like a drift finding. Nothing is recomputed here: the dump
+    instantiates the REAL top and prints the localparams by hierarchical
+    reference.
+    """
+    import subprocess, tempfile
+    root = src_root or ROOT
+    out = os.path.join(tempfile.gettempdir(), "pe_param_dump.vvp")
+    files = [os.path.join(root, f) for f in PARAM_DUMP]
+    if src_root:            # a mutated copy supplies only src/
+        files[0] = os.path.join(ROOT, PARAM_DUMP[0])
+    r = subprocess.run(["iverilog", "-g2012", "-o", out, "-s", "param_dump"]
+                       + files, capture_output=True, text=True,
+                       encoding="utf-8", errors="replace")
+    if r.returncode != 0:
+        return None, (r.stdout + r.stderr)[-400:]
+    r2 = subprocess.run(["vvp", out], capture_output=True, text=True,
+                        encoding="utf-8", errors="replace")
+    vals = {}
+    for m in re.finditer(r"PARAM (\w+)=(-?\d+)", r2.stdout):
+        vals[m.group(1)] = int(m.group(2))
+    return (vals, None) if vals else (None, "no PARAM lines in the output")
+
+
+def dump_verilator():
+    """The same dump, through the second elaborator."""
+    import subprocess
+    r = subprocess.run(["wsl.exe", "-d", "Ubuntu", "--", "bash",
+                        "/mnt/d/ProtocolEmulator/test/param_dump.sh"],
+                       capture_output=True, text=True, encoding="utf-8",
+                       errors="replace")
+    vals = {}
+    for m in re.finditer(r"PARAM (\w+)=(-?\d+)", r.stdout):
+        vals[m.group(1)] = int(m.group(2))
+    return (vals, None) if vals else (None, (r.stdout + r.stderr)[-400:])
+
+
 def _ternary_to_py(e):
     """Verilog `c ? a : b` -> Python `a if c else b`, right-associative.
 
@@ -201,31 +248,66 @@ def main() -> int:
         print("    all agree -- one encoding in use across %d artefacts"
               % len(seen))
 
-    # ---- 3. the RTL agrees (cross-language) ---------------------------
+    # ---- 3. the RTL agrees, AS THE TOOLS RESOLVE IT -------------------
     print()
-    print("  --- 3. the RTL's own widths agree ---")
-    env = rtl_params(os.path.join(ROOT, "src", "pe_engine.v"))
-    for name, want in sorted(RTL_EXPECT.items()):
-        got = env.get(name)
-        if got is None:
-            print("    %-10s *** not found in src/pe_engine.v" % name)
-            rc = 1
-        elif got != want:
-            print("    %-10s *** RTL says %s, pe_isa says %s" % (name, got, want))
+    print("  --- 3. the RTL's widths, resolved by BOTH elaborators ---")
+    iv, iverr = dump_iverilog()
+    vl, vlerr = dump_verilator()
+    # ⛔ A TOOL THAT CANNOT ELABORATE THE DUMP FAILS THE GATE. Otherwise the
+    # authority silently disappears and the check passes on whatever is left.
+    if iv is None:
+        print("    *** iverilog could not elaborate the dump: %s" % iverr)
+        rc = 1
+    if vl is None:
+        print("    *** Verilator could not elaborate the dump: %s" % vlerr)
+        rc = 1
+    if iv and vl:
+        print("    %-10s %8s %10s %10s" % ("param", "pe_isa", "iverilog",
+                                           "verilator"))
+        for name, want in sorted(RTL_EXPECT.items()):
+            a, b = iv.get(name), vl.get(name)
+            ok = (a == want and b == want)
+            print("    %-10s %8s %10s %10s  %s"
+                  % (name, want, a, b, "" if ok else "*** MISMATCH"))
+            if not ok:
+                rc = 1
+        # the two elaborators must also agree with each other
+        both = set(iv) & set(vl)
+        disagree = [k for k in both if iv[k] != vl[k]]
+        if disagree:
+            print("    *** THE TWO ELABORATORS DISAGREE on %s" % disagree)
             rc = 1
         else:
-            print("    %-10s %s  agrees" % (name, got))
+            print("    the two elaborators agree on all %d dumped values"
+                  % len(both))
 
-    # ---- the must-fire: a drifted width has to FAIL -------------------
-    # ⛔ Priced, not trusted. ACT_W really did change 22 -> 24, in two languages,
-    # in two commits -- the window where they disagreed is the thing this check
-    # exists to close, so it is shown to detect one.
+    # ---- the regex parser, kept as a THIRD READING only ---------------
+    # ⭐ Reported, never authoritative. It is a useful cross-check precisely
+    # because it is written differently; it is not allowed to decide anything,
+    # because a parser is a same-hand model of the language and this one has
+    # already produced a false "not found" twice.
     print()
-    print("  --- must-fire: a drifted RTL width ---")
-    import tempfile
+    print("  --- a third reading: the regex parser (informational) ---")
+    env = rtl_params(os.path.join(ROOT, "src", "pe_engine.v"))
+    odd = [n for n, w in sorted(RTL_EXPECT.items()) if env.get(n) != w]
+    if odd:
+        print("    differs from pe_isa on %s -- NOT a failure; the tools"
+              % odd)
+        print("    decide. Worth a look as a possible parser gap.")
+    else:
+        print("    agrees on all %d values" % len(RTL_EXPECT))
+
+    # ---- the must-fire: a drifted RTL width, through the TOOL ----------
+    print()
+    print("  --- must-fire: a drifted RTL width, via iverilog ---")
+    import shutil, tempfile
     with tempfile.TemporaryDirectory() as td:
-        src = os.path.join(ROOT, "src", "pe_engine.v")
-        with open(src, encoding="utf-8") as fh:
+        os.makedirs(os.path.join(td, "src"))
+        for f in ("pe_engine.v", "pe_store.v", "project.v"):
+            shutil.copy(os.path.join(ROOT, "src", f),
+                        os.path.join(td, "src", f))
+        tgt = os.path.join(td, "src", "pe_engine.v")
+        with open(tgt, encoding="utf-8") as fh:
             txt = fh.read()
         bad = txt.replace("localparam integer BQW   = 2;",
                           "localparam integer BQW   = 3;", 1)
@@ -233,23 +315,21 @@ def main() -> int:
             print("    *** could not inject a drift -- the anchor moved")
             rc = 1
         else:
-            tmp = os.path.join(td, "pe_engine.v")
-            with open(tmp, "w", encoding="utf-8") as fh:
+            with open(tgt, "w", encoding="utf-8") as fh:
                 fh.write(bad)
-            env2 = rtl_params(tmp)
-            got2 = env2.get("ACT_W")
-            if got2 is None:
-                print("    *** FIRED FOR THE WRONG REASON: ACT_W did not")
-                print("        resolve at all, so this proves a parsing")
-                print("        failure rather than drift detection.")
+            mv, mverr = dump_iverilog(src_root=td)
+            if mv is None:
+                print("    *** the mutated dump did not elaborate: %s" % mverr)
                 rc = 1
-            elif got2 == pe_isa.ACT_W:
+            elif mv.get("ACT_W") == pe_isa.ACT_W:
                 print("    *** DID NOT FIRE: BQW 2->3 left ACT_W unchanged")
                 rc = 1
             else:
-                print("    BQW 2->3 makes the RTL ACT_W %s against pe_isa %s"
-                      % (got2, pe_isa.ACT_W))
-                print("    => a drift in either language is caught")
+                print("    BQW 2->3 -> the tool resolves ACT_W %s against "
+                      "pe_isa %s" % (mv.get("ACT_W"), pe_isa.ACT_W))
+                print("    => a drift in either language is caught, and the")
+                print("       finding comes from an elaborator rather than")
+                print("       from our own reading of the language.")
 
     print()
     print("=" * 78)
