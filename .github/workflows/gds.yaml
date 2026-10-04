@@ -2,7 +2,30 @@ name: gds
 
 on:
   push:
+    # ⛔ WITHOUT THIS, EVERY COMMIT HARDENED THE SAME VERILOG. 10 gds runs across
+    # 10 distinct commits in one day, most of them docs- or model-only, at 1+
+    # hour each on a BILLED private repo. `git diff --name-only A B -- src/` was
+    # empty for several of them.
+    # ⭐ `test/**` IS IN THE LIST because `gl_test` runs inside THIS workflow --
+    # a testbench change has to re-run it, and filtering it out would silently
+    # stop gate-level testing on test-only commits.
+    paths:
+      - 'src/**'
+      - 'test/**'
+      - 'info.yaml'
+      - '.github/workflows/gds.yaml'
   workflow_dispatch:
+
+# ⭐ SUPERSEDED RUNS CANCEL THEMSELVES NOW. Three were cancelled by hand today;
+# a hand-cancel is a watcher's job that nobody armed.
+# ⚠ SUBMISSION CHECKLIST CONSEQUENCE, recorded where it will be read: with a
+# `paths` filter a docs-only HEAD has NO gds run rather than a passing one, so
+# the submitted SHA must be given one deliberately --
+#   gh workflow run gds.yaml --ref <the exact submitted SHA>
+# TT's precheck wants a green gds on the commit that is submitted.
+concurrency:
+  group: gds-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   gds:
