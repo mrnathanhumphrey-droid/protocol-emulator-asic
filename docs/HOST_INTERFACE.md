@@ -88,14 +88,41 @@ clock edge to an attached device.
 | bit | meaning |
 | --- | --- |
 | 0 | always 1 — alive |
-| 1 | TX underrun (sticky) |
+| 1 | TX underrun (sticky, per lane OR-ed) |
 | 2 | RX overflow (sticky) |
 | 3 | `ovr` (sticky) |
-| 7:4 | 0 |
+| 4 | **TX-full** — a push arrived on a full queue (sticky) |
+| 5 | **CONFIG_ERR** — the program violates 1.6s; the chip refused to run it |
+| 6 | **RX-drop** — a payload arrived while one was still pending (sticky) |
+| 7 | 0 |
 
 **Overflow is reported in the stream, never as a stall**, because a host that
-has stopped reading cannot be told by a pin it is not reading. The flags are
-sticky.
+has stopped reading cannot be told by a pin it is not reading.
+
+### How the flags clear, and what that costs you
+
+**Reset only.** Every flag above is sticky until `rst_n`. There is no
+clear-on-read. Stated plainly because it has a consequence a host must plan
+around: **a single TX underrun makes the stream carry status frames in every
+idle slot for the rest of the run.**
+
+That is bounded rather than harmful, and the two reasons are worth knowing:
+
+- **A payload always wins the next frame slot.** Self-started status is queued
+  only when no RX payload is pending, so a set flag can never push data out of
+  the stream — it fills slots the payload did not want.
+- **An RX payload is held one deep.** `rx_push` from the engine is a one-cycle
+  pulse, so before this a payload arriving mid-frame was simply *lost*; with a
+  set sticky flag filling idle slots that would have meant dropped bytes rather
+  than delay. One register is two orders of margin: a frame takes 18 cycles and
+  the fastest RX lane delivers a byte every 414. A second pulse arriving while
+  one is pending is a real overrun and sets **RX-drop**.
+
+⛔ **Status does not self-start on a timer.** An unconditional heartbeat would
+queue a frame every 18 cycles, and 1.6p prices this link at 2.2% of the clock —
+so it would have paid for liveness with the data it exists to report. Status
+self-starts only while a flag is set, which is what makes it an error channel
+rather than a background load.
 
 ## The readback contract
 

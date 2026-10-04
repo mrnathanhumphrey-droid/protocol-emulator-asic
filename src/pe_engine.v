@@ -1030,16 +1030,26 @@ module pe_engine #(
       end
 
       // ---------------- dispatch, C = 2 ------------------------------
+      // ⛔ REFUSES TO RUN on a 1.6s violation. Not a warning: the program names
+      //    a pin that physically cannot do what it asked, so dispatching would
+      //    emulate a protocol incorrectly rather than fail visibly. The host
+      //    sees CONFIG_ERR in the status stream.
+      // ⛔⛔ THE `ifdef` BELOW WRAPS THE MINIMAL DELTA -- ONE EXPRESSION, NOTHING
+      //    ELSE, NOT EVEN THIS COMMENT. `!config_err` first went in on the
+      //    M_NO_PRIME arm ONLY, because the two arms each carried a full copy of
+      //    the guard line and a text edit hit the wrong copy; the default path
+      //    never had it and the violating program ran. A FIX THAT LANDS IN A
+      //    MUTANT ARM IS NOT IN THE DESIGN. `gate_mutant_arms.py` now
+      //    preprocesses with and without every define and requires the diff to
+      //    be exactly the intended mutation, so arms cannot drift again.
       case (st)
+        ST_IDLE: if (
 `ifdef M_NO_PRIME
-        // ⛔ REFUSES TO RUN on a 1.6s violation. Not a warning: the program
-        //    names a pin that physically cannot do what the program asked, so
-        //    dispatching it would emulate a protocol incorrectly rather than
-        //    fail visibly. The host sees CONFIG_ERR in the status stream.
-        ST_IDLE: if (hdr_done && !config_err && winner_v) begin
+                     hdr_done
 `else
-        ST_IDLE: if (primed && !config_err && winner_v) begin
+                     primed
 `endif
+                     && !config_err && winner_v) begin
                    // ⛔⛔ RULING 2: ARRIVING READY WHILE STILL ARMED IS A
                    // TIMEOUT, AND A TIMEOUT IS AN ERROR. The lane armed, its
                    // deadline passed, and no edge of the requested polarity ever
@@ -1265,9 +1275,13 @@ module pe_engine #(
             l_sel[cur]  <= !l_sel[cur];
 `endif
           end
+          // ⛔ M_BUF_CHAINFLIP swaps the slot on a CHAINING re-arm, where the
+          //    PC does not move -- so the head would point at the word the lane
+          //    just executed. The comment lives OUTSIDE the arm: a comment that
+          //    exists in only one arm proves the `ifdef` wraps more than the
+          //    delta, and `gate_mutant_arms.py` fails on exactly that.
 `ifdef M_BUF_CHAINFLIP
           else begin
-            // the chaining re-arm: PC unchanged, so swapping is wrong
             l_sel[cur] <= !l_sel[cur];
           end
 `endif

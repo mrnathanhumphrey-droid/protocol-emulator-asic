@@ -437,12 +437,30 @@ module tt_um_protocol_emulator #(
   reg       status_turn;
   // the ERROR bits only -- status_byte[0] is the always-1 alive bit, so
   // including it would make the stream permanently busy.
+  // ⛔⛔ AN RX PENDING REGISTER, BECAUSE PRIORITY AT THE QUEUE POINT IS NOT
+  // ENOUGH. `e_rx_push` is a ONE-CYCLE PULSE, so a payload arriving while any
+  // frame is shifting was simply LOST -- and once a sticky flag trips,
+  // self-started status fills every idle slot, so "status competes with RX"
+  // would have meant dropped bytes, not just delay. Holding the payload one
+  // deep makes "no RX payload pending" a thing that can be tested, which is
+  // what lets status self-start safely.
+  // ⚠ ONE DEEP, NOT A FIFO: the serialiser takes 18 cycles per frame and the
+  // fastest RX lane delivers a byte every 414, so one holding register is two
+  // orders of margin. A second pulse arriving while one is still pending is a
+  // genuine overrun and is reported, never silently dropped.
+  reg       rx_pend;
+  reg [7:0] rx_pend_data;
+  reg       rx_drop_sticky;           // status bit 6
+
   wire      status_pending = e_cfg_err | tx_full_sticky | e_ovr
+                           | rx_drop_sticky
                            | (|e_ovf) | (|e_under);
 
   always @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
       ser_d <= 1'b0; ser_s <= 1'b0; ser_v <= 1'b0;
+      rx_pend <= 1'b0; rx_pend_data <= 8'h00;
+      rx_drop_sticky <= 1'b0;
       ser_sh <= 9'h000; ser_cnt <= 4'd0; ser_phase <= 1'b0;
       status_byte <= 8'h00; status_turn <= 1'b0;
       rb_ptr <= {AW{1'b0}}; rb_addr <= {AW{1'b0}}; rb_bit <= 3'd0; rb_re <= 1'b0;
@@ -453,9 +471,20 @@ module tt_um_protocol_emulator #(
       // ⭐ bit 5 = CONFIG_ERR (1.6s): the program named an open-drain lane on
       // a `uo_out` pin, so the chip REFUSED TO RUN it. The host learns why
       // from the stream rather than from a part that sits silent.
-      status_byte <= {2'b00, e_cfg_err, tx_full_sticky,
+      // ⭐ bit 6 = RX-DROP: a payload arrived while one was still pending.
+      status_byte <= {1'b0, rx_drop_sticky, e_cfg_err, tx_full_sticky,
                       e_ovr, |e_ovf, |e_under, 1'b1};
       rb_re <= 1'b0;
+      // capture the RX pulse the instant it appears, whatever the serialiser
+      // is doing. ⛔ A second pulse while one is pending is an OVERRUN: the
+      // host is told, because the alternative is a byte that never existed.
+      if (e_rx_push) begin
+        if (rx_pend) rx_drop_sticky <= 1'b1;
+        else begin
+          rx_pend      <= 1'b1;
+          rx_pend_data <= e_rx_data;
+        end
+      end
 
       if (ser_cnt != 4'd0) begin
         // shifting a frame out: one bit per two cycles, strobe in the middle
@@ -508,9 +537,13 @@ module tt_um_protocol_emulator #(
               status_turn <= 1'b1;
             end
           end
-        end else if (e_rx_push) begin
-          ser_sh      <= {1'b0, e_rx_data};
+        end else if (rx_pend) begin
+          // ⭐ A PAYLOAD ALWAYS WINS THE NEXT FRAME SLOT. Checked before the
+          // self-started status below, so a set sticky flag can never push data
+          // out of the stream -- it only fills slots the payload did not want.
+          ser_sh      <= {1'b0, rx_pend_data};
           ser_cnt     <= 4'd9;
+          rx_pend     <= 1'b0;
           status_turn <= 1'b1;
         end else if (status_pending) begin
           // ⛔⛔ A SILENT PART CANNOT REPORT WHY IT IS SILENT. In run mode the

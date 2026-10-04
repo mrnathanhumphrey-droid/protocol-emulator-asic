@@ -153,8 +153,8 @@ RULINGS = [
      "dispatch. ⚠ WAS UNBUILT: no load-time rejection existed in the RTL "
      "and the toolchain only stated the rule in a docstring, while two RTL "
      "comments deferred to a 'load-time screen' that did not exist."),
-    ("1.6t", "toolchain", OWED_TC, None, None,
-     "model/a2/gate_j_program.py derives J, but for OUR programs only",
+    ("1.6t", "toolchain", BUILT_TC, "model/pe_asm.py", "def compute_j",
+     "pe_asm (computes J + admissibility per program) + gate_j_program",
      "REWORDED per the ruling: the ASSEMBLER computes the program's J and "
      "admissibility; the chip enforces only what is structural. Computing J "
      "on-chip buys nothing -- THE CHIP NEVER USES J; it is an input to the "
@@ -162,6 +162,18 @@ RULINGS = [
      "not exist, so a user cannot get a J or an admissibility verdict for a "
      "program they wrote. The claim now says TOOLCHAIN wherever it means "
      "toolchain."),
+
+    ("queue-ownership", "toolchain", BUILT_TC, "model/pe_asm.py",
+     "def check_queue_ownership",
+     "pe_asm must-fires: shared queue and lane-switching both REJECTED, "
+     "naming the lanes",
+     "each TX queue is consumed by at most ONE lane per program and a lane "
+     "uses one queue throughout. ⛔ THE PER-ACTION QUEUE FIELD RE-OPENED "
+     "THE ROUTING RACE IT WAS BUILT TO KILL: two lanes naming one queue, or a "
+     "lane switching mid-transfer, splits bytes by EDF interleave again, and "
+     "the engine cannot tell a misrouted byte from an intended one. Enforcing "
+     "it in silicon needs cross-action tracking over a whole program; here it "
+     "costs a loop."),
 
     # ---- known-open, already recorded ----------------------------------
     ("TX-routing", "rtl", PARTIAL, "src/pe_engine.v", "a_q     = cur_act",
