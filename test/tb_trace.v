@@ -11,7 +11,9 @@
  * Every other bench in this project reaches inside (tb_smoke reads
  * `jitter_max`, tb_edge reads `l_armed`), which is right for what they measure
  * and makes them RTL-only. This one trades that away deliberately so one
- * artefact covers RTL, Verilator and GL.
+ * artefact covers RTL, the 2-state engine and GL.
+ * ⭐ THE PEERS DO NOT BREAK THAT. They attach to `uio`/`uo_out`, which survive
+ * synthesis, so adding them kept the bench gate-level-ready.
  *
  * ⛔ AND IT IS WHY THE COMPARISON NEEDS NO GOLDEN MODEL. Per Wilson's Q1, the
  * simulator-vs-simulator arm compares resolved driven pin values per cycle and
@@ -20,16 +22,24 @@
  * implementation of the pipeline, which Law 1 says is worth nothing.
  *
  * ⛔⛔ UNINITIALISED STATE IS THE FIRST THING THIS WOULD HAVE TRIPPED ON.
- * iverilog starts a flop at X; Verilator at 0 or at a per-flop random pattern.
- * `model/gate_reset_audit.py` had to come first and name all 2,087 unreset
- * flops before a disagreement here could mean anything -- and the seed sweep
- * (>= 3 `--x-initial unique` seeds, traces identical) is the RUNTIME check
- * behind that allowlist's otherwise-only-stated write-before-read reasons.
+ * iverilog starts a flop at X; the 2-state engine at 0 or at a per-flop random
+ * pattern. `model/gate_reset_audit.py` had to come first and name all 2,087
+ * unreset flops before a disagreement here could mean anything -- and the seed
+ * sweep (>= 3 seeds, traces identical) is the RUNTIME check behind that
+ * allowlist's otherwise-only-stated write-before-read reasons.
  *
  * ⚠ X IS PRINTED AS A DISTINCT TOKEN, not folded to 0 or 1. iverilog can emit
- * X and Verilator cannot, so a trace containing X will differ between them BY
- * CONSTRUCTION -- which is information, not noise: it means a port is driven
- * from something uninitialised and the comparison is not yet meaningful.
+ * X and the 2-state engine cannot, so a trace containing X will differ between
+ * them BY CONSTRUCTION -- which is information, not noise: it means a port is
+ * driven from something uninitialised, or two drivers are contending, and the
+ * comparison is not yet meaningful.
+ *
+ * ⛔⛔⛔ `uio_in` IS IN THE TRACE, AND ITS ABSENCE IS WHY THE FIRST RESULT WAS
+ * NARROW. The first cycle-exact pass compared `uo_out`, `uio_out` and `uio_oe`
+ * only -- and under the ruled two-bank pin map FIVE of the eight `uio` bits are
+ * peer-driven INPUTS (SPI-master MISO, UART-rx RX, SPI-target SCLK/MOSI/CS).
+ * Every peer-driven edge and the whole edge-capture path was therefore
+ * invisible to the comparison, not merely unexercised.
  */
 
 `default_nettype none
@@ -37,22 +47,81 @@
 
 module tb_trace;
 
+  // ⛔ THE PIN MAP IS GENERATED, NOT RESTATED. test/corpus.py derives it from
+  //    the two-bank ruling and checks it against project.v's MISO_PIN/CS_PIN;
+  //    a hand-written copy here would be the second table that drifts, and a
+  //    drifted pin map passes every check while watching the wrong wire.
+`include "pinmap.vh"
+
   reg        clk = 0, rst_n = 0, ena = 1;
   reg  [7:0] ui_in = 8'h00;
-  reg  [7:0] uio_drv = 8'h00;
-  reg  [7:0] uio_oe_tb = 8'h00;
   wire [7:0] uo_out, uio_out, uio_oe;
   wire [7:0] uio_in;
 
-  // the resolved bus, same semantics as tb_edge: two active drivers -> X
+  // ---- the bench-side drivers ------------------------------------------
+  // ⛔⛔⛔ EVERY ONE OF THESE IS INITIALISED AT ITS DECLARATION, AND THE SEED
+  // SWEEP IS WHAT FOUND OUT WHY. They were assigned in the main `initial`
+  // block instead, which looks equivalent and is not: under
+  // `+verilator+rand+reset+2` the bench's OWN regs are randomised at
+  // construction, and `run_go` starting at 1 let the peer-master processes
+  // fall straight through their `wait (run_go)` and begin driving before the
+  // main block had cleared it. Three of the five corpus programs -- exactly
+  // the three that use a bench master -- then disagreed across x-initial
+  // seeds, by 1,492 to 2,888 body lines.
+  // ⭐ A declaration initialiser is applied at elaboration, before any
+  // `initial` block runs, so it is not something a later assignment races.
+  // ⚠ AND THE FINDING WAS IN THE BENCH, NOT THE DUT. `gate_reset_audit.py`
+  // allowlists the DESIGN's unreset flops; nothing audits the testbench, and
+  // read-before-write there produces exactly the same seed-dependent trace.
+  // The sweep does not care which side of the port list the defect is on.
+  reg  [7:0] ld_val  = 8'h00;         // LOAD mode drives all 8 bits
+  reg        ld_en   = 1'b0;
+  reg  [7:0] mst_val = 8'hFF;         // the bench acting as a peer MASTER;
+  reg  [7:0] mst_oe  = 8'h00;         //   idle high = CS deselected, RX idle
+  reg        en_i2c  = 1'b0;
+  reg        en_spi  = 1'b0;
+  reg        en_tgt  = 1'b0;
+  reg        en_rx   = 1'b0;
+
+  wire i2c_scl_oe, i2c_sda_oe;        // PULL-LOW enables, never drive high
+  wire spi_so, spi_so_oe;
+
+  // ⭐ ONE DRIVER PER BIT, STRUCTURALLY. Each `uio` bit below is assigned
+  // exactly once, so a bench-side overlap is impossible by construction rather
+  // than forbidden by an assertion that could itself be wrong. The ruled map
+  // accounts for all eight bits with nothing left over.
+  wire [7:0] peer_oe, peer_val;
+  assign peer_oe [P_M_MISO] = en_spi & spi_so_oe;
+  assign peer_val[P_M_MISO] = spi_so;
+  assign peer_oe [P_SCL]    = en_i2c & i2c_scl_oe;
+  assign peer_val[P_SCL]    = 1'b0;             // open-drain: pull low or let go
+  assign peer_oe [P_SDA]    = en_i2c & i2c_sda_oe;
+  assign peer_val[P_SDA]    = 1'b0;
+  assign peer_oe [P_RX]     = en_rx  & mst_oe[P_RX];
+  assign peer_val[P_RX]     = mst_val[P_RX];
+  assign peer_oe [P_T_SCLK] = en_tgt & mst_oe[P_T_SCLK];
+  assign peer_val[P_T_SCLK] = mst_val[P_T_SCLK];
+  assign peer_oe [P_T_MOSI] = en_tgt & mst_oe[P_T_MOSI];
+  assign peer_val[P_T_MOSI] = mst_val[P_T_MOSI];
+  assign peer_oe [P_T_CS]   = en_tgt & mst_oe[P_T_CS];
+  assign peer_val[P_T_CS]   = mst_val[P_T_CS];
+  assign peer_oe [P_T_MISO] = 1'b0;             // the DUT owns it: tri-state out
+  assign peer_val[P_T_MISO] = 1'b0;
+
+  wire [7:0] tb_oe  = ld_en ? 8'hFF  : peer_oe;
+  wire [7:0] tb_val = ld_en ? ld_val : peer_val;
+
+  // the resolved bus, same semantics as tb_edge: two active drivers that
+  // DISAGREE -> X. Two drivers that agree are indistinguishable from one, which
+  // is exactly why enable overlap and not X is the contention detector.
   genvar b;
   generate
     for (b = 0; b < 8; b = b + 1) begin : g_bus
-      assign uio_in[b] = (uio_oe[b] && uio_oe_tb[b])
-                       ? ((uio_out[b] === uio_drv[b]) ? uio_out[b] : 1'bx)
-                       : uio_oe[b]    ? uio_out[b]
-                       : uio_oe_tb[b] ? uio_drv[b]
-                       : 1'b1;
+      assign uio_in[b] = (uio_oe[b] && tb_oe[b])
+                       ? ((uio_out[b] === tb_val[b]) ? uio_out[b] : 1'bx)
+                       : uio_oe[b] ? uio_out[b]
+                       : tb_oe[b]  ? tb_val[b]
+                       : 1'b1;                  // pull-up / idle high
     end
   endgenerate
 
@@ -62,38 +131,168 @@ module tb_trace;
   localparam integer PIN_PROG = 7, PIN_PTR = 5, PIN_WR = 6;
 
   reg [7:0]  img [0:IMG_MAX-1];
-  integer    img_bytes, i, cyc, fd, ncyc;
-  reg [8*64-1:0] imgfile, outfile;
+  integer    img_bytes, i, jt, jr, cyc, fd, ncyc, seed, async_arm;
+  reg [8*64-1:0] imgfile, outfile, peersel;
+
+  // ---- A PORTABLE PRNG, AND $random IS NOT ONE -------------------------
+  // ⛔⛔ `$random`'s GENERATOR IS NOT THE SAME IN THE TWO SIMULATORS. Seeded
+  // peer phases drawn from it would differ between them, so every trace would
+  // disagree BY CONSTRUCTION and the disagreement would look like a design
+  // fault in the edge-capture path. A 32-bit LCG written out in Verilog
+  // arithmetic is identical in both, because truncating multiplication is
+  // defined.
+  // ⛔⛔⛔ ONE LCG STATE PER PROCESS, AND SHARING ONE WAS A CROSS-SIMULATOR
+  // BUG. A portable generator is necessary and NOT sufficient: the two
+  // peer-master processes both read-modify-write their state, and both run in
+  // every configuration (the `en_*` masks gate their DRIVE, not their
+  // execution), so a single shared `rnd` made the draw sequence depend on which
+  // process the scheduler ran first. That ordering is not guaranteed identical
+  // across simulators, and the two disagreed on 2,392 to 2,896 lines for every
+  // program using a bench master, while the I2C program -- whose peer is driven
+  // only by the DUT -- stayed cycle-exact. The same applied to the shared loop
+  // index `j`.
+  // ⭐ Seeded deterministically from the one phase seed, so the stimulus is
+  // still reproducible from the provenance header alone.
+  reg [31:0] rnd_t = 32'd1;           // the SPI-target master's own state
+  reg [31:0] rnd_r = 32'd1;           // the UART-rx driver's own state
+  function [31:0] lcg;
+    input [31:0] s;
+    begin
+      lcg = s * 32'd1103515245 + 32'd12345;
+    end
+  endfunction
+  function integer draw;                // 0 .. n-1, from the high bits
+    input [31:0] s;
+    input integer n;
+    begin
+      draw = (s >> 16) % n;
+    end
+  endfunction
 
   // ⛔ A SINGLE FORMATTING FUNCTION, so the two simulators cannot differ in
   // how they RENDER a value and have that look like a design disagreement.
-  // `%b` on an 8-bit vector prints X as `x`, which is exactly the distinct
-  // token the header asks for.
+  // `%b` on an 8-bit vector prints X as `x`, the distinct token the header
+  // asks for.
   task emit;
     begin
-      $fwrite(fd, "%0d %b %b %b\n", cyc, uo_out, uio_out, uio_oe);
+      $fwrite(fd, "%0d %b %b %b %b\n", cyc, uo_out, uio_out, uio_oe, uio_in);
     end
   endtask
 
+  // =====================================================================
+  // THE PEERS. Always instantiated, connected by a RUNTIME enable.
+  // =====================================================================
+  // ⛔ Verilog cannot instantiate conditionally on a plusarg, so all peers are
+  // elaborated and the `en_*` regs gate their drive onto the bus. That also
+  // means every program in the corpus elaborates the SAME netlist, so a trace
+  // difference between programs cannot be a different build.
+  // ⛔⛔ AND UNTIL NOW BOTH PEERS WERE INSTANTIATED NOWHERE. They were
+  // lint-clean in two simulators and connected to nothing, so "SPI master ->
+  // SPI FRAM peer" had never once run against the DUT. A peer that compiles is
+  // not a peer that is wired.
+  fram_i2c u_i2c (
+      .clk(clk),
+      .scl_in(uio_in[P_SCL]), .sda_in(uio_in[P_SDA]),
+      .sda_oe(i2c_sda_oe), .scl_oe(i2c_scl_oe)
+  );
+
+  fram_spi u_spi (
+      .cs_n(uo_out[P_M_CS_UO]),
+      .sck (uo_out[P_M_SCLK_UO]),
+      .si  (uo_out[P_M_MOSI_UO]),
+      .so  (spi_so), .so_oe(spi_so_oe)
+  );
+
+  // =====================================================================
+  // THE BENCH AS A PEER MASTER -- SPI-target's SCK/CS/MOSI, and UART-rx's RX
+  // =====================================================================
+  // ⛔ SEE THE DRIVER BLOCK ABOVE: `run_go` must be 0 from elaboration, or the
+  //    two peer-master processes race their own start condition.
+  reg run_go = 1'b0;
+
+  // SPI-target: clock bytes into the DUT at a seeded phase. ⭐ This is the only
+  // way the SPI-target lane sees anything: under the ruled map its SCLK, MOSI
+  // and CS are all INPUTS, so with no master driving them the lane is inert and
+  // `uio_oe[MISO]` never moves -- which would make the async-clear arm vacuous.
+  initial begin
+    wait (run_go);
+    forever begin
+      repeat (draw(rnd_t, 7) + 3) @(negedge clk);
+      rnd_t = lcg(rnd_t);
+      mst_val[P_T_CS] = 1'b0;                   // select, active low
+      @(negedge clk);
+      for (jt = 0; jt < 8; jt = jt + 1) begin
+        mst_val[P_T_MOSI] = rnd_t[jt];
+        mst_val[P_T_SCLK] = 1'b1;
+        @(negedge clk);
+        mst_val[P_T_SCLK] = 1'b0;
+        @(negedge clk);
+      end
+      // ---- CS DEASSERT: the ASYNC-CLEAR ARM ----------------------------
+      // ⛔⛔ WITH `async_arm`, CS RISES MID-CYCLE, OFF BOTH CLOCK EDGES, AND
+      //    THAT IS THE POINT. `uio_oe[MISO]` comes from `miso_oe_q`, a flop on
+      //    `always @(posedge clk or posedge cs_deasserted or negedge rst_n)`.
+      //    A triple-edge async-clear flop is the construct where two
+      //    simulators most plausibly diverge, and clocking CS on an edge like
+      //    everything else would HIDE it: the clear would coincide with the
+      //    synchronous path, and agreement would say nothing about the
+      //    asynchronous one.
+      // ⭐ The offset is drawn in 1..9 ns, strictly BETWEEN the negedge and the
+      //    following posedge, so it can never land ON an edge -- a randomised
+      //    phase that is still guaranteed off-edge.
+      @(negedge clk);
+      if (async_arm) begin
+        #(draw(rnd_t, 9) + 1);
+        mst_val[P_T_CS] = 1'b1;
+        rnd_t = lcg(rnd_t);
+      end else begin
+        mst_val[P_T_CS] = 1'b1;
+      end
+    end
+  end
+
+  // UART-rx: a start bit then 8 data bits, at a seeded phase, so the ARM and
+  // edge-capture path is driven across its timing range rather than at one
+  // fixed offset.
+  initial begin
+    wait (run_go);
+    forever begin
+      repeat (draw(rnd_r, 23) + 5) @(negedge clk);
+      rnd_r = lcg(rnd_r);
+      mst_val[P_RX] = 1'b0;                     // the START bit: a FALL
+      repeat (4) @(negedge clk);
+      for (jr = 0; jr < 8; jr = jr + 1) begin
+        mst_val[P_RX] = rnd_r[jr];
+        repeat (4) @(negedge clk);
+      end
+      mst_val[P_RX] = 1'b1;                     // idle high
+      repeat (4) @(negedge clk);
+    end
+  end
+
+  // =====================================================================
   initial begin
     if (!$value$plusargs("IMG=%s", imgfile)) imgfile = "test/smoke_image.hex";
     if (!$value$plusargs("OUT=%s", outfile)) outfile = "trace.txt";
     if (!$value$plusargs("NCYC=%d", ncyc))   ncyc = 2000;
+    if (!$value$plusargs("SEED=%d", seed))   seed = 1;
+    if (!$value$plusargs("ASYNC=%d", async_arm)) async_arm = 0;
+    if (!$value$plusargs("PEER=%s", peersel)) peersel = "none";
 
     // ⛔⛔ THE LENGTH IS PASSED IN, NOT DERIVED FROM UNINITIALISED STATE, AND
     // THE REASON IS A BUG THIS BENCH ALREADY HAD. tb_smoke derives it by
     // scanning for the first X (`$readmemh` leaves unwritten entries X), which
-    // is correct in iverilog and SILENTLY WRONG in Verilator: Verilator
-    // initialises the array to 0, so every one of the 256 entries looks
-    // written and the derivation returned 256 instead of 51.
+    // is correct in iverilog and SILENTLY WRONG in the 2-state engine: that one
+    // initialises the array to 0, so every one of the 256 entries looks written
+    // and the derivation returned 256 instead of 51.
     // ⭐ The provenance header caught it -- added for the clobber hazard, it
     // reported `bytes=256` against iverilog's `bytes=51` before a single trace
     // line was compared. A cross-simulator bench cannot depend on
     // uninitialised-array semantics, which is the same X-vs-zero hazard the
     // reset audit exists for, inside the bench itself.
     if (!$value$plusargs("NBYTES=%d", img_bytes)) begin
-      // ⛔ SEPARATE $display CALLS: Verilog has NO C-style adjacent string
-      // concatenation, and this project has made that mistake before.
+      // ⛔ SEPARATE $display CALLS: there is no C-style adjacent string
+      // concatenation in Verilog, and this project has made that mistake.
       $display("tb_trace: FATAL -- +NBYTES=<n> is required.");
       $display("  The image length must be passed explicitly; deriving it");
       $display("  from unwritten-array state is simulator-dependent.");
@@ -101,10 +300,43 @@ module tb_trace;
     end
     $readmemh(imgfile, img);
 
+    rnd_t   = seed;
+    rnd_r   = seed ^ 32'h5f5f5f5f;
+    ld_en   = 1'b0;
+    ld_val  = 8'h00;
+    mst_oe  = 8'h00;
+    mst_val = 8'hFF;                    // idle high: CS deselected, RX idle
+    run_go  = 1'b0;
+    en_i2c  = 1'b0; en_spi = 1'b0; en_tgt = 1'b0; en_rx = 1'b0;
+
+    // the peer wiring this program needs. ⛔ Selected by name rather than
+    // "everything on", because a peer driving a pin the program never touches
+    // is a second driver on a line nobody is watching.
+    if (peersel == "i2c") en_i2c = 1'b1;
+    if (peersel == "spi") en_spi = 1'b1;
+    if (peersel == "tgt") begin
+      en_tgt = 1'b1;
+      mst_oe = (8'b1 << P_T_SCLK) | (8'b1 << P_T_MOSI) | (8'b1 << P_T_CS);
+    end
+    if (peersel == "rx") begin
+      en_rx  = 1'b1;
+      mst_oe = (8'b1 << P_RX);
+    end
+    if (peersel == "all") begin
+      en_i2c = 1'b1; en_spi = 1'b1; en_tgt = 1'b1; en_rx = 1'b1;
+      mst_oe = (8'b1 << P_T_SCLK) | (8'b1 << P_T_MOSI)
+             | (8'b1 << P_T_CS)   | (8'b1 << P_RX);
+    end
+
     fd = $fopen(outfile, "w");
     // ⭐ The header records what produced the trace. A trace file with no
-    // provenance is the clobber hazard the C/J measurements already hit once.
-    $fwrite(fd, "# img=%0s bytes=%0d ncyc=%0d\n", imgfile, img_bytes, ncyc);
+    // provenance is the clobber hazard the C/J measurements already hit once,
+    // and it has since caught a real mismatch: `bytes=256` vs `bytes=51`.
+    // ⛔ PEER, SEED AND ASYNC ARE IN IT. Two runs of the same image with
+    // different peers or a different seed are DIFFERENT EXPERIMENTS, and
+    // comparing them would read as a design disagreement.
+    $fwrite(fd, "# img=%0s bytes=%0d ncyc=%0d peer=%0s seed=%0d async=%0d\n",
+            imgfile, img_bytes, ncyc, peersel, seed, async_arm);
 
     // ⛔⛔⛔ EVERY EDGE IN THIS BENCH IS A NEGEDGE, AND THAT IS WHAT MAKES THE
     //    TWO SIMULATORS COMPARABLE AT ALL. Driving stimulus in the SAME
@@ -125,10 +357,12 @@ module tb_trace;
     //    SAMPLING off the edge; the traces stayed one cycle apart because the
     //    race was upstream in the stimulus. A pure shift with zero residual is
     //    the signature of a whole program displaced, not of a sampled value.
-    // ⇒ The clock is driven off the posedge and the bench lives entirely on
+    // ⇒ The clock is driven off its own timer and the bench lives entirely on
     //   the negedge: inputs change half a period before the DUT samples them,
-    //   and outputs are read half a period after it drove them. No bench
-    //   event ever shares a timestep with the active edge.
+    //   and outputs are read half a period after it drove them. No bench event
+    //   ever shares a timestep with the active edge.
+    // ⚠ THE ONE DELIBERATE EXCEPTION IS THE ASYNC-CLEAR ARM, which must be
+    //   off-edge to mean anything -- see the CS deassert above.
     cyc = 0;
     repeat (4) @(negedge clk);
     rst_n = 1;
@@ -136,11 +370,11 @@ module tb_trace;
 
     // ---- LOAD ----------------------------------------------------------
     ui_in[PIN_PROG] = 1'b1;
-    uio_oe_tb = 8'hFF;
+    ld_en = 1'b1;
     ui_in[PIN_PTR] = 1'b1; @(negedge clk);
     ui_in[PIN_PTR] = 1'b0; @(negedge clk);
     for (i = 0; i < img_bytes; i = i + 1) begin
-      uio_drv = img[i];
+      ld_val = img[i];
       @(negedge clk); @(negedge clk);
       ui_in[PIN_WR] = 1'b1;
       @(negedge clk); @(negedge clk); @(negedge clk);
@@ -150,8 +384,8 @@ module tb_trace;
 
     // ---- RUN, tracing every cycle --------------------------------------
     ui_in[PIN_PROG] = 1'b0;
-    uio_oe_tb = 8'h00;              // release the bus; the engine owns it
-    uio_drv   = 8'hFF;
+    ld_en  = 1'b0;                  // release the bus; engine and peers own it
+    run_go = 1'b1;                  // the peer masters start
     for (i = 0; i < ncyc; i = i + 1) begin
       @(negedge clk);
       cyc = cyc + 1;

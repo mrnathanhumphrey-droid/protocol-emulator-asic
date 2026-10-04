@@ -31,14 +31,28 @@
 # Usage (a SCRIPT FILE, never `bash -lc` with inline $VAR across the
 # Git-Bash/WSL boundary -- that has eaten arguments here before):
 #   MSYS_NO_PATHCONV=1 wsl.exe -d Ubuntu -- bash \
-#     /mnt/d/ProtocolEmulator/test/verilator_trace.sh <root> <nbytes> <ncyc> <outdir> [defines]
+#     .../verilator_trace.sh <root> <nbytes> <ncyc> <outdir> [img] [peer] [async] [defines]
+# TWO DIFFERENT SEEDS LIVE IN THIS SCRIPT AND CONFLATING THEM MADE THE SWEEP
+# ASSERT SOMETHING FALSE BY CONSTRUCTION:
+#   * `+verilator+seed+N` randomises UNINITIALISED STATE. Changing it must
+#     NOT change the trace -- that is the whole check.
+#   * `+SEED=N` seeds the bench peer-phase LCG, which deliberately MOVES THE
+#     STIMULUS: different peer edge phases, a different experiment.
+# Passing the sweep index to both made the check "different stimulus produces
+# the same trace", false on purpose, and the all-lane program duly disagreed
+# on 2,904 lines. The phase seed is now an ARGUMENT held fixed across the
+# sweep; varying it is a separate arm that re-runs the cross-sim compare.
 set -uo pipefail
 
 ROOT="${1:-/mnt/d/ProtocolEmulator}"
 NBYTES="${2:-51}"
 NCYC="${3:-1500}"
 OUTDIR="${4:-/mnt/c/tmp/vtrace}"
-DEFS="${5:-}"
+IMG="${5:-test/smoke_image.hex}"
+PEER="${6:-none}"
+ASYNCA="${7:-0}"
+PHASE="${8:-1}"
+DEFS="${9:-}"
 SEEDS="1 7 12345"          # ⭐ recorded here and echoed with every result
 
 cd "$ROOT" || exit 1
@@ -48,16 +62,37 @@ mkdir -p "$OUTDIR"
 # must sit on /mnt/c or /mnt/d; but Verilator's C++ build across the 9p mount is
 # slow, so only the traces cross over.
 OBJ="/tmp/pe_vobj"
-rm -rf "$OBJ"
+# ---- BUILD CACHE, keyed on SOURCES AND DEFINES ------------------------
+# The netlist does not depend on the phase seed or the image, so sweeping
+# phases would otherwise pay for a full C++ rebuild each time. ⛔ But a cached
+# binary is a STALE-ARTEFACT hazard, and this project has already read a
+# verdict off a stale build once: the fix is to key the cache on what can
+# change the binary -- every source file's timestamp and the define string --
+# and rebuild whenever either moves.
+STAMP="$OBJ/.stamp"
+WANT="$DEFS|$(ls -la --time-style=+%s test/tb_trace.v test/fram_spi.v     test/fram_i2c.v test/pinmap.vh src/pe_engine.v src/pe_store.v     src/project.v 2>/dev/null | awk '{print $6, $7}' | tr '
+' ' ')"
+if [ -x "$OBJ/tr" ] && [ -f "$STAMP" ] && [ "$(cat "$STAMP")" = "$WANT" ]; then
+    SKIP_BUILD=1
+else
+    SKIP_BUILD=0
+    rm -rf "$OBJ"
+fi
 
 # shellcheck disable=SC2086
+if [ "$SKIP_BUILD" -eq 1 ]; then
+    RC=0
+else
 verilator --binary --timing --x-initial unique \
     -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC -Wno-UNOPTFLAT -Wno-fatal \
-    --top-module tb_trace -o tr --Mdir "$OBJ" \
+    --top-module tb_trace -o tr --Mdir "$OBJ" +incdir+test \
     $DEFS \
-    test/tb_trace.v src/pe_engine.v src/pe_store.v src/project.v \
+    test/tb_trace.v test/fram_spi.v test/fram_i2c.v \
+    src/pe_engine.v src/pe_store.v src/project.v \
     > "$OUTDIR/build.log" 2>&1
 RC=$?
+printf '%s' "$WANT" > "$STAMP" 2>/dev/null
+fi
 if [ "$RC" -ne 0 ] || [ ! -x "$OBJ/tr" ]; then
     echo "  *** verilator build FAILED (exit $RC). Log: $OUTDIR/build.log"
     tail -25 "$OUTDIR/build.log"
@@ -65,6 +100,8 @@ if [ "$RC" -ne 0 ] || [ ! -x "$OBJ/tr" ]; then
 fi
 
 echo "  verilator  : $(verilator --version)"
+echo "  image      : $IMG  peer=$PEER  async=$ASYNCA"
+echo "  phase seed : $PHASE  (the STIMULUS seed, held FIXED)"
 echo "  defines    : ${DEFS:-<none>}"
 echo "  x-initial  : unique + runtime +verilator+rand+reset+2"
 echo "               (NOT 0, and NOT the compile flag alone)"
@@ -114,9 +151,11 @@ echo
 for S in $SEEDS; do
     # BOTH FLAGS: rand+reset+2 selects RANDOM initial state; without it the
     # seed is accepted and silently ignored and every seed is all-zeros.
-    "$OBJ/tr" "+IMG=test/smoke_image.hex" "+NBYTES=$NBYTES" \
+    "$OBJ/tr" "+IMG=$IMG" "+NBYTES=$NBYTES" \
               "+OUT=$OUTDIR/s$S.txt" "+NCYC=$NCYC" \
+              "+PEER=$PEER" "+ASYNC=$ASYNCA" "+SEED=$PHASE" \
               "+verilator+rand+reset+2" "+verilator+seed+$S" \
+              > "$OUTDIR/run_s$S.log" 2>&1
               > "$OUTDIR/run_s$S.log" 2>&1
     if [ ! -s "$OUTDIR/s$S.txt" ]; then
         echo "  *** seed $S produced no trace. Log: $OUTDIR/run_s$S.log"
@@ -136,10 +175,16 @@ NPAIR=0
 for S in $SEEDS; do
     if [ -z "$FIRST" ]; then FIRST="$S"; continue; fi
     NPAIR=$((NPAIR + 1))
-    if ! diff -q "$OUTDIR/s$FIRST.txt" "$OUTDIR/s$S.txt" > /dev/null; then
-        N=$(diff "$OUTDIR/s$FIRST.txt" "$OUTDIR/s$S.txt" | grep -c '^[<>]')
-        echo "  seed $FIRST vs seed $S : DIFFER on $N line(s)"
-        diff "$OUTDIR/s$FIRST.txt" "$OUTDIR/s$S.txt" | head -4 | sed 's/^/      /'
+    # BODIES, NOT WHOLE FILES. The provenance header records the seed --
+    # correctly, so two runs cannot be confused -- and comparing whole files
+    # therefore reported every pair as DIFFERENT on exactly the header line:
+    # a guard defeated by a field added to make runs distinguishable.
+    grep -v '^#' "$OUTDIR/s$FIRST.txt" > "$OUTDIR/b$FIRST.txt"
+    grep -v '^#' "$OUTDIR/s$S.txt"     > "$OUTDIR/b$S.txt"
+    if ! diff -q "$OUTDIR/b$FIRST.txt" "$OUTDIR/b$S.txt" > /dev/null; then
+        N=$(diff "$OUTDIR/b$FIRST.txt" "$OUTDIR/b$S.txt" | grep -c '^[<>]')
+        echo "  seed $FIRST vs seed $S : DIFFER on $N body line(s)"
+        diff "$OUTDIR/b$FIRST.txt" "$OUTDIR/b$S.txt" | head -4 | sed 's/^/      /'
         NDIFF=$((NDIFF + 1))
     else
         echo "  seed $FIRST vs seed $S : identical"
