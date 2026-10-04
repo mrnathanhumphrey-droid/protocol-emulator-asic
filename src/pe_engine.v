@@ -93,6 +93,13 @@ module pe_engine #(
     output reg  [N_PINS-1:0]    pin_out,
     output reg  [N_PINS-1:0]    pin_oe,
     input  wire [N_PINS-1:0]    pin_in,       // already synchronised upstream
+    // ⭐ EDGE DETECT, one bit per pin per polarity, combinational off the top
+    // module's 3-stage sync chain. `OP_ARM` selects the polarity with the
+    // action's existing level bit, because the three reactive releases do NOT
+    // agree on one: UART-rx arms on the start bit's FALL, SPI-target on CS
+    // FALL, I2C on the SCL RISE.
+    input  wire [N_PINS-1:0]    pin_rise,
+    input  wire [N_PINS-1:0]    pin_fall,
 
     // host data channel (F1): payload enters here, never through the program
     input  wire [7:0]           host_data,
@@ -227,6 +234,41 @@ module pe_engine #(
   // simulator and a synthesiser do not accept the same language. A flat array
   // with explicit index arithmetic is accepted by both, so the construct is not
   // the thing being tested here.
+  // ---------------------------------------------------------------------
+  // ⭐⭐ ARM STATE -- the reactive release, and the timeout that bounds it
+  // ---------------------------------------------------------------------
+  // ⛔ `l_armed` IS THE EDGE LATCH, and arming IS the clear. An earlier sketch
+  // carried a separate `l_edge_seen` bit; it is unnecessary and worse, because
+  // the question "may this edge release the lane" is exactly "was the lane armed
+  // when the edge arrived". Ruling 3 asks for `l_edge_seen` cleared at ARM
+  // dispatch; making `l_armed` the latch gives that BY CONSTRUCTION -- an edge
+  // arriving before ARM dispatches cannot be seen, because there is nothing
+  // holding it. One bit fewer and one fewer way to get the clear wrong.
+  //
+  // ⛔⛔ RULING 2: A TIMEOUT MUST NEVER LOOK LIKE AN EDGE. If both simply made
+  // the lane ready, a program could not tell them apart and a SILENT PEER would
+  // make the lane carry on as though it had answered -- the forbidden direction
+  // one level up from an unsound bound. So a timeout HALTS the lane and sets a
+  // sticky flag; only an edge lets the program proceed.
+  //
+  // ⭐ AND THE TIMEOUT COSTS NO COMPARATOR. `ST_WB` already does
+  // `l_timestamp += a_dly` and `ready` already tests `now - l_timestamp`, so an
+  // ARM with a delay IS a deadline and the existing machinery enforces it. The
+  // edge is an EARLY release against that deadline. That is Ruling 2's
+  // stored-timestamp discipline paying for red-team 3's deadline-mode primitive.
+  reg             l_armed  [0:N_LANES-1];   // armed, waiting on an edge
+  reg [PINW-1:0]  l_armpin [0:N_LANES-1];   // which pin. ⛔ FULL WIDTH: it
+                                            // cannot be narrowed to a choice of
+                                            // {l_pin, l_clkpin}, because
+                                            // SPI-target needs THREE pins --
+                                            // MISO (data), SCK (clock) and CS
+                                            // (arm) -- and narrowing it would
+                                            // erode "pins are assigned per
+                                            // program" for a 15-flop saving.
+  reg             l_armedge[0:N_LANES-1];   // 1 = rise, 0 = fall
+  reg             l_notmo  [0:N_LANES-1];   // "no timeout": wait indefinitely
+  reg             l_timeout[0:N_LANES-1];   // STICKY: the peer went silent
+
   localparam integer NSLOT = 2 * N_LANES;
   reg [ACT_W-1:0] l_act    [0:NSLOT-1];
   reg             l_actv   [0:NSLOT-1];
@@ -262,6 +304,36 @@ module pe_engine #(
   end
 
   // =====================================================================
+  // ⭐⭐ EDGE CAPTURE AND REBASE -- Ruling 1, the one that would break UART
+  // =====================================================================
+  // ⛔⛔ ON AN EDGE RELEASE THE LANE'S TIMESTAMP IS REBASED TO THE EDGE, NOT
+  // LEFT AT THE ARM'S DEADLINE. `ST_WB` sets `l_timestamp += a_dly`
+  // unconditionally, so after an EARLY (edge) release every following action
+  // would be timed from the ARM's TIMEOUT instant -- an arbitrary moment with
+  // no relation to the peer. For UART-rx that is fatal rather than imprecise:
+  // 0.9b derives the sample grid as `edge + half + m*T`, anchored to the START
+  // BIT, and a grid anchored to the deadline misses every bit.
+  // ⇒ On capture: `l_timestamp := now`. The sync latency is then a KNOWN
+  //   CONSTANT offset (2..3 cycles, derived in gate_edge_capture.py) which is
+  //   already inside UART-rx's 213-cycle tolerance, and the first sample's
+  //   programmed delay is measured from the edge like every later one.
+  // ⭐ This also removes the need for a per-lane `l_edge_time` register: there
+  //   is nothing to remember, because the rebase happens AT capture rather than
+  //   at dispatch. 16 bits x 5 lanes = 80 flops not spent.
+  //
+  // ⛔ CAPTURE DISARMS. A second edge while the lane is waiting to be dispatched
+  // must not re-rebase the timestamp -- that would slide the grid forward on
+  // every subsequent peer transition, which on a clocked bus is every bit.
+  wire [N_LANES-1:0] arm_hit;
+  generate
+    for (gi = 0; gi < N_LANES; gi = gi + 1) begin : g_arm
+      assign arm_hit[gi] = l_armed[gi] &
+                           (l_armedge[gi] ? pin_rise[l_armpin[gi]]
+                                          : pin_fall[l_armpin[gi]]);
+    end
+  endgenerate
+
+  // =====================================================================
   // READY + EDF SELECT. ⛔ Both comparisons are wrap-safe.
   // =====================================================================
   wire [N_LANES-1:0] ready;
@@ -280,7 +352,17 @@ module pe_engine #(
       // round-robin-by-prefetch-availability -- while every lane still moved
       // its pins, so the smoke test passed. ⭐ A2 assumes every RELEASED lane
       // competes; this is the line that makes that true.
-      assign ready[gi] = l_live[gi] & ~diff[TS_W-1];
+      // ⛔⛔ AN ARMED LANE WITH "NO TIMEOUT" IS NOT READY ON ITS TIMESTAMP.
+      // `l_notmo` is how a lane that must wait indefinitely (UART-rx idling
+      // between frames) encodes it -- an ARM whose delay field is ZERO. Without
+      // this term such a lane's stale timestamp is already in the past, so it
+      // would be instantly "ready", instantly time out, and halt itself the
+      // moment it armed.
+      // ⭐ An ARMED lane with a timeout IS ready at its deadline, and that
+      // readiness is exactly the timeout firing -- see ST_IDLE, where arriving
+      // ready while still armed halts the lane instead of dispatching.
+      assign ready[gi] = l_live[gi] & ~diff[TS_W-1]
+                       & ~(l_armed[gi] & l_notmo[gi]);
       // ⭐ deadline as an OFFSET FROM NOW, so a wrapped key still orders
       //   correctly. 1.6b is what bounds the spread that makes this sound.
       assign edf_key_off[gi] = (l_timestamp[gi] + {{(TS_W-D_W){1'b0}}, l_d[gi]}) - now;
@@ -596,6 +678,15 @@ module pe_engine #(
         l_base[i]   <= {AW{1'b0}};
         l_fpc[i]    <= {AW{1'b0}};
         l_sel[i]    <= 1'b0;
+        // ⛔ EVERY ARM REGISTER RESETS, including `l_armpin`. An X in the pin
+        // index would index `pin_rise` with X and make `arm_hit` X, which the
+        // ready term then propagates into the scheduler -- the same class of
+        // failure as the X action word that killed a lane permanently.
+        l_armed[i]   <= 1'b0;
+        l_armpin[i]  <= {PINW{1'b0}};
+        l_armedge[i] <= 1'b0;
+        l_notmo[i]   <= 1'b0;
+        l_timeout[i] <= 1'b0;
       end
       // ⛔ A SEPARATE LOOP, because the slot arrays are 2*N_LANES long and
       // reusing the lane loop would leave the odd slots unreset -- X on the
@@ -613,11 +704,34 @@ module pe_engine #(
       hdr_done <= 1'b0;
       pst      <= P_SCAN;
       rx_push  <= 1'b0;
+      // ⭐⭐ RELEASE EVERY PIN ON HALT, AND THIS IS WHAT FIXES F2 FACE 3.
+      // `pin_oe` used to survive a halt, so the TOP had to force release with
+      // `assign uio_oe = prog_mode ? 0 : uio_oe_run` -- a COMBINATIONAL mux
+      // whose select is `ui_in[7]`, a RAW ASYNCHRONOUS INPUT PIN. The real
+      // netlist showed the consequence: all 16 `uio_out`/`uio_oe` bits driven
+      // by `and2`/`nor2` instead of a flop, so a host transition on prog_mode
+      // can GLITCH every uio pin -- and SCL and SCLK are in that bank, where a
+      // glitch is an extra clock edge and therefore a corruption, not a margin
+      // problem. That is exactly what ruling F2 forbids.
+      // ⇒ Clearing it HERE moves the release behind the existing flop, so the
+      //   top module needs no mux at all and every uio bit is a flop Q.
+      // ⛔ It costs ONE CYCLE of release latency, not zero: prog_mode is async
+      //   and this clear is synchronous, so the host must leave at least one
+      //   clock between asserting prog_mode and driving `uio`. The load
+      //   sequence already does, and `gate_load_pin_safety` plus the bench's
+      //   load-mode violation counters are what hold that.
+      pin_oe   <= {N_PINS{1'b0}};
       for (i = 0; i < N_LANES; i = i + 1) begin
         l_live[i] <= 1'b0;
         l_pc[i]   <= {AW{1'b0}};
         l_fpc[i]  <= {AW{1'b0}};
         l_sel[i]  <= 1'b0;
+        // ⛔ DISARM ON HALT. A lane left armed across a reload would fire on an
+        // edge belonging to the PREVIOUS program. `l_timeout` is deliberately
+        // NOT cleared here: it is sticky status the host reads AFTER halting,
+        // and clearing it on halt would erase the reason the host halted.
+        l_armed[i]   <= 1'b0;
+        l_notmo[i]   <= 1'b0;
       end
       for (i = 0; i < NSLOT; i = i + 1) l_actv[i] <= 1'b0;
     end else begin
@@ -725,6 +839,26 @@ module pe_engine #(
 `else
         ST_IDLE: if (primed && winner_v) begin
 `endif
+                   // ⛔⛔ RULING 2: ARRIVING READY WHILE STILL ARMED IS A
+                   // TIMEOUT, AND A TIMEOUT IS AN ERROR. The lane armed, its
+                   // deadline passed, and no edge of the requested polarity ever
+                   // came -- so the peer is silent or absent. The lane HALTS and
+                   // sets a sticky flag; it does NOT execute its next action.
+                   // ⭐ WHY IT CANNOT JUST PROCEED: a program would then be
+                   // unable to tell "the peer answered" from "the peer never
+                   // answered", and would read a frame out of an idle line. That
+                   // is the forbidden direction one level up from an unsound
+                   // bound -- not a number that is too small, but a chip that
+                   // reports data it never received.
+                   // ⛔ M_TIMEOUT_PROCEED removes the halt and the bench fails.
+`ifndef M_TIMEOUT_PROCEED
+                   if (l_armed[winner]) begin
+                     l_live[winner]    <= 1'b0;      // HALT this lane
+                     l_armed[winner]   <= 1'b0;
+                     l_timeout[winner] <= 1'b1;      // STICKY -- status stream
+                     sticky_ovr        <= 1'b1;
+                   end else
+`endif
                    // ⭐ dispatch reads the HEAD slot. With the spare already
                    // filled, the usual case after a writeback is that the head
                    // is valid IMMEDIATELY -- which is the whole J reduction.
@@ -773,6 +907,8 @@ module pe_engine #(
             OP_SHIFTIN, OP_READBIT: begin
               pin_oe[a_pin] <= 1'b0;            // release to sample
             end
+            // ⭐ OP_ARM moves no pin -- it RELEASES the lane on a peer edge.
+            // Its state goes in at writeback, below.
             OP_ARM, OP_REARM: ;                 // no pin movement
             default: ;
           endcase
@@ -784,6 +920,23 @@ module pe_engine #(
           //    `now`. The relative form drifts k*(r-C) -- 15,260 cycles on a
           //    one-second delay -- and is INVISIBLE at k = 1.
           l_timestamp[cur] <= l_timestamp[cur] + {{(TS_W-DLY_W){1'b0}}, a_dly};
+
+          // ⭐⭐ ARM: the reactive release, armed here and fired by the edge
+          // capture below. The timestamp add above IS the timeout deadline --
+          // no second comparator, no second register. The action's EXISTING
+          // fields carry everything: `pin` names the pin, `level` selects the
+          // polarity (rise for I2C's SCL, fall for a UART start bit and for
+          // SPI-target's CS), and `delay` is the timeout.
+          // ⛔ `delay == 0` MEANS "NO TIMEOUT", which is how a lane that must
+          // wait indefinitely (UART-rx between frames) is expressed. It is an
+          // encoding choice in an existing field rather than a new one, and the
+          // `ready` term above is what makes it mean "not ready on time".
+          if (a_op == OP_ARM) begin
+            l_armed[cur]   <= 1'b1;
+            l_armpin[cur]  <= a_pin;
+            l_armedge[cur] <= a_lvl;
+            l_notmo[cur]   <= (a_dly == {DLY_W{1'b0}});
+          end
 
           case (a_op)
             OP_SHIFT: begin
@@ -900,6 +1053,37 @@ module pe_engine #(
       for (i = 0; i < N_LANES; i = i + 1) begin
         if (l_live[i] && ready[i] && busy && (i[LW-1:0] != cur))
           sticky_ovr <= sticky_ovr;             // observed, not an error here
+      end
+
+      // ---- ⭐⭐ EDGE CAPTURE AND REBASE (Ruling 1) ---------------------
+      // ⛔⛔ IT LIVES IN *THIS* BLOCK, and that is not a style choice. This is
+      // the ONE sequential block for lane state, and `l_timestamp` is written
+      // by ST_WB above. A second always block writing it would be
+      // TS_W x N_LANES = 80 multiple-driver nets -- the same defect that made
+      // the engine unsynthesizable once, passed the local bench in silence
+      // (last-write-wins in simulation, a hard error in synthesis) and killed a
+      // harden after three minutes.
+      //
+      // ⭐ ORDERING IS SAFE WITHOUT A PRIORITY TERM: a lane being dispatched
+      // cannot be armed in the same cycle it arms, because `l_armed[cur] <= 1`
+      // above is non-blocking, so `l_armed[cur]` still reads 0 here and
+      // `arm_hit[cur]` is 0. An ARM therefore cannot be fired by an edge in its
+      // own writeback cycle -- which is correct: the window opens when the ARM
+      // completes, not while it is executing.
+      //
+      // ⛔ M_NO_REBASE leaves the timestamp at the ARM's DEADLINE, which is
+      // Ruling 1's failure: the sample grid anchors to an arbitrary timeout
+      // instant instead of to the peer's edge, and UART-rx misses every bit.
+      for (i = 0; i < N_LANES; i = i + 1) begin
+        if (arm_hit[i]) begin
+          l_armed[i] <= 1'b0;                   // capture DISARMS: a second
+                                                // edge must not re-rebase and
+                                                // slide the grid forward on
+                                                // every peer transition
+`ifndef M_NO_REBASE
+          l_timestamp[i] <= now;                // ⭐ THE REBASE
+`endif
+        end
       end
     end
   end

@@ -73,6 +73,23 @@ OUT_PORTS = ("uo_out", "uio_out", "uio_oe")
 # Three mutants dying for one reason is one mutant, and it made the
 # unknown-cell arm vacuous because nothing distinguished it.
 CELL_KINDS = [
+    # ⭐⭐ YOSYS GENERIC CELLS FIRST, so this checker can run on a LOCAL
+    # synthesis instead of only on a CI artefact. ⛔ THE REASON IS A MEASURED
+    # ONE: face 3 is a check on a gate-level netlist, the netlist only existed
+    # after a ~2-HOUR harden, and when it finally arrived it found a real defect
+    # (all 16 uio bits combinationally gated by a raw async input). A checker
+    # whose feedback loop is two hours is a checker that gets run once.
+    # `yosys -p 'synth -top ...; write_verilog'` produces these names, so the
+    # same classifier now answers in seconds locally and against the PDK
+    # netlist in CI.
+    # ⚠ A LOCAL RUN IS NOT A SUBSTITUTE: generic cells are pre-technology
+    # mapping, so a local PASS does not prove the PDK netlist passes. It catches
+    # the structural error -- a pin driven by a function instead of a register --
+    # which is exactly what F2 is about.
+    (r"^\$_(dffe?|sdffe?|dffsre|aldff|dlatch|ff)_", "flop"),
+    (r"^\$_(not|buf)_", "inverter"),
+    (r"^\$_(and|or|nand|nor|xor|xnor|andnot|ornot|mux|nmux|aoi3|oai3|"
+     r"aoi4|oai4|mux4|mux8|mux16)_", "comb"),
     (r"(^|_)(dly|dlygate|dlymetal|dlclkp|buf|bufbuf|clkbuf|clkdly)", "buffer"),
     (r"(^|_)(inv|clkinv|einvp|einvn)", "inverter"),
     (r"(^|_)(conb|tiehi|tielo|tie)", "constant"),
@@ -89,7 +106,22 @@ INST_RE = re.compile(
     r"^\s*([A-Za-z_][\w$]*)\s+([A-Za-z_\\][\w$\\\[\]\.]*)\s*\((.*?)\)\s*;",
     re.S | re.M)
 CONN_RE = re.compile(r"\.\s*([\w$]+)\s*\(\s*([^()]*?)\s*\)")
-OUT_PORT_NAMES = {"X", "Y", "Q", "Q_N", "QN", "Z", "COUT", "SUM", "HI", "LO"}
+# ⛔⛔ `L_HI`/`L_LO` ADDED AFTER THE FIRST REAL NETLIST, and the omission
+# produced a FALSE POSITIVE rather than a false negative -- which is the whole
+# design of this checker working. IHP's tie cells are
+# `sg13cmos5l_tiehi(.L_HI(...))` / `tielo(.L_LO(...))`, and `L_LO` is not `LO`.
+# With the port unrecognised the instance contributed NO driver, so the net
+# looked UNDRIVEN and `uo_out[7]` -- the deliberately tied spare pin -- was
+# reported as a violation.
+# ⭐ IT FAILED CLOSED, which is why this is a classifier fix and not a scare.
+# The header's rule is "a registered value OR a constant tie"; a tie cell cannot
+# glitch, so recognising it is correct and does NOT weaken the check. An
+# genuinely floating output still reports UNDRIVEN, because nothing drives it at
+# all -- the two cases stay distinguishable.
+# ⚠ The full port-name set was taken from the netlist itself (every `.NAME(`
+# occurrence, counted) rather than from memory of a library.
+OUT_PORT_NAMES = {"X", "Y", "Q", "Q_N", "QN", "Z", "COUT", "SUM", "HI", "LO",
+                  "L_HI", "L_LO"}
 
 
 def classify(cell: str) -> str:
@@ -98,6 +130,86 @@ def classify(cell: str) -> str:
         if re.search(pat, c):
             return kind
     return "unknown"
+
+
+# ===========================================================================
+# THE JSON PATH -- the same question, answerable LOCALLY in seconds
+# ===========================================================================
+# ⛔⛔ WHY THIS EXISTS, AND IT IS THE WHOLE LESSON OF FACE 3. This check needs a
+# gate-level netlist; the only netlist was a CI artefact behind a ~2-hour
+# harden; so face 3 sat as a PREDICTION from S3 until the harden finally ran --
+# and when it ran it found 16 output bits combinationally gated by `prog_mode`,
+# a RAW ASYNCHRONOUS INPUT PIN, with SCL and SCLK in that bank. A check whose
+# feedback loop is two hours is a check that runs once, late.
+#
+# ⛔ AND `write_verilog` CANNOT SERVE: yosys renders its own internal cells
+# ($_DFFE_PP_, $_MUX_, ...) as behavioural `always`/`assign` blocks, so the
+# emitted file contains ZERO instances and the anti-vacuity guard below
+# correctly refuses it. `write_json` keeps the cell graph, which is what a
+# structural question actually needs.
+#
+# ⚠ A LOCAL PASS IS NOT A PDK PASS. These are pre-technology-mapping cells, and
+# only the real flow produces `sg13cmos5l_*`. What it catches is the STRUCTURAL
+# error F2 is about -- a pin driven by a function rather than by a register --
+# which is exactly the error that took two hours to find the first time.
+_JSON_FLOP = ("$_dff", "$_sdff", "$_dffe", "$dff", "$_aldff", "$_dlatch",
+              "$_ff", "$_dffsr")
+
+
+def check_json(path: str) -> int:
+    import json
+    with open(path, encoding="utf-8") as fh:
+        d = json.load(fh)
+    mods = d.get("modules", {})
+    top = "tt_um_protocol_emulator"
+    if top not in mods:
+        print("    *** %s not in the JSON (modules: %s)"
+              % (top, list(mods)[:4]))
+        return 1
+    m = mods[top]
+    drv = {}
+    for _cn, c in m["cells"].items():
+        pd = c.get("port_directions", {})
+        for port, bits in c["connections"].items():
+            if pd.get(port) == "output":
+                for b in bits:
+                    if isinstance(b, int):
+                        drv[b] = c["type"]
+    print("    cells: %d   driven nets: %d" % (len(m["cells"]), len(drv)))
+    bad, checked = [], 0
+    for pname in ("uo_out", "uio_out", "uio_oe"):
+        if pname not in m["ports"]:
+            print("    *** port %s absent -- not the netlist we think it is"
+                  % pname)
+            return 1
+        for i, b in enumerate(m["ports"][pname]["bits"]):
+            checked += 1
+            if not isinstance(b, int):
+                kind = "CONST"              # tied 0/1: cannot glitch
+            else:
+                t = drv.get(b)
+                kind = ("FLOP" if (t and t.lower().startswith(_JSON_FLOP))
+                        else (t or "UNDRIVEN"))
+            if kind not in ("FLOP", "CONST"):
+                bad.append(("%s[%d]" % (pname, i), kind))
+    # ⛔ ANTI-VACUITY, same rule as the Verilog path: a check that examined
+    # nothing has not run, and 0 violations out of 0 bits is not a pass.
+    if checked != 24:
+        print("    *** examined %d output bits, expected 24 (8+8+8). The port "
+              "shape changed or the parse is wrong." % checked)
+        return 1
+    print("    output bits examined: %d   flop-or-const: %d"
+          % (checked, checked - len(bad)))
+    if bad:
+        print("    *** FAIL: %d bit(s) driven by a function, not a register:"
+              % len(bad))
+        for n, k in bad:
+            print("        %-14s %s" % (n, k))
+        print("    A combinational output can GLITCH, and a glitch on a clock")
+        print("    pin is an extra edge -- a corruption, not a margin problem.")
+        return 1
+    print("    ⭐ every output bit is a register Q or a constant tie.")
+    return 0
 
 
 def parse(text: str) -> tuple:
@@ -399,12 +511,20 @@ def main(argv) -> int:
         print("  The gate-level netlist comes from the tt-gds-action artifact;")
         print("  test/gate_level_netlist.v is gitignored. Download it first.")
         return 1
-    with open(path, encoding="utf-8", errors="replace") as fh:
-        text = fh.read()
     print()
     print("=" * 78)
     print("RULING F2 -- flop-driven outputs, on %s" % os.path.basename(path))
     print("=" * 78)
+    # ⭐ A `.json` argument is a LOCAL yosys netlist graph; anything else is a
+    # gate-level Verilog netlist from the CI artefact. Same ruling, two input
+    # formats, because the slow one is the only authoritative one and the fast
+    # one is the only one that gets run.
+    if path.endswith(".json"):
+        print("  (yosys JSON -- pre-technology-mapping cells; structural only,")
+        print("   NOT a substitute for the PDK netlist from CI)")
+        return check_json(path)
+    with open(path, encoding="utf-8", errors="replace") as fh:
+        text = fh.read()
     return check(text, path)
 
 

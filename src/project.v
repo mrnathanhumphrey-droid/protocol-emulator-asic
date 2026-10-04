@@ -130,24 +130,63 @@ module tt_um_protocol_emulator #(
   // =====================================================================
   reg [2:0] wr_sync;
   reg [1:0] uio_s0, uio_s1;             // two-flop sync, per uio bit
-  reg [7:0] uio_q0, uio_q1;
+  // ⭐⭐ THREE STAGES NOW, NOT TWO, AND THE THIRD IS WHAT MAKES `L_sync = 3`
+  // TRUE OF THE CHIP. The A2 model has carried `L_SYNC = 3` and an async-capture
+  // uncertainty `L_JIT = 1` for reactive lanes since 0.9b; the chip had two
+  // stages and no edge detect at all, so those constants described a mechanism
+  // that did not exist. `uio_q2` completes the chain and gives edge detection
+  // for free off it.
+  reg [7:0] uio_q0, uio_q1, uio_q2;
   always @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
       wr_sync <= 3'b000;
       uio_q0  <= 8'h00;
       uio_q1  <= 8'h00;
+      uio_q2  <= 8'h00;
     end else begin
       wr_sync <= {wr_sync[1:0], ui_in[PIN_WR]};
       uio_q0  <= uio_in;
       uio_q1  <= uio_q0;
+      uio_q2  <= uio_q1;
     end
   end
   wire wr_rise = (wr_sync[2:1] == 2'b01);
 
+  // ---- EDGE DETECT on every protocol input pin -------------------------
+  // ⛔⛔ THIS IS THE SECOND DAY-ONE COMMITMENT, BUILT LATE. ARCH_PREREG_01
+  // commitment 1: "edge timestamping on input pins -- cheap (a counter and a
+  // capture register), and it is the entire substrate for protocol discovery.
+  // Built even though nothing consumes it yet." It was not built, and because
+  // it was not, `OP_ARM` was a no-op and the two REACTIVE lanes (UART-rx,
+  // SPI-target) plus three I2C rulings rested on a mechanism that was absent.
+  //
+  // ⛔ AND THE RULINGS SAID IT ALREADY EXISTED. R3: "the engine already has a
+  // reactive release on the observed SCL rise ... the correct rule costs
+  // nothing". N1a: "the same sampled-SCL-high condition is already required by
+  // A2 Part 4, so no new mechanism is needed." Both were true of the MODEL and
+  // false of the CHIP: gate 0.9b CLASSIFIES a lane REACTIVE-J, and a
+  // classification is not an implementation. Each ruling cited the other's
+  // requirement as evidence the mechanism was there.
+  //
+  // ⭐ `rise = q1 & ~q2` IS A COMBINATIONAL READ OF THE SYNC CHAIN -- the edge
+  // detect itself costs no flops, only the third stage does. Both polarities are
+  // emitted because `OP_ARM` selects one with the action's existing level bit:
+  // UART-rx arms on the START BIT'S FALL, SPI-target on CS FALL, I2C on the
+  // SCL RISE. One of those is not like the others, so the polarity cannot be
+  // fixed in hardware.
+  wire [7:0] uio_rise = uio_q1 & ~uio_q2;
+  wire [7:0] uio_fall = ~uio_q1 &  uio_q2;
+
   // ---- the engine's view of the pins, both banks -----------------------
   // ⭐ Inputs only ever come from `uio`; `uo_out` has no input path, which is
   //   precisely why the open-drain and tri-state classes cannot live there.
-  wire [N_PINS-1:0] pin_in = {{(N_PINS-8){1'b0}}, uio_q1};
+  // ⛔ The upper bits are TIED LOW for `pin_in` and for both edge vectors, so a
+  //   program that arms on a `uo_out` pin can never see an edge -- it will time
+  //   out rather than release, which is the safe direction and is what 1.6
+  //   rejects at load time.
+  wire [N_PINS-1:0] pin_in   = {{(N_PINS-8){1'b0}}, uio_q1};
+  wire [N_PINS-1:0] pin_rise = {{(N_PINS-8){1'b0}}, uio_rise};
+  wire [N_PINS-1:0] pin_fall = {{(N_PINS-8){1'b0}}, uio_fall};
 
   // =====================================================================
   // PROGRAM LOADER -- the address bus is deleted by AUTO-INCREMENT, and the
@@ -204,6 +243,7 @@ module tt_um_protocol_emulator #(
       .s_raddr(e_raddr), .s_re(e_re), .s_rdata(s_rdata),
       .s_wraddr(e_wraddr), .s_wre(e_wre), .s_wrdata(s_wrdata),
       .pin_out(e_pin_out), .pin_oe(e_pin_oe), .pin_in(pin_in),
+      .pin_rise(pin_rise), .pin_fall(pin_fall),
       .host_data(uio_q1), .host_valid(run & ui_in[0]),
       .lane_underrun(e_under), .lane_overflow(e_ovf), .sticky_ovr(e_ovr),
       .rx_data(e_rx_data), .rx_push(e_rx_push), .busy(e_busy)
@@ -304,10 +344,34 @@ module tt_um_protocol_emulator #(
   wire [7:0] uio_oe_run = (uio_oe_eng & ~(8'b1 << MISO_PIN))
                         | ({7'b0, miso_oe_q} << MISO_PIN);
 
-  // ⛔ LOAD MODE RELEASES EVERY `uio`: the host drives the data byte, and the
-  //    protocol lines must not be driven by a readback walk.
+  // ⛔⛔ THE `prog_mode` MUX IS GONE, AND F2 FACE 3 IS WHY. It used to read
+  //   assign uio_oe  = prog_mode ? 8'h00 : uio_oe_run;
+  //   assign uio_out = prog_mode ? 8'h00 : e_pin_out[7:0];
+  // which is a COMBINATIONAL function of `prog_mode` = `ui_in[7] & ena`, a RAW
+  // ASYNCHRONOUS INPUT. The first real gate-level netlist showed all 16
+  // `uio_out`/`uio_oe` bits driven by `and2`/`nor2` rather than a flop: a host
+  // transition on prog_mode could glitch every uio pin, and SCL and SCLK are in
+  // that bank, where a glitch is an EXTRA CLOCK EDGE -- a corruption, not a
+  // margin problem. Ruling F2 exists for precisely this.
+  // ⭐ LOAD MODE STILL RELEASES EVERY `uio`, but now at the SOURCE: the engine
+  // clears `pin_oe` in its `!run` branch, so the release happens behind the
+  // flop that was already there and every bit here is a flop Q.
+  // ⭐⭐ AND MISO'S ASYNC CLEAR SURVIVES, which a 16-flop output register would
+  // have destroyed: 1.6r requires `uio_oe[MISO]` to release ASYNCHRONOUSLY on
+  // CS, so re-registering it would have made the release synchronous and broken
+  // the ruling while satisfying F2. `miso_oe_q` reaches the pin directly, still
+  // a flop Q, still async-cleared -- the two rulings are compatible only
+  // because the fix went upstream rather than downstream.
+  // ⛔ M_COMB_OUT restores the defect, so the local F2 check is PRICED: a
+  // structural check that has only ever been seen pass has unknown strength,
+  // and this one is new. The mutant must make it RED.
+`ifdef M_COMB_OUT
   assign uio_oe  = prog_mode ? 8'h00 : uio_oe_run;
   assign uio_out = prog_mode ? 8'h00 : e_pin_out[7:0];
+`else
+  assign uio_oe  = uio_oe_run;
+  assign uio_out = e_pin_out[7:0];
+`endif
 
   // ---- `uo_out`: 4 protocol + 3 serial + 1 spare
   // ⛔ In LOAD MODE the 4 protocol outputs are HELD AT IDLE (high), not used for
