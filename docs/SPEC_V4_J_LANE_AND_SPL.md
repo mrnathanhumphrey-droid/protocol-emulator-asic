@@ -577,3 +577,97 @@ run rather than from CI.
 ⇒ The wiring is priced, the guard is stronger than when it was written, and the
 scratch branch is deleted. ⭐ This is what pricing buys over writing a check and
 believing it: the hole was known, named in a comment, and still open.
+
+---
+
+# SPI-target 2 MHz reopening — R1 and R2 both fail; 1 MHz stays
+
+The pre-registered condition was "reopens iff measured `C = 2` **and**
+margin > 0", with the margin bar retiring once `C`/`J` are **bounds** rather
+than measurements. So the reopening hinged on `J = 9` being a theorem, plus the
+reactive absolute check. Both were done. **Both fail.**
+
+## R1 — `J = 9` is not a theorem for the quantity RTA needs
+
+Full argument and citations: **`docs/J_LANE_PROOF.md`**.
+
+- **Theorem 1 holds.** The *winner-blocked* wait is `≤ 2·L_REFILL + 1 = 9`,
+  proved from seven premises each anchored to `src/pe_engine.v` (one in-flight
+  non-preemptible refill, winner-first priority, dispatch gated only on the head
+  slot, one slot owed per lane at `SPL = 2`). Measured maximum **7**, and the
+  pre-registered falsifier `sum_L > 9` fired on **0 of 10 cells**.
+- **The claim as written is FALSE.** The ruling required the winner-loss case to
+  be classified as (a) jitter or (b) pyRTA interference, exactly one. It
+  **splits**: the interfering lane's *execution* is (b), charged through `C_j`;
+  its *refill* is (a) — the engine is idle, nothing executes, so pyRTA charges
+  nothing and `sum_L` skips it because the winner is not the subject. That class
+  must go in `J`, and it is measured at **40 cycles** where the claim allows 9.
+- ⛔ **And my first repair was also unsound.** "At most `k` refills can be served
+  during the wait, so `≤ k·L_REFILL + 1 = 21`" — false, because P6 bounds the
+  refills owed at one *instant*, not over an interval: a faster lane dispatches
+  repeatedly during the wait and owes a **fresh** refill each time. Ten of lane
+  0's refills were served while lane 4 waited. The data says it without the
+  argument: `gap` is **4, 8, 12, 40** across arm C's lanes in exact EDF deadline
+  order — not a constant being approached, a **queue**, with the lane at the back
+  waiting longest.
+- ⇒ **The delay is queueing at the single fetch port** — a second scheduling
+  problem nested inside the EDF one — and **no constant from `k` and `L_REFILL`
+  bounds it.** Arm C is not even port-saturated (`U_port = 0.66`), which is why
+  `U_port ≤ 1` failed as a sufficient condition.
+
+⭐⭐ **This explains `D*` rather than merely agreeing with it.** `d ≥ D* =
+k·L_REFILL` is the condition that the port serves every live lane's refill inside
+the shortest action period, so no lane ever finds its head missing and the term
+is **zero**, not bounded. `D*` is the boundary at which this delay vanishes;
+below it the delay is not a constant at all. The refusal is the feasibility
+boundary, not a margin.
+
+⚠ It was caught only because the measurement was taken **before** the document
+was committed. Theorem 2 read as structural and was not — the same failure as
+the retracted universal `J = 8`, one step further up.
+
+## R2 — the reactive absolute budget fails at 2 MHz
+
+`model/a2/gate_reactive_2mhz.py`. All terms cited; `tSU(master)` is a **peer**
+property and therefore parametric, declared at 1 cycle and deliberately
+optimistic.
+
+| configuration | half − tSU | needs `L_sync + start + out_reg + C9` | margin |
+|---|---|---|---|
+| **1 MHz, J = 1 (shipped)** | 25 − 1 = 24 | 3 + 4 + 1 + 0 = 8 | **+16** |
+| **2 MHz, J = 9** (optimistic) | 12 − 1 = 11 | 3 + **10** + 1 + 0 = 14 | **−3** |
+| 3 MHz, J = 9 (indication) | 8 − 1 = 7 | 14 | **−7** |
+
+⛔ **It fails by 3 cycles at the *kindest* `J`**, so the verdict does not depend
+on R1's argument: a failure at 9 is a failure at any sound figure. The binding
+term is the **start delay** (10 of the 14) — `r − C` — so this is the same
+scheduling pressure the `D*` refusal is about, arriving through the peer's clock
+instead of through a deadline.
+
+⭐ **Must-fire 0.9b fired on the real case, not a contrived one.** At 2 MHz the
+*differential* check passes (`r = 12 ≤ D_tol = 12`) while the *absolute* check
+fails (−3). A gate checking only the differential would have **admitted** this
+configuration. That is exactly what 0.9b exists for.
+
+⚠ The 3 MHz row reuses `r` from the d = 12 set, so it is an **indication**: a
+3 MHz lane needs d = 8, a different task set and a different `r`. Reported
+because the ruling asked for the next ceiling to be computed, not as a result.
+
+## R3 — does not proceed
+
+Per the ruling: recorded as written, **1 MHz stays**, and the failing checks are
+named — **R1 §3(a) iterated** (unmodelled refill queueing of earlier-deadline
+lanes, 40 cycles measured against 9 allowed) and **R2** (absolute budget −3 at
+the optimistic `J`). No change to `pe_asm`, no ceiling declared, no re-quote, no
+ledger entry claiming a reopening.
+
+**What would reopen it:** a response-time analysis **of the fetch port**, giving
+a per-program bound on refill queueing. That is real work and a genuine result
+if it lands. It is not a number to be read off a measurement — which is what
+both failed attempts above did.
+
+`model/gate_j_proof_anchors.py` keeps the proof honest: each premise is anchored
+to a substring that must be present in `src/pe_engine.v` (line numbers moved
+twice while the document was being written, and one citation pointed at the
+wrong block by the time it was first saved), the refuted figures must still
+appear, and the verdict must still read as a refusal.

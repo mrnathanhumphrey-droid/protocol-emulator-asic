@@ -76,6 +76,22 @@ module tb_jlane;
   // ⇒ The window is split in half and both halves are reported. A run whose
   //   two halves disagree is not stationary and yields NO READING.
   integer    mid, n_iv_h1, n_iv_h2;
+  // ⛔⛔ THE THIRD BUCKET -- R1's crux. Inside one release interval a cycle is
+  // exactly one of:
+  //   EXEC  st != ST_IDLE            some lane is executing an action. That is
+  //                                  EDF interference and pyRTA's recurrence
+  //                                  already charges it through C_j.
+  //   MINE  idle, and I am the winner-blocked lane. That is the prefetch-miss
+  //                                  wait the J = 9 bound is about.
+  //   GAP   idle, and I am NOT the winner. The engine is stalled on ANOTHER
+  //                                  lane's refill: nothing executes, so pyRTA
+  //                                  charges nothing, and `sum_L` skips it
+  //                                  because the winner is not me.
+  // ⇒ GAP IS THE CYCLE THAT BELONGS TO NEITHER MODEL, and the ruling demands
+  //   it belong to exactly one. If it is ever non-zero the J = 9 bound does
+  //   not cover the delay RTA needs, and the sound bound is the full
+  //   non-execution wait `sum + gap`.
+  integer    iv_gap, iv_exec, max_gap, max_full, max_full_at;
   reg        prev_ready, live_seen, primed_seen, cfgerr_seen, halt_seen;
 
   // ---- the witness ring, so a FALSIFYING interval arrives with its chain --
@@ -227,6 +243,7 @@ module tb_jlane;
     n_iv = 0; n_drop = 0; n_fire = 0; n_over = 0;
     n_rdy = 0; n_blk = 0; free_run = 0; cur_free = 0; free_at = 0;
     mid = 0; n_iv_h1 = 0; n_iv_h2 = 0;
+    iv_gap = 0; iv_exec = 0; max_gap = 0; max_full = 0; max_full_at = 0;
     prev_ready = 1'b0;
     live_seen = 1'b0; primed_seen = 1'b0; cfgerr_seen = 1'b0; halt_seen = 1'b0;
 
@@ -292,6 +309,10 @@ module tb_jlane;
 
       // ---- interval bookkeeping ---------------------------------------
       if (in_iv) begin
+        // ⭐ the three buckets, mutually exclusive by construction
+        if (dut.u_eng.st != 0)        iv_exec = iv_exec + 1;
+        else if (!(dut.u_eng.winner_v
+                   && dut.u_eng.winner == lane[2:0])) iv_gap = iv_gap + 1;
         if (blocked) begin
           iv_sum  = iv_sum + 1;
           cur_run = cur_run + 1;
@@ -315,6 +336,11 @@ module tb_jlane;
               dump_chain;
             end
             if (iv_run > max_run) max_run = iv_run;
+            if (iv_gap > max_gap) max_gap = iv_gap;
+            if ((iv_sum + iv_gap) > max_full) begin
+              max_full    = iv_sum + iv_gap;
+              max_full_at = cyc;
+            end
             if ((cyc - iv_start) > max_wall) begin
               max_wall    = cyc - iv_start;
               max_wall_at = cyc;
@@ -334,6 +360,7 @@ module tb_jlane;
         end
       end else if (rdy && !prev_ready) begin
         in_iv = 1'b1; iv_start = cyc; iv_sum = 0; iv_run = 0; cur_run = 0;
+        iv_gap = 0; iv_exec = 0;
         if (blocked) begin iv_sum = 1; iv_run = 1; cur_run = 1; end
       end
 
@@ -405,6 +432,17 @@ module tb_jlane;
     $display("    J_lane (max sum)        : %0d  at cycle %0d",
              max_sum, max_sum_at);
     $display("    max single run          : %0d", max_run);
+    // ⛔⛔ R1'S DECIDING NUMBERS. `gap` is the cycle class that belongs to
+    // NEITHER model: idle engine, another lane winner-blocked on its refill,
+    // so nothing executes (pyRTA charges nothing) and the winner is not me
+    // (`sum` skips it). If it is non-zero, the bound RTA needs is `sum + gap`,
+    // not `sum`.
+    $display("    max gap (idle, not mine): %0d", max_gap);
+    $display("    max FULL non-exec wait  : %0d  at cycle %0d",
+             max_full, max_full_at);
+    $display("      ^ sum + gap. This is the delay a response-time analysis");
+    $display("        must charge as jitter, because no job executes during");
+    $display("        it -- EDF interference is the separate `exec` class.");
     $display("    intervals over prereg   : %0d", n_fire);
     $display("    wall release->dispatch  : %0d  at cycle %0d",
              max_wall, max_wall_at);
@@ -438,10 +476,11 @@ module tb_jlane;
       $display("    consistency: max_run %0d <= jitter_max %0d  ok",
                max_run, dut.u_eng.jitter_max);
     end
-    $display("  JLANE lane=%0d sum=%0d run=%0d wall=%0d iv=%0d drop=%0d fire=%0d win=%0d agg=%0d rdy=%0d blk=%0d free=%0d",
+    $display("  JLANE lane=%0d sum=%0d run=%0d wall=%0d iv=%0d drop=%0d fire=%0d win=%0d agg=%0d rdy=%0d blk=%0d free=%0d gap=%0d full=%0d",
              lane, max_sum, max_run, max_wall, n_iv, n_drop, n_fire,
              (warm_from > 0 && cyc > warm_from) ? (cyc - warm_from) : 0,
-             dut.u_eng.jitter_max, n_rdy, n_blk, free_run);
+             dut.u_eng.jitter_max, n_rdy, n_blk, free_run, max_gap,
+             max_full);
     $finish;
   end
 

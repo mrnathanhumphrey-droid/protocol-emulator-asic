@@ -213,6 +213,13 @@ SPEC_SYMBOLS = {
     # coverage check doing the job it exists for, and it is worth recording
     # that it catches the AUTHOR rather than only a future editor.
     ("test/run_param_points.py", "BENCHES"),
+    # ⭐ AND A THIRD TIME, ON A THIRD NEW FILE: the J=9 proof's premise list.
+    # Its numbers are Verilog literals inside the RTL anchors (`3'd0`, `1'b0`),
+    # so it is a specification of what the proof rests on, not an observation.
+    # ⚠ Three commits, three catches, all of them on my own new work. Worth
+    # recording: the coverage check's value is that it does not care whose file
+    # it is, and it has now never once been triggered by someone else.
+    ("model/gate_j_proof_anchors.py", "PREMISES"),
     # ⚠ A DELIBERATELY WRONG FIXTURE: a stale lane table kept to price a gate.
     ("model/a2/_price_stale_lane_table.py", "STALE"),
     # this audit's own table

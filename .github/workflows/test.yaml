@@ -76,6 +76,7 @@ jobs:
                    model/gate_reset_audit.py \
                    model/gate_stored_numbers.py \
                    model/gate_bench_indices.py \
+                   model/gate_j_proof_anchors.py \
                    model/pe_asm.py ; do
             echo "=== $g ==="
             python "$g"

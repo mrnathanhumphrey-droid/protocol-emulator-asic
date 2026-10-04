@@ -124,10 +124,10 @@ def parse(txt):
                      or "*** VOID" in l]}
     m = re.search(r"JLANE lane=(\d+) sum=(\d+) run=(\d+) wall=(\d+) "
                   r"iv=(\d+) drop=(\d+) fire=(\d+) win=(\d+) agg=(\d+) "
-                  r"rdy=(\d+) blk=(\d+) free=(\d+)", txt)
+                  r"rdy=(\d+) blk=(\d+) free=(\d+) gap=(\d+) full=(\d+)", txt)
     if m:
         for i, k in enumerate(("lane", "sum", "run", "wall", "iv", "drop",
-                               "fire", "win", "agg", "rdy", "blk", "free")):
+                               "fire", "win", "agg", "rdy", "blk", "free", "gap", "full")):
             out[k] = int(m.group(i + 1))
     m = re.search(r"# arm t =([\d ]+)", txt)
     out["t"] = [int(x) for x in m.group(1).split()] if m else None
@@ -266,10 +266,10 @@ def main() -> int:
             if p["sum"] > J_PREREG:
                 flag = "  <== OVER THE PRE-REGISTERED %d" % J_PREREG
                 violations.append((arm, lane, p["sum"], log))
-            print("    lane %d  J_lane=%-3d run=%-3d wall=%-5d iv=%-6d "
-                  "drop=%-5d agg=%-3d%s"
-                  % (lane, p["sum"], p["run"], p["wall"], p["iv"], p["drop"],
-                     p["agg"], flag))
+            print("    lane %d  J_lane=%-3d run=%-3d gap=%-3d FULL=%-3d "
+                  "wall=%-5d iv=%-6d agg=%-3d%s"
+                  % (lane, p["sum"], p["run"], p["gap"], p["full"],
+                     p["wall"], p["iv"], p["agg"], flag))
             rows.append((arm, lane, p))
         print()
 
@@ -294,6 +294,18 @@ def main() -> int:
     print("  worst wall time      : %d   (NOT bounded by the hypothesis)"
           % worst_wall)
     print("  engine aggregate max : %d   (any-winner-blocked run length)" % agg)
+    # ⛔⛔ R1'S NUMBER. `FULL` = sum + gap, the non-execution portion of a
+    # release-to-dispatch wait: cycles in which NO lane executed, so pyRTA's
+    # recurrence charges nothing for them. A response-time analysis must carry
+    # this as jitter, and `sum` alone does not -- `gap` is the engine idle
+    # while ANOTHER lane is winner-blocked on its refill.
+    full = max(p["full"] for _a, _l, p in rows)
+    gap = max(p["gap"] for _a, _l, p in rows)
+    print("  worst FULL non-exec  : %d   (sum + gap; max gap alone %d)"
+          % (full, gap))
+    print("    ⚠ THE PROVEN BOUND FOR THIS QUANTITY IS k*L_REFILL + 1 = 21,")
+    print("      not 9 -- see docs/J_LANE_PROOF.md. A measured %d is a FLOOR."
+          % full)
     print()
     # ⭐⭐ THE DECOMPOSITION, STATED AS A NUMBER, AND PER ARM. The
     # pre-registration put this prediction at risk against a figure already on
