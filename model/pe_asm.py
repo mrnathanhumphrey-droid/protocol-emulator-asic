@@ -105,9 +105,33 @@ def check_queue_ownership(lanes):
 # ---------------------------------------------------------------------------
 # 1.6t: the program's J, computed HERE and not on the chip
 # ---------------------------------------------------------------------------
-def compute_j(lanes):
-    """`J` from the program's minimum inter-action delay, per gate_j_program."""
+def compute_j(lanes, spl=2):
+    """`J` from the program's minimum inter-action delay, per gate_j_program.
+
+    ⛔⛔ THE SCOPED CLAIM IS CONDITIONAL ON `SPL = 2`, AND THAT IS MEASURED,
+    NOT ASSUMED. `SPL` (action slots per lane) is now a real parameter, and
+    `test/run_spl_compare.py` measures both depths on the J sweep's own recipe:
+
+        d >= D* = 20   SPL = 2 stalls 0        SPL = 1 stalls up to 5
+        cliff          SPL = 2 at d = 19       SPL = 1 at d = 25
+
+    The cliff STRADDLES `D* = 20`. So `d_min >= D* -> J = 1` is a property of
+    the double-buffered engine, not of the architecture, and certifying a
+    program against a single-buffer build would hand over a guarantee that
+    build does not provide.
+    ⇒ This refuses rather than adjusting the number. A `J` for `SPL = 1` would
+      need its own derivation and its own measured check, and neither exists.
+    """
     import gate_j_program as jp
+    if spl != 2:
+        raise Reject(
+            "this build has SPL = %d (action slots per lane) and the timing "
+            "guarantee is scoped to SPL = 2. Measured on the same recipe, the "
+            "stall cliff sits at d = 19 with the double buffer and d = 25 "
+            "without it -- straddling D* = %d -- so `d_min >= D* -> J = 1` "
+            "holds only at SPL = 2. No J is published for SPL = 1: it would "
+            "need its own derivation and its own measured check."
+            % (spl, jp.D_STAR))
     delays = [d for ln in lanes for (_o, _p, _l, d, _q) in lanes[ln] if d > 0]
     if not delays:
         raise Reject("the program has no positive action delay, so d_min is "
@@ -248,6 +272,38 @@ def main() -> int:
             else:
                 print("    %s -> REJECTED, naming %s" % (name, ", ".join(want)))
                 print("        %s" % msg[:66])
+
+    # ---- MUST-FIRE: a single-buffer build must not get a certificate -----
+    # ⛔ THE SCOPED CLAIM IS CONDITIONAL ON SPL = 2, measured: the stall cliff
+    # is d = 19 with the double buffer and d = 25 without it, straddling
+    # D* = 20. A program certified against an SPL = 1 build would carry a
+    # guarantee that build does not provide.
+    print()
+    print("  --- must-fire: certifying against an SPL = 1 build ---")
+    good = _demo_ok()[0]
+    try:
+        compute_j(good, spl=1)
+        print("    *** ACCEPTED at SPL = 1 -- the condition does not fire")
+        rc = 1
+    except Reject as e:
+        m = str(e)
+        need = ["SPL = 2", "19", "25"]
+        gap = [w for w in need if w not in m]
+        if gap:
+            print("    *** fired but did not name %s" % gap)
+            rc = 1
+        else:
+            print("    REJECTED, naming the depth and both measured cliffs")
+            print("        %s" % m[:66])
+    # ⭐ and the SAME program must still certify at SPL = 2, or the condition
+    # is just a blanket refusal wearing a reason.
+    try:
+        d_min, j = compute_j(good, spl=2)
+        print("    the same program at SPL = 2: d_min = %d -> J = %d  ok"
+              % (d_min, j))
+    except Reject as e:
+        print("    *** the same program is refused at SPL = 2 too: %s" % e)
+        rc = 1
     print()
     print("=" * 78)
     print("  pe_asm: %s" % ("PASSED" if rc == 0 else "FAILED"))

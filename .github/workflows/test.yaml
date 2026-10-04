@@ -9,9 +9,19 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Install iverilog
+      # ⛔ THREE TOOLS, AND EACH IS LOAD-BEARING FOR A GATE THAT NOW RUNS HERE:
+      #   iverilog  -- cocotb, and the parameter dump's first elaborator
+      #   verilator -- the dump's SECOND elaborator. `gate_one_encoder` goes
+      #                RED if it is absent, by design ("a tool that cannot
+      #                elaborate the dump fails the gate"), so installing it is
+      #                what makes the two-elaborator authority real in CI
+      #                rather than degraded to one reading.
+      #   yosys     -- the netlist the reset audit classifies flops from. That
+      #                audit is RED without it, not skipped: an audit that
+      #                cannot see the design has not audited it.
+      - name: Install iverilog, verilator and yosys
         shell: bash
-        run: sudo apt-get update && sudo apt-get install -y iverilog
+        run: sudo apt-get update && sudo apt-get install -y iverilog verilator yosys
 
       # Set Python up and install cocotb
       - name: Setup python
@@ -33,6 +43,43 @@ jobs:
           python -c "import sys; sys.path.insert(0, 'test'); import run_local; \
             s = run_local.project_sources(); run_local.assert_info_yaml_agrees(s); \
             print('source lists agree:', ' '.join(s))"
+
+      # ⛔⛔ THE MODEL GATES RUN IN CI, NOT WHEN SOMEONE REMEMBERS THEM.
+      # These five were by-hand only, which is the stored-record problem in
+      # another form: a check that runs when someone thinks of it is a check
+      # whose last green result has no date. Four of them are pure Python and
+      # the fifth (one-encoder) needs only iverilog, which is already
+      # installed above for the cocotb run.
+      # ⚠ `gate_one_encoder` also reads Verilator as a SECOND elaborator and
+      # degrades to iverilog-only when it is absent; that is its own declared
+      # behaviour, and CI therefore exercises the single-elaborator path. The
+      # two-elaborator reading stays a local/by-hand check.
+      # ⛔ NOT INCLUDED HERE: the clean room (it moves files about and runs
+      # benches) and the parameter-point sweep plus run_spl_compare (minutes
+      # of simulation each). Those stay by-hand at each `cmos5l` checkpoint,
+      # and that is a declared boundary rather than an oversight.
+      # the netlist the reset audit reads, via the SAME script the local flow
+      # uses -- its output directory is an argument for exactly this reason
+      - name: Netlist for the reset audit
+        shell: bash
+        run: bash test/local_netlist.sh "$PWD" "" local_netlist /tmp
+
+      - name: Model gates
+        shell: bash
+        env:
+          PE_NETLIST_JSON: /tmp/local_netlist.json
+        run: |
+          set -e
+          for g in model/gate_ruling_audit.py \
+                   model/gate_one_encoder.py \
+                   model/gate_mutant_arms.py \
+                   model/gate_reset_audit.py \
+                   model/gate_stored_numbers.py \
+                   model/gate_bench_indices.py \
+                   model/pe_asm.py ; do
+            echo "=== $g ==="
+            python "$g"
+          done
 
       - name: Run tests
         run: |

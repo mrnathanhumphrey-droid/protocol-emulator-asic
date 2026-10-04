@@ -22,5 +22,12 @@ yosys -s /tmp/nl.ys > /tmp/nl.log 2>&1
 RC=$?
 if [ "$RC" -ne 0 ]; then echo "yosys failed ($RC); see /tmp/nl.log"; exit 1; fi
 OUT="${3:-local_netlist}"
-cp /tmp/local_netlist.json "/mnt/c/tmp/$OUT.json"
-echo "json -> C:\tmp\$OUT.json ($(wc -c < /tmp/local_netlist.json) bytes) defs=[$DEFS]"
+# ⭐ THE DESTINATION IS AN ARGUMENT, so a Linux CI runner uses THIS script
+# rather than a second copy of the yosys recipe pasted into the workflow. A
+# recipe that exists twice is this project's most reliable bug, and the copy in
+# a CI file is the one nobody runs locally. Default stays the Windows-side
+# /mnt/c/tmp that the local flow reads.
+OUTDIR="${4:-/mnt/c/tmp}"
+mkdir -p "$OUTDIR"
+cp /tmp/local_netlist.json "$OUTDIR/$OUT.json"
+echo "json -> $OUTDIR/$OUT.json ($(wc -c < /tmp/local_netlist.json) bytes) defs=[$DEFS]"

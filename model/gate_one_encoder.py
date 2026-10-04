@@ -119,11 +119,24 @@ def dump_iverilog(src_root=None):
 
 
 def dump_verilator():
-    """The same dump, through the second elaborator."""
+    """The same dump, through the second elaborator.
+
+    ⭐ ONE SCRIPT, TWO HOSTS. Locally Verilator lives in WSL, so the script is
+    invoked across the boundary with the fixed `/mnt/d` path. On a Linux runner
+    there is no `wsl.exe` and Verilator is native, so the SAME
+    `test/param_dump.sh` is run directly with the repo root as its argument --
+    which is what its `cd "${1:-...}"` is for. ⛔ Writing a second yosys/
+    Verilator invocation into the CI workflow instead would be a private copy
+    of the recipe, in the one file nobody runs locally.
+    """
+    import shutil
     import subprocess
-    r = subprocess.run(["wsl.exe", "-d", "Ubuntu", "--", "bash",
-                        "/mnt/d/ProtocolEmulator/test/param_dump.sh"],
-                       capture_output=True, text=True, encoding="utf-8",
+    if shutil.which("wsl.exe"):
+        cmd = ["wsl.exe", "-d", "Ubuntu", "--", "bash",
+               "/mnt/d/ProtocolEmulator/test/param_dump.sh"]
+    else:
+        cmd = ["bash", os.path.join(ROOT, "test", "param_dump.sh"), ROOT]
+    r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",
                        errors="replace")
     vals = {}
     for m in re.finditer(r"PARAM (\w+)=(-?\d+)", r.stdout):

@@ -370,3 +370,174 @@ comment landed *inside* the `ifndef M_BUF_SWAP` arm ("5 COMMENT lines inside an
 arm … DRIFT: 7 diff lines, expected 2"). A mutant arm wraps the minimal delta
 and nothing else — the same rule that caught the 1.6s config guard landing in an
 `M_NO_PRIME` arm.
+
+---
+
+# Rulings after `a818382` — outcomes
+
+## 1 — Arm A lane 4 stays unadjudicated, and no arm was added
+
+Recorded as **"neither"** per the pre-registration: its value is 7, the same as
+every other cell, but convergence failed at 4 M cycles. **No post-hoc arm.**
+Adding one now would be choosing the test after seeing the result.
+
+⭐ It does not weaken the result. The `J = 9` bound is **structural** — one
+refill in flight engine-wide, winner-first, non-preemptible — and measurement
+is the *check*, not the source. Nine of ten cells adjudicated and holding, with
+the tenth measuring the same 7, is the record.
+
+If it is to be settled, that needs a **new, separate pre-registration** with a
+stated convergence criterion and run length, committed before measuring. The
+existing one is not amended.
+
+## 2 — The double buffer is kept, and the claim is conditional on `SPL = 2`
+
+Benefit measured, not claimed: cliff **d = 19** (double) versus **25** (single),
+straddling `D* = 20`.
+
+**Recorded:** the scoped claim `d_min ≥ D* = 20 → J = 1` is **conditional on
+`SPL = 2`**. `pe_asm.compute_j(lanes, spl)` now **refuses to certify** against a
+single-buffer build, naming the depth and both measured cliffs, with a must-fire
+either way — the refusal fires at `SPL = 1`, and the same program still
+certifies at `SPL = 2` so the condition is not a blanket refusal wearing a
+reason.
+
+The "11 → 7" phrasing is retracted in favour of the measured cliff shift.
+
+## 3 — The five model gates run in CI
+
+`ruling-audit`, `one-encoder`, `mutant-arms`, `reset-audit`, `stored-numbers`,
+plus `bench-indices` and `pe_asm`, now run in `test.yaml` on every push. A gate
+that runs when someone remembers it is the stored-record problem in another
+form: its last green result has no date.
+
+Two tools had to become portable rather than being duplicated into the
+workflow:
+
+- **`gate_one_encoder`** reached Verilator only through `wsl.exe`. It now runs
+  the *same* `test/param_dump.sh` directly when there is no WSL, so CI exercises
+  the real two-elaborator authority instead of degrading to one reading.
+  Verilator is installed on the runner for exactly that reason — the gate goes
+  **red** without it, by design.
+- **`test/local_netlist.sh`** hard-coded its Windows output path. The
+  destination is now an argument, so CI produces the reset audit's netlist with
+  the *same script* the local flow uses. Writing a second yosys invocation into
+  the workflow would have put a copy of the recipe in the one file nobody runs
+  locally.
+
+⛔ **Not wired in, and declared:** the clean room (it moves files about), the
+parameter-point sweep and `run_spl_compare` (minutes of simulation each). Those
+stay by-hand at each `cmos5l` checkpoint.
+
+### ⚠ And wiring it up immediately found a stale check
+
+`gate_reset_audit` reads a **cached netlist JSON**. It had reported PASSED
+earlier in this round against a netlist generated *before* the `SPL` change — a
+stored input read as current. Regenerating it turned the gate red: synthesis had
+renamed `u_eng.pslot` to `u_eng.fix` (the new index wire reads `pslot` straight
+through, so the net name propagated onto the same single flop).
+
+The allowlist entry is updated, **and the gate now reports a stale entry as a
+finding**: an allowlist key matching nothing in the netlist means the reason for
+a flop that no longer exists sits there unchallenged, and the next flop of that
+name inherits a reason never written for it. That is this file's own recorded
+`s_rdata` lesson, applied to the *name* rather than to the consumers. Priced by
+a self-test.
+
+## 4 — The slot-index class is guarded structurally, not by vigilance
+
+Two complementary checks, because each misses what the other catches:
+
+- **`model/gate_bench_indices.py`** — no bench recomputes an RTL-internal
+  index. Every index into `l_act`/`l_actv` must be a bare name or a
+  hierarchical reference, and any wire holding one must be at least `SIW` bits
+  wide (`SIW` read from the elaborator, not hard-coded — a private copy of an
+  RTL constant is the defect it exists to forbid). All nine benches clean; five
+  must-fires, including that a comment *describing* the forbidden pattern must
+  not fire.
+- **`test/run_param_points.py`** — every bench at every supported parameter
+  value. **Each of the four copies silently assumed `SPL = 2`, and each broke
+  the moment `SPL = 1` existed**, so the parameter is made to vary rather than
+  trusted. `tb_smoke`, `tb_edge`, `tb_jlane`, `tb_witness` and the cocotb suite
+  all run at both depths.
+
+### ⭐ The sweep found a real design consequence on its first run
+
+**`tb_edge` must-fire 5b fails at `SPL = 1`**, and it is not a bench
+assumption. The no-op half-bit differential — two programs whose no-op delays
+differ by 12 must land 12 cycles apart — reads:
+
+| | half = 7 | half = 19 | difference |
+|---|---|---|---|
+| SPL = 2 | 13 | 25 | **12** = programmed |
+| SPL = 1 | **16** | 25 | **9** ≠ 12 |
+
+The short delay lands 3 cycles late and the long one is unaffected: the half = 7
+action is dispatched while its own refill is still in flight and pays the stall,
+while half = 19 has time for the refill to land.
+
+⇒ **At single-buffer depth a programmed delay shorter than the refill latency
+does not reach the pin faithfully**, and the no-op *is* the sub-bit timing
+idiom. So `SPL = 1` breaks a **ruled mechanism**, not merely a jitter figure —
+independent evidence for ruling 2, beyond the stall cliff.
+
+It is recorded as a **declared expectation with a reason, not an allowlist
+entry**: the sweep is red if a declared failure starts *passing*, because a
+stale reason is how an allowlist swallows a real change. All four combinations
+priced.
+
+## 5 — Below-`D*` admission at `J = 9`: the option is closed on these numbers
+
+`model/a2/gate_j9_margins.py`. **Computed, not implemented** — the gate changes
+nothing, publishes no `J = 9`, and does not reopen SPI-target 2 MHz.
+
+| lane set, every lane at `J = 9` | pyRTA (primary) | ours (cross-check) | bar |
+|---|---|---|---|
+| the shipped five | **4** | 0 | 4 |
+| d = 12, SPI-target 2 MHz | **2** | 0 | 4 |
+
+Direction check held on both sets: **ours ≥ pyRTA on every lane**, so the
+cross-check is in the safe direction. (Ours reads 0 where pyRTA reads 4 — our
+bound is loose by 4 on I²C at this `J`, which is the gap
+`SPEC_V4_J_SOUND.md` §4 already records.)
+
+⇒ **The shipped set clears the pre-registered bar of 4 exactly. The d = 12
+program — the case that would be the whole reason for the extension — comes in
+at 2, under the bar.** So admitting `d_min < D*` at `J = 9` would ship a set
+with less slack than the architecture was accepted against.
+
+**The `D*` refusal in `pe_asm` stays, and SPI-target 2 MHz stays closed by it.**
+
+⚠ What would reopen it: a smaller `J` (the measured per-lane value is 7, but
+that is a measured floor on two arms, not a derived bound, so it cannot be
+charged), a looser `D_tol` on the tightest lane, or more fetch bandwidth —
+which is what lowers `D*` itself.
+
+## ⚠ A clobber the new parameter opened, found by running the sweep
+
+`tb_smoke` writes `test/cj_measured.txt`, which `gate_cj_bounds` reads as the
+shipped design's C/J measurement. That file already carried an `image`
+provenance line and a **structural** guard — a non-default image writes
+`cj_measured_alt.txt` instead — both added after a stress run clobbered it
+once.
+
+**`SPL` opened the same hazard on a second axis, and the guard was not
+extended.** The parameter-point sweep runs `tb_smoke` at SPL = 2 then SPL = 1,
+and the single-buffer run overwrote the shipped measurement:
+
+| | jobs | svc_cycles | `op 7 n` |
+|---|---|---|---|
+| SPL = 2 (shipped) | 344 | 688 | 130 |
+| SPL = 1 | 345 | 690 | 131 |
+
+⭐ **And `gate_cj_bounds` PASSED on it.** C is 2.00 at both depths, so the gate
+agreed with a measurement of a design it was not measuring. A guard can pass
+*because* the two values happen to coincide — which is why provenance is
+asserted rather than inferred from the number looking right.
+
+Both halves now cover the second axis, matching what was already done for the
+image: any non-default value on **either** axis writes elsewhere entirely
+(`make N+1 impossible`), and the depth travels **with** the numbers as an `spl`
+line that the gate asserts is 2. Priced by four cases — no `spl` line, an
+SPL = 1 build, the wrong image, and the shipped configuration — the first three
+refused and the fourth accepted.

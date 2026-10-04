@@ -206,6 +206,13 @@ SPEC_SYMBOLS = {
     # ⭐ CAUGHT BY THIS GATE'S OWN COVERAGE CHECK, on the commit that added it:
     # the T3 sweep's d points. They are which programs to BUILD, not readings.
     ("test/run_spl_compare.py", "D_LIST"),
+    # ⭐ CAUGHT THE SAME WAY ON THE NEXT COMMIT: the parameter-point sweep's
+    # bench inventory. Its numbers are run lengths and plusargs -- how to
+    # invoke a bench, not an observation of one.
+    # ⚠ Twice in two commits, both times on my own new file. That is the
+    # coverage check doing the job it exists for, and it is worth recording
+    # that it catches the AUTHOR rather than only a future editor.
+    ("test/run_param_points.py", "BENCHES"),
     # ⚠ A DELIBERATELY WRONG FIXTURE: a stale lane table kept to price a gate.
     ("model/a2/_price_stale_lane_table.py", "STALE"),
     # this audit's own table

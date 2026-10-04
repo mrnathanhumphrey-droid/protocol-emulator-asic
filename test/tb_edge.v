@@ -479,7 +479,19 @@ module tb_edge;
     $finish;
   end
 
-  tt_um_protocol_emulator dut (
+  // ⭐⭐ THE BUFFER DEPTH IS A PARAMETER, AND THE SUITE RUNS BOTH VALUES.
+  // Build the single-buffer configuration with
+  //     iverilog -Ptb_edge.SPL_CFG=1 ...
+  // ⛔⛔ WHY EVERY BENCH CARRIES THIS. Four benches kept a PRIVATE COPY of the
+  // engine's slot index (`lane*2 + l_sel`), every copy silently assumed
+  // SPL = 2, and every one of them broke the moment SPL = 1 existed -- one of
+  // them after measuring and publishing a column. That is the generic
+  // detector: a hidden constant in a bench fails as soon as the parameter it
+  // assumes becomes variable. So the parameter point is swept rather than
+  // trusted, by `test/run_param_points.py`.
+  parameter integer SPL_CFG = 2;
+
+  tt_um_protocol_emulator #(.SPL(SPL_CFG)) dut (
       .ui_in(ui_in), .uo_out(uo_out),
       .uio_in(uio_in), .uio_out(uio_out), .uio_oe(uio_oe),
       .ena(ena), .clk(clk), .rst_n(rst_n)

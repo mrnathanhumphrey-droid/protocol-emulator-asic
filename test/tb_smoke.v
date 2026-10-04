@@ -481,10 +481,22 @@ module tb_smoke;
     // ⭐ The `image` provenance line is KEPT anyway: two independent guards on
     // the same hazard, one structural and one asserted, and the asserted one is
     // what would catch a future third image path added without thinking.
-    if (imgfile == "test/smoke_image.hex")
+    // ⛔⛔ AND `SPL` IS A SECOND DIMENSION OF THE SAME HAZARD, ADDED LATER AND
+    // MISSED AT FIRST. The guard above was written for the IMAGE argument;
+    // when the action-buffer depth became a parameter, a single-buffer run
+    // wrote this same path and clobbered the shipped measurement -- jobs 344
+    // became 345, `op 7 n 130` became 131 -- and `gate_cj_bounds` then
+    // validated the shipped C against a SINGLE-BUFFER run.
+    // ⭐ IT PASSED, which is the instructive part: C is 2.00 at both depths,
+    // so the gate agreed with a measurement of a design it was not measuring.
+    // A guard can pass BECAUSE the two values happen to coincide.
+    // ⇒ Any non-default value on EITHER axis writes somewhere else entirely.
+    if (imgfile == "test/smoke_image.hex" && SPL_CFG == 2)
       fd = $fopen("test/cj_measured.txt", "w");
     else
       fd = $fopen("test/cj_measured_alt.txt", "w");
+    // the depth travels WITH the numbers, and the gate asserts it
+    $fwrite(fd, "spl %0d\n", SPL_CFG);
     // ⛔⛔ THE IMAGE IS RECORDED IN THE FILE, and the gate asserts it. This file
     // has ONE constant path while the bench now takes an IMAGE argument, which
     // is the textbook clobber hazard -- and it bit immediately: a refill-stress

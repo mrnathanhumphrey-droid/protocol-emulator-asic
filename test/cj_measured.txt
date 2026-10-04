@@ -1,3 +1,4 @@
+spl 2
 image test/smoke_image.hex
 jobs 344
 svc_cycles 688

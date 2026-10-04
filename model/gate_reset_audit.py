@@ -97,11 +97,53 @@ ALLOWED = {
         "latched precisely so a writeback cannot move it between the request "
         "and the capture -- see the arbiter comment -- so it is always written "
         "in the cycle before it is read."),
-    "u_eng.pslot": (
+    # ⛔⛔ THIS WAS `u_eng.pslot` AND SYNTHESIS RENAMED IT. The `fix` wire
+    # (the slot a refill in flight targets) reads `pslot` straight through, so
+    # yosys propagated the new net name onto the same single flop: `pslot`
+    # vanished from the netlist and `fix` appeared with exactly 1 unreset bit.
+    # ⚠ AND THE GATE FIRST "PASSED" ANYWAY, against a CACHED netlist JSON from
+    # before the change -- a stored input, read as current. It went red the
+    # moment the netlist was regenerated, which is the only reason this was
+    # found. The stale-ENTRY check below is the other half.
+    "u_eng.fix": (
         1,
-        "the refill's target slot, latched with `paddr` in the same cycle and "
-        "for the same reason."),
+        "the refill's target slot (formerly `pslot`, renamed by synthesis when "
+        "the `fix` index wire began reading it): latched with `paddr` at the "
+        "scan and consumed at P_REQ, precisely so a writeback cannot move it "
+        "between the request and the capture -- see the arbiter comment -- so "
+        "it is always written in the cycle before it is read."),
 }
+
+
+def stale_entries(allowed, unreset):
+    """Allowlist keys that match nothing in the netlist.
+
+    ⛔ ONE DEFINITION, called by `main` and by the self-test below -- a
+    self-test that re-wrote this expression would be checking its own copy.
+    """
+    return sorted(k for k in allowed if k not in unreset)
+
+
+def selftest() -> int:
+    """⛔ PRICE THE STALE CHECK (standing rule 3). It was added because a real
+    entry went stale silently when synthesis renamed `pslot` to `fix`."""
+    rc = 0
+    cases = (
+        ("an entry whose signal vanished",
+         {"a": (1, ""), "gone": (1, "")}, {"a": 1}, ["gone"]),
+        ("every entry matching", {"a": (1, "")}, {"a": 1}, []),
+        ("two stale entries",
+         {"x": (1, ""), "y": (1, "")}, {"z": 1}, ["x", "y"]),
+    )
+    print("  --- must-fire: a stale allowlist entry is reported ---")
+    for name, allowed, unreset, want in cases:
+        got = stale_entries(allowed, unreset)
+        ok = (got == want)
+        print("    %-34s -> %-14s %s" % (name, got or "none",
+                                         "ok" if ok else "*** wanted %s" % want))
+        if not ok:
+            rc = 1
+    return rc
 
 
 def main() -> int:
@@ -187,6 +229,25 @@ def main() -> int:
             print("    %-24s %5d  *** NOT ON THE ALLOWLIST" % (nm, n))
 
     rc = 0
+    # ⛔⛔ A STALE ALLOWLIST ENTRY IS A FINDING TOO, and this gate had one
+    # without saying so. When synthesis renamed `pslot` to `fix`, the `pslot`
+    # entry stopped matching anything and the gate reported only the NEW name
+    # as unallowlisted -- so the justification for a flop that no longer exists
+    # sat here unchallenged, and the next flop that happened to be called
+    # `pslot` would have inherited a reason never written for it.
+    # ⚠ THAT IS THIS FILE'S OWN RECORDED LESSON, from `s_rdata`: "an allowlist
+    # entry is only as good as the set of consumers it names, and a second
+    # consumer added later inherits a reason that was never about it." The
+    # same hazard applies to the NAME, not just to the consumers.
+    stale = stale_entries(ALLOWED, unreset)
+    if stale:
+        print()
+        print("  ⛔ %d ALLOWLIST ENTR(IES) MATCH NOTHING IN THE NETLIST: %s"
+              % (len(stale), ", ".join(stale)))
+        print("     Either the signal was reset, renamed or removed. A reason")
+        print("     left behind for a flop that is gone is a reason the next")
+        print("     flop of that name inherits without anyone writing it.")
+        rc = 1
     print()
     if bad:
         print("  ⛔⛔ %d UNRESET SIGNAL GROUP(S) ARE NOT ALLOWLISTED: %s"
@@ -241,6 +302,9 @@ def main() -> int:
                       len(unreset) - len(bad), len(bad)))
     print("    * ⛔ structural: read from the SYNTHESISED netlist, so a reset")
     print("      the RTL writes but synthesis folds away still shows as built")
+    print()
+    if selftest():
+        rc = 1
     return rc
 
 

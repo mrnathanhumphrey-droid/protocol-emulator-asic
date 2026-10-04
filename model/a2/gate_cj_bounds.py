@@ -153,7 +153,7 @@ DOUBLE_BUFFER_COST = {
 }
 
 
-def read_measured():
+def read_measured(MEAS=MEAS):
     if not os.path.isfile(MEAS):
         return None, ("%s is missing -- run the smoke bench first:\n"
                       "  iverilog -g2012 -o test/smoke.vvp -s tb_smoke "
@@ -188,7 +188,67 @@ def read_measured():
                       "path and their C/J figures are NOT the shipped ones. "
                       "Re-run: python test/make_smoke_image.py && vvp ... "
                       "(no +IMG)" % (MEAS, got, want))
+    # ⛔⛔ AND WHICH *CONFIGURATION*? The image provenance above was added after
+    # a stress run clobbered this file. `SPL` (action slots per lane) then
+    # became a parameter and opened the SAME hazard on a second axis: a
+    # single-buffer run overwrote the shipped measurement (jobs 344 -> 345,
+    # `op 7 n` 130 -> 131) and this gate validated the shipped C against it.
+    # ⭐ AND IT PASSED, because C is 2.00 at both depths -- the guard agreed
+    # with a measurement of a design it was not measuring. A guard can pass
+    # BECAUSE the two values coincide, which is why provenance is asserted
+    # rather than inferred from the number looking right.
+    spl = d.get("spl")
+    if spl is None:
+        return None, ("%s carries no `spl` line, so the action-buffer depth "
+                      "that produced these numbers is unknown. That matters: "
+                      "the single-buffer engine measures a different job count "
+                      "on the same image. Re-run the smoke bench." % MEAS)
+    if spl != 2:
+        return None, ("%s was written by an SPL = %d build; the shipped engine "
+                      "is SPL = 2 and the timing claim is scoped to it. Re-run "
+                      "without -Ptb_smoke.SPL_CFG." % (MEAS, spl))
     return d, None
+
+
+def selftest_provenance() -> int:
+    """⛔ PRICE THE PROVENANCE ASSERTIONS (standing rule 3).
+
+    Both were added after a real clobber -- the image axis first, the SPL axis
+    after a single-buffer run overwrote the shipped measurement and this gate
+    PASSED on it because C is 2.00 either way. A check that has only ever been
+    seen agree is an unknown-strength check.
+    """
+    import tempfile
+    rc = 0
+    nl = chr(10)
+    body = nl.join([
+        "image test/smoke_image.hex", "jobs 344", "svc_cycles 688",
+        "jmiss_max 0", "jmiss_cold 0", "jmiss_steady 0",
+        "steady_stall_events 0", "cycles 4000", "hdr_cyc 92",
+        "op 0 n 214 min 2 max 2", "op 7 n 130 min 2 max 2", ""])
+    shipped = "spl 2" + nl + body
+    cases = (
+        ("no spl line at all",        body,                           False),
+        ("an SPL = 1 build",          "spl 1" + nl + body,            False),
+        ("the wrong image",           shipped.replace(
+            "test/smoke_image.hex", "test/five_image.hex"),           False),
+        ("the shipped configuration", shipped,                        True),
+    )
+    d = tempfile.mkdtemp(prefix="pe_cj_")
+    print("  --- must-fire: the provenance assertions ---")
+    for name, text, want_ok in cases:
+        f = os.path.join(d, "m.txt")
+        with open(f, "w", encoding="utf-8") as fh:
+            fh.write(text)
+        got, why = read_measured(f)
+        ok = (got is not None) == want_ok
+        print("    %-30s %-9s %s" % (
+            name, "accepted" if got is not None else "REFUSED",
+            "ok" if ok else "*** wanted %s" % ("accept" if want_ok
+                                               else "refuse")))
+        if not ok:
+            rc = 1
+    return rc
 
 
 def main() -> int:
@@ -453,6 +513,9 @@ def main() -> int:
     print("    * J_max = %d DERIVED by source; sim %d <= %d countable"
           % (j_total, sim, j_counted))
     print("    * ⛔ a measurement can falsify a bound, never raise one")
+    print()
+    if selftest_provenance():
+        rc = 1
     return rc
 
 

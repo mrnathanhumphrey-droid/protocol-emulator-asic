@@ -23,7 +23,14 @@ module tb ();
   wire [7:0] uio_out;
   wire [7:0] uio_oe;
 
-  tt_um_protocol_emulator user_project (
+  // ⭐⭐ THE BUFFER DEPTH, SO THE COCOTB SUITE RUNS AT BOTH PARAMETER POINTS.
+  // `iverilog -Ptb.SPL_CFG=1` builds the single-buffer engine under the same
+  // toplevel CI uses. ⛔ Four benches kept a private copy of an RTL index that
+  // silently assumed SPL = 2 and each broke the moment SPL = 1 existed, so the
+  // suite sweeps the parameter instead of trusting that nothing assumes it.
+  parameter integer SPL_CFG = 2;
+
+  tt_um_protocol_emulator #(.SPL(SPL_CFG)) user_project (
       .ui_in  (ui_in),    // Dedicated inputs
       .uo_out (uo_out),   // Dedicated outputs
       .uio_in (uio_in),   // IOs: Input path

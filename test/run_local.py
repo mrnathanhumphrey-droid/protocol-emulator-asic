@@ -92,7 +92,13 @@ def main() -> int:
         # ⛔ NO WIDTH WARNINGS SUPPRESSED. The width classes are the ones most
         # likely to expose a real bug in arithmetic RTL, and suppressing them is
         # how "clean under -Wall" became a false statement once already.
-        build_args=["-g2012", "-Wall"],
+        # ⭐ PE_SPL selects the action-buffer depth, so the cocotb suite can
+        # run at BOTH parameter points (ruling: every bench at every supported
+        # parameter value). A hidden constant in a bench fails the moment the
+        # parameter it silently assumed becomes variable -- which is how four
+        # private copies of the engine's slot index were found.
+        build_args=["-g2012", "-Wall",
+                    "-Ptb.SPL_CFG=%s" % os.environ.get("PE_SPL", "2")],
         always=True,
     )
     # ⭐ PE_TEST_MODULE lets a throwaway diagnostic module run through the
