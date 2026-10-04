@@ -148,8 +148,22 @@ def build_stress(d0: int, d1: int):
 
 
 def build_five(delays):
-    """FIVE active lanes at the SHIPPED inter-action delays. The one that is
-    representative of the real design's refill demand.
+    """SCHEDULER STRESS IMAGE -- five active lanes at the shipped inter-action
+    delays. Representative of the real design's REFILL DEMAND.
+
+    ⚠ NOT A PIN-MAP-LEGAL PROGRAM, and the distinction matters. It declares
+    push-pull on `uio` pins 0..4, which is PHYSICALLY FINE -- a `uio` pin is
+    capable of either drive class -- but it is not the ruled PLACEMENT, which
+    puts push-pull protocol outputs on `uo_out` (4 of them) and keeps `uio` for
+    pins that must be able to stop driving. So this image needs five push-pull
+    pins where the ruled placement provides four.
+    ⭐ THAT IS WHY THE 1.5 MASK IS RUNTIME AND NOT BUILD-TIME: a compile-time
+    mask of the ruled placement would freeze this program dead, and it measures
+    something real. It is a scheduler stress program, not a configuration the
+    chip would be wired into.
+    ⛔ AND IT IS WHY THE DRIVE CLASS CANNOT BE CHECKED AT LOAD TIME FOR `uio`:
+    there is no build-time class to check a header against. Only `uo_out` has
+    one (output-only, hence push-pull only), which is exactly 1.6s.
 
     ⛔ THE TWO-LANE PROGRAMS UNDERSTATE REFILL CONTENTION BY A FACTOR OF ~2.5.
     One shared fetch port serves every lane, so the question "does a dispatch
@@ -175,6 +189,9 @@ def build_five(delays):
     return b"".join(headers) + b"".join(prog)
 
 
+# ⚠ LIKE `build_five`, A SCHEDULER STRESS IMAGE AND NOT A PIN-MAP-LEGAL
+# PROGRAM: it declares push-pull on `uio` pins, which is physically fine but is
+# not the ruled placement. See `build_five`'s docstring.
 def build_chain(d_tog: int, d_park: int):
     """Two toggling lanes plus THREE lanes parked on CHAINING re-arms at a
     short delay, so the chaining path is exercised often.
