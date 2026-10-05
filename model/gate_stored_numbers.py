@@ -188,6 +188,22 @@ SITES = [
          "`sim <= derived` check ran against the STALE `SWEEP` and found zero "
          "violations while the prose above it said ten. Found by writing a "
          "check that needed them and getting `0 violations total`"),
+
+    Site("test/gate_coverage.py", "TOGGLE_CEILING", RECORD,
+         "uncovered TOGGLE points per file -- the ratchet the coverage gate "
+         "holds, which may only fall",
+         "test/coverage_sweep.sh",
+         "the sweep that shipped with the gate: 19 arms over 10 benches at "
+         "+verilator+rand+reset+0, Verilator 5.032",
+         "⛔ MEASURED, NOT CHOSEN, and that distinction is the whole value of "
+         "the number: a ratchet seeded from a guess permits a regression up "
+         "to the guess. ⚠ Toggle is ratcheted rather than adjudicated point "
+         "by point because there are ~390 uncovered toggle points against 37 "
+         "line/branch ones, most of them top bits of wide buses that the "
+         "parameter set cannot reach -- and 390 written reasons would bury "
+         "the 37 that name real behaviour. The ruling's named subjects "
+         "(branches, FSM states, opcode arms, peer branches) are all "
+         "line/branch points, and those ARE adjudicated individually"),
 ]
 
 # ⛔ Collections that carry numbers but are SPECIFICATIONS, not measurements:
@@ -229,6 +245,18 @@ SPEC_SYMBOLS = {
     ("model/gate_reverse_trace.py", "LANE_CFG"),
     ("test/make_smoke_image.py", "FIVE_STRESS"),
     ("test/gate_corpus_trace.py", "COLS"),
+    # ⭐ THE COVERAGE SWEEP'S TWO DECLARATIONS, and neither holds a
+    # measurement. `benchset.CONFIG` is STIMULUS -- plusargs, cycle budgets
+    # and the per-lane delay vectors handed to `make_smoke_image.py` -- i.e.
+    # inputs to the design in exactly the sense this list is for. And
+    # `gate_coverage.CLASSIFIED`'s numbers are SOURCE LINE ANCHORS: every one
+    # is a line in `pe_engine.v`, `project.v` or a peer model that a waiver
+    # points at. ⛔ Staleness in both is caught where it means something
+    # rather than here: `benchset.plan()` fails if an image or source is
+    # absent, and `gate_coverage.check_stale` fails on an anchor the merged
+    # coverage does not contain -- which is what a moved line looks like.
+    ("test/benchset.py", "CONFIG"),
+    ("test/gate_coverage.py", "CLASSIFIED"),
     # ⭐ MUTANT INVENTORIES ARE DECLARATIONS, not measurements: a define, what
     # it breaks, the failure text that certifies the kill, and why. The numbers
     # the scraper counts are inside the PROSE (queue indices, byte values named

@@ -63,6 +63,11 @@ test/cj_measured_alt.txt
 # J investigation overwrote test/five_image.hex with an experiment set and the
 # clean room caught it only afterwards -- the rule is what stops it.
 test/probe_*.hex
+# ⛔ AND MEASUREMENTS, NOT ONLY IMAGES. The coverage sweep runs `tb_smoke`
+# under Verilator, which disagrees with iverilog by one cycle on `hdr_cyc`, so
+# its numbers must land on a scratch name rather than on the pinned
+# `cj_measured.txt` -- which it rewrote once before this rule existed.
+test/probe_*.txt
 test/artefacts.sha256.probe
 # ⛔ PROBES WRITE ONLY TO SCRATCH NAMES, and the pattern has to cover the
 # WRAPPER SCRIPTS too. Yosys is only on the PATH inside WSL here, so running

@@ -521,10 +521,42 @@ module tb_smoke;
     // so the gate agreed with a measurement of a design it was not measuring.
     // A guard can pass BECAUSE the two values happen to coincide.
     // ⇒ Any non-default value on EITHER axis writes somewhere else entirely.
-    if (imgfile == "test/smoke_image.hex" && SPL_CFG == 2)
+    // ⛔⛔ AND THE CYCLE BUDGET IS A THIRD AXIS, MISSED UNTIL THE COVERAGE
+    // SWEEP CLOBBERED THIS FILE AGAIN. The guard above was extended from the
+    // image to the image AND the depth, and `ncyc_run`/`warmup` were left out
+    // -- so a run at the SAME image and depth but a longer budget still wrote
+    // the shipped path. `test/coverage_sweep.sh` did exactly that with
+    // `+NCYC=200000`, and the tracked artefact came back with jobs 344 ->
+    // 17642 and cycles 4000 -> 200000.
+    // ⭐ C IS 2.00 AT BOTH BUDGETS, so `gate_cj_bounds` would have agreed with
+    // a measurement of a run it was not measuring -- the SAME way it agreed
+    // across the two buffer depths. A guard can pass because the two values
+    // coincide, twice over.
+    // ⇒ EVERY axis the numbers depend on is in the condition now: image,
+    // depth, budget, warmup. This is the "fix on one axis repeats the error on
+    // a parallel one" lesson, and the parallel axis was the obvious one.
+    // ⛔⛔⛔ AND THE SIMULATOR IS A FOURTH AXIS. The pinned artefact is an
+    // IVERILOG measurement, and the coverage sweep runs the same bench, same
+    // image, same depth and same budget under VERILATOR -- which disagrees by
+    // one cycle: `hdr_cyc` reads 92 under iverilog and 91 under Verilator,
+    // with jobs, svc_cycles and every opcode count identical. So the
+    // canonical-looking run was still a DIFFERENT measurement, and it
+    // rewrote the shipped one.
+    // ⚠ THE ONE-CYCLE DISAGREEMENT IS AN OPEN FINDING in its own right, not
+    // something this guard settles -- see `docs/SPEC_V4_COVERAGE_SWEEP.md`.
+    // ⇒ Verilator writes a SCRATCH name, never a reserved one. `_alt` is not
+    // scratch either: `gate_cj_bounds` reads it for the every-opcode coverage
+    // claim, so dropping a Verilator smoke run there would feed that gate a
+    // file measured on a different program.
+`ifdef VERILATOR
+    fd = $fopen("test/probe_cj_measured.txt", "w");
+`else
+    if (imgfile == "test/smoke_image.hex" && SPL_CFG == 2
+        && ncyc_run == 4000 && warmup == 200)
       fd = $fopen("test/cj_measured.txt", "w");
     else
       fd = $fopen("test/cj_measured_alt.txt", "w");
+`endif
     // the depth travels WITH the numbers, and the gate asserts it
     $fwrite(fd, "spl %0d\n", SPL_CFG);
     // ⛔⛔ THE IMAGE IS RECORDED IN THE FILE, and the gate asserts it. This file

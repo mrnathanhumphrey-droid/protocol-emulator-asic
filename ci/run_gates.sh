@@ -75,6 +75,18 @@ GATES=(
   # engine's LSB-first wire order survived an entire host-channel audit while
   # `pe_isa.py` documented the opposite.
   test/check_vectors.py
+  # ⛔⛔ WILSON'S COVERAGE RULING, GATED. "Every uncovered branch, FSM state,
+  # opcode arm and peer branch gets either a test that reaches it, or a
+  # written reason why it's unreachable, checked like the reset allowlist. It
+  # becomes a gate: new uncovered RTL fails CI unless justified."
+  # ⭐ WHAT IT FOUND ON ITS FIRST RUN: `fram_spi.v`'s ENTIRE command decoder
+  # had never executed (18 points), no byte had ever been written into the I2C
+  # peer's memory, and `lane_underrun` and `tx_full_sticky` -- two status bits
+  # the host reads -- had never been SET by any test, only asserted clear.
+  # ⚠ The bench set it measures is `test/benchset.py`, which enumerates
+  # `test/tb*.v` from disk and fails on a bench nobody classified.
+  test/benchset.py
+  test/gate_coverage.py
   model/pe_asm.py
 )
 
@@ -94,6 +106,13 @@ can_run() {
     model/gate_reset_audit.py)
       [ -n "${PE_NETLIST_JSON:-}" ] && [ -f "${PE_NETLIST_JSON:-}" ] \
         || { echo "no netlist at PE_NETLIST_JSON"; return 1; } ;;
+    # ⛔ THE COVERAGE GATE NEEDS THE MEASUREMENT, and a missing measurement is
+    # a FAILURE here rather than a skip -- the same rule the reset audit's
+    # netlist precondition follows, and for the same reason: a gate that
+    # quietly stops running is a gate that stops covering anything.
+    test/gate_coverage.py)
+      [ -n "${PE_COVERAGE_DAT:-}" ] && [ -f "${PE_COVERAGE_DAT:-}" ] \
+        || { echo "no coverage data at PE_COVERAGE_DAT"; return 1; } ;;
   esac
   return 0
 }
@@ -129,6 +148,29 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# ⛔⛔ THE GIT-BASH -> WSL PATH CONVERSION, IN ONE PLACE. Two steps delegate to
+# WSL now (the netlist and the coverage sweep), and this conversion has already
+# cost two failures: a rule that only matched `X:` converted nothing, because
+# Git Bash reports this repo as `/d/ProtocolEmulator`; and a `sed 's|\\|/|g'`
+# fix had its backslashes eaten before sed saw them. Parameter expansion has no
+# such layer, and ONE copy cannot drift from the other.
+# ---------------------------------------------------------------------------
+wsl_root() {
+  local p="${1//\\//}" d rest
+  case "$p" in
+    [A-Za-z]:*) d="${p%%:*}"; rest="${p#*:}" ;;
+    /?/*)       d="${p:1:1}"; rest="${p:2}"  ;;
+    *)          d="";         rest="$p"      ;;
+  esac
+  if [ -n "$d" ]; then
+    d="$(printf '%s' "$d" | tr 'A-Z' 'a-z')"
+    printf '/mnt/%s%s' "$d" "$rest"
+  else
+    printf '%s' "$rest"
+  fi
+}
+
+# ---------------------------------------------------------------------------
 # the netlist the reset audit classifies flops from
 # ---------------------------------------------------------------------------
 # ⭐ VIA THE SAME SCRIPT THE LOCAL FLOW USES (`test/local_netlist.sh`), whose
@@ -162,16 +204,7 @@ if [ -z "${PE_NETLIST_JSON:-}" ]; then
     # whose backslashes are eaten before sed sees them -- the same quoting
     # hazard this project has a standing rule about. Parameter expansion has
     # no such layer.
-    WSLROOT="${ROOT//\\//}"
-    case "$WSLROOT" in
-      [A-Za-z]:*) _d="${WSLROOT%%:*}"; _rest="${WSLROOT#*:}" ;;
-      /?/*)       _d="${WSLROOT:1:1}"; _rest="${WSLROOT:2}"  ;;
-      *)          _d="";               _rest="$WSLROOT"      ;;
-    esac
-    if [ -n "$_d" ]; then
-      _d="$(printf '%s' "$_d" | tr 'A-Z' 'a-z')"
-      WSLROOT="/mnt/${_d}${_rest}"
-    fi
+    WSLROOT="$(wsl_root "$ROOT")"
     # ⭐ AND IT IS CHECKED FROM WSL'S OWN VIEW before being used. The first
     # failure was "No such file or directory" from inside WSL, which is a
     # clearer message than anything downstream would have produced -- but only
@@ -192,6 +225,72 @@ if [ -z "${PE_NETLIST_JSON:-}" ]; then
   fi
 fi
 [ -n "${PE_NETLIST_JSON:-}" ] && echo "  PE_NETLIST_JSON=$PE_NETLIST_JSON"
+
+# ---------------------------------------------------------------------------
+# THE COVERAGE SWEEP, whose data `test/gate_coverage.py` adjudicates.
+# ---------------------------------------------------------------------------
+# ⛔⛔ WILSON'S RULING PUT THIS IN CI: "It becomes a gate: new uncovered RTL
+# fails CI unless justified." So the measurement is produced here rather than
+# by hand, and the gate is RED without it -- a coverage gate that passes when
+# the measurement is missing is a guard that passes because of what it guards.
+#
+# ⚠ IT COSTS MINUTES, AND THAT IS DECLARED. Eleven Verilator builds at ~19s
+# plus nineteen simulated arms is roughly five minutes, against seconds for
+# every other gate here. `PE_COVERAGE_DAT=<path>` reuses an existing
+# measurement, and `PE_SKIP_COVERAGE=1` leaves the gate RED rather than
+# pretending. ⛔ The reuse path is for iterating on the WAIVER TABLE, not for
+# reporting a green: data from an older tree describes that tree, which is the
+# dirty-tree lesson above in another form.
+if [ -z "${PE_COVERAGE_DAT:-}" ] && [ "${PE_SKIP_COVERAGE:-0}" != "1" ]; then
+  echo
+  echo "  --- coverage sweep for the coverage gate ---"
+  # ⛔⛔ THE EXPORT IS GUARDED ON THE SWEEP'S EXIT CODE, NOT ON THE FILE
+  # EXISTING, and this cost a false green. The first delegated run failed all
+  # nineteen arms; `merged.dat` from an EARLIER successful run was still on
+  # disk; this block exported it and `gate_coverage` passed on data describing
+  # a tree that no longer existed. Nothing in the output said the data was
+  # stale. ⇒ The sweep now destroys the old measurement before starting, AND
+  # the path is only exported when the sweep actually succeeded. Either guard
+  # alone leaves the hole open.
+  SWEEP_OK=0
+  if command -v verilator >/dev/null 2>&1; then
+    if bash test/coverage_sweep.sh "$ROOT/probe_cov"; then
+      SWEEP_OK=1
+    else
+      echo "  *** the coverage sweep failed -- the gate will be RED"
+    fi
+    [ "$SWEEP_OK" = "1" ] && [ -f "$ROOT/probe_cov/merged.dat" ] \
+      && export PE_COVERAGE_DAT="$ROOT/probe_cov/merged.dat"
+  elif command -v wsl.exe >/dev/null 2>&1; then
+    echo "  verilator is not on PATH; delegating the sweep to WSL"
+    CWRAP="$ROOT/probe_ci_coverage.sh"
+    {
+      echo '#!/bin/bash'
+      echo 'cd "$(dirname "$0")" || exit 1'
+      echo 'bash test/coverage_sweep.sh "$PWD/probe_cov"'
+    } > "$CWRAP"
+    CWSLROOT="$(wsl_root "$ROOT")"
+    if ! MSYS_NO_PATHCONV=1 wsl.exe -e test -f "$CWSLROOT/probe_ci_coverage.sh"
+    then
+      echo "  *** WSL cannot see $CWSLROOT/probe_ci_coverage.sh"
+      echo "      (converted from $ROOT). Fix the path mapping rather than"
+      echo "      skipping the coverage gate."
+    else
+      if MSYS_NO_PATHCONV=1 wsl.exe -e bash "$CWSLROOT/probe_ci_coverage.sh"
+      then
+        SWEEP_OK=1
+      else
+        echo "  *** the WSL coverage sweep failed -- the gate will be RED"
+      fi
+      [ "$SWEEP_OK" = "1" ] && [ -f "$ROOT/probe_cov/merged.dat" ] \
+        && export PE_COVERAGE_DAT="$ROOT/probe_cov/merged.dat"
+    fi
+  else
+    echo "  *** neither verilator nor wsl.exe is available, so no coverage"
+    echo "      can be measured. The gate is RED rather than skipped."
+  fi
+fi
+[ -n "${PE_COVERAGE_DAT:-}" ] && echo "  PE_COVERAGE_DAT=$PE_COVERAGE_DAT"
 
 # ---------------------------------------------------------------------------
 # run them
