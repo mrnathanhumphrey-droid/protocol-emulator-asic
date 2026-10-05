@@ -56,7 +56,7 @@ EXCLUDED = {
 # nothing and "no bytes" reads as a queue fault rather than a missing file.
 # ---------------------------------------------------------------------------
 #: benches whose `+NBYTES` must be supplied (they refuse to start without it)
-NEEDS_NBYTES = {"tb_tx", "tb_half", "tb_i2c", "tb_csat", "tb_jlane",
+NEEDS_NBYTES = {"tb_tx", "tb_half", "tb_i2c", "tb_csat", "tb_jlane", "tb_status",
                 "tb_rxbw", "tb_trace", "tb_witness"}
 
 CONFIG = {
@@ -114,6 +114,19 @@ CONFIG = {
     "tb_half": {
         "srcs": [],
         "arms": [("default", ["+IMG=test/half_image.hex", "+NCYC=40000"])],
+    },
+    # ⭐⭐ THE TWO HOST STATUS BITS, ACTUALLY SET (Wilson's ruling (a) item 1).
+    # The coverage sweep found that `lane_underrun` (pe_engine.v:1627) and
+    # `tx_full_sticky` (project.v:412) had never been SET by any test -- both
+    # were asserted CLEAR as preconditions everywhere, so every run proved only
+    # that they do not fire spuriously. The two claims need opposite setups, so
+    # the bench carries two modes.
+    "tb_status": {
+        "srcs": [],
+        "arms": [("starve", ["+IMG=test/tx_image.hex", "+NCYC=20000",
+                             "+MODE=0"]),
+                 ("overrun", ["+IMG=test/tx_image.hex", "+NCYC=20000",
+                              "+MODE=1"])],
     },
     "tb_i2c": {
         "srcs": ["test/fram_i2c.v"],

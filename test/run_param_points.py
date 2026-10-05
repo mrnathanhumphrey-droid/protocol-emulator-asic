@@ -144,6 +144,19 @@ BENCHES = [
     ("tb_rxbw", "test/tb_rxbw.v",
      ["+IMG=test/probe_pp_rx.hex", "+NCYC=20000"],
      "tb_rxbw: PASS", {2: "ok", 1: "ok"}),
+
+    # ⭐⭐ THE STATUS-BIT BENCH, in the sweep from the day it was written --
+    # this file's own rule, two entries above: "a new bench joins the sweep
+    # when it is written, not after it has produced a wrong number at the
+    # other depth." It was added to `benchset.py` first, and adding it to only
+    # one of two bench lists is precisely the drift both lists exist to avoid.
+    # ⚠ `MODE=0` (STARVE) is the arm swept. It is the one that depends on the
+    # engine reaching a SHIFT's byte-load point, which is where the action
+    # slots live, so it is the arm a depth change could plausibly reach; the
+    # OVERRUN arm never dispatches at all.
+    ("tb_status", "test/tb_status.v",
+     ["+IMG=test/tx_image.hex", "+NBYTES=87", "+NCYC=20000", "+MODE=0"],
+     "tb_status: PASS", {2: "ok", 1: "ok"}),
 ]
 
 

@@ -152,15 +152,12 @@ CLASSIFIED = {
         "value of a 3-bit selector reaches the default. ⭐ Checked by "
         "`check_full_case`: if a ninth opcode were added without an arm, the "
         "default would become reachable and this waiver must not survive it."),
-    ("src/pe_engine.v", 1627, "v_branch", "else"): (
-        OWED,
-        "⛔ THE HOST UNDERRUN PATH -- a SHIFT reaching its byte-load point "
-        "with an EMPTY queue. `lane_underrun` is a status bit the host reads, "
-        "and NO TEST HAS EVER SET IT: `tb_tx` asserts the flags are clear as a "
-        "PRECONDITION and `host_feed.vh`'s `hf_check` does the same, so every "
-        "run to date proves only that it does not fire spuriously. ⇒ The test: "
-        "run a lane past the end of its fed bytes with `hf_en` dropped, and "
-        "assert the flag SETS for the starved lane and only that lane."),
+    # ⭐ RETIRED (ruling (a) item 1): the host underrun path at 1627 is now
+    # covered by `tb_status +MODE=0`, which starves the TX lanes with `hf_en`
+    # never enabled and asserts `lane_underrun` SETS on lanes 0 and 1 and on no
+    # other lane, with the lane still LIVE -- the flag must report, never
+    # stall. The entry is removed rather than kept, because a stale OWED claim
+    # says something is untested when it is tested.
     ("src/pe_engine.v", 1651, "v_line", "case"): (
         UNREACHABLE,
         "The dispatch FSM's defensive `default`. `st` is declared `[1:0]` with "
@@ -178,15 +175,13 @@ CLASSIFIED = {
         "needs the two events aligned deliberately rather than by luck. "
         "⇒ The test: drive `ui_in[6]` on the cycle the engine's `host_pop` "
         "pulses for `q_sel`, which `tb_tx` can already observe."),
-    ("src/project.v", 412, "v_branch", "if"): (
-        OWED,
-        "⛔ `tx_full_sticky` HAS NEVER BEEN SET. It latches when a low nibble "
-        "arrives for a FULL queue, i.e. the host overran the depth-2 queue -- "
-        "and like `lane_underrun` it is asserted CLEAR as a precondition by "
-        "`tb_tx` and by `hf_check`. A sticky status bit no test has ever set "
-        "is a bit whose set path is unverified. ⇒ The test: push three bytes "
-        "into one queue with the engine halted, assert the flag sets and that "
-        "the queue's existing contents are NOT corrupted."),
+    # ⭐ RETIRED (ruling (a) item 1): `tx_full_sticky` at 412 is now set by
+    # `tb_status +MODE=1`, which pushes three bytes into QUEUE 2 -- drawn by no
+    # lane of `tx_image`, so it fills and is never drained -- shows `tx_cnt[2]`
+    # at the depth, and asserts both stored bytes survive the refused third.
+    # ⚠ The first draft held the chip in LOAD mode to stop the engine popping
+    # and pushed nothing at all: the host strobe IS `ui_in[6]` = `PIN_WR`, so
+    # in LOAD mode those pushes went to the image loader.
     ("src/project.v", 557, "v_branch", "else"): (
         DEAD_CONFIG,
         "⚠ THIS ONE IS NEITHER UNREACHABLE NOR OWED, AND IT NEEDS A RULING. "
@@ -300,9 +295,9 @@ for _k, _what in (
 #: this gate. A ratchet seeded from a guess is a ratchet that permits a
 #: regression up to the guess.
 TOGGLE_CEILING = {
-    "src/pe_engine.v": 238,
+    "src/pe_engine.v": 236,
     "src/pe_store.v": 3,
-    "src/project.v": 74,
+    "src/project.v": 66,
     "test/fram_i2c.v": 45,
     "test/fram_spi.v": 27,
 }
