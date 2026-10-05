@@ -76,12 +76,31 @@ clock edge to an attached device.
 
 - `valid` is high for the whole of a frame and low between frames, so **its
   rising edge is the frame boundary**. Frame on that, not on a fixed stride.
-- A frame is **9 strobed bits**: 8 payload bits **LSB first**, then a **marker**
-  bit — `1` = status, `0` = payload.
+- A frame is **12 strobed bits**: 8 payload bits **LSB first**, then a 3-bit
+  **`kind`** field (LSB first), then the **marker** bit **last**.
+
+  | marker | `kind` | the frame is |
+  | --- | --- | --- |
+  | `1` | 7 | **status** — the byte below |
+  | `0` | `0..4` | **RX payload from that lane** |
+  | `0` | 7 | **readback** byte (program store), not a lane |
+
+- ⛔ **The marker arrives last**, so a host cannot use it to decide how many
+  bits to read. Both frame types are therefore the **same width**; do not
+  expect a short frame.
 - One bit per two clocks; `strobe` is high for one clock per bit. Sample `data`
   while `strobe` is high.
 - Payload and status frames **alternate**, so liveness is in the stream even
   when no payload is moving.
+
+⭐ **Why `kind` exists.** The frame was 9 bits — 8 payload plus the marker —
+which could not say *which lane* produced a received byte. With two receiving
+lanes the host had to guess, which is the same failure the per-lane TX queues
+exist to prevent, seen from the other direction. It also resolved a second
+problem: a **readback** byte and an **RX payload** byte both carried
+marker `0`, so the two were indistinguishable on the wire and were being told
+apart by whichever mode the host believed it was in. `kind = 7` now says "not
+a lane" explicitly.
 
 ### The status byte
 
@@ -114,15 +133,61 @@ That is bounded rather than harmful, and the two reasons are worth knowing:
 - **An RX payload is held one deep.** `rx_push` from the engine is a one-cycle
   pulse, so before this a payload arriving mid-frame was simply *lost*; with a
   set sticky flag filling idle slots that would have meant dropped bytes rather
-  than delay. One register is two orders of margin: a frame takes 18 cycles and
-  the fastest RX lane delivers a byte every 414. A second pulse arriving while
-  one is pending is a real overrun and sets **RX-drop**.
+  than delay. A second pulse arriving while one is pending is a real overrun
+  and sets **RX-drop**.
+
+  ⚠ **The margin here is smaller than it was described as.** This used to read
+  "two orders of margin: a frame takes 18 cycles and the fastest RX lane
+  delivers a byte every 414". The frame figure was wrong twice over — a frame
+  is **25 cycles** (12 bits at two clocks, plus one clock to queue the next)
+  and a **payload slot is 50**, because a status frame always follows a payload
+  one. And the comparison was against the wrong quantity: what binds a one-deep
+  register is not a lane's average byte period but whether **two completions
+  from different lanes land inside one 50-cycle slot**, which is a question
+  about their relative phase. The two RX lanes' byte periods are 400 and 3312
+  cycles, unrelated, so the phase drifts and a collision is reachable.
+
+  ⇒ **What is guaranteed is that a collision is reported, not that it cannot
+  happen.** `test/run_rxbw.py` measures both halves: forced over-rate, 3,405
+  bytes dropped with **RX-drop set every time and never silently**, and every
+  surviving byte delivered **in order** — so the register refuses the new byte
+  rather than clobbering the pending one. A host that must not lose a byte
+  should keep the aggregate completion rate below one per 50 cycles and read
+  **RX-drop**.
 
 ⛔ **Status does not self-start on a timer.** An unconditional heartbeat would
-queue a frame every 18 cycles, and 1.6p prices this link at 2.2% of the clock —
-so it would have paid for liveness with the data it exists to report. Status
-self-starts only while a flag is set, which is what makes it an error channel
-rather than a background load.
+queue a frame every 25 cycles — it would have paid for liveness with the data
+it exists to report. Status self-starts only while a flag is set, which is what
+makes it an error channel rather than a background load.
+
+### The link's real capacity
+
+| | |
+| --- | --- |
+| bit time | 2 clocks |
+| frame | 12 bits + 1 queue clock = **25 clocks** |
+| payload slot | **50 clocks** (a payload frame and the status frame after it) |
+| payload capacity | **8.00 Mb/s** |
+| shipped two RX lanes | 1.12 Mb/s = **14.0% utilised** |
+| readback, one byte | 50 clocks (readback frames alternate with status too) |
+| readback, full 256-byte store | 12,800 clocks = **256 µs** at 50 MHz |
+
+⚠ **Readback got slower with the frame**, and it is worth stating because a
+host that polls the store after every load pays it: a full walk was 194.6 µs at
+9 bits and is **256 µs** at 12. That is the honest cost of the lane field —
+readback frames carry `kind = 7` and gain nothing from it, but the frame could
+not widen for payload alone (the marker arrives last, so both types must be the
+same width).
+
+⛔ **`1.6p` published "2.2% of the clock" and that was the raw pin rate** — one
+bit per clock on the data pin, which the stream never runs at. It ignored the
+two-clock bit time, the 4 non-payload bits per frame, the status frame that
+always follows a payload, and the queue clock between frames. ⚠ The error
+**predates** the 12-bit frame: at 9 bits the true figure was 10.6%, and the
+widening moved it to 14.0% — the mis-stated capacity accounted for the other
+4.8×. Both numbers are measured by `test/run_rxbw.py`, which reproduces the
+50-clock slot at every point of a 12-point sweep and locates the loss boundary
+where the same arithmetic predicts it.
 
 ## The readback contract
 

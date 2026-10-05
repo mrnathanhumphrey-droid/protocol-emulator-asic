@@ -387,6 +387,43 @@ def build_half(d: int = 24):
     return b"".join(headers) + b"".join(prog)
 
 
+def build_rxfast(d: int = 24):
+    """THE RX-DROP MUST-FIRE: complete a received byte faster than the serial
+    link can carry one away.
+
+    ⛔ THE LINK'S PAYLOAD SLOT IS 48 CYCLES: the serialiser shifts one bit per
+    TWO cycles, a frame is 12 bits, and `status_turn` forces a status frame
+    after every payload frame. `rx_pend` is ONE DEEP, so a second `rx_push`
+    inside that window sets `rx_drop_sticky` and the byte is GONE.
+    ⭐ `count = 1` MAKES THE RATE ARBITRARY: the RX byte-complete fires at
+    `rx_bitp == a_cnt - 1`, so at `a_cnt = 1` it fires on EVERY sample and a
+    "byte" completes once per SHIFTIN dispatch -- once per `d` cycles. At
+    `d = 24` that is one completion per 24 cycles against a 48-cycle slot, so
+    roughly half of them must be lost, and the flag must say so.
+    ⚠ THE BYTES ARE NONSENSE BY CONSTRUCTION -- one sample is not a byte. That
+    is deliberate and declared: this program exists to exercise the PENDING
+    REGISTER's overflow behaviour, not to receive data. What is asserted is
+    that the loss is REPORTED and that the surviving payload is intact.
+    """
+    prog, headers, base = [], [], []
+    off = ACT_BASE
+    base.append(off)
+    seq = []
+    for _b in range(8):
+        seq.append(act(OP_SHIFTIN, 0, 0, d, count=1))
+    seq.append(act(OP_REARM, 0, 1, d))
+    prog += seq
+    off += len(seq) * ACT_BYTES
+    lp = off
+    prog.append(act(OP_REARM, 0, 0, 500))
+    # MISO = uio[0] as an input; the lane needs a clock pin distinct from its
+    # data pin only if it SHIFTS (1.6x), and this lane only shifts IN.
+    headers.append(hdr(0, 1, 1, d, 2, 2 * d, 3 * d, base[0]))
+    for n in range(1, N_LANES):
+        headers.append(hdr(4, 4, 0, 500, 2, 200, 240, lp))
+    return b"".join(headers) + b"".join(prog)
+
+
 def build_tx_badclk(d: int = 12):
     """1.6x's MUST-FIRE: a SHIFT lane whose clock pin IS its data pin.
 
@@ -602,6 +639,8 @@ def main() -> int:
              "tx_badclk_image.hex"),
             (["--half", "24"], "two half-duplex lanes: TX then RX on one lane",
              "half_image.hex"),
+            (["--rxfast", "24"], "RX faster than the 48-cycle payload slot",
+             "rxfast_image.hex"),
         ]
         import hashlib
         import subprocess
@@ -752,6 +791,16 @@ def main() -> int:
             for b in img:
                 fh.write("%02x\n" % b)
         print("five-lane image %s, %d bytes -> %s" % (delays, len(img), out))
+        return 0
+    if "--rxfast" in sys.argv:
+        k = sys.argv.index("--rxfast")
+        dd = int(sys.argv[k + 1]) if len(sys.argv) > k + 1 else 24
+        img = build_rxfast(dd)
+        out = os.path.join(here, "rxfast_image.hex")
+        with open(out, "w", encoding="ascii") as fh:
+            for b in img:
+                fh.write("%02x\n" % b)
+        print("rxfast image d=%d, %d bytes -> %s" % (dd, len(img), out))
         return 0
     if "--half" in sys.argv:
         k = sys.argv.index("--half")

@@ -260,8 +260,14 @@ async def harvest_frames(dut, ncyc):
     Returns [(marker, payload)] with payload None where any bit was unknown.
     """
     frames, cur, prev_v = [], [], "0"
+    # THE END CYCLE TRAVELS WITH EACH FRAME, so frame SPACING is measurable
+    # from the same harvest rather than needing a second pass. The spacing is
+    # what sets readback throughput and the RX payload slot, and both were
+    # quoted from arithmetic until now.
+    t = 0
     for _ in range(ncyc):
         await ClockCycles(dut.clk, 1)
+        t += 1
         b = str(dut.uo_out.value)
         d, st, v = bit(b, SER_DATA), bit(b, SER_STRB), bit(b, SER_VLD)
         if v not in "01" or st not in "01":
@@ -274,7 +280,7 @@ async def harvest_frames(dut, ncyc):
             if len(cur) == FRAME_BITS:
                 mk = cur[FRAME_BITS - 1]
                 if any(c not in "01" for c in cur):
-                    frames.append((mk if mk in "01" else "?", None, None))
+                    frames.append((mk if mk in "01" else "?", None, None, t))
                 else:
                     pay = 0
                     for k in range(8):
@@ -282,7 +288,7 @@ async def harvest_frames(dut, ncyc):
                     kind = 0
                     for k in range(3):
                         kind |= int(cur[8 + k]) << k
-                    frames.append((mk, pay, kind))
+                    frames.append((mk, pay, kind, t))
             cur = []
         prev_v = v
     return frames
@@ -295,7 +301,7 @@ def payloads(frames):
     use this; callers that care WHICH LANE a byte came from use
     `lane_payloads`, which is the whole reason the field exists.
     """
-    return [p for m, p, _k in frames if m == MARK_PAYLOAD]
+    return [p for m, p, _k, _t in frames if m == MARK_PAYLOAD]
 
 
 def lane_payloads(frames, lane):
@@ -305,13 +311,13 @@ def lane_payloads(frames, lane):
     readback frames, which carry `kind = KIND_NONE` and are not lane data --
     they used to be indistinguishable from payload.
     """
-    return [p for m, p, k in frames
+    return [p for m, p, k, _t in frames
             if m == MARK_PAYLOAD and p is not None and k == lane]
 
 
 def readback_payloads(frames):
     """The program bytes from a readback walk -- `kind = KIND_NONE`."""
-    return [p for m, p, k in frames
+    return [p for m, p, k, _t in frames
             if m == MARK_PAYLOAD and p is not None and k == KIND_NONE]
 
 
@@ -422,11 +428,32 @@ async def test_serial_readback_walks_the_image(dut):
                          % ([hex(x) for x in got], [hex(x) for x in want]))
 
     # the status frames must alternate with the payloads and carry the alive bit
-    marks = [m for m, _p, _k in frames]
+    marks = [m for m, _p, _k, _t in frames]
     assert MARK_STATUS in marks, "no STATUS frame in the stream"
-    for m, p, _k in frames:
+    for m, p, _k, _t in frames:
         if m == MARK_STATUS and p is not None:
             assert p & 1, "status byte 0x%02X has the alive bit clear" % p
+    # ⛔⛔ THE FRAME SPACING, MEASURED. `HOST_INTERFACE.md` quotes a 25-clock
+    # frame, a 50-clock payload slot and a 256 us full-store walk, and all
+    # three came from arithmetic: 12 bits at two clocks PLUS one clock to queue
+    # the next, doubled by the status frame that always follows a payload.
+    # ⚠ THE FIRST VERSION OF THAT ARITHMETIC SAID 48, having forgotten the
+    # queue clock, and a sweep measured 50 at every point. So it is measured
+    # here rather than trusted.
+    ends = [t for _m, _p, _k, t in frames]
+    gaps = sorted({ends[i + 1] - ends[i] for i in range(len(ends) - 1)})
+    FRAME_CLK = FRAME_BITS * 2 + 1
+    SLOT = 2 * FRAME_CLK
+    dut._log.info("frame-to-frame gaps seen: %s (a frame is %d clocks, a "
+                  "payload slot %d)" % (gaps, FRAME_CLK, SLOT))
+    assert gaps, "fewer than two frames, so there is no spacing to measure"
+    assert min(gaps) == FRAME_CLK, (
+        "consecutive frames are %d clocks apart; the serialiser's structure "
+        "gives %d (%d bits at 2 clocks + 1 to queue the next). A shorter gap "
+        "means the frame costs fewer clocks than the RTL allows."
+        % (min(gaps), FRAME_CLK, FRAME_BITS))
+    dut._log.info("readback: %d clocks per byte -> a 256-byte walk is %.1f us "
+                  "at 50 MHz" % (SLOT, 256 * SLOT / 50.0))
     dut._log.info("readback reproduces image[1:] in order, status framed in")
 
 
@@ -762,7 +789,7 @@ async def test_config_error_refuses_to_run(dut):
 
     # (b) and the host is told why, in the stream
     frames = await harvest_frames(dut, 900)
-    status = [p for m, p, _k in frames if m == MARK_STATUS and p is not None]
+    status = [p for m, p, _k, _t in frames if m == MARK_STATUS and p is not None]
     assert status, "no status frame in the stream, so CONFIG_ERR is unreadable"
     assert any((p >> ST_CFG_ERR) & 1 for p in status), (
         "CONFIG_ERR never set in %d status frames (%s) -- the part refuses to "

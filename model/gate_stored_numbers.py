@@ -236,6 +236,13 @@ SPEC_SYMBOLS = {
     # same grounds.
     ("test/run_mutants.py", "TX_MUTANTS"),
     ("test/run_mutants.py", "HALF_MUTANTS"),
+    # ⭐ A SWEEP'S POINTS ARE AN EXPERIMENT'S DESIGN, not its result. The
+    # points straddle the derived payload slot and are CONSECUTIVE INTEGERS
+    # around it, for the reason ruling 3 gives: this project has three cases
+    # of a must-fire's witness sliding between hand-picked points. The RESULT
+    # is the measured boundary and the measured frame gap, both checked
+    # against the derivation inside the gate.
+    ("test/run_rxbw.py", "D_POINTS"),
     # ⭐ THE C-SATURATION ARMS ARE AN EXPERIMENT'S DESIGN, not its result. The
     # delays are chosen (40 = 2 x D*, so refill cannot bind; 60 as a slack
     # control; 2 as the oversubscribed contrast) and the pre-registration

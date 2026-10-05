@@ -134,6 +134,16 @@ BENCHES = [
     ("tb_half", "test/tb_half.v",
      ["+IMG=test/probe_pp_half.hex", "+NCYC=40000"],
      "tb_half: PASS", {2: "ok", 1: "ok"}),
+
+    # ⭐ THE SERIAL-LINK BENCH, in the sweep from the day it was written. The
+    # link is downstream of the engine, so SPL should not reach it at all --
+    # which is exactly why it belongs here: "should not" is a prediction.
+    # ⚠ A SHORTER RUN THAN `run_rxbw.py` uses. The sweep is checking that the
+    # bench is honest at both depths, not re-measuring the capacity, and the
+    # 50-clock slot is visible within a few thousand cycles.
+    ("tb_rxbw", "test/tb_rxbw.v",
+     ["+IMG=test/probe_pp_rx.hex", "+NCYC=20000"],
+     "tb_rxbw: PASS", {2: "ok", 1: "ok"}),
 ]
 
 
@@ -237,6 +247,18 @@ def main() -> int:
     for i, (top, _src, args, _needle, _exp) in enumerate(BENCHES):
         if top == "tb_half":
             args.append("+NBYTES=%d" % nb_half)
+    g = run([sys.executable, os.path.join(HERE, "make_smoke_image.py"),
+             "--rxfast", "24"])
+    if g.returncode != 0:
+        print("  *** could not build the tb_rxbw image")
+        return 1
+    shutil.copyfile(os.path.join(HERE, "rxfast_image.hex"),
+                    os.path.join(HERE, "probe_pp_rx.hex"))
+    with open(os.path.join(HERE, "probe_pp_rx.hex"), encoding="ascii") as fh:
+        nb_rx = len([w for w in fh.read().split() if w])
+    for i, (top, _src, args, _needle, _exp) in enumerate(BENCHES):
+        if top == "tb_rxbw":
+            args.append("+NBYTES=%d" % nb_rx)
 
     declared = []
     print("  %-12s %-24s %-24s" % ("bench", "SPL=2", "SPL=1"))

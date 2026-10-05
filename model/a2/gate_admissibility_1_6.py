@@ -458,11 +458,34 @@ def c_rx(lanes):
     rx = [l for l in lanes if l.name.startswith(tuple(BPE))]
     agg = sum(next(v for k, v in BPE.items() if l.name.startswith(k))
               / (l.t * 20e-9) for l in rx)
-    cap = 50e6                      # 1 bit per cycle on the data pin
+    # ⛔⛔ THE CAPACITY WAS THE RAW PIN RATE AND THE STREAM NEVER RUNS AT IT.
+    # This read `cap = 50e6` -- "1 bit per cycle on the data pin" -- and
+    # published 2.2% utilised. Three factors were missing, every one of them
+    # visible in `project.v`'s serialiser:
+    #   the shift is ONE BIT PER TWO CYCLES          (`ser_phase` toggles)
+    #   a frame is FRAME_BITS bits of which 8 are payload
+    #   `status_turn` forces a STATUS frame after EVERY payload frame
+    # and a fourth that cost me a wrong derivation on the way: when `ser_cnt`
+    # hits zero the serialiser spends ONE MORE CYCLE queueing the next frame,
+    # so a frame occupies `bits*2 + 1` cycles, not `bits*2`.
+    #     payload slot = 2 * (12*2 + 1) = 50 cycles  ->  8.00 Mb/s
+    # ⭐ MEASURED, NOT ASSERTED: `test/run_rxbw.py` reports the closest two
+    # payload frames ever came as exactly 50 cycles, at every point of a
+    # 12-point sweep, and locates the loss boundary where the same arithmetic
+    # predicts it.
+    # ⚠ THE ERROR PREDATES THE 12-BIT FRAME. At 9 bits the slot was 38 cycles
+    # and the true figure 10.6%, still quoted as 2.2%: the widening moved it
+    # 10.6% -> 14.0%, and the mis-stated capacity accounted for the other 4.8x.
+    FRAME_BITS, CYC_PER_BIT = 12, 2
+    slot = 2 * (FRAME_BITS * CYC_PER_BIT + 1)
+    cap = 50e6 / slot * 8           # payload bits/s the link can carry
     return agg <= cap, (
-        "aggregate RX payload %.2f Mb/s against %.0f Mb/s on the serial data "
-        "pin = %.1f%% utilised; an RP2040 PIO reads that easily"
-        % (agg / 1e6, cap / 1e6, 100 * agg / cap))
+        "aggregate RX payload %.2f Mb/s against a PAYLOAD capacity of %.2f "
+        "Mb/s (a %d-cycle payload slot: %d bits at %d cycles/bit plus a queue "
+        "cycle, doubled by the status frame that always follows) = %.1f%% "
+        "utilised. ⛔ NOT the 50 Mb/s pin rate, which published 2.2%%"
+        % (agg / 1e6, cap / 1e6, slot, FRAME_BITS, CYC_PER_BIT,
+           100 * agg / cap))
 
 
 def c_rx_fire():
