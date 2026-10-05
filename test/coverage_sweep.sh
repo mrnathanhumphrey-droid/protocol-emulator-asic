@@ -82,17 +82,45 @@ for r in p:
 print('\n'.join(seen[k] for k in seen))
 " "$PLAN")
 
-FLAGS="--binary --coverage --timing --public-flat-rw -Wno-fatal -j 4"
+# ⛔⛔ GENERATE, PATCH, BUILD -- NOT `--binary`, AND THIS IS A PORTABILITY FIX
+# ESTABLISHED FROM VERILATOR'S OWN SOURCE RATHER THAN GUESSED AT. On 5.020 the
+# arms ran, PASSED, and produced no coverage file; `src/V3EmitCMain.cpp` at tag
+# v5.020 emits `topp->final(); return 0;` with NO coverage write anywhere, and
+# `+verilator+coverage+file+` does not exist there either. 5.032 emits
+# `contextp->coveragep()->write();`. ⇒ So the generated main is patched when it
+# lacks that call, which works on both: `VerilatedCovContext::write()` and
+# `VerilatedContext::coveragep()` are present in 5.020's `verilated_cov.h`.
+# ⚠ `--binary` is exactly `--main --exe --build --timing`, so this spells those
+# out and inserts the patch between generating and building.
+FLAGS="--cc --exe --main --timing --coverage --public-flat-rw -Wno-fatal"
 nbuild=0; nbfail=0
 for line in "${BUILDS[@]}"; do
   key="${line%% *}"; rest="${line#* }"
   top="${rest%% *}"; rest="${rest#* }"
   gp="${rest%% -- *}"; srcs="${rest#* -- }"
+  bdir="$OUT/build_$key"
+  rm -rf "$bdir"
   # shellcheck disable=SC2086
-  verilator $FLAGS +incdir+test +incdir+. -Mdir "$OUT/build_$key" \
+  verilator $FLAGS +incdir+test +incdir+. -Mdir "$bdir" \
       -o "$key.sim" --top-module "$top" $gp $srcs \
       > "$OUT/build_$key.log" 2>&1
-  if [ $? -eq 0 ] && [ -x "$OUT/build_$key/$key.sim" ]; then
+  gen_rc=$?
+  MAIN="$bdir/V${top}__main.cpp"
+  if [ $gen_rc -eq 0 ] && [ -f "$MAIN" ]; then
+    if ! grep -q 'coveragep()->write' "$MAIN"; then
+      echo "    (patching $(basename "$MAIN"): this Verilator emits no" \
+           "coverage write)" >> "$OUT/build_$key.log"
+      awk '{ print }
+           /topp->final\(\);/ && !done {
+             print "    contextp->coveragep()->write();"; done = 1 }' \
+        "$MAIN" > "$MAIN.patched" && mv -f "$MAIN.patched" "$MAIN"
+      grep -q 'coveragep()->write' "$MAIN" || {
+        echo "    *** the patch did not take -- no topp->final() to anchor to" \
+          >> "$OUT/build_$key.log"; }
+    fi
+    make -C "$bdir" -f "V${top}.mk" -j 4 >> "$OUT/build_$key.log" 2>&1
+  fi
+  if [ -x "$OUT/build_$key/$key.sim" ]; then
     nbuild=$((nbuild + 1)); printf '  build %-18s ok %s\n' "$key" "$gp"
   else
     nbfail=$((nbfail + 1)); printf '  build %-18s *** FAILED (see %s)\n' \
@@ -129,10 +157,17 @@ print('\n'.join(json.load(open(sys.argv[1]))[int(sys.argv[2])]['args']))
   # on both. ⚠ It also means the run must happen from the repo root (the
   # images are named by relative path) and that arms must stay SEQUENTIAL --
   # two at once would race for the same default filename.
-  rm -f coverage.dat
+  rm -f coverage.dat "$OUT/build_$key/coverage.dat"
   timeout 900 "$bin" +verilator+rand+reset+0 "${ARGS[@]}" > "$log" 2>&1
   rc=$?
-  [ -f coverage.dat ] && mv -f coverage.dat "$dat"
+  # ⛔ AND IT IS SEARCHED FOR, NOT ASSUMED TO BE IN THE CWD. Under Verilator
+  # 5.020 the arms RAN AND PASSED (rc=0, no failure line) and produced no
+  # `coverage.dat` where 5.032 puts one -- so "where the file lands" is itself
+  # version-dependent, after "what the file is called" already was.
+  for cand in coverage.dat "$OUT/build_$key/coverage.dat" \
+              "$OUT/build_$key/logs/coverage.dat"; do
+    [ -s "$cand" ] && { mv -f "$cand" "$dat"; break; }
+  done
   # ⛔ A RUN THAT ABORTED MUST NOT COUNT AS CLEAN. A Verilator abort produces a
   # log with no FAIL line in it, and "FAIL=0" then reads exactly like a pass --
   # which it did in an earlier probe here, where every run aborted on a
@@ -175,6 +210,16 @@ echo "  arms    : $npass ok, $nfail failed  (of $NARM)"
 DATS=("$OUT"/cov_*.dat)
 if [ ! -e "${DATS[0]}" ]; then
   echo "  *** no coverage data at all -- nothing to merge"
+  # ⛔ SAY WHERE IT LOOKED AND WHAT EXISTS. "No coverage data" with a clean
+  # run log is the hardest case to diagnose remotely, and guessing at it
+  # across a toolchain this box does not have is how two CI rounds were spent.
+  echo "      verilator : $(verilator --version 2>&1)"
+  echo "      any coverage*.dat anywhere under the tree:"
+  find . -name 'coverage*.dat' -o -name 'cov_*.dat' 2>/dev/null \
+    | head -10 | sed 's/^/        /'
+  echo "      (none listed above means the simulator never wrote one --"
+  echo "       on this toolchain '--coverage' with '--binary' does not"
+  echo "       emit at exit, and the sweep needs a version that does.)"
   exit 1
 fi
 echo
