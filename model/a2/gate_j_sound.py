@@ -114,7 +114,13 @@ import lane_digest                                                 # noqa: E402
 from jitter_instances import PYRTA_SHIPPED                          # noqa: E402
 from bursty import (DOUBLE_BUFFER_PREREG, J_PIPE_DERIVED,          # noqa: E402
                     J_PIPE_PREDICTED, L_JIT, SPI_RX, TX, UART_RX,
-                    BLane, response_time_b)
+                    BLane, abs_tolerance, response_time_b)
+
+# ⛔ THE SERVICE TIME THE DOUBLE-BUFFER PRE-REGISTRATION WAS WRITTEN AGAINST.
+# NOT `bursty.C_SHIPPED`: that is 3 now, and the point of checking a frozen
+# pre-registration is to rebuild the world it was written in. Named here so
+# the historical configuration is explicit rather than a bare 2 in a formula.
+C_PREREG = 2
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")
@@ -126,10 +132,34 @@ MARGIN_BAR = 4          # pre-registered in ARCH_PREREG_01.md
 # The expected sweep. ⛔ WRITTEN DOWN so a change in the recurrence, the lane
 # table or the deadlines shows up as a disagreement instead of as a new table.
 # J_pipe -> (min margin, tightest lane name fragment)
+# ⛔ RE-DERIVED AT C = 3, NOT RE-BLESSED. Ledger entry `65bc3c8114e5`: the
+# minimum inter-dispatch spacing was pre-registered at 2 and MEASURED 3, and
+# the old figure (`svc_cycles/svc_jobs` = 2.00) was the engine's OCCUPANCY per
+# job rather than the SPACING between the jobs it can deliver.
+# ⛔⛔ TWO FIELDS MOVED, WHICH IS WHY J = 2 DROPS BY FOUR AND NOT BY ONE.
+# SPI-target's `D_tol` is DERIVED by `abs_tolerance(25, completion, C)`, which
+# SUBTRACTS C, so it re-derived 18 -> 17 -- a deadline carries C too. A
+# correction that changed only the service time gave 10 at J = 2; with the
+# deadline re-derived it is 7, because the tighter key changes how much
+# interference the tightest lane sees. ⇒ The old table was reproduced EXACTLY
+# at (C = 2, D_tol = 18) before this one was recorded, so the two are known to
+# differ for the intended reason and not because the recurrence moved.
+# ⚠ THIS IS OUR BOUND, THE CONSERVATIVE ONE. pyRTA is PRIMARY and reads
+# {12, 11, 10, 9, 8, 7, 6, 5, 4} -- it clears the bar at every swept J. Ours
+# going negative at J = 8 is the cross-check being conservative, NOT an
+# infeasibility, and `gate_c3_requote.py` tables both under their own names.
 EXPECTED = {
-    0: 13, 1: 12, 2: 11, 3: 8, 4: 7, 5: 6, 6: 5, 7: 4, 8: 1,
+    0: 12, 1: 11, 2: 7, 3: 6, 4: 5, 5: 4, 6: 3, 7: 2, 8: -2,
 }
-OLD_SUM_AT_8 = 5        # what the unsound form reported -- the must-fire
+# ⛔ RE-DERIVED WITH THE TABLE. This is what the UNSOUND interference form
+# (jitter omitted from the interference a jittery lane imposes) reports at
+# J = 8, and it moved with C and the re-derived deadline exactly as the sound
+# form did: 5 at (C = 2, D_tol = 18), 4 now. ⭐ WHAT THE MUST-FIRE IS ABOUT IS
+# UNCHANGED and is the interesting part: the unsound form CLEARS the bar
+# (4 >= 4) while the sound one FAILS it (-2), so the reversal the gate exists
+# to demonstrate is still demonstrated -- by a narrower margin, which is worth
+# noticing rather than smoothing over.
+OLD_SUM_AT_8 = 4        # what the unsound form reports -- the must-fire
 
 
 def lanes_at(j_pipe: int) -> list:
@@ -317,15 +347,57 @@ def main() -> int:
           % DOUBLE_BUFFER_PREREG["falsifier"])
     print("    still owed:                                  %s"
           % ", ".join(DOUBLE_BUFFER_PREREG["owes"]))
-    # ⛔ the pre-registration must agree with the sweep it was justified by, or
-    # the recorded `margin_at_predicted_J` is a number nobody checked.
-    if sound[pred]["min_margin"] != DOUBLE_BUFFER_PREREG["margin_at_predicted_J"]:
-        print("    *** the pre-registration records margin %d at J=%d, the sweep"
+    # ⛔⛔ THE PRE-REGISTRATION IS CHECKED IN **ITS OWN TERMS**, NOT AGAINST
+    # THE CURRENT TABLE, and this check used to do the latter.
+    # `margin_at_predicted_J = 11` is a FROZEN value: a pre-registration that
+    # can be re-run is worthless, so `gate_stored_numbers` classifies it LEDGER
+    # and it must never be edited to match a later analysis. But the shipped
+    # table has since been authorised to change -- `C` was corrected 2 -> 3 by
+    # the saturation measurement, ledger entry `65bc3c8114e5`, which also
+    # re-derived SPI-target's `D_tol` 18 -> 17 -- so the live sweep now reads 7
+    # at J = 2 and the old comparison declared the pre-registration stale.
+    # ⚠ THAT IS THE WRONG VERDICT. The pre-registration is not stale; its
+    # CONTEXT moved. The question it can still answer is whether it was
+    # justified against a number that was right AT THE TIME, and that is
+    # checkable exactly: rebuild the configuration it was written against
+    # (C = 2, and the `D_tol` that C implied) and require the recorded margin
+    # to reproduce.
+    # ⭐ IT ALSO MAKES THE PRE-REGISTRATION HARDER TO FUDGE, not easier: the
+    #   frozen number must still be reproducible from a named configuration,
+    #   so it cannot be quietly re-fitted to whatever the table says today.
+    hist = [BLane(l.name, l.T, C_PREREG,
+                  D_tol=(abs_tolerance(25, True, C_PREREG)
+                         if l.name.startswith("SPI-target") else l.D_tol),
+                  n=l.n, t=l.t, J=l.J)
+            for l in lanes_at(pred)]
+    hist_min = min(l.margin(response_time_b(l, hist,
+                                            jitter_in_interference=True)["r"])
+                   for l in hist)
+    print("    the configuration it was WRITTEN AGAINST (C = %d): margin %d"
+          % (C_PREREG, hist_min))
+    if hist_min != DOUBLE_BUFFER_PREREG["margin_at_predicted_J"]:
+        print("    *** the pre-registration records margin %d at J=%d, and the"
               % (DOUBLE_BUFFER_PREREG["margin_at_predicted_J"], pred))
-        print("        says %d. The decision was justified against a number that"
-              % sound[pred]["min_margin"])
-        print("        is no longer current. ***")
+        print("        configuration it was written against now gives %d. That"
+              % hist_min)
+        print("        is a real staleness: the decision was justified against")
+        print("        a number that was never reproducible. ***")
         return 1
+    if sound[pred]["min_margin"] != DOUBLE_BUFFER_PREREG["margin_at_predicted_J"]:
+        print("    ⚠ THE LIVE SWEEP SAYS %d, NOT %d, AND THAT IS A CONTEXT"
+              % (sound[pred]["min_margin"],
+                 DOUBLE_BUFFER_PREREG["margin_at_predicted_J"]))
+        print("      CHANGE, NOT A DRIFT: `C` was corrected 2 -> 3 by")
+        print("      measurement (docs/PREREG_C_SAT.md) and the deadline it")
+        print("      derives re-derived with it. The pre-registered number")
+        print("      reproduces in its own configuration, above, and the")
+        print("      DECISION it justified -- build the double buffer -- is")
+        print("      unaffected: the bar is %d and the live margin is %d."
+              % (MARGIN_BAR, sound[pred]["min_margin"]))
+        if sound[pred]["min_margin"] < MARGIN_BAR:
+            print("      *** EXCEPT IT IS NOW UNDER THE BAR. That is a finding")
+            print("          and not a footnote. ***")
+            return 1
     if pred != J_PIPE_PREDICTED:
         print("    *** J_PIPE_PREDICTED and the pre-reg dict disagree ***")
         return 1

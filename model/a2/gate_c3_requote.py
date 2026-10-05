@@ -64,8 +64,9 @@ except Exception:
 import lane_digest                                             # noqa: E402
 import pyrta_bound                                             # noqa: E402
 import pyrta_src                                               # noqa: E402
-from bursty import BLane, abs_tolerance, response_time_b       # noqa: E402
-from gate_j_sound import EXPECTED, MARGIN_BAR, lanes_at        # noqa: E402
+from bursty import (BLane, C_SHIPPED, abs_tolerance,           # noqa: E402
+                    response_time_b)
+from gate_j_sound import MARGIN_BAR, lanes_at                  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # THE MEASUREMENT, as a RECORD with a runnable recipe
@@ -75,7 +76,11 @@ from gate_j_sound import EXPECTED, MARGIN_BAR, lanes_at        # noqa: E402
 # applies -- a RECORD needs a recipe file that re-derives it, and the recipe is
 # named here rather than described.
 C_OCCUPANCY = 2          # svc_cycles/svc_jobs, test/cj_measured.txt
-C_SPACING = 3            # btbmin, test/run_csat.py arms S and T
+# ⭐ FROM THE TABLE, NOT RETYPED. The canonical flip landed (ledger entry
+# `65bc3c8114e5`), so this gate's "after" value and the shipped lane table
+# cannot disagree -- which is what `lane_digest.announce` below now reports as
+# a MATCH rather than as a declared variant.
+C_SPACING = C_SHIPPED    # btbmin, test/run_csat.py arms S and T
 C_SAT_RECIPE = "test/run_csat.py"
 C_SAT_PREREG = "docs/PREREG_C_SAT.md"
 C_SAT_BTB = 32677        # back-to-back spacings across the four arms
@@ -94,7 +99,18 @@ C_SAT_BTB = 32677        # back-to-back spacings across the four arms
 # cross-check. The two bounds AGREE for J <= 2 and diverge from J = 3 upward.
 # J_pipe -> min margin
 EXPECTED_C3_OURS = {
-    0: 12, 1: 11, 2: 10, 3: 6, 4: 5, 5: 4, 6: 3, 7: 2, 8: -2,
+    0: 12, 1: 11, 2: 7, 3: 6, 4: 5, 5: 4, 6: 3, 7: 2, 8: -2,
+}
+# ⛔ THE HISTORICAL `ours` TABLE, RECORDED HERE RATHER THAN IMPORTED. This
+# gate used to read `gate_j_sound.EXPECTED` for the before-values -- and that
+# table has now been RE-DERIVED to C = 3, so importing it would compare C = 3
+# against C = 3 and the must-fire "every row was strictly optimistic" would
+# fail on every row while looking like a recurrence change. These are the
+# values `gate_j_sound.EXPECTED` held at (C = 2, SPI-target D_tol = 18), and
+# `gate_j_sound` reproduced them from that configuration before they were
+# moved, so the pair is known to differ for the intended reason.
+EXPECTED_C2_OURS = {
+    0: 13, 1: 12, 2: 11, 3: 8, 4: 7, 5: 6, 6: 5, 7: 4, 8: 1,
 }
 EXPECTED_C2_PYRTA = {
     0: 13, 1: 12, 2: 11, 3: 10, 4: 9, 5: 8, 6: 7, 7: 6, 8: 5,
@@ -109,6 +125,16 @@ J_SHIPPED = 1            # the stated design point
 def at_c(c: int, j_pipe: int) -> list:
     """The shipped five at a given service time and uniform J_pipe.
 
+    ⛔⛔ THE `C = 2` ARM REBUILDS THE **HISTORICAL CONFIGURATION**, DEADLINE
+    AND ALL, and overriding only `C` was wrong. SPI-target's `D_tol` is DERIVED
+    by `abs_tolerance(25, completion, C)`, which SUBTRACTS C -- so the table
+    that shipped with `C = 2` also had `D_tol = 18`, and the current one has
+    17. An arm that changed the service time and left the deadline at today's
+    value was comparing against a configuration that never existed, and it
+    reported 10 at J = 2 where the real before-value is 11 and the real
+    after-value is 7. ⇒ `C_SHIPPED` now comes from the table and the companion
+    deadline is re-derived for whichever `C` is being built.
+
     ⛔ BUILT ONCE AND SELECTED FROM. `response_time_b` filters interference by
     IDENTITY (`o is not lane`), so a second builder call yields equal-but-
     distinct objects that fail to exclude and INFLATE the bound -- the defect
@@ -117,7 +143,10 @@ def at_c(c: int, j_pipe: int) -> list:
     lane at every J; re-deriving that here would duplicate the one place it is
     decided.
     """
-    return [BLane(l.name, l.T, c, D_tol=l.D_tol, n=l.n, t=l.t, J=l.J)
+    return [BLane(l.name, l.T, c,
+                  D_tol=(abs_tolerance(25, True, c)
+                         if l.name.startswith("SPI-target") else l.D_tol),
+                  n=l.n, t=l.t, J=l.J)
             for l in lanes_at(j_pipe)]
 
 
@@ -211,7 +240,7 @@ def face_sweep(src) -> int:
     print("    %-7s %-8s %-9s %-8s %-9s %s"
           % ("", "C=2", "C=3", "C=2", "C=3", "pyRTA C=3 verdict"))
     cross_p, cross_o = None, None
-    for j in sorted(EXPECTED):
+    for j in sorted(EXPECTED_C2_OURS):
         o3, p3 = mins(src, C_SPACING, j)
         o2, p2 = mins(src, C_OCCUPANCY, j)
         for label, got, want in ((("ours", C_SPACING), o3, EXPECTED_C3_OURS[j]),
@@ -219,7 +248,7 @@ def face_sweep(src) -> int:
                                   EXPECTED_C3_PYRTA[j]),
                                  (("pyRTA", C_OCCUPANCY), p2,
                                   EXPECTED_C2_PYRTA[j]),
-                                 (("ours", C_OCCUPANCY), o2, EXPECTED[j])):
+                                 (("ours", C_OCCUPANCY), o2, EXPECTED_C2_OURS[j])):
             if got != want:
                 print("    *** J=%d %s C=%d: recorded %s, now %s -- RED, not"
                       " re-recorded" % (j, label[0], label[1], want, got))
@@ -300,7 +329,7 @@ def face_derived_j(src) -> int:
           % (EXPECTED_C3_PYRTA[J_DERIVED], EXPECTED_C2_PYRTA[J_DERIVED],
              C_OCCUPANCY))
     print("    min margin, ours           : %d  (was %d) -- the conservative"
-          % (EXPECTED_C3_OURS[J_DERIVED], EXPECTED[J_DERIVED]))
+          % (EXPECTED_C3_OURS[J_DERIVED], EXPECTED_C2_OURS[J_DERIVED]))
     print("                                 side, NOT the published number")
     if worst != EXPECTED_C3_PYRTA[J_DERIVED]:
         print("    *** recorded %d, now %d -- RED, not re-recorded"
@@ -451,12 +480,12 @@ def selftest() -> int:
     # 3. ⛔ THE DIRECTION OF THE ERROR. A larger C must never IMPROVE a margin;
     #    if it did, the recurrence would not be monotone in service time and
     #    the whole "optimistic" framing would be wrong.
-    worse = all(EXPECTED_C3_OURS[j] <= EXPECTED[j] for j in EXPECTED_C3_OURS)
+    worse = all(EXPECTED_C3_OURS[j] <= EXPECTED_C2_OURS[j] for j in EXPECTED_C3_OURS)
     cases.append(("a larger C never improves a margin", worse,
                   "monotone in service time"))
     # 4. ⛔ AND THE OLD NUMBER WAS THE OPTIMISTIC ONE, which is the claim being
     #    published. Strictly, not merely weakly.
-    strict = all(EXPECTED_C3_OURS[j] < EXPECTED[j] for j in EXPECTED_C3_OURS)
+    strict = all(EXPECTED_C3_OURS[j] < EXPECTED_C2_OURS[j] for j in EXPECTED_C3_OURS)
     cases.append(("every row was strictly optimistic (ours)", strict,
                   "so the correction is not cosmetic on any row"))
     # 5. ⛔⛔ AND THE SAME ON THE PRIMARY BOUND, which is the one published.

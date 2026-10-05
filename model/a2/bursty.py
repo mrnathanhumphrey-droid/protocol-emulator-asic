@@ -901,9 +901,37 @@ def abs_tolerance(half_period: int, c9_at_completion: bool, C: int,
 # J_SHIPPED + L_JIT, because it is the lane whose release is captured
 # asynchronously. An earlier estimate that forgot this was wrong by exactly one.
 J_SHIPPED = 1
+# ⛔⛔⛔ C = 3, MEASURED, AND IT WAS 2 FOR THE LIFE OF THE PROJECT.
+# `docs/PREREG_C_SAT.md` pre-registered the minimum inter-dispatch spacing at 2
+# and named 3 as the falsifier; `test/run_csat.py` measured 3 on four arms over
+# 32,677 spacings in which a successor was ALREADY ELIGIBLE during the
+# predecessor's writeback, and not one of them was 2. The dispatch FSM is a
+# THREE-state cycle (ST_IDLE -> ST_DRIVE -> ST_WB -> ST_IDLE) and `ST_WB`
+# returns to ST_IDLE unconditionally, so the next dispatch decision cannot be
+# taken until the cycle after writeback.
+#
+# WHY THE OLD FIGURE WAS WRONG ABOUT THE RIGHT NUMBER. `svc_cycles/svc_jobs`
+# = 688/344 = 2.00 counts cycles with `st != ST_IDLE`: the engine's OCCUPANCY
+# per job. Occupancy is 2 and spacing is 3, both exactly. `C` in a
+# response-time analysis is the resource time a job denies to every OTHER job,
+# and that is the spacing.
+# ⚠ AND IT SURVIVED BECAUSE TWO READINGS AGREED -- a structural derivation
+# ("two states, so C = 2") and a simulation mean (2.00), both about occupancy.
+# Agreement between two measurements of the same wrong quantity is not
+# corroboration.
+#
+# ⛔ IT IS A NAME, NOT A LITERAL, BECAUSE A DEADLINE CARRIES `C` TOO.
+# `SPI_RX`'s `D_tol` is DERIVED by `abs_tolerance(..., C=...)`, which SUBTRACTS
+# C -- a reactive lane whose pin moves at service completion spends its whole
+# service time out of the peer's setup window. Writing `3` in the lane rows and
+# leaving `C=2` in that call would have left the table internally inconsistent,
+# which is the "a scope assumption is threaded through the constant too" shape.
+# `gate_lane_class` asserts `D_tol == abs_tolerance(25, True, sp.C)` and would
+# have caught it -- the guard working is not a reason to rely on it.
+C_SHIPPED = 3
 
 TX = [
-    BLane("UART-tx 115200", 434, 2, D_tol=216, J=J_SHIPPED,
+    BLane("UART-tx 115200", 434, C_SHIPPED, D_tol=216, J=J_SHIPPED,
           note="periodic, one event/bit"),
     # ⭐ D = 23 DERIVED from the MB85RS64V AC table (DS501-00015-6v1-E, refs/),
     # replacing the modelled centre-sample 12. We are the MASTER here, so the
@@ -914,11 +942,11 @@ TX = [
     # to IMPROVE the set: a too-tight deadline had been distorting EDF into
     # prioritising SPI-tx over lanes that needed it more. Minimum margin across
     # all five lanes rises 9 -> 11; I2C r 7 -> 5, SPI-target r 5 -> 3.
-    BLane("SPI-tx 1 MHz", 25, 2, D_tol=23, J=J_SHIPPED,
+    BLane("SPI-tx 1 MHz", 25, C_SHIPPED, D_tol=23, J=J_SHIPPED,
           note="D derived from MB85RS64V tSU/tCH/tCL"),
     # ⭐ J_SHIPPED + L_JIT -- the only lane with an ASYNCHRONOUSLY captured
     # release, so it pays the async-capture cycle on top of the pipeline term.
-    BLane("I2C 400 kHz", 45, 2, D_tol=15, J=J_SHIPPED + L_JIT,
+    BLane("I2C 400 kHz", 45, C_SHIPPED, D_tol=15, J=J_SHIPPED + L_JIT,
           note="asymmetric SCL 80/45; D derived from UM10204 T11, not modelled; "
                "J = J_SHIPPED + L_JIT (async capture)"),
 ]
@@ -951,7 +979,8 @@ TX = [
 # model disagreed by 3 cycles on a 206-cycle margin. Costs nothing here -- and
 # that is exactly why it survived: a difference that changes no verdict is the
 # kind that stays wrong.
-UART_RX = BLane("UART-rx 115200", T=4140, C=2, D_tol=216 - L_SYNC, n=10, t=414,
+UART_RX = BLane("UART-rx 115200", T=4140, C=C_SHIPPED, D_tol=216 - L_SYNC,
+                n=10, t=414,
                 J=J_SHIPPED,
                 note="10 samples/frame at the fastest admitted peer (414, the "
                      "sampler-realistic band floor); n*t == T, gapless; "
@@ -990,8 +1019,9 @@ UART_RX = BLane("UART-rx 115200", T=4140, C=2, D_tol=216 - L_SYNC, n=10, t=414,
 # 11 -> 14. Both C9 variants clear the >= 4 bar at 1 MHz by more than 15 cycles,
 # so C9 is NOT decided by 1 MHz feasibility; it is decided by the frequency
 # ceiling, which is 1.3's question and not this lane's.
-SPI_RX = BLane("SPI-target 1 MHz", T=400, C=2, n=16, t=25, J=J_SHIPPED,
-               D_tol=abs_tolerance(25, c9_at_completion=True, C=2),
+SPI_RX = BLane("SPI-target 1 MHz", T=400, C=C_SHIPPED, n=16, t=25,
+               J=J_SHIPPED,
+               D_tol=abs_tolerance(25, c9_at_completion=True, C=C_SHIPPED),
                note="master-clocked, 16 edges/byte, back-to-back: n*t == T; "
                     "D_tol DERIVED from the absolute budget (R1), C9=COMPLETION")
 

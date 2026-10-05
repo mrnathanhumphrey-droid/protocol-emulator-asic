@@ -50,8 +50,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
 import lane_digest                                                   # noqa: E402
-from bursty import (BLane, L_JIT, L_SYNC, OUT_REG, TSU_MASTER,       # noqa: E402
-                    abs_tolerance, response_time_b)
+from bursty import (BLane, C_SHIPPED, L_JIT, L_SYNC, OUT_REG,        # noqa: E402
+                    TSU_MASTER, abs_tolerance, response_time_b)
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")
@@ -162,10 +162,20 @@ def main() -> int:
     # declared as one. The point of printing it anyway is that `base` must still
     # match every other gate in the run: a frontier swept from the wrong table
     # is the failure mode here, not a mismatched sweep point.
+    # ⛔ SHOWN AT THE MEASURED POINT, NOT AT A HARD-CODED (C = 2). This read
+    # `build(2, 1, True)` and therefore declared a variant at the OLD base
+    # digest -- which had been the shipped one, so the declaration used to read
+    # as "this gate matches the table". After the C correction (ledger entry
+    # `65bc3c8114e5`) that same call silently became a claim about a
+    # configuration the project no longer ships, while still being labelled as
+    # the target. ⭐ `C_SHIPPED` makes the shown point follow the table, so this
+    # gate MATCHES again and the variant it declares -- sweeping C and J -- is
+    # the one it actually is.
     lane_digest.announce(
-        "frontier.py (1.2)", build(2, 1, True),
-        variant="sweeps C and J by construction; shown at the target (C=2, "
-                "J_pipe=1, C9=COMPLETION). D_tol(SPI-target) is a FUNCTION of C")
+        "frontier.py (1.2)", build(C_SHIPPED, 1, True),
+        variant="sweeps C and J by construction; shown at the target (C=%d, "
+                "J_pipe=1, C9=COMPLETION). D_tol(SPI-target) is a FUNCTION of C"
+                % C_SHIPPED)
 
     rc = 0
     for c9 in (False, True):

@@ -113,6 +113,31 @@ DIGEST_LEDGER = [
      "d_min >= D* = 20 -> J = 1. The gate_pyrta_jitter J=8 variant is "
      "withdrawn with it. Shipped J = 1 unaffected and measured clean."),
 
+    # ⛔⛔ C CORRECTED 2 -> 3 BY SATURATION MEASUREMENT (Wilson's ruling 1).
+    ("65bc3c8114e5",
+     "C = 3 ON EVERY LANE. `docs/PREREG_C_SAT.md` pre-registered the minimum "
+     "inter-dispatch spacing at 2 and named 3 as the falsifier; "
+     "`test/run_csat.py` measured 3 on four arms over 32,677 spacings in which "
+     "a successor was ALREADY ELIGIBLE during the predecessor's writeback, and "
+     "not one was 2. The dispatch FSM is a THREE-state cycle and ST_WB returns "
+     "to ST_IDLE unconditionally, so the next dispatch decision waits a further "
+     "cycle. The old figure, `svc_cycles/svc_jobs` = 688/344 = 2.00, counted "
+     "cycles with `st != ST_IDLE` -- the engine's OCCUPANCY per job, not the "
+     "SPACING between the jobs it can deliver. Occupancy 2 and spacing 3 are "
+     "both exact; the error was using one for the other, and it survived "
+     "because a structural derivation and a simulation mean AGREED -- both "
+     "about occupancy. "
+     "⛔ TWO FIELDS MOVED, NOT ONE: SPI-target's `D_tol` is DERIVED by "
+     "`abs_tolerance(25, completion, C)`, which SUBTRACTS C, so it re-derives "
+     "18 -> 17. A deadline carries C too. "
+     "r = {16, 12, 7, 15, 9}, min margin 12 -> 11, IDENTICAL under our bound "
+     "and pyRTA on all five lanes. "
+     "⭐ THE EDF ORDER IS UNCHANGED (I2C < SPI-target < SPI-tx < UART-rx < "
+     "UART-tx) and I2C stays the tightest lane, which is what makes this a "
+     "re-quote rather than a reschedule -- spec R2 split D_sched from D_tol "
+     "precisely because a tolerance correction had silently reordered the set "
+     "once. Nothing shipped becomes infeasible: the bar is 4 and the minimum "
+     "is 11."),
 ]
 
 

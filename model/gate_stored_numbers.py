@@ -164,6 +164,16 @@ SITES = [
          "n/a -- recomputed every run, PYRTA_SRC required",
          "⛔ without it the must-fire could not show every row was strictly "
          "optimistic -- a correction with no before-value is an assertion"),
+    Site("model/a2/gate_c3_requote.py", "EXPECTED_C2_OURS", LEDGER,
+         "the J sweep under our bound at the PRE-CORRECTION configuration",
+         "", "gate_j_sound.EXPECTED before ledger entry 65bc3c8114e5",
+         "⛔ LEDGER, NOT LIVE, AND THAT IS THE POINT: it is what the sweep "
+         "said at (C = 2, SPI-target D_tol = 18), the configuration the "
+         "project shipped before the saturation measurement. It CANNOT be "
+         "recomputed from the current table, and re-fitting it would destroy "
+         "the only before-value the correction can be measured against. "
+         "⭐ It was REPRODUCED from that configuration by gate_j_sound before "
+         "being frozen here, so it is not merely remembered"),
     Site("model/a2/gate_c3_requote.py", "EXPECTED_C3_OURS", LIVE,
          "min margin per J_pipe at the measured C, OUR recurrence",
          "model/a2/gate_c3_requote.py", "n/a -- recomputed every run",
@@ -231,6 +241,11 @@ SPEC_SYMBOLS = {
     # explains each choice. The RESULT is `btbmin`, which lives in
     # `gate_c3_requote.C_SPACING` and is tabled above.
     ("test/run_csat.py", "ARMS"),
+    # ⭐ A TEST PAYLOAD IS STIMULUS, NOT A MEASUREMENT. The four bytes the
+    # cocotb host feeder pushes are chosen to be distinguishable on a wire;
+    # nothing is concluded from their values. `host_feed.vh` carries the same
+    # kind of pattern on the Verilog side and is not a Python collection.
+    ("test/test.py", "HOST_PAT"),
     # ⭐ FORCED ANSWERS, NOT OBSERVATIONS. The `zone/` validation tables are
     # schedules whose answers are DERIVED BY HAND, used to validate the model
     # generator before TChecker is trusted on anything else. They are a

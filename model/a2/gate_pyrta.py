@@ -121,11 +121,22 @@ except Exception:
 # ⛔ The previous values {10, 7, 3, 9, 5} were the J = 0 analysis. The shipped
 # table now carries its DERIVED J (1, and 2 on I2C for async capture), so these
 # are the J = 1 answers: r = {11, 8, 5, 10, 6}, min margin 12.
-EXPECTED_R = {"UART-tx 115200": 11,
-              "SPI-tx 1 MHz": 8,
-              "I2C 400 kHz": 5,
-              "UART-rx 115200": 10,
-              "SPI-target 1 MHz": 6}
+# ⛔ RE-DERIVED AT C = 3, NOT RE-BLESSED. Every value below is the response
+# time the recurrence now gives on the shipped table, and the table moved for a
+# MEASURED reason: `docs/PREREG_C_SAT.md` pre-registered the minimum
+# inter-dispatch spacing at 2, `test/run_csat.py` measured 3, and the old
+# figure (`svc_cycles/svc_jobs` = 2.00) was the engine's OCCUPANCY per job
+# rather than the SPACING between the jobs it can deliver. Ledger entry
+# `65bc3c8114e5`.
+# ⚠ THE SHIFT IS NOT UNIFORM: +5, +4, +2, +5, +3. It is not "add one per lane",
+# because a larger C changes how many interfering instances fit inside each
+# lane's window as well as its own service time. A table corrected by adding a
+# constant would have been wrong on all five rows.
+EXPECTED_R = {"UART-tx 115200": 16,
+              "SPI-tx 1 MHz": 12,
+              "I2C 400 kHz": 7,
+              "UART-rx 115200": 15,
+              "SPI-target 1 MHz": 9}
 
 # ⛔ ONE lane set, built once and selected from -- never a second builder call.
 # `response_time_b` filters interference BY IDENTITY, so an equal-but-distinct

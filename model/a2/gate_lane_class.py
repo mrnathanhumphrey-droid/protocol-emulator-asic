@@ -299,26 +299,36 @@ def main() -> int:
     # finds, so the arm survives any change that moves the boundary instead of
     # silently going vacuous -- which is the standing rule that a spec fix must
     # audit its own suite for arms that encoded the old numbers.
+    # ⛔⛔⛔ AND IT WENT VACUOUS A SECOND TIME, ON THE C = 2 -> 3 CORRECTION.
+    # The fix above replaced two hard-coded rates with a SEARCH -- over a
+    # hard-coded LIST of round megahertz values, which has the same shelf life
+    # one step removed. At C = 3 the separating case is the integer period
+    # T = 13 (about 1.92 MHz), which sits between the list's 2.0 and 1.5 and
+    # was therefore missed: the arm reported "no case separates the two tests"
+    # about a separation that exists.
+    # ⇒ THE SCAN IS OVER THE INTEGER PERIOD, exhaustively. `T` is the quantity
+    #   both tests actually depend on -- `D = min(T//2, T-T//2-1)` and
+    #   `half = T/2` -- and it is an integer, so sweeping it cannot step over a
+    #   boundary. A search that can miss its own witness is not a search.
+    # ⚠ THE SAME DEFECT CLASS, THIRD TIME: a must-fire whose witness is a
+    #   constant, then a list of constants. Recorded rather than quietly fixed
+    #   again.
     fired = False
-    candidates = [6.0, 5.0, 4.0, 3.0, 2.5, 2.0, 1.5, 1.25, 1.0]
     scanned = []
-    for mhz in candidates:
-        T = int(round(25.0 / mhz))
-        half = 25.0 / mhz
-        if T < 2:
-            continue
+    for T in range(2, 121):
+        half = T / 2.0
         D = min(T // 2, T - T // 2 - 1)
         diff_ok = rc <= D
         a_ok = abs_budget(rc, True, sp.C) <= half - tsu
-        scanned.append((mhz, diff_ok, a_ok))
+        scanned.append((T, diff_ok, a_ok))
         if diff_ok and not a_ok and not fired:
             fired = True
-            print("    %g MHz: differential PASSES (%d <= %d) but absolute FAILS"
-                  % (mhz, rc, D))
+            print("    T = %d cycles (%.2f MHz): differential PASSES "
+                  "(%d <= %d) but absolute FAILS" % (T, 25.0 / T, rc, D))
             print("            (%d > %.1f - %d) -> REJECTED by the absolute test"
                   % (abs_budget(rc, True, sp.C), half, tsu))
-    print("    scanned %d rates; separating cases: %d"
-          % (len(scanned), sum(1 for _m, d, a in scanned if d and not a)))
+    print("    scanned %d integer periods; separating cases: %d"
+          % (len(scanned), sum(1 for _t, d, a in scanned if d and not a)))
     print("    must-fire: %s"
           % ("PASS -- the absolute test catches what the differential one misses"
              if fired else

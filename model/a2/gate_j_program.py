@@ -63,6 +63,12 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
+# ⛔ THE MEASURED SERVICE TIME COMES FROM THE LANE TABLE, NOT A SECOND COPY.
+# Writing `3` here as well would put the same measured number in two places,
+# and `gate_stored_numbers` treats a duplicated figure as a finding for good
+# reason: the two copies drift and nothing says which is the design's.
+from bursty import C_SHIPPED                                    # noqa: E402
+
 try:
     sys.stdout.reconfigure(encoding="utf-8")
 except Exception:
@@ -84,15 +90,25 @@ N_LANES = 5
 #   C_OCCUPANCY = 2   cycles with `st != ST_IDLE`, i.e. `svc_cycles/svc_jobs`.
 #                     Still exactly right as an answer to its own question.
 #
-# ⚠ AND THE REFILL-WINDOW TERM IN `j_stall` KEEPS THE OCCUPANCY FIGURE, on
-# purpose. Its `+ C` is not a service charge at all: it is "the spare must be
-# refilled between two of this lane's consecutive dispatches, so the window is
-# the action delay plus the lane's own busy time". Which `C` belongs there is a
-# re-derivation, not a substitution -- and the DIRECTION decides the default:
-# a LARGER C makes the shortfall SMALLER and so the derived bound WEAKER, so
-# keeping 2 is the conservative choice for a bound that is already RETRACTED
-# (see the sweep below). Re-deriving it is owed, and is not this round's work.
-C_SPACING = 3
+# ⛔⛔ RULING 3: THE REFILL-WINDOW `+ C` IN `j_stall` DELIBERATELY KEEPS THE
+# OCCUPANCY FIGURE, AND THIS IS THE RECORD OF THAT DECISION so it does not read
+# as an unexamined leftover after the C correction.
+#   WHAT THE TERM IS. `shortfall = max(0, k*L_REFILL - (d_min + C))`. The `+ C`
+#   is not a service charge: it is the WINDOW in which a lane's spare slot can
+#   be refilled -- the action delay plus the lane's own busy time, during which
+#   the port is free to work on that lane's next action. The quantity it wants
+#   is "how long is the engine occupied by this job", which is the OCCUPANCY,
+#   2 -- not the spacing, 3.
+#   WHY THE DIRECTION SETTLES IT ANYWAY. A LARGER `C` makes the shortfall
+#   SMALLER and therefore the derived bound WEAKER. So 2 is the conservative
+#   choice, and substituting 3 here would move a BOUND in the unsafe direction
+#   on the strength of an argument about a different quantity.
+#   WHY IT CHANGES NO PUBLISHED NUMBER. `j_of(D_MIN_SHIPPED = 25)` is
+#   `max(0, 20 - (25 + C)) + 1 = 1` at either value, so the shipped claim is
+#   identical; and the universal bound this term feeds is RETRACTED (see the
+#   sweep below), so nothing else quotes it.
+# ⇒ Re-derive only if a published number would change. Recorded, not deferred.
+C_SPACING = C_SHIPPED
 C_OCCUPANCY = 2
 C_SVC = C_OCCUPANCY   # the refill-window term only; see above
 L_REFILL = 4          # P_SCAN(1) + P_REQ/P_WAIT/P_CAP(3)
