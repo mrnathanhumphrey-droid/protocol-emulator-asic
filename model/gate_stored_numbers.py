@@ -219,6 +219,12 @@ SPEC_SYMBOLS = {
     ("model/gate_reverse_trace.py", "LANE_CFG"),
     ("test/make_smoke_image.py", "FIVE_STRESS"),
     ("test/gate_corpus_trace.py", "COLS"),
+    # ⭐ MUTANT INVENTORIES ARE DECLARATIONS, not measurements: a define, what
+    # it breaks, the failure text that certifies the kill, and why. The numbers
+    # the scraper counts are inside the PROSE (queue indices, byte values named
+    # in the reason). `MUTANTS` and `EDGE_MUTANTS` are already excluded on the
+    # same grounds.
+    ("test/run_mutants.py", "TX_MUTANTS"),
     # ⭐ THE C-SATURATION ARMS ARE AN EXPERIMENT'S DESIGN, not its result. The
     # delays are chosen (40 = 2 x D*, so refill cannot bind; 60 as a slack
     # control; 2 as the oversubscribed contrast) and the pre-registration

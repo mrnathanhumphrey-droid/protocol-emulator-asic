@@ -97,10 +97,32 @@ def suite():
     sp = os.environ.get("PE_SCRATCH", os.path.join(QUAR, "build"))
     os.makedirs(sp, exist_ok=True)
     out = []
-    for name, top, srcs in (
-        ("tb_smoke", "tb_smoke", ["test/tb_smoke.v"]),
-        ("tb_edge", "tb_edge", ["test/tb_edge.v"]),
+    # ⭐ tb_tx JOINS THEM BECAUSE `tx_image.hex` IS NOW A PINNED ARTEFACT. The
+    # manifest hashes the recipe's OUTPUT, which catches a recipe change -- but
+    # a tracked image that no bench in the clean room LOADS is the
+    # named-artefact-with-no-implementation class this project has already been
+    # bitten by (`noop_image_h19.hex`, made by hand and then gitignored, with
+    # tb_edge depending on it). Loading it here proves the recipe produces
+    # something the engine can actually run in a clean tree.
+    # ⛔ ITS PLUSARGS ARE REQUIRED, NOT OPTIONAL: tb_tx refuses to start
+    # without +IMG and +NBYTES, because an image that never loaded emits
+    # nothing and "no bytes" would read as a queue fault rather than as a
+    # missing file. NBYTES is counted from the quarantined copy.
+    extra_tx = []
+    txp = os.path.join(ROOT, "test", "tx_image.hex")
+    if os.path.isfile(txp):
+        with open(txp, encoding="ascii") as fh:
+            extra_tx = ["+IMG=test/tx_image.hex",
+                        "+NBYTES=%d" % len([w for w in fh.read().split() if w]),
+                        "+NCYC=6000"]
+    for name, top, srcs, pargs in (
+        ("tb_smoke", "tb_smoke", ["test/tb_smoke.v"], []),
+        ("tb_edge", "tb_edge", ["test/tb_edge.v"], []),
+        ("tb_tx", "tb_tx", ["test/tb_tx.v"], extra_tx),
     ):
+        if name == "tb_tx" and not pargs:
+            out.append((name, False, "test/tx_image.hex absent"))
+            continue
         vvp = os.path.join(sp, name + ".vvp")
         b = run(["iverilog", "-g2012", "-o", vvp, "-s", top]
                 + [os.path.join(ROOT, s) for s in srcs]
@@ -109,7 +131,7 @@ def suite():
         if b.returncode != 0:
             out.append((name, False, "build failed"))
             continue
-        r = run(["vvp", vvp])
+        r = run(["vvp", vvp] + pargs)
         txt = r.stdout + r.stderr
         ok = ("PASS" in txt and "FAILURE" not in txt)
         why = "PASS" if ok else [l for l in txt.splitlines()

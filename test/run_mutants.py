@@ -42,6 +42,29 @@ SRC = ["test/tb_smoke.v", "src/pe_engine.v", "src/pe_store.v", "src/project.v"]
 # benches, because a mutant has to be judged by the bench that can see it.
 SRC_EDGE = ["test/tb_edge.v", "src/pe_engine.v", "src/pe_store.v",
             "src/project.v"]
+# ⭐ T5.1 -- A THIRD BENCH, because the TX queue tag is invisible to the other
+# two. `tb_smoke` and `tb_edge` never drive the host channel, so every
+# OP_SHIFT they execute finds an empty queue and takes the underrun branch: a
+# mutant on the queue-selection path has nothing to break there. `tb_tx` is
+# what gives M_TX_IGNORE_TAG something to kill it with.
+SRC_TX = ["test/tb_tx.v", "src/pe_engine.v", "src/pe_store.v", "src/project.v"]
+TX_IMG = "test/tx_image.hex"
+TX_MUTANTS = [
+    ("M_TX_IGNORE_TAG",
+     "host_q becomes a constant: every lane pops queue 0",
+     "the queue tag was ignored",
+     "⛔ THE SILENT-CORRUPTION CLASS. The engine pops a queue, the lane shifts "
+     "what it got, and the wire carries a WELL-FORMED FRAME WITH ANOTHER "
+     "LANE'S PAYLOAD -- no assertion in the design fires, no flag is set. "
+     "With two TX lanes active, consumption order is the EDF interleave, so "
+     "the host cannot predict which lane takes the next byte; the action's "
+     "queue field is the whole mechanism that makes that safe. ⚠ The kill is "
+     "certified by the CROSS-LANE diagnosis, not by a value mismatch: the "
+     "bench scans every byte a lane emitted against every byte of the other "
+     "queue, because the narrow 'byte 0 vs byte 0' check did NOT fire (lane 1 "
+     "gets queue 0's SECOND byte, since lane 0 took the first) and the mutant "
+     "would have died of 'got 4e want 2d' -- a wrong reason."),
+]
 EDGE_MUTANTS = [
     ("M_NO_REBASE",
      "edge release leaves the timestamp at the ARM's DEADLINE",
@@ -167,7 +190,13 @@ def flips(out):
 
 
 def build(defines, out, src=None):
-    top = "tb_edge" if (src is not None and src is SRC_EDGE) else "tb_smoke"
+    # ⛔ THE TOP IS DERIVED FROM THE BENCH FILE, NOT FROM LIST IDENTITY. This
+    # read `src is SRC_EDGE`, so adding a third bench meant a third `is`
+    # comparison and a silent fall-through to `tb_smoke` if one was forgotten
+    # -- the mutant would then build the wrong top, pass, and be recorded as a
+    # survivor for a reason that was not the mutation.
+    files = src if src is not None else SRC
+    top = os.path.splitext(os.path.basename(files[0]))[0]
     cmd = ["iverilog", "-g2012", "-o", out, "-s", top]
     for d in defines:
         cmd += ["-D%s" % d]
@@ -183,8 +212,8 @@ def build(defines, out, src=None):
     return r.returncode, (r.stdout or "") + (r.stderr or "")
 
 
-def run(vvp, img=DEFAULT_IMG):
-    cmd = ["vvp", vvp] + ([] if img is None else ["+IMG=%s" % img])
+def run(vvp, img=DEFAULT_IMG, extra=None):
+    cmd = ["vvp", vvp] + ([] if img is None else ["+IMG=%s" % img])         + (extra or [])
     # ⛔⛔ UTF-8, EXPLICITLY. `text=True` uses the locale codec, which on this
     # box is cp1252 -- and every bench prints ⭐/⛔, so the reader thread raised
     # UnicodeDecodeError, DIED, and left the captured output TRUNCATED. The
@@ -354,11 +383,61 @@ def main() -> int:
                     print("        *** died, but not of `%s` ***" % want)
                     wrong_reason.append((define, "wrong reason"))
 
+    # ---- the TX QUEUE mutants, on tb_tx -----------------------------
+    print()
+    print("  --- TX queue-ownership mutants (bench: tb_tx) ---")
+    nb_tx = None
+    tx_path = os.path.join(ROOT, TX_IMG)
+    if not os.path.isfile(tx_path):
+        print("    *** %s is missing. Build it:" % TX_IMG)
+        print("        python test/make_smoke_image.py --tx 12 13")
+        survivors.append("tb_tx image")
+    else:
+        # ⛔ NBYTES IS COUNTED FROM THE FILE, never passed as a literal. The
+        # bench REFUSES to run without it, because an image that never loaded
+        # emits nothing and "no bytes" would read as a queue fault.
+        with open(tx_path, encoding="ascii") as fh:
+            nb_tx = len([w for w in fh.read().split() if w])
+    if nb_tx is not None:
+        extra = ["+NBYTES=%d" % nb_tx, "+NCYC=6000"]
+        base_t = os.path.join(SCRATCH, "mut_tx_base.vvp")
+        rc, log = build([], base_t, src=SRC_TX)
+        if rc != 0:
+            print("    *** tb_tx does not compile: %s" % log[:300])
+            survivors.append("tb_tx build")
+        else:
+            out_t = run(base_t, img=TX_IMG, extra=extra)
+            if "tb_tx: PASS" not in out_t:
+                print("    *** the UNMUTATED tb_tx does not pass -- nothing")
+                print("        below is interpretable.")
+                survivors.append("tb_tx baseline")
+            else:
+                print("    baseline: PASS (4 of 4 must-fires)")
+                for define, breaks, want, why in TX_MUTANTS:
+                    v = os.path.join(SCRATCH, "mut_t_%s.vvp" % define.lower())
+                    rc, log = build([define], v, src=SRC_TX)
+                    if rc != 0:
+                        print("    %-19s BUILD FAIL -- not a kill" % define)
+                        wrong_reason.append((define, "build"))
+                        continue
+                    o = run(v, img=TX_IMG, extra=extra)
+                    killed = "tb_tx: PASS" not in o
+                    right = want in o
+                    print("    %-19s %-40s %s"
+                          % (define, breaks[:40],
+                             "RED" if killed else "*** SURVIVED ***"))
+                    print("        %s" % why)
+                    if not killed:
+                        survivors.append(define)
+                    elif not right:
+                        print("        *** died, but not of `%s` ***" % want)
+                        wrong_reason.append((define, "wrong reason"))
+
     print()
     print("=" * 78)
     print("VERDICT")
     print("=" * 78)
-    print("  mutants run           : %d" % len(MUTANTS))
+    print("  mutants run           : %d" % (len(MUTANTS) + len(TX_MUTANTS)))
     print("  survived (bad)        : %d  %s" % (len(survivors), survivors or ""))
     print("  died of a WRONG reason: %d  %s" % (len(wrong_reason),
                                                 wrong_reason or ""))

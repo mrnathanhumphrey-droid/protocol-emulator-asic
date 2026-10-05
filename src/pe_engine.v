@@ -588,7 +588,22 @@ module pe_engine #(
   reg [1:0]       st;
   reg [LW-1:0]    cur;
   assign host_lane = cur;
+  // ⛔⛔ M_TX_IGNORE_TAG: THE ACTION'S QUEUE FIELD IS WHAT MAKES TWO
+  // TRANSMITTERS SAFE. `host_q` selects which per-lane TX queue the host
+  // channel presents and pops, so dropping it to a constant makes every lane
+  // draw from queue 0 -- and NOTHING FLAGS IT. The engine pops a queue, the
+  // lane shifts what it got, and the wire carries a well-formed frame with
+  // another lane's payload. That is the silent-corruption class, one level
+  // above a wrong number, so the field is PRICED rather than trusted.
+  // ⚠ IT WAS UNPRICEABLE UNTIL T5.1, and that is the point: no bench had ever
+  // driven the host channel, so every OP_SHIFT in the suite found an empty
+  // queue and took the underrun branch. A mutant on a path that never carries
+  // data cannot die. `test/tb_tx.v` is what gives this one something to break.
+`ifdef M_TX_IGNORE_TAG
+  assign host_q    = 2'd0;
+`else
   assign host_q    = a_q;
+`endif
   always @(*) cfg_err = config_err;
   reg [ACT_W-1:0] cur_act;
 

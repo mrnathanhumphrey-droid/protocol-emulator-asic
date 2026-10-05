@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import subprocess
 import sys
 
@@ -109,6 +110,22 @@ BENCHES = [
      ["+IMG=test/probe_pp_c.hex", "+NBYTES=75", "+LANE=0", "+NCYC=200000",
       "+WARMUP=20000"],
      "consistency:", {2: "ok", 1: "ok"}),
+
+    # ⭐ T5.1 -- THE ONLY BENCH THAT CARRIES HOST PAYLOAD, so it is the only
+    # one in which the TX queue tag can be wrong. It is here because the four
+    # private slot-index copies were all found ONE AT A TIME, and the lesson
+    # recorded then was that a new bench joins the sweep when it is written,
+    # not after it has produced a wrong number at the other depth.
+    # ⚠ AND IT EARNED ITS PLACE IMMEDIATELY, though not against the design:
+    # run at SPL = 1 it reported ONE unexplained pin event out of 847 while
+    # SPL = 2 reported none. The ownership result was identical at both
+    # depths, so a denominator that moved with a parameter that cannot affect
+    # it was the tell -- a drive in the final cycles was counted as scored
+    # before its lag window could resolve. The bench now counts an event only
+    # when it resolves. A bench defect, found by varying a parameter.
+    ("tb_tx", "test/tb_tx.v",
+     ["+IMG=test/probe_pp_tx.hex", "+NCYC=6000"],
+     "tb_tx: PASS", {2: "ok", 1: "ok"}),
 ]
 
 
@@ -182,6 +199,24 @@ def main() -> int:
         if g.returncode != 0:
             print("  *** could not build test/%s.hex" % base)
             return 1
+    # ⛔ tb_tx NEEDS THE TWO-TX-LANE PROGRAM, and it gets a PROBE COPY rather
+    # than the committed `tx_image.hex`: standing rule 6, and also so this
+    # sweep cannot pass or fail on how stale a tracked artefact happens to be.
+    # `--tx` writes one fixed name, so the copy is made here.
+    g = run([sys.executable, os.path.join(HERE, "make_smoke_image.py"),
+             "--tx", "12", "13"])
+    if g.returncode != 0:
+        print("  *** could not build the tb_tx image")
+        return 1
+    shutil.copyfile(os.path.join(HERE, "tx_image.hex"),
+                    os.path.join(HERE, "probe_pp_tx.hex"))
+    with open(os.path.join(HERE, "probe_pp_tx.hex"), encoding="ascii") as fh:
+        nb_tx = len([w for w in fh.read().split() if w])
+    # ⛔ NBYTES COUNTED FROM THE FILE. tb_tx REFUSES to run without it, and a
+    # literal would go stale the moment the program grew an action.
+    for i, (top, _src, args, _needle, _exp) in enumerate(BENCHES):
+        if top == "tb_tx":
+            args.append("+NBYTES=%d" % nb_tx)
 
     declared = []
     print("  %-12s %-24s %-24s" % ("bench", "SPL=2", "SPL=1"))

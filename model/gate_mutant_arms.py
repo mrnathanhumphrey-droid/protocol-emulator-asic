@@ -69,6 +69,12 @@ EXPECT = {
     "M_COMB_OUT":        (4, None),
     "M_NO_PRIME":        (4, None),
     "M_BUF_CHAINFLIP":   (3, None),
+    # ⭐ TWO LINES, WHICH IS ONE SUBSTITUTION: `assign host_q = a_q;` becomes
+    # `assign host_q = 2'd0;`, so the diff is one line removed and one added --
+    # the same shape as M_BUF_SWAP and M_PFETCH_NOWAIT. The queue tag is a
+    # single expression, so nothing else moves with it, which is what makes
+    # this a clean price on the field rather than on a block.
+    "M_TX_IGNORE_TAG":   (2, None),
     "M_TIMEOUT_PROCEED": (6,
         "a BLOCK substitution, declared: the mutation removes the halt -- "
         "clearing l_live, l_armed and the sticky flag -- and there is no single "

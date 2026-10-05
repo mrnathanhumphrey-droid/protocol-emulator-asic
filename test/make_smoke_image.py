@@ -293,6 +293,83 @@ def build_census(d: int = 25):
     return b"".join(headers) + b"".join(prog)
 
 
+def build_tx(d0: int = 12, d1: int = 13, cnt: int = 7):
+    """T5.1 -- TWO TX LANES DRAWING FROM DIFFERENT HOST QUEUES.
+
+    ⛔⛔ THE HOST DATA CHANNEL HAS NEVER BEEN DRIVEN BY ANY BENCH. `pe_isa`
+    has carried `host_pushes` since the channel was built, and nothing in
+    `test/` calls it -- so every `OP_SHIFT` the suite has ever executed found
+    `host_valid = 0` and took the UNDERRUN branch. The census image runs SHIFT,
+    which is how `gate_cj_bounds` measures C on 8 of 8 opcodes; it has never
+    run SHIFT with a BYTE IN THE QUEUE. The path from a queue to a wire was
+    built, encoded in the ISA, and unexercised.
+    ⇒ This program is the first one that can carry payload, and the claim it
+      exists to test is the ORDERING one: with two TX-consuming lanes active,
+      consumption order is the EDF dispatch interleave, so a host cannot
+      predict which lane takes the next byte. Per-lane queues are what make
+      that safe, and `tb_tx.v` is what shows it.
+
+    THE SHAPE. Each lane loops eight SHIFTs then re-arms, and names its OWN
+    queue:
+        lane 0:  8 x SHIFT(pin=UO0, count=cnt, q=0), REARM(d0)   clk = UO2
+        lane 1:  8 x SHIFT(pin=UO1, count=cnt, q=1), REARM(d1)   clk = UO3
+
+    ⛔⛔ THE CLOCK PIN MUST DIFFER FROM THE DATA PIN, AND THE FIRST VERSION OF
+    THIS PROGRAM GOT IT WRONG IN A WAY NOTHING WOULD HAVE FLAGGED. `OP_SHIFT`
+    drives BOTH pins in one ST_DRIVE -- `pin_out[a_pin] <= l_data[cur][0]` and
+    then `pin_out[l_clkpin[cur]] <= a_lvl` -- and the clock write comes SECOND.
+    With `clkpin == pin` (which `build_census` and `build_five` both declare,
+    harmlessly, because they only use OP_LEVEL) the clock assignment OVERWRITES
+    the data bit with `a_lvl`. At `a_lvl = 0` every 1 bit becomes a 0: exactly
+    8 lost bits per lane here, which is exactly the number of 1s in each
+    queue's payload.
+    ⚠ NOTHING REFUSES SUCH A PROGRAM. The wire carries a well-formed frame of
+    the wrong data, which is the silent-corruption class -- and it had never
+    been reachable before, because until T5.1 nothing in the suite had ever
+    shifted a real byte. ⇒ Reported as a candidate load-time condition; NOT
+    fixed here, because adding an admissibility rule is a ruling.
+
+    ⭐ `count = 7`, NOT 8, AND THE OFF-BY-ONE IS THE POINT. The byte load fires
+    at `l_bitp[cur] == a_cnt` and resets `l_bitp` to 0, so with `cnt = 7` the
+    pointer walks 0..7 -- EIGHT drives -- and the load lands on the eighth. At
+    `cnt = 8` it would walk 0..8 and emit a ninth, padding bit per byte, which
+    would show up as a byte-alignment failure that looked like a tag bug.
+
+    ⚠ THE FIRST BYTE OUT OF EACH LANE IS ZERO, by construction and not by
+    accident: `l_data` resets to 0 and the first load happens at the END of the
+    first eight drives. So the stream is `00` then the pushed bytes in order,
+    and a bench that expected the pushed bytes immediately would fail for a
+    reason that has nothing to do with queues.
+
+    ⚠ `d0 != d1` SO THE LANES INTERLEAVE RATHER THAN RACE. Equal delays would
+    keep them phase-locked and dispatching in a fixed index order every time,
+    which is the easy case; one cycle of difference makes the interleave drift
+    and exercises the ordering claim at many phases in one run.
+    """
+    prog, headers, base = [], [], []
+    off = ACT_BASE
+    lanes = ((UO0, UO2, d0, 0), (UO1, UO3, d1, 1))
+    for n, (pin, _clk, d, q) in enumerate(lanes):
+        base.append(off)
+        for _i in range(8):
+            prog.append(act(OP_SHIFT, pin, 0, d, count=cnt, q=q))
+            off += ACT_BYTES
+        prog.append(act(OP_REARM, 0, 1, d))
+        off += ACT_BYTES
+    lp = off
+    prog.append(act(OP_REARM, 0, 0, 500))
+    # mode = 1 (push-pull): `uo_out` has no enable, so open-drain there is the
+    # 1.6s violation. UO0..UO3 are `uo_out` pins, so push-pull is the only legal
+    # class and this program is pin-map legal -- unlike `build_five`.
+    # ⭐ DATA AND CLOCK ON DIFFERENT PINS, which is also how a real SPI lane is
+    # configured (MOSI + SCK). See the docstring for what happens otherwise.
+    for n, (pin, clk, d, q) in enumerate(lanes):
+        headers.append(hdr(pin, clk, 1, d, 2, 2 * d, 3 * d, base[n]))
+    for n in range(2, N_LANES):
+        headers.append(hdr(n, n, 0, 500, 2, 200, 240, lp))
+    return b"".join(headers) + b"".join(prog)
+
+
 def build_edge(timeout: int, d1: int = 12, arm_pin: int = 0,
                arm_edge: int = 0):
     """A REACTIVE lane: arm on a peer edge, then move a pin.
@@ -396,6 +473,9 @@ def main() -> int:
              "half = 19 (5b pairs with 7: difference 12)",
              "noop_image_h19.hex"),
             (["--noop", "0", "7", "bad"], "no-op on a real input pin", "noop_image_bad.hex"),
+            # ⭐ T5.1: the first image in the suite that can carry HOST PAYLOAD.
+            (["--tx", "12", "13"], "two TX lanes on queues 0 and 1",
+             "tx_image.hex"),
         ]
         import hashlib
         import subprocess
@@ -546,6 +626,17 @@ def main() -> int:
             for b in img:
                 fh.write("%02x\n" % b)
         print("five-lane image %s, %d bytes -> %s" % (delays, len(img), out))
+        return 0
+    if "--tx" in sys.argv:
+        k = sys.argv.index("--tx")
+        d0 = int(sys.argv[k + 1]) if len(sys.argv) > k + 1 else 12
+        d1 = int(sys.argv[k + 2]) if len(sys.argv) > k + 2 else 13
+        img = build_tx(d0, d1)
+        out = os.path.join(here, "tx_image.hex")
+        with open(out, "w", encoding="ascii") as fh:
+            for b in img:
+                fh.write("%02x\n" % b)
+        print("tx image d0=%d d1=%d, %d bytes -> %s" % (d0, d1, len(img), out))
         return 0
     if "--stress" in sys.argv:
         k = sys.argv.index("--stress")

@@ -18,6 +18,7 @@ efd8c25de5f3462d520d9f37611d696b8569d03f90a5102ea6945687d97cfb63  five_image.hex
 47467ad263148d94613c5630d9dfa5ecadff567c01d09ed4bcea639b6c737d24  noop_image.hex  # make_smoke_image.py --noop 0 7 noop_image
 f2fa994d96eccf346cb328dbbcda24a07d7f4d89ead49f9b259fae301dd6b7b0  noop_image_h19.hex  # make_smoke_image.py --noop 0 19 noop_image_h19
 021b65969ba866d6bb64f1442d204c92520686befabe3ef579d94bd38632a057  noop_image_bad.hex  # make_smoke_image.py --noop 0 7 bad
+7e1e4652d9d5f5dbc99e932b52209f11f3166a90d975a341ff800a15f37c94f7  tx_image.hex  # make_smoke_image.py --tx 12 13
 d224a790df1a5d343b7348aa7ec445bd05fed08071862ac9e7c0883ef754d51c  corpus_all5.hex  # corpus.py
 9d4f31a315e91eff9b85dada226c9f8d4d455a01a75925254e9b557f54ed8c5d  corpus_i2c.hex  # corpus.py
 72a57241e347a877b074118d3fab3fc0c18f5358a9ed1ab329045fa5c2ceca57  corpus_spim.hex  # corpus.py
