@@ -111,14 +111,24 @@ CLASSIFIED = {
         "point belongs to. ⛔ Counted as uncovered anyway, because the gate "
         "must not pick the lenient reading of a disagreement it cannot "
         "adjudicate."),
-    ("src/pe_engine.v", 965, "v_branch", "if"): (
+    ("src/pe_engine.v", 966, "v_branch", "if"): (
         TOOL_DIVERGENT,
-        "`l_live[pi] && want_fetch(pi)` in the prime scan, also inside an "
-        "unrolled `for` over lanes. Same divergence and same reasoning as 651 (it was line 942 before the `rx_bit` guard shifted it): "
-        "uncovered under 5.020, taken **30 times** under 5.032, identical "
-        "point totals on both. ⚠ The smaller count is expected -- the prime "
-        "scan only runs until `primed_q` sets -- and it is still not zero, so "
-        "this is the same attribution difference rather than a gap."),
+        "`if (hdr_done && !prime_unp) primed_q <= 1'b1;` -- the prime scan's "
+        "COMPLETION test, which sits AFTER the `for` over lanes, not inside "
+        "it. 5.020 reports this arm uncovered; 5.032 records it taken 34 "
+        "times on byte-identical stimulus, and the per-file point totals are "
+        "the same on both, so the count is being attributed to an adjacent "
+        "line of the same statement group. ⚠ I CANNOT RUN 5.020 HERE to say "
+        "WHICH line absorbs it, so that part is inference and is labelled as "
+        "such; what is measured is the two counts and the equal totals. "
+        "⛔⛔ THIS ENTRY WAS MIS-ANCHORED ONCE, AND THE WAY IT HAPPENED IS THE "
+        "LESSON. Its original line was 942; the `rx_bit` guard shifted the "
+        "file by +24, so the new line is 966 -- but I re-anchored it to 965 by "
+        "GREPPING FOR A STATEMENT I REMEMBERED as the anchor instead of "
+        "applying the measured shift, and 965 is a different statement "
+        "(`l_live[pi] && want_fetch`, inside the loop, covered on both). CI "
+        "caught it: `*** UNCLASSIFIED src/pe_engine.v line 966`. Copy the "
+        "number out of the artefact; do not reconstruct it from memory."),
 
     # ---- src/pe_engine.v --------------------------------------------------
     ("src/pe_engine.v", 1134, "v_branch", "else"): (
