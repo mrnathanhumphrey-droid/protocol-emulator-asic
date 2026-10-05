@@ -418,6 +418,96 @@ def subject(key):
     return key[0].startswith(SUBJECT)
 
 
+#: the cocotb suite's own coverage, produced by `test/coverage_cocotb.sh`
+COCOTB_DAT = os.environ.get(
+    "PE_COCOTB_DAT", os.path.join(ROOT, "probe_cov", "cocotb_coverage.dat"))
+
+
+def norm_path(fn):
+    """⛔ THE COCOTB RUN RECORDS ABSOLUTE PATHS, because its `make` runs from
+    `test/`: `/mnt/d/ProtocolEmulator/test/../src/pe_engine.v`. A filter on a
+    `src/` prefix silently matched NOTHING and reported "cocotb covers 0
+    points" -- a wrong answer that only looked wrong because 0 is implausible
+    for a run that simulated 279,580 ns of the DUT.
+    """
+    fn = fn.replace(chr(92), "/")
+    i = fn.find("ProtocolEmulator/")
+    if i >= 0:
+        fn = fn[i + len("ProtocolEmulator/"):]
+    parts = []
+    for seg in fn.split("/"):
+        if seg == "..":
+            if parts:
+                parts.pop()
+        elif seg not in ("", "."):
+            parts.append(seg)
+    return "/".join(parts)
+
+
+def check_cocotb(agg) -> int:
+    """⛔⛔ NO POINT MAY BE CALLED UNCOVERED IF COCOTB REACHES IT.
+
+    RULING 2. `tb.v` is the one bench the sweep excludes, and that exclusion
+    produced TWO FALSE "never fired" gaps that I relayed as silicon findings.
+    With the cocotb suite's own coverage in hand the claim is CHECKED instead
+    of inferred: any point this gate reports uncovered, which the cocotb suite
+    actually executes, is a measurement artefact and fails here.
+
+    ⚠ ABSENT DATA IS REPORTED, NOT PASSED OVER. The arm needs a pinned
+    toolchain (cocotb 2.0.1 wants Verilator >= 5.036; the distro has 5.032 and
+    CI 5.020), so it cannot run everywhere yet. When the data is missing this
+    says so and says what it therefore did NOT check -- it does not quietly
+    read as "no false gaps".
+    """
+    print()
+    print("  --- ruling 2: does cocotb reach anything we call uncovered? ---")
+    if not os.path.isfile(COCOTB_DAT):
+        print("    ⚠ NO COCOTB COVERAGE DATA at %s" % COCOTB_DAT)
+        print("      So this run did NOT check for the false-gap class. Produce")
+        print("      it with `bash test/coverage_cocotb.sh` (needs the pinned")
+        print("      OSS CAD Suite verilator and the Python 3.12 venv).")
+        return 0
+    coco = collections.Counter()
+    with open(COCOTB_DAT, encoding="utf-8", errors="replace") as fh:
+        for ln in fh:
+            m = _LINE.match(ln)
+            if not m:
+                continue
+            f = {}
+            for part in m.group(1).split(chr(1)):
+                kv = part.split(chr(2), 1)
+                if len(kv) == 2:
+                    f[kv[0]] = kv[1]
+            fn = norm_path(f.get("f", ""))
+            if not fn.startswith(SUBJECT):
+                continue
+            kind = f.get("page", "?").split("/")[0]
+            if kind not in ("v_line", "v_branch"):
+                continue
+            coco[(fn, int(f.get("l", 0)), kind, f.get("o", ""))] += int(m.group(2))
+    if not coco:
+        print("    *** the data has NO subject points at all, which is a")
+        print("        finding rather than a pass: the cocotb suite drives the")
+        print("        same RTL. Either the paths no longer normalise or the")
+        print("        run emitted nothing.")
+        return 1
+    uncovered = [k for k, c in agg.items()
+                 if c == 0 and subject(k) and k[2] in ("v_line", "v_branch")]
+    rescued = sorted(k for k in uncovered if coco.get(k, 0) > 0)
+    print("    cocotb subject points: %d   our uncovered: %d"
+          % (len(coco), len(uncovered)))
+    for k in rescued:
+        print("    *** FALSE GAP  %s line %d %s/%s -- cocotb executes it %d time(s)"
+              % (k[0], k[1], k[2].replace("v_", ""), k[3], coco[k]))
+        print("        ⛔ This point is TESTED and the sweep cannot see it.")
+        print("           Bring the stimulus into a swept bench rather than")
+        print("           reporting the point as owed.")
+    if not rescued:
+        print("    none -- every point we call uncovered is uncovered by")
+        print("    cocotb too, so the uncovered set stands on its own.")
+    return 1 if rescued else 0
+
+
 def check_points(agg) -> int:
     """Every uncovered line/branch point in the subject must be classified."""
     rc = 0
@@ -1003,6 +1093,7 @@ def main() -> int:
         print("    cannot be told from a version difference.")
     rc = 0
     rc |= check_points(agg)
+    rc |= check_cocotb(agg)
     rc |= check_stale(agg)
     rc |= check_anchors()
     rc |= check_reasons()
