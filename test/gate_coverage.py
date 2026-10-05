@@ -57,6 +57,14 @@ SUBJECT = ("src/", "test/fram_")
 UNREACHABLE = "UNREACHABLE"
 OWED = "OWED"
 DEAD_CONFIG = "DEAD_CONFIG"
+#: ⛔⛔ A POINT WHOSE COVERAGE STATUS DEPENDS ON THE VERILATOR RELEASE.
+#: Established, not assumed: the same 19 arms on 5.020 and 5.032 produce
+#: IDENTICAL point totals for every file and IDENTICAL uncovered toggle counts
+#: for every file. The whole difference is two branch arms in `pe_engine.v`,
+#: which 5.032 credits and 5.020 does not. ⇒ These are exempt from the stale
+#: check -- being covered is EXPECTED on some versions -- and they are counted
+#: as uncovered, which is the safe direction.
+TOOL_DIVERGENT = "TOOL_DIVERGENT"
 
 # ---------------------------------------------------------------------------
 # THE CLASSIFICATION. (file, line, kind, arm) -> (status, reason)
@@ -64,6 +72,28 @@ DEAD_CONFIG = "DEAD_CONFIG"
 # ⛔ A point here that is now COVERED also fails -- see `check_stale`.
 # ---------------------------------------------------------------------------
 CLASSIFIED = {
+    # ---- the two tool-divergent points -----------------------------------
+    ("src/pe_engine.v", 651, "v_branch", "if"): (
+        TOOL_DIVERGENT,
+        "The EDF arbiter's selection condition, `ready[k] && (!winner_v || "
+        "edf_key_off[k] < best)`, inside the unrolled `for` over lanes in an "
+        "`always @*`. 5.020 reports this arm UNCOVERED; 5.032 records it taken "
+        "**5,231,510 times** on byte-identical stimulus. ⭐ So the arm is "
+        "plainly exercised and 5.020's zero is an ATTRIBUTION artefact, not a "
+        "test gap -- both releases emit the same 72 branch points for this "
+        "file, so the disagreement is over which unrolled loop iteration the "
+        "point belongs to. ⛔ Counted as uncovered anyway, because the gate "
+        "must not pick the lenient reading of a disagreement it cannot "
+        "adjudicate."),
+    ("src/pe_engine.v", 942, "v_branch", "if"): (
+        TOOL_DIVERGENT,
+        "`l_live[pi] && want_fetch(pi)` in the prime scan, also inside an "
+        "unrolled `for` over lanes. Same divergence and same reasoning as 651: "
+        "uncovered under 5.020, taken **30 times** under 5.032, identical "
+        "point totals on both. ⚠ The smaller count is expected -- the prime "
+        "scan only runs until `primed_q` sets -- and it is still not zero, so "
+        "this is the same attribution difference rather than a gap."),
+
     # ---- src/pe_engine.v --------------------------------------------------
     ("src/pe_engine.v", 1110, "v_branch", "else"): (
         UNREACHABLE,
@@ -378,6 +408,17 @@ def check_stale(agg) -> int:
     stale = 0
     for key, (st, _why) in sorted(CLASSIFIED.items()):
         c = agg.get(key)
+        # ⛔ TOOL_DIVERGENT IS EXEMPT, AND ONLY IT. Those points are covered
+        # on one Verilator release and not another, so "covered" is the
+        # expected reading half the time and failing on it would make the
+        # gate red on whichever version it was not tuned against. ⚠ The
+        # exemption is this narrow on purpose: an UNREACHABLE point that got
+        # covered stays fatal, because that means the written reason is false.
+        if st == TOOL_DIVERGENT:
+            print("    %-20s line %-5d %s/%-5s tool-divergent (count %s)"
+                  % (key[0], key[1], key[2].replace("v_", ""), key[3],
+                     "absent" if c is None else c))
+            continue
         if c is None:
             print("    *** NOT IN THE DATA  %s line %d %s/%s"
                   % (key[0], key[1], key[2].replace("v_", ""), key[3]))
@@ -422,7 +463,7 @@ def check_reasons() -> int:
             short.append((key, len(w)))
         if w.lower().rstrip(". ") in BOILER:
             vague.append(key)
-        if st not in (UNREACHABLE, OWED, DEAD_CONFIG):
+        if st not in (UNREACHABLE, OWED, DEAD_CONFIG, TOOL_DIVERGENT):
             print("    *** %s line %d has unknown status %r" % (key[0], key[1], st))
             rc = 1
     for key, n in short:
