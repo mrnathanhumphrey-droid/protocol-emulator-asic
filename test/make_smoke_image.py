@@ -48,6 +48,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from pe_isa import (                      # noqa: F401,E402
     ACT_BASE, ACT_BYTES, ACT_W, AW, BQW, CW, DLY_W, D_W, HDR_BITS, HDR_BYTES,
     N_LANES, OP_ARM, OP_LEVEL, OP_READBIT, OP_REARM, OP_SHIFT, OP_SHIFTIN,
+    ORDER_LSB, ORDER_MSB,
     OP_START, OP_STOP, PINW, PIN_NONE, UO0, UO1, UO2, UO3, act, hdr,
 )
 
@@ -448,7 +449,15 @@ def build_i2cframe(d: int = 62, sda: int = 2, scl: int = 1):
     off += len(seq) * ACT_BYTES
     lp = off
     prog.append(act(OP_REARM, 0, 0, 500))
-    headers.append(hdr(sda, scl, 0, d, 2, 2 * d, 3 * d, base))
+    # ⭐ ORDER_MSB (ruling 1): I2C is MSB-first, and the lane now SAYS so in
+    # its header rather than relying on the host to pre-reverse every byte.
+    # The engine reverses at the load into `l_tx`, so the host pushes the
+    # device address 0xA0 AS ITSELF and the wire carries 0xA0 MSB-first.
+    # ⚠ BEFORE THIS BIT EXISTED the program had to push 0x05 -- the reversal --
+    # and sigrok read the 7-bit address as 0x50 either way, which is exactly
+    # how the engine's LSB-first order stayed invisible.
+    headers.append(hdr(sda, scl, 0, d, 2, 2 * d, 3 * d, base,
+                       order=ORDER_MSB))
     for n in range(1, N_LANES):
         headers.append(hdr(4, 4, 0, 500, 2, 200, 240, lp))
     img = b"".join(headers) + b"".join(prog)

@@ -39,7 +39,10 @@ CNT_W = 4                  # the per-action count field
 BQW = 2                    # TX queue index, in what used to be zero padding
 N_TXQ = 1 << BQW           # TX queues the tag can name
 
-HDR_BITS = PINW * 2 + 1 + DLY_W + CW + D_W + D_W + AW   # +1 = drive mode
+# ⭐ THE HEADER'S LAST SPARE BIT IS THE BIT-ORDER BIT (Wilson's ruling 1).
+# The header was 47 bits in 6 bytes with ONE spare at the bottom; `order` takes
+# it, so the layout is now exactly 48 of 48 and the word is full.
+HDR_BITS = PINW * 2 + 1 + DLY_W + CW + D_W + D_W + AW + 1  # +1 mode, +1 order
 HDR_BYTES = (HDR_BITS + 7) // 8
 ACT_W = 3 + PINW + 1 + DLY_W + CNT_W + BQW
 ACT_BYTES = (ACT_W + 7) // 8
@@ -60,7 +63,25 @@ PIN_NONE = (1 << PINW) - 1          # the reserved non-driving index
 
 # ---- the field order, declared as data so the digest covers it ------------
 HDR_FIELDS = (("pin", PINW), ("clkpin", PINW), ("mode", 1), ("t", DLY_W),
-              ("c", CW), ("dsched", D_W), ("dtol", D_W), ("base", AW))
+              ("c", CW), ("dsched", D_W), ("dtol", D_W), ("base", AW),
+              ("order", 1))
+
+# ⛔⛔ BIT ORDER IS A PER-LANE PROPERTY, AND IT HAD BEEN AN UNSTATED GLOBAL.
+# `OP_SHIFT` emits `l_tx[0]` first, so the wire order was LSB-FIRST for every
+# lane -- while I2C and SPI mode 0 are both MSB-first and UART really is
+# LSB-first. One engine-wide order cannot serve both.
+# ⭐ A LANE RUNS ONE PROTOCOL, so the setting belongs in the lane header, not
+# in each action: per-action it would be 5 x N_ACTIONS bits to say the same
+# thing, and there is no spare action bit anyway (ACT_W is 24 of 24).
+#     ORDER_LSB = 0   UART: first bit out is the LSB (and the default, so
+#                     every image written before this field is unchanged)
+#     ORDER_MSB = 1   I2C, SPI mode 0: first bit out is the MSB
+# ⚠ THE DOCSTRING BELOW USED TO CLAIM THE LANES SHIFT MSB-FIRST, which was the
+# OPPOSITE of what the RTL did, and it went unnoticed because nothing decoded
+# the wire against a standard -- and the one byte a bench checked end to end
+# (0x5A) is a BIT-REVERSAL PALINDROME that matched either way. sigrok reading
+# a pushed 0x05 as 7-bit address 0x50 is what settled it.
+ORDER_LSB, ORDER_MSB = 0, 1
 ACT_FIELDS = (("op", 3), ("pin", PINW), ("level", 1), ("delay", DLY_W),
               ("count", CNT_W), ("q", BQW))
 
@@ -74,15 +95,33 @@ def _pack(fields, values, nbytes):
     return w.to_bytes(nbytes, "big")
 
 
-def hdr(pin, clkpin, mode, t, c, dsched, dtol, base) -> bytes:
+def hdr(pin, clkpin, mode, t, c, dsched, dtol, base,
+        order=ORDER_LSB) -> bytes:
     """`mode`: 1 = push-pull, 0 = open-drain.
+    `order`: ORDER_LSB (0) or ORDER_MSB (1) -- which end of the byte goes out
+    first. See ORDER_LSB above for why it is per LANE.
 
     ⛔ Open-drain is only meaningful on a `uio` pin: `uo_out` has no enable, so
     an open-drain lane there drives low once and sticks. The chip now REFUSES
     such a program (1.6s, `config_err`) -- it is not merely discouraged.
+    ⭐ `order` DEFAULTS TO LSB, which is what the engine did before the field
+    existed, so every image written without it is bit-identical to one written
+    with `order = ORDER_LSB` -- the same property the `q` field has.
     """
-    return _pack(HDR_FIELDS, (pin, clkpin, mode, t, c, dsched, dtol, base),
+    return _pack(HDR_FIELDS,
+                 (pin, clkpin, mode, t, c, dsched, dtol, base, order),
                  HDR_BYTES)
+
+
+def bitrev8(b: int) -> int:
+    """Reverse the bits of a byte.
+
+    ⭐ SHARED, because the host needs the same function the RTL implements: a
+    test that wants 0xA0 on an MSB-first wire has to know what to push, and a
+    second private copy of a bit reversal is the kind of thing that disagrees
+    in one place only.
+    """
+    return int("{:08b}".format(int(b) & 0xFF)[::-1], 2)
 
 
 def act(op, pin, level, delay, count=0, q=0) -> bytes:
@@ -108,7 +147,7 @@ def host_pushes(byte, queue):
     side too.
 
     ⛔ THE ORDER IS A RULING, NOT A CONVENTION: high-nibble-first matches the
-    MSB-first bit order the SPI and I2C lanes shift with, so a byte reads the
+    bit order the lane's `order` header bit selects, so a byte reads the
     same way on the wire as it was pushed.
     """
     if not 0 <= queue < N_TXQ:

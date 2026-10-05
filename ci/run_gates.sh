@@ -68,6 +68,13 @@ GATES=(
   # green while the gate-level harness was unbuildable. This answers the same
   # question in under a second.
   test/gl_harness_check.py
+  # ⛔ RULING 1b. Every end-to-end payload pattern must contain a byte whose
+  # bit reversal differs from itself. Three benches fed {5A, C3, 3C, A5} --
+  # FOUR PALINDROMES OUT OF FOUR -- so every "the byte reached the wire"
+  # result was true and said nothing about bit ORDER, which is how the
+  # engine's LSB-first wire order survived an entire host-channel audit while
+  # `pe_isa.py` documented the opposite.
+  test/check_vectors.py
   model/pe_asm.py
 )
 

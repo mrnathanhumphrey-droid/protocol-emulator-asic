@@ -216,7 +216,16 @@ module pe_engine #(
   // silently fatal: open-drain holds `pin_out` at 0 and modulates the ENABLE,
   // and `uo_out` HAS NO ENABLE -- so the pin went low on its first action and
   // stuck there forever while the scheduler ran perfectly.
-  localparam integer HDR_BITS  = PINW + PINW + 1 + DLY_W + CW + D_W + D_W + AW;
+  // ⭐ +1 FOR `order`, THE LAST SPARE BIT (ruling 1). The header was 47 bits
+  // inside 6 bytes with one spare at the bottom; the per-lane bit-order bit
+  // takes it, so the word is now exactly 48 of 48 and FULL.
+  // ⛔ `gate_one_encoder.py` IS WHAT CAUGHT THIS BEING STALE: `pe_isa.py` was
+  // updated to 48 and this line still said 47, and the gate exists precisely
+  // to refuse two definitions of one layout. It compares both elaborators and
+  // the Python encoder, which is why a one-line omission in the RTL could not
+  // slip through as "the images still load".
+  localparam integer HDR_BITS  = PINW + PINW + 1 + DLY_W + CW + D_W + D_W
+                                 + AW + 1;
   localparam integer HDR_BYTES = (HDR_BITS + 7) / 8;
   // ⭐⭐ SIZED COMPARISON CONSTANTS, so every comparison is width-matched.
   // ⛔ WHY, AND WHY NOT A LINT WAIVER. Verilator rejects the design on six
@@ -276,6 +285,21 @@ module pe_engine #(
   reg [PINW-1:0]  l_clkpin [0:N_LANES-1];   // ⭐ a LANE property; the per-ACTION
                                             //   copy was cut by S2 as a duplicate
   reg             l_mode   [0:N_LANES-1];   // 0 = open-drain, 1 = push-pull
+  // BIT ORDER, PER LANE, FROM THE HEADER'S LAST SPARE BIT (ruling 1).
+  //     0 = LSB first -- UART, and the engine's original behaviour
+  //     1 = MSB first -- I2C and SPI mode 0
+  // The shift path is UNCHANGED and still walks `l_tx[0]` outward; what the
+  // bit selects is whether the byte is REVERSED as it is loaded, and whether
+  // a received byte is reversed as it completes. A reversal at the two load
+  // points is a pair of muxes; reversing the shift path itself would have
+  // meant two shift directions in the dispatch arm.
+  // WHY PER LANE AND NOT PER ACTION: a lane runs one protocol. Per action it
+  // would be the same answer repeated for every action, and the action word
+  // has no spare bit anyway (ACT_W is 24 of 24).
+  // IT WAS AN UNSTATED GLOBAL BEFORE, and `pe_isa.py` documented the opposite
+  // of what this file did. Nothing decoded the wire against a standard, and
+  // the one byte checked end to end (0x5A) is a bit-reversal PALINDROME.
+  reg             l_order  [0:N_LANES-1];
 
   // ⛔⛔⛔ RULING 1.5, THE DRIVE-MODE CONSTRUCTION -- AND IT HAD NEVER BEEN
   // BUILT. 1.5 ruled that the output be formed as `out[i] = data[i] &
@@ -708,6 +732,20 @@ module pe_engine #(
   // the refusal had nowhere for the corpus to go.
   wire clk_real = (l_clkpin[cur] < N_PINS[PINW-1:0]);
 
+  // ---- the bit-order reversals (ruling 1) ------------------------------
+  // SPELLED OUT AS A CONCATENATION, NOT A FUNCTION OR A LOOP. A Verilog
+  // function here is the "non-constant function call in constant expression"
+  // shape that Yosys rejected TWICE in this design while iverilog accepted
+  // it; an explicit reversal cannot be read two ways by two tools.
+  wire [7:0] host_data_rev = {host_data[0], host_data[1], host_data[2],
+                              host_data[3], host_data[4], host_data[5],
+                              host_data[6], host_data[7]};
+  // the byte an OP_SHIFTIN completes: the sample being taken now, followed by
+  // the seven already in `l_rx`
+  wire [7:0] rx_asm     = {pin_in[a_pin], l_rx[cur][7:1]};
+  wire [7:0] rx_asm_rev = {rx_asm[0], rx_asm[1], rx_asm[2], rx_asm[3],
+                           rx_asm[4], rx_asm[5], rx_asm[6], rx_asm[7]};
+
   // =====================================================================
   // HEADER LOAD -- on entering run, pull N_LANES headers out of the image.
   // ⛔ D_tol is in the image and is NOT loaded into any register (ruling F3):
@@ -989,6 +1027,7 @@ module pe_engine #(
       for (i = 0; i < N_LANES; i = i + 1) begin
         l_pin[i]    <= {PINW{1'b0}};
         l_clkpin[i] <= {PINW{1'b0}};
+        l_order[i]  <= 1'b0;
         l_mode[i]   <= 1'b0;
         l_tx[i]     <= 8'h00;
         l_rx[i]     <= 8'h00;
@@ -1089,6 +1128,8 @@ module pe_engine #(
                     l_pin[hl]    <= hsh_n[HDR_BYTES*8-1 -: PINW];
                     l_clkpin[hl] <= hsh_n[HDR_BYTES*8-1-PINW -: PINW];
                     l_mode[hl]   <= hsh_n[HDR_BYTES*8-1-2*PINW];
+                    // the LAST bit of the header word; see `l_order`
+                    l_order[hl]  <= hsh_n[0];
                     // ⛔⛔ 1.6s IN SILICON. It was ruled as "the loader REJECTS"
                     // and no load-time rejection existed anywhere -- not in the
                     // RTL, and not asserted in the toolchain, which only stated
@@ -1450,15 +1491,23 @@ module pe_engine #(
               // RX ONLY. Neither `l_tx` nor `tx_bitp` is named here, which
               // is what makes the TX host load at `a_cnt` REACHABLE: this
               // reset used to clear the pointer that load was waiting on.
+              // REVERSED ON AN MSB-FIRST LANE: the accumulator shifts the
+              // first-received bit toward bit 0, so an MSB-first protocol's
+              // byte arrives reversed and is corrected as it completes. The
+              // expression is identical in both arms below -- the mutant only
+              // changes WHICH POINTER decides when a byte is complete -- and
+              // it is commented HERE rather than inside an arm because
+              // `gate_mutant_arms` counts a comment inside an `ifdef` as the
+              // arm wrapping more than its delta, and is right to.
               l_rx[cur] <= {pin_in[a_pin], l_rx[cur][7:1]};
 `ifdef M_SHARED_BITP
               l_bitp_shared <= l_bitp_shared + {{(BPW-1){1'b0}}, 1'b1};
               if (l_bitp_shared == a_cnt - {{(BPW-1){1'b0}}, 1'b1}) begin
-                rx_data <= {pin_in[a_pin], l_rx[cur][7:1]};
+                rx_data <= l_order[cur] ? rx_asm_rev : rx_asm;
 `else
               rx_bitp[cur] <= rx_bitp[cur] + {{(BPW-1){1'b0}}, 1'b1};
               if (rx_bitp[cur] == a_cnt - {{(BPW-1){1'b0}}, 1'b1}) begin
-                rx_data <= {pin_in[a_pin], l_rx[cur][7:1]};
+                rx_data <= l_order[cur] ? rx_asm_rev : rx_asm;
 `endif
                 rx_lane <= cur;
                 rx_push <= 1'b1;
@@ -1576,7 +1625,14 @@ module pe_engine #(
           if (a_op == OP_SHIFT && tx_bitp[cur] == a_cnt) begin
 `endif
             if (host_valid) begin
+              // REVERSED ON AN MSB-FIRST LANE. The shift path still walks
+              // `l_tx[0]` outward, so reversing here puts the byte's MSB at
+              // bit 0 and therefore on the wire first.
+`ifdef M_IGNORE_ORDER
               l_tx[cur] <= host_data;
+`else
+              l_tx[cur] <= l_order[cur] ? host_data_rev : host_data;
+`endif
               host_pop    <= 1'b1;        // consumed: advance the host FIFO
             end else begin
               lane_underrun[cur] <= 1'b1;

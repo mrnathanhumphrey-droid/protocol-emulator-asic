@@ -56,9 +56,13 @@ DUMP = "probe_i2c.bin"
 # detectable: nothing decoded the wire against a standard, and the one value a
 # bench had checked (0x5A) is a BIT-REVERSAL PALINDROME, so it matched either
 # way. sigrok reading `Address write: 50` from a pushed 0x05 is what settles it.
-ADDR_PUSHED = 0x05              # reversed on the wire -> 0xA0
+ADDR_PUSHED = 0xA0              # pushed AS ITSELF; the lane declares ORDER_MSB
 ADDR_7BIT = 0x50                # what sigrok reports: 0xA0 >> 1
-DATA_BYTE = 0x5A                # a palindrome, so it reads the same either way
+# ⛔ NON-PALINDROMIC, AND THAT IS THE WHOLE POINT (ruling 1b). This was 0x5A,
+# which reverses to itself, so sigrok reading it back proved the byte arrived
+# and NOTHING about the order it arrived in. 0x5B reverses to 0xDA, so sigrok
+# reading `5B` is evidence the MSB-first path is right.
+DATA_BYTE = 0x5B
 
 
 def run(cmd, cwd=ROOT):
@@ -148,14 +152,21 @@ def main() -> int:
     # COMPUTED, NOT WRITTEN DOWN. A literal 0xA0 here would be a second copy
     # of the thing being tested, and `ADDR_PUSHED * 0 + 0xA0` -- which is what
     # this said first -- is that literal wearing arithmetic.
-    rev = int("{:08b}".format(ADDR_PUSHED)[::-1], 2)
-    print("  host pushes 0x%02X; the wire carries its BIT REVERSAL 0x%02X, so"
-          % (ADDR_PUSHED, rev))
-    if rev >> 1 != ADDR_7BIT:
-        print("  *** the reversal of 0x%02X is 0x%02X, whose 7-bit address is"
-              % (ADDR_PUSHED, rev))
-        print("      0x%02X, not the 0x%02X this gate expects. The two")
-        print("      constants disagree before any measurement is taken.")
+    # ⭐ THE LANE DECLARES ORDER_MSB, so the host pushes the address AS
+    # ITSELF and the engine reverses at the load. The cross-check is now that
+    # the pushed byte's own 7-bit field is what sigrok should report.
+    print("  the lane header declares ORDER_MSB, so the host pushes 0x%02X"
+          % ADDR_PUSHED)
+    print("  as itself and sigrok should report the 7-bit address as 0x%02X"
+          % ADDR_7BIT)
+    if ADDR_PUSHED >> 1 != ADDR_7BIT:
+        print("  *** 0x%02X >> 1 is 0x%02X, not the 0x%02X this gate expects."
+              % (ADDR_PUSHED, ADDR_PUSHED >> 1, ADDR_7BIT))
+        print("      The two constants disagree before any measurement.")
+        return 1
+    if int("{:08b}".format(DATA_BYTE)[::-1], 2) == DATA_BYTE:
+        print("  *** DATA_BYTE 0x%02X is a BIT-REVERSAL PALINDROME, so it")
+        print("      cannot distinguish the two bit orders (ruling 1b).")
         return 1
     print("  sigrok should report the 7-bit address as 0x%02X" % ADDR_7BIT)
     print()
@@ -279,6 +290,56 @@ def main() -> int:
     print("      MSB-first. Whether the ENGINE should shift the other way is")
     print("      a ruling, not a bug fix: it would change the TX byte order")
     print("      of every lane and `tb_tx`'s recorded streams with it.")
+
+    # ---- PRICE THE ORDER BIT -------------------------------------------
+    # ⛔⛔ NO BENCH OF OURS CAN JUDGE THIS, which is why it is here. A reversed
+    # I2C byte is still a well-formed byte; only a decoder reading the standard
+    # can say it is the WRONG one. `M_IGNORE_ORDER` ties `l_order` to 0, so the
+    # engine reverts to LSB-first on the wire and the address the peer sees is
+    # 0x05 reversed -- not its own. sigrok must stop certifying.
+    print()
+    print("  --- PRICED: M_IGNORE_ORDER must break the certification ---")
+    mv = os.path.join(SCRATCH, "i2c_mut.vvp")
+    bm = run(["iverilog", "-g2012", "-DM_IGNORE_ORDER", "-o", mv,
+              "-s", "tb_i2c"] + SRCS)
+    if bm.returncode != 0:
+        print("    *** the mutant does not build, so it is not a kill")
+        print("        %s" % ((bm.stdout + bm.stderr).strip()[:200]))
+        rc = 1
+    else:
+        rm = run(["vvp", mv, "+IMG=test/i2cframe_image.hex",
+                  "+NBYTES=%d" % nb, "+NCYC=%d" % NCYC,
+                  "+DUMP=probe_i2c_mut.bin"])
+        dm = sigrok_i2c("probe_i2c_mut.bin")
+        if dm["rc"] != 0:
+            print("    *** sigrok did not run on the mutant dump, so nothing")
+            print("        is concluded")
+            rc = 1
+        else:
+            txm = transactions(dm["events"])
+            goodm = [t for t in txm
+                     if [e for e in t if e[0] != "Write"] == want]
+            acked = sum(1 for t in txm for e in t if e[0] == "ACK")
+            print("    transactions decoded        : %d" % len(txm))
+            print("    still matching the frame    : %d %s"
+                  % (len(goodm), "*** SURVIVED" if goodm else "ok -- none"))
+            print("    ACKs anywhere in the run    : %d %s"
+                  % (acked, "*** SURVIVED" if acked else "ok -- none"))
+            if goodm or acked:
+                print("      ⛔ With the order bit IGNORED the device should")
+                print("         never recognise its address, so a surviving")
+                print("         ACK means the certification above does not")
+                print("         depend on the order bit at all.")
+                rc = 1
+            else:
+                print("    ⇒ the mutant is REFUSED by the peer and certified")
+                print("      by nothing: the order bit is load-bearing for")
+                print("      every transaction above.")
+                if "tb_i2c: PASS" in (rm.stdout + rm.stderr):
+                    print("      ⚠ note: the BENCH still passes on the mutant.")
+                    print("        It checks liveness and that the peer ACKed")
+                    print("        at least once -- and with a wrong address")
+                    print("        it ACKs none, so the bench catches it too.")
 
     print()
     print("=" * 78)

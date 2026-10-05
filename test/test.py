@@ -125,7 +125,13 @@ async def load_image(dut, img):
 # NIBBLE FIRST, with the 2-bit queue tag on BOTH pushes because the hardware
 # latches it with the high nibble. `test/host_feed.vh` is the Verilog side of
 # the same contract; this is the cocotb side.
-HOST_PAT = [0x5A, 0xC3, 0x3C, 0xA5]
+# ⛔⛔ NON-PALINDROMIC (ruling 1b). This was [0x5A, 0xC3, 0x3C, 0xA5] -- FOUR
+# BIT-REVERSAL PALINDROMES out of four, so it passed under either bit order and
+# tested nothing about order. That is how the engine's LSB-first wire order
+# went unnoticed while `pe_isa.py` documented MSB-first: the only byte checked
+# end to end read the same both ways. These reverse to DA/80/5E/E3, and 0x01 is
+# the asymmetric extreme.
+HOST_PAT = [0x5B, 0x01, 0x7A, 0xC7]
 TXQ = 4
 TXD = 2
 

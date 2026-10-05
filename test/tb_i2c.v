@@ -122,7 +122,15 @@ module tb_i2c;
     // [data, addr, data, addr] the loop emits (0x00, data) then (addr, data)
     // for ever after. `0xA0` is `1010 000 0` -- the MB85RC256V device address
     // with A2/A1/A0 strapped to 0 and R/W = 0 (write).
-    hf_set(0, 8'h5A, 8'h05, 8'h5A, 8'h05);
+    // ⭐ PUSHED AS THEMSELVES, because the lane header now declares
+    // ORDER_MSB and the engine reverses at the load. 0xA0 is the MB85RC256V
+    // device address (1010 000 0, write); 0x5B is the data byte and it is
+    // NON-PALINDROMIC -- it reverses to 0xDA -- so sigrok reading `5B` is
+    // evidence about the ORDER, which 0x5A could never have been.
+    // ⚠ BEFORE THE ORDER BIT this read {5A, 05, 5A, 05}: the address had to be
+    // pushed pre-reversed and the data byte was a palindrome, so the whole
+    // frame passed under either bit order (ruling 1b).
+    hf_set(0, 8'h5B, 8'hA0, 8'h5B, 8'hA0);
 
     cyc = 0; nwr = 0; fails = 0;
     n_sda_edge = 0; n_scl_edge = 0; n_peer_ack = 0;

@@ -437,10 +437,18 @@ module tb_trace;
     // NOT IN `stayload` MODE: PROG stays HIGH there to trace the readback
     // stream, and `ui_in[5]` is PIN_PTR in load mode -- a push would be a
     // POINTER RESET, which would corrupt the very stream being traced.
-    hf_set(0, 8'h5A, 8'hC3, 8'h3C, 8'hA5);
-    hf_set(1, 8'h5A, 8'hC3, 8'h3C, 8'hA5);
-    hf_set(2, 8'h5A, 8'hC3, 8'h3C, 8'hA5);
-    hf_set(3, 8'h5A, 8'hC3, 8'h3C, 8'hA5);
+    // ⛔⛔ NON-PALINDROMIC VECTORS (ruling 1b). This pattern was
+    // {5A, C3, 3C, A5} -- FOUR BIT-REVERSAL PALINDROMES out of four, so it
+    // passed under EITHER bit order and tested nothing about order at all.
+    // That is how the engine's LSB-first wire order went unnoticed while
+    // `pe_isa.py` documented the opposite: the only byte ever checked end to
+    // end read the same both ways.
+    // 0x5B/0x01/0x7A/0xC7 reverse to DA/80/5E/E3 -- all different, and 0x01
+    // is the asymmetric extreme the ruling asks for.
+    hf_set(0, 8'h5B, 8'h01, 8'h7A, 8'hC7);
+    hf_set(1, 8'h5B, 8'h01, 8'h7A, 8'hC7);
+    hf_set(2, 8'h5B, 8'h01, 8'h7A, 8'hC7);
+    hf_set(3, 8'h5B, 8'h01, 8'h7A, 8'hC7);
     if (stayload == 0) hf_en = 1'b1;
     for (i = 0; i < ncyc; i = i + 1) begin
       @(negedge clk);

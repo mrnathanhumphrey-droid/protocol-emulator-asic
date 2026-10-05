@@ -206,10 +206,18 @@ module tb_smoke;
     // cannot know which queues the program names -- and a queue nobody draws
     // from simply stays full, because the feeder tops up to the depth and
     // stops rather than pushing blindly. `hf_check` reports the result.
-    hf_set(0, 8'h5A, 8'hC3, 8'h3C, 8'hA5);
-    hf_set(1, 8'h5A, 8'hC3, 8'h3C, 8'hA5);
-    hf_set(2, 8'h5A, 8'hC3, 8'h3C, 8'hA5);
-    hf_set(3, 8'h5A, 8'hC3, 8'h3C, 8'hA5);
+    // ⛔⛔ NON-PALINDROMIC VECTORS (ruling 1b). This pattern was
+    // {5A, C3, 3C, A5} -- FOUR BIT-REVERSAL PALINDROMES out of four, so it
+    // passed under EITHER bit order and tested nothing about order at all.
+    // That is how the engine's LSB-first wire order went unnoticed while
+    // `pe_isa.py` documented the opposite: the only byte ever checked end to
+    // end read the same both ways.
+    // 0x5B/0x01/0x7A/0xC7 reverse to DA/80/5E/E3 -- all different, and 0x01
+    // is the asymmetric extreme the ruling asks for.
+    hf_set(0, 8'h5B, 8'h01, 8'h7A, 8'hC7);
+    hf_set(1, 8'h5B, 8'h01, 8'h7A, 8'hC7);
+    hf_set(2, 8'h5B, 8'h01, 8'h7A, 8'hC7);
+    hf_set(3, 8'h5B, 8'h01, 8'h7A, 8'hC7);
     hf_en = 1'b1;
     prev_proto = uo_out[3:0];
     svc_cycles = 0; svc_jobs = 0; svc_max = 0; prev_st = 0;

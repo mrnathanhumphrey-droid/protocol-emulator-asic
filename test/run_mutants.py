@@ -53,6 +53,13 @@ SRC_TX = ["test/tb_tx.v", "src/pe_engine.v", "src/pe_store.v", "src/project.v"]
 # asserting byte identity, so neither can see a direction corrupting the other.
 SRC_HALF = ["test/tb_half.v", "src/pe_engine.v", "src/pe_store.v",
             "src/project.v"]
+# ⭐ THE BIT-ORDER MUTANT IS JUDGED BY A FOREIGN DECODER, so it lives with
+# `run_i2c.py` rather than here: no bench of ours can tell a correctly ordered
+# I2C byte from a reversed one -- that is the whole reason the defect survived.
+# Named here so the mutant inventory is complete in one place.
+ORDER_MUTANT = ("M_IGNORE_ORDER",
+                "tie l_order to 0: the per-lane bit order is ignored",
+                "judged by test/run_i2c.py (sigrok), not by a bench here")
 HALF_IMG = "test/half_image.hex"
 HALF_MUTANTS = [
     ("M_SHARED_BITP",
