@@ -54,6 +54,12 @@ GATES=(
   model/gate_bench_indices.py
   model/gate_j_proof_anchors.py
   model/a2/gate_j_program.py
+  # ⭐ JOINED THE LIST when it took the RX lane-field width check. That check
+  # guards against a received byte being attributed to the WRONG LANE if
+  # `N_LANES` ever outgrows the explicit [2:0] on `e_rx_lane` -- and it lives
+  # here rather than in the RTL because a generate-guarded zero-width net was
+  # tried as a compile-time assertion and iverilog accepted it SILENTLY.
+  model/part1_param_contract.py
   model/pe_asm.py
 )
 

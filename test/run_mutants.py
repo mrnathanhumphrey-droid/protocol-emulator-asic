@@ -70,6 +70,20 @@ HALF_MUTANTS = [
      "split while the pointer is not. Plausible wrong data beats no data for "
      "danger, and it is why the register had to split WITH the pointer rather "
      "than after it."),
+    ("M_RX_NO_LANE",
+     "pin the RX frame's lane field to 0: every byte looks like lane 0's",
+     "no frame was attributed to lane 1",
+     "⛔ WHAT SHIPPED IN EFFECT. `rx_push`/`rx_data` were engine-wide and the "
+     "serial frame was {marker, 8 data} with NO lane field, so a host with two "
+     "receiving lanes could not attribute a byte -- the mirror image of the TX "
+     "queue-tag problem that per-lane queues solved, and found the same way: by "
+     "feeding the channel and watching the arithmetic fail to add up (50 bytes "
+     "delivered where 40 were assembled, the difference being exactly the other "
+     "lane's). ⭐ THE MUTANT KEEPS THE FRAME WIDTH and only pins the field, so "
+     "the bench still decodes and the kill is an ATTRIBUTION failure rather "
+     "than a framing one -- the host sees L0=50, L1=0 where the truth is L0=10, "
+     "L1=40. A mutant that broke the framing would die of the wrong "
+     "assertion."),
 ]
 TX_IMG = "test/tx_image.hex"
 TX_BADCLK_IMG = "test/tx_badclk_image.hex"

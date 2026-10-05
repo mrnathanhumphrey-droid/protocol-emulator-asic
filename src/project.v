@@ -266,6 +266,13 @@ module tt_um_protocol_emulator #(
   wire               e_host_pop;
   wire               e_cfg_err;
   wire [7:0]         e_rx_data;
+  // DECLARED WITH AN EXPLICIT WIDTH, NOT `LW`, because `LW` is a localparam
+  // defined further down this file. iverilog and yosys both accepted the
+  // forward reference, but a width that depends on a parameter declared after
+  // it is the kind of thing that elaborates in two tools and not a third --
+  // and this project has already lost a harden to tool-dependent elaboration.
+  // The width is checked against `LW` by an assertion below.
+  wire [2:0]         e_rx_lane;
 
   // =====================================================================
   // THE HOST TX DATA CHANNEL -- F1's nibble channel, AS RULED
@@ -419,7 +426,8 @@ module tt_um_protocol_emulator #(
         .host_lane(e_host_lane), .host_q(e_host_q),
       .lane_underrun(e_under), .lane_overflow(e_ovf), .sticky_ovr(e_ovr),
         .cfg_err(e_cfg_err),
-      .rx_data(e_rx_data), .rx_push(e_rx_push), .busy(e_busy)
+      .rx_data(e_rx_data), .rx_lane(e_rx_lane), .rx_push(e_rx_push),
+      .busy(e_busy)
   );
 
   // =====================================================================
@@ -437,8 +445,35 @@ module tt_um_protocol_emulator #(
   //    a sticky flag in-stream, never a stall.
   // =====================================================================
   reg       ser_d, ser_s, ser_v;
-  reg [8:0] ser_sh;                     // 8 payload bits + a frame marker
+  // THE FRAME IS 12 BITS: {marker, kind[2:0], data[7:0]}, and it was 9.
+  // It carried only {marker, data}, so a payload frame could not say WHICH
+  // lane produced it -- and worse, a READBACK byte and an RX payload byte
+  // BOTH used marker = 0, so the two were already indistinguishable on the
+  // wire and were being told apart by which mode the host believed it was in.
+  // THE MARKER IS SHIFTED OUT LAST, so a variable-length frame is not an
+  // option: the host cannot know a frame's width until it has already read
+  // most of it. Both frame types therefore widen together.
+  // `kind` RESOLVES BOTH QUESTIONS AT ONCE:
+  //     marker 1              -> STATUS           (kind = KIND_NONE)
+  //     marker 0, kind 0..4   -> RX PAYLOAD from THAT LANE
+  //     marker 0, kind 7      -> READBACK byte, not a lane
+  // Cost: 3 flops on `ser_sh`. `ser_cnt` already had the range.
+  localparam [2:0] KIND_NONE = 3'd7;    // "not a lane"
+  // THE EXPLICIT WIDTH ABOVE MUST EQUAL `LW`, AND THE CHECK IS IN THE
+  // TOOLCHAIN, NOT HERE. `e_rx_lane` is declared [2:0] because `LW` is not in
+  // scope that early; if `N_LANES` grew past 8 then `LW` would become 4 and
+  // the explicit 3 would SILENTLY TRUNCATE the lane id -- a byte attributed to
+  // the WRONG lane, which is the exact failure this field exists to prevent.
+  // The `kind` field in the frame is 3 bits too, so growing past 7 lanes needs
+  // the frame widened as well.
+  // A generate-guarded zero-width net was tried here as a compile-time
+  // assertion and iverilog accepted `wire x[-1:0]` SILENTLY -- it was
+  // decoration, which is worse than nothing because it reads as a guard.
+  // Priced by inverting it: the build stayed green. ⇒ The real check lives in
+  // `model/part1_param_contract.py`, which runs in CI.
+  reg [11:0] ser_sh;                    // {marker, kind[2:0], data[7:0]}
   reg [3:0] ser_cnt;
+  localparam [3:0] FRAME_LEN = 4'd12;
   reg       ser_phase;
   reg [7:0] status_byte;
   reg       status_turn;
@@ -457,6 +492,7 @@ module tt_um_protocol_emulator #(
   // genuine overrun and is reported, never silently dropped.
   reg       rx_pend;
   reg [7:0] rx_pend_data;
+  reg [LW-1:0] rx_pend_lane;            // travels WITH the byte
   reg       rx_drop_sticky;           // status bit 6
 
   wire      status_pending = e_cfg_err | tx_full_sticky | e_ovr
@@ -467,8 +503,9 @@ module tt_um_protocol_emulator #(
     if (!rst_n) begin
       ser_d <= 1'b0; ser_s <= 1'b0; ser_v <= 1'b0;
       rx_pend <= 1'b0; rx_pend_data <= 8'h00;
+      rx_pend_lane <= {LW{1'b0}};
       rx_drop_sticky <= 1'b0;
-      ser_sh <= 9'h000; ser_cnt <= 4'd0; ser_phase <= 1'b0;
+      ser_sh <= 12'h000; ser_cnt <= 4'd0; ser_phase <= 1'b0;
       status_byte <= 8'h00; status_turn <= 1'b0;
       rb_ptr <= {AW{1'b0}}; rb_addr <= {AW{1'b0}}; rb_bit <= 3'd0; rb_re <= 1'b0;
       rb_prime <= 2'd0;
@@ -490,6 +527,7 @@ module tt_um_protocol_emulator #(
         else begin
           rx_pend      <= 1'b1;
           rx_pend_data <= e_rx_data;
+          rx_pend_lane <= e_rx_lane;
         end
       end
 
@@ -497,7 +535,7 @@ module tt_um_protocol_emulator #(
         // shifting a frame out: one bit per two cycles, strobe in the middle
         ser_phase <= ~ser_phase;
         if (ser_phase) begin
-          ser_sh  <= {1'b0, ser_sh[8:1]};
+          ser_sh  <= {1'b0, ser_sh[11:1]};
           ser_cnt <= ser_cnt - 4'd1;
           ser_s   <= 1'b0;
         end else begin
@@ -512,8 +550,8 @@ module tt_um_protocol_emulator #(
         // ⭐ ALTERNATE payload and status, so liveness is in the stream even
         //   when no payload is moving.
         if (status_turn) begin
-          ser_sh      <= {1'b1, status_byte};
-          ser_cnt     <= 4'd9;
+          ser_sh      <= {1'b1, KIND_NONE, status_byte};
+          ser_cnt     <= FRAME_LEN;
           status_turn <= 1'b0;
         end else if (prog_mode) begin
           if (RX_SERIAL != 0) begin
@@ -536,8 +574,8 @@ module tt_um_protocol_emulator #(
               end
               rb_prime <= rb_prime + 2'd1;
             end else begin
-              ser_sh  <= {1'b0, s_rdata};
-              ser_cnt <= 4'd9;
+              ser_sh  <= {1'b0, KIND_NONE, s_rdata};
+              ser_cnt <= FRAME_LEN;
               rb_addr <= rb_ptr;          // THE PRE-INCREMENT ADDRESS
               rb_ptr  <= rb_ptr + 1'b1;
               rb_re   <= 1'b1;
@@ -548,8 +586,22 @@ module tt_um_protocol_emulator #(
           // ⭐ A PAYLOAD ALWAYS WINS THE NEXT FRAME SLOT. Checked before the
           // self-started status below, so a set sticky flag can never push data
           // out of the stream -- it only fills slots the payload did not want.
-          ser_sh      <= {1'b0, rx_pend_data};
-          ser_cnt     <= 4'd9;
+          // THE LANE TRAVELS WITH THE BYTE, which is the whole point: it is
+          // taken from `rx_pend_lane`, captured at the push, and NOT from
+          // whatever lane the engine happens to be running now.
+          // M_RX_NO_LANE pins the field to 0, which is what shipped in effect
+          // -- every received byte looking like lane 0's -- so the field is
+          // PRICED rather than only ever seen to carry the right value. ⚠ Note
+          // the mutant is NOT "no field at all": the frame keeps its width, so
+          // the bench still decodes and the failure is an ATTRIBUTION error
+          // rather than a framing one. A mutant that broke the framing would
+          // be killed by the wrong assertion.
+`ifdef M_RX_NO_LANE
+          ser_sh      <= {1'b0, 3'd0, rx_pend_data};
+`else
+          ser_sh      <= {1'b0, rx_pend_lane, rx_pend_data};
+`endif
+          ser_cnt     <= FRAME_LEN;
           rx_pend     <= 1'b0;
           status_turn <= 1'b1;
         end else if (status_pending) begin
@@ -566,8 +618,8 @@ module tt_um_protocol_emulator #(
           // `e_rx_push` is a PULSE that is lost while a frame shifts, would
           // turn the heartbeat into RX overflow -- paying for liveness with the
           // data it exists to report. 1.6p prices that channel at 2.2 %.
-          ser_sh      <= {1'b1, status_byte};
-          ser_cnt     <= 4'd9;
+          ser_sh      <= {1'b1, KIND_NONE, status_byte};
+          ser_cnt     <= FRAME_LEN;
         end
       end
     end

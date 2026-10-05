@@ -112,6 +112,95 @@ def strip_comments(t: str) -> str:
     return re.sub(r"/\*.*?\*/", "", t, flags=re.S)
 
 
+def check_rx_lane_width(allsrc: str) -> int:
+    """The RX frame's lane field must be wide enough for `N_LANES`.
+
+    `src/project.v` declares `e_rx_lane` with an EXPLICIT `[2:0]` -- it cannot
+    use `LW`, which is a localparam defined further down that file -- and packs
+    the lane into a 3-bit `kind` field in the serial frame. If `N_LANES` grew
+    past 8, `LW` would become 4 and that explicit 3 would SILENTLY TRUNCATE
+    the lane id: a received byte attributed to the WRONG LANE, which is the
+    exact failure the field exists to prevent, and nothing in the RTL would
+    say so.
+
+    ⛔⛔ THIS CHECK IS HERE BECAUSE THE RTL COULD NOT HOLD IT. A
+    generate-guarded zero-width net was tried as a compile-time assertion and
+    iverilog accepted `wire x[-1:0]` SILENTLY -- decoration, which is worse
+    than nothing because it reads as a guard. ⭐ It was caught by PRICING it:
+    inverting the condition left the build green, so the "assertion" had never
+    been able to fail.
+    ⚠ `kind` is 3 bits in the frame as well, so more than 7 lanes needs the
+    frame widened too. Both limits are checked below, because they are
+    different numbers that happen to coincide today.
+    """
+    rc = 0
+    print()
+    print("  --- the RX frame's lane field vs N_LANES ---")
+    # ⛔ `parameter`, NOT `localparam`: N_LANES is a MODULE PARAMETER of
+    # `tt_um_protocol_emulator` -- the first version of this check looked for
+    # `localparam` and read None, which made the check RED for the right
+    # reason (it refuses to pass on a value it could not find) but for the
+    # wrong cause. A regex that cannot find what it is looking for is
+    # indistinguishable from a violation unless it says which.
+    m = re.search(r"parameter\s+integer\s+N_LANES\s*=\s*(\d+)", allsrc)
+    n_lanes = int(m.group(1)) if m else None
+    w = re.search(r"wire\s*\[(\d+):0\]\s+e_rx_lane\s*;", allsrc)
+    declared = (int(w.group(1)) + 1) if w else None
+    print("    N_LANES                     : %s" % n_lanes)
+    print("    e_rx_lane declared width    : %s" % declared)
+    if n_lanes is None or declared is None:
+        print("    *** could not read one of them out of the RTL, so the")
+        print("        check cannot be made -- RED rather than skipped.")
+        return 1
+    need = 1
+    while (1 << need) < n_lanes:
+        need += 1
+    print("    width LW would compute      : %d" % need)
+    ok = declared >= need
+    print("    declared >= needed          : %s  %s"
+          % (ok, "ok" if ok else "*** TRUNCATION -- a received byte would be "
+                                 "attributed to the WRONG LANE"))
+    if not ok:
+        rc = 1
+    kind_ok = n_lanes <= 7
+    print("    N_LANES <= 7 (frame `kind`) : %s  %s"
+          % (kind_ok, "ok" if kind_ok
+             else "*** the 3-bit `kind` field cannot name this many lanes and "
+                  "keep 7 as 'not a lane' -- widen the frame"))
+    if not kind_ok:
+        rc = 1
+    # ⛔⛔ PRICED, because the thing it replaces was decoration that had never
+    # been able to fail. Three synthetic sources: the shipped shape, a lane
+    # count that OVERFLOWS the declared width, and one that overflows the
+    # frame's `kind` field but not the width. The third case matters because
+    # those two limits are different numbers that merely coincide today.
+    print("    --- must-fire: the width check rejects what it claims to ---")
+    cases = (
+        ("the shipped shape", 5, 3, True),
+        ("9 lanes, width still 3", 9, 3, False),
+        ("8 lanes, width 3 -- `kind` cannot keep 7 free", 8, 3, False),
+        ("9 lanes, width widened to 4", 9, 4, False),
+    )
+    for name, nl, dw, want_ok in cases:
+        src = ("parameter integer N_LANES  = %d,\n"
+               "  wire [%d:0] e_rx_lane;\n" % (nl, dw - 1))
+        m2 = re.search(r"parameter\s+integer\s+N_LANES\s*=\s*(\d+)", src)
+        w2 = re.search(r"wire\s*\[(\d+):0\]\s+e_rx_lane\s*;", src)
+        nn, dd = int(m2.group(1)), int(w2.group(1)) + 1
+        nd = 1
+        while (1 << nd) < nn:
+            nd += 1
+        got_ok = (dd >= nd) and (nn <= 7)
+        agree = got_ok == want_ok
+        print("      %-46s %-9s %s"
+              % (name, "accepted" if got_ok else "REJECTED",
+                 "ok" if agree else "*** wanted %s"
+                 % ("accept" if want_ok else "reject")))
+        if not agree:
+            rc = 1
+    return rc
+
+
 def main() -> int:
     print()
     print("=" * 78)
@@ -129,6 +218,8 @@ def main() -> int:
         with open(f, encoding="utf-8", errors="replace") as fh:
             bodies[f] = strip_comments(fh.read())
     allsrc = "\n".join(bodies.values())
+
+    rc |= check_rx_lane_width(allsrc)
 
     # ---- does the engine exist yet? -------------------------------------
     print()

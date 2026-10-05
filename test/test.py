@@ -57,7 +57,18 @@ PIN_PROG, PIN_WR, PIN_PTR = 7, 6, 5
 SER_DATA, SER_STRB, SER_VLD = 4, 5, 6
 PROTO_LO, PROTO_HI = 0, 3          # uo_out[3:0] = the 4 push-pull protocol pins
 
-FRAME_BITS = 9                     # 8 payload bits LSB-first + a marker bit
+# THE FRAME IS 12 BITS: 8 data LSB-first, then a 3-bit `kind`, then the
+# marker. It was 9 (data + marker), which could not say WHICH LANE produced a
+# received byte -- and a readback byte and an RX payload byte BOTH carried
+# marker 0, so the two were indistinguishable on the wire and were being told
+# apart by which mode the host believed it was in.
+#   marker 1              -> STATUS            (kind = KIND_NONE)
+#   marker 0, kind 0..4   -> RX PAYLOAD from THAT LANE
+#   marker 0, kind 7      -> READBACK byte, not a lane
+# THE MARKER SHIFTS OUT LAST, so the two frame types had to widen together:
+# the host cannot know a frame's width until it has already read most of it.
+FRAME_BITS = 12
+KIND_NONE = 7                      # "not a lane"
 MARK_STATUS, MARK_PAYLOAD = "1", "0"
 
 
@@ -261,20 +272,47 @@ async def harvest_frames(dut, ncyc):
             cur.append(d)
         if v == "0" and prev_v == "1":
             if len(cur) == FRAME_BITS:
+                mk = cur[FRAME_BITS - 1]
                 if any(c not in "01" for c in cur):
-                    frames.append((cur[8] if cur[8] in "01" else "?", None))
+                    frames.append((mk if mk in "01" else "?", None, None))
                 else:
                     pay = 0
                     for k in range(8):
                         pay |= int(cur[k]) << k
-                    frames.append((cur[8], pay))
+                    kind = 0
+                    for k in range(3):
+                        kind |= int(cur[8 + k]) << k
+                    frames.append((mk, pay, kind))
             cur = []
         prev_v = v
     return frames
 
 
 def payloads(frames):
-    return [p for m, p in frames if m == MARK_PAYLOAD]
+    """Every payload byte, whatever its kind.
+
+    A frame is now `(marker, payload, kind)`. Callers that only want the bytes
+    use this; callers that care WHICH LANE a byte came from use
+    `lane_payloads`, which is the whole reason the field exists.
+    """
+    return [p for m, p, _k in frames if m == MARK_PAYLOAD]
+
+
+def lane_payloads(frames, lane):
+    """The payload bytes a GIVEN LANE produced.
+
+    This is the question the 9-bit frame could not answer. It also excludes
+    readback frames, which carry `kind = KIND_NONE` and are not lane data --
+    they used to be indistinguishable from payload.
+    """
+    return [p for m, p, k in frames
+            if m == MARK_PAYLOAD and p is not None and k == lane]
+
+
+def readback_payloads(frames):
+    """The program bytes from a readback walk -- `kind = KIND_NONE`."""
+    return [p for m, p, k in frames
+            if m == MARK_PAYLOAD and p is not None and k == KIND_NONE]
 
 
 async def rewind_readback(dut):
@@ -384,9 +422,9 @@ async def test_serial_readback_walks_the_image(dut):
                          % ([hex(x) for x in got], [hex(x) for x in want]))
 
     # the status frames must alternate with the payloads and carry the alive bit
-    marks = [m for m, _ in frames]
+    marks = [m for m, _p, _k in frames]
     assert MARK_STATUS in marks, "no STATUS frame in the stream"
-    for m, p in frames:
+    for m, p, _k in frames:
         if m == MARK_STATUS and p is not None:
             assert p & 1, "status byte 0x%02X has the alive bit clear" % p
     dut._log.info("readback reproduces image[1:] in order, status framed in")
@@ -724,7 +762,7 @@ async def test_config_error_refuses_to_run(dut):
 
     # (b) and the host is told why, in the stream
     frames = await harvest_frames(dut, 900)
-    status = [p for m, p in frames if m == MARK_STATUS and p is not None]
+    status = [p for m, p, _k in frames if m == MARK_STATUS and p is not None]
     assert status, "no status frame in the stream, so CONFIG_ERR is unreadable"
     assert any((p >> ST_CFG_ERR) & 1 for p in status), (
         "CONFIG_ERR never set in %d status frames (%s) -- the part refuses to "

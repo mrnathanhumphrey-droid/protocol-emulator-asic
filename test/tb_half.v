@@ -109,6 +109,25 @@ module tb_half;
   integer    fails;
   reg        primed_seen, cfgerr_seen;
 
+  // ---- THE SERIAL FRAME, DECODED AS THE HOST SEES IT --------------------
+  // ⛔⛔ THE CLAIM IS ABOUT THE HOST, SO IT IS READ OFF THE WIRE. `rx_push`
+  // and `cur` are internal; the question the lane field exists to answer is
+  // "can the HOST attribute a received byte", and the only honest place to
+  // ask it is the 3-pin serial stream. The frame is 12 bits: 8 data
+  // LSB-first, then a 3-bit `kind`, then the marker (shifted out LAST).
+  //     marker 1            -> STATUS          (kind = KIND_NONE)
+  //     marker 0, kind 0..4 -> RX PAYLOAD from THAT LANE
+  //     marker 0, kind 7    -> READBACK byte, not a lane
+  localparam integer SER_DATA = 4, SER_STRB = 5, SER_VLD = 6;
+  localparam integer FRAME_BITS = 12;
+  localparam integer KIND_NONE  = 7;
+  reg  [FRAME_BITS-1:0] fr_sh;
+  integer    fr_n, fr_cnt;
+  reg        prev_v;
+  integer    fl_n   [0:4];            // payload frames seen per lane
+  reg  [7:0] fl_got [0:4][0:MAXB-1];  // and the bytes
+  integer    n_status, n_badkind;
+
   always #10 clk = ~clk;
 
   parameter integer SPL_CFG = 2;
@@ -168,6 +187,12 @@ module tb_half;
       rwant[i] = 8'h00; rgot[i] = 8'h00;
     end
     cyc = 0; fails = 0; n_shift_all = 0;
+    fr_sh = 0; fr_n = 0; fr_cnt = 0; prev_v = 1'b0;
+    n_status = 0; n_badkind = 0;
+    for (j = 0; j < 5; j = j + 1) begin
+      fl_n[j] = 0;
+      for (i = 0; i < MAXB; i = i + 1) fl_got[j][i] = 8'h00;
+    end
     primed_seen = 1'b0; cfgerr_seen = 1'b0;
 
     $display("# half img=%0s bytes=%0d ncyc=%0d SPL=%0d",
@@ -258,6 +283,39 @@ module tb_half;
           end
         end
       end
+
+      // ---- THE SERIAL STREAM, framed on the `valid` edge -------------
+      // ⛔ FRAMED ON THE EDGE, NOT A FIXED STRIDE: `ser_v` is high only while
+      // a frame shifts, so its rising edge IS the boundary. Chunking strobed
+      // bits into fixed groups of twelve would assume the harvest began
+      // exactly at one.
+      if (uo_out[SER_VLD] && !prev_v) begin
+        fr_sh  = 0;
+        fr_cnt = 0;
+      end
+      if (uo_out[SER_VLD] && uo_out[SER_STRB]) begin
+        if (fr_cnt < FRAME_BITS) begin
+          fr_sh[fr_cnt] = uo_out[SER_DATA];
+          fr_cnt = fr_cnt + 1;
+        end
+      end
+      if (!uo_out[SER_VLD] && prev_v) begin
+        if (fr_cnt == FRAME_BITS) begin
+          fr_n = fr_n + 1;
+          if (fr_sh[11]) begin
+            n_status = n_status + 1;
+          end else if (fr_sh[10:8] <= 3'd4) begin
+            j = fr_sh[10:8];
+            if (fl_n[j] < MAXB) fl_got[j][fl_n[j]] = fr_sh[7:0];
+            fl_n[j] = fl_n[j] + 1;
+          end else if (fr_sh[10:8] != KIND_NONE[2:0]) begin
+            // a kind that is neither a lane nor the reserved value
+            n_badkind = n_badkind + 1;
+          end
+        end
+        fr_cnt = 0;
+      end
+      prev_v = uo_out[SER_VLD];
 
       // ---- what the engine DELIVERED to the host --------------------
       // ⛔⛔ ATTRIBUTED BY `cur`, BECAUSE THE CHANNEL CARRIES NO LANE ID.
@@ -383,7 +441,44 @@ module tb_half;
              ack_seen ? "ok" : "*** FAIL");
     if (!ack_seen) fail("the ACK window never saw the peer low");
 
-    $display("  MUST-FIRE 4: the two directions did not disturb each other");
+    $display("  MUST-FIRE 4: the HOST can attribute every received byte");
+    $display("    frames decoded off the wire : %0d (%0d status)",
+             fr_n, n_status);
+    $write("    payload frames per lane     :");
+    for (j = 0; j < 5; j = j + 1) $write(" L%0d=%0d", j, fl_n[j]);
+    $display("");
+    $display("    frames with an unknown kind : %0d %0s", n_badkind,
+             (n_badkind == 0) ? "ok" : "*** FAIL");
+    if (n_badkind != 0)
+      fail("a payload frame carried a kind that is neither a lane nor 7");
+    // ⛔⛔ THE CLAIM: lane 1's bytes arrive TAGGED AS LANE 1, and lane 0's ACK
+    // bytes arrive tagged as LANE 0. Before the lane field both arrived on one
+    // untagged channel and the host could only have guessed -- which is the
+    // mirror of the TX problem per-lane queues solved.
+    if (fl_n[1] < 1) begin
+      fail("no frame was attributed to lane 1, which receives a byte");
+    end else begin
+      $write("    lane 1 bytes, as the host sees them :");
+      for (i = 0; i < fl_n[1] && i < 4; i = i + 1) $write(" %02h", fl_got[1][i]);
+      $display("");
+      $write("    lane 1 bytes the bench presented    :");
+      for (i = 0; i < rwn && i < 4; i = i + 1) $write(" %02h", rwant[i]);
+      $display("");
+      for (i = 0; i < fl_n[1] && i < rwn && i < 4; i = i + 1)
+        if (fl_got[1][i] != rwant[i]) begin
+          $display("    lane 1 frame %0d: host saw %02h, presented %02h *** FAIL",
+                   i, fl_got[1][i], rwant[i]);
+          fails = fails + 1;
+        end
+    end
+    if (fl_n[0] < 1)
+      fail("no frame was attributed to lane 0, which reads an ACK byte");
+    else
+      $display("    lane 0 attributed %0d frame(s)  ok -- its ACK bytes are",
+               fl_n[0]);
+    $display("      separable from lane 1's on the wire, which is the point");
+
+    $display("  MUST-FIRE 5: the two directions did not disturb each other");
     // ⛔ THE CONJUNCTION IS THE CLAIM. Either half alone was already true at
     // some point in this project's history: the TX path worked on a
     // SHIFT-only lane, and the RX path worked on a SHIFTIN-only lane. What
@@ -403,7 +498,7 @@ module tb_half;
     $display();
     $display("================ VERDICT ================");
     if (fails == 0)
-      $display("  tb_half: PASS (4 of 4 must-fires)");
+      $display("  tb_half: PASS (5 of 5 must-fires)");
     else
       $display("  tb_half: *** FAILED %0d check(s)", fails);
     $finish;

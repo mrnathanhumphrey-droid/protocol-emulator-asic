@@ -146,6 +146,19 @@ module pe_engine #(
 
     // RX payload out to the serialiser (which is NOT a lane -- zero budget)
     output reg  [7:0]           rx_data,
+    // RX LANE IDENTITY. `rx_data`/`rx_push` were engine-wide with no way to
+    // say WHICH lane completed the byte, so a host with two receiving lanes
+    // could not attribute one -- the mirror image of the TX queue-tag problem
+    // that per-lane queues solved, and found the same way: by feeding the
+    // channel and watching the arithmetic fail to add up (50 bytes delivered
+    // where 40 were assembled, the difference being exactly the other lane's).
+    // REGISTERED ALONGSIDE `rx_data`, not derived from `cur` downstream:
+    // `rx_push` is a pulse that goes high the cycle AFTER the writeback that
+    // completes the byte, and `cur` is free to change before anyone reads it.
+    // A consumer sampling `cur` at the pulse would be reading whichever lane
+    // the scheduler moved to -- right most of the time, which is the worst
+    // kind of wrong.
+    output reg  [LW-1:0]        rx_lane,
     output reg                  rx_push,
 
     output wire                 busy
@@ -966,6 +979,7 @@ module pe_engine #(
       pin_pp   <= {N_PINS{1'b1}};
       pin_oe   <= {N_PINS{1'b0}};
       rx_data  <= 8'h00;
+      rx_lane  <= {LW{1'b0}};
       rx_push  <= 1'b0;
       sticky_ovr    <= 1'b0;
       config_err    <= 1'b0;
@@ -1446,6 +1460,7 @@ module pe_engine #(
               if (rx_bitp[cur] == a_cnt - {{(BPW-1){1'b0}}, 1'b1}) begin
                 rx_data <= {pin_in[a_pin], l_rx[cur][7:1]};
 `endif
+                rx_lane <= cur;
                 rx_push <= 1'b1;
 `ifdef M_SHARED_BITP
                 l_bitp_shared <= {BPW{1'b0}};
