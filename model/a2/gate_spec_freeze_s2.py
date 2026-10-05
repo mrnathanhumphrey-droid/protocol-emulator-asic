@@ -80,7 +80,12 @@ DELAY_BITS = 10
 TS_W = 16                       # timestamp width shipped; floor is derived
 AW = 8                          # S1 census
 MEM_TYPE = "flops"              # S0 = SRAM-BLOCKED
-RX_SERIAL = 1
+# ⛔ `RX_SERIAL = 1` WAS FROZEN HERE AND IS NOW DELETED BY RULING. The freeze's
+# own rationale was "the sweep must be able to turn it off to price it"; the
+# coverage sweep measured that no arm ever did, and nothing overrode it. The
+# parameter and its dead `else` are gone from src/project.v. ⚠ A frozen row
+# must not vanish without a trace, so the deletion is recorded rather than
+# simply erased -- a freeze that quietly loses entries is not a freeze.
 
 # ---------------------------------------------------------------------------
 # THE FROZEN FIELD TABLE.
@@ -387,8 +392,9 @@ def main() -> int:
               ("D_W", bits_for(max(l.D for l in LANES)), "deadline spread"),
               ("MEM_TYPE", MEM_TYPE, "⛔ default FLOPS: S0 = SRAM-BLOCKED. The "
                "sram path stays a parameter for the predictive-node tier"),
-              ("RX_SERIAL", RX_SERIAL, "ruled map needs serial; the sweep must "
-               "be able to turn it off to price it")]
+              # `RX_SERIAL` was the next row; deleted by ruling, see the
+              # constant block at the top of this file.
+              ]
     for n, v, why in params:
         print("      %-11s = %-7s %s" % (n, v, why))
 

@@ -72,9 +72,15 @@ REQUIRED_PARAMS = [
      "⭐ THE PORTABILITY PARAMETER -- without it the Nangate45/ASAP7 runs "
      "cannot be built at all, AND it is the fallback if the CMOS5L macro "
      "harden fails"),
-    ("RX_SERIAL", "0 = parallel RX view, 1 = 3-pin bit-serial",
-     "the ruled pin map needs serial; the sweep needs to be able to turn it "
-     "off to measure what it costs"),
+    # ⛔ `RX_SERIAL` WAS HERE AND WAS DELETED BY RULING. Its contract line read
+    # "the sweep needs to be able to turn it off to measure what it costs" --
+    # and the coverage sweep then measured that NO arm ever turned it off, and
+    # nothing in the tree overrode it. An unexercised knob is not a priced
+    # alternative, so the parameter and its dead `else` went from src/project.v
+    # together with this row. ⚠ THE ROW IS RECORDED RATHER THAN SILENTLY
+    # DROPPED: this list is asserted against the RTL, so leaving the entry
+    # would turn the gate red, and removing it without a note would erase the
+    # only trace that the contract once promised a knob it never exercised.
 ]
 
 # ⛔ Protocol-specific constants that must appear NOWHERE in the engine. These

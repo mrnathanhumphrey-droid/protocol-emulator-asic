@@ -24,7 +24,7 @@ that are named below.
 | ⛔⛔ | **No byte has ever been written into the I²C peer's memory.** `P_WDATA`, which holds `mem[addr] <= shin`, has count 0. |
 | ⛔⛔ | **`lane_underrun` and `tx_full_sticky` have never been SET by any test.** Both are status bits the host reads, and both are asserted *clear* as a precondition by `tb_tx` and by `host_feed.vh`'s `hf_check`. Every run to date proves only that they do not fire spuriously; their set paths are unverified. |
 | ⛔ | **Half of the 1.6s load-time refusal has never fired.** The `clkpin == pin` guard is exercised by `tb_tx +BADCLK=1`; the `pin >= N_UIO` guard on an open-drain lane, on *either* pin, is not. |
-| ⚠ | **`RX_SERIAL` is a parameter no configuration ever sets.** Its `!= 0` arm's `else` is shipped source that nothing executes. **This needs a ruling** — sweep it as a build arm, or delete it. |
+| ✅ | **`RX_SERIAL` is a parameter no configuration ever sets.** Its `!= 0` arm's `else` was shipped source that nothing executed. **RULED: delete.** The parameter and the branch are gone from `src/project.v`; the serial RX view is unconditional at its one use site. The rows that froze it in the Part 1 contract and the S2 freeze went with it — each recorded, not silently dropped. ⚠ Its contract line had read *"the sweep needs to be able to turn it off to measure what it costs"*, and the sweep then measured that no arm ever did: **an unexercised knob is not a priced alternative.** |
 
 ### 1.1 A correction to a published claim
 
@@ -138,7 +138,11 @@ the classification table.** 37 points, as:
 
 - **4 `UNREACHABLE`** — with the mechanism *checked structurally*, not asserted
 - **32 `OWED`** — debt, each naming the test that would reach it
-- **1 `DEAD_CONFIG`** — `RX_SERIAL`, awaiting a ruling
+- **0 `DEAD_CONFIG`** — the class's only member was `RX_SERIAL`, now **retired by
+  deletion** rather than by a test reaching it. ⛔ The status stays in the
+  vocabulary: it is the classification for "no build selects this arm", and the
+  next unexercised parameter needs somewhere to land that is not `UNREACHABLE`.
+  An empty class here is a resolved one, not a dead one.
 
 ⛔ **A green means "nothing NEW went uncovered"** — which is precisely the
 gating property the ruling asks for. It does **not** mean the design is
@@ -436,7 +440,8 @@ written**.
   the SPI peer's command set; the sharpest for the *design* are the two status
   bits (`lane_underrun`, `tx_full_sticky`) whose set paths no test has entered.
 - **The reset-mode divergence** (§4), unisolated.
-- **`RX_SERIAL`** (§1), awaiting a sweep-or-delete ruling.
+- ~~**`RX_SERIAL`** (§1), awaiting a sweep-or-delete ruling.~~ **Closed: deleted**
+  (§1). The parameter, its branch, and its Part 1 / S2 freeze rows are gone.
 - **Toggle coverage** is ratcheted per file, not adjudicated per point — ~390
   uncovered toggle points against 37 line/branch ones, mostly top bits of wide
   buses the parameter set cannot reach.

@@ -143,6 +143,17 @@ serialiser off to measure what it costs.
 
 The contract remains **red**, correctly: the engine does not exist.
 
+> ⛔ **LATER, AND THE REASON THIS SECTION IS LEFT STANDING:** `RX_SERIAL` was
+> **deleted by ruling.** The justification recorded above — "the sweep needs to be
+> able to turn the serialiser off to measure what it costs" — was never acted on.
+> The coverage sweep later measured that **no arm ever turned it off** and that
+> nothing in the tree overrode the parameter, so its `else` was shipped source no
+> configuration executed. An unexercised knob is not a priced alternative.
+> The claim is kept rather than edited away, because the useful record is not
+> "the contract had this parameter" but **"a knob was added for a measurement
+> that was never taken"** — which is the pattern worth recognising next time.
+> See `docs/SPEC_V4_COVERAGE_SWEEP.md` §1.
+
 ---
 
 ## Status

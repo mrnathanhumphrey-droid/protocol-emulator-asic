@@ -173,7 +173,7 @@ CLASSIFIED = {
         "what underwrites `st` being reset at all."),
 
     # ---- src/project.v ----------------------------------------------------
-    ("src/project.v", 401, "v_branch", "if"): (
+    ("src/project.v", 406, "v_branch", "if"): (
         OWED,
         "A host PUSH and an engine POP landing on the SAME queue in one cycle. "
         "The arm exists so the occupancy update is not lost, and reaching it "
@@ -187,17 +187,21 @@ CLASSIFIED = {
     # ⚠ The first draft held the chip in LOAD mode to stop the engine popping
     # and pushed nothing at all: the host strobe IS `ui_in[6]` = `PIN_WR`, so
     # in LOAD mode those pushes went to the image loader.
-    ("src/project.v", 557, "v_branch", "else"): (
-        DEAD_CONFIG,
-        "⚠ THIS ONE IS NEITHER UNREACHABLE NOR OWED, AND IT NEEDS A RULING. "
-        "`RX_SERIAL` is a `parameter integer RX_SERIAL = 1` at line 98 and it "
-        "is overridden NOWHERE in the tree -- the only two references are the "
-        "declaration and this use. So the `else` is the RX_SERIAL = 0 build, "
-        "a configuration nothing instantiates and the chip does not ship. "
-        "⇒ Two honest resolutions, and code does not pick between them: sweep "
-        "it as a build arm the way `SPL_CFG = 1` now is, or delete the "
-        "parameter and the arm. Leaving it is shipping source that no "
-        "configuration executes."),
+    # ⭐⭐ RETIRED BY DELETION, and it is the only point in this table that
+    # retired that way rather than by a test reaching it. The `DEAD_CONFIG`
+    # entry here was `src/project.v` 557, the implicit `else` of
+    # `if (RX_SERIAL != 0)`: a parameter overridden NOWHERE in the tree, so the
+    # arm was shipped source no configuration executed. It named two honest
+    # resolutions -- sweep it as a build arm the way `SPL_CFG = 1` is, or
+    # delete the parameter and the arm -- and DELETE was ruled. The parameter,
+    # the branch and the rows that froze it in the Part 1 contract and the S2
+    # freeze all went together.
+    # ⛔ SO `DEAD_CONFIG` NOW HAS NO MEMBERS, and the status is deliberately
+    # KEPT in the vocabulary rather than removed with its last user: it is the
+    # classification that says "this arm cannot be reached because no build
+    # selects it", and the next unexercised parameter needs somewhere to land
+    # that is not `UNREACHABLE`. ⚠ An empty class is not a dead one -- it is a
+    # class whose only member was resolved, which is the outcome it exists for.
 
     # ---- test/fram_i2c.v (the peer model Wilson named) --------------------
     # ⭐ A POINT ONLY VERILATOR 5.053 EMITS. The pinned suite adds
@@ -348,10 +352,13 @@ ANCHOR_TEXT = {
         "default: ;",
     ("src/pe_engine.v", 1701):
         "default: st <= ST_IDLE;",
-    ("src/project.v", 401):
+    ("src/project.v", 406):
         "if (do_push && do_pop && (q_sel == tx_tag)) begin",
-    ("src/project.v", 557):
-        "if (RX_SERIAL != 0) begin",
+    # `src/project.v` 557 -- `if (RX_SERIAL != 0) begin` -- is gone with the
+    # parameter. ⭐ THE ANCHOR IS WHAT MADE THAT SAFE TO DO: the source text
+    # was recorded beside the line number, so the deletion had to account for
+    # the anchor instead of leaving a live number pointing at whatever moved
+    # into line 557.
     ("test/fram_i2c.v", 207):
         "phase    <= shin[0] ? P_RDATA : P_AHI;",
     ("test/fram_i2c.v", 208):
@@ -403,6 +410,24 @@ ANCHOR_TEXT = {
 #: "29 uncovered" is not a fact about the design on its own -- it is a fact
 #: about the design AND the release.
 TOOL_LABEL = "Verilator (unrecorded)"
+
+#: ⛔⛔ THE PINNED RELEASE, ASSERTED AND NOT MERELY LABELLED. Labelling was not
+#: enough, and the way that showed up is the reason this exists: a sweep run
+#: against the distro's 5.032 instead of the pinned binary reported
+#:
+#:     src/pe_engine.v  1337 total  234 uncov  651 ceiling
+#:                                  improved by 417 -- lower the ceiling
+#:
+#: on EVERY file at once. The ceilings are EXACT POINT COUNTS, so a release
+#: that emits half as many points reads as a sweeping improvement -- and the
+#: gate's own advice was to ratchet down to it. Accepting that invitation would
+#: have frozen wrong-tool numbers into the ratchet permanently, where they
+#: would then mis-measure every later run. ⭐ A RATCHET IS ONLY AS GOOD AS THE
+#: CONSTANCY OF WHAT IT COUNTS, so the counter is now part of the contract.
+#: ⚠ The check is on the MAJOR.MINOR prefix, because the pinned build is a
+#: devel revision ("5.053 devel rev v5.052-258-ga419e9157 (mod)") whose full
+#: string carries a git hash that moves without the point counts moving.
+PINNED_TOOL = "Verilator 5.053"
 
 _LINE = re.compile(r"^C '(.*)' (\d+)\s*$")
 
@@ -762,6 +787,51 @@ def check_reasons() -> int:
     return rc
 
 
+def check_pinned_tool_quiet(label) -> int:
+    """1 if `label` is not the pinned release. Shared by the gate and its
+    must-fire so the two cannot drift apart.
+
+    ⛔ TOKEN EQUALITY, NOT A PREFIX, and the must-fire is what forced it: the
+    first version of this said `label.startswith(PINNED_TOOL)`, which accepts
+    "Verilator 5.0531" -- a release that would emit its own point counts while
+    reading as the pin.
+    """
+    want = PINNED_TOOL.split()
+    got = label.split()
+    if len(got) < 2 or len(want) < 2:
+        return 1
+    return 0 if (got[0] == want[0] and got[1] == want[1]) else 1
+
+
+def check_pinned_tool(label) -> int:
+    """The sweep must have been taken with the PINNED release.
+
+    ⛔ RED, NOT A WARNING, and the difference matters: the toggle ceilings are
+    exact point counts, so data from another release does not merely carry a
+    caveat -- it makes every ceiling verdict in this run meaningless, in the
+    direction that reads as good news. See PINNED_TOOL.
+    """
+    print()
+    print("  --- the sweep's tool, against the pin ---")
+    if label.startswith("Verilator (unrecorded"):
+        print("    *** the tool is UNRECORDED, so it cannot be checked against")
+        print("        the pin. Re-run test/coverage_sweep.sh, which writes")
+        print("        sweep_env.txt beside the data.")
+        return 1
+    if check_pinned_tool_quiet(label):
+        print("    *** %s produced this data; the pin is %s"
+              % (label, PINNED_TOOL))
+        print("        ⛔ The toggle ceilings are EXACT POINT COUNTS measured")
+        print("           at the pin. On 5.032 every file reads 'improved --")
+        print("           lower the ceiling', because that release emits about")
+        print("           half the toggle points. Ratcheting to those numbers")
+        print("           would freeze a wrong-tool count into the ratchet.")
+        print("        ⇒ export PE_VERILATOR=<pinned verilator> and re-sweep.")
+        return 1
+    print("    %-44s ok (pin %s)" % (label, PINNED_TOOL))
+    return 0
+
+
 def check_toggle(agg) -> int:
     """Toggle coverage is ratcheted per file: the ceiling may only fall."""
     rc = 0
@@ -1057,6 +1127,24 @@ def selftest(agg) -> int:
                             "ok" if short else "*** ACCEPTED"))
     if not short:
         rc = 1
+    # (3b) ⛔⛔ THE PIN ITSELF, priced on the release that actually fooled it.
+    # A guard added after a near miss and never mutated is the shape this
+    # project keeps finding, so each arm must fail FOR ITS OWN REASON.
+    for label, want_fail in (
+            ("Verilator 5.053", False),
+            ("Verilator 5.032", True),       # what the distro gives, the near miss
+            ("Verilator 5.036", True),       # cocotb's floor, still not the pin
+            ("Verilator 5.0531", True),      # ⛔ a prefix that must NOT pass
+            ("Verilator (unrecorded)", True),
+            ("Icarus 12.0", True)):
+        got = bool(check_pinned_tool_quiet(label))
+        ok = (got == want_fail)
+        print("    %-52s %s"
+              % ("tool pin: %-24s -> %s" % (label,
+                                            "REJECT" if want_fail else "accept"),
+                 "ok" if ok else "*** wanted the other verdict"))
+        if not ok:
+            rc = 1
     # (4) ⛔ THE PARSER ITSELF, priced on the aggregation it exists for. A
     # point that IS covered must read as covered -- if the hier aggregation
     # broke, everything would read uncovered and the gate would be loud and
@@ -1153,6 +1241,7 @@ def main() -> int:
         print("    produced it is unrecorded, so a toggle-ceiling breach")
         print("    cannot be told from a version difference.")
     rc = 0
+    rc |= check_pinned_tool(TOOL_LABEL)
     rc |= check_points(agg)
     rc |= check_cocotb(agg)
     rc |= check_stale(agg)

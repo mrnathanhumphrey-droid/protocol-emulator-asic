@@ -95,7 +95,12 @@ module tt_um_protocol_emulator #(
     parameter integer DLY_W    = 10,    // program delay field
     parameter integer D_W      = 8,     // D_sched field
     parameter         MEM_TYPE = "flops",  // ⛔ default: S0 = SRAM-BLOCKED
-    parameter integer RX_SERIAL = 1,    // 1 = 3-pin serial host view
+    // ⛔ `RX_SERIAL` WAS DELETED HERE, by ruling. It was overridden nowhere in
+    // the tree, so its `else` was source no configuration executed; the serial
+    // RX view is now unconditional at its one use site. It is NOT coming back
+    // as an `ifdef`: the point of the deletion is that an unexercised knob is
+    // not a priced alternative, and an `ifdef` would restore the dead arm
+    // without restoring a build that runs it.
     // ⛔ fixed at build time because the async release path cannot be muxed
     parameter integer MISO_PIN = 7,     // uio index of the SPI-target MISO
     parameter integer CS_PIN   = 6,     // uio index of its CS input
@@ -554,33 +559,42 @@ module tt_um_protocol_emulator #(
           ser_cnt     <= FRAME_LEN;
           status_turn <= 1'b0;
         end else if (prog_mode) begin
-          if (RX_SERIAL != 0) begin
-            // ⛔⛔ PRIME BEFORE FRAMING, and `rb_addr` alone was not enough.
-            // Latching the pre-increment address made byte 0 REACHABLE, but a
-            // frame is queued from `s_rdata` in the same breath as the read is
-            // REQUESTED, so frame 1 still carried whatever the register held
-            // from the previous walk: the stream read 0x22(stale), 0xAA, 0x22,
-            // ... with the image's own byte 0 arriving SECOND.
-            // ⭐ So the first two visits issue the read and let it land,
-            // queueing NO frame; from then on every frame carries the byte its
-            // own request fetched and byte 0 is the FIRST payload. This is the
-            // same prime-before-release shape the engine already uses, for the
-            // same reason: a pipeline's first output is not data.
-            if (rb_prime != 2'd2) begin
-              if (rb_prime == 2'd0) begin
-                rb_addr <= rb_ptr;            // address 0, pre-increment
-                rb_ptr  <= rb_ptr + 1'b1;
-                rb_re   <= 1'b1;
-              end
-              rb_prime <= rb_prime + 2'd1;
-            end else begin
-              ser_sh  <= {1'b0, KIND_NONE, s_rdata};
-              ser_cnt <= FRAME_LEN;
-              rb_addr <= rb_ptr;          // THE PRE-INCREMENT ADDRESS
+          // ⛔ THE SERIAL RX VIEW IS UNCONDITIONAL. This was wrapped in
+          // `if (RX_SERIAL != 0)` until the coverage sweep showed the
+          // parameter was overridden NOWHERE in the tree: its only two
+          // references were the declaration and this use, so the implicit
+          // `else` was shipped source that no configuration executed. The
+          // sweep offered two honest resolutions -- sweep it as a build arm
+          // the way `SPL_CFG = 1` is, or delete it -- and DELETE was ruled.
+          // ⚠ The parameter's stated justification in the Part 1 contract and
+          // the S2 freeze was "the sweep needs to be able to turn it off to
+          // measure what it costs". That was never exercised in any arm, which
+          // is exactly why it went: an unexercised knob is not a priced one.
+          // ⛔⛔ PRIME BEFORE FRAMING, and `rb_addr` alone was not enough.
+          // Latching the pre-increment address made byte 0 REACHABLE, but a
+          // frame is queued from `s_rdata` in the same breath as the read is
+          // REQUESTED, so frame 1 still carried whatever the register held
+          // from the previous walk: the stream read 0x22(stale), 0xAA, 0x22,
+          // ... with the image's own byte 0 arriving SECOND.
+          // ⭐ So the first two visits issue the read and let it land,
+          // queueing NO frame; from then on every frame carries the byte its
+          // own request fetched and byte 0 is the FIRST payload. This is the
+          // same prime-before-release shape the engine already uses, for the
+          // same reason: a pipeline's first output is not data.
+          if (rb_prime != 2'd2) begin
+            if (rb_prime == 2'd0) begin
+              rb_addr <= rb_ptr;            // address 0, pre-increment
               rb_ptr  <= rb_ptr + 1'b1;
               rb_re   <= 1'b1;
-              status_turn <= 1'b1;
             end
+            rb_prime <= rb_prime + 2'd1;
+          end else begin
+            ser_sh  <= {1'b0, KIND_NONE, s_rdata};
+            ser_cnt <= FRAME_LEN;
+            rb_addr <= rb_ptr;          // THE PRE-INCREMENT ADDRESS
+            rb_ptr  <= rb_ptr + 1'b1;
+            rb_re   <= 1'b1;
+            status_turn <= 1'b1;
           end
         end else if (rx_pend) begin
           // ⭐ A PAYLOAD ALWAYS WINS THE NEXT FRAME SLOT. Checked before the

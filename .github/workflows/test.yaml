@@ -31,6 +31,16 @@ jobs:
       # measuring two different tools on the two sides.
       # ⚠ ONLY ITS VERILATOR IS ADOPTED. The same suite ships yosys 0.69 and
       # iverilog 14.0-devel, and both feed PUBLISHED numbers -- the yosys
+      # ⛔⛔ AND ITS IVERILOG CANNOT BUILD THIS DESIGN AT ALL, which is a
+      # stronger reason than the policy one. MEASURED: iverilog 14.0 (devel)
+      # (s20260301-500-g2e81fcccb-dirty) gives 8 elaboration errors --
+      # "Unable to bind parameter `LW' in `tb.user_project.u_eng'",
+      # "Unable to bind wire/reg/memory `a_q'", "... `primed'" -- where apt's
+      # release iverilog elaborates it cleanly. ⭐ ATTRIBUTED WITH A CONTROL
+      # ARM, not assumed: the identical 8 errors appear at HEAD and at the
+      # committed tree, and all 8 are in pe_engine.v, so they are the TOOL and
+      # not any local edit. ⇒ Do not "upgrade" the suite's iverilog onto PATH
+      # expecting the cocotb suite to run; it will not elaborate.
       # netlist drives the reset audit's flop classification and allowlist,
       # while `cj_measured.txt` (including the open hdr_cyc 92-vs-91 finding)
       # is an iverilog 12.0 measurement. Those move only with a measured diff,

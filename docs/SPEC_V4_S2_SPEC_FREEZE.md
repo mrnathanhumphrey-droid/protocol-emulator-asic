@@ -140,7 +140,7 @@ remain** for logic *and* the 252 state flops.
 | `DLY_W` | 10 | F1's fit |
 | `D_W` | 8 | deadline spread |
 | `MEM_TYPE` | **`flops`** | ⛔ default flops: **S0 = SRAM-BLOCKED**. The `sram` path stays a parameter for the predictive-node tier |
-| `RX_SERIAL` | 1 | the ruled map needs serial; the sweep must be able to turn it off to price it |
+| ~~`RX_SERIAL`~~ | ~~1~~ | **DELETED BY RULING.** The row's own rationale was "the sweep must be able to turn it off to price it"; the coverage sweep measured that no arm ever did, and nothing in the tree overrode it. The parameter and its dead `else` are gone from `src/project.v`. ⚠ Recorded rather than erased — a freeze that quietly loses entries is not a freeze |
 
 ---
 
