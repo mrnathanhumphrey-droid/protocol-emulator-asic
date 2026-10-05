@@ -45,6 +45,8 @@ module tb_pinrange ();
   wire [7:0] uo_out, uio_out, uio_oe;
   integer    i, fails = 0, mode, img_bytes, ncyc, cyc;
   integer    edges, busy_cyc, xseen, xser;
+  integer    j, armed_cyc, xarm;
+  reg        armed_any;
   reg  [3:0] prev_proto;
   reg  [7:0] prev_uio;
   reg [8*160-1:0] imgfile;
@@ -112,6 +114,7 @@ module tb_pinrange ();
     load_image;
 
     edges = 0; busy_cyc = 0; xseen = 0; xser = 0;
+    armed_cyc = 0; xarm = 0;
     prev_proto = uo_out[3:0];
     prev_uio   = uio_out;
     for (cyc = 0; cyc < ncyc; cyc = cyc + 1) begin
@@ -143,6 +146,16 @@ module tb_pinrange ();
         xser = xser + 1;
       end
       if (dut.u_eng.st !== ST_IDLE) busy_cyc = busy_cyc + 1;
+      // ⭐ THE ARMED WINDOW AND THE X IN IT, for MODE=2. `arm_hit[gi] =
+      // l_armed[gi] & ...` masks the X to 0 whenever the lane is NOT armed,
+      // so the defect is only observable inside the armed window -- which is
+      // why the window is COUNTED and asserted non-empty below. A pin-level
+      // probe cannot see this at all.
+      armed_any = 1'b0;
+      for (j = 0; j < N_LANES; j = j + 1)
+        if (dut.u_eng.l_armed[j] === 1'b1) armed_any = 1'b1;
+      if (armed_any) armed_cyc = armed_cyc + 1;
+      if (^dut.u_eng.arm_hit === 1'bx) xarm = xarm + 1;
     end
 
     $display();
@@ -164,7 +177,11 @@ module tb_pinrange ();
                : "*** FAIL -- a refused program drove its pins");
       if (edges != 0)
         fail("the refused program still moved a pin");
-    end else begin
+    // ⛔ MODE 2 HAS ITS OWN CLAIM AND MUST NOT INHERIT MODE 1'S. The
+    // reserved-index arm asserts the lane stays LIVE and moves no pin;
+    // the arm-on-reserved-index program deliberately moves a real pin and
+    // then halts, so falling through reported a passing run as a failure.
+    end else if (mode == 1) begin
       $display("===== tb_pinrange: THE RESERVED INDEX IS LEGAL, DRIVES NONE ==");
       $display("  PIN_NONE = 15 names no pin. The lane must RUN -- the no-op");
       $display("  half-bit idiom depends on it -- and every pin write must be");
@@ -193,6 +210,25 @@ module tb_pinrange ();
                : "*** FAIL -- a pin moved for a lane that names no pin");
       if (edges != 0)
         fail("a pin moved although the lane names the reserved index");
+    end
+    if (mode == 2) begin
+      $display("===== tb_pinrange: AN ARM ON THE RESERVED INDEX ============");
+      $display("  `l_armpin` is written straight from the action's pin field,");
+      $display("  and pin_rise/pin_fall are [N_PINS-1:0]. An ARM on 12..15");
+      $display("  reads OUT OF RANGE -- the third site in the family.");
+      $display("    armpin (lane 0)          : %0d", dut.u_eng.l_armpin[0]);
+      // ⛔ THE WINDOW MUST EXIST OR THE CLAIM IS VACUOUS: `arm_hit` is masked
+      // to 0 whenever no lane is armed, so "no X" proves nothing without it.
+      $display("    cycles with a lane ARMED : %0d %0s", armed_cyc,
+               (armed_cyc > 0) ? "ok -- the window exists"
+               : "*** FAIL -- never armed, so 'no X' proves nothing");
+      if (armed_cyc == 0)
+        fail("the lane never armed, so the arm_hit claim is vacuous");
+      $display("    cycles with arm_hit X    : %0d %0s", xarm,
+               (xarm == 0) ? "ok -- the range guard holds"
+               : "*** FAIL -- an out-of-range edge select went X");
+      if (xarm != 0)
+        fail("arm_hit went X: the l_armpin range guard is gone");
     end
     $display("    X on the PROTOCOL pins   : %0d %0s", xseen,
              (xseen == 0) ? "ok -- no out-of-range write reached a pin"
@@ -230,7 +266,8 @@ module tb_pinrange ();
     if (fails == 0)
       $display("  tb_pinrange: PASS (%0s)",
                (mode == 0) ? "open-drain on uo refused"
-                           : "reserved index legal, drives nothing");
+               : (mode == 2) ? "an ARM on the reserved index drives no X"
+                             : "reserved index legal, drives nothing");
     else
       $display("  tb_pinrange: *** FAILED %0d check(s)", fails);
     $finish;

@@ -59,6 +59,14 @@ GATES=(
   # `N_LANES` ever outgrows the explicit [2:0] on `e_rx_lane` -- and it lives
   # here rather than in the RTL because a generate-guarded zero-width net was
   # tried as a compile-time assertion and iverilog accepted it SILENTLY.
+  # ⛔⛔ THE SAME DEFECT THREE TIMES is why this gate exists: an array
+  # indexed by a PROGRAM-CONTROLLED pin field can be driven out of range,
+  # and it shipped as the `pin_out[12]` WRITE, then as the `pin_in[a_pin]`
+  # RX SAMPLE, then as the `pin_rise[l_armpin]` EDGE SELECT -- each found
+  # and fixed separately. It enumerates the family and holds every member
+  # to a declared guard, keyed on (file, array, index) so nothing has to be
+  # re-anchored when lines move.
+  model/gate_program_index.py
   model/part1_param_contract.py
   # ⛔⛔ THE HARNESS MUST BUILD AT GATE LEVEL, and this is in the list because
   # a checkpoint harden died proving otherwise: `gl_test` failed in 55 seconds

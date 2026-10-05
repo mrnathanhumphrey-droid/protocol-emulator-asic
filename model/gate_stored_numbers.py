@@ -266,6 +266,14 @@ SPEC_SYMBOLS = {
     # judged by, the failure text that certifies the kill, and why. Its
     # numbers are line counts in prose, not measurements.
     ("test/run_mutants.py", "PINRANGE_MUTANTS"),
+    # ⚠ PINRANGE_ARMS is NOT listed: it holds two string values, so the
+    # scraper (>= 3 numbers) never sees it, and a named exclusion the
+    # scraper cannot find is itself a finding -- this gate says so, and said
+    # so about this very line.
+    # ⭐ the program-index family: (file, array, index) -> (guard, reason).
+    # Its only numbers are the pin-count bound in the prose.
+    ("model/gate_program_index.py", "CLASSIFIED"),
+    ("model/gate_program_index.py", "PROGRAM_INDEX"),
     # ⭐ MUTANT INVENTORIES ARE DECLARATIONS, not measurements: a define, what
     # it breaks, the failure text that certifies the kill, and why. The numbers
     # the scraper counts are inside the PROSE (queue indices, byte values named

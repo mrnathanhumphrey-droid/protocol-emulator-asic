@@ -142,7 +142,14 @@ CONFIG = {
         "arms": [("refuse", ["+IMG=test/cfgerr_image.hex", "+NCYC=8000",
                              "+MODE=0"]),
                  ("reserved", ["+IMG=test/pinnone_image.hex", "+NCYC=8000",
-                               "+MODE=1"])],
+                               "+MODE=1"]),
+                 # ⭐ THE THIRD SITE IN THE FAMILY: an `OP_ARM` on the reserved
+                 # index put X into `arm_hit` for every armed cycle. The arm
+                 # counts the armed WINDOW and asserts it non-empty, because
+                 # `arm_hit` is masked to 0 whenever no lane is armed -- so
+                 # "no X" would otherwise be vacuous.
+                 ("armnone", ["+IMG=test/armnone_image.hex", "+NCYC=8000",
+                              "+MODE=2"])],
     },
     "tb_i2c": {
         "srcs": ["test/fram_i2c.v"],

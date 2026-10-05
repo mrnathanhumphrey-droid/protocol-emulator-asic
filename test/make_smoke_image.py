@@ -253,6 +253,44 @@ def build_cfgerr(d: int = 20):
     return b"".join(headers) + b"".join(prog)
 
 
+def build_armnone(d: int = 20):
+    """A lane that ARMS on the RESERVED INDEX -- the third out-of-range read.
+
+    ⛔⛔ THE DEFECT THIS IS FOR. `l_armpin[cur] <= a_pin` is written straight
+    from the action's 4-bit pin field with nothing refusing it, and
+    `pin_rise[l_armpin[gi]]` / `pin_fall[...]` index a `[N_PINS-1:0]` = [11:0]
+    vector. An `OP_ARM` naming 12..15 therefore reads OUT OF RANGE.
+    MEASURED before the guard existed: `arm_hit` was X for ALL 198 armed cycles
+    of this program, against 0 for the same program arming on a real pin.
+    ⚠ `ready` did NOT go X -- the terms it is ANDed with masked it -- so the X
+    was never shown to reach the scheduler. The guard went in anyway.
+
+    ⭐ MODE IS PUSH-PULL, and the first draft of this program got it wrong in a
+    way worth recording: at mode 0 the 1.6s loader check refuses a clock pin at
+    or above `N_UIO`, and PIN_NONE is 15 -- so BOTH the test and its control
+    were refused at load with `config_err` and zero dispatches. The control
+    failing identically is what showed the probe was wrong rather than the
+    design.
+    """
+    prog, headers = [], []
+    off = ACT_BASE
+    l0 = off
+    seq = [
+        act(OP_ARM, PIN_NONE, 0, 200),     # arm on a FALL of a pin that is not
+        act(OP_LEVEL, 0, 1, d),            # then move a real pin
+        act(OP_LEVEL, 0, 0, d),
+        act(OP_REARM, 0, 1, d),
+    ]
+    prog += seq
+    off += len(seq) * ACT_BYTES
+    lp = off
+    prog.append(act(OP_REARM, 0, 0, 500))
+    headers.append(hdr(0, PIN_NONE, 1, d, 2, 2 * d, 3 * d, l0))
+    for n in range(1, N_LANES):
+        headers.append(hdr(n, n, 0, 500, 2, 200, 240, lp))
+    return b"".join(headers) + b"".join(prog)
+
+
 def build_pinnone(d: int = 20):
     """A LANE ON THE RESERVED NON-DRIVING INDEX, shifting (ruling (a) item 1).
 
@@ -754,6 +792,10 @@ def main() -> int:
             # ever put PIN_NONE on an OP_LEVEL action.
             (["--pinnone"], "lane on the reserved index, shifting",
              "pinnone_image.hex"),
+            # ⭐ the THIRD out-of-range read: an OP_ARM on the reserved index,
+            # which put X into `arm_hit` for every armed cycle.
+            (["--armnone"], "OP_ARM on the reserved index",
+             "armnone_image.hex"),
             # ⭐ the FULL MB85RC256V write -- four bytes, so the peer reaches
             # P_ALO and P_WDATA and a byte actually lands in its memory. The
             # certified 2-byte frame stays exactly as it was.
@@ -911,6 +953,15 @@ def main() -> int:
                 fh.write("%02x" % b + chr(10))
         print("i2c dev+addrhi+addrlo image (reaches P_ALO; a 4th byte would be "
               "291 bytes > 256), %d bytes -> %s" % (len(img), out))
+        return 0
+    if "--armnone" in sys.argv:
+        img = build_armnone()
+        out = os.path.join(here, "armnone_image.hex")
+        with open(out, "w", encoding="ascii") as fh:
+            for b in img:
+                fh.write("%02x" % b + chr(10))
+        print("armnone image (OP_ARM on the reserved index), %d bytes -> %s"
+              % (len(img), out))
         return 0
     if "--pinnone" in sys.argv:
         img = build_pinnone()

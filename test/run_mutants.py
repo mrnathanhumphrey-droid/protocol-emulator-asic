@@ -107,6 +107,16 @@ HALF_MUTANTS = [
 ]
 TX_IMG = "test/tx_image.hex"
 PINNONE_IMG = "test/pinnone_image.hex"
+ARMNONE_IMG = "test/armnone_image.hex"
+
+#: ⛔ EACH PINRANGE MUTANT HAS ITS OWN PROGRAM AND MODE, and each gets
+#: its OWN baseline below. A family that shared one baseline would report
+#: "the mutant killed it" for an arm whose unmutated run was never
+#: checked -- which is unreadable, not evidence.
+PINRANGE_ARMS = {
+    "M_UNGUARDED_SAMPLE": (PINNONE_IMG, "1"),
+    "M_UNGUARDED_ARMPIN": (ARMNONE_IMG, "2"),
+}
 TX_BADCLK_IMG = "test/tx_badclk_image.hex"
 # (define, what it breaks, the text that certifies the kill, why, which image)
 # ⭐ TWO IMAGES, because the two mutants break DIFFERENT claims: the tag mutant
@@ -161,6 +171,20 @@ PINRANGE_MUTANTS = [
      "synthesis made of it, deterministic but UNSPECIFIED, which is worse "
      "because nothing warns. The guard samples a defined 0 so the behaviour "
      "is a property of the RTL."),
+    ("M_UNGUARDED_ARMPIN",
+     "read pin_rise/pin_fall[l_armpin] with no range guard",
+     "arm_hit went X: the l_armpin range guard is gone",
+     "⛔ THE THIRD SITE IN THE SAME FAMILY, and the one the class sweep "
+     "found. `l_armpin[cur] <= a_pin` is written straight from the action's "
+     "4-bit pin field with nothing refusing it, and `pin_rise`/`pin_fall` "
+     "are [N_PINS-1:0], so an OP_ARM naming 12..15 reads OUT OF RANGE. "
+     "⭐ MEASURED: `arm_hit` X for ALL 198 armed cycles against 0 on a real "
+     "pin, with the armed window counted so the result cannot be vacuous -- "
+     "`arm_hit` is masked to 0 whenever no lane is armed, so a pin-level "
+     "probe cannot see this at all. ⚠ `ready` did NOT go X: the terms it is "
+     "ANDed with masked it, so this was never shown to reach the scheduler. "
+     "Guarded anyway, because an X at a flop's input surviving on which "
+     "terms happen to mask it is not a property to rely on."),
 ]
 EDGE_MUTANTS = [
     ("M_NO_REBASE",
@@ -565,49 +589,55 @@ def main() -> int:
     # unmutated run must report ZERO serial X on the reserved-index program.
     print()
     print("  --- out-of-range sample mutants (bench: tb_pinrange) ---")
-    pp = os.path.join(ROOT, PINNONE_IMG)
-    if not os.path.isfile(pp):
+    if not os.path.isfile(os.path.join(ROOT, PINNONE_IMG)):
         print("    *** %s is missing. Build it:" % PINNONE_IMG)
         print("        python test/make_smoke_image.py --pinnone")
         survivors.append("tb_pinrange image")
     else:
-        with open(pp, encoding="ascii") as fh:
-            nbp = len([w for w in fh.read().split() if w])
-        p_extra = ["+NBYTES=%d" % nbp, "+NCYC=8000", "+MODE=1"]
         base_p = os.path.join(SCRATCH, "mut_pr_base.vvp")
         rc, log = build([], base_p, src=SRC_PINRANGE)
         if rc != 0:
             print("    *** tb_pinrange does not compile: %s" % log[:300])
             survivors.append("tb_pinrange build")
         else:
-            out_p = run(base_p, img=PINNONE_IMG, extra=p_extra)
-            if "tb_pinrange: PASS" not in out_p:
-                print("    *** the UNMUTATED tb_pinrange does not pass --")
-                print("        nothing below is interpretable.")
-                survivors.append("tb_pinrange baseline")
-            else:
-                print("    baseline: PASS (guard holds, 0 serial X)")
-                for define, breaks, want, why in PINRANGE_MUTANTS:
-                    v = os.path.join(SCRATCH,
-                                     "mut_pr_%s.vvp" % define.lower())
-                    rc, log = build([define], v, src=SRC_PINRANGE)
-                    if rc != 0:
-                        print("    %-19s BUILD FAIL -- not a kill" % define)
-                        wrong_reason.append((define, "build"))
-                        continue
-                    o = run(v, img=PINNONE_IMG, extra=p_extra)
-                    killed = "tb_pinrange: PASS" not in o
-                    right = want in o
-                    RAN.append(define)
-                    print("    %-19s %-40s %s"
-                          % (define, breaks[:40],
-                             "RED" if killed else "*** SURVIVED ***"))
-                    print("        %s" % why)
-                    if not killed:
-                        survivors.append(define)
-                    elif not right:
-                        print("        *** died, but not of `%s` ***" % want)
-                        wrong_reason.append((define, "wrong reason"))
+            for define, breaks, want, why in PINRANGE_MUTANTS:
+                img_rel, mode = PINRANGE_ARMS[define]
+                ip = os.path.join(ROOT, img_rel)
+                if not os.path.isfile(ip):
+                    print("    *** %s is missing for %s" % (img_rel, define))
+                    survivors.append(define + " image")
+                    continue
+                with open(ip, encoding="ascii") as fh:
+                    nbp = len([w for w in fh.read().split() if w])
+                extra = ["+NBYTES=%d" % nbp, "+NCYC=8000", "+MODE=" + mode]
+                out_p = run(base_p, img=img_rel, extra=extra)
+                if "tb_pinrange: PASS" not in out_p:
+                    print("    *** the UNMUTATED tb_pinrange does not pass on"
+                          " %s -- %s is not interpretable."
+                          % (os.path.basename(img_rel), define))
+                    survivors.append(define + " baseline")
+                    continue
+                print("    baseline on %-22s PASS"
+                      % os.path.basename(img_rel))
+                v = os.path.join(SCRATCH, "mut_pr_%s.vvp" % define.lower())
+                rc, log = build([define], v, src=SRC_PINRANGE)
+                if rc != 0:
+                    print("    %-19s BUILD FAIL -- not a kill" % define)
+                    wrong_reason.append((define, "build"))
+                    continue
+                o = run(v, img=img_rel, extra=extra)
+                killed = "tb_pinrange: PASS" not in o
+                right = want in o
+                RAN.append(define)
+                print("    %-19s %-40s %s"
+                      % (define, breaks[:40],
+                         "RED" if killed else "*** SURVIVED ***"))
+                print("        %s" % why)
+                if not killed:
+                    survivors.append(define)
+                elif not right:
+                    print("        *** died, but not of `%s` ***" % want)
+                    wrong_reason.append((define, "wrong reason"))
 
     # ---- the HALF-DUPLEX mutants, on tb_half -------------------------
     print()

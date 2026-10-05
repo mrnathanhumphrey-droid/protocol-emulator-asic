@@ -593,7 +593,33 @@ module pe_engine #(
   wire [N_LANES-1:0] arm_hit;
   generate
     for (gi = 0; gi < N_LANES; gi = gi + 1) begin : g_arm
-      assign arm_hit[gi] = l_armed[gi] &
+      // ⛔⛔⛔ RANGE-GUARDED, AND THIS WAS A LIVE THIRD INSTANCE OF THE CLASS.
+      // `l_armpin` is `[PINW-1:0]` -- 4 bits, 0..15 -- and `pin_rise`/
+      // `pin_fall` are `[N_PINS-1:0]` = [11:0], so an ARM naming 12..15 reads
+      // OUT OF RANGE. `l_armpin[cur] <= a_pin` is written straight from the
+      // action's pin field with nothing refusing it.
+      // ⭐ MEASURED, not reasoned: with the ARM pin at PIN_NONE, `arm_hit` is
+      // X for ALL 198 armed cycles of the probe program, against 0 for the
+      // same program arming on a real pin. The armed window exists in both, so
+      // the result is not vacuous.
+      // ⚠ WHAT WAS **NOT** SHOWN: `ready` did NOT go X in that program -- the
+      // X was contained by the other terms it is ANDed with. So this is a real
+      // out-of-range read with a real X, and it has NOT been demonstrated to
+      // reach the scheduler. Guarding it anyway, because an X at a flop's
+      // input depending on which terms happen to mask it is not a property to
+      // rely on.
+      // ⇒ `arm_hit = 0` is the right meaning, not merely the safe one: an ARM
+      // on a pin that does not exist can never legitimately fire, so the lane
+      // waits for its timeout, which is exactly what a non-firing arm does.
+      // ⚠ This is the THIRD site in the family (writes, then the RX sample,
+      // now the edge select), which is why `model/gate_program_index.py`
+      // enumerates the class rather than fixing sites one at a time.
+`ifdef M_UNGUARDED_ARMPIN
+      wire arm_real = 1'b1;                 // the mutant: the defect restored
+`else
+      wire arm_real = (l_armpin[gi] < N_PINS[PINW-1:0]);
+`endif
+      assign arm_hit[gi] = l_armed[gi] & arm_real &
                            (l_armedge[gi] ? pin_rise[l_armpin[gi]]
                                           : pin_fall[l_armpin[gi]]);
     end

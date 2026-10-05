@@ -87,6 +87,14 @@ EXPECT = {
         "⚠ Its size is the point: the defect it reproduces was distributed "
         "across every site that touched the pointer, which is how it survived "
         "unnoticed."),
+    "M_UNGUARDED_ARMPIN": (2,
+        "AN IFDEF/ELSE PAIR, like its sibling: one line of guard against one "
+        "line of mutant, so the diff is two. ⭐ Same shape because the FIX is "
+        "the same shape -- the edge select now reads a single `arm_real` wire "
+        "instead of indexing `pin_rise`/`pin_fall` raw, so BOTH arms of the "
+        "`?:` are covered by one guard. Guarding only one would have left the "
+        "asymmetry that made D2 a defect, in the one place where both arms "
+        "index the same program field."),
     "M_UNGUARDED_SAMPLE": (2,
         "ONE LINE, and that is the whole point of the fix. The three sample "
         "sites now read a single guarded wire -- `rx_bit = pin_real ? "

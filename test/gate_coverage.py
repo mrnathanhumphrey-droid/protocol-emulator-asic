@@ -99,7 +99,7 @@ CLASSIFIED = {
     # is not in this table -- it is an owed RULING.
 
     # ---- the two tool-divergent points -----------------------------------
-    ("src/pe_engine.v", 651, "v_branch", "if"): (
+    ("src/pe_engine.v", 677, "v_branch", "if"): (
         TOOL_DIVERGENT,
         "The EDF arbiter's selection condition, `ready[k] && (!winner_v || "
         "edf_key_off[k] < best)`, inside the unrolled `for` over lanes in an "
@@ -111,7 +111,7 @@ CLASSIFIED = {
         "point belongs to. ⛔ Counted as uncovered anyway, because the gate "
         "must not pick the lenient reading of a disagreement it cannot "
         "adjudicate."),
-    ("src/pe_engine.v", 966, "v_branch", "if"): (
+    ("src/pe_engine.v", 992, "v_branch", "if"): (
         TOOL_DIVERGENT,
         "`if (hdr_done && !prime_unp) primed_q <= 1'b1;` -- the prime scan's "
         "COMPLETION test, which sits AFTER the `for` over lanes, not inside "
@@ -131,7 +131,7 @@ CLASSIFIED = {
         "number out of the artefact; do not reconstruct it from memory."),
 
     # ---- src/pe_engine.v --------------------------------------------------
-    ("src/pe_engine.v", 1134, "v_branch", "else"): (
+    ("src/pe_engine.v", 1160, "v_branch", "else"): (
         UNREACHABLE,
         "H_IDLE (line 1134) with `hdr_done` ALREADY SET. Every assignment that puts the "
         "header FSM into H_IDLE clears `hdr_done` in the same non-blocking "
@@ -141,7 +141,7 @@ CLASSIFIED = {
         "the arm of a condition that is true on every entry. ⭐ Checked "
         "structurally by `check_h_idle_clears` below rather than asserted, "
         "because the claim is about two specific lines and would rot."),
-    ("src/pe_engine.v", 1270, "v_line", "case"): (
+    ("src/pe_engine.v", 1296, "v_line", "case"): (
         UNREACHABLE,
         "The prefetch FSM's defensive `default`. `pst` is declared `[2:0]` and "
         "its four encodings P_SCAN/P_REQ/P_WAIT/P_CAP are 3'd0..3'd3, all "
@@ -149,7 +149,7 @@ CLASSIFIED = {
         "⭐ Verified mechanically by `check_full_case` below, which reads the "
         "encodings out of the source -- a hand-counted enumeration is the sort "
         "of claim that survives the addition of a fifth state."),
-    ("src/pe_engine.v", 1476, "v_line", "case"): (
+    ("src/pe_engine.v", 1502, "v_line", "case"): (
         UNREACHABLE,
         "The opcode `case`'s `default`. The opcode field is 3 bits and ALL "
         "EIGHT encodings are named in arms -- OP_LEVEL, OP_SHIFT, OP_SHIFTIN, "
@@ -163,7 +163,7 @@ CLASSIFIED = {
     # other lane, with the lane still LIVE -- the flag must report, never
     # stall. The entry is removed rather than kept, because a stale OWED claim
     # says something is untested when it is tested.
-    ("src/pe_engine.v", 1675, "v_line", "case"): (
+    ("src/pe_engine.v", 1701, "v_line", "case"): (
         UNREACHABLE,
         "The dispatch FSM's defensive `default`. `st` is declared `[1:0]` with "
         "three encodings ST_IDLE/ST_DRIVE/ST_WB = 2'd0..2'd2 at line 666; "
@@ -320,17 +320,17 @@ TOGGLE_CEILING = {
 #: ⇒ The gate reads the anchored line back and requires it to MATCH, so
 #: "copy, do not recall" is mechanised instead of remembered.
 ANCHOR_TEXT = {
-    ("src/pe_engine.v", 651):
+    ("src/pe_engine.v", 677):
         "if (ready[k] && (!winner_v || edf_key_off[k] < best)) begin",
-    ("src/pe_engine.v", 966):
+    ("src/pe_engine.v", 992):
         "if (hdr_done && !prime_unp) primed_q <= 1'b1;",
-    ("src/pe_engine.v", 1134):
+    ("src/pe_engine.v", 1160):
         "H_IDLE: if (!hdr_done) begin",
-    ("src/pe_engine.v", 1270):
+    ("src/pe_engine.v", 1296):
         "default: pst <= P_SCAN;",
-    ("src/pe_engine.v", 1476):
+    ("src/pe_engine.v", 1502):
         "default: ;",
-    ("src/pe_engine.v", 1675):
+    ("src/pe_engine.v", 1701):
         "default: st <= ST_IDLE;",
     ("src/project.v", 401):
         "if (do_push && do_pop && (q_sel == tx_tag)) begin",
@@ -753,7 +753,7 @@ def check_full_case() -> int:
     lines = src.splitlines()
     enc = _encodings(src)
     bare = re.sub(r"//[^\n]*", "", re.sub(r"/\*.*?\*/", "", src, flags=re.S))
-    for line in (1270, 1476, 1675):
+    for line in (1296, 1502, 1701):
         sel, arms = _case_arms(lines, line)
         if sel is None:
             print("    line %-5d *** no enclosing `case` found -- the waiver's"
