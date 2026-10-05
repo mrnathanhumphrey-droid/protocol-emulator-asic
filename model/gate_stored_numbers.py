@@ -146,6 +146,38 @@ SITES = [
          "model/gate_mutant_arms.py",
          "n/a -- the arms are preprocessed every run",
          "a budget with a declared reason per arm; drift in an arm goes red"),
+
+    # ---- the C = 3 re-quote ---------------------------------------------
+    # ⭐ THREE TABLES AND NOT ONE, which is itself the finding. The first
+    # version of that gate kept a single C = 3 table filled from OUR
+    # recurrence and then printed conclusions about the PUBLISHED bound. Each
+    # table is now named for the bound that produced it.
+    Site("model/a2/gate_c3_requote.py", "EXPECTED_C3_PYRTA", LIVE,
+         "min margin per J_pipe at the measured C, pyRTA -- the PUBLISHED one",
+         "model/a2/gate_c3_requote.py",
+         "n/a -- recomputed every run, PYRTA_SRC required",
+         "the corrected companion to gate_j_sound.EXPECTED; the gate is RED "
+         "on drift rather than re-recording"),
+    Site("model/a2/gate_c3_requote.py", "EXPECTED_C2_PYRTA", LIVE,
+         "the same under the OLD C, so the correction's size is checkable",
+         "model/a2/gate_c3_requote.py",
+         "n/a -- recomputed every run, PYRTA_SRC required",
+         "⛔ without it the must-fire could not show every row was strictly "
+         "optimistic -- a correction with no before-value is an assertion"),
+    Site("model/a2/gate_c3_requote.py", "EXPECTED_C3_OURS", LIVE,
+         "min margin per J_pipe at the measured C, OUR recurrence",
+         "model/a2/gate_c3_requote.py", "n/a -- recomputed every run",
+         "the safe-direction cross-check. ⛔ NEVER THE QUOTED NUMBER: it "
+         "reads -2 at J = 8 where pyRTA reads +4, and an earlier draft "
+         "published the -2 as an infeasibility"),
+    Site("model/a2/gate_j_program.py", "SWEEP_LIVE", RECORD,
+         "the live J sweep -- the ten points that retracted the universal J",
+         "model/a2/price_j_sweep.sh",
+         "200k cycles per point, >=100k-cycle asserted steady window",
+         "⛔⛔ THESE NUMBERS EXISTED ONLY IN A SOURCE COMMENT. The gate's "
+         "`sim <= derived` check ran against the STALE `SWEEP` and found zero "
+         "violations while the prose above it said ten. Found by writing a "
+         "check that needed them and getting `0 violations total`"),
 ]
 
 # ⛔ Collections that carry numbers but are SPECIFICATIONS, not measurements:
@@ -187,6 +219,12 @@ SPEC_SYMBOLS = {
     ("model/gate_reverse_trace.py", "LANE_CFG"),
     ("test/make_smoke_image.py", "FIVE_STRESS"),
     ("test/gate_corpus_trace.py", "COLS"),
+    # ⭐ THE C-SATURATION ARMS ARE AN EXPERIMENT'S DESIGN, not its result. The
+    # delays are chosen (40 = 2 x D*, so refill cannot bind; 60 as a slack
+    # control; 2 as the oversubscribed contrast) and the pre-registration
+    # explains each choice. The RESULT is `btbmin`, which lives in
+    # `gate_c3_requote.C_SPACING` and is tabled above.
+    ("test/run_csat.py", "ARMS"),
     # ⭐ FORCED ANSWERS, NOT OBSERVATIONS. The `zone/` validation tables are
     # schedules whose answers are DERIVED BY HAND, used to validate the model
     # generator before TChecker is trusted on anything else. They are a

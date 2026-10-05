@@ -84,6 +84,12 @@ GATES = [
     ("../gate_reverse_trace.py",
      "RT   reverse traceability: the census on the golden model", False),
     ("gate_j_sound.py", "J4   the J sweep; the bar verdict is bound-dependent", True),
+    # ⛔ THE C CORRECTION. `docs/PREREG_C_SAT.md` pre-registered the minimum
+    # inter-dispatch spacing at 2 and it MEASURED 3, so every published r_i and
+    # margin was optimistic. This gate is the re-quote, and it is in the suite
+    # because a correction that runs only when someone remembers it has the
+    # same standing as the number it replaced.
+    ("gate_c3_requote.py", "C3   C = 3 re-quote: r_i and margins corrected", True),
     ("gate_pyrta_jitter.py", "J3   pyRTA witness at J>0; the naive arm is a trap", True),
 ]
 EXPECT_DIGEST = {f for f, _l, needs in GATES if needs}

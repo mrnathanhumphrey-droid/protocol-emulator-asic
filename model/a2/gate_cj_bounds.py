@@ -11,6 +11,21 @@ IF THEY WERE BOUNDS.
   * "C = 2.00" was 708 cycles / 354 jobs -- A MEAN. A mean of exactly 2.00 is
     consistent with every job taking 2 AND with some taking 1 and others 3.
     A2 needs C_max, and a mean cannot supply it.
+    ⛔⛔ AND IT WAS A MEAN OF THE WRONG QUANTITY, found later and recorded
+    here because this is where the figure lives. `svc_cycles` counts cycles
+    with `st != ST_IDLE`: the engine's OCCUPANCY per job. The dispatch FSM is
+    a THREE-state CYCLE and `ST_WB` returns to `ST_IDLE` unconditionally, so
+    the next dispatch decision waits a further cycle and the SPACING between
+    jobs is 3 -- which is what a response-time analysis charges. Occupancy 2
+    and spacing 3 are both exact; the error was using one for the other.
+    ⇒ `docs/PREREG_C_SAT.md` pre-registered the spacing at 2 and named 3 as
+      the falsifier; `test/run_csat.py` measured 3 on four arms with 32,677
+      back-to-back opportunities and not one spacing of 2. The margins are
+      re-quoted in `model/a2/gate_c3_requote.py`.
+    ⚠ EVERYTHING BELOW IS STILL ABOUT OCCUPANCY and is still correct about
+      it -- `min == max == 2` on 8 of 8 opcodes is a real result and is what
+      makes "no opcode costs more than another" checkable. It is simply not
+      the `C` the recurrence needs.
   * "J = 5" was the largest value seen in ONE simulation, with ONE program, at
     ONE phase alignment. That is a FLOOR on the true maximum, not a bound. A
     different lane mix could produce 6.
@@ -55,9 +70,11 @@ OPNAMES = {0: "LEVEL", 1: "SHIFT", 2: "SHIFTIN", 3: "READBIT",
 # INSIDE a state, never how many states are visited. So the service time is the
 # SAME CONSTANT for every action type.
 C_DERIVED = {op: 2 for op in OPNAMES}
-C_DERIVATION = ("ST_DRIVE then ST_WB, both exited UNCONDITIONALLY and with no "
-                "opcode-dependent branch; the opcode selects what is written "
-                "inside a state, never how many states are visited")
+C_DERIVATION = ("OCCUPANCY: ST_DRIVE then ST_WB, both exited UNCONDITIONALLY "
+                "and with no opcode-dependent branch; the opcode selects what "
+                "is written inside a state, never how many states are visited."
+                " ⛔ NOT the inter-dispatch SPACING, which is 3 and is what "
+                "RTA charges -- see gate_c3_requote.py")
 
 # =========================================================================
 # THE J DECOMPOSITION -- one derived worst case per source.

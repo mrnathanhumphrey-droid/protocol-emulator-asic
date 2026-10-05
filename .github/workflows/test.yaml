@@ -54,10 +54,23 @@ jobs:
       # degrades to iverilog-only when it is absent; that is its own declared
       # behaviour, and CI therefore exercises the single-elaborator path. The
       # two-elaborator reading stays a local/by-hand check.
+      # ⭐ `gate_j_program.py` JOINED THEM, and the reason is specific: it now
+      # carries the §6.1 check from `docs/PREREG_C_SAT.md` -- the ten live
+      # measurements that RETRACTED the universal `J = 8` must stay visible
+      # even though the corrected admissibility condition takes seven of them
+      # out of scope. A guard against a retraction being quietly re-opened
+      # should not depend on somebody remembering to run it. It also holds the
+      # recorded violation COUNT, so an edit that drops one goes red.
       # ⛔ NOT INCLUDED HERE: the clean room (it moves files about and runs
       # benches) and the parameter-point sweep plus run_spl_compare (minutes
       # of simulation each). Those stay by-hand at each `cmos5l` checkpoint,
       # and that is a declared boundary rather than an oversight.
+      # ⚠ NOR `gate_c3_requote.py`, AND THAT IS A REAL GAP, not a preference:
+      # pyRTA is the PRIMARY bound, it is NOT VENDORED (reached via PYRTA_SRC),
+      # and the gate is RED by design without it rather than falling back to
+      # our own recurrence. So the C = 3 re-quote is checked by `run_a2.py` at
+      # each checkpoint and not on every push. The same is already true of
+      # every other pyRTA-primary gate.
       # the netlist the reset audit reads, via the SAME script the local flow
       # uses -- its output directory is an argument for exactly this reason
       - name: Netlist for the reset audit
@@ -77,6 +90,7 @@ jobs:
                    model/gate_stored_numbers.py \
                    model/gate_bench_indices.py \
                    model/gate_j_proof_anchors.py \
+                   model/a2/gate_j_program.py \
                    model/pe_asm.py ; do
             echo "=== $g ==="
             python "$g"

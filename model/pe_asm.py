@@ -143,8 +143,17 @@ def compute_j(lanes, spl=2):
     # exclusion that kept the universal J at 8 rather than something larger.
     # ⛔⛔ PORT FEASIBILITY FIRST, AND IT IS STRICTLY STRONGER THAN
     # ADMISSIBILITY. `admissible` only asks whether the DISPATCHER keeps up
-    # (U = k*C/(d+C) <= 1, so d >= 8). Every dispatched action must also be
+    # (U = k*C/d <= 1, so d >= k*C = 15). Every dispatched action must also be
     # REFILLED through ONE shared fetch port, which needs d >= k*L_REFILL.
+    # ⚠ THIS CHECK IS UNREACHABLE AS A REJECTION PATH, AND WAS BEFORE THE
+    # CORRECTION TOO. Port feasibility is tested FIRST and needs d >= 20,
+    # which strictly dominates d >= 15 (and dominated d >= 8 by more). So no
+    # program reaches the `admissible` refusal below -- every sub-D* program
+    # is refused by the port screen with the port arithmetic named, which is
+    # the better message anyway. It is kept rather than deleted because it is
+    # the SOUNDNESS condition: if D* ever fell (more fetch bandwidth), this is
+    # the screen that would start binding, and a loader that had dropped it
+    # would admit an overloaded set.
     # ⚠ THE GAP IS WHERE THE PUBLISHED UNIVERSAL J WAS FOUND UNSOUND: live
     # measurement puts the steady stall at 8..12 for admissible-but-saturated
     # programs (d = 8..18) where the old derivation predicted 0..7. The chip

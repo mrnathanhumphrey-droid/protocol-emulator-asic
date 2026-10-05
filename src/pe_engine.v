@@ -1463,13 +1463,25 @@ module pe_engine #(
     end
   end
 
-  // ⚠ NOT CLAIMED HERE: that C is exactly 2 in silicon. The dispatch FSM spends
-  // two cycles per action BY CONSTRUCTION (ST_DRIVE then ST_WB), which is the
-  // intended C -- but the number A2 needs is the one a SIMULATION and a
-  // post-synthesis path report agree on. ⛔ "Two states therefore C = 2" is a
-  // same-author re-derivation of my own design intent, and this project has
-  // already recorded that such a thing is not an independent witness. S3's
-  // results file states it as owed.
+  // ⛔⛔ C IS 3, NOT 2, AND THIS COMMENT USED TO SAY 2. The dispatch FSM spends
+  // two cycles per action in SERVICE (ST_DRIVE then ST_WB) -- but it is a
+  // THREE-STATE CYCLE, because ST_WB assigns `st <= ST_IDLE` unconditionally
+  // and the next dispatch decision cannot be taken until the cycle after
+  // writeback. So the engine delivers one action every THREE cycles, and the
+  // number a response-time analysis charges is that SPACING, not the
+  // occupancy. `svc_cycles/svc_jobs = 2.00` measured the occupancy and was
+  // exactly right about it.
+  // ⭐ MEASURED, NOT ARGUED: `docs/PREREG_C_SAT.md` pre-registered the minimum
+  // inter-dispatch spacing at 2 and named 3 as the falsifier;
+  // `test/run_csat.py` measured 3 on four arms, over 32,677 spacings in which
+  // another lane was ALREADY ELIGIBLE during the predecessor's writeback and
+  // not one of them 2. Margins are re-quoted in `model/a2/gate_c3_requote.py`
+  // (shipped min margin 12 -> 11, bar 4).
+  // ⚠ STILL OWED: the post-synthesis path report. This is a simulation
+  // reading, and "three states therefore C = 3" would be the same
+  // same-author re-derivation the old comment correctly refused -- which is
+  // why the spacing was measured directly instead of inferred from the state
+  // count a second time.
   wire _unused_eng = &{l_pin[0], 1'b0};
 
 endmodule

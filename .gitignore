@@ -64,3 +64,10 @@ test/cj_measured_alt.txt
 # clean room caught it only afterwards -- the rule is what stops it.
 test/probe_*.hex
 test/artefacts.sha256.probe
+# ⛔ PROBES WRITE ONLY TO SCRATCH NAMES, and the pattern has to cover the
+# WRAPPER SCRIPTS too. Yosys is only on the PATH inside WSL here, so running
+# the reset audit's netlist step by hand needs a tiny `probe_*.sh` in the tree
+# (WSL cannot see Git Bash's /tmp, and `bash -c` inline is forbidden by the
+# toolchain rules). Those wrappers are scratch and must never be committed.
+probe_*.sh
+probe_*.json

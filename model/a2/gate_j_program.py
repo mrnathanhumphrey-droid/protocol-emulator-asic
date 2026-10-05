@@ -69,10 +69,39 @@ except Exception:
     pass
 
 N_LANES = 5
-C_SVC = 2
+# =========================================================================
+# ⛔⛔ TWO DIFFERENT QUANTITIES WERE BOTH CALLED `C`, AND ONE OF THEM WAS
+# MEASURED WRONG. `docs/PREREG_C_SAT.md` pre-registered the minimum
+# inter-dispatch spacing at 2; `test/run_csat.py` measured 3 on four arms with
+# 32,677 back-to-back opportunities and not one spacing of 2. The dispatch FSM
+# is a THREE-state cycle (ST_IDLE -> ST_DRIVE -> ST_WB -> ST_IDLE) and `ST_WB`
+# returns to ST_IDLE unconditionally, so the next dispatch decision cannot be
+# taken until the cycle after writeback.
+#
+#   C_SPACING   = 3   the resource time a job denies to every other job. THIS
+#                     is what a response-time analysis charges, and what
+#                     `utilisation` must use.
+#   C_OCCUPANCY = 2   cycles with `st != ST_IDLE`, i.e. `svc_cycles/svc_jobs`.
+#                     Still exactly right as an answer to its own question.
+#
+# ⚠ AND THE REFILL-WINDOW TERM IN `j_stall` KEEPS THE OCCUPANCY FIGURE, on
+# purpose. Its `+ C` is not a service charge at all: it is "the spare must be
+# refilled between two of this lane's consecutive dispatches, so the window is
+# the action delay plus the lane's own busy time". Which `C` belongs there is a
+# re-derivation, not a substitution -- and the DIRECTION decides the default:
+# a LARGER C makes the shortfall SMALLER and so the derived bound WEAKER, so
+# keeping 2 is the conservative choice for a bound that is already RETRACTED
+# (see the sweep below). Re-deriving it is owed, and is not this round's work.
+C_SPACING = 3
+C_OCCUPANCY = 2
+C_SVC = C_OCCUPANCY   # the refill-window term only; see above
 L_REFILL = 4          # P_SCAN(1) + P_REQ/P_WAIT/P_CAP(3)
 L_CAP = 7             # in-flight(3) + scan(1) + own(3), via winner-first
 J_WINNER_REG = 1      # registering the EDF winner; structural, never stalls
+# the number of points at which live measurement exceeded the derivation. The
+# retraction of the universal J = 8 cites it, so it is asserted, not counted
+# afresh each run.
+VIOLATIONS_RECORDED = 10
 
 # The shipped program's tightest inner action spacing, in cycles at 50 MHz.
 # SPI-master and SPI-target both run 1 MHz => 25 cycles per bit.
@@ -145,6 +174,25 @@ D_MIN_SHIPPED = 25
 SWEEP = {
     2: 5, 3: 5, 4: 5, 5: 5, 6: 5, 7: 5, 8: 5, 9: 5, 10: 4,
     11: 0, 12: 0, 13: 0, 14: 0, 15: 0, 16: 0, 18: 0, 20: 0, 25: 0,
+}
+# ⛔⛔⛔ AND THE LIVE MEASUREMENT AS *DATA*, WHICH IT WAS NOT. The ten
+# violations that retracted the universal `J = 8` existed ONLY in the comment
+# table above. This gate's `sim <= derived` check ran against `SWEEP` -- the
+# stale record -- so it found zero violations and said so, while the prose four
+# screens up said ten. The two-copies defect in its purest form: the gate was
+# green BECAUSE the numbers that falsify it were not in any data structure.
+# ⚠ FOUND BY TRYING TO USE THEM. `docs/PREREG_C_SAT.md` §6.1 pre-registered a
+# check that the admissibility correction must not take known violations out of
+# scope -- and that check printed "0 violations total", which is how the
+# missing data surfaced. A guard can pass because what it guards is absent.
+# ⇒ Transcribed from the comment table, which is the ONLY record of them, and
+#   re-derivable with `bash model/a2/price_j_sweep.sh`.
+# ⚠ d = 2..7 is recorded in that table as a RANGE ("7..11") and not per point,
+#   so those points are ABSENT here rather than guessed. They are inadmissible
+#   under both conditions, so no verdict depends on them.
+SWEEP_LIVE = {
+    8: 10, 9: 9, 10: 8, 11: 8, 12: 11, 13: 11, 14: 11,
+    15: 11, 16: 11, 18: 11, 20: 0, 25: 0,
 }
 # The single-buffer arm, same sweep, for the double buffer's price.
 # ⛔⛔ THIS ARM CANNOT BE RE-MEASURED, AND THE BENEFIT CLAIM RESTS ON IT.
@@ -229,15 +277,48 @@ def port_feasible(d: int, k: int = N_LANES) -> bool:
 
 
 def utilisation(d: int, k: int = N_LANES) -> float:
-    return k * C_SVC / float(d + C_SVC)
+    """⛔⛔ THE PERIOD IS EXACTLY `d`, NOT `d + C`. This read
+    `k*C/(d + C)` and printed `adm = yes` at d = 8, 10, 12 and 18 -- a false
+    label on a green gate, and the reason Wilson ruled it fixed regardless of
+    how the C measurement came out.
+
+    `P8` (anchored in `model/gate_j_proof_anchors.py`) is the premise: writeback
+    advances a lane's timestamp from the PREVIOUS TIMESTAMP, absolutely, not
+    from completion. So a lane releases every `d` cycles however long its job
+    took -- which is also what Theorem 3 needs, and what the RTL comment at
+    that line records as the reason the relative form drifts `k*(r - C)`.
+    Dividing by `d + C` credited the system with a longer period than any lane
+    has, in the optimistic direction.
+
+    ⇒ `U = k*C/d <= 1` admits `d >= k*C`: **15** at the measured spacing,
+    against the **8** this printed before. The two corrections compound --
+    `d + C -> d` alone would have given 10.
+    """
+    return k * C_SPACING / float(d)
 
 
 def admissible(d: int, k: int = N_LANES) -> bool:
-    """Condition (1). ⛔ `<= 1.0` with a tolerance, because d = 8 lands on
+    """Condition (1). ⛔ `<= 1.0` with a tolerance, because `d = k*C` lands on
     EXACTLY 1.0 and a float compare must not silently drop the boundary case --
-    which is the tightest admissible point and therefore the one that sets the
-    universal maximum."""
+    it is the tightest admissible point and therefore the one that would set
+    any universal maximum."""
     return utilisation(d, k) <= 1.0 + 1e-12
+
+
+# ⛔⛔ THE OLD CONDITION, KEPT AS A FUNCTION AND NOT AS A COMMENT. §6.1 of
+# `docs/PREREG_C_SAT.md` pre-registered the trap this correction walks into:
+# this gate EXCLUDES inadmissible points from its `sim <= derived` check, and
+# the recorded sweep has TEN admissible points measuring above the derivation
+# -- the unsoundness that retracted the universal J = 8. Tightening
+# `admissible` to d >= 15 moves seven of those ten OUT OF SCOPE, so the gate
+# could start reporting "sim <= derived at every admissible point" while the
+# measurements that killed the bound sat silently outside it.
+# ⇒ Both scopes are computed and both are printed. A correction that makes
+#   known violations disappear by re-scoping is not a correction.
+def admissible_as_published(d: int, k: int = N_LANES) -> bool:
+    """`k*C/(d + C) <= 1` at C = 2 -- the condition that printed `yes` at
+    d >= 8. Retained so the violations it admitted stay visible."""
+    return k * C_OCCUPANCY / float(d + C_OCCUPANCY) <= 1.0 + 1e-12
 
 
 def j_stall(d_min: int, k: int = N_LANES) -> int:
@@ -250,29 +331,47 @@ def j_of(d_min: int, k: int = N_LANES) -> int:
 
 
 def main() -> int:
+    rc = 0
     print()
     print("=" * 78)
     print("J AS A FUNCTION OF THE PROGRAM (Ruling 1(b))")
     print("=" * 78)
-    print("  L_REFILL=%d  L_CAP=%d  J_WINNER_REG=%d  N_LANES=%d  C=%d"
-          % (L_REFILL, L_CAP, J_WINNER_REG, N_LANES, C_SVC))
+    print("  L_REFILL=%d  L_CAP=%d  J_WINNER_REG=%d  N_LANES=%d"
+          % (L_REFILL, L_CAP, J_WINNER_REG, N_LANES))
+    print("  C_SPACING=%d (measured, used by `utilisation`)  C_OCCUPANCY=%d"
+          % (C_SPACING, C_OCCUPANCY))
+    print("    ⛔ docs/PREREG_C_SAT.md: the min inter-dispatch spacing was")
+    print("    pre-registered at %d and MEASURED %d. The dispatch FSM is a"
+          % (C_OCCUPANCY, C_SPACING))
+    print("    three-state cycle, and `svc_cycles/svc_jobs = 2.00` was")
+    print("    occupancy, not spacing. Margins are re-quoted in")
+    print("    `model/a2/gate_c3_requote.py`.")
 
     print()
     print("  --- the derivation against the recorded sweep ---")
-    print("    %-5s %-8s %-7s %-10s %-10s %s"
-          % ("d", "U", "adm?", "derived", "measured", "verdict"))
+    print("    ⛔ `adm?` NOW READS `U = k*C/d` WITH C = %d (the measured"
+          % C_SPACING)
+    print("    inter-dispatch spacing), not `k*C/(d+C)` with C = %d. `was?`"
+          % C_OCCUPANCY)
+    print("    is the condition this gate used to print, kept visible because")
+    print("    the tighter one would otherwise take known violations out of")
+    print("    scope -- docs/PREREG_C_SAT.md §6.1.")
+    print("    %-5s %-8s %-6s %-6s %-9s %-9s %s"
+          % ("d", "U", "adm?", "was?", "derived", "measured", "verdict"))
     violations, inadmissible = [], []
     for d in sorted(SWEEP):
         der = j_stall(d)
         sim = SWEEP[d]
         adm = admissible(d)
+        was = admissible_as_published(d)
         if not adm:
             inadmissible.append(d)
         bad = sim > der
         if bad and adm:
             violations.append((d, der, sim))
-        print("    %-5d %-8.3f %-7s %-10d %-10d %s"
-              % (d, utilisation(d), "yes" if adm else "NO", der, sim,
+        print("    %-5d %-8.3f %-6s %-6s %-9d %-9d %s"
+              % (d, utilisation(d), "yes" if adm else "NO",
+                 "yes" if was else "NO", der, sim,
                  "*** SIM > DERIVED ***" if bad else
                  ("ok" if adm else "ok (excluded: U>1)")))
 
@@ -288,6 +387,56 @@ def main() -> int:
         print("        A measurement cannot raise a bound. The derivation is")
         print("        WRONG and nothing downstream is usable. STOP.")
         return 1
+    # ⛔⛔⛔ THE §6.1 SECTION. The admissibility correction is in the
+    # RIGHT direction and it has a side effect that must never be allowed to
+    # read as progress: it takes points OUT of the `sim <= derived` check, and
+    # some of those points are the ones that falsified the universal bound.
+    # Pre-registered before the C measurement was known, and printed here
+    # whatever either condition says.
+    print()
+    print("  --- ⛔ EVERY MEASURED VIOLATION, UNDER BOTH SCOPES (prereg §6.1) ---")
+    print("    ⛔⛔ AGAINST `SWEEP_LIVE`, NOT `SWEEP`. The table above compares")
+    print("    the derivation with the STALE RECORD and finds nothing; the ten")
+    print("    violations are in the LIVE measurement, which until this round")
+    print("    existed only in a source comment. A check written against the")
+    print("    record would print `0 violations` -- and did, which is how the")
+    print("    missing data was found.")
+    print("    %-5s %-9s %-9s %-7s %s"
+          % ("d", "derived", "live", "adm now", "adm as published"))
+    all_viol = []
+    for d in sorted(SWEEP_LIVE):
+        der, sim = j_stall(d), SWEEP_LIVE[d]
+        if sim > der:
+            all_viol.append((d, der, sim, admissible(d),
+                             admissible_as_published(d)))
+    for d, der, sim, adm, was in all_viol:
+        print("    %-5d %-9d %-9d %-7s %s"
+              % (d, der, sim, "yes" if adm else "NO", "yes" if was else "NO"))
+    n_now = len([1 for _d, _r, _s, a, _w in all_viol if a])
+    n_was = len([1 for _d, _r, _s, _a, w in all_viol if w])
+    # ⛔ THE COUNT IS RECORDED, so an edit to `SWEEP_LIVE` that quietly drops a
+    # violation makes this gate RED instead of making the problem smaller. The
+    # retraction of the universal J = 8 cites TEN points; if this ever prints
+    # fewer, the citation and the data have parted company.
+    if len(all_viol) != VIOLATIONS_RECORDED:
+        print("    *** %d VIOLATIONS, NOT THE %d THE RETRACTION CITES. Either"
+              % (len(all_viol), VIOLATIONS_RECORDED))
+        print("        `SWEEP_LIVE` or `j_stall` has changed. The retraction")
+        print("        names a count, so this is RED rather than re-recorded.")
+        rc = 1
+    print("    %d violations total: %d still in scope, %d were in scope under"
+          % (len(all_viol), n_now, n_was))
+    print("    the published condition. ⛔ THE %d THAT LEFT THE SCOPE DID NOT"
+          % (n_was - n_now))
+    print("    GO AWAY. They are measurements of this design and they exceed")
+    print("    the derivation; the universal J = 8 stays RETRACTED, and this")
+    print("    gate must not be read as having re-established it.")
+    print("    ⭐ WHY IT IS NOT A DODGE EITHER: the points that left are below")
+    print("    d = %d, where the corrected utilisation says the DISPATCHER"
+          % (N_LANES * C_SPACING))
+    print("    itself cannot keep up -- so their stalls were never refill")
+    print("    latency to begin with. Both facts are true, and printing only")
+    print("    the convenient one is what §6.1 forbids.")
     print()
     print("    ⇒ sim <= derived at every ADMISSIBLE point (%d of %d swept)"
           % (len(SWEEP) - len(inadmissible), len(SWEEP)))
@@ -331,10 +480,13 @@ def main() -> int:
     print("    RETRACTED: the universal worst case over admissible programs,")
     print("      published as J = 8. j_of capped the stall at L_CAP = %d; the"
           % L_CAP)
-    print("      witness chain gives (queued ahead + 1) x %d, up to %d. Ten"
-          % (L_REFILL, N_LANES * L_REFILL))
-    print("      admissible points measured ABOVE the derivation.")
-    print("      NOT re-fitted -- withdrawn.")
+    print("      witness chain gives (queued ahead + 1) x %d, up to %d. %d"
+          % (L_REFILL, N_LANES * L_REFILL, VIOLATIONS_RECORDED))
+    print("      points measured ABOVE the derivation (d = 8..18), and they")
+    print("      were ALL admissible under the condition published at the")
+    print("      time. ⛔ Under the corrected utilisation only d = 15, 16, 18")
+    print("      are still admissible -- which NARROWS THE SCOPE and does not")
+    print("      un-measure the rest. NOT re-fitted -- withdrawn.")
     print("    UNCLAIMED: d_min in [%d, %d] -- admissible (the dispatcher"
           % (min(adm_ds), D_STAR - 1))
     print("      keeps up) but NOT port-feasible; measured stalls 7..12.")
@@ -398,15 +550,25 @@ def main() -> int:
         print("    %-8d %-9s %-14s %s"
               % (d, "yes" if adm else "NO", "yes" if pf else "NO", verdict))
     print("    ⛔ TWO SCREENS, AND THE PORT ONE IS THE BINDING ONE. U <= 1 asks")
-    print("    only whether the DISPATCHER keeps up and admits d >= 8; the")
-    print("    fetch port needs d >= D* = %d. The gap d in [8, %d] is exactly"
-          % (D_STAR, D_STAR - 1))
-    print("    where the retracted universal J was unsound, and the loader")
-    print("    refuses there instead of quoting a number.")
+    print("    only whether the DISPATCHER keeps up and admits d >= %d; the"
+          % (N_LANES * C_SPACING))
+    print("    fetch port needs d >= D* = %d, so the admissible-but-not-"
+          % D_STAR)
+    print("    port-feasible gap is d in [%d, %d] and the loader refuses"
+          % (N_LANES * C_SPACING, D_STAR - 1))
+    print("    throughout it instead of quoting a number.")
+    print("    ⛔ TWO INTERVALS, NOT ONE, AND THEY USED TO BE CONFLATED. The")
+    print("    region where live measurement exceeded the derivation is")
+    print("    d = 8..18, which is WIDER than the gap above: the points below")
+    print("    d = %d are now inadmissible, so their stalls are the dispatcher"
+          % (N_LANES * C_SPACING))
+    print("    saturating rather than refill latency. Both intervals end at")
+    print("    D* - 1 and they start in different places.")
 
     print()
     print("=" * 78)
-    print("  GATE j-program: PASSED -- on the SCOPED claim")
+    print("  GATE j-program: %s -- on the SCOPED claim"
+          % ("PASSED" if rc == 0 else "FAILED"))
     print("    * D* = k * L_REFILL derived from the refill FSM and the")
     print("      single fetch port, not fitted to the sweep")
     print("    * published: d_min >= D* = %d -> J = 1; shipped d_min"
@@ -423,7 +585,13 @@ def main() -> int:
     print("      have re-measured it did not exist. Run")
     print("      `bash model/a2/price_j_sweep.sh` for the live check.")
     print("    * a measurement can falsify a bound, never raise it")
-    return 0
+    print("    * ⛔ `utilisation` now divides by `d`, not `d + C`, and uses")
+    print("      the MEASURED spacing: the admissible floor is d >= %d, not"
+          % (N_LANES * C_SPACING))
+    print("      d >= 8. The four rows that printed `adm = yes` at d = 8, 10,")
+    print("      12 and 18 were a false label; 18 is still admissible and the")
+    print("      other three are not.")
+    return rc
 
 
 if __name__ == "__main__":
