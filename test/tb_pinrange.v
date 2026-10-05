@@ -199,7 +199,8 @@ module tb_pinrange ();
              : "*** FAIL -- out-of-range write or contention");
     if (xseen != 0)
       fail("X appeared on a driven protocol pin");
-    // ⛔⛔ AN OPEN DEFECT, REPORTED BY NAME RATHER THAN FAILED ON. The
+    // ⛔⛔ FIXED UNDER RULING 1, AND NOW ASSERTED. It was an open defect
+    // when this bench first ran, and is kept as a hard check because the
     // reserved-index arm puts X on `ser_d` (uo_out[4]) for exactly as many
     // cycles as it dispatches SHIFTs, and the cause is an UNGUARDED
     // OUT-OF-RANGE READ: `pin_in[a_pin]` at pe_engine.v:745, :1502 and :1524
@@ -213,12 +214,15 @@ module tb_pinrange ();
     // ⚠ CONTROL RUN, so this is not a property of the check: smoke_image,
     // five_image and cfgerr_image all give ZERO serial X; only the
     // reserved-index program produces it.
-    // ⇒ WHETHER TO SAMPLE 0 OR REFUSE THE PROGRAM IS A RULING, so this is
-    // recorded and not silently fixed. It does NOT fail the arm, because the
-    // arm's claim is about pin WRITES.
+    // ⇒ RULED (Wilson 1): silicon samples a DEFINED 0 on a non-real pin
+    // (`rx_bit = pin_real ? pin_in[a_pin] : 1'b0`, one wire for all three
+    // sites), so X can never leave the chip by construction. PRICED: build
+    // with `M_UNGUARDED_SAMPLE` and this count goes 0 -> 112.
     $display("    X on ser_d (uo_out[4])   : %0d %0s", xser,
-             (xser == 0) ? "ok"
-             : "⛔ OPEN DEFECT -- unguarded pin_in[a_pin] read, see header");
+             (xser == 0) ? "ok -- the sample guard holds"
+             : "*** FAIL -- an out-of-range sample reached the serial output");
+    if (xser != 0)
+      fail("X on ser_d: the pin_in[a_pin] range guard is gone");
     $display("      ⚠ both X checks are VACUOUS under Verilator (two-state),");
     $display("        so they are evidence only in an iverilog run.");
 

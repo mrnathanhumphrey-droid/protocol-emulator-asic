@@ -51,6 +51,13 @@ ROOT = os.path.dirname(HERE)
 DAT = os.environ.get("PE_COVERAGE_DAT", os.path.join(ROOT, "probe_cov",
                                                      "merged.dat"))
 
+# ⛔⛔ THE KEYS ARE LINE NUMBERS AND THEY DRIFT. Adding the `rx_bit` guard
+# to `pe_engine.v` moved four anchors by +24 and this gate reported all four
+# as NOT IN THE DATA while their new line numbers came back UNCLASSIFIED --
+# loudly, from both directions at once, which is the behaviour to keep. A
+# coverage point IS identified by file and line, so the fragility cannot be
+# designed away; what matters is that a drifted anchor can never read as a
+# pass. ⚠ On an RTL edit above a classified line, expect to re-anchor.
 #: the subject of the gate: the design, and the peer models Wilson named
 SUBJECT = ("src/", "test/fram_")
 
@@ -104,19 +111,19 @@ CLASSIFIED = {
         "point belongs to. ⛔ Counted as uncovered anyway, because the gate "
         "must not pick the lenient reading of a disagreement it cannot "
         "adjudicate."),
-    ("src/pe_engine.v", 942, "v_branch", "if"): (
+    ("src/pe_engine.v", 965, "v_branch", "if"): (
         TOOL_DIVERGENT,
         "`l_live[pi] && want_fetch(pi)` in the prime scan, also inside an "
-        "unrolled `for` over lanes. Same divergence and same reasoning as 651: "
+        "unrolled `for` over lanes. Same divergence and same reasoning as 651 (it was line 942 before the `rx_bit` guard shifted it): "
         "uncovered under 5.020, taken **30 times** under 5.032, identical "
         "point totals on both. ⚠ The smaller count is expected -- the prime "
         "scan only runs until `primed_q` sets -- and it is still not zero, so "
         "this is the same attribution difference rather than a gap."),
 
     # ---- src/pe_engine.v --------------------------------------------------
-    ("src/pe_engine.v", 1110, "v_branch", "else"): (
+    ("src/pe_engine.v", 1134, "v_branch", "else"): (
         UNREACHABLE,
-        "H_IDLE with `hdr_done` ALREADY SET. Every assignment that puts the "
+        "H_IDLE (line 1134) with `hdr_done` ALREADY SET. Every assignment that puts the "
         "header FSM into H_IDLE clears `hdr_done` in the same non-blocking "
         "block -- the reset arm (`hst <= H_IDLE` at 1001 beside "
         "`hdr_done <= 1'b0` at 1005) and the `!run` arm (1070 beside 1071). "
@@ -124,7 +131,7 @@ CLASSIFIED = {
         "the arm of a condition that is true on every entry. ⭐ Checked "
         "structurally by `check_h_idle_clears` below rather than asserted, "
         "because the claim is about two specific lines and would rot."),
-    ("src/pe_engine.v", 1246, "v_line", "case"): (
+    ("src/pe_engine.v", 1270, "v_line", "case"): (
         UNREACHABLE,
         "The prefetch FSM's defensive `default`. `pst` is declared `[2:0]` and "
         "its four encodings P_SCAN/P_REQ/P_WAIT/P_CAP are 3'd0..3'd3, all "
@@ -132,7 +139,7 @@ CLASSIFIED = {
         "⭐ Verified mechanically by `check_full_case` below, which reads the "
         "encodings out of the source -- a hand-counted enumeration is the sort "
         "of claim that survives the addition of a fifth state."),
-    ("src/pe_engine.v", 1452, "v_line", "case"): (
+    ("src/pe_engine.v", 1476, "v_line", "case"): (
         UNREACHABLE,
         "The opcode `case`'s `default`. The opcode field is 3 bits and ALL "
         "EIGHT encodings are named in arms -- OP_LEVEL, OP_SHIFT, OP_SHIFTIN, "
@@ -146,7 +153,7 @@ CLASSIFIED = {
     # other lane, with the lane still LIVE -- the flag must report, never
     # stall. The entry is removed rather than kept, because a stale OWED claim
     # says something is untested when it is tested.
-    ("src/pe_engine.v", 1651, "v_line", "case"): (
+    ("src/pe_engine.v", 1675, "v_line", "case"): (
         UNREACHABLE,
         "The dispatch FSM's defensive `default`. `st` is declared `[1:0]` with "
         "three encodings ST_IDLE/ST_DRIVE/ST_WB = 2'd0..2'd2 at line 666; "
@@ -190,14 +197,14 @@ CLASSIFIED = {
         "against 13 executions of the address-match. ⚠ ALREADY OWED to Wilson "
         "in `docs/SPEC_V4_I2C_CERTIFIED.md` §6; coverage found it "
         "independently, which is the point of the sweep."),
-    ("test/fram_i2c.v", 223, "v_line", "case"): (
-        OWED,
-        "P_ALO, the LOW address byte. The certified frame is `S | dev | A | "
-        "one byte | A | P`, so the second byte lands in P_AHI and the phase "
-        "machine stops there. The part's real sequence is `S | dev | A | "
-        "addrhi | A | addrlo | A | data | A | P`. ⚠ The owed item in §6 says "
-        "'the peer's P_AHI/P_ALO phases are still unexercised' and coverage "
-        "CORRECTS it: P_AHI executes 13 times. P_ALO is the unexercised one."),
+    # ⭐ RETIRED by ruling (a)2: `P_ALO` is reached by `i2caddr_image.hex`
+    # (`dev | addrhi | addrlo`, 3 bytes) under `tb_i2c +TXB=3`, and the claim
+    # is stronger than the count -- the bench asserts the peer's assembled
+    # address reads 0x0123, from `addrhi 0x01` at P_AHI and `addrlo 0x23` at
+    # P_ALO, a value only BOTH phases can produce.
+    # ⛔ `P_WDATA` (228, below) STAYS OWED AND IS NOT REACHABLE WITH THIS
+    # IDIOM: the framing costs `51 + 60n` bytes, so a fourth byte is 291
+    # against a 256-byte store. That is a ruling, not a missing test.
     ("test/fram_i2c.v", 228, "v_line", "case"): (
         OWED,
         "⛔ P_WDATA -- SO NO BYTE HAS EVER BEEN WRITTEN INTO THE PEER'S "
@@ -286,7 +293,7 @@ TOGGLE_CEILING = {
     "src/pe_engine.v": 236,
     "src/pe_store.v": 3,
     "src/project.v": 66,
-    "test/fram_i2c.v": 45,
+    "test/fram_i2c.v": 42,
     "test/fram_spi.v": 27,
 }
 
@@ -398,9 +405,24 @@ def check_stale(agg) -> int:
         # exemption is this narrow on purpose: an UNREACHABLE point that got
         # covered stays fatal, because that means the written reason is false.
         if st == TOOL_DIVERGENT:
+            # ⛔⛔ EXEMPT FROM "COVERED", NOT FROM "ABSENT". The first version
+            # skipped both, and a DRIFTED ANCHOR then survived in silence: the
+            # `rx_bit` guard moved this entry's line by +24, the point came
+            # back `absent`, and the gate said nothing -- while on the CI
+            # toolchain, where that arm reads uncovered, its new line number
+            # would have been UNCLASSIFIED and CI would have gone red. Being
+            # covered on some releases is the entry's whole premise; not
+            # existing at all is an anchor that needs moving.
+            if c is None:
+                print("    *** ANCHOR IS GONE  %s line %d %s/%s"
+                      % (key[0], key[1], key[2].replace("v_", ""), key[3]))
+                print("        A tool-divergent entry may be COVERED, but it")
+                print("        must still EXIST. Re-anchor it to the line the")
+                print("        construct moved to.")
+                rc = 1
+                continue
             print("    %-20s line %-5d %s/%-5s tool-divergent (count %s)"
-                  % (key[0], key[1], key[2].replace("v_", ""), key[3],
-                     "absent" if c is None else c))
+                  % (key[0], key[1], key[2].replace("v_", ""), key[3], c))
             continue
         if c is None:
             print("    *** NOT IN THE DATA  %s line %d %s/%s"
@@ -582,7 +604,7 @@ def check_full_case() -> int:
     lines = src.splitlines()
     enc = _encodings(src)
     bare = re.sub(r"//[^\n]*", "", re.sub(r"/\*.*?\*/", "", src, flags=re.S))
-    for line in (1246, 1452, 1651):
+    for line in (1270, 1476, 1675):
         sel, arms = _case_arms(lines, line)
         if sel is None:
             print("    line %-5d *** no enclosing `case` found -- the waiver's"
@@ -701,6 +723,23 @@ def selftest(agg) -> int:
                             "ok" if bad2 else "*** ACCEPTED"))
     if not bad2:
         rc = 1
+    # (2b) ⛔ A TOOL_DIVERGENT ENTRY WHOSE ANCHOR NO LONGER EXISTS. This is
+    # the arm the `rx_bit` line shift earned: the exemption for "covered" had
+    # also exempted "absent", so a drifted anchor passed in silence here while
+    # CI, on a toolchain where that arm reads uncovered, would have gone red on
+    # its new line number.
+    probe_key = ("src/pe_engine.v", 999998, "v_branch", "if")
+    saved2 = dict(CLASSIFIED)
+    CLASSIFIED[probe_key] = (TOOL_DIVERGENT, "x" * 80)
+    try:
+        gone = check_stale_quiet_absent(agg)
+    finally:
+        CLASSIFIED.clear()
+        CLASSIFIED.update(saved2)
+    print("    %-52s %s" % ("a tool-divergent entry with a dead anchor is rejected",
+                            "ok" if gone else "*** ACCEPTED"))
+    if not gone:
+        rc = 1
     # (3) a short reason
     probe = {("x.v", 1, "v_line", "case"): (UNREACHABLE, "because.")}
     short = any(len((w or "").strip()) < 60 for _s, w in probe.values())
@@ -735,6 +774,14 @@ def check_points_quiet(agg):
         if c == 0 and CLASSIFIED.get(key) is None:
             out.append(key)
     return bool(out)
+
+
+def check_stale_quiet_absent(agg):
+    """True if any TOOL_DIVERGENT entry's anchor is missing from the data."""
+    for key, (st, _why) in CLASSIFIED.items():
+        if st == TOOL_DIVERGENT and agg.get(key) is None:
+            return True
+    return False
 
 
 def check_stale_quiet(agg):

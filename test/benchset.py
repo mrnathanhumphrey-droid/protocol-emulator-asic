@@ -155,8 +155,22 @@ CONFIG = {
         # so the certified run takes the bench's own default. Writing the value
         # down means a change to that default cannot silently change what the
         # sweep measured.
+        # ⭐⭐ `+TXB` IS THE TRANSACTION LENGTH, and both arms are here because
+        # ruling (a)2 needs the peer's SECOND address byte. At TXB = 2 this is
+        # the sigrok-certified frame, unchanged. At TXB = 3 the program sends
+        # `dev | addrhi | addrlo`, which is what reaches the peer's `P_ALO`
+        # phase -- and the bench then asserts the assembled address is 0x0123,
+        # a value only both phases can produce.
+        # ⛔ A FOURTH BYTE WOULD BE A COMPLETE WRITE AND IT DOES NOT FIT: the
+        # framing costs `51 + 60n` bytes, so n = 4 is 291 against a 256-byte
+        # store. `P_WDATA` is therefore out of reach with this idiom -- see
+        # `make_smoke_image.py --i2caddr`.
         "arms": [("default", ["+IMG=test/i2cframe_image.hex", "+NCYC=40000",
-                              "+DIAG=0", "+DUMP=probe_cov_i2c.bin"])],
+                              "+DIAG=0", "+TXB=2",
+                              "+DUMP=probe_cov_i2c.bin"]),
+                 ("addr3", ["+IMG=test/i2caddr_image.hex", "+NCYC=60000",
+                            "+DIAG=0", "+TXB=3",
+                            "+DUMP=probe_cov_i2caddr.bin"])],
     },
     "tb_witness": {
         "srcs": [],

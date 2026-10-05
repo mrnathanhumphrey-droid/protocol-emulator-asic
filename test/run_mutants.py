@@ -36,6 +36,17 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 SCRATCH = os.environ.get("TEMP", "/tmp")
 
+# ⛔⛔ WHAT ACTUALLY RAN, COUNTED -- NOT A HAND-SUMMED LIST. The verdict
+# reported `len(MUTANTS) + len(TX_MUTANTS) + len(HALF_MUTANTS)` = 8 while
+# THIRTEEN mutants were defined: the whole EDGE family was missing from the
+# sum, and a new family would have been missing too. A summary value is not
+# evidence until it is checked against its run, and this one had been
+# reported as "8 of 8" for a long time.
+# ⚠ Two EDGE entries are STRUCTURAL (F2) and are deliberately not built or
+# run, so they are listed separately rather than silently inflating this.
+RAN = []
+SKIPPED_STRUCTURAL = []
+
 SRC = ["test/tb_smoke.v", "src/pe_engine.v", "src/pe_store.v", "src/project.v"]
 # ⭐ The reactive-release mutants run against a DIFFERENT bench: tb_edge drives
 # protocol inputs during run, which tb_smoke never does. One runner, two
@@ -48,6 +59,8 @@ SRC_EDGE = ["test/tb_edge.v", "src/pe_engine.v", "src/pe_store.v",
 # mutant on the queue-selection path has nothing to break there. `tb_tx` is
 # what gives M_TX_IGNORE_TAG something to kill it with.
 SRC_TX = ["test/tb_tx.v", "src/pe_engine.v", "src/pe_store.v", "src/project.v"]
+SRC_PINRANGE = ["test/tb_pinrange.v", "src/pe_engine.v", "src/pe_store.v",
+                "src/project.v"]
 # ⭐ A FOURTH BENCH -- the HALF-DUPLEX one, where TX and RX live on ONE lane.
 # `tb_tx` has SHIFT-only lanes and `tb_trace` runs real protocols without
 # asserting byte identity, so neither can see a direction corrupting the other.
@@ -93,6 +106,7 @@ HALF_MUTANTS = [
      "assertion."),
 ]
 TX_IMG = "test/tx_image.hex"
+PINNONE_IMG = "test/pinnone_image.hex"
 TX_BADCLK_IMG = "test/tx_badclk_image.hex"
 # (define, what it breaks, the text that certifies the kill, why, which image)
 # ⭐ TWO IMAGES, because the two mutants break DIFFERENT claims: the tag mutant
@@ -127,6 +141,26 @@ TX_MUTANTS = [
      "lane the entire time. ⭐ With the refusal removed the bad program RUNS "
      "and emits 36 bytes; with it, config_err is sticky, the lane halts, and "
      "nothing beyond the reset byte comes out.", "badclk"),
+]
+
+# ⛔⛔ THE OUT-OF-RANGE SAMPLE GUARD (Wilson's ruling 1). Its own family,
+# because the claim lives in `tb_pinrange` and not in `tb_tx`.
+PINRANGE_MUTANTS = [
+    ("M_UNGUARDED_SAMPLE",
+     "read pin_in[a_pin] with no range guard",
+     "X on ser_d: the pin_in[a_pin] range guard is gone",
+     "⛔ `a_pin` is a 4-bit PROGRAM-CONTROLLED field addressing 0..15 while "
+     "only N_PINS = 12 pins exist, so `OP_SHIFTIN`/`OP_READBIT` on the "
+     "reserved index reads OUT OF RANGE. The X went into `l_rx`, then "
+     "`rx_data`, then the serial readback, and LEFT THE CHIP on `ser_d` "
+     "while `ser_v` was high -- 112 cycles, one per SHIFT dispatch. "
+     "⭐ IT IS THE MIRROR OF A DEFECT ALREADY FIXED: the WRITE side was "
+     "guarded after the `pin_out[12]` incident and the READ side was not, "
+     "which is fix-one-axis-miss-the-parallel-one for the second time. "
+     "⚠ In silicon an out-of-range read is not X at all -- it is whatever "
+     "synthesis made of it, deterministic but UNSPECIFIED, which is worse "
+     "because nothing warns. The guard samples a defined 0 so the behaviour "
+     "is a property of the RTL."),
 ]
 EDGE_MUTANTS = [
     ("M_NO_REBASE",
@@ -388,6 +422,7 @@ def main() -> int:
             killed = fl is not None and bl is not None and fl != bl
             right = killed
             evidence = "sel flips %s vs baseline %s" % (fl, bl)
+        RAN.append(define)
         print("  %-18s %-7s %-28s %-9s %s"
               % (define, mode, breaks[:28],
                  "RED" if killed else "*** SURVIVED ***", evidence))
@@ -423,6 +458,7 @@ def main() -> int:
             print("    baseline: PASS (4 of 4 must-fires)")
             for define, breaks, want, why in EDGE_MUTANTS:
                 if define in ("M_COMB_OUT", "M_NOOP_DRIVES"):
+                    SKIPPED_STRUCTURAL.append(define)
                     print("    %-19s %-40s %s"
                           % (define, breaks[:40], "structural -- see F2"))
                     print("        %s" % why)
@@ -436,6 +472,7 @@ def main() -> int:
                 o = run(v, img=None)
                 killed = "tb_edge: PASS" not in o
                 right = want in o
+                RAN.append(define)
                 print("    %-19s %-40s %s"
                       % (define, breaks[:40],
                          "RED" if killed else "*** SURVIVED ***"))
@@ -512,6 +549,56 @@ def main() -> int:
                     o = run(v, img=use_img, extra=use_extra)
                     killed = "tb_tx: PASS" not in o
                     right = want in o
+                    RAN.append(define)
+                    print("    %-19s %-40s %s"
+                          % (define, breaks[:40],
+                             "RED" if killed else "*** SURVIVED ***"))
+                    print("        %s" % why)
+                    if not killed:
+                        survivors.append(define)
+                    elif not right:
+                        print("        *** died, but not of `%s` ***" % want)
+                        wrong_reason.append((define, "wrong reason"))
+
+    # ---- the OUT-OF-RANGE SAMPLE mutant, on tb_pinrange -------------
+    # ⛔ ITS BASELINE IS THE GUARD HOLDING, so a kill is readable: the
+    # unmutated run must report ZERO serial X on the reserved-index program.
+    print()
+    print("  --- out-of-range sample mutants (bench: tb_pinrange) ---")
+    pp = os.path.join(ROOT, PINNONE_IMG)
+    if not os.path.isfile(pp):
+        print("    *** %s is missing. Build it:" % PINNONE_IMG)
+        print("        python test/make_smoke_image.py --pinnone")
+        survivors.append("tb_pinrange image")
+    else:
+        with open(pp, encoding="ascii") as fh:
+            nbp = len([w for w in fh.read().split() if w])
+        p_extra = ["+NBYTES=%d" % nbp, "+NCYC=8000", "+MODE=1"]
+        base_p = os.path.join(SCRATCH, "mut_pr_base.vvp")
+        rc, log = build([], base_p, src=SRC_PINRANGE)
+        if rc != 0:
+            print("    *** tb_pinrange does not compile: %s" % log[:300])
+            survivors.append("tb_pinrange build")
+        else:
+            out_p = run(base_p, img=PINNONE_IMG, extra=p_extra)
+            if "tb_pinrange: PASS" not in out_p:
+                print("    *** the UNMUTATED tb_pinrange does not pass --")
+                print("        nothing below is interpretable.")
+                survivors.append("tb_pinrange baseline")
+            else:
+                print("    baseline: PASS (guard holds, 0 serial X)")
+                for define, breaks, want, why in PINRANGE_MUTANTS:
+                    v = os.path.join(SCRATCH,
+                                     "mut_pr_%s.vvp" % define.lower())
+                    rc, log = build([define], v, src=SRC_PINRANGE)
+                    if rc != 0:
+                        print("    %-19s BUILD FAIL -- not a kill" % define)
+                        wrong_reason.append((define, "build"))
+                        continue
+                    o = run(v, img=PINNONE_IMG, extra=p_extra)
+                    killed = "tb_pinrange: PASS" not in o
+                    right = want in o
+                    RAN.append(define)
                     print("    %-19s %-40s %s"
                           % (define, breaks[:40],
                              "RED" if killed else "*** SURVIVED ***"))
@@ -557,6 +644,7 @@ def main() -> int:
                     o = run(v, img=HALF_IMG, extra=h_extra)
                     killed = "tb_half: PASS" not in o
                     right = want in o
+                    RAN.append(define)
                     print("    %-19s %-40s %s"
                           % (define, breaks[:40],
                              "RED" if killed else "*** SURVIVED ***"))
@@ -571,8 +659,14 @@ def main() -> int:
     print("=" * 78)
     print("VERDICT")
     print("=" * 78)
-    print("  mutants run           : %d"
-          % (len(MUTANTS) + len(TX_MUTANTS) + len(HALF_MUTANTS)))
+    print("  mutants defined       : %d"
+          % (len(MUTANTS) + len(TX_MUTANTS) + len(EDGE_MUTANTS)
+             + len(HALF_MUTANTS) + len(PINRANGE_MUTANTS)))
+    print("  mutants RUN           : %d   %s"
+          % (len(RAN), " ".join(sorted(RAN))))
+    if SKIPPED_STRUCTURAL:
+        print("  structural, not run   : %d   %s  (F2 proves these)"
+              % (len(SKIPPED_STRUCTURAL), " ".join(sorted(SKIPPED_STRUCTURAL))))
     print("  survived (bad)        : %d  %s" % (len(survivors), survivors or ""))
     print("  died of a WRONG reason: %d  %s" % (len(wrong_reason),
                                                 wrong_reason or ""))

@@ -87,6 +87,15 @@ EXPECT = {
         "⚠ Its size is the point: the defect it reproduces was distributed "
         "across every site that touched the pointer, which is how it survived "
         "unnoticed."),
+    "M_UNGUARDED_SAMPLE": (2,
+        "ONE LINE, and that is the whole point of the fix. The three sample "
+        "sites now read a single guarded wire -- `rx_bit = pin_real ? "
+        "pin_in[a_pin] : 1'b0` -- so the mutation is one substitution rather "
+        "than three, and a fourth sample site cannot pick up the unguarded "
+        "form by copying its neighbour. ⚠ Before the wire existed, "
+        "`pin_in[a_pin]` appeared verbatim at 745, 1502 and 1524, and removing "
+        "the guard would have meant three separate edits -- an arm whose size "
+        "tracks the number of copies rather than the size of the idea."),
     "M_SHIFT_CLK_ALIAS": (6,
         "a BLOCK substitution, declared: the refusal has to suppress BOTH the "
         "data write and the clock write, so removing it removes an if/else "

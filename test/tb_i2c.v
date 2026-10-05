@@ -40,6 +40,7 @@ module tb_i2c;
 
   reg  [7:0] img [0:IMG_MAX-1];
   integer    img_bytes, i, cyc, ncyc, fd, nwr;
+  integer    txb;   // bytes per I2C transaction: 2 (certified) or 3
   reg [8*64-1:0] imgfile, dumpfile;
 
   // ---- the resolved open-drain bus ------------------------------------
@@ -116,6 +117,7 @@ module tb_i2c;
     if (!$value$plusargs("NCYC=%d", ncyc)) ncyc = 40000;
     $readmemh(imgfile, img);
 
+    if (!$value$plusargs("TXB=%d", txb)) txb = 2;
     hf_init;
     // ⭐ THE PATTERN IS CHOSEN SO EVERY TRANSACTION AFTER THE FIRST IS VALID.
     // `l_tx` resets to 0 so the first byte out is 0x00; with a 4-byte cycle of
@@ -130,7 +132,22 @@ module tb_i2c;
     // ⚠ BEFORE THE ORDER BIT this read {5A, 05, 5A, 05}: the address had to be
     // pushed pre-reversed and the data byte was a palindrome, so the whole
     // frame passed under either bit order (ruling 1b).
-    hf_set(0, 8'h5B, 8'hA0, 8'h5B, 8'hA0);
+    // ⭐⭐ `+TXB` SELECTS THE TRANSACTION LENGTH, and the two patterns solve
+    // different problems. At TXB = 2 (the default, and the certified frame)
+    // every transaction after the first is (0xA0, 0x5B): a 4-byte cycle of
+    // [data, addr, data, addr] stays in phase with a 2-byte transaction.
+    // ⛔ AT TXB = 3 THE PHASE ROTATES -- 3 bytes against a 4-byte pattern has
+    // period 4 -- so NO pattern can make every transaction well-formed. With
+    // [0x23, 0x5B, 0xA0, 0x01] the wire stream is
+    //     txn1 00 23 5B | txn2 A0 01 23 | txn3 5B A0 01 | txn4 23 5B A0 | ...
+    // so every FOURTH transaction is `dev A0, addrhi 01, addrlo 23` and the
+    // peer's address register must land on 0x0123. The others fail the device
+    // match and the peer returns to idle -- exactly what the restart counter
+    // was added to survive.
+    // ⚠ ALL FOUR BYTES ARE NON-PALINDROMIC (ruling 1b): 23/C4, 5B/DA,
+    // A0/05, 01/80, so every byte sigrok reads is evidence about bit ORDER.
+    if (txb == 3) hf_set(0, 8'h23, 8'h5B, 8'hA0, 8'h01);
+    else          hf_set(0, 8'h5B, 8'hA0, 8'h5B, 8'hA0);
 
     cyc = 0; nwr = 0; fails = 0;
     n_sda_edge = 0; n_scl_edge = 0; n_peer_ack = 0;
@@ -206,6 +223,31 @@ module tb_i2c;
              (n_peer_ack > 0) ? "ok -- the device recognised an address"
              : "*** FAIL -- the peer never acknowledged");
     if (n_peer_ack == 0) fails = fails + 1;
+    // ⭐⭐ THE PEER'S ADDRESS REGISTER, WHICH IS THE PROOF `P_ALO` RAN. A
+    // transaction of `dev | addrhi | addrlo` must leave the model holding the
+    // assembled address, and the model builds it in two halves:
+    //     P_AHI : addr[AW-1:8] <= shin[AW-9:0]   (0x01 & 0x7F = 0x01)
+    //     P_ALO : addr[7:0]    <= shin           (0x23)
+    // so `addr == 0x0123` is reachable ONLY by executing both phases. The
+    // coverage sweep found `P_ALO` at zero; this is the claim that closes it,
+    // rather than the count alone.
+    // ⚠ ONLY AT TXB = 3. The certified 2-byte frame stops at P_AHI by
+    // construction -- its second byte IS the high address byte -- and
+    // asserting an assembled address there would assert something the frame
+    // cannot produce.
+    if (txb == 3) begin
+      $display("  peer phase reached  : %0d %0s", peer.phase,
+               (peer.phase >= 3'd2) ? "ok -- past P_AHI" : "(see addr below)");
+      $display("  peer addr register  : %04h %0s", peer.addr,
+               (peer.addr == 15'h0123) ? "ok -- P_AHI and P_ALO both ran"
+               : "*** FAIL -- the two address bytes did not assemble");
+      if (peer.addr !== 15'h0123) begin
+        fails = fails + 1;
+        $display("      expected 0x0123 from addrhi 0x01 and addrlo 0x23.");
+        $display("      A value of 0x__23 with the high half wrong means");
+        $display("      P_ALO ran and P_AHI did not; 0x01__ means the reverse.");
+      end
+    end
     $display();
     if (fails == 0) $display("  tb_i2c: PASS (dump written, bus live, peer ACKed)");
     else            $display("  tb_i2c: *** FAILED %0d check(s)", fails);

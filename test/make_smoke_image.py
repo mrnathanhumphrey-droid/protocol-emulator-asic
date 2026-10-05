@@ -435,7 +435,7 @@ def build_half(d: int = 24):
     return b"".join(headers) + b"".join(prog)
 
 
-def build_i2cframe(d: int = 62, sda: int = 2, scl: int = 1):
+def build_i2cframe(d: int = 62, sda: int = 2, scl: int = 1, nbytes: int = 2):
     """A FULL I2C WRITE TRANSACTION, for a foreign decoder to adjudicate.
 
         S | 1010 000 0 | A | data | A | P
@@ -480,7 +480,13 @@ def build_i2cframe(d: int = 62, sda: int = 2, scl: int = 1):
     seq = []
     seq.append(act(OP_START, sda, 0, d))        # SDA low, SCL still high = S
     seq.append(act(OP_LEVEL, scl, 0, d))        # SCL low
-    for _byte in range(2):                      # device address, then data
+    # ⭐ `nbytes` IS THE TRANSACTION LENGTH, and it is a parameter because the
+    # MB85RC256V needs FOUR bytes for a real write -- `S | dev | A | addrhi |
+    # A | addrlo | A | data | A | P`. At `nbytes = 2` this is the original
+    # certified frame (dev + one byte), which the sigrok gate and
+    # `docs/SPEC_V4_I2C_CERTIFIED.md` both pin; at 4 it is the full write
+    # that finally reaches the peer's `P_ALO` and `P_WDATA` phases.
+    for _byte in range(nbytes):                 # dev, [addrhi, addrlo,] data
         for _b in range(8):
             seq.append(act(OP_SHIFT, sda, 0, d, count=7, q=0))
             seq.append(act(OP_LEVEL, scl, 1, d))
@@ -748,6 +754,14 @@ def main() -> int:
             # ever put PIN_NONE on an OP_LEVEL action.
             (["--pinnone"], "lane on the reserved index, shifting",
              "pinnone_image.hex"),
+            # ⭐ the FULL MB85RC256V write -- four bytes, so the peer reaches
+            # P_ALO and P_WDATA and a byte actually lands in its memory. The
+            # certified 2-byte frame stays exactly as it was.
+            # ⭐ dev + BOTH address bytes, which reaches the peer's P_ALO.
+            # ⛔ A fourth byte (a COMPLETE write, landing in P_WDATA) would be
+            # 291 bytes against a 256-byte store -- see the --i2caddr block.
+            (["--i2caddr"], "I2C dev+addrhi+addrlo (reaches P_ALO)",
+             "i2caddr_image.hex"),
             (["--five"] + [str(x) for x in FIVE_STRESS],
              "5-lane refill load (the run_mutants stress set)",
              "five_image.hex"),
@@ -877,6 +891,26 @@ def main() -> int:
             for b in img:
                 fh.write("%02x\n" % b)
         print("edge image (timeout=%d), %d bytes -> %s" % (to, len(img), out))
+        return 0
+    if "--i2caddr" in sys.argv:
+        # ⛔⛔ THREE BYTES, NOT FOUR, AND THE REASON IS THE STORE DEPTH. A
+        # complete MB85RC256V write is `S | dev | A | addrhi | A | addrlo | A |
+        # data | A | P` -- FOUR bytes -- and this framing costs exactly
+        # `51 + 60n` bytes: 30 of header plus 3 x (20n + 7) action bytes, at 20
+        # actions per byte (8 bits x 2 actions, plus 4 for the acknowledge).
+        #   n = 2 -> 171   the certified frame
+        #   n = 3 -> 231   dev + both address bytes; reaches P_ALO
+        #   n = 4 -> 291   A COMPLETE WRITE, AND IT DOES NOT FIT: the store is
+        #                  256 bytes (AW = 8, and AW = 9 was rejected on area)
+        # ⇒ So `P_WDATA` -- a byte actually landing in the peer's memory --
+        # is OUT OF REACH with this idiom, and that is a ruling, not a bug.
+        img = build_i2cframe(nbytes=3)
+        out = os.path.join(here, "i2caddr_image.hex")
+        with open(out, "w", encoding="ascii") as fh:
+            for b in img:
+                fh.write("%02x" % b + chr(10))
+        print("i2c dev+addrhi+addrlo image (reaches P_ALO; a 4th byte would be "
+              "291 bytes > 256), %d bytes -> %s" % (len(img), out))
         return 0
     if "--pinnone" in sys.argv:
         img = build_pinnone()

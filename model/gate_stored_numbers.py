@@ -257,6 +257,10 @@ SPEC_SYMBOLS = {
     # coverage does not contain -- which is what a moved line looks like.
     ("test/benchset.py", "CONFIG"),
     ("test/gate_coverage.py", "CLASSIFIED"),
+    # ⭐ a MUTANT INVENTORY, like the others above: a define, the bench it is
+    # judged by, the failure text that certifies the kill, and why. Its
+    # numbers are line counts in prose, not measurements.
+    ("test/run_mutants.py", "PINRANGE_MUTANTS"),
     # ⭐ MUTANT INVENTORIES ARE DECLARATIONS, not measurements: a define, what
     # it breaks, the failure text that certifies the kill, and why. The numbers
     # the scraper counts are inside the PROSE (queue indices, byte values named

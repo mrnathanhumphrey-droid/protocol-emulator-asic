@@ -740,9 +740,33 @@ module pe_engine #(
   wire [7:0] host_data_rev = {host_data[0], host_data[1], host_data[2],
                               host_data[3], host_data[4], host_data[5],
                               host_data[6], host_data[7]};
+  // ⛔⛔⛔ THE SAMPLE IS RANGE-GUARDED, AND IT IS ONE WIRE SO THERE IS ONE
+  // GUARD. `a_pin` is a 4-bit PROGRAM-CONTROLLED field addressing 0..15 while
+  // only `N_PINS = 12` pins exist, so `pin_in[a_pin]` on the reserved index
+  // reads OUT OF RANGE. Found by `pinnone_image.hex`: `OP_SHIFTIN` on
+  // PIN_NONE put X into `l_rx`, then `rx_data`, then the serial readback, and
+  // the X LEFT THE CHIP on `ser_d` while `ser_v` was high -- 112 cycles, one
+  // per SHIFT dispatch.
+  // ⭐ IT IS THE MIRROR OF A DEFECT ALREADY FIXED. The WRITE side was guarded
+  // after the `pin_out[12]` incident (`pin_real` at the OP_SHIFT arm,
+  // `clk_real` on the clock write, the `pin_pp` header guard) and the READ
+  // side was not -- "a fix on one axis repeats the error on a parallel one",
+  // twice over now.
+  // ⚠ AND IN SILICON IT IS NOT X. An out-of-range read synthesises to
+  // whatever the tool made of it: deterministic but UNSPECIFIED, which is
+  // worse than X because simulation stops warning about it. Sampling a
+  // defined 0 makes the behaviour a property of the RTL rather than of the
+  // synthesiser.
+  // ⇒ Every one of the three sample sites uses this wire, so a future site
+  // cannot pick up the unguarded form by copying its neighbour.
+`ifdef M_UNGUARDED_SAMPLE
+  wire       rx_bit     = pin_in[a_pin];      // the mutant: the defect restored
+`else
+  wire       rx_bit     = pin_real ? pin_in[a_pin] : 1'b0;
+`endif
   // the byte an OP_SHIFTIN completes: the sample being taken now, followed by
   // the seven already in `l_rx`
-  wire [7:0] rx_asm     = {pin_in[a_pin], l_rx[cur][7:1]};
+  wire [7:0] rx_asm     = {rx_bit, l_rx[cur][7:1]};
   wire [7:0] rx_asm_rev = {rx_asm[0], rx_asm[1], rx_asm[2], rx_asm[3],
                            rx_asm[4], rx_asm[5], rx_asm[6], rx_asm[7]};
 
@@ -1499,7 +1523,7 @@ module pe_engine #(
               // it is commented HERE rather than inside an arm because
               // `gate_mutant_arms` counts a comment inside an `ifdef` as the
               // arm wrapping more than its delta, and is right to.
-              l_rx[cur] <= {pin_in[a_pin], l_rx[cur][7:1]};
+              l_rx[cur] <= {rx_bit, l_rx[cur][7:1]};
 `ifdef M_SHARED_BITP
               l_bitp_shared <= l_bitp_shared + {{(BPW-1){1'b0}}, 1'b1};
               if (l_bitp_shared == a_cnt - {{(BPW-1){1'b0}}, 1'b1}) begin
@@ -1521,7 +1545,7 @@ module pe_engine #(
             // ⭐ READBIT accumulates into the RX register and moves NO
             // pointer -- it is the single-bit sample (an I2C ACK, a UART stop
             // bit), so there is no byte to complete.
-            OP_READBIT: l_rx[cur] <= {pin_in[a_pin], l_rx[cur][7:1]};
+            OP_READBIT: l_rx[cur] <= {rx_bit, l_rx[cur][7:1]};
             default: ;
           endcase
 

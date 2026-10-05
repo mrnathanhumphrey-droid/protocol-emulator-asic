@@ -10,6 +10,7 @@ a82cc73255cdc692cdf29418b2d79580b0d4b84473e0005629486d0ac4513553  smoke_image.he
 31416b685c43ae3c7862365090eb6d71cc9c20ca52ac87c15f4fbbec09d56c0a  census_image.hex  # make_smoke_image.py --census
 07eda46b134513e5fe880a9e9433c083503a7d896dc6cde9bb332a5adfb54ce0  cfgerr_image.hex  # make_smoke_image.py --cfgerr
 3e20d562d2811217d474ee6745e8d7eed17da25da123fcd4e126898e8b3fc44b  pinnone_image.hex  # make_smoke_image.py --pinnone
+840cc976033c2dc290da601ee6d0ad1bf15a2fe8caf8b48e509945f50dc12483  i2caddr_image.hex  # make_smoke_image.py --i2caddr
 efd8c25de5f3462d520d9f37611d696b8569d03f90a5102ea6945687d97cfb63  five_image.hex  # make_smoke_image.py --five 12 13 14 15 16
 36fa92e90afdea5aff9c17256796b0194eda07150c1eb881c713d767349c9d0a  chain_image.hex  # make_smoke_image.py --chain 12 40
 65ba6f94c9a66520b3ab437047a4fe9fc300e82eb61a1cf330e7a0548890cc9f  stress_image.hex  # make_smoke_image.py --stress 25 31
