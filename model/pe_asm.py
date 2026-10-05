@@ -46,7 +46,8 @@ sys.path.insert(0, os.path.join(ROOT, "test"))
 sys.path.insert(0, os.path.join(HERE, "a2"))
 
 from make_smoke_image import (            # noqa: E402
-    ACT_BASE, ACT_BYTES, AW, N_LANES, OP_LEVEL, OP_READBIT, OP_REARM,
+    ACT_BASE, ACT_BYTES, AW, N_LANES, OP_ARM, OP_LEVEL, OP_READBIT,
+    OP_REARM,
     OP_SHIFT,
     OP_SHIFTIN, PIN_NONE, act, hdr,
 )
@@ -196,7 +197,19 @@ def check_receive_pin(lanes, headers):
     fetched lazily -- so silicon guards at dispatch. Here the whole program is
     visible, so the error is named with its lane and its opcode.
     """
-    names = {OP_SHIFTIN: "OP_SHIFTIN", OP_READBIT: "OP_READBIT"}
+    # ⛔⛔ `OP_ARM` JOINS THE SAME REFUSAL (Wilson's addition, from the third
+    # instance of the out-of-range family). An ARM names the pin whose EDGE
+    # releases the lane, and `pin_rise[l_armpin]` indexes a [N_PINS-1:0]
+    # vector -- so an ARM on 12..15 can never see an edge and can only ever
+    # time out. Measured before the silicon guard existed: `arm_hit` was X for
+    # all 198 armed cycles. A lane armed on a pin that does not exist is
+    # always a program error, exactly as a receive with nothing to sample is.
+    # ⚠ `OP_REARM` IS **NOT** INCLUDED, and that is deliberate: every program
+    # in the suite ends its loop with `act(OP_REARM, 0, 1, d)` where the pin
+    # field is not an arm pin at all -- re-arm reuses the lane's existing
+    # `l_armpin`. Refusing on its pin field would reject every program here.
+    names = {OP_SHIFTIN: "OP_SHIFTIN", OP_READBIT: "OP_READBIT",
+             OP_ARM: "OP_ARM"}
     for ln in sorted(lanes):
         for (op, pin, _lvl, _dly, _q) in lanes[ln]:
             if op not in names:
@@ -206,7 +219,8 @@ def check_receive_pin(lanes, headers):
             raise Reject(
                 "lane %d executes %s on pin %d, which is not a real pin "
                 "(N_PINS = %d, so only 0..%d exist%s). A receive with nothing "
-                "to sample cannot mean anything, and an out-of-range read is "
+                "to sample -- or an edge on a pin that does not exist -- cannot "
+                "mean anything, and an out-of-range read is "
                 "X in simulation and an UNSPECIFIED synthesised value in "
                 "silicon. PIN_NONE is legal as a CLOCK pin (an SPI target "
                 "needs that) and as a no-op's action pin, but not as the pin a "
@@ -393,6 +407,13 @@ def _demo_readbit_nonreal():
     return lanes, headers
 
 
+def _demo_arm_nonreal():
+    """An ARM on the reserved index: no edge can ever arrive, only a timeout."""
+    lanes, headers = _demo_ok()
+    lanes[0] = [(OP_ARM, PIN_NONE, 0, 200, 0), (OP_REARM, 0, 1, 25, 0)]
+    return lanes, headers
+
+
 def _demo_spi_target():
     """An SPI TARGET: lane 0 receives, and names PIN_NONE as its CLOCK pin.
 
@@ -431,6 +452,8 @@ def main() -> int:
              ("queue 0", "lane 0", "lane 2")),
             ("one lane, two queues", _demo_switching, ("lane 0",)),
             ("d_min below D*", _demo_tight, ("D* = 20", "LANE")),
+            ("an ARM on a non-real pin", _demo_arm_nonreal,
+             ("lane 0", "OP_ARM", "PIN_NONE")),
             ("a receive on a non-real pin", _demo_recv_nonreal,
              ("lane 0", "OP_SHIFTIN", "PIN_NONE"))):
         try:
@@ -463,6 +486,8 @@ def main() -> int:
              ("lane 0", "OP_SHIFTIN", "PIN_NONE")),
             ("OP_READBIT on PIN_NONE", _demo_readbit_nonreal, True,
              ("lane 0", "OP_READBIT")),
+            ("OP_ARM on PIN_NONE", _demo_arm_nonreal, True,
+             ("lane 0", "OP_ARM")),
             ("an SPI target: PIN_NONE as the CLOCK pin", _demo_spi_target,
              False, ()),
             ("a no-op: OP_LEVEL on PIN_NONE", _demo_noop_pin_none, False, ())):

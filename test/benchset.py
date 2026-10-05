@@ -389,6 +389,63 @@ def generate(cfg, top):
     return None
 
 
+def cocotb_images():
+    """Images the cocotb suite loads, scraped from `test/test.py`."""
+    path = os.path.join(HERE, "test.py")
+    if not os.path.isfile(path):
+        return None
+    with open(path, encoding="utf-8", errors="replace") as fh:
+        body = fh.read()
+    return sorted(set(re.findall(r'read_hex\(\s*"([a-z0-9_]+\.hex)"', body)))
+
+
+def cocotb_blind_spot(recs):
+    """⛔⛔ THE COCOTB SUITE'S STIMULUS MUST BE REACHABLE BY THE SWEEP.
+
+    RULING 2, and it is here because the exclusion of `tb.v` produced TWO
+    FALSE "never fired" GAPS. `cfgerr_image.hex` had been run by
+    `test_config_error_refuses_to_run` all along, but the cocotb toplevel is
+    the one bench this file excludes (no self-checking PASS line for a
+    `--binary` run), so the open-drain refusal arms read as untested and I
+    relayed them to Wilson as a silicon gap. Twice.
+
+    ⚠ WHAT THIS IS AND IS NOT. Running the cocotb suite itself under Verilator
+    with coverage is BLOCKED ON TOOL VERSIONS: cocotb 2.0.1 requires Verilator
+    >= 5.036, and this box has 5.032 while the CI runner installs 5.020 -- so
+    that arm cannot run in either environment today. What IS checkable now is
+    that every PROGRAM the cocotb suite loads is also driven by a bench the
+    sweep measures, which is what made `cfgerr_image` a false gap rather than
+    a real one.
+    ⇒ So this does NOT measure cocotb's own driving -- its host pacing and its
+    serial-readback decode through `tb.v` are still unmeasured, and that
+    remains owed. It does close the case where a cocotb-only PROGRAM exercises
+    RTL nothing else reaches.
+    """
+    want = cocotb_images()
+    if want is None:
+        return ["test/test.py is missing, so the cocotb suite's images cannot "
+                "be compared against the sweep"]
+    if not want:
+        return ["no `read_hex(...)` found in test/test.py -- either the cocotb "
+                "suite stopped loading images or this scan no longer matches "
+                "how it does, and a zero-hit scan proves the string absent, "
+                "not the thing"]
+    swept = set()
+    for r in recs:
+        for a in r["args"]:
+            if a.startswith("+IMG="):
+                swept.add(os.path.basename(a.split("=", 1)[1]))
+    out = []
+    for img in want:
+        if img not in swept:
+            out.append("the cocotb suite loads %s and NO swept bench does. "
+                       "A point only that program reaches would read as "
+                       "\"never fired\" -- which has already happened twice. "
+                       "Give some bench in CONFIG an arm that loads it."
+                       % img)
+    return out
+
+
 def plan():
     """(records, problems). A record is one runnable arm, fully resolved.
 
@@ -473,6 +530,8 @@ def plan():
                                         for k, v in sorted(gparams.items())))
             recs.append({"top": top, "label": label, "srcs": srcs,
                          "args": full, "gparams": gparams, "build": key})
+    # ⛔ RULING 2: the cocotb suite's stimulus must be reachable
+    probs.extend(cocotb_blind_spot(recs))
     return recs, probs
 
 
@@ -508,6 +567,38 @@ def main() -> int:
         for p in probs:
             print("      %s" % p)
     print()
+    ci = cocotb_images() or []
+    print("  cocotb images, all swept : %s" % (", ".join(ci) or "none"))
+    print("    ⚠ cocotb's OWN driving is still unmeasured: running the")
+    print("      suite under Verilator needs cocotb >= its 5.036 Verilator")
+    print("      floor, and this box has 5.032 / CI has 5.020.")
+    # ⛔ PRICE THE BLIND-SPOT CHECK. It passes today because all three cocotb
+    # images are swept, and a check only ever seen to pass has unknown
+    # strength -- which is the whole reason this one exists.
+    print()
+    print("  --- must-fire: a cocotb-only image is reported ---")
+    fake_recs = [{"args": ["+IMG=test/corpus_i2c.hex"]}]
+    _real = globals()["cocotb_images"]
+    try:
+        globals()["cocotb_images"] = lambda: ["corpus_i2c.hex",
+                                              "only_in_cocotb.hex"]
+        got = cocotb_blind_spot(fake_recs)
+    finally:
+        globals()["cocotb_images"] = _real
+    hit = any("only_in_cocotb.hex" in g for g in got)
+    print("    %-46s %s" % ("an image only cocotb loads is reported",
+                            "ok" if hit else "*** MISSED"))
+    if not hit:
+        probs = list(probs) + ["the cocotb blind-spot check does not fire"]
+    try:
+        globals()["cocotb_images"] = lambda: []
+        empty = cocotb_blind_spot([])
+    finally:
+        globals()["cocotb_images"] = _real
+    print("    %-46s %s" % ("a zero-hit scan is a finding, not a pass",
+                            "ok" if empty else "*** ACCEPTED"))
+    if not empty:
+        probs = list(probs) + ["an empty cocotb image scan reads as a pass"]
     print("  BENCH SET: %s" % ("ok" if not probs else "FAILED"))
     return 1 if probs else 0
 
