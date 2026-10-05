@@ -396,6 +396,14 @@ ANCHOR_TEXT = {
         "end else if (drive) begin",
 }
 
+#: ⛔⛔ EVERY COVERAGE FIGURE IS LABELLED WITH THE TOOL THAT MEASURED IT
+#: (Wilson's provenance ruling). A release bump is not neutral here: 5.053
+#: emits ~2x the toggle points of 5.032 AND a conditional-expression point
+#: class 5.032 lacked, which added an OWED point with the design unchanged. So
+#: "29 uncovered" is not a fact about the design on its own -- it is a fact
+#: about the design AND the release.
+TOOL_LABEL = "Verilator (unrecorded)"
+
 _LINE = re.compile(r"^C '(.*)' (\d+)\s*$")
 
 
@@ -442,16 +450,23 @@ COCOTB_DAT = os.environ.get(
 
 
 def norm_path(fn):
-    """⛔ THE COCOTB RUN RECORDS ABSOLUTE PATHS, because its `make` runs from
-    `test/`: `/mnt/d/ProtocolEmulator/test/../src/pe_engine.v`. A filter on a
-    `src/` prefix silently matched NOTHING and reported "cocotb covers 0
-    points" -- a wrong answer that only looked wrong because 0 is implausible
-    for a run that simulated 279,580 ns of the DUT.
+    """Reduce a coverage record's filename to a repo-relative path.
+
+    ⛔⛔ THE COCOTB RUN RECORDS ABSOLUTE PATHS, because its `make` runs from
+    `test/`: `.../test/../src/pe_engine.v`. Two bugs came out of that, and the
+    second is the instructive one:
+      1. a filter on a `src/` prefix matched NOTHING and reported "cocotb
+         covers 0 points" -- implausible for a run that simulated 279,580 ns;
+      2. the fix keyed on the literal substring `ProtocolEmulator/`, WHICH IS
+         THIS MACHINE'S CHECKOUT DIRECTORY NAME. In CI the repo is
+         `protocol-emulator-asic`, so it matched nothing there and the gate
+         failed with "the data has NO subject points at all" -- a hardcoded
+         local path masquerading as a normaliser.
+    ⇒ So it depends on NO directory name: collapse `..`, then keep the tail
+    from the LAST segment that is `src` or `test`. That holds for any checkout
+    path on any machine.
     """
     fn = fn.replace(chr(92), "/")
-    i = fn.find("ProtocolEmulator/")
-    if i >= 0:
-        fn = fn[i + len("ProtocolEmulator/"):]
     parts = []
     for seg in fn.split("/"):
         if seg == "..":
@@ -459,6 +474,9 @@ def norm_path(fn):
                 parts.pop()
         elif seg not in ("", "."):
             parts.append(seg)
+    for i in range(len(parts) - 1, -1, -1):
+        if parts[i] in ("src", "test"):
+            return "/".join(parts[i:])
     return "/".join(parts)
 
 
@@ -549,7 +567,8 @@ def check_points(agg) -> int:
               % (fk[0], fk[1].replace("v_", ""), t, u, 100.0 * (t - u) / t))
 
     print()
-    print("  --- adjudication: %d uncovered point(s) ---" % len(uncovered))
+    print("  --- adjudication: %d uncovered point(s), measured with %s ---"
+          % (len(uncovered), TOOL_LABEL))
     by_status = collections.Counter()
     unclassified = []
     for key in sorted(uncovered):
@@ -1011,6 +1030,26 @@ def selftest(agg) -> int:
                             "ok" if moved else "*** ACCEPTED"))
     if not moved:
         rc = 1
+    # (2d) ⛔ THE PATH NORMALISER, ON EVERY SPELLING IT MUST HANDLE. It was
+    # keyed on this machine's checkout directory name once, matched nothing in
+    # CI, and the gate failed with "no subject points at all". A normaliser
+    # that depends on where the repo happens to live is not one.
+    cases = (
+        ("/mnt/d/ProtocolEmulator/test/../src/pe_engine.v", "src/pe_engine.v"),
+        ("/home/runner/work/protocol-emulator-asic/"
+         "protocol-emulator-asic/test/../src/project.v", "src/project.v"),
+        ("/home/runner/work/protocol-emulator-asic/"
+         "protocol-emulator-asic/test/tb.v", "test/tb.v"),
+        ("src/pe_store.v", "src/pe_store.v"),
+        ("/some/src/checkout/test/fram_i2c.v", "test/fram_i2c.v"),
+    )
+    bad = [(i, norm_path(i), w) for i, w in cases if norm_path(i) != w]
+    print("    %-52s %s (%d spellings)"
+          % ("the path normaliser handles every checkout spelling",
+             "ok" if not bad else "*** WRONG", len(cases)))
+    for i, got, want in bad:
+        print("        %s -> %s, wanted %s" % (i, got, want))
+        rc = 1
     # (3) a short reason
     probe = {("x.v", 1, "v_line", "case"): (UNREACHABLE, "because.")}
     short = any(len((w or "").strip()) < 60 for _s, w in probe.values())
@@ -1100,11 +1139,15 @@ def main() -> int:
     # The toggle ceilings are exact point counts and a Verilator release can
     # emit a different number of them, so a ceiling breach caused by a version
     # change must not be indistinguishable from a regression.
+    global TOOL_LABEL
     env = os.path.join(os.path.dirname(DAT), "sweep_env.txt")
     if os.path.isfile(env):
         with open(env, encoding="utf-8", errors="replace") as fh:
             for ln in fh.read().strip().splitlines():
-                print("  %s" % ln.strip())
+                t = ln.strip()
+                print("  %s" % t)
+                if t.startswith("Verilator "):
+                    TOOL_LABEL = " ".join(t.split()[:2])
     else:
         print("  ⚠ no sweep_env.txt beside the data -- the tool version that")
         print("    produced it is unrecorded, so a toggle-ceiling breach")
@@ -1127,6 +1170,9 @@ def main() -> int:
     print("    ⚠ PASSED means NOTHING NEW went uncovered. It does not mean")
     print("      the design is covered: %d points are OWED (debt, each named "
           "with" % owed)
+    print("    ⚠ ALL FIGURES ABOVE -- uncovered, OWED, and every toggle")
+    print("      ceiling -- are relative to %s. A release bump can add or" % TOOL_LABEL)
+    print("      reshape points without the design changing, and has.")
     print("      the test that would reach it) and %d is dead configuration"
           % dead)
     print("      awaiting a ruling. The debt is the point of the list -- it")
