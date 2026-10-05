@@ -43,6 +43,17 @@ module tb_smoke;
       .ena(ena), .clk(clk), .rst_n(rst_n)
   );
 
+  // DO NOT REORDER: the shared host-channel driver needs `dut`, `clk`,
+  // `rst_n` and `ui_in`, all declared above.
+  // THE HOST CHANNEL, WHICH THIS BENCH NEVER DROVE. Ruling 0: every
+  // `OP_SHIFT` the suite ever executed found `host_valid = 0` and took the
+  // UNDERRUN branch, so the per-opcode `C` this bench writes to
+  // `cj_measured*.txt` -- including the "8 of 8 opcodes" claim measured on the
+  // census image -- was taken in the STARVED regime without saying so.
+  // The feeder is a concurrent process inside the include; this bench only
+  // declares which queues to feed and raises `hf_en` after load.
+`include "test/host_feed.vh"
+
   always #10 clk = ~clk;                   // 50 MHz, the shipped clock
 
   // ---- image ----------------------------------------------------------
@@ -154,6 +165,7 @@ module tb_smoke;
       $display("      Either the path is wrong or the generator did not run.");
       errors = errors + 1;
     end
+    hf_init;
     repeat (4) @(posedge clk);
     rst_n = 1;
     @(posedge clk);
@@ -189,6 +201,16 @@ module tb_smoke;
     // ---- RUN MODE -------------------------------------------------------
     uio_drv  = 8'hFF;                      // CS high = deselected
     ui_in[7] = 1'b0;
+    ui_in[6] = 1'b0;
+    // FEED EVERY QUEUE. This bench runs whatever image it is given, so it
+    // cannot know which queues the program names -- and a queue nobody draws
+    // from simply stays full, because the feeder tops up to the depth and
+    // stops rather than pushing blindly. `hf_check` reports the result.
+    hf_set(0, 8'h5A, 8'hC3, 8'h3C, 8'hA5);
+    hf_set(1, 8'h5A, 8'hC3, 8'h3C, 8'hA5);
+    hf_set(2, 8'h5A, 8'hC3, 8'h3C, 8'hA5);
+    hf_set(3, 8'h5A, 8'hC3, 8'h3C, 8'hA5);
+    hf_en = 1'b1;
     prev_proto = uo_out[3:0];
     svc_cycles = 0; svc_jobs = 0; svc_max = 0; prev_st = 0;
     cur_svc = 0; cur_op = 0;
@@ -505,6 +527,18 @@ module tb_smoke;
     // perfectly green. Env-selected input plus a constant output path silently
     // produces the wrong artefact, so the provenance travels WITH the numbers.
     $fwrite(fd, "image %0s\n", imgfile);
+    // THE FED STATE TRAVELS WITH THE NUMBERS, for exactly the reason the
+    // image and the depth do. A per-opcode `C` measured with every queue
+    // EMPTY is a measurement of the UNDERRUN PATH, and it is
+    // indistinguishable from a fed one by the numbers alone -- SHIFT takes
+    // two cycles either way. That is how "C measured on 8 of 8 opcodes"
+    // came to describe the starved regime for the whole life of the host
+    // channel. `gate_cj_bounds` now REFUSES a file whose SHIFT count is
+    // non-zero while `fed` is 0.
+    $fwrite(fd, "fed %0d\n", hf_bytes);
+    $fwrite(fd, "pops %0d\n", hf_pops);
+    $fwrite(fd, "underrun %0d\n",
+            (dut.u_eng.lane_underrun != 5'b00000) ? 1 : 0);
     $fwrite(fd, "jobs %0d\n", svc_jobs);
     $fwrite(fd, "svc_cycles %0d\n", svc_cycles);
     $fwrite(fd, "jmiss_max %0d\n", jmiss_max);

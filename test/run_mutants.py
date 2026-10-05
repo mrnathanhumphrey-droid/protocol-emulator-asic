@@ -49,6 +49,12 @@ SRC_EDGE = ["test/tb_edge.v", "src/pe_engine.v", "src/pe_store.v",
 # what gives M_TX_IGNORE_TAG something to kill it with.
 SRC_TX = ["test/tb_tx.v", "src/pe_engine.v", "src/pe_store.v", "src/project.v"]
 TX_IMG = "test/tx_image.hex"
+TX_BADCLK_IMG = "test/tx_badclk_image.hex"
+# (define, what it breaks, the text that certifies the kill, why, which image)
+# ⭐ TWO IMAGES, because the two mutants break DIFFERENT claims: the tag mutant
+# needs a legal two-lane program to misroute bytes in, and the clock-alias
+# mutant needs the ILLEGAL program whose refusal it removes. A single image
+# could not kill both.
 TX_MUTANTS = [
     ("M_TX_IGNORE_TAG",
      "host_q becomes a constant: every lane pops queue 0",
@@ -63,7 +69,20 @@ TX_MUTANTS = [
      "bench scans every byte a lane emitted against every byte of the other "
      "queue, because the narrow 'byte 0 vs byte 0' check did NOT fire (lane 1 "
      "gets queue 0's SECOND byte, since lane 0 took the first) and the mutant "
-     "would have died of 'got 4e want 2d' -- a wrong reason."),
+     "would have died of 'got 4e want 2d' -- a wrong reason.", "good"),
+    ("M_SHIFT_CLK_ALIAS",
+     "remove the 1.6x refusal of a SHIFT lane whose clk pin is its data pin",
+     "1.6x: the aliased SHIFT was not refused",
+     "⛔ OP_SHIFT writes the data pin and THEN the clock pin, so with "
+     "`clkpin == pin` the clock write overwrites every data bit with the "
+     "action's level field -- at level = 0 every 1 bit becomes a 0 and the "
+     "wire carries a well-formed frame of the wrong data. ⚠ IT WAS LATENT FOR "
+     "THE WHOLE LIFE OF THE HOST CHANNEL: nothing had ever fed a queue, so "
+     "every OP_SHIFT ran on an all-zero shift register where losing the 1 bits "
+     "changed nothing -- and `build_census` declared the alias on its shifting "
+     "lane the entire time. ⭐ With the refusal removed the bad program RUNS "
+     "and emits 36 bytes; with it, config_err is sticky, the lane halts, and "
+     "nothing beyond the reset byte comes out.", "badclk"),
 ]
 EDGE_MUTANTS = [
     ("M_NO_REBASE",
@@ -413,14 +432,40 @@ def main() -> int:
                 survivors.append("tb_tx baseline")
             else:
                 print("    baseline: PASS (4 of 4 must-fires)")
-                for define, breaks, want, why in TX_MUTANTS:
+                # ⛔ THE BAD-CLOCK IMAGE IS BUILT AND MEASURED HERE TOO,
+                # and its BASELINE is the refusal: `tb_tx +BADCLK=1` passes
+                # only if the engine refused the program. A mutant arm whose
+                # unmutated run was never checked would make "the mutant
+                # killed it" unreadable.
+                bad_extra, bad_ok = None, False
+                bp = os.path.join(ROOT, TX_BADCLK_IMG)
+                if os.path.isfile(bp):
+                    with open(bp, encoding="ascii") as fh:
+                        nb = len([w for w in fh.read().split() if w])
+                    bad_extra = ["+NBYTES=%d" % nb, "+NCYC=4000", "+BADCLK=1"]
+                    ob = run(base_t, img=TX_BADCLK_IMG, extra=bad_extra)
+                    bad_ok = "tb_tx: PASS" in ob
+                    print("    baseline (1.6x image): %s"
+                          % ("REFUSED, as it must" if bad_ok
+                             else "*** the illegal program was NOT refused"))
+                    if not bad_ok:
+                        survivors.append("tb_tx 1.6x baseline")
+                else:
+                    print("    *** %s is missing. Build it:" % TX_BADCLK_IMG)
+                    print("        python test/make_smoke_image.py --txbadclk")
+                    survivors.append("tb_tx 1.6x image")
+                for define, breaks, want, why, which in TX_MUTANTS:
+                    if which == "badclk" and not bad_ok:
+                        continue
+                    use_img = TX_BADCLK_IMG if which == "badclk" else TX_IMG
+                    use_extra = bad_extra if which == "badclk" else extra
                     v = os.path.join(SCRATCH, "mut_t_%s.vvp" % define.lower())
                     rc, log = build([define], v, src=SRC_TX)
                     if rc != 0:
                         print("    %-19s BUILD FAIL -- not a kill" % define)
                         wrong_reason.append((define, "build"))
                         continue
-                    o = run(v, img=TX_IMG, extra=extra)
+                    o = run(v, img=use_img, extra=use_extra)
                     killed = "tb_tx: PASS" not in o
                     right = want in o
                     print("    %-19s %-40s %s"

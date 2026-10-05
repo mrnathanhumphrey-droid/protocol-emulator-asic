@@ -100,6 +100,126 @@ async def load_image(dut, img):
         await write_byte(dut, b)
 
 
+# ---------------------------------------------------------------------------
+# THE HOST DATA CHANNEL (Wilson's ruling 0)
+# ---------------------------------------------------------------------------
+# ⛔⛔ NO BENCH IN THIS PROJECT HAD EVER DRIVEN IT. `pe_isa.host_pushes` had
+# been in the ISA since the channel was built and nothing called it, so every
+# `OP_SHIFT` ever executed found `host_valid = 0` and took the UNDERRUN branch.
+# Three tests in this file load shifting corpus programs -- `corpus_i2c.hex`
+# (twice) and `corpus_all5.hex` -- so all three measured the STARVED path while
+# reading as evidence about the open-drain and engine behaviour of a
+# transmitting lane.
+# ⭐ THE PUSH SHAPE IS `pe_isa`'s, NOT A LOCAL GUESS: two pushes per byte, HIGH
+# NIBBLE FIRST, with the 2-bit queue tag on BOTH pushes because the hardware
+# latches it with the high nibble. `test/host_feed.vh` is the Verilog side of
+# the same contract; this is the cocotb side.
+HOST_PAT = [0x5A, 0xC3, 0x3C, 0xA5]
+TXQ = 4
+TXD = 2
+
+
+def push_ctrl(nib, tag, wr):
+    """`ui_in` in RUN mode: prog=0, nibble on [4:1], tag on {[5], [0]}."""
+    return ((wr << PIN_WR) | ((tag >> 1) << 5) | ((nib & 0xF) << 1)
+            | (tag & 1))
+
+
+async def push_nibble(dut, nib, tag):
+    """One push. ⛔ `wr` is an ASYNCHRONOUS strobe behind a 3-stage
+    synchroniser, so it is held -- a missed push is INVISIBLE: the byte never
+    arrives and the lane underruns, which looks exactly like the starved
+    regime this exists to leave."""
+    dut.ui_in.value = push_ctrl(nib, tag, 0)
+    await ClockCycles(dut.clk, 2)
+    dut.ui_in.value = push_ctrl(nib, tag, 1)
+    await ClockCycles(dut.clk, 3)
+    dut.ui_in.value = push_ctrl(nib, tag, 0)
+    await ClockCycles(dut.clk, 1)
+
+
+async def feed_host(dut, state):
+    """Top up every TX queue that has space, from a repeating pattern.
+
+    ⛔ ONLY QUEUES WITH SPACE. A push onto a full queue is DROPPED and sets
+    `tx_full_sticky` -- the host has no back-pressure pin -- so a blind feeder
+    would drop bytes and the lane would emit a stream with gaps, which is the
+    FEEDER's bug reported as the engine's.
+    ⚠ Runs forever; start it with `cocotb.start_soon` and read `state`
+    afterwards.
+    """
+    idx = [0] * TXQ
+    while True:
+        for q in range(TXQ):
+            try:
+                room = int(dut.user_project.tx_cnt[q].value) != TXD
+            except Exception:
+                room = True
+            if room:
+                b = HOST_PAT[idx[q]]
+                await push_nibble(dut, (b >> 4) & 0xF, q)
+                await push_nibble(dut, b & 0xF, q)
+                idx[q] = (idx[q] + 1) % len(HOST_PAT)
+                state["bytes"] += 1
+        await ClockCycles(dut.clk, 1)
+
+
+async def watch_pops(dut, state):
+    """Count `host_pop` pulses -- bytes the ENGINE actually consumed.
+
+    ⛔⛔ WITHOUT THIS THE PRECONDITION PASSES VACUOUSLY, which is the exact
+    defect class this whole ruling is about. "No underrun" is trivially true if
+    no `OP_SHIFT` ever reached its byte load: the load fires only at
+    `l_bitp == a_cnt`, so a program with `count = 8` loads once every nine
+    shifts and a short window can contain shifts but no load at all. A run like
+    that has not exercised the payload path and must not be allowed to say it
+    did.
+    """
+    while True:
+        await ClockCycles(dut.clk, 1)
+        try:
+            if int(dut.user_project.u_eng.host_pop.value) == 1:
+                state["pops"] += 1
+        except Exception:
+            pass
+
+
+def assert_host_fed(dut, state, expect_pops=True, why=""):
+    """THE STANDING PRECONDITION (ruling 0): a run that executes a SHIFT must
+    have had a byte pushed, must have had one CONSUMED, and must not have set
+    any lane's underrun flag. Otherwise the run is STARVED and does not count
+    -- the same class as "the image loaded" and "the window is long enough".
+
+    ⛔⛔ `expect_pops=False` IS A DECLARATION, NOT AN ESCAPE HATCH. It asserts
+    that the engine consumed EXACTLY ZERO bytes, and the caller must say why.
+    So a design change that makes the load reachable turns the test RED and
+    forces the declaration to be revisited -- the opposite of a weakened check.
+    """
+    assert state["bytes"] > 0, (
+        "STARVED: the program shifts and no host byte was ever pushed, so "
+        "every OP_SHIFT took the underrun branch")
+    if not expect_pops:
+        assert why, "a declared zero-pop expectation must carry its reason"
+        assert state["pops"] == 0, (
+            "THE DECLARATION IS STALE: %d bytes were consumed where zero were "
+            "expected. Reason on record: %s -- re-check it."
+            % (state["pops"], why))
+        dut._log.info("host channel: %d pushed, 0 consumed AS DECLARED -- %s"
+                      % (state["bytes"], why))
+        return
+    assert state["pops"] > 0, (
+        "VACUOUS: %d bytes were pushed but the engine consumed NONE, so no "
+        "OP_SHIFT reached its byte load and the payload path was never "
+        "exercised. `no underrun` here means `nothing tried`."
+        % state["bytes"])
+    ur = int(dut.user_project.u_eng.lane_underrun.value)
+    assert ur == 0, (
+        "STARVED: lane_underrun = %d -- a shift found an empty queue, so this "
+        "run measured the underrun path and does not count" % ur)
+    dut._log.info("host channel: %d bytes pushed, %d consumed, no underrun"
+                  % (state["bytes"], state["pops"]))
+
+
 def read_hex(name):
     """A corpus image, one hex byte per line. ⭐ The SAME images the two-simulator
     trace corpus uses, so this suite and that comparison speak about the same
@@ -362,6 +482,14 @@ async def test_open_drain_data_pin(dut):
     dut.ui_in.value = ctrl(prog=0)
     dut.uio_in.value = 0xFF                 # idle-high bus, as pull-ups give
     await ClockCycles(dut.clk, 8)
+    # ⛔ RULING 0: FEED THE HOST CHANNEL. This program SHIFTS, and until now
+    # every shift here found an empty queue and took the underrun branch --
+    # so this test's evidence was about the starved path. The feeder owns
+    # `ui_in` from here on, which is why it starts AFTER the line above sets
+    # run mode and why the sampling loop below never writes that port.
+    hostq = {"bytes": 0, "pops": 0}
+    cocotb.start_soon(feed_host(dut, hostq))
+    cocotb.start_soon(watch_pops(dut, hostq))
 
     asserted, released, samples = 0, 0, 0
     for _ in range(2500):
@@ -390,6 +518,21 @@ async def test_open_drain_data_pin(dut):
 # =====================================================================
 # 5b. D2's must-fire: the open-drain clock pin is released
 # =====================================================================
+
+    # ⛔ THE STANDING PRECONDITION (ruling 0). Checked at the END, because a
+    # lane can be fed at the start and still starve later -- and a starved
+    # run does not count whatever else it showed.
+    # ⛔⛔ ZERO POPS, DECLARED, AND IT IS A DESIGN FINDING. This lane mixes
+    # OP_SHIFT (drive a bit) with OP_SHIFTIN (read the ACK), which is how
+    # I2C works -- and the two directions SHARE ONE BIT POINTER. The RX
+    # byte-complete resets `l_bitp` at `a_cnt - 1`, so it fires before the
+    # TX byte load at `a_cnt` can ever be reached: 124 OP_SHIFT dispatches
+    # produce ZERO loads and ZERO underruns, because no byte is ever even
+    # REQUESTED. ⇒ The host -> TX path is unreachable on a half-duplex lane,
+    # which is owed a ruling (separate pointers, or a symmetric `a_cnt - 1`
+    # on the TX side). Asserted as exactly zero so a fix turns this red.
+    assert_host_fed(dut, hostq, expect_pops=False,
+                    why="half-duplex lane: OP_SHIFTIN resets l_bitp at a_cnt-1 before the TX load at a_cnt is reachable")
 @cocotb.test()
 async def test_open_drain_clock_pin_is_released(dut):
     """D2: an open-drain lane's CLOCK pin is RELEASED, never driven high.
@@ -435,6 +578,14 @@ async def test_open_drain_clock_pin_is_released(dut):
     dut.ui_in.value = ctrl(prog=0)
     dut.uio_in.value = 0xFF
     await ClockCycles(dut.clk, 8)
+    # ⛔ RULING 0: FEED THE HOST CHANNEL. This program SHIFTS, and until now
+    # every shift here found an empty queue and took the underrun branch --
+    # so this test's evidence was about the starved path. The feeder owns
+    # `ui_in` from here on, which is why it starts AFTER the line above sets
+    # run mode and why the sampling loop below never writes that port.
+    hostq = {"bytes": 0, "pops": 0}
+    cocotb.start_soon(feed_host(dut, hostq))
+    cocotb.start_soon(watch_pops(dut, hostq))
 
     for _ in range(2500):
         oe = str(dut.uio_oe.value)
@@ -451,6 +602,21 @@ async def test_open_drain_clock_pin_is_released(dut):
 # =====================================================================
 # 6. the engine, at the pins
 # =====================================================================
+
+    # ⛔ THE STANDING PRECONDITION (ruling 0). Checked at the END, because a
+    # lane can be fed at the start and still starve later -- and a starved
+    # run does not count whatever else it showed.
+    # ⛔⛔ ZERO POPS, DECLARED, AND IT IS A DESIGN FINDING. This lane mixes
+    # OP_SHIFT (drive a bit) with OP_SHIFTIN (read the ACK), which is how
+    # I2C works -- and the two directions SHARE ONE BIT POINTER. The RX
+    # byte-complete resets `l_bitp` at `a_cnt - 1`, so it fires before the
+    # TX byte load at `a_cnt` can ever be reached: 124 OP_SHIFT dispatches
+    # produce ZERO loads and ZERO underruns, because no byte is ever even
+    # REQUESTED. ⇒ The host -> TX path is unreachable on a half-duplex lane,
+    # which is owed a ruling (separate pointers, or a symmetric `a_cnt - 1`
+    # on the TX side). Asserted as exactly zero so a fix turns this red.
+    assert_host_fed(dut, hostq, expect_pops=False,
+                    why="half-duplex lane: OP_SHIFTIN resets l_bitp at a_cnt-1 before the TX load at a_cnt is reachable")
 @cocotb.test()
 async def test_engine_runs_at_the_pins(dut):
     """THE ENGINE BENCH AT THE PINS: a five-lane program moves BOTH banks.
@@ -477,6 +643,14 @@ async def test_engine_runs_at_the_pins(dut):
     dut.ui_in.value = ctrl(prog=0)
     dut.uio_in.value = 0xFF
     await ClockCycles(dut.clk, 8)
+    # ⛔ RULING 0: FEED THE HOST CHANNEL. This program SHIFTS, and until now
+    # every shift here found an empty queue and took the underrun branch --
+    # so this test's evidence was about the starved path. The feeder owns
+    # `ui_in` from here on, which is why it starts AFTER the line above sets
+    # run mode and why the sampling loop below never writes that port.
+    hostq = {"bytes": 0, "pops": 0}
+    cocotb.start_soon(feed_host(dut, hostq))
+    cocotb.start_soon(watch_pops(dut, hostq))
 
     proto, oes, unknown = set(), set(), 0
     for _ in range(2500):
@@ -499,6 +673,11 @@ async def test_engine_runs_at_the_pins(dut):
                            "open-drain / tri-state bank, so this program's "
                            "lanes are not running" % oes)
     dut._log.info("the engine is alive at the pins on all five lanes")
+
+    # ⛔ THE STANDING PRECONDITION (ruling 0). Checked at the END, because a
+    # lane can be fed at the start and still starve later -- and a starved
+    # run does not count whatever else it showed.
+    assert_host_fed(dut, hostq)
 
 
 # =====================================================================

@@ -405,6 +405,7 @@ module tb_trace;
     // ⚠ THE ONE DELIBERATE EXCEPTION IS THE ASYNC-CLEAR ARM, which must be
     //   off-edge to mean anything -- see the CS deassert above.
     cyc = 0;
+    hf_init;
     repeat (4) @(negedge clk);
     rst_n = 1;
     @(negedge clk);
@@ -430,6 +431,17 @@ module tb_trace;
     if (stayload == 0) ui_in[PIN_PROG] = 1'b0;
     ld_en  = 1'b0;                  // release the bus; engine and peers own it
     run_go = (stayload == 0);       // the peer masters start
+    // FEED THE HOST QUEUES (ruling 0). Corpus programs draw from queue 0, but
+    // every queue is fed because this bench runs whatever image it is given
+    // and an unused queue simply stays full.
+    // NOT IN `stayload` MODE: PROG stays HIGH there to trace the readback
+    // stream, and `ui_in[5]` is PIN_PTR in load mode -- a push would be a
+    // POINTER RESET, which would corrupt the very stream being traced.
+    hf_set(0, 8'h5A, 8'hC3, 8'h3C, 8'hA5);
+    hf_set(1, 8'h5A, 8'hC3, 8'h3C, 8'hA5);
+    hf_set(2, 8'h5A, 8'hC3, 8'h3C, 8'hA5);
+    hf_set(3, 8'h5A, 8'hC3, 8'h3C, 8'hA5);
+    if (stayload == 0) hf_en = 1'b1;
     for (i = 0; i < ncyc; i = i + 1) begin
       @(negedge clk);
       cyc = cyc + 1;
@@ -457,11 +469,19 @@ module tb_trace;
   // trusted, by `test/run_param_points.py`.
   parameter integer SPL_CFG = 2;
 
+  // THE HOST CHANNEL (Wilson's ruling 0). Every corpus program shifts, and
+  // until now every one of those shifts found an empty queue and took the
+  // UNDERRUN branch -- so the cycle-exact two-simulator agreement and the
+  // cross-seed sweep were established on the STARVED path. Feeding them is
+  // what makes those claims about the payload path they were read as covering.
+  // The include is placed AFTER the dut because it references `dut.tx_cnt`.
   tt_um_protocol_emulator #(.SPL(SPL_CFG)) dut (
       .ui_in(ui_in), .uo_out(uo_out),
       .uio_in(uio_in), .uio_out(uio_out), .uio_oe(uio_oe),
       .ena(ena), .clk(clk), .rst_n(rst_n)
   );
+
+`include "test/host_feed.vh"
 
 endmodule
 

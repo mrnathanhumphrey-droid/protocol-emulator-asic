@@ -636,6 +636,22 @@ module pe_engine #(
 `else
   wire pin_real = (a_pin < N_PINS[PINW-1:0]);
 `endif
+  // ⛔⛔ THE SAME GUARD ON THE CLOCK PIN, AND IT WAS MISSING. Every DATA write
+  // is guarded by `pin_real`; `OP_SHIFT`'s CLOCK write was not, so
+  // `pin_out[l_clkpin[cur]]` could index out of range with no guard at all --
+  // the identical out-of-range hazard the comment above calls "the class of
+  // thing that passed iverilog and died in Yosys once already", on the
+  // parallel axis. A fix applied to one axis and not to the symmetric one.
+  // ⭐ AND IT IS WHAT MAKES "THIS LANE HAS NO CLOCK" EXPRESSIBLE, which the
+  // design needs: an SPI **TARGET** does not drive a clock -- the master
+  // supplies SCK -- so a target lane's `clkpin` has nothing legitimate to
+  // point at. `test/corpus.py`'s SPI-target program had been pointing it at
+  // its own MISO pin, which 1.6x now refuses, and the only honest alternative
+  // is PIN_NONE.
+  // ⚠ FOUND BY RULING 0's AUDIT, not by a failing test: feeding the host
+  // channel turned the aliased clock write from invisible into a refusal, and
+  // the refusal had nowhere for the corpus to go.
+  wire clk_real = (l_clkpin[cur] < N_PINS[PINW-1:0]);
 
   // =====================================================================
   // HEADER LOAD -- on entering run, pull N_LANES headers out of the image.
@@ -1232,6 +1248,48 @@ module pe_engine #(
               end
             end
             OP_SHIFT: if (pin_real) begin
+              // ⛔⛔⛔ 1.6x -- A SHIFT LANE WHOSE CLOCK PIN IS ITS DATA PIN IS
+              // REFUSED. This block writes the DATA pin and then the CLOCK pin,
+              // clock SECOND. With `clkpin == pin` the clock assignment
+              // OVERWRITES the data bit with `a_lvl`, so at `a_lvl = 0` every
+              // 1 bit becomes a 0 -- and NOTHING FLAGGED IT: the wire carries a
+              // well-formed frame of the wrong data, which is the
+              // silent-corruption class, one level above a wrong number.
+              // ⚠ FOUND BY T5.1, AND ONLY REACHABLE THEN. No bench had ever
+              // driven the host channel, so every OP_SHIFT in the suite's
+              // history ran on an all-zero shift register where losing the 1
+              // bits changed nothing observable. `tb_tx` read 8 unexplained pin
+              // events per lane, which is exactly the number of 1 bits in each
+              // payload.
+              // ⭐ WHY AT DISPATCH AND NOT AT HEADER LOAD, which is where 1.6s
+              // lives. The hazard needs OP_SHIFT: `l_clkpin` reaches the pins
+              // in THIS CASE ARM AND NOWHERE ELSE, so for a lane that never
+              // shifts, `clkpin == pin` is a don't-care and refusing it would
+              // be a FALSE REFUSAL. At header-load time the chip cannot know
+              // whether the lane's program contains a SHIFT -- actions are
+              // fetched lazily -- so the correctly scoped check can only be
+              // made where the opcode is known. ⚠ `build_five` declares
+              // `clkpin == pin` on all five lanes and is LEGAL under this
+              // scope, which matters: it is the measurement base for T1's
+              // J_lane and for Theorem 3's 35 port-feasible cells, and
+              // refusing it would invalidate both for a hazard it cannot hit.
+              // ⇒ The toolchain (`pe_asm`) refuses it STATICALLY, where the
+              //   whole program is visible; this is the silicon backstop.
+              // ⛔ M_SHIFT_CLK_ALIAS removes the refusal, so the guard is
+              // PRICED rather than only ever seen to pass.
+              // ⛔ THE REFUSAL MUST SUPPRESS **BOTH** WRITES, and the first
+              // version of this guard only suppressed the DATA one -- the
+              // `else` bound to the data branch and the clock write below ran
+              // regardless, driving the aliased pin with `a_lvl`. A refusal
+              // that still drives the pin it is refusing to drive is not a
+              // refusal; it is the defect with a flag set beside it.
+`ifndef M_SHIFT_CLK_ALIAS
+              if (l_clkpin[cur] == a_pin) begin
+                config_err   <= 1'b1;        // sticky, in the status stream
+                sticky_ovr   <= 1'b1;
+                l_live[cur]  <= 1'b0;        // HALT: do not emit wrong data
+              end else begin
+`endif
               if (l_mode[cur]) begin
                 pin_out[a_pin] <= l_data[cur][0] & pin_pp[a_pin];
                 pin_oe[a_pin]  <= 1'b1;
@@ -1262,6 +1320,10 @@ module pe_engine #(
               // the cross-program open-drain invariant is PRICED rather than
               // only ever seen to pass. A guard that has never been observed to
               // fail has unknown strength, and this one is new.
+              // GUARDED BY `clk_real`, so a lane that declares PIN_NONE as
+              // its clock pin drives no clock -- which is what an SPI TARGET
+              // needs, since the master supplies SCK.
+              if (clk_real) begin
 `ifdef M_OD_CLK_PUSHPULL
               pin_out[l_clkpin[cur]] <= a_lvl;
               pin_oe[l_clkpin[cur]]  <= 1'b1;
@@ -1273,6 +1335,10 @@ module pe_engine #(
                 pin_out[l_clkpin[cur]] <= 1'b0;
                 pin_oe[l_clkpin[cur]]  <= ~a_lvl;
               end
+`endif
+              end
+`ifndef M_SHIFT_CLK_ALIAS
+              end                             // closes the 1.6x else-begin
 `endif
             end
             OP_SHIFTIN, OP_READBIT: if (pin_real) begin

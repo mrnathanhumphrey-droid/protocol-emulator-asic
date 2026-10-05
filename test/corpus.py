@@ -182,13 +182,40 @@ def _park(off):
     return act(OP_REARM, 0, 0, 500), off + ACT_BYTES
 
 
-def _assemble(seqs, headers_spec, park_at):
-    """seqs: list of (lane, [(op, pin, lvl, dly)]). Returns image bytes."""
+ASSEMBLED = []          # every program _assemble has built, for the audit
+
+
+def _assemble(seqs, headers_spec, park_at, queues=None):
+    """seqs: list of (lane, [(op, pin, lvl, dly)]). Returns image bytes.
+
+    ⛔⛔ `queues` IS {lane: tx_queue}, AND IT WAS MISSING. Every corpus action
+    was emitted with the default `q = 0`, so `build_all5` -- which has THREE
+    shifting lanes -- had all three drawing from TX queue 0. Consumption order
+    is the EDF interleave, so whichever lane dispatched first took the byte and
+    the other two got whatever was left: the head-of-line blocking that
+    per-lane queues exist to prevent, in the one program that has three
+    transmitters. `model/pe_asm.check_queue_ownership` REJECTS exactly that,
+    and it had never been run against a corpus program.
+    ⚠ INVISIBLE UNTIL RULING 0. No bench fed the host channel, so all three
+    lanes drew nothing from queue 0 and shifted zeros; the collision could not
+    produce a wrong byte because there were no bytes.
+    """
+    queues = queues or {}
+    # ⭐ WHAT WAS ASSEMBLED IS RECORDED, so the programs can be AUDITED rather
+    # than only built. `audit_programs()` below runs the loader's own rules
+    # over this, which is how the two defects ruling 0 uncovered are kept out:
+    # a shifting lane whose clock pin is its data pin (1.6x) and two shifting
+    # lanes sharing a TX queue. Both were present here for the lifetime of the
+    # corpus and neither was checkable, because the builders returned only
+    # bytes.
+    ASSEMBLED.append({"seqs": seqs, "spec": dict(headers_spec),
+                      "queues": dict(queues)})
     prog, base, off = [], {}, ACT_BASE
     for lane, seq in seqs:
         base[lane] = off
         for op, pin, lvl, dly in seq:
-            prog.append(act(op, pin, lvl, dly, count=8))
+            prog.append(act(op, pin, lvl, dly, count=8,
+                            q=queues.get(lane, 0)))
             off += ACT_BYTES
     lp = off
     prog.append(act(OP_REARM, 0, 0, 500))
@@ -274,8 +301,21 @@ def build_spi_target(d: int = 6):
         (OP_LEVEL, P_T_MISO, 0, d),
         (OP_REARM, 0, 1, d),
     ]
+    # ⛔⛔ `PIN_NONE` AS THE CLOCK PIN, AND IT USED TO BE `P_T_MISO` -- THE
+    # LANE'S OWN DATA PIN. `OP_SHIFT` writes the data pin and then the clock
+    # pin, clock SECOND, so with the two aliased the clock write overwrote
+    # every data bit with the action's level field: at level 0, every 1 bit
+    # became a 0. This program is the ONLY one that exercises the tri-state
+    # MISO and the async-clear path, and it was transmitting corrupted data
+    # the whole time -- invisibly, because no bench fed the queue, so the
+    # shift register was all zeros and losing the 1 bits changed nothing.
+    # ⭐ PIN_NONE IS THE RIGHT ANSWER, NOT A SPARE PIN: an SPI **TARGET** does
+    # not drive a clock at all -- the master supplies SCK -- so the lane has
+    # nothing legitimate to point `clkpin` at. `pe_engine`'s `clk_real` guard
+    # (added with this fix) is what makes the non-driving code safe rather
+    # than an out-of-range write.
     img = _assemble([(0, seq)],
-                    {0: (P_T_MISO, P_T_MISO, MODE_PP, d, 2 * d, 3 * d)},
+                    {0: (P_T_MISO, PIN_NONE, MODE_PP, d, 2 * d, 3 * d)},
                     park_at=P_SCL)
     return img, {"uio_oe": True, "uio_out": True, "uo_out": False,
                  "od_pins": (P_SCL,)}
@@ -324,12 +364,25 @@ def build_all5(d: int = 9):
     seqs = [(0, s_i2c), (1, s_tgt), (2, s_mst), (3, s_tx), (4, s_rx)]
     spec = {
         0: (P_SDA,    P_SCL,     MODE_OD, d,     2 * d,       3 * d),
-        1: (P_T_MISO, P_T_MISO,  MODE_PP, d + 1, 2 * (d + 1), 3 * (d + 1)),
+        # lane 1 is the SPI TARGET: no clock to drive, so PIN_NONE. It read
+        # `P_T_MISO` -- its own data pin -- so OP_SHIFT's clock write
+        # overwrote every data bit. See `build_spi_target`.
+        1: (P_T_MISO, PIN_NONE,  MODE_PP, d + 1, 2 * (d + 1), 3 * (d + 1)),
         2: (P_M_MOSI, P_M_SCLK,  MODE_PP, d + 2, 2 * (d + 2), 3 * (d + 2)),
+        # lanes 3 and 4 keep `clkpin == pin` DELIBERATELY: neither runs
+        # OP_SHIFT (LEVEL/ARM/READBIT only), so the alias is a don't-care and
+        # 1.6x is scoped to shifting lanes. Changing them would move two
+        # programs for a hazard they cannot reach.
         3: (P_TX,     P_TX,      MODE_PP, d + 3, 2 * (d + 3), 3 * (d + 3)),
         4: (P_RX,     P_RX,      MODE_PP, d + 4, 2 * (d + 4), 3 * (d + 4)),
     }
-    img = _assemble(seqs, spec, park_at=P_SCL)
+    # ⛔⛔ ONE TX QUEUE PER TRANSMITTING LANE. All three shifting lanes used
+    # the default queue 0, which is the head-of-line collision
+    # `pe_asm.check_queue_ownership` refuses: consumption order is the EDF
+    # interleave, so the host could not know which lane took the byte it
+    # pushed. Unfed, all three drew nothing and the collision was unobservable.
+    img = _assemble(seqs, spec, park_at=P_SCL,
+                    queues={0: 0, 1: 1, 2: 2})
     return img, {"uio_oe": True, "uio_out": True, "uo_out": True,
                  "uio_in": True, "od_pins": (P_SCL, P_SDA)}
 
@@ -431,6 +484,94 @@ def write_pinmap_vh() -> str:
     return out
 
 
+def audit_programs() -> int:
+    """⛔⛔ EVERY CORPUS PROGRAM AGAINST THE LOADER'S OWN RULES.
+
+    `model/pe_asm.py` holds the admissibility checks the toolchain applies, and
+    they had NEVER been run against a corpus program -- so the corpus carried
+    two violations of rules this project had already written down:
+
+      1.6x  `build_spi_target` and `build_all5` lane 1 named `P_T_MISO` as
+            BOTH the data and the clock pin of a SHIFTING lane. OP_SHIFT writes
+            the data pin and then the clock pin, so every 1 bit was overwritten
+            with the action's level field. That program is the only one
+            exercising the tri-state MISO and the async-clear path.
+      queue `build_all5`'s THREE shifting lanes all drew from TX queue 0,
+            which is the head-of-line collision per-lane queues exist to
+            prevent.
+
+    ⚠ BOTH WERE UNOBSERVABLE UNTIL RULING 0. No bench fed the host channel, so
+    every shift ran on an all-zero register: losing the 1 bits changed nothing
+    and three lanes colliding over an empty queue produced no wrong byte.
+    ⇒ Running the checks here is the structural guard. Writing the images is
+      not the same as checking them, exactly as `main()` says about the
+      preconditions.
+    """
+    sys.path.insert(0, os.path.join(os.path.dirname(HERE), "model"))
+    import pe_asm
+    rc = 0
+    print()
+    print("  --- the loader's rules, applied to every corpus program ---")
+    print("    %-15s %-10s %s" % ("program", "verdict", "detail"))
+    for name, (fn, _peer) in sorted(CORPUS.items()):
+        del ASSEMBLED[:]
+        fn()
+        if not ASSEMBLED:
+            print("    %-15s *** NOT RECORDED -- the builder bypassed"
+                  " _assemble" % name)
+            rc = 1
+            continue
+        a = ASSEMBLED[-1]
+        lanes, headers = {}, {}
+        for lane, seq in a["seqs"]:
+            q = a["queues"].get(lane, 0)
+            lanes[lane] = [(op, pin, lvl, dly, q)
+                           for (op, pin, lvl, dly) in seq]
+        for lane, sp in a["spec"].items():
+            headers[lane] = sp
+        try:
+            pe_asm.check_queue_ownership(lanes)
+            pe_asm.check_shift_clock_alias(lanes, headers)
+            print("    %-15s %-10s %s" % (name, "ok", "queue ownership + 1.6x"))
+        except pe_asm.Reject as e:
+            print("    %-15s *** REJECTED  %s" % (name, str(e)[:70]))
+            rc = 1
+    if rc:
+        print("    ⛔ A CORPUS PROGRAM THE TOOLCHAIN WOULD REFUSE IS NOT A")
+        print("       WITNESS FOR ANYTHING. Fix the program, not the check.")
+    # ⛔⛔ PRICED. Five programs passing says nothing about whether this audit
+    # can fail -- and it is reporting on two defects it did NOT catch for the
+    # whole life of the corpus, because it did not exist. The two rejections
+    # below reconstruct exactly those defects.
+    print("    --- must-fire: the audit rejects what it claims to ---")
+    bad = [
+        ("a SHIFT lane whose clk pin is its data pin",
+         {0: [(OP_SHIFT, P_T_MISO, 1, 6, 0)]},
+         {0: (P_T_MISO, P_T_MISO, MODE_PP, 6, 12, 18)},
+         "OP_SHIFT"),
+        ("two SHIFT lanes sharing TX queue 0",
+         {0: [(OP_SHIFT, P_SDA, 1, 9, 0)],
+          1: [(OP_SHIFT, P_T_MISO, 1, 9, 0)]},
+         {0: (P_SDA, P_SCL, MODE_OD, 9, 18, 27),
+          1: (P_T_MISO, PIN_NONE, MODE_PP, 9, 18, 27)},
+         "queue 0"),
+    ]
+    for label, lanes_b, headers_b, needle in bad:
+        try:
+            pe_asm.check_queue_ownership(lanes_b)
+            pe_asm.check_shift_clock_alias(lanes_b, headers_b)
+            print("      *** %-44s ACCEPTED -- the audit is blind" % label)
+            rc = 1
+        except pe_asm.Reject as e:
+            if needle in str(e):
+                print("      %-44s rejected, naming %r" % (label, needle))
+            else:
+                print("      *** %-44s rejected but did not name %r"
+                      % (label, needle))
+                rc = 1
+    return rc
+
+
 def main() -> int:
     print("THE TRACE CORPUS")
     print("=" * 70)
@@ -453,6 +594,8 @@ def main() -> int:
               % (name, len(img), peer, want))
     print()
     print("  pin map for the bench -> %s" % write_pinmap_vh())
+    print()
+    rc |= audit_programs()
     print()
     print("  ⛔ writing the image is not running it. The preconditions above")
     print("     are CLAIMS until test/gate_corpus_trace.py checks each one")

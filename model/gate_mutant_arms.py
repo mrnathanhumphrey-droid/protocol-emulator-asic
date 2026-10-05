@@ -75,6 +75,15 @@ EXPECT = {
     # single expression, so nothing else moves with it, which is what makes
     # this a clean price on the field rather than on a block.
     "M_TX_IGNORE_TAG":   (2, None),
+    "M_SHIFT_CLK_ALIAS": (6,
+        "a BLOCK substitution, declared: the refusal has to suppress BOTH the "
+        "data write and the clock write, so removing it removes an if/else "
+        "whose begin and end bracket two separate assignment groups -- the "
+        "`else begin` and its closing `end` are in different `ifndef` arms. "
+        "⚠ The first version of the guard put only the data write inside the "
+        "else, and the clock write then drove the aliased pin anyway: a "
+        "refusal that still drives the pin it refuses is the defect with a "
+        "flag set beside it."),
     "M_TIMEOUT_PROCEED": (6,
         "a BLOCK substitution, declared: the mutation removes the halt -- "
         "clearing l_live, l_armed and the sticky flag -- and there is no single "

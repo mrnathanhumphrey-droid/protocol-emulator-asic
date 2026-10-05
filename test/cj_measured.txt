@@ -1,5 +1,8 @@
 spl 2
 image test/smoke_image.hex
+fed 8
+pops 0
+underrun 0
 jobs 344
 svc_cycles 688
 jmiss_max 0

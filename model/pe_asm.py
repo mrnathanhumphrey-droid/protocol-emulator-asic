@@ -103,6 +103,57 @@ def check_queue_ownership(lanes):
 
 
 # ---------------------------------------------------------------------------
+# RULING 1.6x: a SHIFT lane's clock pin must not be its data pin
+# ---------------------------------------------------------------------------
+def check_shift_clock_alias(lanes, headers):
+    """A lane that executes `OP_SHIFT` must name a clock pin OTHER than its
+    data pin.
+
+    ⛔⛔ WHY, AND IT IS A SILENT-CORRUPTION BUG. `OP_SHIFT` writes the data pin
+    and then the CLOCK pin, clock SECOND (`src/pe_engine.v`, the OP_SHIFT case).
+    With `clkpin == pin` the clock assignment overwrites the data bit with the
+    action's `level` field, so at `level = 0` EVERY 1 BIT BECOMES A 0. The wire
+    then carries a well-formed frame of the wrong data and nothing in the
+    design can tell: no assertion, no flag, no timing anomaly.
+
+    ⚠ IT WAS UNREACHABLE UNTIL T5.1 AND THEN IMMEDIATELY REAL. No bench had
+    ever driven the host channel, so every `OP_SHIFT` in the suite's history
+    ran on an all-zero shift register where losing the 1 bits changed nothing
+    observable. `build_census` had declared `clkpin == pin` on its shifting
+    lane the whole time.
+
+    ⭐ SCOPED TO SHIFTING LANES, NOT A BLANKET RULE, and the scope is load-
+    bearing. `l_clkpin` reaches the pins ONLY inside the `OP_SHIFT` case, so
+    for a lane that never shifts the alias is a don't-care -- and `build_five`
+    declares it on all five lanes while running only `OP_LEVEL`. That image is
+    the measurement base for T1's per-lane `J` and for Theorem 3's 35
+    port-feasible cells; refusing it for a hazard it cannot reach would
+    invalidate both and buy nothing.
+
+    ⛔ THE CHIP ALSO REFUSES IT (1.6x in silicon), at DISPATCH rather than at
+    header load: at header-load time the chip cannot know whether a lane's
+    program contains a SHIFT, because actions are fetched lazily. Here the
+    whole program is visible, so the refusal is static and names the lane.
+    """
+    for ln in sorted(lanes):
+        if not any(op == OP_SHIFT for (op, _p, _l, _d, _q) in lanes[ln]):
+            continue
+        if ln not in headers:
+            continue
+        pin, clkpin = headers[ln][0], headers[ln][1]
+        if pin == clkpin:
+            raise Reject(
+                "lane %d executes OP_SHIFT and names pin %d as BOTH its data "
+                "and its clock pin. OP_SHIFT writes the data pin and then the "
+                "clock pin, so the clock write would overwrite every data bit "
+                "with the action's level field -- at level = 0 every 1 bit "
+                "becomes a 0, and the wire carries a well-formed frame of the "
+                "wrong data with nothing flagging it. Give the lane a distinct "
+                "clock pin (or PIN_NONE if it needs no clock)."
+                % (ln, pin))
+
+
+# ---------------------------------------------------------------------------
 # 1.6t: the program's J, computed HERE and not on the chip
 # ---------------------------------------------------------------------------
 def compute_j(lanes, spl=2):
@@ -180,6 +231,7 @@ def compute_j(lanes, spl=2):
 def assemble(lanes, headers):
     """Emit the image. `headers` is {lane: (pin, clkpin, mode, t, dsched, dtol)}."""
     check_queue_ownership(lanes)
+    check_shift_clock_alias(lanes, headers)
     prog, base, off = [], {}, ACT_BASE
     for ln in sorted(lanes):
         base[ln] = off
@@ -209,6 +261,7 @@ def report(lanes, headers):
     print("=" * 78)
     try:
         owner = check_queue_ownership(lanes)
+        check_shift_clock_alias(lanes, headers)
         d_min, j = compute_j(lanes)
         img = assemble(lanes, headers)
     except Reject as e:
@@ -245,6 +298,13 @@ def _demo_switching():
     lanes, headers = _demo_ok()
     lanes[0] = [(OP_SHIFT, 8, 1, 25, 0), (OP_SHIFT, 8, 0, 25, 3),
                 (OP_REARM, 0, 1, 25, 0)]
+    return lanes, headers
+
+
+def _demo_clkalias():
+    """1.6x: lane 0 shifts, and names pin 8 as both its data and clock pin."""
+    lanes, headers = _demo_ok()
+    headers[0] = (8, 8, 1, 25, 50, 75)
     return lanes, headers
 
 
@@ -287,6 +347,44 @@ def main() -> int:
     # is d = 19 with the double buffer and d = 25 without it, straddling
     # D* = 20. A program certified against an SPL = 1 build would carry a
     # guarantee that build does not provide.
+    # ---- 1.6x, BOTH WAYS ------------------------------------------------
+    # ⛔ A GUARD SEEN ONLY TO PASS HAS UNKNOWN STRENGTH, and this one is new:
+    # it is checked on a program that violates it AND on one that does not, so
+    # a check that rejected everything would be caught too.
+    print()
+    print("  --- must-fire: 1.6x, a SHIFT lane whose clock pin is its data pin ---")
+    for name, build, want_reject, want in (
+            ("clkpin == pin on a shifting lane", _demo_clkalias, True,
+             ("lane 0", "pin 8", "OP_SHIFT")),
+            ("the same program with a distinct clock pin", _demo_ok, False,
+             ())):
+        lanes_b, headers_b = build()
+        try:
+            check_shift_clock_alias(lanes_b, headers_b)
+            got_reject = False
+            msg = ""
+        except Reject as e:
+            got_reject = True
+            msg = str(e)
+        if got_reject != want_reject:
+            print("    *** %-44s %s" % (name, "ACCEPTED" if not got_reject
+                                        else "REJECTED"))
+            print("        wanted %s" % ("a rejection" if want_reject
+                                         else "acceptance"))
+            rc = 1
+        else:
+            missing = [w for w in want if w not in msg]
+            if missing:
+                print("    *** %-44s REJECTED but did not name %s"
+                      % (name, missing))
+                rc = 1
+            else:
+                print("    %-44s %s" % (name, "REJECTED, naming the lane and "
+                                        "the pin" if want_reject
+                                        else "accepted"))
+                if want_reject:
+                    print("        %s" % msg[:76])
+
     print()
     print("  --- must-fire: certifying against an SPL = 1 build ---")
     good = _demo_ok()[0]

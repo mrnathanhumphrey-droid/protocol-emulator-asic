@@ -286,9 +286,51 @@ def build_census(d: int = 25):
             off += ACT_BYTES
     lp = off
     prog.append(act(OP_REARM, 0, 0, 500))
-    headers.append(hdr(UO0, UO0, 1, d, 2, 2 * d, 3 * d, base[0]))
+    # ⛔⛔ LANE 0's CLOCK PIN IS NOT ITS DATA PIN, AND IT USED TO BE. This
+    # image runs OP_SHIFT on lane 0, and OP_SHIFT writes the data pin and then
+    # the CLOCK pin, clock second -- so with `clkpin == pin` the clock write
+    # overwrites the data bit with `a_lvl` and every 1 bit is lost. The engine
+    # now REFUSES that combination (1.6x: sticky CONFIG_ERR, lane halted), so
+    # this image would not run at all.
+    # ⚠ IT WAS HARMLESS UNTIL TWO THINGS CHANGED TOGETHER: nothing had ever
+    # fed the host channel, so the shift register was always all-zero and
+    # losing the 1 bits changed nothing; and nothing refused the program. The
+    # per-opcode C measurement this image exists for was taken in that state.
+    # ⭐ LANE 1 KEEPS `clkpin == pin` DELIBERATELY: it runs SHIFTIN, READBIT
+    # and ARM, none of which touch the clock pin, so the alias is a don't-care
+    # there -- and leaving it is what keeps the 1.6x refusal SCOPED rather than
+    # a blanket rule. `build_five` relies on the same scope.
+    headers.append(hdr(UO0, UO2, 1, d, 2, 2 * d, 3 * d, base[0]))
     headers.append(hdr(UO1, UO1, 1, d + 1, 2, 2 * d, 3 * d, base[1]))
     for n in range(2, N_LANES):
+        headers.append(hdr(n, n, 0, 500, 2, 200, 240, lp))
+    return b"".join(headers) + b"".join(prog)
+
+
+def build_tx_badclk(d: int = 12):
+    """1.6x's MUST-FIRE: a SHIFT lane whose clock pin IS its data pin.
+
+    ⛔ The program the engine must refuse. One lane, eight SHIFTs drawing from
+    queue 0, with `clkpin == pin` -- so the clock write would overwrite every
+    data bit with `a_lvl`. The chip sets sticky CONFIG_ERR and halts the lane
+    instead of transmitting corrupted bytes.
+    ⚠ A GUARD THAT HAS ONLY EVER BEEN SEEN TO PASS HAS UNKNOWN STRENGTH, which
+    is why this image exists rather than a comment: `tb_tx +BADCLK=1` runs it
+    and requires the refusal, and `M_SHIFT_CLK_ALIAS` removes the refusal and
+    must make that run fail.
+    """
+    prog, headers, base = [], [], []
+    off = ACT_BASE
+    base.append(off)
+    for _i in range(8):
+        prog.append(act(OP_SHIFT, UO0, 0, d, count=7, q=0))
+        off += ACT_BYTES
+    prog.append(act(OP_REARM, 0, 1, d))
+    off += ACT_BYTES
+    lp = off
+    prog.append(act(OP_REARM, 0, 0, 500))
+    headers.append(hdr(UO0, UO0, 1, d, 2, 2 * d, 3 * d, base[0]))
+    for n in range(1, N_LANES):
         headers.append(hdr(n, n, 0, 500, 2, 200, 240, lp))
     return b"".join(headers) + b"".join(prog)
 
@@ -476,6 +518,8 @@ def main() -> int:
             # ⭐ T5.1: the first image in the suite that can carry HOST PAYLOAD.
             (["--tx", "12", "13"], "two TX lanes on queues 0 and 1",
              "tx_image.hex"),
+            (["--txbadclk"], "1.6x violation: SHIFT with clkpin == pin",
+             "tx_badclk_image.hex"),
         ]
         import hashlib
         import subprocess
@@ -626,6 +670,14 @@ def main() -> int:
             for b in img:
                 fh.write("%02x\n" % b)
         print("five-lane image %s, %d bytes -> %s" % (delays, len(img), out))
+        return 0
+    if "--txbadclk" in sys.argv:
+        img = build_tx_badclk()
+        out = os.path.join(here, "tx_badclk_image.hex")
+        with open(out, "w", encoding="ascii") as fh:
+            for b in img:
+                fh.write("%02x\n" % b)
+        print("tx badclk image, %d bytes -> %s" % (len(img), out))
         return 0
     if "--tx" in sys.argv:
         k = sys.argv.index("--tx")

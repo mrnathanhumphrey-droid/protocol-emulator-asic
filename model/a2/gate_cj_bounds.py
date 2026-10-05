@@ -220,6 +220,29 @@ def read_measured(MEAS=MEAS):
                       "that produced these numbers is unknown. That matters: "
                       "the single-buffer engine measures a different job count "
                       "on the same image. Re-run the smoke bench." % MEAS)
+    # THE FED STATE, ASSERTED (Wilson's ruling 0). A per-opcode `C` taken
+    # with every TX queue EMPTY measures the UNDERRUN path, and it is
+    # indistinguishable from a fed measurement by the numbers alone: SHIFT
+    # occupies two cycles whether a byte loads or not. For the whole life of
+    # the host channel NO BENCH DROVE IT, so every SHIFT measurement in this
+    # project's history was starved -- and nothing said so, because nothing
+    # recorded it. The bench now writes `fed`/`pops`/`underrun` and this
+    # refuses a file that claims a SHIFT measurement it did not make.
+    if d.get("fed") is None:
+        return None, ("%s carries no `fed` line, so whether the TX queues were "
+                      "fed is unknown. A SHIFT measured against an empty queue "
+                      "is a measurement of the underrun path. Re-run the smoke "
+                      "bench." % MEAS)
+    if d["ops"].get(1) and d.get("fed", 0) == 0:
+        return None, ("%s records %d OP_SHIFT dispatches with `fed 0`: the "
+                      "queues were never fed, so every shift took the UNDERRUN "
+                      "branch and the per-opcode C is a measurement of that "
+                      "path. Re-run with the host feeder."
+                      % (MEAS, d["ops"][1]["n"]))
+    if d.get("underrun", 0) != 0:
+        return None, ("%s records `underrun 1`: a lane's underrun flag was set, "
+                      "so at least one shift found an empty queue and this run "
+                      "is STARVED. It does not count." % MEAS)
     if spl != 2:
         return None, ("%s was written by an SPL = %d build; the shipped engine "
                       "is SPL = 2 and the timing claim is scoped to it. Re-run "
@@ -238,17 +261,37 @@ def selftest_provenance() -> int:
     import tempfile
     rc = 0
     nl = chr(10)
+    # the SHIPPED program runs no SHIFT (LEVEL and REARM only), so `fed` may
+    # legitimately be whatever the feeder managed and `pops` 0.
     body = nl.join([
-        "image test/smoke_image.hex", "jobs 344", "svc_cycles 688",
+        "image test/smoke_image.hex", "fed 8", "pops 0", "underrun 0",
+        "jobs 344", "svc_cycles 688",
         "jmiss_max 0", "jmiss_cold 0", "jmiss_steady 0",
         "steady_stall_events 0", "cycles 4000", "hdr_cyc 92",
         "op 0 n 214 min 2 max 2", "op 7 n 130 min 2 max 2", ""])
     shipped = "spl 2" + nl + body
+    # a file that DOES record shifts, used to price the fed assertions
+    shifty = shipped.replace("op 0 n 214 min 2 max 2",
+                             "op 1 n 124 min 2 max 2")
     cases = (
         ("no spl line at all",        body,                           False),
         ("an SPL = 1 build",          "spl 1" + nl + body,            False),
         ("the wrong image",           shipped.replace(
             "test/smoke_image.hex", "test/five_image.hex"),           False),
+        # ⛔ THE FED ASSERTIONS, PRICED (Wilson's ruling 0). A per-opcode C
+        # taken with every queue empty measures the UNDERRUN path and is
+        # indistinguishable from a fed measurement by the numbers alone --
+        # SHIFT occupies two cycles either way. These are the three shapes
+        # that must be refused.
+        ("no fed line at all",        shipped.replace("fed 8" + nl, ""),
+                                                                      False),
+        ("shifts recorded, fed 0",    shifty.replace("fed 8", "fed 0"),
+                                                                      False),
+        ("underrun was set",          shifty.replace("underrun 0",
+                                                     "underrun 1"),   False),
+        # ⭐ AND THE ACCEPTING CASE WITH SHIFTS, so the check is not simply
+        # "refuse anything that shifts".
+        ("shifts recorded and fed",   shifty,                         True),
         ("the shipped configuration", shipped,                        True),
     )
     d = tempfile.mkdtemp(prefix="pe_cj_")
@@ -376,14 +419,50 @@ def main() -> int:
               "+IMG=test/census_image.hex")
     else:
         a = {"ops": {}}
+        return_bad = []
         for line in open(alt, encoding="utf-8"):
             p = line.split()
-            if p and p[0] == "op":
+            if not p:
+                continue
+            if p[0] == "op":
                 a["ops"][int(p[1])] = {"n": int(p[3]), "min": int(p[5]),
                                        "max": int(p[7])}
-            elif p and p[0] == "image":
+            elif p[0] == "image":
                 a["image"] = p[1]
+            else:
+                try:
+                    a[p[0]] = int(p[1])
+                except (ValueError, IndexError):
+                    pass
         print("    source image: %s" % a.get("image", "UNRECORDED"))
+        # THE ALT FILE'S PROVENANCE WAS NEVER ASSERTED, and it had drifted.
+        # The shipped file has carried an `image` assertion since a stress run
+        # clobbered it -- the alt file, reached by the SAME constant-path
+        # mechanism, had only a printed label. It was found holding a
+        # `five_image` run (2 opcodes, LEVEL and REARM) while this section is
+        # headed "census image": the coverage claim was being read off a file
+        # written by a different program. The fix that was applied to one axis
+        # was not applied to the parallel one.
+        want_alt = "test/census_image.hex"
+        if a.get("image") != want_alt:
+            print("    *** THIS FILE WAS WRITTEN BY %r, NOT %r."
+                  % (a.get("image"), want_alt))
+            print("        The coverage claim below is about the CENSUS")
+            print("        program; a file from another image cannot support")
+            print("        it. Re-run: vvp ... +IMG=%s" % want_alt)
+            return_bad.append("alt image")
+        if a["ops"].get(1) and a.get("fed", 0) == 0:
+            print("    *** %d OP_SHIFT dispatches with `fed 0`: the queues were"
+                  % a["ops"][1]["n"])
+            print("        never fed, so every shift took the UNDERRUN branch.")
+            print("        The 8-of-8 claim would be about the starved path.")
+            return_bad.append("alt starved")
+        if a.get("underrun", 0) != 0:
+            print("    *** `underrun 1`: a lane found an empty queue, so this")
+            print("        run is STARVED and does not count.")
+            return_bad.append("alt underrun")
+        print("    fed / pops / underrun: %s / %s / %s"
+              % (a.get("fed"), a.get("pops"), a.get("underrun")))
         covered = sorted(a["ops"])
         print("    opcodes executed by the RTL: %d of %d  %s"
               % (len(covered), len(OPNAMES), covered))
@@ -396,9 +475,14 @@ def main() -> int:
             print("    %-12s derived %-3d n=%-4d min=%-3d max=%-3d %s"
                   % (OPNAMES[op], d, s["n"], s["min"], s["max"],
                      "ok" if ok else "*** SIM EXCEEDS DERIVED"))
+        if return_bad:
+            rc = 1
         if bad:
             print("    *** SIM EXCEEDS THE DERIVED C on %s. STOP." % (bad,))
             rc = 1
+        elif return_bad:
+            print("    ⇒ THE COVERAGE CLAIM IS NOT SUPPORTED by this file:")
+            print("      %s. Nothing is concluded about 8-of-8." % return_bad)
         elif len(covered) == len(OPNAMES):
             print("    ⭐ ALL %d ACTION TYPES EXECUTED BY THE RTL, every one with"
                   % len(OPNAMES))

@@ -153,6 +153,27 @@ RULINGS = [
      "dispatch. ⚠ WAS UNBUILT: no load-time rejection existed in the RTL "
      "and the toolchain only stated the rule in a docstring, while two RTL "
      "comments deferred to a 'load-time screen' that did not exist."),
+    ("1.6x", "rtl", BUILT, "src/pe_engine.v", "clk_real",
+     "tb_tx +BADCLK=1 (refusal) + M_SHIFT_CLK_ALIAS (removes it) + "
+     "pe_asm::check_shift_clock_alias + corpus.py::audit_programs",
+     "A SHIFT LANE WHOSE CLOCK PIN IS ITS DATA PIN IS REFUSED. OP_SHIFT writes "
+     "the data pin and then the clock pin, clock SECOND, so with the two "
+     "aliased the clock write overwrites every data bit with the action's "
+     "level field -- at level 0 every 1 bit becomes a 0 and the wire carries a "
+     "WELL-FORMED FRAME OF THE WRONG DATA with nothing flagging it. Sticky "
+     "CONFIG_ERR and the lane halts. ⚠ FOUND BY RULING 0 AND LATENT FOR THE "
+     "WHOLE LIFE OF THE HOST CHANNEL: no bench had ever fed a TX queue, so "
+     "every OP_SHIFT ran on an all-zero shift register where losing the 1 bits "
+     "changed nothing -- and build_census, corpus.py's SPI-target and "
+     "build_all5's lane 1 all declared the alias. ⭐ SCOPED TO SHIFTING LANES "
+     "and checked at DISPATCH, not header load: l_clkpin reaches the pins only "
+     "inside the OP_SHIFT arm, and at header-load time the chip cannot know "
+     "whether a lane's program shifts. build_five declares the alias on all "
+     "five lanes while running only OP_LEVEL, and it is the measurement base "
+     "for T1's J_lane and Theorem 3's 35 cells -- refusing it would invalidate "
+     "both for a hazard it cannot reach. `clk_real` is the companion guard "
+     "that makes PIN_NONE expressible, so a lane with no clock (an SPI TARGET) "
+     "can say so instead of pointing at its own data pin."),
     ("1.6t", "toolchain", BUILT_TC, "model/pe_asm.py", "def compute_j",
      "pe_asm (computes J + admissibility per program) + gate_j_program",
      "REWORDED per the ruling: the ASSEMBLER computes the program's J and "
