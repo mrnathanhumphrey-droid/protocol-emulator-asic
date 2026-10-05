@@ -107,12 +107,92 @@ ALLOWED = {
     # found. The stale-ENTRY check below is the other half.
     "u_eng.fix": (
         1,
-        "the refill's target slot (formerly `pslot`, renamed by synthesis when "
-        "the `fix` index wire began reading it): latched with `paddr` at the "
-        "scan and consumed at P_REQ, precisely so a writeback cannot move it "
-        "between the request and the capture -- see the arbiter comment -- so "
-        "it is always written in the cycle before it is read."),
+        "⛔⛔ THE REGISTER IS `pslot`. THE NAME `fix` IS AN ALIAS, AND THE "
+        "MAPPING IS NOW CHECKED (`check_fix_alias`) RATHER THAN ASSERTED. "
+        "`fix` is declared a WIRE -- `wire [SIW-1:0] fix = pl * SPL + "
+        "(((SPL > 1) && pslot) ? 1 : 0)` -- so there is no flop of that name at "
+        "all, and an allowlist entry naming a wire is a reason nobody has "
+        "checked. ⭐ WHY SYNTHESIS CALLS IT THAT: at SPL = 2 the expression is "
+        "`pl * 2 + pslot`, which is a CONCATENATION `{pl, pslot}` -- no gates, "
+        "so the wire's bits ARE those registers and yosys gives one bit two "
+        "names. From the netlist, by the PORT test (a reset-bearing flop has an "
+        "`R` connection): `fix[0]` = `pslot`, `$_DFFE_PP_`, NO reset -- the one "
+        "unreset bit, which is why this entry's count is 1; `fix[1..3]` = "
+        "`pl[0..2]`, `$_DFFE_PN0P_`, reset-bearing. ⚠ `bit2name` keeps the "
+        "FIRST name it meets for a bit, which is why the audit reports `fix` "
+        "and not `pslot`. "
+        "⇒ AND THE REASON, RE-JUSTIFIED FOR `pslot` ITSELF: it is written in "
+        "the P_SCAN arm (both branches, beside `paddr`, in the same block that "
+        "sets `pst <= P_REQ`) and read only through `fix` at P_CAP "
+        "(`l_act[fix] <= s_wrdata`, `l_actv[fix] <= 1'b1`) -- two states later. "
+        "A writeback cannot move it between the request and the capture, so it "
+        "is always written before it is read."),
 }
+
+
+
+def check_fix_alias(m, bit2name) -> int:
+    """The `u_eng.fix` entry is about `pslot`; prove the aliasing from the
+    netlist.
+
+    ⛔⛔ RULING 3. An allowlist entry that names the wrong thing is a reason
+    nobody has actually checked, and `fix` is a WIRE -- there is no flop of
+    that name. The entry says it is really `pslot`; this makes that a CHECK.
+    If synthesis ever stops folding `pl * SPL + pslot` into a concatenation,
+    the names stop coinciding and the entry must be re-read rather than
+    silently describing something else.
+
+    ⚠ THE PORT TEST, NOT THE NAME SHAPE. A first attempt at this used a regex
+    on the cell type and classified `$_DFFE_PN0P_` as unreset -- the trailing
+    enable polarity defeated the pattern -- which would have reported `pl`'s
+    three reset-bearing flops as unreset too. A reset-bearing flop HAS AN `R`
+    CONNECTION; that is the definitive test and it is what this uses.
+    """
+    rc = 0
+    print()
+    print("  --- ruling 3: `u_eng.fix` really is `pslot` ---")
+    want_unreset = {}      # bit -> names
+    for cname, c in m["cells"].items():
+        t = c["type"]
+        if "DFF" not in t.upper():
+            continue
+        conns = c.get("connections", {})
+        has_r = ("R" in conns) or ("S" in conns)
+        for b in conns.get("Q", []):
+            if not isinstance(b, int):
+                continue
+            names = [nm for nm, info in m["netnames"].items()
+                     if b in (info.get("bits") or [])]
+            if any(nm == "u_eng.fix" or nm.startswith("u_eng.fix")
+                   for nm in names):
+                want_unreset[b] = (t, has_r, sorted(names))
+    if not want_unreset:
+        print("    *** NO FLOP drives any bit named `u_eng.fix`.")
+        print("        The entry describes nothing in this netlist. Either the")
+        print("        aliasing is gone or the signal is. Re-read the entry.")
+        return 1
+    n_unreset = 0
+    saw_pslot = False
+    for b, (t, has_r, names) in sorted(want_unreset.items()):
+        tag = "reset-bearing" if has_r else "UNRESET"
+        print("    bit %-4d %-14s %-13s %s" % (b, t, tag, ",".join(names)))
+        if not has_r:
+            n_unreset += 1
+            if any(nm == "u_eng.pslot" for nm in names):
+                saw_pslot = True
+    if n_unreset != 1:
+        print("    *** %d unreset bit(s) under the name `fix`, expected 1."
+              % n_unreset)
+        print("        The entry's count is part of its claim.")
+        rc = 1
+    if not saw_pslot:
+        print("    *** the unreset bit is NOT also named `u_eng.pslot`.")
+        print("        The entry says the register is `pslot`; the netlist no")
+        print("        longer agrees, so the reason is about something else.")
+        rc = 1
+    if rc == 0:
+        print("    ok -- one unreset bit, and it is also named `u_eng.pslot`")
+    return rc
 
 
 def stale_entries(allowed, unreset):
@@ -143,6 +223,46 @@ def selftest() -> int:
                                          "ok" if ok else "*** wanted %s" % want))
         if not ok:
             rc = 1
+
+    # ⛔ PRICE RULING 3's MAPPING CHECK on synthetic netlists, because the real
+    # one passes and a check only ever seen to pass has unknown strength.
+    print("  --- must-fire: the `fix` -> `pslot` mapping check ---")
+    def fake(unreset_names, reset_names=()):
+        cells, nets, nxt = {}, {}, 0
+        def add(names, has_r):
+            nonlocal nxt
+            b = nxt; nxt += 1
+            conns = {"Q": [b], "D": [b], "C": [b]}
+            if has_r:
+                conns["R"] = [b]
+            cells["c%d" % b] = {"type": "$_DFFE_PN0P_" if has_r
+                                else "$_DFFE_PP_", "connections": conns}
+            for nm in names:
+                nets.setdefault(nm, {"bits": []})["bits"].append(b)
+        for nms in unreset_names:
+            add(nms, False)
+        for nms in reset_names:
+            add(nms, True)
+        return {"cells": cells, "netnames": nets}
+
+    for label, mod, want_fail in (
+            ("the real shape: one unreset bit, also named pslot",
+             fake([["u_eng.fix", "u_eng.pslot"]],
+                  [["u_eng.fix", "u_eng.pl"]]), False),
+            ("the unreset bit is NOT named pslot",
+             fake([["u_eng.fix", "u_eng.somethingelse"]]), True),
+            ("TWO unreset bits under the name fix",
+             fake([["u_eng.fix", "u_eng.pslot"],
+                   ["u_eng.fix", "u_eng.other"]]), True),
+            ("no flop drives a `fix` bit at all",
+             fake([["u_eng.unrelated"]]), True)):
+        got_fail = bool(check_fix_alias(mod, {}))
+        ok = (got_fail == want_fail)
+        print("    %-50s %s" % (label, "ok" if ok else
+                                "*** wanted %s" % ("a failure" if want_fail
+                                                   else "a pass")))
+        if not ok:
+            rc = 1
     return rc
 
 
@@ -169,6 +289,8 @@ def main() -> int:
         for b in info["bits"]:
             if isinstance(b, int):
                 bit2name.setdefault(b, nm)
+
+    rc_fix = check_fix_alias(m, bit2name)
 
     FF = ("$_dff", "$_sdff", "$_dffe", "$_aldff")
     by_type = collections.Counter()
@@ -295,7 +417,12 @@ def main() -> int:
     print("    not reproducible.")
 
     print()
-    print("=" * 78)
+    # ⛔ RULING 3's CHECK FOLDS INTO THE VERDICT. Running it and discarding
+    # its result would be a check that cannot fail -- the exact shape this
+    # project keeps finding.
+    if rc_fix:
+        rc = 1
+    print("=" * 78)
     print("  GATE reset-audit: %s" % ("PASSED" if rc == 0 else "FAILED"))
     print("    * %d flops, %d unreset across %d group(s); %d allowlisted, "
           "%d not" % (total, n_unreset, len(unreset),
