@@ -46,9 +46,15 @@ sys.path.insert(0, os.path.join(ROOT, "test"))
 sys.path.insert(0, os.path.join(HERE, "a2"))
 
 from make_smoke_image import (            # noqa: E402
-    ACT_BASE, ACT_BYTES, AW, N_LANES, OP_REARM, OP_SHIFT, act, hdr,
+    ACT_BASE, ACT_BYTES, AW, N_LANES, OP_LEVEL, OP_READBIT, OP_REARM,
+    OP_SHIFT,
+    OP_SHIFTIN, PIN_NONE, act, hdr,
 )
 
+# ⚠ N_PINS IS THE PIN-MAP BOUND, not a pin count the ISA encodes:
+# `PINW = 4` addresses 0..15 and only 12 pins exist, which is the whole
+# reason a receive can name something unsamplable.
+N_PINS = 12
 N_TXQ = 4           # TX queues; goes into the parametric contract
 
 
@@ -153,6 +159,62 @@ def check_shift_clock_alias(lanes, headers):
                 % (ln, pin))
 
 
+
+# ---------------------------------------------------------------------------
+# RULING 1 (toolchain half): a receive must name a pin it can sample
+# ---------------------------------------------------------------------------
+def check_receive_pin(lanes, headers):
+    """`OP_SHIFTIN` and `OP_READBIT` must name a REAL data pin.
+
+    ⛔⛔ WHY IT IS ALWAYS A PROGRAM ERROR. A receive with nothing to sample
+    cannot mean anything: the opcode exists to put a bit from a pin into
+    `l_rx`. `PINW = 4` addresses 0..15 while only `N_PINS = 12` pins exist, so
+    a receive on 12..15 reads out of range -- and that is not theoretical. It
+    shipped: `pin_in[a_pin]` was read with no range guard, so `OP_SHIFTIN` on
+    PIN_NONE put X into `l_rx`, then `rx_data`, then the serial readback, and
+    the X LEFT THE CHIP on `ser_d` while `ser_v` was high.
+
+    ⭐ THE SILICON NOW SAMPLES A DEFINED 0 (`rx_bit = pin_real ? ... : 1'b0`),
+    so the chip is safe whatever it is handed. This refusal is the other half:
+    the chip must not be ASKED. In silicon an out-of-range read is not X at
+    all but whatever synthesis made of it -- deterministic and UNSPECIFIED --
+    so "it is defined now" is a reason to keep programs away from it, not a
+    reason to allow them.
+
+    ⚠ SCOPED TO THE DATA PIN OF A RECEIVE, and the scope is load-bearing in
+    two directions:
+      * PIN_NONE as a CLOCK pin stays legal -- an SPI TARGET names it
+        deliberately, because the master supplies SCK. `clk_real` is what
+        guards that path.
+      * PIN_NONE as the action pin of a NO-OP stays legal -- the half-bit
+        offset idiom is built on it (`build_noop`), and `OP_LEVEL` on a
+        non-real pin is precisely how a no-op moves nothing.
+    Refusing either would break a shipped mechanism and buy nothing.
+
+    ⛔ AND IT IS A STATIC REFUSAL BECAUSE IT CAN BE. The chip cannot know at
+    header-load time whether a lane's program contains a receive -- actions are
+    fetched lazily -- so silicon guards at dispatch. Here the whole program is
+    visible, so the error is named with its lane and its opcode.
+    """
+    names = {OP_SHIFTIN: "OP_SHIFTIN", OP_READBIT: "OP_READBIT"}
+    for ln in sorted(lanes):
+        for (op, pin, _lvl, _dly, _q) in lanes[ln]:
+            if op not in names:
+                continue
+            if pin < N_PINS:
+                continue
+            raise Reject(
+                "lane %d executes %s on pin %d, which is not a real pin "
+                "(N_PINS = %d, so only 0..%d exist%s). A receive with nothing "
+                "to sample cannot mean anything, and an out-of-range read is "
+                "X in simulation and an UNSPECIFIED synthesised value in "
+                "silicon. PIN_NONE is legal as a CLOCK pin (an SPI target "
+                "needs that) and as a no-op's action pin, but not as the pin a "
+                "receive samples."
+                % (ln, names[op], pin, N_PINS, N_PINS - 1,
+                   "; %d is PIN_NONE" % PIN_NONE if pin == PIN_NONE else ""))
+
+
 # ---------------------------------------------------------------------------
 # 1.6t: the program's J, computed HERE and not on the chip
 # ---------------------------------------------------------------------------
@@ -232,6 +294,7 @@ def assemble(lanes, headers):
     """Emit the image. `headers` is {lane: (pin, clkpin, mode, t, dsched, dtol)}."""
     check_queue_ownership(lanes)
     check_shift_clock_alias(lanes, headers)
+    check_receive_pin(lanes, headers)
     prog, base, off = [], {}, ACT_BASE
     for ln in sorted(lanes):
         base[ln] = off
@@ -262,6 +325,7 @@ def report(lanes, headers):
     try:
         owner = check_queue_ownership(lanes)
         check_shift_clock_alias(lanes, headers)
+        check_receive_pin(lanes, headers)
         d_min, j = compute_j(lanes)
         img = assemble(lanes, headers)
     except Reject as e:
@@ -315,6 +379,47 @@ def _demo_tight():
     return lanes, headers
 
 
+def _demo_recv_nonreal():
+    """A receive on the reserved index: lane 0 runs OP_SHIFTIN on PIN_NONE."""
+    lanes, headers = _demo_ok()
+    lanes[0] = [(OP_SHIFTIN, PIN_NONE, 0, 25, 0), (OP_REARM, 0, 1, 25, 0)]
+    return lanes, headers
+
+
+def _demo_readbit_nonreal():
+    """The same error on the single-bit sample: OP_READBIT on PIN_NONE."""
+    lanes, headers = _demo_ok()
+    lanes[0] = [(OP_READBIT, PIN_NONE, 0, 25, 0), (OP_REARM, 0, 1, 25, 0)]
+    return lanes, headers
+
+
+def _demo_spi_target():
+    """An SPI TARGET: lane 0 receives, and names PIN_NONE as its CLOCK pin.
+
+    ⛔ THIS MUST BE ACCEPTED. The master supplies SCK, so a target lane has no
+    clock of its own -- `clk_real` is what makes that work in silicon. A
+    refusal keyed on PIN_NONE anywhere, rather than on the receive's DATA pin,
+    would refuse the SPI target outright.
+    """
+    lanes, headers = _demo_ok()
+    lanes[0] = [(OP_SHIFTIN, 2, 0, 25, 0), (OP_REARM, 0, 1, 25, 0)]
+    headers[0] = (2, PIN_NONE, 0, 25, 50, 75)
+    return lanes, headers
+
+
+def _demo_noop_pin_none():
+    """The half-bit offset idiom: `OP_LEVEL` on PIN_NONE, moving no pin.
+
+    ⛔ THIS MUST BE ACCEPTED TOO. `build_noop` is built on it, and the no-op
+    is how a UART receiver lands its first sample at `edge + half`. The refusal
+    is about RECEIVES, which have something to sample by definition; a no-op's
+    whole purpose is to move nothing.
+    """
+    lanes, headers = _demo_ok()
+    lanes[0] = [(OP_LEVEL, PIN_NONE, 0, 25, 0), (OP_REARM, 0, 1, 25, 0)]
+    return lanes, headers
+
+
 def main() -> int:
     rc = report(*_demo_ok())
 
@@ -325,10 +430,13 @@ def main() -> int:
             ("two lanes on one queue", _demo_shared_queue,
              ("queue 0", "lane 0", "lane 2")),
             ("one lane, two queues", _demo_switching, ("lane 0",)),
-            ("d_min below D*", _demo_tight, ("D* = 20", "LANE"))):
+            ("d_min below D*", _demo_tight, ("D* = 20", "LANE")),
+            ("a receive on a non-real pin", _demo_recv_nonreal,
+             ("lane 0", "OP_SHIFTIN", "PIN_NONE"))):
         try:
             lanes_b = build()[0]
             check_queue_ownership(lanes_b)
+            check_receive_pin(lanes_b, build()[1])
             compute_j(lanes_b)
             print("    *** %s was ACCEPTED -- the check does not fire" % name)
             rc = 1
@@ -341,6 +449,45 @@ def main() -> int:
             else:
                 print("    %s -> REJECTED, naming %s" % (name, ", ".join(want)))
                 print("        %s" % msg[:66])
+
+
+    # ---- MUST-FIRE: the receive refusal's SCOPE, in both directions -------
+    # ⛔ A REFUSAL THAT IS TOO WIDE BREAKS SHIPPED MECHANISMS, so the carve-outs
+    # are priced as explicitly as the rejection. PIN_NONE is legal as a CLOCK
+    # pin (the SPI target depends on it) and as a no-op's action pin (the
+    # half-bit offset idiom is built on it).
+    print()
+    print("  --- must-fire: a receive must name a samplable pin ---")
+    for name, build, want_reject, want in (
+            ("OP_SHIFTIN on PIN_NONE", _demo_recv_nonreal, True,
+             ("lane 0", "OP_SHIFTIN", "PIN_NONE")),
+            ("OP_READBIT on PIN_NONE", _demo_readbit_nonreal, True,
+             ("lane 0", "OP_READBIT")),
+            ("an SPI target: PIN_NONE as the CLOCK pin", _demo_spi_target,
+             False, ()),
+            ("a no-op: OP_LEVEL on PIN_NONE", _demo_noop_pin_none, False, ())):
+        lanes_b, headers_b = build()
+        try:
+            check_receive_pin(lanes_b, headers_b)
+            got_reject, msg = False, ""
+        except Reject as e:
+            got_reject, msg = True, str(e)
+        if got_reject != want_reject:
+            print("    *** %-42s %s" % (name,
+                                        "REJECTED" if got_reject else "ACCEPTED"))
+            print("        wanted %s" % ("a rejection" if want_reject
+                                         else "acceptance"))
+            rc = 1
+        else:
+            missing = [w for w in want if w not in msg]
+            if missing:
+                print("    *** %-42s REJECTED but did not name %s"
+                      % (name, missing))
+                rc = 1
+            else:
+                print("    %-42s %s" % (name, "REJECTED, naming the lane and "
+                                        "the opcode" if want_reject
+                                        else "accepted, as it must be"))
 
     # ---- MUST-FIRE: a single-buffer build must not get a certificate -----
     # ⛔ THE SCOPED CLAIM IS CONDITIONAL ON SPL = 2, measured: the stall cliff
