@@ -51,7 +51,7 @@ command -v "$PY" >/dev/null 2>&1 || PY=python
 # `merged.dat` left behind by an EARLIER successful run. The gate passed on
 # data describing a tree that no longer existed -- the dirty-tree lesson in
 # its worst form, because nothing in the output said the data was stale.
-rm -f "$OUT/merged.dat" "$OUT/merged.info"
+rm -f "$OUT/merged.dat" "$OUT/merged.info" coverage.dat
 
 for t in verilator verilator_coverage; do
   command -v "$t" >/dev/null 2>&1 || {
@@ -120,9 +120,19 @@ print('\n'.join(json.load(open(sys.argv[1]))[int(sys.argv[2])]['args']))
 " "$PLAN" "$i")
   log="$OUT/run_${top}_${label}.log"
   dat="$OUT/cov_${top}_${label}.dat"
-  timeout 900 "$bin" +verilator+rand+reset+0 \
-      "+verilator+coverage+file+$dat" "${ARGS[@]}" > "$log" 2>&1
+  # ⛔⛔ THE COVERAGE FILE IS MOVED, NOT NAMED ON THE COMMAND LINE, AND THAT
+  # IS A PORTABILITY FIX PAID FOR BY A RED CI RUN. `+verilator+coverage+file+`
+  # does not exist in Verilator 5.020, which is what the CI runner installs;
+  # this box has 5.032, where it works. Every one of the nineteen arms died
+  # with `Unknown runtime argument` and SIGABRT while the builds all passed.
+  # ⇒ Writing to the default `./coverage.dat` and moving it afterwards works
+  # on both. ⚠ It also means the run must happen from the repo root (the
+  # images are named by relative path) and that arms must stay SEQUENTIAL --
+  # two at once would race for the same default filename.
+  rm -f coverage.dat
+  timeout 900 "$bin" +verilator+rand+reset+0 "${ARGS[@]}" > "$log" 2>&1
   rc=$?
+  [ -f coverage.dat ] && mv -f coverage.dat "$dat"
   # ⛔ A RUN THAT ABORTED MUST NOT COUNT AS CLEAN. A Verilator abort produces a
   # log with no FAIL line in it, and "FAIL=0" then reads exactly like a pass --
   # which it did in an earlier probe here, where every run aborted on a

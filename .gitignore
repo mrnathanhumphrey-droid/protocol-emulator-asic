@@ -83,3 +83,6 @@ probe_*.json
 probe_*/
 probe_*.bin
 test/probe_*.vh
+# a Verilator sim writes ./coverage.dat by default; the sweep moves it per
+# arm, but an aborted run can leave one behind
+coverage.dat
