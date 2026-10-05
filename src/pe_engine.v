@@ -293,9 +293,51 @@ module pe_engine #(
   // mask costs nothing.
   reg [N_PINS-1:0] pin_pp;                  // 1 = this pin may drive a 1
   reg              config_err;              // sticky: 1.6s violation
-  reg [7:0]       l_data   [0:N_LANES-1];   // THE PAYLOAD lives here, not in
-                                            //   the program (ruling F1)
-  reg [BPW-1:0]   l_bitp   [0:N_LANES-1];
+  // ⛔⛔⛔ TX AND RX HAVE SEPARATE STATE, AND THEY USED TO SHARE IT. Ruling 1
+  // after `beb8862`, and the defect it fixes is the one T5.1's host-channel
+  // audit uncovered: on a lane that mixes `OP_SHIFT` (transmit) with
+  // `OP_SHIFTIN` (receive) -- which is every half-duplex protocol we ship --
+  // the two directions corrupted each other through BOTH shared objects:
+  //
+  //   the POINTER. `OP_SHIFTIN`'s byte-complete resets it at `a_cnt - 1`,
+  //   which always fires BEFORE `OP_SHIFT`'s host byte load at `a_cnt`. So
+  //   the TX load was UNREACHABLE: measured on `corpus_i2c`, 124 OP_SHIFT
+  //   dispatches produced 0 loads and 0 underruns -- no byte was ever even
+  //   REQUESTED. Every I2C and SPI-master result in this project's history
+  //   exercised the shift mechanics without ever sending a real byte.
+  //
+  //   the REGISTER. `OP_SHIFTIN` inserts the sampled bit at bit 7 of the very
+  //   register `OP_SHIFT` is draining from bit 0, so an ACK read rewrites the
+  //   byte in flight and a transmit shift disturbs the word being received.
+  //   ⚠ THE RULING NAMED THE POINTER; THE REGISTER HAD TO GO WITH IT. Splitting
+  //   only the pointer would have made the TX load fire and then deliver
+  //   corrupted data -- a worse failure than the unreachable one, because it
+  //   produces plausible bytes instead of none.
+  //
+  // ⭐ THE INVARIANT IS NOW STRUCTURAL: no opcode writes the other direction's
+  // state, by construction, so there is nothing to reason about per program.
+  // That is why this shape was chosen over a combined shift-exchange action --
+  // which would also have needed an encoding bit the action word does not have
+  // (ACT_W is exactly 24 of 24 bits).
+  // ⛔ `M_SHARED_BITP` re-merges the pointers so the defect is PRICED.
+  // COST: 40 flops for `l_rx` plus 20 for `rx_bitp`, 60 total.
+  reg [7:0]       l_tx     [0:N_LANES-1];   // THE TX PAYLOAD lives here, not
+                                            //   in the program (ruling F1)
+  reg [7:0]       l_rx     [0:N_LANES-1];   // the RX accumulator
+  reg [BPW-1:0]   tx_bitp  [0:N_LANES-1];   // advanced/reset ONLY by OP_SHIFT
+  reg [BPW-1:0]   rx_bitp  [0:N_LANES-1];   // ... ONLY by OP_SHIFTIN
+  // THE MUTANT'S SHARED POINTER: one for both directions, which is what
+  // shipped. It is per-ENGINE rather than per-lane, deliberately -- the defect
+  // being reproduced is "the two directions share a pointer", and sharing it
+  // engine-wide reproduces it on any lane the bench drives while keeping the
+  // arm to one declaration.
+  // NOTE the comment sits OUTSIDE the `ifdef`: `gate_mutant_arms` counts any
+  // comment line inside an arm as the arm wrapping more than the delta, and
+  // it is right to -- a mutant whose diff is mostly prose is not a measured
+  // one-line mutation.
+`ifdef M_SHARED_BITP
+  reg [BPW-1:0]   l_bitp_shared;
+`endif
   reg [TS_W-1:0]  l_timestamp     [0:N_LANES-1];   // ABSOLUTE next-action timestamp
   reg [CW-1:0]    l_c      [0:N_LANES-1];
   reg [D_W-1:0]   l_d      [0:N_LANES-1];   // D_sched -- the EDF key, in a
@@ -934,8 +976,13 @@ module pe_engine #(
         l_pin[i]    <= {PINW{1'b0}};
         l_clkpin[i] <= {PINW{1'b0}};
         l_mode[i]   <= 1'b0;
-        l_data[i]   <= 8'h00;
-        l_bitp[i]   <= {BPW{1'b0}};
+        l_tx[i]     <= 8'h00;
+        l_rx[i]     <= 8'h00;
+        tx_bitp[i]  <= {BPW{1'b0}};
+        rx_bitp[i]  <= {BPW{1'b0}};
+`ifdef M_SHARED_BITP
+        l_bitp_shared <= {BPW{1'b0}};
+`endif
         l_timestamp[i]     <= {TS_W{1'b0}};
         l_c[i]      <= {CW{1'b0}};
         l_d[i]      <= {D_W{1'b0}};
@@ -1291,11 +1338,11 @@ module pe_engine #(
               end else begin
 `endif
               if (l_mode[cur]) begin
-                pin_out[a_pin] <= l_data[cur][0] & pin_pp[a_pin];
+                pin_out[a_pin] <= l_tx[cur][0] & pin_pp[a_pin];
                 pin_oe[a_pin]  <= 1'b1;
               end else begin
                 pin_out[a_pin] <= 1'b0;
-                pin_oe[a_pin]  <= ~l_data[cur][0];
+                pin_oe[a_pin]  <= ~l_tx[cur][0];
               end
               // ⛔⛔⛔ D2: THE CLOCK PIN HONOURS `l_mode` TOO, AND IT DID NOT.
               // It was driven `pin_out <= a_lvl; pin_oe <= 1` unconditionally,
@@ -1377,19 +1424,40 @@ module pe_engine #(
 
           case (a_op)
             OP_SHIFT: begin
-              l_data[cur] <= {1'b0, l_data[cur][7:1]};
-              l_bitp[cur] <= l_bitp[cur] + {{(BPW-1){1'b0}}, 1'b1};
+              // TX ONLY. Neither `l_rx` nor `rx_bitp` is named here.
+              l_tx[cur]    <= {1'b0, l_tx[cur][7:1]};
+`ifdef M_SHARED_BITP
+              l_bitp_shared <= l_bitp_shared + {{(BPW-1){1'b0}}, 1'b1};
+`else
+              tx_bitp[cur] <= tx_bitp[cur] + {{(BPW-1){1'b0}}, 1'b1};
+`endif
             end
             OP_SHIFTIN: begin
-              l_data[cur] <= {pin_in[a_pin], l_data[cur][7:1]};
-              l_bitp[cur] <= l_bitp[cur] + {{(BPW-1){1'b0}}, 1'b1};
-              if (l_bitp[cur] == a_cnt - {{(BPW-1){1'b0}}, 1'b1}) begin
-                rx_data <= {pin_in[a_pin], l_data[cur][7:1]};
+              // RX ONLY. Neither `l_tx` nor `tx_bitp` is named here, which
+              // is what makes the TX host load at `a_cnt` REACHABLE: this
+              // reset used to clear the pointer that load was waiting on.
+              l_rx[cur] <= {pin_in[a_pin], l_rx[cur][7:1]};
+`ifdef M_SHARED_BITP
+              l_bitp_shared <= l_bitp_shared + {{(BPW-1){1'b0}}, 1'b1};
+              if (l_bitp_shared == a_cnt - {{(BPW-1){1'b0}}, 1'b1}) begin
+                rx_data <= {pin_in[a_pin], l_rx[cur][7:1]};
+`else
+              rx_bitp[cur] <= rx_bitp[cur] + {{(BPW-1){1'b0}}, 1'b1};
+              if (rx_bitp[cur] == a_cnt - {{(BPW-1){1'b0}}, 1'b1}) begin
+                rx_data <= {pin_in[a_pin], l_rx[cur][7:1]};
+`endif
                 rx_push <= 1'b1;
-                l_bitp[cur] <= {BPW{1'b0}};
+`ifdef M_SHARED_BITP
+                l_bitp_shared <= {BPW{1'b0}};
+`else
+                rx_bitp[cur] <= {BPW{1'b0}};
+`endif
               end
             end
-            OP_READBIT: l_data[cur] <= {pin_in[a_pin], l_data[cur][7:1]};
+            // ⭐ READBIT accumulates into the RX register and moves NO
+            // pointer -- it is the single-bit sample (an I2C ACK, a UART stop
+            // bit), so there is no byte to complete.
+            OP_READBIT: l_rx[cur] <= {pin_in[a_pin], l_rx[cur][7:1]};
             default: ;
           endcase
 
@@ -1487,14 +1555,22 @@ module pe_engine #(
           // ---- the host data channel (F1), and its sticky flag ----------
           // ⛔ underrun is a STICKY FLAG, NEVER A STALL: a stall would make C
           //    unbounded, which is the clock-stretch conclusion a third time.
-          if (a_op == OP_SHIFT && l_bitp[cur] == a_cnt) begin
+`ifdef M_SHARED_BITP
+          if (a_op == OP_SHIFT && l_bitp_shared == a_cnt) begin
+`else
+          if (a_op == OP_SHIFT && tx_bitp[cur] == a_cnt) begin
+`endif
             if (host_valid) begin
-              l_data[cur] <= host_data;
+              l_tx[cur] <= host_data;
               host_pop    <= 1'b1;        // consumed: advance the host FIFO
             end else begin
               lane_underrun[cur] <= 1'b1;
             end
-            l_bitp[cur] <= {BPW{1'b0}};
+`ifdef M_SHARED_BITP
+            l_bitp_shared <= {BPW{1'b0}};
+`else
+            tx_bitp[cur] <= {BPW{1'b0}};
+`endif
           end
 
           st <= ST_IDLE;

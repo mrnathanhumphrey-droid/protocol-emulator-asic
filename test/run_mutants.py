@@ -48,6 +48,29 @@ SRC_EDGE = ["test/tb_edge.v", "src/pe_engine.v", "src/pe_store.v",
 # mutant on the queue-selection path has nothing to break there. `tb_tx` is
 # what gives M_TX_IGNORE_TAG something to kill it with.
 SRC_TX = ["test/tb_tx.v", "src/pe_engine.v", "src/pe_store.v", "src/project.v"]
+# ⭐ A FOURTH BENCH -- the HALF-DUPLEX one, where TX and RX live on ONE lane.
+# `tb_tx` has SHIFT-only lanes and `tb_trace` runs real protocols without
+# asserting byte identity, so neither can see a direction corrupting the other.
+SRC_HALF = ["test/tb_half.v", "src/pe_engine.v", "src/pe_store.v",
+            "src/project.v"]
+HALF_IMG = "test/half_image.hex"
+HALF_MUTANTS = [
+    ("M_SHARED_BITP",
+     "re-merge the TX and RX bit pointers into one",
+     "*** FAIL",
+     "⛔ WHAT SHIPPED FOR THE LIFE OF THE HOST CHANNEL. OP_SHIFT and OP_SHIFTIN "
+     "shared the bit pointer, so the RX byte-complete reset at `a_cnt - 1` "
+     "always fired BEFORE the TX host load at `a_cnt`: on corpus_i2c, 124 "
+     "OP_SHIFT dispatches produced 0 loads and 0 underruns -- no byte was ever "
+     "even REQUESTED, and every I2C and SPI-master result exercised the shift "
+     "mechanics without sending a real byte. ⭐ WITH THE POINTER RE-MERGED THE "
+     "KILL IS WORSE THAN THE ORIGINAL SYMPTOM, which is the informative part: "
+     "the load now fires sometimes and delivers CORRUPTED bytes (lane 0 emits "
+     "60 09 48 2b where 96 69 c5 3a was pushed), because `l_tx` and `l_rx` are "
+     "split while the pointer is not. Plausible wrong data beats no data for "
+     "danger, and it is why the register had to split WITH the pointer rather "
+     "than after it."),
+]
 TX_IMG = "test/tx_image.hex"
 TX_BADCLK_IMG = "test/tx_badclk_image.hex"
 # (define, what it breaks, the text that certifies the kill, why, which image)
@@ -478,11 +501,57 @@ def main() -> int:
                         print("        *** died, but not of `%s` ***" % want)
                         wrong_reason.append((define, "wrong reason"))
 
+    # ---- the HALF-DUPLEX mutants, on tb_half -------------------------
+    print()
+    print("  --- half-duplex mutants (bench: tb_half) ---")
+    hp = os.path.join(ROOT, HALF_IMG)
+    if not os.path.isfile(hp):
+        print("    *** %s is missing. Build it:" % HALF_IMG)
+        print("        python test/make_smoke_image.py --half 24")
+        survivors.append("tb_half image")
+    else:
+        with open(hp, encoding="ascii") as fh:
+            nbh = len([w for w in fh.read().split() if w])
+        h_extra = ["+NBYTES=%d" % nbh, "+NCYC=40000"]
+        base_h = os.path.join(SCRATCH, "mut_half_base.vvp")
+        rc, log = build([], base_h, src=SRC_HALF)
+        if rc != 0:
+            print("    *** tb_half does not compile: %s" % log[:300])
+            survivors.append("tb_half build")
+        else:
+            out_h = run(base_h, img=HALF_IMG, extra=h_extra)
+            if "tb_half: PASS" not in out_h:
+                print("    *** the UNMUTATED tb_half does not pass -- nothing")
+                print("        below is interpretable.")
+                survivors.append("tb_half baseline")
+            else:
+                print("    baseline: PASS (4 of 4 must-fires)")
+                for define, breaks, want, why in HALF_MUTANTS:
+                    v = os.path.join(SCRATCH, "mut_h_%s.vvp" % define.lower())
+                    rc, log = build([define], v, src=SRC_HALF)
+                    if rc != 0:
+                        print("    %-19s BUILD FAIL -- not a kill" % define)
+                        wrong_reason.append((define, "build"))
+                        continue
+                    o = run(v, img=HALF_IMG, extra=h_extra)
+                    killed = "tb_half: PASS" not in o
+                    right = want in o
+                    print("    %-19s %-40s %s"
+                          % (define, breaks[:40],
+                             "RED" if killed else "*** SURVIVED ***"))
+                    print("        %s" % why)
+                    if not killed:
+                        survivors.append(define)
+                    elif not right:
+                        print("        *** died, but not of `%s` ***" % want)
+                        wrong_reason.append((define, "wrong reason"))
+
     print()
     print("=" * 78)
     print("VERDICT")
     print("=" * 78)
-    print("  mutants run           : %d" % (len(MUTANTS) + len(TX_MUTANTS)))
+    print("  mutants run           : %d"
+          % (len(MUTANTS) + len(TX_MUTANTS) + len(HALF_MUTANTS)))
     print("  survived (bad)        : %d  %s" % (len(survivors), survivors or ""))
     print("  died of a WRONG reason: %d  %s" % (len(wrong_reason),
                                                 wrong_reason or ""))

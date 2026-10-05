@@ -426,8 +426,16 @@ def assert_reduces_to_periodic(verbose: bool = True) -> bool:
     bad = []
     n_j_pos = 0           # cells actually exercised at J > 0 -- asserted below
     # (a) the arrival curve against the corrected release count, SWEPT OVER J
-    for T in (3, 5, 7, 25, 62, 434):
-        for J in (0, 1, 2, 3, 7, 11):
+    # ⛔ ENUMERATED WHERE THE SPACE IS SMALL (ruling 3). The arrival curve is
+    # arithmetic in T and J, so every small period is swept exhaustively; the
+    # three large ones are kept as NAMED REPRESENTATIVES because the inner
+    # `delta` loop is O(T) and 434 alone would dominate the run.
+    # ⭐ THE SAMPLING RATIONALE, stated because the ruling requires one where
+    # enumeration stops: 25, 62 and 434 are the SHIPPED periods (SPI, I2C,
+    # UART), so the unenumerated part of the space is covered by the exact
+    # values the design uses rather than by arbitrary large numbers.
+    for T in list(range(2, 17)) + [25, 62, 434]:
+        for J in range(0, 13):
             bl = BLane("x", T, 2, T // 2, n=1, J=J)
             pl = Lane("x", T, C=2, J=J, D=T // 2)
             for delta in range(0, 3 * T + 5):
@@ -468,7 +476,8 @@ def assert_reduces_to_periodic(verbose: bool = True) -> bool:
         print("  n=1 reduction gate: %s"
               % ("PASS -- bursty form is the periodic form at n=1 "
                  "(curve, inflated curve, interference term, and whole "
-                 "recurrence), over J in {0,1,2,3,7,11}: %d cells at J>0"
+                 "recurrence), over T in 2..16 + {25,62,434} and J in 0..12 "
+                 "EXHAUSTIVELY: %d cells at J>0"
                  % n_j_pos if not bad
                  else "*** FAIL: %d mismatches, first %s ***" % (len(bad), bad[0])))
     return not bad
@@ -542,13 +551,30 @@ def price_jitter_blocking(verbose: bool = True) -> dict:
     emergent in that model and B is not encoded at all: if B were wrong under
     jitter, the foreign checker would disagree on a constructed instance.
     """
+    # ⛔⛔ EXHAUSTIVE OVER A DECLARED RANGE, NOT A HAND-PICKED GRID
+    # (Wilson's ruling 3). This read
+    #     T_i in (4,5,8,11), T_j in (3,5,7,13), D_i in (3,5,9),
+    #     D_j in (4,6,11),   J_j in (1,3,8)
+    # -- 432 points chosen by hand. The project has now had a must-fire's
+    # witness slide between hand-chosen constants THREE times: two constants,
+    # then a list of constants, then `T = 13` falling between 2.0 and 1.5 MHz
+    # in `gate_lane_class`. A disagreement between two expressions of one
+    # formula is an ARITHMETIC fact over small integers, and small integers
+    # are enumerable.
+    # ⭐ THE RANGE IS THE RATIONALE: periods 2..12 and deadlines 2..12 cover
+    # every ordering of the five quantities that the blocking term branches
+    # on, and a disagreement that needs a period above 12 to appear would be
+    # a disagreement about overflow, not about the algebra -- a different
+    # claim, and one this must-fire does not make.
+    # ⚠ 11 x 11 x 11 x 11 x 8 is 117k instances before the arrival loop, so
+    # the bound is kept modest on purpose; it is still 270x the hand grid.
     moved = []
     n = 0
-    for T_i in (4, 5, 8, 11):
-        for T_j in (3, 5, 7, 13):
-            for D_i in (3, 5, 9):
-                for D_j in (4, 6, 11):
-                    for J_j in (1, 3, 8):
+    for T_i in range(2, 13):
+        for T_j in range(2, 13):
+            for D_i in range(2, 13):
+                for D_j in range(2, 13):
+                    for J_j in range(0, 8):
                         li = BLane("i", T_i, 2, D_i, J=0)
                         lj = BLane("j", T_j, 3, D_j, J=J_j)
                         ls = [li, lj]
@@ -574,7 +600,9 @@ def price_jitter_blocking(verbose: bool = True) -> dict:
                   "which the filter rejects. ⚠ same-author check: soundness of")
             print("      the B term under jitter is TChecker's to confirm.")
         print("      ⛔ RETRACTED: the first version of this probe tested "
-              "`D_j + J_j > a + D_i` and reported 184/432 instances moved.")
+              "`D_j + J_j > a + D_i` and reported 184 of 432 instances moved")
+        print("         -- 432 being the HAND-PICKED grid this sweep replaced;"
+              " it is exhaustive now (ruling 3).")
         print("         That is not a jittered deadline -- a late release has "
               "LESS slack, not a later deadline. The probe was the bug.")
     return out

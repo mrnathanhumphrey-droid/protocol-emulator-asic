@@ -126,6 +126,14 @@ BENCHES = [
     ("tb_tx", "test/tb_tx.v",
      ["+IMG=test/probe_pp_tx.hex", "+NCYC=6000"],
      "tb_tx: PASS", {2: "ok", 1: "ok"}),
+
+    # ⭐ THE HALF-DUPLEX BENCH, in the sweep from the day it was written. It is
+    # the only bench where TX and RX live on ONE lane, so it is the only one
+    # that can see a direction corrupting the other -- and a depth-dependent
+    # version of that would be invisible everywhere else.
+    ("tb_half", "test/tb_half.v",
+     ["+IMG=test/probe_pp_half.hex", "+NCYC=40000"],
+     "tb_half: PASS", {2: "ok", 1: "ok"}),
 ]
 
 
@@ -217,6 +225,18 @@ def main() -> int:
     for i, (top, _src, args, _needle, _exp) in enumerate(BENCHES):
         if top == "tb_tx":
             args.append("+NBYTES=%d" % nb_tx)
+    g = run([sys.executable, os.path.join(HERE, "make_smoke_image.py"),
+             "--half", "24"])
+    if g.returncode != 0:
+        print("  *** could not build the tb_half image")
+        return 1
+    shutil.copyfile(os.path.join(HERE, "half_image.hex"),
+                    os.path.join(HERE, "probe_pp_half.hex"))
+    with open(os.path.join(HERE, "probe_pp_half.hex"), encoding="ascii") as fh:
+        nb_half = len([w for w in fh.read().split() if w])
+    for i, (top, _src, args, _needle, _exp) in enumerate(BENCHES):
+        if top == "tb_half":
+            args.append("+NBYTES=%d" % nb_half)
 
     declared = []
     print("  %-12s %-24s %-24s" % ("bench", "SPL=2", "SPL=1"))

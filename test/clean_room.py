@@ -115,13 +115,21 @@ def suite():
             extra_tx = ["+IMG=test/tx_image.hex",
                         "+NBYTES=%d" % len([w for w in fh.read().split() if w]),
                         "+NCYC=6000"]
+    extra_half = []
+    hfp = os.path.join(ROOT, "test", "half_image.hex")
+    if os.path.isfile(hfp):
+        with open(hfp, encoding="ascii") as fh:
+            extra_half = ["+IMG=test/half_image.hex",
+                          "+NBYTES=%d" % len([w for w in fh.read().split() if w]),
+                          "+NCYC=40000"]
     for name, top, srcs, pargs in (
         ("tb_smoke", "tb_smoke", ["test/tb_smoke.v"], []),
         ("tb_edge", "tb_edge", ["test/tb_edge.v"], []),
         ("tb_tx", "tb_tx", ["test/tb_tx.v"], extra_tx),
+        ("tb_half", "tb_half", ["test/tb_half.v"], extra_half),
     ):
-        if name == "tb_tx" and not pargs:
-            out.append((name, False, "test/tx_image.hex absent"))
+        if name in ("tb_tx", "tb_half") and not pargs:
+            out.append((name, False, "its image is absent"))
             continue
         vvp = os.path.join(sp, name + ".vvp")
         b = run(["iverilog", "-g2012", "-o", vvp, "-s", top]

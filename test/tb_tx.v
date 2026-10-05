@@ -62,7 +62,7 @@ module tb_tx;
 
   // ---- per-lane bit/byte reconstruction ---------------------------------
   // ⭐ RECONSTRUCTED FROM THE DRIVE DECISION, which is what reaches the pin:
-  // `OP_SHIFT` drives `pin_out[a_pin] <= l_data[cur][0]`, LSB first. The pin
+  // `OP_SHIFT` drives `pin_out[a_pin] <= l_tx[cur][0]`, LSB first. The pin
   // itself is cross-checked below, so the byte-level claim and the pin path
   // are two separate readings rather than one.
   reg  [7:0] acc   [0:1];
@@ -116,7 +116,7 @@ module tb_tx;
   // ST_DRIVE edge, so in ST_DRIVE they already name this job.
   wire       shifting = (dut.u_eng.st == 1) && (dut.u_eng.a_op == 3'd1);
   wire [2:0] sh_lane  = dut.u_eng.cur;
-  wire       sh_bit   = dut.u_eng.l_data[dut.u_eng.cur][0];
+  wire       sh_bit   = dut.u_eng.l_tx[dut.u_eng.cur][0];
 
   task fail;
     input [8*72-1:0] msg;
@@ -203,7 +203,7 @@ module tb_tx;
         end
 
         // ⭐ THE BIT, AND THE BYTE IT BUILDS. LSB FIRST, because that is the
-        // order `l_data` shifts right in.
+        // order `l_tx` shifts right in.
         if (shifting) begin
           n_shift_all = n_shift_all + 1;
           if (sh_lane < 3'd2) begin
@@ -347,7 +347,7 @@ module tb_tx;
       if (dut.u_eng.l_live[0]) fail("1.6x: the lane was not halted");
       // ⛔ AND IT MUST NOT HAVE EMITTED DATA. A flag set beside a lane that
       // transmitted anyway is not a refusal. The first byte is 00 by
-      // construction (l_data resets to 0), so the assertion is that NOTHING
+      // construction (l_tx resets to 0), so the assertion is that NOTHING
       // beyond that ever came out.
       $display("    bytes emitted by lane 0 : %0d %0s", ngot[0],
                (ngot[0] <= 1) ? "ok -- nothing beyond the reset byte"
@@ -382,7 +382,7 @@ module tb_tx;
     fails = fails + hf_bad;
 
     $display("  MUST-FIRE 1: the first byte out of each lane is 00");
-    // ⭐ BY CONSTRUCTION, NOT BY LUCK: `l_data` resets to 0 and the first load
+    // ⭐ BY CONSTRUCTION, NOT BY LUCK: `l_tx` resets to 0 and the first load
     // lands at the END of the first eight drives. Asserting it is what proves
     // the reconstruction is BYTE-ALIGNED -- if the framing were off by a bit
     // this would break first, and every later comparison would fail for a

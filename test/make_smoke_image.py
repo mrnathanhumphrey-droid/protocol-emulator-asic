@@ -307,6 +307,86 @@ def build_census(d: int = 25):
     return b"".join(headers) + b"".join(prog)
 
 
+def build_half(d: int = 24):
+    """RULING 1's MUST-FIRES: two HALF-DUPLEX lanes, TX and RX on one lane.
+
+    ⛔⛔ THE PROGRAM SHAPE IS THE POINT, AND IT IS NOT THE OBVIOUS ONE.
+    `OP_SHIFT` drives the data pin AND the clock pin in one dispatch, and it
+    ADVANCES THE TX POINTER. So a bit period built from two SHIFTs -- one per
+    clock edge, which is what `corpus.py` does -- consumes TWO payload bits per
+    protocol bit, and the byte on the wire is not the byte that was pushed.
+    ⭐ THE CLOCK CAN BE DECOUPLED FROM THE SHIFT with the opcodes that already
+    exist: `OP_LEVEL` reaches `l_clkpin` NOWHERE -- the clock pin is written in
+    the `OP_SHIFT` arm and in no other -- so pointing an `OP_LEVEL` at the
+    clock pin as its own `a_pin` moves the clock WITHOUT shifting. One bit is
+    then:
+        SHIFT(data, level=0)   data bit out, clock LOW   -- advances TX
+        LEVEL(clkpin, 1)       clock HIGH                -- no shift
+    which is one shift per bit, data changing while the clock is low. That is
+    the correct framing for both I2C and SPI mode 0.
+    ⚠ IT COSTS TWO ACTIONS PER BIT, so a bit period is 2*d cycles. At d >= D*
+    = 20 that is <= 1.25 MHz for SPI and comfortably inside 400 kHz for I2C.
+    A THREE-action bit (adding a separate receive sample) needs d = 17 for
+    1 MHz, which is BELOW D* and therefore inadmissible -- see the round's
+    record for what that closes.
+
+    lane 0 -- I2C-SHAPED WRITE THEN ACK READ (open-drain SDA/SCL on uio):
+        8 x [ SHIFT(SDA, lvl=0, clk=SCL, q=0, cnt=7), LEVEL(SCL, 1) ]
+        LEVEL(SCL, 0), SHIFTIN(SDA, cnt=8), LEVEL(SCL, 1)   -- release + sample
+        REARM
+    lane 1 -- SPI-MASTER-SHAPED WRITE THEN READ (push-pull on uo_out):
+        8 x [ SHIFT(MOSI, lvl=0, clk=SCLK, q=1, cnt=7), LEVEL(SCLK, 1) ]
+        8 x [ LEVEL(SCLK, 0), SHIFTIN(MISO, cnt=8), LEVEL(SCLK, 1) ]
+        REARM
+
+    ⭐ THE TWO LANES NAME DIFFERENT QUEUES (0 and 1), so `pe_asm`'s
+    queue-ownership rule is satisfied and the two TX streams are separable at
+    the pins.
+    ⚠ PROTOCOL-SHAPED, NOT A CERTIFIED PROTOCOL. There is no START/STOP
+    condition and no addressing: the claims this image supports are about the
+    PLUMBING -- that a pushed byte reaches the wire, that a sampled byte
+    reaches the host, and that neither direction corrupts the other.
+    """
+    prog, headers, base = [], [], []
+    off = ACT_BASE
+    # ---- lane 0: I2C-shaped, SDA = uio[2], SCL = uio[1] ----------------
+    base.append(off)
+    seq0 = []
+    for _b in range(8):
+        seq0.append(act(OP_SHIFT, 2, 0, d, count=7, q=0))
+        seq0.append(act(OP_LEVEL, 1, 1, d))
+    seq0.append(act(OP_LEVEL, 1, 0, d))
+    seq0.append(act(OP_SHIFTIN, 2, 0, d, count=8))
+    seq0.append(act(OP_LEVEL, 1, 1, d))
+    seq0.append(act(OP_REARM, 0, 1, d))
+    prog += seq0
+    off += len(seq0) * ACT_BYTES
+    # ---- lane 1: SPI-master-shaped, MOSI = uo_out[2], SCLK = uo_out[1],
+    #      MISO = uio[0] ------------------------------------------------
+    base.append(off)
+    seq1 = []
+    for _b in range(8):
+        seq1.append(act(OP_SHIFT, 10, 0, d, count=7, q=1))
+        seq1.append(act(OP_LEVEL, 9, 1, d))
+    for _b in range(8):
+        seq1.append(act(OP_LEVEL, 9, 0, d))
+        seq1.append(act(OP_SHIFTIN, 0, 0, d, count=8))
+        seq1.append(act(OP_LEVEL, 9, 1, d))
+    seq1.append(act(OP_REARM, 0, 1, d))
+    prog += seq1
+    off += len(seq1) * ACT_BYTES
+    lp = off
+    prog.append(act(OP_REARM, 0, 0, 500))
+    # lane 0 open-drain on uio (a releasable bank, as the pin map requires);
+    # lane 1 push-pull on uo_out. Both name a clock pin DISTINCT from the data
+    # pin, which 1.6x requires of any shifting lane.
+    headers.append(hdr(2, 1, 0, d, 2, 2 * d, 3 * d, base[0]))
+    headers.append(hdr(10, 9, 1, d, 2, 2 * d, 3 * d, base[1]))
+    for n in range(2, N_LANES):
+        headers.append(hdr(4, 4, 0, 500, 2, 200, 240, lp))
+    return b"".join(headers) + b"".join(prog)
+
+
 def build_tx_badclk(d: int = 12):
     """1.6x's MUST-FIRE: a SHIFT lane whose clock pin IS its data pin.
 
@@ -520,6 +600,8 @@ def main() -> int:
              "tx_image.hex"),
             (["--txbadclk"], "1.6x violation: SHIFT with clkpin == pin",
              "tx_badclk_image.hex"),
+            (["--half", "24"], "two half-duplex lanes: TX then RX on one lane",
+             "half_image.hex"),
         ]
         import hashlib
         import subprocess
@@ -670,6 +752,17 @@ def main() -> int:
             for b in img:
                 fh.write("%02x\n" % b)
         print("five-lane image %s, %d bytes -> %s" % (delays, len(img), out))
+        return 0
+    if "--half" in sys.argv:
+        k = sys.argv.index("--half")
+        dd = int(sys.argv[k + 1]) if len(sys.argv) > k + 1 else 24
+        img = build_half(dd)
+        out = os.path.join(here, "half_image.hex")
+        with open(out, "w", encoding="ascii") as fh:
+            for b in img:
+                fh.write("%02x\n" % b)
+        print("half-duplex image d=%d, %d bytes -> %s"
+              % (dd, len(img), out))
         return 0
     if "--txbadclk" in sys.argv:
         img = build_tx_badclk()

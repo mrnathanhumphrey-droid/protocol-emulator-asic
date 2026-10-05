@@ -235,6 +235,7 @@ SPEC_SYMBOLS = {
     # in the reason). `MUTANTS` and `EDGE_MUTANTS` are already excluded on the
     # same grounds.
     ("test/run_mutants.py", "TX_MUTANTS"),
+    ("test/run_mutants.py", "HALF_MUTANTS"),
     # ⭐ THE C-SATURATION ARMS ARE AN EXPERIMENT'S DESIGN, not its result. The
     # delays are chosen (40 = 2 x D*, so refill cannot bind; 60 as a slack
     # control; 2 as the oversubscribed contrast) and the pre-registration

@@ -71,3 +71,9 @@ test/artefacts.sha256.probe
 # toolchain rules). Those wrappers are scratch and must never be committed.
 probe_*.sh
 probe_*.json
+# ⛔ AND THE DIRECTORIES THEY WRITE INTO. `ci/run_gates.sh` delegates the
+# netlist step to WSL when yosys is not on PATH, and WSL cannot see Git Bash's
+# /tmp -- so the JSON lands in `probe_nl/` inside the repo, where both sides
+# can reach it. A 10 MB generated netlist must never be committed.
+probe_*/
+test/probe_*.vh

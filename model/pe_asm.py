@@ -71,7 +71,7 @@ def check_queue_ownership(lanes):
     seen from the other side: the host cannot know which queue the lane will
     draw from next. Either way bytes land in the wrong transmitter and NOTHING
     FLAGS IT -- the engine cannot tell a misrouted byte from an intended one.
-    ⭐ Only actions that CONSUME are considered: `OP_SHIFT` reads `l_data`, so a
+    ⭐ Only actions that CONSUME are considered: `OP_SHIFT` reads `l_tx`, so a
     lane whose actions never shift has no queue and cannot collide with one.
     """
     owner = {}          # queue -> lane

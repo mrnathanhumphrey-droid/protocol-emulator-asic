@@ -522,17 +522,16 @@ async def test_open_drain_data_pin(dut):
     # ⛔ THE STANDING PRECONDITION (ruling 0). Checked at the END, because a
     # lane can be fed at the start and still starve later -- and a starved
     # run does not count whatever else it showed.
-    # ⛔⛔ ZERO POPS, DECLARED, AND IT IS A DESIGN FINDING. This lane mixes
-    # OP_SHIFT (drive a bit) with OP_SHIFTIN (read the ACK), which is how
-    # I2C works -- and the two directions SHARE ONE BIT POINTER. The RX
-    # byte-complete resets `l_bitp` at `a_cnt - 1`, so it fires before the
-    # TX byte load at `a_cnt` can ever be reached: 124 OP_SHIFT dispatches
-    # produce ZERO loads and ZERO underruns, because no byte is ever even
-    # REQUESTED. ⇒ The host -> TX path is unreachable on a half-duplex lane,
-    # which is owed a ruling (separate pointers, or a symmetric `a_cnt - 1`
-    # on the TX side). Asserted as exactly zero so a fix turns this red.
-    assert_host_fed(dut, hostq, expect_pops=False,
-                    why="half-duplex lane: OP_SHIFTIN resets l_bitp at a_cnt-1 before the TX load at a_cnt is reachable")
+    # ⭐⭐ THIS WAS A DECLARED ZERO AND IS NOW A REAL READING. The lane mixes
+    # OP_SHIFT with OP_SHIFTIN, which is how I2C works, and the two directions
+    # used to SHARE both the bit pointer and the shift register -- so the RX
+    # byte-complete reset at `a_cnt - 1` always fired before the TX host load
+    # at `a_cnt`, and 124 OP_SHIFT dispatches produced ZERO loads. The
+    # assertion was written as "exactly zero, and here is why" precisely so
+    # that fixing it would turn this test RED and force the declaration to be
+    # revisited. Ruling 1 split them (`tx_bitp`/`rx_bitp`, `l_tx`/`l_rx`), the
+    # test went red as designed, and the ordinary precondition now applies.
+    assert_host_fed(dut, hostq)
 @cocotb.test()
 async def test_open_drain_clock_pin_is_released(dut):
     """D2: an open-drain lane's CLOCK pin is RELEASED, never driven high.
@@ -606,17 +605,16 @@ async def test_open_drain_clock_pin_is_released(dut):
     # ⛔ THE STANDING PRECONDITION (ruling 0). Checked at the END, because a
     # lane can be fed at the start and still starve later -- and a starved
     # run does not count whatever else it showed.
-    # ⛔⛔ ZERO POPS, DECLARED, AND IT IS A DESIGN FINDING. This lane mixes
-    # OP_SHIFT (drive a bit) with OP_SHIFTIN (read the ACK), which is how
-    # I2C works -- and the two directions SHARE ONE BIT POINTER. The RX
-    # byte-complete resets `l_bitp` at `a_cnt - 1`, so it fires before the
-    # TX byte load at `a_cnt` can ever be reached: 124 OP_SHIFT dispatches
-    # produce ZERO loads and ZERO underruns, because no byte is ever even
-    # REQUESTED. ⇒ The host -> TX path is unreachable on a half-duplex lane,
-    # which is owed a ruling (separate pointers, or a symmetric `a_cnt - 1`
-    # on the TX side). Asserted as exactly zero so a fix turns this red.
-    assert_host_fed(dut, hostq, expect_pops=False,
-                    why="half-duplex lane: OP_SHIFTIN resets l_bitp at a_cnt-1 before the TX load at a_cnt is reachable")
+    # ⭐⭐ THIS WAS A DECLARED ZERO AND IS NOW A REAL READING. The lane mixes
+    # OP_SHIFT with OP_SHIFTIN, which is how I2C works, and the two directions
+    # used to SHARE both the bit pointer and the shift register -- so the RX
+    # byte-complete reset at `a_cnt - 1` always fired before the TX host load
+    # at `a_cnt`, and 124 OP_SHIFT dispatches produced ZERO loads. The
+    # assertion was written as "exactly zero, and here is why" precisely so
+    # that fixing it would turn this test RED and force the declaration to be
+    # revisited. Ruling 1 split them (`tx_bitp`/`rx_bitp`, `l_tx`/`l_rx`), the
+    # test went red as designed, and the ordinary precondition now applies.
+    assert_host_fed(dut, hostq)
 @cocotb.test()
 async def test_engine_runs_at_the_pins(dut):
     """THE ENGINE BENCH AT THE PINS: a five-lane program moves BOTH banks.

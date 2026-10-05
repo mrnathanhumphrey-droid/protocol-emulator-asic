@@ -75,6 +75,16 @@ EXPECT = {
     # single expression, so nothing else moves with it, which is what makes
     # this a clean price on the field rather than on a block.
     "M_TX_IGNORE_TAG":   (2, None),
+    "M_SHARED_BITP":     (14,
+        "a BLOCK substitution across FOUR sites, declared: the mutation "
+        "re-merges the TX and RX bit pointers, and the pointer is named in the "
+        "reset, in OP_SHIFT's advance, in OP_SHIFTIN's advance-and-complete, "
+        "and at the TX host load. There is no single expression whose value "
+        "expresses 'share the pointer' -- the arm also has to DECLARE the "
+        "shared register, which is why it is the largest arm in this table. "
+        "⚠ Its size is the point: the defect it reproduces was distributed "
+        "across every site that touched the pointer, which is how it survived "
+        "unnoticed."),
     "M_SHIFT_CLK_ALIAS": (6,
         "a BLOCK substitution, declared: the refusal has to suppress BOTH the "
         "data write and the clock write, so removing it removes an if/else "
