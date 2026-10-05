@@ -189,6 +189,27 @@ And one detector bug worth naming: a case-insensitive `FAIL` match flagged
 `tb_csat`'s own line *"sticky_ovr observed : 0 (recorded, not a failure)"* and
 failed an arm that had passed.
 
+### 5.0 Two points whose coverage depends on the Verilator release
+
+⭐ **Measured, across two releases on byte-identical stimulus.** The same 19
+arms on **5.020** and **5.032** produce **identical point totals for every
+file** (72/60, 6/3, 44/15, 14/18, 10/17) and **identical uncovered toggle
+counts for every file**. The entire difference is two branch arms in
+`pe_engine.v`, both `if` arms inside unrolled `for` loops over lanes:
+
+| line | what | 5.020 | 5.032 |
+|---|---|---|---|
+| 651 | the EDF arbiter's selection condition | uncovered | taken **5,231,510** times |
+| 942 | the prime scan's `l_live[pi] && want_fetch(pi)` | uncovered | taken **30** times |
+
+⇒ The arms are plainly exercised, so 5.020's zero is an **attribution
+artefact** across loop iterations rather than a test gap. They carry the status
+`TOOL_DIVERGENT`: **counted as uncovered**, because the gate must not pick the
+lenient reading of a disagreement it cannot adjudicate, and exempt from the
+stale check, because "covered" is the expected reading on half the releases.
+⛔ That exemption is deliberately narrow — an `UNREACHABLE` point that got
+covered stays fatal, since it means the written reason is false.
+
 ### 5.1 The parser's one real hazard
 
 `verilator_coverage --write` does **not** sum a point across benches: the merged
@@ -213,6 +234,31 @@ builds plus nineteen simulated arms — against seconds for every other gate;
 the sweep the same way it delegates the yosys netlist step — one shared
 path-conversion helper now, because that conversion had already cost two
 failures.
+
+### 6.1 ⛔⛔ The tool is older in CI, and `--binary` cannot do coverage there
+
+The sweep is built as **generate, patch, build** rather than `--binary`, and
+that is a portability fix established from Verilator's own source rather than
+guessed at. On **5.020** — what the runner installs, against **5.032** here —
+the arms ran, **passed**, and produced no coverage file at all:
+
+- `src/V3EmitCMain.cpp` at tag `v5.020` emits `topp->final(); return 0;` with
+  **no coverage write anywhere**. 5.032 emits `contextp->coveragep()->write();`.
+- `+verilator+coverage+file+` **does not exist** in 5.020 — passing it is
+  `Unknown runtime argument` and SIGABRT.
+
+So neither naming the output file nor searching for it could ever have worked:
+the simulator never wrote one. ⇒ The generated `V<top>__main.cpp` now gets the
+coverage write inserted after `topp->final()` when it lacks one;
+`VerilatedCovContext::write()` and `VerilatedContext::coveragep()` are both
+present in 5.020's `verilated_cov.h`, so one line serves both.
+
+⭐ **Priced, because on this box the patch never fires.** 5.032 already emits
+the call, so the patch would have shipped unexercised — the exact shape of a
+guard that is never run. `probe_covpatch.sh` strips the line to the 5.020
+shape, applies the sweep's patch verbatim, rebuilds and runs: **1 write call →
+0 stripped → 1 patched**, sim `rc=0` with 7 PASS, **2192 lines of coverage
+written**.
 
 ## 7. What this does not settle
 
