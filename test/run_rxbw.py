@@ -144,16 +144,20 @@ def main() -> int:
              "verdict"))
     rows = []
     for d in D_POINTS:
+        # ⛔ A PROBE NAME. This swept `--rxfast d` into the TRACKED
+        # `rxfast_image.hex` once per point, leaving it at the last `d` under a
+        # manifest entry that says 24 -- and it was committed that way,
+        # because the clean room had already run and passed on the real file.
         g = run([sys.executable, os.path.join(HERE, "make_smoke_image.py"),
-                 "--rxfast", str(d)])
+                 "--rxfast", str(d), "probe_rxfast"])
         if g.returncode != 0:
             print("  %-6d *** could not build the image" % d)
             rc = 1
             continue
-        path = os.path.join(HERE, "rxfast_image.hex")
+        path = os.path.join(HERE, "probe_rxfast.hex")
         with open(path, encoding="ascii") as fh:
             nb = len([w for w in fh.read().split() if w])
-        r, bad = one(vvp, "test/rxfast_image.hex", nb)
+        r, bad = one(vvp, "test/probe_rxfast.hex", nb)
         if r is None:
             print("  %-6d *** NO READING: %s" % (d, bad))
             rc = 1

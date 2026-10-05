@@ -885,8 +885,19 @@ def main() -> int:
     if "--rxfast" in sys.argv:
         k = sys.argv.index("--rxfast")
         dd = int(sys.argv[k + 1]) if len(sys.argv) > k + 1 else 24
+        # ⛔⛔ A BASE NAME, BECAUSE A SWEEP MUST NOT WRITE A TRACKED IMAGE.
+        # `run_rxbw.py` rebuilds this image once per swept `d` and the path
+        # was CONSTANT, so the tracked `rxfast_image.hex` was left holding
+        # the LAST sweep point -- d = 64 -- under a manifest entry that says
+        # `--rxfast 24`. It was committed that way: the clean room had run
+        # BEFORE the sweep and validated the d = 24 file, and the sweep
+        # clobbered it afterwards.
+        # ⭐ The standing rule is that probes write only to `probe_*` names;
+        # giving the sweep a base makes that possible rather than hoped for.
+        base = (sys.argv[k + 2] if len(sys.argv) > k + 2
+                and not sys.argv[k + 2].startswith("-") else "rxfast_image")
         img = build_rxfast(dd)
-        out = os.path.join(here, "rxfast_image.hex")
+        out = os.path.join(here, base + ".hex")
         with open(out, "w", encoding="ascii") as fh:
             for b in img:
                 fh.write("%02x\n" % b)
