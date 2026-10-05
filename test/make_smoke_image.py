@@ -387,6 +387,74 @@ def build_half(d: int = 24):
     return b"".join(headers) + b"".join(prog)
 
 
+def build_i2cframe(d: int = 62, sda: int = 2, scl: int = 1):
+    """A FULL I2C WRITE TRANSACTION, for a foreign decoder to adjudicate.
+
+        S | 1010 000 0 | A | data | A | P
+
+    ⛔⛔ WHY A FOREIGN DECODER AND NOT ANOTHER ASSERTION. Every I2C claim this
+    project has made is same-hand: our engine against our own peer model
+    (`fram_i2c.v` says so in its own header) and our own benches. `sigrok`'s
+    `i2c` protocol decoder is code written from the standard by people who have
+    never seen this design, so it can disagree in ways nothing here can.
+
+    THE FRAMING, built from the opcodes that exist:
+      START   `OP_START(SDA, 0)` pulls SDA low while SCL is still released
+              high -- which IS a start condition -- then SCL goes low.
+      a bit   `OP_SHIFT(SDA, lvl=0, clk=SCL)` puts the data bit on SDA and
+              takes SCL LOW in one dispatch, then `OP_LEVEL(SCL, 1)` releases
+              SCL high. Data changes only while SCL is low, as I2C requires.
+              ⭐ TWO ACTIONS PER BIT AND ONE SHIFT PER BIT -- the clock is
+              decoupled from the shift because `l_clkpin` is written in the
+              `OP_SHIFT` arm and nowhere else, so an `OP_LEVEL` aimed at SCL
+              moves the clock without consuming a payload bit.
+      ACK     SCL low, `OP_SHIFTIN(SDA)` RELEASES SDA so the peer can pull it,
+              SCL high (the acknowledge is now on the wire), SCL low.
+      STOP    SDA low, SCL high, then `OP_STOP(SDA, 1)` releases SDA so it
+              RISES while SCL is high.
+
+    ⚠ THE FIRST TRANSACTION CARRIES ADDRESS 0x00 AND IS EXPECTED TO. `l_tx`
+    resets to 0 and the host byte loads only at the end of eight shifts, so the
+    first byte out of any lane is the reset byte -- `tb_tx` asserts exactly
+    that. ⭐ The host pattern is therefore chosen so that EVERY LATER
+    transaction is valid: with a 4-byte cycle of [data, addr, data, addr] the
+    loop emits (0x00, data), then (addr, data), (addr, data), ... so from the
+    second transaction on the wire carries a well-formed write.
+
+    ⚠ OPEN-DRAIN IS WHAT MAKES THIS LEGAL AT ALL. Both pins are on `uio`,
+    declared `MODE_OD`, so a 1 is a RELEASE and the peer may pull low at the
+    same time -- which is what an ACK is. A push-pull lane here would fight the
+    peer on every acknowledge.
+    """
+    prog, headers = [], []
+    off = ACT_BASE
+    base = off
+    seq = []
+    seq.append(act(OP_START, sda, 0, d))        # SDA low, SCL still high = S
+    seq.append(act(OP_LEVEL, scl, 0, d))        # SCL low
+    for _byte in range(2):                      # device address, then data
+        for _b in range(8):
+            seq.append(act(OP_SHIFT, sda, 0, d, count=7, q=0))
+            seq.append(act(OP_LEVEL, scl, 1, d))
+        seq.append(act(OP_LEVEL, scl, 0, d))    # SCL low before releasing SDA
+        seq.append(act(OP_SHIFTIN, sda, 0, d, count=8))   # release + sample
+        seq.append(act(OP_LEVEL, scl, 1, d))    # SCL high: the ACK is on air
+        seq.append(act(OP_LEVEL, scl, 0, d))    # SCL low
+    seq.append(act(OP_LEVEL, sda, 0, d))        # SDA low with SCL low
+    seq.append(act(OP_LEVEL, scl, 1, d))        # SCL high
+    seq.append(act(OP_STOP, sda, 1, d))         # SDA released = P
+    seq.append(act(OP_REARM, 0, 1, d))
+    prog += seq
+    off += len(seq) * ACT_BYTES
+    lp = off
+    prog.append(act(OP_REARM, 0, 0, 500))
+    headers.append(hdr(sda, scl, 0, d, 2, 2 * d, 3 * d, base))
+    for n in range(1, N_LANES):
+        headers.append(hdr(4, 4, 0, 500, 2, 200, 240, lp))
+    img = b"".join(headers) + b"".join(prog)
+    return img
+
+
 def build_rxfast(d: int = 24):
     """THE RX-DROP MUST-FIRE: complete a received byte faster than the serial
     link can carry one away.
@@ -639,8 +707,10 @@ def main() -> int:
              "tx_badclk_image.hex"),
             (["--half", "24"], "two half-duplex lanes: TX then RX on one lane",
              "half_image.hex"),
-            (["--rxfast", "24"], "RX faster than the 48-cycle payload slot",
+            (["--rxfast", "24"], "RX faster than the payload slot",
              "rxfast_image.hex"),
+            (["--i2cframe", "62"], "a full I2C write: S | addr | A | data | A | P",
+             "i2cframe_image.hex"),
         ]
         import hashlib
         import subprocess
@@ -791,6 +861,17 @@ def main() -> int:
             for b in img:
                 fh.write("%02x\n" % b)
         print("five-lane image %s, %d bytes -> %s" % (delays, len(img), out))
+        return 0
+    if "--i2cframe" in sys.argv:
+        k = sys.argv.index("--i2cframe")
+        dd = int(sys.argv[k + 1]) if len(sys.argv) > k + 1 else 62
+        img = build_i2cframe(dd)
+        out = os.path.join(here, "i2cframe_image.hex")
+        with open(out, "w", encoding="ascii") as fh:
+            for b in img:
+                fh.write("%02x\n" % b)
+        print("i2c frame image d=%d, %d bytes -> %s"
+              % (dd, len(img), out))
         return 0
     if "--rxfast" in sys.argv:
         k = sys.argv.index("--rxfast")

@@ -67,12 +67,29 @@ module fram_i2c #(
 
   // ---- block A owns these ---------------------------------------------
   reg          bus_active;
+  // A START COUNTER, BECAUSE `bus_active` ALONE IS INVISIBLE ACROSS A
+  // STOP-THEN-START PAIR. Both state blocks below latch `bus_active` on an SCL
+  // edge and detect a fresh START as "it was 0 and now it is 1". But a STOP and
+  // the next START both happen while SCL is HIGH -- that is what the conditions
+  // ARE -- so between two SCL edges the flag goes 1 -> 0 -> 1 and each block
+  // samples 1 then 1. The restart is missed, and a device that had gone to
+  // P_IDLE on an address that was not its own STAYS THERE FOR EVER.
+  // THAT IS WHAT THIS MODEL DID, and it mattered the moment anything sent it a
+  // decodable byte: our program's first transaction carries the reset byte 0x00
+  // (an address this device correctly refuses), so the peer went idle and never
+  // acknowledged any of the hundreds of valid transactions that followed.
+  // A real part has an asynchronous START/STOP detector that resets its state
+  // machine immediately. A monotonic counter is the same information in a form
+  // an edge-sampled block can read without a second driver on any signal --
+  // which the header's one-driver rule requires.
+  reg [7:0]    start_cnt;
 
   // ---- block B (posedge scl) owns these -------------------------------
   reg [3:0]    bitn;
   reg [7:0]    shin;
   reg          byte_done;
   reg          prev_active_b;
+  reg [7:0]    seen_b;
 
   // ---- block C (negedge scl) owns these -------------------------------
   reg [2:0]    phase;
@@ -83,6 +100,7 @@ module fram_i2c #(
   reg          data_low;        // pulling SDA low for a data 0
   reg          selected;
   reg          prev_active_c;
+  reg [7:0]    seen_c;
   reg [15:0]   stretch_n;
 
   // ⭐ THE EXPORTED ENABLES. Two sources of pull-low on SDA -- the ACK and a
@@ -99,8 +117,12 @@ module fram_i2c #(
   // the defect Verilator caught in the SPI peer.
   always @(sda_in) begin
     if (scl_in) begin
-      if (!sda_in) bus_active <= 1'b1;    // START: SDA falls while SCL high
-      else         bus_active <= 1'b0;    // STOP : SDA rises while SCL high
+      if (!sda_in) begin
+        bus_active <= 1'b1;               // START: SDA falls while SCL high
+        start_cnt  <= start_cnt + 8'd1;   // ... and it is COUNTED
+      end else begin
+        bus_active <= 1'b0;               // STOP : SDA rises while SCL high
+      end
     end
   end
 
@@ -115,10 +137,30 @@ module fram_i2c #(
       bitn      <= 4'd7;
       shin      <= 8'h00;
       byte_done <= 1'b0;
-    end else if (!prev_active_b) begin    // a fresh START
-      bitn      <= 4'd7;
+      seen_b    <= start_cnt;
+    end else if (start_cnt != seen_b) begin   // a fresh START, however brief
+      // THIS RISE ALREADY CARRIES BIT 7, so only SEVEN more are owed and the
+      // counter starts at 6. It was 7, which made a byte complete on the
+      // NINTH rise: `shin` then held samples 2..9 -- the byte shifted left by
+      // one with the released ACK bit appended -- so a correct device address
+      // of 0xA0 was decoded as 0x41 and NEVER MATCHED.
+      // HOW IT SURVIVED: the P_DEV address comparison had never once fired.
+      // Nothing in this project had ever sent this model a decodable byte --
+      // `corpus.py`'s I2C program used two SHIFTs per bit, so it consumed two
+      // payload bits per protocol bit and never put a coherent byte on the
+      // wire, and the trace gate compares the two SIMULATORS against each
+      // other rather than the bus against a standard. An unexercised branch
+      // is not a correct one.
+      // ADJUDICATED BY SIGROK, NOT BY ME. The foreign `i2c` decoder reads
+      // the same waveform as `Start / Address write: 50 / NACK / Data write:
+      // 5A / Stop` -- eight address bits with the ACK slot in the right
+      // place -- so the WIRE is well formed and this model was counting
+      // wrong. Without a foreign authority this would have been my framing
+      // against my model, with no way to tell which was at fault.
+      bitn      <= 4'd6;
       shin      <= {7'h00, sda_in};
       byte_done <= 1'b0;
+      seen_b    <= start_cnt;
     end else if (bitn == 4'd8) begin
       byte_done <= 1'b0;                  // the ACK bit slot: sample nothing
       bitn      <= 4'd7;
@@ -140,7 +182,8 @@ module fram_i2c #(
       data_low  <= 1'b0;
       selected  <= 1'b0;
       shout     <= 8'h00;
-    end else if (!prev_active_c) begin
+      seen_c    <= start_cnt;
+    end else if (start_cnt != seen_c) begin
       // ⭐ A repeated START lands here: the phase returns to P_DEV but `addr`
       // is DELIBERATELY KEPT. That is the part's documented read sequence --
       // "specifying the address in the same way as for a write, and then
@@ -149,6 +192,7 @@ module fram_i2c #(
       phase    <= P_DEV;
       ack_low  <= 1'b0;
       data_low <= 1'b0;
+      seen_c   <= start_cnt;
     end else if (byte_done) begin
       case (phase)
         P_DEV: begin
@@ -210,6 +254,7 @@ module fram_i2c #(
   initial begin
     bus_active = 1'b0; bitn = 4'd7; shin = 8'h00; byte_done = 1'b0;
     prev_active_b = 1'b0; prev_active_c = 1'b0;
+    start_cnt = 8'd0; seen_b = 8'd0; seen_c = 8'd0;
     phase = P_DEV; rw = 1'b0; shout = 8'h00;
     ack_low = 1'b0; data_low = 1'b0; selected = 1'b0; stretch_n = 16'd0;
   end

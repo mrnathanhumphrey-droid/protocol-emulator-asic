@@ -122,13 +122,25 @@ def suite():
             extra_half = ["+IMG=test/half_image.hex",
                           "+NBYTES=%d" % len([w for w in fh.read().split() if w]),
                           "+NCYC=40000"]
+    extra_i2c = []
+    i2p = os.path.join(ROOT, "test", "i2cframe_image.hex")
+    if os.path.isfile(i2p):
+        with open(i2p, encoding="ascii") as fh:
+            extra_i2c = ["+IMG=test/i2cframe_image.hex",
+                         "+NBYTES=%d" % len([w for w in fh.read().split() if w]),
+                         "+NCYC=40000",
+                         # ⛔ THE DUMP GOES TO A SCRATCH NAME inside the
+                         # quarantine, not to the repo: the clean room's whole
+                         # point is that it does not write where the tree is.
+                         "+DUMP=probe_cleanroom_i2c.bin"]
     for name, top, srcs, pargs in (
         ("tb_smoke", "tb_smoke", ["test/tb_smoke.v"], []),
         ("tb_edge", "tb_edge", ["test/tb_edge.v"], []),
         ("tb_tx", "tb_tx", ["test/tb_tx.v"], extra_tx),
         ("tb_half", "tb_half", ["test/tb_half.v"], extra_half),
+        ("tb_i2c", "tb_i2c", ["test/tb_i2c.v", "test/fram_i2c.v"], extra_i2c),
     ):
-        if name in ("tb_tx", "tb_half") and not pargs:
+        if name in ("tb_tx", "tb_half", "tb_i2c") and not pargs:
             out.append((name, False, "its image is absent"))
             continue
         vvp = os.path.join(sp, name + ".vvp")

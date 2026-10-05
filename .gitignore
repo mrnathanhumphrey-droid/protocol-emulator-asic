@@ -76,4 +76,5 @@ probe_*.json
 # /tmp -- so the JSON lands in `probe_nl/` inside the repo, where both sides
 # can reach it. A 10 MB generated netlist must never be committed.
 probe_*/
+probe_*.bin
 test/probe_*.vh
