@@ -45,6 +45,19 @@ command -v "$PY" >/dev/null 2>&1 || PY=python3
 #     PYRTA_SRC -- and those gates are RED by design without it rather than
 #     falling back to our own recurrence. `model/a2/run_a2.py` is their
 #     harness, by hand at each checkpoint.
+#   * `model/gate_flow_netlist.py` -- the R2 FLOW CROSS-CHECK. It reads the
+#     HARDENING FLOW's post-synthesis netlist, which costs a ~3.5-hour run, so
+#     it cannot be a per-push gate. It runs after each harden, on the
+#     downloaded artefact, and its result is recorded with that harden's
+#     per-job report:
+#       $env:PE_FLOW_NETLIST = '<run>\logs\runs\wokwi\06-yosys-synthesis\tt_um_protocol_emulator.nl.v.json'
+#       $env:PE_NETLIST_JSON = 'D:\ProtocolEmulator\probe_nl\ci_netlist.json'
+#       python model/gate_flow_netlist.py
+#     ⛔ IT IS A SECOND AUTHORITY, NOT A REPLACEMENT: `gate_reset_audit` above
+#     still gates every push on the netlist built in seconds. ⛔ AND IT IS NOT
+#     CONDITIONALLY WIRED INTO THIS LIST -- a gate that skips itself when an
+#     env var is unset is the exact shape this project keeps finding bugs in,
+#     so the exclusion is declared here and the invocation is explicit.
 GATES=(
   model/gate_ruling_audit.py
   model/gate_one_encoder.py

@@ -207,6 +207,29 @@ SITES = [
          "the 37 that name real behaviour. The ruling's named subjects "
          "(branches, FSM states, opcode arms, peer branches) are all "
          "line/branch points, and those ARE adjudicated individually"),
+
+    Site("model/gate_flow_netlist.py", "EXPECT_TIED", RECORD,
+         "tied-reset (unreset) flop bits per declared register group in the "
+         "HARDENING FLOW's PDK-mapped netlist -- 2048 + 64 + 24 + 8 + 8 + 1 "
+         "= 2153, which must equal the local audit's unreset count",
+         "model/gate_flow_netlist.py",
+         "set PE_FLOW_NETLIST to a harden's "
+         "logs/runs/wokwi/06-yosys-synthesis/"
+         "tt_um_protocol_emulator.nl.v.json and PE_NETLIST_JSON to the local "
+         "netlist, then run the gate: it PRINTS the per-group tied counts it "
+         "measured beside the expected ones, so the number is remade on "
+         "every run rather than merely compared",
+         "⛔ MEASURED FROM THE ARTEFACT, and it is a PARTITION rather than a "
+         "list of interesting groups: the gate requires these counts AND "
+         "requires them to account for every tied bit with no residue. "
+         "Checking only the four groups the ruling named would let one extra "
+         "tied flop land anywhere else and still pass, which is exactly the "
+         "must-fire. ⚠ THE TOTAL IS NOT STORED HERE -- it is read from the "
+         "local netlist at run time, because an expectation recorded on both "
+         "sides passes while both sides drift together. ⭐ The `u_eng.fix: 1` "
+         "entry is the `pslot` alias by the concatenation identity "
+         "fix = {pl, pslot}; `pslot` does NOT survive into the mapped "
+         "netlist as a name, so a check spelling it would pass vacuously"),
 ]
 
 # ⛔ Collections that carry numbers but are SPECIFICATIONS, not measurements:
