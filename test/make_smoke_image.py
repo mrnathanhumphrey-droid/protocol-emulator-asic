@@ -253,6 +253,53 @@ def build_cfgerr(d: int = 20):
     return b"".join(headers) + b"".join(prog)
 
 
+def build_pinnone(d: int = 20):
+    """A LANE ON THE RESERVED NON-DRIVING INDEX, shifting (ruling (a) item 1).
+
+    ⛔⛔ WHY IT IS A SEPARATE IMAGE FROM `cfgerr_image`. `PINW = 4` addresses
+    0..15 while `N_PINS = 12`, so `PIN_NONE = 15` is a legal header value that
+    names NO PIN -- and the engine must handle it in three places the coverage
+    sweep found at zero:
+
+        pe_engine.v:1158  the header's `pin < N_PINS` guard on the `pin_pp`
+                          write. An unguarded write here is the out-of-range
+                          `pin_out[12]` class this project has paid for once.
+        pe_engine.v:1352  `OP_SHIFT: if (pin_real)` -- the shift must move no
+                          pin, and its CLOCK write is the half that was once
+                          unguarded.
+        pe_engine.v:1446  `OP_SHIFTIN, OP_READBIT: if (pin_real)`.
+
+    ⚠ `build_noop` already puts `PIN_NONE` on an ACTION, which is why the
+    `OP_LEVEL/START/STOP` arm at 1339 is covered and these three are not: no
+    image had ever put it on a SHIFT, a SHIFTIN, or in a HEADER.
+
+    ⭐ MODE IS PUSH-PULL ON PURPOSE. At `mode = 0` the 1.6s check fires first
+    (`pin >= N_UIO`, since 15 >= 8) and `config_err` halts every lane, so the
+    dispatch arms would never be reached -- the refusal would mask the very
+    paths this image exists to execute. That is a real ordering property of the
+    loader, not a quirk of the test.
+    """
+    prog, headers = [], []
+    off = ACT_BASE
+    l0 = off
+    for _i in range(4):
+        prog.append(act(OP_SHIFT, PIN_NONE, 0, d, count=7, q=0))
+        off += ACT_BYTES
+    prog.append(act(OP_SHIFTIN, PIN_NONE, 0, d, count=8))
+    off += ACT_BYTES
+    prog.append(act(OP_READBIT, PIN_NONE, 0, d))
+    off += ACT_BYTES
+    prog.append(act(OP_REARM, 0, 1, d))
+    off += ACT_BYTES
+    lp = off
+    prog.append(act(OP_REARM, 0, 0, 500))
+    # the violating lane: header pin AND clock pin both on the reserved index
+    headers.append(hdr(PIN_NONE, PIN_NONE, 1, d, 2, 2 * d, 3 * d, l0))
+    for n in range(1, N_LANES):
+        headers.append(hdr(n, n, 0, 500, 2, 200, 240, lp))
+    return b"".join(headers) + b"".join(prog)
+
+
 def build_census(d: int = 25):
     """A program that executes ALL EIGHT opcodes on the RTL.
 
@@ -696,6 +743,11 @@ def main() -> int:
             ([], "default smoke", "smoke_image.hex"),
             (["--census"], "all 8 opcodes", "census_image.hex"),
             (["--cfgerr"], "1.6s violation", "cfgerr_image.hex"),
+            # ⭐ the reserved non-driving index, on a SHIFT and in a HEADER --
+            # three arms the coverage sweep found at zero. `build_noop` only
+            # ever put PIN_NONE on an OP_LEVEL action.
+            (["--pinnone"], "lane on the reserved index, shifting",
+             "pinnone_image.hex"),
             (["--five"] + [str(x) for x in FIVE_STRESS],
              "5-lane refill load (the run_mutants stress set)",
              "five_image.hex"),
@@ -825,6 +877,15 @@ def main() -> int:
             for b in img:
                 fh.write("%02x\n" % b)
         print("edge image (timeout=%d), %d bytes -> %s" % (to, len(img), out))
+        return 0
+    if "--pinnone" in sys.argv:
+        img = build_pinnone()
+        out = os.path.join(here, "pinnone_image.hex")
+        with open(out, "w", encoding="ascii") as fh:
+            for b in img:
+                fh.write("%02x" % b + chr(10))
+        print("pinnone image (lane on the reserved index, shifting), "
+              "%d bytes -> %s" % (len(img), out))
         return 0
     if "--cfgerr" in sys.argv:
         img = build_cfgerr()

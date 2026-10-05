@@ -72,6 +72,25 @@ TOOL_DIVERGENT = "TOOL_DIVERGENT"
 # ⛔ A point here that is now COVERED also fails -- see `check_stale`.
 # ---------------------------------------------------------------------------
 CLASSIFIED = {
+    # ⭐⭐ RETIRED BY ruling (a) item 1, and TWO OF THEM WERE NEVER DEBT.
+    #   1143, 1145  the open-drain `pin >= N_UIO` refusal. ⛔ I REPORTED THESE
+    #               AS "never fired" AND THAT WAS WRONG: `cfgerr_image.hex` is
+    #               `hdr(UO0, UO0, 0, ...)` and `test/test.py` has run it as
+    #               `test_config_error_refuses_to_run` all along. They read as
+    #               uncovered because the cocotb toplevel `tb.v` is the ONE
+    #               bench `benchset.py` excludes. `tb_pinrange +MODE=0` now
+    #               runs that image where the sweep can see it, and asserts
+    #               both the flag AND that nothing was emitted.
+    #   1158, 1352, 1446  the reserved index PIN_NONE on a HEADER, an OP_SHIFT
+    #               and an OP_SHIFTIN. These WERE genuine: `build_noop` only
+    #               ever put PIN_NONE on an `OP_LEVEL` action, which is why
+    #               1339's arm was already covered and these three were not.
+    #               `pinnone_image.hex` + `tb_pinrange +MODE=1` reach all three.
+    # ⚠ AND THAT ARM FOUND A NEW DEFECT, recorded in the bench header and the
+    # spec doc: `pin_in[a_pin]` is read UNGUARDED, so SHIFTIN on PIN_NONE
+    # samples out of range and puts X on `ser_d`. Not a coverage point, so it
+    # is not in this table -- it is an owed RULING.
+
     # ---- the two tool-divergent points -----------------------------------
     ("src/pe_engine.v", 651, "v_branch", "if"): (
         TOOL_DIVERGENT,
@@ -105,28 +124,6 @@ CLASSIFIED = {
         "the arm of a condition that is true on every entry. ⭐ Checked "
         "structurally by `check_h_idle_clears` below rather than asserted, "
         "because the claim is about two specific lines and would rot."),
-    ("src/pe_engine.v", 1143, "v_branch", "if"): (
-        OWED,
-        "⛔ THE OTHER HALF OF THE 1.6s LOAD-TIME REFUSAL, AND IT HAS NEVER "
-        "FIRED. An OPEN-DRAIN lane whose DATA pin index is outside the uio "
-        "bank cannot release, so the loader must refuse it -- and the sibling "
-        "guard, `clkpin == pin` at 1390, IS exercised by `tb_tx +BADCLK=1`. "
-        "This one is not. ⇒ The test: an image whose header names mode=OD "
-        "with `pin >= N_UIO`, built by hand as `tx_badclk_image.hex` was, "
-        "because `pe_asm` refuses the program statically and cannot emit it."),
-    ("src/pe_engine.v", 1145, "v_branch", "if"): (
-        OWED,
-        "The same refusal on the CLOCK pin index, and the same missing test. "
-        "⚠ Both arms matter separately: the guard was written over a defect "
-        "where only the data pin was checked, so a one-pin test would leave "
-        "exactly the asymmetry D2 was."),
-    ("src/pe_engine.v", 1158, "v_branch", "else"): (
-        OWED,
-        "A header naming a pin at or beyond `N_PINS` -- the RESERVED "
-        "non-driving index. The write is range-guarded and this is the guard's "
-        "refusing arm. ⇒ One hand-built image reaches this and 1352 and 1446 "
-        "together, since all three are the same reserved index seen from the "
-        "load, the SHIFT and the SHIFTIN path."),
     ("src/pe_engine.v", 1246, "v_line", "case"): (
         UNREACHABLE,
         "The prefetch FSM's defensive `default`. `pst` is declared `[2:0]` and "
@@ -135,15 +132,6 @@ CLASSIFIED = {
         "⭐ Verified mechanically by `check_full_case` below, which reads the "
         "encodings out of the source -- a hand-counted enumeration is the sort "
         "of claim that survives the addition of a fifth state."),
-    ("src/pe_engine.v", 1352, "v_branch", "else"): (
-        OWED,
-        "`OP_SHIFT` dispatched on a lane whose pin is the reserved "
-        "non-driving index (`pin_real` false), so the opcode must move no "
-        "pin. Reached by the same hand-built image as 1158."),
-    ("src/pe_engine.v", 1446, "v_branch", "else"): (
-        OWED,
-        "`OP_SHIFTIN`/`OP_READBIT` on the reserved non-driving index. Same "
-        "image as 1158 and 1352."),
     ("src/pe_engine.v", 1452, "v_line", "case"): (
         UNREACHABLE,
         "The opcode `case`'s `default`. The opcode field is 3 bits and ALL "

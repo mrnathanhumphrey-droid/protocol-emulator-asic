@@ -57,7 +57,7 @@ EXCLUDED = {
 # ---------------------------------------------------------------------------
 #: benches whose `+NBYTES` must be supplied (they refuse to start without it)
 NEEDS_NBYTES = {"tb_tx", "tb_half", "tb_i2c", "tb_csat", "tb_jlane", "tb_status",
-                "tb_rxbw", "tb_trace", "tb_witness"}
+                "tb_rxbw", "tb_trace", "tb_witness", "tb_pinrange"}
 
 CONFIG = {
     # ⭐⭐ THE SPL = 1 ARM IS HERE BECAUSE COVERAGE ASKED FOR IT. The sweep's
@@ -127,6 +127,22 @@ CONFIG = {
                              "+MODE=0"]),
                  ("overrun", ["+IMG=test/tx_image.hex", "+NCYC=20000",
                               "+MODE=1"])],
+    },
+    # ⭐⭐ PINS OUTSIDE THE REAL RANGE (ruling (a) item 1). `PINW = 4` addresses
+    # 0..15 while `N_PINS = 12`, and the two out-of-range cases are different:
+    # an OPEN-DRAIN lane on a `uo_out` pin must be REFUSED (1143/1145), while
+    # the RESERVED index PIN_NONE = 15 is LEGAL and must simply drive nothing
+    # (1158, 1352, 1446).
+    # ⛔ THE `refuse` ARM IS ALSO A SWEEP-BLIND-SPOT FIX, and a correction:
+    # `cfgerr_image.hex` has been run by the cocotb suite all along, but `tb.v`
+    # is the one bench this file excludes, so 1143/1145 read as "never tested".
+    # A sweep with a blind spot keeps manufacturing false gaps.
+    "tb_pinrange": {
+        "srcs": [],
+        "arms": [("refuse", ["+IMG=test/cfgerr_image.hex", "+NCYC=8000",
+                             "+MODE=0"]),
+                 ("reserved", ["+IMG=test/pinnone_image.hex", "+NCYC=8000",
+                               "+MODE=1"])],
     },
     "tb_i2c": {
         "srcs": ["test/fram_i2c.v"],

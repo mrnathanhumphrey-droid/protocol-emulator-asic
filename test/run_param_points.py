@@ -157,6 +157,14 @@ BENCHES = [
     ("tb_status", "test/tb_status.v",
      ["+IMG=test/tx_image.hex", "+NBYTES=87", "+NCYC=20000", "+MODE=0"],
      "tb_status: PASS", {2: "ok", 1: "ok"}),
+
+    # ⭐ THE OUT-OF-RANGE PIN BENCH, swept on the RESERVED-INDEX arm. That is
+    # the arm that DISPATCHES -- the refusal arm never gets past the loader --
+    # so it is the one where an action-slot depth could reach the pin-write
+    # guards it is checking.
+    ("tb_pinrange", "test/tb_pinrange.v",
+     ["+IMG=test/pinnone_image.hex", "+NBYTES=54", "+NCYC=8000", "+MODE=1"],
+     "tb_pinrange: PASS", {2: "ok", 1: "ok"}),
 ]
 
 

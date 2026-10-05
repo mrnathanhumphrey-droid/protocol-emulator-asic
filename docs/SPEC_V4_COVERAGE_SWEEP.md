@@ -42,6 +42,59 @@ never completed**, and the two are easy to conflate.
 
 ---
 
+## 1a. Ruling (a) item 1, closed — and one correction, one new defect
+
+**Closed:** 7 points, uncovered 37 → **30**, OWED 32 → **25**.
+
+| point | how |
+|---|---|
+| `pe_engine.v:1627` `lane_underrun` SET | `tb_status +MODE=0` starves the TX lanes; the flag sets on lanes 0 and 1 **and no other**, lane still **live** |
+| `project.v:412` `tx_full_sticky` SET | `tb_status +MODE=1` overruns queue 2; `tx_cnt[2]` shown full first, **both stored bytes survive** |
+| `pe_engine.v:1158, 1352, 1446` the reserved index | `pinnone_image.hex` + `tb_pinrange +MODE=1` — header, `OP_SHIFT` and `OP_SHIFTIN` all on `PIN_NONE` |
+| `pe_engine.v:1143, 1145` the OD refusal | `tb_pinrange +MODE=0` — **see the correction below** |
+
+### ⛔ CORRECTION: the open-drain refusal was never untested
+
+I reported *"half the 1.6s load-time refusal has never fired."* **Wrong.**
+`cfgerr_image.hex` is `hdr(UO0, UO0, 0, ...)` — open-drain with **both** pins at
+`UO0 = 8 ≥ N_UIO = 8` — and `test/test.py` has run it as
+`test_config_error_refuses_to_run` all along. Measured directly: under that
+image, 1143's and 1145's taken arms each fire once.
+
+They read as uncovered because **the cocotb toplevel `tb.v` is the one bench
+`benchset.py` excludes** (no self-checking PASS line for a `--binary` run).
+⇒ This is the **second** false gap from that blind spot — §5 item 1 of this
+very document warns about it. A sweep with a declared exclusion keeps
+manufacturing false gaps unless the excluded bench's *stimulus* is brought
+somewhere measurable, which `tb_pinrange +MODE=0` now does (with a Verilog-side
+assertion, so the refusal no longer rests on cocotb alone).
+
+### ⛔⛔ NEW DEFECT: `pin_in[a_pin]` is read out of range, and the X leaves the chip
+
+The reserved-index arm puts **X on `ser_d` (`uo_out[4]`) for 112 cycles** —
+exactly its number of `OP_SHIFT` dispatches.
+
+`pin_in[a_pin]` is read with **no `pin_real` guard** at `pe_engine.v:745`,
+`:1502` and `:1524`. With `a_pin = PIN_NONE = 15` against a `[11:0]` vector,
+`OP_SHIFTIN`/`OP_READBIT` samples out of range; the X lands in `l_rx`, then
+`rx_data`, then the serial readback, and leaves the chip while `ser_v` is high —
+so a host would sample it.
+
+⭐ **It is the mirror of a defect already fixed.** The WRITE side was guarded
+after the `pin_out[12]` incident — `pin_real` at 1352, `clk_real` at 1428, the
+`pin_pp` guard at 1158 — and the SAMPLE side was not. *A fix on one axis
+repeats the error on a parallel one.*
+
+⚠ **Controlled, so it is not a property of the check:** `smoke_image`,
+`five_image` and `cfgerr_image` all give **zero** serial X; only the
+reserved-index program produces it. And the X check is two-state-vacuous under
+Verilator, so it is evidence only in an iverilog run.
+
+⇒ **OWED RULING.** Sample a defined 0 on a non-real pin, or refuse a SHIFTIN
+that names the reserved index? The second would be wrong for an SPI target,
+which names `PIN_NONE` as its *clock* deliberately — but the data pin is a
+different question. Not fixed unilaterally.
+
 ## 2. What the sweep is
 
 | | |
