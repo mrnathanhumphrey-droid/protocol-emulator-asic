@@ -737,6 +737,19 @@ def main() -> int:
         print("      a guard that passes because of what it guards.")
         return 1
     print("  records: %d   distinct points: %d" % (n, len(agg)))
+    # ⛔ THE TOOL THAT PRODUCED THE DATA, PRINTED WHERE THE VERDICT IS READ.
+    # The toggle ceilings are exact point counts and a Verilator release can
+    # emit a different number of them, so a ceiling breach caused by a version
+    # change must not be indistinguishable from a regression.
+    env = os.path.join(os.path.dirname(DAT), "sweep_env.txt")
+    if os.path.isfile(env):
+        with open(env, encoding="utf-8", errors="replace") as fh:
+            for ln in fh.read().strip().splitlines():
+                print("  %s" % ln.strip())
+    else:
+        print("  ⚠ no sweep_env.txt beside the data -- the tool version that")
+        print("    produced it is unrecorded, so a toggle-ceiling breach")
+        print("    cannot be told from a version difference.")
     rc = 0
     rc |= check_points(agg)
     rc |= check_stale(agg)

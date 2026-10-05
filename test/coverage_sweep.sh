@@ -177,6 +177,17 @@ rm -rf "$OUT/ann"
 verilator_coverage --annotate "$OUT/ann" --annotate-all --annotate-points \
     "$OUT/merged.dat" > "$OUT/ann.log" 2>&1
 grep -iE 'total coverage' "$OUT/ann.log" | sed 's/^/  /'
+# ⛔ THE TOOL VERSION TRAVELS WITH THE MEASUREMENT. The toggle ceilings in
+# `gate_coverage.py` are EXACT COUNTS of emitted points, and how many points a
+# file emits is a property of the Verilator release -- this box runs 5.032
+# while the CI runner installs 5.020. A ceiling breached by a version change
+# and a ceiling breached by a regression look identical without this line.
+{
+  verilator --version
+  echo "arms $npass ok / $NARM"
+  echo "reset +verilator+rand+reset+0"
+} > "$OUT/sweep_env.txt"
+echo "  tool    : $(verilator --version 2>&1)"
 echo "  merged  : $OUT/merged.dat  $OUT/merged.info  $OUT/ann/"
 
 # ⛔ THE SWEEP'S OWN EXIT CODE REPORTS THE MEASUREMENT, not the verdict. The

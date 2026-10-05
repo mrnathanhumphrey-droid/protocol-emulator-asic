@@ -256,6 +256,66 @@ def plusargs_read(bench: str):
     return names
 
 
+def base_images():
+    """Build the tracked-and-generated image set the arms load.
+
+    ⛔⛔ WHY THIS IS HERE AT ALL, FROM A RED CI RUN. The sweep was green on
+    this box and failed in CI with "image test/edge_image.hex is not on disk"
+    for three arms. `edge_image.hex`, `five_image.hex` and `stress_image.hex`
+    are GENERATED, not tracked, so they exist here only because the generators
+    have been run -- and a fresh clone has none of them. ⚠ The local tree was
+    carrying state the repository does not, which is the same shape as
+    reporting a green from a tree that no longer exists.
+
+    ⭐ THE GENERATOR LIST IS IMPORTED FROM `clean_room`, not re-typed. It
+    already owns that declaration (`make_smoke_image.py --all`, then
+    `corpus.py`), and a second copy here is the drift this file exists to
+    prevent -- the clean room would then be verifying a recipe set the sweep
+    does not use.
+    """
+    import subprocess
+    # ⛔⛔ ONLY WHEN SOMETHING IS ACTUALLY MISSING, and this is not an
+    # optimisation. `make_smoke_image.py --all` REWRITES the tracked
+    # `test/artefacts.sha256` -- it pins every artefact's hash, which is its
+    # job -- so running it unconditionally meant the coverage sweep modified a
+    # tracked manifest on every single run. One of those runs left the five
+    # `corpus_*.hex` hashes pointing at content that was not on disk.
+    # ⇒ A fresh clone has no generated images and regenerates (and re-pins,
+    # which is correct there -- a hash that then DIFFERS is exactly the finding
+    # the clean room exists for). A working tree that already has them is left
+    # alone, and the sweep touches nothing tracked.
+    want = set()
+    for top, cfg in CONFIG.items():
+        arms = cfg["arms"]
+        if arms == "FROM_CORPUS":
+            continue
+        for a in arms:
+            for p in a[1]:
+                if p.startswith("+IMG="):
+                    want.add(p.split("=", 1)[1])
+    missing = [w for w in sorted(want)
+               if not os.path.isfile(os.path.join(ROOT, w))
+               and "probe_cov_" not in w]
+    if not missing:
+        return []
+    sys.path.insert(0, HERE)
+    try:
+        import clean_room
+        gens = clean_room.GENERATORS
+    except Exception as exc:
+        return ["clean_room.GENERATORS did not import (%s) -- the sweep has "
+                "no image recipes and must not improvise a copy" % exc]
+    probs = []
+    for cmd in gens:
+        r = subprocess.run(cmd, capture_output=True, text=True, cwd=ROOT,
+                           encoding="utf-8", errors="replace")
+        if r.returncode != 0:
+            probs.append("generator %s failed: %s"
+                         % (os.path.basename(str(cmd[-1])),
+                            (r.stdout + r.stderr).strip()[-200:]))
+    return probs
+
+
 def generate(cfg, top):
     """Build a bench's purpose-made probe image, via the gates' own builder.
 
@@ -288,6 +348,7 @@ def plan():
     stops covering something.
     """
     recs, probs = [], []
+    probs.extend(base_images())
     found = discovered()
     for name in found:
         top = name[:-2]
