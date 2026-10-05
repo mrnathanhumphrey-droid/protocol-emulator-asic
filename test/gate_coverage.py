@@ -307,6 +307,77 @@ TOGGLE_CEILING = {
     "test/fram_spi.v": 27,
 }
 
+#: ⛔⛔ EVERY ANCHOR CARRIES ITS SOURCE TEXT (Wilson's ruling). A coverage
+#: point is identified by FILE AND LINE, so an edit above it silently
+#: re-points the anchor at a different construct -- and that is not
+#: hypothetical: the `rx_bit` guard shifted `pe_engine.v` by +24, and when I
+#: re-anchored one entry I GREPPED FOR A STATEMENT I REMEMBERED instead of
+#: applying the measured shift. It landed on 965 (`l_live[pi] && want_fetch`,
+#: inside the lane loop) when the construct was at 966 (`hdr_done &&
+#: !prime_unp`, after it). Both lines exist, both are branch points, and the
+#: reason text then described the wrong statement. CI caught it; nothing
+#: local did.
+#: ⇒ The gate reads the anchored line back and requires it to MATCH, so
+#: "copy, do not recall" is mechanised instead of remembered.
+ANCHOR_TEXT = {
+    ("src/pe_engine.v", 651):
+        "if (ready[k] && (!winner_v || edf_key_off[k] < best)) begin",
+    ("src/pe_engine.v", 966):
+        "if (hdr_done && !prime_unp) primed_q <= 1'b1;",
+    ("src/pe_engine.v", 1134):
+        "H_IDLE: if (!hdr_done) begin",
+    ("src/pe_engine.v", 1270):
+        "default: pst <= P_SCAN;",
+    ("src/pe_engine.v", 1476):
+        "default: ;",
+    ("src/pe_engine.v", 1675):
+        "default: st <= ST_IDLE;",
+    ("src/project.v", 401):
+        "if (do_push && do_pop && (q_sel == tx_tag)) begin",
+    ("src/project.v", 557):
+        "if (RX_SERIAL != 0) begin",
+    ("test/fram_i2c.v", 208):
+        "if (shin[0]) shout <= mem[addr];",
+    ("test/fram_i2c.v", 228):
+        "P_WDATA: begin",
+    ("test/fram_i2c.v", 235):
+        "if (STRETCH != 0) stretch_n <= STRETCH[15:0];",
+    ("test/fram_i2c.v", 239):
+        "if (selected && rw && phase == P_RDATA) begin",
+    ("test/fram_i2c.v", 251):
+        "if (stretch_n != 16'd0) stretch_n <= stretch_n - 16'd1;",
+    ("test/fram_spi.v", 113):
+        "if (cs_n) begin",
+    ("test/fram_spi.v", 126):
+        "OP_WREN: begin wel <= 1'b1; drive <= 1'b0; end",
+    ("test/fram_spi.v", 127):
+        "OP_WRDI: begin wel <= 1'b0; drive <= 1'b0; end",
+    ("test/fram_spi.v", 128):
+        "OP_RDSR: begin",
+    ("test/fram_spi.v", 133):
+        "OP_RDID: begin shout <= 8'h04; drive <= 1'b1; phase <= P_DATA; end",
+    ("test/fram_spi.v", 134):
+        "OP_READ, OP_WRITE: begin phase <= P_AHI; drive <= 1'b0; end",
+    ("test/fram_spi.v", 138):
+        "P_AHI: begin",
+    ("test/fram_spi.v", 146):
+        "P_ALO: begin",
+    ("test/fram_spi.v", 149):
+        "if (opcode == OP_READ) begin",
+    ("test/fram_spi.v", 154):
+        "P_DATA: begin",
+    ("test/fram_spi.v", 155):
+        "if (opcode == OP_WRITE) begin",
+    ("test/fram_spi.v", 160):
+        "if (wel) mem[addr] <= shin;",
+    ("test/fram_spi.v", 162):
+        "end else if (opcode == OP_READ) begin",
+    ("test/fram_spi.v", 167):
+        "default: ;",
+    ("test/fram_spi.v", 169):
+        "end else if (drive) begin",
+}
+
 _LINE = re.compile(r"^C '(.*)' (\d+)\s*$")
 
 
@@ -461,6 +532,74 @@ def check_stale(agg) -> int:
             rc = 1
     if not stale:
         print("    none -- every classified point is still uncovered")
+    return rc
+
+
+def check_anchors() -> int:
+    """Every classified anchor's line must still READ as the recorded text.
+
+    ⛔⛔ THIS IS THE MECHANISED FORM OF "COPY, DO NOT RECALL". A coverage point
+    is file-and-line, so an RTL edit above an anchor re-points it at a
+    different construct and the gate's own reason text then describes the wrong
+    statement -- which happened: the `rx_bit` guard shifted `pe_engine.v` by
+    +24 and one entry was re-anchored to 965 (`l_live[pi] && want_fetch`,
+    inside the lane loop) when the construct had moved to 966 (`hdr_done &&
+    !prime_unp`, after it). Both lines existed and both were branch points, so
+    nothing local objected; CI caught it as an UNCLASSIFIED point.
+
+⭐ PRICED WITH A REAL SHIFT, not only a synthetic text swap: inserting ONE
+    blank line into `pe_engine.v` makes this name every anchor, and the entry
+    for 966 then reports `found: if (l_live[pi] && want_fetch(...))` -- which
+    is EXACTLY the statement the mis-anchor had pointed at. The check
+    reproduces the slip it was built for.
+
+        ⚠ IT CANNOT CATCH EVERYTHING. If an edit moves an anchor onto a line whose
+    text happens to be identical -- two `default: ;` arms, say -- the text
+    matches and the anchor is still wrong. The `v_line`/`v_branch` kind and the
+    arm name narrow it, and the coverage data itself is the backstop (a drifted
+    anchor usually stops resolving at all). What this closes is the case where
+    a human re-anchors from memory.
+    """
+    rc = 0
+    print()
+    print("  --- anchors still read as recorded ---")
+    want = {(f, l) for (f, l, _k, _a) in CLASSIFIED}
+    missing = sorted(want - set(ANCHOR_TEXT))
+    for f, l in missing:
+        print("    *** NO RECORDED TEXT  %s line %d" % (f, l))
+        print("        A classified anchor with no source text cannot be")
+        print("        checked for drift. Add it to ANCHOR_TEXT.")
+        rc = 1
+    stale = sorted(set(ANCHOR_TEXT) - want)
+    for f, l in stale:
+        print("    *** TEXT FOR A POINT NOBODY CLASSIFIES  %s line %d" % (f, l))
+        rc = 1
+    src = {}
+    ok = 0
+    for (f, l), expect in sorted(ANCHOR_TEXT.items()):
+        path = os.path.join(ROOT, f)
+        if f not in src:
+            if not os.path.isfile(path):
+                print("    *** %s is missing entirely" % f)
+                rc = 1
+                src[f] = []
+            else:
+                with open(path, encoding="utf-8", errors="replace") as fh:
+                    src[f] = fh.read().splitlines()
+        lines = src[f]
+        found = lines[l - 1].strip() if 0 < l <= len(lines) else "<past end of file>"
+        if found == expect:
+            ok += 1
+            continue
+        print("    *** ANCHOR MOVED  %s line %d" % (f, l))
+        print("        expected: %s" % expect)
+        print("        found   : %s" % found)
+        print("        ⛔ Re-anchor by applying the MEASURED line shift, not by")
+        print("           grepping for a statement you remember. Then update")
+        print("           ANCHOR_TEXT and the entry's reason together.")
+        rc = 1
+    if rc == 0:
+        print("    %d anchors, every one reads as recorded" % ok)
     return rc
 
 
@@ -750,6 +889,20 @@ def selftest(agg) -> int:
                             "ok" if gone else "*** ACCEPTED"))
     if not gone:
         rc = 1
+    # (2c) ⛔ AN ANCHOR WHOSE LINE NO LONGER READS AS RECORDED. Simulated by
+    # pointing a recorded text at a line that certainly does not match, which
+    # is what a shift above the anchor produces.
+    saved3 = dict(ANCHOR_TEXT)
+    ANCHOR_TEXT[("src/pe_engine.v", 1)] = "this is not what line 1 says"
+    try:
+        moved = check_anchors_quiet()
+    finally:
+        ANCHOR_TEXT.clear()
+        ANCHOR_TEXT.update(saved3)
+    print("    %-52s %s" % ("an anchor whose line text changed is rejected",
+                            "ok" if moved else "*** ACCEPTED"))
+    if not moved:
+        rc = 1
     # (3) a short reason
     probe = {("x.v", 1, "v_line", "case"): (UNREACHABLE, "because.")}
     short = any(len((w or "").strip()) < 60 for _s, w in probe.values())
@@ -784,6 +937,23 @@ def check_points_quiet(agg):
         if c == 0 and CLASSIFIED.get(key) is None:
             out.append(key)
     return bool(out)
+
+
+def check_anchors_quiet():
+    """True if any recorded anchor text no longer matches its line."""
+    src = {}
+    for (f, l), expect in ANCHOR_TEXT.items():
+        path = os.path.join(ROOT, f)
+        if f not in src:
+            if not os.path.isfile(path):
+                return True
+            with open(path, encoding="utf-8", errors="replace") as fh:
+                src[f] = fh.read().splitlines()
+        lines = src[f]
+        found = lines[l - 1].strip() if 0 < l <= len(lines) else None
+        if found != expect:
+            return True
+    return False
 
 
 def check_stale_quiet_absent(agg):
@@ -834,6 +1004,7 @@ def main() -> int:
     rc = 0
     rc |= check_points(agg)
     rc |= check_stale(agg)
+    rc |= check_anchors()
     rc |= check_reasons()
     rc |= check_full_case()
     rc |= check_h_idle_clears()

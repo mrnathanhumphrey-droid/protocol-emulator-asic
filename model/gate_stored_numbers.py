@@ -257,6 +257,11 @@ SPEC_SYMBOLS = {
     # coverage does not contain -- which is what a moved line looks like.
     ("test/benchset.py", "CONFIG"),
     ("test/gate_coverage.py", "CLASSIFIED"),
+    # ⭐ ANCHOR_TEXT is the same thing one step further: a line number and the
+    # SOURCE TEXT that line must still read as. Its numbers are anchors, not
+    # measurements, and drift in them is caught by `check_anchors` -- which
+    # names expected vs found -- rather than by an audit here.
+    ("test/gate_coverage.py", "ANCHOR_TEXT"),
     # ⭐ a MUTANT INVENTORY, like the others above: a define, the bench it is
     # judged by, the failure text that certifies the kill, and why. Its
     # numbers are line counts in prose, not measurements.

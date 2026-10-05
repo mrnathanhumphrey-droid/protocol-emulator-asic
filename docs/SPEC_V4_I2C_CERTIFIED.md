@@ -144,9 +144,60 @@ boundary every pyRTA-primary gate sits behind.
 - **Electrical timing against UM10204.** sigrok adjudicates framing and byte
   values; it is tolerant of rate. The timing claim is `gate_i2c_phase.py`'s,
   from the datasheet table.
-- **A read transaction.** This certifies a *write*: `S | addr | A | data | A | P`.
-  The part's read sequence needs a repeated START and `R/W = 1`, which the peer
-  models and nothing yet exercises.
+- **A read transaction.** This certifies a *write*: `S | addr | A | data | A |
+  P`. The part's read sequence needs a repeated START and `R/W = 1`, which the
+  peer models and nothing yet exercises. See §6.2.
 - **Two address bytes.** The MB85RC256V takes `S | dev | A | addrhi | A |
-  addrlo | A | data | A | P`; this frame sends one address byte, so the peer's
-  `P_AHI`/`P_ALO` phases are still unexercised.
+  addrlo | A | data | A | P`; this frame sends one address byte.
+
+### 6.1 ⛔ CORRECTED: what the certified frame actually does to the peer
+
+The sentence above originally ended *"so the peer's `P_AHI`/`P_ALO` phases are
+still unexercised."* **That was wrong on the first half, and it understated the
+second.** Both corrections come from the coverage sweep
+(`docs/SPEC_V4_COVERAGE_SWEEP.md`).
+
+1. **`P_AHI` IS exercised -- 13 times.** The frame's second byte is consumed by
+   the model as `addr[AW-1:8]`, i.e. as the HIGH ADDRESS BYTE. `P_ALO` was the
+   unexercised one.
+2. **⛔⛔ NO BYTE HAS EVER BEEN WRITTEN INTO THE PEER'S MEMORY.** `P_WDATA`
+   holds `mem[addr] <= shin` and its coverage count is **0**. sigrok's
+   `Data write 5B` is correct at the I²C level -- it is simply the second byte
+   on the wire -- but the FRAM write itself **does not complete**. The two are
+   easy to conflate, and §3's table above invites it by calling that byte
+   "data".
+
+⭐ **The certification stands for exactly what it claimed:** framing and byte
+values on the wire, adjudicated by a foreign decoder. It never claimed a
+completed memory write, and this section now says so instead of implying the
+opposite.
+
+### 6.2 `P_ALO` is now reached, and `P_WDATA` is a ruling
+
+`i2caddr_image.hex` sends `dev | addrhi | addrlo` (3 bytes) and `tb_i2c
++TXB=3` asserts the peer's assembled address reads **`0x0123`** -- `addrhi
+0x01` at `P_AHI` and `addrlo 0x23` at `P_ALO`, a value only BOTH phases can
+produce. Coverage confirms it independently.
+
+⛔ **A complete write does not fit the program store.** The framing costs
+`51 + 60n` bytes -- 30 of header plus 3 x (20n + 7) actions, at 20 actions per
+byte -- validated against the measured images (n=2 -> 171, n=3 -> 231):
+
+| n | bytes | |
+|---|---|---|
+| 2 | 171 | the certified frame |
+| 3 | 231 | dev + both address bytes; reaches `P_ALO` |
+| 4 | **291** | a complete write -- **exceeds the 256-byte store** (`AW = 8`) |
+
+⇒ **Ruled (Wilson): the clocked SHIFT.** When `l_clkpin` is real, each
+dispatch of a SHIFT alternates phase (odd = data + clock low, even = clock
+high) with the bit pointer advancing on the low phase only, so ONE action
+carries a whole byte. Dispatch count per bit is unchanged, so the timing model
+is untouched. That brings a full write to ~111 bytes and a random read with
+repeated START within budget. ⚠ Flagged back before building: `C = 3` must be
+re-measured (`test/run_csat.py`), because a re-dispatched action needs no store
+read and a shortened writeback would move the inter-dispatch spacing that every
+published margin rests on.
+
+- **A read transaction** remains uncertified; it is held until the clocked
+  SHIFT settles.
