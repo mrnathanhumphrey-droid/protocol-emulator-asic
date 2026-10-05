@@ -200,6 +200,22 @@ CLASSIFIED = {
         "configuration executes."),
 
     # ---- test/fram_i2c.v (the peer model Wilson named) --------------------
+    # ⭐ A POINT ONLY VERILATOR 5.053 EMITS. The pinned suite adds
+    # CONDITIONAL-EXPRESSION coverage (`cond_then`/`cond_else`) that 5.032 did
+    # not, so adopting the newer release introduced a point class, not just
+    # different counts. Same family as 208 below: both arms of `shin[0]` on the
+    # device byte, i.e. the READ transaction, which no program performs.
+    ("test/fram_i2c.v", 207, "v_branch", "cond_then"): (
+        OWED,
+        "`phase <= shin[0] ? P_RDATA : P_AHI` -- the R/W bit's TRUE arm, i.e. "
+        "the device byte asking for a READ. Every frame ever put on the bus "
+        "has been a WRITE, so this arm has never been taken; it is the same "
+        "missing transaction as 208 and 239 and is closed by the same test (a "
+        "read with R/W = 1). ⚠ It appears in the uncovered set only under "
+        "Verilator 5.053, which emits conditional-expression points 5.032 did "
+        "not -- so a toolchain bump can ADD owed points without the design "
+        "changing, and that is a reason to adopt a release with its measured "
+        "diff rather than silently."),
     ("test/fram_i2c.v", 208, "v_branch", "if"): (
         OWED,
         "The READ transaction: `shin[0]` set at P_DEV, i.e. R/W = 1. Every "
@@ -300,11 +316,11 @@ for _k, _what in (
 #: this gate. A ratchet seeded from a guess is a ratchet that permits a
 #: regression up to the guess.
 TOGGLE_CEILING = {
-    "src/pe_engine.v": 236,
-    "src/pe_store.v": 3,
-    "src/project.v": 66,
-    "test/fram_i2c.v": 42,
-    "test/fram_spi.v": 27,
+    "src/pe_engine.v": 651,
+    "src/pe_store.v": 6,
+    "src/project.v": 186,
+    "test/fram_i2c.v": 94,
+    "test/fram_spi.v": 54,
 }
 
 #: ⛔⛔ EVERY ANCHOR CARRIES ITS SOURCE TEXT (Wilson's ruling). A coverage
@@ -336,6 +352,8 @@ ANCHOR_TEXT = {
         "if (do_push && do_pop && (q_sel == tx_tag)) begin",
     ("src/project.v", 557):
         "if (RX_SERIAL != 0) begin",
+    ("test/fram_i2c.v", 207):
+        "phase    <= shin[0] ? P_RDATA : P_AHI;",
     ("test/fram_i2c.v", 208):
         "if (shin[0]) shout <= mem[addr];",
     ("test/fram_i2c.v", 228):

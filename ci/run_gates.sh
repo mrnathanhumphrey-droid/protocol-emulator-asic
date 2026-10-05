@@ -275,6 +275,12 @@ if [ -z "${PE_COVERAGE_DAT:-}" ] && [ "${PE_SKIP_COVERAGE:-0}" != "1" ]; then
     {
       echo '#!/bin/bash'
       echo 'cd "$(dirname "$0")" || exit 1'
+      # ⛔⛔ THE SWEEP GETS THE SAME PINNED VERILATOR AS THE COCOTB ARM. Without
+      # this they split inside ONE gate run -- the sweep on the distro's 5.032
+      # and the arm on the pinned 5.053 -- and the coverage gate then failed on
+      # a classified point that only the newer release emits. One toolchain, or
+      # the two halves of the same gate disagree about what exists.
+      echo "export PE_VERILATOR=\"${PE_VERILATOR_WSL:-/opt/oss-cad-suite-2026-09-30/bin/verilator}\""
       echo 'bash test/coverage_sweep.sh "$PWD/probe_cov"'
     } > "$CWRAP"
     CWSLROOT="$(wsl_root "$ROOT")"
@@ -299,6 +305,43 @@ if [ -z "${PE_COVERAGE_DAT:-}" ] && [ "${PE_SKIP_COVERAGE:-0}" != "1" ]; then
   fi
 fi
 [ -n "${PE_COVERAGE_DAT:-}" ] && echo "  PE_COVERAGE_DAT=$PE_COVERAGE_DAT"
+
+# ---------------------------------------------------------------------------
+# THE COCOTB COVERAGE ARM (ruling 2) -- the one bench the sweep excludes.
+# ---------------------------------------------------------------------------
+# ⛔⛔ IT RUNS AFTER THE SWEEP, NOT BEFORE. The sweep clears `cov_*.dat` at
+# startup, which deleted this arm's output once and made the gate report "no
+# cocotb coverage" after a run that had produced it.
+# ⚠ A MISSING ARM IS REPORTED, NOT FAILED. It needs Verilator >= 5.036 (cocotb
+# 2.0.1's floor) and Python <= 3.13; `gate_coverage` then names what it did NOT
+# check rather than reading as "no false gaps".
+if [ -z "${PE_COCOTB_DAT:-}" ] && [ "${PE_SKIP_COVERAGE:-0}" != "1" ]; then
+  echo
+  echo "  --- cocotb coverage arm (ruling 2) ---"
+  CC_OK=0
+  if command -v verilator >/dev/null 2>&1 || [ -n "${PE_VERILATOR:-}" ]; then
+    if bash test/coverage_cocotb.sh "$ROOT/probe_cov"; then CC_OK=1; fi
+  elif command -v wsl.exe >/dev/null 2>&1; then
+    CCWRAP="$ROOT/probe_ci_cocotb.sh"
+    {
+      echo '#!/bin/bash'
+      echo 'cd "$(dirname "$0")" || exit 1'
+      echo "export PE_VERILATOR=\"${PE_VERILATOR_WSL:-/opt/oss-cad-suite-2026-09-30/bin/verilator}\""
+      echo 'bash test/coverage_cocotb.sh "$PWD/probe_cov"'
+    } > "$CCWRAP"
+    CCROOT="$(wsl_root "$ROOT")"
+    if MSYS_NO_PATHCONV=1 wsl.exe -e bash "$CCROOT/probe_ci_cocotb.sh"; then
+      CC_OK=1
+    fi
+  fi
+  if [ "$CC_OK" = "1" ] && [ -f "$ROOT/probe_cov/cocotb_coverage.dat" ]; then
+    export PE_COCOTB_DAT="$ROOT/probe_cov/cocotb_coverage.dat"
+  else
+    echo "  ⚠ the cocotb arm did not produce data; the false-gap check will"
+    echo "    report itself as NOT PERFORMED."
+  fi
+fi
+[ -n "${PE_COCOTB_DAT:-}" ] && echo "  PE_COCOTB_DAT=$PE_COCOTB_DAT"
 
 # ---------------------------------------------------------------------------
 # run them

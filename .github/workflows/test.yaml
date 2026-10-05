@@ -23,6 +23,48 @@ jobs:
         shell: bash
         run: sudo apt-get update && sudo apt-get install -y iverilog verilator yosys
 
+      # ⛔⛔ A PINNED VERILATOR, BECAUSE THE DISTRO'S IS TOO OLD AND BECAUSE THE
+      # TWO ENVIRONMENTS MUST AGREE. cocotb 2.0.1 refuses to run on anything
+      # below Verilator 5.036 ("cocotb requires Verilator 5.036 or later, but
+      # using 5.032"), and apt here gives 5.020 while the dev box has 5.032 --
+      # so the cocotb coverage arm could run NOWHERE, and the coverage gate was
+      # measuring two different tools on the two sides.
+      # ⚠ ONLY ITS VERILATOR IS ADOPTED. The same suite ships yosys 0.69 and
+      # iverilog 14.0-devel, and both feed PUBLISHED numbers -- the yosys
+      # netlist drives the reset audit's flop classification and allowlist,
+      # while `cj_measured.txt` (including the open hdr_cyc 92-vs-91 finding)
+      # is an iverilog 12.0 measurement. Those move only with a measured diff,
+      # and the yosys authority is the version the HARDENING FLOW uses, not the
+      # newest one. So `PE_VERILATOR` names a binary and nothing goes on PATH.
+      # ⭐ PINNED BY DATE AND CACHED BY DATE: a floating "latest" would make the
+      # toggle ceilings -- exact point counts -- drift on their own, and 5.053
+      # already emits ~2x the toggle points of 5.032 plus a conditional-
+      # expression point class that 5.032 did not have.
+      - name: Cache the pinned OSS CAD Suite
+        id: osscad
+        uses: actions/cache@v4
+        with:
+          path: /opt/oss-cad-suite
+          key: oss-cad-suite-linux-x64-20260930
+
+      - name: Download the pinned OSS CAD Suite
+        if: steps.osscad.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          URL=https://github.com/YosysHQ/oss-cad-suite-build/releases/download/2026-09-30/oss-cad-suite-linux-x64-20260930.tgz
+          curl -fL --retry 3 -o /tmp/oss-cad-suite.tgz "$URL"
+          sudo mkdir -p /opt/oss-cad-suite
+          sudo tar -xzf /tmp/oss-cad-suite.tgz -C /opt/oss-cad-suite --strip-components=1
+
+      - name: Report the pinned Verilator
+        shell: bash
+        run: |
+          /opt/oss-cad-suite/bin/verilator --version
+          echo "apt verilator (NOT used by the sweep): $(verilator --version)"
+          echo "yosys stays at: $(yosys -V | head -1)"
+          echo "iverilog stays at: $(iverilog -V | head -1)"
+
       # Set Python up and install cocotb
       - name: Setup python
         uses: actions/setup-python@v6
@@ -65,6 +107,13 @@ jobs:
       # `model/a2/run_a2.py` is their harness, by hand at each checkpoint.
       - name: Model gates (ci/run_gates.sh)
         shell: bash
+        # ⭐ THE PINNED VERILATOR, NAMED NOT PATHED, so the sweep and the cocotb
+        # arm use the SAME binary here as on the dev box while yosys and
+        # iverilog stay exactly as apt installed them. Without this the two
+        # halves of the coverage gate ran on different tools inside one gate
+        # run, and it failed on a point only the newer release emits.
+        env:
+          PE_VERILATOR: /opt/oss-cad-suite/bin/verilator
         run: bash ci/run_gates.sh
 
       - name: Run tests

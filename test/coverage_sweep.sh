@@ -14,7 +14,7 @@
 # (and SVL user) coverage; there is no `--coverage-branch` in Verilator 5.032.
 # Line points are emitted PER BASIC BLOCK, so each arm of an `if`/`else`/`case`
 # carries its own point -- which is branch coverage in substance, and
-# `verilator_coverage --write-info` reports those arms as lcov `BRDA:` records.
+# `"$VLCOV" --write-info` reports those arms as lcov `BRDA:` records.
 # ⛔ So "branch" below means lcov BRDA derived from Verilator's per-block line
 # points, NOT a separate Verilator metric. Calling it a third independent
 # measurement would overstate what was run.
@@ -61,13 +61,32 @@ command -v "$PY" >/dev/null 2>&1 || PY=python
 # its worst form, because nothing in the output said the data was stale.
 rm -f "$OUT/merged.dat" "$OUT/merged.info" coverage.dat
 
-for t in verilator verilator_coverage; do
-  command -v "$t" >/dev/null 2>&1 || {
-    echo "*** $t is not on PATH -- the sweep cannot run"; exit 2; }
+# ⛔⛔ THE VERILATOR IS NAMED, NOT TAKEN FROM PATH, so CI and this box can use
+# THE SAME PINNED BINARY without adopting the rest of a suite. `PE_VERILATOR`
+# points at the pinned OSS CAD Suite build; its yosys and iverilog are
+# deliberately NOT put on PATH, because the netlist-derived gates must describe
+# the chip the HARDENING FLOW builds and the published `cj_measured` numbers are
+# iverilog 12.0 measurements. Absolute invocation was verified to build (the
+# suite's `verilator` is a perl wrapper that finds its own root).
+# ⚠ The version is PRINTED below and travels with the measurement, because the
+# toggle ceilings are exact point counts and a release can emit a different
+# number of them.
+VL="${PE_VERILATOR:-verilator}"
+VLCOV="${PE_VERILATOR_COVERAGE:-verilator_coverage}"
+if [ "$VL" != "verilator" ] && [ ! -x "$VL" ]; then
+  echo "*** PE_VERILATOR=$VL is not executable"; exit 2
+fi
+if [ "$VLCOV" = "verilator_coverage" ] && [ "$VL" != "verilator" ]; then
+  VLCOV="$(dirname "$VL")/verilator_coverage"
+fi
+for t in "$VL" "$VLCOV"; do
+  command -v "$t" >/dev/null 2>&1 || [ -x "$t" ] || {
+    echo "*** $t is not available -- the sweep cannot run"; exit 2; }
 done
 
 echo "=============================================================================="
-echo "  COVERAGE SWEEP -- Verilator $(verilator --version 2>&1 | awk '{print $2}')  rand-reset=+{$RMODES}"
+echo "  COVERAGE SWEEP -- Verilator $("$VL" --version 2>&1 | awk '{print $2}')  rand-reset=+{$RMODES}"
+echo "  binary : $VL"
 echo "=============================================================================="
 
 PLAN="$OUT/plan.json"
@@ -109,7 +128,7 @@ for line in "${BUILDS[@]}"; do
   bdir="$OUT/build_$key"
   rm -rf "$bdir"
   # shellcheck disable=SC2086
-  verilator $FLAGS +incdir+test +incdir+. -Mdir "$bdir" \
+  "$VL" $FLAGS +incdir+test +incdir+. -Mdir "$bdir" \
       -o "$key.sim" --top-module "$top" $gp $srcs \
       > "$OUT/build_$key.log" 2>&1
   gen_rc=$?
@@ -230,7 +249,7 @@ if [ ! -e "${DATS[0]}" ]; then
   # ⛔ SAY WHERE IT LOOKED AND WHAT EXISTS. "No coverage data" with a clean
   # run log is the hardest case to diagnose remotely, and guessing at it
   # across a toolchain this box does not have is how two CI rounds were spent.
-  echo "      verilator : $(verilator --version 2>&1)"
+  echo "      verilator : $("$VL" --version 2>&1)"
   echo "      any coverage*.dat anywhere under the tree:"
   find . -name 'coverage*.dat' -o -name 'cov_*.dat' 2>/dev/null \
     | head -10 | sed 's/^/        /'
@@ -256,14 +275,14 @@ echo
 echo "  --- merging coverage ---"
 echo "      adjudicated : $(ls -1 "$OUT"/cov_*_m0.dat 2>/dev/null | wc -l) files at rand-reset+0"
 echo "      information : $(ls -1 "$OUT"/cov_*.dat | wc -l) files over all modes"
-verilator_coverage --write "$OUT/merged_allmodes.dat" "$OUT"/cov_*.dat \
+"$VLCOV" --write "$OUT/merged_allmodes.dat" "$OUT"/cov_*.dat \
     > "$OUT/merge_all.log" 2>&1 || echo "  ⚠ the all-mode union did not merge"
-verilator_coverage --write "$OUT/merged.dat" "$OUT"/cov_*_m0.dat \
+"$VLCOV" --write "$OUT/merged.dat" "$OUT"/cov_*_m0.dat \
     > "$OUT/merge.log" 2>&1 || { echo "  *** merge failed"; tail -3 "$OUT/merge.log"; exit 1; }
-verilator_coverage --write-info "$OUT/merged.info" "$OUT/merged.dat" \
+"$VLCOV" --write-info "$OUT/merged.info" "$OUT/merged.dat" \
     > "$OUT/info.log" 2>&1 || { echo "  *** write-info failed"; tail -3 "$OUT/info.log"; exit 1; }
 rm -rf "$OUT/ann"
-verilator_coverage --annotate "$OUT/ann" --annotate-all --annotate-points \
+"$VLCOV" --annotate "$OUT/ann" --annotate-all --annotate-points \
     "$OUT/merged.dat" > "$OUT/ann.log" 2>&1
 grep -iE 'total coverage' "$OUT/ann.log" | sed 's/^/  /'
 # ⛔ THE TOOL VERSION TRAVELS WITH THE MEASUREMENT. The toggle ceilings in
@@ -272,11 +291,11 @@ grep -iE 'total coverage' "$OUT/ann.log" | sed 's/^/  /'
 # while the CI runner installs 5.020. A ceiling breached by a version change
 # and a ceiling breached by a regression look identical without this line.
 {
-  verilator --version
+  "$VL" --version
   echo "arms $npass ok / $NARM"
   echo "reset modes +verilator+rand+reset+{$RMODES}"
 } > "$OUT/sweep_env.txt"
-echo "  tool    : $(verilator --version 2>&1)"
+echo "  tool    : $("$VL" --version 2>&1)"
 echo "  merged  : $OUT/merged.dat  $OUT/merged.info  $OUT/ann/"
 
 # ⛔ THE SWEEP'S OWN EXIT CODE REPORTS THE MEASUREMENT, not the verdict. The

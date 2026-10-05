@@ -193,8 +193,11 @@ SITES = [
          "uncovered TOGGLE points per file -- the ratchet the coverage gate "
          "holds, which may only fall",
          "test/coverage_sweep.sh",
-         "the sweep that shipped with the gate: 19 arms over 10 benches at "
-         "+verilator+rand+reset+0, Verilator 5.032",
+         "the sweep as pinned: 25 arms over 12 benches at "
+         "+verilator+rand+reset+0, PINNED Verilator 5.053 from OSS CAD "
+         "Suite 2026-09-30 -- the ceilings are EXACT POINT COUNTS and 5.053 "
+         "emits ~2x the toggle points of 5.032, so the release is part of "
+         "the number",
          "⛔ MEASURED, NOT CHOSEN, and that distinction is the whole value of "
          "the number: a ratchet seeded from a guess permits a regression up "
          "to the guess. ⚠ Toggle is ratcheted rather than adjudicated point "

@@ -41,12 +41,38 @@ OUT="$(cd "$OUT" && pwd)"
 SUITE="${PE_OSS_CAD_SUITE:-/opt/oss-cad-suite-2026-09-30}"
 VENV="${PE_COCOTB_VENV:-$ROOT/probe_venv312}"
 
-for p in "$SUITE/bin/verilator" "$VENV/bin/python"; do
-  [ -x "$p" ] || { echo "*** missing: $p"
-                   echo "    the cocotb coverage arm needs the PINNED toolchain;"
-                   echo "    see the header of this script. RED, not skipped."
-                   exit 2; }
-done
+VL="${PE_VERILATOR:-$SUITE/bin/verilator}"
+[ -x "$VL" ] || { echo "*** missing verilator: $VL"
+                  echo "    the arm needs Verilator >= 5.036 (cocotb 2.0.1's"
+                  echo "    floor). RED, not skipped."; exit 2; }
+
+# ⛔⛔ THE INTERPRETER IS WHICHEVER ONE SUPPORTS cocotb, and it differs by
+# environment. CI's `actions/setup-python` pins 3.11 and pip-installs the
+# pinned cocotb, so the AMBIENT python is already correct there and a venv
+# would be pure overhead. This box needs one, because the distro ships 3.14
+# and cocotb 2.0.1 caps at 3.13. So: use the venv IF it exists, otherwise use
+# the ambient python -- and in both cases CHECK that cocotb imports and that
+# the version is in range, rather than assuming the environment is right.
+if [ -x "$VENV/bin/python" ]; then
+  PY="$VENV/bin/python"
+else
+  PY="$(command -v python3 || command -v python)"
+fi
+[ -n "${PY:-}" ] || { echo "*** no python found"; exit 2; }
+"$PY" - <<'PYEOF' || exit 2
+import sys
+v = sys.version_info
+if v >= (3, 14):
+    print("*** python %d.%d is above cocotb 2.0.1's 3.13 cap"
+          % (v.major, v.minor))
+    raise SystemExit(1)
+try:
+    import cocotb
+except Exception as exc:
+    print("*** cocotb does not import: %s" % exc)
+    raise SystemExit(1)
+print("  interpreter and cocotb both in range")
+PYEOF
 
 echo "=============================================================================="
 echo "  COCOTB COVERAGE ARM -- the bench the sweep excludes"
@@ -58,7 +84,7 @@ printf '  %-11s %s\n' verilator "$("$SUITE/bin/verilator" --version 2>&1 | head 
 cd "$ROOT/test" || exit 1
 # ⛔ ONLY the suite's verilator is put on PATH ahead of the system tools; its
 # yosys and iverilog are deliberately NOT adopted here (see the header).
-export PATH="$VENV/bin:$SUITE/bin:$PATH"
+export PATH="$(dirname "$PY"):$(dirname "$VL"):$PATH"
 rm -rf sim_build/vlcov results.xml coverage.dat
 make -B SIM=verilator SIM_BUILD=sim_build/vlcov \
      EXTRA_ARGS="--coverage --public-flat-rw --timing -Wno-fatal" \
