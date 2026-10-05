@@ -129,6 +129,21 @@ HOST_PAT = [0x5A, 0xC3, 0x3C, 0xA5]
 TXQ = 4
 TXD = 2
 
+# ⛔⛔ GATE LEVEL HAS NO INTERNALS, AND PRETENDING OTHERWISE BROKE A HARDEN.
+# `GATES=yes` builds against the flat synthesised netlist: `u_eng`, `tx_cnt`,
+# `host_pop` and `lane_underrun` do not exist there -- synthesis does not keep
+# the hierarchy or the names. ⚠ `tb.v`'s parameter override had the same
+# problem and killed `gl_test` in 55 seconds after `gds` had spent 3h50m
+# succeeding, which is how expensive this class is to discover late.
+# ⭐ ONE NAMED PREDICATE, not a scatter of try/except. A bare `except` around
+# each read would make a gate-level run SILENTLY SKIP the host-channel
+# precondition while still printing a pass -- which is the "a guard can pass
+# because what it guards is absent" shape this project has already paid for.
+# What degrades is declared, loudly, at the point of use.
+GL = os.environ.get("GATES", "") == "yes"
+GL_WHY = ("gate level: the synthesised netlist keeps no hierarchy, so "
+          "tx_cnt / host_pop / lane_underrun do not exist")
+
 
 def push_ctrl(nib, tag, wr):
     """`ui_in` in RUN mode: prog=0, nibble on [4:1], tag on {[5], [0]}."""
@@ -162,10 +177,19 @@ async def feed_host(dut, state):
     idx = [0] * TXQ
     while True:
         for q in range(TXQ):
-            try:
-                room = int(dut.user_project.tx_cnt[q].value) != TXD
-            except Exception:
+            if GL:
+                # ⛔ NO `tx_cnt` TO READ, so the feeder cannot top up on
+                # demand. It PACES itself instead: a byte takes ~24 clocks to
+                # push and the fastest consumer here takes one every ~400, so
+                # a fixed gap keeps the queues fed without overrunning them.
+                # ⚠ A blind feeder that pushed flat out WOULD overrun and set
+                # `tx_full_sticky`, and the dropped bytes would be the
+                # FEEDER's bug reported as the engine's -- which is why the
+                # RTL path reads the depth and this path waits instead.
                 room = True
+                await ClockCycles(dut.clk, 200)
+            else:
+                room = int(dut.user_project.tx_cnt[q].value) != TXD
             if room:
                 b = HOST_PAT[idx[q]]
                 await push_nibble(dut, (b >> 4) & 0xF, q)
@@ -186,13 +210,16 @@ async def watch_pops(dut, state):
     that has not exercised the payload path and must not be allowed to say it
     did.
     """
+    if GL:
+        # ⛔ NOT COUNTABLE AT GATE LEVEL. `host_pop` is an internal pulse with
+        # no port, so this monitor has nothing to watch. It returns rather
+        # than spinning, and `assert_host_fed` knows not to require pops --
+        # stated there, not inferred from a zero.
+        return
     while True:
         await ClockCycles(dut.clk, 1)
-        try:
-            if int(dut.user_project.u_eng.host_pop.value) == 1:
-                state["pops"] += 1
-        except Exception:
-            pass
+        if int(dut.user_project.u_eng.host_pop.value) == 1:
+            state["pops"] += 1
 
 
 def assert_host_fed(dut, state, expect_pops=True, why=""):
@@ -209,6 +236,23 @@ def assert_host_fed(dut, state, expect_pops=True, why=""):
     assert state["bytes"] > 0, (
         "STARVED: the program shifts and no host byte was ever pushed, so "
         "every OP_SHIFT took the underrun branch")
+    # ⛔⛔ AT GATE LEVEL ONLY THE PUSH HALF IS CHECKABLE, AND THAT IS SAID
+    # RATHER THAN QUIETLY SKIPPED. `pops` and `lane_underrun` are internal and
+    # the netlist keeps neither, so the two strongest clauses of this
+    # precondition cannot be evaluated here at all.
+    # ⚠ THE RTL RUN IS WHAT CARRIES THEM. Every one of these tests runs at RTL
+    # in CI on the same program with the full precondition, so the claim is
+    # made where it is checkable and the gate-level run asserts the subset it
+    # can see. Silently returning "pass" with no note would be the defect
+    # this project keeps finding: a guard that passes because what it guards
+    # is absent.
+    if GL:
+        dut._log.warning(
+            "HOST-CHANNEL PRECONDITION PARTIAL -- %d bytes pushed; `pops` and "
+            "`lane_underrun` NOT CHECKED (%s). The full precondition is "
+            "carried by the RTL run of this same test."
+            % (state["bytes"], GL_WHY))
+        return
     if not expect_pops:
         assert why, "a declared zero-pop expectation must carry its reason"
         assert state["pops"] == 0, (

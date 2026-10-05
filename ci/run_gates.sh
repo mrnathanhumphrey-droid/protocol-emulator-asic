@@ -60,6 +60,14 @@ GATES=(
   # here rather than in the RTL because a generate-guarded zero-width net was
   # tried as a compile-time assertion and iverilog accepted it SILENTLY.
   model/part1_param_contract.py
+  # ⛔⛔ THE HARNESS MUST BUILD AT GATE LEVEL, and this is in the list because
+  # a checkpoint harden died proving otherwise: `gl_test` failed in 55 seconds
+  # on a parameter override in `tb.v` after `gds` had spent 3h50m and
+  # `precheck` 2h11m succeeding. Gate-level elaboration happens ONLY inside
+  # the harden, so the RTL `test` job and the parameter sweep could both be
+  # green while the gate-level harness was unbuildable. This answers the same
+  # question in under a second.
+  test/gl_harness_check.py
   model/pe_asm.py
 )
 
@@ -74,7 +82,7 @@ GATES=(
 # unrunnable locally, which is how a gate quietly stops being run at all.
 can_run() {
   case "$1" in
-    model/gate_one_encoder.py)
+    model/gate_one_encoder.py|test/gl_harness_check.py)
       command -v iverilog >/dev/null 2>&1 || { echo "iverilog is not on PATH"; return 1; } ;;
     model/gate_reset_audit.py)
       [ -n "${PE_NETLIST_JSON:-}" ] && [ -f "${PE_NETLIST_JSON:-}" ] \

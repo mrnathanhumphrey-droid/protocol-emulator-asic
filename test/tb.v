@@ -30,7 +30,26 @@ module tb ();
   // suite sweeps the parameter instead of trusting that nothing assumes it.
   parameter integer SPL_CFG = 2;
 
+  // ⛔⛔⛔ THE PARAMETER OVERRIDE IS RTL-ONLY, AND OMITTING THIS GUARD BROKE A
+  // CHECKPOINT HARDEN. At gate level `user_project` is the flat synthesised
+  // netlist, which has NO PARAMETERS, so `#(.SPL(...))` is an elaboration
+  // error:
+  //     test/tb.v:33: error: parameter `SPL' not found in `tb.user_project'.
+  // `gl_test` died in 55 seconds on it, after `gds` had already spent 3h50m
+  // and `precheck` 2h11m succeeding.
+  // ⚠ WHY NOTHING CAUGHT IT: gate-level elaboration happens ONLY inside the
+  // ~4-hour harden. CI's `test` job and `run_param_points.py` both build the
+  // RTL, so the parameter was added, swept at two values, and never once
+  // elaborated the way `gl_test` does. `ci/run_gates.sh` now does that in
+  // under a second against a parameterless stub.
+  // ⭐ SPL IS BAKED INTO THE GATES ANYWAY. The harden synthesises the default
+  // SPL = 2, so there is nothing to override at gate level -- the override is
+  // meaningful only where the source is still parametric.
+`ifdef GL_TEST
+  tt_um_protocol_emulator user_project (
+`else
   tt_um_protocol_emulator #(.SPL(SPL_CFG)) user_project (
+`endif
       .ui_in  (ui_in),    // Dedicated inputs
       .uo_out (uo_out),   // Dedicated outputs
       .uio_in (uio_in),   // IOs: Input path
