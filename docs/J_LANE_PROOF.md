@@ -227,7 +227,7 @@ merely bounded. That deserves the same treatment `J = 9` just got.
 |---|---|---|
 | P8 | **A lane's period is exactly its action delay `d`.** The timestamp advances **absolutely** — `l_timestamp[cur] <= l_timestamp[cur] + a_dly` — not from completion, so consecutive releases of a lane are `d` apart with no drift. | `src/pe_engine.v:1278` |
 | P9 | **Readiness is that timestamp arriving.** `ready` tests `now - l_timestamp`, so a lane is released at its timestamp and not before. | `src/pe_engine.v` — the `g_ready` generate |
-| P10 | **At `SPL = 2` the dispatched slot is the HEAD and the refill owed is for the SPARE.** Writeback invalidates the consumed head and flips the select, so the already-prefetched spare becomes the head and the freed slot becomes the new spare. | `src/pe_engine.v:1353, 1367` (= P6) |
+| P10 | **At `SPL = 2` the dispatched slot is the HEAD and the refill owed is for the SPARE.** Writeback invalidates the consumed head and flips the select, so the already-prefetched spare becomes the head and the freed slot becomes the new spare. **⚠ AMENDED 2026-10-05 — see Amendment A1:** a *retiring* dispatch owes one refill; a clocked SHIFT's **re-dispatch retires nothing and owes none**. Read as "**at most** one". | `src/pe_engine.v:1353, 1367` (= P6) |
 
 ## Statement
 
@@ -237,8 +237,10 @@ merely bounded. That deserves the same treatment `J = 9` just got.
 > term `RQ` — idle cycles spent refilling for a lane that outranks the subject
 > — is **zero**.
 
-*Proof.* By P10 a dispatch consumes a valid head and leaves exactly one slot
-per lane to be refilled, and by P8/P9 a lane dispatches at most once per `d`
+*Proof.* By P10 a dispatch consumes a valid head and leaves **at most one** slot
+per lane to be refilled *(amended 2026-10-05 from "exactly one" — see Amendment
+A1; the bound is preserved because demand only decreases)*, and by P8/P9 a lane
+dispatches at most once per `d`
 cycles. So in any window of `d` cycles the port is asked for at most `k`
 refills, one per live lane, each costing `L_REFILL` by P2 — a demand of
 `k · L_REFILL` cycles of port time per `d` cycles of wall time. When
@@ -300,3 +302,73 @@ is recorded here because `gate_j_program`'s 1.6t table currently prints
 optimistic label — inside a region nothing is claimed for, but a label is still
 a statement. **Not changed without a ruling**, since `admissible` feeds the A2
 suite.
+
+---
+
+# Amendments
+
+## A1 — "exactly one refill" becomes "at most one" (2026-10-05)
+
+**Ruled** alongside the clocked SHIFT/SHIFTIN build. A versioned amendment, not
+a silent edit: the original wording is quoted here so the change is auditable
+against any published copy.
+
+**What changed.** Two places, both marked inline:
+
+| where | was | is |
+|---|---|---|
+| P10 | "the refill owed is for the SPARE" | unchanged, **plus**: a re-dispatch retires nothing and owes **no** refill |
+| Theorem 3 proof, the line beginning *"By P10 a dispatch consumes…"* | "leaves **exactly one** slot per lane to be refilled" | "leaves **at most one** slot per lane to be refilled" |
+
+**Why.** Under the clocked SHIFT, when `l_clkpin` is real a single action is
+**re-dispatched** — odd phase drives data and takes the clock low, even phase
+releases it high, the bit pointer advancing on the low phase only. A
+re-dispatch performs no writeback-retire and no store read, so it **leaves zero
+slots to be refilled**. "Exactly one" is therefore false under the new scheme,
+and was true before only because *one action had always equalled one dispatch*.
+
+**Why the bound survives — and this is the whole reason the amendment is
+bookkeeping rather than a re-proof.** The premise is used at exactly one step:
+to conclude that *"in any window of `d` cycles the port is asked for at most `k`
+refills"*. That step needs an **upper** bound on refills owed per dispatch. A
+re-dispatch owes **fewer** (zero), never more. So weakening "exactly" to "at
+most" preserves every inequality downstream, and `D* = k · L_REFILL = 20` is
+unchanged. ⛔ Had the clocked scheme made a dispatch owe *more* than one refill,
+this would have been a re-proof and a re-quote, not an amendment.
+
+### Every other "exactly" in this document, checked for the same dependency
+
+The ruling required the whole proof swept, not just the one line. Eight
+occurrences; the verdicts:
+
+| line | text | depends on refills-per-dispatch? |
+|---|---|---|
+| §3 | "there are **exactly two** sub-cases" | **No.** A dichotomy on whether B's head is valid. Exhaustive however many refills a dispatch owes. |
+| §3(a) | "must belong to **exactly one**" | **No.** The ruling's requirement that a cycle class be charged to one model, not a count of refills. |
+| §4 | "which is **exactly** why" | **No.** Rhetorical. |
+| P8 | "a lane's period is **exactly** its action delay `d`" | **No, but see below.** |
+| Thm 3 proof | "leaves **exactly one** slot" | **YES — amended above.** |
+| §5 | "separately for **exactly** this reason" | **No.** Rhetorical. |
+| queued note | "P8 says a lane's period is **exactly** `d`" | **No.** Quotes P8 inside the already-queued `utilisation(d)` finding. |
+
+### P8 is literally unchanged, and the reason is worth recording
+
+`l_timestamp[cur] <= l_timestamp[cur] + a_dly` fires in **`ST_WB`**, i.e. on
+**every** dispatch — `src/pe_engine.v:1511`. A clocked re-dispatch is an
+ordinary dispatch through `ST_IDLE → ST_DRIVE → ST_WB`, so it advances the
+timestamp like any other. Consecutive **releases** therefore remain `d` apart
+and P8 stays true as written.
+
+⚠ **But the identity it was written under is gone.** P8 and P10 were both
+written when *one action = one dispatch*, which made "period of a release" and
+"period of an action" the same quantity. Under the clocked SHIFT an action
+spans **16** dispatches (8 bits × 2 phases), so:
+
+- a lane's **release** period is `d` — P8, unchanged;
+- a lane's **action** period is `16 d` — a new quantity the proof never needed
+  a name for.
+
+Anything that silently reads P8 as "a lane completes an action every `d`
+cycles" is wrong under the clocked scheme. Nothing in this proof does — every
+use is about releases — but the distinction is now load-bearing and is recorded
+here rather than left to be rediscovered.
