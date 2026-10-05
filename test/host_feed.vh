@@ -53,9 +53,16 @@
   localparam integer HF_PAT = 4;
   reg  [7:0] hf_pat [0:3][0:HF_PAT-1];
   integer    hf_idx [0:3];
-  reg  [3:0] hf_mask;
-  reg        hf_en;
-  integer    hf_pushes, hf_bytes, hf_q;
+  // ⛔⛔ DECLARATION INITIALISERS, NOT JUST `hf_init`, AND THE DIFFERENCE IS A
+  // RACE. `hf_init` is a TASK called from each bench's main `initial`, while
+  // the feeder is its OWN `initial` block. Both start at time 0 and their
+  // order is not guaranteed, so with `hf_en` holding an arbitrary power-on
+  // value the feeder can push BEFORE `hf_init` clears it. Declaration
+  // initialisers are applied before any process runs, which is the only
+  // ordering that holds. ⚠ `hf_q` was never covered by `hf_init` at all.
+  reg  [3:0] hf_mask = 4'b0000;
+  reg        hf_en = 1'b0;
+  integer    hf_pushes = 0, hf_bytes = 0, hf_q = 0;
 
   task hf_init;
     integer a, b;

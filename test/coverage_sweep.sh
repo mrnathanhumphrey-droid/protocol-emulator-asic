@@ -42,6 +42,14 @@ OUT="${1:-probe_cov}"
 # `./mnt/d/...`, which does not exist.
 mkdir -p "$OUT"
 OUT="$(cd "$OUT" && pwd)"
+# ⛔⛔ THE RESET MODE IS A PARAMETER NOW, AND ALL THREE ARE RUN (Wilson's
+# ruling (c)). It was pinned at +0 because three benches failed at +1/+2 --
+# which turned out to be the HOST FEEDER's own uninitialised state, not the
+# design: `hf_en`/`hf_mask`/`hf_q` had no declaration initialisers, so the
+# feeder could push before `hf_init` cleared it. With initialisers every bench
+# passes at all three modes, so there is no longer any reason to measure only
+# one.
+RMODES="${PE_RESET_MODES:-0 1 2}"
 PY="${PE_PYTHON:-python3}"
 command -v "$PY" >/dev/null 2>&1 || PY=python
 
@@ -59,7 +67,7 @@ for t in verilator verilator_coverage; do
 done
 
 echo "=============================================================================="
-echo "  COVERAGE SWEEP -- Verilator $(verilator --version 2>&1 | awk '{print $2}')"
+echo "  COVERAGE SWEEP -- Verilator $(verilator --version 2>&1 | awk '{print $2}')  rand-reset=+{$RMODES}"
 echo "=============================================================================="
 
 PLAN="$OUT/plan.json"
@@ -133,6 +141,14 @@ echo
 rm -f "$OUT"/cov_*.dat
 NARM=$("$PY" -c "import json,sys;print(len(json.load(open(sys.argv[1]))))" "$PLAN")
 npass=0; nfail=0
+# ⛔⛔ EVERY ARM AT EVERY RESET MODE (Wilson's ruling (c)). The binaries do
+# NOT depend on the mode -- it is a runtime plusarg -- so the build phase runs
+# once and only the RUN phase repeats, which is why three modes cost three
+# times the simulation and not three times the build.
+# ⭐ The merged coverage is then the UNION over the three modes, which is
+# strictly more of the design than any single mode reaches.
+for RMODE in $RMODES; do
+echo "  --- rand-reset +$RMODE ---"
 for i in $(seq 0 $((NARM - 1))); do
   read -r top label key <<<"$("$PY" -c "
 import json,sys
@@ -146,8 +162,8 @@ print(r['top'], r['label'], r['build'])
 import json,sys
 print('\n'.join(json.load(open(sys.argv[1]))[int(sys.argv[2])]['args']))
 " "$PLAN" "$i")
-  log="$OUT/run_${top}_${label}.log"
-  dat="$OUT/cov_${top}_${label}.dat"
+  log="$OUT/run_${top}_${label}_m${RMODE}.log"
+  dat="$OUT/cov_${top}_${label}_m${RMODE}.dat"
   # ⛔⛔ THE COVERAGE FILE IS MOVED, NOT NAMED ON THE COMMAND LINE, AND THAT
   # IS A PORTABILITY FIX PAID FOR BY A RED CI RUN. `+verilator+coverage+file+`
   # does not exist in Verilator 5.020, which is what the CI runner installs;
@@ -158,7 +174,7 @@ print('\n'.join(json.load(open(sys.argv[1]))[int(sys.argv[2])]['args']))
   # images are named by relative path) and that arms must stay SEQUENTIAL --
   # two at once would race for the same default filename.
   rm -f coverage.dat "$OUT/build_$key/coverage.dat"
-  timeout 900 "$bin" +verilator+rand+reset+0 "${ARGS[@]}" > "$log" 2>&1
+  timeout 900 "$bin" "+verilator+rand+reset+$RMODE" "${ARGS[@]}" > "$log" 2>&1
   rc=$?
   # ⛔ AND IT IS SEARCHED FOR, NOT ASSUMED TO BE IN THE CWD. Under Verilator
   # 5.020 the arms RAN AND PASSED (rc=0, no failure line) and produced no
@@ -186,7 +202,7 @@ print('\n'.join(json.load(open(sys.argv[1]))[int(sys.argv[2])]['args']))
   # `gate_coverage.py`: bench lines after a `$finish` can be credited here
   # though they never execute under iverilog. That is why the gate's verdict
   # covers `src/` and the peer models, not bench bodies.
-  cut="$OUT/cut_${top}_${label}.log"
+  cut="$OUT/cut_${top}_${label}_m${RMODE}.log"
   awk '/Verilog \$finish/{exit} {print}' "$log" > "$cut"
   # ⚠ CASE-SENSITIVE ON PURPOSE. `-i` matched the word "failure" inside
   # `tb_csat`'s own line "sticky_ovr observed : 0 (recorded, not a failure)"
@@ -196,16 +212,17 @@ print('\n'.join(json.load(open(sys.argv[1]))[int(sys.argv[2])]['args']))
     npass=$((npass + 1)); printf '  run   %-11s %-14s ok\n' "$top" "$label"
   else
     nfail=$((nfail + 1))
-    printf '  run   %-11s %-14s *** rc=%s fail-lines=%s dat=%s\n' \
-        "$top" "$label" "$rc" "$nf" "$([ -s "$dat" ] && echo yes || echo EMPTY)"
+    printf '  run   %-11s %-14s +%s *** rc=%s fail-lines=%s dat=%s\n' \
+        "$top" "$label" "$RMODE" "$rc" "$nf" "$([ -s "$dat" ] && echo yes || echo EMPTY)"
     grep -E '\*\*\* FAIL|FAILURE\(S\)|FAILED|%Error|Aborting' "$cut" \
         | head -2 | sed 's/^/      /'
   fi
-done
+done   # arms
+done   # reset modes
 
 echo
 echo "  builds  : $nbuild ok, $nbfail failed"
-echo "  arms    : $npass ok, $nfail failed  (of $NARM)"
+echo "  arms    : $npass ok, $nfail failed  (of $NARM x $(echo $RMODES | wc -w) modes)"
 
 DATS=("$OUT"/cov_*.dat)
 if [ ! -e "${DATS[0]}" ]; then
@@ -223,8 +240,25 @@ if [ ! -e "${DATS[0]}" ]; then
   exit 1
 fi
 echo
-echo "  --- merging $(ls -1 "$OUT"/cov_*.dat | wc -l) coverage files ---"
-verilator_coverage --write "$OUT/merged.dat" "$OUT"/cov_*.dat \
+# ⛔⛔⛔ THE ADJUDICATED MEASUREMENT IS MODE 0 ONLY, AND THIS IS MEASURED, NOT
+# a conservative choice. Running all three modes added 160 points (716 -> 876
+# of 2727) and EVERY ONE OF THEM IS A TOGGLE POINT: line and branch coverage
+# was identical at 37 uncovered under the union and under +0 alone. The reason
+# is immediate once seen -- `rand+reset+1/+2` sets every register bit to an
+# arbitrary value, so nearly every bit "toggles" without the design doing
+# anything. Uncovered toggle went 238 -> 0 in `pe_engine.v`, 74 -> 0 in
+# `project.v`, 45 -> 1 in the I2C peer.
+# ⇒ Toggle coverage at a randomised power-on measures THE RESET MODE, not the
+# stimulus, and crediting it would raise the ratchet to a number no test earns.
+# The union is still written, for information, as `merged_allmodes.dat`.
+# ⚠ The three-mode run keeps its full value as the ROBUSTNESS gate: every arm
+# must PASS at every mode, which is what ruling (c) asked for.
+echo "  --- merging coverage ---"
+echo "      adjudicated : $(ls -1 "$OUT"/cov_*_m0.dat 2>/dev/null | wc -l) files at rand-reset+0"
+echo "      information : $(ls -1 "$OUT"/cov_*.dat | wc -l) files over all modes"
+verilator_coverage --write "$OUT/merged_allmodes.dat" "$OUT"/cov_*.dat \
+    > "$OUT/merge_all.log" 2>&1 || echo "  ⚠ the all-mode union did not merge"
+verilator_coverage --write "$OUT/merged.dat" "$OUT"/cov_*_m0.dat \
     > "$OUT/merge.log" 2>&1 || { echo "  *** merge failed"; tail -3 "$OUT/merge.log"; exit 1; }
 verilator_coverage --write-info "$OUT/merged.info" "$OUT/merged.dat" \
     > "$OUT/info.log" 2>&1 || { echo "  *** write-info failed"; tail -3 "$OUT/info.log"; exit 1; }
@@ -240,7 +274,7 @@ grep -iE 'total coverage' "$OUT/ann.log" | sed 's/^/  /'
 {
   verilator --version
   echo "arms $npass ok / $NARM"
-  echo "reset +verilator+rand+reset+0"
+  echo "reset modes +verilator+rand+reset+{$RMODES}"
 } > "$OUT/sweep_env.txt"
 echo "  tool    : $(verilator --version 2>&1)"
 echo "  merged  : $OUT/merged.dat  $OUT/merged.info  $OUT/ann/"

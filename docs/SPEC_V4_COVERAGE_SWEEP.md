@@ -125,7 +125,124 @@ sound waiver.
 
 ---
 
-## 4. ⛔⛔ The reset-mode divergence — an open finding
+## 4. ⛔⛔ RETRACTED: the reset-mode divergence was the BENCH, not the DUT
+
+**Ruling (c) (Wilson) made this top priority ahead of the 32 owed points, on
+the grounds that it was silicon correctness.** It is not. The cause is the host
+feeder's own uninitialised state, and **my claim that "it is the DUT, not bench
+bookkeeping" was wrong.**
+
+### 4.1 What it actually was
+
+`test/host_feed.vh` declared `hf_en`, `hf_mask` and `hf_q` with **no
+declaration initialisers**. `hf_init` is a *task* called from each bench's main
+`initial`, while the feeder is its **own** `initial` block — both start at time
+0 and their order is not guaranteed. With `hf_en` holding an arbitrary power-on
+value the feeder could push host bytes **before `hf_init` cleared it**, and
+`hf_q` was never covered by `hf_init` at all.
+
+⇒ Fixed by initialising at the declaration, which is applied before any process
+runs — the only ordering that holds. **Every bench then passes at `+0`, `+1`
+and `+2`: 57 of 57 arms.**
+
+### 4.2 Why my evidence was misleading, and the lesson
+
+I argued: *"It is the DUT, not bench bookkeeping — `tb_i2c`'s raw bus dump
+diverges from cycle 119."* The dump being a raw wire proves **the wire
+differed**. It says nothing about where the cause is, because the DUT drives
+that wire *in response to host pushes*, and the pushes are the bench's. A
+spurious early push makes the DUT transmit something different, entirely
+correctly.
+
+⛔ **"The probe output is low-level" is not an argument about causation.**
+
+### 4.3 Wilson's elimination method, run and negative
+
+The ruling specified: under `rand+reset+2`, zero one allowlisted group at a
+time; the group whose zeroing restores the pass has the false reason. Run over
+all five zeroable groups plus a `PE_ZERO_ALL` control:
+
+| arm | tb_smoke | tb_tx | tb_i2c |
+|---|---|---|---|
+| baseline +0 | 0 | 0 | 0 |
+| baseline +2 | 1 | 12 | 4 |
+| **ALL** (5 groups zeroed) +2 | 1 | 12 | 4 |
+| each group individually +2 | 1 | 12 | 4 |
+
+**Zeroing every group changed nothing** — and `PE_ZERO_ALL`'s bus dump was
+*byte-identical* to the unzeroed `+2` run. So the elimination returned nothing,
+which is what sent the investigation to a DUT-only VCD and from there to the
+bench. ⭐ The control arm was what made the negative result readable: without
+it, five negative individual arms could have meant anything.
+
+⚠ And the first run of that sweep was **unsound**: every mode-2 arm wrote
+`run_<top>_<mode>.log`, so each arm clobbered the previous arm's evidence — a
+constant output path, the same class as the `cj_measured.txt` clobber in §5.
+The counts happened to be grepped before each overwrite, but nothing could be
+verified afterwards. Re-run with the arm in the filename and a **vacuity
+check**: an arm whose zeroing never printed is reported `*** VACUOUS` rather
+than counted as a result.
+
+### 4.4 What this does and does not say about the allowlist
+
+It removes the evidence that one of the six "write-before-read" reasons is
+false. It does **not** prove they are all true — only that these benches at
+these modes do not expose a violation. ⚠ One reason is independently suspect on
+inspection: `u_eng.fix` is `wire [SIW-1:0] fix = pl * SPL + ...` at
+`pe_engine.v:797`, a **combinational expression with no flop**, so the
+netlist-derived entry attributes some other 1-bit unreset flop to that name.
+
+### 4.5 ⛔ Running all three modes adds NO line or branch coverage
+
+Measured: the union over `+0/+1/+2` reaches 876 of 2727 points against 716 for
+`+0` alone — and **every one of those 160 points is a toggle point.** Line and
+branch are identical at 37 uncovered either way. Uncovered toggle goes 238 → 0
+in `pe_engine.v`, 74 → 0 in `project.v`, 45 → 1 in the I²C peer.
+
+The reason is immediate once seen: `rand+reset` sets every register bit to an
+arbitrary value, so nearly every bit *toggles* without the design doing
+anything. ⇒ **Toggle coverage at a randomised power-on measures the reset mode,
+not the stimulus.** Crediting it would raise the ratchet to a number no test
+earns, so the **adjudicated measurement is `+0` only**; the union is kept as
+`merged_allmodes.dat` for information. The three-mode run keeps its full value
+as the robustness gate ruling (c) asked for.
+
+### 4.6 `hdr_cyc` 92 vs 91: not the same root
+
+Ruling (c) asked whether the one-cycle cross-simulator disagreement shared the
+power-on cause. **It does not.** At the canonical point (SPL 2, default image,
+`NCYC=4000`, `WARMUP=200`):
+
+| | `hdr_cyc` |
+|---|---|
+| Verilator, rand-reset **+0 / +1 / +2** | **91**, identical at all three |
+| iverilog | **92** |
+
+`jobs 344`, `svc_cycles 688`, `cycles 4000` and both opcode rows agree exactly.
+So it is stable and reset-independent — a separate race, as the ruling
+anticipated.
+
+⚠ **My first re-measurement of this today was confounded** and I nearly
+reported it: `test/probe_cj_measured.txt` is a constant path written by *every*
+Verilator `tb_smoke` arm, so the SPL=1 arm had overwritten the default arm's
+numbers and the file read `spl 1 / jobs 345`. Comparing that against the SPL=2
+iverilog record compares two configurations. The same clobber class, a third
+time.
+
+**A hypothesis tested and falsified.** The loop does `@(posedge clk)` and then
+reads `dut.u_eng.hdr_done`, which the DUT assigns non-blockingly on that same
+edge — a classic nonblocking-visibility race. Adding a `#0.1` settling delay
+gives iverilog **91** and Verilator **90**: both shifted by one, **the gap
+preserved**. So that is not the cause, and adopting the delay would move pinned
+numbers (`jobs` 344 → 345 under Verilator) without fixing anything. Not
+adopted. **Root not isolated; it remains open.**
+
+⭐ The consequence is bounded, which is the part that matters for published
+work: `C_OCCUPANCY` is `svc_cycles/jobs` = 688/344 = 2.0000 under iverilog and
+689/345 = 1.9971 under Verilator — **2.00 at the published precision either
+way**, so the disagreement does not reach the derivation.
+
+## 4a. (superseded) The reset-mode divergence as first reported
 
 **The sweep runs at `+verilator+rand+reset+0`, and that is declared rather than
 assumed.** At `+1` (all ones) and `+2` (randomised) — **the setting this
