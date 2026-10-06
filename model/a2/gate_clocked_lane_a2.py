@@ -60,6 +60,7 @@ the whole lane was conservative then and is closer to exact now.
 
 from __future__ import annotations
 
+import io
 import os
 import sys
 
@@ -382,6 +383,75 @@ def main() -> int:
     print("      which the OTHER four rows are still the shipped ones. If the")
     print("      clocked scheme replaces more than the I2C lane, this is")
     print("      recomputed, not carried.")
+
+    # -----------------------------------------------------------------
+    # 6. A2 -- the bench's gap budget must still cover `r_i - C`
+    # -----------------------------------------------------------------
+    print()
+    print("  --- 6. the bench's post-HIGH gap budget, checked against A2 ---")
+    print("    ⛔⛔ THE CONSTANT LIVES IN THE BENCH AND IS CHECKED HERE. "
+          "`clocked_conform.vh`")
+    print("    bounds a post-HIGH gap at `d + L_SYNC + 1 + (r_i - C)`, and the")
+    print("    `r_i - C` term is an A2 number that the RTL cannot know. Copying")
+    print("    it into this gate as well would be the two-copies defect that")
+    print("    has already cost this project a published column, so the bench")
+    print("    HOLDS it and this gate PARSES and adjudicates it.")
+    vh = os.path.join(os.path.dirname(os.path.dirname(HERE)), "test",
+                      "clocked_conform.vh")
+    slack = None
+    try:
+        import re as _re
+        txt = io.open(vh, encoding="utf-8").read()
+        m = _re.search(r"localparam\s+integer\s+CK_GAP_SLACK\s*=\s*(\d+)",
+                       txt)
+        if m:
+            slack = int(m.group(1))
+    except Exception as exc:                            # noqa: BLE001
+        print("    *** FAIL could not read %s: %s" % (vh, exc))
+        rc = 1
+    if slack is None:
+        print("    *** FAIL no `CK_GAP_SLACK` localparam found in")
+        print("        test/clocked_conform.vh -- the bound this gate is")
+        print("        supposed to adjudicate is not there to read.")
+        rc = 1
+    else:
+        pick2 = "Fm+ 1 MHz" if "Fm+ 1 MHz" in results else next(iter(results),
+                                                                None)
+        if pick2 is None:
+            print("    *** FAIL no feasible mode to take r_i from")
+            rc = 1
+        else:
+            d2 = results[pick2][0]
+            ls2 = build(d2, tc[pick2]["t_LOW"])
+            # ⛔⛔ THE CLOCKED LANE'S OWN `r - C`, NOT THE MAX OVER THE SET,
+            # and the first version of this check took the max and failed at 13.
+            # The quantity being bounded is how late THE CLOCKED LANE's own
+            # post-HIGH dispatch can be served; UART-tx's 13 bounds UART-tx.
+            # ⭐ THE MEASUREMENT SETTLES IT: the observed gap margin topped out
+            # at exactly 8 = L_SYNC + 1 + 4, and 4 is this lane's r - C. A term
+            # taken from another lane would have been loose by 9 cycles and the
+            # bound would have stopped catching anything.
+            ck_lane = ls2[-1]
+            worst_rc = response_time_b(ck_lane, ls2)["r"] - ck_lane.C
+            need = L_SYNC + 1 + worst_rc
+            ok = slack >= need
+            if not ok:
+                rc = 1
+            print()
+            print("      %-26s %d" % ("CK_GAP_SLACK (bench)", slack))
+            print("      %-26s %d" % ("L_SYNC", L_SYNC))
+            print("      %-26s %d" % ("+ 1 (the dispatch)", 1))
+            print("      %-26s %d  (at %s)"
+                  % ("the clocked lane's r_i - C", worst_rc, pick2))
+            print("      %-26s %d   %s"
+                  % ("=> required", need,
+                     "ok -- the bench budget covers it" if ok
+                     else "*** FAIL the bench budget is TOO SMALL"))
+            if ok and slack == need:
+                print("      ⚠ EXACTLY EQUAL, so there is no slack above the")
+                print("        derivation. A red in the bench's A2 arm is a")
+                print("        request to RE-DERIVE this, never a licence to")
+                print("        raise the constant until it passes.")
 
     print()
     print("=" * 78)

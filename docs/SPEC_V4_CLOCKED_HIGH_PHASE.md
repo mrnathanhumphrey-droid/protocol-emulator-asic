@@ -382,3 +382,92 @@ minimum low of 65, so a high phase of `d/2` — a wire shift, zero flops — wou
 roughly reach Fm nominal. It is not valid for Sm, which needs a near-symmetric
 clock and already runs at 100 kHz. It needs a selector bit (header or global),
 so it waits on an encoding decision.
+
+---
+
+## 11. A1 / A2 — teeth for what was accepted
+
+### A1 — head-slot stability across a clocked park
+
+F1's rebase reads the parked lane's delay out of `l_act[hix[gi]]`, and that costs
+**zero flops** only because a held clocked action does not invalidate its slot.
+The whole saving rests on an *emptiness* — on an `ST_WB` arm that does nothing —
+and an emptiness cannot be read as deliberate. So the action word is snapshotted
+when a clocked action begins and compared on every re-dispatch: **884 / 1229
+re-dispatches stable**.
+
+⚠ **It false-fired on the clean build first.** The snapshot sat after the
+if/else, so at the *retiring* dispatch it cleared `ca_have` and immediately
+re-took the snapshot with the outgoing action's word — and the next action
+compared itself against its predecessor. A check that fires on a correct design
+is worse than no check: it trains the reader to ignore it.
+
+⛔ **The must-fire took three attempts, and the failures are the result.**
+
+| mutant | fires A1? | why |
+| --- | --- | --- |
+| `M_CK_HOLD_INVAL` (invalidate on hold) | **no** | the PC does not advance during a hold, so the prefetch re-reads the same address and restores an *identical* word |
+| advance the PC on hold | **no** | the slot stays **valid**, so no refill happens and nothing is re-read |
+| `M_CK_HOLD_RETIRES` (both) | **yes** | slot goes free *and* the PC moves, so the refill brings the next action's word |
+
+`M_CK_HOLD_INVAL` is kept as its own arm with that recorded. It is not harmless —
+it costs a refill per **dispatch** instead of per **action**, which is exactly
+the port demand Amendment A1 says a re-dispatch does not owe, and it moved
+re-dispatch counts 1229 → 1061 on `corpus_i2c`. It is a `D*` defect, not a
+delay-corruption one. ⭐ A mutant that does not fire is a statement about the
+design, not a failed attempt to be deleted — and a must-fire has to be built
+against the **mechanism**, not against the name of the invariant.
+
+### A2 — the upper bound, measured from the observed rise
+
+`gap ≤ d + L_SYNC + 1 + (r_i − C)` = **d + 8**, derived first and then confirmed:
+the measured post-rise lateness tops out at **4..6** against the budget of 8.
+`M_CK_REBASE_2D` fires it (306/306 and 552/552) while `t_HIGH ≥ d`, G1's lower
+bound and the UM10204 hold floor all stay green — which is the whole argument
+for bounding both sides.
+
+⚠ **The first version measured from the HIGH dispatch and was wrong**: that gap
+*contains* the peer's stretch, so a 200-cycle hold inflates it legitimately. It
+fired 684 times across the sweep on arms that were behaving correctly, three of
+which exist precisely to stretch the clock. F1 counts the high period from the
+rise it *sees*, so the bound starts there too and the stretch is excluded by
+construction rather than by a term that would have to guess at it.
+
+**The constant lives in the bench; `gate_clocked_lane_a2.py` parses and
+adjudicates it** rather than holding a second copy. That cross-check caught an
+error on its first run: it took `max(r_i − C)` over the whole lane set (**13**,
+from UART-tx) when the bound is on the *clocked lane's own* lateness (**4**). A
+term from another lane would have been loose by 9 cycles and the bound would
+have stopped catching anything. The measurement settled it — 8 = 3 + 1 + 4
+exactly.
+
+### ⛔⛔ The same category error, three times in one arc
+
+Written down because once is a slip and three times is a habit:
+
+1. A **d = 25** lane failed for missing **Sm's** 250 ns setup — a requirement
+   that only applies at 100 kHz.
+2. The budget cross-check took **`max(r_i − C)` over every lane** when the bound
+   is on one lane's own lateness.
+3. The shipped set's `r_i − C = 4` was checked against **`corpus_all5`**, a
+   five-lane stress image whose own post-rise lateness measures **19**.
+
+Each is the same shape: a bound derived for one configuration applied to
+another, which reads as a design violation when it is a mismatched comparison.
+
+⇒ **Only the verdict is scoped, never the measurement.** `+A2BOUND=1` enforces
+the bound on the one arm whose lane set A2 models; every other arm still
+measures and reports its widest post-rise lateness, so `corpus_all5`'s 19 stays
+in the log instead of being scoped out of existence. ⚠ If that lane set ever
+becomes something we ship, A2's `r_i − C` needs re-deriving for it and the bound
+with it.
+
+### Harness friction, observed not fixed
+
+Every RTL edit in this arc shifted the coverage gate's line anchors, and
+`reanchor.py` ran five times (11 / 6 / 13 anchors, by measured shift). The tool
+behaves correctly — it refuses on ambiguity rather than guessing — but the loop
+is *edit RTL → suite red on anchors → reanchor → re-run the ten-minute suite*,
+and two full suite runs went to nothing but anchor arithmetic. Keying the table
+on anchor **text** with the line as a hint, rather than the reverse, would
+absorb the shift. Recorded as an observation about the harness; not changed.

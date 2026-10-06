@@ -342,7 +342,13 @@ def corpus_arms():
                 ["+IMG=test/ckod_image.hex", "+PEER=none",
                  "+OUT=probe_cov_trace_ckod.txt",
                  "+NCYC=200000", "+SEED=1", "+ASYNC=0",
-                 "+STAYLOAD=0", "+SCLHOLD=0"]))
+                 "+STAYLOAD=0", "+SCLHOLD=0",
+                 # ⭐ THE ONE ARM THAT ENFORCES A2's UPPER BOUND. Its lane
+                 # set is the one A2 models, so `L_SYNC + 1 + (r_i - C) = 8`
+                 # is its number. Every other arm MEASURES the same quantity
+                 # and reports it without a verdict -- see
+                 # `clocked_conform.vh`'s A2 header.
+                 "+A2BOUND=1"]))
     out.append(("corpus_i2c_sclhold",
                 ["+IMG=test/corpus_i2c.hex", "+PEER=i2c",
                  "+OUT=probe_cov_trace_i2c_sclhold.txt",

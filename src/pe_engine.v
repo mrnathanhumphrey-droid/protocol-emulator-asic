@@ -841,6 +841,10 @@ module pe_engine #(
   // cases.
   // ⛔ M_CK_RISE_ELIGIBLE restores the pre-fix behaviour so the compliance
   // checker has a must-fire: under it t_HIGH is the synchroniser latency again.
+  // ⛔ M_CK_REBASE_2D releases at `rise + 2d` instead, which is the "too LATE"
+  // direction. It prices A2's UPPER bound: `t_HIGH >= d` is still satisfied, so
+  // G1 and the UM10204 floor both stay green while the clock period is wrong --
+  // which is precisely why a one-sided bound is half a check.
   wire [TS_W-1:0] ck_rebase [0:N_LANES-1];
   generate
     for (gi = 0; gi < N_LANES; gi = gi + 1) begin : g_arm
@@ -898,7 +902,9 @@ module pe_engine #(
       // the delay field of the action this lane is currently clocking
       assign ck_dly[gi] = l_act[hix[gi]][BQW+BPW +: DLY_W];
       assign ck_hold_fits[gi] = (ck_dly[gi] > SDA_HOLD[DLY_W-1:0]);
-`ifdef M_CK_RISE_ELIGIBLE
+`ifdef M_CK_REBASE_2D
+      assign ck_rebase[gi] = now + {{(TS_W-DLY_W-1){1'b0}}, ck_dly[gi], 1'b0};
+`elsif M_CK_RISE_ELIGIBLE
       assign ck_rebase[gi] = now;
 `else
       assign ck_rebase[gi] = now + (l_ckpark[gi] ? {{(TS_W-DLY_W){1'b0}}, ck_dly[gi]} : {TS_W{1'b0}});
@@ -2308,6 +2314,42 @@ module pe_engine #(
           if (ck_hold_eff) begin
             // a held clocked action retires NOTHING: no PC advance, no
             // invalidation, no buffer swap. Amendment A1 in silicon.
+            // ⛔⛔ AND F1's ZERO-FLOP REBASE RESTS ON THAT, which is why the
+            // emptiness of this arm is now a CHECKED invariant rather than a
+            // comment. `ck_dly` reads the lane's delay out of
+            // `l_act[hix[gi]]` during the park -- sound only because a held
+            // action does not invalidate its slot, so the prefetch cannot
+            // refill it with the NEXT action's word underneath the park. If it
+            // ever did, the park would release on some other action's delay.
+            // ⛔ M_CK_HOLD_RETIRES MAKES A HELD ACTION RETIRE LIKE A NORMAL
+            // ONE -- invalidate AND advance the PC -- and that is the mutation
+            // that actually reaches the hazard: the slot goes free, the
+            // prefetch refills it from the NEW pc, and the parked lane
+            // releases on a delay belonging to the NEXT action.
+            // ⚠ IT TAKES BOTH LINES, AND FINDING THAT OUT COST TWO ATTEMPTS.
+            // Invalidating alone leaves the PC put, so the refill re-reads the
+            // same address and restores an identical word. Advancing the PC
+            // alone leaves the slot VALID, so no refill happens at all and
+            // nothing is re-read. Only together do they change what the park
+            // reads -- which is why a must-fire has to be built against the
+            // MECHANISM rather than against the name of the invariant.
+            // ⚠ M_CK_HOLD_INVAL -- invalidating the slot on a hold -- was
+            // tried FIRST as the must-fire and DOES NOT break A1, which is
+            // worth recording rather than discarding. Because the PC does not
+            // advance during a hold, the prefetch re-reads the SAME address
+            // and restores an IDENTICAL word, so the delay the park reads is
+            // still right. It is not harmless -- it costs a refill per
+            // DISPATCH instead of per ACTION, which is precisely the port
+            // demand Amendment A1 says a re-dispatch does not owe, and it
+            // moved re-dispatch counts 1229 -> 1061 on `corpus_i2c` -- but it
+            // is a `D*`/port defect, not a delay-corruption one.
+`ifdef M_CK_HOLD_INVAL
+            l_actv[hix[cur]] <= 1'b0;
+`endif
+`ifdef M_CK_HOLD_RETIRES
+            l_actv[hix[cur]] <= 1'b0;
+            l_pc[cur] <= l_pc[cur] + ACT_BYTES[AW-1:0];
+`endif
           end else if (a_op != OP_REARM) begin
             l_pc[cur]   <= l_pc[cur] + ACT_BYTES[AW-1:0];
 `ifndef M_BUF_NOINVAL

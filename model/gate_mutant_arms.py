@@ -131,6 +131,48 @@ EXPECT = {
         "reports OK in every one of those runs, because the DISPATCH COUNT is "
         "unchanged by a stretch -- which is the point of capturing on the rise, "
         "and also why bit loss needs its own check and not a conformance one."),
+    "M_CK_HOLD_RETIRES": (2,
+        "TWO LINES IN ONE ARM, added to an EMPTY clean arm: a held clocked "
+        "action retires like a normal one -- invalidate AND advance the PC. "
+        "⛔ IT IS THE MUTATION THAT REACHES F1's HAZARD: the slot goes free, "
+        "the prefetch refills it from the NEW pc, and the parked lane releases "
+        "on a delay belonging to the next action. ⚠ IT TAKES BOTH LINES AND "
+        "THAT COST TWO ATTEMPTS TO ESTABLISH. Invalidating alone leaves the PC "
+        "put, so the refill restores an identical word; advancing the PC alone "
+        "leaves the slot valid, so no refill happens and nothing is re-read. "
+        "Neither single-line mutant fires A1. ⭐ A must-fire has to be built "
+        "against the MECHANISM, not against the name of the invariant -- and a "
+        "mutant that does not fire is a statement about the design worth "
+        "recording, not a failed attempt to be deleted."),
+    "M_CK_HOLD_INVAL": (1,
+        "ONE LINE IN ONE ARM: the clean arm is EMPTY, because a held clocked "
+        "action is defined by retiring nothing, so the mutant adds the "
+        "invalidation rather than replacing anything. ⛔ WHAT IT BREAKS IS "
+        "F1's ZERO-FLOP REBASE, which reads the parked lane's delay out of "
+        "`l_act[hix[gi]]` and is sound ONLY because a held action leaves its "
+        "slot valid. Under the mutant the prefetch refills the head slot with "
+        "the NEXT action's word while the park is still waiting, so the lane "
+        "releases on a delay belonging to a different action. ⚠ IT IS INVISIBLE "
+        "TO EVERY COUNT-BASED CHECK -- the dispatch count is unchanged and the "
+        "clock still looks like a clock -- which is why "
+        "`clocked_conform.vh`'s A1 arm snapshots the word and compares it on "
+        "every re-dispatch. ⭐ The whole saving rested on an arm that does "
+        "nothing, and an emptiness cannot be read as deliberate; now it is "
+        "checked. ⚠⚠ MEASURED: THIS MUTANT DOES **NOT** FIRE A1, and that is "
+        "recorded rather than hidden. The PC does not advance during a hold, so "
+        "the prefetch re-reads the same address and restores an IDENTICAL "
+        "word -- the delay the park reads stays correct. What it really breaks "
+        "is Amendment A1's PORT premise: a refill per DISPATCH instead of per "
+        "ACTION, and re-dispatch counts moved 1229 -> 1061 on `corpus_i2c`. "
+        "`M_CK_HOLD_PCADV` is the arm that reaches the delay hazard."),
+    "M_CK_REBASE_2D": (2,
+        "ONE LINE IN EACH ARM, against the SAME `ck_rebase` wire its sibling "
+        "mutates -- `rise + 2d` instead of `rise + d`. ⛔ IT IS THE 'TOO LATE' "
+        "DIRECTION, AND NOTHING ELSE CATCHES IT: `t_HIGH >= d` still holds, so "
+        "G1's lower bound stays green and the UM10204 hold floor stays green, "
+        "while the clock period is simply wrong. ⭐ That is the argument for "
+        "bounding the gap on BOTH sides -- a one-sided bound is half a check, "
+        "and this arm is what makes the other half non-vacuous."),
     "M_CK_RISE_ELIGIBLE": (2,
         "ONE LINE IN EACH ARM: `ck_rebase` is a wire, so the mutant drops the "
         "`+ d` and rebases a parked clocked lane to `now`. ⛔ WHAT IT BREAKS IS "
