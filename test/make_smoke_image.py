@@ -246,7 +246,33 @@ def build_ckfive(delays):
 #: NOT A POINT, because the defect it exists to catch was a high phase that did
 #: not move with `d` at all: measuring at one delay cannot tell "t_HIGH = d"
 #: from "t_HIGH happens to equal d here".
-CKOD_DELAYS = [9, 25, 60, 120]
+#:
+#: ⛔⛔ THE LOW END WAS 9 AND IS NOW 25, AND THE REASON IS DERIVED RATHER THAN
+#: CONVENIENT. The SDA data hold (ruling H) gives a data-driving clocked lane a
+#: MINIMUM legal delay: the hold has to fit inside the low phase and still
+#: leave `t_SU;DAT` before the rise, so `d > SDA_HOLD + t_SU;DAT(min)` -- 18
+#: cycles at Fm+, 20 at Fm, 28 at Sm. At `d = 9` with `SDA_HOLD = 15` the held
+#: value lands AFTER the next rise, which is data changing while SCL is high:
+#: MEASURED at 613 such transitions out of 1718 clock periods. That is a harder
+#: violation than the one the hold fixes -- to any receiver it is a START or a
+#: STOP.
+#: ⚠ SO `d = 9` IS NOT A LEGAL DELAY FOR THIS IMAGE ANY MORE, and removing it
+#: is not tuning a test to pass: 9 cycles is a 2.7 MHz clock, above every I2C
+#: mode, and it was only ever here to widen the span. 33..240 is 7.3x, which
+#: distinguishes "t_HIGH tracks d" from "t_HIGH is flat at 6" exactly as well.
+#:
+#: ⭐⭐ AND THE LOW END IS 33, NOT THE BARE t_LOW MINIMUM OF 25, BECAUSE
+#: THE MEASUREMENT SAID SO. At `d = 25` the observed t_LOW came out 23 -- EDF
+#: service jitter eats into the low phase, which is the C2 finding -- so a
+#: 25-cycle delay does not actually claim Fm+ and the mode-dependent checks
+#: had to skip it. 33 is the SHIPPABLE Fm+ delay derived in
+#: `gate_clocked_lane_a2.py` (the margin-bar fixed point), so every lane in
+#: this image is now a configuration that could really ship.
+#: ⛔ THE MODE t_LOW FLOORS (25 / 65 / 235) ALL CLEAR THE HOLD MINIMUM, so no
+#: mode-legal program is affected -- but a program CAN still ask for a delay
+#: below it, and whether silicon should refuse that is OWED a ruling. It is the
+#: silent-corruption class: the wire carries a well-formed frame of wrong data.
+CKOD_DELAYS = [33, 60, 120, 240]
 
 
 def build_ckod(delays=None):

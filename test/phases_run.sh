@@ -80,6 +80,16 @@ rc=0
 echo "  --- building ---"
 build_arm clean  ""                          || rc=1
 build_arm mutant "-DM_CK_RISE_ELIGIBLE"      || rc=1
+# ⛔⛔ THE TWO t_HD;DAT MUST-FIRE BUILDS (H3). `SDA_HOLD` is a PARAMETER and not
+# an `ifdef`, so each is an ordinary build with one number changed:
+#   hold0   -- restores the MEASURED defect (SDA moves in the same cycle SCL
+#              falls), which must fail the >= 15 cycle requirement at every d.
+#   holdbig -- a hold so long that `t_HD;DAT + t_r` runs past `t_VD;DAT`, which
+#              must fail at Fm+ where that budget is tightest. ⭐ A requirement
+#              with a floor and no ceiling is half a requirement: without this
+#              arm the gate would accept any hold at all above 15.
+build_arm hold0   "-GSDA_HOLD_NS=0"                 || rc=1
+build_arm holdbig "-GSDA_HOLD_NS=800"                || rc=1
 [ $rc -eq 0 ] || { echo "  *** a build failed; no measurement"; exit 1; }
 echo "    clean + mutant built"
 echo
@@ -96,6 +106,26 @@ run_arm clean  "$CTRL" "$NC" 40000 control        || rc=1
 run_arm clean  "$IMG"  "$NB" 40000 stretch_mid  200   || rc=1
 run_arm clean  "$IMG"  "$NB" 40000 stretch_long 4000  || rc=1
 run_arm mutant "$IMG"  "$NB" 40000 mutant         || rc=1
+run_arm hold0   "$IMG" "$NB" 40000 hold0         || rc=1
+run_arm holdbig "$IMG" "$NB" 40000 holdbig       || rc=1
+# ⛔⛔ THE CERTIFIED TWO-ACTION FRAME, MEASURED ON THE SAME INSTRUMENT (H4).
+# `build_i2cframe` drives SCL with explicit OP_LEVEL actions and its SHIFTs
+# carry lvl=0, so it is NOT the clocked scheme -- but its own docstring says it
+# "puts the data bit on SDA and takes SCL LOW in one dispatch", which is the
+# same shape as the clocked defect. Whether the certified frame violates
+# t_HD;DAT is therefore a question to MEASURE, not to assume either way, and
+# sigrok's decode certification says nothing about it.
+"$PY" test/make_smoke_image.py --i2cframe 62 >> "$OUT/img.log" 2>&1
+CERT=test/i2cframe_image.hex
+if [ -f "$CERT" ]; then
+  NCERT=$(tr -s ' 
+' '
+' < "$CERT" | grep -cv '^$')
+  run_arm clean "$CERT" "$NCERT" 40000 certified || rc=1
+else
+  echo "  *** the certified frame image is absent; H4 NOT MEASURED"
+  rc=1
+fi
 
 echo
 if [ $rc -eq 0 ]; then

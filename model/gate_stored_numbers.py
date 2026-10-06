@@ -267,6 +267,15 @@ SPEC_SYMBOLS = {
     # the same three numbers, which a transcription slip would have had to
     # survive twice.
     ("model/a2/gate_um10204.py", "UM10204"),
+    # ⭐ THE SAME TABLE'S MAXIMA -- `t_VD;DAT` and `t_r` per mode. They bound
+    # the data hold from ABOVE, and they are requirements for exactly the same
+    # reason the minima are: transcribed from UM10204, not derivable here, and
+    # nothing in this repo may adjust them. ⛔ THEY EXIST BECAUSE A FLOOR
+    # WITHOUT A CEILING IS HALF A REQUIREMENT: with only the minima the gate
+    # would accept any hold above 15 cycles, including one long enough to push
+    # the data change past the next clock rise -- a worse defect than the one
+    # the hold fixes.
+    ("model/a2/gate_um10204.py", "UM10204_MAX"),
     # ⭐ THE DELAY SPAN THE HIGH-PHASE INSTRUMENT SWEEPS. An experiment design,
     # not an observation: four periods spanning 13x, chosen because the defect
     # being caught was a high phase that did not move with `d` AT ALL, and a

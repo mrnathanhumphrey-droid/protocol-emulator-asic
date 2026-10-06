@@ -153,25 +153,75 @@ def measure(trace, image):
         # are released high before the program runs) and the last is truncated
         # by the cycle limit. Neither is a phase the design produced.
         body = rr[1:-1] if len(rr) > 2 else rr
-        hi = [k for v, k, _s in body if v == "1"]
-        lo = [k for v, k, _s in body if v == "0"]
+        # ⛔⛔ MEASURE ONLY COMPLETE CLOCK PERIODS, by a structural rule rather
+        # than a tuned window. A LOW run counts as a t_LOW only when a HIGH
+        # follows it AND another LOW follows that -- which is what proves the
+        # high phase ended in a FALL rather than in the lane going quiescent.
+        # ⚠ WHY: the phases at the EDGES of a program are not clock periods at
+        # all. The first low run after the bus leaves load mode is the tail of
+        # the release, and the last one ends because the lane stopped clocking.
+        # Measured, the tail showed up as a lone short outlier -- lane 3's
+        # t_LOW histogram was [[14,1],[92,1],[120,6]] with t_HIGH a clean 125
+        # on all seven, and the 14 was the final low run before a
+        # 38,139-cycle idle high.
+        # ⛔ IT EXCLUDES NON-PERIODS, NOT SHORT VALUES. A genuinely short low
+        # phase in the middle of a program sits inside a complete period and is
+        # still measured. The first attempt at this fix dropped a LEADING low
+        # run, which was the wrong end and changed nothing -- recorded because
+        # a rule that does not bite looks exactly like one that did.
+        periods = []
+        for j in range(len(body) - 2):
+            if (body[j][0] == "0" and body[j + 1][0] == "1"
+                    and body[j + 2][0] == "0"):
+                periods.append((body[j], body[j + 1]))
+        lo = [p[0][1] for p in periods]
+        hi = [p[1][1] for p in periods]
         # ---- data setup and hold, against the clock's own edges ----
         sda_tr = [i for i, _v in transitions(sda)]
         su, hd = [], []
-        for v, _k, s in body:
-            if v == "1":                       # an SCL RISE at cycle s
-                prev = [t for t in sda_tr if t <= s]
-                if prev:
-                    su.append(s - prev[-1])
-            else:                              # an SCL FALL at cycle s
-                nxt = [t for t in sda_tr if t >= s]
-                if nxt:
-                    hd.append(nxt[0] - s)
+        n_high_moves = [0]      # SDA transitions during a clock HIGH phase
+        for low, high in periods:
+            s_fall = low[2]                    # the LOW run begins at the fall
+            s_rise = high[2]                   # the HIGH run begins at the rise
+            prev = [t for t in sda_tr if t <= s_rise]
+            if prev:
+                su.append(s_rise - prev[-1])
+            # ⛔⛔ t_HD;DAT IS ONLY DEFINED WHERE SDA ACTUALLY MOVES, and the
+            # first version of this got it wrong in the flattering direction.
+            # It took the next SDA transition after the fall WHEREVER it was,
+            # so on a lane whose consecutive bits happen to be equal the answer
+            # was the distance to some later bit -- lane 3 reported 489 cycles
+            # of "hold" on the ZERO-HOLD build, which would have read as the
+            # requirement being met by a design that does not meet it.
+            # ⇒ The transition must fall inside THIS bit period (after the
+            #   fall, before the rise). If SDA does not move, there is no hold
+            #   to measure -- the data was already stable, which is not a
+            #   violation and must not be recorded as a passing measurement
+            #   either.
+            inside = [t for t in sda_tr if s_fall <= t < s_rise]
+            if inside:
+                hd.append(inside[0] - s_fall)
+            # ⛔⛔ SDA MOVING WHILE SCL IS HIGH IS A HARD PROTOCOL VIOLATION,
+            # and it is counted separately because its ABSENCE from `hd` reads
+            # like no data rather than like bad data. UM10204: data may change
+            # only while SCL is low; a change during the high phase is a START
+            # or a STOP to any receiver.
+            # ⚠ IT IS REACHABLE FROM THE HOLD ITSELF. If `SDA_HOLD` exceeds the
+            # lane's low phase, the held value lands AFTER the next rise -- so
+            # a fix for the hold requirement can create this violation, which is
+            # exactly why it is measured and not reasoned about. MEASURED: at
+            # d = 9 with SDA_HOLD = 15 the clocked lane reports NO in-period
+            # transition at all, because every one of them moved late.
+            nxt_fall = s_rise + high[1]
+            moved_high = [t for t in sda_tr if s_rise <= t < nxt_fall]
+            n_high_moves[0] += len(moved_high)
         row = dict(l)
         row["t_HIGH"] = stats(hi)
         row["t_LOW"] = stats(lo)
         row["t_SU_DAT"] = stats(su)
         row["t_HD_DAT"] = stats(hd)
+        row["sda_moves_in_high"] = n_high_moves[0]
+        row["periods"] = len(periods)
         out.append(row)
     return out
 

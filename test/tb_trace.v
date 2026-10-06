@@ -477,13 +477,18 @@ module tb_trace;
   // is NOT touched: the arm tests the mechanism, not a different number.
   parameter integer CK_PRE = 16384;
 
+  // ⛔ THE SDA DATA HOLD, overridable so the t_HD;DAT requirement is priced at
+  // BOTH ends: 0 restores the measured defect, 40 runs past `t_VD;DAT` at Fm+.
+  parameter integer SDA_HOLD_NS = 300;
+
   // THE HOST CHANNEL (Wilson's ruling 0). Every corpus program shifts, and
   // until now every one of those shifts found an empty queue and took the
   // UNDERRUN branch -- so the cycle-exact two-simulator agreement and the
   // cross-seed sweep were established on the STARVED path. Feeding them is
   // what makes those claims about the payload path they were read as covering.
   // The include is placed AFTER the dut because it references `dut.tx_cnt`.
-  tt_um_protocol_emulator #(.SPL(SPL_CFG), .CK_STRETCH_PRE(CK_PRE)) dut (
+  tt_um_protocol_emulator #(.SPL(SPL_CFG), .CK_STRETCH_PRE(CK_PRE),
+                            .SDA_HOLD_NS(SDA_HOLD_NS)) dut (
       .ui_in(ui_in), .uo_out(uo_out),
       .uio_in(uio_in), .uio_out(uio_out), .uio_oe(uio_oe),
       .ena(ena), .clk(clk), .rst_n(rst_n)

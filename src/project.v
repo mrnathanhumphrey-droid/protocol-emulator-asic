@@ -104,6 +104,10 @@ module tt_um_protocol_emulator #(
     // ⛔ fixed at build time because the async release path cannot be muxed
     // the clock-stretch BUS-FAULT bound: 35 ms at 50 MHz (the SMBus figure),
     // as 107 ticks of a 16384-cycle prescaler. See src/pe_engine.v.
+    // ⛔ PASSED THROUGH so the two t_HD;DAT must-fire builds are ordinary
+    // builds with one number changed: `-GSDA_HOLD=0` restores the measured
+    // zero-hold defect, `-GSDA_HOLD=40` runs past `t_VD;DAT` at Fm+.
+    parameter integer SDA_HOLD_NS = 300,
     parameter integer CK_STRETCH_PRE = 16384,
     parameter integer CK_STRETCH_TO  = 107,
     parameter integer MISO_PIN = 7,     // uio index of the SPI-target MISO
@@ -428,7 +432,11 @@ module tt_um_protocol_emulator #(
       .TS_W(TS_W), .DLY_W(DLY_W), .D_W(D_W), .SPL(SPL),
       // ⭐ PASSED THROUGH so a bench can shorten the prescaler and reach the
       // bus-fault bound in hundreds of cycles instead of 1.75 million.
-      .CK_STRETCH_PRE(CK_STRETCH_PRE), .CK_STRETCH_TO(CK_STRETCH_TO)
+      .CK_STRETCH_PRE(CK_STRETCH_PRE), .CK_STRETCH_TO(CK_STRETCH_TO),
+      // ⭐ PASSED THROUGH so a bench can build the zero-hold defect and an
+      // over-long hold, which is what prices the t_HD;DAT requirement at both
+      // ends rather than only at its floor.
+      .SDA_HOLD_NS(SDA_HOLD_NS)
   ) u_eng (
       .clk(clk), .rst_n(rst_n), .run(run),
       .s_raddr(e_raddr), .s_re(e_re), .s_rdata(s_rdata),

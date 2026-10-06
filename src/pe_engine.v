@@ -76,6 +76,52 @@ module pe_engine #(
     // bank has no enable. So the boundary is a parameter rather than knowledge
     // the engine helps itself to.
     parameter integer N_UIO    = 8,
+    // ⛔⛔⛔ SDA DATA HOLD ACROSS THE SCL FALL -- UM10204's DEVICE-INTERNAL
+    // REQUIREMENT, AND A MEASURED VIOLATION BEFORE THIS EXISTED. A clocked LOW
+    // dispatch drove the data pin and took the clock pin low IN THE SAME
+    // CYCLE, so the data hold was ZERO: measured t_HD;DAT = 0 over 1719, 696
+    // and 296 transitions on the clocked image, AND over 266 on the CERTIFIED
+    // two-action frame, which has the same shape. UM10204 Table 10 tabulates
+    // t_HD;DAT min = 0 ns, so 0 meets the TABLE -- but the table's own note
+    // requires a device to internally provide >= 300 ns (15 cycles at 50 MHz)
+    // so SDA bridges the undefined region of SCL's falling edge.
+    // ⚠ THE HAZARD IS CONCRETE, NOT A FORMALITY: SCL takes up to 300 ns (Fm)
+    // to fall through a receiver's undefined region. If SDA moves in the same
+    // cycle we pull SCL low, a receiver can see SDA change while it still
+    // reads SCL high -- which is a START or a STOP. On a FRAM that aborts the
+    // transfer at best and corrupts the write at worst.
+    // ⭐ ONE GLOBAL CONSTANT, NO ENCODING BITS: `ACT_FIELDS` is 24 of 24 bits
+    // and nothing is spare, so this is a build parameter rather than a field.
+    // ⭐ A PARAMETER AND NOT AN `ifdef` so both must-fires are ordinary builds:
+    // `-GSDA_HOLD=0` restores the measured defect, and a too-large hold runs
+    // past `t_VD;DAT`. ⚠ IT MUST STAY BELOW THE LANE'S `d`, or a hold would
+    // still be pending when the next action drives the same pin; the mode
+    // floors (Fm+ 25) all clear 15 with room.
+    // ⛔⛔ OPEN-DRAIN ONLY, AND THAT IS SCOPE RATHER THAN CONVENIENCE. The
+    // requirement is UM10204's, which is I2C, which is open-drain. A push-pull
+    // SPI lane's setup and hold are governed by the PART's SPI AC table -- the
+    // same table the SPI-tx lane's `D_tol = 23` is already derived from -- and
+    // SPI changes data on a clock edge BY DESIGN, with no undefined-region
+    // START/STOP hazard to bridge. Charging an I2C hold to an SPI lane would
+    // be applying one standard's rule to another standard's wire.
+    // ⚠ WHAT MADE ME CHECK THE SCOPE: with the hold applied unconditionally,
+    // the PUSH-PULL control image grew eight 15-cycle clock-low phases that
+    // the zero-hold build does not have. The hold's direct effect was exactly
+    // the intended 15 cycles on the DATA pin, and the clock pin's release
+    // pattern was identical in both builds (17 transitions), so the phase of
+    // an action-boundary artifact had shifted rather than anything breaking.
+    // ⛔ I DID NOT FULLY EXPLAIN THAT INTERACTION, and it is recorded rather
+    // than smoothed over: scoping the hold to open-drain puts it out of reach
+    // of every push-pull lane instead of accounting for it. If a push-pull
+    // lane ever needs a data hold, this is owed an explanation first.
+    // ⭐⭐ EXPRESSED AS A TIME, NOT A CYCLE COUNT, and that is the honest
+    // form: the requirement is 300 ns, and "15 cycles" is only correct at
+    // 50 MHz. `part1_param_contract` flags a bare protocol constant in the
+    // RTL -- correctly, since 15 is one -- and writing the ns requirement with
+    // the clock period makes the cycle count DERIVED and the design portable
+    // to another clock rate without editing a magic number.
+    parameter integer SDA_HOLD_NS   = 300,
+    parameter integer CLK_PERIOD_NS = 20,
     parameter integer TS_W    = 16,
     parameter integer DLY_W   = 10,
     parameter integer D_W     = 8,
@@ -467,6 +513,34 @@ module pe_engine #(
   wire            ck_tick = ck_any_park & (ck_pre >= CK_STRETCH_PRE[13:0] - 14'd1);
   reg             l_cksamp [0:N_LANES-1];   // the bit latched AT the rise
   reg             l_ckgot  [0:N_LANES-1];   // ... and it is unconsumed
+  // ⛔⛔ THE SDA HOLD PIPELINE (ruling H). A dispatch that takes the clock pin
+  // LOW no longer writes the data pin: it LOADS the value here, and the pin is
+  // written `SDA_HOLD` cycles later. The clock still moves immediately, so the
+  // data change lands AFTER the fall, which is the whole requirement.
+  // ⭐⭐ THE HOLD BECOMES THE ONLY WRITER FOR THAT PATH, which is what makes it
+  // safe: with the direct write removed there is no same-cycle race between a
+  // dispatch and an expiry for the data pin, and no second always block (a
+  // second writer of `pin_out` would be N_PINS multiple-driver nets -- the
+  // defect that made this engine unsynthesizable once while simulating fine).
+  // ⭐ THE PIN INDEX IS **NOT** STORED: the lane's data pin is already in
+  // `l_pin[i]`, which a held action cannot change (it retires nothing). Storing
+  // it would have cost another PINW bits per lane for a value already in a
+  // register -- the same reasoning as `ck_dly` reading the head slot.
+  // ⇒ COST: SDA_HOLD = 15 needs HOLDW = 4, so 4 + 1 + 1 = 6 bits per lane and
+  //   30 flops at N_LANES = 5. Measured against the alternative of storing the
+  //   pin index too, which would have been 50.
+  // ceil(SDA_HOLD_NS / CLK_PERIOD_NS) -- a minimum is not met by rounding down
+  localparam integer SDA_HOLD = (SDA_HOLD_NS + CLK_PERIOD_NS - 1)
+                                / CLK_PERIOD_NS;
+  localparam integer HOLDW = (SDA_HOLD < 2)   ? 1 :
+                             (SDA_HOLD < 4)   ? 2 :
+                             (SDA_HOLD < 8)   ? 3 :
+                             (SDA_HOLD < 16)  ? 4 :
+                             (SDA_HOLD < 32)  ? 5 :
+                             (SDA_HOLD < 64)  ? 6 : 7;
+  reg [HOLDW-1:0] l_hcnt   [0:N_LANES-1];   // cycles left before SDA may move
+  reg             l_hval   [0:N_LANES-1];   // the pending pin_out value
+  reg             l_hoe    [0:N_LANES-1];   // the pending pin_oe value
   reg [7:0]       l_tx     [0:N_LANES-1];   // THE TX PAYLOAD lives here, not
                                             //   in the program (ruling F1)
   reg [7:0]       l_rx     [0:N_LANES-1];   // the RX accumulator
@@ -717,6 +791,25 @@ module pe_engine #(
   // to be rediscovered: if a held action ever began invalidating its slot, this
   // would silently read the NEXT action's delay.
   wire [DLY_W-1:0] ck_dly [0:N_LANES-1];
+  // ⛔⛔⛔ THE HOLD IS CLAMPED OUT WHEN IT WOULD NOT FIT, and this is a
+  // CORRECTNESS clamp rather than a tidy-up. A hold longer than the action's
+  // own delay lands the data AFTER the next clock rise -- data moving while
+  // SCL is high, which to any receiver is a START or a STOP. That is a WORSE
+  // defect than the zero hold it replaces, so the fix must not be able to
+  // create it.
+  // ⚠ MEASURED, AND IT COST A PAID TEST BEFORE THE CLAMP EXISTED: `corpus_i2c`
+  // runs at d = 9, below the 15-cycle hold, and with the hold applied
+  // unconditionally the I2C peer stopped decoding -- the STRETCHING peer held
+  // SCL low for 242 cycles without the hold and for 0 cycles with it, so two
+  // `fram_i2c` stretch branches went dark. A regression visible only because
+  // the coverage debt is recorded.
+  // ⭐ WHAT THE CLAMP DOES **NOT** DO: it does not make such a program
+  // compliant. A lane whose delay cannot fit the hold keeps its old
+  // zero-hold behaviour and `gate_um10204` reports it as BELOW the
+  // requirement -- the violation stays visible instead of being converted
+  // into a harder one. The honest reading is that `d <= SDA_HOLD` is not a
+  // legal I2C delay; the clamp only refuses to make it worse.
+  wire [N_LANES-1:0] ck_hold_fits;
   // ⛔⛔⛔ F1 -- A CLOCKED PARK COUNTS ITS HIGH PERIOD FROM THE RISE IT
   // OBSERVES, so it releases at `now + d` rather than at `now`. This is the fix
   // for a MEASURED compliance failure: rebasing a parked clocked lane to `now`
@@ -804,6 +897,7 @@ module pe_engine #(
       assign ck_bit[gi] = ckd_real ? pin_in[l_pin[gi]] : 1'b0;
       // the delay field of the action this lane is currently clocking
       assign ck_dly[gi] = l_act[hix[gi]][BQW+BPW +: DLY_W];
+      assign ck_hold_fits[gi] = (ck_dly[gi] > SDA_HOLD[DLY_W-1:0]);
 `ifdef M_CK_RISE_ELIGIBLE
       assign ck_rebase[gi] = now;
 `else
@@ -1388,6 +1482,9 @@ module pe_engine #(
         l_ckwdog[i] <= 7'd0;
         l_cksamp[i] <= 1'b0;
         l_ckgot[i]  <= 1'b0;
+        l_hcnt[i]   <= {HOLDW{1'b0}};
+        l_hval[i]   <= 1'b0;
+        l_hoe[i]    <= 1'b0;
 `ifdef M_SHARED_BITP
         l_bitp_shared <= {BPW{1'b0}};
 `endif
@@ -1753,13 +1850,33 @@ module pe_engine #(
                   // index gate, which stops at 60 lines and at the enclosing
                   // arm -- should not have to scroll out to learn that a
                   // program-controlled index is bounded. Synthesis folds it.
+                  // ⛔⛔ THE DATA BIT IS HELD, NOT DRIVEN HERE (ruling H). It
+                  // goes into the hold pipeline and reaches the pin SDA_HOLD
+                  // cycles after the clock falls below. At SDA_HOLD = 0 it is
+                  // driven immediately, which is the measured defect and the
+                  // must-fire build.
                   if (pin_real) begin
-                  if (l_mode[cur]) begin
-                    pin_out[a_pin] <= l_tx[cur][0] & pin_pp[a_pin];
-                    pin_oe[a_pin]  <= 1'b1;
+                  if (SDA_HOLD == 0 || l_mode[cur]
+                      || !ck_hold_fits[cur]) begin
+                    if (l_mode[cur]) begin
+                      pin_out[a_pin] <= l_tx[cur][0] & pin_pp[a_pin];
+                      pin_oe[a_pin]  <= 1'b1;
+                    end else begin
+                      pin_out[a_pin] <= 1'b0;
+                      pin_oe[a_pin]  <= ~l_tx[cur][0];
+                    end
                   end else begin
-                    pin_out[a_pin] <= 1'b0;
-                    pin_oe[a_pin]  <= ~l_tx[cur][0];
+                    // ⛔ OPEN-DRAIN VALUES, UNCONDITIONALLY, AND THE
+                    // TERNARIES THAT USED TO BE HERE WERE DEAD CODE. This arm
+                    // is reached only when the condition above is FALSE, and
+                    // that condition contains `l_mode[cur]` -- so `l_mode` is
+                    // provably 0 here and a `l_mode ? a : b` could only ever
+                    // take the `b` side. ⭐ FOUND BY THE COVERAGE GATE, which
+                    // reported the `cond_then` halves as uncovered: they were
+                    // not under-tested, they were unreachable.
+                    l_hval[cur] <= 1'b0;
+                    l_hoe[cur]  <= ~l_tx[cur][0];
+                    l_hcnt[cur] <= SDA_HOLD[HOLDW-1:0];
                   end
                   end
                   if (clk_real) begin
@@ -1826,13 +1943,36 @@ module pe_engine #(
               // than 60 lines away now that the clocked arm sits between
               // them, and the index gate correctly refuses to search past
               // the enclosing arm.
+              // ⛔⛔ THE SAME HOLD ON THE UNCLOCKED PATH (ruling H), AND IT IS
+              // NEEDED HERE TOO -- MEASURED, NOT ASSUMED. This arm is what the
+              // CERTIFIED two-action frame runs: `OP_SHIFT(sda, lvl=0,
+              // clk=SCL)` puts the data bit on SDA and takes SCL low in one
+              // dispatch, exactly the clocked defect's shape, and it measured
+              // t_HD;DAT = 0 over 266 transitions. sigrok certified the frame's
+              // DECODE, which says nothing about its timing.
+              // ⚠ ONLY WHEN THE CLOCK IS GOING LOW. At `a_lvl = 1` the clock
+              // rises and the data must already be stable -- holding there
+              // would move SDA across the RISE, which is the opposite error.
+              // A lane with no real clock pin (an SPI target, where the master
+              // supplies SCK) drives immediately for the same reason.
               if (pin_real) begin
-              if (l_mode[cur]) begin
-                pin_out[a_pin] <= l_tx[cur][0] & pin_pp[a_pin];
-                pin_oe[a_pin]  <= 1'b1;
+              if (SDA_HOLD == 0 || l_mode[cur] || !clk_real || a_lvl
+                  || !ck_hold_fits[cur]) begin
+                if (l_mode[cur]) begin
+                  pin_out[a_pin] <= l_tx[cur][0] & pin_pp[a_pin];
+                  pin_oe[a_pin]  <= 1'b1;
+                end else begin
+                  pin_out[a_pin] <= 1'b0;
+                  pin_oe[a_pin]  <= ~l_tx[cur][0];
+                end
               end else begin
-                pin_out[a_pin] <= 1'b0;
-                pin_oe[a_pin]  <= ~l_tx[cur][0];
+                // ⛔ OPEN-DRAIN VALUES ONLY -- same reasoning as the clocked
+                // site above: `l_mode[cur]` appears in the condition that sent
+                // control here, so it is provably 0 and the ternaries it used
+                // to carry were unreachable on their push-pull side.
+                l_hval[cur] <= 1'b0;
+                l_hoe[cur]  <= ~l_tx[cur][0];
+                l_hcnt[cur] <= SDA_HOLD[HOLDW-1:0];
               end
               // ⛔⛔⛔ D2: THE CLOCK PIN HONOURS `l_mode` TOO, AND IT DID NOT.
               // It was driven `pin_out <= a_lvl; pin_oe <= 1` unconditionally,
@@ -2258,6 +2398,39 @@ module pe_engine #(
 
         default: st <= ST_IDLE;
       endcase
+
+      // ---- ⛔⛔ THE SDA HOLD EXPIRY (ruling H) --------------------------
+      // ⛔ IT RUNS EVERY CYCLE AND AT BLOCK LEVEL, not inside `case (st)`: the
+      // countdown continues while the engine dispatches other lanes, which is
+      // the point -- the hold is a PIN pipeline and must not depend on the FSM
+      // reaching any state. Putting it in `ST_DRIVE` would stall a hold
+      // whenever the lane that owns it is not the one being served.
+      // ⛔ AND IN *THIS* BLOCK, for the reason the rebase below gives: this is
+      // the one sequential block that writes `pin_out`/`pin_oe`, and a second
+      // one would be N_PINS multiple-driver nets -- the defect that made this
+      // engine unsynthesizable once while simulating cleanly.
+      // ⭐ ENGINE DISPATCH TIMING IS UNTOUCHED. Nothing here reads or writes
+      // `st`, `l_timestamp`, `ready` or the EDF key, so A2's C and J are
+      // unaffected by construction rather than by measurement -- though the
+      // measurement is taken anyway, because "by construction" is exactly the
+      // kind of claim that stops holding silently.
+      // ⚠ `l_pin[i]` IS RANGE-GUARDED HERE TOO. It is the fifth site of the
+      // family `model/gate_program_index.py` enumerates: a program-controlled
+      // pin index reaching an array, where `PINW = 4` encodes 16 values and
+      // only N_PINS are real.
+      for (i = 0; i < N_LANES; i = i + 1) begin
+        if (l_hcnt[i] != {HOLDW{1'b0}}) begin
+          if (l_hcnt[i] == {{(HOLDW-1){1'b0}}, 1'b1}) begin
+            if (l_pin[i] < N_PINS[PINW-1:0]) begin
+              pin_out[l_pin[i]] <= l_hval[i];
+              pin_oe[l_pin[i]]  <= l_hoe[i];
+            end
+            l_hcnt[i] <= {HOLDW{1'b0}};
+          end else begin
+            l_hcnt[i] <= l_hcnt[i] - {{(HOLDW-1){1'b0}}, 1'b1};
+          end
+        end
+      end
 
       // ---- sticky ovr: a lane was still ready when its own next release
       //      arrived, i.e. the queue-depth-one assumption (1.6a) was violated.

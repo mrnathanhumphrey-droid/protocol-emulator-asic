@@ -328,6 +328,21 @@ def corpus_arms():
     # bench-side stretch path -- but they are NOT the fix for 235, and saying
     # so here is the point: an arm added in the expectation of covering
     # something must be checked against whether it did.
+    # ⭐⭐ THE OPEN-DRAIN CLOCKED ARM WITH A DELAY THAT FITS THE SDA HOLD,
+    # and it is here because the coverage gate asked for it rather than because
+    # it looked tidy. The hold-taking branch is reached only when a lane is
+    # OPEN-DRAIN, CLOCKED, and has `d > SDA_HOLD`; every clocked open-drain
+    # image in the corpus runs at d = 9, so the clamp sends them all down the
+    # direct-drive path and the hold path was NEVER EXECUTED by the sweep.
+    # ⛔ IT NEEDS A BUS MODEL, which is why it runs here and not in
+    # `tb_csat`: an open-drain clocked lane PARKS on the observed rise, and
+    # without a pull-up there is no rise to observe -- it would measure a hang.
+    # That is also why the `ckfive` saturation image is deliberately push-pull.
+    out.append(("ckod",
+                ["+IMG=test/ckod_image.hex", "+PEER=none",
+                 "+OUT=probe_cov_trace_ckod.txt",
+                 "+NCYC=200000", "+SEED=1", "+ASYNC=0",
+                 "+STAYLOAD=0", "+SCLHOLD=0"]))
     out.append(("corpus_i2c_sclhold",
                 ["+IMG=test/corpus_i2c.hex", "+PEER=i2c",
                  "+OUT=probe_cov_trace_i2c_sclhold.txt",

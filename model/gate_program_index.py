@@ -169,6 +169,31 @@ CLASSIFIED = {
         "the RX accumulator and the serial readback -- the identical path "
         "`pinnone_image.hex` was built to catch on the UNCLOCKED sample, which "
         "is why this one is guarded at birth instead of after a measurement."),
+
+    # ⭐ THE SDA HOLD EXPIRY (ruling H) -- the FIFTH and SIXTH members of this
+    # family, and they arrived together because the expiry writes both halves
+    # of a pin. The hold defers a data-pin write by SDA_HOLD cycles, so the pin
+    # is driven from a per-lane register LONG AFTER the dispatch that chose it
+    # -- which means the index is read in a block where none of the dispatch
+    # arm's own guards are in scope. Guarded at birth for exactly that reason.
+    ("src/pe_engine.v", "pin_out", "l_pin[*]"): (
+        "< N_PINS",
+        "THE HELD DATA VALUE REACHING THE PIN. The expiry runs at block level "
+        "every cycle, outside `case (st)`, so `pin_real` -- which guards the "
+        "dispatch arm that LOADED the hold -- does not dominate it. A lane "
+        "that named a RESERVED data pin would write `pin_out[15]` here, which "
+        "is the `pin_out[12]` out-of-range class this gate was built after. "
+        "⚠ The guard is NOT redundant with the load site's: the load is "
+        "guarded, but a held value outlives its dispatch and the two sites are "
+        "in different blocks, so each has to answer for itself."),
+    ("src/pe_engine.v", "pin_oe", "l_pin[*]"): (
+        "< N_PINS",
+        "THE HELD OUTPUT-ENABLE, and it is guarded separately from `pin_out` "
+        "above for the same reason the clock and data sample guards are "
+        "separate: they are two writes and a guard on one says nothing about "
+        "the other. On an open-drain lane the ENABLE is what carries the data "
+        "(`oe = ~bit`, `out = 0`), so an unguarded write here would be the "
+        "half that actually corrupts the wire."),
 }
 
 

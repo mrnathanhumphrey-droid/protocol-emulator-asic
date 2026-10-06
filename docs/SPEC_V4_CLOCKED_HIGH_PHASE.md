@@ -256,3 +256,129 @@ fast one's.
 ⚠ Not a shipped number yet: the other four rows in the set are still the shipped
 two-action ones. If the clocked scheme replaces more than the I2C lane, this is
 recomputed, not carried.
+
+---
+
+## 9. Ruling H — the SDA data hold, and a regression it nearly caused
+
+**In scope, and the gate fails on it.** UM10204 Table 10 tabulates
+`t_HD;DAT` min = 0 ns, but the table's own note requires a **device** to
+internally provide ≥ 300 ns (15 cycles at 50 MHz), and this chip is the device
+driving SDA. The hazard is concrete: SCL takes up to 300 ns (Fm) to fall through
+a receiver's undefined region, so SDA moving in the same cycle we pull SCL low
+reads as a START or a STOP. On a FRAM that aborts the transfer at best.
+
+**Baseline, measured before anything changed:**
+
+| | t_HD;DAT | transitions |
+| --- | --- | --- |
+| clocked lanes | **0** | 1719 / 696 / 296 |
+| **certified two-action frame** | **0** | 266 |
+
+H4 is therefore answered and it mattered: `build_i2cframe`'s
+`OP_SHIFT(sda, lvl=0, clk=SCL)` "puts the data bit on SDA and takes SCL LOW in
+one dispatch" — the clocked defect's shape on the *certified* path. sigrok
+certified its **decode**, which says nothing about timing. The fix covers both.
+
+### Mechanism (H2)
+
+A per-lane hold pipeline: a dispatch that takes the clock low no longer writes
+the data pin, it loads `l_hval`/`l_hoe`/`l_hcnt`, and the expiry writes the pin
+`SDA_HOLD` cycles later at block level, every cycle, outside `case (st)`. The
+hold becomes the **only** writer for that path, so there is no same-cycle race
+and no second `always` block (a second writer of `pin_out` would be N_PINS
+multiple-driver nets — the defect that made this engine unsynthesizable once
+while simulating cleanly).
+
+* **Cost: +30 flops, measured** off the netlist (3253 → 3283), matching 6 bits
+  × 5 lanes. The pin index is *not* stored — `l_pin[i]` already holds it, and a
+  held action cannot change it.
+* **Expressed as a time, not a cycle count:** `SDA_HOLD_NS = 300` with
+  `CLK_PERIOD_NS = 20`, the cycle count derived. `part1_param_contract` flagged
+  a bare `15` in the RTL as a protocol constant — correctly — and the ns form
+  is both the honest shape and portable to another clock rate.
+* **Open-drain only, by scope:** the requirement is UM10204's, i.e. I2C. A
+  push-pull SPI lane's setup/hold come from the part's SPI AC table, already the
+  source of SPI-tx's `D_tol = 23`, and SPI changes data on a clock edge by
+  design with no undefined region to bridge.
+* **Dispatch timing untouched**, so A2's `C` and `J` are unaffected — and H5 is
+  verified rather than asserted: the A2 fixed point is unchanged at
+  **33 / 73 / 249**.
+
+### Result
+
+t_HD;DAT = **15** on every lane with a transition to measure, including the
+certified frame, and unchanged under 200- and 4000-cycle stretches. Both H3
+must-fires fire: `SDA_HOLD_NS=0` misses the floor on every measured lane,
+`SDA_HOLD_NS=800` moves SDA while SCL is high and exceeds the Fm+ `t_VD;DAT`
+budget. A requirement with a floor and no ceiling is half a requirement.
+
+### The clamp, and the regression that forced it
+
+⛔ **The fix nearly shipped a worse defect than the one it fixed.** A hold longer
+than the action's low phase lands the data **after** the next rise — data
+changing while SCL is high, which is a START or STOP to any receiver.
+
+Measured: `corpus_i2c` runs at **d = 9**, below the 15-cycle hold. With the hold
+applied unconditionally the stretching I2C peer went from **242 cycles of
+SCL-low to 0** — it stopped decoding entirely, and two `fram_i2c` stretch
+branches went dark. The only visible symptom was lost coverage in a file that
+was never edited.
+
+⚠ **And the first diagnosis was wrong.** I measured `PEER=i2c`, which never ACKs
+on that image in either build, so the check looked exonerating. The stretching
+instance `PEER=i2cs` is what showed the difference.
+
+⇒ `ck_hold_fits`: if the action's delay cannot fit the hold, do not hold.
+Stretch restored to 242; legal delays (33/60/120) still measure 15.
+
+⭐ **It deliberately does not make such a program compliant.** A lane whose delay
+cannot fit the hold keeps its old zero-hold behaviour and `gate_um10204` still
+reports it below the requirement. The violation stays visible instead of being
+converted into a harder one — which is also why the two dark branches were
+**not** classified as justified-uncovered. That would have re-scoped a
+regression into a pass.
+
+### The minimum legal `d`, and what is still owed
+
+`d > SDA_HOLD + t_SU;DAT(min)` — **18 / 20 / 28** cycles. Every mode-legal
+program clears it (the t_LOW floors are 25/65/235), but a program can still ask
+for a smaller delay and the engine will run it. **Whether silicon should refuse
+`d ≤ SDA_HOLD` is owed a ruling**: the clamp bounds the damage, it does not
+settle the question. It is the silent-corruption class — a well-formed frame of
+the wrong data.
+
+### What the coverage gate found in the new code
+
+Not a formality — it reviewed the implementation:
+
+* **Four dead coverage points were dead code.** Inside the hold arm `l_mode[cur]`
+  is provably 0 (it appears in the condition that routes control there), so the
+  `l_mode ? a : b` ternaries could only take one side. Removed at both sites.
+* **The hold-taking path was never executed by the sweep.** Every clocked
+  open-drain corpus image runs at d = 9, so the clamp routes them all to the
+  direct path; `ckod` is the only image that reaches the hold, and it was not an
+  arm. Added to `tb_trace` (33 arms / 14 benches) — it needs the pull-up bus
+  model, which is why it cannot run in `tb_csat`.
+* **Two points classified OWED, not waived**, each naming its witness: the
+  expiry's `l_pin[i] < N_PINS` guard (needs a reserved data pin on a lane that
+  is also open-drain, clocked and fitting), and the unclocked open-drain direct
+  drive (needs `build_i2cframe(d=12)` — an illegal delay, which is exactly what
+  makes it the right witness for the clamp's fallback).
+* ⚠ **And a mistake of mine:** those entries were first added with no
+  `ANCHOR_TEXT`, so `reanchor.py` could not move them when the hold's own edits
+  shifted the file, and the gate failed on a classification that had slid off its
+  line. The gate already demanded it; I had not met it.
+
+Uncovered: 24 → 33 → **26**, all classified. 20 of 20 gates pass.
+
+## 10. Ruling T — symmetric clock throughput
+
+Accepted: Fm+ 725 kHz, Fm 336 kHz, Sm 100 kHz, all legal since an I2C mode is a
+*maximum* rate.
+
+**Named reach item, not built:** Fm's minimum high phase is 30 cycles against a
+minimum low of 65, so a high phase of `d/2` — a wire shift, zero flops — would
+roughly reach Fm nominal. It is not valid for Sm, which needs a near-symmetric
+clock and already runs at 100 kHz. It needs a selector bit (header or global),
+so it waits on an encoding decision.

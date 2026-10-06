@@ -72,6 +72,20 @@ UM10204 = {
     "Fm+ 1 MHz":   {"t_LOW": 500, "t_HIGH": 260, "t_SU_DAT": 50,
                     "t_HD_DAT": 0},
 }
+
+#: THE MAXIMA THAT BOUND THE HOLD FROM ABOVE, in ns. ⛔ A REQUIREMENT WITH A
+#: FLOOR AND NO CEILING IS HALF A REQUIREMENT: without these the gate would
+#: accept any hold at all above 15 cycles, and a hold long enough to outlast the
+#: low phase is a WORSE defect than the one the hold fixes -- it moves data
+#: across the clock rise.
+#: ⚠ `t_r` is the SDA RISE TIME, which a cycle-resolution trace cannot measure,
+#: so the mode's MAXIMUM is charged as a budget rather than observed. That is
+#: the conservative direction.
+UM10204_MAX = {
+    "Sm  100 kHz": {"t_VD_DAT": 3450, "t_r": 1000},
+    "Fm  400 kHz": {"t_VD_DAT": 900, "t_r": 300},
+    "Fm+ 1 MHz":   {"t_VD_DAT": 450, "t_r": 120},
+}
 MODES = list(UM10204)
 
 
@@ -82,6 +96,22 @@ def cycles(ns):
 
 def table_cycles():
     return {m: {k: cycles(v) for k, v in d.items()} for m, d in UM10204.items()}
+
+
+def claimable(lo, hi, tc):
+    """The fastest mode whose t_LOW/t_HIGH minima this clock actually meets.
+
+    ⛔⛔ A LANE CANNOT BE HELD TO A MODE ITS CLOCK CANNOT ACHIEVE, and
+    the first version of the hold checks did exactly that: it compared the
+    WORST setup seen on any lane against EVERY mode's minimum, so a d = 25
+    lane (an Fm+ clock) was failed for not meeting Sm's 250 ns setup -- a
+    requirement that only applies at 100 kHz. A category error reads as a
+    design violation, which is worse than no check.
+    """
+    for m in reversed(list(tc)):            # loosest minima first
+        if lo >= tc[m]["t_LOW"] and hi >= tc[m]["t_HIGH"]:
+            return m
+    return None
 
 
 def load():
@@ -213,8 +243,13 @@ def main() -> int:
                   % (l["lane"], l["d"], hi, lo,
                      "yes" if sym else "*** no (%+d)" % (hi - lo)))
         if asym:
-            print("    *** FAIL %d push-pull lane(s) asymmetric: the park is")
-            print("        open-drain only, so a push-pull clock must be" % ())
+            # ⛔ THE ARGUMENT WAS MISSING HERE and the line printed a literal
+            # `%d`. That is the "a check that cannot speak" shape
+            # `gate_bench_lint` exists to catch in Verilog, in Python -- the
+            # failure fired correctly and then described itself uselessly.
+            print("    *** FAIL %d push-pull lane(s) asymmetric: the park is"
+                  % asym)
+            print("        open-drain only, so a push-pull clock must be")
             print("        symmetric in d")
             rc = 1
         else:
@@ -260,53 +295,222 @@ def main() -> int:
         print("      picks a legal d.")
 
     # -----------------------------------------------------------------
-    # 4b. t_HD;DAT -- THE OWED ITEM, NOW A NUMBER
+    # 4b. RULING H -- t_HD;DAT, AND THE GATE FAILS ON IT
     # -----------------------------------------------------------------
     print()
-    print("  --- 4b. t_HD;DAT against the BRIDGING note, not just the minimum ---")
-    print("    ⛔⛔ THIS IS THE OWED ELECTRICAL ITEM AND THE MEASUREMENT SETTLES")
-    print("    THAT IT IS REAL. The concern on record was that a clocked LOW")
-    print("    dispatch changes SDA in the SAME dispatch that takes SCL low, so")
-    print("    a slow SCL fall with SDA going H->L could be read as a START.")
-    print("    Measured, that hold is ZERO cycles on the lanes below.")
+    print("  --- 4b. RULING H: the SDA data hold across the SCL fall ---")
+    print("    ⛔⛔ IN SCOPE, AND THIS GATE FAILS ON IT. UM10204 Table 10")
+    print("    tabulates t_HD;DAT min = 0 ns, but the table's own note requires")
+    print("    a DEVICE to internally provide >= %d ns (%d cycles at 50 MHz),"
+          % (HD_BRIDGE_NS, cycles(HD_BRIDGE_NS)))
+    print("    and this chip is the device driving SDA. The hazard is concrete:")
+    print("    SCL takes up to 300 ns (Fm) to fall through a receiver's")
+    print("    undefined region, so SDA moving in the same cycle we pull SCL")
+    print("    low can be read as a START or a STOP. On a FRAM that aborts the")
+    print("    transfer at best and corrupts the write at worst.")
+    print("    ⚠ The tabulated 0 ns minimum is the WEAKER test and is not")
+    print("    the one adjudicated here.")
+    need = cycles(HD_BRIDGE_NS)
+    a_clean = blob.get("clean")
     print()
-    print("    UM10204 Table 10 sets t_HD;DAT minimum = 0 ns for every mode, so")
-    print("    0 MEETS THE TABLE. But the table's own note requires a device to")
-    print("    internally provide >= %d ns of hold to bridge the undefined"
-          % HD_BRIDGE_NS)
-    print("    region of SCL's falling edge -- %d cycles at 50 MHz."
-          % cycles(HD_BRIDGE_NS))
-    print("    ⚠ SO THE TABLE MINIMUM IS THE WEAKER TEST, AND PASSING IT IS NOT")
-    print("    THE ANSWER. Both are reported; the gate does not silently take")
-    print("    the one it meets.")
-    print()
-    if a is not None:
-        need = cycles(HD_BRIDGE_NS)
-        print("      %-6s %-6s %-11s %-13s %s"
-              % ("lane", "d", "t_HD;DAT", "table (0 ns)", "bridge (%d cy)" % need))
-        short = []
+    print("    (a) hold floor: t_HD;DAT >= %d cycles" % need)
+    print("      %-13s %-6s %-11s %-9s %s"
+          % ("arm", "d", "t_HD;DAT", "periods", "verdict"))
+    nmeas = 0
+    for arm in ("clean", "certified", "stretch_mid", "stretch_long"):
+        a = blob.get(arm)
+        if a is None:
+            continue
         for l in a["lanes"]:
-            if l["mode"] != 0 or not l.get("t_HD_DAT"):
+            hd = l.get("t_HD_DAT")
+            if not hd:
+                # ⛔ NO IN-PERIOD SDA TRANSITION IS NEITHER A PASS NOR A
+                # FAIL: the lane's consecutive bits did not differ, so there was
+                # no hold to observe. Recording it as a pass is how a
+                # measurement starts reporting absence of evidence as evidence.
+                print("      %-13s %-6d %-11s %-9s %s"
+                      % (arm, l["d"], "none", l.get("periods"),
+                         "not measured -- SDA moved in no period"))
                 continue
-            hd = l["t_HD_DAT"]["min"]
-            okb = hd >= need
-            if not okb:
-                short.append((l["lane"], l["d"], hd))
-            print("      %-6d %-6d %-11d %-13s %s"
-                  % (l["lane"], l["d"], hd, "met",
-                     "met" if okb else "*** SHORT by %d" % (need - hd)))
-        if short:
-            print()
-            print("    ⛔ %d lane(s) provide ZERO data hold across the SCL fall."
-                  % len(short))
-            print("      RULED SCOPE PENDING: the table minimum is met, so this")
-            print("      gate does not fail on it -- but a requirement that is")
-            print("      named in the standard and missed by the design is not")
-            print("      something a green gate should absorb. It is reported")
-            print("      here, counted, and OWED a ruling on whether the")
-            print("      bridging note is in scope for this entry.")
-            print("      ⚠ A guard that passes while a named requirement is")
-            print("      unmet is the shape this project keeps finding bugs in.")
+            nmeas += 1
+            ok = hd["min"] >= need
+            if not ok:
+                rc = 1
+            print("      %-13s %-6d %-11d %-9s %s"
+                  % (arm, l["d"], hd["min"], l.get("periods"),
+                     "ok" if ok else "*** FAIL below %d" % need))
+    if nmeas == 0:
+        print("      *** FAIL no lane in any arm produced a t_HD;DAT")
+        print("          measurement, so the requirement was not checked")
+        rc = 1
+
+    print()
+    print("    (b) hold ceiling: hold + t_r(max) <= t_VD;DAT(max)")
+    print("      \u26d4 THE DESIGN'S HOLD IS THE **MODAL** MEASURED VALUE, not")
+    print("      the maximum, and the first version used the maximum. A later")
+    print("      unrelated SDA move inside the same long low phase pushed that")
+    print("      to 77 cycles and failed two modes for a hold the design never")
+    print("      applies -- the clean build measures min = modal = max = 15 on")
+    print("      every lane that has a transition to measure.")
+    print("      %-13s %-6s %-7s %-9s %-9s %-9s %s"
+          % ("arm", "d", "hold", "mode", "t_r(max)", "budget", "verdict"))
+    for arm in ("clean", "certified", "stretch_mid", "stretch_long"):
+        a = blob.get(arm)
+        if a is None:
+            continue
+        for l in a["lanes"]:
+            hd = l.get("t_HD_DAT")
+            lo = (l.get("t_LOW") or {}).get("min")
+            hi = (l.get("t_HIGH") or {}).get("min")
+            if not hd or lo is None or hi is None:
+                continue
+            m = claimable(lo, hi, tc)
+            if m is None:
+                print("      %-13s %-6d %-7d %-9s %-9s %-9s %s"
+                      % (arm, l["d"], hd["modal"], "NONE", "-", "-",
+                         "not checked -- this clock claims no mode"))
+                continue
+            tr = cycles(UM10204_MAX[m]["t_r"])
+            budget = cycles(UM10204_MAX[m]["t_VD_DAT"]) - tr
+            ok = hd["modal"] <= budget
+            if not ok:
+                rc = 1
+            print("      %-13s %-6d %-7d %-9s %-9d %-9d %s"
+                  % (arm, l["d"], hd["modal"], m.split()[0], tr, budget,
+                     "ok" if ok else "*** FAIL hold over the budget"))
+
+    print()
+    print("    (c) setup: t_SU;DAT before the next rise, PER LANE")
+    print("      %-13s %-6s %-9s %-9s %-11s %s"
+          % ("arm", "d", "mode", "need", "worst seen", "verdict"))
+    for arm in ("clean", "certified", "stretch_mid", "stretch_long"):
+        a = blob.get(arm)
+        if a is None:
+            continue
+        for l in a["lanes"]:
+            su = l.get("t_SU_DAT")
+            lo = (l.get("t_LOW") or {}).get("min")
+            hi = (l.get("t_HIGH") or {}).get("min")
+            if not su or lo is None or hi is None:
+                continue
+            m = claimable(lo, hi, tc)
+            if m is None:
+                print("      %-13s %-6d %-9s %-9s %-11d %s"
+                      % (arm, l["d"], "NONE", "-", su["min"],
+                         "not checked -- this clock claims no mode"))
+                continue
+            need_su = tc[m]["t_SU_DAT"]
+            ok = su["min"] >= need_su
+            if not ok:
+                rc = 1
+            print("      %-13s %-6d %-9s %-9d %-11d %s"
+                  % (arm, l["d"], m.split()[0], need_su, su["min"],
+                     "ok" if ok else "*** FAIL setup below the minimum"))
+
+    print()
+    print("    (d) SDA must NOT move while SCL is high")
+    print("      ⛔⛔ THE FIX FOR (a) CAN CREATE THIS, which is why it")
+    print("      is measured and not reasoned about. If the hold outlasts the")
+    print("      low phase the held value lands AFTER the next rise -- data")
+    print("      changing while SCL is high, which to any receiver is a START")
+    print("      or a STOP. MEASURED at a delay below the hold: 613 of 1718")
+    print("      clock periods.")
+    print("      ⚠ THE CERTIFIED FRAME IS EXEMPT BY CONTENT, NOT BY CHOICE:")
+    print("      it contains OP_START and OP_STOP, which move SDA while SCL is")
+    print("      high ON PURPOSE. A pin trace cannot tell those from a")
+    print("      violation -- that needs opcode visibility -- so its count is")
+    print("      checked for CONSISTENCY against two per transaction instead,")
+    print("      and a trace-level separation is OWED.")
+    print("      %-13s %-6s %-9s %-9s %s"
+          % ("arm", "d", "moves", "periods", "verdict"))
+    for arm in ("clean", "stretch_mid", "stretch_long"):
+        a = blob.get(arm)
+        if a is None:
+            continue
+        for l in a["lanes"]:
+            mv = l.get("sda_moves_in_high")
+            ok = (mv == 0)
+            if not ok:
+                rc = 1
+            print("      %-13s %-6d %-9s %-9s %s"
+                  % (arm, l["d"], mv, l.get("periods"),
+                     "ok" if ok else "*** FAIL SDA moved while SCL was high"))
+    cert = blob.get("certified")
+    if cert:
+        for l in cert["lanes"]:
+            mv = l.get("sda_moves_in_high") or 0
+            even = (mv % 2 == 0)
+            if not even:
+                rc = 1
+            print("      %-13s %-6d %-9s %-9s %s"
+                  % ("certified", l["d"], mv, l.get("periods"),
+                     "ok -- %d transaction(s) x (START + STOP)" % (mv // 2)
+                     if even else "*** FAIL not two per transaction"))
+
+    print()
+    print("    (e) the MINIMUM LEGAL d the hold implies")
+    print("      ⛔ DERIVED, and a NEW constraint the hold introduces: the")
+    print("      hold must fit inside the low phase AND leave setup before the")
+    print("      rise, so `d > SDA_HOLD + t_SU;DAT(min)`.")
+    print("      %-13s %-9s %-13s %-13s %s"
+          % ("mode", "hold", "+ t_SU;DAT", "min legal d", "t_LOW floor clears?"))
+    for m in MODES:
+        mind = need + tc[m]["t_SU_DAT"]
+        print("      %-13s %-9d %-13d %-13d %s"
+              % (m, need, tc[m]["t_SU_DAT"], mind,
+                 "yes (%d)" % tc[m]["t_LOW"] if tc[m]["t_LOW"] >= mind
+                 else "*** NO"))
+    print("      ⚠ EVERY MODE-LEGAL PROGRAM CLEARS IT, but a program can")
+    print("      still ASK for a smaller delay and the engine will run it.")
+    print("      Whether silicon should REFUSE `d <= SDA_HOLD` is OWED a")
+    print("      ruling: it is the silent-corruption class, where the wire")
+    print("      carries a well-formed frame of the wrong data.")
+
+    # -----------------------------------------------------------------
+    # 4c. THE TWO MUST-FIRES FOR RULING H (H3)
+    # -----------------------------------------------------------------
+    print()
+    print("  --- 4c. must-fire: the hold is priced at BOTH ends (H3) ---")
+    fired = []
+    h0 = blob.get("hold0")
+    if h0 is None:
+        print("    *** MUST-FIRE FAILED: no `hold0` arm, so the floor in (a)")
+        print("        has never been seen to fail.")
+        rc = 1
+    else:
+        meas = [l for l in h0["lanes"] if l.get("t_HD_DAT")]
+        bad = [l for l in meas if l["t_HD_DAT"]["min"] < need]
+        good = bool(meas) and len(bad) == len(meas)
+        print("    SDA_HOLD=0  : %d of %d measured lane(s) below %d   %s"
+              % (len(bad), len(meas), need,
+                 "fires" if good else "*** DID NOT FIRE"))
+        if good:
+            fired.append("hold0")
+        else:
+            rc = 1
+    hb = blob.get("holdbig")
+    if hb is None:
+        print("    *** MUST-FIRE FAILED: no `holdbig` arm, so the ceiling in")
+        print("        (b)/(d) has never been seen to fail.")
+        rc = 1
+    else:
+        fmp = UM10204_MAX["Fm+ 1 MHz"]
+        budget = cycles(fmp["t_VD_DAT"]) - cycles(fmp["t_r"])
+        moved = [l for l in hb["lanes"] if (l.get("sda_moves_in_high") or 0) > 0]
+        over = [l for l in hb["lanes"]
+                if l.get("t_HD_DAT") and l["t_HD_DAT"]["min"] > budget]
+        good = bool(moved) or bool(over)
+        print("    SDA_HOLD=40 : %d lane(s) moved SDA while SCL high, %d over "
+              "the Fm+ budget of %d   %s"
+              % (len(moved), len(over), budget,
+                 "fires" if good else "*** DID NOT FIRE"))
+        if good:
+            fired.append("holdbig")
+        else:
+            rc = 1
+    if len(fired) == 2:
+        print("    => both ends priced. Too short fails (a); too long fails")
+        print("      (b) or (d). Neither end is a check nobody has seen fail.")
 
     # -----------------------------------------------------------------
     # 5. C2: the d a mode needs, WITH the measured jitter
