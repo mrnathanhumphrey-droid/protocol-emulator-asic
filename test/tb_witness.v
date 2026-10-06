@@ -80,6 +80,7 @@ module tb_witness;
   );
 
 `include "test/progress.vh"
+`include "test/clocked_conform.vh"
 
   // ⛔ THE SAME STALL CONDITION THE ENGINE COUNTS ON, reconstructed here:
   // winner chosen, schedule running, and waiting ONLY on its own head slot.

@@ -149,6 +149,26 @@ CLASSIFIED = {
         "value being tested is a bit-slice of the shift register and there is "
         "no per-lane register to hang a wire on yet. A header may legitimately "
         "name the reserved index, so this must skip rather than refuse."),
+    ("src/pe_engine.v", "pin_rise", "l_clkpin[*]"): (
+        "< N_PINS",
+        "THE FOURTH INSTANCE OF THE CLASS, arriving with the self-clocked "
+        "SHIFTIN. `ck_hit` watches the lane's CLOCK pin for the rise that says "
+        "the peer has released it, and `l_clkpin` comes from a header field "
+        "that may legitimately name PIN_NONE -- an SPI TARGET declares exactly "
+        "that, because the master supplies the clock. `pin_rise` is [11:0], so "
+        "an unguarded read would be `pin_rise[15]`. Guarded by an explicit "
+        "`< N_PINS` on `ckp_real`, and `ck_hit = 0` is the RIGHT meaning rather "
+        "than merely the safe one: a self-clocked shift is impossible without a "
+        "real clock pin, so this capture can never legitimately fire on one."),
+    ("src/pe_engine.v", "pin_in", "l_pin[*]"): (
+        "< N_PINS",
+        "THE SAMPLED DATA PIN, guarded SEPARATELY from the clock pin above, and "
+        "the separation is the point: a lane may name a real clock and a "
+        "RESERVED data pin, so the two guards answer different questions. "
+        "Reading `pin_in[15]` would latch X into `l_cksamp` and carry it into "
+        "the RX accumulator and the serial readback -- the identical path "
+        "`pinnone_image.hex` was built to catch on the UNCLOCKED sample, which "
+        "is why this one is guarded at birth instead of after a measurement."),
 }
 
 
@@ -366,6 +386,23 @@ def selftest() -> int:
         return 1
     mutated = list(lines)
     mutated[victim - 1] = "            OP_SHIFT: begin"
+    # ⛔⛔ EVERY `pin_real` GUARD INSIDE THE OP_SHIFT ARM, NOT JUST THE LABEL'S.
+    # Removing only `OP_SHIFT: if (pin_real)` reported "0 sites exposed" the
+    # moment the self-clocked arm landed, because the clocked and unclocked
+    # data writes each carry a LOCAL `if (pin_real)` -- so dropping one of three
+    # guards leaves the other two doing the work, and the must-fire was
+    # measuring a guard that had stopped being load-bearing.
+    # ⭐ A MUST-FIRE THAT STOPS EXPOSING SITES IS NOT A PASS; it is the signal
+    # that what it mutates no longer matters. So the mutant removes the WHOLE
+    # family: if ANY `pin_real` in this arm still covers these writes, the gate
+    # must not be able to call them guarded.
+    for n in range(victim, len(mutated)):
+        code = strip_comment(mutated[n])
+        if ARM_LABEL.match(code) and n != victim - 1:
+            break                       # left the OP_SHIFT arm
+        if re.match(r"^\s*if\s*\(\s*pin_real\s*\)\s*begin\s*$", code):
+            mutated[n] = re.sub(r"if\s*\(\s*pin_real\s*\)\s*begin",
+                                "begin", mutated[n])
     # the sites that depended on it must now report no guard
     bad = 0
     for n, raw in enumerate(mutated, 1):

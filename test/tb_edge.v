@@ -498,6 +498,7 @@ module tb_edge;
   );
 
 `include "test/progress.vh"
+`include "test/clocked_conform.vh"
 
 endmodule
 

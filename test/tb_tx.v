@@ -110,6 +110,7 @@ module tb_tx;
   // copied per bench is the same shape as the four private slot-index copies
   // that cost a published column.
 `include "test/progress.vh"
+`include "test/clocked_conform.vh"
 `include "test/host_feed.vh"
 
   // ⭐ THE DRIVE EVENT, read literally off the FSM: `st == ST_DRIVE` with the

@@ -143,6 +143,10 @@ module pe_engine #(
     output reg  [N_LANES-1:0]   lane_overflow,
     output reg                  sticky_ovr,
     output reg                  cfg_err,
+    // ⭐ ITS OWN STATUS BIT rather than folding into `cfg_err`: a config error
+    // means THE PROGRAM is wrong and the lane is halted; this means THE PEER
+    // was late. A host that cannot tell them apart can act on neither.
+    output reg                  clk_stretch,
 
     // RX payload out to the serialiser (which is NOT a lane -- zero budget)
     output reg  [7:0]           rx_data,
@@ -330,6 +334,12 @@ module pe_engine #(
   // mask costs nothing.
   reg [N_PINS-1:0] pin_pp;                  // 1 = this pin may drive a 1
   reg              config_err;              // sticky: 1.6s violation
+  // sticky: a clocked SHIFTIN consume point found no captured bit -- the peer
+  // held the clock past this lane's next dispatch. ⛔ IT IS NOT A PROGRAM
+  // ERROR: a slow peer is legal. It says the bit REPORTED WAS NOT SAMPLED,
+  // which for an ACK is the difference between "acknowledged" and "never
+  // answered" -- and the substituted 0 reads as the former.
+  reg              clk_stretch_err;
   // ⛔⛔⛔ TX AND RX HAVE SEPARATE STATE, AND THEY USED TO SHARE IT. Ruling 1
   // after `beb8862`, and the defect it fixes is the one T5.1's host-channel
   // audit uncovered: on a lane that mixes `OP_SHIFT` (transmit) with
@@ -358,6 +368,63 @@ module pe_engine #(
   // (ACT_W is exactly 24 of 24 bits).
   // ⛔ `M_SHARED_BITP` re-merges the pointers so the defect is PRICED.
   // COST: 40 flops for `l_rx` plus 20 for `rx_bitp`, 60 total.
+  // =====================================================================
+  // THE SELF-CLOCKED SHIFT (ruled Option C), BUILT FROM THE GOLDEN MODEL
+  // `model/clocked_phase.py`. A SHIFT or SHIFTIN whose lane has a REAL clock
+  // pin AND whose action carries `level = 1` drives BOTH clock phases itself,
+  // so ONE ACTION CARRIES A WHOLE BYTE: 20 actions per I2C wire byte become 2,
+  // which brings a full FRAM write (291 bytes) and a random read (360) inside
+  // the 256-byte store at 75 and 90.
+  //
+  // ⛔⛔ WHY `level` AND NOT A NEW BIT OR OPCODE: there is none. Measured --
+  // ACT_FIELDS is 24 of 24 bits, HDR_FIELDS 48 of 48, all 8 opcodes used.
+  // Reuse was FORCED. And `level` is the right field rather than merely the
+  // available one: on a self-clocked shift "the clock level to write this
+  // dispatch" is vacuous, because the action writes both levels. ⛔ With NO
+  // real clock pin, `level` keeps its exact old meaning -- which is what
+  // leaves every UART lane untouched, and why the six certified and
+  // measurement-base images stay bit-identical.
+  //
+  // THE PHASE MACHINE, AND IT IS THE MODEL'S, NOT A SECOND DESIGN:
+  //     SHIFT    LOW (drive the bit, clock low, count it) -> HIGH (clock high)
+  //              ... n times, retire on the last HIGH.           2n dispatches
+  //     SHIFTIN  LOW (release data, clock low) -> HIGH (clock high, ARM the
+  //              capture) ... n times, then ONE trailing COLL.  2n+1 dispatches
+  //
+  // ⛔⛔⛔ THE +1 IS FORCED, NOT A CHOICE. The bit must be sampled on the
+  // OBSERVED clock rise, so a stretching peer is read when it answers rather
+  // than when we guessed. That rise lands AFTER the high phase's writeback, in
+  // the idle window following it -- so at the instant 2n dispatches have
+  // elapsed the last bit DOES NOT EXIST YET. For n > 1 the intermediate bits
+  // cost nothing extra: bit k is consumed at bit k+1's LOW phase. Only the
+  // last bit has no successor, so the cost is +1 per ACTION, not per bit.
+  // ⚠ WAITING for the rise inside a dispatch is the stall this design refuses
+  // everywhere ("underrun is a STICKY FLAG, NEVER A STALL: a stall would make
+  // C unbounded"), so the high phase ARMS a capture and returns. The tolerance
+  // is therefore ONE LANE PERIOD: a rise later than the next dispatch of that
+  // lane loses its bit, and `clk_stretch_err` is what says so.
+  //
+  // ⛔⛔ THE PHASE IS RESET AT EVERY ACTION START, and that is the whole
+  // defect of the first attempt. Per-lane ownership was never wrong -- a lane
+  // runs one action at a time, in order -- but a new action INHERITED the
+  // previous one's leftover phase, so a clocked SHIFTIN following a clocked
+  // SHIFT started mid-sequence and retired after one dispatch, sampling
+  // nothing. Layer B of the bench watchdog caught it against the model: "op=1
+  // cnt=7 took 1 dispatch, the model says 16". The reset is written at the
+  // RETIRE, which IS the next-action load, so it cannot be forgotten by a
+  // later arm.
+  localparam [1:0] CK_LOW  = 2'd0;
+  localparam [1:0] CK_HIGH = 2'd1;
+  localparam [1:0] CK_COLL = 2'd2;
+  reg [1:0]       l_ckph   [0:N_LANES-1];   // the phase this lane is in
+  // ⛔ A DEDICATED BIT COUNTER, and it is NOT redundant with `tx_bitp`: the
+  // host-byte load fires on the last bit's LOW phase and RESETS `tx_bitp` to
+  // zero, so by the following HIGH it can no longer say which bit this was.
+  // Counting the action's own progress is the only thing that survives it.
+  reg [BPW-1:0]   l_ckbit  [0:N_LANES-1];
+  reg             l_ckwait [0:N_LANES-1];   // a capture armed on the rise
+  reg             l_cksamp [0:N_LANES-1];   // the bit latched AT the rise
+  reg             l_ckgot  [0:N_LANES-1];   // ... and it is unconsumed
   reg [7:0]       l_tx     [0:N_LANES-1];   // THE TX PAYLOAD lives here, not
                                             //   in the program (ruling F1)
   reg [7:0]       l_rx     [0:N_LANES-1];   // the RX accumulator
@@ -591,6 +658,8 @@ module pe_engine #(
   // must not re-rebase the timestamp -- that would slide the grid forward on
   // every subsequent peer transition, which on a clocked bus is every bit.
   wire [N_LANES-1:0] arm_hit;
+  wire [N_LANES-1:0] ck_hit;    // a clocked SHIFTIN's rise, OBSERVED
+  wire [N_LANES-1:0] ck_bit;    // ... and the data pin at that instant
   generate
     for (gi = 0; gi < N_LANES; gi = gi + 1) begin : g_arm
       // ⛔⛔⛔ RANGE-GUARDED, AND THIS WAS A LIVE THIRD INSTANCE OF THE CLASS.
@@ -622,6 +691,27 @@ module pe_engine #(
       assign arm_hit[gi] = l_armed[gi] & arm_real &
                            (l_armedge[gi] ? pin_rise[l_armpin[gi]]
                                           : pin_fall[l_armpin[gi]]);
+
+      // ⭐⭐ THE CLOCKED SHIFTIN'S SAMPLE, TAKEN ON THE OBSERVED CLOCK RISE.
+      // Same shape as `arm_hit` above and for the same reason: a peer that
+      // stretches releases the clock LATE, so the only honest sampling
+      // instant is the one the PEER chooses. ⛔ CAPTURED IN THE IDLE WINDOW,
+      // never waited for, so `C` stays bounded.
+      // ⛔ RANGE-GUARDED, and this is the FOURTH site of the class the index
+      // gate enumerates (pin_out writes, the RX sample, the edge select, and
+      // now this): an SPI TARGET legitimately declares PIN_NONE as its clock
+      // pin because the master supplies it, and `pin_rise` is [11:0].
+      // `ck_hit = 0` is the RIGHT meaning, not merely the safe one -- a
+      // self-clocked shift is impossible without a real clock pin.
+      wire ckp_real = (l_clkpin[gi] < N_PINS[PINW-1:0]);
+      wire ckd_real = (l_pin[gi]    < N_PINS[PINW-1:0]);
+      assign ck_hit[gi] = l_ckwait[gi] & ckp_real & pin_rise[l_clkpin[gi]];
+      // ⛔ THE SAMPLED PIN IS GUARDED SEPARATELY from the clock pin: a lane
+      // may name a real clock and a RESERVED data pin, and reading
+      // `pin_in[15]` would put X into the accumulator and from there into the
+      // serial readback -- the defect `pinnone_image.hex` exists to catch on
+      // the unclocked path, guarded here at birth instead.
+      assign ck_bit[gi] = ckd_real ? pin_in[l_pin[gi]] : 1'b0;
     end
   endgenerate
 
@@ -710,6 +800,7 @@ module pe_engine #(
   assign host_q    = a_q;
 `endif
   always @(*) cfg_err = config_err;
+  always @(*) clk_stretch = clk_stretch_err;
   reg [ACT_W-1:0] cur_act;
 
   assign busy = (st != ST_IDLE);
@@ -758,6 +849,79 @@ module pe_engine #(
   // the refusal had nowhere for the corpus to go.
   wire clk_real = (l_clkpin[cur] < N_PINS[PINW-1:0]);
 
+  // =====================================================================
+  // THE SELF-CLOCKED DECODE. Both terms of the trigger matter and neither is
+  // redundant: without `clk_real` there is no clock to drive and `level` keeps
+  // its old meaning; without `a_lvl` this would capture the 83 existing
+  // `clk_real, level = 0` SHIFTs in the shipped images.
+  wire ck_shift   = clk_real & a_lvl & (a_op == OP_SHIFT);
+  wire ck_shiftin = clk_real & a_lvl & (a_op == OP_SHIFTIN);
+  wire ck_act     = ck_shift | ck_shiftin;
+  wire ck_is_low  = (l_ckph[cur] == CK_LOW);
+  wire ck_is_high = (l_ckph[cur] == CK_HIGH);
+  wire ck_is_coll = (l_ckph[cur] == CK_COLL);
+  // ⚠ THE TWO OPCODES COUNT BITS DIFFERENTLY, and this is pre-existing ISA
+  // semantics preserved rather than tidied: `OP_SHIFT` compares the
+  // PRE-increment pointer against `a_cnt` (so a_cnt = 7 is eight bits, and it
+  // is the same comparison the host-byte load uses, which is why the load and
+  // the last bit coincide), while `OP_SHIFTIN` compares against `a_cnt - 1`
+  // (so a_cnt = 8 is eight bits and a_cnt = 1 is the single-bit ACK).
+  wire [BPW-1:0] ck_nbits = ck_shift ? (a_cnt + {{(BPW-1){1'b0}}, 1'b1})
+                                     : a_cnt;
+  // the n-th bit has been counted (`l_ckbit` advances on the LOW phase)
+  wire ck_bits_done = (l_ckbit[cur] == ck_nbits);
+  // ⭐ RETIRE: a transmit on the last HIGH, a receive on its trailing COLL.
+  wire ck_retire  = (ck_shift   & ck_is_high & ck_bits_done) |
+                    (ck_shiftin & ck_is_coll);
+  // ⛔ EVERY OTHER PHASE RE-DISPATCHES: no PC advance, no head invalidation,
+  // no buffer swap -- the same mechanism a chaining `OP_REARM` already uses.
+  // This is also Amendment A1 in silicon: a held dispatch owes NO refill, so
+  // the proof's "exactly one slot per lane" became "at most one".
+  wire ck_hold    = ck_act & ~ck_retire;
+  // A CONSUME POINT: where a captured bit is taken. The first LOW of an action
+  // has nothing pending yet (`l_ckbit` is still 0), every later LOW takes the
+  // previous bit, and the COLL takes the last one -- n consumes for n bits.
+  wire ck_consume = ck_shiftin & (ck_is_coll |
+                                  (ck_is_low & (l_ckbit[cur] !=
+                                                {BPW{1'b0}})));
+
+  // THE NEXT PHASE, as a wire so the mutant is a one-line substitution.
+  wire [1:0] ck_norm = ck_shift
+                       ? (ck_is_low ? CK_HIGH : CK_LOW)
+                       : ck_is_low  ? CK_HIGH
+                       : ck_is_high ? (ck_bits_done ? CK_COLL : CK_LOW)
+                       : CK_LOW;
+`ifdef M_CK_NO_ALTERNATE
+  wire [1:0] ck_next = CK_LOW;            // the mutant: the phase never moves
+`else
+  wire [1:0] ck_next = ck_norm;
+`endif
+  // ⛔ M_CK_NEVER_RETIRE holds for ever, which is LAYER A of the bench
+  // watchdog's must-fire: a lane that never retires must trip the coarse
+  // liveness check in every bench that runs a clocked program.
+`ifdef M_CK_NEVER_RETIRE
+  wire ck_hold_eff = ck_act;              // the mutant: it never lets go
+`else
+  wire ck_hold_eff = ck_hold;
+`endif
+  // ⭐ "THIS ACTION RETIRES ON THIS DISPATCH", named ONCE and used by the
+  // retire chain, the phase reset and the bit-counter reset. Writing the
+  // condition three times is how the three drift apart -- and the phase
+  // reset getting it wrong is precisely the defect being fixed.
+  wire act_retire = ~ck_hold_eff & ((a_op != OP_REARM) | a_lvl);
+  // CONDITION (a): the clocked ACK releases the data pin on BOTH phases.
+  // `{oe, out}` as a wire, so the mutant is one line against one line.
+  // ⛔ M_ACK_DRIVES_SDA makes it a PUSH-PULL HIGH on an open-drain net while
+  // the peer pulls low to acknowledge -- a SHORT, which the per-net-type
+  // overlap rule must refuse. ⭐ In the clean build `ack_drv[1]` is 0, so the
+  // `pin_out` write it feeds never happens and the unclocked SHIFTIN path is
+  // bit-for-bit what it was.
+`ifdef M_ACK_DRIVES_SDA
+  wire [1:0] ack_drv = 2'b11;             // the mutant: DRIVE the ACK high
+`else
+  wire [1:0] ack_drv = 2'b00;             // release: oe = 0, both phases
+`endif
+
   // ---- the bit-order reversals (ruling 1) ------------------------------
   // SPELLED OUT AS A CONCATENATION, NOT A FUNCTION OR A LOOP. A Verilog
   // function here is the "non-constant function call in constant expression"
@@ -792,7 +956,17 @@ module pe_engine #(
 `endif
   // the byte an OP_SHIFTIN completes: the sample being taken now, followed by
   // the seven already in `l_rx`
-  wire [7:0] rx_asm     = {rx_bit, l_rx[cur][7:1]};
+  // ⭐⭐ ON A CLOCKED SHIFTIN THE BIT COMES FROM THE CAPTURE, NOT A LIVE READ.
+  // `rx_bit` reads the pin AT WRITEBACK, which on a clocked receive is the
+  // wrong instant by construction: the writeback of the high phase happens
+  // when the engine RELEASED the clock, and the peer may not have let it rise
+  // yet. `l_cksamp` holds the value the data pin had AT THE OBSERVED RISE.
+  // ⛔ FALLS BACK TO 0 RATHER THAN TO A LIVE READ when no rise was seen: a
+  // live read would silently substitute a plausible bit for a missing one,
+  // and `clk_stretch_err` is what distinguishes them.
+  wire       ck_rxbit  = l_ckgot[cur] & l_cksamp[cur];
+  wire       rx_bit_sel = ck_shiftin ? ck_rxbit : rx_bit;
+  wire [7:0] rx_asm     = {rx_bit_sel, l_rx[cur][7:1]};
   wire [7:0] rx_asm_rev = {rx_asm[0], rx_asm[1], rx_asm[2], rx_asm[3],
                            rx_asm[4], rx_asm[5], rx_asm[6], rx_asm[7]};
 
@@ -1071,6 +1245,7 @@ module pe_engine #(
       rx_push  <= 1'b0;
       sticky_ovr    <= 1'b0;
       config_err    <= 1'b0;
+      clk_stretch_err <= 1'b0;
       host_pop      <= 1'b0;
       lane_underrun <= {N_LANES{1'b0}};
       lane_overflow <= {N_LANES{1'b0}};
@@ -1083,6 +1258,11 @@ module pe_engine #(
         l_rx[i]     <= 8'h00;
         tx_bitp[i]  <= {BPW{1'b0}};
         rx_bitp[i]  <= {BPW{1'b0}};
+        l_ckph[i]   <= CK_LOW;
+        l_ckbit[i]  <= {BPW{1'b0}};
+        l_ckwait[i] <= 1'b0;
+        l_cksamp[i] <= 1'b0;
+        l_ckgot[i]  <= 1'b0;
 `ifdef M_SHARED_BITP
         l_bitp_shared <= {BPW{1'b0}};
 `endif
@@ -1399,7 +1579,76 @@ module pe_engine #(
                 pin_oe[a_pin]  <= ~a_lvl;       // low = drive, high = release
               end
             end
+            // ⛔⛔ THE SELF-CLOCKED ARM IS FIRST INSIDE `OP_SHIFT` BELOW, and
+            // the unclocked body after it is untouched -- the whole point of
+            // gating on `level = 1` is that every existing
+            // `clk_real, level = 0` SHIFT still takes the identical path.
+            // ⛔ THE 1.6x ALIAS REFUSAL WRAPS BOTH ARMS AND IS WRITTEN ONCE.
+            // The first attempt duplicated it into the clocked arm and
+            // `gate_mutant_arms` caught that immediately -- `M_SHIFT_CLK_ALIAS`
+            // went from 6 diff lines to 12. A refusal that exists twice can be
+            // fixed in one place and left broken in the other.
+            // ⛔⛔ THIS COMMENTARY SITS ABOVE THE CASE LABEL ON PURPOSE.
+            // `model/gate_program_index.py` requires each program-indexed
+            // write's guard within 60 lines; left inside the arm this block
+            // pushed the label's own `if (pin_real)` out of that window. The
+            // fix is to move the PROSE, never to widen the window -- the gate's
+            // docstring records a `clk_real` 30 lines away falsely guarding a
+            // deliberately unguarded mutant arm.
             OP_SHIFT: if (pin_real) begin
+`ifndef M_SHIFT_CLK_ALIAS
+              if (l_clkpin[cur] == a_pin) begin
+                config_err   <= 1'b1;
+                sticky_ovr   <= 1'b1;
+                l_live[cur]  <= 1'b0;
+              end else begin
+`endif
+              if (ck_shift) begin
+                // ⛔ PHASE ORDER IS DATA-THEN-CLOCK-LOW, THEN CLOCK-HIGH, and
+                // it is a SUPPORTED-MODE statement rather than an arbitrary
+                // choice: data settling while the clock is low and read on the
+                // rise is I2C, and SPI MODES 0 AND 3 -- which covers both FRAM
+                // parts. ⚠ SPI MODES 1 AND 2 change data on the RISING edge and
+                // are NOT expressible this way; they stay on the unclocked
+                // idiom (`level = 0` plus `OP_LEVEL`), which is untouched and
+                // still available. A limitation, recorded, not an omission.
+                if (ck_is_low) begin
+                  // ⛔ `pin_real` LOCALLY, redundant only in the sense that the
+                  // case label carries it. A reader of this block -- and the
+                  // index gate, which stops at 60 lines and at the enclosing
+                  // arm -- should not have to scroll out to learn that a
+                  // program-controlled index is bounded. Synthesis folds it.
+                  if (pin_real) begin
+                  if (l_mode[cur]) begin
+                    pin_out[a_pin] <= l_tx[cur][0] & pin_pp[a_pin];
+                    pin_oe[a_pin]  <= 1'b1;
+                  end else begin
+                    pin_out[a_pin] <= 1'b0;
+                    pin_oe[a_pin]  <= ~l_tx[cur][0];
+                  end
+                  end
+                  if (clk_real) begin
+                    pin_out[l_clkpin[cur]] <= 1'b0;
+                    pin_oe[l_clkpin[cur]]  <= 1'b1;   // pull/drive LOW
+                  end
+                end else begin
+                  // ⭐ CLOCK HIGH ONLY -- the data pin is NOT rewritten, so the
+                  // bit stays on the wire across the rise.
+                  // ⛔ OPEN-DRAIN RELEASES rather than driving 1: a peer
+                  // stretches by holding the clock LOW, and against a push-pull
+                  // high that is a SHORT. This is D2's lesson, and the release
+                  // is also what MAKES the stretch observable.
+                  if (clk_real) begin
+                  if (l_mode[cur]) begin
+                    pin_out[l_clkpin[cur]] <= 1'b1 & pin_pp[l_clkpin[cur]];
+                    pin_oe[l_clkpin[cur]]  <= 1'b1;
+                  end else begin
+                    pin_out[l_clkpin[cur]] <= 1'b0;
+                    pin_oe[l_clkpin[cur]]  <= 1'b0;   // RELEASE
+                  end
+                  end
+                end
+              end else begin
               // ⛔⛔⛔ 1.6x -- A SHIFT LANE WHOSE CLOCK PIN IS ITS DATA PIN IS
               // REFUSED. This block writes the DATA pin and then the CLOCK pin,
               // clock SECOND. With `clkpin == pin` the clock assignment
@@ -1435,13 +1684,14 @@ module pe_engine #(
               // regardless, driving the aliased pin with `a_lvl`. A refusal
               // that still drives the pin it is refusing to drive is not a
               // refusal; it is the defect with a flag set beside it.
-`ifndef M_SHIFT_CLK_ALIAS
-              if (l_clkpin[cur] == a_pin) begin
-                config_err   <= 1'b1;        // sticky, in the status stream
-                sticky_ovr   <= 1'b1;
-                l_live[cur]  <= 1'b0;        // HALT: do not emit wrong data
-              end else begin
-`endif
+              // ⇒ THE REFUSAL NOW LIVES ONCE, above the clocked/unclocked
+              // split, so this arm is covered by it rather than carrying a
+              // second copy. It used to be written here.
+              // ⛔ `pin_real` LOCALLY HERE TOO: the label's guard is further
+              // than 60 lines away now that the clocked arm sits between
+              // them, and the index gate correctly refuses to search past
+              // the enclosing arm.
+              if (pin_real) begin
               if (l_mode[cur]) begin
                 pin_out[a_pin] <= l_tx[cur][0] & pin_pp[a_pin];
                 pin_oe[a_pin]  <= 1'b1;
@@ -1489,12 +1739,47 @@ module pe_engine #(
               end
 `endif
               end
+              end                             // closes the local pin_real
+              end                             // closes the `ck_shift` else
+              // the next `end` closes the 1.6x else-begin, which wraps BOTH
+              // arms -- see the refusal above the split.
 `ifndef M_SHIFT_CLK_ALIAS
-              end                             // closes the 1.6x else-begin
+              end
 `endif
             end
             OP_SHIFTIN, OP_READBIT: if (pin_real) begin
-              pin_oe[a_pin] <= 1'b0;            // release to sample
+              // ⭐⭐ CONDITION (a): A CLOCKED SHIFTIN RELEASES THE DATA PIN ON
+              // **BOTH** PHASES. This assignment is unconditional, so it
+              // covers every phase: driving SDA during an ACK would fight
+              // the peer's acknowledge, which on an open-drain net is a
+              // push-pull high against a pull-low -- a SHORT, not a wrong
+              // bit. Priced by M_ACK_DRIVES_SDA.
+              pin_oe[a_pin] <= ack_drv[1];      // release to sample (0)
+              // ⭐ NEVER TAKEN IN THE CLEAN BUILD -- `ack_drv[1]` is 0 -- so
+              // `pin_out` is not written on any SHIFTIN and the unclocked
+              // path is unchanged.
+              if (ck_shiftin & ack_drv[1]) pin_out[a_pin] <= ack_drv[0];
+              if (ck_shiftin & clk_real) begin
+                if (ck_is_high) begin
+                  // RELEASE, not drive -- see D2. The release is what makes
+                  // the stretch observable: the rise happens when the PEER
+                  // allows it, and `l_ckwait` is what catches that instant.
+                  if (l_mode[cur]) begin
+                    pin_out[l_clkpin[cur]] <= 1'b1 & pin_pp[l_clkpin[cur]];
+                    pin_oe[l_clkpin[cur]]  <= 1'b1;
+                  end else begin
+                    pin_out[l_clkpin[cur]] <= 1'b0;
+                    pin_oe[l_clkpin[cur]]  <= 1'b0;
+                  end
+                end else begin
+                  // LOW and COLL both take the clock down. ⭐ I6: an action
+                  // ENDS with the clock low, so the next one's LOW phase
+                  // starts from a known level and no program needs a
+                  // separating OP_LEVEL between bytes.
+                  pin_out[l_clkpin[cur]] <= 1'b0;
+                  pin_oe[l_clkpin[cur]]  <= 1'b1;
+                end
+              end
             end
             // ⭐ OP_ARM moves no pin -- it RELEASES the lane on a peer edge.
             // Its state goes in at writeback, below.
@@ -1527,9 +1812,65 @@ module pe_engine #(
             l_notmo[cur]   <= (a_dly == {DLY_W{1'b0}});
           end
 
+          // ⭐⭐ THE PHASE, ADVANCED OR RESET, ahead of the opcode case so it
+          // happens on every clocked dispatch whichever arm runs.
+          // ⛔⛔ THE RESET AT RETIRE **IS** THE ACTION-START RESET, and it is
+          // the ruled fix: a new action must begin in LOW. Writing it here,
+          // where the PC advances, means it cannot be forgotten by a later
+          // arm -- the first attempt let a clocked SHIFTIN inherit the
+          // preceding SHIFT's leftover phase and retire after one dispatch.
+          // ⛔ IT ALSO COVERS AN **UNCLOCKED** RETIRE, which matters: a
+          // clocked action following a plain one must still start in LOW.
+          // ⛔ A CHAINING `OP_REARM` RETIRES NOTHING and so resets nothing --
+          // correct, because it re-dispatches the SAME action.
+          // ⚠⚠ M_CK_NO_PHASE_RESET IS A **CHARACTERISED SURVIVOR**, and saying
+          // so is more useful than the reset itself. The ruling diagnosed the
+          // original defect as a clocked action inheriting a stale phase, and
+          // ordered this reset. It is correct and it is here -- but the mutant
+          // that removes it KILLS NOTHING, and the reason is structural: with
+          // the phase machine as the model specifies it, every clocked action
+          // already LEAVES the phase at LOW (a SHIFT retires from HIGH -> LOW,
+          // a SHIFTIN from COLL -> LOW), and power-on resets it too. So the
+          // reset is DEFENSIVE -- it covers a lane halted mid-action and
+          // restarted -- not load-bearing for any program the suite builds.
+          // ⛔⛔ AND THE REAL ROOT CAUSE WAS ELSEWHERE, which this mutant is
+          // what proved: the retire chain below used to read
+          // `if (a_op != OP_REARM && !ck_hold)`, so a HELD clocked action --
+          // which carries `level = 1` BY DEFINITION of the trigger -- fell
+          // through into the `else if (a_lvl)` LOOPING-REARM arm and jumped
+          // its PC to `l_base`. That is what made an action look like it
+          // retired after one dispatch. Correct by DERIVATION, unevidenced by
+          // TEST, and recorded rather than papered over with a contrived
+          // program -- the same treatment `M_BUF_CHAINFLIP` gets.
+`ifdef M_CK_NO_PHASE_RESET
+          if (ck_act) l_ckph[cur] <= ck_next;
+`else
+          if (act_retire)  l_ckph[cur] <= CK_LOW;
+          else if (ck_act) l_ckph[cur] <= ck_next;
+`endif
+          if (ck_act) begin
+            // the action's own bit counter: advances on LOW, cleared at the
+            // retire that starts the next action. ⛔ NOT `tx_bitp`, which the
+            // host-byte load zeroes on the last bit's LOW phase.
+            if (act_retire)     l_ckbit[cur] <= {BPW{1'b0}};
+            else if (ck_is_low) l_ckbit[cur] <= l_ckbit[cur] +
+                                                {{(BPW-1){1'b0}}, 1'b1};
+            // ARM THE CAPTURE as the high phase leaves: the clock has just
+            // been released and the rise -- whenever the peer allows it --
+            // lands in `l_cksamp` during the idle window.
+            if (ck_shiftin & ck_is_high) begin
+              l_ckwait[cur] <= 1'b1;
+              l_ckgot[cur]  <= 1'b0;
+            end
+          end
+
           case (a_op)
-            OP_SHIFT: begin
+            OP_SHIFT: if (!ck_shift || ck_is_low) begin
               // TX ONLY. Neither `l_rx` nor `rx_bitp` is named here.
+              // ⛔ ON A CLOCKED SHIFT ONLY THE LOW PHASE SHIFTS: the high
+              // phase emits no new bit, so shifting there would drain the
+              // byte at twice the clock rate -- exactly the two-bits-per-
+              // clock defect the old corpus idiom had.
               l_tx[cur]    <= {1'b0, l_tx[cur][7:1]};
 `ifdef M_SHARED_BITP
               l_bitp_shared <= l_bitp_shared + {{(BPW-1){1'b0}}, 1'b1};
@@ -1537,7 +1878,20 @@ module pe_engine #(
               tx_bitp[cur] <= tx_bitp[cur] + {{(BPW-1){1'b0}}, 1'b1};
 `endif
             end
-            OP_SHIFTIN: begin
+            // ⛔⛔ ON A CLOCKED SHIFTIN THE ACCUMULATE HAPPENS ONLY AT A
+            // CONSUME POINT, and takes the bit the OBSERVED RISE captured --
+            // never a live pin read, which at writeback is the wrong instant
+            // by construction (the clock has only just been released).
+            // ⛔ AND A CONSUME POINT WITH NOTHING PENDING IS REPORTED: the
+            // peer held the clock past this lane's next dispatch, so the bit
+            // is not late, it is ABSENT. The substituted 0 reads as an ACK,
+            // which is why this needs a status bit and not a comment.
+            OP_SHIFTIN: if (!ck_shiftin || ck_consume) begin
+              if (ck_consume & ~l_ckgot[cur]) begin
+                clk_stretch_err <= 1'b1;
+                sticky_ovr      <= 1'b1;
+              end
+              if (ck_consume) l_ckgot[cur] <= 1'b0;
               // RX ONLY. Neither `l_tx` nor `tx_bitp` is named here, which
               // is what makes the TX host load at `a_cnt` REACHABLE: this
               // reset used to clear the pointer that load was waiting on.
@@ -1549,7 +1903,7 @@ module pe_engine #(
               // it is commented HERE rather than inside an arm because
               // `gate_mutant_arms` counts a comment inside an `ifdef` as the
               // arm wrapping more than its delta, and is right to.
-              l_rx[cur] <= {rx_bit, l_rx[cur][7:1]};
+              l_rx[cur] <= {rx_bit_sel, l_rx[cur][7:1]};
 `ifdef M_SHARED_BITP
               l_bitp_shared <= l_bitp_shared + {{(BPW-1){1'b0}}, 1'b1};
               if (l_bitp_shared == a_cnt - {{(BPW-1){1'b0}}, 1'b1}) begin
@@ -1610,7 +1964,31 @@ module pe_engine #(
           //                   DERIVATION and unevidenced by TEST, and that is
           //                   recorded rather than papered over with a
           //                   program contrived to kill it.
-          if (a_op != OP_REARM) begin
+          // ⭐⭐⭐ A CLOCKED ACTION MID-BYTE RETIRES NOTHING. While `ck_hold_eff`
+          // is high the PC does not advance, the head is not invalidated and
+          // the buffer does not swap -- so the SAME action is dispatched
+          // again and emits its next phase. Not a new mechanism: a chaining
+          // `OP_REARM` already re-dispatches by not advancing the PC.
+          // ⛔⛔ THIS IS ALSO AMENDMENT A1 IN SILICON. Theorem 3 argued from
+          // "a dispatch leaves EXACTLY one slot per lane to be refilled"; a
+          // held dispatch leaves ZERO. The bound survives because it only
+          // ever needed an UPPER bound and a re-dispatch owes fewer -- but
+          // the proof text had to stop saying "exactly", and
+          // docs/J_LANE_PROOF.md Amendment A1 is where it does.
+          // ⛔⛔ THE HOLD IS THE **FIRST** ARM OF THIS CHAIN, and that is a bug
+          // fix, not a style preference. The first version bolted
+          // `&& !ck_hold_eff` onto the `a_op != OP_REARM` arm and left the
+          // chain alone -- so a HELD clocked action, which carries
+          // `level = 1` BY DEFINITION of the trigger, fell through into the
+          // `else if (a_lvl)` LOOPING-REARM arm and jumped its PC to
+          // `l_base`. It looked exactly like retiring after one dispatch.
+          // ⇒ A term added to a chained if/else must be checked against
+          //   EVERY later arm, and the arms here are selected by `a_lvl`,
+          //   which the new trigger also uses.
+          if (ck_hold_eff) begin
+            // a held clocked action retires NOTHING: no PC advance, no
+            // invalidation, no buffer swap. Amendment A1 in silicon.
+          end else if (a_op != OP_REARM) begin
             l_pc[cur]   <= l_pc[cur] + ACT_BYTES[AW-1:0];
 `ifndef M_BUF_NOINVAL
             l_actv[hix[cur]] <= 1'b0;   // ⛔ INVALIDATION
@@ -1728,6 +2106,16 @@ module pe_engine #(
       // Ruling 1's failure: the sample grid anchors to an arbitrary timeout
       // instant instead of to the peer's edge, and UART-rx misses every bit.
       for (i = 0; i < N_LANES; i = i + 1) begin
+        // ⭐⭐ THE CLOCKED SHIFTIN'S CAPTURE, in the idle window after the
+        // high phase. ⛔ FIRST RISE ONLY -- `l_ckwait` clears here -- so a
+        // peer that glitches the clock twice cannot overwrite the bit it
+        // already answered with. The same "capture DISARMS" property the ARM
+        // below needs, for the same reason.
+        if (ck_hit[i]) begin
+          l_cksamp[i] <= ck_bit[i];
+          l_ckgot[i]  <= 1'b1;
+          l_ckwait[i] <= 1'b0;
+        end
         if (arm_hit[i]) begin
           l_armed[i] <= 1'b0;                   // capture DISARMS: a second
                                                 // edge must not re-rebase and

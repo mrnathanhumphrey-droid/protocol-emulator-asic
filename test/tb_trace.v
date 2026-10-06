@@ -490,6 +490,7 @@ module tb_trace;
   );
 
 `include "test/progress.vh"
+`include "test/clocked_conform.vh"
 `include "test/host_feed.vh"
 
 endmodule

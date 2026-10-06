@@ -145,6 +145,7 @@ module tb_jlane;
   );
 
 `include "test/progress.vh"
+`include "test/clocked_conform.vh"
 
   // ⛔⛔ THE PREDICATE IS `pe_engine.v:1076-1089` READ LITERALLY, with the
   // winner pinned to `lane`. Every term earns its place:

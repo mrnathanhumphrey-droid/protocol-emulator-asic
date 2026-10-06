@@ -104,6 +104,48 @@ EXPECT = {
         "`pin_in[a_pin]` appeared verbatim at 745, 1502 and 1524, and removing "
         "the guard would have meant three separate edits -- an arm whose size "
         "tracks the number of copies rather than the size of the idea."),
+    "M_CK_NO_ALTERNATE": (2,
+        "ONE LINE IN EACH ARM. The next phase is a wire (`ck_norm`), so the "
+        "mutant substitutes `ck_next = CK_LOW`. ⛔ WHAT IT BREAKS: the phase "
+        "never leaves LOW, so the clock is taken down and never released and "
+        "the action never reaches its retire condition -- LAYER A of the bench "
+        "watchdog trips in every bench running a clocked program, and the "
+        "foreign decoder would find no byte at all."),
+    "M_CK_NEVER_RETIRE": (2,
+        "ONE LINE IN EACH ARM: `ck_hold_eff = ck_act` instead of `ck_hold`, so "
+        "a clocked action holds for ever. ⭐ THIS IS LAYER A'S MUST-FIRE, the "
+        "one the ruling asked for by name: a never-retiring lane must trip the "
+        "COARSE liveness check, which is model-independent on purpose. "
+        "MEASURED: layer A fires, layer B stays silent -- because layer B only "
+        "compares actions that DID retire, which is exactly why one layer "
+        "cannot do both jobs."),
+    "M_CK_NO_PHASE_RESET": (3,
+        "ONE LINE AGAINST TWO -- the clean arm needs both the reset and the "
+        "advance it falls back to -- and ⚠ A CHARACTERISED SURVIVOR rather than a "
+        "kill -- which is the useful result. It removes the action-start phase "
+        "reset the ruling ordered. Neither watchdog layer fires, and the "
+        "reason is structural: with the phase machine as the golden model "
+        "specifies it, every clocked action already LEAVES the phase at LOW (a "
+        "SHIFT retires from HIGH -> LOW, a SHIFTIN from COLL -> LOW) and "
+        "power-on resets it. The reset is DEFENSIVE -- it covers a lane halted "
+        "mid-action and restarted -- not load-bearing for any program the "
+        "suite builds. ⛔⛔ AND IT IS WHAT LOCATED THE REAL ROOT CAUSE: the "
+        "retire chain read `a_op != OP_REARM && !ck_hold`, so a held clocked "
+        "action (level = 1 by definition of the trigger) fell into the "
+        "`else if (a_lvl)` looping-REARM arm and jumped its PC to the lane "
+        "base. Correct by derivation, unevidenced by test, recorded rather "
+        "than killed with a contrived program -- as `M_BUF_CHAINFLIP` is."),
+    "M_ACK_DRIVES_SDA": (2,
+        "ONE LINE IN EACH ARM: `{oe, out}` is a wire, so the mutant is `2'b11` "
+        "for `2'b00`. ⭐ IT CANNOT PERTURB THE CLEAN BUILD -- with `ack_drv[1]` "
+        "low the `pin_out` write it feeds is never taken, so every unclocked "
+        "SHIFTIN path is bit-for-bit what it was. ⛔ WHAT IT BREAKS, which is "
+        "ruled condition (a): the ACK slot DRIVES the data pin high while the "
+        "peer pulls it low to acknowledge -- on an open-drain net a push-pull "
+        "high against a low, which is a SHORT and which the per-net-type "
+        "overlap rule must refuse. ⚠ Deliberately NOT a wrong-bit mutant: "
+        "forcing the pin LOW would read as a permanent ACK, which is the NACK "
+        "test's job. Two defects, two arms."),
     "M_SHIFT_CLK_ALIAS": (6,
         "a BLOCK substitution, declared: the refusal has to suppress BOTH the "
         "data write and the clock write, so removing it removes an if/else "

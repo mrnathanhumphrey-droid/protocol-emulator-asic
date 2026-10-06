@@ -86,6 +86,7 @@ module tb_csat;
   );
 
 `include "test/progress.vh"
+`include "test/clocked_conform.vh"
 
   // ⛔⛔ `pe_engine.v`'s ST_IDLE ARM READ LITERALLY. Every term earns its place:
   //   `primed && !config_err` gate the whole arm, so a cycle before priming is

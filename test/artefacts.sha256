@@ -26,8 +26,8 @@ f2fa994d96eccf346cb328dbbcda24a07d7f4d89ead49f9b259fae301dd6b7b0  noop_image_h19
 7424d687523be2a402e9acc721937cdd2177a578fed6cccceb1ffa62afbbfb05  half_image.hex  # make_smoke_image.py --half 24
 f1eb700a980aa3ac7800a17fe700baa4da105d3f48bfa3515b4dd950404a4e12  rxfast_image.hex  # make_smoke_image.py --rxfast 24
 ca52b2bc8dfbef9e1fb0f3fd7de1aebf2ee34db2f1b2004d882e5c6f6b65b156  i2cframe_image.hex  # make_smoke_image.py --i2cframe 62
-d1db8a89415b2e535c73e9d6d2b6e463177e9aa65845648950b88a8d2a9f4592  corpus_all5.hex  # corpus.py
-9d4f31a315e91eff9b85dada226c9f8d4d455a01a75925254e9b557f54ed8c5d  corpus_i2c.hex  # corpus.py
-72a57241e347a877b074118d3fab3fc0c18f5358a9ed1ab329045fa5c2ceca57  corpus_spim.hex  # corpus.py
+d1e2508711f0b908436c474558c52717c4953fee5f6a223d5b76c9aa160e7356  corpus_all5.hex  # corpus.py
+7dbe1c50f433ba5f59d02c707a4f44c7c56317d87231e27f01fde6e9ed9043d0  corpus_i2c.hex  # corpus.py
+a411efcc0bff86ed4284df04b9af9023cddc1ae0dc9e195a16b0fc73a501fca8  corpus_spim.hex  # corpus.py
 c5e06816bcdef2bf58143dcb99a3d46d2303b370cc7915c02bb53783df64f2ef  corpus_sptgt.hex  # corpus.py
 dd5a2e3152c2f01aa184cec736839b84fe45aeedf8b2feaf62575362d4377f70  corpus_uartrx.hex  # corpus.py

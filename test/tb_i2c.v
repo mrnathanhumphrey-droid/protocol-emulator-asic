@@ -80,6 +80,7 @@ module tb_i2c;
   );
 
 `include "test/progress.vh"
+`include "test/clocked_conform.vh"
 `include "test/host_feed.vh"
 
   // ---- liveness, so a silent run cannot pass -------------------------

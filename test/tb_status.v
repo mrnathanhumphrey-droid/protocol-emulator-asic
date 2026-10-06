@@ -69,6 +69,7 @@ module tb_status ();
   );
 
 `include "test/progress.vh"
+`include "test/clocked_conform.vh"
 `include "test/host_feed.vh"
 
   task fail;

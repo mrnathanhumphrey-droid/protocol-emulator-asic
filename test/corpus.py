@@ -73,6 +73,7 @@ sys.path.insert(0, os.path.join(ROOT, "model", "a2"))
 from make_smoke_image import (            # noqa: E402
     ACT_BASE, ACT_BYTES, AW, HDR_BYTES, N_LANES,
     OP_ARM, OP_LEVEL, OP_READBIT, OP_REARM, OP_SHIFT, OP_SHIFTIN, OP_START,
+    SELF_CLOCKED,
     OP_STOP, PIN_NONE, act, hdr,
 )
 
@@ -213,8 +214,16 @@ def _assemble(seqs, headers_spec, park_at, queues=None):
     prog, base, off = [], {}, ACT_BASE
     for lane, seq in seqs:
         base[lane] = off
-        for op, pin, lvl, dly in seq:
-            prog.append(act(op, pin, lvl, dly, count=8,
+        # ⛔ COUNT IS NOW PER ACTION, with 8 as the default this always used.
+        # It had to become explicit for the self-clocked shifts: `count` is the
+        # BIT COUNT there, and the two opcodes read it differently (SHIFT
+        # compares the pre-increment pointer against `a_cnt`, SHIFTIN against
+        # `a_cnt - 1`), so a hardcoded 8 would have made a clocked transmit
+        # nine bits long and a clocked ACK eight.
+        for entry in seq:
+            op, pin, lvl, dly = entry[:4]
+            cnt = entry[4] if len(entry) > 4 else 8
+            prog.append(act(op, pin, lvl, dly, count=cnt,
                             q=queues.get(lane, 0)))
             off += ACT_BYTES
     lp = off
@@ -242,11 +251,22 @@ def build_i2c(d: int = 9):
     `uio_out` constant-0 on those bits BY CONSTRUCTION -- so this program's
     precondition is `uio_oe`, not `uio_out`.
     """
+    # ⛔⛔ REWRITTEN TO THE SELF-CLOCKED SHIFTS, and the old idiom was not
+    # merely verbose -- it was WRONG. It read:
+    #       (OP_SHIFT, P_SDA, 1, d),   # "a bit, clocked on SCL"
+    #       (OP_SHIFT, P_SDA, 0, d),
+    # Two SHIFT actions, one per clock level -- but EACH ONE advances `tx_bitp`
+    # and shifts `l_tx`, so the pair consumed TWO payload bits per clock cycle
+    # and put only the first on the wire. Invisible for the corpus's whole life
+    # because no bench fed the host channel, so every lane shifted zeros and
+    # losing alternate bits changed nothing observable -- the same blindness
+    # that hid the 1.6x alias defect.
+    # ⭐ Now ONE action carries the whole byte, one payload bit per clock, and
+    # the ACK is a one-bit clocked receive sampled on the OBSERVED SCL rise.
     seq = [
         (OP_START, P_SDA, 0, d),      # START: SDA low while SCL high
-        (OP_SHIFT, P_SDA, 1, d),      # a bit, clocked on SCL (the lane's clkpin)
-        (OP_SHIFT, P_SDA, 0, d),
-        (OP_SHIFTIN, P_SDA, 0, d),    # release to read the ACK
+        (OP_SHIFT, P_SDA, SELF_CLOCKED, d, 7),    # a whole byte, 8 bits
+        (OP_SHIFTIN, P_SDA, SELF_CLOCKED, d, 1),  # the ACK slot, 1 bit
         (OP_READBIT, P_SDA, 0, d),
         (OP_STOP, P_SDA, 1, d),       # STOP
         (OP_REARM, 0, 1, d),
@@ -270,9 +290,13 @@ def build_spi_master(d: int = 7):
     """
     seq = [
         (OP_LEVEL, P_M_CS, 0, d),       # select
-        (OP_SHIFT, P_M_MOSI, 1, d),     # clock a command bit out
-        (OP_SHIFT, P_M_MOSI, 0, d),
-        (OP_SHIFTIN, P_M_MISO, 0, d),   # release + sample the peer
+        # ⛔ SAME REWRITE AS build_i2c, same defect: the old (level=1, level=0)
+        # SHIFT pair advanced `tx_bitp` twice per clock. ⭐ SPI MODE 0 IS THE
+        # SUPPORTED ORDER here -- data settles with the clock low and is read on
+        # the rise -- which is what the self-clocked shift emits. Modes 1 and 2
+        # would need the reverse order and stay on the unclocked idiom.
+        (OP_SHIFT, P_M_MOSI, SELF_CLOCKED, d, 7),    # a whole command byte
+        (OP_SHIFTIN, P_M_MISO, SELF_CLOCKED, d, 8),  # a whole reply byte
         (OP_READBIT, P_M_MISO, 0, d),
         (OP_LEVEL, P_M_CS, 1, d),       # deselect
         (OP_REARM, 0, 1, d),
@@ -349,13 +373,28 @@ def build_all5(d: int = 9):
     is the program that exercises the scheduler WITH the protocol pins moving,
     rather than the opcode-coverage census that moves only `uo_out`.
     """
-    s_i2c = [(OP_START, P_SDA, 0, d), (OP_SHIFT, P_SDA, 1, d),
-             (OP_SHIFTIN, P_SDA, 0, d), (OP_STOP, P_SDA, 1, d),
+    # ⛔⛔ LANES 0 AND 2 ARE THE OTHER TWO OF THE FOUR SELF-CLOCKED SITES, and
+    # this builder has its OWN sequences rather than reusing `build_i2c` /
+    # `build_spi_master` -- so rewriting those two did NOT fix these. Caught by
+    # checking the manifest hash instead of assuming: `corpus_all5` read
+    # UNCHANGED while the decode said it had two affected lanes, and an
+    # unchanged hash there would have meant the two sites were still emitting
+    # the old two-bits-per-clock pair through the new clocked path.
+    # ⚠ LANE 1 IS **NOT** ONE OF THEM: its clock pin is PIN_NONE, so
+    # `clk_real` is false and its `level = 1` keeps the old meaning. It stays
+    # exactly as it was -- which is the UART/SPI-target case the ruling asked
+    # be defined, visible here in a program.
+    s_i2c = [(OP_START, P_SDA, 0, d),
+             (OP_SHIFT, P_SDA, SELF_CLOCKED, d, 7),     # a whole byte
+             (OP_SHIFTIN, P_SDA, SELF_CLOCKED, d, 1),   # the ACK slot
+             (OP_STOP, P_SDA, 1, d),
              (OP_REARM, 0, 1, d)]
     s_tgt = [(OP_SHIFT, P_T_MISO, 1, d + 1), (OP_LEVEL, P_T_MISO, 0, d + 1),
              (OP_REARM, 0, 1, d + 1)]
-    s_mst = [(OP_LEVEL, P_M_CS, 0, d + 2), (OP_SHIFT, P_M_MOSI, 1, d + 2),
-             (OP_SHIFTIN, P_M_MISO, 0, d + 2), (OP_LEVEL, P_M_CS, 1, d + 2),
+    s_mst = [(OP_LEVEL, P_M_CS, 0, d + 2),
+             (OP_SHIFT, P_M_MOSI, SELF_CLOCKED, d + 2, 7),
+             (OP_SHIFTIN, P_M_MISO, SELF_CLOCKED, d + 2, 8),
+             (OP_LEVEL, P_M_CS, 1, d + 2),
              (OP_REARM, 0, 1, d + 2)]
     s_tx  = [(OP_LEVEL, P_TX, 0, d + 3), (OP_LEVEL, P_TX, 1, d + 3),
              (OP_REARM, 0, 1, d + 3)]
@@ -525,8 +564,12 @@ def audit_programs() -> int:
         lanes, headers = {}, {}
         for lane, seq in a["seqs"]:
             q = a["queues"].get(lane, 0)
-            lanes[lane] = [(op, pin, lvl, dly, q)
-                           for (op, pin, lvl, dly) in seq]
+            # ⛔ TOLERATES THE OPTIONAL PER-ACTION COUNT. The self-clocked
+            # shifts carry a 5th element, and this audit is the ONLY path that
+            # feeds the corpus to the toolchain's own rules -- so if it could
+            # not parse an action shape, the new actions would go UNAUDITED by
+            # the checks that exist to catch exactly this class of program.
+            lanes[lane] = [(e[0], e[1], e[2], e[3], q) for e in seq]
         for lane, sp in a["spec"].items():
             headers[lane] = sp
         try:

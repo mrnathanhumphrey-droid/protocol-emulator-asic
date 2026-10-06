@@ -47,6 +47,22 @@ INVARIANTS, asserted on every action this model runs:
   I6  the clock returns LOW at the end of an action, so the next action's LOW
       phase starts from a known level and no program needs a separating
       OP_LEVEL
+  I7  COLLECT is never released before the HIGH job it follows has COMPLETED
+      (the one-slot-per-lane condition, r_i <= t_i). It holds by construction
+      -- the sample is captured in the idle window AFTER that writeback -- but
+      a condition that holds by construction is exactly the kind that stops
+      holding silently when the construction changes, so it is asserted.
+
+⚠ WHAT COLLECT COSTS THE TIMING MODEL, which is NOT this file's claim to make
+but is recorded here because the dispatch count is: it is an ordinary job in
+the lane's job stream with `C = 3`, released reactively by the observed rise
+(so it carries `J = 1`), and it makes NO FETCH-PORT DEMAND. Refill was never
+part of the A2 task model -- it lives only in the `D*` theorem and per-lane
+`J` -- so no new arm is needed. ⛔ But its release spacing from the HIGH job is
+about `L_sync`, FAR shorter than the lane's nominal bit spacing, so A2/pyRTA
+must model that true minimum separation and `D*`/`d_min` must count only
+REFILL-BEARING dispatches or it will refuse every clocked program over a gap
+that never touches the port.
 """
 import json
 import os
@@ -238,6 +254,18 @@ def check_invariants(op, nbits, disp, lane):
     if disp[-1].clk != 0:
         bad.append("I6: the clock is %d at the end, expected 0"
                    % disp[-1].clk)
+    # I7: a COLLECT dispatch must come strictly AFTER the HIGH it follows, and
+    # may consume only a bit captured in the window between them. A COLLECT
+    # that consumed nothing means the bit was never there to take.
+    for i, d in enumerate(disp):
+        if d.phase != COLL:
+            continue
+        if i == 0 or disp[i - 1].phase != HIGH:
+            bad.append("I7: a COLLECT at dispatch %d does not follow a HIGH"
+                       % i)
+        elif d.consumed is None:
+            bad.append("I7: the COLLECT at dispatch %d consumed nothing, so "
+                       "the sample it exists to take never arrived" % i)
     return bad
 
 
@@ -363,6 +391,27 @@ def selftest():
                             "ok" if not clean else "*** %s" % clean[0]))
     if clean:
         rc = 1
+
+    # ⛔⛔ THE STRETCH TOLERANCE, MADE EXPLICIT RATHER THAN DISCOVERED LATER.
+    # The capture must land in the idle window BEFORE its consume point. One
+    # window is one LANE PERIOD (`d` cycles), so a peer may hold the clock for
+    # up to `d` and be read correctly; beyond that the bit is LOST.
+    # ⭐ AND THE DISPATCH COUNT DOES NOT MOVE EITHER WAY -- that is the whole
+    # value of capturing on the rise: a stretching peer changes WHICH bits
+    # arrive, never the schedule. So a lost bit shows up as I5, not as a
+    # timing violation, and the RTL's `clk_stretch_err` sticky is what reports
+    # it to the host. A design that silently substituted 0 would read as a
+    # successful ACK, which is the most dangerous possible default.
+    print("    stretch tolerance: the rise must land within ONE lane period")
+    for s, want_bits in ((0, 2), (1, 1), (3, 0), (20, 0)):
+        lane = Lane()
+        d = run_action(lane, 0, SHIFTIN, 2, stretch=s)
+        ok = (len(d) == 5 and len(lane.rx) == want_bits)
+        print("      stretch=%-3d %d dispatch(es), %d bit(s) consumed   %s"
+              % (s, len(d), len(lane.rx),
+                 "ok" if ok else "*** expected 5 and %d" % want_bits))
+        if not ok:
+            rc = 1
 
     # ⭐ STRETCH MUST NOT CHANGE THE DISPATCH COUNT, only when the bit lands.
     for s in (0, 1, 5):

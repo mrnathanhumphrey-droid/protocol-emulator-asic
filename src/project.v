@@ -270,6 +270,7 @@ module tt_um_protocol_emulator #(
   wire               e_ovr, e_busy, e_rx_push;
   wire               e_host_pop;
   wire               e_cfg_err;
+  wire               e_clk_stretch;
   wire [7:0]         e_rx_data;
   // DECLARED WITH AN EXPLICIT WIDTH, NOT `LW`, because `LW` is a localparam
   // defined further down this file. iverilog and yosys both accepted the
@@ -431,6 +432,7 @@ module tt_um_protocol_emulator #(
         .host_lane(e_host_lane), .host_q(e_host_q),
       .lane_underrun(e_under), .lane_overflow(e_ovf), .sticky_ovr(e_ovr),
         .cfg_err(e_cfg_err),
+        .clk_stretch(e_clk_stretch),
       .rx_data(e_rx_data), .rx_lane(e_rx_lane), .rx_push(e_rx_push),
       .busy(e_busy)
   );
@@ -521,7 +523,13 @@ module tt_um_protocol_emulator #(
       // a `uo_out` pin, so the chip REFUSED TO RUN it. The host learns why
       // from the stream rather than from a part that sits silent.
       // ⭐ bit 6 = RX-DROP: a payload arrived while one was still pending.
-      status_byte <= {1'b0, rx_drop_sticky, e_cfg_err, tx_full_sticky,
+      // ⭐ bit 7 = CLOCK-STRETCH: a clocked SHIFTIN consume point found no
+      // captured bit, so the peer held the clock past this lane's next
+      // dispatch. ⛔ THIS BIT WAS THE HARDCODED 0, which is why adding it
+      // changes no existing program's status byte: any image that never runs
+      // a clocked SHIFTIN leaves it 0, exactly as the literal did. The
+      // bit-identity condition is not weakened by it.
+      status_byte <= {e_clk_stretch, rx_drop_sticky, e_cfg_err, tx_full_sticky,
                       e_ovr, |e_ovf, |e_under, 1'b1};
       rb_re <= 1'b0;
       // capture the RX pulse the instant it appears, whatever the serialiser

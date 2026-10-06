@@ -139,6 +139,7 @@ module tb_half;
   );
 
 `include "test/progress.vh"
+`include "test/clocked_conform.vh"
 `include "test/host_feed.vh"
 
   // ---- the dispatch events, read literally off the FSM -------------------

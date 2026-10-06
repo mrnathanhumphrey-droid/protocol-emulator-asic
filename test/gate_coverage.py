@@ -99,7 +99,7 @@ CLASSIFIED = {
     # is not in this table -- it is an owed RULING.
 
     # ---- the two tool-divergent points -----------------------------------
-    ("src/pe_engine.v", 677, "v_branch", "if"): (
+    ("src/pe_engine.v", 767, "v_branch", "if"): (
         TOOL_DIVERGENT,
         "The EDF arbiter's selection condition, `ready[k] && (!winner_v || "
         "edf_key_off[k] < best)`, inside the unrolled `for` over lanes in an "
@@ -111,7 +111,7 @@ CLASSIFIED = {
         "point belongs to. ⛔ Counted as uncovered anyway, because the gate "
         "must not pick the lenient reading of a disagreement it cannot "
         "adjudicate."),
-    ("src/pe_engine.v", 992, "v_branch", "if"): (
+    ("src/pe_engine.v", 1166, "v_branch", "if"): (
         TOOL_DIVERGENT,
         "`if (hdr_done && !prime_unp) primed_q <= 1'b1;` -- the prime scan's "
         "COMPLETION test, which sits AFTER the `for` over lanes, not inside "
@@ -131,7 +131,7 @@ CLASSIFIED = {
         "number out of the artefact; do not reconstruct it from memory."),
 
     # ---- src/pe_engine.v --------------------------------------------------
-    ("src/pe_engine.v", 1160, "v_branch", "else"): (
+    ("src/pe_engine.v", 1340, "v_branch", "else"): (
         UNREACHABLE,
         "H_IDLE (line 1134) with `hdr_done` ALREADY SET. Every assignment that puts the "
         "header FSM into H_IDLE clears `hdr_done` in the same non-blocking "
@@ -141,7 +141,7 @@ CLASSIFIED = {
         "the arm of a condition that is true on every entry. ⭐ Checked "
         "structurally by `check_h_idle_clears` below rather than asserted, "
         "because the claim is about two specific lines and would rot."),
-    ("src/pe_engine.v", 1296, "v_line", "case"): (
+    ("src/pe_engine.v", 1476, "v_line", "case"): (
         UNREACHABLE,
         "The prefetch FSM's defensive `default`. `pst` is declared `[2:0]` and "
         "its four encodings P_SCAN/P_REQ/P_WAIT/P_CAP are 3'd0..3'd3, all "
@@ -149,7 +149,7 @@ CLASSIFIED = {
         "⭐ Verified mechanically by `check_full_case` below, which reads the "
         "encodings out of the source -- a hand-counted enumeration is the sort "
         "of claim that survives the addition of a fifth state."),
-    ("src/pe_engine.v", 1502, "v_line", "case"): (
+    ("src/pe_engine.v", 1787, "v_line", "case"): (
         UNREACHABLE,
         "The opcode `case`'s `default`. The opcode field is 3 bits and ALL "
         "EIGHT encodings are named in arms -- OP_LEVEL, OP_SHIFT, OP_SHIFTIN, "
@@ -163,7 +163,7 @@ CLASSIFIED = {
     # other lane, with the lane still LIVE -- the flag must report, never
     # stall. The entry is removed rather than kept, because a stale OWED claim
     # says something is untested when it is tested.
-    ("src/pe_engine.v", 1701, "v_line", "case"): (
+    ("src/pe_engine.v", 2079, "v_line", "case"): (
         UNREACHABLE,
         "The dispatch FSM's defensive `default`. `st` is declared `[1:0]` with "
         "three encodings ST_IDLE/ST_DRIVE/ST_WB = 2'd0..2'd2 at line 666; "
@@ -173,7 +173,7 @@ CLASSIFIED = {
         "what underwrites `st` being reset at all."),
 
     # ---- src/project.v ----------------------------------------------------
-    ("src/project.v", 406, "v_branch", "if"): (
+    ("src/project.v", 407, "v_branch", "if"): (
         OWED,
         "A host PUSH and an engine POP landing on the SAME queue in one cycle. "
         "The arm exists so the occupancy update is not lost, and reaching it "
@@ -203,7 +203,69 @@ CLASSIFIED = {
     # that is not `UNREACHABLE`. ⚠ An empty class is not a dead one -- it is a
     # class whose only member was resolved, which is the outcome it exists for.
 
+    # ---- the self-clocked arms: redundant-by-construction guards ---------
+    # ⛔ ALL FIVE ARE UNREACHABLE **STRUCTURALLY**, not by argument, and each
+    # names the enclosing condition that makes it so. They exist because the
+    # index gate requires a program-indexed write's guard to be LOCAL (within
+    # 60 lines and inside its own case arm), so the clocked arms repeat guards
+    # their enclosing conditions already imply. Synthesis folds them; the
+    # locality is for the reader and the gate.
+    ("src/pe_engine.v", 1621, "v_branch", "else"): (
+        UNREACHABLE,
+        "The local `if (pin_real)` inside the SELF-CLOCKED SHIFT's LOW phase. "
+        "Its `else` cannot be taken: the enclosing case label is "
+        "`OP_SHIFT: if (pin_real)`, so `pin_real` is already true on every "
+        "path that reaches here. Written locally anyway because "
+        "`model/gate_program_index.py` bounds its guard search at 60 lines and "
+        "at the enclosing arm -- and widening that window is refused, since the "
+        "gate's own docstring records a `clk_real` 30 lines away falsely "
+        "guarding a deliberately unguarded mutant arm."),
+    ("src/pe_engine.v", 1630, "v_branch", "else"): (
+        UNREACHABLE,
+        "The `if (clk_real)` around the LOW phase's CLOCK write. Unreachable "
+        "`else`: this block runs only under `ck_shift`, which is DEFINED as "
+        "`clk_real & a_lvl & (a_op == OP_SHIFT)` -- so `clk_real` is a "
+        "conjunct of the condition that got us here. ⚠ It is still written, "
+        "because the guard must be visible at the indexed write rather than "
+        "inferred through a wire's definition."),
+    ("src/pe_engine.v", 1641, "v_branch", "else"): (
+        UNREACHABLE,
+        "The same `if (clk_real)` around the HIGH phase's clock write, "
+        "unreachable for the identical reason -- `ck_shift` carries "
+        "`clk_real`. Both phases guard separately because a guard shared "
+        "across two write groups is how the 1.6x refusal first failed: it "
+        "suppressed the data write and let the clock write run anyway."),
+    ("src/pe_engine.v", 1694, "v_branch", "else"): (
+        UNREACHABLE,
+        "The local `if (pin_real)` inside the UNCLOCKED SHIFT body. Same "
+        "structure as the clocked one at 1621 and unreachable for the same "
+        "reason. ⭐ IT WAS ADDED BECAUSE THE INDEX GATE CAUGHT THE EXISTING "
+        "CODE: inserting the clocked arm pushed the case label's own guard "
+        "more than 60 lines away from five writes that were fine the day "
+        "before, which is exactly the drift that window exists to detect."),
+    ("src/pe_engine.v", 1761, "v_branch", "if"): (
+        UNREACHABLE,
+        "`if (ck_shiftin & ack_drv[1]) pin_out[a_pin] <= ack_drv[0];` -- the "
+        "TRUE arm cannot be taken in a clean build, because `ack_drv` is "
+        "`2'b00` and only `M_ACK_DRIVES_SDA` makes it `2'b11`. ⭐ THE LINE IS "
+        "IN THE COMMON PATH ON PURPOSE: keeping it outside the `ifdef` is what "
+        "makes that mutant ONE LINE against one, which `gate_mutant_arms` "
+        "requires -- an arm that wrapped this write too would wrap more than "
+        "its delta. ⚠ So this point is uncovered BY DESIGN and its coverage "
+        "would mean the mutant had leaked into the shipped build."),
+
     # ---- test/fram_i2c.v (the peer model Wilson named) --------------------
+    # ⭐⭐ NINE OWED POINTS WERE PAID BY THE SELF-CLOCKED CORPUS, and the gate
+    # REFUSED to let their entries linger: "DEBT PAID, ENTRY STALE". They were
+    # the I2C peer's clock-stretch counter arms (fram_i2c 235, 251) and most of
+    # the SPI peer's COMMAND DECODER (fram_spi 134-160) -- which was the single
+    # largest OWED item on the list. The old corpus idiom clocked two payload
+    # bits per clock and never completed a byte, so the peers' decoders were
+    # never driven past their first state; whole-byte clocked shifts drive them
+    # properly. ⚠ THE DEBT WAS NOT PAID BY WRITING A TEST FOR IT. It was paid
+    # by fixing a program that had been under-exercising the peer all along,
+    # which is worth more than the nine points: it means the earlier "the peer
+    # model is exercised" claims were measuring less than they sounded like.
     # ⭐ A POINT ONLY VERILATOR 5.053 EMITS. The pinned suite adds
     # CONDITIONAL-EXPRESSION coverage (`cond_then`/`cond_else`) that 5.032 did
     # not, so adopting the newer release introduced a point class, not just
@@ -246,31 +308,11 @@ CLASSIFIED = {
         "by a foreign decoder -- but the FRAM write itself has never "
         "completed, and the two are easy to conflate. ⇒ One more address byte "
         "and one more data byte in the program reaches this and 223."),
-    ("test/fram_i2c.v", 235, "v_branch", "if"): (
-        OWED,
-        "⛔ NO COHERENT BYTE HAS EVER BEEN CLOCKED INTO THE STRETCHING PEER. "
-        "This arm needs `byte_done` on an instance with STRETCH != 0; the "
-        "point EXECUTES 28 times, always on the STRETCH = 0 instance. "
-        "`i2cframe_image.hex` is the only program that assembles bytes the "
-        "peer accepts and `tb_i2c` runs it against `u_i2c`; `tb_trace`'s "
-        "`+PEER=i2cs` selects the stretching `u_i2cs` but the corpus I2C "
-        "program never completes a byte into it. ⚠ Two arms were added to the "
-        "sweep expecting to cover this and the count did not move -- recorded "
-        "in `benchset.py`, because an arm added in hope must be checked. "
-        "⇒ The test: `tb_i2c` with a STRETCH-parameterised peer."),
     ("test/fram_i2c.v", 239, "v_branch", "if"): (
         OWED,
         "The read-data presentation (`selected && rw && phase == P_RDATA`). "
         "Count 0 against 270 executions of the enclosing `else`. Downstream "
         "of 208: no read transaction exists to reach it."),
-    ("test/fram_i2c.v", 251, "v_branch", "if"): (
-        OWED,
-        "The stretch countdown's decrementing arm. The point executes "
-        "2,845,919 times -- every clock -- and `stretch_n` is never nonzero, "
-        "because the only thing that loads it is 235. ⇒ Covered by the same "
-        "test; listed separately because a fix to 235 that left this at zero "
-        "would mean the countdown never ran."),
-
     # ---- test/fram_spi.v --------------------------------------------------
     # ⛔⛔ ONE FINDING, EIGHTEEN POINTS: the SPI peer's ENTIRE command decoder
     # has never executed. `byte_done` never becomes 1 at an `negedge sck` with
@@ -285,6 +327,20 @@ CLASSIFIED = {
     # byte with CS asserted, then a certified decode of it, exactly as the
     # I2C frame was certified. Per-point entries follow so that a partial fix
     # cannot close the family.
+    # ⭐⭐ AND THE FAMILY WAS PARTIALLY PAID EXACTLY THAT WAY: the
+    # self-clocked corpus now drives WHOLE BYTES through this peer, and SEVEN
+    # of the eighteen points went covered -- the READ/WRITE opcode arm, the
+    # P_AHI, P_ALO and P_DATA phases, the WRITE arm, and two not-taken forks.
+    # The gate refused to let their entries linger ("DEBT PAID, ENTRY
+    # STALE"), so they are gone and ELEVEN remain owed. ⛔ THE DEBT WAS NOT
+    # PAID BY WRITING A TEST FOR IT: it was paid by fixing a corpus program
+    # that had been clocking two payload bits per clock and never completing
+    # a byte. That is worth more than the seven points, because it means the
+    # earlier "the peer model is exercised" claims were measuring less than
+    # they sounded like -- the same shape as the I2C peer defect sigrok found.
+    # ⚠ STILL OWED: the taken READ fork and the honoured write-enable latch,
+    # which need a program that actually READS and one that WRITES with WREN
+    # set -- i.e. the FRAM write and random read that come next.
 }
 
 _SPI_FAMILY = (
@@ -299,15 +355,8 @@ for _k, _what in (
         ((127, "v_line", "case"), "the WRDI opcode arm"),
         ((128, "v_line", "case"), "the RDSR (read status) opcode arm"),
         ((133, "v_line", "case"), "the RDID (read id) opcode arm"),
-        ((134, "v_line", "case"), "the READ/WRITE opcode arm"),
-        ((138, "v_line", "case"), "the P_AHI high-address phase"),
-        ((146, "v_line", "case"), "the P_ALO low-address phase"),
         ((149, "v_branch", "if"), "the READ fork at P_ALO, taken"),
-        ((149, "v_branch", "else"), "the READ fork at P_ALO, not taken"),
-        ((154, "v_line", "case"), "the P_DATA phase"),
-        ((155, "v_line", "elsif"), "the WRITE arm inside P_DATA"),
         ((160, "v_branch", "if"), "the write-enable latch honoured"),
-        ((160, "v_branch", "else"), "the write-enable latch refusing"),
         ((162, "v_branch", "if"), "the READ arm inside P_DATA"),
         ((162, "v_branch", "else"), "the READ arm inside P_DATA, not taken"),
         ((167, "v_line", "case"), "the phase case's defensive default"),
@@ -320,11 +369,28 @@ for _k, _what in (
 #: this gate. A ratchet seeded from a guess is a ratchet that permits a
 #: regression up to the guess.
 TOGGLE_CEILING = {
-    "src/pe_engine.v": 651,
+    # ⚠⚠ RAISED 651 -> 728 BY THE SELF-CLOCKED REGISTERS, and a RISE in a
+    # ratchet needs a reason rather than a new number. The clocked phase
+    # machine adds five per-lane registers -- `l_ckph` (2 bits), `l_ckbit`
+    # (4), `l_ckwait`, `l_cksamp`, `l_ckgot` -- across 5 lanes, plus the
+    # decode wires. Total toggle points went 2844 -> 3026 (+182) and
+    # uncovered 651 -> 728 (+77): the new state is mostly top bits of the
+    # bit counter and the per-lane copies for lanes no clocked program uses.
+    # ⛔ THIS IS DESIGN GROWTH, NOT A REGRESSION, and the distinction is
+    # checkable: no point that was COVERED became uncovered -- the
+    # line/branch adjudication above is exhaustive and reports 0 unclassified
+    # and 0 newly-dark points. A rise that could not point at new registers
+    # would be a regression and would have to be refused.
+    "src/pe_engine.v": 728,
     "src/pe_store.v": 6,
     "src/project.v": 186,
-    "test/fram_i2c.v": 94,
-    "test/fram_spi.v": 54,
+    # ⭐ RATCHETED DOWN BY THE SELF-CLOCKED CORPUS, and the cause is worth
+    # recording: the rewritten corpus drives WHOLE BYTES through the peer
+    # models instead of two bits per clock, so `fram_spi` went 54 -> 30
+    # uncovered toggle points and `fram_i2c` 94 -> 93. The old idiom was
+    # not merely verbose -- it was reaching less of the peer.
+    "test/fram_i2c.v": 93,
+    "test/fram_spi.v": 30,
 }
 
 #: ⛔⛔ EVERY ANCHOR CARRIES ITS SOURCE TEXT (Wilson's ruling). A coverage
@@ -340,19 +406,33 @@ TOGGLE_CEILING = {
 #: ⇒ The gate reads the anchored line back and requires it to MATCH, so
 #: "copy, do not recall" is mechanised instead of remembered.
 ANCHOR_TEXT = {
-    ("src/pe_engine.v", 677):
+    ("src/pe_engine.v", 767):
         "if (ready[k] && (!winner_v || edf_key_off[k] < best)) begin",
-    ("src/pe_engine.v", 992):
+    ("src/pe_engine.v", 1166):
         "if (hdr_done && !prime_unp) primed_q <= 1'b1;",
-    ("src/pe_engine.v", 1160):
+    # the self-clocked arms' redundant-by-construction guards. ⭐ TWO PAIRS
+    # SHARE THEIR TEXT (`if (pin_real) begin` at 1621/1694, `if (clk_real)
+    # begin` at 1630/1641), which is exactly why the anchor is keyed on the
+    # LINE and the text is the drift check rather than the identifier.
+    ("src/pe_engine.v", 1621):
+        "if (pin_real) begin",
+    ("src/pe_engine.v", 1630):
+        "if (clk_real) begin",
+    ("src/pe_engine.v", 1641):
+        "if (clk_real) begin",
+    ("src/pe_engine.v", 1694):
+        "if (pin_real) begin",
+    ("src/pe_engine.v", 1761):
+        "if (ck_shiftin & ack_drv[1]) pin_out[a_pin] <= ack_drv[0];",
+    ("src/pe_engine.v", 1340):
         "H_IDLE: if (!hdr_done) begin",
-    ("src/pe_engine.v", 1296):
+    ("src/pe_engine.v", 1476):
         "default: pst <= P_SCAN;",
-    ("src/pe_engine.v", 1502):
+    ("src/pe_engine.v", 1787):
         "default: ;",
-    ("src/pe_engine.v", 1701):
+    ("src/pe_engine.v", 2079):
         "default: st <= ST_IDLE;",
-    ("src/project.v", 406):
+    ("src/project.v", 407):
         "if (do_push && do_pop && (q_sel == tx_tag)) begin",
     # `src/project.v` 557 -- `if (RX_SERIAL != 0) begin` -- is gone with the
     # parameter. ⭐ THE ANCHOR IS WHAT MADE THAT SAFE TO DO: the source text
@@ -365,12 +445,8 @@ ANCHOR_TEXT = {
         "if (shin[0]) shout <= mem[addr];",
     ("test/fram_i2c.v", 228):
         "P_WDATA: begin",
-    ("test/fram_i2c.v", 235):
-        "if (STRETCH != 0) stretch_n <= STRETCH[15:0];",
     ("test/fram_i2c.v", 239):
         "if (selected && rw && phase == P_RDATA) begin",
-    ("test/fram_i2c.v", 251):
-        "if (stretch_n != 16'd0) stretch_n <= stretch_n - 16'd1;",
     ("test/fram_spi.v", 113):
         "if (cs_n) begin",
     ("test/fram_spi.v", 126):
@@ -381,18 +457,10 @@ ANCHOR_TEXT = {
         "OP_RDSR: begin",
     ("test/fram_spi.v", 133):
         "OP_RDID: begin shout <= 8'h04; drive <= 1'b1; phase <= P_DATA; end",
-    ("test/fram_spi.v", 134):
-        "OP_READ, OP_WRITE: begin phase <= P_AHI; drive <= 1'b0; end",
-    ("test/fram_spi.v", 138):
-        "P_AHI: begin",
-    ("test/fram_spi.v", 146):
-        "P_ALO: begin",
+    # ⭐ 149 AND 160 KEEP THEIR ANCHORS: only one arm of each was paid (the
+    # not-taken fork), so the taken arm is still owed and still anchored.
     ("test/fram_spi.v", 149):
         "if (opcode == OP_READ) begin",
-    ("test/fram_spi.v", 154):
-        "P_DATA: begin",
-    ("test/fram_spi.v", 155):
-        "if (opcode == OP_WRITE) begin",
     ("test/fram_spi.v", 160):
         "if (wel) mem[addr] <= shin;",
     ("test/fram_spi.v", 162):
@@ -950,7 +1018,13 @@ def check_full_case() -> int:
     lines = src.splitlines()
     enc = _encodings(src)
     bare = re.sub(r"//[^\n]*", "", re.sub(r"/\*.*?\*/", "", src, flags=re.S))
-    for line in (1296, 1502, 1701):
+    # ⛔ THE SAME MEASURED SHIFT AS THE ANCHORS ABOVE. These are the three
+    # `default` arms whose UNREACHABILITY rests on the case being FULL, and
+    # they moved with the self-clocked arms: 1296 -> 1476, 1502 -> 1787,
+    # 1701 -> 2079. ⚠ A stale number here degrades silently to "no enclosing
+    # case found", which is why the gate says that out loud rather than
+    # skipping the check.
+    for line in (1476, 1787, 2079):
         sel, arms = _case_arms(lines, line)
         if sel is None:
             print("    line %-5d *** no enclosing `case` found -- the waiver's"

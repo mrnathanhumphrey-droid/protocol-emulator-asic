@@ -143,4 +143,6 @@ task pg_report;
   end
 endtask
 
-final pg_report;
+final begin
+  pg_report;
+end
