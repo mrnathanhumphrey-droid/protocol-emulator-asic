@@ -230,7 +230,20 @@ def main() -> int:
         print("        a design property are indistinguishable.")
         rc = 1
     else:
-        rows = [l for l in ctl["lanes"] if l.get("t_HIGH") and l.get("t_LOW")]
+        # ⛔ A PAD-OVERRIDDEN LANE IS NOT MEASURABLE HERE, and skipping it is
+        # stated rather than silent. `project.v` overrides `uio_oe[MISO_PIN]`
+        # with the SPI target's `miso_oe_q`, so a "clock" read on that pin is
+        # the target's output, not the lane's. `build_ckfive` lane 3 sits on
+        # pin 6 / clkpin 7 -- CS_PIN and MISO_PIN -- and this arm reported a
+        # symmetric clock there for several runs before the override was found.
+        skipped = [l for l in ctl["lanes"] if l.get("pad_overridden")]
+        rows = [l for l in ctl["lanes"]
+                if l.get("t_HIGH") and l.get("t_LOW")
+                and not l.get("pad_overridden")]
+        for l in skipped:
+            print("    lane %d pin=%d clk=%d  SKIPPED -- pad-overridden "
+                  "(MISO_PIN/CS_PIN); the pad value is the SPI target's, "
+                  "not this lane's" % (l["lane"], l["pin"], l["clkpin"]))
         print("    %-6s %-6s %-8s %-8s %s"
               % ("lane", "d", "t_HIGH", "t_LOW", "symmetric?"))
         asym = 0

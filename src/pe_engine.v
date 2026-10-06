@@ -110,10 +110,21 @@ module pe_engine #(
     // the intended 15 cycles on the DATA pin, and the clock pin's release
     // pattern was identical in both builds (17 transitions), so the phase of
     // an action-boundary artifact had shifted rather than anything breaking.
-    // ⛔ I DID NOT FULLY EXPLAIN THAT INTERACTION, and it is recorded rather
-    // than smoothed over: scoping the hold to open-drain puts it out of reach
-    // of every push-pull lane instead of accounting for it. If a push-pull
-    // lane ever needs a data hold, this is owed an explanation first.
+    // ⭐⭐ THAT INTERACTION IS NOW EXPLAINED, AND IT WAS A PIN-MAP ARTEFACT OF
+    // THE STRESS IMAGE RATHER THAN A PATH IN THIS LOGIC. `MISO_PIN = 7` and
+    // `CS_PIN = 6`, and `project.v`'s boundary OVERRIDES `uio_oe[MISO_PIN]`
+    // with the SPI target's `miso_oe_q` -- the engine's clock write to that pin
+    // never reaches the pad. `build_ckfive` declares lane 3 on pin 6 / clkpin 7,
+    // colliding with both, which it is allowed to do only because it says of
+    // itself that it is NOT a pin-map-legal program. So the hold delayed that
+    // lane's DATA pin, which IS the target's chip select; the delayed CS edge
+    // moved when the target drove MISO; and `uio_oe[7]` followed by exactly the
+    // hold's 15 cycles. ⛔ MEASURED, not argued: the hold expiry writes pins
+    // 0, 2, 4 and 6 and NEVER pin 7, the per-dispatch streams of the two builds
+    // are byte-identical (3571 records), and rand-reset +0 and +2 agree -- so
+    // it is neither a scheduling effect nor an initialisation one.
+    // ⇒ The open-drain scoping therefore stands on UM10204 alone, which is
+    //   where it always belonged; it was never load-bearing for this effect.
     // ⭐⭐ EXPRESSED AS A TIME, NOT A CYCLE COUNT, and that is the honest
     // form: the requirement is 300 ns, and "15 cycles" is only correct at
     // 50 MHz. `part1_param_contract` flags a bare protocol constant in the

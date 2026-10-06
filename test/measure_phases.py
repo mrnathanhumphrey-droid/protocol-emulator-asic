@@ -25,6 +25,7 @@ pass condition.
 """
 import argparse
 import collections
+import io
 import json
 import os
 import sys
@@ -38,6 +39,46 @@ except Exception:
 import pe_isa as I
 
 HB = I.HDR_BYTES
+
+#: ⛔⛔ PINS WHOSE PAD VALUE IS NOT THE ENGINE'S. `project.v` OVERRIDES
+#: `uio_oe[MISO_PIN]` with the SPI target's `miso_oe_q`, so the engine's write to
+#: that pin never reaches the pad, and `CS_PIN` is that target's chip-select
+#: INPUT. A phase measured on either is a measurement of the SPI target, not of
+#: the lane that declared the pin.
+#: ⚠ THIS WAS NOT HYPOTHETICAL: `build_ckfive` puts lane 3 on pin 6 / clkpin 7 --
+#: both of them -- and the control arm duly reported a "clock" there. Chasing a
+#: 15-cycle shift on that pin cost a whole investigation before the override was
+#: found. `build_ckfive` is allowed the collision because it declares itself not
+#: pin-map-legal; the MEASUREMENT is not allowed to believe it.
+#: ⭐ The values are carried here rather than imported because `project.v` holds
+#: them as module parameters, not in any Python module -- and they are asserted
+#: against that file at run time below, so a drift is a failure and not a
+#: silent disagreement.
+MISO_PIN = 7
+CS_PIN = 6
+
+
+def _check_pin_constants(root):
+    """Assert the carried pin numbers still match `src/project.v`."""
+    # ⛔⛔ NO BARE `except` HERE, AND THE FIRST VERSION HAD ONE -- WHICH MADE
+    # THIS GUARD UNABLE TO FIRE AT ALL. `io` was not imported, so `io.open`
+    # raised NameError, the bare handler swallowed it and the function returned
+    # `None` on every call. A deliberately wrong MISO_PIN was NOT reported.
+    # ⚠ That is the exact shape this function exists to prevent, in the
+    # function itself: a check whose failure path is the silent one.
+    import re
+    path = os.path.join(root, "src", "project.v")
+    txt = io.open(path, encoding="utf-8").read()
+    out = {}
+    for name in ("MISO_PIN", "CS_PIN"):
+        m = re.search(r"parameter\s+integer\s+%s\s*=\s*(\d+)" % name, txt)
+        if m:
+            out[name] = int(m.group(1))
+    if not out:
+        raise AssertionError(
+            "no MISO_PIN/CS_PIN parameters found in %s -- the pins this "
+            "measurement excludes could not be confirmed" % path)
+    return [k for k, v in out.items() if v != globals()[k]]
 
 
 def load_image(path):
@@ -141,6 +182,13 @@ def stats(xs):
 
 
 def measure(trace, image):
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    bad = _check_pin_constants(root)
+    if bad:
+        raise AssertionError(
+            "MISO_PIN/CS_PIN here disagree with src/project.v: %s. A phase "
+            "measurement that excludes the wrong pins is worse than one that "
+            "excludes none, because the exclusion looks deliberate" % bad)
     img = load_image(image)
     lanes = lanes_of(img)
     pins = sorted({l["pin"] for l in lanes} | {l["clkpin"] for l in lanes})
@@ -216,6 +264,8 @@ def measure(trace, image):
             moved_high = [t for t in sda_tr if s_rise <= t < nxt_fall]
             n_high_moves[0] += len(moved_high)
         row = dict(l)
+        row["pad_overridden"] = (l["pin"] in (MISO_PIN, CS_PIN)
+                                 or l["clkpin"] in (MISO_PIN, CS_PIN))
         row["t_HIGH"] = stats(hi)
         row["t_LOW"] = stats(lo)
         row["t_SU_DAT"] = stats(su)

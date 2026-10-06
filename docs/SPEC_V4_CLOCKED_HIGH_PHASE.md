@@ -471,3 +471,71 @@ is *edit RTL → suite red on anchors → reanchor → re-run the ten-minute sui
 and two full suite runs went to nothing but anchor arithmetic. Keying the table
 on anchor **text** with the line as a hint, rather than the reverse, would
 absorb the shift. Recorded as an observation about the harness; not changed.
+
+---
+
+## 12. Ruling P — the push-pull clock-low growth, explained
+
+**P2(b): a bench artifact, with the trace.** `project.v:686` overrides the pad:
+
+```verilog
+uio_oe_run = (uio_oe_eng & ~(1<<MISO_PIN)) | (miso_oe_q << MISO_PIN)
+```
+
+With `MISO_PIN = 7`, `CS_PIN = 6`, and `build_ckfive` putting lane 3 on
+**pin 6 / clkpin 7** — colliding with both — the chain is: the hold delays that
+lane's **data** pin (6), pin 6 *is* the SPI target's **chip select**, the delayed
+CS edge moves when the target drives MISO, `miso_oe_q` moves, and `uio_oe[7]`
+follows by exactly the hold's 15 cycles.
+
+**The hold never touched a clock pin.** Pin 7 is not that lane's clock at the pad.
+
+Three falsifiers, each killing a candidate rather than confirming a story:
+
+| test | result | kills |
+| --- | --- | --- |
+| rand-reset +0 vs +2 | identical | an initialisation artifact |
+| per-dispatch stream diff | **byte-identical, 3571 records** | any scheduling effect |
+| pins the hold expiry writes | **0, 2, 4, 6 — never 7** | a hold → clock path |
+
+**P3 n/a**: it cannot occur on an open-drain lane via the hold, because it is not
+a hold path — it is a pad override of one pin, and no pin-map-legal program may
+place a lane on 6 or 7. `build_ckfive` is allowed the collision only because it
+declares itself not pin-map-legal; the MEASUREMENT was not allowed to believe it.
+
+⇒ `M_SDA_HOLD_ALL` removed (the effect is explained, not priced). **The
+open-drain hold scoping stands on UM10204 alone**, which is where it belonged; it
+was never load-bearing for this effect.
+
+### P4 — the original control arm stands
+
+| lane | pin/clk | status | modal t_HIGH vs d |
+| --- | --- | --- | --- |
+| 0 | 0/1 | legal + measurable | **25 = 25** ← the original F4 control |
+| 1 | 2/3 | legal + measurable | 45 = 45 |
+| 2 | 4/5 | legal + measurable | 123 vs 120 (+3, **unexplained**) |
+| 3 | 6/7 | pad-overridden | 434 — meaningless |
+| 4 | 8/9 | outside uio (`uo_out`) | unmeasurable |
+
+The first F4 control reported `ckfive lane 0, pin=0 clkpin=1, modal t_HIGH = 25
+against programmed 25`. That lane collides with nothing. **So the control did run
+on a legal lane and the record does not change**; the 428/421 correction applies
+only to lane 3, which was a later extra row in the gate's table and never the
+control claim. F1 keeps all three legs: the 13× scaling falsifier, the
+fix/mutant split (13/29/64/125 vs 5/5/5/6), and a control on a legal lane.
+
+⚠ **OPEN:** lane 2 reads modal 123 against d = 120 — about `+L_SYNC` on a
+push-pull lane that does not park, while lanes 0 and 1 are exact. Not explained.
+
+### Corrections recorded
+
+* `428/421` for ckfive lane 3 was the **SPI target's output**, not a clock.
+* `gate_um10204`'s control arm now **skips pad-overridden lanes** with the reason
+  printed, and `MISO_PIN`/`CS_PIN` are asserted against `project.v` at run time.
+* ⛔ **That drift check could not fire when first written.** `measure_phases.py`
+  did not import `io`, so `io.open` raised `NameError` into a bare `except` that
+  returned `None` every call — a deliberately wrong `MISO_PIN` went unreported.
+  Fixed and priced: `[]` on the real tree, `['MISO_PIN']` when wrong. The shape
+  appeared inside the very function written to prevent a silent disagreement,
+  and it is the **third check-that-could-not-fire this session** after the
+  sweep's grep and the backspace regex — which is what Ruling E now gates.
