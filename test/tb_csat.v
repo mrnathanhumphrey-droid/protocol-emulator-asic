@@ -59,6 +59,13 @@ module tb_csat;
 
   // ---- spacing state ----------------------------------------------------
   integer    last_disp, n_disp, n_sp, dmin, dmax, dsum;
+  // per-opcode spacing: the MAX over FSM-limited back-to-back gaps, which is
+  // the quantity `docs/PREREG_C_CLOCKED.md` fixes the decision rule on.
+  integer    last_op;
+  integer    op_max [0:7];
+  integer    op_max_at [0:7];
+  integer    op_n [0:7];
+  integer    oi, op_tot, occ, occ_op;
   integer    btb, btb_min, btb_min_at, btb_h1, btb_h2;
   reg        wb_elig;
   integer    hist [0:HMAX-1];
@@ -144,6 +151,10 @@ module tb_csat;
     for (i = 0; i < HMAX; i = i + 1) hist[i] = 0;
     cyc = 0; warm_from = 0; mid = 0;
     last_disp = 0; n_disp = 0; n_sp = 0; dmin = 0; dmax = 0; dsum = 0;
+    last_op = 0; occ = 0; occ_op = 0;
+    for (oi = 0; oi < 8; oi = oi + 1) begin
+      op_max[oi] = 0; op_max_at[oi] = 0; op_n[oi] = 0;
+    end
     btb = 0; btb_min = 0; btb_min_at = 0; btb_h1 = 0; btb_h2 = 0;
     wb_elig = 1'b0;
     n_trans = 0; prev_st = 0;
@@ -214,6 +225,33 @@ module tb_csat;
         end
       end
 
+      // ---- per-opcode OCCUPANCY, which is the only service-only measure --
+      // ⛔⛔ A MAX OVER *GAPS* DOES NOT MEASURE `C`, and the first version of
+      // this tried. It took the maximum back-to-back gap per opcode over the
+      // same `wb_elig` qualification `btb_min` uses -- but that qualification
+      // holds only at the gap's START, and eligibility can lapse inside it.
+      // MEASURED on `five_image`, an UNCLOCKED program: max 11 for OP_LEVEL
+      // and OP_REARM, which would have read as `C = 11` on a design that is
+      // perfectly fine. A baseline that fails is how an instrument says it is
+      // measuring the wrong thing.
+      // ⭐ OCCUPANCY IS IMMUNE TO ARRIVAL LIMITS: cycles the engine spends
+      // with `st != ST_IDLE` for one dispatch. The FSM is ST_IDLE -> ST_DRIVE
+      // -> ST_WB, so this is 2 for every action and `C` is that plus the
+      // mandatory idle cycle = 3. An opcode that needed more engine time --
+      // which is the risk the clocked scheme introduces -- shows up here and
+      // nowhere else.
+      if (dut.u_eng.st != 2'd0) begin
+        occ = occ + 1;
+        occ_op = dut.u_eng.a_op;
+      end else if (occ > 0) begin
+        if (occ > op_max[occ_op]) begin
+          op_max[occ_op]    = occ;
+          op_max_at[occ_op] = cyc;
+        end
+        op_n[occ_op] = op_n[occ_op] + 1;
+        occ = 0;
+      end
+
       // ---- spacing bookkeeping ----------------------------------------
       if (disp && warm_from > 0 && cyc > warm_from) begin
         n_disp = n_disp + 1;
@@ -239,6 +277,7 @@ module tb_csat;
           end
         end
         last_disp = cyc;
+        last_op   = dut.u_eng.a_op;   // whose service the NEXT gap measures
         wb_elig   = 1'b0;
       end
       prev_st = dut.u_eng.st;
@@ -296,6 +335,35 @@ module tb_csat;
              ovr_seen);
     $display("  MEASURED");
     $display("    btbmin (THE NUMBER)     : %0d", btb_min);
+    // ⭐⭐ THE PER-OPCODE MAXIMUM, and the verdict the pre-registration fixed
+    // BEFORE this ran: < 3 means the engine is faster than charged and we
+    // KEEP CHARGING 3; = 3 is unchanged; > 3 is FORBIDDEN and stops
+    // everything until every margin resting on C = 3 is re-quoted.
+    $display();
+    $display("    per-opcode MAX OCCUPANCY (cycles with st != ST_IDLE);");
+    $display("    C is this plus the mandatory idle cycle, so 2 means C = 3:");
+    $display("      %-9s %-6s %-7s %s", "opcode", "gaps", "max", "verdict");
+    for (oi = 0; oi < 8; oi = oi + 1) begin
+      if (op_n[oi] > 0)
+        $display("      op %0d      %-6d %-7d %0s", oi, op_n[oi], op_max[oi],
+                 (op_max[oi] > 2) ? "*** FAIL -- C EXCEEDS 3, FORBIDDEN"
+                 : (op_max[oi] == 2) ? "ok -- C = 3, the charged value"
+                                     : "ok -- faster than charged (keep 3)");
+      else
+        $display("      op %0d      %-6d %-7s %0s", oi, 0, "-",
+                 "not dispatched in this arm");
+      // ⛔ NO TALLY VARIABLE: this bench reports by PRINTING `*** FAIL`,
+      // which is what the sweep's per-arm grep matches. Adding a counter
+      // here would be a second verdict mechanism in one bench.
+    end
+    // ⛔ AND AN ANTI-VACUITY CHECK ON THE BREAKDOWN ITSELF: if no opcode
+    // recorded a single FSM-limited gap, the per-opcode verdict above is
+    // vacuous and must not read as a pass.
+    op_tot = 0;
+    for (oi = 0; oi < 8; oi = oi + 1) op_tot = op_tot + op_n[oi];
+    $display("      jobs attributed: %0d %0s", op_tot,
+             (op_tot > 0) ? "ok -- the breakdown has subjects"
+             : "*** FAIL -- no job was attributed, so the per-opcode verdict is vacuous");
     $display("      ^ minimum spacing where a successor was ALREADY eligible");
     $display("        during the predecessor's ST_WB cycle. This is the FSM's");
     $display("        floor and therefore the C that RTA must charge.");

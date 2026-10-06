@@ -190,6 +190,55 @@ def build_five(delays):
     return b"".join(headers) + b"".join(prog)
 
 
+def build_ckfive(delays):
+    """`build_five`, BUT SELF-CLOCKED -- the saturation base for re-measuring `C`.
+
+    ⛔⛔ WHY A NEW IMAGE. `C` had to be re-measured because a clocked action
+    RE-DISPATCHES without a store read, and a shortened writeback would move
+    the inter-dispatch spacing every published margin rests on. `five_image`
+    is the saturation base, but it runs only `OP_LEVEL` and `OP_REARM` -- so it
+    cannot say anything about the clocked opcodes at all.
+
+    ⛔ EACH LANE NEEDS A **DISTINCT** CLOCK PIN. `build_five` declares
+    `clkpin == pin`, which is legal there only because its lanes never SHIFT
+    (1.6x is scoped to shifting lanes). A clocked SHIFT with the two aliased is
+    REFUSED and would halt the engine, so this uses ten pins as five
+    (data, clock) pairs.
+
+    ⭐ PUSH-PULL, AND THAT IS LOAD-BEARING HERE: the post-HIGH park is
+    OPEN-DRAIN ONLY, because stretching is a peer pulling a RELEASED line low
+    and no peer can hold a push-pull clock. A push-pull clocked lane therefore
+    never parks, so this image runs in a bench with NO bus model -- which
+    `tb_csat` is. An open-drain version would park on a clock nothing drives
+    back and measure a hang instead of a service time.
+
+    ⚠ LIKE `build_five`, A SCHEDULER STRESS IMAGE AND NOT A PIN-MAP-LEGAL
+    PROGRAM: it declares push-pull on `uio` pins, which is physically fine but
+    is not the ruled placement. See `build_five`'s docstring.
+    """
+    prog, headers = [], []
+    off, base = ACT_BASE, {}
+    for n, d in enumerate(delays):
+        base[n] = off
+        # one whole byte per action, then the loop re-arm.
+        # ⭐ THE LAST LANE RECEIVES, so the clocked SHIFTIN's occupancy is
+        # MEASURED rather than argued to be identical to the transmit's.
+        # ⚠ Without a bus model its captures never land, so the
+        # clock-stretch sticky sets -- which is correct reporting and not
+        # what this image measures: occupancy is service time and is
+        # independent of whether the peer answered.
+        if n == len(delays) - 1:
+            prog.append(act(OP_SHIFTIN, 2 * n, SELF_CLOCKED, d, count=8))
+        else:
+            prog.append(act(OP_SHIFT, 2 * n, SELF_CLOCKED, d,
+                            count=7, q=n % 4))
+        prog.append(act(OP_REARM, 0, 1, d))
+        off += 2 * ACT_BYTES
+    for n, d in enumerate(delays):
+        headers.append(hdr(2 * n, 2 * n + 1, 1, min(d, 1023), 2,
+                           min(2 * d, 255), min(3 * d, 255), base[n]))
+    return b"".join(headers) + b"".join(prog)
+
 # ⚠ LIKE `build_five`, A SCHEDULER STRESS IMAGE AND NOT A PIN-MAP-LEGAL
 # PROGRAM: it declares push-pull on `uio` pins, which is physically fine but is
 # not the ruled placement. See `build_five`'s docstring.
@@ -850,6 +899,9 @@ def main() -> int:
              "ckdegen_image.hex"),
             (["--ckdegen"], "... the wrapping SHIFT route",
              "ckdegen2_image.hex"),
+            # ⭐ the saturation base for the clocked `C` re-measurement
+            (["--ckfive"], "five SELF-CLOCKED lanes at the shipped delays",
+             "ckfive_image.hex"),
             # ⭐ the FULL MB85RC256V write -- four bytes, so the peer reaches
             # P_ALO and P_WDATA and a byte actually lands in its memory. The
             # certified 2-byte frame stays exactly as it was.
@@ -1007,6 +1059,15 @@ def main() -> int:
                 fh.write("%02x" % b + chr(10))
         print("i2c dev+addrhi+addrlo image (reaches P_ALO; a 4th byte would be "
               "291 bytes > 256), %d bytes -> %s" % (len(img), out))
+        return 0
+    if "--ckfive" in sys.argv:
+        img = build_ckfive([25, 45, 120, 434, 60])
+        out = os.path.join(here, "ckfive_image.hex")
+        with open(out, "w", encoding="ascii") as fh:
+            for b in img:
+                fh.write("%02x" % b + chr(10))
+        print("ckfive image (five self-clocked lanes), %d bytes -> %s"
+              % (len(img), out))
         return 0
     if "--ckdegen" in sys.argv:
         for _r, _nm in ((0, "ckdegen_image.hex"), (1, "ckdegen2_image.hex")):

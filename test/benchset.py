@@ -245,7 +245,19 @@ CONFIG = {
         "srcs": [],
         "gen": ["--five", "40", "40", "40", "40", "40", "probe_cov_sim40"],
         "arms": [("sim40", ["+IMG=test/probe_cov_sim40.hex", "+NCYC=200000",
-                            "+WARMUP=4000"])],
+                            "+WARMUP=4000"]),
+                 # ⭐⭐ THE CLOCKED `C` RE-MEASUREMENT, swept permanently.
+                 # `sim40` runs only OP_LEVEL and OP_REARM, so it cannot say
+                 # anything about the clocked opcodes -- which is the whole
+                 # reason `C` had to be re-measured. This arm dispatches
+                 # clocked SHIFT and clocked SHIFTIN and reports their
+                 # per-opcode OCCUPANCY, the only service-only measure.
+                 # ⛔ MEASURED: occupancy 2 for both, i.e. C = 3, the
+                 # charged value -- so the pre-registered verdict is
+                 # "unchanged, proceed". It is an ARM and not a one-off run
+                 # so a later RTL change cannot move C silently.
+                 ("ckfive", ["+IMG=test/ckfive_image.hex", "+NCYC=200000",
+                             "+WARMUP=4000"])],
     },
     # ⚠ AND `tb_jlane` WANTS THE OPPOSITE SHAPE TO `tb_csat`, which is why it
     # has its own image rather than sharing one. `run_dstar_check.py` builds
