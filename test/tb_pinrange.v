@@ -107,6 +107,11 @@ module tb_pinrange ();
     end
     if (!$value$plusargs("NCYC=%d", ncyc)) ncyc = 8000;
     if (!$value$plusargs("MODE=%d", mode)) mode = 0;
+    // ⭐ EVERY MODE OF THIS BENCH IS A REFUSAL TEST: a cfgerr refusal never
+    // dispatches, a reserved pin index drives nothing, an ARM on a reserved
+    // index can never fire. "No action retired" is the CLAIM here, so the
+    // shared liveness check is told so rather than silently exempted.
+    pg_quiescent_ok = 1'b1;
     $readmemh(imgfile, img);
     $display("# pinrange img=%0s bytes=%0d mode=%0d SPL=%0d",
              imgfile, img_bytes, mode, SPL_CFG);
@@ -214,6 +219,40 @@ module tb_pinrange ();
       if (edges != 0)
         fail("a pin moved although the lane names the reserved index");
     end
+    if (mode == 3) begin
+      $display("===== tb_pinrange: A CLOCKED ACTION WITH ZERO BITS ========");
+      $display("  A clocked SHIFTIN's bit count IS its `count` field, and a");
+      $display("  clocked SHIFT's is `count + 1` -- which WRAPS to 0 at 15.");
+      $display("  Neither has a meaning, and \"undefined\" is not acceptable:");
+      $display("  the lane HALTS and the existing CONFIG_ERR sticky is set.");
+      $display("  ⚠ A static refusal only covers programs we assemble; a");
+      $display("  store corrupted by a bad load reaches the engine anyway,");
+      $display("  which is exactly how this was found.");
+      $display("    config_err               : %0b %0s", dut.u_eng.config_err,
+               dut.u_eng.config_err ? "ok -- refused"
+                                    : "*** FAIL -- not refused");
+      if (!dut.u_eng.config_err)
+        fail("a degenerate clocked action did not set CONFIG_ERR");
+      $display("    offending lane live       : %0b %0s", dut.u_eng.l_live[0],
+               dut.u_eng.l_live[0] ? "*** FAIL -- still live" : "ok -- halted");
+      // ⛔⛔ ONE ROUTE PER IMAGE, and the first version of this arm assumed
+      // otherwise. It put both routes on two lanes and asserted BOTH halted;
+      // only the first was ever reached, because `config_err` gates dispatch
+      // for the WHOLE ENGINE -- measured as ONE writeback in the entire run,
+      // with the second lane still live because it never ran at all.
+      // ⭐ So the halt is ENGINE-WIDE through that gate, and clearing
+      // `l_live` on the offending lane is belt-and-braces on top of it. The
+      // two routes are two images (`ckdegen` and `ckdegen2`), two arms.
+      if (dut.u_eng.l_live[0])
+        fail("the degenerate lane was not halted");
+      // ⭐ AND NO CLOCK EDGE: the drive arms are gated on `~ck_degen`, so a
+      // refused action must not have moved a pin on its way to being refused.
+      $display("    pin edges after load      : %0d %0s", edges,
+               (edges == 0) ? "ok -- nothing was driven"
+                            : "*** FAIL -- a refused action moved a pin");
+      if (edges != 0)
+        fail("a degenerate clocked action emitted pin edges");
+    end
     if (mode == 2) begin
       $display("===== tb_pinrange: AN ARM ON THE RESERVED INDEX ============");
       $display("  `l_armpin` is written straight from the action's pin field,");
@@ -269,6 +308,7 @@ module tb_pinrange ();
     if (fails == 0)
       $display("  tb_pinrange: PASS (%0s)",
                (mode == 0) ? "open-drain on uo refused"
+               : (mode == 3) ? "a clocked action with zero bits is refused"
                : (mode == 2) ? "an ARM on the reserved index drives no X"
                              : "reserved index legal, drives nothing");
     else

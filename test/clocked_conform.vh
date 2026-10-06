@@ -19,7 +19,8 @@
  * model says 16". Layer A reported 0, correctly, because nothing hung. That
  * split is why there are two layers.
  *
- * ⛔ EVERY FORMAT STRING IS ONE PLAIN LITERAL. Brace-concatenated formats
+ * ⛔ EVERY FORMAT STRING IS ONE PLAIN LITERAL, AND EVERY FAILURE LINE
+ * CARRIES THE `*** FAIL` PREFIX the sweep actually greps for. Brace-concatenated formats
  * printed NOTHING here while the counter beside them reached 144 --
  * `model/gate_bench_lint.py` now refuses them.
  *
@@ -67,10 +68,10 @@ always @(posedge dut.clk) begin
         if (cb_acts == 1)
           $display("  clocked_conform[B]: live -- checking clocked actions against the model");
         if (ck_expect(cb_op[dut.u_eng.cur], cb_cnt[dut.u_eng.cur]) < 0) begin
-          $display("FAIL clocked_conform: no model entry for op=%0d cnt=%0d -- the generated table and the ISA disagree about what a clocked action is", cb_op[dut.u_eng.cur], cb_cnt[dut.u_eng.cur]);
+          $display("*** FAIL clocked_conform: no model entry for op=%0d cnt=%0d -- the generated table and the ISA disagree about what a clocked action is", cb_op[dut.u_eng.cur], cb_cnt[dut.u_eng.cur]);
           cb_fails = cb_fails + 1;
         end else if (cb_n[dut.u_eng.cur] !== ck_expect(cb_op[dut.u_eng.cur], cb_cnt[dut.u_eng.cur])) begin
-          $display("FAIL clocked_conform: lane %0d op=%0d cnt=%0d at pc=%0d took %0d dispatch(es), the model says %0d", dut.u_eng.cur, cb_op[dut.u_eng.cur], cb_cnt[dut.u_eng.cur], cb_pc[dut.u_eng.cur], cb_n[dut.u_eng.cur], ck_expect(cb_op[dut.u_eng.cur], cb_cnt[dut.u_eng.cur]));
+          $display("*** FAIL clocked_conform: lane %0d op=%0d cnt=%0d at pc=%0d took %0d dispatch(es), the model says %0d", dut.u_eng.cur, cb_op[dut.u_eng.cur], cb_cnt[dut.u_eng.cur], cb_pc[dut.u_eng.cur], cb_n[dut.u_eng.cur], ck_expect(cb_op[dut.u_eng.cur], cb_cnt[dut.u_eng.cur]));
           cb_fails = cb_fails + 1;
         end
       end
@@ -95,7 +96,7 @@ task cb_report;
   begin
     $display("  clocked_conform[B]: %0d clocked action(s) checked against the model", cb_acts);
     if (cb_fails != 0)
-      $display("FAIL clocked_conform: %0d action(s) disagreed with the model", cb_fails);
+      $display("*** FAIL clocked_conform: %0d action(s) disagreed with the model", cb_fails);
     else if (cb_acts != 0)
       $display("  clocked_conform[B]: ok -- every clocked action matched the model exactly");
   end

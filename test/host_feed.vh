@@ -198,6 +198,12 @@
   // ⭐ POPS ARE COUNTED HERE so every bench gets the same number from the same
   // place. `host_pop` is a one-cycle pulse.
   integer hf_pops;
+  // ⭐ THE SHARED INTERLOCK (see test/progress.vh): `hf_en` IS this
+  // bench's "I am driving the host channel" signal, so it feeds the guard
+  // directly. The feeder already waits for PROG to drop; this is what
+  // makes that wait CHECKED rather than merely documented.
+  always @(*) pg_pushing = hf_en;
+
   always @(posedge clk) begin
     if (!rst_n) hf_pops <= 0;
     else if (dut.u_eng.host_pop) hf_pops <= hf_pops + 1;

@@ -339,6 +339,52 @@ def build_pinnone(d: int = 20):
     return b"".join(headers) + b"".join(prog)
 
 
+def build_ckdegen(d: int = 20, route: int = 0):
+    """A CLOCKED ACTION WITH A ZERO BIT COUNT -- the degenerate refusal.
+
+    ⛔⛔ WHY THIS IMAGE EXISTS. A clocked SHIFTIN with `count = 0` reached
+    the engine by accident, from a store corrupted by pushing host bytes while
+    PROG was still high, and `clocked_conform` reported "no model entry for
+    op=2 cnt=0". Writing the guard turned up a SECOND route: a clocked SHIFT
+    with `count = 15`, where `a_cnt + 1` wraps to 0 in the 4-bit field.
+    ⛔ A STATIC REFUSAL ONLY COVERS PROGRAMS WE ASSEMBLE. A corrupted store
+    reaches the engine anyway, so the silicon answer is defined: the lane
+    HALTS and the existing `config_err` sticky is set -- no new status bit,
+    and an illegal state is an ERROR rather than silent success.
+    ⭐ THIS IMAGE IS THAT BEHAVIOUR'S MUST-FIRE, and it is DELIBERATELY
+    DEGENERATE: `model/gate_degenerate_fields.py` lists it by name, because a
+    gate that failed on it would be refusing the test that proves the refusal.
+    ⛔⛔ ONE ROUTE PER IMAGE, AND THE FIRST VERSION GOT THIS WRONG. It put
+    both routes on two lanes of one program, and only the FIRST was ever
+    reached: `config_err` gates dispatch for the WHOLE ENGINE
+    (`ST_IDLE: if (primed && !config_err && winner_v)`), so the moment lane 0
+    was refused nothing dispatched again -- measured as ONE writeback in the
+    entire run, with lane 1 still live because it never ran at all.
+    ⭐ THAT IS ALSO A CORRECTION TO HOW THE REFUSAL WAS DESCRIBED: the halt
+    is ENGINE-WIDE through the `config_err` dispatch gate, and clearing
+    `l_live` for the offending lane is belt-and-braces on top of it.
+    ⇒ `route = 0` is the clocked SHIFTIN at count 0; `route = 1` is the
+      clocked SHIFT at count 15 whose `count + 1` wraps. Two images, two arms.
+    """
+    prog, headers = [], []
+    off = ACT_BASE
+    l0 = off
+    if route == 0:
+        prog.append(act(OP_SHIFTIN, 2, SELF_CLOCKED, d, count=0))
+    else:
+        prog.append(act(OP_SHIFT, 2, SELF_CLOCKED, d, count=15, q=0))
+    off += ACT_BYTES
+    prog.append(act(OP_REARM, 0, 1, d))
+    off += ACT_BYTES
+    lp = off
+    prog.append(act(OP_REARM, 0, 0, 500))
+    # the offending lane needs a REAL clock pin DISTINCT from its data pin, or
+    # the action is not clocked at all and the degeneracy never arises
+    headers.append(hdr(2, 1, 0, d, 2, 2 * d, 3 * d, l0))
+    for n in range(1, N_LANES):
+        headers.append(hdr(n + 2, n + 2, 0, 500, 2, 200, 240, lp))
+    return b"".join(headers) + b"".join(prog)
+
 def build_census(d: int = 25):
     """A program that executes ALL EIGHT opcodes on the RTL.
 
@@ -797,6 +843,13 @@ def main() -> int:
             # which put X into `arm_hit` for every armed cycle.
             (["--armnone"], "OP_ARM on the reserved index",
              "armnone_image.hex"),
+            # ⭐ the DEGENERATE CLOCKED COUNT, both routes to it: a clocked
+            # SHIFTIN at count 0, and a clocked SHIFT at count 15 where
+            # count + 1 wraps to 0 in the 4-bit field.
+            (["--ckdegen"], "clocked zero bit count (both routes)",
+             "ckdegen_image.hex"),
+            (["--ckdegen"], "... the wrapping SHIFT route",
+             "ckdegen2_image.hex"),
             # ⭐ the FULL MB85RC256V write -- four bytes, so the peer reaches
             # P_ALO and P_WDATA and a byte actually lands in its memory. The
             # certified 2-byte frame stays exactly as it was.
@@ -954,6 +1007,23 @@ def main() -> int:
                 fh.write("%02x" % b + chr(10))
         print("i2c dev+addrhi+addrlo image (reaches P_ALO; a 4th byte would be "
               "291 bytes > 256), %d bytes -> %s" % (len(img), out))
+        return 0
+    if "--ckdegen" in sys.argv:
+        for _r, _nm in ((0, "ckdegen_image.hex"), (1, "ckdegen2_image.hex")):
+            _i = build_ckdegen(route=_r)
+            with open(os.path.join(here, _nm), "w", encoding="ascii") as _f:
+                for _b in _i:
+                    _f.write("%02x" % _b + chr(10))
+            print("ckdegen route %d -> %s (%d bytes)" % (_r, _nm, len(_i)))
+        return 0
+    if "--ckdegen-unused" in sys.argv:
+        img = build_ckdegen()
+        out = os.path.join(here, "ckdegen_image.hex")
+        with open(out, "w", encoding="ascii") as fh:
+            for b in img:
+                fh.write("%02x" % b + chr(10))
+        print("ckdegen image (clocked action with a zero bit count), "
+              "%d bytes -> %s" % (len(img), out))
         return 0
     if "--armnone" in sys.argv:
         img = build_armnone()

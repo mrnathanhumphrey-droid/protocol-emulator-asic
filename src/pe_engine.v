@@ -913,6 +913,21 @@ module pe_engine #(
   // (so a_cnt = 8 is eight bits and a_cnt = 1 is the single-bit ACK).
   wire [BPW-1:0] ck_nbits = ck_shift ? (a_cnt + {{(BPW-1){1'b0}}, 1'b1})
                                      : a_cnt;
+  // ⛔⛔ A DEGENERATE CLOCKED ACTION IS A CONFIG ERROR, NOT UNDEFINED. A
+  // clocked action whose BIT COUNT is zero has no defined meaning, and
+  // "undefined" is not acceptable on an entry whose whole claim is defined
+  // behaviour. ⚠ TWO WAYS TO REACH IT, which is why the guard is on
+  // `ck_nbits` and not on `a_cnt`: a clocked SHIFTIN with `count = 0` reads
+  // nbits 0 directly, and a clocked SHIFT with `count = 15` computes
+  // `a_cnt + 1` = 16, which WRAPS to 0 in the 4-bit field. The second was
+  // found by writing the guard, not by testing.
+  // ⭐ `pe_asm` refuses both statically, but a static refusal only covers
+  // programs WE assemble -- a store corrupted by a bad load reaches the
+  // engine anyway, which is exactly what happened while building `tb_fifo`.
+  // ⇒ The lane HALTS and the EXISTING `config_err` sticky is set: no new
+  //   status bit, and the standing rule that an illegal state is an ERROR
+  //   rather than silent success.
+  wire ck_degen = ck_act & (ck_nbits == {BPW{1'b0}});
   // the n-th bit has been counted (`l_ckbit` advances on the LOW phase)
   wire ck_bits_done = (l_ckbit[cur] == ck_nbits);
   // ⭐ RETIRE: a transmit on the last HIGH, a receive on its trailing COLL.
@@ -1653,7 +1668,17 @@ module pe_engine #(
             // fix is to move the PROSE, never to widen the window -- the gate's
             // docstring records a `clk_real` 30 lines away falsely guarding a
             // deliberately unguarded mutant arm.
-            OP_SHIFT: if (pin_real) begin
+            // ⛔⛔ `ck_degen` IS THE FIRST ARM OF THIS CHAIN, and that is a bug
+            // fix. The first version wrote `if (ck_shift & ~ck_degen)` and
+            // left the chain alone -- so a refused clocked SHIFT fell
+            // through into the UNCLOCKED body and DROVE THE DATA PIN on its
+            // way to being refused. MEASURED: `tb_pinrange +MODE=3` on the
+            // wrapping route reported "pin edges after load : 1".
+            // ⚠ SECOND TIME THIS EXACT MISTAKE: the retire chain had a term
+            // added to one arm while a LATER arm (`else if (a_lvl)`) still
+            // matched. A guard belongs at the HEAD of a chain, not bolted to
+            // a branch of it.
+            OP_SHIFT: if (pin_real && !ck_degen) begin
 `ifndef M_SHIFT_CLK_ALIAS
               if (l_clkpin[cur] == a_pin) begin
                 config_err   <= 1'b1;
@@ -1805,7 +1830,7 @@ module pe_engine #(
               end
 `endif
             end
-            OP_SHIFTIN, OP_READBIT: if (pin_real) begin
+            OP_SHIFTIN, OP_READBIT: if (pin_real && !ck_degen) begin
               // ⭐⭐ CONDITION (a): A CLOCKED SHIFTIN RELEASES THE DATA PIN ON
               // **BOTH** PHASES. This assignment is unconditional, so it
               // covers every phase: driving SDA during an ACK would fight
@@ -1906,6 +1931,14 @@ module pe_engine #(
           if (act_retire)  l_ckph[cur] <= CK_LOW;
           else if (ck_act) l_ckph[cur] <= ck_next;
 `endif
+          // ⛔ THE DEGENERATE HALT. Checked at WRITEBACK so it fires once per
+          // dispatch of the offending action, and the drive arms above are
+          // gated on `~ck_degen` so NO CLOCK EDGE is emitted for it.
+          if (ck_degen) begin
+            config_err  <= 1'b1;
+            sticky_ovr  <= 1'b1;
+            l_live[cur] <= 1'b0;        // HALT: the action has no meaning
+          end
           if (ck_act) begin
             // the action's own bit counter: advances on LOW, cleared at the
             // retire that starts the next action. ⛔ NOT `tx_bitp`, which the

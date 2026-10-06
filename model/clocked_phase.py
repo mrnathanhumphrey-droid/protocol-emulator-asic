@@ -118,6 +118,7 @@ class Lane:
         self.tx_sent = []       # bits put on the wire
         self.halted = False     # a stretch past the timeout: a BUS FAULT
         self.stretch_err = False
+        self.cfg_err = False    # a degenerate action: refused, lane halted
 
     def start_action(self):
         """I1: every action starts in LOW, with no stale capture."""
@@ -173,6 +174,20 @@ def run_action(lane, act_index, op, nbits, tx_byte=0, peer_bits=None,
     and never success.
     """
     assert op in (SHIFT, SHIFTIN), op
+    # ⛔⛔ A ZERO BIT COUNT IS A DEFINED REFUSAL, NOT AN ASSERTION FAILURE.
+    # `nbits == 0` has no meaning as a shift, and the silicon's answer is to
+    # HALT the lane and set the existing `config_err` sticky -- so the model
+    # must say the same thing, or Layer B has no entry to compare against and
+    # the RTL's behaviour on it would be unverifiable.
+    # ⚠ TWO WAYS TO REACH IT in the ISA, which is why the engine guards the
+    # COMPUTED `ck_nbits` and not the raw field: a clocked SHIFTIN with
+    # `count = 0`, and a clocked SHIFT with `count = 15`, where `a_cnt + 1`
+    # wraps to 0 in the 4-bit field.
+    if nbits == 0:
+        lane.start_action()
+        lane.halted = True
+        lane.cfg_err = True
+        return []                       # no dispatch, no clock edge, no bits
     assert 1 <= nbits <= 8, nbits
     peer_bits = list(peer_bits or [0] * nbits)
     lane.start_action()
@@ -450,6 +465,18 @@ def selftest():
                             "ok" if not clean else "*** %s" % clean[0]))
     if clean:
         rc = 1
+
+    # ⛔ THE DEGENERATE BIT COUNT: refused, lane halted, nothing emitted.
+    print("    a clocked action with ZERO bits is REFUSED, not undefined")
+    for op, n in ((SHIFT, 0), (SHIFTIN, 0)):
+        lane = Lane()
+        d = run_action(lane, 0, op, n)
+        ok = (d == [] and lane.halted and lane.cfg_err)
+        print("      %-8s nbits=0  dispatches=%d halted=%-5s cfg_err=%-5s  %s"
+              % (op, len(d), lane.halted, lane.cfg_err,
+                 "ok" if ok else "*** expected no dispatch + halt + cfg_err"))
+        if not ok:
+            rc = 1
 
     # ⛔⛔ I8 -- A STRETCH OF ANY LENGTH LOSES NOTHING. This arm REPLACES one
     # that asserted the opposite: the first model had the capture race an idle

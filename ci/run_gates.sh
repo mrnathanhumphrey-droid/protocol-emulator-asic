@@ -67,6 +67,12 @@ GATES=(
   # reached 144. Both shapes are "a check that cannot speak", which reads
   # exactly like a check that passed.
   model/gate_bench_lint.py
+  # ⛔ EVERY OPCODE x FIELD x DEGENERATE VALUE, enumerated. `count = 0` was
+  # found by accident (a corrupted store reached the engine) and a SECOND
+  # route to the same state -- a clocked SHIFT with `count = 15`, where
+  # `a_cnt + 1` wraps to 0 -- was found by writing the fix. That is a class,
+  # and a class gets enumerated rather than fixed instance by instance.
+  model/gate_degenerate_fields.py
   # ⛔ `tb.v` PREPROCESSES AS THE COCOTB MAKEFILE DOES. 81 of 81 arms and 16
   # of 16 gates were green while the cocotb half would not even preprocess:
   # the single bus model's include is written `test/od_bus.vh`, Verilator runs

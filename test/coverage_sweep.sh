@@ -222,7 +222,22 @@ print('\n'.join(json.load(open(sys.argv[1]))[int(sys.argv[2])]['args']))
   # though they never execute under iverilog. That is why the gate's verdict
   # covers `src/` and the peer models, not bench bodies.
   cut="$OUT/cut_${top}_${label}_m${RMODE}.log"
-  awk '/Verilog \$finish/{exit} {print}' "$log" > "$cut"
+  # ⛔⛔ AND THE SHARED WATCHDOGS' SUMMARIES SURVIVE THE CUT, which the first
+  # version of this line did not allow. `test/progress.vh` and
+  # `test/clocked_conform.vh` report from `final` blocks, whose output lands
+  # AFTER the `$finish` line -- so their verdicts, including the
+  # anti-vacuity one ("no action was observed to retire"), were being
+  # DISCARDED before the FAIL grep ever saw them. An arm could run a
+  # completely vacuous watchdog and report `ok`, which is the exact shape
+  # those files exist to prevent.
+  # ⚠ THE ORIGINAL PROTECTION IS KEPT: everything else after `$finish` is
+  # still dropped, because Verilator runs a bench's own verdict section past
+  # it and iverilog does not (`tb_tx +BADCLK=1` printed a PASS, hit
+  # `$finish`, then ran a verdict that of course failed). A `final` block is
+  # DIFFERENT: it is defined to run at `$finish`, it is instrumentation
+  # rather than bench-verdict code, and both simulators honour it.
+  awk '/Verilog \$finish/{seen=1} !seen{print}
+       seen && (/progress\.vh/ || /clocked_conform/){print}' "$log" > "$cut"
   # ⚠ CASE-SENSITIVE ON PURPOSE. `-i` matched the word "failure" inside
   # `tb_csat`'s own line "sticky_ovr observed : 0 (recorded, not a failure)"
   # and failed an arm that had passed.

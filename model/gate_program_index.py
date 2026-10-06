@@ -376,7 +376,22 @@ def selftest() -> int:
     # (48 lines), so removing it is the hardest case for the window.
     victim = None
     for n, raw in enumerate(lines, 1):
-        if re.search(r"OP_SHIFT:\s*if\s*\(\s*pin_real\s*\)", strip_comment(raw)):
+        # ⚠⚠ AND A  BECAME A LITERAL BACKSPACE BYTE HERE ONCE. A patch
+        # script wrote the pattern through two escaping layers and the
+        # word-boundary `` collapsed into  -- so the regex required an
+        # actual backspace after `pin_real` and matched nothing, while a
+        # grep for `pin_real` found the line perfectly well. ⭐ The gate SAID
+        # SO ("could not find the OP_SHIFT guard to remove ... an unpriced
+        # gate has unknown strength") instead of passing, which is the only
+        # reason it was found. ⇒ Author regexes with Write/Edit, never
+        # through a shell heredoc into a Python string.
+        # ⚠ THE LABEL'S GUARD GAINED A TERM (`&& !ck_degen`), so the match
+        # must not require `pin_real` to be the WHOLE condition -- the first
+        # version did, stopped finding the victim, and said so instead of
+        # silently passing: "could not find the OP_SHIFT guard to remove, so
+        # this must-fire cannot run -- and an unpriced gate has unknown
+        # strength". That message is why the drift was visible at all.
+        if re.search(r"OP_SHIFT:\s*if\s*\(\s*pin_real", strip_comment(raw)):
             victim = n
             break
     if victim is None:
@@ -385,7 +400,11 @@ def selftest() -> int:
         print("        unknown strength.")
         return 1
     mutated = list(lines)
-    mutated[victim - 1] = "            OP_SHIFT: begin"
+    # ⛔ REMOVE ONLY THE `pin_real` TERM, not the whole condition: the mutant
+    # must be the dropped GUARD and nothing else, so `!ck_degen` stays.
+    mutated[victim - 1] = re.sub(r"pin_real\s*&&\s*", "",
+                                 re.sub(r"if\s*\(\s*pin_real\s*\)", "",
+                                        mutated[victim - 1]))
     # ⛔⛔ EVERY `pin_real` GUARD INSIDE THE OP_SHIFT ARM, NOT JUST THE LABEL'S.
     # Removing only `OP_SHIFT: if (pin_real)` reported "0 sites exposed" the
     # moment the self-clocked arm landed, because the clocked and unclocked

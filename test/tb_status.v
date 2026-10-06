@@ -112,6 +112,10 @@ module tb_status ();
     end
     if (!$value$plusargs("NCYC=%d", ncyc)) ncyc = 20000;
     if (!$value$plusargs("MODE=%d", mode)) mode = 0;
+    // ⭐ MODE=1 (OVERRUN) pushes into a queue NO LANE DRAINS and asserts the
+    // sticky sets; the engine is not expected to retire anything. MODE=0
+    // (STARVE) runs the engine and IS checked, which is why this is per-arm.
+    pg_quiescent_ok = (mode == 1);
     $readmemh(imgfile, img);
     hf_init;
 

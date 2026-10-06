@@ -98,6 +98,7 @@ module tb_fifo ();
   // the three-stage synchroniser to see an edge.
   task push_nib(input [3:0] nib, input [1:0] q, input integer hold);
     begin
+      pg_pushing = 1'b1;   // the shared interlock: see test/progress.vh
       ui_in[4:1] = nib;
       ui_in[5]   = q[1];
       ui_in[0]   = q[0];

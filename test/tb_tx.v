@@ -254,6 +254,10 @@ module tb_tx;
     // (M_SHIFT_CLK_ALIAS) is the defect, and the mode makes that
     // observable instead of requiring a reader to notice a missing flag.
     if (!$value$plusargs("BADCLK=%d", badclk)) badclk = 0;
+    // ⭐ THE BADCLK ARM IS THE 1.6x REFUSAL: the lane HALTS and emits no
+    // wrong data, so nothing retires. The `clean` arm must still be checked,
+    // which is exactly why the declaration is per-arm and not per-bench.
+    pg_quiescent_ok = (badclk != 0);
     $readmemh(imgfile, img);
 
     hf_init;

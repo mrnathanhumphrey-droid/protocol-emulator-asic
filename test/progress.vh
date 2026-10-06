@@ -58,7 +58,7 @@
  * ⭐ Both traps in this file had the same shape -- a check that cannot speak --
  * and both were caught only by comparing a COUNTER against the messages.
  *
- * ⭐ IT REPORTS BY PRINTING `FAIL`, which wires it into the existing machinery
+ * ⭐ IT REPORTS BY PRINTING `*** FAIL`, which wires it into the existing machinery
  * for free: `test/coverage_sweep.sh` greps each arm's log for a case-sensitive
  * `FAIL`. And it self-reports in a `final` block, so no bench has to remember
  * to call anything -- a watchdog that only speaks when invited is silent in
@@ -121,7 +121,7 @@ always @(posedge dut.clk) begin
     if (dut.u_eng.cur >= PG_MAXL) begin
       if (!pg_oor) begin
         pg_oor = 1'b1;
-        $display("FAIL progress.vh: lane index %0d exceeds PG_MAXL=%0d -- the watchdog cannot see every lane; raise PG_MAXL rather than trust a partial check", dut.u_eng.cur, PG_MAXL);
+        $display("*** FAIL progress.vh: lane index %0d exceeds PG_MAXL=%0d -- the watchdog cannot see every lane; raise PG_MAXL rather than trust a partial check", dut.u_eng.cur, PG_MAXL);
         pg_fa = pg_fa + 1;
       end
     end else if (dut.u_eng.a_op === 3'd7 && dut.u_eng.a_lvl === 1'b0) begin
@@ -138,10 +138,56 @@ always @(posedge dut.clk) begin
       end
       // ---- LAYER A: coarse liveness, model-independent -------------------
       if (pg_n[dut.u_eng.cur] == PG_COARSE + 1) begin
-        $display("FAIL progress.vh[A]: lane %0d has sat on the action at pc=%0d for %0d dispatches (coarse bound %0d) -- it is NOT RETIRING", dut.u_eng.cur, pg_pc[dut.u_eng.cur], pg_n[dut.u_eng.cur], PG_COARSE);
+        $display("*** FAIL progress.vh[A]: lane %0d has sat on the action at pc=%0d for %0d dispatches (coarse bound %0d) -- it is NOT RETIRING", dut.u_eng.cur, pg_pc[dut.u_eng.cur], pg_n[dut.u_eng.cur], PG_COARSE);
         pg_fa = pg_fa + 1;
       end
     end
+  end
+end
+
+// ⛔⛔⛔ THE LOAD-MODE INTERLOCK, AND IT HAS MISLED FOUR TIMES. In LOAD
+// mode `ui_in[5]` is PIN_PTR, not the host queue tag -- so a host PUSH
+// issued while PROG is high RESETS THE LOAD POINTER instead of pushing. It
+// is silent: the image is quietly corrupted and the symptom surfaces much
+// later as nonsense the engine executes.
+// ⚠ MEASURED, in `tb_fifo`'s first version: 81 of 87 store bytes differed
+// from the image, and what it LOOKED like was an RTL defect -- Layer B
+// reporting 24 clocked actions disagreeing with the model on `op=2 cnt=0`,
+// an action the image does not contain.
+// ⛔⛔ IT CANNOT BE GUARDED AT THE PINS, and the first version of this guard
+// tried: a WR strobe with PROG high is EXACTLY WHAT THE LOADER DOES, so
+// watching the pins fires on every bench's own load. The pins are
+// multiplexed -- that IS the hazard -- so nothing at the pin level
+// distinguishes a load write from a stray push.
+// ⇒ THE GUARD IS ON THE BENCH'S INTENT. A bench raises `pg_pushing` while it
+//   means to drive the HOST CHANNEL -- `host_feed.vh` drives it from `hf_en`,
+//   and a bench that pushes by hand sets it around its own strobes -- and
+//   pushing while PROG is high is then a declared contradiction rather than
+//   an indistinguishable waveform.
+// ⚠ A bench deliberately testing load-mode behaviour sets `pg_loadmode_ok`.
+// ⛔⛔ EXPECTED QUIESCENCE, DECLARED BY THE BENCH THAT KNOWS IT. The
+// anti-vacuity check above ("no action was observed to retire") is right for
+// an ordinary arm and WRONG for a REFUSAL arm, where the whole claim is that
+// the engine does NOT proceed: a 1.6x alias halts the lane, a cfgerr refusal
+// never dispatches, an ARM on a reserved pin can never fire. ⚠ MEASURED: the
+// moment the sweep could finally SEE these verdicts, exactly four arms went
+// red -- tb_pinrange refuse and armnone, tb_status overrun, tb_tx badclk --
+// and every one of them is a refusal test.
+// ⇒ So the bench DECLARES it, per ARM rather than per bench (tb_tx's `clean`
+//   arm must still be checked while `badclk` must not), and the declaration
+//   is a claim the bench makes about itself rather than a silent exemption.
+reg pg_quiescent_ok = 1'b0;  // this arm EXPECTS no action to retire
+reg pg_pushing    = 1'b0;   // the bench intends to drive the host channel
+reg pg_loadmode_ok = 1'b0;  // ... and means to do it in LOAD mode
+integer pg_badpush;
+initial pg_badpush = 0;
+always @(posedge dut.clk) if (dut.rst_n === 1'b1) begin
+  if (pg_pushing && !pg_loadmode_ok && dut.ui_in[7] === 1'b1) begin
+    if (pg_badpush == 0) begin
+      $display("*** FAIL progress.vh[A]: the bench drove the HOST CHANNEL while PROG=1 -- in load mode ui_in[5] is PIN_PTR, so a push RESETS THE LOAD POINTER and corrupts the image silently (set pg_loadmode_ok if that is the test)");
+      pg_fa = pg_fa + 1;
+    end
+    pg_badpush = pg_badpush + 1;
   end
 end
 
@@ -151,14 +197,16 @@ task pg_report;
     // because this file was once vacuous on every bench and said nothing.
     $display("  progress.vh[A]: %0d writeback(s), %0d action(s) retired",
              pg_wbs, pg_acts);
-    if (pg_wbs == 0)
-      $display("FAIL progress.vh: no writeback was ever observed, so the liveness check had nothing to check");
+    if (pg_quiescent_ok && pg_acts == 0)
+      $display("  progress.vh[A]: quiescent BY DECLARATION -- this arm expects no action to retire (a refusal test)");
+    else if (pg_wbs == 0)
+      $display("*** FAIL progress.vh: no writeback was ever observed, so the liveness check had nothing to check");
     else if (pg_acts == 0)
-      $display("FAIL progress.vh: no action was observed to retire, so the liveness check had nothing to check");
+      $display("*** FAIL progress.vh: no action was observed to retire, so the liveness check had nothing to check");
     else if (pg_fa == 0)
       $display("  progress.vh[A]: ok -- coarse liveness clean");
     else
-      $display("FAIL progress.vh[A]: %0d liveness failure(s)", pg_fa);
+      $display("*** FAIL progress.vh[A]: %0d liveness failure(s)", pg_fa);
   end
 endtask
 

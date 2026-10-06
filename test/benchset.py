@@ -166,7 +166,19 @@ CONFIG = {
                  # `arm_hit` is masked to 0 whenever no lane is armed -- so
                  # "no X" would otherwise be vacuous.
                  ("armnone", ["+IMG=test/armnone_image.hex", "+NCYC=8000",
-                              "+MODE=2"])],
+                              "+MODE=2"]),
+                 # ⭐ THE DEGENERATE CLOCKED COUNT, both routes in one image:
+                 # lane 0 a clocked SHIFTIN at count 0, lane 1 a clocked SHIFT
+                 # at count 15 where count + 1 wraps to 0. Asserts both lanes
+                 # HALT with CONFIG_ERR set and NO pin edge emitted.
+                 ("ckdegen", ["+IMG=test/ckdegen_image.hex", "+NCYC=8000",
+                              "+MODE=3"]),
+                 # the SECOND route: a clocked SHIFT at count 15, whose
+                 # count + 1 wraps to 0. Its own image, because `config_err`
+                 # gates dispatch engine-wide and the first refusal would
+                 # stop the second from ever running.
+                 ("ckdegen2", ["+IMG=test/ckdegen2_image.hex", "+NCYC=8000",
+                               "+MODE=3"])],
     },
     "tb_i2c": {
         "srcs": ["test/fram_i2c.v"],

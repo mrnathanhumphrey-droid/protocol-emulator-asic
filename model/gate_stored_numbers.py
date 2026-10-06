@@ -252,6 +252,16 @@ SPEC_SYMBOLS = {
     # running the machine and emitted to `test/clocked_bounds.vh`, which is why
     # there is no RECORD entry to pair with this exclusion.
     ("model/clocked_phase.py", "PROGRAMS"),
+    # ⭐ The degenerate-field audit's two tables. `TABLE` is the enumerated
+    # verdict per (opcode, field, degenerate value) and `DELIBERATE` names the
+    # must-fire images that trip a refusal ON PURPOSE. Both are
+    # SPECIFICATIONS -- a statement of what is legal and which programs are
+    # intentionally illegal -- not measurements of the design. ⚠ The numbers a
+    # reader sees in them are field VALUES (0, 15, PIN_NONE) quoted from the
+    # ISA, which is an input to the design; nothing in either table is
+    # observed, so there is no run to check them against.
+    ("model/gate_degenerate_fields.py", "TABLE"),
+    ("model/gate_degenerate_fields.py", "DELIBERATE"),
     # instance / lane / pin definitions -- inputs to the design
     ("model/a2/a2_close.py", "REQUIRED"),
     ("model/a2/frontier.py", "LANE_SPEC"),
