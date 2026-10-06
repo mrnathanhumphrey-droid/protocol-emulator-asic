@@ -276,6 +276,14 @@ SPEC_SYMBOLS = {
     # `test/measure_phases.py` on every run and adjudicated from there, which
     # is why there is no RECORD entry to pair with this exclusion either.
     ("test/make_smoke_image.py", "CKOD_DELAYS"),
+    # ⭐ THE I2C MODE RATE CEILINGS -- 100 kHz, 400 kHz, 1 MHz. These are what
+    # the mode NAMES mean, not observations of anything, and they are the
+    # loosest kind of input: an I2C mode is a MAXIMUM rate, so a slower clock
+    # is a legal clock of that mode and only the upper edge constrains. ⛔ They
+    # sit beside `UM10204`'s minima for the same reason that table does -- a
+    # requirement the design is measured against, which nothing here may
+    # derive or adjust.
+    ("model/a2/gate_clocked_lane_a2.py", "MODE_MAX_HZ"),
     # ⭐ The degenerate-field audit's two tables. `TABLE` is the enumerated
     # verdict per (opcode, field, degenerate value) and `DELIBERATE` names the
     # must-fire images that trip a refusal ON PURPOSE. Both are

@@ -179,6 +179,11 @@ not carried: both its premises changed. At `d = 25` the FRAM write is now
 **81** (was 53) and the random read **50**, both ≥ `D* = 20`, both `J = 1` —
 the pre-registered admissibility claim still holds, with more margin.
 
+Re-evaluated at a **mode-legal** `d` as well, since these two programs are I2C
+and `D_MIN_SHIPPED = 25` is the shipped *SPI* period: admissible with `J = 1` at
+every declared mode — `d_min` 81/50 (Fm+ at d=25), 201/130 (Fm at 65), 711/470
+(Sm at 235). The claim does not rest on the SPI period.
+
 ⚠ **Two errors in that re-derivation are worth recording.** The first rewrite
 charged each spacing the gap after its *own* retiring dispatch instead of its
 predecessor's; the totals still matched (66 + 341 = 63 + 344) so a sum check
@@ -196,3 +201,58 @@ it understates `d_min` by 2.0–3.2×, and between the utilisation floor and twi
 it the two definitions still disagree about admission (fires at `d` = 9, 12, 14).
 A must-fire that silently stops firing because its target was fixed is not a
 pass.
+
+---
+
+## 8. The clocked I2C lane in A2 — `D_tol` and `r` derived
+
+`model/a2/gate_clocked_lane_a2.py`, pyRTA as the PRIMARY bound.
+
+**The two-action row could not be reused.** `bursty.py` carries
+`BLane("I2C 400 kHz", T=45, D_tol=15, J=J_SHIPPED+L_JIT)`. `T = 45` is the short
+half of an **asymmetric 80/45** SCL built from `OP_SHIFT` + `OP_LEVEL`, and
+`D_tol = 15` was derived from UM10204 T11 for that geometry. The clocked scheme
+makes a *symmetric* clock from one action per bit.
+
+**`D_tol = d − t_LOW(min)`**, derived rather than assumed. Writeback advances
+the timestamp absolutely (P8), so the HIGH's release is `d` after the LOW's
+however late the LOW was served:
+`t_LOW(observed) = d + (HIGH start delay) − (LOW start delay)`, minimised at
+`d − (r_i − C_i)`. Only t_LOW needs margin — F1 counts the high phase from the
+observed rise, so service lateness only *lengthens* it.
+
+**The stream simplified, as predicted.** Before F1 a clocked lane presented
+*pairs* of jobs 3 cycles apart — a two-level burst `BLane`'s uniform inner
+spacing cannot express. After F1 every gap is `d` or `d + L_sync`, so the lane
+is an ordinary periodic one at `d`. The fix removed a modelling problem as well
+as a compliance one.
+
+**`d` is a fixed point**, not a formula: `D_tol` depends on `d`, and the `r_i`
+it must cover depends on a lane set containing the lane whose `T` is `d`.
+
+| mode | t_LOW min | `d` feasible | `d` **shippable** | D_tol | SCL rate | ≤ mode max |
+| --- | --- | --- | --- | --- | --- | --- |
+| Fm+ 1 MHz | 25 | 29 | **33** | 8 | 725 kHz | yes |
+| Fm 400 kHz | 65 | 69 | **73** | 8 | 336 kHz | yes |
+| Sm 100 kHz | 235 | 239 | **249** | 14 | 100 kHz | yes |
+
+⛔ **Every feasible margin is exactly 0, by construction** — the search returns
+the first `d` where `d − t_LOW(min)` only just reaches `r − C`. A zero-margin
+number is feasible and **not shippable**; the shippable column clears the
+4-cycle margin bar *and* the mode's rate ceiling, whichever binds. For Sm the
+**rate** binds (239 would be 104 kHz, over the ceiling); for Fm and Fm+ t_LOW
+binds. All three sit inside `DLY_W = 10`.
+
+⚠ **A symmetric clock cannot reach a mode's nominal maximum.** Fm+ tops out at
+725 kHz and Fm at 336 kHz. That is legal — an I2C mode is a *maximum* rate — but
+it is a throughput statement the clocked scheme owes, not a free win.
+
+**Must-fire:** inheriting the fixed `D_tol = 15` gives a *different* feasible
+`d` at all three modes (26/66/236 against 29/69/239), so the re-derivation
+changes the answer rather than decorating it. The inherited tolerance does not
+scale with `d`, so it understates a slow clock's real tolerance and overstates a
+fast one's.
+
+⚠ Not a shipped number yet: the other four rows in the set are still the shipped
+two-action ones. If the clocked scheme replaces more than the I2C lane, this is
+recomputed, not carried.

@@ -88,6 +88,12 @@ GATES = [
     # minima. Needs `PE_PHASES_JSON` from `test/phases_run.sh`; RED without it.
     ("gate_um10204.py",
      "C1   measured t_HIGH/t_LOW/t_SU;DAT/t_HD;DAT vs UM10204 minima", False),
+    # ⛔ pyRTA-PRIMARY, so it is NOT in `ci/run_gates.sh`: pyRTA is not
+    # vendored and this gate is RED without it rather than falling back to our
+    # own recurrence. It declares a lane-table VARIANT (the clocked I2C row
+    # replacing the two-action one), so it needs the digest.
+    ("gate_clocked_lane_a2.py",
+     "A2c  the clocked I2C lane's D_tol and r, DERIVED not inherited", True),
     # ⛔ `../` because this one lives in model/ with the other RTL-FACING gates
     # (part1_param_contract, f2_flop_driven_outputs), not in model/a2/ with the
     # analysis. It is in THIS list anyway: an out-of-suite gate is a gate nobody

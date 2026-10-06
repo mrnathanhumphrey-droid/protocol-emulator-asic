@@ -398,6 +398,55 @@ def main() -> int:
         print("      and it is the next step, not this one.")
 
     # ---------------------------------------------------------------
+    # 3b. THE SAME CLAIM AT A d THAT MEETS A DECLARED I2C MODE
+    # ---------------------------------------------------------------
+    print()
+    print("  --- 3b. re-evaluated at a MODE-LEGAL d ---")
+    print("    ⛔⛔ WHY §3 ALONE IS NOT THE ANSWER FOR THE FRAM PROGRAMS.")
+    print("    `D_MIN_SHIPPED = 25` is the tightest spacing in the SHIPPED")
+    print("    table -- SPI at 1 MHz -- and it is the right worst case for the")
+    print("    fetch port. But these two programs are I2C, and after F1 the")
+    print("    clock is symmetric (low = d, high = d + L_sync), so `d` must")
+    print("    also clear the mode's t_LOW minimum or the program is not a")
+    print("    legal I2C clock at all. A d_min computed at an illegal d")
+    print("    describes a program that cannot ship.")
+    print("    ⭐ THE DELAYS COME FROM `gate_um10204`'s TABLE, imported rather")
+    print("    than restated -- `table_cycles()` is a pure function and needs")
+    print("    no measurement, so there is no second copy of the minima here.")
+    print("    ⚠ THE BARE t_LOW MINIMUM IS USED, not the jitter-corrected")
+    print("    floor, because it is the TIGHTER d and therefore the stricter")
+    print("    test of admissibility: a larger d only raises d_min.")
+    print()
+    try:
+        import gate_um10204 as um
+        modes = um.table_cycles()
+    except Exception as exc:                            # noqa: BLE001
+        print("    *** FAIL could not import the UM10204 table: %s" % exc)
+        modes, rc = {}, 1
+    print("    %-13s %-6s %-22s %-8s %-7s %-7s %-6s %s"
+          % ("mode", "d", "program", "d_min", ">= D*?", "adm?", "J", "verdict"))
+    for mname in sorted(modes, key=lambda m: modes[m]["t_LOW"]):
+        dd = modes[mname]["t_LOW"]
+        for name in CLAIMED:
+            _rows, sp, _der, _naive = measure(name, PROGRAMS[name], dd)
+            dmin = min(sp)
+            pf, adm = jp.port_feasible(dmin), jp.admissible(dmin)
+            j = jp.j_of(dmin)
+            ok = pf and adm and j == jp.j_of(jp.D_MIN_SHIPPED)
+            if not ok:
+                rc = 1
+            print("    %-13s %-6d %-22s %-8d %-7s %-7s %-6d %s"
+                  % (mname, dd, name, dmin, "yes" if pf else "NO",
+                     "yes" if adm else "NO", j,
+                     "ADMISSIBLE" if ok else "*** FAIL"))
+    if modes and rc == 0:
+        print("    ⇒ admissible at every declared mode, still J = %d. The"
+              % jp.j_of(jp.D_MIN_SHIPPED))
+        print("      claim does not depend on the shipped SPI period: the")
+        print("      loosest I2C clock this engine can legally produce is")
+        print("      already far above D* = %d." % jp.D_STAR)
+
+    # ---------------------------------------------------------------
     # 4. MUST-FIRE: the wrong definition must CHANGE THE VERDICT
     # ---------------------------------------------------------------
     print()
