@@ -135,6 +135,70 @@ def act(op, pin, level, delay, count=0, q=0) -> bytes:
 
 
 # ---------------------------------------------------------------------------
+# THE SELF-CLOCKED SHIFTS -- named constructors, because the field is overloaded
+# ---------------------------------------------------------------------------
+# ⛔⛔ `level = 1` ON A SHIFT OR SHIFTIN WHOSE LANE HAS A REAL CLOCK PIN MEANS
+# "SELF-CLOCKED": the action drives BOTH clock phases itself and carries a whole
+# byte, instead of one bit per action. 20 actions per I2C wire byte become 2.
+#
+# WHY AN OVERLOADED FIELD AT ALL -- there was nothing else. Measured: ACT_FIELDS
+# is 24 of 24 bits, HDR_FIELDS is 48 of 48, and all 8 opcodes are used. And
+# `level` is the RIGHT field to overload rather than merely the available one:
+# on a self-clocked shift "the clock level to write this dispatch" is vacuous,
+# because the action writes both levels.
+#
+# ⛔ THE UART CASE IS DEFINED AND UNCHANGED: with NO real clock pin
+# (`clkpin = PIN_NONE`), `level` keeps its exact old meaning. Self-clocking
+# requires `clk_real` AND `level = 1`. A UART lane has no clock pin, so nothing
+# a UART program can write is reinterpreted.
+#
+# ⚠ SUPPORTED PHASE ORDER, and the limitation stated rather than omitted: the
+# self-clocked order is DATA WITH THE CLOCK LOW, THEN CLOCK HIGH -- data settles
+# while the clock is low and is read on the rise. That is I2C, and SPI MODES 0
+# AND 3, which covers both FRAM parts. SPI MODES 1 AND 2 change data on the
+# RISING edge and need the reverse order: they are NOT expressible as a
+# self-clocked shift and stay on the unclocked idiom (`level = 0` plus
+# `OP_LEVEL` for the clock), which is untouched and still available.
+#
+# ⇒ These constructors exist so no caller has to write the bare `1`. `pe_asm`
+#   refuses a raw `level = 1` SHIFT on a real-clock lane that did not come
+#   through them, so the overload stays visible in the toolchain.
+SELF_CLOCKED = 1        # the `level` value that means "self-clocked"
+
+
+def act_shift_clocked(pin, delay, nbits=8, q=0) -> bytes:
+    """A self-clocked transmit of `nbits` bits (a whole byte by default).
+
+    ⛔ `count = nbits - 1` BECAUSE THAT IS THE EXISTING `OP_SHIFT` CONVENTION,
+    not an off-by-one: the engine compares the PRE-increment `tx_bitp` against
+    `a_cnt`, which is also the comparison the host-byte load uses -- so the
+    load and the retire coincide, which is what makes a clocked byte reload the
+    next payload exactly when it finishes the current one.
+    """
+    if not 1 <= int(nbits) <= 8:
+        raise ValueError("nbits %r outside 1..8" % (nbits,))
+    return act(OP_SHIFT, pin, SELF_CLOCKED, delay, count=int(nbits) - 1, q=q)
+
+
+def act_shiftin_clocked(pin, delay, nbits=8) -> bytes:
+    """A self-clocked receive of `nbits` bits. `nbits = 1` is an I2C ACK slot.
+
+    ⛔ `count = nbits` HERE, against `nbits - 1` for the transmit, because the
+    two opcodes already counted differently before this existed: `OP_SHIFTIN`
+    compares against `a_cnt - 1`. The asymmetry is PRE-EXISTING SEMANTICS
+    PRESERVED, and these constructors are where it stops being a trap.
+
+    ⚠ A clocked receive of `n` bits takes `2n + 1` dispatches, not `2n`. The bit
+    is captured on the OBSERVED clock rise, which lands in the idle window after
+    the high phase, so a trailing COLLECT phase retires the action with the last
+    bit in hand. Store cost is unchanged -- it is still ONE action.
+    """
+    if not 1 <= int(nbits) <= 8:
+        raise ValueError("nbits %r outside 1..8" % (nbits,))
+    return act(OP_SHIFTIN, pin, SELF_CLOCKED, delay, count=int(nbits))
+
+
+# ---------------------------------------------------------------------------
 # THE HOST STREAM -- the other half, and the reason this module is shared
 # ---------------------------------------------------------------------------
 def host_pushes(byte, queue):

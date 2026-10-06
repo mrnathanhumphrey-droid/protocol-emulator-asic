@@ -64,6 +64,8 @@ module tb_pinrange ();
       .ena(ena), .clk(clk), .rst_n(rst_n)
   );
 
+`include "test/progress.vh"
+
   task fail;
     input [8*72-1:0] msg;
     begin

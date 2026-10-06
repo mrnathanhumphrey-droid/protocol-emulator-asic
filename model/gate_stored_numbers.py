@@ -243,6 +243,15 @@ SITES = [
 # before it was ever committed, which is why the stale-exclusion check below
 # exists and why it fired immediately.
 SPEC_SYMBOLS = {
+    # ⭐ The clocked phase model's PROGRAMS: the ACTION SHAPES it runs its
+    # invariants over -- the corpus lanes, a full 4-byte FRAM write, a random
+    # read with repeated START. The numbers are BIT COUNTS the protocols
+    # require (8 for a byte, 1 for an I2C ACK slot), so they are inputs to the
+    # model, not observations of it. ⛔ WHAT THE MODEL *MEASURES* -- the
+    # dispatch count per action -- is NOT stored anywhere: it is computed by
+    # running the machine and emitted to `test/clocked_bounds.vh`, which is why
+    # there is no RECORD entry to pair with this exclusion.
+    ("model/clocked_phase.py", "PROGRAMS"),
     # instance / lane / pin definitions -- inputs to the design
     ("model/a2/a2_close.py", "REQUIRED"),
     ("model/a2/frontier.py", "LANE_SPEC"),

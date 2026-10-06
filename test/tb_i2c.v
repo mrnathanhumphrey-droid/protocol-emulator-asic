@@ -79,6 +79,7 @@ module tb_i2c;
       .sda_oe(peer_sda_low), .scl_oe(peer_scl_low)
   );
 
+`include "test/progress.vh"
 `include "test/host_feed.vh"
 
   // ---- liveness, so a silent run cannot pass -------------------------

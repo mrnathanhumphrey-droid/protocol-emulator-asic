@@ -43,9 +43,20 @@ QUAR = os.environ.get(
     "PE_QUARANTINE",
     os.path.join(os.environ.get("TEMP", "/tmp"), "pe_cleanroom"))
 
+# ⛔⛔ ORDER IS LOAD-BEARING: THE MANIFEST WRITER MUST RUN LAST. `corpus.py`
+# writes the corpus images but `make_smoke_image.py --all` writes
+# `artefacts.sha256` -- hashing whatever is on disk WHEN IT RUNS. With the
+# manifest writer first, a corpus change was pinned at its PREVIOUS hash, so
+# the manifest was one regeneration stale for exactly the files the other
+# generator owns.
+# ⚠ MEASURED, not foreseen: after rewriting the corpus's self-clocked sites,
+# `corpus_all5.hex` on disk read d1e2508711f0 while the manifest still said
+# d1db8a89415b -- and the bit-identity check reported it as UNCHANGED, which is
+# the dangerous direction. A manifest that lags is worse than no manifest,
+# because it answers.
 GENERATORS = [
-    [sys.executable, os.path.join(HERE, "make_smoke_image.py"), "--all"],
     [sys.executable, os.path.join(HERE, "corpus.py")],
+    [sys.executable, os.path.join(HERE, "make_smoke_image.py"), "--all"],
 ]
 
 

@@ -47,7 +47,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 # reliable bug.
 from pe_isa import (                      # noqa: F401,E402
     ACT_BASE, ACT_BYTES, ACT_W, AW, BQW, CW, DLY_W, D_W, HDR_BITS, HDR_BYTES,
-    N_LANES, OP_ARM, OP_LEVEL, OP_READBIT, OP_REARM, OP_SHIFT, OP_SHIFTIN,
+    N_LANES, SELF_CLOCKED, act_shift_clocked,
+    act_shiftin_clocked, OP_ARM, OP_LEVEL, OP_READBIT, OP_REARM, OP_SHIFT, OP_SHIFTIN,
     ORDER_LSB, ORDER_MSB,
     OP_START, OP_STOP, PINW, PIN_NONE, UO0, UO1, UO2, UO3, act, hdr,
 )

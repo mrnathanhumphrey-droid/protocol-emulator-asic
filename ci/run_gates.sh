@@ -59,6 +59,14 @@ command -v "$PY" >/dev/null 2>&1 || PY=python3
 #     env var is unset is the exact shape this project keeps finding bugs in,
 #     so the exclusion is declared here and the invocation is explicit.
 GATES=(
+  # ⛔ THE BENCH LINT, and it earned its place twice over in one file. The
+  # watchdog `test/progress.vh` was VACUOUS on all twelve benches on its first
+  # run -- a hierarchical reference to a `localparam` compiled and never
+  # matched -- and then its failure messages printed NOTHING because their
+  # format strings were brace-concatenated, while the counter beside them
+  # reached 144. Both shapes are "a check that cannot speak", which reads
+  # exactly like a check that passed.
+  model/gate_bench_lint.py
   model/gate_ruling_audit.py
   model/gate_one_encoder.py
   model/gate_mutant_arms.py

@@ -144,6 +144,8 @@ module tb_jlane;
       .ena(ena), .clk(clk), .rst_n(rst_n)
   );
 
+`include "test/progress.vh"
+
   // ⛔⛔ THE PREDICATE IS `pe_engine.v:1076-1089` READ LITERALLY, with the
   // winner pinned to `lane`. Every term earns its place:
   //   `primed && !config_err` -- the ST_IDLE arm is gated on both, so a cycle

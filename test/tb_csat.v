@@ -85,6 +85,8 @@ module tb_csat;
       .ena(ena), .clk(clk), .rst_n(rst_n)
   );
 
+`include "test/progress.vh"
+
   // ⛔⛔ `pe_engine.v`'s ST_IDLE ARM READ LITERALLY. Every term earns its place:
   //   `primed && !config_err` gate the whole arm, so a cycle before priming is
   //     not a dispatch opportunity;

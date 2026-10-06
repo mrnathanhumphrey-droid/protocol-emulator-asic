@@ -79,6 +79,8 @@ module tb_witness;
       .ena(ena), .clk(clk), .rst_n(rst_n)
   );
 
+`include "test/progress.vh"
+
   // ⛔ THE SAME STALL CONDITION THE ENGINE COUNTS ON, reconstructed here:
   // winner chosen, schedule running, and waiting ONLY on its own head slot.
   // Reading a different condition would witness a different event.

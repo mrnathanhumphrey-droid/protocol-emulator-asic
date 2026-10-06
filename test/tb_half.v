@@ -138,6 +138,7 @@ module tb_half;
       .ena(ena), .clk(clk), .rst_n(rst_n)
   );
 
+`include "test/progress.vh"
 `include "test/host_feed.vh"
 
   // ---- the dispatch events, read literally off the FSM -------------------

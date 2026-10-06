@@ -497,6 +497,8 @@ module tb_edge;
       .ena(ena), .clk(clk), .rst_n(rst_n)
   );
 
+`include "test/progress.vh"
+
 endmodule
 
 `default_nettype wire

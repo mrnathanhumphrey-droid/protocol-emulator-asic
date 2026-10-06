@@ -107,6 +107,7 @@ module tb_rxbw;
       .ena(ena), .clk(clk), .rst_n(rst_n)
   );
 
+`include "test/progress.vh"
 `include "test/host_feed.vh"
 
   initial begin

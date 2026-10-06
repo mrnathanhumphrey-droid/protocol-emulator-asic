@@ -52,6 +52,7 @@ module tb_smoke;
   // census image -- was taken in the STARVED regime without saying so.
   // The feeder is a concurrent process inside the include; this bench only
   // declares which queues to feed and raises `hf_en` after load.
+`include "test/progress.vh"
 `include "test/host_feed.vh"
 
   always #10 clk = ~clk;                   // 50 MHz, the shipped clock
