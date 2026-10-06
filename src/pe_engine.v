@@ -423,6 +423,10 @@ module pe_engine #(
   // Counting the action's own progress is the only thing that survives it.
   reg [BPW-1:0]   l_ckbit  [0:N_LANES-1];
   reg             l_ckwait [0:N_LANES-1];   // a capture armed on the rise
+  // ⭐ parked for a CLOCK phase rather than for a program's `OP_ARM`, so a
+  // stretch fault can be told from a peer-silent ARM timeout when the bound
+  // lands.
+  reg             l_ckpark [0:N_LANES-1];
   reg             l_cksamp [0:N_LANES-1];   // the bit latched AT the rise
   reg             l_ckgot  [0:N_LANES-1];   // ... and it is unconsumed
   reg [7:0]       l_tx     [0:N_LANES-1];   // THE TX PAYLOAD lives here, not
@@ -909,6 +913,16 @@ module pe_engine #(
   // condition three times is how the three drift apart -- and the phase
   // reset getting it wrong is precisely the defect being fixed.
   wire act_retire = ~ck_hold_eff & ((a_op != OP_REARM) | a_lvl);
+  // ⛔ M_CK_NO_PARK removes the post-HIGH park, so the capture races the
+  // lane's own next dispatch again and a long stretch LOSES BITS. MEASURED
+  // both ways: without the park a 500-cycle SCL hold sets `clk_stretch_err`
+  // and a 50-cycle one does not; with it, 5000 cycles lose nothing. That is
+  // what makes the compliance claim evidence rather than an assertion.
+`ifdef M_CK_NO_PARK
+  wire ck_park_en = 1'b0;                 // the mutant: no park
+`else
+  wire ck_park_en = 1'b1;
+`endif
   // CONDITION (a): the clocked ACK releases the data pin on BOTH phases.
   // `{oe, out}` as a wire, so the mutant is one line against one line.
   // ⛔ M_ACK_DRIVES_SDA makes it a PUSH-PULL HIGH on an open-drain net while
@@ -1261,6 +1275,7 @@ module pe_engine #(
         l_ckph[i]   <= CK_LOW;
         l_ckbit[i]  <= {BPW{1'b0}};
         l_ckwait[i] <= 1'b0;
+        l_ckpark[i] <= 1'b0;
         l_cksamp[i] <= 1'b0;
         l_ckgot[i]  <= 1'b0;
 `ifdef M_SHARED_BITP
@@ -1858,6 +1873,43 @@ module pe_engine #(
             // ARM THE CAPTURE as the high phase leaves: the clock has just
             // been released and the rise -- whenever the peer allows it --
             // lands in `l_cksamp` during the idle window.
+            // ⛔⛔⛔ AFTER THE HIGH PHASE THE LANE IS **PARKED ON THE OBSERVED
+            // RISE**, and this is a compliance fix, not an optimisation. The
+            // previous build let the capture race the lane's own next dispatch, so
+            // a peer holding SCL longer than that gap LOST a bit -- MEASURED: a
+            // 500-cycle hold set `clk_stretch_err`, a 50-cycle hold did not. That
+            // contradicts A2 Part 4 (the SCL wait is a HARDWARE CONDITION ON THE
+            // LANE, never engine occupancy) and N1a/R3 (stretching DELAYS, never
+            // loses data); UM10204 sets no upper limit on how long a target may
+            // hold SCL low.
+            // ⭐⭐ IT REUSES `OP_ARM`'s MACHINERY WHOLE rather than adding a second
+            // way to wait: `l_armed` + `arm_hit` already watch a pin for an edge
+            // and REBASE the timestamp to `now` when it lands, which IS "released
+            // by the rise".
+            // ⚠⚠ A FAULT BOUND IS OWED, stated rather than hidden: `l_notmo = 1`
+            // makes the wait UNBOUNDED, which compliance requires, but a peer that
+            // VANISHES then parks the lane for ever. The ARM alternative
+            // (`l_notmo = 0`) bounds the wait at the action's `delay` -- ONE BIT
+            // PERIOD -- which is the very bound being removed, and the action word
+            // is 24 of 24 bits so no field can carry a second, longer timeout. A
+            // fault detector needs a build-time parameter plus per-lane counters
+            // (~50 flops), so it is RULED, not assumed.
+            // ⛔⛔ OPEN-DRAIN ONLY, AND THAT IS PHYSICS RATHER THAN A
+            // CONVENIENCE. Stretching is a peer PULLING A RELEASED LINE LOW;
+            // on a PUSH-PULL clock the engine drives both levels and no peer
+            // can hold it, so there is nothing to wait for. ⚠ MEASURED THE
+            // HARD WAY: parking unconditionally hung the push-pull SPI master
+            // lane -- it waited for a rise on a clock it drives itself -- and
+            // four `fram_spi` coverage points that the clocked corpus had just
+            // PAID went dark again. A regression visible only because the
+            // paid debt was recorded.
+            if (ck_act & ck_is_high & ck_park_en & ~l_mode[cur]) begin
+              l_armed[cur]   <= 1'b1;
+              l_armpin[cur]  <= l_clkpin[cur];
+              l_armedge[cur] <= 1'b1;        // a RISE
+              l_notmo[cur]   <= 1'b1;        // unbounded: a slow peer is legal
+              l_ckpark[cur]  <= 1'b1;
+            end
             if (ck_shiftin & ck_is_high) begin
               l_ckwait[cur] <= 1'b1;
               l_ckgot[cur]  <= 1'b0;
@@ -2115,6 +2167,7 @@ module pe_engine #(
           l_cksamp[i] <= ck_bit[i];
           l_ckgot[i]  <= 1'b1;
           l_ckwait[i] <= 1'b0;
+          l_ckpark[i] <= 1'b0;
         end
         if (arm_hit[i]) begin
           l_armed[i] <= 1'b0;                   // capture DISARMS: a second

@@ -47,11 +47,34 @@ INVARIANTS, asserted on every action this model runs:
   I6  the clock returns LOW at the end of an action, so the next action's LOW
       phase starts from a known level and no program needs a separating
       OP_LEVEL
+  I8  a stretch of ANY length loses no bits and does not change the dispatch
+      count; it shifts the release TIMES only
+  I9  a stretch beyond the programmed timeout halts the lane and raises the
+      sticky -- a fault, reported, never a silently short byte
   I7  COLLECT is never released before the HIGH job it follows has COMPLETED
       (the one-slot-per-lane condition, r_i <= t_i). It holds by construction
       -- the sample is captured in the idle window AFTER that writeback -- but
       a condition that holds by construction is exactly the kind that stops
       holding silently when the construction changes, so it is asserted.
+
+⛔⛔ CLOCK STRETCHING IS UNBOUNDED, AND THE FIRST VERSION OF THIS FILE GOT IT
+WRONG. It modelled the capture as landing in the idle window and said that a
+rise later than ONE LANE PERIOD lost its bit. That contradicts what has been
+ruled since A2 Part 4 -- the SCL wait is a HARDWARE CONDITION ON THE LANE,
+never engine occupancy -- and N1a and R3 build on it: stretching DELAYS the
+high phase and NEVER LOSES DATA. UM10204 puts no upper limit on how long a
+target may hold SCL low, so a design that drops bits after one lane period is
+not stretch-compliant, however cleanly it reports the loss.
+⇒ THE LANE IS PARKED AFTER THE HIGH PHASE, exactly the way `OP_ARM` parks a
+  lane on an edge: its next dispatch -- the next LOW, or the COLLECT -- is
+  RELEASED BY THE OBSERVED RISE rather than by its timestamp. A stretch of any
+  length then shifts the lane's TIMING and loses nothing, and the dispatch
+  count is untouched at 2n / 2n+1.
+⚠ THE TIMEOUT SURVIVES, BUT AS A BUS-FAULT DETECTOR, not a stretch limit: a
+  stretch beyond the programmed timeout halts the lane and sets
+  `clk_stretch_err` -- the same "a timeout means ERROR, never success" rule
+  `OP_ARM` already follows. The difference matters: "the peer is slow" is
+  legal and must work; "the peer is gone" is a fault and must be reported.
 
 ⚠ WHAT COLLECT COSTS THE TIMING MODEL, which is NOT this file's claim to make
 but is recorded here because the dispatch count is: it is an ordinary job in
@@ -93,6 +116,8 @@ class Lane:
         self.captured = None    # a bit latched at an observed rise, unconsumed
         self.rx = []            # bits consumed
         self.tx_sent = []       # bits put on the wire
+        self.halted = False     # a stretch past the timeout: a BUS FAULT
+        self.stretch_err = False
 
     def start_action(self):
         """I1: every action starts in LOW, with no stale capture."""
@@ -103,28 +128,49 @@ class Lane:
 
 class Dispatch:
     __slots__ = ("lane", "act", "idx", "phase", "ptr", "retire", "clk",
-                 "armed", "consumed")
+                 "armed", "consumed", "t", "reactive")
 
     def __init__(self, lane, act, idx, phase, ptr, retire, clk, armed,
-                 consumed):
+                 consumed, t=0, reactive=False):
         self.lane, self.act, self.idx = lane, act, idx
         self.phase, self.ptr, self.retire = phase, ptr, retire
         self.clk, self.armed, self.consumed = clk, armed, consumed
+        # ⭐ THE RELEASE TIME, and whether this dispatch was released by the
+        # OBSERVED RISE rather than by the lane's timestamp. The second flag is
+        # what the A2 modelling needs: every post-HIGH dispatch on a clocked
+        # lane is a REACTIVE release and carries the sync jitter, not just the
+        # COLLECT one.
+        self.t, self.reactive = t, reactive
 
     def row(self):
         return [self.lane, self.act, self.idx, self.phase, self.ptr,
                 int(self.retire), self.clk, int(self.armed),
-                -1 if self.consumed is None else int(self.consumed)]
+                -1 if self.consumed is None else int(self.consumed),
+                self.t, int(self.reactive)]
+
+
+#: the lane period, the sync latency of an observed edge, and the programmed
+#: timeout. ⚠ These are the MODEL's units of time, not a claim about the
+#: shipped parameters -- the `C` re-measurement is what sets those.
+D_PERIOD, L_SYNC, TIMEOUT = 20, 3, 4000
 
 
 def run_action(lane, act_index, op, nbits, tx_byte=0, peer_bits=None,
-               stretch=0):
+               stretch=0, timeout=TIMEOUT, d=D_PERIOD):
     """Dispatch-by-dispatch expansion of ONE clocked action.
 
     `peer_bits` is what the peer puts on the data line, consumed in order.
-    `stretch` delays the observed rise by that many idle windows -- it changes
-    WHEN the bit is captured, never how many dispatches the action takes, which
-    is the whole point of capturing on the rise instead of counting cycles.
+    `stretch` is CYCLES the peer holds the clock low past the high phase.
+
+    ⛔⛔ THE LANE IS PARKED AFTER THE HIGH PHASE, ARM-STYLE. Its next dispatch
+    is RELEASED BY THE OBSERVED RISE, not by its timestamp, so a stretch of any
+    length shifts the release TIMES and loses NOTHING. The first version of
+    this model had the capture race an idle window and drop bits past one lane
+    period, which contradicted A2 Part 4 / N1a / R3 and would not have been
+    stretch-compliant.
+    ⚠ `timeout` is a BUS-FAULT bound, not a stretch limit: past it the lane
+    HALTS and the sticky is raised, the same way `OP_ARM`'s timeout means error
+    and never success.
     """
     assert op in (SHIFT, SHIFTIN), op
     assert 1 <= nbits <= 8, nbits
@@ -133,7 +179,9 @@ def run_action(lane, act_index, op, nbits, tx_byte=0, peer_bits=None,
     out = []
     i = 0
     bits_done = 0
-    pending = None          # a rise armed, waiting for the idle window
+    pending = None          # a rise armed; the lane is parked until it arrives
+    t = 0                   # the release time of the dispatch about to run
+    reactive = False        # was THIS dispatch released by the rise
 
     while True:
         armed = False
@@ -191,16 +239,27 @@ def run_action(lane, act_index, op, nbits, tx_byte=0, peer_bits=None,
             lane.phase = LOW
 
         out.append(Dispatch(lane.name, act_index, i, ph_exec, lane.ptr,
-                            retire, lane.clk, armed, consumed))
+                            retire, lane.clk, armed, consumed, t, reactive))
 
-        # the idle window after this dispatch: an armed capture lands here,
-        # `stretch` windows later.
+        # ---- the gap to the NEXT dispatch -------------------------------
+        # ⛔⛔ A PARK, NOT A RACE. If a capture was armed by this high phase,
+        # the lane waits for the OBSERVED RISE: the next dispatch is released
+        # `stretch + L_SYNC` after this one, however long `stretch` is, and the
+        # bit is in hand when it runs. Nothing is lost at any stretch length.
         if pending is not None:
-            if stretch <= 0:
-                lane.captured = pending
-                pending = None
-            else:
-                stretch -= 1
+            if stretch > timeout:
+                # ⚠ A BUS FAULT, not a slow peer: halt and report. The bits
+                # already taken stand; the action does NOT complete.
+                lane.halted = True
+                lane.stretch_err = True
+                break
+            t = t + stretch + L_SYNC
+            lane.captured = pending
+            pending = None
+            reactive = True        # released by the rise
+        else:
+            t = t + d
+            reactive = False
 
         i += 1
         if retire:
@@ -392,37 +451,55 @@ def selftest():
     if clean:
         rc = 1
 
-    # ⛔⛔ THE STRETCH TOLERANCE, MADE EXPLICIT RATHER THAN DISCOVERED LATER.
-    # The capture must land in the idle window BEFORE its consume point. One
-    # window is one LANE PERIOD (`d` cycles), so a peer may hold the clock for
-    # up to `d` and be read correctly; beyond that the bit is LOST.
-    # ⭐ AND THE DISPATCH COUNT DOES NOT MOVE EITHER WAY -- that is the whole
-    # value of capturing on the rise: a stretching peer changes WHICH bits
-    # arrive, never the schedule. So a lost bit shows up as I5, not as a
-    # timing violation, and the RTL's `clk_stretch_err` sticky is what reports
-    # it to the host. A design that silently substituted 0 would read as a
-    # successful ACK, which is the most dangerous possible default.
-    print("    stretch tolerance: the rise must land within ONE lane period")
-    for s, want_bits in ((0, 2), (1, 1), (3, 0), (20, 0)):
+    # ⛔⛔ I8 -- A STRETCH OF ANY LENGTH LOSES NOTHING. This arm REPLACES one
+    # that asserted the opposite: the first model had the capture race an idle
+    # window and said a rise later than one lane period dropped its bit. That
+    # contradicted A2 Part 4 / N1a / R3 and UM10204, which sets no upper limit
+    # on how long a target may hold SCL low. ⇒ The lane PARKS on the rise,
+    # ARM-style, so the stretch shifts release TIMES and never data.
+    # ⭐ THE OLD ARM PASSED. It was green against the wrong contract, which is
+    # why the walk-back came from the RULING and not from a failing test --
+    # a test can only check the specification it was given.
+    print("    I8: a stretch of ANY length loses no bits (the lane parks)")
+    for st in (0, 1, 3, 20, 200, 3999):
         lane = Lane()
-        d = run_action(lane, 0, SHIFTIN, 2, stretch=s)
-        ok = (len(d) == 5 and len(lane.rx) == want_bits)
-        print("      stretch=%-3d %d dispatch(es), %d bit(s) consumed   %s"
-              % (s, len(d), len(lane.rx),
-                 "ok" if ok else "*** expected 5 and %d" % want_bits))
+        d = run_action(lane, 0, SHIFTIN, 2, peer_bits=[1, 0], stretch=st)
+        ok = (len(d) == 5 and lane.rx == [1, 0] and not lane.halted)
+        print("      stretch=%-5d %d dispatch(es), bits %s, last release t=%-5d %s"
+              % (st, len(d), lane.rx, d[-1].t, "ok" if ok else "*** expected 5 and [1, 0]"))
         if not ok:
             rc = 1
 
-    # ⭐ STRETCH MUST NOT CHANGE THE DISPATCH COUNT, only when the bit lands.
-    for s in (0, 1, 5):
+    # ⛔ I9 -- PAST THE TIMEOUT IT IS A BUS FAULT, NOT A SLOW PEER. The lane
+    # halts and the sticky is raised: the same "a timeout means ERROR, never
+    # success" rule `OP_ARM` follows. ⚠ The distinction is the whole point --
+    # "the peer is slow" is legal and must work; "the peer is gone" must be
+    # reported, never completed as a short byte.
+    print("    I9: a stretch past the timeout halts the lane and reports it")
+    for st, want_halt in ((3999, False), (4001, True), (40000, True)):
         lane = Lane()
-        d = run_action(lane, 0, SHIFTIN, 2, stretch=s)
-        n = len(d)
-        print("    %-40s %s"
-              % ("stretch=%d leaves the count at 2n+1 = 5" % s,
-                 "ok (%d)" % n if n == 5 else "*** %d" % n))
-        if n != 5:
+        d = run_action(lane, 0, SHIFTIN, 2, peer_bits=[1, 0], stretch=st,
+                       timeout=4000)
+        ok = (lane.halted == want_halt and lane.stretch_err == want_halt)
+        print("      stretch=%-6d halted=%-5s sticky=%-5s   %s"
+              % (st, lane.halted, lane.stretch_err,
+                 "ok" if ok else "*** expected halted=%s" % want_halt))
+        if not ok:
             rc = 1
+
+    # ⭐ AND THE REACTIVE RELEASE IS NOW VISIBLE PER DISPATCH, which is what the
+    # A2 modelling needs: EVERY post-HIGH dispatch on a clocked lane is
+    # released by the observed rise, not just the COLLECT one, so they all
+    # carry the sync jitter and a minimum separation of ~L_SYNC.
+    lane = Lane()
+    d = run_action(lane, 0, SHIFTIN, 8, peer_bits=[0] * 8)
+    nreact = sum(1 for x in d if x.reactive)
+    ok = (nreact == 8)
+    print("    %-52s %s"
+          % ("every post-HIGH dispatch is a REACTIVE release (8 of 17)",
+             "ok (%d)" % nreact if ok else "*** %d, expected 8" % nreact))
+    if not ok:
+        rc = 1
     return rc
 
 

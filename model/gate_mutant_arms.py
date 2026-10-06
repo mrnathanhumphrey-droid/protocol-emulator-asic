@@ -104,6 +104,17 @@ EXPECT = {
         "`pin_in[a_pin]` appeared verbatim at 745, 1502 and 1524, and removing "
         "the guard would have meant three separate edits -- an arm whose size "
         "tracks the number of copies rather than the size of the idea."),
+    "M_CK_NO_PARK": (2,
+        "ONE LINE IN EACH ARM: `ck_park_en` is a wire, so the mutant is `1'b0` "
+        "for `1'b1`. ⛔ WHAT IT BREAKS IS COMPLIANCE, not an assertion: without "
+        "the post-HIGH park the capture races the lane's own next dispatch, so "
+        "a peer holding SCL longer than that gap LOSES A BIT. ⭐ MEASURED BOTH "
+        "WAYS, which is what makes this evidence -- with the mutant a 500-cycle "
+        "SCL hold sets `clk_stretch_err` while a 50-cycle hold does not; "
+        "without it, 5000 cycles lose nothing. ⚠ Layer B of the bench watchdog "
+        "reports OK in every one of those runs, because the DISPATCH COUNT is "
+        "unchanged by a stretch -- which is the point of capturing on the rise, "
+        "and also why bit loss needs its own check and not a conformance one."),
     "M_CK_NO_ALTERNATE": (2,
         "ONE LINE IN EACH ARM. The next phase is a wire (`ck_norm`), so the "
         "mutant substitutes `ck_next = CK_LOW`. ⛔ WHAT IT BREAKS: the phase "
