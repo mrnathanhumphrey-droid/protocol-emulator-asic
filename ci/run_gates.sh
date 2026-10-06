@@ -103,6 +103,19 @@ GATES=(
   # every existing check, because Layer B compares dispatch COUNTS and a park
   # changes timing without changing a count.
   model/a2/gate_um10204.py
+  # ⛔⛔⛔ RULING R -- THE PORT PREMISE, AND IT IS HERE BECAUSE A ONE-LINE
+  # MUTANT SURVIVED EVERY OTHER GATE IN THIS FILE FOR AN ENTIRE ARC.
+  # `M_CK_HOLD_INVAL` invalidates a clocked lane's head slot on every HELD
+  # dispatch. A1 cannot see it (the PC does not advance, so the refill restores
+  # an IDENTICAL word), B cannot see it (a refill changes no dispatch count),
+  # and the coverage sweep cannot see it (the lines are covered either way).
+  # What it breaks is the premise `D* = N_LANES * L_REFILL` and every
+  # port-feasible cell in Theorem 3 are COMPUTED FROM: that a held clocked
+  # dispatch owes no refill. Measured 16-17 refills per action against a
+  # derived bound of SPL = 2.
+  # ⇒ The suite read 20 of 20 while that premise was unchecked. This is the
+  #   gate that ends it, and it is RED without `test/refill_run.sh`'s data.
+  model/gate_port_demand.py
   # ⭐ JOINED THE LIST when it took the RX lane-field width check. That check
   # guards against a received byte being attributed to the WRONG LANE if
   # `N_LANES` ever outgrows the explicit [2:0] on `e_rx_lane` -- and it lives
@@ -177,6 +190,13 @@ can_run() {
     model/a2/gate_um10204.py)
       [ -n "${PE_PHASES_JSON:-}" ] && [ -f "${PE_PHASES_JSON:-}" ] \
         || { echo "no phase measurement at PE_PHASES_JSON"; return 1; } ;;
+    # ⛔⛔ RULING R, AND THE STRICTEST VERSION OF THIS RULE. `M_CK_HOLD_INVAL`
+    # survived every gate in this repo for a whole arc, so the premise `D*`
+    # rests on was unchecked while the suite read 20 of 20. A version of this
+    # gate that skipped on a missing measurement would restore exactly that.
+    model/gate_port_demand.py)
+      [ -n "${PE_REFILL_JSON:-}" ] && [ -f "${PE_REFILL_JSON:-}" ] \
+        || { echo "no refill measurement at PE_REFILL_JSON"; return 1; } ;;
   esac
   return 0
 }
@@ -444,6 +464,51 @@ if [ -z "${PE_PHASES_JSON:-}" ] && [ "${PE_SKIP_PHASES:-0}" != "1" ]; then
     && export PE_PHASES_JSON="$ROOT/probe_phases/phases.json"
 fi
 [ -n "${PE_PHASES_JSON:-}" ] && echo "  PE_PHASES_JSON=$PE_PHASES_JSON"
+
+# ---------------------------------------------------------------------------
+# THE PORT-DEMAND MEASUREMENT (ruling R), which `gate_port_demand.py` judges.
+# ---------------------------------------------------------------------------
+# ⛔⛔ IT BUILDS TWO ARMS ON PURPOSE -- clean and `M_CK_HOLD_INVAL` -- and the
+# mutant one is the reason the gate is worth running. That mutation survived
+# EVERY gate in this file for an entire arc: the PC does not advance during a
+# hold, so the refill restores an identical word and A1 sees nothing, while a
+# refill changes no dispatch count so B sees nothing either. A clean arm alone
+# would be a check nobody has seen fail, on the premise `D*` is computed from.
+# ⚠ ~80s for two Verilator builds, declared, same as the phase measurement.
+if [ -z "${PE_REFILL_JSON:-}" ] && [ "${PE_SKIP_REFILL:-0}" != "1" ]; then
+  echo
+  echo "  --- port-demand measurement (R) ---"
+  RF_OK=0
+  if command -v verilator >/dev/null 2>&1 || [ -n "${PE_VERILATOR:-}" ]; then
+    if bash test/refill_run.sh "$ROOT/probe_refill"; then RF_OK=1; fi
+  elif command -v wsl.exe >/dev/null 2>&1; then
+    echo "  verilator is not on PATH; delegating the measurement to WSL"
+    RWRAP="$ROOT/probe_ci_refill.sh"
+    {
+      echo '#!/bin/bash'
+      echo 'cd "$(dirname "$0")" || exit 1'
+      echo "export PE_VERILATOR=\"${PE_VERILATOR_WSL:-/opt/oss-cad-suite-2026-09-30/bin/verilator}\""
+      echo 'bash test/refill_run.sh "$PWD/probe_refill"'
+    } > "$RWRAP"
+    RWSLROOT="$(wsl_root "$ROOT")"
+    if ! MSYS_NO_PATHCONV=1 wsl.exe -e test -f "$RWSLROOT/probe_ci_refill.sh"
+    then
+      echo "  *** WSL cannot see $RWSLROOT/probe_ci_refill.sh"
+      echo "      (converted from $ROOT). Fix the path mapping rather than"
+      echo "      skipping the port-demand gate."
+    elif MSYS_NO_PATHCONV=1 wsl.exe -e bash "$RWSLROOT/probe_ci_refill.sh"; then
+      RF_OK=1
+    else
+      echo "  *** the WSL port-demand measurement failed -- the gate is RED"
+    fi
+  else
+    echo "  *** neither verilator nor wsl.exe is available, so port demand"
+    echo "      cannot be measured. The gate is RED rather than skipped."
+  fi
+  [ "$RF_OK" = "1" ] && [ -f "$ROOT/probe_refill/refill.json" ] \
+    && export PE_REFILL_JSON="$ROOT/probe_refill/refill.json"
+fi
+[ -n "${PE_REFILL_JSON:-}" ] && echo "  PE_REFILL_JSON=$PE_REFILL_JSON"
 
 # ---------------------------------------------------------------------------
 # run them

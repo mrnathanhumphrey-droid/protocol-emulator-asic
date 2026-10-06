@@ -28,6 +28,43 @@
  */
 `include "test/clocked_bounds.vh"
 
+/* ⛔⛔⛔ THE PORT-DEMAND BOUND (ruling R): **ONE REFILL PER SLOT** per retired
+ * clocked action, which is `SPL`. Amendment A1 says a HELD clocked dispatch
+ * owes no refill -- `ST_WB`'s hold arm skips the PC advance, the invalidation
+ * and the buffer swap -- so inside one action's window a lane can take:
+ *
+ *   * at most ONE head refill, the one the PREVIOUS action's retire triggered,
+ *     landing just inside this window; and
+ *   * at most ONE spare fill, because `want_fetch` fills the spare when it is
+ *     empty and it then stays valid until the head retires and the swap
+ *     consumes it.
+ *
+ * ⇒ `SPL` slots, at most one fill each: the bound is the BUFFER DEPTH, not a
+ *   number fitted to an image. It is read from `dut.u_eng.SPL` so it follows
+ *   the design -- and becomes 1 automatically on an `SPL = 1` build, which
+ *   `run_param_points.py` really does run.
+ *
+ * ⛔⛔ THE FIRST VERSION OF THIS BOUND WAS 1, MEASURED ON TOO NARROW AN IMAGE
+ * SET, AND THAT IS RECORDED RATHER THAN QUIETLY BUMPED. `ckod` (184 actions)
+ * and `corpus_i2c` (72) each have exactly ONE live clocked lane, and both show
+ * worst = 1. `corpus_all5` has FIVE live lanes and shows worst = **2**: under
+ * contention the speculative spare fill really does land inside a clocked
+ * action's window. ⚠ SAME CATEGORY ERROR AS THREE ALREADY IN THIS SESSION'S
+ * LEDGER -- a bound measured on the shipped single-lane case and then applied
+ * to the 5-lane stress image. The fix is to DERIVE it from the depth, which
+ * also explains both numbers instead of accommodating one.
+ *
+ * ⚠ STILL TIGHT, and declared: `corpus_all5` touches the bound exactly, so
+ * anything that adds a refill to a clocked window goes RED here. That is a
+ * request to re-derive `D*`, never a licence to raise this.
+ *
+ * ⛔ `M_CK_HOLD_INVAL` IS THE MUST-FIRE: it invalidates the head on every held
+ * dispatch, so a clocked byte takes a refill PER DISPATCH -- measured 16, 16
+ * and 17 against a bound of 2. That mutant survives Layer A1 (the PC does not
+ * move, so the refill restores an identical word) and Layer B (a refill changes
+ * no dispatch count). This is the layer that sees it.
+ */
+
 integer cb_n   [0:7];      // dispatches on the current action
 integer cb_pc  [0:7];
 integer cb_op  [0:7];
@@ -88,6 +125,99 @@ always @(posedge dut.clk) begin
                                 dut.u_eng.a_op === 3'd2)) ? 1 : 0;
     end else begin
       cb_n[dut.u_eng.cur] = cb_n[dut.u_eng.cur] + 1;
+    end
+  end
+end
+
+/* =======================================================================
+ * R -- PORT DEMAND PER RETIRED ACTION, which is the premise `D*` rests on.
+ *
+ * ⛔⛔ THE HOLE THIS CLOSES, AND IT WAS FOUND BY A MUTANT THAT SURVIVED
+ * EVERYTHING. `M_CK_HOLD_INVAL` invalidates the lane's head slot on every HELD
+ * clocked dispatch. Layer A1 cannot see it: the PC does NOT advance during a
+ * hold, so the prefetch re-reads the SAME address and restores an IDENTICAL
+ * word -- every delay the park reads is still correct, and A1's subject is the
+ * head-slot WORD. Layer B cannot see it either, because a refill changes no
+ * dispatch count.
+ * ⇒ WHAT IT BREAKS IS AMENDMENT A1's **PORT PREMISE**: a refill per DISPATCH
+ *   instead of per ACTION. `D* = N_LANES * L_REFILL` and every port-feasibility
+ *   cell in Theorem 3 assume a held clocked dispatch owes NO refill. With the
+ *   mutant a single clocked byte costs up to 16 refills instead of one, and
+ *   re-dispatch counts moved 1229 -> 1061 on `corpus_i2c` -- so the schedule
+ *   the whole A2 argument quotes is for a different machine.
+ * ⚠ SO THE TREE WAS GREEN ON A PREMISE NOTHING CHECKED. That is the reason
+ *   this layer exists and the reason it is NOT optional on clocked arms.
+ *
+ * THE OBSERVABLE, read from the engine rather than inferred: one refill is one
+ * cycle in `pst == P_CAP` with `pl` naming the lane (`P_CAP` is where
+ * `l_act[fix]` is written and `l_actv[fix]` set). Counted per lane over the
+ * window Layer B already delimits -- from the dispatch that starts an action to
+ * the one that starts the next.
+ *
+ * ⛔ THE BOUND IS **MEASURED, THEN ENFORCED**, and the order matters. The
+ * verdict is gated on `+RBOUND`, exactly as A2's is, so the first runs REPORT
+ * the distribution and a number nobody has derived is never asserted. What the
+ * design should give is at most ONE refill per clocked action -- the retire's
+ * own invalidation, which belongs to the NEXT action -- plus at most one
+ * speculative SPARE fill at SPL = 2.
+ * ⚠ `P_CAP` IS COUNTED FOR **EVERY** LANE, not just clocked ones, because the
+ * window is per lane and a refill for lane 2 says nothing about lane 0's
+ * action. A single shared counter would have made every multi-lane arm look
+ * like a violation.
+ * ======================================================================= */
+integer cr_ref  [0:7];     // refills seen inside the current action's window
+integer cr_max  [0:7];     // the worst window this lane has shown
+integer cr_checks, cr_fails, cr_worst, cr_bound, cr_k;
+
+initial begin
+  for (cr_k = 0; cr_k < 8; cr_k = cr_k + 1) begin
+    cr_ref[cr_k] = 0;  cr_max[cr_k] = -1;
+  end
+  cr_checks = 0;  cr_fails = 0;  cr_worst = -1;
+  // ⛔⛔ THE DEFAULT IS **ENFORCED**, not off, and that is the whole point of
+  // ruling R: the tree was green on this premise because nothing checked it, so
+  // a layer that defaults to report-only would reproduce the hole it closes.
+  // `+RBOUND=<n>` only RAISES it for a lane set that legitimately needs more,
+  // and `-1` disables it explicitly for a measurement run.
+  // ⚠ THIS FILE IS INCLUDED BY THIRTEEN BENCHES, so the plusarg it reads is
+  // declared once in `benchset.SHARED_INCLUDE_DEFAULTS` with its reason --
+  // the mechanism built for `+A2BOUND` after the scanner's digit blind spot.
+  // ⭐ THE DEFAULT IS THE DESIGN'S OWN BUFFER DEPTH, read hierarchically, so
+  // the bound cannot drift from `SPL` and needs no second copy here.
+  if (!$value$plusargs("RBOUND=%d", cr_bound)) cr_bound = dut.u_eng.SPL;
+end
+
+always @(posedge dut.clk) begin
+  if (dut.rst_n !== 1'b1) begin
+    for (cr_k = 0; cr_k < 8; cr_k = cr_k + 1) cr_ref[cr_k] = 0;
+  end else begin
+    // ---- count a refill against the lane it is for ----------------------
+    if (dut.u_eng.pst === 3'd3 && dut.u_eng.pl < 8)
+      cr_ref[dut.u_eng.pl] = cr_ref[dut.u_eng.pl] + 1;
+    // ---- close the window on the same event Layer B uses ----------------
+    if (dut.u_eng.st === 2'd2 && dut.u_eng.cur < 8) begin
+      if (dut.u_eng.a_op === 3'd7 && dut.u_eng.a_lvl === 1'b0) begin
+        cr_ref[dut.u_eng.cur] = 0;                  // the chaining re-arm
+      end else if (cb_pc[dut.u_eng.cur] !== dut.u_eng.l_pc[dut.u_eng.cur]) begin
+        // ⭐ `cb_ck` IS THE CLOSING action's class, set when its window opened,
+        // so this counts the action that just ENDED rather than the one
+        // starting -- the off-by-one that would have attributed a clocked
+        // action's refills to its unclocked successor.
+        if (cb_pc[dut.u_eng.cur] !== -1 && cb_ck[dut.u_eng.cur]) begin
+          cr_checks = cr_checks + 1;
+          if (cr_checks == 1)
+            $display("  clocked_conform[R]: live -- counting refills per retired clocked action");
+          if (cr_ref[dut.u_eng.cur] > cr_max[dut.u_eng.cur])
+            cr_max[dut.u_eng.cur] = cr_ref[dut.u_eng.cur];
+          if (cr_ref[dut.u_eng.cur] > cr_worst)
+            cr_worst = cr_ref[dut.u_eng.cur];
+          if (cr_bound >= 0 && cr_ref[dut.u_eng.cur] > cr_bound) begin
+            $display("*** FAIL clocked_conform[R]: lane %0d retired a clocked op=%0d cnt=%0d after %0d dispatch(es) having taken %0d PREFETCH REFILL(S), over the bound of %0d -- a held clocked dispatch owes no refill, and Amendment A1's port premise (and D*) assume it does not", dut.u_eng.cur, cb_op[dut.u_eng.cur], cb_cnt[dut.u_eng.cur], cb_n[dut.u_eng.cur], cr_ref[dut.u_eng.cur], cr_bound);
+            cr_fails = cr_fails + 1;
+          end
+        end
+        cr_ref[dut.u_eng.cur] = 0;
+      end
     end
   end
 end
@@ -371,6 +501,15 @@ task cb_report;
       $display("*** FAIL clocked_conform[A2]: %0d of %0d releases later than d + %0d after the observed rise", cg_afails, cg_achecks, CK_GAP_SLACK);
     else
       $display("  clocked_conform[A2]: ok -- %0d release(s) within d + %0d of the observed rise, widest %0d", cg_achecks, CK_GAP_SLACK, cg_awidest);
+    // ⭐ R REPORTS ITS OWN NON-VACUITY like every other layer here: zero checks
+    // means this program retired no clocked action at all, which is true of the
+    // unclocked and refusal images and must read as "not exercised".
+    if (cr_checks == 0)
+      $display("  clocked_conform[R]: 0 retired clocked actions in this program -- NOT EXERCISED");
+    else if (cr_fails != 0)
+      $display("*** FAIL clocked_conform[R]: %0d of %0d retired clocked actions took more than %0d prefetch refill(s); worst %0d", cr_fails, cr_checks, cr_bound, cr_worst);
+    else
+      $display("  clocked_conform[R]: ok -- %0d retired clocked action(s), worst %0d refill(s) against a bound of %0d", cr_checks, cr_worst, cr_bound);
     if (cb_fails != 0)
       $display("*** FAIL clocked_conform: %0d action(s) disagreed with the model", cb_fails);
     else if (cb_acts != 0)

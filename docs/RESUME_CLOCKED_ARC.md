@@ -16,15 +16,35 @@ including commit and push.
 | H1–H5 + the clamp | `2120012` | SDA hold 15 cy, +30 flops, `t_HD;DAT` 0 → 15 |
 | A1 / A2 | `e1fa642` | head-slot stability; gap bounded both sides |
 | Ruling P | `80ff8d7` | pad-override explanation; P4 control re-established |
-| Ruling D (D1, D3–D6) + P5 + D2's static half | *this commit* | `d <= SDA_HOLD` refused in silicon and in the assembler; +0 flops |
+| Ruling D (D1, D3–D6) + P5 + D2's static half | `1f00768` | `d <= SDA_HOLD` refused in silicon and in the assembler; +0 flops |
+| the CI red local could not see | `d5ae9bc` | `tb_trace`'s 64-byte filename buffer; **CI green both workflows** |
+| Ruling R — the port premise | *this commit* | Layer R + `gate_port_demand`; `M_CK_HOLD_INVAL` is no longer a survivor |
 
-20 of 20 gates, **26 uncovered (all classified, and the same 26 points as at
-`80ff8d7` — `gate_coverage.py`'s diff is 27 anchor moves and nothing else)**,
-37 arms / 14 benches.
+**21 of 21 gates** (ruling R added `model/gate_port_demand.py`), 26 uncovered
+(all classified, the same 26 points as at `80ff8d7`), 37 arms / 14 benches.
+
+⛔ **"Green" means CI on the exact SHA, both workflows, with the run ID written
+here** (ruling CI1). A local pass is reported as local. `d5ae9bc` was the first
+`test`-workflow green since `752fd7a`.
 
 ---
 
-## OWED — in this order
+## OWED — Wilson's order
+
+`R` ✅ → **`S`** → `Q2 + CI3` → `K (+U)` → `E` → sigrok re-certification →
+FRAM write + random read.
+
+| item | what | state |
+| --- | --- | --- |
+| **R** | port-demand invariant | ✅ landed, see below |
+| **S** | the A2 bound, per program; also supplies D2's mode floor | **NEXT** |
+| **Q2** | `gate_corpus_trace`: answered; fix = run it + repair the build | owed |
+| **CI3** | every bench's `8*64-1` filename buffer + a >128-byte long-path arm | owed |
+| **K** | ACK hold: every driven SDA transition through `SDA_HOLD`, + a transition-class coverage table | owed |
+| **U** | widen the refusal to the unclocked open-drain data drive; retire the clamp | owed, with K |
+| **CI2** | retro: confirm the `tb_trace` path gate was the ONLY failure on `6abb6dd..e1fa642` | owed |
+| **E** | swallowed-exception audit | owed |
+
 
 ### ~~D — refuse `d <= SDA_HOLD`~~ → LANDED, except D2's mode floor
 
@@ -63,19 +83,29 @@ See `docs/SPEC_V4_CLOCKED_HIGH_PHASE.md` §13 for the full trace. Summary:
 * **P5** — `corpus.PAD_COLLISION`: `ckfive` lane 3 and `ckod` lane 3, the only
   two, each with the colliding pin named. Scoped to lanes that can **drive**.
 
-### R — the port-demand invariant (⛔ before ACK)
+### ~~R — the port-demand invariant~~ → LANDED
 
-`M_CK_HOLD_INVAL` **survives every gate**. A1 cannot see it: the PC does not
-advance during a hold, so the prefetch re-reads the same address and restores
-an identical word. What it breaks is **Amendment A1's port premise** — a refill
-per *dispatch* instead of per *action*, measured as re-dispatch counts
-1229 → 1061 on `corpus_i2c`. `D*` rests on that premise, so until R lands a
-design that doubles port demand passes clean.
+`clocked_conform.vh` **Layer R** counts prefetch refills (`pst == P_CAP` with
+`pl` naming the lane) per **retired clocked action**, over the window Layer B
+already delimits, attributed to the action that **ended** via `cb_ck`.
+`test/refill_run.sh` + `model/gate_port_demand.py` adjudicate it; the gate is in
+`ci/run_gates.sh` and is **RED without the measurement**. See SPEC §14.
 
-⇒ Need an invariant counting **refills per retired action** on a clocked lane
-(expect 1, not one per dispatch), with `M_CK_HOLD_INVAL` as its must-fire.
-Candidate observables: the prefetch FSM's `P_REQ`/`P_CAP` transitions per lane
-against `act_retire`.
+* **Bound = `dut.u_eng.SPL`**, derived: at most one fill per slot (the previous
+  retire's head refill landing just inside the window, plus one speculative
+  spare fill). **Enforced by default** — unlike A2's, because it is a
+  structural property of the buffer depth rather than a lane-set bound.
+* **Measured:** clean 1 / 1 / **2** on `ckod` / `corpus_i2c` / `corpus_all5`
+  (632 retired actions); `M_CK_HOLD_INVAL` **16 / 16 / 17**. Also 1 on `ckfive`
+  (310 actions) and `ckhold_over` (196), in all three rand-reset modes.
+* ⚠ **`corpus_all5` touches the bound exactly** — no slack. A red here is a
+  request to re-derive `D*`, never a licence to raise the constant.
+* ⛔ **The first bound was 1 and was wrong**: measured on the two single-clocked-
+  lane images and applied to the 5-lane stress image, where the spare fill
+  lands inside the window. Same category error as three others in this ledger;
+  fixed by deriving from the depth, which explains both numbers.
+* `M_CK_HOLD_INVAL` is **no longer a characterised survivor** — its entry in
+  `gate_mutant_arms.py` says so.
 
 ### ⛔ NEW, AND IT CHANGES ACK — the clocked SHIFTIN's SDA release is not held
 
@@ -188,15 +218,20 @@ says a green here is a green there — that claim held only because nobody looke
 
 ## Open, accepted or unexplained
 
-* ⛔ **`test/gate_corpus_trace.py` CANNOT BUILD**, and has not been able to
-  since `7a672b0`: `final procedures cannot enable/call tasks` on
-  `test/progress.vh:214` and `test/clocked_conform.vh:382` under iverilog. It is
-  the **two-simulator** corpus comparison and the thing that turns
-  `corpus.py`'s `must move` preconditions from claims into checks. It is **not**
-  in `ci/run_gates.sh`, so 20 of 20 is green without it. ⇒ The corpus at
-  `d = 70` is certified by the Verilator sweep (3 rand-reset modes, no
-  `*** FAIL`), the loader audit and `measure_phases` — **not** by the iverilog
-  cross-check. Pre-existing, not from ruling D, and owed.
+* ⛔⛔ **`gate_corpus_trace` — Q2 ANSWERED, FIX ORDERED AFTER S.** It is **not
+  in the gate list and nothing runs it**: `GATES` does not contain it and no
+  `.sh`/`.yml` invokes it. So 20 of 20 never included it — the suite was not
+  passing *over* a broken gate, it was never asking. **It is also not
+  fail-open:** on a build failure it prints `*** iverilog build FAILED` and
+  `return 1`, real exit code **1**. ⛔ My earlier `RC=0` was my own error — `$?`
+  read after a pipe into `tail`, the **vacuous `$?`** mistake from earlier in
+  this same session, repeated. ⇒ The real defect is **a gate that correctly
+  reports RED and that nobody runs** — a fifth instance of the class, in a new
+  shape. Fix = add it to the list (goes red at once) **and** repair the build
+  (`final procedures cannot enable/call tasks`, `progress.vh:214`,
+  `clocked_conform.vh:382`). Until then the corpus at `d = 70` is certified by
+  the Verilator sweep, the loader audit and `measure_phases` — **not** by the
+  iverilog cross-check.
 * **The unclocked `ck_hold_fits` clamp** — still live, still reachable by
   `build_i2cframe(d=12)`. Retiring it means widening D1 past `ck_act`: a scope
   decision (D3).

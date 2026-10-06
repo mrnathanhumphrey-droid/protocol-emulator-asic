@@ -807,3 +807,140 @@ running on an undeclared default.
   their zero-hold samples come from the clocked SHIFTIN release above. Until
   that is fixed, a `min >= 15` verdict on those arms would be a verdict about
   the wrong transition.
+
+---
+
+## 14. Ruling R — the port premise, which nothing checked
+
+`M_CK_HOLD_INVAL` — **one line**, invalidating a clocked lane's head slot on
+every *held* dispatch — **survived every gate in this repo for an entire arc**,
+while the suite read 20 of 20.
+
+| layer | why it cannot see the mutant |
+| --- | --- |
+| A1 (head-slot word) | the PC does **not** advance during a hold, so the prefetch re-reads the **same address** and restores an **identical word**. Every delay the zero-flop rebase reads is still correct. |
+| B (dispatch counts) | a refill changes no dispatch count. |
+| coverage sweep | the lines it touches are covered either way. |
+
+What it breaks is **Amendment A1's port premise**: a refill per *dispatch*
+instead of per *action*. `D* = N_LANES × L_REFILL` and every port-feasible cell
+in Theorem 3 are computed **from** that premise, so under the mutant the
+schedule the whole A2 argument quotes is for a different machine. Re-dispatch
+counts moved 1229 → 1061 on `corpus_i2c`.
+
+⇒ **That is the finding.** Not that a mutant survived — that the premise a
+published bound rests on was unchecked, and the only reason it looked fine is
+that no layer was measuring it.
+
+### The observable
+
+One refill is one cycle in `pst == P_CAP` with `pl` naming the lane — where
+`l_act[fix]` is written and `l_actv[fix]` set. Counted **per lane**, over the
+window Layer B already delimits (the dispatch that starts an action to the one
+that starts the next), and attributed to the action that just **ended** via
+`cb_ck` — the off-by-one that would otherwise charge a clocked action's refills
+to its unclocked successor.
+
+A single shared counter would have made every multi-lane arm look like a
+violation, since a refill for lane 2 says nothing about lane 0's action.
+
+### The bound is `SPL`, derived — and the first version was wrong
+
+Inside one action's window a lane can take **at most one fill per slot**:
+
+* one **head** refill — the one the *previous* action's retire triggered,
+  landing just inside this window; and
+* one **spare** fill, because `want_fetch` fills the spare when empty and it
+  then stays valid until the head retires and the swap consumes it.
+
+⇒ `SPL` slots, one fill each. `clocked_conform.vh` reads **`dut.u_eng.SPL`**, so
+the bound follows the design and becomes 1 automatically on an `SPL = 1` build.
+
+⛔ **The first bound was `1`, measured on too narrow an image set, and it is
+recorded rather than quietly bumped.** `ckod` (184 actions) and `corpus_i2c`
+(72) each have exactly **one** live clocked lane and both measure 1. I set the
+constant from those two. `corpus_all5` has **five** live lanes and measures
+**2** — under contention the speculative spare fill really does land inside a
+clocked action's window.
+
+⚠ That is the **same category error** as three already in this session's
+ledger: a bound measured on the shipped single-lane case and applied to the
+5-lane stress image. Deriving it from the buffer depth explains *both* numbers
+instead of accommodating one.
+
+### Measured
+
+| arm | image | retired actions | worst refills | bound |
+| --- | --- | --- | --- | --- |
+| clean | `ckod` | 184 | 1 | 2 |
+| clean | `corpus_i2c` | 72 | 1 | 2 |
+| clean | `corpus_all5` | 376 | **2** | 2 |
+| `M_CK_HOLD_INVAL` | `ckod` | 184 | **16** | 2 |
+| `M_CK_HOLD_INVAL` | `corpus_i2c` | 108 | **16** | 2 |
+| `M_CK_HOLD_INVAL` | `corpus_all5` | 408 | **17** | 2 |
+
+632 retired clocked actions across the clean arms. The mutant costs a refill
+per dispatch, and a clocked byte is 16 dispatches — `gate_port_demand` requires
+a worst of **≥ 8** so a mutant that barely took effect cannot pass as a kill.
+
+Also checked on arms `refill_run.sh` does *not* measure, across all three
+rand-reset modes: `ckfive` (five push-pull clocked lanes) 310 actions worst 1;
+`ckhold_over` 196 worst 1; `corpus_all5` 2 in every mode. ⚠ **`corpus_all5`
+touches the bound exactly**, so there is no slack — anything that adds a refill
+to a clocked window goes red, and that is a request to re-derive `D*`, never a
+licence to raise the constant.
+
+### Enforced, not gated
+
+`+RBOUND` defaults to **`dut.u_eng.SPL`** and is **on**. A2's bound defaults to
+*off* because a lighter lane set's bound on a heavier program is unsound
+(ruling S) — R's is a per-action structural property of the buffer depth, so
+the same reasoning does not apply. A layer defaulting to report-only would have
+rebuilt the hole it closes. `+RBOUND` exists only to **raise** it, and no
+shipped arm passes it.
+
+Declared once in `benchset.SHARED_INCLUDE_DEFAULTS` — the mechanism built for
+`+A2BOUND` after the scanner's digit blind spot — because
+`clocked_conform.vh` is included by thirteen benches.
+
+### Why it is a script plus a gate
+
+`M_CK_HOLD_INVAL` is a `define`, and `benchset`'s arms carry plusargs and `-G`
+*parameters*; there is no define channel, and adding one to the coverage sweep
+would rebuild every bench for a mutation one layer reads. `test/refill_run.sh`
++ `model/gate_port_demand.py` follows the shape the clocked measurement already
+has (`phases_run.sh` + `gate_um10204`), and the gate is **RED without the
+measurement** rather than skipping — the strictest case of that rule in the
+file, since this is the premise that went unchecked while the suite was green.
+
+### What ruling R does NOT check
+
+* **It bounds refills per action, not `D*` itself.** `D*` is a
+  port-feasibility statement over a whole lane *set*; this layer checks the
+  per-action premise `D*` is computed from. A design respecting this bound that
+  still oversubscribed the port would pass here and fail
+  `gate_admissibility_1_6`.
+* **The spare fill is charged to whichever action is running**, so the bound is
+  per-*slot* rather than per-*cause*. A per-cause split needs the prefetch's own
+  reason exported — flops for a bound that already holds.
+
+### Answer to Q2 — `gate_corpus_trace`
+
+**It is not in the gate list, and nothing runs it.** `ci/run_gates.sh`'s
+`GATES` array does not contain it, and no `.sh` or `.yml` in the repo invokes
+it. So 20 of 20 never included it — the suite was not passing *over* a broken
+gate, it was never asking.
+
+**It is also not fail-open**, contrary to the hypothesis: on an iverilog build
+failure it prints `*** iverilog build FAILED` and `return 1`, and the real exit
+code is **1**. ⛔ My earlier report of `RC=0` was my own measurement error — I
+read `$?` after a pipe into `tail`, so I got `tail`'s status, not python's. That
+is the **vacuous `$?`** mistake from earlier in this session, made a second
+time, in the same session, while checking something else.
+
+⇒ So the defect is a different and arguably worse one: **a gate that correctly
+reports RED and that nobody ever runs.** A fifth instance of the class — not a
+check that cannot fire, but a check nothing listens to. Fixing it means adding
+it to the list (which goes red immediately) *and* repairing the iverilog build
+(`final procedures cannot enable/call tasks`, `progress.vh:214` and
+`clocked_conform.vh:382`). Ordered after S.

@@ -164,7 +164,17 @@ EXPECT = {
         "word -- the delay the park reads stays correct. What it really breaks "
         "is Amendment A1's PORT premise: a refill per DISPATCH instead of per "
         "ACTION, and re-dispatch counts moved 1229 -> 1061 on `corpus_i2c`. "
-        "`M_CK_HOLD_PCADV` is the arm that reaches the delay hazard."),
+        "`M_CK_HOLD_PCADV` is the arm that reaches the delay hazard. "
+        "⭐⭐ AND IT IS NO LONGER A SURVIVOR (ruling R). It survived every gate "
+        "in this repo for an entire arc -- A1 cannot see it, Layer B cannot "
+        "see it, and the coverage sweep covers its lines either way -- so the "
+        "suite read 20 of 20 while the premise `D*` is computed from went "
+        "unchecked. `clocked_conform.vh`'s Layer R counts PREFETCH REFILLS per "
+        "retired clocked action against a bound DERIVED from the buffer depth "
+        "(`dut.u_eng.SPL`, one fill per slot), and `model/gate_port_demand.py` "
+        "requires this mutant RED on all three clocked images: MEASURED 16, 16 "
+        "and 17 refills against a bound of 2, with the clean design at 1, 1 "
+        "and 2 over 632 retired actions."),
     "M_CK_REBASE_2D": (2,
         "ONE LINE IN EACH ARM, against the SAME `ck_rebase` wire its sibling "
         "mutates -- `rise + 2d` instead of `rise + d`. ⛔ IT IS THE 'TOO LATE' "

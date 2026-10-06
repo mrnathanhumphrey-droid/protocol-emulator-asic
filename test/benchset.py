@@ -89,6 +89,23 @@ NEEDS_NBYTES = {"tb_tx", "tb_half", "tb_i2c", "tb_csat", "tb_jlane", "tb_status"
 #: been running on an undeclared default the whole time. A guard that cannot
 #: see part of its subject passes about the part it can.
 SHARED_INCLUDE_DEFAULTS = {
+    # ⛔⛔ R's BOUND IS ENFORCED BY DEFAULT, unlike A2's. The whole finding of
+    # ruling R is that the tree was green on the port premise because NOTHING
+    # CHECKED IT, so a layer defaulting to report-only would rebuild the hole.
+    # The default is the design's own `SPL` (the buffer depth) and is
+    # DERIVED then CHECKED: at most one fill per slot. Worst 1 on the single-lane
+    # images (ckod 184 actions, corpus_i2c 72), 2 on corpus_all5 (five live lanes,
+    # so the spare fill lands inside a clocked window), 16-17 under
+    # `M_CK_HOLD_INVAL`.
+    # ⇒ `+RBOUND` exists to RAISE it for a lane set that legitimately needs
+    #   more, and no shipped arm passes it.
+    "RBOUND": ("test/clocked_conform.vh", "dut.u_eng.SPL (2 at the shipped depth), ENFORCED",
+               "refills per retired clocked action. Amendment A1 says a HELD "
+               "clocked dispatch owes no refill, and D* plus every "
+               "port-feasibility cell in Theorem 3 assume it. This is the only "
+               "layer that sees `M_CK_HOLD_INVAL`, which survives A1 (the PC "
+               "does not advance, so the refill restores an identical word) "
+               "and B (a refill changes no dispatch count)."),
     "A2BOUND": ("test/clocked_conform.vh", 0,
                 "A2's upper bound is ENFORCED only on the lane set A2 models "
                 "(`ckod`, which supplies +A2BOUND=1). Every other bench "
