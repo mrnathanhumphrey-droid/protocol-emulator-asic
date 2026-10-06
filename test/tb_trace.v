@@ -498,6 +498,38 @@ module tb_trace;
 `include "test/clocked_conform.vh"
 `include "test/host_feed.vh"
 
+// ⭐⭐ D4's POSITIVE POINT: a clocked open-drain delay ONE CYCLE ABOVE
+// `SDA_HOLD` must RUN. D1's two refusing points run in `tb_pinrange`, where no
+// bus model is needed because a refused program never dispatches -- but this
+// one must get all the way through a byte, and an open-drain clocked lane
+// PARKS ON AN OBSERVED RISE. `tb_pinrange` holds `uio_in` at a constant
+// 8'hFF, so a released SCL reads high and never TRANSITIONS: `pin_rise` never
+// fires, the lane parks until the stretch-fault bound halts it, and the arm
+// would measure a hang. ⇒ It belongs here, in the bench that has `od_bus`.
+// ⛔⛔ AND IT IS READ **HERE** RATHER THAN IN `clocked_conform.vh`, which is
+// where the first version put it. That include is shared by THIRTEEN benches,
+// and `test/benchset.py` requires every plusarg a bench reads to be supplied
+// by one of that bench's own arms -- so a read in the include made twelve
+// unrelated benches depend on an undeclared default, and the gate said so
+// immediately. The verdict needs `cb_acts` from the include, so this block
+// sits after it.
+// ⛔ "IT RAN" IS ASSERTED ON RETIRED CLOCKED ACTIONS, never on an absent flag:
+// `config_err == 0` is also true of an engine that never started, which is the
+// vacuous pass this bench family has already reported once.
+integer d4_runs;
+initial if (!$value$plusargs("CKRUNS=%d", d4_runs)) d4_runs = 0;
+
+final begin
+  if (d4_runs != 0) begin
+    if (dut.u_eng.config_err !== 1'b0)
+      $display("*** FAIL tb_trace[D4]: config_err is SET on a program whose clocked delay is ABOVE SDA_HOLD -- the D1 refusal is too wide and rejects legal programs");
+    else if (cb_acts == 0)
+      $display("*** FAIL tb_trace[D4]: config_err is clear but NO clocked action retired, so 'it runs' is vacuous -- the lane never dispatched or is still parked");
+    else
+      $display("  tb_trace[D4]: ok -- %0d clocked action(s) retired with config_err clear at d = SDA_HOLD + 1", cb_acts);
+  end
+end
+
 endmodule
 
 `default_nettype wire

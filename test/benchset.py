@@ -73,6 +73,31 @@ NEEDS_NBYTES = {"tb_tx", "tb_half", "tb_i2c", "tb_csat", "tb_jlane", "tb_status"
                 "tb_fifo",
                 "tb_rxbw", "tb_trace", "tb_witness", "tb_pinrange"}
 
+#: ⛔⛔ PLUSARGS READ BY A **SHARED INCLUDE**, with their default declared ONCE.
+#: `test/clocked_conform.vh` is included by thirteen benches, so a plusarg read
+#: there is read by all thirteen -- and the rule above says a bench running on
+#: an undeclared default is a different run from the one the gates certify. The
+#: alternative is repeating `+A2BOUND=0` on 36 arms, which states the condition
+#: 36 times and lets 35 of them drift.
+#: ⇒ The DEFAULT is the declaration, and it lives here with its reason. Any
+#:   bench whose own arm supplies the plusarg overrides it, which is exactly
+#:   what `ckod` does with `+A2BOUND=1`.
+#: ⚠ WHY THIS TABLE EXISTS AT ALL -- IT IS A FINDING, NOT HOUSEKEEPING. The
+#: scanner's pattern was `[A-Z_]+`, which cannot match a name containing a
+#: DIGIT, so `A2BOUND` was invisible to it for a whole arc while `CKRUNS` was
+#: caught in one run. Widening the pattern turned up twelve benches that had
+#: been running on an undeclared default the whole time. A guard that cannot
+#: see part of its subject passes about the part it can.
+SHARED_INCLUDE_DEFAULTS = {
+    "A2BOUND": ("test/clocked_conform.vh", 0,
+                "A2's upper bound is ENFORCED only on the lane set A2 models "
+                "(`ckod`, which supplies +A2BOUND=1). Every other bench "
+                "MEASURES the same quantity and reports it without a verdict, "
+                "because a lighter lane set's bound applied to a heavier "
+                "program is not a sound check -- that is ruling S, still owed. "
+                "0 is therefore the correct default and not a placeholder."),
+}
+
 CONFIG = {
     # ⭐⭐ THE SPL = 1 ARM IS HERE BECAUSE COVERAGE ASKED FOR IT. The sweep's
     # first run left `pe_engine.v:867 else if (SPL == 1)` and the two
@@ -197,7 +222,23 @@ CONFIG = {
                  # gates dispatch engine-wide and the first refusal would
                  # stop the second from ever running.
                  ("ckdegen2", ["+IMG=test/ckdegen2_image.hex", "+NCYC=8000",
-                               "+MODE=3"])],
+                               "+MODE=3"]),
+                 # ⭐⭐ D4: THE SDA-HOLD BOUNDARY, THE TWO REFUSING POINTS.
+                 # One image each, for the same reason `ckdegen` is two
+                 # images: `config_err` gates dispatch ENGINE-WIDE, so two
+                 # refusals in one program means only the first ever runs.
+                 # ⛔ THE THIRD POINT (`SDA_HOLD + 1`, which must RUN) IS NOT
+                 # HERE AND THAT IS NOT AN OMISSION: an open-drain clocked
+                 # lane parks on an OBSERVED rise, and this bench holds
+                 # `uio_in` at a constant 8'hFF -- a released SCL reads high
+                 # but never TRANSITIONS, so the lane would park until the
+                 # stretch-fault bound halted it and the arm would measure a
+                 # hang. It runs in `tb_trace` (`+CKRUNS=1`) instead, which
+                 # has `od_bus`. The same reasoning put `ckod` there.
+                 ("ckhold_at", ["+IMG=test/ckhold_at_image.hex",
+                                "+NCYC=8000", "+MODE=4"]),
+                 ("ckhold_under", ["+IMG=test/ckhold_under_image.hex",
+                                   "+NCYC=8000", "+MODE=4"])],
     },
     "tb_i2c": {
         "srcs": ["test/fram_i2c.v"],
@@ -349,6 +390,40 @@ def corpus_arms():
                  # and reports it without a verdict -- see
                  # `clocked_conform.vh`'s A2 header.
                  "+A2BOUND=1"]))
+    # ⭐⭐ D4's POSITIVE POINT: `d = SDA_HOLD + 1` MUST RUN. It is here rather
+    # than in `tb_pinrange` because an open-drain clocked lane parks on an
+    # OBSERVED rise and needs `od_bus`'s pull-up to have a rise to observe --
+    # the same reason `ckod` is here. ⛔ WITHOUT THIS ARM the boundary is
+    # tested only from the refusing side, and a refusal that was too WIDE --
+    # one that rejected every clocked open-drain program -- would pass every
+    # other arm in ruling D. `+CKRUNS=1` asserts config_err clear AND at least
+    # one clocked action RETIRED, because the flag alone is also true of an
+    # engine that never started.
+    out.append(("ckhold_over",
+                ["+IMG=test/ckhold_over_image.hex", "+PEER=none",
+                 "+OUT=probe_cov_trace_ckhold_over.txt",
+                 "+NCYC=40000", "+SEED=1", "+ASYNC=0",
+                 "+STAYLOAD=0", "+SCLHOLD=0", "+CKRUNS=1"]))
+    # ⭐⭐ THE ZERO-HOLD BUILD, IN THE COVERAGE SWEEP (ruling D3). Removing the
+    # `ck_hold_fits` clamp from the clocked site left ONE branch reachable only
+    # at `SDA_HOLD == 0`: the open-drain side of the clocked direct-drive arm.
+    # With a hold in force, every clocked open-drain action now routes to the
+    # HOLD path -- D1 refuses the delays that used to be clamped past it -- so
+    # at the default parameter point that `else` cannot be taken.
+    # ⛔ MEASURED, NOT PREDICTED: the sweep reported it as the ONE new
+    # uncovered point after D1/D3 (27 against 26), which is exactly the kind of
+    # parameter-conditional branch `tb_smoke`'s `spl1` arm already exists for.
+    # ⇒ BUILDING THE PARAMETER POINT IS THE FIX, not a waiver. A written reason
+    #   would have said "unreachable at the default", which is true and is not
+    #   the same as unreachable -- and the zero-hold build is a build we
+    #   already ship a measurement arm for (`test/phases_run.sh`'s `hold0`), so
+    #   it was being simulated and simply never swept.
+    out.append(("ckod_hold0",
+                ["+IMG=test/ckod_image.hex", "+PEER=none",
+                 "+OUT=probe_cov_trace_ckod_hold0.txt",
+                 "+NCYC=200000", "+SEED=1", "+ASYNC=0",
+                 "+STAYLOAD=0", "+SCLHOLD=0"],
+                {"SDA_HOLD_NS": 0}))
     out.append(("corpus_i2c_sclhold",
                 ["+IMG=test/corpus_i2c.hex", "+PEER=i2c",
                  "+OUT=probe_cov_trace_i2c_sclhold.txt",
@@ -395,6 +470,25 @@ def discovered():
                   if re.fullmatch(r"tb.*\.v", n))
 
 
+def includes_file(bench: str, inc: str) -> bool:
+    """Does `bench`'s own source `include` this file?
+
+    ⛔ CHECKED RATHER THAN ASSUMED: `SHARED_INCLUDE_DEFAULTS` excuses a plusarg
+    only for the benches that actually pull the include in, so a bench that
+    reads the same name in its own body still has to supply it. The first draft
+    excused it everywhere, which would have let exactly the `CKRUNS` case this
+    table was written for slip through unnoticed.
+    """
+    p = os.path.join(HERE, bench + ".v")
+    if not os.path.isfile(p):
+        return False
+    with open(p, encoding="utf-8", errors="replace") as fh:
+        body = fh.read()
+    base = os.path.basename(inc)
+    return any(os.path.basename(m) == base
+               for m in re.findall(r'`include\s+"([^"]+)"', body))
+
+
 def plusargs_read(bench: str):
     """Every plusarg the bench's own source reads, including its includes."""
     names = set()
@@ -409,7 +503,18 @@ def plusargs_read(bench: str):
             srcs.append(p)
     for p in srcs:
         with open(p, encoding="utf-8", errors="replace") as fh:
-            for m in re.finditer(r'\$value\$plusargs\("([A-Z_]+)=', fh.read()):
+            # ⛔⛔ THE PATTERN WAS `[A-Z_]+` AND THAT WAS A BLIND SPOT, found
+            # by ruling D4 rather than by review. `+A2BOUND` CONTAINS A DIGIT,
+            # so the old pattern matched "A" and then needed "=", failed, and
+            # the scanner never saw it -- which is why `A2BOUND` was read by
+            # thirteen benches and supplied by one arm for a whole arc without
+            # this check saying a word. A plusarg named `CKRUNS` was caught
+            # instantly; the identical mistake under a digit was invisible.
+            # ⇒ A guard that cannot see part of its subject reports a pass
+            #   about the part it CAN see. Fourth instance of that class in
+            #   this project's ledger.
+            for m in re.finditer(r'\$value\$plusargs\("([A-Z_][A-Z0-9_]*)=',
+                                 fh.read()):
                 names.add(m.group(1))
     return names
 
@@ -602,6 +707,14 @@ def plan():
                 declared.add(a.lstrip("+").split("=")[0])
         if top in NEEDS_NBYTES:
             declared.add("NBYTES")
+        # ⭐ A SHARED INCLUDE'S PLUSARG IS DECLARED BY ITS DEFAULT, once, in
+        # `SHARED_INCLUDE_DEFAULTS` -- but ONLY for a bench that really does
+        # include the file. A blanket set would excuse a bench that reads the
+        # plusarg in its OWN source and supplies it nowhere, which is the case
+        # this check exists for.
+        for pa, (inc, _dflt, _why) in SHARED_INCLUDE_DEFAULTS.items():
+            if includes_file(top, inc):
+                declared.add(pa)
         unsupplied = plusargs_read(top) - declared
         for u in sorted(unsupplied):
             probs.append("%s reads +%s and no arm supplies it -- a bench "
@@ -708,6 +821,28 @@ def main() -> int:
                             "ok" if empty else "*** ACCEPTED"))
     if not empty:
         probs = list(probs) + ["an empty cocotb image scan reads as a pass"]
+    # ⛔⛔ PRICE THE PLUSARG SCANNER, because it was BROKEN for a whole arc and
+    # read as green. `A2BOUND` escaped it on a digit, so the two arms below are
+    # the digit case and the shared-include case -- the exact two holes the
+    # fix closed.
+    print()
+    print("  --- must-fire: the plusarg scanner sees what it claims to ---")
+    seen = plusargs_read("tb_trace")
+    for want, label in (("A2BOUND", "a plusarg with a DIGIT in its name"),
+                        ("CKRUNS", "a plusarg read in the bench's own body")):
+        ok = want in seen
+        print("    %-46s %s" % (label, "ok" if ok else "*** MISSED " + want))
+        if not ok:
+            probs = list(probs) + ["plusargs_read cannot see +%s" % want]
+    # ⛔ AND THE EXEMPTION MUST NOT BE BLANKET: a bench that does NOT include
+    # the shared file gets no free pass from its default.
+    inc = SHARED_INCLUDE_DEFAULTS["A2BOUND"][0]
+    scoped = includes_file("tb_trace", inc) and not includes_file("tb_verdict",
+                                                                  inc)
+    print("    %-46s %s" % ("the shared-include excuse is scoped to includers",
+                            "ok" if scoped else "*** NOT SCOPED"))
+    if not scoped:
+        probs = list(probs) + ["SHARED_INCLUDE_DEFAULTS is applied blanket"]
     print("  BENCH SET: %s" % ("ok" if not probs else "FAILED"))
     return 1 if probs else 0
 

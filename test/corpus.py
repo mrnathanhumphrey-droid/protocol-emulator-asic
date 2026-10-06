@@ -53,6 +53,7 @@ column so peer-driven activity is compared at all rather than being invisible.
 
 from __future__ import annotations
 
+import glob
 import os
 import re
 import sys
@@ -66,12 +67,19 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(ROOT, "model", "a2"))
+sys.path.insert(0, os.path.join(ROOT, "model"))
+# ⛔ ONE IMAGE DECODER, TOO. `walk`/`load` already exist in
+# `model/gate_degenerate_fields.py` and are the only implementation; a second
+# decoder here would be the duplicated-unpacker shape this project refuses on
+# the ENCODER side, with the same failure mode -- two readers of one layout
+# that drift and both look right.
+import gate_degenerate_fields as dgf      # noqa: E402
 
 # ⛔ ONE ENCODER. `hdr`/`act` are IMPORTED, never re-implemented here: two
 # copies of a bit-packer is the exact failure `lane_digest` exists to catch,
 # and a corpus encoded by a second builder would be a different ISA.
 from make_smoke_image import (            # noqa: E402
-    ACT_BASE, ACT_BYTES, AW, HDR_BYTES, N_LANES,
+    ACT_BASE, ACT_BYTES, AW, D_FM_SHIPPABLE, HDR_BYTES, N_LANES,
     OP_ARM, OP_LEVEL, OP_READBIT, OP_REARM, OP_SHIFT, OP_SHIFTIN, OP_START,
     SELF_CLOCKED,
     OP_STOP, PIN_NONE, act, hdr,
@@ -241,8 +249,19 @@ def _assemble(seqs, headers_spec, park_at, queues=None):
     return img
 
 
-def build_i2c(d: int = 9):
+def build_i2c(d: int = D_FM_SHIPPABLE):
     """I2C on the OPEN-DRAIN uio pins, with the I2C FRAM peer in the loop.
+
+    ⛔⛔ THE DELAY WAS 9 AND IS NOW `D_FM_SHIPPABLE` (ruling D5), AND THE CHIP
+    NO LONGER RUNS IT AT 9. D1 refuses a clocked open-drain action with
+    `d <= SDA_HOLD`, so at d = 9 this program sets `config_err` on its first
+    clocked SHIFT and the engine halts: MEASURED as ZERO SCL transitions in
+    60,000 cycles, against 2,667 at d = 16. The old delay was never a legal
+    I2C delay -- 9 cycles is a 2.7 MHz clock, above every mode in UM10204 --
+    and the clamp that used to make it merely non-compliant is gone.
+    ⚠ IT COSTS SIM TIME AND COVERAGE REACH, which is reported rather than
+    absorbed: the bit period goes from 24 cycles to 146, so a fixed `+NCYC`
+    buys ~6x fewer transactions. See `docs/SPEC_V4_CLOCKED_HIGH_PHASE.md`.
 
     ⭐ THIS IS THE PROGRAM THAT MOVES `uio_oe`. Open-drain never drives high:
     the engine holds `pin_out = 0` and modulates `pin_oe = ~level`, so a 1 in
@@ -366,12 +385,25 @@ def build_uart_rx(d: int = 11, timeout: int = 300):
                  "uio_in": True, "od_pins": (P_SCL,)}
 
 
-def build_all5(d: int = 9):
+def build_all5(d: int = 9, d0: int = D_FM_SHIPPABLE):
     """All five lanes live at once -- pin-feasible under the two-bank ruling.
 
     ⭐ `bank_need` for the full set is `(8, 4)`: both banks exactly full. This
     is the program that exercises the scheduler WITH the protocol pins moving,
     rather than the opcode-coverage census that moves only `uo_out`.
+
+    ⛔⛔ TWO DELAYS, AND THE SPLIT IS THE POINT (ruling D5). D1 refuses a
+    CLOCKED OPEN-DRAIN action with `d <= SDA_HOLD`, and lane 0 is the only lane
+    here that is both -- lane 1 names `PIN_NONE` as its clock so nothing it
+    does is clocked, lane 2 is push-pull, and lanes 3 and 4 run LEVEL/ARM/
+    READBIT only. ⇒ Lane 0 moves to a mode-legal `d0` and the OTHER FOUR STAY
+    AT 9, because this image's job is SCHEDULER CONTENTION: raising all five to
+    70 would cut the dispatch rate ~7x and quietly turn the stress image into a
+    relaxed one. The asymmetry (70 against 9..13) is also a harder EDF mix than
+    the arithmetic-progression periods it replaces.
+    ⚠ MEASURED, NOT ASSUMED, that lane 0 was the only one refused: at the old
+    `d = 9` this program produced ZERO SCL transitions on lane 0's clock pin in
+    60,000 cycles.
     """
     # ⛔⛔ LANES 0 AND 2 ARE THE OTHER TWO OF THE FOUR SELF-CLOCKED SITES, and
     # this builder has its OWN sequences rather than reusing `build_i2c` /
@@ -384,11 +416,11 @@ def build_all5(d: int = 9):
     # `clk_real` is false and its `level = 1` keeps the old meaning. It stays
     # exactly as it was -- which is the UART/SPI-target case the ruling asked
     # be defined, visible here in a program.
-    s_i2c = [(OP_START, P_SDA, 0, d),
-             (OP_SHIFT, P_SDA, SELF_CLOCKED, d, 7),     # a whole byte
-             (OP_SHIFTIN, P_SDA, SELF_CLOCKED, d, 1),   # the ACK slot
-             (OP_STOP, P_SDA, 1, d),
-             (OP_REARM, 0, 1, d)]
+    s_i2c = [(OP_START, P_SDA, 0, d0),
+             (OP_SHIFT, P_SDA, SELF_CLOCKED, d0, 7),     # a whole byte
+             (OP_SHIFTIN, P_SDA, SELF_CLOCKED, d0, 1),   # the ACK slot
+             (OP_STOP, P_SDA, 1, d0),
+             (OP_REARM, 0, 1, d0)]
     s_tgt = [(OP_SHIFT, P_T_MISO, 1, d + 1), (OP_LEVEL, P_T_MISO, 0, d + 1),
              (OP_REARM, 0, 1, d + 1)]
     s_mst = [(OP_LEVEL, P_M_CS, 0, d + 2),
@@ -402,7 +434,7 @@ def build_all5(d: int = 9):
              (OP_REARM, 0, 1, d + 4)]
     seqs = [(0, s_i2c), (1, s_tgt), (2, s_mst), (3, s_tx), (4, s_rx)]
     spec = {
-        0: (P_SDA,    P_SCL,     MODE_OD, d,     2 * d,       3 * d),
+        0: (P_SDA,    P_SCL,     MODE_OD, d0,    2 * d0,      min(3 * d0, 255)),
         # lane 1 is the SPI TARGET: no clock to drive, so PIN_NONE. It read
         # `P_T_MISO` -- its own data pin -- so OP_SHIFT's clock write
         # overwrote every data bit. See `build_spi_target`.
@@ -486,6 +518,164 @@ CORPUS = {
     "corpus_all5":   (build_all5,       "all"),
 }
 """name -> (builder, the PEER wiring the bench must use for it)."""
+
+
+#: ⛔⛔ IMAGES WHOSE LANES COLLIDE WITH THE PAD OVERRIDE, declared BY NAME with
+#: the colliding LANES (ruling P5). `src/project.v` rebuilds `uio_oe[MISO_PIN]`
+#: from the SPI target's own release path --
+#:     uio_oe_run = (uio_oe_eng & ~(1 << MISO_PIN)) | (miso_oe_q << MISO_PIN)
+#: -- so a lane that drives pin 7 has its output enable REPLACED, and pin 6 is
+#: the CS **input** the release path reads. A lane on either is not measurable
+#: and its pin waveform is not its own.
+#: ⭐ THIS IS NOT A THEORY, IT IS WHY A CORRECTION WAS NEEDED. `ckfive` lane 3
+#: reported a modal t_HIGH of 434 against a programmed 120, and that number was
+#: briefly taken for a design finding before the override was identified. P4
+#: re-established the control on lane 0 (pins 0/1, which collide with nothing)
+#: and the record stood -- but the near-miss is the reason the collision is
+#: DECLARED now rather than left to be rediscovered.
+#: ⇒ An image with an undeclared collision is RED, and a declaration whose
+#:   image no longer collides is RED too: both mean the map and the programs
+#:   moved apart.
+#: ⚠ THESE ARE STRESS AND MEASUREMENT IMAGES, NOT SHIPPABLE CONFIGURATIONS.
+#: None of them is a corpus program and none claims the ruled placement; the
+#: lane sets exist to saturate the scheduler and to span `d`. Listing them is
+#: how that stays true on purpose instead of by accident.
+PAD_COLLISION = {
+    "ckfive_image.hex": (
+        [3],
+        "five self-clocked lanes on consecutive pin pairs, so lane 3 lands on "
+        "pins 6/7 -- CS_PIN and MISO_PIN. Its clock pin is 7, whose output "
+        "enable the SPI-target release path overwrites, so the lane's own "
+        "clock is not what reaches the pad. MEASURED: modal t_HIGH 434 against "
+        "a programmed 120. Lanes 0, 1 and 2 (pins 0/1, 2/3, 4/5) are clean and "
+        "lane 0 is F4's control."),
+    "ckod_image.hex": (
+        [3],
+        "the same consecutive-pairs layout, so its highest-delay lane (d = 240) "
+        "is also on pins 6/7. `model/a2/gate_um10204.py` SKIPS that lane by "
+        "name rather than quoting it, and the three lanes below it carry the "
+        "F1 span (33, 60, 120) on their own."),
+}
+
+
+def pad_collisions(img):
+    """Lanes in `img` whose data or clock pin collides with the pad override.
+
+    ⭐ THE PREDICATE IS THE SAME ONE `test/measure_phases.py` USES to mark a
+    lane `pad_overridden`, and both read the pin numbers from `src/project.v`
+    through this module's `_assert_rtl_agrees` -- so a pin that moves in the
+    RTL moves in the audit, the measurement and the pin map together.
+    """
+    # ⛔⛔ SCOPED TO LANES THAT CAN ACTUALLY DRIVE, and the scope is the same
+    # argument `pe_asm.check_shift_clock_alias` makes about the 1.6x alias: for
+    # a lane that never writes the pin, the pin assignment is a DON'T-CARE.
+    # ⚠ MEASURED THE HARD WAY -- the first version of this audit flagged five
+    # images whose only offender was a PARKED FILLER LANE running `OP_REARM`
+    # and nothing else. Declaring those would have been five vacuous entries
+    # burying the two real ones, which is how a named exemption list stops
+    # being read. ⇒ The clock pin matters only for a lane that CLOCKS
+    # (SHIFT/SHIFTIN), the data pin only for a lane that WRITES it.
+    clk_drivers = (OP_SHIFT, OP_SHIFTIN)
+    pin_writers = (OP_LEVEL, OP_SHIFT, OP_START, OP_STOP)
+    ops = {}
+    hdrs = {}
+    for ln, h, a in dgf.walk(img):
+        ops.setdefault(ln, set()).add(a["op"])
+        hdrs[ln] = h
+    bad = {}
+    for ln, h in sorted(hdrs.items()):
+        drives_clk = bool(ops[ln] & set(clk_drivers))
+        writes_pin = bool(ops[ln] & set(pin_writers))
+        hits = []
+        if drives_clk and h["clkpin"] == P_T_MISO:
+            hits.append("clock on pin %d (MISO_PIN): its output enable is "
+                        "rebuilt from miso_oe_q, so the lane does not drive "
+                        "its own clock" % P_T_MISO)
+        if drives_clk and h["clkpin"] == P_T_CS:
+            hits.append("clock on pin %d (CS_PIN): an INPUT in the ruled "
+                        "two-bank map" % P_T_CS)
+        if writes_pin and h["pin"] == P_T_CS:
+            hits.append("data on pin %d (CS_PIN): an INPUT in the ruled map"
+                        % P_T_CS)
+        if hits:
+            bad[ln] = hits
+    return bad
+
+
+def audit_pad_collisions() -> int:
+    """Every image, against `PAD_COLLISION`. Undeclared or stale is RED."""
+    print("  --- ruling P5: lanes colliding with the pad override ---")
+    print("    project.v MISO_PIN=%d CS_PIN=%d"
+          % (RTL_PINS["MISO_PIN"], RTL_PINS["CS_PIN"]))
+    rc, seen = 0, set()
+    imgs = sorted(glob.glob(os.path.join(HERE, "*.hex")))
+    imgs = [p for p in imgs if not os.path.basename(p).startswith("probe_")]
+    for p in imgs:
+        name = os.path.basename(p)
+        bad = pad_collisions(dgf.load(p))
+        if not bad:
+            continue
+        if name not in PAD_COLLISION:
+            print("    *** %-22s lanes %s collide and the image is NOT in"
+                  % (name, sorted(bad)))
+            print("        PAD_COLLISION. Either put it on the ruled map or")
+            print("        declare it here with the colliding lanes named.")
+            for ln, hits in sorted(bad.items()):
+                for h in hits:
+                    print("          lane %d: %s" % (ln, h))
+            rc = 1
+            continue
+        seen.add(name)
+        want, _why = PAD_COLLISION[name]
+        if sorted(bad) != sorted(want):
+            print("    *** %-22s declares lanes %s but lanes %s collide"
+                  % (name, sorted(want), sorted(bad)))
+            rc = 1
+            continue
+        print("    %-22s DECLARED non-legal, lanes %s" % (name, sorted(want)))
+    for name in sorted(set(PAD_COLLISION) - seen):
+        print("    *** %s is declared as colliding but no lane of it does"
+              % name)
+        print("        -- either the image or the pin map moved")
+        rc = 1
+    if rc == 0:
+        print("    %d image(s) scanned, %d declared, every collision named"
+              % (len(imgs), len(seen)))
+    # ⛔⛔ PRICE IT. The predicate's whole value is its SCOPE -- a driving lane
+    # on an overridden pin is a finding, a parked one is a don't-care -- so
+    # both directions are probed on hand-built images rather than left to the
+    # shipped set, which happens to contain only one of the two shapes.
+    # ⚠ IT HAS ALREADY FIRED FOR REAL, five times, on the first version of
+    # this audit: `ckdegen`, `ckdegen2` and the three `ckhold` images were all
+    # reported because a parked filler lane sat on pin 6. That is what sent
+    # `build_ckhold`'s fillers to PIN_NONE and scoped the predicate.
+    print("    --- must-fire: the scope holds in both directions ---")
+    base = bytearray(ACT_BASE + 4 * ACT_BYTES)
+    for ln in range(1, N_LANES):
+        base[ln * HDR_BYTES:(ln + 1) * HDR_BYTES] = \
+            hdr(PIN_NONE, PIN_NONE, 1, 500, 2, 200, 240, ACT_BASE)
+    cases = [
+        ("a SHIFT lane clocked on MISO_PIN", P_T_MISO, P_T_SCLK,
+         (OP_SHIFT, P_T_SCLK, SELF_CLOCKED), True),
+        ("a REARM-only lane sitting on CS_PIN", PIN_NONE, P_T_CS,
+         (OP_REARM, 0, 1), False),
+        ("a LEVEL lane writing CS_PIN", PIN_NONE, P_T_CS,
+         (OP_LEVEL, P_T_CS, 1), True),
+    ]
+    for label, clkpin, pin, (op, apin, lvl), want in cases:
+        img = bytearray(base)
+        img[0:HDR_BYTES] = hdr(pin, clkpin, 1, 70, 2, 140, 210, ACT_BASE)
+        img[ACT_BASE:ACT_BASE + ACT_BYTES] = act(op, apin, lvl, 70, count=7)
+        img[ACT_BASE + ACT_BYTES:ACT_BASE + 2 * ACT_BYTES] = \
+            act(OP_REARM, 0, 1, 70)
+        got = bool(pad_collisions(bytes(img)))
+        ok = (got == want)
+        print("      %-44s %s"
+              % (label, "ok" if ok else
+                 "*** wanted %s" % ("a collision" if want else "none")))
+        if not ok:
+            rc = 1
+    return rc
 
 
 def write_pinmap_vh() -> str:
@@ -639,6 +829,8 @@ def main() -> int:
     print("  pin map for the bench -> %s" % write_pinmap_vh())
     print()
     rc |= audit_programs()
+    print()
+    rc |= audit_pad_collisions()
     print()
     print("  ⛔ writing the image is not running it. The preconditions above")
     print("     are CLAIMS until test/gate_corpus_trace.py checks each one")

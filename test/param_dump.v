@@ -47,6 +47,11 @@ module param_dump;
     // and N_LANES = 5 the slot index runs 0..9 and needs FOUR bits, and a
     // three-bit copy of it aliases lane 4's slots onto lane 0's -- which is
     // a bug this project has now hit once, in the per-lane instrument.
+    // ⭐ THE SDA HOLD BOUNDARY (ruling D). `model/hold_bound.py` reads the same
+    // number out of the RTL text; this is the ELABORATOR's independent value,
+    // so a formula change that fooled the reader's regex still shows up as a
+    // disagreement here rather than as a quietly wrong legal-delay floor.
+    $display("PARAM SDA_HOLD=%0d",  dut.u_eng.SDA_HOLD);
     $display("PARAM SPL=%0d",       dut.u_eng.SPL);
     $display("PARAM NSLOT=%0d",     dut.u_eng.NSLOT);
     $display("PARAM SIW=%0d",       dut.u_eng.SIW);

@@ -253,6 +253,39 @@ module tb_pinrange ();
       if (edges != 0)
         fail("a degenerate clocked action emitted pin edges");
     end
+    if (mode == 4) begin
+      $display("===== tb_pinrange: d <= SDA_HOLD IS REFUSED (ruling D1) ====");
+      $display("  SDA_HOLD cycles of data hold satisfy t_HD;DAT only if the");
+      $display("  bit period is LONGER than the hold. At d <= SDA_HOLD the");
+      $display("  held value would land AFTER the next clock rise -- data");
+      $display("  moving while SCL is high, which to any receiver is a START");
+      $display("  or a STOP. The clamp that used to detect this fell back to");
+      $display("  the ZERO hold and left the program RUNNING and");
+      $display("  non-compliant; silicon now REFUSES it.");
+      $display("  ⚠ THE EQUAL CASE IS REFUSED TOO: at d == SDA_HOLD the");
+      $display("  data reaches the pin on the same cycle the next phase");
+      $display("  dispatches, so t_SU;DAT is ZERO. Two images cover the");
+      $display("  boundary from below and AT it; the image one cycle ABOVE");
+      $display("  must RUN and is asserted in tb_trace, which has a pull-up.");
+      $display("    config_err               : %0b %0s", dut.u_eng.config_err,
+               dut.u_eng.config_err ? "ok -- refused"
+                                    : "*** FAIL -- not refused");
+      if (!dut.u_eng.config_err)
+        fail("a clocked open-drain action with d <= SDA_HOLD was not refused");
+      $display("    offending lane live      : %0b %0s", dut.u_eng.l_live[0],
+               dut.u_eng.l_live[0] ? "*** FAIL -- still live" : "ok -- halted");
+      if (dut.u_eng.l_live[0])
+        fail("the lane running an illegal clocked delay was not halted");
+      // ⛔ AND NOTHING WAS DRIVEN ON THE WAY TO BEING REFUSED. The guard is at
+      // the HEAD of the dispatch chain (`ck_refuse`), not bolted to a branch
+      // of it -- the mistake that let a refused clocked SHIFT fall through
+      // into the unclocked body and drive the data pin, twice.
+      $display("    pin edges after load     : %0d %0s", edges,
+               (edges == 0) ? "ok -- nothing was driven"
+                            : "*** FAIL -- a refused action moved a pin");
+      if (edges != 0)
+        fail("a refused clocked action emitted pin edges");
+    end
     if (mode == 2) begin
       $display("===== tb_pinrange: AN ARM ON THE RESERVED INDEX ============");
       $display("  `l_armpin` is written straight from the action's pin field,");

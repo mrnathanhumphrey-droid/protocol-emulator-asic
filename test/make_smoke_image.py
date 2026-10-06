@@ -38,6 +38,14 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# ⭐ THE SDA HOLD BOUNDARY COMES FROM THE RTL (ruling D4). `build_ckhold`
+# builds images AT the boundary and one cycle either side of it, and a literal
+# 15 here would be a second statement of a number `src/pe_engine.v` derives --
+# so the images would keep testing 15 after the hold moved. See
+# `model/hold_bound.py`.
+sys.path.insert(0, os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "model"))
+import hold_bound                                              # noqa: E402
 
 # ⛔⛔ THE ENCODER IS IMPORTED, NOT DEFINED HERE. Field widths, `hdr`, `act`
 # and the host push sequence all live in `pe_isa`, because this file used to own
@@ -270,9 +278,39 @@ def build_ckfive(delays):
 #: this image is now a configuration that could really ship.
 #: ⛔ THE MODE t_LOW FLOORS (25 / 65 / 235) ALL CLEAR THE HOLD MINIMUM, so no
 #: mode-legal program is affected -- but a program CAN still ask for a delay
-#: below it, and whether silicon should refuse that is OWED a ruling. It is the
-#: silent-corruption class: the wire carries a well-formed frame of wrong data.
-CKOD_DELAYS = [33, 60, 120, 240]
+#: below it. ⭐ THAT IS NOW RULED AND IN SILICON (D1): a clocked open-drain
+#: action with `d <= SDA_HOLD` sets `config_err` and halts the engine, so the
+#: silent-corruption case this comment flagged as owed can no longer RUN. The
+#: boundary itself lives in `src/pe_engine.v` and is read by
+#: `model/hold_bound.py`; nothing below restates it.
+#
+#: ⭐⭐ THE SHIPPABLE Fm+ DELAY, NAMED ONCE. Derived in
+#: `gate_clocked_lane_a2.py` as the margin-bar fixed point and confirmed by
+#: measurement on three programs (`ckod`, `corpus_i2c`, `corpus_all5`): at
+#: `d = 33` the observed t_LOW floor is 31 cycles = 620 ns against Fm+'s 500,
+#: t_HIGH 37 = 740 against 260, and t_SU;DAT 16 = 320 against 50.
+#: ⛔ `test/corpus.py` IMPORTS IT rather than carrying a second 33, because D5
+#: raised both clocked corpus programs to this delay and two copies of a
+#: shippable floor is how a mode claim drifts from the program that earns it.
+D_FMPLUS_SHIPPABLE = 33
+
+#: ⭐⭐ THE SHIPPABLE **Fm** DELAY, for a lane that claims 400 kHz. `ckod` is an
+#: Fm+ instrument, but the corpus I2C lane is named "I2C 400 kHz" in
+#: `test/corpus.py`'s pin map -- it is the SHIPPED lane set's I2C row -- so its
+#: legal delay is Fm's, not Fm+'s, and a program running at 694 kHz under a
+#: 400 kHz label is the mislabel class this project refuses elsewhere.
+#: ⛔ DERIVED, THEN MEASURED, AND THE MEASUREMENT MOVED IT. Fm needs
+#: t_LOW >= 1300 ns = 65 cycles, so 65 is the arithmetic floor -- and at d = 65
+#: the OBSERVED t_LOW floor came out 63 on `corpus_i2c` and 64 on
+#: `corpus_all5`, two cycles short, because EDF service jitter eats into the
+#: low phase (the C2 finding again, in a second place). At d = 70 the observed
+#: floor is 68 = 1360 ns on both, t_HIGH 74 = 1480 against 600, t_SU;DAT 53
+#: against 5, and the bit period is 146 cycles = 342 kHz, inside the 400 kHz
+#: ceiling. ⇒ 70, and the 5 cycles over the arithmetic floor are MEASURED
+#: jitter rather than padding.
+D_FM_SHIPPABLE = 70
+
+CKOD_DELAYS = [D_FMPLUS_SHIPPABLE, 60, 120, 240]
 
 
 def build_ckod(delays=None):
@@ -516,6 +554,58 @@ def build_ckdegen(d: int = 20, route: int = 0):
     for n in range(1, N_LANES):
         headers.append(hdr(n + 2, n + 2, 0, 500, 2, 200, 240, lp))
     return b"".join(headers) + b"".join(prog)
+
+
+#: ⛔⛔ THE THREE D4 POINTS, AND THE BOUNDARY IS STATED ONCE. `hold_bound.bound()`
+#: reads `SDA_HOLD` out of `src/pe_engine.v`; these offsets are the only numbers
+#: written here, so moving the hold moves the images with it.
+#: ⇒ `at` and `under` must be REFUSED, `over` must RUN. A one-sided must-fire
+#:   would pass against a guard written `d < SDA_HOLD`, which lets the data land
+#:   on the same cycle the next phase dispatches -- the hold fits and `t_SU;DAT`
+#:   is zero, which is why the RTL compares `<=`.
+CKHOLD_POINTS = {"at": 0, "under": -1, "over": 1}
+
+
+def build_ckhold(offset: int = 0):
+    """A clocked OPEN-DRAIN byte at `SDA_HOLD + offset` -- D1's must-fire.
+
+    ⛔⛔ LEGAL IN EVERY OTHER FIELD, WHICH IS THE WHOLE POINT (ruling D6). The
+    lane names a real clock pin DISTINCT from its data pin (so 1.6x cannot
+    fire), both pins are inside `uio` (so 1.6s cannot fire), the count is 7 for
+    a full byte (so `ck_degen` cannot fire) and the receive lanes are absent
+    (so `pin_real` cannot fire). The ONLY thing that can refuse this program is
+    the delay -- so when the bench sees `config_err`, the delay is what caused
+    it. `model/gate_degenerate_fields.py` enforces that mechanically rather
+    than trusting this docstring.
+    ⚠ THE PARKED LANES ARE PUSH-PULL ON `PIN_NONE` HERE, unlike
+    `build_ckdegen`'s. They run `OP_REARM` only, so their pin and mode are
+    don't-cares -- and that is exactly why they are pinned to the RESERVED
+    non-driving index instead of to consecutive real pins. ⛔ THE FIRST VERSION
+    USED `n + 2`, which put the last filler lane on pin 6 (CS_PIN) and made
+    `corpus.audit_pad_collisions` report all three images; the lane drives
+    nothing, so the collision was a don't-care -- but a must-fire image should
+    not rest on a don't-care STAYING one, and PIN_NONE says "drives nothing" in
+    the field rather than in a comment.
+    """
+    d = hold_bound.bound() + offset
+    if d < 1:
+        raise ValueError("SDA_HOLD + %d is %d; an image needs a delay >= 1"
+                         % (offset, d))
+    prog, headers = [], []
+    off = ACT_BASE
+    l0 = off
+    # a whole byte, self-clocked, on the open-drain pair
+    prog.append(act(OP_SHIFT, 2, SELF_CLOCKED, d, count=7, q=0))
+    off += ACT_BYTES
+    prog.append(act(OP_REARM, 0, 1, d))
+    off += ACT_BYTES
+    lp = off
+    prog.append(act(OP_REARM, 0, 0, 500))
+    headers.append(hdr(2, 1, 0, d, 2, min(2 * d, 255), min(3 * d, 255), l0))
+    for _n in range(1, N_LANES):
+        headers.append(hdr(PIN_NONE, PIN_NONE, 1, 500, 2, 200, 240, lp))
+    return b"".join(headers) + b"".join(prog)
+
 
 def build_census(d: int = 25):
     """A program that executes ALL EIGHT opcodes on the RTL.
@@ -989,6 +1079,16 @@ def main() -> int:
             # phase can be shown to TRACK `d` rather than to equal it once.
             (["--ckod"], "open-drain self-clocked lanes, delay span",
              "ckod_image.hex"),
+            # ⭐⭐ D4: THE SDA-HOLD BOUNDARY, THREE POINTS, ONE PER IMAGE.
+            # `at` and `under` must be REFUSED and `over` must RUN, so the
+            # bench sees the boundary from both sides rather than only from
+            # the side that happens to pass.
+            (["--ckhold"], "clocked open-drain at d = SDA_HOLD (refused)",
+             "ckhold_at_image.hex"),
+            (["--ckhold"], "... at d = SDA_HOLD - 1 (refused)",
+             "ckhold_under_image.hex"),
+            (["--ckhold"], "... at d = SDA_HOLD + 1 (runs)",
+             "ckhold_over_image.hex"),
             # ⭐ the FULL MB85RC256V write -- four bytes, so the peer reaches
             # P_ALO and P_WDATA and a byte actually lands in its memory. The
             # certified 2-byte frame stays exactly as it was.
@@ -1155,6 +1255,16 @@ def main() -> int:
                 fh.write("%02x" % b + chr(10))
         print("ckfive image (five self-clocked lanes), %d bytes -> %s"
               % (len(img), out))
+        return 0
+    if "--ckhold" in sys.argv:
+        for _nm, _off in sorted(CKHOLD_POINTS.items()):
+            _i = build_ckhold(_off)
+            _o = os.path.join(here, "ckhold_%s_image.hex" % _nm)
+            with open(_o, "w", encoding="ascii") as fh:
+                for b in _i:
+                    fh.write("%02x" % b + chr(10))
+            print("ckhold %-6s d = SDA_HOLD%+d = %d, %d bytes -> %s"
+                  % (_nm, _off, hold_bound.bound() + _off, len(_i), _o))
         return 0
     if "--ckod" in sys.argv:
         img = build_ckod()

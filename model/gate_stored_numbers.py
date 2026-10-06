@@ -330,7 +330,27 @@ SPEC_SYMBOLS = {
     ("model/ta01b/uart_stream.py", "STREAM_DEFAULT"),
     ("model/gate_reverse_trace.py", "LANE_CFG"),
     ("test/make_smoke_image.py", "FIVE_STRESS"),
+    # ⭐ `CKHOLD_POINTS` IS AN EXPERIMENT'S DESIGN AND THE NUMBERS ARE OFFSETS,
+    # not values: -1, 0, +1 AROUND a boundary this file does not store. The
+    # boundary itself is `SDA_HOLD`, which lives in `src/pe_engine.v` and is
+    # read through `model/hold_bound.py` -- so there is nothing here to drift
+    # from the design. ⛔ THE OFFSETS ARE THE POINT: a refusal tested only
+    # below its boundary passes against a guard written `<` when the design
+    # says `<=`, which is why `at` (offset 0) must refuse and `over` (+1) must
+    # run.
+    ("test/make_smoke_image.py", "CKHOLD_POINTS"),
     ("test/gate_corpus_trace.py", "COLS"),
+    # ⭐ `PAD_COLLISION` IS A NAMED-EXEMPTION LIST (ruling P5), like
+    # `gate_degenerate_fields.DELIBERATE`: an image, the LANES of it that
+    # collide with the pad override, and why that is intended. Its numbers are
+    # lane indices and the pin numbers quoted in the prose -- not a
+    # measurement. ⛔ STALENESS IS CAUGHT WHERE IT MEANS SOMETHING, not here:
+    # `audit_pad_collisions` reds on an undeclared collision, on a declared
+    # lane set that no longer matches, AND on a declaration whose image no
+    # longer collides at all. The pin numbers themselves come from
+    # `src/project.v` through `_assert_rtl_agrees`, so they cannot drift from
+    # the RTL either.
+    ("test/corpus.py", "PAD_COLLISION"),
     # ⭐ THE COVERAGE SWEEP'S TWO DECLARATIONS, and neither holds a
     # measurement. `benchset.CONFIG` is STIMULUS -- plusargs, cycle budgets
     # and the per-lane delay vectors handed to `make_smoke_image.py` -- i.e.
@@ -342,6 +362,15 @@ SPEC_SYMBOLS = {
     # absent, and `gate_coverage.check_stale` fails on an anchor the merged
     # coverage does not contain -- which is what a moved line looks like.
     ("test/benchset.py", "CONFIG"),
+    # ⭐ `SHARED_INCLUDE_DEFAULTS` IS A RUN CONDITION, NOT A MEASUREMENT: the
+    # default value a shared include's plusarg takes on the benches that do not
+    # override it. ⛔ IT EXISTS BECAUSE THE SCANNER COULD NOT SEE `A2BOUND` --
+    # a digit in the name defeated its pattern -- so the number here (0) is the
+    # declaration of a stimulus, in exactly the sense `CONFIG` above is, and
+    # staleness is caught where it means something: a bench that stops
+    # including the file loses the excuse, which `includes_file` enforces, and
+    # the gate's own must-fire checks that the scanner still sees both names.
+    ("test/benchset.py", "SHARED_INCLUDE_DEFAULTS"),
     ("test/gate_coverage.py", "CLASSIFIED"),
     # ⭐ ANCHOR_TEXT is the same thing one step further: a line number and the
     # SOURCE TEXT that line must still read as. Its numbers are anchors, not

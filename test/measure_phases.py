@@ -31,6 +31,9 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "model"))
+import hold_bound                                              # noqa: E402
 try:
     sys.stdout.reconfigure(encoding="utf-8")
 except Exception:
@@ -282,6 +285,18 @@ def main():
     ap.add_argument("--image", required=True)
     ap.add_argument("--arm", default="clean")
     ap.add_argument("--json", required=True)
+    # ⛔⛔ THE ARM'S OWN HOLD, RECORDED WITH ITS DATA. `SDA_HOLD` is a BUILD
+    # PARAMETER -- `-GSDA_HOLD_NS=<n>` -- so three arms of this measurement run
+    # at three different boundaries, and the gate that adjudicates them was
+    # printing a LITERAL "SDA_HOLD=40" for one of them. A run condition that
+    # lives only in the script that launched the run is a run condition the
+    # data cannot be checked against. ⇒ It travels in the JSON.
+    # ⚠ DEFAULT None, NOT the RTL's default: an arm whose hold was never
+    # recorded must read as UNKNOWN rather than as the default value, or a
+    # parameterised arm would silently be adjudicated against the wrong
+    # boundary -- which is the defect this flag exists to fix.
+    ap.add_argument("--hold-ns", type=int, default=None,
+                    help="the SDA_HOLD_NS this build was compiled with")
     a = ap.parse_args()
     rows = measure(a.trace, a.image)
     blob = {}
@@ -291,8 +306,12 @@ def main():
                 blob = json.load(fh)
         except Exception:
             blob = {}
-    blob[a.arm] = {"image": os.path.basename(a.image),
-                   "trace": os.path.basename(a.trace), "lanes": rows}
+    rec = {"image": os.path.basename(a.image),
+           "trace": os.path.basename(a.trace), "lanes": rows}
+    if a.hold_ns is not None:
+        rec["hold_ns"] = a.hold_ns
+        rec["sda_hold"] = hold_bound.bound(hold_ns=a.hold_ns)
+    blob[a.arm] = rec
     with open(a.json, "w", encoding="utf-8", newline="\n") as fh:
         json.dump(blob, fh, indent=1, sort_keys=True)
     print("  arm %-22s %d clocked lane(s) -> %s"

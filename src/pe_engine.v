@@ -820,6 +820,18 @@ module pe_engine #(
   // requirement -- the violation stays visible instead of being converted
   // into a harder one. The honest reading is that `d <= SDA_HOLD` is not a
   // legal I2C delay; the clamp only refuses to make it worse.
+  // ⛔⛔⛔ AND THAT READING IS NOW THE RULING (D1/D3). A CLOCKED open-drain
+  // action with `d <= SDA_HOLD` is REFUSED, so the clamp is unreachable on the
+  // clocked path and has been removed from it. ⇒ WHAT IS LEFT IS THE
+  // **UNCLOCKED** SITE, and it is left deliberately: D1 is scoped to `ck_act`,
+  // and an unclocked open-drain SHIFT that takes its own clock low in the same
+  // dispatch (`clk_real & ~a_lvl`) is the CERTIFIED two-action frame's shape --
+  // `build_i2cframe` runs it, and at a short delay it would push data past the
+  // rise with nothing refusing it.
+  // ⚠ SO THE CLAMP IS NOW A ONE-SITE MECHANISM WITH A NAMED REACHABLE CASE
+  // (`build_i2cframe(d=12)`), not a leftover. Extending the refusal to cover
+  // the unclocked idiom too would retire it entirely; that is a SCOPE
+  // DECISION and is recorded as owed rather than taken here.
   wire [N_LANES-1:0] ck_hold_fits;
   // ⛔⛔⛔ F1 -- A CLOCKED PARK COUNTS ITS HIGH PERIOD FROM THE RISE IT
   // OBSERVES, so it releases at `now + d` rather than at `now`. This is the fix
@@ -1091,6 +1103,41 @@ module pe_engine #(
   //   status bit, and the standing rule that an illegal state is an ERROR
   //   rather than silent success.
   wire ck_degen = ck_act & (ck_nbits == {BPW{1'b0}});
+  // ⛔⛔⛔ D1 -- A CLOCKED OPEN-DRAIN ACTION WHOSE DELAY CANNOT HOLD ITS DATA
+  // IS REFUSED, and the refusal replaces a CLAMP that merely declined to make
+  // things worse. `SDA_HOLD` cycles of data hold only satisfy `t_HD;DAT` if
+  // the bit period is longer than the hold: at `d <= SDA_HOLD` the held value
+  // would land AFTER the next clock rise, which to any receiver is a START or
+  // a STOP rather than a data bit. The old `ck_hold_fits` term detected that
+  // and fell back to the ZERO-hold behaviour -- correct as far as it went, but
+  // it left the program RUNNING while `gate_um10204` reported it below the
+  // `t_HD;DAT` requirement. A chip that emulates a protocol incorrectly and
+  // reports success is the silent-corruption class; the entry's claim is
+  // DEFINED behaviour, so the honest answer is to refuse.
+  // ⚠ WHY `d <= SDA_HOLD` AND NOT `d < SDA_HOLD`: at `d == SDA_HOLD` the data
+  // reaches the pin on the SAME cycle the next phase dispatches, so there is
+  // ZERO setup before the rise -- `t_SU;DAT` is violated even though the hold
+  // itself fits. The legal floor is strictly greater.
+  // ⭐ OPEN-DRAIN ONLY, for the same reason the park is: a push-pull clocked
+  // lane is SPI, where `t_HD;DAT` is the master's own choice and no pull-up
+  // slews the line. `l_mode[cur]` already routes those straight past the hold.
+  // ⇒ AT `SDA_HOLD == 0` THERE IS NO HOLD TO NOT FIT, so nothing is refused.
+  //   That build (`-GSDA_HOLD_NS=0`) exists to MEASURE the original defect, and
+  //   a refusal there would leave the measurement arm with no traffic to
+  //   measure -- the shape `project.v` already warns about, where a chip that
+  //   refuses to run produces no evidence by definition.
+  wire ck_holdviol = ck_act & ~l_mode[cur] & (SDA_HOLD != 0)
+                     & (a_dly <= SDA_HOLD[DLY_W-1:0]);
+  // ⛔⛔ THE TWO REFUSALS SHARE ONE CHAIN-HEAD WIRE, and that is the lesson of
+  // `ck_degen`'s own history written down: a guard bolted onto a BRANCH let a
+  // refused clocked SHIFT fall through into the unclocked body and drive the
+  // data pin on its way to being refused, and the identical mistake had
+  // already been made once on the retire chain. One wire, used at the head of
+  // every chain that dispatches a clocked action.
+  // ⭐ THE CAUSE STAYS DISTINGUISHABLE without a second status bit: the bench
+  // reads `ck_degen` and `ck_holdviol` separately (D6 -- a refusal image that
+  // trips a SECOND refusal is red), while the host sees one `config_err`.
+  wire ck_refuse = ck_degen | ck_holdviol;
   // the n-th bit has been counted (`l_ckbit` advances on the LOW phase)
   wire ck_bits_done = (l_ckbit[cur] == ck_nbits);
   // ⭐ RETIRE: a transmit on the last HIGH, a receive on its trailing COLL.
@@ -1834,7 +1881,7 @@ module pe_engine #(
             // fix is to move the PROSE, never to widen the window -- the gate's
             // docstring records a `clk_real` 30 lines away falsely guarding a
             // deliberately unguarded mutant arm.
-            // ⛔⛔ `ck_degen` IS THE FIRST ARM OF THIS CHAIN, and that is a bug
+            // ⛔⛔ `ck_refuse` IS THE FIRST ARM OF THIS CHAIN, and that is a bug
             // fix. The first version wrote `if (ck_shift & ~ck_degen)` and
             // left the chain alone -- so a refused clocked SHIFT fell
             // through into the UNCLOCKED body and DROVE THE DATA PIN on its
@@ -1844,7 +1891,7 @@ module pe_engine #(
             // added to one arm while a LATER arm (`else if (a_lvl)`) still
             // matched. A guard belongs at the HEAD of a chain, not bolted to
             // a branch of it.
-            OP_SHIFT: if (pin_real && !ck_degen) begin
+            OP_SHIFT: if (pin_real && !ck_refuse) begin
 `ifndef M_SHIFT_CLK_ALIAS
               if (l_clkpin[cur] == a_pin) begin
                 config_err   <= 1'b1;
@@ -1873,8 +1920,20 @@ module pe_engine #(
                   // driven immediately, which is the measured defect and the
                   // must-fire build.
                   if (pin_real) begin
-                  if (SDA_HOLD == 0 || l_mode[cur]
-                      || !ck_hold_fits[cur]) begin
+                  // ⛔⛔⛔ D3: THE `ck_hold_fits` CLAMP IS GONE FROM **THIS**
+                  // SITE, because D1 made it unreachable here. A clocked
+                  // open-drain action with `d <= SDA_HOLD` no longer reaches
+                  // dispatch at all -- `ck_refuse` stops it at the head of
+                  // this chain -- so the clamp's only remaining job here would
+                  // be to handle a case the engine refuses to run.
+                  // ⚠ IT SURVIVES AT THE **UNCLOCKED** SITE BELOW, and that is
+                  // scope rather than oversight: D1 is scoped to `ck_act`, so
+                  // an UNCLOCKED open-drain SHIFT that takes its own clock low
+                  // (`clk_real & ~a_lvl`) can still ask for a delay shorter
+                  // than the hold, and `build_i2cframe(d=12)` is exactly that
+                  // program. Removing the clamp there would push data past the
+                  // rise for a program silicon still accepts.
+                  if (SDA_HOLD == 0 || l_mode[cur]) begin
                     if (l_mode[cur]) begin
                       pin_out[a_pin] <= l_tx[cur][0] & pin_pp[a_pin];
                       pin_oe[a_pin]  <= 1'b1;
@@ -2039,7 +2098,7 @@ module pe_engine #(
               end
 `endif
             end
-            OP_SHIFTIN, OP_READBIT: if (pin_real && !ck_degen) begin
+            OP_SHIFTIN, OP_READBIT: if (pin_real && !ck_refuse) begin
               // ⭐⭐ CONDITION (a): A CLOCKED SHIFTIN RELEASES THE DATA PIN ON
               // **BOTH** PHASES. This assignment is unconditional, so it
               // covers every phase: driving SDA during an ACK would fight
@@ -2140,10 +2199,17 @@ module pe_engine #(
           if (act_retire)  l_ckph[cur] <= CK_LOW;
           else if (ck_act) l_ckph[cur] <= ck_next;
 `endif
-          // ⛔ THE DEGENERATE HALT. Checked at WRITEBACK so it fires once per
-          // dispatch of the offending action, and the drive arms above are
-          // gated on `~ck_degen` so NO CLOCK EDGE is emitted for it.
-          if (ck_degen) begin
+          // ⛔ THE REFUSAL HALT -- degenerate bit count (`ck_degen`) or a
+          // delay that cannot hold the data (`ck_holdviol`, D1). Checked at
+          // WRITEBACK so it fires once per dispatch of the offending action,
+          // and the drive arms above are gated on `~ck_refuse` so NO CLOCK
+          // EDGE and NO DATA EDGE is emitted for either.
+          // ⭐ ONE STICKY FOR BOTH: `config_err` also gates `ST_IDLE`, so a
+          // set sticky stops the whole engine dispatching -- the ENGINE-WIDE
+          // halt, on top of this lane's own `l_live` clear. The lane clear is
+          // not redundant: it is what makes the halt survive a host that
+          // clears the sticky without reloading the program.
+          if (ck_refuse) begin
             config_err  <= 1'b1;
             sticky_ovr  <= 1'b1;
             l_live[cur] <= 1'b0;        // HALT: the action has no meaning

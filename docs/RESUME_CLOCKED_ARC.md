@@ -15,38 +15,53 @@ including commit and push.
 | clocked I2C lane in A2 | `ea0259f` | `D_tol = d − t_LOW(min)`, fixed point 33/73/249 |
 | H1–H5 + the clamp | `2120012` | SDA hold 15 cy, +30 flops, `t_HD;DAT` 0 → 15 |
 | A1 / A2 | `e1fa642` | head-slot stability; gap bounded both sides |
-| Ruling P | *this commit* | pad-override explanation; P4 control re-established |
+| Ruling P | `80ff8d7` | pad-override explanation; P4 control re-established |
+| Ruling D (D1, D3–D6) + P5 + D2's static half | *this commit* | `d <= SDA_HOLD` refused in silicon and in the assembler; +0 flops |
 
-20 of 20 gates, 26 uncovered (all classified), 33 arms / 14 benches.
+20 of 20 gates, **26 uncovered (all classified, and the same 26 points as at
+`80ff8d7` — `gate_coverage.py`'s diff is 27 anchor moves and nothing else)**,
+37 arms / 14 benches.
 
 ---
 
 ## OWED — in this order
 
-### D — refuse `d <= SDA_HOLD` (amended)
+### ~~D — refuse `d <= SDA_HOLD`~~ → LANDED, except D2's mode floor
 
-* **D1 silicon**: clocked open-drain with `d <= SDA_HOLD` → `CONFIG_ERR`,
-  engine-wide halt, **guard at the head of the chain** (same route as
-  `ck_degen`; the retire-chain leak has bitten twice — see `act_retire`).
-* **D2 assembler/audit**: refuse below the **per-program** floor
-  `d >= t_LOW(min, mode) + (r_i − C)`, computed from that program's own A2 row
-  via **S**. ⛔ The fixed 38/78/248 is **retired** — it was `ckod`'s observed
-  jitter, not a law. A2 gives Fm+ **33** for the clocked lane set.
-* **D3** remove the clamp (`ck_hold_fits`), now unreachable. No new uncovered
-  points.
-* **D4** must-fire images at `d = SDA_HOLD`, `SDA_HOLD − 1` (refuse) and
-  `SDA_HOLD + 1` (runs); all other fields legal. Boundary stated **once**
-  (the constant), read by gate and bench.
-* **D5 corpus**: raise `corpus_i2c` / `corpus_all5` to a **mode-legal** `d`
-  that passes `gate_um10204` — not merely `> 15`. Report coverage
-  before/after; any point reached only at `d = 9` gets its own image or a
-  classification; report sim-time growth.
-  ⚠ These images are the coverage backbone and currently run at `d = 9`, so
-  D1 halts them until D5 lands. Do D5 with D1.
-* **D6 one image, one refusal**: `ckdegen2` (and every refusal image) gets
-  legal values in every field except the one it tests; the audit records
-  **which** refusal fired, and a refusal image tripping a second refusal is
-  RED. At `d = 9` `ckdegen2` would trip both count-wrap and `d <= SDA_HOLD`.
+See `docs/SPEC_V4_CLOCKED_HIGH_PHASE.md` §13 for the full trace. Summary:
+
+* **D1 silicon** — `ck_holdviol` joined with `ck_degen` into one `ck_refuse`
+  wire at the **head** of every clocked chain. `config_err`, lane halt,
+  engine-wide stop through `ST_IDLE`. **+0 flops.** `<=` not `<` (at equality
+  `t_SU;DAT` is zero). Open-drain only. `SDA_HOLD == 0` refuses nothing, so the
+  `hold0` measurement arm still has traffic.
+* **D2 — STATIC HALF ONLY.** `pe_asm.check_clocked_hold_delay` refuses on the
+  `SDA_HOLD` floor, boundary read from the RTL via `model/hold_bound.py`.
+  ⛔ **STILL OWED, WITH S:** the per-program floor
+  `d >= t_LOW(min, mode) + (r_i − C)`. A program the assembler accepts today is
+  **hold-legal, not certified mode-legal**, and the report says so.
+* **D3** — clamp removed from the **clocked** site; **kept at the unclocked
+  site**, where `build_i2cframe(d=12)` still reaches it and D1's `ck_act` scope
+  does not. ⇒ Extending the refusal to the unclocked idiom would retire it
+  entirely: a **scope decision**, recorded not taken.
+* **D4** — three images (`ckhold_under/at/over`), boundary from
+  `hold_bound.bound()` + offset. Refusals in `tb_pinrange +MODE=4`; the **runs**
+  arm in `tb_trace +CKRUNS=1`, because `tb_pinrange` holds `uio_in` constant and
+  a parked open-drain lane would measure a hang. 131 clocked actions retired.
+* **D5** — `d = 70` (Fm, matching the lane's own "I2C 400 kHz" label). 65 is the
+  arithmetic floor and **measured 63/64**, so 70. `corpus_all5` raises **lane 0
+  only** — the other four stay at 9..13 to keep the contention the image exists
+  for. Bit period 24 → 146 cycles; `+NCYC` fixed, so ~6× fewer transactions per
+  arm. Coverage **26 → 26, same points**; the one branch D3 left reachable only
+  at `SDA_HOLD == 0` is **covered by a new sweep arm** (`ckod_hold0`,
+  `-GSDA_HOLD_NS=0`) rather than waived.
+* **D6** — `DELIBERATE` names one refusal class per image and reds on a second.
+  32 images, 8 declared, 0 undeclared, 0 multi. Found `cfgerr_image.hex`
+  undeclared (the 1.6s predicate did not exist, so the audit could not decode
+  the refusal the image exists for) and the gate's own selftest probing at
+  `d = 9`, where two arms would have passed for the wrong reason.
+* **P5** — `corpus.PAD_COLLISION`: `ckfive` lane 3 and `ckod` lane 3, the only
+  two, each with the colliding pin named. Scoped to lanes that can **drive**.
 
 ### R — the port-demand invariant (⛔ before ACK)
 
@@ -61,6 +76,26 @@ design that doubles port demand passes clean.
 (expect 1, not one per dispatch), with `M_CK_HOLD_INVAL` as its must-fire.
 Candidate observables: the prefetch FSM's `P_REQ`/`P_CAP` transitions per lane
 against `act_retire`.
+
+### ⛔ NEW, AND IT CHANGES ACK — the clocked SHIFTIN's SDA release is not held
+
+ACK item (a) asked that the release be **confirmed** to pass the H1 hold check.
+Measured during D5: **it does not.** `t_HD;DAT` on `corpus_i2c` is
+`{0: 20, 15: 93, 280: 35, 282: 1}` — 93 held data bits and **20 with zero
+hold**. A falsifier set attributes every zero to the clocked `OP_SHIFTIN`:
+dropping `OP_READBIT` leaves 21, dropping `OP_START`/`OP_STOP` leaves 23,
+dropping the SHIFTIN leaves **0** (all 140 at 15).
+
+The clocked SHIFTIN releases SDA unconditionally on its first LOW dispatch, so
+the transition **from the last transmitted bit into the ACK slot** carries no
+hold — a real `t_HD;DAT` violation, the same class ruling H fixed, in a place
+ruling H did not reach.
+
+⇒ **The ruling-H measurement set cannot see it**: `build_ckod` is SHIFT-only,
+and `i2cframe` escapes because its SCL fall and SDA release are different
+dispatches, `d` apart. §4b(a)'s green is sound for the **transmit** path and
+silent about the receive handover. ACK (a) becomes a **fix**, not a
+confirmation.
 
 ### S — the A2 bound, per program
 
@@ -81,21 +116,13 @@ heavier program must go red. This also supplies **D2**'s floor.
   recording a verdict. Allowlist **by name with a reason**.
 * **E2** must-fire: the pre-fix `measure_phases.py` shape
   (`NameError` → `None`) must trip it.
-* **E3** ledger: **third** check-that-could-not-fire this session — the
-  sweep's `*** FAIL` grep, the backspace `\b` regex, and this swallowed
-  `NameError`. Same class, now gated.
-
-### P5 — `build_ckfive` pin-map legality (with D5)
-
-Either make it pin-map-legal or add it to the audit's **named** non-legal list
-with exactly which lanes collide. Measurement tools already refuse those lanes
-by name. Current state:
-
-| lane | pin/clk | status |
-| --- | --- | --- |
-| 0,1,2 | 0/1, 2/3, 4/5 | legal + measurable |
-| 3 | 6/7 | collides with `CS_PIN`=6 and `MISO_PIN`=7 → pad-overridden |
-| 4 | 8/9 | outside `uio` (`uo_out` bank) → unmeasurable from `uio_in` |
+* **E3** ledger: now **four** checks-that-could-not-fire in this arc — the
+  sweep's `*** FAIL` grep, the backspace `\b` regex, the swallowed `NameError`,
+  and (found by ruling D) **`benchset.plusargs_read`'s `[A-Z_]+` pattern, which
+  could not see `+A2BOUND` because of the digit** — thirteen benches reading it,
+  one arm supplying it, the check silent for a whole arc. Pattern widened,
+  `SHARED_INCLUDE_DEFAULTS` declares the default once, and both the digit case
+  and the scoping are priced in the gate's own must-fires.
 
 ---
 
@@ -108,8 +135,11 @@ by name. Current state:
 * (b) sample on the **observed** rise
 * (c) sigrok shows ACK reads 0, NACK reads 1; a non-alternating-phase mutant
   fails decode
-* ⛔ **Confirm ACK's SDA release passes the H1 hold check** — the release goes
-  *through* the hold path.
+* ⛔⛔ **ACK's SDA release does NOT pass the H1 hold check — measured.** See
+  the finding above: the clocked `OP_SHIFTIN` releases SDA on its first LOW
+  dispatch with no hold, so the last transmitted bit gets `t_HD;DAT = 0`. (a)
+  is a **fix**, not a confirmation, and the ruling-H measurement set is blind to
+  it (`ckod` is SHIFT-only).
 
 Merge rule unchanged: **nothing to `cmos5l`** without `gds` + `precheck` +
 `gl_test` green on the exact SHA.
@@ -118,7 +148,20 @@ Merge rule unchanged: **nothing to `cmos5l`** without `gds` + `precheck` +
 
 ## Open, accepted or unexplained
 
-* **`d ≤ SDA_HOLD` hazard** — the clamp bounds it; D1 refuses it.
+* ⛔ **`test/gate_corpus_trace.py` CANNOT BUILD**, and has not been able to
+  since `7a672b0`: `final procedures cannot enable/call tasks` on
+  `test/progress.vh:214` and `test/clocked_conform.vh:382` under iverilog. It is
+  the **two-simulator** corpus comparison and the thing that turns
+  `corpus.py`'s `must move` preconditions from claims into checks. It is **not**
+  in `ci/run_gates.sh`, so 20 of 20 is green without it. ⇒ The corpus at
+  `d = 70` is certified by the Verilator sweep (3 rand-reset modes, no
+  `*** FAIL`), the loader audit and `measure_phases` — **not** by the iverilog
+  cross-check. Pre-existing, not from ruling D, and owed.
+* **The unclocked `ck_hold_fits` clamp** — still live, still reachable by
+  `build_i2cframe(d=12)`. Retiring it means widening D1 past `ck_act`: a scope
+  decision (D3).
+* ~~**`d ≤ SDA_HOLD` hazard**~~ — refused in silicon (D1) and in the assembler
+  (D2 static half). The clamp is gone from the clocked path.
 * **`corpus_all5` post-rise lateness 19** — ACCEPTED, legitimate for the stress
   set, unchecked by design, number kept in the sweep log; governed by S if that
   lane set is ever shipped.
@@ -147,6 +190,10 @@ Merge rule unchanged: **nothing to `cmos5l`** without `gds` + `precheck` +
 * `wsl.exe` always with `MSYS_NO_PATHCONV=1` and always a **script file**.
 * Author sources with Write/Edit, **never** shell heredocs into tracked files.
 * Never `git add -A`; explicit paths only. Probes write only to `probe_*`.
+* **`SDA_HOLD` is stated once, in `src/pe_engine.v`**, and read everywhere else
+  through `model/hold_bound.py` — which refuses rather than guesses if the RTL's
+  ceiling expression changes. `test/param_dump.sh` prints the **elaborator's**
+  value as a second authority (both read 15). Never type the number.
 * No comment line may begin with the token `Verilator`.
 * Run `bash ci/run_gates.sh` as the **last** thing before reporting; a green on
   a tree you then edit describes nothing.

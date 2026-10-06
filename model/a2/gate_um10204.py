@@ -473,11 +473,16 @@ def main() -> int:
               % (m, need, tc[m]["t_SU_DAT"], mind,
                  "yes (%d)" % tc[m]["t_LOW"] if tc[m]["t_LOW"] >= mind
                  else "*** NO"))
-    print("      ⚠ EVERY MODE-LEGAL PROGRAM CLEARS IT, but a program can")
-    print("      still ASK for a smaller delay and the engine will run it.")
-    print("      Whether silicon should REFUSE `d <= SDA_HOLD` is OWED a")
-    print("      ruling: it is the silent-corruption class, where the wire")
-    print("      carries a well-formed frame of the wrong data.")
+    print("      ⚠ EVERY MODE-LEGAL PROGRAM CLEARS IT, and a program that")
+    print("      asks for less NO LONGER RUNS. ⭐ RULED AND IN SILICON (D1):")
+    print("      a clocked open-drain action with `d <= SDA_HOLD` sets")
+    print("      CONFIG_ERR and halts the engine, so the silent-corruption")
+    print("      case this gate used to report as OWED cannot reach a wire.")
+    print("      `pe_asm.check_clocked_hold_delay` refuses it statically too,")
+    print("      and the boundary is read from the RTL, never typed twice.")
+    print("      ⚠ THE **MODE** FLOOR IS STILL OWED (D2 with S): `SDA_HOLD` is")
+    print("      a hard floor for every mode, but the column above shows each")
+    print("      mode wants MORE, per program and with its own jitter.")
 
     # -----------------------------------------------------------------
     # 4c. THE TWO MUST-FIRES FOR RULING H (H3)
@@ -509,14 +514,43 @@ def main() -> int:
     else:
         fmp = UM10204_MAX["Fm+ 1 MHz"]
         budget = cycles(fmp["t_VD_DAT"]) - cycles(fmp["t_r"])
+        # ⛔⛔ THE ARM'S OWN BOUNDARY, OUT OF ITS OWN DATA. This line used to
+        # print a LITERAL `SDA_HOLD=40` while `test/phases_run.sh` decided the
+        # actual value, and the two could disagree without a word -- which is
+        # what happened: ruling D1 forced the arm from 800 ns to 500 ns, and
+        # the label would have gone on claiming 40.
+        hb_hold = hb.get("sda_hold")
+        lab = ("SDA_HOLD=%d" % hb_hold) if hb_hold is not None \
+            else "SDA_HOLD=UNRECORDED"
         moved = [l for l in hb["lanes"] if (l.get("sda_moves_in_high") or 0) > 0]
         over = [l for l in hb["lanes"]
                 if l.get("t_HD_DAT") and l["t_HD_DAT"]["min"] > budget]
+        # ⛔⛔ AND THE ARM MUST HAVE PRODUCED TRAFFIC AT ALL. Ruling D1 refuses
+        # a clocked open-drain action with `d <= SDA_HOLD`, so a `holdbig` hold
+        # at or above the image's smallest delay REFUSES THE PROGRAM: the
+        # engine halts, no lane measures anything, and `moved`/`over` are both
+        # empty -- a must-fire reading as "did not fire" for the one reason
+        # that is not a design regression. ⇒ The vacuity is named separately
+        # from the failure, because the fix is different: choose a hold between
+        # the Fm+ budget and the image's smallest delay.
+        measured = [l for l in hb["lanes"] if l.get("t_HD_DAT")]
         good = bool(moved) or bool(over)
-        print("    SDA_HOLD=40 : %d lane(s) moved SDA while SCL high, %d over "
+        print("    %-12s: %d lane(s) moved SDA while SCL high, %d over "
               "the Fm+ budget of %d   %s"
-              % (len(moved), len(over), budget,
+              % (lab, len(moved), len(over), budget,
                  "fires" if good else "*** DID NOT FIRE"))
+        if not measured:
+            print("        ⛔ AND NO LANE MEASURED ANYTHING: the arm produced no")
+            print("        traffic, so this is VACUOUS rather than a regression.")
+            print("        Under D1 a hold at or above the image's smallest")
+            print("        delay REFUSES the program (config_err, engine-wide")
+            print("        halt). Pick a hold strictly between the Fm+ budget")
+            print("        (%d) and the smallest delay in the image." % budget)
+        if hb_hold is None:
+            print("        ⛔ the arm did not record its own SDA_HOLD, so this")
+            print("        verdict cannot be tied to the boundary it ran at")
+            print("        -- pass --hold-ns from test/phases_run.sh.")
+            rc = 1
         if good:
             fired.append("holdbig")
         else:

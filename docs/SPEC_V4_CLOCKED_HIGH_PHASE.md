@@ -539,3 +539,271 @@ push-pull lane that does not park, while lanes 0 and 1 are exact. Not explained.
   appeared inside the very function written to prevent a silent disagreement,
   and it is the **third check-that-could-not-fire this session** after the
   sweep's grep and the backspace regex — which is what Ruling E now gates.
+
+---
+
+## 13. Ruling D — `d <= SDA_HOLD` is refused, in silicon and in the assembler
+
+The hold (§9) only satisfies `t_HD;DAT` if the bit period is **longer** than the
+hold. Below that, the held value lands after the next rise — data moving while
+SCL is high, which to any receiver is a START or a STOP. §9 shipped a *clamp*
+that detected this and fell back to the zero hold: correct as far as it went,
+but it left the program **running and non-compliant**. The ruling replaces the
+clamp with a refusal.
+
+### D1 — silicon
+
+`ck_holdviol = ck_act & ~l_mode[cur] & (SDA_HOLD != 0) & (a_dly <= SDA_HOLD)`,
+joined with `ck_degen` into one `ck_refuse` wire used at the **head** of every
+chain that dispatches a clocked action. `config_err` is set, the lane's
+`l_live` is cleared, and `ST_IDLE`'s existing `!config_err` term makes the halt
+**engine-wide**. **+0 flops** — the comparison is combinational on a word
+already in a register.
+
+* **One wire, three sites**, because this exact mistake has been made twice: a
+  guard bolted to a *branch* let a refused clocked SHIFT fall through into the
+  unclocked body and **drive the data pin on its way to being refused**, and
+  the retire chain had the same shape. A guard belongs at a chain's head.
+* **`<=`, not `<`.** At `d == SDA_HOLD` the data reaches the pin on the same
+  cycle the next phase dispatches, so `t_SU;DAT` is **zero**. The hold fits and
+  the program is still illegal.
+* **Open-drain only**, for the reason the park is: a push-pull clocked lane is
+  SPI, where `t_HD;DAT` is the master's own choice.
+* **`SDA_HOLD == 0` refuses nothing**, or `test/phases_run.sh`'s `hold0` arm —
+  which exists to *measure* the original defect — would have no traffic to
+  measure.
+
+**Measured:** `corpus_i2c` at `d = 9` produces **0 SCL transitions in 60,000
+cycles** (against 2,667 at `d = 16`) and exactly **one** SDA transition — the
+`OP_START` that precedes the refused SHIFT. The status stream keeps shifting on
+`uo_out[4..6]` while the engine is halted, which is the host learning *why*.
+
+### D2 — assembler, the static half
+
+`pe_asm.check_clocked_hold_delay` refuses the same programs statically, naming
+the lane, the opcode and the floor. The boundary is **read from the RTL**
+(`model/hold_bound.py`), never typed: a second copy of `15` would keep
+accepting programs silicon refuses after the hold moved, and the toolchain
+would be telling people their program is fine.
+
+⚠ **This is the static half and it says so.** The full ruling refuses below the
+**per-program** floor `d >= t_LOW(min, mode) + (r_i − C)`, which needs **S**.
+`SDA_HOLD` is a hard floor for every program and every mode, so it lands now;
+the mode floor is strictly tighter and lands with S. A program this check
+accepts is **hold-legal, not yet certified mode-legal**, and the report says so.
+
+### D3 — the clamp, removed where it became unreachable
+
+Removed from the **clocked** site. **Kept at the unclocked site**, and that is
+scope rather than oversight: D1 is scoped to `ck_act`, so an *unclocked*
+open-drain SHIFT that takes its own clock low in the same dispatch
+(`clk_real & ~a_lvl`) can still ask for a short delay — `build_i2cframe(d=12)`
+is exactly that program, and it is the shape of the **certified** frame.
+Removing the clamp there would push data past the rise for a program silicon
+still accepts.
+
+⇒ **Owed, and it is a scope decision rather than mine to take:** extending the
+refusal to the unclocked idiom would retire the clamp entirely.
+
+### D4 — the boundary, from both sides
+
+Three images, one point each, built from `hold_bound.bound()` plus an offset so
+the boundary is stated once:
+
+| image | `d` | expected | where |
+| --- | --- | --- | --- |
+| `ckhold_under_image.hex` | `SDA_HOLD − 1` | refused | `tb_pinrange +MODE=4` |
+| `ckhold_at_image.hex` | `SDA_HOLD` | refused | `tb_pinrange +MODE=4` |
+| `ckhold_over_image.hex` | `SDA_HOLD + 1` | **runs** | `tb_trace +CKRUNS=1` |
+
+* Each is **legal in every other field** (real distinct clock pin, both pins
+  inside `uio`, count 7, fillers on `PIN_NONE`), so the delay is the only thing
+  that can refuse it — enforced by D6 rather than asserted in a docstring.
+* **The positive arm is in `tb_trace`, not `tb_pinrange`, and that is a
+  measured constraint.** An open-drain clocked lane parks on an *observed*
+  rise; `tb_pinrange` holds `uio_in` at a constant `8'hFF`, so a released SCL
+  reads high and never **transitions** — the lane would park until the
+  stretch-fault bound halted it and the arm would measure a hang.
+* **"It runs" is asserted on retired clocked actions**, never on an absent
+  flag: `config_err == 0` is also true of an engine that never started.
+  Measured: `tb_trace[D4]: ok — 131 clocked action(s) retired`.
+* Without the `over` arm, a refusal that was too **wide** — rejecting every
+  clocked open-drain program — would pass every other arm in this ruling.
+
+### D5 — the corpus, raised to a mode-legal delay
+
+Both clocked corpus programs ran at `d = 9`, which D1 now refuses, so they had
+to move. **`d = 70`**, derived and then corrected by measurement:
+
+* The corpus I2C lane is named **"I2C 400 kHz"** in `corpus.py`'s ruled pin map
+  — it is the shipped lane set's Fm row — so its floor is Fm's, not Fm+'s. A
+  program running at 694 kHz under a 400 kHz label is the mislabel class this
+  project refuses elsewhere.
+* Fm needs `t_LOW >= 1300 ns` = 65 cycles, so **65 is the arithmetic floor**.
+  At `d = 65` the *observed* floor came out **63** on `corpus_i2c` and **64** on
+  `corpus_all5` — two cycles short, EDF service jitter eating into the low
+  phase, the C2 finding in a second place. At `d = 70`: `t_LOW` **68** = 1360 ns,
+  `t_HIGH` 74 = 1480 against 600, `t_SU;DAT` 53 against 5, bit period 146
+  cycles = **342 kHz**, inside the ceiling. The 5 cycles over the arithmetic
+  floor are measured jitter, not padding.
+* **`corpus_all5` raises lane 0 only.** It is the only lane that is both clocked
+  and open-drain — lane 1 names `PIN_NONE` as its clock, lane 2 is push-pull,
+  lanes 3 and 4 run LEVEL/ARM/READBIT. The other four stay at 9..13 because the
+  image's job is **scheduler contention**, and raising all five would cut the
+  dispatch rate ~7× and quietly turn a stress image into a relaxed one. The
+  resulting 70-against-9..13 mix is a harder EDF spread than the arithmetic
+  progression it replaces.
+
+**Cost, reported rather than absorbed:**
+
+| | `d = 9` | `d = 70` |
+| --- | --- | --- |
+| bit period | 24 cycles | 146 cycles (6.1×) |
+| complete periods per 60,000 cycles (`corpus_i2c`) | — (refused) | 327 |
+| the same at `d = 16`, for scale | 1,332 | — |
+
+`+NCYC` is fixed per arm, so **simulated time did not grow**; what shrank is
+protocol work per cycle, ~6× fewer I2C transactions in the same budget.
+
+**Coverage: 26 uncovered before, 26 after, and the same 26 points.** Not just
+the count — `test/gate_coverage.py`'s diff is **27 line-number moves and
+nothing else**, and the gate reds both on an uncovered point with no entry and
+on an entry whose point is no longer uncovered. So no point was traded for
+another.
+
+That took one deliberate addition. D3's removal left **one** branch reachable
+only at `SDA_HOLD == 0` — the open-drain side of the clocked direct-drive arm,
+since every clocked open-drain action now routes to the hold path. The sweep
+duly reported it as the one new uncovered point (27 against 26).
+
+⇒ **The parameter point was built rather than waived.** A written reason would
+have said "unreachable at the default", which is true and is *not* the same as
+unreachable. `tb_trace ckod_hold0` (`-GSDA_HOLD_NS=0`) joins the sweep, the
+same shape as `tb_smoke`'s `spl1` arm — and it is a build we already ship a
+*measurement* arm for, so it was being simulated and simply never swept.
+
+### D6 — one image, one refusal
+
+`gate_degenerate_fields.DELIBERATE` now names **one refusal class** per refusal
+image and reds if the image trips a second. The reason is mechanical:
+`config_err` halts dispatch engine-wide, so whichever refusal fires **first** is
+the only one that ever runs — an arm certifying refusal A would be passing on
+refusal B. Five classes are decoded: `ck_degen`, `pin_real`, 1.6x, 1.6s and D1.
+
+Two findings came out of writing it:
+
+* **`cfgerr_image.hex` was undeclared** — the 1.6s refusal image, run by
+  `tb_pinrange +MODE=0` and by cocotb before that, for the whole life of the
+  gate. Not an oversight in the list: until D6 added the 1.6s predicate,
+  `violations()` **could not decode** the refusal the image exists to exercise,
+  so it tripped nothing and the gate had nothing to ask about. An audit can
+  only miss what it cannot decode.
+* **The gate's own selftest ran every probe at `d = 9`** with mode 0 and a real
+  clock pin. Under D1 all five would trip the hold refusal — including the
+  three asserting *no* refusal, which would have gone red, and the two
+  asserting one, which would have passed **for the wrong reason**. The probes
+  moved to `hold + 1`, and the comparison moved from `bool(v)` to the refusal
+  **class**, which is the distinction D6 exists to make.
+
+Current state: 32 images, 8 declared deliberate, **0 undeclared, 0 tripping
+more than one refusal**.
+
+### P5 — `build_ckfive`'s pin-map collisions, named
+
+`test/corpus.PAD_COLLISION` declares, by image, the **lanes** that collide with
+`project.v`'s pad override
+(`uio_oe_run = (uio_oe_eng & ~(1 << MISO_PIN)) | (miso_oe_q << MISO_PIN)`).
+Undeclared collision is red; a declaration whose image no longer collides is
+red too.
+
+| image | lanes | why |
+| --- | --- | --- |
+| `ckfive_image.hex` | 3 | consecutive pin pairs put it on 6/7; its **clock** is pin 7, whose OE the SPI-target release path overwrites. Measured modal `t_HIGH` 434 against a programmed 120. |
+| `ckod_image.hex` | 3 | same layout, so the `d = 240` lane lands there too. `gate_um10204` already skips it **by name**. |
+
+Those are the only two. The predicate is the same one `measure_phases` uses to
+mark a lane `pad_overridden`, and both read the pin numbers from `project.v`.
+
+⚠ **Scoped to lanes that can drive**, and the scope was forced by measurement:
+the first version flagged five images whose only offender was a parked
+`OP_REARM`-only filler lane sitting on pin 6. Declaring those would have been
+five vacuous entries burying the two real ones. It also sent `build_ckhold`'s
+fillers to `PIN_NONE` — a must-fire image should not rest on a don't-care
+staying one.
+
+### Findings that came out of ruling D
+
+**⛔ The clocked `OP_SHIFTIN`'s SDA release is not held.** `t_HD;DAT` on
+`corpus_i2c` histograms as `{0: 20, 15: 93, 280: 35, 282: 1}` — 93 correctly
+held data bits and **20 transitions with zero hold**. Attributed by a falsifier
+set rather than a story, because the certified frame contains START and STOP and
+measures 15:
+
+| variant | zero-hold samples |
+| --- | --- |
+| full sequence | 20 |
+| drop `OP_READBIT` | 21 |
+| drop `OP_START`/`OP_STOP` | 23 |
+| **SHIFT only** (drop the clocked `OP_SHIFTIN`) | **0** — all 140 at 15 |
+
+The clocked SHIFTIN releases SDA unconditionally on its first (LOW) dispatch,
+so the transition **from the last transmitted data bit into the ACK slot**
+carries no hold. A master must hold its last data bit past the fall before
+releasing for the ACK, so this is a real `t_HD;DAT` violation — the same class
+§9 fixed, in a place §9 did not reach.
+
+⇒ **The whole ruling-H measurement set is blind to it.** `build_ckod` is
+**SHIFT-only**, and `i2cframe` escapes it because its SCL fall and its SDA
+release are *different dispatches*, `d` apart. So §4b(a)'s green is sound for
+the transmit path and says nothing about the receive handover. This is ACK item
+(a)'s own question — Wilson asked it be *confirmed*; the answer is **no**, so it
+becomes a fix.
+
+**⛔ `holdbig` stopped being able to fire, because the chip got stricter.** The
+hold-ceiling must-fire ran at `-GSDA_HOLD_NS=800` = 40 cycles, and `ckod`'s
+smallest delay is 33 — so under D1 the program is **refused**, the engine halts,
+and the arm that was demonstrating the ceiling violation produces no traffic.
+It read as `0 lane(s) moved SDA while SCL high, 0 over the budget`: a must-fire
+failing in the one direction that is not a design regression.
+
+* Fixed at **500 ns = 25 cycles**, which must sit strictly between the Fm+
+  `t_VD;DAT − t_r` budget (17) and the image's smallest delay (33). Now fires on
+  **3 lanes**.
+* The gate was printing a **literal** `SDA_HOLD=40` while the script decided the
+  real value. Each arm's `SDA_HOLD_NS` now travels **in its own JSON**
+  (`measure_phases --hold-ns`), and the gate reports the boundary it actually
+  measured. A run condition that lives only in the launching script cannot be
+  checked against the data it produced.
+* The gate also now names **vacuity separately from failure**, because the fix
+  differs: "no lane measured anything" means choose a different hold, not that
+  the design regressed.
+
+**⛔ `benchset`'s plusarg scanner could not see a name containing a digit.** Its
+pattern was `[A-Z_]+`, so `+A2BOUND` was invisible — read by **thirteen**
+benches and supplied by one arm, for a whole arc, with this check silent.
+`+CKRUNS` was caught in one run. Widening the pattern turned up twelve benches
+running on an undeclared default.
+
+* ⇒ `SHARED_INCLUDE_DEFAULTS` declares a shared include's plusarg **default
+  once**, with its reason, instead of repeating `+A2BOUND=0` on 36 arms — and
+  the excuse is **scoped to benches that actually include the file**, so a bench
+  reading the name in its own body still has to supply it.
+* Priced in both directions, plus the digit case, in the gate's own must-fires.
+* **Fourth check-that-could-not-fire in this arc**, after the sweep's grep, the
+  backspace regex and the swallowed `NameError`. Ruling E's ledger.
+
+### Not claimed
+
+* **`gate_corpus_trace.py` cannot build**, and has not been able to since
+  `7a672b0`: `final procedures cannot enable/call tasks` on `progress.vh:214`
+  and `clocked_conform.vh:382` under iverilog. It is the **two-simulator**
+  corpus comparison and the thing that turns `corpus.py`'s `must move`
+  preconditions from claims into checks. It is not in `ci/run_gates.sh`, so the
+  suite is green without it. ⇒ **The corpus at `d = 70` was certified by the
+  Verilator sweep (3 rand-reset modes, no `*** FAIL`), by the loader audit and
+  by `measure_phases` — NOT by the iverilog cross-check.** Pre-existing, outside
+  this ruling, and owed.
+* **`t_HD;DAT` on the corpus programs is not adjudicated by §4b(a)**, because
+  their zero-hold samples come from the clocked SHIFTIN release above. Until
+  that is fixed, a `min >= 15` verdict on those arms would be a verdict about
+  the wrong transition.

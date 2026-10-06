@@ -45,6 +45,7 @@ ROOT = os.path.dirname(HERE)
 sys.path.insert(0, os.path.join(ROOT, "test"))
 sys.path.insert(0, os.path.join(HERE, "a2"))
 
+import hold_bound                         # noqa: E402
 from make_smoke_image import (            # noqa: E402
     ACT_BASE, ACT_BYTES, AW, N_LANES, OP_ARM, OP_LEVEL, OP_READBIT,
     OP_REARM,
@@ -164,6 +165,74 @@ def check_shift_clock_alias(lanes, headers):
 # ---------------------------------------------------------------------------
 # RULING 1 (toolchain half): a receive must name a pin it can sample
 # ---------------------------------------------------------------------------
+def check_clocked_hold_delay(lanes, headers):
+    """A CLOCKED OPEN-DRAIN action must ask for `d > SDA_HOLD` (ruling D2).
+
+    ⛔⛔ WHY, AND IT IS THE SILENT-CORRUPTION CLASS AGAIN. The SDA data hold
+    (ruling H) defers a data-pin write by `SDA_HOLD` cycles so the bit stays
+    stable across the SCL fall, which is what `t_HD;DAT` requires. That only
+    works if the bit period is LONGER than the hold: at `d <= SDA_HOLD` the
+    held value lands AFTER the next clock rise, and data moving while SCL is
+    high is a START or a STOP to any receiver. The wire then carries a
+    well-formed frame of the wrong thing.
+
+    ⭐ THE CHIP ALSO REFUSES IT (D1 in silicon), at DISPATCH: `ck_refuse` sets
+    `config_err` and halts the engine, so a store corrupted by a bad load
+    cannot run it either. This refusal is the other half -- the chip must not
+    be ASKED -- and here the whole program is visible, so the lane, the
+    opcode and the legal floor are all named.
+
+    ⭐⭐ THE BOUNDARY IS **READ FROM THE RTL**, never typed here. A second copy
+    of 15 in the assembler would keep refusing at 15 after the hold moved,
+    which is the direction that matters: the assembler would ACCEPT programs
+    silicon refuses, and the toolchain would be telling people their program
+    is fine. See `model/hold_bound.py`.
+
+    ⚠ THIS IS THE **STATIC HALF** OF D2 AND SAYS SO. The full ruling refuses
+    below a PER-PROGRAM floor, `d >= t_LOW(min, mode) + (r_i - C)`, computed
+    from that program's own A2 row -- which needs ruling S (the per-program
+    bound, still owed). `SDA_HOLD` is a HARD floor that holds for every
+    program and every mode, so it lands now; the mode floor is strictly
+    tighter and lands with S. ⛔ A program this check ACCEPTS is therefore not
+    yet certified mode-legal, only hold-legal, and the report says so rather
+    than implying the stronger claim.
+    """
+    try:
+        hold = hold_bound.bound()
+    except hold_bound.HoldBoundError as exc:
+        # ⛔ A BOUNDARY THAT CANNOT BE READ IS A REFUSAL, NOT A SKIP. Returning
+        # quietly here would accept every program in exactly the situation
+        # where the assembler has no idea what silicon does.
+        raise Reject(
+            "the SDA hold boundary could not be read from the RTL, so no "
+            "clocked delay can be judged: %s" % exc)
+    if hold == 0:
+        return hold
+    for ln in sorted(lanes):
+        if ln not in headers:
+            continue
+        _pin, clkpin, mode = headers[ln][0], headers[ln][1], headers[ln][2]
+        if clkpin >= N_PINS or mode != 0:
+            continue                      # no real clock, or push-pull
+        for (op, _p, lvl, dly, _q) in lanes[ln]:
+            if op not in (OP_SHIFT, OP_SHIFTIN) or not lvl:
+                continue                  # not a self-clocked action
+            if dly <= hold:
+                raise Reject(
+                    "lane %d runs a CLOCKED OPEN-DRAIN %s with delay %d, which "
+                    "is not above the %d-cycle SDA data hold. The held data bit "
+                    "would reach the pin after the next clock rise -- data "
+                    "moving while SCL is high, which to any receiver is a START "
+                    "or a STOP rather than a bit. The chip REFUSES this program "
+                    "(CONFIG_ERR, engine-wide halt), so it would not run. Use "
+                    "d >= %d, and note that the MODE floor is higher still: "
+                    "Fm+ needs t_LOW >= 25 cycles, Fm 65, Sm 235, plus that "
+                    "program's own service jitter (ruling S)."
+                    % (ln, "SHIFT" if op == OP_SHIFT else "SHIFTIN", dly,
+                       hold, hold + 1))
+    return hold
+
+
 def check_receive_pin(lanes, headers):
     """`OP_SHIFTIN` and `OP_READBIT` must name a REAL data pin.
 
@@ -309,6 +378,7 @@ def assemble(lanes, headers):
     check_queue_ownership(lanes)
     check_shift_clock_alias(lanes, headers)
     check_receive_pin(lanes, headers)
+    check_clocked_hold_delay(lanes, headers)
     prog, base, off = [], {}, ACT_BASE
     for ln in sorted(lanes):
         base[ln] = off
@@ -340,6 +410,7 @@ def report(lanes, headers):
         owner = check_queue_ownership(lanes)
         check_shift_clock_alias(lanes, headers)
         check_receive_pin(lanes, headers)
+        hold = check_clocked_hold_delay(lanes, headers)
         d_min, j = compute_j(lanes)
         img = assemble(lanes, headers)
     except Reject as e:
@@ -347,6 +418,8 @@ def report(lanes, headers):
         return 1
     print("  ACCEPTED")
     print("    image            : %d bytes" % len(img))
+    print("    SDA hold floor   : d > %d on a clocked open-drain lane "
+          "(read from src/pe_engine.v)" % hold)
     print("    queue ownership  : %s"
           % (", ".join("q%d -> lane %d" % (q, l)
                        for q, l in sorted(owner.items())) or "no TX consumers"))
@@ -363,6 +436,51 @@ def _demo_ok():
              2: [(OP_SHIFT, 2, 1, 45, 1), (OP_REARM, 0, 1, 45, 1)]}
     headers = {0: (8, 9, 1, 25, 50, 75), 2: (2, 1, 0, 45, 90, 135)}
     return lanes, headers
+
+
+def _hold_demo(delay, mode=0, level=1):
+    """`_demo_ok` with lane 2's clocked delay, mode and level moved.
+
+    ⭐ ONE BUILDER FOR FIVE ARMS rather than five near-copies: the arms differ
+    in exactly the three things the refusal is scoped on, so writing them as
+    separate functions would have let one drift and still read as a probe of
+    the same thing.
+    """
+    lanes, headers = _demo_ok()
+    lanes[2] = [(OP_SHIFT, 2, level, delay, 1), (OP_REARM, 0, 1, delay, 1)]
+    headers[2] = (2, 1, mode, delay, min(2 * delay, 255),
+                  min(3 * delay, 255))
+    return lanes, headers
+
+
+def _demo_hold_at():
+    """Clocked open-drain AT the boundary: refused, because t_SU;DAT is zero."""
+    return _hold_demo(hold_bound.bound())
+
+
+def _demo_hold_under():
+    return _hold_demo(hold_bound.bound() - 1)
+
+
+def _demo_hold_over():
+    """One cycle above: accepted. A refusal that is too wide rejects this."""
+    return _hold_demo(hold_bound.bound() + 1)
+
+
+def _demo_hold_pp():
+    """PUSH-PULL below the hold: accepted -- SPI has no t_HD;DAT to miss."""
+    return _hold_demo(hold_bound.bound() - 1, mode=1)
+
+
+def _demo_hold_unclocked():
+    """An UNCLOCKED open-drain SHIFT below the hold: out of D1's scope.
+
+    ⚠ ACCEPTED HERE AND STILL CLAMPED IN SILICON. `ck_hold_fits` survives at
+    the unclocked site precisely for this program class, so the delay is
+    hold-legal by a different mechanism -- and whether the refusal should be
+    widened to cover it is recorded as owed rather than decided here.
+    """
+    return _hold_demo(hold_bound.bound() - 1, level=0)
 
 
 def _demo_shared_queue():
@@ -473,6 +591,50 @@ def main() -> int:
                 print("    %s -> REJECTED, naming %s" % (name, ", ".join(want)))
                 print("        %s" % msg[:66])
 
+
+    # ---- MUST-FIRE: the SDA hold floor, from BOTH sides and in SCOPE ------
+    # ⛔⛔ THE BOUNDARY IS PROBED AT `SDA_HOLD`, ONE BELOW AND ONE ABOVE, and
+    # the equal case is the one that matters: a check written `d < SDA_HOLD`
+    # passes the `under` arm and accepts a program whose data reaches the pin
+    # on the same cycle the next phase dispatches -- zero setup before the
+    # rise. ⭐ AND THE SCOPE IS PRICED AS EXPLICITLY AS THE REFUSAL: a
+    # PUSH-PULL clocked lane is SPI and has no `t_HD;DAT` requirement to miss,
+    # and an UNCLOCKED SHIFT does not use the hold pipeline at all. Refusing
+    # either would reject shipped programs for a hazard they cannot reach.
+    print()
+    print("  --- must-fire: a clocked open-drain delay must clear the hold ---")
+    _hold = hold_bound.bound()
+    for name, build, want_reject, want in (
+            ("clocked open-drain at d = SDA_HOLD", _demo_hold_at, True,
+             ("lane 2", "SHIFT", "SDA data hold")),
+            ("... at d = SDA_HOLD - 1", _demo_hold_under, True,
+             ("lane 2", "START")),
+            ("... at d = SDA_HOLD + 1", _demo_hold_over, False, ()),
+            ("a PUSH-PULL clocked lane below the hold", _demo_hold_pp,
+             False, ()),
+            ("an UNCLOCKED open-drain SHIFT below the hold",
+             _demo_hold_unclocked, False, ())):
+        lanes_b, headers_b = build()
+        try:
+            check_clocked_hold_delay(lanes_b, headers_b)
+            got_reject, msg = False, ""
+        except Reject as e:
+            got_reject, msg = True, str(e)
+        if got_reject != want_reject:
+            print("    *** %-42s %s" % (name, "REJECTED" if got_reject
+                                        else "ACCEPTED"))
+            print("        wanted %s (SDA_HOLD = %d)"
+                  % ("a rejection" if want_reject else "acceptance", _hold))
+            rc = 1
+        else:
+            missing = [w for w in want if w not in msg]
+            if missing:
+                print("    *** %-42s REJECTED but did not name %s"
+                      % (name, missing))
+                rc = 1
+            else:
+                print("    %-42s %s" % (name, "rejected" if got_reject
+                                        else "accepted"))
 
     # ---- MUST-FIRE: the receive refusal's SCOPE, in both directions -------
     # ⛔ A REFUSAL THAT IS TOO WIDE BREAKS SHIPPED MECHANISMS, so the carve-outs

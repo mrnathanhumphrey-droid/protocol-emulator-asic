@@ -51,6 +51,21 @@ build_arm() {   # $1=armname  $2=extra verilator defines
   return 0
 }
 
+# ⛔⛔ EACH BUILD'S `SDA_HOLD_NS` IS RECORDED HERE AND TRAVELS WITH ITS DATA.
+# It is a BUILD parameter, so three arms of this run sit at three different
+# boundaries -- and `gate_um10204` was printing a literal for one of them. A
+# run condition that exists only in the launching script cannot be checked
+# against the measurement it produced. `run_arm` reads it out of this map by
+# ARM NAME, so an arm added without an entry records UNKNOWN rather than
+# inheriting the default.
+arm_hold_ns() {
+  case "$1" in
+    hold0)   echo 0 ;;
+    holdbig) echo 500 ;;
+    *)       echo 300 ;;      # the RTL's own default; clean/mutant builds
+  esac
+}
+
 run_arm() {     # $1=armname $2=image $3=nbytes $4=ncyc $5=label $6=sclhold
   local arm="$1"
   local img="$2"
@@ -58,6 +73,8 @@ run_arm() {     # $1=armname $2=image $3=nbytes $4=ncyc $5=label $6=sclhold
   local ncyc="$4"
   local label="$5"
   local hold="${6:-0}"
+  local hns
+  hns="$(arm_hold_ns "$arm")"
   ( cd "$OUT/build_$arm" && ./trace.sim \
       +IMG="$ROOT/$img" +NBYTES="$nb" +PEER=none +NCYC="$ncyc" \
       +SCLHOLD="$hold" +OUT="$OUT/trace_$label.txt" \
@@ -65,7 +82,8 @@ run_arm() {     # $1=armname $2=image $3=nbytes $4=ncyc $5=label $6=sclhold
       > "$OUT/run_$label.log" 2>&1
   [ -s "$OUT/trace_$label.txt" ] || { echo "  *** $label: no trace"; return 1; }
   "$PY" test/measure_phases.py --trace "$OUT/trace_$label.txt" \
-        --image "$img" --arm "$label" --json "$JSON" || return 1
+        --image "$img" --arm "$label" --json "$JSON" \
+        --hold-ns "$hns" || return 1
   return 0
 }
 
@@ -88,8 +106,24 @@ build_arm mutant "-DM_CK_RISE_ELIGIBLE"      || rc=1
 #              must fail at Fm+ where that budget is tightest. ⭐ A requirement
 #              with a floor and no ceiling is half a requirement: without this
 #              arm the gate would accept any hold at all above 15.
+#
+# ⛔⛔ `holdbig` WAS 800 ns AND RULING D1 MADE THAT ARM VACUOUS. 800 ns is 40
+# cycles, and `ckod`'s lowest delay is 33 -- so under D1 the lane is REFUSED
+# (`d <= SDA_HOLD`), `config_err` halts the engine, and the program that was
+# demonstrating the ceiling violation produces no traffic at all. MEASURED:
+# the must-fire went from firing to "0 lane(s) moved SDA while SCL high, 0
+# over the Fm+ budget" -- a must-fire that stopped being able to fire because
+# the chip got stricter, which is the most dangerous direction for one to fail.
+# ⇒ 500 ns = 25 cycles: still FAR over the Fm+ `t_VD;DAT - t_r` budget of 17,
+#   so the ceiling is genuinely violated, but BELOW `ckod`'s 33 so the program
+#   is legal, runs, and can be measured violating it.
+# ⚠ THE TWO CONSTRAINTS ARE NAMED BECAUSE THEY SQUEEZE: the hold must sit
+#   strictly between the Fm+ budget (17) and the image's smallest delay (33).
+#   Raise `CKOD_DELAYS[0]` or tighten the budget and this arm needs rechoosing
+#   -- `gate_um10204` reads the arm's own `sda_hold` out of the JSON rather
+#   than a literal, so it reports the boundary it actually measured.
 build_arm hold0   "-GSDA_HOLD_NS=0"                 || rc=1
-build_arm holdbig "-GSDA_HOLD_NS=800"                || rc=1
+build_arm holdbig "-GSDA_HOLD_NS=500"                || rc=1
 [ $rc -eq 0 ] || { echo "  *** a build failed; no measurement"; exit 1; }
 echo "    clean + mutant built"
 echo
