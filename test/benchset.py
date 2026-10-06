@@ -273,6 +273,22 @@ def corpus_arms():
                  "+OUT=probe_cov_trace_i2c_sclhold.txt",
                  "+NCYC=200000", "+SEED=1", "+ASYNC=0",
                  "+STAYLOAD=0", "+SCLHOLD=200"]))
+    # ⭐⭐ THE CLOCK-STRETCH FAULT BOUND, EXERCISED. `CK_STRETCH_TO` halts a
+    # lane whose clock never rises, and a 200-cycle hold is well inside the
+    # bound (it must be TOLERATED, losing nothing) while this one is far past
+    # it and must HALT the lane with `clk_stretch_err` set.
+    # ⛔ IT IS AN ARM RATHER THAN AN OWED POINT because the bound is new
+    # safety-critical behaviour: a fault detector nothing ever triggers has
+    # unknown strength, and "the lane halts" is exactly the kind of claim that
+    # would otherwise sit in a comment. ⚠ FOUND BY CI, not by design -- the
+    # cocotb bench holds `uio_in` constant so a released SCL never TRANSITIONS,
+    # two open-drain tests hung on a park with no bound, and a dead board would
+    # do the same thing.
+    out.append(("corpus_i2c_sclfault",
+                ["+IMG=test/corpus_i2c.hex", "+PEER=i2c",
+                 "+OUT=probe_cov_trace_i2c_sclfault.txt",
+                 "+NCYC=200000", "+SEED=1", "+ASYNC=0",
+                 "+STAYLOAD=0", "+SCLHOLD=5000"]))
     out.append(("corpus_i2cs_stretch",
                 ["+IMG=test/corpus_i2c.hex", "+PEER=i2cs",
                  "+OUT=probe_cov_trace_i2cs_stretch.txt",

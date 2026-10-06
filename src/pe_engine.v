@@ -92,6 +92,23 @@ module pe_engine #(
     // measured. An `ifdef` would have left the alternative un-buildable by
     // anything except a mutation run, which is the wrong frame for a
     // 169-flop decision.
+    // ⛔⛔ THE CLOCK-STRETCH FAULT BOUND, and it is a BUS-FAULT detector
+    // rather than a stretch limit. A peer may hold SCL low for as long as it
+    // likes (UM10204 sets no limit) and the lane parks on the observed rise;
+    // but a peer that VANISHES, or a bus whose clock never rises at all,
+    // would park the lane FOR EVER. Past this many cycles the lane HALTS and
+    // `clk_stretch_err` is raised -- the same "a timeout means ERROR, never
+    // success" rule `OP_ARM` follows.
+    // ⚠ IT CANNOT COME FROM THE ACTION: the action word is 24 of 24 bits and
+    // its `delay` field is the BIT PERIOD, so bounding the wait there is the
+    // one-bit-period bound this design had to remove. A build-time parameter
+    // is the only place left, and a fault bound is a property of the BOARD
+    // rather than of a program, so that is the right place anyway.
+    // ⭐ FOUND BY CI, not by reasoning: the cocotb bench holds `uio_in`
+    // CONSTANT, so a released SCL never TRANSITIONS and `pin_rise` never
+    // fires. Two open-drain tests hung. A bench that does not model the bus
+    // cannot produce a rise -- and neither can a dead board.
+    parameter integer CK_STRETCH_TO = 1023,
     parameter integer SPL     = 2
 ) (
     input  wire                 clk,
@@ -427,6 +444,9 @@ module pe_engine #(
   // stretch fault can be told from a peer-silent ARM timeout when the bound
   // lands.
   reg             l_ckpark [0:N_LANES-1];
+  // the parked-cycle count, per lane. ⚠ ~50 flops at DLY_W = 10 and 5 lanes,
+  // which is the price of not hanging on a dead bus.
+  reg [DLY_W-1:0] l_ckwdog [0:N_LANES-1];
   reg             l_cksamp [0:N_LANES-1];   // the bit latched AT the rise
   reg             l_ckgot  [0:N_LANES-1];   // ... and it is unconsumed
   reg [7:0]       l_tx     [0:N_LANES-1];   // THE TX PAYLOAD lives here, not
@@ -1276,6 +1296,7 @@ module pe_engine #(
         l_ckbit[i]  <= {BPW{1'b0}};
         l_ckwait[i] <= 1'b0;
         l_ckpark[i] <= 1'b0;
+        l_ckwdog[i] <= {DLY_W{1'b0}};
         l_cksamp[i] <= 1'b0;
         l_ckgot[i]  <= 1'b0;
 `ifdef M_SHARED_BITP
@@ -2163,6 +2184,27 @@ module pe_engine #(
         // peer that glitches the clock twice cannot overwrite the bit it
         // already answered with. The same "capture DISARMS" property the ARM
         // below needs, for the same reason.
+        // ⛔⛔ THE FAULT BOUND. A parked lane counts cycles; past
+        // CK_STRETCH_TO the bus is declared FAULTY -- the lane halts, the
+        // park and the arm are released and the sticky is raised. ⭐ IT
+        // HALTS RATHER THAN PROCEEDING, for the reason the ARM timeout
+        // already gives: a program that proceeded could not tell "the peer
+        // answered" from "the peer never answered", and would read a frame
+        // out of an idle line.
+        if (l_ckpark[i]) begin
+          if (l_ckwdog[i] >= CK_STRETCH_TO[DLY_W-1:0]) begin
+            l_live[i]       <= 1'b0;        // HALT this lane
+            l_armed[i]      <= 1'b0;
+            l_ckpark[i]     <= 1'b0;
+            l_ckwait[i]     <= 1'b0;
+            clk_stretch_err <= 1'b1;        // STICKY -- status bit 7
+            sticky_ovr      <= 1'b1;
+          end else begin
+            l_ckwdog[i] <= l_ckwdog[i] + {{(DLY_W-1){1'b0}}, 1'b1};
+          end
+        end else begin
+          l_ckwdog[i] <= {DLY_W{1'b0}};
+        end
         if (ck_hit[i]) begin
           l_cksamp[i] <= ck_bit[i];
           l_ckgot[i]  <= 1'b1;
