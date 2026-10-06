@@ -26,7 +26,16 @@ cannot live there without changing every caller and every must-fire that
 builds those tuples. This gate decodes the ASSEMBLED IMAGES instead, which is
 strictly stronger for the purpose: it sees what actually SHIPS, including
 images built by generators that never pass through `pe_asm`'s tuple form at
-all. ⛔ What it does NOT do is reject a program at assembly time, so a new
+all.
+
+⛔⛔ OWED, AGAINST THE `pe_asm` PROTOCOL FRONT-END. When the judge-usable
+assembler lands, its lane descriptions carry `count`, and the refusal moves to
+ASSEMBLY TIME as well -- a program is then rejected where it is WRITTEN rather
+than audited after it is built. This gate stays either way: it is the only
+thing that sees images produced by generators which never pass through the
+assembler at all. ⇒ Interim by ruling, not by accident.
+
+⛔ What it does NOT do is reject a program at assembly time, so a new
 generator can still emit a degenerate action -- it will fail here, in the gate,
 rather than at the call site.
 """

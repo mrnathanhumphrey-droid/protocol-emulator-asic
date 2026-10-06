@@ -169,10 +169,10 @@ npass=0; nfail=0
 for RMODE in $RMODES; do
 echo "  --- rand-reset +$RMODE ---"
 for i in $(seq 0 $((NARM - 1))); do
-  read -r top label key <<<"$("$PY" -c "
+  read -r top label key xfail <<<"$("$PY" -c "
 import json,sys
 r=json.load(open(sys.argv[1]))[int(sys.argv[2])]
-print(r['top'], r['label'], r['build'])
+print(r['top'], r['label'], r['build'], r.get('xfail', 0))
 " "$PLAN" "$i")"
   bin="$OUT/build_$key/$key.sim"
   [ -x "$bin" ] || { printf '  run   %-11s %-14s *** no binary\n' "$top" "$label"
@@ -242,6 +242,26 @@ print('\n'.join(json.load(open(sys.argv[1]))[int(sys.argv[2])]['args']))
   # `tb_csat`'s own line "sticky_ovr observed : 0 (recorded, not a failure)"
   # and failed an arm that had passed.
   nf=$(grep -cE '\*\*\* FAIL|FAILURE\(S\)|FAILED|%Error|Aborting' "$cut")
+  # ⛔⛔ A DECLARED XFAIL ARM MUST COME OUT RED, and that is how the VERDICT
+  # PIPELINE itself is priced. This extraction is a checker, and it was
+  # silently broken for as long as the watchdogs existed: the grep above
+  # wants `*** FAIL` while they printed a bare `FAIL`, and the cut above
+  # dropped `final`-block output, which is where they report from. "The
+  # sweep catches it" was false twice over.
+  # ⇒ `tb_verdict` emits a watchdog-shaped failure from a `final` block and
+  #   nothing else. If either half regresses it goes GREEN -- so green is
+  #   the failure here, and the message says why rather than just inverting.
+  if [ "$xfail" = "1" ]; then
+    if [ "$nf" -gt 0 ]; then
+      npass=$((npass + 1)); printf '  run   %-11s %-14s ok (xfail: red as required)
+' "$top" "$label"
+    else
+      nfail=$((nfail + 1))
+      printf '  run   %-11s %-14s *** XFAIL ARM CAME OUT GREEN -- the arm verdict no longer sees watchdog FAIL lines (log cut, or grep pattern)
+' "$top" "$label"
+    fi
+    continue
+  fi
   if [ $rc -eq 0 ] && [ "$nf" -eq 0 ] && [ -s "$dat" ]; then
     npass=$((npass + 1)); printf '  run   %-11s %-14s ok\n' "$top" "$label"
   else

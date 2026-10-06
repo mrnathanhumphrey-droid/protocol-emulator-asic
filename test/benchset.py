@@ -56,6 +56,19 @@ EXCLUDED = {
 # nothing and "no bytes" reads as a queue fault rather than a missing file.
 # ---------------------------------------------------------------------------
 #: benches whose `+NBYTES` must be supplied (they refuse to start without it)
+#: ⛔⛔ ARMS THAT MUST COME OUT **RED**, declared by name. The sweep's per-arm
+#: verdict is a checker, and it was SILENTLY BROKEN for as long as the
+#: watchdogs existed: the grep wanted `*** FAIL` while they printed a bare
+#: `FAIL`, and the log was cut at the first `$finish` while they report from
+#: `final` blocks. "The sweep catches it" was false twice over, and fixing it
+#: immediately turned four arms red.
+#: ⇒ `tb_verdict` prints a watchdog-shaped failure from a `final` block and
+#:   nothing else. Requiring it to be RED prices the log cut and the grep
+#:   pattern TOGETHER and permanently: if either regresses, this arm starts
+#:   passing and the sweep fails on it. A checker that has stopped checking
+#:   announces itself no other way.
+XFAIL = {("tb_verdict", "pipeline")}
+
 NEEDS_NBYTES = {"tb_tx", "tb_half", "tb_i2c", "tb_csat", "tb_jlane", "tb_status",
                 "tb_fifo",
                 "tb_rxbw", "tb_trace", "tb_witness", "tb_pinrange"}
@@ -124,6 +137,12 @@ CONFIG = {
     # unreachable. The bench slips the push phase a cycle per byte and asserts
     # when the coincidence happens -- it reports the phase it found (191), and
     # NEVER seeing it is a FAILURE rather than a pass.
+    # ⛔ THE VERDICT PIPELINE ITSELF, declared XFAIL. It instantiates no DUT:
+    # the subject is the harness, not the design.
+    "tb_verdict": {
+        "srcs": [],
+        "arms": [("pipeline", ["+NCYC=100"])],
+    },
     "tb_fifo": {
         "srcs": [],
         "arms": [("pushpop", ["+IMG=test/tx_image.hex", "+NCYC=60000"])],
@@ -585,7 +604,8 @@ def plan():
                          "_" + "_".join("%s%s" % (k.lower(), v)
                                         for k, v in sorted(gparams.items())))
             recs.append({"top": top, "label": label, "srcs": srcs,
-                         "args": full, "gparams": gparams, "build": key})
+                         "args": full, "gparams": gparams, "build": key,
+                         "xfail": 1 if (top, label) in XFAIL else 0})
     # ⛔ RULING 2: the cocotb suite's stimulus must be reachable
     probs.extend(cocotb_blind_spot(recs))
     return recs, probs

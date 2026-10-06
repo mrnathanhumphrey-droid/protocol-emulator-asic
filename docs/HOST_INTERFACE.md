@@ -111,12 +111,43 @@ a lane" explicitly.
 | 2 | RX overflow (sticky) |
 | 3 | `ovr` (sticky) |
 | 4 | **TX-full** — a push arrived on a full queue (sticky) |
-| 5 | **CONFIG_ERR** — the program violates 1.6s; the chip refused to run it |
+| 5 | **CONFIG_ERR** — the program is illegal; the chip refused to run it |
 | 6 | **RX-drop** — a payload arrived while one was still pending (sticky) |
-| 7 | 0 |
+| 7 | **CLOCK-STRETCH** — a clocked receive's consume point found no bit: the peer held the clock past the bus-fault bound (sticky) |
 
 **Overflow is reported in the stream, never as a stall**, because a host that
 has stopped reading cannot be told by a pin it is not reading.
+
+### ⛔ CONFIG_ERR HALTS THE WHOLE ENGINE, not just the offending lane
+
+An illegal action stops **every lane**, because `config_err` gates dispatch
+engine-wide: `ST_IDLE` will not dispatch at all while it is set. This is
+intended, and it is the same posture 1.6s already takes at LOAD time — a
+program the chip refuses is refused in full.
+
+**Why fail-stop rather than per-lane:** a program that contains one illegal
+action is a program whose provenance is in doubt, and the other lanes are
+driving *buses* — an I²C bus with other devices on it, an SPI target's
+tri-state MISO. Continuing to drive them from a program that has already
+been shown to be malformed is the wrong risk to take, and a host cannot tell
+"the lane I care about is fine" from "the part is running a corrupted
+image".
+
+**What counts as illegal at run time:**
+
+* a `SHIFT` lane whose clock pin **is** its data pin (1.6x) — the clock write
+  would overwrite the data bit, emitting a well-formed frame of wrong data;
+* a **self-clocked action with a zero bit count** — either a clocked
+  `SHIFTIN` at `count = 0`, or a clocked `SHIFT` at `count = 15`, where
+  `count + 1` wraps to zero in the 4-bit field.
+
+⚠ **A host sees CONFIG_ERR and must assume the image, not one lane, is**
+**suspect.** Reload before expecting anything else to run. The flag is
+sticky and the engine does not resume on its own.
+
+⭐ The refusal emits **no pin edges**: the drive arms are gated on the same
+condition, so a refused action does not move a pin on its way to being
+refused. `tb_pinrange +MODE=3` asserts exactly that, on both routes.
 
 ### How the flags clear, and what that costs you
 
