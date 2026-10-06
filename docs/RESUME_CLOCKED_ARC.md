@@ -146,6 +146,46 @@ Merge rule unchanged: **nothing to `cmos5l`** without `gds` + `precheck` +
 
 ---
 
+## ⛔⛔ CI WAS RED FOR FIVE COMMITS WHILE LOCAL WAS GREEN — fixed, read this
+
+`6abb6dd`, `ea0259f`, `2120012`, `e1fa642` and `80ff8d7` all show **`test`
+workflow FAILURE** on GitHub at **19 of 20**, with
+`model/a2/gate_um10204.py (no phase measurement at PE_PHASES_JSON)`. The
+earlier handoff recorded them as "CI-green". **That was wrong**, and the local
+20 of 20 was not: the two disagreed for a reason that is invisible on this box.
+
+**Cause.** `tb_trace.v` declared `reg [8*64-1:0] imgfile, outfile, peersel`,
+and `test/phases_run.sh` passes **absolute** paths. Here
+`/mnt/d/ProtocolEmulator/probe_phases/trace_clean.txt` is 59 bytes and fits; in
+CI the checkout is `/home/runner/work/protocol-emulator-asic/...`, so `+OUT` is
+**99** bytes and `+IMG` **83**. Verilog **silently truncates** a longer
+`$value$plusargs("%s")`, `$fopen` returned 0, `$fwrite` to fd 0 wrote nothing,
+and the simulation printed a clean `$finish` and **exit 0**. Every arm reported
+`*** no trace` with no reason.
+
+**Priced, not argued:** the same binary writes 2,001 lines to a 39-byte path and
+nothing to a 107-byte one. After the fix, 107 bytes writes 2,001 lines.
+
+**Fixed three ways**, because one would have left it undiagnosable again:
+
+1. `tb_trace.v`'s filename buffers → **256 bytes**.
+2. `$fopen` failure is now **fatal and named**, printing the path and the
+   buffer size. A bench that cannot record its measurement must say so itself.
+3. `phases_run.sh`'s `no trace` branch prints the **path length** and the head
+   of the run log. Five CI runs said `no trace` and nothing else.
+
+⚠ **LATENT, NOT FIXED:** **every other bench still declares `8*64-1`**
+(`tb_csat`, `tb_edge`, `tb_fifo`, `tb_half`, `tb_i2c`, `tb_jlane`, `tb_rxbw`,
+`tb_smoke`, `tb_tx`). They are safe **only** because `benchset` hands them
+RELATIVE `+IMG=test/...`. Anything that ever passes one an absolute path hits
+the identical silent truncation. Deliberately left rather than changed blind.
+
+⇒ **STANDING RULE FROM THIS:** a local `20 of 20` is **not** a CI green. Check
+`gh run list --branch dev` after every push. `ci/run_gates.sh`'s own banner
+says a green here is a green there — that claim held only because nobody looked.
+
+---
+
 ## Open, accepted or unexplained
 
 * ⛔ **`test/gate_corpus_trace.py` CANNOT BUILD**, and has not been able to

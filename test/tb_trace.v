@@ -148,7 +148,25 @@ module tb_trace;
 
   reg [7:0]  img [0:IMG_MAX-1];
   integer    img_bytes, i, jt, jr, cyc, fd, ncyc, seed, async_arm;
-  reg [8*64-1:0] imgfile, outfile, peersel;
+  // ⛔⛔⛔ 256 BYTES, NOT 64, AND THAT WAS A FIVE-COMMIT CI FAILURE. A Verilog
+  // string reg SILENTLY TRUNCATES a longer `$value$plusargs("%s")` value, and
+  // `test/phases_run.sh` passes ABSOLUTE paths. On this box
+  // `/mnt/d/ProtocolEmulator/probe_phases/trace_clean.txt` is 59 bytes and
+  // fitted; in CI the checkout is
+  // `/home/runner/work/protocol-emulator-asic/protocol-emulator-asic/...`, so
+  // `+OUT` is 99 bytes and `+IMG` 83. Both truncated, `$fopen` returned 0, and
+  // every arm reported "no trace" -- while the simulation printed a clean
+  // `$finish` and exit 0.
+  // ⇒ `gate_um10204` CANNOT-RUN on every push from `6abb6dd` to `80ff8d7`,
+  //   five commits, at 19 of 20, while the same tree measured 20 of 20 locally.
+  //   The gate was right: it reds rather than skipping. The LOCAL green was
+  //   real and the difference was the length of the checkout path.
+  // ⚠ PRICED, NOT ARGUED: the same binary writes 2,001 lines to a 39-byte path
+  // and nothing to a 107-byte one.
+  // ⚠ EVERY OTHER BENCH STILL DECLARES `8*64-1` and is fine ONLY because
+  // `benchset` hands them RELATIVE `+IMG=test/...`. That is a latent version of
+  // this defect, recorded in the handoff rather than fixed blind here.
+  reg [8*256-1:0] imgfile, outfile, peersel;
 
   // ---- A PORTABLE PRNG, AND $random IS NOT ONE -------------------------
   // ⛔⛔ `$random`'s GENERATOR IS NOT THE SAME IN THE TWO SIMULATORS. Seeded
@@ -362,6 +380,20 @@ module tb_trace;
     end
 
     fd = $fopen(outfile, "w");
+    // ⛔⛔ AN UNOPENED TRACE FILE IS FATAL AND NAMED. It was neither: `$fwrite`
+    // to fd = 0 writes nothing, the run finished with a clean `$finish` and
+    // exit 0, and the only symptom anywhere was `*** no trace` from the
+    // launching script with no reason attached. Five CI runs said exactly that
+    // and nothing more. A bench that cannot record its measurement must say so
+    // itself rather than leave the caller to guess.
+    if (fd == 0) begin
+      $display("*** FAIL tb_trace: $fopen could not open the trace file.");
+      $display("    OUT = %0s", outfile);
+      $display("    The filename buffer is 256 bytes and a LONGER +OUT is");
+      $display("    silently TRUNCATED, which is what this check caught in");
+      $display("    CI; the other cause is a missing output directory.");
+      $finish;
+    end
     // ⭐ The header records what produced the trace. A trace file with no
     // provenance is the clobber hazard the C/J measurements already hit once,
     // and it has since caught a real mismatch: `bytes=256` vs `bytes=51`.

@@ -80,7 +80,19 @@ run_arm() {     # $1=armname $2=image $3=nbytes $4=ncyc $5=label $6=sclhold
       +SCLHOLD="$hold" +OUT="$OUT/trace_$label.txt" \
       --x-initial unique +verilator+rand+reset+2 ) \
       > "$OUT/run_$label.log" 2>&1
-  [ -s "$OUT/trace_$label.txt" ] || { echo "  *** $label: no trace"; return 1; }
+  # ⛔⛔ SAY **WHY** THERE IS NO TRACE. This line used to print `no trace` and
+  # stop, and that is all five failing CI runs ever said: the bench had
+  # truncated a 99-byte `+OUT`, `$fopen` returned 0, and the simulation exited
+  # 0 with a clean `$finish`. The reason was sitting in the run log the whole
+  # time and nothing printed it. An error message is not a fix, but a failure
+  # with no message is not even a report.
+  if [ ! -s "$OUT/trace_$label.txt" ]; then
+    echo "  *** $label: no trace at $OUT/trace_$label.txt"
+    echo "      (+OUT was $(printf '%s' "$OUT/trace_$label.txt" | wc -c) bytes;"
+    echo "       tb_trace's filename buffer is 256)"
+    sed -n '1,12p' "$OUT/run_$label.log" 2>/dev/null | sed 's/^/      | /'
+    return 1
+  fi
   "$PY" test/measure_phases.py --trace "$OUT/trace_$label.txt" \
         --image "$img" --arm "$label" --json "$JSON" \
         --hold-ns "$hns" || return 1
