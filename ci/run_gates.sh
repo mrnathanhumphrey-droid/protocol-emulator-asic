@@ -95,6 +95,14 @@ GATES=(
   # dispatch gives d_min = 3 (the L_SYNC park, which makes no port demand) and
   # U = 5.0, refusing every clocked program ever written.
   model/a2/gate_dmin_clocked.py
+  # ⛔⛔ THE CLOCKED BUS TIMINGS, MEASURED OFF TRACES. It adjudicates a
+  # measurement that `test/phases_run.sh` produces (clean + mutant + two
+  # stretch arms + a push-pull control), and it is RED without it. ⭐ WHY IT IS
+  # IN CI AT ALL: the defect it closes -- an SCL high phase that was the
+  # synchroniser latency rather than the programmed delay -- was INVISIBLE to
+  # every existing check, because Layer B compares dispatch COUNTS and a park
+  # changes timing without changing a count.
+  model/a2/gate_um10204.py
   # ⭐ JOINED THE LIST when it took the RX lane-field width check. That check
   # guards against a received byte being attributed to the WRONG LANE if
   # `N_LANES` ever outgrows the explicit [2:0] on `e_rx_lane` -- and it lives
@@ -162,6 +170,13 @@ can_run() {
     test/gate_coverage.py)
       [ -n "${PE_COVERAGE_DAT:-}" ] && [ -f "${PE_COVERAGE_DAT:-}" ] \
         || { echo "no coverage data at PE_COVERAGE_DAT"; return 1; } ;;
+    # ⛔ SAME RULE AS THE COVERAGE GATE: a missing measurement is a FAILURE,
+    # not a skip. This gate exists because a timing defect survived every
+    # count-based check, so a version of it that quietly stops running would
+    # reopen exactly that hole.
+    model/a2/gate_um10204.py)
+      [ -n "${PE_PHASES_JSON:-}" ] && [ -f "${PE_PHASES_JSON:-}" ] \
+        || { echo "no phase measurement at PE_PHASES_JSON"; return 1; } ;;
   esac
   return 0
 }
@@ -383,6 +398,52 @@ if [ -z "${PE_COCOTB_DAT:-}" ] && [ "${PE_SKIP_COVERAGE:-0}" != "1" ]; then
   fi
 fi
 [ -n "${PE_COCOTB_DAT:-}" ] && echo "  PE_COCOTB_DAT=$PE_COCOTB_DAT"
+
+# ---------------------------------------------------------------------------
+# THE CLOCKED PHASE MEASUREMENT, which `gate_um10204.py` adjudicates.
+# ---------------------------------------------------------------------------
+# ⛔⛔ IT BUILDS TWO ARMS ON PURPOSE -- clean and `M_CK_RISE_ELIGIBLE` -- because
+# the gate requires the pre-fix design to MISS the bound it requires the fixed
+# one to meet. A single-arm measurement would leave a timing check nobody has
+# seen fail, which is how the watchdog verdict pipeline sat broken for an entire
+# arc.
+# ⚠ ~40s for two Verilator builds, declared. `PE_PHASES_JSON=<path>` reuses an
+# existing measurement; as with coverage, reuse is for iterating on the TABLE,
+# not for reporting a green on a tree the data does not describe.
+if [ -z "${PE_PHASES_JSON:-}" ] && [ "${PE_SKIP_PHASES:-0}" != "1" ]; then
+  echo
+  echo "  --- clocked phase measurement (F4) ---"
+  PH_OK=0
+  if command -v verilator >/dev/null 2>&1 || [ -n "${PE_VERILATOR:-}" ]; then
+    if bash test/phases_run.sh "$ROOT/probe_phases"; then PH_OK=1; fi
+  elif command -v wsl.exe >/dev/null 2>&1; then
+    echo "  verilator is not on PATH; delegating the measurement to WSL"
+    PWRAP="$ROOT/probe_ci_phases.sh"
+    {
+      echo '#!/bin/bash'
+      echo 'cd "$(dirname "$0")" || exit 1'
+      echo "export PE_VERILATOR=\"${PE_VERILATOR_WSL:-/opt/oss-cad-suite-2026-09-30/bin/verilator}\""
+      echo 'bash test/phases_run.sh "$PWD/probe_phases"'
+    } > "$PWRAP"
+    PWSLROOT="$(wsl_root "$ROOT")"
+    if ! MSYS_NO_PATHCONV=1 wsl.exe -e test -f "$PWSLROOT/probe_ci_phases.sh"
+    then
+      echo "  *** WSL cannot see $PWSLROOT/probe_ci_phases.sh"
+      echo "      (converted from $ROOT). Fix the path mapping rather than"
+      echo "      skipping the timing gate."
+    elif MSYS_NO_PATHCONV=1 wsl.exe -e bash "$PWSLROOT/probe_ci_phases.sh"; then
+      PH_OK=1
+    else
+      echo "  *** the WSL phase measurement failed -- the gate will be RED"
+    fi
+  else
+    echo "  *** neither verilator nor wsl.exe is available, so no phase"
+    echo "      timing can be measured. The gate is RED rather than skipped."
+  fi
+  [ "$PH_OK" = "1" ] && [ -f "$ROOT/probe_phases/phases.json" ] \
+    && export PE_PHASES_JSON="$ROOT/probe_phases/phases.json"
+fi
+[ -n "${PE_PHASES_JSON:-}" ] && echo "  PE_PHASES_JSON=$PE_PHASES_JSON"
 
 # ---------------------------------------------------------------------------
 # run them

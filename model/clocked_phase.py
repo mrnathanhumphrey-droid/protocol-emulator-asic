@@ -107,8 +107,17 @@ class Lane:
     progress of the CURRENT action. The bug was never the ownership, it was
     that a new action INHERITED the previous one's leftover phase."""
 
-    def __init__(self, name="L0"):
+    def __init__(self, name="L0", open_drain=True):
         self.name = name
+        # ⛔⛔ THE LANE'S PIN MODE IS PART OF THE CLOCKED SEMANTICS, and leaving
+        # it out of this model is what let model and RTL disagree about timing
+        # with every check green. `l_mode` resets to 0 = OPEN-DRAIN in the RTL,
+        # so that is the default here too.
+        # ⭐ ONLY AN OPEN-DRAIN LANE PARKS. Stretching is a peer pulling a
+        # RELEASED line low; on a push-pull clock the engine drives both levels
+        # and there is nothing to wait for -- parking one hung the SPI master
+        # lane when it was tried.
+        self.open_drain = open_drain
         self.phase = LOW
         self.ptr = 0            # bit pointer within the current byte
         self.clk = 1            # the clock line's level (released high at idle)
@@ -129,10 +138,10 @@ class Lane:
 
 class Dispatch:
     __slots__ = ("lane", "act", "idx", "phase", "ptr", "retire", "clk",
-                 "armed", "consumed", "t", "reactive")
+                 "armed", "consumed", "t", "reactive", "t_rise", "t_next")
 
     def __init__(self, lane, act, idx, phase, ptr, retire, clk, armed,
-                 consumed, t=0, reactive=False):
+                 consumed, t=0, reactive=False, t_rise=None):
         self.lane, self.act, self.idx = lane, act, idx
         self.phase, self.ptr, self.retire = phase, ptr, retire
         self.clk, self.armed, self.consumed = clk, armed, consumed
@@ -142,12 +151,25 @@ class Dispatch:
         # lane is a REACTIVE release and carries the sync jitter, not just the
         # COLLECT one.
         self.t, self.reactive = t, reactive
+        # ⭐ WHEN THE CLOCK ACTUALLY ROSE, which is NOT this dispatch's release
+        # time once a peer stretches. `t_HIGH` is measured from here, so the
+        # invariant that the high period is at least `d` has something to
+        # measure against rather than a formula to restate.
+        self.t_rise = t if t_rise is None else t_rise
+        # ⭐⭐ THE RELEASE TIME OF THE NEXT DISPATCH, RECORDED EVEN ON THE ONE
+        # THAT RETIRES. The gap rule is "d, unless this was an open-drain HIGH,
+        # in which case rise + L_SYNC + d" -- and a RETIRING dispatch's gap is
+        # the gap to the NEXT ACTION, so anything composing a program needs it.
+        # ⛔ RECORDED RATHER THAN RE-DERIVED, because the alternative is a
+        # second copy of the gap rule in the composer, and two copies of a rule
+        # this arc has already changed once is how they drift apart.
+        self.t_next = None
 
     def row(self):
         return [self.lane, self.act, self.idx, self.phase, self.ptr,
                 int(self.retire), self.clk, int(self.armed),
                 -1 if self.consumed is None else int(self.consumed),
-                self.t, int(self.reactive)]
+                self.t, int(self.reactive), self.t_rise]
 
 
 #: the lane period, the sync latency of an observed edge, and the programmed
@@ -157,7 +179,8 @@ D_PERIOD, L_SYNC, TIMEOUT = 20, 3, 4000
 
 
 def run_action(lane, act_index, op, nbits, tx_byte=0, peer_bits=None,
-               stretch=0, timeout=TIMEOUT, d=D_PERIOD):
+               stretch=0, timeout=TIMEOUT, d=D_PERIOD,
+               m_eligible_at_rise=False):
     """Dispatch-by-dispatch expansion of ONE clocked action.
 
     `peer_bits` is what the peer puts on the data line, consumed in order.
@@ -257,24 +280,63 @@ def run_action(lane, act_index, op, nbits, tx_byte=0, peer_bits=None,
                             retire, lane.clk, armed, consumed, t, reactive))
 
         # ---- the gap to the NEXT dispatch -------------------------------
-        # ⛔⛔ A PARK, NOT A RACE. If a capture was armed by this high phase,
-        # the lane waits for the OBSERVED RISE: the next dispatch is released
-        # `stretch + L_SYNC` after this one, however long `stretch` is, and the
-        # bit is in hand when it runs. Nothing is lost at any stretch length.
-        if pending is not None:
+        # ⛔⛔ A PARK, NOT A RACE, AND THE HIGH PERIOD IS COUNTED FROM THE RISE
+        # WE OBSERVE (F1). The lane waits for the observed rise and then holds
+        # the clock high for a further `d`:
+        #
+        #       next eligible = (t + stretch) + L_SYNC + d
+        #                        \_________/   \_____/   \_/
+        #                         the rise      seeing   the HIGH
+        #                         happens       it       period
+        #
+        # ⛔ WHY NOT `max(timestamp, observed rise)`, WHICH WAS THE FIRST
+        # PROPOSAL AND IS WRONG EXACTLY WHEN IT MATTERS. If the peer stretches
+        # past `d` the max resolves to the rise, the next dispatch fires one
+        # synchroniser latency later, and `t_HIGH` collapses to ~L_SYNC --
+        # right after a stretch, which is the moment compliance is being
+        # tested. Counting from the rise is UM10204's own clock-synchronisation
+        # rule: a master starts timing its HIGH period when it SEES SCL high.
+        # ⭐ IT NEEDS NO NEW ENCODING BITS. `d` already exists, and
+        # `ACT_FIELDS` is 24 of 24 bits with nothing spare. The clock comes out
+        # SYMMETRIC (low = d, high >= d), so `d` must clear the LARGER of the
+        # mode's two UM10204 minima.
+        #
+        # ⛔⛔ EVERY OPEN-DRAIN CLOCKED HIGH PHASE PARKS -- SHIFT AS WELL AS
+        # SHIFTIN (F2), AND THE MODEL WAS WRONG ABOUT THIS. It parked only for
+        # SHIFTIN because only a receive has a bit to collect; but a target may
+        # stretch on ANY bit, including one we are transmitting, and the lane is
+        # ruled stretch-safe with zero loss at any stretch. The RTL's
+        # `ck_act = ck_shift | ck_shiftin` was right and this model was wrong.
+        # ⚠ THE DIVERGENCE SURVIVED EVERY CHECK because Layer B compares
+        # dispatch COUNTS and the bounds table, and a park changes TIMING
+        # without changing the count. A checker blind to the dimension it is
+        # trusted on reads exactly like a checker that passed.
+        parked = (ph_exec == HIGH) and lane.open_drain
+        if parked:
             if stretch > timeout:
                 # ⚠ A BUS FAULT, not a slow peer: halt and report. The bits
                 # already taken stand; the action does NOT complete.
                 lane.halted = True
                 lane.stretch_err = True
                 break
-            t = t + stretch + L_SYNC
-            lane.captured = pending
-            pending = None
-            reactive = True        # released by the rise
+            rise = t + stretch              # the peer finally released it
+            out[-1].t_rise = rise
+            # ⛔ `m_eligible_at_rise` IS THE PRE-FIX DESIGN, KEPT REACHABLE SO
+            # I10 HAS A MUST-FIRE. Without it the invariant could not be shown
+            # to fail, and an invariant nobody has seen fail is indistinguish-
+            # able from one that cannot. This is what the RTL did, and what
+            # measured t_HIGH FLAT at 6 cycles across a 13x span in d.
+            t = (rise + L_SYNC) if m_eligible_at_rise else (rise + L_SYNC + d)
+            reactive = True                 # released by the observed rise
         else:
             t = t + d
             reactive = False
+        # the captured bit lands either way; only the RELEASE is reactive. A
+        # push-pull lane does not park, so its capture rides the ordinary gap.
+        if pending is not None:
+            lane.captured = pending
+            pending = None
+        out[-1].t_next = t
 
         i += 1
         if retire:
@@ -293,8 +355,23 @@ def expand(op, nbits):
     return seq
 
 
-def check_invariants(op, nbits, disp, lane):
-    """I1-I6. Returns a list of violations."""
+def high_widths(disp):
+    """Measured high-phase widths: (index, width) per HIGH with a successor.
+
+    ⭐ MEASURED FROM `t_rise`, NOT FROM THE RELEASE TIME. Once a peer stretches
+    those differ by the whole stretch, and the quantity UM10204 bounds is the
+    time the line is actually HIGH -- from the rise to the next fall.
+    """
+    out = []
+    for i, d in enumerate(disp):
+        if d.phase != HIGH or i + 1 >= len(disp):
+            continue
+        out.append((i, disp[i + 1].t - d.t_rise))
+    return out
+
+
+def check_invariants(op, nbits, disp, lane, period=None):
+    """I1-I10. Returns a list of violations."""
     bad = []
     want = expand(op, nbits)
     # ⛔ THE RECORDED PHASES, not a recomputation. The first version rebuilt the
@@ -340,6 +417,25 @@ def check_invariants(op, nbits, disp, lane):
         elif d.consumed is None:
             bad.append("I7: the COLLECT at dispatch %d consumed nothing, so "
                        "the sample it exists to take never arrived" % i)
+    # ⛔⛔ I10 -- THE HIGH PERIOD IS AT LEAST `d`, MEASURED FROM THE OBSERVED
+    # RISE, AT ANY STRETCH (F3). This is the invariant the whole fix exists to
+    # establish, and it is the one the pre-fix design FAILED: releasing the
+    # next dispatch AT the rise made `t_HIGH` the synchroniser latency --
+    # measured FLAT at 6 cycles while the programmed delay spanned 13x
+    # (9/25/60/120), against UM10204 minima of 13 (Fm+), 30 (Fm) and 200 (Sm)
+    # cycles at 50 MHz. A clock whose high period is not programmable cannot be
+    # brought into compliance by programming it.
+    # ⚠ IT IS CHECKED ONLY WHEN `d` IS GIVEN, and that is a deliberate
+    # weakness being named rather than hidden: callers that do not pass the
+    # period cannot have this checked. Every caller in this file passes it.
+    if period is not None:
+        for i, w in high_widths(disp):
+            if w < period:
+                bad.append("I10: the high phase at dispatch %d is %d cycle(s) "
+                           "wide, under the programmed d = %d. UM10204 counts "
+                           "t_HIGH from SCL SEEN high, so the next dispatch "
+                           "must be eligible at rise + d, not at the rise"
+                           % (i, w, period))
     return bad
 
 
@@ -378,13 +474,14 @@ PROGRAMS = {
 }
 
 
-def run_program(name, actions, stretch=0):
-    lane = Lane("L0")
+def run_program(name, actions, stretch=0, open_drain=True, d=D_PERIOD):
+    lane = Lane("L0", open_drain=open_drain)
     trace, rc = [], 0
-    print("  %s" % name)
+    print("  %s%s" % (name, "" if open_drain else "  (push-pull)"))
     for ai, (op, n) in enumerate(actions):
         disp = run_action(lane, ai, op, n,
-                          tx_byte=0xA5, peer_bits=[0] * n, stretch=stretch)
+                          tx_byte=0xA5, peer_bits=[0] * n, stretch=stretch,
+                          d=d)
         # ⛔ `start_action` ALREADY ZEROED THE POINTER, so the per-action count
         # IS `lane.ptr`. The first version subtracted a "pre" value and read
         # 7-of-8 on every action after the first -- an off-by-one invented by
@@ -392,7 +489,7 @@ def run_program(name, actions, stretch=0):
         lane_view = Lane("tmp")
         lane_view.ptr = lane.ptr
         lane_view.rx = lane.rx[-n:] if op == SHIFTIN else []
-        bad = check_invariants(op, n, disp, lane_view)
+        bad = check_invariants(op, n, disp, lane_view, period=d)
         trace += [d.row() for d in disp]
         print("    %-8s n=%-2d %2d dispatch(es)  %-28s %s"
               % (op, n, len(disp), "/".join(d.phase for d in disp)[:28],
@@ -460,7 +557,7 @@ def selftest():
     lane = Lane()
     d = run_action(lane, 0, SHIFTIN, 8)
     lane2 = Lane("tmp"); lane2.ptr = lane.ptr; lane2.rx = lane.rx
-    clean = check_invariants(SHIFTIN, 8, d, lane2)
+    clean = check_invariants(SHIFTIN, 8, d, lane2, period=D_PERIOD)
     print("    %-40s %s" % ("the unmutated model is silent",
                             "ok" if not clean else "*** %s" % clean[0]))
     if clean:
@@ -513,6 +610,45 @@ def selftest():
                  "ok" if ok else "*** expected halted=%s" % want_halt))
         if not ok:
             rc = 1
+
+    # ⛔⛔ I10 (F3) -- THE HIGH PERIOD IS AT LEAST `d` AT ANY STRETCH, AND THE
+    # PRE-FIX DESIGN MUST FAIL IT. This is the arc's whole result, so it is
+    # swept rather than spot-checked: four programmed periods spanning 13x, and
+    # four stretch regimes including one just under the bus-fault timeout.
+    print()
+    print("    --- I10: t_HIGH >= d from the OBSERVED rise, at any stretch ---")
+    print("      %-6s %-8s %-9s %-9s %-7s %s"
+          % ("d", "stretch", "t_HIGH", "want", "I10", "mutant fails?"))
+    for dd in (9, 25, 60, 120):
+        for label, st in (("none", 0), ("short", dd // 2),
+                          ("long", 10 * dd), ("near-TO", TIMEOUT - 1)):
+            lane = Lane(open_drain=True)
+            disp = run_action(lane, 0, SHIFTIN, 2, peer_bits=[1, 0],
+                              stretch=st, d=dd)
+            lv = Lane("tmp"); lv.ptr = lane.ptr; lv.rx = lane.rx
+            bad = check_invariants(SHIFTIN, 2, disp, lv, period=dd)
+            i10 = [b for b in bad if b.startswith("I10")]
+            widths = sorted({w for _i, w in high_widths(disp)})
+            want = dd + L_SYNC
+            # the mutant: eligible AT the rise, which is what the RTL did
+            lane_m = Lane(open_drain=True)
+            disp_m = run_action(lane_m, 0, SHIFTIN, 2, peer_bits=[1, 0],
+                                stretch=st, d=dd, m_eligible_at_rise=True)
+            lvm = Lane("tmp"); lvm.ptr = lane_m.ptr; lvm.rx = lane_m.rx
+            bad_m = check_invariants(SHIFTIN, 2, disp_m, lvm, period=dd)
+            m_fires = any(b.startswith("I10") for b in bad_m)
+            ok = (not i10) and widths == [want] and m_fires
+            print("      %-6d %-8s %-9s %-9d %-7s %s"
+                  % (dd, label, ",".join(str(w) for w in widths), want,
+                     "ok" if not i10 else "*** FAIL",
+                     "fires" if m_fires else "*** DID NOT FIRE"))
+            if not ok:
+                rc = 1
+                if widths != [want]:
+                    print("        *** t_HIGH %s, expected exactly %d"
+                          % (widths, want))
+    print("      ⇒ t_HIGH TRACKS d (= d + L_SYNC) and is stretch-independent;")
+    print("        the pre-fix design fails I10 at every point.")
 
     # ⭐ AND THE REACTIVE RELEASE IS NOW VISIBLE PER DISPATCH, which is what the
     # A2 modelling needs: EVERY post-HIGH dispatch on a clocked lane is

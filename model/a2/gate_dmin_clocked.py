@@ -58,9 +58,9 @@ of its own; §1 and §2 did not, and a check with no must-fire is one nobody has
 shown can fail. Four mutants, each breaking one thing, via a scratch probe:
 
     baseline (unmutated)                            rc=0  fail-lines=0
-    M1  closed_form SHIFT = (2n-1)d                 rc=1  fail-lines=10
-    M2  closed_form SHIFTIN drops n*(s+L_SYNC)      rc=1  fail-lines=7
-    M3  compose drops the cross-action `+d`         rc=1  fail-lines=1
+    M1  closed_form SHIFT drops the post-HIGH gaps  rc=1  fail-lines=10
+    M2  closed_form SHIFTIN drops n*post_high       rc=1  fail-lines=7
+    M3  compose drops the cross-action gap          rc=1  fail-lines=1
     M4  a 1-bit SHIFT spacing = d (breaks the floor) rc=1  fail-lines=7
 
 ⚠ M3 FOUND A DEFECT IN THIS GATE, not in the model. Dropping the cross-action
@@ -107,13 +107,21 @@ except Exception:
 # =========================================================================
 # THE COMPOSITION -- one lane, one absolute timeline
 # =========================================================================
-def compose(actions, d=D_PERIOD, stretch=0):
+def compose(actions, d=D_PERIOD, stretch=0, open_drain=True):
     """Run `actions` on one lane and return `(t_abs, Dispatch)` in order.
 
     ⛔ `run_action` RESETS `t` TO 0 PER ACTION, so each action's rows are
-    offset by the running `t0` and `t0` advances by `retire.t + d`.
+    offset by the running `t0`, and `t0` advances by the retiring dispatch's
+    OWN recorded `t_next`.
+    ⭐⭐ `t_next` AND NOT `+ d`, AND THE DIFFERENCE IS THE WHOLE F1 FIX. The
+    cross-action gap is `d` only when the retiring dispatch is a COLLECT; when
+    it is an open-drain HIGH -- which is how every clocked SHIFT retires -- the
+    lane is PARKED and the next action is released at `rise + L_SYNC + d`. The
+    first version of this composer added a flat `d` and would now understate
+    every SHIFT-terminated spacing. Reading the model's own recorded gap means
+    this file holds no copy of the rule to get wrong.
     """
-    lane = Lane("L0")
+    lane = Lane("L0", open_drain=open_drain)
     out, t0 = [], 0
     for ai, (op, n) in enumerate(actions):
         disp = run_action(lane, ai, op, n, tx_byte=0xA5,
@@ -133,7 +141,11 @@ def compose(actions, d=D_PERIOD, stretch=0):
                 "the retire is not the last dispatch of action %d" % ai)
         for x in disp:
             out.append((t0 + x.t, x))
-        t0 = t0 + rets[0].t + d
+        if rets[0].t_next is None:
+            raise AssertionError(
+                "action %d retired without recording its gap to the next "
+                "action, so the program cannot be composed" % ai)
+        t0 = t0 + rets[0].t_next
     return out
 
 
@@ -159,17 +171,10 @@ def _guard_positive(what, sp):
     return sp
 
 
-def spacings(rows, cyclic_first=None):
+def retire_spacings(rows):
     """Consecutive spacings over the REFILL-BEARING dispatches (the retires)."""
     ts = [t for t, x in rows if x.retire]
-    out = [b - a for a, b in zip(ts, ts[1:])]
-    # ⭐ THE WRAP-AROUND IS INCLUDED, because these programs are FRAMES that
-    # repeat. The gap from the last action's retire to the next frame's first
-    # retire is a real inter-refill spacing, and leaving it out would measure a
-    # program that runs once.
-    if cyclic_first is not None:
-        out.append(cyclic_first)
-    return out
+    return [b - a for a, b in zip(ts, ts[1:])]
 
 
 def all_dispatch_spacings(rows):
@@ -181,20 +186,58 @@ def all_dispatch_spacings(rows):
 # =========================================================================
 # THE SECOND ROUTE -- closed forms from the model's gap rules
 # =========================================================================
-def closed_form(op, n, d, stretch=0):
-    """Retire-to-retire spacing INTO an action of this shape.
+def post_high_gap(d, stretch=0, open_drain=True):
+    """The gap after a HIGH dispatch: a park on open-drain, otherwise `d`."""
+    return (stretch + L_SYNC + d) if open_drain else d
 
-    SHIFT: 2n dispatches and `pending` is never armed (only SHIFTIN arms a
-    capture), so every gap is `d`; first->retire is `(2n-1)*d` and the
-    preceding `+d` makes `2n*d`.
 
-    SHIFTIN: 2n+1 dispatches -- n LOW, n HIGH, one COLL. The gap after each
-    HIGH is the park (`stretch + L_SYNC`); the gap after each LOW is `d`.
-    first->retire is `n*d + n*(stretch + L_SYNC)`, plus the preceding `d`.
+def span(op, n, d, stretch=0, open_drain=True):
+    """First dispatch of an action to its RETIRING dispatch.
+
+      SHIFT n    2n dispatches (n LOW, n HIGH), so 2n-1 internal gaps: `d`
+                 after each of the n LOWs, and a post-HIGH gap after each of
+                 the FIRST n-1 HIGHs. The last HIGH retires.
+                 => n*d + (n-1)*post_high
+
+      SHIFTIN n  2n+1 dispatches (n LOW, n HIGH, one COLL), so 2n internal
+                 gaps: `d` after each LOW and a post-HIGH gap after each HIGH.
+                 => n*d + n*post_high
     """
+    ph = post_high_gap(d, stretch, open_drain)
     if op == SHIFT:
-        return 2 * n * d
-    return (n + 1) * d + n * (stretch + L_SYNC)
+        return n * d + (n - 1) * ph
+    return n * d + n * ph
+
+
+def gap_after_retire(op, d, stretch=0, open_drain=True):
+    """The gap from an action's RETIRE to the next action's first dispatch.
+
+    ⛔⛔ IT DEPENDS ON WHAT THE ACTION RETIRES ON, AND THAT IS THE CORRECTION
+    THE CROSS-CHECK FORCED. A SHIFT retires ON a high phase, so an open-drain
+    lane is PARKED at that moment and the next action waits for the rise plus
+    `d`. A SHIFTIN retires on a COLLECT, which is not a high phase, so its gap
+    is the plain `d`.
+    """
+    return post_high_gap(d, stretch, open_drain) if op == SHIFT else d
+
+
+def closed_form(prev_op, op, n, d, stretch=0, open_drain=True):
+    """Retire-to-retire spacing INTO an action, given what PRECEDED it.
+
+    ⭐⭐ RE-DERIVED AFTER F1, AND THE FIRST RE-DERIVATION WAS WRONG. The gap
+    rule changed twice in this arc -- every open-drain clocked high phase now
+    parks (F2), and the park releases at `rise + L_SYNC + d` (F1) -- so the old
+    `2n*d` / `(n+1)*d + n*(stretch+L_SYNC)` forms could not be carried.
+    ⛔ THE ERROR WORTH RECORDING IS THE SECOND ONE, NOT THE FIRST: the rewrite
+    charged each spacing the gap after its OWN retiring dispatch instead of the
+    gap after its PREDECESSOR's. The totals still matched -- 66 + 341 equals
+    63 + 344 -- so a sum check would have passed while every individual
+    spacing was misattributed by exactly L_SYNC, and `d_min` is a MINIMUM over
+    those individuals. ⭐ The two-route cross-check caught it on the first run,
+    which is the entire reason this gate computes the same quantity twice.
+    """
+    return (gap_after_retire(prev_op, d, stretch, open_drain)
+            + span(op, n, d, stretch, open_drain))
 
 
 # the programs the pre-registered claim names, plus the corpus shapes already
@@ -202,15 +245,39 @@ def closed_form(op, n, d, stretch=0):
 CLAIMED = ("FRAM write n=4", "FRAM random read")
 
 
-def measure(name, actions, d, stretch=0):
-    rows = compose(actions, d=d, stretch=stretch)
-    first = closed_form(actions[0][0], actions[0][1], d, stretch)
-    sp = spacings(rows, cyclic_first=first)
-    derived = [closed_form(op, n, d, stretch) for op, n in actions[1:]] + [first]
+def measure(name, actions, d, stretch=0, open_drain=True):
+    """Compose TWO frames so the wrap-around spacing is MEASURED, not computed.
+
+    ⛔ THE FIRST VERSION APPENDED A COMPUTED WRAP VALUE to the measured list,
+    which put a closed-form number inside the "measured" column and compared it
+    against itself. These programs are frames that repeat, so running two of
+    them measures the wrap for real -- and the wrap matters, because it is the
+    spacing into the first action of the next frame.
+    """
+    twice = list(actions) * 2
+    rows = compose(twice, d=d, stretch=stretch, open_drain=open_drain)
+    sp = retire_spacings(rows)
+    ops = [a[0] for a in twice]
+    ns = [a[1] for a in twice]
+    derived = [closed_form(ops[k - 1], ops[k], ns[k], d, stretch, open_drain)
+               for k in range(1, len(twice))]
     naive = all_dispatch_spacings(rows)
     _guard_positive("%s refill-bearing" % name, sp)
     _guard_positive("%s all-dispatch" % name, naive)
     return rows, sp, derived, naive
+
+
+def structural_floor(d, stretch=0, open_drain=True):
+    """The tightest spacing any clocked program can produce, over every
+    (predecessor, action) pair -- not over actions alone."""
+    best = None
+    for prev in (SHIFT, SHIFTIN):
+        for op in (SHIFT, SHIFTIN):
+            for n in range(1, 9):
+                v = closed_form(prev, op, n, d, stretch, open_drain)
+                if best is None or v < best:
+                    best = v
+    return best
 
 
 def main() -> int:
@@ -267,20 +334,22 @@ def main() -> int:
     # ---------------------------------------------------------------
     print()
     print("  --- 2. the structural result ---")
-    print("    the smallest clocked action is a 1-bit SHIFT: 2 dispatches,")
-    print("    spacing 2d. Every other shape is larger (a SHIFTIN n adds")
-    print("    n*L_SYNC on top of (n+1)*d). So for ANY clocked program:")
+    print("    the tightest pair is a SHIFTIN (which retires on a COLLECT,")
+    print("    so its gap is a plain d) followed by a 1-bit SHIFT (whose span")
+    print("    is one d). Every other pair is larger, so for ANY clocked")
+    print("    program:")
     print()
     print("          d_min(refill-bearing) >= 2d  >  d")
     print()
     floor_ok = True
     for d in (D_PERIOD, jp.D_MIN_SHIPPED):
-        worst = min(closed_form(op, n, d)
-                    for op in (SHIFT, SHIFTIN) for n in range(1, 9))
-        if worst != 2 * d:
+        worst = structural_floor(d)
+        want = 2 * d
+        if worst != want:
             floor_ok = False
-        print("    d = %-4d  tightest over every legal (op, n): %-5d  2d = %d  %s"
-              % (d, worst, 2 * d, "ok" if worst == 2 * d else "*** FAIL"))
+        print("    d = %-4d  tightest over every (prev, op, n): %-5d  "
+              "2d = %-5d  %s"
+              % (d, worst, want, "ok" if worst == want else "*** FAIL"))
     if not floor_ok:
         print("    *** FAIL: the floor is not 2d, so the claim that clocking")
         print("        cannot tighten d_min does not hold as stated.")
@@ -329,38 +398,69 @@ def main() -> int:
         print("      and it is the next step, not this one.")
 
     # ---------------------------------------------------------------
-    # 4. MUST-FIRE: the wrong definition must refuse these programs
+    # 4. MUST-FIRE: the wrong definition must CHANGE THE VERDICT
     # ---------------------------------------------------------------
     print()
-    print("  --- 4. must-fire: counting EVERY dispatch must REFUSE them ---")
-    print("    ⛔ This is the whole reason §3a exists. If the naive definition")
-    print("    happened to admit these programs too, the distinction would be")
-    print("    cosmetic and the prereg would have fixed a definition that did")
-    print("    not matter. It is not cosmetic, and here is the price:")
-    print("    %-22s %-12s %-10s %-8s %s"
-          % ("program", "naive d_min", "U", "adm?", "must-fire"))
-    fired = 0
+    print("  --- 4. must-fire: counting EVERY dispatch must change a verdict ---")
+    print("    ⛔⛔ THIS MUST-FIRE WAS REWRITTEN BECAUSE F1 INVALIDATED IT, AND")
+    print("    THAT IS WORTH RECORDING RATHER THAN QUIETLY REPLACING. Before")
+    print("    F1 the post-HIGH gap was the L_SYNC park -- 3 cycles -- so the")
+    print("    naive all-dispatch `d_min` was 3 on every clocked program, U was")
+    print("    5.0, and the wrong definition refused EVERYTHING. F1 made the")
+    print("    post-HIGH gap `L_SYNC + d`, so the tightest inter-dispatch gap")
+    print("    on a clocked lane is now `d` itself and there is no sub-d gap")
+    print("    left anywhere. The old must-fire therefore stopped firing -- not")
+    print("    because the definition stopped mattering, but because the thing")
+    print("    it pointed at was fixed.")
+    print()
+    print("    ⇒ WHAT §3a STILL BUYS, in two parts:")
+    print()
+    print("    (a) it changes the NUMBER, and by a lot:")
+    print("      %-22s %-12s %-14s %s"
+          % ("program", "naive", "refill-bearing", "understated by"))
+    understated = 0
     for name in CLAIMED:
         dmin, _pf, _adm, _j, naive_dmin = verdicts[name]
-        u = jp.utilisation(naive_dmin)
-        adm = jp.admissible(naive_dmin)
-        this = not adm
+        if naive_dmin < dmin:
+            understated += 1
+        print("      %-22s %-12d %-14d %.1fx"
+              % (name, naive_dmin, dmin, dmin / float(naive_dmin)))
+    print()
+    print("    (b) it changes the VERDICT wherever `d` is tight. The naive")
+    print("    reading charges the program `d`; the correct one charges at")
+    print("    least `2d`. Between the utilisation floor and twice it, the two")
+    print("    definitions disagree about whether the program may run at all:")
+    print("      %-6s %-10s %-11s %-10s %-11s %s"
+          % ("d", "naive", "naive adm?", "correct", "correct adm?", "must-fire"))
+    fired = 0
+    trials = 0
+    for dd in (7, 9, 12, 14):
+        naive_d = dd                      # the tightest all-dispatch gap IS d
+        corr_d = structural_floor(dd)
+        na, ca = jp.admissible(naive_d), jp.admissible(corr_d)
+        this = (not na) and ca
+        trials += 1
         if this:
             fired += 1
-        print("    %-22s %-12d %-10.3f %-8s %s"
-              % (name, naive_dmin, u, "yes" if adm else "NO",
-                 "fired" if this else "*** DID NOT FIRE"))
-    if fired != len(CLAIMED):
-        print("    *** MUST-FIRE FAILED: the naive definition did not refuse")
-        print("        every claimed program, so this gate is not measuring")
-        print("        the thing §3a was written to prevent. A must-fire that")
-        print("        does not fire is indistinguishable from one that cannot.")
+        print("      %-6d %-10d %-11s %-10d %-11s %s"
+              % (dd, naive_d, "yes" if na else "NO", corr_d,
+                 "yes" if ca else "NO", "fired" if this else "-"))
+    if fired == 0:
+        print("    *** MUST-FIRE FAILED: at no tested `d` does the naive")
+        print("        definition refuse a program the correct one admits, so")
+        print("        the distinction has not been shown to decide anything.")
+        print("        A must-fire that does not fire is indistinguishable")
+        print("        from one that cannot.")
+        rc = 1
+    elif understated != len(CLAIMED):
+        print("    *** MUST-FIRE FAILED: the naive definition did not")
+        print("        understate every claimed program's d_min.")
         rc = 1
     else:
-        print("    ⇒ the naive reading refuses BOTH, at U far above 1, over a")
-        print("      gap (%d cycles, the L_SYNC park) that makes no port demand"
-              % L_SYNC)
-        print("      at all. The definition is load-bearing.")
+        print("    ⇒ fired at %d of %d tested delays, and understated d_min on"
+              % (fired, trials))
+        print("      both claimed programs. The definition decides both the")
+        print("      number and, at tight d, the admission.")
 
     # ---------------------------------------------------------------
     # 5. the corpus shapes, for completeness

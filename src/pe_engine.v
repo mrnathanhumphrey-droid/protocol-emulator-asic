@@ -704,6 +704,51 @@ module pe_engine #(
                                // prescaler's enable
   wire [N_LANES-1:0] ck_hit;    // a clocked SHIFTIN's rise, OBSERVED
   wire [N_LANES-1:0] ck_bit;    // ... and the data pin at that instant
+  // ⭐⭐ THE PARKED LANE'S OWN ACTION DELAY, COMBINATIONAL AND ZERO FLOPS (F1).
+  // The HIGH period is counted from the rise we OBSERVE, so the release after
+  // a park is `rise + d` -- which needs `d` for a lane that is NOT `cur`.
+  // ⛔ IT COMES FROM THE LANE'S HEAD SLOT, AND THAT IS SOUND ONLY BECAUSE A
+  // HELD CLOCKED ACTION RETIRES NOTHING: `ST_WB`'s `ck_hold_eff` arm skips the
+  // PC advance, the INVALIDATION and the buffer swap, so `l_act[hix[gi]]` still
+  // holds the action being clocked for the whole park. Capturing `a_dly` into a
+  // per-lane register instead would have cost N_LANES * DLY_W = 50 flops to
+  // store a word that is already sitting in a register.
+  // ⚠ THE PRECONDITION IS LOAD-BEARING, so it is named here rather than left
+  // to be rediscovered: if a held action ever began invalidating its slot, this
+  // would silently read the NEXT action's delay.
+  wire [DLY_W-1:0] ck_dly [0:N_LANES-1];
+  // ⛔⛔⛔ F1 -- A CLOCKED PARK COUNTS ITS HIGH PERIOD FROM THE RISE IT
+  // OBSERVES, so it releases at `now + d` rather than at `now`. This is the fix
+  // for a MEASURED compliance failure: rebasing a parked clocked lane to `now`
+  // made the next dispatch eligible immediately, so the SCL HIGH phase was the
+  // synchroniser latency and nothing else -- measured FLAT at 6 cycles while
+  // the programmed delay spanned 13x (d = 9, 25, 60, 120), with t_LOW tracking
+  // d exactly. UM10204 wants t_HIGH >= 13 cycles (Fm+), 30 (Fm) and 200 (Sm) at
+  // 50 MHz, so the clocked scheme met NO I2C mode -- and could not be brought
+  // into compliance by programming it, because the high phase was not
+  // programmable at all.
+  // ⭐ IT IS UM10204's OWN CLOCK-SYNCHRONISATION RULE, not an invention here: a
+  // master starts timing its HIGH period when it SEES SCL high. The
+  // synchroniser lag therefore only ADDS to t_HIGH (measured d + L_sync), which
+  // is the safe direction for compliance.
+  // ⛔ WHY NOT `max(timestamp, observed rise)`, WHICH WAS THE FIRST PROPOSAL AND
+  // IS WRONG EXACTLY WHEN IT MATTERS: once the peer stretches past `d` the max
+  // resolves to the rise, the next dispatch fires one synchroniser latency
+  // later, and t_HIGH collapses back to ~L_sync -- right after a stretch, which
+  // is the moment the rule is being tested. Counting from the rise is
+  // stretch-safe at ANY stretch length.
+  // ⭐ ZERO NEW ENCODING BITS: `d` is the action's existing delay field, and
+  // `ACT_FIELDS` is 24 of 24 bits with nothing spare for a second duration.
+  // ⚠ THE CLOCK IS THEREFORE SYMMETRIC (low = d, high = d + L_sync), so `d`
+  // must clear the LARGER of the mode's two UM10204 minima, which is t_LOW.
+  // ⛔⛔ AN ORDINARY `OP_ARM` STILL REBASES TO `now`, AND MUST. Ruling 1's
+  // `ARM -> no-op(half) -> sample` idiom anchors UART-rx's sample grid to the
+  // peer's detected edge; adding a delay there would slide the whole grid and
+  // break every reactive lane. `l_ckpark` is the ONLY thing separating the two
+  // cases.
+  // ⛔ M_CK_RISE_ELIGIBLE restores the pre-fix behaviour so the compliance
+  // checker has a must-fire: under it t_HIGH is the synchroniser latency again.
+  wire [TS_W-1:0] ck_rebase [0:N_LANES-1];
   generate
     for (gi = 0; gi < N_LANES; gi = gi + 1) begin : g_arm
       // ⛔⛔⛔ RANGE-GUARDED, AND THIS WAS A LIVE THIRD INSTANCE OF THE CLASS.
@@ -757,6 +802,13 @@ module pe_engine #(
       // serial readback -- the defect `pinnone_image.hex` exists to catch on
       // the unclocked path, guarded here at birth instead.
       assign ck_bit[gi] = ckd_real ? pin_in[l_pin[gi]] : 1'b0;
+      // the delay field of the action this lane is currently clocking
+      assign ck_dly[gi] = l_act[hix[gi]][BQW+BPW +: DLY_W];
+`ifdef M_CK_RISE_ELIGIBLE
+      assign ck_rebase[gi] = now;
+`else
+      assign ck_rebase[gi] = now + (l_ckpark[gi] ? {{(TS_W-DLY_W){1'b0}}, ck_dly[gi]} : {TS_W{1'b0}});
+`endif
     end
   endgenerate
 
@@ -2277,8 +2329,11 @@ module pe_engine #(
                                                 // edge must not re-rebase and
                                                 // slide the grid forward on
                                                 // every peer transition
+          // ⭐ THE REBASE. `ck_rebase` is `now` for an ordinary `OP_ARM` and
+          // `now + d` for a lane released from a CLOCKED PARK -- see its
+          // declaration for why, which is a measured compliance failure.
 `ifndef M_NO_REBASE
-          l_timestamp[i] <= now;                // ⭐ THE REBASE
+          l_timestamp[i] <= ck_rebase[i];
 `endif
         end
       end

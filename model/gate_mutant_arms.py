@@ -131,6 +131,21 @@ EXPECT = {
         "reports OK in every one of those runs, because the DISPATCH COUNT is "
         "unchanged by a stretch -- which is the point of capturing on the rise, "
         "and also why bit loss needs its own check and not a conformance one."),
+    "M_CK_RISE_ELIGIBLE": (2,
+        "ONE LINE IN EACH ARM: `ck_rebase` is a wire, so the mutant drops the "
+        "`+ d` and rebases a parked clocked lane to `now`. ⛔ WHAT IT BREAKS IS "
+        "COMPLIANCE, and it is the pre-fix design rather than an invented "
+        "defect: releasing the next dispatch AT the observed rise makes the SCL "
+        "HIGH phase the synchroniser latency, so t_HIGH is not programmable at "
+        "all. ⭐ MEASURED, WITH A CONTROL ARM AND A SCALING FALSIFIER -- t_HIGH "
+        "FLAT at 6 cycles while the programmed delay spanned 13x (d = 9, 25, "
+        "60, 120) and t_LOW tracked d exactly (7, 26, 58, 119), against "
+        "push-pull `ckfive` in the SAME bench reading t_HIGH = 25 = d. UM10204 "
+        "wants 13 cycles (Fm+), 30 (Fm), 200 (Sm) at 50 MHz, so the clocked "
+        "scheme met no I2C mode. ⚠ Layer B reported OK throughout, because a "
+        "park changes TIMING and not the DISPATCH COUNT -- the same blindness "
+        "`M_CK_NO_PARK` records, and the reason gap conformance is now checked "
+        "too."),
     "M_CK_NO_ALTERNATE": (2,
         "ONE LINE IN EACH ARM. The next phase is a wire (`ck_norm`), so the "
         "mutant substitutes `ck_next = CK_LOW`. ⛔ WHAT IT BREAKS: the phase "

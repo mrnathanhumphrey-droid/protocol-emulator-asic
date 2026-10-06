@@ -84,6 +84,10 @@ GATES = [
     ("gate_dmin_clocked.py",
      "J1c  d_min over refill-bearing dispatches; clocked programs admissible",
      False),
+    # ⭐ C1/C2: measured clocked-bus timings against the TRANSCRIBED UM10204
+    # minima. Needs `PE_PHASES_JSON` from `test/phases_run.sh`; RED without it.
+    ("gate_um10204.py",
+     "C1   measured t_HIGH/t_LOW/t_SU;DAT/t_HD;DAT vs UM10204 minima", False),
     # ⛔ `../` because this one lives in model/ with the other RTL-FACING gates
     # (part1_param_contract, f2_flop_driven_outputs), not in model/a2/ with the
     # analysis. It is in THIS list anyway: an out-of-suite gate is a gate nobody

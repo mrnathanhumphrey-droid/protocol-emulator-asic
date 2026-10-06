@@ -252,6 +252,30 @@ SPEC_SYMBOLS = {
     # running the machine and emitted to `test/clocked_bounds.vh`, which is why
     # there is no RECORD entry to pair with this exclusion.
     ("model/clocked_phase.py", "PROGRAMS"),
+    # ⭐⭐ UM10204's TIMING MINIMA, TRANSCRIBED. These are REQUIREMENTS the
+    # design is measured against, so they are inputs in the strongest sense --
+    # the whole point of the gate that holds them is that nothing in this repo
+    # may derive or adjust them. ⛔ AND THEY CANNOT BE PAIRED WITH A RECORD
+    # ENTRY, which is a real weakness rather than an oversight: UM10204 is
+    # third-party copyright and `refs/` is gitignored with the guard committed,
+    # because the submission is open source. So there is no artefact here from
+    # which the numbers could be remade on every run, the way `EXPECT_TIED` is
+    # remade from a netlist. They are hand-carried, and `gate_um10204.py` says
+    # so in its header and in its output. ⭐ ONE INDEPENDENT CROSS-CHECK
+    # EXISTS: the t_LOW minima give d >= 25 / 65 / 235 at 50 MHz, which were
+    # derived separately in the ruling that ordered the gate -- two routes to
+    # the same three numbers, which a transcription slip would have had to
+    # survive twice.
+    ("model/a2/gate_um10204.py", "UM10204"),
+    # ⭐ THE DELAY SPAN THE HIGH-PHASE INSTRUMENT SWEEPS. An experiment design,
+    # not an observation: four periods spanning 13x, chosen because the defect
+    # being caught was a high phase that did not move with `d` AT ALL, and a
+    # single delay cannot distinguish "t_HIGH = d" from "t_HIGH happens to
+    # equal d here". ⛔ What the instrument MEASURES -- t_HIGH and t_LOW per
+    # lane -- is not stored anywhere: it is written to the phase JSON by
+    # `test/measure_phases.py` on every run and adjudicated from there, which
+    # is why there is no RECORD entry to pair with this exclusion either.
+    ("test/make_smoke_image.py", "CKOD_DELAYS"),
     # ⭐ The degenerate-field audit's two tables. `TABLE` is the enumerated
     # verdict per (opcode, field, degenerate value) and `DELIBERATE` names the
     # must-fire images that trip a refusal ON PURPOSE. Both are

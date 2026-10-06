@@ -242,6 +242,63 @@ def build_ckfive(delays):
 # ⚠ LIKE `build_five`, A SCHEDULER STRESS IMAGE AND NOT A PIN-MAP-LEGAL
 # PROGRAM: it declares push-pull on `uio` pins, which is physically fine but is
 # not the ruled placement. See `build_five`'s docstring.
+#: the delay span the clocked high-phase measurement runs over. ⭐ A SPAN AND
+#: NOT A POINT, because the defect it exists to catch was a high phase that did
+#: not move with `d` at all: measuring at one delay cannot tell "t_HIGH = d"
+#: from "t_HIGH happens to equal d here".
+CKOD_DELAYS = [9, 25, 60, 120]
+
+
+def build_ckod(delays=None):
+    """OPEN-DRAIN self-clocked lanes at a SPAN of delays -- the F1 instrument.
+
+    ⛔⛔ WHY THIS IMAGE EXISTS, AND IT IS A MEASURED COMPLIANCE FAILURE RATHER
+    THAN A HYPOTHETICAL. The post-HIGH park arms on `ck_act & ck_is_high &
+    ck_park_en & ~l_mode`, and `ck_act` covers SHIFT as well as SHIFTIN -- so
+    EVERY open-drain clocked high phase parks. While the park released the next
+    dispatch AT the observed rise, the SCL high phase was the synchroniser
+    latency and nothing else: MEASURED FLAT AT 6 CYCLES while the programmed
+    delay spanned 13x (9/25/60/120) and t_LOW tracked `d` exactly. UM10204 wants
+    t_HIGH >= 13 cycles (Fm+), 30 (Fm), 200 (Sm) at 50 MHz, so the clocked
+    scheme met no I2C mode, and no choice of `d` could fix it because the high
+    phase was not programmable.
+
+    ⭐ THE FIX (F1) IS UM10204's OWN CLOCK-SYNCHRONISATION RULE: a master counts
+    its HIGH period from the moment it SEES SCL high, so the release is
+    `rise + d`. With it, t_HIGH tracks `d` (measured d + 4, never below) and is
+    stretch-independent.
+
+    ⭐ `build_ckfive` IS THE CONTROL ARM AND IS DELIBERATELY PUSH-PULL: it never
+    parks, so its high phase is the programmed delay by a different route. Two
+    images in the same bench, differing in ONE header bit, is what makes the
+    measurement a comparison rather than a reading.
+
+    ⚠ LIKE `build_five` AND `build_ckfive`, A STRESS IMAGE AND NOT A
+    PIN-MAP-LEGAL PROGRAM: it declares four open-drain (data, clock) pairs
+    across uio 0..7. Four lanes, not five, because open-drain needs `uio` pins
+    and there are eight of them.
+    """
+    delays = list(CKOD_DELAYS if delays is None else delays)
+    prog, headers = [], []
+    off, base = ACT_BASE, {}
+    for n, d in enumerate(delays):
+        base[n] = off
+        prog.append(act(OP_SHIFT, 2 * n, SELF_CLOCKED, d, count=7, q=n % 4))
+        prog.append(act(OP_REARM, 0, 1, d))
+        off += 2 * ACT_BYTES
+    idle = off
+    prog.append(act(OP_REARM, 0, 0, 500))
+    for n, d in enumerate(delays):
+        # ⛔ MODE 0 = OPEN-DRAIN, the ONLY difference from `build_ckfive`, and
+        # the whole experiment. Open-drain is what arms the park.
+        headers.append(hdr(2 * n, 2 * n + 1, 0, min(d, 1023), 2,
+                           min(2 * d, 255), min(3 * d, 255), base[n]))
+    # the inert fifth lane: `clkpin == pin` makes `clk_real` false, so nothing
+    # it runs can be clocked, and a long re-arm keeps it out of the way.
+    headers.append(hdr(4, 4, 0, 500, 2, 200, 240, idle))
+    return b"".join(headers) + b"".join(prog)
+
+
 def build_chain(d_tog: int, d_park: int):
     """Two toggling lanes plus THREE lanes parked on CHAINING re-arms at a
     short delay, so the chaining path is exercised often.
@@ -902,6 +959,10 @@ def main() -> int:
             # ⭐ the saturation base for the clocked `C` re-measurement
             (["--ckfive"], "five SELF-CLOCKED lanes at the shipped delays",
              "ckfive_image.hex"),
+            # ⭐ F1: open-drain clocked lanes at a SPAN of delays, so the high
+            # phase can be shown to TRACK `d` rather than to equal it once.
+            (["--ckod"], "open-drain self-clocked lanes, delay span",
+             "ckod_image.hex"),
             # ⭐ the FULL MB85RC256V write -- four bytes, so the peer reaches
             # P_ALO and P_WDATA and a byte actually lands in its memory. The
             # certified 2-byte frame stays exactly as it was.
@@ -1068,6 +1129,15 @@ def main() -> int:
                 fh.write("%02x" % b + chr(10))
         print("ckfive image (five self-clocked lanes), %d bytes -> %s"
               % (len(img), out))
+        return 0
+    if "--ckod" in sys.argv:
+        img = build_ckod()
+        out = os.path.join(here, "ckod_image.hex")
+        with open(out, "w", encoding="ascii") as fh:
+            for b in img:
+                fh.write("%02x" % b + chr(10))
+        print("ckod image (open-drain self-clocked, delays %s), %d bytes -> %s"
+              % (CKOD_DELAYS, len(img), out))
         return 0
     if "--ckdegen" in sys.argv:
         for _r, _nm in ((0, "ckdegen_image.hex"), (1, "ckdegen2_image.hex")):
