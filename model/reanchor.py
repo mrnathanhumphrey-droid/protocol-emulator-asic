@@ -57,7 +57,7 @@ def main(apply_it):
     want = {}
     for (f, ln), txt in G.ANCHOR_TEXT.items():
         want.setdefault((f, txt.strip()), []).append(ln)
-    moves, stuck = [], []
+    moves, stuck, ambiguous = [], [], []
     for (f, txt), lns in sorted(want.items()):
         lns = sorted(lns)
         here = [i + 1 for i, l in enumerate(src[f]) if l.strip() == txt]
@@ -65,16 +65,55 @@ def main(apply_it):
             stuck.append((f, lns, txt, "the text appears NOWHERE"))
             continue
         if len(here) != len(lns):
-            # ⛔ only a clean one-to-one remap is safe to automate
             if all(l in here for l in lns):
                 continue            # already correct, extra copies elsewhere
-            stuck.append((f, lns, txt,
-                          "%d recorded vs %d found -- ambiguous"
-                          % (len(lns), len(here))))
+            # ⭐⭐ RESOLVED BY THE GLOBAL SHIFT, not by guessing. A duplicated
+            # anchor text with MORE copies than records is the common case --
+            # `if (clk_real) begin` has three occurrences and two of them are
+            # classified -- and it recurred on every run. The shift is a
+            # PROPERTY OF THE EDIT, measurable from the anchors that ARE
+            # unambiguous, so each record maps to the candidate nearest
+            # `old + shift`, order preserved and no candidate used twice.
+            # ⛔ IT STILL REFUSES when that mapping is not consistent: if a
+            # chosen target is further than `TOL` from the expected shift, the
+            # text has moved for some reason other than the edit's shift, and
+            # that is a human call again.
+            ambiguous.append((f, lns, txt, here))
             continue
         for old, new in zip(lns, here):
             if old != new:
                 moves.append((f, old, new, txt))
+
+    # the global shift, from the records that needed no guessing
+    TOL = 40
+    if ambiguous:
+        deltas = sorted(n - o for _f, o, n, _t in moves)
+        shift = deltas[len(deltas) // 2] if deltas else 0
+        for f, lns, txt, here in ambiguous:
+            used, ok = set(), True
+            picks = []
+            for old_ln in lns:
+                cands = [h for h in here if h not in used and h >= (picks[-1] if picks else 0)]
+                if not cands:
+                    ok = False
+                    break
+                best = min(cands, key=lambda h: abs(h - (old_ln + shift)))
+                if abs(best - (old_ln + shift)) > TOL:
+                    ok = False
+                    break
+                used.add(best)
+                picks.append(best)
+            if not ok:
+                stuck.append((f, lns, txt,
+                              "%d recorded vs %d found, and the global shift "
+                              "of %+d does not resolve it within %d lines"
+                              % (len(lns), len(here), shift, TOL)))
+                continue
+            for old_ln, new_ln in zip(lns, picks):
+                if old_ln != new_ln:
+                    moves.append((f, old_ln, new_ln, txt))
+        print("  (global shift measured at %+d from the unambiguous anchors)"
+              % shift)
 
     print("  --- measured anchor shifts ---")
     for f, old, new, txt in moves:

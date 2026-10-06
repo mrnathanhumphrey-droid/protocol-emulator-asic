@@ -92,23 +92,34 @@ module pe_engine #(
     // measured. An `ifdef` would have left the alternative un-buildable by
     // anything except a mutation run, which is the wrong frame for a
     // 169-flop decision.
-    // ⛔⛔ THE CLOCK-STRETCH FAULT BOUND, and it is a BUS-FAULT detector
-    // rather than a stretch limit. A peer may hold SCL low for as long as it
-    // likes (UM10204 sets no limit) and the lane parks on the observed rise;
-    // but a peer that VANISHES, or a bus whose clock never rises at all,
-    // would park the lane FOR EVER. Past this many cycles the lane HALTS and
-    // `clk_stretch_err` is raised -- the same "a timeout means ERROR, never
-    // success" rule `OP_ARM` follows.
-    // ⚠ IT CANNOT COME FROM THE ACTION: the action word is 24 of 24 bits and
-    // its `delay` field is the BIT PERIOD, so bounding the wait there is the
-    // one-bit-period bound this design had to remove. A build-time parameter
-    // is the only place left, and a fault bound is a property of the BOARD
-    // rather than of a program, so that is the right place anyway.
-    // ⭐ FOUND BY CI, not by reasoning: the cocotb bench holds `uio_in`
-    // CONSTANT, so a released SCL never TRANSITIONS and `pin_rise` never
-    // fires. Two open-drain tests hung. A bench that does not model the bus
-    // cannot produce a rise -- and neither can a dead board.
-    parameter integer CK_STRETCH_TO = 1023,
+    // ⛔⛔ THE CLOCK-STRETCH FAULT BOUND, and it is a BUS-FAULT detector rather
+    // than a stretch limit. A peer may hold SCL low for as long as it likes
+    // (UM10204 sets NO limit) and the lane parks on the observed rise; but a
+    // peer that VANISHES, or a bus whose clock never rises at all, would park
+    // the lane FOR EVER. Past the bound the lane HALTS and `clk_stretch_err`
+    // is raised -- the same "a timeout means ERROR, never success" rule
+    // `OP_ARM` follows.
+    // ⛔⛔ THE DEFAULT IS THE **SMBus BUS-FAULT FIGURE**, and the first one was
+    // WRONG BY THREE ORDERS OF MAGNITUDE. It was 1023 cycles -- about 20 us at
+    // 50 MHz -- which would declare a bus fault on LEGITIMATE devices: real
+    // peripherals (sensors, microcontroller-based targets) stretch for
+    // MILLISECONDS. SMBus is the published standard for "this bus is stuck"
+    // and puts it at 25-35 ms, so 35 ms is the number: 1,753,088 cycles at
+    // 50 MHz, which is 107 ticks of a 16384-cycle prescaler.
+    // ⭐ A SHARED PRESCALER, NOT FIVE WIDE COUNTERS. 35 ms needs 21 bits, and
+    // five of those is 105 flops; a 14-bit prescaler shared across lanes plus
+    // a 7-bit per-lane tick counter is 49. The prescaler costs granularity
+    // (0.33 ms) which is irrelevant to a 35 ms fault bound.
+    // ⚠ BOTH ARE BUILD PARAMETERS so a bench can SHORTEN the prescaler and
+    // reach the fault in a few hundred cycles instead of simulating 1.75
+    // million -- which is how `corpus_i2c_sclfault` exercises the halt without
+    // a minute of wall clock. A fault detector nothing ever triggers has
+    // unknown strength.
+    // ⭐ FOUND BY CI, not by reasoning: the cocotb bench held `uio_in` CONSTANT,
+    // so a released SCL never TRANSITIONED and `pin_rise` never fired. Two
+    // open-drain tests hung. A dead board does the same thing.
+    parameter integer CK_STRETCH_PRE = 16384,   // cycles per watchdog tick
+    parameter integer CK_STRETCH_TO  = 107,     // ticks before a bus fault
     parameter integer SPL     = 2
 ) (
     input  wire                 clk,
@@ -444,9 +455,16 @@ module pe_engine #(
   // stretch fault can be told from a peer-silent ARM timeout when the bound
   // lands.
   reg             l_ckpark [0:N_LANES-1];
-  // the parked-cycle count, per lane. ⚠ ~50 flops at DLY_W = 10 and 5 lanes,
-  // which is the price of not hanging on a dead bus.
-  reg [DLY_W-1:0] l_ckwdog [0:N_LANES-1];
+  // the parked-TICK count, per lane. ⚠ 49 flops all told, which is the price
+  // of not hanging on a dead bus.
+  reg [6:0]       l_ckwdog [0:N_LANES-1];   // ticks, not cycles
+  // ⭐ ONE prescaler for every lane. It advances whenever ANY lane is parked,
+  // which is sound for a FAULT bound: it can only make the bound fire up to
+  // one tick EARLY for a lane that parked mid-prescale, and 0.33 ms of
+  // jitter on a 35 ms fault detector decides nothing.
+  reg [13:0]      ck_pre;
+  wire            ck_any_park = |{ck_parked};
+  wire            ck_tick = ck_any_park & (ck_pre >= CK_STRETCH_PRE[13:0] - 14'd1);
   reg             l_cksamp [0:N_LANES-1];   // the bit latched AT the rise
   reg             l_ckgot  [0:N_LANES-1];   // ... and it is unconsumed
   reg [7:0]       l_tx     [0:N_LANES-1];   // THE TX PAYLOAD lives here, not
@@ -682,6 +700,8 @@ module pe_engine #(
   // must not re-rebase the timestamp -- that would slide the grid forward on
   // every subsequent peer transition, which on a clocked bus is every bit.
   wire [N_LANES-1:0] arm_hit;
+  wire [N_LANES-1:0] ck_parked; // packed view of `l_ckpark`, for the shared
+                               // prescaler's enable
   wire [N_LANES-1:0] ck_hit;    // a clocked SHIFTIN's rise, OBSERVED
   wire [N_LANES-1:0] ck_bit;    // ... and the data pin at that instant
   generate
@@ -730,6 +750,7 @@ module pe_engine #(
       wire ckp_real = (l_clkpin[gi] < N_PINS[PINW-1:0]);
       wire ckd_real = (l_pin[gi]    < N_PINS[PINW-1:0]);
       assign ck_hit[gi] = l_ckwait[gi] & ckp_real & pin_rise[l_clkpin[gi]];
+      assign ck_parked[gi] = l_ckpark[gi];
       // ⛔ THE SAMPLED PIN IS GUARDED SEPARATELY from the clock pin: a lane
       // may name a real clock and a RESERVED data pin, and reading
       // `pin_in[15]` would put X into the accumulator and from there into the
@@ -1280,6 +1301,7 @@ module pe_engine #(
       sticky_ovr    <= 1'b0;
       config_err    <= 1'b0;
       clk_stretch_err <= 1'b0;
+      ck_pre          <= 14'd0;
       host_pop      <= 1'b0;
       lane_underrun <= {N_LANES{1'b0}};
       lane_overflow <= {N_LANES{1'b0}};
@@ -1296,7 +1318,7 @@ module pe_engine #(
         l_ckbit[i]  <= {BPW{1'b0}};
         l_ckwait[i] <= 1'b0;
         l_ckpark[i] <= 1'b0;
-        l_ckwdog[i] <= {DLY_W{1'b0}};
+        l_ckwdog[i] <= 7'd0;
         l_cksamp[i] <= 1'b0;
         l_ckgot[i]  <= 1'b0;
 `ifdef M_SHARED_BITP
@@ -2178,6 +2200,12 @@ module pe_engine #(
       // ⛔ M_NO_REBASE leaves the timestamp at the ARM's DEADLINE, which is
       // Ruling 1's failure: the sample grid anchors to an arbitrary timeout
       // instant instead of to the peer's edge, and UART-rx misses every bit.
+      // ⭐ THE SHARED PRESCALER. It runs only while SOME lane is parked and
+      // clears when none is, so a short legitimate stretch leaves no residue
+      // to shorten the NEXT lane's fault bound.
+      if (!ck_any_park)  ck_pre <= 14'd0;
+      else if (ck_tick)  ck_pre <= 14'd0;
+      else               ck_pre <= ck_pre + 14'd1;
       for (i = 0; i < N_LANES; i = i + 1) begin
         // ⭐⭐ THE CLOCKED SHIFTIN'S CAPTURE, in the idle window after the
         // high phase. ⛔ FIRST RISE ONLY -- `l_ckwait` clears here -- so a
@@ -2192,18 +2220,18 @@ module pe_engine #(
         // answered" from "the peer never answered", and would read a frame
         // out of an idle line.
         if (l_ckpark[i]) begin
-          if (l_ckwdog[i] >= CK_STRETCH_TO[DLY_W-1:0]) begin
+          if (l_ckwdog[i] >= CK_STRETCH_TO[6:0]) begin
             l_live[i]       <= 1'b0;        // HALT this lane
             l_armed[i]      <= 1'b0;
             l_ckpark[i]     <= 1'b0;
             l_ckwait[i]     <= 1'b0;
             clk_stretch_err <= 1'b1;        // STICKY -- status bit 7
             sticky_ovr      <= 1'b1;
-          end else begin
-            l_ckwdog[i] <= l_ckwdog[i] + {{(DLY_W-1){1'b0}}, 1'b1};
+          end else if (ck_tick) begin
+            l_ckwdog[i] <= l_ckwdog[i] + 7'd1;
           end
         end else begin
-          l_ckwdog[i] <= {DLY_W{1'b0}};
+          l_ckwdog[i] <= 7'd0;
         end
         if (ck_hit[i]) begin
           l_cksamp[i] <= ck_bit[i];

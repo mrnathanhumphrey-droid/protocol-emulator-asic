@@ -72,6 +72,18 @@ DEAD_CONFIG = "DEAD_CONFIG"
 #: check -- being covered is EXPECTED on some versions -- and they are counted
 #: as uncovered, which is the safe direction.
 TOOL_DIVERGENT = "TOOL_DIVERGENT"
+#: ⚠⚠ TESTED, BUT BY THE UNSWEPT BENCH. A point the cocotb suite EXECUTES and
+#: the Verilator sweep never reaches. ⛔ IT IS NOT "OWED": owed means no test
+#: reaches it, and this one is reached 48 times. Calling it owed described a
+#: gap in ONE BENCH as a gap in the DESIGN.
+#: ⛔⛔ AND IT IS NOT SILENTLY DROPPED EITHER, which is the point of giving it
+#: a name: the cross-check still reports it, the entry still has to carry a
+#: reason, and what it costs is stated -- cocotb is NOT swept across the three
+#: rand-reset modes and is NOT ratcheted, so a point resting on it has WEAKER
+#: evidence than a swept one. The ruled resolution is still to bring the
+#: stimulus into a swept bench; this records the debt honestly until that
+#: happens, instead of a red gate or a deleted finding.
+COCOTB_ONLY = "COCOTB_ONLY"
 
 # ---------------------------------------------------------------------------
 # THE CLASSIFICATION. (file, line, kind, arm) -> (status, reason)
@@ -99,7 +111,7 @@ CLASSIFIED = {
     # is not in this table -- it is an owed RULING.
 
     # ---- the two tool-divergent points -----------------------------------
-    ("src/pe_engine.v", 791, "v_branch", "if"): (
+    ("src/pe_engine.v", 812, "v_branch", "if"): (
         TOOL_DIVERGENT,
         "The EDF arbiter's selection condition, `ready[k] && (!winner_v || "
         "edf_key_off[k] < best)`, inside the unrolled `for` over lanes in an "
@@ -111,7 +123,7 @@ CLASSIFIED = {
         "point belongs to. ⛔ Counted as uncovered anyway, because the gate "
         "must not pick the lenient reading of a disagreement it cannot "
         "adjudicate."),
-    ("src/pe_engine.v", 1200, "v_branch", "if"): (
+    ("src/pe_engine.v", 1221, "v_branch", "if"): (
         TOOL_DIVERGENT,
         "`if (hdr_done && !prime_unp) primed_q <= 1'b1;` -- the prime scan's "
         "COMPLETION test, which sits AFTER the `for` over lanes, not inside "
@@ -131,7 +143,7 @@ CLASSIFIED = {
         "number out of the artefact; do not reconstruct it from memory."),
 
     # ---- src/pe_engine.v --------------------------------------------------
-    ("src/pe_engine.v", 1376, "v_branch", "else"): (
+    ("src/pe_engine.v", 1398, "v_branch", "else"): (
         UNREACHABLE,
         "H_IDLE (line 1134) with `hdr_done` ALREADY SET. Every assignment that puts the "
         "header FSM into H_IDLE clears `hdr_done` in the same non-blocking "
@@ -141,7 +153,7 @@ CLASSIFIED = {
         "the arm of a condition that is true on every entry. ⭐ Checked "
         "structurally by `check_h_idle_clears` below rather than asserted, "
         "because the claim is about two specific lines and would rot."),
-    ("src/pe_engine.v", 1512, "v_line", "case"): (
+    ("src/pe_engine.v", 1534, "v_line", "case"): (
         UNREACHABLE,
         "The prefetch FSM's defensive `default`. `pst` is declared `[2:0]` and "
         "its four encodings P_SCAN/P_REQ/P_WAIT/P_CAP are 3'd0..3'd3, all "
@@ -149,7 +161,7 @@ CLASSIFIED = {
         "⭐ Verified mechanically by `check_full_case` below, which reads the "
         "encodings out of the source -- a hand-counted enumeration is the sort "
         "of claim that survives the addition of a fifth state."),
-    ("src/pe_engine.v", 1823, "v_line", "case"): (
+    ("src/pe_engine.v", 1845, "v_line", "case"): (
         UNREACHABLE,
         "The opcode `case`'s `default`. The opcode field is 3 bits and ALL "
         "EIGHT encodings are named in arms -- OP_LEVEL, OP_SHIFT, OP_SHIFTIN, "
@@ -163,7 +175,7 @@ CLASSIFIED = {
     # other lane, with the lane still LIVE -- the flag must report, never
     # stall. The entry is removed rather than kept, because a stale OWED claim
     # says something is untested when it is tested.
-    ("src/pe_engine.v", 2152, "v_line", "case"): (
+    ("src/pe_engine.v", 2174, "v_line", "case"): (
         UNREACHABLE,
         "The dispatch FSM's defensive `default`. `st` is declared `[1:0]` with "
         "three encodings ST_IDLE/ST_DRIVE/ST_WB = 2'd0..2'd2 at line 666; "
@@ -173,13 +185,20 @@ CLASSIFIED = {
         "what underwrites `st` being reset at all."),
 
     # ---- src/project.v ----------------------------------------------------
-    ("src/project.v", 407, "v_branch", "if"): (
-        OWED,
-        "A host PUSH and an engine POP landing on the SAME queue in one cycle. "
-        "The arm exists so the occupancy update is not lost, and reaching it "
-        "needs the two events aligned deliberately rather than by luck. "
-        "⇒ The test: drive `ui_in[6]` on the cycle the engine's `host_pop` "
-        "pulses for `q_sel`, which `tb_tx` can already observe."),
+    ("src/project.v", 411, "v_branch", "if"): (
+        COCOTB_ONLY,
+        "A host PUSH and an engine POP landing on the SAME queue in one cycle. ⭐ IT WAS OWED AND IT IS NOT: the cocotb cross-check reports it EXECUTED 48 TIMES, so no test was missing -- the SWEEP cannot reach it. ⛔ WHY: `do_push` is the WR strobe after a 3-stage synchroniser, so hitting the same cycle as a pop means phasing a push three cycles ahead of the engine's pop cadence. The shared feeder pushes whenever a queue has space, which is already its maximum rate, and that cadence never coincides; cocotb's feeder has a different one and does. ⚠ IT ONLY BECAME VISIBLE WITH THE SHARED BUS MODEL -- before that, cocotb drove a constant bus and never reached this alignment either. ⇒ The ruled fix is a swept bench with a feeder phase-locked to the pop cadence; until then this is tabled rather than reported as debt, because calling it owed described a gap in ONE BENCH as a gap in the DESIGN."),
+
+    # ⭐⭐ DEBT PAID BY THE **OTHER BENCH**, and the cross-check is what
+    # found it: `src/project.v` 411 -- a host PUSH and an engine POP landing
+    # on the SAME queue in one cycle -- was OWED here, and cocotb executes
+    # it 48 TIMES. The gate reported "FALSE GAP" and refused to keep the
+    # entry. ⛔ IT ONLY BECAME TRUE WITH THE SHARED BUS MODEL: once cocotb
+    # drove the resolved bus instead of a constant, its runs reached a
+    # push/pop alignment the Verilator sweep never produces. ⚠ So "OWED"
+    # had been describing a gap in ONE bench as a gap in the DESIGN -- which
+    # is exactly what the cocotb cross-check exists to catch, and the second
+    # false gap it has caught.
     # ⭐ RETIRED (ruling (a) item 1): `tx_full_sticky` at 412 is now set by
     # `tb_status +MODE=1`, which pushes three bytes into QUEUE 2 -- drawn by no
     # lane of `tx_image`, so it fills and is never drained -- shows `tx_cnt[2]`
@@ -210,7 +229,7 @@ CLASSIFIED = {
     # 60 lines and inside its own case arm), so the clocked arms repeat guards
     # their enclosing conditions already imply. Synthesis folds them; the
     # locality is for the reader and the gate.
-    ("src/pe_engine.v", 1657, "v_branch", "else"): (
+    ("src/pe_engine.v", 1679, "v_branch", "else"): (
         UNREACHABLE,
         "The local `if (pin_real)` inside the SELF-CLOCKED SHIFT's LOW phase. "
         "Its `else` cannot be taken: the enclosing case label is "
@@ -220,7 +239,7 @@ CLASSIFIED = {
         "at the enclosing arm -- and widening that window is refused, since the "
         "gate's own docstring records a `clk_real` 30 lines away falsely "
         "guarding a deliberately unguarded mutant arm."),
-    ("src/pe_engine.v", 1666, "v_branch", "else"): (
+    ("src/pe_engine.v", 1688, "v_branch", "else"): (
         UNREACHABLE,
         "The `if (clk_real)` around the LOW phase's CLOCK write. Unreachable "
         "`else`: this block runs only under `ck_shift`, which is DEFINED as "
@@ -228,14 +247,14 @@ CLASSIFIED = {
         "conjunct of the condition that got us here. ⚠ It is still written, "
         "because the guard must be visible at the indexed write rather than "
         "inferred through a wire's definition."),
-    ("src/pe_engine.v", 1677, "v_branch", "else"): (
+    ("src/pe_engine.v", 1699, "v_branch", "else"): (
         UNREACHABLE,
         "The same `if (clk_real)` around the HIGH phase's clock write, "
         "unreachable for the identical reason -- `ck_shift` carries "
         "`clk_real`. Both phases guard separately because a guard shared "
         "across two write groups is how the 1.6x refusal first failed: it "
         "suppressed the data write and let the clock write run anyway."),
-    ("src/pe_engine.v", 1730, "v_branch", "else"): (
+    ("src/pe_engine.v", 1752, "v_branch", "else"): (
         UNREACHABLE,
         "The local `if (pin_real)` inside the UNCLOCKED SHIFT body. Same "
         "structure as the clocked one at 1621 and unreachable for the same "
@@ -243,7 +262,7 @@ CLASSIFIED = {
         "CODE: inserting the clocked arm pushed the case label's own guard "
         "more than 60 lines away from five writes that were fine the day "
         "before, which is exactly the drift that window exists to detect."),
-    ("src/pe_engine.v", 1797, "v_branch", "if"): (
+    ("src/pe_engine.v", 1819, "v_branch", "if"): (
         UNREACHABLE,
         "`if (ck_shiftin & ack_drv[1]) pin_out[a_pin] <= ack_drv[0];` -- the "
         "TRUE arm cannot be taken in a clean build, because `ack_drv` is "
@@ -421,33 +440,33 @@ TOGGLE_CEILING = {
 #: ⇒ The gate reads the anchored line back and requires it to MATCH, so
 #: "copy, do not recall" is mechanised instead of remembered.
 ANCHOR_TEXT = {
-    ("src/pe_engine.v", 791):
+    ("src/pe_engine.v", 812):
         "if (ready[k] && (!winner_v || edf_key_off[k] < best)) begin",
-    ("src/pe_engine.v", 1200):
+    ("src/pe_engine.v", 1221):
         "if (hdr_done && !prime_unp) primed_q <= 1'b1;",
     # the self-clocked arms' redundant-by-construction guards. ⭐ TWO PAIRS
     # SHARE THEIR TEXT (`if (pin_real) begin` at 1621/1694, `if (clk_real)
     # begin` at 1630/1641), which is exactly why the anchor is keyed on the
     # LINE and the text is the drift check rather than the identifier.
-    ("src/pe_engine.v", 1657):
+    ("src/pe_engine.v", 1679):
         "if (pin_real) begin",
-    ("src/pe_engine.v", 1666):
+    ("src/pe_engine.v", 1688):
         "if (clk_real) begin",
-    ("src/pe_engine.v", 1677):
+    ("src/pe_engine.v", 1699):
         "if (clk_real) begin",
-    ("src/pe_engine.v", 1730):
+    ("src/pe_engine.v", 1752):
         "if (pin_real) begin",
-    ("src/pe_engine.v", 1797):
+    ("src/pe_engine.v", 1819):
         "if (ck_shiftin & ack_drv[1]) pin_out[a_pin] <= ack_drv[0];",
-    ("src/pe_engine.v", 1376):
+    ("src/pe_engine.v", 1398):
         "H_IDLE: if (!hdr_done) begin",
-    ("src/pe_engine.v", 1512):
+    ("src/pe_engine.v", 1534):
         "default: pst <= P_SCAN;",
-    ("src/pe_engine.v", 1823):
+    ("src/pe_engine.v", 1845):
         "default: ;",
-    ("src/pe_engine.v", 2152):
+    ("src/pe_engine.v", 2174):
         "default: st <= ST_IDLE;",
-    ("src/project.v", 407):
+    ("src/project.v", 411):
         "if (do_push && do_pop && (q_sel == tx_tag)) begin",
     # `src/project.v` 557 -- `if (RX_SERIAL != 0) begin` -- is gone with the
     # parameter. ⭐ THE ANCHOR IS WHAT MADE THAT SAFE TO DO: the source text
@@ -638,6 +657,19 @@ def check_cocotb(agg) -> int:
     uncovered = [k for k, c in agg.items()
                  if c == 0 and subject(k) and k[2] in ("v_line", "v_branch")]
     rescued = sorted(k for k in uncovered if coco.get(k, 0) > 0)
+    # ⚠ A point TABLED as COCOTB_ONLY is acknowledged, not rescued -- it is
+    # still printed below so it cannot hide, but it does not fail the gate.
+    # ⛔ ONLY A TABLED ONE: an untabled rescued point still fails, so this
+    # cannot become a way to make the cross-check quiet.
+    tabled = [k for k in rescued
+              if CLASSIFIED.get(k, (None,))[0] == COCOTB_ONLY]
+    rescued = [k for k in rescued if k not in tabled]
+    for k in tabled:
+        print("    ⚠ COCOTB-ONLY  %s line %d %s/%s -- cocotb executes it "
+              "%d time(s), the sweep does not"
+              % (k[0], k[1], k[2].replace("v_", ""), k[3], coco[k]))
+        print("        tabled, so it is not owed debt -- but it rests on the")
+        print("        UNSWEPT bench: no rand-reset sweep, no ratchet.")
     print("    cocotb subject points: %d   our uncovered: %d"
           % (len(coco), len(uncovered)))
     for k in rescued:
@@ -852,7 +884,8 @@ def check_reasons() -> int:
             short.append((key, len(w)))
         if w.lower().rstrip(". ") in BOILER:
             vague.append(key)
-        if st not in (UNREACHABLE, OWED, DEAD_CONFIG, TOOL_DIVERGENT):
+        if st not in (UNREACHABLE, OWED, DEAD_CONFIG, TOOL_DIVERGENT,
+                      COCOTB_ONLY):
             print("    *** %s line %d has unknown status %r" % (key[0], key[1], st))
             rc = 1
     for key, n in short:
@@ -1039,7 +1072,7 @@ def check_full_case() -> int:
     # 1701 -> 2079. ⚠ A stale number here degrades silently to "no enclosing
     # case found", which is why the gate says that out loud rather than
     # skipping the check.
-    for line in (1512, 1823, 2152):
+    for line in (1534, 1845, 2174):
         sel, arms = _case_arms(lines, line)
         if sel is None:
             print("    line %-5d *** no enclosing `case` found -- the waiver's"

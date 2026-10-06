@@ -288,7 +288,18 @@ def corpus_arms():
                 ["+IMG=test/corpus_i2c.hex", "+PEER=i2c",
                  "+OUT=probe_cov_trace_i2c_sclfault.txt",
                  "+NCYC=200000", "+SEED=1", "+ASYNC=0",
-                 "+STAYLOAD=0", "+SCLHOLD=5000"]))
+                 "+STAYLOAD=0", "+SCLHOLD=5000"], {"CK_PRE": 4}))
+    # ⭐ THE OTHER SIDE OF THE MUST-FIRE: a 25,000-cycle hold is 500 us at
+    # 50 MHz -- a LEGITIMATE long stretch, far inside the 35 ms SMBus bound --
+    # and must NOT fault. ⛔ IT RUNS AT THE SHIPPED PRESCALER, because the claim
+    # is about the real bound: at CK_PRE = 16384 those 25,000 cycles are 1.5
+    # ticks of 107. Testing only the fault side would leave "does it tolerate a
+    # long stretch" unmeasured, which is the half that matters to a user.
+    out.append(("corpus_i2c_sclslow",
+                ["+IMG=test/corpus_i2c.hex", "+PEER=i2c",
+                 "+OUT=probe_cov_trace_i2c_sclslow.txt",
+                 "+NCYC=200000", "+SEED=1", "+ASYNC=0",
+                 "+STAYLOAD=0", "+SCLHOLD=25000"]))
     out.append(("corpus_i2cs_stretch",
                 ["+IMG=test/corpus_i2c.hex", "+PEER=i2cs",
                  "+OUT=probe_cov_trace_i2cs_stretch.txt",

@@ -47,22 +47,11 @@ module tb_edge;
   // forcing `uio_in` would hide a contention bug -- the engine driving the same
   // pin the peer is driving -- which is a real failure on a shared bus and
   // exactly what 1.6r's MISO work was about.
-  genvar b;
-  generate
-    for (b = 0; b < 8; b = b + 1) begin : g_bus
-      // ⛔⛔ TWO ACTIVE DRIVERS RESOLVE TO X, WHICH IS THE POINT. The first
-      // version gave the ENGINE priority -- `uio_oe ? uio_out : uio_drv` --
-      // so a no-op driving against the peer produced a clean value and the
-      // bad program showed ZERO X. A bus model that silently picks a winner
-      // cannot detect contention, which is the single thing a resolved bus is
-      // for, and it is the class 1.6r closed on MISO.
-      assign uio_in[b] = (uio_oe[b] && uio_oe_tb[b])
-                       ? ((uio_out[b] === uio_drv[b]) ? uio_out[b] : 1'bx)
-                       : uio_oe[b]    ? uio_out[b]
-                       : uio_oe_tb[b] ? uio_drv[b]
-                       : 1'b1;                       // idle high (pull-up)
-    end
-  endgenerate
+  // ⭐ THE RESOLUTION NOW LIVES ONCE, in test/od_bus.vh. The X-on-disagreement
+  // reasoning that was written out here is in that file's header.
+  wire [7:0] ob_oe  = uio_oe_tb;
+  wire [7:0] ob_val = uio_drv;
+`include "test/od_bus.vh"
 
   always #10 clk = ~clk;
 

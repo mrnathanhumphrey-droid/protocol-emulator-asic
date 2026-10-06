@@ -81,7 +81,8 @@ async def start(dut):
     cocotb.start_soon(Clock(dut.clk, CLK_NS, unit="ns").start())
     dut.ena.value = 1
     dut.ui_in.value = 0
-    dut.uio_in.value = 0
+    dut.ob_oe.value = 0                 # the bench drives nothing yet
+    dut.ob_val.value = 0
     dut.rst_n.value = 0
     await ClockCycles(dut.clk, 10)
     dut.rst_n.value = 1
@@ -92,7 +93,10 @@ async def write_byte(dut, val, offset=0):
     """One load write. `wr` is held several clocks because it is treated as an
     ASYNCHRONOUS pin strobe: two flops to resolve metastability, a third to see
     the edge. `offset` nudges the pulse to exercise exactly that."""
-    dut.uio_in.value = val
+    # ⭐ THE LOADER IS A BUS DRIVER LIKE ANY OTHER: enable all eight and
+    # present the byte. The resolution in `test/od_bus.vh` does the rest.
+    dut.ob_oe.value = 0xFF
+    dut.ob_val.value = val
     dut.ui_in.value = ctrl(prog=1, wr=0)
     await ClockCycles(dut.clk, 3)
     dut.ui_in.value = ctrl(prog=1, wr=1)
@@ -170,40 +174,17 @@ async def push_nibble(dut, nib, tag):
     await ClockCycles(dut.clk, 1)
 
 
-async def open_drain_bus(dut):
-    """Resolve `uio_in` as a real OPEN-DRAIN BUS: pull-ups high, DUT pulls low.
-
-    ⛔⛔ WHY THIS EXISTS, AND IT IS A FINDING ABOUT THE TESTS. Four tests set
-    `dut.uio_in.value = 0xFF` with the comment "idle-high bus, as pull-ups
-    give" -- which models the PULL-UPS and not the DUT's PULL-DOWNS, so the
-    input never TRANSITIONS. A constant cannot represent a bus.
-    ⛔ IT WENT UNNOTICED because the engine never READ the bus back: the
-    clocked SHIFT now parks on the OBSERVED SCL rise, and in a bench where SCL
-    never rises a lane parks for ever and no byte completes. The two
-    open-drain tests then failed their own anti-vacuity precondition ("8 bytes
-    pushed, the engine consumed NONE") while their ELECTRICAL assertions still
-    passed -- so the tests were checking that the DUT drives the line
-    correctly without ever checking that the line answers.
-    ⚠ AND IT IS NOT A BENCH-ONLY ARTEFACT: a board with no pull-up, or a bus
-    held low by a stuck peer, does exactly what the constant did. The engine's
-    `CK_STRETCH_TO` bound is what keeps that case from hanging a lane for ever,
-    and `test/tb_trace.v` has modelled the bus all along -- which is why the
-    Verilator sweep stayed green and said nothing. Two benches, two different
-    models of the same wire.
-
-    The resolution is the standard one: a bit reads 0 only while the DUT
-    actively drives it low (`oe = 1, out = 0`), and 1 otherwise.
-    """
-    while True:
-        try:
-            oe = int(dut.uio_oe.value)
-            ou = int(dut.uio_out.value)
-        except ValueError:
-            # X/Z during reset: the pull-ups win, which is what a real bus does
-            oe, ou = 0, 0
-        dut.uio_in.value = 0xFF & ~(oe & ~ou) & 0xFF
-        await ClockCycles(dut.clk, 1)
-
+# ⛔⛔ THE PYTHON BUS MODEL IS GONE, and that is the point of this change.
+# It used to live here as `open_drain_bus`, re-deriving in Python what
+# `tb_trace.v` and `tb_edge.v` each re-derived in Verilog -- THREE models of
+# the same wire. The bus is now resolved ONCE, in `test/od_bus.vh`, which
+# `tb.v` includes alongside the other benches; cocotb drives the PEER SIDE
+# (`ob_oe`/`ob_val`) and reads the resolved `uio_in`, exactly as a peer model
+# does. ⭐ M_BUS_NO_PULLDOWN now breaks the cocotb suite AND the Verilog
+# benches together, which is the only way to show there is one model.
+# ⚠ The Python copy was also WRONG for most of its life -- a constant 0xFF,
+# pull-ups without the DUT's pull-downs -- and nothing noticed until the
+# engine began parking on an OBSERVED rise.
 
 async def feed_host(dut, state):
     """Top up every TX queue that has space, from a repeating pattern.
@@ -630,9 +611,7 @@ async def test_open_drain_data_pin(dut):
     img = read_hex("corpus_i2c.hex")
     await load_image(dut, img)
     dut.ui_in.value = ctrl(prog=0)
-    # ⭐ A MODELLED OPEN-DRAIN BUS, not a constant -- see `open_drain_bus`.
-    dut.uio_in.value = 0xFF                 # idle-high to start
-    cocotb.start_soon(open_drain_bus(dut))
+    dut.ob_oe.value = 0                     # release: the pull-ups hold it high
     await ClockCycles(dut.clk, 8)
     # ⛔ RULING 0: FEED THE HOST CHANNEL. This program SHIFTS, and until now
     # every shift here found an empty queue and took the underrun branch --
@@ -727,12 +706,7 @@ async def test_open_drain_clock_pin_is_released(dut):
     img = read_hex("corpus_i2c.hex")
     await load_image(dut, img)
     dut.ui_in.value = ctrl(prog=0)
-    dut.uio_in.value = 0xFF                 # idle-high to start
-    # ⭐ A MODELLED OPEN-DRAIN BUS. ⛔ ALL FOUR SITES, not just the two that
-    # went red: leaving a known-wrong model in the tests that happen to pass
-    # is two models of the same wire, which is the defect this helper
-    # documents.
-    cocotb.start_soon(open_drain_bus(dut))
+    dut.ob_oe.value = 0                     # release: the pull-ups hold it high
     await ClockCycles(dut.clk, 8)
     # ⛔ RULING 0: FEED THE HOST CHANNEL. This program SHIFTS, and until now
     # every shift here found an empty queue and took the underrun branch --
@@ -796,12 +770,7 @@ async def test_engine_runs_at_the_pins(dut):
     dut._log.info("loading the 5-lane program, %d bytes" % len(img))
     await load_image(dut, img)
     dut.ui_in.value = ctrl(prog=0)
-    dut.uio_in.value = 0xFF                 # idle-high to start
-    # ⭐ A MODELLED OPEN-DRAIN BUS. ⛔ ALL FOUR SITES, not just the two that
-    # went red: leaving a known-wrong model in the tests that happen to pass
-    # is two models of the same wire, which is the defect this helper
-    # documents.
-    cocotb.start_soon(open_drain_bus(dut))
+    dut.ob_oe.value = 0                     # release: the pull-ups hold it high
     await ClockCycles(dut.clk, 8)
     # ⛔ RULING 0: FEED THE HOST CHANNEL. This program SHIFTS, and until now
     # every shift here found an empty queue and took the underrun branch --
@@ -871,12 +840,7 @@ async def test_config_error_refuses_to_run(dut):
     img = read_hex("cfgerr_image.hex")
     await load_image(dut, img)
     dut.ui_in.value = ctrl(prog=0)
-    dut.uio_in.value = 0xFF                 # idle-high to start
-    # ⭐ A MODELLED OPEN-DRAIN BUS. ⛔ ALL FOUR SITES, not just the two that
-    # went red: leaving a known-wrong model in the tests that happen to pass
-    # is two models of the same wire, which is the defect this helper
-    # documents.
-    cocotb.start_soon(open_drain_bus(dut))
+    dut.ob_oe.value = 0                     # release: the pull-ups hold it high
     await ClockCycles(dut.clk, 8)
 
     # (a) the program must not run: its lane drives uo_out[0], which must not move

@@ -134,19 +134,12 @@ module tb_trace;
   wire [7:0] tb_oe  = ld_en ? 8'hFF  : peer_oe;
   wire [7:0] tb_val = ld_en ? ld_val : peer_val;
 
-  // the resolved bus, same semantics as tb_edge: two active drivers that
-  // DISAGREE -> X. Two drivers that agree are indistinguishable from one, which
-  // is exactly why enable overlap and not X is the contention detector.
-  genvar b;
-  generate
-    for (b = 0; b < 8; b = b + 1) begin : g_bus
-      assign uio_in[b] = (uio_oe[b] && tb_oe[b])
-                       ? ((uio_out[b] === tb_val[b]) ? uio_out[b] : 1'bx)
-                       : uio_oe[b] ? uio_out[b]
-                       : tb_oe[b]  ? tb_val[b]
-                       : 1'b1;                  // pull-up / idle high
-    end
-  endgenerate
+  // ⭐ THE RESOLUTION NOW LIVES ONCE, in test/od_bus.vh. This block used to
+  // carry its own copy, and its comment said "same semantics as tb_edge" --
+  // a copy admitting it was a copy.
+  wire [7:0] ob_oe  = tb_oe;
+  wire [7:0] ob_val = tb_val;
+`include "test/od_bus.vh"
 
   always #10 clk = ~clk;
 
@@ -476,6 +469,13 @@ module tb_trace;
   // assumes becomes variable. So the parameter point is swept rather than
   // trusted, by `test/run_param_points.py`.
   parameter integer SPL_CFG = 2;
+  // ⭐ THE STRETCH PRESCALER, OVERRIDABLE FROM THE SWEEP. The shipped bound is
+  // 35 ms (the SMBus bus-fault figure) = 107 ticks of 16384 cycles, which is
+  // 1.75 MILLION cycles -- far too long to simulate. Shortening the prescaler
+  // reaches the SAME halt in hundreds of cycles, so the fault path is
+  // EXERCISED rather than reasoned about. ⛔ The bound itself (`CK_STRETCH_TO`)
+  // is NOT touched: the arm tests the mechanism, not a different number.
+  parameter integer CK_PRE = 16384;
 
   // THE HOST CHANNEL (Wilson's ruling 0). Every corpus program shifts, and
   // until now every one of those shifts found an empty queue and took the
@@ -483,7 +483,7 @@ module tb_trace;
   // cross-seed sweep were established on the STARVED path. Feeding them is
   // what makes those claims about the payload path they were read as covering.
   // The include is placed AFTER the dut because it references `dut.tx_cnt`.
-  tt_um_protocol_emulator #(.SPL(SPL_CFG)) dut (
+  tt_um_protocol_emulator #(.SPL(SPL_CFG), .CK_STRETCH_PRE(CK_PRE)) dut (
       .ui_in(ui_in), .uo_out(uo_out),
       .uio_in(uio_in), .uio_out(uio_out), .uio_oe(uio_oe),
       .ena(ena), .clk(clk), .rst_n(rst_n)

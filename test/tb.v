@@ -18,7 +18,17 @@ module tb ();
   reg rst_n;
   reg ena;
   reg [7:0] ui_in;
-  reg [7:0] uio_in;
+  // ⛔⛔ THE BUS IS RESOLVED IN VERILOG, BY THE SAME INCLUDE THE OTHER BENCHES
+  // USE. `uio_in` used to be a `reg` that cocotb wrote directly, which meant
+  // the electrical layer existed a THIRD time -- in Python -- and for most of
+  // its life it was a CONSTANT 0xFF: pull-ups modelled, the DUT's pull-downs
+  // not, so the bus never TRANSITIONED. Two open-drain tests then hung the
+  // moment the engine started parking on an observed SCL rise.
+  // ⇒ cocotb now drives the PEER SIDE (`ob_oe`/`ob_val`) and reads the
+  //   resolved wire, exactly as a peer model does in tb_trace.
+  wire [7:0] uio_in;
+  reg  [7:0] ob_oe  = 8'h00;   // the bench side: nothing driven at reset
+  reg  [7:0] ob_val = 8'h00;
   wire [7:0] uo_out;
   wire [7:0] uio_out;
   wire [7:0] uio_oe;
@@ -59,5 +69,7 @@ module tb ();
       .clk    (clk),      // clock
       .rst_n  (rst_n)     // not reset
   );
+
+`include "test/od_bus.vh"
 
 endmodule

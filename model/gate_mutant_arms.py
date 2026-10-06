@@ -104,6 +104,22 @@ EXPECT = {
         "`pin_in[a_pin]` appeared verbatim at 745, 1502 and 1524, and removing "
         "the guard would have meant three separate edits -- an arm whose size "
         "tracks the number of copies rather than the size of the idea."),
+    "M_BUS_NO_PULLDOWN": (2,
+        "ONE LINE IN EACH ARM, in `test/od_bus.vh` -- THE BENCHES' one bus "
+        "model. It drops the DUT's pull-down, so a line the part is actively "
+        "pulling low still reads HIGH. ⛔ WHAT IT PROVES is that there is now "
+        "ONE model: the resolution used to exist three times (tb_trace, "
+        "tb_edge, and a Python coroutine in test.py), and the Python copy was "
+        "a CONSTANT 0xFF -- pull-ups without pull-downs -- for most of its "
+        "life. ⚠ IT IS PRICED AGAINST THE DESIGN'S OWN FAULT DETECTOR, not a "
+        "bench heuristic, and that choice was forced by measurement: a global "
+        "stall detector CANNOT see it (under the mutant tb_trace still "
+        "produced 1603 writebacks, because the other four lanes keep the "
+        "engine busy, while only 1 action retired against 110), and a per-lane "
+        "one cannot either (a lane parked on an OP_ARM edge legitimately never "
+        "retires). MEASURED with the prescaler shortened: clean = no fault, "
+        "7387 actions retired, 2462 clocked actions conformant; mutant = "
+        "`clk_stretch_err` SET, 1 action retired, 0 clocked actions checked."),
     "M_CK_NO_PARK": (2,
         "ONE LINE IN EACH ARM: `ck_park_en` is a wire, so the mutant is `1'b0` "
         "for `1'b1`. ⛔ WHAT IT BREAKS IS COMPLIANCE, not an assertion: without "

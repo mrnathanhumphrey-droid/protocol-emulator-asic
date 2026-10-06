@@ -79,6 +79,24 @@ localparam integer PG_COARSE = 64;
 integer pg_n     [0:PG_MAXL-1];      // writebacks on the current action
 integer pg_pc    [0:PG_MAXL-1];      // the PC they were at
 integer pg_fa;
+// ⛔⛔ A GLOBAL STALL DETECTOR WAS TRIED HERE AND REMOVED, because it
+// CANNOT WORK and the reason is worth more than the check. Layer A counts
+// dispatches ON an action, so it is blind to a lane that stops dispatching
+// altogether -- which is what a lane parked for ever does, and it has cost
+// two findings (a park with no fault bound hung the push-pull SPI master;
+// M_BUS_NO_PULLDOWN survived every bench).
+// ⚠ BUT A GLOBAL DETECTOR NEVER FIRES: MEASURED under
+// M_BUS_NO_PULLDOWN, tb_trace still produced 1603 writebacks -- the other
+// four lanes keep the engine busy -- while only 1 action retired against 110
+// in the clean build. The engine was not stalled; ONE LANE was.
+// ⛔ AND A PER-LANE VERSION CANNOT WORK EITHER: a lane parked on an OP_ARM
+// edge legitimately never retires (UART-rx idling between frames), and from
+// inside the bench nothing distinguishes that from a hang.
+// ⇒ THAT AMBIGUITY IS WHAT THE DESIGN'S OWN FAULT BOUND IS FOR. A stuck bus
+//   is detected by `CK_STRETCH_TO` in the engine, which HALTS the lane and
+//   raises `clk_stretch_err`, and the bus-model mutant is priced against
+//   THAT rather than against a bench heuristic. A check that cannot fire
+//   would have been worse than no check: it reads as a pass.
 integer pg_wbs, pg_acts;
 integer pg_k;
 reg     pg_oor;
@@ -97,7 +115,8 @@ always @(posedge dut.clk) begin
     for (pg_k = 0; pg_k < PG_MAXL; pg_k = pg_k + 1) begin
       pg_n[pg_k] = 0;  pg_pc[pg_k] = -1;
     end
-  end else if (dut.u_eng.st === 2'd2) begin        // ST_WB -- literal, see above
+  end else if (dut.u_eng.st === 2'd2) begin
+       // ST_WB -- literal, see above
     pg_wbs = pg_wbs + 1;
     if (dut.u_eng.cur >= PG_MAXL) begin
       if (!pg_oor) begin
