@@ -67,6 +67,12 @@ GATES=(
   # reached 144. Both shapes are "a check that cannot speak", which reads
   # exactly like a check that passed.
   model/gate_bench_lint.py
+  # ⛔ `tb.v` PREPROCESSES AS THE COCOTB MAKEFILE DOES. 81 of 81 arms and 16
+  # of 16 gates were green while the cocotb half would not even preprocess:
+  # the single bus model's include is written `test/od_bus.vh`, Verilator runs
+  # from the repo root and resolves it, the Makefile runs from `test/` and did
+  # not. Nothing local looked at `tb.v` at all, so only CI could see it.
+  test/gate_tb_elaborates.py
   model/gate_ruling_audit.py
   model/gate_one_encoder.py
   model/gate_mutant_arms.py
@@ -130,7 +136,7 @@ GATES=(
 # unrunnable locally, which is how a gate quietly stops being run at all.
 can_run() {
   case "$1" in
-    model/gate_one_encoder.py|test/gl_harness_check.py)
+    model/gate_one_encoder.py|test/gl_harness_check.py|test/gate_tb_elaborates.py)
       command -v iverilog >/dev/null 2>&1 || { echo "iverilog is not on PATH"; return 1; } ;;
     model/gate_reset_audit.py)
       [ -n "${PE_NETLIST_JSON:-}" ] && [ -f "${PE_NETLIST_JSON:-}" ] \

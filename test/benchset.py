@@ -57,6 +57,7 @@ EXCLUDED = {
 # ---------------------------------------------------------------------------
 #: benches whose `+NBYTES` must be supplied (they refuse to start without it)
 NEEDS_NBYTES = {"tb_tx", "tb_half", "tb_i2c", "tb_csat", "tb_jlane", "tb_status",
+                "tb_fifo",
                 "tb_rxbw", "tb_trace", "tb_witness", "tb_pinrange"}
 
 CONFIG = {
@@ -110,6 +111,22 @@ CONFIG = {
         "arms": [("clean", ["+IMG=test/tx_image.hex", "+NCYC=6000"]),
                  ("badclk", ["+IMG=test/tx_badclk_image.hex", "+NCYC=6000",
                              "+BADCLK=1"])],
+    },
+    # ⭐⭐ THE SAME-CYCLE PUSH AND POP ON ONE TX QUEUE, directed. The coverage
+    # sweep reported `src/project.v`'s `do_push && do_pop && q_sel == tx_tag`
+    # arm UNCOVERED and it was tabled as OWED -- then the cocotb cross-check
+    # reported it EXECUTED 48 times. The swept benches could not reach it, so
+    # "owed" described a gap in ONE BENCH as a gap in the DESIGN.
+    # ⛔ THE PHASE IS WALKED, NOT COMPUTED: `do_push` is the LOW-nibble push
+    # after a three-stage synchroniser and `do_pop` is a byte-load pulse from a
+    # lane's own cadence, so computing the alignment means composing three
+    # latencies and being off by one looks exactly like the corner being
+    # unreachable. The bench slips the push phase a cycle per byte and asserts
+    # when the coincidence happens -- it reports the phase it found (191), and
+    # NEVER seeing it is a FAILURE rather than a pass.
+    "tb_fifo": {
+        "srcs": [],
+        "arms": [("pushpop", ["+IMG=test/tx_image.hex", "+NCYC=60000"])],
     },
     "tb_half": {
         "srcs": [],

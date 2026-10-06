@@ -84,6 +84,14 @@ TOOL_DIVERGENT = "TOOL_DIVERGENT"
 #: stimulus into a swept bench; this records the debt honestly until that
 #: happens, instead of a red gate or a deleted finding.
 COCOTB_ONLY = "COCOTB_ONLY"
+#: ⛔⛔ AND EVERY `COCOTB_ONLY` ENTRY MUST NAME THE SWEPT STIMULUS THAT WILL
+#: RETIRE IT -- a ruled condition, so the status cannot become a permanent
+#: home for a point nobody intends to cover. The reason text has to contain
+#: a `test/tb` bench name; `check_reasons` enforces it.
+#: ⭐ ITS FIRST AND ONLY MEMBER HAS ALREADY LEFT: `src/project.v` 411 named
+#: `test/tb_fifo.v`, that bench was built, and the point is COVERED in the
+#: sweep. The class is empty by resolution rather than by never being used.
+COCOTB_ONLY_NEEDS = "test/tb"
 
 # ---------------------------------------------------------------------------
 # THE CLASSIFICATION. (file, line, kind, arm) -> (status, reason)
@@ -185,10 +193,18 @@ CLASSIFIED = {
         "what underwrites `st` being reset at all."),
 
     # ---- src/project.v ----------------------------------------------------
-    ("src/project.v", 411, "v_branch", "if"): (
-        COCOTB_ONLY,
-        "A host PUSH and an engine POP landing on the SAME queue in one cycle. ⭐ IT WAS OWED AND IT IS NOT: the cocotb cross-check reports it EXECUTED 48 TIMES, so no test was missing -- the SWEEP cannot reach it. ⛔ WHY: `do_push` is the WR strobe after a 3-stage synchroniser, so hitting the same cycle as a pop means phasing a push three cycles ahead of the engine's pop cadence. The shared feeder pushes whenever a queue has space, which is already its maximum rate, and that cadence never coincides; cocotb's feeder has a different one and does. ⚠ IT ONLY BECAME VISIBLE WITH THE SHARED BUS MODEL -- before that, cocotb drove a constant bus and never reached this alignment either. ⇒ The ruled fix is a swept bench with a feeder phase-locked to the pop cadence; until then this is tabled rather than reported as debt, because calling it owed described a gap in ONE BENCH as a gap in the DESIGN."),
-
+    # ⭐⭐ COVERED NOW, AND IT PASSED THROUGH `COCOTB_ONLY` TO GET HERE.
+    # `src/project.v` 411 -- a host PUSH and an engine POP on the SAME queue
+    # in one cycle -- was tabled OWED, then the cocotb cross-check reported
+    # it EXECUTED 48 times (so nothing was missing, the SWEPT benches could
+    # not reach it), then it was tabled COCOTB_ONLY while a directed bench
+    # was built, and `test/tb_fifo.v` now reaches it IN THE SWEEP.
+    # ⛔ THE INTERIM STATUS DID ITS JOB AND EMPTIED: it kept the point
+    # visible and honest instead of being reported as debt that did not
+    # exist, and it did not become a permanent home.
+    # ⚠ tb_fifo WALKS the push phase rather than computing it, asserts that
+    # both pointers flip, the count holds and order is preserved, and
+    # FAILS if no phase ever hits the corner.
     # ⭐⭐ DEBT PAID BY THE **OTHER BENCH**, and the cross-check is what
     # found it: `src/project.v` 411 -- a host PUSH and an engine POP landing
     # on the SAME queue in one cycle -- was OWED here, and cocotb executes
@@ -466,8 +482,6 @@ ANCHOR_TEXT = {
         "default: ;",
     ("src/pe_engine.v", 2174):
         "default: st <= ST_IDLE;",
-    ("src/project.v", 411):
-        "if (do_push && do_pop && (q_sel == tx_tag)) begin",
     # `src/project.v` 557 -- `if (RX_SERIAL != 0) begin` -- is gone with the
     # parameter. ⭐ THE ANCHOR IS WHAT MADE THAT SAFE TO DO: the source text
     # was recorded beside the line number, so the deletion had to account for
@@ -879,6 +893,15 @@ def check_reasons() -> int:
     BOILER = ("n/a", "todo", "tbd", "unreachable", "not reachable", "see above",
               "obvious", "by design", "")
     for key, (st, why) in sorted(CLASSIFIED.items()):
+        # ⛔ A COCOTB_ONLY entry must NAME the swept bench that will retire
+        # it. Without that the status is a parking space, and the whole
+        # reason it was ratified is that it is INTERIM.
+        if st == COCOTB_ONLY and COCOTB_ONLY_NEEDS not in (why or ""):
+            print("    *** %s line %d is COCOTB_ONLY but names no swept"
+                  % (key[0], key[1]))
+            print("        stimulus (a `%s...` bench) that will retire it"
+                  % COCOTB_ONLY_NEEDS)
+            rc = 1
         w = (why or "").strip()
         if len(w) < 60:
             short.append((key, len(w)))
