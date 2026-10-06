@@ -77,6 +77,13 @@ GATES = [
     ("gate_noop_job.py",
      "NOP  the half-bit no-op as a real job; A2 + pyRTA re-quoted", True),
     ("gate_j_program.py", "J1b  J(d_min) derived; shipped J=1, universal J=8", False),
+    # ⭐ THE CLOCKED HALF OF THE SAME QUESTION. `d_min` over REFILL-BEARING
+    # dispatches only (prereg C-clocked §3a): measured off the golden model,
+    # cross-checked against a closed form, and `>= 2d` for every clocked
+    # program -- so clocking RELAXES `D*` rather than tightening it.
+    ("gate_dmin_clocked.py",
+     "J1c  d_min over refill-bearing dispatches; clocked programs admissible",
+     False),
     # ⛔ `../` because this one lives in model/ with the other RTL-FACING gates
     # (part1_param_contract, f2_flop_driven_outputs), not in model/a2/ with the
     # analysis. It is in THIS list anyway: an out-of-suite gate is a gate nobody

@@ -87,6 +87,14 @@ GATES=(
   model/gate_bench_indices.py
   model/gate_j_proof_anchors.py
   model/a2/gate_j_program.py
+  # ⛔ `d_min` OVER REFILL-BEARING DISPATCHES -- the definition the clocked
+  # SHIFT forced, fixed in `docs/PREREG_C_CLOCKED.md` §3a BEFORE it was
+  # measured. It is here rather than in `run_a2.py`'s pyRTA set because it
+  # needs no pyRTA: it composes the golden model onto one absolute timeline and
+  # reads the spacings off it. ⛔ Its must-fire is the point -- counting EVERY
+  # dispatch gives d_min = 3 (the L_SYNC park, which makes no port demand) and
+  # U = 5.0, refusing every clocked program ever written.
+  model/a2/gate_dmin_clocked.py
   # ⭐ JOINED THE LIST when it took the RX lane-field width check. That check
   # guards against a received byte being attributed to the WRONG LANE if
   # `N_LANES` ever outgrows the explicit [2:0] on `e_rx_lane` -- and it lives
