@@ -41,6 +41,15 @@ endif
 
 # Allow sharing configuration between design and testbench via `include`:
 COMPILE_ARGS 		+= -I$(SRC_DIR)
+# ⛔⛔ AND THE REPO ROOT, so ONE include spelling works in BOTH toolchains.
+# `test/od_bus.vh` is the single open-drain bus model, included by tb.v here
+# AND by tb_trace/tb_edge under Verilator. Verilator runs from the repo root,
+# so it writes `test/od_bus.vh`; this Makefile runs from `test/`, where that
+# path resolved to `test/test/od_bus.vh` and iverilog said only
+# "Include file test/od_bus.vh not found" -- a CI-only break, because the
+# Verilator sweep could not see it. ⚠ The alternative was a different spelling
+# per bench, which is how one file quietly becomes two.
+COMPILE_ARGS 		+= -I$(PWD)/..
 
 # Include the testbench sources:
 VERILOG_SOURCES += $(PWD)/tb.v
