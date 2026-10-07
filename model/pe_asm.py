@@ -139,10 +139,13 @@ def check_shift_clock_alias(lanes, headers):
     ⭐ SCOPED TO SHIFTING LANES, NOT A BLANKET RULE, and the scope is load-
     bearing. `l_clkpin` reaches the pins ONLY inside the `OP_SHIFT` case, so
     for a lane that never shifts the alias is a don't-care -- and `build_five`
-    declares it on all five lanes while running only `OP_LEVEL`. That image is
-    the measurement base for T1's per-lane `J` and for Theorem 3's 35
+    declares it on all five lanes while running only `OP_LEVEL`. That BUILDER
+    is the measurement base for T1's per-lane `J` and for Theorem 3's 35
     port-feasible cells; refusing it for a hazard it cannot reach would
-    invalidate both and buy nothing.
+    invalidate both and buy nothing. ⚠ THE BUILDER, AT EACH RUNNER'S OWN
+    DELAYS -- Theorem 3's cells are `run_dstar_check` at d = 20..60, every
+    point admissible. The TRACKED `five_image.hex` (d = 12..16, U = 1.083) is
+    a declared non-admissible MECHANISM image and backs neither (ruling Q3).
 
     ⛔ THE CHIP ALSO REFUSES IT (1.6x in silicon), at DISPATCH rather than at
     header load: at header-load time the chip cannot know whether a lane's

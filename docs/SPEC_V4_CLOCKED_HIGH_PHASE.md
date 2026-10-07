@@ -1411,3 +1411,78 @@ while the loop said 0 (real exit code: 1). No false green reached a commit: the
 full suite reads exit codes correctly and ran before every commit. It is the
 same shape as the three earlier instances in this arc, and E+'s lint gate is
 what makes it mechanical rather than a matter of noticing.
+
+
+---
+
+## 19. E+ and Q3 — exit codes made mechanical; `five_image` was never evidence
+
+### E+ — a shell exit code is read only where it can belong
+
+Four times in this arc a checking loop printed an exit code that belonged to
+something else, and once it hid a gate that was really exiting 1:
+
+| shape | whose status `$?` actually held |
+| --- | --- |
+| `cmd \| tail; echo $?` | `tail`'s |
+| `cmd \| head; echo "rc=$?"` | `head`'s |
+| `printf "%s %s" "$(basename $g)" "$?"` | `basename`'s — the substitution ran first |
+
+The third has **no pipe**, so `set -o pipefail` alone could not have caught it.
+
+* **E1** — every `.sh` under `ci/`, `test/`, `model/` already sets `pipefail`;
+  the gate keeps it so. One named exception: `ci/rc.sh`, a **sourced** helper,
+  where setting shell options would silently change the caller's shell — and
+  the gate reds if that helper ever gains a pipe.
+* **E2** — `ci/rc.sh`: `run_rc` / `run_rc_quiet` capture the code on the next
+  statement and print `rc=<n>  <command>`. Quick loops use it.
+* **E3** — `model/gate_shell_rc.py` (in CI): no substitution before `$?` on its
+  line, no `$?` reading a pipeline, and `$?` read on the very next line (or the
+  same line after `;`). Backslash continuations are joined; single-quoted text
+  is not scanned.
+* **E4** — priced: a failing command piped into `tail` (both one- and two-line
+  forms), `$?` after `$(basename …)` in a loop, a blank line before `$?`, and a
+  script without `pipefail` are all red; a redirected command, a continued
+  command, `cmd; rc=$?` and `'$?'` in single quotes are all accepted.
+
+**Every committed `$?` read was already clean** (17 of them) — all four vacuous
+instances were in throwaway interactive loops, not files. So the gate guards the
+committed scripts going forward, and the helper fixes the practice.
+
+⛔ **A check-that-could-not-fire, caught before it shipped:** the first version
+of the "sourced helper must stay pipe-free" check ran over the whole file, and
+the comment-stripper stops at the first `#` — the shebang. It is now per line
+and priced.
+
+### Q3 — was `five_image` ever evidence?
+
+**No claim scoped to admissible programs rests on a non-admissible run.** The
+deciding distinction is between the **builder** and the **tracked file**: the
+claim-bearing runners rebuild `--five` at their own delays into their own output
+names, so each run point is judged at the delays it used.
+
+| runner | delays | admissible? | role |
+| --- | --- | --- | --- |
+| `run_dstar_check` — Theorem 3's **35 cells**, the live J = 1 sweep | d … d+4, d = 20…60 | **all 7 points** (U ≤ 0.685) | claim |
+| `run_csat` S / T — **C = 3** | 40×5, 60×5 | yes | claim |
+| `run_csat` U | 2×5 | no — U = 7.5 | one-sided contrast ("may only be larger") |
+| `run_spl_compare` | d = 8…30 | the claim is **scoped** to d ≥ 20, all admissible | claim |
+| `run_jlane` A / C | 12…16; 8,100×4 | no, on purpose | sub-D* J characterisation; the aggregate 8 recorded on A was later **retracted** (ledger `b4e51034e283`) |
+| **tracked `five_image.hex`** | 12…16 | **no** — U = 1.083 | `tb_witness` stall chain (a floor), `M_BUF_SWAP`'s kill, `gate_cj_bounds` (owed, CJ) |
+
+⇒ **The tracked `five_image` is mechanism only**, and its N1 entry now says so.
+
+⛔ **My own N1 entry was wrong** — it called the tracked file "the measurement
+base for T1's per-lane J and Theorem 3's port-feasible cells", conflating the
+file with the builder at other delays. `pe_asm`'s and `gate_ruling_audit`'s
+comments made the same conflation; all three are corrected.
+
+### Found while answering Q3 — README, for Nathan (not edited: the write-up is his)
+
+* **The README's shipped-program row is the pre-C = 3 table.** It shows
+  `r = {11, 8, 5, 10, 6}, min margin 12`; ledger entry `65bc3c8114e5` re-quoted
+  it to `r = {16, 12, 7, 15, 9}, min margin 11` when C was corrected 2 → 3 — and
+  that is what `gate_pyrta` reproduces at the pinned pyRTA.
+* **The README still presents the universal `J = 8` row** ("over every
+  admissible program"). Ledger entry `b4e51034e283` **withdrew** universal J = 8
+  as unsound and replaced it with the scoped claim `d_min ≥ D* = 20 → J = 1`.

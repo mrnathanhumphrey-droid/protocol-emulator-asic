@@ -148,6 +148,13 @@ GATES=(
   # first run found the stress image `five_image` overloaded (U = 1.083) and
   # nine more below D* that nothing declared.
   model/gate_admissible_images.py
+  # ⛔⛔ E+ -- A SHELL EXIT CODE IS READ ONLY WHERE IT CAN BELONG. Four times in
+  # one arc a checking loop printed an exit code belonging to something else
+  # (`| tail`, `| head`, and `"$(basename $g)" "$?"` -- the substitution reset
+  # it, with no pipe for pipefail to catch), and once that hid a gate really
+  # exiting 1. Every committed read is clean; this keeps it so, and
+  # `ci/rc.sh`'s `run_rc` is how loops capture a code.
+  model/gate_shell_rc.py
   # ⭐ JOINED THE LIST when it took the RX lane-field width check. That check
   # guards against a received byte being attributed to the WRONG LANE if
   # `N_LANES` ever outgrows the explicit [2:0] on `e_rx_lane` -- and it lives

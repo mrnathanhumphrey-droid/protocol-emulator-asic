@@ -169,9 +169,12 @@ RULINGS = [
      "and checked at DISPATCH, not header load: l_clkpin reaches the pins only "
      "inside the OP_SHIFT arm, and at header-load time the chip cannot know "
      "whether a lane's program shifts. build_five declares the alias on all "
-     "five lanes while running only OP_LEVEL, and it is the measurement base "
-     "for T1's J_lane and Theorem 3's 35 cells -- refusing it would invalidate "
-     "both for a hazard it cannot reach. `clk_real` is the companion guard "
+     "five lanes while running only OP_LEVEL, and the BUILDER (at each "
+     "runner's own delays -- Theorem 3's cells at d = 20..60, all admissible; "
+     "not the tracked 12..16 file, a declared mechanism image, ruling Q3) is "
+     "the measurement base for T1's J_lane and Theorem 3's 35 cells -- "
+     "refusing it would invalidate both for a hazard it cannot reach. "
+     "`clk_real` is the companion guard "
      "that makes PIN_NONE expressible, so a lane with no clock (an SPI TARGET) "
      "can say so instead of pointing at its own data pin."),
     ("1.6t", "toolchain", BUILT_TC, "model/pe_asm.py", "def compute_j",

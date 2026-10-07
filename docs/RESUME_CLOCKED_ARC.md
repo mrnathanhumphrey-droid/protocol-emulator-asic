@@ -39,6 +39,7 @@ here** (ruling CI1). A local pass is reported as local.
 | `47bc387` | ❌ `37568512542` | ✅ `37568512633` | **6 of 8 on the witness**: all four corpus programs CYCLE-EXACT in CI, but the async-clear arm disagreed on 666 lines of `uio_in[6]` (CS, bench-driven) from cycle 22. |
 | `f8f952c` | ❌ `37570517654` | ✅ `37570517688` | ⛔ **a wrong diagnosis, disproved by CI.** I took it for a race between the trace sampler and blocking stimulus writes on the same negedge and made the stimulus non-blocking; the identical 666 lines disagreed again. The real cause: `verilator_trace.sh` called a bare `verilator`, which in CI is apt's **5.020** -- CI keeps the pinned **5.053** off PATH and names it in `PE_VERILATOR`. CI's Icarus matched the local trace exactly; it was CI's Verilator that saw CS rise a cycle late. Fixed in the next commit; the non-blocking change is kept (the race is real) but fixed nothing observed. |
 | `f0aa6db` | ✅ `37572686088` | ✅ `37572686044` | the pinned Verilator in `verilator_trace.sh`; witness 7 of 8, 0 failed, in CI; 24 of 24 |
+| `b97d5bd` | ✅ `37611788009` | ✅ `37611787822` | P6 + N1; 25 of 25 |
 
 ---
 
@@ -58,6 +59,9 @@ FRAM write + random read.
 | **CI3** | every bench's name buffer 256, loud load check, >128-byte arm, lint rule | ✅ landed — SPEC §17 |
 | **P6** | pyRTA pinned at `1f3a649`, enforced, printed everywhere; reproduces `65bc3c8114e5` exactly | ✅ landed — SPEC §18 |
 | **N1** | non-admissible images declared (OVERLOAD / PORT / PINMAP), derived from each image; found `five_image` overloaded + 9 more below D* | ✅ landed — SPEC §18 |
+| **E+** | exit codes mechanical: pipefail enforced, `ci/rc.sh` run_rc, `gate_shell_rc` lint, must-fires | ✅ landed — SPEC §19 |
+| **Q3** | `five_image` as evidence: **mechanism only**; every claim-bearing run point admissible | ✅ landed — SPEC §19 |
+| **README (Nathan)** | stale pre-C=3 shipped row (`r = {11,8,5,10,6}`, margin 12 → ledger has `{16,12,7,15,9}`, 11) and the withdrawn universal `J = 8` row | **yours — the write-up** |
 | **M** | unreset store: full-store images, defined filler, audit, PC-reach report, load-time report | **NEXT** |
 | **V** | tool pinning enforced: lint on bare verilator/iverilog/yosys; every tool gate prints path + version | owed |
 | **MU** | mutant completeness: every `ifdef M_*` killed by a named gate or a declared survivor; equivalence goes red | owed |
@@ -325,3 +329,5 @@ says a green here is a green there — that claim held only because nobody looke
   from CI by design, and a pyRTA clone sits in this box's scratch directory, so
   a plain local run can pass checks CI cannot run (`992c298`, red at 20 of 22).
   The pyRTA-primary gates run separately: `python model/a2/run_a2.py`.
+
+* ⛔ **Capture exit codes with `. ci/rc.sh; run_rc <cmd>`**, never a hand-written `$?` after a pipe or a `$(...)`. Four vacuous readings in one arc; `gate_shell_rc` enforces it in committed scripts.

@@ -73,10 +73,19 @@ NON_ADMISSIBLE = {
         "the scheduler stress image: four lanes at d = 9..13 beside a clocked "
         "lane at 70 (D5 raised only lane 0), deliberately oversubscribed. "
         "Ruling S reports its clocked lane UNBOUNDED for this reason."),
+    # ⛔ MECHANISM ONLY (ruling Q3), and the first version of this entry said
+    # otherwise: it called the tracked file "the measurement base for T1's
+    # per-lane J and Theorem 3's port-feasible cells". Those claims were
+    # measured with the BUILDER at OTHER delays -- Theorem 3's 35 cells are
+    # `run_dstar_check` at d = 20..60, every point admissible -- not with this
+    # file at 12..16. Conflating the builder with the file is how a
+    # non-admissible image starts to read as evidence.
     "five_image.hex": ({OVERLOAD, PORT},
-        "`build_five`'s scheduler stress image -- five push-pull lanes on uio "
-        "at d = 12.. -- the measurement base for T1's per-lane J and Theorem "
-        "3's port-feasible cells, which is what it must exceed to probe."),
+        "MECHANISM ONLY. The tracked FIVE_STRESS image (d = 12..16, "
+        "U = 1.083). Used by tb_witness's stall-chain trace (a floor, sub-D* "
+        "regime), run_mutants' M_BUF_SWAP kill (needs stalls to discriminate), "
+        "and gate_cj_bounds' sub-D* double-buffer number (owed under CJ). No "
+        "claim scoped to admissible programs was measured on it (Q3)."),
     "corpus_spim.hex": ({PORT},
         "the SPI-master TRACE image at d = 7, below D*: it exists to move the "
         "uo_out bank for the corpus witness, not as the shipped 1 MHz SPI "
