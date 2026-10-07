@@ -863,3 +863,236 @@ async def test_config_error_refuses_to_run(dut):
         % (len(status), [hex(p) for p in status[:4]]))
     dut._log.info("1.6s: the violating program never dispatched, and "
                   "CONFIG_ERR is set in the status stream")
+
+
+# =====================================================================
+# 8. CHECKPOINT H-CK3 -- the silicon paths added since `d2b7d34`, at the pins
+# =====================================================================
+# ⛔⛔ WHY THESE FOUR ARMS EXIST. The checkpoint harden is the first gate-level
+# run since `d2b7d34`, and every path below landed after it: M5's short-load
+# refusal, D1/U's hold refusal, F1's clocked open-drain park and rebase, the
+# SDA hold pipeline and W1's hold-pending ineligibility. The eight tests above
+# reach none of them as a CHECK -- `corpus_i2c` runs the park and the hold, but
+# nothing there measures a high phase, a hold or a setup, so the netlist could
+# break any of them and stay green. Each arm is pins-only, so the identical
+# check runs on the RTL and on the netlist.
+# ⭐ The boundaries are READ, not restated: SDA_HOLD / SDA_SETUP from the RTL
+# (`model/hold_bound.py`), delays from the image's own headers and actions.
+sys.path.insert(0, os.path.join(os.path.dirname(HERE), "model"))
+import hold_bound                                    # noqa: E402
+import pe_isa                                        # noqa: E402
+
+
+def _unpack(fields, raw, nbytes):
+    w = int.from_bytes(bytes(raw), "big") >> (nbytes * 8
+                                              - sum(x for _n, x in fields))
+    out = {}
+    for name, width in reversed(fields):
+        out[name] = w & ((1 << width) - 1)
+        w >>= width
+    return out
+
+
+def lane_delays(img, lane):
+    """Every action delay lane `lane` can reach, from the image itself."""
+    h = _unpack(pe_isa.HDR_FIELDS,
+                img[lane * pe_isa.HDR_BYTES:(lane + 1) * pe_isa.HDR_BYTES],
+                pe_isa.HDR_BYTES)
+    pc, out = h["base"], []
+    for _ in range(200):
+        a = _unpack(pe_isa.ACT_FIELDS, img[pc:pc + pe_isa.ACT_BYTES],
+                    pe_isa.ACT_BYTES)
+        if a["delay"]:
+            out.append(a["delay"])
+        if a["op"] == pe_isa.OP_REARM:
+            break
+        pc += pe_isa.ACT_BYTES
+    return h, out
+
+
+async def run_loaded(dut, img, feed=True, first=True):
+    """Load `img` and run it. `first=False` re-resets WITHOUT a second clock:
+    CONFIG_ERR and M5's `store_full` are sticky until `rst_n`, so every arm
+    after the first needs a reset, and `start` would add another Clock."""
+    if first:
+        await start(dut)
+    else:
+        dut.ui_in.value = 0
+        dut.ob_oe.value = 0
+        dut.rst_n.value = 0
+        await ClockCycles(dut.clk, 10)
+        dut.rst_n.value = 1
+        await ClockCycles(dut.clk, 2)
+    await load_image(dut, img)
+    dut.ui_in.value = ctrl(prog=0)
+    dut.ob_oe.value = 0                     # release: the pull-ups hold it high
+    await ClockCycles(dut.clk, 8)
+    hostq = {"bytes": 0, "pops": 0}
+    if feed:
+        cocotb.start_soon(feed_host(dut, hostq))
+        cocotb.start_soon(watch_pops(dut, hostq))
+    return hostq
+
+
+async def i2c_oe_trace(dut, ncyc):
+    """[(scl_oe, sda_oe)] per cycle on the I2C pair, X as '?'."""
+    out = []
+    for _ in range(ncyc):
+        oe = str(dut.uio_oe.value)
+        out.append((bit(oe, P_SCL), bit(oe, P_SDA)))
+        await ClockCycles(dut.clk, 1)
+    return out
+
+
+async def cfg_err_seen(dut, ncyc=900):
+    frames = await harvest_frames(dut, ncyc)
+    status = [p for m, p, _k, _t in frames if m == MARK_STATUS and p is not None]
+    return bool(status), any((p >> ST_CFG_ERR) & 1 for p in status)
+
+
+@cocotb.test()
+async def test_short_load_refused(dut):
+    """M5 at the pins: a load shorter than the store never runs.
+
+    The store has no reset, so a partial load leaves power-up contents one
+    missing REARM from running on real pins. Silicon gates the engine on
+    2^AW consecutive writes since `rst_n` and raises CONFIG_ERR at release.
+    Loaded here: `corpus_i2c`'s 51 program bytes, not its 256-byte image --
+    the exact short load M5 caught `gate_corpus_trace` making.
+    """
+    img = read_hex("corpus_i2c.hex")[:51]
+    await run_loaded(dut, img, feed=False)
+    tr = await i2c_oe_trace(dut, 1500)
+    pulled = sum(1 for s, d in tr if "1" in (s, d))
+    assert pulled == 0, ("a 51-byte load RAN: the I2C pair was pulled low on "
+                         "%d of %d cycles" % (pulled, len(tr)))
+    have, err = await cfg_err_seen(dut)
+    assert have, "no status frame in the stream, so CONFIG_ERR is unreadable"
+    assert err, "a short load was refused silently -- CONFIG_ERR never set"
+    dut._log.info("M5: the 51-byte load never ran, and CONFIG_ERR is set")
+
+
+@cocotb.test()
+async def test_hold_refusal(dut):
+    """D1 + U at the pins: a delay the SDA hold cannot fit is REFUSED.
+
+    D1, clocked: `ckhold_at` (a self-clocked open-drain byte at d = SDA_HOLD)
+    must never move the pair and must raise CONFIG_ERR. U, unclocked:
+    `build_i2cframe(SDA_HOLD)` STARTs (SDA low) and takes SCL low, then its
+    first clock-low SHIFT is refused -- so a few moves, then a frozen pair and
+    CONFIG_ERR. ⭐ The control arm is the same frame at SDA_HOLD + 1, which
+    must RUN: a refusal that fired on both would prove nothing.
+    """
+    import make_smoke_image as msi
+    hold = hold_bound.bound()
+    # -- D1: the clocked byte at d = SDA_HOLD -----------------------------
+    await run_loaded(dut, read_hex("ckhold_at_image.hex"), feed=False)
+    tr = await i2c_oe_trace(dut, 1200)
+    assert all(s != "1" and d != "1" for s, d in tr), (
+        "D1: a clocked open-drain byte at d = %d moved the I2C pair" % hold)
+    have, err = await cfg_err_seen(dut)
+    assert have and err, "D1: refused without CONFIG_ERR in the stream"
+    # -- U: the unclocked frame, refused at SDA_HOLD, running at +1 -------
+    moves = {}
+    for d in (hold, hold + 1):
+        img = list(pe_isa.full_store(msi.build_i2cframe(d)))
+        await run_loaded(dut, img, feed=False, first=False)
+        tr = await i2c_oe_trace(dut, 2000)
+        moves[d] = (sum(1 for a, b in zip(tr, tr[1:]) if a != b),
+                    sum(1 for a, b in zip(tr[-600:], tr[-599:]) if a != b))
+        have, err = await cfg_err_seen(dut)
+        moves[d] += (err,)
+    (n_at, tail_at, err_at), (n_ov, _t, err_ov) = moves[hold], moves[hold + 1]
+    assert err_at and tail_at == 0 and n_at <= 3, (
+        "U: the unclocked frame at d = %d was not refused cleanly: %d pair "
+        "moves, %d in the last 600 cycles, CONFIG_ERR=%s"
+        % (hold, n_at, tail_at, err_at))
+    assert not err_ov and n_ov > 20, (
+        "U control: the frame at d = %d should RUN (moves %d, CONFIG_ERR=%s)"
+        % (hold + 1, n_ov, err_ov))
+    dut._log.info("D1 + U: refused at d = %d (%d moves, then frozen), runs at "
+                  "d = %d (%d moves)" % (hold, n_at, hold + 1, n_ov))
+
+
+@cocotb.test()
+async def test_clocked_park_high_phase(dut):
+    """F1 at the pins: a clocked open-drain HIGH lasts at least `d`.
+
+    The post-HIGH park counts its high period from the OBSERVED SCL rise and
+    releases at `rise + d`. Before F1 it rebased to the rise itself, and t_HIGH
+    measured FLAT at the synchroniser latency (~6 cycles) whatever `d` was --
+    no I2C mode at any delay. Measured here on `corpus_i2c`: every complete
+    SCL-released run between two pulls is >= the lane's minimum delay.
+    """
+    img = read_hex("corpus_i2c.hex")
+    h, dl = lane_delays(img, 0)
+    assert h["clkpin"] == P_SCL and h["pin"] == P_SDA and dl, (
+        "corpus_i2c lane 0 is not the I2C pair this test watches: %s" % h)
+    d = min(dl)
+    hostq = await run_loaded(dut, img)
+    tr = await i2c_oe_trace(dut, 4000)
+    highs, run, seen_pull = [], 0, False
+    for s, _d in tr:
+        if s == "1":
+            if seen_pull and run:
+                highs.append(run)
+            seen_pull, run = True, 0
+        else:
+            run += 1
+    assert len(highs) >= 10, ("only %d complete SCL high phases -- the "
+                              "measurement is vacuous" % len(highs))
+    assert min(highs) >= d, (
+        "t_HIGH fell to %d cycles, under the lane's delay d = %d: the park "
+        "released before rise + d (F1)" % (min(highs), d))
+    dut._log.info("F1: %d SCL high phases, %d..%d cycles, all >= d = %d"
+                  % (len(highs), min(highs), max(highs), d))
+    assert_host_fed(dut, hostq)
+
+
+@cocotb.test()
+async def test_sda_hold_and_setup(dut):
+    """The SDA hold pipeline and W1 at the pins.
+
+    `ckhold_over` is one self-clocked open-drain byte at d = SDA_HOLD + 1, the
+    program the setup finding was measured on: with one cycle of contention
+    the held bit used to land after the next SCL release (11 of 562 data moves
+    with SCL released). W1 makes the lane ineligible until its hold + setup
+    is over. At the pins, every SDA change must (a) come while SCL is pulled
+    low, (b) >= SDA_HOLD after that low began, and (c) >= SDA_SETUP before
+    the release that ends it. No START/STOP in this program, so every SDA
+    change is a data move.
+    """
+    hold, setup = hold_bound.bound(), hold_bound.setup()
+    img = read_hex("ckhold_over_image.hex")
+    hostq = await run_loaded(dut, img)
+    tr = await i2c_oe_trace(dut, 5000)
+    fall, last, n_mv, n_su = None, None, 0, 0
+    worst_hold, worst_su = None, None
+    prev = tr[0]
+    for cyc, (s, d) in enumerate(tr[1:], 1):
+        ps, pd = prev
+        if ps != "1" and s == "1":
+            fall, last = cyc, None
+        if ps == "1" and s != "1" and last is not None:
+            su = cyc - last
+            worst_su = su if worst_su is None else min(worst_su, su)
+            n_su += 1
+        if pd != d and fall is not None:
+            assert s == "1" and ps == "1", (
+                "cycle %d: SDA changed with SCL RELEASED -- t_SU;DAT <= 0, a "
+                "START or STOP to any receiver (W1)" % cyc)
+            hd = cyc - fall
+            worst_hold = hd if worst_hold is None else min(worst_hold, hd)
+            last = cyc
+            n_mv += 1
+        prev = (s, d)
+    assert n_mv >= 20 and n_su >= 10, (
+        "only %d SDA moves / %d releases after one -- vacuous" % (n_mv, n_su))
+    assert worst_hold >= hold, ("t_HD;DAT fell to %d, under SDA_HOLD = %d"
+                                % (worst_hold, hold))
+    assert worst_su >= setup, ("t_SU;DAT fell to %d, under SDA_SETUP = %d (W1)"
+                               % (worst_su, setup))
+    dut._log.info("hold + W1: %d SDA moves, hold >= %d (min %d), setup >= %d "
+                  "(min %d over %d releases)"
+                  % (n_mv, hold, worst_hold, setup, worst_su, n_su))
+    assert_host_fed(dut, hostq)

@@ -1,6 +1,6 @@
-"""Rulings K and U -- every chip-driven SDA transition holds across the SCL
-fall, per CLASS, and a delay that cannot fit the hold is refused wherever the
-hold applies.
+"""Rulings K, U and W -- every chip-driven SDA transition holds across the SCL
+fall, lands before the next SCL release, and a delay that cannot fit the hold
+is refused wherever the hold applies.
 
 ⛔⛔ WHY. Ruling H put the transmit path's SDA change through a hold pipeline
 and measured it -- on `ckod`, a SHIFT-only image. The clocked SHIFTIN's
@@ -23,8 +23,22 @@ CLASSES, not images:
       and the wire-level `gate_um10204` arm on corpus_i2c).
   U2  the unclocked open-drain frame (`build_i2cframe`) at d = SDA_HOLD is
       REFUSED; at SDA_HOLD + 1 it RUNS and holds. Must-fire:
-      `M_HOLD_CLOCKED_ONLY` (the old clocked-only scope) runs d = SDA_HOLD and
-      Layer H reports the broken hold.
+      `M_HOLD_CLOCKED_ONLY` (the old clocked-only scope) RUNS d = SDA_HOLD.
+
+⛔⛔ RULING W -- NO SDA CHANGE WHILE SCL IS HIGH, IN SILICON. The refusal
+`d > SDA_HOLD` fixes the HOLD and nothing fixed the SETUP: MEASURED, ckhold_over
+(d = 16) moved data with SCL released 11 times in 562, i2cframe 10 at d = 16
+and 3 at d = 17, and the unclocked SHIFTIN release held only 14 at d = 16.
+
+  W1  a lane is ineligible while its own hold + SDA_SETUP is pending; Layer H
+      now reds any data move with SCL released (when SDA_HOLD != 0)
+  W2  the unclocked SHIFTIN/READBIT release goes through the hold pipeline
+  W4  ckhold_over (d = 16) and i2cframe at d = 16/17/18: zero data moves with
+      SCL released, every hold >= SDA_HOLD, setup >= SDA_SETUP; and how often
+      W1 actually delayed a dispatch, on every image in the table
+  W5  must-fires: `M_NO_HOLD_GATE` reproduces the setup moves (11/562 on
+      ckhold_over, 10 and 3 on i2cframe d = 16/17), `M_SHIFTIN_UC_UNHELD`
+      reproduces the unclocked release hold of 14
 """
 
 from __future__ import annotations
@@ -53,13 +67,14 @@ CLASS = {0: "LEVEL", 1: "SHIFT data", 2: "SHIFTIN release",
          3: "READBIT release", 4: "START", 5: "STOP", 6: "ARM", 7: "REARM",
          8: "SHIFT 1-bit (ACK/NACK)", 9: "other"}
 DATA = {1, 2, 3, 8}
-#: image -> (peer, required data classes, setup judged?).
+#: image -> (peer, required data classes, mode floor must pass?).
 #: ⛔ An empty required cell is RED.
-#: ⛔ SETUP (a data move with SCL released) is judged only where a floor
-#: promises it: clocked images the mode floor (`pe_asm.check_mode_floor`)
-#: covers and passes -- checked below, not assumed -- and the CERTIFIED frame,
-#: whose certification is the claim. `corpus_all5` is OVERLOADED (the mode
-#: floor refuses it: no finite worst-case response), so it is reported only.
+#: ⛔ SETUP is no longer judged here per image: since W1 it is a SILICON
+#: promise on every program and Layer H reds it itself. The third column now
+#: asserts what the image CLAIMS -- that it passes the mode floor
+#: (`pe_asm.check_mode_floor`, clocked and, since W7, unclocked frames).
+#: `corpus_all5` is OVERLOADED (no finite worst-case response), so it claims
+#: nothing.
 IMAGES = {
     "corpus_i2c": ("i2c", {1, 2}, True),
     "corpus_all5": ("none", {1, 2}, False),
@@ -67,9 +82,17 @@ IMAGES = {
     "ckread_image": ("none", {1, 2, 8}, True),
     "i2cframe_image": ("i2c", {1}, True),
 }
+#: W4's subjects: the programs the findings were measured on.
+W4 = [("ckhold_over_image", "test/ckhold_over_image.hex", "none")]
+#: W5's recorded findings, reproduced by the mutant without W1:
+#: subject -> data moves with SCL released (and of how many, where recorded).
+W5_FOUND = {"ckhold_over_image": (11, 562), "i2cframe_d16": (10, None),
+            "i2cframe_d17": (3, None)}
 ROW = re.compile(r"clocked_conform\[H\] class (\d+): n=(\d+) hold_min=(-?\d+) "
                  r"hold_max=(-?\d+) moved_while_released=(\d+)")
 CFG = re.compile(r"clocked_conform\[M5\]: store_full=\d config_err=(\d)")
+SU = re.compile(r"clocked_conform\[W\] setup_min=(-?\d+) over (\d+)")
+WB = re.compile(r"clocked_conform\[W\] w1_binds=(\d+) w1_cycles=(\d+)")
 
 
 def build(defs, name):
@@ -96,11 +119,22 @@ def run(vvp, img, peer):
     o = r.stdout
     rows = {int(m.group(1)): tuple(int(x) for x in m.groups()[1:])
             for m in ROW.finditer(o)}
-    cfg = CFG.search(o)
+    cfg, su, wb = CFG.search(o), SU.search(o), WB.search(o)
     return {"rows": rows, "hfail": "*** FAIL clocked_conform[H]" in o,
             "anyfail": "*** FAIL" in o,
             "config_err": int(cfg.group(1)) if cfg else None,
-            "exercised": "clocked_conform[H]: 0 chip-driven" not in o}
+            "exercised": "clocked_conform[H]: 0 chip-driven" not in o,
+            "su": int(su.group(1)) if su else None,
+            "binds": (int(wb.group(1)), int(wb.group(2))) if wb else None}
+
+
+def released(res):
+    """Data moves made with SCL released, summed over the data classes."""
+    return sum(res["rows"].get(c, (0, 0, 0, 0))[3] for c in DATA)
+
+
+def data_moves(res):
+    return sum(res["rows"].get(c, (0, 0, 0, 0))[0] for c in DATA)
 
 
 def frame_image(d):
@@ -116,11 +150,14 @@ def main() -> int:
     banner("iverilog", "vvp")
     print()
     print("=" * 78)
-    print("  K + U -- EVERY CHIP-DRIVEN SDA MOVE HOLDS ACROSS THE SCL FALL")
+    print("  K + U + W -- EVERY CHIP-DRIVEN SDA MOVE HOLDS ACROSS THE FALL AND")
+    print("  LANDS BEFORE THE RELEASE")
     print("=" * 78)
     os.makedirs(OUT, exist_ok=True)
     hold = hold_bound.bound()
-    print("  SDA_HOLD = %d cycles (read from src/pe_engine.v)" % hold)
+    setup = hold_bound.setup()
+    print("  SDA_HOLD = %d, SDA_SETUP = %d cycles (read from src/pe_engine.v)"
+          % (hold, setup))
     rc = 0
     clean = build([], "clean")
 
@@ -130,24 +167,18 @@ def main() -> int:
                                            "max", "high"))
     import gate_degenerate_fields as dgf
     import pe_asm
-    for img, (peer, need, judged) in IMAGES.items():
+    binds = {}
+    for img, (peer, need, claims) in IMAGES.items():
         res = run(clean, "test/%s.hex" % img, peer)
-        if judged:
-            # ⛔ "judged" must be TRUE of the image, not asserted: a clocked
-            # image marked judged must pass the mode floor it is judged by.
+        binds[img] = (res["binds"], claims)
+        if claims:
+            # ⛔ a claim must be TRUE of the image, not asserted
             try:
-                floors = pe_asm.check_mode_floor(dgf.load(
+                pe_asm.check_mode_floor(dgf.load(
                     os.path.join(ROOT, "test", img + ".hex")))
             except Exception as e:
-                print("  *** %s is marked setup-judged but the mode floor "
-                      "REJECTS it: %s" % (img, str(e)[:80]))
-                rc = 1
-                floors = None
-            setup = sum(res["rows"].get(c, (0, 0, 0, 0))[3] for c in DATA)
-            if setup:
-                print("  *** %s: %d data move(s) with SCL released -- t_SU;DAT "
-                      "<= 0 on a program a floor promises setup for"
-                      % (img, setup))
+                print("  *** %s claims a mode but the mode floor REJECTS it: "
+                      "%s" % (img, str(e)[:80]))
                 rc = 1
         for c in sorted(res["rows"]):
             n, lo, hi, high = res["rows"][c]
@@ -158,17 +189,54 @@ def main() -> int:
                 print("  *** %s: required class %r is EMPTY -- nothing checked "
                       "it" % (img, CLASS[c]))
                 rc = 1
-        if res["hfail"]:
+        if res["hfail"] or released(res):
             print("  *** %s: Layer H reports a data move under SDA_HOLD or with "
                   "SCL released" % img)
+            rc = 1
+        if res["su"] is not None and res["su"] < setup:
+            print("  *** %s: setup %d < SDA_SETUP %d" % (img, res["su"], setup))
             rc = 1
         if res["config_err"] != 0:
             print("  *** %s: refused (CONFIG_ERR) -- a shipped image must run"
                   % img)
             rc = 1
     if rc == 0:
-        print("  ⇒ every required cell exercised; every data move held >= %d"
-              % hold)
+        print("  ⇒ every required cell exercised; every data move held >= %d "
+              "and landed before the release" % hold)
+
+    # ---- W4: the findings' programs, post-fix -----------------------------------
+    print()
+    print("  --- W4: no SDA move while SCL is high, at the programs that had them ---")
+    print("    %-20s %6s %8s %8s %10s %12s" % ("program", "data", "hold_min",
+                                              "released", "setup_min",
+                                              "W1 binds/cy"))
+    subjects = list(W4) + [("i2cframe_d%d" % d, frame_image(d), "i2c")
+                           for d in (hold + 1, hold + 2, hold + 3)]
+    for name, img, peer in subjects:
+        res = run(clean, img, peer)
+        hmin = min((res["rows"][c][1] for c in DATA
+                    if res["rows"].get(c, (0,))[0] and res["rows"][c][1] >= 0),
+                   default=-1)
+        ok = (res["config_err"] == 0 and not res["hfail"] and released(res) == 0
+              and hmin >= hold and res["su"] is not None and res["su"] >= setup
+              and data_moves(res) > 0)
+        b = res["binds"] or (0, 0)
+        print("    %-20s %6d %8d %8d %10s %12s   %s"
+              % (name, data_moves(res), hmin, released(res), res["su"],
+                 "%d/%d" % b, "ok" if ok else "*** FAIL"))
+        if not ok:
+            rc = 1
+    print("    (these programs are below every mode floor -- W7 refuses them in "
+          "the toolchain -- so W1 binding often here is expected)")
+
+    # ---- W4: how often W1 binds on the shipped/corpus images --------------------
+    print()
+    print("  --- W4: how often W1 delays a dispatch (shipped / corpus images) ---")
+    for img, ((nb, cy), claims) in ((k, (v[0] or (0, 0), v[1]))
+                                    for k, v in binds.items()):
+        print("    %-16s %5d delay(s), %5d cycle(s)   %s"
+              % (img, nb, cy, "mode-legal" if claims
+                 else "overloaded, claims no mode"))
 
     # ---- U2: the unclocked frame at the boundary -------------------------------
     print()
@@ -184,16 +252,6 @@ def main() -> int:
              else "*** WRONG"))
     if not (ok_at and ok_over):
         rc = 1
-    # ⚠ REPORTED, NOT JUDGED: the refusal fixes the HOLD on the held path;
-    # at d = SDA_HOLD + 1 release jitter leaves no SETUP, and the UNCLOCKED
-    # SHIFTIN release is not held at all (its hold is the inter-dispatch
-    # delay). No floor promises this program anything -- the mode floor does
-    # not cover unclocked lanes -- so the numbers are recorded as the finding.
-    for c in (1, 2):
-        r = ro["rows"].get(c)
-        if r:
-            print("      d = %d %-16s hold %d..%d, %d move(s) with SCL released"
-                  % (hold + 1, CLASS[c], r[1], r[2], r[3]))
 
     # ---- must-fires -------------------------------------------------------------
     print()
@@ -207,12 +265,39 @@ def main() -> int:
                                 else "*** MISSED"))
     co = build(["M_HOLD_CLOCKED_ONLY"], "clockedonly")
     r4 = run(co, at, "i2c")
-    setup4 = sum(r4["rows"].get(c, (0, 0, 0, 0))[3] for c in DATA)
-    hit4 = r4["config_err"] == 0 and setup4 > 0
+    # ⚠ REDEFINED BY W: this mutant used to be caught by its setup moves, and
+    # W1 now removes those in silicon. What still separates it from the clean
+    # design is the refusal itself: clean refuses d = SDA_HOLD, it runs it.
+    hit4 = r4["config_err"] == 0 and data_moves(r4) > 0
     print("    U   M_HOLD_CLOCKED_ONLY RUNS d = %d (clean refuses), %d data "
-          "move(s) with SCL released   %s"
-          % (hold, setup4, "ok" if hit4 else "*** MISSED"))
-    if not (hit3 and hit4):
+          "move(s), %d with SCL released   %s"
+          % (hold, data_moves(r4), released(r4), "ok" if hit4
+             else "*** MISSED"))
+    ng = build(["M_NO_HOLD_GATE"], "nogate")
+    hit5 = True
+    for name, img, peer in subjects[:3]:
+        r5 = run(ng, img, peer)
+        want, of = W5_FOUND.get(name, (None, None))
+        got = released(r5)
+        same = (want == got) and (of is None or of == data_moves(r5))
+        # ⛔ W5 asks the mutant to REPRODUCE the finding, so the recorded
+        # count is a LIVE pin (`gate_stored_numbers`): drift is red, and a
+        # legitimate change re-measures and re-records it, saying why.
+        hit = got > 0 and r5["hfail"] and same
+        hit5 = hit5 and hit
+        print("    W5  M_NO_HOLD_GATE on %-16s %3d of %3d data move(s) with "
+              "SCL released, Layer H red   %s%s"
+              % (name, got, data_moves(r5), "ok" if hit else "*** MISSED",
+                 "" if same else "  *** recorded finding was %s%s -- re-measure"
+                 % (want, "/%s" % of if of else "")))
+    uc = build(["M_SHIFTIN_UC_UNHELD"], "ucunheld")
+    r6 = run(uc, frame_image(hold + 1), "i2c")
+    c6 = r6["rows"].get(2)
+    hit6 = bool(c6) and c6[1] < hold and r6["hfail"]
+    print("    W5  M_SHIFTIN_UC_UNHELD on i2cframe d = %d: SHIFTIN release hold "
+          "%s (recorded 14), Layer H red   %s"
+          % (hold + 1, c6[1] if c6 else "-", "ok" if hit6 else "*** MISSED"))
+    if not (hit3 and hit4 and hit5 and hit6):
         rc = 1
 
     print()

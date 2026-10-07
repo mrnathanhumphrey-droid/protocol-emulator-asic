@@ -189,6 +189,15 @@ SITES = [
          "violations while the prose above it said ten. Found by writing a "
          "check that needed them and getting `0 violations total`"),
 
+    Site("model/gate_sda_hold.py", "W5_FOUND", LIVE,
+         "ruling W's recorded setup findings (data moves with SCL released "
+         "on ckhold_over and i2cframe d = 16/17), which M_NO_HOLD_GATE must "
+         "reproduce",
+         "model/gate_sda_hold.py",
+         "SPEC §24 (measured at cd57eee, before W1), iverilog, 60k cycles, "
+         "SEED=1",
+         "re-measured in the same run under the mutant and compared; drift is "
+         "red, because W5's claim is that the mutant REPRODUCES these"),
     Site("test/gate_coverage.py", "TOGGLE_CEILING", RECORD,
          "uncovered TOGGLE points per file -- the ratchet the coverage gate "
          "holds, which may only fall",

@@ -314,11 +314,18 @@ D_FM_SHIPPABLE = 70
 CKOD_DELAYS = [D_FMPLUS_SHIPPABLE, 60, 120, 240]
 
 #: ⭐⭐ RULING S's MUST-FIRE SUBJECT: the `ckod` layout at a DENSE span. It is a
-#: FEASIBLE program (U = 0.518, J = 1) whose clocked lanes MEASURE 10 cycles of
-#: post-rise lateness -- under their own derived A2 budgets (11 / 13 / 15 / 17)
-#: and OVER the lighter `corpus_i2c` budget of 8. That is the pair the ruling
+#: FEASIBLE program (U = 0.566, J = 1, d_min = D*) whose clocked lanes MEASURE
+#: 10 cycles of post-rise lateness -- under their own derived A2 budgets and
+#: OVER the lighter `corpus_i2c` budget of 8. That is the pair the ruling
 #: asked for: a lighter lane set's bound applied to a heavier program goes red,
 #: while the heavier program's own bound holds.
+#: ⛔⛔ RE-SPANNED BY RULING W, FROM [22, 23, 24, 25]. W1 makes a lane whose
+#: hold is pending ineligible, so it stops contending for the engine at the
+#: very moments it used to; at the old span the widest post-HIGH lateness fell
+#: from 10 to 8 (4 / 7 / 8 / 4) -- EQUAL to the light budget, so the must-fire
+#: stopped firing. Probed, not guessed: [20, 21, 22, 23] measures 6 / 7 / 10 / 5,
+#: [20, 20, 21, 21], [20, 21, 21, 22], [21, 22, 23, 24] and [20, 22, 24, 26]
+#: all stay at or under 8.
 #: ⛔ WHY IT HAD TO BE BUILT: no shipped image produced it. `ckod` measures 7 and
 #: `corpus_i2c` 4, so a lighter bound of 8 never fails on either -- the shared
 #: constant was unsound for three of `ckod`'s lanes and nothing could show it.
@@ -329,7 +336,7 @@ CKOD_DELAYS = [D_FMPLUS_SHIPPABLE, 60, 120, 240]
 #: scheduler, and `gate_um10204` does not measure it. It also inherits `ckod`'s
 #: consecutive pin pairs, so lane 3 sits on pins 6/7 and is declared in
 #: `corpus.PAD_COLLISION`.
-CKDENSE_DELAYS = [22, 23, 24, 25]
+CKDENSE_DELAYS = [20, 21, 22, 23]
 
 
 def build_ckod(delays=None):

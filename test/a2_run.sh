@@ -5,10 +5,10 @@
 # model's shipped lane set and then enforced on `ckod` -- a DIFFERENT lane set.
 # It held only because `ckod`'s measured lateness (7) happened to sit under it,
 # so nothing on the bench could ever show that a bound belongs to a program.
-# This runs ONE feasible program, `ckdense` (U = 0.518, J = 1, measured
-# lateness 10), twice:
+# This runs ONE feasible program, `ckdense` (U = 0.566, J = 1, measured
+# lateness 10 -- re-spanned to [20, 21, 22, 23] by ruling W), twice:
 #
-#   own    -- with ITS OWN derived per-lane budgets (11,13,15,17)  -> must PASS
+#   own    -- with ITS OWN derived per-lane budgets (clocked_a2_bounds.json) -> must PASS
 #   light  -- with `corpus_i2c`'s budget (8) on every clocked lane -> must FAIL
 #
 # If `light` passes, the per-program derivation is indistinguishable on the

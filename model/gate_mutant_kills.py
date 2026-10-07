@@ -75,6 +75,9 @@ KILLERS = {
     # -- rulings K and U --------------------------------------------------------
     "M_SHIFTIN_UNHELD": "model/gate_sda_hold.py",
     "M_HOLD_CLOCKED_ONLY": "model/gate_sda_hold.py",
+    # -- ruling W -----------------------------------------------------------------
+    "M_NO_HOLD_GATE": "model/gate_sda_hold.py",
+    "M_SHIFTIN_UC_UNHELD": "model/gate_sda_hold.py",
     # ⚠ LOCAL ONLY: judged by sigrok's foreign I2C decoder, which CI does not
     # install -- so it runs under `run_a2.py` with the other sigrok gates.
     "M_IGNORE_ORDER": "test/run_i2c.py",

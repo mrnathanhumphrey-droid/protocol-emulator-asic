@@ -132,6 +132,13 @@ module pe_engine #(
     // the clock period makes the cycle count DERIVED and the design portable
     // to another clock rate without editing a magic number.
     parameter integer SDA_HOLD_NS   = 300,
+    // ⛔⛔ RULING W1: t_SU;DAT, the SETUP that follows the hold. A lane may not
+    // dispatch again until its held SDA change has landed AND this long has
+    // passed, so the next SCL release always finds SDA settled. ONE global
+    // constant covering the strictest declared mode: Fm+ is 50 ns (UM10204
+    // Table 10), 3 cycles at 50 MHz. Sm (250) and Fm (100) are mode floor
+    // business (`pe_asm.check_mode_floor`); silicon guarantees the strictest.
+    parameter integer SDA_SETUP_NS  = 50,
     parameter integer CLK_PERIOD_NS = 20,
     parameter integer TS_W    = 16,
     parameter integer DLY_W   = 10,
@@ -543,12 +550,28 @@ module pe_engine #(
   // ceil(SDA_HOLD_NS / CLK_PERIOD_NS) -- a minimum is not met by rounding down
   localparam integer SDA_HOLD = (SDA_HOLD_NS + CLK_PERIOD_NS - 1)
                                 / CLK_PERIOD_NS;
-  localparam integer HOLDW = (SDA_HOLD < 2)   ? 1 :
-                             (SDA_HOLD < 4)   ? 2 :
-                             (SDA_HOLD < 8)   ? 3 :
-                             (SDA_HOLD < 16)  ? 4 :
-                             (SDA_HOLD < 32)  ? 5 :
-                             (SDA_HOLD < 64)  ? 6 : 7;
+  // ⛔⛔ RULING W1 -- THE SAME COUNTER CARRIES THE SETUP. It is loaded with
+  // SDA_HOLD + SDA_SETUP, the pin is written when it reaches SDA_SETUP + 1
+  // (SDA_HOLD cycles after the load, exactly as before), and it keeps counting
+  // to 0. `ready` is gated on it reaching 0, so the lane cannot dispatch its
+  // next edge -- the SCL release -- until the data has landed and settled.
+  // ⭐ CONTENTION-INDEPENDENT BY CONSTRUCTION: the counter starts at the
+  // dispatch that ACTUALLY happened, not the scheduled one, so a lane that was
+  // dispatched late by contention is held back by exactly what it lost. A
+  // constant floor on `d` cannot do that (W3), since the jitter grows with the
+  // lane set. ⇒ COST: one more counter bit per lane (18 needs 5), 5 flops.
+  // ⚠ AT SDA_HOLD = 0 nothing loads the counter, so nothing is gated: that
+  //   build is the MEASURED defect and stays exactly that.
+  localparam integer SDA_SETUP = (SDA_SETUP_NS + CLK_PERIOD_NS - 1)
+                                 / CLK_PERIOD_NS;
+  localparam integer SDA_HS = SDA_HOLD + SDA_SETUP;
+  localparam integer SDA_SETUP1 = SDA_SETUP + 1;   // the count the pin lands at
+  localparam integer HOLDW = (SDA_HS < 2)   ? 1 :
+                             (SDA_HS < 4)   ? 2 :
+                             (SDA_HS < 8)   ? 3 :
+                             (SDA_HS < 16)  ? 4 :
+                             (SDA_HS < 32)  ? 5 :
+                             (SDA_HS < 64)  ? 6 : 7;
   reg [HOLDW-1:0] l_hcnt   [0:N_LANES-1];   // cycles left before SDA may move
   reg             l_hval   [0:N_LANES-1];   // the pending pin_out value
   reg             l_hoe    [0:N_LANES-1];   // the pending pin_oe value
@@ -937,6 +960,7 @@ module pe_engine #(
   // READY + EDF SELECT. ⛔ Both comparisons are wrap-safe.
   // =====================================================================
   wire [N_LANES-1:0] ready;
+  wire [N_LANES-1:0] rel_due;
   wire [TS_W-1:0]    edf_key_off [0:N_LANES-1];
 
   genvar gi;
@@ -961,8 +985,20 @@ module pe_engine #(
       // ⭐ An ARMED lane with a timeout IS ready at its deadline, and that
       // readiness is exactly the timeout firing -- see ST_IDLE, where arriving
       // ready while still armed halts the lane instead of dispatching.
-      assign ready[gi] = l_live[gi] & ~diff[TS_W-1]
-                       & ~(l_armed[gi] & l_notmo[gi]);
+      // ⛔⛔ RULING W1: `rel_due` is "the release has arrived"; `ready` adds
+      // "and this lane's own SDA hold + setup is over". A lane is INELIGIBLE
+      // while its hold counter runs, so the dispatch that would release SCL
+      // cannot overtake the data it is meant to clock. Kept as two wires so a
+      // bench can count how often W1 actually delays a dispatch
+      // (`rel_due & ~ready`). M_NO_HOLD_GATE drops the gate: the hold still
+      // lands on time, and the data moves after SCL is released again.
+      assign rel_due[gi] = l_live[gi] & ~diff[TS_W-1]
+                         & ~(l_armed[gi] & l_notmo[gi]);
+`ifdef M_NO_HOLD_GATE
+      assign ready[gi] = rel_due[gi];
+`else
+      assign ready[gi] = rel_due[gi] & (l_hcnt[gi] == {HOLDW{1'b0}});
+`endif
       // ⭐ deadline as an OFFSET FROM NOW, so a wrapped key still orders
       //   correctly. 1.6b is what bounds the spread that makes this sound.
       assign edf_key_off[gi] = (l_timestamp[gi] + {{(TS_W-D_W){1'b0}}, l_d[gi]}) - now;
@@ -1961,7 +1997,7 @@ module pe_engine #(
                     // not under-tested, they were unreachable.
                     l_hval[cur] <= 1'b0;
                     l_hoe[cur]  <= ~l_tx[cur][0];
-                    l_hcnt[cur] <= SDA_HOLD[HOLDW-1:0];
+                    l_hcnt[cur] <= SDA_HS[HOLDW-1:0];
                   end
                   end
                   if (clk_real) begin
@@ -2074,7 +2110,7 @@ module pe_engine #(
                 // to carry were unreachable on their push-pull side.
                 l_hval[cur] <= 1'b0;
                 l_hoe[cur]  <= ~l_tx[cur][0];
-                l_hcnt[cur] <= SDA_HOLD[HOLDW-1:0];
+                l_hcnt[cur] <= SDA_HS[HOLDW-1:0];
               end
               // ⛔⛔⛔ D2: THE CLOCK PIN HONOURS `l_mode` TOO, AND IT DID NOT.
               // It was driven `pin_out <= a_lvl; pin_oe <= 1` unconditionally,
@@ -2147,12 +2183,37 @@ module pe_engine #(
               // transmit side, so the hold applies only when the action names
               // that pin; any other falls back to the direct release, and
               // Layer H would report it.
+              // ⛔ W1/W6: ONLY A RELEASE THAT MOVES SDA (`pin_oe[a_pin]`). The
+              // later LOW and COLL dispatches find SDA already released; they
+              // used to load the pipeline anyway, a no-op on the wire that W1
+              // now turns into a dispatch delay -- and COLL followed by the
+              // next action's LOW made two hold loads back to back, which is
+              // the one shape A2's W1 term cannot bound (W6).
 `ifndef M_SHIFTIN_UNHELD
               if (ck_shiftin & clk_real & ~ck_is_high & ~l_mode[cur]
-                  & (SDA_HOLD != 0) & ~ack_drv[1] & (a_pin == l_pin[cur])) begin
+                  & (SDA_HOLD != 0) & ~ack_drv[1] & (a_pin == l_pin[cur])
+                  & pin_oe[a_pin]) begin
                 l_hval[cur] <= 1'b0;
                 l_hoe[cur]  <= 1'b0;
-                l_hcnt[cur] <= SDA_HOLD[HOLDW-1:0];
+                l_hcnt[cur] <= SDA_HS[HOLDW-1:0];
+              end else
+`endif
+              // ⛔⛔ RULING W2: THE UNCLOCKED RELEASE IS HELD TOO. In the
+              // certified frame the clock fall is a separate `OP_LEVEL` and
+              // the release follows one delay later, so its hold was only the
+              // inter-dispatch gap minus contention -- MEASURED 14 at d = 16.
+              // Through the pipeline it lands SDA_HOLD after the dispatch, on
+              // top of that gap, and W1 then keeps the SCL rise behind it.
+              // ⚠ ONLY A RELEASE THAT MOVES SDA (`pin_oe[a_pin]` set): one
+              // that finds the pin already released changes nothing on the
+              // wire, has no hold to protect, and must not cost the lane a
+              // W1 delay. M_SHIFTIN_UC_UNHELD restores the direct release.
+`ifndef M_SHIFTIN_UC_UNHELD
+              if (~ck_shiftin & clk_real & ~l_mode[cur] & (SDA_HOLD != 0)
+                  & ~ack_drv[1] & (a_pin == l_pin[cur]) & pin_oe[a_pin]) begin
+                l_hval[cur] <= 1'b0;
+                l_hoe[cur]  <= 1'b0;
+                l_hcnt[cur] <= SDA_HS[HOLDW-1:0];
               end else
 `endif
               pin_oe[a_pin] <= ack_drv[1];      // release to sample (0)
@@ -2591,16 +2652,17 @@ module pe_engine #(
       // pin index reaching an array, where `PINW = 4` encodes 16 values and
       // only N_PINS are real.
       for (i = 0; i < N_LANES; i = i + 1) begin
+        // ⛔ W1: the pin lands at SDA_SETUP + 1, SDA_HOLD cycles after the
+        // load as before; the remaining SDA_SETUP counts are the setup the
+        // gate on `ready` enforces before the lane's next dispatch.
         if (l_hcnt[i] != {HOLDW{1'b0}}) begin
-          if (l_hcnt[i] == {{(HOLDW-1){1'b0}}, 1'b1}) begin
+          if (l_hcnt[i] == SDA_SETUP1[HOLDW-1:0]) begin
             if (l_pin[i] < N_PINS[PINW-1:0]) begin
               pin_out[l_pin[i]] <= l_hval[i];
               pin_oe[l_pin[i]]  <= l_hoe[i];
             end
-            l_hcnt[i] <= {HOLDW{1'b0}};
-          end else begin
-            l_hcnt[i] <= l_hcnt[i] - {{(HOLDW-1){1'b0}}, 1'b1};
           end
+          l_hcnt[i] <= l_hcnt[i] - {{(HOLDW-1){1'b0}}, 1'b1};
         end
       end
 

@@ -310,9 +310,139 @@ def check_mode_floor(img):
                 "program: the same lane beside lighter traffic could pass."
                 % (ln, e["T"], lag, lo, need))
         claims[int(ln)] = (mode, lo, lag)
+    claims.update(check_unclocked_floor(img, src))
     check_mode_floor.basis = (
         "max(our recurrence, pyRTA @ %s)" % PINNED_COMMIT[:12] if src
         else "our recurrence only -- pyRTA absent or unpinned")
+    return claims
+
+
+def claim_mode(lo, hi, su, tc):
+    """The loosest mode whose t_LOW, t_HIGH AND t_SU;DAT minima all hold."""
+    for m in reversed(list(tc)):
+        if (lo >= tc[m]["t_LOW"] and hi >= tc[m]["t_HIGH"]
+                and su >= tc[m]["t_SU_DAT"]):
+            return m
+    return None
+
+
+def unclocked_phases(h, acts):
+    """Nominal SCL phases of an UNCLOCKED open-drain frame, from its actions.
+
+    Returns (lows, highs, held setups, direct setups) in cycles, or None if
+    the lane never drives its clock with the unclocked idiom. SCL moves on
+    `OP_SHIFT` at level 0 (data + clock low in one dispatch) and on `OP_LEVEL`
+    aimed at the clock pin.
+    An action's delay is the time to the NEXT action's release (P8), so the
+    phase lengths are sums of delays. A setup is measured from each SDA move
+    inside a low phase to the rise that ends it: a HELD move (SHIFT at level 0,
+    the SHIFTIN/READBIT release on the lane's own pin) lands SDA_HOLD after
+    its dispatch, so the hold is subtracted; an `OP_LEVEL` on the data pin is
+    driven directly.
+    """
+    clk, pin = h["clkpin"], h["pin"]
+    hold = hold_bound.bound()
+    drives = False
+    ev = []                             # (scl after or None, sda move kind)
+    for a in acts:
+        op, p, lvl = a["op"], a["pin"], a["level"]
+        scl, sda = None, None
+        # ⚠ A level-1 SHIFT with a real clock pin is the CLOCKED shift
+        # (`ck_shift`), and the caller sends any lane that has one to the
+        # clocked floor -- so only level 0 can appear here.
+        if op == OP_SHIFT and not lvl:
+            scl, sda, drives = 0, "held", True
+        elif op == OP_LEVEL and p == clk:
+            scl, drives = lvl, True
+        elif op == OP_LEVEL and p == pin:
+            sda = "direct"
+        elif op in (OP_SHIFTIN, OP_READBIT) and p == pin:
+            sda = "held"
+        ev.append((scl, sda, a["delay"]))
+    if not drives:
+        return None
+    loops = bool(acts) and acts[-1]["op"] == OP_REARM and acts[-1]["level"]
+    seq = ev * (3 if loops else 1)
+    lows, highs, held, direct = [], [], [], []
+    t, state, edge, moves = 0, 1, None, []
+    for scl, sda, dly in seq:
+        changed = scl is not None and scl != state
+        if changed:
+            if edge is not None:
+                (lows if state == 0 else highs).append(t - edge)
+                if state == 0:
+                    for tm, k in moves:
+                        if k == "held":
+                            held.append(t - tm - hold)
+                        else:
+                            direct.append(t - tm)
+            state, edge, moves = scl, t, []
+        if sda is not None and state == 0:
+            moves.append((t, sda))
+        t += dly
+    return lows, highs, held, direct
+
+
+def check_unclocked_floor(img, src=None):
+    """RULING W7: UNCLOCKED open-drain frames clear SOME mode too.
+
+    ⛔⛔ WHY. `check_mode_floor` judged clocked lanes only, so the unclocked
+    frame (`build_i2cframe`) at d = 16 -- above the 15-cycle hold, so the
+    silicon runs it -- was accepted by the toolchain while its low phase sat
+    under every mode's t_LOW. W1 now keeps it safe on the wire (no SDA move
+    with SCL released); this is the COMPLIANCE half: t_LOW, t_HIGH and
+    t_SU;DAT against UM10204 per mode, with this program's own start delay.
+    The worst case takes the earlier dispatch of a pair late by `r_i - C` and
+    the later one on time, exactly as the clocked floor does.
+    ⚠ t_HIGH here is NOT stretch-safe: an unclocked lane does not observe the
+    SCL rise (only a clocked park does, F1), so a stretching peer shortens it.
+    That limitation is the unclocked idiom's, recorded, not new.
+    ⭐ t_SU;DAT is never taken below SDA_SETUP + 1: W1 holds the rise back that
+    far behind a held move in silicon, whatever the schedule does.
+    """
+    tc = um.table_cycles()
+    su_floor = hold_bound.setup() + 1
+    resp = None
+    claims = {}
+    for ln, h, acts in program_a2.lanes_of(img):
+        if h["mode"] != 0 or h["clkpin"] >= N_PINS:
+            continue
+        if any(program_a2.is_clocked(h, a) for a in acts):
+            continue                    # judged by the clocked floor
+        ph = unclocked_phases(h, acts)
+        if ph is None or not ph[0]:
+            continue                    # no complete SCL low phase to judge
+        if resp is None:
+            resp = program_a2.lane_responses(img, src)
+        r, why = resp.get(ln, (None, "lane not in the lane set"))
+        if r is None:
+            raise Reject(
+                "lane %d is an unclocked open-drain frame in a program whose "
+                "lane set has no finite worst-case response (%s), so its low "
+                "phase has no certifiable floor and no UM10204 mode can be "
+                "claimed." % (ln, why))
+        lag = r - C_SHIPPED
+        lows, highs, held, direct = ph
+        lo = min(lows) - lag
+        hi = (min(highs) - lag) if highs else lo
+        # held moves get W1's silicon floor; a direct move (`OP_LEVEL` on the
+        # data pin) gets none
+        sus = [max(min(held) - lag, su_floor)] if held else []
+        sus += [s - lag for s in direct]
+        su = min(sus) if sus else su_floor
+        mode = claim_mode(lo, hi, su, tc)
+        if mode is None:
+            need = min(tc[m]["t_LOW"] for m in tc) + lag
+            raise Reject(
+                "lane %d is an UNCLOCKED open-drain frame whose shortest SCL "
+                "low phase is %d cycles nominal; in THIS program its dispatches "
+                "can start up to %d cycle(s) late (r_i - C), so t_LOW can "
+                "shrink to %d (t_HIGH %d, t_SU;DAT %d) -- under every UM10204 "
+                "mode. The chip runs it and W1 keeps SDA still while SCL is "
+                "high, but it is mode-illegal. The floor for this lane in this "
+                "program is a low phase >= %d, per program."
+                % (ln, min(lows), lag, lo, hi, su, need))
+        claims[ln] = (mode, lo, lag)
     return claims
 
 
@@ -790,6 +920,35 @@ def main() -> int:
                  "*** %s%s" % ("REJECTED" if got_reject else "ACCEPTED",
                                (" but did not name %s" % missing)
                                if missing else "")))
+        if not ok:
+            rc = 1
+
+    # ---- MUST-FIRE: W7, the mode floor covers UNCLOCKED open-drain frames --
+    # ⛔ The certified frame's shape at d = 16 is above the hold, so silicon
+    # runs it (and W1 keeps it safe on the wire), but its low phase is under
+    # every t_LOW. Until W7 the toolchain accepted it. The certified d = 62
+    # frame must still pass, or the floor is too wide.
+    print()
+    print("  --- must-fire: W7 -- an unclocked open-drain frame clears a mode ---")
+    import make_smoke_image as _msi
+    for name, d, want_reject, want in (
+            ("build_i2cframe(d = 16)", 16, True,
+             ("lane 0", "UNCLOCKED", "t_LOW", "per program")),
+            ("build_i2cframe(d = 62), the certified frame", 62, False, ())):
+        try:
+            got = check_mode_floor(full_store(_msi.build_i2cframe(d)))
+            got_reject, msg = False, ""
+        except Reject as e:
+            got, got_reject, msg = None, True, str(e)
+        missing = [w for w in want if w not in msg]
+        ok = (got_reject == want_reject) and not missing
+        print("    %-46s %s" % (name, ("rejected" if got_reject else
+                                       "accepted (%s)" % got[0][0]) if ok else
+                                 "*** %s%s" % ("REJECTED" if got_reject
+                                               else "ACCEPTED",
+                                               (" but did not name %s"
+                                                % missing) if missing
+                                               else "")))
         if not ok:
             rc = 1
 

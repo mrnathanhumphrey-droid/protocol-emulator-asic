@@ -191,10 +191,11 @@ EXPECT = {
         "cycles under it on `corpus_i2c`, and (b) a bench-held SCL low to "
         "CONTEND (X on the line) against it while staying clean against the "
         "real design."),
-    "M_SHIFTIN_UNHELD": (6,
-        "SIX LINES IN THE CLEAN ARM AND NONE IN THE MUTANT'S, declared: the fix "
-        "ADDS a branch -- the clock-low SHIFTIN release loads the hold "
-        "pipeline (condition, three pipeline writes, `end else`) -- and the "
+    "M_SHIFTIN_UNHELD": (7,
+        "SEVEN LINES IN THE CLEAN ARM AND NONE IN THE MUTANT'S, declared: the "
+        "fix ADDS a branch -- the clock-low SHIFTIN release loads the hold "
+        "pipeline (a three-line condition, three pipeline writes, `end else`; "
+        "W6 added the condition's `pin_oe[a_pin]` line) -- and the "
         "mutant removes it, leaving the original unconditional release. There "
         "is no single expression to swap: holding is three register writes. "
         "RULING K3's must-fire: `model/gate_sda_hold.py` requires the "
@@ -204,7 +205,23 @@ EXPECT = {
         "ONE LINE IN EACH ARM: the refusal's scope `(ck_act | uc_hold)` back "
         "to `ck_act`. RULING U's must-fire: `model/gate_sda_hold.py` requires "
         "the unclocked frame at d = SDA_HOLD to RUN under it (the clean build "
-        "refuses it) and to show data moves with SCL released."),
+        "refuses it). ⚠ Its setup moves are gone since W1 holds the release "
+        "back in silicon, so the RUN is the observable."),
+    "M_NO_HOLD_GATE": (2,
+        "ONE LINE IN EACH ARM: `ready` drops the W1 term `l_hcnt == 0`, so a "
+        "lane may dispatch its SCL release while its own hold + setup is still "
+        "running. The hold itself still lands on time. RULING W5's must-fire: "
+        "`model/gate_sda_hold.py` requires Layer H red with data moves while "
+        "SCL is released -- MEASURED 11 of 562 on ckhold_over and 10 / 3 on "
+        "i2cframe at d = 16 / 17, the recorded findings."),
+    "M_SHIFTIN_UC_UNHELD": (6,
+        "SIX LINES IN THE CLEAN ARM AND NONE IN THE MUTANT'S, the same shape "
+        "as M_SHIFTIN_UNHELD: W2 ADDS a branch (a two-line condition, three "
+        "pipeline writes, `end else`) routing the UNCLOCKED SHIFTIN/READBIT "
+        "release through the hold pipeline, and the mutant removes it. RULING "
+        "W5's must-fire: `model/gate_sda_hold.py` requires the SHIFTIN release "
+        "hold on i2cframe d = 16 to fall under SDA_HOLD (MEASURED 14) and Layer "
+        "H red."),
     "M_NO_STORE_FULL": (2,
         "ONE LINE IN EACH ARM, in `project.v`: the engine's run input is `run` "
         "instead of `run & store_full`, so the chip executes whatever the "

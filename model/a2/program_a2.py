@@ -104,12 +104,117 @@ def lane_set(img):
         J = j_prog + (L_JIT if ck_od else 0)
         bl = BLane("lane%d%s" % (ln, " ckOD" if ck_od else ""), T=T,
                    C=C_SHIPPED, D_tol=dt, D_sched=ds, J=J)
-        out.append({"lane": ln, "blane": bl, "clocked_od": ck_od, "T": T})
+        loads, chains = hold_profile(h, acts)
+        out.append({"lane": ln, "blane": bl, "clocked_od": ck_od, "T": T,
+                    "loads_hold": loads, "chains": chains})
     return out, d_min, k, j_prog
 
 
 def utilisation(ls):
     return sum(r["blane"].C / float(r["T"]) for r in ls)
+
+
+# ---------------------------------------------------------------------------
+# RULING W6 -- W1 IS OWN-LANE BLOCKING, ACCOUNTED AS RELEASE JITTER
+# ---------------------------------------------------------------------------
+# ⛔⛔ W1 makes a lane INELIGIBLE until SDA_HOLD + SDA_SETUP cycles after the
+# dispatch that loaded its hold. MEASURED to bind on admissible programs under
+# contention (`ckdense`, d = 20..23), so "it cannot bind at the mode floor" is
+# FALSE and the bound has to carry it.
+# THE DERIVATION. A loading job of lane i is picked at lateness j <= r_i - C
+# (r_i measured from the nominal release, C the service time). Its hold counter
+# is loaded at the DRIVE edge one cycle after the pick and runs HS cycles, so
+# the lane is next eligible HS + 1 cycles after the pick. Its next job is
+# released T_i after the loading job's release, so W1 holds that job back by
+#     J_w1(i) = max(0, HS + 1 + (r_i - C) - T_i)
+# ⇒ TO EVERY OTHER LANE THAT IS RELEASE JITTER on lane i (`BLane.N_J`): lane i
+#   still delivers one C per release, but up to J_w1 later. It costs the engine
+#   nothing while blocked (a blocked lane is not served).
+# ⇒ TO LANE i ITSELF the delayed job is the SCL RELEASE (the HIGH, or the
+#   unclocked `OP_LEVEL` after the data). It loads no hold, and the bench's A2
+#   check bounds the gap AFTER the high, not before it -- so the subject's own
+#   `r_i` keeps its base J, and only the OTHER lanes see J + J_w1.
+# ⚠ THAT RESTS ON "A LOADING JOB IS NEVER ITSELF W1-DELAYED", which holds iff
+#   no lane runs two hold loads back to back. Checked per lane (`chains`), never
+#   assumed: such a lane would feed its own delay back into its lateness, the
+#   recurrence has no fixed point, and the lane is reported UNBOUNDED with that
+#   reason rather than given a number.
+LOADERS_UNCLOCKED = (I.OP_SHIFT, I.OP_SHIFTIN, I.OP_READBIT)
+
+
+def _hs():
+    import hold_bound
+    return hold_bound.bound() + hold_bound.setup()
+
+
+def hold_profile(h, acts):
+    """(loads_hold, chains) for one lane, from its own actions.
+
+    A clocked SHIFT/SHIFTIN loads at its FIRST dispatch (LOW) and ends on a
+    dispatch that loads nothing (SHIFT retires on HIGH; SHIFTIN's COLL finds
+    SDA already released). An unclocked SHIFT at level 0 loads; an unclocked
+    SHIFTIN/READBIT on the lane's own pin may (only if SDA was driven) and is
+    counted as loading. A REARM, LEVEL, START, STOP or ARM loads nothing.
+    """
+    if h["mode"] != 0 or h["clkpin"] >= N_PINS:
+        return False, False
+    marks = []                          # (loads at start, loads at end)
+    for a in acts:
+        if is_clocked(h, a):
+            marks.append((True, False))
+        elif a["op"] == I.OP_SHIFT and a["level"] == 0:
+            marks.append((True, True))
+        elif (a["op"] in (I.OP_SHIFTIN, I.OP_READBIT)
+              and a["pin"] == h["pin"]):
+            marks.append((True, True))
+        else:
+            marks.append((False, False))
+    loads = any(s for s, _e in marks)
+    n = len(marks)
+    chains = any(marks[i][1] and marks[(i + 1) % n][0] for i in range(n)) \
+        if n > 1 else (n == 1 and marks[0][0] and marks[0][1])
+    return loads, chains
+
+
+def _with_j(bl, J):
+    return BLane(bl.name, T=bl.T, C=bl.C, D_tol=bl.D_tol, D_sched=bl.D_sched,
+                 J=J)
+
+
+def w1_jitter(ls, hs=None, max_iter=64):
+    """Per lane J_w1, by fixed point; None for a lane with no bound.
+
+    Returns (w1 list, reason or None). See the block comment above.
+    """
+    hs = _hs() if hs is None else hs
+    w1 = [0] * len(ls)
+    for r in ls:
+        if r["loads_hold"] and r["chains"]:
+            return None, ("lane %d runs two hold loads back to back: W1 delays "
+                          "a loading job, the recurrence has no fixed point"
+                          % r["lane"])
+    for _ in range(max_iter):
+        new = []
+        for i, r in enumerate(ls):
+            if not r["loads_hold"]:
+                new.append(0)
+                continue
+            lanes = [ls[k]["blane"] if k == i else
+                     _with_j(ls[k]["blane"], ls[k]["blane"].J + w1[k])
+                     for k in range(len(ls))]
+            rr = response_time_b(lanes[i], lanes)["r"]
+            new.append(max(0, hs + 1 + (rr - C_SHIPPED) - r["T"]))
+        if new == w1:
+            return w1, None
+        w1 = new
+    return None, "W1 jitter did not converge in %d iterations" % max_iter
+
+
+def with_w1(ls, w1, i):
+    """The lane set as lane i's analysis sees it: others carry J + J_w1."""
+    return [ls[k]["blane"] if k == i else
+            _with_j(ls[k]["blane"], ls[k]["blane"].J + w1[k])
+            for k in range(len(ls))]
 
 
 def derive(img, src=None):
@@ -132,12 +237,30 @@ def derive(img, src=None):
     `ckdense` lanes), so a floor taken from `r_ours` alone is never LESS strict
     than the pyRTA one on any program we have -- but that is an observation,
     not a theorem, so when pyRTA is present the max is used rather than trusted.
+    ⛔⛔ AND SINCE W6 THE OBSERVATION IS FALSE, which is why the max was right.
+    W1's release jitter (up to 12 on `ckdense`) flips every `ckdense` lane:
+    pyRTA 21/23/25/25 against ours 16/16/16/19. Diagnosed, not assumed: an extended
+    Spuri candidate set (every interferer's `kT_j + D_j - J_j - D_i`) leaves
+    ours unchanged, and pyrta_bound's framing gives an interferer BOTH the
+    jitter-inflated arrival curve AND the deadline `D_j - J_j` -- charging J
+    twice, since the jobs jitter bunches cannot all carry the tightened
+    deadline. So pyRTA is the pessimistic one here, ours is Spuri's count, and
+    the bench budgets (pyRTA-primary) are the looser, sound pair. ⚠ In CI,
+    where pyRTA is absent, `r_floor` is ours alone -- for these lanes up to 9
+    cycles less strict than the published number.
     """
     ls, d_min, k, j_prog = lane_set(img)
     blanes = [r["blane"] for r in ls]
     u = utilisation(ls)
     res = {"d_min": d_min, "k": k, "J": j_prog, "U": round(u, 4),
            "lanes": {}}
+    # ⛔ W6: the W1 release jitter of every hold-loading lane, by fixed point
+    # (see `w1_jitter`). Only defined on a set that is not overloaded.
+    w1, w1_why = (None, None)
+    if u <= 1.0:
+        w1, w1_why = w1_jitter(ls)
+        res["w1"] = ({str(r["lane"]): w1[i] for i, r in enumerate(ls)
+                      if r["loads_hold"]} if w1 is not None else None)
     for i, r in enumerate(ls):
         if not r["clocked_od"]:
             continue
@@ -150,8 +273,13 @@ def derive(img, src=None):
                             "worst-case response exists" % u)
             res["lanes"][str(r["lane"])] = entry
             continue
+        if w1 is None:
+            entry["why"] = w1_why
+            res["lanes"][str(r["lane"])] = entry
+            continue
+        blanes = with_w1(ls, w1, i)
         try:
-            ours = response_time_b(r["blane"], blanes)["r"]
+            ours = response_time_b(blanes[i], blanes)["r"]
         except Exception as exc:                          # noqa: BLE001
             ours = None
             entry["why"] = "own recurrence raised %s" % type(exc).__name__
@@ -176,6 +304,38 @@ def derive(img, src=None):
             entry["slack"] = L_SYNC + 1 + (p - C_SHIPPED)
         res["lanes"][str(r["lane"])] = entry
     return res
+
+
+def lane_responses(img, src=None):
+    """{lane: (r_floor, why)} for EVERY lane, W1 accounted (ruling W7).
+
+    `derive` answers for clocked open-drain lanes only, because the bench's
+    post-HIGH budget is theirs. W7's mode floor also judges UNCLOCKED
+    open-drain frames, whose low phase shrinks by the same start delay, so it
+    needs `r_i` for any lane. Same lane set, same W1 term, same max(ours,
+    pyRTA) rule as `derive`.
+    """
+    ls, _d, _k, _j = lane_set(img)
+    u = utilisation(ls)
+    if u > 1.0:
+        why = ("lane set overloaded (U = %.3f > 1): no finite worst-case "
+               "response exists" % u)
+        return {r["lane"]: (None, why) for r in ls}
+    w1, w1_why = w1_jitter(ls)
+    if w1 is None:
+        return {r["lane"]: (None, w1_why) for r in ls}
+    out = {}
+    for i, r in enumerate(ls):
+        bl = with_w1(ls, w1, i)
+        try:
+            ours = response_time_b(bl[i], bl)["r"]
+        except Exception as exc:                          # noqa: BLE001
+            out[r["lane"]] = (None, "own recurrence raised %s"
+                              % type(exc).__name__)
+            continue
+        p = pyrta_bound.bound(src, bl, i)[0] if src else None
+        out[r["lane"]] = (max(x for x in (ours, p) if x is not None), None)
+    return out
 
 
 def clocked_images():

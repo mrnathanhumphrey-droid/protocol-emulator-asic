@@ -778,6 +778,22 @@ end
 //   CLK_PERIOD_NS), the RTL's own formula, so `-GSDA_HOLD_NS=0` builds read 0.
 integer h_min, h_nl, h_np, h_i, h_ck, h_dp, h_cls, h_hold, h_bad, h_moves;
 integer h_cyc_h;
+// ⛔⛔ RULING W (W4): SETUP and W1's binding, measured here as well.
+//   h_su       SDA_SETUP, from the engine's PARAMETERS like h_min; the hold
+//              pipeline now lands its pin at count h_su + 1, not 1
+//   h_sulo     the smallest gap from a data move to the next SCL release
+//   h_sun      how many such releases followed a data move
+//   h_wb_ev    dispatches W1 delayed (a lane's release had arrived, `rel_due`,
+//              but its hold + setup was still running, so `ready` was low);
+//              counted on the rising edge, every lane
+//   h_wb_cyc   the cycles those delays cost in total
+//   h_wbmax    per lane, the longest single W1 delay -- A2's W1 term
+//              (`program_a2.w1_jitter`) must cover it
+integer h_su, h_sulo, h_sun, h_wb_ev, h_wb_cyc;
+integer h_lastmv [0:7];
+integer h_wbp    [0:7];
+integer h_wbrun  [0:7];
+integer h_wbmax  [0:7];
 integer h_fall [0:7];
 integer h_low  [0:7];
 integer h_pck  [0:7];
@@ -796,10 +812,14 @@ initial begin
           / dut.u_eng.CLK_PERIOD_NS;
   h_nl = dut.u_eng.N_LANES;
   h_np = dut.u_eng.N_PINS;
+  h_su = (dut.u_eng.SDA_SETUP_NS + dut.u_eng.CLK_PERIOD_NS - 1)
+         / dut.u_eng.CLK_PERIOD_NS;
   h_bad = 0;  h_moves = 0;  h_cyc_h = 0;
+  h_sulo = 1000000;  h_sun = 0;  h_wb_ev = 0;  h_wb_cyc = 0;
   for (h_i = 0; h_i < 8; h_i = h_i + 1) begin
     h_fall[h_i] = -1;  h_low[h_i] = 0;  h_pck[h_i] = -1;  h_pd[h_i] = -1;
     h_phc[h_i] = 0;  h_ldop[h_i] = 9;  h_ldcnt[h_i] = 0;
+    h_lastmv[h_i] = -1;  h_wbp[h_i] = 0;  h_wbrun[h_i] = 0;  h_wbmax[h_i] = 0;
   end
   for (h_i = 0; h_i < 10; h_i = h_i + 1) begin
     h_n[h_i] = 0;  h_lo[h_i] = 1000000;  h_hi[h_i] = -1;  h_high[h_i] = 0;
@@ -826,12 +846,20 @@ always @(posedge dut.clk) begin
         if (h_pck[h_i] == 0 && dut.u_eng.pin_oe[h_ck] === 1'b1) begin
           h_fall[h_i] = h_cyc_h;  h_low[h_i] = 1;
         end
-        if (h_pck[h_i] == 1 && dut.u_eng.pin_oe[h_ck] === 1'b0)
+        if (h_pck[h_i] == 1 && dut.u_eng.pin_oe[h_ck] === 1'b0) begin
           h_low[h_i] = 0;
+          // W4: setup = this release minus the last data move of the low phase
+          if (h_lastmv[h_i] >= 0) begin
+            h_sun = h_sun + 1;
+            if (h_cyc_h - h_lastmv[h_i] < h_sulo)
+              h_sulo = h_cyc_h - h_lastmv[h_i];
+          end
+          h_lastmv[h_i] = -1;
+        end
         // ---- a chip-driven SDA change -----------------------------------
         if (h_pd[h_i] != -1 && (dut.u_eng.pin_oe[h_dp] === 1'b1 ? 1 : 0)
                                != h_pd[h_i]) begin
-          if (h_phc[h_i] == 1)
+          if (h_phc[h_i] == h_su + 1)
             h_cls = h_ldop[h_i];                      // from the hold expiry
           else if (dut.u_eng.st === 2'd2 && dut.u_eng.cur == h_i)
             h_cls = h_class(dut.u_eng.a_op, dut.u_eng.a_cnt);
@@ -839,6 +867,9 @@ always @(posedge dut.clk) begin
             h_cls = 9;
           h_moves = h_moves + 1;
           h_n[h_cls] = h_n[h_cls] + 1;
+          if (h_low[h_i] == 1 && (h_cls == 1 || h_cls == 2 || h_cls == 3
+                                  || h_cls == 8))
+            h_lastmv[h_i] = h_cyc_h;
           if (h_low[h_i] == 1 && h_fall[h_i] >= 0) begin
             h_hold = h_cyc_h - h_fall[h_i];
             if (h_hold < h_lo[h_cls]) h_lo[h_cls] = h_hold;
@@ -850,16 +881,22 @@ always @(posedge dut.clk) begin
                 $display("*** FAIL clocked_conform[H]: lane %0d moved SDA %0d cycle(s) after the SCL fall (class %0d) -- under SDA_HOLD = %0d, a t_HD;DAT violation", h_i, h_hold, h_cls, h_min);
             end
           end else begin
-            // ⚠ COUNTED, NOT FAILED HERE. A data move with SCL released is a
-            // SETUP failure (t_SU;DAT <= 0), not a hold one, and setup is the
-            // MODE FLOOR's domain (D2, `pe_asm.check_mode_floor`): the
-            // silicon refusal guarantees `d > SDA_HOLD`, which fixes the HOLD,
-            // and a program at d = SDA_HOLD + 1 with one cycle of release
-            // jitter has no setup left. MEASURED on `ckhold_over` (d = 16,
-            // below every mode floor): holds all 15, 11 of 562 moves with SCL
-            // released. `model/gate_sda_hold.py` reds these on every image
-            // the mode floor covers and passes.
+            // ⛔⛔ RULING W: A DATA MOVE WITH SCL RELEASED IS NOW RED. It used
+            // to be counted and left to the mode floor, because the silicon
+            // refusal (`d > SDA_HOLD`) fixes the HOLD and nothing fixed the
+            // SETUP: MEASURED on `ckhold_over` (d = 16), holds all 15 and 11
+            // of 562 data moves with SCL released. W1 makes a lane ineligible
+            // until its hold + setup is over, so silicon now promises this on
+            // EVERY program, and the bench holds it to that.
+            // ⚠ NOT AT SDA_HOLD = 0: that build has no hold pipeline, so W1
+            //   has nothing to gate on; it is the measured-defect build.
             h_high[h_cls] = h_high[h_cls] + 1;
+            if ((h_cls == 1 || h_cls == 2 || h_cls == 3 || h_cls == 8)
+                && h_min != 0) begin
+              h_bad = h_bad + 1;
+              if (h_bad <= 4)
+                $display("*** FAIL clocked_conform[H]: lane %0d moved SDA with SCL released (class %0d) -- t_SU;DAT <= 0, W1 should have held the release back", h_i, h_cls);
+            end
           end
         end
         // ---- remember which dispatch LOADED the hold pipeline -----------
@@ -872,6 +909,28 @@ always @(posedge dut.clk) begin
         h_pck[h_i] = (dut.u_eng.pin_oe[h_ck] === 1'b1) ? 1 : 0;
         h_pd[h_i]  = (dut.u_eng.pin_oe[h_dp] === 1'b1) ? 1 : 0;
       end
+    end
+    // ---- W4: how often W1 delays a dispatch, every lane -----------------
+    // ⚠ NOT WHILE THE LANE IS BEING SERVED. During its own ST_DRIVE/ST_WB
+    // its timestamp has not advanced yet (non-blocking) while the hold it
+    // just loaded is running, so `rel_due & ~ready` holds for a cycle on
+    // EVERY held dispatch -- the first cut counted that and read 347 "binds"
+    // at d = 62, each of exactly 1 cycle. Every other cycle counts, busy or
+    // not: the delay is release jitter, measured from the release.
+    for (h_i = 0; h_i < h_nl && h_i < 8; h_i = h_i + 1) begin
+      if (!(dut.u_eng.st !== 2'd0 && dut.u_eng.cur == h_i)
+          && dut.u_eng.rel_due[h_i] === 1'b1
+          && dut.u_eng.ready[h_i] === 1'b0) begin
+        h_wb_cyc = h_wb_cyc + 1;
+        if (h_wbp[h_i] == 0) begin
+          h_wb_ev = h_wb_ev + 1;
+          h_wbrun[h_i] = 0;
+        end
+        h_wbrun[h_i] = h_wbrun[h_i] + 1;
+        if (h_wbrun[h_i] > h_wbmax[h_i]) h_wbmax[h_i] = h_wbrun[h_i];
+        h_wbp[h_i] = 1;
+      end else
+        h_wbp[h_i] = 0;
     end
     h_cyc_h = h_cyc_h + 1;
   end
@@ -1004,11 +1063,16 @@ final begin
         if (h_n[h_i] != 0)
           $display("  clocked_conform[H] class %0d: n=%0d hold_min=%0d hold_max=%0d moved_while_released=%0d", h_i, h_n[h_i], (h_lo[h_i] == 1000000) ? -1 : h_lo[h_i], h_hi[h_i], h_high[h_i]);
       if (h_bad != 0)
-        $display("*** FAIL clocked_conform[H]: %0d of %0d chip-driven SDA move(s) broke t_HD;DAT >= SDA_HOLD = %0d", h_bad, h_moves, h_min);
+        $display("*** FAIL clocked_conform[H]: %0d of %0d chip-driven SDA move(s) broke t_HD;DAT >= SDA_HOLD = %0d or moved with SCL released", h_bad, h_moves, h_min);
       else
-        $display("  clocked_conform[H]: ok -- %0d chip-driven SDA move(s), every data move held >= SDA_HOLD = %0d after the fall", h_moves, h_min);
-      $display("  clocked_conform[H] setup: %0d data move(s) with SCL released (judged against the mode floor by gate_sda_hold, not here)", h_high[1] + h_high[2] + h_high[3] + h_high[8]);
+        $display("  clocked_conform[H]: ok -- %0d chip-driven SDA move(s), every data move held >= SDA_HOLD = %0d after the fall and landed before the release", h_moves, h_min);
+      $display("  clocked_conform[H] setup: %0d data move(s) with SCL released (red when SDA_HOLD != 0 -- ruling W)", h_high[1] + h_high[2] + h_high[3] + h_high[8]);
+      $display("  clocked_conform[W] setup_min=%0d over %0d release(s) after a data move (SDA_SETUP = %0d)", (h_sulo == 1000000) ? -1 : h_sulo, h_sun, h_su);
     end
+    $display("  clocked_conform[W] w1_binds=%0d w1_cycles=%0d", h_wb_ev, h_wb_cyc);
+    for (h_i = 0; h_i < h_nl && h_i < 8; h_i = h_i + 1)
+      if (h_wbmax[h_i] != 0)
+        $display("  clocked_conform[W] lane %0d w1_max=%0d", h_i, h_wbmax[h_i]);
   end
 
 

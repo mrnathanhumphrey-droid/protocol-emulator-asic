@@ -99,6 +99,35 @@ def bound(engine_path=None, hold_ns=None):
     return (ns + per - 1) // per
 
 
+_SETUP_FORM = (r"\(\s*SDA_SETUP_NS\s*\+\s*CLK_PERIOD_NS\s*-\s*1\s*\)\s*/\s*"
+               r"CLK_PERIOD_NS")
+
+
+def setup(engine_path=None):
+    """`SDA_SETUP` in CYCLES (ruling W1), read the same way as `bound()`.
+
+    W1 gates a lane's next dispatch until SDA_HOLD + SDA_SETUP cycles after the
+    dispatch that loaded its hold, so A2 needs this number as well. Same
+    tripwire: the RTL's expression must be the ceiling form, textually.
+    """
+    path = engine_path or ENGINE
+    with io.open(path, encoding="utf-8", errors="replace") as fh:
+        text = fh.read()
+    p = _params(text)
+    m = re.search(r"parameter\s+integer\s+SDA_SETUP_NS\s*=\s*(\d+)", text)
+    e = re.search(r"localparam\s+integer\s+SDA_SETUP\s*=\s*(.+?);", text, re.S)
+    if m is None or e is None:
+        raise HoldBoundError("src/pe_engine.v has no SDA_SETUP_NS parameter "
+                             "or SDA_SETUP localparam; W1's setup cannot be "
+                             "read.")
+    if re.fullmatch(_SETUP_FORM, " ".join(e.group(1).split())) is None:
+        raise HoldBoundError("src/pe_engine.v computes SDA_SETUP in a form "
+                             "this reader does not know; update it "
+                             "deliberately.")
+    per = p["CLK_PERIOD_NS"]
+    return (int(m.group(1)) + per - 1) // per
+
+
 def params(engine_path=None):
     """The two ns parameters, for callers that want to report the inputs."""
     path = engine_path or ENGINE
@@ -130,6 +159,8 @@ def main() -> int:
     print("  CLK_PERIOD_NS = %d" % p["CLK_PERIOD_NS"])
     print("  SDA_HOLD      = %d cycles  (read from src/pe_engine.v)" % bound())
     print("  legal clocked open-drain delay: d > %d" % bound())
+    print("  SDA_SETUP     = %d cycles  (W1: dispatch gated SDA_HOLD + "
+          "SDA_SETUP after a hold load)" % setup())
     return 0
 
 

@@ -89,6 +89,11 @@ def main() -> int:
                 + [os.path.join(HERE, "tb.v")],
         build_dir=build_dir,
         hdl_toplevel="tb",
+        # ⛔ THE MAKEFILE'S INCLUDE PATHS (`-I$(SRC_DIR)`, `-I$(PWD)/..`). They
+        # were missing here, so once tb.v began including `test/od_bus.vh`
+        # this runner could not elaborate tb at all -- a local runner that
+        # drifts from CI's flags is the failure its own docstring warns about.
+        includes=[SRC, os.path.dirname(HERE)],
         # ⛔ NO WIDTH WARNINGS SUPPRESSED. The width classes are the ones most
         # likely to expose a real bug in arithmetic RTL, and suppressing them is
         # how "clean under -Wall" became a false statement once already.

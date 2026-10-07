@@ -179,7 +179,12 @@ def main() -> int:
         rc = 1
     else:
         own, light = meas.get("own") or {}, meas.get("light") or {}
-        print("    ckdense (U = 0.518, J = 1) under two budgets:")
+        # ⛔ U and J READ from the committed bounds, never typed: the subject
+        # was re-spanned by ruling W and a typed "0.518" outlived it
+        with io.open(program_a2.OUT_JSON, encoding="utf-8") as fh:
+            row = json.load(fh).get("ckdense_image.hex", {})
+        print("    ckdense (U = %s, J = %s) under two budgets:"
+              % (row.get("U"), row.get("J")))
         print("      %-7s %-18s %-8s %-6s %s"
               % ("arm", "budget", "verdict", "late", "widest per lane"))
         for nm, r in (("own", own), ("light", light)):

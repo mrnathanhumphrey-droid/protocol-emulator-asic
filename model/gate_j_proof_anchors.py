@@ -68,8 +68,20 @@ PREMISES = [
     # form for a different reason, and both want the same line.
     ("P8", "a lane's period is exactly d -- ABSOLUTE timestamp advance",
      "l_timestamp[cur] <= l_timestamp[cur] + {{(TS_W-DLY_W){1'b0}}, a_dly};"),
-    ("P9", "readiness is that timestamp arriving",
-     "assign ready[gi] = l_live[gi] & ~diff[TS_W-1]"),
+    # ⛔⛔ RULING W SPLIT READINESS IN TWO. `rel_due` is still "the timestamp
+    # has arrived" (P9, re-anchored); `ready` adds W1's own-hold gate (P9w).
+    # P9w is release jitter on a lane that loads the SDA hold, bounded by
+    # `program_a2.w1_jitter` and ZERO whenever T_i >= HS + 1 + (r_i - C).
+    # ⚠ SCOPE FOR THEOREM 3: on a CLOCKED lane the delayed job is the HIGH and
+    # the next job is rebased from the observed rise, so W1 cannot bunch two
+    # dispatches inside d. On an UNCLOCKED frame the job after a delayed SCL
+    # rise is timed absolutely, so it can -- by up to J_w1. W7's mode floor
+    # refuses the short frames where J_w1 > 0 alone; under heavy contention
+    # it is the D* sweep's job to measure (SPEC §25).
+    ("P9", "readiness is that timestamp arriving (`rel_due`)",
+     "assign rel_due[gi] = l_live[gi] & ~diff[TS_W-1]"),
+    ("P9w", "W1: ready also waits for the lane's own hold + setup",
+     "assign ready[gi] = rel_due[gi] & (l_hcnt[gi] == {HOLDW{1'b0}});"),
 ]
 
 # the two bounds the document states -- if either number changes in the RTL's

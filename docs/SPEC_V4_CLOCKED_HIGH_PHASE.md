@@ -1993,3 +1993,187 @@ Options for a ruling: (a) extend the mode floor to unclocked open-drain frames
 own hold is pending, so the clock cannot rise before the data lands, whatever
 the jitter; (c) raise the silicon floor to `SDA_HOLD + 2`. These are recorded,
 not chosen.
+
+## 25. W — no SDA change while SCL is high, in silicon
+
+Ruling W chose (b) for the safety net and (a) for compliance, and rejected (c):
+a constant floor on `d` cannot bound contention jitter, which grows with the
+lane set. Findings 1 and 3 above are the ACK bug's hazard: a data bit that moves
+after SCL is released is SDA changing while SCL is high, which is a START or a
+STOP to any receiver.
+
+### W1 — a lane is ineligible while its own hold + setup is pending
+
+`SDA_SETUP_NS = 50` (Fm+'s t_SU;DAT, the strictest declared mode) gives
+`SDA_SETUP = 3` cycles at 50 MHz, by the same ceiling formula as the hold. The
+hold counter now carries both. It is loaded with `SDA_HOLD + SDA_SETUP` = 18,
+the pin is written when it reaches `SDA_SETUP + 1`, which is SDA_HOLD cycles
+after the load exactly as before, and it keeps counting to 0. `ready` is split
+into `rel_due` (the release has arrived) and `ready = rel_due & (l_hcnt == 0)`,
+so the lane cannot dispatch its next edge, the SCL release, until the data has
+landed and settled. The counter starts at the dispatch that actually happened,
+so a lane dispatched late by contention is held back by exactly what it lost.
+That makes it contention-independent by construction. **Cost:** `HOLDW` goes
+from 4 to 5 bits (one flop per lane). At `SDA_HOLD = 0` nothing loads the
+counter and nothing is gated, so that build is still the measured defect.
+**Mutant:** `M_NO_HOLD_GATE` (`ready = rel_due`).
+
+Only releases that **move** SDA load the pipeline now (`& pin_oe[a_pin]` on
+K's clocked SHIFTIN arm). Later LOW/COLL dispatches find SDA already released,
+and they used to load anyway. That was a no-op on the wire, but W1 would have
+turned it into a dispatch delay. It also put two hold loads back to back (COLL,
+then the next action's LOW), which is the one shape W6's bound cannot handle.
+
+### W2 — the unclocked SHIFTIN/READBIT release goes through the hold pipeline
+
+In the certified frame the clock fall is a separate `OP_LEVEL` and the release
+follows one delay later. Its hold was therefore the inter-dispatch gap minus
+contention: **14 at d = 16**. When the lane has a real clock, is open-drain,
+the action names the lane's pin and SDA is actually driven, the release now
+loads the pipeline. It lands SDA_HOLD after the dispatch, on top of the gap,
+and W1 keeps the next SCL rise behind it. **Mutant:** `M_SHIFTIN_UC_UNHELD`.
+
+### W4 — measured (`model/gate_sda_hold.py`, CI, iverilog, 60,000 cycles)
+
+Layer H now reds a data move with SCL released whenever `SDA_HOLD != 0`. It
+used to count those moves and leave them to the mode floor, but silicon now
+promises this on every program. Layer W is new in `clocked_conform.vh`. It
+reports `setup_min`: from the last data move of a low phase to the SCL release
+that ends it. It also counts W1 delays as cycles where `rel_due & ~ready` while
+the lane is not being served, with a per-lane maximum.
+
+| program | d | data moves | hold min | moved with SCL released | setup min | W1 delays / cycles |
+| --- | --- | --- | --- | --- | --- | --- |
+| ckhold_over | 16 | 509 | 15 | **0** (was 11 of 562) | 5 | 1424 / 5746 |
+| i2cframe | 16 | 647 | 15 | **0** (was 10) | 5 | 1344 / 5407 |
+| i2cframe | 17 | 611 | 15 | **0** (was 3) | 5 | 1265 / 3829 |
+| i2cframe | 18 | 577 | 15 | 0 | 5 | 1195 / 2418 |
+
+The i2cframe SHIFTIN release class now holds 29..31 at d = 16, up from 14.
+Setup min is 5 = SDA_SETUP + 2: the IDLE pick plus the DRIVE edge.
+
+**How often W1 binds** on the shipped and corpus images:
+
+| image | mode floor | W1 delays / cycles |
+| --- | --- | --- |
+| corpus_i2c, ckod, ckread, i2cframe (d = 62), i2caddr | passes (Fm+) | **0 / 0** |
+| half, every push-pull or unclocked-SPI image | — | 0 / 0 |
+| corpus_all5 | overloaded, claims none | 2 / 34 |
+| ckdense, old span 22..25 | rejected | 56 / 75 (max 2 / 2 / 4 on lanes 1–3) |
+| ckdense, re-spanned 20..23 (below) | rejected | 833 / 1574 (max 4 / 4 / 6 / 6) |
+| ckhold_over, i2cframe d = 16..18 | rejected | above |
+
+On every mode-legal program W1 never binds. It binds on programs that are below
+every mode floor, and under the overload stress image's contention.
+
+### W5 — must-fires (all in `gate_sda_hold`, registered in `gate_mutant_kills`)
+
+| mutant | subject | reproduces |
+| --- | --- | --- |
+| `M_NO_HOLD_GATE` | ckhold_over | **11 of 562** data moves with SCL released, Layer H red |
+| `M_NO_HOLD_GATE` | i2cframe d = 16 / 17 | **10 / 3**, Layer H red |
+| `M_SHIFTIN_UC_UNHELD` | i2cframe d = 16 | SHIFTIN release hold **14**, Layer H red |
+
+`M_HOLD_CLOCKED_ONLY` (ruling U) used to be caught by its setup moves. W1 removes
+those in silicon (0 of 695), so its must-fire is now the run itself: clean
+refuses d = 15 and the mutant runs it.
+
+### W6 — W1 is own-lane blocking; A2 carries it as release jitter
+
+W1 binds on `ckdense`, which is A2-admissible, under contention: d = 20..25 with
+five lanes. So "it cannot bind at the mode floor" does not hold in general, and
+the bound has to account for it. A loading job is picked at lateness
+`j <= r_i - C`. The hold is loaded one cycle later, at the DRIVE edge, and runs
+HS = 18 cycles. The lane's next job, released T_i after the loading one, is
+therefore held back by at most
+
+    J_w1(i) = max(0, HS + 1 + (r_i - C) - T_i)
+
+`program_a2.w1_jitter` solves this by fixed point.
+- **Other lanes** see it as release jitter on lane i (`BLane.N_J`): one C per
+  release, up to J_w1 later. A blocked lane costs the engine nothing.
+- **Lane i itself**: the delayed job is the SCL release, which loads no hold.
+  The bench's A2 check bounds the gap after the high, not before it, so the
+  subject keeps its base J.
+
+**Theorem 3 (D\*) and P9.** Its premise "readiness is the timestamp arriving"
+is now `rel_due` (P9, re-anchored). W1's gate is its own premise, P9w, in
+`gate_j_proof_anchors`.
+- **Clocked lane:** the W1-delayed job is the HIGH. The next job is rebased from
+  the observed rise, so W1 cannot put two of the lane's dispatches inside `d`.
+- **Unclocked frame:** the job after a delayed SCL rise is timed absolutely, so
+  it can bunch by up to J_w1, which changes the per-period port demand the
+  theorem counts.
+
+W7 refuses every short frame where that happens alone (J_w1 > 0 needs roughly
+`d < 19 + lag`, while the i2cframe floor is 28). Under heavy contention it is
+measurable, and the **D\* sweep + live window check next in the order is where
+it gets measured**. Recorded, not asserted.
+
+That argument needs one condition: a loading job is never itself W1-delayed,
+i.e. no lane runs two hold loads back to back. It is checked per lane
+(`hold_profile`), and such a lane is reported unbounded rather than given a
+number. No tracked image has one.
+
+**Re-derived** (`test/clocked_a2_bounds.json`):
+- At its old span (22..25), only ckdense moved (J_w1 = 10 / 9 / 8 / 7):
+  - r_ours went from 10 / 13 / 16 / 16 to 16 / 16 / 16 / 16.
+  - r_pyrta went to 16 / 19 / 21 / 22.
+  - The measured W1 maximum per lane was 2 / 2 / 4 (within J_w1), and the
+    widest post-HIGH gap past d was 4 / 7 / 8 / 4.
+- Every other image has J_w1 = 0 or an unchanged r.
+
+⛔ **That 8 broke ruling S's must-fire** (`gate_a2_program` §3). The light
+budget is 8, so the heavier program no longer failed under it, and the
+per-program bound was indistinguishable from one shared number. W1 takes a
+lane with a pending hold out of contention at exactly the moments it used to
+contend. **ckdense is re-spanned to [20, 21, 22, 23]** (U = 0.566,
+d_min = D*). That was probed, not guessed: this span measures 6 / 7 / **10** / 5,
+while [20, 20, 21, 21], [20, 21, 21, 22], [21, 22, 23, 24] and [20, 22, 24, 26]
+all stay at or under 8. New row:
+- J_w1 = 12 / 11 / 10 / 12.
+- r_ours = 16 / 16 / 16 / 19 and r_pyrta = 21 / 23 / 25 / 25.
+- Bench slack is 22 / 24 / 26 / 26. The widest gap holds under it and fails the
+  light 8 on lane 2.
+- W1 maximum is 4 / 4 / 6 / 6, within J_w1.
+
+The §16 table above records the old span as it was. `gate_a2_program` now
+reads U and J from the JSON instead of a typed "0.518".
+
+⚠ **pyRTA now exceeds our recurrence on ckdense lanes**, the first time
+that has happened. An extended Spuri candidate set (every interferer's
+`kT_j + D_j − J_j − D_i`) leaves ours unchanged. The cause is pyrta_bound's
+framing, which gives an interferer both the jitter-inflated arrival curve and
+the deadline `D_j − J_j`. That charges J twice, because the jobs that jitter
+bunches together cannot all carry the tightened deadline. So pyRTA is the
+pessimistic number here, and `r_floor = max(ours, pyRTA)` keeps the sound one.
+In CI, where pyRTA is absent, the toolchain floor rests on ours alone. For
+these lanes that is up to 9 cycles less strict than the published number
+(lane 2: 16 against 25).
+
+### W7 — the mode floor covers unclocked open-drain frames
+
+`pe_asm.check_unclocked_floor` (called from `check_mode_floor`) reads a lane's
+SCL phases from its own actions. SCL moves on `OP_SHIFT` at level 0/1 and on
+`OP_LEVEL` aimed at the clock pin, and phase lengths are sums of delays. The
+check judges t_LOW, t_HIGH and t_SU;DAT against UM10204 per mode. The worst case
+takes the earlier dispatch of a pair as late as `r_i − C` (`lane_responses`, W1
+included) and the later one on time. Held moves get W1's silicon floor
+(`SDA_SETUP + 1`); direct moves get none. **The d = 16 frame is refused** as
+mode-illegal (worst t_LOW 11). d = 16/17/18 floors are 30/29/28, and i2cframe
+clears Fm+ from d = 28. The certified d = 62 frame and i2caddr clear Fm+ (worst
+t_LOW 59). `half_image`, an unclocked open-drain bench image at low phase 24
+that never claimed a mode, is now called mode-illegal by the toolchain.
+**Must-fire** (in `pe_asm`'s demo): i2cframe d = 16 is rejected and names
+UNCLOCKED / t_LOW / per program; d = 62 is accepted.
+⚠ t_HIGH on an unclocked frame is not stretch-safe. Only a clocked park observes
+the SCL rise (F1). That limitation belongs to the unclocked idiom and is
+recorded, not new.
+⚠ A shape that looked like a hole, and isn't one: an `OP_SHIFT` at level 1
+that moves SDA and releases SCL in one dispatch. With a real clock pin, level 1
+*is* the clocked SHIFT (`ck_shift = clk_real & a_lvl & OP_SHIFT`), which
+alternates LOW/HIGH and holds its data. The unclocked arm only ever sees
+`a_lvl = 0` when `clk_real` holds, as `pe_engine.v` already records at
+`M_CK_OD_CLK_DRIVE`. The phase reader therefore treats only level-0 SHIFTs and
+`OP_LEVEL` on the clock pin as unclocked SCL moves, and a lane with any clocked
+action goes to the clocked floor.

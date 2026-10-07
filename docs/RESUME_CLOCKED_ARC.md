@@ -45,6 +45,7 @@ here** (ruling CI1). A local pass is reported as local.
 | `231b37c` | ✅ `37636453349` | ✅ `37636453287` | M5 + M6; 27 of 27 |
 | `0e29fe7` | ✅ `37644777003` | ✅ `37644776920` | V + MU + CJ + M7; 31 of 31; run_a2 41 of 41 |
 | `67ea17a` | ✅ `37654159229` | ✅ `37654159170` | RA1–RA3 + MF1; 33 of 33 |
+| `cd57eee` | ✅ `37661287583` / `37661284834` | ✅ `37661287669` / `37661284446` | K + U + RL1; 35 of 35 |
 
 ### Silicon fixes — RTL defects closed (ledger)
 
@@ -52,13 +53,17 @@ here** (ruling CI1). A local pass is reported as local.
 | --- | --- | --- | --- |
 | **power-up run** | with PROG low at reset release, the engine **ran on the power-up contents of the unreset store**: a power-up glitch on real pins, before any host load. Never on the owed list; found as a side effect of M5's first cut. | `eng_run = run & store_full` (`project.v`): the engine runs only after 2^AW consecutive writes since `rst_n` | `231b37c` |
 | **partial load** | a host loading fewer than 256 bytes left the rest of the store at power-up contents, one missing REARM from running on pins | the same gate, plus a release-time CONFIG_ERR (`short_load`) | `231b37c` |
+| **ACK-slot release unheld** (K) | the clocked SHIFTIN released SDA in the cycle SCL fell: `t_HD;DAT = 0` into every ACK slot | the release goes through the SDA hold pipeline | `cd57eee` |
+| **setup under contention** (W1) | `d > SDA_HOLD` fixed the hold, not the setup: a lane dispatched late by contention released SCL before its held data landed, so **SDA changed while SCL was high**, a START/STOP to any receiver (11 of 562 on `ckhold_over`, 10 / 3 on the unclocked frame at d = 16 / 17) | a lane is ineligible while its own hold + `SDA_SETUP` (3 cy) is pending; contention-independent; +5 flops | *this commit* |
+| **unclocked release unheld** (W2) | the unclocked frame's SHIFTIN release held only the inter-dispatch gap minus jitter (14 at d = 16) | the release goes through the hold pipeline when it moves SDA | *this commit* |
 
 ---
 
 ## OWED — Wilson's order
 
-**`V + MU + CJ`** → `K (+U)` → **checkpoint harden** (Nathan's call) → `E` →
-sigrok re-certification → FRAM write + random read.
+**`W`** → **checkpoint harden** (GO; fix anything it finds) → `E` → D* sweep
++ live window check → ACK (b)–(c) → sigrok re-certification → FRAM write +
+random read → pe_asm protocol front-end → lock.
 
 | item | what | state |
 | --- | --- | --- |
@@ -86,11 +91,16 @@ sigrok re-certification → FRAM write + random read.
 | **RL1** | Verilator lint on src/ in CI, BLKSEQ/COMBDLY errors except a checked block-local temporary (`prime_unp`); must-fires planted | ✅ landed — SPEC §24 |
 | **K** | clocked SHIFTIN release held (hold pipeline); Layer H attributes every chip SDA move; K2 table with required cells (new `ckread_image` for ACK/NACK); K3 `M_SHIFTIN_UNHELD`; K4 corpus_i2c arm in phases_run, min 15 over 217 | ✅ landed — SPEC §24 |
 | **U** | refusal widened to the unclocked clock-low SHIFT; clamp retired; pe_asm + dgf mirrors; i2cframe d=15 refused, d=16 runs; `M_HOLD_CLOCKED_ONLY` | ✅ landed — SPEC §24 |
-| **FINDINGS (ruling owed)** | silicon floor guarantees hold not setup (ckhold_over d=16: 11/562 data moves with SCL released); mode floor skips unclocked lanes; unclocked SHIFTIN release unheld (14 at d=16). Options (a) toolchain floor, (b) hold-pending ineligibility, (c) floor SDA_HOLD+2 | **Wilson** |
+| **W1** | (b) chosen: a lane is ineligible while its own hold + `SDA_SETUP` (Fm+ 50 ns → 3 cy) is pending; one counter (load 18, pin at 4); `ready = rel_due & hcnt == 0`; only releases that move SDA load; Layer H reds data moves with SCL released | ✅ landed — SPEC §25 |
+| **W2** | unclocked SHIFTIN/READBIT release through the hold pipeline (14 → 29 at d = 16) | ✅ landed — SPEC §25 |
+| **W3** | (c) rejected | — |
+| **W4** | ckhold_over + i2cframe d = 16/17/18: 0 data moves with SCL released, holds ≥ 15, setup ≥ 5; W1 binds **0** on every mode-legal image | ✅ landed — SPEC §25 |
+| **W5** | `M_NO_HOLD_GATE` reproduces 11/562 and 10/3; `M_SHIFTIN_UC_UNHELD` reproduces 14 | ✅ landed — SPEC §25 |
+| **W6** | W1 binds on ckdense (A2-admissible): carried as release jitter `J_w1 = max(0, HS + 1 + r_i − C − T_i)` by fixed point; measured ≤ derived; pyRTA now exceeds ours on every ckdense lane (its D−J framing double-counts J). W1 also stopped ruling S's must-fire firing (widest 8 = the light budget) → **ckdense re-spanned 22..25 → 20..23** (widest 10 again). P9 re-anchored to `rel_due`, W1 gate added as P9w; Theorem 3 scope on unclocked frames recorded for the D* sweep | ✅ landed — SPEC §25 |
+| **W7** | mode floor covers unclocked OD frames (t_LOW, t_HIGH, t_SU;DAT); i2cframe d = 16 refused, d = 62 Fm+ | ✅ landed — SPEC §25 |
 | (opt) | `ckdense` margin: a heavier feasible variant firing on several releases | non-blocking |
-| **U** | widen the refusal to the unclocked open-drain data drive; retire the clamp | owed, with K |
 | **M7** | HOST_INTERFACE: the full-store rule binds the FIRST load after `rst_n`; partial reloads after it run | ✅ landed |
-| **CHECKPOINT** | after K: one full harden (gds + precheck) + `gl_test` on that dev SHA without merging; report flops / utilisation / slack vs `d2b7d34` (3127 flops, ~10%). ⚠ Scope is **17 `src/` commits since `d2b7d34`** (+1,162 / −55), not only F1/D1/SDA hold/M5: also clocked SHIFT/SHIFTIN, the stretch park + bus-fault bound, per-lane bit order, the out-of-range sample guard; now also K's held SHIFTIN release and U's widened refusal / retired clamp | **NEXT — Nathan's call, recommended** |
+| **CHECKPOINT (H-CK1–3)** | full harden (gds + precheck + gl_test) on the W dev SHA without merging; report flops / utilisation / slack / gl_test / precheck / wall time vs `d2b7d34` (3127 flops, ~10%, 8/8); gl_test must exercise M5 short-load, D1/U refusal, clocked OD park/rebase, the hold pipeline, W1 — add arms or say which it can't reach. ⚠ Scope is every `src/` commit since `d2b7d34`, now also K, U and W | **NEXT — GO** |
 | **CI2** | retro: confirm the `tb_trace` path gate was the ONLY failure on `6abb6dd..e1fa642` | owed |
 | **E** | swallowed-exception audit, **+E+**: `set -o pipefail` in every `.sh` under `ci/` and `test/` with a lint gate (must-fire: a failing command piped into `tail`) | owed |
 
