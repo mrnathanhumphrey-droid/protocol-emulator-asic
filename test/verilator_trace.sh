@@ -59,6 +59,19 @@ SEEDS="1 7 12345"          # ⭐ recorded here and echoed with every result
 
 cd "$ROOT" || exit 1
 mkdir -p "$OUTDIR"
+# ⛔⛔⛔ THE PINNED VERILATOR, BY NAME -- NOT WHATEVER `verilator` IS ON PATH.
+# CI deliberately keeps the pinned OSS CAD suite OFF PATH and names it only in
+# `PE_VERILATOR`, because apt's Verilator 5.020 is also installed there and the
+# pin is 5.053. This script called a bare `verilator`, so in CI it ran 5.020
+# while `coverage_sweep.sh`, `phases_run.sh` and every other measurement ran
+# 5.053 -- and on the development box (WSL, suite on PATH) it ran 5.053 too.
+# When ruling Q2 put the two-simulator witness in CI, its async-clear arm saw
+# the bench's CS rise ONE CYCLE LATER under 5.020 than under 5.053 or Icarus,
+# and disagreed on 666 lines. The cross-simulator witness was comparing against
+# a different Verilator from the one the project pins.
+VL="${PE_VERILATOR:-verilator}"
+command -v "$VL" >/dev/null 2>&1 || [ -x "$VL" ] \
+    || { echo "  *** no Verilator at '$VL' (set PE_VERILATOR)"; exit 1; }
 # ⛔ THE BUILD TREE LIVES IN /tmp AND THE TRACES DO NOT. WSL's /tmp is WIPED
 # between `wsl.exe` invocations here, so an artefact another command has to read
 # must sit on /mnt/c or /mnt/d; but Verilator's C++ build across the 9p mount is
@@ -85,7 +98,7 @@ fi
 if [ "$SKIP_BUILD" -eq 1 ]; then
     RC=0
 else
-verilator --binary --timing --x-initial unique \
+"$VL" --binary --timing --x-initial unique \
     -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC -Wno-UNOPTFLAT -Wno-fatal \
     --top-module tb_trace -o tr --Mdir "$OBJ" +incdir+test \
     $DEFS \
@@ -101,7 +114,7 @@ if [ "$RC" -ne 0 ] || [ ! -x "$OBJ/tr" ]; then
     exit 1
 fi
 
-echo "  verilator  : $(verilator --version)"
+echo "  verilator  : $("$VL" --version)  ($VL)"
 echo "  image      : $IMG  peer=$PEER  async=$ASYNCA"
 echo "  phase seed : $PHASE  (the STIMULUS seed, held FIXED)"
 echo "  stayload=$STAYLOAD  sclhold=$SCLHOLD"
@@ -124,7 +137,7 @@ module probe;
   initial begin #1 $display("PROBE %h", never_written); $finish; end
 endmodule
 PV
-verilator --binary --timing --x-initial unique --top-module probe \
+"$VL" --binary --timing --x-initial unique --top-module probe \
     -o pr --Mdir "$PRE/obj" "$PRE/probe.v" > "$PRE/build.log" 2>&1
 PV_VALS=""
 for S in $SEEDS; do

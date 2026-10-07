@@ -260,21 +260,23 @@ module tb_trace;
   //    two peer-master processes race their own start condition.
   reg run_go = 1'b0;
 
-  // ⛔⛔⛔ EVERY STIMULUS WRITE BELOW IS NON-BLOCKING, AND THAT WAS A
-  // CROSS-SIMULATOR RACE. The trace sampler (`emit`, in the main loop) wakes on
-  // `@(negedge clk)` -- the SAME event these master processes apply their
-  // stimulus on. With blocking writes, two processes woken by one edge run in
-  // an order the language leaves UNDEFINED, so whether a sample shows the old or
-  // the new CS was the simulator's choice. Here it happened to agree; on CI's
-  // Icarus 12.0 (stable) the async-clear arm DISAGREED on 666 lines, every one
-  // in `uio_in[6]` -- CS, a BENCH-driven input -- from cycle 22, when ruling Q2
-  // first ran this witness on Linux. The async arm's mid-cycle `#delay` changes
-  // the order in which this process re-registers on the edge, which is why
-  // only that arm flipped.
-  // ⇒ Non-blocking writes land in the NBA region, after every active-region
-  //   read at that edge, in every simulator: the sampler sees the pre-edge
-  //   value, deterministically. The DUT samples these pins at the following
-  //   POSEDGE, so what the design sees is unchanged.
+  // ⛔⛔ EVERY STIMULUS WRITE BELOW IS NON-BLOCKING, because the trace sampler
+  // (`emit`, in the main loop) wakes on `@(negedge clk)` -- the SAME event these
+  // master processes apply their stimulus on. With blocking writes, two
+  // processes woken by one edge run in an order the language leaves UNDEFINED,
+  // so whether a sample shows the old or the new value is the simulator's
+  // choice. Non-blocking writes land in the NBA region, after every
+  // active-region read at that edge, in every simulator. The DUT samples these
+  // pins at the following POSEDGE, so what the design sees is unchanged --
+  // measured: the same 26 coverage points, every measurement gate unchanged.
+  // ⚠⚠ RECORDED AS A WRONG DIAGNOSIS, NOT A FIX. This change was made because
+  // the async-clear arm disagreed in CI on 666 lines of `uio_in[6]` (CS), and
+  // the race above looked like the cause. CI DISPROVED IT: the same 666 lines
+  // disagreed after the change. The real cause was that `verilator_trace.sh`
+  // called a bare `verilator`, which in CI is apt's 5.020 rather than the
+  // pinned 5.053 (`PE_VERILATOR`). The change is kept because the race is real
+  // and removing an undefined order is right on its own terms -- but it fixed
+  // nothing that was observed.
   // SPI-target: clock bytes into the DUT at a seeded phase. ⭐ This is the only
   // way the SPI-target lane sees anything: under the ruled map its SCLK, MOSI
   // and CS are all INPUTS, so with no master driving them the lane is inert and
