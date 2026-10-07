@@ -370,6 +370,11 @@ SPEC_SYMBOLS = {
     # `lane_digest.selftest`, and the r_i are what `gate_pyrta` prints at the
     # pin -- re-run under `run_a2.py`.
     ("model/a2/lane_digest.py", "PYRTA_PIN"),
+    # ⭐ RD1's WITHDRAWN-CLAIM LIST: patterns, each with the ledger entry that
+    # withdrew it. Its "numbers" are the 8 in `J = 8` and the digits of the
+    # ledger hashes -- identifiers of a retraction, not measurements. Priced in
+    # `readme_check()` by re-inserting the J = 8 row.
+    ("model/gate_stored_numbers.py", "WITHDRAWN"),
     # ⭐ THE COVERAGE SWEEP'S TWO DECLARATIONS, and neither holds a
     # measurement. `benchset.CONFIG` is STIMULUS -- plusargs, cycle budgets
     # and the per-lane delay vectors handed to `make_smoke_image.py` -- i.e.
@@ -596,6 +601,160 @@ def selftest():
     return rc
 
 
+# ============================================================================
+# RD1 -- THE README IS A STORED-NUMBER SITE TOO
+# ============================================================================
+# ⛔⛔ WHY. The README carried the pre-C = 3 shipped table (`r = {11, 8, 5, 10,
+# 6}`, margin 12, `C = 2`, SPI-target `D_tol = 18`) and the universal `J = 8`
+# row for an entire arc after the ledger had re-quoted the first and WITHDRAWN
+# the second. Every gate here audited `model/` and `test/`; the one document a
+# reader opens first was in no list. Found by hand answering ruling Q3.
+# ⇒ Every number the README publishes about the shipped timing is traced, in
+#   this run, to its source:
+#     lane table  -> `lane_digest.shipped()`, the live table the ledger hashes
+#     r and margin -> the newest `DIGEST_LEDGER` entry, cross-checked against
+#                    `PYRTA_PIN["reproduces"]` (the pinned foreign witness)
+#     D*           -> `gate_j_program.D_STAR`, computed
+#   and every WITHDRAWN claim is RED wherever it reappears.
+README = os.path.join(ROOT, "README.md")
+
+#: ⛔ (pattern, ledger entry that withdrew it, what it was). A match anywhere in
+#: the README is RED: a withdrawn claim does not come back as prose either.
+WITHDRAWN = [
+    (r"`?J\s*=\s*8`?", "b4e51034e283",
+     "the universal worst case J = 8 over admissible programs -- unsound"),
+    (r"universal (?:worst case|row)", "b4e51034e283",
+     "the universal J row, withdrawn with J = 8"),
+    (r"over every admissible program", "b4e51034e283",
+     "a claim over EVERY admissible program; only d_min >= D* is claimed"),
+]
+
+_LANE_ROW = re.compile(
+    r"^\|\s*(?P<name>[^|]+?)\s*\|\s*(?P<T>\d+)\s*\|\s*(?P<C>\d+)\s*\|"
+    r"\s*(?P<n>\d+)\s*\|\s*(?P<t>\d+)\s*\|\s*(?P<J>\d+)\s*\|"
+    r"\s*(?P<D_tol>\d+)\s*\|\s*$", re.M)
+_R_ROW = re.compile(r"r = \{([\d, ]+)\}\s+min margin (\d+)\s+bar ≥ (\d+)")
+_J1_ROW = re.compile(r"^\| shipped `J = 1` \| (\d+) \| \*\*(\d+)\*\*", re.M)
+_SCOPED = re.compile(r"d_min ≥ D\* = (\d+) → J = 1")
+
+
+def _a2_imports():
+    p = os.path.join(HERE, "a2")
+    if p not in sys.path:
+        sys.path.insert(0, p)
+    import lane_digest
+    import gate_j_program
+    return lane_digest, gate_j_program
+
+
+def readme_sources():
+    """What the README must say, from the ledger and the live table."""
+    ld, jp = _a2_imports()
+    newest = ld.DIGEST_LEDGER[-1][1]
+    m = re.search(r"r = \{([\d, ]+)\}, min margin (?:\d+ -> )?(\d+)", newest)
+    bar = re.search(r"the bar is (\d+)", newest)
+    r = [int(x) for x in m.group(1).split(",")]
+    order = ["UART-tx", "SPI-tx", "I2C", "UART-rx", "SPI-target"]
+    witness = [ld.PYRTA_PIN["reproduces"][k] for k in order]
+    lanes = {}
+    for l in ld.shipped():
+        lanes[l.name.replace("²", "2")] = {
+            "T": int(l.T), "C": int(l.C), "n": int(getattr(l, "n", 1)),
+            "t": int(getattr(l, "t", l.T)), "J": int(getattr(l, "J", 0)),
+            "D_tol": int(l.D_tol)}
+    return {"r": r, "margin": int(m.group(2)), "bar": int(bar.group(1)),
+            "witness": witness, "lanes": lanes, "dstar": jp.D_STAR,
+            "entry": ld.DIGEST_LEDGER[-1][0]}
+
+
+def readme_audit(text, src):
+    """Problems in README `text` against `src`. Pure, so it can be priced."""
+    probs = []
+    if src["r"] != src["witness"]:
+        probs.append("the ledger's r %s disagrees with the pinned pyRTA "
+                     "witness %s" % (src["r"], src["witness"]))
+    rows = {m.group("name").replace("²", "2"): m
+            for m in _LANE_ROW.finditer(text)}
+    for name, want in sorted(src["lanes"].items()):
+        m = rows.get(name)
+        if m is None:
+            probs.append("lane table: no row for %s" % name)
+            continue
+        for f, v in want.items():
+            if int(m.group(f)) != v:
+                probs.append("lane table: %s %s = %s, the live table has %d"
+                             % (name, f, m.group(f), v))
+    rr = _R_ROW.findall(text)
+    if len(rr) != 1:
+        probs.append("expected ONE shipped `r = {...} min margin ... bar` "
+                     "line, found %d" % len(rr))
+    else:
+        r = [int(x) for x in rr[0][0].split(",")]
+        if r != src["r"] or int(rr[0][1]) != src["margin"] \
+                or int(rr[0][2]) != src["bar"]:
+            probs.append("shipped row says r = %s, margin %s, bar %s; ledger "
+                         "%s says r = %s, margin %d, bar %d"
+                         % (r, rr[0][1], rr[0][2], src["entry"], src["r"],
+                            src["margin"], src["bar"]))
+    j1 = _J1_ROW.findall(text)
+    if len(j1) != 1 or any(int(x) != src["margin"] for x in j1[0]):
+        probs.append("the shipped `J = 1` row must read %d | %d (ours | "
+                     "pyRTA); found %s" % (src["margin"], src["margin"], j1))
+    sc = _SCOPED.findall(text)
+    if not sc:
+        probs.append("the scoped claim `d_min ≥ D* = %d → J = 1` is absent"
+                     % src["dstar"])
+    elif any(int(x) != src["dstar"] for x in sc):
+        probs.append("the scoped claim names D* = %s; computed D* = %d"
+                     % (sc, src["dstar"]))
+    for pat, entry, what in WITHDRAWN:
+        for m in re.finditer(pat, text):
+            line = text.count("\n", 0, m.start()) + 1
+            probs.append("README.md:%d restates a WITHDRAWN claim (%s, ledger "
+                         "%s): %r" % (line, what, entry, m.group(0)))
+    return probs
+
+
+def readme_check():
+    print("  --- RD1: README.md, traced to the ledger and the live table ---")
+    src = readme_sources()
+    print("    ledger %s: r = %s, min margin %d, bar %d; pyRTA witness %s"
+          % (src["entry"], src["r"], src["margin"], src["bar"],
+             src["witness"]))
+    print("    live lane table: %d lanes; D* = %d (computed)"
+          % (len(src["lanes"]), src["dstar"]))
+    with open(README, encoding="utf-8") as fh:
+        text = fh.read()
+    rc = 0
+    probs = readme_audit(text, src)
+    for p in probs:
+        print("    *** %s" % p)
+        rc = 1
+    if not probs:
+        print("    README: every timing number traces; no withdrawn claim")
+    # ⛔ PRICED: the exact rows this audit exists for, re-inserted.
+    print("    --- must-fire ---")
+    j8 = ("| universal worst case `J = 8` | 1, FAIL | **5** | PASS under the "
+          "primary bound |\n")
+    cases = (
+        ("the universal J = 8 row re-inserted",
+         text.replace("| shipped `J = 1`", j8 + "| shipped `J = 1`", 1),
+         "WITHDRAWN"),
+        ("the pre-C = 3 shipped row restored",
+         _R_ROW.sub("r = {11, 8, 5, 10, 6}      min margin 12      bar ≥ 4",
+                    text, 1), "shipped row says"),
+        ("a lane-table C reverted to 2",
+         _LANE_ROW.sub(lambda m: m.group(0).replace(
+             "| %s |" % m.group("C"), "| 2 |", 1), text, 1), "C = 2"),
+    )
+    for label, mutated, needle in cases:
+        hit = any(needle in p for p in readme_audit(mutated, src))
+        print("      %-40s %s" % (label, "ok" if hit else "*** MISSED"))
+        if not hit:
+            rc = 1
+    return rc
+
+
 def main() -> int:
     rc = 0
     print()
@@ -661,6 +820,10 @@ def main() -> int:
     print()
     print("  --- the mechanism, priced ---")
     if selftest():
+        rc = 1
+
+    print()
+    if readme_check():
         rc = 1
 
     print()

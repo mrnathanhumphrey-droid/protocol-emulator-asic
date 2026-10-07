@@ -155,6 +155,13 @@ GATES=(
   # exiting 1. Every committed read is clean; this keeps it so, and
   # `ci/rc.sh`'s `run_rc` is how loops capture a code.
   model/gate_shell_rc.py
+  # ⛔⛔ M -- EVERY IMAGE WRITES THE WHOLE STORE. The store has no reset, and a
+  # 51-byte image left 205 bytes holding power-up contents, one missing REARM
+  # from running on real pins. Every image is now the program plus the defined
+  # filler word; this refuses a short image, a lane with no terminating REARM,
+  # and a header base outside its program. `test/store_run.sh` is the
+  # simulated half (the bench sentinel, `clocked_conform.vh` Layer M).
+  model/gate_store_full.py
   # ⭐ JOINED THE LIST when it took the RX lane-field width check. That check
   # guards against a received byte being attributed to the WRONG LANE if
   # `N_LANES` ever outgrows the explicit [2:0] on `e_rx_lane` -- and it lives
@@ -249,6 +256,11 @@ can_run() {
     model/a2/gate_a2_program.py)
       [ -n "${PE_A2_JSON:-}" ] && [ -f "${PE_A2_JSON:-}" ] \
         || { echo "no A2 must-fire measurement at PE_A2_JSON"; return 1; } ;;
+    # ⛔ RULING M: the sentinel's must-fire is a simulation; without it Layer M
+    # has never been seen to name a lane.
+    model/gate_store_full.py)
+      [ -n "${PE_STORE_JSON:-}" ] && [ -f "${PE_STORE_JSON:-}" ] \
+        || { echo "no sentinel measurement at PE_STORE_JSON"; return 1; } ;;
   esac
   return 0
 }
@@ -604,6 +616,48 @@ if [ -z "${PE_A2_JSON:-}" ] && [ "${PE_SKIP_A2:-0}" != "1" ]; then
     && export PE_A2_JSON="$ROOT/probe_a2/a2.json"
 fi
 [ -n "${PE_A2_JSON:-}" ] && echo "  PE_A2_JSON=$PE_A2_JSON"
+
+# ---------------------------------------------------------------------------
+# THE STORE SENTINEL (ruling M3), which `gate_store_full.py` judges.
+# ---------------------------------------------------------------------------
+# ⛔ Shipped images written whole must never fetch the filler; a lane with no
+# terminating REARM must be NAMED at the first filler address. The second arm
+# is the one that shows Layer M can fire at all.
+# ⚠ ~40s for one Verilator build, declared.
+if [ -z "${PE_STORE_JSON:-}" ] && [ "${PE_SKIP_STORE:-0}" != "1" ]; then
+  echo
+  echo "  --- store sentinel (M3) ---"
+  ST_OK=0
+  if command -v verilator >/dev/null 2>&1 || [ -n "${PE_VERILATOR:-}" ]; then
+    if bash test/store_run.sh "$ROOT/probe_store"; then ST_OK=1; fi
+  elif command -v wsl.exe >/dev/null 2>&1; then
+    echo "  verilator is not on PATH; delegating the measurement to WSL"
+    SWRAP="$ROOT/probe_ci_store.sh"
+    {
+      echo '#!/bin/bash'
+      echo 'cd "$(dirname "$0")" || exit 1'
+      echo "export PE_VERILATOR=\"${PE_VERILATOR_WSL:-/opt/oss-cad-suite-2026-09-30/bin/verilator}\""
+      echo 'bash test/store_run.sh "$PWD/probe_store"'
+    } > "$SWRAP"
+    SWSLROOT="$(wsl_root "$ROOT")"
+    if ! MSYS_NO_PATHCONV=1 wsl.exe -e test -f "$SWSLROOT/probe_ci_store.sh"
+    then
+      echo "  *** WSL cannot see $SWSLROOT/probe_ci_store.sh"
+      echo "      (converted from $ROOT). Fix the path mapping rather than"
+      echo "      skipping the store gate."
+    elif MSYS_NO_PATHCONV=1 wsl.exe -e bash "$SWSLROOT/probe_ci_store.sh"; then
+      ST_OK=1
+    else
+      echo "  *** the WSL store sentinel failed -- the gate is RED"
+    fi
+  else
+    echo "  *** neither verilator nor wsl.exe is available, so the store"
+    echo "      sentinel cannot run. The gate is RED rather than skipped."
+  fi
+  [ "$ST_OK" = "1" ] && [ -f "$ROOT/probe_store/store.json" ] \
+    && export PE_STORE_JSON="$ROOT/probe_store/store.json"
+fi
+[ -n "${PE_STORE_JSON:-}" ] && echo "  PE_STORE_JSON=$PE_STORE_JSON"
 
 # ---------------------------------------------------------------------------
 # run them

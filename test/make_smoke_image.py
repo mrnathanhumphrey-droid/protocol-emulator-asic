@@ -59,6 +59,7 @@ from pe_isa import (                      # noqa: F401,E402
     act_shiftin_clocked, OP_ARM, OP_LEVEL, OP_READBIT, OP_REARM, OP_SHIFT, OP_SHIFTIN,
     ORDER_LSB, ORDER_MSB,
     OP_START, OP_STOP, PINW, PIN_NONE, UO0, UO1, UO2, UO3, act, hdr,
+    write_image,
 )
 
 def build():
@@ -1226,9 +1227,7 @@ def main() -> int:
         name = ("noop_image_bad" if bad
                 else (arg4 if arg4 else "noop_image"))
         out = os.path.join(here, name + ".hex")
-        with open(out, "w", encoding="ascii") as fh:
-            for b in img:
-                fh.write("%02x\n" % b)
+        write_image(out, img)
         print("%s (timeout=%d half=%d noop_pin=%d), %d bytes -> %s"
               % (name, to, half, 0 if bad else PIN_NONE, len(img), out))
         return 0
@@ -1244,9 +1243,7 @@ def main() -> int:
         name = sys.argv[k + 3] if len(sys.argv) > k + 3 else "edge_image"
         img = build_edge(to, arm_edge=pol)
         out = os.path.join(here, name + ".hex")
-        with open(out, "w", encoding="ascii") as fh:
-            for b in img:
-                fh.write("%02x\n" % b)
+        write_image(out, img)
         print("edge image (timeout=%d), %d bytes -> %s" % (to, len(img), out))
         return 0
     if "--i2caddr" in sys.argv:
@@ -1263,18 +1260,14 @@ def main() -> int:
         # is OUT OF REACH with this idiom, and that is a ruling, not a bug.
         img = build_i2cframe(nbytes=3)
         out = os.path.join(here, "i2caddr_image.hex")
-        with open(out, "w", encoding="ascii") as fh:
-            for b in img:
-                fh.write("%02x" % b + chr(10))
+        write_image(out, img)
         print("i2c dev+addrhi+addrlo image (reaches P_ALO; a 4th byte would be "
               "291 bytes > 256), %d bytes -> %s" % (len(img), out))
         return 0
     if "--ckfive" in sys.argv:
         img = build_ckfive([25, 45, 120, 434, 60])
         out = os.path.join(here, "ckfive_image.hex")
-        with open(out, "w", encoding="ascii") as fh:
-            for b in img:
-                fh.write("%02x" % b + chr(10))
+        write_image(out, img)
         print("ckfive image (five self-clocked lanes), %d bytes -> %s"
               % (len(img), out))
         return 0
@@ -1282,88 +1275,68 @@ def main() -> int:
         for _nm, _off in sorted(CKHOLD_POINTS.items()):
             _i = build_ckhold(_off)
             _o = os.path.join(here, "ckhold_%s_image.hex" % _nm)
-            with open(_o, "w", encoding="ascii") as fh:
-                for b in _i:
-                    fh.write("%02x" % b + chr(10))
+            write_image(_o, _i)
             print("ckhold %-6s d = SDA_HOLD%+d = %d, %d bytes -> %s"
                   % (_nm, _off, hold_bound.bound() + _off, len(_i), _o))
         return 0
     if "--ckdense" in sys.argv:
         _i = build_ckod(CKDENSE_DELAYS)
         _o = os.path.join(here, "ckdense_image.hex")
-        with open(_o, "w", encoding="ascii") as fh:
-            for b in _i:
-                fh.write("%02x" % b + chr(10))
+        write_image(_o, _i)
         print("ckdense image (S must-fire subject, delays %s), %d bytes -> %s"
               % (CKDENSE_DELAYS, len(_i), _o))
         return 0
     if "--ckod" in sys.argv:
         img = build_ckod()
         out = os.path.join(here, "ckod_image.hex")
-        with open(out, "w", encoding="ascii") as fh:
-            for b in img:
-                fh.write("%02x" % b + chr(10))
+        write_image(out, img)
         print("ckod image (open-drain self-clocked, delays %s), %d bytes -> %s"
               % (CKOD_DELAYS, len(img), out))
         return 0
     if "--ckdegen" in sys.argv:
         for _r, _nm in ((0, "ckdegen_image.hex"), (1, "ckdegen2_image.hex")):
             _i = build_ckdegen(route=_r)
-            with open(os.path.join(here, _nm), "w", encoding="ascii") as _f:
-                for _b in _i:
-                    _f.write("%02x" % _b + chr(10))
+            write_image(os.path.join(here, _nm), _i)
             print("ckdegen route %d -> %s (%d bytes)" % (_r, _nm, len(_i)))
         return 0
     if "--ckdegen-unused" in sys.argv:
         img = build_ckdegen()
         out = os.path.join(here, "ckdegen_image.hex")
-        with open(out, "w", encoding="ascii") as fh:
-            for b in img:
-                fh.write("%02x" % b + chr(10))
+        write_image(out, img)
         print("ckdegen image (clocked action with a zero bit count), "
               "%d bytes -> %s" % (len(img), out))
         return 0
     if "--armnone" in sys.argv:
         img = build_armnone()
         out = os.path.join(here, "armnone_image.hex")
-        with open(out, "w", encoding="ascii") as fh:
-            for b in img:
-                fh.write("%02x" % b + chr(10))
+        write_image(out, img)
         print("armnone image (OP_ARM on the reserved index), %d bytes -> %s"
               % (len(img), out))
         return 0
     if "--pinnone" in sys.argv:
         img = build_pinnone()
         out = os.path.join(here, "pinnone_image.hex")
-        with open(out, "w", encoding="ascii") as fh:
-            for b in img:
-                fh.write("%02x" % b + chr(10))
+        write_image(out, img)
         print("pinnone image (lane on the reserved index, shifting), "
               "%d bytes -> %s" % (len(img), out))
         return 0
     if "--cfgerr" in sys.argv:
         img = build_cfgerr()
         out = os.path.join(here, "cfgerr_image.hex")
-        with open(out, "w", encoding="ascii") as fh:
-            for b in img:
-                fh.write("%02x" % b + chr(10))
+        write_image(out, img)
         print("cfgerr image (1.6s violation), %d bytes -> %s" % (len(img), out))
         return 0
     if "--census" in sys.argv:
         img = build_census()
         out = os.path.join(here, "census_image.hex")
-        with open(out, "w", encoding="ascii") as fh:
-            for b in img:
-                fh.write("%02x\n" % b)
+        write_image(out, img)
         print("census image (all 8 opcodes), %d bytes -> %s" % (len(img), out))
         return 0
     if "--chain" in sys.argv:
         k = sys.argv.index("--chain")
         img = build_chain(int(sys.argv[k + 1]), int(sys.argv[k + 2]))
         out = os.path.join(here, "chain_image.hex")
-        with open(out, "w", encoding="ascii") as fh:
-            for b in img:
-                fh.write("%02x\n" % b)
+        write_image(out, img)
         print("chain image, %d bytes -> %s" % (len(img), out))
         return 0
     if "--five" in sys.argv:
@@ -1381,9 +1354,7 @@ def main() -> int:
         base = (sys.argv[k + 6] if len(sys.argv) > k + 6
                 and not sys.argv[k + 6].startswith("-") else "five_image")
         out = os.path.join(here, base + ".hex")
-        with open(out, "w", encoding="ascii") as fh:
-            for b in img:
-                fh.write("%02x\n" % b)
+        write_image(out, img)
         print("five-lane image %s, %d bytes -> %s" % (delays, len(img), out))
         return 0
     if "--i2cframe" in sys.argv:
@@ -1391,9 +1362,7 @@ def main() -> int:
         dd = int(sys.argv[k + 1]) if len(sys.argv) > k + 1 else 62
         img = build_i2cframe(dd)
         out = os.path.join(here, "i2cframe_image.hex")
-        with open(out, "w", encoding="ascii") as fh:
-            for b in img:
-                fh.write("%02x\n" % b)
+        write_image(out, img)
         print("i2c frame image d=%d, %d bytes -> %s"
               % (dd, len(img), out))
         return 0
@@ -1413,9 +1382,7 @@ def main() -> int:
                 and not sys.argv[k + 2].startswith("-") else "rxfast_image")
         img = build_rxfast(dd)
         out = os.path.join(here, base + ".hex")
-        with open(out, "w", encoding="ascii") as fh:
-            for b in img:
-                fh.write("%02x\n" % b)
+        write_image(out, img)
         print("rxfast image d=%d, %d bytes -> %s" % (dd, len(img), out))
         return 0
     if "--half" in sys.argv:
@@ -1423,18 +1390,14 @@ def main() -> int:
         dd = int(sys.argv[k + 1]) if len(sys.argv) > k + 1 else 24
         img = build_half(dd)
         out = os.path.join(here, "half_image.hex")
-        with open(out, "w", encoding="ascii") as fh:
-            for b in img:
-                fh.write("%02x\n" % b)
+        write_image(out, img)
         print("half-duplex image d=%d, %d bytes -> %s"
               % (dd, len(img), out))
         return 0
     if "--txbadclk" in sys.argv:
         img = build_tx_badclk()
         out = os.path.join(here, "tx_badclk_image.hex")
-        with open(out, "w", encoding="ascii") as fh:
-            for b in img:
-                fh.write("%02x\n" % b)
+        write_image(out, img)
         print("tx badclk image, %d bytes -> %s" % (len(img), out))
         return 0
     if "--tx" in sys.argv:
@@ -1443,9 +1406,7 @@ def main() -> int:
         d1 = int(sys.argv[k + 2]) if len(sys.argv) > k + 2 else 13
         img = build_tx(d0, d1)
         out = os.path.join(here, "tx_image.hex")
-        with open(out, "w", encoding="ascii") as fh:
-            for b in img:
-                fh.write("%02x\n" % b)
+        write_image(out, img)
         print("tx image d0=%d d1=%d, %d bytes -> %s" % (d0, d1, len(img), out))
         return 0
     if "--stress" in sys.argv:
@@ -1454,17 +1415,13 @@ def main() -> int:
         d1 = int(sys.argv[k + 2])
         img = build_stress(d0, d1)
         out = os.path.join(here, "stress_image.hex")
-        with open(out, "w", encoding="ascii") as fh:
-            for b in img:
-                fh.write("%02x\n" % b)
+        write_image(out, img)
         print("stress image d0=%d d1=%d, %d bytes -> %s"
               % (d0, d1, len(img), out))
         return 0
     img = build()
     out = os.path.join(here, "smoke_image.hex")
-    with open(out, "w", encoding="ascii") as fh:
-        for b in img:
-            fh.write("%02x\n" % b)
+    write_image(out, img)
     print("HDR_BITS=%d HDR_BYTES=%d ACT_W=%d ACT_BYTES=%d ACT_BASE=%d"
           % (HDR_BITS, HDR_BYTES, ACT_W, ACT_BYTES, ACT_BASE))
     print("image is %d bytes -> %s" % (len(img), out))

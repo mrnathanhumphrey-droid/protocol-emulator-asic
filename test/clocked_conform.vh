@@ -722,6 +722,38 @@ always @(posedge dut.clk) begin
   end
 end
 
+// ---------------------------------------------------------------------------
+// LAYER M -- NO LANE EVER FETCHES PAST ITS PROGRAM (ruling M3)
+// ---------------------------------------------------------------------------
+// ⛔⛔ The store has no reset, so a byte no image wrote is whatever powered up,
+// and a PC that reaches it executes it on real pins. Every image is now written
+// whole (`pe_isa.full_store`), the unused bytes holding ONE defined word,
+// `PE_STORE_FILLER` -- a chaining OP_REARM on PIN_NONE, distinctive in its
+// don't-care fields. THIS LAYER IS THE SENTINEL: every prefetch capture is
+// compared against it, so a lane whose fetch path ever leaves its program --
+// fall-through past a missing REARM, a header base outside the program, the
+// 8-bit PC wrapping, a speculative spare fetched past the end -- is named here
+// with the lane and the address, instead of parking silently on the filler.
+// ⚠ It covers EVERY lane and every capture, head or spare: P_CAP is the only
+// place a store word enters the engine.
+// ⚠ NON-VACUITY: on an image that is not full-store the filler is not in the
+// store and this layer cannot fire -- `model/gate_store_full.py` refuses any
+// such image, and the probe in `test/store_run.sh` prices the layer on a
+// program that falls off its end.
+`include "test/store_filler.vh"
+integer cm_caps  = 0;
+integer cm_fills = 0;
+always @(posedge dut.clk) begin
+  if (dut.rst_n === 1'b1 && dut.u_eng.pst === 3'd3) begin
+    cm_caps = cm_caps + 1;
+    if (dut.u_eng.s_wrdata[23:0] === PE_STORE_FILLER) begin
+      cm_fills = cm_fills + 1;
+      if (cm_fills <= 4)
+        $display("*** FAIL clocked_conform[M]: lane %0d fetched the STORE FILLER at address %0d -- its fetch path left its program", dut.u_eng.pl, dut.u_eng.paddr);
+    end
+  end
+end
+
 // ⛔⛔ THE REPORT IS THE `final` BLOCK ITSELF, NOT A TASK IT CALLS.
 // It was `task cb_report` invoked from `final`, which Verilator accepts and
 // iverilog refuses ("final procedures cannot enable/call tasks").
@@ -799,6 +831,10 @@ final begin
       $display("*** FAIL clocked_conform: %0d action(s) disagreed with the model", cb_fails);
     else if (cb_acts != 0)
       $display("  clocked_conform[B]: ok -- every clocked action matched the model exactly");
+    if (cm_fills != 0)
+      $display("*** FAIL clocked_conform[M]: %0d of %0d prefetch capture(s) fetched the store filler", cm_fills, cm_caps);
+    else
+      $display("  clocked_conform[M]: ok -- %0d prefetch capture(s), none fetched the store filler", cm_caps);
   end
 
 

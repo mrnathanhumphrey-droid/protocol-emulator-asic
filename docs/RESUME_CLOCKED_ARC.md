@@ -40,6 +40,7 @@ here** (ruling CI1). A local pass is reported as local.
 | `f8f952c` | ❌ `37570517654` | ✅ `37570517688` | ⛔ **a wrong diagnosis, disproved by CI.** I took it for a race between the trace sampler and blocking stimulus writes on the same negedge and made the stimulus non-blocking; the identical 666 lines disagreed again. The real cause: `verilator_trace.sh` called a bare `verilator`, which in CI is apt's **5.020** -- CI keeps the pinned **5.053** off PATH and names it in `PE_VERILATOR`. CI's Icarus matched the local trace exactly; it was CI's Verilator that saw CS rise a cycle late. Fixed in the next commit; the non-blocking change is kept (the race is real) but fixed nothing observed. |
 | `f0aa6db` | ✅ `37572686088` | ✅ `37572686044` | the pinned Verilator in `verilator_trace.sh`; witness 7 of 8, 0 failed, in CI; 24 of 24 |
 | `b97d5bd` | ✅ `37611788009` | ✅ `37611787822` | P6 + N1; 25 of 25 |
+| `29bd861` | ✅ `37619713604` | ✅ `37619713637` | E+ + Q3; 26 of 26 |
 
 ---
 
@@ -61,9 +62,9 @@ FRAM write + random read.
 | **N1** | non-admissible images declared (OVERLOAD / PORT / PINMAP), derived from each image; found `five_image` overloaded + 9 more below D* | ✅ landed — SPEC §18 |
 | **E+** | exit codes mechanical: pipefail enforced, `ci/rc.sh` run_rc, `gate_shell_rc` lint, must-fires | ✅ landed — SPEC §19 |
 | **Q3** | `five_image` as evidence: **mechanism only**; every claim-bearing run point admissible | ✅ landed — SPEC §19 |
-| **README (Nathan)** | stale pre-C=3 shipped row (`r = {11,8,5,10,6}`, margin 12 → ledger has `{16,12,7,15,9}`, 11) and the withdrawn universal `J = 8` row | **yours — the write-up** |
-| **M** | unreset store: full-store images, defined filler, audit, PC-reach report, load-time report | **NEXT** |
-| **V** | tool pinning enforced: lint on bare verilator/iverilog/yosys; every tool gate prints path + version | owed |
+| **M** | unreset store: full-store images, defined filler, audit, PC-reach report, load-time report | ✅ landed — SPEC §20 |
+| **README (option a) + RD1** | ledger numbers only (lane table C 2→3, SPI-target D_tol 18→17, r row, margin 12→11), universal `J = 8` row + its sentence removed, scoped `d_min ≥ D* = 20 → J = 1` stated; `gate_stored_numbers` now audits the README | ✅ landed — SPEC §20; ⚠ framing/prose untouched, still Nathan's (F7b) |
+| **V** | tool pinning enforced: lint on bare verilator/iverilog/yosys; every tool gate prints path + version | **NEXT** |
 | **MU** | mutant completeness: every `ifdef M_*` killed by a named gate or a declared survivor; equivalence goes red | owed |
 | **CJ** (`gate_cj_bounds`) | report its claim; retire with a pointer if superseded, else a declared producer + reserved artefact | owed |
 | (opt) | `ckdense` margin: a heavier feasible variant firing on several releases | non-blocking |

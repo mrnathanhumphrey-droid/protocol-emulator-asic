@@ -471,16 +471,20 @@ def main() -> int:
     # ⚠ WHAT IT DOES NOT SAY: a host reading back past the bytes it loaded
     # gets uninitialised store contents. That is the store's declared
     # behaviour, not a defect, and it is now written down here.
+    # ⭐⭐ RULING M MADE THE PADDING THE IMAGE. Every image is now written
+    # whole (`pe_isa.full_store`, the filler word rather than zeros), so this
+    # arm runs the TRACKED `corpus_i2c.hex` as it ships; the zero-padding copy
+    # it used to build is gone. It REFUSES a short image rather than pad one,
+    # so it can never again run something other than what is loaded on a chip.
     src_img = "test/corpus_i2c.hex"
-    body = open(os.path.join(ROOT, src_img)).read().split()
-    full = body + ["00"] * ((1 << corpus.AW) - len(body))
-    img_abs = os.path.join(TMP, "readback_fullstore.hex")
-    with open(img_abs, "w", encoding="ascii", newline="\n") as fh:
-        fh.write("".join(b + "\n" for b in full))
-    img = os.path.relpath(img_abs, ROOT).replace("\\", "/")
+    full = open(os.path.join(ROOT, src_img)).read().split()
+    img = src_img
     nb = len(full)
-    print("  image: %s padded %d -> %d bytes (the whole store)"
-          % (src_img, len(body), nb))
+    if nb != (1 << corpus.AW):
+        print("  *** %s is %d bytes, not the whole store (%d) -- ruling M"
+              % (src_img, nb, 1 << corpus.AW))
+        failures.append(("readback", "short image"))
+    print("  image: %s, %d bytes (the whole store)" % (src_img, nb))
     ivr = os.path.join(TMP, "readback_iv.txt")
     ok, log = iverilog_run(vvp, img, nb, "none", ivr, stayload=1)
     if ok and os.path.isfile(ivr):

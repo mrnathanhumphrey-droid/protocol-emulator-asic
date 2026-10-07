@@ -83,11 +83,11 @@ Five lanes, derived from the protocols rather than chosen:
 
 | lane | `T` | `C` | `n` | `t` | `J` | `D_tol` |
 |---|---|---|---|---|---|---|
-| UART-tx 115200 | 434 | 2 | 1 | 434 | 1 | 216 |
-| SPI-tx 1 MHz | 25 | 2 | 1 | 25 | 1 | 23 |
-| I²C 400 kHz | 45 | 2 | 1 | 45 | 2 | 15 |
-| UART-rx 115200 | 4140 | 2 | 10 | 414 | 1 | 213 |
-| SPI-target 1 MHz | 400 | 2 | 16 | 25 | 1 | 18 |
+| UART-tx 115200 | 434 | 3 | 1 | 434 | 1 | 216 |
+| SPI-tx 1 MHz | 25 | 3 | 1 | 25 | 1 | 23 |
+| I²C 400 kHz | 45 | 3 | 1 | 45 | 2 | 15 |
+| UART-rx 115200 | 4140 | 3 | 10 | 414 | 1 | 213 |
+| SPI-target 1 MHz | 400 | 3 | 16 | 25 | 1 | 17 |
 
 Cycles at 50 MHz. `n`/`t` describe the bursty lanes: UART-rx is 10 bits of 414,
 SPI-target 16 bits of 25, so a periodic model with the outer period alone
@@ -102,19 +102,17 @@ function of the program, not asserted as a chip constant.
 Shipped program:
 
 ```
-r = {11, 8, 5, 10, 6}      min margin 12      bar ≥ 4
+r = {16, 12, 7, 15, 9}      min margin 11      bar ≥ 4
 ```
 
 | | ours | pyRTA | bar |
 |---|---|---|---|
-| shipped `J = 1` | 12 | **12** — exact on all five lanes | PASS both |
-| universal worst case `J = 8` | 1, FAIL | **5** | PASS under the primary bound |
+| shipped `J = 1` | 11 | **11** — exact on all five lanes | PASS both |
+
+`d_min ≥ D* = 20 → J = 1`
 
 **The primary bound is pyRTA's**, not ours; ours is a cross-check that is only
-allowed to be *more* conservative, and a gate fails if it is ever smaller. The
-universal row is the honest one: over every admissible program our own bound
-does not clear the bar and the third-party one does, so the published number is
-the third-party one.
+allowed to be *more* conservative, and a gate fails if it is ever smaller.
 
 Non-preemptive EDF is monotone under removing lanes, so the five-lane numbers
 bound every subset — but that is an argument, and three arguments of that exact

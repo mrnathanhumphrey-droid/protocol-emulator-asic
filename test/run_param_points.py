@@ -42,6 +42,11 @@ except Exception:
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
+sys.path.insert(0, HERE)
+# ⛔ RULING M: an image is the WHOLE store, so a bench loads all of it. The two
+# literals below were the program lengths (87, 54); loading only those left the
+# rest of the store unwritten -- the defect M closes.
+from pe_isa import STORE_BYTES                                    # noqa: E402
 SCRATCH = os.environ.get("PE_SCRATCH",
                          os.path.join(os.environ.get("TEMP", "/tmp"), "pe_pp"))
 
@@ -155,7 +160,7 @@ BENCHES = [
     # slots live, so it is the arm a depth change could plausibly reach; the
     # OVERRUN arm never dispatches at all.
     ("tb_status", "test/tb_status.v",
-     ["+IMG=test/tx_image.hex", "+NBYTES=87", "+NCYC=20000", "+MODE=0"],
+     ["+IMG=test/tx_image.hex", "+NBYTES=%d" % STORE_BYTES, "+NCYC=20000", "+MODE=0"],
      "tb_status: PASS", {2: "ok", 1: "ok"}),
 
     # ⭐ THE OUT-OF-RANGE PIN BENCH, swept on the RESERVED-INDEX arm. That is
@@ -163,7 +168,7 @@ BENCHES = [
     # so it is the one where an action-slot depth could reach the pin-write
     # guards it is checking.
     ("tb_pinrange", "test/tb_pinrange.v",
-     ["+IMG=test/pinnone_image.hex", "+NBYTES=54", "+NCYC=8000", "+MODE=1"],
+     ["+IMG=test/pinnone_image.hex", "+NBYTES=%d" % STORE_BYTES, "+NCYC=8000", "+MODE=1"],
      "tb_pinrange: PASS", {2: "ok", 1: "ok"}),
 ]
 

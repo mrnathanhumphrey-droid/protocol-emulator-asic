@@ -82,7 +82,7 @@ from make_smoke_image import (            # noqa: E402
     ACT_BASE, ACT_BYTES, AW, D_FM_SHIPPABLE, HDR_BYTES, N_LANES,
     OP_ARM, OP_LEVEL, OP_READBIT, OP_REARM, OP_SHIFT, OP_SHIFTIN, OP_START,
     SELF_CLOCKED,
-    OP_STOP, PIN_NONE, act, hdr,
+    OP_STOP, PIN_NONE, act, hdr, write_image,
 )
 
 # ---------------------------------------------------------------------------
@@ -825,9 +825,7 @@ def main() -> int:
     for name, (fn, peer) in sorted(CORPUS.items()):
         img, expect = fn()
         out = os.path.join(HERE, name + ".hex")
-        with open(out, "w", encoding="ascii") as fh:
-            for b in img:
-                fh.write("%02x\n" % b)
+        write_image(out, img)
         want = ",".join(k for k, v in sorted(expect.items()) if v)
         print("  %-15s %3d bytes  peer=%-4s must move: %s"
               % (name, len(img), peer, want))

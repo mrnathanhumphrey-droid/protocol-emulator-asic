@@ -58,6 +58,7 @@ from make_smoke_image import (            # noqa: E402
     OP_SHIFT,
     OP_SHIFTIN, PIN_NONE, act, hdr,
 )
+from pe_isa import full_store                  # noqa: E402
 
 # ⚠ N_PINS IS THE PIN-MAP BOUND, not a pin count the ISA encodes:
 # `PINW = 4` addresses 0..15 and only 12 pins exist, which is the whole
@@ -472,6 +473,12 @@ def assemble(lanes, headers):
     if len(img) > (1 << AW):
         raise Reject("image is %d bytes, over the %d-byte program store"
                      % (len(img), 1 << AW))
+    # ⛔⛔ THE ACCEPTED IMAGE IS THE WHOLE STORE (ruling M1). The store has no
+    # reset; a short image leaves the rest of it holding whatever powered up,
+    # one missing REARM away from running on real pins. Every byte past the
+    # program is `pe_isa.STORE_FILLER`, the defined non-driving word.
+    assemble.program_bytes = len(img)
+    img = full_store(img)
     # ⛔ AFTER THE IMAGE EXISTS, ON THE IMAGE. The floor is derived from the
     # program's own lane set, and the image is the one representation that
     # every route into the chip shares -- deriving it from the tuples instead
@@ -496,7 +503,9 @@ def report(lanes, headers):
         print("  REJECTED: %s" % e)
         return 1
     print("  ACCEPTED")
-    print("    image            : %d bytes" % len(img))
+    print("    image            : %d bytes (program %d, store filler %d)"
+          % (len(img), assemble.program_bytes,
+             len(img) - assemble.program_bytes))
     print("    SDA hold floor   : d > %d on a clocked open-drain lane "
           "(read from src/pe_engine.v)" % hold)
     for ln, (mode, lo, lag) in sorted(check_mode_floor(img).items()):

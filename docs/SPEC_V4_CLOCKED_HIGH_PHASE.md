@@ -1486,3 +1486,138 @@ comments made the same conflation; all three are corrected.
 * **The README still presents the universal `J = 8` row** ("over every
   admissible program"). Ledger entry `b4e51034e283` **withdrew** universal J = 8
   as unsound and replaced it with the scoped claim `d_min ≥ D* = 20 → J = 1`.
+
+---
+
+## 20. M — the store is written whole; README traced to the ledger
+
+### M3 — can a lane's PC reach a byte past its program? (answered first)
+
+**From the RTL.** A lane's PC changes in exactly three places, all in the
+writeback (`src/pe_engine.v`): `+ACT_BYTES` when a non-REARM retires, `l_base`
+when a looping REARM (level 1) retires, and **not at all** on a chaining REARM
+(level 0), which never retires (`act_retire`). There is no branch or jump
+opcode. The prefetch reads only `l_pc` (empty head), `l_base` (head is a
+looping REARM) or `l_fpc` = last fetch + `ACT_BYTES`, and fetches nothing past a
+chaining REARM head (`want_fetch`). So, case by case:
+
+| path | reaches past the program? |
+| --- | --- |
+| branch / jump target | none exist |
+| refill speculation | the spare is the head's successor; for a terminated program that is still inside it |
+| end-of-lane fall-through | **only if the lane has no terminating REARM** |
+| header base outside the program | **yes, from the first fetch** |
+| wrap at 2^AW (`l_pc`, `l_fpc` are AW bits) | only after (a) or (b) carries the PC to 255 |
+
+**From the bench** — `test/store_run.sh`, pinned Verilator 5.053, with the
+sentinel Layer M in `test/clocked_conform.vh` (every P_CAP compared against the
+filler word):
+
+| image (full store) | prefetch captures | filler fetched |
+| --- | --- | --- |
+| `corpus_i2c` | 223 | **0** |
+| `ckod_image` | 378 | **0** |
+| `corpus_all5` | 11,422 | **0** |
+| `smoke_image` | 4,933 | **0** |
+| `falloff` (must-fire: a lane with no terminating REARM) | 7 | **1** — lane 0 at address 39 |
+
+The must-fire shows the path: the **speculative spare fetch** one word past the
+lane's last action, while the head was still its final LEVEL. After that the
+lane parked on the filler (1 of 7 captures, not a walk through the store).
+
+### M1 — every image is the whole store, with a defined filler
+
+`pe_isa.STORE_FILLER` = `feffc0` = **`OP_REARM`, level 0 (chaining), pin
+`PIN_NONE`, delay 1023, count 0, q 0**. Classified in the degenerate-field
+audit by the existing row `("REARM", "pin", "PIN_NONE or >= N_PINS")` =
+**DEFINED**. Non-driving (`OP_ARM, OP_REARM: ;`), non-retiring, so a lane that
+ever reached it parks instead of walking on.
+
+* ⛔ **q = 0 on purpose.** The first draft set q = 3 to make the word
+  distinctive; `host_q = a_q` steers `project.v`'s TX-queue mux while the
+  action is current. Nothing pops on a REARM, but a "non-driving" filler should
+  not move a select line, so it matches every REARM already shipped.
+* `pe_isa.write_image` is the one writer: all 22 writers in
+  `make_smoke_image.py` and the corpus writer go through it, and
+  `pe_asm.assemble` returns the full store (reporting program and filler bytes).
+* All **33 images** are now 256 bytes (23 tracked, 10 regenerated from recipes);
+  the manifest is re-pinned.
+* `test/run_param_points.py` hard-coded `+NBYTES=87` and `+NBYTES=54` — loads
+  that would have left the rest of the store unwritten. Now `STORE_BYTES`.
+* `gate_corpus_trace`'s readback arm zero-padded `corpus_i2c` itself; it now
+  runs the tracked image and refuses a short one.
+
+⛔ **A walker that would have misread the filler, fixed with it.**
+`gate_degenerate_fields.walk` stopped only at a *looping* REARM and ran on past
+a chaining one. That was harmless while every parked lane's REARM was its
+image's last word. Measured before the change: walks are identical on every
+tracked image. Padded, the old walk read 60–70 phantom filler actions per
+parked lane. It now stops at any REARM, as the RTL does.
+
+### M2 — the audit (`model/gate_store_full.py`, in CI)
+
+Per image on disk: exactly 256 bytes; the tail is the filler from an action
+boundary; every lane's header base is inside its program and aligned; every
+lane's walk ends on **its own** REARM, not on the filler. Also checks the
+filler's fields and classification, and that `test/store_filler.vh` matches
+`pe_isa.filler_vh()`. **Must-fires:** the 51-byte pre-M `corpus_i2c` (red), a
+lane with no terminating REARM (red), a header base pointing into the filler
+(red), and the clean image (accepted).
+
+It also judges the **simulated** half: `ci/run_gates.sh` runs
+`test/store_run.sh` as a measurement step (one Verilator build, ~40 s) and the
+gate is **red without `PE_STORE_JSON`**, the same rule as R and S. Layer M runs
+in every bench, but on a clean image it can only ever report zero. The
+`falloff` arm is what shows it can name a lane.
+
+⚠ **Found, not ruled on:** `corpus_all5` offset 87 is the one unreachable word
+in any image. `corpus._assemble` always appends a park REARM, and in all5 every
+lane is live, so nothing uses it. It is a defined, inert word; no dead-code rule
+was added.
+
+### M4 — load time
+
+Every Verilog bench's loader takes **6 cycles/byte** (`tb_smoke` 7); cocotb's
+`load_image` takes 9.
+
+| image | before | at 256 bytes |
+| --- | --- | --- |
+| smallest (39 B, the ckhold/ckdegen set) | 234 cy | 1,536 cy |
+| `corpus_i2c` (51 B) | 306 cy | 1,536 cy |
+| largest (`i2caddr`, 231 B) | 1,386 cy | 1,536 cy |
+| `tb_smoke` | 357 cy (51 B) | 1,792 cy |
+| cocotb | 464 cy (51 B) | 2,309 cy |
+
+**No bench's window assumption changes.** Every `+NCYC` run loop starts after
+the load loop; `progress.vh`'s watchdog counts dispatches, not time; cocotb
+sets no wall-time limits; every bench's image buffer is already 256. The two
+cocotb readback tests that load 8 literal bytes stay in load mode and never
+run the engine, so M does not reach them.
+
+### README, option (a), with RD1
+
+Nathan chose (a). Only ledger numbers were changed:
+
+| README item | was | now | source |
+| --- | --- | --- | --- |
+| lane table `C` (all five) | 2 | **3** | `65bc3c8114e5`, live `bursty` table |
+| SPI-target `D_tol` | 18 | **17** | same entry ("two fields moved") |
+| shipped row | `{11,8,5,10,6}`, margin 12 | **`{16,12,7,15,9}`, margin 11** | same entry; = `PYRTA_PIN` |
+| shipped `J = 1` row | 12 / 12 | **11 / 11** | same entry |
+| universal `J = 8` row | present | **removed**; `d_min ≥ D* = 20 → J = 1` stated | `b4e51034e283` |
+
+⚠ **Two things beyond "the two rows", stated rather than hidden.** The lane
+table's C column and SPI-target D_tol come from the same ledger entry as the
+shipped row; leaving them would have made RD1 a gate that passes by not
+looking. And the sentence after the table, "The universal row is the honest
+one: over every admissible program …", *is* the withdrawn claim, so it was
+removed with its row. Nothing else in the README changed; framing and prose
+are Nathan's (F7b).
+
+**RD1** (`gate_stored_numbers.readme_check`, in CI): lane table against
+`lane_digest.shipped()`, r and margin against the newest `DIGEST_LEDGER` entry
+(and that entry against `PYRTA_PIN`), D* against `gate_j_program.D_STAR`, and
+`WITHDRAWN` patterns red anywhere in the README. On the unedited README it
+reported 13 findings. **Must-fires:** the universal `J = 8` row re-inserted,
+the pre-C = 3 shipped row restored, and a lane-table C reverted to 2 are all
+red.
