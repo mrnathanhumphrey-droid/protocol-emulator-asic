@@ -41,6 +41,8 @@ ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 
 import corpus  # noqa: E402
+from toolchain import (banner, tool, tool_or_none,   # noqa: E402  ruling V
+                       pinned_ok, PINNED_VERILATOR, PINNED_WSL_VERILATOR)
 
 # ⛔⛔ NO PATH IN THIS FILE NAMES A MACHINE ANY MORE (ruling Q2). It used to
 # hardcode `wsl.exe -d Ubuntu`, `/mnt/d/ProtocolEmulator` and `C:\tmp\corpus`,
@@ -75,7 +77,7 @@ def run(cmd, **kw):
 
 
 def iverilog_build(vvp, defines=()):
-    cmd = ["iverilog", "-g2012", "-I", "test", "-o", vvp, "-s", "tb_trace"]
+    cmd = [tool("iverilog"), "-g2012", "-I", "test", "-o", vvp, "-s", "tb_trace"]
     for d in defines:
         cmd += ["-D", d]
     cmd += SRC
@@ -85,7 +87,7 @@ def iverilog_build(vvp, defines=()):
 
 def iverilog_run(vvp, img, nbytes, peer, out, phase=1, async_arm=0,
                  stayload=0, sclhold=0):
-    r = run(["vvp", vvp, "+IMG=%s" % img, "+NBYTES=%d" % nbytes,
+    r = run([tool("vvp"), vvp, "+IMG=%s" % img, "+NBYTES=%d" % nbytes,
              "+PEER=%s" % peer, "+OUT=%s" % out, "+NCYC=%d" % NCYC,
              "+SEED=%d" % phase, "+ASYNC=%d" % async_arm,
              "+STAYLOAD=%d" % stayload, "+SCLHOLD=%d" % sclhold])
@@ -153,8 +155,7 @@ def od_violations(rows, od_pins):
 
 def _verilator_native():
     """True where the Verilator scripts can run in THIS process's shell."""
-    return os.name != "nt" or bool(
-        shutil.which(os.environ.get("PE_VERILATOR", "verilator")))
+    return os.name != "nt" or bool(tool_or_none("verilator"))
 
 
 def vpath(path):
@@ -186,14 +187,47 @@ def vrun(script, *args):
     if _verilator_native():
         cmd = ["bash", sc]
     elif shutil.which("wsl.exe"):
-        cmd = ["wsl.exe", "--", "bash", vpath(sc)]
+        # ⛔ RULING V: THE PIN TRAVELS WITH THE CALL. Without it the WSL side
+        # resolved a bare `verilator` from its own PATH -- apt's 5.032 on this
+        # box -- the same class of defect that ran CI's witness on 5.020. A
+        # fixed argv (`env NAME=value`) carries it with no shell to expand.
+        cmd = ["wsl.exe", "--", "env",
+               "PE_VERILATOR=%s" % PINNED_WSL_VERILATOR, "bash", vpath(sc)]
     else:
         return _NoVerilator()
-    return subprocess.run(cmd + [str(a) for a in args], capture_output=True,
-                          text=True, encoding="utf-8", errors="replace")
+    r = subprocess.run(cmd + [str(a) for a in args], capture_output=True,
+                       text=True, encoding="utf-8", errors="replace")
+    # ⚠ ONLY THE SCRIPT THAT RUNS VERILATOR is held to the banner:
+    # `two_sim_trace.sh` compares two trace FILES and runs no simulator.
+    if script in VERILATOR_SCRIPTS:
+        _pin_check(r.stdout, script)
+    return r
+
+
+VERILATOR_SCRIPTS = {"verilator_trace.sh"}
+
+
+#: ⛔ RULING V: every Verilator-side run must NAME the pinned release in its
+#: banner (`tool_banner verilator`). "The witness CI log must show 5.053" is
+#: enforced here, not left to someone reading the log.
+PIN_PROBLEMS = []
+
+
+def _pin_check(out, script):
+    lines = [l for l in (out or "").splitlines()
+             if l.strip().startswith("tool verilator")]
+    if not lines:
+        PIN_PROBLEMS.append("%s printed no `tool verilator` banner" % script)
+        return
+    ver = lines[0].split(":", 1)[1].strip().split("  ", 1)
+    label = ver[1] if len(ver) > 1 else ""
+    if not pinned_ok(label):
+        PIN_PROBLEMS.append("%s ran %r, not the pinned %s"
+                            % (script, lines[0].strip(), PINNED_VERILATOR))
 
 
 def main() -> int:
+    banner("iverilog", "vvp")   # ruling V2: the log names the binary that ran
     os.makedirs(TMP, exist_ok=True)
     print()
     print("=" * 78)
@@ -554,6 +588,17 @@ def main() -> int:
         print("  *** the must-fire arm did not run")
     if not mf_ok:
         failures.append(("must-fire", "the precondition was not seen to fail"))
+
+    # ---- RULING V: the Verilator side was the PINNED release, every time ----
+    print()
+    print("  --- ruling V: every Verilator-side run named the pin ---")
+    if PIN_PROBLEMS:
+        for p in sorted(set(PIN_PROBLEMS)):
+            print("  *** %s" % p)
+        failures.append(("verilator pin", "%d run(s) not on %s"
+                         % (len(PIN_PROBLEMS), PINNED_VERILATOR)))
+    else:
+        print("  every run printed `tool verilator` on %s" % PINNED_VERILATOR)
 
     total = len(corpus.CORPUS) + 3
     passed = (len(results) + (1 if async_ok else 0)

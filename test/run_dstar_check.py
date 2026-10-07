@@ -37,6 +37,7 @@ import os
 import re
 import subprocess
 import sys
+from toolchain import banner, tool          # noqa: E402  ruling V
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")
@@ -84,7 +85,7 @@ def run(cmd, cwd=ROOT):
 def build():
     os.makedirs(SCRATCH, exist_ok=True)
     out = os.path.join(SCRATCH, "jlane.vvp")
-    r = run(["iverilog", "-g2012", "-o", out, "-s", "tb_jlane",
+    r = run([tool("iverilog"), "-g2012", "-o", out, "-s", "tb_jlane",
              "-Ptb_jlane.SPL_CFG=2", "test/tb_jlane.v"] + SRCS)
     if r.returncode != 0:
         print("*** build failed")
@@ -94,7 +95,7 @@ def build():
 
 
 def one(vvp, base, nbytes, lane, ncyc=NCYC, warmup=WARMUP):
-    r = run(["vvp", vvp, "+IMG=test/%s.hex" % base, "+NBYTES=%d" % nbytes,
+    r = run([tool("vvp"), vvp, "+IMG=test/%s.hex" % base, "+NBYTES=%d" % nbytes,
              "+LANE=%d" % lane, "+NCYC=%d" % ncyc, "+WARMUP=%d" % warmup])
     txt = r.stdout + r.stderr
     m = re.search(r"JLANE lane=(\d+) sum=(\d+) run=(\d+) wall=(\d+) iv=(\d+) "
@@ -177,6 +178,7 @@ def sweep(vvp, sets, label, expect_zero, ncyc=NCYC, warmup=WARMUP):
 
 
 def main() -> int:
+    banner("iverilog", "vvp")   # ruling V2: the log names the binary that ran
     print()
     print("=" * 78)
     print("THE D* THEOREM -- per-lane refill queueing is ZERO at d >= D* = %d"

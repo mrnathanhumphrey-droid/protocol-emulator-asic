@@ -54,6 +54,9 @@ EXCEPTIONS = {}
 PIPEFAIL_EXEMPT = {
     "ci/rc.sh": "a SOURCED helper (`. ci/rc.sh`); setting shell options in it "
                 "would silently change the caller's shell. Contains no pipes.",
+    "ci/tools.sh": "a SOURCED helper (`. ci/tools.sh`, ruling V's resolver); "
+                   "same reason, and it reads the version banner by process "
+                   "substitution so it contains no pipes.",
 }
 
 PIPEFAIL = re.compile(r"^\s*set\s+-[A-Za-z]*o\s+pipefail\b|^\s*set\s+-o\s+pipefail\b",

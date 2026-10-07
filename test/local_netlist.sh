@@ -18,7 +18,9 @@ synth -top tt_um_protocol_emulator -flatten
 write_json /tmp/local_netlist.json
 YS
 if [ -n "$DEFS" ]; then sed -i "s|DEFARGS|-D $DEFS|g" /tmp/nl.ys; else sed -i "s|DEFARGS ||g" /tmp/nl.ys; fi
-yosys -s /tmp/nl.ys > /tmp/nl.log 2>&1
+. ci/tools.sh              # ruling V: $YS from PE_YOSYS, made absolute
+tool_banner yosys
+"$YS" -s /tmp/nl.ys > /tmp/nl.log 2>&1
 RC=$?
 if [ "$RC" -ne 0 ]; then echo "yosys failed ($RC); see /tmp/nl.log"; exit 1; fi
 OUT="${3:-local_netlist}"

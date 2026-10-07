@@ -30,6 +30,7 @@ import shutil
 import subprocess
 import sys
 import time
+from toolchain import banner, tool          # noqa: E402  ruling V
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")
@@ -155,14 +156,14 @@ def suite():
             out.append((name, False, "its image is absent"))
             continue
         vvp = os.path.join(sp, name + ".vvp")
-        b = run(["iverilog", "-g2012", "-o", vvp, "-s", top]
+        b = run([tool("iverilog"), "-g2012", "-o", vvp, "-s", top]
                 + [os.path.join(ROOT, s) for s in srcs]
                 + [os.path.join(ROOT, "src", f)
                    for f in ("pe_engine.v", "pe_store.v", "project.v")])
         if b.returncode != 0:
             out.append((name, False, "build failed"))
             continue
-        r = run(["vvp", vvp] + pargs)
+        r = run([tool("vvp"), vvp] + pargs)
         txt = r.stdout + r.stderr
         ok = ("PASS" in txt and "FAILURE" not in txt)
         why = "PASS" if ok else [l for l in txt.splitlines()
@@ -248,6 +249,7 @@ def selftest() -> int:
 
 
 def main() -> int:
+    banner("iverilog", "vvp")   # ruling V2: the log names the binary that ran
     rc = 0
     print()
     print("=" * 78)

@@ -27,6 +27,7 @@ import os
 import re
 import subprocess
 import sys
+from toolchain import banner, tool          # noqa: E402  ruling V
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")
@@ -70,7 +71,7 @@ def run(cmd, cwd=ROOT):
 def build():
     os.makedirs(SCRATCH, exist_ok=True)
     out = os.path.join(SCRATCH, "csat.vvp")
-    r = run(["iverilog", "-g2012", "-o", out, "-s", "tb_csat",
+    r = run([tool("iverilog"), "-g2012", "-o", out, "-s", "tb_csat",
              "-Ptb_csat.SPL_CFG=2", "test/tb_csat.v"] + SRCS)
     if r.returncode != 0:
         print("*** build failed")
@@ -84,7 +85,7 @@ KEYS = ("btbmin", "dmin", "dmax", "btb", "nsp", "ndisp", "ntrans", "win",
 
 
 def one(vvp, img, nbytes):
-    r = run(["vvp", vvp, "+IMG=%s" % img, "+NBYTES=%d" % nbytes,
+    r = run([tool("vvp"), vvp, "+IMG=%s" % img, "+NBYTES=%d" % nbytes,
              "+NCYC=%d" % NCYC, "+WARMUP=%d" % WARMUP])
     txt = r.stdout + r.stderr
     m = re.search(r"CSAT img=\S+ " + " ".join(
@@ -141,6 +142,7 @@ def validate(d, bad, primary):
 
 
 def main() -> int:
+    banner("iverilog", "vvp")   # ruling V2: the log names the binary that ran
     rc = 0
     print()
     print("=" * 78)

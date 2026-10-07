@@ -29,13 +29,13 @@ cd "$ROOT" || exit 1
 OUT="${1:-$ROOT/probe_store}"
 PY="${PE_PYTHON:-python}"
 command -v "$PY" >/dev/null 2>&1 || PY=python3
-VL="${PE_VERILATOR:-verilator}"
+. "$ROOT/ci/tools.sh"     # ruling V: $VL from PE_VERILATOR, made absolute
 command -v "$VL" >/dev/null 2>&1 || { echo "  *** no verilator at $VL"; exit 1; }
 
 echo "=============================================================================="
 echo "  RULING M3 -- NO LANE FETCHES PAST ITS PROGRAM (sentinel = store filler)"
 echo "=============================================================================="
-echo "  verilator : $VL  $("$VL" --version 2>&1 | head -1)"
+tool_banner verilator
 echo
 
 rm -rf "$OUT"; mkdir -p "$OUT"

@@ -1708,3 +1708,121 @@ toolchain writes. A host-written partial image is refused by M5 in silicon.
 What remains is a host that writes a *full* store containing a malformed
 program, which the chip runs and the escaping lane parks on the filler without
 telling anyone.
+
+---
+
+## 22. V, MU, CJ — what runs is named, what is killed is re-killed, what is superseded says so
+
+### M7 and the silicon-fix ledger
+
+`HOST_INTERFACE.md` now says the full-store rule binds the **first** load after
+`rst_n`. After that, partial reloads run, because every byte is still defined.
+The handoff gained a "silicon fixes" ledger; its first entry is the power-up run
+(PROG low at reset release, engine running the power-up store), closed by M5's
+`store_full` gate.
+
+### V — one resolver per language, and every log names the binary
+
+* `ci/tools.sh` (shell, sourced, pipe-free) and `test/toolchain.py tool()` /
+  `banner()` (Python). Each reads `PE_VERILATOR` / `PE_IVERILOG` / `PE_VVP` /
+  `PE_YOSYS` first, then PATH, and returns an absolute path. `vvp` defaults to
+  the iverilog install's sibling.
+* **Converted:** 13 Python files (30 argv sites, plus 2 private resolvers) and
+  13 shell scripts. 14 Python entry points and every resolver-using script print
+  `tool <name>: <path>  <version>`.
+* **`model/gate_tool_pinning.py` (CI):** refuses a bare tool in command
+  position, a Python argv headed by a bare tool name, a `which("<tool>")`, a
+  private `${PE_X:-<tool>}` or `environ.get("PE_X", "<tool>")`, a script that
+  runs a resolved tool without a banner, and a resolved run without sourcing
+  the resolver. **Must-fire:** `verilator_trace.sh` as it stood at `f8f952c`
+  (committed as a fixture, because CI checks out at depth 1, and compared
+  byte-for-byte with `git show` where history exists), plus one synthetic case
+  per rule.
+* **The witness must show 5.053, enforced:** `gate_corpus_trace` parses every
+  Verilator-side run's `tool verilator` banner and reds unless it is the pin
+  (`toolchain.pinned_ok`, token equality). `gate_coverage.PINNED_TOOL` now
+  reads `toolchain.PINNED_VERILATOR`, so the pin is stated once.
+
+⛔ **Three more instances of the defect V names, found answering it:**
+
+| where | what it ran |
+| --- | --- |
+| `test/artefacts.sha256` header (`toolchain` probe) | a bare WSL `verilator` = **apt 5.032**, which built nothing; now the pinned path, header reads 5.053 |
+| `gate_corpus_trace` on this machine (`wsl.exe -- bash verilator_trace.sh`) | the WSL side resolved its own PATH; now `env PE_VERILATOR=<pin>` in the fixed argv |
+| `gate_one_encoder` → `param_dump.sh` via WSL | same; same fix |
+
+### MU — every mutant killed by a killer that runs, or declared
+
+**What answering it measured:**
+
+* `test/run_mutants.py` (12 kills, ~10 s) was run by **nothing**: not CI, not
+  `run_a2`.
+* Six clocked mutants (`M_CK_NEVER_RETIRE`, `M_CK_NO_ALTERNATE`,
+  `M_CK_NO_PARK`, `M_CK_HOLD_RETIRES`, `M_CK_REBASE_2D`, plus the R/R4 pair
+  under iverilog) were named by **no script**; each was killed once by a
+  hand-run probe and recorded here. The same was true of `M_ACK_DRIVES_SDA`,
+  `M_BUS_NO_PULLDOWN` and `M_PFETCH_NOWAIT`. `M_COMB_OUT` was priced only by
+  hand, and `M_IGNORE_ORDER`'s killer (`run_i2c.py`) was run by nothing.
+* ⛔ **Layer R failed the CLEAN design under iverilog**: 13 of 64 clocked
+  actions "over the bound", worst 9. It closed its window by reading Layer B's
+  `cb_*` variables, which another `always @(posedge)` block writes with blocking
+  assignments. Verilator happened to run R first; iverilog ran B first, so R
+  never saw the PC change. The verdict was a property of block ordering. **R now
+  keeps its own window state** (`cr_pc`, `cr_ck`, `cr_op`, `cr_cnt`, `cr_n`).
+  Clean is 0 failures on both simulators, and the R/R4 mutants still die. The
+  only other cross-block read (R5's `cb_ck`/`cb_n`) is of a value written at
+  least one edge earlier and is safe.
+
+**Wired:**
+
+| killer | runs in | kills |
+| --- | --- | --- |
+| `test/run_mutants.py` (new clocked family on `tb_trace`, baseline 0 FAIL / 0 hard-1 required) | **CI** | 22 |
+| `model/gate_f2_local.py`: F2 face 3 on the real yosys graph, clean must pass, `-D M_COMB_OUT` must fail (both netlists ~5 s, built in the netlist step) | **CI** | `M_COMB_OUT` |
+| `gate_store_full`, `gate_corpus_trace` | CI | `M_NO_STORE_FULL`, `M_CK_OD_CLK_DRIVE` |
+| `test/run_i2c.py` (sigrok, local only) | **run_a2** | `M_IGNORE_ORDER` |
+| declared survivors | — | `M_NOOP_DRIVES`, `M_CK_NO_PHASE_RESET`, `M_OD_CLK_PUSHPULL` |
+
+Clocked kills, each of its named layer: progress[A] (`NEVER_RETIRE`,
+`NO_ALTERNATE`), G1 (`NO_PARK`), A1 (`HOLD_RETIRES`), A2 with the image's own
+budget (`REBASE_2D`), R (`HOLD_INVAL`), R4a (`PFETCH_BOTH_INVAL`), Layer M
+(`PFETCH_NOWAIT`: the capture files the previous read's word, which on a
+full-store image is a filler fetch), an open-drain **hard-1** in the trace
+(`ACK_DRIVES_SDA`, 6,818 cycles against 0 clean), "no action retired"
+(`BUS_NO_PULLDOWN`).
+
+**`model/gate_mutant_kills.py` (CI):** 29 defines across `src/` and the bench
+includes. Each is killed by a file that is in CI's or `run_a2`'s list and names
+it (for `run_mutants.py`, in a RUN list, not prose), or is a declared survivor.
+**Must-fires:** an unregistered dummy, a mutant named only in prose, a killer
+nothing runs, a stale entry, and a mutant whose arms are identical to clean
+(empty preprocessed diff) are all red.
+
+### CJ — `gate_cj_bounds` retired, with a pointer per claim
+
+| its claim | now |
+| --- | --- |
+| C_max = 2, every opcode | occupancy; RTA charges spacing C = 3 → `gate_c3_requote` + `run_csat` (`65bc3c8114e5`) |
+| J_max = 8, universal | **withdrawn** → `d_min ≥ D* = 20 → J = 1`, `gate_j_program` / `gate_dmin_clocked` (`b4e51034e283`) |
+| opcode coverage 8/8 | its census input was written by `five_image` → the coverage sweep, `gate_coverage` |
+| double buffer: 2 pre-registered, 7 measured | `bursty.DOUBLE_BUFFER_PREREG` (a LEDGER site) |
+| J = 0..10 margin table | pre-C = 3 → `gate_c3_requote` |
+
+The file stays, for its history. Its header carries `RETIRED (ruling CJ)`; run
+plainly it prints the pointers and exits 0, and `--legacy` runs the old checks.
+`gate_gates_complete` has a `RETIRED` class: banner required, not in any run
+list, every successor run. Its three new must-fires fire.
+
+⚠ **Found following the pointer:** `gate_c3_requote` face (c) still called
+J = 8 "the derived worst-case J … nothing admitted can reach". That is the
+withdrawn claim, in a live `run_a2` gate. **Relabelled only**, as the J = 8
+*stress point* (the retracted universal figure). Every number and check is
+unchanged.
+
+### Found on the way: the artefact manifest was stale since `9ebcaeb`
+
+All five `corpus_*.hex` hashes in `test/artefacts.sha256` were the
+pre-final-filler bytes. In M, `make_smoke_image.py --all` (which writes the
+manifest) ran before `corpus.py` rewrote the corpus, and nothing in CI compares
+the manifest. Fixed in place; and `--all` now runs `corpus.py` itself before
+hashing, so one command writes every artefact it pins.

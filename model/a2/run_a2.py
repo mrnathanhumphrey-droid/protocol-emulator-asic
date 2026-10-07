@@ -120,6 +120,13 @@ GATES = [
      "AF   UART jitter tolerance against sigrok's foreign decode", False),
     ("gate_reactive_2mhz.py",
      "R2M  the 2 MHz reactive budget and its must-fire", False),
+    # ⛔ RULING MU: `M_IGNORE_ORDER`'s ONLY killer -- no bench of ours can tell
+    # a correctly ordered I2C byte from a reversed one, so sigrok's decoder is
+    # the judge, and sigrok is local (like gate_jitter_sigrok above). It was
+    # run by nothing, so the bit-order kill was as old as the day it was typed.
+    ("../../test/run_i2c.py",
+     "I2CF sigrok certifies the I2C frame; M_IGNORE_ORDER must break it",
+     False),
     ("../ta02/run_ta02.py",
      "TA02 the TA-02 harness (gate_fields, gate_pwm, gate_uart_identity)",
      False),

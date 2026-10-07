@@ -43,6 +43,7 @@ ROOT = os.path.dirname(HERE)
 sys.path.insert(0, os.path.join(ROOT, "test"))
 
 import pe_isa  # noqa: E402
+from toolchain import banner, tool, PINNED_WSL_VERILATOR   # noqa: E402  V
 
 OWNER = "test/pe_isa.py"
 SCAN_DIRS = ("test", "model", os.path.join("model", "a2"))
@@ -105,12 +106,12 @@ def dump_iverilog(src_root=None):
     files = [os.path.join(root, f) for f in PARAM_DUMP]
     if src_root:            # a mutated copy supplies only src/
         files[0] = os.path.join(ROOT, PARAM_DUMP[0])
-    r = subprocess.run(["iverilog", "-g2012", "-o", out, "-s", "param_dump"]
+    r = subprocess.run([tool("iverilog"), "-g2012", "-o", out, "-s", "param_dump"]
                        + files, capture_output=True, text=True,
                        encoding="utf-8", errors="replace")
     if r.returncode != 0:
         return None, (r.stdout + r.stderr)[-400:]
-    r2 = subprocess.run(["vvp", out], capture_output=True, text=True,
+    r2 = subprocess.run([tool("vvp"), out], capture_output=True, text=True,
                         encoding="utf-8", errors="replace")
     vals = {}
     for m in re.finditer(r"PARAM (\w+)=(-?\d+)", r2.stdout):
@@ -132,7 +133,10 @@ def dump_verilator():
     import shutil
     import subprocess
     if shutil.which("wsl.exe"):
-        cmd = ["wsl.exe", "-d", "Ubuntu", "--", "bash",
+        # ⛔ RULING V: the pinned Verilator travels with the call (a fixed
+        # argv, no shell); without it WSL resolved its own PATH's Verilator.
+        cmd = ["wsl.exe", "-d", "Ubuntu", "--", "env",
+               "PE_VERILATOR=%s" % PINNED_WSL_VERILATOR, "bash",
                "/mnt/d/ProtocolEmulator/test/param_dump.sh"]
     else:
         cmd = ["bash", os.path.join(ROOT, "test", "param_dump.sh"), ROOT]
@@ -216,6 +220,7 @@ def rtl_params(path):
 
 
 def main() -> int:
+    banner("iverilog", "vvp")   # ruling V2: the log names the binary that ran
     rc = 0
     print()
     print("=" * 78)

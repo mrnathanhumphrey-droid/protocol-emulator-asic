@@ -47,6 +47,7 @@ sys.path.insert(0, HERE)
 # literals below were the program lengths (87, 54); loading only those left the
 # rest of the store unwritten -- the defect M closes.
 from pe_isa import STORE_BYTES                                    # noqa: E402
+from toolchain import banner, tool          # noqa: E402  ruling V
 SCRATCH = os.environ.get("PE_SCRATCH",
                          os.path.join(os.environ.get("TEMP", "/tmp"), "pe_pp"))
 
@@ -223,6 +224,7 @@ def selftest() -> int:
 
 
 def main() -> int:
+    banner("iverilog", "vvp")   # ruling V2: the log names the binary that ran
     rc = 0
     if "--selftest" in sys.argv:
         return selftest()
@@ -292,12 +294,12 @@ def main() -> int:
         cells = {}
         for spl in POINTS["SPL"]:
             vvp = os.path.join(SCRATCH, "%s_spl%d.vvp" % (top, spl))
-            b = run(["iverilog", "-g2012", "-o", vvp, "-s", top,
+            b = run([tool("iverilog"), "-g2012", "-o", vvp, "-s", top,
                      "-P%s.SPL_CFG=%d" % (top, spl), src] + SRCS)
             if b.returncode != 0:
                 passed, note = False, "BUILD FAILED"
             else:
-                r = run(["vvp", vvp] + args)
+                r = run([tool("vvp"), vvp] + args)
                 txt = r.stdout + r.stderr
                 # ⛔ A FAILURE LINE COUNTS EVEN IF THE PASS LINE IS PRESENT:
                 # some benches print both when one arm of several fails.

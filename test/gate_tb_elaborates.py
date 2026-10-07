@@ -45,6 +45,8 @@ import shutil
 import subprocess
 import sys
 
+from toolchain import banner, tool_or_none   # ruling V
+
 try:
     sys.stdout.reconfigure(encoding="utf-8")
 except Exception:
@@ -56,7 +58,8 @@ MAKEFILE = os.path.join(HERE, "Makefile")
 
 
 def iverilog():
-    return os.environ.get("PE_IVERILOG") or shutil.which("iverilog")
+    # ruling V: the one resolver (PE_IVERILOG, then PATH), not a private copy
+    return tool_or_none("iverilog")
 
 
 def include_flags():
@@ -109,6 +112,7 @@ def preprocess(iv, flags, sources, label):
 
 
 def main():
+    banner("iverilog")   # ruling V2: the log names the binary that ran
     print()
     print("=" * 78)
     print("TB ELABORATION -- `tb.v` preprocesses as the cocotb Makefile does")

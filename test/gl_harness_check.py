@@ -34,6 +34,7 @@ import os
 import re
 import subprocess
 import sys
+from toolchain import banner, tool          # noqa: E402  ruling V
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")
@@ -86,7 +87,7 @@ def check_elaborates() -> int:
     with open(stub, "w", encoding="ascii", newline="\n") as fh:
         fh.write(STUB)
     out = os.path.join(SCRATCH, "gl_tb.vvp")
-    r = run(["iverilog", "-g2012", "-DGL_TEST", "-o", out, "-s", "tb",
+    r = run([tool("iverilog"), "-g2012", "-DGL_TEST", "-o", out, "-s", "tb",
              "-I", "test", "test/tb.v", stub])
     txt = (r.stdout or "") + (r.stderr or "")
     if r.returncode != 0:
@@ -108,7 +109,7 @@ def check_elaborates() -> int:
     srcs = ["src/pe_engine.v", "src/pe_store.v", "src/project.v"]
     for extra, label in (([], "default"), (["-Ptb.SPL_CFG=1"], "SPL=1")):
         o2 = os.path.join(SCRATCH, "rtl_tb.vvp")
-        r2 = run(["iverilog", "-g2012"] + extra +
+        r2 = run([tool("iverilog"), "-g2012"] + extra +
                  ["-o", o2, "-s", "tb", "-I", "test", "test/tb.v"] + srcs)
         ok = r2.returncode == 0
         print("    RTL %-8s %s" % (label, "ok" if ok else "*** FAILED"))
@@ -208,7 +209,7 @@ def selftest() -> int:
                  "    .uio_out(uio_out), .uio_oe(uio_oe),\n"
                  "    .ena(ena), .clk(clk), .rst_n(rst_n));\n"
                  "endmodule\n`default_nettype wire\n")
-    r = run(["iverilog", "-g2012", "-DGL_TEST", "-o",
+    r = run([tool("iverilog"), "-g2012", "-DGL_TEST", "-o",
              os.path.join(SCRATCH, "bad.vvp"), "-s", "tb", bad_tb, stub])
     fires = r.returncode != 0 and "SPL" in (r.stdout + r.stderr)
     print("    %-52s %s" % ("an unguarded parameter override is rejected",
@@ -244,6 +245,7 @@ def selftest() -> int:
 
 
 def main() -> int:
+    banner("iverilog")   # ruling V2: the log names the binary that ran
     rc = 0
     print()
     print("=" * 78)

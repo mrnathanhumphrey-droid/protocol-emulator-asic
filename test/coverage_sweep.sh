@@ -71,7 +71,7 @@ rm -f "$OUT/merged.dat" "$OUT/merged.info" coverage.dat
 # ⚠ The version is PRINTED below and travels with the measurement, because the
 # toggle ceilings are exact point counts and a release can emit a different
 # number of them.
-VL="${PE_VERILATOR:-verilator}"
+. "$ROOT/ci/tools.sh"     # ruling V: $VL from PE_VERILATOR, made absolute
 VLCOV="${PE_VERILATOR_COVERAGE:-verilator_coverage}"
 if [ "$VL" != "verilator" ] && [ ! -x "$VL" ]; then
   echo "*** PE_VERILATOR=$VL is not executable"; exit 2
@@ -87,6 +87,7 @@ done
 echo "=============================================================================="
 echo "  COVERAGE SWEEP -- Verilator $("$VL" --version 2>&1 | awk '{print $2}')  rand-reset=+{$RMODES}"
 echo "  binary : $VL"
+tool_banner verilator
 echo "=============================================================================="
 
 PLAN="$OUT/plan.json"

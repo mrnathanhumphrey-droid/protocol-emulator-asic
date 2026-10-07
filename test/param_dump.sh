@@ -8,7 +8,9 @@ rm -rf /tmp/pdobj
 # ⛔ THE PINNED VERILATOR via PE_VERILATOR, never a bare `verilator` from PATH:
 # CI keeps the pin off PATH and apt's 5.020 on it. `verilator_trace.sh` made
 # that mistake and its witness ran against the wrong Verilator in CI.
-"${PE_VERILATOR:-verilator}" --binary --timing -Wno-fatal --top-module param_dump -o pd \
+. ci/tools.sh              # ruling V: the one resolver
+tool_banner verilator
+"$VL" --binary --timing -Wno-fatal --top-module param_dump -o pd \
     --Mdir /tmp/pdobj +incdir+test \
     test/param_dump.v src/pe_engine.v src/pe_store.v src/project.v \
     > /tmp/pd_build.log 2>&1

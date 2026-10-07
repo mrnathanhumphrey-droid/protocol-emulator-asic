@@ -36,7 +36,9 @@ synth -top tt_um_protocol_emulator -flatten
 tee -o /tmp/pe_stat.txt stat
 YS
 
-yosys -s /tmp/pe_check.ys > /tmp/pe_full.log 2>&1
+. "$ROOT/ci/tools.sh"     # ruling V: $YS from PE_YOSYS, made absolute
+tool_banner yosys
+"$YS" -s /tmp/pe_check.ys > /tmp/pe_full.log 2>&1
 RC=$?
 
 echo "=============================================================="
@@ -74,7 +76,7 @@ read_verilog src/pe_engine.v
 chparam -set AW 4 pe_engine
 hierarchy -top pe_engine -check
 YS
-yosys -s /tmp/pe_assert_bad.ys > /tmp/pe_assert_bad.log 2>&1
+"$YS" -s /tmp/pe_assert_bad.ys > /tmp/pe_assert_bad.log 2>&1
 AB=$?
 if [ "$AB" -ne 0 ] && grep -qi 'HEADER_REGION_DOES_NOT_FIT' /tmp/pe_assert_bad.log; then
     echo "  AW=4 fails elaboration with the diagnostic: PASS"

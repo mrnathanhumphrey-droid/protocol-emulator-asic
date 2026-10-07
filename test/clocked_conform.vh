@@ -168,10 +168,29 @@ end
 integer cr_ref  [0:7];     // refills seen inside the current action's window
 integer cr_max  [0:7];     // the worst window this lane has shown
 integer cr_checks, cr_fails, cr_worst, cr_bound, cr_k;
+// ⛔⛔ LAYER R's OWN WINDOW STATE, NOT LAYER B's (found answering ruling MU).
+// This layer used to close its window by reading `cb_pc`/`cb_ck`/`cb_op`/
+// `cb_cnt`/`cb_n` -- written with BLOCKING assignments in Layer B's separate
+// `always @(posedge dut.clk)`. Which block runs first in a timestep is the
+// simulator's choice: Verilator ran this one first and saw the PC change;
+// iverilog ran Layer B first, so this layer saw `cb_pc == l_pc`, never closed
+// a window, and accumulated refills across several actions. MEASURED on the
+// CLEAN design under iverilog: 13 of 64 clocked actions "over the bound",
+// worst 9 -- a verdict that was a property of block ordering, not of the
+// design. ⇒ The same five quantities are tracked HERE, in this block, by the
+// same rule Layer B uses, so nothing this layer decides depends on another
+// block having run.
+integer cr_pc   [0:7];
+integer cr_ck   [0:7];
+integer cr_op   [0:7];
+integer cr_cnt  [0:7];
+integer cr_n    [0:7];
 
 initial begin
   for (cr_k = 0; cr_k < 8; cr_k = cr_k + 1) begin
     cr_ref[cr_k] = 0;  cr_max[cr_k] = -1;
+    cr_pc[cr_k] = -1;  cr_ck[cr_k] = 0;  cr_op[cr_k] = -1;
+    cr_cnt[cr_k] = 0;  cr_n[cr_k] = 0;
   end
   cr_checks = 0;  cr_fails = 0;  cr_worst = -1;
   // ⛔⛔ THE DEFAULT IS **ENFORCED**, not off, and that is the whole point of
@@ -189,7 +208,9 @@ end
 
 always @(posedge dut.clk) begin
   if (dut.rst_n !== 1'b1) begin
-    for (cr_k = 0; cr_k < 8; cr_k = cr_k + 1) cr_ref[cr_k] = 0;
+    for (cr_k = 0; cr_k < 8; cr_k = cr_k + 1) begin
+      cr_ref[cr_k] = 0;  cr_pc[cr_k] = -1;  cr_n[cr_k] = 0;
+    end
   end else begin
     // ---- count a refill against the lane it is for ----------------------
     if (dut.u_eng.pst === 3'd3 && dut.u_eng.pl < 8)
@@ -198,12 +219,14 @@ always @(posedge dut.clk) begin
     if (dut.u_eng.st === 2'd2 && dut.u_eng.cur < 8) begin
       if (dut.u_eng.a_op === 3'd7 && dut.u_eng.a_lvl === 1'b0) begin
         cr_ref[dut.u_eng.cur] = 0;                  // the chaining re-arm
-      end else if (cb_pc[dut.u_eng.cur] !== dut.u_eng.l_pc[dut.u_eng.cur]) begin
-        // ⭐ `cb_ck` IS THE CLOSING action's class, set when its window opened,
+        cr_n[dut.u_eng.cur]   = 0;
+        cr_pc[dut.u_eng.cur]  = dut.u_eng.l_pc[dut.u_eng.cur];
+      end else if (cr_pc[dut.u_eng.cur] !== dut.u_eng.l_pc[dut.u_eng.cur]) begin
+        // ⭐ `cr_ck` IS THE CLOSING action's class, set when its window opened,
         // so this counts the action that just ENDED rather than the one
         // starting -- the off-by-one that would have attributed a clocked
         // action's refills to its unclocked successor.
-        if (cb_pc[dut.u_eng.cur] !== -1 && cb_ck[dut.u_eng.cur]) begin
+        if (cr_pc[dut.u_eng.cur] !== -1 && cr_ck[dut.u_eng.cur]) begin
           cr_checks = cr_checks + 1;
           if (cr_checks == 1)
             $display("  clocked_conform[R]: live -- counting refills per retired clocked action");
@@ -212,11 +235,22 @@ always @(posedge dut.clk) begin
           if (cr_ref[dut.u_eng.cur] > cr_worst)
             cr_worst = cr_ref[dut.u_eng.cur];
           if (cr_bound >= 0 && cr_ref[dut.u_eng.cur] > cr_bound) begin
-            $display("*** FAIL clocked_conform[R]: lane %0d retired a clocked op=%0d cnt=%0d after %0d dispatch(es) having taken %0d PREFETCH REFILL(S), over the bound of %0d -- a held clocked dispatch owes no refill, and Amendment A1's port premise (and D*) assume it does not", dut.u_eng.cur, cb_op[dut.u_eng.cur], cb_cnt[dut.u_eng.cur], cb_n[dut.u_eng.cur], cr_ref[dut.u_eng.cur], cr_bound);
+            $display("*** FAIL clocked_conform[R]: lane %0d retired a clocked op=%0d cnt=%0d after %0d dispatch(es) having taken %0d PREFETCH REFILL(S), over the bound of %0d -- a held clocked dispatch owes no refill, and Amendment A1's port premise (and D*) assume it does not", dut.u_eng.cur, cr_op[dut.u_eng.cur], cr_cnt[dut.u_eng.cur], cr_n[dut.u_eng.cur], cr_ref[dut.u_eng.cur], cr_bound);
             cr_fails = cr_fails + 1;
           end
         end
         cr_ref[dut.u_eng.cur] = 0;
+        // open the next window -- the same rule Layer B uses, held here
+        cr_pc[dut.u_eng.cur]  = dut.u_eng.l_pc[dut.u_eng.cur];
+        cr_n[dut.u_eng.cur]   = 1;
+        cr_op[dut.u_eng.cur]  = dut.u_eng.a_op;
+        cr_cnt[dut.u_eng.cur] = dut.u_eng.a_cnt;
+        cr_ck[dut.u_eng.cur]  = (dut.u_eng.clk_real === 1'b1 &&
+                                 dut.u_eng.a_lvl === 1'b1 &&
+                                 (dut.u_eng.a_op === 3'd1 ||
+                                  dut.u_eng.a_op === 3'd2)) ? 1 : 0;
+      end else begin
+        cr_n[dut.u_eng.cur] = cr_n[dut.u_eng.cur] + 1;
       end
     end
   end

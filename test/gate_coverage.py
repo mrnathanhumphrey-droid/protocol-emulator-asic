@@ -590,7 +590,10 @@ TOOL_LABEL = "Verilator (unrecorded)"
 #: ⚠ The check is on the MAJOR.MINOR prefix, because the pinned build is a
 #: devel revision ("5.053 devel rev v5.052-258-ga419e9157 (mod)") whose full
 #: string carries a git hash that moves without the point counts moving.
-PINNED_TOOL = "Verilator 5.053"
+#: ⛔ RULING V: STATED ONCE, in the resolver (`test/toolchain.py`), and read
+#: here -- the pin and the check that enforces it can no longer disagree.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from toolchain import PINNED_VERILATOR as PINNED_TOOL            # noqa: E402
 
 _LINE = re.compile(r"^C '(.*)' (\d+)\s*$")
 

@@ -42,13 +42,21 @@ here** (ruling CI1). A local pass is reported as local.
 | `b97d5bd` | ✅ `37611788009` | ✅ `37611787822` | P6 + N1; 25 of 25 |
 | `29bd861` | ✅ `37619713604` | ✅ `37619713637` | E+ + Q3; 26 of 26 |
 | `9ebcaeb` | ✅ `37627116027` | ✅ `37627115865` | M + README (a) + RD1; 27 of 27 |
+| `231b37c` | ✅ `37636453349` | ✅ `37636453287` | M5 + M6; 27 of 27 |
+
+### Silicon fixes — RTL defects closed (ledger)
+
+| fix | defect, as silicon would show it | closed by | commit |
+| --- | --- | --- | --- |
+| **power-up run** | with PROG low at reset release, the engine **ran on the power-up contents of the unreset store**: a power-up glitch on real pins, before any host load. Never on the owed list; found as a side effect of M5's first cut. | `eng_run = run & store_full` (`project.v`): the engine runs only after 2^AW consecutive writes since `rst_n` | `231b37c` |
+| **partial load** | a host loading fewer than 256 bytes left the rest of the store at power-up contents, one missing REARM from running on pins | the same gate, plus a release-time CONFIG_ERR (`short_load`) | `231b37c` |
 
 ---
 
 ## OWED — Wilson's order
 
-`R` ✅ → **`S`** → `Q2 + CI3` → `K (+U)` → `E` → sigrok re-certification →
-FRAM write + random read.
+**`V + MU + CJ`** → `K (+U)` → **checkpoint harden** (Nathan's call) → `E` →
+sigrok re-certification → FRAM write + random read.
 
 | item | what | state |
 | --- | --- | --- |
@@ -67,12 +75,14 @@ FRAM write + random read.
 | **README (option a) + RD1** | ledger numbers only (lane table C 2→3, SPI-target D_tol 18→17, r row, margin 12→11), universal `J = 8` row + its sentence removed, scoped `d_min ≥ D* = 20 → J = 1` stated; `gate_stored_numbers` now audits the README | ✅ landed — SPEC §20; ⚠ framing/prose untouched, still Nathan's (F7b) |
 | **M5** | silicon refuses a partial load: consecutive-write counter, engine gated on `store_full`, release-time CONFIG_ERR; `M_NO_STORE_FULL` must-fire | ✅ landed — SPEC §21 |
 | **M6** | loud filler: no lane-independent dispatch refusal exists → `feffc0` kept, "escape parks silently" recorded | ✅ landed — SPEC §21 |
-| **V** | tool pinning enforced: lint on bare verilator/iverilog/yosys; every tool gate prints path + version | **NEXT** |
-| **MU** | mutant completeness: every `ifdef M_*` killed by a named gate or a declared survivor; equivalence goes red | owed |
-| **CJ** (`gate_cj_bounds`) | report its claim; retire with a pointer if superseded, else a declared producer + reserved artefact | owed |
+| **V** | one resolver per language (`ci/tools.sh`, `toolchain.tool()`), banners everywhere, `gate_tool_pinning` (must-fire: `verilator_trace.sh` @ `f8f952c`); witness REQUIRES the 5.053 banner; manifest + local WSL calls now carry the pin | ✅ landed — SPEC §22 |
+| **MU** | `gate_mutant_kills`: 29 defines, 25 killed in CI, 1 in run_a2, 3 declared survivors; `run_mutants` into CI with a clocked family; `gate_f2_local` (M_COMB_OUT on the real netlist); Layer R cross-block race fixed | ✅ landed — SPEC §22 |
+| **CJ** (`gate_cj_bounds`) | RETIRED with a per-claim pointer; `gate_gates_complete` RETIRED class; `gate_c3_requote` J = 8 relabelled as the retracted stress point | ✅ landed — SPEC §22 |
+| **K** | ACK hold: every driven SDA transition through `SDA_HOLD`, + a transition-class coverage table | **NEXT** |
 | (opt) | `ckdense` margin: a heavier feasible variant firing on several releases | non-blocking |
-| **K** | ACK hold: every driven SDA transition through `SDA_HOLD`, + a transition-class coverage table | owed |
 | **U** | widen the refusal to the unclocked open-drain data drive; retire the clamp | owed, with K |
+| **M7** | HOST_INTERFACE: the full-store rule binds the FIRST load after `rst_n`; partial reloads after it run | ✅ landed |
+| **CHECKPOINT** | after K: one full harden (gds + precheck) + `gl_test` on that dev SHA without merging; report flops / utilisation / slack vs `d2b7d34` (3127 flops, ~10%). ⚠ Scope is **17 `src/` commits since `d2b7d34`** (+1,162 / −55), not only F1/D1/SDA hold/M5: also clocked SHIFT/SHIFTIN, the stretch park + bus-fault bound, per-lane bit order, the out-of-range sample guard | Nathan's call — recommended |
 | **CI2** | retro: confirm the `tb_trace` path gate was the ONLY failure on `6abb6dd..e1fa642` | owed |
 | **E** | swallowed-exception audit, **+E+**: `set -o pipefail` in every `.sh` under `ci/` and `test/` with a lint gate (must-fire: a failing command piped into `tail`) | owed |
 

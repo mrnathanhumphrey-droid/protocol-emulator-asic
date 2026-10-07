@@ -4,7 +4,7 @@
 # the toolchain that built these hashes:
 # tool python = 3.12.10
 # tool iverilog = Icarus Verilog version 12.0 (devel) (s20150603-1539-g2693dd32b)
-# tool verilator = Verilator 5.032 2025-01-01 rev (Debian 5.032-1)
+# tool verilator = Verilator 5.053 devel rev v5.052-258-ga419e9157 (mod)
 # tool yosys = Yosys 0.52 (git sha1 fee39a3284c90249e1d9684cf6944ffbbcbb8f90)
 7b74914d0f1668540600b944241c15e67c5e03c528dc0ac31b03d81f44434047  smoke_image.hex  # make_smoke_image.py (default)
 3f12860e6e4a165d62bbe75f11e060a68400d240b125701174aa30fa8fbe90cc  census_image.hex  # make_smoke_image.py --census
@@ -34,8 +34,8 @@ bc20d0b7ba2333a5cc7ce443784102d9ced26595e98b3f4c9831fc25f16f5ef9  tx_badclk_imag
 eaacca1344b1ae95caad214a7d83c7fce7662462d90abe246ac859aa9afe1b7f  half_image.hex  # make_smoke_image.py --half 24
 e9b0c50b2ae88b16e3c8ba1426cb4f25f6556c932a16b5380e0905a0a2cb5150  rxfast_image.hex  # make_smoke_image.py --rxfast 24
 ee93b3cff3258044c65ff520b11639c5d3914212fb2c8cfcc2ef9b2a49b55193  i2cframe_image.hex  # make_smoke_image.py --i2cframe 62
-628a7c67ae420e17209f820d289a703b268f415396c28c90e20a76a2d2b955f1  corpus_all5.hex  # corpus.py
-6476e3881c165deb936d629a05cac1ad41f5861f4030a26994ffc6311ff0f490  corpus_i2c.hex  # corpus.py
-0325a9f66a0a5f7125541dccb800913f6718d3a4ccbfa72dd438950cb06e39ba  corpus_spim.hex  # corpus.py
-319bb81a6b94e734f9f0f8d8f5bbc365a955ae88893615e976c6dd828eeb33c3  corpus_sptgt.hex  # corpus.py
-a66474287709d5a5c17a29bf29e37a32a002a890cb763368c263ea11f4072229  corpus_uartrx.hex  # corpus.py
+0dd2ea911989617e50955a7be7f8330aa5b7325cbdb7a121414d67f341773573  corpus_all5.hex  # corpus.py
+a11f9070bc1727df282f3e374ddb723dc0436ca3594b456d84bcb1131bc45bb0  corpus_i2c.hex  # corpus.py
+1587a2f36949f773e4aa422a0370b5064ffac55cc9b8b23a79b05d348769e304  corpus_spim.hex  # corpus.py
+916eb7c41928d076787c60b5dde99e81073b6a39f9cd59ef4b11eadbf7ef2271  corpus_sptgt.hex  # corpus.py
+58ebcab7b6c65b8355bcbaae8dc914af535f639030f0a9169d16f32e6ce06f5a  corpus_uartrx.hex  # corpus.py

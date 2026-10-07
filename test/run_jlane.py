@@ -23,6 +23,7 @@ import os
 import re
 import subprocess
 import sys
+from toolchain import banner, tool          # noqa: E402  ruling V
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")
@@ -95,7 +96,7 @@ SPL = 1 if "--spl" in sys.argv and sys.argv[sys.argv.index("--spl") + 1] == "1" 
 def build():
     os.makedirs(SCRATCH, exist_ok=True)
     vvp = os.path.join(SCRATCH, "jlane_spl%d.vvp" % SPL)
-    r = run(["iverilog", "-g2012", "-o", vvp, "-s", "tb_jlane",
+    r = run([tool("iverilog"), "-g2012", "-o", vvp, "-s", "tb_jlane",
              "-Ptb_jlane.SPL_CFG=%d" % SPL]
             + [os.path.join(ROOT, s) for s in SRCS])
     if r.returncode != 0:
@@ -151,7 +152,7 @@ def cell(vvp, base, nbytes, lane, delays, arm, ncyc, warmup, tag=""):
     code as the first attempt -- a retry judged by looser rules would be a
     second standard wearing the first one's name.
     """
-    r = run(["vvp", vvp,
+    r = run([tool("vvp"), vvp,
              "+IMG=test/%s.hex" % base,
              "+NBYTES=%d" % nbytes,
              "+LANE=%d" % lane,
@@ -198,6 +199,7 @@ def cell(vvp, base, nbytes, lane, delays, arm, ncyc, warmup, tag=""):
 
 
 def main() -> int:
+    banner("iverilog", "vvp")   # ruling V2: the log names the binary that ran
     rc = 0
     print()
     print("=" * 78)

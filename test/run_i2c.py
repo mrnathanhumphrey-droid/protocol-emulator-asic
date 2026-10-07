@@ -30,6 +30,7 @@ import os
 import re
 import subprocess
 import sys
+from toolchain import banner, tool          # noqa: E402  ruling V
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")
@@ -141,6 +142,7 @@ def transactions(ev):
 
 
 def main() -> int:
+    banner("iverilog", "vvp")   # ruling V2: the log names the binary that ran
     rc = 0
     print()
     print("=" * 78)
@@ -183,12 +185,12 @@ def main() -> int:
         nb = len([w for w in fh.read().split() if w])
 
     vvp = os.path.join(SCRATCH, "i2c.vvp")
-    b = run(["iverilog", "-g2012", "-o", vvp, "-s", "tb_i2c"] + SRCS)
+    b = run([tool("iverilog"), "-g2012", "-o", vvp, "-s", "tb_i2c"] + SRCS)
     if b.returncode != 0:
         print("  *** build failed")
         print((b.stdout + b.stderr)[-700:])
         return 1
-    r = run(["vvp", vvp, "+IMG=test/i2cframe_image.hex", "+NBYTES=%d" % nb,
+    r = run([tool("vvp"), vvp, "+IMG=test/i2cframe_image.hex", "+NBYTES=%d" % nb,
              "+NCYC=%d" % NCYC, "+DUMP=%s" % DUMP])
     txt = r.stdout + r.stderr
     m = re.search(r"I2CDUMP file=(\S+) samples=(\d+) sda_edges=(\d+) "
@@ -300,14 +302,14 @@ def main() -> int:
     print()
     print("  --- PRICED: M_IGNORE_ORDER must break the certification ---")
     mv = os.path.join(SCRATCH, "i2c_mut.vvp")
-    bm = run(["iverilog", "-g2012", "-DM_IGNORE_ORDER", "-o", mv,
+    bm = run([tool("iverilog"), "-g2012", "-DM_IGNORE_ORDER", "-o", mv,
               "-s", "tb_i2c"] + SRCS)
     if bm.returncode != 0:
         print("    *** the mutant does not build, so it is not a kill")
         print("        %s" % ((bm.stdout + bm.stderr).strip()[:200]))
         rc = 1
     else:
-        rm = run(["vvp", mv, "+IMG=test/i2cframe_image.hex",
+        rm = run([tool("vvp"), mv, "+IMG=test/i2cframe_image.hex",
                   "+NBYTES=%d" % nb, "+NCYC=%d" % NCYC,
                   "+DUMP=probe_i2c_mut.bin"])
         dm = sigrok_i2c("probe_i2c_mut.bin")

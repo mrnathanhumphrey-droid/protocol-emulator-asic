@@ -30,6 +30,7 @@ import os
 import re
 import subprocess
 import sys
+from toolchain import banner, tool          # noqa: E402  ruling V
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")
@@ -92,7 +93,7 @@ def run(cmd, cwd=ROOT):
 def build():
     os.makedirs(SCRATCH, exist_ok=True)
     out = os.path.join(SCRATCH, "rxbw.vvp")
-    r = run(["iverilog", "-g2012", "-o", out, "-s", "tb_rxbw",
+    r = run([tool("iverilog"), "-g2012", "-o", out, "-s", "tb_rxbw",
              "test/tb_rxbw.v"] + SRCS)
     if r.returncode != 0:
         print("*** build failed")
@@ -102,7 +103,7 @@ def build():
 
 
 def one(vvp, img, nbytes):
-    r = run(["vvp", vvp, "+IMG=%s" % img, "+NBYTES=%d" % nbytes,
+    r = run([tool("vvp"), vvp, "+IMG=%s" % img, "+NBYTES=%d" % nbytes,
              "+NCYC=%d" % NCYC])
     txt = r.stdout + r.stderr
     m = re.search(r"RXBW " + " ".join(r"%s=(-?\d+)" % k for k in KEYS), txt)
@@ -114,6 +115,7 @@ def one(vvp, img, nbytes):
 
 
 def main() -> int:
+    banner("iverilog", "vvp")   # ruling V2: the log names the binary that ran
     rc = 0
     print()
     print("=" * 78)

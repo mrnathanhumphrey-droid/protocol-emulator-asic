@@ -1158,6 +1158,20 @@ def main() -> int:
             print("  %-46s %-44s %s"
                   % (" ".join(args) or "(default)", why,
                      "ok" if ok else "*** FAILED"))
+        # ⛔⛔ THE CORPUS IS REGENERATED HERE, BEFORE IT IS HASHED. The manifest
+        # pins `corpus_*.hex` too, but they come from `corpus.py`; run in the
+        # other order (this, then corpus.py) the manifest hashed the PREVIOUS
+        # corpus bytes. That is exactly what shipped in 9ebcaeb -- all five
+        # corpus hashes stale after the store filler changed -- and nothing in
+        # CI compares the manifest, so it read as pinned. One command now
+        # writes every artefact it pins.
+        r = subprocess.run([sys.executable, os.path.join(here, "corpus.py")],
+                           capture_output=True, text=True,
+                           encoding="utf-8", errors="replace")
+        rc |= 0 if r.returncode == 0 else 1
+        print("  %-46s %-44s %s" % ("corpus.py", "the trace corpus (hashed "
+                                    "below)", "ok" if r.returncode == 0
+                                    else "*** FAILED"))
         # ⭐⭐ THE MANIFEST. Each reserved artefact is pinned by hash NEXT TO THE
         # RECIPE THAT MAKES IT, and the file is TRACKED -- so a recipe change
         # shows up as a diff in review, and an artefact that comes out

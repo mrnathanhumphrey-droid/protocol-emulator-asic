@@ -24,8 +24,9 @@ cd "$ROOT" || exit 1
 OUT="${1:-$ROOT/probe_a2}"
 PY="${PE_PYTHON:-python}"
 command -v "$PY" >/dev/null 2>&1 || PY=python3
-VL="${PE_VERILATOR:-verilator}"
+. "$ROOT/ci/tools.sh"     # ruling V: $VL from PE_VERILATOR, made absolute
 command -v "$VL" >/dev/null 2>&1 || { echo "  *** no verilator at $VL"; exit 1; }
+tool_banner verilator
 
 rm -rf "$OUT"; mkdir -p "$OUT"
 JSON="$OUT/a2.json"

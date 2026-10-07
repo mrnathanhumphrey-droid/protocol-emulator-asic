@@ -46,6 +46,9 @@ import re
 import subprocess
 import sys
 import tempfile
+sys.path.insert(0, os.path.join(os.path.dirname(
+    os.path.dirname(os.path.abspath(__file__))), "test"))
+from toolchain import banner, tool          # noqa: E402  ruling V
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")
@@ -325,7 +328,7 @@ def discover():
 
 def preprocess(fn, define=None):
     out = os.path.join(tempfile.gettempdir(), "pe_pp_%s.v" % (define or "off"))
-    cmd = ["iverilog", "-E", "-o", out]
+    cmd = [tool("iverilog"), "-E", "-o", out]
     if define:
         cmd.append("-D" + define)
     cmd.append(os.path.join(SRC, fn))
@@ -406,6 +409,7 @@ def audit(src_dir=None):
 
 
 def main() -> int:
+    banner("iverilog")   # ruling V2: the log names the binary that ran
     print()
     print("=" * 78)
     print("MUTANT ARM DRIFT GUARD -- the ifdef wraps the minimal delta")

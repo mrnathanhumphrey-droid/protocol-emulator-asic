@@ -73,6 +73,71 @@ SRC_HALF = ["test/tb_half.v", "src/pe_engine.v", "src/pe_store.v",
 ORDER_MUTANT = ("M_IGNORE_ORDER",
                 "tie l_order to 0: the per-lane bit order is ignored",
                 "judged by test/run_i2c.py (sigrok), not by a bench here")
+# ⛔⛔ RULING MU -- THE CLOCKED FAMILY, on tb_trace with the shared
+# `clocked_conform.vh` / `progress.vh` layers. Every one of these was killed
+# ONCE, by a hand-run probe, and recorded in a spec; no runner re-ran any of
+# them, so each "kill" was as old as the day it was last typed. Each entry
+# names the LAYER that must fire -- a mutant that dies of another assertion
+# has not been shown to be killed by the thing that claims it.
+# ⚠ `OD_HARD1` is not a message but a TRACE predicate: an open-drain pin
+# driven as a hard 1 (oe=1, out=1), read with `gate_corpus_trace.od_violations`
+# -- the per-net-type contention rule `fram_i2c.v` states, applied to the
+# resolved trace rather than restated here.
+SRC_TRACE = ["test/tb_trace.v", "test/fram_i2c.v", "test/fram_spi.v",
+             "src/pe_engine.v", "src/pe_store.v", "src/project.v"]
+CLOCKED_MUTANTS = [
+    ("M_CK_NEVER_RETIRE", "corpus_i2c", "i2c", "*** FAIL progress.vh[A]",
+     "a clocked action holds for ever; Layer A (coarse liveness) is the one "
+     "that must see a lane stop retiring."),
+    ("M_CK_NO_ALTERNATE", "corpus_i2c", "i2c", "*** FAIL progress.vh[A]",
+     "the clock phase never alternates, so the action never completes its "
+     "bits; Layer A sees the lane stop retiring."),
+    ("M_CK_NO_PARK", "corpus_i2c", "i2c", "*** FAIL clocked_conform[G1]",
+     "the post-HIGH park is removed, so a release can follow the rise sooner "
+     "than d; G1 (post-HIGH gap >= d) is the lower bound it breaks."),
+    ("M_CK_HOLD_RETIRES", "corpus_i2c", "i2c", "*** FAIL clocked_conform[A1]",
+     "a held clocked dispatch invalidates the slot AND advances the PC, so "
+     "the refill brings the next action's word; A1 (head-slot word stable "
+     "across a hold) is the one that must fire."),
+    ("M_CK_REBASE_2D", "corpus_i2c", "i2c", "*** FAIL clocked_conform[A2]",
+     "the release re-bases at rise + 2d -- too LATE; A2 (release within d + "
+     "the lane's own budget after the observed rise) is the upper bound."),
+    ("M_CK_HOLD_INVAL", "ckod_image", "none", "*** FAIL clocked_conform[R]",
+     "a held dispatch invalidates its slot: a refill per DISPATCH, not per "
+     "action -- Layer R's rate. (Also gate_port_demand, under Verilator.)"),
+    ("M_PFETCH_BOTH_INVAL", "ckod_image", "none",
+     "*** FAIL clocked_conform[R4a]",
+     "one dispatch frees BOTH slots; R4a is Theorem 3's P10 checked "
+     "verbatim. (Also gate_port_demand, under Verilator.)"),
+    ("M_PFETCH_NOWAIT", "corpus_i2c", "i2c", "*** FAIL clocked_conform[M]",
+     "P_CAP samples the store before the read is registered, so it files the "
+     "PREVIOUS read's word. On a full-store image that is visible as a "
+     "capture of the store filler -- Layer M, the sentinel. (Under Verilator "
+     "--x-initial unique the same defect shows as seeds disagreeing, which is "
+     "verilator_trace.sh's arm.)"),
+    ("M_ACK_DRIVES_SDA", "corpus_i2c", "i2c", "OD_HARD1",
+     "the clocked ACK drives SDA as a PUSH-PULL HIGH on an open-drain net "
+     "while the peer pulls low to acknowledge -- a SHORT. The trace shows "
+     "SDA with oe=1, out=1; the clean design shows none."),
+    ("M_BUS_NO_PULLDOWN", "ckod_image", "none",
+     "no action was observed to retire",
+     "the DUT's pull-down is dropped from the ONE bus model, so a released "
+     "open-drain clock never resolves as the engine expects and the clocked "
+     "lanes never retire; progress.vh reports it."),
+]
+CLOCKED_SURVIVORS = {
+    "M_CK_NO_PHASE_RESET": "CHARACTERISED SURVIVOR (pe_engine.v records why): "
+                           "every clocked action already leaves the phase at "
+                           "LOW and power-on resets it, so the reset is "
+                           "defensive (a lane halted mid-action) and no "
+                           "program the suite builds can see its removal.",
+    "M_OD_CLK_PUSHPULL": "EQUIVALENT in the clocked path: the self-clocked "
+                         "rework routes every open-drain clocked HIGH through "
+                         "the release arm, so the unclocked branch this "
+                         "mutates cannot express the defect. D2's live "
+                         "must-fire is M_CK_OD_CLK_DRIVE (gate_corpus_trace).",
+}
+
 HALF_IMG = "test/half_image.hex"
 HALF_MUTANTS = [
     ("M_SHARED_BITP",
@@ -233,6 +298,7 @@ DEFAULT_IMG = "test/smoke_image.hex"
 # one filename, which the clean-room check caught as the same file reproducing
 # with different content. The generator owns them.
 from make_smoke_image import FIVE_STRESS as STRESS_FIVE   # noqa: E402
+from toolchain import banner, tool          # noqa: E402  ruling V
 STRESS_IMG = "test/five_image.hex"
 
 # mode "assert": a named bench assertion must fire.
@@ -318,7 +384,9 @@ def build(defines, out, src=None):
     # survivor for a reason that was not the mutation.
     files = src if src is not None else SRC
     top = os.path.splitext(os.path.basename(files[0]))[0]
-    cmd = ["iverilog", "-g2012", "-o", out, "-s", top]
+    # `-I test -I .`: tb_trace and the shared layers include by repo path
+    cmd = [tool("iverilog"), "-g2012", "-I", "test", "-I", ".",
+           "-o", out, "-s", top]
     for d in defines:
         cmd += ["-D%s" % d]
     cmd += (src if src is not None else SRC)
@@ -334,7 +402,7 @@ def build(defines, out, src=None):
 
 
 def run(vvp, img=DEFAULT_IMG, extra=None):
-    cmd = ["vvp", vvp] + ([] if img is None else ["+IMG=%s" % img])         + (extra or [])
+    cmd = [tool("vvp"), vvp] + ([] if img is None else ["+IMG=%s" % img])         + (extra or [])
     # ⛔⛔ UTF-8, EXPLICITLY. `text=True` uses the locale codec, which on this
     # box is cp1252 -- and every bench prints ⭐/⛔, so the reader thread raised
     # UnicodeDecodeError, DIED, and left the captured output TRUNCATED. The
@@ -370,6 +438,7 @@ def verdict(out):
 
 
 def main() -> int:
+    banner("iverilog", "vvp")   # ruling V2: the log names the binary that ran
     print()
     print("=" * 78)
     print("MUTATION TESTING -- the double-buffered action fetch")
@@ -685,17 +754,82 @@ def main() -> int:
                         print("        *** died, but not of `%s` ***" % want)
                         wrong_reason.append((define, "wrong reason"))
 
+    # ---- RULING MU: the clocked family, on tb_trace --------------------
+    # ⛔ BASELINE FIRST, per image: the unmutated design must produce ZERO
+    # `*** FAIL` lines and ZERO open-drain hard-1 cycles, or no kill below is
+    # readable. (Layer R failed the CLEAN design under iverilog until its
+    # cross-block race was fixed -- found exactly here.)
+    print()
+    print("  --- clocked mutants (bench: tb_trace + clocked_conform/progress) ---")
+    import benchset
+    import gate_corpus_trace as gct
+
+    def trace_run(vvp, img, peer):
+        a2 = benchset.a2_slack_arg("test/%s.hex" % img)
+        tr = os.path.join(SCRATCH, "mut_ck_trace.txt")
+        o = run(vvp, img="test/%s.hex" % img,
+                extra=["+NBYTES=256", "+PEER=%s" % peer, "+NCYC=40000",
+                       "+OUT=%s" % tr, "+SEED=1", "+ASYNC=0", "+STAYLOAD=0",
+                       "+SCLHOLD=0"] + ([a2] if a2 else []))
+        _h, rows = gct.read_trace(tr)
+        hard = len(gct.od_violations(rows, (gct.corpus.P_SCL, gct.corpus.P_SDA)))
+        return o, hard
+
+    base_c = os.path.join(SCRATCH, "mut_ck_base.vvp")
+    rc, log = build([], base_c, src=SRC_TRACE)
+    ck_ok = rc == 0
+    if not ck_ok:
+        print("    *** tb_trace does not compile: %s" % log[:300])
+        survivors.append("tb_trace build")
+    else:
+        for img, peer in sorted({(e[1], e[2]) for e in CLOCKED_MUTANTS}):
+            o, hard = trace_run(base_c, img, peer)
+            nf = o.count("*** FAIL")
+            print("    baseline %-11s %d FAIL line(s), %d hard-1 cycle(s)   %s"
+                  % (img, nf, hard, "clean" if nf == 0 and hard == 0
+                     else "*** NOT CLEAN"))
+            if nf or hard:
+                survivors.append("tb_trace baseline %s" % img)
+                ck_ok = False
+    if ck_ok:
+        for define, img, peer, want, why in CLOCKED_MUTANTS:
+            v = os.path.join(SCRATCH, "mut_ck_%s.vvp" % define.lower())
+            rc, log = build([define], v, src=SRC_TRACE)
+            if rc != 0:
+                print("    %-19s BUILD FAIL -- not a kill" % define)
+                wrong_reason.append((define, "build"))
+                continue
+            o, hard = trace_run(v, img, peer)
+            killed = ("*** FAIL" in o) or hard > 0
+            right = (hard > 0) if want == "OD_HARD1" else (want in o)
+            RAN.append(define)
+            print("    %-19s %-11s %-34s %s"
+                  % (define, img, want[:34],
+                     "RED" if killed else "*** SURVIVED ***"))
+            print("        %s" % why)
+            if not killed:
+                survivors.append(define)
+            elif not right:
+                print("        *** died, but not of `%s` ***" % want)
+                wrong_reason.append((define, "wrong reason"))
+        for define, why in sorted(CLOCKED_SURVIVORS.items()):
+            print("    %-19s declared survivor -- %s" % (define, why[:90]))
+
     print()
     print("=" * 78)
     print("VERDICT")
     print("=" * 78)
     print("  mutants defined       : %d"
           % (len(MUTANTS) + len(TX_MUTANTS) + len(EDGE_MUTANTS)
-             + len(HALF_MUTANTS) + len(PINRANGE_MUTANTS)))
+             + len(HALF_MUTANTS) + len(PINRANGE_MUTANTS)
+             + len(CLOCKED_MUTANTS) + len(CLOCKED_SURVIVORS)))
     print("  mutants RUN           : %d   %s"
           % (len(RAN), " ".join(sorted(RAN))))
     if SKIPPED_STRUCTURAL:
-        print("  structural, not run   : %d   %s  (F2 proves these)"
+        # ⛔ NOT "F2 proves these": only M_COMB_OUT is F2's (gate_f2_local);
+        # M_NOOP_DRIVES is a characterised survivor (see its entry).
+        print("  structural, not run   : %d   %s  (M_COMB_OUT: gate_f2_local; "
+              "M_NOOP_DRIVES: characterised survivor)"
               % (len(SKIPPED_STRUCTURAL), " ".join(sorted(SKIPPED_STRUCTURAL))))
     print("  survived (bad)        : %d  %s" % (len(survivors), survivors or ""))
     print("  died of a WRONG reason: %d  %s" % (len(wrong_reason),

@@ -118,7 +118,13 @@ EXPECTED_C2_PYRTA = {
 EXPECTED_C3_PYRTA = {
     0: 12, 1: 11, 2: 10, 3: 9, 4: 8, 5: 7, 6: 6, 7: 5, 8: 4,
 }
-J_DERIVED = 8            # gate_cj_bounds' derived J_max total
+#: ⛔ THE RETRACTED UNIVERSAL FIGURE, kept as a STRESS POINT only. This was
+#: `gate_cj_bounds`' "derived J_max"; ledger b4e51034e283 WITHDREW universal
+#: J = 8 as unsound (ten admissible points measured above it -- the stall chain
+#: reaches k * L_REFILL = 20) and replaced it with d_min >= D* = 20 -> J = 1.
+#: The margins below are correct arithmetic AT J = 8; they bound nothing.
+#: (Relabelled under ruling CJ; the name is kept so EXPECTED_* stay keyed.)
+J_DERIVED = 8
 J_SHIPPED = 1            # the stated design point
 
 
@@ -288,7 +294,11 @@ def face_sweep(src) -> int:
 
 
 def face_derived_j(src) -> int:
-    """The derived J_max = 8 at C = 3: the slack goes to EXACTLY the bar.
+    """The J = 8 stress point at C = 3: the slack goes to EXACTLY the bar.
+
+    ⛔ RELABELLED (ruling CJ): this face used to call J = 8 "the derived
+    J_max". Ledger b4e51034e283 withdrew universal J = 8 as unsound; the
+    margins here are correct arithmetic at J = 8 and bound nothing.
 
     ⛔⛔ THIS FACE EXISTS BECAUSE ITS FIRST VERSION OVERSTATED ITS OWN RESULT.
     It was headed "now infeasible" and printed "margin -2, MISSES DEADLINES",
@@ -298,8 +308,8 @@ def face_derived_j(src) -> int:
     """
     rc = 0
     print()
-    print("  --- face (c): the DERIVED J_max = %d at C = %d ---"
-          % (J_DERIVED, C_SPACING))
+    print("  --- face (c): the J = %d STRESS POINT at C = %d (the retracted "
+          "universal figure, ledger b4e51034e283) ---" % (J_DERIVED, C_SPACING))
     ls = at_c(C_SPACING, J_DERIVED)
     o, p = dict(ours(ls)), dict(pyrta(src, ls))
     print("    %-20s %-8s %-8s %-8s %s"
@@ -335,21 +345,21 @@ def face_derived_j(src) -> int:
         print("    *** recorded %d, now %d -- RED, not re-recorded"
               % (EXPECTED_C3_PYRTA[J_DERIVED], worst))
         rc = 1
-    print("    ⇒ THE DERIVED WORST-CASE J STILL CLEARS THE BAR, at EXACTLY the")
+    print("    ⇒ AT THE J = 8 STRESS POINT the primary bound sits EXACTLY at the")
     print("      bar: %d against %d. Our cross-check reads %d, which is"
           % (EXPECTED_C3_PYRTA[J_DERIVED], MARGIN_BAR,
              EXPECTED_C3_OURS[J_DERIVED]))
     print("      negative -- so the two bounds disagree about whether this")
     print("      case survives, and the primary one says it does.")
-    print("    ⚠ WHAT THAT MEANS IN PRACTICE: the derived J = %d is a"
+    print("    ⚠ WHAT THAT MEANS IN PRACTICE: J = %d is NOT a worst case --"
           % J_DERIVED)
-    print("      worst case nothing admitted can reach, because the D* screen")
-    print("      refuses every program with d_min < D* and J = 1 is derived")
-    print("      above it. The row is a stress point, not a shipped")
+    print("      universal J = 8 was WITHDRAWN as unsound (ledger b4e51034e283;")
+    print("      the stall chain reaches 20). The claim is scoped instead:")
+    print("      d_min >= D* -> J = 1. The row is a stress point, not a shipped")
     print("      configuration. ⛔ But its slack is now ZERO above the bar on")
     print("      the primary bound and negative on the cross-check, so it")
-    print("      stops being a comfortable fallback: if the derived worst case")
-    print("      ever had to be charged, there would be nothing left over.")
+    print("      stops being a comfortable fallback: if this J ever had to be")
+    print("      charged, there would be nothing left over.")
     print("      ⭐ THAT MAKES THE D* SCREEN LOAD-BEARING FOR FEASIBILITY and")
     print("      not merely for the size of a bound -- which is a stronger")
     print("      reason to keep it than the one it was adopted for.")
@@ -573,10 +583,10 @@ def main() -> int:
     print("      It is a fact about the conservative bound, not about the")
     print("      analysis we quote. Recorded so the retraction is not needed")
     print("      twice.")
-    print("    * the derived J_max = %d keeps margin %d -- EXACTLY the bar --"
+    print("    * the J = %d stress point keeps margin %d -- EXACTLY the bar --"
           % (J_DERIVED, EXPECTED_C3_PYRTA[J_DERIVED]))
-    print("      on pyRTA, and goes negative on ours. Nothing admitted can")
-    print("      reach it (the D* screen), but it has no slack left over.")
+    print("      on pyRTA, and goes negative on ours. It is the RETRACTED")
+    print("      universal figure (ledger b4e51034e283), not a bound.")
     print("    ⛔ HOW IT SURVIVED SO LONG: the two readings AGREED. A")
     print("      structural derivation ('two states, so C = 2') and a")
     print("      simulation mean (2.00) confirmed each other, and both were")

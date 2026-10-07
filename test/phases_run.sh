@@ -18,7 +18,7 @@ cd "$ROOT" || exit 1
 OUT="${1:-$ROOT/probe_phases}"
 PY="${PE_PYTHON:-python}"
 command -v "$PY" >/dev/null 2>&1 || PY=python3
-VL="${PE_VERILATOR:-verilator}"
+. "$ROOT/ci/tools.sh"     # ruling V: $VL from PE_VERILATOR, made absolute
 command -v "$VL" >/dev/null 2>&1 || { echo "  *** no verilator at $VL"; exit 1; }
 
 rm -rf "$OUT"; mkdir -p "$OUT"
@@ -102,7 +102,7 @@ run_arm() {     # $1=armname $2=image $3=nbytes $4=ncyc $5=label $6=sclhold
 echo "=============================================================================="
 echo "  CLOCKED PHASE MEASUREMENT (F4)"
 echo "=============================================================================="
-echo "  verilator : $("$VL" --version 2>&1 | head -1)"
+tool_banner verilator
 echo "  image     : $IMG ($NB bytes)   control: $CTRL ($NC bytes)"
 echo
 

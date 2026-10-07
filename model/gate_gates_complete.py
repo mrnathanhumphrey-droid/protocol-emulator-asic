@@ -45,25 +45,43 @@ EXCLUDED = {
         "reads the HARDENING FLOW's post-synthesis netlist, which costs a "
         "~3.5-hour run, so it cannot be per-push or per-checkpoint; it runs "
         "after each harden (documented in ci/run_gates.sh's header).",
-    # ⛔⛔ RED, AND EXCLUDED ONLY SO THE LIST DESCRIBES THE TREE -- NOT BECAUSE
-    # IT IS FINE. Found by this gate's first run: no harness had invoked it
-    # since `cb7f376`. It FAILS today, for a reason it reports correctly: its
-    # census-coverage claim reads `test/cj_measured_alt.txt`, an UNTRACKED
-    # scratch file whatever ran last overwrote (it was last written by a
-    # `five_image` run), so its own provenance check refuses the claim. Its
-    # live content -- J as a derived function of the program -- is carried by
-    # `gate_j_program` and `gate_dmin_clocked`. OWED: either give its input a
-    # recipe and track it, or retire the gate. That is a decision, recorded.
-    "model/a2/gate_cj_bounds.py":
-        "RED -- owed. Reads UNTRACKED test/cj_measured_alt.txt (last written "
-        "by five_image), so its own provenance check refuses its census claim. "
-        "Unrun since cb7f376; live J content is in gate_j_program / "
-        "gate_dmin_clocked. Fix its input recipe or retire it.",
 }
+
+#: ⛔⛔ RULING CJ -- gate files RETIRED because every claim they made now lives
+#: in a gate that RUNS. Kept on disk for their history (nothing is deleted);
+#: each must carry a `RETIRED` banner in its header so nobody reads a stale
+#: verdict as live, must not be in a run list, and every successor named here
+#: must itself be run -- a pointer to a gate nothing runs is no pointer.
+#: file -> ([successor gate files], the per-claim pointer)
+RETIRED = {
+    "model/a2/gate_cj_bounds.py": (
+        ["model/a2/gate_c3_requote.py", "model/a2/gate_j_program.py",
+         "model/a2/gate_dmin_clocked.py", "test/gate_coverage.py"],
+        "C_max = 2 is OCCUPANCY; RTA charges the SPACING C = 3 -> "
+        "gate_c3_requote + run_csat (ledger 65bc3c8114e5). Universal J_max = 8 "
+        "is WITHDRAWN -> the scoped d_min >= D* = 20 -> J = 1 in "
+        "gate_j_program / gate_dmin_clocked (ledger b4e51034e283). Opcode "
+        "coverage 8/8 (its census input was written by five_image, so it was "
+        "red) -> the coverage sweep, gate_coverage. The double-buffer "
+        "pre-registration (2, measured 7) -> bursty.DOUBLE_BUFFER_PREREG, a "
+        "LEDGER site in gate_stored_numbers. Its J = 0..10 margin table is "
+        "pre-C = 3 -> gate_c3_requote."),
+}
+RETIRED_BANNER = "RETIRED (ruling CJ)"
 
 
 def _norm(p):
     return os.path.normpath(p).replace(os.sep, "/")
+
+
+def _head(rel, n=12):
+    """The first `n` lines of a file -- where a RETIRED banner must sit."""
+    try:
+        with io.open(os.path.join(ROOT, rel), encoding="utf-8",
+                     errors="replace") as fh:
+            return "".join(fh.readline() for _ in range(n))
+    except OSError:
+        return ""
 
 
 def ci_gates(text=None):
@@ -119,11 +137,28 @@ def gate_files(root=ROOT):
     return out
 
 
-def audit(files, ci, a2, excluded):
+def audit(files, ci, a2, excluded, retired=None, read=None):
     """(unlisted, stale) -- both must be empty."""
+    retired = RETIRED if retired is None else retired
     unlisted = sorted(f for f in files
-                      if f not in ci and f not in a2 and f not in excluded)
+                      if f not in ci and f not in a2 and f not in excluded
+                      and f not in retired)
     stale = []
+    for f, (succ, _why) in sorted(retired.items()):
+        if f not in files:
+            stale.append("%s is RETIRED but does not exist" % f)
+            continue
+        if f in ci or f in a2:
+            stale.append("%s is RETIRED and ALSO run -- a retired verdict is "
+                         "not evidence" % f)
+        head = (read or _head)(f)
+        if RETIRED_BANNER not in head:
+            stale.append("%s is RETIRED but its header lacks %r -- a reader "
+                         "would take its verdict as live" % (f, RETIRED_BANNER))
+        for s in succ:
+            if s not in ci and s not in a2:
+                stale.append("%s points at successor %s, which nothing runs"
+                             % (f, s))
     for f in sorted(excluded):
         if f not in files:
             stale.append("%s is EXCLUDED but does not exist" % f)
@@ -160,6 +195,10 @@ def main() -> int:
     for f, why in sorted(EXCLUDED.items()):
         if f in files:
             print("  excluded  %-40s %s" % (f, why[:60]))
+    for f, (succ, why) in sorted(RETIRED.items()):
+        print("  RETIRED   %s" % f)
+        print("            successors (all run): %s" % ", ".join(succ))
+        print("            %s" % why)
 
     # ---- must-fire: an unlisted gate file is reported ------------------
     # ⛔ PRICED ON THE REAL LISTS, with one invented file added. A completeness
@@ -176,7 +215,22 @@ def main() -> int:
     hit2 = any("gate_no_such_file" in x for x in s3)
     print("    a stale exclusion is reported                %s"
           % ("ok" if hit2 else "*** MISSED"))
-    if not (hit and hit2):
+    # ⛔ RULING CJ's retirement, priced three ways
+    f0 = next(iter(RETIRED))
+    _u, s4 = audit(files, ci, a2, EXCLUDED, read=lambda r: "no banner here")
+    hit3 = any("lacks" in x for x in s4)
+    print("    a retired gate without its banner            %s"
+          % ("ok" if hit3 else "*** MISSED"))
+    _u, s5 = audit(files, ci | {f0}, a2, EXCLUDED)
+    hit4 = any("ALSO run" in x for x in s5)
+    print("    a retired gate still in a run list           %s"
+          % ("ok" if hit4 else "*** MISSED"))
+    r6 = {f0: (["test/gate_nobody_runs.py"], "fixture")}
+    _u, s6 = audit(files, ci, a2, EXCLUDED, retired=r6)
+    hit5 = any("which nothing runs" in x for x in s6)
+    print("    a successor nothing runs                     %s"
+          % ("ok" if hit5 else "*** MISSED"))
+    if not (hit and hit2 and hit3 and hit4 and hit5):
         rc = 1
 
     print()

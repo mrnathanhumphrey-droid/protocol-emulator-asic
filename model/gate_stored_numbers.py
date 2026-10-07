@@ -375,6 +375,15 @@ SPEC_SYMBOLS = {
     # ledger hashes -- identifiers of a retraction, not measurements. Priced in
     # `readme_check()` by re-inserting the J = 8 row.
     ("model/gate_stored_numbers.py", "WITHDRAWN"),
+    # ⭐ RULING CJ's RETIREMENT REGISTRY: file -> successors + a pointer whose
+    # "numbers" are ledger hashes and the claims it names (C = 2/3, J = 8/1,
+    # D* = 20, 8/8 opcodes). Every figure is owned by the successor gate the
+    # pointer names, each of which is checked to RUN.
+    ("model/gate_gates_complete.py", "RETIRED"),
+    # ⭐ RULING MU's CLOCKED MUTANT FAMILY: stimulus (image, peer) and the
+    # assertion each must die of. Its numbers are layer labels ([A1], [A2],
+    # [R4a]) inside the expected messages -- inputs, re-judged every run.
+    ("test/run_mutants.py", "CLOCKED_MUTANTS"),
     # ⭐ THE COVERAGE SWEEP'S TWO DECLARATIONS, and neither holds a
     # measurement. `benchset.CONFIG` is STIMULUS -- plusargs, cycle budgets
     # and the per-lane delay vectors handed to `make_smoke_image.py` -- i.e.

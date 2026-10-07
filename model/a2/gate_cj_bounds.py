@@ -1,4 +1,18 @@
-"""C AND J ARE BOUNDS, DERIVED FROM STRUCTURE. Simulation is the CHECK.
+"""⛔⛔ RETIRED (ruling CJ). Every claim below now lives in a gate that RUNS:
+  * C_max = 2 is OCCUPANCY; RTA charges the SPACING, C = 3
+      -> gate_c3_requote + test/run_csat.py (ledger 65bc3c8114e5)
+  * universal J_max = 8 is WITHDRAWN
+      -> d_min >= D* = 20 -> J = 1, gate_j_program / gate_dmin_clocked
+         (ledger b4e51034e283)
+  * opcode coverage 8/8 (its census input was written by five_image) -> the
+    coverage sweep, test/gate_coverage.py
+  * double buffer: pre-registered J 2, measured 7 -> bursty.DOUBLE_BUFFER_PREREG
+  * the J = 0..10 margin table is pre-C = 3 -> gate_c3_requote
+Running it prints this and exits 0; `--legacy` runs the old checks, whose
+verdict is history, not evidence. The registry is
+`model/gate_gates_complete.py RETIRED`.
+
+C AND J ARE BOUNDS, DERIVED FROM STRUCTURE. Simulation is the CHECK.
 
 THE ONE CLAIM: `C_max` and `J_max` are derived from the RTL's cycle-level
 structure, and the measured values from `test/tb_smoke.v` are compared against
@@ -621,4 +635,9 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    # ⛔ RETIRED (ruling CJ): the default run states the retirement and the
+    # successors instead of producing a red verdict about superseded claims.
+    if "--legacy" not in sys.argv:
+        print(__doc__.split("C AND J ARE BOUNDS")[0].rstrip())
+        raise SystemExit(0)
     raise SystemExit(main())

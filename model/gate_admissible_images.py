@@ -84,7 +84,8 @@ NON_ADMISSIBLE = {
         "MECHANISM ONLY. The tracked FIVE_STRESS image (d = 12..16, "
         "U = 1.083). Used by tb_witness's stall-chain trace (a floor, sub-D* "
         "regime), run_mutants' M_BUF_SWAP kill (needs stalls to discriminate), "
-        "and gate_cj_bounds' sub-D* double-buffer number (owed under CJ). No "
+        "and gate_cj_bounds' sub-D* double-buffer number (that gate is "
+        "RETIRED under CJ; the figure is history). No "
         "claim scoped to admissible programs was measured on it (Q3)."),
     "corpus_spim.hex": ({PORT},
         "the SPI-master TRACE image at d = 7, below D*: it exists to move the "

@@ -69,7 +69,7 @@ mkdir -p "$OUTDIR"
 # the bench's CS rise ONE CYCLE LATER under 5.020 than under 5.053 or Icarus,
 # and disagreed on 666 lines. The cross-simulator witness was comparing against
 # a different Verilator from the one the project pins.
-VL="${PE_VERILATOR:-verilator}"
+. "$ROOT/ci/tools.sh"     # ruling V: $VL from PE_VERILATOR, made absolute
 command -v "$VL" >/dev/null 2>&1 || [ -x "$VL" ] \
     || { echo "  *** no Verilator at '$VL' (set PE_VERILATOR)"; exit 1; }
 # ⛔ THE BUILD TREE LIVES IN /tmp AND THE TRACES DO NOT. WSL's /tmp is WIPED
@@ -114,7 +114,7 @@ if [ "$RC" -ne 0 ] || [ ! -x "$OBJ/tr" ]; then
     exit 1
 fi
 
-echo "  verilator  : $("$VL" --version)  ($VL)"
+tool_banner verilator
 echo "  image      : $IMG  peer=$PEER  async=$ASYNCA"
 echo "  phase seed : $PHASE  (the STIMULUS seed, held FIXED)"
 echo "  stayload=$STAYLOAD  sclhold=$SCLHOLD"

@@ -71,6 +71,11 @@ written since power-on**:
   have landed. Because the pointer auto-increments and wraps, 256 consecutive
   writes from any start cover every address. Once reached, the condition holds
   until `rst_n`.
+* ⚠ **The full-store rule applies to the FIRST load after `rst_n`.** After
+  that, partial reloads run: every byte is still defined, holding either the
+  new program or the previous full load. The counter is a power-on guarantee,
+  **not a per-load one**. A host that reloads part of the store is responsible
+  for what the rest of it still holds.
 * Until then the engine **does not run** (no dispatch, every pin released),
   including the window after reset if `prog` is low.
 * **Deasserting `prog` before 256 consecutive writes sets CONFIG_ERR** (status

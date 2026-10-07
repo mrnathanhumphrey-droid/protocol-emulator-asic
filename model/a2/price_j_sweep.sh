@@ -36,10 +36,12 @@ echo "=============================================================="
 echo "  recipe per point: --five d d+1 d+2 d+3 d+4, then tb_smoke on it"
 echo
 
-VVP="$SP/j_sweep.vvp"
-iverilog -g2012 -o "$VVP" -s tb_smoke \
+. ci/tools.sh              # ruling V: $IV / $VVP, made absolute
+tool_banner iverilog vvp
+VVPF="$SP/j_sweep.vvp"
+"$IV" -g2012 -o "$VVPF" -s tb_smoke \
     test/tb_smoke.v src/pe_engine.v src/pe_store.v src/project.v 2>/dev/null
-if [ ! -f "$VVP" ]; then
+if [ ! -f "$VVPF" ]; then
     echo "  *** iverilog build failed -- cannot re-measure"
     exit 1
 fi
@@ -103,7 +105,7 @@ for d in $DS; do
     # So: a 200k-cycle run, a fixed warm-up well inside it, and the window
     # length is CHECKED. A number from an empty window is refused.
     M=""; WINDOW=""
-    OUT=$(vvp "$VVP" +IMG=test/probe_five.hex +NCYC=200000 +WARMUP=4000 2>&1)
+    OUT=$("$VVP" "$VVPF" +IMG=test/probe_five.hex +NCYC=200000 +WARMUP=4000 2>&1)
     NB=$(echo "$OUT" | grep -o "probe_five.hex: [0-9]* bytes" | grep -o "[0-9]*" | head -1)
     WINDOW=$(echo "$OUT" | grep -o "window length *: *[0-9]*" | grep -o "[0-9]*$" | head -1)
     CUR=$(echo "$OUT" | grep -o "STEADY *: *[0-9]*" | grep -o "[0-9]*$" | head -1)

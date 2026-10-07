@@ -33,6 +33,14 @@ cd "$ROOT" || exit 1
 PY="${PE_PYTHON:-python}"
 command -v "$PY" >/dev/null 2>&1 || PY=python3
 
+# ⛔ RULING V: every tool through the one resolver, and the log says which.
+# "$VL" / "$IV" / "$VVP" / "$YS" read PE_VERILATOR / PE_IVERILOG / PE_VVP /
+# PE_YOSYS before PATH. A tool this side cannot see prints NOT FOUND here and
+# is delegated to WSL below (or the gate that needs it is RED).
+. "$ROOT/ci/tools.sh"
+echo "  --- tools, as resolved (ruling V) ---"
+tool_banner verilator iverilog vvp yosys
+
 # ---------------------------------------------------------------------------
 # THE GATE LIST. One place. Add a gate here and CI runs it.
 # ---------------------------------------------------------------------------
@@ -140,8 +148,8 @@ GATES=(
   # list, in `model/a2/run_a2.py`'s, or excluded BY NAME with a reason. Its
   # first run found NINE gate files nothing ran -- four passing analysis gates
   # and the whole TA-02 harness now under `run_a2.py`, `gate_flow_netlist`
-  # excluded (a 3.5 h hardening input), and `gate_cj_bounds` RED and excluded
-  # only so the list describes the tree, with the reason and the debt stated.
+  # excluded (a 3.5 h hardening input), and `gate_cj_bounds` -- RED then, now
+  # RETIRED under ruling CJ with a per-claim pointer to the gates that run.
   model/gate_gates_complete.py
   # ⭐ N1 -- every NON-ADMISSIBLE image is declared by name with the condition
   # it breaks (OVERLOAD, PORT, PINMAP), derived from the image itself. Its
@@ -155,6 +163,22 @@ GATES=(
   # exiting 1. Every committed read is clean; this keeps it so, and
   # `ci/rc.sh`'s `run_rc` is how loops capture a code.
   model/gate_shell_rc.py
+  # ⛔⛔ V -- EVERY TOOL THROUGH ONE RESOLVER, AND THE LOG SAYS WHICH. A bare
+  # `verilator` ran apt's 5.020 in CI and the witness disagreed with the pin
+  # on 666 lines. Refuses a bare invocation or a private PATH-default resolver
+  # anywhere in ci/ test/ model/, and a tool-driven script with no banner.
+  # Must-fire: verilator_trace.sh as it stood at f8f952c.
+  model/gate_tool_pinning.py
+  # ⭐ MU -- F2 face 3 on the real design, priced by building M_COMB_OUT. That
+  # mutant was killed only by hand until now.
+  model/gate_f2_local.py
+  # ⭐ MU -- the simulation mutant runner, ~10 s: every arm must die of the
+  # assertion it names. It was run by nothing, so its kills were as old as the
+  # day each was last typed.
+  test/run_mutants.py
+  # ⛔⛔ MU -- every `ifdef M_*` is KILLED by a named, actually-run killer or is
+  # a DECLARED survivor; an unregistered mutant is red.
+  model/gate_mutant_kills.py
   # ⛔⛔ M -- EVERY IMAGE WRITES THE WHOLE STORE. The store has no reset, and a
   # 51-byte image left 205 bytes holding power-up contents, one missing REARM
   # from running on real pins. Every image is now the program plus the defined
@@ -221,15 +245,18 @@ can_run() {
     # failure named as itself -- a two-simulator comparison with one simulator
     # compares nothing.
     test/gate_corpus_trace.py)
-      command -v iverilog >/dev/null 2>&1 || { echo "iverilog is not on PATH"; return 1; }
-      { command -v verilator >/dev/null 2>&1 || [ -n "${PE_VERILATOR:-}" ] \
+      command -v "$IV" >/dev/null 2>&1 || { echo "iverilog not found (PE_IVERILOG unset and not on PATH)"; return 1; }
+      { command -v "$VL" >/dev/null 2>&1 || [ -n "${PE_VERILATOR:-}" ] \
         || command -v wsl.exe >/dev/null 2>&1; } \
         || { echo "no verilator and no wsl.exe to reach one"; return 1; } ;;
-    model/gate_one_encoder.py|test/gl_harness_check.py|test/gate_tb_elaborates.py)
-      command -v iverilog >/dev/null 2>&1 || { echo "iverilog is not on PATH"; return 1; } ;;
+    model/gate_one_encoder.py|test/gl_harness_check.py|test/gate_tb_elaborates.py|test/run_mutants.py)
+      command -v "$IV" >/dev/null 2>&1 || { echo "iverilog not found (PE_IVERILOG unset and not on PATH)"; return 1; } ;;
     model/gate_reset_audit.py)
       [ -n "${PE_NETLIST_JSON:-}" ] && [ -f "${PE_NETLIST_JSON:-}" ] \
         || { echo "no netlist at PE_NETLIST_JSON"; return 1; } ;;
+    model/gate_f2_local.py)
+      [ -n "${PE_NETLIST_COMB_JSON:-}" ] && [ -f "${PE_NETLIST_COMB_JSON:-}" ] \
+        || { echo "no M_COMB_OUT netlist at PE_NETLIST_COMB_JSON"; return 1; } ;;
     # ⛔ THE COVERAGE GATE NEEDS THE MEASUREMENT, and a missing measurement is
     # a FAILURE here rather than a skip -- the same rule the reset audit's
     # netlist precondition follows, and for the same reason: a gate that
@@ -327,10 +354,15 @@ NL_DIR="${PE_NETLIST_DIR:-/tmp}"
 if [ -z "${PE_NETLIST_JSON:-}" ]; then
   echo
   echo "  --- netlist for the reset audit ---"
-  if command -v yosys >/dev/null 2>&1; then
+  if command -v "$YS" >/dev/null 2>&1; then
     bash test/local_netlist.sh "$ROOT" "" ci_netlist "$NL_DIR" || {
       echo "  *** yosys could not build the netlist"; exit 1; }
+    # ⭐ RULING MU: THE SAME RECIPE AT `M_COMB_OUT`, ~5 s, so F2 face 3 is
+    # priced on every push (`model/gate_f2_local.py`) rather than by hand.
+    bash test/local_netlist.sh "$ROOT" M_COMB_OUT ci_netlist_comb "$NL_DIR" || {
+      echo "  *** yosys could not build the M_COMB_OUT netlist"; exit 1; }
     export PE_NETLIST_JSON="$NL_DIR/ci_netlist.json"
+    export PE_NETLIST_COMB_JSON="$NL_DIR/ci_netlist_comb.json"
   elif command -v wsl.exe >/dev/null 2>&1; then
     # ⛔ DELEGATED, AND THE RULES FOR IT ARE THE PROJECT'S: always a SCRIPT
     # FILE (never inline `bash -c`) and always MSYS_NO_PATHCONV=1, because
@@ -342,7 +374,8 @@ if [ -z "${PE_NETLIST_JSON:-}" ]; then
     {
       echo '#!/bin/bash'
       echo 'cd "$(dirname "$0")" || exit 1'
-      echo 'bash test/local_netlist.sh "$PWD" "" ci_netlist "$PWD/probe_nl"'
+      echo 'bash test/local_netlist.sh "$PWD" "" ci_netlist "$PWD/probe_nl" || exit 1'
+      echo 'bash test/local_netlist.sh "$PWD" M_COMB_OUT ci_netlist_comb "$PWD/probe_nl"'
     } > "$WRAP"
     mkdir -p "$ROOT/probe_nl"
     # ⛔ TWO SPELLINGS TO HANDLE, AND BASH EXPANSION RATHER THAN `sed`.
@@ -367,12 +400,14 @@ if [ -z "${PE_NETLIST_JSON:-}" ]; then
     MSYS_NO_PATHCONV=1 wsl.exe -e bash "$WSLROOT/probe_ci_netlist.sh" || {
       echo "  *** the WSL netlist step failed"; exit 1; }
     export PE_NETLIST_JSON="$ROOT/probe_nl/ci_netlist.json"
+    export PE_NETLIST_COMB_JSON="$ROOT/probe_nl/ci_netlist_comb.json"
   else
     echo "  *** neither yosys nor wsl.exe is available, so the reset audit"
     echo "      cannot see the design. It is RED rather than skipped."
   fi
 fi
 [ -n "${PE_NETLIST_JSON:-}" ] && echo "  PE_NETLIST_JSON=$PE_NETLIST_JSON"
+[ -n "${PE_NETLIST_COMB_JSON:-}" ] && echo "  PE_NETLIST_COMB_JSON=$PE_NETLIST_COMB_JSON"
 
 # ---------------------------------------------------------------------------
 # THE COVERAGE SWEEP, whose data `test/gate_coverage.py` adjudicates.
@@ -401,7 +436,7 @@ if [ -z "${PE_COVERAGE_DAT:-}" ] && [ "${PE_SKIP_COVERAGE:-0}" != "1" ]; then
   # the path is only exported when the sweep actually succeeded. Either guard
   # alone leaves the hole open.
   SWEEP_OK=0
-  if command -v verilator >/dev/null 2>&1; then
+  if command -v "$VL" >/dev/null 2>&1; then
     if bash test/coverage_sweep.sh "$ROOT/probe_cov"; then
       SWEEP_OK=1
     else
@@ -459,7 +494,7 @@ if [ -z "${PE_COCOTB_DAT:-}" ] && [ "${PE_SKIP_COVERAGE:-0}" != "1" ]; then
   echo
   echo "  --- cocotb coverage arm (ruling 2) ---"
   CC_OK=0
-  if command -v verilator >/dev/null 2>&1 || [ -n "${PE_VERILATOR:-}" ]; then
+  if command -v "$VL" >/dev/null 2>&1 || [ -n "${PE_VERILATOR:-}" ]; then
     if bash test/coverage_cocotb.sh "$ROOT/probe_cov"; then CC_OK=1; fi
   elif command -v wsl.exe >/dev/null 2>&1; then
     CCWRAP="$ROOT/probe_ci_cocotb.sh"
@@ -498,7 +533,7 @@ if [ -z "${PE_PHASES_JSON:-}" ] && [ "${PE_SKIP_PHASES:-0}" != "1" ]; then
   echo
   echo "  --- clocked phase measurement (F4) ---"
   PH_OK=0
-  if command -v verilator >/dev/null 2>&1 || [ -n "${PE_VERILATOR:-}" ]; then
+  if command -v "$VL" >/dev/null 2>&1 || [ -n "${PE_VERILATOR:-}" ]; then
     if bash test/phases_run.sh "$ROOT/probe_phases"; then PH_OK=1; fi
   elif command -v wsl.exe >/dev/null 2>&1; then
     echo "  verilator is not on PATH; delegating the measurement to WSL"
@@ -543,7 +578,7 @@ if [ -z "${PE_REFILL_JSON:-}" ] && [ "${PE_SKIP_REFILL:-0}" != "1" ]; then
   echo
   echo "  --- port-demand measurement (R) ---"
   RF_OK=0
-  if command -v verilator >/dev/null 2>&1 || [ -n "${PE_VERILATOR:-}" ]; then
+  if command -v "$VL" >/dev/null 2>&1 || [ -n "${PE_VERILATOR:-}" ]; then
     if bash test/refill_run.sh "$ROOT/probe_refill"; then RF_OK=1; fi
   elif command -v wsl.exe >/dev/null 2>&1; then
     echo "  verilator is not on PATH; delegating the measurement to WSL"
@@ -586,7 +621,7 @@ if [ -z "${PE_A2_JSON:-}" ] && [ "${PE_SKIP_A2:-0}" != "1" ]; then
   echo
   echo "  --- A2 per-program must-fire (S) ---"
   A2_OK=0
-  if command -v verilator >/dev/null 2>&1 || [ -n "${PE_VERILATOR:-}" ]; then
+  if command -v "$VL" >/dev/null 2>&1 || [ -n "${PE_VERILATOR:-}" ]; then
     if bash test/a2_run.sh "$ROOT/probe_a2"; then A2_OK=1; fi
   elif command -v wsl.exe >/dev/null 2>&1; then
     echo "  verilator is not on PATH; delegating the measurement to WSL"
@@ -628,7 +663,7 @@ if [ -z "${PE_STORE_JSON:-}" ] && [ "${PE_SKIP_STORE:-0}" != "1" ]; then
   echo
   echo "  --- store sentinel (M3) ---"
   ST_OK=0
-  if command -v verilator >/dev/null 2>&1 || [ -n "${PE_VERILATOR:-}" ]; then
+  if command -v "$VL" >/dev/null 2>&1 || [ -n "${PE_VERILATOR:-}" ]; then
     if bash test/store_run.sh "$ROOT/probe_store"; then ST_OK=1; fi
   elif command -v wsl.exe >/dev/null 2>&1; then
     echo "  verilator is not on PATH; delegating the measurement to WSL"
