@@ -1826,3 +1826,63 @@ pre-final-filler bytes. In M, `make_smoke_image.py --all` (which writes the
 manifest) ran before `corpus.py` rewrote the corpus, and nothing in CI compares
 the manifest. Fixed in place; and `--all` now runs `corpus.py` itself before
 hashing, so one command writes every artefact it pins.
+
+---
+
+## 23. RA + MF — what the racy Layer R measured, re-measured; two holes closed
+
+### RA1 / RA2 — every accepted Layer R number re-measured on both simulators
+
+Every R figure accepted before `0e29fe7` was measured with the racy Layer R.
+`test/race_remeasure.py` re-runs Layer R, R4 and R5 with the fixed bench, on
+**iverilog 12.0 and Verilator 5.053 separately**: 5 images × 3 builds, 60,000
+cycles each, parsed by `refill_collect`'s own patterns.
+
+**The two simulators' tables are identical, field for field, on all 15 runs.**
+
+| build | ckod | corpus_i2c | corpus_all5 | ckfive | ckhold_over |
+| --- | --- | --- | --- | --- | --- |
+| clean: R worst (actions) | 1 (184) | 1 (72) | **2** (376) | 1 (310) | 1 (196) |
+| clean: R4 / R5 | ok, 1 slot, 1 in flight / 0 non-retiring | same | same | same | same |
+| `M_CK_HOLD_INVAL`: R worst | **16** | **16** | **17** | 17 | 16 |
+| `M_CK_HOLD_INVAL`: R4 | ok | ok | ok | ok | ok |
+| `M_PFETCH_BOTH_INVAL`: R worst | 2 (ok) | 2 | 2 | 2 | 2 |
+| `M_PFETCH_BOTH_INVAL`: R4 violations | 185 | 181 | 1,374 | 310 | 197 |
+
+* **Clean worst 1/1/2/1/1**, as expected. **`corpus_all5` still measures 2**,
+  so RA2 does not trigger: the `SPL` bound keeps both its structural argument
+  and its measured confirmation.
+* **The kills stand: 16/16/17** on the three accepted images (17/16 on the two
+  added).
+* **The orthogonality stands:** `M_CK_HOLD_INVAL` fails R and passes R4;
+  `M_PFETCH_BOTH_INVAL` fails R4 and passes R (worst 2 against a bound of 2).
+* ⇒ Verilator's block order had happened to give the right answer every time,
+  which is why the race was invisible there. That is now a measured fact, not a
+  "probably".
+
+### RA3 — `model/gate_bench_races.py` (CI)
+
+The race class as a gate. For every bench in `test/*.v`, with its `include`s
+expanded (a bench and its layers share one module scope), a variable written by
+a **blocking** `=` in one `always @(<edge>)` block and read by another block on
+the **same** sensitivity is red. The exception is a read declared in `SAFE`
+with its reason; a declaration names the reading block by an anchor token, so
+the same variable read elsewhere is not covered. Non-blocking writes are exempt,
+because the language orders them. **18 files, 2 declared safe reads** (R5's
+`cb_ck`/`cb_n`, latched one edge earlier), **0 undeclared.**
+**Must-fires:** Layer R as it stood at `231b37c` (a committed fixture, because
+CI checks out at depth 1) is red on exactly `cb_pc`, `cb_ck`, `cb_op`,
+`cb_cnt` and `cb_n`. A synthetic blocking race is red; the same read of a
+non-blocking write passes.
+
+### MF1 — `test/gate_manifest.py` (CI)
+
+Every hash in `test/artefacts.sha256` is checked against its file.
+⛔ **Which manifest matters:** a fresh CI clone lacks the 10 generated images,
+so `benchset.base_images()` runs `--all`, which **rewrites the working-copy
+manifest from the files it just built**. A check against that copy cannot fail,
+and is exactly how the stale lines would have passed CI. So in CI the gate reads
+the **committed** manifest (`git show HEAD:`), and locally the working copy
+(a commit in progress changes it). **Must-fires:** one flipped byte; an empty
+manifest; and **the manifest as committed at `231b37c`** (fixture), which it
+reds on exactly the five stale `corpus_*.hex` lines and nothing else.

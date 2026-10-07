@@ -43,6 +43,7 @@ here** (ruling CI1). A local pass is reported as local.
 | `29bd861` | ✅ `37619713604` | ✅ `37619713637` | E+ + Q3; 26 of 26 |
 | `9ebcaeb` | ✅ `37627116027` | ✅ `37627115865` | M + README (a) + RD1; 27 of 27 |
 | `231b37c` | ✅ `37636453349` | ✅ `37636453287` | M5 + M6; 27 of 27 |
+| `0e29fe7` | ✅ `37644777003` | ✅ `37644776920` | V + MU + CJ + M7; 31 of 31; run_a2 41 of 41 |
 
 ### Silicon fixes — RTL defects closed (ledger)
 
@@ -78,6 +79,9 @@ sigrok re-certification → FRAM write + random read.
 | **V** | one resolver per language (`ci/tools.sh`, `toolchain.tool()`), banners everywhere, `gate_tool_pinning` (must-fire: `verilator_trace.sh` @ `f8f952c`); witness REQUIRES the 5.053 banner; manifest + local WSL calls now carry the pin | ✅ landed — SPEC §22 |
 | **MU** | `gate_mutant_kills`: 29 defines, 25 killed in CI, 1 in run_a2, 3 declared survivors; `run_mutants` into CI with a clocked family; `gate_f2_local` (M_COMB_OUT on the real netlist); Layer R cross-block race fixed | ✅ landed — SPEC §22 |
 | **CJ** (`gate_cj_bounds`) | RETIRED with a per-claim pointer; `gate_gates_complete` RETIRED class; `gate_c3_requote` J = 8 relabelled as the retracted stress point | ✅ landed — SPEC §22 |
+| **RA1/RA2** | racy-R numbers re-measured, iverilog + Verilator, 5 images × 3 builds: **identical**; clean 1/1/2/1/1, kills 16/16/17, orthogonality stands; SPL confirmation stands | ✅ landed — SPEC §23 |
+| **RA3** | `gate_bench_races`: same-edge cross-block blocking reads red unless declared; must-fire = Layer R @ `231b37c` | ✅ landed — SPEC §23 |
+| **MF1** | `gate_manifest`: committed manifest vs files in CI; must-fires: flipped byte, empty, the stale `231b37c` manifest | ✅ landed — SPEC §23 |
 | **K** | ACK hold: every driven SDA transition through `SDA_HOLD`, + a transition-class coverage table | **NEXT** |
 | (opt) | `ckdense` margin: a heavier feasible variant firing on several releases | non-blocking |
 | **U** | widen the refusal to the unclocked open-drain data drive; retire the clamp | owed, with K |

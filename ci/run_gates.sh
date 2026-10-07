@@ -179,6 +179,14 @@ GATES=(
   # ⛔⛔ MU -- every `ifdef M_*` is KILLED by a named, actually-run killer or is
   # a DECLARED survivor; an unregistered mutant is red.
   model/gate_mutant_kills.py
+  # ⛔⛔ RA3 -- no bench layer reads, on the same edge, another `always` block's
+  # BLOCKING write. Layer R did, and the clean design failed it under iverilog.
+  # Must-fire: Layer R as it stood at 231b37c.
+  model/gate_bench_races.py
+  # ⛔⛔ MF1 -- every pinned artefact hash matches its file, against the
+  # COMMITTED manifest in CI (the working copy is regenerated here). The
+  # manifest carried five stale corpus hashes through two green commits.
+  test/gate_manifest.py
   # ⛔⛔ M -- EVERY IMAGE WRITES THE WHOLE STORE. The store has no reset, and a
   # 51-byte image left 205 bytes holding power-up contents, one missing REARM
   # from running on real pins. Every image is now the program plus the defined
