@@ -216,6 +216,13 @@ gives.
 
 # Theorem 3 — the `D*` theorem
 
+> ⛔⛔ **STATUS (Ruling TH1): proof gap identified.** The utilisation argument
+> is insufficient, and the deadline is tied to the wrong release and slot.
+> The **statement** is supported by measurement. A formal proof is in
+> progress (Lean). The proof below is kept as written so the gap can be
+> audited against it. See **Amendment A2** for what is wrong with it, and
+> `docs/PORT_SPEC.md` for the RTL facts a repaired proof has to use.
+
 **This is now the load-bearing claim.** The published guarantee is
 `d_min ≥ D* = k · L_REFILL = 20  →  J = 1`, and §4–§5 showed what it actually
 rests on: that the **uncounted refill-queueing term is zero above `D*`**, not
@@ -372,3 +379,107 @@ Anything that silently reads P8 as "a lane completes an action every `d`
 cycles" is wrong under the clocked scheme. Nothing in this proof does — every
 use is about releases — but the distinction is now load-bearing and is recorded
 here rather than left to be rediscovered.
+
+## A2 — Theorem 3's proof is unsound as written (Ruling TH1, 2026-10-07)
+
+**Ruled:** the red-team is accepted. The proof is unsound as written. The
+**statement is not refuted**: every measurement below is consistent with it.
+The proof text above is left unedited so this amendment can be checked
+against it.
+
+### Defect 1: the utilisation argument is insufficient
+
+The proof reasons that the port is asked for `k · L_REFILL` cycles of work
+per `d` cycles, so when `d ≥ D*` demand fits capacity and "every refill
+issued at a lane's writeback completes before that lane's next release".
+The last step does not follow. Demand fitting capacity over a window is a
+**utilisation** condition. Whether one particular owed refill meets its
+deadline depends on the **order** in which the port serves refills, and the
+proof never uses the order.
+
+**This document had already measured the counterexample to the inference.**
+§5 shows arm C has `U_port = 0.66` and still builds a 40-cycle queue. It
+records that `U_port ≤ 1` was falsified as a sufficient condition.
+
+The order is in `docs/PORT_SPEC.md` §1:
+- the winner's head is served first;
+- every other owed refill is served round-robin, by the position of the scan
+  pointer;
+- and every winner-head refill relocates that pointer.
+
+### Defect 2: the deadline is tied to the wrong release and slot
+
+The proof gives the refill owed at `WB(j)` the deadline *"before that lane's
+next release"*, which is `j + 1`. But the slot freed at `WB(j)` refills with
+job **`j + 2`**'s action. Job `j + 1` is served from the other slot, which
+became the head at the swap. So the refill owed at `WB(j)` is needed at
+**`decision(j + 2)`** (`PORT_SPEC.md` §4).
+
+The event the conclusion needs is different: the head valid at `release(j + 1)`.
+That is a fact about the refill owed at **`WB(j − 1)`**. The proof's chain
+therefore checks one event and concludes about another. The correct slack is
+`decision(j + 2) − WB(j) ≥ 2d − R_i − 2`, where `R_i` is the lane's release →
+decision time. That term couples the port invariant to the EDF response
+time, and the proof does not mention it.
+
+### What the statement now rests on: measurement (TH3)
+
+Probe `probe_tb_port.v` follows every slot from free to issue to capture, and
+attributes every stall cycle to a cause.
+
+- **Arms covered:**
+  - the seven port-feasible points (d = 20, 21, 22, 25, 30, 40, 60, each
+    `d..d+4`);
+  - the 16 admissible images with the `uio` read-back model. 12 of them owe
+    refills inside the window. `ckdegen`, `ckdegen2`, `ckhold_at` and
+    `ckhold_under` owe none after warm-up, so they exercise nothing here;
+  - adversarial arms with lanes 0–3 at the minimum delay and lane 4 slower,
+    each run at 200k, 1M and 4M cycles.
+- **Above `D*`:**
+  - **0 stall cycles** of any cause on every arm.
+  - The winner-head branch fires **once** per run, for the cold-start fill,
+    and never again. The port is pure round-robin.
+  - Worst owed fill: **19** cycles to issue and **23** to capture. At most
+    **5** refills were captured ahead of one owed fill: the in-flight one
+    plus one per other lane.
+  - The adversarial arms' worst wait is **identical at 200k, 1M and 4M
+    cycles**. It does not grow with run length, so there is no starvation.
+- **Below `D*` (the d = 18 control and arm C):** every stall cycle in the
+  measured window is **arbitration**: 204,371 of 204,371 at d = 18 and
+  391,955 of 391,955 on arm C. **None** is pipeline latency (a refill issued
+  at the first scan that still lands late), and **none** is cold start.
+  - The winner-head branch fires 49,919 and 124,982 times respectively.
+    Below `D*` the port is not round-robin, because branch 1 keeps
+    relocating the pointer.
+- **⛔ Below `D*` the arbitration is not starvation-free (measured).** Arm
+  `12, 12, 12, 12, 100` was run at 200k, 1M and 4M cycles:
+  - lane 1's owed spare waited **16,468 cycles** to issue, with **2,473**
+    refills served ahead of it;
+  - lane 4's worst wait grew from **35** to **202** cycles between the 1M and
+    4M runs.
+
+  The mechanism is branch 1: every winner-head refill moves the pointer to
+  `winner + 1`, so a lane can be passed over indefinitely. `pe_asm` refuses
+  this region, and TH3c's bug condition (growth at `d_min = 20`) did **not**
+  fire. But it means the round-robin bound is **conditional on branch 1
+  staying silent**. A repaired proof must establish that silence by the
+  induction, not assume it.
+
+### What a repaired proof needs
+
+`PORT_SPEC.md` §6 states the shape. It is an induction over owed refills:
+1. While every owed refill lands before its slack, no head is invalid, so
+   branch 1 never fires and the scan is round-robin.
+2. Under round-robin, an owed fill waits behind at most:
+   - the in-flight remainder;
+   - one refill per other lane;
+   - one scan cycle per lane passed over.
+3. That wait must fit inside `2d − R_i − 2`.
+
+The constant and the treatment of `R_i` are for the formal proof to fix. This
+amendment does not supply them.
+
+**Claim status (README via RD1):** `d_min ≥ D* = 20 → J = 1` is carried as
+**MEASURED**, with "written proof under revision", not as proved.
+`gate_j_proof_anchors` keeps premises P1–P10, because they are RTL facts and
+the red-team did not touch them.

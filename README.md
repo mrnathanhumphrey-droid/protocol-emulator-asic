@@ -111,7 +111,10 @@ r = {16, 12, 7, 15, 9}      min margin 11      bar ≥ 4
 
 Ours is a pessimistic cross-check: 2 cycles above pyRTA on I2C and 1 on UART-rx, where the exact model checker (TChecker) agrees with pyRTA.
 
-`d_min ≥ D* = 20 → J = 1`
+`d_min ≥ D* = 20 → J = 1` — **measured**, not proved: zero refill-queueing
+stall at every port-feasible point of the d = 20..60 runs
+(`test/run_dstar_check.py`). The written proof is under revision
+(`docs/J_LANE_PROOF.md`, Amendment A2).
 
 **The primary bound is pyRTA's**, not ours; ours is a cross-check that is only
 allowed to be *more* conservative, and a gate fails if it is ever smaller.
