@@ -35,6 +35,7 @@ here** (ruling CI1). A local pass is reported as local.
 | `775b6bc` | ✅ `37555388505` | ✅ `37555388522` | R4 + R5 |
 | `992c298` | ❌ `37558472597` | ✅ `37558472654` | ruling S, **20 of 22**: pyRTA-dependent checks put in CI, where pyRTA is absent by design. Passed locally only via a scratch pyRTA clone. Fixed in the next commit. |
 | `2e6c118` | ✅ `37560421145` | ✅ `37560421167` | S fixed; 22 of 22 with pyRTA absent |
+| `de38c55` | ❌ `37565855366` | ✅ `37565855370` | Q2 + CI3, **23 of 24**: the restored corpus witness's `two_sim_trace.sh` wrote its scratch to a hardcoded `/mnt/c/tmp/` -- present under WSL, absent on CI's Linux -- so both normalised traces were empty and every program "disagreed" on 0 lines. A local run cannot catch it (WSL has `/mnt/c`). Fixed with `mktemp` in the next commit. The long-path arm passed in CI. |
 
 ---
 

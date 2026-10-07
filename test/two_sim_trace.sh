@@ -39,8 +39,16 @@ if [ "$NCR" -ne 0 ]; then
     echo "  => every CR is a line terminator: normalisation is a format fix"
 fi
 
-tr -d '\r' < "$IV" > /mnt/c/tmp/iv.norm
-tr -d '\r' < "$VL" > /mnt/c/tmp/vl.norm
+# ⛔⛔ THE NORMALISED COPIES GO IN A FRESH TEMP DIRECTORY, NOT /mnt/c/tmp.
+# They were written to `/mnt/c/tmp/{iv,vl}.norm`, which exists under WSL on the
+# development box and NOWHERE on CI's Linux runner -- so when ruling Q2 put the
+# corpus witness in CI, both copies came out empty, both headers printed blank,
+# and every program reported a "CROSS-SIM DISAGREEMENT" on ZERO lines. A local
+# run could not catch it: WSL HAS /mnt/c. ⇒ mktemp, removed on exit.
+NORM="$(mktemp -d)"
+trap 'rm -rf "$NORM"' EXIT
+tr -d '\r' < "$IV" > "$NORM/iv.norm" || { echo "  *** cannot write $NORM"; exit 1; }
+tr -d '\r' < "$VL" > "$NORM/vl.norm" || { echo "  *** cannot write $NORM"; exit 1; }
 
 # ---- PROVENANCE FIRST ------------------------------------------------------
 # The header is compared BEFORE the body, because the first run of this pair
@@ -51,7 +59,7 @@ tr -d '\r' < "$VL" > /mnt/c/tmp/vl.norm
 # and failed on two headers that were character-for-character the same text --
 # the iverilog one carried a trailing CR. A provenance guard defeated by the
 # very file-format difference it sits downstream of.
-HI=$(head -1 /mnt/c/tmp/iv.norm); HV=$(head -1 /mnt/c/tmp/vl.norm)
+HI=$(head -1 "$NORM/iv.norm"); HV=$(head -1 "$NORM/vl.norm")
 echo "  iverilog  header : $HI"
 echo "  verilator header : $HV"
 if [ "$HI" != "$HV" ]; then
@@ -64,27 +72,27 @@ fi
 # The header contains `smoke_image.hex`, so a whole-file grep for `x` matches
 # the provenance line and reports 1 X on a trace that has none. Measured on the
 # body.
-XIV=$(grep -v '^#' /mnt/c/tmp/iv.norm | grep -c 'x')
+XIV=$(grep -v '^#' "$NORM/iv.norm" | grep -c 'x')
 echo
 echo "  iverilog X-bearing cycles : $XIV"
 if [ "$XIV" -ne 0 ]; then
     echo "  ⚠ iverilog drives X onto a port. Verilator is 2-state and CANNOT"
     echo "    reproduce that, so the comparison below is NOT MEANINGFUL until"
     echo "    the X is gone: the two engines differ by construction."
-    grep -v '^#' /mnt/c/tmp/iv.norm | grep -n 'x' | head -3 | sed 's/^/      /'
+    grep -v '^#' "$NORM/iv.norm" | grep -n 'x' | head -3 | sed 's/^/      /'
 fi
 
 # ---- THE COMPARE -----------------------------------------------------------
 echo
-if diff -q /mnt/c/tmp/iv.norm /mnt/c/tmp/vl.norm > /dev/null; then
+if diff -q "$NORM/iv.norm" "$NORM/vl.norm" > /dev/null; then
     echo "  CYCLE-EXACT: identical on all $NL lines"
-    echo "    iverilog  sha256 $(sha256sum /mnt/c/tmp/iv.norm | cut -c1-16)"
-    echo "    verilator sha256 $(sha256sum /mnt/c/tmp/vl.norm | cut -c1-16)"
+    echo "    iverilog  sha256 $(sha256sum "$NORM/iv.norm" | cut -c1-16)"
+    echo "    verilator sha256 $(sha256sum "$NORM/vl.norm" | cut -c1-16)"
     exit 0
 fi
-ND=$(diff /mnt/c/tmp/iv.norm /mnt/c/tmp/vl.norm | grep -c '^[<>]')
-FIRST=$(diff /mnt/c/tmp/iv.norm /mnt/c/tmp/vl.norm | grep -m1 -n '^[<>]')
+ND=$(diff "$NORM/iv.norm" "$NORM/vl.norm" | grep -c '^[<>]')
+FIRST=$(diff "$NORM/iv.norm" "$NORM/vl.norm" | grep -m1 -n '^[<>]')
 echo "  DISAGREE on $ND line(s). First divergence:"
-diff /mnt/c/tmp/iv.norm /mnt/c/tmp/vl.norm | head -6 | sed 's/^/      /'
+diff "$NORM/iv.norm" "$NORM/vl.norm" | head -6 | sed 's/^/      /'
 echo "  (first: $FIRST)"
 exit 2
