@@ -140,6 +140,29 @@ DIGEST_LEDGER = [
      "is 11."),
 ]
 
+#: ⛔⛔ RULING A9 -- THE ANALYSIS LEDGER. `DIGEST_LEDGER` records why the
+#: LANE TABLE moved, keyed by its digest, and `assert_current` requires the live
+#: table to hash to its newest entry. An ANALYSIS of an unchanged table can
+#: move too, and that is a different record: it names the digest it analyses
+#: (which must be the current one -- `selftest` checks it), what changed in the
+#: analysis, and the numbers before and after. Immutable, like its sibling.
+#: (digest analysed, change id, text, {"ours_r": [...], "ours_margin": n})
+ANALYSIS_LEDGER = [
+    ("65bc3c8114e5", "Z-spuri-candidates",
+     "RULING Z: our recurrence (`bursty.response_time_b`) searched only the "
+     "subject's own release offsets; Spuri's EDF candidate set also needs "
+     "every interferer's deadline step. The old search fell BELOW TChecker's "
+     "exact worst case on 7 of 8 queue-depth-one instances and below the full "
+     "set on 184 of 6,601 with no jitter. Fixed (Spuri step set). PUBLISHED "
+     "(pyRTA) numbers UNCHANGED: shipped r = {16, 12, 7, 15, 9}, min margin "
+     "11. OURS moved: r = {16, 12, 9, 16, 9}, min margin 9 -- PESSIMISTIC, "
+     "not a disagreement: TChecker on the scaled I2C / UART-rx shapes "
+     "(ruling Z4, all tie rules) gives truth = pyRTA, so ours is 2 / 1 "
+     "cycles high there. Ours is now the asserted cross-check (>= pyRTA) and "
+     "CI's pyRTA-free floor; every published number reads pyRTA (ruling A).",
+     {"ours_r": [16, 12, 9, 16, 9], "ours_margin": 9}),
+]
+
 #: ⛔⛔ P6 -- THE pyRTA THESE NUMBERS ARE WITNESSED BY, recorded beside the
 #: digest they were re-derived for. Until P6 the primary foreign authority for
 #: every timing claim was picked up from a scratch-directory clone with NO
@@ -270,6 +293,24 @@ def selftest() -> int:
         return 1
     print("  pyRTA pin recorded beside %s: %s -- matches the enforced pin"
           % (PYRTA_PIN["digest"], PYRTA_PIN["commit"][:12]))
+    # ⛔ A9: the newest analysis entry must analyse the CURRENT table, and its
+    # recorded `ours` must be what our recurrence says today (LIVE).
+    a_dig, a_id, _t, a_num = ANALYSIS_LEDGER[-1]
+    if a_dig != DIGEST_LEDGER[-1][0]:
+        print("  *** FAIL ANALYSIS_LEDGER's newest entry (%s) analyses %s, but "
+              "the current table is %s" % (a_id, a_dig, DIGEST_LEDGER[-1][0]))
+        return 1
+    from bursty import response_time_b as _rtb
+    _ls = shipped()
+    live = [_rtb(l, _ls)["r"] for l in _ls]
+    live_m = min(l.margin(r) for l, r in zip(_ls, live))
+    if live != a_num["ours_r"] or live_m != a_num["ours_margin"]:
+        print("  *** FAIL ANALYSIS_LEDGER %s records ours r = %s (margin %d); "
+              "our recurrence now gives %s (margin %d)"
+              % (a_id, a_num["ours_r"], a_num["ours_margin"], live, live_m))
+        return 1
+    print("  analysis ledger: %s on %s -- ours r = %s, min margin %d, live"
+          % (a_id, a_dig, live, live_m))
     print()
     print("=" * 78)
     print("SPEC A1 -- the lane-table digest, both faces")

@@ -2140,16 +2140,17 @@ all stay at or under 8. New row:
 The §16 table above records the old span as it was. `gate_a2_program` now
 reads U and J from the JSON instead of a typed "0.518".
 
-⚠ **pyRTA now exceeds our recurrence on ckdense lanes**, the first time
-that has happened. An extended Spuri candidate set (every interferer's
-`kT_j + D_j − J_j − D_i`) leaves ours unchanged. The cause is pyrta_bound's
-framing, which gives an interferer both the jitter-inflated arrival curve and
-the deadline `D_j − J_j`. That charges J twice, because the jobs that jitter
-bunches together cannot all carry the tightened deadline. So pyRTA is the
-pessimistic number here, and `r_floor = max(ours, pyRTA)` keeps the sound one.
-In CI, where pyRTA is absent, the toolchain floor rests on ours alone. For
-these lanes that is up to 9 cycles less strict than the published number
-(lane 2: 16 against 25).
+⛔⛔ **WITHDRAWN (ruling Y-R1, §26).** This paragraph claimed pyrta_bound's
+framing "charges J twice", which made pyRTA the pessimistic number on ckdense.
+That claim had no witness, and TChecker refutes it. On the large-jitter
+instances the D − J framing is exact on 8 of 8 lanes, and the "charge once"
+framing falls below the truth on 5 of 8. The real defect was the other way
+round: **our recurrence searched too few candidate offsets** and fell below the
+exact worst case. The probe that "left ours unchanged" happened to sit on a
+program where the missing offsets didn't bind. Ruling Z fixed the recurrence.
+ckdense then turned out to be outside the model altogether: it fails 1.6a, so
+it is a declared stress image (ruling DT). The numbers above are kept as they
+were measured.
 
 ### W7 — the mode floor covers unclocked open-drain frames
 
@@ -2177,3 +2178,115 @@ alternates LOW/HIGH and holds its data. The unclocked arm only ever sees
 `M_CK_OD_CLK_DRIVE`. The phase reader therefore treats only level-0 SHIFTs and
 `OP_LEVEL` on the clock pin as unclocked SCL moves, and a lane with any clocked
 action goes to the clocked floor.
+
+## 26. Y-R, Z, DT, A — a retracted premise, a recurrence fixed, every claim inside the exact witness
+
+### Y-R — "pyRTA double-counts jitter" is withdrawn
+
+Ruling Y ordered pyrta_bound changed on the claim, made in §25, that its
+D − J framing charges jitter twice. That claim had no witness. TChecker settles
+it. On 8 lanes with jitter around half the period (`jitter_instances.LJ_*`):
+
+- the wrapper as it stands (interferer deadline D − J) is **exact on 8 of 8**;
+- the "charge once" framing (deadline D) is **below the truth on 5 of 8**, which
+  makes it unsound.
+
+The wrapper stays. `pyrta_bound.bound_charge_once` is kept only so it can be
+shown failing (`gate_pyrta_jitter` arm 4). Across both probe sets, pyRTA matches
+TChecker on 15 of 16 lanes and is one cycle pessimistic on the other.
+
+### Z — our recurrence searched too few offsets
+
+`bursty.response_time_b` evaluated r(a) only at the analysed lane's own
+release offsets. Spuri's EDF analysis (INRIA RR-2772, 1996) needs every offset
+where a term steps, which includes each interferer's
+`kT_j + m·t_j − J_j + D_j − D_i`. Missing them under-estimates r:
+
+| evidence | old search | fixed (Spuri step set) |
+| --- | --- | --- |
+| 8 queue-depth-one instances, TChecker exact | **below the truth on 7** | ≥ truth on 8 |
+| 24 recorded exact verdicts (Z, LJ, Z4 ties) | — | ≥ truth on 24 |
+| 6,601 no-jitter lane-instances | short of the full set on **184** | equals a dense brute-force set on all |
+
+`model/gate_spuri_candidates.py` (CI) holds all of this, and
+`model/a2/zone/run_z.py` re-runs TChecker on the records. They reproduce 24 of
+24, with `ovr` unreachable throughout.
+
+**Z4: I2C and UART-rx.** On the shipped table our fixed recurrence reads I2C 9
+and UART-rx 16, against pyRTA's 7 and 15. TChecker on scaled versions of both
+shapes, in both lane-index orders and under both nondeterministic and
+lowest-index tie-breaks, gives 7 and 6: pyRTA's values. So ours is pessimistic
+there (2 and 1 cycles), and pyRTA doesn't miss the hardware's tie rule. The
+published numbers stand.
+
+### DT — the exact witness's boundary is 1.6a, not D > T
+
+TChecker can't adjudicate a model where a lane's job can still be pending at its
+next release (`ovr` reachable). Measured against TChecker, the exact boundary is
+**r_i ≤ t_i**, with r counted from the nominal release. r already contains the
+lane's own jitter, so r + J would charge it twice. Equality is admissible:
+- solo T = 5, r = 5 and a blocked T = 7, r = 7 both leave `ovr` unreachable;
+- a blocked T = 6 lane at r = 7 reaches it.
+
+That is condition 1.6a, which had only ever been checked on the shipped table.
+
+- **DT-A.** 1.6a applies per program (`program_a2.queue_slot`, W1's jitter on
+  every lane including the subject). `pe_asm.check_queue_slot` refuses a program
+  that fails it, and `gate_admissible_images` derives a new condition, QUEUE.
+  Both have must-fires.
+- **DT-B.** ckdense (r far above t = 20–23 under either bound; its pyRTA-side
+  W1 term nearly diverges, A8) and ckhold_over (18 against 16) are declared
+  QUEUE. Every other 1.6a failure was already PORT.
+- **DT-C.** Ruling S's must-fire subject is now **ckheavy**: three clocked
+  open-drain lanes at d = 30/31/32 beside two busy push-pull lanes on `uo_out`.
+  It is admissible (U = 0.583, d_min = D*, no PINMAP), and it fails the light
+  budget of 8 on **all three** clocked lanes (widest 10/11/13) while its own
+  budgets hold. `gate_a2_program` checks that the subject is admissible.
+- **DT-D.** D_sched ≤ D_tol on every lane of all 35 images, asserted, with a
+  must-fire.
+- **DT-E.** W1 never binds in measurement on any admissible image, ckheavy
+  included. ckheavy's analytic W1 term is non-zero, so the term stays.
+- **DT-F.** CI's floor (ours) is ≥ pyRTA on every lane of every admissible
+  program (`gate_a2_program` §1b).
+
+### A — pyRTA primary wherever a number is published or a verdict judged
+
+| | published (pyRTA) | ours (cross-check, asserted ≥ pyRTA) |
+| --- | --- | --- |
+| shipped r | {16, 12, 7, 15, 9} | {16, 12, 9, 16, 9} |
+| shipped min margin (J = 1) | **11** | 9 |
+| J sweep, bar 4 | clears at every J = 0…8 (12 → 4) | fails at J ≥ 6; J = 5 sits exactly at the bar |
+| 2 MHz SPI-target margin, C = 2/3/4 (1.6m) | 3 / **1** / −1 | 3 / 0 / −2 |
+
+- **A1** README's `J = 1` row reads `9 | 11` with a one-line note. Whether to
+  keep the ours column is Nathan's prose call. RD1 reads the ours figure from
+  the analysis ledger.
+- **A2** `gate_pyrta`: pyRTA pinned as published, ours pinned as a cross-check.
+  The gap set must equal the cited one (I2C +2, UART-rx +1, Z4).
+- **A3** `gate_pin_subsets`: ours ≥ pyRTA on all 80 subset results. The 16
+  gapped subsets each contain the Z4 shape that explains them. Must-fire: ours
+  below pyRTA, and a gap no shape explains.
+- **A4** `gate_j_sound`: the verdict is on pyRTA's sweep, which is recorded
+  (the gate must run without pyRTA) and recomputed whenever the pin is present.
+  The double-buffer pre-registration is reproduced with the search it was
+  computed by, and the fixed recurrence's reading of the same configuration
+  (10) is reported beside it.
+- **A5** `gate_c3_requote`: the history is untouched and reproduced with the
+  pre-Z search. A fixed-recurrence record sits beside it, at or below pyRTA's
+  margin on every row.
+- **A6** 1.6m priced on pyRTA. At C = 3 the margin is 1, so (a) "measured
+  C = 2" is the only thing keeping 2 MHz closed. Under ours it is 0, where (b)
+  would close it too. Both readings are recorded.
+- **A7** Refusal thresholds (mode floor, 1.6a, CI QUEUE) read ours when pyRTA
+  is absent. That is intended and only stricter, and the gates say so.
+- **A8** W1's jitter is now computed on pyRTA's side (`w1_jitter(src=...)`) for
+  every pyRTA figure, and ours keeps its own term. ckheavy: pyRTA's term is
+  1/1/1 against ours 4/4/1, so its published r is 15/16/17 (budgets 16/17/18)
+  and ours stays above at 18/19/17. ckdense's pyRTA-side term nearly diverges
+  (36–38, r ≈ 43). It sits outside 1.6a, so nothing rests on it.
+- **A9** `lane_digest.ANALYSIS_LEDGER`, a new ledger for changes to the
+  analysis of an unchanged table. Its newest entry must analyse the current
+  digest, and its ours figures are checked live: "our recurrence moved under Z1
+  (Spuri step set); published (pyRTA) numbers unchanged; shipped
+  r {16,12,7,15,9}, min margin 11; ours {16,12,9,16,9}, min margin 9
+  (pessimistic, Z4)."

@@ -189,6 +189,66 @@ SITES = [
          "violations while the prose above it said ten. Found by writing a "
          "check that needed them and getting `0 violations total`"),
 
+    # ---- ruling A: pyRTA primary, ours the asserted cross-check ----------
+    Site("model/a2/lane_digest.py", "ANALYSIS_LEDGER", LIVE,
+         "the analysis ledger: what moved in our ANALYSIS of an unchanged lane "
+         "table (ruling Z), with ours' r and min margin after it",
+         "model/a2/lane_digest.py",
+         "ruling A9",
+         "entries are never edited; `selftest` recomputes the newest entry's "
+         "ours r / margin on the live table and reds on drift"),
+    Site("model/a2/gate_pyrta.py", "EXPECTED_OURS", LIVE,
+         "our recurrence on the shipped table (cross-check)",
+         "model/a2/gate_pyrta.py", "ruling A2",
+         "arm 0 recomputes it with no tool"),
+    Site("model/a2/gate_pyrta.py", "GAP_CITED", LIVE,
+         "ours - pyRTA on the two lanes where ours is pessimistic",
+         "model/a2/gate_pyrta.py", "ruling A2, cited to TIE_RECORDED",
+         "recomputed against pinned pyRTA; the gap set must equal this"),
+    Site("model/a2/gate_j_sound.py", "PYRTA_SWEEP", LIVE,
+         "pyRTA's min margin per J_pipe -- the published sweep verdict",
+         "model/a2/gate_j_sound.py", "pyRTA @ 1f3a649, ruling A4",
+         "recomputed and compared whenever the pinned pyRTA is present "
+         "(run_a2); the gate states when it is not"),
+    Site("model/a2/gate_c3_requote.py", "EXPECTED_C3_OURS_Z", LIVE,
+         "our recurrence after ruling Z at C = 3 per J_pipe, beside the "
+         "history it does not replace",
+         "model/a2/gate_c3_requote.py", "ruling A5",
+         "recomputed every run; asserted never above pyRTA's margin"),
+    Site("model/a2/gate_admissibility_1_6.py", "PYRTA_2MHZ", LIVE,
+         "pyRTA's 2 MHz SPI-target margin at measured C = 2/3/4 (1.6m)",
+         "model/a2/gate_admissibility_1_6.py", "pyRTA @ 1f3a649, ruling A6",
+         "recomputed and compared when the pinned pyRTA is present"),
+    # ---- rulings Y-R and Z: the exact witness on our recurrence ----------
+    Site("model/a2/jitter_instances.py", "Z_RECORDED", RECORD,
+         "TChecker's exact worst case on the 8 queue-depth-one instances where "
+         "the subject-releases-only search fell below it, and that search's "
+         "answers",
+         "model/a2/zone/run_z.py",
+         "TChecker tck-reach -a reach (WSL), ovr unreachable on all 8",
+         "a foreign verdict, re-run by hand (WSL); gate_spuri_candidates "
+         "re-derives the `old` column LIVE and red-flags drift"),
+    Site("model/a2/jitter_instances.py", "LJ_RECORDED", RECORD,
+         "TChecker's exact worst case on the 8 large-jitter lanes that "
+         "retracted ruling Y's premise",
+         "model/a2/zone/run_z.py",
+         "TChecker tck-reach -a reach (WSL), ovr unreachable on all 8"),
+    Site("model/a2/jitter_instances.py", "TIE_RECORDED", RECORD,
+         "TChecker's exact worst case on the scaled I2C / UART-rx shapes "
+         "under nondeterministic AND lowest-index ties (ruling Z4)",
+         "model/a2/zone/run_z.py",
+         "TChecker tck-reach -a reach (WSL), tie_mode nondet and index"),
+    Site("model/a2/jitter_instances.py", "LJ_CHARGE_ONCE", LIVE,
+         "the retracted 'charge once' pyRTA framing's answers on the LJ lanes",
+         "model/a2/gate_pyrta_jitter.py",
+         "pyRTA @ 1f3a649 (bound_charge_once)",
+         "recomputed and compared by gate_pyrta_jitter arm 4 under run_a2"),
+    Site("model/gate_spuri_candidates.py", "SWEEP", LIVE,
+         "the deterministic no-jitter sweep: lane-instances, and how many the "
+         "old candidate search fell short on",
+         "model/gate_spuri_candidates.py",
+         "seed 3, 3000 trials",
+         "recomputed every run; drift is red"),
     Site("model/gate_sda_hold.py", "W5_FOUND", LIVE,
          "ruling W's recorded setup findings (data moves with SCL released "
          "on ckhold_over and i2cframe d = 16/17), which M_NO_HOLD_GATE must "
@@ -294,6 +354,20 @@ SPEC_SYMBOLS = {
     # `test/measure_phases.py` on every run and adjudicated from there, which
     # is why there is no RECORD entry to pair with this exclusion either.
     ("test/make_smoke_image.py", "CKOD_DELAYS"),
+    # ⭐ Ruling DT-C's must-fire subject: a program DESIGN (searched, the
+    # search recorded beside it), not an observation -- what it measures is
+    # written to probe_a2/a2.json by test/a2_run.sh on every run.
+    ("test/make_smoke_image.py", "CKHEAVY_CLOCKED"),
+    # ⭐ The exact-witness INSTANCES of rulings Y-R and Z: lane sets chosen
+    # for what they stress, inputs to TChecker / pyRTA / our recurrence. The
+    # verdicts on them are the RECORD sites above.
+    ("model/a2/jitter_instances.py", "Z_INSTANCES"),
+    # ⭐ ruling A3: which interferer produces our recurrence's pessimism on
+    # which subject -- lane NAMES (the digits are in "400 kHz"), a mapping to
+    # the TChecker records, not a measurement.
+    ("model/a2/gate_pin_subsets.py", "Z4_SHAPES"),
+    ("model/a2/jitter_instances.py", "LJ_INSTANCES"),
+    ("model/a2/jitter_instances.py", "TIE_INSTANCES"),
     # ⭐ THE I2C MODE RATE CEILINGS -- 100 kHz, 400 kHz, 1 MHz. These are what
     # the mode NAMES mean, not observations of anything, and they are the
     # loosest kind of input: an I2C mode is a MAXIMUM rate, so a slower clock
@@ -687,9 +761,14 @@ def readme_sources():
             "T": int(l.T), "C": int(l.C), "n": int(getattr(l, "n", 1)),
             "t": int(getattr(l, "t", l.T)), "J": int(getattr(l, "J", 0)),
             "D_tol": int(l.D_tol)}
+    # ⛔ RULING A1/A9: the "ours" column reads the ANALYSIS ledger (our
+    # recurrence after ruling Z), the published column the digest ledger
+    # (pyRTA). `lane_digest.selftest` checks the analysis entry is live.
+    an = ld.ANALYSIS_LEDGER[-1]
     return {"r": r, "margin": int(m.group(2)), "bar": int(bar.group(1)),
             "witness": witness, "lanes": lanes, "dstar": jp.D_STAR,
-            "entry": ld.DIGEST_LEDGER[-1][0]}
+            "entry": ld.DIGEST_LEDGER[-1][0],
+            "ours_margin": int(an[3]["ours_margin"]), "analysis": an[1]}
 
 
 def readme_audit(text, src):
@@ -722,9 +801,12 @@ def readme_audit(text, src):
                          % (r, rr[0][1], rr[0][2], src["entry"], src["r"],
                             src["margin"], src["bar"]))
     j1 = _J1_ROW.findall(text)
-    if len(j1) != 1 or any(int(x) != src["margin"] for x in j1[0]):
+    want_j1 = (src.get("ours_margin", src["margin"]), src["margin"])
+    if len(j1) != 1 or (int(j1[0][0]), int(j1[0][1])) != want_j1:
         probs.append("the shipped `J = 1` row must read %d | %d (ours | "
-                     "pyRTA); found %s" % (src["margin"], src["margin"], j1))
+                     "pyRTA -- ours from analysis %s, pyRTA published); "
+                     "found %s" % (want_j1[0], want_j1[1],
+                                   src.get("analysis", "-"), j1))
     sc = _SCOPED.findall(text)
     if not sc:
         probs.append("the scoped claim `d_min ≥ D* = %d → J = 1` is absent"

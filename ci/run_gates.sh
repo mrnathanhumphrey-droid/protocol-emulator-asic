@@ -197,6 +197,12 @@ GATES=(
   # image table has required cells; the refusal covers the unclocked frame.
   # The clocked SHIFTIN's release had hold 0 on every one until ruling K.
   model/gate_sda_hold.py
+  # ⛔⛔ Z -- OUR RECURRENCE SEARCHES SPURI'S FULL CANDIDATE SET. It searched
+  # only the subject's own releases and fell below TChecker's exact worst case
+  # on 7 of 8 instances (184 of 6,601 with no jitter). It is CI's only timing
+  # floor (no pyRTA here), so this runs here: >= the recorded exact verdicts,
+  # the old search shown failing, the step set shown complete.
+  model/gate_spuri_candidates.py
   # ⛔⛔ M -- EVERY IMAGE WRITES THE WHOLE STORE. The store has no reset, and a
   # 51-byte image left 205 bytes holding power-up contents, one missing REARM
   # from running on real pins. Every image is now the program plus the defined

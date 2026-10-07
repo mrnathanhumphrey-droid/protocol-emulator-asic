@@ -148,8 +148,22 @@ MARGIN_BAR = 4          # pre-registered in ARCH_PREREG_01.md
 # {12, 11, 10, 9, 8, 7, 6, 5, 4} -- it clears the bar at every swept J. Ours
 # going negative at J = 8 is the cross-check being conservative, NOT an
 # infeasibility, and `gate_c3_requote.py` tables both under their own names.
+# ⛔⛔ RULING Z MOVED THIS, LEGITIMATELY, AND THE OLD VALUES ARE KEPT HERE:
+#   before Z: {0: 12, 1: 11, 2: 7, 3: 6, 4: 5, 5: 4, 6: 3, 7: 2, 8: -2}
+# Our recurrence searched only the subject's own release offsets and could fall
+# BELOW the exact worst case; with Spuri's full candidate set it is sound and,
+# on I2C and UART-rx, pessimistic (TChecker, ruling Z4: truth = pyRTA). It is a
+# regression pin for OUR recurrence, so it moves with it; the historical C = 3
+# re-quote is protected separately in gate_c3_requote.
 EXPECTED = {
-    0: 12, 1: 11, 2: 7, 3: 6, 4: 5, 5: 4, 6: 3, 7: 2, 8: -2,
+    0: 11, 1: 9, 2: 7, 3: 6, 4: 5, 5: 4, 6: 2, 7: 0, 8: -2,
+}
+# ⭐⭐ RULING A4: THE VERDICT IS pyRTA's. Its min margin per J_pipe, recorded
+# because this gate must not NEED pyRTA (its header says why); when the PINNED
+# pyRTA is present the sweep is recomputed and compared, so the record is
+# checked rather than trusted. pyRTA @ 1f3a649 via `pyrta_bound.bound`.
+PYRTA_SWEEP = {
+    0: 12, 1: 11, 2: 10, 3: 9, 4: 8, 5: 7, 6: 6, 7: 5, 8: 4,
 }
 # ⛔ RE-DERIVED WITH THE TABLE. This is what the UNSOUND interference form
 # (jitter omitted from the interference a jittery lane imposes) reports at
@@ -235,6 +249,46 @@ def main() -> int:
         print("        which, so this gate is RED rather than re-recording.")
         return 1
     print("    => the sweep matches the record at every J")
+
+    # ---- face (a'): RULING A4 -- the VERDICT, on pyRTA ----------------------
+    print()
+    print("  --- face (a'): THE VERDICT -- pyRTA's min margin per J (primary) ---")
+    from pyrta_src import pinned_pyrta
+    import pyrta_bound
+    src = pinned_pyrta(quiet=True)
+    live = {}
+    if src:
+        for j in sorted(PYRTA_SWEEP):
+            ls = lanes_at(j)
+            live[j] = min(l.margin(pyrta_bound.bound(src, ls, i)[0])
+                          for i, l in enumerate(ls))
+    print("    %-7s %-8s %-8s %-9s %s" % ("J_pipe", "pyRTA", "verdict", "ours",
+                                         "ours <= pyRTA (margins)"))
+    bad_dir, py_drift = [], []
+    for j in sorted(PYRTA_SWEEP):
+        p = PYRTA_SWEEP[j]
+        if src and live[j] != p:
+            py_drift.append((j, p, live[j]))
+        o = sound[j]["min_margin"]
+        if o > p:
+            bad_dir.append(j)
+        print("    %-7d %-8d %-8s %-9d %s"
+              % (j, p, "PASS" if p >= MARGIN_BAR else "*** FAIL ***", o,
+                 "yes" if o <= p else "*** NO"))
+    print("    pyRTA sweep %s" % (
+        "recomputed live (pinned pyRTA) and identical to the record"
+        if src and not py_drift else
+        "NOT recomputed -- pyRTA absent here; the record is checked under "
+        "run_a2" if not src else "*** DRIFTED from the record"))
+    for d in py_drift:
+        print("    *** J_pipe=%d: recorded %d, pyRTA now %d" % d)
+    print("    ⇒ under pyRTA every swept J clears the bar of %d; under ours "
+          "J >= 6 does not" % MARGIN_BAR)
+    print("      (ours is the pessimistic cross-check; J = 5 sits exactly at "
+          "the bar under ours). The SCOPED claim is J = 1: pyRTA %d, ours %d."
+          % (PYRTA_SWEEP[1], sound[1]["min_margin"]))
+    if bad_dir or py_drift:
+        return 1
 
     print()
     print("  --- face (b) MUST-FIRE: the old sum's number at the same J ---")
@@ -370,11 +424,23 @@ def main() -> int:
                          if l.name.startswith("SPI-target") else l.D_tol),
                   n=l.n, t=l.t, J=l.J)
             for l in lanes_at(pred)]
+    # ⛔ RULING Z: "ITS OWN TERMS" INCLUDE THE RECURRENCE AS IT THEN WAS. The
+    # frozen 11 was computed by the subject-releases-only search, which ruling
+    # Z found UNSOUND (below TChecker's exact worst case on 7 of 8 instances).
+    # So the reproduction uses that search (`spuri_candidates=False`), and the
+    # fixed recurrence's reading of the same configuration is REPORTED beside
+    # it -- the pre-registration is not re-fitted, and its decision is judged
+    # against the sound number too.
     hist_min = min(l.margin(response_time_b(l, hist,
-                                            jitter_in_interference=True)["r"])
+                                            jitter_in_interference=True,
+                                            spuri_candidates=False)["r"])
                    for l in hist)
+    hist_fixed = min(l.margin(response_time_b(l, hist)["r"]) for l in hist)
     print("    the configuration it was WRITTEN AGAINST (C = %d): margin %d"
           % (C_PREREG, hist_min))
+    print("    ... under the fixed recurrence (ruling Z): margin %d -- %s"
+          % (hist_fixed, "still clears the bar of %d" % MARGIN_BAR
+             if hist_fixed >= MARGIN_BAR else "*** BELOW the bar"))
     if hist_min != DOUBLE_BUFFER_PREREG["margin_at_predicted_J"]:
         print("    *** the pre-registration records margin %d at J=%d, and the"
               % (DOUBLE_BUFFER_PREREG["margin_at_predicted_J"], pred))

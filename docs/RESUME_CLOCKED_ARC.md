@@ -54,16 +54,29 @@ here** (ruling CI1). A local pass is reported as local.
 | **power-up run** | with PROG low at reset release, the engine **ran on the power-up contents of the unreset store**: a power-up glitch on real pins, before any host load. Never on the owed list; found as a side effect of M5's first cut. | `eng_run = run & store_full` (`project.v`): the engine runs only after 2^AW consecutive writes since `rst_n` | `231b37c` |
 | **partial load** | a host loading fewer than 256 bytes left the rest of the store at power-up contents, one missing REARM from running on pins | the same gate, plus a release-time CONFIG_ERR (`short_load`) | `231b37c` |
 | **ACK-slot release unheld** (K) | the clocked SHIFTIN released SDA in the cycle SCL fell: `t_HD;DAT = 0` into every ACK slot | the release goes through the SDA hold pipeline | `cd57eee` |
-| **setup under contention** (W1) | `d > SDA_HOLD` fixed the hold, not the setup: a lane dispatched late by contention released SCL before its held data landed, so **SDA changed while SCL was high**, a START/STOP to any receiver (11 of 562 on `ckhold_over`, 10 / 3 on the unclocked frame at d = 16 / 17) | a lane is ineligible while its own hold + `SDA_SETUP` (3 cy) is pending; contention-independent; +5 flops | *this commit* |
-| **unclocked release unheld** (W2) | the unclocked frame's SHIFTIN release held only the inter-dispatch gap minus jitter (14 at d = 16) | the release goes through the hold pipeline when it moves SDA | *this commit* |
+| **setup under contention** (W1) | `d > SDA_HOLD` fixed the hold, not the setup: a lane dispatched late by contention released SCL before its held data landed, so **SDA changed while SCL was high**, a START/STOP to any receiver (11 of 562 on `ckhold_over`, 10 / 3 on the unclocked frame at d = 16 / 17) | a lane is ineligible while its own hold + `SDA_SETUP` (3 cy) is pending; contention-independent; +5 flops | `c8a4126` |
+| **unclocked release unheld** (W2) | the unclocked frame's SHIFTIN release held only the inter-dispatch gap minus jitter (14 at d = 16) | the release goes through the hold pipeline when it moves SDA | `c8a4126` |
+
+⛔⛔ **T4 — WHAT `d2b7d34`'s "GATE-LEVEL-VERIFIED" COVERED.** It covered
+**function**: gl_test 8 of 8 and precheck passing (gds 37287797590). It did
+**not** cover timing. At the slow corner (1.08 V, 125 °C) and 50 MHz, setup WNS
+was −5.44 ns over 53 paths (TNS −228.9). Every path ran from `u_eng.now[0]`
+through the serial EDF argmin into the dispatch registers, about 26 ns against
+20. Typ and fast were clean. Utilisation was 49.3%, not "~10%". Ruling T makes
+closing every signoff corner at 50 MHz, or an explicit measured
+operating-condition scope, a **lock criterion**.
 
 ---
 
 ## OWED — Wilson's order
 
-**`W`** → **checkpoint harden** (GO; fix anything it finds) → `E` → D* sweep
-+ live window check → ACK (b)–(c) → sigrok re-certification → FRAM write +
-random read → pe_asm protocol front-end → lock.
+harden (gds 37678507030 on `c8a4126`) → **T1 + T2** report → commit
+**Y-R / Z / DT / A** → T fix plan (Nathan's call) → `E` → D* sweep + live
+window check (P9w under contention) → ACK (b)–(c) → sigrok re-certification →
+FRAM write + random read → pe_asm protocol front-end → lock.
+**Lock criteria now include T3:** setup and hold met at every signoff corner at
+50 MHz, or an explicit, measured operating-condition scope carried into every
+timing claim.
 
 | item | what | state |
 | --- | --- | --- |
@@ -100,6 +113,11 @@ random read → pe_asm protocol front-end → lock.
 | **W7** | mode floor covers unclocked OD frames (t_LOW, t_HIGH, t_SU;DAT); i2cframe d = 16 refused, d = 62 Fm+ | ✅ landed — SPEC §25 |
 | (opt) | `ckdense` margin: a heavier feasible variant firing on several releases | non-blocking |
 | **M7** | HOST_INTERFACE: the full-store rule binds the FIRST load after `rst_n`; partial reloads after it run | ✅ landed |
+| **Y-R** | "pyRTA double-counts jitter" WITHDRAWN (TChecker: D − J exact 8/8, charge-once below truth 5/8); wrapper unchanged | ✅ local — SPEC §26 |
+| **Z** | our recurrence gets Spuri's full candidate set (old search below TChecker on 7/8; 184/6,601 at J = 0); `gate_spuri_candidates` (CI), `zone/run_z.py` (24/24) | ✅ local — SPEC §26 |
+| **DT** | 1.6a per program (r_i ≤ t_i, measured vs TChecker); QUEUE condition; ckdense + ckhold_over non-admissible; ckheavy is Ruling S's subject; D_sched ≤ D_tol asserted | ✅ local — SPEC §26 |
+| **A** | pyRTA primary wherever published/judged; ours an asserted ≥ cross-check; README `J = 1` row 9 / 11 (ours column keep/drop = Nathan's prose call); 1.6m re-priced (pyRTA C = 3 margin 1); W1 jitter on pyRTA's side; `ANALYSIS_LEDGER` | ✅ local — SPEC §26 |
+| **T** | 50 MHz timing closure, LOCK BLOCKER. T1/T2 from the harden; fix plan named only after the paths are; any argmin restructure must preserve the lowest-index tie rule, proven equal to the serial one | T1/T2 owed (harden running) |
 | **CHECKPOINT (H-CK1–3)** | full harden (gds + precheck + gl_test) on the W dev SHA without merging; report flops / utilisation / slack / gl_test / precheck / wall time vs `d2b7d34` (3127 flops, ~10%, 8/8); gl_test must exercise M5 short-load, D1/U refusal, clocked OD park/rebase, the hold pipeline, W1 — add arms or say which it can't reach. ⚠ Scope is every `src/` commit since `d2b7d34`, now also K, U and W | **NEXT — GO** |
 | **CI2** | retro: confirm the `tb_trace` path gate was the ONLY failure on `6abb6dd..e1fa642` | owed |
 | **E** | swallowed-exception audit, **+E+**: `set -o pipefail` in every `.sh` under `ci/` and `test/` with a lint gate (must-fire: a failing command piped into `tail`) | owed |

@@ -5,8 +5,11 @@
 # model's shipped lane set and then enforced on `ckod` -- a DIFFERENT lane set.
 # It held only because `ckod`'s measured lateness (7) happened to sit under it,
 # so nothing on the bench could ever show that a bound belongs to a program.
-# This runs ONE feasible program, `ckdense` (U = 0.566, J = 1, measured
-# lateness 10 -- re-spanned to [20, 21, 22, 23] by ruling W), twice:
+# This runs ONE ADMISSIBLE program, `ckheavy` (ruling DT-C: three clocked
+# open-drain lanes at 30/31/32 beside two busy push-pull lanes; U = 0.583,
+# J = 1, 1.6a met, measured lateness 10/11/13), twice. ⛔ It replaced
+# `ckdense`, which fails 1.6a under W1 (DT-B) and so cannot carry a claim:
+# a must-fire on a program outside the model proves nothing about the model.
 #
 #   own    -- with ITS OWN derived per-lane budgets (clocked_a2_bounds.json) -> must PASS
 #   light  -- with `corpus_i2c`'s budget (8) on every clocked lane -> must FAIL
@@ -31,19 +34,22 @@ tool_banner verilator
 rm -rf "$OUT"; mkdir -p "$OUT"
 JSON="$OUT/a2.json"
 
-"$PY" test/make_smoke_image.py --ckdense > "$OUT/img.log" 2>&1 || exit 1
+SUBJ=ckheavy_image.hex
+"$PY" test/make_smoke_image.py --ckheavy > "$OUT/img.log" 2>&1 || exit 1
 "$PY" test/corpus.py >> "$OUT/img.log" 2>&1 || exit 1
 
 # ⛔ BOTH BUDGETS COME FROM THE GENERATED FILE, never typed here: `own` is the
 # heavy program's row and `light` is built from the light program's single
 # clocked-lane budget, so the must-fire tracks the derivation if it moves.
-OWN="$("$PY" -c "import sys; sys.path.insert(0,'test'); import benchset as b; print(b.a2_slack_arg('test/ckdense_image.hex').split('=',1)[1])")" || exit 1
-LIGHTV="$("$PY" -c "
+# ⭐ `light` goes on EXACTLY the subject's clocked lanes (read from its row),
+# -1 elsewhere -- the subject has push-pull lanes that carry no A2 budget.
+OWN="$("$PY" -c "import sys; sys.path.insert(0,'test'); import benchset as b; print(b.a2_slack_arg('test/$SUBJ').split('=',1)[1])")" || exit 1
+LIGHT="$("$PY" -c "
 import json; b=json.load(open('test/clocked_a2_bounds.json'))
-print(b['corpus_i2c.hex']['lanes']['0']['slack'])")" || exit 1
-LIGHT="$LIGHTV,$LIGHTV,$LIGHTV,$LIGHTV,-1"
-echo "  own   budgets (ckdense's own lane set) : $OWN"
-echo "  light budgets (corpus_i2c's, on all)   : $LIGHT"
+v=b['corpus_i2c.hex']['lanes']['0']['slack']; ck=b['$SUBJ']['lanes']
+print(','.join(str(v) if str(i) in ck else '-1' for i in range(5)))")" || exit 1
+echo "  own   budgets ($SUBJ's own lane set) : $OWN"
+echo "  light budgets (corpus_i2c's, on its clocked lanes) : $LIGHT"
 
 SRCS="test/tb_trace.v test/fram_i2c.v test/fram_spi.v src/pe_engine.v src/pe_store.v src/project.v"
 FLAGS="--cc --exe --main --timing --public-flat-rw -Wno-fatal"
@@ -53,7 +59,7 @@ make -C "$OUT/build" -f Vtb_trace.mk -j 4 >> "$OUT/build.log" 2>&1
 [ -x "$OUT/build/a2.sim" ] || { echo "  *** build failed"
     grep -E '^%Error' "$OUT/build.log" | head -4; exit 1; }
 
-IMG=test/ckdense_image.hex
+IMG=test/$SUBJ
 NB=$(tr -s ' \n' '\n' < "$IMG" | grep -cv '^$')
 rc=0
 for arm in own light; do

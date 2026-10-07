@@ -17,6 +17,14 @@ anyone running the bench set, like a program the guarantee covers.
     PINMAP    a driving lane collides with `project.v`'s pad override --
               DECLARED in `test/corpus.py PAD_COLLISION` (P5), read from
               there rather than restated.
+    QUEUE     condition 1.6a broken PER PROGRAM (ruling DT-A): some lane's
+              worst-case response, from its NOMINAL release and with W1's
+              jitter on every lane, exceeds its tightest action delay --
+              `r_i > t_i`, so a job can still be pending at its successor's
+              release (`program_a2.queue_slot`). That is exactly where
+              TChecker's `ovr` becomes reachable, so a program outside it is
+              one no exact witness can adjudicate. Not judged on an OVERLOAD
+              image (no finite r exists to compare).
 
 An image may violate any of them only if `NON_ADMISSIBLE` names it with THOSE
 conditions and a reason. Undeclared is RED; a declared condition that no longer
@@ -64,7 +72,7 @@ import pe_isa as I                                                # noqa: E402
 import program_a2 as pa                                           # noqa: E402
 from bursty import L_SYNC                                         # noqa: E402
 
-OVERLOAD, PORT, PINMAP = "OVERLOAD", "PORT", "PINMAP"
+OVERLOAD, PORT, PINMAP, QUEUE = "OVERLOAD", "PORT", "PINMAP", "QUEUE"
 
 #: ⛔ DECLARED BY NAME, each with the conditions it breaks and why that is
 #: intended. PINMAP is NOT listed here -- it lives in corpus.PAD_COLLISION.
@@ -87,17 +95,17 @@ NON_ADMISSIBLE = {
         "and gate_cj_bounds' sub-D* double-buffer number (that gate is "
         "RETIRED under CJ; the figure is history). No "
         "claim scoped to admissible programs was measured on it (Q3)."),
-    "corpus_spim.hex": ({PORT},
+    "corpus_spim.hex": ({PORT, QUEUE},
         "the SPI-master TRACE image at d = 7, below D*: it exists to move the "
         "uo_out bank for the corpus witness, not as the shipped 1 MHz SPI "
         "lane (25 cycles)."),
-    "corpus_sptgt.hex": ({PORT},
+    "corpus_sptgt.hex": ({PORT, QUEUE},
         "the SPI-target trace image at d = 6, below D*: it exists to exercise "
         "the target's async MISO release for the corpus witness."),
-    "corpus_uartrx.hex": ({PORT},
+    "corpus_uartrx.hex": ({PORT, QUEUE},
         "the UART-rx trace image at d = 11, below D*: it exercises the ARM "
         "and edge-capture path at a seeded phase."),
-    "chain_image.hex": ({PORT},
+    "chain_image.hex": ({PORT, QUEUE},
         "`build_chain`, the chaining re-arm mechanism at d = 12: a mechanism "
         "test, not a schedulable program."),
     "edge_image.hex": ({PORT},
@@ -107,14 +115,27 @@ NON_ADMISSIBLE = {
         "the no-timeout variant of the tb_edge image (d = 12)."),
     "edge_image_rise.hex": ({PORT},
         "the rising-edge variant of the tb_edge image (d = 12)."),
-    "noop_image.hex": ({PORT},
+    "noop_image.hex": ({PORT, QUEUE},
         "the half-bit no-op idiom at d = 7: the no-op exists to offset a lane "
         "by less than one period, which is below D* by construction."),
-    "noop_image_bad.hex": ({PORT},
+    "noop_image_bad.hex": ({PORT, QUEUE},
         "the no-op idiom's must-fire image (d = 7)."),
     "noop_image_h19.hex": ({PORT},
         "the no-op idiom at the measured half value h = 19 (d = 12)."),
-    "tx_image.hex": ({PORT},
+    # ⛔ RULING DT-B. ckdense's PINMAP is declared in corpus.PAD_COLLISION;
+    # QUEUE is new: after W1 its clocked lanes reach r = 28/27/29/31 against
+    # T = 20/21/22/23 (pyRTA), the regime where TChecker's `ovr` is reachable
+    # and neither our recurrence nor pyRTA can be adjudicated. A STRESS image,
+    # no longer Ruling S's must-fire subject.
+    "ckdense_image.hex": ({QUEUE},
+        "the A2 scheduler stress image (four dense clocked lanes, d = 20..23). "
+        "Fails 1.6a under W1's jitter (DT-B), so no claim rests on it; kept "
+        "because it is where W1 binds hardest and where W6's term is priced."),
+    "ckhold_over_image.hex": ({QUEUE},
+        "D4's 'must RUN' boundary point at d = SDA_HOLD + 1 = 16, below every "
+        "mode floor: under W1 its lane's r = 18 > t = 16 (DT-A). It exists to "
+        "show the silicon RUNS one cycle above the hold, not to be scheduled."),
+    "tx_image.hex": ({PORT, QUEUE},
         "`tb_tx`'s TX-queue ownership image at d = 12-13, below D*: it tests "
         "routing of host bytes, not schedulability."),
 }
@@ -156,6 +177,13 @@ def conditions(name, img):
         out.add(PORT)
     if corpus.pad_collisions(img):
         out.add(PINMAP)
+    # ⛔ DT-A, our recurrence only (pyRTA is not in CI): after Z1 ours is >=
+    # pyRTA on every admissible lane (DT-F), so this can only be STRICTER
+    # than the published number -- the safe side for a refusal.
+    if OVERLOAD not in out:
+        q = pa.queue_slot(img)
+        if any(v["r"] is not None and not v["ok"] for v in q.values()):
+            out.add(QUEUE)
     return out, dm, pa.utilisation(ls)
 
 
@@ -197,6 +225,10 @@ def main() -> int:
     imgs = images()
     probs, rows = audit(imgs, NON_ADMISSIBLE, corpus.PAD_COLLISION,
                         dgf.DELIBERATE)
+    print("  QUEUE (1.6a) reads OUR recurrence here (no pyRTA in CI) -- intended "
+          "for a refusal threshold:")
+    print("  ours >= pyRTA on every admissible lane (gate_a2_program §1b), so "
+          "it can only refuse MORE (ruling A7)")
     print("  %d image(s); %d refusal image(s) exempt (declared in DELIBERATE)"
           % (len(imgs), len(imgs) - len(rows)))
     print()
@@ -232,7 +264,43 @@ def main() -> int:
     hit2 = any("stale" in x for x in p2)
     print("    a stale declaration is reported              %s"
           % ("ok" if hit2 else "*** MISSED"))
-    if not (hit and hit2):
+    # ---- DT-D: D_sched <= D_tol on every image ----------------------------
+    # ⛔ `program_a2.lane_set` PATCHES a header whose EDF key is looser than
+    # its tolerance (`if ds > dt: dt = ds`) so the model can run at all; that
+    # patch must never be what a tracked image relies on. Not declarable: a
+    # header that schedules a lane later than it tolerates is simply wrong.
+    print()
+    print("  --- DT-D: D_sched <= D_tol on every lane of every image ---")
+    def dsched_bad(img):
+        return [(ln, h["dsched"], h["dtol"]) for ln, h, _a in pa.lanes_of(img)
+                if h["dsched"] > h["dtol"]]
+    viol = [(n, b) for n, img in imgs for b in dsched_bad(img)]
+    for n, (ln, ds, dt) in viol:
+        print("    *** %s lane %d: D_sched %d > D_tol %d" % (n, ln, ds, dt))
+        rc = 1
+    print("    %d image(s): %s" % (len(imgs), "every lane D_sched <= D_tol"
+                                   if not viol else "VIOLATIONS above"))
+    import pe_isa as _isa
+    planted = bytearray(next(img for n, img in imgs if n == "corpus_i2c.hex"))
+    h0 = dgf.unpack(_isa.HDR_FIELDS, planted[:_isa.HDR_BYTES], _isa.HDR_BYTES)
+    h0["dsched"], h0["dtol"] = 200, 100
+    planted[:_isa.HDR_BYTES] = _isa._pack(
+        _isa.HDR_FIELDS, [h0[nm] for nm, _w in _isa.HDR_FIELDS],
+        _isa.HDR_BYTES)
+    fired = bool(dsched_bad(bytes(planted)))
+    print("    must-fire: a planted D_sched 200 > D_tol 100 header is caught  %s"
+          % ("ok" if fired else "*** MISSED"))
+    if not fired:
+        rc = 1
+
+    # ⛔ DT-A's must-fire: ckdense under a name nothing declares must be
+    # reported for QUEUE -- the condition is derived, not read off the list.
+    dense = next(img for n, img in imgs if n == "ckdense_image.hex")
+    p3, _ = audit([("undeclared_queue.hex", dense)], {}, {}, {})
+    hit3 = any("QUEUE" in x for x in p3)
+    print("    an undeclared 1.6a (QUEUE) image is reported  %s"
+          % ("ok" if hit3 else "*** MISSED"))
+    if not (hit and hit2 and hit3):
         rc = 1
 
     print()

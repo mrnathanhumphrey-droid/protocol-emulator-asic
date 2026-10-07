@@ -312,18 +312,45 @@ def c_2mhz_fire():
     by condition (a) ALONE. (a) is therefore not redundant with (b), which is
     the thing a must-fire on this condition should establish."""
     from frontier import build as _fb
-    out = []
+    # ⛔⛔ RULING A6: PRICED ON pyRTA, THE PUBLISHED BOUND, WITH OURS BESIDE IT.
+    # Ruling Z made our recurrence sound and pessimistic; under it the C = 3
+    # margin is 0, so (b) alone would close 2 MHz and (a) would look
+    # redundant. That is a statement about the cross-check. Under pyRTA the
+    # C = 3 margin is 1, (b) holds, and (a) 'C = 2 exactly' is the ONLY thing
+    # keeping 2 MHz closed -- the state the reach planning must see.
+    # Recorded (this gate must run without pyRTA) and recomputed when pinned.
+    import pyrta_bound
+    from pyrta_src import pinned_pyrta
+    src = pinned_pyrta(quiet=True)
+    py, ou = [], []
     for C in (2, 3, 4):
         ls = _fb(C, 1, False)
-        sp = [l for l in ls if l.name.startswith("SPI-target")][0]
-        rc = response_time_b(sp, ls)["r"] - sp.C
-        out.append((C, int(25.0 / 2 - TSU_MASTER - (L_SYNC + rc + OUT_REG))))
-    c3 = dict(out)[3]
+        k = [i for i, l in enumerate(ls) if l.name.startswith("SPI-target")][0]
+        sp = ls[k]
+
+        def m(r):
+            return int(25.0 / 2 - TSU_MASTER - (L_SYNC + (r - sp.C) + OUT_REG))
+        ou.append((C, m(response_time_b(sp, ls)["r"])))
+        py.append((C, m(pyrta_bound.bound(src, ls, k)[0]) if src
+                   else PYRTA_2MHZ[C]))
+    if src and dict(py) != PYRTA_2MHZ:
+        return False, ("pyRTA's 2 MHz margins %s DRIFTED from the record %s"
+                       % (dict(py), PYRTA_2MHZ))
+    c3 = dict(py)[3]
     return c3 > 0, (
-        "measured C -> 2 MHz margin: %s. At C = 3 the margin is %d, so (b) "
+        "measured C -> 2 MHz margin, pyRTA (published%s): %s; ours "
+        "(pessimistic cross-check): %s. Under pyRTA, C = 3 gives %d, so (b) "
         "'margin > 0' STILL HOLDS and 2 MHz is kept closed by (a) 'C = 2 "
-        "exactly' alone -- (a) is load-bearing, not redundant"
-        % (", ".join("C=%d:%d" % x for x in out), c3))
+        "exactly' alone -- (a) is load-bearing. Under ours C = 3 gives %d, "
+        "where (b) would close it too."
+        % ("" if src else ", recorded -- pyRTA absent",
+           ", ".join("C=%d:%d" % x for x in py),
+           ", ".join("C=%d:%d" % x for x in ou), c3, dict(ou)[3]))
+
+
+#: ruling A6 -- pyRTA's 2 MHz SPI-target margin at measured C = 2 / 3 / 4
+#: (frontier.build(C, J_pipe=1, C9=START)); pyRTA @ 1f3a649.
+PYRTA_2MHZ = {2: 3, 3: 1, 4: -1}
 
 
 def _channel():

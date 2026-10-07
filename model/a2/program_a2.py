@@ -181,10 +181,15 @@ def _with_j(bl, J):
                  J=J)
 
 
-def w1_jitter(ls, hs=None, max_iter=64):
+def w1_jitter(ls, hs=None, max_iter=64, src=None):
     """Per lane J_w1, by fixed point; None for a lane with no bound.
 
     Returns (w1 list, reason or None). See the block comment above.
+    ⛔⛔ RULING A8: `src` given -> the lateness `r_i - C` inside the fixed
+    point is pyRTA's, so the jitter a pyRTA number is computed WITH is pyRTA's
+    too and the foreign witness's input is not ours. Without `src` (CI) it is
+    our recurrence's -- >= pyRTA on admissible lanes, so a PESSIMISTIC input,
+    and every pyRTA figure in this file is computed with the pyRTA-side term.
     """
     hs = _hs() if hs is None else hs
     w1 = [0] * len(ls)
@@ -202,7 +207,10 @@ def w1_jitter(ls, hs=None, max_iter=64):
             lanes = [ls[k]["blane"] if k == i else
                      _with_j(ls[k]["blane"], ls[k]["blane"].J + w1[k])
                      for k in range(len(ls))]
-            rr = response_time_b(lanes[i], lanes)["r"]
+            rr = (pyrta_bound.bound(src, lanes, i)[0] if src
+                  else response_time_b(lanes[i], lanes)["r"])
+            if rr is None:
+                return None, "pyRTA gave no bound inside the W1 fixed point"
             new.append(max(0, hs + 1 + (rr - C_SHIPPED) - r["T"]))
         if new == w1:
             return w1, None
@@ -215,6 +223,59 @@ def with_w1(ls, w1, i):
     return [ls[k]["blane"] if k == i else
             _with_j(ls[k]["blane"], ls[k]["blane"].J + w1[k])
             for k in range(len(ls))]
+
+
+def queue_slot(img, src=None):
+    """RULING DT-A -- condition 1.6a PER PROGRAM: r_i <= t_i on every lane.
+
+    ⛔⛔ THE EXACT FORM, MEASURED AGAINST TCHECKER, NOT CHOSEN. `ovr` in the
+    exact model (`zone/gen_edf.py`) fires when a lane's next NOMINAL release
+    finds its previous job still pending or still waiting out its jitter. r is
+    measured from the nominal release and already CONTAINS the lane's own
+    delay, so the boundary is `r_i <= t_i` -- not `r_i + J_i <= t_i`, which
+    would charge the jitter twice. Equality is admissible: solo T=5, C=2, J=3
+    (r = 5 = T) and a blocked T=7 lane (r = 7 = T) both leave `ovr`
+    unreachable, while a blocked T=6 lane at r = 7 reaches it.
+    ⭐ THE LANE'S OWN W1 DELAY IS IN ITS OWN r HERE, unlike in `derive`: the
+    question is whether ANY job of the lane -- including the SCL release W1
+    held back -- can still be pending at the next release, so every lane
+    carries J + J_w1, subject included.
+    ⚠ `t_i` is the lane's tightest action delay (`T` in `lane_set`), which is
+    the event spacing the queue slot has to clear.
+    Returns {lane: {"r": r or None, "T": t, "ok": bool, "why": str or None}}.
+    """
+    ls, _d, _k, _j = lane_set(img)
+    u = utilisation(ls)
+    out = {}
+    if u > 1.0:
+        for r in ls:
+            out[str(r["lane"])] = {"r": None, "T": r["T"], "ok": False,
+                                   "why": "overloaded (U = %.3f)" % u}
+        return out
+    w1, w1_why = w1_jitter(ls)
+    if w1 is None:
+        for r in ls:
+            out[str(r["lane"])] = {"r": None, "T": r["T"], "ok": False,
+                                   "why": w1_why}
+        return out
+    full = [_with_j(r["blane"], r["blane"].J + w1[k]) for k, r in enumerate(ls)]
+    # A8: pyRTA's figure uses pyRTA's own W1 term
+    w1p = w1_jitter(ls, src=src)[0] if src else None
+    fullp = ([_with_j(r["blane"], r["blane"].J + w1p[k])
+              for k, r in enumerate(ls)] if w1p is not None else None)
+    for i, r in enumerate(ls):
+        try:
+            ours = response_time_b(full[i], full)["r"]
+        except Exception as exc:                          # noqa: BLE001
+            out[str(r["lane"])] = {"r": None, "T": r["T"], "ok": False,
+                                   "why": "own recurrence raised %s"
+                                   % type(exc).__name__}
+            continue
+        p = pyrta_bound.bound(src, fullp, i)[0] if fullp else None
+        rr = max(x for x in (ours, p) if x is not None)
+        out[str(r["lane"])] = {"r": rr, "T": r["T"], "ok": rr <= r["T"],
+                               "why": None}
+    return out
 
 
 def derive(img, src=None):
@@ -237,17 +298,20 @@ def derive(img, src=None):
     `ckdense` lanes), so a floor taken from `r_ours` alone is never LESS strict
     than the pyRTA one on any program we have -- but that is an observation,
     not a theorem, so when pyRTA is present the max is used rather than trusted.
-    ⛔⛔ AND SINCE W6 THE OBSERVATION IS FALSE, which is why the max was right.
-    W1's release jitter (up to 12 on `ckdense`) flips every `ckdense` lane:
-    pyRTA 21/23/25/25 against ours 16/16/16/19. Diagnosed, not assumed: an extended
-    Spuri candidate set (every interferer's `kT_j + D_j - J_j - D_i`) leaves
-    ours unchanged, and pyrta_bound's framing gives an interferer BOTH the
-    jitter-inflated arrival curve AND the deadline `D_j - J_j` -- charging J
-    twice, since the jobs jitter bunches cannot all carry the tightened
-    deadline. So pyRTA is the pessimistic one here, ours is Spuri's count, and
-    the bench budgets (pyRTA-primary) are the looser, sound pair. ⚠ In CI,
-    where pyRTA is absent, `r_floor` is ours alone -- for these lanes up to 9
-    cycles less strict than the published number.
+    ⛔⛔ AND THE OBSERVATION WAS FALSE, which is why the max was right -- but
+    the first diagnosis of WHY was also false, and is WITHDRAWN (ruling Y-R1).
+    Under W1's jitter pyRTA came out above ours on `ckdense`, and this
+    docstring blamed pyrta_bound for "charging J twice". TChecker refutes
+    that: on large-jitter instances the D - J framing is EXACT (8 of 8 lanes)
+    and the "charge once" alternative is BELOW the truth (5 of 8). The defect
+    was OURS: `response_time_b` searched only the subject's own release
+    offsets, and fell below the exact worst case (7 of 8 queue-depth-one
+    instances; 184 of 6,601 even with no jitter). Ruling Z gave it Spuri's full
+    candidate set; `model/gate_spuri_candidates.py` holds it there. ⇒ After Z,
+    ours >= pyRTA on every lane of every ADMISSIBLE program (checked in
+    `gate_a2_program` §1b), which is what CI's pyRTA-free floor needs.
+    ⚠ `ckdense` still has ours < pyRTA; it fails 1.6a (ruling DT-B) and is a
+    declared stress image, outside what any exact witness adjudicates.
     """
     ls, d_min, k, j_prog = lane_set(img)
     blanes = [r["blane"] for r in ls]
@@ -256,11 +320,17 @@ def derive(img, src=None):
            "lanes": {}}
     # ⛔ W6: the W1 release jitter of every hold-loading lane, by fixed point
     # (see `w1_jitter`). Only defined on a set that is not overloaded.
-    w1, w1_why = (None, None)
+    w1, w1_why, w1p = (None, None, None)
     if u <= 1.0:
         w1, w1_why = w1_jitter(ls)
         res["w1"] = ({str(r["lane"]): w1[i] for i, r in enumerate(ls)
                       if r["loads_hold"]} if w1 is not None else None)
+        # ⛔ A8: pyRTA's column is computed with pyRTA's OWN W1 term. Recorded
+        # beside ours (top-level key `w1_pyrta`, pyRTA-only like `r_pyrta`).
+        w1p = w1_jitter(ls, src=src)[0] if (src and w1 is not None) else None
+        if w1p is not None:
+            res["w1_pyrta"] = {str(r["lane"]): w1p[i]
+                               for i, r in enumerate(ls) if r["loads_hold"]}
     for i, r in enumerate(ls):
         if not r["clocked_od"]:
             continue
@@ -291,7 +361,8 @@ def derive(img, src=None):
             entry["r_floor"] = ours
             res["lanes"][str(r["lane"])] = entry
             continue
-        p, err = pyrta_bound.bound(src, blanes, i)
+        p, err = pyrta_bound.bound(src, with_w1(ls, w1p, i)
+                                   if w1p is not None else blanes, i)
         entry["r_pyrta"] = p
         cands = [x for x in (ours, p) if x is not None]
         entry["r_floor"] = max(cands) if cands else None
@@ -324,6 +395,7 @@ def lane_responses(img, src=None):
     w1, w1_why = w1_jitter(ls)
     if w1 is None:
         return {r["lane"]: (None, w1_why) for r in ls}
+    w1p = w1_jitter(ls, src=src)[0] if src else None     # A8
     out = {}
     for i, r in enumerate(ls):
         bl = with_w1(ls, w1, i)
@@ -333,7 +405,8 @@ def lane_responses(img, src=None):
             out[r["lane"]] = (None, "own recurrence raised %s"
                               % type(exc).__name__)
             continue
-        p = pyrta_bound.bound(src, bl, i)[0] if src else None
+        p = (pyrta_bound.bound(src, with_w1(ls, w1p, i), i)[0]
+             if w1p is not None else None)
         out[r["lane"]] = (max(x for x in (ours, p) if x is not None), None)
     return out
 

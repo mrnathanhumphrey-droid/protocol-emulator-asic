@@ -311,9 +311,15 @@ def check_mode_floor(img):
                 % (ln, e["T"], lag, lo, need))
         claims[int(ln)] = (mode, lo, lag)
     claims.update(check_unclocked_floor(img, src))
+    # ⛔ RULING A7: a REFUSAL THRESHOLD, not a published number -- it reads
+    # ours when pyRTA is absent, ON PURPOSE: after ruling Z ours is >= pyRTA on
+    # every admissible lane (gate_a2_program §1b), so this can only refuse
+    # MORE than the published bound would, never accept what it refuses.
     check_mode_floor.basis = (
         "max(our recurrence, pyRTA @ %s)" % PINNED_COMMIT[:12] if src
-        else "our recurrence only -- pyRTA absent or unpinned")
+        else "our recurrence only -- pyRTA absent or unpinned; INTENDED for a "
+             "refusal threshold: ours >= pyRTA on every admissible lane, so "
+             "this is the stricter side (ruling A7)")
     return claims
 
 
@@ -622,7 +628,37 @@ def assemble(lanes, headers):
     # every route into the chip shares -- deriving it from the tuples instead
     # would be a second decoder of the same program.
     check_mode_floor(img)
+    check_queue_slot(img)
     return img
+
+
+def check_queue_slot(img):
+    """RULING DT-A: condition 1.6a per program -- `r_i <= t_i` on every lane.
+
+    A lane whose worst-case response (from its nominal release, W1's jitter
+    included) exceeds its tightest action delay can still be pending when its
+    successor is released. The engine holds one job per lane, so that program
+    is outside the model every bound here rests on, and outside what TChecker
+    can adjudicate (`ovr` reachable). `program_a2.queue_slot` has the exact
+    form and why equality is admissible. ⭐ pyRTA when pinned, else our
+    recurrence -- which is >= pyRTA on every admissible lane (DT-F), so the CI
+    form can only refuse MORE, never accept what pyRTA would refuse.
+    """
+    src = pinned_pyrta(quiet=True)
+    for ln, v in sorted(program_a2.queue_slot(img, src).items(),
+                        key=lambda kv: int(kv[0])):
+        if v["r"] is None:
+            continue                      # overload: refused by compute_j
+        if not v["ok"]:
+            raise Reject(
+                "lane %s can still be pending at its own next release: its "
+                "worst-case response in THIS program is %d cycles (from its "
+                "nominal release, W1 jitter included) against a tightest "
+                "action delay of %d. The engine holds one job per lane "
+                "(condition 1.6a, r_i <= t_i), so this program is outside "
+                "every timing bound -- space that lane's actions to >= %d, "
+                "or lighten its neighbours. It is per program."
+                % (ln, v["r"], v["T"], v["r"]))
 
 
 def report(lanes, headers):
@@ -949,6 +985,26 @@ def main() -> int:
                                                (" but did not name %s"
                                                 % missing) if missing
                                                else "")))
+        if not ok:
+            rc = 1
+
+    # ---- MUST-FIRE: DT-A, condition 1.6a per program ----------------------
+    print()
+    print("  --- must-fire: DT-A -- one job per lane (1.6a), per program ---")
+    for name, img_b, want_reject in (
+            ("ckdense (four dense clocked lanes, W1 binding)",
+             full_store(_msi.build_ckod(_msi.CKDENSE_DELAYS)), True),
+            ("corpus_i2c", bytes(int(x, 16) for x in open(
+                os.path.join(ROOT, "test", "corpus_i2c.hex")).read().split()),
+             False)):
+        try:
+            check_queue_slot(img_b)
+            got_reject, msg = False, ""
+        except Reject as e:
+            got_reject, msg = True, str(e)
+        ok = got_reject == want_reject and (not want_reject or "1.6a" in msg)
+        print("    %-46s %s" % (name, ("rejected" if got_reject else "accepted")
+                                if ok else "*** WRONG (%s)" % msg[:60]))
         if not ok:
             rc = 1
 

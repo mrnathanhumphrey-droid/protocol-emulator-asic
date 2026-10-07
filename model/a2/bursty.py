@@ -309,8 +309,32 @@ def blocking_at_b_from_jitter_model(lane: BLane, lanes: list, a: int) -> tuple:
     return (max(l.C - 1 for l in who) if who else 0), [l.name for l in who]
 
 
+def spuri_candidate_set(lane: BLane, lanes: list, horizon: int) -> list:
+    """Every subject offset `a` in [0, horizon] where a term of r(a) steps.
+
+    The subject's own release offsets, plus, for every other lane j, the
+    offsets where `N_J(a + D_i - D_j)` steps: `N(x)` steps at x = kT + m*t, and
+    `N_J(x) = N(x + J)`, so a = kT_j + m*t_j - J_j + D_j - D_i. See the Z1
+    comment in `response_time_b` for the source and the bug it closes.
+    """
+    out = set(lane.arrivals(horizon))
+    out.add(0)
+    for o in lanes:
+        if o is lane:
+            continue
+        k = 0
+        while k * o.T - o.J + o.D - lane.D <= horizon:
+            for m in range(o.n):
+                a = k * o.T + m * o.t - o.J + o.D - lane.D
+                if 0 <= a <= horizon:
+                    out.add(a)
+            k += 1
+    return sorted(out)
+
+
 def response_time_b(lane: BLane, lanes: list, horizon: int | None = None,
-                    jitter_in_interference: bool = True) -> dict:
+                    jitter_in_interference: bool = True,
+                    spuri_candidates: bool = True) -> dict:
     """r_i for a bursty lane set. The generalisation of `response_time_spuri`.
 
     ⛔⛔ THE ANALYSED LANE MUST BE AN ELEMENT OF `lanes` BY IDENTITY, AND THIS IS
@@ -352,7 +376,22 @@ def response_time_b(lane: BLane, lanes: list, horizon: int | None = None,
     if horizon is None:
         horizon = L_busy + max(l.T for l in lanes)
     best = None
-    cands = lane.arrivals(horizon)
+    # ⛔⛔ RULING Z1 -- SPURI'S CANDIDATE SET, NOT THE SUBJECT'S RELEASES ALONE.
+    # Spuri, "Analysis of Deadline Scheduled Real-Time Systems", INRIA RR-2772
+    # (1996), the EDF response-time analysis for arbitrary release: r(a) is
+    # piecewise in the subject's offset `a` and its maxima sit at the LEFT end
+    # of each piece, i.e. wherever any term of the recurrence steps:
+    #   * the subject's own count N(a)          -> its own release offsets
+    #   * each interferer's N_J(a + D_i - D_j)  -> a = kT_j + m*t_j + D_j
+    #                                                  - J_j - D_i
+    # This used to read `cands = lane.arrivals(horizon)` -- the first set only
+    # -- which misses every offset where an interferer's deadline lines up
+    # with the subject's. MEASURED: below TChecker's exact worst case on 7 of
+    # 8 queue-depth-one instances, and below the full set on 184 of 6,601
+    # lane-instances with NO jitter at all. `spuri_candidates=False` keeps the
+    # old search ONLY so `gate_spuri_candidates` can show it failing.
+    cands = (spuri_candidate_set(lane, lanes, horizon) if spuri_candidates
+             else lane.arrivals(horizon))
     cnt = (lambda o, x: o.N_J(x)) if jitter_in_interference else (lambda o, x: o.N(x))
     for a in cands:
         B, who = blocking_at_b(lane, lanes, a)

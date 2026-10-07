@@ -107,7 +107,9 @@ r = {16, 12, 7, 15, 9}      min margin 11      bar ≥ 4
 
 | | ours | pyRTA | bar |
 |---|---|---|---|
-| shipped `J = 1` | 11 | **11** — exact on all five lanes | PASS both |
+| shipped `J = 1` | 9 | **11** — the published bound | PASS both |
+
+Ours is a pessimistic cross-check: 2 cycles above pyRTA on I2C and 1 on UART-rx, where the exact model checker (TChecker) agrees with pyRTA.
 
 `d_min ≥ D* = 20 → J = 1`
 

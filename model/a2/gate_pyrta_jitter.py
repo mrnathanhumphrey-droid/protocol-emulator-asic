@@ -395,7 +395,39 @@ def main() -> int:
         print("    much the framing is doing.")
         print("  ⚠ AND: every instance is PERIODIC. A reactive lane (m_i > 1)")
         print("    carrying J has no foreign witness at all yet.")
-    return 0 if ok else 1
+
+    # ---- arm 4: RULING Y-R2 -- the retracted "charge once" framing --------
+    # ⛔⛔ Ruling Y ordered `bound` changed to give interferers Deadline(D)
+    # (jitter "charged once") on the claim that D - J double-counts. The claim
+    # was unwitnessed and is FALSE: at large J the D - J framing is EXACT and
+    # the charge-once framing is BELOW the truth. Both halves are required.
+    from jitter_instances import LJ_CHARGE_ONCE, LJ_INSTANCES, LJ_RECORDED
+    print()
+    print("  --- arm 4: Y-R2 -- D - J exact, 'charge once' below the truth ---")
+    n_exact = n_below = n_lanes = 0
+    drift = []
+    for name, spec in LJ_INSTANCES:
+        objs = [BLane(nm, T, C, D, J=J) for (nm, T, C, D, _n, _t, J) in spec]
+        for k in range(len(spec)):
+            if (name, k) not in LJ_RECORDED:
+                continue
+            tck = LJ_RECORDED[(name, k)]
+            dj = pyrta_bound.bound(src, objs, k)[0]
+            once = pyrta_bound.bound_charge_once(src, objs, k)
+            n_lanes += 1
+            n_exact += dj == tck
+            n_below += once < tck
+            if once != LJ_CHARGE_ONCE[(name, k)]:
+                drift.append((name, k, once, LJ_CHARGE_ONCE[(name, k)]))
+            print("    %s/%d  tck %2d   D-J %2s   charge-once %2s%s"
+                  % (name, k, tck, dj, once,
+                     "   <-- BELOW truth" if once < tck else ""))
+    for d in drift:
+        print("    *** %s/%d: charge-once gives %s, recorded %s" % d)
+    ok4 = n_exact == n_lanes and n_below == 5 and not drift
+    print("    D - J exact on %d of %d; charge-once below on %d (recorded 5)"
+          "   %s" % (n_exact, n_lanes, n_below, "ok" if ok4 else "*** WRONG"))
+    return 0 if (ok and ok4) else 1
 
 
 if __name__ == "__main__":

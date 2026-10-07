@@ -156,9 +156,23 @@ def at_c(c: int, j_pipe: int) -> list:
             for l in lanes_at(j_pipe)]
 
 
-def ours(lanes):
-    return [(l.name, response_time_b(l, lanes,
-                                     jitter_in_interference=True)["r"])
+#: ⭐⭐ RULING A5: OUR RECURRENCE AFTER RULING Z, recorded BESIDE the history
+#: rather than over it. EXPECTED_C2_OURS / EXPECTED_C3_OURS above were computed
+#: by the subject-releases-only search that ruling Z found unsound; they are
+#: reproduced below in THEIR OWN terms (`search="historical"`), never re-fitted.
+#: This table is the fixed recurrence at C = 3 -- the cross-check, asserted
+#: never above pyRTA's margin. The PUBLISHED sweep is EXPECTED_C3_PYRTA.
+EXPECTED_C3_OURS_Z = {
+    0: 11, 1: 9, 2: 7, 3: 6, 4: 5, 5: 4, 6: 2, 7: 0, 8: -2,
+}
+
+
+def ours(lanes, search="fixed"):
+    """Our recurrence; `search="historical"` is the pre-Z subject-releases-only
+    search the EXPECTED_*_OURS history was computed with (ruling A5)."""
+    full = search != "historical"
+    return [(l.name, response_time_b(l, lanes, jitter_in_interference=True,
+                                     spuri_candidates=full)["r"])
             for l in lanes]
 
 
@@ -172,7 +186,7 @@ def pyrta(src, lanes):
     return out
 
 
-def mins(src, c: int, j: int):
+def mins(src, c: int, j: int, search="historical"):
     """(ours_min, pyrta_min) over the five lanes. ⛔ EACH MARGIN IS TAKEN FROM
     THE LANE OBJECT THAT PRODUCED ITS `r`. The first version computed the
     C = 2 response times and then evaluated `margin` on the C = 3 lane
@@ -181,7 +195,7 @@ def mins(src, c: int, j: int):
     too: a scope assumption threaded through a constant, exactly the shape
     this project has a standing rule about."""
     ls = at_c(c, j)
-    o = min(l.margin(r) for l, (_n, r) in zip(ls, ours(ls)))
+    o = min(l.margin(r) for l, (_n, r) in zip(ls, ours(ls, search)))
     p = [None if r is None else l.margin(r)
          for l, (_n, r) in zip(ls, pyrta(src, ls))]
     return o, (None if any(x is None for x in p) else min(p))
@@ -267,6 +281,26 @@ def face_sweep(src) -> int:
               % (j, p2, p3, o2, o3,
                  "PASS" if (p3 is not None and p3 >= MARGIN_BAR)
                  else "*** FAIL"))
+    print()
+    # ---- RULING A5: the fixed recurrence, beside the history -------------
+    print()
+    print("    ⭐ ruling A5 -- OUR recurrence after ruling Z (Spuri step set), "
+          "C = %d, beside the" % C_SPACING)
+    print("      historical column above (which is reproduced with the pre-Z "
+          "search, not re-fitted):")
+    print("      %-7s %-12s %-14s %s" % ("J_pipe", "pyRTA (pub.)",
+                                         "ours (fixed)", "ours <= pyRTA"))
+    for j in sorted(EXPECTED_C3_OURS_Z):
+        oz, pz = mins(src, C_SPACING, j, search="fixed")
+        if oz != EXPECTED_C3_OURS_Z[j]:
+            print("    *** J=%d ours (fixed) C=%d: recorded %s, now %s"
+                  % (j, C_SPACING, EXPECTED_C3_OURS_Z[j], oz))
+            rc = 1
+        okd = pz is not None and oz <= pz
+        if not okd:
+            rc = 1
+        print("      %-7d %-12s %-14d %s" % (j, pz, oz,
+                                            "yes" if okd else "*** NO"))
     print()
     print("    largest J_pipe clearing the bar, C = %d:" % C_SPACING)
     print("      pyRTA (PRIMARY)    : J = %s  -- every swept J still clears it"
@@ -472,7 +506,7 @@ def selftest() -> int:
     bad = 0
     for j in sorted(EXPECTED_C3_OURS):
         ls = at_c(C_OCCUPANCY, j)
-        got = min(l.margin(r) for l, (_n, r) in zip(ls, ours(ls)))
+        got = min(l.margin(r) for l, (_n, r) in zip(ls, ours(ls, "historical")))
         if got != EXPECTED_C3_OURS[j]:
             bad += 1
     cases.append(("C = 2 does not reproduce the C = 3 table",
@@ -482,7 +516,7 @@ def selftest() -> int:
     bad3 = 0
     for j in sorted(EXPECTED_C3_OURS):
         ls = at_c(C_SPACING, j)
-        got = min(l.margin(r) for l, (_n, r) in zip(ls, ours(ls)))
+        got = min(l.margin(r) for l, (_n, r) in zip(ls, ours(ls, "historical")))
         if got != EXPECTED_C3_OURS[j]:
             bad3 += 1
     cases.append(("C = 3 reproduces it exactly", bad3 == 0,

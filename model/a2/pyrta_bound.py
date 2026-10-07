@@ -166,6 +166,37 @@ def bound(src, lanes, k, horizon=None):
     return best, (None if best is not None else (err or "no feasible delta"))
 
 
+def bound_charge_once(src, lanes, k, horizon=None):
+    """⛔ THE "CHARGE JITTER ONCE" FRAMING -- RETRACTED, KEPT TO BE SHOWN FAILING.
+
+    Interferers keep their jittered arrival curve but get `Deadline(D_j)`
+    instead of `D_j - J_j`; the subject's own delay is swept as in `bound`.
+    Ruling Y ordered the wrapper changed to this on the claim that `bound`
+    charges jitter twice. The claim had no witness and it is FALSE: on the
+    LJ instances (`jitter_instances.LJ_INSTANCES`, J about half the period)
+    TChecker says `bound` is EXACT on all 8 lanes and THIS framing is BELOW the
+    truth on 5 of 8 -- it hands a late interferer a deadline its nominal
+    release never had, so it is outranked when it should not be.
+    `gate_pyrta_jitter` arm 4 requires exactly that.
+    """
+    m = _mod(src)
+    if horizon is None:
+        horizon = 2 * max(getattr(l, "T", l.t) for l in lanes)
+    curves = [_curve(m, l, horizon) for l in lanes]
+    best = None
+    for delta in range(0, lanes[k].J + 1):
+        tasks = [m["Task"](curves[i], m["FullyNonPreemptive"](m["WCET"](l.C)),
+                           m["Deadline"]((l.D - delta) if i == k else l.D),
+                           m["Priority"](i))
+                 for i, l in enumerate(lanes)]
+        ts = m["taskset"](*tasks)
+        sol = m["edf"].rta(ts, tasks[k], m["IdealProcessor"]())
+        R = getattr(sol.response_time_bound, "value", sol.response_time_bound)
+        if R is not None and (best is None or R + delta > best):
+            best = R + delta
+    return best
+
+
 def bound_naive(src, lanes, k, horizon=None):
     """⛔ THE NAIVE FRAMING, KEPT ONLY TO BE SHOWN FAILING.
 

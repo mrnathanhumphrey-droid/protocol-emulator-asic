@@ -132,11 +132,28 @@ except Exception:
 # because a larger C changes how many interfering instances fit inside each
 # lane's window as well as its own service time. A table corrected by adding a
 # constant would have been wrong on all five rows.
+# ⛔⛔ RULING A2: THIS IS THE PUBLISHED VALUE, AND IT IS pyRTA's. Until ruling
+# Z our recurrence and pyRTA agreed on all five lanes, so one literal served
+# both. Z gave our recurrence Spuri's full candidate set (it had been searching
+# too few offsets and could fall BELOW the exact worst case); it is now sound
+# and on two lanes PESSIMISTIC, so the two separate and each gets its own pin.
 EXPECTED_R = {"UART-tx 115200": 16,
               "SPI-tx 1 MHz": 12,
               "I2C 400 kHz": 7,
               "UART-rx 115200": 15,
               "SPI-target 1 MHz": 9}
+# ⭐ OUR RECURRENCE ON THE SAME TABLE -- the cross-check, asserted >= pyRTA.
+# The two gaps are NAMED and cited, not tolerated: TChecker on the scaled
+# shapes (`jitter_instances.TIE_INSTANCES`, ruling Z4) gives truth = pyRTA under
+# every tie rule, so these are our recurrence's pessimism at a deadline tie
+# combined with blocking, not a missing case in pyRTA.
+EXPECTED_OURS = {"UART-tx 115200": 16,
+                 "SPI-tx 1 MHz": 12,
+                 "I2C 400 kHz": 9,
+                 "UART-rx 115200": 16,
+                 "SPI-target 1 MHz": 9}
+GAP_CITED = {"I2C 400 kHz": (2, "T-I2C / T-I2C-mirror"),
+             "UART-rx 115200": (1, "T-URX / T-URX-mirror")}
 
 # ⛔ ONE lane set, built once and selected from -- never a second builder call.
 # `response_time_b` filters interference BY IDENTITY, so an equal-but-distinct
@@ -159,7 +176,7 @@ def spec_rows():
     out = []
     for l in LANES:
         r_ours = response_time_b(l, LANES)["r"]
-        out.append((l.name, l.t, l.C, l.D, r_ours, EXPECTED_R.get(l.name)))
+        out.append((l.name, l.t, l.C, l.D, r_ours, EXPECTED_OURS.get(l.name)))
     return out
 
 
@@ -217,7 +234,8 @@ def main() -> int:
     # with no pyRTA clone -- rather than hiding a stale literal behind a red
     # that looks like a missing dependency.
     print()
-    print("  --- arm 0: the lane table vs the typed answers (no tool needed) ---")
+    print("  --- arm 0: OUR recurrence on the lane table vs its typed pin "
+          "(no tool needed) ---")
     print("    %-20s %-6s %-5s %-6s %-7s %-7s %s"
           % ("lane", "t_i", "C_i", "key", "ours", "typed", "agree"))
     drift = []
@@ -265,7 +283,20 @@ def main() -> int:
                  "exact" if R == r_ours else
                  ("ours +%d (safe)" % (r_ours - R) if r_ours > R
                   else "*** OURS SMALLER ***")))
-    agree = all(x[1] == x[2] for x in rows)
+    # ⛔⛔ RULING A2: THE VERDICT IS ON pyRTA, the published value. It must
+    # reproduce EXPECTED_R exactly; ours must be >= it everywhere, and every
+    # lane where ours is larger must be a NAMED gap of exactly the cited size.
+    published_ok = all(R == EXPECTED_R[n] for n, R, _o in rows)
+    gaps = {n: o - R for n, R, o in rows if o > R}
+    gaps_ok = gaps == {n: g for n, (g, _c) in GAP_CITED.items()}
+    print("    published (pyRTA) == EXPECTED_R on every lane: %s"
+          % ("yes" if published_ok else "*** NO"))
+    for n, (g, cite) in sorted(GAP_CITED.items()):
+        print("    ours - pyRTA on %-16s = %s (cited %d: TChecker %s, truth = "
+              "pyRTA)" % (n, gaps.get(n, 0), g, cite))
+    if not gaps_ok:
+        print("    *** the gap set %s is not the cited one" % gaps)
+    agree = published_ok and gaps_ok
 
     print()
     # direction matters more than agreement
@@ -292,20 +323,18 @@ def main() -> int:
     elif ours_larger:
         print("  ⚠ our bound is LARGER than pyRTA's on: %s"
               % ", ".join(x[0] for x in ours_larger))
-        print("    Safe direction (we are pessimistic), but worth tightening.")
-        print("    ⚠⚠ UNLESS THE DIFFERENCE IS JITTER. pyRTA's task model has")
-        print("    NO jitter parameter, so at J > 0 it is analysing a DIFFERENT")
-        print("    task set and 'pessimistic' is not established -- see the")
-        print("    scope note in this file's header.")
+        print("    Safe direction (we are pessimistic). Each gap is cited above")
+        print("    to the TChecker shape that shows pyRTA is the exact one.")
     print()
     eq = periodic_equivalence()
     print()
     print("=" * 78)
     ok = agree and eq and not ours_smaller
     print("  GATE 1.4b: %s" % (
-        "PASSED -- a third-party implementation of machine-verified theory\n"
-        "  reproduces the shipped r_i exactly, at the real periods, with no\n"
-        "  replica and no scaling. The shipped numbers are foreign-checked."
+        "PASSED -- the PUBLISHED r_i are pyRTA's (a third-party implementation\n"
+        "  of machine-verified theory) at the real periods, with no replica and\n"
+        "  no scaling; our recurrence is >= them on every lane, its two gaps\n"
+        "  cited to TChecker (ruling A2)."
         if ok else "FAILED -- see above."))
     if ok:
         print()

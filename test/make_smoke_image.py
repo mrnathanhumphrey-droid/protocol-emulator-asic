@@ -389,6 +389,46 @@ def build_ckod(delays=None):
     return b"".join(headers) + b"".join(prog)
 
 
+#: ⭐⭐ RULING DT-C: Ruling S's must-fire subject, ADMISSIBLE this time.
+#: Three self-clocked open-drain lanes on uio 0/1, 2/3, 4/5 (not 6/7, which is
+#: the pad override's CS/MISO pair that made ckdense PINMAP) beside two busy
+#: push-pull `OP_LEVEL` lanes on uo_out 8/9 with tight EDF keys. The contention
+#: comes from the push-pull neighbours, not from W1 binding dense clocked lanes,
+#: so the program clears 1.6a (r 22/23/18 against t 30/31/32), d_min = D* and
+#: U = 0.583. MEASURED: widest post-HIGH lateness 10/11/13 under its own
+#: budgets (17/17/18) and over the light 8 on ALL THREE clocked lanes.
+#: Searched, not guessed: of 24 shapes probed, every clocked span below 30/31/32
+#: or 26/28/30 broke 1.6a.
+CKHEAVY_CLOCKED = [30, 31, 32]
+CKHEAVY_PP = [20, 21]
+CKHEAVY_PP_DSCHED = 4
+
+
+def build_ckheavy(ck=None, pp=None, pp_dsched=CKHEAVY_PP_DSCHED):
+    """Ruling S's admissible must-fire subject (DT-C); see CKHEAVY_CLOCKED."""
+    ck = list(CKHEAVY_CLOCKED if ck is None else ck)
+    pp = list(CKHEAVY_PP if pp is None else pp)
+    prog, headers, off, base = [], [], ACT_BASE, {}
+    for n, d in enumerate(ck):
+        base[n] = off
+        prog.append(act(OP_SHIFT, 2 * n, SELF_CLOCKED, d, count=7, q=n % 4))
+        prog.append(act(OP_REARM, 0, 1, d))
+        off += 2 * ACT_BYTES
+    for m, d in enumerate(pp):
+        base[len(ck) + m] = off
+        prog.append(act(OP_LEVEL, UO0 + m, 0, d))
+        prog.append(act(OP_LEVEL, UO0 + m, 1, d))
+        prog.append(act(OP_REARM, 0, 1, d))
+        off += 3 * ACT_BYTES
+    for n, d in enumerate(ck):
+        headers.append(hdr(2 * n, 2 * n + 1, 0, d, 2, min(2 * d, 255),
+                           min(3 * d, 255), base[n]))
+    for m, d in enumerate(pp):
+        headers.append(hdr(UO0 + m, UO0 + m, 1, d, 2, pp_dsched,
+                           pp_dsched + 8, base[len(ck) + m]))
+    return b"".join(headers) + b"".join(prog)
+
+
 def build_ckread(d: int = D_FM_SHIPPABLE, sda: int = 2, scl: int = 1):
     """A CLOCKED I2C READ on one open-drain lane -- ruling K's class-8 subject.
 
@@ -1152,10 +1192,14 @@ def main() -> int:
             # `at` and `under` must be REFUSED and `over` must RUN, so the
             # bench sees the boundary from both sides rather than only from
             # the side that happens to pass.
-            # ⭐ ruling S's must-fire subject: feasible, and heavier than
-            # `corpus_i2c`, so the lighter bound fails on it.
-            (["--ckdense"], "open-drain clocked lanes, DENSE span (S)",
+            # ckdense: the A2 STRESS image since DT-B (fails 1.6a under W1);
+            # no longer ruling S's subject.
+            (["--ckdense"], "open-drain clocked lanes, DENSE span (stress)",
              "ckdense_image.hex"),
+            # ⭐ ruling S's must-fire subject since DT-C: ADMISSIBLE, and
+            # heavier than `corpus_i2c`, so the lighter bound fails on it.
+            (["--ckheavy"], "clocked OD lanes beside busy PP lanes (S, DT-C)",
+             "ckheavy_image.hex"),
             (["--ckhold"], "clocked open-drain at d = SDA_HOLD (refused)",
              "ckhold_at_image.hex"),
             (["--ckhold"], "... at d = SDA_HOLD - 1 (refused)",
@@ -1347,8 +1391,15 @@ def main() -> int:
         _i = build_ckod(CKDENSE_DELAYS)
         _o = os.path.join(here, "ckdense_image.hex")
         write_image(_o, _i)
-        print("ckdense image (S must-fire subject, delays %s), %d bytes -> %s"
+        print("ckdense image (A2 stress image, delays %s), %d bytes -> %s"
               % (CKDENSE_DELAYS, len(_i), _o))
+        return 0
+    if "--ckheavy" in sys.argv:
+        _i = build_ckheavy()
+        _o = os.path.join(here, "ckheavy_image.hex")
+        write_image(_o, _i)
+        print("ckheavy image (S must-fire subject, clocked %s beside PP %s), "
+              "%d bytes -> %s" % (CKHEAVY_CLOCKED, CKHEAVY_PP, len(_i), _o))
         return 0
     if "--ckread" in sys.argv:
         img = build_ckread()

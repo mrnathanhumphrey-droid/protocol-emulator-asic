@@ -93,6 +93,87 @@ PESSIMISTIC = [("J1", "subject", 1), ("J3", "B", 1)]
 
 
 # ============================================================================
+# RULINGS Y-R AND Z -- the cases that retracted a claim and found a bug
+# ============================================================================
+# Produced by: python model/a2/zone/run_z.py (TChecker, same build and flags as
+# above; `ovr` unreachable on every instance below -- the gate re-checks that
+# field, because an instance where a job can be pending at its successor's
+# release is one the exact model does not adjudicate).
+# Tuple shape is `gen_edf.gen`'s (name, T, C, D, n, t, J); list order is lane
+# index, which is the hardware's tie-break priority.
+#
+# ⛔⛔ Z_INSTANCES -- OUR RECURRENCE WAS BELOW THE TRUTH. `response_time_b`
+# searched only the subject's own release offsets; Spuri's candidate set also
+# holds every interferer's deadline step. Found by a random search for the
+# ckdense signature, filtered to queue-depth-one, adjudicated here.
+# "old" is the subject-releases-only search, kept to show it failing.
+Z_INSTANCES = [
+    ("Z1", 2, [("l0", 9, 3, 7, 1, 9, 0), ("l1", 11, 3, 7, 1, 11, 0),
+               ("l2", 9, 1, 6, 1, 9, 1)]),
+    ("Z2", 2, [("l0", 11, 3, 6, 1, 11, 2), ("l1", 11, 3, 9, 1, 11, 0),
+               ("l2", 9, 1, 3, 1, 9, 0)]),
+    ("Z3", 2, [("l0", 11, 2, 9, 1, 11, 1), ("l1", 6, 2, 4, 1, 6, 1),
+               ("l2", 6, 1, 2, 1, 6, 0)]),
+    ("Z4", 2, [("l0", 11, 3, 10, 1, 11, 0), ("l1", 9, 2, 7, 1, 9, 2),
+               ("l2", 6, 1, 4, 1, 6, 0)]),
+    ("Z5", 1, [("l0", 6, 2, 4, 1, 6, 1), ("l1", 13, 1, 8, 1, 13, 1),
+               ("l2", 8, 3, 6, 1, 8, 0)]),
+    ("Z6", 0, [("l0", 6, 2, 3, 1, 6, 0), ("l1", 9, 1, 4, 1, 9, 0),
+               ("l2", 12, 1, 6, 1, 12, 2)]),
+    ("Z7", 1, [("l0", 13, 1, 8, 1, 13, 4), ("l1", 8, 1, 3, 1, 8, 0),
+               ("l2", 9, 1, 7, 1, 9, 3)]),
+    ("Z8", 0, [("l0", 11, 1, 5, 1, 11, 0), ("l1", 13, 2, 11, 1, 13, 3),
+               ("l2", 6, 3, 6, 1, 6, 0)]),
+]
+Z_RECORDED = {"Z1": {"tck": 6, "old": 4}, "Z2": {"tck": 5, "old": 3},
+              "Z3": {"tck": 3, "old": 2}, "Z4": {"tck": 4, "old": 3},
+              "Z5": {"tck": 7, "old": 7}, "Z6": {"tck": 3, "old": 2},
+              "Z7": {"tck": 2, "old": 1}, "Z8": {"tck": 4, "old": 3}}
+
+# ⛔⛔ LJ_INSTANCES -- RULING Y's PREMISE, RETRACTED. "pyRTA's D - J framing
+# double-counts jitter" was asserted without a witness. At large J (about half
+# the period, W1's regime) TChecker says the D - J framing is EXACT on all 7
+# lanes and the "charge once" framing (interferer deadline D) is BELOW the
+# truth on 5 of 7 -- unsound. (instance, subject index) -> truth.
+LJ_INSTANCES = [
+    ("L1", [("subj", 10, 2, 8, 1, 10, 0), ("jit", 9, 2, 6, 1, 9, 4)]),
+    ("L2", [("subj", 10, 2, 9, 1, 10, 1), ("jit", 10, 2, 9, 1, 10, 5)]),
+    ("L3", [("A", 9, 2, 8, 1, 9, 4), ("B", 10, 2, 9, 1, 10, 4)]),
+    ("L4", [("A", 10, 2, 9, 1, 10, 0), ("B", 11, 2, 9, 1, 11, 5),
+            ("C", 12, 2, 10, 1, 12, 5)]),
+]
+LJ_RECORDED = {("L1", 0): 4, ("L2", 0): 5, ("L2", 1): 8, ("L3", 0): 7,
+               ("L3", 1): 8, ("L4", 0): 6, ("L4", 1): 9, ("L4", 2): 10}
+#: the charge-once framing's answers on the same lanes (pyRTA @ the pin) --
+#: below the truth on L2/0, L3/1, L4/0, L4/1, L4/2. L1/1 is not a subject
+#: (it carries all the jitter; J1's must-fire shape).
+LJ_CHARGE_ONCE = {("L1", 0): 4, ("L2", 0): 4, ("L2", 1): 8, ("L3", 0): 7,
+                  ("L3", 1): 7, ("L4", 0): 5, ("L4", 1): 8, ("L4", 2): 8}
+
+# ⭐ TIE_INSTANCES -- RULING Z4. The shipped I2C / UART-rx shapes, scaled to
+# what TChecker can solve, each in both index orders. Truth is the same under
+# NONDETERMINISTIC ties and the hardware's LOWEST-INDEX rule, so the published
+# I2C 7 / UART-rx 15 stand and our widened recurrence (9 / 7 here) is
+# pessimistic there, not a sign that pyRTA misses the hardware's tie rule.
+TIE_INSTANCES = [
+    ("T-I2C", 1, [("blk", 60, 3, 40, 1, 60, 1), ("i2c", 30, 3, 18, 1, 30, 2),
+                  ("tie", 30, 3, 20, 1, 30, 1)]),
+    ("T-I2C-mirror", 2, [("blk", 60, 3, 40, 1, 60, 1),
+                         ("tie", 30, 3, 20, 1, 30, 1),
+                         ("i2c", 30, 3, 18, 1, 30, 2)]),
+    ("T-URX", 1, [("tie", 40, 3, 19, 1, 40, 1), ("urx", 40, 3, 16, 1, 40, 1),
+                  ("blk", 60, 3, 50, 1, 60, 1)]),
+    ("T-URX-mirror", 0, [("urx", 40, 3, 16, 1, 40, 1),
+                         ("tie", 40, 3, 19, 1, 40, 1),
+                         ("blk", 60, 3, 50, 1, 60, 1)]),
+]
+TIE_RECORDED = {"T-I2C": {"nondet": 7, "index": 7},
+                "T-I2C-mirror": {"nondet": 7, "index": 7},
+                "T-URX": {"nondet": 6, "index": 6},
+                "T-URX-mirror": {"nondet": 6, "index": 6}}
+
+
+# ============================================================================
 # pyRTA ON THE SHIPPED FIVE LANES -- the bound comparison at J > 0
 # ============================================================================
 # Produced by: PYRTA_SRC=<clone>/src python model/a2/gate_pyrta_jitter.py (arm 3)

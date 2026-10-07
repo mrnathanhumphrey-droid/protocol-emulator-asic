@@ -180,6 +180,24 @@ def feasible_subsets(budget: int = N_UIO):
     return out
 
 
+#: ruling A3 -- the shapes TChecker adjudicated (Z4): subject -> the lane whose
+#: presence in the subset produces our recurrence's pessimism, and the record.
+Z4_SHAPES = {"I2C 400 kHz": ("SPI-target 1 MHz", "T-I2C / T-I2C-mirror"),
+             "UART-rx 115200": ("UART-tx 115200", "T-URX / T-URX-mirror")}
+
+
+def classify_gap(subject, subset_names, ours, pyrta):
+    """'equal', 'cited ...', 'UNCITED ...' or 'FORBIDDEN ...' (ruling A3)."""
+    if ours == pyrta:
+        return "equal"
+    if ours < pyrta:
+        return "FORBIDDEN: ours below pyRTA's sufficient bound"
+    shape = Z4_SHAPES.get(subject)
+    if shape and shape[0] in subset_names:
+        return "cited (TChecker %s: truth = pyRTA)" % shape[1]
+    return "UNCITED gap: no adjudicated shape explains it"
+
+
 def pyrta_on(subset, src) -> dict:
     """r_i per lane from pyRTA, on this subset.
 
@@ -312,27 +330,50 @@ def main() -> int:
         print("    The envelope claim is OURS ALONE without this, which is the")
         print("    one thing the ruling asked it not to be.")
         return 1
-    dis = fviol = 0
+    # ⛔⛔ RULING A3: DIRECTION, NOT EQUALITY. Since ruling Z our recurrence is
+    # sound and PESSIMISTIC on two shapes, so `ours == pyRTA` would fail where
+    # nothing is wrong. The requirement is ours >= pyRTA on every subset, and
+    # every subset where ours is larger must contain the shape TChecker
+    # adjudicated (ruling Z4, truth = pyRTA): I2C beside SPI-target (the tie at
+    # a = 1 plus blocking) or UART-rx beside UART-tx.
+    dis = fviol = gaps = 0
     checked = 0
     for s in subs:
         got = pyrta_on(s, src)
         for l in s:
             checked += 1
             ours = response_time_b(l, s)["r"]
-            if got[l.name] != ours:
-                dis += 1
-                print("    *** %s on %s: pyRTA %s, ours %d"
+            verdict = classify_gap(l.name, [x.name for x in s], ours,
+                                   got[l.name])
+            if verdict == "equal":
+                continue
+            if verdict.startswith("cited"):
+                gaps += 1
+                print("    %s on %s: pyRTA %s, ours %d -- %s"
                       % (l.name, [x.name.split()[0] for x in s],
-                         got[l.name], ours))
+                         got[l.name], ours, verdict))
+            else:
+                dis += 1
+                print("    *** %s on %s: pyRTA %s, ours %d -- %s"
+                      % (l.name, [x.name.split()[0] for x in s],
+                         got[l.name], ours, verdict))
             if got[l.name] > env[l.name]:
                 fviol += 1
                 print("    *** %s on %s: pyRTA %s EXCEEDS envelope %d"
                       % (l.name, [x.name.split()[0] for x in s],
                          got[l.name], env[l.name]))
     print("    %d (lane, subset) results compared" % checked)
-    print("    disagreements with our recurrence : %d" % dis)
+    print("    ours > pyRTA, cited to a Z4 shape : %d" % gaps)
+    print("    ours < pyRTA, or an UNCITED gap   : %d" % dis)
     print("    results exceeding the envelope    : %d" % fviol)
-    if dis or fviol:
+    # must-fire: the classifier REJECTS ours < pyRTA and an uncited gap
+    mf1 = classify_gap("I2C 400 kHz", ["I2C 400 kHz", "SPI-target 1 MHz"],
+                       6, 7)
+    mf2 = classify_gap("SPI-tx 1 MHz", ["SPI-tx 1 MHz"], 13, 12)
+    ok_mf = mf1.startswith("FORBIDDEN") and mf2.startswith("UNCITED")
+    print("    must-fire: ours < pyRTA -> %s; an uncited gap -> %s   %s"
+          % (mf1.split()[0], mf2.split()[0], "ok" if ok_mf else "*** MISSED"))
+    if dis or fviol or not ok_mf:
         rc = 1
     else:
         print("    => a THIRD-PARTY tool confirms the envelope on every subset a")

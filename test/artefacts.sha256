@@ -17,6 +17,7 @@ dfc62848bdea461a2a7f1fd7c4ed7227cc4c1aab39dd7e651dba0b03fd35cb29  ckfive_image.h
 b4d7d47b094d66029f742212917d7449a5aead32a6a6cdc8d0e58c29ab566a74  ckod_image.hex  # make_smoke_image.py --ckod
 ac6bc3e29e91a970d28be1ecb44f243cf7352114eb1a7e4f6b41dbb9c1c35bde  ckread_image.hex  # make_smoke_image.py --ckread
 dfe8cad0955a451e38261343be59e78b0364bc711e43e0e4e3bcd9e5776c5601  ckdense_image.hex  # make_smoke_image.py --ckdense
+342e5535ce41cd42ee5f64f861384096df979c19d32e3931ec3ee3b4715d825b  ckheavy_image.hex  # make_smoke_image.py --ckheavy
 945fb2ad1bb12cf5ee1be1cbb9f912fca1ad385d496aca271103dd7ccbf11985  ckhold_at_image.hex  # make_smoke_image.py --ckhold
 71de2e3d08537f17a59625e1165fd3444df6e96b8457a56de7732575730c6f9d  ckhold_under_image.hex  # make_smoke_image.py --ckhold
 3c4ab990f3bc8bd1e8f7d425bd7b78da88a2f4ff31532ee13c53754270b86b78  ckhold_over_image.hex  # make_smoke_image.py --ckhold

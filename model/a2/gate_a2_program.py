@@ -15,8 +15,9 @@ WHAT THIS GATE HOLDS:
      to a bound for a program that no longer exists.
   2. NO BOUND IS TYPED. The bench carries no slack constant, and every arm
      `test/benchset.py` plans gets `+A2SLACK` equal to the generated row.
-  3. THE MUST-FIRE (`test/a2_run.sh`): `ckdense`, a FEASIBLE program heavier
-     than `corpus_i2c`, PASSES under its own budgets and FAILS under
+  3. THE MUST-FIRE (`test/a2_run.sh`): `ckheavy`, an ADMISSIBLE program
+     heavier than `corpus_i2c` (ruling DT-C; it was `ckdense` until that
+     failed 1.6a under W1), PASSES under its own budgets and FAILS under
      `corpus_i2c`'s. Without both halves the per-program derivation would be
      indistinguishable on the bench from one shared number.
   4. OVERLOADED PROGRAMS ARE NAMED, with the utilisation that leaves them
@@ -48,9 +49,14 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(ROOT, "test"))
+sys.path.insert(0, os.path.join(ROOT, "model"))
 
+import gate_degenerate_fields as dgf                              # noqa: E402
 import program_a2                                                 # noqa: E402
 from pyrta_src import pinned_pyrta                                # noqa: E402
+
+#: Ruling S's must-fire subject (DT-C). `test/a2_run.sh` measures the same one.
+SUBJECT = "ckheavy_image.hex"
 
 
 def load_measurement():
@@ -75,8 +81,11 @@ def stale_rows(on_disk, fresh, with_pyrta):
     stale = sorted(set(on_disk) ^ set(fresh))
     for n in sorted(set(on_disk) & set(fresh)):
         a, b = on_disk[n], fresh[n]
-        top = ({k: a.get(k) for k in a if k != "lanes"}
-               != {k: b.get(k) for k in b if k != "lanes"})
+        # ⭐ `w1_pyrta` (ruling A8) is pyRTA's own W1 term: compared only when
+        # pyRTA is present, like the per-lane pyRTA column.
+        tskip = {"lanes"} | (set() if with_pyrta else {"w1_pyrta"})
+        top = ({k: a.get(k) for k in a if k not in tskip}
+               != {k: b.get(k) for k in b if k not in tskip})
         if top or set(a["lanes"]) != set(b["lanes"]):
             stale.append(n)
             continue
@@ -133,6 +142,36 @@ def main() -> int:
                               "not in CI by design; `gate_a2_bounds_pyrta.py` "
                               "under `run_a2.py` owns it"))
 
+    # ---- 1b. Z5 / DT-F: the CI floor is never looser than pyRTA -----------
+    # ⛔⛔ CI has no pyRTA, so every CI-side refusal (pe_asm's mode floor and
+    # 1.6a, gate_admissible_images' QUEUE) rests on OUR recurrence alone. After
+    # ruling Z1 it is >= pyRTA on every lane we have; that is checked here on
+    # the COMMITTED pyRTA column, for every ADMISSIBLE program, rather than
+    # assumed -- a lane where ours < pyRTA is one where CI would accept what
+    # the published bound refuses.
+    print()
+    print("  --- 1b. CI floor (ours) >= pyRTA, every lane of every admissible "
+          "program ---")
+    import gate_admissible_images as ga
+    n_ok, below = 0, []
+    for name, row in sorted(on_disk.items()):
+        img = dgf.load(os.path.join(ROOT, "test", name))
+        if ga.conditions(name, img)[0]:
+            continue                      # non-admissible: declared in N1
+        for ln, e in sorted(row["lanes"].items()):
+            if e.get("r_pyrta") is None or e.get("r_ours") is None:
+                continue
+            if e["r_ours"] >= e["r_pyrta"]:
+                n_ok += 1
+            else:
+                below.append((name, ln, e["r_ours"], e["r_pyrta"]))
+    for name, ln, o, p in below:
+        print("    *** %s lane %s: ours %d < pyRTA %d -- CI's floor is looser "
+              "than the published bound" % (name, ln, o, p))
+        rc = 1
+    print("    %d admissible lane(s): ours >= pyRTA on every one%s"
+          % (n_ok, "" if not below else " EXCEPT the above"))
+
     # ---- 2. no bound is typed --------------------------------------------
     print()
     print("  --- 2. no bound is typed anywhere ---")
@@ -182,9 +221,21 @@ def main() -> int:
         # ⛔ U and J READ from the committed bounds, never typed: the subject
         # was re-spanned by ruling W and a typed "0.518" outlived it
         with io.open(program_a2.OUT_JSON, encoding="utf-8") as fh:
-            row = json.load(fh).get("ckdense_image.hex", {})
-        print("    ckdense (U = %s, J = %s) under two budgets:"
-              % (row.get("U"), row.get("J")))
+            row = json.load(fh).get(SUBJECT, {})
+        print("    %s (U = %s, J = %s) under two budgets:"
+              % (SUBJECT, row.get("U"), row.get("J")))
+        # ⛔ RULING DT-C: THE SUBJECT MUST BE ADMISSIBLE. A must-fire on a
+        # program outside the model (ckdense fails 1.6a under W1) proves
+        # nothing about the bound the model gives -- so admissibility is
+        # derived here, not assumed from the subject's name.
+        import gate_admissible_images as ga
+        sub_img = dgf.load(os.path.join(ROOT, "test", SUBJECT))
+        conds = ga.conditions(SUBJECT, sub_img)[0]
+        print("    subject admissibility: %s"
+              % ("ADMISSIBLE (no OVERLOAD/PORT/PINMAP/QUEUE)" if not conds
+                 else "*** violates %s" % sorted(conds)))
+        if conds:
+            rc = 1
         print("      %-7s %-18s %-8s %-6s %s"
               % ("arm", "budget", "verdict", "late", "widest per lane"))
         for nm, r in (("own", own), ("light", light)):
@@ -192,7 +243,7 @@ def main() -> int:
                   % (nm, r.get("budget"), r.get("verdict"), r.get("late"),
                      r.get("lane_widest")))
         if own.get("verdict") != "ok":
-            print("    *** FAIL ckdense's OWN budget did not hold -- the")
+            print("    *** FAIL the subject's OWN budget did not hold -- the")
             print("        per-program derivation is unsound for it")
             rc = 1
         if light.get("verdict") != "red":
@@ -202,12 +253,10 @@ def main() -> int:
             rc = 1
         if own.get("verdict") == "ok" and light.get("verdict") == "red":
             print("    => holds under its own bound, fails under the lighter one.")
-            print("    ⚠ IT FIRES ON %s RELEASE(S): the program's lateness peaks"
-                  % light.get("late"))
-            print("      at 10 on lane 2 against a light budget of 8, and is")
-            print("      deterministic across all three rand-reset modes -- but a")
-            print("      single release is a thin margin, so the gate requires")
-            print("      the verdict, not a count.")
+            print("    it fires on %s release(s), widest per lane %s against"
+                  % (light.get("late"), light.get("lane_widest")))
+            print("    the light budget -- the gate requires the verdict, not a")
+            print("    count.")
 
     # ---- 4. programs with no bound ----------------------------------------
     print()
