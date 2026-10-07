@@ -575,21 +575,30 @@ end
  *   (r_i - C)   4  the lane's A2 start-delay bound -- how late EDF contention
  *                  can push the dispatch once it is eligible
  *
- * ⭐ DERIVED AND THEN CONFIRMED, in that order: the sum is 8, and the measured
- * margin came out 4..8 on the four-lane open-drain image and 4..6 on
- * `corpus_i2c`. The maximum touches the bound exactly, which is what a correct
- * bound should do.
- * ⚠ IT IS THEREFORE TIGHT, AND THAT IS DECLARED: there is no slack above the
- * observed maximum, so a change that adds contention to a clocked lane will go
- * red here. That is the point of a bound -- but it means a red here is a
- * REQUEST TO RE-DERIVE `r_i - C`, not a licence to raise the constant.
- * ⛔ `model/a2/gate_clocked_lane_a2.py` PARSES THIS CONSTANT out of this file
- * and asserts it still covers `max(r_i - C)` over the lane set it builds, so
- * the number lives in ONE place and A2 is what checks it. Copying it into the
- * gate would be the two-copies defect that this project has already shipped
- * once in a published column.
+ * ⛔⛔⛔ `r_i` BELONGS TO THE PAIR (PROGRAM, LANE), AND THIS LAYER USED TO
+ * HOLD ONE NUMBER FOR EVERY PROGRAM (ruling S). It was `CK_GAP_SLACK = 8`,
+ * derived from `gate_clocked_lane_a2.build()` -- the A2 MODEL's shipped lane
+ * set -- and then ENFORCED on `ckod`, a different lane set of four clocked
+ * open-drain lanes. Derived per program, `ckod`'s own bounds are 8 / 11 / 17 /
+ * 18 for its four lanes: the shared 8 was TIGHTER than the worst case of three
+ * of them, and held only because the measured schedule (widest 7) was gentler
+ * than that worst case. Every other clocked arm ran with the bound OFF, for
+ * want of a number for its lane set.
+ * => The bound now arrives PER LANE, PER ARM, as `+A2SLACK=s0,s1,s2,s3,s4`:
+ *   `model/a2/program_a2.py` derives each from the program's OWN image (its
+ *   headers' EDF keys, its delays, its J) with pyRTA primary, writes
+ *   `test/clocked_a2_bounds.json`, and `test/benchset.py` GENERATES the
+ *   plusarg from that file for every arm whose image is in it -- so no arm
+ *   carries a hand-typed bound and none can be left out.
+ * ⚠ -1 MEANS UNBOUNDED, and it is a RESULT for an overloaded program rather
+ * than a gap. `corpus_all5`'s lane set has U = 1.096; no finite worst-case
+ * response exists, and its clocked lane MEASURED 131 cycles late. The layer
+ * reports that lateness without a verdict, which is the status the earlier
+ * ruling gave the stress image -- now stated with the reason instead of a flag.
+ * ⛔ A RED HERE IS A REQUEST TO RE-DERIVE, NEVER A LICENCE TO RAISE A NUMBER:
+ * the numbers are not typed anywhere, so the only way to change one is to
+ * change the program or the model it is derived from.
  */
-localparam integer CK_GAP_SLACK = 8;
 localparam integer N_LANES_CB   = 5;
 
 integer cg_cyc;
@@ -617,12 +626,30 @@ integer cg_afails, cg_achecks, cg_awidest;
  * being scoped out of existence. `+A2BOUND=1` is set on the arm whose lane
  * set A2 actually models.
  */
-integer cg_abound;
+integer cg_slack [0:7];    // this ARM's derived budget for each lane; -1 = none
+integer cg_lwide [0:7];    // the widest lateness each lane actually showed
+integer cg_nslack;         // how many fields the plusarg supplied
+reg [8*96-1:0] cg_sstr;
 
 initial begin
   cg_cyc = 0;  cg_fails = 0;  cg_checks = 0;  cg_worst = 1000000;
   cg_widest = 0;  cg_afails = 0;  cg_achecks = 0;  cg_awidest = 0;
-  if (!$value$plusargs("A2BOUND=%d", cg_abound)) cg_abound = 0;
+  for (cg_k2 = 0; cg_k2 < 8; cg_k2 = cg_k2 + 1) begin
+    cg_slack[cg_k2] = -1;  cg_lwide[cg_k2] = -1;
+  end
+  cg_nslack = 0;
+  // ⭐ ONE PLUSARG, FIVE FIELDS, rather than five plusargs: this file is
+  // included by thirteen benches, so every name it reads is a shared default
+  // declared in `benchset.SHARED_INCLUDE_DEFAULTS`, and one name is one entry.
+  // ⛔ A MALFORMED VALUE IS NOT SILENTLY "UNBOUNDED": `$sscanf` reports how
+  // many fields it parsed, and anything but 5 is printed as a FAIL so a typo
+  // in a generated plusarg cannot switch the check off.
+  if ($value$plusargs("A2SLACK=%s", cg_sstr)) begin
+    cg_nslack = $sscanf(cg_sstr, "%d,%d,%d,%d,%d", cg_slack[0], cg_slack[1],
+                        cg_slack[2], cg_slack[3], cg_slack[4]);
+    if (cg_nslack != 5)
+      $display("*** FAIL clocked_conform[A2]: +A2SLACK carried %0d field(s), not 5 -- the per-lane bound could not be read, so A2 would be checking nothing", cg_nslack);
+  end
   for (cg_k2 = 0; cg_k2 < 8; cg_k2 = cg_k2 + 1) cg_rise[cg_k2] = -1;
   for (cg_k2 = 0; cg_k2 < 8; cg_k2 = cg_k2 + 1) begin
     cg_last[cg_k2] = -1;  cg_hi[cg_k2] = 0;
@@ -662,11 +689,16 @@ always @(posedge dut.clk) begin
         // term that would have to guess at it.
         if (cg_rise[dut.u_eng.cur] >= 0) begin
           cg_achecks = cg_achecks + 1;
-          if (cg_abound != 0 && (cg_cyc - cg_rise[dut.u_eng.cur]) >
-              (cg_dly[dut.u_eng.cur] + CK_GAP_SLACK)) begin
-            $display("*** FAIL clocked_conform[A2]: lane %0d dispatched %0d cycle(s) after its rise was OBSERVED, over d=%0d plus the %0d-cycle budget -- the lane released too LATE, which a lower bound alone cannot see", dut.u_eng.cur, cg_cyc - cg_rise[dut.u_eng.cur], cg_dly[dut.u_eng.cur], CK_GAP_SLACK);
+          if (cg_slack[dut.u_eng.cur] >= 0 &&
+              (cg_cyc - cg_rise[dut.u_eng.cur]) >
+              (cg_dly[dut.u_eng.cur] + cg_slack[dut.u_eng.cur])) begin
+            $display("*** FAIL clocked_conform[A2]: lane %0d dispatched %0d cycle(s) after its rise was OBSERVED, over d=%0d plus THIS LANE's %0d-cycle budget (derived from this program's own lane set) -- the lane released too LATE, which a lower bound alone cannot see", dut.u_eng.cur, cg_cyc - cg_rise[dut.u_eng.cur], cg_dly[dut.u_eng.cur], cg_slack[dut.u_eng.cur]);
             cg_afails = cg_afails + 1;
           end
+          if ((cg_cyc - cg_rise[dut.u_eng.cur] - cg_dly[dut.u_eng.cur])
+              > cg_lwide[dut.u_eng.cur])
+            cg_lwide[dut.u_eng.cur] = cg_cyc - cg_rise[dut.u_eng.cur]
+                                      - cg_dly[dut.u_eng.cur];
           if ((cg_cyc - cg_rise[dut.u_eng.cur] - cg_dly[dut.u_eng.cur])
               > cg_awidest)
             cg_awidest = cg_cyc - cg_rise[dut.u_eng.cur]
@@ -715,12 +747,17 @@ task cb_report;
       $display("  clocked_conform[G1]: ok -- %0d post-HIGH gap(s), all >= d, margin %0d..%0d cycle(s)", cg_checks, cg_worst, cg_widest);
     if (cg_achecks == 0)
       $display("  clocked_conform[A2]: 0 observed-rise releases in this program -- NOT EXERCISED");
-    else if (cg_abound == 0)
-      $display("  clocked_conform[A2]: %0d release(s) measured, widest %0d past d -- BOUND NOT ENFORCED on this lane set (+A2BOUND=0)", cg_achecks, cg_awidest);
     else if (cg_afails != 0)
-      $display("*** FAIL clocked_conform[A2]: %0d of %0d releases later than d + %0d after the observed rise", cg_afails, cg_achecks, CK_GAP_SLACK);
+      $display("*** FAIL clocked_conform[A2]: %0d of %0d releases later than d + their lane's own budget after the observed rise", cg_afails, cg_achecks);
+    else if (cg_nslack == 0)
+      $display("  clocked_conform[A2]: %0d release(s) measured, widest %0d past d -- NO BOUND SUPPLIED for this image (+A2SLACK absent)", cg_achecks, cg_awidest);
     else
-      $display("  clocked_conform[A2]: ok -- %0d release(s) within d + %0d of the observed rise, widest %0d", cg_achecks, CK_GAP_SLACK, cg_awidest);
+      $display("  clocked_conform[A2]: ok -- %0d release(s), widest %0d past d, every bounded lane within its own budget", cg_achecks, cg_awidest);
+    // ⭐ PER LANE, so the gate can hold each lane to ITS bound. A program-wide
+    // "widest" would compare one lane's lateness against another lane's
+    // budget -- the max-over-the-set error this ruling exists to remove.
+    if (cg_achecks != 0)
+      $display("  clocked_conform[A2] lanes: budget %0d,%0d,%0d,%0d,%0d widest %0d,%0d,%0d,%0d,%0d", cg_slack[0], cg_slack[1], cg_slack[2], cg_slack[3], cg_slack[4], cg_lwide[0], cg_lwide[1], cg_lwide[2], cg_lwide[3], cg_lwide[4]);
     // ⭐⭐ R4 QUOTES BOTH SENTENCES BESIDE ITS VERDICT, which is the whole
     // point of the layer: a reader can see that the bench and
     // `docs/J_LANE_PROOF.md` are checking the same statement, not two that

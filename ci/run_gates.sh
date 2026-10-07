@@ -116,6 +116,14 @@ GATES=(
   # ⇒ The suite read 20 of 20 while that premise was unchecked. This is the
   #   gate that ends it, and it is RED without `test/refill_run.sh`'s data.
   model/gate_port_demand.py
+  # ⛔⛔ RULING S -- A2's post-HIGH bound belongs to (PROGRAM, LANE). The bench
+  # used to hold ONE constant, derived for the A2 model's shipped lane set and
+  # enforced on `ckod` -- a different lane set whose own bounds are
+  # 8 / 11 / 17 / 18 -- while every other clocked arm ran unbounded. This gate
+  # holds the generated per-lane budgets current, refuses a typed one, and
+  # requires the must-fire: a LIGHTER set's bound on a HEAVIER feasible
+  # program goes red while the program's own bound holds.
+  model/a2/gate_a2_program.py
   # ⭐ JOINED THE LIST when it took the RX lane-field width check. That check
   # guards against a received byte being attributed to the WRONG LANE if
   # `N_LANES` ever outgrows the explicit [2:0] on `e_rx_lane` -- and it lives
@@ -197,6 +205,11 @@ can_run() {
     model/gate_port_demand.py)
       [ -n "${PE_REFILL_JSON:-}" ] && [ -f "${PE_REFILL_JSON:-}" ] \
         || { echo "no refill measurement at PE_REFILL_JSON"; return 1; } ;;
+    # ⛔ RULING S: without the must-fire measurement the per-program bound has
+    # never been seen to do anything a shared number would not.
+    model/a2/gate_a2_program.py)
+      [ -n "${PE_A2_JSON:-}" ] && [ -f "${PE_A2_JSON:-}" ] \
+        || { echo "no A2 must-fire measurement at PE_A2_JSON"; return 1; } ;;
   esac
   return 0
 }
@@ -509,6 +522,49 @@ if [ -z "${PE_REFILL_JSON:-}" ] && [ "${PE_SKIP_REFILL:-0}" != "1" ]; then
     && export PE_REFILL_JSON="$ROOT/probe_refill/refill.json"
 fi
 [ -n "${PE_REFILL_JSON:-}" ] && echo "  PE_REFILL_JSON=$PE_REFILL_JSON"
+
+# ---------------------------------------------------------------------------
+# THE A2 MUST-FIRE (ruling S), which `gate_a2_program.py` judges.
+# ---------------------------------------------------------------------------
+# ⛔⛔ ONE PROGRAM, TWO BUDGETS: `ckdense` under its OWN derived per-lane
+# budgets must pass, and under `corpus_i2c`'s lighter budget must fail. The
+# swept arms already hold every clocked program to its own bound; this is the
+# arm that shows the bound is PER PROGRAM rather than one number.
+# ⚠ ~40s for one Verilator build, declared.
+if [ -z "${PE_A2_JSON:-}" ] && [ "${PE_SKIP_A2:-0}" != "1" ]; then
+  echo
+  echo "  --- A2 per-program must-fire (S) ---"
+  A2_OK=0
+  if command -v verilator >/dev/null 2>&1 || [ -n "${PE_VERILATOR:-}" ]; then
+    if bash test/a2_run.sh "$ROOT/probe_a2"; then A2_OK=1; fi
+  elif command -v wsl.exe >/dev/null 2>&1; then
+    echo "  verilator is not on PATH; delegating the measurement to WSL"
+    AWRAP="$ROOT/probe_ci_a2.sh"
+    {
+      echo '#!/bin/bash'
+      echo 'cd "$(dirname "$0")" || exit 1'
+      echo "export PE_VERILATOR=\"${PE_VERILATOR_WSL:-/opt/oss-cad-suite-2026-09-30/bin/verilator}\""
+      echo 'bash test/a2_run.sh "$PWD/probe_a2"'
+    } > "$AWRAP"
+    AWSLROOT="$(wsl_root "$ROOT")"
+    if ! MSYS_NO_PATHCONV=1 wsl.exe -e test -f "$AWSLROOT/probe_ci_a2.sh"
+    then
+      echo "  *** WSL cannot see $AWSLROOT/probe_ci_a2.sh"
+      echo "      (converted from $ROOT). Fix the path mapping rather than"
+      echo "      skipping the A2 gate."
+    elif MSYS_NO_PATHCONV=1 wsl.exe -e bash "$AWSLROOT/probe_ci_a2.sh"; then
+      A2_OK=1
+    else
+      echo "  *** the WSL A2 measurement failed -- the gate is RED"
+    fi
+  else
+    echo "  *** neither verilator nor wsl.exe is available, so the A2"
+    echo "      must-fire cannot run. The gate is RED rather than skipped."
+  fi
+  [ "$A2_OK" = "1" ] && [ -f "$ROOT/probe_a2/a2.json" ] \
+    && export PE_A2_JSON="$ROOT/probe_a2/a2.json"
+fi
+[ -n "${PE_A2_JSON:-}" ] && echo "  PE_A2_JSON=$PE_A2_JSON"
 
 # ---------------------------------------------------------------------------
 # run them

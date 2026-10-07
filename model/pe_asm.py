@@ -46,6 +46,12 @@ sys.path.insert(0, os.path.join(ROOT, "test"))
 sys.path.insert(0, os.path.join(HERE, "a2"))
 
 import hold_bound                         # noqa: E402
+# ⭐ D2's per-program floor reuses ruling S's derivation and gate_um10204's
+# transcribed table: one model of r_i, one table of minima, no copies here.
+import gate_um10204 as um                 # noqa: E402
+import program_a2                         # noqa: E402
+from bursty import C_SHIPPED, L_SYNC      # noqa: E402
+from pyrta_src import find_pyrta          # noqa: E402
 from make_smoke_image import (            # noqa: E402
     ACT_BASE, ACT_BYTES, AW, N_LANES, OP_ARM, OP_LEVEL, OP_READBIT,
     OP_REARM,
@@ -188,14 +194,13 @@ def check_clocked_hold_delay(lanes, headers):
     silicon refuses, and the toolchain would be telling people their program
     is fine. See `model/hold_bound.py`.
 
-    ⚠ THIS IS THE **STATIC HALF** OF D2 AND SAYS SO. The full ruling refuses
-    below a PER-PROGRAM floor, `d >= t_LOW(min, mode) + (r_i - C)`, computed
-    from that program's own A2 row -- which needs ruling S (the per-program
-    bound, still owed). `SDA_HOLD` is a HARD floor that holds for every
-    program and every mode, so it lands now; the mode floor is strictly
-    tighter and lands with S. ⛔ A program this check ACCEPTS is therefore not
-    yet certified mode-legal, only hold-legal, and the report says so rather
-    than implying the stronger claim.
+    ⭐ THIS IS ONE OF D2's TWO HALVES. It is the HARD floor -- `SDA_HOLD`
+    holds for every program and every mode -- and it landed first. The
+    PER-PROGRAM half, `d >= t_LOW(min, mode) + (r_i - C)` from that program's
+    own lane set, is `check_mode_floor`, which landed with ruling S and runs on
+    the assembled image. A lane can clear this check and still fail that one
+    (d = 20: above the hold, under every t_LOW), which is exactly the gap the
+    static half used to leave open and the reason both run.
     """
     try:
         hold = hold_bound.bound()
@@ -231,6 +236,66 @@ def check_clocked_hold_delay(lanes, headers):
                     % (ln, "SHIFT" if op == OP_SHIFT else "SHIFTIN", dly,
                        hold, hold + 1))
     return hold
+
+
+def check_mode_floor(img):
+    """Every clocked open-drain lane must clear SOME UM10204 mode (ruling D2).
+
+    ⭐⭐ THE PER-PROGRAM HALF OF D2, landed on ruling S's machinery rather than a
+    second model. The floor is
+
+        worst-case t_LOW = d - (r_i - C)  >=  t_LOW(min, mode)
+
+    and `r_i` belongs to the pair (PROGRAM, LANE): this program's own lane set,
+    from its own headers, delays and `J`, through `model/a2/program_a2.py` with
+    pyRTA primary. ⛔ The fixed 38/78/248 floor this replaces was `ckod`'s
+    observed jitter promoted to a law -- a number from one lane set applied to
+    every program, the same error ruling S removed from the bench.
+
+    ⚠ "SOME MODE", AND THE ISA IS WHY. Nothing in a program declares which
+    I2C mode a lane intends, so the assembler can only refuse a lane that
+    claims NONE: Fm+ has the smallest minima, so a lane under Fm+'s floor is
+    illegal at every rate. The mode each lane DOES clear is reported, so a
+    program meant for 400 kHz can see that it only reaches Fm+.
+
+    ⛔ OVERLOADED IS A REFUSAL, NOT A PASS. A lane set with U > 1 has no
+    finite `r_i`, so no `t_LOW` floor can be certified for its clocked lane.
+    ⛔ NO pyRTA IS A REFUSAL, NOT A SKIP: an assembler that certified mode
+    legality without the bound it rests on would be certifying nothing.
+    """
+    src = find_pyrta()
+    if not src:
+        raise Reject(
+            "pyRTA was not found, so no clocked open-drain lane can be "
+            "certified against a UM10204 t_LOW floor -- the floor needs the "
+            "lane's worst-case start delay, which is pyRTA-primary. Set "
+            "PYRTA_SRC to a pyRTA src/ directory.")
+    res = program_a2.derive(img, src)
+    tc = um.table_cycles()
+    claims = {}
+    for ln, e in sorted(res["lanes"].items(), key=lambda kv: int(kv[0])):
+        if e["r_pyrta"] is None:
+            raise Reject(
+                "lane %s is a clocked open-drain lane in a program whose lane "
+                "set has no finite worst-case response (%s), so its low phase "
+                "has no certifiable floor and no UM10204 mode can be claimed."
+                % (ln, e["why"]))
+        lag = e["r_pyrta"] - C_SHIPPED
+        lo = e["T"] - lag
+        hi = e["T"] + L_SYNC
+        mode = um.claimable(lo, hi, tc)
+        if mode is None:
+            need = min(tc[m]["t_LOW"] for m in tc) + lag
+            raise Reject(
+                "lane %s runs a clocked open-drain action at d = %d, and in "
+                "THIS program's lane set its dispatch can start up to %d "
+                "cycle(s) late (r_i - C, pyRTA), so its low phase can shrink to "
+                "%d cycles -- under every UM10204 mode's t_LOW minimum. The "
+                "floor for this lane in this program is d >= %d. It is per "
+                "program: the same lane beside lighter traffic could pass."
+                % (ln, e["T"], lag, lo, need))
+        claims[int(ln)] = (mode, lo, lag)
+    return claims
 
 
 def check_receive_pin(lanes, headers):
@@ -398,6 +463,11 @@ def assemble(lanes, headers):
     if len(img) > (1 << AW):
         raise Reject("image is %d bytes, over the %d-byte program store"
                      % (len(img), 1 << AW))
+    # ⛔ AFTER THE IMAGE EXISTS, ON THE IMAGE. The floor is derived from the
+    # program's own lane set, and the image is the one representation that
+    # every route into the chip shares -- deriving it from the tuples instead
+    # would be a second decoder of the same program.
+    check_mode_floor(img)
     return img
 
 
@@ -420,6 +490,10 @@ def report(lanes, headers):
     print("    image            : %d bytes" % len(img))
     print("    SDA hold floor   : d > %d on a clocked open-drain lane "
           "(read from src/pe_engine.v)" % hold)
+    for ln, (mode, lo, lag) in sorted(check_mode_floor(img).items()):
+        print("    lane %d mode     : clears %s -- worst t_LOW %d cycles "
+              "after %d of start delay (this program's own r_i - C)"
+              % (ln, mode, lo, lag))
     print("    queue ownership  : %s"
           % (", ".join("q%d -> lane %d" % (q, l)
                        for q, l in sorted(owner.items())) or "no TX consumers"))
@@ -481,6 +555,25 @@ def _demo_hold_unclocked():
     widened to cover it is recorded as owed rather than decided here.
     """
     return _hold_demo(hold_bound.bound() - 1, level=0)
+
+
+def _floor_demo(d, heavy):
+    """One clocked open-drain lane at `d`, alone or beside three busy lanes.
+
+    ⭐ THE SAME LANE IN TWO PROGRAMS is the whole point: D2's floor belongs to
+    the pair (program, lane), so the lane's legality must change with its
+    neighbours while its own fields do not move. The neighbours are push-pull
+    `OP_LEVEL` lanes on `uo_out` pins with tight EDF keys -- real contention,
+    and nothing a refusal elsewhere in this file would object to.
+    """
+    lanes = {2: [(OP_SHIFT, 2, 1, d, 1), (OP_REARM, 0, 1, d, 1)]}
+    headers = {2: (2, 1, 0, d, min(2 * d, 255), min(3 * d, 255))}
+    if heavy:
+        for ln, pin in ((0, 8), (1, 9), (3, 10)):
+            lanes[ln] = [(OP_LEVEL, pin, 0, 21, 0), (OP_LEVEL, pin, 1, 21, 0),
+                         (OP_REARM, 0, 1, 21, 0)]
+            headers[ln] = (pin, pin, 1, 21, 22, 30)
+    return lanes, headers
 
 
 def _demo_shared_queue():
@@ -635,6 +728,43 @@ def main() -> int:
             else:
                 print("    %-42s %s" % (name, "rejected" if got_reject
                                         else "accepted"))
+
+    # ---- MUST-FIRE: D2's per-program mode floor ---------------------------
+    # ⛔⛔ THREE CASES, AND THE FIRST IS THE ONE D2's STATIC HALF LEFT OPEN.
+    # d = 20 clears the SDA hold (> 15) so `check_clocked_hold_delay` accepts
+    # it -- yet its worst low phase is under every mode's t_LOW, so the
+    # assembler used to call it "hold-legal" and wave it through.
+    # ⭐ THE OTHER TWO ARE THE SAME LANE AT d = 32 IN TWO PROGRAMS. Searched,
+    # not guessed: the lane alone clears Fm+ from d = 30, and beside three busy
+    # lanes only from d = 38. A floor that did not depend on the neighbours
+    # would give the same verdict for both, which is the shared-constant error
+    # ruling S removed from the bench.
+    print()
+    print("  --- must-fire: D2's mode floor belongs to (program, lane) ---")
+    for name, build, want_reject, want in (
+            ("hold-legal (d = 20) but under every t_LOW",
+             lambda: _floor_demo(20, False), True,
+             ("lane 2", "t_LOW", "per program")),
+            ("d = 32, the clocked lane ALONE",
+             lambda: _floor_demo(32, False), False, ()),
+            ("d = 32, the SAME lane beside three busy lanes",
+             lambda: _floor_demo(32, True), True, ("lane 2", "per program"))):
+        lanes_b, headers_b = build()
+        try:
+            check_clocked_hold_delay(lanes_b, headers_b)
+            assemble(lanes_b, headers_b)
+            got_reject, msg = False, ""
+        except Reject as e:
+            got_reject, msg = True, str(e)
+        missing = [w for w in want if w not in msg]
+        ok = (got_reject == want_reject) and not missing
+        print("    %-46s %s"
+              % (name, ("rejected" if got_reject else "accepted") if ok else
+                 "*** %s%s" % ("REJECTED" if got_reject else "ACCEPTED",
+                               (" but did not name %s" % missing)
+                               if missing else "")))
+        if not ok:
+            rc = 1
 
     # ---- MUST-FIRE: the receive refusal's SCOPE, in both directions -------
     # ⛔ A REFUSAL THAT IS TOO WIDE BREAKS SHIPPED MECHANISMS, so the carve-outs

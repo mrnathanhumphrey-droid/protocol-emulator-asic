@@ -1,0 +1,201 @@
+"""RULING S -- A2's post-HIGH gap bound belongs to (PROGRAM, LANE), adjudicated.
+
+⛔⛔ THE DEFECT. `test/clocked_conform.vh` held ONE number, `CK_GAP_SLACK = 8`,
+derived from the A2 MODEL's shipped lane set and enforced on `ckod` -- a
+different lane set. Derived over `ckod`'s own four lanes the bounds are 8 / 11 /
+17 / 18, so the shared 8 was tighter than the worst case of three of them and
+held only because the measured schedule was gentler. Every other clocked arm ran
+unbounded. This is the narrow-lane-set error this session has now made four
+times, in its original form.
+
+WHAT THIS GATE HOLDS:
+
+  1. `test/clocked_a2_bounds.json` is CURRENT. It is regenerated in memory from
+     the images on disk and compared; a stale file means some arm is being held
+     to a bound for a program that no longer exists.
+  2. NO BOUND IS TYPED. The bench carries no slack constant, and every arm
+     `test/benchset.py` plans gets `+A2SLACK` equal to the generated row.
+  3. THE MUST-FIRE (`test/a2_run.sh`): `ckdense`, a FEASIBLE program heavier
+     than `corpus_i2c`, PASSES under its own budgets and FAILS under
+     `corpus_i2c`'s. Without both halves the per-program derivation would be
+     indistinguishable on the bench from one shared number.
+  4. OVERLOADED PROGRAMS ARE NAMED, with the utilisation that leaves them
+     unbounded, rather than given a number.
+
+⚠ `J` IS CONSERVATIVE BY CONSTRUCTION, and declared: `program_a2` takes `J` from
+the program's MINIMUM ACTION DELAY, which is a lower bound on the refill-bearing
+`d_min` §1 computes. So `J` -- and with it `r_i` and the budget -- can only come
+out LARGER than exact, never smaller: the bound stays sound and may be loose.
+It changes nothing for any program with `d >= D*` (all of them `J = 1` either
+way); it loosens the `ckhold_*` images, whose delays sit just above
+`SDA_HOLD`.
+"""
+
+from __future__ import annotations
+
+import io
+import json
+import os
+import re
+import sys
+
+try:
+    sys.stdout.reconfigure(encoding="utf-8")
+except Exception:
+    pass
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(os.path.dirname(HERE))
+sys.path.insert(0, HERE)
+sys.path.insert(0, os.path.join(ROOT, "test"))
+
+import program_a2                                                 # noqa: E402
+from pyrta_src import find_pyrta                                  # noqa: E402
+
+
+def load_measurement():
+    p = os.environ.get("PE_A2_JSON", "")
+    if not p:
+        cand = os.path.join(ROOT, "probe_a2", "a2.json")
+        if os.path.isfile(cand):
+            p = cand
+    if not p or not os.path.isfile(p):
+        return None, p
+    with io.open(p, encoding="utf-8") as fh:
+        return json.load(fh), p
+
+
+def main() -> int:
+    rc = 0
+    print()
+    print("=" * 78)
+    print("  RULING S -- A2's POST-HIGH BOUND, PER (PROGRAM, LANE)")
+    print("=" * 78)
+
+    # ---- 1. the generated bounds are current --------------------------
+    print()
+    print("  --- 1. test/clocked_a2_bounds.json matches the images on disk ---")
+    src = find_pyrta()
+    if not src:
+        print("    *** FAIL pyRTA not found -- the bounds are pyRTA-primary, so")
+        print("        currency cannot be checked. A foreign check that cannot")
+        print("        run has not run.")
+        return 1
+    if not os.path.isfile(program_a2.OUT_JSON):
+        print("    *** FAIL test/clocked_a2_bounds.json is absent -- every")
+        print("        clocked arm would run with A2's upper bound OFF.")
+        return 1
+    with io.open(program_a2.OUT_JSON, encoding="utf-8") as fh:
+        on_disk = json.load(fh)
+    fresh = {name: program_a2.derive(img, src)
+             for name, img in program_a2.clocked_images()}
+    stale = sorted(set(on_disk) ^ set(fresh)) + sorted(
+        n for n in set(on_disk) & set(fresh) if on_disk[n] != fresh[n])
+    if stale:
+        print("    *** FAIL stale for: %s" % ", ".join(stale))
+        print("        Run `python model/a2/program_a2.py`. A stale row holds an")
+        print("        arm to the bound of a program that no longer exists.")
+        rc = 1
+    else:
+        print("    current -- %d image(s) re-derived and identical" % len(fresh))
+
+    # ---- 2. no bound is typed --------------------------------------------
+    print()
+    print("  --- 2. no bound is typed anywhere ---")
+    vh = io.open(os.path.join(ROOT, "test", "clocked_conform.vh"),
+                 encoding="utf-8").read()
+    if re.search(r"localparam\s+integer\s+CK_GAP_SLACK", vh):
+        print("    *** FAIL `CK_GAP_SLACK` is back in clocked_conform.vh -- a")
+        print("        shared constant is the defect this ruling removed")
+        rc = 1
+    else:
+        print("    the bench carries no slack constant")
+    import benchset                                               # noqa: E402
+    recs, probs = benchset.plan()
+    checked, mism = 0, []
+    for r in recs:
+        img = next((a.split("=", 1)[1] for a in r["args"]
+                    if a.startswith("+IMG=")), None)
+        if img is None:
+            continue
+        want = benchset.a2_slack_arg(img)
+        have = next((a for a in r["args"] if a.startswith("+A2SLACK=")), None)
+        if want is None and have is None:
+            continue
+        checked += 1
+        if want != have:
+            mism.append((r["top"], r["label"], want, have))
+    for top, lab, want, have in mism:
+        print("    *** FAIL %s/%s carries %s, the generated row says %s"
+              % (top, lab, have, want))
+        rc = 1
+    if not mism:
+        print("    %d clocked arm(s), every one carrying its generated budget"
+              % checked)
+
+    # ---- 3. the must-fire ------------------------------------------------
+    print()
+    print("  --- 3. must-fire: a LIGHTER set's bound on a HEAVIER program ---")
+    meas, mpath = load_measurement()
+    if meas is None:
+        print("    *** FAIL no measurement at PE_A2_JSON='%s'" % mpath)
+        print("        `bash test/a2_run.sh <outdir>` produces it. RED rather")
+        print("        than skipped: without it the per-program bound has never")
+        print("        been seen to do anything a shared number would not.")
+        rc = 1
+    else:
+        own, light = meas.get("own") or {}, meas.get("light") or {}
+        print("    ckdense (U = 0.518, J = 1) under two budgets:")
+        print("      %-7s %-18s %-8s %-6s %s"
+              % ("arm", "budget", "verdict", "late", "widest per lane"))
+        for nm, r in (("own", own), ("light", light)):
+            print("      %-7s %-18s %-8s %-6s %s"
+                  % (nm, r.get("budget"), r.get("verdict"), r.get("late"),
+                     r.get("lane_widest")))
+        if own.get("verdict") != "ok":
+            print("    *** FAIL ckdense's OWN budget did not hold -- the")
+            print("        per-program derivation is unsound for it")
+            rc = 1
+        if light.get("verdict") != "red":
+            print("    *** FAIL the lighter budget did NOT fail on the heavier")
+            print("        program -- on the bench the per-program bound is")
+            print("        indistinguishable from one shared number")
+            rc = 1
+        if own.get("verdict") == "ok" and light.get("verdict") == "red":
+            print("    => holds under its own bound, fails under the lighter one.")
+            print("    ⚠ IT FIRES ON %s RELEASE(S): the program's lateness peaks"
+                  % light.get("late"))
+            print("      at 10 on lane 2 against a light budget of 8, and is")
+            print("      deterministic across all three rand-reset modes -- but a")
+            print("      single release is a thin margin, so the gate requires")
+            print("      the verdict, not a count.")
+
+    # ---- 4. programs with no bound ----------------------------------------
+    print()
+    print("  --- 4. programs whose lane set has NO finite bound ---")
+    none = [(n, r) for n, r in sorted(fresh.items())
+            if any(e["slack"] is None for e in r["lanes"].values())]
+    for n, r in none:
+        print("    %-24s U = %.3f -- overloaded, so unbounded; the bench"
+              % (n, r["U"]))
+        print("    %-24s reports its lateness WITHOUT a verdict" % "")
+    if not none:
+        print("    none")
+
+    print()
+    print("  --- 5. what this gate does NOT check ---")
+    print("    ⚠ J IS CONSERVATIVE: taken from the minimum ACTION delay, a")
+    print("      lower bound on §1's refill-bearing d_min, so budgets can only")
+    print("      be looser than exact. No change for any program at d >= D*.")
+    print("    ⚠ THE BOUND IS A2's MODEL OF THE ENGINE, not the engine. It is")
+    print("      checked against the bench on every swept clocked arm, which")
+    print("      is what makes it more than arithmetic.")
+
+    print()
+    print("=" * 78)
+    print("  GATE a2-program: %s" % ("PASSED" if rc == 0 else "FAILED"))
+    return rc
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

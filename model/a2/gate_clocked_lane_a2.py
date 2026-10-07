@@ -385,74 +385,47 @@ def main() -> int:
     print("      recomputed, not carried.")
 
     # -----------------------------------------------------------------
-    # 6. A2 -- the bench's gap budget must still cover `r_i - C`
+    # 6. A2 -- the bench's gap budget, now PER (PROGRAM, LANE) (ruling S)
     # -----------------------------------------------------------------
     print()
-    print("  --- 6. the bench's post-HIGH gap budget, checked against A2 ---")
-    print("    ⛔⛔ THE CONSTANT LIVES IN THE BENCH AND IS CHECKED HERE. "
-          "`clocked_conform.vh`")
-    print("    bounds a post-HIGH gap at `d + L_SYNC + 1 + (r_i - C)`, and the")
-    print("    `r_i - C` term is an A2 number that the RTL cannot know. Copying")
-    print("    it into this gate as well would be the two-copies defect that")
-    print("    has already cost this project a published column, so the bench")
-    print("    HOLDS it and this gate PARSES and adjudicates it.")
+    print("  --- 6. the bench's post-HIGH gap budget, against A2 ---")
+    print("    ⛔⛔ THIS SECTION USED TO PARSE `CK_GAP_SLACK = 8` OUT OF")
+    print("    `clocked_conform.vh` and check it against THIS gate's lane set")
+    print("    -- the A2 MODEL's shipped set. The bench then enforced that one")
+    print("    number on `ckod`, a different lane set, whose own bounds are")
+    print("    8 / 11 / 17 / 18. Ruling S retired the constant: each arm now")
+    print("    carries a per-lane budget derived from its OWN program by")
+    print("    `model/a2/program_a2.py`, and `gate_a2_program.py` holds it.")
+    print("    What stays here is the model's own number, as a reference:")
     vh = os.path.join(os.path.dirname(os.path.dirname(HERE)), "test",
                       "clocked_conform.vh")
-    slack = None
     try:
         import re as _re
         txt = io.open(vh, encoding="utf-8").read()
-        m = _re.search(r"localparam\s+integer\s+CK_GAP_SLACK\s*=\s*(\d+)",
-                       txt)
-        if m:
-            slack = int(m.group(1))
-    except Exception as exc:                            # noqa: BLE001
+    except OSError as exc:
         print("    *** FAIL could not read %s: %s" % (vh, exc))
         rc = 1
-    if slack is None:
-        print("    *** FAIL no `CK_GAP_SLACK` localparam found in")
-        print("        test/clocked_conform.vh -- the bound this gate is")
-        print("        supposed to adjudicate is not there to read.")
+        txt = ""
+    if _re.search(r"localparam\s+integer\s+CK_GAP_SLACK", txt):
+        print("    *** FAIL a shared `CK_GAP_SLACK` constant is back in the")
+        print("        bench -- the defect ruling S removed")
+        rc = 1
+    pick2 = "Fm+ 1 MHz" if "Fm+ 1 MHz" in results else next(iter(results),
+                                                            None)
+    if pick2 is None:
+        print("    *** FAIL no feasible mode to take r_i from")
         rc = 1
     else:
-        pick2 = "Fm+ 1 MHz" if "Fm+ 1 MHz" in results else next(iter(results),
-                                                                None)
-        if pick2 is None:
-            print("    *** FAIL no feasible mode to take r_i from")
-            rc = 1
-        else:
-            d2 = results[pick2][0]
-            ls2 = build(d2, tc[pick2]["t_LOW"])
-            # ⛔⛔ THE CLOCKED LANE'S OWN `r - C`, NOT THE MAX OVER THE SET,
-            # and the first version of this check took the max and failed at 13.
-            # The quantity being bounded is how late THE CLOCKED LANE's own
-            # post-HIGH dispatch can be served; UART-tx's 13 bounds UART-tx.
-            # ⭐ THE MEASUREMENT SETTLES IT: the observed gap margin topped out
-            # at exactly 8 = L_SYNC + 1 + 4, and 4 is this lane's r - C. A term
-            # taken from another lane would have been loose by 9 cycles and the
-            # bound would have stopped catching anything.
-            ck_lane = ls2[-1]
-            worst_rc = response_time_b(ck_lane, ls2)["r"] - ck_lane.C
-            need = L_SYNC + 1 + worst_rc
-            ok = slack >= need
-            if not ok:
-                rc = 1
-            print()
-            print("      %-26s %d" % ("CK_GAP_SLACK (bench)", slack))
-            print("      %-26s %d" % ("L_SYNC", L_SYNC))
-            print("      %-26s %d" % ("+ 1 (the dispatch)", 1))
-            print("      %-26s %d  (at %s)"
-                  % ("the clocked lane's r_i - C", worst_rc, pick2))
-            print("      %-26s %d   %s"
-                  % ("=> required", need,
-                     "ok -- the bench budget covers it" if ok
-                     else "*** FAIL the bench budget is TOO SMALL"))
-            if ok and slack == need:
-                print("      ⚠ EXACTLY EQUAL, so there is no slack above the")
-                print("        derivation. A red in the bench's A2 arm is a")
-                print("        request to RE-DERIVE this, never a licence to")
-                print("        raise the constant until it passes.")
-
+        d2 = results[pick2][0]
+        ls2 = build(d2, tc[pick2]["t_LOW"])
+        ck_lane = ls2[-1]
+        worst_rc = response_time_b(ck_lane, ls2)["r"] - ck_lane.C
+        print("      A2 model's shipped set, clocked lane at %s: r_i - C = %d"
+              % (pick2, worst_rc))
+        print("      => L_SYNC + 1 + %d = %d. ⚠ A REFERENCE FOR THIS LANE SET"
+              % (worst_rc, L_SYNC + 1 + worst_rc))
+        print("         ONLY -- no bench arm runs this lane set, so no arm is")
+        print("         held to it.")
     print()
     print("=" * 78)
     print("  GATE clocked-lane-a2: %s" % ("PASSED" if rc == 0 else "FAILED"))

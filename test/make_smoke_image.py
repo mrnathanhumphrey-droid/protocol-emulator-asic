@@ -312,6 +312,24 @@ D_FM_SHIPPABLE = 70
 
 CKOD_DELAYS = [D_FMPLUS_SHIPPABLE, 60, 120, 240]
 
+#: ⭐⭐ RULING S's MUST-FIRE SUBJECT: the `ckod` layout at a DENSE span. It is a
+#: FEASIBLE program (U = 0.518, J = 1) whose clocked lanes MEASURE 10 cycles of
+#: post-rise lateness -- under their own derived A2 budgets (11 / 13 / 15 / 17)
+#: and OVER the lighter `corpus_i2c` budget of 8. That is the pair the ruling
+#: asked for: a lighter lane set's bound applied to a heavier program goes red,
+#: while the heavier program's own bound holds.
+#: ⛔ WHY IT HAD TO BE BUILT: no shipped image produced it. `ckod` measures 7 and
+#: `corpus_i2c` 4, so a lighter bound of 8 never fails on either -- the shared
+#: constant was unsound for three of `ckod`'s lanes and nothing could show it.
+#: The only image over 8 was `corpus_all5` (131), which is OVERLOADED and has no
+#: bound at all, so it cannot stand in for "heavier but feasible".
+#: ⚠ A SCHEDULING STRESS IMAGE, NOT A MODE-LEGAL I2C PROGRAM: at d = 22 the low
+#: phase is ~440 ns, under Fm+'s 500. Like `build_five`, it exists to load the
+#: scheduler, and `gate_um10204` does not measure it. It also inherits `ckod`'s
+#: consecutive pin pairs, so lane 3 sits on pins 6/7 and is declared in
+#: `corpus.PAD_COLLISION`.
+CKDENSE_DELAYS = [22, 23, 24, 25]
+
 
 def build_ckod(delays=None):
     """OPEN-DRAIN self-clocked lanes at a SPAN of delays -- the F1 instrument.
@@ -1083,6 +1101,10 @@ def main() -> int:
             # `at` and `under` must be REFUSED and `over` must RUN, so the
             # bench sees the boundary from both sides rather than only from
             # the side that happens to pass.
+            # ⭐ ruling S's must-fire subject: feasible, and heavier than
+            # `corpus_i2c`, so the lighter bound fails on it.
+            (["--ckdense"], "open-drain clocked lanes, DENSE span (S)",
+             "ckdense_image.hex"),
             (["--ckhold"], "clocked open-drain at d = SDA_HOLD (refused)",
              "ckhold_at_image.hex"),
             (["--ckhold"], "... at d = SDA_HOLD - 1 (refused)",
@@ -1265,6 +1287,15 @@ def main() -> int:
                     fh.write("%02x" % b + chr(10))
             print("ckhold %-6s d = SDA_HOLD%+d = %d, %d bytes -> %s"
                   % (_nm, _off, hold_bound.bound() + _off, len(_i), _o))
+        return 0
+    if "--ckdense" in sys.argv:
+        _i = build_ckod(CKDENSE_DELAYS)
+        _o = os.path.join(here, "ckdense_image.hex")
+        with open(_o, "w", encoding="ascii") as fh:
+            for b in _i:
+                fh.write("%02x" % b + chr(10))
+        print("ckdense image (S must-fire subject, delays %s), %d bytes -> %s"
+              % (CKDENSE_DELAYS, len(_i), _o))
         return 0
     if "--ckod" in sys.argv:
         img = build_ckod()

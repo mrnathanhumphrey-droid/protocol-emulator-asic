@@ -45,13 +45,14 @@ FRAM write + random read.
 | **R** | port-demand invariant (a RATE) | ✅ landed |
 | **R4** | Theorem 3's P10 + P1 checked VERBATIM; own mutant | ✅ landed |
 | **R5** | refill-bearing dispatch attribution; §1 stands (case a) | ✅ landed |
-| **S** | the A2 bound, per program; also supplies D2's mode floor | **NEXT** |
-| **Q2** | `gate_corpus_trace`: answered; fix = run it + repair the build | owed |
+| **S** | the A2 bound, per program; D2's mode floor on the same machinery | ✅ landed — SPEC §16 |
+| **D\*-window** | Theorem 3's CONCLUSION live: sliding window of `d` cycles counting refill requests at the port, asserted `<= k` on every feasible-at-J=1 arm; must-fire on an infeasible arm (`corpus_all5`). Premise (R4) + conclusion (window) = the whole theorem on the bench. **Goes in the existing `D*` sweep step — not new work now.** | owed (Wilson, after R5) |
+| **Q2** | `gate_corpus_trace`: answered; fix = run it + repair the build, + a GATES-completeness check (every `gate_*.py` listed or excluded by name) | **NEXT** |
 | **CI3** | every bench's `8*64-1` filename buffer + a >128-byte long-path arm | owed |
 | **K** | ACK hold: every driven SDA transition through `SDA_HOLD`, + a transition-class coverage table | owed |
 | **U** | widen the refusal to the unclocked open-drain data drive; retire the clamp | owed, with K |
 | **CI2** | retro: confirm the `tb_trace` path gate was the ONLY failure on `6abb6dd..e1fa642` | owed |
-| **E** | swallowed-exception audit | owed |
+| **E** | swallowed-exception audit, **+E+**: `set -o pipefail` in every `.sh` under `ci/` and `test/` with a lint gate (must-fire: a failing command piped into `tail`) | owed |
 
 
 ### ~~D — refuse `d <= SDA_HOLD`~~ → LANDED, except D2's mode floor
@@ -283,9 +284,10 @@ says a green here is a green there — that claim held only because nobody looke
   decision (D3).
 * ~~**`d ≤ SDA_HOLD` hazard**~~ — refused in silicon (D1) and in the assembler
   (D2 static half). The clamp is gone from the clocked path.
-* **`corpus_all5` post-rise lateness 19** — ACCEPTED, legitimate for the stress
-  set, unchecked by design, number kept in the sweep log; governed by S if that
-  lane set is ever shipped.
+* ⛔ **`corpus_all5` post-rise lateness is 131, not 19** — the 19 went stale when
+  D5 moved lane 0 to d = 70 beside four lanes at 9–13. Its lane set has
+  U = 1.096, so ruling S reports it **unbounded** (no finite worst case) and the
+  bench measures it without a verdict.
 * **`ckfive` lane 2: modal t_HIGH 123 vs d = 120** (+≈`L_SYNC`) on a push-pull
   lane that does not park, while lanes 0 and 1 are exact. **Unexplained.**
 * **`t_SU;STA` / `t_HD;STA` / `t_SU;STO`** — need START/STOP, which the clocked

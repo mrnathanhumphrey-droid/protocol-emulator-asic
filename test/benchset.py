@@ -26,6 +26,7 @@ still uncovered becomes a waiver with a written reason, not a silent zero.
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import sys
@@ -106,13 +107,19 @@ SHARED_INCLUDE_DEFAULTS = {
                "layer that sees `M_CK_HOLD_INVAL`, which survives A1 (the PC "
                "does not advance, so the refill restores an identical word) "
                "and B (a refill changes no dispatch count)."),
-    "A2BOUND": ("test/clocked_conform.vh", 0,
-                "A2's upper bound is ENFORCED only on the lane set A2 models "
-                "(`ckod`, which supplies +A2BOUND=1). Every other bench "
-                "MEASURES the same quantity and reports it without a verdict, "
-                "because a lighter lane set's bound applied to a heavier "
-                "program is not a sound check -- that is ruling S, still owed. "
-                "0 is therefore the correct default and not a placeholder."),
+    # ⛔⛔ `+A2BOUND` IS RETIRED (ruling S). It switched one shared constant on
+    # for one arm; the bound is now a per-lane vector GENERATED per arm, so
+    # the default below is what an arm gets only when its image has NO
+    # clocked open-drain lane -- in which case the A2 layer has nothing to
+    # bound and reports NOT EXERCISED.
+    "A2SLACK": ("test/clocked_conform.vh", "absent (no clocked OD lane)",
+                "A2's per-lane post-HIGH budget, `L_SYNC + 1 + (r_i - C)` with "
+                "r_i from pyRTA over the PROGRAM's OWN lane set "
+                "(`model/a2/program_a2.py` -> `test/clocked_a2_bounds.json`). "
+                "Supplied by the planning loop for EVERY arm whose image has a "
+                "clocked open-drain lane, so it is never hand-typed and never "
+                "omitted; -1 in a field means that lane's set is overloaded "
+                "and has no finite bound."),
 }
 
 CONFIG = {
@@ -400,13 +407,21 @@ def corpus_arms():
                 ["+IMG=test/ckod_image.hex", "+PEER=none",
                  "+OUT=probe_cov_trace_ckod.txt",
                  "+NCYC=200000", "+SEED=1", "+ASYNC=0",
-                 "+STAYLOAD=0", "+SCLHOLD=0",
-                 # ⭐ THE ONE ARM THAT ENFORCES A2's UPPER BOUND. Its lane
-                 # set is the one A2 models, so `L_SYNC + 1 + (r_i - C) = 8`
-                 # is its number. Every other arm MEASURES the same quantity
-                 # and reports it without a verdict -- see
-                 # `clocked_conform.vh`'s A2 header.
-                 "+A2BOUND=1"]))
+                 "+STAYLOAD=0", "+SCLHOLD=0"]))
+    # ⛔⛔ THE `+A2BOUND=1` THAT USED TO SIT ON THE ARM ABOVE IS GONE, AND THE
+    # COMMENT IT CARRIED WAS WRONG. It said `ckod`'s "lane set is the one A2
+    # models, so 8 is its number". It is not: A2's model is the SHIPPED set
+    # (UART-tx, SPI-tx, UART-rx, SPI-rx, one clocked I2C lane), while `ckod` is
+    # four clocked open-drain lanes. Derived over `ckod`'s own lanes the bounds
+    # are 8 / 11 / 17 / 18. Every clocked arm now gets `+A2SLACK` GENERATED
+    # from `test/clocked_a2_bounds.json` in the planning loop (ruling S).
+    # ⭐ RULING S's MUST-FIRE SUBJECT, swept under its OWN bound so the derived
+    # numbers are held on every run, not only in the must-fire runner.
+    out.append(("ckdense",
+                ["+IMG=test/ckdense_image.hex", "+PEER=none",
+                 "+OUT=probe_cov_trace_ckdense.txt",
+                 "+NCYC=200000", "+SEED=1", "+ASYNC=0",
+                 "+STAYLOAD=0", "+SCLHOLD=0"]))
     # ⭐⭐ D4's POSITIVE POINT: `d = SDA_HOLD + 1` MUST RUN. It is here rather
     # than in `tb_pinrange` because an open-drain clocked lane parks on an
     # OBSERVED rise and needs `od_bus`'s pull-up to have a rise to observe --
@@ -485,6 +500,42 @@ def discovered():
     """Every `test/tb*.v` on disk. The enumeration, not a list."""
     return sorted(n for n in os.listdir(HERE)
                   if re.fullmatch(r"tb.*\.v", n))
+
+
+A2_BOUNDS_JSON = os.path.join(HERE, "clocked_a2_bounds.json")
+
+
+def a2_slack_arg(img):
+    """`+A2SLACK=s0,..,s4` for `img`, from the generated per-program bounds.
+
+    Returns None when the image has no clocked open-drain lane. ⚠ A lane the
+    derivation could not bound (an OVERLOADED lane set) is -1, which the bench
+    reports without a verdict -- unbounded is a result there, not an omission.
+    ⛔ A MISSING JSON IS AN ERROR, NOT "NO BOUND". Returning None would let
+    every clocked arm run unbounded in silence, which is exactly the state
+    ruling S ended.
+    """
+    if not os.path.isfile(A2_BOUNDS_JSON):
+        raise RuntimeError(
+            "test/clocked_a2_bounds.json is absent -- run "
+            "`python model/a2/program_a2.py`. Without it every clocked arm "
+            "would run with A2's upper bound switched off.")
+    with open(A2_BOUNDS_JSON, encoding="utf-8") as fh:
+        blob = json.load(fh)
+    rec = blob.get(os.path.basename(img))
+    if rec is None:
+        return None
+    sl = [-1] * N_LANES_A2
+    for ln, e in rec["lanes"].items():
+        if e.get("slack") is not None:
+            sl[int(ln)] = int(e["slack"])
+    return "+A2SLACK=" + ",".join(str(x) for x in sl)
+
+
+#: the field count `clocked_conform.vh`'s `$sscanf` expects. ⚠ It is the
+#: engine's N_LANES; a mismatch makes the bench print a FAIL rather than parse
+#: a short vector, so drift here is loud.
+N_LANES_A2 = 5
 
 
 def includes_file(bench: str, inc: str) -> bool:
@@ -758,6 +809,17 @@ def plan():
                 probs.append("%s/%s: image %s is not on disk"
                              % (top, label, img))
                 continue
+            # ⛔⛔ RULING S: THE A2 BOUND IS GENERATED, PER LANE, FROM THE
+            # PROGRAM'S OWN LANE SET -- never typed on an arm. Every arm whose
+            # image has a clocked open-drain lane gets `+A2SLACK` from
+            # `test/clocked_a2_bounds.json`, which `model/a2/program_a2.py`
+            # derives with pyRTA. So no arm can carry a bound for the wrong
+            # lane set, and no clocked arm can be left out -- the two failures
+            # the single `CK_GAP_SLACK` constant had at once.
+            if img is not None:
+                a2 = a2_slack_arg(img)
+                if a2 is not None:
+                    full.append(a2)
             # ⛔ THE BUILD KEY CARRIES THE PARAMETERS. Two arms that differ in
             # a build-time parameter are two BINARIES, and keying the build on
             # the top module alone would have silently run the SPL = 1 arm
@@ -845,7 +907,7 @@ def main() -> int:
     print()
     print("  --- must-fire: the plusarg scanner sees what it claims to ---")
     seen = plusargs_read("tb_trace")
-    for want, label in (("A2BOUND", "a plusarg with a DIGIT in its name"),
+    for want, label in (("A2SLACK", "a plusarg with a DIGIT in its name"),
                         ("CKRUNS", "a plusarg read in the bench's own body")):
         ok = want in seen
         print("    %-46s %s" % (label, "ok" if ok else "*** MISSED " + want))
@@ -853,7 +915,7 @@ def main() -> int:
             probs = list(probs) + ["plusargs_read cannot see +%s" % want]
     # ⛔ AND THE EXEMPTION MUST NOT BE BLANKET: a bench that does NOT include
     # the shared file gets no free pass from its default.
-    inc = SHARED_INCLUDE_DEFAULTS["A2BOUND"][0]
+    inc = SHARED_INCLUDE_DEFAULTS["A2SLACK"][0]
     scoped = includes_file("tb_trace", inc) and not includes_file("tb_verdict",
                                                                   inc)
     print("    %-46s %s" % ("the shared-include excuse is scoped to includers",

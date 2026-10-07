@@ -1,0 +1,179 @@
+{
+ "ckdegen2_image.hex": {
+  "J": 1,
+  "U": 0.174,
+  "d_min": 20,
+  "k": 5,
+  "lanes": {
+   "0": {
+    "T": 20,
+    "r_ours": 7,
+    "r_pyrta": 7,
+    "slack": 8,
+    "why": null
+   }
+  }
+ },
+ "ckdegen_image.hex": {
+  "J": 1,
+  "U": 0.174,
+  "d_min": 20,
+  "k": 5,
+  "lanes": {
+   "0": {
+    "T": 20,
+    "r_ours": 7,
+    "r_pyrta": 7,
+    "slack": 8,
+    "why": null
+   }
+  }
+ },
+ "ckdense_image.hex": {
+  "J": 1,
+  "U": 0.5178,
+  "d_min": 22,
+  "k": 5,
+  "lanes": {
+   "0": {
+    "T": 22,
+    "r_ours": 10,
+    "r_pyrta": 10,
+    "slack": 11,
+    "why": null
+   },
+   "1": {
+    "T": 23,
+    "r_ours": 13,
+    "r_pyrta": 12,
+    "slack": 13,
+    "why": null
+   },
+   "2": {
+    "T": 24,
+    "r_ours": 16,
+    "r_pyrta": 14,
+    "slack": 15,
+    "why": null
+   },
+   "3": {
+    "T": 25,
+    "r_ours": 16,
+    "r_pyrta": 16,
+    "slack": 17,
+    "why": null
+   }
+  }
+ },
+ "ckhold_at_image.hex": {
+  "J": 4,
+  "U": 0.224,
+  "d_min": 15,
+  "k": 5,
+  "lanes": {
+   "0": {
+    "T": 15,
+    "r_ours": 10,
+    "r_pyrta": 10,
+    "slack": 11,
+    "why": null
+   }
+  }
+ },
+ "ckhold_over_image.hex": {
+  "J": 3,
+  "U": 0.2115,
+  "d_min": 16,
+  "k": 5,
+  "lanes": {
+   "0": {
+    "T": 16,
+    "r_ours": 9,
+    "r_pyrta": 9,
+    "slack": 10,
+    "why": null
+   }
+  }
+ },
+ "ckhold_under_image.hex": {
+  "J": 5,
+  "U": 0.2383,
+  "d_min": 14,
+  "k": 5,
+  "lanes": {
+   "0": {
+    "T": 14,
+    "r_ours": 11,
+    "r_pyrta": 11,
+    "slack": 12,
+    "why": null
+   }
+  }
+ },
+ "ckod_image.hex": {
+  "J": 1,
+  "U": 0.1844,
+  "d_min": 33,
+  "k": 5,
+  "lanes": {
+   "0": {
+    "T": 33,
+    "r_ours": 7,
+    "r_pyrta": 7,
+    "slack": 8,
+    "why": null
+   },
+   "1": {
+    "T": 60,
+    "r_ours": 10,
+    "r_pyrta": 10,
+    "slack": 11,
+    "why": null
+   },
+   "2": {
+    "T": 120,
+    "r_ours": 16,
+    "r_pyrta": 16,
+    "slack": 17,
+    "why": null
+   },
+   "3": {
+    "T": 240,
+    "r_ours": 17,
+    "r_pyrta": 17,
+    "slack": 18,
+    "why": null
+   }
+  }
+ },
+ "corpus_all5.hex": {
+  "J": 8,
+  "U": 1.0964,
+  "d_min": 10,
+  "k": 5,
+  "lanes": {
+   "0": {
+    "T": 70,
+    "r_ours": null,
+    "r_pyrta": null,
+    "slack": null,
+    "why": "lane set overloaded (U = 1.096 > 1): no finite worst-case response exists"
+   }
+  }
+ },
+ "corpus_i2c.hex": {
+  "J": 1,
+  "U": 0.0669,
+  "d_min": 70,
+  "k": 5,
+  "lanes": {
+   "0": {
+    "T": 70,
+    "r_ours": 7,
+    "r_pyrta": 7,
+    "slack": 8,
+    "why": null
+   }
+  }
+ }
+}

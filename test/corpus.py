@@ -549,6 +549,12 @@ PAD_COLLISION = {
         "clock is not what reaches the pad. MEASURED: modal t_HIGH 434 against "
         "a programmed 120. Lanes 0, 1 and 2 (pins 0/1, 2/3, 4/5) are clean and "
         "lane 0 is F4's control."),
+    "ckdense_image.hex": (
+        [3],
+        "ruling S's must-fire subject, built on `ckod`'s consecutive-pairs "
+        "layout at d = 22..25, so lane 3 is on pins 6/7 for the same reason. "
+        "Harmless to its purpose: A2 bounds DISPATCH TIMING, which the "
+        "bench reads from the engine, not from the overridden pad."),
     "ckod_image.hex": (
         [3],
         "the same consecutive-pairs layout, so its highest-delay lane (d = 240) "

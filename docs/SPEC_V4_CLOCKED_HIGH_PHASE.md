@@ -1071,3 +1071,133 @@ cycles. So no FRAM program is affected either way.
 * Theorem 3's **conclusion** (no lane ever winner-blocked, `RQ = 0`) is not what
   these layers check. They check its premises; the stall counters check the
   conclusion.
+
+
+---
+
+## 16. Ruling S — A2's bound belongs to (program, lane)
+
+### The defect, in its original form
+
+`clocked_conform.vh` bounded every clocked lane's post-HIGH release at
+`d + CK_GAP_SLACK`, with `CK_GAP_SLACK = 8 = L_SYNC + 1 + (r_i − C)`. That
+`r_i` came from `gate_clocked_lane_a2.build()` — the **A2 model's shipped lane
+set** (UART-tx, SPI-tx, UART-rx, SPI-rx, one clocked I2C lane). The bound was
+then **enforced on `ckod`**, which is four clocked open-drain lanes at
+33 / 60 / 120 / 240 and nothing else. The arm's own comment said `ckod`'s
+"lane set is the one A2 models". It is not.
+
+Every other clocked arm ran with the bound **off**, for want of a number for
+its lane set. So the check was simultaneously aimed at the wrong lane set on
+one arm and absent on all the others.
+
+### Derived per program
+
+`model/a2/program_a2.py` builds each program's lane set **from its own image**
+and computes each clocked open-drain lane's `r_i` with pyRTA primary:
+
+| field | taken from | why |
+| --- | --- | --- |
+| `T` | the lane's minimum action delay | P8: timestamps advance absolutely, so the tightest delay is the tightest release |
+| `C` | `C_SHIPPED` | measured dispatch service |
+| `D_sched` | the header's `dsched` | that **is** the engine's EDF key; any other priority would describe a different machine |
+| `D_tol` | the header's `dtol` | admissibility only; does not move `r_i` |
+| `J` | `j_of(d_min, k)`, + `L_JIT` on an edge-released lane | `J` is a function of the program (ruling 1(b)) |
+
+| image | U | lane budgets (`L_SYNC + 1 + r_i − C`) | measured widest |
+| --- | --- | --- | --- |
+| `corpus_i2c` | 0.067 | **8** | 4 |
+| `ckod` | 0.184 | **8 / 11 / 17 / 18** | 7 |
+| `ckdense` | 0.518 | **11 / 13 / 15 / 17** | 4 / 7 / 10 / 4 |
+| `ckhold_over` | 0.212 | **10** | 4 |
+| `corpus_all5` | **1.096** | **none — overloaded** | **131** |
+
+⇒ **The shared 8 was tighter than the worst case of three of `ckod`'s four
+lanes.** It held only because the measured schedule (widest 7) was gentler
+than the worst case — exactly the situation in which nobody finds out.
+
+⛔ **`corpus_all5`'s lateness is 131, not the 19 the handoff recorded.** That
+number went stale when D5 moved lane 0 to `d = 70` beside four lanes still at
+9–13. The lane set has `U = 1.096`, so **no finite worst-case response
+exists**: the RTA has no fixed point and a number returned anyway would be the
+horizon, not a bound. It is reported **unbounded** with that reason, and the
+bench measures its lateness without a verdict — the status Wilson's earlier
+ruling gave the stress image, now stated with its cause.
+
+### Generated, never typed
+
+`model/a2/program_a2.py` → `test/clocked_a2_bounds.json` → `test/benchset.py`
+**generates** `+A2SLACK=s0,s1,s2,s3,s4` for every arm whose image has a clocked
+open-drain lane. No arm carries a hand-typed bound and none can be left out —
+the two failures the constant had at once. Fourteen clocked arms now carry
+their own row. `-1` in a field means that lane's set is overloaded.
+
+The bench reads it with `$sscanf` and **refuses a malformed value** rather than
+treating it as unbounded, so a typo in a generated plusarg cannot switch the
+check off. It reports **per lane**, because a program-wide "widest" would
+compare one lane's lateness against another lane's budget — the max-over-the-set
+error this ruling removes.
+
+### The must-fire
+
+No shipped image could demonstrate it. `ckod` measures 7 and `corpus_i2c` 4, so
+a lighter budget of 8 never fails on either; the only image over 8 was
+`corpus_all5`, which is overloaded and has no bound to compare against. So it
+had to be built:
+
+**`ckdense`** — `ckod`'s layout at d = 22 / 23 / 24 / 25 — is **feasible**
+(U = 0.518, J = 1) and heavier than `corpus_i2c`. `test/a2_run.sh` runs it
+twice:
+
+| budget | verdict | widest per lane |
+| --- | --- | --- |
+| its own, 11 / 13 / 15 / 17 | **ok** | 4 / 7 / 10 / 4 |
+| `corpus_i2c`'s, 8 on every lane | **red** | 4 / 7 / 10 / 4 |
+
+⚠ **It fires on one release** — lane 2's 10 against 8 — deterministically
+across all three rand-reset modes, but a single release is a thin margin, so the
+gate requires the **verdict**, not a count. `ckdense` is also swept under its
+own bound on every run, so the derived numbers are held continuously and not
+only in the must-fire. It is a **scheduling stress image**, not a mode-legal
+I2C program (at d = 22 the low phase is under Fm+'s 500 ns), and it inherits
+`ckod`'s pin pairs, so lane 3 is declared in `PAD_COLLISION`.
+
+### D2's per-program floor, on the same machinery
+
+`pe_asm.check_mode_floor` runs **on the assembled image** through the same
+`program_a2.derive`, so there is one model of `r_i`, not two. For each clocked
+open-drain lane, the worst low phase `d − (r_i − C)` must clear **some**
+UM10204 mode's `t_LOW` (via `gate_um10204.claimable`). "Some", because nothing
+in the ISA declares which mode a lane intends: the assembler can only refuse a
+lane that claims **none**, and it reports which mode each lane does clear.
+
+| case | verdict |
+| --- | --- |
+| d = 20, above `SDA_HOLD` but under every `t_LOW` | **rejected** — the gap D2's static half used to leave open |
+| d = 32, the clocked lane **alone** | accepted |
+| d = 32, the **same lane** beside three busy lanes | **rejected** |
+
+The last two were **searched, not guessed**: alone the lane clears Fm+ from
+d = 30, beside the neighbours only from d = 38. A floor independent of the
+neighbours would give one verdict for both. ⛔ The fixed 38 / 78 / 248 this
+replaces was `ckod`'s observed jitter promoted to a law.
+
+Overloaded and no-pyRTA are **refusals**, not passes: an assembler certifying
+mode legality without the bound it rests on certifies nothing.
+
+### Declared, not hidden
+
+* **`J` is conservative.** It comes from the minimum **action** delay, which is
+  a lower bound on §1's refill-bearing `d_min`, so `J`, `r_i` and the budget can
+  only come out *larger* than exact. The bound stays sound and may be loose.
+  It changes nothing for any program at `d ≥ D*` (all `J = 1` either way); it
+  loosens the `ckhold_*` images, whose delays sit just above `SDA_HOLD`.
+  Extending §1's composer to whole images would make it exact; not done here.
+* **`k` is `N_LANES`** for every program, including idle filler lanes — the same
+  conservative direction.
+* **A2 is a model of the engine, not the engine.** What makes it more than
+  arithmetic is that every swept clocked arm is now held to its own derived
+  number.
+* `gate_clocked_lane_a2` §6 no longer parses a bench constant; it reports the
+  model's own shipped-set number (still 8) **as a reference for that lane set
+  only**, and fails if a shared constant ever reappears in the bench.

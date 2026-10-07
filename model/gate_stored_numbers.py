@@ -339,6 +339,13 @@ SPEC_SYMBOLS = {
     # says `<=`, which is why `at` (offset 0) must refuse and `over` (+1) must
     # run.
     ("test/make_smoke_image.py", "CKHOLD_POINTS"),
+    # ⭐ `CKDENSE_DELAYS` IS AN EXPERIMENT'S DESIGN, NOT A RESULT: the delays
+    # of ruling S's must-fire subject, chosen to make a FEASIBLE program
+    # heavier than `corpus_i2c`. The RESULTS -- its per-lane budgets and its
+    # measured lateness -- are derived (`test/clocked_a2_bounds.json`, held
+    # current by `gate_a2_program`) and measured (`test/a2_run.sh`), never
+    # stored here.
+    ("test/make_smoke_image.py", "CKDENSE_DELAYS"),
     ("test/gate_corpus_trace.py", "COLS"),
     # ⭐ `PAD_COLLISION` IS A NAMED-EXEMPTION LIST (ruling P5), like
     # `gate_degenerate_fields.DELIBERATE`: an image, the LANES of it that
