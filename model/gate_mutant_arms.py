@@ -175,6 +175,23 @@ EXPECT = {
         "requires this mutant RED on all three clocked images: MEASURED 16, 16 "
         "and 17 refills against a bound of 2, with the clean design at 1, 1 "
         "and 2 over 632 retired actions."),
+    "M_PFETCH_BOTH_INVAL": (1,
+        "ONE LINE IN ONE ARM: the clean arm is EMPTY, because a retiring "
+        "dispatch invalidates its HEAD and nothing else -- the mutant adds the "
+        "SPARE's invalidation rather than replacing anything. ⛔⛔ IT IS "
+        "RULING R4's MUST-FIRE, AND IT IS AIMED AT A SENTENCE RATHER THAN AT A "
+        "BEHAVIOUR. Theorem 3's P10 reads \"a dispatch consumes a valid head "
+        "and leaves AT MOST ONE slot per lane to be refilled\", and "
+        "`D* = k * L_REFILL` counts exactly one refill per lane per period from "
+        "it. Under this mutant one dispatch leaves TWO slots to refill, so the "
+        "port demand is double what the published bound is computed from. "
+        "⚠ IT IS A DIFFERENT DEFECT FROM `M_CK_HOLD_INVAL`, which Layer R "
+        "catches: that one raises the RATE (a refill per dispatch instead of "
+        "per action) while keeping one refill owed per dispatch, so it passes "
+        "R4a and fails R. This one keeps the rate and breaks the per-dispatch "
+        "premise, so it fails R4a and passes R. ⇒ Two layers, two mutants, "
+        "neither redundant -- which is the whole reason R4 was ordered "
+        "separately from R after R checked a rate rather than the premise."),
     "M_CK_REBASE_2D": (2,
         "ONE LINE IN EACH ARM, against the SAME `ck_rebase` wire its sibling "
         "mutates -- `rise + 2d` instead of `rise + d`. ⛔ IT IS THE 'TOO LATE' "

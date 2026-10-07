@@ -83,11 +83,19 @@ rc=0
 echo "  --- building ---"
 build_arm clean  ""                      || rc=1
 build_arm inval  "-DM_CK_HOLD_INVAL"     || rc=1
+# ⛔⛔ R4's MUST-FIRE IS A **DIFFERENT** MUTANT, and that is the point of the
+# ruling. `M_CK_HOLD_INVAL` raises the refill RATE while still owing one refill
+# per dispatch, so it fails Layer R and PASSES R4a. `M_PFETCH_BOTH_INVAL` keeps
+# the rate and makes one dispatch leave TWO slots to refill, so it fails R4a and
+# PASSES Layer R. Two layers, two mutants, neither redundant -- which is why R4
+# was ordered separately once R turned out to check a rate rather than the
+# premise Theorem 3 reasons from.
+build_arm both   "-DM_PFETCH_BOTH_INVAL" || rc=1
 [ $rc -eq 0 ] || { echo "  *** a build failed; no measurement"; exit 1; }
-echo "    clean + M_CK_HOLD_INVAL built"
+echo "    clean + M_CK_HOLD_INVAL + M_PFETCH_BOTH_INVAL built"
 echo
 echo "  --- measuring ---"
-for arm in clean inval; do
+for arm in clean inval both; do
   for img in test/ckod_image.hex test/corpus_i2c.hex test/corpus_all5.hex; do
     base="$(basename "$img" .hex)"
     run_arm "$arm" "$img" "${arm}_${base}" || rc=1

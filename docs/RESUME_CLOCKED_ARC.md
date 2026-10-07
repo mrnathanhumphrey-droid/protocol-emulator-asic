@@ -42,7 +42,9 @@ FRAM write + random read.
 
 | item | what | state |
 | --- | --- | --- |
-| **R** | port-demand invariant | ✅ landed, see below |
+| **R** | port-demand invariant (a RATE) | ✅ landed |
+| **R4** | Theorem 3's P10 + P1 checked VERBATIM; own mutant | ✅ landed |
+| **R5** | refill-bearing dispatch attribution; §1 stands (case a) | ✅ landed |
 | **S** | the A2 bound, per program; also supplies D2's mode floor | **NEXT** |
 | **Q2** | `gate_corpus_trace`: answered; fix = run it + repair the build | owed |
 | **CI3** | every bench's `8*64-1` filename buffer + a >128-byte long-path arm | owed |
@@ -112,6 +114,44 @@ already delimits, attributed to the action that **ended** via `cb_ck`.
   fixed by deriving from the depth, which explains both numbers.
 * `M_CK_HOLD_INVAL` is **no longer a characterised survivor** — its entry in
   `gate_mutant_arms.py` says so.
+
+### ~~R4 / R5~~ → LANDED. See SPEC §15.
+
+**R4** checks Theorem 3's **P10** and **P1** in the words the proof uses, and
+`gate_port_demand.check_premise_text()` fails if either sentence stops appearing
+verbatim in `J_LANE_PROOF.md` — so the bench and the proof cannot drift. The
+Lean formalisation has not started; when it does its premise is copied from the
+same sentence.
+
+⇒ **The three layers are orthogonal, and that is measured, not argued:**
+
+| arm | R4 (premise) | R5 non-retiring | R (rate) |
+| --- | --- | --- | --- |
+| clean | ok | 0 | ok |
+| `M_CK_HOLD_INVAL` | **ok** | 2820 / 586 / 5260 | **red** |
+| `M_PFETCH_BOTH_INVAL` (new) | **red** | 0 | **ok** |
+
+`M_CK_HOLD_INVAL` raises the *rate* while still leaving one slot per dispatch,
+so **P10 holds under it**; `M_PFETCH_BOTH_INVAL` keeps the rate and breaks the
+premise. Each mutant dies to exactly the layer whose sentence it violates.
+
+**R5's answer is case (a):** **zero** non-retiring refill-bearing dispatches on
+every clean arm (7 images). Every refill is owed by a **retiring** dispatch —
+exactly the set §1's closed form covers, so **`d_min` needs no re-derivation**.
+`corpus_all5`'s second refill is the speculative spare fill Theorem 3's own note
+already counts.
+
+⛔ **`D*` is a RATE bound, not a minimum separation.** The port-wide min gap is
+3 cycles on multi-lane programs and that is the demand `D*` is sized *for*;
+comparing it to 20 would have manufactured a failure on every such program. The
+**per-lane** min is `d_min`'s subject, and it tracks admissibility exactly:
+`corpus_i2c` 69, `ckod` 37, `ckfive` 23, `ckhold_over` 20 — all port-feasible,
+`J = 1`. The three below `D*` (`corpus_spim` 5, `corpus_sptgt` 3, `corpus_all5`
+3) are coverage/stress images, infeasible **on purpose**, `J = 8`.
+
+**FRAM programs, explicitly:** §1's write and random read have `d_min` **81**
+and **50**, far above `D* = 20`, one clocked lane each. Unaffected either way.
+`corpus_spim` at `d = 7` is a trace image, not the shipped 1 MHz SPI lane.
 
 ### ⛔ NEW, AND IT CHANGES ACK — the clocked SHIFTIN's SDA release is not held
 

@@ -183,7 +183,7 @@ CLASSIFIED = {
     # other lane, with the lane still LIVE -- the flag must report, never
     # stall. The entry is removed rather than kept, because a stale OWED claim
     # says something is untested when it is tested.
-    ("src/pe_engine.v", 2518, "v_line", "case"): (
+    ("src/pe_engine.v", 2521, "v_line", "case"): (
         UNREACHABLE,
         "The dispatch FSM's defensive `default`. `st` is declared `[1:0]` with "
         "three encodings ST_IDLE/ST_DRIVE/ST_WB = 2'd0..2'd2 at line 666; "
@@ -250,7 +250,7 @@ CLASSIFIED = {
     # `case (st)`, so none of the dispatch arm's own guards dominate it --
     # which is why it carries its own, and why `gate_program_index` classifies
     # both writes as members of the program-indexed family.
-    ("src/pe_engine.v", 2543, "v_branch", "else"): (
+    ("src/pe_engine.v", 2546, "v_branch", "else"): (
         OWED,
         "The `l_pin[i] < N_PINS` guard on the hold expiry. Its `else` is "
         "REACHABLE, not unreachable: a lane may legally name the RESERVED data "
@@ -511,7 +511,7 @@ ANCHOR_TEXT = {
     # ("Add it to ANCHOR_TEXT"); I had simply not met it.
     ("src/pe_engine.v", 2037):
         "if (l_mode[cur]) begin",
-    ("src/pe_engine.v", 2543):
+    ("src/pe_engine.v", 2546):
         "if (l_pin[i] < N_PINS[PINW-1:0]) begin",
     ("src/pe_engine.v", 1958):
         "if (clk_real) begin",
@@ -527,7 +527,7 @@ ANCHOR_TEXT = {
         "default: pst <= P_SCAN;",
     ("src/pe_engine.v", 2138):
         "default: ;",
-    ("src/pe_engine.v", 2518):
+    ("src/pe_engine.v", 2521):
         "default: st <= ST_IDLE;",
     # `src/project.v` 557 -- `if (RX_SERIAL != 0) begin` -- is gone with the
     # parameter. ⭐ THE ANCHOR IS WHAT MADE THAT SAFE TO DO: the source text
@@ -1142,7 +1142,7 @@ def check_full_case() -> int:
     # 1701 -> 2079. ⚠ A stale number here degrades silently to "no enclosing
     # case found", which is why the gate says that out loud rather than
     # skipping the check.
-    for line in (1762, 2138, 2518):
+    for line in (1762, 2138, 2521):
         sel, arms = _case_arms(lines, line)
         if sel is None:
             print("    line %-5d *** no enclosing `case` found -- the waiver's"

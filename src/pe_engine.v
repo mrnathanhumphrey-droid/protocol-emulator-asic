@@ -2432,6 +2432,9 @@ module pe_engine #(
 `ifndef M_BUF_NOINVAL
             l_actv[hix[cur]] <= 1'b0;   // ⛔ INVALIDATION
 `endif
+`ifdef M_PFETCH_BOTH_INVAL
+            l_actv[six[cur]] <= 1'b0;
+`endif
           // ⭐ THE SWAP IS GUARDED ON DEPTH. With SPL = 1 `l_sel` must stay
           // 0: `hix` ignores it at that depth, so a toggling select would be
           // harmless BY ACCIDENT, and a bit that changes while nothing reads

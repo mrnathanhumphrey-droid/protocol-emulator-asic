@@ -944,3 +944,130 @@ check that cannot fire, but a check nothing listens to. Fixing it means adding
 it to the list (which goes red immediately) *and* repairing the iverilog build
 (`final procedures cannot enable/call tasks`, `progress.vh:214` and
 `clocked_conform.vh:382`). Ordered after S.
+
+
+---
+
+## 15. R4 / R5 — checking the premise, not a paraphrase of it
+
+Ruling R landed a layer that checks **refills per retired clocked action ≤ SPL**.
+That kills `M_CK_HOLD_INVAL` and is worth having, but it is **not the sentence
+`docs/J_LANE_PROOF.md` reasons from**. R4 and R5 close that gap.
+
+### R4 — the two premises, verbatim
+
+| # | sentence, as the proof states it | what the bench counts |
+| --- | --- | --- |
+| **P10** (amended 2026-10-05, A1) | "a dispatch consumes a valid head and leaves **at most one** slot per lane to be refilled" | slots this dispatch **invalidated** |
+| **P1** | "One prefetch FSM, one refill in flight engine-wide. A single `pst`/`pl` pair; there is no per-lane fetch engine." | refills in flight, and slots filled **per episode** |
+
+⭐ **R4a counts what the dispatch LEAVES, not what the prefetch later does.**
+"Leaves to be refilled" is a property of the dispatch; measuring the prefetch's
+subsequent activity would measure the consequence instead of the premise.
+
+⭐ **R4b has two halves**, because P1 does: at most one refill in flight, *and*
+each episode fills **exactly one** slot. An episode satisfying two slots would
+be a second fetch engine hiding inside one FSM — the thing P1 asserts does not
+exist. ⚠ The in-flight counter **cannot exceed 1 with one `pst` register**, so
+that half is a *regression guard* against adding a second server rather than a
+check that can fail on the shipped design. Declared as such, not presented as
+priced.
+
+⚠ **One cycle late, by construction.** `l_actv` is written by a non-blocking
+assignment, so a bench `always @(posedge clk)` reads its pre-edge value. Each
+edge is compared against the previous edge's sample and attributed to the
+previous cycle's dispatch. Reading after the edge would race the DUT's own NBA
+ordering — the hazard this bench family already hit once on `pin_out`.
+
+**The wording is compared, not trusted.** `gate_port_demand.check_premise_text()`
+reads `J_LANE_PROOF.md` and fails if either sentence no longer appears
+verbatim, so a reworded premise is a deliberate act that updates both places.
+Priced in §6 of the gate: a sentence the doc does not contain is reported.
+
+⚠ **The Lean formalisation has not started.** When it does, its premise is
+copied from this same sentence — one wording in three places rather than three
+paraphrases.
+
+### The three-way separation, measured
+
+| arm | R4 (premise) | R5 non-retiring | Layer R (rate) |
+| --- | --- | --- | --- |
+| clean | **ok** — worst 1 slot, 1 in flight | **0** | **ok** — 1 / 1 / 2 |
+| `M_CK_HOLD_INVAL` | **ok** | **2820 / 586 / 5260** | **red** — 16 / 16 / 17 |
+| `M_PFETCH_BOTH_INVAL` | **red** | 0 | **ok** — 2 / 2 / 2 |
+
+⇒ **Neither layer is redundant, and that is now a measurement.**
+`M_CK_HOLD_INVAL` raises the refill *rate* while still leaving exactly one slot
+per dispatch — **so P10 holds under it** — and `M_PFETCH_BOTH_INVAL` keeps the
+rate while breaking the per-dispatch premise. Each mutant is caught by exactly
+the layer whose sentence it violates.
+
+⛔ **A correction inside this work:** the first version added R5's non-retiring
+count to R4's failure tally, so `M_CK_HOLD_INVAL` reported an "R4 premise
+violation" when P10 actually holds under it. One counter shared between two
+claims makes every verdict mean "one of these two things" — the opposite of
+what R4 was ordered for. Split.
+
+### R5 — are the refill-bearing dispatches the ones §1 assumes?
+
+`gate_dmin_clocked` (§1) computes `d_min` over **refill-bearing** dispatches as
+if those are the action-**begin** ones, spaced ≥ 2d. Layer R had measured a
+second refill landing inside a clocked window on `corpus_all5`, so the question
+was whether some *other* dispatch is refill-bearing.
+
+**Answer: case (a).** **Zero non-retiring refill-bearing dispatches** on every
+clean arm — `corpus_i2c`, `corpus_all5`, `corpus_spim`, `corpus_sptgt`, `ckod`,
+`ckfive`, `ckhold_over`. Every refill is owed by a **retiring** dispatch, which
+is exactly the set §1's closed form covers. **§1 stands, unchanged.** The
+`corpus_all5` second refill is a *speculative spare fill*, which Theorem 3's own
+note already counts as "the one unit of work this argument counts per lane per
+period".
+
+⛔ **A correction to my own first predicate.** It used `cb_n[lane] > 1`
+("any dispatch after the first") and fired 310 times on `ckfive` — because
+dispatch 16 of an 8-bit clocked SHIFT **is** the retiring one (2n = 16). The
+engine's own `act_retire` is the predicate; Amendment A1 is phrased about
+*retiring*, not about position.
+
+### The spacing, and the comparison that would have been wrong
+
+| program | per-lane min gap | port-wide min | `port_feasible` | `J` |
+| --- | --- | --- | --- | --- |
+| `corpus_i2c` (d = 70) | **69** | 69 | yes | 1 |
+| `ckod` (d = 33…240) | **37** | 3 | yes | 1 |
+| `ckfive` (d = 25…) | **23** | 3 | yes | 1 |
+| `ckhold_over` (d = 16) | **20** | 20 | yes | 1 |
+| `corpus_spim` (d = 7) | 5 | 5 | **no** | 8 |
+| `corpus_sptgt` (d = 6) | 3 | 3 | **no** | 8 |
+| `corpus_all5` (lanes at d = 9…13) | 3 | 3 | **no** | 8 |
+
+⛔ **`D*` is a RATE bound, not a minimum separation** — "in any window of `d`
+cycles the port is asked for at most `k` refills". Five lanes at `d ≈ 9…13`
+legitimately put refill-bearing dispatches **3 cycles apart** on the port; that
+is the demand `D*` is sized *for*. Reporting the port-wide minimum against
+`D* = 20` would have manufactured a failure on every multi-lane program, so the
+gate prints both numbers and asserts neither against `D*`.
+
+⇒ **The measured per-lane minimum tracks admissibility exactly.** Every program
+`gate_j_program.port_feasible` admits clears `D* = 20`; the three that do not
+are the coverage and stress images, which run below `D*` **on purpose** and
+claim `J = 8`, not `J = 1`. A spacing under `D*` is a statement about that
+program's `J`, not a design failure.
+
+**The FRAM programs, explicitly** (Wilson asked either way): §1's FRAM write
+and random read have `d_min` **81** and **50**, both far above `D* = 20`, each
+with one clocked lane. `corpus_spim` at `d = 7` is a *trace* image for the SPI
+path, not the shipped FRAM configuration — the shipped SPI lane is 1 MHz = 25
+cycles. So no FRAM program is affected either way.
+
+### Also not claimed
+
+* **`worst dispatch-to-next-fill` is an upper bound, not a latency.** A fill may
+  target the lane's *other* slot, so the number is "cycles to the next fill for
+  that lane", not "cycles to fill the slot this dispatch freed". Reported as a
+  bound and labelled one. ⚠ Its first version was worse: `p5_owe` was never
+  cleared, so a speculative fill was charged against a long-retired dispatch and
+  reported 6,940 cycles — a number with no referent.
+* Theorem 3's **conclusion** (no lane ever winner-blocked, `RQ = 0`) is not what
+  these layers check. They check its premises; the stall counters check the
+  conclusion.

@@ -59,11 +59,54 @@ ROOT = os.path.dirname(HERE)
 #: was not red" from "the mutant was never built".
 CLEAN_ARMS = ("clean_ckod_image", "clean_corpus_i2c", "clean_corpus_all5")
 MUTANT_ARMS = ("inval_ckod_image", "inval_corpus_i2c", "inval_corpus_all5")
+#: ⛔ R4's must-fire is a DIFFERENT mutant, and the orthogonality is measured
+#: rather than argued -- see §3's table.
+BOTH_ARMS = ("both_ckod_image", "both_corpus_i2c", "both_corpus_all5")
+
+#: Theorem 3's premises, quoted from `docs/J_LANE_PROOF.md` so the gate output
+#: carries the same wording the proof does. ⛔ IF THESE DIVERGE FROM THE DOC THE
+#: WHOLE POINT IS LOST, so `check_premise_text()` reads the doc and compares.
+P10_TEXT = ("a dispatch consumes a valid head and leaves **at most one** slot\n"
+            "per lane to be refilled")
+P1_TEXT = ("One prefetch FSM, one refill in flight engine-wide.** A single "
+           "`pst`/`pl` pair; there is no per-lane fetch engine.")
+
+#: `D* = k * L_REFILL` with k = N_LANES = 5 and L_REFILL = 4.
+#: ⚠ REPORTED AGAINST, NEVER ASSERTED AGAINST. A program may legally run below
+#: `D*`; what `D*` buys is `J = 1`. `corpus_all5` runs four lanes at d = 9..13
+#: ON PURPOSE and is port-INFEASIBLE by construction.
+D_STAR = 20
 
 #: the mutant must exceed the bound by more than rounding. It costs a refill
 #: per DISPATCH, and a clocked byte is 16 dispatches, so anything below this is
 #: a sign the mutant did not really take effect.
 MUTANT_MIN_WORST = 8
+
+
+def check_premise_text():
+    """Do the sentences this gate prints still appear in `J_LANE_PROOF.md`?
+
+    ⛔⛔ WITHOUT THIS THE WHOLE RULING IS DECORATIVE. R4 exists so the bench and
+    the proof check the SAME statement; if the proof's wording is edited and the
+    bench's copy is not, the two drift apart and the gate goes on claiming they
+    agree. ⚠ It compares TEXT, so a reworded premise is a deliberate action
+    that fails here and gets updated in both places -- which is the point.
+    """
+    path = os.path.join(ROOT, "docs", "J_LANE_PROOF.md")
+    if not os.path.isfile(path):
+        return None, "docs/J_LANE_PROOF.md is absent, so the premise this " \
+                     "gate checks cannot be compared with the one the proof " \
+                     "states"
+    with io.open(path, encoding="utf-8", errors="replace") as fh:
+        doc = fh.read()
+    missing = [n for n, t in (("P10", P10_TEXT), ("P1", P1_TEXT))
+               if t not in doc]
+    if missing:
+        return None, ("%s no longer appears VERBATIM in docs/J_LANE_PROOF.md, "
+                      "so the bench and the proof have drifted apart. Update "
+                      "both deliberately -- R4's only purpose is that they "
+                      "read the same." % " and ".join(missing))
+    return doc, None
 
 
 def load():
@@ -167,8 +210,120 @@ def main() -> int:
                  sorted({blob[a]["worst"] for a in MUTANT_ARMS}),
                  blob[MUTANT_ARMS[0]]["bound"]))
 
+    # -----------------------------------------------------------------
+    # 3. R4 -- Theorem 3's premises, in the words the proof uses
+    # -----------------------------------------------------------------
     print()
-    print("  --- 3. what this gate does NOT check ---")
+    print("  --- 3. R4: Theorem 3's premises, checked as written ---")
+    ptxt, perr = check_premise_text()
+    if perr:
+        print("    *** %s" % perr)
+        rc = 1
+    else:
+        print("    the bench prints these, and `docs/J_LANE_PROOF.md` states")
+        print("    them -- compared textually, not trusted:")
+    print("      P10  \"a dispatch consumes a valid head and leaves AT MOST")
+    print("            ONE slot per lane to be refilled\"")
+    print("      P1   \"One prefetch FSM, one refill in flight engine-wide.")
+    print("            A single `pst`/`pl` pair; there is no per-lane fetch")
+    print("            engine.\"")
+    print("    ⚠ The Lean formalisation has not started. When it does, its")
+    print("      premise is copied from this same sentence.")
+    print()
+    print("    %-26s %-8s %-9s %-11s %s"
+          % ("arm", "R4", "worst", "in flight", "verdict"))
+    # ⛔ THE THREE-WAY TABLE IS THE EVIDENCE THAT R4 IS NOT REDUNDANT WITH R.
+    # Each mutant must be caught by exactly the layer whose sentence it breaks.
+    want = ([(a, "ok") for a in CLEAN_ARMS]
+            + [(a, "ok") for a in MUTANT_ARMS]       # R's mutant PASSES R4
+            + [(a, "red") for a in BOTH_ARMS])      # R4's mutant FAILS R4
+    for arm, expect in want:
+        r = (blob.get(arm) or {}).get("r4")
+        if r is None:
+            print("    *** %-26s MISSING -- R4 never spoke on this arm" % arm)
+            rc = 1
+            continue
+        ok = r["verdict"] == expect
+        print("    %-26s %-8s %-9s %-11s %s"
+              % (arm, r["verdict"], r["worst_slots"], r["max_inflight"],
+                 "as expected" if ok else "*** WANTED %s" % expect))
+        if not ok:
+            rc = 1
+    print("    ⇒ `M_CK_HOLD_INVAL` PASSES R4 and fails Layer R; "
+          "`M_PFETCH_BOTH_INVAL`")
+    print("      FAILS R4 and passes Layer R. Two sentences, two mutants,")
+    print("      neither layer redundant -- which is why R4 was ordered")
+    print("      separately once R turned out to check a RATE.")
+
+    # -----------------------------------------------------------------
+    # 4. R5 -- where the refill-bearing dispatches actually are
+    # -----------------------------------------------------------------
+    print()
+    print("  --- 4. R5: are refill-bearing dispatches the ones §1 assumes? ---")
+    print("    ⛔ THE QUESTION: `gate_dmin_clocked` (§1) computes `d_min` over")
+    print("    REFILL-BEARING dispatches as if those are the action-BEGIN")
+    print("    ones. If a refill is owed by some OTHER dispatch, `d_min` for")
+    print("    contended programs was derived over the wrong set.")
+    print()
+    print("    %-26s %-11s %-10s %-9s %s"
+          % ("arm", "non-retir", "bearing", "lane-min", "spec fills"))
+    for arm in CLEAN_ARMS + MUTANT_ARMS + BOTH_ARMS:
+        r = (blob.get(arm) or {}).get("r5")
+        if r is None:
+            print("    *** %-26s MISSING -- R5 never spoke" % arm)
+            rc = 1
+            continue
+        print("    %-26s %-11s %-10s %-9s %s"
+              % (arm, r["non_retiring"], r["bearing"], r["lane_min"],
+                 r["speculative"]))
+    # ⛔ ASSERTED ON THE CLEAN ARMS ONLY: by Amendment A1 a re-dispatch retires
+    # nothing and owes no refill, so a non-retiring refill-bearing dispatch on
+    # the real design means §1's set is wrong.
+    bad = [a for a in CLEAN_ARMS
+           if ((blob.get(a) or {}).get("r5") or {}).get("non_retiring", 1) != 0]
+    if bad:
+        print("    *** FAIL non-retiring refill-bearing dispatches on %s"
+              % ", ".join(bad))
+        print("        ⇒ CASE (b): `d_min` must be re-derived with refills at")
+        print("        their MEASURED positions, and `J = 1` re-checked for")
+        print("        those programs.")
+        rc = 1
+    else:
+        print("    ⇒ CASE (a): ZERO non-retiring refill-bearing dispatches on")
+        print("      every clean arm. Every refill is owed by a RETIRING")
+        print("      dispatch, which is exactly the set §1's closed form")
+        print("      covers. §1 stands, unchanged.")
+    # and the must-fire for R5 itself: the mutant makes held dispatches bear
+    # refills, so a zero here would mean R5 cannot see the thing it is for.
+    fired = [a for a in MUTANT_ARMS
+             if ((blob.get(a) or {}).get("r5") or {}).get("non_retiring", 0) > 0]
+    print("    must-fire: `M_CK_HOLD_INVAL` makes HELD dispatches refill-"
+          "bearing")
+    print("      -> non-retiring > 0 on %d of %d arms %s"
+          % (len(fired), len(MUTANT_ARMS),
+             "" if len(fired) == len(MUTANT_ARMS) else "*** DID NOT FIRE"))
+    if len(fired) != len(MUTANT_ARMS):
+        rc = 1
+    print()
+    print("    per-lane MIN spacing vs D* = %d, with each program's own" % D_STAR)
+    print("    admissibility -- REPORTED, NEVER ASSERTED:")
+    print("      ⛔ `D*` IS A RATE BOUND -- \"in any window of d cycles the")
+    print("      port is asked for at most k refills\" -- NOT a minimum")
+    print("      separation. A program below `D*` is one that does not claim")
+    print("      `J = 1`; it is not a design failure. `corpus_all5` runs four")
+    print("      lanes at d = 9..13 ON PURPOSE.")
+    for arm in CLEAN_ARMS:
+        r = (blob.get(arm) or {}).get("r5")
+        if r is None:
+            continue
+        lm = r["lane_min"]
+        print("      %-26s lane-min %-6s %s"
+              % (arm, lm,
+                 "clears D*" if lm >= D_STAR
+                 else "BELOW D* -- port-infeasible by construction"))
+
+    print()
+    print("  --- 5. what this gate does NOT check ---")
     print("    ⚠ IT BOUNDS REFILLS PER ACTION, NOT `D*` ITSELF. `D*` is a")
     print("      port-feasibility statement over a whole lane SET; this layer")
     print("      checks the per-action premise `D*` is computed FROM. A design")
@@ -178,6 +333,33 @@ def main() -> int:
     print("      RUNNING, so the bound is per-slot rather than per-cause. A")
     print("      tighter per-cause split would need the prefetch's own reason")
     print("      exported, which is flops for a bound that already holds.")
+
+    # -----------------------------------------------------------------
+    # 6. must-fire: the premise-text comparison must be able to fail
+    # -----------------------------------------------------------------
+    # ⛔⛔ OTHERWISE R4 IS DECORATIVE. The whole ruling is that the bench and
+    # the proof read the same sentence; a comparison that cannot fail would let
+    # them drift while this gate reported agreement. Priced by asking the real
+    # function about a sentence the proof does not contain.
+    print()
+    print("  --- 6. must-fire: the premise comparison can fail ---")
+    global P10_TEXT                                            # noqa: PLW0603
+    keep = P10_TEXT
+    try:
+        P10_TEXT = "a dispatch leaves EXACTLY SEVEN slots to be refilled"
+        _doc, err = check_premise_text()
+    finally:
+        P10_TEXT = keep
+    fired = err is not None
+    print("    a premise absent from the doc is reported   %s"
+          % ("ok" if fired else "*** MISSED -- the comparison is vacuous"))
+    if not fired:
+        rc = 1
+    _doc, err2 = check_premise_text()
+    print("    and the real wording still matches          %s"
+          % ("ok" if err2 is None else "*** %s" % err2))
+    if err2 is not None:
+        rc = 1
 
     print()
     print("=" * 78)

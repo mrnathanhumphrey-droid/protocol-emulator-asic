@@ -223,6 +223,226 @@ always @(posedge dut.clk) begin
 end
 
 /* =======================================================================
+ * R4 -- THEOREM 3's PREMISES, CHECKED IN THE WORDS THEY ARE WRITTEN IN.
+ *
+ * ⛔⛔ WHY THIS IS SEPARATE FROM LAYER R, AND THE DISTINCTION IS THE POINT.
+ * Layer R checks a RATE -- refills per retired clocked action <= SPL. That is
+ * worth having and it is what kills `M_CK_HOLD_INVAL`, but it is NOT the
+ * sentence `docs/J_LANE_PROOF.md` reasons from. Theorem 3 rests on two
+ * premises, quoted here verbatim so the bench and the proof check the same
+ * statement rather than two statements that sound alike:
+ *
+ *   P10 (amended 2026-10-05, Amendment A1):
+ *     "a dispatch consumes a valid head and leaves AT MOST ONE slot per lane
+ *      to be refilled"
+ *
+ *   P1:
+ *     "One prefetch FSM, one refill in flight engine-wide. A single
+ *      `pst`/`pl` pair; there is no per-lane fetch engine."
+ *
+ * ⚠ THE LEAN FORMALISATION HAS NOT STARTED. When it does, its premise is
+ * copied from this same sentence -- so there is one wording, in the proof, in
+ * this bench, and later in Lean, rather than three paraphrases.
+ *
+ * ⇒ R4a IS P10 LITERALLY: count the slots a dispatch leaves to be refilled,
+ *   which is the slots it INVALIDATES -- not the refills that later happen.
+ *   "Leaves to be refilled" is a property of the dispatch, and measuring the
+ *   prefetch's later activity would be measuring the consequence instead.
+ * ⇒ R4b IS P1 LITERALLY: one refill in flight, and -- its other half -- each
+ *   refill episode fills EXACTLY ONE slot. A single episode satisfying two
+ *   slots would be a second fetch engine hiding inside one FSM, which is the
+ *   thing P1 asserts does not exist.
+ *
+ * ⚠ ONE CYCLE LATE, BY CONSTRUCTION, AND DECLARED. `l_actv` is updated by a
+ * non-blocking assignment, so a bench `always @(posedge clk)` reads its
+ * PRE-EDGE value. Each edge is therefore compared against the previous edge's
+ * sample, and the dispatch it is attributed to is the PREVIOUS cycle's -- held
+ * in `p4_wb`/`p4_lane`. Reading `l_actv` after the edge would have raced the
+ * DUT's own NBA ordering, which is the hazard this bench family already hit
+ * once on `pin_out`.
+ * ======================================================================= */
+integer p4_shadow [0:15];   // l_actv as of the previous edge
+integer p4_wb, p4_lane, p4_pcap, p4_inflight;
+integer p4_fails, p4_checks, p4_worst, p4_fl_max, p4_k, p4_j;
+integer p4_fell, p4_rose, p4_nslot, p4_cyc, p4_retire;
+
+/* ⭐⭐ R5 -- WHERE THE REFILL-BEARING DISPATCHES ACTUALLY ARE.
+ *
+ * ⛔ THE QUESTION, AND IT IS A LIVE ONE. `model/a2/gate_dmin_clocked.py` (§1)
+ * computes `d_min` over REFILL-BEARING dispatches on the assumption that those
+ * are the ACTION-BEGIN dispatches, spaced `>= 2d`. Layer R then measured a
+ * SECOND refill landing inside a clocked action's window on `corpus_all5`. If
+ * that refill is owed by a dispatch the closed form does not cover, then some
+ * OTHER dispatch is refill-bearing and `d_min` for contended programs was
+ * derived over the wrong set.
+ *
+ * ⇒ WHAT SETTLES IT IS A MEASUREMENT, not an argument: the spacing, in cycles,
+ *   between consecutive refill-bearing dispatches ON THE PORT (engine-wide --
+ *   the port is shared, so a per-lane spacing would not bound its demand), and
+ *   whether any refill-bearing dispatch is MID-ACTION.
+ *
+ * ⭐ `p5_mid` SHOULD BE ZERO BY AMENDMENT A1: a held clocked dispatch retires
+ * nothing, so it invalidates nothing and owes no refill. A non-zero count is
+ * the case (b) Wilson's ruling names -- re-derive `d_min` with refills at
+ * their measured positions.
+ * ⚠ `p5_min` IS REPORTED AGAINST `D*` = 20 AND NEVER ASSERTED AGAINST IT. A
+ * program may legally run below `D*`; what `D*` buys is `J = 1`, and a spacing
+ * under it is a statement about THAT program's `J`, not a design failure. The
+ * gate reads the number; this layer does not render a verdict it has no
+ * standing to render.
+ */
+integer p5_last, p5_min, p5_n, p5_mid, p5_lat_max, p5_spec;
+/* ⛔⛔ TWO SPACINGS, AND ONLY ONE OF THEM IS WHAT §1 RESTS ON.
+ *   p5_min   -- PORT-WIDE: the gap between consecutive refill-bearing
+ *               dispatches of ANY lane. Reported as context and NOT compared
+ *               against D*, because D* is a RATE bound -- "in any window of d
+ *               cycles the port is asked for at most k refills" -- and not a
+ *               minimum separation. Five lanes at d ~ 9..13 legitimately put
+ *               refill-bearing dispatches 3 cycles apart; that is the demand
+ *               D* is sized FOR, not a violation of it.
+ *   p5_lmin  -- PER LANE: the gap between a lane's OWN consecutive
+ *               refill-bearing dispatches. This is the quantity
+ *               `gate_dmin_clocked` computes as `d_min` (its structural floor
+ *               is 2d for a clocked action), and the one that must clear D*
+ *               for J = 1.
+ * ⚠ REPORTING THE PORT-WIDE MINIMUM AGAINST D* WOULD HAVE MANUFACTURED A
+ * FAILURE on every multi-lane program. Both numbers are printed so the
+ * distinction is visible rather than resolved silently. */
+integer p5_lmin, p5_llast [0:7];
+integer p5_owe [0:7];       // cycle of each lane's last refill-bearing dispatch
+
+initial begin
+  for (p4_k = 0; p4_k < 16; p4_k = p4_k + 1) p4_shadow[p4_k] = 0;
+  p4_wb = 0;  p4_lane = 0;  p4_pcap = 0;  p4_inflight = 0;
+  p4_fails = 0;  p4_checks = 0;  p4_worst = 0;  p4_fl_max = 0;
+  p4_cyc = 0;  p4_retire = 0;
+  p5_last = -1;  p5_min = 1000000;  p5_n = 0;  p5_mid = 0;  p5_lat_max = 0;
+  p5_spec = 0;  p5_lmin = 1000000;
+  for (p4_k = 0; p4_k < 8; p4_k = p4_k + 1) p5_llast[p4_k] = -1;
+  for (p4_k = 0; p4_k < 8; p4_k = p4_k + 1) p5_owe[p4_k] = -1;
+end
+
+always @(posedge dut.clk) begin
+  if (dut.rst_n !== 1'b1) begin
+    for (p4_k = 0; p4_k < 16; p4_k = p4_k + 1) p4_shadow[p4_k] = 0;
+    p4_wb = 0;  p4_pcap = 0;  p4_inflight = 0;
+  end else begin
+    p4_nslot = dut.u_eng.NSLOT;
+    // ---- what changed at the PREVIOUS edge -----------------------------
+    p4_fell = 0;  p4_rose = 0;
+    for (p4_j = 0; p4_j < p4_nslot; p4_j = p4_j + 1) begin
+      if (p4_shadow[p4_j] === 1 && dut.u_eng.l_actv[p4_j] === 1'b0)
+        p4_fell = p4_fell + 1;
+      if (p4_shadow[p4_j] === 0 && dut.u_eng.l_actv[p4_j] === 1'b1)
+        p4_rose = p4_rose + 1;
+    end
+
+    // ---- P10: a dispatch leaves AT MOST ONE slot to be refilled --------
+    if (p4_wb) begin
+      p4_checks = p4_checks + 1;
+      if (p4_checks == 1)
+        $display("  clocked_conform[R4]: live -- checking Theorem 3's P10 and P1 as written");
+      if (p4_fell > p4_worst) p4_worst = p4_fell;
+      if (p4_fell > 1) begin
+        $display("*** FAIL clocked_conform[R4a]: lane %0d's dispatch left %0d slots to be refilled. Theorem 3's P10 says a dispatch \"consumes a valid head and leaves AT MOST ONE slot per lane to be refilled\" -- D* = k * L_REFILL counts one refill per lane per period, so a dispatch owing two doubles the port demand the bound is computed from", p4_lane, p4_fell);
+        p4_fails = p4_fails + 1;
+      end
+    end else if (p4_fell > 0) begin
+      // ⛔ AN INVALIDATION WITH NO DISPATCH IS ALSO A P10 VIOLATION: the
+      // premise attributes every freed slot to a dispatch, so a slot going
+      // invalid on its own is port demand the theorem never counted.
+      $display("*** FAIL clocked_conform[R4a]: %0d slot(s) went invalid in a cycle with no dispatch. P10 attributes every freed slot to a dispatch that consumed it; demand from anywhere else is uncounted by D*", p4_fell);
+      p4_fails = p4_fails + 1;
+    end
+
+    // ---- R5: this dispatch's place in the port's refill sequence --------
+    if (p4_wb && p4_fell > 0) begin
+      p5_owe[p4_lane] = p4_cyc - 1;          // the dispatch was last cycle
+      if (p5_last >= 0) begin
+        if ((p4_cyc - 1 - p5_last) < p5_min) p5_min = p4_cyc - 1 - p5_last;
+        p5_n = p5_n + 1;
+      end
+      p5_last = p4_cyc - 1;
+      // the SAME lane's previous refill-bearing dispatch -- `d_min`'s subject
+      if (p5_llast[p4_lane] >= 0)
+        if ((p4_cyc - 1 - p5_llast[p4_lane]) < p5_lmin)
+          p5_lmin = p4_cyc - 1 - p5_llast[p4_lane];
+      p5_llast[p4_lane] = p4_cyc - 1;
+      // ⭐ MID-ACTION MEANS **NON-RETIRING**, and the first version of this
+      // check got it wrong in a way worth recording: it used
+      // `cb_n[lane] > 1`, i.e. "any dispatch after the first". But dispatch
+      // 16 of an 8-bit clocked SHIFT IS the retiring one (2n = 16), so the
+      // check fired 310 times on `ckfive` for the one dispatch per action
+      // that legitimately owes a refill. ⇒ The engine's own `act_retire` is
+      // the predicate -- Amendment A1 is phrased about RETIRING, not about
+      // position -- and reading it from the DUT means the bench cannot
+      // disagree with the silicon about which dispatches those are.
+      if (cb_ck[p4_lane] === 1 && p4_retire !== 1) begin
+        p5_mid = p5_mid + 1;
+        // ⛔ R5's OWN TALLY, NOT R4's. The first version added this to
+        // `p4_fails`, so `M_CK_HOLD_INVAL` reported an "R4 premise violation"
+        // when what it actually breaks is R5's attribution -- it still leaves
+        // exactly ONE slot per dispatch, so P10 holds under it. Sharing one
+        // counter between two claims makes every verdict mean "one of these
+        // two things", which is the opposite of what R4 was ordered for.
+        $display("*** FAIL clocked_conform[R5]: lane %0d's NON-RETIRING clocked dispatch (%0d of its action) was REFILL-BEARING -- it freed %0d slot. Amendment A1 says a re-dispatch retires nothing and owes no refill, and gate_dmin_clocked computes d_min over refill-bearing dispatches as if they were action-BEGIN dispatches spaced >= 2d", p4_lane, cb_n[p4_lane], p4_fell);
+      end
+    end
+    // the latency from being owed to being filled, per lane
+    // ⛔ CLEARED ONCE MEASURED. The first version left `p5_owe` set, so a
+    // later SPECULATIVE spare fill for the same lane was charged against a
+    // long-retired dispatch and reported a worst latency of 6,940 cycles --
+    // a number with no referent. An unmatched fill now contributes nothing
+    // rather than contributing nonsense.
+    if (p4_pcap && dut.u_eng.pl < 8) begin
+      if (p5_owe[dut.u_eng.pl] >= 0) begin
+        if ((p4_cyc - 1 - p5_owe[dut.u_eng.pl]) > p5_lat_max)
+          p5_lat_max = p4_cyc - 1 - p5_owe[dut.u_eng.pl];
+        p5_owe[dut.u_eng.pl] = -1;
+      end else begin
+        p5_spec = p5_spec + 1;      // a fill nothing was owed: speculative
+      end
+    end
+
+    // ---- P1: one refill in flight, and one slot filled per episode -----
+    if (p4_pcap) begin
+      if (p4_rose !== 1) begin
+        $display("*** FAIL clocked_conform[R4b]: a refill episode completed and filled %0d slot(s), not exactly 1. Theorem 3's P1 says \"One prefetch FSM, one refill in flight engine-wide. A single `pst`/`pl` pair; there is no per-lane fetch engine\" -- an episode satisfying two slots is a second fetch engine inside one FSM, and L_REFILL = 4 per slot stops being the cost", p4_rose);
+        p4_fails = p4_fails + 1;
+      end
+    end else if (p4_rose > 0) begin
+      $display("*** FAIL clocked_conform[R4b]: %0d slot(s) became valid with no refill episode completing. Every fill must come from the one prefetch FSM (P1); a fill from anywhere else is port work D* never charged for", p4_rose);
+      p4_fails = p4_fails + 1;
+    end
+    if (p4_inflight > p4_fl_max) p4_fl_max = p4_inflight;
+    if (p4_inflight > 1) begin
+      $display("*** FAIL clocked_conform[R4b]: %0d refills in flight. P1 says ONE, engine-wide", p4_inflight);
+      p4_fails = p4_fails + 1;
+    end
+
+    // ---- sample for the next edge --------------------------------------
+    for (p4_j = 0; p4_j < p4_nslot; p4_j = p4_j + 1)
+      p4_shadow[p4_j] = (dut.u_eng.l_actv[p4_j] === 1'b1) ? 1 : 0;
+    // a dispatch is a WRITEBACK: that is where a slot is consumed and freed
+    p4_wb   = (dut.u_eng.st === 2'd2) ? 1 : 0;
+    p4_lane = dut.u_eng.cur;
+    // ⭐ SAMPLED WITH THE DISPATCH IT BELONGS TO, one cycle behind like the
+    // rest of this layer: `act_retire` is combinational on the dispatched
+    // action, so it is only meaningful in the writeback cycle itself.
+    p4_retire = (dut.u_eng.act_retire === 1'b1) ? 1 : 0;
+    p4_pcap = (dut.u_eng.pst === 3'd3) ? 1 : 0;
+    // in flight: a refill is started at P_REQ and retired at P_CAP. ⚠ WITH ONE
+    // `pst` REGISTER THIS CANNOT EXCEED 1, and that is exactly P1's content --
+    // so this counter is a REGRESSION GUARD against a second fetch engine
+    // rather than a check that can fail on the shipped design. Declared as
+    // such instead of presented as priced.
+    if (dut.u_eng.pst === 3'd1) p4_inflight = p4_inflight + 1;
+    if (p4_pcap && p4_inflight > 0) p4_inflight = p4_inflight - 1;
+    p4_cyc = p4_cyc + 1;
+  end
+end
+
+/* =======================================================================
  * G1 -- INTER-DISPATCH GAP CONFORMANCE, and why it checks a BOUND rather
  * than an equality.
  *
@@ -501,6 +721,28 @@ task cb_report;
       $display("*** FAIL clocked_conform[A2]: %0d of %0d releases later than d + %0d after the observed rise", cg_afails, cg_achecks, CK_GAP_SLACK);
     else
       $display("  clocked_conform[A2]: ok -- %0d release(s) within d + %0d of the observed rise, widest %0d", cg_achecks, CK_GAP_SLACK, cg_awidest);
+    // ⭐⭐ R4 QUOTES BOTH SENTENCES BESIDE ITS VERDICT, which is the whole
+    // point of the layer: a reader can see that the bench and
+    // `docs/J_LANE_PROOF.md` are checking the same statement, not two that
+    // sound alike. When the Lean formalisation starts, its premise is copied
+    // from this same wording.
+    if (p4_checks == 0)
+      $display("  clocked_conform[R4]: 0 dispatches observed -- NOT EXERCISED");
+    else begin
+      $display("  clocked_conform[R4] P10: \"a dispatch consumes a valid head and leaves AT MOST ONE slot per lane to be refilled\"");
+      $display("  clocked_conform[R4] P1 : \"One prefetch FSM, one refill in flight engine-wide. A single `pst`/`pl` pair; there is no per-lane fetch engine.\"");
+      if (p4_fails != 0)
+        $display("*** FAIL clocked_conform[R4]: %0d premise violation(s) over %0d dispatch(es)", p4_fails, p4_checks);
+      else
+        $display("  clocked_conform[R4]: ok -- %0d dispatch(es), worst %0d slot(s) left to refill, max %0d refill(s) in flight", p4_checks, p4_worst, p4_fl_max);
+      if (p5_mid != 0)
+        $display("*** FAIL clocked_conform[R5]: %0d non-retiring clocked dispatch(es) were refill-bearing", p5_mid);
+      // ⭐ R5 IS A MEASUREMENT, REPORTED WITHOUT A VERDICT on the spacing:
+      // `model/gate_port_demand.py` compares it against D* and against the
+      // program's own 2d, because whether a spacing under D* matters is a
+      // statement about that PROGRAM's J, not about the design.
+      $display("  clocked_conform[R5]: %0d refill-bearing dispatch(es); port-wide MIN gap %0d cy (context, NOT vs D*); PER-LANE MIN gap %0d cy (d_min's subject); %0d non-retiring; %0d speculative fill(s); worst dispatch-to-next-fill %0d cy (upper bound)", p5_n, (p5_n == 0) ? -1 : p5_min, (p5_lmin == 1000000) ? -1 : p5_lmin, p5_mid, p5_spec, p5_lat_max);
+    end
     // ⭐ R REPORTS ITS OWN NON-VACUITY like every other layer here: zero checks
     // means this program retired no clocked action at all, which is true of the
     // unclocked and refusal images and must read as "not exercised".
