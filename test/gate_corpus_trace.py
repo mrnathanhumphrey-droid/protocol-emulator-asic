@@ -217,7 +217,10 @@ def main() -> int:
         fn, peer = corpus.CORPUS[name]
         img_bytes, expect = fn()
         img = "test/%s.hex" % name
-        nb = len(img_bytes)
+        # ⛔ RULING M5: load the FILE, all of it. `len(img_bytes)` was the
+        # program length (51 for corpus_i2c), which left the rest of the store
+        # unwritten -- and the chip now refuses exactly that load.
+        nb = len(open(os.path.join(ROOT, img)).read().split())
         iv = os.path.join(TMP, "%s_iv.txt" % name)
 
         ok, log = iverilog_run(vvp, img, nb, peer, iv)
@@ -337,8 +340,8 @@ def main() -> int:
     print("  hide it behind the synchronous path.")
     fn, peer = corpus.CORPUS["corpus_sptgt"]
     img_bytes, _ = fn()
-    nb = len(img_bytes)
     img = "test/corpus_sptgt.hex"
+    nb = len(open(os.path.join(ROOT, img)).read().split())   # M5: the whole file
     iv = os.path.join(TMP, "async_iv.txt")
     ok, log = iverilog_run(vvp, img, nb, peer, iv, async_arm=1)
     async_ok = False

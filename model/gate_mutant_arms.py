@@ -188,6 +188,14 @@ EXPECT = {
         "cycles under it on `corpus_i2c`, and (b) a bench-held SCL low to "
         "CONTEND (X on the line) against it while staying clean against the "
         "real design."),
+    "M_NO_STORE_FULL": (2,
+        "ONE LINE IN EACH ARM, in `project.v`: the engine's run input is `run` "
+        "instead of `run & store_full`, so the chip executes whatever the "
+        "unreset store holds after a partial load. ⛔ RULING M5's MUST-FIRE: "
+        "`test/store_run.sh` loads `corpus_i2c` as its 51 program bytes on "
+        "this build and requires it to RUN (1317 writebacks measured), while "
+        "the clean build refuses the same load with 0 writebacks and "
+        "CONFIG_ERR; `model/gate_store_full.py` holds both."),
     "M_PFETCH_BOTH_INVAL": (1,
         "ONE LINE IN ONE ARM: the clean arm is EMPTY, because a retiring "
         "dispatch invalidates its HEAD and nothing else -- the mutant adds the "

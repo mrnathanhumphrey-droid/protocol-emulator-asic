@@ -60,6 +60,27 @@ leave at least 3 clocks between writes.
    address bus.
 4. Deassert `prog` to run.
 
+### ⛔ Load the FULL store: all 256 bytes
+
+The program store has **no reset**. A byte the host never wrote holds whatever
+the SRAM powered up as, and a lane that ever reached one would execute it on a
+real pin. So the chip **refuses to run until every store byte has been
+written since power-on**:
+
+* It counts **consecutive** writes; a `ptr` pulse restarts the count until 256
+  have landed. Because the pointer auto-increments and wraps, 256 consecutive
+  writes from any start cover every address. Once reached, the condition holds
+  until `rst_n`.
+* Until then the engine **does not run** (no dispatch, every pin released),
+  including the window after reset if `prog` is low.
+* **Deasserting `prog` before 256 consecutive writes sets CONFIG_ERR** (status
+  bit 5, sticky until `rst_n`) so the host is told why the part is silent.
+
+⇒ Write the program, then fill the rest of the store. The toolchain does this
+for you: every image `pe_asm` / `pe_isa.write_image` emits is already 256 bytes,
+the program followed by the **store filler** `FE FF C0` repeated (a parked,
+non-driving `OP_REARM`).
+
 Every `uio` pin is an **input** for the whole of load mode, which is what lets
 the 8 protocol pins double as the load data port at zero pin cost. The 4
 push-pull protocol outputs are held at **idle high** throughout, because
@@ -132,6 +153,9 @@ tri-state MISO. Continuing to drive them from a program that has already
 been shown to be malformed is the wrong risk to take, and a host cannot tell
 "the lane I care about is fine" from "the part is running a corrupted
 image".
+
+**What counts as illegal at load release:** leaving load mode before the whole
+store was written (above). The engine never started, so no pin moved.
 
 **What counts as illegal at run time:**
 

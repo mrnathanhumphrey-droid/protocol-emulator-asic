@@ -45,7 +45,7 @@
 set -uo pipefail
 
 ROOT="${1:-/mnt/d/ProtocolEmulator}"
-NBYTES="${2:-51}"
+NBYTES="${2:-256}"   # ruling M5: images are the whole store; a short load is refused
 NCYC="${3:-1500}"
 OUTDIR="${4:-/mnt/c/tmp/vtrace}"
 IMG="${5:-test/smoke_image.hex}"

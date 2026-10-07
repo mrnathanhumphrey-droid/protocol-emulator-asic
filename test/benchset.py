@@ -472,6 +472,21 @@ def corpus_arms():
                  "+OUT=probe_cov_trace_ckhold_over.txt",
                  "+NCYC=40000", "+SEED=1", "+ASYNC=0",
                  "+STAYLOAD=0", "+SCLHOLD=0", "+CKRUNS=1"]))
+    # ⭐ RULING M5: A PARTIAL LOAD, IN THE SWEEP. Every other arm loads the
+    # whole store, so the release-time refusal (`short_load` in `project.v`)
+    # was the one new uncovered point -- MEASURED, 1 against the table. This
+    # arm loads corpus_i2c's 51 program bytes and releases. ⚠ It is a COVERAGE
+    # arm, and it judges itself: `+EXPECT_REFUSED=1` makes tb_trace assert
+    # CONFIG_ERR, `store_full` clear and zero writebacks (and tells
+    # `progress.vh` the arm is quiescent on purpose). The mutant half -- the
+    # same load RUNS on `M_NO_STORE_FULL` -- is `test/store_run.sh`'s.
+    # ⛔ `+NBYTES` IS GIVEN HERE, and `plan()` does not append the file's count
+    # when an arm names its own -- a plusarg's FIRST occurrence wins.
+    out.append(("shortload",
+                ["+IMG=test/corpus_i2c.hex", "+NBYTES=51", "+PEER=none",
+                 "+OUT=probe_cov_trace_shortload.txt",
+                 "+NCYC=4000", "+SEED=1", "+ASYNC=0",
+                 "+STAYLOAD=0", "+SCLHOLD=0", "+EXPECT_REFUSED=1"]))
     # ⭐⭐ THE ZERO-HOLD BUILD, IN THE COVERAGE SWEEP (ruling D3). Removing the
     # `ck_hold_fits` clamp from the clocked site left ONE branch reachable only
     # at `SDA_HOLD == 0`: the open-drain side of the clocked direct-drive arm.
@@ -832,7 +847,10 @@ def plan():
                 if a.startswith("+IMG="):
                     img = a.split("=", 1)[1]
             full = list(pargs)
-            if top in NEEDS_NBYTES:
+            if top in NEEDS_NBYTES and any(a.startswith("+NBYTES=")
+                                           for a in pargs):
+                pass                     # the arm sizes its own load (M5)
+            elif top in NEEDS_NBYTES:
                 if img is None:
                     probs.append("%s/%s needs +NBYTES but names no image"
                                  % (top, label))

@@ -1621,3 +1621,90 @@ are Nathan's (F7b).
 reported 13 findings. **Must-fires:** the universal `J = 8` row re-inserted,
 the pre-C = 3 shipped row restored, and a lane-table C reverted to 2 are all
 red.
+
+---
+
+## 21. M5 and M6 — the chip, not just the toolchain
+
+The audit covers images our toolchain writes. M5 and M6 are about what the chip
+does with an image that **didn't** come from it.
+
+### M5 — the loader auto-increments, so silicon refuses a partial load
+
+**The addressing:** `project.v`'s `ptr` resets on `ptr` (`ui_in[5]`) and steps
++1 on each write strobe. There is no address bus, so a write counter is enough.
+
+**What was built (`src/project.v`, AW + 3 flops):**
+
+* `wr_run` (AW + 1 bits) counts **consecutive** writes; a `ptr` pulse clears it
+  until it saturates. Its top bit, `store_full`, means "every store byte has
+  been written since power-on". 2^AW consecutive writes from any start cover
+  every address, and a written byte stays written, so it is **sticky until
+  `rst_n`**.
+* ⛔ **Consecutive, not total.** Counting every write would accept "200 bytes,
+  `ptr`, 60 bytes": 260 writes with 200..255 never written.
+* The engine's run input is `run & store_full`, so the engine never executes an
+  unwritten store, **including the power-up window** with `prog` low.
+* `short_load`: releasing load mode with `store_full` clear sets a sticky that
+  is OR-ed into **CONFIG_ERR** (status bit 5).
+
+⛔ **The first cut refused every full load.** It set the engine's
+`config_err` at run entry when `store_full` was clear. Benches, and real hosts,
+release reset with `prog` low for a cycle or more, so the check fired on the
+empty store and the sticky outlived the full load that followed (`store_run.sh`:
+CONFIG_ERR on all four full images, 0 writebacks). The refusal now fires **at
+the release from load mode**, as ruled, and the power-up window is covered by
+the silent run gate instead of an error.
+
+**Measured (`test/store_run.sh`, pinned Verilator 5.053):**
+
+| arm | build | bytes | store_full | CONFIG_ERR | writebacks |
+| --- | --- | --- | --- | --- | --- |
+| `corpus_i2c` | clean | 256 | 1 | 0 | 1,317 |
+| `ckod_image` | clean | 256 | 1 | 0 | 3,309 |
+| `corpus_all5` | clean | 256 | 1 | 0 | 16,745 |
+| `smoke_image` | clean | 256 | 1 | 0 | 5,286 |
+| **`short51`** (corpus_i2c's 51 program bytes) | clean | 51 | 0 | **1** | **0** |
+| **`mut_short51`** | `M_NO_STORE_FULL` | 51 | 0 | 1 | **1,317** |
+
+Full loads run with prefetch counts identical to §20's M3 table, so the gate
+changes no timing. The mutant runs the same 51-byte load exactly as the full one
+does, so it's the gate that refuses. `M_NO_STORE_FULL` is registered in
+`gate_mutant_arms` (2 lines, minimal) and `gate_store_full` holds every row
+above.
+
+⛔ **What the silicon refusal caught on its first full-suite run:** three
+corpus programs and the async-clear arm in `gate_corpus_trace` went
+"constant", meaning the engine never ran. That gate sized its loads from the
+builder's program length (`len(img_bytes)` = 51 for `corpus_i2c`), not from the
+256-byte file. It had been loading partial stores all along, which is exactly
+what M5 refuses. It now loads the file. `verilator_trace.sh`'s default byte
+count of 51 is now 256. The coverage sweep gained a `shortload` arm (tb_trace,
+corpus_i2c, `+NBYTES=51`) because the release-time refusal was the one new
+uncovered branch. `benchset.plan()` no longer appends the file's byte count
+when an arm names its own, because a plusarg's first occurrence wins. `docs/HOST_INTERFACE.md` now states **"load the full store"**, the
+counting rule, and the release-time CONFIG_ERR.
+
+### M6 — loud filler: no existing encoding is refused for every lane
+
+Every refusal the engine raises at dispatch depends on the **lane's header**:
+
+| refusal | needs |
+| --- | --- |
+| 1.6x clock alias (`OP_SHIFT`, clkpin == pin) | the lane's `clkpin` to equal the action's pin |
+| `ck_degen`, D1 `ck_holdviol` | a real clock pin in the header (`clk_real`) |
+| 1.6s open-drain on `uo_out` | header-time, not dispatch |
+
+The "refused" receive and arm rows in the degenerate-field table
+(`SHIFTIN` / `READBIT` / `ARM` on `PIN_NONE`) are **silent guards**
+(`pin_real`, `arm_real`): the read is suppressed and **CONFIG_ERR is not set**.
+So no word is refused at dispatch on every lane without new logic.
+
+⇒ **`feffc0` stays, and the trade is recorded: a lane that escapes its program
+parks silently.** What makes that acceptable now is that both ways to escape
+are closed before the engine runs. A missing terminating REARM or an
+out-of-program base is refused by `gate_store_full` on every image the
+toolchain writes. A host-written partial image is refused by M5 in silicon.
+What remains is a host that writes a *full* store containing a malformed
+program, which the chip runs and the escaping lane parks on the filler without
+telling anyone.

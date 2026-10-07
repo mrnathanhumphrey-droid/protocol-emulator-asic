@@ -157,7 +157,33 @@ def sim_check(path):
     print("    %-26s must-fire: lane 0 named at address %s   %s"
           % ("falloff", d.get("first_filler_addr"),
              "ok" if hit else "*** MISSED"))
-    return rc | (0 if hit else 1)
+    rc |= 0 if hit else 1
+
+    # ---- M5: silicon refuses a partial load ----------------------------------
+    # ⛔ A FULL load must run unrefused, a 51-byte load must be refused before
+    # any dispatch, and the same short load must RUN on M_NO_STORE_FULL -- or
+    # the refusal is not the guard's doing.
+    print("    --- M5: the chip refuses a partial load ---")
+    for k, v in sorted(pads.items()):
+        ok = v.get("store_full") == 1 and v.get("config_err") == 0 \
+            and v.get("writebacks", 0) > 0
+        print("    %-26s full load: store_full=%s config_err=%s, %s writebacks"
+              "   %s" % (k, v.get("store_full"), v.get("config_err"),
+                         v.get("writebacks"), "ok" if ok else "*** RED"))
+        rc |= 0 if ok else 1
+    s = runs.get("short51")
+    ok = bool(s) and s.get("store_full") == 0 and s.get("config_err") == 1 \
+        and s.get("writebacks") == 0
+    print("    %-26s 51 bytes: refused (CONFIG_ERR, 0 writebacks)   %s"
+          % ("short51", "ok" if ok else "*** MISSED"))
+    rc |= 0 if ok else 1
+    m = runs.get("mut_short51")
+    ok = bool(m) and m.get("build") == "nofull" and m.get("writebacks", 0) > 0
+    print("    %-26s M_NO_STORE_FULL: the same load RUNS (%s wb)   %s"
+          % ("mut_short51", m.get("writebacks") if m else "-",
+             "ok" if ok else "*** MISSED"))
+    rc |= 0 if ok else 1
+    return rc
 
 
 def images():

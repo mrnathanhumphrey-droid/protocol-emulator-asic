@@ -743,7 +743,9 @@ end
 `include "test/store_filler.vh"
 integer cm_caps  = 0;
 integer cm_fills = 0;
+integer cm_wbs   = 0;     // M5: writebacks, so a refused load shows ZERO
 always @(posedge dut.clk) begin
+  if (dut.rst_n === 1'b1 && dut.u_eng.st === 2'd2) cm_wbs = cm_wbs + 1;
   if (dut.rst_n === 1'b1 && dut.u_eng.pst === 3'd3) begin
     cm_caps = cm_caps + 1;
     if (dut.u_eng.s_wrdata[23:0] === PE_STORE_FILLER) begin
@@ -835,6 +837,10 @@ final begin
       $display("*** FAIL clocked_conform[M]: %0d of %0d prefetch capture(s) fetched the store filler", cm_fills, cm_caps);
     else
       $display("  clocked_conform[M]: ok -- %0d prefetch capture(s), none fetched the store filler", cm_caps);
+    // ⭐ M5 IS REPORTED, NOT JUDGED, HERE: a refused load is CORRECT on a
+    // short image and a defect on a full one, and only the caller knows which
+    // it loaded. `test/store_run.sh` holds each arm to its expectation.
+    $display("  clocked_conform[M5]: store_full=%0b config_err=%0b writebacks=%0d short_load=%0b", dut.store_full, dut.cfg_err_any, cm_wbs, dut.short_load);
   end
 
 

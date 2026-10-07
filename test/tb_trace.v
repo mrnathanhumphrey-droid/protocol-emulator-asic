@@ -582,6 +582,27 @@ final begin
   end
 end
 
+// ⛔ RULING M5 -- `+EXPECT_REFUSED=1` IS A LOAD THE CHIP MUST REFUSE (the
+// sweep's `shortload` arm: 51 of 256 store bytes written). It declares the arm
+// quiescent to `progress.vh`, which otherwise reds an arm with no writeback,
+// and then asserts the refusal itself: the status CONFIG_ERR set, `store_full`
+// clear, and ZERO writebacks. Quiescence alone would also be true of an engine
+// that never started for some other reason.
+integer m5_refused;
+initial begin
+  if (!$value$plusargs("EXPECT_REFUSED=%d", m5_refused)) m5_refused = 0;
+  pg_quiescent_ok = (m5_refused != 0);
+end
+
+final begin
+  if (m5_refused != 0) begin
+    if (dut.cfg_err_any !== 1'b1 || dut.store_full !== 1'b0 || cm_wbs != 0)
+      $display("*** FAIL tb_trace[M5]: a partial load was NOT refused -- CONFIG_ERR=%0b store_full=%0b writebacks=%0d", dut.cfg_err_any, dut.store_full, cm_wbs);
+    else
+      $display("  tb_trace[M5]: ok -- the partial load was refused: CONFIG_ERR set, 0 writebacks");
+  end
+end
+
 endmodule
 
 `default_nettype wire

@@ -223,6 +223,61 @@ module tt_um_protocol_emulator #(
   end
 
   // =====================================================================
+  // RULING M5 -- THE CHIP REFUSES A PARTIAL LOAD.
+  // ⛔⛔ The store has no reset. A host that loads 51 bytes leaves 205 holding
+  // power-up contents, and the image audit cannot reach a host's bytes. So the
+  // chip counts: `wr_run` is the number of CONSECUTIVE writes since the last
+  // pointer reset, and its top bit -- `store_full` -- is set once 2^AW of them
+  // have landed. Because the pointer auto-increments and wraps, 2^AW
+  // consecutive writes from ANY start cover every address, so the flag means
+  // exactly "every store byte has been written since power-on".
+  // ⭐ STICKY UNTIL `rst_n`, because a byte once written stays written: a
+  //   later partial re-load over a fully written store leaves no power-up byte.
+  // ⛔ A POINTER RESET BEFORE SATURATION RESTARTS THE COUNT. Counting all
+  //   writes instead would accept "200 bytes, pointer reset, 60 bytes" -- 260
+  //   writes with 200..255 never written.
+  // ⇒ TWO CONSEQUENCES, deliberately split:
+  //   * the ENGINE does not run until the flag is set (`eng_run` below). That
+  //     covers the power-up window too: with PROG low at reset release the
+  //     engine used to start on whatever the store powered up holding.
+  //   * RELEASING load mode with the flag clear sets `short_load`, a sticky
+  //     reported as CONFIG_ERR (status bit 5), so the host is told WHY the
+  //     part is silent. It is set at the RELEASE, not at every run entry, so
+  //     a reset with PROG low -- no load attempted yet -- is not an error.
+  // ⚠ The first cut set CONFIG_ERR inside the engine at run entry, and every
+  //   full load was refused: benches (and hosts) release reset with PROG low
+  //   for a cycle, the check fired on the empty store, and the sticky outlived
+  //   the full load that followed. Measured by `test/store_run.sh`.
+  // Cost: AW+3 flops.
+  // =====================================================================
+  reg [AW:0] wr_run;
+  wire       store_full = wr_run[AW];
+  reg        prog_q, short_load;
+  always @(posedge clk or negedge rst_n) begin
+    if (!rst_n) begin
+      wr_run     <= {(AW+1){1'b0}};
+      prog_q     <= 1'b0;
+      short_load <= 1'b0;
+    end else begin
+      prog_q <= prog_mode;
+      if (prog_q && !prog_mode && !store_full) short_load <= 1'b1;
+      if (prog_mode && !store_full) begin
+        if (ui_in[PIN_RST])              wr_run <= {(AW+1){1'b0}};
+        else if (wr_rise)                wr_run <= wr_run + 1'b1;
+      end
+    end
+  end
+  // ⛔ M_NO_STORE_FULL restores the old behaviour: the engine runs whatever
+  //   the store holds. `test/store_run.sh` requires a 51-byte load to RUN on
+  //   that build, so the gate below is shown to be what refuses it.
+`ifdef M_NO_STORE_FULL
+  wire eng_run = run;
+`else
+  wire eng_run = run & store_full;
+`endif
+  wire cfg_err_any;          // the engine's CONFIG_ERR, or a short load
+
+  // =====================================================================
   // THE STORE -- one instance, shared between the loader and the engine.
   // =====================================================================
   wire [AW-1:0] e_raddr;
@@ -278,6 +333,7 @@ module tt_um_protocol_emulator #(
   wire               e_ovr, e_busy, e_rx_push;
   wire               e_host_pop;
   wire               e_cfg_err;
+  assign cfg_err_any = e_cfg_err | short_load;   // M5: one status bit
   wire               e_clk_stretch;
   wire [7:0]         e_rx_data;
   // DECLARED WITH AN EXPLICIT WIDTH, NOT `LW`, because `LW` is a localparam
@@ -438,7 +494,7 @@ module tt_um_protocol_emulator #(
       // ends rather than only at its floor.
       .SDA_HOLD_NS(SDA_HOLD_NS)
   ) u_eng (
-      .clk(clk), .rst_n(rst_n), .run(run),
+      .clk(clk), .rst_n(rst_n), .run(eng_run),
       .s_raddr(e_raddr), .s_re(e_re), .s_rdata(s_rdata),
       .s_wraddr(e_wraddr), .s_wre(e_wre), .s_wrdata(s_wrdata),
       .pin_out(e_pin_out), .pin_oe(e_pin_oe), .pin_in(pin_in),
@@ -517,7 +573,7 @@ module tt_um_protocol_emulator #(
   reg [LW-1:0] rx_pend_lane;            // travels WITH the byte
   reg       rx_drop_sticky;           // status bit 6
 
-  wire      status_pending = e_cfg_err | tx_full_sticky | e_ovr
+  wire      status_pending = cfg_err_any | tx_full_sticky | e_ovr
                            | rx_drop_sticky
                            | (|e_ovf) | (|e_under);
 
@@ -544,7 +600,7 @@ module tt_um_protocol_emulator #(
       // changes no existing program's status byte: any image that never runs
       // a clocked SHIFTIN leaves it 0, exactly as the literal did. The
       // bit-identity condition is not weakened by it.
-      status_byte <= {e_clk_stretch, rx_drop_sticky, e_cfg_err, tx_full_sticky,
+      status_byte <= {e_clk_stretch, rx_drop_sticky, cfg_err_any, tx_full_sticky,
                       e_ovr, |e_ovf, |e_under, 1'b1};
       rb_re <= 1'b0;
       // capture the RX pulse the instant it appears, whatever the serialiser

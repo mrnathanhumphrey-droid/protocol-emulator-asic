@@ -41,6 +41,7 @@ here** (ruling CI1). A local pass is reported as local.
 | `f0aa6db` | ✅ `37572686088` | ✅ `37572686044` | the pinned Verilator in `verilator_trace.sh`; witness 7 of 8, 0 failed, in CI; 24 of 24 |
 | `b97d5bd` | ✅ `37611788009` | ✅ `37611787822` | P6 + N1; 25 of 25 |
 | `29bd861` | ✅ `37619713604` | ✅ `37619713637` | E+ + Q3; 26 of 26 |
+| `9ebcaeb` | ✅ `37627116027` | ✅ `37627115865` | M + README (a) + RD1; 27 of 27 |
 
 ---
 
@@ -64,6 +65,8 @@ FRAM write + random read.
 | **Q3** | `five_image` as evidence: **mechanism only**; every claim-bearing run point admissible | ✅ landed — SPEC §19 |
 | **M** | unreset store: full-store images, defined filler, audit, PC-reach report, load-time report | ✅ landed — SPEC §20 |
 | **README (option a) + RD1** | ledger numbers only (lane table C 2→3, SPI-target D_tol 18→17, r row, margin 12→11), universal `J = 8` row + its sentence removed, scoped `d_min ≥ D* = 20 → J = 1` stated; `gate_stored_numbers` now audits the README | ✅ landed — SPEC §20; ⚠ framing/prose untouched, still Nathan's (F7b) |
+| **M5** | silicon refuses a partial load: consecutive-write counter, engine gated on `store_full`, release-time CONFIG_ERR; `M_NO_STORE_FULL` must-fire | ✅ landed — SPEC §21 |
+| **M6** | loud filler: no lane-independent dispatch refusal exists → `feffc0` kept, "escape parks silently" recorded | ✅ landed — SPEC §21 |
 | **V** | tool pinning enforced: lint on bare verilator/iverilog/yosys; every tool gate prints path + version | **NEXT** |
 | **MU** | mutant completeness: every `ifdef M_*` killed by a named gate or a declared survivor; equivalence goes red | owed |
 | **CJ** (`gate_cj_bounds`) | report its claim; retire with a pointer if superseded, else a declared producer + reserved artefact | owed |
