@@ -36,6 +36,7 @@ here** (ruling CI1). A local pass is reported as local.
 | `992c298` | ❌ `37558472597` | ✅ `37558472654` | ruling S, **20 of 22**: pyRTA-dependent checks put in CI, where pyRTA is absent by design. Passed locally only via a scratch pyRTA clone. Fixed in the next commit. |
 | `2e6c118` | ✅ `37560421145` | ✅ `37560421167` | S fixed; 22 of 22 with pyRTA absent |
 | `de38c55` | ❌ `37565855366` | ✅ `37565855370` | Q2 + CI3, **23 of 24**: the restored corpus witness's `two_sim_trace.sh` wrote its scratch to a hardcoded `/mnt/c/tmp/` -- present under WSL, absent on CI's Linux -- so both normalised traces were empty and every program "disagreed" on 0 lines. A local run cannot catch it (WSL has `/mnt/c`). Fixed with `mktemp` in the next commit. The long-path arm passed in CI. |
+| `47bc387` | ❌ `37568512542` | ✅ `37568512633` | **6 of 8 on the witness**: all four corpus programs CYCLE-EXACT in CI, but the async-clear arm disagreed on 666 lines, all `uio_in[6]` (CS, bench-driven). A **bench race**: the trace sampler and the SPI/UART masters both woke on `@(negedge clk)` with blocking writes, an order the language leaves undefined; CI's Icarus 12.0 stable resolved it differently. Stimulus made non-blocking in the next commit. |
 
 ---
 

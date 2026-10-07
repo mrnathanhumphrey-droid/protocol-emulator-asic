@@ -260,6 +260,21 @@ module tb_trace;
   //    two peer-master processes race their own start condition.
   reg run_go = 1'b0;
 
+  // ⛔⛔⛔ EVERY STIMULUS WRITE BELOW IS NON-BLOCKING, AND THAT WAS A
+  // CROSS-SIMULATOR RACE. The trace sampler (`emit`, in the main loop) wakes on
+  // `@(negedge clk)` -- the SAME event these master processes apply their
+  // stimulus on. With blocking writes, two processes woken by one edge run in
+  // an order the language leaves UNDEFINED, so whether a sample shows the old or
+  // the new CS was the simulator's choice. Here it happened to agree; on CI's
+  // Icarus 12.0 (stable) the async-clear arm DISAGREED on 666 lines, every one
+  // in `uio_in[6]` -- CS, a BENCH-driven input -- from cycle 22, when ruling Q2
+  // first ran this witness on Linux. The async arm's mid-cycle `#delay` changes
+  // the order in which this process re-registers on the edge, which is why
+  // only that arm flipped.
+  // ⇒ Non-blocking writes land in the NBA region, after every active-region
+  //   read at that edge, in every simulator: the sampler sees the pre-edge
+  //   value, deterministically. The DUT samples these pins at the following
+  //   POSEDGE, so what the design sees is unchanged.
   // SPI-target: clock bytes into the DUT at a seeded phase. ⭐ This is the only
   // way the SPI-target lane sees anything: under the ruled map its SCLK, MOSI
   // and CS are all INPUTS, so with no master driving them the lane is inert and
@@ -269,13 +284,13 @@ module tb_trace;
     forever begin
       repeat (draw(rnd_t, 7) + 3) @(negedge clk);
       rnd_t = lcg(rnd_t);
-      mst_val[P_T_CS] = 1'b0;                   // select, active low
+      mst_val[P_T_CS] <= 1'b0;                   // select, active low
       @(negedge clk);
       for (jt = 0; jt < 8; jt = jt + 1) begin
-        mst_val[P_T_MOSI] = rnd_t[jt];
-        mst_val[P_T_SCLK] = 1'b1;
+        mst_val[P_T_MOSI] <= rnd_t[jt];
+        mst_val[P_T_SCLK] <= 1'b1;
         @(negedge clk);
-        mst_val[P_T_SCLK] = 1'b0;
+        mst_val[P_T_SCLK] <= 1'b0;
         @(negedge clk);
       end
       // ---- CS DEASSERT: the ASYNC-CLEAR ARM ----------------------------
@@ -293,10 +308,10 @@ module tb_trace;
       @(negedge clk);
       if (async_arm) begin
         #(draw(rnd_t, 9) + 1);
-        mst_val[P_T_CS] = 1'b1;
+        mst_val[P_T_CS] <= 1'b1;
         rnd_t = lcg(rnd_t);
       end else begin
-        mst_val[P_T_CS] = 1'b1;
+        mst_val[P_T_CS] <= 1'b1;
       end
     end
   end
@@ -309,13 +324,13 @@ module tb_trace;
     forever begin
       repeat (draw(rnd_r, 23) + 5) @(negedge clk);
       rnd_r = lcg(rnd_r);
-      mst_val[P_RX] = 1'b0;                     // the START bit: a FALL
+      mst_val[P_RX] <= 1'b0;                     // the START bit: a FALL
       repeat (4) @(negedge clk);
       for (jr = 0; jr < 8; jr = jr + 1) begin
-        mst_val[P_RX] = rnd_r[jr];
+        mst_val[P_RX] <= rnd_r[jr];
         repeat (4) @(negedge clk);
       end
-      mst_val[P_RX] = 1'b1;                     // idle high
+      mst_val[P_RX] <= 1'b1;                     // idle high
       repeat (4) @(negedge clk);
     end
   end
