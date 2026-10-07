@@ -260,27 +260,28 @@ def check_mode_floor(img):
 
     ⛔ OVERLOADED IS A REFUSAL, NOT A PASS. A lane set with U > 1 has no
     finite `r_i`, so no `t_LOW` floor can be certified for its clocked lane.
-    ⛔ NO pyRTA IS A REFUSAL, NOT A SKIP: an assembler that certified mode
-    legality without the bound it rests on would be certifying nothing.
+    ⭐⭐ THE START DELAY IS `r_floor` -- the LARGER of our recurrence and pyRTA
+    when both exist, our recurrence alone when pyRTA is absent -- and the
+    report names which. ⛔ The first version REFUSED outright without pyRTA,
+    and `pe_asm` is in `ci/run_gates.sh`, where pyRTA is deliberately absent
+    (not vendored; every pyRTA-primary gate runs under `run_a2.py` instead).
+    CI went red. Our recurrence measured `>=` pyRTA on every clocked lane in
+    the repo, so it is the STRICTER floor on all of them -- the safe direction
+    for a refusal -- and when pyRTA is present the max is taken rather than
+    that observation trusted.
     """
     src = find_pyrta()
-    if not src:
-        raise Reject(
-            "pyRTA was not found, so no clocked open-drain lane can be "
-            "certified against a UM10204 t_LOW floor -- the floor needs the "
-            "lane's worst-case start delay, which is pyRTA-primary. Set "
-            "PYRTA_SRC to a pyRTA src/ directory.")
     res = program_a2.derive(img, src)
     tc = um.table_cycles()
     claims = {}
     for ln, e in sorted(res["lanes"].items(), key=lambda kv: int(kv[0])):
-        if e["r_pyrta"] is None:
+        if e["r_floor"] is None:
             raise Reject(
                 "lane %s is a clocked open-drain lane in a program whose lane "
                 "set has no finite worst-case response (%s), so its low phase "
                 "has no certifiable floor and no UM10204 mode can be claimed."
                 % (ln, e["why"]))
-        lag = e["r_pyrta"] - C_SHIPPED
+        lag = e["r_floor"] - C_SHIPPED
         lo = e["T"] - lag
         hi = e["T"] + L_SYNC
         mode = um.claimable(lo, hi, tc)
@@ -295,6 +296,8 @@ def check_mode_floor(img):
                 "program: the same lane beside lighter traffic could pass."
                 % (ln, e["T"], lag, lo, need))
         claims[int(ln)] = (mode, lo, lag)
+    check_mode_floor.basis = ("max(our recurrence, pyRTA)" if src
+                              else "our recurrence only -- pyRTA absent")
     return claims
 
 
@@ -494,6 +497,7 @@ def report(lanes, headers):
         print("    lane %d mode     : clears %s -- worst t_LOW %d cycles "
               "after %d of start delay (this program's own r_i - C)"
               % (ln, mode, lo, lag))
+    print("    start-delay basis: %s" % check_mode_floor.basis)
     print("    queue ownership  : %s"
           % (", ".join("q%d -> lane %d" % (q, l)
                        for q, l in sorted(owner.items())) or "no TX consumers"))

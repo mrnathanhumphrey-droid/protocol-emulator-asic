@@ -1201,3 +1201,34 @@ mode legality without the bound it rests on certifies nothing.
 * `gate_clocked_lane_a2` §6 no longer parses a bench constant; it reports the
   model's own shipped-set number (still 8) **as a reference for that lane set
   only**, and fails if a shared constant ever reappears in the bench.
+
+
+### ⛔ First push was CI-red at 20 of 22 — my error, caught by CI1
+
+`992c298` put two **pyRTA-dependent** checks into `ci/run_gates.sh`:
+`gate_a2_program`'s currency check and `pe_asm.check_mode_floor`. This project
+keeps **every pyRTA-primary gate out of CI by design** — pyRTA is not vendored,
+and `model/a2/run_a2.py` runs those gates by hand at each checkpoint. Both
+passed locally **only because a pyRTA clone sits in a scratch directory on the
+development box**. CI (`37558472597`) went red. Checking CI on the exact SHA is
+what caught it, which is ruling CI1 working as intended.
+
+**Fixed without falling back on the principle:**
+
+* `program_a2.derive(img, src=None)` computes **everything except the pyRTA
+  column** — lane set, U, J, our own recurrence `r_ours`.
+* **CI's `gate_a2_program`** re-derives all of that and compares; an image
+  changed without the JSON being regenerated is caught on every push. It says
+  plainly that the pyRTA column is not re-derived there. Priced: a lane's `T`
+  moved by one is reported stale; the committed rows read as current.
+* **`gate_a2_bounds_pyrta.py`** re-derives the pyRTA column (and so the bench
+  budgets) under `run_a2.py`, **RED without pyRTA** — where the other
+  pyRTA-primary gates live.
+* **`pe_asm`'s floor uses `r_floor`** = max(our recurrence, pyRTA) when both
+  exist, our recurrence alone otherwise, and the report names the basis. Our
+  recurrence measured **≥ pyRTA on every clocked lane in the repo**, so it is
+  the *stricter* floor — the safe direction for a refusal — but that is an
+  observation, so the max is taken when pyRTA is present. The d = 32 must-fire
+  boundaries are **identical** both ways (alone from 30, beside traffic from 38).
+* ⇒ **The local suite now runs with `PYRTA_SRC=/nonexistent`**, so a local
+  green is a prediction of CI rather than of this box.

@@ -65,6 +65,30 @@ def load_measurement():
         return json.load(fh), p
 
 
+#: the fields only a pyRTA run can fill. Skipped when comparing without it,
+#: so CI never reports a stale row merely because it could not run pyRTA.
+PYRTA_ONLY = {"r_pyrta", "slack", "r_floor", "why"}
+
+
+def stale_rows(on_disk, fresh, with_pyrta):
+    """Image names whose committed row no longer matches a re-derivation."""
+    stale = sorted(set(on_disk) ^ set(fresh))
+    for n in sorted(set(on_disk) & set(fresh)):
+        a, b = on_disk[n], fresh[n]
+        top = ({k: a.get(k) for k in a if k != "lanes"}
+               != {k: b.get(k) for k in b if k != "lanes"})
+        if top or set(a["lanes"]) != set(b["lanes"]):
+            stale.append(n)
+            continue
+        skip = set() if with_pyrta else PYRTA_ONLY
+        for ln in a["lanes"]:
+            ea, eb = a["lanes"][ln], b["lanes"][ln]
+            if any(ea.get(k) != eb.get(k) for k in ea if k not in skip):
+                stale.append(n)
+                break
+    return sorted(set(stale))
+
+
 def main() -> int:
     rc = 0
     print()
@@ -75,12 +99,17 @@ def main() -> int:
     # ---- 1. the generated bounds are current --------------------------
     print()
     print("  --- 1. test/clocked_a2_bounds.json matches the images on disk ---")
+    # ⛔⛔ pyRTA IS NOT REQUIRED HERE, AND THE FIRST VERSION REQUIRED IT. This
+    # gate is in `ci/run_gates.sh`, and pyRTA is deliberately absent from CI
+    # (not vendored; every pyRTA-primary gate runs under `run_a2.py` by hand).
+    # It went red at 20 of 22 in CI while passing here, because a pyRTA clone
+    # happens to sit in a scratch directory on this box.
+    # ⇒ CI re-derives EVERYTHING EXCEPT THE pyRTA COLUMN -- lane set, U, J and
+    #   our own recurrence -- which is what catches an image that changed
+    #   without the JSON being regenerated. The pyRTA column, and so the bench
+    #   budgets, is re-derived by `gate_a2_bounds_pyrta.py` under `run_a2.py`,
+    #   RED without pyRTA. When pyRTA IS present here, it is compared too.
     src = find_pyrta()
-    if not src:
-        print("    *** FAIL pyRTA not found -- the bounds are pyRTA-primary, so")
-        print("        currency cannot be checked. A foreign check that cannot")
-        print("        run has not run.")
-        return 1
     if not os.path.isfile(program_a2.OUT_JSON):
         print("    *** FAIL test/clocked_a2_bounds.json is absent -- every")
         print("        clocked arm would run with A2's upper bound OFF.")
@@ -89,15 +118,18 @@ def main() -> int:
         on_disk = json.load(fh)
     fresh = {name: program_a2.derive(img, src)
              for name, img in program_a2.clocked_images()}
-    stale = sorted(set(on_disk) ^ set(fresh)) + sorted(
-        n for n in set(on_disk) & set(fresh) if on_disk[n] != fresh[n])
+    stale = stale_rows(on_disk, fresh, with_pyrta=bool(src))
     if stale:
-        print("    *** FAIL stale for: %s" % ", ".join(stale))
+        print("    *** FAIL stale for: %s" % ", ".join(sorted(set(stale))))
         print("        Run `python model/a2/program_a2.py`. A stale row holds an")
         print("        arm to the bound of a program that no longer exists.")
         rc = 1
     else:
         print("    current -- %d image(s) re-derived and identical" % len(fresh))
+        print("    %s" % ("pyRTA column compared too (pyRTA present)" if src
+                         else "pyRTA column NOT re-derived here -- pyRTA is "
+                              "not in CI by design; `gate_a2_bounds_pyrta.py` "
+                              "under `run_a2.py` owns it"))
 
     # ---- 2. no bound is typed --------------------------------------------
     print()
@@ -181,6 +213,27 @@ def main() -> int:
         print("    %-24s reports its lateness WITHOUT a verdict" % "")
     if not none:
         print("    none")
+
+    # ---- must-fire: the currency check can see a stale row --------------
+    # ⛔ PRICED WITHOUT pyRTA, because that is how it runs in CI. A copy of the
+    # committed rows has ONE non-pyRTA field moved (a lane's `T`) and must be
+    # reported; the untouched copy must not. A comparison that skipped too
+    # much -- the risk of a skip-list -- would pass both.
+    print()
+    print("  --- must-fire: the currency check sees a stale row ---")
+    import copy as _copy
+    bent = _copy.deepcopy(on_disk)
+    victim = next(n for n in sorted(bent) if bent[n]["lanes"])
+    ln0 = sorted(bent[victim]["lanes"])[0]
+    bent[victim]["lanes"][ln0]["T"] += 1
+    hit = victim in stale_rows(bent, fresh, with_pyrta=False)
+    clean = not stale_rows(on_disk, fresh, with_pyrta=False)
+    print("    a lane's T moved by one is reported stale    %s"
+          % ("ok" if hit else "*** MISSED"))
+    print("    the committed rows read as current           %s"
+          % ("ok" if clean else "*** FALSE STALE"))
+    if not (hit and clean):
+        rc = 1
 
     print()
     print("  --- 5. what this gate does NOT check ---")

@@ -112,8 +112,27 @@ def utilisation(ls):
     return sum(r["blane"].C / float(r["T"]) for r in ls)
 
 
-def derive(img, src):
-    """Per clocked open-drain lane: r_i (pyRTA primary), and the bench slack."""
+def derive(img, src=None):
+    """Per clocked open-drain lane: r_i (pyRTA primary), and the bench slack.
+
+    ⛔⛔ `src=None` IS A SUPPORTED MODE, AND THE FIRST VERSION DID NOT HAVE IT.
+    pyRTA is NOT vendored, and every pyRTA-primary gate in this project lives
+    OUTSIDE `ci/run_gates.sh` for exactly that reason (`run_a2.py` runs them by
+    hand at each checkpoint). Ruling S first wired two pyRTA-dependent checks
+    into CI; both passed here only because a pyRTA clone sits in a scratch
+    directory, and CI went red at 20 of 22 -- caught by checking CI on the
+    exact SHA, which is what ruling CI1 is for.
+    ⇒ Without pyRTA this computes EVERYTHING EXCEPT the pyRTA column: the lane
+      set, U, J and our own recurrence's `r_ours`. That is what CI re-derives
+      to hold the committed JSON current. The pyRTA column -- and therefore the
+      bench budgets, which are pyRTA-primary -- is re-derived by
+      `gate_a2_bounds_pyrta.py` under `run_a2.py`, RED without pyRTA.
+    ⭐ `r_floor` IS THE LARGER OF THE TWO WHEN BOTH EXIST. Measured over every
+    clocked lane in the repo, `r_ours >= r_pyrta` (equal on most, larger on two
+    `ckdense` lanes), so a floor taken from `r_ours` alone is never LESS strict
+    than the pyRTA one on any program we have -- but that is an observation,
+    not a theorem, so when pyRTA is present the max is used rather than trusted.
+    """
     ls, d_min, k, j_prog = lane_set(img)
     blanes = [r["blane"] for r in ls]
     u = utilisation(ls)
@@ -123,7 +142,7 @@ def derive(img, src):
         if not r["clocked_od"]:
             continue
         entry = {"T": r["T"], "r_pyrta": None, "r_ours": None, "slack": None,
-                 "why": None}
+                 "r_floor": None, "why": None}
         # ⛔ OVERLOAD FIRST: an RTA over a set with U > 1 has no fixed point,
         # and a number returned anyway would be the horizon, not a bound.
         if u > 1.0:
@@ -137,9 +156,17 @@ def derive(img, src):
             ours = None
             entry["why"] = "own recurrence raised %s" % type(exc).__name__
         entry["r_ours"] = ours
-        p, err = pyrta_bound.bound(src, blanes, i) if src else (None,
-                                                                 "no pyRTA")
+        if not src:
+            # ⭐ NO pyRTA: our recurrence only, and the entry SAYS so. The
+            # pyRTA column stays None rather than being filled with `r_ours`,
+            # so nothing downstream can mistake one for the other.
+            entry["r_floor"] = ours
+            res["lanes"][str(r["lane"])] = entry
+            continue
+        p, err = pyrta_bound.bound(src, blanes, i)
         entry["r_pyrta"] = p
+        cands = [x for x in (ours, p) if x is not None]
+        entry["r_floor"] = max(cands) if cands else None
         if p is None:
             entry["why"] = entry["why"] or ("pyRTA gave no bound: %s" % err)
         else:

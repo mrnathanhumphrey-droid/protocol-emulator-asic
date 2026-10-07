@@ -94,6 +94,12 @@ GATES = [
     # replacing the two-action one), so it needs the digest.
     ("gate_clocked_lane_a2.py",
      "A2c  the clocked I2C lane's D_tol and r, DERIVED not inherited", True),
+    # ⛔ RULING S's pyRTA COLUMN. The per-program bench budgets are
+    # pyRTA-primary, so their re-derivation lives here and not in CI -- where
+    # the first version of ruling S put it and CI went red at 20 of 22.
+    # `gate_a2_program.py` (in CI) re-derives everything but this column.
+    ("gate_a2_bounds_pyrta.py",
+     "A2s  per-program A2 budgets: the pyRTA column, re-derived", False),
     # ⛔ `../` because this one lives in model/ with the other RTL-FACING gates
     # (part1_param_contract, f2_flop_driven_outputs), not in model/a2/ with the
     # analysis. It is in THIS list anyway: an out-of-suite gate is a gate nobody

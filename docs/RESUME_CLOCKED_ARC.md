@@ -32,6 +32,8 @@ here** (ruling CI1). A local pass is reported as local.
 | `1f00768` | ❌ FAILURE | ✅ | same cause; superseded |
 | `d5ae9bc` | ✅ `37545309988` | ✅ `37545310031` | **first `test` green since `752fd7a`** |
 | `43575eb` | ✅ `37548607991` | ✅ `37548608000` | 21 of 21; CI ran `gate_port_demand` on real data (mutant red at 17 vs bound 2) |
+| `775b6bc` | ✅ `37555388505` | ✅ `37555388522` | R4 + R5 |
+| `992c298` | ❌ `37558472597` | ✅ `37558472654` | ruling S, **20 of 22**: pyRTA-dependent checks put in CI, where pyRTA is absent by design. Passed locally only via a scratch pyRTA clone. Fixed in the next commit. |
 
 ---
 
@@ -320,3 +322,7 @@ says a green here is a green there — that claim held only because nobody looke
 * No comment line may begin with the token `Verilator`.
 * Run `bash ci/run_gates.sh` as the **last** thing before reporting; a green on
   a tree you then edit describes nothing.
+* ⛔ **Run it as `PYRTA_SRC=/nonexistent bash ci/run_gates.sh`.** pyRTA is absent
+  from CI by design, and a pyRTA clone sits in this box's scratch directory, so
+  a plain local run can pass checks CI cannot run (`992c298`, red at 20 of 22).
+  The pyRTA-primary gates run separately: `python model/a2/run_a2.py`.

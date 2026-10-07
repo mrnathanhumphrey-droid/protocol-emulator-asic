@@ -7,6 +7,7 @@
   "lanes": {
    "0": {
     "T": 20,
+    "r_floor": 7,
     "r_ours": 7,
     "r_pyrta": 7,
     "slack": 8,
@@ -22,6 +23,7 @@
   "lanes": {
    "0": {
     "T": 20,
+    "r_floor": 7,
     "r_ours": 7,
     "r_pyrta": 7,
     "slack": 8,
@@ -37,6 +39,7 @@
   "lanes": {
    "0": {
     "T": 22,
+    "r_floor": 10,
     "r_ours": 10,
     "r_pyrta": 10,
     "slack": 11,
@@ -44,6 +47,7 @@
    },
    "1": {
     "T": 23,
+    "r_floor": 13,
     "r_ours": 13,
     "r_pyrta": 12,
     "slack": 13,
@@ -51,6 +55,7 @@
    },
    "2": {
     "T": 24,
+    "r_floor": 16,
     "r_ours": 16,
     "r_pyrta": 14,
     "slack": 15,
@@ -58,6 +63,7 @@
    },
    "3": {
     "T": 25,
+    "r_floor": 16,
     "r_ours": 16,
     "r_pyrta": 16,
     "slack": 17,
@@ -73,6 +79,7 @@
   "lanes": {
    "0": {
     "T": 15,
+    "r_floor": 10,
     "r_ours": 10,
     "r_pyrta": 10,
     "slack": 11,
@@ -88,6 +95,7 @@
   "lanes": {
    "0": {
     "T": 16,
+    "r_floor": 9,
     "r_ours": 9,
     "r_pyrta": 9,
     "slack": 10,
@@ -103,6 +111,7 @@
   "lanes": {
    "0": {
     "T": 14,
+    "r_floor": 11,
     "r_ours": 11,
     "r_pyrta": 11,
     "slack": 12,
@@ -118,6 +127,7 @@
   "lanes": {
    "0": {
     "T": 33,
+    "r_floor": 7,
     "r_ours": 7,
     "r_pyrta": 7,
     "slack": 8,
@@ -125,6 +135,7 @@
    },
    "1": {
     "T": 60,
+    "r_floor": 10,
     "r_ours": 10,
     "r_pyrta": 10,
     "slack": 11,
@@ -132,6 +143,7 @@
    },
    "2": {
     "T": 120,
+    "r_floor": 16,
     "r_ours": 16,
     "r_pyrta": 16,
     "slack": 17,
@@ -139,6 +151,7 @@
    },
    "3": {
     "T": 240,
+    "r_floor": 17,
     "r_ours": 17,
     "r_pyrta": 17,
     "slack": 18,
@@ -154,6 +167,7 @@
   "lanes": {
    "0": {
     "T": 70,
+    "r_floor": null,
     "r_ours": null,
     "r_pyrta": null,
     "slack": null,
@@ -169,6 +183,7 @@
   "lanes": {
    "0": {
     "T": 70,
+    "r_floor": 7,
     "r_ours": 7,
     "r_pyrta": 7,
     "slack": 8,
