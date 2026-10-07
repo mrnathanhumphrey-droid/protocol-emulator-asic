@@ -24,8 +24,14 @@ including commit and push.
 (all classified, the same 26 points as at `80ff8d7`), 37 arms / 14 benches.
 
 ⛔ **"Green" means CI on the exact SHA, both workflows, with the run ID written
-here** (ruling CI1). A local pass is reported as local. `d5ae9bc` was the first
-`test`-workflow green since `752fd7a`.
+here** (ruling CI1). A local pass is reported as local.
+
+| SHA | `test` | `docs` | note |
+| --- | --- | --- | --- |
+| `6abb6dd` … `80ff8d7` | ❌ **FAILURE** ×5 | ✅ | 19 of 20, `gate_um10204` CANNOT-RUN — see the CI section below |
+| `1f00768` | ❌ FAILURE | ✅ | same cause; superseded |
+| `d5ae9bc` | ✅ `37545309988` | ✅ `37545310031` | **first `test` green since `752fd7a`** |
+| `43575eb` | ✅ `37548607991` | ✅ `37548608000` | 21 of 21; CI ran `gate_port_demand` on real data (mutant red at 17 vs bound 2) |
 
 ---
 
