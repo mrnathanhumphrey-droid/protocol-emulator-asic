@@ -140,6 +140,31 @@ DIGEST_LEDGER = [
      "is 11."),
 ]
 
+#: ⛔⛔ P6 -- THE pyRTA THESE NUMBERS ARE WITNESSED BY, recorded beside the
+#: digest they were re-derived for. Until P6 the primary foreign authority for
+#: every timing claim was picked up from a scratch-directory clone with NO
+#: recorded commit, so the ledger could say WHY a number moved but not WHICH
+#: witness had certified it.
+#: ⭐ WHAT IS CLAIMED, PRECISELY: at this commit, `gate_pyrta` reproduces
+#: entry `65bc3c8114e5`'s quoted responses EXACTLY on all five lanes --
+#: r = {UART-tx 16, SPI-tx 12, I2C 7, UART-rx 15, SPI-target 9}, matching our
+#: own bound lane for lane. ⚠ It is a REPRODUCTION. Which clone produced the
+#: entry the first time was never written down -- that gap is the finding --
+#: so this records the witness that stands behind the number NOW, not an
+#: archaeology of the one that stood behind it then.
+#: ⛔ ONE HASH, TWO PLACES, CHECKED EQUAL: the enforced pin lives in
+#: `pyrta_src.PINNED_COMMIT`; `selftest()` below fails if this record and
+#: that pin ever disagree, so the ledger cannot describe a witness the gates no
+#: longer accept.
+PYRTA_PIN = {
+    "commit": "1f3a649ced61709620857ec28653b51a0c6ce28d",
+    "repo": "https://github.com/PROSA-Project/pyRTA",
+    "date": "2026-06-16",
+    "digest": "65bc3c8114e5",
+    "reproduces": {"UART-tx": 16, "SPI-tx": 12, "I2C": 7, "UART-rx": 15,
+                   "SPI-target": 9},
+}
+
 
 def assert_current(verbose: bool = True) -> bool:
     """The live shipped table must hash to the newest ledger entry."""
@@ -235,6 +260,16 @@ def selftest() -> int:
     went in last and is the one a future edit is most likely to forget.
     """
     from bursty import BLane
+    # ⛔ P6: the ledger's recorded witness must BE the pin the gates enforce.
+    from pyrta_src import PINNED_COMMIT
+    if PYRTA_PIN["commit"] != PINNED_COMMIT:
+        print("  *** FAIL lane_digest.PYRTA_PIN records pyRTA %s but the gates"
+              % PYRTA_PIN["commit"][:12])
+        print("      enforce %s -- the ledger names a witness the gates refuse."
+              % PINNED_COMMIT[:12])
+        return 1
+    print("  pyRTA pin recorded beside %s: %s -- matches the enforced pin"
+          % (PYRTA_PIN["digest"], PYRTA_PIN["commit"][:12]))
     print()
     print("=" * 78)
     print("SPEC A1 -- the lane-table digest, both faces")

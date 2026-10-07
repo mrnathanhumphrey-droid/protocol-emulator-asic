@@ -143,6 +143,11 @@ GATES=(
   # excluded (a 3.5 h hardening input), and `gate_cj_bounds` RED and excluded
   # only so the list describes the tree, with the reason and the debt stated.
   model/gate_gates_complete.py
+  # ⭐ N1 -- every NON-ADMISSIBLE image is declared by name with the condition
+  # it breaks (OVERLOAD, PORT, PINMAP), derived from the image itself. Its
+  # first run found the stress image `five_image` overloaded (U = 1.083) and
+  # nine more below D* that nothing declared.
+  model/gate_admissible_images.py
   # ⭐ JOINED THE LIST when it took the RX lane-field width check. That check
   # guards against a received byte being attributed to the WRONG LANE if
   # `N_LANES` ever outgrows the explicit [2:0] on `e_rx_lane` -- and it lives

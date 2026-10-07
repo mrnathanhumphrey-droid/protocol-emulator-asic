@@ -38,6 +38,7 @@ here** (ruling CI1). A local pass is reported as local.
 | `de38c55` | ❌ `37565855366` | ✅ `37565855370` | Q2 + CI3, **23 of 24**: the restored corpus witness's `two_sim_trace.sh` wrote its scratch to a hardcoded `/mnt/c/tmp/` -- present under WSL, absent on CI's Linux -- so both normalised traces were empty and every program "disagreed" on 0 lines. A local run cannot catch it (WSL has `/mnt/c`). Fixed with `mktemp` in the next commit. The long-path arm passed in CI. |
 | `47bc387` | ❌ `37568512542` | ✅ `37568512633` | **6 of 8 on the witness**: all four corpus programs CYCLE-EXACT in CI, but the async-clear arm disagreed on 666 lines of `uio_in[6]` (CS, bench-driven) from cycle 22. |
 | `f8f952c` | ❌ `37570517654` | ✅ `37570517688` | ⛔ **a wrong diagnosis, disproved by CI.** I took it for a race between the trace sampler and blocking stimulus writes on the same negedge and made the stimulus non-blocking; the identical 666 lines disagreed again. The real cause: `verilator_trace.sh` called a bare `verilator`, which in CI is apt's **5.020** -- CI keeps the pinned **5.053** off PATH and names it in `PE_VERILATOR`. CI's Icarus matched the local trace exactly; it was CI's Verilator that saw CS rise a cycle late. Fixed in the next commit; the non-blocking change is kept (the race is real) but fixed nothing observed. |
+| `f0aa6db` | ✅ `37572686088` | ✅ `37572686044` | the pinned Verilator in `verilator_trace.sh`; witness 7 of 8, 0 failed, in CI; 24 of 24 |
 
 ---
 
@@ -55,9 +56,12 @@ FRAM write + random read.
 | **D\*-window** | Theorem 3's CONCLUSION live: sliding window of `d` cycles counting refill requests at the port, asserted `<= k` on every feasible-at-J=1 arm; must-fire on an infeasible arm (`corpus_all5`). Premise (R4) + conclusion (window) = the whole theorem on the bench. **Goes in the existing `D*` sweep step — not new work now.** | owed (Wilson, after R5) |
 | **Q2** | `gate_corpus_trace` built, portable, in CI; GATES completeness | ✅ landed — SPEC §17 |
 | **CI3** | every bench's name buffer 256, loud load check, >128-byte arm, lint rule | ✅ landed — SPEC §17 |
-| **P6** | pyRTA provenance: path + commit printed by every pyRTA-primary gate; unpinned copy refused unless declared; pin recorded beside digest `65bc3c8114e5` | **NEXT** |
-| **N1** | non-admissible images declared by name with the violated condition (`corpus_all5` U > 1; `corpus_spim`/`corpus_sptgt` port-infeasible at J=1; `ckfive` pin map); audit red on an undeclared one | **NEXT** |
-| **`gate_cj_bounds`** | RED: reads untracked `test/cj_measured_alt.txt`; excluded by name so the list describes the tree. Give its input a recipe and track it, or retire it | **owed — decision** |
+| **P6** | pyRTA pinned at `1f3a649`, enforced, printed everywhere; reproduces `65bc3c8114e5` exactly | ✅ landed — SPEC §18 |
+| **N1** | non-admissible images declared (OVERLOAD / PORT / PINMAP), derived from each image; found `five_image` overloaded + 9 more below D* | ✅ landed — SPEC §18 |
+| **M** | unreset store: full-store images, defined filler, audit, PC-reach report, load-time report | **NEXT** |
+| **V** | tool pinning enforced: lint on bare verilator/iverilog/yosys; every tool gate prints path + version | owed |
+| **MU** | mutant completeness: every `ifdef M_*` killed by a named gate or a declared survivor; equivalence goes red | owed |
+| **CJ** (`gate_cj_bounds`) | report its claim; retire with a pointer if superseded, else a declared producer + reserved artefact | owed |
 | (opt) | `ckdense` margin: a heavier feasible variant firing on several releases | non-blocking |
 | **K** | ACK hold: every driven SDA transition through `SDA_HOLD`, + a transition-class coverage table | owed |
 | **U** | widen the refusal to the unclocked open-drain data drive; retire the clamp | owed, with K |

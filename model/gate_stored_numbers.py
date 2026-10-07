@@ -358,6 +358,18 @@ SPEC_SYMBOLS = {
     # `src/project.v` through `_assert_rtl_agrees`, so they cannot drift from
     # the RTL either.
     ("test/corpus.py", "PAD_COLLISION"),
+    # ⭐ N1's NAMED-EXEMPTION LIST, the same kind as `PAD_COLLISION`: image,
+    # the conditions it breaks, why. Its numbers are delays and utilisations
+    # quoted in the prose. Staleness is caught where it means something --
+    # `audit()` reds on an undeclared condition AND on a declared one that no
+    # longer holds, both derived from the image itself.
+    ("model/gate_admissible_images.py", "NON_ADMISSIBLE"),
+    # ⭐ P6's RECORD OF THE pyRTA WITNESS: a commit, a date and the five r_i it
+    # reproduces at that commit. Not a measurement this file holds: the hash
+    # is checked equal to the ENFORCED pin (`pyrta_src.PINNED_COMMIT`) by
+    # `lane_digest.selftest`, and the r_i are what `gate_pyrta` prints at the
+    # pin -- re-run under `run_a2.py`.
+    ("model/a2/lane_digest.py", "PYRTA_PIN"),
     # ⭐ THE COVERAGE SWEEP'S TWO DECLARATIONS, and neither holds a
     # measurement. `benchset.CONFIG` is STIMULUS -- plusargs, cycle budgets
     # and the per-lane delay vectors handed to `make_smoke_image.py` -- i.e.

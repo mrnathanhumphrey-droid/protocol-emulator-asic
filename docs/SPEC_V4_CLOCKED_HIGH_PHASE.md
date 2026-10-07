@@ -1331,3 +1331,83 @@ a recipe and track it, or retire it.
   bench, priced on the exact 64-byte declaration that broke CI.
 * `tb_smoke`'s measurement-file `$fopen` is now fatal on failure; `tb_i2c`'s
   already was.
+
+
+---
+
+## 18. P6 + N1 — which pyRTA, and which images break the rules on purpose
+
+### P6 — the timing witness, pinned
+
+The primary foreign authority for every timing claim was being picked up from a
+scratch-directory clone with **no recorded commit**. An unpinned witness is an
+unverified one: a pyRTA change between two runs would move every bound it
+certifies, and the record could not say whether it had.
+
+* **Pinned**: `PROSA-Project/pyRTA` at **`1f3a649`** (2026-06-16), a clean clone,
+  in `pyrta_src.PINNED_COMMIT`.
+* **`pinned_pyrta()` / `require_pyrta()`** accept a clone only if it is a clean
+  git checkout of exactly that commit, or if the run declares the difference by
+  name: `PYRTA_DECLARED="<commit|UNKNOWN>: <reason>"`, which is then printed.
+  An unpinned copy is treated as **absent**, so the pyRTA-primary gates go red
+  and the CI-side derivations fall back to their own recurrence and say so.
+* **Every pyRTA-reaching path prints the commit**: `require_pyrta`, `run_a2.py`'s
+  banner, `program_a2`, `gate_a2_program`, and `pe_asm`'s floor basis
+  (`max(our recurrence, pyRTA @ 1f3a649ced61)`).
+* **Priced** (`pyrta_src` face 4): the real clone is PINNED; a pyRTA-shaped copy
+  outside any git repo is refused; declared with a reason it is accepted and
+  labelled; declared without a reason it is refused.
+* **Recorded beside `65bc3c8114e5`** in `lane_digest.PYRTA_PIN`. At the pin,
+  `gate_pyrta` reproduces that entry's responses **exactly** — r = {16, 12, 7,
+  15, 9} on all five lanes. ⚠ That is a **reproduction**: which clone produced
+  the entry first was never written down, which is the defect P6 closes.
+  `lane_digest.selftest` fails if the ledger's hash and the enforced pin ever
+  disagree.
+
+### N1 — non-admissible images, declared
+
+`model/gate_admissible_images.py` (in CI) derives three conditions from each
+image and requires every violation to be declared by name with a reason:
+
+| condition | test |
+| --- | --- |
+| OVERLOAD | U > 1 over the program's own lane set |
+| PORT | refill-bearing `d_min` below `D* = 20` (`port_feasible`), so not J = 1 |
+| PINMAP | a driving lane on an overridden pad — declared in `corpus.PAD_COLLISION` (P5), read from there |
+
+Refusal images are exempt here because `gate_degenerate_fields.DELIBERATE`
+already declares each one's refusal.
+
+**The derived list is larger than the ruling's.** Beyond the four it named:
+
+* **`five_image.hex` is OVERLOADED** (U = 1.083) — `build_five`'s stress image,
+  the base for T1 and Theorem 3's port cells, never declared as such.
+* **Nine more are below `D*`**: `corpus_uartrx`, `chain`, three `edge` images,
+  three `noop` images, `tx`. Each is a mechanism test whose spacing is below
+  `D*` by construction, and each now says so.
+
+**The `d_min` is the refill-bearing release spacing, not the raw delay.**
+Refills follow retires (R5), so the spacing that matters is between a lane's
+consecutive retires: `d_i` after an unclocked retire, `d_i + L_SYNC + 1` after a
+clocked open-drain one (it parks on the observed rise — the same term as A2's
+slack), plus `(m − 1)·d` for the next action's remaining dispatches. Statically
+this gives **37 on `ckod`** (R5 measured 37) and **20 on `ckhold_over`** (R5
+measured 20), so `ckhold_over` is correctly *not* flagged. The raw minimum delay
+would have flagged it — the conservative-but-wrong reading §1 already refuted.
+
+⚠ It is the **nominal release** spacing, which is Theorem 3's quantity. A
+measured *dispatch* spacing can sit up to J below it: R5 measured 69 on
+`corpus_i2c` against a nominal 70.
+
+Priced: an undeclared U > 1 image (the real `five_image` bytes under an
+undeclared name) is reported, and so is a stale declaration.
+
+### ⛔ The vacuous `$?`, a fourth time
+
+My quick "fast gates" loops printed `"$(basename $g)" "$?"` — the command
+substitution runs first and resets `$?`, so **every rc=0 those loops printed was
+vacuous**. It surfaced here because `gate_stored_numbers` printed `***` lines
+while the loop said 0 (real exit code: 1). No false green reached a commit: the
+full suite reads exit codes correctly and ran before every commit. It is the
+same shape as the three earlier instances in this arc, and E+'s lint gate is
+what makes it mechanical rather than a matter of noticing.

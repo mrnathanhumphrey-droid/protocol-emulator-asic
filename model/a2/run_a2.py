@@ -165,6 +165,19 @@ def main(argv=None) -> int:
     for i, (f, label, needs) in enumerate(gates, 1):
         print("  %2d. [%s] %-24s %s"
               % (i, "digest" if needs else "      ", f, label))
+    # ⛔⛔ P6: THE WITNESS IS NAMED BEFORE ANYTHING IT CERTIFIES. Every gate
+    # below that reaches pyRTA prints its commit too; this line makes the
+    # suite's one answer to "which pyRTA" impossible to miss at the top, and a
+    # refused copy shows up here before twenty gates fail one by one.
+    from pyrta_src import find_pyrta, judge, PINNED_COMMIT, DECLARE_ENV
+    _src = find_pyrta()
+    if _src:
+        _ok, _label = judge(_src, os.environ.get(DECLARE_ENV))
+        print("  pyRTA  : %s" % _src)
+        print("  commit : %s%s" % (_label, "" if _ok else "   *** REFUSED"))
+    else:
+        print("  pyRTA  : NOT FOUND -- every pyRTA-primary gate will be RED")
+        print("  pin    : %s" % PINNED_COMMIT)
     print()
 
     results, digests = [], {}

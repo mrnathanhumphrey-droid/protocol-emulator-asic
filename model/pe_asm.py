@@ -51,7 +51,7 @@ import hold_bound                         # noqa: E402
 import gate_um10204 as um                 # noqa: E402
 import program_a2                         # noqa: E402
 from bursty import C_SHIPPED, L_SYNC      # noqa: E402
-from pyrta_src import find_pyrta          # noqa: E402
+from pyrta_src import PINNED_COMMIT, pinned_pyrta  # noqa: E402
 from make_smoke_image import (            # noqa: E402
     ACT_BASE, ACT_BYTES, AW, N_LANES, OP_ARM, OP_LEVEL, OP_READBIT,
     OP_REARM,
@@ -270,7 +270,9 @@ def check_mode_floor(img):
     for a refusal -- and when pyRTA is present the max is taken rather than
     that observation trusted.
     """
-    src = find_pyrta()
+    # ⛔ P6: an unpinned pyRTA is treated as ABSENT -- the floor then rests
+    # on our recurrence alone and says so, rather than on an unknown copy.
+    src = pinned_pyrta(quiet=True)
     res = program_a2.derive(img, src)
     tc = um.table_cycles()
     claims = {}
@@ -296,8 +298,9 @@ def check_mode_floor(img):
                 "program: the same lane beside lighter traffic could pass."
                 % (ln, e["T"], lag, lo, need))
         claims[int(ln)] = (mode, lo, lag)
-    check_mode_floor.basis = ("max(our recurrence, pyRTA)" if src
-                              else "our recurrence only -- pyRTA absent")
+    check_mode_floor.basis = (
+        "max(our recurrence, pyRTA @ %s)" % PINNED_COMMIT[:12] if src
+        else "our recurrence only -- pyRTA absent or unpinned")
     return claims
 
 

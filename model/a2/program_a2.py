@@ -59,7 +59,7 @@ import gate_j_program as jp                                       # noqa: E402
 import pe_isa as I                                                # noqa: E402
 import pyrta_bound                                                # noqa: E402
 from bursty import C_SHIPPED, L_JIT, L_SYNC, BLane, response_time_b  # noqa
-from pyrta_src import find_pyrta                                  # noqa: E402
+from pyrta_src import pinned_pyrta                                # noqa: E402
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")
@@ -197,7 +197,9 @@ def main() -> int:
     print("=" * 78)
     print("  RULING S -- A2's POST-HIGH GAP BOUND, PER PROGRAM")
     print("=" * 78)
-    src = find_pyrta()
+    # ⛔ P6: only a PINNED (or declared) pyRTA writes the budgets the bench
+    # enforces -- an unpinned witness cannot certify a committed artefact.
+    src = pinned_pyrta()
     if not src:
         print("  *** pyRTA NOT FOUND -- the per-program bound is pyRTA-primary,")
         print("      so nothing is written rather than a fallback number.")

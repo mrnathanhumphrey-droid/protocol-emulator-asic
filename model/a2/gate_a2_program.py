@@ -50,7 +50,7 @@ sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(ROOT, "test"))
 
 import program_a2                                                 # noqa: E402
-from pyrta_src import find_pyrta                                  # noqa: E402
+from pyrta_src import pinned_pyrta                                # noqa: E402
 
 
 def load_measurement():
@@ -109,7 +109,9 @@ def main() -> int:
     #   without the JSON being regenerated. The pyRTA column, and so the bench
     #   budgets, is re-derived by `gate_a2_bounds_pyrta.py` under `run_a2.py`,
     #   RED without pyRTA. When pyRTA IS present here, it is compared too.
-    src = find_pyrta()
+    # ⛔ P6: an UNPINNED pyRTA counts as absent here, so the pyRTA column
+    # is compared only against the pinned witness that produced it.
+    src = pinned_pyrta()
     if not os.path.isfile(program_a2.OUT_JSON):
         print("    *** FAIL test/clocked_a2_bounds.json is absent -- every")
         print("        clocked arm would run with A2's upper bound OFF.")

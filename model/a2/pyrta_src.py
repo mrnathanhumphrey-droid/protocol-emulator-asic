@@ -81,17 +81,111 @@ def find_pyrta() -> str | None:
     return None
 
 
+# ===========================================================================
+# P6 -- PROVENANCE: WHICH pyRTA, NOT JUST WHERE
+# ===========================================================================
+# ⛔⛔ THE PRIMARY FOREIGN AUTHORITY FOR EVERY TIMING CLAIM WAS PICKED UP FROM
+# A SCRATCH DIRECTORY WITH NO RECORDED COMMIT. `find_pyrta()` answers "is there
+# a pyRTA src/ here"; nothing answered "which pyRTA". A witness whose version is
+# unknown is an unverified witness: a pyRTA change between two runs would move
+# every bound it certifies, and the record could not say whether it had.
+# ⇒ The commit is PINNED here, and `pinned_pyrta()` returns a clone only if it
+#   is a clean git checkout of exactly this commit -- or the run DECLARES the
+#   difference by name in `PYRTA_DECLARED`, which every gate then prints.
+# ⭐ WHY THIS COMMIT: it is the clone the ruling-S budgets and the C = 3
+#   re-quote were re-derived against in this arc, and re-running `gate_pyrta`
+#   at it reproduces ledger entry `65bc3c8114e5`'s numbers exactly
+#   (r = {16, 12, 7, 15, 9}) -- see `lane_digest.PYRTA_PIN`. ⚠ That is a
+#   REPRODUCTION, not a claim about which clone produced the entry first: the
+#   earlier clone's commit was never recorded, which is the defect this fixes.
+PINNED_COMMIT = "1f3a649ced61709620857ec28653b51a0c6ce28d"
+PINNED_DATE = "2026-06-16"           # its commit date, for the reader
+DECLARE_ENV = "PYRTA_DECLARED"        # "<commit|UNKNOWN>: <reason>"
+
+
+def provenance(src: str):
+    """(commit, dirty) for the clone owning `src`, or (None, None) if not git.
+
+    ⚠ `dirty` covers TRACKED changes only: a modified pyRTA file means the code
+    that ran is not the commit's, so the commit alone no longer identifies it.
+    """
+    import subprocess
+    root = os.path.dirname(os.path.abspath(src))
+    try:
+        head = subprocess.run(["git", "-C", root, "rev-parse", "HEAD"],
+                              capture_output=True, text=True, timeout=20)
+        if head.returncode != 0:
+            return None, None
+        st = subprocess.run(["git", "-C", root, "status", "--porcelain",
+                             "--untracked-files=no"],
+                            capture_output=True, text=True, timeout=20)
+    except (OSError, subprocess.SubprocessError):
+        return None, None
+    return head.stdout.strip(), bool(st.stdout.strip())
+
+
+def judge(src: str, declared: str | None):
+    """(ok, label) for one clone. Pure, so the must-fire can price it."""
+    commit, dirty = provenance(src)
+    ident = commit or "UNKNOWN"
+    if commit == PINNED_COMMIT and not dirty:
+        return True, "PINNED %s (%s)" % (commit[:12], PINNED_DATE)
+    if dirty:
+        ident = "%s+LOCAL-CHANGES" % (commit or "UNKNOWN")
+    if declared:
+        want = declared.split(":", 1)[0].strip()
+        why = declared.split(":", 1)[1].strip() if ":" in declared else ""
+        if want and (want == ident or (commit and want == commit and not dirty)):
+            if not why:
+                return False, ("%s is DECLARED without a reason -- a declaration "
+                               "is only worth printing if it says why" % ident)
+            return True, "DECLARED %s -- %s" % (ident[:20], why)
+    return False, ("UNPINNED %s, pin is %s. Check out the pin, or set %s="
+                   "\"%s: <reason>\" to run this copy on purpose."
+                   % (ident[:20], PINNED_COMMIT[:12], DECLARE_ENV, ident))
+
+
+def pinned_pyrta(quiet: bool = False):
+    """`find_pyrta()`, but only a PINNED (or declared) clone counts.
+
+    ⛔ An unpinned copy is returned as None -- the same as no pyRTA at all --
+    so every caller's existing "pyRTA absent" path takes over: the
+    pyRTA-primary gates go RED, and the CI-side derivations fall back to their
+    own recurrence and say so. Nothing downstream needs to know about pins.
+    """
+    src = find_pyrta()
+    if not src:
+        return None
+    ok, label = judge(src, os.environ.get(DECLARE_ENV))
+    if not quiet:
+        print("  pyRTA: %s" % src)
+        print("  pyRTA commit: %s" % label)
+    if not ok:
+        if quiet:
+            print("  pyRTA REFUSED: %s" % label)
+        return None
+    return src
+
+
 def require_pyrta(gate: str) -> str | None:
     """find_pyrta(), but it prints the RED paragraph the gates all printed.
 
     Returns the src path, or None after explaining why the gate is red. The
     caller returns non-zero; this function never exits, so a caller can still
     run its tool-independent arms before failing.
+    ⭐ P6: it now also prints the clone's COMMIT, and refuses an unpinned one.
     """
     src = find_pyrta()
     if src:
+        ok, label = judge(src, os.environ.get(DECLARE_ENV))
         print("  pyRTA source: %s" % src)
-        return src
+        print("  pyRTA commit: %s" % label)
+        if ok:
+            return src
+        print("  *** pyRTA REFUSED -- %s is RED. An unpinned witness is an" % gate)
+        print("      unverified one: the bounds it certifies would move with")
+        print("      a pyRTA change and the record could not say whether.")
+        return None
     raw = os.environ.get(ENV)
     print("  *** pyRTA NOT FOUND -- %s is RED." % gate)
     if raw is None:
@@ -171,6 +265,40 @@ def selftest() -> int:
         else:
             print("    refused on the marker, not on existence -- a real directory")
             print("    that is not pyRTA is still not pyRTA.")
+
+        # --- face 4 (P6): WHICH pyRTA -- the pin, priced ---------------------
+        # ⛔ A COPY WITH NO RECORDED COMMIT must be refused, which is exactly the
+        # state the timing witness was in before P6. Built as a real pyRTA-shaped
+        # directory OUTSIDE any git repo, so `find_pyrta` would accept it and
+        # only the provenance check can turn it away.
+        import shutil
+        import tempfile
+        print("  face 4  the pin (P6)")
+        if found:
+            ok, label = judge(found, None)
+            print("    the real clone                      -> %s" % label)
+            if not ok:
+                print("    *** the clone in use is NOT the pin -- every")
+                print("        pyRTA-primary gate will refuse it")
+                rc = 1
+        fake = tempfile.mkdtemp(prefix="pyrta_unpinned_")
+        try:
+            fsrc = os.path.join(fake, "src")
+            os.makedirs(os.path.join(fsrc, _MARKER))
+            for label_, decl, want in (
+                    ("a copy with NO commit, undeclared", None, False),
+                    ("... declared by name with a reason",
+                     "UNKNOWN: selftest fixture", True),
+                    ("... declared with NO reason", "UNKNOWN", False)):
+                ok, why = judge(fsrc, decl)
+                good = ok == want
+                print("    %-38s -> %s" % (label_, "accepted" if ok else "refused"))
+                if not good:
+                    print("      *** wanted %s: %s"
+                          % ("acceptance" if want else "refusal", why))
+                    rc = 1
+        finally:
+            shutil.rmtree(fake, ignore_errors=True)
     finally:
         if saved is None:
             os.environ.pop(ENV, None)
