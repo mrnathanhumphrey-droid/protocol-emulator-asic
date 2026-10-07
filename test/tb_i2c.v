@@ -28,6 +28,7 @@
 `default_nettype none
 `timescale 1ns / 1ps
 
+`include "test/imgload.vh"
 module tb_i2c;
 
   reg        clk = 0, rst_n = 0, ena = 1;
@@ -41,7 +42,7 @@ module tb_i2c;
   reg  [7:0] img [0:IMG_MAX-1];
   integer    img_bytes, i, cyc, ncyc, fd, nwr;
   integer    txb;   // bytes per I2C transaction: 2 (certified) or 3
-  reg [8*64-1:0] imgfile, dumpfile;
+  reg [8*256-1:0] imgfile, dumpfile;
 
   // ---- the resolved open-drain bus ------------------------------------
   // ⛔ A PULL-UP IS A RELEASE, NOT A DRIVE. `sda`/`scl` are 1 unless somebody
@@ -118,6 +119,7 @@ module tb_i2c;
     if (!$value$plusargs("DUMP=%s", dumpfile)) dumpfile = "probe_i2c.bin";
     if (!$value$plusargs("NCYC=%d", ncyc)) ncyc = 40000;
     $readmemh(imgfile, img);
+    `PE_REQUIRE_IMG_LOADED(imgfile)
 
     if (!$value$plusargs("TXB=%d", txb)) txb = 2;
     hf_init;

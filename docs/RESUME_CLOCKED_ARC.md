@@ -34,6 +34,7 @@ here** (ruling CI1). A local pass is reported as local.
 | `43575eb` | ✅ `37548607991` | ✅ `37548608000` | 21 of 21; CI ran `gate_port_demand` on real data (mutant red at 17 vs bound 2) |
 | `775b6bc` | ✅ `37555388505` | ✅ `37555388522` | R4 + R5 |
 | `992c298` | ❌ `37558472597` | ✅ `37558472654` | ruling S, **20 of 22**: pyRTA-dependent checks put in CI, where pyRTA is absent by design. Passed locally only via a scratch pyRTA clone. Fixed in the next commit. |
+| `2e6c118` | ✅ `37560421145` | ✅ `37560421167` | S fixed; 22 of 22 with pyRTA absent |
 
 ---
 
@@ -49,8 +50,12 @@ FRAM write + random read.
 | **R5** | refill-bearing dispatch attribution; §1 stands (case a) | ✅ landed |
 | **S** | the A2 bound, per program; D2's mode floor on the same machinery | ✅ landed — SPEC §16 |
 | **D\*-window** | Theorem 3's CONCLUSION live: sliding window of `d` cycles counting refill requests at the port, asserted `<= k` on every feasible-at-J=1 arm; must-fire on an infeasible arm (`corpus_all5`). Premise (R4) + conclusion (window) = the whole theorem on the bench. **Goes in the existing `D*` sweep step — not new work now.** | owed (Wilson, after R5) |
-| **Q2** | `gate_corpus_trace`: answered; fix = run it + repair the build, + a GATES-completeness check (every `gate_*.py` listed or excluded by name) | **NEXT** |
-| **CI3** | every bench's `8*64-1` filename buffer + a >128-byte long-path arm | owed |
+| **Q2** | `gate_corpus_trace` built, portable, in CI; GATES completeness | ✅ landed — SPEC §17 |
+| **CI3** | every bench's name buffer 256, loud load check, >128-byte arm, lint rule | ✅ landed — SPEC §17 |
+| **P6** | pyRTA provenance: path + commit printed by every pyRTA-primary gate; unpinned copy refused unless declared; pin recorded beside digest `65bc3c8114e5` | **NEXT** |
+| **N1** | non-admissible images declared by name with the violated condition (`corpus_all5` U > 1; `corpus_spim`/`corpus_sptgt` port-infeasible at J=1; `ckfive` pin map); audit red on an undeclared one | **NEXT** |
+| **`gate_cj_bounds`** | RED: reads untracked `test/cj_measured_alt.txt`; excluded by name so the list describes the tree. Give its input a recipe and track it, or retire it | **owed — decision** |
+| (opt) | `ckdense` margin: a heavier feasible variant firing on several releases | non-blocking |
 | **K** | ACK hold: every driven SDA transition through `SDA_HOLD`, + a transition-class coverage table | owed |
 | **U** | widen the refusal to the unclocked open-drain data drive; retire the clamp | owed, with K |
 | **CI2** | retro: confirm the `tb_trace` path gate was the ONLY failure on `6abb6dd..e1fa642` | owed |
@@ -267,20 +272,7 @@ says a green here is a green there — that claim held only because nobody looke
 
 ## Open, accepted or unexplained
 
-* ⛔⛔ **`gate_corpus_trace` — Q2 ANSWERED, FIX ORDERED AFTER S.** It is **not
-  in the gate list and nothing runs it**: `GATES` does not contain it and no
-  `.sh`/`.yml` invokes it. So 20 of 20 never included it — the suite was not
-  passing *over* a broken gate, it was never asking. **It is also not
-  fail-open:** on a build failure it prints `*** iverilog build FAILED` and
-  `return 1`, real exit code **1**. ⛔ My earlier `RC=0` was my own error — `$?`
-  read after a pipe into `tail`, the **vacuous `$?`** mistake from earlier in
-  this same session, repeated. ⇒ The real defect is **a gate that correctly
-  reports RED and that nobody runs** — a fifth instance of the class, in a new
-  shape. Fix = add it to the list (goes red at once) **and** repair the build
-  (`final procedures cannot enable/call tasks`, `progress.vh:214`,
-  `clocked_conform.vh:382`). Until then the corpus at `d = 70` is certified by
-  the Verilator sweep, the loader audit and `measure_phases` — **not** by the
-  iverilog cross-check.
+* ~~`gate_corpus_trace`~~ — **restored and in CI** (SPEC §17). 7 of 8, 0 failed, 1 open (`corpus_spim`, stated); `corpus_i2c` / `corpus_all5` at d = 70 CYCLE-EXACT across both simulators.
 * **The unclocked `ck_hold_fits` clamp** — still live, still reachable by
   `build_i2cframe(d=12)`. Retiring it means widening D1 past `ck_act`: a scope
   decision (D3).

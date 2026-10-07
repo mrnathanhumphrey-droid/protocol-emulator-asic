@@ -35,6 +35,7 @@
 `default_nettype none
 `timescale 1ns / 1ps
 
+`include "test/imgload.vh"
 module tb_half;
 
   reg        clk = 0, rst_n = 0, ena = 1;
@@ -65,7 +66,7 @@ module tb_half;
 
   reg  [7:0] img [0:IMG_MAX-1];
   integer    img_bytes, i, cyc, ncyc, j;
-  reg [8*64-1:0] imgfile;
+  reg [8*256-1:0] imgfile;
 
   // ---- TX reconstruction, per lane --------------------------------------
   reg  [7:0] tacc  [0:1];
@@ -169,6 +170,7 @@ module tb_half;
     end
     if (!$value$plusargs("NCYC=%d", ncyc)) ncyc = 40000;
     $readmemh(imgfile, img);
+    `PE_REQUIRE_IMG_LOADED(imgfile)
 
     hf_init;
     // ⛔ DISJOINT PATTERNS PER QUEUE, so a byte that surfaces on the wrong

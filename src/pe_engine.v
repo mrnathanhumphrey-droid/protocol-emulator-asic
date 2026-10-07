@@ -1966,13 +1966,27 @@ module pe_engine #(
                   // stretches by holding the clock LOW, and against a push-pull
                   // high that is a SHORT. This is D2's lesson, and the release
                   // is also what MAKES the stretch observable.
+                  // ⛔⛔ M_CK_OD_CLK_DRIVE IS D2's MUST-FIRE NOW, AND IT HAD TO
+                  // MOVE HERE. D2's original mutant, M_OD_CLK_PUSHPULL, sits in
+                  // the UNCLOCKED arm -- and since the self-clocked rework every
+                  // `clk_real & level = 1` SHIFT comes HERE instead, so in that
+                  // arm `a_lvl` is always 0 whenever `clk_real` holds. Its
+                  // `pin_out <= a_lvl; pin_oe <= 1` then only ever writes the
+                  // same pull-low the clean design writes: an EQUIVALENT mutant
+                  // no image can kill. Found when `gate_corpus_trace` ran again
+                  // after being dark since `7a672b0` (ruling Q2).
                   if (clk_real) begin
                   if (l_mode[cur]) begin
                     pin_out[l_clkpin[cur]] <= 1'b1 & pin_pp[l_clkpin[cur]];
                     pin_oe[l_clkpin[cur]]  <= 1'b1;
                   end else begin
+`ifdef M_CK_OD_CLK_DRIVE
+                    pin_out[l_clkpin[cur]] <= 1'b1;
+                    pin_oe[l_clkpin[cur]]  <= 1'b1;
+`else
                     pin_out[l_clkpin[cur]] <= 1'b0;
                     pin_oe[l_clkpin[cur]]  <= 1'b0;   // RELEASE
+`endif
                   end
                   end
                 end

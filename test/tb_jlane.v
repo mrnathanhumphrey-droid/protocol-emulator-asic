@@ -29,6 +29,7 @@
 `default_nettype none
 `timescale 1ns / 1ps
 
+`include "test/imgload.vh"
 module tb_jlane;
 
   reg        clk = 0, rst_n = 0, ena = 1;
@@ -48,7 +49,7 @@ module tb_jlane;
 
   reg  [7:0] img [0:IMG_MAX-1];
   integer    img_bytes, i, cyc, ncyc, warmup, warm_from, lane;
-  reg [8*64-1:0] imgfile;
+  reg [8*256-1:0] imgfile;
 
   // ---- interval state ---------------------------------------------------
   reg        in_iv;
@@ -241,6 +242,7 @@ module tb_jlane;
       $finish;
     end
     $readmemh(imgfile, img);
+    `PE_REQUIRE_IMG_LOADED(imgfile)
     // ⛔ THE CONFIGURATION IS ECHOED, for the same reason the arm's delays
     // are: a single-buffer number reported under the double-buffer name is a
     // wrong result that looks right, and the whole point of T3 is comparing

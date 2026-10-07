@@ -33,6 +33,7 @@
 `default_nettype none
 `timescale 1ns / 1ps
 
+`include "test/imgload.vh"
 module tb_edge;
 
   reg        clk = 0, rst_n = 0, ena = 1;
@@ -58,7 +59,7 @@ module tb_edge;
   localparam integer IMG_MAX = 256;
   reg [7:0] img [0:IMG_MAX-1];
   integer   img_bytes;
-  reg [8*64-1:0] imgfile;
+  reg [8*256-1:0] imgfile;
 
   integer i, errors, cyc;
   integer t_edge, t_out, seen_out;
@@ -156,6 +157,7 @@ module tb_edge;
     errors = 0; oe_viol = 0; x_viol = 0;
     if (!$value$plusargs("IMG=%s", imgfile)) imgfile = "test/edge_image.hex";
     $readmemh(imgfile, img);
+    `PE_REQUIRE_IMG_LOADED(imgfile)
     img_bytes = 0;
     for (i = 0; i < IMG_MAX; i = i + 1)
       if (^img[i] !== 1'bx) img_bytes = i + 1;

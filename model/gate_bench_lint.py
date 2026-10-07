@@ -106,6 +106,28 @@ def scan(rel, lines):
     return hp, bf
 
 
+#: ⛔⛔ RULING CI3: a FILENAME buffer narrower than 256 bytes. Verilog truncates
+#: a longer `$value$plusargs("%s")` SILENTLY; `tb_trace`'s 64-byte buffer took
+#: CI's 99-byte checkout path and wrote nothing, five commits running, while
+#: this box's 59-byte path fitted. Every bench declared the same 64 bytes.
+#: `test/imgload.vh` fails loudly at RUN time on an image that did not load;
+#: this refuses the narrow declaration at REVIEW time, on every bench at once,
+#: so the runtime guard is never the only thing standing.
+NAME_BUF = re.compile(r"reg\s*\[\s*8\s*\*\s*(\d+)\s*-\s*1\s*:\s*0\s*\]\s*"
+                      r"((?:\w*file\w*|\w*name\w*)(?:\s*,\s*\w+)*)")
+NAME_BUF_MIN = 256
+
+
+def narrow_names(lines):
+    """Filename-ish string regs declared narrower than NAME_BUF_MIN bytes."""
+    out = []
+    for n, code in enumerate(strip_comments(lines), 1):
+        for m in NAME_BUF.finditer(code):
+            if int(m.group(1)) < NAME_BUF_MIN:
+                out.append((n, int(m.group(1)), m.group(2).strip()))
+    return out
+
+
 def selftest():
     """⛔ PRICE BOTH DETECTORS on the exact text that fooled the watchdog."""
     print()
@@ -201,6 +223,36 @@ def main():
             rc = 1
     if not nbf:
         print("    none -- every format string is a single literal")
+    print()
+    print("  --- filename buffers narrower than %d bytes (CI3) ---"
+          % NAME_BUF_MIN)
+    nnb = 0
+    for rel in files:
+        with io.open(os.path.join(ROOT, rel), encoding="utf-8",
+                     errors="replace") as fh:
+            lines = fh.read().splitlines()
+        for n, width, names in narrow_names(lines):
+            nnb += 1
+            print("    *** %s:%d  %d-byte buffer for %s" % (rel, n, width, names))
+            print("        ⛔ A longer +IMG/+OUT is TRUNCATED SILENTLY. Declare")
+            print("           reg [8*%d-1:0]." % NAME_BUF_MIN)
+            rc = 1
+    if not nnb:
+        print("    none -- every filename buffer is %d bytes or wider"
+              % NAME_BUF_MIN)
+    # ⛔ PRICED on the declaration that actually broke CI, and on the fixed one.
+    for label, line, want in (
+            ("tb_trace's old 64-byte declaration is refused",
+             "  reg [8*64-1:0] imgfile, outfile, peersel;", True),
+            ("tb_status's old 160-byte one is refused too",
+             "  reg [8*160-1:0] imgfile;", True),
+            ("the 256-byte declaration is accepted",
+             "  reg [8*256-1:0] imgfile, outfile, peersel;", False)):
+        got = bool(narrow_names([line]))
+        ok = got == want
+        print("    %-52s %s" % (label, "ok" if ok else "*** WRONG"))
+        if not ok:
+            rc = 1
 
     rc |= selftest()
     print()

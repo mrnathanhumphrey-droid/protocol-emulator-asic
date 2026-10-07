@@ -124,6 +124,25 @@ GATES=(
   # requires the must-fire: a LIGHTER set's bound on a HEAVIER feasible
   # program goes red while the program's own bound holds.
   model/a2/gate_a2_program.py
+  # ⛔⛔⛔ RULING Q2 -- THE TWO-SIMULATOR CORPUS WITNESS, AND IT WAS NEVER HERE.
+  # `test/gate_corpus_trace.py` compares iverilog against Verilator, cycle for
+  # cycle, on every corpus program. It could not BUILD from `7a672b0` to now
+  # (`final procedures cannot enable/call tasks`, in two shared includes), and
+  # because it was in no list, 20 of 20 meant nothing about it. It was not
+  # FAIL-OPEN -- it returns 1 on a build failure -- it was UNRUN: a correct
+  # gate nobody invoked. Fifth check-that-could-not-fire, new shape.
+  # => Brought back, it found TWO more things the dark period had hidden: D2's
+  #   must-fire mutant had become EQUIVALENT (the self-clocked rework made it
+  #   unable to express the defect), and its 1500-cycle window had shrunk to
+  #   under one transaction at D5's d = 70. Both fixed in the same change.
+  test/gate_corpus_trace.py
+  # ⭐ AND THE CHECK THAT WOULD HAVE CAUGHT IT: every `gate_*.py` is in this
+  # list, in `model/a2/run_a2.py`'s, or excluded BY NAME with a reason. Its
+  # first run found NINE gate files nothing ran -- four passing analysis gates
+  # and the whole TA-02 harness now under `run_a2.py`, `gate_flow_netlist`
+  # excluded (a 3.5 h hardening input), and `gate_cj_bounds` RED and excluded
+  # only so the list describes the tree, with the reason and the debt stated.
+  model/gate_gates_complete.py
   # ⭐ JOINED THE LIST when it took the RX lane-field width check. That check
   # guards against a received byte being attributed to the WRONG LANE if
   # `N_LANES` ever outgrows the explicit [2:0] on `e_rx_lane` -- and it lives
@@ -179,6 +198,14 @@ GATES=(
 # unrunnable locally, which is how a gate quietly stops being run at all.
 can_run() {
   case "$1" in
+    # ⛔ THE CORPUS WITNESS NEEDS BOTH SIMULATORS, and a missing one is a
+    # failure named as itself -- a two-simulator comparison with one simulator
+    # compares nothing.
+    test/gate_corpus_trace.py)
+      command -v iverilog >/dev/null 2>&1 || { echo "iverilog is not on PATH"; return 1; }
+      { command -v verilator >/dev/null 2>&1 || [ -n "${PE_VERILATOR:-}" ] \
+        || command -v wsl.exe >/dev/null 2>&1; } \
+        || { echo "no verilator and no wsl.exe to reach one"; return 1; } ;;
     model/gate_one_encoder.py|test/gl_harness_check.py|test/gate_tb_elaborates.py)
       command -v iverilog >/dev/null 2>&1 || { echo "iverilog is not on PATH"; return 1; } ;;
     model/gate_reset_audit.py)

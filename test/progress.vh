@@ -191,8 +191,14 @@ always @(posedge dut.clk) if (dut.rst_n === 1'b1) begin
   end
 end
 
-task pg_report;
-  begin
+// ⛔⛔ THE REPORT IS THE `final` BLOCK ITSELF, NOT A TASK IT CALLS.
+// It was `task pg_report` invoked from `final`, which Verilator accepts and
+// iverilog refuses ("final procedures cannot enable/call tasks").
+// That one line kept `test/gate_corpus_trace.py` -- the TWO-SIMULATOR
+// corpus comparison -- from building since `7a672b0`, and because that
+// gate was in no list, nothing noticed (ruling Q2). The task had exactly
+// one caller, so folding it in changes nothing Verilator does.
+final begin
     // ⛔ DID-NOT-RUN MUST NOT LOOK LIKE PASSED. These two counters exist
     // because this file was once vacuous on every bench and said nothing.
     $display("  progress.vh[A]: %0d writeback(s), %0d action(s) retired",
@@ -208,8 +214,4 @@ task pg_report;
     else
       $display("*** FAIL progress.vh[A]: %0d liveness failure(s)", pg_fa);
   end
-endtask
 
-final begin
-  pg_report;
-end

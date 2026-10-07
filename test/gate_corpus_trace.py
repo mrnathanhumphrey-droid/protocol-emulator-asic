@@ -27,6 +27,7 @@ result cannot be read as more than it is.
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import sys
 
@@ -41,10 +42,23 @@ sys.path.insert(0, HERE)
 
 import corpus  # noqa: E402
 
-WSL_ROOT = "/mnt/d/ProtocolEmulator"
-TMP = os.environ.get("PE_TRACE_TMP", r"C:\tmp\corpus")
-WSL_TMP = "/mnt/c/tmp/corpus"
-NCYC = int(os.environ.get("PE_TRACE_NCYC", "1500"))
+# ⛔⛔ NO PATH IN THIS FILE NAMES A MACHINE ANY MORE (ruling Q2). It used to
+# hardcode `wsl.exe -d Ubuntu`, `/mnt/d/ProtocolEmulator` and `C:\tmp\corpus`,
+# so the two-simulator corpus witness could only ever run on the development
+# box -- which is one reason it sat outside `ci/run_gates.sh`, and outside it
+# nothing noticed it had stopped BUILDING at `7a672b0`. The scratch directory
+# is now inside the checkout (`probe_*` is gitignored), and the Verilator half
+# runs NATIVELY where `verilator` is on PATH (CI) or through WSL where it is
+# not (this box), with every path translated by one function.
+TMP = os.environ.get("PE_TRACE_TMP") or os.path.join(ROOT,
+                                                     "probe_corpus_trace")
+# ⛔⛔ 8000 CYCLES, NOT 1500, AND THE OLD WINDOW HAD STOPPED WITNESSING ANYTHING.
+# D5 raised the corpus I2C delay to d = 70, a 146-cycle bit period, so 1500
+# cycles was ~10 periods -- LESS THAN ONE START + byte + ACK + STOP. The
+# cross-simulator check on the corpus that had just changed saw under one
+# transaction. Measured: runtime does not scale with it (66 s at 1500, 66 s at
+# 8000), so the longer window costs nothing.
+NCYC = int(os.environ.get("PE_TRACE_NCYC", "8000"))
 
 SRC = ["test/tb_trace.v", "test/fram_spi.v", "test/fram_i2c.v",
        "src/pe_engine.v", "src/pe_store.v", "src/project.v"]
@@ -137,11 +151,46 @@ def od_violations(rows, od_pins):
     return bad
 
 
-def wsl(script, *args):
-    cmd = ["wsl.exe", "-d", "Ubuntu", "--", "bash",
-           "%s/test/%s" % (WSL_ROOT, script)] + [str(a) for a in args]
-    return subprocess.run(cmd, capture_output=True, text=True,
-                          encoding="utf-8", errors="replace")
+def _verilator_native():
+    """True where the Verilator scripts can run in THIS process's shell."""
+    return os.name != "nt" or bool(
+        shutil.which(os.environ.get("PE_VERILATOR", "verilator")))
+
+
+def vpath(path):
+    """A native path as the Verilator side sees it.
+
+    ⭐ ONE TRANSLATION, used for every path handed to a Verilator script. The
+    old file spelled the WSL scratch path out by hand at four call sites and
+    the Windows drive path at the others -- two spellings of one directory that
+    only agreed on one machine.
+    """
+    full = os.path.abspath(path)
+    if _verilator_native():
+        return full.replace("\\", "/")
+    drive, rest = os.path.splitdrive(full)
+    return "/mnt/%s%s" % (drive[0].lower(), rest.replace("\\", "/"))
+
+
+class _NoVerilator:
+    returncode = 127
+    stdout = ("*** NO VERILATOR: not on PATH and no wsl.exe to delegate to, "
+              "so the second simulator cannot run -- the comparison is RED, "
+              "not skipped.")
+    stderr = ""
+
+
+def vrun(script, *args):
+    """Run a Verilator-side script: natively (CI) or through WSL (this box)."""
+    sc = os.path.join(ROOT, "test", script)
+    if _verilator_native():
+        cmd = ["bash", sc]
+    elif shutil.which("wsl.exe"):
+        cmd = ["wsl.exe", "--", "bash", vpath(sc)]
+    else:
+        return _NoVerilator()
+    return subprocess.run(cmd + [str(a) for a in args], capture_output=True,
+                          text=True, encoding="utf-8", errors="replace")
 
 
 def main() -> int:
@@ -214,6 +263,13 @@ def main() -> int:
             print("      ⭐ THIS ARM WAS RECORDED AS OPEN AND ITS PRECONDITION")
             print("         NOW PASSES -- the recorded cause no longer holds.")
             print("         Re-read test/corpus.py OPEN and retire the entry.")
+            # ⛔ A STALE EXEMPTION IS A FAILURE, NOT A NOTE. This only printed,
+            # so a program could start passing while still listed OPEN and the
+            # exemption would sit there excusing nothing, unnoticed -- the hole
+            # `DELIBERATE` and `PAD_COLLISION` already close by going red.
+            # Found when ruling Q2 brought this gate back from `7a672b0`.
+            failures.append((name, "listed OPEN but its precondition now "
+                                   "passes -- retire the entry"))
 
         # ---- D2's INVARIANT: no open-drain pin ever drives a 1 ---------
         odp = expect.get("od_pins", ())
@@ -247,8 +303,8 @@ def main() -> int:
                 print("      *** phase %d: iverilog run failed" % ph)
                 ok_all = False
                 break
-            od = "%s/%s_p%d" % (WSL_TMP, name, ph)
-            r = wsl("verilator_trace.sh", WSL_ROOT, nb, NCYC, od,
+            od = vpath(os.path.join(TMP, "%s_p%d" % (name, ph)))
+            r = vrun("verilator_trace.sh", vpath(ROOT), nb, NCYC, od,
                     img, peer, 0, ph)
             if "SEEDS AGREE" not in r.stdout:
                 print("      *** phase %d: seed sweep did NOT agree" % ph)
@@ -256,8 +312,8 @@ def main() -> int:
                                  for x in r.stdout.splitlines()[-10:]))
                 ok_all = False
                 break
-            ivw = "/mnt/c/tmp/corpus/%s_p%d_iv.txt" % (name, ph)
-            r2 = wsl("two_sim_trace.sh", ivw, "%s/s1.txt" % od)
+            ivw = vpath(ivp)
+            r2 = vrun("two_sim_trace.sh", ivw, "%s/s1.txt" % od)
             if "CYCLE-EXACT" not in r2.stdout:
                 print("      *** phase %d: CROSS-SIM DISAGREEMENT" % ph)
                 print(chr(10).join("        " + x
@@ -296,14 +352,14 @@ def main() -> int:
             print("      to clear and agreement proves nothing.")
             failures.append(("async-clear", "vacuous: uio_oe constant"))
         else:
-            od = "%s/async" % WSL_TMP
-            r = wsl("verilator_trace.sh", WSL_ROOT, nb, NCYC, od, img, peer, 1)
+            od = vpath(os.path.join(TMP, "async"))
+            r = vrun("verilator_trace.sh", vpath(ROOT), nb, NCYC, od, img,
+                     peer, 1)
             if "SEEDS AGREE" not in r.stdout:
                 print("  *** seed sweep disagreed on the async arm")
                 failures.append(("async-clear", "cross-seed disagreement"))
             else:
-                r2 = wsl("two_sim_trace.sh",
-                         "/mnt/c/tmp/corpus/async_iv.txt", "%s/s1.txt" % od)
+                r2 = vrun("two_sim_trace.sh", vpath(iv), "%s/s1.txt" % od)
                 if "CYCLE-EXACT" in r2.stdout:
                     print("  CYCLE-EXACT with CS off-edge: the two simulators")
                     print("  agree on the asynchronous release.")
@@ -338,7 +394,7 @@ def main() -> int:
     print("  --- D2 must-fires: the invariant and the stretch, both priced ---")
     d2_ok = True
     mvvp = os.path.join(TMP, "mut.vvp")
-    okb, lg = iverilog_build(mvvp, defines=("M_OD_CLK_PUSHPULL",))
+    okb, lg = iverilog_build(mvvp, defines=("M_CK_OD_CLK_DRIVE",))
     if not okb:
         print("  *** the mutant build failed")
         d2_ok = False
@@ -396,8 +452,35 @@ def main() -> int:
     print()
     print("  --- D1: the serial readback stream, 3 seeds + cross-sim ---")
     rb_ok = False
-    img = "test/corpus_i2c.hex"
-    nb = len(open(os.path.join(ROOT, img)).read().split())
+    # ⛔⛔ THE READBACK IMAGE FILLS THE WHOLE STORE, AND THE MEASUREMENT SAYS WHY.
+    # The readback pointer increments freely and wraps at 2^AW, so it walks
+    # EVERY store address -- and a 51-byte image leaves 205 of them never
+    # written. The store is allowlisted UNRESET, so past the image the stream
+    # reads uninitialised SRAM and the three init seeds legitimately disagree:
+    # MEASURED, 920 to 1380 differing lines from cycle ~2247, exactly where the
+    # serial walk passes byte 51. The old 1500-cycle window ended just before
+    # that point, so it never saw it.
+    # ⇒ Falsified rather than argued: the SAME program padded with zeros to the
+    #   full store gives SEEDS AGREE. So this is NOT an unreset engine flop; it
+    #   is the store doing what its allowlist entry says.
+    # ⭐ PADDING ALSO MAKES THE ARM STRONGER, not merely green: the walk now
+    # crosses the pointer's WRAP at 2^AW, a framing edge the short window never
+    # reached. The arm's claim is that the readback FRAMING is init-independent
+    # -- what the stale first frame would have broken -- and it now holds over
+    # the whole store and across the wrap.
+    # ⚠ WHAT IT DOES NOT SAY: a host reading back past the bytes it loaded
+    # gets uninitialised store contents. That is the store's declared
+    # behaviour, not a defect, and it is now written down here.
+    src_img = "test/corpus_i2c.hex"
+    body = open(os.path.join(ROOT, src_img)).read().split()
+    full = body + ["00"] * ((1 << corpus.AW) - len(body))
+    img_abs = os.path.join(TMP, "readback_fullstore.hex")
+    with open(img_abs, "w", encoding="ascii", newline="\n") as fh:
+        fh.write("".join(b + "\n" for b in full))
+    img = os.path.relpath(img_abs, ROOT).replace("\\", "/")
+    nb = len(full)
+    print("  image: %s padded %d -> %d bytes (the whole store)"
+          % (src_img, len(body), nb))
     ivr = os.path.join(TMP, "readback_iv.txt")
     ok, log = iverilog_run(vvp, img, nb, "none", ivr, stayload=1)
     if ok and os.path.isfile(ivr):
@@ -408,8 +491,8 @@ def main() -> int:
             print("  *** the readback stream is CONSTANT -- nothing to compare")
             failures.append(("readback", "stream constant"))
         else:
-            od = "%s/readback" % WSL_TMP
-            r = wsl("verilator_trace.sh", WSL_ROOT, nb, NCYC, od, img,
+            od = vpath(os.path.join(TMP, "readback"))
+            r = vrun("verilator_trace.sh", vpath(ROOT), nb, NCYC, od, img,
                     "none", 0, 1, "", 1, 0)
             if "SEEDS AGREE" not in r.stdout:
                 print("  *** the readback stream DISAGREED ACROSS SEEDS -- a")
@@ -418,8 +501,7 @@ def main() -> int:
                                    for x in r.stdout.splitlines()[-10:]))
                 failures.append(("readback", "cross-seed disagreement"))
             else:
-                r2 = wsl("two_sim_trace.sh",
-                         "/mnt/c/tmp/corpus/readback_iv.txt", "%s/s1.txt" % od)
+                r2 = vrun("two_sim_trace.sh", vpath(ivr), "%s/s1.txt" % od)
                 if "CYCLE-EXACT" in r2.stdout:
                     print("  seeds agree + CYCLE-EXACT: the readback stream is")
                     print("  init-independent, which is what the stale first")
@@ -478,9 +560,18 @@ def main() -> int:
     for nm in opens:
         print("    OPEN   %-15s see test/corpus.py OPEN[%r]" % (nm, nm))
     print()
-    print("  ⛔ AN OPEN ARM IS NOT A PASS. It is counted separately so the")
-    print("     total cannot be read as coverage it does not have, and it")
-    print("     stays red until the ruling it names lands.")
+    # ⛔⛔ THIS TEXT USED TO SAY AN OPEN ARM "STAYS RED", and the exit code below
+    # has always been `0 if not failures` -- so the prose claimed a strictness
+    # the gate never had. Found by reading the exit code against the words when
+    # ruling Q2 put this gate in CI. An OPEN arm is a NAMED, REASONED exception
+    # in `test/corpus.py OPEN`, the same pattern as `DELIBERATE` and
+    # `PAD_COLLISION`; what keeps it honest is that it is counted apart from
+    # the passes and that a STALE entry (the program now passes) is a failure.
+    print("  ⛔ AN OPEN ARM IS NOT A PASS. It is a NAMED exception with a")
+    print("     stated cause in test/corpus.py OPEN, counted apart from the")
+    print("     passes so the total cannot be read as coverage it does not")
+    print("     have. It does not fail the gate; a STALE entry -- the program")
+    print("     now passes while still listed -- does.")
     print()
     print("  ⚠ WHAT THIS STILL DOES NOT ESTABLISH:")
     print("    * ports only -- internal state is not compared, so a divergence")

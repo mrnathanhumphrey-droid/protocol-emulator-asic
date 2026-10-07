@@ -722,8 +722,14 @@ always @(posedge dut.clk) begin
   end
 end
 
-task cb_report;
-  begin
+// ⛔⛔ THE REPORT IS THE `final` BLOCK ITSELF, NOT A TASK IT CALLS.
+// It was `task cb_report` invoked from `final`, which Verilator accepts and
+// iverilog refuses ("final procedures cannot enable/call tasks").
+// That one line kept `test/gate_corpus_trace.py` -- the TWO-SIMULATOR
+// corpus comparison -- from building since `7a672b0`, and because that
+// gate was in no list, nothing noticed (ruling Q2). The task had exactly
+// one caller, so folding it in changes nothing Verilator does.
+final begin
     $display("  clocked_conform[B]: %0d clocked action(s) checked against the model", cb_acts);
     // ⭐ THE GAP LAYER REPORTS ITS OWN NON-VACUITY. Zero checks means no
     // open-drain clocked HIGH was ever followed by another clocked dispatch in
@@ -794,9 +800,5 @@ task cb_report;
     else if (cb_acts != 0)
       $display("  clocked_conform[B]: ok -- every clocked action matched the model exactly");
   end
-endtask
 
-final begin
-  cb_report;
-end
 

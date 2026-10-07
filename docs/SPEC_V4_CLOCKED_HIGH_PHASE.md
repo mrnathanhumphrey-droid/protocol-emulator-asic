@@ -1232,3 +1232,102 @@ what caught it, which is ruling CI1 working as intended.
   boundaries are **identical** both ways (alone from 30, beside traffic from 38).
 * ⇒ **The local suite now runs with `PYRTA_SRC=/nonexistent`**, so a local
   green is a prediction of CI rather than of this box.
+
+
+---
+
+## 17. Q2 + CI3 — the witness nobody ran, and every name buffer
+
+### Q2 — `gate_corpus_trace`, restored, and what it found
+
+It is the **two-simulator** corpus comparison — iverilog against Verilator,
+cycle for cycle, on every corpus program. It was **not fail-open** (it returns
+1 on a build failure); it was **unrun**: in no list, invoked by nothing, and
+unable to build since `7a672b0`. Four things had to change before it could be
+listed, and running it found two more defects.
+
+| change | why |
+| --- | --- |
+| `pg_report` / `cb_report` folded into their `final` blocks | iverilog refuses `final` procedures that call tasks; Verilator accepts it. Each task had exactly one caller. That one shape kept the witness from building. |
+| no path names a machine | it hardcoded `wsl.exe -d Ubuntu`, `/mnt/d/ProtocolEmulator`, `C:\tmp\corpus`, so it could only ever run on the development box. Scratch is now inside the checkout; the Verilator half runs natively where `verilator` is on PATH (CI) and through WSL where it is not, with one `vpath()` translation instead of two hand spellings. |
+| window 1500 → **8000** cycles | at D5's d = 70 a bit period is 146 cycles, so 1500 cycles was **under one START + byte + ACK + STOP**. Runtime does not scale with it (66 s either way). |
+| a **stale OPEN** entry now fails | it only printed; a program could start passing while still exempted. And the prose claimed an open arm "stays red" while the exit code never did that — corrected to say what the gate does. |
+
+**Found by running it:**
+
+1. **D2's must-fire mutant had become EQUIVALENT.** `M_OD_CLK_PUSHPULL` mutates
+   the *unclocked* SHIFT arm's clock write. Since the self-clocked rework, every
+   `clk_real & level = 1` SHIFT goes to the clocked arm, so in that branch
+   `a_lvl` is always 0 whenever `clk_real` holds — and the mutant writes exactly
+   the pull-low the clean design writes. **No image can kill it.** It read
+   0 hard-1 and 0 contended cycles. Recorded as equivalent, not deleted.
+   ⇒ **`M_CK_OD_CLK_DRIVE`** puts D2's defect in the arm it can still reach — the
+   open-drain clocked HIGH drives a hard 1 instead of releasing. Measured:
+   **2,961 hard-1 cycles** under it on `corpus_i2c`, and a bench-held SCL
+   contends for **43 cycles** against it versus **0** for the real design.
+2. **The readback stream's seeds disagreed at the honest window**, from cycle
+   ~2247. Falsified rather than argued: the readback pointer increments freely
+   and wraps at 2^AW, so a 51-byte image leaves 205 store addresses never
+   written, and the store is **allowlisted unreset**. The same program padded to
+   the full store gives **SEEDS AGREE**. So it is the store doing what its
+   allowlist entry says, not an unreset engine flop. The arm now reads back a
+   store-filling image — which also crosses the pointer's **wrap**, a framing
+   edge the short window never reached. ⚠ A host reading past the bytes it
+   loaded gets uninitialised store contents; that is now written down.
+
+**Result: 7 of 8, 0 failed, 1 open** (`corpus_spim`, the stated FRAM-addressing
+cause). **`corpus_i2c` and `corpus_all5` at d = 70 are CYCLE-EXACT across both
+simulators**, every seed and phase, with the open-drain invariant holding —
+the foreign witness on exactly the corpus that changed, as required before
+sigrok re-certifies.
+
+### GATES completeness
+
+`model/gate_gates_complete.py` (in CI) requires every `gate_*.py` to be in
+`ci/run_gates.sh`, in `model/a2/run_a2.py`, or **excluded by name** with a
+reason, and reds on a stale exclusion. Priced: an unlisted dummy gate and a
+stale exclusion are both reported. Its first run found **nine** gate files
+nothing ran:
+
+| gate | state | placed |
+| --- | --- | --- |
+| `gate_differential`, `gate_j9_margins`, `gate_jitter_sigrok`, `gate_reactive_2mhz` | pass (with and without pyRTA) | `run_a2.py` |
+| `gate_fields`, `gate_pwm`, `gate_uart_identity` | pass (7 of 7) | via `run_ta02.py`, which was **itself invoked by nothing** — now in `run_a2.py` |
+| `gate_flow_netlist` | needs the 3.5 h hardening netlist | excluded, by name |
+| **`gate_cj_bounds`** | **RED** | excluded so the list describes the tree — **owed** |
+
+⛔ `ci/run_gates.sh`'s header said every pyRTA-primary gate, **naming
+`gate_j9_margins`**, runs under `run_a2.py`. It did not. Each of those gates'
+last verdict was whatever it was the day it was written.
+
+⛔ **`gate_cj_bounds` is red for a real reason it reports correctly**: its
+census-coverage claim reads `test/cj_measured_alt.txt`, an **untracked** scratch
+file that `tb_smoke` writes for any non-default image — last written by a
+`five_image` run — so its own provenance check refuses the claim. Unrun since
+`cb7f376`. Its live content (J as a function of the program) is carried by
+`gate_j_program` / `gate_dmin_clocked`. **Owed, and a decision:** give its input
+a recipe and track it, or retire it.
+
+### CI3 — every bench's name buffer
+
+* All thirteen benches: name buffers **256 bytes** (were 64, two were 160).
+* **`test/imgload.vh`** — one macro, used after every plusarg-driven load,
+  failing loudly if the name **fills** the buffer (it may be truncated) or the
+  file **cannot be opened**.
+* ⛔ **The first version of that macro could not fire under Verilator.** It
+  tested `^img[0] === 1'bx`, but Verilator is two-state: with randomised reset an
+  unloaded store holds random bits, never X. **Measured:** a 299-byte path was
+  truncated, `$readmem file not found` printed, and the macro stayed silent
+  while the bench ran on an empty store — the check-that-could-not-fire class
+  inside the fix for it. Both tests are now about the name and the file, which
+  mean the same in a two-state and a four-state simulator. `tb_smoke`'s older
+  X-scan length check has the same Verilator blind spot; the macro now covers
+  that bench in both.
+* **Must-fire arm:** `tb_tx longpath` runs the `clean` arm unchanged through a
+  **139-byte** `+IMG`, and must give the same passing assertions — proof the
+  image loaded, not merely that nothing complained. Priced on one build:
+  17 bytes clean, 139 bytes clean, **299 bytes refused** with both messages.
+* **`gate_bench_lint`** refuses any filename buffer under 256 bytes on every
+  bench, priced on the exact 64-byte declaration that broke CI.
+* `tb_smoke`'s measurement-file `$fopen` is now fatal on failure; `tb_i2c`'s
+  already was.

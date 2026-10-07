@@ -22,6 +22,7 @@
 `default_nettype none
 `timescale 1ns / 1ps
 
+`include "test/imgload.vh"
 module tb_witness;
 
   reg        clk = 0, rst_n = 0, ena = 1;
@@ -49,7 +50,7 @@ module tb_witness;
   // inherited the defect; it showed up there only because that bench prints
   // its window as a precondition with a known ceiling.
   integer    di, dn;
-  reg [8*64-1:0] imgfile;
+  reg [8*256-1:0] imgfile;
 
   // the ring: what the fetch port was doing, cycle by cycle
   integer r_cyc  [0:RING-1];
@@ -132,6 +133,7 @@ module tb_witness;
       $finish;
     end
     $readmemh(imgfile, img);
+    `PE_REQUIRE_IMG_LOADED(imgfile)
     $display("# witness img=%0s bytes=%0d ncyc=%0d warmup=%0d",
              imgfile, img_bytes, ncyc, warmup);
 

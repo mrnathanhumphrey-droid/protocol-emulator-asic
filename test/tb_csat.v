@@ -36,6 +36,7 @@
 `default_nettype none
 `timescale 1ns / 1ps
 
+`include "test/imgload.vh"
 module tb_csat;
 
   reg        clk = 0, rst_n = 0, ena = 1;
@@ -55,7 +56,7 @@ module tb_csat;
 
   reg  [7:0] img [0:IMG_MAX-1];
   integer    img_bytes, i, cyc, ncyc, warmup, warm_from, mid;
-  reg [8*64-1:0] imgfile;
+  reg [8*256-1:0] imgfile;
 
   // ---- spacing state ----------------------------------------------------
   integer    last_disp, n_disp, n_sp, dmin, dmax, dsum;
@@ -144,6 +145,7 @@ module tb_csat;
     if (!$value$plusargs("NCYC=%d", ncyc))     ncyc = 200000;
     if (!$value$plusargs("WARMUP=%d", warmup)) warmup = 20000;
     $readmemh(imgfile, img);
+    `PE_REQUIRE_IMG_LOADED(imgfile)
     $display("# csat img=%0s bytes=%0d ncyc=%0d warmup=%0d prereg=%0d SPL=%0d",
              imgfile, img_bytes, ncyc, warmup, DELTA_PREREG, SPL_CFG);
     echo_arm;

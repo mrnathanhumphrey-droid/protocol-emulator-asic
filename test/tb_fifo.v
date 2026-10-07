@@ -39,6 +39,7 @@
  *   3. ORDER is preserved: the byte popped is the OLDER of the two resident,
  *      and the byte pushed lands in the slot the write pointer named
  */
+`include "test/imgload.vh"
 module tb_fifo ();
 
   localparam integer N_LANES = 5;
@@ -80,7 +81,7 @@ module tb_fifo ();
   // low") and this bench drives the channel itself for phase control, so it
   // has to carry the same interlock rather than inherit it.
   reg       loaded = 1'b0;
-  reg [8*64-1:0] imgfile;
+  reg [8*256-1:0] imgfile;
 
   // the captured corner
   integer cnt_before, cnt_after, wp_before, wp_after, rp_before, rp_after;
@@ -121,6 +122,7 @@ module tb_fifo ();
     end
     for (i = 0; i < IMG_MAX; i = i + 1) img[i] = 8'h00;
     $readmemh(imgfile, img);
+    `PE_REQUIRE_IMG_LOADED(imgfile)
     fails = 0; cyc = 0; hits = 0; phase = 0;
     hit_cycle = -1; hit_phase = -1;
 

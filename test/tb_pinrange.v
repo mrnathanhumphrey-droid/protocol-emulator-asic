@@ -36,6 +36,7 @@
  * coverage sweep runs Verilator. The check earns its keep in the parameter
  * sweep and by-hand iverilog runs; it is not evidence under the sweep.
  */
+`include "test/imgload.vh"
 module tb_pinrange ();
 
   parameter integer SPL_CFG = 2;
@@ -49,7 +50,7 @@ module tb_pinrange ();
   reg        armed_any;
   reg  [3:0] prev_proto;
   reg  [7:0] prev_uio;
-  reg [8*160-1:0] imgfile;
+  reg [8*256-1:0] imgfile;
   reg  [7:0] img [0:255];
 
   localparam integer PIN_PROG = 7, PIN_PTR = 5, PIN_WR = 6;
@@ -113,6 +114,7 @@ module tb_pinrange ();
     // shared liveness check is told so rather than silently exempted.
     pg_quiescent_ok = 1'b1;
     $readmemh(imgfile, img);
+    `PE_REQUIRE_IMG_LOADED(imgfile)
     $display("# pinrange img=%0s bytes=%0d mode=%0d SPL=%0d",
              imgfile, img_bytes, mode, SPL_CFG);
 

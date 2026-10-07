@@ -39,6 +39,7 @@
 `default_nettype none
 `timescale 1ns / 1ps
 
+`include "test/imgload.vh"
 module tb_tx;
 
   reg        clk = 0, rst_n = 0, ena = 1;
@@ -58,7 +59,7 @@ module tb_tx;
 
   reg  [7:0] img [0:IMG_MAX-1];
   integer    img_bytes, i, cyc, ncyc, badclk;
-  reg [8*64-1:0] imgfile;
+  reg [8*256-1:0] imgfile;
 
   // ---- per-lane bit/byte reconstruction ---------------------------------
   // ⭐ RECONSTRUCTED FROM THE DRIVE DECISION, which is what reaches the pin:
@@ -259,6 +260,7 @@ module tb_tx;
     // which is exactly why the declaration is per-arm and not per-bench.
     pg_quiescent_ok = (badclk != 0);
     $readmemh(imgfile, img);
+    `PE_REQUIRE_IMG_LOADED(imgfile)
 
     hf_init;
     // ⛔ DISJOINT PATTERNS, AND NOT BIT-ROTATIONS OF EACH OTHER. No value in

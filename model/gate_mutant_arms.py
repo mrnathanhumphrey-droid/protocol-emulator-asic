@@ -175,6 +175,19 @@ EXPECT = {
         "requires this mutant RED on all three clocked images: MEASURED 16, 16 "
         "and 17 refills against a bound of 2, with the clean design at 1, 1 "
         "and 2 over 632 retired actions."),
+    "M_CK_OD_CLK_DRIVE": (4,
+        "TWO LINES IN EACH ARM: the open-drain side of the self-clocked HIGH "
+        "phase DRIVES a hard 1 on SCL instead of releasing it. ⛔⛔ IT IS D2's "
+        "MUST-FIRE IN THE PATH THAT IS ACTUALLY LIVE. D2's defect was an "
+        "open-drain clock driven high -- against a peer stretching by holding "
+        "SCL low, that is a SHORT, not a slow bit. Its original mutant "
+        "(`M_OD_CLK_PUSHPULL`) lives in the UNCLOCKED arm, which the "
+        "self-clocked rework made unable to express it; this one sits where "
+        "every clocked open-drain HIGH now goes. `test/gate_corpus_trace.py` "
+        "requires (a) the cross-program open-drain invariant to REPORT hard-1 "
+        "cycles under it on `corpus_i2c`, and (b) a bench-held SCL low to "
+        "CONTEND (X on the line) against it while staying clean against the "
+        "real design."),
     "M_PFETCH_BOTH_INVAL": (1,
         "ONE LINE IN ONE ARM: the clean arm is EMPTY, because a retiring "
         "dispatch invalidates its HEAD and nothing else -- the mutant adds the "
@@ -276,7 +289,16 @@ EXPECT = {
         "l_mode branch on the clock pin AND the 1.5 pin_pp mask, because with "
         "1.5 built the mask alone would suppress the hard 1 and the mutant "
         "would no longer reproduce the defect it prices. Two coupled changes, "
-        "so no single expression carries it."),
+        "so no single expression carries it. ⛔⛔ AND IT IS NOW AN EQUIVALENT "
+        "MUTANT, recorded rather than deleted. It sits in the UNCLOCKED SHIFT "
+        "arm, and the self-clocked rework sends every `clk_real & level = 1` "
+        "SHIFT to the clocked arm -- so here `a_lvl` is always 0 whenever "
+        "`clk_real` holds, and `pin_out <= a_lvl; pin_oe <= 1` writes exactly "
+        "the pull-low the clean design writes. No image can kill it. Found by "
+        "ruling Q2: `gate_corpus_trace` had been unbuildable since `7a672b0`, "
+        "and the first run after the repair showed this must-fire at 0 hard-1 "
+        "and 0 contended cycles. D2's must-fire is now `M_CK_OD_CLK_DRIVE`, in "
+        "the arm the defect can still reach."),
 }
 
 

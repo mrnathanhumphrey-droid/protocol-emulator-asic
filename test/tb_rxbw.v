@@ -33,6 +33,7 @@
 `default_nettype none
 `timescale 1ns / 1ps
 
+`include "test/imgload.vh"
 module tb_rxbw;
 
   reg        clk = 0, rst_n = 0, ena = 1;
@@ -60,7 +61,7 @@ module tb_rxbw;
 
   reg  [7:0] img [0:IMG_MAX-1];
   integer    img_bytes, i, cyc, ncyc, j;
-  reg [8*64-1:0] imgfile;
+  reg [8*256-1:0] imgfile;
 
   reg  [FRAME_BITS-1:0] fr_sh;
   integer    fr_cnt, n_frame, n_status, n_payload, n_rb;
@@ -120,6 +121,7 @@ module tb_rxbw;
     end
     if (!$value$plusargs("NCYC=%d", ncyc)) ncyc = 200000;
     $readmemh(imgfile, img);
+    `PE_REQUIRE_IMG_LOADED(imgfile)
 
     hf_init;
     hf_set(0, 8'h96, 8'h69, 8'hC5, 8'h3A);

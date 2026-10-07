@@ -104,6 +104,25 @@ GATES = [
     # (part1_param_contract, f2_flop_driven_outputs), not in model/a2/ with the
     # analysis. It is in THIS list anyway: an out-of-suite gate is a gate nobody
     # runs, and `golden.py` carries prediction A3 and falsifier F1.
+    # ⛔⛔ FIVE ENTRIES THAT SHOULD ALWAYS HAVE BEEN HERE (ruling Q2's
+    # completeness check). `ci/run_gates.sh`'s header said every pyRTA-primary
+    # gate -- naming `gate_j9_margins` -- runs under THIS harness. It did not:
+    # none of these four was in this list, and nothing else invoked them, so
+    # each one's last verdict was whatever it was the day it was written. All
+    # four PASS today, measured, with and without pyRTA. And `run_ta02.py`, the
+    # harness for the three TA-02 gates, was itself invoked by NOTHING -- so
+    # those gates were unrun one level up. It passes 7 of 7.
+    ("gate_differential.py",
+     "0.9  the differential reading, adjudicated", False),
+    ("gate_j9_margins.py",
+     "J9   the J = 9 margins, computed with the direction stated", False),
+    ("gate_jitter_sigrok.py",
+     "AF   UART jitter tolerance against sigrok's foreign decode", False),
+    ("gate_reactive_2mhz.py",
+     "R2M  the 2 MHz reactive budget and its must-fire", False),
+    ("../ta02/run_ta02.py",
+     "TA02 the TA-02 harness (gate_fields, gate_pwm, gate_uart_identity)",
+     False),
     ("../gate_reverse_trace.py",
      "RT   reverse traceability: the census on the golden model", False),
     ("gate_j_sound.py", "J4   the J sweep; the bar verdict is bound-dependent", True),

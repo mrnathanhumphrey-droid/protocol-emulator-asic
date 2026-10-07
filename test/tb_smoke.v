@@ -18,6 +18,7 @@
 `default_nettype none
 `timescale 1ns / 1ps
 
+`include "test/imgload.vh"
 module tb_smoke;
 
   reg        clk = 0, rst_n = 0, ena = 1;
@@ -122,7 +123,7 @@ module tb_smoke;
   reg       now_running;
   reg [31:0] prev_now;
   reg [4:0] prev_sel;
-  reg [8*64-1:0] imgfile;
+  reg [8*256-1:0] imgfile;
   reg [23:0] exp_act;
   // ⛔ 24, NOT 22, AND IT USED TO BE 22. The action word's bottom 2 bits were
   // zero padding and this bench compared `exp_act[23:2]` to match. Those bits
@@ -153,6 +154,7 @@ module tb_smoke;
     if (!$value$plusargs("NCYC=%d", ncyc_run)) ncyc_run = 4000;
     if (!$value$plusargs("IMG=%s", imgfile)) imgfile = "test/smoke_image.hex";
     $readmemh(imgfile, img);
+    `PE_REQUIRE_IMG_LOADED(imgfile)
     // derive the real length: highest initialised byte + 1
     img_bytes = 0;
     for (i = 0; i < IMG_MAX; i = i + 1)
@@ -559,6 +561,14 @@ module tb_smoke;
     else
       fd = $fopen("test/cj_measured_alt.txt", "w");
 `endif
+    // ⛔ AN UNOPENED MEASUREMENT FILE IS FATAL AND NAMED (ruling CI3). `$fwrite`
+    // to fd 0 writes nothing and the run finishes clean, so the gates reading
+    // this file would adjudicate whatever an EARLIER run left there -- the
+    // failure `tb_trace`'s trace file had for five CI runs.
+    if (fd == 0) begin
+      $display("*** FAIL tb_smoke: $fopen could not open the measurement file for writing");
+      $finish;
+    end
     // the depth travels WITH the numbers, and the gate asserts it
     $fwrite(fd, "spl %0d\n", SPL_CFG);
     // ⛔⛔ THE IMAGE IS RECORDED IN THE FILE, and the gate asserts it. This file

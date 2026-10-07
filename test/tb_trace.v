@@ -45,6 +45,7 @@
 `default_nettype none
 `timescale 1ns / 1ps
 
+`include "test/imgload.vh"
 module tb_trace;
 
   // ⛔ THE PIN MAP IS GENERATED, NOT RESTATED. test/corpus.py derives it from
@@ -163,9 +164,10 @@ module tb_trace;
   //   real and the difference was the length of the checkout path.
   // ⚠ PRICED, NOT ARGUED: the same binary writes 2,001 lines to a 39-byte path
   // and nothing to a 107-byte one.
-  // ⚠ EVERY OTHER BENCH STILL DECLARES `8*64-1` and is fine ONLY because
-  // `benchset` hands them RELATIVE `+IMG=test/...`. That is a latent version of
-  // this defect, recorded in the handoff rather than fixed blind here.
+  // ⭐ EVERY OTHER BENCH NOW DOES THE SAME (ruling CI3). They had kept 64-byte
+  // buffers, safe only because `benchset` passes them RELATIVE paths -- the
+  // latent form of this defect. All take 256 bytes and `test/imgload.vh`'s
+  // macro fails loudly on an image that did not load.
   reg [8*256-1:0] imgfile, outfile, peersel;
 
   // ---- A PORTABLE PRNG, AND $random IS NOT ONE -------------------------
@@ -349,6 +351,7 @@ module tb_trace;
       $finish;
     end
     $readmemh(imgfile, img);
+    `PE_REQUIRE_IMG_LOADED(imgfile)
 
     rnd_t   = seed;
     rnd_r   = seed ^ 32'h5f5f5f5f;

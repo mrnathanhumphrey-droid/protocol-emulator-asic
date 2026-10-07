@@ -26,6 +26,7 @@
  * `lane_underrun != 0` would pass if the flag set on a lane that never drew
  * from a queue, which is a different defect wearing the same flag.
  */
+`include "test/imgload.vh"
 module tb_status ();
 
   parameter integer SPL_CFG = 2;
@@ -34,7 +35,7 @@ module tb_status ();
   reg  [7:0] ui_in = 8'h00, uio_in = 8'h00;
   wire [7:0] uo_out, uio_out, uio_oe;
   integer    i, fails = 0, mode, img_bytes, ncyc, cyc;
-  reg [8*160-1:0] imgfile;
+  reg [8*256-1:0] imgfile;
   reg  [7:0] img [0:255];
 
   localparam integer PIN_PROG = 7, PIN_PTR = 5, PIN_WR = 6;
@@ -117,6 +118,7 @@ module tb_status ();
     // (STARVE) runs the engine and IS checked, which is why this is per-arm.
     pg_quiescent_ok = (mode == 1);
     $readmemh(imgfile, img);
+    `PE_REQUIRE_IMG_LOADED(imgfile)
     hf_init;
 
     $display("# status img=%0s bytes=%0d mode=%0d SPL=%0d",
