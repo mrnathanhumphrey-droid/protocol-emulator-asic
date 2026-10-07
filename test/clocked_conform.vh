@@ -757,6 +757,127 @@ always @(posedge dut.clk) begin
 end
 
 // ---------------------------------------------------------------------------
+// LAYER H -- EVERY CHIP-DRIVEN SDA TRANSITION HOLDS ACROSS THE SCL FALL (K)
+// ---------------------------------------------------------------------------
+// ⛔⛔ WHY A BENCH LAYER AND NOT ONLY THE TRACE MEASUREMENT. `measure_phases`
+// reads the resolved wire, so it can say a hold was 0 but not WHICH action
+// caused it -- the clocked SHIFTIN's release into the ACK slot was found only
+// by a falsifier set (drop an opcode, re-run, see which zeros vanish). This
+// layer reads the engine: on every open-drain lane with a real clock pin it
+// records the chip's own SCL falls (`pin_oe[clkpin]` 0 -> 1) and every
+// chip-driven SDA change (`pin_oe[pin]` toggling), and attributes each change
+// to the opcode that caused it -- the dispatch itself, or the dispatch that
+// LOADED the hold pipeline when the change comes from its expiry.
+// ⇒ K2's table, per image: class x (count, min/max t_HD;DAT in cycles, moves
+//   while SCL was released). K1/K4's verdict: a DATA class (SHIFT, the 1-bit
+//   SHIFT a master ACK/NACK is, SHIFTIN's release, READBIT's release) that
+//   moves SDA less than SDA_HOLD after the fall, or while SCL is released, is
+//   RED. START/STOP move SDA with SCL high BY DEFINITION and are reported only.
+// ⚠ SDA_HOLD IS DERIVED FROM THE ENGINE'S *PARAMETERS*, assigned, never
+//   compared hierarchically (`gate_bench_lint`'s rule): ceil(SDA_HOLD_NS /
+//   CLK_PERIOD_NS), the RTL's own formula, so `-GSDA_HOLD_NS=0` builds read 0.
+integer h_min, h_nl, h_np, h_i, h_ck, h_dp, h_cls, h_hold, h_bad, h_moves;
+integer h_cyc_h;
+integer h_fall [0:7];
+integer h_low  [0:7];
+integer h_pck  [0:7];
+integer h_pd   [0:7];
+integer h_phc  [0:7];
+integer h_ldop [0:7];
+integer h_ldcnt[0:7];
+// classes: 0 LEVEL, 1 SHIFT data, 2 SHIFTIN release, 3 READBIT release,
+//          4 START, 5 STOP, 6 ARM, 7 REARM, 8 SHIFT 1-bit (ACK/NACK), 9 other
+integer h_n   [0:9];
+integer h_lo  [0:9];
+integer h_hi  [0:9];
+integer h_high[0:9];
+initial begin
+  h_min = (dut.u_eng.SDA_HOLD_NS + dut.u_eng.CLK_PERIOD_NS - 1)
+          / dut.u_eng.CLK_PERIOD_NS;
+  h_nl = dut.u_eng.N_LANES;
+  h_np = dut.u_eng.N_PINS;
+  h_bad = 0;  h_moves = 0;  h_cyc_h = 0;
+  for (h_i = 0; h_i < 8; h_i = h_i + 1) begin
+    h_fall[h_i] = -1;  h_low[h_i] = 0;  h_pck[h_i] = -1;  h_pd[h_i] = -1;
+    h_phc[h_i] = 0;  h_ldop[h_i] = 9;  h_ldcnt[h_i] = 0;
+  end
+  for (h_i = 0; h_i < 10; h_i = h_i + 1) begin
+    h_n[h_i] = 0;  h_lo[h_i] = 1000000;  h_hi[h_i] = -1;  h_high[h_i] = 0;
+  end
+end
+
+function integer h_class(input integer op, input integer cnt);
+  begin
+    if (op == 1 && cnt == 0) h_class = 8;
+    else if (op >= 0 && op <= 7) h_class = op;
+    else h_class = 9;
+  end
+endfunction
+
+always @(posedge dut.clk) begin
+  if (dut.rst_n === 1'b1) begin
+    for (h_i = 0; h_i < h_nl && h_i < 8; h_i = h_i + 1) begin
+      h_ck = dut.u_eng.l_clkpin[h_i];
+      h_dp = dut.u_eng.l_pin[h_i];
+      if (h_ck < h_np && h_dp < h_np && h_ck != h_dp
+          && dut.u_eng.l_mode[h_i] === 1'b0
+          && dut.u_eng.l_live[h_i] === 1'b1) begin
+        // ---- the chip's own SCL fall / release -------------------------
+        if (h_pck[h_i] == 0 && dut.u_eng.pin_oe[h_ck] === 1'b1) begin
+          h_fall[h_i] = h_cyc_h;  h_low[h_i] = 1;
+        end
+        if (h_pck[h_i] == 1 && dut.u_eng.pin_oe[h_ck] === 1'b0)
+          h_low[h_i] = 0;
+        // ---- a chip-driven SDA change -----------------------------------
+        if (h_pd[h_i] != -1 && (dut.u_eng.pin_oe[h_dp] === 1'b1 ? 1 : 0)
+                               != h_pd[h_i]) begin
+          if (h_phc[h_i] == 1)
+            h_cls = h_ldop[h_i];                      // from the hold expiry
+          else if (dut.u_eng.st === 2'd2 && dut.u_eng.cur == h_i)
+            h_cls = h_class(dut.u_eng.a_op, dut.u_eng.a_cnt);
+          else
+            h_cls = 9;
+          h_moves = h_moves + 1;
+          h_n[h_cls] = h_n[h_cls] + 1;
+          if (h_low[h_i] == 1 && h_fall[h_i] >= 0) begin
+            h_hold = h_cyc_h - h_fall[h_i];
+            if (h_hold < h_lo[h_cls]) h_lo[h_cls] = h_hold;
+            if (h_hold > h_hi[h_cls]) h_hi[h_cls] = h_hold;
+            if ((h_cls == 1 || h_cls == 2 || h_cls == 3 || h_cls == 8)
+                && h_hold < h_min) begin
+              h_bad = h_bad + 1;
+              if (h_bad <= 4)
+                $display("*** FAIL clocked_conform[H]: lane %0d moved SDA %0d cycle(s) after the SCL fall (class %0d) -- under SDA_HOLD = %0d, a t_HD;DAT violation", h_i, h_hold, h_cls, h_min);
+            end
+          end else begin
+            // ⚠ COUNTED, NOT FAILED HERE. A data move with SCL released is a
+            // SETUP failure (t_SU;DAT <= 0), not a hold one, and setup is the
+            // MODE FLOOR's domain (D2, `pe_asm.check_mode_floor`): the
+            // silicon refusal guarantees `d > SDA_HOLD`, which fixes the HOLD,
+            // and a program at d = SDA_HOLD + 1 with one cycle of release
+            // jitter has no setup left. MEASURED on `ckhold_over` (d = 16,
+            // below every mode floor): holds all 15, 11 of 562 moves with SCL
+            // released. `model/gate_sda_hold.py` reds these on every image
+            // the mode floor covers and passes.
+            h_high[h_cls] = h_high[h_cls] + 1;
+          end
+        end
+        // ---- remember which dispatch LOADED the hold pipeline -----------
+        if (h_phc[h_i] == 0 && dut.u_eng.l_hcnt[h_i] != 0
+            && dut.u_eng.cur == h_i) begin
+          h_ldop[h_i]  = h_class(dut.u_eng.a_op, dut.u_eng.a_cnt);
+          h_ldcnt[h_i] = dut.u_eng.a_cnt;
+        end
+        h_phc[h_i] = dut.u_eng.l_hcnt[h_i];
+        h_pck[h_i] = (dut.u_eng.pin_oe[h_ck] === 1'b1) ? 1 : 0;
+        h_pd[h_i]  = (dut.u_eng.pin_oe[h_dp] === 1'b1) ? 1 : 0;
+      end
+    end
+    h_cyc_h = h_cyc_h + 1;
+  end
+end
+
+// ---------------------------------------------------------------------------
 // LAYER M -- NO LANE EVER FETCHES PAST ITS PROGRAM (ruling M3)
 // ---------------------------------------------------------------------------
 // ⛔⛔ The store has no reset, so a byte no image wrote is whatever powered up,
@@ -875,6 +996,19 @@ final begin
     // short image and a defect on a full one, and only the caller knows which
     // it loaded. `test/store_run.sh` holds each arm to its expectation.
     $display("  clocked_conform[M5]: store_full=%0b config_err=%0b writebacks=%0d short_load=%0b", dut.store_full, dut.cfg_err_any, cm_wbs, dut.short_load);
+    // ---- Layer H: the K2 table and the K1/K4 verdict --------------------
+    if (h_moves == 0)
+      $display("  clocked_conform[H]: 0 chip-driven SDA moves on an open-drain clocked lane -- NOT EXERCISED");
+    else begin
+      for (h_i = 0; h_i < 10; h_i = h_i + 1)
+        if (h_n[h_i] != 0)
+          $display("  clocked_conform[H] class %0d: n=%0d hold_min=%0d hold_max=%0d moved_while_released=%0d", h_i, h_n[h_i], (h_lo[h_i] == 1000000) ? -1 : h_lo[h_i], h_hi[h_i], h_high[h_i]);
+      if (h_bad != 0)
+        $display("*** FAIL clocked_conform[H]: %0d of %0d chip-driven SDA move(s) broke t_HD;DAT >= SDA_HOLD = %0d", h_bad, h_moves, h_min);
+      else
+        $display("  clocked_conform[H]: ok -- %0d chip-driven SDA move(s), every data move held >= SDA_HOLD = %0d after the fall", h_moves, h_min);
+      $display("  clocked_conform[H] setup: %0d data move(s) with SCL released (judged against the mode floor by gate_sda_hold, not here)", h_high[1] + h_high[2] + h_high[3] + h_high[8]);
+    end
   end
 
 

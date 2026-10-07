@@ -224,11 +224,18 @@ def check_clocked_hold_delay(lanes, headers):
         if clkpin >= N_PINS or mode != 0:
             continue                      # no real clock, or push-pull
         for (op, _p, lvl, dly, _q) in lanes[ln]:
-            if op not in (OP_SHIFT, OP_SHIFTIN) or not lvl:
-                continue                  # not a self-clocked action
+            clocked = op in (OP_SHIFT, OP_SHIFTIN) and lvl
+            # ⛔ RULING U: the UNCLOCKED open-drain SHIFT that takes its own
+            # clock low (level 0, real clock pin) is held by the same pipeline
+            # and REFUSED by the same silicon rule (`uc_hold` in pe_engine.v).
+            # This check accepted it until U -- the assembler would have told
+            # a user that a program the chip refuses was fine.
+            unclocked_low = op == OP_SHIFT and not lvl
+            if not (clocked or unclocked_low):
+                continue
             if dly <= hold:
                 raise Reject(
-                    "lane %d runs a CLOCKED OPEN-DRAIN %s with delay %d, which "
+                    "lane %d runs an OPEN-DRAIN %s%s with delay %d, which "
                     "is not above the %d-cycle SDA data hold. The held data bit "
                     "would reach the pin after the next clock rise -- data "
                     "moving while SCL is high, which to any receiver is a START "
@@ -237,7 +244,8 @@ def check_clocked_hold_delay(lanes, headers):
                     "d >= %d, and note that the MODE floor is higher still: "
                     "Fm+ needs t_LOW >= 25 cycles, Fm 65, Sm 235, plus that "
                     "program's own service jitter (ruling S)."
-                    % (ln, "SHIFT" if op == OP_SHIFT else "SHIFTIN", dly,
+                    % (ln, "CLOCKED " if clocked else "UNCLOCKED clock-low ",
+                       "SHIFT" if op == OP_SHIFT else "SHIFTIN", dly,
                        hold, hold + 1))
     return hold
 
@@ -566,12 +574,12 @@ def _demo_hold_pp():
 
 
 def _demo_hold_unclocked():
-    """An UNCLOCKED open-drain SHIFT below the hold: out of D1's scope.
+    """An UNCLOCKED open-drain SHIFT below the hold: REFUSED since ruling U.
 
-    ⚠ ACCEPTED HERE AND STILL CLAMPED IN SILICON. `ck_hold_fits` survives at
-    the unclocked site precisely for this program class, so the delay is
-    hold-legal by a different mechanism -- and whether the refusal should be
-    widened to cover it is recorded as owed rather than decided here.
+    ⛔ IT WAS ACCEPTED HERE, and silicon clamped it to zero hold (the
+    `ck_hold_fits` term at the unclocked site). Ruling U widened the silicon
+    refusal to this class and retired the clamp, so the assembler refuses it
+    too -- otherwise it would accept a program the chip refuses to run.
     """
     return _hold_demo(hold_bound.bound() - 1, level=0)
 
@@ -724,8 +732,8 @@ def main() -> int:
             ("... at d = SDA_HOLD + 1", _demo_hold_over, False, ()),
             ("a PUSH-PULL clocked lane below the hold", _demo_hold_pp,
              False, ()),
-            ("an UNCLOCKED open-drain SHIFT below the hold",
-             _demo_hold_unclocked, False, ())):
+            ("an UNCLOCKED open-drain SHIFT below the hold (U)",
+             _demo_hold_unclocked, True, ("lane 2", "UNCLOCKED"))):
         lanes_b, headers_b = build()
         try:
             check_clocked_hold_delay(lanes_b, headers_b)

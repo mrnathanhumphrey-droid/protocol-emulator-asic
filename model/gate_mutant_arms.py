@@ -191,6 +191,20 @@ EXPECT = {
         "cycles under it on `corpus_i2c`, and (b) a bench-held SCL low to "
         "CONTEND (X on the line) against it while staying clean against the "
         "real design."),
+    "M_SHIFTIN_UNHELD": (6,
+        "SIX LINES IN THE CLEAN ARM AND NONE IN THE MUTANT'S, declared: the fix "
+        "ADDS a branch -- the clock-low SHIFTIN release loads the hold "
+        "pipeline (condition, three pipeline writes, `end else`) -- and the "
+        "mutant removes it, leaving the original unconditional release. There "
+        "is no single expression to swap: holding is three register writes. "
+        "RULING K3's must-fire: `model/gate_sda_hold.py` requires the "
+        "corpus_i2c SHIFTIN class to read hold 0 under it (it measured 0 on "
+        "every release before the fix)."),
+    "M_HOLD_CLOCKED_ONLY": (2,
+        "ONE LINE IN EACH ARM: the refusal's scope `(ck_act | uc_hold)` back "
+        "to `ck_act`. RULING U's must-fire: `model/gate_sda_hold.py` requires "
+        "the unclocked frame at d = SDA_HOLD to RUN under it (the clean build "
+        "refuses it) and to show data moves with SCL released."),
     "M_NO_STORE_FULL": (2,
         "ONE LINE IN EACH ARM, in `project.v`: the engine's run input is `run` "
         "instead of `run & store_full`, so the chip executes whatever the "

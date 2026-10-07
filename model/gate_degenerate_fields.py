@@ -72,7 +72,8 @@ REFUSED, DEFINED, UNREACHABLE = "REFUSED", "DEFINED", "UNREACHABLE"
 R_CKDEGEN = "ck_degen: a clocked action with a zero bit count"
 R_PINRANGE = "pin_real: a receive or arm on an index >= N_PINS"
 R_CLKALIAS = "1.6x: an OP_SHIFT whose clock pin IS its data pin"
-R_HOLDVIOL = "D1: a clocked open-drain action with d <= SDA_HOLD"
+R_HOLDVIOL = ("D1/U: an open-drain data drive the hold applies to (clocked, or "
+              "an unclocked SHIFT taking its own clock low) with d <= SDA_HOLD")
 R_OD_ON_UO = "1.6s: an open-drain lane on a push-pull-only `uo_out` pin"
 
 #: (opcode, field, predicate-name) -> (verdict, reason)
@@ -340,11 +341,17 @@ def violations(img, sda_hold=None):
         # RTL and is reproduced here rather than widened into a blanket rule.
         # ⚠ AT `SDA_HOLD == 0` NOTHING IS REFUSED, matching the RTL's own
         # `(SDA_HOLD != 0)` term: a build with no hold has no hold to not fit.
-        if clocked and h["mode"] == 0 and sda_hold != 0 \
+        # ⛔⛔ RULING U WIDENED IT, and this mirror follows the RTL's
+        # `(ck_act | uc_hold)`: the UNCLOCKED open-drain SHIFT that takes its
+        # own clock low (`clk_real & level == 0`) is held by the same pipeline,
+        # so it is refused at the same delay.
+        uc_hold = (a["op"] == I.OP_SHIFT and clk_real and a["level"] == 0)
+        if (clocked or uc_hold) and h["mode"] == 0 and sda_hold != 0 \
                 and a["delay"] <= sda_hold:
             out.append((R_HOLDVIOL, ln, op, "delay",
-                        "clocked open-drain and delay <= SDA_HOLD (%d)"
-                        % sda_hold, a["delay"]))
+                        "%s open-drain and delay <= SDA_HOLD (%d)"
+                        % ("clocked" if clocked else "unclocked clock-low",
+                           sda_hold), a["delay"]))
         # ⛔ 1.6s, THE HEADER-LOAD REFUSAL. It is per LANE rather than per
         # action, so it would be reported once per action the lane can reach;
         # the dedupe in the caller's `kinds` set collapses that, and the detail

@@ -187,6 +187,16 @@ GATES=(
   # COMMITTED manifest in CI (the working copy is regenerated here). The
   # manifest carried five stale corpus hashes through two green commits.
   test/gate_manifest.py
+  # ⭐ RL1 -- the RTL's race classes: Verilator -Wall on src/ with BLKSEQ and
+  # COMBDLY as errors, except a CHECKED block-local temporary. Must-fires: a
+  # planted blocking assignment in a clocked block; a planted `<=` in a
+  # combinational one.
+  model/gate_rtl_lint.py
+  # ⛔⛔ K + U -- every chip-driven SDA move holds >= SDA_HOLD after the SCL
+  # fall, per CLASS (Layer H attributes each move to its opcode); the class x
+  # image table has required cells; the refusal covers the unclocked frame.
+  # The clocked SHIFTIN's release had hold 0 on every one until ruling K.
+  model/gate_sda_hold.py
   # ⛔⛔ M -- EVERY IMAGE WRITES THE WHOLE STORE. The store has no reset, and a
   # 51-byte image left 205 bytes holding power-up contents, one missing REARM
   # from running on real pins. Every image is now the program plus the defined
@@ -257,7 +267,10 @@ can_run() {
       { command -v "$VL" >/dev/null 2>&1 || [ -n "${PE_VERILATOR:-}" ] \
         || command -v wsl.exe >/dev/null 2>&1; } \
         || { echo "no verilator and no wsl.exe to reach one"; return 1; } ;;
-    model/gate_one_encoder.py|test/gl_harness_check.py|test/gate_tb_elaborates.py|test/run_mutants.py)
+    model/gate_rtl_lint.py)
+      { command -v "$VL" >/dev/null 2>&1 || command -v wsl.exe >/dev/null 2>&1; } \
+        || { echo "no verilator and no wsl.exe to reach one"; return 1; } ;;
+    model/gate_one_encoder.py|test/gl_harness_check.py|test/gate_tb_elaborates.py|test/run_mutants.py|model/gate_sda_hold.py)
       command -v "$IV" >/dev/null 2>&1 || { echo "iverilog not found (PE_IVERILOG unset and not on PATH)"; return 1; } ;;
     model/gate_reset_audit.py)
       [ -n "${PE_NETLIST_JSON:-}" ] && [ -f "${PE_NETLIST_JSON:-}" ] \

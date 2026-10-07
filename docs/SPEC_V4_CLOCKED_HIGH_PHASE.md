@@ -1886,3 +1886,110 @@ the **committed** manifest (`git show HEAD:`), and locally the working copy
 (a commit in progress changes it). **Must-fires:** one flipped byte; an empty
 manifest; and **the manifest as committed at `231b37c`** (fixture), which it
 reds on exactly the five stale `corpus_*.hex` lines and nothing else.
+
+---
+
+## 24. K + U + RL1 — every chip-driven SDA move holds; the refusal covers the unclocked frame
+
+### RL1 — Verilator lint on `src/` (`model/gate_rtl_lint.py`, CI)
+
+No Verilator lint ran on the RTL before. `-Wall` on `src/` reports BLKSEQ 2,
+COMBDLY 0, plus UNUSEDSIGNAL 9, UNUSEDPARAM 5, WIDTHTRUNC 3, SYNCASYNCNET 1 and
+DECLFILENAME 1 (reported, not judged). Both BLKSEQs are `prime_unp`, the
+priming block's loop accumulator; the comment above it records why it isn't an
+`always @*`. It is declared a **block-local temporary**, and the gate *checks*
+that claim (every use inside one `always` block) rather than taking it.
+**Must-fires** (planted copies under `probe_rl1/`): `ptr = ptr + 1` in a
+clocked block is red; `cfg_err <= config_err` in a combinational block is red.
+
+### K — the clocked SHIFTIN's release is held
+
+**Layer H** (`test/clocked_conform.vh`). On every open-drain lane with a real
+clock pin it records the chip's own SCL falls and every chip-driven SDA change,
+and attributes each change to the opcode that caused it: the dispatch itself,
+or the dispatch that loaded the hold pipeline. A data class (SHIFT, the 1-bit
+SHIFT a master ACK/NACK is, SHIFTIN's release, READBIT's release) landing less
+than `SDA_HOLD` after the fall is red. Before the fix it reproduced the finding
+with attribution instead of a falsifier set: **corpus_i2c, SHIFTIN release,
+14 of 14 at hold 0.**
+
+**The fix** (`pe_engine.v`, the SHIFTIN arm). On an open-drain lane with a real
+clock, a clock-low SHIFTIN dispatch now loads the **same hold pipeline** the
+transmit path uses, instead of releasing SDA directly. HIGH/COLL dispatches find
+SDA already released. `M_ACK_DRIVES_SDA`'s drive stays direct. The hold applies
+when the action names the lane's pin, as on the transmit side.
+`M_SHIFTIN_UNHELD` restores the unheld release.
+
+**K2: class × image (`model/gate_sda_hold.py`, CI, 60,000 cycles, iverilog).**
+Holds are in cycles after the chip's SCL fall; "high" counts moves with SCL
+released.
+
+| image | class | n | hold min..max | high |
+| --- | --- | --- | --- | --- |
+| corpus_i2c | SHIFT data | 109 | 15..365 | 0 |
+| corpus_i2c | **SHIFTIN release** | 20 | **15..15** | 0 |
+| corpus_all5 | SHIFT data / SHIFTIN release | 113 / 21 | 15.. / 15..15 | 0 |
+| ckod | SHIFT data | 535 | 15..15 | 0 |
+| **ckread** | SHIFT data | 45 | 15..15 | 0 |
+| **ckread** | SHIFTIN release | 10 | 15..15 | 0 |
+| **ckread** | **SHIFT 1-bit (ACK/NACK)** | 14 | 85..85 | 0 |
+| i2cframe (d = 62) | SHIFT data / SHIFTIN release | 156 / 11 | 15..77 / 62 | 0 |
+
+Required cells: corpus_i2c {SHIFT, SHIFTIN}, ckod {SHIFT}, **ckread {SHIFT,
+SHIFTIN, ACK/NACK}**, i2cframe {SHIFT}. An empty one is red. `ckread_image` is
+new (`make_smoke_image.py --ckread`). Every program in the tree was a write, so
+none had a master ACK/NACK or the release that follows it. Its A2 budget is
+generated into `clocked_a2_bounds.json` (7/8, the same row as corpus_i2c).
+
+**K3:** `M_SHIFTIN_UNHELD` on corpus_i2c reads SHIFTIN release hold **0** and
+Layer H is red. **K4:** Layer H is clean on corpus_i2c, and at the wire level
+`phases_run.sh` gained a **corpus_i2c arm** that `gate_um10204`'s hold floor now
+**requires**. It measured `t_HD;DAT` min **15 over 217 periods**, against
+`{0: 20, 15: 93, ...}` before the fix. The ruling-H arm set had been
+`ckod`-only, which is why it could not see this.
+
+### U — the refusal covers every open-drain data drive the hold applies to
+
+`ck_holdviol` is now `(ck_act | uc_hold) & ~l_mode & (SDA_HOLD != 0) &
+d <= SDA_HOLD`, where `uc_hold` is the unclocked open-drain SHIFT that takes its
+own clock low, the certified frame's shape. **The `ck_hold_fits` clamp is
+retired** (its wire, per-lane compare and term are gone), because nothing can
+reach it. `M_HOLD_CLOCKED_ONLY` restores the old scope.
+The static mirrors follow: `gate_degenerate_fields.violations()` (no tracked
+image is newly refused) and **`pe_asm.check_clocked_hold_delay`**, which
+*accepted* the unclocked program below the hold until now and would have told a
+user that a program the chip refuses was fine. Its demo now expects a
+rejection.
+**U2:** `build_i2cframe` at d = 15 is refused (CONFIG_ERR) and at d = 16 runs.
+**U3:** the certified frames (`i2cframe`, `i2caddr`) are at d = 62, so no delay
+moved. **Must-fire:** `M_HOLD_CLOCKED_ONLY` runs d = 15, which the clean build
+refuses, with 635 data moves while SCL is released.
+
+### ⛔ Three findings past what K/U ruled, measured and NOT acted on
+
+1. **The silicon floor `d > SDA_HOLD` guarantees the HOLD, not SETUP.**
+   With one cycle of release jitter, d = SDA_HOLD + 1 leaves no setup:
+
+   | program | d | holds | data moves with SCL released |
+   | --- | --- | --- | --- |
+   | `ckhold_over` (clocked, D4's "must RUN" point) | 16 | all 15 | **11 of 562** |
+   | `build_i2cframe` (unclocked) | 16 | 15..31 | **10 of 606** |
+   | `build_i2cframe` | 17 | 15..33 | **3 of 572** |
+   | `build_i2cframe` | 18…30 | ≥ 15 | 0 |
+
+   Setup is the mode floor's job (D2), and `pe_asm.check_mode_floor` rejects
+   `ckhold_over`. So Layer H only *reports* setup moves, and `gate_sda_hold`
+   reds them only on images that a floor covers and passes; the gate checks
+   that marking rather than assuming it.
+2. **The mode floor does not cover unclocked lanes.** `check_mode_floor`
+   returns `{}` for `i2cframe`, so `pe_asm` accepts the unclocked frame at
+   d = 16 that moves SDA with SCL released.
+3. **The unclocked SHIFTIN release is not held.** Its hold is the inter-dispatch
+   delay minus jitter: **14 at d = 16**, ≥ 15 from d = 17. K's fix covers the
+   *clocked* SHIFTIN, which is the only one that takes the clock low itself.
+
+Options for a ruling: (a) extend the mode floor to unclocked open-drain frames
+(toolchain only); (b) in silicon, make a lane ineligible to dispatch while its
+own hold is pending, so the clock cannot rise before the data lands, whatever
+the jitter; (c) raise the silicon floor to `SDA_HOLD + 2`. These are recorded,
+not chosen.

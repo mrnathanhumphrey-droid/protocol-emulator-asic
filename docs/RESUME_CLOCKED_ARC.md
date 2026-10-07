@@ -44,6 +44,7 @@ here** (ruling CI1). A local pass is reported as local.
 | `9ebcaeb` | ✅ `37627116027` | ✅ `37627115865` | M + README (a) + RD1; 27 of 27 |
 | `231b37c` | ✅ `37636453349` | ✅ `37636453287` | M5 + M6; 27 of 27 |
 | `0e29fe7` | ✅ `37644777003` | ✅ `37644776920` | V + MU + CJ + M7; 31 of 31; run_a2 41 of 41 |
+| `67ea17a` | ✅ `37654159229` | ✅ `37654159170` | RA1–RA3 + MF1; 33 of 33 |
 
 ### Silicon fixes — RTL defects closed (ledger)
 
@@ -82,11 +83,14 @@ sigrok re-certification → FRAM write + random read.
 | **RA1/RA2** | racy-R numbers re-measured, iverilog + Verilator, 5 images × 3 builds: **identical**; clean 1/1/2/1/1, kills 16/16/17, orthogonality stands; SPL confirmation stands | ✅ landed — SPEC §23 |
 | **RA3** | `gate_bench_races`: same-edge cross-block blocking reads red unless declared; must-fire = Layer R @ `231b37c` | ✅ landed — SPEC §23 |
 | **MF1** | `gate_manifest`: committed manifest vs files in CI; must-fires: flipped byte, empty, the stale `231b37c` manifest | ✅ landed — SPEC §23 |
-| **K** | ACK hold: every driven SDA transition through `SDA_HOLD`, + a transition-class coverage table | **NEXT** |
+| **RL1** | Verilator lint on src/ in CI, BLKSEQ/COMBDLY errors except a checked block-local temporary (`prime_unp`); must-fires planted | ✅ landed — SPEC §24 |
+| **K** | clocked SHIFTIN release held (hold pipeline); Layer H attributes every chip SDA move; K2 table with required cells (new `ckread_image` for ACK/NACK); K3 `M_SHIFTIN_UNHELD`; K4 corpus_i2c arm in phases_run, min 15 over 217 | ✅ landed — SPEC §24 |
+| **U** | refusal widened to the unclocked clock-low SHIFT; clamp retired; pe_asm + dgf mirrors; i2cframe d=15 refused, d=16 runs; `M_HOLD_CLOCKED_ONLY` | ✅ landed — SPEC §24 |
+| **FINDINGS (ruling owed)** | silicon floor guarantees hold not setup (ckhold_over d=16: 11/562 data moves with SCL released); mode floor skips unclocked lanes; unclocked SHIFTIN release unheld (14 at d=16). Options (a) toolchain floor, (b) hold-pending ineligibility, (c) floor SDA_HOLD+2 | **Wilson** |
 | (opt) | `ckdense` margin: a heavier feasible variant firing on several releases | non-blocking |
 | **U** | widen the refusal to the unclocked open-drain data drive; retire the clamp | owed, with K |
 | **M7** | HOST_INTERFACE: the full-store rule binds the FIRST load after `rst_n`; partial reloads after it run | ✅ landed |
-| **CHECKPOINT** | after K: one full harden (gds + precheck) + `gl_test` on that dev SHA without merging; report flops / utilisation / slack vs `d2b7d34` (3127 flops, ~10%). ⚠ Scope is **17 `src/` commits since `d2b7d34`** (+1,162 / −55), not only F1/D1/SDA hold/M5: also clocked SHIFT/SHIFTIN, the stretch park + bus-fault bound, per-lane bit order, the out-of-range sample guard | Nathan's call — recommended |
+| **CHECKPOINT** | after K: one full harden (gds + precheck) + `gl_test` on that dev SHA without merging; report flops / utilisation / slack vs `d2b7d34` (3127 flops, ~10%). ⚠ Scope is **17 `src/` commits since `d2b7d34`** (+1,162 / −55), not only F1/D1/SDA hold/M5: also clocked SHIFT/SHIFTIN, the stretch park + bus-fault bound, per-lane bit order, the out-of-range sample guard; now also K's held SHIFTIN release and U's widened refusal / retired clamp | **NEXT — Nathan's call, recommended** |
 | **CI2** | retro: confirm the `tb_trace` path gate was the ONLY failure on `6abb6dd..e1fa642` | owed |
 | **E** | swallowed-exception audit, **+E+**: `set -o pipefail` in every `.sh` under `ci/` and `test/` with a lint gate (must-fire: a failing command piped into `tail`) | owed |
 

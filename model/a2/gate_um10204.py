@@ -330,9 +330,17 @@ def main() -> int:
     print("      %-13s %-6s %-11s %-9s %s"
           % ("arm", "d", "t_HD;DAT", "periods", "verdict"))
     nmeas = 0
-    for arm in ("clean", "certified", "stretch_mid", "stretch_long"):
+    # ⛔ RULING K4: `corpus_i2c` is REQUIRED, not optional -- it is the arm that
+    # contains the clocked SHIFTIN release, and skipping it when absent would
+    # restore the blindness that hid the defect.
+    for arm in ("clean", "certified", "stretch_mid", "stretch_long",
+                "corpus_i2c"):
         a = blob.get(arm)
         if a is None:
+            if arm == "corpus_i2c":
+                print("      *** FAIL the corpus_i2c arm is absent -- K4 is "
+                      "not measured")
+                rc = 1
             continue
         for l in a["lanes"]:
             hd = l.get("t_HD_DAT")

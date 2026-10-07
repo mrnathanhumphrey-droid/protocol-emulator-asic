@@ -382,6 +382,45 @@ def build_ckod(delays=None):
     return b"".join(headers) + b"".join(prog)
 
 
+def build_ckread(d: int = D_FM_SHIPPABLE, sda: int = 2, scl: int = 1):
+    """A CLOCKED I2C READ on one open-drain lane -- ruling K's class-8 subject.
+
+    ⛔⛔ WHY IT EXISTS. Ruling K's table (K2) requires every chip-driven SDA
+    transition CLASS to be exercised, and every program in the tree was a
+    WRITE: none had the master drive an ACK or NACK (a 1-bit clocked SHIFT,
+    class 8), and so none had the release that FOLLOWS a master ACK (the next
+    byte's clocked SHIFTIN taking SDA back). An empty cell would have been a
+    class the hold check never saw -- the same blindness `ckod` (SHIFT-only)
+    had to the SHIFTIN release.
+    ⇒ address byte (SHIFT 8), the slave's ACK slot (SHIFTIN 1), a data byte in
+      (SHIFTIN 8), the master's ACK (SHIFT 1), a second byte in -- whose first
+      LOW releases SDA after that ACK -- and the master's NACK (SHIFT 1), then
+      STOP. The ACK/NACK bit VALUES come from the host feed, so both a drive
+      and a release occur across iterations.
+    ⚠ A TIMING SUBJECT, NOT A FRAM TRANSACTION: no peer is addressed, so the
+    receives read the pull-up. Layer H measures the CHIP's drives, which do not
+    depend on what the peer says.
+    """
+    prog = []
+    base = ACT_BASE
+    prog.append(act(OP_START, sda, 0, d))
+    prog.append(act_shift_clocked(sda, d, nbits=8))        # address | R
+    prog.append(act_shiftin_clocked(sda, d, nbits=1))      # slave ACK slot
+    prog.append(act_shiftin_clocked(sda, d, nbits=8))      # data byte in
+    prog.append(act_shift_clocked(sda, d, nbits=1))        # master ACK
+    prog.append(act_shiftin_clocked(sda, d, nbits=8))      # next byte in
+    prog.append(act_shift_clocked(sda, d, nbits=1))        # master NACK
+    prog.append(act(OP_STOP, sda, 1, d))
+    prog.append(act(OP_REARM, 0, 1, d))
+    park = base + len(prog) * ACT_BYTES
+    prog.append(act(OP_REARM, 0, 0, 500))
+    headers = [hdr(sda, scl, 0, d, 2, 2 * d, 3 * d, base)]
+    # parked lanes OFF the pad-override pins (CS/MISO), so N1's PINMAP
+    # condition has nothing to report
+    headers += [hdr(p, p, 0, 500, 2, 200, 240, park) for p in (0, 3, 4, 5)]
+    return b"".join(headers) + b"".join(prog)
+
+
 def build_chain(d_tog: int, d_park: int):
     """Two toggling lanes plus THREE lanes parked on CHAINING re-arms at a
     short delay, so the chaining path is exercised often.
@@ -1098,6 +1137,10 @@ def main() -> int:
             # phase can be shown to TRACK `d` rather than to equal it once.
             (["--ckod"], "open-drain self-clocked lanes, delay span",
              "ckod_image.hex"),
+            # ⭐ RULING K: the clocked READ -- master ACK/NACK (class 8) and the
+            # release that follows it, which no write program exercises.
+            (["--ckread"], "clocked I2C read: master ACK/NACK + release",
+             "ckread_image.hex"),
             # ⭐⭐ D4: THE SDA-HOLD BOUNDARY, THREE POINTS, ONE PER IMAGE.
             # `at` and `under` must be REFUSED and `over` must RUN, so the
             # bench sees the boundary from both sides rather than only from
@@ -1299,6 +1342,13 @@ def main() -> int:
         write_image(_o, _i)
         print("ckdense image (S must-fire subject, delays %s), %d bytes -> %s"
               % (CKDENSE_DELAYS, len(_i), _o))
+        return 0
+    if "--ckread" in sys.argv:
+        img = build_ckread()
+        out = os.path.join(here, "ckread_image.hex")
+        write_image(out, img)
+        print("ckread image (a clocked I2C read: master ACK/NACK, ruling K), "
+              "%d bytes -> %s" % (len(img), out))
         return 0
     if "--ckod" in sys.argv:
         img = build_ckod()

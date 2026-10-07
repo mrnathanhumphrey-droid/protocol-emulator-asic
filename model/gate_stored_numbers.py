@@ -384,6 +384,13 @@ SPEC_SYMBOLS = {
     # assertion each must die of. Its numbers are layer labels ([A1], [A2],
     # [R4a]) inside the expected messages -- inputs, re-judged every run.
     ("test/run_mutants.py", "CLOCKED_MUTANTS"),
+    # ⭐ RULINGS K/U's GATE TABLES: `CLASS` and `DATA` are opcode codes (the
+    # ISA's own numbering, plus 8 = the 1-bit SHIFT and 9 = unattributed),
+    # and `IMAGES` lists which classes each image must exercise. Inputs, not
+    # measurements -- the measured holds are re-read from Layer H every run.
+    ("model/gate_sda_hold.py", "CLASS"),
+    ("model/gate_sda_hold.py", "DATA"),
+    ("model/gate_sda_hold.py", "IMAGES"),
     # ⭐ THE COVERAGE SWEEP'S TWO DECLARATIONS, and neither holds a
     # measurement. `benchset.CONFIG` is STIMULUS -- plusargs, cycle budgets
     # and the per-lane delay vectors handed to `make_smoke_image.py` -- i.e.

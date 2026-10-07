@@ -828,11 +828,10 @@ module pe_engine #(
   // dispatch (`clk_real & ~a_lvl`) is the CERTIFIED two-action frame's shape --
   // `build_i2cframe` runs it, and at a short delay it would push data past the
   // rise with nothing refusing it.
-  // ⚠ SO THE CLAMP IS NOW A ONE-SITE MECHANISM WITH A NAMED REACHABLE CASE
-  // (`build_i2cframe(d=12)`), not a leftover. Extending the refusal to cover
-  // the unclocked idiom too would retire it entirely; that is a SCOPE
-  // DECISION and is recorded as owed rather than taken here.
-  wire [N_LANES-1:0] ck_hold_fits;
+  // ⛔⛔ RULING U TOOK THAT SCOPE DECISION: the refusal (`ck_holdviol`) now
+  // covers the unclocked idiom too, so the clamp had no reachable case left and
+  // is RETIRED -- its wire, its per-lane compare and its term at the unclocked
+  // site are gone. History above is kept because it is why the refusal exists.
   // ⛔⛔⛔ F1 -- A CLOCKED PARK COUNTS ITS HIGH PERIOD FROM THE RISE IT
   // OBSERVES, so it releases at `now + d` rather than at `now`. This is the fix
   // for a MEASURED compliance failure: rebasing a parked clocked lane to `now`
@@ -924,7 +923,6 @@ module pe_engine #(
       assign ck_bit[gi] = ckd_real ? pin_in[l_pin[gi]] : 1'b0;
       // the delay field of the action this lane is currently clocking
       assign ck_dly[gi] = l_act[hix[gi]][BQW+BPW +: DLY_W];
-      assign ck_hold_fits[gi] = (ck_dly[gi] > SDA_HOLD[DLY_W-1:0]);
 `ifdef M_CK_REBASE_2D
       assign ck_rebase[gi] = now + {{(TS_W-DLY_W-1){1'b0}}, ck_dly[gi], 1'b0};
 `elsif M_CK_RISE_ELIGIBLE
@@ -1126,8 +1124,22 @@ module pe_engine #(
   //   a refusal there would leave the measurement arm with no traffic to
   //   measure -- the shape `project.v` already warns about, where a chip that
   //   refuses to run produces no evidence by definition.
+  // ⛔⛔ RULING U: THE SCOPE IS EVERY OPEN-DRAIN DATA DRIVE THE HOLD APPLIES
+  // TO, not only the clocked ones. The UNCLOCKED open-drain SHIFT that takes
+  // its own clock low in the same dispatch (`clk_real & ~a_lvl` -- the
+  // certified two-action frame's shape) is held by the same pipeline, so a
+  // delay that cannot fit the hold is the same defect there. It used to fall
+  // back to a CLAMP (zero hold, program left running and reported below the
+  // requirement); D1's reasoning applies unchanged, so it is now REFUSED and
+  // the clamp is retired. `M_HOLD_CLOCKED_ONLY` restores the old scope.
+  wire uc_hold = (a_op == OP_SHIFT) & clk_real & ~a_lvl;
+`ifdef M_HOLD_CLOCKED_ONLY
   wire ck_holdviol = ck_act & ~l_mode[cur] & (SDA_HOLD != 0)
                      & (a_dly <= SDA_HOLD[DLY_W-1:0]);
+`else
+  wire ck_holdviol = (ck_act | uc_hold) & ~l_mode[cur] & (SDA_HOLD != 0)
+                     & (a_dly <= SDA_HOLD[DLY_W-1:0]);
+`endif
   // ⛔⛔ THE TWO REFUSALS SHARE ONE CHAIN-HEAD WIRE, and that is the lesson of
   // `ck_degen`'s own history written down: a guard bolted onto a BRANCH let a
   // refused clocked SHIFT fall through into the unclocked body and drive the
@@ -1926,13 +1938,10 @@ module pe_engine #(
                   // dispatch at all -- `ck_refuse` stops it at the head of
                   // this chain -- so the clamp's only remaining job here would
                   // be to handle a case the engine refuses to run.
-                  // ⚠ IT SURVIVES AT THE **UNCLOCKED** SITE BELOW, and that is
-                  // scope rather than oversight: D1 is scoped to `ck_act`, so
-                  // an UNCLOCKED open-drain SHIFT that takes its own clock low
-                  // (`clk_real & ~a_lvl`) can still ask for a delay shorter
-                  // than the hold, and `build_i2cframe(d=12)` is exactly that
-                  // program. Removing the clamp there would push data past the
-                  // rise for a program silicon still accepts.
+                  // ⛔ AND RULING U RETIRED IT AT THE UNCLOCKED SITE TOO: the
+                  // refusal now covers an unclocked open-drain SHIFT that takes
+                  // its own clock low, so `build_i2cframe(d <= SDA_HOLD)` is
+                  // refused rather than clamped to zero hold.
                   if (SDA_HOLD == 0 || l_mode[cur]) begin
                     if (l_mode[cur]) begin
                       pin_out[a_pin] <= l_tx[cur][0] & pin_pp[a_pin];
@@ -2046,8 +2055,11 @@ module pe_engine #(
               // A lane with no real clock pin (an SPI target, where the master
               // supplies SCK) drives immediately for the same reason.
               if (pin_real) begin
-              if (SDA_HOLD == 0 || l_mode[cur] || !clk_real || a_lvl
-                  || !ck_hold_fits[cur]) begin
+              // ⛔ RULING U RETIRED THE CLAMP that stood here
+              // (`|| !ck_hold_fits[cur]`): an unclocked open-drain SHIFT whose
+              // delay cannot fit the hold is now REFUSED by `ck_holdviol` at
+              // the head of this arm, so it never reaches this branch.
+              if (SDA_HOLD == 0 || l_mode[cur] || !clk_real || a_lvl) begin
                 if (l_mode[cur]) begin
                   pin_out[a_pin] <= l_tx[cur][0] & pin_pp[a_pin];
                   pin_oe[a_pin]  <= 1'b1;
@@ -2119,6 +2131,30 @@ module pe_engine #(
               // the peer's acknowledge, which on an open-drain net is a
               // push-pull high against a pull-low -- a SHORT, not a wrong
               // bit. Priced by M_ACK_DRIVES_SDA.
+              // ⛔⛔ RULING K: THE RELEASE IS HELD ON A CLOCK-LOW DISPATCH.
+              // The FIRST LOW of a clocked SHIFTIN takes SCL down and releases
+              // SDA in the same dispatch, so the transition from the last
+              // transmitted bit into the ACK slot had ZERO hold -- MEASURED,
+              // 14 of 14 SHIFTIN releases at t_HD;DAT = 0 on corpus_i2c
+              // (Layer H), the class ruling H fixed on the transmit side and
+              // did not reach here. ⇒ On an open-drain lane with a real clock
+              // that release now goes through the SAME hold pipeline the
+              // transmit path uses and lands SDA_HOLD cycles after the fall.
+              // HIGH/COLL dispatches find SDA already released, so releasing
+              // there directly moves nothing. The mutant's DRIVE (ack_drv[1])
+              // stays direct, so M_ACK_DRIVES_SDA still prices condition (a).
+              // ⚠ The pipeline writes the LANE's pin (`l_pin`), as on the
+              // transmit side, so the hold applies only when the action names
+              // that pin; any other falls back to the direct release, and
+              // Layer H would report it.
+`ifndef M_SHIFTIN_UNHELD
+              if (ck_shiftin & clk_real & ~ck_is_high & ~l_mode[cur]
+                  & (SDA_HOLD != 0) & ~ack_drv[1] & (a_pin == l_pin[cur])) begin
+                l_hval[cur] <= 1'b0;
+                l_hoe[cur]  <= 1'b0;
+                l_hcnt[cur] <= SDA_HOLD[HOLDW-1:0];
+              end else
+`endif
               pin_oe[a_pin] <= ack_drv[1];      // release to sample (0)
               // ⭐ NEVER TAKEN IN THE CLEAN BUILD -- `ack_drv[1]` is 0 -- so
               // `pin_out` is not written on any SHIFTIN and the unclocked

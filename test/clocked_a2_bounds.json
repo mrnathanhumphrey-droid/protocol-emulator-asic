@@ -159,6 +159,22 @@
    }
   }
  },
+ "ckread_image.hex": {
+  "J": 1,
+  "U": 0.0669,
+  "d_min": 70,
+  "k": 5,
+  "lanes": {
+   "0": {
+    "T": 70,
+    "r_floor": 7,
+    "r_ours": 7,
+    "r_pyrta": 7,
+    "slack": 8,
+    "why": null
+   }
+  }
+ },
  "corpus_all5.hex": {
   "J": 8,
   "U": 1.0964,

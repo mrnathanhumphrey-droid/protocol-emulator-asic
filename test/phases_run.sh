@@ -172,6 +172,12 @@ else
   echo "  *** the certified frame image is absent; H4 NOT MEASURED"
   rc=1
 fi
+# ⛔⛔ RULING K4: corpus_i2c, ON THE SAME INSTRUMENT. Every arm above runs a
+# SHIFT-only image (`ckod`) or the unclocked frame, so the clocked SHIFTIN's
+# release into the ACK slot -- t_HD;DAT = 0 on every one before ruling K --
+# was a transition this measurement could not contain. `gate_um10204` now
+# holds this arm to the same hold floor as the others.
+run_arm clean "test/corpus_i2c.hex" 256 40000 corpus_i2c || rc=1
 
 echo
 if [ $rc -eq 0 ]; then
