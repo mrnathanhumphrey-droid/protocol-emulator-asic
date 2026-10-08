@@ -479,6 +479,14 @@ attributes every stall cycle to a cause.
 The constant and the treatment of `R_i` are for the formal proof to fix. This
 amendment does not supply them.
 
+**PS1–PS3 (2026-10-07), details in `PORT_SPEC.md` §6:**
+- The candidate boundary `2d ≥ 37` (`d ≥ 19`) is falsified: five lanes at
+  `d = 19` stall. `D* = k · L_REFILL` is a throughput floor, and a repaired
+  statement needs both throughput and latency.
+- Lemma B's 23 is measured at 24 above `D*`.
+- Lemma A's premise (same-lane gaps > 12) is false on `ckheavy` (gap 12),
+  even though its `R_i ≤ 12` held on every stall-free arm.
+
 **Claim status (README via RD1):** `d_min ≥ D* = 20 → J = 1` is carried as
 **MEASURED**, with "written proof under revision", not as proved.
 `gate_j_proof_anchors` keeps premises P1–P10, because they are RTL facts and

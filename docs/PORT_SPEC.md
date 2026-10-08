@@ -217,6 +217,69 @@ refills and holds no deadlines.
   `R_i` is 12, so the slack is `2·24 − 12 − 2 = 34`. ⚠ This is measurement.
   The bound, its constant and `R_i` are for the Lean statement to fix.
 
+### PS1–PS3: the candidate bound, measured against today's RTL (2026-10-07)
+
+The candidate was: Lemma A `R_i ≤ (k−1)C = 12`; Lemma B "valid within
+`(k+1)L − 1 = 23` of the WB"; Lemma C slack `≥ 2d − R_i − 2`. Together they
+give `2d ≥ 37`, i.e. `d ≥ 19`. Runs were 1M cycles with probes
+`probe_tb_port.v` and `probe_tb_lat.v`.
+
+**Conventions.**
+- *Valid from WB* is the first cycle a decision can read the slot as valid,
+  minus the cycle of the WB that freed it.
+- *Slack* is the consuming decision's cycle minus that first-valid cycle.
+- `R_i` is release → decision.
+
+| arm | stalls (window) | winner-head refills after priming | worst valid from WB | worst slack | worst `R_i` |
+|---|---|---|---|---|---|
+| 20 20 20 20 20 | 0 | 0 | 10 | ≥ 28 | — |
+| 20 21 22 23 24 | 0 | 0 | **24** | ≥ 15 | 12 |
+| 20 21 22 23 100 | 0 | 0 | 21 | ≥ 15 | — |
+| 20 20 20 20 24 | 0 | 0 | 13 | ≥ 25 | — |
+| 19 20 21 22 23 | 0 | 0 | **27** | ≥ 9 | 12 |
+| 19 23 19 23 19 | 0 | 0 | 24 | ≥ 12 | 12 |
+| **19 19 19 19 23** | **184,612** | 25,919 | — | — | 275 |
+| **19 19 19 19 19** | **195,571** | 35,754 | — | — | 157 |
+| 18 18 18 18 18 (control) | 177,287 | 22,431 | — | — | 154 |
+| 18 19 20 21 22 (control) | 204,371 | 49,918 | — | — | 97 |
+
+- **PS1: the boundary prediction `d ≥ 19` is FALSIFIED.** Five lanes at
+  `d = 19` stall. The port is asked for `5 · 4 = 20` cycles of refill per 19.
+  The cliff the sweep recorded at "d = 19" came from the recipe
+  `19 20 21 22 23`, which has only **one** lane at 19, so port demand is
+  below 1.
+  - ⇒ `D* = k · L_REFILL = 20` is a **throughput** floor, and on the uniform
+    family it is tight.
+  - The latency condition `2d ≥ 37` is necessary, not sufficient. A sound
+    statement needs **both** conditions.
+  - The owed item in `gate_j_program.py` is closed with this record.
+- **Lemma B's constant is one cycle short even above `D*`.** The worst valid
+  from WB is 24, not 23, on `20..24`. On `19..23` it is 27, with branch 1
+  silent and no stall: a lane can owe both slots at once (§4), so its second
+  refill waits a second round-robin pass. The latency slack still held, at
+  ≥ 9.
+- **Lemma A's bound (`R_i ≤ 12`) held on every stall-free arm.** It fails
+  only where the port is saturated.
+- **PS2: Lemma A's premise ("every same-lane dispatch gap > 12") is false
+  on an admissible image.**
+  - `ckheavy_image` (the A2 subject), lane 4, `d = 21`: the minimum gap is
+    **12**, and 10 gaps are ≤ 13. A lane released at `d` and decided up to
+    `R_i` late can be decided again `d − R_i` cycles later. The measured
+    `R_4` is 11.
+  - The same holds for held clocked re-dispatches. `ckheavy`'s clocked lanes
+    (`d = 30..32`) bottom out at **22**, not `≥ d`.
+  - Every other admissible image has a minimum gap ≥ 16. So no zero-delay
+    back-to-back dispatch occurs on any of them, even though `pe_asm`'s
+    `d_min` ignores zero-delay actions (`pe_asm.py:550`).
+  - Gaps are bounded below by `d − R_i`, not by `d`.
+- **PS3: `pe_asm` refuses `d_min < D*`** (`pe_asm.py:576–586`). The
+  `_demo_tight` must-fire covers it. The chip itself refuses nothing: a raw
+  image bypasses `pe_asm`, which is how every sub-`D*` arm above runs.
+  - Aside, sub-`D*` only: on the saturated arms some lanes fall behind by
+    about 2^15 cycles. Release → decision then reads ~32,800, which is the
+    16-bit timestamp's signed window. 1.6b's spread assumption fails in
+    overload, in a region nothing is claimed for.
+
 `R_i` is a response-time quantity, so the port invariant and the EDF analysis
 are coupled through it. The Lean statement needs that coupling stated
 explicitly, or an independent bound on `R_i` such as pyRTA's.

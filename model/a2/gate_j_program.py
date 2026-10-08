@@ -284,6 +284,18 @@ SWEEP_SINGLE = {
 # make the measurement the source and leave the off-by-one unexplained -- the
 # claim is stated at the structural number and the gap is recorded. Explaining
 # why 19 suffices needs the witness trace, and is owed.
+# ⛔⛔ CLOSED BY PS1 (2026-10-07): 19 DOES NOT SUFFICE, AND 20 IS TIGHT. The
+# sweep's "d = 19" point is the recipe `--five 19 20 21 22 23`: ONE lane at 19,
+# so the port's demand is sum(4/d_i) < 1. On 1M-cycle runs, today's RTL:
+#     19 20 21 22 23   stall 0, winner-head refills after priming 0
+#     19 23 19 23 19   stall 0, 0
+#     19 19 19 19 23   STALLS (184,612 window cycles), 25,919
+#     19 19 19 19 19   STALLS (195,571 window cycles), 35,754
+# With five lanes at 19 the port is asked for 20 cycles of refill per 19.
+# ⇒ The cliff is a THROUGHPUT floor, d >= k*L_REFILL = 20, and that is what
+#   D_STAR states. The candidate latency bound (2d >= 37, i.e. d >= 19) is
+#   NECESSARY, NOT SUFFICIENT: a sound statement needs both conditions.
+#   Recorded in docs/J_LANE_PROOF.md (Amendment A2) and docs/PORT_SPEC.md.
 D_STAR = N_LANES * L_REFILL
 
 
