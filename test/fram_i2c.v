@@ -51,7 +51,20 @@
 module fram_i2c #(
     parameter integer AW = 15,              // 32768 x 8 = MB85RC256V
     parameter [2:0]   DEV_SEL = 3'b000,     // the A2/A1/A0 strap
-    parameter integer STRETCH = 0           // cycles of SCL stretch per ACK
+    parameter integer STRETCH = 0,          // cycles of SCL stretch per ACK
+    // ⭐ RULING ACK (b) -- LATE DATA. With LATE > 0 a READ data bit is not
+    // presented at the SCL fall: the peer holds SCL low for LATE cycles,
+    // releases SDA meanwhile, and puts the bit on SDA only at the END of the
+    // stretch, just before letting SCL go. Legal I2C (data may change while
+    // SCL is low), and it is what makes "sampled on the OBSERVED rise"
+    // distinguishable from "sampled when the controller released SCL": with
+    // the bit presented at the fall, both instants read the same value and a
+    // wrong-instant sampler cannot fail. LATE_SKIP read bits are presented
+    // normally first; LATE_ONCE stretches only the next one (the arm just
+    // under the chip's stretch timeout would otherwise run for hours).
+    parameter integer LATE = 0,
+    parameter integer LATE_SKIP = 0,
+    parameter integer LATE_ONCE = 0
 ) (
     input  wire clk,        // ⚠ stretch timer reference only -- see header
     input  wire scl_in,     // the RESOLVED line, as the device sees it
@@ -102,12 +115,25 @@ module fram_i2c #(
   reg          prev_active_c;
   reg [7:0]    seen_c;
   reg [15:0]   stretch_n;
+  reg          ackslot_c;       // the fall that ends a master ACK/NACK slot
+  reg          late_gate;       // this bit is presented late (block D drives)
+  reg          late_bit;        // the late bit's pull-low, for block D
+  reg [7:0]    late_req;        // a request counter, read by block D
+  integer      late_cnt;        // read data bits presented so far
+
+  // ---- block B also owns the master's ACK/NACK sample -------------------
+  reg          mack;            // SDA at the ACK slot's rise: 1 = NACK
+
+  // ---- block D (posedge clk) owns these: the late-data stretch ---------
+  reg [7:0]    late_seen;
+  reg [31:0]   late_n;
+  reg          late_low;
 
   // ⭐ THE EXPORTED ENABLES. Two sources of pull-low on SDA -- the ACK and a
   // read data 0 -- are ORed, which is exactly how an open-drain line behaves
   // and is why the ENABLE rather than the value is the thing to export.
-  assign sda_oe = bus_active & (ack_low | data_low);
-  assign scl_oe = (stretch_n != 16'd0);
+  assign sda_oe = bus_active & (ack_low | data_low | (late_gate & late_low));
+  assign scl_oe = (stretch_n != 16'd0) | (late_n != 32'd0);
 
   // =====================================================================
   // BLOCK A -- START / STOP. Owns `bus_active` and nothing else.
@@ -162,8 +188,10 @@ module fram_i2c #(
       byte_done <= 1'b0;
       seen_b    <= start_cnt;
     end else if (bitn == 4'd8) begin
-      byte_done <= 1'b0;                  // the ACK bit slot: sample nothing
+      byte_done <= 1'b0;                  // the ACK bit slot: no data bit,
       bitn      <= 4'd7;
+      mack      <= sda_in;                // but a READ needs the master's
+                                          // ACK (0) or NACK (1)
     end else begin
       shin      <= {shin[6:0], sda_in};
       byte_done <= (bitn == 4'd0);
@@ -183,6 +211,8 @@ module fram_i2c #(
       selected  <= 1'b0;
       shout     <= 8'h00;
       seen_c    <= start_cnt;
+      late_gate <= 1'b0;
+      ackslot_c <= 1'b0;
     end else if (start_cnt != seen_c) begin
       // ⭐ A repeated START lands here: the phase returns to P_DEV but `addr`
       // is DELIBERATELY KEPT. That is the part's documented read sequence --
@@ -193,7 +223,15 @@ module fram_i2c #(
       ack_low  <= 1'b0;
       data_low <= 1'b0;
       seen_c   <= start_cnt;
+      late_gate <= 1'b0;
+      ackslot_c <= 1'b0;
     end else if (byte_done) begin
+      // ⛔ RULING ACK (AC4): THE NEXT SLOT IS AN ACK SLOT, so a read's last
+      // data bit must come OFF the line. It used to stay on: a 0 in bit 0
+      // held SDA low through the master's slot and turned its NACK into an
+      // ACK on the wire.
+      data_low  <= 1'b0;
+      late_gate <= 1'b0;
       case (phase)
         P_DEV: begin
           // 1010 A2A1A0 R/W
@@ -230,17 +268,49 @@ module fram_i2c #(
           addr      <= addr + 1'b1;       // auto-increment
           ack_low   <= 1'b1;
         end
+        P_RDATA: begin
+          // ⛔⛔ RULING ACK (AC4): THE SECOND READ BYTE. This fell to
+          // `default`, so `shout` was never reloaded and `addr` never moved:
+          // a second byte shifted out the zeros left behind and read 0x00.
+          // Unexercised until ruling ACK -- no bench ever addressed this
+          // peer for a read (tb_i2c and tb_trace only write). The master's
+          // ACK/NACK lands in `mack` on the coming rise.
+          ack_low   <= 1'b0;
+          addr      <= addr + 1'b1;
+          shout     <= mem[addr + 1'b1];
+          ackslot_c <= 1'b1;
+        end
         default: ack_low <= 1'b0;
       endcase
       if (STRETCH != 0) stretch_n <= STRETCH[15:0];
     end else begin
-      ack_low <= 1'b0;                    // the ACK lasts ONE clock
-      // a read presents the next bit, MSB first, as a PULL-LOW for 0
-      if (selected && rw && phase == P_RDATA) begin
-        data_low <= ~shout[7];
+      ack_low   <= 1'b0;                  // the ACK lasts ONE clock
+      ackslot_c <= 1'b0;
+      if (selected && rw && phase == P_RDATA && ackslot_c && mack) begin
+        // ⭐ THE MASTER SAID NACK: the read is over. Off the bus until the
+        // next START, as the part's read sequence ends.
+        phase     <= P_IDLE;
+        selected  <= 1'b0;
+        data_low  <= 1'b0;
+        late_gate <= 1'b0;
+      end else if (selected && rw && phase == P_RDATA) begin
+        // a read presents the next bit, MSB first, as a PULL-LOW for 0 --
+        // at this fall, or (LATE) at the end of a stretch, by block D
+        if (LATE != 0 && late_cnt >= LATE_SKIP
+            && (LATE_ONCE == 0 || late_cnt == LATE_SKIP)) begin
+          data_low  <= 1'b0;
+          late_gate <= 1'b1;
+          late_bit  <= ~shout[7];
+          late_req  <= late_req + 8'd1;
+        end else begin
+          data_low  <= ~shout[7];
+          late_gate <= 1'b0;
+        end
+        late_cnt <= late_cnt + 1;
         shout    <= {shout[6:0], 1'b0};
       end else begin
-        data_low <= 1'b0;
+        data_low  <= 1'b0;
+        late_gate <= 1'b0;
       end
     end
     prev_active_c <= bus_active;
@@ -251,12 +321,32 @@ module fram_i2c #(
     if (stretch_n != 16'd0) stretch_n <= stretch_n - 16'd1;
   end
 
+  // =====================================================================
+  // BLOCK D -- the LATE-DATA stretch (ruling ACK (b)), on `clk`
+  // =====================================================================
+  // A request from block C (the counter moved) starts a LATE-cycle hold of
+  // SCL with SDA released; the bit goes on the line 4 cycles before the
+  // hold ends, so it is set up before the rise the controller observes.
+  always @(posedge clk) begin
+    if (late_req != late_seen) begin
+      late_seen <= late_req;
+      late_n    <= LATE;
+      late_low  <= 1'b0;
+    end else if (late_n != 32'd0) begin
+      late_n <= late_n - 32'd1;
+      if (late_n == 32'd4) late_low <= late_bit;
+    end
+  end
+
   initial begin
     bus_active = 1'b0; bitn = 4'd7; shin = 8'h00; byte_done = 1'b0;
     prev_active_b = 1'b0; prev_active_c = 1'b0;
     start_cnt = 8'd0; seen_b = 8'd0; seen_c = 8'd0;
     phase = P_DEV; rw = 1'b0; shout = 8'h00;
     ack_low = 1'b0; data_low = 1'b0; selected = 1'b0; stretch_n = 16'd0;
+    ackslot_c = 1'b0; mack = 1'b0; late_gate = 1'b0; late_bit = 1'b0;
+    late_req = 8'd0; late_seen = 8'd0; late_n = 32'd0; late_low = 1'b0;
+    late_cnt = 0;
   end
 
 endmodule

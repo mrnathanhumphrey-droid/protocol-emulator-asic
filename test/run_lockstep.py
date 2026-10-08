@@ -7,6 +7,12 @@ stream `test/tb_lock.v` prints (each dispatch's cycle, lane and action word;
 each output-pin change) must be BYTE-IDENTICAL to the stream the pre-fix RTL
 printed. The digests in `test/lockstep_golden.json` were recorded from that
 RTL (`python test/run_lockstep.py --record <dir holding the pre-fix src>`).
+⛔ RE-RECORDED ONCE, DELIBERATELY (ruling TX5, silicon fix #2): the clocked
+SHIFT's host load moved off the HIGH phase, which changes SDA VALUES on the
+5 clocked images and nothing else. Proven before re-recording: the fix's
+pre-form (`M_TX_LOAD_ANYPHASE`) reproduced every old digest, and the
+DISPATCH stream (now recorded on its own, `dispatch_sha256`) is identical
+old -> new on all 12. The schedule this file freezes has not moved.
 
 ⭐ THE MUST-FIRE IS TF1's NAIVE RETIMING. `M_TF1_LATE` registers readiness
 from the CURRENT `now` and timestamp instead of the next-state ones. The
@@ -84,7 +90,13 @@ def stream(vvp, img):
     body = [l for l in txt.splitlines() if l[:2] in ("D ", "P ")]
     prim = [l for l in txt.splitlines() if l.startswith("C primed_at")]
     fails = [l for l in txt.splitlines() if "*** FAIL" in l]
+    disp = [l for l in body if l.startswith("D ")]
     return {"sha256": hashlib.sha256("\n".join(body).encode()).hexdigest(),
+            # ⭐ RULING TX5: the DISPATCH stream alone, so a change that may
+            # move pins but must not move the schedule (silicon fix #2) is
+            # checked as exactly that
+            "dispatch_sha256": hashlib.sha256(
+                "\n".join(disp).encode()).hexdigest(),
             "lines": len(body),
             "dispatches": sum(1 for l in body if l.startswith("D ")),
             "primed_at": int(prim[0].split()[2]) if prim else None}, fails
@@ -121,8 +133,14 @@ def compare(vvp, gold, label):
         if s["sha256"] == g["sha256"]:
             same += 1
         else:
-            bad.append((img, "%d dispatches vs %d recorded"
-                        % (s["dispatches"], g["dispatches"])))
+            why = "%d dispatches vs %d recorded" % (s["dispatches"],
+                                                    g["dispatches"])
+            if "dispatch_sha256" in g:
+                why += (", dispatch stream %s" % (
+                    "IDENTICAL (pins moved)"
+                    if s["dispatch_sha256"] == g["dispatch_sha256"]
+                    else "MOVED"))
+            bad.append((img, why))
         if s["primed_at"] != g["primed_at"]:
             moved.append((img, g["primed_at"], s["primed_at"]))
     return same, bad, moved

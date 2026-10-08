@@ -127,6 +127,15 @@ CLOCKED_MUTANTS = [
      "X in iverilog, which the tree select propagates until nothing retires. "
      "(Under Verilator --x-initial unique the same defect shows as seeds "
      "disagreeing, which is verilator_trace.sh's arm.)"),
+    # ⛔⛔ SILICON FIX #2 (ruling TX1/TX2): the pre-fix host load, on the HIGH
+    # phase after the 7th bit. Every timing layer passes it -- the dispatch
+    # stream is byte-identical -- so the kill must be a VALUE: Layer V1 sees
+    # the load off the model's load point and the 8th bit wrong.
+    ("M_TX_LOAD_ANYPHASE", "corpus_i2c", "i2c", "*** FAIL clocked_conform[V1]",
+     "the clocked SHIFT's host load fires on the HIGH phase after the 7th "
+     "LOW, so the 8th bit is the next byte's first and the stream drifts a "
+     "bit per byte (5B fed -> 00, B5, 6A, D5 on the wire); counts, gaps and "
+     "widths are all exact, so only a value check can see it."),
     ("M_ACK_DRIVES_SDA", "corpus_i2c", "i2c", "OD_HARD1",
      "the clocked ACK drives SDA as a PUSH-PULL HIGH on an open-drain net "
      "while the peer pulls low to acknowledge -- a SHORT. The trace shows "

@@ -223,6 +223,13 @@ GATES=(
   # into scratch (src/ untouched). The full D* sweep is the recipe behind the
   # record `gate_j_program` checks.
   test/run_w_sweep.py
+  # ⛔⛔ TX -- SILICON FIX #2: CLOCKED TRANSMIT VALUES. The clocked SHIFT's
+  # host load fired on the HIGH phase, so every clocked byte drifted a bit
+  # while every timing layer stayed exact. Layer V of clocked_conform.vh now
+  # checks the BITS (V1 vs the golden model, V2 vs the pushed bytes); this
+  # covers widths 1..8, MSB/LSB lanes, ACK or not, empty/refill. Must-fire:
+  # M_TX_LOAD_ANYPHASE red on V1 and V2.
+  test/run_cktx.py
   # ⛔⛔ M -- EVERY IMAGE WRITES THE WHOLE STORE. The store has no reset, and a
   # 51-byte image left 205 bytes holding power-up contents, one missing REARM
   # from running on real pins. Every image is now the program plus the defined
@@ -296,7 +303,7 @@ can_run() {
     model/gate_rtl_lint.py)
       { command -v "$VL" >/dev/null 2>&1 || command -v wsl.exe >/dev/null 2>&1; } \
         || { echo "no verilator and no wsl.exe to reach one"; return 1; } ;;
-    model/gate_one_encoder.py|test/gl_harness_check.py|test/gate_tb_elaborates.py|test/run_mutants.py|model/gate_sda_hold.py|test/run_w_sweep.py)
+    model/gate_one_encoder.py|test/gl_harness_check.py|test/gate_tb_elaborates.py|test/run_mutants.py|model/gate_sda_hold.py|test/run_w_sweep.py|test/run_cktx.py)
       command -v "$IV" >/dev/null 2>&1 || { echo "iverilog not found (PE_IVERILOG unset and not on PATH)"; return 1; } ;;
     model/gate_reset_audit.py)
       [ -n "${PE_NETLIST_JSON:-}" ] && [ -f "${PE_NETLIST_JSON:-}" ] \

@@ -86,6 +86,9 @@ EXPECT = {
     "M_TX_IGNORE_TAG":   (2, None),
     "M_RX_NO_LANE":      (2, None),
     "M_IGNORE_ORDER":    (2, None),
+    # silicon fix #2 (ruling TX1): the host load's LOW-phase gate removed --
+    # one condition, one line out and one in
+    "M_TX_LOAD_ANYPHASE": (2, None),
     "M_SHARED_BITP":     (14,
         "a BLOCK substitution across FOUR sites, declared: the mutation "
         "re-merges the TX and RX bit pointers, and the pointer is named in the "

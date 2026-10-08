@@ -30,3 +30,34 @@ function integer ck_expect;
     if (op == 2 && cnt == 8 ) ck_expect = 17 ;  // SHIFTIN, 8 bit(s)
   end
 endfunction
+
+/* ruling TX3: the clocked SHIFT's load point and bit order, MEASURED from the
+ * model (silicon fix #2 moved the load off the HIGH phase). -1 = not a SHIFT. */
+function integer ck_load_at;
+  input integer cnt;
+  begin
+    ck_load_at = -1;
+    if (cnt == 0) ck_load_at = 1 ;  // SHIFT, 1 bit(s)
+    if (cnt == 1) ck_load_at = 3 ;  // SHIFT, 2 bit(s)
+    if (cnt == 2) ck_load_at = 5 ;  // SHIFT, 3 bit(s)
+    if (cnt == 3) ck_load_at = 7 ;  // SHIFT, 4 bit(s)
+    if (cnt == 4) ck_load_at = 9 ;  // SHIFT, 5 bit(s)
+    if (cnt == 5) ck_load_at = 11;  // SHIFT, 6 bit(s)
+    if (cnt == 6) ck_load_at = 13;  // SHIFT, 7 bit(s)
+    if (cnt == 7) ck_load_at = 15;  // SHIFT, 8 bit(s)
+  end
+endfunction
+function integer ck_tx_bit;
+  input integer k;
+  begin
+    ck_tx_bit = -1;
+    if (k == 0) ck_tx_bit = 0;
+    if (k == 1) ck_tx_bit = 1;
+    if (k == 2) ck_tx_bit = 2;
+    if (k == 3) ck_tx_bit = 3;
+    if (k == 4) ck_tx_bit = 4;
+    if (k == 5) ck_tx_bit = 5;
+    if (k == 6) ck_tx_bit = 6;
+    if (k == 7) ck_tx_bit = 7;
+  end
+endfunction

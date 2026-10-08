@@ -37,7 +37,8 @@ and 3 at d = 17, and the unclocked SHIFTIN release held only 14 at d = 16.
       SCL released, every hold >= SDA_HOLD, setup >= SDA_SETUP; and how often
       W1 actually delayed a dispatch, on every image in the table
   W5  must-fires: `M_NO_HOLD_GATE` reproduces the setup moves (11/562 on
-      ckhold_over, 10 and 3 on i2cframe d = 16/17), `M_SHIFTIN_UC_UNHELD`
+      ckhold_over, 10 and 3 on i2cframe d = 16/17; ckhold_over is 14/688
+      since silicon fix #2 corrected its bytes), `M_SHIFTIN_UC_UNHELD`
       reproduces the unclocked release hold of 14
 """
 
@@ -86,7 +87,12 @@ IMAGES = {
 W4 = [("ckhold_over_image", "test/ckhold_over_image.hex", "none")]
 #: W5's recorded findings, reproduced by the mutant without W1:
 #: subject -> data moves with SCL released (and of how many, where recorded).
-W5_FOUND = {"ckhold_over_image": (11, 562), "i2cframe_d16": (10, None),
+#: ⛔ RE-RECORDED, RULING TX5 (silicon fix #2): ckhold_over was (11, 562).
+#: The clocked SHIFT's bytes were misaligned, so the SDA move count was the
+#: wrong bytes' count. MEASURED: built with M_TX_LOAD_ANYPHASE as well, the
+#: mutant still gives exactly 11 of 562; on the fixed RTL 14 of 688. The two
+#: unclocked frames do not use the clocked SHIFT and did not move.
+W5_FOUND = {"ckhold_over_image": (14, 688), "i2cframe_d16": (10, None),
             "i2cframe_d17": (3, None)}
 ROW = re.compile(r"clocked_conform\[H\] class (\d+): n=(\d+) hold_min=(-?\d+) "
                  r"hold_max=(-?\d+) moved_while_released=(\d+)")

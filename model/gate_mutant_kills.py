@@ -57,6 +57,8 @@ KILLERS = {
     "M_BUF_NOINVAL": RUN_MUTANTS, "M_BUF_SWAP": RUN_MUTANTS,
     "M_BUF_CHAINFLIP": RUN_MUTANTS, "M_NO_PRIME": RUN_MUTANTS,
     "M_NO_REBASE": RUN_MUTANTS,
+    # silicon fix #2: killed on VALUE by Layer V1 (tb_trace, corpus_i2c)
+    "M_TX_LOAD_ANYPHASE": RUN_MUTANTS,
     # -- run_mutants.py, other benches ---------------------------------------
     "M_SHIFT_CLK_ALIAS": RUN_MUTANTS, "M_TX_IGNORE_TAG": RUN_MUTANTS,
     "M_TIMEOUT_PROCEED": RUN_MUTANTS, "M_UNGUARDED_ARMPIN": RUN_MUTANTS,

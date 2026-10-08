@@ -1,76 +1,88 @@
 {
  "_ncyc_after_priming": 60000,
- "_recorded_from": "src/ at 5cb00c1 (pre-TF RTL; byte-equal snapshot checked)",
+ "_recorded_from": "src/ after silicon fix #2 (ruling TX5). Was src/ at 5cb00c1 (pre-TF RTL). The fix's pre-form (M_TX_LOAD_ANYPHASE) reproduced the old digest on all 12; DISPATCH streams identical old->new on all 12; full digests moved on exactly the 5 clocked images (corpus_i2c, ckheavy, ckfive, ckod, ckread): SDA values only.",
  "census_image.hex": {
+  "dispatch_sha256": "cf95eae806e222f47fb6e5892fa0057261d6db14bac705fbe1b5139114eb5af0",
   "dispatches": 2763,
   "lines": 62686,
-  "primed_at": 120,
+  "primed_at": 121,
   "sha256": "7405217fbb0498d86a92dbc80cb4e0d9338bc363a07578b160db42d8d2a10ab4"
  },
  "ckfive_image.hex": {
+  "dispatch_sha256": "779ec9cb4da4a8f653c07cd77a1023ea736345b648120280c33c52cbc9001031",
   "dispatches": 5373,
-  "lines": 65076,
-  "primed_at": 132,
-  "sha256": "4b4df9cdc8f972d0a845f99592c5ee29d0c33949047f453e2b75dc009b929fe3"
+  "lines": 65052,
+  "primed_at": 133,
+  "sha256": "bbba669835e323faf5027ab5bd43de405b362da46897feba7bcddcde3c457b65"
  },
  "ckheavy_image.hex": {
+  "dispatch_sha256": "6742a6bb923e5f5e7d1ebbee933d04aeb11decab722d9882accc3cc2e27b0be4",
   "dispatches": 11237,
-  "lines": 70885,
-  "primed_at": 132,
-  "sha256": "b4292ea84ac7d0067d99195e2b0c754db96b04cc1d667edfba6347d428bd6fe8"
+  "lines": 70858,
+  "primed_at": 133,
+  "sha256": "5990cc50c4b77447294634b1dcf912c864b66193a8de3cc16f7653dd06980ec3"
  },
  "ckod_image.hex": {
+  "dispatch_sha256": "8125ec484ca7fb535da790f06aeb1c1ee8984523ce08360ea251c2f8af8f86a9",
   "dispatches": 3548,
-  "lines": 63123,
-  "primed_at": 128,
-  "sha256": "f6bf04fa2246af8e4f73491f85d9c20bab57da9e75f51fb76b636751a12f1621"
+  "lines": 63088,
+  "primed_at": 129,
+  "sha256": "a1af4720f98805fb013084ed9ffa31d839057467f8d998f36b286fe087e2843f"
  },
  "ckread_image.hex": {
+  "dispatch_sha256": "490a5e03253d3bea6fe949b7145bc1297f7584e71eca972a7998edbab0781c74",
   "dispatches": 1316,
-  "lines": 60320,
+  "lines": 60247,
   "primed_at": 116,
-  "sha256": "ea1e42fb71d83c8a2c3e204a0387b84f8e8187c0e8825b8d9d9bface6e2e9120"
+  "sha256": "faa8f4c6c07ca4194d2799555b31456f32ba08ad6fcf50589e75892fa0fe1222"
  },
  "corpus_i2c.hex": {
+  "dispatch_sha256": "f51cffe8fcfac4fd2419d4c39a0cabb638310f3bb0970e0b50300f59d50980ff",
   "dispatches": 1319,
-  "lines": 60323,
+  "lines": 60250,
   "primed_at": 116,
-  "sha256": "aa745219ee179a77583b55b521e7a370d57366df577f5c4a6013d72b74398168"
+  "sha256": "f8b7f6ab913f4c36fe271fccdef1ee2acc0f9c408bf20efb5f78343d8b49ff31"
  },
  "half_image.hex": {
+  "dispatch_sha256": "a4ebdbd8eef0cf77b0689458510ef418eb5518ba719024f7069480060e0b86d1",
   "dispatches": 5360,
   "lines": 65049,
-  "primed_at": 120,
+  "primed_at": 121,
   "sha256": "eef3aa2568790d51442f9155bec018c2fe934bc803d4122b2a2cecf51af081a3"
  },
  "i2caddr_image.hex": {
+  "dispatch_sha256": "ea57fb7fbfe454f696e618a9bbf37ae4bd66b6b85d3822edc757a1394dcd57bb",
   "dispatches": 1448,
   "lines": 60467,
   "primed_at": 116,
   "sha256": "aea3ac0931b0fa70f2a7b1313eb453a3dbf49f35adfb2275cfddadefceb9e450"
  },
  "i2cframe_image.hex": {
+  "dispatch_sha256": "60a1d9250a42d35c6772f466cbc69d817c999f3356eb5c8218819e3c0379ba0d",
   "dispatches": 1448,
   "lines": 60467,
   "primed_at": 116,
   "sha256": "10b1aaed02661380f681007a1b5358b646994d56445451806d5d1b5666692411"
  },
  "rxfast_image.hex": {
+  "dispatch_sha256": "cf3dd84c52cb30152da351fee35b0e717901ba83e44bf9c712d55fe4cb0e3942",
   "dispatches": 2980,
   "lines": 62974,
   "primed_at": 116,
   "sha256": "42906c3e857654309ceade6470cf0580e05555e1d3b1a23a376768fe35ee73f2"
  },
  "smoke_image.hex": {
+  "dispatch_sha256": "41e2a9148423dc712744ccb0a4438a96892ba74d15f7db3811b348b4c4060fd9",
   "dispatches": 5296,
   "lines": 8588,
-  "primed_at": 120,
+  "primed_at": 121,
   "sha256": "679351d294ead09d6a3b108c11fe2345e3c10a371c97999e8167e38149bae623"
  },
  "stress_image.hex": {
+  "dispatch_sha256": "5b038087319d88e447d3dee57032455fbf4d7d0578b899ce20919a69b78af7b3",
   "dispatches": 4696,
   "lines": 7588,
-  "primed_at": 120,
+  "primed_at": 121,
   "sha256": "bc54032c0c5f693de3b22307556d65013790fa3dc0e2209f661f6e80bde16a9c"
  }
 }

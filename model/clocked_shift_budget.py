@@ -195,12 +195,22 @@ def main():
     print("  --- a random read with repeated START ---")
     print("    S | dev+W | A | addrhi | A | addrlo | A | Sr | dev+R | A | data | A- | P")
     print()
-    # ⚠ THE REPEATED START IS COSTED AT 4 ACTIONS, NOT 1: SDA must be released
-    # high and SCL taken high again before SDA may fall, and after a clocked
-    # ACK the clock is left HIGH, so the sequence is SCL low, SDA high, SCL
-    # high, then OP_START. Costing it at 1 would be the optimistic error.
-    REPEATED_START = 4
-    STOP_SEQ = 3            # SDA low, SCL high, OP_STOP
+    # ⛔⛔ RULING TX8 -- MEASURED ON THE WIRE (2026-10-08), AND IT DEPENDS ON
+    # WHAT THE CONDITION FOLLOWS. This read "after a clocked ACK the clock is
+    # left HIGH" and costed the repeated START at 4. The bench says:
+    #   * after a clocked SHIFTIN (an ACK slot the chip READS) the trailing
+    #     COLLECT takes SCL LOW. A repeated START is then SDA high, SCL high,
+    #     START = 3; a STOP is SDA low, SCL high, STOP = 3.
+    #   * after a clocked SHIFT (a byte, or the master's ACK/NACK) SCL is left
+    #     HIGH. A STOP must take it low first: SCL low, SDA low, SCL high,
+    #     STOP = 4. With 3, a last bit of 1 -- EVERY NACK -- puts SDA low while
+    #     SCL is high, which is a spurious START (measured: 'START, STOP' on
+    #     the wire instead of 'STOP').
+    # The read below ends on the master NACK, so its STOP is 4; its repeated
+    # START follows the slave's ACK, so it is 3. Net: unchanged.
+    REPEATED_START = 3      # after a clocked SHIFTIN: SDA high, SCL high, START
+    STOP_SEQ = 3            # after a clocked SHIFTIN: SDA low, SCL high, STOP
+    STOP_AFTER_SHIFT = 4    # after a clocked SHIFT: SCL low first
     rows = []
     # RULED: every master byte is 1 action + 1 ACK action; the byte read IN is
     # one clocked SHIFTIN(count=8); the master NACK is one clocked SHIFT(1).
@@ -210,7 +220,7 @@ def main():
              + RULED_PER_BYTE       # dev+R
              + 1                    # clocked SHIFTIN(8): the data byte
              + 1                    # clocked SHIFT(1): the master NACK
-             + STOP_SEQ
+             + STOP_AFTER_SHIFT     # the NACK is a SHIFT: SCL is left high
              + 2)                   # OP_REARM + the parked OP_REARM
     rows.append(("RULED clocked", ruled))
     # Scaffolded: the master bytes keep their ACK scaffolding, and reading a

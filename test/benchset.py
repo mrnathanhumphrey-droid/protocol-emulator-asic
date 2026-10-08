@@ -71,7 +71,7 @@ EXCLUDED = {
 XFAIL = {("tb_verdict", "pipeline")}
 
 NEEDS_NBYTES = {"tb_tx", "tb_half", "tb_i2c", "tb_csat", "tb_jlane", "tb_status",
-                "tb_fifo", "tb_lock", "tb_w",
+                "tb_fifo", "tb_lock", "tb_w", "tb_ckack", "tb_cktx",
                 "tb_rxbw", "tb_trace", "tb_witness", "tb_pinrange"}
 
 #: ⛔⛔ PLUSARGS READ BY A **SHARED INCLUDE**, with their default declared ONCE.
@@ -252,6 +252,36 @@ CONFIG = {
         "srcs": [],
         "arms": [("ckheavy", ["+IMG=test/ckheavy_image.hex", "+NCYC=20000",
                               "+WARMUP=2000"])],
+    },
+    # ⭐ RULING TX4 -- clocked transmit values over widths 1..8, MSB/LSB, ACK
+    # or not, empty/refill. Verdicts in `test/run_cktx.py` (CI); this arm
+    # runs it once fed, on an image that exists on disk, so it is swept.
+    "tb_cktx": {
+        "srcs": [],
+        "arms": [("ckfive", ["+IMG=test/ckfive_image.hex", "+NCYC=20000",
+                             "+STARVE=0", "+STARVE_LEN=0"])],
+    },
+    # ⭐ RULING ACK (b)-(c) -- the clocked I2C read against a stretching peer.
+    # Its verdicts (chip bytes == sigrok bytes) live in `test/run_ckack.py`,
+    # which is local (sigrok); this arm runs the bench in the sweep so it is
+    # linted and counted and Layer V sees it.
+    # ⭐ `+DEVW=85` MAKES `ckread_image`'s FIRST BYTE A READ ADDRESS: its lane
+    # is LSB-FIRST (no order in its header), so 0x85 goes out as 1010 0001 =
+    # A1 on the wire (A1 itself went out as 85 and the peer, rightly, never
+    # answered -- measured, the first try of this arm). So the peer's read
+    # path (R/W = 1, the data presentation, the second-byte reload, the
+    # master's NACK) runs in the swept set, and `LATE` runs the
+    # late-data stretch -- the peer code ruling ACK added, covered here
+    # rather than only by the local sigrok gate.
+    "tb_ckack": {
+        "srcs": ["test/fram_i2c.v"],
+        "arms": [("ckread_late", ["+IMG=test/ckread_image.hex",
+                                  "+NCYC=40000",
+                                  "+DUMP=probe_ckack_sweep.bin", "+DEVW=85",
+                                  "+DEVR=A1"],
+                  # LATE_SKIP: the first 4 read bits at the fall, the rest
+                  # late -- both arms of the peer's presentation choice
+                  {"LATE": 300, "LATE_SKIP": 4})],
     },
     # ⭐⭐ THE TWO HOST STATUS BITS, ACTUALLY SET (Wilson's ruling (a) item 1).
     # The coverage sweep found that `lane_underrun` (pe_engine.v:1627) and

@@ -138,7 +138,8 @@ class Lane:
 
 class Dispatch:
     __slots__ = ("lane", "act", "idx", "phase", "ptr", "retire", "clk",
-                 "armed", "consumed", "t", "reactive", "t_rise", "t_next")
+                 "armed", "consumed", "t", "reactive", "t_rise", "t_next",
+                 "loaded")
 
     def __init__(self, lane, act, idx, phase, ptr, retire, clk, armed,
                  consumed, t=0, reactive=False, t_rise=None):
@@ -164,6 +165,10 @@ class Dispatch:
         # second copy of the gap rule in the composer, and two copies of a rule
         # this arc has already changed once is how they drift apart.
         self.t_next = None
+        # ⭐ RULING TX3: did THIS dispatch load the next host byte into the
+        # transmit register. Not in `row()`, so the recorded trace is
+        # unchanged; `ck_load_at` in the generated table is read from it.
+        self.loaded = False
 
     def row(self):
         return [self.lane, self.act, self.idx, self.phase, self.ptr,
@@ -180,11 +185,21 @@ D_PERIOD, L_SYNC, TIMEOUT = 20, 3, 4000
 
 def run_action(lane, act_index, op, nbits, tx_byte=0, peer_bits=None,
                stretch=0, timeout=TIMEOUT, d=D_PERIOD,
-               m_eligible_at_rise=False):
+               m_eligible_at_rise=False, next_byte=0, m_load_anyphase=False):
     """Dispatch-by-dispatch expansion of ONE clocked action.
 
     `peer_bits` is what the peer puts on the data line, consumed in order.
     `stretch` is CYCLES the peer holds the clock low past the high phase.
+    `tx_byte` is the transmit REGISTER at the action's start (register order:
+    bit 0 goes out first); `next_byte` is what the host load puts there.
+
+    ⛔⛔ RULING TX3 -- THE LOAD POINT IS PART OF THE SEMANTICS. A SHIFT of n
+    bits emits register bit k on its k-th LOW and LOADS the next host byte on
+    its LAST LOW, after that bit is out -- so the next action starts with a
+    whole fresh byte. `m_load_anyphase` is the pre-fix silicon (silicon fix
+    #2), kept reachable so I11 has a must-fire: the load fired on the first
+    dispatch, of EITHER phase, at which n-1 bits had gone out -- the HIGH after
+    the (n-1)-th LOW -- and the n-th LOW sent the next byte's first bit.
 
     ⛔⛔ THE LANE IS PARKED AFTER THE HIGH PHASE, ARM-STYLE. Its next dispatch
     is RELEASED BY THE OBSERVED RISE, not by its timestamp, so a stretch of any
@@ -220,11 +235,17 @@ def run_action(lane, act_index, op, nbits, tx_byte=0, peer_bits=None,
     pending = None          # a rise armed; the lane is parked until it arrives
     t = 0                   # the release time of the dispatch about to run
     reactive = False        # was THIS dispatch released by the rise
+    reg = tx_byte           # the transmit register, register order
+    did_load = False
 
     while True:
         armed = False
         consumed = None
         retire = False
+        loaded = False
+        if (op == SHIFT and m_load_anyphase and not did_load
+                and bits_done == nbits - 1 and lane.phase == HIGH):
+            reg, did_load, loaded = next_byte, True, True   # the pre-fix load
         # ⛔ RECORD THE PHASE THIS DISPATCH EXECUTES, captured BEFORE the body
         # mutates it. The first version read `lane.phase` afterwards and every
         # row came out "LOW" -- a trace that cannot distinguish the phases is
@@ -239,8 +260,12 @@ def run_action(lane, act_index, op, nbits, tx_byte=0, peer_bits=None,
             # the old corpus idiom had.
             lane.clk = 0
             if op == SHIFT:
-                lane.tx_sent.append((tx_byte >> bits_done) & 1)
+                lane.tx_sent.append(reg & 1)
+                reg >>= 1
                 lane.data_driven = True
+                # ⭐ THE LOAD: on the LAST LOW, after its bit is out (TX3)
+                if bits_done == nbits - 1 and not did_load:
+                    reg, did_load, loaded = next_byte, True, True
             else:
                 lane.data_driven = False      # condition (a): RELEASED
                 # consume the bit captured during the previous idle window
@@ -278,6 +303,7 @@ def run_action(lane, act_index, op, nbits, tx_byte=0, peer_bits=None,
 
         out.append(Dispatch(lane.name, act_index, i, ph_exec, lane.ptr,
                             retire, lane.clk, armed, consumed, t, reactive))
+        out[-1].loaded = loaded
 
         # ---- the gap to the NEXT dispatch -------------------------------
         # ⛔⛔ A PARK, NOT A RACE, AND THE HIGH PERIOD IS COUNTED FROM THE RISE
@@ -370,9 +396,26 @@ def high_widths(disp):
     return out
 
 
-def check_invariants(op, nbits, disp, lane, period=None):
-    """I1-I10. Returns a list of violations."""
+def check_invariants(op, nbits, disp, lane, period=None, tx_byte=None):
+    """I1-I12. Returns a list of violations."""
     bad = []
+    # ⛔⛔ I11 -- A SHIFT LOADS THE NEXT HOST BYTE EXACTLY ONCE, ON ITS LAST LOW
+    # (ruling TX3). The pre-fix silicon loaded on the HIGH before it, and every
+    # count, gap and width this model checked stayed exact while the bytes
+    # were wrong -- so the load point is checked as itself.
+    if op == SHIFT:
+        lows = [i for i, d in enumerate(disp) if d.phase == LOW]
+        loads = [i for i, d in enumerate(disp) if d.loaded]
+        if lows and loads != [lows[-1]]:
+            bad.append("I11: host load at dispatch(es) %s, expected exactly "
+                       "the last LOW (%d)" % (loads, lows[-1]))
+    # ⛔ I12 -- THE BITS ON THE WIRE ARE THE REGISTER's, IN ORDER: bit k on the
+    # k-th LOW. Checked when the caller names the register it started with.
+    if op == SHIFT and tx_byte is not None:
+        want = [(tx_byte >> k) & 1 for k in range(nbits)]
+        got = lane.tx_sent[-nbits:]
+        if got != want:
+            bad.append("I12: sent %s, the register holds %s" % (got, want))
     want = expand(op, nbits)
     # ⛔ THE RECORDED PHASES, not a recomputation. The first version rebuilt the
     # sequence from scratch starting at LOW, which made I1 unfireable: it could
@@ -539,10 +582,31 @@ def selftest():
         disp[0].retire = True
         return check_invariants(SHIFT, 2, disp, lane)
 
+    # (e) THE PRE-FIX SILICON (fix #2): the TX load on the HIGH phase
+    def load_anyphase():
+        lane = Lane()
+        disp = run_action(lane, 0, SHIFT, 8, tx_byte=0xDA, next_byte=0x5B,
+                          m_load_anyphase=True)
+        return check_invariants(SHIFT, 8, disp, lane, tx_byte=0xDA)
+
+    # (f) ... which also sends a wrong BIT, and I12 must see that by itself.
+    # ⚠ The next byte's bit 0 must DIFFER from the register's bit 7, or the
+    # wrong bit is the right one by luck: with 0x5B after 0xDA both are 1 and
+    # this arm passed vacuously when first written. 0xC4 (bit 0 = 0).
+    def load_anyphase_value():
+        lane = Lane()
+        disp = run_action(lane, 0, SHIFT, 8, tx_byte=0xDA, next_byte=0xC4,
+                          m_load_anyphase=True)
+        for x in disp:
+            x.loaded = False                 # hide the load point from I11
+        return check_invariants(SHIFT, 8, disp, lane, tx_byte=0xDA)
+
     cases = [("no phase reset at action start", no_reset, "I1"),
              ("the pointer advances twice per bit", ptr_twice, "I2"),
              ("a receive with no trailing consume", no_collect, "I4"),
-             ("two retires in one action", two_retires, "I3")]
+             ("two retires in one action", two_retires, "I3"),
+             ("TX load on the HIGH phase (pre-fix #2)", load_anyphase, "I11"),
+             ("... and its wrong 8th bit", load_anyphase_value, "I12")]
     for label, fn, want in cases:
         bad = fn()
         hit = [b for b in bad if b.startswith(want)]
@@ -558,6 +622,11 @@ def selftest():
     d = run_action(lane, 0, SHIFTIN, 8)
     lane2 = Lane("tmp"); lane2.ptr = lane.ptr; lane2.rx = lane.rx
     clean = check_invariants(SHIFTIN, 8, d, lane2, period=D_PERIOD)
+    for n in range(1, 9):                    # and every SHIFT width, valued
+        lane = Lane()
+        d = run_action(lane, 0, SHIFT, n, tx_byte=0xDA, next_byte=0x5B)
+        clean += check_invariants(SHIFT, n, d, lane, period=D_PERIOD,
+                                  tx_byte=0xDA)
     print("    %-40s %s" % ("the unmutated model is silent",
                             "ok" if not clean else "*** %s" % clean[0]))
     if clean:
@@ -719,6 +788,35 @@ def main():
         for opnum, cnt, ndisp, opname, n in rows:
             fh.write("    if (op == %d && cnt == %-2d) ck_expect = %-3d;"
                      "  // %s, %d bit(s)\n" % (opnum, cnt, ndisp, opname, n))
+        fh.write("  end\nendfunction\n")
+        # ⛔⛔ RULING TX3 -- THE VALUE SEMANTICS, MEASURED FROM THE MODEL TOO.
+        # `ck_load_at`: the 1-based dispatch of a clocked SHIFT at which the
+        # next host byte is loaded. `ck_tx_bit`: which REGISTER bit its k-th
+        # LOW puts on the wire (found by running one-hot registers).
+        fh.write("\n/* ruling TX3: the clocked SHIFT's load point and bit "
+                 "order, MEASURED from the\n * model (silicon fix #2 moved the"
+                 " load off the HIGH phase). -1 = not a SHIFT. */\n")
+        fh.write("function integer ck_load_at;\n  input integer cnt;\n"
+                 "  begin\n    ck_load_at = -1;\n")
+        for cnt in range(0, 8):
+            disp = run_action(Lane(), 0, SHIFT, cnt + 1, tx_byte=0,
+                              next_byte=0xFF)
+            at = [i for i, x in enumerate(disp) if x.loaded]
+            assert len(at) == 1, at
+            fh.write("    if (cnt == %d) ck_load_at = %-2d;  // SHIFT, %d "
+                     "bit(s)\n" % (cnt, at[0] + 1, cnt + 1))
+        fh.write("  end\nendfunction\n")
+        fh.write("function integer ck_tx_bit;\n  input integer k;\n"
+                 "  begin\n    ck_tx_bit = -1;\n")
+        for k in range(8):
+            hit = []
+            for j in range(8):
+                lane = Lane()
+                run_action(lane, 0, SHIFT, 8, tx_byte=1 << j)
+                if lane.tx_sent[k] == 1:
+                    hit.append(j)
+            assert len(hit) == 1, (k, hit)
+            fh.write("    if (k == %d) ck_tx_bit = %d;\n" % (k, hit[0]))
         fh.write("  end\nendfunction\n")
     print()
     print("  bounds table -> %s (%d entries, measured)" % (vh, len(rows)))

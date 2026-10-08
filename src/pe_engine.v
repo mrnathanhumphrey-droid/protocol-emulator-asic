@@ -2826,10 +2826,23 @@ module pe_engine #(
           // ---- the host data channel (F1), and its sticky flag ----------
           // ⛔ underrun is a STICKY FLAG, NEVER A STALL: a stall would make C
           //    unbounded, which is the clock-stretch conclusion a third time.
+          // ⛔⛔ SILICON FIX #2 (ruling TX1): ON A CLOCKED SHIFT THE LOAD IS
+          //    GATED TO THE LOW PHASE. `tx_bitp` advances on LOW only, but this
+          //    test ran at EVERY writeback, so the HIGH phase after the 7th
+          //    LOW already read `tx_bitp == a_cnt` and loaded the next byte:
+          //    the 8th LOW put that byte's first bit on the wire and every
+          //    later byte drifted one bit (5B, 5B, ... went out 00, B5, 6A,
+          //    D5). Every clocked check measured edges and timing, never
+          //    values, so the dispatch stream was exact and the bytes wrong.
+          //    `M_TX_LOAD_ANYPHASE` restores the ungated test.
 `ifdef M_SHARED_BITP
-          if (a_op == OP_SHIFT && l_bitp_shared == a_cnt) begin
+          if (a_op == OP_SHIFT && (!ck_shift || ck_is_low) && l_bitp_shared == a_cnt) begin
 `else
+`ifdef M_TX_LOAD_ANYPHASE
           if (a_op == OP_SHIFT && tx_bitp[cur] == a_cnt) begin
+`else
+          if (a_op == OP_SHIFT && (!ck_shift || ck_is_low) && tx_bitp[cur] == a_cnt) begin
+`endif
 `endif
             if (host_valid) begin
               // REVERSED ON AN MSB-FIRST LANE. The shift path still walks

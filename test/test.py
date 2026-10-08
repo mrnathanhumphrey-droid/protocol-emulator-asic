@@ -1096,3 +1096,75 @@ async def test_sda_hold_and_setup(dut):
                   "(min %d over %d releases)"
                   % (n_mv, hold, worst_hold, setup, worst_su, n_su))
     assert_host_fed(dut, hostq)
+
+
+def decode_i2c(tr):
+    """Bytes framed by START/STOP off an `i2c_oe_trace` (open-drain: a pin
+    whose enable is set is LOW, a released one HIGH). -> [byte, ...], the 8
+    data bits of each 9-clock group, MSB first as the wire carries them."""
+    out, bits, ps, pd = [], [], 1, 1
+    for scl_oe, sda_oe in tr:
+        s = 0 if scl_oe == "1" else 1
+        d = 0 if sda_oe == "1" else 1
+        if s and ps and d != pd:
+            bits = []                                   # START or STOP
+        if s and not ps:
+            bits.append(d)
+            if len(bits) == 9:
+                out.append(int("".join(str(b) for b in bits[:8]), 2))
+                bits = []
+        ps, pd = s, d
+    return out
+
+
+@cocotb.test()
+async def test_clocked_tx_bytes_at_the_pins(dut):
+    """SILICON FIX #2 (ruling TX6), PINS ONLY: a clocked SHIFT sends the byte
+    the host pushed. 0x5B in, 0x5B out, every transaction.
+
+    The clocked SHIFT's host load used to fire on the HIGH phase after the 7th
+    bit, so the 8th bit was the next byte's first and the stream drifted one
+    bit per byte: 5B fed went out 00, B5, 6A, D5. Every timing check passed
+    it. This reads the BYTES off `uio_oe` alone, so it holds at gate level,
+    where nothing internal exists. The program is one open-drain lane, MSB
+    first: START, a clocked 8-bit SHIFT, a clocked ACK slot, STOP. The first
+    byte out is the reset 0x00 (documented: the register resets to 0).
+    ⛔ Must-fire: built with `M_TX_LOAD_ANYPHASE` this test FAILS in RTL
+    simulation with the drifting pattern.
+    """
+    sda, scl, d = P_SDA, P_SCL, 70
+    prog = [pe_isa.act(pe_isa.OP_START, sda, 0, d),
+            pe_isa.act_shift_clocked(sda, d, nbits=8, q=0),
+            pe_isa.act_shiftin_clocked(sda, d, nbits=1),
+            pe_isa.act(pe_isa.OP_LEVEL, sda, 0, d),
+            pe_isa.act(pe_isa.OP_LEVEL, scl, 1, d),
+            pe_isa.act(pe_isa.OP_STOP, sda, 1, d),
+            pe_isa.act(pe_isa.OP_REARM, 0, 1, d)]
+    park = pe_isa.ACT_BASE + len(prog) * pe_isa.ACT_BYTES
+    prog.append(pe_isa.act(pe_isa.OP_REARM, 0, 0, 500))
+    hdrs = [pe_isa.hdr(sda, scl, 0, d, 2, 2 * d, 3 * d, pe_isa.ACT_BASE,
+                       order=pe_isa.ORDER_MSB)]
+    hdrs += [pe_isa.hdr(p, p, 0, 500, 2, 200, 240, park)
+             for p in range(8) if p not in (sda, scl)][:4]
+    img = list(pe_isa.full_store(b"".join(hdrs) + b"".join(prog)))
+    await run_loaded(dut, img, feed=False)
+
+    async def feed_5b():
+        # ⭐ ONE BYTE VALUE, so a push dropped on a full queue changes nothing
+        # the check reads; paced, because gate level has no depth to read
+        while True:
+            await push_nibble(dut, 0x5, 0)
+            await push_nibble(dut, 0xB, 0)
+            await ClockCycles(dut.clk, 300)
+    cocotb.start_soon(feed_5b())
+    tr = await i2c_oe_trace(dut, 12000)
+    got = decode_i2c(tr)
+    dut._log.info("clocked TX bytes at the pins: %s"
+                  % " ".join("%02X" % b for b in got))
+    assert len(got) >= 5, ("only %d byte(s) on the wire in 12000 cycles -- "
+                           "nothing to judge" % len(got))
+    bad = [(i, b) for i, b in enumerate(got[1:], 1) if b != 0x5B]
+    assert not bad, ("CLOCKED TX BYTES WRONG: 5B pushed, the wire carried %s "
+                     "(byte, index) %s -- the drifting pattern 00 B5 6A D5 is "
+                     "the pre-fix host load (silicon fix #2)"
+                     % (" ".join("%02X" % b for b in got), bad[:4]))

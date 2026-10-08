@@ -178,7 +178,7 @@ CLASSIFIED = {
     # other lane, with the lane still LIVE -- the flag must report, never
     # stall. The entry is removed rather than kept, because a stale OWED claim
     # says something is untested when it is tested.
-    ("src/pe_engine.v", 2858, "v_line", "case"): (
+    ("src/pe_engine.v", 2871, "v_line", "case"): (
         UNREACHABLE,
         "The dispatch FSM's defensive `default`. `st` is declared `[1:0]` with "
         "three encodings ST_IDLE/ST_DRIVE/ST_WB = 2'd0..2'd2 at line 666; "
@@ -245,7 +245,7 @@ CLASSIFIED = {
     # `case (st)`, so none of the dispatch arm's own guards dominate it --
     # which is why it carries its own, and why `gate_program_index` classifies
     # both writes as members of the program-indexed family.
-    ("src/pe_engine.v", 2897, "v_branch", "else"): (
+    ("src/pe_engine.v", 2910, "v_branch", "else"): (
         OWED,
         "The `l_pin[i] < N_PINS` guard on the hold expiry. Its `else` is "
         "REACHABLE, not unreachable: a lane may legally name the RESERVED data "
@@ -334,29 +334,11 @@ CLASSIFIED = {
     # by fixing a program that had been under-exercising the peer all along,
     # which is worth more than the nine points: it means the earlier "the peer
     # model is exercised" claims were measuring less than they sounded like.
-    # ⭐ A POINT ONLY VERILATOR 5.053 EMITS. The pinned suite adds
-    # CONDITIONAL-EXPRESSION coverage (`cond_then`/`cond_else`) that 5.032 did
-    # not, so adopting the newer release introduced a point class, not just
-    # different counts. Same family as 208 below: both arms of `shin[0]` on the
-    # device byte, i.e. the READ transaction, which no program performs.
-    ("test/fram_i2c.v", 207, "v_branch", "cond_then"): (
-        OWED,
-        "`phase <= shin[0] ? P_RDATA : P_AHI` -- the R/W bit's TRUE arm, i.e. "
-        "the device byte asking for a READ. Every frame ever put on the bus "
-        "has been a WRITE, so this arm has never been taken; it is the same "
-        "missing transaction as 208 and 239 and is closed by the same test (a "
-        "read with R/W = 1). ⚠ It appears in the uncovered set only under "
-        "Verilator 5.053, which emits conditional-expression points 5.032 did "
-        "not -- so a toolchain bump can ADD owed points without the design "
-        "changing, and that is a reason to adopt a release with its measured "
-        "diff rather than silently."),
-    ("test/fram_i2c.v", 208, "v_branch", "if"): (
-        OWED,
-        "The READ transaction: `shin[0]` set at P_DEV, i.e. R/W = 1. Every "
-        "frame ever put on the bus has been a WRITE -- this arm's count is 0 "
-        "against 13 executions of the address-match. ⚠ ALREADY OWED to Wilson "
-        "in `docs/SPEC_V4_I2C_CERTIFIED.md` §6; coverage found it "
-        "independently, which is the point of the sweep."),
+    # ⭐⭐ THE READ TRANSACTION IS PAID (ruling ACK / TX9): the R/W = 1 arm,
+    # the shout load, and the read-data presentation (old 207, 208, 239) are
+    # covered by `tb_ckack`'s swept arm, which addresses the peer with A1 and
+    # reads -- the first program ever to. The gate retired the entries
+    # ("DEBT PAID, ENTRY STALE"), as it should.
     # ⭐ RETIRED by ruling (a)2: `P_ALO` is reached by `i2caddr_image.hex`
     # (`dev | addrhi | addrlo`, 3 bytes) under `tb_i2c +TXB=3`, and the claim
     # is stronger than the count -- the bench asserts the peer's assembled
@@ -365,7 +347,7 @@ CLASSIFIED = {
     # ⛔ `P_WDATA` (228, below) STAYS OWED AND IS NOT REACHABLE WITH THIS
     # IDIOM: the framing costs `51 + 60n` bytes, so a fourth byte is 291
     # against a 256-byte store. That is a ruling, not a missing test.
-    ("test/fram_i2c.v", 228, "v_line", "case"): (
+    ("test/fram_i2c.v", 266, "v_line", "case"): (
         OWED,
         "⛔ P_WDATA -- SO NO BYTE HAS EVER BEEN WRITTEN INTO THE PEER'S "
         "MEMORY. `mem[addr] <= shin` lives here and its count is 0. The "
@@ -376,11 +358,6 @@ CLASSIFIED = {
         "by a foreign decoder -- but the FRAM write itself has never "
         "completed, and the two are easy to conflate. ⇒ One more address byte "
         "and one more data byte in the program reaches this and 223."),
-    ("test/fram_i2c.v", 239, "v_branch", "if"): (
-        OWED,
-        "The read-data presentation (`selected && rw && phase == P_RDATA`). "
-        "Count 0 against 270 executions of the enclosing `else`. Downstream "
-        "of 208: no read transaction exists to reach it."),
     # ---- test/fram_spi.v --------------------------------------------------
     # ⛔⛔ ONE FINDING, EIGHTEEN POINTS: the SPI peer's ENTIRE command decoder
     # has never executed. `byte_done` never becomes 1 at an `negedge sck` with
@@ -432,6 +409,31 @@ for _k, _what in (
     CLASSIFIED[("test/fram_spi.v", _k[0], _k[1], _k[2])] = (
         OWED, _SPI_FAMILY + "This point is " + _what + ".")
 
+# ⛔⛔ RULING TX5 -- SEVEN "PAID" POINTS WERE PAID BY THE BUG, AND THE CREDIT IS
+# RETRACTED. The block comment above records that the self-clocked corpus paid
+# seven of the decoder's points. MEASURED after silicon fix #2: it paid them
+# with MISALIGNED BYTES. The corpus feeds `5B 01 7A C7`, which holds neither
+# READ (03) nor WRITE (02); the pre-fix load drifted the stream a bit per byte
+# and the drifted bytes happened to decode as those opcodes. With the bytes
+# correct, the READ/WRITE path is dark again. The same lesson as the fix: a
+# coverage count is an EDGE measurement too -- it says a branch ran, not that
+# the bytes that ran it were the ones the program meant.
+_SPI_DRIFT = (
+    "Covered before silicon fix #2 ONLY BY MISALIGNED BYTES: the corpus feed "
+    "(5B 01 7A C7) carries no READ (03) or WRITE (02) opcode, and the pre-fix "
+    "drift happened to form one. Owed to the FRAM write + random read "
+    "programs, which send the opcodes on purpose. This point is ")
+for _k, _what in (
+        ((134, "v_line", "case"), "the READ/WRITE opcode arm"),
+        ((138, "v_line", "case"), "the P_AHI phase"),
+        ((146, "v_line", "case"), "the P_ALO phase"),
+        ((149, "v_branch", "else"), "the READ fork at P_ALO, not taken"),
+        ((154, "v_line", "case"), "the P_DATA phase"),
+        ((155, "v_line", "elsif"), "the WRITE arm inside P_DATA"),
+        ((160, "v_branch", "else"), "the write-enable latch, not honoured")):
+    CLASSIFIED[("test/fram_spi.v", _k[0], _k[1], _k[2])] = (
+        OWED, _SPI_DRIFT + _what + ".")
+
 #: ⚠ TOGGLE CEILINGS -- uncovered toggle points per file, which may only FALL.
 #: ⛔ Measured, not chosen: these are the values of the sweep that shipped with
 #: this gate. A ratchet seeded from a guess is a ratchet that permits a
@@ -472,8 +474,18 @@ TOGGLE_CEILING = {
     # models instead of two bits per clock, so `fram_spi` went 54 -> 30
     # uncovered toggle points and `fram_i2c` 94 -> 93. The old idiom was
     # not merely verbose -- it was reaching less of the peer.
-    "test/fram_i2c.v": 93,
-    "test/fram_spi.v": 30,
+    # ⛔⛔ RAISED BY RULING TX (measured, Verilator 5.053), each for a stated
+    # reason and not to make the gate pass:
+    #   fram_i2c 93 -> 98: ruling ACK's LATE-mode registers. `late_n` is 32
+    #     bits and the swept arm stretches 300 cycles, so its high bits never
+    #     toggle; the request/seen counters likewise only reach a few values.
+    #   fram_spi 30 -> 54: the SAME retraction as `_SPI_DRIFT` above. The
+    #     toggles the self-clocked corpus "paid" (54 -> 30) were paid by the
+    #     pre-fix silicon's MISALIGNED bytes forming READ/WRITE opcodes; with
+    #     silicon fix #2 the corpus sends 5B 01 7A C7 and the decoder's
+    #     address and data registers go quiet again. Owed to the FRAM programs.
+    "test/fram_i2c.v": 98,
+    "test/fram_spi.v": 54,
 }
 
 #: ⛔⛔ EVERY ANCHOR CARRIES ITS SOURCE TEXT (Wilson's ruling). A coverage
@@ -510,7 +522,7 @@ ANCHOR_TEXT = {
     # ("Add it to ANCHOR_TEXT"); I had simply not met it.
     ("src/pe_engine.v", 2325):
         "if (l_mode[cur]) begin",
-    ("src/pe_engine.v", 2897):
+    ("src/pe_engine.v", 2910):
         "if (l_pin[i] < N_PINS[PINW-1:0]) begin",
     ("src/pe_engine.v", 2229):
         "if (clk_real) begin",
@@ -526,21 +538,15 @@ ANCHOR_TEXT = {
         "default: pst <= P_SCAN;",
     ("src/pe_engine.v", 2475):
         "default: ;",
-    ("src/pe_engine.v", 2858):
+    ("src/pe_engine.v", 2871):
         "default: st <= ST_IDLE;",
     # `src/project.v` 557 -- `if (RX_SERIAL != 0) begin` -- is gone with the
     # parameter. ⭐ THE ANCHOR IS WHAT MADE THAT SAFE TO DO: the source text
     # was recorded beside the line number, so the deletion had to account for
     # the anchor instead of leaving a live number pointing at whatever moved
     # into line 557.
-    ("test/fram_i2c.v", 207):
-        "phase    <= shin[0] ? P_RDATA : P_AHI;",
-    ("test/fram_i2c.v", 208):
-        "if (shin[0]) shout <= mem[addr];",
-    ("test/fram_i2c.v", 228):
+    ("test/fram_i2c.v", 266):
         "P_WDATA: begin",
-    ("test/fram_i2c.v", 239):
-        "if (selected && rw && phase == P_RDATA) begin",
     ("test/fram_spi.v", 113):
         "if (cs_n) begin",
     ("test/fram_spi.v", 126):
@@ -551,6 +557,17 @@ ANCHOR_TEXT = {
         "OP_RDSR: begin",
     ("test/fram_spi.v", 133):
         "OP_RDID: begin shout <= 8'h04; drive <= 1'b1; phase <= P_DATA; end",
+    # ruling TX5: the seven points the pre-fix drift had paid
+    ("test/fram_spi.v", 134):
+        "OP_READ, OP_WRITE: begin phase <= P_AHI; drive <= 1'b0; end",
+    ("test/fram_spi.v", 138):
+        "P_AHI: begin",
+    ("test/fram_spi.v", 146):
+        "P_ALO: begin",
+    ("test/fram_spi.v", 154):
+        "P_DATA: begin",
+    ("test/fram_spi.v", 155):
+        "if (opcode == OP_WRITE) begin",
     # ⭐ 149 AND 160 KEEP THEIR ANCHORS: only one arm of each was paid (the
     # not-taken fork), so the taken arm is still owed and still anchored.
     ("test/fram_spi.v", 149):
@@ -1146,7 +1163,7 @@ def check_full_case() -> int:
     # skipping the check. Ruling TF moved them again: 1810 -> 1971,
     # 2249 -> 2410, 2632 -> 2793 (the same text match as ANCHOR_TEXT), and
     # TF2-R again: 1971 -> 2033, 2410 -> 2475, 2793 -> 2858.
-    for line in (2033, 2475, 2858):
+    for line in (2033, 2475, 2871):
         sel, arms = _case_arms(lines, line)
         if sel is None:
             print("    line %-5d *** no enclosing `case` found -- the waiver's"
