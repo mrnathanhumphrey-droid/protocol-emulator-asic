@@ -491,3 +491,36 @@ amendment does not supply them.
 **MEASURED**, with "written proof under revision", not as proved.
 `gate_j_proof_anchors` keeps premises P1–P10, because they are RTL facts and
 the red-team did not touch them.
+
+## A3 — Ruling TF changes P3, P4, P7 and P9 (2026-10-07)
+
+The 50 MHz timing fix changed four premises. The anchors in
+`gate_j_proof_anchors.py` were updated with the RTL, and `PORT_SPEC.md` §0
+has the details.
+
+| premise | was | is |
+|---|---|---|
+| P3 | the port serves the **same-cycle** EDF winner's invalid head first | it serves the **previous cycle's** winner (`winner_q`), re-checked live. A winner's head refill starts **one cycle later** |
+| P4 | spare fills at the pointer `pl`, and a winner-first refill **moved the pointer** to `winner + 1` | spare fills at the pointer `prr`. A winner-first refill **does not move it** (P4r) |
+| P7 | the select is a serial loop over combinational keys | a tree, **proved equal** to the loop (`formal/argmin_equiv.sby`), over **registered** keys |
+| P9 / P9w | `rel_due` and `ready` were combinational over `now`, `l_timestamp` and `l_hcnt` | the same values, held in registers computed from next-state inputs (P9t, P9h). The streams are byte-identical on every shipped admissible image (`test/run_lockstep.py`) |
+
+### Theorem 1 is affected, and the measurement shows it
+
+Theorem 1's arithmetic is `4 + 4 + 1 = 9`. It assumed the port starts the
+winner's head refill at the first `P_SCAN` after the lane becomes the winner.
+Under the new P3 the refill starts one cycle later. **The derivation as
+written no longer covers the RTL.** Re-derived with `winner_q`, the bound is
+expected to be `10`. That is for the formal proof to fix, not this amendment.
+
+`test/run_jlane.py` on the TF RTL (1M cycles, arms A and C):
+- arm A (`d = 12..16`): worst `sum_L` is **9** on lane 4 (8 on lanes 0–3).
+  It was **7** on the pre-TF RTL. The pre-registered falsifier (`sum > 9`)
+  did **not** fire, but the margin is now **zero**.
+- arm C (`8, 100, 100, 100, 100`): `sum_L` is 8 on lane 0 and 0 elsewhere.
+  Lane 4's refill-queueing gap **fell from 40 to 4**, which is the TF3
+  pointer fix.
+
+Both arms are below `D*`, a region `pe_asm` refuses. **No published claim
+moves.** Theorem 3's statement is unaffected: above `D*`, branch 1 fires only
+during priming, before and after TF.

@@ -42,10 +42,16 @@ PREMISES = [
      "P_WAIT: pst <= P_CAP;"),
     ("P2b", "and the request state is registered before the read",
      "P_REQ:  pst <= P_WAIT;"),
-    ("P3", "WINNER-FIRST: the port serves the winner's invalid head first",
-     "if (winner_v && !l_actv[hix[winner]]) begin"),
-    ("P4", "spare fills are strictly lower priority (the else-if)",
-     "end else if (l_live[pl] && want_fetch(pl)) begin"),
+    # ⛔ RULING TF3 CHANGED P3 AND P4, AND THE ANCHORS SAY SO. Branch 1 now
+    # reads the REGISTERED winner (`winner_q`, the previous cycle's), re-
+    # checked live, and borrows the port WITHOUT moving the round-robin
+    # pointer, which is its own register `prr` (docs/PORT_SPEC.md §1).
+    ("P3", "WINNER-FIRST: the port serves the (registered) winner's invalid head first",
+     "if (winner_v_q && l_live[winner_q] && !l_actv[hix[winner_q]]) begin"),
+    ("P4", "spare fills are strictly lower priority (the else-if), at the pointer",
+     "end else if (l_live[prr] && want_fetch(prr)) begin"),
+    ("P4r", "only a round-robin refill advances the pointer (TF3)",
+     "if (!pbr1) prr <= (pl == LANE_LAST) ? {LW{1'b0}} : pl + 1'b1;"),
     ("P5", "dispatch is gated only on the head slot being valid",
      "if (l_actv[hix[winner]]) begin"),
     ("P6a", "writeback INVALIDATES the consumed head",
@@ -78,10 +84,19 @@ PREMISES = [
     # rise is timed absolutely, so it can -- by up to J_w1. W7's mode floor
     # refuses the short frames where J_w1 > 0 alone; under heavy contention
     # it is the D* sweep's job to measure (SPEC §25).
+    # ⛔ RULING TF1 REGISTERED BOTH TERMS. `due_q` is "the timestamp has
+    # arrived", computed one cycle ahead from the NEXT `now` and timestamp
+    # (P9t), and `hz_q` is "the hold counter is zero", written beside the
+    # counter (P9h). Equal to the old combinational terms in every cycle;
+    # the lockstep check and M_TF1_LATE are what hold that.
     ("P9", "readiness is that timestamp arriving (`rel_due`)",
-     "assign rel_due[gi] = l_live[gi] & ~diff[TS_W-1]"),
+     "assign rel_due[gi] = l_live[gi] & due_q[gi]"),
+    ("P9t", "the arrival term is computed from NEXT-state now and timestamp",
+     "due_q[ti] <= ~tf_diff(now_n, ts_n[ti]);"),
     ("P9w", "W1: ready also waits for the lane's own hold + setup",
-     "assign ready[gi] = rel_due[gi] & (l_hcnt[gi] == {HOLDW{1'b0}});"),
+     "assign ready[gi] = rel_due[gi] & hz_q[gi];"),
+    ("P9h", "the hold-zero term is written beside the counter",
+     "hz_q[i] <= (l_hcnt[i] == {{(HOLDW-1){1'b0}}, 1'b1});"),
 ]
 
 # the two bounds the document states -- if either number changes in the RTL's

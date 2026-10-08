@@ -1,0 +1,16 @@
+# Ruling TF4: tree five-way select == the serial loop, for every input.
+# Combinational, so an unbounded proof is a one-step induction.
+# Run: python formal/make_argmin_miter.py && sby -f formal/argmin_equiv.sby
+[options]
+mode prove
+depth 1
+
+[engines]
+smtbmc yices
+
+[script]
+read -formal argmin_miter.sv
+prep -top argmin_miter
+
+[files]
+build/argmin_miter.sv

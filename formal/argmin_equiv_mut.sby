@@ -1,0 +1,16 @@
+# Must-fire for argmin_equiv.sby: the same proof on a tree whose first node
+# breaks the lowest-index tie rule. It MUST FAIL (a counterexample is the pass).
+# Run: python formal/make_argmin_miter.py --mutate && sby -f formal/argmin_equiv_mut.sby
+[options]
+mode prove
+depth 1
+
+[engines]
+smtbmc yices
+
+[script]
+read -formal argmin_miter_mut.sv
+prep -top argmin_miter
+
+[files]
+build/argmin_miter_mut.sv

@@ -65,7 +65,12 @@ MINIMAL = 4          # lines of preprocessed diff that need no excuse
 # mutant -> (expected total diff lines, reason if above MINIMAL)
 EXPECT = {
     "M_NOOP_DRIVES":     (2, None),
-    "M_NO_REBASE":       (1, None),
+    # ⭐ TWO DELETED LINES SINCE RULING TF1: the rebase write in the lane block
+    # and the same rebase term in `ts_n`, the next-state timestamp the
+    # registered readiness reads. Both must go or the arms disagree.
+    "M_NO_REBASE":       (2, None),
+    # TF1's must-fire: the naive retiming (current values, not next-state)
+    "M_TF1_LATE":        (4, None),
     "M_PFETCH_NOWAIT":   (2, None),
     "M_BUF_NOINVAL":     (2, None),
     "M_BUF_SWAP":        (2, None),

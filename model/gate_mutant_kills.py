@@ -70,6 +70,9 @@ KILLERS = {
     "M_ACK_DRIVES_SDA": RUN_MUTANTS, "M_BUS_NO_PULLDOWN": RUN_MUTANTS,
     # -- dedicated gates ------------------------------------------------------
     "M_NO_STORE_FULL": "model/gate_store_full.py",
+    # RULING TF4: the naive retiming of TF1. The smoke bench PASSES on it;
+    # only an exact schedule comparison sees a one-cycle shift.
+    "M_TF1_LATE": "test/run_lockstep.py",
     "M_CK_OD_CLK_DRIVE": "test/gate_corpus_trace.py",
     "M_COMB_OUT": "model/gate_f2_local.py",
     # -- rulings K and U --------------------------------------------------------

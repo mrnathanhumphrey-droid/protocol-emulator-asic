@@ -49,6 +49,12 @@ TEMPS = {
         "the priming block's loop accumulator: written and read only inside "
         "that `always @(posedge clk)`; see the comment above it for why it is "
         "not an `always @*`.",
+    ("pe_engine.v", "hold_ld"):
+        "RULING TF1: the lane block's 'a DRIVE arm starts an SDA hold' flag. "
+        "Cleared at the top of the run branch, set by the four hold arms, read "
+        "at the one `l_hcnt` load and the matching `hz_q` write -- all inside "
+        "that one `always @(posedge clk)`. It exists so the counter and its "
+        "registered zero-flag have ONE write site and cannot disagree.",
 }
 SCRATCH = os.path.join(ROOT, "probe_rl1")
 WARN = re.compile(r"^%(?:Warning|Error)-([A-Z0-9_]+): (\S+?):(\d+):")

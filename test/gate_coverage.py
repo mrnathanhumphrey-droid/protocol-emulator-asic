@@ -118,20 +118,15 @@ CLASSIFIED = {
     # samples out of range and puts X on `ser_d`. Not a coverage point, so it
     # is not in this table -- it is an owed RULING.
 
-    # ---- the two tool-divergent points -----------------------------------
-    ("src/pe_engine.v", 1021, "v_branch", "if"): (
-        TOOL_DIVERGENT,
-        "The EDF arbiter's selection condition, `ready[k] && (!winner_v || "
-        "edf_key_off[k] < best)`, inside the unrolled `for` over lanes in an "
-        "`always @*`. 5.020 reports this arm UNCOVERED; 5.032 records it taken "
-        "**5,231,510 times** on byte-identical stimulus. ⭐ So the arm is "
-        "plainly exercised and 5.020's zero is an ATTRIBUTION artefact, not a "
-        "test gap -- both releases emit the same 72 branch points for this "
-        "file, so the disagreement is over which unrolled loop iteration the "
-        "point belongs to. ⛔ Counted as uncovered anyway, because the gate "
-        "must not pick the lenient reading of a disagreement it cannot "
-        "adjudicate."),
-    ("src/pe_engine.v", 1494, "v_branch", "if"): (
+    # ---- the tool-divergent point(s) -------------------------------------
+    # ⛔ RETIRED BY RULING TF2: the EDF arbiter's serial-loop condition
+    # `ready[k] && (!winner_v || edf_key_off[k] < best)` (old line 1021),
+    # which 5.020 reported uncovered and 5.032 recorded taken 5,231,510 times.
+    # For N_LANES = 5 the select is now a tree (proved equal to that loop,
+    # formal/argmin_equiv.sby); the loop survives only in the generate branch
+    # for other lane counts, which is not elaborated, so the point no longer
+    # exists to classify.
+    ("src/pe_engine.v", 1639, "v_branch", "if"): (
         TOOL_DIVERGENT,
         "`if (hdr_done && !prime_unp) primed_q <= 1'b1;` -- the prime scan's "
         "COMPLETION test, which sits AFTER the `for` over lanes, not inside "
@@ -151,7 +146,7 @@ CLASSIFIED = {
         "number out of the artefact; do not reconstruct it from memory."),
 
     # ---- src/pe_engine.v --------------------------------------------------
-    ("src/pe_engine.v", 1674, "v_branch", "else"): (
+    ("src/pe_engine.v", 1827, "v_branch", "else"): (
         UNREACHABLE,
         "H_IDLE (line 1134) with `hdr_done` ALREADY SET. Every assignment that puts the "
         "header FSM into H_IDLE clears `hdr_done` in the same non-blocking "
@@ -161,7 +156,7 @@ CLASSIFIED = {
         "the arm of a condition that is true on every entry. ⭐ Checked "
         "structurally by `check_h_idle_clears` below rather than asserted, "
         "because the claim is about two specific lines and would rot."),
-    ("src/pe_engine.v", 1810, "v_line", "case"): (
+    ("src/pe_engine.v", 1971, "v_line", "case"): (
         UNREACHABLE,
         "The prefetch FSM's defensive `default`. `pst` is declared `[2:0]` and "
         "its four encodings P_SCAN/P_REQ/P_WAIT/P_CAP are 3'd0..3'd3, all "
@@ -169,7 +164,7 @@ CLASSIFIED = {
         "⭐ Verified mechanically by `check_full_case` below, which reads the "
         "encodings out of the source -- a hand-counted enumeration is the sort "
         "of claim that survives the addition of a fifth state."),
-    ("src/pe_engine.v", 2249, "v_line", "case"): (
+    ("src/pe_engine.v", 2410, "v_line", "case"): (
         UNREACHABLE,
         "The opcode `case`'s `default`. The opcode field is 3 bits and ALL "
         "EIGHT encodings are named in arms -- OP_LEVEL, OP_SHIFT, OP_SHIFTIN, "
@@ -183,7 +178,7 @@ CLASSIFIED = {
     # other lane, with the lane still LIVE -- the flag must report, never
     # stall. The entry is removed rather than kept, because a stale OWED claim
     # says something is untested when it is tested.
-    ("src/pe_engine.v", 2632, "v_line", "case"): (
+    ("src/pe_engine.v", 2793, "v_line", "case"): (
         UNREACHABLE,
         "The dispatch FSM's defensive `default`. `st` is declared `[1:0]` with "
         "three encodings ST_IDLE/ST_DRIVE/ST_WB = 2'd0..2'd2 at line 666; "
@@ -250,7 +245,7 @@ CLASSIFIED = {
     # `case (st)`, so none of the dispatch arm's own guards dominate it --
     # which is why it carries its own, and why `gate_program_index` classifies
     # both writes as members of the program-indexed family.
-    ("src/pe_engine.v", 2660, "v_branch", "else"): (
+    ("src/pe_engine.v", 2832, "v_branch", "else"): (
         OWED,
         "The `l_pin[i] < N_PINS` guard on the hold expiry. Its `else` is "
         "REACHABLE, not unreachable: a lane may legally name the RESERVED data "
@@ -269,7 +264,7 @@ CLASSIFIED = {
     # clocked twin IS covered -- every clocked open-drain image runs at d = 9,
     # so the clamp sends them all down the direct path -- and the asymmetry is
     # the whole reason this one is debt rather than a waiver.
-    ("src/pe_engine.v", 2099, "v_branch", "else"): (
+    ("src/pe_engine.v", 2260, "v_branch", "else"): (
         OWED,
         "The `if (l_mode[cur])` inside the UNCLOCKED SHIFT's direct-drive arm, "
         "open-drain side. Reaching it needs an unclocked open-drain SHIFT whose "
@@ -283,7 +278,7 @@ CLASSIFIED = {
         "⚠ NOT waived as unreachable: it is reachable, by exactly the class "
         "of program the clamp was written for, and leaving the clamp's own "
         "fallback untested is how a safety path rots."),
-    ("src/pe_engine.v", 1970, "v_branch", "else"): (
+    ("src/pe_engine.v", 2131, "v_branch", "else"): (
         UNREACHABLE,
         "The local `if (pin_real)` inside the SELF-CLOCKED SHIFT's LOW phase. "
         "Its `else` cannot be taken: the enclosing case label is "
@@ -293,7 +288,7 @@ CLASSIFIED = {
         "at the enclosing arm -- and widening that window is refused, since the "
         "gate's own docstring records a `clk_real` 30 lines away falsely "
         "guarding a deliberately unguarded mutant arm."),
-    ("src/pe_engine.v", 2003, "v_branch", "else"): (
+    ("src/pe_engine.v", 2164, "v_branch", "else"): (
         UNREACHABLE,
         "The `if (clk_real)` around the LOW phase's CLOCK write. Unreachable "
         "`else`: this block runs only under `ck_shift`, which is DEFINED as "
@@ -301,14 +296,14 @@ CLASSIFIED = {
         "conjunct of the condition that got us here. ⚠ It is still written, "
         "because the guard must be visible at the indexed write rather than "
         "inferred through a wire's definition."),
-    ("src/pe_engine.v", 2023, "v_branch", "else"): (
+    ("src/pe_engine.v", 2184, "v_branch", "else"): (
         UNREACHABLE,
         "The same `if (clk_real)` around the HIGH phase's clock write, "
         "unreachable for the identical reason -- `ck_shift` carries "
         "`clk_real`. Both phases guard separately because a guard shared "
         "across two write groups is how the 1.6x refusal first failed: it "
         "suppressed the data write and let the clock write run anyway."),
-    ("src/pe_engine.v", 2093, "v_branch", "else"): (
+    ("src/pe_engine.v", 2254, "v_branch", "else"): (
         UNREACHABLE,
         "The local `if (pin_real)` inside the UNCLOCKED SHIFT body. Same "
         "structure as the clocked one at 1621 and unreachable for the same "
@@ -316,7 +311,7 @@ CLASSIFIED = {
         "CODE: inserting the clocked arm pushed the case label's own guard "
         "more than 60 lines away from five writes that were fine the day "
         "before, which is exactly the drift that window exists to detect."),
-    ("src/pe_engine.v", 2223, "v_branch", "if"): (
+    ("src/pe_engine.v", 2384, "v_branch", "if"): (
         UNREACHABLE,
         "`if (ck_shiftin & ack_drv[1]) pin_out[a_pin] <= ack_drv[0];` -- the "
         "TRUE arm cannot be taken in a clean build, because `ack_drv` is "
@@ -494,40 +489,44 @@ TOGGLE_CEILING = {
 #: ⇒ The gate reads the anchored line back and requires it to MATCH, so
 #: "copy, do not recall" is mechanised instead of remembered.
 ANCHOR_TEXT = {
-    ("src/pe_engine.v", 1021):
-        "if (ready[k] && (!winner_v || edf_key_off[k] < best)) begin",
-    ("src/pe_engine.v", 1494):
+    # ⛔ RULING TF: every pe_engine.v anchor below was RE-ANCHORED by matching
+    # its recorded text in the pre-TF file (c8a4126) to the TF file -- each
+    # text found once in the shift band (+145 .. +172), the two
+    # `if (clk_real) begin` in their original order. The serial-select entry
+    # (old 1021) is RETIRED: TF2 replaced that loop with a tree for
+    # N_LANES = 5, so the branch is no longer elaborated (see CLASSIFIED).
+    ("src/pe_engine.v", 1639):
         "if (hdr_done && !prime_unp) primed_q <= 1'b1;",
     # the self-clocked arms' redundant-by-construction guards. ⭐ TWO PAIRS
     # SHARE THEIR TEXT (`if (pin_real) begin` at 1621/1694, `if (clk_real)
     # begin` at 1630/1641), which is exactly why the anchor is keyed on the
     # LINE and the text is the drift check rather than the identifier.
-    ("src/pe_engine.v", 1970):
+    ("src/pe_engine.v", 2131):
         "if (pin_real) begin",
     # ⛔ THE TWO RULING-H ENTRIES NEED ANCHORS LIKE EVERY OTHER, and the
     # first version of them did not have any -- so `reanchor.py` could not move
     # them when the hold's own edits shifted the file, and the gate failed on a
     # classification that had slid off its line. The gate already demands this
     # ("Add it to ANCHOR_TEXT"); I had simply not met it.
-    ("src/pe_engine.v", 2099):
+    ("src/pe_engine.v", 2260):
         "if (l_mode[cur]) begin",
-    ("src/pe_engine.v", 2660):
+    ("src/pe_engine.v", 2832):
         "if (l_pin[i] < N_PINS[PINW-1:0]) begin",
-    ("src/pe_engine.v", 2003):
+    ("src/pe_engine.v", 2164):
         "if (clk_real) begin",
-    ("src/pe_engine.v", 2023):
+    ("src/pe_engine.v", 2184):
         "if (clk_real) begin",
-    ("src/pe_engine.v", 2093):
+    ("src/pe_engine.v", 2254):
         "if (pin_real) begin",
-    ("src/pe_engine.v", 2223):
+    ("src/pe_engine.v", 2384):
         "if (ck_shiftin & ack_drv[1]) pin_out[a_pin] <= ack_drv[0];",
-    ("src/pe_engine.v", 1674):
+    ("src/pe_engine.v", 1827):
         "H_IDLE: if (!hdr_done) begin",
-    ("src/pe_engine.v", 1810):
+    ("src/pe_engine.v", 1971):
         "default: pst <= P_SCAN;",
-    ("src/pe_engine.v", 2249):
+    ("src/pe_engine.v", 2410):
         "default: ;",
-    ("src/pe_engine.v", 2632):
+    ("src/pe_engine.v", 2793):
         "default: st <= ST_IDLE;",
     # `src/project.v` 557 -- `if (RX_SERIAL != 0) begin` -- is gone with the
     # parameter. ⭐ THE ANCHOR IS WHAT MADE THAT SAFE TO DO: the source text
@@ -1144,8 +1143,9 @@ def check_full_case() -> int:
     # they moved with the self-clocked arms: 1296 -> 1476, 1502 -> 1787,
     # 1701 -> 2079. ⚠ A stale number here degrades silently to "no enclosing
     # case found", which is why the gate says that out loud rather than
-    # skipping the check.
-    for line in (1810, 2249, 2632):
+    # skipping the check. Ruling TF moved them again: 1810 -> 1971,
+    # 2249 -> 2410, 2632 -> 2793 (the same text match as ANCHOR_TEXT).
+    for line in (1971, 2410, 2793):
         sel, arms = _case_arms(lines, line)
         if sel is None:
             print("    line %-5d *** no enclosing `case` found -- the waiver's"

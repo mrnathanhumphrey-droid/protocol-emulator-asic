@@ -109,12 +109,24 @@ CLOCKED_MUTANTS = [
      "*** FAIL clocked_conform[R4a]",
      "one dispatch frees BOTH slots; R4a is Theorem 3's P10 checked "
      "verbatim. (Also gate_port_demand, under Verilator.)"),
-    ("M_PFETCH_NOWAIT", "corpus_i2c", "i2c", "*** FAIL clocked_conform[M]",
+    # ⛔⛔ THE EXPECTED REASON MOVED WITH RULING TF2, AND THIS IS WHY. Under the
+    # mutant the FIRST refill files a never-written register: X in iverilog.
+    # The dispatched action is all-X, so that lane's timestamp goes X. The OLD
+    # serial select read `if (ready[k] && ...)`, and an X condition is FALSE
+    # in an `if` -- the X lane was silently DROPPED, the engine ran on, and
+    # Layer M later caught a filler fetch. The TREE select uses `?:`, which
+    # PROPAGATES the X into `winner`, so the engine wedges after one dispatch
+    # and progress.vh's liveness check is the first to fire.
+    # ⭐ Silicon has no X, and the clean design never makes one (TF4 lockstep:
+    # byte-identical streams). The defect is still caught where it is a
+    # 2-state fact: verilator_trace.sh with -DM_PFETCH_NOWAIT, MEASURED after
+    # TF on corpus_i2c -- SEEDS DISAGREE on both pairs.
+    ("M_PFETCH_NOWAIT", "corpus_i2c", "i2c", "*** FAIL progress.vh",
      "P_CAP samples the store before the read is registered, so it files the "
-     "PREVIOUS read's word. On a full-store image that is visible as a "
-     "capture of the store filler -- Layer M, the sentinel. (Under Verilator "
-     "--x-initial unique the same defect shows as seeds disagreeing, which is "
-     "verilator_trace.sh's arm.)"),
+     "PREVIOUS read's word -- on the first refill a never-written register, "
+     "X in iverilog, which the tree select propagates until nothing retires. "
+     "(Under Verilator --x-initial unique the same defect shows as seeds "
+     "disagreeing, which is verilator_trace.sh's arm.)"),
     ("M_ACK_DRIVES_SDA", "corpus_i2c", "i2c", "OD_HARD1",
      "the clocked ACK drives SDA as a PUSH-PULL HIGH on an open-drain net "
      "while the peer pulls low to acknowledge -- a SHORT. The trace shows "
@@ -317,7 +329,7 @@ MUTANTS = [
      "selects it. This is the double-buffer form of M-PREFETCH-STALE."),
     ("M_BUF_SWAP", "worse", STRESS_IMG,
      "invalidate the head but never swap to the prefetched successor",
-     "steady-state stall strictly worse than the baseline",
+     "more steady-state stall events than the baseline",
      "The dispatched action stays CORRECT -- `fetch_addr` sees an invalid head "
      "and refills it from `l_pc` -- so no correctness assertion fires. What "
      "breaks is the jitter. This is the mutant that certifies the SWAP, rather "
@@ -368,6 +380,22 @@ def make_stress():
 
 def steady(out):
     m = re.search(r"max prefetch stall, STEADY\s+:\s+(\d+)", out)
+    return int(m.group(1)) if m else None
+
+
+# ⛔⛔ THE "WORSE" MEASURE IS THE STALL-EVENT COUNT, NOT THE MAXIMUM, SINCE
+# RULING TF3. The stress image is overloaded and below D*, which is exactly
+# where TF3 changed the port's arbitration on purpose (a winner-first refill
+# no longer moves the round-robin pointer). There the single worst stall is
+# chaotic: MEASURED on `five_image`, baseline 7 -> 13 and M_BUF_SWAP 10 -> 11
+# across the fix, and on five other sub-D* delay sets the mutant's MAXIMUM
+# came out BELOW the baseline's. A maximum that a correct design can exceed
+# is the wrong witness for "the swap buys the J reduction".
+# ⭐ THE EVENT COUNT IS THE STEADY ONE: on `five_image` the mutant stalls 329
+# times against 246 (TF RTL) and 417 against 287 (pre-TF) -- strictly worse
+# on both, as a design that pays a full refill per dispatch must be.
+def stall_events(out):
+    m = re.search(r"stall EVENTS in steady state\s+:\s+(\d+)", out)
     return int(m.group(1)) if m else None
 
 
@@ -476,9 +504,10 @@ def main() -> int:
     print()
     base_out_flips = out           # the baseline run on the DEFAULT image
     make_stress()
-    base_stress = steady(run(base, STRESS_IMG))
-    print("      baseline steady-state stall on the stress image: %s"
-          % base_stress)
+    _bs_out = run(base, STRESS_IMG)
+    base_stress = stall_events(_bs_out)
+    print("      baseline on the stress image: %s steady-state stall events "
+          "(max stall %s)" % (base_stress, steady(_bs_out)))
     if base_stress is None:
         print("      *** the stress image produced no steady-state figure ***")
         return 1
@@ -505,10 +534,11 @@ def main() -> int:
             right = want in fired
             evidence = ", ".join(fired) if fired else "(none)"
         elif mode == "worse":
-            ms = steady(out)
+            ms = stall_events(out)
             killed = ms is not None and base_stress is not None and ms > base_stress
             right = killed
-            evidence = "steady %s vs baseline %s" % (ms, base_stress)
+            evidence = "stall events %s vs baseline %s (max stall %s)" % (
+                ms, base_stress, steady(out))
         else:   # "effect" -- a characterised survivor that must still DO something
             fl = flips(out)
             bl = flips(base_out_flips)

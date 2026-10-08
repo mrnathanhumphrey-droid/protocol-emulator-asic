@@ -182,13 +182,43 @@ module tb_fifo ();
   initial begin
     wait (loaded);
     repeat (20) @(negedge clk);
-    // ⭐ THE PHASE WALK. Each byte is two nibbles; after each byte an extra
-    // `phase` cycles of delay are inserted, and `phase` advances. Over one pop
-    // period some byte's LOW nibble must land on a pop.
+    // ⭐ THE PHASE WALK, ANCHORED TO AN OBSERVED POP. Each byte waits for an
+    // engine pop, then `phase` more cycles, then pushes its two nibbles; and
+    // `phase` advances by one. So the low nibble's landing point walks across
+    // the pop period ONE CYCLE AT A TIME, and every offset is tried within one
+    // period's worth of bytes.
+    // ⛔⛔ IT USED TO WALK IN ABSOLUTE TIME, `phase % 23` extra cycles per byte,
+    // and that was NOT exhaustive -- the comment above claimed a coincidence
+    // "must occur" and it was luck. Ruling TF moved priming one cycle later,
+    // which moved every pop on `tx_image` by exactly one cycle (MEASURED: the
+    // same pops, 1746 -> 1747, 1854 -> 1855, ...), and the old walk then missed
+    // every one of them. A walk whose coverage depends on where cycle 0 falls
+    // has not swept the phase.
+    // ⛔ FILL FIRST: `do_pop` is `e_host_pop & tx_valid`, so with an empty
+    // queue there is no pop to anchor to and the walk would wait forever.
+    // Two bytes fill the TXD = 2 queue; each step then pushes one per pop.
+    push_nib(4'hA, 2'd0, 3);
+    push_nib(4'h5, 2'd0, 3);
+    push_nib(4'hA, 2'd0, 3);
+    push_nib(4'h5, 2'd0, 3);
     for (phase = 0; phase < 400 && hits < 2; phase = phase + 1) begin
+      // ⛔ TOP THE QUEUE UP BEFORE EVERY ANCHOR. When the landing point walks
+      // past a pop, that pop falls inside the previous step's push and is not
+      // seen as an anchor -- two pops for one push -- and the 2-deep queue
+      // drains to empty just as the walk reaches the coincidence (MEASURED:
+      // phase 98 landed one cycle before a pop, then the queue emptied). A full
+      // queue at the coincidence is also the harder case: the push is accepted
+      // ONLY because the pop frees a slot in the same cycle.
+      while (dut.tx_cnt[0] < 2) begin
+        push_nib(4'hA, 2'd0, 3);
+        push_nib(4'h5, 2'd0, 3);
+      end
+      @(posedge clk);
+      while (!dut.do_pop) @(posedge clk);
+      @(negedge clk);
+      repeat (phase) @(negedge clk);
       push_nib(4'hA, 2'd0, 3);
       push_nib(4'h5, 2'd0, 3);
-      repeat (phase % 23) @(negedge clk);
     end
   end
 

@@ -1,0 +1,76 @@
+{
+ "_ncyc_after_priming": 60000,
+ "_recorded_from": "src/ at 5cb00c1 (pre-TF RTL; byte-equal snapshot checked)",
+ "census_image.hex": {
+  "dispatches": 2763,
+  "lines": 62686,
+  "primed_at": 120,
+  "sha256": "7405217fbb0498d86a92dbc80cb4e0d9338bc363a07578b160db42d8d2a10ab4"
+ },
+ "ckfive_image.hex": {
+  "dispatches": 5373,
+  "lines": 65076,
+  "primed_at": 132,
+  "sha256": "4b4df9cdc8f972d0a845f99592c5ee29d0c33949047f453e2b75dc009b929fe3"
+ },
+ "ckheavy_image.hex": {
+  "dispatches": 11237,
+  "lines": 70885,
+  "primed_at": 132,
+  "sha256": "b4292ea84ac7d0067d99195e2b0c754db96b04cc1d667edfba6347d428bd6fe8"
+ },
+ "ckod_image.hex": {
+  "dispatches": 3548,
+  "lines": 63123,
+  "primed_at": 128,
+  "sha256": "f6bf04fa2246af8e4f73491f85d9c20bab57da9e75f51fb76b636751a12f1621"
+ },
+ "ckread_image.hex": {
+  "dispatches": 1316,
+  "lines": 60320,
+  "primed_at": 116,
+  "sha256": "ea1e42fb71d83c8a2c3e204a0387b84f8e8187c0e8825b8d9d9bface6e2e9120"
+ },
+ "corpus_i2c.hex": {
+  "dispatches": 1319,
+  "lines": 60323,
+  "primed_at": 116,
+  "sha256": "aa745219ee179a77583b55b521e7a370d57366df577f5c4a6013d72b74398168"
+ },
+ "half_image.hex": {
+  "dispatches": 5360,
+  "lines": 65049,
+  "primed_at": 120,
+  "sha256": "eef3aa2568790d51442f9155bec018c2fe934bc803d4122b2a2cecf51af081a3"
+ },
+ "i2caddr_image.hex": {
+  "dispatches": 1448,
+  "lines": 60467,
+  "primed_at": 116,
+  "sha256": "aea3ac0931b0fa70f2a7b1313eb453a3dbf49f35adfb2275cfddadefceb9e450"
+ },
+ "i2cframe_image.hex": {
+  "dispatches": 1448,
+  "lines": 60467,
+  "primed_at": 116,
+  "sha256": "10b1aaed02661380f681007a1b5358b646994d56445451806d5d1b5666692411"
+ },
+ "rxfast_image.hex": {
+  "dispatches": 2980,
+  "lines": 62974,
+  "primed_at": 116,
+  "sha256": "42906c3e857654309ceade6470cf0580e05555e1d3b1a23a376768fe35ee73f2"
+ },
+ "smoke_image.hex": {
+  "dispatches": 5296,
+  "lines": 8588,
+  "primed_at": 120,
+  "sha256": "679351d294ead09d6a3b108c11fe2345e3c10a371c97999e8167e38149bae623"
+ },
+ "stress_image.hex": {
+  "dispatches": 4696,
+  "lines": 7588,
+  "primed_at": 120,
+  "sha256": "bc54032c0c5f693de3b22307556d65013790fa3dc0e2209f661f6e80bde16a9c"
+ }
+}

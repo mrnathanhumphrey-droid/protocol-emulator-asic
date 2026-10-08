@@ -203,6 +203,13 @@ GATES=(
   # floor (no pyRTA here), so this runs here: >= the recorded exact verdicts,
   # the old search shown failing, the step set shown complete.
   model/gate_spuri_candidates.py
+  # ⛔⛔ TF4 -- THE SCHEDULE FREEZE. The 50 MHz timing fix (registered
+  # readiness, tree select, registered prefetch winner) may change nothing
+  # where a claim is made: on the 12 shipped admissible images the dispatch
+  # and pin streams must be byte-identical to the pre-fix RTL's recorded
+  # digests. Must-fire: M_TF1_LATE (the naive retiming), which the smoke
+  # bench passes and this gate must not.
+  test/run_lockstep.py
   # ⛔⛔ M -- EVERY IMAGE WRITES THE WHOLE STORE. The store has no reset, and a
   # 51-byte image left 205 bytes holding power-up contents, one missing REARM
   # from running on real pins. Every image is now the program plus the defined

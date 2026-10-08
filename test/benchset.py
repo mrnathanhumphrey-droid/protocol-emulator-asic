@@ -71,7 +71,7 @@ EXCLUDED = {
 XFAIL = {("tb_verdict", "pipeline")}
 
 NEEDS_NBYTES = {"tb_tx", "tb_half", "tb_i2c", "tb_csat", "tb_jlane", "tb_status",
-                "tb_fifo",
+                "tb_fifo", "tb_lock",
                 "tb_rxbw", "tb_trace", "tb_witness", "tb_pinrange"}
 
 #: ⛔⛔ PLUSARGS READ BY A **SHARED INCLUDE**, with their default declared ONCE.
@@ -235,6 +235,14 @@ CONFIG = {
     "tb_half": {
         "srcs": [],
         "arms": [("default", ["+IMG=test/half_image.hex", "+NCYC=40000"])],
+    },
+    # ⭐ RULING TF4's schedule freeze. Its verdict lives in
+    # `test/run_lockstep.py`, which compares the printed stream with the
+    # pre-fix RTL's digests on 12 images; this arm runs it once on the A2
+    # subject so the bench is swept, linted and counted like every other.
+    "tb_lock": {
+        "srcs": [],
+        "arms": [("ckheavy", ["+IMG=test/ckheavy_image.hex", "+NCYC=20000"])],
     },
     # ⭐⭐ THE TWO HOST STATUS BITS, ACTUALLY SET (Wilson's ruling (a) item 1).
     # The coverage sweep found that `lane_underrun` (pe_engine.v:1627) and

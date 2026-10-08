@@ -4,15 +4,42 @@ Ruling TH2. This is the input for the Lean formalisation of the `D*`
 statement. It describes what `src/pe_engine.v` **does**, with a citation for
 every clause. It proves nothing.
 
-**Citations.** Line numbers are for `src/pe_engine.v` at `c8a4126`, the last
-commit that changed the RTL. Line numbers drift whenever a comment grows, so
-each clause also gives a **substring anchor**: text that must appear in the
-RTL verbatim. `model/gate_j_proof_anchors.py` checks anchors the same way. If
-the two disagree, the anchor wins.
+**Citations.** Line numbers are for `src/pe_engine.v` at the **Ruling TF
+commit**, which changed the RTL (§0). Line numbers drift whenever a comment
+grows, so each clause also gives a **substring anchor**: text that must appear
+in the RTL verbatim. `model/gate_j_proof_anchors.py` checks anchors the same
+way. If the two disagree, the anchor wins. §6's measurements were taken on the
+pre-TF RTL (`c8a4126` / `5cb00c1`) unless they say otherwise.
 
-⚠ **`J_LANE_PROOF.md` cites P4 as lines 1075–1082. Those lines are stale.**
-The branch now sits at 1772–1777 (§1 below). The premise's anchor is
-unchanged and still present.
+⚠ **`J_LANE_PROOF.md`'s premise table cites line numbers from before both
+TH2 and TF. Use the anchors.**
+
+## 0. Ruling TF: what changed in the RTL (for the Lean agent)
+
+Three changes for 50 MHz timing, all in `src/pe_engine.v`:
+
+| change | before | after | lines | anchor |
+|---|---|---|---|---|
+| **TF1** registered readiness and EDF key | `rel_due`, `ready` and `edf_key_off` were combinational over `now`, `l_timestamp`, `l_d` and `l_hcnt` | `due_q`, `hz_q` and `key_q` are registers that hold, **in every cycle, the value the old expressions had in that cycle**. They are computed one cycle ahead from next-state values: `now_n`, `ts_n` (the WB advance and the edge rebase), `ld_n` (the header write), and `l_hcnt`'s next value, written beside the counter | 1014–1024, 1405–1458, 2819–2827 | `due_q[ti] <= ~tf_diff(now_n, ts_n[ti]);` |
+| **TF2** tree select | serial loop, four dependent compares | a tree: `(0,1)` and `(2,3)`, then their winners, then lane 4. **Proved equal** to the serial loop for every input (`formal/argmin_equiv.sby`, SymbiYosys k-induction). The must-fire is a broken tie rule, which fails | 1046–1067 | `---- BEGIN ARGMIN TREE ----` |
+| **TF3** prefetch branch 1 | read the same-cycle `winner`; set `pl <= winner`, so the capture moved the round-robin position to `winner + 1` | reads the **previous cycle's** winner (`winner_q`, re-checked `l_live`). **Branch 1 no longer moves the round-robin pointer**, which is now its own register `prr`. `pl` is still the lane the in-flight refill serves | 1480–1490, 1923–1939, 1969 | `if (!pbr1) prr <= (pl == LANE_LAST) ? {LW{1'b0}} : pl + 1'b1;` |
+
+**What this means for the proof:**
+- **TF1 changes nothing observable.** The streams are byte-identical on every
+  shipped admissible image (`test/run_lockstep.py`, in CI). The must-fire
+  `M_TF1_LATE`, the naive retiming, moves all 12 streams.
+- **TF2 changes nothing.** It is proved, not measured.
+- **TF3 removes the starvation mechanism.** §1's "branch 1 relocates the
+  pointer" is gone. On the arm that starved a lane for 16,468 cycles, the
+  worst owed-fill wait is now 50 cycles to issue and 53 to capture over 4M
+  cycles, with at most 12 refills ahead, and it does not grow with run
+  length.
+  - Above `D*` branch 1 fires only during priming, as before. Priming now
+    finishes **one cycle later** on 7 of the 12 lockstep images. That is a
+    cold-start difference TF4 allows, and it is listed by `run_lockstep.py`.
+  - Branch 1 now starts a winner's head refill **one cycle later** than
+    before, because it reads `winner_q`. That bears on Theorem 1's
+    winner-blocked bound (§6).
 
 Constants: `N_LANES = k = 5`, `SPL = 2` slots per lane, `L_REFILL = 4`.
 
@@ -21,57 +48,63 @@ Constants: `N_LANES = k = 5`, `SPL = 2` slots per lane, `L_REFILL = 4`.
 ## 1. TH2a: how the port chooses which owed refill to serve
 
 There is one prefetch FSM. Its state is `pst ∈ {P_SCAN, P_REQ, P_WAIT, P_CAP}`
-and its lane pointer is `pl` (`:1339–1342`). The FSM runs only after the
-header load completes (`if (hdr_done)`, `:1757`). In a `P_SCAN` cycle it
-evaluates exactly one of three branches, in this order (`:1759–1781`):
+(`:1472`). It has two lane registers (`:1473–1490`):
+- `pl`, the lane the in-flight refill serves;
+- `prr`, the round-robin pointer (TF3).
+
+The FSM runs only after the header load completes (`if (hdr_done)`, `:1910`).
+In a `P_SCAN` cycle it evaluates exactly one of three branches, in this order
+(`:1912–1940`):
 
 | order | condition | action | lines | anchor |
 |---|---|---|---|---|
-| 1 | `winner_v && !l_actv[hix[winner]]`: the current EDF winner's **head** is invalid | serve the **winner's head**: `pl <= winner`, `pslot <= l_sel[winner]` (the head), `paddr <= l_pc[winner]`, go to `P_REQ` | 1767–1771 | `if (winner_v && !l_actv[hix[winner]]) begin` |
-| 2 | `l_live[pl] && want_fetch(pl)`: the lane **at the pointer** wants a fetch | serve lane `pl`: its **head if the head is empty, else its spare** (`pslot <= l_actv[hix[pl]] ? !l_sel[pl] : l_sel[pl]`), `paddr <= fetch_addr(pl)`, go to `P_REQ` | 1772–1777 | `end else if (l_live[pl] && want_fetch(pl)) begin` |
-| 3 | otherwise | advance the pointer: `pl <= (pl == LANE_LAST) ? 0 : pl + 1`. **This costs one cycle** per lane passed over. | 1778–1780 | `pl <= (pl == LANE_LAST) ? {LW{1'b0}} : pl + 1'b1;` |
+| 1 | `winner_v_q && l_live[winner_q] && !l_actv[hix[winner_q]]`: the **previous cycle's** EDF winner is still live and its **head** is invalid | serve that **winner's head**: `pl <= winner_q`, `pbr1 <= 1`, `pslot <= l_sel[winner_q]` (the head), `paddr <= l_pc[winner_q]`, go to `P_REQ`. **`prr` is not touched.** | 1923–1928 | `if (winner_v_q && l_live[winner_q] && !l_actv[hix[winner_q]]) begin` |
+| 2 | `l_live[prr] && want_fetch(prr)`: the lane **at the pointer** wants a fetch | serve lane `prr`: `pl <= prr`, `pbr1 <= 0`, its **head if the head is empty, else its spare**, `paddr <= fetch_addr(prr)`, go to `P_REQ` | 1929–1936 | `end else if (l_live[prr] && want_fetch(prr)) begin` |
+| 3 | otherwise | advance the pointer: `prr <= (prr == LANE_LAST) ? 0 : prr + 1`. **This costs one cycle** per lane passed over. | 1937–1939 | `prr <= (prr == LANE_LAST) ? {LW{1'b0}} : prr + 1'b1;` |
 
-After every capture the pointer moves to the lane **after** the one just
-served: `pl <= pl + 1 mod k` (`:1808`). This includes a capture issued
-through branch 1, where `pl` had been set to `winner`.
+After a **branch-2** capture the pointer moves to the lane after the one
+served: `if (!pbr1) prr <= pl + 1 mod k` (`:1969`). After a **branch-1**
+capture it does not move.
 
 **So the answers to TH2a, exactly:**
 
-- **Winner first.** Only the EDF winner's head jumps the queue (branch 1). A
-  non-winner whose head is invalid gets no priority. It is served by branch 2
-  when the pointer reaches it.
+- **Winner first.** Only the registered winner's head jumps the queue
+  (branch 1). A non-winner whose head is invalid gets no priority. It is
+  served by branch 2 when the pointer reaches it.
 - **Owed refills are served in round-robin order, by the position of the scan
   pointer.** Branch 2 ranks owed refills by nothing else: **not** by lane
   index, **not** by EDF key, **not** by age. Within one lane, branch 2 fills
   the head before the spare.
-- **Branch 1 relocates the pointer.** A winner-head refill sets `pl` to the
-  winner, and the capture then sets it to `winner + 1`. The round-robin
-  position is therefore reset by every branch-1 refill. Branch 1 is the only
-  way a lane can be passed over more than once per rotation (§6).
-- `want_fetch(ln)` (`:1404–1427`) returns true in exactly two cases:
+- **Branch 1 borrows the port without moving the pointer** (TF3). So every
+  owed refill is reached by the pointer within one rotation of branch-2 and
+  branch-3 steps. Branch-1 refills can be interleaved, and each costs
+  `L_REFILL`.
+  - Before TF3, branch 1 set `pl <= winner`, and the capture moved the scan to
+    `winner + 1`. That relocation is what starved a lane for 16,468 cycles
+    below `D*` (§6).
+- `want_fetch(ln)` (`:1549`) returns true in exactly two cases:
   - the lane's head is invalid; or
   - with `SPL > 1`, the spare is invalid and the head is **not** a chaining
     re-arm (`OP_REARM` with `level = 0`).
 
-  A chaining re-arm's spare is deliberately left unfilled (`:1421–1423`).
-- `fetch_addr(ln)` (`:1375–1388`) picks the address:
+  A chaining re-arm's spare is deliberately left unfilled.
+- `fetch_addr(ln)` (`:1520`) picks the address:
   - `l_pc` if the head is invalid (filling the head itself);
   - `l_base` if the head is a looping re-arm;
   - `l_fpc` otherwise (the successor pointer, advanced at every capture,
-    `:1806`).
+    `:1965`).
 - **The store read port has one other client**, the header load. It has
-  priority (`:1499–1541`), but it finishes (`hdr_done`) before the prefetch
-  FSM is enabled. During a run the prefetch is the only reader of the store
-  (`:1500–1502`).
+  priority (`:1645`), but it finishes (`hdr_done`) before the prefetch FSM is
+  enabled. During a run the prefetch is the only reader of the store.
 
 ## 2. TH2d: refill service time and the one-in-flight rule
 
 | fact | lines | anchor |
 |---|---|---|
-| The four states form a fixed walk: `P_SCAN → P_REQ → P_WAIT → P_CAP → P_SCAN`. Every transition after `P_SCAN` is unconditional. | 1795, 1797, 1807 | `P_REQ:  pst <= P_WAIT;` / `P_WAIT: pst <= P_CAP;` |
-| `P_CAP` writes the word and sets `l_actv[fix] <= 1`. `fix` is the slot **latched at the scan** (`pl`, `pslot`), not the lane's current head. | 1349, 1800–1801 | `wire [SIW-1:0]        fix = pl * SPL + (((SPL > 1) && pslot) ? 1 : 0);` |
-| The address is latched at the scan (`paddr`) and is not recomputed at `P_REQ`. A writeback while the refill is in flight cannot redirect it. | 1532–1538 | `s_wraddr <= paddr;` |
-| **One in flight.** `pst` is a single register. No new scan happens until `P_CAP` returns to `P_SCAN`, and nothing preempts a started refill. | 1340, 1758–1811 | `reg [2:0]             pst;` |
+| The four states form a fixed walk: `P_SCAN → P_REQ → P_WAIT → P_CAP → P_SCAN`. Every transition after `P_SCAN` is unconditional. | 1954, 1956, 1966 | `P_REQ:  pst <= P_WAIT;` / `P_WAIT: pst <= P_CAP;` |
+| `P_CAP` writes the word and sets `l_actv[fix] <= 1`. `fix` is the slot **latched at the scan** (`pl`, `pslot`), not the lane's current head. | 1494, 1957–1960 | `wire [SIW-1:0]        fix = pl * SPL + (((SPL > 1) && pslot) ? 1 : 0);` |
+| The address is latched at the scan (`paddr`) and is not recomputed at `P_REQ`. A writeback while the refill is in flight cannot redirect it. | 1683 | `s_wraddr <= paddr;` |
+| **One in flight.** `pst` is a single register. No new scan happens until `P_CAP` returns to `P_SCAN`, and nothing preempts a started refill. | 1472, 1911–1972 | `reg [2:0]             pst;` |
 
 **`L_REFILL = 4`** is counted from the `P_SCAN` cycle that issues the refill
 to the cycle after `P_CAP`, when the valid bit is visible. In TH3 the probe
@@ -80,22 +113,24 @@ sees the issue at the `P_REQ` sample and the valid bit three samples later.
 1 cycle. With all five lanes wanting, the port completes one refill every 4
 cycles.
 
-`M_PFETCH_NOWAIT` (`:1792–1796`) removes `P_WAIT`. It is a mutant, not a
+`M_PFETCH_NOWAIT` (`:1951–1955`) removes `P_WAIT`. It is a mutant, not a
 configuration.
 
 ## 3. TH2b: per-dispatch pipeline latencies
 
-Every term below is a combinational read of registered state unless stated.
+Unless stated, every term below is a combinational read of registered state.
+Since TF1, the time compare, the key and the hold test are themselves
+registers, holding the value the old expressions had in the same cycle.
 
 | stage | definition | lines | anchor |
 |---|---|---|---|
-| **release** | `rel_due[i] = l_live & (now − l_timestamp[i] ≥ 0) & ~(armed & no-timeout)`. The job is released in the cycle where `now == l_timestamp`. | 995–996 | `assign rel_due[gi] = l_live[gi] & ~diff[TS_W-1]` |
-| **eligible** | `ready[i] = rel_due[i] & (l_hcnt[i] == 0)`. **W1:** a lane is ineligible while its own SDA hold + setup counter runs. | 997–1001 | `assign ready[gi] = rel_due[gi] & (l_hcnt[gi] == {HOLDW{1'b0}});` |
-| **winner** | Minimum `edf_key_off` over the `ready` lanes. On a tie the lowest index wins (strict `<` in an ascending loop). It is combinational, so it is valid **in the same cycle** as `ready`. | 1004, 1016–1027 | `if (ready[k] && (!winner_v \|\| edf_key_off[k] < best)) begin` |
-| **decision** | In `ST_IDLE`, dispatch requires `primed && !config_err && winner_v`. An armed winner takes the timeout-halt branch instead. Otherwise: head valid → `st <= ST_DRIVE`, `cur <= winner`; head invalid → stall and count `jitter_cnt`. | 1828–1878 | `if (l_actv[hix[winner]]) begin` |
-| **DRIVE** | One cycle. The pin registers are written here (C9 = START). Always `st <= ST_WB`. | 1880–2252 | `st <= ST_WB;` |
-| **WB** | One cycle: `l_timestamp += a_dly` (absolute, P8); the slot lifecycle (§4); `st <= ST_IDLE` unconditionally. | 2254–2630 | `l_timestamp[cur] <= l_timestamp[cur] + {{(TS_W-DLY_W){1'b0}}, a_dly};` |
-| **next decision** | The cycle after WB. The FSM is a three-state cycle, so dispatches are **≥ 3 cycles apart** (`C = 3` spacing, `:2750–2768`). | 2628 | `st <= ST_IDLE;` |
+| **release** | `rel_due[i] = l_live & due_q[i] & ~(armed & no-timeout)`, where `due_q[i]` = `(now − l_timestamp[i] ≥ 0)` in this cycle (TF1, from `now_n`, `ts_n`). The job is released in the cycle where `now == l_timestamp`. | 1014–1015, 1451 | `assign rel_due[gi] = l_live[gi] & due_q[gi]` |
+| **eligible** | `ready[i] = rel_due[i] & hz_q[i]`, where `hz_q[i]` = `(l_hcnt[i] == 0)` in this cycle (TF1, written beside the counter). **W1:** a lane is ineligible while its own SDA hold + setup counter runs. | 1016–1020, 2822–2827 | `assign ready[gi] = rel_due[gi] & hz_q[gi];` |
+| **winner** | Minimum `edf_key_off` (= `key_q`, TF1) over the `ready` lanes. On a tie the lowest index wins. It is a tree since TF2, proved equal to the strict-`<` ascending loop. It is combinational over registers, so it is valid **in the same cycle** as `ready`. | 1024, 1046–1067 | `---- BEGIN ARGMIN TREE ----` |
+| **decision** | In `ST_IDLE`, dispatch requires `primed && !config_err && winner_v`. An armed winner takes the timeout-halt branch instead. Otherwise: head valid → `st <= ST_DRIVE`, `cur <= winner`; head invalid → stall and count `jitter_cnt`. | 1989–2039 | `if (l_actv[hix[winner]]) begin` |
+| **DRIVE** | One cycle. The pin registers are written here (C9 = START). Always `st <= ST_WB`. | 2041–2412 | `st <= ST_WB;` |
+| **WB** | One cycle: `l_timestamp += a_dly` (absolute, P8); the slot lifecycle (§4); `st <= ST_IDLE` unconditionally. | 2415–2790 | `l_timestamp[cur] <= l_timestamp[cur] + {{(TS_W-DLY_W){1'b0}}, a_dly};` |
+| **next decision** | The cycle after WB. The FSM is a three-state cycle, so dispatches are **≥ 3 cycles apart** (`C = 3` spacing, `:2922`). | — | `st <= ST_IDLE;` |
 
 **Measured** with the TH2b probe (`probe_tb_lat.v`). Over every decision after
 warm-up, for each listed image:
@@ -117,9 +152,10 @@ warm-up, for each listed image:
 - **W1's hold wait (P9w)** is 0 on every admissible arm. On `ckdense` it
   reaches 8, which shows the probe can see it. Bound: a hold is loaded with
   `SDA_HS = SDA_HOLD + SDA_SETUP = 18` at a DRIVE, and only on the K and W2
-  arms (`:2000`, `:2113`, `:2198`, `:2216`). It counts down every cycle, at
-  block level, whatever `st` is (`:2654–2667`). The pin lands at
-  `l_hcnt == SDA_SETUP1` (`:2659`).
+  arms. Since TF1 those arms raise `hold_ld` (`:2161`, `:2274`, `:2359`,
+  `:2377`) and the single load is at `:2819`. The counter counts down every
+  cycle, at block level, whatever `st` is (`:2820–2845`). The pin lands at
+  `l_hcnt == SDA_SETUP1` (`:2831`).
 
   ⇒ The lane is eligible again no earlier than 19 cycles after that DRIVE.
   Its next release waits `max(0, DRIVE + 19 − release)`. This is the
@@ -129,14 +165,14 @@ warm-up, for each listed image:
 
 Each lane has two slots, `hix[ln]` (the head) and `six[ln]` (the spare),
 selected by `l_sel[ln]` (`:738–739`). In `ST_WB`, exactly one of these arms
-runs (`:2502–2581`):
+runs (`:2663–2742`):
 
 | dispatch kind | condition | head invalidated? | `l_sel` flips? | refill owed? | lines |
 |---|---|---|---|---|---|
-| **held clocked re-dispatch** (mid-byte SHIFT/SHIFTIN phase) | `ck_hold_eff` | no | no | **none** (Amendment A1) | 2502–2540 |
-| **ordinary retire** | `a_op != OP_REARM` | **yes** | **yes** | **one**: the freed slot, now the spare | 2541–2562 |
-| **looping re-arm** | `OP_REARM`, `level = 1` | **yes** | **yes** | **one**, fetched from `l_base` | 2563–2571 |
-| **chaining re-arm** | `OP_REARM`, `level = 0` | no | no | **none**, and `want_fetch` leaves the spare unfilled | no arm: it matches none of 2502–2571 (`M_BUF_CHAINFLIP`, 2577–2581, is the mutant that adds one) |
+| **held clocked re-dispatch** (mid-byte SHIFT/SHIFTIN phase) | `ck_hold_eff` | no | no | **none** (Amendment A1) | 2663–2701 |
+| **ordinary retire** | `a_op != OP_REARM` | **yes** | **yes** | **one**: the freed slot, now the spare | 2702–2723 |
+| **looping re-arm** | `OP_REARM`, `level = 1` | **yes** | **yes** | **one**, fetched from `l_base` | 2724–2732 |
+| **chaining re-arm** | `OP_REARM`, `level = 0` | no | no | **none**, and `want_fetch` leaves the spare unfilled | no arm: it matches none of 2663–2732 (`M_BUF_CHAINFLIP`, 2738–2742, is the mutant that adds one) |
 
 **Which slot is the head, which is freed.** After a retiring WB of job `j`:
 
@@ -169,11 +205,11 @@ stall.
 
 | fact | lines | anchor |
 |---|---|---|
-| Reset clears every `l_actv` and `l_sel`. At `hdr_done` both slots of every lane are empty. | 1611, 1628, 1659, 1667 | `for (i = 0; i < NSLOT; i = i + 1) l_actv[i] <= 1'b0;` |
-| **Dispatch is gated on `primed`**, not on `hdr_done`. | 1828–1834 | `primed` (the `ifndef M_NO_PRIME` arm) |
-| **`now` does not advance until `primed`.** The schedule's `t = 0` begins after priming, so no job's response time contains a priming refill. | 771–786 | `else if (run && primed) now <= now + 1'b1;` |
-| `primed_q` latches **once**, when `hdr_done` holds and no live lane `want_fetch`es: both slots are full, except a chaining head's spare. Ordinary refill churn never revokes it. Only `!run` (HALT) clears it. | 1484–1497 | `if (hdr_done && !prime_unp) primed_q <= 1'b1;` |
-| Priming refills go through the same FSM (§1). With `now` frozen, a lane whose timestamp is already due is a `ready` winner with an invalid head, so branch 1 can fire during priming. TH3 counted exactly **one** branch-1 issue per run on every port-feasible arm, at cold start. | — | — |
+| Reset clears every `l_actv` and `l_sel`. At `hdr_done` both slots of every lane are empty. | 1759, 1776, 1807, 1815 | `for (i = 0; i < NSLOT; i = i + 1) l_actv[i] <= 1'b0;` |
+| **Dispatch is gated on `primed`**, not on `hdr_done`. | 1989–1995 | `primed` (the `ifndef M_NO_PRIME` arm) |
+| **`now` does not advance until `primed`.** The schedule's `t = 0` begins after priming, so no job's response time contains a priming refill. Since TF1 the condition is the wire `now_inc`, which the registered readiness also reads. | 771–786, 1405–1409 | `wire now_inc = run && primed;` |
+| `primed_q` latches **once**, when `hdr_done` holds and no live lane `want_fetch`es: both slots are full, except a chaining head's spare. Ordinary refill churn never revokes it. Only `!run` (HALT) clears it. | 1629–1642 | `if (hdr_done && !prime_unp) primed_q <= 1'b1;` |
+| Priming refills go through the same FSM (§1). With `now` frozen, a lane whose timestamp is already due is a `ready` winner with an invalid head, so branch 1 can fire during priming. TH3 counted exactly **one** branch-1 issue per run on every port-feasible arm, at cold start (pre-TF). With TF3 branch 1 reads `winner_q`, and priming ends one cycle later on 7 of 12 lockstep images. | — | — |
 
 **What holds before the first refill completes:**
 
@@ -197,10 +233,14 @@ refills and holds no deadlines.
   round-robin.** Measured on every port-feasible arm: `ISSUE head = 1`, the
   cold-start fill. On the d = 18 control branch 1 fires 49,919 times in 1M
   cycles, and arm C fires it 124,982 times.
-- **The arbitration is not starvation-free in general.** Below `D*`, on arm
+- **Pre-TF, the arbitration was not starvation-free.** Below `D*`, on arm
   `12, 12, 12, 12, 100`, one owed spare waited 16,468 cycles, with 2,473
-  refills served ahead of it. The cause is branch 1 relocating the pointer
-  (§1). Round-robin fairness therefore holds only while branch 1 is silent.
+  refills served ahead of it. The cause was branch 1 relocating the pointer.
+  **TF3 removed it:** on the same arm the worst wait is 48 / 50 cycles to
+  issue at 1M / 4M cycles (51 / 53 to capture), with at most 12 refills
+  ahead, and it does not grow. Branch 1 still borrows the port, so the bound
+  on an owed fill's wait must charge the branch-1 refills interleaved with
+  one rotation. It no longer has to charge a pointer reset.
 - **This is circular as a premise and must be proved, not assumed.** Branch 1
   fires only when a winner's head is invalid, which is the very event the
   theorem excludes. The natural shape is an **induction over owed refills**:

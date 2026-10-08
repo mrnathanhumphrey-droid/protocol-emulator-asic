@@ -89,3 +89,10 @@ coverage.dat
 
 # scratch diagnostics, like probe_* -- never suite artefacts
 test/diag_*.py
+
+# Ruling TF4's SymbiYosys proof: the miter is GENERATED from src/pe_engine.v
+# on every run (formal/make_argmin_miter.py), and sby writes one work
+# directory per .sby file -- neither is a source
+formal/build/
+formal/argmin_equiv/
+formal/argmin_equiv_mut/

@@ -779,11 +779,10 @@ module pe_engine #(
     // clock makes the refill latency elapse before t = 0 of the schedule
     // exists, so no job's response time can contain it.
     // ⛔ M_NO_PRIME removes both halves and the bench must fail.
-`ifdef M_NO_PRIME
-    else if (run)    now <= now + 1'b1;
-`else
-    else if (run && primed) now <= now + 1'b1;
-`endif
+    // ⭐ RULING TF1: the increment condition is the wire `now_inc`, declared
+    // below, so the registered readiness reads the SAME condition this block
+    // advances on rather than a second copy of it.
+    else if (now_inc) now <= now + 1'b1;
   end
 
   // =====================================================================
@@ -963,11 +962,29 @@ module pe_engine #(
   wire [N_LANES-1:0] rel_due;
   wire [TS_W-1:0]    edf_key_off [0:N_LANES-1];
 
+  // ⛔⛔ RULING TF1 -- READINESS AND THE EDF KEY ARE REGISTERED, COMPUTED ONE
+  // CYCLE AHEAD FROM NEXT-STATE VALUES. The 50 MHz slow-corner path started
+  // at `now`, ran through the 16-bit release compare and the key subtract,
+  // then the five-way select, into the dispatch and prefetch registers.
+  // Registering the compare and the key takes `now` off that path.
+  // ⭐ NOT A PIPELINE STAGE: `due_q`, `key_q` and `hz_q` hold, in every cycle,
+  // exactly the value the old combinational expression has in that cycle.
+  // They are computed from the NEXT values of `now`, `l_timestamp`, `l_d` and
+  // `l_hcnt` -- `now_n`, `ts_n`, `ld_n` below and the hold term in the
+  // sequential block -- so no lane becomes eligible one cycle earlier or
+  // later than before. Lockstep simulation against the old RTL is the check.
+  // ⛔ THE NAIVE VERSION IS THE MUTANT. Registering the CURRENT values (a
+  // plain retiming register) makes readiness lag a cycle: a lane that has
+  // just written back still reads its OLD timestamp for one cycle, and its
+  // next release is seen one cycle late. M_TF1_LATE builds exactly that.
+  reg  [N_LANES-1:0] due_q;                 // == (now - l_timestamp >= 0)
+  reg  [N_LANES-1:0] hz_q;                  // == (l_hcnt == 0)
+  reg  [TS_W-1:0]    key_q [0:N_LANES-1];   // == l_timestamp + l_d - now
+  reg                hold_ld;               // a DRIVE arm starts an SDA hold
+
   genvar gi;
   generate
     for (gi = 0; gi < N_LANES; gi = gi + 1) begin : g_ready
-      // ⭐ signed difference: ready when the stored timestamp has ARRIVED.
-      wire [TS_W-1:0] diff = now - l_timestamp[gi];
       // ⛔⛔ READINESS MUST NOT DEPEND ON THE PREFETCH. It used to read
       // `l_live & l_actv & ~diff[...]`, which conflated "I have this lane's
       // next action in a register" with "this lane's job has been RELEASED".
@@ -992,16 +1009,19 @@ module pe_engine #(
       // bench can count how often W1 actually delays a dispatch
       // (`rel_due & ~ready`). M_NO_HOLD_GATE drops the gate: the hold still
       // lands on time, and the data moves after SCL is released again.
-      assign rel_due[gi] = l_live[gi] & ~diff[TS_W-1]
+      // ⭐ TF1: `due_q` is the registered "timestamp has ARRIVED" (signed
+      // difference), `hz_q` the registered "hold counter is zero".
+      assign rel_due[gi] = l_live[gi] & due_q[gi]
                          & ~(l_armed[gi] & l_notmo[gi]);
 `ifdef M_NO_HOLD_GATE
       assign ready[gi] = rel_due[gi];
 `else
-      assign ready[gi] = rel_due[gi] & (l_hcnt[gi] == {HOLDW{1'b0}});
+      assign ready[gi] = rel_due[gi] & hz_q[gi];
 `endif
       // ⭐ deadline as an OFFSET FROM NOW, so a wrapped key still orders
       //   correctly. 1.6b is what bounds the spread that makes this sound.
-      assign edf_key_off[gi] = (l_timestamp[gi] + {{(TS_W-D_W){1'b0}}, l_d[gi]}) - now;
+      //   Registered by TF1; see `key_q`.
+      assign edf_key_off[gi] = key_q[gi];
     end
   endgenerate
 
@@ -1009,22 +1029,59 @@ module pe_engine #(
   // which is Ruling 1's condition (i): without the key registers this mux would
   // sit after the store read and the pipeline register would land behind the mux
   // it was added to avoid.
+  // ⛔⛔ RULING TF2 -- A TREE, NOT A CHAIN. The serial loop below compared
+  // lane k against the running best of lanes 0..k-1, four dependent compares
+  // deep. The tree compares (0,1) and (2,3) in parallel, then their winners,
+  // then lane 4: three deep.
+  // ⭐ THE TIE RULE IS PRESERVED BY CONSTRUCTION: at every node the HIGHER-
+  // index side wins only on a STRICT `<`, and every index on the left of a
+  // node is lower than every index on its right -- so equal keys keep the
+  // lowest index, exactly as the serial `<` did.
+  // ⭐ PROVED, NOT ARGUED: `formal/argmin_equiv.sby` extracts the text between
+  // the BEGIN/END markers from this file and proves it equal to the serial
+  // loop for every `ready` and every key (SymbiYosys, unbounded).
   reg [LW-1:0]   winner;
   reg            winner_v;
-  reg [TS_W-1:0] best;
-  integer        k;
-  always @* begin
-    winner   = {LW{1'b0}};
-    winner_v = 1'b0;
-    best  = {TS_W{1'b1}};
-    for (k = 0; k < N_LANES; k = k + 1) begin
-      if (ready[k] && (!winner_v || edf_key_off[k] < best)) begin
-        winner   = k[LW-1:0];
-        winner_v = 1'b1;
-        best  = edf_key_off[k];
+  generate if (N_LANES == 5) begin : g_argmin_tree
+  // ---- BEGIN ARGMIN TREE ----
+    reg            t1, t3, t23, t4, v01, v23, v03;
+    reg [LW-1:0]   i01, i23, i03;
+    reg [TS_W-1:0] k01, k23, k03;
+    always @* begin
+      t1  = ready[1] && (!ready[0] || edf_key_off[1] < edf_key_off[0]);
+      v01 = ready[0] | ready[1];
+      i01 = t1 ? 3'd1 : 3'd0;
+      k01 = t1 ? edf_key_off[1] : edf_key_off[0];
+      t3  = ready[3] && (!ready[2] || edf_key_off[3] < edf_key_off[2]);
+      v23 = ready[2] | ready[3];
+      i23 = t3 ? 3'd3 : 3'd2;
+      k23 = t3 ? edf_key_off[3] : edf_key_off[2];
+      t23 = v23 && (!v01 || k23 < k01);
+      v03 = v01 | v23;
+      i03 = t23 ? i23 : i01;
+      k03 = t23 ? k23 : k01;
+      t4  = ready[4] && (!v03 || edf_key_off[4] < k03);
+      winner   = t4 ? 3'd4 : i03;
+      winner_v = v03 | ready[4];
+    end
+  // ---- END ARGMIN TREE ----
+  end else begin : g_argmin_serial
+    // any other lane count keeps the serial form the tree is proved against
+    reg [TS_W-1:0] best;
+    integer        k;
+    always @* begin
+      winner   = {LW{1'b0}};
+      winner_v = 1'b0;
+      best  = {TS_W{1'b1}};
+      for (k = 0; k < N_LANES; k = k + 1) begin
+        if (ready[k] && (!winner_v || edf_key_off[k] < best)) begin
+          winner   = k[LW-1:0];
+          winner_v = 1'b1;
+          best  = edf_key_off[k];
+        end
       end
     end
-  end
+  end endgenerate
 
   // =====================================================================
   // THE DISPATCH PIPELINE -- C = 2, J = 1, C9 = START
@@ -1326,6 +1383,81 @@ module pe_engine #(
   wire [HDR_BYTES*8-1:0] hsh_n = {hsh[HDR_BYTES*8-9:0], s_rdata};
 
   // =====================================================================
+  // ⛔⛔ RULING TF1 -- THE NEXT-STATE VALUES THE REGISTERED READINESS READS
+  // =====================================================================
+  // Each wire is the value its register WILL hold after this edge, written
+  // from the same conditions the register's own write uses:
+  //   now_n  the `now` block: +1 when `now_inc`
+  //   ts_n   the lane block: ST_WB adds `a_dly` for `cur`; the edge capture's
+  //          rebase, written LATER in that block, wins over it; nothing moves
+  //          while `!run`
+  //   ld_n   the header unpack: `l_d[hl]` at H_RD on the header's last byte
+  // ⚠ `l_d` IS IN THE LIST BECAUSE OF ONE EDGE. The last lane's `l_d` is
+  // written on the same edge that sets `hdr_done`, and the prefetch reads the
+  // winner from the very next cycle -- so a key computed from the current
+  // `l_d` would be stale for exactly that cycle.
+  // ⛔ M_TF1_LATE registers the CURRENT values instead: the naive retiming,
+  // which makes every release, and every post-writeback readiness, a cycle
+  // late. It is the must-fire for this block.
+`ifdef M_NO_PRIME
+  wire now_inc = run;
+`else
+  wire now_inc = run && primed;
+`endif
+  wire [TS_W-1:0] now_n = now + {{(TS_W-1){1'b0}}, now_inc};
+  wire            hdr_wr = run && (hst == H_RD) && (hb == HB_LAST);
+  wire [TS_W-1:0] ts_n [0:N_LANES-1];
+  wire [D_W-1:0]  ld_n [0:N_LANES-1];
+  generate
+    for (gi = 0; gi < N_LANES; gi = gi + 1) begin : g_next
+      assign ts_n[gi] =
+          !run ? l_timestamp[gi]
+`ifndef M_NO_REBASE
+        : arm_hit[gi] ? ck_rebase[gi]
+`endif
+        : (st == ST_WB && cur == gi)
+            ? l_timestamp[gi] + {{(TS_W-DLY_W){1'b0}}, a_dly}
+            : l_timestamp[gi];
+      assign ld_n[gi] = (hdr_wr && hl == gi)
+          ? hsh_n[HDR_BYTES*8-2-2*PINW-DLY_W-CW -: D_W] : l_d[gi];
+    end
+  endgenerate
+
+  // the sign of a wrap-safe difference: 1 when `t` is still in the future
+  function tf_diff(input [TS_W-1:0] a, input [TS_W-1:0] t);
+    reg [TS_W-1:0] d;
+    begin
+      d = a - t;
+      tf_diff = d[TS_W-1];
+    end
+  endfunction
+
+  // its own loop index: sharing `i` with the lane block would make two
+  // always blocks write one variable on the same edge
+  integer ti;
+  always @(posedge clk or negedge rst_n) begin
+    if (!rst_n) begin
+      // `now`, every `l_timestamp` and every `l_d` reset to 0
+      due_q      <= {N_LANES{1'b1}};
+      for (ti = 0; ti < N_LANES; ti = ti + 1) key_q[ti] <= {TS_W{1'b0}};
+      winner_q   <= {LW{1'b0}};
+      winner_v_q <= 1'b0;
+    end else begin
+      for (ti = 0; ti < N_LANES; ti = ti + 1) begin
+`ifdef M_TF1_LATE
+        due_q[ti] <= ~tf_diff(now, l_timestamp[ti]);
+        key_q[ti] <= (l_timestamp[ti] + {{(TS_W-D_W){1'b0}}, l_d[ti]}) - now;
+`else
+        due_q[ti] <= ~tf_diff(now_n, ts_n[ti]);
+        key_q[ti] <= (ts_n[ti] + {{(TS_W-D_W){1'b0}}, ld_n[ti]}) - now_n;
+`endif
+      end
+      winner_q   <= winner;
+      winner_v_q <= winner_v;
+    end
+  end
+
+  // =====================================================================
   // PREFETCH -- refill one lane's action register per visit, round robin.
   // =====================================================================
   // same one-cycle-too-early bug, same fix
@@ -1338,7 +1470,20 @@ module pe_engine #(
   // header FSM, in a second place, which is why it is called out twice.
   localparam [2:0] P_SCAN = 3'd0, P_REQ = 3'd1, P_WAIT = 3'd2, P_CAP = 3'd3;
   reg [2:0]             pst;
-  reg [LW-1:0]          pl;
+  reg [LW-1:0]          pl;           // the lane the in-flight refill serves
+  // ⛔⛔ RULING TF3 -- THE ROUND-ROBIN POINTER IS ITS OWN REGISTER. It used
+  // to BE `pl`, so the winner-first branch, which sets `pl <= winner`, also
+  // moved the scan position to `winner + 1` after every capture. Below D*
+  // that starved a lane for 16,468 cycles (2,473 refills served ahead of
+  // it; docs/PORT_SPEC.md §6). `prr` is advanced ONLY by the round-robin
+  // path, so the winner-first branch borrows the port without moving it.
+  reg [LW-1:0]          prr;
+  reg                   pbr1;         // the in-flight refill came from branch 1
+  // ⭐ TF3: branch 1 reads the PREVIOUS cycle's winner, a register, so the
+  // prefetch scan is no longer at the end of the select path. Above D* the
+  // branch never fires after priming (TH3), so nothing there changes.
+  reg [LW-1:0]          winner_q;
+  reg                   winner_v_q;
   reg                   pslot;        // which slot this refill is filling
   reg [AW-1:0]          paddr;        // and from which address -- both latched
                                       // at the scan, see the arbiter comment
@@ -1557,6 +1702,9 @@ module pe_engine #(
       hdr_done <= 1'b0;
       pst      <= P_SCAN;
       pl       <= {LW{1'b0}};
+      prr      <= {LW{1'b0}};
+      pbr1     <= 1'b0;
+      hz_q     <= {N_LANES{1'b1}};          // every l_hcnt resets to 0
       // ⭐ RESET-HIGH on the pins is handled in the TOP module, not here:
       //   which pins can RELEASE differs between the two banks, and this
       //   module does not know the banks. See pe_top's reset comment.
@@ -1668,6 +1816,11 @@ module pe_engine #(
     end else begin
       rx_push <= 1'b0;
         host_pop <= 1'b0;   // one-cycle pulse; the consume site re-asserts
+      // ⭐ TF1: the DRIVE arms that start an SDA hold raise this instead of
+      // writing `l_hcnt` themselves; the one write, and the matching `hz_q`
+      // update, are in the hold-expiry block below. One site, so the counter
+      // and its registered zero-flag cannot disagree.
+      hold_ld = 1'b0;
 
       // ---------------- header load ----------------------------------
       case (hst)
@@ -1764,19 +1917,25 @@ module pe_engine #(
             // EMPTY HEAD on the EDF winner is the only case that can still
             // stall a dispatch, so it is served first; filling a SPARE is
             // speculative work that can wait. `want_fetch` folds both.
-            if (winner_v && !l_actv[hix[winner]]) begin
-              pl    <= winner;
-              pslot <= l_sel[winner];        // the head: it is what stalls
-              paddr <= l_pc[winner];
+            // ⭐ TF3: the registered winner, re-checked live -- a lane can halt
+            // (timeout, stretch fault) in the cycle after it won, and a refill
+            // for a halted lane is four cycles of port time for nothing.
+            if (winner_v_q && l_live[winner_q] && !l_actv[hix[winner_q]]) begin
+              pl    <= winner_q;
+              pbr1  <= 1'b1;
+              pslot <= l_sel[winner_q];      // the head: it is what stalls
+              paddr <= l_pc[winner_q];
               pst   <= P_REQ;
-            end else if (l_live[pl] && want_fetch(pl)) begin
+            end else if (l_live[prr] && want_fetch(prr)) begin
               // fill the head if empty, otherwise the spare
-              pslot <= l_actv[hix[pl]] ? (!l_sel[pl])
-                                                          : l_sel[pl];
-              paddr <= fetch_addr(pl);
+              pl    <= prr;
+              pbr1  <= 1'b0;
+              pslot <= l_actv[hix[prr]] ? (!l_sel[prr])
+                                                          : l_sel[prr];
+              paddr <= fetch_addr(prr);
               pst   <= P_REQ;
             end else begin
-              pl <= (pl == LANE_LAST) ? {LW{1'b0}} : pl + 1'b1;
+              prr <= (prr == LANE_LAST) ? {LW{1'b0}} : prr + 1'b1;
             end
           end
           // ⛔⛔ M_PFETCH_NOWAIT IS THE PRICE OF ALLOWLIST ENTRY #2. The reset
@@ -1805,7 +1964,9 @@ module pe_engine #(
             // exactly the successor of the action now resident.
             l_fpc[pl] <= paddr + ACT_BYTES[AW-1:0];
             pst       <= P_SCAN;
-            pl        <= (pl == LANE_LAST) ? {LW{1'b0}} : pl + 1'b1;
+            // ⛔ TF3: only a round-robin refill advances the pointer. A
+            // winner-first refill leaves it where the scan had reached.
+            if (!pbr1) prr <= (pl == LANE_LAST) ? {LW{1'b0}} : pl + 1'b1;
           end
           default: pst <= P_SCAN;
         endcase
@@ -1997,7 +2158,7 @@ module pe_engine #(
                     // not under-tested, they were unreachable.
                     l_hval[cur] <= 1'b0;
                     l_hoe[cur]  <= ~l_tx[cur][0];
-                    l_hcnt[cur] <= SDA_HS[HOLDW-1:0];
+                    hold_ld = 1'b1;
                   end
                   end
                   if (clk_real) begin
@@ -2110,7 +2271,7 @@ module pe_engine #(
                 // to carry were unreachable on their push-pull side.
                 l_hval[cur] <= 1'b0;
                 l_hoe[cur]  <= ~l_tx[cur][0];
-                l_hcnt[cur] <= SDA_HS[HOLDW-1:0];
+                hold_ld = 1'b1;
               end
               // ⛔⛔⛔ D2: THE CLOCK PIN HONOURS `l_mode` TOO, AND IT DID NOT.
               // It was driven `pin_out <= a_lvl; pin_oe <= 1` unconditionally,
@@ -2195,7 +2356,7 @@ module pe_engine #(
                   & pin_oe[a_pin]) begin
                 l_hval[cur] <= 1'b0;
                 l_hoe[cur]  <= 1'b0;
-                l_hcnt[cur] <= SDA_HS[HOLDW-1:0];
+                hold_ld = 1'b1;
               end else
 `endif
               // ⛔⛔ RULING W2: THE UNCLOCKED RELEASE IS HELD TOO. In the
@@ -2213,7 +2374,7 @@ module pe_engine #(
                   & ~ack_drv[1] & (a_pin == l_pin[cur]) & pin_oe[a_pin]) begin
                 l_hval[cur] <= 1'b0;
                 l_hoe[cur]  <= 1'b0;
-                l_hcnt[cur] <= SDA_HS[HOLDW-1:0];
+                hold_ld = 1'b1;
               end else
 `endif
               pin_oe[a_pin] <= ack_drv[1];      // release to sample (0)
@@ -2651,7 +2812,18 @@ module pe_engine #(
       // family `model/gate_program_index.py` enumerates: a program-controlled
       // pin index reaching an array, where `PINW = 4` encodes 16 values and
       // only N_PINS are real.
+      // ⭐ TF1: the hold LOAD, raised by a DRIVE arm. It sits BEFORE the
+      // countdown on purpose: the countdown's write is the later one, so for
+      // a lane whose counter is still running the countdown wins -- the same
+      // order the loads had when they were written inside the DRIVE arms.
+      if (hold_ld) l_hcnt[cur] <= SDA_HS[HOLDW-1:0];
       for (i = 0; i < N_LANES; i = i + 1) begin
+        // ⭐ TF1: `hz_q` is `l_hcnt == 0` for the NEXT cycle, written by the
+        // same branches that write the counter, in the same priority.
+        if (l_hcnt[i] != {HOLDW{1'b0}})
+          hz_q[i] <= (l_hcnt[i] == {{(HOLDW-1){1'b0}}, 1'b1});
+        else if (hold_ld && (i[LW-1:0] == cur))
+          hz_q[i] <= (SDA_HS[HOLDW-1:0] == {HOLDW{1'b0}});
         // ⛔ W1: the pin lands at SDA_SETUP + 1, SDA_HOLD cycles after the
         // load as before; the remaining SDA_SETUP counts are the setup the
         // gate on `ready` enforces before the lane's next dispatch.
