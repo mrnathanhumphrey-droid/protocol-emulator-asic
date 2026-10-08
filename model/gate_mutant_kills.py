@@ -105,6 +105,67 @@ SURVIVORS = {
 }
 
 
+#: ⛔⛔ RULING AC2 -- SCRATCH MUTANTS, REGISTERED. A mutant built into scratch
+#: from `src/`'s own text (so lock hygiene charges no harden for a test-only
+#: change) has no `ifdef` for `discover()` to find, and a mutant nothing
+#: tracks decays quietly -- this project has seen it. So each killer DECLARES
+#: its scratch mutants in a module-level `SCRATCH_MUTANTS = {name: what}`, and
+#: this table names the killer. Red if a declared one is unlisted, a listed one
+#: is declared nowhere (stale), the declaring file is not the listed killer,
+#: or the killer is run by nothing. The KILL is the killer's own verdict, as
+#: for `KILLERS`: each one reds when its scratch mutant survives.
+SCRATCH = {
+    # ruling W4: the slow-refill copy; the live subset kills it in CI
+    "S_W4_SLOW_REFILL": "test/run_w_sweep.py",
+    # ruling ACK (b): the wrong-instant SHIFTIN sampler; local (sigrok)
+    "S_CK_COMMANDED_RISE": "test/run_ckack.py",
+}
+
+
+def discover_scratch():
+    """{name: file} for every `SCRATCH_MUTANTS` dict declared at module level
+    in model/ and test/ (probe_* excluded)."""
+    import ast
+    found = {}
+    for base in ("model", "test"):
+        for p in sorted(glob.glob(os.path.join(ROOT, base, "**", "*.py"),
+                                  recursive=True)):
+            if os.path.basename(p).startswith("probe_"):
+                continue
+            with open(p, encoding="utf-8") as fh:
+                tree = ast.parse(fh.read(), filename=p)
+            rel = os.path.relpath(p, ROOT).replace(os.sep, "/")
+            for node in tree.body:
+                if (isinstance(node, ast.Assign) and isinstance(node.value,
+                                                                ast.Dict)
+                        and any(isinstance(t, ast.Name)
+                                and t.id == "SCRATCH_MUTANTS"
+                                for t in node.targets)):
+                    for k in node.value.keys:
+                        if isinstance(k, ast.Constant):
+                            found[k.value] = rel
+    return found
+
+
+def audit_scratch(found, table, ran):
+    probs = []
+    for m, f in sorted(found.items()):
+        if m not in table:
+            probs.append("scratch mutant %s (declared in %s) is UNLISTED"
+                         % (m, f))
+        elif table[m] != f:
+            probs.append("scratch mutant %s is declared in %s but listed "
+                         "against %s" % (m, f, table[m]))
+    for m, k in sorted(table.items()):
+        if m not in found:
+            probs.append("scratch mutant %s is listed but declared nowhere "
+                         "-- stale" % m)
+        if k not in ran:
+            probs.append("scratch mutant %s's killer %s is run by NOTHING "
+                         "(not CI, not run_a2)" % (m, k))
+    return probs
+
+
 def discover():
     """Every `ifdef`/`ifndef M_*` in the RTL and the bench includes."""
     found = set()
@@ -215,6 +276,19 @@ def main() -> int:
     if not probs:
         print("  every mutant is killed by a killer that runs, or declared")
 
+    # ---- AC2: scratch mutants ------------------------------------------
+    sfound = discover_scratch()
+    sprobs = audit_scratch(sfound, SCRATCH, ran)
+    print("  %d scratch mutant(s) declared by their killers" % len(sfound))
+    for m in sorted(SCRATCH):
+        k = SCRATCH[m]
+        print("    %-24s %-24s [%s]" % (m, k, "CI" if k in ggc.ci_gates()
+                                       else "run_a2" if k in ggc.a2_gates()
+                                       else "-"))
+    for p in sprobs:
+        print("  *** %s" % p)
+        rc = 1
+
     print()
     print("  --- must-fire ---")
     checks = []
@@ -236,6 +310,17 @@ def main() -> int:
     checks.append(("a stale registry entry", any("stale" in x for x in p4)))
     same, why = identical_arm_is_red()
     checks.append(("a mutant identical to clean (empty diff, %s)" % why, same))
+    checks.append(("an unlisted scratch mutant",
+                   any("UNLISTED" in x for x in audit_scratch(
+                       dict(sfound, S_MU_GHOST="test/x.py"), SCRATCH, ran))))
+    checks.append(("a stale scratch entry",
+                   any("stale" in x for x in audit_scratch(
+                       sfound, dict(SCRATCH, S_MU_GONE="test/x.py"), ran))))
+    checks.append(("a scratch killer nothing runs",
+                   any("run by NOTHING" in x for x in audit_scratch(
+                       dict(sfound, S_MU_IDLE="test/run_spl_compare.py"),
+                       dict(SCRATCH, S_MU_IDLE="test/run_spl_compare.py"),
+                       ran))))
     for label, hit in checks:
         print("    %-50s %s" % (label, "ok" if hit else "*** MISSED"))
         if not hit:

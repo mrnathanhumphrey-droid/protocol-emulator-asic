@@ -56,6 +56,14 @@ SCRATCH = os.environ.get("PE_SCRATCH",
 RECORD = os.path.join(ROOT, "model", "a2", "sweep_w.json")
 SRCS = ["pe_engine.v", "pe_store.v", "project.v"]
 
+#: scratch-built mutants this file kills (gate_mutant_kills' SCRATCH table)
+SCRATCH_MUTANTS = {
+    "S_W4_SLOW_REFILL": "the fetch port idles L_REFILL cycles after every "
+                        "capture, so each refill costs 8 cycles; u20 must "
+                        "violate Theorem 3's conclusion",
+}
+
+
 def slow_subs():
     """(landmark, replacement) for the slow-refill mutant; each landmark must
     occur exactly once. A Verilog spec, not stored numbers."""

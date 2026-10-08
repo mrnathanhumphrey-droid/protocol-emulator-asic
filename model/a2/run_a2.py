@@ -127,6 +127,12 @@ GATES = [
     ("../../test/run_i2c.py",
      "I2CF sigrok certifies the I2C frame; M_IGNORE_ORDER must break it",
      False),
+    # ⛔ RULING ACK (b)-(c): the clocked random read against a stretching
+    # peer, the chip's bytes adjudicated by sigrok (local, like I2CF); kills
+    # the scratch mutant S_CK_COMMANDED_RISE (gate_mutant_kills' SCRATCH).
+    ("../../test/run_ckack.py",
+     "ACK  clocked random read: chip bytes == sigrok bytes, at any stretch",
+     False),
     ("../ta02/run_ta02.py",
      "TA02 the TA-02 harness (gate_fields, gate_pwm, gate_uart_identity)",
      False),
