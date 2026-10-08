@@ -192,6 +192,44 @@ def subset():
     return rc
 
 
+def image_sha256():
+    """sha256 of every image row's .hex, line endings normalised (RC6): a
+    program can change while the RTL does not, and the record must notice."""
+    from run_lockstep import IMAGES
+    out = {}
+    for i in IMAGES:
+        with open(os.path.join(HERE, i), "rb") as fh:
+            out[i] = hashlib.sha256(fh.read().replace(b"\r\n", b"\n")).hexdigest()
+    return out
+
+
+def images_only():
+    """RC6: re-run ONLY the image rows and refresh their hashes. Refused if
+    the RTL hash is stale -- a partial re-run must not paper over an RTL
+    change, which needs `--full`."""
+    from run_lockstep import IMAGES
+    with open(RECORD, encoding="utf-8") as fh:
+        rec = json.load(fh)
+    if rec.get("_src_sha256") != src_sha256():
+        raise SystemExit("*** the record's RTL hash is STALE: an RTL change "
+                         "needs `--full`, not `--images`")
+    banner("iverilog", "vvp")
+    good = build("good")
+    for i in IMAGES:
+        res = run(good, os.path.join(HERE, i), 200000, 20000)
+        res.update(kind="image", rtl="good", image=i)
+        rec["arms"]["img_" + i.replace(".hex", "")] = res
+        print("  done img_%-14s violations %d" % (i.replace(".hex", ""),
+                                                  viol(res)), flush=True)
+    rec["_image_sha256"] = image_sha256()
+    with open(RECORD, "w", encoding="utf-8", newline="\n") as fh:
+        json.dump(rec, fh, indent=1, sort_keys=True)
+        fh.write("\n")
+    print("  rewrote the %d image rows of %s" % (len(IMAGES),
+                                                os.path.relpath(RECORD, ROOT)))
+    return 0
+
+
 def full():
     from run_lockstep import IMAGES
     banner("iverilog", "vvp")
@@ -231,6 +269,7 @@ def full():
         arms = dict(ex.map(one, jobs))
     rec = {"_recipe": "python test/run_w_sweep.py --full",
            "_src_sha256": src_sha256(),
+           "_image_sha256": image_sha256(),
            "_ncyc_synthetic": 1000000, "_warmup_synthetic": 200000,
            "_ncyc_image": 200000, "_warmup_image": 20000,
            "arms": arms}
@@ -242,4 +281,5 @@ def full():
 
 
 if __name__ == "__main__":
-    sys.exit(full() if "--full" in sys.argv else subset())
+    sys.exit(full() if "--full" in sys.argv
+             else images_only() if "--images" in sys.argv else subset())

@@ -331,6 +331,13 @@ SPEC_SYMBOLS = {
     # running the machine and emitted to `test/clocked_bounds.vh`, which is why
     # there is no RECORD entry to pair with this exclusion.
     ("model/clocked_phase.py", "PROGRAMS"),
+    # ⭐ RULING RC: the re-certification's CLASSES -- which lanes of which image
+    # are certified as I2C, as SPI, or declared not certifiable. The numbers
+    # are LANE INDICES naming a program's lanes, not measurements; what the
+    # gate measures (sigrok's bytes, the wire's) is computed every run.
+    ("test/run_recert.py", "I2C"),
+    ("test/run_recert.py", "SPI"),
+    ("test/run_recert.py", "RX_ONLY"),
     # ⭐⭐ UM10204's TIMING MINIMA, TRANSCRIBED. These are REQUIREMENTS the
     # design is measured against, so they are inputs in the strongest sense --
     # the whole point of the gate that holds them is that nothing in this repo

@@ -133,6 +133,12 @@ GATES = [
     ("../../test/run_ckack.py",
      "ACK  clocked random read: chip bytes == sigrok bytes, at any stretch",
      False),
+    # ⛔ RULING RC: sigrok re-certifies every clocked image by bus type -- I2C
+    # frames well-formed and == the wire == the pushed bytes; push-pull lanes
+    # through sigrok's SPI decoder; every other clocked image named.
+    ("../../test/run_recert.py",
+     "RC   sigrok re-certifies every clocked image (I2C frames, SPI words)",
+     False),
     ("../ta02/run_ta02.py",
      "TA02 the TA-02 harness (gate_fields, gate_pwm, gate_uart_identity)",
      False),

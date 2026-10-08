@@ -230,6 +230,12 @@ GATES=(
   # covers widths 1..8, MSB/LSB lanes, ACK or not, empty/refill. Must-fire:
   # M_TX_LOAD_ANYPHASE red on V1 and V2.
   test/run_cktx.py
+  # ⛔⛔ RC4 -- EVERY START/STOP (I2C) LANE IS MSB-FIRST. Three corpus images
+  # framed I2C on LSB-first lanes (hdr()'s default) and sent every byte
+  # reversed until sigrok read them. Same rule as pe_asm's refusal; census
+  # lane 0 exempt by name. Must-fires: a planted LSB I2C image, a stale
+  # exemption.
+  model/gate_i2c_order.py
   # ⛔⛔ M -- EVERY IMAGE WRITES THE WHOLE STORE. The store has no reset, and a
   # 51-byte image left 205 bytes holding power-up contents, one missing REARM
   # from running on real pins. Every image is now the program plus the defined

@@ -84,6 +84,7 @@ from make_smoke_image import (            # noqa: E402
     SELF_CLOCKED,
     OP_STOP, PIN_NONE, act, hdr, write_image,
 )
+from pe_isa import order_for                 # noqa: E402  ruling RC4
 
 # ---------------------------------------------------------------------------
 # THE PIN MAP, derived from the ruling
@@ -237,11 +238,17 @@ def _assemble(seqs, headers_spec, park_at, queues=None):
     lp = off
     prog.append(act(OP_REARM, 0, 0, 500))
     headers = []
+    seq_of = dict(seqs)
     for lane in range(N_LANES):
         if lane in base:
             pin, clkpin, mode, t, dsched, dtol = headers_spec[lane]
+            # ⛔ RULING RC4: the order is DERIVED from the lane's program --
+            # START/STOP framing means I2C means MSB-first. Every corpus lane
+            # used to take `hdr()`'s LSB default, so the I2C lanes sent each
+            # byte bit-reversed (5B went out as DA).
             headers.append(hdr(pin, clkpin, mode, t, 2, dsched, dtol,
-                               base[lane]))
+                               base[lane],
+                               order=order_for([e[0] for e in seq_of[lane]])))
         else:
             headers.append(hdr(park_at, park_at, MODE_OD, 500, 2, 200, 240, lp))
     img = b"".join(headers) + b"".join(prog)
@@ -287,6 +294,13 @@ def build_i2c(d: int = D_FM_SHIPPABLE):
         (OP_SHIFT, P_SDA, SELF_CLOCKED, d, 7),    # a whole byte, 8 bits
         (OP_SHIFTIN, P_SDA, SELF_CLOCKED, d, 1),  # the ACK slot, 1 bit
         (OP_READBIT, P_SDA, 0, d),
+        # ⛔ RULING RC1 / TX8: a STOP needs SDA LOW and SCL HIGH first. The
+        # clocked ACK slot's COLLECT leaves SCL low, so: SDA low, SCL high,
+        # then STOP releases SDA while SCL is high. A bare OP_STOP here
+        # released SDA with SCL LOW -- no STOP at all, so sigrok saw one START
+        # and an endless byte stream (the first foreign decode of this image).
+        (OP_LEVEL, P_SDA, 0, d),
+        (OP_LEVEL, P_SCL, 1, d),
         (OP_STOP, P_SDA, 1, d),       # STOP
         (OP_REARM, 0, 1, d),
     ]
@@ -419,6 +433,9 @@ def build_all5(d: int = 9, d0: int = D_FM_SHIPPABLE):
     s_i2c = [(OP_START, P_SDA, 0, d0),
              (OP_SHIFT, P_SDA, SELF_CLOCKED, d0, 7),     # a whole byte
              (OP_SHIFTIN, P_SDA, SELF_CLOCKED, d0, 1),   # the ACK slot
+             # RC1 / TX8: SDA low, SCL high, STOP (after a clocked SHIFTIN)
+             (OP_LEVEL, P_SDA, 0, d0),
+             (OP_LEVEL, P_SCL, 1, d0),
              (OP_STOP, P_SDA, 1, d0),
              (OP_REARM, 0, 1, d0)]
     s_tgt = [(OP_SHIFT, P_T_MISO, 1, d + 1), (OP_LEVEL, P_T_MISO, 0, d + 1),

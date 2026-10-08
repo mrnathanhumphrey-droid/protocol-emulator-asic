@@ -59,6 +59,7 @@ from pe_isa import (                      # noqa: F401,E402
     act_shiftin_clocked, OP_ARM, OP_LEVEL, OP_READBIT, OP_REARM, OP_SHIFT, OP_SHIFTIN,
     ORDER_LSB, ORDER_MSB,
     OP_START, OP_STOP, PINW, PIN_NONE, UO0, UO1, UO2, UO3, act, hdr,
+    I2C_ORDER,
     write_image,
 )
 
@@ -457,11 +458,20 @@ def build_ckread(d: int = D_FM_SHIPPABLE, sda: int = 2, scl: int = 1):
     prog.append(act_shift_clocked(sda, d, nbits=1))        # master ACK
     prog.append(act_shiftin_clocked(sda, d, nbits=8))      # next byte in
     prog.append(act_shift_clocked(sda, d, nbits=1))        # master NACK
+    # ⛔ RULING RC1 / TX8: the NACK is a clocked SHIFT, which leaves SCL
+    # HIGH with SDA high (a NACK is a 1), so pulling SDA low now would be a
+    # START. SCL low first, then SDA low, SCL high, STOP -- four actions. The
+    # bare OP_STOP this had released an already-high SDA: no STOP on the wire.
+    prog.append(act(OP_LEVEL, scl, 0, d))
+    prog.append(act(OP_LEVEL, sda, 0, d))
+    prog.append(act(OP_LEVEL, scl, 1, d))
     prog.append(act(OP_STOP, sda, 1, d))
     prog.append(act(OP_REARM, 0, 1, d))
     park = base + len(prog) * ACT_BYTES
     prog.append(act(OP_REARM, 0, 0, 500))
-    headers = [hdr(sda, scl, 0, d, 2, 2 * d, 3 * d, base)]
+    # ⛔ RULING RC4: I2C is MSB-first. This took `hdr()`'s LSB default, so
+    # every byte this program sent went out bit-reversed.
+    headers = [hdr(sda, scl, 0, d, 2, 2 * d, 3 * d, base, order=I2C_ORDER)]
     # parked lanes OFF the pad-override pins (CS/MISO), so N1's PINMAP
     # condition has nothing to report
     headers += [hdr(p, p, 0, 500, 2, 200, 240, park) for p in (0, 3, 4, 5)]

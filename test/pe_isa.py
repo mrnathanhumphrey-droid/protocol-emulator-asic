@@ -276,6 +276,67 @@ def write_image(path, img) -> bytes:
     return full
 
 
+def _unpack(fields, raw, nbytes):
+    """The inverse of `_pack`: {name: value}."""
+    w = int.from_bytes(raw, "big") >> (nbytes * 8 - sum(x for _n, x in fields))
+    out = {}
+    for name, width in reversed(fields):
+        out[name] = w & ((1 << width) - 1)
+        w >>= width
+    return out
+
+
+def lane_programs(img):
+    """{lane: (header dict, [action dict, ...])}: each lane's actions from its
+    header's base through its first OP_REARM, which is how every builder here
+    ends a lane (a loop, or the parked lane's chaining wait)."""
+    out = {}
+    for ln in range(N_LANES):
+        h = _unpack(HDR_FIELDS, img[ln * HDR_BYTES:(ln + 1) * HDR_BYTES],
+                    HDR_BYTES)
+        acts, a = [], h["base"]
+        while a + ACT_BYTES <= len(img) and len(acts) <= STORE_BYTES:
+            x = _unpack(ACT_FIELDS, img[a:a + ACT_BYTES], ACT_BYTES)
+            acts.append(x)
+            if x["op"] == OP_REARM:
+                break
+            a += ACT_BYTES
+        out[ln] = (h, acts)
+    return out
+
+
+# ⛔⛔ RULING RC4 -- AN I2C LANE IS MSB-FIRST, AND THE ORDER IS DERIVED, NOT
+# DEFAULTED. `hdr()`'s default is LSB (UART's order, and every image written
+# before the field existed), and every I2C builder inherited it: SIX clocked
+# images framed I2C on an LSB-first lane, so `5B` went out as `DA` -- correct
+# silicon faithfully sending the wrong byte, found on the first foreign decode
+# (sigrok). ⇒ A lane whose program uses START/STOP framing is I2C, so its
+# order is MSB; builders take the order from `order_for`, and `i2c_order_
+# problems` refuses an image where the two disagree.
+I2C_ORDER = ORDER_MSB
+
+
+def order_for(ops):
+    """The bit order a lane's program requires: MSB-first if it frames with
+    START/STOP (I2C), else the LSB default."""
+    return I2C_ORDER if any(o in (OP_START, OP_STOP) for o in ops) else ORDER_LSB
+
+
+def i2c_order_problems(img, exempt=()):
+    """-> [str]: every lane whose program uses OP_START/OP_STOP but whose
+    header is LSB-first. `exempt` names lanes excused BY NAME by the caller."""
+    probs = []
+    for ln, (h, acts) in sorted(lane_programs(img).items()):
+        ops = [x["op"] for x in acts]
+        if ln in exempt or order_for(ops) == h["order"]:
+            continue
+        if order_for(ops) == I2C_ORDER:
+            probs.append("lane %d frames with START/STOP (I2C) but its header "
+                         "is LSB-first: every byte would go out bit-reversed "
+                         "(I2C is MSB-first, UM10204 3.1.5)" % ln)
+    return probs
+
+
 def filler_vh() -> str:
     """The filler word for the bench, GENERATED so it is never typed twice."""
     word = int.from_bytes(STORE_FILLER, "big") >> (ACT_BYTES * 8 - ACT_W)

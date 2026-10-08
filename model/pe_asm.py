@@ -59,6 +59,7 @@ from make_smoke_image import (            # noqa: E402
     OP_SHIFTIN, PIN_NONE, act, hdr,
 )
 from pe_isa import full_store                  # noqa: E402
+from pe_isa import i2c_order_problems, order_for  # noqa: E402  ruling RC4
 
 # ⚠ N_PINS IS THE PIN-MAP BOUND, not a pin count the ISA encodes:
 # `PINW = 4` addresses 0..15 and only 12 pins exist, which is the whole
@@ -610,7 +611,11 @@ def assemble(lanes, headers):
     for ln in range(N_LANES):
         if ln in headers:
             pin, clkpin, mode, t, ds, dt = headers[ln]
-            hs.append(hdr(pin, clkpin, mode, t, 2, ds, dt, base[ln]))
+            # ⛔ RULING RC4: the order is derived from the lane's program
+            # (START/STOP framing = I2C = MSB-first), never left to `hdr()`'s
+            # LSB default, which put every I2C byte on the wire reversed
+            hs.append(hdr(pin, clkpin, mode, t, 2, ds, dt, base[ln],
+                          order=order_for([a[0] for a in lanes[ln]])))
         else:
             hs.append(hdr(1, 1, 0, 500, 2, 200, 240, lp))
     img = b"".join(hs) + b"".join(prog)
@@ -629,7 +634,19 @@ def assemble(lanes, headers):
     # would be a second decoder of the same program.
     check_mode_floor(img)
     check_queue_slot(img)
+    check_i2c_order(img)
     return img
+
+
+def check_i2c_order(img):
+    """A lane that frames with OP_START/OP_STOP is I2C and must be MSB-first
+    (ruling RC4). ⛔ On the IMAGE, like the floor above, so a header written
+    by any route -- not only by `assemble` -- is held to it; the assembler
+    accepts NO exemption (the image audit names its one, census, by name)."""
+    probs = i2c_order_problems(img)
+    if probs:
+        raise Reject("; ".join(probs) + ". Three corpus images shipped this "
+                     "way and sent every byte reversed until sigrok read them.")
 
 
 def check_queue_slot(img):
@@ -1117,6 +1134,39 @@ def main() -> int:
     except Reject as e:
         print("    *** the same program is refused at SPL = 2 too: %s" % e)
         rc = 1
+
+    # ---- MUST-FIRE: an I2C lane is MSB-first (ruling RC4) ------------------
+    # ⭐ BOTH SIDES: the image a header-writer produced LSB-first must be
+    # REFUSED, and the same program through `assemble` must come out MSB and
+    # pass -- a check that refused both would be a blanket ban on START.
+    print()
+    print("  --- must-fire: a START/STOP lane must be MSB-first (RC4) ---")
+    from pe_isa import ACT_BASE as _AB, ORDER_LSB as _LSB, OP_START as _S, \
+        OP_STOP as _P, lane_programs as _lp
+    i2c = [act(_S, 2, 0, 70), act(OP_SHIFT, 2, 1, 70), act(_P, 2, 1, 70),
+           act(OP_REARM, 0, 1, 70)]
+    park = _AB + len(i2c) * ACT_BYTES
+    bad = full_store(b"".join(
+        [hdr(2, 1, 0, 70, 2, 140, 210, _AB, order=_LSB)]
+        + [hdr(p, p, 0, 500, 2, 200, 240, park) for p in (0, 3, 4, 5)])
+        + b"".join(i2c) + act(OP_REARM, 0, 0, 500))
+    try:
+        check_i2c_order(bad)
+        print("    *** an LSB-first START/STOP lane was ACCEPTED")
+        rc = 1
+    except Reject as e:
+        ok = "lane 0" in str(e) and "LSB-first" in str(e)
+        print("    an LSB-first START/STOP lane -> REJECTED%s"
+              % ("" if ok else " *** but did not name lane 0 / LSB-first"))
+        rc |= 0 if ok else 1
+    order = _lp(full_store(b"".join(
+        [hdr(2, 1, 0, 70, 2, 140, 210, _AB,
+             order=order_for([_S, OP_SHIFT, _P, OP_REARM]))]
+        + [hdr(p, p, 0, 500, 2, 200, 240, park) for p in (0, 3, 4, 5)])
+        + b"".join(i2c) + act(OP_REARM, 0, 0, 500)))[0][0]["order"]
+    print("    the same lane, order derived by order_for: %s  %s"
+          % ("MSB" if order else "LSB", "ok" if order else "*** WRONG"))
+    rc |= 0 if order else 1
     print()
     print("=" * 78)
     print("  pe_asm: %s" % ("PASSED" if rc == 0 else "FAILED"))

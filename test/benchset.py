@@ -265,10 +265,11 @@ CONFIG = {
     # Its verdicts (chip bytes == sigrok bytes) live in `test/run_ckack.py`,
     # which is local (sigrok); this arm runs the bench in the sweep so it is
     # linted and counted and Layer V sees it.
-    # ⭐ `+DEVW=85` MAKES `ckread_image`'s FIRST BYTE A READ ADDRESS: its lane
-    # is LSB-FIRST (no order in its header), so 0x85 goes out as 1010 0001 =
-    # A1 on the wire (A1 itself went out as 85 and the peer, rightly, never
-    # answered -- measured, the first try of this arm). So the peer's read
+    # ⭐ `+DEVW=A1` MAKES `ckread_image`'s FIRST BYTE A READ ADDRESS. ⚠ It was
+    # 85 while `ckread`'s lane was LSB-first (85 went out as A1); ruling RC
+    # made the lane MSB-first, as I2C requires, so A1 now goes out as A1 --
+    # and the 85 workaround silently lost the read path from the sweep
+    # (measured: nine fram_i2c points went dark until this changed). So the peer's read
     # path (R/W = 1, the data presentation, the second-byte reload, the
     # master's NACK) runs in the swept set, and `LATE` runs the
     # late-data stretch -- the peer code ruling ACK added, covered here
@@ -277,7 +278,7 @@ CONFIG = {
         "srcs": ["test/fram_i2c.v"],
         "arms": [("ckread_late", ["+IMG=test/ckread_image.hex",
                                   "+NCYC=40000",
-                                  "+DUMP=probe_ckack_sweep.bin", "+DEVW=85",
+                                  "+DUMP=probe_ckack_sweep.bin", "+DEVW=A1",
                                   "+DEVR=A1"],
                   # LATE_SKIP: the first 4 read bits at the fall, the rest
                   # late -- both arms of the peer's presentation choice

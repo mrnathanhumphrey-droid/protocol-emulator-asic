@@ -328,7 +328,7 @@ def _load_sweep_w():
 SWEEP_W = _load_sweep_w()
 
 
-def check_sweep_w(rec, live_sha):
+def check_sweep_w(rec, live_sha, live_img=None):
     """-> list of problems; empty is a pass. The claims (ruling W):
       W2  every arm whose every lane has d >= D*, and every shipped admissible
           image: 0 conclusion violations, every lane consuming;
@@ -341,6 +341,13 @@ def check_sweep_w(rec, live_sha):
     if rec.get("_src_sha256") != live_sha:
         probs.append("STALE: the record ran on different RTL than src/ holds "
                      "now -- re-run `python test/run_w_sweep.py --full`")
+    # ⛔ RULING RC6: a PROGRAM can change while the RTL does not (the RC
+    # rebuild of corpus_i2c and ckread did exactly that), so the image rows
+    # carry their images' hashes too
+    if live_img is not None and rec.get("_image_sha256") != live_img:
+        probs.append("STALE: an image row ran on a different .hex than test/ "
+                     "holds now -- re-run `python test/run_w_sweep.py "
+                     "--images`")
     arms = rec.get("arms", {})
 
     def v(a):
@@ -679,14 +686,16 @@ def main() -> int:
     print("  --- W: Theorem 3's conclusion over the D* sweep (record) ---")
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(HERE)),
                                     "test"))
-    from run_w_sweep import src_sha256
-    live_sha = src_sha256()
-    wp = check_sweep_w(SWEEP_W, live_sha)
+    from run_w_sweep import image_sha256, src_sha256
+    live_sha, live_img = src_sha256(), image_sha256()
+    wp = check_sweep_w(SWEEP_W, live_sha, live_img)
     if SWEEP_W is not None:
         arms = SWEEP_W["arms"]
-        print("    %d arms, recipe `%s`, RTL sha256 %s"
+        print("    %d arms, recipe `%s`, RTL sha256 %s, image sha256 %s"
               % (len(arms), SWEEP_W["_recipe"],
                  "MATCHES src/" if SWEEP_W["_src_sha256"] == live_sha
+                 else "*** STALE",
+                 "MATCH test/" if SWEEP_W.get("_image_sha256") == live_img
                  else "*** STALE"))
         print("    %-6s %-6s %-9s %-9s %-9s %s"
               % ("d", "arms", "violated", "min slk", "owed max", "worst R_i"))
@@ -727,10 +736,13 @@ def main() -> int:
         quiet = copy.deepcopy(SWEEP_W)
         for l in quiet["arms"]["MF_slow_u20"]["lanes"]:
             l["viol_ev"] = 0
+        oldimg = copy.deepcopy(SWEEP_W)
+        oldimg["_image_sha256"] = dict(live_img, **{"corpus_i2c.hex": "0" * 64})
         for what, rec in (("a stale RTL hash", stale),
+                          ("a stale image hash (RC6)", oldimg),
                           ("one violation on u20", hot),
                           ("a silent slow-refill must-fire", quiet)):
-            red = bool(check_sweep_w(rec, live_sha))
+            red = bool(check_sweep_w(rec, live_sha, live_img))
             print("      %-36s %s" % (what, "red  ok" if red else "*** WRONG"))
             if not red:
                 rc = 1
