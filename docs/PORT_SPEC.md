@@ -248,6 +248,19 @@ refills and holds no deadlines.
   round-robin.** Measured on every port-feasible arm: `ISSUE head = 1`, the
   cold-start fill. On the d = 18 control branch 1 fires 49,919 times in 1M
   cycles, and arm C fires it 124,982 times.
+  - **Re-measured on the TF RTL (`18f2c0e`), 2026-10-08: still holds.**
+    `ISSUE head = 1` and 0 stalls on all 29 arms with every `d ≥ 20`: 17
+    synthetic arms at 1M cycles (uniform 20..60, `20..24`, the drift and
+    adversarial TH3 arms, `20 20 20 20 24`, `20 21 22 23 100`) and the 12
+    admissible images at 200k. Probe `probe_tb_port_tf.v`, logs
+    `probe_b1/`.
+  - ⚠ **Below `D*` this no longer tracks stalls.** With TF3 branch 1 reads
+    `winner_q`, so it can start a speculative head fill for the lane that
+    just wrote back. On the two stall-free `d = 19` arms it fires 92 times
+    (`19 20 21 22 23`) and 2,291 times (`19 23 19 23 19`) in 1M cycles,
+    where the pre-TF PS table records 0. The dispatch stream is unchanged
+    (C1: byte-identical to `3b37967`). So "branch 1 fired" is not evidence of
+    a stall on the TF RTL, and the induction below must not use it as one.
 - **Pre-TF, the arbitration was not starvation-free.** Below `D*`, on arm
   `12, 12, 12, 12, 100`, one owed spare waited 16,468 cycles, with 2,473
   refills served ahead of it. The cause was branch 1 relocating the pointer.
@@ -313,6 +326,10 @@ give `2d ≥ 37`, i.e. `d ≥ 19`. Runs were 1M cycles with probes
   silent and no stall: a lane can owe both slots at once (§4), so its second
   refill waits a second round-robin pass. The latency slack still held, at
   ≥ 9.
+  - ⚠ This table is **pre-TF**. On the TF RTL (C3, 2026-10-08), `19..23`
+    has worst valid from WB 28 and slack ≥ 8, and branch 1 is **not**
+    silent (92 head fills, 0 stalls). `19 23 19 23 19` has 24 and ≥ 12,
+    with 2,291 head fills and 0 stalls. Above `D*`, see §6.
 - **Lemma A's bound (`R_i ≤ 12`) held on every stall-free arm.** It fails
   only where the port is saturated.
 - **PS2: Lemma A's premise ("every same-lane dispatch gap > 12") is false
