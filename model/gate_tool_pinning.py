@@ -168,7 +168,9 @@ def main() -> int:
     try:
         hist = subprocess.run(["git", "show", "f8f952c:test/verilator_trace.sh"],
                               cwd=ROOT, capture_output=True).stdout
-    except Exception:
+    # ⛔ RULING E: only "git is not runnable here" is expected, and that is
+    # OSError; a git that runs and fails returns empty stdout without raising.
+    except OSError:
         hist = b""
     if hist:
         # line endings normalised: a Windows checkout may CRLF the fixture

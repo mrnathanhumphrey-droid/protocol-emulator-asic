@@ -301,11 +301,15 @@ def main():
     rows = measure(a.trace, a.image)
     blob = {}
     if os.path.isfile(a.json):
+        # ⛔⛔ RULING E: a corrupt file used to become `{}` -- and this script
+        # then WROTE IT BACK holding only the new record, silently deleting
+        # every other image's phases. A file it cannot read is now a refusal.
         try:
             with open(a.json, encoding="utf-8") as fh:
                 blob = json.load(fh)
-        except Exception:
-            blob = {}
+        except ValueError as e:
+            raise SystemExit("*** %s does not parse (%s): refusing to "
+                             "overwrite it" % (a.json, e))
     rec = {"image": os.path.basename(a.image),
            "trace": os.path.basename(a.trace), "lanes": rows}
     if a.hold_ns is not None:

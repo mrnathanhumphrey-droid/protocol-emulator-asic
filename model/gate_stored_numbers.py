@@ -598,11 +598,11 @@ def scrape():
                     continue
                 p = os.path.join(d, f)
                 rel = os.path.relpath(p, ROOT).replace(os.sep, "/")
-                try:
-                    with open(p, encoding="utf-8") as fh:
-                        tree = ast.parse(fh.read())
-                except Exception:
-                    continue
+                # ⛔ RULING E: a file that does not parse used to be SKIPPED,
+                # so its stored numbers left this audit without a word. It
+                # now fails here, loudly, with the file named.
+                with open(p, encoding="utf-8") as fh:
+                    tree = ast.parse(fh.read(), filename=rel)
                 for node in tree.body:
                     if not isinstance(node, ast.Assign):
                         continue
@@ -614,10 +614,9 @@ def scrape():
                             continue
                         if not re.fullmatch(r"[A-Z][A-Z0-9_]{2,}", t.id):
                             continue
-                        try:
-                            src = ast.unparse(node.value)
-                        except Exception:
-                            src = ""
+                        # ⛔ RULING E: no fallback to "" -- an unparse failure
+                        # would have hidden the node's numbers from the audit.
+                        src = ast.unparse(node.value)
                         nums = re.findall(r"(?<![\w.])\d+(?![\w.])", src)
                         if len(nums) >= 3:
                             found.append((rel, t.id, len(nums)))

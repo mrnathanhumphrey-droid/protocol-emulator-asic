@@ -163,6 +163,13 @@ GATES=(
   # exiting 1. Every committed read is clean; this keeps it so, and
   # `ci/rc.sh`'s `run_rc` is how loops capture a code.
   model/gate_shell_rc.py
+  # ⛔⛔ E -- THE PYTHON HALF: no bare `except:`, and no `except Exception`
+  # that neither re-raises nor is named with where its verdict is recorded.
+  # Its audit fixed four live swallows (measure_phases deleting phases on a
+  # corrupt file, gate_stored_numbers skipping unparsable files, an over-
+  # broad resolver, gate_a2_program skipping a crashed lane). Must-fire: the
+  # pre-fix measure_phases `NameError -> None` shape.
+  model/gate_except.py
   # ⛔⛔ V -- EVERY TOOL THROUGH ONE RESOLVER, AND THE LOG SAYS WHICH. A bare
   # `verilator` ran apt's 5.020 in CI and the witness disagreed with the pin
   # on 666 lines. Refuses a bare invocation or a private PATH-default resolver

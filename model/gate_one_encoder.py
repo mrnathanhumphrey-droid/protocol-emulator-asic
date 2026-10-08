@@ -214,7 +214,12 @@ def rtl_params(path):
             try:
                 env[name] = int(eval(e, {"__builtins__": {}}, dict(env)))
                 pend.pop(name, None)
-            except Exception:
+            # ⛔ RULING E: NARROWED from `except Exception`. MEASURED over the
+            # three RTL files, the resolver only ever meets NameError (a
+            # reference not resolved YET -- the next pass may) and
+            # IndentationError (a SyntaxError: an expression that is not
+            # Python). Anything else is a bug here and now surfaces.
+            except (NameError, SyntaxError):
                 continue
     return env
 

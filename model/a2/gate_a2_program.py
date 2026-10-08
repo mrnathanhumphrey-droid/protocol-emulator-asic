@@ -159,6 +159,14 @@ def main() -> int:
         if ga.conditions(name, img)[0]:
             continue                      # non-admissible: declared in N1
         for ln, e in sorted(row["lanes"].items()):
+            # ⛔ RULING E: an admissible lane where pyRTA gave a bound but
+            # OUR recurrence gave none is a FAILURE, not a skip.
+            # `program_a2` records `r_ours = None` when the recurrence RAISES,
+            # and skipping it here would drop exactly that lane from the
+            # ours >= pyRTA check -- a guard passing because of the defect.
+            if e.get("r_pyrta") is not None and e.get("r_ours") is None:
+                below.append((name, ln, None, e["r_pyrta"]))
+                continue
             if e.get("r_pyrta") is None or e.get("r_ours") is None:
                 continue
             if e["r_ours"] >= e["r_pyrta"]:
@@ -166,8 +174,12 @@ def main() -> int:
             else:
                 below.append((name, ln, e["r_ours"], e["r_pyrta"]))
     for name, ln, o, p in below:
-        print("    *** %s lane %s: ours %d < pyRTA %d -- CI's floor is looser "
-              "than the published bound" % (name, ln, o, p))
+        if o is None:
+            print("    *** %s lane %s: OUR recurrence gave no bound (pyRTA %d) "
+                  "-- see the lane's `why`" % (name, ln, p))
+        else:
+            print("    *** %s lane %s: ours %d < pyRTA %d -- CI's floor is "
+                  "looser than the published bound" % (name, ln, o, p))
         rc = 1
     print("    %d admissible lane(s): ours >= pyRTA on every one%s"
           % (n_ok, "" if not below else " EXCEPT the above"))
