@@ -217,6 +217,12 @@ GATES=(
   # digests. Must-fire: M_TF1_LATE (the naive retiming), which the smoke
   # bench passes and this gate must not.
   test/run_lockstep.py
+  # ⭐ W -- THEOREM 3 ON THE BENCH, LIVE. The conclusion (every freed slot
+  # valid before the decision that consumes it) on u20 and m20, ~55 s. Must-
+  # fires: d = 18, and u20 on a slow-refill mutant built from src's own text
+  # into scratch (src/ untouched). The full D* sweep is the recipe behind the
+  # record `gate_j_program` checks.
+  test/run_w_sweep.py
   # ⛔⛔ M -- EVERY IMAGE WRITES THE WHOLE STORE. The store has no reset, and a
   # 51-byte image left 205 bytes holding power-up contents, one missing REARM
   # from running on real pins. Every image is now the program plus the defined
@@ -290,7 +296,7 @@ can_run() {
     model/gate_rtl_lint.py)
       { command -v "$VL" >/dev/null 2>&1 || command -v wsl.exe >/dev/null 2>&1; } \
         || { echo "no verilator and no wsl.exe to reach one"; return 1; } ;;
-    model/gate_one_encoder.py|test/gl_harness_check.py|test/gate_tb_elaborates.py|test/run_mutants.py|model/gate_sda_hold.py)
+    model/gate_one_encoder.py|test/gl_harness_check.py|test/gate_tb_elaborates.py|test/run_mutants.py|model/gate_sda_hold.py|test/run_w_sweep.py)
       command -v "$IV" >/dev/null 2>&1 || { echo "iverilog not found (PE_IVERILOG unset and not on PATH)"; return 1; } ;;
     model/gate_reset_audit.py)
       [ -n "${PE_NETLIST_JSON:-}" ] && [ -f "${PE_NETLIST_JSON:-}" ] \

@@ -1,0 +1,16 @@
+# Must-fire for preselect_equiv.sby, required to FAIL (a counterexample is
+# the pass): `w_act` drops its one-hot gate, so it ORs all five heads.
+# Run: python formal/make_preselect_miter.py --mutate && sby -f formal/preselect_equiv_mut.sby
+[options]
+mode prove
+depth 1
+
+[engines]
+smtbmc yices
+
+[script]
+read -formal preselect_miter_mut.sv
+prep -top preselect_miter
+
+[files]
+build/preselect_miter_mut.sv

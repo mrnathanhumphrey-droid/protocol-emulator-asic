@@ -88,6 +88,16 @@ SITES = [
          "stored values are retained as a labelled record and the benefit "
          "claim is withdrawn, not re-fitted"),
 
+    Site("model/a2/gate_j_program.py", "SWEEP_W", RECORD,
+         "ruling W: Theorem 3's conclusion per lane over the D* sweep "
+         "(d = 19..60 families, must-fires, 12 shipped images)",
+         "test/run_w_sweep.py",
+         "written by `run_w_sweep.py --full`; carries the sha256 of the RTL "
+         "it ran on",
+         "LOADED from model/a2/sweep_w.json, never transcribed, and checked "
+         "STALE against src/ every run -- an RTL change turns the gate red "
+         "until the recipe is re-run. Its live subset runs in CI"),
+
     # ---- foreign-tool records: stored ON PURPOSE -------------------------
     Site("model/a2/jitter_instances.py", "TCHECKER_RECORDED", RECORD,
          "TChecker reachability answers on the 11 jitter lane-instances",

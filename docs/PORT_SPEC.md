@@ -263,7 +263,8 @@ refills and holds no deadlines.
     a stall on the TF RTL, and the induction below must not use it as one.
 - **Pre-TF, the arbitration was not starvation-free.** Below `D*`, on arm
   `12, 12, 12, 12, 100`, one owed spare waited 16,468 cycles, with 2,473
-  refills served ahead of it. The cause was branch 1 relocating the pointer.
+  refills served ahead of it (measured 2026-10-07 on RTL `c8a4126`, the last
+  `pe_engine.v` before TF). The cause was branch 1 relocating the pointer.
   **TF3 removed it:** on the same arm the worst wait is 48 / 50 cycles to
   issue at 1M / 4M cycles (51 / 53 to capture), with at most 12 refills
   ahead, and it does not grow. Branch 1 still borrows the port, so the bound
@@ -284,6 +285,15 @@ refills and holds no deadlines.
   ahead of an owed one (the in-flight one plus four others). Lane 4's measured
   `R_i` is 12, so the slack is `2·24 − 12 − 2 = 34`. ⚠ This is measurement.
   The bound, its constant and `R_i` are for the Lean statement to fix.
+- **Ruling W (2026-10-08, TF RTL, `test/run_w_sweep.py`; J_LANE_PROOF A4):**
+  - **Step 2 must allow a lane owing BOTH slots.** At `d = 20` and `21`, on
+    the `d..d+4`, alternating and drift families, a lane owes two slots at
+    once. Its second refill waits one more pass, and nothing stalls. It is
+    ≤ 1 at `d ≥ 22` and on every image.
+  - **At most 5 refills are served ahead of an owed one above `D*`, all by
+    branch 2.** Branch 1 serves none ahead, at any `d ≥ 20`.
+  - **`R_i` = 12 exactly on every stall-free arm:** Lemma A's bound is
+    tight.
 
 ### PS1–PS3: the candidate bound, measured against today's RTL (2026-10-07)
 

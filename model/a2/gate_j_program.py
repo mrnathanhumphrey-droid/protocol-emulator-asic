@@ -296,7 +296,88 @@ SWEEP_SINGLE = {
 #   D_STAR states. The candidate latency bound (2d >= 37, i.e. d >= 19) is
 #   NECESSARY, NOT SUFFICIENT: a sound statement needs both conditions.
 #   Recorded in docs/J_LANE_PROOF.md (Amendment A2) and docs/PORT_SPEC.md.
+# ⭐ RE-MEASURED ON THE TF RTL (ruling W, 2026-10-08), and the table above is
+# PRE-TF in one column: "winner-head refills 0" on the two clean arms is no
+# longer true. TF3's branch 1 reads the registered winner, so it now starts
+# speculative head fills with NOTHING stalling -- 92 on `19..23` and 2,291 on
+# `19 23 19 23 19` in 1M cycles, dispatch stream unchanged. At d = 19 the
+# record `SWEEP_W` below says: m and drift CLEAN (slack 8 and 13), u and mb
+# STALL. So 19 is not a boundary for all programs, and the published claim
+# stays D* = 20: "measured clean on some recipes; candidate bound 2d >= 37;
+# not claimed until the formal proof closes". This item is CLOSED.
 D_STAR = N_LANES * L_REFILL
+
+
+# ⛔⛔ RULING W -- THE D* SWEEP, AS A RECORD WITH A RECIPE THAT RUNS. This file
+# is the project's lesson in numbers nobody could remake (`SWEEP`,
+# `SWEEP_SINGLE`), so the W sweep is not transcribed here: it is LOADED from
+# `model/a2/sweep_w.json`, which `python test/run_w_sweep.py --full` writes,
+# and the record carries the sha256 of the RTL it ran on. An RTL change makes
+# it STALE and this gate red until the sweep is re-run -- the record cannot
+# outlive the design it describes. The live subset of the same bench runs in
+# CI on its own (`test/run_w_sweep.py`).
+def _load_sweep_w():
+    import json
+    p = os.path.join(HERE, "sweep_w.json")
+    if not os.path.isfile(p):
+        return None
+    with open(p, encoding="utf-8") as fh:
+        return json.load(fh)
+
+
+SWEEP_W = _load_sweep_w()
+
+
+def check_sweep_w(rec, live_sha):
+    """-> list of problems; empty is a pass. The claims (ruling W):
+      W2  every arm whose every lane has d >= D*, and every shipped admissible
+          image: 0 conclusion violations, every lane consuming;
+      W4  every must-fire (d = 18; the slow-refill mutant at d = 20): red;
+      W5  d = 19 as ruled: m and drift clean, u and mb stall."""
+    if rec is None:
+        return ["model/a2/sweep_w.json is missing -- run "
+                "`python test/run_w_sweep.py --full`"]
+    probs = []
+    if rec.get("_src_sha256") != live_sha:
+        probs.append("STALE: the record ran on different RTL than src/ holds "
+                     "now -- re-run `python test/run_w_sweep.py --full`")
+    arms = rec.get("arms", {})
+
+    def v(a):
+        return sum(l["viol_ev"] for l in arms[a]["lanes"])
+    clean = [a for a, r in arms.items() if r["rtl"] == "good" and (
+        r["kind"] == "image" or (r["kind"] == "synthetic"
+                                 and min(r["delays"]) >= D_STAR))]
+    if not clean:
+        probs.append("no clean-claim arm in the record")
+    for a in sorted(clean):
+        if v(a):
+            probs.append("%s: %d violations at d >= D*" % (a, v(a)))
+        if r_has_idle(arms[a]):
+            probs.append("%s: a lane never consumed -- 0 violations from a "
+                         "bench that did not run" % a)
+    mf = [a for a, r in arms.items() if r["kind"] == "mustfire"]
+    if len(mf) < 4:
+        probs.append("must-fires missing: %d of 4 in the record" % len(mf))
+    for a in sorted(mf):
+        if not v(a):
+            probs.append("must-fire %s did NOT violate" % a)
+    for a, want_clean in (("m19", True), ("drift19", True),
+                          ("u19", False), ("mb19", False)):
+        if a not in arms:
+            probs.append("d = 19 row %s missing" % a)
+        elif (v(a) == 0) != want_clean:
+            probs.append("d = 19 row %s: ruled %s, record says %d violations"
+                         % (a, "clean" if want_clean else "stall", v(a)))
+    return probs
+
+
+def r_has_idle(arm):
+    """A synthetic arm must have every lane consuming; an image only the
+    lanes it uses (an idle lane on an image is the program, not the bench)."""
+    if arm["kind"] == "image":
+        return not any(l["consumed"] > 0 for l in arm["lanes"])
+    return not all(l["consumed"] > 0 for l in arm["lanes"])
 
 
 def port_feasible(d: int, k: int = N_LANES) -> bool:
@@ -592,6 +673,67 @@ def main() -> int:
           % (N_LANES * C_SPACING))
     print("    saturating rather than refill latency. Both intervals end at")
     print("    D* - 1 and they start in different places.")
+
+    # ---- ruling W: the D* sweep record --------------------------------
+    print()
+    print("  --- W: Theorem 3's conclusion over the D* sweep (record) ---")
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(HERE)),
+                                    "test"))
+    from run_w_sweep import src_sha256
+    live_sha = src_sha256()
+    wp = check_sweep_w(SWEEP_W, live_sha)
+    if SWEEP_W is not None:
+        arms = SWEEP_W["arms"]
+        print("    %d arms, recipe `%s`, RTL sha256 %s"
+              % (len(arms), SWEEP_W["_recipe"],
+                 "MATCHES src/" if SWEEP_W["_src_sha256"] == live_sha
+                 else "*** STALE"))
+        print("    %-6s %-6s %-9s %-9s %-9s %s"
+              % ("d", "arms", "violated", "min slk", "owed max", "worst R_i"))
+        for d in (19, 20, 21, 22, 25, 30, 40, 60):
+            a = [r for r in arms.values() if r["kind"] == "synthetic"
+                 and min(r["delays"]) == d]
+            if not a:
+                continue
+            bad = sum(1 for r in a if sum(l["viol_ev"] for l in r["lanes"]))
+            ok = [r for r in a if not sum(l["viol_ev"] for l in r["lanes"])]
+            sl = min((l["slack_min"] for r in ok for l in r["lanes"]
+                      if l["consumed"] > 0), default=-1)
+            ow = max(l["owed_max"] for r in ok for l in r["lanes"]) if ok else -1
+            rr = max(l["r_max"] for r in ok for l in r["lanes"]) if ok else -1
+            print("    %-6d %-6d %-9d %-9d %-9d %d" % (d, len(a), bad, sl, ow, rr))
+        im = [r for r in arms.values() if r["kind"] == "image"]
+        print("    images %d, violated %d, min slack %d"
+              % (len(im), sum(1 for r in im
+                              if sum(l["viol_ev"] for l in r["lanes"])),
+                 min(l["slack_min"] for r in im for l in r["lanes"]
+                     if l["consumed"] > 0)))
+    for p in wp:
+        print("    *** %s" % p)
+    if wp:
+        rc = 1
+    else:
+        print("    every arm at d >= D* and every image: 0 violations; every")
+        print("    must-fire red; d = 19 as ruled (m, drift clean; u, mb stall)")
+    # ⛔ PRICE IT: the check must reject a stale record, a violation above D*
+    # and a must-fire that stayed quiet. Planted on copies, in memory.
+    if SWEEP_W is not None:
+        import copy
+        print("    --- must-fires (planted on a copy of the record) ---")
+        stale = copy.deepcopy(SWEEP_W)
+        stale["_src_sha256"] = {"pe_engine.v": "0" * 64}
+        hot = copy.deepcopy(SWEEP_W)
+        hot["arms"]["u20"]["lanes"][0]["viol_ev"] = 1
+        quiet = copy.deepcopy(SWEEP_W)
+        for l in quiet["arms"]["MF_slow_u20"]["lanes"]:
+            l["viol_ev"] = 0
+        for what, rec in (("a stale RTL hash", stale),
+                          ("one violation on u20", hot),
+                          ("a silent slow-refill must-fire", quiet)):
+            red = bool(check_sweep_w(rec, live_sha))
+            print("      %-36s %s" % (what, "red  ok" if red else "*** WRONG"))
+            if not red:
+                rc = 1
 
     print()
     print("=" * 78)

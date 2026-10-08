@@ -71,7 +71,7 @@ EXCLUDED = {
 XFAIL = {("tb_verdict", "pipeline")}
 
 NEEDS_NBYTES = {"tb_tx", "tb_half", "tb_i2c", "tb_csat", "tb_jlane", "tb_status",
-                "tb_fifo", "tb_lock",
+                "tb_fifo", "tb_lock", "tb_w",
                 "tb_rxbw", "tb_trace", "tb_witness", "tb_pinrange"}
 
 #: ⛔⛔ PLUSARGS READ BY A **SHARED INCLUDE**, with their default declared ONCE.
@@ -243,6 +243,15 @@ CONFIG = {
     "tb_lock": {
         "srcs": [],
         "arms": [("ckheavy", ["+IMG=test/ckheavy_image.hex", "+NCYC=20000"])],
+    },
+    # ⭐ RULING W -- Theorem 3 on the bench. Its verdicts live in
+    # `test/run_w_sweep.py` (live subset in CI, full sweep -> the record
+    # `gate_j_program` checks); this arm runs it once on the A2 subject so the
+    # bench is swept, linted and counted like every other.
+    "tb_w": {
+        "srcs": [],
+        "arms": [("ckheavy", ["+IMG=test/ckheavy_image.hex", "+NCYC=20000",
+                              "+WARMUP=2000"])],
     },
     # ⭐⭐ THE TWO HOST STATUS BITS, ACTUALLY SET (Wilson's ruling (a) item 1).
     # The coverage sweep found that `lane_underrun` (pe_engine.v:1627) and

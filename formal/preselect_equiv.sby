@@ -1,0 +1,17 @@
+# Ruling C2: the AND-OR pre-select (w_act, w_hv, w_armed) == the indexed mux
+# over the winner, given the one-hot premise argmin_equiv.sby proves.
+# Combinational, so an unbounded proof is a one-step induction.
+# Run: python formal/make_preselect_miter.py && sby -f formal/preselect_equiv.sby
+[options]
+mode prove
+depth 1
+
+[engines]
+smtbmc yices
+
+[script]
+read -formal preselect_miter.sv
+prep -top preselect_miter
+
+[files]
+build/preselect_miter.sv

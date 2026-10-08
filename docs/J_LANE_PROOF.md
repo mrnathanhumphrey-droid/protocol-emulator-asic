@@ -525,3 +525,60 @@ expected to be `10`. That is for the formal proof to fix, not this amendment.
 Both arms are below `D*`, a region `pe_asm` refuses. **No published claim
 moves.** Theorem 3's statement is unaffected: above `D*`, branch 1 fires only
 during priming, before and after TF.
+
+## A4 — Ruling W: Theorem 3 on the bench, and three corrections (2026-10-08)
+
+`test/tb_w.v` checks Theorem 3's **conclusion** per lane: every freed slot is
+valid before the decision that consumes it. A violation is a decision that
+finds its head slot invalid. The full sweep is
+`python test/run_w_sweep.py --full`, and its record `model/a2/sweep_w.json`
+is checked by `gate_j_program` (stale if the RTL changes). A live subset runs
+in CI.
+
+**Result on the TF RTL (`18f2c0e`):**
+- **0 violations on all 56 arms with every lane at `d ≥ 20`**, at 1M cycles,
+  and on all 12 shipped admissible images at 200k.
+  - The arm families at each `d`: uniform; `d..d+4`; four at `d` plus
+    `d+4`; alternating `d, d+4`; four at `d` plus 100 or 1000; `d..d+3`
+    plus 100 or 1000.
+  - Minimum slack is 15 at `d = 20`. On the images it is 21 (`ckheavy`).
+- **The must-fires are red:** `d = 18` (uniform and `18..22`), and a mutant
+  that idles the port `L_REFILL` cycles after every refill, at `d = 20`.
+- **`d = 19`:** `19..23` and `19..22, 100` are clean (slack 8 and 13);
+  uniform 19 and `19 19 19 19 23` stall. **The published boundary stays
+  `D* = 20`.** `d = 19` is "measured clean on some recipes; candidate bound
+  `2d ≥ 37`; not claimed until the formal proof closes."
+
+**F1. A lane can owe BOTH slots at once above `D*`.** This happens at
+`d = 20` and `21` on the `d..d+4`, alternating and drift families. Nothing
+stalls: the second refill waits one more round-robin pass (`PORT_SPEC.md`
+§4). It is ≤ 1 at `d ≥ 22` and on every image. **⇒ The proof must allow up
+to `SPL = 2` owed slots per lane**, and bound the doubly-owed lane's second
+refill by a second pass. An invariant "at most one owed slot" is false.
+
+**F2. Lemma A's bound is tight.** The worst `R_i` is exactly 12 =
+`(k − 1)·C` on every stall-free arm, at every `d`.
+
+**F3. Lemma A's premise fails on an admissible image.** The premise is
+"every same-lane dispatch gap > 12". On `ckheavy`, lane 4 has a minimum gap
+of **12**, with 10 gaps ≤ 13. Its measured `R_i` is still ≤ 12.
+- **Ruling:** generalise Lemma A to count a dense lane's extra jobs in the
+  window, which is the formal proof's work. `ckheavy` is not refused.
+- **Until that proof closes, `ckheavy`'s timing is covered by measurement
+  only.**
+
+**Premises the repaired Theorem 3 needs, stated explicitly:**
+
+| # | premise | status |
+|---|---|---|
+| T1 | throughput: every lane's `d ≥ D* = k · L_REFILL = 20` | `pe_asm` refuses below it |
+| T2 | latency: an owed refill's wait fits inside `2d − R_i − 2` | candidate `2d ≥ 37`; necessary, not sufficient (PS1) |
+| T3 | Lemma A: `R_i ≤ (k − 1)·C = 12` | tight (F2). Its gap premise fails on `ckheavy` (F3); generalisation owed |
+| T4 | at most `SPL = 2` owed slots per lane, the second served within a second pass | F1 |
+| T5 | P1–P10, as amended by A1 and A3 | RTL facts, anchored in `gate_j_proof_anchors` |
+
+**Step 1 of the repair shape needs one change.** On the TF RTL, "branch 1
+fired" is not evidence of a stall: at `d = 19` it fires with none
+(`PORT_SPEC.md` §6). Above `D*` it fires once, at cold start, on every arm
+and image, so step 1 holds there as measured. The induction must not use a
+branch-1 fire as its stall signal.

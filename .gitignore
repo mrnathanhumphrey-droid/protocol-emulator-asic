@@ -96,3 +96,5 @@ test/diag_*.py
 formal/build/
 formal/argmin_equiv/
 formal/argmin_equiv_mut/
+formal/preselect_equiv/
+formal/preselect_equiv_mut/
