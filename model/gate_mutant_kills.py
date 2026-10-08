@@ -73,6 +73,8 @@ KILLERS = {
     # RULING TF4: the naive retiming of TF1. The smoke bench PASSES on it;
     # only an exact schedule comparison sees a one-cycle shift.
     "M_TF1_LATE": "test/run_lockstep.py",
+    # TF2-R3: a lane halted this cycle stays eligible one more
+    "M_TF2_LIVE_LATE": "test/run_lockstep.py",
     "M_CK_OD_CLK_DRIVE": "test/gate_corpus_trace.py",
     "M_COMB_OUT": "model/gate_f2_local.py",
     # -- rulings K and U --------------------------------------------------------

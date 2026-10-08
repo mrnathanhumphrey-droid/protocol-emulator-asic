@@ -69,8 +69,9 @@ EXPECT = {
     # and the same rebase term in `ts_n`, the next-state timestamp the
     # registered readiness reads. Both must go or the arms disagree.
     "M_NO_REBASE":       (2, None),
-    # TF1's must-fire: the naive retiming (current values, not next-state)
-    "M_TF1_LATE":        (4, None),
+    # TF2-R3's must-fire: the release term reads the CURRENT `l_live`, so a
+    # lane halted this cycle stays eligible one more -- one token, one line
+    "M_TF2_LIVE_LATE":   (2, None),
     "M_PFETCH_NOWAIT":   (2, None),
     "M_BUF_NOINVAL":     (2, None),
     "M_BUF_SWAP":        (2, None),
@@ -212,6 +213,14 @@ EXPECT = {
         "the unclocked frame at d = SDA_HOLD to RUN under it (the clean build "
         "refuses it). ⚠ Its setup moves are gone since W1 holds the release "
         "back in silicon, so the RUN is the observable."),
+    "M_TF1_LATE": (6,
+        "TWO SITES BY DESIGN, ONE SUBSTITUTION EACH: TF1 registers two things "
+        "computed from next-state values -- the EDF key `key_q` (TF1 block, "
+        "one line each arm) and, since TF2-R3, the release term `rel_q` (lane "
+        "block: one line in the mutant arm against the clean arm's four-line "
+        "expression with M_TF2_LIVE_LATE nested inside it). The mutant is the "
+        "naive retiming of BOTH, which is what TF1's must-fire is about. "
+        "Killed by `test/run_lockstep.py` (12 of 12 streams move)."),
     "M_NO_HOLD_GATE": (2,
         "ONE LINE IN EACH ARM: `ready` drops the W1 term `l_hcnt == 0`, so a "
         "lane may dispatch its SCL release while its own hold + setup is still "

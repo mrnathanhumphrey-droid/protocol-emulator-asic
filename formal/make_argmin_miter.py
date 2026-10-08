@@ -51,13 +51,17 @@ module argmin_miter (
   // ---- the TREE, lifted from src/pe_engine.v ----
   reg [LW-1:0]   winner;
   reg            winner_v;
+  reg [4:0]      winner_oh;
 """
 
 TAIL = """
   // ---- the claim: identical outputs for every input ----
+  // TF2-R5: and the one-hot lines name exactly the binary winner (all zero
+  // when there is none), so the AND-OR dispatch mux picks the same lane.
   always @* begin
     assert (winner_v == s_winner_v);
     assert (winner == s_winner);
+    assert (winner_oh == (s_winner_v ? (5'b00001 << s_winner) : 5'b00000));
   end
 endmodule
 """
@@ -84,6 +88,18 @@ def main() -> int:
             return 1
         body[hits[0]] = body[hits[0]].replace(needle,
                                               "edf_key_off[1] <= edf_key_off[0]")
+        out = OUT.replace(".sv", "_mut.sv")
+    # ⛔ THE SECOND MUST-FIRE (TF2-R5): drop `v01` from lane 0's select line,
+    # so it is raised when NO lane is ready. The one-hot assertion must catch
+    # it; the binary-winner assertions alone would not.
+    if "--mutate-oh" in sys.argv:
+        needle = "winner_oh[0] = !t4 & !t23 & !t1 & v01;"
+        hits = [i for i, l in enumerate(body) if needle in l]
+        if len(hits) != 1:
+            print("*** FAIL must-fire: %r found %d times" % (needle, len(hits)))
+            return 1
+        body[hits[0]] = body[hits[0]].replace(needle,
+                                              "winner_oh[0] = !t4 & !t23 & !t1;")
         out = OUT.replace(".sv", "_mut.sv")
     os.makedirs(os.path.dirname(out), exist_ok=True)
     with open(out, "w", encoding="utf-8", newline="\n") as fh:

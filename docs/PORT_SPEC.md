@@ -4,8 +4,10 @@ Ruling TH2. This is the input for the Lean formalisation of the `D*`
 statement. It describes what `src/pe_engine.v` **does**, with a citation for
 every clause. It proves nothing.
 
-**Citations.** Line numbers are for `src/pe_engine.v` at the **Ruling TF
-commit**, which changed the RTL (§0). Line numbers drift whenever a comment
+**Citations.** Line numbers are for `src/pe_engine.v` at **`3b37967`** (Ruling
+TF), which changed the RTL (§0). The TF2-R commit that follows moved them
+again, by a few dozen lines past the select, so for its changes (§0, last
+rows) use the anchors. Line numbers drift whenever a comment
 grows, so each clause also gives a **substring anchor**: text that must appear
 in the RTL verbatim. `model/gate_j_proof_anchors.py` checks anchors the same
 way. If the two disagree, the anchor wins. §6's measurements were taken on the
@@ -23,6 +25,19 @@ Three changes for 50 MHz timing, all in `src/pe_engine.v`:
 | **TF1** registered readiness and EDF key | `rel_due`, `ready` and `edf_key_off` were combinational over `now`, `l_timestamp`, `l_d` and `l_hcnt` | `due_q`, `hz_q` and `key_q` are registers that hold, **in every cycle, the value the old expressions had in that cycle**. They are computed one cycle ahead from next-state values: `now_n`, `ts_n` (the WB advance and the edge rebase), `ld_n` (the header write), and `l_hcnt`'s next value, written beside the counter | 1014–1024, 1405–1458, 2819–2827 | `due_q[ti] <= ~tf_diff(now_n, ts_n[ti]);` |
 | **TF2** tree select | serial loop, four dependent compares | a tree: `(0,1)` and `(2,3)`, then their winners, then lane 4. **Proved equal** to the serial loop for every input (`formal/argmin_equiv.sby`, SymbiYosys k-induction). The must-fire is a broken tie rule, which fails | 1046–1067 | `---- BEGIN ARGMIN TREE ----` |
 | **TF3** prefetch branch 1 | read the same-cycle `winner`; set `pl <= winner`, so the capture moved the round-robin position to `winner + 1` | reads the **previous cycle's** winner (`winner_q`, re-checked `l_live`). **Branch 1 no longer moves the round-robin pointer**, which is now its own register `prr`. `pl` is still the lane the in-flight refill serves | 1480–1490, 1923–1939, 1969 | `if (!pbr1) prr <= (pl == LANE_LAST) ? {LW{1'b0}} : pl + 1'b1;` |
+
+**Ruling TF2-R (round 2), after the TF harden left the slow corner at
+−3.49 ns.** Every remaining violator started at `l_live` and ended in the
+dispatch registers through a 10-way, 24-bit select on the binary winner:
+
+| change | what | anchor |
+|---|---|---|
+| **R1** per-lane head pre-select | `hw[i] = l_act[hix[i]]`, `hv[i] = l_actv[hix[i]]`: each lane's own head word and head-valid, a 2:1 mux on its own `l_sel`, in parallel with the tree. **Combinational, not a registered shadow** (Nathan's choice), so it is the same bit by definition and there is no copy to keep in step | `assign hv[gi] = l_actv[hix[gi]];` |
+| **R2** one-hot winner | the tree also emits `winner_oh[4:0]`, the AND of node outcomes on each lane's path. Dispatch reads `w_act`, `w_hv`, `w_armed` through a flat AND-OR. `cur <= winner` keeps the binary index. Proved: `winner_oh == (winner_v ? 1 << winner : 0)` (`formal/argmin_equiv.sby`, with a must-fire that breaks lane 0's line) | `winner_oh[0] = !t4 & !t23 & !t1 & v01;` |
+| **R3** release term fully registered | `rel_q` = `l_live & arrived & ~(l_armed & l_notmo)` for the current cycle, computed from **next** values. Every run-time write of `l_live` / `l_armed` / `l_notmo` goes to `live_n` / `armed_n` / `notmo_n`, and the registers and `rel_q` are written once at the end of the lane block. **A lane halted this cycle is not eligible next cycle.** Must-fire `M_TF2_LIVE_LATE` moves `census_image`'s stream in `test/run_lockstep.py` | `assign rel_due[gi] = rel_q[gi];` |
+
+TF2-R changes **no behaviour anywhere**, including below `D*` and at cold
+start. Measured against `3b37967`: see RESUME's TF2-R row.
 
 **What this means for the proof:**
 - **TF1 changes nothing observable.** The streams are byte-identical on every

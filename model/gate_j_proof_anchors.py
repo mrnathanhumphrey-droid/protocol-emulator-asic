@@ -52,8 +52,12 @@ PREMISES = [
      "end else if (l_live[prr] && want_fetch(prr)) begin"),
     ("P4r", "only a round-robin refill advances the pointer (TF3)",
      "if (!pbr1) prr <= (pl == LANE_LAST) ? {LW{1'b0}} : pl + 1'b1;"),
+    # ⛔ TF2-R1/R2: the winner's head-valid bit is now picked from per-lane
+    # `hv[i] = l_actv[hix[i]]` by the one-hot lines -- the same bit (P5h).
     ("P5", "dispatch is gated only on the head slot being valid",
-     "if (l_actv[hix[winner]]) begin"),
+     "if (w_hv) begin"),
+    ("P5h", "the picked bit is the winner's head-slot valid",
+     "assign hv[gi] = l_actv[hix[gi]];"),
     ("P6a", "writeback INVALIDATES the consumed head",
      "l_actv[hix[cur]] <= 1'b0;"),
     ("P6b", "and flips the select, so the prefetched spare becomes the head",
@@ -89,10 +93,12 @@ PREMISES = [
     # (P9t), and `hz_q` is "the hold counter is zero", written beside the
     # counter (P9h). Equal to the old combinational terms in every cycle;
     # the lockstep check and M_TF1_LATE are what hold that.
+    # ⛔ TF2-R3 folded `l_live` / `l_armed` / `l_notmo` in too: the whole
+    # release term is the register `rel_q`, written from next-state values.
     ("P9", "readiness is that timestamp arriving (`rel_due`)",
-     "assign rel_due[gi] = l_live[gi] & due_q[gi]"),
-    ("P9t", "the arrival term is computed from NEXT-state now and timestamp",
-     "due_q[ti] <= ~tf_diff(now_n, ts_n[ti]);"),
+     "assign rel_due[gi] = rel_q[gi];"),
+    ("P9t", "the release term is computed from NEXT-state live, now, timestamp",
+     ") & ~tf_diff(now_n, ts_n[i]) & ~(armed_n[i] & notmo_n[i]);"),
     ("P9w", "W1: ready also waits for the lane's own hold + setup",
      "assign ready[gi] = rel_due[gi] & hz_q[gi];"),
     ("P9h", "the hold-zero term is written beside the counter",

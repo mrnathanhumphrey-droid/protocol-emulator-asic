@@ -967,7 +967,7 @@ module pe_engine #(
   // at `now`, ran through the 16-bit release compare and the key subtract,
   // then the five-way select, into the dispatch and prefetch registers.
   // Registering the compare and the key takes `now` off that path.
-  // ⭐ NOT A PIPELINE STAGE: `due_q`, `key_q` and `hz_q` hold, in every cycle,
+  // ⭐ NOT A PIPELINE STAGE: `rel_q`, `key_q` and `hz_q` hold, in every cycle,
   // exactly the value the old combinational expression has in that cycle.
   // They are computed from the NEXT values of `now`, `l_timestamp`, `l_d` and
   // `l_hcnt` -- `now_n`, `ts_n`, `ld_n` below and the hold term in the
@@ -977,7 +977,12 @@ module pe_engine #(
   // plain retiming register) makes readiness lag a cycle: a lane that has
   // just written back still reads its OLD timestamp for one cycle, and its
   // next release is seen one cycle late. M_TF1_LATE builds exactly that.
-  reg  [N_LANES-1:0] due_q;                 // == (now - l_timestamp >= 0)
+  // ⭐ TF2-R3: `rel_q` == `l_live & (now - l_timestamp >= 0)
+  //                       & ~(l_armed & l_notmo)`, the whole release term --
+  // so `l_live` no longer STARTS a path into the select (it did after TF1:
+  // all 28 remaining violators began at `l_live[2]`).
+  reg  [N_LANES-1:0] rel_q;
+  reg  [N_LANES-1:0] live_n, armed_n, notmo_n;   // lane block's next values
   reg  [N_LANES-1:0] hz_q;                  // == (l_hcnt == 0)
   reg  [TS_W-1:0]    key_q [0:N_LANES-1];   // == l_timestamp + l_d - now
   reg                hold_ld;               // a DRIVE arm starts an SDA hold
@@ -1009,10 +1014,10 @@ module pe_engine #(
       // bench can count how often W1 actually delays a dispatch
       // (`rel_due & ~ready`). M_NO_HOLD_GATE drops the gate: the hold still
       // lands on time, and the data moves after SCL is released again.
-      // ⭐ TF1: `due_q` is the registered "timestamp has ARRIVED" (signed
-      // difference), `hz_q` the registered "hold counter is zero".
-      assign rel_due[gi] = l_live[gi] & due_q[gi]
-                         & ~(l_armed[gi] & l_notmo[gi]);
+      // ⭐ TF1 + TF2-R3: `rel_q` is the registered release term (live, the
+      // timestamp ARRIVED by signed difference, and not armed-without-
+      // timeout); `hz_q` the registered "hold counter is zero".
+      assign rel_due[gi] = rel_q[gi];
 `ifdef M_NO_HOLD_GATE
       assign ready[gi] = rel_due[gi];
 `else
@@ -1042,6 +1047,7 @@ module pe_engine #(
   // loop for every `ready` and every key (SymbiYosys, unbounded).
   reg [LW-1:0]   winner;
   reg            winner_v;
+  reg [N_LANES-1:0] winner_oh;   // one-hot winner, all zero when !winner_v
   generate if (N_LANES == 5) begin : g_argmin_tree
   // ---- BEGIN ARGMIN TREE ----
     reg            t1, t3, t23, t4, v01, v23, v03;
@@ -1063,6 +1069,16 @@ module pe_engine #(
       t4  = ready[4] && (!v03 || edf_key_off[4] < k03);
       winner   = t4 ? 3'd4 : i03;
       winner_v = v03 | ready[4];
+      // ⭐ TF2-R2: the SAME decisions, as five select lines. Each lane's line
+      // is the AND of the node outcomes on its path to the root, so the
+      // dispatch mux after the winner is a flat AND-OR with no decoder.
+      // `!t1 & v01` names lane 0: with lane 1 not taken, `v01` can only be
+      // lane 0's ready.
+      winner_oh[4] = t4;
+      winner_oh[3] = !t4 &  t23 &  t3;
+      winner_oh[2] = !t4 &  t23 & !t3;
+      winner_oh[1] = !t4 & !t23 &  t1;
+      winner_oh[0] = !t4 & !t23 & !t1 & v01;
     end
   // ---- END ARGMIN TREE ----
   end else begin : g_argmin_serial
@@ -1080,8 +1096,42 @@ module pe_engine #(
           best  = edf_key_off[k];
         end
       end
+      winner_oh = {N_LANES{1'b0}};
+      for (k = 0; k < N_LANES; k = k + 1)
+        if (winner_v && winner == k[LW-1:0]) winner_oh[k] = 1'b1;
     end
   end endgenerate
+
+  // ⛔⛔ RULING TF2-R1/R2 -- THE WINNER'S ACTION, PICKED FROM PER-LANE HEADS.
+  // The 50 MHz path after TF1/TF2 was mostly BUFFERS: one binary winner index
+  // decoded into a 10-way, 24-bit select over every slot (`l_act[hix[winner]]`)
+  // plus the head-valid and armed bits. Each lane's own head word and head-
+  // valid bit are now selected by that lane's own `l_sel` -- a 2:1 mux on
+  // flops, in parallel with the tree -- and the winner only picks one of five
+  // with the one-hot lines: a flat AND-OR, no decoder after the select.
+  // ⭐ CHOSEN OVER A REGISTERED SHADOW (Nathan, TF2-R): `hw[i]` IS
+  // `l_act[hix[i]]` by definition, so there is no second copy of state to
+  // keep in step and no update site that could be missed.
+  wire [ACT_W-1:0] hw [0:N_LANES-1];
+  wire [N_LANES-1:0] hv;
+  generate
+    for (gi = 0; gi < N_LANES; gi = gi + 1) begin : g_head
+      assign hw[gi] = l_act[hix[gi]];
+      assign hv[gi] = l_actv[hix[gi]];
+    end
+  endgenerate
+  reg [ACT_W-1:0] w_act;           // == l_act[hix[winner]] when winner_v
+  reg             w_hv;            // == l_actv[hix[winner]]
+  reg             w_armed;         // == l_armed[winner]
+  integer         wk;
+  always @* begin
+    w_act = {ACT_W{1'b0}}; w_hv = 1'b0; w_armed = 1'b0;
+    for (wk = 0; wk < N_LANES; wk = wk + 1) begin
+      w_act   = w_act   | ({ACT_W{winner_oh[wk]}} & hw[wk]);
+      w_hv    = w_hv    | (winner_oh[wk] & hv[wk]);
+      w_armed = w_armed | (winner_oh[wk] & l_armed[wk]);
+    end
+  end
 
   // =====================================================================
   // THE DISPATCH PIPELINE -- C = 2, J = 1, C9 = START
@@ -1437,18 +1487,17 @@ module pe_engine #(
   integer ti;
   always @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
-      // `now`, every `l_timestamp` and every `l_d` reset to 0
-      due_q      <= {N_LANES{1'b1}};
+      // `now`, every `l_timestamp` and every `l_d` reset to 0. The release
+      // term `rel_q` lives in the lane block (TF2-R3), beside the writes of
+      // `l_live` / `l_armed` / `l_notmo` it needs the next values of.
       for (ti = 0; ti < N_LANES; ti = ti + 1) key_q[ti] <= {TS_W{1'b0}};
       winner_q   <= {LW{1'b0}};
       winner_v_q <= 1'b0;
     end else begin
       for (ti = 0; ti < N_LANES; ti = ti + 1) begin
 `ifdef M_TF1_LATE
-        due_q[ti] <= ~tf_diff(now, l_timestamp[ti]);
         key_q[ti] <= (l_timestamp[ti] + {{(TS_W-D_W){1'b0}}, l_d[ti]}) - now;
 `else
-        due_q[ti] <= ~tf_diff(now_n, ts_n[ti]);
         key_q[ti] <= (ts_n[ti] + {{(TS_W-D_W){1'b0}}, ld_n[ti]}) - now_n;
 `endif
       end
@@ -1705,6 +1754,7 @@ module pe_engine #(
       prr      <= {LW{1'b0}};
       pbr1     <= 1'b0;
       hz_q     <= {N_LANES{1'b1}};          // every l_hcnt resets to 0
+      rel_q    <= {N_LANES{1'b0}};          // every l_live resets to 0
       // ⭐ RESET-HIGH on the pins is handled in the TOP module, not here:
       //   which pins can RELEASE differs between the two banks, and this
       //   module does not know the banks. See pe_top's reset comment.
@@ -1800,6 +1850,7 @@ module pe_engine #(
       //   sequence already does, and `gate_load_pin_safety` plus the bench's
       //   load-mode violation counters are what hold that.
       pin_oe   <= {N_PINS{1'b0}};
+      rel_q    <= {N_LANES{1'b0}};          // TF2-R3: every lane goes not-live
       for (i = 0; i < N_LANES; i = i + 1) begin
         l_live[i] <= 1'b0;
         l_pc[i]   <= {AW{1'b0}};
@@ -1821,6 +1872,17 @@ module pe_engine #(
       // update, are in the hold-expiry block below. One site, so the counter
       // and its registered zero-flag cannot disagree.
       hold_ld = 1'b0;
+      // ⭐ TF2-R3: every run-time write to `l_live`, `l_armed` and `l_notmo`
+      // lands in these next-value temporaries; the registers -- and the
+      // registered readiness `rel_q`, which needs their NEXT values -- are
+      // written from them ONCE, at the end of this branch. Reads of the
+      // registers inside the block still see this cycle's value, exactly as
+      // they did when the writes were non-blocking.
+      for (i = 0; i < N_LANES; i = i + 1) begin
+        live_n[i]  = l_live[i];
+        armed_n[i] = l_armed[i];
+        notmo_n[i] = l_notmo[i];
+      end
 
       // ---------------- header load ----------------------------------
       case (hst)
@@ -1888,7 +1950,7 @@ module pe_engine #(
                     // head at `l_pc` and `fetch_addr` reads `l_pc` directly.
                     // `l_fpc` then takes over from P_CAP onward.
                     l_fpc[hl]    <= hsh_n[HDR_BYTES*8-2-2*PINW-DLY_W-CW-D_W-D_W -: AW];
-                    l_live[hl]   <= 1'b1;
+                    live_n[hl]   = 1'b1;
                     hb <= 4'd0;
                     if (hl == LANE_LAST) begin
                       hst <= H_DONE; hdr_done <= 1'b1;
@@ -2006,9 +2068,9 @@ module pe_engine #(
                    // reports data it never received.
                    // ⛔ M_TIMEOUT_PROCEED removes the halt and the bench fails.
 `ifndef M_TIMEOUT_PROCEED
-                   if (l_armed[winner]) begin
-                     l_live[winner]    <= 1'b0;      // HALT this lane
-                     l_armed[winner]   <= 1'b0;
+                   if (w_armed) begin
+                     live_n[winner]    = 1'b0;       // HALT this lane
+                     armed_n[winner]   = 1'b0;
                      l_timeout[winner] <= 1'b1;      // STICKY -- status stream
                      sticky_ovr        <= 1'b1;
                    end else
@@ -2016,9 +2078,12 @@ module pe_engine #(
                    // ⭐ dispatch reads the HEAD slot. With the spare already
                    // filled, the usual case after a writeback is that the head
                    // is valid IMMEDIATELY -- which is the whole J reduction.
-                   if (l_actv[hix[winner]]) begin
+                   // ⭐ TF2-R: the one-hot picks (`w_hv`, `w_act`, `w_armed`
+                   // above) are exactly `l_actv[hix[winner]]`,
+                   // `l_act[hix[winner]]` and `l_armed[winner]`.
+                   if (w_hv) begin
                      cur     <= winner;
-                     cur_act <= l_act[hix[winner]];
+                     cur_act <= w_act;
                      st      <= ST_DRIVE;
                    end else begin
                      // ⭐⭐ THIS STALL IS THE JITTER TERM J. The EDF winner is
@@ -2105,7 +2170,7 @@ module pe_engine #(
               if (l_clkpin[cur] == a_pin) begin
                 config_err   <= 1'b1;
                 sticky_ovr   <= 1'b1;
-                l_live[cur]  <= 1'b0;
+                live_n[cur]  = 1'b0;
               end else begin
 `endif
               if (ck_shift) begin
@@ -2429,10 +2494,10 @@ module pe_engine #(
           // encoding choice in an existing field rather than a new one, and the
           // `ready` term above is what makes it mean "not ready on time".
           if (a_op == OP_ARM) begin
-            l_armed[cur]   <= 1'b1;
+            armed_n[cur]   = 1'b1;
             l_armpin[cur]  <= a_pin;
             l_armedge[cur] <= a_lvl;
-            l_notmo[cur]   <= (a_dly == {DLY_W{1'b0}});
+            notmo_n[cur]   = (a_dly == {DLY_W{1'b0}});
           end
 
           // ⭐⭐ THE PHASE, ADVANCED OR RESET, ahead of the opcode case so it
@@ -2484,7 +2549,7 @@ module pe_engine #(
           if (ck_refuse) begin
             config_err  <= 1'b1;
             sticky_ovr  <= 1'b1;
-            l_live[cur] <= 1'b0;        // HALT: the action has no meaning
+            live_n[cur] = 1'b0;         // HALT: the action has no meaning
           end
           if (ck_act) begin
             // the action's own bit counter: advances on LOW, cleared at the
@@ -2527,10 +2592,10 @@ module pe_engine #(
             // PAID went dark again. A regression visible only because the
             // paid debt was recorded.
             if (ck_act & ck_is_high & ck_park_en & ~l_mode[cur]) begin
-              l_armed[cur]   <= 1'b1;
+              armed_n[cur]   = 1'b1;
               l_armpin[cur]  <= l_clkpin[cur];
               l_armedge[cur] <= 1'b1;        // a RISE
-              l_notmo[cur]   <= 1'b1;        // unbounded: a slow peer is legal
+              notmo_n[cur]   = 1'b1;         // unbounded: a slow peer is legal
               l_ckpark[cur]  <= 1'b1;
             end
             if (ck_shiftin & ck_is_high) begin
@@ -2885,8 +2950,8 @@ module pe_engine #(
         // out of an idle line.
         if (l_ckpark[i]) begin
           if (l_ckwdog[i] >= CK_STRETCH_TO[6:0]) begin
-            l_live[i]       <= 1'b0;        // HALT this lane
-            l_armed[i]      <= 1'b0;
+            live_n[i]       = 1'b0;         // HALT this lane
+            armed_n[i]      = 1'b0;
             l_ckpark[i]     <= 1'b0;
             l_ckwait[i]     <= 1'b0;
             clk_stretch_err <= 1'b1;        // STICKY -- status bit 7
@@ -2904,7 +2969,7 @@ module pe_engine #(
           l_ckpark[i] <= 1'b0;
         end
         if (arm_hit[i]) begin
-          l_armed[i] <= 1'b0;                   // capture DISARMS: a second
+          armed_n[i] = 1'b0;                    // capture DISARMS: a second
                                                 // edge must not re-rebase and
                                                 // slide the grid forward on
                                                 // every peer transition
@@ -2915,6 +2980,31 @@ module pe_engine #(
           l_timestamp[i] <= ck_rebase[i];
 `endif
         end
+      end
+
+      // ---- ⭐ TF2-R3: the one write of the live/armed/no-timeout registers,
+      // and the registered release term computed from their NEXT values.
+      // `rel_q` therefore holds, every cycle, what the combinational
+      // `l_live & arrived & ~(armed & no-timeout)` held -- and a lane halted
+      // this cycle is NOT eligible next cycle. M_TF2_LIVE_LATE reads the
+      // CURRENT `l_live` instead: the halted lane stays eligible one cycle.
+      for (i = 0; i < N_LANES; i = i + 1) begin
+        l_live[i]  <= live_n[i];
+        l_armed[i] <= armed_n[i];
+        l_notmo[i] <= notmo_n[i];
+        // ⛔ NO `elsif`: the drift and kill gates discover mutants from
+        // `ifdef` / `ifndef` only, so each mutant gets its own arm.
+`ifdef M_TF1_LATE
+        rel_q[i] <= l_live[i] & ~tf_diff(now, l_timestamp[i]) & ~(l_armed[i] & l_notmo[i]);
+`else
+        rel_q[i] <= (
+`ifdef M_TF2_LIVE_LATE
+                     l_live[i]
+`else
+                     live_n[i]
+`endif
+                     ) & ~tf_diff(now_n, ts_n[i]) & ~(armed_n[i] & notmo_n[i]);
+`endif
       end
     end
   end

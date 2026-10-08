@@ -44,6 +44,14 @@ SCRATCH = os.environ.get("PE_SCRATCH",
 GOLDEN = os.path.join(HERE, "lockstep_golden.json")
 NCYC = 60000
 SRCS = ["pe_engine.v", "pe_store.v", "project.v"]
+# ⭐ EACH must move at least one stream. TF2-R3's mutant keeps a lane that
+# halted this cycle eligible for one more; on these images only
+# `census_image` halts a lane in the window, and that one image is enough --
+# MEASURED: its stream moves, the other eleven do not.
+MUST_FIRE = [
+    ("M_TF1_LATE", "registered readiness from CURRENT values"),
+    ("M_TF2_LIVE_LATE", "a lane halted this cycle still eligible next cycle"),
+]
 IMAGES = ["smoke_image.hex", "stress_image.hex", "half_image.hex",
           "census_image.hex", "corpus_i2c.hex", "i2caddr_image.hex",
           "i2cframe_image.hex", "rxfast_image.hex", "ckheavy_image.hex",
@@ -148,17 +156,19 @@ def main() -> int:
     if bad:
         rc = 1
 
-    print("  --- must-fire: M_TF1_LATE (registered readiness from CURRENT values) ---")
-    mvvp = build(os.path.join(ROOT, "src"), ("M_TF1_LATE",), "m_tf1_late")
-    if mvvp is None:
-        return 1
-    msame, mbad, _ = compare(mvvp, gold, "mutant")
-    print("    streams that moved under the mutant: %d of %d"
-          % (len(mbad), len(IMAGES)))
-    if not mbad:
-        print("    *** MUST-FIRE FAILED: the naive retiming left every stream "
-              "identical -- this gate does not see the schedule")
-        rc = 1
+    for define, what in MUST_FIRE:
+        print("  --- must-fire: %s (%s) ---" % (define, what))
+        mvvp = build(os.path.join(ROOT, "src"), (define,), define.lower())
+        if mvvp is None:
+            return 1
+        msame, mbad, _ = compare(mvvp, gold, "mutant")
+        print("    streams that moved under the mutant: %d of %d (%s)"
+              % (len(mbad), len(IMAGES),
+                 ", ".join(i for i, _w in mbad) or "none"))
+        if not mbad:
+            print("    *** MUST-FIRE FAILED: %s left every stream identical "
+                  "-- this gate does not see the schedule" % define)
+            rc = 1
     print()
     print("  GATE lockstep: %s" % ("PASSED" if rc == 0 else "FAILED"))
     return rc

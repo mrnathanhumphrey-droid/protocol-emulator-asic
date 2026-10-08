@@ -55,6 +55,16 @@ TEMPS = {
         "at the one `l_hcnt` load and the matching `hz_q` write -- all inside "
         "that one `always @(posedge clk)`. It exists so the counter and its "
         "registered zero-flag have ONE write site and cannot disagree.",
+    ("pe_engine.v", "live_n"):
+        "RULING TF2-R3: the lane block's next value of `l_live`. Loaded from "
+        "`l_live` at the top of the run branch, written at every run-time "
+        "halt / go-live site, and read only at the end of that same block to "
+        "write `l_live` and the registered release term `rel_q`.",
+    ("pe_engine.v", "armed_n"):
+        "RULING TF2-R3: as `live_n`, for `l_armed` (WB arm, clocked park, "
+        "timeout halt, stretch fault, edge-capture disarm).",
+    ("pe_engine.v", "notmo_n"):
+        "RULING TF2-R3: as `live_n`, for `l_notmo` (WB arm, clocked park).",
 }
 SCRATCH = os.path.join(ROOT, "probe_rl1")
 WARN = re.compile(r"^%(?:Warning|Error)-([A-Z0-9_]+): (\S+?):(\d+):")

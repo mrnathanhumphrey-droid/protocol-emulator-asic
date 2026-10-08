@@ -503,7 +503,8 @@ has the details.
 | P3 | the port serves the **same-cycle** EDF winner's invalid head first | it serves the **previous cycle's** winner (`winner_q`), re-checked live. A winner's head refill starts **one cycle later** |
 | P4 | spare fills at the pointer `pl`, and a winner-first refill **moved the pointer** to `winner + 1` | spare fills at the pointer `prr`. A winner-first refill **does not move it** (P4r) |
 | P7 | the select is a serial loop over combinational keys | a tree, **proved equal** to the loop (`formal/argmin_equiv.sby`), over **registered** keys |
-| P9 / P9w | `rel_due` and `ready` were combinational over `now`, `l_timestamp` and `l_hcnt` | the same values, held in registers computed from next-state inputs (P9t, P9h). The streams are byte-identical on every shipped admissible image (`test/run_lockstep.py`) |
+| P9 / P9w | `rel_due` and `ready` were combinational over `now`, `l_timestamp` and `l_hcnt` | the same values, held in registers computed from next-state inputs (P9t, P9h). The streams are byte-identical on every shipped admissible image (`test/run_lockstep.py`). Since TF2-R3 the whole release term, `l_live` and the armed/no-timeout guard included, is the one register `rel_q` |
+| P5 (TF2-R) | dispatch tested `l_actv[hix[winner]]` | it tests `w_hv`, the one-hot pick of per-lane `hv[i] = l_actv[hix[i]]`. The same bit (P5h; the one-hot/binary equality is proved in `formal/argmin_equiv.sby`) |
 
 ### Theorem 1 is affected, and the measurement shows it
 

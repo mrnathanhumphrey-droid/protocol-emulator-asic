@@ -1,6 +1,9 @@
-# Must-fire for argmin_equiv.sby: the same proof on a tree whose first node
-# breaks the lowest-index tie rule. It MUST FAIL (a counterexample is the pass).
-# Run: python formal/make_argmin_miter.py --mutate && sby -f formal/argmin_equiv_mut.sby
+# Must-fires for argmin_equiv.sby, two of them, each built into the same miter
+# file and each required to FAIL (a counterexample is the pass):
+#   --mutate     the first node breaks the lowest-index tie rule (`<=`)
+#   --mutate-oh  lane 0's one-hot line drops `v01`, so it fires with no
+#                lane ready (TF2-R5); only the one-hot assertion catches it
+# Run: python formal/make_argmin_miter.py --mutate[-oh] && sby -f formal/argmin_equiv_mut.sby
 [options]
 mode prove
 depth 1
