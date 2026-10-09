@@ -104,24 +104,25 @@ module tb_ckack;
     // otherwise read mem[X] and put X on SDA -- measured, `data=xx`
     peer.addr = 15'h0123;
 
-    // ⭐ EACH SHIFT's QUEUE TAG SUPPLIES THE *NEXT* SHIFT's BYTE: the host
-    // load runs at the end of a byte, so the byte a SHIFT emits was popped
-    // by the SHIFT before it. The runner tags the actions accordingly:
-    //   q0 dev W  (A0 -- or A2, an address nobody answers, on the NACK arm)
-    //   q1 the two address bytes, 01 then 23
-    //   q2 dev R  (A1 -- or A3)
-    //   q3 the master's ACK (2D, MSB 0) then NACK (C4, MSB 1)
+    // ⭐ ONE QUEUE, IN PROGRAM ORDER (`pe_asm.check_queue_ownership`: a lane
+    // uses one queue). A SHIFT loads its successor's byte at its own end, so
+    // the six SHIFTs of the random read pop q0 in this order -- and the first
+    // SHIFT after reset sends the register's reset 0x00:
+    //   01 23 (address)  A1 (dev R)  2D (master ACK, MSB 0)  C4 (master
+    //   NACK, MSB 1)  A0 (next loop's dev W)
+    // ACK/NACK are 2D/C4, NOT 00/FF: only the MSB of a 1-bit SHIFT goes out,
+    // and every payload stays non-palindromic (ruling 1b).
+    // +DEVW / +DEVR replace A0 / A1 (A2 / A3 on the nobody-answers arm).
     hf_init;
-    if (!$value$plusargs("DEVW=%h", i)) i = 8'hA0;
-    hf_set(0, i[7:0], i[7:0], i[7:0], i[7:0]);
-    hf_set(1, 8'h01, 8'h23, 8'h01, 8'h23);
+    hf_n(0, 6);
+    hf_put(0, 0, 8'h01);
+    hf_put(0, 1, 8'h23);
     if (!$value$plusargs("DEVR=%h", i)) i = 8'hA1;
-    hf_set(2, i[7:0], i[7:0], i[7:0], i[7:0]);
-    // ⭐ ONLY THE FIRST BIT (the MSB, on this MSB-first lane) of a 1-bit
-    // SHIFT goes out, so ACK is any byte with MSB 0 and NACK any with MSB 1:
-    // 2D and C4, NOT 00 and FF -- non-palindromic like every other payload
-    // (ruling 1b), so a reversed lane would send the wrong ACK/NACK
-    hf_set(3, 8'h2D, 8'hC4, 8'h2D, 8'hC4);
+    hf_put(0, 2, i[7:0]);
+    hf_put(0, 3, 8'h2D);
+    hf_put(0, 4, 8'hC4);
+    if (!$value$plusargs("DEVW=%h", i)) i = 8'hA0;
+    hf_put(0, 5, i[7:0]);
 
     cyc = 0; nwr = 0; park_now = 0; park_max = 0; n_rx = 0;
     fd = $fopen(dumpfile, "wb");

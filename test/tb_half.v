@@ -375,12 +375,12 @@ module tb_half;
         $display("");
         $write("    lane %0d pushed          :", j);
         for (i = 1; i < tn[j] && i <= 4; i = i + 1)
-          $write(" %02h", hf_pat[j][(i - 1) % HF_PAT]);
+          $write(" %02h", hf_pat[j][(i - 1) % hf_len[j]]);
         $display("");
         for (i = 1; i < tn[j] && i <= 4; i = i + 1)
-          if (tgot[j][i] != hf_pat[j][(i - 1) % HF_PAT]) begin
+          if (tgot[j][i] != hf_pat[j][(i - 1) % hf_len[j]]) begin
             $display("    lane %0d byte %0d: got %02h want %02h *** FAIL",
-                     j, i - 1, tgot[j][i], hf_pat[j][(i - 1) % HF_PAT]);
+                     j, i - 1, tgot[j][i], hf_pat[j][(i - 1) % hf_len[j]]);
             fails = fails + 1;
           end
       end

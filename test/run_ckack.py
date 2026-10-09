@@ -99,25 +99,29 @@ def image(path):
                         OP_STOP, ORDER_MSB, act, act_shift_clocked,
                         act_shiftin_clocked, hdr, write_image)
     sda, scl, d = 2, 1, D
-    # ⭐ q = the queue of the NEXT shift's byte: a clocked SHIFT loads at its
-    # end, so the byte it sends was popped by the SHIFT before it (tb_ckack.v)
+    # ⭐ ONE QUEUE (q0) for every SHIFT, as `pe_asm.check_queue_ownership`
+    # requires; the host pushes the bytes in the order the SHIFTs pop them
+    # (tb_ckack.v). ⚠ The first version spread this lane over FOUR queues --
+    # a program the assembler REFUSES -- which is corrected here; the result
+    # it certified (sampling instant, sigrok's decode) does not depend on the
+    # routing, and is re-measured on the admissible program.
     prog = [
         act(OP_START, sda, 0, d),
-        act_shift_clocked(sda, d, nbits=8, q=1),     # A0   (q0's byte)
+        act_shift_clocked(sda, d, nbits=8, q=0),     # A0
         act_shiftin_clocked(sda, d, nbits=1),        # ACK slot
-        act_shift_clocked(sda, d, nbits=8, q=1),     # 01   (q1)
+        act_shift_clocked(sda, d, nbits=8, q=0),     # 01
         act_shiftin_clocked(sda, d, nbits=1),
-        act_shift_clocked(sda, d, nbits=8, q=2),     # 23   (q1)
+        act_shift_clocked(sda, d, nbits=8, q=0),     # 23
         act_shiftin_clocked(sda, d, nbits=1),
         # Sr after a clocked SHIFTIN (SCL low): SDA high, SCL high, START
         act(OP_LEVEL, sda, 1, d), act(OP_LEVEL, scl, 1, d),
         act(OP_START, sda, 0, d),
-        act_shift_clocked(sda, d, nbits=8, q=3),     # A1   (q2)
+        act_shift_clocked(sda, d, nbits=8, q=0),     # A1
         act_shiftin_clocked(sda, d, nbits=1),        # peer ACK
         act_shiftin_clocked(sda, d, nbits=8),        # data 1
-        act_shift_clocked(sda, d, nbits=1, q=3),     # master ACK  (q3: 2D)
+        act_shift_clocked(sda, d, nbits=1, q=0),     # master ACK  (2D)
         act_shiftin_clocked(sda, d, nbits=8),        # data 2
-        act_shift_clocked(sda, d, nbits=1, q=0),     # master NACK (q3: C4)
+        act_shift_clocked(sda, d, nbits=1, q=0),     # master NACK (C4)
         # P after a clocked SHIFT (SCL high): SCL low, SDA low, SCL high, STOP
         act(OP_LEVEL, scl, 0, d), act(OP_LEVEL, sda, 0, d),
         act(OP_LEVEL, scl, 1, d), act(OP_STOP, sda, 1, d),
@@ -232,6 +236,22 @@ def main() -> int:
     print("=" * 78)
     os.makedirs(SCRATCH, exist_ok=True)
     image(os.path.join(SCRATCH, "ckack.hex"))
+    # ⛔ THE PROGRAM MUST BE ONE THE TOOLCHAIN ADMITS: `pe_asm`'s queue rule
+    # (one lane, one queue), read back off the image itself
+    import pe_isa
+    sys.path.insert(0, os.path.join(ROOT, "model"))
+    import pe_asm
+    with open(os.path.join(SCRATCH, "ckack.hex"), encoding="ascii") as fh:
+        raw = bytes(int(t, 16) for t in fh.read().split())
+    lanes = {ln: [(a["op"], a["pin"], a["level"], a["delay"], a["q"])
+                  for a in acts]
+             for ln, (_h, acts) in pe_isa.lane_programs(raw).items()}
+    try:
+        pe_asm.check_queue_ownership(lanes)
+        print("  the program passes pe_asm's queue rule (one lane, one queue)")
+    except pe_asm.Reject as e:
+        print("  *** the program breaks pe_asm's queue rule: %s" % e)
+        return 1
     to = stretch_timeout()
     under = to - 50000
     print("  stretch timeout = %d cycles (CK_STRETCH_PRE * CK_STRETCH_TO); "

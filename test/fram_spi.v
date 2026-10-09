@@ -95,8 +95,25 @@ module fram_spi #(
   assign so    = shout[7];
   assign so_oe = drive & ~cs_n;
 
-  // ---- LATCH on SCK rise. CS is a synchronous reset here. -------------
-  always @(posedge sck) begin
+  // ⛔⛔ RULING SP1 -- MODE 3, WHICH THE PART SUPPORTS AND THIS MODEL DID NOT.
+  // The datasheet: "corresponds to SPI mode 0 (CPOL 0, CPHA 0) and mode 3
+  // (CPOL 1, CPHA 1)". This model was mode-0-only in two ways, invisible until
+  // a program first addressed it for real:
+  //   * deselect was a SYNCHRONOUS reset, so it needed an SCK edge while CS
+  //     was high -- in mode 3 SCK idles HIGH and still, so `phase` never
+  //     reset and every transaction after the first was decoded as DATA;
+  //   * a byte was ACTED ON at the next SCK fall, so the last byte before CS
+  //     rose (WREN; the final WRITE data byte) never acted -- in mode 3 there
+  //     is no fall after it.
+  // ⇒ Deselect is an ASYNCHRONOUS reset in each block (still one driver per
+  //   signal), and a completed byte is counted (`nbyte`) and acted on ONCE --
+  //   at the next fall, or at CS rise if no fall came. Mode 0 behaves exactly
+  //   as before: its fall acts, and the CS rise then finds nothing pending.
+  reg [7:0]    nbyte;      // driven ONLY by the rise block: bytes completed
+  reg [7:0]    seen;       // driven ONLY by the fall block: bytes acted on
+
+  // ---- LATCH on SCK rise; deselect resets asynchronously ---------------
+  always @(posedge sck or posedge cs_n) begin
     if (cs_n) begin
       bitn      <= 3'd7;
       shin      <= 8'h00;
@@ -105,12 +122,21 @@ module fram_spi #(
       shin      <= {shin[6:0], si};
       byte_done <= (bitn == 3'd0);
       bitn      <= (bitn == 3'd0) ? 3'd7 : bitn - 3'd1;
+      if (bitn == 3'd0) nbyte <= nbyte + 8'd1;
     end
   end
 
   // ---- ACT on a completed byte, and present, on SCK fall -------------
-  always @(negedge sck) begin
+  always @(negedge sck or posedge cs_n) begin
     if (cs_n) begin
+      // a byte completed and never acted on (mode 3's last byte) acts NOW
+      if (nbyte != seen) begin
+        act_byte;
+        seen <= nbyte;
+      end
+      // ⭐ "WEL is reset ... at the rising edge of CS after WRITE command
+      // recognition" (datasheet) -- AFTER the last data byte has used it
+      if (phase != P_OP && opcode == OP_WRITE) wel <= 1'b0;
       phase <= P_OP;
       drive <= 1'b0;
       shout <= 8'h00;
@@ -118,7 +144,17 @@ module fram_spi #(
       // part keeps it across the deselect that ends the WREN transaction --
       // that is the whole point of a separate WREN command, and clearing it
       // here would make every WRITE fail for a reason the program cannot see.
-    end else if (byte_done) begin
+    end else if (nbyte != seen) begin
+      act_byte;
+      seen <= nbyte;
+    end else if (drive) begin
+      shout <= {shout[6:0], 1'b0};          // shift out, MSB first
+    end
+  end
+
+  // ---- what a completed byte does, in its phase -------------------------
+  task act_byte;
+    begin
       case (phase)
         P_OP: begin
           opcode <= shin;
@@ -166,10 +202,8 @@ module fram_spi #(
         end
         default: ;
       endcase
-    end else if (drive) begin
-      shout <= {shout[6:0], 1'b0};          // shift out, MSB first
     end
-  end
+  endtask
 
   // ---- init ------------------------------------------------------------
   // ⛔ THE ARRAY IS LEFT X, NOT ZEROED. A zero-filled array makes a read of an
@@ -186,6 +220,8 @@ module fram_spi #(
     phase     = P_OP;
     opcode    = 8'h00;
     byte_done = 1'b0;
+    nbyte     = 8'd0;
+    seen      = 8'd0;
   end
 
 endmodule

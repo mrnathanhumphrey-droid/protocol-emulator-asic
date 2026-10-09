@@ -338,6 +338,10 @@ SPEC_SYMBOLS = {
     ("test/run_recert.py", "I2C"),
     ("test/run_recert.py", "SPI"),
     ("test/run_recert.py", "RX_ONLY"),
+    # ⭐ RULING SP1: the BYTES a real SPI FRAM transaction sends (opcodes,
+    # address, data) and the ones it must read back -- inputs to the program
+    # and its verdict, not observations; what is measured is sigrok's decode.
+    ("test/corpus.py", "FEEDS"),
     # ⭐⭐ UM10204's TIMING MINIMA, TRANSCRIBED. These are REQUIREMENTS the
     # design is measured against, so they are inputs in the strongest sense --
     # the whole point of the gate that holds them is that nothing in this repo

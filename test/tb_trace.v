@@ -169,6 +169,8 @@ module tb_trace;
   // latent form of this defect. All take 256 bytes and `test/imgload.vh`'s
   // macro fails loudly on an image that did not load.
   reg [8*256-1:0] imgfile, outfile, peersel;
+  reg [127:0]     feedv;          // ruling SP1: +FEED, up to 16 bytes
+  integer         feedn, fi;
 
   // ---- A PORTABLE PRNG, AND $random IS NOT ONE -------------------------
   // ⛔⛔ `$random`'s GENERATOR IS NOT THE SAME IN THE TWO SIMULATORS. Seeded
@@ -494,6 +496,20 @@ module tb_trace;
     hf_set(1, 8'h5B, 8'h01, 8'h7A, 8'hC7);
     hf_set(2, 8'h5B, 8'h01, 8'h7A, 8'hC7);
     hf_set(3, 8'h5B, 8'h01, 8'h7A, 8'hC7);
+    // ⭐ RULING SP1: `+FEED=<hex>` with `+FEEDN=<n>` (n <= 16) puts an
+    // image's own byte sequence on queue 0, most significant byte first -- a
+    // real transaction's opcodes and addresses, which the default pattern can
+    // never spell (`corpus.FEEDS`). `+FEEDN=0` keeps the default.
+    if (!$value$plusargs("FEEDN=%d", feedn)) feedn = 0;
+    if (feedn > 0) begin
+      if (!$value$plusargs("FEED=%h", feedv)) begin
+        $display("tb_trace: FATAL -- +FEEDN=%0d without +FEED", feedn);
+        $finish;
+      end
+      hf_n(0, feedn);
+      for (fi = 0; fi < feedn; fi = fi + 1)
+        hf_put(0, fi, feedv[(feedn - 1 - fi) * 8 +: 8]);
+    end
     if (stayload == 0) hf_en = 1'b1;
     for (i = 0; i < ncyc; i = i + 1) begin
       @(negedge clk);

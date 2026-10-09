@@ -388,51 +388,34 @@ CLASSIFIED = {
     # set -- i.e. the FRAM write and random read that come next.
 }
 
-_SPI_FAMILY = (
-    "`fram_spi.v`'s command decoder has never executed: `byte_done` never "
-    "fires at an `negedge sck` with the part selected, so this arm is dark "
-    "along with the other seventeen. See the block comment above -- the whole "
-    "family needs one SPI-master program that clocks eight coherent bits per "
-    "byte with CS asserted. ")
+# ⭐⭐ RULING SP1 -- THE DECODER IS PAID BY A REAL TRANSACTION. `corpus_spim` is
+# now the MB85RS64V's WREN / WRITE / READ, fed its own opcodes in order, and
+# the peer was brought to the datasheet's mode 3 (it was mode-0-only: deselect
+# needed an SCK edge, and a transaction's last byte never acted). MEASURED,
+# Verilator 5.053: fram_spi went from 11/17 lines and 7/12 branches UNCOVERED
+# to 4/18 and 2/18. The eighteen-point "never executed" family and the seven
+# points ruling TX5 retracted (paid only by silicon fix #2's misaligned bytes)
+# are now paid by the bytes the program MEANT, and their entries are retired.
+# What remains is what this program does not send:
+_SPI_LEFT = (
+    "Not in the swept SPI FRAM transaction (`corpus_spim`: WREN, WRITE, "
+    "READ). Owed to a program that sends it -- the pe_asm front-end's SPI "
+    "FRAM sequences (RDSR to poll status, WRDI to drop WEL, RDID to "
+    "identify). This point is ")
 for _k, _what in (
-        ((113, "v_line", "elsif"), "the deselect reset of the phase machine"),
-        ((126, "v_line", "case"), "the WREN opcode arm"),
-        ((127, "v_line", "case"), "the WRDI opcode arm"),
-        ((128, "v_line", "case"), "the RDSR (read status) opcode arm"),
-        ((133, "v_line", "case"), "the RDID (read id) opcode arm"),
-        ((149, "v_branch", "if"), "the READ fork at P_ALO, taken"),
-        ((160, "v_branch", "if"), "the write-enable latch honoured"),
-        ((162, "v_branch", "if"), "the READ arm inside P_DATA"),
-        ((162, "v_branch", "else"), "the READ arm inside P_DATA, not taken"),
-        ((167, "v_line", "case"), "the phase case's defensive default"),
-        ((169, "v_branch", "if"), "the drive-out shift between bytes")):
+        ((163, "v_line", "case"), "the WRDI opcode arm"),
+        ((164, "v_line", "case"), "the RDSR (read status) opcode arm"),
+        ((169, "v_line", "case"), "the RDID (read id) opcode arm"),
+        ((196, "v_branch", "else"), "a WRITE with WEL clear -- the refused "
+                                    "write (the program always WRENs first)"),
+        ((198, "v_branch", "else"), "the data phase of an opcode that is "
+                                    "neither WRITE nor READ (RDSR/RDID)")):
     CLASSIFIED[("test/fram_spi.v", _k[0], _k[1], _k[2])] = (
-        OWED, _SPI_FAMILY + "This point is " + _what + ".")
-
-# ⛔⛔ RULING TX5 -- SEVEN "PAID" POINTS WERE PAID BY THE BUG, AND THE CREDIT IS
-# RETRACTED. The block comment above records that the self-clocked corpus paid
-# seven of the decoder's points. MEASURED after silicon fix #2: it paid them
-# with MISALIGNED BYTES. The corpus feeds `5B 01 7A C7`, which holds neither
-# READ (03) nor WRITE (02); the pre-fix load drifted the stream a bit per byte
-# and the drifted bytes happened to decode as those opcodes. With the bytes
-# correct, the READ/WRITE path is dark again. The same lesson as the fix: a
-# coverage count is an EDGE measurement too -- it says a branch ran, not that
-# the bytes that ran it were the ones the program meant.
-_SPI_DRIFT = (
-    "Covered before silicon fix #2 ONLY BY MISALIGNED BYTES: the corpus feed "
-    "(5B 01 7A C7) carries no READ (03) or WRITE (02) opcode, and the pre-fix "
-    "drift happened to form one. Owed to the FRAM write + random read "
-    "programs, which send the opcodes on purpose. This point is ")
-for _k, _what in (
-        ((134, "v_line", "case"), "the READ/WRITE opcode arm"),
-        ((138, "v_line", "case"), "the P_AHI phase"),
-        ((146, "v_line", "case"), "the P_ALO phase"),
-        ((149, "v_branch", "else"), "the READ fork at P_ALO, not taken"),
-        ((154, "v_line", "case"), "the P_DATA phase"),
-        ((155, "v_line", "elsif"), "the WRITE arm inside P_DATA"),
-        ((160, "v_branch", "else"), "the write-enable latch, not honoured")):
-    CLASSIFIED[("test/fram_spi.v", _k[0], _k[1], _k[2])] = (
-        OWED, _SPI_DRIFT + _what + ".")
+        OWED, _SPI_LEFT + _what + ".")
+CLASSIFIED[("test/fram_spi.v", 203, "v_line", "case")] = (
+    UNREACHABLE,
+    "the phase case's `default`: `phase` is 2 bits and P_OP, P_AHI, P_ALO, "
+    "P_DATA enumerate all four values, so no phase reaches it. Defensive.")
 
 #: ⚠ TOGGLE CEILINGS -- uncovered toggle points per file, which may only FALL.
 #: ⛔ Measured, not chosen: these are the values of the sweep that shipped with
@@ -485,7 +468,10 @@ TOGGLE_CEILING = {
     #     silicon fix #2 the corpus sends 5B 01 7A C7 and the decoder's
     #     address and data registers go quiet again. Owed to the FRAM programs.
     "test/fram_i2c.v": 98,
-    "test/fram_spi.v": 54,
+    #   fram_spi 54 -> 18 (RATCHETED DOWN, ruling SP1): the real WREN / WRITE /
+    #     READ transaction drives the decoder's address, data and output
+    #     registers with the bytes the program means.
+    "test/fram_spi.v": 18,
 }
 
 #: ⛔⛔ EVERY ANCHOR CARRIES ITS SOURCE TEXT (Wilson's ruling). A coverage
@@ -547,39 +533,19 @@ ANCHOR_TEXT = {
     # into line 557.
     ("test/fram_i2c.v", 266):
         "P_WDATA: begin",
-    ("test/fram_spi.v", 113):
-        "if (cs_n) begin",
-    ("test/fram_spi.v", 126):
-        "OP_WREN: begin wel <= 1'b1; drive <= 1'b0; end",
-    ("test/fram_spi.v", 127):
+    # ruling SP1: what the real WREN/WRITE/READ transaction does not send
+    ("test/fram_spi.v", 163):
         "OP_WRDI: begin wel <= 1'b0; drive <= 1'b0; end",
-    ("test/fram_spi.v", 128):
+    ("test/fram_spi.v", 164):
         "OP_RDSR: begin",
-    ("test/fram_spi.v", 133):
-        "OP_RDID: begin shout <= 8'h04; drive <= 1'b1; phase <= P_DATA; end",
-    # ruling TX5: the seven points the pre-fix drift had paid
-    ("test/fram_spi.v", 134):
-        "OP_READ, OP_WRITE: begin phase <= P_AHI; drive <= 1'b0; end",
-    ("test/fram_spi.v", 138):
-        "P_AHI: begin",
-    ("test/fram_spi.v", 146):
-        "P_ALO: begin",
-    ("test/fram_spi.v", 154):
-        "P_DATA: begin",
-    ("test/fram_spi.v", 155):
-        "if (opcode == OP_WRITE) begin",
-    # ⭐ 149 AND 160 KEEP THEIR ANCHORS: only one arm of each was paid (the
-    # not-taken fork), so the taken arm is still owed and still anchored.
-    ("test/fram_spi.v", 149):
-        "if (opcode == OP_READ) begin",
-    ("test/fram_spi.v", 160):
-        "if (wel) mem[addr] <= shin;",
-    ("test/fram_spi.v", 162):
-        "end else if (opcode == OP_READ) begin",
-    ("test/fram_spi.v", 167):
-        "default: ;",
     ("test/fram_spi.v", 169):
-        "end else if (drive) begin",
+        "OP_RDID: begin shout <= 8'h04; drive <= 1'b1; phase <= P_DATA; end",
+    ("test/fram_spi.v", 196):
+        "if (wel) mem[addr] <= shin;",
+    ("test/fram_spi.v", 198):
+        "end else if (opcode == OP_READ) begin",
+    ("test/fram_spi.v", 203):
+        "default: ;",
 }
 
 #: ⛔⛔ EVERY COVERAGE FIGURE IS LABELLED WITH THE TOOL THAT MEASURED IT

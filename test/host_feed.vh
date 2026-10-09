@@ -50,9 +50,16 @@
   // payload runs out and the lane underruns, which is the regime being
   // replaced; a cycling pattern means the emitted stream must equal the
   // pattern cyclically, for as long as the run lasts.
-  localparam integer HF_PAT = 4;
+  // ⭐ RULING SP1: a queue's pattern may be up to 16 bytes long (`hf_n` +
+  // `hf_put`), because a REAL transaction on ONE queue needs more than four
+  // distinct bytes in order -- an SPI FRAM write + read is nine -- and
+  // `pe_asm.check_queue_ownership` refuses a lane that spreads its bytes over
+  // several queues (the host could not know which queue a lane takes next).
+  // `hf_set` still loads four, and every bench that uses only it is unchanged.
+  localparam integer HF_PAT = 16;
   reg  [7:0] hf_pat [0:3][0:HF_PAT-1];
   integer    hf_idx [0:3];
+  integer    hf_len [0:3];
   // ⛔⛔ DECLARATION INITIALISERS, NOT JUST `hf_init`, AND THE DIFFERENCE IS A
   // RACE. `hf_init` is a TASK called from each bench's main `initial`, while
   // the feeder is its OWN `initial` block. Both start at time 0 and their
@@ -71,6 +78,7 @@
       hf_pushes = 0; hf_bytes = 0;
       for (a = 0; a < 4; a = a + 1) begin
         hf_idx[a] = 0;
+        hf_len[a] = 4;
         for (b = 0; b < HF_PAT; b = b + 1) hf_pat[a][b] = 8'h00;
       end
     end
@@ -86,8 +94,25 @@
       hf_pat[q][0] = b0; hf_pat[q][1] = b1;
       hf_pat[q][2] = b2; hf_pat[q][3] = b3;
       hf_idx[q] = 0;
+      hf_len[q] = 4;
       hf_mask[q] = 1'b1;
     end
+  endtask
+
+  // ⭐ A LONGER SEQUENCE ON ONE QUEUE (ruling SP1): `hf_n(q, n)` sets the
+  // length and enables the queue, `hf_put(q, i, b)` writes entry i.
+  task hf_n;
+    input integer q, n;
+    begin
+      hf_len[q] = n;
+      hf_idx[q] = 0;
+      hf_mask[q] = 1'b1;
+    end
+  endtask
+  task hf_put;
+    input integer q, i;
+    input [7:0] b;
+    hf_pat[q][i] = b;
   endtask
 
   // ---- one nibble -------------------------------------------------------
@@ -148,7 +173,7 @@
       for (hf_q = 0; hf_q < 4; hf_q = hf_q + 1) begin
         if (hf_mask[hf_q] && dut.tx_cnt[hf_q] != 2'd2) begin
           hf_push_byte(hf_pat[hf_q][hf_idx[hf_q]], hf_q[1:0]);
-          hf_idx[hf_q] = (hf_idx[hf_q] + 1) % HF_PAT;
+          hf_idx[hf_q] = (hf_idx[hf_q] + 1) % hf_len[hf_q];
         end
       end
       @(negedge clk);

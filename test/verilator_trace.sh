@@ -55,6 +55,9 @@ PHASE="${8:-1}"
 DEFS="${9:-}"
 STAYLOAD="${10:-0}"
 SCLHOLD="${11:-0}"
+# ⭐ RULING SP1: extra plusargs for the run (an image's own host feed,
+# `+FEEDN=n +FEED=hex` from corpus.FEEDS), word-split on purpose
+EXTRA="${12:-}"
 SEEDS="1 7 12345"          # ⭐ recorded here and echoed with every result
 
 cd "$ROOT" || exit 1
@@ -170,7 +173,7 @@ for S in $SEEDS; do
     "$OBJ/tr" "+IMG=$IMG" "+NBYTES=$NBYTES" \
               "+OUT=$OUTDIR/s$S.txt" "+NCYC=$NCYC" \
               "+PEER=$PEER" "+ASYNC=$ASYNCA" "+SEED=$PHASE" \
-              "+STAYLOAD=$STAYLOAD" "+SCLHOLD=$SCLHOLD" \
+              "+STAYLOAD=$STAYLOAD" "+SCLHOLD=$SCLHOLD" $EXTRA \
               "+verilator+rand+reset+2" "+verilator+seed+$S" \
               > "$OUTDIR/run_s$S.log" 2>&1
               > "$OUTDIR/run_s$S.log" 2>&1

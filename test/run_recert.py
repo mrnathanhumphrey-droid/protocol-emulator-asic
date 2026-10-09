@@ -120,16 +120,23 @@ def build():
     return g.build([], "recert")
 
 
-def trace(vvp, img, peer):
+def trace(vvp, img, peer, ncyc=NCYC):
+    """Run `tb_trace` on `img` with its own host feed (`corpus.FEEDS`, ruling
+    SP1) -> (stdout, rows of (uo_out, uio_out, uio_oe, uio_in))."""
     os.makedirs(SCRATCH, exist_ok=True)
     out = os.path.join(SCRATCH, "t_%s_%s.txt" % (img.replace(".hex", ""), peer))
     import benchset
+    import corpus
     a2 = benchset.a2_slack_arg("test/" + img)
+    seq = corpus.FEEDS.get(img.replace(".hex", ""), [])
+    feed = (["+FEEDN=%d" % len(seq),
+             "+FEED=%s" % "".join("%02x" % b for b in seq)] if seq else [])
     r = subprocess.run([tool("vvp"), vvp, "+IMG=test/%s" % img, "+NBYTES=256",
-                        "+PEER=%s" % peer, "+NCYC=%d" % NCYC, "+OUT=%s" % out,
+                        "+PEER=%s" % peer, "+NCYC=%d" % ncyc, "+OUT=%s" % out,
                         "+SEED=1", "+ASYNC=0", "+STAYLOAD=0", "+SCLHOLD=0"]
-                       + ([a2] if a2 else []), cwd=ROOT, capture_output=True,
-                       text=True, encoding="utf-8", errors="replace")
+                       + ([a2] if a2 else []) + feed, cwd=ROOT,
+                       capture_output=True, text=True, encoding="utf-8",
+                       errors="replace")
     rows = []
     with open(out, encoding="ascii", errors="replace") as fh:
         for line in fh:

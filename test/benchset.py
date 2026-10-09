@@ -453,10 +453,17 @@ def corpus_arms():
         return None, "corpus.py did not import: %s" % exc
     out = []
     for name, (_builder, peer) in sorted(corpus.CORPUS.items()):
+        # ⭐ RULING SP1: an image with its own host feed gets it here too, so
+        # the sweep runs the REAL transaction (corpus_spim's WREN/WRITE/READ)
+        # rather than the default bytes the peer rightly ignores
+        seq = corpus.FEEDS.get(name, [])
+        feed = (["+FEEDN=%d" % len(seq),
+                 "+FEED=%s" % "".join("%02x" % b for b in seq)] if seq
+                else ["+FEEDN=0"])
         out.append((name, ["+IMG=test/%s.hex" % name, "+PEER=%s" % peer,
                            "+OUT=probe_cov_trace_%s.txt" % name,
                            "+NCYC=200000", "+SEED=1", "+ASYNC=0",
-                           "+STAYLOAD=0", "+SCLHOLD=0"]))
+                           "+STAYLOAD=0", "+SCLHOLD=0"] + feed))
     # ⭐ THE TWO CLOCK-STRETCH ARMS, both of which `gate_corpus_trace.py`
     # already certifies: `+SCLHOLD` is a BENCH-DRIVEN hold on SCL (its line
     # 365), and the PEER-driven stretch is a second instance,

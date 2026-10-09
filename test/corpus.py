@@ -84,7 +84,7 @@ from make_smoke_image import (            # noqa: E402
     SELF_CLOCKED,
     OP_STOP, PIN_NONE, act, hdr, write_image,
 )
-from pe_isa import order_for                 # noqa: E402  ruling RC4
+from pe_isa import ORDER_MSB, order_for      # noqa: E402  ruling RC4
 
 # ---------------------------------------------------------------------------
 # THE PIN MAP, derived from the ruling
@@ -241,14 +241,16 @@ def _assemble(seqs, headers_spec, park_at, queues=None):
     seq_of = dict(seqs)
     for lane in range(N_LANES):
         if lane in base:
-            pin, clkpin, mode, t, dsched, dtol = headers_spec[lane]
+            pin, clkpin, mode, t, dsched, dtol = headers_spec[lane][:6]
             # ⛔ RULING RC4: the order is DERIVED from the lane's program --
             # START/STOP framing means I2C means MSB-first. Every corpus lane
             # used to take `hdr()`'s LSB default, so the I2C lanes sent each
-            # byte bit-reversed (5B went out as DA).
+            # byte bit-reversed (5B went out as DA). A 7th spec field states it
+            # where the program has no framing to derive it from (SPI FRAM).
+            order = (headers_spec[lane][6] if len(headers_spec[lane]) > 6
+                     else order_for([e[0] for e in seq_of[lane]]))
             headers.append(hdr(pin, clkpin, mode, t, 2, dsched, dtol,
-                               base[lane],
-                               order=order_for([e[0] for e in seq_of[lane]])))
+                               base[lane], order=order))
         else:
             headers.append(hdr(park_at, park_at, MODE_OD, 500, 2, 200, 240, lp))
     img = b"".join(headers) + b"".join(prog)
@@ -321,21 +323,44 @@ def build_spi_master(d: int = 7):
     unsatisfiable, and "fixing" it by putting the master on `uio` would violate
     the two-bank ruling.
     """
-    seq = [
-        (OP_LEVEL, P_M_CS, 0, d),       # select
-        # ⛔ SAME REWRITE AS build_i2c, same defect: the old (level=1, level=0)
-        # SHIFT pair advanced `tx_bitp` twice per clock. ⭐ SPI MODE 0 IS THE
-        # SUPPORTED ORDER here -- data settles with the clock low and is read on
-        # the rise -- which is what the self-clocked shift emits. Modes 1 and 2
-        # would need the reverse order and stay on the unclocked idiom.
-        (OP_SHIFT, P_M_MOSI, SELF_CLOCKED, d, 7),    # a whole command byte
-        (OP_SHIFTIN, P_M_MISO, SELF_CLOCKED, d, 8),  # a whole reply byte
-        (OP_READBIT, P_M_MISO, 0, d),
-        (OP_LEVEL, P_M_CS, 1, d),       # deselect
-        (OP_REARM, 0, 1, d),
-    ]
+    # ⛔⛔ RULING SP1: A REAL MB85RS64V TRANSACTION, which this program never
+    # was. It sent one byte from the host feed (5B 01 7A C7 -- no opcode the
+    # part knows) and read one back, so the peer stayed High-Z for its whole
+    # life and `corpus_spim` was OPEN; the seven decoder points it seemed to
+    # pay were paid by silicon fix #2's MISALIGNED bytes (ruling TX5). Now, per
+    # the datasheet's sequences (MSB first, CS active low):
+    #     CS-  WREN  CS+  (twice; see below)    set the write-enable latch
+    #     CS-  WRITE 01 23  5B C4 1E  CS+       three bytes at 0x0123
+    #     CS-  READ  01 23  [in] [in]  CS+      read two of them back
+    # ⭐ SAMPLED ON THE RISE: the clocked SHIFT drives data with the clock low
+    # and raises it on the HIGH phase, leaving it high (mode 3; the part
+    # accepts modes 0 and 3 -- measured by sigrok in `run_recert`).
+    # ⭐ ONE QUEUE, the bytes in the order the SHIFTs pop them: `FEEDS` below.
+    # ⛔ MSB-FIRST, EXPLICITLY: SPI FRAM is MSB-first and has no START/STOP for
+    # `order_for` to see, so the header states it (the LSB default would send
+    # every opcode reversed, as the I2C corpus did -- ruling RC).
+    sh = lambda: (OP_SHIFT, P_M_MOSI, SELF_CLOCKED, d, 7)      # 8 bits out
+    rd = lambda: (OP_SHIFTIN, P_M_MISO, SELF_CLOCKED, d, 8)    # 8 bits in
+    sel, desel = (OP_LEVEL, P_M_CS, 0, d), (OP_LEVEL, P_M_CS, 1, d)
+    # ⚠ WREN TWICE: the first SHIFT after reset sends the register's reset
+    # 0x00, so on the first loop the first WREN is no opcode at all -- WEL
+    # would stay clear, the WRITE be ignored, and the READ return the peer's
+    # deliberately-X memory (an X into the chip makes the two-simulator
+    # comparison disagree by construction). Measured: MISO read `x`. The
+    # second WREN is real on every loop.
+    seq = ([sel, sh(), desel]                                  # WREN (00 1st)
+           + [sel, sh(), desel]                                # WREN
+           # ⚠ THREE data bytes for a TWO-byte read: the part prefetches the
+           # NEXT address when a read byte completes, and the clocked
+           # SHIFTIN's trailing COLLECT is an SCK fall with CS still low --
+           # so reading 0x0123/0x0124 fetches 0x0125. Unwritten, that is the
+           # peer's X on MISO (measured); written, it is a defined byte.
+           + [sel, sh(), sh(), sh(), sh(), sh(), sh(), desel]  # WRITE a a d d d
+           + [sel, sh(), sh(), sh(), rd(), rd(), desel]        # READ a a in in
+           + [(OP_REARM, 0, 1, d)])
     img = _assemble([(0, seq)],
-                    {0: (P_M_MOSI, P_M_SCLK, MODE_PP, d, 2 * d, 3 * d)},
+                    {0: (P_M_MOSI, P_M_SCLK, MODE_PP, d, 2 * d, 3 * d,
+                         ORDER_MSB)},
                     park_at=P_SCL)
     return img, {"uio_oe": False, "uio_out": False, "uo_out": True,
                  "uio_in": True, "od_pins": (P_SCL,)}
@@ -514,12 +539,23 @@ def build_all5(d: int = 9, d0: int = D_FM_SHIPPABLE):
 # still never answered. That is a precondition satisfied by the wrong
 # mechanism, so the check below is sharpened to the ONE BIT the peer drives:
 # `uio_in[MISO]` must take both values, which only a real response can do.
-OPEN = {
-    "corpus_spim":
-        "the FRAM peer cannot be addressed yet: the command byte must come "
-        "from the HOST (l_data <- host_data, gated by ui_in[0]) over the same "
-        "uio bank MISO uses, and the SHIFT/clock phase the ISA intends is "
-        "unruled. The peer is correct to stay High-Z on opcode 0x00.",
+#: ⭐ RULING SP1 RETIRED THE ONE OPEN ARM. `corpus_spim` was OPEN because the
+#: FRAM peer could not be addressed: the bench fed every queue 5B 01 7A C7 and
+#: the program sent one of them as its "command", no opcode the part knows.
+#: It is now a real WREN / WRITE / READ transaction fed in order (`FEEDS`), so
+#: the peer drives MISO and the precondition holds.
+OPEN = {}
+
+#: image -> the bytes queue 0 must carry, in the order the program's SHIFTs
+#: POP them (a SHIFT loads its successor's byte at its own end, so the first
+#: SHIFT after reset sends 0x00 and the last one pops the next loop's first).
+#: `tb_trace` takes it as `+FEED` / `+FEEDN`; images not listed keep the
+#: bench's default 5B 01 7A C7 on every queue.
+#:   corpus_spim: WREN, WRITE 01 23 5B C4 1E, READ 01 23, then the next
+#:   loop's first WREN
+FEEDS = {
+    "corpus_spim": [0x06, 0x02, 0x01, 0x23, 0x5B, 0xC4, 0x1E, 0x03, 0x01,
+                    0x23, 0x06],
 }
 
 # ports whose single BIT must vary, where a whole-port check would be gameable

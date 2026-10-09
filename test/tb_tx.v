@@ -422,12 +422,12 @@ module tb_tx;
         $display("");
         $write("    want  :");
         for (i = 1; i <= CHECKB; i = i + 1)
-          $write(" %02h", hf_pat[j][(i - 1) % HF_PAT]);
+          $write(" %02h", hf_pat[j][(i - 1) % hf_len[j]]);
         $display("");
         for (i = 1; i <= CHECKB; i = i + 1) begin
-          if (got[j][i] != hf_pat[j][(i - 1) % HF_PAT]) begin
+          if (got[j][i] != hf_pat[j][(i - 1) % hf_len[j]]) begin
             $display("    lane %0d byte %0d: got %02h want %02h *** FAIL",
-                     j, i - 1, got[j][i], hf_pat[j][(i - 1) % HF_PAT]);
+                     j, i - 1, got[j][i], hf_pat[j][(i - 1) % hf_len[j]]);
             fails = fails + 1;
           end
         end
@@ -446,7 +446,7 @@ module tb_tx;
     for (j = 0; j < 2; j = j + 1) begin
       for (i = 1; i <= CHECKB; i = i + 1) begin
         if (ngot[j] > i) begin
-          for (lg = 0; lg < HF_PAT; lg = lg + 1) begin
+          for (lg = 0; lg < hf_len[1 - j]; lg = lg + 1) begin
             if (got[j][i] == hf_pat[1 - j][lg]) begin
               if (j == 0)
                 fail("lane 0 emitted a QUEUE 1 byte -- the queue tag was ignored");

@@ -85,12 +85,24 @@ def iverilog_build(vvp, defines=()):
     return r.returncode == 0, (r.stdout + r.stderr)
 
 
+def feed_args(img):
+    """RULING SP1: an image's own host feed (`corpus.FEEDS`) as tb_trace
+    plusargs, so a real transaction gets its opcodes. Same in both
+    simulators -- a stimulus that differed would make the comparison moot."""
+    seq = corpus.FEEDS.get(os.path.basename(img).replace(".hex", ""))
+    if not seq:
+        return []
+    return ["+FEEDN=%d" % len(seq), "+FEED=%s" % "".join("%02x" % b
+                                                         for b in seq)]
+
+
 def iverilog_run(vvp, img, nbytes, peer, out, phase=1, async_arm=0,
                  stayload=0, sclhold=0):
     r = run([tool("vvp"), vvp, "+IMG=%s" % img, "+NBYTES=%d" % nbytes,
              "+PEER=%s" % peer, "+OUT=%s" % out, "+NCYC=%d" % NCYC,
              "+SEED=%d" % phase, "+ASYNC=%d" % async_arm,
-             "+STAYLOAD=%d" % stayload, "+SCLHOLD=%d" % sclhold])
+             "+STAYLOAD=%d" % stayload, "+SCLHOLD=%d" % sclhold]
+            + feed_args(img))
     return r.returncode == 0, (r.stdout + r.stderr)
 
 
@@ -342,7 +354,7 @@ def main() -> int:
                 break
             od = vpath(os.path.join(TMP, "%s_p%d" % (name, ph)))
             r = vrun("verilator_trace.sh", vpath(ROOT), nb, NCYC, od,
-                    img, peer, 0, ph)
+                    img, peer, 0, ph, "", 0, 0, " ".join(feed_args(img)))
             if "SEEDS AGREE" not in r.stdout:
                 print("      *** phase %d: seed sweep did NOT agree" % ph)
                 print(chr(10).join("        " + x
@@ -391,7 +403,7 @@ def main() -> int:
         else:
             od = vpath(os.path.join(TMP, "async"))
             r = vrun("verilator_trace.sh", vpath(ROOT), nb, NCYC, od, img,
-                     peer, 1)
+                     peer, 1, 1, "", 0, 0, " ".join(feed_args(img)))
             if "SEEDS AGREE" not in r.stdout:
                 print("  *** seed sweep disagreed on the async arm")
                 failures.append(("async-clear", "cross-seed disagreement"))
