@@ -70,6 +70,12 @@ PROGRAM_INDEX = (
     (r"l_pin\[[a-z_0-9]+\]", "l_pin[*]"),
     (r"l_armpin\[[a-z_0-9]+\]", "l_armpin[*]"),
     (r"hsh_n\[[^\]]*\]", "hsh_n[*]"),
+    # ⛔ SILICON FIX #3a (ruling PN1): the clocked sample's pin is now the head
+    # slot's ACTION pin, read out of `l_act` into a named wire. Under the old
+    # name (`l_pin[gi]`) this gate saw the access; under the wire's name it saw
+    # NOTHING -- the entry below went "classified but not present" while the
+    # new, still program-controlled read was invisible. Registered by name.
+    (r"ck_rpin", "ck_rpin"),
 )
 IDX_RE = "(?:" + "|".join(p for p, _n in PROGRAM_INDEX) + ")"
 ACCESS = re.compile(r"([a-z_][a-z_0-9]*)\s*\[\s*(" + IDX_RE + r")\s*\]")
@@ -160,9 +166,10 @@ CLASSIFIED = {
         "`< N_PINS` on `ckp_real`, and `ck_hit = 0` is the RIGHT meaning rather "
         "than merely the safe one: a self-clocked shift is impossible without a "
         "real clock pin, so this capture can never legitimately fire on one."),
-    ("src/pe_engine.v", "pin_in", "l_pin[*]"): (
+    ("src/pe_engine.v", "pin_in", "ck_rpin"): (
         "< N_PINS",
-        "THE SAMPLED DATA PIN, guarded SEPARATELY from the clock pin above, and "
+        "THE SAMPLED DATA PIN -- the ACTION's pin since silicon fix #3a (it "
+        "was the header's `l_pin`), guarded by `ckd_real`, SEPARATELY from the clock pin above, and "
         "the separation is the point: a lane may name a real clock and a "
         "RESERVED data pin, so the two guards answer different questions. "
         "Reading `pin_in[15]` would latch X into `l_cksamp` and carry it into "

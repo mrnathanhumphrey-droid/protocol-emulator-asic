@@ -318,3 +318,47 @@ cannot carry a nibble plus a valid, so RX went bit-serial — the serial host vi
 above), and PART5 framed status **into** the stream, which retires the
 `ui_in[5]` pop and the `ui_in[0]` view select. Neither supersedes the TX nibble
 or "zero `uio` spent".
+
+## SPI master receive timing (clocked SHIFTIN on a push-pull clock)
+
+*Ruling CI2, silicon fix #3. Measured in `test/run_spidelay.py` (CI).*
+
+**What the chip samples.** A clocked SHIFTIN reads the **action's** pin (MISO),
+not the lane header's data pin (MOSI). On a **push-pull** clock it samples MISO
+**as the MISO pad stood at the chip's own SCK pad rise**. It doesn't wait to
+observe the rise: an SPI master's SCK sits on `uo_out`, which has no input path,
+and a push-pull clock can't be stretched anyway. Open-drain clocks (I²C) still
+sample on the **observed** rise, so a stretching target is read when it lets go.
+
+**The instant, exactly.** The capture fires when `pin_in` shows the MISO pad as
+it was at the SCK pad's rise. That's 2 cycles after the pad edge, the input
+path's depth as measured from the pads. A `uo_out` SCK pad rises 2 cycles after
+the HIGH-phase dispatch (one extra cycle behind its output register), so the
+capture fires 4 cycles after that dispatch; a `uio` clock fires at 3. On silicon
+the synchroniser moves this by **±1 cycle (±20 ns at 50 MHz)**.
+
+**What the peer must do, in ns at 50 MHz.** SCK low lasts `T_low = d × 20 ns`
+for the action's delay `d`. A late LOW dispatch shortens it to
+`d − (r_i − C)` cycles; this is the same quantity the I²C mode floor uses. For a
+correct read:
+- MISO must be **valid on the pad by `T_low − 20 ns` after SCK falls** (setup
+  of one cycle, covering the synchroniser's ±1);
+- MISO must **hold until 20 ns after SCK rises**.
+
+**Against the MB85RS64V** (RAMXEED datasheet, AC characteristics, in `refs/`):
+
+| parameter | symbol | figure | requirement | margin |
+|---|---|---|---|---|
+| output data valid time | tODV | max 20 ns from SCK fall | ≤ `T_low − 20 ns` | `d·20 − 40 ns`: 100 ns at d = 7, 460 ns at the shipped 1 MHz lane (d = 25) |
+| output hold time | tOH | min 0 ns | MISO changes only at the *next* fall, d cycles after the rise | `d·20 − 20 ns` |
+| clock low / high time | tCL / tCH | min 25 ns each | `d ≥ 2` | met at every legal d |
+
+**Measured (CI3).** The peer was given an adjustable MISO delay of N cycles on
+the real WREN / WRITE / READ program (d = 7):
+- every read was correct for N ≤ 5;
+- every read was wrong for N ≥ 8 (the chip takes the previous bit);
+- N = 6 and 7 form the band in between.
+
+The band is the bits whose low phase was shortened to 5 or 6 cycles by a late
+LOW dispatch: 59 of about 2,000 bits. The prediction from this section,
+"correct while N ≤ d − 1", agrees within one cycle.

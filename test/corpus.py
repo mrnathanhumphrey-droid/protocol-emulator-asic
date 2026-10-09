@@ -313,7 +313,7 @@ def build_i2c(d: int = D_FM_SHIPPABLE):
                  "od_pins": (P_SCL, P_SDA)}
 
 
-def build_spi_master(d: int = 7):
+def build_spi_master(d: int = 7, mode0: bool = False):
     """SPI master: SCLK/MOSI/CS on `uo_out`, MISO read from the FRAM peer.
 
     ⚠ ITS PRECONDITION IS NOT `uio_oe`. Under the ruled map the master's three
@@ -342,21 +342,31 @@ def build_spi_master(d: int = 7):
     sh = lambda: (OP_SHIFT, P_M_MOSI, SELF_CLOCKED, d, 7)      # 8 bits out
     rd = lambda: (OP_SHIFTIN, P_M_MISO, SELF_CLOCKED, d, 8)    # 8 bits in
     sel, desel = (OP_LEVEL, P_M_CS, 0, d), (OP_LEVEL, P_M_CS, 1, d)
+    # ⭐ RULING CI4, `mode0`: the part takes its mode from SCK AT CS FALL, and
+    # in this program the READ always follows the WRITE, whose clocked SHIFT
+    # ends with SCK high -- so every READ is mode 3. `mode0` parks SCK low
+    # before each select, making every transaction mode 0. Used in scratch by
+    # `run_spifram` only; the tracked image is the default (pops unchanged:
+    # a LEVEL takes nothing from the queue).
+    if mode0:
+        sel = [(OP_LEVEL, P_M_SCLK, 0, d), sel]
+    else:
+        sel = [sel]
     # ⚠ WREN TWICE: the first SHIFT after reset sends the register's reset
     # 0x00, so on the first loop the first WREN is no opcode at all -- WEL
     # would stay clear, the WRITE be ignored, and the READ return the peer's
     # deliberately-X memory (an X into the chip makes the two-simulator
     # comparison disagree by construction). Measured: MISO read `x`. The
     # second WREN is real on every loop.
-    seq = ([sel, sh(), desel]                                  # WREN (00 1st)
-           + [sel, sh(), desel]                                # WREN
+    seq = (sel + [sh(), desel]                                 # WREN (00 1st)
+           + sel + [sh(), desel]                               # WREN
            # ⚠ THREE data bytes for a TWO-byte read: the part prefetches the
            # NEXT address when a read byte completes, and the clocked
            # SHIFTIN's trailing COLLECT is an SCK fall with CS still low --
            # so reading 0x0123/0x0124 fetches 0x0125. Unwritten, that is the
            # peer's X on MISO (measured); written, it is a defined byte.
-           + [sel, sh(), sh(), sh(), sh(), sh(), sh(), desel]  # WRITE a a d d d
-           + [sel, sh(), sh(), sh(), rd(), rd(), desel]        # READ a a in in
+           + sel + [sh(), sh(), sh(), sh(), sh(), sh(), desel] # WRITE a a d d d
+           + sel + [sh(), sh(), sh(), rd(), rd(), desel]       # READ a a in in
            + [(OP_REARM, 0, 1, d)])
     img = _assemble([(0, seq)],
                     {0: (P_M_MOSI, P_M_SCLK, MODE_PP, d, 2 * d, 3 * d,

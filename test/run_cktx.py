@@ -33,7 +33,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
-from toolchain import banner, tool          # noqa: E402  ruling V
+from toolchain import banner, tool, scratch_sub  # noqa: E402  ruling V
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")
@@ -72,12 +72,93 @@ def image(path):
     return path
 
 
-def build(defines, tag):
+def pindiv_image(path=None):
+    """RULING PN4: every pin-taking opcode with its ACTION pin != the lane's
+    HEADER data pin (and != its clock pin where that is legal) -- the case
+    silicon fix #3 hid in, because every program before named one pin per
+    lane. Pads 6/7 (the SPI-target CS/MISO pair) are avoided.
+      L0  push-pull, header 8, clock 9 (uo): LEVEL, clocked SHIFT and
+          unclocked SHIFT on pin 10; a clocked SHIFTIN on pin 3 (a uo clock:
+          the capture fix #3 part b made possible)
+      L1  push-pull, header 1, clock 2 (uio): a clocked SHIFTIN on pin 3
+      L2  push-pull, header 5, no clock: toggles pin 3 -- the data the others
+          receive
+      L3  open-drain, header 4, clock 5: ARM, READBIT, unclocked SHIFTIN and a
+          clocked SHIFTIN, all on pin 3
+      L4  push-pull, header 11, no clock: START / STOP on pin 8
+    -> image bytes (and written to `path` when given)."""
+    from pe_isa import (ACT_BASE, ACT_BYTES, OP_ARM, OP_LEVEL, OP_READBIT,
+                        OP_REARM, OP_SHIFT, OP_SHIFTIN, OP_START, OP_STOP,
+                        PIN_NONE, act, act_shift_clocked, act_shiftin_clocked,
+                        full_store, hdr, order_for, write_image)
+    lanes = {
+        0: (8, 9, 1, 30, [act(OP_LEVEL, 10, 0, 30),
+                          act_shift_clocked(10, 30, nbits=8, q=0),
+                          act(OP_SHIFT, 10, 0, 30, count=0, q=0),
+                          act_shiftin_clocked(3, 30, nbits=8),
+                          act(OP_REARM, 0, 1, 30)]),
+        1: (1, 2, 1, 40, [act_shiftin_clocked(3, 40, nbits=8),
+                          act(OP_REARM, 0, 1, 40)]),
+        2: (5, PIN_NONE, 1, 23, [act(OP_LEVEL, 3, 1, 23),
+                                 act(OP_LEVEL, 3, 0, 23),
+                                 act(OP_REARM, 0, 1, 23)]),
+        3: (4, 5, 0, 70, [act(OP_ARM, 3, 1, 70),
+                          act(OP_READBIT, 3, 0, 70),
+                          act(OP_SHIFTIN, 3, 0, 70, count=1),
+                          act_shiftin_clocked(3, 70, nbits=8),
+                          act(OP_REARM, 0, 1, 70)]),
+        4: (11, PIN_NONE, 1, 50, [act(OP_START, 8, 0, 50),
+                                  act(OP_STOP, 8, 1, 50),
+                                  act(OP_REARM, 0, 1, 50)]),
+    }
+    base, prog, hs = ACT_BASE, [], []
+    for ln in range(5):
+        pin, ck, mode, d, acts = lanes[ln]
+        ops = [int.from_bytes(a, "big") >> (ACT_BYTES * 8 - 3) for a in acts]
+        hs.append(hdr(pin, ck, mode, d, 2, 2 * d, 3 * d, base,
+                      order=order_for(ops)))
+        prog += acts
+        base += len(acts) * ACT_BYTES
+    img = b"".join(hs) + b"".join(prog)
+    if path:
+        write_image(path, img)
+    return full_store(img)
+
+
+def tx_header_pin_engine():
+    """CI5's must-fire, SCRATCH-BUILT (registered): the clocked push-pull
+    SHIFT drives the lane HEADER's pin instead of the action's. A checker
+    that samples the header pin (Layer V2 before CI5) would read the right
+    bits there and PASS; V2 on the action pin must go red."""
+    with open(os.path.join(ROOT, "src", "pe_engine.v"), encoding="utf-8",
+              newline="") as fh:
+        txt = fh.read().replace("\r\n", "\n")
+    a = ("                      pin_out[a_pin] <= l_tx[cur][0] & pin_pp[a_pin];\n"
+         "                      pin_oe[a_pin]  <= 1'b1;\n")
+    b = ("                      pin_out[l_pin[cur]] <= l_tx[cur][0];  // S_TX_HEADER_PIN\n"
+         "                      pin_oe[l_pin[cur]]  <= 1'b1;\n")
+    txt = scratch_sub(txt, a, b, "S_TX_HEADER_PIN")
+    os.makedirs(SCRATCH, exist_ok=True)
+    out = os.path.join(SCRATCH, "pe_engine_txhdr.v")
+    with open(out, "w", encoding="utf-8", newline="\n") as fh:
+        fh.write(txt)
+    return out
+
+
+#: scratch-built mutants this file kills (gate_mutant_kills' SCRATCH table)
+SCRATCH_MUTANTS = {
+    "S_TX_HEADER_PIN": "the clocked push-pull SHIFT drives the header pin "
+                       "instead of the action's (CI5's checker must-fire)",
+}
+
+
+def build(defines, tag, engine=None):
     os.makedirs(SCRATCH, exist_ok=True)
     out = os.path.join(SCRATCH, "cktx_%s.vvp" % tag)
     cmd = [tool("iverilog"), "-g2012", "-o", out, "-s", "tb_cktx"]
     cmd += ["-D%s" % d for d in defines]
-    cmd += ["test/tb_cktx.v"] + [os.path.join(ROOT, "src", s) for s in SRCS]
+    cmd += ["test/tb_cktx.v", engine or os.path.join(ROOT, "src", SRCS[0])]
+    cmd += [os.path.join(ROOT, "src", s) for s in SRCS[1:]]
     r = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True,
                        encoding="utf-8", errors="replace")
     if r.returncode != 0:
@@ -157,6 +238,27 @@ def main() -> int:
     t = run(mut, img, 60000, 0, 0)
     say("*** FAIL clocked_conform[V1]" in t, "V1 red (load point / model bit)")
     say("*** FAIL clocked_conform[V2]" in t, "V2 red (the pushed bytes)")
+
+    # ---- PN4: every pin-taking opcode with action pin != header pin -------
+    print("  --- pindiv: action pin != header pin, every pin-taking opcode ---")
+    pimg = os.path.join(SCRATCH, "pindiv.hex")
+    pindiv_image(pimg)
+    t = run(good, pimg, 80000, 0, 0)
+    fails = [l for l in t.splitlines() if "*** FAIL" in l]
+    for l in fails[:6]:
+        print("      %s" % l)
+    say(not fails, "no FAIL line (V1, V2, V-RX, B, progress, ...)")
+    m = re.search(r"\[V-RX\]: ok -- (\d+) RX frame", t)
+    say(m is not None and int(m.group(1)) >= 8,
+        "V-RX: the received bytes are the pins' on the ACTION's pin (%s)"
+        % (m.group(1) if m else "none"))
+    say("[V2]: ok" in t, "V2: the transmitted bits on the ACTION's pin")
+    print("  --- MUST-FIRE (CI5): S_TX_HEADER_PIN -- the SHIFT drives the "
+          "header pin ---")
+    th = run(build([], "txhdr", tx_header_pin_engine()), pimg, 80000, 0, 0)
+    say("*** FAIL clocked_conform[V2]" in th,
+        "V2 red: the action pin did not carry the bits (a header-pin "
+        "checker would have read them there and passed)")
     print()
     print("  GATE cktx: %s" % ("PASSED" if rc == 0 else "FAILED"))
     return rc

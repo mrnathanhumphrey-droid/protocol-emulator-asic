@@ -1168,3 +1168,74 @@ async def test_clocked_tx_bytes_at_the_pins(dut):
                      "(byte, index) %s -- the drifting pattern 00 B5 6A D5 is "
                      "the pre-fix host load (silicon fix #2)"
                      % (" ".join("%02X" % b for b in got), bad[:4]))
+
+
+@cocotb.test()
+async def test_clocked_spi_read_at_the_pins(dut):
+    """SILICON FIX #3 (ruling CI4), PINS ONLY: a clocked SPI master reads
+    MISO. A byte in on MISO, the same byte out in the chip's RX frame.
+
+    Two defects stood between them: (a) a clocked SHIFTIN sampled the lane
+    HEADER's pin (MOSI) instead of the action's (MISO), and (b) a push-pull
+    clocked receive waited for an OBSERVED clock rise -- and the master's SCK
+    is a `uo_out` pin, which has no input path, so the capture never fired.
+    Either one alone makes the chip receive 00. The program: CS low, one
+    clocked 8-bit SHIFTIN on MISO, CS high; this test plays the SPI peer from
+    the pins -- MISO's MSB when CS falls, the next bit on each SCK fall.
+    ⛔ Must-fire: built with `M_CKRX_HEADER_PIN` or `M_CKRX_PP_OBSERVED`
+    this FAILS in RTL simulation.
+    """
+    from corpus import P_M_CS, P_M_MISO, P_M_MOSI, P_M_SCLK
+    d, want = 25, 0x5B
+    prog = [pe_isa.act(pe_isa.OP_LEVEL, P_M_CS, 0, d),
+            pe_isa.act_shiftin_clocked(P_M_MISO, d, nbits=8),
+            pe_isa.act(pe_isa.OP_LEVEL, P_M_CS, 1, d),
+            pe_isa.act(pe_isa.OP_REARM, 0, 1, d)]
+    park = pe_isa.ACT_BASE + len(prog) * pe_isa.ACT_BYTES
+    prog.append(pe_isa.act(pe_isa.OP_REARM, 0, 0, 500))
+    hdrs = [pe_isa.hdr(P_M_MOSI, P_M_SCLK, 1, d, 2, 2 * d, 3 * d,
+                       pe_isa.ACT_BASE, order=pe_isa.ORDER_MSB)]
+    hdrs += [pe_isa.hdr(p, p, 0, 500, 2, 200, 240, park) for p in (1, 2, 3, 4)]
+    img = list(pe_isa.full_store(b"".join(hdrs) + b"".join(prog)))
+    await run_loaded(dut, img, feed=False)
+    cs_b, sck_b = P_M_CS - 8, P_M_SCLK - 8          # uo_out bit indices
+
+    # ⛔ THE MODE IS THE SCK LEVEL AT CS FALL, as the part decides it. Mode 3
+    # (SCK high): the first SCK fall presents bit 7. Mode 0 (SCK low): bit 7
+    # is presented at CS fall, the next bit at each fall. A clocked receive
+    # ENDS WITH SCK LOW (I6), so the first read after reset is mode 3 and every
+    # later one mode 0 -- both of ruling CI4's modes from one program. The
+    # first version of this peer presented bit 7 at CS fall in both modes and
+    # the mode-3 read came back B7: the peer one bit ahead, not the chip.
+    modes = []
+
+    async def peer():
+        pcs, psck, k = "1", "1", 0
+        while True:
+            await ClockCycles(dut.clk, 1)
+            uo = str(dut.uo_out.value)
+            cs, sck = bit(uo, cs_b), bit(uo, sck_b)
+            if cs == "0" and pcs == "1":
+                modes.append(3 if sck == "1" else 0)
+                k = -1 if sck == "1" else 0
+            elif cs == "0" and sck == "0" and psck == "1":
+                k += 1                               # each SCK fall: next bit
+            if cs == "0" and k < 8:
+                dut.ob_oe.value = 1 << P_M_MISO
+                dut.ob_val.value = ((want >> (7 - max(k, 0))) & 1) << P_M_MISO
+            else:
+                dut.ob_oe.value = 0
+            pcs, psck = cs, sck
+    cocotb.start_soon(peer())
+    frames = await harvest_frames(dut, 8000)
+    got = lane_payloads(frames, 0)
+    dut._log.info("clocked SPI read at the pins: %s (modes %s)"
+                  % (" ".join("%02X" % b for b in got), modes[:len(got)]))
+    assert len(got) >= 3, ("only %d RX frame(s) from lane 0 -- nothing to "
+                           "judge" % len(got))
+    assert {3, 0} <= set(modes[:len(got)]), (
+        "the reads judged were not both modes: %s" % modes[:len(got)])
+    assert all(b == want for b in got), (
+        "CLOCKED SPI READ WRONG: %02X driven on MISO, the chip received %s -- "
+        "00 is silicon fix #3 (header pin sampled, or the push-pull capture "
+        "never fired)" % (want, " ".join("%02X" % b for b in got)))

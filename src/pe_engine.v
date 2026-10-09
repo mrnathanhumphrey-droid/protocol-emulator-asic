@@ -527,6 +527,21 @@ module pe_engine #(
   // one tick EARLY for a lane that parked mid-prescale, and 0.33 ms of
   // jitter on a 35 ms fault detector decides nothing.
   reg [13:0]      ck_pre;
+  // ⛔⛔ SILICON FIX #3 PART (b) (ruling CI1): THE PUSH-PULL CAPTURE SLOT. A
+  // push-pull clock cannot be stretched, so a clocked SHIFTIN on one must
+  // not wait for an OBSERVED rise -- and on a `uo_out` clock (the SPI master's
+  // SCLK) there is nothing to observe: `uo_out` has no input path and its
+  // `pin_rise` is tied low, so the capture NEVER fired and every received byte
+  // read 0. The engine raised that edge itself, so it captures at a known
+  // cycle instead: the HIGH phase's writeback loads this slot, which fires
+  // when `pin_in` shows the data pad AS IT STOOD AT THE CLOCK PAD'S RISE (CI2:
+  // rise + the 2-cycle input path seen from here; the `uo_out` pad rises one
+  // cycle later than a `uio` pad, behind its output register). ONE SLOT, 6
+  // flops: dispatches are >= C = 3 cycles apart and the slot fires within
+  // 2 cycles of its writeback, so it is free again before the next one.
+  reg             ppc_v;
+  reg [LW-1:0]    ppc_l;
+  reg [1:0]       ppc_n;
   wire            ck_any_park = |{ck_parked};
   wire            ck_tick = ck_any_park & (ck_pre >= CK_STRETCH_PRE[13:0] - 14'd1);
   reg             l_cksamp [0:N_LANES-1];   // the bit latched AT the rise
@@ -933,16 +948,43 @@ module pe_engine #(
       // pin because the master supplies it, and `pin_rise` is [11:0].
       // `ck_hit = 0` is the RIGHT meaning, not merely the safe one -- a
       // self-clocked shift is impossible without a real clock pin.
+      // ⛔⛔ SILICON FIX #3 (ruling PN1): THE SAMPLED PIN IS THE ACTION'S, not
+      //    the lane header's `l_pin`. The unclocked SHIFTIN and READBIT read
+      //    `pin_in[a_pin]` and `pe_asm` validates the action pin, but this
+      //    capture read `l_pin` -- so a clocked SPI master (header pin MOSI,
+      //    SHIFTIN on MISO) sampled its OWN OUTPUT and received 00 while MISO
+      //    carried 5B C4. Hidden because every clocked receive ever run had
+      //    action pin == header pin (I2C). ⭐ ZERO FLOPS: the action is still
+      //    in the lane's head slot while its capture is pending (the hold
+      //    keeps it there -- A1 checks the word is stable), so the pin is read
+      //    straight from it, the same way `ck_dly` reads the delay (F1). The
+      //    capture is off the dispatch path. `M_CKRX_HEADER_PIN` restores the
+      //    header pin.
+`ifdef M_CKRX_HEADER_PIN
+      wire [PINW-1:0] ck_rpin = l_pin[gi];
+`else
+      wire [PINW-1:0] ck_rpin = l_act[hix[gi]][ACT_W-4 -: PINW];
+`endif
       wire ckp_real = (l_clkpin[gi] < N_PINS[PINW-1:0]);
-      wire ckd_real = (l_pin[gi]    < N_PINS[PINW-1:0]);
+      wire ckd_real = (ck_rpin      < N_PINS[PINW-1:0]);
+      // ⛔ CI1: an OPEN-DRAIN clock is observed (a peer may stretch it, and
+      // the I2C stretch behaviour is certified on exactly this); a PUSH-PULL
+      // clock fires from the capture slot, at the engine's own rise.
+      // `M_CKRX_PP_OBSERVED` restores the observed rise for both.
+`ifdef M_CKRX_PP_OBSERVED
       assign ck_hit[gi] = l_ckwait[gi] & ckp_real & pin_rise[l_clkpin[gi]];
+`else
+      assign ck_hit[gi] = l_ckwait[gi] & (l_mode[gi]
+                          ? (ppc_v & (ppc_l == gi) & (ppc_n == 2'd0))
+                          : (ckp_real & pin_rise[l_clkpin[gi]]));
+`endif
       assign ck_parked[gi] = l_ckpark[gi];
       // ⛔ THE SAMPLED PIN IS GUARDED SEPARATELY from the clock pin: a lane
       // may name a real clock and a RESERVED data pin, and reading
       // `pin_in[15]` would put X into the accumulator and from there into the
       // serial readback -- the defect `pinnone_image.hex` exists to catch on
       // the unclocked path, guarded here at birth instead.
-      assign ck_bit[gi] = ckd_real ? pin_in[l_pin[gi]] : 1'b0;
+      assign ck_bit[gi] = ckd_real ? pin_in[ck_rpin] : 1'b0;
       // the delay field of the action this lane is currently clocking
       assign ck_dly[gi] = l_act[hix[gi]][BQW+BPW +: DLY_W];
 `ifdef M_CK_REBASE_2D
@@ -1220,6 +1262,9 @@ module pe_engine #(
   wire ck_act     = ck_shift | ck_shiftin;
   wire ck_is_low  = (l_ckph[cur] == CK_LOW);
   wire ck_is_high = (l_ckph[cur] == CK_HIGH);
+  // ⭐ CI1: a PUSH-PULL clocked SHIFTIN's HIGH phase is writing back -- load
+  // the capture slot (`ppc_*`), since its rise cannot be observed
+  wire ppc_set    = (st == ST_WB) & ck_shiftin & ck_is_high & l_mode[cur];
   wire ck_is_coll = (l_ckph[cur] == CK_COLL);
   // ⚠ THE TWO OPCODES COUNT BITS DIFFERENTLY, and this is pre-existing ISA
   // semantics preserved rather than tidied: `OP_SHIFT` compares the
@@ -1773,6 +1818,9 @@ module pe_engine #(
       config_err    <= 1'b0;
       clk_stretch_err <= 1'b0;
       ck_pre          <= 14'd0;
+      ppc_v           <= 1'b0;
+      ppc_l           <= {LW{1'b0}};
+      ppc_n           <= 2'd0;
       host_pop      <= 1'b0;
       lane_underrun <= {N_LANES{1'b0}};
       lane_overflow <= {N_LANES{1'b0}};
@@ -2948,6 +2996,17 @@ module pe_engine #(
       if (!ck_any_park)  ck_pre <= 14'd0;
       else if (ck_tick)  ck_pre <= 14'd0;
       else               ck_pre <= ck_pre + 14'd1;
+      // ⭐ CI1: load the push-pull capture slot at a push-pull clocked
+      // SHIFTIN's HIGH-phase writeback; it fires when it reaches 0 (CI2's
+      // instant: 1 more cycle for a `uio` clock pad, 2 for a `uo_out` one)
+      if (ppc_set) begin
+        ppc_v <= 1'b1;
+        ppc_l <= cur;
+        ppc_n <= (l_clkpin[cur] >= 8) ? 2'd2 : 2'd1;
+      end else if (ppc_v) begin
+        if (ppc_n == 2'd0) ppc_v <= 1'b0;
+        else               ppc_n <= ppc_n - 2'd1;
+      end
       for (i = 0; i < N_LANES; i = i + 1) begin
         // ⭐⭐ THE CLOCKED SHIFTIN'S CAPTURE, in the idle window after the
         // high phase. ⛔ FIRST RISE ONLY -- `l_ckwait` clears here -- so a

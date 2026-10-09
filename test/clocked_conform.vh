@@ -1005,7 +1005,7 @@ integer   tv_on  [0:7], tv_pc [0:7], tv_cnt [0:7], tv_n [0:7], tv_low [0:7];
 integer   tv_ld  [0:7], tv_acts[0:7], tv_pops[0:7], tv_under[0:7];
 reg [7:0] tv_reg [0:7];             // V1: the register snapshot (register order)
 reg [7:0] tv_rn  [0:7];             // V1: the byte loaded, for the next action
-integer   tv_rv  [0:7], tv_v1 [0:7];
+integer   tv_rv  [0:7], tv_v1 [0:7], tv_dpin [0:7];
 reg [7:0] tv_w   [0:7];             // V2: the wire-order register
 integer   tv_e1  [0:7], tv_e2 [0:7]; // the bit the last LOW should have sent
 integer   tv1_chk, tv1_bad, tv1_ldbad, tv2_chk, tv2_bad, tv_anom;
@@ -1024,7 +1024,7 @@ initial begin
     tv_cnt[tv_k] = 0; tv_n[tv_k] = 0; tv_low[tv_k] = 0; tv_ld[tv_k] = 0;
     tv_acts[tv_k] = 0; tv_pops[tv_k] = 0; tv_under[tv_k] = 0;
     tv_reg[tv_k] = 8'h00; tv_w[tv_k] = 8'h00; tv_e1[tv_k] = 0; tv_e2[tv_k] = 0;
-    tv_rn[tv_k] = 8'h00; tv_rv[tv_k] = 0; tv_v1[tv_k] = 1;
+    tv_rn[tv_k] = 8'h00; tv_rv[tv_k] = 0; tv_v1[tv_k] = 1; tv_dpin[tv_k] = 0;
   end
 end
 
@@ -1068,13 +1068,16 @@ always @(posedge dut.clk) begin
       end else begin
         tv_p = tv_q[tv_phq * 256 + (tv_qr[tv_phq] % 256)];
         tv_qr[tv_phq] = tv_qr[tv_phq] + 1;
-        // ⚠ only a CLOCKED SHIFT's pop feeds the clocked expectation; an
-        // unclocked shift's byte is consumed from the queue and nothing more
-        if (tv_pcur < 8 && tv_on[tv_pcur] != 0) begin
+        // ⭐ ANY SHIFT's load feeds the next SHIFT's byte -- an unclocked
+        // SHIFT loads at its end exactly as a clocked one does, so a clocked
+        // SHIFT after it sends the byte IT popped (measured: PN4's pindiv
+        // lane mixes the two on one queue, and a clocked-only model read the
+        // wrong byte there). The load POINT is checked for clocked ones only.
+        if (tv_pcur < 8) begin
           tv_pend[tv_pcur][tv_pw[tv_pcur] % 8] = tv_p;
           tv_pw[tv_pcur] = tv_pw[tv_pcur] + 1;
           tv_pops[tv_pcur] = tv_pops[tv_pcur] + 1;
-          tv_ld[tv_pcur] = tv_pn;
+          if (tv_on[tv_pcur] != 0) tv_ld[tv_pcur] = tv_pn;
           // V1: the byte the ENGINE loaded, in register order -- applied at
           // the NEXT action's start, which is the model's rule, so a load
           // that lands early cannot re-time this layer's own expectation
@@ -1100,6 +1103,13 @@ always @(posedge dut.clk) begin
         tv_pc[tv_k] = dut.u_eng.l_pc[tv_k];
         tv_cnt[tv_k] = dut.u_eng.a_cnt;
         tv_n[tv_k] = 0; tv_low[tv_k] = 0; tv_ld[tv_k] = 0;
+        // an UNCLOCKED SHIFT sends the pending byte itself: consume it, so the
+        // next clocked SHIFT is held to the byte the unclocked one then pops
+        if (tv_on[tv_k] == 0 && dut.u_eng.a_op === 3'd1
+            && tv_pr[tv_k] < tv_pw[tv_k]) begin
+          tv_pr[tv_k] = tv_pr[tv_k] + 1;
+          tv_rv[tv_k] = 0;
+        end
         if (tv_on[tv_k] != 0) begin
           tv_acts[tv_k] = tv_acts[tv_k] + 1;
           // V1 models a FED action only: after an underrun the register holds
@@ -1131,8 +1141,13 @@ always @(posedge dut.clk) begin
           tv_e2[tv_k] = tv_w[tv_k][7];
           tv_w[tv_k] = {tv_w[tv_k][6:0], 1'b0};
           tv_low[tv_k] = tv_low[tv_k] + 1;
+          // ⛔ RULING CI5: the pin THIS ACTION drives -- the chip writes
+          // `pin_out[a_pin]` -- not the header's `l_pin`. They were equal on
+          // every program this layer had seen, which is exactly how the chip's
+          // own receive used the wrong one unseen (silicon fix #3).
+          tv_dpin[tv_k] = dut.u_eng.a_pin;
         end else if (dut.u_eng.ck_is_high === 1'b1) begin
-          tv_lvl = tv_pin(dut.u_eng.l_pin[tv_k]);
+          tv_lvl = tv_pin(tv_dpin[tv_k]);
           tv1_chk = tv1_chk + 1; tv2_chk = tv2_chk + 1;
           if (tv1_chk == 1)
             $display("  clocked_conform[V]: live -- checking clocked transmit BITS");
@@ -1153,6 +1168,140 @@ always @(posedge dut.clk) begin
   end
 end
 
+// =======================================================================
+// LAYER V-RX -- RECEIVED VALUES, FROM THE PINS (ruling PN3, silicon fix #3)
+// =======================================================================
+// ⛔⛔ WHY. Layer V checked what the chip SENDS; nothing checked what it
+// RECEIVES against the wire. A clocked SHIFTIN sampled the lane HEADER's pin
+// instead of the action's, and a push-pull clocked receive never captured at
+// all -- both invisible because every clocked receive ever run was open-drain
+// I2C with action pin == header pin. This layer rebuilds every received bit
+// from the PADS and holds the chip's RX frames to it:
+//   * the bit is the ACTION's pin, read from the pad history 2 samples back
+//     (the measured input path: a pad change reaches `pin_in` 2 samples
+//     later), at the chip's own sample instant -- its capture for a clocked
+//     SHIFTIN, the writeback for an unclocked SHIFTIN or READBIT;
+//   * bits accumulate as `l_rx` does ({bit, R[7:1]}, reversed on an
+//     MSB-first lane at the push);
+//   * each byte is compared with the chip's 12-bit serial RX frame
+//     ({marker, kind, data} off `uo_out[6:4]`, decoded here from the pins), in
+//     order, per lane;
+//   * a clocked consume with NO capture is a failure of its own (the bit the
+//     chip then substitutes is 0, which reads as an ACK).
+// ⛔ AN OVERRUN IS NOT A FRAME. A push that arrives while the serialiser's
+// one-byte holding register is still full is DROPPED by `project.v` -- never
+// framed, reported to the host as status bit 6 (`rx_drop_sticky`). The first
+// version of this layer queued every push, so on `tb_rxbw` (which overloads
+// RX on purpose to find where loss starts) every frame after the first drop
+// was compared one byte late. The drop is decided where `project.v` decides
+// it -- `rx_pend` at the edge that takes the push -- and every drop must have
+// raised the sticky bit, or the host was not told.
+// ⚠ All state is this block's own (ruling RA3).
+localparam integer N_LANES_VR = 5;
+reg [11:0] vr_h1 = 12'd0, vr_h2 = 12'd0, vr_pad;
+reg [7:0]  vr_R   [0:7];
+integer    vr_rpin[0:7], vr_capv[0:7];
+reg        vr_capb[0:7], vr_bit, vr_pv;
+reg [7:0]  vr_q   [0:127];             // 8 lanes x 16, a ring per lane
+integer    vr_qw  [0:7], vr_qr [0:7];
+integer    vr_fn, vr_k, vr_chk, vr_bad, vr_nocap, vr_orph, vr_pay, vr_kind;
+integer    vr_drop;
+reg [11:0] vr_f;
+
+initial begin
+  vr_chk = 0; vr_bad = 0; vr_nocap = 0; vr_orph = 0; vr_fn = 0; vr_pv = 1'b0;
+  vr_drop = 0;
+  for (vr_k = 0; vr_k < 8; vr_k = vr_k + 1) begin
+    vr_R[vr_k] = 8'h00; vr_rpin[vr_k] = 0; vr_capv[vr_k] = 0;
+    vr_capb[vr_k] = 1'b0; vr_qw[vr_k] = 0; vr_qr[vr_k] = 0;
+  end
+end
+
+function [7:0] vr_rev;
+  input [7:0] b;
+  vr_rev = {b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]};
+endfunction
+
+always @(posedge dut.clk) begin
+  if (dut.rst_n !== 1'b1) begin
+    for (vr_k = 0; vr_k < 8; vr_k = vr_k + 1) begin
+      vr_R[vr_k] = 8'h00; vr_capv[vr_k] = 0;
+    end
+  end else begin
+    // `uo_out` has no input path: the engine sees pins 8..11 as 0
+    vr_pad = {4'b0000, dut.uio_in};
+    // ---- a clocked SHIFTIN's HIGH: the pin its capture must read ---------
+    if (dut.u_eng.st === 2'd2 && dut.u_eng.ck_shiftin === 1'b1
+        && dut.u_eng.ck_is_high === 1'b1 && dut.u_eng.cur < 8)
+      vr_rpin[dut.u_eng.cur] = dut.u_eng.a_pin;
+    // ---- the chip's capture: the action pin's pad, 2 samples back --------
+    for (vr_k = 0; vr_k < N_LANES_VR; vr_k = vr_k + 1)
+      if (dut.u_eng.ck_hit[vr_k] === 1'b1) begin
+        vr_capb[vr_k] = (vr_rpin[vr_k] < 12) ? vr_h2[vr_rpin[vr_k]] : 1'b0;
+        vr_capv[vr_k] = 1;
+      end
+    // ---- a writeback that takes a received bit ----------------------------
+    if (dut.u_eng.st === 2'd2 && dut.u_eng.cur < 8) begin
+      vr_k = dut.u_eng.cur;
+      if (dut.u_eng.ck_shiftin === 1'b1 && dut.u_eng.ck_consume === 1'b1) begin
+        if (vr_capv[vr_k] == 0) begin
+          vr_nocap = vr_nocap + 1;
+          if (vr_nocap <= 4)
+            $display("*** FAIL clocked_conform[V-RX]: lane %0d consumed a clocked receive bit that was NEVER CAPTURED (the chip substitutes 0)", vr_k);
+          vr_bit = 1'b0;
+        end else begin
+          vr_bit = vr_capb[vr_k];
+        end
+        vr_capv[vr_k] = 0;
+        vr_R[vr_k] = {vr_bit, vr_R[vr_k][7:1]};
+      end else if ((dut.u_eng.a_op === 3'd2 && dut.u_eng.ck_shiftin !== 1'b1)
+                   || dut.u_eng.a_op === 3'd3) begin
+        vr_bit = (dut.u_eng.a_pin < 12) ? vr_h2[dut.u_eng.a_pin] : 1'b0;
+        vr_R[vr_k] = {vr_bit, vr_R[vr_k][7:1]};
+      end
+    end
+    // ---- a push: queue the byte the pins say it must be -------------------
+    if (dut.u_eng.rx_push === 1'b1 && dut.u_eng.rx_lane < 8
+        && dut.rx_pend === 1'b1)
+      vr_drop = vr_drop + 1;                    // overrun: never framed
+    else if (dut.u_eng.rx_push === 1'b1 && dut.u_eng.rx_lane < 8) begin
+      vr_k = dut.u_eng.rx_lane;
+      vr_q[vr_k * 16 + (vr_qw[vr_k] % 16)] =
+        (dut.u_eng.l_order[vr_k] === 1'b1) ? vr_rev(vr_R[vr_k]) : vr_R[vr_k];
+      vr_qw[vr_k] = vr_qw[vr_k] + 1;
+    end
+    // ---- the chip's serial RX frames, off the pins ------------------------
+    if (dut.uo_out[6] === 1'b1 && !vr_pv) vr_fn = 0;
+    if (dut.uo_out[6] === 1'b1 && dut.uo_out[5] === 1'b1) begin
+      if (vr_fn < 12) vr_f[vr_fn] = dut.uo_out[4];
+      vr_fn = vr_fn + 1;
+    end
+    if (dut.uo_out[6] !== 1'b1 && vr_pv && vr_fn == 12 && vr_f[11] === 1'b0) begin
+      vr_pay = vr_f[7:0]; vr_kind = vr_f[10:8];
+      if (vr_kind < 5) begin
+        if (vr_qr[vr_kind] >= vr_qw[vr_kind]) begin
+          vr_orph = vr_orph + 1;
+          if (vr_orph <= 4)
+            $display("*** FAIL clocked_conform[V-RX]: an RX frame for lane %0d (%02h) with no byte the pins put there", vr_kind, vr_pay);
+        end else begin
+          vr_chk = vr_chk + 1;
+          if (vr_chk == 1)
+            $display("  clocked_conform[V-RX]: live -- checking received BYTES against the pins");
+          if (vr_f[7:0] !== vr_q[vr_kind * 16 + (vr_qr[vr_kind] % 16)]) begin
+            vr_bad = vr_bad + 1;
+            if (vr_bad <= 4)
+              $display("*** FAIL clocked_conform[V-RX]: lane %0d RX frame %02h, but the pins carried %02h on the sampled pin", vr_kind, vr_f[7:0], vr_q[vr_kind * 16 + (vr_qr[vr_kind] % 16)]);
+          end
+          vr_qr[vr_kind] = vr_qr[vr_kind] + 1;
+        end
+      end
+    end
+    vr_pv = (dut.uo_out[6] === 1'b1);
+    vr_h2 = vr_h1;
+    vr_h1 = vr_pad;
+  end
+end
+
 // ⛔⛔ THE REPORT IS THE `final` BLOCK ITSELF, NOT A TASK IT CALLS.
 // It was `task cb_report` invoked from `final`, which Verilator accepts and
 // iverilog refuses ("final procedures cannot enable/call tasks").
@@ -1162,6 +1311,15 @@ end
 // one caller, so folding it in changes nothing Verilator does.
 final begin
     $display("  clocked_conform[B]: %0d clocked action(s) checked against the model", cb_acts);
+    // ---- Layer V-RX: received values (ruling PN3) -----------------------
+    if (vr_chk == 0 && vr_nocap == 0 && vr_orph == 0)
+      $display("  clocked_conform[V-RX]: 0 received byte(s) in this program -- NOT EXERCISED");
+    else if (vr_bad != 0 || vr_nocap != 0 || vr_orph != 0)
+      $display("*** FAIL clocked_conform[V-RX]: %0d of %0d RX frame(s) disagree with the pins, %0d clocked bit(s) consumed uncaptured, %0d frame(s) with no byte", vr_bad, vr_chk, vr_nocap, vr_orph);
+    else if (vr_drop != 0 && dut.rx_drop_sticky !== 1'b1)
+      $display("*** FAIL clocked_conform[V-RX]: %0d RX push(es) dropped on overrun and the host was NOT told (status bit 6 clear)", vr_drop);
+    else
+      $display("  clocked_conform[V-RX]: ok -- %0d RX frame(s) are the bytes the pins carried on the ACTION's pin; %0d overrun drop(s), each reported", vr_chk, vr_drop);
     // ---- Layer V: clocked transmit values (ruling TX) -------------------
     if (tv1_chk == 0)
       $display("  clocked_conform[V]: 0 clocked transmit bits in this program -- NOT EXERCISED");

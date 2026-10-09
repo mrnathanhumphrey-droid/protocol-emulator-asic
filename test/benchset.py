@@ -256,9 +256,16 @@ CONFIG = {
     # ⭐ RULING TX4 -- clocked transmit values over widths 1..8, MSB/LSB, ACK
     # or not, empty/refill. Verdicts in `test/run_cktx.py` (CI); this arm
     # runs it once fed, on an image that exists on disk, so it is swept.
+    # ⭐ RULING PN4 / CI4: `pindiv` is `run_cktx`'s action-pin != header-pin
+    # program. It is swept because its lane 1 is the only push-pull clocked
+    # receive on a `uio` clock -- the K = 1 arm of silicon fix #3b's capture
+    # slot, which no other swept image reaches (the coverage gate found it).
     "tb_cktx": {
         "srcs": [],
+        "gen": ["--pindiv", "probe_cov_pindiv"],
         "arms": [("ckfive", ["+IMG=test/ckfive_image.hex", "+NCYC=20000",
+                             "+STARVE=0", "+STARVE_LEN=0"]),
+                 ("pindiv", ["+IMG=test/probe_cov_pindiv.hex", "+NCYC=80000",
                              "+STARVE=0", "+STARVE_LEN=0"])],
     },
     # ⭐ RULING ACK (b)-(c) -- the clocked I2C read against a stretching peer.

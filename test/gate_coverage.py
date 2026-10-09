@@ -126,7 +126,7 @@ CLASSIFIED = {
     # formal/argmin_equiv.sby); the loop survives only in the generate branch
     # for other lane counts, which is not elaborated, so the point no longer
     # exists to classify.
-    ("src/pe_engine.v", 1688, "v_branch", "if"): (
+    ("src/pe_engine.v", 1733, "v_branch", "if"): (
         TOOL_DIVERGENT,
         "`if (hdr_done && !prime_unp) primed_q <= 1'b1;` -- the prime scan's "
         "COMPLETION test, which sits AFTER the `for` over lanes, not inside "
@@ -146,7 +146,7 @@ CLASSIFIED = {
         "number out of the artefact; do not reconstruct it from memory."),
 
     # ---- src/pe_engine.v --------------------------------------------------
-    ("src/pe_engine.v", 1889, "v_branch", "else"): (
+    ("src/pe_engine.v", 1937, "v_branch", "else"): (
         UNREACHABLE,
         "H_IDLE (line 1134) with `hdr_done` ALREADY SET. Every assignment that puts the "
         "header FSM into H_IDLE clears `hdr_done` in the same non-blocking "
@@ -156,7 +156,7 @@ CLASSIFIED = {
         "the arm of a condition that is true on every entry. ⭐ Checked "
         "structurally by `check_h_idle_clears` below rather than asserted, "
         "because the claim is about two specific lines and would rot."),
-    ("src/pe_engine.v", 2033, "v_line", "case"): (
+    ("src/pe_engine.v", 2081, "v_line", "case"): (
         UNREACHABLE,
         "The prefetch FSM's defensive `default`. `pst` is declared `[2:0]` and "
         "its four encodings P_SCAN/P_REQ/P_WAIT/P_CAP are 3'd0..3'd3, all "
@@ -164,7 +164,7 @@ CLASSIFIED = {
         "⭐ Verified mechanically by `check_full_case` below, which reads the "
         "encodings out of the source -- a hand-counted enumeration is the sort "
         "of claim that survives the addition of a fifth state."),
-    ("src/pe_engine.v", 2475, "v_line", "case"): (
+    ("src/pe_engine.v", 2523, "v_line", "case"): (
         UNREACHABLE,
         "The opcode `case`'s `default`. The opcode field is 3 bits and ALL "
         "EIGHT encodings are named in arms -- OP_LEVEL, OP_SHIFT, OP_SHIFTIN, "
@@ -178,7 +178,7 @@ CLASSIFIED = {
     # other lane, with the lane still LIVE -- the flag must report, never
     # stall. The entry is removed rather than kept, because a stale OWED claim
     # says something is untested when it is tested.
-    ("src/pe_engine.v", 2871, "v_line", "case"): (
+    ("src/pe_engine.v", 2919, "v_line", "case"): (
         UNREACHABLE,
         "The dispatch FSM's defensive `default`. `st` is declared `[1:0]` with "
         "three encodings ST_IDLE/ST_DRIVE/ST_WB = 2'd0..2'd2 at line 666; "
@@ -245,7 +245,7 @@ CLASSIFIED = {
     # `case (st)`, so none of the dispatch arm's own guards dominate it --
     # which is why it carries its own, and why `gate_program_index` classifies
     # both writes as members of the program-indexed family.
-    ("src/pe_engine.v", 2910, "v_branch", "else"): (
+    ("src/pe_engine.v", 2958, "v_branch", "else"): (
         OWED,
         "The `l_pin[i] < N_PINS` guard on the hold expiry. Its `else` is "
         "REACHABLE, not unreachable: a lane may legally name the RESERVED data "
@@ -260,11 +260,30 @@ CLASSIFIED = {
         "BECAUSE THE GUARD IS NEW AND UNPRICED: every other member of this "
         "family was added after a measured out-of-range read, and a guard that "
         "has never been seen to fire has unknown strength."),
+    # ⛔⛔ PAID ONLY BY A DEFECT, LIKE TX5's SEVEN. Until silicon fix #3b every
+    # push-pull clocked SHIFTIN consumed a bit it never captured (`uo_out` has
+    # no input path, so the observed rise never came), and THAT is what covered
+    # this branch on every sweep. With the fix it went dark -- which is the fix
+    # working, and also a branch nothing legitimate is known to reach.
+    ("src/pe_engine.v", 2678, "v_branch", "if"): (
+        OWED,
+        "`ck_consume & ~l_ckgot`: a clocked SHIFTIN consumes a bit that was "
+        "never captured, and reports it (`clk_stretch_err`). Covered before "
+        "silicon fix #3b ONLY by that defect: every push-pull clocked consume "
+        "was uncaptured. Why the clean build does not reach it: an open-drain "
+        "lane PARKS on the rise after its HIGH phase, so its next dispatch "
+        "waits for the capture (reached under `M_CK_NO_PARK`); a stretch "
+        "watchdog HALTS the lane rather than letting it consume; a push-pull "
+        "capture fires 2-3 cycles after the HIGH writeback (the `ppc` slot), "
+        "while the lane's next dispatch is `d` later. ⚠ NOT CLAIMED "
+        "UNREACHABLE: a push-pull clocked SHIFTIN with `d` of a few cycles "
+        "has not been ruled out and is the candidate stimulus (`tb_cktx`, a "
+        "pindiv variant at small d). `M_CKRX_PP_OBSERVED` reaches it."),
     # ⭐ THE UNCLOCKED SITE'S OPEN-DRAIN DIRECT DRIVE (ruling H). Its
     # clocked twin IS covered -- every clocked open-drain image runs at d = 9,
     # so the clamp sends them all down the direct path -- and the asymmetry is
     # the whole reason this one is debt rather than a waiver.
-    ("src/pe_engine.v", 2325, "v_branch", "else"): (
+    ("src/pe_engine.v", 2373, "v_branch", "else"): (
         OWED,
         "The `if (l_mode[cur])` inside the UNCLOCKED SHIFT's direct-drive arm, "
         "open-drain side. Reaching it needs an unclocked open-drain SHIFT whose "
@@ -278,7 +297,7 @@ CLASSIFIED = {
         "⚠ NOT waived as unreachable: it is reachable, by exactly the class "
         "of program the clamp was written for, and leaving the clamp's own "
         "fallback untested is how a safety path rots."),
-    ("src/pe_engine.v", 2196, "v_branch", "else"): (
+    ("src/pe_engine.v", 2244, "v_branch", "else"): (
         UNREACHABLE,
         "The local `if (pin_real)` inside the SELF-CLOCKED SHIFT's LOW phase. "
         "Its `else` cannot be taken: the enclosing case label is "
@@ -288,7 +307,7 @@ CLASSIFIED = {
         "at the enclosing arm -- and widening that window is refused, since the "
         "gate's own docstring records a `clk_real` 30 lines away falsely "
         "guarding a deliberately unguarded mutant arm."),
-    ("src/pe_engine.v", 2229, "v_branch", "else"): (
+    ("src/pe_engine.v", 2277, "v_branch", "else"): (
         UNREACHABLE,
         "The `if (clk_real)` around the LOW phase's CLOCK write. Unreachable "
         "`else`: this block runs only under `ck_shift`, which is DEFINED as "
@@ -296,14 +315,14 @@ CLASSIFIED = {
         "conjunct of the condition that got us here. ⚠ It is still written, "
         "because the guard must be visible at the indexed write rather than "
         "inferred through a wire's definition."),
-    ("src/pe_engine.v", 2249, "v_branch", "else"): (
+    ("src/pe_engine.v", 2297, "v_branch", "else"): (
         UNREACHABLE,
         "The same `if (clk_real)` around the HIGH phase's clock write, "
         "unreachable for the identical reason -- `ck_shift` carries "
         "`clk_real`. Both phases guard separately because a guard shared "
         "across two write groups is how the 1.6x refusal first failed: it "
         "suppressed the data write and let the clock write run anyway."),
-    ("src/pe_engine.v", 2319, "v_branch", "else"): (
+    ("src/pe_engine.v", 2367, "v_branch", "else"): (
         UNREACHABLE,
         "The local `if (pin_real)` inside the UNCLOCKED SHIFT body. Same "
         "structure as the clocked one at 1621 and unreachable for the same "
@@ -311,7 +330,7 @@ CLASSIFIED = {
         "CODE: inserting the clocked arm pushed the case label's own guard "
         "more than 60 lines away from five writes that were fine the day "
         "before, which is exactly the drift that window exists to detect."),
-    ("src/pe_engine.v", 2449, "v_branch", "if"): (
+    ("src/pe_engine.v", 2497, "v_branch", "if"): (
         UNREACHABLE,
         "`if (ck_shiftin & ack_drv[1]) pin_out[a_pin] <= ack_drv[0];` -- the "
         "TRUE arm cannot be taken in a clean build, because `ack_drv` is "
@@ -403,16 +422,16 @@ _SPI_LEFT = (
     "FRAM sequences (RDSR to poll status, WRDI to drop WEL, RDID to "
     "identify). This point is ")
 for _k, _what in (
-        ((163, "v_line", "case"), "the WRDI opcode arm"),
-        ((164, "v_line", "case"), "the RDSR (read status) opcode arm"),
-        ((169, "v_line", "case"), "the RDID (read id) opcode arm"),
-        ((196, "v_branch", "else"), "a WRITE with WEL clear -- the refused "
+        ((177, "v_line", "case"), "the WRDI opcode arm"),
+        ((178, "v_line", "case"), "the RDSR (read status) opcode arm"),
+        ((183, "v_line", "case"), "the RDID (read id) opcode arm"),
+        ((210, "v_branch", "else"), "a WRITE with WEL clear -- the refused "
                                     "write (the program always WRENs first)"),
-        ((198, "v_branch", "else"), "the data phase of an opcode that is "
+        ((212, "v_branch", "else"), "the data phase of an opcode that is "
                                     "neither WRITE nor READ (RDSR/RDID)")):
     CLASSIFIED[("test/fram_spi.v", _k[0], _k[1], _k[2])] = (
         OWED, _SPI_LEFT + _what + ".")
-CLASSIFIED[("test/fram_spi.v", 203, "v_line", "case")] = (
+CLASSIFIED[("test/fram_spi.v", 217, "v_line", "case")] = (
     UNREACHABLE,
     "the phase case's `default`: `phase` is 2 bits and P_OP, P_AHI, P_ALO, "
     "P_DATA enumerate all four values, so no phase reaches it. Defensive.")
@@ -493,38 +512,40 @@ ANCHOR_TEXT = {
     # `if (clk_real) begin` in their original order. The serial-select entry
     # (old 1021) is RETIRED: TF2 replaced that loop with a tree for
     # N_LANES = 5, so the branch is no longer elaborated (see CLASSIFIED).
-    ("src/pe_engine.v", 1688):
+    ("src/pe_engine.v", 1733):
         "if (hdr_done && !prime_unp) primed_q <= 1'b1;",
     # the self-clocked arms' redundant-by-construction guards. ⭐ TWO PAIRS
     # SHARE THEIR TEXT (`if (pin_real) begin` at 1621/1694, `if (clk_real)
     # begin` at 1630/1641), which is exactly why the anchor is keyed on the
     # LINE and the text is the drift check rather than the identifier.
-    ("src/pe_engine.v", 2196):
+    ("src/pe_engine.v", 2244):
         "if (pin_real) begin",
     # ⛔ THE TWO RULING-H ENTRIES NEED ANCHORS LIKE EVERY OTHER, and the
     # first version of them did not have any -- so `reanchor.py` could not move
     # them when the hold's own edits shifted the file, and the gate failed on a
     # classification that had slid off its line. The gate already demands this
     # ("Add it to ANCHOR_TEXT"); I had simply not met it.
-    ("src/pe_engine.v", 2325):
+    ("src/pe_engine.v", 2373):
         "if (l_mode[cur]) begin",
-    ("src/pe_engine.v", 2910):
+    ("src/pe_engine.v", 2958):
         "if (l_pin[i] < N_PINS[PINW-1:0]) begin",
-    ("src/pe_engine.v", 2229):
+    ("src/pe_engine.v", 2277):
         "if (clk_real) begin",
-    ("src/pe_engine.v", 2249):
+    ("src/pe_engine.v", 2297):
         "if (clk_real) begin",
-    ("src/pe_engine.v", 2319):
+    ("src/pe_engine.v", 2367):
         "if (pin_real) begin",
-    ("src/pe_engine.v", 2449):
+    ("src/pe_engine.v", 2497):
         "if (ck_shiftin & ack_drv[1]) pin_out[a_pin] <= ack_drv[0];",
-    ("src/pe_engine.v", 1889):
+    ("src/pe_engine.v", 1937):
         "H_IDLE: if (!hdr_done) begin",
-    ("src/pe_engine.v", 2033):
+    ("src/pe_engine.v", 2678):
+        "if (ck_consume & ~l_ckgot[cur]) begin",
+    ("src/pe_engine.v", 2081):
         "default: pst <= P_SCAN;",
-    ("src/pe_engine.v", 2475):
+    ("src/pe_engine.v", 2523):
         "default: ;",
-    ("src/pe_engine.v", 2871):
+    ("src/pe_engine.v", 2919):
         "default: st <= ST_IDLE;",
     # `src/project.v` 557 -- `if (RX_SERIAL != 0) begin` -- is gone with the
     # parameter. ⭐ THE ANCHOR IS WHAT MADE THAT SAFE TO DO: the source text
@@ -534,17 +555,17 @@ ANCHOR_TEXT = {
     ("test/fram_i2c.v", 266):
         "P_WDATA: begin",
     # ruling SP1: what the real WREN/WRITE/READ transaction does not send
-    ("test/fram_spi.v", 163):
+    ("test/fram_spi.v", 177):
         "OP_WRDI: begin wel <= 1'b0; drive <= 1'b0; end",
-    ("test/fram_spi.v", 164):
+    ("test/fram_spi.v", 178):
         "OP_RDSR: begin",
-    ("test/fram_spi.v", 169):
+    ("test/fram_spi.v", 183):
         "OP_RDID: begin shout <= 8'h04; drive <= 1'b1; phase <= P_DATA; end",
-    ("test/fram_spi.v", 196):
+    ("test/fram_spi.v", 210):
         "if (wel) mem[addr] <= shin;",
-    ("test/fram_spi.v", 198):
+    ("test/fram_spi.v", 212):
         "end else if (opcode == OP_READ) begin",
-    ("test/fram_spi.v", 203):
+    ("test/fram_spi.v", 217):
         "default: ;",
 }
 
@@ -1129,7 +1150,7 @@ def check_full_case() -> int:
     # skipping the check. Ruling TF moved them again: 1810 -> 1971,
     # 2249 -> 2410, 2632 -> 2793 (the same text match as ANCHOR_TEXT), and
     # TF2-R again: 1971 -> 2033, 2410 -> 2475, 2793 -> 2858.
-    for line in (2033, 2475, 2871):
+    for line in (2081, 2523, 2919):
         sel, arms = _case_arms(lines, line)
         if sel is None:
             print("    line %-5d *** no enclosing `case` found -- the waiver's"

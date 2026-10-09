@@ -66,8 +66,14 @@ module fram_spi #(
     parameter [7:0]   OP_RDSR  = 8'h05,
     parameter [7:0]   OP_READ  = 8'h03,
     parameter [7:0]   OP_WRITE = 8'h02,
-    parameter [7:0]   OP_RDID  = 8'h9F
+    parameter [7:0]   OP_RDID  = 8'h9F,
+    // ⭐ RULING CI3: SO changes this many SYSTEM-CLOCK cycles after the SCK
+    // fall that presents it (the part's tODV, made adjustable), so the chip's
+    // sample instant can be FOUND rather than asserted: inside the window the
+    // read is right, past it the read is wrong. 0 = combinational, as before.
+    parameter integer MISO_DLY = 0
 ) (
+    input  wire clk,        // ⚠ only the CI3 delay pipeline uses it
     input  wire cs_n,       // chip select, active LOW
     input  wire sck,
     input  wire si,         // master -> device
@@ -92,7 +98,15 @@ module fram_spi #(
   // device must stop driving the instant CS goes high, not on the next clock.
   // A model that waited for an edge would hold the bus through a deselect and
   // MANUFACTURE the contention the overlap check is looking for.
-  assign so    = shout[7];
+  generate
+    if (MISO_DLY == 0) begin : g_so_now
+      assign so = shout[7];
+    end else begin : g_so_dly
+      reg [MISO_DLY-1:0] so_pipe = {MISO_DLY{1'b0}};
+      always @(posedge clk) so_pipe <= {so_pipe, shout[7]};
+      assign so = so_pipe[MISO_DLY-1];
+    end
+  endgenerate
   assign so_oe = drive & ~cs_n;
 
   // ⛔⛔ RULING SP1 -- MODE 3, WHICH THE PART SUPPORTS AND THIS MODEL DID NOT.

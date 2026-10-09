@@ -52,7 +52,7 @@ from concurrent.futures import ThreadPoolExecutor
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
-from toolchain import banner, tool          # noqa: E402  ruling V
+from toolchain import banner, tool, scratch_sub  # noqa: E402  ruling V
 from run_i2c import sigrok_i2c, transactions  # noqa: E402  one decoder path
 
 try:
@@ -79,9 +79,12 @@ SCRATCH_MUTANTS = {
 
 def commanded_rise_subs():
     """(landmark, replacement) for S_CK_COMMANDED_RISE; each must occur once."""
-    return [("      assign ck_hit[gi] = l_ckwait[gi] & ckp_real & "
-             "pin_rise[l_clkpin[gi]];",
-             "      assign ck_hit[gi] = l_ckwait[gi] & ckp_real;  "
+    # ⛔ THE OPEN-DRAIN ARM of the live `ck_hit` (silicon fix #3b split it by
+    # mode; the old one-line assign survives only under M_CKRX_PP_OBSERVED,
+    # where this landmark matched once and changed nothing -- see
+    # `toolchain.scratch_sub`)
+    return [("                          : (ckp_real & pin_rise[l_clkpin[gi]]));",
+             "                          : (ckp_real));  "
              "// S_CK_COMMANDED_RISE")]
 
 
@@ -142,11 +145,7 @@ def engine(kind):
               newline="") as fh:
         txt = fh.read().replace("\r\n", "\n")
     for a, b in commanded_rise_subs():
-        n = txt.count(a)
-        if n != 1:
-            raise SystemExit("*** S_CK_COMMANDED_RISE: landmark found %d times"
-                             % n)
-        txt = txt.replace(a, b)
+        txt = scratch_sub(txt, a, b, "S_CK_COMMANDED_RISE")
     out = os.path.join(SCRATCH, "pe_engine_commanded.v")
     with open(out, "w", encoding="utf-8", newline="\n") as fh:
         fh.write(txt)

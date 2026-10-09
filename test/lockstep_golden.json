@@ -1,6 +1,6 @@
 {
  "_ncyc_after_priming": 60000,
- "_recorded_from": "src/ after ruling RC (2026-10-09): corpus_i2c and ckread rebuilt as valid I2C (MSB-first, measured STOP), so their DISPATCH streams moved (ckread 1316 -> 1317, corpus_i2c 1319 -> 1320 dispatches in the window); the other 10 unchanged. Before that: src/ after silicon fix #2 (ruling TX5) -- the fix's pre-form reproduced all 12 old digests, dispatch streams identical, pins moved on the 5 clocked images. Originally src/ at 5cb00c1 (pre-TF RTL).",
+ "_recorded_from": "src/ after silicon fix #3 (rulings PN + CI): a clocked SHIFTIN samples the ACTION's pin, and a push-pull clocked capture fires at the engine's own rise (ppc slot). Only ckfive_image.hex moved -- its lane 4 now captures -- sha256 bbba669835e3 -> a6e0fcbb551e, 5373 dispatches, dispatch stream IDENTICAL, pins moved; the other 11 unchanged. Before that: src/ after ruling RC (2026-10-09): corpus_i2c and ckread rebuilt as valid I2C (MSB-first, measured STOP), so their DISPATCH streams moved (ckread 1316 -> 1317, corpus_i2c 1319 -> 1320 dispatches in the window). Before that: src/ after silicon fix #2 (ruling TX5) -- the fix's pre-form reproduced all 12 old digests, dispatch streams identical, pins moved on the 5 clocked images. Originally src/ at 5cb00c1 (pre-TF RTL).",
  "census_image.hex": {
   "dispatch_sha256": "cf95eae806e222f47fb6e5892fa0057261d6db14bac705fbe1b5139114eb5af0",
   "dispatches": 2763,
@@ -13,7 +13,7 @@
   "dispatches": 5373,
   "lines": 65052,
   "primed_at": 133,
-  "sha256": "bbba669835e323faf5027ab5bd43de405b362da46897feba7bcddcde3c457b65"
+  "sha256": "a6e0fcbb551e717ff6ddfe2dcdff2d752be5ed2c24780397fdb2a9df16cbc898"
  },
  "ckheavy_image.hex": {
   "dispatch_sha256": "6742a6bb923e5f5e7d1ebbee933d04aeb11decab722d9882accc3cc2e27b0be4",

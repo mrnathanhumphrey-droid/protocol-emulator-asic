@@ -139,6 +139,12 @@ GATES = [
     ("../../test/run_recert.py",
      "RC   sigrok re-certifies every clocked image (I2C frames, SPI words)",
      False),
+    # ⛔ RULINGS SP1 / PN5 / CI4: a real MB85RS64V WREN / WRITE / READ, in SPI
+    # mode 3 and mode 0 -- chip RX == sigrok MISO == the written bytes; kills
+    # M_TX_LOAD_ANYPHASE and both halves of silicon fix #3.
+    ("../../test/run_spifram.py",
+     "SP1  SPI FRAM write + read: chip RX == sigrok MISO == written, modes 3/0",
+     False),
     ("../ta02/run_ta02.py",
      "TA02 the TA-02 harness (gate_fields, gate_pwm, gate_uart_identity)",
      False),

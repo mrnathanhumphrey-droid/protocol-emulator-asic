@@ -31,6 +31,7 @@ complete; `MISSING` is a reading, and it is visibly not a version.
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -69,6 +70,43 @@ PINNED_WSL_VERILATOR = os.environ.get(
 
 class ToolMissing(RuntimeError):
     pass
+
+
+def scratch_sub(txt, a, b, name):
+    """A SCRATCH MUTANT's one text substitution: `a` must occur exactly ONCE
+    and in LIVE code -> the substituted text.
+
+    ⛔⛔ "FOUND ONCE" IS NOT "LIVE". Silicon fix #3 wrapped the old `ck_hit`
+    assign in `ifdef M_CKRX_PP_OBSERVED`, so `S_CK_COMMANDED_RISE`'s landmark
+    still occurred exactly once -- inside a branch the clean build never
+    compiles. The substitution edited dead code, the "mutant" WAS the clean
+    RTL, and its must-fire in `run_ckack` went quietly vacuous: a guard
+    passing because of the defect. ⇒ A landmark inside an `ifdef` of a
+    mutant macro (`M_*` / `S_*`, never defined in the clean build) is
+    refused, and so is one in the `else` of an `ifndef` of one."""
+    n = txt.count(a)
+    if n != 1:
+        raise SystemExit("*** %s: landmark found %d times" % (name, n))
+    stack = []                        # one entry per open `ifdef: live?
+    for m in re.finditer(r"`(ifdef|ifndef|else|endif)\b[ \t]*(\w*)",
+                         txt[:txt.index(a)]):
+        kw, mac = m.group(1), m.group(2)
+        mut = mac.startswith(("M_", "S_"))
+        if kw == "ifdef":
+            stack.append(not mut)     # an M_ macro is undefined: dead
+        elif kw == "ifndef":
+            stack.append(True)
+        elif kw == "else" and stack:
+            stack[-1] = not stack[-1] if stack[-1] is not None else None
+        elif kw == "endif" and stack:
+            stack.pop()
+        if kw in ("ifdef", "ifndef") and not mut:
+            stack[-1] = None          # unknown macro: neither live nor dead
+    if any(s is False for s in stack):
+        raise SystemExit("*** %s: landmark sits in code the clean build does "
+                         "not compile (inside a mutant `ifdef`) -- the "
+                         "substitution would change nothing" % name)
+    return txt.replace(a, b)
 
 
 def tool(name):

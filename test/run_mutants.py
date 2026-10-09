@@ -136,6 +136,18 @@ CLOCKED_MUTANTS = [
      "LOW, so the 8th bit is the next byte's first and the stream drifts a "
      "bit per byte (5B fed -> 00, B5, 6A, D5 on the wire); counts, gaps and "
      "widths are all exact, so only a value check can see it."),
+    # ⛔⛔ SILICON FIX #3 (rulings PN1 / CI1), both parts, killed on VALUE by
+    # Layer V-RX on the real SPI FRAM read (`corpus_spim`, its own feed):
+    ("M_CKRX_HEADER_PIN", "corpus_spim", "spi",
+     "*** FAIL clocked_conform[V-RX]",
+     "a clocked SHIFTIN samples the lane HEADER's pin (MOSI) instead of the "
+     "action's (MISO): the chip receives its own output, 00, while MISO "
+     "carries 5B C4 -- every frame disagrees with the pins."),
+    ("M_CKRX_PP_OBSERVED", "corpus_spim", "spi",
+     "*** FAIL clocked_conform[V-RX]",
+     "a push-pull clocked SHIFTIN waits for an OBSERVED rise; the SPI master's "
+     "SCLK is a uo_out pin with no input path, so it never captures and every "
+     "bit is consumed uncaptured (read as 0)."),
     ("M_ACK_DRIVES_SDA", "corpus_i2c", "i2c", "OD_HARD1",
      "the clocked ACK drives SDA as a PUSH-PULL HIGH on an open-drain net "
      "while the peer pulls low to acknowledge -- a SHORT. The trace shows "
@@ -809,7 +821,8 @@ def main() -> int:
         o = run(vvp, img="test/%s.hex" % img,
                 extra=["+NBYTES=256", "+PEER=%s" % peer, "+NCYC=40000",
                        "+OUT=%s" % tr, "+SEED=1", "+ASYNC=0", "+STAYLOAD=0",
-                       "+SCLHOLD=0"] + ([a2] if a2 else []))
+                       "+SCLHOLD=0"] + ([a2] if a2 else [])
+                + gct.feed_args("test/%s.hex" % img))
         _h, rows = gct.read_trace(tr)
         hard = len(gct.od_violations(rows, (gct.corpus.P_SCL, gct.corpus.P_SDA)))
         return o, hard

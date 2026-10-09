@@ -44,7 +44,7 @@ from concurrent.futures import ThreadPoolExecutor
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
-from toolchain import banner, tool          # noqa: E402  ruling V
+from toolchain import banner, tool, scratch_sub  # noqa: E402  ruling V
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")
@@ -93,11 +93,7 @@ def slow_engine():
               newline="") as fh:
         txt = fh.read().replace("\r\n", "\n")
     for a, b in slow_subs():
-        n = txt.count(a)
-        if n != 1:
-            raise SystemExit("*** slow-refill mutant: landmark found %d times: %r"
-                             % (n, a[:50]))
-        txt = txt.replace(a, b)
+        txt = scratch_sub(txt, a, b, "slow-refill mutant (%r)" % a[:50])
     os.makedirs(SCRATCH, exist_ok=True)
     out = os.path.join(SCRATCH, "pe_engine_slow.v")
     with open(out, "w", encoding="utf-8", newline="\n") as fh:

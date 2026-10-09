@@ -162,9 +162,16 @@ module tb_rxbw;
       if (dut.u_eng.primed)     primed_seen = 1'b1;
       if (dut.u_eng.config_err) cfgerr_seen = 1'b1;
       // the peer walks a pattern on every input so any RX lane sees traffic
-      peer[0] = cyc[5];
-      peer[2] = cyc[4];
-      peer[3] = cyc[6];
+      // ⛔ NON-BLOCKING. A blocking write right after `@(posedge clk)` RACES
+      // every posedge sampler -- the chip's input synchroniser among them --
+      // so which value an edge saw depended on scheduling order. Layer V-RX
+      // (ruling PN3) rebuilds received bytes from these pads and disagreed
+      // with the chip by one bit on 616 of 3948 frames at d = 45, the bit
+      // walking one place per frame: the race, not the chip. With `<=` the
+      // pad changes after the edge, for every sampler alike.
+      peer[0] <= cyc[5];
+      peer[2] <= cyc[4];
+      peer[3] <= cyc[6];
       if (dut.u_eng.rx_push) begin
         if (cn < CMAX) cval[cn] = dut.u_eng.rx_data;
         n_compl = n_compl + 1;

@@ -89,6 +89,10 @@ EXPECT = {
     # silicon fix #2 (ruling TX1): the host load's LOW-phase gate removed --
     # one condition, one line out and one in
     "M_TX_LOAD_ANYPHASE": (2, None),
+    # silicon fix #3 (rulings PN1 / CI1): the receive pin back to the header's,
+    # and the push-pull capture back to the observed rise
+    "M_CKRX_HEADER_PIN": (2, None),
+    "M_CKRX_PP_OBSERVED": (4, None),
     "M_SHARED_BITP":     (14,
         "a BLOCK substitution across FOUR sites, declared: the mutation "
         "re-merges the TX and RX bit pointers, and the pointer is named in the "

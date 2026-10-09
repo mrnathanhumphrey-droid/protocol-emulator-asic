@@ -48,6 +48,10 @@
 `include "test/imgload.vh"
 module tb_trace;
 
+  // ⭐ RULING CI3: the SPI peer's MISO delay in system cycles (its tODV,
+  // adjustable), so `test/run_spidelay.py` can find the chip's sample edge
+  parameter integer SPI_MISO_DLY = 0;
+
   // ⛔ THE PIN MAP IS GENERATED, NOT RESTATED. test/corpus.py derives it from
   //    the two-bank ruling and checks it against project.v's MISO_PIN/CS_PIN;
   //    a hand-written copy here would be the second table that drifts, and a
@@ -248,7 +252,8 @@ module tb_trace;
       .sda_oe(i2cs_sda_oe), .scl_oe(i2cs_scl_oe)
   );
 
-  fram_spi u_spi (
+  fram_spi #(.MISO_DLY(SPI_MISO_DLY)) u_spi (
+      .clk (clk),
       .cs_n(uo_out[P_M_CS_UO]),
       .sck (uo_out[P_M_SCLK_UO]),
       .si  (uo_out[P_M_MOSI_UO]),

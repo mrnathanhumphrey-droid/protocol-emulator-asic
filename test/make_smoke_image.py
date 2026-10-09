@@ -1498,6 +1498,22 @@ def main() -> int:
         print("i2c frame image d=%d, %d bytes -> %s"
               % (dd, len(img), out))
         return 0
+    if "--pindiv" in sys.argv:
+        # ⭐ RULING PN4 / CI4 -- `run_cktx`'s pin-diversity program, written
+        # for the coverage sweep (`benchset` tb_cktx `gen`). Its lane 1 is the
+        # ONLY push-pull clocked receive with a `uio` clock, i.e. the only
+        # stimulus for the K = 1 arm of silicon fix #3b's capture slot.
+        # ⛔ A `probe_` BASE ONLY: this is a generated image, never tracked.
+        k = sys.argv.index("--pindiv")
+        base = sys.argv[k + 1] if len(sys.argv) > k + 1 else ""
+        if not base.startswith("probe_"):
+            print("--pindiv needs a probe_ base name, got %r" % base)
+            return 1
+        import run_cktx
+        out = os.path.join(here, base + ".hex")
+        run_cktx.pindiv_image(out)
+        print("pindiv image -> %s" % out)
+        return 0
     if "--rxfast" in sys.argv:
         k = sys.argv.index("--rxfast")
         dd = int(sys.argv[k + 1]) if len(sys.argv) > k + 1 else 24

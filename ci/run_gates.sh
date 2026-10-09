@@ -230,6 +230,17 @@ GATES=(
   # covers widths 1..8, MSB/LSB lanes, ACK or not, empty/refill. Must-fire:
   # M_TX_LOAD_ANYPHASE red on V1 and V2.
   test/run_cktx.py
+  # ⛔ CI3 -- SILICON FIX #3 (b): WHERE THE PUSH-PULL CLOCKED RECEIVE SAMPLES,
+  # FOUND BY SWEEPING THE SPI PEER's MISO DELAY on the real FRAM read: all
+  # right at N <= d-2, all wrong at N >= d+1, the edge within 1 cycle of the
+  # prediction (HOST_INTERFACE's SPI receive timing).
+  test/run_spidelay.py
+  # ⛔⛔ PN4 -- EVERY PIN-TAKING OPCODE IS RUN WITH ITS ACTION PIN != THE
+  # LANE's HEADER PIN. Silicon fix #3 hid where the two were always equal
+  # (I2C); so did pe_asm's alias check and Layer V2. Red on a class with only
+  # same-pin coverage. Must-fires: no pindiv -> holes; a clock-pin action is
+  # not diversity.
+  model/gate_pin_matrix.py
   # ⛔⛔ RC4 -- EVERY START/STOP (I2C) LANE IS MSB-FIRST. Three corpus images
   # framed I2C on LSB-first lanes (hdr()'s default) and sent every byte
   # reversed until sigrok read them. Same rule as pe_asm's refusal; census
@@ -309,7 +320,7 @@ can_run() {
     model/gate_rtl_lint.py)
       { command -v "$VL" >/dev/null 2>&1 || command -v wsl.exe >/dev/null 2>&1; } \
         || { echo "no verilator and no wsl.exe to reach one"; return 1; } ;;
-    model/gate_one_encoder.py|test/gl_harness_check.py|test/gate_tb_elaborates.py|test/run_mutants.py|model/gate_sda_hold.py|test/run_w_sweep.py|test/run_cktx.py)
+    model/gate_one_encoder.py|test/gl_harness_check.py|test/gate_tb_elaborates.py|test/run_mutants.py|model/gate_sda_hold.py|test/run_w_sweep.py|test/run_cktx.py|test/run_spidelay.py)
       command -v "$IV" >/dev/null 2>&1 || { echo "iverilog not found (PE_IVERILOG unset and not on PATH)"; return 1; } ;;
     model/gate_reset_audit.py)
       [ -n "${PE_NETLIST_JSON:-}" ] && [ -f "${PE_NETLIST_JSON:-}" ] \

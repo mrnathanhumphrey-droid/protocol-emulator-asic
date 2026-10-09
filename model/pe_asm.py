@@ -154,13 +154,21 @@ def check_shift_clock_alias(lanes, headers):
     program contains a SHIFT, because actions are fetched lazily. Here the
     whole program is visible, so the refusal is static and names the lane.
     """
+    # ⛔⛔ RULING CI5: THE ACTION's PIN, NOT THE HEADER's. The chip's 1.6x
+    # refusal is `l_clkpin[cur] == a_pin` -- the pin the SHIFT action names --
+    # and this check compared the HEADER pin. So it ACCEPTED a SHIFT whose
+    # own pin is the clock (the chip refuses it at dispatch), and REFUSED a
+    # header alias whose actions drive another pin (the chip runs it). Found by
+    # the pin-field audit (PN2): every program tested had action pin == header
+    # pin, where the two readings agree.
     for ln in sorted(lanes):
-        if not any(op == OP_SHIFT for (op, _p, _l, _d, _q) in lanes[ln]):
-            continue
         if ln not in headers:
             continue
-        pin, clkpin = headers[ln][0], headers[ln][1]
-        if pin == clkpin:
+        clkpin = headers[ln][1]
+        bad = [pin for (op, pin, _l, _d, _q) in lanes[ln]
+               if op == OP_SHIFT and pin == clkpin]
+        if bad:
+            pin = bad[0]
             raise Reject(
                 "lane %d executes OP_SHIFT and names pin %d as BOTH its data "
                 "and its clock pin. OP_SHIFT writes the data pin and then the "
@@ -807,6 +815,24 @@ def _demo_clkalias():
     return lanes, headers
 
 
+def _demo_action_alias():
+    """CI5: the HEADER pin is distinct from the clock, but a SHIFT ACTION
+    names the clock pin -- the old header check ACCEPTED it; the chip refuses
+    it at dispatch (`l_clkpin == a_pin`)."""
+    lanes, headers = _demo_ok()
+    lanes[0] = [(OP_SHIFT, 9, 1, 25, 0), (OP_REARM, 0, 1, 25, 0)]
+    return lanes, headers
+
+
+def _demo_header_alias_only():
+    """CI5: the header pin equals the clock, but every SHIFT drives another
+    pin -- the old check REFUSED it; the chip runs it."""
+    lanes, headers = _demo_ok()
+    headers[0] = (9, 9, 1, 25, 50, 75)
+    lanes[0] = [(OP_SHIFT, 8, 1, 25, 0), (OP_REARM, 0, 1, 25, 0)]
+    return lanes, headers
+
+
 def _demo_tight():
     """A program inside the regime where the published J was found unsound."""
     lanes, headers = _demo_ok()
@@ -1080,7 +1106,12 @@ def main() -> int:
             ("clkpin == pin on a shifting lane", _demo_clkalias, True,
              ("lane 0", "pin 8", "OP_SHIFT")),
             ("the same program with a distinct clock pin", _demo_ok, False,
-             ())):
+             ()),
+            # ⭐ CI5: the check follows the ACTION's pin, as the chip does
+            ("a SHIFT ACTION on the clock pin (header distinct)",
+             _demo_action_alias, True, ("lane 0", "pin 9", "OP_SHIFT")),
+            ("a header alias whose SHIFTs drive another pin",
+             _demo_header_alias_only, False, ())):
         lanes_b, headers_b = build()
         try:
             check_shift_clock_alias(lanes_b, headers_b)

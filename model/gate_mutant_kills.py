@@ -59,6 +59,9 @@ KILLERS = {
     "M_NO_REBASE": RUN_MUTANTS,
     # silicon fix #2: killed on VALUE by Layer V1 (tb_trace, corpus_i2c)
     "M_TX_LOAD_ANYPHASE": RUN_MUTANTS,
+    # silicon fix #3: killed on VALUE by Layer V-RX (tb_trace, corpus_spim)
+    "M_CKRX_HEADER_PIN": RUN_MUTANTS,
+    "M_CKRX_PP_OBSERVED": RUN_MUTANTS,
     # -- run_mutants.py, other benches ---------------------------------------
     "M_SHIFT_CLK_ALIAS": RUN_MUTANTS, "M_TX_IGNORE_TAG": RUN_MUTANTS,
     "M_TIMEOUT_PROCEED": RUN_MUTANTS, "M_UNGUARDED_ARMPIN": RUN_MUTANTS,
@@ -119,6 +122,9 @@ SCRATCH = {
     "S_W4_SLOW_REFILL": "test/run_w_sweep.py",
     # ruling ACK (b): the wrong-instant SHIFTIN sampler; local (sigrok)
     "S_CK_COMMANDED_RISE": "test/run_ckack.py",
+    # ruling CI5: the clocked SHIFT drives the header pin; V2 on the action
+    # pin must catch it (a header-pin checker would not); CI
+    "S_TX_HEADER_PIN": "test/run_cktx.py",
 }
 
 
@@ -321,6 +327,26 @@ def main() -> int:
                        dict(sfound, S_MU_IDLE="test/run_spl_compare.py"),
                        dict(SCRATCH, S_MU_IDLE="test/run_spl_compare.py"),
                        ran))))
+    # ⛔ A SCRATCH LANDMARK IN DEAD CODE: `S_CK_COMMANDED_RISE`'s landmark once
+    # matched exactly once inside `ifdef M_CKRX_PP_OBSERVED`, so its mutant was
+    # the clean RTL. Every scratch builder goes through `scratch_sub`, which
+    # must refuse that -- and must still accept the same line when it is live.
+    sys.path.insert(0, os.path.join(ROOT, "test"))
+    from toolchain import scratch_sub
+    dead = ("`ifdef M_MU_X\n  assign h = a & b;\n`else\n  assign h = c;\n"
+            "`endif\n")
+    try:
+        scratch_sub(dead, "  assign h = a & b;", "  assign h = a;", "plant")
+        refused = False
+    except SystemExit:
+        refused = True
+    checks.append(("a scratch landmark inside a mutant `ifdef", refused))
+    try:
+        live_ok = "a;" in scratch_sub(dead, "  assign h = c;",
+                                      "  assign h = a;", "plant")
+    except SystemExit:
+        live_ok = False
+    checks.append(("... and the live branch is accepted", live_ok))
     for label, hit in checks:
         print("    %-50s %s" % (label, "ok" if hit else "*** MISSED"))
         if not hit:
