@@ -342,6 +342,12 @@ SPEC_SYMBOLS = {
     # address, data) and the ones it must read back -- inputs to the program
     # and its verdict, not observations; what is measured is sigrok's decode.
     ("test/corpus.py", "FEEDS"),
+    # ⭐ RULING CE2: the SPI MODE TABLE -- which (CPOL, CPHA) a clean SPI lane
+    # is in with CLK_INV clear or set. The numbers are the mode bits the SPI
+    # convention defines, inputs that tell sigrok how to decode; what is
+    # measured (the mode the wire's idle level and edges actually show) is
+    # computed every run by `cs_modes`.
+    ("test/run_spifram.py", "CPOL_CPHA"),
     # ⭐⭐ UM10204's TIMING MINIMA, TRANSCRIBED. These are REQUIREMENTS the
     # design is measured against, so they are inputs in the strongest sense --
     # the whole point of the gate that holds them is that nothing in this repo

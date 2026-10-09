@@ -708,8 +708,10 @@ always @(posedge dut.clk) begin
       if (cg_last[dut.u_eng.cur] >= 0 && cg_hi[dut.u_eng.cur] === 1 &&
           cg_od[dut.u_eng.cur] === 1) begin
         cg_checks = cg_checks + 1;
+        // ⭐ CE1: `cg_dly` already holds the HIGH phase's length (`d`, or
+        // `d/2` on a HALF_HIGH lane) -- see where it is recorded below
         if ((cg_cyc - cg_last[dut.u_eng.cur]) < cg_dly[dut.u_eng.cur]) begin
-          $display("*** FAIL clocked_conform[G1]: lane %0d gap after a HIGH was %0d cycle(s), under its delay d=%0d -- the park must release at the OBSERVED RISE plus d, not at the rise", dut.u_eng.cur, cg_cyc - cg_last[dut.u_eng.cur], cg_dly[dut.u_eng.cur]);
+          $display("*** FAIL clocked_conform[G1]: lane %0d gap after a HIGH was %0d cycle(s), under its HIGH length %0d -- the park must release at the OBSERVED RISE plus the HIGH length, not at the rise", dut.u_eng.cur, cg_cyc - cg_last[dut.u_eng.cur], cg_dly[dut.u_eng.cur]);
           cg_fails = cg_fails + 1;
         end
         // ⛔⛔ A2 IS MEASURED FROM THE OBSERVED RISE, NOT FROM THE HIGH
@@ -749,7 +751,13 @@ always @(posedge dut.clk) begin
       cg_hi[dut.u_eng.cur]   = (dut.u_eng.ck_is_high === 1'b1) ? 1 : 0;
       cg_od[dut.u_eng.cur]   = (dut.u_eng.l_mode[dut.u_eng.cur] === 1'b0)
                                 ? 1 : 0;
-      cg_dly[dut.u_eng.cur]  = dut.u_eng.a_dly;
+      // ⭐ CE1: after a HIGH dispatch the length in force is the HIGH
+      // phase's -- `d`, or `d/2` on a HALF_HIGH lane (`ck_high_gap`, from
+      // the model). Every reader of `cg_dly` is gated on `cg_hi`, so G1, the
+      // A2 bound and the lateness statistics all judge the right length.
+      cg_dly[dut.u_eng.cur]  = (dut.u_eng.ck_is_high === 1'b1)
+          ? ck_high_gap(dut.u_eng.a_dly, dut.u_eng.l_half[dut.u_eng.cur])
+          : dut.u_eng.a_dly;
     end else begin
       cg_last[dut.u_eng.cur] = -1;   // a non-clocked action breaks the chain
     end
@@ -1169,6 +1177,87 @@ always @(posedge dut.clk) begin
 end
 
 // =======================================================================
+// LAYER B GAPS -- EVERY CLOCKED PHASE'S LENGTH, AGAINST THE MODEL (CE1)
+// =======================================================================
+// ⛔⛔ WHY. Layer B compared dispatch COUNTS, and the golden model says so
+// about itself: "a park changes TIMING without changing the count", so a
+// checker of counts is blind to every timing rule. CE1 adds a second gap
+// length (HALF_HIGH: the HIGH phase lasts d/2), so the gaps are now checked:
+//   * at a clocked writeback, the lane's timestamp must advance by the
+//     model's rule -- `ck_high_gap(d, half)` for a HIGH phase (generated in
+//     clocked_bounds.vh from the model at every 10-bit delay), `d` otherwise;
+//   * an OPEN-DRAIN HIGH parks, and its gap is set by the REBASE at the
+//     observed rise instead: the new timestamp must be `now + ck_high_gap`.
+// `M_HALF_IGNORED` (the selector read as 0) must fail here on a HALF_HIGH
+// lane: the bench reads the lane's `l_half` register, the mutant does not.
+// ⚠ All state is this block's own (ruling RA3).
+localparam integer N_LANES_BG = 5;
+integer    bg_chk, bg_bad, bg_k;
+reg        bg_pend [0:7];
+reg [31:0] bg_ts0  [0:7], bg_exp [0:7];
+reg        bg_rpend[0:7];
+reg [31:0] bg_rexp [0:7];
+reg [31:0] bg_mask;
+
+initial begin
+  bg_chk = 0; bg_bad = 0;
+  bg_mask = (32'd1 << $bits(dut.u_eng.now)) - 32'd1;
+  for (bg_k = 0; bg_k < 8; bg_k = bg_k + 1) begin
+    bg_pend[bg_k] = 1'b0; bg_rpend[bg_k] = 1'b0;
+  end
+end
+
+always @(posedge dut.clk) begin
+  if (dut.rst_n !== 1'b1) begin
+    for (bg_k = 0; bg_k < 8; bg_k = bg_k + 1) begin
+      bg_pend[bg_k] = 1'b0; bg_rpend[bg_k] = 1'b0;
+    end
+  end else begin
+    // ---- the checks owed from the previous edge --------------------------
+    for (bg_k = 0; bg_k < N_LANES_BG; bg_k = bg_k + 1) begin
+      if (bg_pend[bg_k]) begin
+        bg_pend[bg_k] = 1'b0;
+        bg_chk = bg_chk + 1;
+        if (((dut.u_eng.l_timestamp[bg_k] - bg_ts0[bg_k]) & bg_mask)
+            !== (bg_exp[bg_k] & bg_mask)) begin
+          bg_bad = bg_bad + 1;
+          if (bg_bad <= 4)
+            $display("*** FAIL clocked_conform[B-GAP]: lane %0d's clocked writeback advanced its timestamp by %0d, the model's rule says %0d", bg_k, (dut.u_eng.l_timestamp[bg_k] - bg_ts0[bg_k]) & bg_mask, bg_exp[bg_k]);
+        end
+      end
+      if (bg_rpend[bg_k]) begin
+        bg_rpend[bg_k] = 1'b0;
+        bg_chk = bg_chk + 1;
+        if ((dut.u_eng.l_timestamp[bg_k] & bg_mask) !== (bg_rexp[bg_k] & bg_mask)) begin
+          bg_bad = bg_bad + 1;
+          if (bg_bad <= 4)
+            $display("*** FAIL clocked_conform[B-GAP]: lane %0d's open-drain HIGH rebased to %0d at the rise, the model's rule says %0d", bg_k, dut.u_eng.l_timestamp[bg_k] & bg_mask, bg_rexp[bg_k] & bg_mask);
+        end
+      end
+    end
+    // ---- a clocked writeback (not an open-drain HIGH, which parks) -------
+    if (dut.u_eng.st === 2'd2 && dut.u_eng.cur < N_LANES_BG
+        && dut.u_eng.ck_act === 1'b1 && dut.u_eng.ck_refuse !== 1'b1
+        && !(dut.u_eng.ck_is_high === 1'b1
+             && dut.u_eng.l_mode[dut.u_eng.cur] !== 1'b1)) begin
+      bg_k = dut.u_eng.cur;
+      bg_pend[bg_k] = 1'b1;
+      bg_ts0[bg_k]  = dut.u_eng.l_timestamp[bg_k];
+      bg_exp[bg_k]  = (dut.u_eng.ck_is_high === 1'b1)
+                    ? ck_high_gap(dut.u_eng.a_dly, dut.u_eng.l_half[bg_k])
+                    : dut.u_eng.a_dly;
+    end
+    // ---- an open-drain clocked lane released by its observed rise --------
+    for (bg_k = 0; bg_k < N_LANES_BG; bg_k = bg_k + 1)
+      if (dut.u_eng.arm_hit[bg_k] === 1'b1 && dut.u_eng.l_ckpark[bg_k] === 1'b1) begin
+        bg_rpend[bg_k] = 1'b1;
+        bg_rexp[bg_k]  = dut.u_eng.now
+                       + ck_high_gap(dut.u_eng.ck_dly[bg_k], dut.u_eng.l_half[bg_k]);
+      end
+  end
+end
+
+// =======================================================================
 // LAYER V-RX -- RECEIVED VALUES, FROM THE PINS (ruling PN3, silicon fix #3)
 // =======================================================================
 // ⛔⛔ WHY. Layer V checked what the chip SENDS; nothing checked what it
@@ -1311,6 +1400,13 @@ end
 // one caller, so folding it in changes nothing Verilator does.
 final begin
     $display("  clocked_conform[B]: %0d clocked action(s) checked against the model", cb_acts);
+    // ---- Layer B gaps: every clocked phase's length (ruling CE1) ---------
+    if (bg_chk == 0)
+      $display("  clocked_conform[B-GAP]: 0 clocked gaps in this program -- NOT EXERCISED");
+    else if (bg_bad != 0)
+      $display("*** FAIL clocked_conform[B-GAP]: %0d of %0d clocked gap(s) disagree with the model's rule", bg_bad, bg_chk);
+    else
+      $display("  clocked_conform[B-GAP]: ok -- %0d clocked gap(s) match the model's rule (d; HIGH = ck_high_gap)", bg_chk);
     // ---- Layer V-RX: received values (ruling PN3) -----------------------
     if (vr_chk == 0 && vr_nocap == 0 && vr_orph == 0)
       $display("  clocked_conform[V-RX]: 0 received byte(s) in this program -- NOT EXERCISED");

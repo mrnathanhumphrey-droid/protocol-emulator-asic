@@ -262,11 +262,16 @@ CONFIG = {
     # slot, which no other swept image reaches (the coverage gate found it).
     "tb_cktx": {
         "srcs": [],
-        "gen": ["--pindiv", "probe_cov_pindiv"],
+        # ⭐ RULING CE1 / CE2: `cemodes` runs both new lane mode bits, so the
+        # HALF_HIGH and CLK_INV logic is reached by the swept bench (coverage)
+        "gen": [["--pindiv", "probe_cov_pindiv"],
+                ["--cemodes", "probe_cov_cemodes"]],
         "arms": [("ckfive", ["+IMG=test/ckfive_image.hex", "+NCYC=20000",
                              "+STARVE=0", "+STARVE_LEN=0"]),
                  ("pindiv", ["+IMG=test/probe_cov_pindiv.hex", "+NCYC=80000",
-                             "+STARVE=0", "+STARVE_LEN=0"])],
+                             "+STARVE=0", "+STARVE_LEN=0"]),
+                 ("cemodes", ["+IMG=test/probe_cov_cemodes.hex",
+                              "+NCYC=80000", "+STARVE=0", "+STARVE_LEN=0"])],
     },
     # ⭐ RULING ACK (b)-(c) -- the clocked I2C read against a stretching peer.
     # Its verdicts (chip bytes == sigrok bytes) live in `test/run_ckack.py`,
@@ -467,10 +472,13 @@ def corpus_arms():
         feed = (["+FEEDN=%d" % len(seq),
                  "+FEED=%s" % "".join("%02x" % b for b in seq)] if seq
                 else ["+FEEDN=0"])
+        # ⭐ RULING CE2: `+SPI_SCK_INV=0` -- the SPI peer is mode 0/3 for the
+        # corpus (its mode 1/2 arms are `run_spifram`'s, adjudicated by sigrok)
         out.append((name, ["+IMG=test/%s.hex" % name, "+PEER=%s" % peer,
                            "+OUT=probe_cov_trace_%s.txt" % name,
                            "+NCYC=200000", "+SEED=1", "+ASYNC=0",
-                           "+STAYLOAD=0", "+SCLHOLD=0"] + feed))
+                           "+STAYLOAD=0", "+SCLHOLD=0", "+SPI_SCK_INV=0"]
+                    + feed))
     # ⭐ THE TWO CLOCK-STRETCH ARMS, both of which `gate_corpus_trace.py`
     # already certifies: `+SCLHOLD` is a BENCH-DRIVEN hold on SCL (its line
     # 365), and the PEER-driven stretch is a second instance,
@@ -774,13 +782,16 @@ def generate(cfg, top):
     if not args:
         return None
     import subprocess
-    r = subprocess.run([sys.executable,
-                        os.path.join(HERE, "make_smoke_image.py")] + args,
-                       capture_output=True, text=True, cwd=ROOT,
-                       encoding="utf-8", errors="replace")
-    if r.returncode != 0:
-        return "%s: make_smoke_image %s failed: %s" % (
-            top, " ".join(args), (r.stdout + r.stderr).strip()[-200:])
+    # ⭐ ONE generator, or a LIST of them (ruling CE: tb_cktx sweeps two
+    # generated images, pindiv and cemodes)
+    for one in (args if isinstance(args[0], list) else [args]):
+        r = subprocess.run([sys.executable,
+                            os.path.join(HERE, "make_smoke_image.py")] + one,
+                           capture_output=True, text=True, cwd=ROOT,
+                           encoding="utf-8", errors="replace")
+        if r.returncode != 0:
+            return "%s: make_smoke_image %s failed: %s" % (
+                top, " ".join(one), (r.stdout + r.stderr).strip()[-200:])
     return None
 
 

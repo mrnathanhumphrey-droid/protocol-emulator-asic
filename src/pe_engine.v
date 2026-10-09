@@ -206,6 +206,9 @@ module pe_engine #(
     // edge and an extra edge is a corruption, not a margin problem.
     output reg  [N_PINS-1:0]    pin_out,
     output reg  [N_PINS-1:0]    pin_oe,
+    // CE2: 1 = this pin is a CLK_INV lane's clock -- the TOP inverts it at the
+    // `uo_out` register (a flop; set only at header load, static in run)
+    output reg  [N_PINS-1:0]    pin_inv,
     input  wire [N_PINS-1:0]    pin_in,       // already synchronised upstream
     // ⭐ EDGE DETECT, one bit per pin per polarity, combinational off the top
     // module's 3-stage sync chain. `OP_ARM` selects the polarity with the
@@ -628,7 +631,12 @@ module pe_engine #(
   reg [BPW-1:0]   l_bitp_shared;
 `endif
   reg [TS_W-1:0]  l_timestamp     [0:N_LANES-1];   // ABSOLUTE next-action timestamp
-  reg [CW-1:0]    l_c      [0:N_LANES-1];
+  // ⛔ RULING HDR: the header field that was `c` -- loaded into `l_c`, which
+  // NOTHING read -- is now the lane's mode bits. bit0 HALF_HIGH (CE1), bit1
+  // CLK_INV (CE2); bits 2-3 are reserved (refused by the toolchain, ignored
+  // here). `l_c` is gone: it was dead state.
+  reg             l_half   [0:N_LANES-1];   // CE1: the HIGH phase lasts d/2
+  reg             l_clkinv [0:N_LANES-1];   // CE2: the clock pin is inverted
   reg [D_W-1:0]   l_d      [0:N_LANES-1];   // D_sched -- the EDF key, in a
                                             //   REGISTER (Ruling 1)
   reg [DLY_W-1:0] l_t      [0:N_LANES-1];   // inner period
@@ -859,6 +867,7 @@ module pe_engine #(
   // to be rediscovered: if a held action ever began invalidating its slot, this
   // would silently read the NEXT action's delay.
   wire [DLY_W-1:0] ck_dly [0:N_LANES-1];
+  wire [DLY_W-1:0] ck_hdly [0:N_LANES-1];   // CE1: the HIGH length in force
   // ⛔⛔⛔ THE HOLD IS CLAMPED OUT WHEN IT WOULD NOT FIT, and this is a
   // CORRECTNESS clamp rather than a tidy-up. A hold longer than the action's
   // own delay lands the data AFTER the next clock rise -- data moving while
@@ -925,6 +934,26 @@ module pe_engine #(
   // G1 and the UM10204 floor both stay green while the clock period is wrong --
   // which is precisely why a one-sided bound is half a check.
   wire [TS_W-1:0] ck_rebase [0:N_LANES-1];
+  // ⛔⛔ RULING CE1 -- HALF_HIGH. A symmetric clock cannot reach I2C Fm's
+  // nominal rate: t_LOW >= 1.3 us fixes d >= 69 and the HIGH phase then wastes
+  // the 0.7 us beyond Fm's 0.6 us t_HIGH (336 kHz). A HALF_HIGH lane's HIGH
+  // phase lasts d/2 -- on an open-drain clock d/2 after the OBSERVED rise (the
+  // park rebase), on a push-pull clock the HIGH-phase writeback adds d/2 --
+  // so Fm runs up to ~397 kHz (ideal edges; pull-up dependent). The LOW phase
+  // is untouched, so every t_LOW / hold / setup argument stands. `pe_asm`
+  // refuses HALF_HIGH when d/2 < D*: J = 1's premise holds PER GAP.
+  // `M_HALF_IGNORED` reads every lane as symmetric.
+  wire [N_LANES-1:0] half_v;
+  genvar gh;
+  generate
+    for (gh = 0; gh < N_LANES; gh = gh + 1) begin : g_half
+`ifdef M_HALF_IGNORED
+      assign half_v[gh] = 1'b0;
+`else
+      assign half_v[gh] = l_half[gh];
+`endif
+    end
+  endgenerate
   generate
     for (gi = 0; gi < N_LANES; gi = gi + 1) begin : g_arm
       // ⛔⛔⛔ RANGE-GUARDED, AND THIS WAS A LIVE THIRD INSTANCE OF THE CLASS.
@@ -1007,12 +1036,15 @@ module pe_engine #(
       assign ck_bit[gi] = ckd_real ? pin_in[ck_rpin] : 1'b0;
       // the delay field of the action this lane is currently clocking
       assign ck_dly[gi] = l_act[hix[gi]][BQW+BPW +: DLY_W];
+      // ⭐ CE1: the parked lane's HIGH length after the observed rise --
+      // `d`, or `d/2` on a HALF_HIGH lane (the rebase below adds it)
+      assign ck_hdly[gi] = half_v[gi] ? (ck_dly[gi] >> 1) : ck_dly[gi];
 `ifdef M_CK_REBASE_2D
       assign ck_rebase[gi] = now + {{(TS_W-DLY_W-1){1'b0}}, ck_dly[gi], 1'b0};
 `elsif M_CK_RISE_ELIGIBLE
       assign ck_rebase[gi] = now;
 `else
-      assign ck_rebase[gi] = now + (l_ckpark[gi] ? {{(TS_W-DLY_W){1'b0}}, ck_dly[gi]} : {TS_W{1'b0}});
+      assign ck_rebase[gi] = now + (l_ckpark[gi] ? {{(TS_W-DLY_W){1'b0}}, ck_hdly[gi]} : {TS_W{1'b0}});
 `endif
     end
   endgenerate
@@ -1316,6 +1348,12 @@ module pe_engine #(
   // the capture slot (`ppc_*`), since its rise cannot be observed
   wire ppc_set    = (st == ST_WB) & ck_shiftin & ck_is_high & l_mode[cur];
   wire ck_is_coll = (l_ckph[cur] == CK_COLL);
+  // ⭐ CE1: what a writeback adds to the timestamp -- the action's delay, or
+  // half of it for the HIGH phase of a HALF_HIGH lane's clocked action. ONE
+  // wire, read by both the WB and TF1's next-state mirror `ts_n`, so the two
+  // cannot drift. (On an open-drain lane the park rebase then overrides it.)
+  wire [DLY_W-1:0] wb_dly = (ck_act & ck_is_high & half_v[cur])
+                            ? (a_dly >> 1) : a_dly;
   // ⚠ THE TWO OPCODES COUNT BITS DIFFERENTLY, and this is pre-existing ISA
   // semantics preserved rather than tidied: `OP_SHIFT` compares the
   // PRE-increment pointer against `a_cnt` (so a_cnt = 7 is eight bits, and it
@@ -1561,7 +1599,7 @@ module pe_engine #(
         : arm_hit[gi] ? ck_rebase[gi]
 `endif
         : (st == ST_WB && cur == gi)
-            ? l_timestamp[gi] + {{(TS_W-DLY_W){1'b0}}, a_dly}
+            ? l_timestamp[gi] + {{(TS_W-DLY_W){1'b0}}, wb_dly}
             : l_timestamp[gi];
       assign ld_n[gi] = (hdr_wr && hl == gi)
           ? hsh_n[HDR_BYTES*8-2-2*PINW-DLY_W-CW -: D_W] : l_d[gi];
@@ -1873,6 +1911,7 @@ module pe_engine #(
       // reset-HIGH value of the `uo_out` protocol pins to 0 and break the
       // forced idle-high that bank requires.
       pin_pp   <= {N_PINS{1'b1}};
+      pin_inv  <= {N_PINS{1'b0}};           // CE2: no pin inverted at reset
       pin_oe   <= {N_PINS{1'b0}};
       rx_data  <= 8'h00;
       rx_lane  <= {LW{1'b0}};
@@ -1910,7 +1949,8 @@ module pe_engine #(
         l_bitp_shared <= {BPW{1'b0}};
 `endif
         l_timestamp[i]     <= {TS_W{1'b0}};
-        l_c[i]      <= {CW{1'b0}};
+        l_half[i]   <= 1'b0;
+        l_clkinv[i] <= 1'b0;
         l_d[i]      <= {D_W{1'b0}};
         l_t[i]      <= {DLY_W{1'b0}};
         l_live[i]   <= 1'b0;
@@ -2052,7 +2092,20 @@ module pe_engine #(
                       pin_pp[hsh_n[HDR_BYTES*8-1-PINW -: PINW]]
                           <= hsh_n[HDR_BYTES*8-1-2*PINW];
                     l_t[hl]      <= hsh_n[HDR_BYTES*8-2-2*PINW -: DLY_W];
-                    l_c[hl]      <= hsh_n[HDR_BYTES*8-2-2*PINW-DLY_W -: CW];
+                    // ⭐ RULING HDR: the old `c` field's low two bits.
+                    l_half[hl]   <= hsh_n[HDR_BYTES*8-2-2*PINW-DLY_W-CW+1];
+                    l_clkinv[hl] <= hsh_n[HDR_BYTES*8-2-2*PINW-DLY_W-CW+2];
+                    // ⛔ CE2: only a PUSH-PULL lane whose clock is a `uo_out`
+                    // pin (8..11) is inverted. `uo_out` is re-registered in
+                    // the top, so the XOR lands BEFORE a flop and F2 (every
+                    // output bit a flop Q) holds; a `uio` clock would put the
+                    // XOR after the last flop, so it is refused by pe_asm and
+                    // the image audit, and ignored here.
+                    if (hsh_n[HDR_BYTES*8-1-PINW -: PINW] < N_PINS[PINW-1:0]
+                        && hsh_n[HDR_BYTES*8-1-PINW -: PINW] >= 4'd8)
+                      pin_inv[hsh_n[HDR_BYTES*8-1-PINW -: PINW]]
+                          <= hsh_n[HDR_BYTES*8-2-2*PINW-DLY_W-CW+2]
+                             & hsh_n[HDR_BYTES*8-1-2*PINW];
                     l_d[hl]      <= hsh_n[HDR_BYTES*8-2-2*PINW-DLY_W-CW -: D_W];
                     l_pc[hl]     <= hsh_n[HDR_BYTES*8-2-2*PINW-DLY_W-CW-D_W-D_W -: AW];
                     l_base[hl]   <= hsh_n[HDR_BYTES*8-2-2*PINW-DLY_W-CW-D_W-D_W -: AW];
@@ -2592,7 +2645,7 @@ module pe_engine #(
           // ⛔⛔ RULING 2: the re-arm ADDS TO THE STORED TIMESTAMP, never to
           //    `now`. The relative form drifts k*(r-C) -- 15,260 cycles on a
           //    one-second delay -- and is INVISIBLE at k = 1.
-          l_timestamp[cur] <= l_timestamp[cur] + {{(TS_W-DLY_W){1'b0}}, a_dly};
+          l_timestamp[cur] <= l_timestamp[cur] + {{(TS_W-DLY_W){1'b0}}, wb_dly};
 
           // ⭐⭐ ARM: the reactive release, armed here and fired by the edge
           // capture below. The timestamp add above IS the timeout deadline --

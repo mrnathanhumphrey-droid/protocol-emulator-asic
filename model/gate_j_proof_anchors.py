@@ -76,8 +76,15 @@ PREMISES = [
     # would no longer be the right threshold. The RTL comment at that line
     # says the relative form drifts k*(r-C); the theorem needs the absolute
     # form for a different reason, and both want the same line.
-    ("P8", "a lane's period is exactly d -- ABSOLUTE timestamp advance",
-     "l_timestamp[cur] <= l_timestamp[cur] + {{(TS_W-DLY_W){1'b0}}, a_dly};"),
+    # ⭐ AMENDED BY RULING CE1 (J_LANE_PROOF Amendment A4): the advance is
+    # still ABSOLUTE, but by `wb_dly` -- `d`, or `d/2` for the HIGH phase of a
+    # HALF_HIGH lane -- so a lane's GAPS are `d` or `d/2`. The theorem's
+    # `d_min` is over gaps, and `pe_asm` refuses `d/2 < D*`. Both lines are
+    # anchored: the advance, and the definition it now reads.
+    ("P8", "a lane's gap is exactly its writeback delay -- ABSOLUTE advance",
+     "l_timestamp[cur] <= l_timestamp[cur] + {{(TS_W-DLY_W){1'b0}}, wb_dly};"),
+    ("P8h", "the writeback delay: d, or d/2 for a HALF_HIGH lane's HIGH",
+     "wire [DLY_W-1:0] wb_dly = (ck_act & ck_is_high & half_v[cur])"),
     # ⛔⛔ RULING W SPLIT READINESS IN TWO. `rel_due` is still "the timestamp
     # has arrived" (P9, re-anchored); `ready` adds W1's own-hold gate (P9w).
     # P9w is release jitter on a lane that loads the SDA hold, bounded by

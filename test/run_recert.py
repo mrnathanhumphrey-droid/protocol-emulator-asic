@@ -120,15 +120,19 @@ def build():
     return g.build([], "recert")
 
 
-def trace(vvp, img, peer, ncyc=NCYC, img_path=None, feed_of=None):
+def trace(vvp, img, peer, ncyc=NCYC, img_path=None, feed_of=None,
+          sck_inv=0):
     """Run `tb_trace` on `img` with its own host feed (`corpus.FEEDS`, ruling
     SP1) -> (stdout, rows of (uo_out, uio_out, uio_oe, uio_in)).
 
     `img_path`: a SCRATCH image (not under `test/`) run under the name `img`;
     `feed_of`: the `corpus.FEEDS` key whose queue it takes (a variant of a
-    tracked program pops the same bytes in the same order)."""
+    tracked program pops the same bytes in the same order);
+    `sck_inv`: the SPI peer as a mode 1/2 device (ruling CE2)."""
     os.makedirs(SCRATCH, exist_ok=True)
-    out = os.path.join(SCRATCH, "t_%s_%s.txt" % (img.replace(".hex", ""), peer))
+    out = os.path.join(SCRATCH, "t_%s_%s%s.txt" % (img.replace(".hex", ""),
+                                                   peer, "_inv" if sck_inv
+                                                   else ""))
     import benchset
     import corpus
     a2 = benchset.a2_slack_arg("test/" + img)
@@ -138,7 +142,8 @@ def trace(vvp, img, peer, ncyc=NCYC, img_path=None, feed_of=None):
     ipath = (img_path.replace("\\", "/") if img_path else "test/%s" % img)
     r = subprocess.run([tool("vvp"), vvp, "+IMG=%s" % ipath, "+NBYTES=256",
                         "+PEER=%s" % peer, "+NCYC=%d" % ncyc, "+OUT=%s" % out,
-                        "+SEED=1", "+ASYNC=0", "+STAYLOAD=0", "+SCLHOLD=0"]
+                        "+SEED=1", "+ASYNC=0", "+STAYLOAD=0", "+SCLHOLD=0",
+                        "+SPI_SCK_INV=%d" % (1 if sck_inv else 0)]
                        + ([a2] if a2 else []) + feed, cwd=ROOT,
                        capture_output=True, text=True, encoding="utf-8",
                        errors="replace")

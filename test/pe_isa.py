@@ -59,11 +59,12 @@ OPCODES = {
 # pin indices: 0..7 = uio, 8..11 = uo_out[0..3]
 N_UIO = 8
 UO0, UO1, UO2, UO3 = 8, 9, 10, 11
+N_PINS = UO3 + 1                    # 12 real pins: 8 `uio` + 4 `uo_out`
 PIN_NONE = (1 << PINW) - 1          # the reserved non-driving index
 
 # ---- the field order, declared as data so the digest covers it ------------
 HDR_FIELDS = (("pin", PINW), ("clkpin", PINW), ("mode", 1), ("t", DLY_W),
-              ("c", CW), ("dsched", D_W), ("dtol", D_W), ("base", AW),
+              ("flags", CW), ("dsched", D_W), ("dtol", D_W), ("base", AW),
               ("order", 1))
 
 # ⛔⛔ BIT ORDER IS A PER-LANE PROPERTY, AND IT HAD BEEN AN UNSTATED GLOBAL.
@@ -82,7 +83,24 @@ HDR_FIELDS = (("pin", PINW), ("clkpin", PINW), ("mode", 1), ("t", DLY_W),
 # (0x5A) is a BIT-REVERSAL PALINDROME that matched either way. sigrok reading
 # a pushed 0x05 as 7-bit address 0x50 is what settled it.
 ORDER_LSB, ORDER_MSB = 0, 1
-ACT_FIELDS = (("op", 3), ("pin", PINW), ("level", 1), ("delay", DLY_W),
+
+# ⛔⛔ RULING CE1 + CE2 (HDR) -- THE 4-BIT FIELD THAT WAS `c` IS NOW `flags`.
+# `c` was a stale copy of the inter-dispatch spacing C, written `2` from when
+# C measured 2 (it measures 3; that value lives in the analysis, not here).
+# The RTL loaded it into `l_c` and NOTHING read it, nor did any tool -- so the
+# four bits were free, and they are now per-lane MODE BITS:
+#     bit0  FLAG_HALF_HIGH  CE1: a clocked lane's HIGH phase lasts d/2, not d
+#                           (I2C Fm up to ~397 kHz; refused when d/2 < D*)
+#     bit1  FLAG_CLK_INV    CE2: the clock pin is driven INVERTED (push-pull
+#                           only) -- SPI mode 3 -> mode 1, mode 0 -> mode 2
+#     bits2-3 RESERVED      must be 0: kept for the 60 MHz branch. `hdr()`
+#                           refuses them, as do `pe_asm` and the image audit.
+# ⭐ EVERY EXISTING IMAGE WRITES 0, so each runs byte-identically to before
+# (the builders' old `c = 2` would now have meant CLK_INV -- they were updated,
+# and the lockstep proves nothing moved).
+FLAG_HALF_HIGH, FLAG_CLK_INV = 0x1, 0x2
+FLAG_RESERVED = 0xC
+ACT_FIELDS =(("op", 3), ("pin", PINW), ("level", 1), ("delay", DLY_W),
               ("count", CNT_W), ("q", BQW))
 
 
@@ -95,9 +113,11 @@ def _pack(fields, values, nbytes):
     return w.to_bytes(nbytes, "big")
 
 
-def hdr(pin, clkpin, mode, t, c, dsched, dtol, base,
+def hdr(pin, clkpin, mode, t, flags, dsched, dtol, base,
         order=ORDER_LSB) -> bytes:
     """`mode`: 1 = push-pull, 0 = open-drain.
+    `flags`: FLAG_HALF_HIGH | FLAG_CLK_INV, or 0 (see FLAG_* above). The
+    reserved bits are REFUSED here, at the one encoder.
     `order`: ORDER_LSB (0) or ORDER_MSB (1) -- which end of the byte goes out
     first. See ORDER_LSB above for why it is per LANE.
 
@@ -108,8 +128,11 @@ def hdr(pin, clkpin, mode, t, c, dsched, dtol, base,
     existed, so every image written without it is bit-identical to one written
     with `order = ORDER_LSB` -- the same property the `q` field has.
     """
+    if int(flags) & ~(FLAG_HALF_HIGH | FLAG_CLK_INV):
+        raise ValueError("header flags 0x%X set a RESERVED bit (only "
+                         "HALF_HIGH = 1 and CLK_INV = 2 exist)" % int(flags))
     return _pack(HDR_FIELDS,
-                 (pin, clkpin, mode, t, c, dsched, dtol, base, order),
+                 (pin, clkpin, mode, t, flags, dsched, dtol, base, order),
                  HDR_BYTES)
 
 
@@ -334,6 +357,49 @@ def i2c_order_problems(img, exempt=()):
             probs.append("lane %d frames with START/STOP (I2C) but its header "
                          "is LSB-first: every byte would go out bit-reversed "
                          "(I2C is MSB-first, UM10204 3.1.5)" % ln)
+    return probs
+
+
+def flag_problems(img, d_star):
+    """-> [str]: every header whose mode bits the chip must not be given
+    (ruling HDR, CE1, CE2). ONE implementation, called by `pe_asm` on the
+    image it assembles and by the image audit on every tracked image.
+
+      * a RESERVED bit (2-3) set -- they are kept for the 60 MHz branch;
+      * CLK_INV on an open-drain lane (an I2C clock is released, not driven:
+        there is no level to invert), on a lane with no distinct real clock,
+        or on a `uio` clock (the XOR would land after the last flop -- F2);
+      * HALF_HIGH on a lane with a clocked action whose d/2 < `d_star`: the
+        HIGH phase is a dispatch gap, and J = 1 holds only for gaps >= D*.
+    `d_star` is passed in, because D* belongs to the analysis, not here."""
+    probs = []
+    for ln, (h, acts) in sorted(lane_programs(img).items()):
+        f = h["flags"]
+        if f & FLAG_RESERVED:
+            probs.append("lane %d sets RESERVED header flag bit(s) 0x%X"
+                         % (ln, f & FLAG_RESERVED))
+        clocked = h["clkpin"] < N_PINS and h["clkpin"] != h["pin"]
+        if f & FLAG_CLK_INV:
+            if h["mode"] != 1:
+                probs.append("lane %d: CLK_INV on an OPEN-DRAIN lane -- a "
+                             "released clock has no level to invert" % ln)
+            elif not clocked:
+                probs.append("lane %d: CLK_INV with no distinct real clock "
+                             "pin" % ln)
+            elif h["clkpin"] < N_UIO:
+                probs.append("lane %d: CLK_INV on a `uio` clock (pin %d) -- "
+                             "only a `uo_out` clock can be inverted before a "
+                             "flop (F2)" % (ln, h["clkpin"]))
+        if f & FLAG_HALF_HIGH:
+            for x in acts:
+                if (x["op"] in (OP_SHIFT, OP_SHIFTIN) and x["level"] == 1
+                        and clocked and x["delay"] // 2 < d_star):
+                    probs.append("lane %d: HALF_HIGH with a clocked action at "
+                                 "d = %d: its HIGH phase d/2 = %d is under "
+                                 "D* = %d, so J = 1 would not hold for that "
+                                 "gap" % (ln, x["delay"], x["delay"] // 2,
+                                          d_star))
+                    break
     return probs
 
 

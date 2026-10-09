@@ -61,3 +61,13 @@ function integer ck_tx_bit;
     if (k == 7) ck_tx_bit = 7;
   end
 endfunction
+
+/* ruling CE1: the HIGH phase's programmed length, MEASURED from the model at
+ * every 10-bit delay: d, or d >> 1 on a HALF_HIGH lane. */
+function integer ck_high_gap;
+  input integer d;
+  input integer half;
+  begin
+    ck_high_gap = half ? (d >> 1) : d;
+  end
+endfunction

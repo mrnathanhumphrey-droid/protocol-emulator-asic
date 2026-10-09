@@ -49,7 +49,10 @@ engine schedules lanes, fetches actions, and drives pins.
 Eight opcodes, each one action word: `LEVEL`, `SHIFT`, `SHIFTIN`, `READBIT`,
 `START`, `STOP`, `ARM`, `REARM`. An action word carries a pin, a level, a delay
 and a count; a lane header carries its data pin, clock pin, drive mode, inner
-spacing `t`, service time `C`, scheduling deadline and base address.
+spacing `t`, mode bits (`HALF_HIGH`: a clocked HIGH phase of `d/2`;
+`CLK_INV`: an inverted `uo_out` clock), scheduling deadline and base address.
+The service time `C` (3 cycles, measured) belongs to the timing analysis, not
+to the program.
 
 Two design choices carry most of the weight:
 

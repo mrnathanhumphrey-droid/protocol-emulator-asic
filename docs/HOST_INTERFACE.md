@@ -362,3 +362,52 @@ the real WREN / WRITE / READ program (d = 7):
 The band is the bits whose low phase was shortened to 5 or 6 cycles by a late
 LOW dispatch: 59 of about 2,000 bits. The prediction from this section,
 "correct while N ≤ d − 1", agrees within one cycle.
+
+## Lane mode bits (header bits 0–1: `HALF_HIGH`, `CLK_INV`)
+
+The header's 4-bit field that used to hold a stale `C` value is now per-lane
+mode bits. Bits 2–3 are reserved and must be 0; `pe_asm` and the image audit
+refuse an image that sets them. Every image built before the change writes 0,
+so it runs exactly as before.
+
+### `HALF_HIGH` (bit 0): I²C Fm up to ~394 kHz
+
+A clocked lane's HIGH phase lasts `d/2` instead of `d`; the LOW phase is still
+`d`. On an open-drain clock the `d/2` counts from the *observed* rise, so
+clock stretching works exactly as before.
+
+- **The claim:** I²C Fm up to about 394 kHz with ideal edges. The delivered
+  rate depends on the pull-up rise time, because the HIGH phase counts from
+  when the chip sees SCL high. I²C modes are maxima, so a slower rate is still
+  compliant.
+- **Measured** (`run_ckack`, the part's random read at `d = 82`, decoded by
+  sigrok): SCL period 127 cycles = 393.7 kHz at 50 MHz, HIGH 45, LOW 82. The
+  minimum t_HIGH (45 cycles) and t_LOW (80) clear Fm's 30 and 65.
+- **The toolchain refuses** `HALF_HIGH` when any clocked action has
+  `d/2 < D* = 20`: the HIGH phase is a dispatch gap, and J = 1 holds only for
+  gaps of at least `D*`. Fm+ does not need it; it already runs at 725 kHz.
+
+### `CLK_INV` (bit 1): SPI modes 1 and 2
+
+The lane's clock pin is driven inverted. A mode-3 program becomes mode 1; a
+mode-0 program (SCK parked low before each select) becomes mode 2. The chip
+still samples on its own HIGH phase, which on an inverted pin is the falling
+edge, the edge modes 1 and 2 sample on.
+
+- **Push-pull lanes with a `uo_out` clock only.** The inversion is applied
+  just before `uo_out`'s output register, so every output bit is still a
+  flop. A `uio` clock or an open-drain lane with `CLK_INV` is refused.
+- **⚠ The idle level flips once, at header load.** After reset every
+  protocol output idles high. When the header loads, an inverted SCK goes to
+  its inverted idle level (low for a mode-1 program). Headers load before any
+  action runs, so CS is still deasserted and the peer ignores the edge. This
+  is checked on the pins: the first SCK edge after reset happens with CS high,
+  and no SCK edge occurs while CS is asserted other than the transaction's
+  own clock phases.
+- **After a deselect or reset,** the same applies: the program reloads, the
+  header sets the inversion, and only then do actions run.
+- **Measured** (`run_spifram`, WREN / WRITE / READ, decoded by sigrok with
+  each mode's CPOL/CPHA): mode 1 (39 reads) and mode 2 (38 reads), chip RX ==
+  sigrok MISO == the written `5B C4`. The peer for these arms is our mode 0/3
+  model behind an SCK inverter, because the MB85RS64V itself supports only
+  modes 0 and 3.

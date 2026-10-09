@@ -116,8 +116,11 @@ def lanes_of(img):
         h = unpack(I.HDR_FIELDS, img[li * HB:(li + 1) * HB], HB)
         if h["clkpin"] == I.PIN_NONE or h["clkpin"] == h["pin"]:
             continue            # `clk_real` is false: nothing here is clocked
+        # ⭐ CE1: whether the lane's HIGH phase is d/2 (FLAG_HALF_HIGH), so
+        # the gate holds t_HIGH to the lane's OWN programmed high length
         out.append({"lane": li, "pin": h["pin"], "clkpin": h["clkpin"],
-                    "mode": h["mode"], "d": h["t"]})
+                    "mode": h["mode"], "d": h["t"],
+                    "half": bool(h["flags"] & I.FLAG_HALF_HIGH)})
     return out
 
 

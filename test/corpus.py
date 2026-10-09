@@ -85,6 +85,7 @@ from make_smoke_image import (            # noqa: E402
     OP_STOP, PIN_NONE, act, hdr, write_image,
 )
 from pe_isa import ORDER_MSB, order_for      # noqa: E402  ruling RC4
+from pe_isa import FLAG_CLK_INV               # noqa: E402  ruling CE2
 
 # ---------------------------------------------------------------------------
 # THE PIN MAP, derived from the ruling
@@ -249,10 +250,12 @@ def _assemble(seqs, headers_spec, park_at, queues=None):
             # where the program has no framing to derive it from (SPI FRAM).
             order = (headers_spec[lane][6] if len(headers_spec[lane]) > 6
                      else order_for([e[0] for e in seq_of[lane]]))
-            headers.append(hdr(pin, clkpin, mode, t, 2, dsched, dtol,
+            # ⭐ RULING HDR: an 8th spec field carries the mode bits
+            flags = headers_spec[lane][7] if len(headers_spec[lane]) > 7 else 0
+            headers.append(hdr(pin, clkpin, mode, t, flags, dsched, dtol,
                                base[lane], order=order))
         else:
-            headers.append(hdr(park_at, park_at, MODE_OD, 500, 2, 200, 240, lp))
+            headers.append(hdr(park_at, park_at, MODE_OD, 500, 0, 200, 240, lp))
     img = b"".join(headers) + b"".join(prog)
     assert len(img) <= (1 << AW), "image %d > 2**AW" % len(img)
     return img
@@ -313,7 +316,7 @@ def build_i2c(d: int = D_FM_SHIPPABLE):
                  "od_pins": (P_SCL, P_SDA)}
 
 
-def build_spi_master(d: int = 7, mode0: bool = False):
+def build_spi_master(d: int = 7, mode0: bool = False, clkinv: bool = False):
     """SPI master: SCLK/MOSI/CS on `uo_out`, MISO read from the FRAM peer.
 
     ⚠ ITS PRECONDITION IS NOT `uio_oe`. Under the ruled map the master's three
@@ -368,9 +371,13 @@ def build_spi_master(d: int = 7, mode0: bool = False):
            + sel + [sh(), sh(), sh(), sh(), sh(), sh(), desel] # WRITE a a d d d
            + sel + [sh(), sh(), sh(), rd(), rd(), desel]       # READ a a in in
            + [(OP_REARM, 0, 1, d)])
+    # ⭐ RULING CE2, `clkinv`: the SCLK pin driven INVERTED. The default shape
+    # (READ after a SHIFT that ends SCK high) becomes MODE 1 at the READ; with
+    # `mode0` (SCK parked low before each select) every transaction is MODE 2.
+    # Scratch only (`run_spifram`); the tracked image is the default.
     img = _assemble([(0, seq)],
                     {0: (P_M_MOSI, P_M_SCLK, MODE_PP, d, 2 * d, 3 * d,
-                         ORDER_MSB)},
+                         ORDER_MSB, FLAG_CLK_INV if clkinv else 0)},
                     park_at=P_SCL)
     return img, {"uio_oe": False, "uio_out": False, "uo_out": True,
                  "uio_in": True, "od_pins": (P_SCL,)}
@@ -722,7 +729,7 @@ def audit_pad_collisions() -> int:
     base = bytearray(ACT_BASE + 4 * ACT_BYTES)
     for ln in range(1, N_LANES):
         base[ln * HDR_BYTES:(ln + 1) * HDR_BYTES] = \
-            hdr(PIN_NONE, PIN_NONE, 1, 500, 2, 200, 240, ACT_BASE)
+            hdr(PIN_NONE, PIN_NONE, 1, 500, 0, 200, 240, ACT_BASE)
     cases = [
         ("a SHIFT lane clocked on MISO_PIN", P_T_MISO, P_T_SCLK,
          (OP_SHIFT, P_T_SCLK, SELF_CLOCKED), True),
@@ -733,7 +740,7 @@ def audit_pad_collisions() -> int:
     ]
     for label, clkpin, pin, (op, apin, lvl), want in cases:
         img = bytearray(base)
-        img[0:HDR_BYTES] = hdr(pin, clkpin, 1, 70, 2, 140, 210, ACT_BASE)
+        img[0:HDR_BYTES] = hdr(pin, clkpin, 1, 70, 0, 140, 210, ACT_BASE)
         img[ACT_BASE:ACT_BASE + ACT_BYTES] = act(op, apin, lvl, 70, count=7)
         img[ACT_BASE + ACT_BYTES:ACT_BASE + 2 * ACT_BYTES] = \
             act(OP_REARM, 0, 1, 70)

@@ -47,8 +47,8 @@ def build_falloff():
     l0 = park + I.ACT_BYTES
     prog.append(I.act(I.OP_LEVEL, I.UO0, 0, 20))
     prog.append(I.act(I.OP_LEVEL, I.UO0, 1, 20))     # ...and nothing after it
-    headers = [I.hdr(I.UO0, I.UO0, 1, 20, 2, 40, 60, l0)]
-    headers += [I.hdr(p, p, 0, 500, 2, 200, 240, park) for p in (0, 1, 2, 3)]
+    headers = [I.hdr(I.UO0, I.UO0, 1, 20, 0, 40, 60, l0)]
+    headers += [I.hdr(p, p, 0, 500, 0, 200, 240, park) for p in (0, 1, 2, 3)]
     return b"".join(headers) + b"".join(prog), l0 + 2 * I.ACT_BYTES
 
 

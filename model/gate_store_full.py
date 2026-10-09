@@ -240,7 +240,7 @@ def main() -> int:
     checks.append(("a lane with no terminating REARM",
                    any("runs off" in x for x in p2)))
     bad = bytearray(i2c)
-    bad[0:I.HDR_BYTES] = I.hdr(I.UO0, I.UO0, 1, 20, 2, 40, 60, L)
+    bad[0:I.HDR_BYTES] = I.hdr(I.UO0, I.UO0, 1, 20, 0, 40, 60, L)
     p3, _ = audit("base_in_filler.hex", bytes(bad))
     checks.append(("a header base pointing into the filler",
                    any("outside its program" in x for x in p3)))

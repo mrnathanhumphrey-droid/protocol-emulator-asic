@@ -134,6 +134,9 @@ build_arm mutant "-DM_CK_RISE_ELIGIBLE"      || rc=1
 #   Raise `CKOD_DELAYS[0]` or tighten the budget and this arm needs rechoosing
 #   -- `gate_um10204` reads the arm's own `sda_hold` out of the JSON rather
 #   than a literal, so it reports the boundary it actually measured.
+# ⭐ RULING CE1: HALF_HIGH measured on the same instrument, and its must-fire
+# build (`M_HALF_IGNORED`: the selector read as 0, so the HIGH phase is d).
+build_arm halfign "-DM_HALF_IGNORED"                 || rc=1
 build_arm hold0   "-GSDA_HOLD_NS=0"                 || rc=1
 build_arm holdbig "-GSDA_HOLD_NS=500"                || rc=1
 [ $rc -eq 0 ] || { echo "  *** a build failed; no measurement"; exit 1; }
@@ -152,6 +155,13 @@ run_arm clean  "$CTRL" "$NC" 40000 control        || rc=1
 run_arm clean  "$IMG"  "$NB" 40000 stretch_mid  200   || rc=1
 run_arm clean  "$IMG"  "$NB" 40000 stretch_long 4000  || rc=1
 run_arm mutant "$IMG"  "$NB" 40000 mutant         || rc=1
+# ⭐ RULING CE1: the F1 instrument with every lane HALF_HIGH (a probe image,
+# generated here), on the clean build and on the selector-ignored mutant
+"$PY" test/make_smoke_image.py --ckhalf probe_ckhalf >> "$OUT/img.log" 2>&1 || rc=1
+HALF=test/probe_ckhalf.hex
+NH=$(tr -s ' \n' '\n' < "$HALF" | grep -cv '^$')
+run_arm clean   "$HALF" "$NH" 60000 half          || rc=1
+run_arm halfign "$HALF" "$NH" 60000 half_mutant   || rc=1
 run_arm hold0   "$IMG" "$NB" 40000 hold0         || rc=1
 run_arm holdbig "$IMG" "$NB" 40000 holdbig       || rc=1
 # ⛔⛔ THE CERTIFIED TWO-ACTION FRAME, MEASURED ON THE SAME INSTRUMENT (H4).

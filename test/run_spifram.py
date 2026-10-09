@@ -57,8 +57,12 @@ IMG = "corpus_spim.hex"
 NCYC = 60000
 SER_DATA, SER_STRB, SER_VLD = 4, 5, 6         # uo_out bits (project.v)
 FRAME_BITS, MARK_PAYLOAD = 12, "0"
-SPI = ("spi:clk=0:mosi=1:miso=2:cs=3:cpol=1:cpha=1:bitorder=msb-first:"
+SPI = ("spi:clk=0:mosi=1:miso=2:cs=3:cpol=%d:cpha=%d:bitorder=msb-first:"
        "cs_polarity=active-low")
+# ⭐ sigrok samples on the RISE when cpol == cpha (modes 0, 3) and on the FALL
+# otherwise (modes 1, 2) -- so an inverted-clock arm is decoded as mode 1,
+# which a mode-0/3 setting would read on the wrong edge
+CPOL_CPHA = {False: (1, 1), True: (0, 1)}
 
 
 def want():
@@ -92,11 +96,12 @@ def serial_rx(rows, lane):
     return out
 
 
-def transfers(path, which):
+def transfers(path, which, inv=False):
     """sigrok's `which`-transfer annotations -> [[words]] per CS frame.
     ⛔ ONE CHANNEL PER DECODE: the draft read both in one run and paired them
     by output order, and sigrok printed MISO first -- every pair was wrong."""
-    rc, lines = R.sigrok(path, SPI + " -A spi=%s-transfer" % which)
+    rc, lines = R.sigrok(path, SPI % CPOL_CPHA[inv]
+                         + " -A spi=%s-transfer" % which)
     out = []
     for l in lines:
         m = re.match(r"spi-1:\s*((?:[0-9A-Fa-f]{2}\s*)+)$", l)
@@ -105,31 +110,67 @@ def transfers(path, which):
     return rc, out
 
 
-def cs_modes(rows, sck, cs):
-    """SCK's level at each CS fall, as the part reads it -> [3 or 0]."""
+def cs_modes(rows, sck, cs, inv=False):
+    """The SPI mode of each transaction, off the pins: CPOL is SCK's level at
+    CS fall (the part reads it there); CPHA is the clock's polarity -- an
+    inverted clock (CE2) samples on the fall. -> [0, 1, 2 or 3]."""
     out, pc = [], 1
     for r in rows:
         c = R.level(r, cs, True)
         if c == 0 and pc == 1:
-            out.append(3 if R.level(r, sck, True) else 0)
+            hi = R.level(r, sck, True)
+            out.append((2 if hi else 1) if inv else (3 if hi else 0))
         pc = c
     return out
 
 
-def run(defines, mode0=False):
+def stray_sck_edges(rows, sck, cs, bits_per_frame):
+    """⛔ RULING CE2's IDLE-LEVEL CHECK, from the pins: an SCK edge while CS
+    is asserted that is NOT one of the transaction's own clock phases. Each
+    CS-low window carries 2 edges per bit sigrok decoded in it, give or take
+    ONE: a transaction whose first LOW finds the clock already low makes no
+    edge there, and a receive's trailing COLLECT adds a fall -- both are the
+    transaction's own phases. A stray clock (a pair of extra edges) breaks
+    the bound. Also returns whether CS was deasserted at the FIRST SCK edge
+    after reset -- on an inverted clock that edge is the idle-level flip at
+    header load, and a selected peer would count it.
+    -> (stray windows [(index, edges, want)], first_edge_cs_high)"""
+    stray, win, edges, ps, pc, first = [], -1, 0, None, 1, None
+    for r in rows:
+        s, c = R.level(r, sck, True), R.level(r, cs, True)
+        if ps is not None and s != ps:
+            if first is None:
+                first = (c == 1)
+            if c == 0:
+                edges += 1
+        if c == 0 and pc == 1:
+            win += 1
+            edges = 0
+        if c == 1 and pc == 0 and 0 <= win < len(bits_per_frame):
+            want = 2 * bits_per_frame[win]
+            if abs(edges - want) > 1:
+                stray.append((win, edges, want))
+        ps, pc = s, c
+    return stray, first
+
+
+def run(defines, mode0=False, clkinv=False):
     import gate_sda_hold as g
     import pe_isa as I
-    tag = "spifram_" + ("_".join(defines) or "good") + ("_m0" if mode0 else "")
+    tag = ("spifram_" + ("_".join(defines) or "good")
+           + ("_m0" if mode0 else "") + ("_inv" if clkinv else ""))
     vvp = g.build(list(defines), tag)
-    if mode0:
-        img, _pre = corpus.build_spi_master(mode0=True)
+    if mode0 or clkinv:
+        img, _pre = corpus.build_spi_master(mode0=mode0, clkinv=clkinv)
         os.makedirs(R.SCRATCH, exist_ok=True)
-        ipath = os.path.join(R.SCRATCH, "corpus_spim_mode0.hex")
+        name = "corpus_spim%s%s.hex" % ("_mode0" if mode0 else "",
+                                       "_inv" if clkinv else "")
+        ipath = os.path.join(R.SCRATCH, name)
         with open(ipath, "w", encoding="ascii", newline="\n") as fh:
             fh.write("\n".join("%02x" % b for b in I.full_store(bytes(img))))
             fh.write("\n")
-        out, rows = R.trace(vvp, "corpus_spim_mode0.hex", "spi", NCYC,
-                            img_path=ipath, feed_of="corpus_spim")
+        out, rows = R.trace(vvp, name, "spi", NCYC, img_path=ipath,
+                            feed_of="corpus_spim", sck_inv=clkinv)
         prog = bytes(I.full_store(bytes(img)))
     else:
         out, rows = R.trace(vvp, IMG, "spi", NCYC)
@@ -137,11 +178,14 @@ def run(defines, mode0=False):
     hdr = I.lane_programs(prog)[0][0]
     pins = [hdr["clkpin"], hdr["pin"], corpus.P_M_MISO, corpus.P_M_CS]
     path = R.dump(rows, pins, tag, drive=True)
-    rc1, mosi = transfers(path, "mosi")
-    rc2, miso = transfers(path, "miso")
-    modes = cs_modes(rows, hdr["clkpin"], corpus.P_M_CS)
+    rc1, mosi = transfers(path, "mosi", clkinv)
+    rc2, miso = transfers(path, "miso", clkinv)
+    modes = cs_modes(rows, hdr["clkpin"], corpus.P_M_CS, clkinv)
+    stray, first = stray_sck_edges(rows, hdr["clkpin"], corpus.P_M_CS,
+                                   [8 * len(m) for m in mosi])
     return {"out": out, "rows": rows, "rc": rc1 | rc2, "mosi": mosi,
-            "miso": miso, "modes": modes, "chip": serial_rx(rows, 0)}
+            "miso": miso, "modes": modes, "chip": serial_rx(rows, 0),
+            "stray": stray, "first_cs_high": first}
 
 
 def judge(res, say):
@@ -182,6 +226,9 @@ def judge(res, say):
         "Layer V2: MOSI on the wire == the host-pushed bytes")
     say("[V-RX]: ok" in res["out"],
         "Layer V-RX: the chip's RX frames == the bits on the action's pin")
+    say(not res["stray"], "no SCK edge while CS asserted outside the "
+        "transaction's own clock phases%s"
+        % ("" if not res["stray"] else " -- %s" % res["stray"][:3]))
     return [res["modes"][i] for i in reads if i < len(res["modes"])]
 
 
@@ -207,6 +254,70 @@ def main() -> int:
     m0 = judge(run([], mode0=True), say)
     say(m0 and set(m0) == {0}, "every READ was MODE 0 (SCK low at CS fall): "
         "%d" % len(m0))
+
+    # ---- RULING CE2 -- CLK_INV: SPI modes 1 and 2 -----------------------
+    # ⭐ The same transaction with the SCLK pin inverted. The peer is the
+    # mode-0/3 model behind an SCK inverter (same-hand, labelled); sigrok,
+    # decoding the PADS with mode 1's CPOL/CPHA, is the judge of the mode.
+    for label, m0_, want_mode in (("mode 1: CLK_INV, the tracked shape", False,
+                                   1),
+                                  ("mode 2: CLK_INV + SCK parked", True, 2)):
+        print("  --- %s (scratch) ---" % label)
+        r = run([], mode0=m0_, clkinv=True)
+        mm = judge(r, say)
+        say(mm and set(mm) == {want_mode},
+            "every READ was MODE %d (CPOL from SCK at CS fall, CPHA from the "
+            "inversion): %d" % (want_mode, len(mm)))
+        say(r["first_cs_high"] is True,
+            "the inverted clock's idle-level flip (the first SCK edge after "
+            "reset) happened with CS DEASSERTED")
+        if want_mode == 1:
+            inv_rows = r["rows"]
+            inv_bits = [8 * len(m) for m in r["mosi"]]
+    # ⛔ MUST-FIRE for the idle-level check, on the PINS it reads: a stray
+    # SCK pulse planted inside a CS-low window, and the idle-level flip
+    # planted with CS asserted. A check never seen to fire has unknown
+    # strength.
+    sck, cs = corpus.P_M_SCLK, corpus.P_M_CS
+    win = next(i for i, x in enumerate(inv_rows)
+               if R.level(x, cs, True) == 0) + 3
+    def flip(row, pin):
+        uo = list(row[0])
+        k = len(uo) - 1 - (pin - 8)
+        uo[k] = "0" if uo[k] == "1" else "1"
+        return ("".join(uo),) + tuple(row[1:])
+    planted = list(inv_rows)
+    planted[win] = flip(planted[win], sck)
+    planted[win + 1] = flip(planted[win + 1], sck)
+    say(bool(stray_sck_edges(planted, sck, cs, inv_bits)[0]),
+        "must-fire: a planted stray SCK pulse inside CS-low is caught")
+    first = next(i for i in range(1, len(inv_rows))
+                 if R.level(inv_rows[i], sck, True)
+                 != R.level(inv_rows[i - 1], sck, True))
+    planted = list(inv_rows)
+    for i in range(first - 2, first + 2):
+        if R.level(planted[i], cs, True) == 1:
+            planted[i] = flip(planted[i], cs)
+    say(stray_sck_edges(planted, sck, cs, inv_bits)[1] is False,
+        "must-fire: the idle-level flip planted under an asserted CS is "
+        "caught")
+    print("  --- MUST-FIRE: M_CLKINV_IGNORED (the XOR dropped) ---")
+    # ⚠ NOT JUDGED ON MOSI, AND MEASURED WHY: the engine changes MOSI in the
+    # very cycle SCK falls, so a mode-1 decode (sample on the fall) of the
+    # mutant's mode-3 clock still reads the right bits -- 39 of 118 frames
+    # decoded as the WRITE when this arm first judged on MOSI. What the
+    # dropped XOR DOES change is the clock itself and what the mode-1 peer
+    # sends back: the READs are no longer mode 1 at the pins, and the chip
+    # receives 5B C4 one bit early.
+    mf = run(["M_CLKINV_IGNORED"], clkinv=True)
+    mreads = [i for i in range(len(mf["mosi"])) if i % 4 == 3]
+    mm = sorted({mf["modes"][i] for i in mreads if i < len(mf["modes"])})
+    say(mm and mm != [1], "the pins: the READs are no longer MODE 1 (SCK "
+        "level at CS fall reads as mode %s)" % mm)
+    say(mf["chip"][:2] != want()["back"],
+        "the chip's received bytes are not the written %s (got %s)"
+        % (" ".join("%02X" % b for b in want()["back"]),
+           " ".join("%02X" % b for b in mf["chip"][:4])))
 
     print("  --- MUST-FIRE: M_TX_LOAD_ANYPHASE (silicon fix #2's pre-form) ---")
     mf = run(["M_TX_LOAD_ANYPHASE"])

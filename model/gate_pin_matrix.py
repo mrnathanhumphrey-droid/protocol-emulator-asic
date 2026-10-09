@@ -130,8 +130,8 @@ def main() -> int:
     acts = [I.act_shiftin_clocked(1, 70, nbits=8), I.act(I.OP_REARM, 0, 1, 70)]
     park = I.ACT_BASE + len(acts) * I.ACT_BYTES
     plant = I.full_store(b"".join(
-        [I.hdr(2, 1, 0, 70, 2, 140, 210, I.ACT_BASE)]
-        + [I.hdr(p, p, 0, 500, 2, 200, 240, park) for p in (0, 3, 4, 5)])
+        [I.hdr(2, 1, 0, 70, 0, 140, 210, I.ACT_BASE)]
+        + [I.hdr(p, p, 0, 500, 0, 200, 240, park) for p in (0, 3, 4, 5)])
         + b"".join(acts) + I.act(I.OP_REARM, 0, 0, 500))
     ok2 = not matrix([("plant", plant)])["SHIFTIN clocked open-drain"]
     print("    an action on the CLOCK pin is not diversity          %s"

@@ -103,6 +103,9 @@ EXPECT = {
         "form: without the second the wire would read SDA_HS for a load that "
         "never happens."),
     "M_TM2_STORE_ADD":   (2, None),
+    # ruling CE1 / CE2: each new mode bit read as 0 -- the selector ignored
+    "M_HALF_IGNORED":    (2, None),
+    "M_CLKINV_IGNORED":  (3, None),
     "M_SHARED_BITP":     (14,
         "a BLOCK substitution across FOUR sites, declared: the mutation "
         "re-merges the TX and RX bit pointers, and the pointer is named in the "

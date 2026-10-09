@@ -64,6 +64,23 @@ SCRATCH = os.environ.get("PE_SCRATCH",
                          os.path.join(os.environ.get("TEMP", "/tmp"), "pe_ckack"))
 SRCS = ["pe_engine.v", "pe_store.v", "project.v"]
 D = 70                       # D_FM_SHIPPABLE: the shipped clocked I2C delay
+F_CLK = 50000000
+
+
+def d_half_fm():
+    """RULING CE1: the smallest HALF_HIGH delay whose bit period does not
+    exceed Fm's 400 kHz ceiling -- d + d//2 + L_SYNC >= ceil(F_CLK / 400k) --
+    and is not below the symmetric scheme's shippable Fm floor (`D`). DERIVED
+    here rather than typed, so a moved L_SYNC or floor moves it."""
+    sys.path.insert(0, os.path.join(ROOT, "model", "a2"))
+    from bursty import L_SYNC
+    need = -(-F_CLK // 400000)
+    d = D
+    while d + (d >> 1) + L_SYNC < need:
+        d += 1
+    return d
+
+
 WANT = (0x5B, 0xE2)          # what the peer holds at 0x0123 / 0x0124
 ADDR7 = 0x50                 # sigrok's 7-bit reading of A0 / A1
 NACK7 = 0x51                 # ... and of A2 / A3, which nobody answers
@@ -97,11 +114,13 @@ def stretch_timeout():
     return pre * to
 
 
-def image(path):
+def image(path, d=D, flags=0):
+    """The part's random read. `flags` = FLAG_HALF_HIGH builds ruling CE1's
+    Fm image (at `D_HALF`): the same program, the HIGH phase d/2."""
     from pe_isa import (ACT_BASE, ACT_BYTES, OP_LEVEL, OP_REARM, OP_START,
                         OP_STOP, ORDER_MSB, act, act_shift_clocked,
                         act_shiftin_clocked, hdr, write_image)
-    sda, scl, d = 2, 1, D
+    sda, scl = 2, 1
     # ⭐ ONE QUEUE (q0) for every SHIFT, as `pe_asm.check_queue_ownership`
     # requires; the host pushes the bytes in the order the SHIFTs pop them
     # (tb_ckack.v). ⚠ The first version spread this lane over FOUR queues --
@@ -132,8 +151,9 @@ def image(path):
     ]
     park = ACT_BASE + len(prog) * ACT_BYTES
     prog.append(act(OP_REARM, 0, 0, 500))
-    headers = [hdr(sda, scl, 0, d, 2, 2 * d, 3 * d, ACT_BASE, order=ORDER_MSB)]
-    headers += [hdr(p, p, 0, 500, 2, 200, 240, park) for p in (0, 3, 4, 5)]
+    headers = [hdr(sda, scl, 0, d, flags, 2 * d, 3 * d, ACT_BASE,
+                   order=ORDER_MSB)]
+    headers += [hdr(p, p, 0, 500, 0, 200, 240, park) for p in (0, 3, 4, 5)]
     write_image(path, b"".join(headers) + b"".join(prog))
     return path
 
@@ -162,6 +182,8 @@ def build(kind, late, skip, once):
         cmd.append("-DM_CK_NO_ALTERNATE")
     if kind == "oldtx":
         cmd.append("-DM_TX_LOAD_ANYPHASE")
+    if kind == "halfign":
+        cmd.append("-DM_HALF_IGNORED")
     cmd += ["test/tb_ckack.v", "test/fram_i2c.v", engine(kind)]
     cmd += [os.path.join(ROOT, "src", s) for s in SRCS[1:]]
     r = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True,
@@ -172,8 +194,9 @@ def build(kind, late, skip, once):
     return out
 
 
-def run_arm(name, kind, late, skip, once, ncyc, devw="A0", devr="A1"):
-    img = os.path.join(SCRATCH, "ckack.hex")
+def run_arm(name, kind, late, skip, once, ncyc, devw="A0", devr="A1",
+            img_name="ckack.hex"):
+    img = os.path.join(SCRATCH, img_name)
     vvp = build(kind, late, skip, once)
     dump = os.path.join(ROOT, "probe_ckack_%s.bin" % name)
     with open(img, encoding="ascii") as fh:
@@ -199,7 +222,30 @@ def run_arm(name, kind, late, skip, once, ncyc, devw="A0", devr="A1"):
         dec = sigrok_i2c(os.path.relpath(dump, ROOT).replace(os.sep, "/"))
     return {"name": name, "kind": kind, "late": late, "rx": rx,
             "sticky": {k: int(v) for k, v in st.items()}, "park": park,
-            "fails": fails, "sigrok": dec}
+            "fails": fails, "sigrok": dec, "scl": scl_stats(dump)}
+
+
+def scl_stats(dump):
+    """SCL off the bus dump (bit0 per cycle, the RESOLVED line): the modal
+    rise-to-rise period and modal HIGH / LOW widths, in cycles. Modal, so a
+    stretch, a START/STOP or the idle between transactions does not decide."""
+    from collections import Counter
+    with open(dump, "rb") as fh:
+        s = [b & 1 for b in fh.read()]
+    rises = [i for i in range(1, len(s)) if s[i] and not s[i - 1]]
+    falls = [i for i in range(1, len(s)) if not s[i] and s[i - 1]]
+    per = Counter(b - a for a, b in zip(rises, rises[1:]))
+    # ⚠ only COMPLETE phases: the trace's last rise has no fall after it, and
+    # counting it as a 0-cycle high is what reported "min t_HIGH 0" once
+    import bisect
+    hi = Counter(falls[bisect.bisect_right(falls, r)] - r for r in rises
+                 if bisect.bisect_right(falls, r) < len(falls))
+    lo = Counter(rises[bisect.bisect_right(rises, f)] - f for f in falls
+                 if bisect.bisect_right(rises, f) < len(rises))
+    mode = lambda c: c.most_common(1)[0][0] if c else None
+    return {"period": mode(per), "high": mode(hi), "low": mode(lo),
+            "min_high": min(hi) if hi else None,
+            "min_low": min(lo) if lo else None}
 
 
 def random_reads(arm, addr7=ADDR7):
@@ -329,6 +375,67 @@ def main() -> int:
         % bits[:8])
     say(bool(good) and all(b == 0 for b in good),
         "... where an answered address records ACK (0): %s" % good[:8])
+
+    # ---- RULING CE1 -- HALF_HIGH: I2C Fm up to ~397 kHz ---------------------
+    # ⭐ THE SAME RANDOM READ, the HIGH phase d/2, at the DERIVED shippable d.
+    # The claim is "Fm up to ~397 kHz (ideal edges; delivered rate depends on
+    # pull-up rise time)": the rate below is the bench's ideal-edge bus.
+    from pe_isa import FLAG_HALF_HIGH, flag_problems
+    dh = d_half_fm()                       # (puts model/a2 on the path)
+    import gate_j_program as jp
+    import gate_um10204 as um
+    from bursty import L_SYNC
+    image(os.path.join(SCRATCH, "ckack_half.hex"), d=dh, flags=FLAG_HALF_HIGH)
+    with open(os.path.join(SCRATCH, "ckack_half.hex"), encoding="ascii") as fh:
+        hraw = bytes(int(t, 16) for t in fh.read().split())
+    print("  --- CE1: HALF_HIGH at d = %d (derived: the 400 kHz ceiling, "
+          "L_SYNC, the Fm floor %d) ---" % (dh, D))
+    say(not flag_problems(hraw, jp.D_STAR),
+        "the HALF_HIGH image passes the toolchain's mode-bit rules "
+        "(d/2 = %d >= D* = %d)" % (dh >> 1, jp.D_STAR))
+    harms = [("fm_half", "good", 0, 0, 0, 60000),
+             ("fm_half_long", "good", 5000, 0, 0, 260000),
+             ("mut_half", "halfign", 0, 0, 0, 60000)]
+    with ThreadPoolExecutor(3) as ex:
+        hres = dict((a[0], r) for a, r in zip(harms, ex.map(
+            lambda a: run_arm(*a, img_name="ckack_half.hex"), harms)))
+    um_fm = um.UM10204["Fm  400 kHz"]
+    hi_min, lo_min = (-(-um_fm["t_HIGH"] * F_CLK // 10 ** 9),
+                      -(-um_fm["t_LOW"] * F_CLK // 10 ** 9))
+    for n in ("fm_half", "fm_half_long"):
+        a = hres[n]
+        rr, sd, cd = random_reads(a), sigrok_data_reads(a), chip_data_reads(a)
+        sc = a["scl"]
+        khz = F_CLK / sc["period"] / 1000.0 if sc["period"] else 0
+        print("      %s: SCL period %s (%.1f kHz), HIGH %s, LOW %s; random "
+              "reads %s" % (n, sc["period"], khz, sc["high"], sc["low"],
+                            ["%02X %02X" % p for p in rr[:3]]))
+        say(len(rr) >= 1 and all(p == WANT for p in rr),
+            "sigrok: every random read is the part's, data 5B E2 (%s)" % n)
+        say([int(v, 16) if "x" not in v else -1 for v in cd] == sd,
+            "the chip's received bytes == sigrok's Data read bytes (%s)" % n)
+        say(not a["fails"] and a["sticky"].get("clk_stretch_err") == 0,
+            "no bench FAIL line (Layer B gaps included), no stretch fault")
+        if n == "fm_half":
+            # ⛔ MEASURED, NOT ASSERTED: the first version checked the period
+            # against `d + d/2 + L_SYNC` (126) -- a formula of mine -- and the
+            # bus measures 127 (LOW 82, HIGH 45). The claim is the measured
+            # rate, held to Fm's ceiling and to the d/2 phase actually landing.
+            say(khz <= 400.0 and sc["high"] < sc["low"]
+                and sc["high"] - (dh >> 1) <= 2 * L_SYNC,
+                "MEASURED: SCL period %d cycles = %.1f kHz (<= Fm 400 kHz); "
+                "HIGH %d = d/2 %d + sync, LOW %d"
+                % (sc["period"], khz, sc["high"], dh >> 1, sc["low"]))
+            say(sc["min_high"] >= hi_min and sc["min_low"] >= lo_min,
+                "UM10204 Fm: min t_HIGH %d >= %d, min t_LOW %d >= %d cycles"
+                % (sc["min_high"], hi_min, sc["min_low"], lo_min))
+    print("  --- MUST-FIRE: M_HALF_IGNORED (the selector read as 0) ---")
+    m = hres["mut_half"]
+    say(any("[B-GAP]" in f for f in m["fails"]),
+        "Layer B gaps red: the HIGH phase is d, not the model's d/2")
+    say(m["scl"]["period"] != dh + (dh >> 1) + L_SYNC,
+        "the SCL period moved (%s cycles): the mutant runs symmetric"
+        % m["scl"]["period"])
     print()
     print("  GATE ckack: %s" % ("PASSED" if rc == 0 else "FAILED"))
     return rc

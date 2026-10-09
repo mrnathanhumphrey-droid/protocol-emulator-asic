@@ -252,10 +252,18 @@ module tb_trace;
       .sda_oe(i2cs_sda_oe), .scl_oe(i2cs_scl_oe)
   );
 
+  // ⭐ RULING CE2: `+SPI_SCK_INV=1` makes this peer a MODE 1 / MODE 2 device.
+  // ⚠ SAME-HAND, AND LABELLED AS SUCH: it is the mode 0/3 model behind an SCK
+  // inverter -- which is what a CPHA=1-vs-0 device IS, edge for edge -- so it
+  // can only show the chip drives a self-consistent inverted clock. The
+  // foreign judge of the MODE is sigrok's decoder, given that mode's
+  // CPOL/CPHA (`run_spifram`).
+  reg spi_sck_inv = 1'b0;
+  integer spi_inv_arg;
   fram_spi #(.MISO_DLY(SPI_MISO_DLY)) u_spi (
       .clk (clk),
       .cs_n(uo_out[P_M_CS_UO]),
-      .sck (uo_out[P_M_SCLK_UO]),
+      .sck (uo_out[P_M_SCLK_UO] ^ spi_sck_inv),
       .si  (uo_out[P_M_MOSI_UO]),
       .so  (spi_so), .so_oe(spi_so_oe)
   );
@@ -354,6 +362,8 @@ module tb_trace;
     if (!$value$plusargs("SCLHOLD=%d", sclhold)) sclhold = 0;
     if (!$value$plusargs("STAYLOAD=%d", stayload)) stayload = 0;
     if (!$value$plusargs("PEER=%s", peersel)) peersel = "none";
+    if (!$value$plusargs("SPI_SCK_INV=%d", spi_inv_arg)) spi_inv_arg = 0;
+    spi_sck_inv = (spi_inv_arg != 0);
 
     // ⛔⛔ THE LENGTH IS PASSED IN, NOT DERIVED FROM UNINITIALISED STATE, AND
     // THE REASON IS A BUG THIS BENCH ALREADY HAD. tb_smoke derives it by

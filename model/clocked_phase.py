@@ -107,8 +107,11 @@ class Lane:
     progress of the CURRENT action. The bug was never the ownership, it was
     that a new action INHERITED the previous one's leftover phase."""
 
-    def __init__(self, name="L0", open_drain=True):
+    def __init__(self, name="L0", open_drain=True, half_high=False):
         self.name = name
+        # ⭐ RULING CE1 -- HALF_HIGH: this lane's HIGH phase lasts d // 2 (the
+        # header's FLAG_HALF_HIGH). The LOW phase and the COLL gap stay `d`.
+        self.half_high = half_high
         # ⛔⛔ THE LANE'S PIN MODE IS PART OF THE CLOCKED SEMANTICS, and leaving
         # it out of this model is what let model and RTL disagree about timing
         # with every check green. `l_mode` resets to 0 = OPEN-DRAIN in the RTL,
@@ -181,6 +184,14 @@ class Dispatch:
 #: timeout. ⚠ These are the MODEL's units of time, not a claim about the
 #: shipped parameters -- the `C` re-measurement is what sets those.
 D_PERIOD, L_SYNC, TIMEOUT = 20, 3, 4000
+
+
+def high_gap(d, half_high):
+    """The HIGH phase's length for a lane at delay `d` (ruling CE1): `d`, or
+    `d // 2` on a HALF_HIGH lane -- the RTL's `a_dly >> 1` / `ck_dly >> 1`,
+    floor for an odd `d`. The one statement of the rule; the bench table and
+    the A2 two-level lane case are both generated from it."""
+    return (d >> 1) if half_high else d
 
 
 def run_action(lane, act_index, op, nbits, tx_byte=0, peer_bits=None,
@@ -338,6 +349,10 @@ def run_action(lane, act_index, op, nbits, tx_byte=0, peer_bits=None,
         # without changing the count. A checker blind to the dimension it is
         # trusted on reads exactly like a checker that passed.
         parked = (ph_exec == HIGH) and lane.open_drain
+        # ⭐ CE1: the HIGH phase's own length -- `d`, or `d // 2` on a
+        # HALF_HIGH lane. Every other gap is `d`. ONE rule, `high_gap`, which
+        # the generated bench table and the A2 lane model both read.
+        dh = high_gap(d, lane.half_high) if ph_exec == HIGH else d
         if parked:
             if stretch > timeout:
                 # ⚠ A BUS FAULT, not a slow peer: halt and report. The bits
@@ -352,10 +367,10 @@ def run_action(lane, act_index, op, nbits, tx_byte=0, peer_bits=None,
             # to fail, and an invariant nobody has seen fail is indistinguish-
             # able from one that cannot. This is what the RTL did, and what
             # measured t_HIGH FLAT at 6 cycles across a 13x span in d.
-            t = (rise + L_SYNC) if m_eligible_at_rise else (rise + L_SYNC + d)
+            t = (rise + L_SYNC) if m_eligible_at_rise else (rise + L_SYNC + dh)
             reactive = True                 # released by the observed rise
         else:
-            t = t + d
+            t = t + dh
             reactive = False
         # the captured bit lands either way; only the RELEASE is reactive. A
         # push-pull lane does not park, so its capture rides the ordinary gap.
@@ -517,10 +532,12 @@ PROGRAMS = {
 }
 
 
-def run_program(name, actions, stretch=0, open_drain=True, d=D_PERIOD):
-    lane = Lane("L0", open_drain=open_drain)
+def run_program(name, actions, stretch=0, open_drain=True, d=D_PERIOD,
+                half_high=False):
+    lane = Lane("L0", open_drain=open_drain, half_high=half_high)
     trace, rc = [], 0
-    print("  %s%s" % (name, "" if open_drain else "  (push-pull)"))
+    print("  %s%s%s" % (name, "" if open_drain else "  (push-pull)",
+                        "  (HALF_HIGH)" if half_high else ""))
     for ai, (op, n) in enumerate(actions):
         disp = run_action(lane, ai, op, n,
                           tx_byte=0xA5, peer_bits=[0] * n, stretch=stretch,
@@ -532,7 +549,9 @@ def run_program(name, actions, stretch=0, open_drain=True, d=D_PERIOD):
         lane_view = Lane("tmp")
         lane_view.ptr = lane.ptr
         lane_view.rx = lane.rx[-n:] if op == SHIFTIN else []
-        bad = check_invariants(op, n, disp, lane_view, period=d)
+        # I10 judges the HIGH phase against THIS lane's high period (CE1)
+        bad = check_invariants(op, n, disp, lane_view,
+                               period=high_gap(d, half_high))
         trace += [d.row() for d in disp]
         print("    %-8s n=%-2d %2d dispatch(es)  %-28s %s"
               % (op, n, len(disp), "/".join(d.phase for d in disp)[:28],
@@ -719,6 +738,40 @@ def selftest():
     print("      ⇒ t_HIGH TRACKS d (= d + L_SYNC) and is stretch-independent;")
     print("        the pre-fix design fails I10 at every point.")
 
+    # ⛔⛔ RULING CE1 -- HALF_HIGH: the HIGH phase is EXACTLY d // 2 (open-
+    # drain: + L_SYNC after the observed rise, at any stretch), and every LOW
+    # gap is still `d`. Swept over odd and even d, both pin modes, with and
+    # without a stretch. ⭐ MUST-FIRE: the same lane with its selector
+    # IGNORED (the model's M_HALF_IGNORED) produces d-wide HIGH phases, which
+    # the exact-width check refuses -- I10 alone could not, since wider is
+    # always legal.
+    print()
+    print("    --- CE1: HALF_HIGH -- t_HIGH = d // 2 exactly, LOW still d ---")
+    for dd in (82, 83, 120):
+        for od in (True, False):
+            for st in (0, dd):
+                for half, label in ((True, "half"), (False, "IGNORED")):
+                    lane = Lane(open_drain=od, half_high=half)
+                    disp = run_action(lane, 0, SHIFTIN, 3, peer_bits=[1, 0, 1],
+                                      stretch=st if od else 0, d=dd)
+                    hw = sorted({w for _i, w in high_widths(disp)})
+                    want_hi = high_gap(dd, True) + (L_SYNC if od else 0)
+                    lows = sorted({disp[i + 1].t - x.t for i, x in
+                                   enumerate(disp[:-1]) if x.phase == LOW})
+                    exact = hw == [want_hi] and lows == [dd]
+                    ok = exact if half else not exact
+                    if half or not ok:
+                        print("      d=%-4d %-3s stretch=%-4d %-7s t_HIGH %-6s "
+                              "LOW %-6s %s"
+                              % (dd, "OD" if od else "PP", st if od else 0,
+                                 label, ",".join(map(str, hw)),
+                                 ",".join(map(str, lows)),
+                                 "ok" if ok else "*** WRONG"))
+                    if not ok:
+                        rc = 1
+    print("      must-fire: the selector IGNORED gives d-wide HIGH phases at "
+          "every point above (refused)")
+
     # ⭐ AND THE REACTIVE RELEASE IS NOW VISIBLE PER DISPATCH, which is what the
     # A2 modelling needs: EVERY post-HIGH dispatch on a clocked lane is
     # released by the observed rise, not just the COLLECT one, so they all
@@ -818,6 +871,32 @@ def main():
             assert len(hit) == 1, (k, hit)
             fh.write("    if (k == %d) ck_tx_bit = %d;\n" % (k, hit[0]))
         fh.write("  end\nendfunction\n")
+        # ⛔⛔ RULING CE1 -- LAYER B GAPS. The HIGH phase's programmed length,
+        # MEASURED: the model is run on a push-pull lane at EVERY delay the
+        # 10-bit field can hold, half and full, and the one shift that
+        # reproduces every measured width is what is emitted. If the model's
+        # rule ever stops being a shift, generation FAILS rather than emitting
+        # a formula the model does not obey.
+        shift = None
+        for s in (0, 1, 2):
+            # a 1-bit SHIFTIN (LOW, HIGH, COLL): its HIGH has a successor,
+            # where a SHIFT retires ON its HIGH and has no width to measure
+            if all(sorted({w for _i, w in high_widths(run_action(
+                    Lane(open_drain=False, half_high=True), 0, SHIFTIN, 1,
+                    d=dd))}) == [dd >> s] for dd in range(1, 1024)):
+                shift = s
+                break
+        assert shift is not None, "the model's HALF_HIGH gap is not a shift"
+        assert all(sorted({w for _i, w in high_widths(run_action(
+            Lane(open_drain=False), 0, SHIFTIN, 1, d=dd))}) == [dd]
+            for dd in range(1, 1024)), "a full HIGH phase is not d"
+        fh.write("\n/* ruling CE1: the HIGH phase's programmed length, "
+                 "MEASURED from the model at\n * every 10-bit delay: d, or "
+                 "d >> %d on a HALF_HIGH lane. */\n" % shift)
+        fh.write("function integer ck_high_gap;\n  input integer d;\n"
+                 "  input integer half;\n  begin\n"
+                 "    ck_high_gap = half ? (d >> %d) : d;\n  end\n"
+                 "endfunction\n" % shift)
     print()
     print("  bounds table -> %s (%d entries, measured)" % (vh, len(rows)))
 

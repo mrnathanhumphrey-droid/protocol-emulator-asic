@@ -57,7 +57,7 @@ from pe_isa import (                      # noqa: F401,E402
     ACT_BASE, ACT_BYTES, ACT_W, AW, BQW, CW, DLY_W, D_W, HDR_BITS, HDR_BYTES,
     N_LANES, SELF_CLOCKED, act_shift_clocked,
     act_shiftin_clocked, OP_ARM, OP_LEVEL, OP_READBIT, OP_REARM, OP_SHIFT, OP_SHIFTIN,
-    ORDER_LSB, ORDER_MSB,
+    ORDER_LSB, ORDER_MSB, FLAG_HALF_HIGH, FLAG_CLK_INV,
     OP_START, OP_STOP, PINW, PIN_NONE, UO0, UO1, UO2, UO3, act, hdr,
     I2C_ORDER,
     write_image,
@@ -88,11 +88,11 @@ def build():
     prog.append(act(OP_REARM, 0, 0, 500))
 
     headers = [
-        hdr(UO0, UO0, 1, 20, 2, 40, 60, l0),       # lane 0
-        hdr(UO1, UO1, 1, 31, 2, 60, 90, l1),       # lane 1
-        hdr(0, 0, 0, 500, 2, 200, 240, l2),
-        hdr(1, 1, 0, 500, 2, 200, 240, l2),
-        hdr(2, 2, 0, 500, 2, 200, 240, l2),
+        hdr(UO0, UO0, 1, 20, 0, 40, 60, l0),       # lane 0
+        hdr(UO1, UO1, 1, 31, 0, 60, 90, l1),       # lane 1
+        hdr(0, 0, 0, 500, 0, 200, 240, l2),
+        hdr(1, 1, 0, 500, 0, 200, 240, l2),
+        hdr(2, 2, 0, 500, 0, 200, 240, l2),
     ]
     img = b"".join(headers) + b"".join(prog)
     assert len(headers[0]) == HDR_BYTES
@@ -140,11 +140,11 @@ def build_stress(d0: int, d1: int):
     # 40/60 against a 5-cycle period would make every lane permanently late and
     # the run would be measuring an OVERLOADED system, not a jitter mechanism.
     headers = [
-        hdr(UO0, UO0, 1, d0, 2, 2 * d0, 3 * d0, l0),
-        hdr(UO1, UO1, 1, d1, 2, 2 * d1, 3 * d1, l1),
-        hdr(0, 0, 0, 500, 2, 200, 240, l2),
-        hdr(1, 1, 0, 500, 2, 200, 240, l2),
-        hdr(2, 2, 0, 500, 2, 200, 240, l2),
+        hdr(UO0, UO0, 1, d0, 0, 2 * d0, 3 * d0, l0),
+        hdr(UO1, UO1, 1, d1, 0, 2 * d1, 3 * d1, l1),
+        hdr(0, 0, 0, 500, 0, 200, 240, l2),
+        hdr(1, 1, 0, 500, 0, 200, 240, l2),
+        hdr(2, 2, 0, 500, 0, 200, 240, l2),
     ]
     return b"".join(headers) + b"".join(prog)
 
@@ -195,7 +195,7 @@ def build_five(delays):
         # D_tol capped at the 8-bit field; the shipped lanes' real keys are
         # derived in the A2 model, not here -- this program exists to load the
         # REFILL PORT, and its deadlines only have to keep the set schedulable.
-        headers.append(hdr(n, n, 1, min(d, 1023), 2,
+        headers.append(hdr(n, n, 1, min(d, 1023), 0,
                            min(2 * d, 255), min(3 * d, 255), base[n]))
     return b"".join(headers) + b"".join(prog)
 
@@ -245,7 +245,7 @@ def build_ckfive(delays):
         prog.append(act(OP_REARM, 0, 1, d))
         off += 2 * ACT_BYTES
     for n, d in enumerate(delays):
-        headers.append(hdr(2 * n, 2 * n + 1, 1, min(d, 1023), 2,
+        headers.append(hdr(2 * n, 2 * n + 1, 1, min(d, 1023), 0,
                            min(2 * d, 255), min(3 * d, 255), base[n]))
     return b"".join(headers) + b"".join(prog)
 
@@ -340,7 +340,46 @@ CKOD_DELAYS = [D_FMPLUS_SHIPPABLE, 60, 120, 240]
 CKDENSE_DELAYS = [20, 21, 22, 23]
 
 
-def build_ckod(delays=None):
+def build_cemodes():
+    """RULINGS CE1 + CE2: both lane mode bits in one admissible program.
+
+      L0  open-drain, SDA 2 / SCL 1, HALF_HIGH, d = 82: a clocked byte + ACK
+      L1  push-pull, data uo 10 / clock uo 9, HALF_HIGH | CLK_INV, d = 60
+      L2  push-pull, clock uo 11, CLK_INV, d = 40: a clocked receive on uio 4
+      L3  push-pull, no clock: toggles uio 4 -- the data L2 receives
+      L4  parked
+    Every d/2 on a HALF_HIGH lane is >= D* = 20, and CLK_INV is only on
+    push-pull lanes with a `uo_out` clock -- `pe_isa.flag_problems` passes."""
+    from pe_isa import full_store
+    lanes = {
+        0: (2, 1, 0, 82, FLAG_HALF_HIGH,
+            [act_shift_clocked(2, 82, nbits=8, q=0),
+             act_shiftin_clocked(2, 82, nbits=1), act(OP_REARM, 0, 1, 82)]),
+        1: (UO2, UO1, 1, 60, FLAG_HALF_HIGH | FLAG_CLK_INV,
+            [act_shift_clocked(UO2, 60, nbits=8, q=1),
+             act(OP_REARM, 0, 1, 60)]),
+        2: (UO0, UO3, 1, 40, FLAG_CLK_INV,
+            [act_shiftin_clocked(4, 40, nbits=8), act(OP_REARM, 0, 1, 40)]),
+        3: (4, PIN_NONE, 1, 23, 0,
+            [act(OP_LEVEL, 4, 1, 23), act(OP_LEVEL, 4, 0, 29),
+             act(OP_REARM, 0, 1, 23)]),
+    }
+    base, prog, hs = ACT_BASE, [], []
+    for ln in range(4):
+        pin, ck, mode, d, flags, acts = lanes[ln]
+        hs.append(hdr(pin, ck, mode, d, flags, 2 * d, 3 * d, base,
+                      order=ORDER_MSB))
+        prog += acts
+        base += len(acts) * ACT_BYTES
+    park = base
+    prog.append(act(OP_REARM, 0, 0, 500))
+    # parked PUSH-PULL on PIN_NONE, as the corpus parks: an open-drain header
+    # off the `uio` bank is a load-time CONFIG_ERR (1.6s)
+    hs.append(hdr(PIN_NONE, PIN_NONE, 1, 500, 0, 200, 240, park))
+    return full_store(b"".join(hs) + b"".join(prog))
+
+
+def build_ckod(delays=None, flags=0):
     """OPEN-DRAIN self-clocked lanes at a SPAN of delays -- the F1 instrument.
 
     ⛔⛔ WHY THIS IMAGE EXISTS, AND IT IS A MEASURED COMPLIANCE FAILURE RATHER
@@ -382,11 +421,11 @@ def build_ckod(delays=None):
     for n, d in enumerate(delays):
         # ⛔ MODE 0 = OPEN-DRAIN, the ONLY difference from `build_ckfive`, and
         # the whole experiment. Open-drain is what arms the park.
-        headers.append(hdr(2 * n, 2 * n + 1, 0, min(d, 1023), 2,
+        headers.append(hdr(2 * n, 2 * n + 1, 0, min(d, 1023), flags,
                            min(2 * d, 255), min(3 * d, 255), base[n]))
     # the inert fifth lane: `clkpin == pin` makes `clk_real` false, so nothing
     # it runs can be clocked, and a long re-arm keeps it out of the way.
-    headers.append(hdr(4, 4, 0, 500, 2, 200, 240, idle))
+    headers.append(hdr(4, 4, 0, 500, 0, 200, 240, idle))
     return b"".join(headers) + b"".join(prog)
 
 
@@ -422,10 +461,10 @@ def build_ckheavy(ck=None, pp=None, pp_dsched=CKHEAVY_PP_DSCHED):
         prog.append(act(OP_REARM, 0, 1, d))
         off += 3 * ACT_BYTES
     for n, d in enumerate(ck):
-        headers.append(hdr(2 * n, 2 * n + 1, 0, d, 2, min(2 * d, 255),
+        headers.append(hdr(2 * n, 2 * n + 1, 0, d, 0, min(2 * d, 255),
                            min(3 * d, 255), base[n]))
     for m, d in enumerate(pp):
-        headers.append(hdr(UO0 + m, UO0 + m, 1, d, 2, pp_dsched,
+        headers.append(hdr(UO0 + m, UO0 + m, 1, d, 0, pp_dsched,
                            pp_dsched + 8, base[len(ck) + m]))
     return b"".join(headers) + b"".join(prog)
 
@@ -471,10 +510,10 @@ def build_ckread(d: int = D_FM_SHIPPABLE, sda: int = 2, scl: int = 1):
     prog.append(act(OP_REARM, 0, 0, 500))
     # ⛔ RULING RC4: I2C is MSB-first. This took `hdr()`'s LSB default, so
     # every byte this program sent went out bit-reversed.
-    headers = [hdr(sda, scl, 0, d, 2, 2 * d, 3 * d, base, order=I2C_ORDER)]
+    headers = [hdr(sda, scl, 0, d, 0, 2 * d, 3 * d, base, order=I2C_ORDER)]
     # parked lanes OFF the pad-override pins (CS/MISO), so N1's PINMAP
     # condition has nothing to report
-    headers += [hdr(p, p, 0, 500, 2, 200, 240, park) for p in (0, 3, 4, 5)]
+    headers += [hdr(p, p, 0, 500, 0, 200, 240, park) for p in (0, 3, 4, 5)]
     return b"".join(headers) + b"".join(prog)
 
 
@@ -512,11 +551,11 @@ def build_chain(d_tog: int, d_park: int):
     lp = off
     prog.append(act(OP_REARM, 0, 0, d_park))
     for n in range(n_tog):
-        headers.append(hdr(n, n, 1, d_tog + n, 2,
+        headers.append(hdr(n, n, 1, d_tog + n, 0,
                            min(2 * (d_tog + n), 255),
                            min(3 * (d_tog + n), 255), base[n]))
     for n in range(n_tog, N_LANES):
-        headers.append(hdr(n, n, 0, d_park, 2, min(2 * d_park, 255),
+        headers.append(hdr(n, n, 0, d_park, 0, min(2 * d_park, 255),
                            min(3 * d_park, 255), lp))
     return b"".join(headers) + b"".join(prog)
 
@@ -533,9 +572,9 @@ def build_cfgerr(d: int = 20):
     l0 = ACT_BASE
     lp = l0 + 3 * ACT_BYTES
     prog.append(act(OP_REARM, 0, 0, 500))
-    headers = [hdr(UO0, UO0, 0, d, 2, 2 * d, 3 * d, l0)]   # mode 0 on uo_out!
+    headers = [hdr(UO0, UO0, 0, d, 0, 2 * d, 3 * d, l0)]   # mode 0 on uo_out!
     for n in range(1, N_LANES):
-        headers.append(hdr(n, n, 0, 500, 2, 200, 240, lp))
+        headers.append(hdr(n, n, 0, 500, 0, 200, 240, lp))
     return b"".join(headers) + b"".join(prog)
 
 
@@ -571,9 +610,9 @@ def build_armnone(d: int = 20):
     off += len(seq) * ACT_BYTES
     lp = off
     prog.append(act(OP_REARM, 0, 0, 500))
-    headers.append(hdr(0, PIN_NONE, 1, d, 2, 2 * d, 3 * d, l0))
+    headers.append(hdr(0, PIN_NONE, 1, d, 0, 2 * d, 3 * d, l0))
     for n in range(1, N_LANES):
-        headers.append(hdr(n, n, 0, 500, 2, 200, 240, lp))
+        headers.append(hdr(n, n, 0, 500, 0, 200, 240, lp))
     return b"".join(headers) + b"".join(prog)
 
 
@@ -618,9 +657,9 @@ def build_pinnone(d: int = 20):
     lp = off
     prog.append(act(OP_REARM, 0, 0, 500))
     # the violating lane: header pin AND clock pin both on the reserved index
-    headers.append(hdr(PIN_NONE, PIN_NONE, 1, d, 2, 2 * d, 3 * d, l0))
+    headers.append(hdr(PIN_NONE, PIN_NONE, 1, d, 0, 2 * d, 3 * d, l0))
     for n in range(1, N_LANES):
-        headers.append(hdr(n, n, 0, 500, 2, 200, 240, lp))
+        headers.append(hdr(n, n, 0, 500, 0, 200, 240, lp))
     return b"".join(headers) + b"".join(prog)
 
 
@@ -665,9 +704,9 @@ def build_ckdegen(d: int = 20, route: int = 0):
     prog.append(act(OP_REARM, 0, 0, 500))
     # the offending lane needs a REAL clock pin DISTINCT from its data pin, or
     # the action is not clocked at all and the degeneracy never arises
-    headers.append(hdr(2, 1, 0, d, 2, 2 * d, 3 * d, l0))
+    headers.append(hdr(2, 1, 0, d, 0, 2 * d, 3 * d, l0))
     for n in range(1, N_LANES):
-        headers.append(hdr(n + 2, n + 2, 0, 500, 2, 200, 240, lp))
+        headers.append(hdr(n + 2, n + 2, 0, 500, 0, 200, 240, lp))
     return b"".join(headers) + b"".join(prog)
 
 
@@ -716,9 +755,9 @@ def build_ckhold(offset: int = 0):
     off += ACT_BYTES
     lp = off
     prog.append(act(OP_REARM, 0, 0, 500))
-    headers.append(hdr(2, 1, 0, d, 2, min(2 * d, 255), min(3 * d, 255), l0))
+    headers.append(hdr(2, 1, 0, d, 0, min(2 * d, 255), min(3 * d, 255), l0))
     for _n in range(1, N_LANES):
-        headers.append(hdr(PIN_NONE, PIN_NONE, 1, 500, 2, 200, 240, lp))
+        headers.append(hdr(PIN_NONE, PIN_NONE, 1, 500, 0, 200, 240, lp))
     return b"".join(headers) + b"".join(prog)
 
 
@@ -770,10 +809,10 @@ def build_census(d: int = 25):
     # and ARM, none of which touch the clock pin, so the alias is a don't-care
     # there -- and leaving it is what keeps the 1.6x refusal SCOPED rather than
     # a blanket rule. `build_five` relies on the same scope.
-    headers.append(hdr(UO0, UO2, 1, d, 2, 2 * d, 3 * d, base[0]))
-    headers.append(hdr(UO1, UO1, 1, d + 1, 2, 2 * d, 3 * d, base[1]))
+    headers.append(hdr(UO0, UO2, 1, d, 0, 2 * d, 3 * d, base[0]))
+    headers.append(hdr(UO1, UO1, 1, d + 1, 0, 2 * d, 3 * d, base[1]))
     for n in range(2, N_LANES):
-        headers.append(hdr(n, n, 0, 500, 2, 200, 240, lp))
+        headers.append(hdr(n, n, 0, 500, 0, 200, 240, lp))
     return b"".join(headers) + b"".join(prog)
 
 
@@ -850,10 +889,10 @@ def build_half(d: int = 24):
     # lane 0 open-drain on uio (a releasable bank, as the pin map requires);
     # lane 1 push-pull on uo_out. Both name a clock pin DISTINCT from the data
     # pin, which 1.6x requires of any shifting lane.
-    headers.append(hdr(2, 1, 0, d, 2, 2 * d, 3 * d, base[0]))
-    headers.append(hdr(10, 9, 1, d, 2, 2 * d, 3 * d, base[1]))
+    headers.append(hdr(2, 1, 0, d, 0, 2 * d, 3 * d, base[0]))
+    headers.append(hdr(10, 9, 1, d, 0, 2 * d, 3 * d, base[1]))
     for n in range(2, N_LANES):
-        headers.append(hdr(4, 4, 0, 500, 2, 200, 240, lp))
+        headers.append(hdr(4, 4, 0, 500, 0, 200, 240, lp))
     return b"".join(headers) + b"".join(prog)
 
 
@@ -931,10 +970,10 @@ def build_i2cframe(d: int = 62, sda: int = 2, scl: int = 1, nbytes: int = 2):
     # ⚠ BEFORE THIS BIT EXISTED the program had to push 0x05 -- the reversal --
     # and sigrok read the 7-bit address as 0x50 either way, which is exactly
     # how the engine's LSB-first order stayed invisible.
-    headers.append(hdr(sda, scl, 0, d, 2, 2 * d, 3 * d, base,
+    headers.append(hdr(sda, scl, 0, d, 0, 2 * d, 3 * d, base,
                        order=ORDER_MSB))
     for n in range(1, N_LANES):
-        headers.append(hdr(4, 4, 0, 500, 2, 200, 240, lp))
+        headers.append(hdr(4, 4, 0, 500, 0, 200, 240, lp))
     img = b"".join(headers) + b"".join(prog)
     return img
 
@@ -970,9 +1009,9 @@ def build_rxfast(d: int = 24):
     prog.append(act(OP_REARM, 0, 0, 500))
     # MISO = uio[0] as an input; the lane needs a clock pin distinct from its
     # data pin only if it SHIFTS (1.6x), and this lane only shifts IN.
-    headers.append(hdr(0, 1, 1, d, 2, 2 * d, 3 * d, base[0]))
+    headers.append(hdr(0, 1, 1, d, 0, 2 * d, 3 * d, base[0]))
     for n in range(1, N_LANES):
-        headers.append(hdr(4, 4, 0, 500, 2, 200, 240, lp))
+        headers.append(hdr(4, 4, 0, 500, 0, 200, 240, lp))
     return b"".join(headers) + b"".join(prog)
 
 
@@ -998,9 +1037,9 @@ def build_tx_badclk(d: int = 12):
     off += ACT_BYTES
     lp = off
     prog.append(act(OP_REARM, 0, 0, 500))
-    headers.append(hdr(UO0, UO0, 1, d, 2, 2 * d, 3 * d, base[0]))
+    headers.append(hdr(UO0, UO0, 1, d, 0, 2 * d, 3 * d, base[0]))
     for n in range(1, N_LANES):
-        headers.append(hdr(n, n, 0, 500, 2, 200, 240, lp))
+        headers.append(hdr(n, n, 0, 500, 0, 200, 240, lp))
     return b"".join(headers) + b"".join(prog)
 
 
@@ -1075,9 +1114,9 @@ def build_tx(d0: int = 12, d1: int = 13, cnt: int = 7):
     # ⭐ DATA AND CLOCK ON DIFFERENT PINS, which is also how a real SPI lane is
     # configured (MOSI + SCK). See the docstring for what happens otherwise.
     for n, (pin, clk, d, q) in enumerate(lanes):
-        headers.append(hdr(pin, clk, 1, d, 2, 2 * d, 3 * d, base[n]))
+        headers.append(hdr(pin, clk, 1, d, 0, 2 * d, 3 * d, base[n]))
     for n in range(2, N_LANES):
-        headers.append(hdr(n, n, 0, 500, 2, 200, 240, lp))
+        headers.append(hdr(n, n, 0, 500, 0, 200, 240, lp))
     return b"".join(headers) + b"".join(prog)
 
 
@@ -1115,9 +1154,9 @@ def build_edge(timeout: int, d1: int = 12, arm_pin: int = 0,
     prog.append(act(OP_REARM, 0, 1, d1))
     lp = l0 + 4 * ACT_BYTES
     prog.append(act(OP_REARM, 0, 0, 500))
-    headers.append(hdr(UO0, UO0, 1, d1, 2, 2 * d1, 3 * d1, l0))
+    headers.append(hdr(UO0, UO0, 1, d1, 0, 2 * d1, 3 * d1, l0))
     for n in range(1, N_LANES):
-        headers.append(hdr(n, n, 0, 500, 2, 200, 240, lp))
+        headers.append(hdr(n, n, 0, 500, 0, 200, 240, lp))
     return b"".join(headers) + b"".join(prog)
 
 
@@ -1151,9 +1190,9 @@ def build_noop(timeout: int, half: int, d1: int = 12, arm_pin: int = 0,
     prog.append(act(OP_REARM, 0, 1, d1))
     lp = l0 + 5 * ACT_BYTES
     prog.append(act(OP_REARM, 0, 0, 500))
-    headers.append(hdr(UO0, UO0, 1, d1, 2, 2 * d1, 3 * d1, l0))
+    headers.append(hdr(UO0, UO0, 1, d1, 0, 2 * d1, 3 * d1, l0))
     for n in range(1, N_LANES):
-        headers.append(hdr(n, n, 0, 500, 2, 200, 240, lp))
+        headers.append(hdr(n, n, 0, 500, 0, 200, 240, lp))
     return b"".join(headers) + b"".join(prog)
 
 
@@ -1417,6 +1456,39 @@ def main() -> int:
         write_image(out, img)
         print("ckread image (a clocked I2C read: master ACK/NACK, ruling K), "
               "%d bytes -> %s" % (len(img), out))
+        return 0
+    if "--cemodes" in sys.argv:
+        # ⭐ RULINGS CE1 + CE2, FOR THE COVERAGE SWEEP (`benchset` tb_cktx):
+        # both lane mode bits in one program, so the swept bench reaches the
+        # HALF_HIGH and CLK_INV logic. ⛔ A `probe_` BASE ONLY.
+        k = sys.argv.index("--cemodes")
+        base = sys.argv[k + 1] if len(sys.argv) > k + 1 else ""
+        if not base.startswith("probe_"):
+            print("--cemodes needs a probe_ base name, got %r" % base)
+            return 1
+        img = build_cemodes()
+        out = os.path.join(here, base + ".hex")
+        write_image(out, img)
+        print("cemodes image (HALF_HIGH + CLK_INV lanes), %d bytes -> %s"
+              % (len(img), out))
+        return 0
+    if "--ckhalf" in sys.argv:
+        # ⭐ RULING CE1: the F1 instrument with every lane HALF_HIGH, for the
+        # phase measurement (`phases_run.sh`, judged by `gate_um10204`). 82 is
+        # the Fm point (run_ckack's derived d); 470 an Sm point (d/2 + sync
+        # clears Sm's 200-cycle t_HIGH). Every d/2 >= D* = 20.
+        # ⛔ A `probe_` BASE ONLY: a generated measurement input, never tracked.
+        k = sys.argv.index("--ckhalf")
+        base = sys.argv[k + 1] if len(sys.argv) > k + 1 else ""
+        if not base.startswith("probe_"):
+            print("--ckhalf needs a probe_ base name, got %r" % base)
+            return 1
+        delays = [82, 120, 240, 470]
+        img = build_ckod(delays, flags=FLAG_HALF_HIGH)
+        out = os.path.join(here, base + ".hex")
+        write_image(out, img)
+        print("ckhalf image (open-drain self-clocked, HALF_HIGH, delays %s), "
+              "%d bytes -> %s" % (delays, len(img), out))
         return 0
     if "--ckod" in sys.argv:
         img = build_ckod()

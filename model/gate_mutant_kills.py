@@ -91,6 +91,14 @@ KILLERS = {
     # ⚠ LOCAL ONLY: judged by sigrok's foreign I2C decoder, which CI does not
     # install -- so it runs under `run_a2.py` with the other sigrok gates.
     "M_IGNORE_ORDER": "test/run_i2c.py",
+    # -- rulings CE1 / CE2 -------------------------------------------------------
+    # HALF_HIGH ignored: CI's phase measurement (`half_mutant` arm) runs a
+    # full-d HIGH where the lane is HALF_HIGH; `run_ckack` (local) also kills
+    # it on Layer B gaps and the SCL period. The gl_test arms kill both.
+    "M_HALF_IGNORED": "model/a2/gate_um10204.py",
+    # CLK_INV ignored: the READs stop being mode 1 at the pins and the chip
+    # receives 5B C4 one bit early (`run_spifram`, local, sigrok).
+    "M_CLKINV_IGNORED": "test/run_spifram.py",
 }
 
 #: mutant -> why no killer exists. Each is recorded at its site too.

@@ -331,6 +331,7 @@ module tt_um_protocol_emulator #(
   // THE ENGINE
   // =====================================================================
   wire [N_PINS-1:0]  e_pin_out, e_pin_oe;
+  wire [N_PINS-1:0]  e_pin_inv;                // CE2: inverted clock pins
   wire [N_LANES-1:0] e_under, e_ovf;
   wire               e_ovr, e_busy, e_rx_push;
   wire               e_host_pop;
@@ -500,7 +501,8 @@ module tt_um_protocol_emulator #(
       .s_raddr(e_raddr), .s_re(e_re), .s_rdata(s_rdata),
       .s_wraddr(e_wraddr), .s_wraddrk(e_wraddrk), .s_wre(e_wre),
       .s_wrdata(s_wrdata),
-      .pin_out(e_pin_out), .pin_oe(e_pin_oe), .pin_in(pin_in),
+      .pin_out(e_pin_out), .pin_oe(e_pin_oe), .pin_inv(e_pin_inv),
+      .pin_in(pin_in),
       .pin_rise(pin_rise), .pin_fall(pin_fall),
       .host_data(tx_head), .host_valid(tx_valid), .host_pop(e_host_pop),
         .host_lane(e_host_lane), .host_q(e_host_q),
@@ -778,7 +780,23 @@ module tt_um_protocol_emulator #(
   // ⛔ In LOAD MODE the 4 protocol outputs are HELD AT IDLE (high), not used for
   //    readback. Readback goes out on the serial trio above. This is the fix for
   //    the constructed-image FRAM write.
+  // ⛔⛔ RULING CE2 -- CLK_INV, AND WHY ONLY HERE. An inverted clock pin turns
+  // SPI mode 3 into mode 1 and mode 0 into mode 2 with the phase machine
+  // untouched (the push-pull capture fires at the engine's own HIGH phase,
+  // which on an inverted pin IS the falling edge modes 1/2 sample on). The XOR
+  // sits BEFORE `uo_q`, so every `uo_out` bit is still a flop Q (F2). On `uio`
+  // the only place left would be after the last flop -- F2 forbids it, so a
+  // `uio` clock with CLK_INV is refused by the toolchain and never set.
+  // ⚠ THE IDLE LEVEL FLIPS ONCE, when the header loads: before it every
+  // protocol output idles high; after it an inverted SCK idles low. Headers
+  // load before any dispatch, so CS is still deasserted -- a bench checks it.
+  // `M_CLKINV_IGNORED` drops the XOR.
+`ifdef M_CLKINV_IGNORED
   wire [3:0] proto_out = prog_mode ? 4'b1111 : e_pin_out[11:8];
+`else
+  wire [3:0] proto_out = prog_mode ? 4'b1111
+                                   : (e_pin_out[11:8] ^ e_pin_inv[11:8]);
+`endif
 
   reg [7:0] uo_q;
   always @(posedge clk or negedge rst_n) begin

@@ -378,11 +378,11 @@ def selftest():
     legal = hold + 1
     base = bytearray(I.ACT_BASE + 4 * I.ACT_BYTES)
     # one lane, real distinct clock pin, program at ACT_BASE
-    hdr = I.hdr(2, 1, 0, legal, 2, 2 * legal, 3 * legal, I.ACT_BASE)
+    hdr = I.hdr(2, 1, 0, legal, 0, 2 * legal, 3 * legal, I.ACT_BASE)
     base[0:I.HDR_BYTES] = hdr
     for ln in range(1, I.N_LANES):
         base[ln * I.HDR_BYTES:(ln + 1) * I.HDR_BYTES] = \
-            I.hdr(I.PIN_NONE, I.PIN_NONE, 0, 500, 2, 200, 240, I.ACT_BASE)
+            I.hdr(I.PIN_NONE, I.PIN_NONE, 0, 500, 0, 200, 240, I.ACT_BASE)
     cases = [
         ("a clocked SHIFTIN with count = 0",
          I.act(I.OP_SHIFTIN, 2, 1, legal, count=0), R_CKDEGEN),

@@ -293,6 +293,33 @@ def main() -> int:
     if not fired:
         rc = 1
 
+    # ---- RULING HDR: the header mode bits on every image -----------------
+    # ⛔ Not declarable, like DT-D: a reserved bit, CLK_INV on an open-drain or
+    # `uio` clock, or HALF_HIGH with d/2 under D* is simply wrong. The SAME
+    # function `pe_asm` refuses with (`pe_isa.flag_problems`).
+    print()
+    print("  --- HDR: header mode bits (reserved / CLK_INV / HALF_HIGH) ---")
+    fviol = [(n, p) for n, img in imgs
+             for p in _isa.flag_problems(img, jp.D_STAR)]
+    for n, p in fviol:
+        print("    *** %s: %s" % (n, p))
+        rc = 1
+    print("    %d image(s): %s" % (len(imgs), "no forbidden mode bit"
+                                   if not fviol else "VIOLATIONS above"))
+    for what, flags, want in (("a planted RESERVED bit", 0x8, "RESERVED"),
+                              ("a planted CLK_INV on an open-drain lane",
+                               _isa.FLAG_CLK_INV, "OPEN-DRAIN")):
+        pl = bytearray(next(img for n, img in imgs if n == "corpus_i2c.hex"))
+        h0 = dgf.unpack(_isa.HDR_FIELDS, pl[:_isa.HDR_BYTES], _isa.HDR_BYTES)
+        h0["flags"] = flags
+        pl[:_isa.HDR_BYTES] = _isa._pack(
+            _isa.HDR_FIELDS, [h0[nm] for nm, _w in _isa.HDR_FIELDS],
+            _isa.HDR_BYTES)
+        got = any(want in p for p in _isa.flag_problems(bytes(pl), jp.D_STAR))
+        print("    must-fire: %-42s %s" % (what + " is caught",
+                                          "ok" if got else "*** MISSED"))
+        rc |= 0 if got else 1
+
     # ⛔ DT-A's must-fire: ckdense under a name nothing declares must be
     # reported for QUEUE -- the condition is derived, not read off the list.
     dense = next(img for n, img in imgs if n == "ckdense_image.hex")

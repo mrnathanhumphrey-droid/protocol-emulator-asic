@@ -94,6 +94,13 @@ def cycles(ns):
     return -(-ns // NS_PER_CYCLE)
 
 
+def rate_hz(mode):
+    """A mode's maximum SCL rate, read from its own table key ("Fm  400 kHz",
+    "Fm+ 1 MHz") so the rate and the minima cannot come from two places."""
+    num, unit = mode.split()[-2:]
+    return int(num) * {"kHz": 1000, "MHz": 1000000}[unit]
+
+
 def table_cycles():
     return {m: {k: cycles(v) for k, v in d.items()} for m, d in UM10204.items()}
 
@@ -122,7 +129,15 @@ def load():
         return json.load(fh), p
 
 
-OD_ARMS = ("clean", "stretch_mid", "stretch_long")
+OD_ARMS = ("clean", "stretch_mid", "stretch_long", "half")
+
+
+def high_len(lane):
+    """The lane's programmed HIGH length: `d`, or `d // 2` on a HALF_HIGH lane
+    (ruling CE1) -- the golden model's own rule, imported, not restated."""
+    sys.path.insert(0, os.path.dirname(HERE))
+    from clocked_phase import high_gap
+    return high_gap(lane["d"], lane.get("half", False))
 
 
 def main() -> int:
@@ -170,14 +185,18 @@ def main() -> int:
             if l["mode"] != 0 or not l.get("t_HIGH"):
                 continue
             seen_od += 1
-            d, hi = l["d"], l["t_HIGH"]["min"]
+            # ⭐ CE1: held to the lane's OWN HIGH length (d, or d/2 when
+            # HALF_HIGH) -- `d` in the table is still the programmed delay
+            d, hi = high_len(l), l["t_HIGH"]["min"]
             lo = l["t_LOW"]["min"] if l.get("t_LOW") else -1
             ok = hi >= d
             if not ok:
                 rc = 1
-            print("    %-14s %-6d %-6d %-8d %-8d %-9s %s"
-                  % (arm, l["lane"], d, hi, lo, "%+d" % (hi - d),
-                     "ok" if ok else "*** FAIL t_HIGH < d"))
+            print("    %-14s %-6d %-6s %-8d %-8d %-9s %s"
+                  % (arm, l["lane"], "%d%s" % (l["d"], "/2" if l.get("half")
+                                               else ""),
+                     hi, lo, "%+d" % (hi - d),
+                     "ok" if ok else "*** FAIL t_HIGH < its HIGH length"))
     if seen_od == 0:
         print("    *** FAIL no open-drain clocked lane in any arm, so the")
         print("        claim was not measured at all")
@@ -186,6 +205,55 @@ def main() -> int:
         print("    ⇒ %d open-drain lane-arms, every t_HIGH at or above its own"
               % seen_od)
         print("      programmed d, and UNMOVED by a 200- or 4000-cycle stretch.")
+
+    # -----------------------------------------------------------------
+    # 1b. RULING CE1 -- HALF_HIGH: the d/2 phase lands, and the lane still
+    #     meets its mode's t_HIGH with it
+    # -----------------------------------------------------------------
+    print()
+    print("  --- 1b. CE1: HALF_HIGH -- t_HIGH is the d/2 phase, and it meets "
+          "the mode ---")
+    for arm, want_half in (("half", True), ("half_mutant", False)):
+        a = blob.get(arm)
+        if a is None:
+            print("    %-12s *** FAIL arm absent from the measurement" % arm)
+            rc = 1
+            continue
+        for l in a["lanes"]:
+            if l["mode"] != 0 or not l.get("t_HIGH") or not l.get("t_LOW"):
+                continue
+            hi, lo = l["t_HIGH"]["min"], l["t_LOW"]["min"]
+            landed = hi < l["d"]           # the d/2 phase, not d
+            # ⛔ THE LANE'S OWN MODE, NOT THE LOOSEST ONE ITS PHASES MEET: the
+            # mode whose RATE band its measured bit period sits in (the
+            # slowest mode whose ceiling the period respects) -- an 82-cycle
+            # HALF_HIGH lane is an Fm clock and is held to Fm's t_HIGH, not
+            # to Fm+'s 13 cycles, which any clock this slow clears.
+            period = hi + lo
+            target = None
+            for m in MODES:                  # Sm first: the slowest ceiling
+                if period >= cycles(10 ** 9 // rate_hz(m)):
+                    target = m
+                    break
+            if want_half:
+                ok = landed and target is not None and \
+                    hi >= tc[target]["t_HIGH"] and lo >= tc[target]["t_LOW"]
+                verdict = ("ok -- an %s clock (period %d): t_HIGH %d >= %d, "
+                           "t_LOW %d >= %d" % (target, period, hi,
+                                               tc[target]["t_HIGH"], lo,
+                                               tc[target]["t_LOW"])
+                           if ok else "*** FAIL (d/2 landed: %s, mode %s)"
+                           % (landed, target))
+            else:
+                # ⛔ MUST-FIRE: `M_HALF_IGNORED` (phases_run.sh builds the
+                # `half_mutant` arm with it) -- the HIGH phase is d
+                ok = not landed
+                verdict = ("ok -- the mutant's HIGH is the full d (red)"
+                           if ok else "*** the mutant still ran d/2")
+            if not ok:
+                rc = 1
+            print("    %-12s lane %d d=%-4d t_HIGH %-4d t_LOW %-4d %s"
+                  % (arm, l["lane"], l["d"], hi, lo, verdict))
 
     # -----------------------------------------------------------------
     # 2. MUST-FIRE: the pre-fix design must MISS it

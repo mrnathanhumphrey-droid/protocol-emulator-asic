@@ -1142,9 +1142,9 @@ async def test_clocked_tx_bytes_at_the_pins(dut):
             pe_isa.act(pe_isa.OP_REARM, 0, 1, d)]
     park = pe_isa.ACT_BASE + len(prog) * pe_isa.ACT_BYTES
     prog.append(pe_isa.act(pe_isa.OP_REARM, 0, 0, 500))
-    hdrs = [pe_isa.hdr(sda, scl, 0, d, 2, 2 * d, 3 * d, pe_isa.ACT_BASE,
+    hdrs = [pe_isa.hdr(sda, scl, 0, d, 0, 2 * d, 3 * d, pe_isa.ACT_BASE,
                        order=pe_isa.ORDER_MSB)]
-    hdrs += [pe_isa.hdr(p, p, 0, 500, 2, 200, 240, park)
+    hdrs += [pe_isa.hdr(p, p, 0, 500, 0, 200, 240, park)
              for p in range(8) if p not in (sda, scl)][:4]
     img = list(pe_isa.full_store(b"".join(hdrs) + b"".join(prog)))
     await run_loaded(dut, img, feed=False)
@@ -1193,9 +1193,9 @@ async def test_clocked_spi_read_at_the_pins(dut):
             pe_isa.act(pe_isa.OP_REARM, 0, 1, d)]
     park = pe_isa.ACT_BASE + len(prog) * pe_isa.ACT_BYTES
     prog.append(pe_isa.act(pe_isa.OP_REARM, 0, 0, 500))
-    hdrs = [pe_isa.hdr(P_M_MOSI, P_M_SCLK, 1, d, 2, 2 * d, 3 * d,
+    hdrs = [pe_isa.hdr(P_M_MOSI, P_M_SCLK, 1, d, 0, 2 * d, 3 * d,
                        pe_isa.ACT_BASE, order=pe_isa.ORDER_MSB)]
-    hdrs += [pe_isa.hdr(p, p, 0, 500, 2, 200, 240, park) for p in (1, 2, 3, 4)]
+    hdrs += [pe_isa.hdr(p, p, 0, 500, 0, 200, 240, park) for p in (1, 2, 3, 4)]
     img = list(pe_isa.full_store(b"".join(hdrs) + b"".join(prog)))
     await run_loaded(dut, img, feed=False)
     cs_b, sck_b = P_M_CS - 8, P_M_SCLK - 8          # uo_out bit indices
@@ -1239,3 +1239,104 @@ async def test_clocked_spi_read_at_the_pins(dut):
         "CLOCKED SPI READ WRONG: %02X driven on MISO, the chip received %s -- "
         "00 is silicon fix #3 (header pin sampled, or the push-pull capture "
         "never fired)" % (want, " ".join("%02X" % b for b in got)))
+
+
+def _spi_read_image(d, flags):
+    """One clocked SPI read (CS low, 8-bit clocked SHIFTIN on MISO, CS high)
+    on the master's ruled pins, header mode bits `flags` (ruling HDR)."""
+    from corpus import P_M_CS, P_M_MISO, P_M_MOSI, P_M_SCLK
+    prog = [pe_isa.act(pe_isa.OP_LEVEL, P_M_CS, 0, d),
+            pe_isa.act_shiftin_clocked(P_M_MISO, d, nbits=8),
+            pe_isa.act(pe_isa.OP_LEVEL, P_M_CS, 1, d),
+            pe_isa.act(pe_isa.OP_REARM, 0, 1, d)]
+    park = pe_isa.ACT_BASE + len(prog) * pe_isa.ACT_BYTES
+    prog.append(pe_isa.act(pe_isa.OP_REARM, 0, 0, 500))
+    hdrs = [pe_isa.hdr(P_M_MOSI, P_M_SCLK, 1, d, flags, 2 * d, 3 * d,
+                       pe_isa.ACT_BASE, order=pe_isa.ORDER_MSB)]
+    hdrs += [pe_isa.hdr(p, p, 0, 500, 0, 200, 240, park) for p in (1, 2, 3, 4)]
+    return list(pe_isa.full_store(b"".join(hdrs) + b"".join(prog)))
+
+
+@cocotb.test()
+async def test_half_high_phase_at_the_pins(dut):
+    """RULING CE1, PINS ONLY: a HALF_HIGH clocked lane's HIGH phase is d/2.
+
+    A push-pull clocked receive on the master's SCLK (a `uo_out` pin, so no
+    pull-up decides the edges): the pins must show SCK LOW = d and HIGH = d/2
+    -- the phase the CE1 RTL adds. ⛔ Must-fire: built with `M_HALF_IGNORED`
+    the HIGH phase is d, and this FAILS in RTL simulation.
+    """
+    from corpus import P_M_SCLK
+    d = 82
+    await run_loaded(dut, _spi_read_image(d, pe_isa.FLAG_HALF_HIGH),
+                     feed=False)
+    sck_b = P_M_SCLK - 8
+    prev, t, edges = None, 0, []
+    for _ in range(6000):
+        await ClockCycles(dut.clk, 1)
+        t += 1
+        s = bit(str(dut.uo_out.value), sck_b)
+        if prev is not None and s != prev and s in "01":
+            edges.append((t, s))
+        prev = s
+    highs = sorted({b[0] - a[0] for a, b in zip(edges, edges[1:])
+                    if a[1] == "1"})
+    lows = sorted({b[0] - a[0] for a, b in zip(edges, edges[1:])
+                   if a[1] == "0"})
+    dut._log.info("HALF_HIGH at the pins: SCK HIGH widths %s, LOW widths %s "
+                  "(d = %d)" % (highs[:6], lows[:6], d))
+    assert len(edges) >= 20, "only %d SCK edges -- nothing to judge" % len(edges)
+    assert (d >> 1) in highs and d not in highs, (
+        "HALF_HIGH NOT AT THE PINS: SCK HIGH widths %s, want d/2 = %d (d = %d "
+        "is the selector ignored)" % (highs, d >> 1, d))
+    assert d in lows, "the LOW phase moved: widths %s, want d = %d" % (lows, d)
+
+
+@cocotb.test()
+async def test_clocked_spi_mode1_read_at_the_pins(dut):
+    """RULING CE2, PINS ONLY: SPI MODE 1/2 -- an inverted SCLK, a byte in on
+    MISO, the same byte out in the chip's RX frame.
+
+    CLK_INV inverts the master's SCLK, so the chip samples on the pad's FALL.
+    This test plays a mode 1/2 peer from the pins: the mode is the SCK level
+    at CS fall (low = mode 1: the bit goes out on each RISE, the first rise
+    presenting bit 7; high = mode 2: bit 7 at CS fall, the next on each rise).
+    ⛔ Must-fire: built with `M_CLKINV_IGNORED` the clock is not inverted, the
+    peer drives on the edge the chip samples, and this FAILS in RTL simulation.
+    """
+    from corpus import P_M_CS, P_M_MISO, P_M_SCLK
+    d, want = 25, 0x5B
+    await run_loaded(dut, _spi_read_image(d, pe_isa.FLAG_CLK_INV), feed=False)
+    cs_b, sck_b = P_M_CS - 8, P_M_SCLK - 8
+    modes = []
+
+    async def peer():
+        pcs, psck, k = "1", "1", 0
+        while True:
+            await ClockCycles(dut.clk, 1)
+            uo = str(dut.uo_out.value)
+            cs, sck = bit(uo, cs_b), bit(uo, sck_b)
+            if cs == "0" and pcs == "1":
+                modes.append(2 if sck == "1" else 1)
+                k = 0 if sck == "1" else -1
+            elif cs == "0" and sck == "1" and psck == "0":
+                k += 1                               # each SCK RISE: next bit
+            if cs == "0" and k < 8:
+                dut.ob_oe.value = 1 << P_M_MISO
+                dut.ob_val.value = ((want >> (7 - max(k, 0))) & 1) << P_M_MISO
+            else:
+                dut.ob_oe.value = 0
+            pcs, psck = cs, sck
+    cocotb.start_soon(peer())
+    frames = await harvest_frames(dut, 8000)
+    got = lane_payloads(frames, 0)
+    dut._log.info("mode 1/2 SPI read at the pins: %s (modes %s)"
+                  % (" ".join("%02X" % b for b in got), modes[:len(got)]))
+    assert len(got) >= 3, ("only %d RX frame(s) from lane 0 -- nothing to "
+                           "judge" % len(got))
+    assert 1 in modes[:len(got)], (
+        "no read was MODE 1 at the pins (modes %s): the clock was not "
+        "inverted" % modes[:len(got)])
+    assert all(b == want for b in got), (
+        "MODE 1/2 SPI READ WRONG: %02X driven on MISO, the chip received %s"
+        % (want, " ".join("%02X" % b for b in got)))

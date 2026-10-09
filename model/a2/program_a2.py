@@ -83,17 +83,38 @@ def is_clocked(h, a):
             and a["op"] in (I.OP_SHIFT, I.OP_SHIFTIN))
 
 
+def gaps(h, a):
+    """The release gaps one action puts on its lane (ruling CE1).
+
+    ⛔⛔ THE TWO-LEVEL LANE. A clocked action on a HALF_HIGH lane releases at
+    alternating gaps: `d` after each LOW, `d // 2` after each HIGH (plus the
+    sync latency on an open-drain clock, which only lengthens it). Every other
+    action releases at `d`. The A2 model takes such a lane as SPORADIC WITH
+    MINIMUM SEPARATION `d // 2` -- it never releases faster than that, so its
+    demand on the engine is bounded by it. ⚠ CONSERVATIVE, AND SAID SO: half
+    the lane's gaps are really `d`, so the bound over-counts its interference.
+    The same `d // 2` is what J = 1's premise is judged on (`pe_asm` refuses
+    HALF_HIGH when it is under D*), so the premise holds PER GAP."""
+    sys.path.insert(0, os.path.dirname(HERE))
+    from clocked_phase import high_gap
+    half = bool(h.get("flags", 0) & I.FLAG_HALF_HIGH)
+    if is_clocked(h, a) and half:
+        return [a["delay"], high_gap(a["delay"], True)]
+    return [a["delay"]]
+
+
 def lane_set(img):
     """The program's own A2 lane set, plus which entries are clocked OD."""
     rows = lanes_of(img)
-    delays = [a["delay"] for _ln, _h, acts in rows for a in acts
-              if a["delay"] > 0]
+    delays = [g for _ln, h, acts in rows for a in acts if a["delay"] > 0
+              for g in gaps(h, a)]
     d_min = min(delays) if delays else None
     k = len(rows)
     j_prog = jp.j_of(d_min, k) if d_min else 0
     out = []
     for ln, h, acts in rows:
-        T = min((a["delay"] for a in acts if a["delay"] > 0), default=500)
+        T = min((g for a in acts if a["delay"] > 0 for g in gaps(h, a)),
+                default=500)
         ck_od = any(is_clocked(h, a) for a in acts) and h["mode"] == 0
         # ⛔ BLane asserts D_sched <= D_tol; a header that violates it is a
         # program whose EDF key is looser than its own tolerance, which the

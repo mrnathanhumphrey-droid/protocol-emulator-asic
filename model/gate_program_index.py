@@ -155,6 +155,15 @@ CLASSIFIED = {
         "value being tested is a bit-slice of the shift register and there is "
         "no per-lane register to hang a wire on yet. A header may legitimately "
         "name the reserved index, so this must skip rather than refuse."),
+    ("src/pe_engine.v", "pin_inv", "hsh_n[*]"): (
+        "< N_PINS",
+        "RULING CE2's HEADER-TIME write of the clock-inversion bit, indexed by "
+        "the raw clock-pin header field, beside the `pin_pp` write above and "
+        "guarded the same way: an inline `< N_PINS` comparison on the "
+        "shift-register slice. It also requires the index to be a `uo_out` "
+        "pin (>= 8), because only those are re-registered in the top and so "
+        "keep F2; a uio or reserved clock index skips rather than refuses, "
+        "and pe_asm and the image audit refuse it upstream."),
     ("src/pe_engine.v", "pin_rise", "l_clkpin[*]"): (
         "< N_PINS",
         "THE FOURTH INSTANCE OF THE CLASS, arriving with the self-clocked "

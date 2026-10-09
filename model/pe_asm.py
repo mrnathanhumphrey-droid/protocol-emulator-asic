@@ -60,6 +60,8 @@ from make_smoke_image import (            # noqa: E402
 )
 from pe_isa import full_store                  # noqa: E402
 from pe_isa import i2c_order_problems, order_for  # noqa: E402  ruling RC4
+from pe_isa import (flag_problems, FLAG_HALF_HIGH,  # noqa: E402  ruling HDR
+                    FLAG_CLK_INV)
 
 # ⚠ N_PINS IS THE PIN-MAP BOUND, not a pin count the ISA encodes:
 # `PINW = 4` addresses 0..15 and only 12 pins exist, which is the whole
@@ -601,8 +603,15 @@ def compute_j(lanes, spl=2):
     return d_min, jp.j_of(d_min)
 
 
+def header_flags(h):
+    """The lane's mode bits (ruling HDR): an optional 7th header element,
+    FLAG_HALF_HIGH | FLAG_CLK_INV; 0 when absent."""
+    return int(h[6]) if len(h) > 6 else 0
+
+
 def assemble(lanes, headers):
-    """Emit the image. `headers` is {lane: (pin, clkpin, mode, t, dsched, dtol)}."""
+    """Emit the image. `headers` is {lane: (pin, clkpin, mode, t, dsched, dtol
+    [, flags])}."""
     check_queue_ownership(lanes)
     check_shift_clock_alias(lanes, headers)
     check_receive_pin(lanes, headers)
@@ -618,18 +627,25 @@ def assemble(lanes, headers):
     hs = []
     for ln in range(N_LANES):
         if ln in headers:
-            pin, clkpin, mode, t, ds, dt = headers[ln]
+            pin, clkpin, mode, t, ds, dt = headers[ln][:6]
+            flags = header_flags(headers[ln])
             # ⛔ RULING RC4: the order is derived from the lane's program
             # (START/STOP framing = I2C = MSB-first), never left to `hdr()`'s
             # LSB default, which put every I2C byte on the wire reversed
-            hs.append(hdr(pin, clkpin, mode, t, 2, ds, dt, base[ln],
+            hs.append(hdr(pin, clkpin, mode, t, flags, ds, dt, base[ln],
                           order=order_for([a[0] for a in lanes[ln]])))
         else:
-            hs.append(hdr(1, 1, 0, 500, 2, 200, 240, lp))
+            hs.append(hdr(1, 1, 0, 500, 0, 200, 240, lp))
     img = b"".join(hs) + b"".join(prog)
     if len(img) > (1 << AW):
         raise Reject("image is %d bytes, over the %d-byte program store"
                      % (len(img), 1 << AW))
+    # ⛔ RULING HDR / CE1 / CE2: the header mode bits, judged on the image as
+    # emitted, by the same function the image audit runs (`pe_isa`).
+    import gate_j_program as jp
+    fp = flag_problems(img, jp.D_STAR)
+    if fp:
+        raise Reject("; ".join(fp))
     # ⛔⛔ THE ACCEPTED IMAGE IS THE WHOLE STORE (ruling M1). The store has no
     # reset; a short image leaves the rest of it holding whatever powered up,
     # one missing REARM away from running on real pins. Every byte past the
@@ -1178,8 +1194,8 @@ def main() -> int:
            act(OP_REARM, 0, 1, 70)]
     park = _AB + len(i2c) * ACT_BYTES
     bad = full_store(b"".join(
-        [hdr(2, 1, 0, 70, 2, 140, 210, _AB, order=_LSB)]
-        + [hdr(p, p, 0, 500, 2, 200, 240, park) for p in (0, 3, 4, 5)])
+        [hdr(2, 1, 0, 70, 0, 140, 210, _AB, order=_LSB)]
+        + [hdr(p, p, 0, 500, 0, 200, 240, park) for p in (0, 3, 4, 5)])
         + b"".join(i2c) + act(OP_REARM, 0, 0, 500))
     try:
         check_i2c_order(bad)
@@ -1191,13 +1207,67 @@ def main() -> int:
               % ("" if ok else " *** but did not name lane 0 / LSB-first"))
         rc |= 0 if ok else 1
     order = _lp(full_store(b"".join(
-        [hdr(2, 1, 0, 70, 2, 140, 210, _AB,
+        [hdr(2, 1, 0, 70, 0, 140, 210, _AB,
              order=order_for([_S, OP_SHIFT, _P, OP_REARM]))]
-        + [hdr(p, p, 0, 500, 2, 200, 240, park) for p in (0, 3, 4, 5)])
+        + [hdr(p, p, 0, 500, 0, 200, 240, park) for p in (0, 3, 4, 5)])
         + b"".join(i2c) + act(OP_REARM, 0, 0, 500)))[0][0]["order"]
     print("    the same lane, order derived by order_for: %s  %s"
           % ("MSB" if order else "LSB", "ok" if order else "*** WRONG"))
     rc |= 0 if order else 1
+
+    # ---- MUST-FIRES: RULING HDR -- the header mode bits, both ways --------
+    # ⭐ Each arm goes through `assemble`, the path a user's program takes, and
+    # each refusal must NAME what it refused; the accepted arms are the ones
+    # CE1 and CE2 exist to allow, so a check that refused them would be a ban.
+    print()
+    print("  --- must-fire: header mode bits (HDR / CE1 / CE2) ---")
+    import gate_j_program as _jp
+
+    def _one(lane_acts, header):
+        return assemble({0: lane_acts}, {0: header})
+
+    def _clocked(pin, dly):
+        return [(OP_SHIFT, pin, 1, dly, 0), (OP_REARM, 0, 1, dly, 0)]
+
+    for name, lane_acts, header, want in (
+            ("HALF_HIGH Fm I2C at d = 82", _clocked(2, 82),
+             (2, 1, 0, 82, 164, 246, FLAG_HALF_HIGH), None),
+            ("HALF_HIGH with d/2 under D*", _clocked(2, 38),
+             (2, 1, 0, 38, 76, 114, FLAG_HALF_HIGH),
+             ("HALF_HIGH", "D* = %d" % _jp.D_STAR)),
+            ("CLK_INV on a uo_out SPI clock", _clocked(10, 25),
+             (10, 9, 1, 25, 50, 75, FLAG_CLK_INV), None),
+            ("CLK_INV on an open-drain lane", _clocked(2, 82),
+             (2, 1, 0, 82, 164, 246, FLAG_CLK_INV), ("CLK_INV", "OPEN-DRAIN")),
+            ("CLK_INV on a uio clock", _clocked(3, 25),
+             (3, 2, 1, 25, 50, 75, FLAG_CLK_INV), ("CLK_INV", "uio"))):
+        try:
+            _one(lane_acts, header)
+            ok = want is None
+            print("    %-36s accepted%s" % (name, "" if ok else
+                                             "  *** should be REJECTED"))
+        except Reject as e:
+            msg = str(e)
+            ok = want is not None and all(w in msg for w in want)
+            print("    %-36s REJECTED%s" % (name, "" if ok else
+                  "  *** %s" % ("should be accepted: " + msg[:50]
+                                if want is None else "did not name %s" % (want,))))
+        rc |= 0 if ok else 1
+    # a RESERVED bit cannot be written through `hdr()` (it refuses), so it is
+    # PLANTED in an image the way a corrupt load would carry it
+    img = bytearray(_one(_clocked(10, 25), (10, 9, 1, 25, 50, 75, 0)))
+    img[2] |= 0x08                         # flags bit 2 of lane 0's header
+    rp = flag_problems(bytes(img), _jp.D_STAR)
+    ok = any("RESERVED" in p and "lane 0" in p for p in rp)
+    print("    %-36s %s" % ("a planted RESERVED flag bit",
+                            "REFUSED" if ok else "*** NOT REFUSED"))
+    rc |= 0 if ok else 1
+    try:
+        hdr(10, 9, 1, 25, 0x4, 50, 75, ACT_BASE)
+        print("    hdr() with a reserved bit             *** ACCEPTED")
+        rc = 1
+    except ValueError:
+        print("    hdr() with a reserved bit             refused at the encoder")
     print()
     print("=" * 78)
     print("  pe_asm: %s" % ("PASSED" if rc == 0 else "FAILED"))

@@ -232,7 +232,7 @@ merely bounded. That deserves the same treatment `J = 9` just got.
 
 | # | premise | citation |
 |---|---|---|
-| P8 | **A lane's period is exactly its action delay `d`.** The timestamp advances **absolutely** — `l_timestamp[cur] <= l_timestamp[cur] + a_dly` — not from completion, so consecutive releases of a lane are `d` apart with no drift. | `src/pe_engine.v:1278` |
+| P8 | **A lane's period is exactly its action delay `d`.** The timestamp advances **absolutely** — `l_timestamp[cur] <= l_timestamp[cur] + a_dly` — not from completion, so consecutive releases of a lane are `d` apart with no drift. **⚠ AMENDED 2026-10-09 — see Amendment A4:** the advance is `wb_dly` (`d`, or `d/2` for a `HALF_HIGH` lane's clocked HIGH), so a lane's *gaps* are `d` or `d/2`, and `d_min` is over gaps. | `src/pe_engine.v:1278` |
 | P9 | **Readiness is that timestamp arriving.** `ready` tests `now - l_timestamp`, so a lane is released at its timestamp and not before. | `src/pe_engine.v` — the `g_ready` generate |
 | P10 | **At `SPL = 2` the dispatched slot is the HEAD and the refill owed is for the SPARE.** Writeback invalidates the consumed head and flips the select, so the already-prefetched spare becomes the head and the freed slot becomes the new spare. **⚠ AMENDED 2026-10-05 — see Amendment A1:** a *retiring* dispatch owes one refill; a clocked SHIFT's **re-dispatch retires nothing and owes none**. Read as "**at most** one". | `src/pe_engine.v:1353, 1367` (= P6) |
 
@@ -582,3 +582,43 @@ fired" is not evidence of a stall: at `d = 19` it fires with none
 (`PORT_SPEC.md` §6). Above `D*` it fires once, at cold start, on every arm
 and image, so step 1 holds there as measured. The induction must not use a
 branch-1 fire as its stall signal.
+
+## A4 — Ruling CE1 changes P8: a lane's gaps are `d` or `d/2` (2026-10-09)
+
+**What changed.** A clocked lane may now be `HALF_HIGH`. Its HIGH phase lasts
+`d/2`: the writeback adds `wb_dly` = `a_dly >> 1` for the HIGH phase of a
+clocked action, and the open-drain park rebases to `now + d/2` at the
+observed rise. Every other writeback still adds `d`. The advance is still
+**absolute**, so P8's no-drift argument is unchanged. What changes is the
+period: a `HALF_HIGH` lane releases at alternating gaps `d`, `d/2`.
+
+**P8, as amended.** *A lane's consecutive releases are exactly its writeback
+delay apart, absolutely: `d`, or `d/2` for the HIGH phase of a `HALF_HIGH`
+lane's clocked action.* It is anchored on both lines, the advance and the
+`wb_dly` definition (`gate_j_proof_anchors` P8, P8h).
+
+**T1, as amended.** The throughput premise is **per gap**:
+`d_min ≥ D* = 20` is taken over every gap a lane can produce, so a
+`HALF_HIGH` lane contributes `d/2`.
+- `pe_asm` refuses `HALF_HIGH` when any clocked action has `d/2 < D*`
+  (`pe_isa.flag_problems`, with must-fires). No accepted program has a gap
+  under `D*`, so the J = 1 premise holds as before.
+- `program_a2` models such a lane as **sporadic with minimum separation
+  `d/2`**. That is sound and conservative: half its gaps are really `d`, so
+  its interference is over-counted, never under-counted.
+
+**For the Lean formalisation (please tell the Lean agent):**
+- The lane model's period becomes a **gap sequence**: `d` after each LOW,
+  `d/2` after each HIGH on a `HALF_HIGH` clocked lane.
+- The D* statement should quantify over the minimum gap, not the action
+  delay.
+- No other premise moves.
+- The two gap lengths, and the exact HIGH length `d/2` (+ the sync latency on
+  an open-drain clock), are checked on every clocked bench by Layer B gaps,
+  against the golden model's `high_gap`.
+
+**Measured on the shipped evidence:**
+- `run_ckack`'s Fm `HALF_HIGH` random read at `d = 82` (`d/2 = 41 ≥ 20`)
+  is sigrok-certified at 393.7 kHz.
+- `probe_ckhalf` (`d = 82, 120, 240, 470`) has every HIGH at `d/2` + 4
+  cycles, measured.

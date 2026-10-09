@@ -65,9 +65,9 @@ def image(path):
     b1 = b0 + len(l0) * ACT_BYTES
     park = b1 + len(l1) * ACT_BYTES
     tail = [act(OP_REARM, 0, 0, 500)]
-    headers = [hdr(sda, scl, 0, d0, 2, 2 * d0, 3 * d0, b0, order=ORDER_MSB),
-               hdr(dat, ck, 1, d1, 2, 2 * d1, 3 * d1, b1, order=ORDER_LSB)]
-    headers += [hdr(p, p, 0, 500, 2, 200, 240, park) for p in (0, 5, 6)]
+    headers = [hdr(sda, scl, 0, d0, 0, 2 * d0, 3 * d0, b0, order=ORDER_MSB),
+               hdr(dat, ck, 1, d1, 0, 2 * d1, 3 * d1, b1, order=ORDER_LSB)]
+    headers += [hdr(p, p, 0, 500, 0, 200, 240, park) for p in (0, 5, 6)]
     write_image(path, b"".join(headers) + b"".join(l0 + l1 + tail))
     return path
 
@@ -115,7 +115,7 @@ def pindiv_image(path=None):
     for ln in range(5):
         pin, ck, mode, d, acts = lanes[ln]
         ops = [int.from_bytes(a, "big") >> (ACT_BYTES * 8 - 3) for a in acts]
-        hs.append(hdr(pin, ck, mode, d, 2, 2 * d, 3 * d, base,
+        hs.append(hdr(pin, ck, mode, d, 0, 2 * d, 3 * d, base,
                       order=order_for(ops)))
         prog += acts
         base += len(acts) * ACT_BYTES
