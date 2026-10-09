@@ -65,6 +65,9 @@ module pe_store #(
     // ships, so the rule is violated only on a path that is currently blocked.
     input  wire            wre,
     input  wire [AW-1:0]   wraddr,
+    // ⛔ RULING TM2: byte wb's address, PRE-ADDED by the engine (wraddr + wb,
+    // registered beside `wraddr`). See the wide read below.
+    input  wire [WIDE_B*AW-1:0] wraddrk,
     output reg  [WIDE_B*8-1:0] wrdata
 );
 
@@ -99,11 +102,23 @@ module pe_store #(
   endgenerate
 
   // ---- the wide read, shared by both arms so they cannot drift ----------
+  // ⛔⛔ RULING TM2 -- NO ADDER IN FRONT OF THE 256-WAY MUX. Byte wb used to
+  // read `mem[wraddr + wb]`, so an 8-bit add sat in series with the read mux,
+  // and the shared address fanned out to all three byte muxes: the second
+  // family under the +0.5 ns bar (117e55c: `e_wraddr` -> `s_wrdata`, +0.140;
+  // R6's limiter at +0.108). The engine now registers each byte's address
+  // (`wraddrk`, the same sums, the same cycle), so the add moved before the
+  // register and each byte's mux has its own address flops.
+  // `M_TM2_STORE_ADD` keeps the add here (an equivalent mutant: same values).
   integer wb;
   always @(posedge clk) begin
     if (wre) begin
       for (wb = 0; wb < WIDE_B; wb = wb + 1)
+`ifdef M_TM2_STORE_ADD
         wrdata[(WIDE_B-1-wb)*8 +: 8] <= mem[(wraddr + wb[AW-1:0])];
+`else
+        wrdata[(WIDE_B-1-wb)*8 +: 8] <= mem[wraddrk[wb*AW +: AW]];
+`endif
     end
   end
 

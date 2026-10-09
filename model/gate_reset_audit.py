@@ -91,12 +91,11 @@ ALLOWED = {
         "(the load-mode readback) later inherited a reason never written for it, "
         "which is how program byte 0 came out X. If anything else ever reads "
         "this array, this reason does not cover it."),
-    "u_eng.paddr": (
-        8,
-        "the refill address, LATCHED AT THE SCAN and consumed at P_REQ. It is "
-        "latched precisely so a writeback cannot move it between the request "
-        "and the capture -- see the arbiter comment -- so it is always written "
-        "in the cycle before it is read."),
+    # ⭐ `u_eng.paddr` WAS HERE (8 bits, write-before-read) AND IS RESET NOW
+    # (ruling TM2): its `paddr + 1` / `paddr + 2` sums let synthesis rename 7
+    # of the 8 flops to `$auto$alumacc...X`, so the by-name entry stopped
+    # matching. Resetting it was chosen over allowlisting generated names,
+    # which would break again on the next re-synthesis.
     # ⛔⛔ THIS WAS `u_eng.pslot` AND SYNTHESIS RENAMED IT. The `fix` wire
     # (the slot a refill in flight targets) reads `pslot` straight through, so
     # yosys propagated the new net name onto the same single flop: `pslot`
@@ -422,7 +421,7 @@ def main() -> int:
     # project keeps finding.
     if rc_fix:
         rc = 1
-    print("=" * 78)
+    print("=" * 78)
     print("  GATE reset-audit: %s" % ("PASSED" if rc == 0 else "FAILED"))
     print("    * %d flops, %d unreset across %d group(s); %d allowlisted, "
           "%d not" % (total, n_unreset, len(unreset),

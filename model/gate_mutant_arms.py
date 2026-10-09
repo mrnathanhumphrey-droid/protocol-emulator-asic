@@ -93,6 +93,16 @@ EXPECT = {
     # and the push-pull capture back to the observed rise
     "M_CKRX_HEADER_PIN": (2, None),
     "M_CKRX_PP_OBSERVED": (4, None),
+    # ruling TM1 / TM2: the timing fixes' OLD FORMS, both EQUIVALENT by
+    # design (cycle-identical is the requirement), kept so the old structure
+    # can be built and compared
+    "M_TM1_UNREG":       (6,
+        "TWO sites, declared: the old direct counter load replaces the pending-"
+        "load record (2 lines -> 1) AND the effective-count wire collapses to "
+        "the raw register (a 2-line mux -> 1). Neither half alone is the old "
+        "form: without the second the wire would read SDA_HS for a load that "
+        "never happens."),
+    "M_TM2_STORE_ADD":   (2, None),
     "M_SHARED_BITP":     (14,
         "a BLOCK substitution across FOUR sites, declared: the mutation "
         "re-merges the TX and RX bit pointers, and the pointer is named in the "

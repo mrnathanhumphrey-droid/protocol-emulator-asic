@@ -105,6 +105,17 @@ SURVIVORS = {
     "M_OD_CLK_PUSHPULL": "equivalent in the clocked path: every open-drain "
                          "clocked HIGH routes through the release arm; D2's "
                          "live must-fire is M_CK_OD_CLK_DRIVE.",
+    # ⭐ RULING TM1 / TM2: EQUIVALENT BY REQUIREMENT. These are the timing
+    # fixes' old forms; the ruling demands the new form be cycle-identical,
+    # so a bench that COULD kill one would be reporting a failed fix. Their
+    # evidence is the lockstep (pin + dispatch streams byte-identical vs the
+    # pre-fix RTL), and for the argmin rewrite the SymbiYosys miter.
+    "M_TM1_UNREG": "the old direct hold-counter load; TM1 records the load "
+                   "and lands it a cycle later as SDA_HS - 1, so `l_hcnt` is "
+                   "equal in every cycle -- equivalent by requirement.",
+    "M_TM2_STORE_ADD": "the old in-store address add; TM2 registers the same "
+                       "sums beside `s_wraddr`, so every byte reads the same "
+                       "address in the same cycle -- equivalent by requirement.",
 }
 
 

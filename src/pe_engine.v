@@ -196,6 +196,8 @@ module pe_engine #(
     input  wire [7:0]           s_rdata,
     // ⭐ the WIDE action fetch: one registered cycle for a whole action word
     output reg  [AW-1:0]        s_wraddr,
+    // TM2: s_wraddr + 0/1/2, registered with it (the store's WIDE_B = 3)
+    output reg  [3*AW-1:0]      s_wraddrk,
     output reg                  s_wre,
     input  wire [((3+((N_PINS<=2)?1:(N_PINS<=4)?2:(N_PINS<=8)?3:(N_PINS<=16)?4:5)+1+DLY_W+4+7)/8)*8-1:0] s_wrdata,
 
@@ -587,7 +589,25 @@ module pe_engine #(
                              (SDA_HS < 16)  ? 4 :
                              (SDA_HS < 32)  ? 5 :
                              (SDA_HS < 64)  ? 6 : 7;
-  reg [HOLDW-1:0] l_hcnt   [0:N_LANES-1];   // cycles left before SDA may move
+  // ⛔⛔ RULING TM1 -- THE HOLD LOAD IS REGISTERED, AND `l_hcnt` IS UNCHANGED.
+  // The slow-corner worst path (117e55c: -0.074 ns, and 7 of the 10 paths
+  // under the +0.5 ns bar) ran from `cur` through the DRIVE arms' `hold_ld`
+  // and the `cur` decode into all 5 x HOLDW counter flops. The DRIVE arm now
+  // only records the load (`hl_v` / `hl_l`, one lane, 1 + LW flops), and the
+  // countdown writes `SDA_HS - 1` one cycle later. `l_hcnt` is the EFFECTIVE
+  // count, a wire: the pending load reads as `SDA_HS` in exactly the cycle
+  // the old register held it, so every reader -- `hz_q`, the pin landing,
+  // Layer H in the benches -- sees the same value in every cycle.
+  // ⭐ "LOAD WINS ONLY ON AN IDLE COUNTER" IS KEPT: the old load was overwritten
+  // by the countdown's later NBA whenever the counter was still running, so
+  // `hl_v` is set only when `hz_q[cur]` (== `l_hcnt[cur] == 0`) holds.
+  // ⭐ ONE PENDING SLOT SUFFICES: `hold_ld` is raised in ST_DRIVE, once per
+  // dispatch, and dispatches are >= C = 3 cycles apart; the slot is consumed
+  // the cycle after it is set. `M_TM1_UNREG` keeps the old direct load.
+  reg [HOLDW-1:0] l_hcr    [0:N_LANES-1];   // the counter REGISTER (raw)
+  wire [HOLDW-1:0] l_hcnt  [0:N_LANES-1];   // cycles left before SDA may move
+  reg             hl_v;                     // a hold load is pending ...
+  reg [LW-1:0]    hl_l;                     // ... for this lane
   reg             l_hval   [0:N_LANES-1];   // the pending pin_out value
   reg             l_hoe    [0:N_LANES-1];   // the pending pin_oe value
   reg [7:0]       l_tx     [0:N_LANES-1];   // THE TX PAYLOAD lives here, not
@@ -1030,6 +1050,17 @@ module pe_engine #(
   reg                hold_ld;               // a DRIVE arm starts an SDA hold
 
   genvar gi;
+  // TM1: the effective hold count -- the pending load reads as SDA_HS
+  generate
+    for (gi = 0; gi < N_LANES; gi = gi + 1) begin : g_hcnt
+`ifdef M_TM1_UNREG
+      assign l_hcnt[gi] = l_hcr[gi];
+`else
+      assign l_hcnt[gi] = (hl_v && hl_l == gi) ? SDA_HS[HOLDW-1:0]
+                                               : l_hcr[gi];
+`endif
+    end
+  endgenerate
   generate
     for (gi = 0; gi < N_LANES; gi = gi + 1) begin : g_ready
       // ⛔⛔ READINESS MUST NOT DEPEND ON THE PREFETCH. It used to read
@@ -1092,23 +1123,42 @@ module pe_engine #(
   reg [N_LANES-1:0] winner_oh;   // one-hot winner, all zero when !winner_v
   generate if (N_LANES == 5) begin : g_argmin_tree
   // ---- BEGIN ARGMIN TREE ----
+    // ⛔⛔ RULING TM2 -- EVERY COMPARE IS ONE COMPARATOR DEEP. The tree used to
+    // compare, MUX THE 16-BIT WINNING KEY, compare again, mux again, compare a
+    // third time: three comparators and two wide muxes in series, the third
+    // family under the +0.5 ns bar (117e55c: `edf_key_off` -> `a_cnt`, +0.197,
+    // 50 cells). The node decisions only ever compare KEYS OF LANES, so all
+    // eight lane-pair compares run in parallel off the registered keys, and
+    // each node SELECTS the bit for the pair its children chose -- `k23 < k01`
+    // is `l31`, `l30`, `l21` or `l20` by (t3, t1). Same function by
+    // definition (k01 WAS edf_key_off[i01]); proved by the same miter.
     reg            t1, t3, t23, t4, v01, v23, v03;
+    reg            l10, l32, l20, l21, l30, l31, l40, l41, l42, l43;
     reg [LW-1:0]   i01, i23, i03;
-    reg [TS_W-1:0] k01, k23, k03;
     always @* begin
-      t1  = ready[1] && (!ready[0] || edf_key_off[1] < edf_key_off[0]);
+      l10 = edf_key_off[1] < edf_key_off[0];
+      l32 = edf_key_off[3] < edf_key_off[2];
+      l20 = edf_key_off[2] < edf_key_off[0];
+      l21 = edf_key_off[2] < edf_key_off[1];
+      l30 = edf_key_off[3] < edf_key_off[0];
+      l31 = edf_key_off[3] < edf_key_off[1];
+      l40 = edf_key_off[4] < edf_key_off[0];
+      l41 = edf_key_off[4] < edf_key_off[1];
+      l42 = edf_key_off[4] < edf_key_off[2];
+      l43 = edf_key_off[4] < edf_key_off[3];
+      t1  = ready[1] && (!ready[0] || l10);
       v01 = ready[0] | ready[1];
       i01 = t1 ? 3'd1 : 3'd0;
-      k01 = t1 ? edf_key_off[1] : edf_key_off[0];
-      t3  = ready[3] && (!ready[2] || edf_key_off[3] < edf_key_off[2]);
+      t3  = ready[3] && (!ready[2] || l32);
       v23 = ready[2] | ready[3];
       i23 = t3 ? 3'd3 : 3'd2;
-      k23 = t3 ? edf_key_off[3] : edf_key_off[2];
-      t23 = v23 && (!v01 || k23 < k01);
+      // k23 < k01, the pair chosen by (t3, t1)
+      t23 = v23 && (!v01 || (t3 ? (t1 ? l31 : l30) : (t1 ? l21 : l20)));
       v03 = v01 | v23;
       i03 = t23 ? i23 : i01;
-      k03 = t23 ? k23 : k01;
-      t4  = ready[4] && (!v03 || edf_key_off[4] < k03);
+      // edf_key_off[4] < k03, k03 being the key of lane i03
+      t4  = ready[4] && (!v03 || (t23 ? (t3 ? l43 : l42)
+                                      : (t1 ? l41 : l40)));
       winner   = t4 ? 3'd4 : i03;
       winner_v = v03 | ready[4];
       // ⭐ TF2-R2: the SAME decisions, as five select lines. Each lane's line
@@ -1755,6 +1805,7 @@ module pe_engine #(
       s_raddr  <= {AW{1'b0}};
       s_wre    <= 1'b0;
       s_wraddr <= {AW{1'b0}};
+      s_wraddrk <= {(3*AW){1'b0}};
     end else begin
       s_re <= 1'b0;
       if (hst == H_REQ) begin
@@ -1775,6 +1826,9 @@ module pe_engine #(
         // Latching the (lane, slot, address) triple together is what keeps the
         // refill atomic with respect to the dispatch pipeline.
         s_wraddr <= paddr;
+        // TM2: each byte's address, added HERE (off the store read path)
+        s_wraddrk <= {paddr + {{(AW-2){1'b0}}, 2'd2},
+                      paddr + {{(AW-1){1'b0}}, 1'b1}, paddr};
       end
     end
   end
@@ -1799,6 +1853,15 @@ module pe_engine #(
       prr      <= {LW{1'b0}};
       pbr1     <= 1'b0;
       hz_q     <= {N_LANES{1'b1}};          // every l_hcnt resets to 0
+      hl_v     <= 1'b0;                     // TM1: no hold load pending
+      hl_l     <= {LW{1'b0}};
+      // ⭐ TM2: `paddr` IS RESET NOW. It was a deliberately unreset register
+      // (written at the scan, read at P_REQ), allowlisted BY NAME in the
+      // reset audit -- and TM2's `paddr + 1` / `paddr + 2` let synthesis put
+      // `$auto$alumacc` names on 7 of its 8 flops, so the name stopped
+      // matching (the `pslot` -> `fix` lesson, again). Write-before-read makes
+      // the reset invisible; it removes the name from the audit's concern.
+      paddr    <= {AW{1'b0}};
       rel_q    <= {N_LANES{1'b0}};          // every l_live resets to 0
       // ⭐ RESET-HIGH on the pins is handled in the TOP module, not here:
       //   which pins can RELEASE differs between the two banks, and this
@@ -1840,7 +1903,7 @@ module pe_engine #(
         l_ckwdog[i] <= 7'd0;
         l_cksamp[i] <= 1'b0;
         l_ckgot[i]  <= 1'b0;
-        l_hcnt[i]   <= {HOLDW{1'b0}};
+        l_hcr[i]    <= {HOLDW{1'b0}};
         l_hval[i]   <= 1'b0;
         l_hoe[i]    <= 1'b0;
 `ifdef M_SHARED_BITP
@@ -2942,7 +3005,14 @@ module pe_engine #(
       // countdown on purpose: the countdown's write is the later one, so for
       // a lane whose counter is still running the countdown wins -- the same
       // order the loads had when they were written inside the DRIVE arms.
-      if (hold_ld) l_hcnt[cur] <= SDA_HS[HOLDW-1:0];
+      // ⭐ TM1: the load is RECORDED here and lands through `l_hcnt` next
+      // cycle; only an idle counter takes it (the old NBA order).
+`ifdef M_TM1_UNREG
+      if (hold_ld) l_hcr[cur] <= SDA_HS[HOLDW-1:0];
+`else
+      hl_v <= hold_ld & hz_q[cur];
+      hl_l <= cur;
+`endif
       for (i = 0; i < N_LANES; i = i + 1) begin
         // ⭐ TF1: `hz_q` is `l_hcnt == 0` for the NEXT cycle, written by the
         // same branches that write the counter, in the same priority.
@@ -2960,7 +3030,7 @@ module pe_engine #(
               pin_oe[l_pin[i]]  <= l_hoe[i];
             end
           end
-          l_hcnt[i] <= l_hcnt[i] - {{(HOLDW-1){1'b0}}, 1'b1};
+          l_hcr[i] <= l_hcnt[i] - {{(HOLDW-1){1'b0}}, 1'b1};
         end
       end
 

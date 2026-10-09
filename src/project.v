@@ -313,6 +313,7 @@ module tt_um_protocol_emulator #(
   reg          rb_re;
 
   wire [AW-1:0]  e_wraddr;
+  wire [3*AW-1:0] e_wraddrk;                  // TM2: per-byte addresses
   wire           e_wre;
   wire [3*8-1:0] s_wrdata;
 
@@ -322,7 +323,8 @@ module tt_um_protocol_emulator #(
       .re(prog_mode ? rb_re : e_re),
       .raddr(prog_mode ? rb_addr : e_raddr),
       .rdata(s_rdata),
-      .wre(e_wre & run), .wraddr(e_wraddr), .wrdata(s_wrdata)
+      .wre(e_wre & run), .wraddr(e_wraddr), .wraddrk(e_wraddrk),
+      .wrdata(s_wrdata)
   );
 
   // =====================================================================
@@ -496,7 +498,8 @@ module tt_um_protocol_emulator #(
   ) u_eng (
       .clk(clk), .rst_n(rst_n), .run(eng_run),
       .s_raddr(e_raddr), .s_re(e_re), .s_rdata(s_rdata),
-      .s_wraddr(e_wraddr), .s_wre(e_wre), .s_wrdata(s_wrdata),
+      .s_wraddr(e_wraddr), .s_wraddrk(e_wraddrk), .s_wre(e_wre),
+      .s_wrdata(s_wrdata),
       .pin_out(e_pin_out), .pin_oe(e_pin_oe), .pin_in(pin_in),
       .pin_rise(pin_rise), .pin_fall(pin_fall),
       .host_data(tx_head), .host_valid(tx_valid), .host_pop(e_host_pop),
