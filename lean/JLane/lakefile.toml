@@ -1,0 +1,6 @@
+name = "JLane"
+version = "0.1.0"
+defaultTargets = ["JLane"]
+
+[[lean_lib]]
+name = "JLane"
