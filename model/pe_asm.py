@@ -609,9 +609,36 @@ def header_flags(h):
     return int(h[6]) if len(h) > 6 else 0
 
 
+def split_counts(lanes):
+    """An action is `(op, pin, level, delay, q[, count])`; count defaults to 8.
+
+    ⭐ FOUND BY THE UART-rx DEMO (Wilson's UART ruling): the count was
+    hard-wired to 8, so pe_asm could not express a ONE-bit SHIFTIN -- the
+    mid-stop sample that turns the stop bit into a pushed byte the host checks.
+    The checks below all read 5-tuples; the count is split off here, once.
+    Returns (lanes with 5-tuples, {(lane, index): count}).
+    """
+    five, counts = {}, {}
+    for ln in lanes:
+        five[ln] = []
+        for i, a in enumerate(lanes[ln]):
+            if len(a) not in (5, 6):
+                raise Reject("lane %d action %d has %d fields; an action is "
+                             "(op, pin, level, delay, q[, count])"
+                             % (ln, i, len(a)))
+            cnt = int(a[5]) if len(a) == 6 else 8
+            if not 1 <= cnt <= 15:
+                raise Reject("lane %d action %d: count %d is outside 1..15 "
+                             "(the 4-bit count field)" % (ln, i, cnt))
+            counts[(ln, i)] = cnt
+            five[ln].append(tuple(a[:5]))
+    return five, counts
+
+
 def assemble(lanes, headers):
     """Emit the image. `headers` is {lane: (pin, clkpin, mode, t, dsched, dtol
-    [, flags])}."""
+    [, flags])}; an action is `(op, pin, level, delay, q[, count])`."""
+    lanes, counts = split_counts(lanes)
     check_queue_ownership(lanes)
     check_shift_clock_alias(lanes, headers)
     check_receive_pin(lanes, headers)
@@ -619,8 +646,8 @@ def assemble(lanes, headers):
     prog, base, off = [], {}, ACT_BASE
     for ln in sorted(lanes):
         base[ln] = off
-        for (op, pin, lvl, dly, q) in lanes[ln]:
-            prog.append(act(op, pin, lvl, dly, count=8, q=q))
+        for i, (op, pin, lvl, dly, q) in enumerate(lanes[ln]):
+            prog.append(act(op, pin, lvl, dly, count=counts[(ln, i)], q=q))
             off += ACT_BYTES
     lp = off
     prog.append(act(OP_REARM, 0, 0, 500))
@@ -707,13 +734,15 @@ def report(lanes, headers):
     print("=" * 78)
     print("pe_asm -- assemble and judge a program")
     print("=" * 78)
+    full = lanes
     try:
+        lanes, _counts = split_counts(lanes)
         owner = check_queue_ownership(lanes)
         check_shift_clock_alias(lanes, headers)
         check_receive_pin(lanes, headers)
         hold = check_clocked_hold_delay(lanes, headers)
         d_min, j = compute_j(lanes)
-        img = assemble(lanes, headers)
+        img = assemble(full, headers)
     except Reject as e:
         print("  REJECTED: %s" % e)
         return 1

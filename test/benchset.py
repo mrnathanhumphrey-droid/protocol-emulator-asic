@@ -72,7 +72,8 @@ XFAIL = {("tb_verdict", "pipeline")}
 
 NEEDS_NBYTES = {"tb_tx", "tb_half", "tb_i2c", "tb_csat", "tb_jlane", "tb_status",
                 "tb_fifo", "tb_lock", "tb_w", "tb_ckack", "tb_cktx",
-                "tb_rxbw", "tb_trace", "tb_witness", "tb_pinrange"}
+                "tb_rxbw", "tb_trace", "tb_witness", "tb_pinrange",
+                "tb_uartrx"}
 
 #: ⛔⛔ PLUSARGS READ BY A **SHARED INCLUDE**, with their default declared ONCE.
 #: `test/clocked_conform.vh` is included by thirteen benches, so a plusarg read
@@ -434,6 +435,14 @@ CONFIG = {
     "tb_rxbw": {
         "srcs": [],
         "arms": [("default", ["+IMG=test/rxfast_image.hex", "+NCYC=200000"])],
+    },
+    # Wilson's UART ruling: the first program receiving a real UART stream,
+    # against a baud-errored peer (2 % slow), bytes vs what the peer sent.
+    "tb_uartrx": {
+        "srcs": [],
+        "arms": [("err+20", ["+IMG=test/uart_rx_image.hex", "+BITP=64",
+                             "+ERR=20", "+NFR=40", "+SEED=1",
+                             "+BADSTOP=-1"])],
     },
     # ⭐⭐ THE PEER MODELS ARE COVERED HERE, AND THAT IS THE POINT WILSON MADE:
     # the I2C peer's address-match branch had never fired, and coverage would

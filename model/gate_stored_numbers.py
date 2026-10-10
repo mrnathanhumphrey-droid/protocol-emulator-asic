@@ -355,6 +355,11 @@ SPEC_SYMBOLS = {
     # computed every run.
     ("model/gate_cdc.py", "SYNC"),
     ("model/gate_cdc.py", "QUALIFIED"),
+    # ⭐ WILSON'S UART RULING: the BAUD ERRORS the UART-rx program is held to
+    # (-3, -2, 0, +2, +3 %, per-mille). A specification -- the real-world
+    # tolerance the ruling names -- and an input to the peer; what is measured
+    # is whether every byte arrives, computed every run.
+    ("test/run_uartrx.py", "ERRS"),
     # ⭐⭐ UM10204's TIMING MINIMA, TRANSCRIBED. These are REQUIREMENTS the
     # design is measured against, so they are inputs in the strongest sense --
     # the whole point of the gate that holds them is that nothing in this repo

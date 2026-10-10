@@ -655,26 +655,69 @@ def main() -> int:
     # boundary is used (EX1 prints `boundary consumes (= 1): N`, N > 0);
     # M_RX_CAPGATE_LATE: never (N = 0, no functional failure -- the only
     # trace it leaves); M_RX_CAPGATE_EARLY: EX1 and rx_e2e both fail.
+    # ⛔ WILSON (EX1 ruling): the count is PINNED EXACTLY, per image digest --
+    # "> 0" would let a drift from 1016 to 900 pass -- and every consume is
+    # CLASSIFIED (rx_e2e.vh `EX1 classes`): boundary = dispatched at its first
+    # ready cycle (ready -> ST_DRIVE = 3, measured) with the capture still
+    # pending; the off-boundary 72 are CONTENTION -- ready before the capture
+    # landed, dispatched 2 cycles late because another lane's dispatch went
+    # first. Nothing unexplained. An unknown digest is red: re-derive, re-pin.
+    import hashlib
     import pe_isa as I
+    EX1_PIN = {"43c6dfdeda8f931c": dict(n=1088, boundary=1016, b_unexp=0,
+                                        contention=72, late=0, o_unexp=0)}
     d4 = os.path.join(TMP, "spim_d4.hex")
     img4, _ = corpus.build_spi_master(d=4)
+    store4 = bytes(I.full_store(bytes(img4)))
+    dig4 = hashlib.sha256(store4).hexdigest()[:16]
     with open(d4, "w", encoding="ascii", newline="\n") as fh:
-        fh.write("\n".join("%02x" % b for b in I.full_store(bytes(img4))) + "\n")
+        fh.write("\n".join("%02x" % b for b in store4) + "\n")
 
-    def spim4(v):
+    def spim4(v, extra=()):
         r = run([tool("vvp"), v, "+IMG=%s" % d4, "+NBYTES=256", "+PEER=spi",
                  "+OUT=%s" % os.path.join(TMP, "rx_d4.txt"), "+NCYC=60000",
                  "+SEED=1", "+ASYNC=0", "+STAYLOAD=0", "+SCLHOLD=0",
                  "+SPI_SCK_INV=0"] + feed_args(os.path.join(ROOT, "test",
-                                                            "corpus_spim.hex")))
+                                                            "corpus_spim.hex"))
+                + list(extra))
         o = r.stdout + r.stderr
         m = re.search(r"boundary consumes \(= 1\): (\d+)", o)
         return o, (int(m.group(1)) if m else None)
 
     o, nb = spim4(vvp)
-    ex_ok = nb is not None and nb > 0 and o.count("*** FAIL") == 0
-    print("  EX1 d=4 clean : boundary consumes %s  %s" % (
-        nb, "ok (the exact edge is used)" if ex_ok else "*** NOT EXACT"))
+    mn = re.search(r"EX1: ok -- (\d+) push-pull", o)
+    mc = re.search(r"EX1 classes: boundary (\d+) \(\+ (\d+) unexplained\); "
+                   r"off-boundary: contention (\d+), late release (\d+) "
+                   r"\(\+ (\d+) unexplained\)", o)
+    got = None
+    if mn and mc:
+        got = dict(n=int(mn.group(1)), boundary=int(mc.group(1)),
+                   b_unexp=int(mc.group(2)), contention=int(mc.group(3)),
+                   late=int(mc.group(4)), o_unexp=int(mc.group(5)))
+    want_pin = EX1_PIN.get(dig4)
+    ex_ok = (got is not None and got == want_pin and nb == got["boundary"]
+             and o.count("*** FAIL") == 0)
+    print("  EX1 d=4 clean : image %s  %s" % (dig4, got))
+    if want_pin is None:
+        print("  *** EX1: image digest %s is not pinned -- the d = 4 image "
+              "changed; re-derive and re-pin its counts" % dig4)
+    elif not ex_ok:
+        print("  *** EX1: expected exactly %s" % want_pin)
+    else:
+        print("  EX1 d=4 clean : ok -- exact pin; %d boundary, %d contention, "
+              "0 unexplained" % (got["boundary"], got["contention"]))
+    # ⛔ DL1 (Wilson): a receive that stops PART-WAY must be red, not only one
+    # that never completes a byte. Planted: the capture slot is forced off at
+    # cycle 20000, after dozens of bytes (rx_e2e.vh `+RX_PLANT_HANG`).
+    o, _ = spim4(vvp, ["+RX_PLANT_HANG=20000"])
+    mh = re.search(r"EX1: ok -- (\d+) push-pull", o)
+    hit = ("PLANTED HANG" in o and "STOPPED with receive work owed" in o
+           and mh is not None and int(mh.group(1)) >= 64)
+    print("  must-fire %-20s %s" % ("hang @20000 (DL1)", (
+        "red  ok -- stopped after %s consumes (%d+ bytes)" % (
+            mh.group(1), int(mh.group(1)) // 8)) if hit
+        else "*** MUST-FIRE FAILED (a part-way hang passed)"))
+    ex_ok = ex_ok and hit
     for mut, want in (("M_RX_CAPGATE_LATE", "late"), ("M_RX_CAPGATE_EARLY", "early")):
         mv = os.path.join(TMP, "tr_%s.vvp" % mut.lower())
         bok, blog = iverilog_build(mv, [mut])

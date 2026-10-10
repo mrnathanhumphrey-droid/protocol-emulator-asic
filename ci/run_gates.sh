@@ -183,6 +183,11 @@ GATES=(
   # synchronizer (silicon fixes #4 / #5). Priced by building M_CDC_RAW, the
   # 94cebb7 wiring, whose ui_in[7] -> run path must be named.
   model/gate_cdc.py
+  # ⭐⭐ UART -- the first program that RECEIVES a real UART stream (Wilson's
+  # UART ruling): 8N1 vs a peer at -3..+3 % baud, back-to-back frames, bytes
+  # vs what the PEER sent, count exact; framing reported; must-fires "edge"
+  # (sampled at the bit edge, red at +-2 %) and "nostop" (no framing check).
+  test/run_uartrx.py
   # ⭐ MU -- the simulation mutant runner, ~10 s: every arm must die of the
   # assertion it names. It was run by nothing, so its kills were as old as the
   # day each was last typed.
