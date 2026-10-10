@@ -1,6 +1,102 @@
 name: test
-on: [push, workflow_dispatch]
+on:
+  push:
+  # ⭐ A MANUAL DISPATCH IS THE FULL LN1 RUN (200k rows per arm); a push runs
+  # 20k. A `schedule` would only ever fire on the default branch (cmos5l), i.e.
+  # test the locked tree rather than dev, so the full run is dispatched by hand.
+  workflow_dispatch:
+    inputs:
+      ln1_rows:
+        description: "LN1 rows per arm (200000 = the full run)"
+        default: "200000"
 jobs:
+  # ⛔⛔ LN1 -- THE LEAN REPLAY GATE (Wilson; spec from the Lean agent): the Lean
+  # model's `step` replayed against traces EXPORTED HERE from the commit under
+  # test (never stored CSVs), every arm held to a pinned signature -- the three
+  # must-fires must fail for their EXPECTED reason, the 10 out-of-scope images
+  # must stay out of scope at row 0 -- plus `#print axioms` on dstar, dstar29
+  # and dstar39 == exactly [propext, Quot.sound]. Divergence = red.
+  ln1:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v6
+
+      - name: Install iverilog
+        shell: bash
+        run: sudo apt-get update && sudo apt-get install -y iverilog
+
+      # The SAME pinned suite as the test job, for its Verilator only: the
+      # M_PFETCH_NOWAIT arm's seed-4 trace was chosen on this release.
+      - name: Cache the pinned OSS CAD Suite
+        id: osscad
+        uses: actions/cache@v4
+        with:
+          path: /opt/oss-cad-suite
+          key: oss-cad-suite-linux-x64-20260930
+
+      - name: Download the pinned OSS CAD Suite
+        if: steps.osscad.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          URL=https://github.com/YosysHQ/oss-cad-suite-build/releases/download/2026-09-30/oss-cad-suite-linux-x64-20260930.tgz
+          curl -fL --retry 3 -o /tmp/oss-cad-suite.tgz "$URL"
+          sudo mkdir -p /opt/oss-cad-suite
+          sudo tar -xzf /tmp/oss-cad-suite.tgz -C /opt/oss-cad-suite --strip-components=1
+
+      - name: Setup python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Install Python packages
+        shell: bash
+        run: pip install -r test/requirements.txt
+
+      # Lean: elan + the toolchain cached on `lean-toolchain`, the build tree
+      # on `lean-toolchain` + `lake-manifest.json` (lake rebuilds what changed).
+      - name: Cache elan and the Lean toolchain
+        id: elan
+        uses: actions/cache@v4
+        with:
+          path: ~/.elan
+          key: elan-${{ runner.os }}-${{ hashFiles('lean/JLane/lean-toolchain') }}
+
+      - name: Install elan
+        if: steps.elan.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -sSfL https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh \
+            | sh -s -- -y --default-toolchain none
+
+      - name: Put elan on PATH
+        shell: bash
+        run: echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+
+      - name: Cache the Lean build tree
+        uses: actions/cache@v4
+        with:
+          path: lean/JLane/.lake
+          key: lake-${{ runner.os }}-${{ hashFiles('lean/JLane/lean-toolchain', 'lean/JLane/lake-manifest.json') }}
+
+      - name: LN1 replay gate (ci/ln1_replay.py)
+        shell: bash
+        env:
+          PE_VERILATOR: /opt/oss-cad-suite/bin/verilator
+        run: |
+          python ci/ln1_replay.py --out ln1_out \
+            --rows ${{ github.event_name == 'workflow_dispatch' && inputs.ln1_rows || '20000' }}
+
+      - name: Upload LN1 logs
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ln1-logs
+          path: ln1_out/**/*.log
+
+
   test:
     runs-on: ubuntu-24.04
     steps:
