@@ -28,11 +28,24 @@ structure Row where
   oos : Nat
   deriving Inhabited
 
-def parseRow (line : String) : Except String Row := do
+/-- The TR-1 column names, in order. A TR-2 export keeps them as its first 22 and
+appends 18 columns (`hkind0..4` … `cappend`) that this replay does not read yet. -/
+def tr1Names : List String :=
+  ["cycle", "now", "st", "cur", "pst", "pl", "prr", "pbr1", "pslot", "winq_v", "winq",
+   "win_v", "win", "wb_dly", "ts0", "ts1", "ts2", "ts3", "ts4", "sel", "actv", "oos"]
+
+/-- Accepted widths: exactly 22 (TR-1) or exactly 40 (TR-2). -/
+def fmtName : Nat → Option String
+  | 22 => some "TR-1/22"
+  | 40 => some "TR-2/40"
+  | _ => none
+
+def parseRow (width : Nat) (line : String) : Except String Row := do
   let toks := line.splitOn ","
-  if toks.length != 22 then
-    throw s!"expected 22 columns, got {toks.length}"
+  if toks.length != width then
+    throw s!"expected {width} columns, got {toks.length}"
   let mut vs : Array Nat := #[]
+  -- every column must be numeric, the 18 unread TR-2 ones included
   for t in toks do
     match t.toNat? with
     | some v => vs := vs.push v
@@ -113,6 +126,7 @@ structure Report where
   br1 : Nat := 0
   startOk : Bool := true
   startMsg : String := ""
+  fmt : String := "?"
 
 def Report.failed (r : Report) : Bool :=
   r.parseErr.isSome || r.mismatch.isSome || r.notReady > 0 || r.wcViol > 0
@@ -123,7 +137,7 @@ def Report.line (r : Report) : String :=
   let oos := match r.oosAt with
     | some k => s!"{k}"
     | none => "never"
-  s!"{status} {r.path}: checked={r.checked} oos_at={oos} " ++
+  s!"{status} {r.path}: fmt={r.fmt} checked={r.checked} oos_at={oos} " ++
   s!"mismatch={r.mismatch.getD "none"} parse={r.parseErr.getD "none"} " ++
   s!"not_ready={r.notReady} wc_viol={r.wcViol} stalls={r.stalls} br1_issues={r.br1} " ++
   s!"start={if r.startOk then "ok" else r.startMsg}"
@@ -141,11 +155,19 @@ def replayFile (path : String) : IO Report := do
     return { rep with parseErr := some "fewer than 3 lines" }
   let liveMask := parseLive lines[0]!
   let live : Lane → Bool := fun l => liveMask.testBit l.val
+  -- header: 22 or 40 names; a 40-column export must keep the TR-1 names, in order,
+  -- as its first 22, so a reordered export fails here instead of being misread
+  let names := (lines[1]!.replace "\r" "").splitOn ","
+  let some fmt := fmtName names.length
+    | return { rep with parseErr := some s!"header: expected 22 or 40 columns, got {names.length}" }
+  rep := { rep with fmt := fmt }
+  if names.length == 40 && names.take 22 != tr1Names then
+    return { rep with parseErr := some "header: first 22 names are not the TR-1 names in order" }
   let mut rows : Array Row := #[]
   for i in [2:lines.size] do
     let ln := lines[i]!.replace "\r" ""
     if ln.isEmpty then continue
-    match parseRow ln with
+    match parseRow names.length ln with
     | .ok r => rows := rows.push r
     | .error msg => return { rep with parseErr := some s!"line {i + 1}: {msg}" }
   if rows.size < 2 then
