@@ -144,10 +144,12 @@ CLOCKED_MUTANTS = [
      "action's (MISO): the chip receives its own output, 00, while MISO "
      "carries 5B C4 -- every frame disagrees with the pins."),
     ("M_CKRX_PP_OBSERVED", "corpus_spim", "spi",
-     "*** FAIL clocked_conform[V-RX]",
+     "*** FAIL rx_e2e",
      "a push-pull clocked SHIFTIN waits for an OBSERVED rise; the SPI master's "
-     "SCLK is a uo_out pin with no input path, so it never captures and every "
-     "bit is consumed uncaptured (read as 0)."),
+     "SCLK is a uo_out pin with no input path, so it never captures. Before "
+     "RX1 every bit was consumed uncaptured (read as 0); since RX1's capture "
+     "gate the receive lane DEADLOCKS, which only rx_e2e's completion rule "
+     "names (V-RX and the coarse liveness check both stayed quiet)."),
     ("M_ACK_DRIVES_SDA", "corpus_i2c", "i2c", "OD_HARD1",
      "the clocked ACK drives SDA as a PUSH-PULL HIGH on an open-drain net "
      "while the peer pulls low to acknowledge -- a SHORT. The trace shows "

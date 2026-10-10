@@ -1123,10 +1123,49 @@ module pe_engine #(
       // timestamp ARRIVED by signed difference, and not armed-without-
       // timeout); `hz_q` the registered "hold counter is zero".
       assign rel_due[gi] = rel_q[gi];
-`ifdef M_NO_HOLD_GATE
-      assign ready[gi] = rel_due[gi];
+      // ⭐⭐ RULING RX1 -- SILICON FIX #7, THE W1 ANALOG FOR RECEIVE. A
+      // push-pull clocked SHIFTIN lane is INELIGIBLE while its capture is
+      // pending (`l_ckwait`: set by the HIGH dispatch, cleared on the edge
+      // the capture lands and sets `l_ckgot`). Without it, a late HIGH
+      // dispatch followed by an on-time LOW shrank the HIGH phase below the
+      // capture latency under contention, and the LOW consumed the bit
+      // before it was captured -- reading 0 (552 of ~3,300 lane-2 SHIFTINs
+      // on corpus_all5 seed 1). Contention-independent by construction; it
+      // adds at most the capture latency to a late LOW (A2: like W6).
+      // Open-drain lanes are excluded: they PARK on the observed rise.
+      // ⛔ M_RX_NO_CAPGATE removes it (the pre-fix behaviour).
+      // ⭐ EXACT, NOT CONSERVATIVE. A LOW picked in cycle c consumes at its
+      // writeback in c + 2, so it needs the capture to have LANDED by then:
+      // the capture slot fires this cycle or next (`ppc_n <= 1`). The first
+      // version blocked until the capture had landed BEFORE the pick, 2 cycles
+      // stricter than needed, and moved a dispatch on ce_spim_inv_m0 where the
+      // old RTL lost no bit -- against RX1's "cycle-identical except where the
+      // old behaviour lost a bit".
+      // ⛔ EX1's two exactness mutants move the boundary by one cycle each
+      // way (EARLY: allowed while ppc_n = 2, the bit is consumed before its
+      // capture; LATE: only at ppc_n = 0, one cycle of slack lost). Each has
+      // its own `ifdef -- the drift and kill gates discover no `elsif`.
+`ifdef M_RX_CAPGATE_EARLY
+      wire cap_early = 1'b1;
 `else
-      assign ready[gi] = rel_due[gi] & hz_q[gi];
+      wire cap_early = 1'b0;
+`endif
+`ifdef M_RX_CAPGATE_LATE
+      wire cap_late = 1'b1;
+`else
+      wire cap_late = 1'b0;
+`endif
+      wire [1:0] cap_lead = 2'd1 + {1'b0, cap_early} - {1'b0, cap_late};
+`ifdef M_RX_NO_CAPGATE
+      wire cap_ok = 1'b1;
+`else
+      wire cap_ok = ~(l_ckwait[gi] & l_mode[gi])
+                    | (ppc_v & (ppc_l == gi) & (ppc_n <= cap_lead));
+`endif
+`ifdef M_NO_HOLD_GATE
+      assign ready[gi] = rel_due[gi] & cap_ok;
+`else
+      assign ready[gi] = rel_due[gi] & hz_q[gi] & cap_ok;
 `endif
       // ⭐ deadline as an OFFSET FROM NOW, so a wrapped key still orders
       //   correctly. 1.6b is what bounds the spread that makes this sound.

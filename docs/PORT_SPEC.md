@@ -365,3 +365,128 @@ give `2d ≥ 37`, i.e. `d ≥ 19`. Runs were 1M cycles with probes
 `R_i` is a response-time quantity, so the port invariant and the EDF analysis
 are coupled through it. The Lean statement needs that coupling stated
 explicitly, or an independent bound on `R_i` such as pyRTA's.
+
+## 7. The v1 exclusions, read from the RTL (v2 input)
+
+*For the Lean agent's v2 model.* v1's replay stops at the first cycle with
+`oos ≠ 0`. This section gives the RTL behaviour of each excluded feature in
+the form of §1–§5. **Anchors are verbatim substrings of `src/pe_engine.v`,
+checked on every push by `model/gate_j_proof_anchors.py`** (the anchor column
+below is parsed; a missing anchor is red). Line numbers are omitted on
+purpose: the anchors are the citation. The RTL is the RX batch (rulings CDC2,
+CS1, RX1). Stages: **decision** = the `ST_IDLE` cycle that picks the EDF
+winner; **DRIVE** = the next cycle (`st == ST_DRIVE`), which writes pins;
+**WB** = the cycle after that (`st == ST_WB`), which advances state and always
+returns to `ST_IDLE`, so a lane is dispatched at most once every 3 cycles.
+
+**One rule for every action (the timestamp).** At WB the lane's timestamp
+advances by the writeback delay `wb_dly`, which is `a_dly` except on the HIGH
+of a HALF_HIGH lane (D). A rebase on an observed edge overrides it (D, G).
+
+| fact | anchor |
+|---|---|
+| next-state timestamp: hold while `!run`; on an armed lane's edge, `ck_rebase`; at this lane's WB, `+ wb_dly`; else unchanged | `? l_timestamp[gi] + {{(TS_W-DLY_W){1'b0}}, wb_dly}` |
+| the WB write itself | `l_timestamp[cur] <= l_timestamp[cur] + {{(TS_W-DLY_W){1'b0}}, wb_dly};` |
+| WB always returns to IDLE (3-cycle dispatch) | `THREE-STATE CYCLE, because ST_WB assigns` |
+
+### 7A. Chaining re-arm (`OP_REARM`, level 0)
+
+| question | answer | anchor |
+|---|---|---|
+| at WB: PC, head, select | **all unchanged**: the WB retire chain has a branch for "not REARM" and for "REARM with level 1" and **none for level 0**, so `l_pc`, `l_actv[hix]` and `l_sel` are not written | `end else if (a_op != OP_REARM) begin` / `end else if (a_lvl) begin` |
+| at WB: timestamp | advances by `a_dly` (the rule above): the lane's next release is `a_dly` later | (rule above) |
+| does it re-dispatch the same head every period? | **yes**: the head stays valid and is the same word, so the lane is released every `a_dly` and dispatches the same REARM each time | same as row 1 |
+| what ends the chain | **nothing inside the lane.** A chaining re-arm is a park: it repeats until the lane stops being live (HALT by a timeout or a stretch fault, G and D), `run` drops, or the program is reloaded | `//    level = 0  extend the delay, PC unchanged   (Ruling 2's chaining)` |
+| is the spare consumed? | **never while the chain runs**: `want_fetch` returns 0 for a lane whose valid head is a chaining re-arm, so the spare is not refilled; whatever it held stays unread | `else if (hact[ACT_W-1 -: 3] == OP_REARM && !hact[ACT_W-4-PINW])` |
+| `want_fetch`, exactly | `!head_valid` → 1; else `SPL == 1` → 0; else head is `OP_REARM` with level 0 → 0; else `!spare_valid` | `want_fetch = 1'b0;                           // chaining: successor is` |
+| fetch port effect | none after the head is in: the lane is never a branch-2 candidate (§1) while parked; branch 1 only fires for an **invalid** winner head | §1 |
+| eligibility | ordinary: `rel_due & hz_q & cap_ok`, no extra term | (7E, 7F) |
+| trace detection | `hkind = 2` on the lane's head (TR-2); the oos bit 2 state rule already uses the same predicate | — |
+
+### 7B. Looping re-arm (`OP_REARM`, level 1)
+
+| question | answer | anchor |
+|---|---|---|
+| at WB | `l_pc <= l_base`, head invalidated, `l_sel` flips: **the same slot handling as an ordinary retire**, only the PC target differs | `l_pc[cur]   <= l_base[cur];         // loop back to the start` |
+| timestamp | `+ a_dly`, as every action | (rule above) |
+| `want_fetch` / fetch port | the spare is filled as for any non-chaining head; `fetch_addr` reads `l_base` (not `l_fpc`) when the head is a looping re-arm, so the **address** differs and the **timing** does not | `fetch_addr = l_base[ln];                     // the loop, prefetched` |
+| **timing-identical to an ordinary retire?** | **yes**: the same three slot writes, the same timestamp rule, the same refill obligation (one slot); only the refill address differs. v1's replay agreeing on the 56 synthetic arms (which loop) is consistent with this | `if (SPL > 1) l_sel[cur] <= !l_sel[cur];` |
+| trace detection | `hkind = 1` | — |
+
+### 7C. Held clocked re-dispatch (`ck_hold_eff`)
+
+A clocked SHIFT/SHIFTIN (`level = 1`, real clock pin) is dispatched once per
+**phase**; every dispatch but the last is **held**: no PC advance, no
+invalidation, no swap, so the same head is dispatched again for its next
+phase.
+
+| question | answer | anchor |
+|---|---|---|
+| hold condition | `ck_hold = ck_act & ~ck_retire`; it retires on a SHIFT's HIGH once all bits are done, and on a SHIFTIN's COLL | `wire ck_hold    = ck_act & ~ck_retire;` |
+| which phases | SHIFT: LOW, HIGH per bit; SHIFTIN: LOW, HIGH per bit, then one COLL | `wire [1:0] ck_norm = ck_shift` |
+| phase advance at WB | `l_ckph <= ck_next`, reset to LOW on retire; the bit counter `l_ckbit` advances on LOW | `else if (ck_act) l_ckph[cur] <= ck_next;` |
+| timestamp advance at a held WB | **full `a_dly`**, except the HIGH of a HALF_HIGH lane (`a_dly >> 1`) and an open-drain HIGH (rebased, 7D) | `wire [DLY_W-1:0] wb_dly = (ck_act & ck_is_high & half_v[cur])` |
+| dispatches per action | SHIFT: `2 · nbits`, `nbits = a_cnt + 1`; SHIFTIN: `2 · a_cnt + 1` (the COLL). With `BPW`-bit counts, ≤ `2 · 2^BPW` | `wire [BPW-1:0] ck_nbits = ck_shift ? (a_cnt + {{(BPW-1){1'b0}}, 1'b1})` |
+| held re-dispatches per action | dispatches − 1 | — |
+| fetch port | a held WB frees **no** slot (Amendment A1): refills owed ≤ 1 per action, at its retire | `wire act_retire = ~ck_hold_eff & ((a_op != OP_REARM) \| a_lvl);` |
+| trace detection | `hkind = 3`, `ckph` (TR-2) | — |
+
+### 7D. Clocked actions: HALF_HIGH, the open-drain park, the stretch fault
+
+| question | answer | anchor |
+|---|---|---|
+| CE1: `wb_dly = a_dly >> 1` exactly when | the dispatch is a clocked action (`ck_act`), in its **HIGH** phase, on a lane whose `HALF_HIGH` flag is set (`half_v`) | `wire [DLY_W-1:0] wb_dly = (ck_act & ck_is_high & half_v[cur])` |
+| open-drain HIGH WB: the park | the lane **arms on a rise of its own clock pin**, no timeout (`notmo`), and parks: it is not released again until the bus actually rises | `if (ck_act & ck_is_high & ck_park_en & ~l_mode[cur]) begin` |
+| the rebase | on the observed rise (`arm_hit`, 2 cycles after the pad through the synchronizer), `l_timestamp <= now + ck_hdly`: the HIGH lasts `d` (or `d/2` on HALF_HIGH) **from the observed rise**, which also overrides the WB advance | `assign ck_rebase[gi] = now + (l_ckpark[gi] ?` / `l_timestamp[i] <= ck_rebase[i];` |
+| stretch fault | a parked lane's watchdog counts ticks of a **shared** prescaler (`CK_STRETCH_PRE = 16384` cycles); at `CK_STRETCH_TO = 107` ticks the lane HALTs and `clk_stretch_err` is set. Bound: **106 · 16384 + 1 ≤ parked cycles ≤ 107 · 16384 = 1,753,088** (≈ 35 ms at 50 MHz); the first tick can come early because the prescaler is shared | `if (l_ckwdog[i] >= CK_STRETCH_TO[6:0]) begin` / `wire            ck_tick = ck_any_park & (ck_pre >= CK_STRETCH_PRE[13:0] - 14'd1);` |
+| push-pull clocks | never park (`~l_mode`): their SCK has no input path; the receive capture is the slot of 7F | — |
+| trace detection | `ckph`, `armed`/`notmo` (TR-2) | — |
+
+### 7E. The W1 hold
+
+| question | answer | anchor |
+|---|---|---|
+| which actions load it | **open-drain lanes only, SDA_HOLD ≠ 0, at DRIVE**: a clocked SHIFT's data move, an unclocked SHIFT, a clocked SHIFTIN's release of a driven SDA (not on HIGH), an unclocked SHIFTIN's release of a driven SDA | `hold_ld = 1'b1;` (4 sites) |
+| value | `SDA_HS = SDA_HOLD + SDA_SETUP` = ⌈300/20⌉ + ⌈50/20⌉ = **15 + 3 = 18** at 50 MHz | `localparam integer SDA_HS = SDA_HOLD + SDA_SETUP;` |
+| TM1 registration | the load is recorded (`hl_v`, `hl_l`) and lands a cycle later as `SDA_HS − 1`; `l_hcnt` reads `SDA_HS` while pending, so the count is equal in every cycle | `hl_v <= hold_ld & hz_q[cur];` |
+| countdown | every cycle while non-zero; the pin lands at `SDA_SETUP1` | `l_hcr[i] <= l_hcnt[i] - {{(HOLDW-1){1'b0}}, 1'b1};` |
+| eligibility | `ready = rel_due & hz_q & cap_ok`; `hz_q` is "the count reaches 0 this cycle", registered | `hz_q[i] <= (l_hcnt[i] == {{(HOLDW-1){1'b0}}, 1'b1});` |
+| bound, release → eligible | the hold delays the lane's next job by **`J_w1 = max(0, HS + 1 + (r_i − C) − T_i)`**, eligible `HS + 1 = 19` cycles after the loading pick (W6; `model/a2/program_a2.py`) | `assign ready[gi] = rel_due[gi] & hz_q[gi] & cap_ok;` |
+| trace detection | `hcnt` (TR-2) | — |
+
+### 7F. The RX1 capture gate
+
+| question | answer | anchor |
+|---|---|---|
+| exact blocking condition | a lane is **not ready** while it is push-pull (`l_mode`), its capture is pending (`l_ckwait`, set at the SHIFTIN's HIGH WB), **and** the capture will not have landed by the cycle after the decision: allowed once the engine-wide capture slot holds this lane with `ppc_n ≤ 1`. A LOW picked in cycle c consumes at its WB in c + 2, so this is exact | `wire cap_ok = ~(l_ckwait[gi] & l_mode[gi])` / `\| (ppc_v & (ppc_l == gi) & (ppc_n <= cap_lead));` / `wire [1:0] cap_lead = 2'd1 + {1'b0, cap_early} - {1'b0, cap_late};` (`cap_lead` = 1 in the clean build; the two terms are EX1's mutants) |
+| when the capture fires | the HIGH WB loads the slot with `ppc_n = 2` (`uo_out` clock) or `1` (`uio` clock); it fires when `ppc_n` reaches 0: **WB + ppc_n + 1 = pick + 5 / pick + 4** | `ppc_n <= (ck_pin >= 8) ? 2'd2 : 2'd1;` |
+| how long it can stay pending | **≤ 3 cycles after the HIGH WB, always**: the slot is one deep but WBs are ≥ 3 cycles apart (the 3-cycle dispatch), so a second HIGH WB cannot overwrite it before it fires (at WB + 3 at the latest). No watchdog is needed or present | `if (ppc_n == 2'd0) ppc_v <= 1'b0;` |
+| eligibility delay bound | eligible from **pick + 2 + ppc_n** (4 on a `uo_out` clock); A2 carries it as release jitter **`J_cap = max(0, CAP_i + (r_i − C) − T_i)`, `CAP_i = 2 + ppc_n`** (RX4) | (`model/a2/program_a2.py`, `cap_profile`) |
+| what it prevents | silicon fix #7: consuming a bit before its capture (read as 0) | — |
+| trace detection | `cappend` (TR-2) | — |
+
+### 7G. Armed lanes
+
+| question | answer | anchor |
+|---|---|---|
+| `l_armed` | the lane is waiting for an edge on `l_armpin` (polarity `l_armedge`): set by `OP_ARM` at WB, and by the open-drain park (7D) | `if (a_op == OP_ARM) begin` |
+| `l_notmo` | "no timeout": an `OP_ARM` with `a_dly == 0`, or a park | `notmo_n[cur]   = (a_dly == {DLY_W{1'b0}});` |
+| when release is withheld | the release term is `live & (now ≥ timestamp) & ~(armed & notmo)`, registered from next-state values: an armed **no-timeout** lane is never released until its edge; an armed lane **with** a timeout is released at its timestamp (the deadline) like any other | `) & ~tf_diff(now_n, ts_n[i]) & ~(armed_n[i] & notmo_n[i]);` |
+| the edge | `arm_hit` disarms and rebases the timestamp (`ck_rebase`): the lane continues `d` after the edge | `armed_n[i] = 1'b0;                    // capture DISARMS: a second` |
+| timeout-halt at decision | if the EDF winner is **still armed** when it is picked (its deadline came first), the engine **does not dispatch**: the lane is HALTed (`live_n = 0`), disarmed, `l_timeout` and `sticky_ovr` set; `st` stays `ST_IDLE` | `if (w_armed) begin` / `l_timeout[winner] <= 1'b1;      // STICKY -- status stream` |
+| trace detection | `armed`, `notmo` (TR-2) | — |
+
+### TR-2: the extra per-row columns
+
+Appended after `oos` (the v1 header is unchanged up to `oos`, so v1 replay
+still parses):
+
+`…,oos,hkind0,hkind1,hkind2,hkind3,hkind4,hcnt0,…,hcnt4,ckph0,…,ckph4,armed,notmo,cappend`
+
+| column | encoding |
+|---|---|
+| `hkind<l>` | the lane's head word: **0** ordinary action, **1** looping re-arm, **2** chaining re-arm, **3** clocked phase (SHIFT/SHIFTIN, level 1, real clock pin), **4** `OP_ARM`, **5** head slot invalid |
+| `hcnt<l>` | `l_hcnt[l]` (effective count, TM1) |
+| `ckph<l>` | `l_ckph[l]`: 0 LOW, 1 HIGH, 2 COLL |
+| `armed`, `notmo` | 5-bit masks of `l_armed`, `l_notmo` |
+| `cappend` | 5-bit mask of `l_ckwait[l] & l_mode[l]` (an RX1 capture pending) |

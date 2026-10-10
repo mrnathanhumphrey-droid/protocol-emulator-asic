@@ -479,6 +479,19 @@ def corpus_arms():
                            "+NCYC=200000", "+SEED=1", "+ASYNC=0",
                            "+STAYLOAD=0", "+SCLHOLD=0", "+SPI_SCK_INV=0"]
                     + feed))
+        # ⛔⛔ RULING RX5: THE FIVE-LANE CONTENTION IMAGE ON SEEDS 2-6 TOO.
+        # Silicon fix #7's lost bits needed a particular interleaving -- 3 of
+        # 6 seeds at 200k cycles -- and this sweep ran seed 1 only, which
+        # happened to be clean on the RTL it was written for. One seed is one
+        # interleaving, not a claim about contention.
+        if name == "corpus_all5":
+            for sd in range(2, 7):
+                out.append(("%s_s%d" % (name, sd),
+                            ["+IMG=test/%s.hex" % name, "+PEER=%s" % peer,
+                             "+OUT=probe_cov_trace_%s_s%d.txt" % (name, sd),
+                             "+NCYC=200000", "+SEED=%d" % sd, "+ASYNC=0",
+                             "+STAYLOAD=0", "+SCLHOLD=0", "+SPI_SCK_INV=0"]
+                            + feed))
     # ⭐ THE TWO CLOCK-STRETCH ARMS, both of which `gate_corpus_trace.py`
     # already certifies: `+SCLHOLD` is a BENCH-DRIVEN hold on SCL (its line
     # 365), and the PEER-driven stretch is a second instance,

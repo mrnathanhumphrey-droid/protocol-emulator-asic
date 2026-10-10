@@ -1322,15 +1322,19 @@ always @(posedge dut.clk) begin
     // `uo_out` has no input path: the engine sees pins 8..11 as 0
     vr_pad = {4'b0000, dut.uio_in};
     // ---- a clocked SHIFTIN's HIGH: the pin its capture must read ---------
+    // ⛔⛔ RULING RX3 -- THIS MODEL HAD ENCODED THE DEFECT. A capture is
+    // valid for ITS OWN HIGH only: `vr_capv` is now cleared at the HIGH
+    // writeback (it used to be cleared only at the consume, so a capture
+    // landing AFTER its consume was credited to the NEXT bit), and the
+    // consume below is processed BEFORE this cycle's capture (the chip's
+    // consume reads `l_ckgot` before the edge's capture sets it). Together
+    // those had the model PREDICT silicon fix #7's lost bits as conformant:
+    // 5 of ~550 were flagged. A lost bit is now always a failure.
     if (dut.u_eng.st === 2'd2 && dut.u_eng.ck_shiftin === 1'b1
-        && dut.u_eng.ck_is_high === 1'b1 && dut.u_eng.cur < 8)
+        && dut.u_eng.ck_is_high === 1'b1 && dut.u_eng.cur < 8) begin
       vr_rpin[dut.u_eng.cur] = dut.u_eng.a_pin;
-    // ---- the chip's capture: the action pin's pad, 2 samples back --------
-    for (vr_k = 0; vr_k < N_LANES_VR; vr_k = vr_k + 1)
-      if (dut.u_eng.ck_hit[vr_k] === 1'b1) begin
-        vr_capb[vr_k] = (vr_rpin[vr_k] < 12) ? vr_h2[vr_rpin[vr_k]] : 1'b0;
-        vr_capv[vr_k] = 1;
-      end
+      vr_capv[dut.u_eng.cur] = 0;
+    end
     // ---- a writeback that takes a received bit ----------------------------
     if (dut.u_eng.st === 2'd2 && dut.u_eng.cur < 8) begin
       vr_k = dut.u_eng.cur;
@@ -1351,6 +1355,13 @@ always @(posedge dut.clk) begin
         vr_R[vr_k] = {vr_bit, vr_R[vr_k][7:1]};
       end
     end
+    // ---- the chip's capture: the action pin's pad, 2 samples back --------
+    // (AFTER the consume above: RX3's same-edge order)
+    for (vr_k = 0; vr_k < N_LANES_VR; vr_k = vr_k + 1)
+      if (dut.u_eng.ck_hit[vr_k] === 1'b1) begin
+        vr_capb[vr_k] = (vr_rpin[vr_k] < 12) ? vr_h2[vr_rpin[vr_k]] : 1'b0;
+        vr_capv[vr_k] = 1;
+      end
     // ---- a push: queue the byte the pins say it must be -------------------
     if (dut.u_eng.rx_push === 1'b1 && dut.u_eng.rx_lane < 8
         && dut.rx_pend === 1'b1)

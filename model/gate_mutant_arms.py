@@ -113,6 +113,14 @@ EXPECT = {
         "three host level controls each revert to the raw pin. Reverting "
         "fewer would leave a mutant that is part-synchronised, which is not "
         "the 94cebb7 design the must-fire names."),
+    # ruling RX1: silicon fix #7 undone -- no capture-pending eligibility gate
+    "M_RX_NO_CAPGATE":   (3,
+        "one site, declared: the clean `cap_ok` is a two-line expression (the "
+        "pending term and the exact ppc boundary, ruling RX1) against the "
+        "mutant's one-line constant."),
+    # ruling EX1: the capture gate's boundary moved one cycle early / late
+    "M_RX_CAPGATE_EARLY": (2, None),
+    "M_RX_CAPGATE_LATE":  (2, None),
     # ruling CS1: silicon fix #6 undone -- the MISO enable's D unqualified
     "M_CS_RAW_D":        (2, None),
     # ruling PR2: the 94cebb7 form, the 5-way `l_clkpin[cur]` select feeding

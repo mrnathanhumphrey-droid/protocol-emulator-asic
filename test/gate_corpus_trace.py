@@ -27,6 +27,7 @@ result cannot be read as more than it is.
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -601,6 +602,100 @@ def main() -> int:
     if not mf_ok:
         failures.append(("must-fire", "the precondition was not seen to fail"))
 
+    # ---- RULINGS RX2 / RX5: corpus_all5, LONG and MULTI-SEED ---------------
+    # ⛔⛔ SILICON FIX #7 HID FOR TWO REASONS AND THIS ARM ANSWERS BOTH. The
+    # push-pull SPI receive consumed bits before their capture whenever a late
+    # HIGH shrank the HIGH phase under five-lane contention; that needs a
+    # particular INTERLEAVING, so it showed on 3 of 6 seeds at 200k cycles and
+    # never at this gate's 8,000 cycles on seed 1. And Layer V-RX's model
+    # predicted the losses. So: 200k cycles, seeds 1-6, and the verdict that
+    # counts is `rx_e2e` -- the chip's bytes against the WIRE at the clock
+    # edges, with no model of capture timing. Must-fire: M_RX_NO_CAPGATE (the
+    # capture-pending eligibility gate removed) on seed 1.
+    print()
+    print("  --- RX2/RX5: corpus_all5, 200k cycles, seeds 1-6 (rx_e2e) ---")
+    rx_ok = True
+    a5 = os.path.join(ROOT, "test", "corpus_all5.hex")
+    nb5 = len(open(a5).read().split())
+
+    def all5(v, seed):
+        r = run([tool("vvp"), v, "+IMG=%s" % a5, "+NBYTES=%d" % nb5,
+                 "+PEER=all", "+OUT=%s" % os.path.join(TMP, "rx_all5.txt"),
+                 "+NCYC=200000", "+SEED=%d" % seed, "+ASYNC=0",
+                 "+STAYLOAD=0", "+SCLHOLD=0", "+SPI_SCK_INV=0"])
+        return r.stdout + r.stderr
+
+    for seed in range(1, 7):
+        o = all5(vvp, seed)
+        line = next((l.strip() for l in o.splitlines() if "rx_e2e" in l
+                     and ("ok --" in l or "of" in l)), "rx_e2e: no verdict")
+        nf = o.count("*** FAIL")
+        good = nf == 0 and "rx_e2e: ok" in o
+        print("  seed %d  %-62s %s" % (seed, line[:62], "ok" if good
+                                         else "*** %d FAIL line(s)" % nf))
+        rx_ok = rx_ok and good
+    mvvp = os.path.join(TMP, "tr_rxnocap.vvp")
+    bok, blog = iverilog_build(mvvp, ["M_RX_NO_CAPGATE"])
+    if not bok:
+        print("  *** M_RX_NO_CAPGATE build FAILED: %s" % blog[-300:])
+        rx_ok = False
+    else:
+        o = all5(mvvp, 1)
+        bad = [l.strip() for l in o.splitlines()
+               if l.startswith("*** FAIL rx_e2e") and " of " in l]
+        print("  must-fire M_RX_NO_CAPGATE seed 1: %s" % (
+            ("red  ok -- " + bad[0][len("*** FAIL "):]) if bad
+            else "*** MUST-FIRE FAILED (rx_e2e silent)"))
+        rx_ok = rx_ok and bool(bad)
+    # ---- RULING EX1: the capture gate is EXACT, checked at its boundary ----
+    # corpus_all5 never asks the gate to decide AT its edge (0 boundary
+    # consumes on seeds 1-6), so a gate one cycle late would pass there. An
+    # SPI read at d = 4 does: its HIGH lasts 4 cycles, so the LOW is released
+    # 2 cycles after the HIGH writeback, exactly when `ppc_n` = 1. Clean: the
+    # boundary is used (EX1 prints `boundary consumes (= 1): N`, N > 0);
+    # M_RX_CAPGATE_LATE: never (N = 0, no functional failure -- the only
+    # trace it leaves); M_RX_CAPGATE_EARLY: EX1 and rx_e2e both fail.
+    import pe_isa as I
+    d4 = os.path.join(TMP, "spim_d4.hex")
+    img4, _ = corpus.build_spi_master(d=4)
+    with open(d4, "w", encoding="ascii", newline="\n") as fh:
+        fh.write("\n".join("%02x" % b for b in I.full_store(bytes(img4))) + "\n")
+
+    def spim4(v):
+        r = run([tool("vvp"), v, "+IMG=%s" % d4, "+NBYTES=256", "+PEER=spi",
+                 "+OUT=%s" % os.path.join(TMP, "rx_d4.txt"), "+NCYC=60000",
+                 "+SEED=1", "+ASYNC=0", "+STAYLOAD=0", "+SCLHOLD=0",
+                 "+SPI_SCK_INV=0"] + feed_args(os.path.join(ROOT, "test",
+                                                            "corpus_spim.hex")))
+        o = r.stdout + r.stderr
+        m = re.search(r"boundary consumes \(= 1\): (\d+)", o)
+        return o, (int(m.group(1)) if m else None)
+
+    o, nb = spim4(vvp)
+    ex_ok = nb is not None and nb > 0 and o.count("*** FAIL") == 0
+    print("  EX1 d=4 clean : boundary consumes %s  %s" % (
+        nb, "ok (the exact edge is used)" if ex_ok else "*** NOT EXACT"))
+    for mut, want in (("M_RX_CAPGATE_LATE", "late"), ("M_RX_CAPGATE_EARLY", "early")):
+        mv = os.path.join(TMP, "tr_%s.vvp" % mut.lower())
+        bok, blog = iverilog_build(mv, [mut])
+        if not bok:
+            print("  *** %s build FAILED" % mut)
+            ex_ok = False
+            continue
+        o, nb = spim4(mv)
+        if want == "late":
+            hit = nb == 0 and o.count("*** FAIL") == 0
+            why = "boundary consumes %s (the edge is never used)" % nb
+        else:
+            hit = "*** FAIL EX1" in o and "*** FAIL rx_e2e" in o
+            why = "EX1 and rx_e2e both fail"
+        print("  must-fire %-20s %s" % (mut, ("red  ok -- " + why) if hit
+                                         else "*** MUST-FIRE FAILED (%s)" % why))
+        ex_ok = ex_ok and hit
+    rx_ok = rx_ok and ex_ok
+    if not rx_ok:
+        failures.append(("rx-e2e", "corpus_all5 multi-seed, EX1, or a must-fire"))
+
     # ---- RULING V: the Verilator side was the PINNED release, every time ----
     print()
     print("  --- ruling V: every Verilator-side run named the pin ---")
@@ -612,9 +707,10 @@ def main() -> int:
     else:
         print("  every run printed `tool verilator` on %s" % PINNED_VERILATOR)
 
-    total = len(corpus.CORPUS) + 3
+    total = len(corpus.CORPUS) + 4
     passed = (len(results) + (1 if async_ok else 0)
-              + (1 if rb_ok else 0) + (1 if d2_ok else 0))
+              + (1 if rb_ok else 0) + (1 if d2_ok else 0)
+              + (1 if rx_ok else 0))
     print()
     print("=" * 78)
     print("  CORPUS TRACE GATE: %d of %d  (%d open, %d failed)"

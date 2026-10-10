@@ -84,6 +84,44 @@ measures the *engine's* Fmax, not the shipped SRAM design's. The ledger entry ha
 to say which — otherwise the strongest-looking number in the pitch is the one an
 expert dismantles first.
 
+### Reference for `"sram"` in v2 and later: the IHP SRAM macro walkthrough
+
+<https://kdp1965.github.io/ihp-um-janestreet-prism/ihp_sram_macro.html>
+(source repo `kdp1965/ihp-um-janestreet-prism`, dated 2026-09-29).
+
+This is a **public integration walkthrough** that anyone may follow. It is not a
+competing entry that we would be borrowing from. Nate noted it on 2026-10-10 for
+v2 and later. v1 (`sub-v1`) ships the flop store, and nothing in this section
+changes v1.
+
+What the walkthrough covers, as summarised from the page (not yet reproduced here):
+
+- **PDK:** `ihp-sg13cmos5l`, IHP-Open-PDK commit `2bbec755`. This is the same
+  commit our C1 canary uses, so there is no PDK bump.
+- **Macro:** `RM_IHPSG13_1P_512x32_c2_bm_bist`, single port, 512 × 32, with
+  bit/byte mask and BIST. The PDK also has single-port macros from 64×16 to
+  8192×32 and dual-port up to 1024×32.
+- **Read latency:** one cycle. The store-read path would have to absorb this, and
+  A2/W would have to be re-derived.
+- **RTL:** tie `A_DLY` to 1 and disable BIST. Synthesis gets a
+  `(* blackbox *)` stub. Simulation uses the PDK behavioural model with
+  `-DFUNCTIONAL`.
+- **LibreLane `MACROS` block:** GDS, LEF, CDL, and three lib corners, plus
+  placement and orientation. `PDN_MACRO_CONNECTIONS` entries are needed for
+  `VDD!` and `VDDARRAY!`.
+- **PDN:** Metal4 stripes, pitch 44.96 µm, spacing 3.52 µm, width 2.1 µm,
+  offset 6.15 µm, aligned to the macro columns.
+- **Signoff:** Magic DRC is off and KLayout runs with the CMOS5L deck. Precheck
+  whitelists GDS layers 25/0 and 16/0.
+- **Area:** the walkthrough's tile is 8×4 (1.22 mm²), and one 512×32 macro takes
+  about 6.5% of it.
+- **Licence:** the page says IHP's behavioural models are Apache-2.0. The
+  walkthrough repo's own licence is **not yet checked**; check it before copying
+  any of its files.
+
+⛔ This reference does not dissolve Coupling 1. The `"sram"` build is still
+IHP-only, and the flop store is still what tiers 2 and 3 measure.
+
 ---
 
 ## Coupling 2 — tier 3 feeds the proof, so the proof's inputs move with it

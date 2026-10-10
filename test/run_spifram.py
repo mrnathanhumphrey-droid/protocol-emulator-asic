@@ -333,9 +333,20 @@ def main() -> int:
         print("    sigrok MISO %s / chip %s"
               % (" ".join("%02X" % b for b in sig[:4]),
                  " ".join("%02X" % b for b in mf["chip"][:4])))
-        say(n >= 2 and sig[:2] == want()["back"]
-            and mf["chip"][:n] != sig[:n],
-            "the peer still answers 5B C4 and the chip disagrees")
+        # ⛔ RULING RX1 CHANGED HOW M_CKRX_PP_OBSERVED DIES. It waits for an
+        # OBSERVED rise of a `uo_out` SCK, which has no input path, so its
+        # capture never fires. Before RX1 the LOW consumed the bit anyway and
+        # read 0 (`00 00`); since RX1 a lane is ineligible while its capture
+        # is pending, so the receive DEADLOCKS -- no READ completes and the
+        # chip receives NOTHING. Either symptom is the mutant caught; a clean
+        # run receives 76 bytes.
+        if mut == "M_CKRX_PP_OBSERVED" and not mf["chip"]:
+            say(True, "the push-pull capture never fires: the receive lane "
+                      "deadlocks on RX1's capture gate (0 bytes received)")
+        else:
+            say(n >= 2 and sig[:2] == want()["back"]
+                and mf["chip"][:n] != sig[:n],
+                "the peer still answers 5B C4 and the chip disagrees")
     print()
     print("  GATE spifram: %s" % ("PASSED" if rc == 0 else "FAILED"))
     return rc

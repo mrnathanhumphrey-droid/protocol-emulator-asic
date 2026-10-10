@@ -84,6 +84,13 @@ KILLERS = {
     "M_COMB_OUT": "model/gate_f2_local.py",
     # ruling CDC5: structural, on the M_CDC_RAW netlist; ui_in[7] -> run named
     "M_CDC_RAW": "model/gate_cdc.py",
+    # ruling RX2: rx_e2e on corpus_all5 seed 1, 200k cycles (corpus gate, CI)
+    "M_RX_NO_CAPGATE": "test/gate_corpus_trace.py",
+    # ruling EX1: the d = 4 SPI read -- EARLY fails EX1 + rx_e2e; LATE has no
+    # functional failure and is killed by never using the exact edge
+    # (boundary consumes 0 against 1,016 clean)
+    "M_RX_CAPGATE_EARLY": "test/gate_corpus_trace.py",
+    "M_RX_CAPGATE_LATE": "test/gate_corpus_trace.py",
     # ruling CS1: inv_cdc.vh on corpus_sptgt (run_mutants' clocked family)
     "M_CS_RAW_D": "test/run_mutants.py",
     # -- rulings K and U --------------------------------------------------------

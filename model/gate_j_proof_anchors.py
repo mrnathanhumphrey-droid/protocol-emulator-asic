@@ -106,8 +106,10 @@ PREMISES = [
      "assign rel_due[gi] = rel_q[gi];"),
     ("P9t", "the release term is computed from NEXT-state live, now, timestamp",
      ") & ~tf_diff(now_n, ts_n[i]) & ~(armed_n[i] & notmo_n[i]);"),
-    ("P9w", "W1: ready also waits for the lane's own hold + setup",
-     "assign ready[gi] = rel_due[gi] & hz_q[gi];"),
+    # ⛔ RX1 extended the line with the capture gate (`& cap_ok`), so the
+    # anchor is the prefix plus the new term -- both gates are premises now
+    ("P9w", "W1: ready also waits for the lane's own hold + setup (and RX1)",
+     "assign ready[gi] = rel_due[gi] & hz_q[gi] & cap_ok;"),
     ("P9h", "the hold-zero term is written beside the counter",
      "hz_q[i] <= (l_hcnt[i] == {{(HOLDW-1){1'b0}}, 1'b1});"),
 ]
@@ -117,6 +119,35 @@ PREMISES = [
 L_REFILL, N_LANES, J_WINNER_REG = 4, 5, 1
 BOUND_T1 = 2 * L_REFILL + J_WINNER_REG          # 9
 BOUND_T2 = N_LANES * L_REFILL + J_WINNER_REG    # 21
+
+
+PORT_SPEC = os.path.join(ROOT, "docs", "PORT_SPEC.md")
+
+
+def port_spec_s7_anchors(text):
+    """Every RTL anchor in PORT_SPEC §7's tables (the v2 input, TR-2 ruling).
+
+    The anchor is the LAST cell of a table row; every backtick span in it is a
+    verbatim RTL substring (`\\|` is a markdown-escaped pipe). A cell that
+    starts with `(`, `§` or `—` is a cross-reference to another row, not an
+    anchor, and is skipped -- by that rule, not by guessing.
+    """
+    i = text.find("## 7. The v1 exclusions")
+    j = text.find("### TR-2", i)
+    if i < 0 or j < 0:
+        return None
+    out = []
+    for line in text[i:j].splitlines():
+        if not line.startswith("|") or line.startswith("|---"):
+            continue
+        cells = [c.strip() for c in re.split(r"(?<!\\)\|", line)[1:-1]]
+        if len(cells) < 2:
+            continue
+        cell = cells[-1]
+        if cell == "anchor" or cell.startswith(("(", "§", "—")):
+            continue
+        out += [s.replace("\\|", "|") for s in re.findall(r"`([^`]+)`", cell)]
+    return out
 
 
 def check():
@@ -213,6 +244,30 @@ def main() -> int:
             ("d_min ≥ D*", "its scope must still be stated")):
         if needle not in doc:
             print("    *** %s -- %r is gone from the document" % (why, needle))
+            rc = 1
+
+    # ---- PORT_SPEC §7 (the v2 input): every anchor must be in the RTL -------
+    print()
+    print("  --- docs/PORT_SPEC.md §7 anchors (the v1 exclusions, v2 input) ---")
+    with open(PORT_SPEC, encoding="utf-8", errors="replace") as fh:
+        anchors = port_spec_s7_anchors(fh.read())
+    if not anchors:
+        print("    *** §7 not found or it has no anchors -- RED, not skipped")
+        rc = 1
+    else:
+        gone = [a for a in anchors if a not in rtl]
+        print("    anchors checked : %d, missing : %d" % (len(anchors), len(gone)))
+        for a in gone:
+            print("    *** GONE from src/pe_engine.v: %r" % a)
+        if gone:
+            rc = 1
+        # must-fire: the parser must see an anchor it can reject
+        planted = port_spec_s7_anchors(
+            "## 7. The v1 exclusions\n| x | `NO_SUCH_SIGNAL_xyz;` |\n### TR-2\n")
+        mf = bool(planted) and planted[0] not in rtl
+        print("    must-fire: a planted §7 anchor not in the RTL is rejected  %s"
+              % ("ok" if mf else "*** NOT REJECTED"))
+        if not mf:
             rc = 1
 
     print()

@@ -16,6 +16,8 @@
 // CDC2 D5 rides along: every bench that asserts PR2's invariant also checks
 // the CS async clear (test/inv_cdc.vh)
 `include "test/inv_cdc.vh"
+// RX2: end-to-end clocked receive against the wire, in the same benches
+`include "test/rx_e2e.vh"
 always @(negedge `INV_DUT.clk) begin
   if (`INV_DUT.rst_n === 1'b1
       && (`INV_DUT.u_eng.cur_ck

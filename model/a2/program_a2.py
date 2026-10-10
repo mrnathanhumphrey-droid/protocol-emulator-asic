@@ -126,9 +126,43 @@ def lane_set(img):
         bl = BLane("lane%d%s" % (ln, " ckOD" if ck_od else ""), T=T,
                    C=C_SHIPPED, D_tol=dt, D_sched=ds, J=J)
         loads, chains = hold_profile(h, acts)
+        cap = cap_profile(h, acts)
         out.append({"lane": ln, "blane": bl, "clocked_od": ck_od, "T": T,
-                    "loads_hold": loads, "chains": chains})
+                    "loads_hold": loads, "chains": chains,
+                    "loads_cap": cap is not None, "cap_lat": cap})
     return out, d_min, k, j_prog
+
+
+# ---------------------------------------------------------------------------
+# RULING RX4 -- THE CAPTURE GATE (silicon fix #7) IS OWN-LANE BLOCKING TOO
+# ---------------------------------------------------------------------------
+# ⛔⛔ RX1 makes a PUSH-PULL clocked SHIFTIN lane ineligible while its capture
+# is pending, exactly as W1 makes a hold-loading lane ineligible while its
+# hold runs, so A2 carries it the same way (W6): as release jitter on that
+# lane, seen by every OTHER lane, by the same fixed point.
+# THE LATENCY, FROM THE RTL'S OWN PIPELINE (not fitted): the HIGH job is
+# picked, DRIVEs the next cycle and writes back the cycle after (2); the
+# writeback loads the capture slot `ppc_n` with 2 for a `uo_out` clock (one
+# extra cycle behind `uo_q`) or 1 for a `uio` clock, and the capture fires
+# when it reaches 0 (+ ppc_n + 1): pick + 5 on a uo clock, measured on
+# corpus_all5 lane 2 (writeback at 2082, capture at 2085). The gate is EXACT:
+# a LOW picked in cycle c consumes at c + 2, so it is allowed once the capture
+# will have landed by c + 1 -- eligible from pick + 2 + ppc_n, the quantity
+# that plays W6's `HS + 1`:
+#     J_cap(i) = max(0, CAP_i + (r_i - C) - T_i),  CAP_i = 2 + ppc_n
+# ⇒ the delayed job is the LOW (the consume), which arms no capture, so a
+#   capture-blocked job is never itself capture-delayed: no chaining case.
+PICK_TO_WB = 2
+
+
+def cap_profile(h, acts):
+    """CAP_i for a push-pull lane that runs a clocked SHIFTIN, else None."""
+    if h["mode"] != 1 or h["clkpin"] >= N_PINS:
+        return None
+    if not any(is_clocked(h, a) and a["op"] == I.OP_SHIFTIN for a in acts):
+        return None
+    ppc_n = 2 if h["clkpin"] >= 8 else 1
+    return PICK_TO_WB + ppc_n
 
 
 def utilisation(ls):
@@ -222,9 +256,13 @@ def w1_jitter(ls, hs=None, max_iter=64, src=None):
     for _ in range(max_iter):
         new = []
         for i, r in enumerate(ls):
-            if not r["loads_hold"]:
+            # RX4: a capture-gated lane blocks for CAP_i the way a hold
+            # loader blocks for HS (disjoint: holds are open-drain only)
+            if not (r["loads_hold"] or r.get("loads_cap")):
                 new.append(0)
                 continue
+            # eligibility latency after the pick: W1's HS + 1; RX1's CAP_i
+            blk = hs + 1 if r["loads_hold"] else r["cap_lat"]
             lanes = [ls[k]["blane"] if k == i else
                      _with_j(ls[k]["blane"], ls[k]["blane"].J + w1[k])
                      for k in range(len(ls))]
@@ -232,7 +270,7 @@ def w1_jitter(ls, hs=None, max_iter=64, src=None):
                   else response_time_b(lanes[i], lanes)["r"])
             if rr is None:
                 return None, "pyRTA gave no bound inside the W1 fixed point"
-            new.append(max(0, hs + 1 + (rr - C_SHIPPED) - r["T"]))
+            new.append(max(0, blk + (rr - C_SHIPPED) - r["T"]))
         if new == w1:
             return w1, None
         w1 = new
