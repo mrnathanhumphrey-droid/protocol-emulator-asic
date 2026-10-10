@@ -107,6 +107,10 @@ async def write_byte(dut, val, offset=0):
 
 async def load_image(dut, img):
     """Pointer-reset, then write every byte. Load mode only, pins only."""
+    # CDC3 ordering (docs/HOST_INTERFACE.md): `prog` settles >= 3 cycles
+    # before the `ptr` pulse it qualifies; `ptr` is held >= 3 cycles
+    dut.ui_in.value = ctrl(prog=1)
+    await ClockCycles(dut.clk, 3)
     dut.ui_in.value = ctrl(prog=1, ptr=1)
     await ClockCycles(dut.clk, 3)
     dut.ui_in.value = ctrl(prog=1)

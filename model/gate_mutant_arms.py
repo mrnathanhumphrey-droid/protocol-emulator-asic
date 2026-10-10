@@ -106,6 +106,15 @@ EXPECT = {
     # ruling CE1 / CE2: each new mode bit read as 0 -- the selector ignored
     "M_HALF_IGNORED":    (2, None),
     "M_CLKINV_IGNORED":  (3, None),
+    # ruling CDC2: the 94cebb7 wiring -- raw PROG / PTR_RST / ena and a raw
+    # reset release (silicon fixes #4 and #5 undone)
+    "M_CDC_RAW":         (8,
+        "one site, FOUR lines per arm, declared: the reset release and the "
+        "three host level controls each revert to the raw pin. Reverting "
+        "fewer would leave a mutant that is part-synchronised, which is not "
+        "the 94cebb7 design the must-fire names."),
+    # ruling CS1: silicon fix #6 undone -- the MISO enable's D unqualified
+    "M_CS_RAW_D":        (2, None),
     # ruling PR2: the 94cebb7 form, the 5-way `l_clkpin[cur]` select feeding
     # the pin registers; EQUIVALENT by requirement (cycle-identical)
     "M_PR_CURSEL":       (4,

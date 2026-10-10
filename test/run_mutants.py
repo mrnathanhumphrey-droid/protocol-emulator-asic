@@ -152,6 +152,14 @@ CLOCKED_MUTANTS = [
      "the clocked ACK drives SDA as a PUSH-PULL HIGH on an open-drain net "
      "while the peer pulls low to acknowledge -- a SHORT. The trace shows "
      "SDA with oe=1, out=1; the clean design shows none."),
+    # ⭐ RULING CS1 -- silicon fix #6 undone: the CS async clear is released
+    # with D = 1. inv_cdc.vh (in every DUT bench) checks the D net on the
+    # two edges after each CS fall; the fix passes 344 falls on this image.
+    ("M_CS_RAW_D", "corpus_sptgt", "tgt", "*** FAIL inv_cdc",
+     "the MISO enable's D input is not qualified by the synchronised CS, so "
+     "the async clear on CS releases with D = 1 -- a recovery hazard on the "
+     "MISO pad enable that simulation and STA cannot see; inv_cdc names it "
+     "on the first CS fall."),
     ("M_BUS_NO_PULLDOWN", "ckod_image", "none",
      "no action was observed to retire",
      "the DUT's pull-down is dropped from the ONE bus model, so a released "

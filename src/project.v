@@ -140,8 +140,57 @@ module tt_um_protocol_emulator #(
   localparam integer SER_STRB = 5;
   localparam integer SER_VLD  = 6;
 
-  wire prog_mode = ui_in[PIN_PROG] & ena;
-  wire run       = ~ui_in[PIN_PROG] & ena;
+  // =====================================================================
+  // ⭐⭐ RULING CDC2 -- SILICON FIXES #4 AND #5: THE HOST LEVEL CONTROLS AND
+  // THE RESET RELEASE ARE SYNCHRONISED. `ui_in[7]` (PROG) fed `run` straight
+  // into the engine's time counter and key adders, `ui_in[5]` (PTR_RST) fed
+  // the load pointer, and `rst_n` released ~3,430 flops directly. All three
+  // are asynchronous to `clk` (TT: "`clk` and `rst_n` pins are handled like
+  // any other input pins"), so a transition near an edge could split the
+  // state -- part of the engine running, part not; some pointer bits reset,
+  // some not. Invisible to simulation and to STA (the SDC's 4 ns input delay
+  // assumes a synchronous host); found because the worst timing path of
+  // the 29aaeb3 canary STARTED AT A PORT.
+  //   D1 `rst_n`: asserts asynchronously, RELEASES through two flops
+  //      (`rst_n_s`, k = 2). Every core flop resets on `rst_n_s`; only the
+  //      synchronisers themselves see the raw pin.
+  //   D2/D3 `ena`, PROG, PTR_RST: two flops each (k = 2). All logic reads
+  //      the synchronised copies.
+  //   D4 the TX nibble and tag are NOT per-bit synchronised (a bus through
+  //      per-bit synchronisers can resolve bits differently): they are
+  //      sampled when the synchronised WR edge is detected, and the host
+  //      holds them stable until then (docs/HOST_INTERFACE.md).
+  // ⛔ M_CDC_RAW restores the 94cebb7 wiring (raw pins, raw reset release).
+  // Cost: 8 flops.
+  // =====================================================================
+  reg [1:0] rst_sync, prog_sync, ptr_sync, ena_sync;
+  always @(posedge clk or negedge rst_n) begin
+    if (!rst_n) begin
+      rst_sync  <= 2'b00;
+      prog_sync <= 2'b00;
+      ptr_sync  <= 2'b00;
+      ena_sync  <= 2'b00;
+    end else begin
+      rst_sync  <= {rst_sync[0], 1'b1};
+      prog_sync <= {prog_sync[0], ui_in[PIN_PROG]};
+      ptr_sync  <= {ptr_sync[0], ui_in[PIN_RST]};
+      ena_sync  <= {ena_sync[0], ena};
+    end
+  end
+`ifdef M_CDC_RAW
+  wire rst_n_s = rst_n;
+  wire prog_s  = ui_in[PIN_PROG];
+  wire ptr_s   = ui_in[PIN_RST];
+  wire ena_s   = ena;
+`else
+  wire rst_n_s = rst_sync[1];
+  wire prog_s  = prog_sync[1];
+  wire ptr_s   = ptr_sync[1];
+  wire ena_s   = ena_sync[1];
+`endif
+
+  wire prog_mode = prog_s & ena_s;
+  wire run       = ~prog_s & ena_s;
 
   // =====================================================================
   // INPUT SYNCHRONISERS. ⛔ Every pin input is asynchronous to `clk`; sampling
@@ -214,10 +263,10 @@ module tt_um_protocol_emulator #(
   // exclusive (HALT, RELOAD, RESUME).
   // =====================================================================
   reg [AW-1:0] ptr;
-  always @(posedge clk or negedge rst_n) begin
-    if (!rst_n)            ptr <= {AW{1'b0}};
+  always @(posedge clk or negedge rst_n_s) begin
+    if (!rst_n_s)          ptr <= {AW{1'b0}};
     else if (prog_mode) begin
-      if (ui_in[PIN_RST])  ptr <= {AW{1'b0}};
+      if (ptr_s)           ptr <= {AW{1'b0}};
       else if (wr_rise)    ptr <= ptr + 1'b1;
     end
   end
@@ -253,8 +302,8 @@ module tt_um_protocol_emulator #(
   reg [AW:0] wr_run;
   wire       store_full = wr_run[AW];
   reg        prog_q, short_load;
-  always @(posedge clk or negedge rst_n) begin
-    if (!rst_n) begin
+  always @(posedge clk or negedge rst_n_s) begin
+    if (!rst_n_s) begin
       wr_run     <= {(AW+1){1'b0}};
       prog_q     <= 1'b0;
       short_load <= 1'b0;
@@ -262,7 +311,7 @@ module tt_um_protocol_emulator #(
       prog_q <= prog_mode;
       if (prog_q && !prog_mode && !store_full) short_load <= 1'b1;
       if (prog_mode && !store_full) begin
-        if (ui_in[PIN_RST])              wr_run <= {(AW+1){1'b0}};
+        if (ptr_s)                       wr_run <= {(AW+1){1'b0}};
         else if (wr_rise)                wr_run <= wr_run + 1'b1;
       end
     end
@@ -318,7 +367,7 @@ module tt_um_protocol_emulator #(
   wire [3*8-1:0] s_wrdata;
 
   pe_store #(.AW(AW), .MEM_TYPE(MEM_TYPE), .WIDE_B(3)) u_store (
-      .clk(clk), .rst_n(rst_n),
+      .clk(clk), .rst_n(rst_n_s),
       .we(prog_mode & wr_rise), .waddr(ptr), .wdata(uio_q1),
       .re(prog_mode ? rb_re : e_re),
       .raddr(prog_mode ? rb_addr : e_raddr),
@@ -443,8 +492,8 @@ module tt_um_protocol_emulator #(
   wire do_push = nib_lo & ((tx_cnt[tx_tag] != TXD[1:0])
                            | (do_pop & (q_sel == tx_tag)));
 
-  always @(posedge clk or negedge rst_n) begin
-    if (!rst_n) begin
+  always @(posedge clk or negedge rst_n_s) begin
+    if (!rst_n_s) begin
       tx_asm <= 8'h00; tx_half <= 1'b0; tx_tag <= 2'd0;
       tx_full_sticky <= 1'b0;
       for (ti = 0; ti < TXN; ti = ti + 1) begin
@@ -497,7 +546,7 @@ module tt_um_protocol_emulator #(
       // ends rather than only at its floor.
       .SDA_HOLD_NS(SDA_HOLD_NS)
   ) u_eng (
-      .clk(clk), .rst_n(rst_n), .run(eng_run),
+      .clk(clk), .rst_n(rst_n_s), .run(eng_run),
       .s_raddr(e_raddr), .s_re(e_re), .s_rdata(s_rdata),
       .s_wraddr(e_wraddr), .s_wraddrk(e_wraddrk), .s_wre(e_wre),
       .s_wrdata(s_wrdata),
@@ -582,8 +631,8 @@ module tt_um_protocol_emulator #(
                            | rx_drop_sticky
                            | (|e_ovf) | (|e_under);
 
-  always @(posedge clk or negedge rst_n) begin
-    if (!rst_n) begin
+  always @(posedge clk or negedge rst_n_s) begin
+    if (!rst_n_s) begin
       ser_d <= 1'b0; ser_s <= 1'b0; ser_v <= 1'b0;
       rx_pend <= 1'b0; rx_pend_data <= 8'h00;
       rx_pend_lane <= {LW{1'b0}};
@@ -730,11 +779,28 @@ module tt_um_protocol_emulator #(
   // the enable. ⭐ The pin is still a flop's Q, so F2 holds.
   wire cs_deasserted = uio_in[CS_PIN];
 
+  // ⭐⭐ SILICON FIX #6 (ruling CS1): THE CLEAR'S RELEASE MUST FIND D = 0.
+  // CS falls at any instant relative to `clk`, so the async clear can be
+  // released inside the flop's recovery window -- harmless only if D is
+  // already 0 then. It was NOT: the engine holds `pin_oe[MISO]` = 1 between
+  // transactions, and `test/inv_cdc.vh` saw D = 1 on the first CS fall of
+  // corpus_sptgt (CDC2 D5; the "benign" argument was refuted by its own
+  // check). So D is qualified by the SYNCHRONISED CS (`uio_q1`): it stays 0
+  // until the uio synchroniser has seen CS low, and a marginal release
+  // resolves to 0 by construction. The clear on CS high is unchanged: MISO
+  // still releases the instant the master deselects. Cost: one gate. The
+  // enable now rises 2 cycles after CS falls (docs/HOST_INTERFACE.md).
+  // ⛔ M_CS_RAW_D restores the unqualified D input.
   reg miso_oe_q;
-  always @(posedge clk or posedge cs_deasserted or negedge rst_n) begin
-    if (!rst_n)              miso_oe_q <= 1'b0;
+`ifdef M_CS_RAW_D
+  wire miso_oe_d = e_pin_oe[MISO_PIN] & run;
+`else
+  wire miso_oe_d = e_pin_oe[MISO_PIN] & run & ~uio_q1[CS_PIN];
+`endif
+  always @(posedge clk or posedge cs_deasserted or negedge rst_n_s) begin
+    if (!rst_n_s)            miso_oe_q <= 1'b0;
     else if (cs_deasserted)  miso_oe_q <= 1'b0;   // ASYNC release
-    else                     miso_oe_q <= e_pin_oe[MISO_PIN] & run;
+    else                     miso_oe_q <= miso_oe_d;
   end
 
   // =====================================================================
@@ -799,10 +865,10 @@ module tt_um_protocol_emulator #(
 `endif
 
   reg [7:0] uo_q;
-  always @(posedge clk or negedge rst_n) begin
+  always @(posedge clk or negedge rst_n_s) begin
     // ⭐ RESET: the 4 protocol outputs go HIGH (forced -- `uo_out` cannot
     //    release), the serial trio goes low, the spare goes low.
-    if (!rst_n) uo_q <= 8'h0F;
+    if (!rst_n_s) uo_q <= 8'h0F;
     else        uo_q <= {1'b0, ser_v, ser_s, ser_d, proto_out};
   end
   assign uo_out = uo_q;
@@ -810,6 +876,6 @@ module tt_um_protocol_emulator #(
   // ---- unused -----------------------------------------------------------
   // ⭐ `ui_in[4:1]` IS NO LONGER UNUSED -- it is the TX payload nibble, which
   // is the whole point of the fix above. `uio_q2` is the edge-detect tail.
-  wire _unused = &{ena, e_busy, uio_q2, 1'b0};
+  wire _unused = &{e_busy, uio_q2, 1'b0};   // `ena` is read via `ena_sync` (CDC2)
 
 endmodule

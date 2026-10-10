@@ -133,8 +133,8 @@ module tb_fifo ();
     // ---- load ---------------------------------------------------------
     ui_in[PIN_PROG] = 1'b1;
     ld_en = 1'b1;
-    ui_in[PIN_PTR] = 1'b1; @(negedge clk);
-    ui_in[PIN_PTR] = 1'b0; @(negedge clk);
+    repeat (3) @(negedge clk); ui_in[PIN_PTR] = 1'b1; repeat (3) @(negedge clk);  // CDC3: prog >= 3 cy before ptr; ptr >= 3 cy wide
+    ui_in[PIN_PTR] = 1'b0; repeat (3) @(negedge clk);
     for (i = 0; i < img_bytes; i = i + 1) begin
       ld_val = img[i];
       @(negedge clk); @(negedge clk);

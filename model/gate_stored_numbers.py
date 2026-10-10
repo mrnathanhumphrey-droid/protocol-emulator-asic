@@ -348,6 +348,13 @@ SPEC_SYMBOLS = {
     # measured (the mode the wire's idle level and edges actually show) is
     # computed every run by `cs_modes`.
     ("test/run_spifram.py", "CPOL_CPHA"),
+    # ⭐ RULING CDC5: the CDC gate's PIN TABLES -- which input bits enter
+    # through which synchronizer (`SYNC`) and which are qualifier-sampled data
+    # (`QUALIFIED`). The numbers are pin INDICES of the TT pinout, inputs to
+    # the rule; what the gate measures (every input's cone in the netlist) is
+    # computed every run.
+    ("model/gate_cdc.py", "SYNC"),
+    ("model/gate_cdc.py", "QUALIFIED"),
     # ⭐⭐ UM10204's TIMING MINIMA, TRANSCRIBED. These are REQUIREMENTS the
     # design is measured against, so they are inputs in the strongest sense --
     # the whole point of the gate that holds them is that nothing in this repo

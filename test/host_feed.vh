@@ -169,6 +169,11 @@
   // raises `hf_en` only after the image is in.
   initial begin
     wait (hf_en);
+    // CDC3 ordering: PROG has to have been low >= 3 cycles before the first
+    // PUSH edge it qualifies -- `prog` is synchronised (k = 2), so for two
+    // cycles after it drops a tag of 1 on `ui_in[5]` would still read as
+    // PTR_RST in load mode (docs/HOST_INTERFACE.md)
+    repeat (3) @(negedge clk);
     forever begin
       for (hf_q = 0; hf_q < 4; hf_q = hf_q + 1) begin
         if (hf_mask[hf_q] && dut.tx_cnt[hf_q] != 2'd2) begin

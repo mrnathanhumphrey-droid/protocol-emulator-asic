@@ -81,8 +81,8 @@ module tb_edge;
       // LOAD
       ui_in[PIN_PROG] = 1'b1;
       uio_oe_tb = 8'hFF;                  // the bench owns uio during load
-      ui_in[PIN_PTR] = 1'b1; @(posedge clk);
-      ui_in[PIN_PTR] = 1'b0; @(posedge clk);
+      repeat (3) @(posedge clk); ui_in[PIN_PTR] = 1'b1; repeat (3) @(posedge clk);  // CDC3: prog >= 3 cy before ptr; ptr >= 3 cy wide
+      ui_in[PIN_PTR] = 1'b0; repeat (3) @(posedge clk);
       for (i = 0; i < img_bytes; i = i + 1) begin
         uio_drv = img[i];
         @(posedge clk); @(posedge clk);

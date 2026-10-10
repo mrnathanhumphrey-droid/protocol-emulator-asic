@@ -82,6 +82,10 @@ KILLERS = {
     "M_TF2_LIVE_LATE": "test/run_lockstep.py",
     "M_CK_OD_CLK_DRIVE": "test/gate_corpus_trace.py",
     "M_COMB_OUT": "model/gate_f2_local.py",
+    # ruling CDC5: structural, on the M_CDC_RAW netlist; ui_in[7] -> run named
+    "M_CDC_RAW": "model/gate_cdc.py",
+    # ruling CS1: inv_cdc.vh on corpus_sptgt (run_mutants' clocked family)
+    "M_CS_RAW_D": "test/run_mutants.py",
     # -- rulings K and U --------------------------------------------------------
     "M_SHIFTIN_UNHELD": "model/gate_sda_hold.py",
     "M_HOLD_CLOCKED_ONLY": "model/gate_sda_hold.py",

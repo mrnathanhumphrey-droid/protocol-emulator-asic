@@ -27,12 +27,12 @@ project:
 # This section is for the datasheet/website. Use descriptive names (e.g., RX, TX, MOSI, SCL, SEG_A, etc.).
 pinout:
   # Inputs
-  ui[0]: "unused (F1 view-select, retired when status moved into the stream)"
+  ui[0]: "TX queue tag bit 0 (run mode) - latched with the HIGH nibble"
   ui[1]: "TX payload nibble bit 0 (run mode) - 2 pushes per byte, HIGH nibble first"
   ui[2]: "TX payload nibble bit 1"
   ui[3]: "TX payload nibble bit 2"
   ui[4]: "TX payload nibble bit 3"
-  ui[5]: "PTR_RST - reset the program write pointer (load mode)"
+  ui[5]: "load: PTR_RST - reset the program write pointer | run: TX queue tag bit 1"
   ui[6]: "load: WR - rising edge writes uio[7:0] at the pointer, then auto-increments | run: TX payload PUSH"
   ui[7]: "PROG_MODE - 1 = load a program, 0 = run"
 

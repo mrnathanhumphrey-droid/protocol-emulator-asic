@@ -44,12 +44,70 @@ hold SCL low and stretch the clock.
 | --- | --- | --- |
 | `ui_in[7]` | `prog` | 1 = load mode, 0 = run |
 | `ui_in[6]` | `wr` / `push` | load: write strobe. run: TX payload PUSH. **Asynchronous** either way |
-| `ui_in[5]` | `ptr` | load-pointer reset |
+| `ui_in[5]` | `ptr` / `tag[1]` | load: load-pointer reset. run: TX queue tag, high bit |
 | `ui_in[4:1]` | `tx_nibble` | TX payload nibble, 2 pushes per byte (run mode) |
+| `ui_in[0]` | `tag[0]` | run: TX queue tag, low bit |
 
 `wr` is treated as an asynchronous pin strobe: two flops to resolve
 metastability and a third to see the edge. **Hold it for at least 3 clocks**, and
 leave at least 3 clocks between writes.
+
+### Input synchronization and host timing
+
+*Rulings CDC1–CDC3, silicon fixes #4 and #5.* Every host input is asynchronous
+to the chip's clock. The host's microcontroller runs on its own clock, and TT
+routes `clk` and `rst_n` "like any other input pins". So each input reaches
+the logic in one of two ways:
+
+| input | how it enters | latency `k` (cycles, 50 MHz) |
+| --- | --- | --- |
+| `rst_n` | asserts **immediately**; releases through a 2-flop reset synchronizer | release: k = 2 (40 ns) |
+| `ena` | 2-flop synchronizer | k = 2 |
+| `prog` (`ui_in[7]`) | 2-flop synchronizer | k = 2 |
+| `ptr` (`ui_in[5]`, load mode) | 2-flop synchronizer | k = 2 |
+| `wr` / `push` (`ui_in[6]`) | 3-flop synchronizer, edge detected after it | edge seen 2–3 cycles after the pad edge |
+| `uio_in[7:0]` | 3-flop synchronizer (`pin_in` taken after 2) | 2 cycles |
+| `tx_nibble`, `tag` (`ui_in[4:0]`, run mode) | **not synchronized**: sampled when the synchronized `wr` edge is detected | see the hold rule below |
+
+The data pins are deliberately not synchronized bit by bit. A multi-bit value
+passed through per-bit synchronizers can resolve each bit differently, so a
+nibble changing near our clock edge could come out scrambled. Instead the
+data is **qualified by the strobe**: the chip samples it only after the
+synchronized `wr` edge, by which time the host's rules below guarantee it's
+stable, so no data flop can go metastable.
+
+**The host's rules, at 50 MHz:**
+
+- **Data and tag hold:** `tx_nibble` and `tag` must be stable from **≥ 1 cycle
+  (20 ns) before `wr` rises** until **≥ 4 cycles (80 ns) after it**. The chip
+  samples on the cycle after the synchronized edge is detected. That's 3
+  cycles after the pad edge, or 4 if the first synchronizer flop resolves
+  late. This applies equally to the byte on `uio[7:0]` in load mode, which the
+  load procedure's "hold ≥ 3 clocks" before `wr` and the 3-clock `wr` pulse
+  already cover.
+- **Level-control ordering:** `prog` and `ptr` must be stable **≥ 3 cycles
+  (60 ns) before** the `wr` edge they qualify (their 2-flop synchronizer plus
+  one) and stay stable until that edge has been taken, ≥ 4 cycles after it.
+  Concretely: assert `prog`, wait ≥ 60 ns, then pulse `ptr` or begin writing;
+  after the last byte, wait ≥ 80 ns before deasserting `prog`.
+- **Pulse width:** `ptr` must be held for **≥ 3 cycles (60 ns)**, so its
+  synchronizer is guaranteed to see it.
+- **Reset:** after `rst_n` rises, the chip leaves reset 2 cycles (40 ns)
+  later. Wait at least that long before the first `ptr` or `wr` edge. `prog`
+  may already be asserted; it only has to meet the ordering rule above.
+
+The demo board's microcontroller meets all of these with orders of magnitude
+to spare, but they are the contract. The bench drivers (`host_feed.vh`, the
+cocotb harness, gl_test) obey them.
+
+⛔ **Before this fix,** `prog` and `ptr` fed core logic directly and `rst_n`
+released every flop directly. A `prog` edge near our clock edge could leave
+part of the engine running and part not, in the same cycle. Neither
+simulation nor static timing can see that class of bug: the timing setup's
+4 ns input delay assumes a synchronous host. It was found because the worst
+timing path of a canary run started at a pin. `model/gate_cdc.py` now
+checks the structure on every push (its must-fire, `M_CDC_RAW`, is the old
+wiring, where `prog` alone reached 3,379 flop inputs).
 
 ## Loading a program
 
@@ -286,13 +344,20 @@ fetched. A pipeline's first output is not data.
 | pin | run-mode use |
 | --- | --- |
 | `ui_in[4:1]` | TX payload nibble, **2 pushes per byte, HIGH nibble first** |
+| `{ui_in[5], ui_in[0]}` | TX **queue tag** (0–3), latched with the HIGH nibble |
 | `ui_in[6]` | TX payload **PUSH** (rising edge; it is `WR` in load mode) |
 
-Push the high nibble, then the low nibble. The assembled byte enters a **2-deep
-FIFO**; the engine pops one byte each time a lane's `SHIFT` consumes data. There
-is **one** FIFO, not one per lane: the shift action already names its lane, so
-the host pushes bytes and the program does the routing — the same trick that
-deleted the address bus.
+Push the high nibble, then the low nibble. The assembled byte enters one of
+**four 2-deep queues**, chosen by the tag the host presented with the high
+nibble. The engine pops a byte from a queue each time a `SHIFT` that names
+that queue consumes data. `pe_asm` requires each queue to belong to one lane
+(`check_queue_ownership`), so the tag says which lane a byte is for. The
+nibble and tag are sampled on the synchronized `PUSH` edge and obey the hold
+rule in [Input synchronization and host timing](#input-synchronization-and-host-timing).
+
+⛔ This section used to say "one FIFO" and to omit the tag pins. The RTL has had
+four tagged queues (`TXN = 4`, `TXD = 2`) since the tag was added, and
+`info.yaml` listed `ui[0]` as unused; both are corrected (ruling CDC DOC).
 
 - **`uio` carries protocol pins only.** Nothing of the data channel is spent on
   it, which is what lets the host feed a lane while a protocol is live.
@@ -318,6 +383,49 @@ cannot carry a nibble plus a valid, so RX went bit-serial — the serial host vi
 above), and PART5 framed status **into** the stream, which retires the
 `ui_in[5]` pop and the `ui_in[0]` view select. Neither supersedes the TX nibble
 or "zero `uio` spent".
+
+## SPI-target timing (CS, MISO enable, first bit)
+
+*Rulings CS1–CS3, silicon fix #6.* For an external SPI master talking to an
+SPI-target lane (`uio[4]` SCK, `uio[5]` MOSI, `uio[6]` CS, `uio[7]` MISO), at
+50 MHz:
+
+| event | chip behaviour | time |
+| --- | --- | --- |
+| CS rises (deselect) | MISO **released immediately**: the enable flop is cleared asynchronously | gate delay only |
+| CS falls (select) | MISO enable rises on the **3rd clock edge** after the fall: the enable's input is held at 0 until the `uio` synchronizer has seen CS low | 40–60 ns; ≤ 80 ns if the first synchronizer flop resolves late |
+| CS falls → first MISO data bit on the pad | the lane is released by the synchronized CS edge, scheduled, dispatched, and its pin register drives the pad: `L_SYNC + (r − C) + OUT_REG (+ C)` from the reactive budget (`gate_admissibility_1_6`, 1.6 reactive) | ≤ **13 cycles = 260 ns** (10 cycles if the action drives at START) |
+
+**What the master must allow:**
+
+- **CS setup:** at least **14 cycles = 280 ns** from CS falling to its **first
+  sampling SCK edge**. That's the 260 ns first-bit bound plus one cycle of
+  master setup (`TSU_MASTER`).
+- **SCK ≤ 1 MHz** (`SPI_TARGET_MAX_HZ`, gate 1.6k): every later bit has the
+  same 13-cycle response budget against a half period of 25 cycles.
+- **CS high time ≥ 3 cycles (60 ns):** the synchronizer must see the deselect
+  before the next select. A shorter glitch could leave the enable's input
+  armed when CS falls again, which is exactly the hazard fix #6 removes.
+
+**Do common masters meet the setup?** At the 1 MHz limit, yes, by
+construction. In every SPI mode the master's first *sampling* edge comes at
+least half an SCK period after the clock starts: SCK idles, then the first
+edge launches or samples, and the sampling edge is never the first
+half-period. That's ≥ 500 ns ≥ 280 ns **even with zero CS lead**. The bound
+would only bind above about 1.8 MHz with no CS lead, which is outside the
+1 MHz limit anyway. The Pico SDK's examples drive CS as a software GPIO,
+which only adds lead. ⚠ This is argued, not yet measured on the demo
+board's master; it is on the FPGA bring-up checklist.
+
+⛔ **Silicon fix #6.** The MISO enable used to be set on the first clock edge
+after CS fell. The engine holds its MISO enable high between transactions,
+so the asynchronous clear was released with the flop's input already 1, at
+an arbitrary instant relative to the clock: a recovery hazard on the MISO pad
+enable that neither simulation nor static timing sees. An earlier argument
+that this was benign was refuted by its own bench check
+(`test/inv_cdc.vh`, in every DUT bench) on the first CS fall it examined.
+The input is now qualified by the synchronized CS, so a marginal release
+resolves to 0 by construction. Must-fire: `M_CS_RAW_D`.
 
 ## SPI master receive timing (clocked SHIFTIN on a push-pull clock)
 

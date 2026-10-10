@@ -179,6 +179,10 @@ GATES=(
   # ⭐ MU -- F2 face 3 on the real design, priced by building M_COMB_OUT. That
   # mutant was killed only by hand until now.
   model/gate_f2_local.py
+  # ⭐⭐ CDC5 -- no top-level input reaches core logic except through its
+  # synchronizer (silicon fixes #4 / #5). Priced by building M_CDC_RAW, the
+  # 94cebb7 wiring, whose ui_in[7] -> run path must be named.
+  model/gate_cdc.py
   # ⭐ MU -- the simulation mutant runner, ~10 s: every arm must die of the
   # assertion it names. It was run by nothing, so its kills were as old as the
   # day each was last typed.
@@ -328,6 +332,9 @@ can_run() {
     model/gate_f2_local.py)
       [ -n "${PE_NETLIST_COMB_JSON:-}" ] && [ -f "${PE_NETLIST_COMB_JSON:-}" ] \
         || { echo "no M_COMB_OUT netlist at PE_NETLIST_COMB_JSON"; return 1; } ;;
+    model/gate_cdc.py)
+      [ -n "${PE_NETLIST_CDCRAW_JSON:-}" ] && [ -f "${PE_NETLIST_CDCRAW_JSON:-}" ] \
+        || { echo "no M_CDC_RAW netlist at PE_NETLIST_CDCRAW_JSON"; return 1; } ;;
     # ⛔ THE COVERAGE GATE NEEDS THE MEASUREMENT, and a missing measurement is
     # a FAILURE here rather than a skip -- the same rule the reset audit's
     # netlist precondition follows, and for the same reason: a gate that
@@ -432,8 +439,12 @@ if [ -z "${PE_NETLIST_JSON:-}" ]; then
     # priced on every push (`model/gate_f2_local.py`) rather than by hand.
     bash test/local_netlist.sh "$ROOT" M_COMB_OUT ci_netlist_comb "$NL_DIR" || {
       echo "  *** yosys could not build the M_COMB_OUT netlist"; exit 1; }
+    # ⭐ CDC5: the same recipe at M_CDC_RAW, the must-fire of model/gate_cdc.py
+    bash test/local_netlist.sh "$ROOT" M_CDC_RAW ci_netlist_cdcraw "$NL_DIR" || {
+      echo "  *** yosys could not build the M_CDC_RAW netlist"; exit 1; }
     export PE_NETLIST_JSON="$NL_DIR/ci_netlist.json"
     export PE_NETLIST_COMB_JSON="$NL_DIR/ci_netlist_comb.json"
+    export PE_NETLIST_CDCRAW_JSON="$NL_DIR/ci_netlist_cdcraw.json"
   elif command -v wsl.exe >/dev/null 2>&1; then
     # ⛔ DELEGATED, AND THE RULES FOR IT ARE THE PROJECT'S: always a SCRIPT
     # FILE (never inline `bash -c`) and always MSYS_NO_PATHCONV=1, because
@@ -446,7 +457,8 @@ if [ -z "${PE_NETLIST_JSON:-}" ]; then
       echo '#!/bin/bash'
       echo 'cd "$(dirname "$0")" || exit 1'
       echo 'bash test/local_netlist.sh "$PWD" "" ci_netlist "$PWD/probe_nl" || exit 1'
-      echo 'bash test/local_netlist.sh "$PWD" M_COMB_OUT ci_netlist_comb "$PWD/probe_nl"'
+      echo 'bash test/local_netlist.sh "$PWD" M_COMB_OUT ci_netlist_comb "$PWD/probe_nl" || exit 1'
+      echo 'bash test/local_netlist.sh "$PWD" M_CDC_RAW ci_netlist_cdcraw "$PWD/probe_nl"'
     } > "$WRAP"
     mkdir -p "$ROOT/probe_nl"
     # ⛔ TWO SPELLINGS TO HANDLE, AND BASH EXPANSION RATHER THAN `sed`.
@@ -472,6 +484,7 @@ if [ -z "${PE_NETLIST_JSON:-}" ]; then
       echo "  *** the WSL netlist step failed"; exit 1; }
     export PE_NETLIST_JSON="$ROOT/probe_nl/ci_netlist.json"
     export PE_NETLIST_COMB_JSON="$ROOT/probe_nl/ci_netlist_comb.json"
+    export PE_NETLIST_CDCRAW_JSON="$ROOT/probe_nl/ci_netlist_cdcraw.json"
   else
     echo "  *** neither yosys nor wsl.exe is available, so the reset audit"
     echo "      cannot see the design. It is RED rather than skipped."
@@ -479,6 +492,7 @@ if [ -z "${PE_NETLIST_JSON:-}" ]; then
 fi
 [ -n "${PE_NETLIST_JSON:-}" ] && echo "  PE_NETLIST_JSON=$PE_NETLIST_JSON"
 [ -n "${PE_NETLIST_COMB_JSON:-}" ] && echo "  PE_NETLIST_COMB_JSON=$PE_NETLIST_COMB_JSON"
+[ -n "${PE_NETLIST_CDCRAW_JSON:-}" ] && echo "  PE_NETLIST_CDCRAW_JSON=$PE_NETLIST_CDCRAW_JSON"
 
 # ---------------------------------------------------------------------------
 # THE COVERAGE SWEEP, whose data `test/gate_coverage.py` adjudicates.

@@ -186,8 +186,9 @@ module tb_smoke;
 
     // ---- LOAD MODE ------------------------------------------------------
     ui_in[7] = 1'b1;                       // prog_mode
-    ui_in[5] = 1'b1;  @(posedge clk);      // pointer reset
-    ui_in[5] = 1'b0;  @(posedge clk);
+    repeat (3) @(posedge clk);             // CDC3: prog >= 3 cy before ptr
+    ui_in[5] = 1'b1;  repeat (3) @(posedge clk);  // pointer reset, >= 3 cy wide
+    ui_in[5] = 1'b0;  repeat (3) @(posedge clk);
 
     for (i = 0; i < img_bytes; i = i + 1) begin
       uio_drv  = img[i];

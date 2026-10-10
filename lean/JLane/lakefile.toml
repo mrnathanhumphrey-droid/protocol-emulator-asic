@@ -4,3 +4,7 @@ defaultTargets = ["JLane"]
 
 [[lean_lib]]
 name = "JLane"
+
+[[lean_exe]]
+name = "replay"
+root = "Replay"
