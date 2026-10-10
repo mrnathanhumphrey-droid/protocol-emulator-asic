@@ -131,6 +131,23 @@ def five(out, name, delays):
     return p
 
 
+# ⚠ Two lockstep images are GITIGNORED (made by `make_smoke_image --all`), so a
+# fresh checkout lacks them: built here into the run directory with the same
+# builder calls as `--all`, never written into test/.
+GENERATED = {"stress_image.hex": lambda m: m.build_stress(25, 31),
+             "census_image.hex": lambda m: m.build_census()}
+
+
+def image(out, name):
+    if name not in GENERATED:
+        return os.path.join(ROOT, "test", name)
+    import make_smoke_image as m
+    from pe_isa import write_image
+    p = os.path.join(out, name)
+    write_image(p, GENERATED[name](m))
+    return p
+
+
 def nbytes(hexp):
     with open(hexp, encoding="ascii") as fh:
         return len([t for t in fh.read().split() if not t.startswith("//")])
@@ -157,8 +174,7 @@ def export(out, rows, rtl):
         for f, fn in FAMILIES.items():
             n = "%s%d" % (f, d)
             jobs.append((n, "clean", five(out, n, fn(d))))
-    jobs += [("img_" + i[:-4], "clean", os.path.join(ROOT, "test", i))
-             for i in IMAGES]
+    jobs += [("img_" + i[:-4], "clean", image(out, i)) for i in IMAGES]
     m20 = five(out, "m20", (20, 21, 22, 23, 24))
     jobs += [("MF_bufswap_m20", "bufswap", m20),
              ("MF_tf1late_m20", "tf1late", m20)]
@@ -275,7 +291,8 @@ def main():
                     help="local only: label a dirty bench with a content hash")
     a = ap.parse_args()
     rtl = rtl_label(a.worktree)
-    out = os.path.join(a.out, "%s-%d-%s" % (rtl, a.rows, time.strftime("%Y%m%d%H%M%S")))
+    # absolute: the proofs step runs Lean with cwd = lean/JLane
+    out = os.path.join(os.path.abspath(a.out), "%s-%d-%s" % (rtl, a.rows, time.strftime("%Y%m%d%H%M%S")))
     os.makedirs(out)
     print("LN1 -- Lean replay of JLane.step against the RTL at %s, %d rows/arm"
           % (rtl, a.rows))
