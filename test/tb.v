@@ -71,5 +71,11 @@ module tb ();
   );
 
 `include "test/od_bus.vh"
+// PR2: cur_ck == l_clkpin[cur] on every cycle. RTL only -- the gate-level
+// netlist has no `u_eng` hierarchy to read.
+`ifndef GL_TEST
+`define INV_DUT user_project
+`include "test/inv_curck.vh"
+`endif
 
 endmodule

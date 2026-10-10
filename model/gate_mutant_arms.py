@@ -106,6 +106,12 @@ EXPECT = {
     # ruling CE1 / CE2: each new mode bit read as 0 -- the selector ignored
     "M_HALF_IGNORED":    (2, None),
     "M_CLKINV_IGNORED":  (3, None),
+    # ruling PR2: the 94cebb7 form, the 5-way `l_clkpin[cur]` select feeding
+    # the pin registers; EQUIVALENT by requirement (cycle-identical)
+    "M_PR_CURSEL":       (4,
+        "one site, TWO lines per arm, declared: `ck_pin` and `clk_real` both "
+        "revert to the select. Reverting one alone would leave the clock "
+        "index and its range test reading different sources."),
     "M_SHARED_BITP":     (14,
         "a BLOCK substitution across FOUR sites, declared: the mutation "
         "re-merges the TX and RX bit pointers, and the pointer is named in the "

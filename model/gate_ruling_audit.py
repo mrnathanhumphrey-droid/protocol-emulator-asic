@@ -134,7 +134,9 @@ RULINGS = [
      "test.py::test_readback_reaches_byte_zero + the readback seed sweep",
      "program byte 0 is readable: rb_addr latches the pre-increment address AND "
      "the readback primes before it frames."),
-    ("D2", "rtl", BUILT, "src/pe_engine.v", "pin_oe[l_clkpin[cur]]  <= ~a_lvl",
+    # PR2: the clock pin is read through the registered `ck_pin`
+    # (== l_clkpin[cur] every cycle, test/inv_curck.vh)
+    ("D2", "rtl", BUILT, "src/pe_engine.v", "pin_oe[ck_pin]  <= ~a_lvl",
      "test.py::test_open_drain_clock_pin_is_released + the invariant/stretch "
      "must-fires", "an open-drain lane's CLOCK pin is released, not driven."),
     ("serial-RX", "rtl", BUILT, "src/project.v", "ser_sh",

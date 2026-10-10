@@ -1247,13 +1247,19 @@ module pe_engine #(
   reg [ACT_W-1:0] w_act;           // == l_act[hix[winner]] when winner_v
   reg             w_hv;            // == l_actv[hix[winner]]
   reg             w_armed;         // == l_armed[winner]
+  reg [PINW-1:0]  w_ck;            // == l_clkpin[winner]           (PR2)
+  reg             w_ckr;           // == (l_clkpin[winner] < N_PINS) (PR2)
   integer         wk;
   always @* begin
     w_act = {ACT_W{1'b0}}; w_hv = 1'b0; w_armed = 1'b0;
+    w_ck = {PINW{1'b0}}; w_ckr = 1'b0;
     for (wk = 0; wk < N_LANES; wk = wk + 1) begin
       w_act   = w_act   | ({ACT_W{winner_oh[wk]}} & hw[wk]);
       w_hv    = w_hv    | (winner_oh[wk] & hv[wk]);
       w_armed = w_armed | (winner_oh[wk] & l_armed[wk]);
+      w_ck    = w_ck    | ({PINW{winner_oh[wk]}} & l_clkpin[wk]);
+      w_ckr   = w_ckr   | (winner_oh[wk]
+                           & (l_clkpin[wk] < N_PINS[PINW-1:0]));
     end
   end
 
@@ -1332,7 +1338,24 @@ module pe_engine #(
   // ⚠ FOUND BY RULING 0's AUDIT, not by a failing test: feeding the host
   // channel turned the aliased clock write from invisible into a refusal, and
   // the refusal had nowhere for the corpus to go.
+  // ⭐⭐ RULING PR2: THE CURRENT LANE'S CLOCK PIN IS A REGISTER. Signoff at
+  // 94cebb7 put every top-10 slow path through `cur` -> the 5-way
+  // `l_clkpin[cur]` select -> `pin_out` / `pin_oe` (-0.624 ns). `cur_ck` is
+  // loaded with `cur` from the one-hot winner pick (`w_ck`, as `cur_act`
+  // from `w_act`) and on a header write to the current lane, so
+  // `cur_ck == l_clkpin[cur]` holds on every cycle -- asserted by every bench
+  // through `test/inv_curck.vh`. Every DRIVE/WB use reads `ck_pin`.
+  // ⛔ M_PR_CURSEL restores the select (the 94cebb7 form); the registers are
+  // kept in both arms so the invariant check compiles against the mutant.
+  reg  [PINW-1:0] cur_ck;
+  reg             cur_ckr;
+`ifdef M_PR_CURSEL
+  wire [PINW-1:0] ck_pin = l_clkpin[cur];
   wire clk_real = (l_clkpin[cur] < N_PINS[PINW-1:0]);
+`else
+  wire [PINW-1:0] ck_pin = cur_ck;
+  wire clk_real = cur_ckr;
+`endif
 
   // =====================================================================
   // THE SELF-CLOCKED DECODE. Both terms of the trigger matter and neither is
@@ -1881,6 +1904,8 @@ module pe_engine #(
       jitter_max <= {JW{1'b0}};
       cur      <= {LW{1'b0}};
       cur_act  <= {ACT_W{1'b0}};
+      cur_ck   <= {PINW{1'b0}};       // PR2: == l_clkpin[0] at reset
+      cur_ckr  <= 1'b1;               //      0 < N_PINS
       hst      <= H_IDLE;
       hl       <= {LW{1'b0}};
       hb       <= 4'd0;
@@ -2057,6 +2082,15 @@ module pe_engine #(
                     // bits land at the BOTTOM where nothing reads them.
                     l_pin[hl]    <= hsh_n[HDR_BYTES*8-1 -: PINW];
                     l_clkpin[hl] <= hsh_n[HDR_BYTES*8-1-PINW -: PINW];
+                    // ⭐ PR2: `cur_ck` mirrors `l_clkpin[cur]`, so a header
+                    // write to the CURRENT lane updates it too. Dispatch is
+                    // gated on `primed`, which rises only after the header
+                    // load, so the two never land on the same edge.
+                    if (hl == cur) begin
+                      cur_ck  <= hsh_n[HDR_BYTES*8-1-PINW -: PINW];
+                      cur_ckr <= (hsh_n[HDR_BYTES*8-1-PINW -: PINW]
+                                  < N_PINS[PINW-1:0]);
+                    end
                     l_mode[hl]   <= hsh_n[HDR_BYTES*8-1-2*PINW];
                     // the LAST bit of the header word; see `l_order`
                     l_order[hl]  <= hsh_n[0];
@@ -2248,6 +2282,8 @@ module pe_engine #(
                    if (w_hv) begin
                      cur     <= winner;
                      cur_act <= w_act;
+                     cur_ck  <= w_ck;          // PR2: == l_clkpin[winner]
+                     cur_ckr <= w_ckr;
                      st      <= ST_DRIVE;
                    end else begin
                      // ⭐⭐ THIS STALL IS THE JITTER TERM J. The EDF winner is
@@ -2331,7 +2367,7 @@ module pe_engine #(
             // a branch of it.
             OP_SHIFT: if (pin_real && !ck_refuse) begin
 `ifndef M_SHIFT_CLK_ALIAS
-              if (l_clkpin[cur] == a_pin) begin
+              if (ck_pin == a_pin) begin
                 config_err   <= 1'b1;
                 sticky_ovr   <= 1'b1;
                 live_n[cur]  = 1'b0;
@@ -2391,8 +2427,8 @@ module pe_engine #(
                   end
                   end
                   if (clk_real) begin
-                    pin_out[l_clkpin[cur]] <= 1'b0;
-                    pin_oe[l_clkpin[cur]]  <= 1'b1;   // pull/drive LOW
+                    pin_out[ck_pin] <= 1'b0;
+                    pin_oe[ck_pin]  <= 1'b1;   // pull/drive LOW
                   end
                 end else begin
                   // ⭐ CLOCK HIGH ONLY -- the data pin is NOT rewritten, so the
@@ -2412,15 +2448,15 @@ module pe_engine #(
                   // after being dark since `7a672b0` (ruling Q2).
                   if (clk_real) begin
                   if (l_mode[cur]) begin
-                    pin_out[l_clkpin[cur]] <= 1'b1 & pin_pp[l_clkpin[cur]];
-                    pin_oe[l_clkpin[cur]]  <= 1'b1;
+                    pin_out[ck_pin] <= 1'b1 & pin_pp[ck_pin];
+                    pin_oe[ck_pin]  <= 1'b1;
                   end else begin
 `ifdef M_CK_OD_CLK_DRIVE
-                    pin_out[l_clkpin[cur]] <= 1'b1;
-                    pin_oe[l_clkpin[cur]]  <= 1'b1;
+                    pin_out[ck_pin] <= 1'b1;
+                    pin_oe[ck_pin]  <= 1'b1;
 `else
-                    pin_out[l_clkpin[cur]] <= 1'b0;
-                    pin_oe[l_clkpin[cur]]  <= 1'b0;   // RELEASE
+                    pin_out[ck_pin] <= 1'b0;
+                    pin_oe[ck_pin]  <= 1'b0;   // RELEASE
 `endif
                   end
                   end
@@ -2530,15 +2566,15 @@ module pe_engine #(
               // needs, since the master supplies SCK.
               if (clk_real) begin
 `ifdef M_OD_CLK_PUSHPULL
-              pin_out[l_clkpin[cur]] <= a_lvl;
-              pin_oe[l_clkpin[cur]]  <= 1'b1;
+              pin_out[ck_pin] <= a_lvl;
+              pin_oe[ck_pin]  <= 1'b1;
 `else
               if (l_mode[cur]) begin
-                pin_out[l_clkpin[cur]] <= a_lvl & pin_pp[l_clkpin[cur]];
-                pin_oe[l_clkpin[cur]]  <= 1'b1;
+                pin_out[ck_pin] <= a_lvl & pin_pp[ck_pin];
+                pin_oe[ck_pin]  <= 1'b1;
               end else begin
-                pin_out[l_clkpin[cur]] <= 1'b0;
-                pin_oe[l_clkpin[cur]]  <= ~a_lvl;
+                pin_out[ck_pin] <= 1'b0;
+                pin_oe[ck_pin]  <= ~a_lvl;
               end
 `endif
               end
@@ -2617,19 +2653,19 @@ module pe_engine #(
                   // the stretch observable: the rise happens when the PEER
                   // allows it, and `l_ckwait` is what catches that instant.
                   if (l_mode[cur]) begin
-                    pin_out[l_clkpin[cur]] <= 1'b1 & pin_pp[l_clkpin[cur]];
-                    pin_oe[l_clkpin[cur]]  <= 1'b1;
+                    pin_out[ck_pin] <= 1'b1 & pin_pp[ck_pin];
+                    pin_oe[ck_pin]  <= 1'b1;
                   end else begin
-                    pin_out[l_clkpin[cur]] <= 1'b0;
-                    pin_oe[l_clkpin[cur]]  <= 1'b0;
+                    pin_out[ck_pin] <= 1'b0;
+                    pin_oe[ck_pin]  <= 1'b0;
                   end
                 end else begin
                   // LOW and COLL both take the clock down. ⭐ I6: an action
                   // ENDS with the clock low, so the next one's LOW phase
                   // starts from a known level and no program needs a
                   // separating OP_LEVEL between bytes.
-                  pin_out[l_clkpin[cur]] <= 1'b0;
-                  pin_oe[l_clkpin[cur]]  <= 1'b1;
+                  pin_out[ck_pin] <= 1'b0;
+                  pin_oe[ck_pin]  <= 1'b1;
                 end
               end
             end
@@ -2757,7 +2793,7 @@ module pe_engine #(
             // paid debt was recorded.
             if (ck_act & ck_is_high & ck_park_en & ~l_mode[cur]) begin
               armed_n[cur]   = 1'b1;
-              l_armpin[cur]  <= l_clkpin[cur];
+              l_armpin[cur]  <= ck_pin;
               l_armedge[cur] <= 1'b1;        // a RISE
               notmo_n[cur]   = 1'b1;         // unbounded: a slow peer is legal
               l_ckpark[cur]  <= 1'b1;
@@ -3125,7 +3161,7 @@ module pe_engine #(
       if (ppc_set) begin
         ppc_v <= 1'b1;
         ppc_l <= cur;
-        ppc_n <= (l_clkpin[cur] >= 8) ? 2'd2 : 2'd1;
+        ppc_n <= (ck_pin >= 8) ? 2'd2 : 2'd1;
       end else if (ppc_v) begin
         if (ppc_n == 2'd0) ppc_v <= 1'b0;
         else               ppc_n <= ppc_n - 2'd1;

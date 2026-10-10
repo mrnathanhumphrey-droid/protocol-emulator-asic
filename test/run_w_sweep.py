@@ -61,7 +61,18 @@ SCRATCH_MUTANTS = {
     "S_W4_SLOW_REFILL": "the fetch port idles L_REFILL cycles after every "
                         "capture, so each refill costs 8 cycles; u20 must "
                         "violate Theorem 3's conclusion",
+    "S_PR_CKSTALE": "ruling PR2: the dispatch no longer loads `cur_ck`, so "
+                    "the registered clock pin goes stale on the first "
+                    "dispatch to a lane with a different clock pin; "
+                    "`test/inv_curck.vh` must fire on m20",
 }
+
+
+def ckstale_subs():
+    """(landmark, replacement) for S_PR_CKSTALE: drop the dispatch-time load
+    of the registered clock pin. A Verilog spec, not stored numbers."""
+    return [("                     cur_ck  <= w_ck;          "
+             "// PR2: == l_clkpin[winner]\n", "")]
 
 
 def slow_subs():
@@ -88,14 +99,14 @@ def src_sha256():
     return out
 
 
-def slow_engine():
+def slow_engine(tag="slow", subs=slow_subs, what="slow-refill mutant"):
     with open(os.path.join(ROOT, "src", "pe_engine.v"), encoding="utf-8",
               newline="") as fh:
         txt = fh.read().replace("\r\n", "\n")
-    for a, b in slow_subs():
-        txt = scratch_sub(txt, a, b, "slow-refill mutant (%r)" % a[:50])
+    for a, b in subs():
+        txt = scratch_sub(txt, a, b, "%s (%r)" % (what, a[:50]))
     os.makedirs(SCRATCH, exist_ok=True)
-    out = os.path.join(SCRATCH, "pe_engine_slow.v")
+    out = os.path.join(SCRATCH, "pe_engine_%s.v" % tag)
     with open(out, "w", encoding="utf-8", newline="\n") as fh:
         fh.write(txt)
     return out
@@ -104,6 +115,8 @@ def slow_engine():
 def build(rtl):
     os.makedirs(SCRATCH, exist_ok=True)
     eng = (slow_engine() if rtl == "slow"
+           else slow_engine("ckstale", ckstale_subs, "S_PR_CKSTALE")
+           if rtl == "ckstale"
            else os.path.join(ROOT, "src", "pe_engine.v"))
     out = os.path.join(SCRATCH, "w_%s.vvp" % rtl)
     cmd = [tool("iverilog"), "-g2012", "-o", out, "-s", "tb_w", "test/tb_w.v",
@@ -183,6 +196,24 @@ def subset():
                  ",".join(map(str, slk)), own, verdict))
         if not ok:
             rc = 1
+    # ⭐ RULING PR2's invariant, PRICED: with the dispatch-time `cur_ck` load
+    # removed, tb_w's `inv_curck.vh` must stop the run. The clean arms above
+    # already carry the same check (a failure there never prints `END tb_w`,
+    # which `run` refuses).
+    stale = build("ckstale")
+    img = five_image("m20", (20, 21, 22, 23, 24))
+    with open(img, encoding="ascii") as fh:
+        nb = len(fh.read().split())
+    r = subprocess.run([tool("vvp"), stale, "+IMG=" + os.path.abspath(img)
+                        .replace(os.sep, "/"), "+NBYTES=%d" % nb,
+                        "+NCYC=20000", "+WARMUP=0"], cwd=ROOT,
+                       capture_output=True, encoding="utf-8", errors="replace")
+    fired = "*** FAIL inv_curck" in (r.stdout or "") + (r.stderr or "")
+    print("  %-9s %-16s %s" % ("ckstale", "20 21 22 23 24",
+                               "red  ok (must-fire: inv_curck)" if fired
+                               else "*** MUST-FIRE FAILED (inv_curck silent)"))
+    if not fired:
+        rc = 1
     print()
     print("  GATE w_subset: %s" % ("PASSED" if rc == 0 else "FAILED"))
     return rc

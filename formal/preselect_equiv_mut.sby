@@ -1,6 +1,8 @@
-# Must-fire for preselect_equiv.sby, required to FAIL (a counterexample is
-# the pass): `w_act` drops its one-hot gate, so it ORs all five heads.
-# Run: python formal/make_preselect_miter.py --mutate && sby -f formal/preselect_equiv_mut.sby
+# Must-fires for preselect_equiv.sby, two of them, each required to FAIL (a
+# counterexample is the pass):
+#   --mutate     `w_act` drops its one-hot gate, so it ORs all five heads
+#   --mutate-ck  `w_ck` drops its one-hot gate (ruling PR2's clock-pin pick)
+# Run: python formal/make_preselect_miter.py --mutate[-ck] && sby -f formal/preselect_equiv_mut.sby
 [options]
 mode prove
 depth 1

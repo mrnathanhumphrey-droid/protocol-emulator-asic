@@ -1,3 +1,5 @@
+// PR2: every bench that carries Layer B also asserts cur_ck == l_clkpin[cur]
+`include "test/inv_curck.vh"
 /* clocked_conform.vh -- LAYER B of the bench watchdog: exact per-action
  * conformance of the RTL to the GOLDEN MODEL.
  *

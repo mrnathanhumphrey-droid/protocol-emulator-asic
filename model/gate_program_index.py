@@ -76,6 +76,13 @@ PROGRAM_INDEX = (
     # NOTHING -- the entry below went "classified but not present" while the
     # new, still program-controlled read was invisible. Registered by name.
     (r"ck_rpin", "ck_rpin"),
+    # ⛔ RULING PR2, THE SAME TRAP A SECOND TIME: the clock-pin writes moved
+    # from `l_clkpin[cur]` to the registered `ck_pin` (== l_clkpin[cur] every
+    # cycle). The header field is just as program-controlled behind a
+    # register, so the wire is registered by name -- without this line the
+    # three entries below went "classified but not present" and the writes
+    # fell out of the sweep.
+    (r"ck_pin", "ck_pin"),
 )
 IDX_RE = "(?:" + "|".join(p for p, _n in PROGRAM_INDEX) + ")"
 ACCESS = re.compile(r"([a-z_][a-z_0-9]*)\s*\[\s*(" + IDX_RE + r")\s*\]")
@@ -113,19 +120,20 @@ CLASSIFIED = {
         "out-of-range read is X in simulation and an UNSPECIFIED synthesised "
         "value in silicon, and `a_lvl & pin_pp[15]` would carry that straight "
         "to the pin."),
-    ("src/pe_engine.v", "pin_out", "l_clkpin[*]"): (
+    ("src/pe_engine.v", "pin_out", "ck_pin"): (
         "clk_real",
-        "The CLOCK-pin write. ⛔ It needed its own guard, separate from "
+        "The CLOCK-pin write (PR2: through the registered `ck_pin`, with "
+        "`clk_real` its registered range bit). ⛔ It needed its own guard, separate from "
         "`pin_real`: the clock pin is a different header field from the data "
         "pin, so a lane may name a real data pin and a non-real clock -- which "
         "an SPI TARGET does deliberately, naming PIN_NONE because the master "
         "supplies SCK."),
-    ("src/pe_engine.v", "pin_oe", "l_clkpin[*]"): (
+    ("src/pe_engine.v", "pin_oe", "ck_pin"): (
         "clk_real",
         "The clock pin's output enable, under the same `if (clk_real)`. Same "
         "reasoning as the data pin's enable: open-drain drives the enable, not "
         "the level."),
-    ("src/pe_engine.v", "pin_pp", "l_clkpin[*]"): (
+    ("src/pe_engine.v", "pin_pp", "ck_pin"): (
         "clk_real",
         "The clock pin's drive class, read inside the clock write to mask an "
         "open-drain 1. Guarded by `clk_real` with the write it feeds."),

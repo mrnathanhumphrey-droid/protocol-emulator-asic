@@ -50,6 +50,7 @@ module tb_lock;
       .uio_in(uio_in), .uio_out(uio_out), .uio_oe(uio_oe),
       .ena(ena), .clk(clk), .rst_n(rst_n)
   );
+`include "test/inv_curck.vh"       // PR2: cur_ck == l_clkpin[cur], every cycle
 
   initial begin
     if (!$value$plusargs("IMG=%s", imgfile)) begin

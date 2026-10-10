@@ -124,6 +124,12 @@ SURVIVORS = {
     "M_TM2_STORE_ADD": "the old in-store address add; TM2 registers the same "
                        "sums beside `s_wraddr`, so every byte reads the same "
                        "address in the same cycle -- equivalent by requirement.",
+    # ⭐ RULING PR2: same standing. Its evidence is the lockstep vs 94cebb7
+    # and `test/inv_curck.vh` in every bench (priced by S_PR_CKSTALE).
+    "M_PR_CURSEL": "the old `l_clkpin[cur]` select; PR2 registers the same "
+                   "value as `cur_ck` at dispatch and on a header write to "
+                   "the current lane, so every clock-pin access reads the "
+                   "same pin in the same cycle -- equivalent by requirement.",
 }
 
 
@@ -139,6 +145,9 @@ SURVIVORS = {
 SCRATCH = {
     # ruling W4: the slow-refill copy; the live subset kills it in CI
     "S_W4_SLOW_REFILL": "test/run_w_sweep.py",
+    # ruling PR2: the registered clock pin left stale; inv_curck.vh must fire
+    # (W live subset, CI)
+    "S_PR_CKSTALE": "test/run_w_sweep.py",
     # ruling ACK (b): the wrong-instant SHIFTIN sampler; local (sigrok)
     "S_CK_COMMANDED_RISE": "test/run_ckack.py",
     # ruling CI5: the clocked SHIFT drives the header pin; V2 on the action
