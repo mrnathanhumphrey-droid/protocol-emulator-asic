@@ -124,6 +124,19 @@ def provenance(src: str):
     return head.stdout.strip(), bool(st.stdout.strip())
 
 
+def dirty_files(src: str):
+    """The clone's modified / deleted TRACKED files, as `git status` names them."""
+    import subprocess
+    root = os.path.dirname(os.path.abspath(src))
+    try:
+        st = subprocess.run(["git", "-C", root, "status", "--porcelain",
+                             "--untracked-files=no"],
+                            capture_output=True, text=True, timeout=20)
+    except (OSError, subprocess.SubprocessError):
+        return []
+    return [ln.strip() for ln in st.stdout.splitlines() if ln.strip()]
+
+
 def judge(src: str, declared: str | None):
     """(ok, label) for one clone. Pure, so the must-fire can price it."""
     commit, dirty = provenance(src)
@@ -140,6 +153,16 @@ def judge(src: str, declared: str | None):
                 return False, ("%s is DECLARED without a reason -- a declaration "
                                "is only worth printing if it says why" % ident)
             return True, "DECLARED %s -- %s" % (ident[:20], why)
+    # ⛔ DIRTY IS NOT A COMMIT MISMATCH, and the message used to say it was:
+    # "UNPINNED 1f3a649ced6170962085, pin is 1f3a649ced61" when the commit WAS
+    # the pin and one tracked file (py.typed) had been deleted from the clone.
+    # A reader chases the wrong cause. Named separately, with the files.
+    if commit == PINNED_COMMIT and dirty:
+        files = dirty_files(src)
+        return False, ("DIRTY: the clone IS the pinned commit %s, but %d tracked "
+                       "file(s) differ from it: %s. Restore them (git -C <clone> "
+                       "checkout -- <file>) -- and find what changed them." % (
+                           PINNED_COMMIT[:12], len(files), "; ".join(files[:6])))
     return False, ("UNPINNED %s, pin is %s. Check out the pin, or set %s="
                    "\"%s: <reason>\" to run this copy on purpose."
                    % (ident[:20], PINNED_COMMIT[:12], DECLARE_ENV, ident))

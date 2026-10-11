@@ -33,6 +33,7 @@ model/gate_tool_pinning.py          ^\s*GATE tool-pinning: PASSED\s*$
 model/gate_f2_local.py              ^\s*GATE f2-local: PASSED\s*$
 model/gate_cdc.py                   ^\s*GATE cdc: PASSED\s*$
 model/gate_slang_lint.py            ^\s*SLANG LINT GATE: PASSED\s*$
+model/gate_hold_offset.py           ^\s*GATE hold-offset: PASSED\s*$
 test/run_uartrx.py                  ^\s*UART-RX GATE: PASSED\s*$
 test/run_mutants.py                 ^\s*GATE mutants: PASSED\s*$
 model/gate_mutant_kills.py          ^\s*GATE mutant-kills: PASSED\s*$

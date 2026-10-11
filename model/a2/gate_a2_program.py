@@ -73,7 +73,9 @@ def load_measurement():
 
 #: the fields only a pyRTA run can fill. Skipped when comparing without it,
 #: so CI never reports a stale row merely because it could not run pyRTA.
-PYRTA_ONLY = {"r_pyrta", "slack", "r_floor", "why"}
+# `budget` (HC1-B) labels a slack as pyRTA's or EMPIRICAL; it exists only where
+# the slack does, so it is pyRTA-side like the slack itself.
+PYRTA_ONLY = {"r_pyrta", "slack", "r_floor", "why", "budget"}
 
 
 def stale_rows(on_disk, fresh, with_pyrta):
@@ -127,8 +129,15 @@ def main() -> int:
         return 1
     with io.open(program_a2.OUT_JSON, encoding="utf-8") as fh:
         on_disk = json.load(fh)
-    fresh = {name: program_a2.derive(img, src)
-             for name, img in program_a2.clocked_images()}
+    # ⛔ HC1-B: re-derived through `budgets()`, the SAME path that writes the
+    # json (refuse-to-emit, NO_RTA_BUDGET's empirical rows, the `budget`
+    # label). Re-deriving through `derive()` alone compared the file against
+    # a different producer and called every row stale.
+    try:
+        fresh = program_a2.budgets(src)
+    except RuntimeError as exc:
+        print("    *** FAIL program_a2 refused to emit: %s" % exc)
+        return 1
     stale = stale_rows(on_disk, fresh, with_pyrta=bool(src))
     if stale:
         print("    *** FAIL stale for: %s" % ", ".join(sorted(set(stale))))

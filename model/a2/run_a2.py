@@ -100,6 +100,12 @@ GATES = [
     # `gate_a2_program.py` (in CI) re-derives everything but this column.
     ("gate_a2_bounds_pyrta.py",
      "A2s  per-program A2 budgets: the pyRTA column, re-derived", False),
+    # ⛔⛔ HC1-B: a budget that disappears is RED. Regenerated vs committed:
+    # a field gone to None, a negative slack, or an unlabelled budget fails;
+    # other moves are reported. program_a2 refuses to emit an unbounded image
+    # unless it is marked NO_RTA_BUDGET (ckdense: EMPIRICAL budget).
+    ("gate_a2_bounds_diff.py",
+     "A2d  bounds diff: a lost bound is red; program_a2 refuses to emit it", False),
     # ⛔ `../` because this one lives in model/ with the other RTL-FACING gates
     # (part1_param_contract, f2_flop_driven_outputs), not in model/a2/ with the
     # analysis. It is in THIS list anyway: an out-of-suite gate is a gate nobody

@@ -148,7 +148,7 @@ def lane_set(img):
 # corpus_all5 lane 2 (writeback at 2082, capture at 2085). The gate is EXACT:
 # a LOW picked in cycle c consumes at c + 2, so it is allowed once the capture
 # will have landed by c + 1 -- eligible from pick + 2 + ppc_n, the quantity
-# that plays W6's `HS + 1`:
+# that plays W6's `HS + 2` (HS + HOLD_PICK_LAG, corrected by HC1):
 #     J_cap(i) = max(0, CAP_i + (r_i - C) - T_i),  CAP_i = 2 + ppc_n
 # ⇒ the delayed job is the LOW (the consume), which arms no capture, so a
 #   capture-blocked job is never itself capture-delayed: no chaining case.
@@ -177,11 +177,20 @@ def utilisation(ls):
 # contention (`ckdense`, d = 20..23), so "it cannot bind at the mode floor" is
 # FALSE and the bound has to carry it.
 # THE DERIVATION. A loading job of lane i is picked at lateness j <= r_i - C
-# (r_i measured from the nominal release, C the service time). Its hold counter
-# is loaded at the DRIVE edge one cycle after the pick and runs HS cycles, so
-# the lane is next eligible HS + 1 cycles after the pick. Its next job is
-# released T_i after the loading job's release, so W1 holds that job back by
-#     J_w1(i) = max(0, HS + 1 + (r_i - C) - T_i)
+# (r_i measured from the nominal release, C the service time). The DRIVE is
+# the cycle after the pick; the hold load is written at the edge that ENDS the
+# DRIVE, so `l_hcnt` reads HS from pick + 2 and reaches 0 at pick + HS + 2 --
+# the lane is next eligible HS + 2 cycles after the pick (HS + 1 after DRIVE).
+# Its next job is released T_i after the loading job's release, so W1 holds
+# that job back by
+#     J_w1(i) = max(0, HS + 2 + (r_i - C) - T_i)
+# ⛔ HC1 (Lean agent; RTL decides): this read HS + 1 -- "loaded at the DRIVE
+# edge one cycle after the pick" counted the DRIVE cycle's START, not the edge
+# that ends it. MEASURED on RTL signals, 2,556 hold loads over five images,
+# HS = 18: load visible at pick + 2, l_hcnt == 0 and hz_q == 1 at pick + 20,
+# `ready` at pick + 20 wherever the hold binds. Not TM1: M_TM1_UNREG gives the
+# same +20. `model/gate_hold_offset.py` holds this constant to the RTL.
+HOLD_PICK_LAG = 2      # eligible HS + HOLD_PICK_LAG cycles after the pick
 # ⇒ TO EVERY OTHER LANE THAT IS RELEASE JITTER on lane i (`BLane.N_J`): lane i
 #   still delivers one C per release, but up to J_w1 later. It costs the engine
 #   nothing while blocked (a blocked lane is not served).
@@ -261,8 +270,8 @@ def w1_jitter(ls, hs=None, max_iter=64, src=None):
             if not (r["loads_hold"] or r.get("loads_cap")):
                 new.append(0)
                 continue
-            # eligibility latency after the pick: W1's HS + 1; RX1's CAP_i
-            blk = hs + 1 if r["loads_hold"] else r["cap_lat"]
+            # eligibility latency after the pick: W1's HS + 2 (HC1); RX1's CAP_i
+            blk = hs + HOLD_PICK_LAG if r["loads_hold"] else r["cap_lat"]
             lanes = [ls[k]["blane"] if k == i else
                      _with_j(ls[k]["blane"], ls[k]["blane"].J + w1[k])
                      for k in range(len(ls))]
@@ -484,6 +493,73 @@ def clocked_images():
     return out
 
 
+# ⛔⛔ RULING HC1-B (Wilson): A BUDGET IS EMITTED ONLY ON A BOUND THE PRIMARY
+# ANALYSIS PROVED. Under HS + 2, pyRTA's W1 fixed point on `ckdense` gave NO
+# bound, and `derive` fell back to pyRTA evaluated with OUR jitter -- a number
+# that looked like a bound (r 25, slack 26) and silently became the bench
+# budget. An absent result was counted as a pass: the third time that shape
+# appeared in one arc (the equivalence tool twice before it).
+# ⇒ `budgets()` REFUSES (raises) when a non-overloaded image has a lane whose
+#   pyRTA bound or pyRTA W1 term is missing -- unless the image is named here,
+#   where its bench budget is EMPIRICAL and labelled as such: the measured
+#   widest post-HIGH gap past d (clocked_conform[A2] `lanes ... widest`) plus a
+#   STATED margin. Its functional checks (bytes, EX1, rx_e2e) are unchanged.
+NO_RTA_BUDGET = {
+    "ckdense_image.hex": {
+        "why": ("stress image, outside admissibility (fails 1.6a, ruling "
+                "DT-B): pyRTA's W1 fixed point gives no bound under HS + 2, "
+                "so there is NO ANALYTIC BOUND; the budget is EMPIRICAL"),
+        # MEASURED: tb_trace, the benchset `ckdense` arm (+PEER=none, 200k
+        # cycles), +A2SLACK absent, seeds 1-3 identical
+        "measured_widest": {"0": 6, "1": 7, "2": 10, "3": 5},
+        "margin": 4,
+    },
+}
+
+
+def budgets(src, images=None):
+    """{image: derive() result with bench budgets}, refusing unbounded ones.
+
+    `images` defaults to every clocked image. ⛔ Raises RuntimeError on an
+    image with a missing pyRTA bound that is not in NO_RTA_BUDGET.
+    """
+    blob = {}
+    for name, img in (images if images is not None else clocked_images()):
+        res = derive(img, src)
+        mark = NO_RTA_BUDGET.get(name)
+        if mark is not None:
+            res.pop("w1_pyrta", None)
+            for ln, e in res["lanes"].items():
+                w = mark["measured_widest"].get(ln)
+                if w is None:
+                    raise RuntimeError("%s lane %s: marked no_rta_budget but "
+                                       "has no measured widest gap" % (name, ln))
+                e["r_pyrta"] = None
+                e["r_floor"] = e["r_ours"]
+                e["slack"] = w + mark["margin"]
+                e["budget"] = "EMPIRICAL"
+                e["why"] = ("%s -- measured widest %d + stated margin %d"
+                            % (mark["why"], w, mark["margin"]))
+            blob[name] = res
+            continue
+        overloaded = res["U"] > 1.0
+        holds = res.get("w1") or {}
+        if not overloaded and holds and src and res.get("w1_pyrta") is None:
+            raise RuntimeError(
+                "%s: pyRTA's W1 fixed point gave NO bound (ours: %s). A budget "
+                "derived from it would be unsound. Mark the image in "
+                "NO_RTA_BUDGET with a measured, labelled budget, or fix the "
+                "program." % (name, holds))
+        for ln, e in res["lanes"].items():
+            if not overloaded and src and e["r_pyrta"] is None:
+                raise RuntimeError("%s lane %s: pyRTA gave no bound (%s) -- "
+                                   "refusing to emit a budget" % (name, ln, e["why"]))
+            if e.get("slack") is not None:
+                e["budget"] = "pyRTA"
+        blob[name] = res
+    return blob
+
+
 def main() -> int:
     print()
     print("=" * 78)
@@ -501,13 +577,15 @@ def main() -> int:
           % L_SYNC)
     print("  program's OWN lane set")
     print()
-    blob = {}
     print("  %-26s %-5s %-3s %-3s %-7s %-5s %-6s %-7s %-6s %s"
           % ("image", "dmin", "k", "J", "U", "lane", "T", "r(pyRTA)",
              "slack", "note"))
-    for name, img in clocked_images():
-        res = derive(img, src)
-        blob[name] = res
+    try:
+        blob = budgets(src)
+    except RuntimeError as exc:
+        print("  *** REFUSED, NOTHING WRITTEN: %s" % exc)
+        return 1
+    for name, res in blob.items():
         for ln, e in sorted(res["lanes"].items(), key=lambda kv: int(kv[0])):
             print("  %-26s %-5s %-3s %-3s %-7s %-5s %-6s %-7s %-6s %s"
                   % (name, res["d_min"], res["k"], res["J"], res["U"], ln,

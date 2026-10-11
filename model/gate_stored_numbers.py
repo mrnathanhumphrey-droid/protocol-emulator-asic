@@ -88,6 +88,15 @@ SITES = [
          "stored values are retained as a labelled record and the benefit "
          "claim is withdrawn, not re-fitted"),
 
+    Site("model/a2/program_a2.py", "NO_RTA_BUDGET", RECORD,
+         "HC1-B: the EMPIRICAL A2 budget of a stress image pyRTA cannot bound "
+         "(ckdense: measured widest post-HIGH gap past d per lane, + margin 4)",
+         "test/measure_a2_widest.py",
+         "tb_trace, benchset ckdense arm, PEER=none, 200k cycles, seeds 1-3 "
+         "identical (6, 7, 10, 5), at 62390e9",
+         "⛔ A MEASUREMENT, NOT A BOUND, and labelled so wherever it is used "
+         "(`budget: EMPIRICAL`). The coverage sweep's ckdense arm enforces it; "
+         "re-run the recipe after any change that moves ckdense's timing"),
     Site("model/a2/gate_j_program.py", "SWEEP_W", RECORD,
          "ruling W: Theorem 3's conclusion per lane over the D* sweep "
          "(d = 19..60 families, must-fires, 12 shipped images)",

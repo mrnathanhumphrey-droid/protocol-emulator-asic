@@ -451,7 +451,7 @@ phase.
 | TM1 registration | the load is recorded (`hl_v`, `hl_l`) and lands a cycle later as `SDA_HS − 1`; `l_hcnt` reads `SDA_HS` while pending, so the count is equal in every cycle | `hl_v <= hold_ld & hz_q[cur];` |
 | countdown | every cycle while non-zero; the pin lands at `SDA_SETUP1` | `l_hcr[i] <= l_hcnt[i] - {{(HOLDW-1){1'b0}}, 1'b1};` |
 | eligibility | `ready = rel_due & hz_q & cap_ok`; `hz_q` is "the count reaches 0 this cycle", registered | `hz_q[i] <= (l_hcnt[i] == {{(HOLDW-1){1'b0}}, 1'b1});` |
-| bound, release → eligible | the hold delays the lane's next job by **`J_w1 = max(0, HS + 1 + (r_i − C) − T_i)`**, eligible `HS + 1 = 19` cycles after the loading pick (W6; `model/a2/program_a2.py`) | `assign ready[gi] = rel_due[gi] & hz_q[gi] & cap_ok;` |
+| bound, release → eligible | the hold delays the lane's next job by **`J_w1 = max(0, HS + 2 + (r_i − C) − T_i)`**, eligible `HS + 2 = 20` cycles after the loading decision (`HS + 1` after DRIVE): DRIVE is decision + 1, the load lands at decision + 2, `hz_q` opens at decision + 20 (HC1, measured on RTL; W6; `model/a2/program_a2.py` `HOLD_PICK_LAG`; held by `model/gate_hold_offset.py`) | `assign ready[gi] = rel_due[gi] & hz_q[gi] & cap_ok;` |
 | trace detection | `hcnt` (TR-2) | — |
 
 ### 7F. The RX1 capture gate

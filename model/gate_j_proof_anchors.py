@@ -88,7 +88,8 @@ PREMISES = [
     # ⛔⛔ RULING W SPLIT READINESS IN TWO. `rel_due` is still "the timestamp
     # has arrived" (P9, re-anchored); `ready` adds W1's own-hold gate (P9w).
     # P9w is release jitter on a lane that loads the SDA hold, bounded by
-    # `program_a2.w1_jitter` and ZERO whenever T_i >= HS + 1 + (r_i - C).
+    # `program_a2.w1_jitter` and ZERO whenever T_i >= HS + 2 + (r_i - C)
+    # (HC1: HS + 2 after the decision, measured; `model/gate_hold_offset.py`).
     # ⚠ SCOPE FOR THEOREM 3: on a CLOCKED lane the delayed job is the HIGH and
     # the next job is rebased from the observed rise, so W1 cannot bunch two
     # dispatches inside d. On an UNCLOCKED frame the job after a delayed SCL

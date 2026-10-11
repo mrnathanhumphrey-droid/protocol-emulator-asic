@@ -188,6 +188,10 @@ GATES=(
   # before declaration and Vivado refused one, so the FPGA could not build the
   # chip), warnings pinned per class, LW's inlined port widths text-anchored.
   model/gate_slang_lint.py
+  # ⛔⛔ HC1 -- W1's eligibility offset held to the RTL: the hold gate opens at
+  # decision + HS + 2 on every load (ckdense, on RTL signals), and
+  # program_a2.HOLD_PICK_LAG and PORT_SPEC §7E must say the same number.
+  model/gate_hold_offset.py
   # ⭐⭐ UART -- the first program that RECEIVES a real UART stream (Wilson's
   # UART ruling): 8N1 vs a peer at -3..+3 % baud, back-to-back frames, bytes
   # vs what the PEER sent, count exact; framing reported; must-fires "edge"

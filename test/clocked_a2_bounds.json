@@ -7,6 +7,7 @@
   "lanes": {
    "0": {
     "T": 20,
+    "budget": "pyRTA",
     "r_floor": 7,
     "r_ours": 7,
     "r_pyrta": 7,
@@ -15,10 +16,10 @@
    }
   },
   "w1": {
-   "0": 3
+   "0": 4
   },
   "w1_pyrta": {
-   "0": 3
+   "0": 4
   }
  },
  "ckdegen_image.hex": {
@@ -29,6 +30,7 @@
   "lanes": {
    "0": {
     "T": 20,
+    "budget": "pyRTA",
     "r_floor": 7,
     "r_ours": 7,
     "r_pyrta": 7,
@@ -37,10 +39,10 @@
    }
   },
   "w1": {
-   "0": 3
+   "0": 4
   },
   "w1_pyrta": {
-   "0": 3
+   "0": 4
   }
  },
  "ckdense_image.hex": {
@@ -51,48 +53,46 @@
   "lanes": {
    "0": {
     "T": 20,
-    "r_floor": 42,
+    "budget": "EMPIRICAL",
+    "r_floor": 16,
     "r_ours": 16,
-    "r_pyrta": 42,
-    "slack": 43,
-    "why": null
+    "r_pyrta": null,
+    "slack": 10,
+    "why": "stress image, outside admissibility (fails 1.6a, ruling DT-B): pyRTA's W1 fixed point gives no bound under HS + 2, so there is NO ANALYTIC BOUND; the budget is EMPIRICAL -- measured widest 6 + stated margin 4"
    },
    "1": {
     "T": 21,
-    "r_floor": 43,
+    "budget": "EMPIRICAL",
+    "r_floor": 16,
     "r_ours": 16,
-    "r_pyrta": 43,
-    "slack": 44,
-    "why": null
+    "r_pyrta": null,
+    "slack": 11,
+    "why": "stress image, outside admissibility (fails 1.6a, ruling DT-B): pyRTA's W1 fixed point gives no bound under HS + 2, so there is NO ANALYTIC BOUND; the budget is EMPIRICAL -- measured widest 7 + stated margin 4"
    },
    "2": {
     "T": 22,
-    "r_floor": 43,
-    "r_ours": 17,
-    "r_pyrta": 43,
-    "slack": 44,
-    "why": null
+    "budget": "EMPIRICAL",
+    "r_floor": 18,
+    "r_ours": 18,
+    "r_pyrta": null,
+    "slack": 14,
+    "why": "stress image, outside admissibility (fails 1.6a, ruling DT-B): pyRTA's W1 fixed point gives no bound under HS + 2, so there is NO ANALYTIC BOUND; the budget is EMPIRICAL -- measured widest 10 + stated margin 4"
    },
    "3": {
     "T": 23,
-    "r_floor": 43,
-    "r_ours": 19,
-    "r_pyrta": 43,
-    "slack": 44,
-    "why": null
+    "budget": "EMPIRICAL",
+    "r_floor": 20,
+    "r_ours": 20,
+    "r_pyrta": null,
+    "slack": 9,
+    "why": "stress image, outside admissibility (fails 1.6a, ruling DT-B): pyRTA's W1 fixed point gives no bound under HS + 2, so there is NO ANALYTIC BOUND; the budget is EMPIRICAL -- measured widest 5 + stated margin 4"
    }
   },
   "w1": {
-   "0": 12,
-   "1": 11,
-   "2": 11,
-   "3": 12
-  },
-  "w1_pyrta": {
-   "0": 38,
-   "1": 38,
-   "2": 37,
-   "3": 36
+   "0": 13,
+   "1": 12,
+   "2": 13,
+   "3": 14
   }
  },
  "ckheavy_image.hex": {
@@ -103,22 +103,25 @@
   "lanes": {
    "0": {
     "T": 30,
-    "r_floor": 18,
-    "r_ours": 18,
-    "r_pyrta": 15,
-    "slack": 16,
-    "why": null
-   },
-   "1": {
-    "T": 31,
+    "budget": "pyRTA",
     "r_floor": 19,
     "r_ours": 19,
     "r_pyrta": 16,
     "slack": 17,
     "why": null
    },
+   "1": {
+    "T": 31,
+    "budget": "pyRTA",
+    "r_floor": 19,
+    "r_ours": 19,
+    "r_pyrta": 17,
+    "slack": 18,
+    "why": null
+   },
    "2": {
     "T": 32,
+    "budget": "pyRTA",
     "r_floor": 17,
     "r_ours": 17,
     "r_pyrta": 17,
@@ -127,14 +130,14 @@
    }
   },
   "w1": {
-   "0": 4,
-   "1": 4,
-   "2": 1
+   "0": 6,
+   "1": 5,
+   "2": 2
   },
   "w1_pyrta": {
-   "0": 1,
-   "1": 1,
-   "2": 1
+   "0": 3,
+   "1": 3,
+   "2": 2
   }
  },
  "ckhold_at_image.hex": {
@@ -145,6 +148,7 @@
   "lanes": {
    "0": {
     "T": 15,
+    "budget": "pyRTA",
     "r_floor": 10,
     "r_ours": 10,
     "r_pyrta": 10,
@@ -153,10 +157,10 @@
    }
   },
   "w1": {
-   "0": 11
+   "0": 12
   },
   "w1_pyrta": {
-   "0": 11
+   "0": 12
   }
  },
  "ckhold_over_image.hex": {
@@ -167,6 +171,7 @@
   "lanes": {
    "0": {
     "T": 16,
+    "budget": "pyRTA",
     "r_floor": 9,
     "r_ours": 9,
     "r_pyrta": 9,
@@ -175,10 +180,10 @@
    }
   },
   "w1": {
-   "0": 9
+   "0": 10
   },
   "w1_pyrta": {
-   "0": 9
+   "0": 10
   }
  },
  "ckhold_under_image.hex": {
@@ -189,6 +194,7 @@
   "lanes": {
    "0": {
     "T": 14,
+    "budget": "pyRTA",
     "r_floor": 11,
     "r_ours": 11,
     "r_pyrta": 11,
@@ -197,10 +203,10 @@
    }
   },
   "w1": {
-   "0": 13
+   "0": 14
   },
   "w1_pyrta": {
-   "0": 13
+   "0": 14
   }
  },
  "ckod_image.hex": {
@@ -211,6 +217,7 @@
   "lanes": {
    "0": {
     "T": 33,
+    "budget": "pyRTA",
     "r_floor": 7,
     "r_ours": 7,
     "r_pyrta": 7,
@@ -219,6 +226,7 @@
    },
    "1": {
     "T": 60,
+    "budget": "pyRTA",
     "r_floor": 10,
     "r_ours": 10,
     "r_pyrta": 10,
@@ -227,6 +235,7 @@
    },
    "2": {
     "T": 120,
+    "budget": "pyRTA",
     "r_floor": 16,
     "r_ours": 16,
     "r_pyrta": 16,
@@ -235,6 +244,7 @@
    },
    "3": {
     "T": 240,
+    "budget": "pyRTA",
     "r_floor": 17,
     "r_ours": 17,
     "r_pyrta": 17,
@@ -263,6 +273,7 @@
   "lanes": {
    "0": {
     "T": 70,
+    "budget": "pyRTA",
     "r_floor": 7,
     "r_ours": 7,
     "r_pyrta": 7,
@@ -301,6 +312,7 @@
   "lanes": {
    "0": {
     "T": 70,
+    "budget": "pyRTA",
     "r_floor": 7,
     "r_ours": 7,
     "r_pyrta": 7,

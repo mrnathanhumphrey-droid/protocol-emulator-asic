@@ -104,5 +104,8 @@ fpga/build/
 .Xil/
 vivado*.jou
 vivado*.log
-# the UART-rx gate's simulation build directory
+# the UART-rx and hold-offset gates' simulation build directories
 test/sim_build_uartrx/
+test/sim_build_hold/
+# agent worktrees (Claude Code) -- never part of the tree
+.claude/

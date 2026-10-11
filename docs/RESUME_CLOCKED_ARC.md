@@ -93,6 +93,37 @@ the two port widths (`host_lane`, `rx_lane`) as `s_wrdata` already inlines PINW.
 | `assign six[gs] = gs * SPL + (… !l_sel[gs] ? 1 : 0)` | SignConversion | spare slot index of lane `gs` | same bound, 9 < 16 |
 | `wire fix = pl * SPL + (… pslot ? 1 : 0)` | ArithOpMismatch (3-bit × integer) | the slot a refill fills | `pl` unsigned makes the expression unsigned; max 9 < 16 |
 
+### HC1 — W1 eligibility is HS + 2 after the decision, not HS + 1
+
+The Lean model (built from the RTL's effective `l_hcnt`) said decision + 20;
+W6 and PORT_SPEC §7E said HS + 1 = 19. **RTL decided:** on 2,556 hold loads
+over five images, then 12,062 on `ckdense`, DRIVE = decision + 1, the load
+lands at decision + 2, `hz_q` opens at decision + 20 on every load, and `ready`
+= decision + 20 wherever the hold binds. The W6 derivation counted the DRIVE
+cycle's start, not the edge that ends it (not TM1: `M_TM1_UNREG` gives +20 too).
+- `program_a2.HOLD_PICK_LAG = 2`; §7E restated; `model/gate_hold_offset.py`
+  (CI) holds RTL == program_a2 == §7E, must-fires ±1 and the text.
+- **Every admissible image moved by +1/+2 cycles of J_w1; no margin went
+  negative.** But **pyRTA's W1 fixed point gave no bound on `ckdense`** (U 0.566,
+  four hold-loading lanes at d = 20..23), and `derive` fell back to pyRTA with
+  OUR jitter — a budget that looked like a bound. The A2 suite stayed 44/44.
+  Ruling HC1-B: `program_a2.budgets()` REFUSES to emit an image whose pyRTA
+  bound is missing unless it is marked `NO_RTA_BUDGET`; `ckdense` is marked,
+  with an **EMPIRICAL** budget (measured widest 6/7/10/5 + stated margin 4,
+  recipe `test/measure_a2_widest.py`) labelled "stress image, outside
+  admissibility, no analytic bound". `model/a2/gate_a2_bounds_diff.py` (A2
+  suite): a field gone to None, a negative slack or an unlabelled budget is
+  red; other moves are reported.
+- **Is OUR method sound on dense hold loads?** Measured max J_w1 on the ckdense
+  trace = 4/4/6/6 cycles (hold-open minus release) against ours 13/12/13/14 and
+  pyRTA's 38/38/37/36 at HS + 1: ours is sound there; pyRTA is loose.
+- ⛔ **Methodology, third instance in one arc: an ABSENT RESULT COUNTED AS A
+  PASS** — the equivalence tool's yosys never ran (exit 127) and its must-fire
+  called that red; a missed error line called a real red "never ran"; and here
+  a missing pyRTA bound became a budget. Standing rule since: every verdict is
+  an explicit positive token (`ci/gate_tokens.txt`, `ci/pass_token.py`); a
+  missing token or a missing bound is red.
+
 ### Receive paths — which witness covers which (Wilson's UART ruling)
 
 | receive path | foreign witness (not our timing model) | same-hand witness | count exact? |

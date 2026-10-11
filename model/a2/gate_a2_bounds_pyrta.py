@@ -51,8 +51,14 @@ def main() -> int:
         on_disk = json.load(fh)
     rc = 0
     n = 0
-    for name, img in program_a2.clocked_images():
-        fresh = program_a2.derive(img, src)
+    # ⛔ HC1-B: through `budgets()`, the path that writes the json -- a JSON
+    # round trip so int keys and tuples compare as the file stores them
+    try:
+        allfresh = json.loads(json.dumps(program_a2.budgets(src)))
+    except RuntimeError as exc:
+        print("  *** FAIL program_a2 refused to emit: %s" % exc)
+        return 1
+    for name, fresh in allfresh.items():
         old = on_disk.get(name)
         if old != fresh:
             print("  *** FAIL %s differs from the committed row" % name)
