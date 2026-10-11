@@ -322,7 +322,16 @@ def main() -> int:
     mf4 = any("i2caddr_image.hex" in p for p in NA.registry_problems(reg))
     print("    must-fire: an exemption with no N1 (QUEUE) declaration is red  "
           "  %s" % ("ok" if mf4 else "*** MISSED"))
-    if not (mf1 and mf2 and mf3 and mf4):
+    reg5 = dict(NA.TIMING_EXEMPT)
+    e5 = dict(reg5["ckdense_image.hex"])
+    e5.pop("budget_origin", None)
+    reg5["ckdense_image.hex"] = e5
+    mf5 = any("budget_origin" in p for p in NA.registry_problems(reg5))
+    print("    must-fire: an empirical budget with no stated origin is red    "
+          "  %s" % ("ok" if mf5 else "*** MISSED"))
+    print("    ckdense budget origin: %s"
+          % NA.TIMING_EXEMPT["ckdense_image.hex"]["budget_origin"][:72])
+    if not (mf1 and mf2 and mf3 and mf4 and mf5):
         rc = 1
 
     print()
