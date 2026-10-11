@@ -98,3 +98,11 @@ formal/argmin_equiv/
 formal/argmin_equiv_mut/
 formal/preselect_equiv/
 formal/preselect_equiv_mut/
+
+# FPGA bring-up: Vivado writes its bitstream, reports and checkpoints here
+fpga/build/
+.Xil/
+vivado*.jou
+vivado*.log
+# the UART-rx gate's simulation build directory
+test/sim_build_uartrx/

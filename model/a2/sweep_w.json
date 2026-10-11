@@ -17,7 +17,7 @@
  "_ncyc_synthetic": 1000000,
  "_recipe": "python test/run_w_sweep.py --full",
  "_src_sha256": {
-  "pe_engine.v": "fac6127c6a91f6cf87608dae20a3c76805e1bc68b5d08c9e57493ed96a0ac37d",
+  "pe_engine.v": "8e4bbb1d71fa275e4854107279c1effd3688de05a0142b7e88b27f504449d1d6",
   "pe_store.v": "5d0a0a6fe0d4e44732074066f536079441b6af344e0eab3d71347cdfb34394e2",
   "project.v": "fe1f12350b45a4391d7ff59ebff1666d96994e5f9b8a8dcaf4efa243c6691eaf"
  },

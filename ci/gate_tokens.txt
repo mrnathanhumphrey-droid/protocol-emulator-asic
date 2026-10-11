@@ -1,0 +1,57 @@
+# THE POSITIVE TOKEN EACH GATE MUST PRINT TO PASS (Wilson's standing rule).
+#
+# ⛔⛔ WHY. Twice in one arc a checker read "no failure seen" as a pass: the
+# equivalence tool's yosys never ran (exit 127) and its must-fire called that
+# red; then a missed error line called a real red "never ran". Both had the same
+# shape -- the ABSENCE of a failure was taken as success.
+# ⇒ `ci/run_gates.sh` passes a gate only if it exits 0 AND its own output
+#   contains the line below. Exit 0 without the token is RED; a gate not listed
+#   here is RED. Judged by `ci/pass_token.py`.
+#
+# Format: <gate path> <TAB-or-spaces> <python regex, matched per line>
+model/gate_bench_lint.py            ^\s*GATE bench-lint: PASSED\s*$
+model/gate_degenerate_fields.py     ^\s*GATE degenerate-fields: PASSED\s*$
+test/gate_tb_elaborates.py          ^\s*GATE tb-elaborates: PASSED\s*$
+model/gate_ruling_audit.py          ^\s*GATE ruling-audit: PASSED\s*$
+model/gate_one_encoder.py           ^\s*GATE one-encoder: PASSED\s*$
+model/gate_mutant_arms.py           ^\s*GATE mutant-arms: PASSED\s*$
+model/gate_reset_audit.py           ^\s*GATE reset-audit: PASSED\s*$
+model/gate_stored_numbers.py        ^\s*STORED-NUMBER AUDIT: PASSED\s*$
+model/gate_bench_indices.py         ^\s*BENCH INDEX GUARD: PASSED\s*$
+model/gate_j_proof_anchors.py       ^\s*GATE j-proof-anchors: PASSED\s*$
+model/a2/gate_j_program.py          ^\s*GATE j-program: PASSED\b
+model/a2/gate_dmin_clocked.py       ^\s*GATE dmin-clocked: PASSED\s*$
+model/a2/gate_um10204.py            ^\s*GATE um10204: PASSED\s*$
+model/gate_port_demand.py           ^\s*GATE port-demand: PASSED\s*$
+model/a2/gate_a2_program.py         ^\s*GATE a2-program: PASSED\s*$
+test/gate_corpus_trace.py           ^\s*GATE corpus-trace: PASSED\s*$
+model/gate_gates_complete.py        ^\s*GATE gates-complete: PASSED\s*$
+model/gate_admissible_images.py     ^\s*GATE admissible-images: PASSED\s*$
+model/gate_shell_rc.py              ^\s*GATE shell-rc: PASSED\s*$
+model/gate_except.py                ^\s*GATE except: PASSED\s*$
+model/gate_tool_pinning.py          ^\s*GATE tool-pinning: PASSED\s*$
+model/gate_f2_local.py              ^\s*GATE f2-local: PASSED\s*$
+model/gate_cdc.py                   ^\s*GATE cdc: PASSED\s*$
+model/gate_slang_lint.py            ^\s*SLANG LINT GATE: PASSED\s*$
+test/run_uartrx.py                  ^\s*UART-RX GATE: PASSED\s*$
+test/run_mutants.py                 ^\s*GATE mutants: PASSED\s*$
+model/gate_mutant_kills.py          ^\s*GATE mutant-kills: PASSED\s*$
+model/gate_bench_races.py           ^\s*GATE bench-races: PASSED\s*$
+test/gate_manifest.py               ^\s*GATE manifest: PASSED\s*$
+model/gate_rtl_lint.py              ^\s*GATE rtl-lint: PASSED\s*$
+model/gate_sda_hold.py              ^\s*GATE sda-hold: PASSED\s*$
+model/gate_spuri_candidates.py      ^\s*GATE spuri-candidates: PASSED\s*$
+test/run_lockstep.py                ^\s*GATE lockstep: PASSED\s*$
+test/run_w_sweep.py                 ^\s*GATE w_subset: PASSED\s*$
+test/run_cktx.py                    ^\s*GATE cktx: PASSED\s*$
+test/run_spidelay.py                ^\s*GATE spidelay: PASSED\s*$
+model/gate_pin_matrix.py            ^\s*GATE pin-matrix: PASSED\s*$
+model/gate_i2c_order.py             ^\s*GATE i2c-order: PASSED\s*$
+model/gate_store_full.py            ^\s*GATE store-full: PASSED\s*$
+model/gate_program_index.py         ^\s*GATE program-index: PASSED\s*$
+model/part1_param_contract.py       ^\s*GATE part1-params: PASSED\s*$
+test/gl_harness_check.py            ^\s*GATE gl-harness: PASSED\s*$
+test/check_vectors.py               ^\s*GATE test-vectors: PASSED\s*$
+test/benchset.py                    ^\s*BENCH SET: ok\s*$
+test/gate_coverage.py               ^\s*GATE coverage: PASSED\s*$
+model/pe_asm.py                     ^\s*pe_asm: PASSED\s*$

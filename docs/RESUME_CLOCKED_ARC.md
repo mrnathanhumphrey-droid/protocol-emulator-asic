@@ -64,6 +64,35 @@ here** (ruling CI1). A local pass is reported as local.
 | **MISO enable released with D = 1** (CS, "silicon fix #6") | the SPI-target MISO enable is cleared asynchronously while CS is high; the engine holds its MISO enable between transactions, so on CS fall the clear released with the flop's D = 1 at an arbitrary instant: a recovery hazard on the MISO pad enable. An argument that it was benign was **refuted by its own bench check** (`inv_cdc.vh`, D = 1 on the first of 15 CS falls of `corpus_sptgt`) | D qualified by the synchronized CS (`~uio_q1[CS]`): 0 until the synchronizer sees CS low, so a marginal release resolves to 0; enable rises 2 cycles later; 344 falls checked clean; must-fire `M_CS_RAW_D` (`run_mutants`) | `95759ec` |
 | **push-pull SPI receive consumed bits before capture** (RX, "silicon fix #7") | under five-lane contention a late HIGH dispatch followed by an on-time LOW shrank the HIGH phase below the push-pull capture latency (pick + 5 on a `uo_out` clock), so the LOW **consumed the bit before it was captured** and read 0: **552 of ~3,300** lane-2 SHIFTINs on `corpus_all5` seed 1, 158 of 452 bytes wrong. PRE-EXISTING (`29aaeb3` fails seeds 2/3; the CDC shift moved it onto seed 1). ⛔⛔ **Hidden twice:** coverage ran ONE seed at 200k and the corpus gate 8k cycles; and **Layer V-RX's golden model had encoded the defect** — it cleared a capture only at the consume (crediting a late capture to the next bit) and applied captures before consumes in the same cycle, so it PREDICTED the losses and flagged 5 | RX1: a push-pull clocked SHIFTIN lane is **ineligible while its capture is pending** (`l_ckwait`; the W1 analog, contention-independent); must-fire `M_RX_NO_CAPGATE`. RX2: `test/rx_e2e.vh` — received bytes vs the **wire at the clock edges**, paired by order, no capture-timing model (every DUT bench). RX3: V-RX's model fixed (0 → 552 uncaptured counted on the mutant). RX4: A2 carries the gate as release jitter like W6 (`J_cap`; binds on `corpus_spim`: 9). RX5: `corpus_all5` at 200k on seeds 1–6 in the corpus gate and the coverage sweep. **Coverage of the gate's two one-cycle mutants:** `M_RX_CAPGATE_EARLY` — EX1 + `rx_e2e` fail. `M_RX_CAPGATE_LATE` — **Layer B: blind by construction** (bytes stay correct; the consume lands one cycle late, which no gap shows); **caught by EX1**: the d = 4 SPI image's boundary count is pinned EXACTLY per image digest (`43c6dfde…`: 1,088 consumes = 1,016 boundary + 72 contention, 0 unexplained; LATE → 0 boundary, 1,006 unexplained). The 72 are classified, not just counted: ready before the capture landed, dispatched 2 cycles past the 3-cycle pick because another lane's dispatch went first. **DL1:** a receive that stops part-way is red at any byte count (owed work + no progress beyond 4× the lane's own longest stall + 1024); planted hang at cycle 20,000 (after 41 bytes) is a standing must-fire. ⚠ **DL1 residual — a clean stop between bytes** owes nothing and is invisible to this rule: it needs an expected count from the program. Closed per lane where the peer knows the count (UART, FRAM); open in general. Closes generally if `pe_asm` emits an expected receive count per program | `985c42a` (RX); EX1 pin + DL1 next commit |
 
+### Portability — declare-before-use (FPGA bring-up)
+
+Vivado refused `src/pe_engine.v` (`genvar gi` used ~130 lines before its
+declaration). iverilog, Verilator and yosys all accepted it, so CI never could
+have. slang found **8 identifiers used before declaration, 11 sites**: `LW` (in
+the port list), `ck_parked`, `now_inc`, `gi`, `a_q`, `primed`, `winner_q`,
+`winner_v_q`. Fixed DECLARATION-ONLY: declarations moved ahead of first use,
+initialisers turned into `assign`s left where they were, and `LW` inlined in
+the two port widths (`host_lane`, `rx_lane`) as `s_wrdata` already inlines PINW.
+- **Witness: formal equivalence**, not a netlist hash (Wilson). yosys private net
+  names follow declaration order: the location-free hash moved 989b0158 →
+  96d09e6c with identical cell statistics. `model/rtl_equiv.py --base ae15d2c`:
+  the whole `tt_um` top, flattened, `equiv_simple`/`equiv_induct -seq 5`,
+  verdict = `equiv_status -assert`; must-fire `--must-fire` (one inverted term)
+  must leave cells unproven.
+- **Gate: `model/gate_slang_lint.py`** (CI, pyslang 12.0.0): 0 errors; warnings
+  pinned; `LW`'s inlined widths text-anchored to its definition. Must-fires: a
+  planted use-before-declare, `LW` changed with the ports untouched, one more
+  sign conversion — all red. Vivado elaboration is the second check whenever
+  the FPGA build runs.
+- **The four pinned slang warnings, classified (all benign by arithmetic):**
+
+| line (pe_engine.v) | warning | what it does | why benign |
+| --- | --- | --- | --- |
+| `hdr_byte_addr`: `base = ln * HDR_BYTES[AW-1:0]` | ArithOpMismatch (3-bit × 8-bit) | header byte address of lane `ln` | the context widens `ln` to 8 bits; max 4 × 7 = 28 < 256 |
+| `assign hix[gs] = gs * SPL + (… l_sel[gs] ? 1 : 0)` | SignConversion (integer → 4 bits) | head slot index of lane `gs` | never negative; max 4 × 2 + 1 = 9 < 16 |
+| `assign six[gs] = gs * SPL + (… !l_sel[gs] ? 1 : 0)` | SignConversion | spare slot index of lane `gs` | same bound, 9 < 16 |
+| `wire fix = pl * SPL + (… pslot ? 1 : 0)` | ArithOpMismatch (3-bit × integer) | the slot a refill fills | `pl` unsigned makes the expression unsigned; max 9 < 16 |
+
 ### Receive paths — which witness covers which (Wilson's UART ruling)
 
 | receive path | foreign witness (not our timing model) | same-hand witness | count exact? |

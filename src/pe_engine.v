@@ -232,7 +232,12 @@ module pe_engine #(
     // with ONE TX-consuming lane; with more, consumption order is the EDF
     // interleave -- timing-dependent -- so a host cannot order its pushes and
     // the wrong lane transmits the wrong byte SILENTLY.
-    output wire [LW-1:0]        host_lane,
+    // ⛔ PORTABILITY (FPGA bring-up): `LW` is a BODY localparam, so naming it
+    // here is a use before its declaration -- Vivado refuses the class and a
+    // strict front end (slang) rejects it. The expression is `LW`'s, INLINED,
+    // as `s_wrdata` inlines PINW's; `model/gate_slang_lint.py` holds the two
+    // texts equal so they cannot drift.
+    output wire [((N_LANES <= 2) ? 1 : (N_LANES <= 4) ? 2 : (N_LANES <= 8) ? 3 : 4)-1:0] host_lane,
     // ⭐ WHICH QUEUE the consuming action names. The lane index is exported
     // only for diagnostics now; the ROUTING is by queue.
     output wire [1:0]           host_q,
@@ -259,7 +264,7 @@ module pe_engine #(
     // A consumer sampling `cur` at the pulse would be reading whichever lane
     // the scheduler moved to -- right most of the time, which is the worst
     // kind of wrong.
-    output reg  [LW-1:0]        rx_lane,
+    output reg  [((N_LANES <= 2) ? 1 : (N_LANES <= 4) ? 2 : (N_LANES <= 8) ? 3 : 4)-1:0] rx_lane,   // = LW, inlined (see host_lane)
     output reg                  rx_push,
 
     output wire                 busy
@@ -547,6 +552,9 @@ module pe_engine #(
   reg             ppc_v;
   reg [LW-1:0]    ppc_l;
   reg [1:0]       ppc_n;
+  // declared AHEAD of first use (portability: declare-before-use, slang lint)
+  wire [N_LANES-1:0] ck_parked; // packed view of `l_ckpark`, for the shared
+                               // prescaler's enable
   wire            ck_any_park = |{ck_parked};
   wire            ck_tick = ck_any_park & (ck_pre >= CK_STRETCH_PRE[13:0] - 14'd1);
   reg             l_cksamp [0:N_LANES-1];   // the bit latched AT the rise
@@ -787,6 +795,10 @@ module pe_engine #(
   // GLOBAL STATE -- one incrementer, not N_LANES decrementers (Ruling 2)
   // =====================================================================
   reg [TS_W-1:0] now;
+  // declared AHEAD of first use (portability: declare-before-use, slang lint);
+  // their drivers stay where they were (`assign now_inc`, `assign primed`)
+  wire primed;
+  wire now_inc;
 
   // ⭐ J IS MEASURED, NOT ASSERTED. A2 ships J = 1.
   //
@@ -850,8 +862,7 @@ module pe_engine #(
   // must not re-rebase the timestamp -- that would slide the grid forward on
   // every subsequent peer transition, which on a clocked bus is every bit.
   wire [N_LANES-1:0] arm_hit;
-  wire [N_LANES-1:0] ck_parked; // packed view of `l_ckpark`, for the shared
-                               // prescaler's enable
+  // (`ck_parked` is declared ahead, beside its first use, `ck_any_park`)
   wire [N_LANES-1:0] ck_hit;    // a clocked SHIFTIN's rise, OBSERVED
   wire [N_LANES-1:0] ck_bit;    // ... and the data pin at that instant
   // ⭐⭐ THE PARKED LANE'S OWN ACTION DELAY, COMBINATIONAL AND ZERO FLOPS (F1).
@@ -945,6 +956,11 @@ module pe_engine #(
   // `M_HALF_IGNORED` reads every lane as symmetric.
   wire [N_LANES-1:0] half_v;
   genvar gh;
+  // ⛔ DECLARED HERE, BEFORE ITS FIRST USE (g_arm below). It was declared ~130
+  // lines further down: iverilog, Verilator and yosys accepted that, Vivado
+  // refused it ("generate loop index 'gi' is not defined as a genvar") and the
+  // FPGA bring-up could not build the chip. `model/gate_slang_lint.py`.
+  genvar gi;
   generate
     for (gh = 0; gh < N_LANES; gh = gh + 1) begin : g_half
 `ifdef M_HALF_IGNORED
@@ -1081,7 +1097,7 @@ module pe_engine #(
   reg  [TS_W-1:0]    key_q [0:N_LANES-1];   // == l_timestamp + l_d - now
   reg                hold_ld;               // a DRIVE arm starts an SDA hold
 
-  genvar gi;
+  // (`genvar gi` is declared ahead, before g_arm)
   // TM1: the effective hold count -- the pending load reads as SDA_HS
   generate
     for (gi = 0; gi < N_LANES; gi = gi + 1) begin : g_hcnt
@@ -1324,6 +1340,7 @@ module pe_engine #(
   // driven the host channel, so every OP_SHIFT in the suite found an empty
   // queue and took the underrun branch. A mutant on a path that never carries
   // data cannot die. `test/tb_tx.v` is what gives this one something to break.
+  wire [BQW-1:0]   a_q;     // declared ahead of first use; driven below
 `ifdef M_TX_IGNORE_TAG
   assign host_q    = 2'd0;
 `else
@@ -1343,7 +1360,7 @@ module pe_engine #(
   wire [BPW-1:0]   a_cnt   = cur_act[BQW +: BPW];
   // ⭐ WHICH TX QUEUE THIS ACTION DRAWS FROM. Per-ACTION, so a lane's queue is
   // assigned by the PROGRAM and no lane number is baked into the hardware.
-  wire [BQW-1:0]   a_q     = cur_act[0 +: BQW];
+  assign           a_q     = cur_act[0 +: BQW];
 
   // ⭐⭐ THE RESERVED NON-DRIVING PIN INDEX. PINW encodes 2**PINW codes and only
   // N_PINS are real, so `PIN_NONE` costs nothing: it is a value that already
@@ -1645,9 +1662,9 @@ module pe_engine #(
   // which makes every release, and every post-writeback readiness, a cycle
   // late. It is the must-fire for this block.
 `ifdef M_NO_PRIME
-  wire now_inc = run;
+  assign now_inc = run;
 `else
-  wire now_inc = run && primed;
+  assign now_inc = run && primed;
 `endif
   wire [TS_W-1:0] now_n = now + {{(TS_W-1){1'b0}}, now_inc};
   wire            hdr_wr = run && (hst == H_RD) && (hb == HB_LAST);
@@ -1680,6 +1697,12 @@ module pe_engine #(
   // its own loop index: sharing `i` with the lane block would make two
   // always blocks write one variable on the same edge
   integer ti;
+  // ⭐ TF3: branch 1 reads the PREVIOUS cycle's winner, a register, so the
+  // prefetch scan is no longer at the end of the select path. Above D* the
+  // branch never fires after priming (TH3), so nothing there changes.
+  // Declared HERE, ahead of this block that writes them (declare-before-use).
+  reg [LW-1:0]          winner_q;
+  reg                   winner_v_q;
   always @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
       // `now`, every `l_timestamp` and every `l_d` reset to 0. The release
@@ -1723,11 +1746,8 @@ module pe_engine #(
   // path, so the winner-first branch borrows the port without moving it.
   reg [LW-1:0]          prr;
   reg                   pbr1;         // the in-flight refill came from branch 1
-  // ⭐ TF3: branch 1 reads the PREVIOUS cycle's winner, a register, so the
-  // prefetch scan is no longer at the end of the select path. Above D* the
-  // branch never fires after priming (TH3), so nothing there changes.
-  reg [LW-1:0]          winner_q;
-  reg                   winner_v_q;
+  // (`winner_q` / `winner_v_q`, TF3's registered winner, are declared ahead,
+  // before the block that writes them)
   reg                   pslot;        // which slot this refill is filling
   reg [AW-1:0]          paddr;        // and from which address -- both latched
                                       // at the scan, see the arbiter comment
@@ -1883,7 +1903,7 @@ module pe_engine #(
       if (hdr_done && !prime_unp) primed_q <= 1'b1;
     end
   end
-  wire primed = primed_q;
+  assign primed = primed_q;     // `primed` is declared ahead, beside `now`
 
   // ---- the one arbiter for the shared store read port ----------------
   // ⭐ Header load has priority, then prefetch. The engine's own dispatch does

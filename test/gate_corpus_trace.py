@@ -784,6 +784,11 @@ def main() -> int:
     print("      witness the DUT's protocol timing, not the real devices'")
     print("    * %d cycles per program, one seed triple, one phase stream"
           % NCYC)
+    # ⛔ POSITIVE TOKEN (Wilson): printed ONLY on the success path; the runner
+    # (ci/pass_token.py) requires it, so exit 0 without it is red
+    print()
+    print("  GATE corpus-trace: %s" % ("PASSED" if not failures
+                                       else "*** FAILED (%d)" % len(failures)))
     return 0 if not failures else 1
 
 

@@ -913,6 +913,9 @@ def main() -> int:
             print("      in exactly that respect.")
         if wrong_reason:
             print("  ⛔ %d died for the wrong reason -- see above." % len(wrong_reason))
+    # ⛔ POSITIVE TOKEN (Wilson): printed ONLY on the success path
+    print()
+    print("  GATE mutants: %s" % ("PASSED" if ok else "*** FAILED"))
     return 0 if ok else 1
 
 

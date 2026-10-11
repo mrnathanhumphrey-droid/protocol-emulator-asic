@@ -183,6 +183,11 @@ GATES=(
   # synchronizer (silicon fixes #4 / #5). Priced by building M_CDC_RAW, the
   # 94cebb7 wiring, whose ui_in[7] -> run path must be named.
   model/gate_cdc.py
+  # ⛔⛔ PORTABILITY -- a STRICT front end (slang) over src/: zero errors
+  # (declare-before-use: iverilog, Verilator and yosys all accepted 8 uses
+  # before declaration and Vivado refused one, so the FPGA could not build the
+  # chip), warnings pinned per class, LW's inlined port widths text-anchored.
+  model/gate_slang_lint.py
   # ⭐⭐ UART -- the first program that RECEIVES a real UART stream (Wilson's
   # UART ruling): 8N1 vs a peer at -3..+3 % baud, back-to-back frames, bytes
   # vs what the PEER sent, count exact; framing reported; must-fires "edge"
@@ -790,6 +795,16 @@ fi
 echo
 FAILED=()
 MISSING=()
+# ⛔⛔ POSITIVE TOKENS (Wilson): a gate passes only on exit 0 AND its declared
+# pass line (ci/gate_tokens.txt) in its OWN output. The judge proves itself
+# first -- an empty output, a FAILED verdict and an undeclared gate must all
+# be red -- or nothing below is readable.
+"$PY" ci/pass_token.py --self-test
+if [ $? -ne 0 ]; then
+  echo "  *** the pass-token judge failed its own self-test -- no verdict possible"
+  exit 1
+fi
+TOKLOG="$(mktemp)"
 for g in "${GATES[@]}"; do
   # ⛔ A MISSING PREREQUISITE IS A FAILURE, NOT A SKIP, and it is named as
   # itself. "An audit that cannot see the design has not audited it" -- and a
@@ -801,12 +816,21 @@ for g in "${GATES[@]}"; do
     continue
   fi
   echo "=== $g ==="
-  "$PY" "$g"
+  # output to a file (no pipe: the exit code read is the GATE's own), then
+  # shown, then judged for the gate's positive token
+  "$PY" "$g" > "$TOKLOG" 2>&1
   rc=$?
+  cat "$TOKLOG"
   if [ $rc -ne 0 ]; then
     FAILED+=("$g (exit $rc)")
+  else
+    "$PY" ci/pass_token.py "$g" "$TOKLOG"
+    if [ $? -ne 0 ]; then
+      FAILED+=("$g (exit 0 but NO PASS TOKEN)")
+    fi
   fi
 done
+rm -f "$TOKLOG"
 
 echo
 echo "=============================================================================="
