@@ -29,7 +29,14 @@
  *                       guaranteed low there (waits 15..60, low 60..240)
  *   OW-INIT             the master's own low time in read slots (pad): >= 1 us
  *
- * Plusargs: IMG NBYTES FEED NFEED POLLIDX (required), NCYC_MAX
+ * OW6 (the underrun must-fire): +STALL_AT=<feed index> +STALL_CYC=<n> make
+ * the host STOP pushing for n cycles before feed word STALL_AT -- a USB
+ * hiccup. The queue drains, the lane underruns, and an underrunning SHIFT
+ * shifts in 0s: DQ is held LOW (OW6). The run must then be caught by the HOST
+ * (`run_onewire` judges only pushed bytes for that), not by the peer model.
+ *
+ * Plusargs: IMG NBYTES FEED NFEED POLLIDX (required), NCYC_MAX, STALL_AT,
+ * STALL_CYC
  * Parameters: RISE_NS (pull-up rise), Q, S, and the model's timing.
  * End token: `OW-BENCH: END` (printed only when the feed was consumed).
  */
@@ -87,6 +94,7 @@ module tb_onewire;
   reg  [7:0]  img [0:IMG_MAX-1];
   reg  [11:0] feed [0:FEED_MAX-1];
   integer     img_bytes, nfeed, pollidx, i, fi, g, cyc, ncyc_max;
+  integer     stall_at, stall_cyc;
   reg [8*256-1:0] imgfile, feedfile;
 
   // ---- the serial host view: decoded from the pins only --------------------
@@ -180,6 +188,9 @@ module tb_onewire;
       $display("tb_onewire: FATAL -- +POLLIDX=<n> is required."); $finish;
     end
     if (!$value$plusargs("NCYC_MAX=%d", ncyc_max)) ncyc_max = 4000000;
+    // OW6: no stall unless asked (-1 never matches a feed index)
+    if (!$value$plusargs("STALL_AT=%d", stall_at)) stall_at = -1;
+    if (!$value$plusargs("STALL_CYC=%d", stall_cyc)) stall_cyc = 0;
     if (nfeed > FEED_MAX) begin
       $display("tb_onewire: FATAL -- feed of %0d words > %0d", nfeed, FEED_MAX); $finish;
     end
@@ -225,6 +236,12 @@ module tb_onewire;
     // ---- the host: the feed, reactive only at the poll -------------------
     fi = 0;
     while (fi < nfeed && cyc < ncyc_max) begin
+      if (fi == stall_at) begin
+        $display("OW-STALL host stops pushing for %0d cycles before feed word %0d (cyc %0d)",
+                 stall_cyc, fi, cyc);
+        repeat (stall_cyc) @(negedge clk);
+        stall_at = -1;
+      end
       if (feed[fi][8]) begin
         poll_active = 1'b1;
         g = 0;

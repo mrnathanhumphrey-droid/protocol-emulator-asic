@@ -516,6 +516,19 @@ NO_RTA_BUDGET = {
     },
 }
 
+# ⛔⛔ WILSON, SP2/P4: MEMBERSHIP IS THE REGISTRY's, NOT THIS DICT's. The dict
+# above keeps the MEASUREMENT (widest gap, margin -- `measure_a2_widest.py`'s);
+# which images may carry an empirical budget at all is
+# `model/nonadmissible.py` TIMING_EXEMPT (permit `no_rta_budget`), the same
+# file that declares every non-admissible image. A key here the registry does
+# not grant -- or a grant here with no measurement -- refuses at import, so no
+# tool can run on a budget nobody declared.
+import nonadmissible as _NA                                       # noqa: E402
+_NRB_PROBS = _NA.no_rta_problems(NO_RTA_BUDGET)
+if _NRB_PROBS:
+    raise RuntimeError("program_a2.NO_RTA_BUDGET disagrees with the "
+                       "non-admissible registry: " + "; ".join(_NRB_PROBS))
+
 
 def budgets(src, images=None):
     """{image: derive() result with bench budgets}, refusing unbounded ones.
@@ -528,6 +541,8 @@ def budgets(src, images=None):
         res = derive(img, src)
         mark = NO_RTA_BUDGET.get(name)
         if mark is not None:
+            # ⛔ the registry, every use: a key planted after import is red
+            _NA.require(name, _NA.NO_RTA)
             res.pop("w1_pyrta", None)
             for ln, e in res["lanes"].items():
                 w = mark["measured_widest"].get(ln)

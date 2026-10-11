@@ -49,7 +49,8 @@ sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(ROOT, "test"))
 
 from pe_isa import (OP_LEVEL, OP_READBIT, OP_REARM, OP_SHIFT,  # noqa: E402
-                    OP_SHIFTIN, OP_START, OP_STOP, ORDER_MSB, SELF_CLOCKED)
+                    OP_SHIFTIN, OP_START, OP_STOP, ORDER_LSB, ORDER_MSB,
+                    SELF_CLOCKED)
 
 SCL_LOW, SCL_HIGH = 0, 1
 
@@ -181,11 +182,21 @@ MUTANT_RSTART_AS_STOP_START = {
 class SPI:
     """One push-pull SPI master lane. Transactions are CS-framed: CS low,
     bytes out, bytes in, CS high -- generated, never written. `mode0` parks
-    SCK low before each select (CPOL from SCK at CS fall)."""
+    SCK low before each select (CPOL from SCK at CS fall).
 
-    def __init__(self, mosi, sclk, cs, miso, d, nc_count=8, mode0=False):
+    ⛔ `order` HAS NO DEFAULT (Wilson, SP2/P2). SPI has no START/STOP for
+    `order_for` to derive an order from, and pe_asm's documented default is
+    LSB (UART's) -- so an SPI lane that forgot to say would go out
+    bit-reversed with nothing flagging it. In the front-end the order is
+    stated or the lane is refused (`image` checks the header too)."""
+
+    def __init__(self, mosi, sclk, cs, miso, d, order, nc_count=8,
+                 mode0=False):
+        if order not in (ORDER_LSB, ORDER_MSB):
+            raise ProtoError("SPI order must be ORDER_MSB or ORDER_LSB, "
+                             "stated explicitly; got %r" % (order,))
         self.mosi, self.sclk, self.cs, self.miso = mosi, sclk, cs, miso
-        self.d, self.nc, self.mode0 = d, nc_count, mode0
+        self.d, self.nc, self.mode0, self.order = d, nc_count, mode0, order
 
     def _a(self, op, pin, lvl):
         return (op, pin, lvl, self.d, 0, self.nc)
@@ -208,15 +219,45 @@ class SPI:
 
     def header(self, flags=0):
         d = self.d
-        return (self.mosi, self.sclk, 1, d, 2 * d, 3 * d, flags, ORDER_MSB)
+        return (self.mosi, self.sclk, 1, d, 2 * d, 3 * d, flags, self.order)
 
 
-def image(lanes, headers, park_pins=None, timing_checks=True):
+def spi_lanes_without_order(lanes, headers):
+    """-> [lane]: every SPI lane (PUSH-PULL, a real clock pin, a self-clocked
+    SHIFT or SHIFTIN) whose header does not STATE its order (no 8th element).
+    ⭐ I2C lanes are open-drain and their order is DERIVED (START/STOP, ruling
+    RC4); a lane with no real clock (UART, the SPI target) is not an SPI
+    master and keeps pe_asm's documented default."""
+    from pe_isa import N_PINS
+    bad = []
+    for ln in sorted(headers):
+        h = headers[ln]
+        if int(h[2]) != 1 or int(h[1]) >= N_PINS:
+            continue
+        if any(a[0] in (OP_SHIFT, OP_SHIFTIN) and a[2] == SELF_CLOCKED
+               for a in lanes.get(ln, ())) and len(h) < 8:
+            bad.append(ln)
+    return bad
+
+
+def image(lanes, headers, park_pins=None, timing_checks=True, exempt_as=None):
     """Through `pe_asm.assemble` -- every admissibility check applies (the
-    per-program timing pair only when `timing_checks`, see pe_asm)."""
+    per-program timing pair only when `timing_checks`, and then only for an
+    image the non-admissible registry names: `exempt_as`, see pe_asm).
+
+    ⛔ SP2/P2: an SPI lane must STATE its bit order here; raw pe_asm keeps its
+    documented default (order_for: LSB unless START/STOP)."""
+    bad = spi_lanes_without_order(lanes, headers)
+    if bad:
+        raise ProtoError(
+            "lane(s) %s are SPI masters (push-pull, real clock, self-clocked "
+            "shifts) whose header does not state a bit order. SPI has no "
+            "START/STOP to derive it from and the raw default is LSB-first; "
+            "the front-end requires the 8th header element (ORDER_MSB for "
+            "SPI mode 0/3 parts)." % bad)
     import pe_asm
     return pe_asm.assemble(lanes, headers, park_pins=park_pins,
-                           timing_checks=timing_checks)
+                           timing_checks=timing_checks, exempt_as=exempt_as)
 
 
 # ---------------------------------------------------------------------------
@@ -445,6 +486,6 @@ def spi_fram(d=7, mode0=False, clkinv=False):
     import corpus
     from pe_isa import FLAG_CLK_INV
     m = SPI(corpus.P_M_MOSI, corpus.P_M_SCLK, corpus.P_M_CS, corpus.P_M_MISO,
-            d, nc_count=8, mode0=mode0)
+            d, ORDER_MSB, nc_count=8, mode0=mode0)
     lanes = {0: m.transactions([(1, 0), (1, 0), (6, 0), (3, 2)])}
     return lanes, {0: m.header(FLAG_CLK_INV if clkinv else 0)}, None

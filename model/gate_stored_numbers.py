@@ -503,7 +503,23 @@ SPEC_SYMBOLS = {
     # quoted in the prose. Staleness is caught where it means something --
     # `audit()` reds on an undeclared condition AND on a declared one that no
     # longer holds, both derived from the image itself.
-    ("model/gate_admissible_images.py", "NON_ADMISSIBLE"),
+    # ⭐ SP2/P4: MOVED, unchanged, to the one registry `model/nonadmissible.py`.
+    ("model/nonadmissible.py", "NON_ADMISSIBLE"),
+    # ⭐ SP2/P4's TIMING-EXEMPTION REGISTRY, the same kind: image, the switch
+    # it may take, why. Its numbers are the delays quoted in the prose (d = 7,
+    # 25) and "HS + 2". Staleness is caught where it means something:
+    # `registry_problems` reds an exemption without an N1 QUEUE declaration,
+    # N1's audit reds a QUEUE that no longer holds, and `no_rta_problems` reds
+    # a NO_RTA_BUDGET membership that differs.
+    ("model/nonadmissible.py", "TIMING_EXEMPT"),
+    # ⭐ SP2/P1's TEXT ANCHORS into src/pe_engine.v: Verilog substrings whose
+    # "numbers" are widths and bit literals ({BPW-1}, 1'b1) -- identifiers of
+    # RTL text, re-found in the RTL on every run by `count_ranges.anchors`.
+    ("model/count_ranges.py", "ANCHORS"),
+    # ⭐ SP2/P1's RULED TABLE (Wilson): the count ranges as ruled, checked
+    # EQUAL to the derivation from the RTL every run -- an input to compare,
+    # never the source pe_asm reads.
+    ("model/gate_count_ranges.py", "RULED"),
     # ⭐ P6's RECORD OF THE pyRTA WITNESS: a commit, a date and the five r_i it
     # reproduces at that commit. Not a measurement this file holds: the hash
     # is checked equal to the ENFORCED pin (`pyrta_src.PINNED_COMMIT`) by

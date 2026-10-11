@@ -29,6 +29,11 @@ END token, so a crash is not mistaken for a kill)
               ROM fails its CRC (the part released its 0 at tRDV = 15 us)
   romflip     one ROM bit flipped in the peer after its CRC: CRC red and the
               ROM differs from the intended one
+  underrun_reset / underrun_slot   OW6, STANDING: the host stalls mid-READ
+              ROM (100k / 45k cycles), the lane underruns and holds DQ low;
+              the chip's underrun sticky must be set AND the host's CRC-8 on
+              the pushed bytes must go red (the short one leaves the peer
+              model with zero violations -- only the host sees it)
 
 POSITIVE TOKEN: `CE5-ONEWIRE: PASSED` only on the success path.
 """
@@ -147,6 +152,7 @@ def parse(txt):
     m = re.search(r"^OW-STICKY underrun=(\d) rx_drop=(\d) config_err=(\d) tx_full=(\d)",
                   txt, re.M)
     d["sticky"] = tuple(int(x) for x in m.groups()) if m else None
+    d["stalled"] = bool(re.search(r"^OW-STALL ", txt, re.M))
     return d
 
 
@@ -190,6 +196,14 @@ def judge(d, rxmap):
             "rx %s, crc8 %s" % (" ".join("%02X" % b if b is not None else "--"
                                          for b in rom),
                                 "%02X" % crc8(rom[:7]) if None not in rom else "-"))
+        # ⛔ OW6: CRC-8 ALONE PASSES A BUS HELD LOW. Eight 00 bytes have a
+        # valid Dallas CRC (crc8 of zeros is 0), and 00s are exactly what a
+        # host reads while an underrunning lane holds DQ low. The host knows
+        # it is talking to a DS18B20, so it checks the family code (28h) --
+        # host knowledge, not the peer's memory.
+        chk("ROM family code 28h (DS18B20), not an all-zero frame (host-side)",
+            None not in rom and rom[0] == 0x28 and any(rom),
+            "family %s" % ("%02X" % rom[0] if rom[0] is not None else "--"))
         chk("ROM == the model's ROM (pushed bytes vs peer)", rom == d["rom"], "")
         chk("ROM == the intended ROM (family 28h)", rom == want_rom,
             " ".join("%02X" % b for b in want_rom))
@@ -271,7 +285,28 @@ def main():
           ("romflip", "tt", ROM_TXN, 503, ("+FLIPROM=13",),
            lambda d, ck: not ck["ROM CRC-8 valid (host-side)"]
            and not ck["ROM == the intended ROM (family 28h)"],
-           "ROM bit 13 flipped in the peer")]
+           "ROM bit 13 flipped in the peer"),
+          # ⛔⛔ OW6, STANDING (Wilson): AN INDUCED TX UNDERRUN MUST BE CAUGHT
+          # BY THE HOST before the real part goes on. The host stops pushing
+          # mid-READ-ROM (feed word 19 = ROM byte 2); the lane underruns and
+          # holds DQ low. Red needs BOTH: the chip's underrun sticky set (the
+          # stall really starved the lane -- not a no-op) AND a HOST-SIDE
+          # check red (CRC-8 of the pushed bytes). Two lengths:
+          #   long  100k cycles: ~1.2 ms low -> the part RESETS mid-read and
+          #         answers with a presence pulse the host reads as data;
+          #   short  45k cycles: one 128 us low slot -> no reset, the peer
+          #         model sees NOTHING wrong (0 violations), the bit stream
+          #         slips -- only the host's CRC catches it.
+          ("underrun_reset", "tt", ROM_TXN, 503,
+           ("+STALL_AT=19", "+STALL_CYC=100000"),
+           lambda d, ck: d["sticky"] is not None and d["sticky"][0] == 1
+           and d["stalled"] and not ck["ROM CRC-8 valid (host-side)"],
+           "host stalls 100k cycles mid-ROM: underrun -> bus reset"),
+          ("underrun_slot", "tt", ROM_TXN, 503,
+           ("+STALL_AT=19", "+STALL_CYC=45000"),
+           lambda d, ck: d["sticky"] is not None and d["sticky"][0] == 1
+           and d["stalled"] and not ck["ROM CRC-8 valid (host-side)"],
+           "host stalls 45k cycles mid-ROM: underrun -> one slot held low")]
     # ⛔ ONE SIMULATION AT A TIME BY DEFAULT (the machine-wide budget is
     # shared); CI, which owns its runner, sets PE_OW_JOBS=3
     jobs = int(os.environ.get("PE_OW_JOBS", "1"))
@@ -314,6 +349,11 @@ def main():
         if fired:
             for f in d["fails"][:2]:
                 print("      evidence: %s" % f.strip()[:110])
+            if d["stalled"]:
+                print("      evidence: underrun sticky %d, pushed ROM %s, "
+                      "peer violations %s" % (
+                          d["sticky"][0], " ".join("%02X" % b for b in
+                                                   d["rx"][3:11]), d["viol"]))
         rc |= 0 if fired else 1
 
     print()

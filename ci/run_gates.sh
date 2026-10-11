@@ -202,6 +202,11 @@ GATES=(
   # and CS framing generated from context), byte-identical to the verified
   # image; must-fire: rSTART emitted as STOP + START goes red.
   model/gate_sp2_frontend.py
+  # ⭐⭐ SP2/P1 -- pe_asm's per-opcode count range (SHIFT 0..14, SHIFTIN
+  # 1..15, others 0..15) DERIVED from text anchors in src/pe_engine.v
+  # (ck_nbits, ck_degen), never typed. Must-fires: SHIFT 15 and SHIFTIN 0
+  # refused; a mutated ck_nbits / ck_degen makes the derivation raise.
+  model/gate_count_ranges.py
   # ⭐⭐ CE5 FREEZE -- src/ unchanged since FREEZE_SHA (one constant, re-pin on
   # rebase); CE5 is VOID if this is red. Must-fire: a planted 1-char change
   # in a temp COPY of src/, via a temp index.

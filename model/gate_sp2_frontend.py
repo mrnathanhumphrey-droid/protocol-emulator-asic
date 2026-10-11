@@ -22,8 +22,12 @@ hand-written builder that produced it):
 THE ADMISSIBILITY VERDICT is reported beside each identity: the front-end
 goes through `pe_asm.assemble`, and `corpus_spim` at d = 7 is a declared
 non-admissible TRACE image (N1) that the per-program 1.6a check refuses. It is
-emitted for the identity with `timing_checks=False` and its refusal is
-EXPECTED BY NAME (`EXPECT_REFUSED`); any other refusal is red.
+emitted for the identity with `timing_checks=False` -- under its name in the
+non-admissible registry (`model/nonadmissible.py`), which is the only way
+pe_asm will skip the pair -- and its refusal is EXPECTED BY NAME
+(`expect_refused`, derived from that registry); any other refusal is red.
+  M3  SP2/P2: an SPI header with no stated order is refused by the front-end
+      (raw pe_asm keeps its documented LSB default, shown on the same header).
 
 MUST-FIRES (each needs POSITIVE evidence of red, not just a non-zero exit):
   M1  a context rule mutated -- the repeated START emitted as STOP + START --
@@ -56,14 +60,22 @@ import pe_asm                                  # noqa: E402
 import pe_isa                                  # noqa: E402
 import pe_proto as P                           # noqa: E402
 
+import nonadmissible as NA                     # noqa: E402
+
+#: SP2 subject -> its name in the non-admissible registry
+#: (`model/nonadmissible.py`): a tracked image by its file name, a scratch
+#: variant by its own registered name.
+REG_NAME = {"corpus_spim": "corpus_spim.hex", "corpus_i2c": "corpus_i2c.hex",
+            "ckread": "ckread_image.hex"}
+
 #: subjects whose program is refused by the per-program timing checks, BY
-#: NAME, with the reason. Each must actually be refused (stale = red).
-EXPECT_REFUSED = {
-    "corpus_spim": "d = 7 trace image, N1-declared non-admissible (1.6a)",
-    "corpus_spim_mode0": "the same program, SCK parked (scratch variant)",
-    "corpus_spim_inv": "the same program, CLK_INV (scratch variant)",
-    "corpus_spim_mode0_inv": "the same program, both (scratch variant)",
-}
+#: NAME. ⭐ DERIVED FROM THE REGISTRY (Wilson, SP2/P4), no longer a second
+#: list here: a subject is expected refused iff the registry lets it skip the
+#: timing pair. Each must actually be refused (stale = red).
+def expect_refused(names):
+    return {n: NA.TIMING_EXEMPT[REG_NAME.get(n, n)]["why"] for n in names
+            if NA.TIMING_OFF in NA.TIMING_EXEMPT.get(REG_NAME.get(n, n),
+                                                     {"permits": ()})["permits"]}
 
 
 def _read_hex(path):
@@ -122,14 +134,16 @@ def subjects():
     return out
 
 
-def emit(args):
+def emit(args, name=None):
     """-> (image, verdict). The verdict is pe_asm's FULL one; the image is
-    emitted with the timing pair skipped only if that verdict refused."""
+    emitted with the timing pair skipped only if that verdict refused -- and
+    only under the subject's REGISTERED name (pe_asm refuses otherwise)."""
     lanes, headers, park = args
     try:
         return P.image(lanes, headers, park), "accepted"
     except pe_asm.Reject as e:
-        return (P.image(lanes, headers, park, timing_checks=False),
+        return (P.image(lanes, headers, park, timing_checks=False,
+                        exempt_as=REG_NAME.get(name, name)),
                 "REFUSED: " + str(e)[:90])
 
 
@@ -142,11 +156,14 @@ def main() -> int:
                                               sys.version.split()[0]))
     rc = 0
     subj = subjects()
+    EXPECT_REFUSED = expect_refused(subj)
+    print("  expected refused (from model/nonadmissible.py): %s"
+          % ", ".join(sorted(EXPECT_REFUSED)))
     compared = 0
     print("  %-22s %-9s %-44s %s" % ("program", "identity", "reference",
                                      "pe_asm verdict"))
     for name, (args, refs) in subj.items():
-        img, verdict = emit(args)
+        img, verdict = emit(args, name)
         if len(img) != pe_isa.STORE_BYTES:
             print("  *** %s: front-end image is %d bytes" % (name, len(img)))
             rc = 1
@@ -182,7 +199,7 @@ def main() -> int:
     print("  --- must-fire M1: repeated START emitted as STOP + START ---")
     ref = pe_isa.full_store(subj["ckack"][1][0][1])
     mimg, _v = emit(P.i2c_fram_random_read(
-        rules=P.MUTANT_RSTART_AS_STOP_START))
+        rules=P.MUTANT_RSTART_AS_STOP_START), "ckack")
     i = first_diff(mimg, ref)
     ops = [a["op"] for a in pe_isa.lane_programs(mimg)[0][1]]
     stop_start = any(a == pe_isa.OP_STOP and b == pe_isa.OP_START
@@ -201,7 +218,7 @@ def main() -> int:
     k = 77
     planted = bytearray(ref)
     planted[k] ^= 0x10
-    img, _v = emit(subj["ckack"][0])
+    img, _v = emit(subj["ckack"][0], "ckack")
     j = first_diff(img, bytes(planted))
     if j == k:
         print("    red: reported DIFFERS at byte %d, the planted byte" % j)
@@ -209,6 +226,42 @@ def main() -> int:
         print("    *** MUST-FIRE FAILED: comparator reported %s, planted %d"
               % (j, k))
         rc = 1
+
+    # ---- M3: SP2/P2 -- an SPI lane must STATE its order in the front-end ---
+    # ⭐ BOTH SIDES: the corpus SPI header with its 8th element (order)
+    # stripped must be refused BY THE FRONT-END, naming the lane; the same
+    # 7-element header through RAW pe_asm must still assemble (its documented
+    # default) -- and come out LSB, which is exactly why the front-end refuses.
+    print("  --- must-fire M3: an SPI header with no stated order ---")
+    sl, sh, spark = P.spi_fram(d=25)
+    bare = {ln: tuple(h[:7]) for ln, h in sh.items()}
+    try:
+        P.image(sl, bare, spark)
+        print("    *** MUST-FIRE FAILED: the front-end accepted an SPI lane "
+              "with no stated order")
+        rc = 1
+    except P.ProtoError as e:
+        ok = "lane(s) [0]" in str(e) and "order" in str(e)
+        print("    red: front-end REFUSED (%s)%s" % (str(e)[:60],
+              "" if ok else " *** but did not name lane 0 / order"))
+        rc |= 0 if ok else 1
+    try:
+        raw = pe_asm.assemble(sl, bare, park_pins=spark)
+        o = pe_isa.lane_programs(raw)[0][0]["order"]
+        print("    raw pe_asm, same header: accepted, order %s (the documented "
+              "default)%s" % ("MSB" if o else "LSB",
+                              "" if o == pe_isa.ORDER_LSB else " *** WRONG"))
+        rc |= 0 if o == pe_isa.ORDER_LSB else 1
+    except pe_asm.Reject as e:
+        print("    *** raw pe_asm refused the default-order header: %s"
+              % str(e)[:70])
+        rc = 1
+    try:
+        P.SPI(1, 2, 3, 4, 25, None)
+        print("    *** P.SPI accepted order=None")
+        rc = 1
+    except P.ProtoError:
+        print("    red: P.SPI(order=None) refused at construction")
 
     print()
     print("  subjects %d, reference bytes compared %d" % (len(subj), compared))
