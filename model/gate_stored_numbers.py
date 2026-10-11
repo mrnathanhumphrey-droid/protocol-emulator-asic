@@ -360,6 +360,15 @@ SPEC_SYMBOLS = {
     # tolerance the ruling names -- and an input to the peer; what is measured
     # is whether every byte arrives, computed every run.
     ("test/run_uartrx.py", "ERRS"),
+    # ⭐ CE5 (1-Wire): the DS18B20 TRANSACTION -- command bytes (33h, CCh,
+    # 44h, BEh, from the datasheet's command set) and byte counts (8-byte
+    # ROM, 9-byte scratchpad). A protocol specification, an input to the
+    # program; what is measured is what the part answers.
+    ("model/pe_proto.py", "DS18B20_TXN"),
+    # ⭐ CE5: the ROM the peer model is BUILT with (family 28h + a serial):
+    # an input to the peer, the expected value of the transfer; its CRC byte
+    # is computed every run, never stored.
+    ("test/run_onewire.py", "INTENDED_ROM56"),
     # ⭐⭐ UM10204's TIMING MINIMA, TRANSCRIBED. These are REQUIREMENTS the
     # design is measured against, so they are inputs in the strongest sense --
     # the whole point of the gate that holds them is that nothing in this repo
