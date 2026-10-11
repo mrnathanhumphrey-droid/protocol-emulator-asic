@@ -37,8 +37,10 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 
-#: the frozen RTL. ⛔ Re-pin HERE when main rebases this work onto commit 1.
-FREEZE_SHA = "ae15d2ccbcb8b60eb7e3319caf913bed0358ef90"
+#: the frozen RTL. Re-pinned from ae15d2c to commit 1 (62390e9) on the rebase
+#: (Wilson): valid because commit 1's src/ change is declaration-only and
+#: formally equivalent to ae15d2c (model/rtl_equiv.py: 4,102/4,102 proven).
+FREEZE_SHA = "62390e957a2fb09e8d46beac47366892b449556a"
 
 
 def git(args, env=None):

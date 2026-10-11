@@ -133,6 +133,12 @@ timing claim.
 **Lock criteria include LN1 (Wilson):** the FULL LN1 run — 200,000 rows per arm,
 `gh workflow run test.yaml --ref <branch> -f ln1_rows=200000` — dispatched on
 the exact `sub-v1` SHA and green, not only the 20k push run.
+**Lock checklist, owed items:**
+- `test/tb_onewire.v` joins the coverage sweep (`test/benchset.py` excludes it
+  by name today: it needs a generated feed file).
+- A pinned pyRTA clone in a STABLE location outside any scratch directory: the
+  scratch clone lost a tracked file (`py.typed`) to something outside the repo,
+  and every pyRTA gate refused it until it was restored.
 
 | item | what | state |
 | --- | --- | --- |

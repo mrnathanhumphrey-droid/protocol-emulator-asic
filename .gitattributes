@@ -10,3 +10,10 @@
 #
 # The files are already STORED with LF; this pins the checkout side too.
 *.sh text eol=lf
+
+# Program images, too (Wilson). They are STORED with LF and every generator
+# writes LF (`newline="\n"`), but core.autocrlf checked them out as CRLF -- so
+# regenerating an image (make_smoke_image --all, corpus.py) flipped every line
+# ending of a byte-identical file and showed it as modified. Pinned to LF on
+# checkout, a regeneration that changes nothing now shows nothing.
+*.hex text eol=lf
