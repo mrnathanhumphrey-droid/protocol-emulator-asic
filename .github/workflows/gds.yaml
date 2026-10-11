@@ -44,7 +44,55 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # ⛔⛔ SKIP A HARDEN THE SHA ALREADY HAS (Wilson). Fast-forwarding `cmos5l` to
+  # a SHA that was already hardened by dispatch re-ran the same 3.5 h harden
+  # on a billed private repo (38132276695, cancelled by hand). GitHub attaches
+  # checks to the SHA, so that run proved nothing new.
+  # ⛔ POSITIVE EVIDENCE ONLY: a run whose `gds` job was SKIPPED still ends
+  # with overall conclusion "success", so "a successful run on this SHA" would
+  # count a skip as a harden -- an absent result taken for a pass, the shape
+  # that recurred three times in one arc. The check requires an EARLIER run
+  # on this SHA whose `gds`, `precheck` AND `gl_test` jobs each concluded
+  # `success`, and names it. A manual dispatch always hardens.
+  already:
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: read
+    outputs:
+      green: ${{ steps.q.outputs.green }}
+    steps:
+      - id: q
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+          RUN: ${{ github.run_id }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" = "workflow_dispatch" ]; then
+            echo "dispatch: hardening on request"; echo "green=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          found=""
+          for id in $(gh api "repos/$REPO/actions/workflows/gds.yaml/runs?head_sha=$SHA&per_page=50" \
+                        --jq '.workflow_runs[] | select(.conclusion == "success") | .id'); do
+            [ "$id" = "$RUN" ] && continue
+            n=$(gh api "repos/$REPO/actions/runs/$id/jobs" \
+                  --jq '[.jobs[] | select((.name == "gds" or .name == "precheck" or .name == "gl_test") and .conclusion == "success")] | length')
+            if [ "$n" = "3" ]; then found="$id"; break; fi
+          done
+          if [ -n "$found" ]; then
+            echo "SKIP: $SHA already carries a green harden -- run $found (gds, precheck, gl_test all success)"
+            echo "green=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "no green harden on $SHA yet -- hardening"
+            echo "green=false" >> "$GITHUB_OUTPUT"
+          fi
+
   gds:
+    needs: already
+    if: needs.already.outputs.green != 'true'
     runs-on: ubuntu-24.04
     steps:
       - name: checkout repo
