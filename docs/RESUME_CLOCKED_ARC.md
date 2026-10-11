@@ -170,6 +170,19 @@ the exact `sub-v1` SHA and green, not only the 20k push run.
 - A pinned pyRTA clone in a STABLE location outside any scratch directory: the
   scratch clone lost a tracked file (`py.typed`) to something outside the repo,
   and every pyRTA gate refused it until it was restored.
+- **For Wilson (found by the CE5b probe, docs/CE5_LOG.md Part D): a delay-0
+  `REARM` is invisible to the admissibility screen.** `pe_asm.compute_j` and
+  N1's `refill_dmin` take d_min over POSITIVE delays only; a SHIFT-only lane at
+  d = 21 ending in a delay-0 REARM, beside four d = 20 lanes, was ACCEPTED
+  ("d_min 20, J 1") and its SHIFT writebacks were spaced 3–139 cycles (wire
+  stream ≠ fed stream). Same lane with the REARM at d = 21: 20–54. Ruling owed:
+  is a delay-0 REARM a zero spacing for D*?
+- **For Wilson (SP2/P3):** the implicit default park pin (1) is refused only on
+  a drive-class conflict, because `corpus_i2c` parks on its own open-drain SCL.
+  Explicit park pins are refused on any overlap.
+- **WS2812 (CE5b) is NOT claimable** against the Worldsemi datasheet (T0H max
+  380 ns < D* = 400 ns at 50 MHz); the earlier "feasible" verdict is withdrawn
+  in docs/CE5_LOG.md Part D.
 
 | item | what | state |
 | --- | --- | --- |
