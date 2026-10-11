@@ -35,6 +35,7 @@ model/gate_cdc.py                   ^\s*GATE cdc: PASSED\s*$
 model/gate_slang_lint.py            ^\s*SLANG LINT GATE: PASSED\s*$
 model/gate_hold_offset.py           ^\s*GATE hold-offset: PASSED\s*$
 model/gate_sp2_frontend.py          ^\s*SP2-FRONTEND: PASSED\s*$
+model/gate_count_ranges.py          ^\s*GATE count-ranges: PASSED\s*$
 model/gate_ce5_freeze.py            ^\s*CE5-FREEZE: PASSED\s*$
 test/run_onewire.py                 ^\s*CE5-ONEWIRE: PASSED\s*$
 test/run_uartrx.py                  ^\s*UART-RX GATE: PASSED\s*$

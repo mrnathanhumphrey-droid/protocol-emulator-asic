@@ -49,6 +49,8 @@ sys.path.insert(0, os.path.join(ROOT, "test"))
 sys.path.insert(0, os.path.join(HERE, "a2"))
 
 import hold_bound                         # noqa: E402
+import count_ranges                       # noqa: E402  ruling SP2/P1
+import nonadmissible                      # noqa: E402  ruling SP2/P4
 # ⭐ D2's per-program floor reuses ruling S's derivation and gate_um10204's
 # transcribed table: one model of r_i, one table of minima, no copies here.
 import gate_um10204 as um                 # noqa: E402
@@ -645,7 +647,18 @@ def split_counts(lanes):
     # The refusals that remain are the chip's own: a clocked SHIFT at 15
     # (count + 1 wraps to zero bits) and a SHIFTIN at 0 (zero bits) are
     # CONFIG_ERR in silicon (HOST_INTERFACE, "What counts as illegal").
-    lo_hi = {OP_SHIFT: (0, 14), OP_SHIFTIN: (1, 15)}
+    # ⛔⛔ WILSON'S CONDITION: THE TABLE IS DERIVED FROM THE RTL DECODE, never
+    # typed here (`model/count_ranges.py`: BPW, `ck_nbits`, `ck_degen`, each a
+    # text anchor in src/pe_engine.v; `model/gate_count_ranges.py` prints the
+    # file:line of each). A missing anchor is a REFUSAL, not a fallback table.
+    try:
+        rr = count_ranges.ranges()
+    except count_ranges.CountRangeError as exc:
+        raise Reject("the per-opcode count range could not be derived from "
+                     "the RTL, so no count can be judged: %s" % exc)
+    lo_hi = {OP_SHIFT: rr[count_ranges.OP_SHIFT],
+             OP_SHIFTIN: rr[count_ranges.OP_SHIFTIN]}
+    other = rr[None]
     five, counts = {}, {}
     for ln in lanes:
         five[ln] = []
@@ -655,10 +668,13 @@ def split_counts(lanes):
                              "(op, pin, level, delay, q[, count])"
                              % (ln, i, len(a)))
             cnt = int(a[5]) if len(a) == 6 else 8
-            lo, hi = lo_hi.get(int(a[0]), (0, 15))
+            lo, hi = lo_hi.get(int(a[0]), other)
             if not lo <= cnt <= hi:
                 raise Reject("lane %d action %d: count %d is outside %d..%d "
-                             "for this opcode (the 4-bit count field)"
+                             "for this opcode -- the range is derived from "
+                             "the RTL decode (`ck_nbits` / `ck_degen` in "
+                             "src/pe_engine.v, model/count_ranges.py): a "
+                             "zero bit count is CONFIG_ERR in silicon"
                              % (ln, i, cnt, lo, hi))
             counts[(ln, i)] = cnt
             five[ln].append(tuple(a[:5]))
@@ -701,7 +717,60 @@ def check_open_drain_bank(headers, park_pins=None):
 PARK_PIN = 1
 
 
-def assemble(lanes, headers, park_pins=None, timing_checks=True):
+def active_pins(lanes, headers):
+    """{pin: (lane, mode, what)} for every REAL pin an active lane names: its
+    header data and clock pin, and every action's pin."""
+    out = {}
+    for ln in sorted(headers):
+        h = headers[ln]
+        for what, p in (("data", h[0]), ("clock", h[1])):
+            if int(p) < N_PINS:
+                out.setdefault(int(p), (ln, int(h[2]), what + " pin"))
+        for (op, p, _l, _d, _q) in lanes.get(ln, ()):
+            if int(p) < N_PINS and op not in (OP_REARM,):
+                out.setdefault(int(p), (ln, int(h[2]), "action pin"))
+    return out
+
+
+def check_park_overlap(lanes, headers, park_pins):
+    """SP2/P3, ACCEPTED WITH A REFUSAL (Wilson): a PARKED lane's header pin
+    must not be a pin an ACTIVE lane uses.
+
+    ⛔⛔ WHY IT IS NOT COSMETIC. A parked lane's header is LOADED like any other
+    (`pe_engine.v`, ruling 1.5 at header load): it writes `pin_pp[pin]` -- the
+    pin's DRIVE CLASS -- from its own mode (open-drain, 0), and lanes load in
+    order, so a parked lane after an active PUSH-PULL lane on the same pin
+    turns that pin open-drain: the active lane's 1s stop being driven. Nothing
+    flags it.
+    ⚠ SCOPE, AND ONE CARVE-OUT STATED RATHER THAN HIDDEN. `explicit` park pins
+    (the caller named them) are refused on ANY overlap -- the ruling as given.
+    The IMPLICIT default (`PARK_PIN` = 1) is refused only on a drive-class
+    CONFLICT (an active push-pull lane on that pin): the tracked `corpus_i2c`
+    parks every idle lane on pin 1, which is its own open-drain SCL -- same
+    class, so `pin_pp` is unchanged and the image runs as certified. Refusing
+    it would make a shipped, sigrok-verified image inexpressible; that call is
+    Wilson's, reported, not taken here.
+    """
+    act = active_pins(lanes, headers)
+    for ln in range(N_LANES):
+        if ln in headers:
+            continue
+        explicit = ln in park_pins
+        p = int(park_pins.get(ln, PARK_PIN))
+        if p not in act:
+            continue
+        aln, amode, what = act[p]
+        if explicit or amode != 0:
+            raise Reject(
+                "parked lane %d's header names pin %d, which active lane %d "
+                "uses as its %s. A parked header still LOADS (ruling 1.5): it "
+                "sets that pin's drive class to open-drain, so it can override "
+                "the active lane's (lanes load in order). Park the lane on a "
+                "pin no active lane uses." % (ln, p, aln, what))
+
+
+def assemble(lanes, headers, park_pins=None, timing_checks=True,
+             exempt_as=None):
     """Emit the image. `headers` is {lane: (pin, clkpin, mode, t, dsched, dtol
     [, flags[, order]])}; an action is `(op, pin, level, delay, q[, count])`.
 
@@ -710,10 +779,20 @@ def assemble(lanes, headers, park_pins=None, timing_checks=True):
     protocol one, and the SP2 regression found the shipped images disagree on
     it: the corpus parks every idle lane on pin 1, `run_ckack`/`build_ckread`
     on pins 0/3/4/5 (off the pad-override pins). Without this the front-end
-    could not reproduce the ACK image byte for byte."""
+    could not reproduce the ACK image byte for byte.
+
+    `timing_checks=False` is ACCEPTED ONLY THROUGH THE REGISTRY (Wilson,
+    SP2/P4): `exempt_as` must name an image `model/nonadmissible.py` registers
+    with that permit, or the call is refused before anything is emitted."""
+    if not timing_checks:
+        try:
+            nonadmissible.require(exempt_as, nonadmissible.TIMING_OFF)
+        except nonadmissible.ExemptionError as exc:
+            raise Reject(str(exc))
     park_pins = park_pins or {}
     lanes, counts = split_counts(lanes)
     check_open_drain_bank(headers, park_pins)
+    check_park_overlap(lanes, headers, park_pins)
     check_queue_ownership(lanes)
     check_shift_clock_alias(lanes, headers)
     check_receive_pin(lanes, headers)
@@ -765,7 +844,8 @@ def assemble(lanes, headers, park_pins=None, timing_checks=True):
     # d = 7, refused by 1.6a) can still be emitted for a byte-identity
     # comparison. Every structural check above has already run. No caller
     # that ships an image passes it; `gate_sp2_frontend` reports the full
-    # verdict of every program beside its identity.
+    # verdict of every program beside its identity. ⛔ And only for an image
+    # REGISTERED for it (`exempt_as`, checked at the top of this function).
     if timing_checks:
         check_mode_floor(img)
         check_queue_slot(img)
@@ -1402,6 +1482,59 @@ def main() -> int:
             got, msg = True, str(e)
         ok = got == want_reject and (not got or "1.6s" in msg)
         print("    %-36s %s" % (name, ("REJECTED (1.6s)" if got else "accepted")
+                                if ok else "*** WRONG: %s" % (msg[:50] or
+                                                             "accepted")))
+        rc |= 0 if ok else 1
+
+    # ---- MUST-FIRE: SP2/P3, a park pin on an active lane's pin -----------
+    # ⭐ BOTH SIDES: the same 1-Wire lane parked off its pins is accepted; a
+    # planted explicit park on its sense pin (an ACTION pin, not a header
+    # pin -- the case a header-only check would miss) and on its DQ pin are
+    # refused; and the implicit default overlapping a PUSH-PULL lane (the
+    # drive-class conflict) is refused.
+    print()
+    print("  --- must-fire: SP2/P3 -- a parked lane must not name an active pin ---")
+    pp_lane = {0: [(OP_SHIFT, 1, 1, 25, 0, 7), (OP_REARM, 0, 1, 25, 0, 8)]}
+    for name, lanes_b, headers_b, park, want_reject in (
+            ("parked off the 1-Wire pins (0/5/6/7)", {0: ow},
+             {0: (2, 4, 0, 150, 255, 255)}, {1: 0, 2: 5, 3: 6, 4: 7}, False),
+            ("planted: lane 3 parked on the SENSE pin 3", {0: ow},
+             {0: (2, 4, 0, 150, 255, 255)}, {1: 0, 2: 5, 3: 3, 4: 7}, True),
+            ("planted: lane 1 parked on DQ pin 2", {0: ow},
+             {0: (2, 4, 0, 150, 255, 255)}, {1: 2}, True),
+            ("default park pin 1 under a PUSH-PULL lane on uio 1", pp_lane,
+             {0: (1, 0, 1, 25, 50, 75)}, None, True)):
+        try:
+            assemble(lanes_b, headers_b, park_pins=park)
+            got, msg = False, ""
+        except Reject as e:
+            got, msg = True, str(e)
+        ok = got == want_reject and (not got or "parked lane" in msg)
+        print("    %-50s %s" % (name, ("REJECTED" if got else "accepted")
+                                if ok else "*** WRONG: %s" % (msg[:50] or
+                                                             "accepted")))
+        rc |= 0 if ok else 1
+
+    # ---- MUST-FIRE: SP2/P4, timing_checks=False only through the registry --
+    print()
+    print("  --- must-fire: SP2/P4 -- timing_checks=False needs a registry entry ---")
+    import pe_proto as _pp
+    sl, sh, spark = _pp.spi_fram()
+    for name, kw, want_reject in (
+            ("corpus_spim, registered (exempt_as)",
+             {"exempt_as": "corpus_spim.hex"}, False),
+            ("the same program, no name", {}, True),
+            ("the same program as an unregistered name",
+             {"exempt_as": "corpus_i2c.hex"}, True),
+            ("a registered name WITHOUT that permit (ckdense: no_rta only)",
+             {"exempt_as": "ckdense_image.hex"}, True)):
+        try:
+            assemble(sl, sh, park_pins=spark, timing_checks=False, **kw)
+            got, msg = False, ""
+        except Reject as e:
+            got, msg = True, str(e)
+        ok = got == want_reject and (not got or "TIMING_EXEMPT" in msg)
+        print("    %-62s %s" % (name, ("REJECTED" if got else "accepted")
                                 if ok else "*** WRONG: %s" % (msg[:50] or
                                                              "accepted")))
         rc |= 0 if ok else 1

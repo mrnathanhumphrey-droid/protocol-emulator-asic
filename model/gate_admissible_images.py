@@ -72,73 +72,13 @@ import pe_isa as I                                                # noqa: E402
 import program_a2 as pa                                           # noqa: E402
 from bursty import L_SYNC                                         # noqa: E402
 
-OVERLOAD, PORT, PINMAP, QUEUE = "OVERLOAD", "PORT", "PINMAP", "QUEUE"
-
-#: ⛔ DECLARED BY NAME, each with the conditions it breaks and why that is
-#: intended. PINMAP is NOT listed here -- it lives in corpus.PAD_COLLISION.
-NON_ADMISSIBLE = {
-    "corpus_all5.hex": ({OVERLOAD, PORT},
-        "the scheduler stress image: four lanes at d = 9..13 beside a clocked "
-        "lane at 70 (D5 raised only lane 0), deliberately oversubscribed. "
-        "Ruling S reports its clocked lane UNBOUNDED for this reason."),
-    # ⛔ MECHANISM ONLY (ruling Q3), and the first version of this entry said
-    # otherwise: it called the tracked file "the measurement base for T1's
-    # per-lane J and Theorem 3's port-feasible cells". Those claims were
-    # measured with the BUILDER at OTHER delays -- Theorem 3's 35 cells are
-    # `run_dstar_check` at d = 20..60, every point admissible -- not with this
-    # file at 12..16. Conflating the builder with the file is how a
-    # non-admissible image starts to read as evidence.
-    "five_image.hex": ({OVERLOAD, PORT},
-        "MECHANISM ONLY. The tracked FIVE_STRESS image (d = 12..16, "
-        "U = 1.083). Used by tb_witness's stall-chain trace (a floor, sub-D* "
-        "regime), run_mutants' M_BUF_SWAP kill (needs stalls to discriminate), "
-        "and gate_cj_bounds' sub-D* double-buffer number (that gate is "
-        "RETIRED under CJ; the figure is history). No "
-        "claim scoped to admissible programs was measured on it (Q3)."),
-    "corpus_spim.hex": ({PORT, QUEUE},
-        "the SPI-master TRACE image at d = 7, below D*: it exists to move the "
-        "uo_out bank for the corpus witness, not as the shipped 1 MHz SPI "
-        "lane (25 cycles)."),
-    "corpus_sptgt.hex": ({PORT, QUEUE},
-        "the SPI-target trace image at d = 6, below D*: it exists to exercise "
-        "the target's async MISO release for the corpus witness."),
-    "corpus_uartrx.hex": ({PORT, QUEUE},
-        "the UART-rx trace image at d = 11, below D*: it exercises the ARM "
-        "and edge-capture path at a seeded phase."),
-    "chain_image.hex": ({PORT, QUEUE},
-        "`build_chain`, the chaining re-arm mechanism at d = 12: a mechanism "
-        "test, not a schedulable program."),
-    "edge_image.hex": ({PORT},
-        "`tb_edge`'s reactive-release image at d = 12, below D*, because the "
-        "edge-capture must-fires need tight spacing to discriminate."),
-    "edge_image_noto.hex": ({PORT},
-        "the no-timeout variant of the tb_edge image (d = 12)."),
-    "edge_image_rise.hex": ({PORT},
-        "the rising-edge variant of the tb_edge image (d = 12)."),
-    "noop_image.hex": ({PORT, QUEUE},
-        "the half-bit no-op idiom at d = 7: the no-op exists to offset a lane "
-        "by less than one period, which is below D* by construction."),
-    "noop_image_bad.hex": ({PORT, QUEUE},
-        "the no-op idiom's must-fire image (d = 7)."),
-    "noop_image_h19.hex": ({PORT},
-        "the no-op idiom at the measured half value h = 19 (d = 12)."),
-    # ⛔ RULING DT-B. ckdense's PINMAP is declared in corpus.PAD_COLLISION;
-    # QUEUE is new: after W1 its clocked lanes reach r = 28/27/29/31 against
-    # T = 20/21/22/23 (pyRTA), the regime where TChecker's `ovr` is reachable
-    # and neither our recurrence nor pyRTA can be adjudicated. A STRESS image,
-    # no longer Ruling S's must-fire subject.
-    "ckdense_image.hex": ({QUEUE},
-        "the A2 scheduler stress image (four dense clocked lanes, d = 20..23). "
-        "Fails 1.6a under W1's jitter (DT-B), so no claim rests on it; kept "
-        "because it is where W1 binds hardest and where W6's term is priced."),
-    "ckhold_over_image.hex": ({QUEUE},
-        "D4's 'must RUN' boundary point at d = SDA_HOLD + 1 = 16, below every "
-        "mode floor: under W1 its lane's r = 18 > t = 16 (DT-A). It exists to "
-        "show the silicon RUNS one cycle above the hold, not to be scheduled."),
-    "tx_image.hex": ({PORT, QUEUE},
-        "`tb_tx`'s TX-queue ownership image at d = 12-13, below D*: it tests "
-        "routing of host bytes, not schedulability."),
-}
+# ⭐⭐ THE DECLARATION LIST LIVES IN `model/nonadmissible.py` (Wilson, SP2/P4:
+# one registry of declared non-admissible images AND of the timing exemptions
+# any of them may take -- `timing_checks=False`, `no_rta_budget`). It moved
+# there unchanged; this gate still owns judging it against the images.
+import nonadmissible as NA                                        # noqa: E402
+from nonadmissible import (NON_ADMISSIBLE, OVERLOAD, PINMAP,      # noqa: E402,F401
+                           PORT, QUEUE)
 
 
 def refill_dmin(img):
@@ -328,6 +268,61 @@ def main() -> int:
     print("    an undeclared 1.6a (QUEUE) image is reported  %s"
           % ("ok" if hit3 else "*** MISSED"))
     if not (hit and hit2 and hit3):
+        rc = 1
+
+    # ---- SP2/P4: THE TIMING-EXEMPTION REGISTRY (Wilson) ------------------
+    # ⛔ `timing_checks=False` and `no_rta_budget` are accepted only through
+    # `model/nonadmissible.py` TIMING_EXEMPT, whose tracked entries must be N1
+    # entries above that declare QUEUE (and N1's audit already reds a stale
+    # QUEUE, so the exempt image really does fail 1.6a).
+    print()
+    print("  --- SP2/P4: timing exemptions only through the registry ---")
+    import program_a2 as _pa2
+    import pe_asm as _asm
+    import pe_proto as _pp
+    rp = NA.registry_problems() + NA.no_rta_problems(_pa2.NO_RTA_BUDGET)
+    for p in rp:
+        print("    *** %s" % p)
+        rc = 1
+    print("    registry: %s; NO_RTA_BUDGET membership == registry: %s"
+          % (", ".join("%s(%s)" % (n, "/".join(sorted(e["permits"])))
+                       for n, e in sorted(NA.TIMING_EXEMPT.items())),
+             "yes" if not rp else "*** NO"))
+    tracked = {n for n, _i in imgs}
+    for n, e in sorted(NA.TIMING_EXEMPT.items()):
+        if e["of"] is None and n not in tracked:
+            print("    *** %s is a tracked registry entry with no image" % n)
+            rc = 1
+    # must-fires, each needing POSITIVE red
+    sl, sh, spark = _pp.spi_fram()
+    try:
+        _asm.assemble(sl, sh, park_pins=spark, timing_checks=False,
+                      exempt_as="undeclared_spim.hex")
+        mf1 = False
+    except _asm.Reject as e:
+        mf1 = "TIMING_EXEMPT" in str(e)
+    print("    must-fire: an UNREGISTERED image with timing_checks=False is "
+          "refused  %s" % ("ok" if mf1 else "*** MISSED"))
+    planted = dict(_pa2.NO_RTA_BUDGET)
+    planted["corpus_i2c.hex"] = {"why": "planted", "measured_widest": {},
+                                 "margin": 0}
+    mf2 = any("corpus_i2c.hex" in p for p in NA.no_rta_problems(planted))
+    print("    must-fire: an unregistered NO_RTA_BUDGET key is reported      "
+          "  %s" % ("ok" if mf2 else "*** MISSED"))
+    try:
+        NA.require("corpus_i2c.hex", NA.NO_RTA)
+        mf3 = False
+    except NA.ExemptionError:
+        mf3 = True
+    print("    must-fire: budgets()' per-use registry check refuses it        "
+          "  %s" % ("ok" if mf3 else "*** MISSED"))
+    reg = dict(NA.TIMING_EXEMPT)
+    reg["i2caddr_image.hex"] = {"permits": {NA.TIMING_OFF}, "of": None,
+                                "why": "planted"}
+    mf4 = any("i2caddr_image.hex" in p for p in NA.registry_problems(reg))
+    print("    must-fire: an exemption with no N1 (QUEUE) declaration is red  "
+          "  %s" % ("ok" if mf4 else "*** MISSED"))
+    if not (mf1 and mf2 and mf3 and mf4):
         rc = 1
 
     print()
