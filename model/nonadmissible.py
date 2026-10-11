@@ -117,7 +117,19 @@ TIMING_EXEMPT = {
     "ckdense_image.hex": {"permits": {NO_RTA}, "of": None,
         "why": "DT-B: fails 1.6a under W1; pyRTA's W1 fixed point gives no "
                "bound under HS + 2 (HC1-B), so its bench budget is EMPIRICAL "
-               "(program_a2.NO_RTA_BUDGET holds the measurement)."},
+               "(program_a2.NO_RTA_BUDGET holds the measurement).",
+        # ⭐ WILSON: the +4 margin is ACCEPTED; the number carries its origin.
+        # The measurement itself (measured_widest 6/7/10/5, margin 4) stays
+        # in program_a2.NO_RTA_BUDGET, unchanged.
+        "budget_origin":
+            "empirical: measured max over 25 runs (iverilog seeds 1-3; pinned "
+            "Verilator 5.053 reset modes 0/1 + mode 2 seeds 1-20), widest "
+            "6/7/10/5, plus 4 = 10/11/14/9; flake-free over 25 (spread 0); "
+            "catches: M_NO_HOLD_GATE on this image via Layer H + V1/V2 "
+            "(budget itself not broken: widest 4/7/10/8); M_RX_CAPGATE_LATE "
+            "not applicable to this image (no push-pull capture lane; caught "
+            "by EX1 on the d=4 SPI image); HOLD_PICK_LAG=1 caught by "
+            "model/gate_hold_offset.py."},
     "corpus_spim_mode0": {"permits": {TIMING_OFF}, "of": "corpus_spim.hex",
         "why": "run_spifram's scratch variant: SCK parked low before CS "
                "(one extra OP_LEVEL per frame), d = 7 unchanged."},
@@ -163,6 +175,11 @@ def registry_problems(registry=None, n1=None):
             probs.append("%s: no reason" % name)
         if not e.get("permits") or not e["permits"] <= {TIMING_OFF, NO_RTA}:
             probs.append("%s: permits %r" % (name, e.get("permits")))
+        # ⭐ an empirical budget must carry its origin (Wilson, ckdense +4)
+        if NO_RTA in e.get("permits", ()) and \
+                not str(e.get("budget_origin", "")).startswith("empirical:"):
+            probs.append("%s: no_rta_budget without a stated budget_origin "
+                         "('empirical: ...')" % name)
         par = e.get("of")
         if par is None:
             if name not in n1:
