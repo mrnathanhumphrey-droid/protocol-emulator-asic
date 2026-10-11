@@ -22,7 +22,11 @@
 `default_nettype none
 module pe_fpga_core #(
     parameter IMG      = "uart_rx_434.hex",   // 256-byte store image
-    parameter integer UART_DIV = 434          // 50 MHz / 115200 = 434.03
+    parameter integer UART_DIV = 434,         // 50 MHz / 115200 = 434.03
+    // PC-UART LOADER (Wilson: the FPGA stand-in for the Pico 2's role). A line
+    // held low this long is "enter the loader" -- 20 ms at 50 MHz, ten times
+    // the 2 ms break the UART-rx test sends as a framing frame.
+    parameter integer BRK_CYC  = 1000000
 ) (
     input  wire       clk,          // 50 MHz
     input  wire       rst_n,        // synchronous to clk, active low
@@ -34,11 +38,17 @@ module pe_fpga_core #(
   localparam integer P_RX = 3;
 
   // ---------------------------------------------------------------- loader
+  // Boot loads the BRAM ROM (as before). The PC-UART loader (below) fills
+  // `lbuf` and restarts this same sequence from it: ONE load path, two sources.
   reg  [7:0] rom [0:255];
   initial $readmemh(IMG, rom);
+  reg  [7:0] lbuf [0:255];
+  reg        use_buf;
+  reg        relo;          // pulse: restart the load from `lbuf`
+  reg        hold;          // level: hold the chip in reset (listening)
 
   localparam [2:0] L_RST = 3'd0, L_PROG = 3'd1, L_PTR = 3'd2, L_PTR0 = 3'd3,
-                   L_BYTE = 3'd4, L_DONE = 3'd5;
+                   L_BYTE = 3'd4, L_DONE = 3'd5, L_HOLD = 3'd6;
   reg  [2:0]  lst;
   reg  [7:0]  lcnt;
   reg  [8:0]  laddr;
@@ -51,7 +61,13 @@ module pe_fpga_core #(
     if (!rst_n) begin
       lst <= L_RST; lcnt <= 8'd0; laddr <= 9'd0; lph <= 3'd0;
       chip_rst_n <= 1'b0; prog <= 1'b0; ptr <= 1'b0; wr <= 1'b0;
-      ldata <= 8'hFF; loading <= 1'b1;
+      ldata <= 8'hFF; loading <= 1'b1; use_buf <= 1'b0;
+    end else if (hold) begin
+      // listening: chip in reset, the uio bus idle (pull-ups)
+      lst <= L_HOLD; chip_rst_n <= 1'b0; prog <= 1'b0; ptr <= 1'b0;
+      wr <= 1'b0; ldata <= 8'hFF; loading <= 1'b1;
+    end else if (relo) begin
+      lst <= L_RST; lcnt <= 8'd0; use_buf <= 1'b1; chip_rst_n <= 1'b0;
     end else begin
       lcnt <= lcnt + 8'd1;
       case (lst)
@@ -66,7 +82,7 @@ module pe_fpga_core #(
         L_BYTE: begin
           lph <= lph + 3'd1;
           case (lph)
-            3'd0: ldata <= rom[laddr[7:0]];
+            3'd0: ldata <= use_buf ? lbuf[laddr[7:0]] : rom[laddr[7:0]];
             3'd2: wr <= 1'b1;
             3'd5: wr <= 1'b0;
             3'd6: begin
@@ -83,6 +99,7 @@ module pe_fpga_core #(
           prog <= 1'b0; ldata <= 8'hFF;
           if (lcnt == 8'd4) loading <= 1'b0;   // byte held >= 4 cycles past WR
         end
+        L_HOLD: ;                              // left only by `relo`
         default: lst <= L_RST;
       endcase
     end
@@ -130,11 +147,91 @@ module pe_fpga_core #(
   wire [2:0] f_kind   = frame[10:8];
   wire [7:0] f_data   = frame[7:0];
 
+  // ------------------------------------------------- PC-UART loader (glue)
+  // A BREAK of BRK_CYC cycles enters the loader: the chip is held in reset and
+  // the glue listens for  A5 5A <256 image bytes> <ck>,  where ck makes the
+  // sum of the 256 image bytes and ck equal 0 mod 256. Good frame: the load
+  // path restarts from `lbuf` (the same PROG/PTR/WR sequence as boot) and the
+  // board replies 'K'. Bad header or checksum: reply 'E', keep listening.
+  // ⛔ The glue judges only the FRAME (header, checksum) -- whether the chip
+  // then runs the program is judged by the PC, as before.
+  reg  [15:0] rdiv;
+  reg  [3:0]  rbit;
+  reg  [7:0]  rsh;
+  reg         rbusy, rx_q, rx_v;
+  reg  [7:0]  rx_b;
+  always @(posedge clk) begin
+    rx_v <= 1'b0;
+    rx_q <= uart_rx;
+    if (!rst_n) begin
+      rbusy <= 1'b0; rx_q <= 1'b1;
+    end else if (!rbusy) begin
+      if (rx_q && !uart_rx) begin           // start-bit fall
+        rbusy <= 1'b1; rbit <= 4'd0; rdiv <= UART_DIV + UART_DIV / 2 - 1;
+      end
+    end else if (rdiv != 16'd0) begin
+      rdiv <= rdiv - 16'd1;
+    end else if (rbit != 4'd8) begin         // mid-bit sample of a data bit
+      rsh <= {uart_rx, rsh[7:1]}; rbit <= rbit + 4'd1; rdiv <= UART_DIV - 1;
+    end else begin                           // the stop bit
+      rbusy <= 1'b0;
+      if (uart_rx) begin rx_v <= 1'b1; rx_b <= rsh; end
+    end
+  end
+
+  reg  [23:0] lowc;          // saturates at BRK_CYC: `brk` fires once per break
+  wire        brk = !uart_rx && lowc == BRK_CYC - 1;
+  always @(posedge clk) begin
+    if (!rst_n || uart_rx) lowc <= 24'd0;
+    else if (lowc != BRK_CYC) lowc <= lowc + 24'd1;
+  end
+
+  localparam [2:0] S_RUN = 3'd0, S_H1 = 3'd1, S_H2 = 3'd2, S_DATA = 3'd3,
+                   S_CK = 3'd4;
+  reg  [2:0]  ls;
+  reg  [8:0]  lidx;
+  reg  [7:0]  lsum;
+  reg         rp_push;
+  reg  [7:0]  rp_data;
+  reg  [7:0]  nloads;        // PC loads accepted (LED / debug)
+  always @(posedge clk) begin
+    relo <= 1'b0; rp_push <= 1'b0;
+    if (!rst_n) begin
+      ls <= S_RUN; hold <= 1'b0; nloads <= 8'd0;
+    end else if (brk) begin
+      ls <= S_H1; hold <= 1'b1;
+    end else if (rx_v) begin
+      case (ls)
+        S_H1:   if (rx_b == 8'hA5) ls <= S_H2;
+        S_H2:   if (rx_b == 8'h5A) begin ls <= S_DATA; lidx <= 9'd0; lsum <= 8'd0; end
+                else ls <= S_H1;
+        S_DATA: begin
+          lbuf[lidx[7:0]] <= rx_b; lsum <= lsum + rx_b; lidx <= lidx + 9'd1;
+          if (lidx == 9'd255) ls <= S_CK;
+        end
+        S_CK: begin
+          rp_push <= 1'b1;
+          if (lsum + rx_b == 8'd0) begin
+            rp_data <= "K"; ls <= S_RUN; hold <= 1'b0; relo <= 1'b1;
+            nloads <= nloads + 8'd1;
+          end else begin
+            rp_data <= "E"; ls <= S_H1;
+          end
+        end
+        default: ;
+      endcase
+    end
+  end
+
   // ------------------------------------------------------------- the FIFO
   reg [7:0]  fifo [0:1023];
   reg [9:0]  wp, rp;
   reg        ovf;
-  wire       f_push  = f_ok && !f_marker && f_kind == 3'd0 && !loading;
+  wire       f_chip  = f_ok && !f_marker && f_kind == 3'd0 && !loading;
+  // the loader's reply shares the FIFO; it never coincides with a chip byte
+  // (the chip is in reset while the loader listens)
+  wire       f_push  = f_chip || rp_push;
+  wire [7:0] f_in    = rp_push ? rp_data : f_data;
   wire       f_empty = (wp == rp);
   wire       f_full  = ((wp + 10'd1) == rp);
   reg  [7:0] f_q;
@@ -147,7 +244,7 @@ module pe_fpga_core #(
     end else begin
       if (f_push) begin
         if (f_full) ovf <= 1'b1;
-        else begin fifo[wp] <= f_data; wp <= wp + 10'd1; end
+        else begin fifo[wp] <= f_in; wp <= wp + 10'd1; end
       end
       if (!f_empty && !tx_busy && !tx_go) begin
         f_q <= fifo[rp]; rp <= rp + 10'd1; tx_go <= 1'b1;
