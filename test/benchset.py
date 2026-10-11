@@ -49,6 +49,14 @@ EXCLUDED = {
         "ports, and the RTL coverage of those paths is attributed to the "
         "benches that do self-check. ⚠ What IS unmeasured here is `tb.v`'s own "
         "two lines and the cocotb-only host pacing."),
+    "tb_onewire.v": (
+        "CE5's 1-Wire bench. Each arm needs a HOST FEED file generated for its "
+        "image by `test/run_onewire.py` (`OneWire.feed_file`), which this "
+        "file's `gen` hook (make_smoke_image only) cannot produce, and a full "
+        "arm is ~2.5M cycles. Its claims are judged by `test/run_onewire.py` "
+        "in `ci/run_gates.sh`. ⚠ OWED, not waived: joining the coverage sweep "
+        "needs a feed-generating `gen` hook; whether it reaches RTL the swept "
+        "benches do not was NOT measured."),
 }
 
 # ---------------------------------------------------------------------------

@@ -197,6 +197,20 @@ GATES=(
   # vs what the PEER sent, count exact; framing reported; must-fires "edge"
   # (sampled at the bit edge, red at +-2 %) and "nostop" (no framing check).
   test/run_uartrx.py
+  # ⭐⭐ SP2 -- the pe_asm protocol front-end (model/pe_proto.py): every
+  # shipped FRAM program re-expressed as a TRANSACTION (START / rSTART / STOP
+  # and CS framing generated from context), byte-identical to the verified
+  # image; must-fire: rSTART emitted as STOP + START goes red.
+  model/gate_sp2_frontend.py
+  # ⭐⭐ CE5 FREEZE -- src/ unchanged since FREEZE_SHA (one constant, re-pin on
+  # rebase); CE5 is VOID if this is red. Must-fire: a planted 1-char change
+  # in a temp COPY of src/, via a temp index.
+  model/gate_ce5_freeze.py
+  # ⭐⭐ CE5 -- 1-Wire DS18B20 on the frozen RTL, a pe_asm program only:
+  # presence, READ ROM + CRC, CONVERT T polled, READ SCRATCHPAD + CRC, every
+  # slot in its datasheet window (19-7487 Rev 6) against a same-hand peer;
+  # must-fires: write-0 low 50 us, read sample at 20 us, a flipped ROM bit.
+  test/run_onewire.py
   # ⭐ MU -- the simulation mutant runner, ~10 s: every arm must die of the
   # assertion it names. It was run by nothing, so its kills were as old as the
   # day each was last typed.

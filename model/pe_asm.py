@@ -23,8 +23,11 @@ a reader can run.
     argument, not to the hardware -- so computing it on-chip buys nothing. The
     assembler computes it; the chip enforces only what is structural (1.6s).
 
-⚠ FIRST CUT, AND WHAT IS NOT HERE YET: a protocol front-end (programs are given
-as lane/action tuples, not as a protocol description), and the full 23-condition
+⭐ SP2: THE PROTOCOL FRONT-END is `model/pe_proto.py` (I2C transactions with
+START / repeated START / STOP generated from context, SPI CS framing, the CE5
+1-Wire slot engine); it emits through `assemble` below, and
+`model/gate_sp2_frontend.py` holds it byte-identical to the shipped FRAM images.
+⚠ FIRST CUT, AND WHAT IS NOT HERE YET: the full 23-condition
 1.6 report. `gate_admissibility_1_6.py` already carries those conditions against
 the shipped set; wiring them per-program is the next step. The two rulings above
 are complete.
@@ -609,6 +612,19 @@ def header_flags(h):
     return int(h[6]) if len(h) > 6 else 0
 
 
+def header_order(h, ops):
+    """The lane's bit order (SP2): an optional 8th header element, else the
+    one `order_for` derives from the program.
+
+    ⭐ FOUND BY THE SP2 BYTE-IDENTITY REGRESSION: an SPI FRAM lane is
+    MSB-first and has no START/STOP for `order_for` to see, so `corpus.py`
+    states the order in its own spec -- and pe_asm could not, so the shipped
+    SPI FRAM image was not expressible here at all. ⛔ A STATED order may not
+    contradict a DERIVED I2C one: `check_i2c_order` still runs on the image.
+    """
+    return int(h[7]) if len(h) > 7 else order_for(ops)
+
+
 def split_counts(lanes):
     """An action is `(op, pin, level, delay, q[, count])`; count defaults to 8.
 
@@ -618,6 +634,18 @@ def split_counts(lanes):
     The checks below all read 5-tuples; the count is split off here, once.
     Returns (lanes with 5-tuples, {(lane, index): count}).
     """
+    # ⭐⭐ SP2: THE LEGAL COUNT RANGE IS PER OPCODE, and a single 1..15 range
+    # made two SHIPPED programs inexpressible. Found by the SP2 byte-identity
+    # regression (`model/gate_sp2_frontend.py`):
+    #   * a ONE-bit clocked SHIFT (the I2C master's ACK/NACK) is `count = 0`
+    #     -- OP_SHIFT counts `nbits - 1` (`pe_isa.act_shift_clocked`) -- so the
+    #     FRAM random read could not be written through pe_asm at all;
+    #   * START/STOP/LEVEL/READBIT/ARM/REARM never read the field, and
+    #     `run_ckack.image` writes 0 there (the corpus writes 8).
+    # The refusals that remain are the chip's own: a clocked SHIFT at 15
+    # (count + 1 wraps to zero bits) and a SHIFTIN at 0 (zero bits) are
+    # CONFIG_ERR in silicon (HOST_INTERFACE, "What counts as illegal").
+    lo_hi = {OP_SHIFT: (0, 14), OP_SHIFTIN: (1, 15)}
     five, counts = {}, {}
     for ln in lanes:
         five[ln] = []
@@ -627,18 +655,65 @@ def split_counts(lanes):
                              "(op, pin, level, delay, q[, count])"
                              % (ln, i, len(a)))
             cnt = int(a[5]) if len(a) == 6 else 8
-            if not 1 <= cnt <= 15:
-                raise Reject("lane %d action %d: count %d is outside 1..15 "
-                             "(the 4-bit count field)" % (ln, i, cnt))
+            lo, hi = lo_hi.get(int(a[0]), (0, 15))
+            if not lo <= cnt <= hi:
+                raise Reject("lane %d action %d: count %d is outside %d..%d "
+                             "for this opcode (the 4-bit count field)"
+                             % (ln, i, cnt, lo, hi))
             counts[(ln, i)] = cnt
             five[ln].append(tuple(a[:5]))
     return five, counts
 
 
-def assemble(lanes, headers):
+def check_open_drain_bank(headers, park_pins=None):
+    """1.6s: an OPEN-DRAIN lane's data pin AND clock pin must be `uio` pins.
+
+    ⛔⛔ FOUND BY CE5 (the 1-Wire demo), AND IT WAS A TOOLCHAIN-SILICON
+    DISAGREEMENT. The chip refuses such a header at LOAD (`pe_engine.v`, the
+    1.6s block: mode 0 with `pin >= N_UIO` or `clkpin >= N_UIO` sets
+    CONFIG_ERR), and pe_asm never checked it -- so a 1-Wire lane written with
+    no clock (`clkpin = PIN_NONE`, which is what a clockless protocol means)
+    ASSEMBLED CLEANLY and the chip ran nothing: CONFIG_ERR, zero writebacks.
+    ⚠ PIN_NONE IS A "NO CLOCK" ONLY ON A PUSH-PULL LANE (the SPI target). On
+    an open-drain lane the clock pin must exist even if the protocol has no
+    clock -- see docs/CE5_LOG.md, OW3.
+    """
+    for ln, h in sorted(headers.items()):
+        if int(h[2]) == 0:
+            for what, p in (("data", h[0]), ("clock", h[1])):
+                if not 0 <= int(p) < 8:
+                    raise Reject(
+                        "lane %d is OPEN-DRAIN and names %s pin %d, which is "
+                        "not a `uio` pin (0..7). The chip REFUSES this header "
+                        "at load (1.6s, CONFIG_ERR, engine-wide halt): a "
+                        "`uo_out` pin cannot release, and PIN_NONE is not a "
+                        "clock an open-drain lane may name. Give the lane a "
+                        "real `uio` clock pin even if the protocol has none."
+                        % (ln, what, p))
+    for ln, p in sorted((park_pins or {}).items()):
+        if not 0 <= int(p) < 8:
+            raise Reject("parked lane %d is open-drain on pin %d, not a `uio` "
+                         "pin -- the chip refuses it at load (1.6s)" % (ln, p))
+
+
+#: the parked lanes' header pin when the caller names none -- pin 1 (I2C SCL
+#: in the ruled map), what `assemble` and `corpus._assemble` have always used
+PARK_PIN = 1
+
+
+def assemble(lanes, headers, park_pins=None, timing_checks=True):
     """Emit the image. `headers` is {lane: (pin, clkpin, mode, t, dsched, dtol
-    [, flags])}; an action is `(op, pin, level, delay, q[, count])`."""
+    [, flags[, order]])}; an action is `(op, pin, level, delay, q[, count])`.
+
+    `park_pins` (SP2) is {lane: pin} for lanes with no program: the header pin
+    of each parked lane, default `PARK_PIN`. ⭐ It is an IMAGE property, not a
+    protocol one, and the SP2 regression found the shipped images disagree on
+    it: the corpus parks every idle lane on pin 1, `run_ckack`/`build_ckread`
+    on pins 0/3/4/5 (off the pad-override pins). Without this the front-end
+    could not reproduce the ACK image byte for byte."""
+    park_pins = park_pins or {}
     lanes, counts = split_counts(lanes)
+    check_open_drain_bank(headers, park_pins)
     check_queue_ownership(lanes)
     check_shift_clock_alias(lanes, headers)
     check_receive_pin(lanes, headers)
@@ -660,9 +735,11 @@ def assemble(lanes, headers):
             # (START/STOP framing = I2C = MSB-first), never left to `hdr()`'s
             # LSB default, which put every I2C byte on the wire reversed
             hs.append(hdr(pin, clkpin, mode, t, flags, ds, dt, base[ln],
-                          order=order_for([a[0] for a in lanes[ln]])))
+                          order=header_order(headers[ln],
+                                             [a[0] for a in lanes[ln]])))
         else:
-            hs.append(hdr(1, 1, 0, 500, 0, 200, 240, lp))
+            pp = park_pins.get(ln, PARK_PIN)
+            hs.append(hdr(pp, pp, 0, 500, 0, 200, 240, lp))
     img = b"".join(hs) + b"".join(prog)
     if len(img) > (1 << AW):
         raise Reject("image is %d bytes, over the %d-byte program store"
@@ -683,8 +760,15 @@ def assemble(lanes, headers):
     # program's own lane set, and the image is the one representation that
     # every route into the chip shares -- deriving it from the tuples instead
     # would be a second decoder of the same program.
-    check_mode_floor(img)
-    check_queue_slot(img)
+    # ⚠ `timing_checks=False` (SP2) skips ONLY the two per-program TIMING
+    # verdicts, so a declared non-admissible TRACE image (`corpus_spim` at
+    # d = 7, refused by 1.6a) can still be emitted for a byte-identity
+    # comparison. Every structural check above has already run. No caller
+    # that ships an image passes it; `gate_sp2_frontend` reports the full
+    # verdict of every program beside its identity.
+    if timing_checks:
+        check_mode_floor(img)
+        check_queue_slot(img)
     check_i2c_order(img)
     return img
 
@@ -1297,6 +1381,30 @@ def main() -> int:
         rc = 1
     except ValueError:
         print("    hdr() with a reserved bit             refused at the encoder")
+
+    # ---- MUST-FIRE: 1.6s, an open-drain lane's pins are `uio` (CE5) -------
+    # ⭐ BOTH SIDES: the clockless open-drain lane CE5 first wrote (PIN_NONE
+    # clock) must be REFUSED, as silicon refuses it; the same lane with a
+    # real `uio` clock must be accepted, or the check is a ban on 1-Wire.
+    print()
+    print("  --- must-fire: 1.6s -- an open-drain lane names uio pins only ---")
+    ow = [(OP_SHIFT, 2, 0, 150, 0, 7), (OP_SHIFTIN, 3, 0, 900, 0, 8),
+          (OP_REARM, 0, 1, 900, 0, 8)]
+    for name, header, want_reject in (
+            ("open-drain, clock PIN_NONE", (2, PIN_NONE, 0, 150, 255, 255),
+             True),
+            ("open-drain, data on uo_out", (8, 4, 0, 150, 255, 255), True),
+            ("open-drain, clock on uio[4]", (2, 4, 0, 150, 255, 255), False)):
+        try:
+            assemble({0: ow}, {0: header})
+            got, msg = False, ""
+        except Reject as e:
+            got, msg = True, str(e)
+        ok = got == want_reject and (not got or "1.6s" in msg)
+        print("    %-36s %s" % (name, ("REJECTED (1.6s)" if got else "accepted")
+                                if ok else "*** WRONG: %s" % (msg[:50] or
+                                                             "accepted")))
+        rc |= 0 if ok else 1
     print()
     print("=" * 78)
     print("  pe_asm: %s" % ("PASSED" if rc == 0 else "FAILED"))
