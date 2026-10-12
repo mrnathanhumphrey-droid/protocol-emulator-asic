@@ -228,6 +228,15 @@ store was written (above). The engine never started, so no pin moved.
   `SHIFTIN` at `count = 0`, or a clocked `SHIFT` at `count = 15`, where
   `count + 1` wraps to zero in the 4-bit field.
 
+ⓘ **The UNCLOCKED forms are assembler-refused, silicon-defined (16-bit cycle
+over an 8-bit register).** An unclocked `SHIFT` at `count = 15` or `SHIFTIN`
+at `count = 0` is **not** CONFIG_ERR: the same 4-bit arithmetic wraps, so the
+lane runs a 16-bit cycle over the 8-bit `l_tx` / `l_rx` register. That is
+defined behaviour, but it is meaningless as a byte, so `pe_asm` refuses it
+(it applies the clocked range to both forms — stricter than silicon, the safe
+direction). The ranges are derived from the RTL decode
+(`model/count_ranges.py`, anchors A6/A7), not typed.
+
 ⚠ **A host sees CONFIG_ERR and must assume the image, not one lane, is**
 **suspect.** Reload before expecting anything else to run. The flag is
 sticky and the engine does not resume on its own.

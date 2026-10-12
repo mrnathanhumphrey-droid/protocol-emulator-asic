@@ -129,7 +129,9 @@ TIMING_EXEMPT = {
             "(budget itself not broken: widest 4/7/10/8); M_RX_CAPGATE_LATE "
             "not applicable to this image (no push-pull capture lane; caught "
             "by EX1 on the d=4 SPI image); HOLD_PICK_LAG=1 caught by "
-            "model/gate_hold_offset.py."},
+            "model/gate_hold_offset.py. LEDGER NOTE (Wilson): the budget "
+            "itself is a WEAK TRIPWIRE on this image -- none of these "
+            "mutants breaks it; the named gates above are what catch them."},
     "corpus_spim_mode0": {"permits": {TIMING_OFF}, "of": "corpus_spim.hex",
         "why": "run_spifram's scratch variant: SCK parked low before CS "
                "(one extra OP_LEVEL per frame), d = 7 unchanged."},

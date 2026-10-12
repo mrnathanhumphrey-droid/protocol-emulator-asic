@@ -51,6 +51,7 @@ sys.path.insert(0, os.path.join(HERE, "a2"))
 import hold_bound                         # noqa: E402
 import count_ranges                       # noqa: E402  ruling SP2/P1
 import nonadmissible                      # noqa: E402  ruling SP2/P4
+import park_class                         # noqa: E402  ruling SP2/P3
 # ⭐ D2's per-program floor reuses ruling S's derivation and gate_um10204's
 # transcribed table: one model of r_i, one table of minima, no copies here.
 import gate_um10204 as um                 # noqa: E402
@@ -718,23 +719,27 @@ PARK_PIN = 1
 
 
 def active_pins(lanes, headers):
-    """{pin: (lane, mode, what)} for every REAL pin an active lane names: its
-    header data and clock pin, and every action's pin."""
+    """{pin: [(lane, mode, what), ...]} for every REAL pin an active lane
+    names: its header data and clock pin, and every action's pin. EVERY user,
+    not the first: the park rule needs the drive class of all of them."""
     out = {}
     for ln in sorted(headers):
         h = headers[ln]
         for what, p in (("data", h[0]), ("clock", h[1])):
             if int(p) < N_PINS:
-                out.setdefault(int(p), (ln, int(h[2]), what + " pin"))
+                out.setdefault(int(p), []).append(
+                    (ln, int(h[2]), what + " pin"))
         for (op, p, _l, _d, _q) in lanes.get(ln, ()):
             if int(p) < N_PINS and op not in (OP_REARM,):
-                out.setdefault(int(p), (ln, int(h[2]), "action pin"))
+                out.setdefault(int(p), []).append(
+                    (ln, int(h[2]), "action pin"))
     return out
 
 
-def check_park_overlap(lanes, headers, park_pins):
-    """SP2/P3, ACCEPTED WITH A REFUSAL (Wilson): a PARKED lane's header pin
-    must not be a pin an ACTIVE lane uses.
+def check_park_overlap(lanes, headers, park_pins, engine_text=None):
+    """SP2/P3, ONE RULE FOR EXPLICIT AND IMPLICIT PARKS (Wilson): a PARKED lane
+    may name a pin an ACTIVE lane uses iff it is RELEASE-ONLY there for the
+    whole program, proven from RTL anchors (`model/park_class.py`, K1..K5).
 
     ⛔⛔ WHY IT IS NOT COSMETIC. A parked lane's header is LOADED like any other
     (`pe_engine.v`, ruling 1.5 at header load): it writes `pin_pp[pin]` -- the
@@ -742,31 +747,40 @@ def check_park_overlap(lanes, headers, park_pins):
     order, so a parked lane after an active PUSH-PULL lane on the same pin
     turns that pin open-drain: the active lane's 1s stop being driven. Nothing
     flags it.
-    ⚠ SCOPE, AND ONE CARVE-OUT STATED RATHER THAN HIDDEN. `explicit` park pins
-    (the caller named them) are refused on ANY overlap -- the ruling as given.
-    The IMPLICIT default (`PARK_PIN` = 1) is refused only on a drive-class
-    CONFLICT (an active push-pull lane on that pin): the tracked `corpus_i2c`
-    parks every idle lane on pin 1, which is its own open-drain SCL -- same
-    class, so `pin_pp` is unchanged and the image runs as certified. Refusing
-    it would make a shipped, sigrok-verified image inexpressible; that call is
-    Wilson's, reported, not taken here.
+    ⭐ THE ANCHORS PROVE THAT IS ITS ONLY EFFECT: the class write (K1-K3), no
+    `pin_inv` write on a `uio` park pin (K4), and a park word that moves no
+    pin (K5). So the overlap is a no-op exactly when every active user of the
+    pin is open-drain -- `pin_pp[p]` is 0 whichever lane loads last.
+    ⇒ The earlier two rules (explicit refused on ANY overlap, implicit only on
+      a push-pull conflict) are gone. `corpus_i2c`'s implicit park on its own
+      open-drain SCL is accepted by THIS rule, as is an explicit park on an
+      open-drain lane's pin; a push-pull user is refused either way. A missing
+      anchor refuses every overlap (unproven is red).
     """
     act = active_pins(lanes, headers)
     for ln in range(N_LANES):
         if ln in headers:
             continue
-        explicit = ln in park_pins
         p = int(park_pins.get(ln, PARK_PIN))
         if p not in act:
             continue
-        aln, amode, what = act[p]
-        if explicit or amode != 0:
+        users = act[p]
+        try:
+            ok = park_class.release_only([m for _l, m, _w in users],
+                                         engine_text)
+        except park_class.ParkClassError as exc:
+            raise Reject("parked lane %d's header names pin %d, which active "
+                         "lane %d uses, and the overlap cannot be proven "
+                         "release-only: %s" % (ln, p, users[0][0], exc))
+        if not ok:
+            aln, _m, what = next(u for u in users if u[1] != 0)
             raise Reject(
                 "parked lane %d's header names pin %d, which active lane %d "
-                "uses as its %s. A parked header still LOADS (ruling 1.5): it "
-                "sets that pin's drive class to open-drain, so it can override "
-                "the active lane's (lanes load in order). Park the lane on a "
-                "pin no active lane uses." % (ln, p, aln, what))
+                "uses as its %s in PUSH-PULL mode. A parked header still LOADS "
+                "(ruling 1.5): it sets that pin's drive class to open-drain, "
+                "so it can turn the active lane's driven 1s into releases "
+                "(lanes load in order). Park the lane on a pin no push-pull "
+                "lane uses." % (ln, p, aln, what))
 
 
 def assemble(lanes, headers, park_pins=None, timing_checks=True,
@@ -1487,21 +1501,25 @@ def main() -> int:
         rc |= 0 if ok else 1
 
     # ---- MUST-FIRE: SP2/P3, a park pin on an active lane's pin -----------
-    # ⭐ BOTH SIDES: the same 1-Wire lane parked off its pins is accepted; a
-    # planted explicit park on its sense pin (an ACTION pin, not a header
-    # pin -- the case a header-only check would miss) and on its DQ pin are
-    # refused; and the implicit default overlapping a PUSH-PULL lane (the
-    # drive-class conflict) is refused.
+    # ⭐ ONE RULE, BOTH SIDES (Wilson): an overlap is accepted iff it is
+    # release-only, proven from the RTL anchors -- explicit or implicit alike.
+    # The 1-Wire lane is OPEN-DRAIN, so an explicit park on its DQ pin, or on
+    # its sense pin (an ACTION pin, the case a header-only check would miss),
+    # is release-only and ACCEPTED; a park, explicit or the implicit default,
+    # on a PUSH-PULL lane's pin is REFUSED; and with an anchor gone even the
+    # open-drain overlap is refused (unproven is red).
     print()
-    print("  --- must-fire: SP2/P3 -- a parked lane must not name an active pin ---")
+    print("  --- must-fire: SP2/P3 -- a park overlap must be release-only ---")
     pp_lane = {0: [(OP_SHIFT, 1, 1, 25, 0, 7), (OP_REARM, 0, 1, 25, 0, 8)]}
     for name, lanes_b, headers_b, park, want_reject in (
             ("parked off the 1-Wire pins (0/5/6/7)", {0: ow},
              {0: (2, 4, 0, 150, 255, 255)}, {1: 0, 2: 5, 3: 6, 4: 7}, False),
-            ("planted: lane 3 parked on the SENSE pin 3", {0: ow},
-             {0: (2, 4, 0, 150, 255, 255)}, {1: 0, 2: 5, 3: 3, 4: 7}, True),
-            ("planted: lane 1 parked on DQ pin 2", {0: ow},
-             {0: (2, 4, 0, 150, 255, 255)}, {1: 2}, True),
+            ("open-drain release: lane 3 on the SENSE pin 3", {0: ow},
+             {0: (2, 4, 0, 150, 255, 255)}, {1: 0, 2: 5, 3: 3, 4: 7}, False),
+            ("open-drain release: lane 1 on DQ pin 2", {0: ow},
+             {0: (2, 4, 0, 150, 255, 255)}, {1: 2}, False),
+            ("explicit park on a PUSH-PULL lane's uio 1", pp_lane,
+             {0: (1, 0, 1, 25, 50, 75)}, {1: 1, 2: 5, 3: 6, 4: 7}, True),
             ("default park pin 1 under a PUSH-PULL lane on uio 1", pp_lane,
              {0: (1, 0, 1, 25, 50, 75)}, None, True)):
         try:
@@ -1509,11 +1527,24 @@ def main() -> int:
             got, msg = False, ""
         except Reject as e:
             got, msg = True, str(e)
-        ok = got == want_reject and (not got or "parked lane" in msg)
+        ok = got == want_reject and (not got or "PUSH-PULL mode" in msg)
         print("    %-50s %s" % (name, ("REJECTED" if got else "accepted")
                                 if ok else "*** WRONG: %s" % (msg[:50] or
                                                              "accepted")))
         rc |= 0 if ok else 1
+    with open(park_class.ENGINE, encoding="utf-8") as fh:
+        no_k5 = fh.read().replace("OP_ARM, OP_REARM: ;", "OP_ARM: ;")
+    try:
+        check_park_overlap(split_counts({0: ow})[0],
+                           {0: (2, 4, 0, 150, 255, 255)}, {1: 2}, no_k5)
+        got, msg = False, ""
+    except Reject as e:
+        got, msg = True, str(e)
+    ok = got and "K5" in msg
+    print("    %-50s %s" % ("anchor K5 removed: the DQ-pin park",
+                            "REJECTED (unproven)" if ok
+                            else "*** WRONG: %s" % (msg[:50] or "accepted")))
+    rc |= 0 if ok else 1
 
     # ---- MUST-FIRE: SP2/P4, timing_checks=False only through the registry --
     print()

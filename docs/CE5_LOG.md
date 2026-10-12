@@ -224,6 +224,11 @@ Every timing-critical edge and sample is on-chip and exact.
     typical USB-UART latency (milliseconds; FTDI's default latency timer is
     16 ms). **It can underrun** unless the glue adds a TX FIFO (1 KiB =
     262 ms of slack) — and then the must-fire above is the detector.
+  * **⭐ RULED (Wilson): the PC feed, through a glue TX FIFO.** When the board
+    needs a 1-Wire feed, the glue in the FPGA wrapper gets a TX FIFO (test
+    infrastructure, not chip RTL) sized for several ms of USB latency at the
+    slot rate, and the chip's underrun sticky is reported to the host on
+    **every** run. Not built yet: the board has no 1-Wire peer today.
 
 ### OW7 — the poll's end is decided by the host
 
@@ -282,14 +287,19 @@ found four pe_asm gaps (fixed in pe_asm, references unchanged):
   every old image. In the **front-end** an SPI master lane must state its
   order: `pe_proto.SPI(..., order)` has no default and `pe_proto.image`
   refuses a 7-element SPI header (must-fire M3 in `gate_sp2_frontend`).
-* **P3 — accepted, with a refusal.** A parked header still loads and sets
-  its pin's drive class (ruling 1.5), so pe_asm refuses an explicit park pin
-  on any active lane's pin (header data/clock or any action pin — the 1-Wire
-  sense pin is an action pin). ⚠ The implicit default (pin 1) is refused only
-  on a drive-class conflict (an active push-pull lane there): the tracked
-  `corpus_i2c` parks on pin 1, its own open-drain SCL — same class, harmless
-  — and a blanket refusal would make that sigrok-verified image
-  inexpressible. **Open for Wilson.**
+* **P3 — one rule (Wilson's follow-up).** A parked header still loads and
+  sets its pin's drive class (ruling 1.5). An overlap with any active lane's
+  pin (header data/clock or any action pin — the 1-Wire sense pin is an
+  action pin) is allowed **iff it is release-only**, explicit or implicit
+  alike, proven from RTL anchors (`model/park_class.py`, K1–K5: the class
+  write takes the mode bit; no `pin_inv` write on a `uio` park pin; the park
+  word, `OP_REARM`, moves no pin). So it is allowed exactly when every active
+  user of the pin is open-drain; a push-pull user is refused. `corpus_i2c`'s
+  implicit park on its own open-drain SCL passes under this rule.
+  Must-fires (pe_asm): an explicit park on a push-pull pin and the implicit
+  default under a push-pull lane are refused; explicit parks on the
+  open-drain 1-Wire DQ and sense pins are accepted; with anchor K5 removed
+  even the open-drain overlap is refused (unproven is red).
 * **P4 — accepted only through a registry.** `model/nonadmissible.py` is the
   one file: N1's `NON_ADMISSIBLE` moved there (unchanged; `gate_admissible_
   images` reads it), plus `TIMING_EXEMPT`: `corpus_spim.hex` (and its three
@@ -306,6 +316,23 @@ found four pe_asm gaps (fixed in pe_asm, references unchanged):
 against "commonly published" nominals, not a datasheet. Against the
 manufacturer's numbers no admissible program meets the bit timing; the
 measurement and the reasoning follow. No gate claims WS2812 support.
+
+**A measured limit, recorded as a negative result (Wilson).** WS2812 is
+**not claimable on sub-v1**. T0H max is 380 ns; one action delay is at least
+D* = 20 cycles = 400 ns at 50 MHz. So the scheduler's own minimum delay rules
+it out, and no admissible tuning fixes it. This is the concrete motivation
+for the reach branch's per-lane serializers (a byte → 24 timed edges with no
+dispatch per edge).
+
+* **Why the earlier verdict said "feasible":** that measurement's loop ended
+  in a **delay-0 REARM**, which pe_asm's admissibility screen could not see
+  (`compute_j` and N1's `refill_dmin` took the minimum over positive delays
+  only). That is the delay-0 REARM finding below, ruled must-fix-before-lock.
+  A program written that way was outside the guarantee while being certified
+  inside it.
+* **When the NeoPixel Stick arrives,** identify the actual LED part on it
+  (WS2812B, SK6812, …) and record it here. Different parts have different T0H
+  windows; no claim is made from a different part's datasheet.
 
 ### The datasheet (fetched from the manufacturer, quoted; not vendored)
 

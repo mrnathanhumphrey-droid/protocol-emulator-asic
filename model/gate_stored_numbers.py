@@ -516,6 +516,10 @@ SPEC_SYMBOLS = {
     # "numbers" are widths and bit literals ({BPW-1}, 1'b1) -- identifiers of
     # RTL text, re-found in the RTL on every run by `count_ranges.anchors`.
     ("model/count_ranges.py", "ANCHORS"),
+    # ⭐ P3's TEXT ANCHORS (Wilson, the uniform park rule): the same kind --
+    # Verilog statements whose "numbers" are widths and literals (4'd8,
+    # HDR_BYTES*8-1), re-found in the RTL on every run by `park_class.anchors`.
+    ("model/park_class.py", "ANCHORS"),
     # ⭐ SP2/P1's RULED TABLE (Wilson): the count ranges as ruled, checked
     # EQUAL to the derivation from the RTL every run -- an input to compare,
     # never the source pe_asm reads.
