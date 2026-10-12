@@ -156,6 +156,10 @@ GATES=(
   # first run found the stress image `five_image` overloaded (U = 1.083) and
   # nine more below D* that nothing declared.
   model/gate_admissible_images.py
+  # ⭐ WF1 (Wilson, delay-0 REARM ruling step 4) -- every ACCEPTED bench image
+  # with a feed names its wire == feed witness (WITNESS / OWED / MECHANISM).
+  # Same image universe as N1; OWED must reach 0 at the sub-v1 SHA.
+  model/gate_wire_feed.py
   # ⛔⛔ E+ -- A SHELL EXIT CODE IS READ ONLY WHERE IT CAN BELONG. Four times in
   # one arc a checking loop printed an exit code belonging to something else
   # (`| tail`, `| head`, and `"$(basename $g)" "$?"` -- the substitution reset
@@ -195,8 +199,12 @@ GATES=(
   # ⭐⭐ UART -- the first program that RECEIVES a real UART stream (Wilson's
   # UART ruling): 8N1 vs a peer at -3..+3 % baud, back-to-back frames, bytes
   # vs what the PEER sent, count exact; framing reported; must-fires "edge"
-  # (sampled at the bit edge, red at +-2 %) and "nostop" (no framing check).
+  # (sampled at the bit edge, red at +2/+3 %) and "nostop" (no framing check);
+  # the nostop image is ALSO checked exactly for what it is (+PPF=1).
   test/run_uartrx.py
+  # ⭐ WF1 MECHANISM, CHECKED (Wilson): rxfast drops bytes by design, and the
+  # drop count must equal the link capacity's prediction exactly.
+  test/run_rxfast.py
   # ⭐⭐ SP2 -- the pe_asm protocol front-end (model/pe_proto.py): every
   # shipped FRAM program re-expressed as a TRANSACTION (START / rSTART / STOP
   # and CS framing generated from context), byte-identical to the verified

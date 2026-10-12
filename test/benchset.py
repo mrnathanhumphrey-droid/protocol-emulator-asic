@@ -442,7 +442,8 @@ CONFIG = {
     },
     "tb_rxbw": {
         "srcs": [],
-        "arms": [("default", ["+IMG=test/rxfast_image.hex", "+NCYC=200000"])],
+        "arms": [("default", ["+IMG=test/rxfast_image.hex", "+NCYC=200000",
+                              "+SATURATED=1"])],
     },
     # Wilson's UART ruling: the first program receiving a real UART stream,
     # against a baud-errored peer (2 % slow), bytes vs what the peer sent.
@@ -450,7 +451,7 @@ CONFIG = {
         "srcs": [],
         "arms": [("err+20", ["+IMG=test/uart_rx_image.hex", "+BITP=434",
                              "+ERR=20", "+NFR=40", "+SEED=1",
-                             "+BADSTOP=-1"])],
+                             "+BADSTOP=-1", "+PPF=2"])],
     },
     # ⭐⭐ THE PEER MODELS ARE COVERED HERE, AND THAT IS THE POINT WILSON MADE:
     # the I2C peer's address-match branch had never fired, and coverage would

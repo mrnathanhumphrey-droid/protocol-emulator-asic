@@ -96,6 +96,15 @@ Cycles at 50 MHz. `n`/`t` describe the bursty lanes: UART-rx is 10 bits of 414,
 SPI-target 16 bits of 25, so a periodic model with the outer period alone
 understates the burst.
 
+**UART receive speed.** `pe_asm` certifies the UART-rx program down to 232
+cycles per bit, which is up to about 215.5 kbaud at the 50 MHz design clock.
+The simulation bench verifies it at that limit across a ±3% baud-error sweep.
+The fastest standard rate inside the limit is 115,200 baud: 434 cycles per
+bit, with a 0.006% rate error. That rate is also verified on an Artix-7
+prototype of the unchanged RTL, against an independent USB-UART adapter at
+nominal and ±2.5% baud. 230,400 baud would need 217 cycles per bit, which is
+outside the certified range.
+
 **Non-preemptive EDF, with a deadline-limited interference bound.** The
 scheduling key `D_sched` is deliberately separate from the requirement `D_tol`.
 Release jitter `J` enters the interference term through inflated arrival counts

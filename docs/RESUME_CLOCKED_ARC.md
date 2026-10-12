@@ -165,6 +165,13 @@ timing claim.
 `gh workflow run test.yaml --ref <branch> -f ln1_rows=200000` — dispatched on
 the exact `sub-v1` SHA and green, not only the 20k push run.
 **Lock checklist, owed items:**
+- **Wire == feed (Wilson, delay-0 ruling step 4): `model/gate_wire_feed.py`
+  must report `OWED: 0` at the `sub-v1` SHA.** WF1 (the registry) landed with
+  13 OWED; WF2 (pin-level decoder: V2 extended to unclocked SHIFT and to the
+  bus per ownership window, count exact, underrun red unless the arm declares
+  it) and WF3 (each gap closed) remain. Any arm WF2 turns red is triaged as a
+  bench artefact or a chip defect and reported, never loosened. The must-fire
+  on the old assembler's WS2812 3-sub-bit image lands with WF2's decoder.
 - `test/tb_onewire.v` joins the coverage sweep (`test/benchset.py` excludes it
   by name today: it needs a generated feed file).
 - A pinned pyRTA clone in a STABLE location outside any scratch directory: the

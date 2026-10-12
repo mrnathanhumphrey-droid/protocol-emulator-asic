@@ -43,6 +43,10 @@ module tb_uartrx;
   integer    img_bytes, i, cyc, ncyc;
   reg [8*256-1:0] imgfile;
   integer    bitp, err, nfr, seed, badstop, f, b, gapc;
+  // ⭐ PUSHES PER FRAME (Wilson: a MECHANISM image is still checked exactly).
+  // 2 = the program (data + {stop, d7..d1}); 1 = the `nostop` image, whose
+  // ONE push per frame must equal the peer's byte, count exact.
+  integer    ppf;
   real       bt, tnext, tq;
   reg [31:0] rnd;
   reg  [7:0] sent [0:FMAX-1];
@@ -107,14 +111,14 @@ module tb_uartrx;
     if (dut.u_eng.rx_lane !== 0) begin
       n_bad = n_bad + 1;
       $display("*** FAIL uart_rx: a push from lane %0d (only lane 0 receives)", dut.u_eng.rx_lane);
-    end else if (n_push / 2 >= n_sent) begin
+    end else if (n_push / ppf >= n_sent) begin
       n_bad = n_bad + 1;
       $display("*** FAIL uart_rx: push %0d with only %0d frame(s) sent -- an extra byte", n_push, n_sent);
     end else begin
-      f = n_push / 2;
-      if (n_push % 2 == 0) want = sent[f];
+      f = n_push / ppf;
+      if (n_push % ppf == 0) want = sent[f];
       else want = {(f == badstop) ? 1'b0 : 1'b1, sent[f][7:1]};
-      if (n_push % 2 == 1 && dut.u_eng.rx_data[7] !== 1'b1) begin
+      if (n_push % ppf == 1 && dut.u_eng.rx_data[7] !== 1'b1) begin
         n_frame_err = n_frame_err + 1;
         $display("  uart_rx: FRAMING ERROR reported on frame %0d (stop sampled 0)", f);
       end
@@ -122,7 +126,7 @@ module tb_uartrx;
         n_bad = n_bad + 1;
         if (n_bad <= 6)
           $display("*** FAIL uart_rx: frame %0d %s byte: chip %02h, peer sent %02h",
-                   f, (n_push % 2) ? "stop" : "data", dut.u_eng.rx_data, want);
+                   f, (n_push % ppf) ? "stop" : "data", dut.u_eng.rx_data, want);
       end
     end
     n_push = n_push + 1;
@@ -140,6 +144,7 @@ module tb_uartrx;
     if (!$value$plusargs("NFR=%d", nfr)) nfr = 40;
     if (!$value$plusargs("SEED=%d", seed)) seed = 1;
     if (!$value$plusargs("BADSTOP=%d", badstop)) badstop = -1;
+    if (!$value$plusargs("PPF=%d", ppf)) ppf = 2;
     if (nfr > FMAX) nfr = FMAX;
     bt = 20.0 * bitp * (1000.0 + err) / 1000.0;
     rnd = seed;
@@ -178,10 +183,11 @@ module tb_uartrx;
       if (dut.rx_drop_sticky) drop_seen = 1'b1;
     end
 
-    if (n_push != 2 * n_sent) begin
+    if (n_push != ppf * n_sent) begin
       fails = fails + 1;
-      $display("*** FAIL uart_rx: %0d push(es) for %0d frame(s) -- expected EXACTLY %0d (data + stop per frame)",
-               n_push, n_sent, 2 * n_sent);
+      $display("*** FAIL uart_rx: %0d push(es) for %0d frame(s) -- expected EXACTLY %0d (%0s per frame)",
+               n_push, n_sent, ppf * n_sent,
+               (ppf == 2) ? "data + stop" : "data only");
     end
     if (n_bad != 0) begin
       fails = fails + 1;
@@ -197,8 +203,8 @@ module tb_uartrx;
                n_frame_err, (badstop >= 0 && badstop < n_sent) ? 1 : 0);
     end
     if (fails == 0)
-      $display("UART-RX: ok -- %0d frame(s) (%0d back-to-back) at %0d cycles/bit, baud error %0d/1000: %0d push(es) exact, every byte equals the peer's, framing errors %0d (expected %0d)",
-               n_sent, n_b2b, bitp, err, n_push, n_frame_err,
+      $display("UART-RX: ok -- %0d frame(s) (%0d back-to-back) at %0d cycles/bit, baud error %0d/1000: %0d push(es) exact (%0d per frame), every byte equals the peer's, framing errors %0d (expected %0d)",
+               n_sent, n_b2b, bitp, err, n_push, ppf, n_frame_err,
                (badstop >= 0 && badstop < n_sent) ? 1 : 0);
     $finish;
   end

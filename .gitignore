@@ -107,5 +107,6 @@ vivado*.log
 # the UART-rx and hold-offset gates' simulation build directories
 test/sim_build_uartrx/
 test/sim_build_hold/
+test/sim_build_rxfast/
 # agent worktrees (Claude Code) -- never part of the tree
 .claude/

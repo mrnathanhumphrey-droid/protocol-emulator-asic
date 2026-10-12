@@ -67,6 +67,18 @@ module tb_rxbw;
   integer    fr_cnt, n_frame, n_status, n_payload, n_rb;
   reg        prev_v;
   integer    last_pay, min_gap, n_compl, inflight, n_lost;
+  // ⭐⭐ +SATURATED=1 -- THE EXACT PREDICTION (Wilson: a MECHANISM image is
+  // still checked exactly; "some bytes dropped" is not a result). When
+  // completions outrun the link, every payload slot after the first carries a
+  // byte, so the link's capacity over the window IS
+  //     capacity = (last_pay - first_pay) / SLOT + 1,   every gap == SLOT
+  // and every completion is delivered, dropped or in flight, with in-flight
+  // read EXACTLY from the RTL: the window ends mid-frame (`ser_cnt` = 6), where
+  // a payload frame is shifting iff `status_turn` is set (it is set when a
+  // payload loads and cleared when its status frame loads), plus `rx_pend`.
+  //     predicted drops = completions - capacity - (rx_pend + status_turn)
+  // must equal the drops counted at the RTL's own condition, exactly.
+  integer    max_gap, first_pay, sat, end_pend, end_st;
   // THE DROP COUNTED AT THE DESIGN'S OWN CONDITION. `project.v` does
   //     if (e_rx_push) begin if (rx_pend) rx_drop_sticky <= 1; else ... end
   // so a drop IS `rx_push && rx_pend`, and counting it there is exact.
@@ -129,6 +141,8 @@ module tb_rxbw;
     fr_sh = 0; fr_cnt = 0; prev_v = 1'b0;
     n_frame = 0; n_status = 0; n_payload = 0; n_rb = 0; n_compl = 0;
     last_pay = -1; min_gap = 1000000; drop_seen = 1'b0;
+    max_gap = 0; first_pay = -1; end_pend = 0; end_st = 0;
+    if (!$value$plusargs("SATURATED=%d", sat)) sat = 0;
     cn = 0; cscan = 0; n_matched = 0; n_unmatched = 0;
     inflight = 0; n_lost = 0; n_drop = 0;
     cyc = 0; fails = 0; primed_seen = 1'b0; cfgerr_seen = 1'b0;
@@ -156,7 +170,7 @@ module tb_rxbw;
     peer  = 8'hFF;
     hf_en = 1'b1;
 
-    for (i = 0; i < ncyc; i = i + 1) begin
+    for (i = 0; i < ncyc || (sat != 0 && dut.ser_cnt != 4'd6); i = i + 1) begin
       @(posedge clk);
       cyc = cyc + 1;
       if (dut.u_eng.primed)     primed_seen = 1'b1;
@@ -198,6 +212,9 @@ module tb_rxbw;
             // the gap is slot-to-slot and not end-to-start of different pairs.
             if (last_pay >= 0 && (cyc - last_pay) < min_gap)
               min_gap = cyc - last_pay;
+            if (last_pay >= 0 && (cyc - last_pay) > max_gap)
+              max_gap = cyc - last_pay;
+            if (first_pay < 0) first_pay = cyc;
             last_pay = cyc;
             // ⭐ SCAN FORWARD ONLY, never from the start: matching anywhere
             // would accept a reordered stream, which is the thing being
@@ -221,6 +238,8 @@ module tb_rxbw;
       prev_v = uo_out[SER_VLD];
     end
 
+    end_pend = dut.rx_pend;
+    end_st   = dut.status_turn;
     $display();
     $display("========== tb_rxbw: the serial link's real capacity ==========");
     $display("  PRECONDITIONS");
@@ -314,6 +333,32 @@ module tb_rxbw;
       if (min_gap < SLOT_DERIVED) fails = fails + 1;
     end else begin
       $display("    closest two payload frames: n/a (fewer than two)");
+    end
+    if (sat != 0) begin : saturated
+      integer cap, pred;
+      cap  = (last_pay - first_pay) / SLOT_DERIVED + 1;
+      pred = n_compl - cap - (end_pend + end_st);
+      $display("  SATURATED (exact prediction from the link capacity)");
+      $display("    payload gaps min/max     : %0d / %0d (slot %0d) %0s",
+               min_gap, max_gap, SLOT_DERIVED,
+               (min_gap == SLOT_DERIVED && max_gap == SLOT_DERIVED)
+               ? "ok -- every slot carried a byte" : "*** NOT SATURATED");
+      $display("    capacity over the window : %0d = (%0d - %0d)/%0d + 1; payload %0d %0s",
+               cap, last_pay, first_pay, SLOT_DERIVED, n_payload,
+               (cap == n_payload && (last_pay - first_pay) % SLOT_DERIVED == 0)
+               ? "ok" : "*** payload != capacity");
+      $display("    in flight at the end     : rx_pend %0d + payload frame shifting %0d",
+               end_pend, end_st);
+      $display("    drops predicted / counted: %0d / %0d %0s", pred, n_drop,
+               (pred == n_drop) ? "ok" : "*** MISMATCH");
+      if (min_gap != SLOT_DERIVED || max_gap != SLOT_DERIVED
+          || cap != n_payload || (last_pay - first_pay) % SLOT_DERIVED != 0
+          || pred != n_drop || n_drop == 0) begin
+        $display("  *** FAIL: the saturated link's drop count is not the one its capacity predicts");
+        fails = fails + 1;
+      end else if (fails == 0)
+        $display("  RXBW-SAT: ok -- %0d completions, capacity %0d (every %0d-cycle slot used), %0d in flight: %0d drops predicted = %0d counted, every one flagged",
+                 n_compl, cap, SLOT_DERIVED, end_pend + end_st, pred, n_drop);
     end
     $display();
     $display("================ VERDICT ================");

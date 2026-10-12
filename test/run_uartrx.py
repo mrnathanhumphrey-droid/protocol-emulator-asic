@@ -62,6 +62,21 @@ def main():
              "test/uart_rx_image.hex"))
     if not same:
         return 1
+    # ⭐ THE BOARD'S NOSTOP IMAGE (the PC loader's demonstrator) is a
+    # MECHANISM image in gate_wire_feed, and Wilson: MECHANISM is not
+    # "unchecked". It is pe_asm's nostop build at T = 434, byte for byte, and
+    # its behaviour -- ONE push per frame, each the peer's byte, count exact --
+    # is checked below (`+PPF=1`), not only its must-fire red.
+    ns_tracked = os.path.join(ROOT, "fpga", "images", "uart_rx_434_nostop.hex")
+    ns_want = "\n".join("%02x" % b for b in uart_rx.build(434, None, "nostop")) + "\n"
+    with open(ns_tracked, encoding="ascii") as fh:
+        ns_same = fh.read().replace("\r\n", "\n") == ns_want
+    print("  tracked fpga/images/uart_rx_434_nostop.hex == pe_asm nostop "
+          "build: %s" % ("yes" if ns_same else "*** NO -- regenerate: python "
+                         "test/uart_rx.py fpga/images/uart_rx_434_nostop.hex "
+                         "434 - nostop"))
+    if not ns_same:
+        return 1
     TM = uart_rx.T_MIN
     for var, t in (("ok", T), ("edge", T), ("nostop", T), ("ok", TM)):
         p = os.path.join(TMP, "uart_%s_%d.hex" % (var, t))
@@ -102,6 +117,23 @@ def main():
         ok = ok and good
         line = next((l for l in o.splitlines() if "UART-RX" in l or "*** FAIL" in l), "?")
         print("  pass  T %3d err %+3d/1000 seed %d  %s"
+              % (t, e, s, line.strip()[:100] if good
+                 else "*** " + line.strip()[:100]))
+
+    # ⭐ THE NOSTOP IMAGE, CHECKED EXACTLY FOR WHAT IT IS: one push per frame
+    # (+PPF=1), every push the peer's data byte, count exact, across the same
+    # +-3 % sweep and back-to-back frames.
+    jobs = [("nostop", e, s, ["+PPF=1"], T) for e in ERRS for s in SEEDS]
+    with ThreadPoolExecutor(3) as ex:
+        outs = list(ex.map(lambda j: (j, sim(*j)), jobs))
+    for (var, e, s, _x, t), o in outs:
+        m = re.search(r"\((\d+) back-to-back\)", o)
+        good = ("UART-RX: ok" in o and "(1 per frame)" in o
+                and "*** FAIL" not in o and m is not None
+                and int(m.group(1)) > 0)
+        ok = ok and good
+        line = next((l for l in o.splitlines() if "UART-RX" in l or "*** FAIL" in l), "?")
+        print("  nostop T %3d err %+3d/1000 seed %d  %s"
               % (t, e, s, line.strip()[:100] if good
                  else "*** " + line.strip()[:100]))
 

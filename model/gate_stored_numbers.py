@@ -512,6 +512,12 @@ SPEC_SYMBOLS = {
     # N1's audit reds a QUEUE that no longer holds, and `no_rta_problems` reds
     # a NO_RTA_BUDGET membership that differs.
     ("model/nonadmissible.py", "TIMING_EXEMPT"),
+    # ⭐ WF1's wire-feed REGISTRY: the same kind -- per-image reasons whose
+    # numbers (T = 434, a 50-cycle slot, "4 bytes") are quoted in prose.
+    # Staleness is caught where it means something: `gate_wire_feed.audit`
+    # reds an entry on an exempt, absent or no-feed image, derived from the
+    # image itself.
+    ("model/gate_wire_feed.py", "REGISTRY"),
     # ⭐ SP2/P1's TEXT ANCHORS into src/pe_engine.v: Verilog substrings whose
     # "numbers" are widths and bit literals ({BPW-1}, 1'b1) -- identifiers of
     # RTL text, re-found in the RTL on every run by `count_ranges.anchors`.
@@ -811,6 +817,15 @@ _LANE_ROW = re.compile(
 _R_ROW = re.compile(r"r = \{([\d, ]+)\}\s+min margin (\d+)\s+bar ≥ (\d+)")
 _J1_ROW = re.compile(r"^\| shipped `J = 1` \| (\d+) \| \*\*(\d+)\*\*", re.M)
 _SCOPED = re.compile(r"d_min ≥ D\* = (\d+) → J = 1")
+# ⭐ THE UART-rx SPEED LIMIT (Wilson, delay-0 ruling condition 2): every number
+# in the paragraph is recomputed from `test/uart_rx.py` (T_MIN, T_NOMINAL) and
+# the design clock, never stored here.
+_UART_PARA = re.compile(
+    r"down to (?P<tmin>\d+)\s+cycles per bit, which is up to about\s+"
+    r"(?P<kbaud>[\d.]+) kbaud at the (?P<mhz>\d+) MHz design clock\..*?"
+    r"115,200 baud: (?P<tnom>\d+) cycles per\s+bit, with a (?P<err>[\d.]+)% "
+    r"rate error\..*?230,400 baud would need (?P<t230>\d+) cycles per bit",
+    re.S)
 
 
 def _a2_imports():
@@ -841,7 +856,12 @@ def readme_sources():
     # recurrence after ruling Z), the published column the digest ledger
     # (pyRTA). `lane_digest.selftest` checks the analysis entry is live.
     an = ld.ANALYSIS_LEDGER[-1]
-    return {"r": r, "margin": int(m.group(2)), "bar": int(bar.group(1)),
+    tp = os.path.join(ROOT, "test")
+    if tp not in sys.path:
+        sys.path.insert(0, tp)
+    import uart_rx
+    return {"uart": {"tmin": uart_rx.T_MIN, "tnom": uart_rx.T_NOMINAL},
+            "r": r, "margin": int(m.group(2)), "bar": int(bar.group(1)),
             "witness": witness, "lanes": lanes, "dstar": jp.D_STAR,
             "entry": ld.DIGEST_LEDGER[-1][0],
             "ours_margin": int(an[3]["ours_margin"]), "analysis": an[1]}
@@ -890,6 +910,27 @@ def readme_audit(text, src):
     elif any(int(x) != src["dstar"] for x in sc):
         probs.append("the scoped claim names D* = %s; computed D* = %d"
                      % (sc, src["dstar"]))
+    if "uart" in src:
+        u = _UART_PARA.search(text)
+        if u is None:
+            probs.append("the UART-rx speed-limit paragraph is absent or no "
+                         "longer parses")
+        else:
+            f = int(u.group("mhz")) * 1e6
+            tmin, tnom = src["uart"]["tmin"], src["uart"]["tnom"]
+            want = {"tmin": str(tmin), "tnom": str(tnom),
+                    "kbaud": "%.1f" % (f / tmin / 1000.0),
+                    "err": "%.3f" % abs((f / tnom / 115200.0 - 1) * 100),
+                    "t230": "%d" % round(f / 230400.0)}
+            for k, v in sorted(want.items()):
+                if u.group(k) != v:
+                    probs.append("UART-rx speed paragraph: %s = %s, computed "
+                                 "%s (test/uart_rx.py T_MIN %d, T_NOMINAL %d)"
+                                 % (k, u.group(k), v, tmin, tnom))
+            if round(f / 230400.0) >= tmin:
+                probs.append("UART-rx speed paragraph calls 230,400 baud "
+                             "outside the certified range, but %d >= T_MIN %d"
+                             % (round(f / 230400.0), tmin))
     for pat, entry, what in WITHDRAWN:
         for m in re.finditer(pat, text):
             line = text.count("\n", 0, m.start()) + 1
@@ -929,6 +970,9 @@ def readme_check():
         ("a lane-table C reverted to 2",
          _LANE_ROW.sub(lambda m: m.group(0).replace(
              "| %s |" % m.group("C"), "| 2 |", 1), text, 1), "C = 2"),
+        ("a stale UART-rx T_MIN (224) in the prose",
+         text.replace("down to %d" % src["uart"]["tmin"], "down to 224", 1),
+         "UART-rx speed paragraph: tmin"),
     )
     for label, mutated, needle in cases:
         hit = any(needle in p for p in readme_audit(mutated, src))

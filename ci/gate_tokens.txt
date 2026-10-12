@@ -27,6 +27,7 @@ model/a2/gate_a2_program.py         ^\s*GATE a2-program: PASSED\s*$
 test/gate_corpus_trace.py           ^\s*GATE corpus-trace: PASSED\s*$
 model/gate_gates_complete.py        ^\s*GATE gates-complete: PASSED\s*$
 model/gate_admissible_images.py     ^\s*GATE admissible-images: PASSED\s*$
+model/gate_wire_feed.py             ^\s*GATE wire-feed: PASSED\s*$
 model/gate_shell_rc.py              ^\s*GATE shell-rc: PASSED\s*$
 model/gate_except.py                ^\s*GATE except: PASSED\s*$
 model/gate_tool_pinning.py          ^\s*GATE tool-pinning: PASSED\s*$
@@ -39,6 +40,7 @@ model/gate_count_ranges.py          ^\s*GATE count-ranges: PASSED\s*$
 model/gate_ce5_freeze.py            ^\s*CE5-FREEZE: PASSED\s*$
 test/run_onewire.py                 ^\s*CE5-ONEWIRE: PASSED\s*$
 test/run_uartrx.py                  ^\s*UART-RX GATE: PASSED\s*$
+test/run_rxfast.py                  ^\s*GATE rxfast: PASSED\s*$
 test/run_mutants.py                 ^\s*GATE mutants: PASSED\s*$
 model/gate_mutant_kills.py          ^\s*GATE mutant-kills: PASSED\s*$
 model/gate_bench_races.py           ^\s*GATE bench-races: PASSED\s*$
