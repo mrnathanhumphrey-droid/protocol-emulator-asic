@@ -205,6 +205,11 @@ GATES=(
   # ⭐ WF1 MECHANISM, CHECKED (Wilson): rxfast drops bytes by design, and the
   # drop count must equal the link capacity's prediction exactly.
   test/run_rxfast.py
+  # ⭐⭐ WF2 (Wilson) -- the image that started the delay-0 ruling, judged on
+  # the WIRE: the old WS2812 3-sub-bit build's content is exact but V3-T is
+  # RED (28,000+ cycles late vs its bound); the control is green; the control
+  # at bound = measured - 1 is red (the comparison is live).
+  test/run_wirefeed_mf.py
   # ⭐⭐ SP2 -- the pe_asm protocol front-end (model/pe_proto.py): every
   # shipped FRAM program re-expressed as a TRANSACTION (START / rSTART / STOP
   # and CS framing generated from context), byte-identical to the verified

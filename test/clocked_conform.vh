@@ -29,6 +29,7 @@
  * USAGE:  `include "test/clocked_conform.vh"   // after `include progress.vh
  */
 `include "test/clocked_bounds.vh"
+`include "test/v3_table.vh"
 
 /* ⛔⛔⛔ THE PORT-DEMAND BOUND (ruling R): **ONE REFILL PER SLOT** per retired
  * clocked action, which is `SPL`. Amendment A1 says a HELD clocked dispatch
@@ -1179,6 +1180,311 @@ always @(posedge dut.clk) begin
 end
 
 // =======================================================================
+// LAYER V3 -- UNCLOCKED TRANSMIT BITS ON THE BUS == THE HOST FEED (WF2)
+// =======================================================================
+// ⛔⛔ WHY (Wilson, delay-0 REARM ruling step 4, WF2). V2 checks CLOCKED
+// SHIFT bits only, so every UNCLOCKED transmitter -- bit-banged I2C, the
+// half-duplex lane, pindiv's unclocked SHIFTs, and the WS2812 3-sub-bit lane
+// pe_asm once accepted with "J 1" -- had no check that what reached the wire
+// was what the host fed. This layer is that check.
+//   PUSHES are decoded off `ui_in` (its own decoder, ruling RA3: no reads of
+//   another layer's state). A LANE'S REGISTER is mirrored from the RTL's
+//   rule, never read: every SHIFT dispatch that shifts (unclocked, or a
+//   clocked LOW) sends bit 0 and shifts right; at the shift whose OLD bit
+//   count equals `a_cnt` the next byte loads from the action's queue
+//   (bit-reversed on an MSB-first lane) -- or, if that queue is empty, the
+//   register keeps shifting zeros (an UNDERRUN, counted).
+//   EACH UNCLOCKED BIT is checked on the BUS (chip level wired-AND with the
+//   pad the bench drives, so a peer holding the line low is seen) at the
+//   MIDDLE of its LANDED window (its land to the land of the lane's next
+//   dispatch; see the dispatch arm below), so CONTENT is judged on what the
+//   chip put on the bus, in order. TIMING (lateness against release) is
+//   measured per lane and reported as V3-T, not yet judged -- the bound is
+//   Wilson's call. ⛔ NOT AT THE WINDOW'S END: measured on tb_half, a clockless lane
+//   hands the line to the peer for its ACK right where the 8th bit's window
+//   ends, so an end-of-window sample reads the peer, not the chip.
+// ⚠ Exact count: at the end, every byte pushed to a queue is either popped or
+//   still queued in the chip (`tx_cnt`), and no decoded pop found its queue
+//   empty while the chip's said full.
+integer   v3_k, v3_q, v3_half, v3_pst, v3_pcur, v3_chk, v3_bad, v3_under,
+          v3_lost, v3_mis;
+reg [3:0] v3_hi;
+reg [1:0] v3_tag;
+reg       v3_wrp;
+reg [7:0] v3_qb  [0:1023];
+integer   v3_qw  [0:3], v3_qr [0:3];
+reg [7:0] v3_lt  [0:7];             // the lane's transmit register (RTL order)
+integer   v3_nb  [0:7];             // bits shifted since the last load
+integer   v3_nun [0:7];             // per-lane underruns
+integer   v3_qi, v3_held, v3_extra; // the report's working variables
+integer   v3_cyc, v3_j;
+reg [11:0] v3_hb [0:4095];          // the bus, every pin, every cycle (a ring)
+integer   v3_tgt [0:7], v3_tx [0:7], v3_tp [0:7]; // a scheduled mid-window check
+integer   v3_dl;                    // release timestamp - now, signed
+integer   v3_late [0:7];            // how late the bit's dispatch was
+integer   v3_mlate [0:7];           // the lane's worst dispatch lateness
+integer   v3_land [0:7], v3_pend [0:7]; // the open bit's land, and whether one is open
+integer   v3_Lnow;
+integer   v3_ptx [0:7], v3_ptp [0:7], v3_plate [0:7]; // the OPEN bit's values
+// ⭐⭐ V3-T, SCHEDULER CONFORMANCE (Wilson, WF2 ruling 1). THE SAME QUANTITY
+// ON BOTH SIDES: the bound r_i (`program_a2.queue_slot`, pyRTA primary) is the
+// worst-case RESPONSE from the NOMINAL release to COMPLETION of the job, and a
+// job is C = 3 cycles (pick, DRIVE, WB). The release is the lane's
+// `l_timestamp` at the job's DRIVE; an on-time job DRIVEs 1 cycle after it and
+// completes 2 later. So the measured response is
+//     r_meas = (DRIVE cycle - release) + 2        (on time: r_meas = 3 = C)
+// and V3-T requires, per unclocked transmitting lane, worst r_meas <= r_i
+// (`+V3RBOUND`), and -- the looser second line -- <= the header's D_tol
+// (`+V3DTOL`): passing r_i but failing D_tol means pe_asm admitted a program
+// whose bound exceeds its own tolerance, a finding about pe_asm. A lane that
+// transmitted with NO bound is RED (a missing result is red), unless the
+// arm is exempt by the registry (`+V3_EXEMPT=1`).
+// ⚠ SCOPE: this is the SCHEDULER's conformance to its own analysis, a standing
+// empirical check of the RTA on every image and run. PROTOCOL timing (UART
+// bit centres, 1-Wire slots, I2C setup/hold) is the peer models' question.
+integer   v3_nd  [0:7];             // unclocked SHIFT dispatches per lane
+// ⛔⛔ UNDERRUNS (Wilson, WF2 ruling 3): on a correctly fed ACCEPTED image an
+// underrun is a host-contract violation, so it FAILS -- unless the arm
+// declares it with `+V3_UNDERRUN`: 1 = UNFED (a bench that measures
+// something else and pushes nothing, e.g. tb_csat; held to "no push, and
+// EVERY load underran"), 2 = a STARVE window on purpose (run_cktx's starve
+// arm, the OW6-style arms; held to "at least one underrun", count reported).
+integer   v3_unfed, v3_lok;         // the declaration; loads that found a byte
+// ⭐⭐ THE IMAGE IDENTIFIES ITSELF (model/v3_table.py, which says why): the
+// store's write port is snooped during load and the 256 positions hashed
+// (FNV-1a; never written = 256) when the engine primes; `test/v3_table.vh`
+// maps the hash to exempt / r_i / D_tol. A `+V3...` plusarg OVERRIDES the
+// table (the must-fire prices the comparison with one); none is needed.
+integer   v3_wimg [0:255];
+integer   v3_exg, v3_hashed, v3_a, v3_f, v3_ovl;
+reg [31:0] v3_h;
+reg       v3_prim_q;
+integer   v3_rb  [0:7], v3_dt [0:7];
+integer   v3_nrb, v3_ndt, v3_ex, v3_tfail, v3_rm;
+reg [8*96-1:0] v3_sstr;
+integer   v3_void = 0;              // bits voided by a CONFIG_ERR halt
+
+initial begin
+  v3_half = 0; v3_wrp = 1'b0; v3_pst = 0; v3_pcur = 0;
+  v3_chk = 0; v3_bad = 0; v3_under = 0; v3_lost = 0; v3_mis = 0;
+  for (v3_k = 0; v3_k < 4; v3_k = v3_k + 1) begin
+    v3_qw[v3_k] = 0; v3_qr[v3_k] = 0;
+  end
+  for (v3_k = 0; v3_k < 8; v3_k = v3_k + 1) begin
+    v3_lt[v3_k] = 8'h00; v3_nb[v3_k] = 0; v3_nun[v3_k] = 0;
+    v3_tgt[v3_k] = -1; v3_mlate[v3_k] = 0; v3_pend[v3_k] = 0;
+    v3_land[v3_k] = 0; v3_nd[v3_k] = 0; v3_rb[v3_k] = -1; v3_dt[v3_k] = -1;
+  end
+  v3_cyc = 0; v3_nrb = 0; v3_ndt = 0; v3_tfail = 0;
+  v3_exg = $value$plusargs("V3_EXEMPT=%d", v3_ex);
+  if (!v3_exg) v3_ex = 0;
+  v3_hashed = 0; v3_prim_q = 1'b0;
+  for (v3_a = 0; v3_a < 256; v3_a = v3_a + 1) v3_wimg[v3_a] = 256;
+  if (!$value$plusargs("V3_UNDERRUN=%d", v3_unfed)) v3_unfed = 0;
+  v3_lok = 0;
+  // ⛔ a malformed vector is a FAIL, never a silent "unbounded" (as A2SLACK)
+  if ($value$plusargs("V3RBOUND=%s", v3_sstr)) begin
+    v3_nrb = $sscanf(v3_sstr, "%d,%d,%d,%d,%d", v3_rb[0], v3_rb[1], v3_rb[2],
+                     v3_rb[3], v3_rb[4]);
+    if (v3_nrb != 5)
+      $display("*** FAIL clocked_conform[V3-T]: +V3RBOUND carried %0d field(s), not 5", v3_nrb);
+  end
+  if ($value$plusargs("V3DTOL=%s", v3_sstr)) begin
+    v3_ndt = $sscanf(v3_sstr, "%d,%d,%d,%d,%d", v3_dt[0], v3_dt[1], v3_dt[2],
+                     v3_dt[3], v3_dt[4]);
+    if (v3_ndt != 5)
+      $display("*** FAIL clocked_conform[V3-T]: +V3DTOL carried %0d field(s), not 5", v3_ndt);
+  end
+end
+
+// check one scheduled mid-window sample against the bus history
+task v3_judge;
+  input integer k;
+  integer lvl;
+  begin
+    lvl = v3_hb[v3_tgt[k] % 4096][v3_tp[k]];
+    // ⛔ A REFUSED DISPATCH TRANSMITS NOTHING: the chip's CONFIG_ERR halts the
+    // engine and gates the drive arms (no pin edges), so a bit scheduled for
+    // it is VOIDED, counted and reported -- never judged and never passed.
+    if (dut.u_eng.config_err === 1'b1) begin
+      v3_void = v3_void + 1;
+      v3_tgt[k] = -1;
+    end else begin
+    v3_chk = v3_chk + 1;
+    if (lvl != v3_tx[k]) begin
+      v3_bad = v3_bad + 1;
+      if (v3_bad <= 4)
+        $display("%0s clocked_conform[V3]: lane %0d unclocked bit on pin %0d was %0d on the bus at mid-window (cycle %0d); the host feed puts %0d there (its dispatch was %0d cycle(s) after its release)", (v3_ex != 0) ? "  EXEMPT (declared):" : "*** FAIL", k, v3_tp[k], lvl, v3_tgt[k], v3_tx[k], v3_late[k]);
+    end
+    v3_tgt[k] = -1;
+    end
+  end
+endtask
+
+// the BUS on pin `p`: the chip's level, wired-AND with the bench's pad, so a
+// peer pulling the line low is seen even where the chip drives or releases
+function integer v3_bus;
+  input integer p;
+  integer c;
+  begin
+    if (p < 8) begin
+      c = (dut.uio_oe[p] === 1'b1) ? dut.uio_out[p] : 1;
+      v3_bus = (dut.uio_in[p] === 1'b0) ? 0 : c;
+    end else if (p < 12) v3_bus = dut.uo_out[p - 8];
+    else v3_bus = -1;
+  end
+endfunction
+
+always @(posedge dut.clk) begin
+  if (dut.rst_n !== 1'b1) begin
+    v3_half = 0;
+  end else begin
+    // ---- a host PUSH, decoded off the pins ------------------------------
+    if (dut.ui_in[7] === 1'b0 && dut.ui_in[6] === 1'b1 && !v3_wrp) begin
+      if (v3_half == 0) begin
+        v3_hi = dut.ui_in[4:1]; v3_tag = {dut.ui_in[5], dut.ui_in[0]};
+        v3_half = 1;
+      end else begin
+        v3_qb[v3_tag * 256 + (v3_qw[v3_tag] % 256)] = {v3_hi, dut.ui_in[4:1]};
+        v3_qw[v3_tag] = v3_qw[v3_tag] + 1;
+        v3_half = 0;
+      end
+    end
+    v3_wrp = (dut.ui_in[6] === 1'b1);
+    // ---- the image, snooped off the store's write port during load ------
+    if (dut.u_store.we === 1'b1)
+      v3_wimg[dut.u_store.waddr] = ((^dut.u_store.wdata) === 1'bx) ? 256
+                                   : dut.u_store.wdata;
+    // ... and identified once, when the engine primes on it
+    if (dut.u_eng.primed === 1'b1 && !v3_prim_q && v3_hashed == 0) begin
+      v3_h = 32'h811C9DC5;
+      for (v3_a = 0; v3_a < 256; v3_a = v3_a + 1)
+        v3_h = (v3_h ^ v3_wimg[v3_a]) * 32'h01000193;
+      v3_hashed = 1;
+      v3_tab_name(v3_h);
+      // ⛔⛔ AN UNKNOWN PROGRAM IS RED (Wilson, WF2 round 2): a program the
+      // table does not know has no exemption, no bound and no D_tol, and
+      // "not judged" would be a fourth way for an absent result to pass. A
+      // generated image is registered through its GENERATOR
+      // (model/v3_table.py GENERATED), never waved through.
+      if (v3_tab(v3_h, 0) == -2)
+        $display("*** FAIL clocked_conform[V3-ID]: the loaded image (hash %h) is not in test/v3_table.vh -- register it, or its generator, in model/v3_table.py", v3_h);
+      if (v3_tab(v3_h, 0) != -2) begin
+        if (!v3_exg) v3_ex = v3_tab(v3_h, 0);
+        for (v3_f = 0; v3_f < 5; v3_f = v3_f + 1) begin
+          if (v3_nrb == 0) v3_rb[v3_f] = v3_tab(v3_h, 1 + v3_f);
+          if (v3_ndt == 0) v3_dt[v3_f] = v3_tab(v3_h, 6 + v3_f);
+        end
+        // ⛔⛔ OVERRIDES MAY ONLY TIGHTEN (Wilson, WF2 round 2): any loosening
+        // of the table -- a wider bound, a bound where it has none, a higher
+        // D_tol, EXEMPT where it judges, an underrun mode other than fed --
+        // is RED unless model/v3_table.py ALLOW lists it with a reason.
+        v3_ovl = 0;
+        for (v3_f = 0; v3_f < 5; v3_f = v3_f + 1) begin
+          if (v3_nrb == 5 && ((v3_tab(v3_h, 1 + v3_f) >= 0
+                               && (v3_rb[v3_f] < 0
+                                   || v3_rb[v3_f] > v3_tab(v3_h, 1 + v3_f)))
+                              || (v3_tab(v3_h, 1 + v3_f) < 0 && v3_rb[v3_f] >= 0))
+              && v3_allow(v3_h, 1, v3_rb[v3_f]) == 0) begin
+            v3_ovl = v3_ovl + 1;
+            $display("*** FAIL clocked_conform[V3-OV]: +V3RBOUND loosens lane %0d's bound (table %0d, override %0d) and is not allowlisted in model/v3_table.py", v3_f, v3_tab(v3_h, 1 + v3_f), v3_rb[v3_f]);
+          end
+          if (v3_ndt == 5 && v3_tab(v3_h, 6 + v3_f) >= 0
+              && (v3_dt[v3_f] < 0 || v3_dt[v3_f] > v3_tab(v3_h, 6 + v3_f))
+              && v3_allow(v3_h, 2, v3_dt[v3_f]) == 0) begin
+            v3_ovl = v3_ovl + 1;
+            $display("*** FAIL clocked_conform[V3-OV]: +V3DTOL raises lane %0d's D_tol (table %0d, override %0d) and is not allowlisted", v3_f, v3_tab(v3_h, 6 + v3_f), v3_dt[v3_f]);
+          end
+        end
+        if (v3_exg && v3_ex != 0 && v3_tab(v3_h, 0) == 0
+            && v3_allow(v3_h, 3, v3_ex) == 0)
+          $display("*** FAIL clocked_conform[V3-OV]: +V3_EXEMPT=1 exempts an image the table JUDGES, and is not allowlisted");
+        if (v3_unfed != 0 && v3_allow(v3_h, 4, v3_unfed) == 0)
+          $display("*** FAIL clocked_conform[V3-OV]: +V3_UNDERRUN=%0d declares underruns on this image and is not allowlisted in model/v3_table.py", v3_unfed);
+      end
+    end
+    v3_prim_q = (dut.u_eng.primed === 1'b1);
+    // ---- the bus history, then any mid-window check now due -------------
+    v3_cyc = v3_cyc + 1;
+    for (v3_j = 0; v3_j < 12; v3_j = v3_j + 1)
+      v3_hb[v3_cyc % 4096][v3_j] = (v3_bus(v3_j) == 1);
+    for (v3_j = 0; v3_j < 8; v3_j = v3_j + 1)
+      if (v3_tgt[v3_j] >= 0 && v3_cyc >= v3_tgt[v3_j]) v3_judge(v3_j);
+    // ---- a DISPATCH on a lane: CONTENT -- close the lane's pending bit at
+    // the middle of its LANDED window, and open a new one if this is an
+    // unclocked SHIFT; TIMING -- record how late the dispatch was -----------
+    // ⭐ CONTENT: the bit's window runs from its own land to the land of the
+    // lane's next dispatch (a held unclocked SHIFT lands SDA_HOLD late; an
+    // ACK SHIFTIN releases at once), +2 for the dispatch-to-pin latency; the
+    // sample is its middle. So content is judged on the bits the chip put on
+    // the bus, in order, whatever their timing.
+    // ⚠ TIMING IS A SEPARATE QUESTION, MEASURED HERE AND NOT YET JUDGED.
+    // A sampler at each bit's NOMINAL centre (release + d/2) is the fixed-
+    // clock peer's view, and it failed the WS2812 3-sub-bit CONTROL too
+    // (REARM at d = 21, beside four d = 20 lanes): 126 of 1426 bits, each
+    // dispatched 11-13 cycles after release -- within EDF response, beyond
+    // d/2. So "decodable by a fixed-clock peer at d" is stronger than what the
+    // chip guarantees near D*; the per-lane worst lateness is reported, and
+    // what bound it is judged against is Wilson's call.
+    if (dut.u_eng.st === 2'd1 && dut.u_eng.cur < 8) begin
+      v3_k = dut.u_eng.cur;
+      v3_Lnow = (dut.u_eng.a_op === 3'd1 && dut.u_eng.ck_shift !== 1'b1
+                 && dut.u_eng.l_mode[v3_k] === 1'b0
+                 && dut.u_eng.clk_real === 1'b1
+                 && dut.u_eng.a_lvl !== 1'b1) ? dut.u_eng.SDA_HOLD : 0;
+      if (v3_pend[v3_k] != 0) begin
+        if (v3_tgt[v3_k] >= 0) v3_judge(v3_k);   // never overwrite one
+        // ⛔ THE CLOSED BIT'S OWN VALUES move to the scheduled check here:
+        // the first version scheduled the check and then, in the same cycle,
+        // opened the NEW bit into the same slots, so every check judged the
+        // next bit's value (measured: tx_image 398 of 839 red, 1 cycle late)
+        v3_tgt[v3_k]  = (v3_land[v3_k] + v3_cyc + 2 + v3_Lnow) / 2;
+        v3_tx[v3_k]   = v3_ptx[v3_k];
+        v3_tp[v3_k]   = v3_ptp[v3_k];
+        v3_late[v3_k] = v3_plate[v3_k];
+        v3_pend[v3_k] = 0;
+      end
+      if (dut.u_eng.a_op === 3'd1 && dut.u_eng.ck_shift !== 1'b1) begin
+        v3_dl = (dut.u_eng.l_timestamp[v3_k] - dut.u_eng.now) & 16'hFFFF;
+        if (v3_dl >= 32768) v3_dl = v3_dl - 65536;
+        if (-v3_dl > v3_mlate[v3_k]) v3_mlate[v3_k] = -v3_dl;
+        v3_nd[v3_k] = v3_nd[v3_k] + 1;
+        v3_plate[v3_k] = -v3_dl;
+        v3_ptx[v3_k]   = v3_lt[v3_k][0];
+        v3_ptp[v3_k]   = dut.u_eng.a_pin;
+        v3_land[v3_k]  = v3_cyc + 2 + v3_Lnow;
+        v3_pend[v3_k]  = 1;
+      end
+    end
+    // ---- a WRITEBACK of a SHIFT that shifts: mirror the register --------
+    if (dut.u_eng.st === 2'd2 && dut.u_eng.cur < 8 && dut.u_eng.a_op === 3'd1
+        && (dut.u_eng.ck_shift !== 1'b1 || dut.u_eng.ck_is_low === 1'b1)) begin
+      v3_k = dut.u_eng.cur;
+      if (v3_nb[v3_k] == dut.u_eng.a_cnt) begin
+        v3_q = dut.u_eng.a_q;
+        if (v3_qr[v3_q] < v3_qw[v3_q]) begin
+          v3_lt[v3_k] = (dut.u_eng.l_order[v3_k] === 1'b1)
+                        ? tv_rev(v3_qb[v3_q * 256 + (v3_qr[v3_q] % 256)])
+                        : v3_qb[v3_q * 256 + (v3_qr[v3_q] % 256)];
+          v3_qr[v3_q] = v3_qr[v3_q] + 1;
+          v3_lok = v3_lok + 1;
+          if (dut.u_eng.host_valid !== 1'b1) v3_mis = v3_mis + 1;
+        end else begin
+          v3_lt[v3_k] = {1'b0, v3_lt[v3_k][7:1]};
+          v3_under = v3_under + 1;
+          v3_nun[v3_k] = v3_nun[v3_k] + 1;
+          if (dut.u_eng.host_valid === 1'b1) v3_mis = v3_mis + 1;
+        end
+        v3_nb[v3_k] = 0;
+      end else begin
+        v3_lt[v3_k] = {1'b0, v3_lt[v3_k][7:1]};
+        v3_nb[v3_k] = v3_nb[v3_k] + 1;
+      end
+    end
+  end
+end
+
+// =======================================================================
 // LAYER B GAPS -- EVERY CLOCKED PHASE'S LENGTH, AGAINST THE MODEL (CE1)
 // =======================================================================
 // ⛔⛔ WHY. Layer B compared dispatch COUNTS, and the golden model says so
@@ -1429,6 +1735,70 @@ final begin
       $display("*** FAIL clocked_conform[V-RX]: %0d RX push(es) dropped on overrun and the host was NOT told (status bit 6 clear)", vr_drop);
     else
       $display("  clocked_conform[V-RX]: ok -- %0d RX frame(s) are the bytes the pins carried on the ACTION's pin; %0d overrun drop(s), each reported", vr_chk, vr_drop);
+    // ---- Layer V3: unclocked transmit bits on the bus (WF2) --------------
+    // ⛔ NO NAMED BLOCK WITH LOCALS HERE: inside `final`, iverilog silently
+    // stopped the whole report at it (every later layer's line vanished,
+    // V2's included). The working variables are module-scope.
+    begin
+      v3_extra = 0;
+      for (v3_qi = 0; v3_qi < 4; v3_qi = v3_qi + 1) begin
+        v3_held = dut.tx_cnt[v3_qi];
+        if (v3_qw[v3_qi] - v3_qr[v3_qi] != v3_held) v3_extra = v3_extra + 1;
+      end
+      if (v3_void != 0)
+        $display("  clocked_conform[V3]: %0d unclocked bit(s) VOIDED -- scheduled for dispatches after CONFIG_ERR halted the engine (a refused action drives no pin)", v3_void);
+      // ⭐ AN EXEMPT ARM (registry: NON_ADMISSIBLE / DELIBERATE) prints the
+      // SAME counts, marked EXEMPT, and never the FAIL token.
+      if (v3_chk == 0)
+        $display("  clocked_conform[V3]: 0 unclocked transmit bits in this program -- NOT EXERCISED");
+      else if (dut.tx_full_sticky === 1'b1)
+        $display("%0s clocked_conform[V3]: tx_full_sticky -- a push was DROPPED, so the pushed stream is not the consumed one", (v3_ex != 0) ? "  EXEMPT (declared):" : "*** FAIL");
+      else if (v3_bad != 0)
+        $display("%0s clocked_conform[V3]: %0d of %0d unclocked bit(s) on the bus are not the host feed", (v3_ex != 0) ? "  EXEMPT (declared):" : "*** FAIL", v3_bad, v3_chk);
+      else if (v3_extra != 0 || v3_mis != 0)
+        $display("%0s clocked_conform[V3]: count not exact -- %0d queue(s) where pushed != popped + still queued, %0d load(s) where the decoded queue and the chip's disagreed", (v3_ex != 0) ? "  EXEMPT (declared):" : "*** FAIL", v3_extra, v3_mis);
+      else
+        $display("  clocked_conform[V3]: ok%0s -- %0d unclocked bit(s) on the bus are the host feed, in order; count exact (pushed = popped + queued); %0d underrun load(s)", (v3_ex != 0) ? " (EXEMPT arm)" : "", v3_chk, v3_under);
+      for (v3_k = 0; v3_k < 8; v3_k = v3_k + 1)
+        if (v3_nun[v3_k] != 0)
+          $display("  clocked_conform[V3] lane %0d: %0d underrun load(s) -- the register shifted zeros the host did not feed", v3_k, v3_nun[v3_k]);
+      // ---- underruns: 0 fed (none), 1 unfed (all), 2 a declared starve ----
+      if (v3_unfed == 1) begin
+        if (v3_ex == 0 && (v3_qw[0] + v3_qw[1] + v3_qw[2] + v3_qw[3] != 0
+                           || v3_lok != 0))
+          $display("*** FAIL clocked_conform[V3-U]: the arm declares itself UNFED (+V3_UNDERRUN=1) but %0d byte(s) were pushed and %0d load(s) found one", v3_qw[0] + v3_qw[1] + v3_qw[2] + v3_qw[3], v3_lok);
+        else if (v3_under != 0)
+          $display("  clocked_conform[V3-U]: ok -- UNFED by declaration: no push, and every one of %0d load(s) underran", v3_under);
+      end else if (v3_unfed == 2) begin
+        if (v3_ex == 0 && v3_under == 0)
+          $display("*** FAIL clocked_conform[V3-U]: the arm declares a STARVE window (+V3_UNDERRUN=2) and no load underran -- the starve did not happen");
+        else
+          $display("  clocked_conform[V3-U]: ok -- STARVE by declaration: %0d underrun load(s), %0d load(s) found a byte", v3_under, v3_lok);
+      end else if (v3_under != 0) begin
+        if (v3_ex != 0)
+          $display("  clocked_conform[V3-U]: EXEMPT (declared) -- %0d underrun load(s)", v3_under);
+        else
+          $display("*** FAIL clocked_conform[V3-U]: %0d underrun load(s) on a FED arm -- a host-contract violation (HOST_INTERFACE, minimum host feed rate); only an arm that pushes nothing (+V3_UNDERRUN=1) or starves on purpose (+V3_UNDERRUN=2) may underrun", v3_under);
+      end
+      // ---- V3-T: scheduler conformance, per unclocked transmitting lane ----
+      for (v3_k = 0; v3_k < 5; v3_k = v3_k + 1)
+        if (v3_nd[v3_k] != 0) begin
+          v3_rm = v3_mlate[v3_k] + 2;          // worst measured response
+          if (v3_ex != 0)
+            $display("  clocked_conform[V3-T] lane %0d: EXEMPT (declared) -- worst response %0d over %0d dispatch(es); bound %0d, D_tol %0d", v3_k, v3_rm, v3_nd[v3_k], v3_rb[v3_k], v3_dt[v3_k]);
+          else if (v3_rb[v3_k] < 0) begin
+            v3_tfail = v3_tfail + 1;
+            $display("*** FAIL clocked_conform[V3-T] lane %0d: transmitted (%0d dispatch(es), worst response %0d) with NO published response bound -- a missing bound is red", v3_k, v3_nd[v3_k], v3_rm);
+          end else if (v3_rm > v3_rb[v3_k]) begin
+            v3_tfail = v3_tfail + 1;
+            $display("*** FAIL clocked_conform[V3-T] lane %0d: worst response %0d > the published bound r_i = %0d (pyRTA) -- the scheduler broke its own analysis", v3_k, v3_rm, v3_rb[v3_k]);
+          end else if (v3_dt[v3_k] >= 0 && v3_rm > v3_dt[v3_k]) begin
+            v3_tfail = v3_tfail + 1;
+            $display("*** FAIL clocked_conform[V3-T] lane %0d: worst response %0d <= r_i %0d but > the header's D_tol %0d -- pe_asm admitted a program whose bound exceeds its own tolerance", v3_k, v3_rm, v3_rb[v3_k], v3_dt[v3_k]);
+          end else
+            $display("  clocked_conform[V3-T] lane %0d: ok -- worst response %0d over %0d dispatch(es) <= r_i %0d (pyRTA) <= D_tol %0d", v3_k, v3_rm, v3_nd[v3_k], v3_rb[v3_k], v3_dt[v3_k]);
+        end
+    end
     // ---- Layer V: clocked transmit values (ruling TX) -------------------
     if (tv1_chk == 0)
       $display("  clocked_conform[V]: 0 clocked transmit bits in this program -- NOT EXERCISED");

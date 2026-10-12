@@ -108,5 +108,6 @@ vivado*.log
 test/sim_build_uartrx/
 test/sim_build_hold/
 test/sim_build_rxfast/
+test/sim_build_wfmf/
 # agent worktrees (Claude Code) -- never part of the tree
 .claude/

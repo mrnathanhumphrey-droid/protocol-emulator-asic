@@ -1,0 +1,522 @@
+{
+ "census_image.hex": {
+  "lanes": {
+   "0": {
+    "T": 25,
+    "dtol": 75,
+    "r_ours": 9,
+    "r_pyrta": 9,
+    "why": null
+   },
+   "1": {
+    "T": 25,
+    "dtol": 75,
+    "r_ours": 9,
+    "r_pyrta": 9,
+    "why": null
+   },
+   "2": {
+    "T": 500,
+    "dtol": 240,
+    "r_ours": 16,
+    "r_pyrta": 16,
+    "why": null
+   },
+   "3": {
+    "T": 500,
+    "dtol": 240,
+    "r_ours": 16,
+    "r_pyrta": 16,
+    "why": null
+   },
+   "4": {
+    "T": 500,
+    "dtol": 240,
+    "r_ours": 16,
+    "r_pyrta": 16,
+    "why": null
+   }
+  },
+  "why": null
+ },
+ "corpus_all5.hex": {
+  "lanes": {
+   "0": {
+    "T": 70,
+    "dtol": 210,
+    "r_ours": null,
+    "r_pyrta": null,
+    "why": "overloaded (U = 1.096)"
+   },
+   "1": {
+    "T": 10,
+    "dtol": 30,
+    "r_ours": null,
+    "r_pyrta": null,
+    "why": "overloaded (U = 1.096)"
+   },
+   "2": {
+    "T": 11,
+    "dtol": 33,
+    "r_ours": null,
+    "r_pyrta": null,
+    "why": "overloaded (U = 1.096)"
+   },
+   "3": {
+    "T": 12,
+    "dtol": 36,
+    "r_ours": null,
+    "r_pyrta": null,
+    "why": "overloaded (U = 1.096)"
+   },
+   "4": {
+    "T": 13,
+    "dtol": 39,
+    "r_ours": null,
+    "r_pyrta": null,
+    "why": "overloaded (U = 1.096)"
+   }
+  },
+  "why": null
+ },
+ "corpus_sptgt.hex": {
+  "lanes": {
+   "0": {
+    "T": 6,
+    "dtol": 18,
+    "r_ours": 13,
+    "r_pyrta": 16,
+    "why": null
+   },
+   "1": {
+    "T": 500,
+    "dtol": 240,
+    "r_ours": 38,
+    "r_pyrta": 38,
+    "why": null
+   },
+   "2": {
+    "T": 500,
+    "dtol": 240,
+    "r_ours": 38,
+    "r_pyrta": 38,
+    "why": null
+   },
+   "3": {
+    "T": 500,
+    "dtol": 240,
+    "r_ours": 38,
+    "r_pyrta": 38,
+    "why": null
+   },
+   "4": {
+    "T": 500,
+    "dtol": 240,
+    "r_ours": 38,
+    "r_pyrta": 38,
+    "why": null
+   }
+  },
+  "why": null
+ },
+ "half_image.hex": {
+  "lanes": {
+   "0": {
+    "T": 24,
+    "dtol": 72,
+    "r_ours": 11,
+    "r_pyrta": 9,
+    "why": null
+   },
+   "1": {
+    "T": 24,
+    "dtol": 72,
+    "r_ours": 9,
+    "r_pyrta": 9,
+    "why": null
+   },
+   "2": {
+    "T": 500,
+    "dtol": 240,
+    "r_ours": 16,
+    "r_pyrta": 16,
+    "why": null
+   },
+   "3": {
+    "T": 500,
+    "dtol": 240,
+    "r_ours": 16,
+    "r_pyrta": 16,
+    "why": null
+   },
+   "4": {
+    "T": 500,
+    "dtol": 240,
+    "r_ours": 16,
+    "r_pyrta": 16,
+    "why": null
+   }
+  },
+  "why": null
+ },
+ "i2caddr_image.hex": {
+  "lanes": {
+   "0": {
+    "T": 62,
+    "dtol": 186,
+    "r_ours": 6,
+    "r_pyrta": 6,
+    "why": null
+   },
+   "1": {
+    "T": 500,
+    "dtol": 240,
+    "r_ours": 16,
+    "r_pyrta": 16,
+    "why": null
+   },
+   "2": {
+    "T": 500,
+    "dtol": 240,
+    "r_ours": 16,
+    "r_pyrta": 16,
+    "why": null
+   },
+   "3": {
+    "T": 500,
+    "dtol": 240,
+    "r_ours": 16,
+    "r_pyrta": 16,
+    "why": null
+   },
+   "4": {
+    "T": 500,
+    "dtol": 240,
+    "r_ours": 16,
+    "r_pyrta": 16,
+    "why": null
+   }
+  },
+  "why": null
+ },
+ "i2cframe_image.hex": {
+  "lanes": {
+   "0": {
+    "T": 62,
+    "dtol": 186,
+    "r_ours": 6,
+    "r_pyrta": 6,
+    "why": null
+   },
+   "1": {
+    "T": 500,
+    "dtol": 240,
+    "r_ours": 16,
+    "r_pyrta": 16,
+    "why": null
+   },
+   "2": {
+    "T": 500,
+    "dtol": 240,
+    "r_ours": 16,
+    "r_pyrta": 16,
+    "why": null
+   },
+   "3": {
+    "T": 500,
+    "dtol": 240,
+    "r_ours": 16,
+    "r_pyrta": 16,
+    "why": null
+   },
+   "4": {
+    "T": 500,
+    "dtol": 240,
+    "r_ours": 16,
+    "r_pyrta": 16,
+    "why": null
+   }
+  },
+  "why": null
+ },
+ "onewire_fpga_image.hex": {
+  "lanes": {
+   "0": {
+    "T": 100,
+    "dtol": 255,
+    "r_ours": 16,
+    "r_pyrta": 16,
+    "why": null
+   },
+   "1": {
+    "T": 500,
+    "dtol": 240,
+    "r_ours": 16,
+    "r_pyrta": 16,
+    "why": null
+   },
+   "2": {
+    "T": 500,
+    "dtol": 240,
+    "r_ours": 16,
+    "r_pyrta": 16,
+    "why": null
+   },
+   "3": {
+    "T": 500,
+    "dtol": 240,
+    "r_ours": 16,
+    "r_pyrta": 16,
+    "why": null
+   },
+   "4": {
+    "T": 500,
+    "dtol": 240,
+    "r_ours": 16,
+    "r_pyrta": 16,
+    "why": null
+   }
+  },
+  "why": null
+ },
+ "onewire_image.hex": {
+  "lanes": {
+   "0": {
+    "T": 100,
+    "dtol": 255,
+    "r_ours": 16,
+    "r_pyrta": 16,
+    "why": null
+   },
+   "1": {
+    "T": 500,
+    "dtol": 240,
+    "r_ours": 15,
+    "r_pyrta": 15,
+    "why": null
+   },
+   "2": {
+    "T": 500,
+    "dtol": 240,
+    "r_ours": 15,
+    "r_pyrta": 15,
+    "why": null
+   },
+   "3": {
+    "T": 500,
+    "dtol": 240,
+    "r_ours": 15,
+    "r_pyrta": 15,
+    "why": null
+   },
+   "4": {
+    "T": 500,
+    "dtol": 240,
+    "r_ours": 15,
+    "r_pyrta": 15,
+    "why": null
+   }
+  },
+  "why": null
+ },
+ "pinnone_image.hex": {
+  "lanes": {
+   "0": {
+    "T": 20,
+    "dtol": 60,
+    "r_ours": 6,
+    "r_pyrta": 6,
+    "why": null
+   },
+   "1": {
+    "T": 500,
+    "dtol": 240,
+    "r_ours": 16,
+    "r_pyrta": 16,
+    "why": null
+   },
+   "2": {
+    "T": 500,
+    "dtol": 240,
+    "r_ours": 16,
+    "r_pyrta": 16,
+    "why": null
+   },
+   "3": {
+    "T": 500,
+    "dtol": 240,
+    "r_ours": 16,
+    "r_pyrta": 16,
+    "why": null
+   },
+   "4": {
+    "T": 500,
+    "dtol": 240,
+    "r_ours": 16,
+    "r_pyrta": 16,
+    "why": null
+   }
+  },
+  "why": null
+ },
+ "probe_cov_pindiv.hex": {
+  "lanes": {
+   "0": {
+    "T": 30,
+    "dtol": 90,
+    "r_ours": 9,
+    "r_pyrta": 9,
+    "why": null
+   },
+   "1": {
+    "T": 40,
+    "dtol": 120,
+    "r_ours": 12,
+    "r_pyrta": 12,
+    "why": null
+   },
+   "2": {
+    "T": 23,
+    "dtol": 69,
+    "r_ours": 6,
+    "r_pyrta": 6,
+    "why": null
+   },
+   "3": {
+    "T": 70,
+    "dtol": 210,
+    "r_ours": 17,
+    "r_pyrta": 17,
+    "why": null
+   },
+   "4": {
+    "T": 50,
+    "dtol": 150,
+    "r_ours": 15,
+    "r_pyrta": 15,
+    "why": null
+   }
+  },
+  "why": null
+ },
+ "tx_badclk_image.hex": {
+  "lanes": {
+   "0": {
+    "T": 12,
+    "dtol": 36,
+    "r_ours": 12,
+    "r_pyrta": 12,
+    "why": null
+   },
+   "1": {
+    "T": 500,
+    "dtol": 240,
+    "r_ours": 25,
+    "r_pyrta": 25,
+    "why": null
+   },
+   "2": {
+    "T": 500,
+    "dtol": 240,
+    "r_ours": 25,
+    "r_pyrta": 25,
+    "why": null
+   },
+   "3": {
+    "T": 500,
+    "dtol": 240,
+    "r_ours": 25,
+    "r_pyrta": 25,
+    "why": null
+   },
+   "4": {
+    "T": 500,
+    "dtol": 240,
+    "r_ours": 25,
+    "r_pyrta": 25,
+    "why": null
+   }
+  },
+  "why": null
+ },
+ "tx_image.hex": {
+  "lanes": {
+   "0": {
+    "T": 12,
+    "dtol": 36,
+    "r_ours": 15,
+    "r_pyrta": 13,
+    "why": null
+   },
+   "1": {
+    "T": 13,
+    "dtol": 39,
+    "r_ours": 15,
+    "r_pyrta": 15,
+    "why": null
+   },
+   "2": {
+    "T": 500,
+    "dtol": 240,
+    "r_ours": 34,
+    "r_pyrta": 34,
+    "why": null
+   },
+   "3": {
+    "T": 500,
+    "dtol": 240,
+    "r_ours": 34,
+    "r_pyrta": 34,
+    "why": null
+   },
+   "4": {
+    "T": 500,
+    "dtol": 240,
+    "r_ours": 34,
+    "r_pyrta": 34,
+    "why": null
+   }
+  },
+  "why": null
+ },
+ "ws2812_sub3_rearm21.hex": {
+  "lanes": {
+   "0": {
+    "T": 21,
+    "dtol": 42,
+    "r_ours": 16,
+    "r_pyrta": 16,
+    "why": null
+   },
+   "1": {
+    "T": 20,
+    "dtol": 40,
+    "r_ours": 18,
+    "r_pyrta": 15,
+    "why": null
+   },
+   "2": {
+    "T": 20,
+    "dtol": 40,
+    "r_ours": 18,
+    "r_pyrta": 15,
+    "why": null
+   },
+   "3": {
+    "T": 20,
+    "dtol": 40,
+    "r_ours": 18,
+    "r_pyrta": 15,
+    "why": null
+   },
+   "4": {
+    "T": 20,
+    "dtol": 40,
+    "r_ours": 18,
+    "r_pyrta": 15,
+    "why": null
+   }
+  },
+  "why": null
+ }
+}

@@ -40,7 +40,11 @@ NON_ADMISSIBLE = {
     "corpus_all5.hex": ({OVERLOAD, PORT},
         "the scheduler stress image: four lanes at d = 9..13 beside a clocked "
         "lane at 70 (D5 raised only lane 0), deliberately oversubscribed. "
-        "Ruling S reports its clocked lane UNBOUNDED for this reason."),
+        "Ruling S reports its clocked lane UNBOUNDED for this reason. KNOWN "
+        "WIRE BEHAVIOUR (WF2 V3, measured, exempt): ~20 % of its unclocked "
+        "bits are not the feed over seeds 1-6 (1371/6558, 898/4478, "
+        "663/3100, 1032/4874, 868/4252, 1050/5139), lane 1 drifting past the "
+        "16-bit timestamp range -- no bound exists (U = 1.096)."),
     # ⛔ MECHANISM ONLY (ruling Q3), and the first version of this entry said
     # otherwise: it called the tracked file "the measurement base for T1's
     # per-lane J and Theorem 3's port-feasible cells". Those claims were
@@ -61,7 +65,13 @@ NON_ADMISSIBLE = {
         "lane (25 cycles)."),
     "corpus_sptgt.hex": ({PORT, QUEUE},
         "the SPI-target trace image at d = 6, below D*: it exists to exercise "
-        "the target's async MISO release for the corpus witness."),
+        "the target's async MISO release for the corpus witness. KNOWN WIRE "
+        "BEHAVIOUR (WF2 V3, measured, exempt): 2,769 of 13,326 unclocked bits "
+        "are not the feed -- by design, the peer's CS clears MISO mid-stream. "
+        "⚠ It is a MECHANISM image, NOT an SPI-target transfer (self-timed "
+        "SHIFTs, no clock pin, never synchronised to SCK), so it has no SCK "
+        "rate; the published SPI-target lane has no exact witness "
+        "(gate_wire_feed PUBLISHED, OWED)."),
     "corpus_uartrx.hex": ({PORT, QUEUE},
         "the UART-rx trace image at d = 11, below D*: it exercises the ARM "
         "and edge-capture path at a seeded phase."),

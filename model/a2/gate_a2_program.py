@@ -151,6 +151,38 @@ def main() -> int:
                               "not in CI by design; `gate_a2_bounds_pyrta.py` "
                               "under `run_a2.py` owns it"))
 
+    # ---- 1c. WF2 / V3-T: the per-lane response bounds are current ----------
+    # Same rule as 1: CI re-derives everything but the pyRTA column (images,
+    # lanes, our recurrence, T, D_tol); with pyRTA present it is compared too.
+    print()
+    print("  --- 1c. test/lane_response_bounds.json matches the images ---")
+    if not os.path.isfile(program_a2.RESP_JSON):
+        print("    *** FAIL test/lane_response_bounds.json is absent -- every")
+        print("        unclocked arm's V3-T would run with no bound.")
+        return 1
+    with io.open(program_a2.RESP_JSON, encoding="utf-8") as fh:
+        rb_disk = json.load(fh)
+    rb_fresh = program_a2.response_bounds(src)
+    rb_stale = sorted(set(rb_disk) ^ set(rb_fresh))
+    for n in sorted(set(rb_disk) & set(rb_fresh)):
+        a, b = rb_disk[n]["lanes"], rb_fresh[n]["lanes"]
+        if set(a) != set(b):
+            rb_stale.append(n)
+            continue
+        for ln in a:
+            keys = {"r_ours", "T", "dtol"} | ({"r_pyrta"} if src else set())
+            if any(a[ln].get(k) != b[ln].get(k) for k in keys):
+                rb_stale.append(n)
+                break
+    if rb_stale:
+        print("    *** FAIL stale for: %s" % ", ".join(sorted(set(rb_stale))))
+        print("        Run `python model/a2/program_a2.py`.")
+        rc = 1
+    else:
+        print("    current -- %d image(s) re-derived and identical%s"
+              % (len(rb_fresh), " (pyRTA column too)" if src else
+                 " (pyRTA column not re-derived: not in CI by design)"))
+
     # ---- 1b. Z5 / DT-F: the CI floor is never looser than pyRTA -----------
     # ⛔⛔ CI has no pyRTA, so every CI-side refusal (pe_asm's mode floor and
     # 1.6a, gate_admissible_images' QUEUE) rests on OUR recurrence alone. After

@@ -68,6 +68,11 @@ REGISTRY = {
         "runner": "test/run_uartrx.py",
         "how": "tb_uartrx compares every push with what the PEER sent "
                "(`sent[]`), count exact, at T = 434 and T_MIN, +-3 %"}),
+    "ws2812_sub3_rearm21.hex": (WITNESS, {
+        "runner": "test/run_wirefeed_mf.py",
+        "how": "the WS2812 3-sub-bit control (REARM d = 21) beside four "
+               "d = 20 lanes: V3 content exact on the bus, count exact, and "
+               "V3-T worst response within its pyRTA bound"}),
     "uart_rx_434.hex": (WITNESS, {
         "same_as": "uart_rx_image.hex",
         "how": "the board's BRAM image is byte-identical to the bench image"}),
@@ -133,6 +138,64 @@ REGISTRY = {
     "probe_cov_cemodes.hex": (OWED, {
         "gap": "V2 only (drive not bus, partial count)", "closes": "WF2"}),
 }
+
+
+#: ⛔⛔ THE FIVE PUBLISHED LANES (Wilson, WF2 ruling 2): each needs an ACCEPTED
+#: image, at or inside its published rating, that a CI check witnesses EXACT
+#: (wire == feed, count exact). Found on the way: only UART-rx has one. Each
+#: OWED line here counts toward OWED, which must be 0 at the sub-v1 SHA.
+#: ⭐ Wilson (WF2 round 2): the RATED SPEED is a NUMBER for every lane
+#: (`rate_hz`, the bit or clock rate the claim is made at, 50 MHz design
+#: clock), and each witness runs AT that rate with V2/V3 tightened.
+#: ⭐⭐ THE KEY IS THE DISPLAY LABEL; `ledger_id` IS THE TIMING LEDGER'S
+#: STABLE INTERNAL NAME (Wilson: IDs are not claims). The README's lane table
+#: shows these labels, and RD1 (`gate_stored_numbers`) matches each README row
+#: to its ledger lane through `ledger_id` -- so a rating change is an edit
+#: here, never ledger churn.
+PUBLISHED = {
+    "UART-rx 115200": (WITNESS, {"image": "uart_rx_image.hex",
+                                 "rate_hz": 115200,
+                                 "ledger_id": "UART-rx 115200"}),
+    "UART-tx 115200": (OWED, {"rate_hz": 115200,
+                              "ledger_id": "UART-tx 115200",
+        "gap": "no accepted UART-tx image at 434 cycles/bit: tx_image.hex is "
+               "a d = 12/13 TX-routing test image, declared NON_ADMISSIBLE"}),
+    "SPI-master 1 MHz": (OWED, {"rate_hz": 1000000,
+                                "ledger_id": "SPI-tx 1 MHz",
+        "gap": "corpus_spim.hex is NON_ADMISSIBLE at d = 7; the d = 25 "
+               "transaction (inside the rating) exists only as run_spifram's "
+               "untracked, local-only variants"}),
+    # ⭐ Wilson: the ACHIEVED rate (CE1 HALF_HIGH), not the mode's nominal
+    # 400 kHz -- so the rated number and the witnessed number are one number.
+    "I²C Fast-mode 397 kHz": (OWED, {"rate_hz": 397000,
+                                     "ledger_id": "I2C 400 kHz",
+        "gap": "corpus_i2c.hex is accepted but witnessed only by V2 (the "
+               "chip's drive, partial count) -- closes with WF2's V2 "
+               "tightening"}),
+    "SPI-target 1 MHz": (OWED, {"rate_hz": 1000000,
+                                "ledger_id": "SPI-target 1 MHz",
+        "gap": "NO functional SPI-target program exists: corpus_sptgt.hex is "
+               "the async MISO-clear MECHANISM image (self-timed SHIFTs at "
+               "d = 6, no clock pin, never synchronised to the master's SCK); "
+               "nothing receives SCK and shifts a fed byte out on MISO"}),
+}
+
+
+def published_problems(registry, published):
+    """A published lane claimed WITNESS must point at a WITNESSED image."""
+    probs = []
+    for lane, (kind, d) in sorted(published.items()):
+        if not isinstance(d.get("rate_hz"), int) or d["rate_hz"] <= 0:
+            probs.append("published lane %s has no numeric rated speed "
+                         "(rate_hz)" % lane)
+        if kind == WITNESS:
+            img = d.get("image")
+            if registry.get(img, ("",))[0] != WITNESS:
+                probs.append("published lane %s claims WITNESS via %s, which "
+                             "is not WITNESSED in the registry" % (lane, img))
+        elif kind != OWED:
+            probs.append("published lane %s: unknown kind %r" % (lane, kind))
+    return probs
 
 
 def feed_of(img):
@@ -324,10 +387,68 @@ def main() -> int:
                 needle="corpus_all5.hex is exempt")
     rc |= 0 if ok else 1
 
-    owed = counts.get(OWED, 0)
+    # ---- V3's per-image table is current (WF2) ------------------------------
+    # ⛔ The bench takes exempt / r_i / D_tol from `test/v3_table.vh` by its
+    # loaded bytes; a stale table would judge a program by another's facts.
+    import v3_table
     print()
-    print("  OWED: %d image(s) without an exact witness -- the lock checklist "
-          "requires 0 at the sub-v1 SHA (WF2, WF3)" % owed)
+    print("  --- test/v3_table.vh matches the registry, the bounds and the images ---")
+    want = v3_table.text()
+    try:
+        with open(v3_table.OUT, encoding="utf-8") as fh:
+            have = fh.read().replace("\r\n", "\n")
+    except OSError:
+        have = None
+    if have != want:
+        print("  *** test/v3_table.vh is %s -- run `python model/v3_table.py`"
+              % ("absent" if have is None else "STALE"))
+        rc = 1
+    else:
+        print("    current -- %d image(s), keyed by their bytes"
+              % want.count("endcase  //"))
+    # must-fire: an edited table, and a moved image byte, are both seen
+    edited = want.replace("v3_tab = 16;", "v3_tab = 17;", 1)
+    moved = bytearray(imgs["half_image.hex"])
+    moved[200] ^= 1
+    seen_edit = edited != want
+    seen_move = v3_table.fnv(bytes(moved)) != v3_table.fnv(imgs["half_image.hex"])
+    print("    must-fire: a hand-edited bound is not the generated text  %s"
+          % ("red  ok" if seen_edit else "*** MISSED"))
+    print("    must-fire: one image byte moved changes its key           %s"
+          % ("red  ok" if seen_move else "*** MISSED"))
+    rc |= 0 if (seen_edit and seen_move) else 1
+
+    # ---- the five published lanes ------------------------------------------
+    print()
+    print("  --- the published lanes: an exact witness at the published rate ---")
+    for lane, (kind, d) in sorted(PUBLISHED.items()):
+        print("    %-18s %9s Hz %-8s %s" % (lane, d.get("rate_hz"), kind,
+                                            d.get("image")
+                                            or d.get("gap", "")[:80]))
+    pp = published_problems(REGISTRY, PUBLISHED)
+    for p in pp:
+        print("  *** %s" % p)
+        rc = 1
+    bent = dict(PUBLISHED)
+    bent["UART-tx 115200"] = (WITNESS, {"image": "census_image.hex"})
+    hit = bool(published_problems(REGISTRY, bent))
+    print("    must-fire: a lane claiming an OWED image as witness   %s"
+          % ("red  ok" if hit else "*** MISSED"))
+    rc |= 0 if hit else 1
+    norate = dict(PUBLISHED)
+    k, (kind0, d0) = next(iter(sorted(norate.items())))
+    norate[k] = (kind0, {x: v for x, v in d0.items() if x != "rate_hz"})
+    hit = any("rated speed" in p for p in published_problems(REGISTRY, norate))
+    print("    must-fire: a lane with no numeric rated speed        %s"
+          % ("red  ok" if hit else "*** MISSED"))
+    rc |= 0 if hit else 1
+
+    owed = counts.get(OWED, 0)
+    owed_lanes = sum(1 for k, _d in PUBLISHED.values() if k == OWED)
+    print()
+    print("  OWED: %d image(s) and %d published lane(s) without an exact "
+          "witness -- the lock checklist requires 0 at the sub-v1 SHA "
+          "(WF2, WF3)" % (owed, owed_lanes))
     print("  GATE wire-feed: %s" % ("PASSED" if rc == 0 else "*** FAILED"))
     return rc
 

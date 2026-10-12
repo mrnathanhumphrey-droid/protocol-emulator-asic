@@ -518,6 +518,21 @@ SPEC_SYMBOLS = {
     # reds an entry on an exempt, absent or no-feed image, derived from the
     # image itself.
     ("model/gate_wire_feed.py", "REGISTRY"),
+    # ⭐ ... and its PUBLISHED-lanes table: lane NAMES (115200, 1 MHz, 400 kHz
+    # are the published ratings, restated as labels) and gap prose; staleness
+    # is `published_problems` (a WITNESS claim must point at a witnessed image).
+    ("model/gate_wire_feed.py", "PUBLISHED"),
+    # ⭐ WF2 round 2: V3's table generator. GENERATED names each runner's
+    # on-the-fly image and calls the runner's OWN builder (its "numbers" are
+    # builder arguments such as T_MIN 232, d = 60, d = 4 -- inputs, not
+    # results); ALLOW is the loosening-override allowlist (field codes and
+    # the declared underrun mode), each with its reason; FIELD names the codes.
+    # Staleness is caught where it means something: gate_wire_feed regenerates
+    # test/v3_table.vh and requires it identical, and the bench reds any
+    # unknown image or non-allowlisted loosening.
+    ("model/v3_table.py", "GENERATED"),
+    ("model/v3_table.py", "ALLOW"),
+    ("model/v3_table.py", "FIELD"),
     # ⭐ SP2/P1's TEXT ANCHORS into src/pe_engine.v: Verilog substrings whose
     # "numbers" are widths and bit literals ({BPW-1}, 1'b1) -- identifiers of
     # RTL text, re-found in the RTL on every run by `count_ranges.anchors`.
@@ -860,7 +875,13 @@ def readme_sources():
     if tp not in sys.path:
         sys.path.insert(0, tp)
     import uart_rx
-    return {"uart": {"tmin": uart_rx.T_MIN, "tnom": uart_rx.T_NOMINAL},
+    # ⭐ THE LANE LABELS ARE THE WITNESS REGISTRY'S (Wilson): the README shows
+    # each lane's DISPLAY label (`gate_wire_feed.PUBLISHED`), mapped to the
+    # ledger's stable internal ID through `ledger_id` -- IDs are not claims.
+    import gate_wire_feed as wf
+    labels = {lab: d["ledger_id"] for lab, (_k, d) in wf.PUBLISHED.items()}
+    return {"labels": labels,
+            "uart": {"tmin": uart_rx.T_MIN, "tnom": uart_rx.T_NOMINAL},
             "r": r, "margin": int(m.group(2)), "bar": int(bar.group(1)),
             "witness": witness, "lanes": lanes, "dstar": jp.D_STAR,
             "entry": ld.DIGEST_LEDGER[-1][0],
@@ -875,15 +896,29 @@ def readme_audit(text, src):
                      "witness %s" % (src["r"], src["witness"]))
     rows = {m.group("name").replace("²", "2"): m
             for m in _LANE_ROW.finditer(text)}
-    for name, want in sorted(src["lanes"].items()):
-        m = rows.get(name)
+    # label (display, from the witness registry) -> ledger ID; a source with
+    # no `labels` (an older caller) keeps the identity mapping
+    labels = {k.replace("²", "2"): v.replace("²", "2")
+              for k, v in src.get("labels", {n: n for n in src["lanes"]})
+              .items()}
+    for lab in sorted(set(rows) - set(labels)):
+        probs.append("lane table: README row %r is not a published lane "
+                     "label (gate_wire_feed.PUBLISHED) -- a stale or "
+                     "unregistered rating" % lab)
+    for lab, lid in sorted(labels.items()):
+        want = src["lanes"].get(lid)
+        if want is None:
+            probs.append("lane table: published label %s maps to ledger ID "
+                         "%s, which the live table does not have" % (lab, lid))
+            continue
+        m = rows.get(lab)
         if m is None:
-            probs.append("lane table: no row for %s" % name)
+            probs.append("lane table: no row for %s" % lab)
             continue
         for f, v in want.items():
             if int(m.group(f)) != v:
                 probs.append("lane table: %s %s = %s, the live table has %d"
-                             % (name, f, m.group(f), v))
+                             % (lab, f, m.group(f), v))
     rr = _R_ROW.findall(text)
     if len(rr) != 1:
         probs.append("expected ONE shipped `r = {...} min margin ... bar` "
@@ -970,6 +1005,9 @@ def readme_check():
         ("a lane-table C reverted to 2",
          _LANE_ROW.sub(lambda m: m.group(0).replace(
              "| %s |" % m.group("C"), "| 2 |", 1), text, 1), "C = 2"),
+        ("a planted 'I²C 400 kHz' lane label",
+         text.replace("| I²C Fast-mode 397 kHz |", "| I²C 400 kHz |", 1),
+         "is not a published lane label"),
         ("a stale UART-rx T_MIN (224) in the prose",
          text.replace("down to %d" % src["uart"]["tmin"], "down to 224", 1),
          "UART-rx speed paragraph: tmin"),

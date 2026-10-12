@@ -2110,10 +2110,12 @@ W7 refuses every short frame where that happens alone (J_w1 > 0 needs roughly
 measurable, and the **D\* sweep + live window check next in the order is where
 it gets measured**. Recorded, not asserted.
 
-That argument needs one condition: a loading job is never itself W1-delayed,
-i.e. no lane runs two hold loads back to back. It is checked per lane
-(`hold_profile`), and such a lane is reported unbounded rather than given a
-number. No tracked image has one.
+That argument needs one condition: a loading job is never itself W1-delayed.
+A lane that runs two hold loads back to back was reported unbounded rather
+than given a number. ⛔ **"No tracked image has one" was false.** Both 1-Wire
+images do (lane 0 chains write-slot SHIFTs). Their lanes had no bound, and
+pe_asm's 1.6a skipped them. That condition is now proved per gap, below (W8),
+and the skip is closed.
 
 **Re-derived** (`test/clocked_a2_bounds.json`):
 - At its old span (22..25), only ckdense moved (J_w1 = 10 / 9 / 8 / 7):
@@ -2151,6 +2153,74 @@ program where the missing offsets didn't bind. Ruling Z fixed the recurrence.
 ckdense then turned out to be outside the model altogether: it fails 1.6a, so
 it is a declared stress image (ruling DT). The numbers above are kept as they
 were measured.
+
+### W8 — chained hold loads: a loading job is never W1-delayed (accepted 12 Oct)
+
+**Why it is needed.** W6's derivation assumes a hold-*loading* job is never
+itself held back by W1. The 1-Wire lane breaks the old blanket check for that
+assumption: its write-slot SHIFTs follow one another, and each one loads the
+SDA hold.
+
+**Statement.** On lane *l*, let jobs be numbered in release order. Let `g_n` be
+the spacing (the loading action's own delay) between the release of a hold-loading
+job *n* and the release of job *n + 1*, when *n + 1* also loads. If, for every
+such chained pair,
+
+    HS + HOLD_PICK_LAG + (r_l − C)  ≤  g_n
+
+then no job of lane *l* is ever gated by the hold of an earlier job of lane
+*l*. Here `r_l` is the lane's worst-case response (pyRTA primary), computed
+with no self-delay.
+
+**The constants, by name.**
+- `HS + HOLD_PICK_LAG` is **HS + 2**, the HC1-corrected eligibility lag after
+  the pick. That is `program_a2.HOLD_PICK_LAG = 2`, held to the RTL by
+  `model/gate_hold_offset.py`.
+- `r_l − C` is the **pick lateness**: `r_l` bounds release-to-completion, and
+  a job completes `C = 3` cycles after its pick. It is the same quantity J_w1
+  charges in W6.
+
+**Proof (induction on job order within the lane).**
+- *Base.* The first hold-loading job has no earlier hold on this lane, so
+  nothing on the lane gates it.
+- *Step.* Assume every job before *n + 1* met its bound, so job *n* was picked
+  at most `r_l − C` after its release. Its hold makes the lane ineligible
+  until `pick_n + HS + 2 ≤ release_n + (r_l − C) + HS + 2 ≤ release_n + g_n =
+  release_{n+1}`. So when job *n + 1* is released the hold has already
+  expired, and it is not gated.
+- *Why "solve, then check" is sound rather than circular.* The bound used for
+  job *n + 1*'s step depends on the assumption only for jobs **before**
+  *n + 1*. That assumption is the induction hypothesis, never the claim
+  being proved. So computing `r_l` under "no self-delay" and then checking the
+  inequality on every chained gap establishes the assumption for every job.
+  Where the check fails, the lane is refused exactly as before (no bound;
+  1.6a refuses).
+
+**Scope: other lanes' holds never gate this lane.** The W1 gate is per lane.
+`assign ready[gi] = rel_due[gi] & hz_q[gi] & cap_ok;` uses the lane's own
+`hz_q[gi]`, which is derived from its own hold counter
+(`hz_q[i] <= (l_hcnt[i] == ...)`, `src/pe_engine.v`). Another lane's hold
+reaches lane *l* only as interference (release jitter, W6), which `r_l`
+already carries.
+
+**Checked, never assumed.** `program_a2.w1_jitter` checks the inequality after
+the fixed point, with the lane's own `r_l` and the named constants.
+pe_asm must-fires:
+- gaps 100 / 25: accepted / refused;
+- **the edge**: gap 33 = `18 + 2 + (16 − 3)` exactly is accepted, and 32 is
+  refused. The equality is asserted from the live analysis, so an off-by-one
+  in the inequality (the HC1 bug class) is red.
+
+**Measured (all seven 1-Wire arms, `tb_onewire`, 2026-10-12).**
+- Lane 0's worst response is **15** against the bound **r = 16** (pyRTA =
+  ours).
+- Across about 7,000 lane-0 dispatches, **zero** jobs were released into an
+  earlier job's hold. The only `rel_due & ~ready` cycles are 1-cycle episodes
+  of the job in service seeing its own freshly loaded hold before writeback.
+- 1-Wire gaps are ≥ 100 against a window of 20 + 13 = 33.
+
+⭐ Lean: the queued HoldGate brick (d ≥ 34 ⇒ the hold expires before the next
+release) is the same shape stated per d; this is that statement per gap.
 
 ### W7 — the mode floor covers unclocked open-drain frames
 

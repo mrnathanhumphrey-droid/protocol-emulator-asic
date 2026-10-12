@@ -137,6 +137,7 @@ def lane_set(img):
         cap = cap_profile(h, acts)
         out.append({"lane": ln, "blane": bl, "clocked_od": ck_od, "T": T,
                     "loads_hold": loads, "chains": chains,
+                    "chain_gaps": chain_gaps(h, acts),
                     "loads_cap": cap is not None, "cap_lat": cap})
     return out, d_min, k, j_prog
 
@@ -219,6 +220,25 @@ def _hs():
     return hold_bound.bound() + hold_bound.setup()
 
 
+def chain_gaps(h, acts):
+    """The spacings that follow a hold-LOADING action whose successor also
+    loads -- the pairs where a loading job could itself be W1-delayed.
+    [] when the lane has no such chain (same marks as `hold_profile`)."""
+    if h["mode"] != 0 or h["clkpin"] >= N_PINS:
+        return []
+    def marks(a):
+        if is_clocked(h, a):
+            return (True, False)
+        if a["op"] == I.OP_SHIFT and a["level"] == 0:
+            return (True, True)
+        if a["op"] in (I.OP_SHIFTIN, I.OP_READBIT) and a["pin"] == h["pin"]:
+            return (True, True)
+        return (False, False)
+    n = len(acts)
+    return [acts[i]["delay"] for i in range(n)
+            if n > 1 and marks(acts[i])[1] and marks(acts[(i + 1) % n])[0]]
+
+
 def hold_profile(h, acts):
     """(loads_hold, chains) for one lane, from its own actions.
 
@@ -265,11 +285,23 @@ def w1_jitter(ls, hs=None, max_iter=64, src=None):
     """
     hs = _hs() if hs is None else hs
     w1 = [0] * len(ls)
-    for r in ls:
-        if r["loads_hold"] and r["chains"]:
-            return None, ("lane %d runs two hold loads back to back: W1 delays "
-                          "a loading job, the recurrence has no fixed point"
-                          % r["lane"])
+    # ⛔⛔ CHAINED HOLD LOADS (Wilson, WF2 round 2, finding 1 -- the 1-Wire
+    # lane). The derivation below assumes a LOADING job is never itself
+    # W1-delayed, and a lane whose loading actions follow one another breaks
+    # that assumption -- so this used to REFUSE every such lane outright,
+    # and pe_asm's 1.6a then SKIPPED the lane with no bound at all.
+    # ⭐ EXTENDED, BY INDUCTION, NOT REFUSED: a loading job released on its
+    # nominal schedule is picked within r_i - C of its release; its hold makes
+    # the lane ineligible until pick + HS + HOLD_PICK_LAG; so the NEXT loading
+    # job -- released g cycles later, g the loading action's own delay -- finds
+    # the hold already expired iff
+    #     HS + HOLD_PICK_LAG + (r_i - C) <= g        for every chained pair.
+    # Then no loading job is ever W1-delayed (base case: the first job;
+    # step: each one picked on time leaves the next undelayed), the W6 model
+    # below holds unchanged, and the chain costs nothing. The condition is
+    # CHECKED after the fixed point with the lane's OWN r_i; where it fails the
+    # lane is refused exactly as before. 1-Wire: g >= 100 against HS + 2 = 20.
+    chained = [r for r in ls if r["loads_hold"] and r["chains"]]
     for _ in range(max_iter):
         new = []
         for i, r in enumerate(ls):
@@ -289,6 +321,31 @@ def w1_jitter(ls, hs=None, max_iter=64, src=None):
                 return None, "pyRTA gave no bound inside the W1 fixed point"
             new.append(max(0, blk + (rr - C_SHIPPED) - r["T"]))
         if new == w1:
+            # the induction's premise, on every chained lane's own r_i.
+            # ⛔ THE CONSTANTS, BY NAME (Wilson's condition 2): the hold window
+            # is `hs + HOLD_PICK_LAG` = HS + 2, the HC1-corrected eligibility
+            # lag after the pick (`gate_hold_offset.py` holds it to the RTL),
+            # and the lateness is `rr - C_SHIPPED` = r_i - C, the PICK
+            # lateness -- the same quantity J_w1 above charges and the bound
+            # r_i bounds (release to completion = pick lateness + C). Proof:
+            # docs/A2_FRAMEWORK.md, "Chained hold loads".
+            for r in chained:
+                i = ls.index(r)
+                lanes = [ls[k]["blane"] if k == i else
+                         _with_j(ls[k]["blane"], ls[k]["blane"].J + w1[k])
+                         for k in range(len(ls))]
+                rr = (pyrta_bound.bound(src, lanes, i)[0] if src
+                      else response_time_b(lanes[i], lanes)["r"])
+                g = min(r["chain_gaps"])
+                if rr is None or hs + HOLD_PICK_LAG + (rr - C_SHIPPED) > g:
+                    return None, (
+                        "lane %d runs two hold loads back to back %d cycles "
+                        "apart, inside the hold window HS + %d + (r - C) = %s: "
+                        "a loading job can itself be W1-delayed and the "
+                        "recurrence has no fixed point"
+                        % (r["lane"], g, HOLD_PICK_LAG,
+                           None if rr is None
+                           else hs + HOLD_PICK_LAG + rr - C_SHIPPED))
             return w1, None
         w1 = new
     return None, "W1 jitter did not converge in %d iterations" % max_iter
@@ -349,9 +406,70 @@ def queue_slot(img, src=None):
             continue
         p = pyrta_bound.bound(src, fullp, i)[0] if fullp else None
         rr = max(x for x in (ours, p) if x is not None)
+        # ⭐ BOTH FIGURES ARE KEPT (WF2 / V3-T): `r` stays the max, the CI-safe
+        # form 1.6a refuses on; V3-T judges the bench against `r_pyrta`, the
+        # PRIMARY bound, so it needs it separately.
         out[str(r["lane"])] = {"r": rr, "T": r["T"], "ok": rr <= r["T"],
-                               "why": None}
+                               "why": None, "r_ours": ours, "r_pyrta": p}
     return out
+
+
+#: WF2 / V3-T: the per-lane response bound the bench's scheduler-conformance
+#: check judges every unclocked transmitting lane against.
+RESP_JSON = os.path.join(ROOT, "test", "lane_response_bounds.json")
+
+
+def response_images():
+    """(name, img) for every image with an UNCLOCKED SHIFT on some lane:
+    the tracked/generated `test/*.hex` (not probe_*), plus the bench set's
+    generated `probe_cov_*` images that carry one."""
+    # ⛔ THE GENERATED IMAGES ARE BUILT HERE, by the sweep's own builder, so the
+    # set does not depend on whether a sweep ran first (CI's freshness check
+    # and this writer must see the same universe).
+    import benchset
+    for top, cfg in sorted(benchset.CONFIG.items()):
+        err = benchset.generate(cfg, top)
+        if err:
+            raise RuntimeError("response_images: %s" % err)
+    out = []
+    for p in sorted(glob.glob(os.path.join(ROOT, "test", "*.hex"))):
+        n = os.path.basename(p)
+        if n.startswith("probe_") and not n.startswith("probe_cov_"):
+            continue
+        # ⛔ NO `except: continue` (gate_except, measured): an image that does
+        # not load must stop the writer, not drop silently out of the bound set
+        img = dgf.load(p)
+        if any(a["op"] == I.OP_SHIFT and not is_clocked(h, a)
+               for _ln, h, acts in lanes_of(img) for a in acts):
+            out.append((n, img))
+    return out
+
+
+def response_bounds(src, images=None):
+    """{image: {"lanes": {lane: {r_pyrta, r_ours, T, dtol, why}}}}.
+
+    r is 1.6a's own quantity (`queue_slot`): worst-case response from the
+    NOMINAL release to completion, W1 jitter on every lane. `dtol` is the
+    lane header's declared tolerance. An image with a zero release spacing has
+    no lane set (refused by pe_asm) and gets no bound; an overloaded one gets
+    r = None with the reason -- the bench reports both as UNBOUNDED, never as a
+    pass."""
+    blob = {}
+    for name, img in (images if images is not None else response_images()):
+        lanes = {}
+        try:
+            q = queue_slot(img, src)
+        except zs.ZeroSpacingError as exc:
+            blob[name] = {"lanes": {}, "why": "zero release spacing: %s"
+                          % str(exc)[:80]}
+            continue
+        hdr = {str(ln): h for ln, h, _a in lanes_of(img)}
+        for ln, v in q.items():
+            lanes[ln] = {"r_pyrta": v.get("r_pyrta"), "r_ours": v.get("r_ours"),
+                         "T": v["T"], "dtol": int(hdr[ln]["dtol"]),
+                         "why": v.get("why")}
+        blob[name] = {"lanes": lanes, "why": None}
+    return blob
 
 
 def derive(img, src=None):
@@ -618,6 +736,24 @@ def main() -> int:
     print()
     print("  -> %s (%d image(s))" % (os.path.relpath(OUT_JSON, ROOT),
                                      len(blob)))
+    # ⭐ WF2 / V3-T: the per-lane response bound for every image that runs an
+    # unclocked transmitter, pyRTA-primary, written beside the clocked one.
+    rb = response_bounds(src)
+    print()
+    print("  %-26s %-5s %-8s %-7s %-5s %s" % ("image (V3-T)", "lane",
+                                             "r(pyRTA)", "r(ours)", "dtol",
+                                             "note"))
+    for name, res in rb.items():
+        if not res["lanes"]:
+            print("  %-26s %s" % (name, res["why"]))
+        for ln, e in sorted(res["lanes"].items(), key=lambda kv: int(kv[0])):
+            print("  %-26s %-5s %-8s %-7s %-5s %s"
+                  % (name, ln, e["r_pyrta"], e["r_ours"], e["dtol"],
+                     e["why"] or ""))
+    with io.open(RESP_JSON, "w", encoding="utf-8", newline="\n") as fh:
+        json.dump(rb, fh, indent=1, sort_keys=True)
+    print("  -> %s (%d image(s))" % (os.path.relpath(RESP_JSON, ROOT),
+                                     len(rb)))
     return 0
 
 

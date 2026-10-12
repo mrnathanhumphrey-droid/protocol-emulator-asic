@@ -538,6 +538,24 @@ def check_receive_pin(lanes, headers):
 # ---------------------------------------------------------------------------
 # 1.6t: the program's J, computed HERE and not on the chip
 # ---------------------------------------------------------------------------
+def ws2812_sub3(rearm_d):
+    """THE PROGRAM THE DELAY-0 REARM RULING IS ABOUT, in one place: the WS2812
+    3-sub-bit lane (SHIFT-only at d = 21 on uo_out[0], queue 0, its loop closed
+    by a REARM at `rearm_d`) beside four push-pull lanes toggling at d = 20.
+    `rearm_d = 0` is the build pe_asm once ACCEPTED ("J 1") whose wire stream
+    was not its feed; `rearm_d = 21` is its control. Used by pe_asm's own
+    must-fire (refused / accepted) and by `test/run_wirefeed_mf.py` (the old
+    image's wire stream must be RED under V3, the control's green)."""
+    lanes_b = {ln: [(OP_LEVEL, p, 1, 20, 0), (OP_LEVEL, p, 0, 20, 0),
+                    (OP_REARM, 0, 1, 20, 0)]
+               for ln, p in zip((1, 2, 3, 4), (9, 10, 11, 0))}
+    headers_b = {ln: (p, PIN_NONE, 1, 20, 20, 40)
+                 for ln, p in zip((1, 2, 3, 4), (9, 10, 11, 0))}
+    lanes_b[0] = [(OP_SHIFT, 8, 0, 21, 0, 7), (OP_REARM, 0, 1, rearm_d, 0)]
+    headers_b[0] = (8, PIN_NONE, 1, 21, 21, 42)
+    return lanes_b, headers_b
+
+
 def check_zero_spacing(lanes, engine_text=None):
     """DELAY-0 REARM RULING: refuse any zero release spacing -- a delay-0
     action other than an ARM, whose delay 0 means "no timeout" and whose lane
@@ -918,8 +936,19 @@ def check_queue_slot(img):
     src = pinned_pyrta(quiet=True)
     for ln, v in sorted(program_a2.queue_slot(img, src).items(),
                         key=lambda kv: int(kv[0])):
+        # ⛔⛔ NO SKIP PATH (Wilson, WF2 round 2, finding 1). This line used to
+        # `continue` with the comment "overload: refused by compute_j" -- but
+        # `assemble` never calls compute_j, and the None was not only overload:
+        # the 1-Wire images (lane 0 chaining hold loads) had NO bound on every
+        # lane and were ACCEPTED here. A missing result is red, the same lesson
+        # as the delay-0 REARM hole: a lane with no response bound is REFUSED.
         if v["r"] is None:
-            continue                      # overload: refused by compute_j
+            raise Reject(
+                "lane %s has NO worst-case response bound in this program (%s). "
+                "Condition 1.6a needs r_i <= t_i, and a lane with no r_i cannot "
+                "be shown to clear its own next release -- so the program is "
+                "refused, never certified around the gap."
+                % (ln, v.get("why") or "no bound"))
         if not v["ok"]:
             raise Reject(
                 "lane %s can still be pending at its own next release: its "
@@ -1571,6 +1600,56 @@ def main() -> int:
                             else "*** WRONG: %s" % (msg[:50] or "accepted")))
     rc |= 0 if ok else 1
 
+    # ---- MUST-FIRE: chained hold loads, and 1.6a's no-skip (WF2 round 2) ----
+    # ⭐ The 1-Wire shape: an open-drain lane with a real clock pin whose
+    # unclocked level-0 SHIFTs follow one another (each loads the SDA hold).
+    # At a 100-cycle gap the induction holds (HS + 2 + (r - C) <= gap) and the
+    # lane is BOUNDED; at 25 the next loading job can itself be W1-delayed, the
+    # lane has NO bound, and 1.6a must REFUSE it -- it used to skip it.
+    print()
+    print("  --- must-fire: chained hold loads / 1.6a refuses an unbounded lane ---")
+    # ⭐ THE EDGE (Wilson's condition 3): the inequality's own boundary, so an
+    # off-by-one in it -- the HC1 bug class -- is caught. At gap 33 the window
+    # is EXACTLY met (HS 18 + HOLD_PICK_LAG 2 + (r 16 - C 3) = 33, asserted
+    # below from the live analysis, not typed): accepted; at 32 refused.
+    import program_a2 as _pa
+    from bursty import C_SHIPPED as _C
+    edge_lanes = {0: [(OP_SHIFT, 2, 0, 33, 0, 7), (OP_SHIFT, 2, 0, 33, 0, 7),
+                      (OP_LEVEL, PIN_NONE, 0, 100, 0),
+                      (OP_REARM, 0, 1, 100, 0)]}
+    edge_img = assemble(edge_lanes, {0: (2, 4, 0, 150, 255, 255)},
+                        park_pins={1: 0, 2: 5, 3: 6, 4: 7})
+    edge_r = _pa.queue_slot(edge_img, None)["0"]["r"]
+    edge_w = _pa._hs() + _pa.HOLD_PICK_LAG + (edge_r - _C)
+    ok = edge_w == 33
+    print("    %-50s %s" % ("edge: HS + HOLD_PICK_LAG + (r - C) at gap 33",
+                            ("= %d, exactly the gap" % edge_w) if ok
+                            else "*** WRONG: = %d, not 33 -- re-derive the "
+                                 "edge pair" % edge_w))
+    rc |= 0 if ok else 1
+    for name, gap, want_reject in (("chained hold loads 100 apart", 100, False),
+                                   ("chained hold loads 25 apart", 25, True),
+                                   ("edge: gap == window + lateness (33)", 33,
+                                    False),
+                                   ("edge: gap == window + lateness - 1 (32)",
+                                    32, True)):
+        lanes_b = {0: [(OP_SHIFT, 2, 0, gap, 0, 7), (OP_SHIFT, 2, 0, gap, 0, 7),
+                       (OP_LEVEL, PIN_NONE, 0, 100, 0),
+                       (OP_REARM, 0, 1, 100, 0)]}
+        try:
+            assemble(lanes_b, {0: (2, 4, 0, 150, 255, 255)},
+                     park_pins={1: 0, 2: 5, 3: 6, 4: 7})
+            got, msg = False, ""
+        except Reject as e:
+            got, msg = True, str(e)
+        ok = got == want_reject and (not got or "NO worst-case response "
+                                     "bound" in msg)
+        print("    %-50s %s" % (name, ("REJECTED (no bound)" if got
+                                        else "accepted (bounded)")
+                                if ok else "*** WRONG: %s" % (msg[:70] or
+                                                             "accepted")))
+        rc |= 0 if ok else 1
+
     # ---- MUST-FIRE: the delay-0 REARM ruling (Wilson, must fix before lock) --
     # ⭐ THE EXACT CASE THAT WAS ACCEPTED: the WS2812 3-sub-bit lane, SHIFT-only
     # at d = 21 on uo_out[0], its loop closed by a delay-0 REARM, beside four
@@ -1582,18 +1661,7 @@ def main() -> int:
     # accepted; and with the ARM's anchors gone the ARM is refused (unproven).
     print()
     print("  --- must-fire: delay-0 REARM -- a zero release spacing is refused ---")
-    busy = {ln: [(OP_LEVEL, p, 1, 20, 0), (OP_LEVEL, p, 0, 20, 0),
-                 (OP_REARM, 0, 1, 20, 0)]
-            for ln, p in zip((1, 2, 3, 4), (9, 10, 11, 0))}
-    busy_h = {ln: (p, PIN_NONE, 1, 20, 20, 40)
-              for ln, p in zip((1, 2, 3, 4), (9, 10, 11, 0))}
-
-    def sub3(rearm_d):
-        lanes_b = dict(busy)
-        lanes_b[0] = [(OP_SHIFT, 8, 0, 21, 0, 7), (OP_REARM, 0, 1, rearm_d, 0)]
-        headers_b = dict(busy_h)
-        headers_b[0] = (8, PIN_NONE, 1, 21, 21, 42)
-        return lanes_b, headers_b
+    sub3 = ws2812_sub3
 
     arm0 = {0: [(OP_ARM, 3, 0, 0, 0), (OP_LEVEL, PIN_NONE, 0, 25, 0),
                 (OP_SHIFTIN, 3, 0, 25, 0, 8), (OP_REARM, 0, 1, 25, 0)]}

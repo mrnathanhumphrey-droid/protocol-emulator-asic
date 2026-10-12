@@ -106,6 +106,9 @@ module tb_half;
   // ⭐ the ACK bit: lane 0's single SHIFTIN, sampled with SDA released
   integer    n_ack, n_rx_other;
   reg        ack_presented, ack_seen;
+  // the peer's ACK ownership window (see the run loop)
+  integer    ack_t0 = -1, ack_gap = 0, last_sda_shift = -1;
+  reg        ack_low = 1'b0;
 
   integer    fails;
   reg        primed_seen, cfgerr_seen;
@@ -246,20 +249,34 @@ module tb_half;
       end
       peer_hist = {peer_hist[SYNC_MAX-1:0], peer[P_MISO]};
       peer[P_MISO] = cyc[5];
-      // the ACK: hold SDA low in the window after the eighth data bit, which
-      // is where lane 0's SHIFTIN lands. Presented continuously; what matters
-      // is the level AT the sample, recorded below.
-      peer[P_SDA]  = 1'b0;
+      // the ACK: SDA low in the window after the eighth data bit, which is
+      // where lane 0's SHIFTIN lands -- and ONLY there.
+      // ⛔⛔ IT WAS PRESENTED CONTINUOUSLY, and that is a bus conflict: the
+      // peer held the line low under the chip's own data bits, so every 1 the
+      // chip sent read 0 on the bus (WF2's V3, measured: 329 of 993 bits).
+      // This bench's own TX check reads the chip's drive decision, so it never
+      // saw it. ⇒ The peer now owns the line only from 3 cycles before the
+      // ACK SHIFTIN (the pad synchroniser is 2 deep) until lane 0's next SHIFT,
+      // the gap taken from the lane's own measured bit spacing.
+      if (ack_t0 >= 0 && ack_gap > 0 && cyc >= ack_t0 + ack_gap - 3)
+        ack_low = 1'b1;
+      peer[P_SDA]  = ack_low ? 1'b0 : 1'b1;
 
       if (drive) begin
         n_shift_all = n_shift_all + 1;
         // ---- TX: a SHIFT on either data pin ---------------------------
         if (d_op == 3'd1) begin
           j = (d_pin == P_SDA) ? 0 : 1;
+          if (j == 0) begin                // lane 0 drives: the peer lets go
+            ack_low = 1'b0; ack_t0 = -1;
+            if (last_sda_shift >= 0) ack_gap = cyc - last_sda_shift;
+            last_sda_shift = cyc;
+          end
           nshift[j] = nshift[j] + 1;
           tacc[j]   = {tx_bit, tacc[j][7:1]};
           tbit[j]   = tbit[j] + 1;
           if (tbit[j] == 8) begin
+            if (j == 0) ack_t0 = cyc;      // the 8th bit: the ACK follows
             if (tn[j] < MAXB) tgot[j][tn[j]] = tacc[j];
             tn[j]   = tn[j] + 1;
             tbit[j] = 0;

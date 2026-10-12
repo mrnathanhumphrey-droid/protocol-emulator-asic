@@ -128,7 +128,11 @@ def conditions(name, img):
     # than the published number -- the safe side for a refusal.
     if OVERLOAD not in out:
         q = pa.queue_slot(img)
-        if any(v["r"] is not None and not v["ok"] for v in q.values()):
+        # ⛔ A LANE WITH NO BOUND BREAKS 1.6a TOO (WF2 round 2): `r is not
+        # None and ...` used to skip it, so an image whose lanes had no
+        # response bound read as ADMISSIBLE. Overload is declared above; any
+        # other missing bound is QUEUE -- the condition it cannot show.
+        if any(v["r"] is None or not v["ok"] for v in q.values()):
             out.add(QUEUE)
     return out, dm, pa.utilisation(ls)
 

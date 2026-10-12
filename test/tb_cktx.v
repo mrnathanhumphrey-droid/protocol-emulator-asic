@@ -66,6 +66,12 @@ module tb_cktx;
     hf_init;
     hf_set(0, 8'h5B, 8'hC4, 8'h1E, 8'hA7);    // rev DA 23 78 E5
     hf_set(1, 8'h2D, 8'h96, 8'hE1, 8'h4C);    // rev B4 69 87 32
+    // ⛔⛔ QUEUES 2 AND 3 TOO (WF2, Wilson ruling 3: "bench feeder too slow ->
+    // fix the bench"). Only 0 and 1 were fed, so on `ckfive` -- whose lanes
+    // 2 and 3 pop queues 2 and 3 -- every load there was an UNDERRUN (V3
+    // measured 9 and 2): the bench starved a correctly written program.
+    hf_set(2, 8'h3A, 8'h71, 8'hD4, 8'h0B);    // rev 5C 8E 2B D0
+    hf_set(3, 8'h6E, 8'h12, 8'hB9, 8'hF4);    // rev 76 48 9D 2F
     $display("# cktx img=%0s ncyc=%0d starve=%0d+%0d", imgfile, ncyc,
              starve, starve_len);
 
@@ -91,7 +97,7 @@ module tb_cktx;
       @(posedge clk);
       // the feeder tops up only queues in `hf_mask`, so clearing it starves
       if (starve != 0 && cyc == starve)              hf_mask = 4'b0000;
-      if (starve != 0 && cyc == starve + starve_len) hf_mask = 4'b0011;
+      if (starve != 0 && cyc == starve + starve_len) hf_mask = 4'b1111;
     end
     $display("CKTX underrun=%b config_err=%0b tx_full=%0b pushes=%0d pops=%0d",
              dut.u_eng.lane_underrun, dut.u_eng.config_err,

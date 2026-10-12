@@ -172,7 +172,9 @@ def run(vvp, img, ncyc, starve, starve_len):
         nb = len(fh.read().split())
     r = subprocess.run([tool("vvp"), vvp, "+IMG=" + img.replace(os.sep, "/"),
                         "+NBYTES=%d" % nb, "+NCYC=%d" % ncyc,
-                        "+STARVE=%d" % starve, "+STARVE_LEN=%d" % starve_len],
+                        "+STARVE=%d" % starve, "+STARVE_LEN=%d" % starve_len]
+                       # ⭐ WF2 ruling 3: a starve window is a DECLARED underrun
+                       + (["+V3_UNDERRUN=2"] if starve else []),
                        cwd=ROOT, capture_output=True, encoding="utf-8",
                        errors="replace")
     txt = (r.stdout or "") + (r.stderr or "")

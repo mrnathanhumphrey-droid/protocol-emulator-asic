@@ -376,6 +376,43 @@ four tagged queues (`TXN = 4`, `TXD = 2`) since the tag was added, and
 - **A lane that consumes with the FIFO empty records an underrun** (status
   bit 1), per lane. Staging one byte ahead is what the FIFO is for.
 
+### Minimum host feed rate (the host contract for TX)
+
+An underrun on a correctly fed program is a **host-contract violation**: the
+lane shifts zeros the host did not send (an underrunning SHIFT shifts in 0s,
+and a queue is not refilled retroactively). Correct feeding, per TX lane:
+
+- **B, the lane's byte time.** The cycles between two consecutive byte loads
+  on the lane: the sum of the delays of **every** action it runs per byte,
+  framing included (a UART start and stop bit, an SPI chip-select). The
+  shifting part alone is a lower bound, and using it is the safe direction
+  (a smaller `B` is a stricter feed):
+  - unclocked `SHIFT` with count `c` at delay `d`: `(c + 1) · d`;
+  - clocked `SHIFT`: `(c + 1)` LOW + HIGH pairs, each `d + d_HIGH`
+    (`d_HIGH = d`, or `d/2` on a HALF_HIGH lane; an open-drain HIGH also
+    waits for the observed rise).
+- **Rate:** on average, at least **one byte per `B` cycles** into that
+  lane's queue.
+- **Latency:** the next byte loads at the end of each byte, from a 2-deep
+  queue, so **refill a queue within `B` cycles of each pop**. That leaves the
+  one staged byte as the margin.
+- **Channel capacity:** a byte is two PUSH edges. At the pacing the bench
+  uses (`test/host_feed.vh`: 2 cycles setup, 3 high, 1 low per nibble), that
+  is **12 cycles per byte**, shared by all four queues. So the lanes a host
+  feeds together need `Σ 12 / B_q ≤ 1`.
+
+Worked examples at 50 MHz:
+
+| lane configuration | B | feed at least | refill within |
+|---|---|---|---|
+| UART-tx 115200 8N1: start + 8 data + stop at d = 434 | 4,340 cycles | 11.5 kB/s | 86.8 µs |
+| SPI-tx 1 MHz, clocked `SHIFT` c = 7, d = 25 (push-pull), back-to-back bytes | 400 cycles | 125 kB/s | 8 µs |
+
+✓ **Checked in simulation:** layer V3 in `test/clocked_conform.vh` fails any
+underrun on a fed arm (`clocked_conform[V3-U]`). A bench that pushes nothing
+by design declares `+V3_UNDERRUN=1`, and is then held to "no push, and every
+load underran".
+
 ⛔ **This section previously described something else, and that was a real
 defect rather than loose wording.** The RTL took `host_data` from `uio_q1` —
 *eight bits of the protocol bus* — and pushed on `ui_in[0]`, while `ui_in[4:1]`

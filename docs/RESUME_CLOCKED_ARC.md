@@ -164,6 +164,36 @@ timing claim.
 **Lock criteria include LN1 (Wilson):** the FULL LN1 run — 200,000 rows per arm,
 `gh workflow run test.yaml --ref <branch> -f ln1_rows=200000` — dispatched on
 the exact `sub-v1` SHA and green, not only the 20k push run.
+**Findings about our own claims (ledger, 2026-10-12, WF2):**
+- ⛔ **"Five lanes" rested on per-feature tests, not end-to-end witnesses.**
+  Until WF2, the five published lanes were supported by checks of their parts:
+  clocked bit values (V1/V2, the chip's own drive), the RX path (rx_e2e),
+  timing bounds per lane set (A2/pyRTA), and the pin map. **No check ran an
+  accepted program at the published rate and compared what reached the wire
+  with what was fed, count exact**, except UART-rx. **How it was caught:** the
+  delay-0 REARM ruling's step 4 asked for that check on every accepted image,
+  and building its registry (`model/gate_wire_feed.py`, `PUBLISHED`) showed
+  four of five lanes with no such witness. SPI-target has no functional
+  program at all: `corpus_sptgt` is the async MISO-clear mechanism image, not
+  a transfer. All four are OWED and block lock.
+- ⛔ **1.6a skipped a lane with no response bound, and the 1-Wire images
+  passed through that skip.** `pe_asm.check_queue_slot` did `continue` on
+  `r is None` ("overload: refused by compute_j" — but `assemble` never calls
+  `compute_j`), and N1 did the same. The 1-Wire lane chains hold-loading
+  SHIFTs, which W1's model refused outright ("a loading job is never itself
+  W1-delayed"), so every lane of both 1-Wire images had NO bound and was
+  certified anyway. Same shape as the delay-0 hole. **Fixed:** 1.6a and N1
+  refuse a lane with no bound, with no skip path. **Diagnosed as a scope gap,
+  not unbounded interference:** W1's model is extended by induction (a
+  chained loading job is never W1-delayed iff `HS + 2 + (r − C) ≤` the
+  spacing after it, checked after the fixed point; otherwise still refused).
+  1-Wire: gap ≥ 100 against 20 + 13 = 33. Bound now **r = 16** on lane 0
+  (pyRTA = ours). **Measured on all seven 1-Wire arms:** worst response 15
+  ≤ 16, and no lane-0 job was ever released into an earlier job's hold. The
+  only hold-blocked cycles are 1-cycle episodes of the job in service itself.
+  Swept: before the fix, exactly `onewire_image` and `onewire_fpga_image`
+  had unbounded lanes; after it, no accepted image has one.
+
 **Lock checklist, owed items:**
 - **Wire == feed (Wilson, delay-0 ruling step 4): `model/gate_wire_feed.py`
   must report `OWED: 0` at the `sub-v1` SHA.** WF1 (the registry) landed with

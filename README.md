@@ -87,8 +87,8 @@ Five lanes, derived from the protocols rather than chosen:
 | lane | `T` | `C` | `n` | `t` | `J` | `D_tol` |
 |---|---|---|---|---|---|---|
 | UART-tx 115200 | 434 | 3 | 1 | 434 | 1 | 216 |
-| SPI-tx 1 MHz | 25 | 3 | 1 | 25 | 1 | 23 |
-| I²C 400 kHz | 45 | 3 | 1 | 45 | 2 | 15 |
+| SPI-master 1 MHz | 25 | 3 | 1 | 25 | 1 | 23 |
+| I²C Fast-mode 397 kHz | 45 | 3 | 1 | 45 | 2 | 15 |
 | UART-rx 115200 | 4140 | 3 | 10 | 414 | 1 | 213 |
 | SPI-target 1 MHz | 400 | 3 | 16 | 25 | 1 | 17 |
 

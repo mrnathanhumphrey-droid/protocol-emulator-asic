@@ -70,6 +70,20 @@ read 8; reset, CCh 44h, poll; reset, CCh BEh, read 9) into symbols
 host issues reset / write-bit / read-bit, the line driver owns the timing).
 Every timing-critical edge and sample is on-chip and exact.
 
+**Certification status (WF2 round 2, 2026-10-12).** Until today pe_asm's 1.6a
+had **no response bound** for this program and accepted it through a skip
+path. Lane 0 chains hold-loading SHIFTs, which W1's model refused outright.
+That skip is closed, and a lane with no bound is now refused. W1's model is
+extended to chained hold loads by induction. A chained loading job is never
+W1-delayed iff `HS + 2 + (r − C)` is at most the spacing after it, and that
+is checked, never assumed. Lane 0 is now bounded at **r = 16** (pyRTA =
+ours). The measured worst response is **15** on all seven 1-Wire arms, and
+no job was ever released into an earlier job's hold.
+⭐ **Certified by pe_asm under the back-to-back hold extension (accepted 12
+Oct).** The proof, its constants, its edge must-fire (gap 33 = window +
+lateness exactly accepted, 32 refused) and these measurements are in
+`docs/SPEC_V4_CLOCKED_HIGH_PHASE.md`, §W8.
+
 ## Wiring (TT and the Puzhi PA100T-EDU image)
 
 * `test/onewire_image.hex` (TT) and `test/onewire_fpga_image.hex` (PA100T,
