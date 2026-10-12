@@ -21,7 +21,7 @@
  * {stop, d7..d1} from the mid-stop sample -- the ISA has no compare, so the
  * framing check is this bench's (the host's): bit 7 of every second byte.
  *
- * Plusargs: IMG NBYTES (required) BITP(64) ERR(0) NFR(40) SEED(1)
+ * Plusargs: IMG NBYTES (required) BITP(434) ERR(0) NFR(40) SEED(1)
  *           BADSTOP(-1: frame index sent with stop = 0 -- the framing must-fire)
  * Verdict: `UART-RX: ok -- ...` or `*** FAIL uart_rx: ...`.
  */
@@ -135,7 +135,7 @@ module tb_uartrx;
     if (!$value$plusargs("NBYTES=%d", img_bytes)) begin
       $display("tb_uartrx: FATAL -- +NBYTES=<n> is required."); $finish;
     end
-    if (!$value$plusargs("BITP=%d", bitp)) bitp = 64;
+    if (!$value$plusargs("BITP=%d", bitp)) bitp = 434;
     if (!$value$plusargs("ERR=%d", err)) err = 0;
     if (!$value$plusargs("NFR=%d", nfr)) nfr = 40;
     if (!$value$plusargs("SEED=%d", seed)) seed = 1;

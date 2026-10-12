@@ -170,16 +170,45 @@ the exact `sub-v1` SHA and green, not only the 20k push run.
 - A pinned pyRTA clone in a STABLE location outside any scratch directory: the
   scratch clone lost a tracked file (`py.typed`) to something outside the repo,
   and every pyRTA gate refused it until it was restored.
-- **For Wilson (found by the CE5b probe, docs/CE5_LOG.md Part D): a delay-0
-  `REARM` is invisible to the admissibility screen.** `pe_asm.compute_j` and
-  N1's `refill_dmin` take d_min over POSITIVE delays only; a SHIFT-only lane at
-  d = 21 ending in a delay-0 REARM, beside four d = 20 lanes, was ACCEPTED
-  ("d_min 20, J 1") and its SHIFT writebacks were spaced 3–139 cycles (wire
-  stream ≠ fed stream). Same lane with the REARM at d = 21: 20–54. Ruling owed:
-  is a delay-0 REARM a zero spacing for D*?
-- **For Wilson (SP2/P3):** the implicit default park pin (1) is refused only on
-  a drive-class conflict, because `corpus_i2c` parks on its own open-drain SCL.
-  Explicit park pins are refused on any overlap.
+- ✅ **Delay-0 REARM — RULED and FIXED (Wilson, must-fix-before-lock).** A
+  delay-0 action is a ZERO release spacing; pe_asm refuses it (no J exists),
+  except an ARM's delay 0 ("no timeout": the lane waits on its edge — RTL
+  anchors E1–E3 in `model/zero_spacing.py`; a missing anchor withdraws the
+  exemption). Applied in `pe_asm.assemble` (unconditionally — no registry
+  entry may take it), `compute_j`, N1's `refill_dmin` (reads 0) and
+  `program_a2.lane_set` (refuses: 1.6a's input). Must-fires in `pe_asm`: the
+  exact 3-sub-bit case refused (its d = 21-REARM control accepted), a delay-0
+  LEVEL refused, a delay-0 ARM accepted, anchor E2 removed → the ARM refused,
+  and the old assembler's image → `refill_dmin` 0 and `lane_set` refused.
+  **Sweep of the tracked images:** only the three UART-rx images had a
+  zero spacing (stop SHIFTIN → REARM → ARM, all delay 0); the five other
+  delay-0 hits are ARMs (no timeout). The shipped UART-rx program was itself
+  a second instance: beside four d = 20 lanes it was ACCEPTED ("J 1") and
+  mis-received at −3 % baud. → rebuilt, below.
+- ✅ **UART-rx rebuilt (Wilson's (a)).** Stop SHIFTIN and REARM at D* = 20;
+  bench at the board's rate, **T = 434** (115200 baud at 50 MHz). The delay-0
+  build is RETIRED (not declared). **Speed limit, published: T_MIN = 232
+  cycles/bit = 215.5 kbaud at 50 MHz** — the fastest certified rate for this
+  program. Measured (−3/0/+3 %, 40 frames, back-to-back exercised):
+  failures at T = 192, 204, 216 (seed-dependent); clean at 224 (8 seeds) and
+  232 (16 seeds alone, 8 beside four d = 20 lanes). `run_uartrx` sweeps ±3 %
+  at both T = 434 and T_MIN; `uart_rx.build` refuses T_MIN − 1.
+  ⚠ The "edge" must-fire is now priced at +2/+3 % only: at T = 434 a fast peer
+  pulls the edge sample into the bit (−2 % passed); the fixed ~10-cycle
+  latency was 16 % of a bit at T = 64, 2 % at 434. ⚠ README's prose does not
+  state the speed limit yet (Nathan's text).
+- **Board record (PA100T-EDU, CH340E at COM3), rebuilt image, 2026-10-12:**
+  bitstream WNS +10.104 ns / WHS +0.050 ns; nominal 115200, seeds 1–3 × 600
+  frames = **3,600 bytes exact**; **112300 (−2.5 %)** and **118100 (+2.5 %)**,
+  seed 4 × 600 frames, 1,200 bytes each exact; framing reported on every
+  BREAK frame. PC loader: nostop load → 1.00 byte/frame, corrupt → refused,
+  reload → 2.00. Sim twins (`tb_fpga_uart` ±2.5 % seeds 1–2,
+  `tb_fpga_loader`) green on the same images.
+  *History:* the same three runs (3,600 bytes; ±2.5 %) were first made with
+  the delay-0 build; they are superseded by the above and no longer the claim.
+- ✅ **SP2/P3 — one rule (Wilson).** A park overlap is allowed iff
+  release-only, proven from RTL anchors (`model/park_class.py`); explicit and
+  implicit alike. See docs/CE5_LOG.md.
 - **WS2812 (CE5b) is NOT claimable** against the Worldsemi datasheet (T0H max
   380 ns < D* = 400 ns at 50 MHz); the earlier "feasible" verdict is withdrawn
   in docs/CE5_LOG.md Part D.

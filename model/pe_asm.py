@@ -52,6 +52,7 @@ import hold_bound                         # noqa: E402
 import count_ranges                       # noqa: E402  ruling SP2/P1
 import nonadmissible                      # noqa: E402  ruling SP2/P4
 import park_class                         # noqa: E402  ruling SP2/P3
+import zero_spacing                       # noqa: E402  delay-0 REARM ruling
 # ⭐ D2's per-program floor reuses ruling S's derivation and gate_um10204's
 # transcribed table: one model of r_i, one table of minima, no copies here.
 import gate_um10204 as um                 # noqa: E402
@@ -537,6 +538,19 @@ def check_receive_pin(lanes, headers):
 # ---------------------------------------------------------------------------
 # 1.6t: the program's J, computed HERE and not on the chip
 # ---------------------------------------------------------------------------
+def check_zero_spacing(lanes, engine_text=None):
+    """DELAY-0 REARM RULING: refuse any zero release spacing -- a delay-0
+    action other than an ARM, whose delay 0 means "no timeout" and whose lane
+    waits on its edge (`model/zero_spacing.py`, RTL anchors E1-E3; with an
+    anchor gone the ARM is refused too). No J exists for a lane that
+    dispatches back to back, so the program is refused, never quoted."""
+    try:
+        zero_spacing.check([(ln, i, a[0], a[3]) for ln in sorted(lanes)
+                            for i, a in enumerate(lanes[ln])], engine_text)
+    except zero_spacing.ZeroSpacingError as exc:
+        raise Reject(str(exc))
+
+
 def compute_j(lanes, spl=2):
     """`J` from the program's minimum inter-action delay, per gate_j_program.
 
@@ -564,6 +578,11 @@ def compute_j(lanes, spl=2):
             "holds only at SPL = 2. No J is published for SPL = 1: it would "
             "need its own derivation and its own measured check."
             % (spl, jp.D_STAR))
+    # ⛔⛔ DELAY-0 REARM RULING (Wilson): a delay-0 action is a ZERO spacing,
+    # and filtering `d > 0` below used to make it invisible -- the WS2812
+    # 3-sub-bit lane and the old UART-rx chain were both "J 1" here. Refused
+    # FIRST, so the filter below only ever drops an exempt ARM's "no timeout".
+    check_zero_spacing(lanes)
     delays = [d for ln in lanes for (_o, _p, _l, d, _q) in lanes[ln] if d > 0]
     if not delays:
         raise Reject("the program has no positive action delay, so d_min is "
@@ -805,6 +824,12 @@ def assemble(lanes, headers, park_pins=None, timing_checks=True,
             raise Reject(str(exc))
     park_pins = park_pins or {}
     lanes, counts = split_counts(lanes)
+    # ⛔⛔ DELAY-0 REARM RULING: `assemble` never called `compute_j`, and its
+    # 1.6a verdict (`check_queue_slot`) read the same positive-delays-only
+    # lane set -- the path that certified the WS2812 3-sub-bit build. Checked
+    # here, UNCONDITIONALLY: no registry entry may take a zero spacing (Wilson:
+    # the delay-0 build is retired, not declared).
+    check_zero_spacing(lanes)
     check_open_drain_bank(headers, park_pins)
     check_park_overlap(lanes, headers, park_pins)
     check_queue_ownership(lanes)
@@ -1545,6 +1570,107 @@ def main() -> int:
                             "REJECTED (unproven)" if ok
                             else "*** WRONG: %s" % (msg[:50] or "accepted")))
     rc |= 0 if ok else 1
+
+    # ---- MUST-FIRE: the delay-0 REARM ruling (Wilson, must fix before lock) --
+    # ⭐ THE EXACT CASE THAT WAS ACCEPTED: the WS2812 3-sub-bit lane, SHIFT-only
+    # at d = 21 on uo_out[0], its loop closed by a delay-0 REARM, beside four
+    # push-pull lanes toggling at d = 20 ("J 1" before; its SHIFT writebacks
+    # were 3..139 cycles apart and the wire stream was not the feed). Its
+    # control -- the same program with the REARM at 21 -- must be ACCEPTED, so
+    # the refusal is the zero spacing and nothing else. Then the rule's two
+    # sides: a delay-0 non-ARM refused (in `compute_j` too), a delay-0 ARM
+    # accepted; and with the ARM's anchors gone the ARM is refused (unproven).
+    print()
+    print("  --- must-fire: delay-0 REARM -- a zero release spacing is refused ---")
+    busy = {ln: [(OP_LEVEL, p, 1, 20, 0), (OP_LEVEL, p, 0, 20, 0),
+                 (OP_REARM, 0, 1, 20, 0)]
+            for ln, p in zip((1, 2, 3, 4), (9, 10, 11, 0))}
+    busy_h = {ln: (p, PIN_NONE, 1, 20, 20, 40)
+              for ln, p in zip((1, 2, 3, 4), (9, 10, 11, 0))}
+
+    def sub3(rearm_d):
+        lanes_b = dict(busy)
+        lanes_b[0] = [(OP_SHIFT, 8, 0, 21, 0, 7), (OP_REARM, 0, 1, rearm_d, 0)]
+        headers_b = dict(busy_h)
+        headers_b[0] = (8, PIN_NONE, 1, 21, 21, 42)
+        return lanes_b, headers_b
+
+    arm0 = {0: [(OP_ARM, 3, 0, 0, 0), (OP_LEVEL, PIN_NONE, 0, 25, 0),
+                (OP_SHIFTIN, 3, 0, 25, 0, 8), (OP_REARM, 0, 1, 25, 0)]}
+    arm0_h = {0: (3, PIN_NONE, 1, 25, 50, 75)}
+    lvl0 = {0: [(OP_LEVEL, 1, 1, 25, 0), (OP_LEVEL, 1, 0, 0, 0),
+                (OP_REARM, 0, 1, 25, 0)]}
+    lvl0_h = {0: (1, PIN_NONE, 1, 25, 50, 75)}
+    for name, (lanes_b, headers_b), want_reject in (
+            ("3-sub-bit d=21 + REARM d=0, four d=20 lanes", sub3(0), True),
+            ("control: the same with the REARM at d=21", sub3(21), False),
+            ("a delay-0 LEVEL mid-loop", (lvl0, lvl0_h), True),
+            ("a delay-0 ARM (no timeout) before a d=25 loop",
+             (arm0, arm0_h), False)):
+        try:
+            assemble(lanes_b, headers_b)
+            got, msg = False, ""
+        except Reject as e:
+            got, msg = True, str(e)
+        ok = got == want_reject and (not got or "ZERO release spacing" in msg)
+        print("    %-50s %s" % (name, ("REJECTED" if got else "accepted")
+                                if ok else "*** WRONG: %s" % (msg[:60] or
+                                                             "accepted")))
+        rc |= 0 if ok else 1
+    # compute_j on its own (the `report` path) refuses it too
+    try:
+        compute_j(split_counts(sub3(0)[0])[0])
+        got, msg = False, ""
+    except Reject as e:
+        got, msg = True, str(e)
+    ok = got and "ZERO release spacing" in msg
+    print("    %-50s %s" % ("compute_j on the 3-sub-bit program",
+                            "REJECTED" if ok else "*** WRONG: %s"
+                            % (msg[:60] or "accepted")))
+    rc |= 0 if ok else 1
+    with open(zero_spacing.ENGINE, encoding="utf-8") as fh:
+        no_e2 = fh.read().replace("& ~(armed_n[i] & notmo_n[i]);", "")
+    try:
+        check_zero_spacing(split_counts(arm0)[0], no_e2)
+        got, msg = False, ""
+    except Reject as e:
+        got, msg = True, str(e)
+    ok = got and "ZERO release spacing" in msg
+    print("    %-50s %s" % ("anchor E2 removed: the delay-0 ARM",
+                            "REJECTED (exemption unproven)" if ok
+                            else "*** WRONG: %s" % (msg[:60] or "accepted")))
+    rc |= 0 if ok else 1
+    # ⭐ THE IMAGE THE OLD ASSEMBLER EMITTED, judged by the image-side screens:
+    # emitted with the zero-spacing check stubbed out (exactly the old
+    # behaviour), then N1's `refill_dmin` must read 0 and `program_a2.lane_set`
+    # (1.6a's input) must refuse to build a lane set from it.
+    real_find = zero_spacing.find
+    zero_spacing.find = lambda *_a, **_k: []
+    try:
+        old_img = assemble(*sub3(0))
+    except Reject as e:
+        old_img, why = None, str(e)
+    finally:
+        zero_spacing.find = real_find
+    import gate_admissible_images as gai
+    if old_img is None:
+        print("    *** WRONG: the old assembler's image could not be emitted "
+              "(%s)" % why[:60])
+        rc |= 1
+    else:
+        dm = gai.refill_dmin(old_img)
+        ok = dm == 0
+        print("    %-50s %s" % ("old image: N1 refill_dmin",
+                                "0 (PORT)" if ok else "*** WRONG: %s" % dm))
+        rc |= 0 if ok else 1
+        try:
+            program_a2.lane_set(old_img)
+            got, msg = False, ""
+        except zero_spacing.ZeroSpacingError as e:
+            got, msg = True, str(e)
+        print("    %-50s %s" % ("old image: program_a2.lane_set (1.6a input)",
+                                "REFUSED" if got else "*** WRONG: built"))
+        rc |= 0 if got else 1
 
     # ---- MUST-FIRE: SP2/P4, timing_checks=False only through the registry --
     print()

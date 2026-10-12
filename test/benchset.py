@@ -448,7 +448,7 @@ CONFIG = {
     # against a baud-errored peer (2 % slow), bytes vs what the peer sent.
     "tb_uartrx": {
         "srcs": [],
-        "arms": [("err+20", ["+IMG=test/uart_rx_image.hex", "+BITP=64",
+        "arms": [("err+20", ["+IMG=test/uart_rx_image.hex", "+BITP=434",
                              "+ERR=20", "+NFR=40", "+SEED=1",
                              "+BADSTOP=-1"])],
     },

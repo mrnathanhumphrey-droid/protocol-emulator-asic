@@ -56,6 +56,7 @@ sys.path.insert(0, os.path.join(ROOT, "test"))
 
 import gate_degenerate_fields as dgf                              # noqa: E402
 import gate_j_program as jp                                       # noqa: E402
+import zero_spacing as zs                                         # noqa: E402
 import pe_isa as I                                                # noqa: E402
 import pyrta_bound                                                # noqa: E402
 from bursty import C_SHIPPED, L_JIT, L_SYNC, BLane, response_time_b  # noqa
@@ -106,6 +107,13 @@ def gaps(h, a):
 def lane_set(img):
     """The program's own A2 lane set, plus which entries are clocked OD."""
     rows = lanes_of(img)
+    # ⛔⛔ DELAY-0 REARM RULING: the `delay > 0` filters below dropped a
+    # delay-0 action's ZERO spacing, so 1.6a (`queue_slot`) certified the
+    # WS2812 3-sub-bit build. A zero spacing has no lane set -- no T, no J --
+    # so it RAISES here rather than being quoted (`model/zero_spacing.py`;
+    # an ARM's delay 0 is "no timeout", exempt by its RTL anchors).
+    zs.check([(ln, i, a["op"], a["delay"]) for ln, _h, acts in rows
+              for i, a in enumerate(acts)])
     delays = [g for _ln, h, acts in rows for a in acts if a["delay"] > 0
               for g in gaps(h, a)]
     d_min = min(delays) if delays else None

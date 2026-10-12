@@ -1,13 +1,16 @@
 """UART-rx gate (Wilson's UART ruling): the 8N1 receive program against a
 baud-errored peer, bytes compared with what the PEER SENT, count exact.
 
-  PASS ARMS   the program (test/uart_rx.py, pe_asm) at T = 64 against baud
-              error -3, -2, 0, +2, +3 % on two seeds, random idle gaps with a
-              quarter back-to-back: every arm `UART-RX: ok`.
+  PASS ARMS   the program (test/uart_rx.py, pe_asm) at T = 434 (the board's
+              115200 baud) AND at T_MIN = 232 (the published speed limit,
+              Wilson) against baud error -3, -2, 0, +2, +3 % on two seeds,
+              random idle gaps with a quarter back-to-back: every arm
+              `UART-RX: ok`.
+  SPEED LIMIT `uart_rx.build` refuses T_MIN - 1 (below the certified rate).
   FRAMING     the peer sends frame 5 with stop = 0: the host-side check must
               REPORT it (exactly one framing error) and every byte still match.
   MUST-FIRES  "edge"   -- sample 0 at the bit's START edge, not mid-bit: red
-                          at +-2 %.
+                          at +2 and +3 % (a slow peer; see the note below).
               "nostop" -- the stop sample dropped (no framing check): red, on
                           the exact count (one push per frame, not two).
 
@@ -59,34 +62,48 @@ def main():
              "test/uart_rx_image.hex"))
     if not same:
         return 1
-    for var in ("ok", "edge", "nostop"):
-        p = os.path.join(TMP, "uart_%s.hex" % var)
+    TM = uart_rx.T_MIN
+    for var, t in (("ok", T), ("edge", T), ("nostop", T), ("ok", TM)):
+        p = os.path.join(TMP, "uart_%s_%d.hex" % (var, t))
         with open(p, "w", encoding="ascii", newline="\n") as fh:
-            fh.write("\n".join("%02x" % b for b in uart_rx.build(T, None, var)) + "\n")
-        imgs[var] = p
-    print("  program: offset %d (= 1.5 T - %d, measured), pe_asm-assembled"
-          % (uart_rx.default_offset(T), uart_rx.OFFSET_LAT))
+            fh.write("\n".join("%02x" % b for b in uart_rx.build(t, None, var)) + "\n")
+        imgs[(var, t)] = p
+    print("  program: offset 1.5 T - %d (measured), stop + REARM at D*, "
+          "pe_asm-assembled; arms at T = %d and T_MIN = %d"
+          % (uart_rx.OFFSET_LAT, T, TM))
 
-    def sim(var, err, seed, extra=()):
-        o = run([tool("vvp"), vvp, "+IMG=" + imgs[var], "+NBYTES=256",
-                 "+BITP=%d" % T, "+ERR=%d" % err, "+SEED=%d" % seed,
+    # ⛔ THE SPEED LIMIT IS ENFORCED, not only published: one cycle below
+    # T_MIN the builder must refuse, naming the limit.
+    try:
+        uart_rx.build(TM - 1, None, "ok")
+        lim = False
+    except uart_rx.pe_asm.Reject as exc:
+        lim = "T_MIN" in str(exc)
+    print("  speed limit  build at T = %d (T_MIN - 1): %s"
+          % (TM - 1, "refused, naming T_MIN" if lim
+             else "*** NOT REFUSED"))
+    ok = lim
+
+    def sim(var, err, seed, extra=(), t=T):
+        o = run([tool("vvp"), vvp, "+IMG=" + imgs[(var, t)], "+NBYTES=256",
+                 "+BITP=%d" % t, "+ERR=%d" % err, "+SEED=%d" % seed,
                  "+NFR=%d" % NFR] + list(extra))
         return o.stdout + o.stderr
 
-    jobs = [("ok", e, s) for e in ERRS for s in SEEDS]
+    jobs = [("ok", e, s, (), t) for t in (T, TM) for e in ERRS for s in SEEDS]
     with ThreadPoolExecutor(3) as ex:
         outs = list(ex.map(lambda j: (j, sim(*j)), jobs))
-    ok = True
     import re
-    for (var, e, s), o in outs:
+    for (var, e, s, _x, t), o in outs:
         m = re.search(r"\((\d+) back-to-back\)", o)
         # ⛔ the back-to-back case must be EXERCISED, not just possible
         good = ("UART-RX: ok" in o and "*** FAIL" not in o
                 and m is not None and int(m.group(1)) > 0)
         ok = ok and good
         line = next((l for l in o.splitlines() if "UART-RX" in l or "*** FAIL" in l), "?")
-        print("  pass  err %+3d/1000 seed %d  %s" % (e, s, line.strip()[:110]
-                                                    if good else "*** " + line.strip()[:110]))
+        print("  pass  T %3d err %+3d/1000 seed %d  %s"
+              % (t, e, s, line.strip()[:100] if good
+                 else "*** " + line.strip()[:100]))
 
     o = sim("ok", 0, 1, ["+BADSTOP=5"])
     hit = ("FRAMING ERROR reported on frame 5" in o and "UART-RX: ok" in o
@@ -96,7 +113,14 @@ def main():
         else "*** NOT REPORTED AS EXPECTED"))
     ok = ok and hit
 
-    for var, errs, why in (("edge", (-20, 20), "sample at the bit edge"),
+    # ⚠ "edge" IS PRICED ON THE SLOW SIDE ONLY, AND THAT IS MEASURED (T =
+    # 434). Sampling at a bit's START edge reads the PREVIOUS bit once a
+    # slow peer's edges lag the chip's grid (+2 %: red, frame 0). A FAST peer
+    # pulls its edges EARLIER, so the edge sample drifts INTO the bit and
+    # reads it correctly (-2 % passed). At T = 64 both sides were red because
+    # the fixed ~10-cycle edge-to-sample latency was 16 % of a bit; at 434 it
+    # is 2 %. The variant still fails where a mid-bit sampler does not.
+    for var, errs, why in (("edge", (20, 30), "sample at the bit edge"),
                            ("nostop", (0,), "stop-bit check dropped")):
         for e in errs:
             o = sim(var, e, 1)

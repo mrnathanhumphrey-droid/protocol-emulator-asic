@@ -327,9 +327,10 @@ dispatch per edge).
 * **Why the earlier verdict said "feasible":** that measurement's loop ended
   in a **delay-0 REARM**, which pe_asm's admissibility screen could not see
   (`compute_j` and N1's `refill_dmin` took the minimum over positive delays
-  only). That is the delay-0 REARM finding below, ruled must-fix-before-lock.
-  A program written that way was outside the guarantee while being certified
-  inside it.
+  only). That is the delay-0 REARM finding below, ruled must-fix-before-lock
+  and now FIXED: pe_asm refuses any delay-0 action but an ARM's
+  (`model/zero_spacing.py`; docs/RESUME_CLOCKED_ARC.md). A program written
+  that way was outside the guarantee while being certified inside it.
 * **When the NeoPixel Stick arrives,** identify the actual LED part on it
   (WS2812B, SK6812, …) and record it here. Different parts have different T0H
   windows; no claim is made from a different part's datasheet.

@@ -70,6 +70,7 @@ import gate_degenerate_fields as dgf                              # noqa: E402
 import gate_j_program as jp                                       # noqa: E402
 import pe_isa as I                                                # noqa: E402
 import program_a2 as pa                                           # noqa: E402
+import zero_spacing as zs                                         # noqa: E402
 from bursty import L_SYNC                                         # noqa: E402
 
 # ⭐⭐ THE DECLARATION LIST LIVES IN `model/nonadmissible.py` (Wilson, SP2/P4:
@@ -85,6 +86,11 @@ def refill_dmin(img):
     """The minimum spacing between consecutive retires, over every lane."""
     best = None
     for ln, h, acts in pa.lanes_of(img):
+        # ⛔⛔ DELAY-0 REARM RULING: a delay-0 action (other than an ARM's "no
+        # timeout", `model/zero_spacing.py`) IS a spacing between retires, of
+        # 0. Dropping it with `delay > 0` below is what hid the chain.
+        if zs.find([(ln, i, a["op"], a["delay"]) for i, a in enumerate(acts)]):
+            return 0
         seq = [a for a in acts if a["delay"] > 0]
         if not seq:
             continue
@@ -133,7 +139,15 @@ def audit(images, declared, pad_declared, deliberate):
     for name, img in images:
         if name in deliberate:
             continue
-        got, dm, u = conditions(name, img)
+        # ⛔ DELAY-0 REARM RULING: a zero release spacing is not a condition an
+        # image may DECLARE (Wilson: the delay-0 build is retired, not
+        # registered), so it is red here whatever the registry says.
+        try:
+            got, dm, u = conditions(name, img)
+        except zs.ZeroSpacingError as exc:
+            probs.append("%s has a ZERO release spacing and cannot be "
+                         "declared: %s" % (name, exc))
+            continue
         rows.append((name, got, dm, u))
         want = set(declared.get(name, (set(), ""))[0])
         if name in pad_declared:
