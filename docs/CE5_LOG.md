@@ -29,6 +29,42 @@ is the whole claim.
   checked against Maxim AN27's worked example `02 1C B8 01 00 00 00 → A2`).
   On-chip CRC belongs to the reach branch.
 
+### ⛔ The freeze moved (WF2, 2026-10-13): CE5 re-certified on `b3cf898`
+
+"Frozen RTL" means the RTL that ships, so when the RTL changed the freeze
+moved with it **and CE5 was re-run in full**, not re-pinned as bookkeeping.
+
+* **Why the RTL changed** (silicon fixes, not CE5 work — no change was made
+  for 1-Wire):
+  * #8 — a TX lane's first byte after a load was the register's reset
+    `0x00`, never the host's.
+  * #9 / #10 / #11 — a reload kept the old program's bit position, pad
+    levels and clocked-lane state.
+  * The fix also makes a reload a clean slate (rule 1) and adds a two-phase
+    halt (option 1′).
+* **What changed for CE5.** The program image is unchanged. The host feed
+  changed: `OneWire.feed`'s first reset block had been cut to 14 symbols,
+  because the chip sent the first 2 RST itself from the reset `0x00`. Now
+  every symbol is the host's and the first block is the full 16 like every
+  other. The wire is the same 16 RST/IDLE symbols either way.
+* **Re-certified on `b3cf898`** (`FREEZE_SHA`; `test/run_onewire.py`, the
+  full set):
+  * presence after every reset;
+  * ROM `28 A2 C3 4D 05 00 00 08` with valid CRC-8, equal to the model's and
+    to the intended ROM;
+  * scratchpad `91 01 4B 46 7F FF 0C 10 70` with valid CRC-8, equal to the
+    model's;
+  * every per-slot window: tLOW0 70.5 µs, tLOW1 3.3–3.5 µs, read sample
+    11.4–11.9 µs ≤ 15, presence sample 66.9–67.2 µs in [60, 75], tINIT
+    ≥ 2.8 µs;
+  * the FPGA-timing arm.
+  * All must-fires red: w0short, latesample, romflip, underrun_reset and
+    underrun_slot.
+* **New since then:** a reload mid write-0 slot is an ABORT. The release
+  shortens the low pulse, and the new program's reset pulse re-synchronizes
+  the part; the bytes received after it equal a clean run's
+  (`test/run_reload.py`, the `onewire` arm).
+
 ## Datasheet numbers used (quoted)
 
 | symbol | datasheet (Table: AC Electrical Characteristics) | where it binds |

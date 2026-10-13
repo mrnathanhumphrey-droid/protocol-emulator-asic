@@ -40,7 +40,13 @@ ROOT = os.path.dirname(HERE)
 #: the frozen RTL. Re-pinned from ae15d2c to commit 1 (62390e9) on the rebase
 #: (Wilson): valid because commit 1's src/ change is declaration-only and
 #: formally equivalent to ae15d2c (model/rtl_equiv.py: 4,102/4,102 proven).
-FREEZE_SHA = "62390e957a2fb09e8d46beac47366892b449556a"
+#: ⛔ RE-PINNED AGAIN, to b3cf898 (WF2, silicon fixes #8-#11) -- NOT a
+#: bookkeeping move: the RTL changed behaviour (the first TX byte, reloads),
+#: and CE5's own feed changed with it (the first reset block lost its 2-RST
+#: workaround). CE5 was therefore RE-CERTIFIED on this SHA -- the full set,
+#: presence, ROM + scratchpad with CRC, per-slot timing windows and every
+#: must-fire -- and docs/CE5_LOG.md records the move and why (Wilson).
+FREEZE_SHA = "b3cf89811f30132e99b790afb60a447d131536ef"
 
 
 def git(args, env=None):
