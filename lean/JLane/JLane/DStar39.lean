@@ -14,7 +14,7 @@ theorem dstar39 (P : Program) (win : Engine → Option Lane) (e0 : Engine)
     (hW : Wf e0) (hfull : ∀ l s, P.live l = true → e0.actv l s = true)
     (h0 : e0.st = .idle) (h0ts : ∀ l, e0.now ≤ e0.ts l)
     (hwin : ∀ e w, win e = some w → P.live w = true ∧ e.ts w ≤ e.now)
-    (hws : ∀ y e, Ready P y e → win e ≠ none)
+    (hws : ∀ y e, e.st = .idle → Ready P y e → win e ≠ none)
     (hd : ∀ l, P.live l = true → 39 ≤ P.dly l) :
     ∀ T, NoStall win (run P win T e0) ∧ NoBr1 P (run P win T e0) := by
   have hS : Struct e0 := by
@@ -106,18 +106,22 @@ theorem dstar39 (P : Program) (win : Engine → Option Lane) (e0 : Engine)
               have hJ : 1 ≤ cnt P win (IsWB w) m e0 := by omega
               have hdw := hd w hlive
               -- the refill owed at the previous writeback is still pending at m + 1
+              -- writeback #(J − 1) of w, at some w' < m: its refill is still pending at m + 1
+              obtain ⟨w', hw'm, hw'k, hw'b⟩ :=
+                cnt_reach P win (IsWB w) m e0 (cnt P win (IsWB w) m e0 - 1) (by omega)
               have hpb := pending_bound P win w e0 (P.dly w) 14 0 (m + 1) hW hfull hlive rfl
                 (by omega)
                 (fun t ht hwb' => hRof (m + 1) (fun t ht => (ih t ht).1) w hlive t ht hwb')
                 (fun a k hak hk => hBof (m + 1) (fun t ht => (ih t ht).2) w a k hak hk)
-                (cnt P win (IsWB w) m e0 - 1) (m + 1) (Nat.le_refl _) (by omega) (by omega)
-              -- ... yet w was ready at m, so its next release had already passed
-              have hts := ts_run P win w m e0
+                (cnt P win (IsWB w) m e0 - 1) (m + 1) w' (Nat.le_refl _) (by omega) hw'k hw'b
+                (by omega)
+              -- ... yet w was ready at m, one full writeback after w': at least d later
+              have hsp := ts_spacing P win w e0 w' (m - w')
+              have hmw : w' + (m - w') = m := by omega
+              rw [hmw, hw'k] at hsp
+              have h1 : cnt P win (IsWB w) m e0 - (cnt P win (IsWB w) m e0 - 1) = 1 := by omega
+              rw [h1, Nat.mul_one] at hsp
               have hnow := now_run P win m e0
-              have hm : (cnt P win (IsWB w) m e0 - 1) * P.dly w + 1 * P.dly w
-                  = cnt P win (IsWB w) m e0 * P.dly w := by
-                rw [← Nat.add_mul, Nat.sub_add_cancel hJ]
-              have hc := Nat.mul_comm (P.dly w) (cnt P win (IsWB w) m e0)
               omega
   intro T
   exact key (T + 1) T (Nat.lt_succ_self T)

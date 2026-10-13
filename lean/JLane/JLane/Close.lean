@@ -41,7 +41,7 @@ within `14 + 2` of its release. -/
 theorem wb_bound (P : Program) (win : Engine → Option Lane) (e0 : Engine) (T : Nat)
     (h0 : e0.st = .idle) (h0ts : ∀ l, e0.now ≤ e0.ts l)
     (hwin : ∀ e w, win e = some w → P.live w = true ∧ e.ts w ≤ e.now)
-    (hws : ∀ y e, Ready P y e → win e ≠ none)
+    (hws : ∀ y e, e.st = .idle → Ready P y e → win e ≠ none)
     (hd : ∀ l, P.live l = true → 29 ≤ P.dly l)
     (hNS : ∀ t, t < T → NoStall win (run P win t e0)) :
     ∀ t, t < T → ∀ y, P.live y = true → IsWB y (run P win t e0) →
@@ -163,7 +163,7 @@ theorem dstar29 (P : Program) (win : Engine → Option Lane) (e0 : Engine) (B : 
     (hW : Wf e0) (hfull : ∀ l s, P.live l = true → e0.actv l s = true)
     (h0 : e0.st = .idle) (h0ts : ∀ l, e0.now ≤ e0.ts l)
     (hwin : ∀ e w, win e = some w → P.live w = true ∧ e.ts w ≤ e.now)
-    (hws : ∀ y e, Ready P y e → win e ≠ none)
+    (hws : ∀ y e, e.st = .idle → Ready P y e → win e ≠ none)
     (hd : ∀ l, P.live l = true → 29 ≤ P.dly l)
     (hBd : ∀ l, P.live l = true → DSTAR + B ≤ P.dly l)
     (hB : ∀ T, (∀ t, t < T → NoStall win (run P win t e0)) →

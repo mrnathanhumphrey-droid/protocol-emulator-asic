@@ -38,29 +38,33 @@ theorem now_run (P : Program) (win : Engine → Option Lane) :
     omega
 
 theorem ts_step (P : Program) (win : Engine → Option Lane) (e : Engine) (y : Lane) :
-    (step P win e).ts y = e.ts y + (if IsWB y e then P.dly y else 0) := by
-  show tsNext P e y = e.ts y + (if IsWB y e then P.dly y else 0)
+    (step P win e).ts y = e.ts y + (if IsWB y e then P.dly y + P.ext e.now y else 0) := by
+  show tsNext P e y = e.ts y + (if IsWB y e then P.dly y + P.ext e.now y else 0)
   unfold tsNext
   by_cases h : IsWB y e
   · have h' : e.st = .wb ∧ e.cur = y := h
-    rw [if_pos h, if_pos ⟨h'.1, h'.2.symm⟩]
+    rw [if_pos h, if_pos ⟨h'.1, h'.2.symm⟩, Nat.add_assoc]
   · rw [if_neg h, if_neg (fun h' => h ⟨h'.1, h'.2.symm⟩), Nat.add_zero]
 
-/-- P8 on the run: the timestamp advances by `d` at each writeback. -/
-theorem ts_run (P : Program) (win : Engine → Option Lane) (y : Lane) :
+/-- Every writeback adds at least the lane's minimum delay. -/
+theorem ts_run_ge (P : Program) (win : Engine → Option Lane) (y : Lane) :
     ∀ (n : Nat) (e : Engine),
-      (run P win n e).ts y = e.ts y + P.dly y * cnt P win (IsWB y) n e
+      e.ts y + P.dly y * cnt P win (IsWB y) n e ≤ (run P win n e).ts y
   | 0, e => by simp [run, cnt]
   | n + 1, e => by
-    have ih := ts_run P win y n (step P win e)
+    have ih := ts_run_ge P win y n (step P win e)
     have h1 := ts_step P win e y
     have e1 : cnt P win (IsWB y) (n + 1) e
         = (if IsWB y e then 1 else 0) + cnt P win (IsWB y) n (step P win e) := rfl
     have e3 : run P win (n + 1) e = run P win n (step P win e) := rfl
-    rw [e3, ih, h1, e1, Nat.mul_add]
+    rw [e3, e1, Nat.mul_add]
     by_cases h : IsWB y e
-    · rw [if_pos h, if_pos h, Nat.mul_one] <;> omega
-    · rw [if_neg h, if_neg h, Nat.mul_zero] <;> omega
+    · rw [if_pos h] at h1 ⊢
+      rw [Nat.mul_one]
+      omega
+    · rw [if_neg h] at h1 ⊢
+      rw [Nat.mul_zero]
+      omega
 
 theorem cnt_mono (P : Program) (win : Engine → Option Lane) (Q : Engine → Prop)
     [DecidablePred Q] (e : Engine) (a : Nat) :
@@ -86,6 +90,59 @@ theorem no_event_between (P : Program) (win : Engine → Option Lane) (Q : Engin
   have h3 := cnt_succ_back P win Q i e
   rw [if_pos hq] at h3
   omega
+
+/-! ### Timestamps under variable delays -/
+
+/-- Counters add along a run. -/
+theorem cnt_add (P : Program) (win : Engine → Option Lane) (Q : Engine → Prop)
+    [DecidablePred Q] :
+    ∀ (a k : Nat) (e : Engine),
+      cnt P win Q (a + k) e = cnt P win Q a e + cnt P win Q k (run P win a e)
+  | 0, k, e => by
+    show cnt P win Q (0 + k) e = 0 + cnt P win Q k e
+    rw [Nat.zero_add, Nat.zero_add]
+  | a + 1, k, e => by
+    rw [Nat.add_right_comm]
+    show (if Q e then 1 else 0) + cnt P win Q (a + k) (step P win e)
+        = ((if Q e then 1 else 0) + cnt P win Q a (step P win e))
+          + cnt P win Q k (run P win a (step P win e))
+    rw [cnt_add P win Q a k (step P win e)]
+    omega
+
+/-- **Flat between writebacks.** With no writeback of `y` between `a` and `a + k`, its
+timestamp is unchanged: the release of job `k` is well defined. -/
+theorem ts_flat_cnt (P : Program) (win : Engine → Option Lane) (y : Lane) (e : Engine)
+    (a : Nat) :
+    ∀ k, cnt P win (IsWB y) a e = cnt P win (IsWB y) (a + k) e →
+      (run P win (a + k) e).ts y = (run P win a e).ts y
+  | 0, _ => rfl
+  | k + 1, h => by
+    have hm := cnt_mono P win (IsWB y) e a (a + k) (by omega)
+    have hm2 := cnt_mono P win (IsWB y) e (a + k) (a + k + 1) (by omega)
+    have hk : cnt P win (IsWB y) a e = cnt P win (IsWB y) (a + k) e := by
+      rw [← Nat.add_assoc] at h
+      omega
+    have hnw : ¬IsWB y (run P win (a + k) e) := by
+      have hb := cnt_succ_back P win (IsWB y) (a + k) e
+      intro hw
+      rw [if_pos hw] at hb
+      rw [← Nat.add_assoc] at h
+      omega
+    rw [← Nat.add_assoc, run_succ', ts_step, if_neg hnw, Nat.add_zero]
+    exact ts_flat_cnt P win y e a k hk
+
+/-- **At least `dly` per writeback.** Between `a` and `a + k`, the timestamp grows by at
+least the lane's minimum delay times the number of its writebacks in between. -/
+theorem ts_spacing (P : Program) (win : Engine → Option Lane) (y : Lane) (e : Engine)
+    (a k : Nat) :
+    (run P win a e).ts y
+        + P.dly y * (cnt P win (IsWB y) (a + k) e - cnt P win (IsWB y) a e)
+      ≤ (run P win (a + k) e).ts y := by
+  have h1 := ts_run_ge P win y k (run P win a e)
+  have h2 := cnt_add P win (IsWB y) a k e
+  rw [← run_add] at h1
+  rw [h2, Nat.add_sub_cancel_left]
+  exact h1
 
 /-! ### Waits under a branch-1 budget -/
 
@@ -116,21 +173,19 @@ theorem window_le_19 (P : Program) (win : Engine → Option Lane) (y : Lane)
 
 /-! ### The pending bound -/
 
-/-- Fresh case: every earlier refill of `y` was served by writeback #k. -/
+/-- Fresh case: every earlier refill of `y` was served by writeback `w` (#k). The bound is
+against the actual release `ts(w)`, whatever the earlier writebacks added. -/
 theorem pb_fresh (P : Program) (win : Engine → Option Lane) (y : Lane) (e0 : Engine)
-    (d R B T k w t : Nat) (hy : P.live y = true) (hdly : P.dly y = d)
+    (R B T w t : Nat) (hy : P.live y = true)
     (hR : ∀ t, t < T → IsWB y (run P win t e0) →
       (run P win t e0).now ≤ (run P win t e0).ts y + R + 2)
     (hB : ∀ a m, a + m ≤ T → m ≤ 23 + B → chargeSum P win y m (run P win a e0) ≤ B)
-    (hwt : w < t) (htT : t ≤ T) (hwk : cnt P win (IsWB y) w e0 = k)
+    (hwt : w < t) (htT : t ≤ T)
     (hwb : IsWB y (run P win w e0))
     (heq : cnt P win (Hit y) (w + 1) e0 = cnt P win (Hit y) t e0) :
-    e0.now + t ≤ e0.ts y + k * d + R + 25 + B := by
+    e0.now + t ≤ (run P win w e0).ts y + R + 25 + B := by
   have hRw := hR w (by omega) hwb
   have hnow := now_run P win w e0
-  have hts := ts_run P win y w e0
-  rw [hdly, hwk] at hts
-  have hcomm : d * k = k * d := Nat.mul_comm d k
   obtain ⟨hst, hcur⟩ := hwb
   have hwant : (run P win (w + 1) e0).wantFetch y = true := by
     rw [run_succ', ← hcur]
@@ -143,16 +198,18 @@ theorem pb_fresh (P : Program) (win : Engine → Option Lane) (y : Lane) (e0 : E
         (by omega) (by omega) heq)
   omega
 
-/-- **The pending bound.** If refill #k of lane `y` is still pending at cycle `t ≤ T`,
-then `t` is at most `R + 25 + B` past the release of job `k`. -/
+/-- **The pending bound.** If writeback #k of lane `y` is at `w < t` and refill #k is still
+pending at `t ≤ T`, then `t` is at most `R + 25 + B` past that job's actual release `ts(w)`.
+Needs only that every writeback adds at least `d = P.dly y` (`ts_spacing`). -/
 theorem pending_bound (P : Program) (win : Engine → Option Lane) (y : Lane) (e0 : Engine)
     (d R B T : Nat) (hW : Wf e0) (hfull : ∀ l s, P.live l = true → e0.actv l s = true)
     (hy : P.live y = true) (hdly : P.dly y = d) (hd : DSTAR + B ≤ d)
     (hR : ∀ t, t < T → IsWB y (run P win t e0) →
       (run P win t e0).now ≤ (run P win t e0).ts y + R + 2)
     (hB : ∀ a m, a + m ≤ T → m ≤ 23 + B → chargeSum P win y m (run P win a e0) ≤ B) :
-    ∀ (k t : Nat), t ≤ T → k < cnt P win (IsWB y) t e0 → cnt P win (Hit y) t e0 ≤ k →
-      e0.now + t ≤ e0.ts y + k * d + R + 25 + B := by
+    ∀ (k t w : Nat), t ≤ T → w < t → cnt P win (IsWB y) w e0 = k →
+      IsWB y (run P win w e0) → cnt P win (Hit y) t e0 ≤ k →
+      e0.now + t ≤ (run P win w e0).ts y + R + 25 + B := by
   have hS : Struct e0 := by
     have hw := hW
     unfold Wf at hw
@@ -161,20 +218,22 @@ theorem pending_bound (P : Program) (win : Engine → Option Lane) (y : Lane) (e
   intro k
   induction k with
   | zero =>
-    intro t htT hk hh
-    obtain ⟨w, hwt, hwk, hwb⟩ := cnt_reach P win (IsWB y) t e0 0 hk
+    intro t w htT hwt hwk hwb hh
     have hm := cnt_mono P win (Hit y) e0 (w + 1) t (by omega)
-    exact pb_fresh P win y e0 d R B T 0 w t hy hdly hR hB hwt htT hwk hwb (by omega)
+    exact pb_fresh P win y e0 R B T w t hy hR hB hwt htT hwb (by omega)
   | succ k ih =>
-    intro t htT hk hh
-    obtain ⟨w, hwt, hwk, hwb⟩ := cnt_reach P win (IsWB y) t e0 (k + 1) hk
+    intro t w htT hwt hwk hwb hh
     have hm := cnt_mono P win (Hit y) e0 (w + 1) t (by omega)
-    have hmul : (k + 1) * d = k * d + d := by rw [Nat.add_mul, Nat.one_mul]
     by_cases hfresh : k + 1 ≤ cnt P win (Hit y) (w + 1) e0
-    · exact pb_fresh P win y e0 d R B T (k + 1) w t hy hdly hR hB hwt htT hwk hwb (by omega)
-    · by_cases hlate : cnt P win (Hit y) t e0 ≤ k
+    · exact pb_fresh P win y e0 R B T w t hy hR hB hwt htT hwb (by omega)
+    · -- the previous writeback, #k, at w' < w; its release is at least d earlier
+      obtain ⟨w', hw'w, hw'k, hw'b⟩ := cnt_reach P win (IsWB y) w e0 k (by omega)
+      have hsp := ts_spacing P win y e0 w' (w - w')
+      have hww : w' + (w - w') = w := by omega
+      rw [hww, hwk, hw'k, Nat.add_sub_cancel_left, Nat.mul_one, hdly] at hsp
+      by_cases hlate : cnt P win (Hit y) t e0 ≤ k
       · -- refill #k is itself still pending at `t`
-        have := ih t htT (by omega) hlate
+        have := ih t w' htT (by omega) hw'k hw'b hlate
         omega
       · -- refill #k landed at some `c` after writeback #(k+1); the wait restarts there
         obtain ⟨c, hct, hck, hhit⟩ := cnt_reach P win (Hit y) t e0 k (by omega)
@@ -193,7 +252,7 @@ theorem pending_bound (P : Program) (win : Engine → Option Lane) (y : Lane) (e
           omega
         have hwbc := cnt_mono P win (IsWB y) e0 (w + 1) c hwc
         have hwbc1 := cnt_mono P win (IsWB y) e0 (w + 1) (c + 1) (by omega)
-        have hic := ih c (by omega) (by omega) (by omega)
+        have hic := ih c w' (by omega) (by omega) hw'k hw'b (by omega)
         have hwant : (run P win (c + 1) e0).wantFetch y = true := by
           rw [Engine.wantFetch_iff]
           have := owed_run P win y (c + 1) e0 hS
@@ -212,8 +271,8 @@ theorem pending_bound (P : Program) (win : Engine → Option Lane) (y : Lane) (e
         have hD : DSTAR = 20 := dstar_val
         omega
 
-/-- **Corollary.** Under the throughput and latency conditions, lane `y`'s head is
-valid at every cycle `t ≤ T` where `y` is ready. -/
+/-- **Corollary.** Under the throughput and latency conditions on the minimum delay `d`,
+lane `y`'s head is valid at every cycle `t ≤ T` where `y` is ready. -/
 theorem head_valid_when_ready (P : Program) (win : Engine → Option Lane) (y : Lane)
     (e0 : Engine) (d R B T : Nat) (hW : Wf e0) (hfull : ∀ l s, P.live l = true → e0.actv l s = true)
     (hy : P.live y = true) (hdly : P.dly y = d) (hd : DSTAR + B ≤ d)
@@ -228,15 +287,18 @@ theorem head_valid_when_ready (P : Program) (win : Engine → Option Lane) (y : 
   by_cases hc : cnt P win (IsWB y) t e0 ≤ cnt P win (Hit y) t e0 + 1
   · exact hc
   · exfalso
-    have hts := ts_run P win y t e0
     have hnow := now_run P win t e0
-    rw [hdly] at hts
+    -- writeback #(J − 2), where J is the number of writebacks so far
+    obtain ⟨w, hwt, hwk, hwb⟩ :=
+      cnt_reach P win (IsWB y) t e0 (cnt P win (IsWB y) t e0 - 2) (by omega)
     have hpb := pending_bound P win y e0 d R B T hW hfull hy hdly hd hR hB
-      (cnt P win (IsWB y) t e0 - 2) t htT (by omega) (by omega)
-    have hJ : 2 ≤ cnt P win (IsWB y) t e0 := by omega
-    have hm : (cnt P win (IsWB y) t e0 - 2) * d + 2 * d = cnt P win (IsWB y) t e0 * d := by
-      rw [← Nat.add_mul, Nat.sub_add_cancel hJ]
-    have hc' := Nat.mul_comm d (cnt P win (IsWB y) t e0)
+      (cnt P win (IsWB y) t e0 - 2) t w htT hwt hwk hwb (by omega)
+    -- two more writebacks since: the release moved at least 2d
+    have hsp := ts_spacing P win y e0 w (t - w)
+    have htw : w + (t - w) = t := by omega
+    rw [htw, hwk, hdly] at hsp
+    have h2 : cnt P win (IsWB y) t e0 - (cnt P win (IsWB y) t e0 - 2) = 2 := by omega
+    rw [h2] at hsp
     omega
 
 end JLane

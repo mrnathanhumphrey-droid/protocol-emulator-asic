@@ -81,10 +81,10 @@ def actvNext (e : Engine) (l : Lane) (s : Slot) : Bool :=
 def selNext (e : Engine) (l : Lane) : Slot :=
   if e.st = .wb ∧ l = e.cur then !e.sel l else e.sel l
 
-/-- §3 / P8: absolute advance at WB.
+/-- §3 / P8: absolute advance at WB, by the lane's minimum delay plus this writeback's extra.
 Anchor `l_timestamp[cur] <= l_timestamp[cur] + {{(TS_W-DLY_W){1'b0}}, wb_dly};`. -/
 def tsNext (P : Program) (e : Engine) (l : Lane) : Nat :=
-  if e.st = .wb ∧ l = e.cur then e.ts l + P.dly l else e.ts l
+  if e.st = .wb ∧ l = e.cur then e.ts l + P.dly l + P.ext e.now l else e.ts l
 
 /-- One clock cycle. `winq` registers this cycle's winner (anchor `winner_q   <= winner;`).
 `now` advances every cycle (primed, running). -/

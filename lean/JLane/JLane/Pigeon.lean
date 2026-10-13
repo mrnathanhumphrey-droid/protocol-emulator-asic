@@ -193,7 +193,7 @@ theorem pigeon (P : Program) (win : Engine → Option Lane) (i : Lane) (n : Nat)
 /-- **Lemma A, single-dispatch form.** If no other lane is decided twice while lane `i`
 waits, the wait is at most `3(k − 1) + 2 = 14` cycles. -/
 theorem lemmaA_once (P : Program) (win : Engine → Option Lane) (i : Lane)
-    (hws : ∀ e, Ready P i e → win e ≠ none) (t : Nat) (e : Engine)
+    (hws : ∀ e, e.st = .idle → Ready P i e → win e ≠ none) (t : Nat) (e : Engine)
     (hr : Ready P i e) (hm : NotMid i e)
     (hnd : ∀ s, s < t → ¬Dec win i (run P win s e))
     (hns : ∀ s, s < t → NoStall win (run P win s e))

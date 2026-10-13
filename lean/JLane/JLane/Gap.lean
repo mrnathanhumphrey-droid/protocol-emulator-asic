@@ -101,16 +101,18 @@ theorem wb_back (P : Program) (win : Engine → Option Lane) (e0 : Engine)
 
 theorem ts_mono (P : Program) (win : Engine → Option Lane) (y : Lane) (e : Engine)
     (m n : Nat) (h : m ≤ n) : (run P win m e).ts y ≤ (run P win n e).ts y := by
-  have h1 := ts_run P win y m e
-  have h2 := ts_run P win y n e
-  have h3 := cnt_mono P win (IsWB y) e m n h
-  have h4 := Nat.mul_le_mul (Nat.le_refl (P.dly y)) h3
+  have h1 := ts_spacing P win y e m (n - m)
+  have hmn : m + (n - m) = n := by omega
+  rw [hmn] at h1
   omega
 
+/-- A writeback advances the timestamp by the lane's minimum delay plus that writeback's
+extra. -/
 theorem ts_after_wb (P : Program) (win : Engine → Option Lane) (y : Lane) (e : Engine)
     (t : Nat) (h : IsWB y (run P win t e)) :
-    (run P win (t + 1) e).ts y = (run P win t e).ts y + P.dly y := by
-  rw [run_succ', ts_step, if_pos h]
+    (run P win (t + 1) e).ts y
+      = (run P win t e).ts y + P.dly y + P.ext (run P win t e).now y := by
+  rw [run_succ', ts_step, if_pos h, Nat.add_assoc]
 
 /-! ### The gap -/
 

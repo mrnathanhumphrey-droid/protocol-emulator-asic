@@ -74,7 +74,7 @@ theorem notMid_step (P : Program) (win : Engine → Option Lane) (i : Lane) (e :
 /-! ### The per-cycle identity -/
 
 theorem lemA_step (P : Program) (win : Engine → Option Lane) (i : Lane) (e : Engine)
-    (hws : ∀ e, Ready P i e → win e ≠ none)
+    (hws : ∀ e, e.st = .idle → Ready P i e → win e ≠ none)
     (hr : Ready P i e) (hnd : ¬Dec win i e) (hns : NoStall win e) :
     3 * (if decOther win i e = true then 1 else 0) + ph e.st
       = 1 + ph (step P win e).st := by
@@ -83,7 +83,7 @@ theorem lemA_step (P : Program) (win : Engine → Option Lane) (i : Lane) (e : E
   cases hs : e.st with
   | idle =>
     cases hw : win e with
-    | none => exact absurd hw (hws e hr)
+    | none => exact absurd hw (hws e hs hr)
     | some w =>
       have hv : e.headValid w = true := hns hs w hw
       have hwi : w ≠ i := by
@@ -104,7 +104,7 @@ theorem lemA_step (P : Program) (win : Engine → Option Lane) (i : Lane) (e : E
     simp [hd, dispNext, hs, ph]
 
 theorem lemA_run (P : Program) (win : Engine → Option Lane) (i : Lane)
-    (hws : ∀ e, Ready P i e → win e ≠ none) :
+    (hws : ∀ e, e.st = .idle → Ready P i e → win e ≠ none) :
     ∀ (t : Nat) (e : Engine), Ready P i e → NotMid i e →
       (∀ s, s < t → ¬Dec win i (run P win s e)) →
       (∀ s, s < t → NoStall win (run P win s e)) →
@@ -128,7 +128,7 @@ theorem lemA_run (P : Program) (win : Engine → Option Lane) (i : Lane)
 /-- **Lemma A (pigeonhole core).** A lane that has waited `t` cycles undecided saw at
 least `(t − 2)/3` other-lane decisions: `t ≤ 3·D + 2`. -/
 theorem lemmaA (P : Program) (win : Engine → Option Lane) (i : Lane)
-    (hws : ∀ e, Ready P i e → win e ≠ none) (t : Nat) (e : Engine)
+    (hws : ∀ e, e.st = .idle → Ready P i e → win e ≠ none) (t : Nat) (e : Engine)
     (hr : Ready P i e) (hm : NotMid i e)
     (hnd : ∀ s, s < t → ¬Dec win i (run P win s e))
     (hns : ∀ s, s < t → NoStall win (run P win s e)) :
@@ -140,7 +140,7 @@ theorem lemmaA (P : Program) (win : Engine → Option Lane) (i : Lane)
 /-- With at most `k − 1` other-lane decisions in the wait, it lasts at most
 `3(k − 1) + 2 = 14` cycles. -/
 theorem lemmaA_14 (P : Program) (win : Engine → Option Lane) (i : Lane)
-    (hws : ∀ e, Ready P i e → win e ≠ none) (t : Nat) (e : Engine)
+    (hws : ∀ e, e.st = .idle → Ready P i e → win e ≠ none) (t : Nat) (e : Engine)
     (hr : Ready P i e) (hm : NotMid i e)
     (hnd : ∀ s, s < t → ¬Dec win i (run P win s e))
     (hns : ∀ s, s < t → NoStall win (run P win s e))
