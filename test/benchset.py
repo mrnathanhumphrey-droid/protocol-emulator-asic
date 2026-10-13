@@ -41,6 +41,13 @@ ENGINE = ["src/pe_engine.v", "src/pe_store.v", "src/project.v"]
 # ⛔ An exclusion is a DECLARATION, checked below against what is on disk.
 # ---------------------------------------------------------------------------
 EXCLUDED = {
+    "tb_v2win.v": (
+        "THE SYNCHRONIZER-WINDOW MEASUREMENT (V2 pins-only). Each arm pushes "
+        "one byte at an instant the runner computes from a dry run of the "
+        "same image (`+AT`, `+LEAD`), which a fixed arm list cannot express. "
+        "Its claims are judged by `test/run_v2window.py` in "
+        "`ci/run_gates.sh`; its arms are short and reach no RTL the swept "
+        "clocked benches do not."),
     "tb.v": (
         "THE COCOTB TOPLEVEL. It has no self-checking `initial` block at all -- "
         "`test/test.py` drives it from Python, so there is no PASS line for a "

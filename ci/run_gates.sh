@@ -230,6 +230,10 @@ GATES=(
   # a script that runs a bench outside it is red. With V3-ID fatal in the
   # bench, an unknown image cannot pass in any runner that runs.
   model/gate_runner_registry.py
+  # ⭐⭐ WF2 #8 / V2 pins-only (Wilson): the synchronizer window MEASURED --
+  # the push lead the chip needs before a TX slot, V2's TV_WIN held to it,
+  # and the deliberate inside-window arm (the slot underruns whole).
+  test/run_v2window.py
   # ⭐⭐ SP2 -- the pe_asm protocol front-end (model/pe_proto.py): every
   # shipped FRAM program re-expressed as a TRANSACTION (START / rSTART / STOP
   # and CS framing generated from context), byte-identical to the verified

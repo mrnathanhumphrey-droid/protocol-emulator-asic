@@ -191,7 +191,7 @@ def lanes(txt):
     and sent are one number (they used to differ by the byte in flight)."""
     return {int(m[0]): tuple(int(x) for x in m[1:]) for m in re.findall(
         r"\[V2\] lane (\d+): (\d+) clocked SHIFT\(s\), (\d+) host byte\(s\) "
-        r"popped and sent, (\d+) underrun", txt)}
+        r"taken and sent, (\d+) underrun", txt)}
 
 
 def main() -> int:

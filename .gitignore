@@ -111,5 +111,6 @@ test/sim_build_rxfast/
 test/sim_build_wfmf/
 test/sim_build_uarttx/
 test/sim_build_reload/
+test/sim_build_v2win/
 # agent worktrees (Claude Code) -- never part of the tree
 .claude/

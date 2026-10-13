@@ -465,6 +465,22 @@ four tagged queues (`TXN = 4`, `TXD = 2`) since the tag was added, and
   `0x00` (the General Call), an SPI FRAM's first WREN was no opcode at all.
   Programs had been written around it; those workarounds are removed.
 
+### Push before the slot: the synchronizer window
+
+A push crosses `ui_in[6]`'s synchronizer (a 2-flop rise detect), then the
+queue register, before a lane can take it. So a byte is **guaranteed taken by
+its slot only if its LOW-nibble PUSH edge reaches the pin at least 6 clock
+cycles (120 ns at 50 MHz) before the slot's first bit appears on the
+wire.**
+- **Measured:** `test/run_v2window.py` shows the chip needs 5 cycles. The 6th
+  covers an asynchronous host, whose edge can land anywhere within a cycle.
+- **Pushed later than that:** the byte may go out in that slot, or the slot
+  underruns (whole zeros, flagged) and the byte goes out whole in the next
+  slot. Either way the byte is never mixed with another.
+- This sits beside the PROG / PTR / data hold rules above. The benches must
+  respect it too: V2 flags any slot whose byte was pushed inside the window
+  as AMBIGUOUS (red), because the chip may legitimately go either way.
+
 ### Minimum host feed rate (the host contract for TX)
 
 An underrun on a correctly fed program is a **host-contract violation**: the
