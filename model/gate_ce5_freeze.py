@@ -46,7 +46,11 @@ ROOT = os.path.dirname(HERE)
 #: workaround). CE5 was therefore RE-CERTIFIED on this SHA -- the full set,
 #: presence, ROM + scratchpad with CRC, per-slot timing windows and every
 #: must-fire -- and docs/CE5_LOG.md records the move and why (Wilson).
-FREEZE_SHA = "b3cf89811f30132e99b790afb60a447d131536ef"
+#: Re-pinned to 5f59d25 on a FORMAL EQUIVALENCE (the rebase precedent): the
+#: queue pop became a per-queue vector, and model/rtl_equiv.py proved it
+#: against 2b34dc0, 4,466 of 4,466 cells -- the change moves nothing. CE5
+#: was re-run on it anyway (docs/CE5_LOG.md).
+FREEZE_SHA = "5f59d259e217c8706de2ed91ed1924705df2d014"
 
 
 def git(args, env=None):

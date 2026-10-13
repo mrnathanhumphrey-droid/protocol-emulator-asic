@@ -29,6 +29,14 @@ is the whole claim.
   checked against Maxim AN27's worked example `02 1C B8 01 00 00 00 → A2`).
   On-chip CRC belongs to the reach branch.
 
+### The freeze moved again (2026-10-13): `5f59d25`, on a formal equivalence
+
+The TX queue's pop became a per-queue vector, so the queue block is the same
+for every variant of the TX path. `model/rtl_equiv.py` proved it equivalent
+to `2b34dc0` (4,466 of 4,466 cells: "the change moves nothing"), which is the
+rebase precedent for re-pinning. CE5 was re-run on `5f59d25` anyway: the full
+set passes, and all five must-fires are red.
+
 ### ⛔ The freeze moved (WF2, 2026-10-13): CE5 re-certified on `b3cf898`
 
 "Frozen RTL" means the RTL that ships, so when the RTL changed the freeze
