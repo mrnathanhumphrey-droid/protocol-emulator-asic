@@ -106,8 +106,18 @@ ACT_FIELDS =(("op", 3), ("pin", PINW), ("level", 1), ("delay", DLY_W),
 
 def _pack(fields, values, nbytes):
     w = 0
-    for (_name, width), val in zip(fields, values):
-        w = (w << width) | (int(val) & ((1 << width) - 1))
+    for (name, width), val in zip(fields, values):
+        # ⛔⛔ A VALUE THAT DOES NOT FIT ITS FIELD IS REFUSED, NEVER MASKED
+        # (WF2, found by N1). This used to `& ((1 << width) - 1)` silently: a
+        # UART-tx header asking for D_sched 434 / D_tol 868 in 8-bit fields was
+        # encoded as 178 / 100 -- an image saying different numbers than its
+        # program, with D_sched > D_tol, and pe_asm none the wiser.
+        if not 0 <= int(val) < (1 << width):
+            raise ValueError("field %s = %d does not fit its %d-bit field "
+                             "(0..%d) -- the encoder refuses rather than "
+                             "truncating" % (name, int(val), width,
+                                             (1 << width) - 1))
+        w = (w << width) | int(val)
     total = sum(width for _n, width in fields)
     w <<= (nbytes * 8 - total)          # MSB-align; spare lands at the bottom
     return w.to_bytes(nbytes, "big")

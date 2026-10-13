@@ -302,6 +302,15 @@ module tt_um_protocol_emulator #(
   reg [AW:0] wr_run;
   wire       store_full = wr_run[AW];
   reg        prog_q, short_load;
+  wire       prog_rise = prog_mode & ~prog_q;   // Q2: the reload flush
+  // ⭐ Q2 rule 1's switch: the queues and the RX pending byte clear on it.
+  // `M_NO_RELOAD_FLUSH` is the must-fire (no flush: A7 re-sent after a
+  // reload, an unread byte reaches the host).
+`ifdef M_NO_RELOAD_FLUSH
+  wire       reload_flush = 1'b0;
+`else
+  wire       reload_flush = prog_rise;
+`endif
   always @(posedge clk or negedge rst_n_s) begin
     if (!rst_n_s) begin
       wr_run     <= {(AW+1){1'b0}};
@@ -381,6 +390,7 @@ module tt_um_protocol_emulator #(
   // =====================================================================
   wire [N_PINS-1:0]  e_pin_out, e_pin_oe;
   wire [N_PINS-1:0]  e_pin_inv;                // CE2: inverted clock pins
+  wire [N_PINS-1:0]  e_pin_isck;               // 1': declared clock pins
   wire [N_LANES-1:0] e_under, e_ovf;
   wire               e_ovr, e_busy, e_rx_push;
   wire               e_host_pop;
@@ -532,6 +542,20 @@ module tt_um_protocol_emulator #(
       // status frame -- the same reasoning as RX overflow: a host that has
       // stopped reading cannot be told by a pin it is not reading.
       if (nib_lo && !do_push) tx_full_sticky <= 1'b1;
+      // ⛔⛔ RELOAD IS A CLEAN SLATE (Wilson Q2, rule 1): the synchronised PROG
+      // rise empties every TX queue and a half-assembled byte. Pushes while
+      // PROG is high are store writes (`push_rise` is gated by `run`), so no
+      // legitimate byte is lost. After a reload, TX starts with the first byte
+      // pushed after PROG falls. Last assignment wins over a same-cycle push.
+      // The sticky TX-FULL is status, not queue state, and is kept.
+      if (reload_flush) begin
+        tx_half <= 1'b0;
+        for (ti = 0; ti < TXN; ti = ti + 1) begin
+          tx_cnt[ti] <= 2'd0;
+          tx_wp[ti]  <= 1'b0;
+          tx_rp[ti]  <= 1'b0;
+        end
+      end
     end
   end
 
@@ -551,6 +575,7 @@ module tt_um_protocol_emulator #(
       .s_wraddr(e_wraddr), .s_wraddrk(e_wraddrk), .s_wre(e_wre),
       .s_wrdata(s_wrdata),
       .pin_out(e_pin_out), .pin_oe(e_pin_oe), .pin_inv(e_pin_inv),
+      .pin_isck(e_pin_isck),
       .pin_in(pin_in),
       .pin_rise(pin_rise), .pin_fall(pin_fall),
       .host_data(tx_head), .host_valid(tx_valid), .host_pop(e_host_pop),
@@ -669,6 +694,9 @@ module tt_um_protocol_emulator #(
         end
       end
 
+      // ⛔ Q2 RX side: a received byte the host has not read yet is cleared
+      // by the reload too (HOST_INTERFACE: drain RX before raising PROG).
+      if (reload_flush) rx_pend <= 1'b0;
       if (ser_cnt != 4'd0) begin
         // shifting a frame out: one bit per two cycles, strobe in the middle
         ser_phase <= ~ser_phase;
@@ -857,12 +885,26 @@ module tt_um_protocol_emulator #(
   // protocol output idles high; after it an inverted SCK idles low. Headers
   // load before any dispatch, so CS is still deasserted -- a bench checks it.
   // `M_CLKINV_IGNORED` drops the XOR.
-`ifdef M_CLKINV_IGNORED
-  wire [3:0] proto_out = prog_mode ? 4'b1111 : e_pin_out[11:8];
+  // ⛔⛔ OPTION 1' (Wilson): A TWO-PHASE HALT. Forcing all four protocol
+  // outputs high in ONE cycle raised CS and SCK on the same edge, and on real
+  // pads skew decides which lands first: SCK first after 7 bits makes an SPI
+  // peer complete a byte with a stale 8th bit and WRITE it. So in the FIRST
+  // PROG cycle (`prog_rise`) every output except a declared clock pin goes
+  // idle, and the clock pins hold their running level; from the second cycle
+  // all four are forced as before. CS therefore leads any halt-caused SCK
+  // edge by a full clock. `M_ONE_PHASE_HALT` restores the single-phase force.
+`ifdef M_ONE_PHASE_HALT
+  wire [3:0] halt_force = 4'b1111;
 `else
-  wire [3:0] proto_out = prog_mode ? 4'b1111
-                                   : (e_pin_out[11:8] ^ e_pin_inv[11:8]);
+  wire [3:0] halt_force = prog_rise ? ~e_pin_isck[11:8] : 4'b1111;
 `endif
+`ifdef M_CLKINV_IGNORED
+  wire [3:0] run_out   = e_pin_out[11:8];
+`else
+  wire [3:0] run_out   = e_pin_out[11:8] ^ e_pin_inv[11:8];
+`endif
+  wire [3:0] proto_out = prog_mode ? (halt_force | (run_out & ~halt_force))
+                                   : run_out;
 
   reg [7:0] uo_q;
   always @(posedge clk or negedge rst_n_s) begin

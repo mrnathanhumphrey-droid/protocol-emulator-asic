@@ -81,7 +81,7 @@ XFAIL = {("tb_verdict", "pipeline")}
 NEEDS_NBYTES = {"tb_tx", "tb_half", "tb_i2c", "tb_csat", "tb_jlane", "tb_status",
                 "tb_fifo", "tb_lock", "tb_w", "tb_ckack", "tb_cktx",
                 "tb_rxbw", "tb_trace", "tb_witness", "tb_pinrange",
-                "tb_uartrx"}
+                "tb_uartrx", "tb_uarttx"}
 
 #: ⛔⛔ PLUSARGS READ BY A **SHARED INCLUDE**, with their default declared ONCE.
 #: `test/clocked_conform.vh` is included by thirteen benches, so a plusarg read
@@ -480,6 +480,28 @@ CONFIG = {
         "srcs": [],
         "arms": [("default", ["+IMG=test/rxfast_image.hex", "+NCYC=200000",
                               "+SATURATED=1"])],
+    },
+    # WF2 #9/#10/#11 + rule 1: a reload is a clean slate. The four arms on
+    # tracked images (the bench picks them by MODE); the SPI (4) and I2C (5,
+    # 7) arms need images `test/run_reload.py` generates, and that runner
+    # judges every arm and its must-fires in `ci/run_gates.sh`.
+    "tb_reload": {
+        "srcs": ["test/fram_spi.v", "test/fram_i2c.v"],
+        "arms": [("tx", ["+IMG=test/uart_tx_image.hex", "+MODE=0", "+RLF=3",
+                         "+RLB=5", "+NPOST=12"]),
+                 ("rx", ["+IMG=test/uart_rx_image.hex", "+MODE=1", "+RLF=3",
+                         "+RLB=5", "+NPOST=12"]),
+                 ("rx2tx", ["+IMG=test/uart_tx_image.hex", "+MODE=2",
+                            "+RLF=3", "+RLB=5", "+NPOST=12"]),
+                 ("unread", ["+IMG=test/uart_rx_image.hex", "+MODE=3",
+                             "+RLF=3", "+RLB=5", "+NPOST=12"])],
+    },
+    # WF2 round 2: the published UART-tx lane at 115200, judged by a peer on
+    # its own clock; the busy image covers it beside four d = D* lanes.
+    "tb_uarttx": {
+        "srcs": [],
+        "arms": [("busy", ["+IMG=test/uart_tx_busy_image.hex",
+                           "+NCYC=60000", "+BITP=434", "+ERR=0"])],
     },
     # Wilson's UART ruling: the first program receiving a real UART stream,
     # against a baud-errored peer (2 % slow), bytes vs what the peer sent.

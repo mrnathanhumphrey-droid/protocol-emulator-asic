@@ -38,8 +38,10 @@ and 3 at d = 17, and the unclocked SHIFTIN release held only 14 at d = 16.
       W1 actually delayed a dispatch, on every image in the table
   W5  must-fires: `M_NO_HOLD_GATE` reproduces the setup moves (11/562 on
       ckhold_over, 10 and 3 on i2cframe d = 16/17; ckhold_over is 14/688
-      since silicon fix #2 corrected its bytes), `M_SHIFTIN_UC_UNHELD`
-      reproduces the unclocked release hold of 14
+      since silicon fix #2 corrected its bytes, and 15/691, 11, 6 since
+      silicon fix #8 made the first byte the host's), `M_SHIFTIN_UC_UNHELD`
+      reproduces the unclocked release hold of 14 -- on a feed that drives
+      SDA low before every ACK, so the condition is built, not lucky
 """
 
 from __future__ import annotations
@@ -92,8 +94,15 @@ W4 = [("ckhold_over_image", "test/ckhold_over_image.hex", "none")]
 #: wrong bytes' count. MEASURED: built with M_TX_LOAD_ANYPHASE as well, the
 #: mutant still gives exactly 11 of 562; on the fixed RTL 14 of 688. The two
 #: unclocked frames do not use the clocked SHIFT and did not move.
-W5_FOUND = {"ckhold_over_image": (14, 688), "i2cframe_d16": (10, None),
-            "i2cframe_d17": (3, None)}
+#: ⛔ RE-RECORDED A SECOND TIME (WF2, silicon fix #8): the first TX byte is
+#: now the host's, not the reset 0x00, so the SDA bit stream -- and the count
+#: of moves the mutant exposes -- changed on all three. MEASURED: built with
+#: M_TX_PRELOAD (#8 undone) as well, the mutant gives exactly 14/688, 10 and
+#: 3 again; on the fixed RTL 15/691, 11 and 6.
+W5_FOUND = {"ckhold_over_image": (15, 691), "i2cframe_d16": (11, None),
+            "i2cframe_d17": (6, None)}
+#: the unheld-SHIFTIN must-fire's feed: bit 0 and bit 7 = 0 in every byte
+UC_FEED = [0x34, 0x2C, 0x16, 0x68]
 ROW = re.compile(r"clocked_conform\[H\] class (\d+): n=(\d+) hold_min=(-?\d+) "
                  r"hold_max=(-?\d+) moved_while_released=(\d+)")
 CFG = re.compile(r"clocked_conform\[M5\]: store_full=\d config_err=(\d)")
@@ -112,14 +121,17 @@ def build(defs, name):
     return out
 
 
-def run(vvp, img, peer):
+def run(vvp, img, peer, feed=None):
+    """`feed`: queue 0's bytes (tb_trace `+FEED`), or the bench default."""
     import benchset
     a2 = benchset.a2_slack_arg(img) if img.startswith("test/") else None
+    fa = (["+FEEDN=%d" % len(feed), "+FEED=%s" % "".join(
+        "%02x" % b for b in feed)] if feed else [])
     r = subprocess.run([tool("vvp"), vvp, "+IMG=%s" % img, "+NBYTES=256",
                         "+PEER=%s" % peer, "+NCYC=60000",
                         "+OUT=%s" % os.path.join(OUT, "t.txt"), "+SEED=1",
                         "+ASYNC=0", "+STAYLOAD=0", "+SCLHOLD=0"]
-                       + ([a2] if a2 else []),
+                       + ([a2] if a2 else []) + fa,
                        cwd=ROOT, capture_output=True, text=True,
                        encoding="utf-8", errors="replace")
     o = r.stdout
@@ -297,7 +309,14 @@ def main() -> int:
                  "" if same else "  *** recorded finding was %s%s -- re-measure"
                  % (want, "/%s" % of if of else "")))
     uc = build(["M_SHIFTIN_UC_UNHELD"], "ucunheld")
-    r6 = run(uc, frame_image(hold + 1), "i2c")
+    # ⛔⛔ THE STIMULUS GUARANTEES WHAT THE MUTANT NEEDS. An unheld SHIFTIN
+    # release only shows when SDA was DRIVEN LOW before the ACK release; with
+    # the bench's default feed the low came from the reset 0x00 that went
+    # out first (silicon fix #8), and once that was fixed this must-fire went
+    # SILENT (hold 16 >= SDA_HOLD, MEASURED). Every byte below has bit 0 AND
+    # bit 7 = 0, so the last data bit before every ACK is low whichever order
+    # the lane shifts: 162 releases judged, not 40 by luck.
+    r6 = run(uc, frame_image(hold + 1), "i2c", feed=UC_FEED)
     c6 = r6["rows"].get(2)
     hit6 = bool(c6) and c6[1] < hold and r6["hfail"]
     print("    W5  M_SHIFTIN_UC_UNHELD on i2cframe d = %d: SHIFTIN release hold "

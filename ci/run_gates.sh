@@ -210,6 +210,21 @@ GATES=(
   # RED (28,000+ cycles late vs its bound); the control is green; the control
   # at bound = measured - 1 is red (the comparison is live).
   test/run_wirefeed_mf.py
+  # ⭐⭐ WF2 round 2 -- the published UART-tx lane at 115200 baud, judged by
+  # a peer on its own clock (content, framing, the middle-80 % timing window),
+  # V3 exact and V3-T in bound; must-fires: a 5 %-off peer, an MSB-first build.
+  test/run_uarttx.py
+  # ⭐⭐ WF2 #9/#10/#11 + rule 1 + option 1' -- A RELOAD IS A CLEAN SLATE,
+  # judged by peers on the wire: UART TX/RX, RX->TX, an unread RX byte, SPI
+  # (CS leads SCK by a clock), I2C behind a bus switch, 1-Wire cut mid write-0;
+  # a no-pad-moves window after PROG falls on every arm; one mutant per fix,
+  # each red for its own reason. The I2C harm demo is printed, never judged.
+  test/run_reload.py
+  # ⭐⭐ #11 -- the halt state equals the reset state BY CONSTRUCTION (one
+  # list, macros at the top of src/pe_engine.v, expanded in both); this is the
+  # second check: no register reset outside the list, every block halts, the
+  # keep-list is exactly the ruled status flags. Must-fires on mutated text.
+  model/gate_halt_reset.py
   # ⭐⭐ SP2 -- the pe_asm protocol front-end (model/pe_proto.py): every
   # shipped FRAM program re-expressed as a TRANSACTION (START / rSTART / STOP
   # and CS framing generated from context), byte-identical to the verified

@@ -398,12 +398,13 @@ class OneWire:
         bytes]) -- a poll group the host repeats until a pushed byte is
         non-zero (VDD mode: Convert T answers 0 while busy, 1 when done).
         The rx map names what each PUSHED byte is, in order.
-        ⛔ The first 2 symbols of the run are NOT the host's: the shift
-        register resets to 0x00, so the first 8 SHIFTs send RST RST before
-        the first host byte loads (`pe_engine.v`, the TX load at
-        `tx_bitp == a_cnt`). The first reset block therefore takes 14 host
-        symbols, and its 2 missing RSTs are those."""
-        syms, rxmap, words, first = [], [], [], True
+        ⭐ EVERY SYMBOL IS THE HOST'S, the first reset block included
+        (silicon fix #8, WF2). Before it the shift register's reset 0x00 went
+        out first, so the first 8 SHIFTs sent RST RST before any host byte and
+        the first reset block was cut to 14 host symbols to absorb them. The
+        fix takes a byte's first bit from the queue head, so that workaround
+        is gone: the first block is the full 16, like every other."""
+        syms, rxmap, words = [], [], []
         polls = []
 
         def flush_syms():
@@ -417,8 +418,7 @@ class OneWire:
         for step in txn:
             kind = step[0]
             if kind == "reset":
-                blk = self.RESET_BLOCK[2:] if first else list(self.RESET_BLOCK)
-                syms += blk
+                syms += list(self.RESET_BLOCK)
                 rxmap += [("reset", 0), ("reset", 1)]
             elif kind == "write":
                 b = int(step[1])
@@ -437,7 +437,6 @@ class OneWire:
                 polls.append(len(rxmap) - 1)
             else:
                 raise ProtoError("unknown 1-Wire step %r" % (kind,))
-            first = False
         flush_syms()
         return words, rxmap
 
@@ -482,10 +481,12 @@ def onewire_fpga():
 
 
 def spi_fram(d=7, mode0=False, clkinv=False):
-    """`corpus_spim`: WREN, WREN, WRITE a a d d d, READ a a [in] [in]."""
+    """`corpus_spim`: WREN, WRITE a a d d d, READ a a [in] [in].
+    ⭐ ONE WREN since silicon fix #8 (the program had sent it twice to absorb
+    the reset 0x00 that went out first)."""
     import corpus
     from pe_isa import FLAG_CLK_INV
     m = SPI(corpus.P_M_MOSI, corpus.P_M_SCLK, corpus.P_M_CS, corpus.P_M_MISO,
             d, ORDER_MSB, nc_count=8, mode0=mode0)
-    lanes = {0: m.transactions([(1, 0), (1, 0), (6, 0), (3, 2)])}
+    lanes = {0: m.transactions([(1, 0), (6, 0), (3, 2)])}
     return lanes, {0: m.header(FLAG_CLK_INV if clkinv else 0)}, None

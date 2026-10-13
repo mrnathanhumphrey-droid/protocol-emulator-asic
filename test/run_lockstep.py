@@ -13,6 +13,15 @@ SHIFT's host load moved off the HIGH phase, which changes SDA VALUES on the
 pre-form (`M_TX_LOAD_ANYPHASE`) reproduced every old digest, and the
 DISPATCH stream (now recorded on its own, `dispatch_sha256`) is identical
 old -> new on all 12. The schedule this file freezes has not moved.
+⛔ RE-RECORDED A SECOND TIME, DELIBERATELY (WF2, silicon fix #8, with
+#9/#10/#11 / rule 1 / option 1' in the same diff): a TX lane's first byte is
+the host's, not the register's reset 0x00, which changes TX data-pin VALUES
+on the 9 images with a TX lane and nothing else. Proven before re-recording:
+(1) the pre-fix `HEAD` reproduced all 12 old digests; (2) the new RTL built
+with `M_TX_PRELOAD` (#8 alone undone) reproduced all 12 BYTE-IDENTICALLY, so
+the reload fixes and the shared reset list move nothing here; (3) the new
+RTL's DISPATCH stream is identical old -> new on all 12. `M_TX_PRELOAD` now
+moves 9 digests: it is this gate's third must-fire.
 
 ⭐ THE MUST-FIRE IS TF1's NAIVE RETIMING. `M_TF1_LATE` registers readiness
 from the CURRENT `now` and timestamp instead of the next-state ones. The
@@ -57,6 +66,7 @@ SRCS = ["pe_engine.v", "pe_store.v", "project.v"]
 MUST_FIRE = [
     ("M_TF1_LATE", "registered readiness from CURRENT values"),
     ("M_TF2_LIVE_LATE", "a lane halted this cycle still eligible next cycle"),
+    ("M_TX_PRELOAD", "silicon fix #8 undone: the reset 0x00 goes out first"),
 ]
 IMAGES = ["smoke_image.hex", "stress_image.hex", "half_image.hex",
           "census_image.hex", "corpus_i2c.hex", "i2caddr_image.hex",

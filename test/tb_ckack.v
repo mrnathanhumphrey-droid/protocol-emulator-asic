@@ -105,24 +105,28 @@ module tb_ckack;
     peer.addr = 15'h0123;
 
     // ⭐ ONE QUEUE, IN PROGRAM ORDER (`pe_asm.check_queue_ownership`: a lane
-    // uses one queue). A SHIFT loads its successor's byte at its own end, so
-    // the six SHIFTs of the random read pop q0 in this order -- and the first
-    // SHIFT after reset sends the register's reset 0x00:
-    //   01 23 (address)  A1 (dev R)  2D (master ACK, MSB 0)  C4 (master
-    //   NACK, MSB 1)  A0 (next loop's dev W)
+    // uses one queue). Since silicon fix #8 a SHIFT pops the byte it SENDS, so
+    // the six SHIFTs of the random read take q0 in wire order:
+    //   A0 (dev W)  01 23 (address)  A1 (dev R)  2D (master ACK, MSB 0)
+    //   C4 (master NACK, MSB 1)
+    // ⛔ It used to be rotated -- 01 23 A1 2D C4 A0 -- because each SHIFT
+    // loaded its successor's byte at its own end and the first sent the reset
+    // 0x00. Left rotated, the read went out misaligned and the coverage gate
+    // (the only one that runs this bench in CI) saw the peer's READ path go
+    // uncovered.
     // ACK/NACK are 2D/C4, NOT 00/FF: only the MSB of a 1-bit SHIFT goes out,
     // and every payload stays non-palindromic (ruling 1b).
     // +DEVW / +DEVR replace A0 / A1 (A2 / A3 on the nobody-answers arm).
     hf_init;
     hf_n(0, 6);
-    hf_put(0, 0, 8'h01);
-    hf_put(0, 1, 8'h23);
-    if (!$value$plusargs("DEVR=%h", i)) i = 8'hA1;
-    hf_put(0, 2, i[7:0]);
-    hf_put(0, 3, 8'h2D);
-    hf_put(0, 4, 8'hC4);
     if (!$value$plusargs("DEVW=%h", i)) i = 8'hA0;
-    hf_put(0, 5, i[7:0]);
+    hf_put(0, 0, i[7:0]);
+    hf_put(0, 1, 8'h01);
+    hf_put(0, 2, 8'h23);
+    if (!$value$plusargs("DEVR=%h", i)) i = 8'hA1;
+    hf_put(0, 3, i[7:0]);
+    hf_put(0, 4, 8'h2D);
+    hf_put(0, 5, 8'hC4);
 
     cyc = 0; nwr = 0; park_now = 0; park_max = 0; n_rx = 0;
     fd = $fopen(dumpfile, "wb");

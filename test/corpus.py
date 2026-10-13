@@ -355,14 +355,12 @@ def build_spi_master(d: int = 7, mode0: bool = False, clkinv: bool = False):
         sel = [(OP_LEVEL, P_M_SCLK, 0, d), sel]
     else:
         sel = [sel]
-    # ⚠ WREN TWICE: the first SHIFT after reset sends the register's reset
-    # 0x00, so on the first loop the first WREN is no opcode at all -- WEL
-    # would stay clear, the WRITE be ignored, and the READ return the peer's
-    # deliberately-X memory (an X into the chip makes the two-simulator
-    # comparison disagree by construction). Measured: MISO read `x`. The
-    # second WREN is real on every loop.
-    seq = (sel + [sh(), desel]                                 # WREN (00 1st)
-           + sel + [sh(), desel]                               # WREN
+    # ⭐ ONE WREN (silicon fix #8, WF2). The program sent WREN TWICE because
+    # the first SHIFT after a load sent the register's reset 0x00 -- on the
+    # first loop the first "WREN" was no opcode at all, WEL stayed clear and
+    # the READ returned the peer's X. With every byte now the host's from the
+    # first, the workaround is removed: the datasheet's sequence, once.
+    seq = (sel + [sh(), desel]                                 # WREN
            # ⚠ THREE data bytes for a TWO-byte read: the part prefetches the
            # NEXT address when a read byte completes, and the clocked
            # SHIFTIN's trailing COLLECT is an SCK fall with CS still low --
@@ -564,15 +562,16 @@ def build_all5(d: int = 9, d0: int = D_FM_SHIPPABLE):
 OPEN = {}
 
 #: image -> the bytes queue 0 must carry, in the order the program's SHIFTs
-#: POP them (a SHIFT loads its successor's byte at its own end, so the first
-#: SHIFT after reset sends 0x00 and the last one pops the next loop's first).
+#: SEND them: since silicon fix #8 a SHIFT pops the byte it sends, so the feed
+#: is exactly one loop's bytes, in wire order. (It used to be rotated by one:
+#: each SHIFT loaded its successor's byte at its own end, the first sent the
+#: reset 0x00 and the last popped the next loop's first.)
 #: `tb_trace` takes it as `+FEED` / `+FEEDN`; images not listed keep the
 #: bench's default 5B 01 7A C7 on every queue.
-#:   corpus_spim: WREN, WRITE 01 23 5B C4 1E, READ 01 23, then the next
-#:   loop's first WREN
+#:   corpus_spim: WREN, WRITE 01 23 5B C4 1E, READ 01 23
 FEEDS = {
     "corpus_spim": [0x06, 0x02, 0x01, 0x23, 0x5B, 0xC4, 0x1E, 0x03, 0x01,
-                    0x23, 0x06],
+                    0x23],
 }
 
 # ports whose single BIT must vary, where a whole-port check would be gameable

@@ -2,10 +2,11 @@
 BACK THROUGH THE CHIP, ADJUDICATED BY SIGROK.
 
 `corpus_spim` is the datasheet's sequence, clocked, MSB-first, one queue:
-    CS- WREN CS+  CS- WREN CS+  CS- WRITE 01 23 5B C4 1E CS+
+    CS- WREN CS+  CS- WRITE 01 23 5B C4 1E CS+
     CS- READ 01 23 [in] [in] CS+
-(the first WREN of the first loop is the shift register's reset 0x00; the
-second is real on every loop -- see `corpus.build_spi_master`).
+(⭐ ONE WREN since silicon fix #8. The program sent it twice while the first
+SHIFT after a load sent the register's reset 0x00 -- the first loop's first
+"WREN" was no opcode -- and the first frame is now checked to be 06.)
 
 THE CHAIN -- three hands must agree on the two bytes read back:
   * WRITTEN: the bytes the program fed and the WRITE sent, 5B C4;
@@ -204,14 +205,15 @@ def judge(res, say):
         % (len(modes), len(mosi)))
     shape = []
     for i, m in enumerate(mosi):
-        k = i % 4
-        exp = ([0x00] if i == 0 else w["wren"]) if k < 2 else (
-            w["write"] if k == 2 else w["read"] + [None, None])
+        k = i % 3
+        exp = w["wren"] if k == 0 else (
+            w["write"] if k == 1 else w["read"] + [None, None])
         shape.append(len(m) == len(exp) and all(
             e is None or e == b for e, b in zip(exp, m)))
-    say(len(mosi) >= 8 and all(shape),
-        "MOSI per frame: [06] [06] [02 01 23 5B C4 1E] [03 01 23 . .]")
-    reads = [i for i in range(len(mosi)) if i % 4 == 3]
+    say(len(mosi) >= 6 and all(shape),
+        "MOSI per frame, FROM THE FIRST: [06] [02 01 23 5B C4 1E] "
+        "[03 01 23 . .]")
+    reads = [i for i in range(len(mosi)) if i % 3 == 2]
     sig = [w2 for i in reads for w2 in miso[i][3:5]]
     say(len(reads) >= 2 and all(miso[i][3:5] == w["back"] for i in reads),
         "sigrok MISO words of all %d READs == the written %s"
@@ -310,7 +312,7 @@ def main() -> int:
     # sends back: the READs are no longer mode 1 at the pins, and the chip
     # receives 5B C4 one bit early.
     mf = run(["M_CLKINV_IGNORED"], clkinv=True)
-    mreads = [i for i in range(len(mf["mosi"])) if i % 4 == 3]
+    mreads = [i for i in range(len(mf["mosi"])) if i % 3 == 2]   # 3 frames/loop
     mm = sorted({mf["modes"][i] for i in mreads if i < len(mf["modes"])})
     say(mm and mm != [1], "the pins: the READs are no longer MODE 1 (SCK "
         "level at CS fall reads as mode %s)" % mm)
@@ -327,7 +329,7 @@ def main() -> int:
     for mut in ("M_CKRX_HEADER_PIN", "M_CKRX_PP_OBSERVED"):
         print("  --- MUST-FIRE: %s (silicon fix #3) ---" % mut)
         mf = run([mut])
-        sig = [w2 for i, m in enumerate(mf["miso"]) if i % 4 == 3
+        sig = [w2 for i, m in enumerate(mf["miso"]) if i % 3 == 2
                for w2 in m[3:5]]
         n = min(len(mf["chip"]), len(sig))
         print("    sigrok MISO %s / chip %s"

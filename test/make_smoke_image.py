@@ -922,13 +922,12 @@ def build_i2cframe(d: int = 62, sda: int = 2, scl: int = 1, nbytes: int = 2):
       STOP    SDA low, SCL high, then `OP_STOP(SDA, 1)` releases SDA so it
               RISES while SCL is high.
 
-    ⚠ THE FIRST TRANSACTION CARRIES ADDRESS 0x00 AND IS EXPECTED TO. `l_tx`
-    resets to 0 and the host byte loads only at the end of eight shifts, so the
-    first byte out of any lane is the reset byte -- `tb_tx` asserts exactly
-    that. ⭐ The host pattern is therefore chosen so that EVERY LATER
-    transaction is valid: with a 4-byte cycle of [data, addr, data, addr] the
-    loop emits (0x00, data), then (addr, data), (addr, data), ... so from the
-    second transaction on the wire carries a well-formed write.
+    ⭐ EVERY TRANSACTION, THE FIRST INCLUDED, CARRIES THE HOST'S BYTES
+    (silicon fix #8). The first transaction used to carry address 0x00 -- the
+    lane's reset byte went out first, a General Call -- and the host pattern
+    was arranged [data, addr, data, addr] so that later transactions were
+    valid. That workaround is removed: the bench pushes [addr, data, ...] in
+    wire order (`tb_i2c`), and `tb_tx` asserts the first byte is the host's.
 
     ⚠ OPEN-DRAIN IS WHAT MAKES THIS LEGAL AT ALL. Both pins are on `uio`,
     declared `MODE_OD`, so a 1 is a RELEASE and the peer may pull low at the

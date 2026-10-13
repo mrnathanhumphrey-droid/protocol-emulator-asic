@@ -123,11 +123,17 @@ module tb_i2c;
 
     if (!$value$plusargs("TXB=%d", txb)) txb = 2;
     hf_init;
-    // ⭐ THE PATTERN IS CHOSEN SO EVERY TRANSACTION AFTER THE FIRST IS VALID.
-    // `l_tx` resets to 0 so the first byte out is 0x00; with a 4-byte cycle of
-    // [data, addr, data, addr] the loop emits (0x00, data) then (addr, data)
-    // for ever after. `0xA0` is `1010 000 0` -- the MB85RC256V device address
-    // with A2/A1/A0 strapped to 0 and R/W = 0 (write).
+    // ⭐ BYTES GO OUT IN PUSH ORDER, FROM THE FIRST (silicon fix #8). The
+    // pattern used to be [data, addr, data, addr] so that every transaction
+    // AFTER the first was valid -- the first byte out was the register's reset
+    // 0x00, which made the first transaction a GENERAL CALL (every general-
+    // call device on a real bus ACKs it). That workaround is removed.
+    // `0xA0` is `1010 000 0` -- the MB85RC256V device address with A2/A1/A0
+    // strapped to 0 and R/W = 0 (write).
+    // ⭐ THE REFUSAL IS NOW BY DESIGN: TXB = 2 alternates the part's address
+    // with 0xA2 (`1010 001 0`, address 0x51, which this part must NACK), so
+    // `run_i2c`'s non-vacuity check sees both outcomes -- it used to lean on
+    // the accidental 0x00.
     // ⭐ PUSHED AS THEMSELVES, because the lane header now declares
     // ORDER_MSB and the engine reverses at the load. 0xA0 is the MB85RC256V
     // device address (1010 000 0, write); 0x5B is the data byte and it is
@@ -136,22 +142,21 @@ module tb_i2c;
     // ⚠ BEFORE THE ORDER BIT this read {5A, 05, 5A, 05}: the address had to be
     // pushed pre-reversed and the data byte was a palindrome, so the whole
     // frame passed under either bit order (ruling 1b).
-    // ⭐⭐ `+TXB` SELECTS THE TRANSACTION LENGTH, and the two patterns solve
-    // different problems. At TXB = 2 (the default, and the certified frame)
-    // every transaction after the first is (0xA0, 0x5B): a 4-byte cycle of
-    // [data, addr, data, addr] stays in phase with a 2-byte transaction.
-    // ⛔ AT TXB = 3 THE PHASE ROTATES -- 3 bytes against a 4-byte pattern has
-    // period 4 -- so NO pattern can make every transaction well-formed. With
-    // [0x23, 0x5B, 0xA0, 0x01] the wire stream is
-    //     txn1 00 23 5B | txn2 A0 01 23 | txn3 5B A0 01 | txn4 23 5B A0 | ...
-    // so every FOURTH transaction is `dev A0, addrhi 01, addrlo 23` and the
-    // peer's address register must land on 0x0123. The others fail the device
-    // match and the peer returns to idle -- exactly what the restart counter
-    // was added to survive.
-    // ⚠ ALL FOUR BYTES ARE NON-PALINDROMIC (ruling 1b): 23/C4, 5B/DA,
-    // A0/05, 01/80, so every byte sigrok reads is evidence about bit ORDER.
-    if (txb == 3) hf_set(0, 8'h23, 8'h5B, 8'hA0, 8'h01);
-    else          hf_set(0, 8'h5B, 8'hA0, 8'h5B, 8'hA0);
+    // ⭐⭐ `+TXB` SELECTS THE TRANSACTION LENGTH. At TXB = 2 (the certified
+    // frame) the transactions alternate (0xA0, 0x5B) -- acknowledged -- and
+    // (0xA2, 0x5B) -- refused. At TXB = 3 the pattern is the 3-byte cycle
+    // [0xA0, 0x01, 0x23], so EVERY transaction is `dev A0, addrhi 01, addrlo
+    // 23` and the peer's address register must land on 0x0123. (With the
+    // reset 0x00 first, a 4-byte pattern rotated against the 3-byte frame and
+    // only every FOURTH transaction was well-formed.)
+    // ⚠ EVERY BYTE IS NON-PALINDROMIC (ruling 1b): A0/05, 5B/DA, A2/45,
+    // 01/80, 23/C4, so every byte sigrok reads is evidence about bit ORDER.
+    if (txb == 3) begin
+      hf_n(0, 3);
+      hf_put(0, 0, 8'hA0); hf_put(0, 1, 8'h01); hf_put(0, 2, 8'h23);
+    end else begin
+      hf_set(0, 8'hA0, 8'h5B, 8'hA2, 8'h5B);
+    end
 
     cyc = 0; nwr = 0; fails = 0;
     n_sda_edge = 0; n_scl_edge = 0; n_peer_ack = 0;

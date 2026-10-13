@@ -38,13 +38,13 @@ function integer ck_load_at;
   begin
     ck_load_at = -1;
     if (cnt == 0) ck_load_at = 1 ;  // SHIFT, 1 bit(s)
-    if (cnt == 1) ck_load_at = 3 ;  // SHIFT, 2 bit(s)
-    if (cnt == 2) ck_load_at = 5 ;  // SHIFT, 3 bit(s)
-    if (cnt == 3) ck_load_at = 7 ;  // SHIFT, 4 bit(s)
-    if (cnt == 4) ck_load_at = 9 ;  // SHIFT, 5 bit(s)
-    if (cnt == 5) ck_load_at = 11;  // SHIFT, 6 bit(s)
-    if (cnt == 6) ck_load_at = 13;  // SHIFT, 7 bit(s)
-    if (cnt == 7) ck_load_at = 15;  // SHIFT, 8 bit(s)
+    if (cnt == 1) ck_load_at = 1 ;  // SHIFT, 2 bit(s)
+    if (cnt == 2) ck_load_at = 1 ;  // SHIFT, 3 bit(s)
+    if (cnt == 3) ck_load_at = 1 ;  // SHIFT, 4 bit(s)
+    if (cnt == 4) ck_load_at = 1 ;  // SHIFT, 5 bit(s)
+    if (cnt == 5) ck_load_at = 1 ;  // SHIFT, 6 bit(s)
+    if (cnt == 6) ck_load_at = 1 ;  // SHIFT, 7 bit(s)
+    if (cnt == 7) ck_load_at = 1 ;  // SHIFT, 8 bit(s)
   end
 endfunction
 function integer ck_tx_bit;

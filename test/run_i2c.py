@@ -59,6 +59,7 @@ DUMP = "probe_i2c.bin"
 # way. sigrok reading `Address write: 50` from a pushed 0x05 is what settles it.
 ADDR_PUSHED = 0xA0              # pushed AS ITSELF; the lane declares ORDER_MSB
 ADDR_7BIT = 0x50                # what sigrok reports: 0xA0 >> 1
+ADDR_REFUSED = 0x51             # tb_i2c also pushes 0xA2: an address to NACK
 # ⛔ NON-PALINDROMIC, AND THAT IS THE WHOLE POINT (ruling 1b). This was 0x5A,
 # which reverses to itself, so sigrok reading it back proved the byte arrived
 # and NOTHING about the order it arrived in. 0x5B reverses to 0xDA, so sigrok
@@ -254,25 +255,29 @@ def main() -> int:
 
     # ---- NON-VACUITY: the decoder and the peer must both DISCRIMINATE --
     # ⛔⛔ A PEER THAT ACKED EVERYTHING WOULD CERTIFY NOTHING, and so would a
-    # decoder that reported ACK unconditionally. The first transaction carries
-    # the reset byte 0x00 -- an address this device must REFUSE -- so the run
-    # contains both outcomes and the ACK above is a discrimination, not a
-    # constant.
+    # decoder that reported ACK unconditionally. The host pattern alternates
+    # the part's address with 0xA2 (7-bit 0x51) -- an address this device
+    # must REFUSE -- so the run contains both outcomes BY DESIGN and the ACK
+    # above is a discrimination, not a constant.
+    # ⚠ This used to lean on an ACCIDENT: the first byte out was the reset
+    # register's 0x00 (silicon fix #8), a General Call the peer refused.
     print()
     print("  --- non-vacuity: the peer REFUSES what is not its address ---")
     nacked = [t for t in tx
-              if any(e == ("Address write", 0x00) for e in t)
+              if any(e == ("Address write", ADDR_REFUSED) for e in t)
               and any(e[0] == "NACK" for e in t)]
-    print("    transactions addressed 0x00 and NACKed : %d" % len(nacked))
+    print("    transactions addressed 0x%02X and NACKed : %d"
+          % (ADDR_REFUSED, len(nacked)))
     if not nacked:
         print("    *** the run never exercised a refusal, so the ACK above")
-        print("        could be a constant. The first transaction carries the")
-        print("        reset byte 0x00 by construction -- if it was ACKed, the")
-        print("        peer is not discriminating.")
+        print("        could be a constant. Every other transaction addresses")
+        print("        0x%02X by construction -- if it was ACKed, the peer is"
+              % ADDR_REFUSED)
+        print("        not discriminating.")
         rc = 1
     else:
-        print("    ⇒ both outcomes present: 0x00 refused, 0x%02X acknowledged."
-              % ADDR_7BIT)
+        print("    ⇒ both outcomes present: 0x%02X refused, 0x%02X acknowledged."
+              % (ADDR_REFUSED, ADDR_7BIT))
 
     # ---- the bit order, settled by the foreign decoder ----------------
     print()

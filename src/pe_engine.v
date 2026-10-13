@@ -66,6 +66,191 @@
 
 `default_nettype none
 
+/* THE ENGINE'S RESET LIST, ONE COPY (candidate #11, WF2).
+ *
+ * ⛔⛔ THE HALT STATE EQUALS THE RESET STATE (Wilson, #10/#11). Before this
+ * list the power-on reset and the halt clear were two hand-written lists, and
+ * they had drifted: the halt cleared PCs, arms and `pin_oe` and nothing else,
+ * so the bit pointers (#9), the pads' levels (#10) and the clocked-lane phase
+ * state (#11: `l_ckbit` left at 7 made the first clocked SHIFT after a reload
+ * 16 bits long) all survived a reload into the next program.
+ * ⇒ Every always block with a power-on reset expands ONE macro below in BOTH
+ *   its async power-on branch and its synchronous `!run` (halt) branch, so the
+ *   two cannot drift: there is only one list. `model/gate_halt_reset.py` is
+ *   the second check -- any flop reset at power-on outside these macros, and
+ *   any keep-list entry beyond the named status flags, is red.
+ * ⚠ IN THIS FILE, NOT AN INCLUDE: an `include needs every tool (iverilog,
+ *   Verilator, slang, yosys, the harden flow, the gates that copy this file
+ *   to a scratch directory) to be given the include path, and the first run
+ *   of the gates with one showed most of them were not. One place is the
+ *   requirement; this is one place.
+ *
+ * THE KEEP-LIST (`PE_RST_KEEP`, power-on only) is STATUS the host reads AFTER
+ * halting -- clearing it at the halt would erase the reason the host halted:
+ *     l_timeout, sticky_ovr, config_err, clk_stretch_err,
+ *     lane_underrun, lane_overflow
+ * Nothing else may be on it.
+ *
+ * Notes carried from the old hand-written lists:
+ *   * `pin_out` all ones: reset-HIGH on the pins; the TOP decides which can
+ *     release (`uo_out` cannot). At a HALT this is #10: a pad no longer keeps
+ *     the halted program's last level.
+ *   * `pin_pp` all ones (all push-pull), matching `pin_out`'s reset-high: a
+ *     lane cannot drive until its header sets the pin's class; resetting to 0
+ *     would mask the `uo_out` idle-high. `pin_inv` 0: a stale inverted clock
+ *     is not carried into the next program.
+ *   * `pin_oe` 0 -- RELEASE EVERY PIN ON HALT (F2 face 3): the release is
+ *     behind the existing flop, so the top needs no combinational prog_mode
+ *     mux. It costs one cycle of release latency; `gate_load_pin_safety` and
+ *     the benches' load-mode counters hold the host to it.
+ *   * `paddr` IS RESET (TM2): write-before-read made it invisible, and the
+ *     reset removes the name from the audit's concern.
+ *   * EVERY ARM REGISTER RESETS, `l_armpin` included: an X pin index would
+ *     index `pin_rise` with X and poison the scheduler. DISARM ON HALT: an
+ *     armed lane would otherwise fire on the previous program's edge.
+ *   * The slot arrays are 2*N_LANES long, so they take their OWN loop -- the
+ *     lane loop would leave every odd slot's valid bit X.
+ *   * `cur_ck == l_clkpin[cur]` (PR2) holds through the clear: both go to 0.
+ *   * `hz_q` all ones == every `l_hcnt` 0, because `l_hcr` clears with it.
+ */
+
+`ifdef M_SHARED_BITP
+`define PE_RST_SHBITP l_bitp_shared <= {BPW{1'b0}};
+`else
+`define PE_RST_SHBITP
+`endif
+
+// ---- the main dispatch block --------------------------------------------
+`define PE_RST_MAIN \
+      st         <= ST_IDLE; \
+      jitter_cnt <= {JW{1'b0}}; \
+      jitter_max <= {JW{1'b0}}; \
+      cur        <= {LW{1'b0}}; \
+      cur_act    <= {ACT_W{1'b0}}; \
+      cur_ck     <= {PINW{1'b0}}; \
+      cur_ckr    <= 1'b1; \
+      hst        <= H_IDLE; \
+      hl         <= {LW{1'b0}}; \
+      hb         <= 4'd0; \
+      hsh        <= {(HDR_BYTES*8){1'b0}}; \
+      hdr_done   <= 1'b0; \
+      pst        <= P_SCAN; \
+      pl         <= {LW{1'b0}}; \
+      prr        <= {LW{1'b0}}; \
+      pbr1       <= 1'b0; \
+      hz_q       <= {N_LANES{1'b1}}; \
+      hl_v       <= 1'b0; \
+      hl_l       <= {LW{1'b0}}; \
+      paddr      <= {AW{1'b0}}; \
+      rel_q      <= {N_LANES{1'b0}}; \
+      pin_out    <= {N_PINS{1'b1}}; \
+      pin_pp     <= {N_PINS{1'b1}}; \
+      pin_inv    <= {N_PINS{1'b0}}; \
+      pin_oe     <= {N_PINS{1'b0}}; \
+      rx_data    <= 8'h00; \
+      rx_lane    <= {LW{1'b0}}; \
+      rx_push    <= 1'b0; \
+      ck_pre     <= 14'd0; \
+      ppc_v      <= 1'b0; \
+      ppc_l      <= {LW{1'b0}}; \
+      ppc_n      <= 2'd0; \
+      host_pop   <= 1'b0; \
+      for (i = 0; i < N_LANES; i = i + 1) begin \
+        l_pin[i]       <= {PINW{1'b0}}; \
+        l_clkpin[i]    <= {PINW{1'b0}}; \
+        l_order[i]     <= 1'b0; \
+        l_mode[i]      <= 1'b0; \
+        l_tx[i]        <= 8'h00; \
+        l_txv[i]       <= 1'b0; \
+        l_rx[i]        <= 8'h00; \
+        tx_bitp[i]     <= {BPW{1'b0}}; \
+        rx_bitp[i]     <= {BPW{1'b0}}; \
+        l_ckph[i]      <= CK_LOW; \
+        l_ckbit[i]     <= {BPW{1'b0}}; \
+        l_ckwait[i]    <= 1'b0; \
+        l_ckpark[i]    <= 1'b0; \
+        l_ckwdog[i]    <= 7'd0; \
+        l_cksamp[i]    <= 1'b0; \
+        l_ckgot[i]     <= 1'b0; \
+        l_hcr[i]       <= {HOLDW{1'b0}}; \
+        l_hval[i]      <= 1'b0; \
+        l_hoe[i]       <= 1'b0; \
+        `PE_RST_SHBITP \
+        l_timestamp[i] <= {TS_W{1'b0}}; \
+        l_half[i]      <= 1'b0; \
+        l_clkinv[i]    <= 1'b0; \
+        l_d[i]         <= {D_W{1'b0}}; \
+        l_t[i]         <= {DLY_W{1'b0}}; \
+        l_live[i]      <= 1'b0; \
+        l_pc[i]        <= {AW{1'b0}}; \
+        l_base[i]      <= {AW{1'b0}}; \
+        l_fpc[i]       <= {AW{1'b0}}; \
+        l_sel[i]       <= 1'b0; \
+        l_armed[i]     <= 1'b0; \
+        l_armpin[i]    <= {PINW{1'b0}}; \
+        l_armedge[i]   <= 1'b0; \
+        l_notmo[i]     <= 1'b0; \
+      end \
+      for (i = 0; i < NSLOT; i = i + 1) begin \
+        l_act[i]  <= {ACT_W{1'b0}}; \
+        l_actv[i] <= 1'b0; \
+      end
+
+// ---- the keep-list: POWER-ON ONLY (status the host reads after halting) --
+`define PE_RST_KEEP \
+      sticky_ovr      <= 1'b0; \
+      config_err      <= 1'b0; \
+      clk_stretch_err <= 1'b0; \
+      lane_underrun   <= {N_LANES{1'b0}}; \
+      lane_overflow   <= {N_LANES{1'b0}}; \
+      for (i = 0; i < N_LANES; i = i + 1) l_timeout[i] <= 1'b0;
+
+// ---- the other blocks, one macro each -------------------------------------
+`define PE_RST_NOW    now <= {TS_W{1'b0}};
+`define PE_RST_SCHED \
+      for (ti = 0; ti < N_LANES; ti = ti + 1) key_q[ti] <= {TS_W{1'b0}}; \
+      winner_q   <= {LW{1'b0}}; \
+      winner_v_q <= 1'b0;
+`define PE_RST_PRIMED primed_q <= 1'b0;
+`define PE_RST_PORT \
+      s_re      <= 1'b0; \
+      s_raddr   <= {AW{1'b0}}; \
+      s_wre     <= 1'b0; \
+      s_wraddr  <= {AW{1'b0}}; \
+      s_wraddrk <= {(3*AW){1'b0}};
+
+// ---- MUST-FIRE MUTANTS: re-assert a register's own value AFTER the halt
+// clear (the last nonblocking assignment wins), so the list itself is never
+// edited by a mutant.
+`define PE_HALT_MUTANTS \
+      for (i = 0; i < N_LANES; i = i + 1) begin \
+        `PE_MUT_RELOAD_RESET \
+        `PE_MUT_CKBIT \
+        `PE_MUT_HOLD \
+      end \
+      `PE_MUT_HALT_IDLE
+
+`ifdef M_NO_RELOAD_RESET
+`define PE_MUT_RELOAD_RESET l_txv[i] <= l_txv[i]; tx_bitp[i] <= tx_bitp[i]; rx_bitp[i] <= rx_bitp[i];
+`else
+`define PE_MUT_RELOAD_RESET
+`endif
+`ifdef M_HALT_KEEP_CKBIT
+`define PE_MUT_CKBIT l_ckbit[i] <= l_ckbit[i];
+`else
+`define PE_MUT_CKBIT
+`endif
+`ifdef M_HALT_KEEP_HOLD
+`define PE_MUT_HOLD l_hval[i] <= l_hval[i]; l_hoe[i] <= l_hoe[i]; l_hcr[i] <= l_hcr[i];
+`else
+`define PE_MUT_HOLD
+`endif
+`ifdef M_NO_HALT_IDLE
+`define PE_MUT_HALT_IDLE pin_out <= pin_out;
+`else
+`define PE_MUT_HALT_IDLE
+`endif
+
 module pe_engine #(
     parameter integer N_LANES = 5,
     parameter integer AW      = 8,
@@ -209,6 +394,11 @@ module pe_engine #(
     // CE2: 1 = this pin is a CLK_INV lane's clock -- the TOP inverts it at the
     // `uo_out` register (a flop; set only at header load, static in run)
     output reg  [N_PINS-1:0]    pin_inv,
+    // ⭐ OPTION 1' (Wilson): 1 = some lane's header declares this pin its
+    // CLOCK. The top holds these pads back one cycle at the halt, so every
+    // other output (CS among them) goes idle first. Read from `l_clkpin`, the
+    // same registers that gate CLK_INV -- no new header field.
+    output wire [N_PINS-1:0]    pin_isck,
     input  wire [N_PINS-1:0]    pin_in,       // already synchronised upstream
     // ⭐ EDGE DETECT, one bit per pin per polarity, combinational off the top
     // module's 3-stage sync chain. `OP_ARM` selects the polarity with the
@@ -390,6 +580,20 @@ module pe_engine #(
   reg [PINW-1:0]  l_pin    [0:N_LANES-1];   // data pin / armed pin
   reg [PINW-1:0]  l_clkpin [0:N_LANES-1];   // ⭐ a LANE property; the per-ACTION
                                             //   copy was cut by S2 as a duplicate
+  // ⭐ OPTION 1': which pins are some lane's declared clock (see `pin_isck`)
+  genvar gck;
+  generate
+    for (gck = 0; gck < N_PINS; gck = gck + 1) begin : g_isck
+      reg isck;
+      integer lk;
+      always @(*) begin
+        isck = 1'b0;
+        for (lk = 0; lk < N_LANES; lk = lk + 1)
+          if (l_clkpin[lk] == gck[PINW-1:0]) isck = 1'b1;
+      end
+      assign pin_isck[gck] = isck;
+    end
+  endgenerate
   reg             l_mode   [0:N_LANES-1];   // 0 = open-drain, 1 = push-pull
   // BIT ORDER, PER LANE, FROM THE HEADER'S LAST SPARE BIT (ruling 1).
   //     0 = LSB first -- UART, and the engine's original behaviour
@@ -623,6 +827,11 @@ module pe_engine #(
   reg             l_hoe    [0:N_LANES-1];   // the pending pin_oe value
   reg [7:0]       l_tx     [0:N_LANES-1];   // THE TX PAYLOAD lives here, not
                                             //   in the program (ruling F1)
+  // ⛔⛔ CANDIDATE #8 (WF2): `l_txv` -- the register holds THIS byte's host
+  // data. Clear at the start of every byte, so the byte's FIRST bit is taken
+  // from the queue head and popped at that bit's writeback: no byte reaches
+  // the wire that the host did not push (the reset 0x00 used to).
+  reg             l_txv    [0:N_LANES-1];
   reg [7:0]       l_rx     [0:N_LANES-1];   // the RX accumulator
   reg [BPW-1:0]   tx_bitp  [0:N_LANES-1];   // advanced/reset ONLY by OP_SHIFT
   reg [BPW-1:0]   rx_bitp  [0:N_LANES-1];   // ... ONLY by OP_SHIFTIN
@@ -824,7 +1033,8 @@ module pe_engine #(
   reg [JW-1:0] jitter_cnt, jitter_max;
 
   always @(posedge clk or negedge rst_n) begin
-    if (!rst_n)      now <= {TS_W{1'b0}};
+    if (!rst_n)      `PE_RST_NOW
+    else if (!run)   `PE_RST_NOW         // #11: halt == reset
     // ⭐⭐ `now` DOES NOT ADVANCE UNTIL PRIMED, and that is the half of
     // prime-before-release that actually removes the cold start. Gating only
     // DISPATCH would relocate the problem, not remove it: `now` would run on
@@ -1574,9 +1784,28 @@ module pe_engine #(
   // function here is the "non-constant function call in constant expression"
   // shape that Yosys rejected TWICE in this design while iverilog accepted
   // it; an explicit reversal cannot be read two ways by two tools.
+  // ⛔⛔ CANDIDATE #8: the bit a SHIFT drives -- the register's, or, when the
+  // register does not yet hold this byte, the queue head's first bit (0 on an
+  // empty queue: an underrun, flagged at the writeback).
   wire [7:0] host_data_rev = {host_data[0], host_data[1], host_data[2],
                               host_data[3], host_data[4], host_data[5],
                               host_data[6], host_data[7]};
+  // the queue head in WIRE order: REVERSED ON AN MSB-FIRST LANE, so the
+  // shift path, which walks `l_tx[0]` outward, puts the MSB on the wire
+  // first. ONE site for the order, read by the first bit and by the pop.
+`ifdef M_IGNORE_ORDER
+  wire [7:0] host_ord = host_data;
+`else
+  wire [7:0] host_ord = l_order[cur] ? host_data_rev : host_data;
+`endif
+  // `M_TX_PRELOAD` is silicon fix #8 undone (the must-fire): the register
+  // alone drives, the next byte preloads at the end of each byte, and the
+  // first byte after a load is the reset 0x00.
+`ifdef M_TX_PRELOAD
+  wire tx_bit   = l_tx[cur][0];
+`else
+  wire tx_bit   = l_txv[cur] ? l_tx[cur][0] : (host_valid & host_ord[0]);
+`endif
   // ⛔⛔⛔ THE SAMPLE IS RANGE-GUARDED, AND IT IS ONE WIRE SO THERE IS ONE
   // GUARD. `a_pin` is a 4-bit PROGRAM-CONTROLLED field addressing 0..15 while
   // only `N_PINS = 12` pins exist, so `pin_in[a_pin]` on the reserved index
@@ -1708,9 +1937,9 @@ module pe_engine #(
       // `now`, every `l_timestamp` and every `l_d` reset to 0. The release
       // term `rel_q` lives in the lane block (TF2-R3), beside the writes of
       // `l_live` / `l_armed` / `l_notmo` it needs the next values of.
-      for (ti = 0; ti < N_LANES; ti = ti + 1) key_q[ti] <= {TS_W{1'b0}};
-      winner_q   <= {LW{1'b0}};
-      winner_v_q <= 1'b0;
+      `PE_RST_SCHED
+    end else if (!run) begin
+      `PE_RST_SCHED                     // #11: halt == reset
     end else begin
       for (ti = 0; ti < N_LANES; ti = ti + 1) begin
 `ifdef M_TF1_LATE
@@ -1894,8 +2123,8 @@ module pe_engine #(
   reg prime_unp;
   integer pi;
   always @(posedge clk or negedge rst_n) begin
-    if (!rst_n)      primed_q <= 1'b0;
-    else if (!run)   primed_q <= 1'b0;      // HALT re-primes on the next run
+    if (!rst_n)      `PE_RST_PRIMED
+    else if (!run)   `PE_RST_PRIMED      // HALT re-primes on the next run
     else if (!primed_q) begin
       prime_unp = 1'b0;
       for (pi = 0; pi < N_LANES; pi = pi + 1)
@@ -1921,11 +2150,9 @@ module pe_engine #(
     // design that CANNOT BE BUILT. ⇒ A simulation bench cannot see multi-driver;
     // only synthesis can. That is why CI is a gate and not a formality.
     if (!rst_n) begin
-      s_re     <= 1'b0;
-      s_raddr  <= {AW{1'b0}};
-      s_wre    <= 1'b0;
-      s_wraddr <= {AW{1'b0}};
-      s_wraddrk <= {(3*AW){1'b0}};
+      `PE_RST_PORT
+    end else if (!run) begin
+      `PE_RST_PORT                      // #11: halt == reset
     end else begin
       s_re <= 1'b0;
       if (hst == H_REQ) begin
@@ -1958,147 +2185,18 @@ module pe_engine #(
   // =====================================================================
   always @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
-      st       <= ST_IDLE;
-      jitter_cnt <= {JW{1'b0}};
-      jitter_max <= {JW{1'b0}};
-      cur      <= {LW{1'b0}};
-      cur_act  <= {ACT_W{1'b0}};
-      cur_ck   <= {PINW{1'b0}};       // PR2: == l_clkpin[0] at reset
-      cur_ckr  <= 1'b1;               //      0 < N_PINS
-      hst      <= H_IDLE;
-      hl       <= {LW{1'b0}};
-      hb       <= 4'd0;
-      hsh      <= {(HDR_BYTES*8){1'b0}};
-      hdr_done <= 1'b0;
-      pst      <= P_SCAN;
-      pl       <= {LW{1'b0}};
-      prr      <= {LW{1'b0}};
-      pbr1     <= 1'b0;
-      hz_q     <= {N_LANES{1'b1}};          // every l_hcnt resets to 0
-      hl_v     <= 1'b0;                     // TM1: no hold load pending
-      hl_l     <= {LW{1'b0}};
-      // ⭐ TM2: `paddr` IS RESET NOW. It was a deliberately unreset register
-      // (written at the scan, read at P_REQ), allowlisted BY NAME in the
-      // reset audit -- and TM2's `paddr + 1` / `paddr + 2` let synthesis put
-      // `$auto$alumacc` names on 7 of its 8 flops, so the name stopped
-      // matching (the `pslot` -> `fix` lesson, again). Write-before-read makes
-      // the reset invisible; it removes the name from the audit's concern.
-      paddr    <= {AW{1'b0}};
-      rel_q    <= {N_LANES{1'b0}};          // every l_live resets to 0
-      // ⭐ RESET-HIGH on the pins is handled in the TOP module, not here:
-      //   which pins can RELEASE differs between the two banks, and this
-      //   module does not know the banks. See pe_top's reset comment.
-      pin_out  <= {N_PINS{1'b1}};
-      // ⛔ RESET TO ALL PUSH-PULL, matching `pin_out`'s reset-high: at reset
-      // `pin_oe` is 0 so nothing is driven, and a lane cannot drive until its
-      // header has set this pin's class. Resetting to 0 instead would mask the
-      // reset-HIGH value of the `uo_out` protocol pins to 0 and break the
-      // forced idle-high that bank requires.
-      pin_pp   <= {N_PINS{1'b1}};
-      pin_inv  <= {N_PINS{1'b0}};           // CE2: no pin inverted at reset
-      pin_oe   <= {N_PINS{1'b0}};
-      rx_data  <= 8'h00;
-      rx_lane  <= {LW{1'b0}};
-      rx_push  <= 1'b0;
-      sticky_ovr    <= 1'b0;
-      config_err    <= 1'b0;
-      clk_stretch_err <= 1'b0;
-      ck_pre          <= 14'd0;
-      ppc_v           <= 1'b0;
-      ppc_l           <= {LW{1'b0}};
-      ppc_n           <= 2'd0;
-      host_pop      <= 1'b0;
-      lane_underrun <= {N_LANES{1'b0}};
-      lane_overflow <= {N_LANES{1'b0}};
-      for (i = 0; i < N_LANES; i = i + 1) begin
-        l_pin[i]    <= {PINW{1'b0}};
-        l_clkpin[i] <= {PINW{1'b0}};
-        l_order[i]  <= 1'b0;
-        l_mode[i]   <= 1'b0;
-        l_tx[i]     <= 8'h00;
-        l_rx[i]     <= 8'h00;
-        tx_bitp[i]  <= {BPW{1'b0}};
-        rx_bitp[i]  <= {BPW{1'b0}};
-        l_ckph[i]   <= CK_LOW;
-        l_ckbit[i]  <= {BPW{1'b0}};
-        l_ckwait[i] <= 1'b0;
-        l_ckpark[i] <= 1'b0;
-        l_ckwdog[i] <= 7'd0;
-        l_cksamp[i] <= 1'b0;
-        l_ckgot[i]  <= 1'b0;
-        l_hcr[i]    <= {HOLDW{1'b0}};
-        l_hval[i]   <= 1'b0;
-        l_hoe[i]    <= 1'b0;
-`ifdef M_SHARED_BITP
-        l_bitp_shared <= {BPW{1'b0}};
-`endif
-        l_timestamp[i]     <= {TS_W{1'b0}};
-        l_half[i]   <= 1'b0;
-        l_clkinv[i] <= 1'b0;
-        l_d[i]      <= {D_W{1'b0}};
-        l_t[i]      <= {DLY_W{1'b0}};
-        l_live[i]   <= 1'b0;
-        l_pc[i]     <= {AW{1'b0}};
-        l_base[i]   <= {AW{1'b0}};
-        l_fpc[i]    <= {AW{1'b0}};
-        l_sel[i]    <= 1'b0;
-        // ⛔ EVERY ARM REGISTER RESETS, including `l_armpin`. An X in the pin
-        // index would index `pin_rise` with X and make `arm_hit` X, which the
-        // ready term then propagates into the scheduler -- the same class of
-        // failure as the X action word that killed a lane permanently.
-        l_armed[i]   <= 1'b0;
-        l_armpin[i]  <= {PINW{1'b0}};
-        l_armedge[i] <= 1'b0;
-        l_notmo[i]   <= 1'b0;
-        l_timeout[i] <= 1'b0;
-      end
-      // ⛔ A SEPARATE LOOP, because the slot arrays are 2*N_LANES long and
-      // reusing the lane loop would leave the odd slots unreset -- X on the
-      // valid bit of every spare, which in simulation reads as "maybe valid"
-      // and in synthesis as a don't-care the tools may resolve either way.
-      for (i = 0; i < NSLOT; i = i + 1) begin
-        l_act[i]  <= {ACT_W{1'b0}};
-        l_actv[i] <= 1'b0;
-      end
+      // ⛔⛔ ONE LIST FOR RESET AND HALT: the macros at the top of this
+      // file (#11).
+      `PE_RST_MAIN
+      `PE_RST_KEEP
     end else if (!run) begin
-      // HALT, RELOAD, RESUME -- an explicit scope choice, never a mid
-      // transaction swap. Everything re-initialises on the next run entry.
-      st       <= ST_IDLE;
-      hst      <= H_IDLE;
-      hdr_done <= 1'b0;
-      pst      <= P_SCAN;
-      rx_push  <= 1'b0;
-      // ⭐⭐ RELEASE EVERY PIN ON HALT, AND THIS IS WHAT FIXES F2 FACE 3.
-      // `pin_oe` used to survive a halt, so the TOP had to force release with
-      // `assign uio_oe = prog_mode ? 0 : uio_oe_run` -- a COMBINATIONAL mux
-      // whose select is `ui_in[7]`, a RAW ASYNCHRONOUS INPUT PIN. The real
-      // netlist showed the consequence: all 16 `uio_out`/`uio_oe` bits driven
-      // by `and2`/`nor2` instead of a flop, so a host transition on prog_mode
-      // can GLITCH every uio pin -- and SCL and SCLK are in that bank, where a
-      // glitch is an extra clock edge and therefore a corruption, not a margin
-      // problem. That is exactly what ruling F2 forbids.
-      // ⇒ Clearing it HERE moves the release behind the existing flop, so the
-      //   top module needs no mux at all and every uio bit is a flop Q.
-      // ⛔ It costs ONE CYCLE of release latency, not zero: prog_mode is async
-      //   and this clear is synchronous, so the host must leave at least one
-      //   clock between asserting prog_mode and driving `uio`. The load
-      //   sequence already does, and `gate_load_pin_safety` plus the bench's
-      //   load-mode violation counters are what hold that.
-      pin_oe   <= {N_PINS{1'b0}};
-      rel_q    <= {N_LANES{1'b0}};          // TF2-R3: every lane goes not-live
-      for (i = 0; i < N_LANES; i = i + 1) begin
-        l_live[i] <= 1'b0;
-        l_pc[i]   <= {AW{1'b0}};
-        l_fpc[i]  <= {AW{1'b0}};
-        l_sel[i]  <= 1'b0;
-        // ⛔ DISARM ON HALT. A lane left armed across a reload would fire on an
-        // edge belonging to the PREVIOUS program. `l_timeout` is deliberately
-        // NOT cleared here: it is sticky status the host reads AFTER halting,
-        // and clearing it on halt would erase the reason the host halted.
-        l_armed[i]   <= 1'b0;
-        l_notmo[i]   <= 1'b0;
-      end
-      for (i = 0; i < NSLOT; i = i + 1) l_actv[i] <= 1'b0;
+      // HALT, RELOAD, RESUME -- never a mid-transaction swap. THE HALT STATE
+      // EQUALS THE RESET STATE minus the keep-list (Wilson, #10/#11): the
+      // same macro as the power-on branch, so the two cannot drift. (The F2
+      // face-3 note on `pin_oe` -- release behind the flop, one cycle of
+      // latency -- is carried with the list at the top of this file.)
+      `PE_RST_MAIN
+      `PE_HALT_MUTANTS
     end else begin
       rx_push <= 1'b0;
         host_pop <= 1'b0;   // one-cycle pulse; the consume site re-asserts
@@ -2465,11 +2563,11 @@ module pe_engine #(
                   // refused rather than clamped to zero hold.
                   if (SDA_HOLD == 0 || l_mode[cur]) begin
                     if (l_mode[cur]) begin
-                      pin_out[a_pin] <= l_tx[cur][0] & pin_pp[a_pin];
+                      pin_out[a_pin] <= tx_bit & pin_pp[a_pin];
                       pin_oe[a_pin]  <= 1'b1;
                     end else begin
                       pin_out[a_pin] <= 1'b0;
-                      pin_oe[a_pin]  <= ~l_tx[cur][0];
+                      pin_oe[a_pin]  <= ~tx_bit;
                     end
                   end else begin
                     // ⛔ OPEN-DRAIN VALUES, UNCONDITIONALLY, AND THE
@@ -2481,7 +2579,7 @@ module pe_engine #(
                     // reported the `cond_then` halves as uncovered: they were
                     // not under-tested, they were unreachable.
                     l_hval[cur] <= 1'b0;
-                    l_hoe[cur]  <= ~l_tx[cur][0];
+                    l_hoe[cur]  <= ~tx_bit;
                     hold_ld = 1'b1;
                   end
                   end
@@ -2582,11 +2680,11 @@ module pe_engine #(
               // the head of this arm, so it never reaches this branch.
               if (SDA_HOLD == 0 || l_mode[cur] || !clk_real || a_lvl) begin
                 if (l_mode[cur]) begin
-                  pin_out[a_pin] <= l_tx[cur][0] & pin_pp[a_pin];
+                  pin_out[a_pin] <= tx_bit & pin_pp[a_pin];
                   pin_oe[a_pin]  <= 1'b1;
                 end else begin
                   pin_out[a_pin] <= 1'b0;
-                  pin_oe[a_pin]  <= ~l_tx[cur][0];
+                  pin_oe[a_pin]  <= ~tx_bit;
                 end
               end else begin
                 // ⛔ OPEN-DRAIN VALUES ONLY -- same reasoning as the clocked
@@ -2594,7 +2692,7 @@ module pe_engine #(
                 // control here, so it is provably 0 and the ternaries it used
                 // to carry were unreachable on their push-pull side.
                 l_hval[cur] <= 1'b0;
-                l_hoe[cur]  <= ~l_tx[cur][0];
+                l_hoe[cur]  <= ~tx_bit;
                 hold_ld = 1'b1;
               end
               // ⛔⛔⛔ D2: THE CLOCK PIN HONOURS `l_mode` TOO, AND IT DID NOT.
@@ -2870,7 +2968,26 @@ module pe_engine #(
               // phase emits no new bit, so shifting there would drain the
               // byte at twice the clock rate -- exactly the two-bits-per-
               // clock defect the old corpus idiom had.
-              l_tx[cur]    <= {1'b0, l_tx[cur][7:1]};
+              // ⛔⛔ CANDIDATE #8: a byte's FIRST bit came from the queue
+              // head (`tx_bit`); its writeback POPS that byte and keeps its
+              // remaining bits. Empty queue: an underrun, and the rest of the
+              // byte is zeros (aligned -- the next byte starts fresh).
+`ifdef M_TX_PRELOAD
+              if (1'b1) begin
+`else
+              if (l_txv[cur]) begin
+`endif
+                l_tx[cur] <= {1'b0, l_tx[cur][7:1]};
+              end else begin
+                if (host_valid) begin
+                  l_tx[cur] <= {1'b0, host_ord[7:1]};
+                  host_pop  <= 1'b1;        // consumed: advance the host FIFO
+                end else begin
+                  l_tx[cur] <= 8'h00;
+                  lane_underrun[cur] <= 1'b1;
+                end
+                l_txv[cur] <= 1'b1;
+              end
 `ifdef M_SHARED_BITP
               l_bitp_shared <= l_bitp_shared + {{(BPW-1){1'b0}}, 1'b1};
 `else
@@ -3103,19 +3220,19 @@ module pe_engine #(
           if (a_op == OP_SHIFT && (!ck_shift || ck_is_low) && tx_bitp[cur] == a_cnt) begin
 `endif
 `endif
+            // ⛔⛔ CANDIDATE #8: NO PRELOAD at the end of a byte. The next
+            // byte is taken LAZILY at its own first bit (above; reversed there
+            // on an MSB-first lane), so the register never carries a byte the
+            // host did not push -- the reset 0x00 used to go out first on
+            // every TX lane.
+`ifdef M_TX_PRELOAD
             if (host_valid) begin
-              // REVERSED ON AN MSB-FIRST LANE. The shift path still walks
-              // `l_tx[0]` outward, so reversing here puts the byte's MSB at
-              // bit 0 and therefore on the wire first.
-`ifdef M_IGNORE_ORDER
-              l_tx[cur] <= host_data;
+              l_tx[cur] <= host_ord;
+              host_pop  <= 1'b1;
+            end else lane_underrun[cur] <= 1'b1;
 `else
-              l_tx[cur] <= l_order[cur] ? host_data_rev : host_data;
+            l_txv[cur] <= 1'b0;
 `endif
-              host_pop    <= 1'b1;        // consumed: advance the host FIFO
-            end else begin
-              lane_underrun[cur] <= 1'b1;
-            end
 `ifdef M_SHARED_BITP
             l_bitp_shared <= {BPW{1'b0}};
 `else

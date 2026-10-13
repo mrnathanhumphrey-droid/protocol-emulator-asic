@@ -84,9 +84,42 @@ def _gen_uart(T, variant):
     return f
 
 
+def _gen_uart_tx_msb():
+    import uart_tx
+    return bytes(uart_tx.build(uart_tx.T_NOMINAL, False, True))
+
+
 def _gen_rxfast60():
     import make_smoke_image
     return bytes(make_smoke_image.build_rxfast(60))
+
+
+def _gen_ckack(half):
+    """run_ckack's random read (`ckack.hex`), or its CE1 HALF_HIGH variant at
+    the derived Fm delay (`ckack_half.hex`): the same calls it makes."""
+    def f():
+        import tempfile
+        import gate_degenerate_fields as dgf
+        import run_ckack
+        from pe_isa import FLAG_HALF_HIGH
+        p = os.path.join(tempfile.mkdtemp(prefix="v3tab_"), "ckack.hex")
+        if half:
+            run_ckack.image(p, d=run_ckack.d_half_fm(), flags=FLAG_HALF_HIGH)
+        else:
+            run_ckack.image(p)
+        return bytes(dgf.load(p))
+    return f
+
+
+def _gen_sda_frame(k):
+    """gate_sda_hold's `frame_image(hold + k)`: the same call it makes."""
+    def f():
+        import hold_bound
+        import make_smoke_image
+        import pe_isa
+        return bytes(pe_isa.full_store(bytes(
+            make_smoke_image.build_i2cframe(hold_bound.bound() + k))))
+    return f
 
 
 #: ⛔⛔ IMAGES A RUNNER BUILDS ON THE FLY (Wilson, WF2 round 2): registered
@@ -100,10 +133,31 @@ GENERATED = (
     ("run_uartrx: uart_rx.build(434, edge)", _gen_uart(434, "edge"), 0,
      "the edge-sampling must-fire variant"),
     ("run_cktx: cktx.hex", _gen_cktx, 0, "TX4's clocked widths 1..8 image"),
+    ("run_uarttx: uart_tx MSB-first", _gen_uart_tx_msb, 0,
+     "the byte-order must-fire variant"),
     ("run_rxfast: rxfast d=60", _gen_rxfast60, 0,
      "the unsaturated must-fire (link not overrun)"),
     ("gate_corpus_trace: spim_d4", _gen_spim_d4, 1,
      "corpus_spim at d = 4 (EX1): the NON_ADMISSIBLE corpus_spim family"),
+    # ⛔ FOUND LATE (WF2 #8 follow-up): gate_sda_hold reads only Layer H's
+    # verdict, so its generated frames ran V3-red (unknown image, no bound)
+    # without failing anything. Registered here; exempt because every one is
+    # BELOW D* (d = hold .. hold + 3 = 15..18 < 20): a hold-window probe that
+    # pe_asm would refuse, never a published program.
+    # ⛔ FOUND LATE TOO: run_ckack runs only in the local A2 suite, which the
+    # unknown-fingerprint sweep never ran, so its images were V3-red there.
+    ("run_ckack: ckack.hex", _gen_ckack(False), 0,
+     "the clocked random read (ruling ACK), sigrok-judged"),
+    ("run_ckack: ckack_half.hex", _gen_ckack(True), 0,
+     "the same read at CE1's HALF_HIGH Fm delay"),
+    ("gate_sda_hold: i2cframe d = hold", _gen_sda_frame(0), 1,
+     "the hold-window probe at d = SDA_HOLD, below D*"),
+    ("gate_sda_hold: i2cframe d = hold + 1", _gen_sda_frame(1), 1,
+     "the hold-window probe at d = SDA_HOLD + 1, below D*"),
+    ("gate_sda_hold: i2cframe d = hold + 2", _gen_sda_frame(2), 1,
+     "the hold-window probe at d = SDA_HOLD + 2, below D*"),
+    ("gate_sda_hold: i2cframe d = hold + 3", _gen_sda_frame(3), 1,
+     "the hold-window probe at d = SDA_HOLD + 3, below D*"),
     ("run_wirefeed_mf: old WS2812 (REARM d=0)", _gen_old_ws2812, 1,
      "the delay-0 build pe_asm REFUSES today; run only as the must-fire, "
      "with its V3 facts supplied by allowlisted override"),

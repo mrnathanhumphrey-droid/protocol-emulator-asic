@@ -68,6 +68,14 @@ REGISTRY = {
         "runner": "test/run_uartrx.py",
         "how": "tb_uartrx compares every push with what the PEER sent "
                "(`sent[]`), count exact, at T = 434 and T_MIN, +-3 %"}),
+    "uart_tx_image.hex": (WITNESS, {
+        "runner": "test/run_uarttx.py",
+        "how": "tb_uarttx's peer on its own clock at 115200: every frame "
+               "from the first the host's byte in order, stop "
+               "bits 1, middle-80 % timing window; V3 exact; V3-T in bound"}),
+    "uart_tx_busy_image.hex": (WITNESS, {
+        "runner": "test/run_uarttx.py",
+        "how": "the same, beside four push-pull lanes at d = D*"}),
     "ws2812_sub3_rearm21.hex": (WITNESS, {
         "runner": "test/run_wirefeed_mf.py",
         "how": "the WS2812 3-sub-bit control (REARM d = 21) beside four "
@@ -156,10 +164,9 @@ PUBLISHED = {
     "UART-rx 115200": (WITNESS, {"image": "uart_rx_image.hex",
                                  "rate_hz": 115200,
                                  "ledger_id": "UART-rx 115200"}),
-    "UART-tx 115200": (OWED, {"rate_hz": 115200,
-                              "ledger_id": "UART-tx 115200",
-        "gap": "no accepted UART-tx image at 434 cycles/bit: tx_image.hex is "
-               "a d = 12/13 TX-routing test image, declared NON_ADMISSIBLE"}),
+    "UART-tx 115200": (WITNESS, {"image": "uart_tx_image.hex",
+                                 "rate_hz": 115200,
+                                 "ledger_id": "UART-tx 115200"}),
     "SPI-master 1 MHz": (OWED, {"rate_hz": 1000000,
                                 "ledger_id": "SPI-tx 1 MHz",
         "gap": "corpus_spim.hex is NON_ADMISSIBLE at d = 7; the d = 25 "

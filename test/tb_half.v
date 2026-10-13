@@ -154,7 +154,11 @@ module tb_half;
   // ⛔ THE TX BIT IS `l_tx`, THE RX ACCUMULATOR IS `l_rx`, AND READING ONE FOR
   // THE OTHER IS THE DEFECT ITSELF. Named separately so this bench cannot
   // accidentally assert the pre-split behaviour.
-  wire       tx_bit   = dut.u_eng.l_tx[dut.u_eng.cur][0];
+  // ⛔ THE BIT THE ENGINE DRIVES (`tx_bit`), not `l_tx[cur][0]`: since
+  // silicon fix #8 a byte's FIRST bit comes from the queue head and is never
+  // in the register (the #6 lesson: a check that mirrors the register
+  // encodes its design).
+  wire       tx_bit   = dut.u_eng.tx_bit;
 
   task fail;
     input [8*72-1:0] msg;
@@ -373,10 +377,9 @@ module tb_half;
     fails = fails + hf_bad;
 
     $display("  MUST-FIRE 1: each lane's TX stream IS the pushed bytes");
-    // ⭐ THE FIRST BYTE IS 00 BY CONSTRUCTION (`l_tx` resets to 0 and the
-    // first load lands at the end of the first eight shifts), so the
-    // comparison starts at index 1. Asserting the 00 is what proves the
-    // reconstruction is byte-ALIGNED.
+    // ⭐ THE FIRST BYTE IS THE QUEUE'S FIRST BYTE, and asserting it is what
+    // proves the reconstruction is byte-ALIGNED. ⛔ It used to be 00 -- the
+    // reset register went out first on every TX lane (silicon fix #8, WF2).
     for (j = 0; j < 2; j = j + 1) begin
       if (tn[j] < 3) begin
         $display("    lane %0d: *** FAIL -- only %0d bytes reconstructed",
@@ -384,20 +387,21 @@ module tb_half;
         fails = fails + 1;
       end else begin
         $display("    lane %0d first byte      : %02h %0s", j, tgot[j][0],
-                 (tgot[j][0] == 8'h00) ? "ok (reset byte)"
+                 (tgot[j][0] == hf_pat[j][0]) ? "ok (the first pushed)"
+                 : (tgot[j][0] == 8'h00) ? "*** FAIL -- the reset register (fix #8 undone?)"
                  : "*** FAIL -- not byte-aligned");
-        if (tgot[j][0] != 8'h00) fails = fails + 1;
+        if (tgot[j][0] != hf_pat[j][0]) fails = fails + 1;
         $write("    lane %0d emitted         :", j);
         for (i = 1; i < tn[j] && i <= 4; i = i + 1) $write(" %02h", tgot[j][i]);
         $display("");
         $write("    lane %0d pushed          :", j);
         for (i = 1; i < tn[j] && i <= 4; i = i + 1)
-          $write(" %02h", hf_pat[j][(i - 1) % hf_len[j]]);
+          $write(" %02h", hf_pat[j][i % hf_len[j]]);
         $display("");
         for (i = 1; i < tn[j] && i <= 4; i = i + 1)
-          if (tgot[j][i] != hf_pat[j][(i - 1) % hf_len[j]]) begin
+          if (tgot[j][i] != hf_pat[j][i % hf_len[j]]) begin
             $display("    lane %0d byte %0d: got %02h want %02h *** FAIL",
-                     j, i - 1, tgot[j][i], hf_pat[j][(i - 1) % hf_len[j]]);
+                     j, i, tgot[j][i], hf_pat[j][i % hf_len[j]]);
             fails = fails + 1;
           end
       end

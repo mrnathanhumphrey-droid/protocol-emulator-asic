@@ -572,6 +572,11 @@ SPEC_SYMBOLS = {
     ("model/gate_sda_hold.py", "CLASS"),
     ("model/gate_sda_hold.py", "DATA"),
     ("model/gate_sda_hold.py", "IMAGES"),
+    # ⭐ A MUST-FIRE'S STIMULUS (WF2 #8): four payload bytes chosen so bit 0
+    # and bit 7 are 0, which drives SDA low before every ACK release -- the
+    # condition `M_SHIFTIN_UC_UNHELD` needs. Inputs; nothing is concluded
+    # from their values.
+    ("model/gate_sda_hold.py", "UC_FEED"),
     # ⭐ THE COVERAGE SWEEP'S TWO DECLARATIONS, and neither holds a
     # measurement. `benchset.CONFIG` is STIMULUS -- plusargs, cycle budgets
     # and the per-lane delay vectors handed to `make_smoke_image.py` -- i.e.

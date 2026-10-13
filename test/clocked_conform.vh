@@ -998,10 +998,11 @@ end
 //      (PIN_WR rise, nibble ui_in[4:1], tag {ui_in[5], ui_in[0]} latched with
 //      the high nibble, high nibble first) and wire bits off the data pin at
 //      every clocked HIGH phase (uio: released reads 1; uo: the level). A
-//      lane's j-th clocked SHIFT must send the (j-1)-th byte it popped, in its
-//      lane order, whole (the first one sends the reset 0x00); an action that
-//      found nothing popped sends the residue, and that is COUNTED.
-//      bytes consumed == bytes on the wire, per lane, at the end.
+//      clocked SHIFT sends the host byte IT pops (at its first LOW: silicon
+//      fix #8), in its lane order, whole; an action that pops nothing is an
+//      UNDERRUN, sends zeros, and is COUNTED. ⛔ It used to hold the j-th
+//      action to the (j-1)-th byte popped and the first to the reset 0x00 --
+//      that encoded the defect. popped + underruns == actions, exactly.
 // ⚠ All state is this block's own: one `always`, no reads of another layer's
 // blocking writes (ruling RA3).
 integer   tv_k, tv_p, tv_lvl, tv_half, tv_pst, tv_pcur, tv_phq, tv_pn;
@@ -1010,14 +1011,12 @@ reg [1:0] tv_tag;
 reg       tv_wr_prev;
 reg [7:0] tv_q   [0:1023];          // pushes, 4 queues x 256 (a ring)
 integer   tv_qw  [0:3], tv_qr [0:3];
-reg [7:0] tv_pend[0:7][0:7];        // bytes each lane popped, not yet sent
-integer   tv_pw  [0:7], tv_pr [0:7];
 integer   tv_on  [0:7], tv_pc [0:7], tv_cnt [0:7], tv_n [0:7], tv_low [0:7];
 integer   tv_ld  [0:7], tv_acts[0:7], tv_pops[0:7], tv_under[0:7];
-reg [7:0] tv_reg [0:7];             // V1: the register snapshot (register order)
-reg [7:0] tv_rn  [0:7];             // V1: the byte loaded, for the next action
+reg [7:0] tv_reg [0:7];             // V1: the byte this action loaded (register order)
 integer   tv_rv  [0:7], tv_v1 [0:7], tv_dpin [0:7];
-reg [7:0] tv_w   [0:7];             // V2: the wire-order register
+reg [7:0] tv_w   [0:7];             // V2: the host byte this action sends (wire order)
+integer   tv_wv  [0:7];             // V2: this action has popped its byte
 integer   tv_e1  [0:7], tv_e2 [0:7]; // the bit the last LOW should have sent
 integer   tv1_chk, tv1_bad, tv1_ldbad, tv2_chk, tv2_bad, tv_anom;
 reg       tv_full;
@@ -1031,11 +1030,11 @@ initial begin
     tv_qw[tv_k] = 0; tv_qr[tv_k] = 0;
   end
   for (tv_k = 0; tv_k < 8; tv_k = tv_k + 1) begin
-    tv_pw[tv_k] = 0; tv_pr[tv_k] = 0; tv_on[tv_k] = 0; tv_pc[tv_k] = -1;
+    tv_on[tv_k] = 0; tv_pc[tv_k] = -1;
     tv_cnt[tv_k] = 0; tv_n[tv_k] = 0; tv_low[tv_k] = 0; tv_ld[tv_k] = 0;
     tv_acts[tv_k] = 0; tv_pops[tv_k] = 0; tv_under[tv_k] = 0;
     tv_reg[tv_k] = 8'h00; tv_w[tv_k] = 8'h00; tv_e1[tv_k] = 0; tv_e2[tv_k] = 0;
-    tv_rn[tv_k] = 8'h00; tv_rv[tv_k] = 0; tv_v1[tv_k] = 1; tv_dpin[tv_k] = 0;
+    tv_rv[tv_k] = 0; tv_wv[tv_k] = 0; tv_v1[tv_k] = 0; tv_dpin[tv_k] = 0;
   end
 end
 
@@ -1079,22 +1078,23 @@ always @(posedge dut.clk) begin
       end else begin
         tv_p = tv_q[tv_phq * 256 + (tv_qr[tv_phq] % 256)];
         tv_qr[tv_phq] = tv_qr[tv_phq] + 1;
-        // ⭐ ANY SHIFT's load feeds the next SHIFT's byte -- an unclocked
-        // SHIFT loads at its end exactly as a clocked one does, so a clocked
-        // SHIFT after it sends the byte IT popped (measured: PN4's pindiv
-        // lane mixes the two on one queue, and a clocked-only model read the
-        // wrong byte there). The load POINT is checked for clocked ones only.
-        if (tv_pcur < 8) begin
-          tv_pend[tv_pcur][tv_pw[tv_pcur] % 8] = tv_p;
-          tv_pw[tv_pcur] = tv_pw[tv_pcur] + 1;
+        // ⭐ SILICON FIX #8: A SHIFT POPS THE BYTE IT SENDS, at its first bit.
+        // So a pop during a CLOCKED action is THAT action's byte (it used to
+        // feed the NEXT action, and the first action sent the reset 0x00). A
+        // pop during an unclocked SHIFT belongs to an unclocked byte, which
+        // Layer V3 judges; the queue pointer above still advances for it, so
+        // a lane mixing the two on one queue (PN4's pindiv) stays in order.
+        if (tv_pcur < 8 && tv_on[tv_pcur] != 0) begin
           tv_pops[tv_pcur] = tv_pops[tv_pcur] + 1;
-          if (tv_on[tv_pcur] != 0) tv_ld[tv_pcur] = tv_pn;
-          // V1: the byte the ENGINE loaded, in register order -- applied at
-          // the NEXT action's start, which is the model's rule, so a load
-          // that lands early cannot re-time this layer's own expectation
-          tv_rn[tv_pcur] = (dut.u_eng.l_order[tv_pcur] === 1'b1)
-                           ? tv_rev(dut.u_eng.host_data) : dut.u_eng.host_data;
+          tv_ld[tv_pcur] = tv_pn;
+          // V1: the byte the ENGINE loaded, in register order
+          tv_reg[tv_pcur] = (dut.u_eng.l_order[tv_pcur] === 1'b1)
+                            ? tv_rev(dut.u_eng.host_data) : dut.u_eng.host_data;
           tv_rv[tv_pcur] = 1;
+          // V2: the byte the HOST pushed (decoded off the pins), wire order
+          tv_w[tv_pcur] = (dut.u_eng.l_order[tv_pcur] === 1'b1) ? tv_p
+                          : tv_rev(tv_p);
+          tv_wv[tv_pcur] = 1;
         end
       end
     end
@@ -1114,43 +1114,19 @@ always @(posedge dut.clk) begin
         tv_pc[tv_k] = dut.u_eng.l_pc[tv_k];
         tv_cnt[tv_k] = dut.u_eng.a_cnt;
         tv_n[tv_k] = 0; tv_low[tv_k] = 0; tv_ld[tv_k] = 0;
-        // an UNCLOCKED SHIFT sends the pending byte itself: consume it, so the
-        // next clocked SHIFT is held to the byte the unclocked one then pops
-        if (tv_on[tv_k] == 0 && dut.u_eng.a_op === 3'd1
-            && tv_pr[tv_k] < tv_pw[tv_k]) begin
-          tv_pr[tv_k] = tv_pr[tv_k] + 1;
-          tv_rv[tv_k] = 0;
-        end
-        if (tv_on[tv_k] != 0) begin
-          tv_acts[tv_k] = tv_acts[tv_k] + 1;
-          // V1 models a FED action only: after an underrun the register holds
-          // a residue, which V2 models and V1 does not
-          tv_v1[tv_k] = (tv_acts[tv_k] == 1 || tv_rv[tv_k] != 0) ? 1 : 0;
-          if (tv_rv[tv_k] != 0) begin
-            tv_reg[tv_k] = tv_rn[tv_k];
-            tv_rv[tv_k] = 0;
-          end
-          // V2: this action sends the next byte the lane popped, or (first
-          // action, or nothing popped: an UNDERRUN) whatever the wire-order
-          // register still holds
-          if (tv_pr[tv_k] < tv_pw[tv_k]) begin
-            tv_p = tv_pend[tv_k][tv_pr[tv_k] % 8];
-            tv_pr[tv_k] = tv_pr[tv_k] + 1;
-            tv_w[tv_k] = (dut.u_eng.l_order[tv_k] === 1'b1) ? tv_p : tv_rev(tv_p);
-          end else if (tv_acts[tv_k] > 1) begin
-            tv_under[tv_k] = tv_under[tv_k] + 1;
-          end
-        end
+        // a new action has popped nothing yet: its byte arrives with the pop
+        // after its FIRST LOW (silicon fix #8), so the expectations below are
+        // formed at each HIGH, when that pop is known
+        tv_rv[tv_k] = 0; tv_wv[tv_k] = 0;
+        if (tv_on[tv_k] != 0) tv_acts[tv_k] = tv_acts[tv_k] + 1;
       end
       if (tv_on[tv_k] != 0) begin
         tv_n[tv_k] = tv_n[tv_k] + 1;
         tv_pn = tv_n[tv_k];
         if (dut.u_eng.ck_is_low === 1'b1) begin
-          // the bit this LOW sends: V1 from the register, V2 from the wire
-          // order; checked on the pin at the HIGH that follows
-          tv_e1[tv_k] = tv_reg[tv_k][ck_tx_bit(tv_low[tv_k])];
-          tv_e2[tv_k] = tv_w[tv_k][7];
-          tv_w[tv_k] = {tv_w[tv_k][6:0], 1'b0};
+          // the bit this LOW sends is checked on the pin at the HIGH that
+          // follows; its expectation is formed there (the byte is popped by
+          // this action's first LOW, one cycle after it)
           tv_low[tv_k] = tv_low[tv_k] + 1;
           // ⛔ RULING CI5: the pin THIS ACTION drives -- the chip writes
           // `pin_out[a_pin]` -- not the header's `l_pin`. They were equal on
@@ -1159,6 +1135,15 @@ always @(posedge dut.clk) begin
           tv_dpin[tv_k] = dut.u_eng.a_pin;
         end else if (dut.u_eng.ck_is_high === 1'b1) begin
           tv_lvl = tv_pin(tv_dpin[tv_k]);
+          // V1: the loaded byte's bit `ck_tx_bit(k)` (a FED action only: an
+          // underrun loads nothing, and V2 holds it to zeros)
+          tv_v1[tv_k] = tv_rv[tv_k];
+          tv_e1[tv_k] = tv_reg[tv_k][ck_tx_bit(tv_low[tv_k] - 1)];
+          // V2: the host's byte, wire order -- or, if the action popped
+          // nothing by its first HIGH, an UNDERRUN: the lane sends zeros
+          if (tv_wv[tv_k] == 0 && tv_low[tv_k] == 1)
+            tv_under[tv_k] = tv_under[tv_k] + 1;
+          tv_e2[tv_k] = (tv_wv[tv_k] != 0) ? tv_w[tv_k][8 - tv_low[tv_k]] : 0;
           tv1_chk = tv1_chk + 1; tv2_chk = tv2_chk + 1;
           if (tv1_chk == 1)
             $display("  clocked_conform[V]: live -- checking clocked transmit BITS");
@@ -1188,12 +1173,13 @@ end
 // pe_asm once accepted with "J 1" -- had no check that what reached the wire
 // was what the host fed. This layer is that check.
 //   PUSHES are decoded off `ui_in` (its own decoder, ruling RA3: no reads of
-//   another layer's state). A LANE'S REGISTER is mirrored from the RTL's
-//   rule, never read: every SHIFT dispatch that shifts (unclocked, or a
-//   clocked LOW) sends bit 0 and shifts right; at the shift whose OLD bit
-//   count equals `a_cnt` the next byte loads from the action's queue
-//   (bit-reversed on an MSB-first lane) -- or, if that queue is empty, the
-//   register keeps shifting zeros (an UNDERRUN, counted).
+//   another layer's state). THE EXPECTED STREAM IS THE HOST'S, NEVER THE
+//   CHIP'S REGISTER (candidate #8, Wilson): a lane's shifting dispatches
+//   (unclocked, or a clocked LOW) form byte SLOTS of `a_cnt + 1` bits, and
+//   each slot must carry the next byte pushed to the action's queue
+//   (bit-reversed on an MSB-first lane); a slot that starts with that queue
+//   empty is an UNDERRUN (counted, judged by V3-U). A bit from no pushed byte
+//   -- the reset 0x00 the chip used to send first -- is a mismatch.
 //   EACH UNCLOCKED BIT is checked on the BUS (chip level wired-AND with the
 //   pad the bench drives, so a peer holding the line low is seen) at the
 //   MIDDLE of its LANDED window (its land to the land of the lane's next
@@ -1225,6 +1211,7 @@ integer   v3_late [0:7];            // how late the bit's dispatch was
 integer   v3_mlate [0:7];           // the lane's worst dispatch lateness
 integer   v3_land [0:7], v3_pend [0:7]; // the open bit's land, and whether one is open
 integer   v3_Lnow;
+reg       v3_xb;                    // the expected bit of the current slot
 integer   v3_ptx [0:7], v3_ptp [0:7], v3_plate [0:7]; // the OPEN bit's values
 // ⭐⭐ V3-T, SCHEDULER CONFORMANCE (Wilson, WF2 ruling 1). THE SAME QUANTITY
 // ON BOTH SIDES: the bound r_i (`program_a2.queue_slot`, pyRTA primary) is the
@@ -1444,41 +1431,49 @@ always @(posedge dut.clk) begin
         v3_late[v3_k] = v3_plate[v3_k];
         v3_pend[v3_k] = 0;
       end
-      if (dut.u_eng.a_op === 3'd1 && dut.u_eng.ck_shift !== 1'b1) begin
-        v3_dl = (dut.u_eng.l_timestamp[v3_k] - dut.u_eng.now) & 16'hFFFF;
-        if (v3_dl >= 32768) v3_dl = v3_dl - 65536;
-        if (-v3_dl > v3_mlate[v3_k]) v3_mlate[v3_k] = -v3_dl;
-        v3_nd[v3_k] = v3_nd[v3_k] + 1;
-        v3_plate[v3_k] = -v3_dl;
-        v3_ptx[v3_k]   = v3_lt[v3_k][0];
-        v3_ptp[v3_k]   = dut.u_eng.a_pin;
-        v3_land[v3_k]  = v3_cyc + 2 + v3_Lnow;
-        v3_pend[v3_k]  = 1;
-      end
-    end
-    // ---- a WRITEBACK of a SHIFT that shifts: mirror the register --------
-    if (dut.u_eng.st === 2'd2 && dut.u_eng.cur < 8 && dut.u_eng.a_op === 3'd1
-        && (dut.u_eng.ck_shift !== 1'b1 || dut.u_eng.ck_is_low === 1'b1)) begin
-      v3_k = dut.u_eng.cur;
-      if (v3_nb[v3_k] == dut.u_eng.a_cnt) begin
-        v3_q = dut.u_eng.a_q;
-        if (v3_qr[v3_q] < v3_qw[v3_q]) begin
-          v3_lt[v3_k] = (dut.u_eng.l_order[v3_k] === 1'b1)
-                        ? tv_rev(v3_qb[v3_q * 256 + (v3_qr[v3_q] % 256)])
-                        : v3_qb[v3_q * 256 + (v3_qr[v3_q] % 256)];
-          v3_qr[v3_q] = v3_qr[v3_q] + 1;
-          v3_lok = v3_lok + 1;
-          if (dut.u_eng.host_valid !== 1'b1) v3_mis = v3_mis + 1;
-        end else begin
-          v3_lt[v3_k] = {1'b0, v3_lt[v3_k][7:1]};
-          v3_under = v3_under + 1;
-          v3_nun[v3_k] = v3_nun[v3_k] + 1;
-          if (dut.u_eng.host_valid === 1'b1) v3_mis = v3_mis + 1;
+      // ⛔⛔ THE FEED IS ONLY WHAT THE HOST PUSHED (Wilson, candidate #8).
+      // V3 used to MIRROR THE CHIP'S REGISTER, so it modelled the register's
+      // reset 0x00 as legitimate output and passed the stray first byte on
+      // every TX lane -- exactly how V-RX's golden model hid silicon bug #6:
+      // a checker built from the RTL's behaviour encodes the RTL's defects.
+      // ⇒ A lane's wire stream is BYTE SLOTS of (count + 1) shifting
+      //   dispatches (unclocked, or a clocked LOW); each slot must carry the
+      //   NEXT byte the host pushed to the action's queue. A slot that starts
+      //   with that queue empty is an UNDERRUN (V3-U judges it). Any bit not
+      //   from a pushed byte is a mismatch. Nothing here reads the chip's
+      //   register or its pops; `host_valid` is read only to cross-check the
+      //   bench's own queue decode (v3_mis).
+      if (dut.u_eng.a_op === 3'd1
+          && (dut.u_eng.ck_shift !== 1'b1 || dut.u_eng.ck_is_low === 1'b1)) begin
+        if (v3_nb[v3_k] == 0) begin
+          v3_q = dut.u_eng.a_q;
+          if (v3_qr[v3_q] < v3_qw[v3_q]) begin
+            v3_lt[v3_k] = (dut.u_eng.l_order[v3_k] === 1'b1)
+                          ? tv_rev(v3_qb[v3_q * 256 + (v3_qr[v3_q] % 256)])
+                          : v3_qb[v3_q * 256 + (v3_qr[v3_q] % 256)];
+            v3_qr[v3_q] = v3_qr[v3_q] + 1;
+            v3_lok = v3_lok + 1;
+            if (dut.u_eng.host_valid !== 1'b1) v3_mis = v3_mis + 1;
+          end else begin
+            v3_lt[v3_k] = 8'h00;           // an underrun slot: no host byte
+            v3_under = v3_under + 1;
+            v3_nun[v3_k] = v3_nun[v3_k] + 1;
+            if (dut.u_eng.host_valid === 1'b1) v3_mis = v3_mis + 1;
+          end
         end
-        v3_nb[v3_k] = 0;
-      end else begin
-        v3_lt[v3_k] = {1'b0, v3_lt[v3_k][7:1]};
-        v3_nb[v3_k] = v3_nb[v3_k] + 1;
+        v3_xb = v3_lt[v3_k][v3_nb[v3_k]];   // this bit of the slot's byte
+        v3_nb[v3_k] = (v3_nb[v3_k] >= dut.u_eng.a_cnt) ? 0 : v3_nb[v3_k] + 1;
+        if (dut.u_eng.ck_shift !== 1'b1) begin
+          v3_dl = (dut.u_eng.l_timestamp[v3_k] - dut.u_eng.now) & 16'hFFFF;
+          if (v3_dl >= 32768) v3_dl = v3_dl - 65536;
+          if (-v3_dl > v3_mlate[v3_k]) v3_mlate[v3_k] = -v3_dl;
+          v3_nd[v3_k] = v3_nd[v3_k] + 1;
+          v3_plate[v3_k] = -v3_dl;
+          v3_ptx[v3_k]   = v3_xb;
+          v3_ptp[v3_k]   = dut.u_eng.a_pin;
+          v3_land[v3_k]  = v3_cyc + 2 + v3_Lnow;
+          v3_pend[v3_k]  = 1;
+        end
       end
     end
   end
@@ -1815,9 +1810,10 @@ final begin
         $display("  clocked_conform[V2]: ok -- %0d clocked bit(s) on the wire are the host-pushed bytes, in order", tv2_chk);
       for (tv_k = 0; tv_k < 8; tv_k = tv_k + 1)
         if (tv_acts[tv_k] != 0) begin
-          // bytes consumed == bytes on the wire: every byte this lane popped
-          // was sent by its next action, except at most the last one popped
-          $display("  clocked_conform[V2] lane %0d: %0d clocked SHIFT(s), %0d host byte(s) popped, %0d sent, %0d underrun action(s)%0s", tv_k, tv_acts[tv_k], tv_pw[tv_k], tv_pr[tv_k], tv_under[tv_k], (tv_pw[tv_k] - tv_pr[tv_k] > 1) ? " *** FAIL: bytes consumed != bytes on the wire" : "");
+          // ⭐ EXACT (silicon fix #8): every clocked SHIFT either popped the
+          // byte it sent or underran -- popped + underrun == actions, except
+          // one action still before its first HIGH when the run ended
+          $display("  clocked_conform[V2] lane %0d: %0d clocked SHIFT(s), %0d host byte(s) popped and sent, %0d underrun action(s)%0s", tv_k, tv_acts[tv_k], tv_pops[tv_k], tv_under[tv_k], (tv_acts[tv_k] - tv_pops[tv_k] - tv_under[tv_k] > 1 || tv_acts[tv_k] < tv_pops[tv_k] + tv_under[tv_k]) ? " *** FAIL: actions != bytes popped + underruns" : "");
         end
       if (tv_anom != 0)
         $display("*** FAIL clocked_conform[V]: %0d host pop(s) not following a writeback -- the load is not where the layer looks", tv_anom);

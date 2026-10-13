@@ -479,6 +479,86 @@
   },
   "why": null
  },
+ "uart_tx_busy_image.hex": {
+  "lanes": {
+   "0": {
+    "T": 20,
+    "dtol": 255,
+    "r_ours": 16,
+    "r_pyrta": 16,
+    "why": null
+   },
+   "1": {
+    "T": 20,
+    "dtol": 40,
+    "r_ours": 15,
+    "r_pyrta": 15,
+    "why": null
+   },
+   "2": {
+    "T": 20,
+    "dtol": 40,
+    "r_ours": 15,
+    "r_pyrta": 15,
+    "why": null
+   },
+   "3": {
+    "T": 20,
+    "dtol": 40,
+    "r_ours": 15,
+    "r_pyrta": 15,
+    "why": null
+   },
+   "4": {
+    "T": 20,
+    "dtol": 40,
+    "r_ours": 15,
+    "r_pyrta": 15,
+    "why": null
+   }
+  },
+  "why": null
+ },
+ "uart_tx_image.hex": {
+  "lanes": {
+   "0": {
+    "T": 20,
+    "dtol": 255,
+    "r_ours": 16,
+    "r_pyrta": 16,
+    "why": null
+   },
+   "1": {
+    "T": 500,
+    "dtol": 240,
+    "r_ours": 15,
+    "r_pyrta": 15,
+    "why": null
+   },
+   "2": {
+    "T": 500,
+    "dtol": 240,
+    "r_ours": 15,
+    "r_pyrta": 15,
+    "why": null
+   },
+   "3": {
+    "T": 500,
+    "dtol": 240,
+    "r_ours": 15,
+    "r_pyrta": 15,
+    "why": null
+   },
+   "4": {
+    "T": 500,
+    "dtol": 240,
+    "r_ours": 15,
+    "r_pyrta": 15,
+    "why": null
+   }
+  },
+  "why": null
+ },
  "ws2812_sub3_rearm21.hex": {
   "lanes": {
    "0": {

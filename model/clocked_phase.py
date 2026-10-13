@@ -196,21 +196,27 @@ def high_gap(d, half_high):
 
 def run_action(lane, act_index, op, nbits, tx_byte=0, peer_bits=None,
                stretch=0, timeout=TIMEOUT, d=D_PERIOD,
-               m_eligible_at_rise=False, next_byte=0, m_load_anyphase=False):
+               m_eligible_at_rise=False, next_byte=0, m_load_anyphase=False,
+               m_load_last=False, stale=0x00):
     """Dispatch-by-dispatch expansion of ONE clocked action.
 
     `peer_bits` is what the peer puts on the data line, consumed in order.
     `stretch` is CYCLES the peer holds the clock low past the high phase.
-    `tx_byte` is the transmit REGISTER at the action's start (register order:
-    bit 0 goes out first); `next_byte` is what the host load puts there.
+    `tx_byte` is the byte this SHIFT SENDS: the host queue's head, which it
+    loads (pops) on its FIRST LOW (register order: bit 0 goes out first).
 
-    ⛔⛔ RULING TX3 -- THE LOAD POINT IS PART OF THE SEMANTICS. A SHIFT of n
-    bits emits register bit k on its k-th LOW and LOADS the next host byte on
-    its LAST LOW, after that bit is out -- so the next action starts with a
-    whole fresh byte. `m_load_anyphase` is the pre-fix silicon (silicon fix
-    #2), kept reachable so I11 has a must-fire: the load fired on the first
-    dispatch, of EITHER phase, at which n-1 bits had gone out -- the HIGH after
-    the (n-1)-th LOW -- and the n-th LOW sent the next byte's first bit.
+    ⛔⛔ THE LOAD POINT IS PART OF THE SEMANTICS (TX3, revised by silicon fix
+    #8, WF2). A SHIFT of n bits LOADS its host byte on its FIRST LOW -- that
+    LOW's bit is the byte's bit 0, taken from the queue head -- and emits bit
+    k on its k-th LOW. The byte an action sends is the byte it loads: nothing
+    the host did not push reaches the wire.
+    ⛔ TX3 AS FIRST RULED loaded the NEXT byte on the LAST LOW, so each action
+    sent what the previous one had loaded -- and the first action after a
+    load sent the register's reset 0x00 (`stale`). That is `m_load_last`,
+    kept reachable so I11/I12 have a must-fire for #8.
+    `m_load_anyphase` is the pre-fix silicon of fix #2, kept for the same
+    reason: a second load on the HIGH after the (n-1)-th LOW, so the n-th LOW
+    sent the next byte's first bit (`next_byte`).
 
     ⛔⛔ THE LANE IS PARKED AFTER THE HIGH PHASE, ARM-STYLE. Its next dispatch
     is RELEASED BY THE OBSERVED RISE, not by its timestamp, so a stretch of any
@@ -246,17 +252,21 @@ def run_action(lane, act_index, op, nbits, tx_byte=0, peer_bits=None,
     pending = None          # a rise armed; the lane is parked until it arrives
     t = 0                   # the release time of the dispatch about to run
     reactive = False        # was THIS dispatch released by the rise
-    reg = tx_byte           # the transmit register, register order
+    # the transmit register, register order. Under the fix nothing reads it
+    # before the first LOW's load; the pre-#8 mutant sends its stale value.
+    reg = stale
     did_load = False
+    any_done = False        # m_load_anyphase's own once-flag
 
     while True:
         armed = False
         consumed = None
         retire = False
         loaded = False
-        if (op == SHIFT and m_load_anyphase and not did_load
+        if (op == SHIFT and m_load_anyphase and not any_done
                 and bits_done == nbits - 1 and lane.phase == HIGH):
-            reg, did_load, loaded = next_byte, True, True   # the pre-fix load
+            # the pre-fix-#2 load: a SECOND load, on the HIGH
+            reg, any_done, loaded = next_byte, True, True
         # ⛔ RECORD THE PHASE THIS DISPATCH EXECUTES, captured BEFORE the body
         # mutates it. The first version read `lane.phase` afterwards and every
         # row came out "LOW" -- a trace that cannot distinguish the phases is
@@ -271,12 +281,16 @@ def run_action(lane, act_index, op, nbits, tx_byte=0, peer_bits=None,
             # the old corpus idiom had.
             lane.clk = 0
             if op == SHIFT:
+                # ⭐ THE LOAD: on the FIRST LOW -- its bit IS the head's bit 0
+                # (silicon fix #8)
+                if bits_done == 0 and not did_load and not m_load_last:
+                    reg, did_load, loaded = tx_byte, True, True
                 lane.tx_sent.append(reg & 1)
                 reg >>= 1
                 lane.data_driven = True
-                # ⭐ THE LOAD: on the LAST LOW, after its bit is out (TX3)
-                if bits_done == nbits - 1 and not did_load:
-                    reg, did_load, loaded = next_byte, True, True
+                # the pre-#8 TX3 load: the NEXT byte, on the LAST LOW
+                if m_load_last and bits_done == nbits - 1 and not did_load:
+                    reg, did_load, loaded = tx_byte, True, True
             else:
                 lane.data_driven = False      # condition (a): RELEASED
                 # consume the bit captured during the previous idle window
@@ -414,23 +428,24 @@ def high_widths(disp):
 def check_invariants(op, nbits, disp, lane, period=None, tx_byte=None):
     """I1-I12. Returns a list of violations."""
     bad = []
-    # ⛔⛔ I11 -- A SHIFT LOADS THE NEXT HOST BYTE EXACTLY ONCE, ON ITS LAST LOW
-    # (ruling TX3). The pre-fix silicon loaded on the HIGH before it, and every
-    # count, gap and width this model checked stayed exact while the bytes
-    # were wrong -- so the load point is checked as itself.
+    # ⛔⛔ I11 -- A SHIFT LOADS ITS HOST BYTE EXACTLY ONCE, ON ITS FIRST LOW
+    # (TX3 revised by silicon fix #8). Fix #2's silicon loaded a second time on
+    # a HIGH and #8's loaded on the LAST LOW, and in both every count, gap and
+    # width this model checked stayed exact while the bytes were wrong -- so
+    # the load point is checked as itself.
     if op == SHIFT:
         lows = [i for i, d in enumerate(disp) if d.phase == LOW]
         loads = [i for i, d in enumerate(disp) if d.loaded]
-        if lows and loads != [lows[-1]]:
+        if lows and loads != [lows[0]]:
             bad.append("I11: host load at dispatch(es) %s, expected exactly "
-                       "the last LOW (%d)" % (loads, lows[-1]))
-    # ⛔ I12 -- THE BITS ON THE WIRE ARE THE REGISTER's, IN ORDER: bit k on the
-    # k-th LOW. Checked when the caller names the register it started with.
+                       "the first LOW (%d)" % (loads, lows[0]))
+    # ⛔ I12 -- THE BITS ON THE WIRE ARE THE HOST BYTE's, IN ORDER: bit k on the
+    # k-th LOW. Checked when the caller names the byte the action pops.
     if op == SHIFT and tx_byte is not None:
         want = [(tx_byte >> k) & 1 for k in range(nbits)]
         got = lane.tx_sent[-nbits:]
         if got != want:
-            bad.append("I12: sent %s, the register holds %s" % (got, want))
+            bad.append("I12: sent %s, the host byte is %s" % (got, want))
     want = expand(op, nbits)
     # ⛔ THE RECORDED PHASES, not a recomputation. The first version rebuilt the
     # sequence from scratch starting at LOW, which made I1 unfireable: it could
@@ -620,12 +635,29 @@ def selftest():
             x.loaded = False                 # hide the load point from I11
         return check_invariants(SHIFT, 8, disp, lane, tx_byte=0xDA)
 
+    # (g) THE PRE-FIX SILICON (fix #8): TX3 as first ruled -- the load on the
+    # LAST LOW, so this action sends the register's stale reset 0x00
+    def load_last():
+        lane = Lane()
+        disp = run_action(lane, 0, SHIFT, 8, tx_byte=0x5B, m_load_last=True)
+        return check_invariants(SHIFT, 8, disp, lane, tx_byte=0x5B)
+
+    # (h) ... whose BYTE is wrong too, and I12 must see that by itself
+    def load_last_value():
+        lane = Lane()
+        disp = run_action(lane, 0, SHIFT, 8, tx_byte=0x5B, m_load_last=True)
+        for x in disp:
+            x.loaded = False                 # hide the load point from I11
+        return check_invariants(SHIFT, 8, disp, lane, tx_byte=0x5B)
+
     cases = [("no phase reset at action start", no_reset, "I1"),
              ("the pointer advances twice per bit", ptr_twice, "I2"),
              ("a receive with no trailing consume", no_collect, "I4"),
              ("two retires in one action", two_retires, "I3"),
              ("TX load on the HIGH phase (pre-fix #2)", load_anyphase, "I11"),
-             ("... and its wrong 8th bit", load_anyphase_value, "I12")]
+             ("... and its wrong 8th bit", load_anyphase_value, "I12"),
+             ("TX load on the LAST LOW (pre-fix #8)", load_last, "I11"),
+             ("... and its reset 0x00 sent", load_last_value, "I12")]
     for label, fn, want in cases:
         bad = fn()
         hit = [b for b in bad if b.startswith(want)]

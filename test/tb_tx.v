@@ -119,7 +119,12 @@ module tb_tx;
   // ST_DRIVE edge, so in ST_DRIVE they already name this job.
   wire       shifting = (dut.u_eng.st == 1) && (dut.u_eng.a_op == 3'd1);
   wire [2:0] sh_lane  = dut.u_eng.cur;
-  wire       sh_bit   = dut.u_eng.l_tx[dut.u_eng.cur][0];
+  // ⛔ THE BIT THE ENGINE DRIVES (`tx_bit`), not `l_tx[cur][0]`: since
+  // silicon fix #8 a byte's FIRST bit comes from the queue head and is never
+  // in the register, so mirroring the register lost every byte's bit 0 --
+  // the #6 lesson (a check that mirrors the chip's register encodes its
+  // design). The pin-lag check below still holds this bit to the pad.
+  wire       sh_bit   = dut.u_eng.tx_bit;
 
   task fail;
     input [8*72-1:0] msg;
@@ -389,20 +394,22 @@ module tb_tx;
     hf_check(n_shift_all);
     fails = fails + hf_bad;
 
-    $display("  MUST-FIRE 1: the first byte out of each lane is 00");
-    // ⭐ BY CONSTRUCTION, NOT BY LUCK: `l_tx` resets to 0 and the first load
-    // lands at the END of the first eight drives. Asserting it is what proves
-    // the reconstruction is BYTE-ALIGNED -- if the framing were off by a bit
-    // this would break first, and every later comparison would fail for a
-    // reason that had nothing to do with queues.
+    $display("  MUST-FIRE 1: the first byte out of each lane is its queue's FIRST byte");
+    // ⭐ THE ALIGNMENT PROOF: the first byte must be the first one the host
+    // pushed on the lane's queue. If the framing were off by a bit this
+    // breaks first, so every later comparison fails for a queue reason only.
+    // ⛔ It used to assert 00 -- the reset register went out first on every
+    // TX lane (silicon fix #8, WF2); a 00 here is now that defect.
     for (j = 0; j < 2; j = j + 1) begin
       if (ngot[j] < 1) begin
         $display("    lane %0d: *** FAIL -- no complete byte", j);
         fails = fails + 1;
       end else begin
         $display("    lane %0d: %02h %0s", j, got[j][0],
-                 (got[j][0] == 8'h00) ? "ok" : "*** FAIL (not byte-aligned)");
-        if (got[j][0] != 8'h00) fails = fails + 1;
+                 (got[j][0] == hf_pat[j][0]) ? "ok"
+                 : (got[j][0] == 8'h00) ? "*** FAIL (the reset register -- fix #8 undone?)"
+                 : "*** FAIL (not byte-aligned)");
+        if (got[j][0] != hf_pat[j][0]) fails = fails + 1;
       end
     end
 
@@ -422,12 +429,12 @@ module tb_tx;
         $display("");
         $write("    want  :");
         for (i = 1; i <= CHECKB; i = i + 1)
-          $write(" %02h", hf_pat[j][(i - 1) % hf_len[j]]);
+          $write(" %02h", hf_pat[j][i % hf_len[j]]);
         $display("");
         for (i = 1; i <= CHECKB; i = i + 1) begin
-          if (got[j][i] != hf_pat[j][(i - 1) % hf_len[j]]) begin
+          if (got[j][i] != hf_pat[j][i % hf_len[j]]) begin
             $display("    lane %0d byte %0d: got %02h want %02h *** FAIL",
-                     j, i - 1, got[j][i], hf_pat[j][(i - 1) % hf_len[j]]);
+                     j, i, got[j][i], hf_pat[j][i % hf_len[j]]);
             fails = fails + 1;
           end
         end

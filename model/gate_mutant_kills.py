@@ -93,6 +93,17 @@ KILLERS = {
     "M_RX_CAPGATE_LATE": "test/gate_corpus_trace.py",
     # ruling CS1: inv_cdc.vh on corpus_sptgt (run_mutants' clocked family)
     "M_CS_RAW_D": "test/run_mutants.py",
+    # -- WF2: a reload is a clean slate (run_reload: each red for its OWN
+    # reason, matched on the FAIL text, not merely "some FAIL") --------------
+    "M_NO_RELOAD_RESET": "test/run_reload.py",
+    "M_NO_HALT_IDLE": "test/run_reload.py",
+    "M_NO_RELOAD_FLUSH": "test/run_reload.py",
+    "M_HALT_KEEP_CKBIT": "test/run_reload.py",
+    "M_HALT_KEEP_HOLD": "test/run_reload.py",
+    "M_ONE_PHASE_HALT": "test/run_reload.py",
+    # silicon fix #8 undone: moves the 9 TX images' digests (and reproduces
+    # the pre-fix ones exactly -- the re-record's proof)
+    "M_TX_PRELOAD": "test/run_lockstep.py",
     # -- rulings K and U --------------------------------------------------------
     "M_SHIFTIN_UNHELD": "model/gate_sda_hold.py",
     "M_HOLD_CLOCKED_ONLY": "model/gate_sda_hold.py",

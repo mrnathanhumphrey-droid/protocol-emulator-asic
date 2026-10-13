@@ -855,27 +855,36 @@ def assemble(lanes, headers, park_pins=None, timing_checks=True,
     check_receive_pin(lanes, headers)
     check_clocked_hold_delay(lanes, headers)
     prog, base, off = [], {}, ACT_BASE
-    for ln in sorted(lanes):
-        base[ln] = off
-        for i, (op, pin, lvl, dly, q) in enumerate(lanes[ln]):
-            prog.append(act(op, pin, lvl, dly, count=counts[(ln, i)], q=q))
-            off += ACT_BYTES
-    lp = off
-    prog.append(act(OP_REARM, 0, 0, 500))
-    hs = []
-    for ln in range(N_LANES):
-        if ln in headers:
-            pin, clkpin, mode, t, ds, dt = headers[ln][:6]
-            flags = header_flags(headers[ln])
-            # ⛔ RULING RC4: the order is derived from the lane's program
-            # (START/STOP framing = I2C = MSB-first), never left to `hdr()`'s
-            # LSB default, which put every I2C byte on the wire reversed
-            hs.append(hdr(pin, clkpin, mode, t, flags, ds, dt, base[ln],
-                          order=header_order(headers[ln],
-                                             [a[0] for a in lanes[ln]])))
-        else:
-            pp = park_pins.get(ln, PARK_PIN)
-            hs.append(hdr(pp, pp, 0, 500, 0, 200, 240, lp))
+    # ⛔⛔ A FIELD THAT DOES NOT FIT IS A REFUSAL (WF2). The encoder used to
+    # MASK: a header asking for D_sched 434 was emitted as 178, so the image
+    # said different numbers than the program. `pe_isa._pack` now raises, and
+    # the assembler names it.
+    try:
+        for ln in sorted(lanes):
+            base[ln] = off
+            for i, (op, pin, lvl, dly, q) in enumerate(lanes[ln]):
+                prog.append(act(op, pin, lvl, dly, count=counts[(ln, i)],
+                                q=q))
+                off += ACT_BYTES
+        lp = off
+        prog.append(act(OP_REARM, 0, 0, 500))
+        hs = []
+        for ln in range(N_LANES):
+            if ln in headers:
+                pin, clkpin, mode, t, ds, dt = headers[ln][:6]
+                flags = header_flags(headers[ln])
+                # ⛔ RULING RC4: the order is derived from the lane's program
+                # (START/STOP framing = I2C = MSB-first), never left to
+                # `hdr()`'s LSB default, which put every I2C byte on the wire
+                # reversed
+                hs.append(hdr(pin, clkpin, mode, t, flags, ds, dt, base[ln],
+                              order=header_order(headers[ln],
+                                                 [a[0] for a in lanes[ln]])))
+            else:
+                pp = park_pins.get(ln, PARK_PIN)
+                hs.append(hdr(pp, pp, 0, 500, 0, 200, 240, lp))
+    except ValueError as exc:
+        raise Reject("a value does not fit its encoding: %s" % exc)
     img = b"".join(hs) + b"".join(prog)
     if len(img) > (1 << AW):
         raise Reject("image is %d bytes, over the %d-byte program store"
@@ -1598,6 +1607,21 @@ def main() -> int:
     print("    %-50s %s" % ("anchor K5 removed: the DQ-pin park",
                             "REJECTED (unproven)" if ok
                             else "*** WRONG: %s" % (msg[:50] or "accepted")))
+    rc |= 0 if ok else 1
+
+    # ---- MUST-FIRE: a field that does not fit is refused, never masked ------
+    print()
+    print("  --- must-fire: an oversize header field is refused (was masked) ---")
+    try:
+        assemble({0: [(OP_LEVEL, 8, 0, 434, 0), (OP_REARM, 0, 1, 434, 0)]},
+                 {0: (8, PIN_NONE, 1, 434, 434, 868)})
+        got, msg = False, ""
+    except Reject as e:
+        got, msg = True, str(e)
+    ok = got and "does not fit" in msg
+    print("    %-50s %s" % ("D_sched 434 / D_tol 868 in 8-bit fields",
+                            "REJECTED" if ok else "*** WRONG: %s"
+                            % (msg[:60] or "accepted (masked to 178 / 100)")))
     rc |= 0 if ok else 1
 
     # ---- MUST-FIRE: chained hold loads, and 1.6a's no-skip (WF2 round 2) ----

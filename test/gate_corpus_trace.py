@@ -664,8 +664,14 @@ def main() -> int:
     # first. Nothing unexplained. An unknown digest is red: re-derive, re-pin.
     import hashlib
     import pe_isa as I
-    EX1_PIN = {"43c6dfdeda8f931c": dict(n=1088, boundary=1016, b_unexp=0,
-                                        contention=72, late=0, o_unexp=0)}
+    # ⛔ RE-PINNED (WF2, silicon fix #8): the program sends ONE WREN, not two
+    # (the second was a workaround for the reset 0x00), so the image -- and
+    # its digest -- changed. Was 43c6dfdeda8f931c: 1088 = 1016 boundary + 72
+    # contention, 0 unexplained. Now 1184 = 1111 + 73, 0 unexplained: a
+    # shorter loop fits more READs in the same 60k cycles; the classification
+    # is unchanged and every must-fire below still fires.
+    EX1_PIN = {"726383c7533dfe41": dict(n=1184, boundary=1111, b_unexp=0,
+                                        contention=73, late=0, o_unexp=0)}
     d4 = os.path.join(TMP, "spim_d4.hex")
     img4, _ = corpus.build_spi_master(d=4)
     store4 = bytes(I.full_store(bytes(img4)))

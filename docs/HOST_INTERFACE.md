@@ -150,6 +150,85 @@ push-pull protocol outputs are held at **idle high** throughout, because
 `uo_out` cannot release and an idling low could look like a START condition or a
 clock edge to an attached device.
 
+### ⛔ Isolate every `uio` peer during ANY load
+
+Because `uio` **is the load data port**, a device wired to the `uio` protocol
+pins sees the whole image as bus traffic during **every** program load — the
+first one after power-up as well as any reload. **The host must electrically
+isolate those peers for the duration of each load**, or they may see arbitrary
+transactions.
+
+- **Measured** (an I²C FRAM on `uio[1]`/`uio[2]`, each of the 29 tracked
+  images loaded): **23 of 29 images produce START conditions** on the bus, up
+  to **24** for `i2caddr_image`. None of them happened to clock out the
+  FRAM's address after a START, so nothing was written — that is luck in the
+  bit patterns, not a property: another image can address the part and write
+  it. `test/run_reload.py` keeps a **harm demonstration** (the peer connected
+  through a load) that prints what the peer saw; it is a measurement of this
+  limit, never a pass.
+- **Use a bidirectional bus switch, with its enable driven by the host**: a
+  74CBT/CBTLV-class FET switch, or a TCA9548A-style I²C mux. ⚠ A one-way
+  buffer (e.g. 74AHCT125) is not suitable for SDA, which is bidirectional.
+  ⚠ **Do not isolate by powering the peer down**: driving the pins of an
+  unpowered chip can back-power it through its input protection diodes.
+- **Not affected:** peers on `uo_out` (UART-tx, SPI master). Load mode holds
+  those pins idle-high.
+
+### Reloading a program — a reload is a clean slate
+
+A reload (PROG high, the image written, PROG low) is an **abort**: whatever a
+lane was doing stops where it is. The chip guarantees what happens to its own
+state and pins; what an aborted transaction means to a peer is the peer's.
+
+**What clears** — the halt state equals the power-on reset state, by
+construction (one register list, at the top of `src/pe_engine.v`, used by
+both):
+
+- every lane's program state, bit position, clocked-phase state, pending
+  hold, arm, pin class (`pin_pp`, `pin_inv`) and header copy;
+- **the TX queues** and a half-pushed byte, on the synchronized PROG rise.
+  ⇒ **After a reload, TX starts with the first byte pushed after PROG
+  falls.** A byte pushed before the reload is gone, even if no bit of it was
+  sent;
+- **a received byte not yet read** when PROG rises. ⇒ **Drain RX before
+  raising PROG.**
+
+**What is kept:** the sticky status flags — `l_timeout`, overflow,
+`CONFIG_ERR`, clock-stretch, per-lane underrun/overflow. They are the host's
+to read after halting; only `rst_n` clears them.
+
+**The pins at the halt:**
+
+- `uio` pins release (`uio_oe` = 0).
+- The four `uo_out` protocol outputs go idle-high in **two steps**: in the
+  first PROG cycle every output **except a declared clock pin** (some lane's
+  header `clkpin`) goes high; the clock pins follow one cycle later. So an
+  SPI chip-select deasserts **at least one clock (20 ns) before** any SCK
+  edge the halt causes, and no pad skew can let SCK clock a stale bit into
+  the part.
+- After PROG falls, no pad moves until the new program's first action: the
+  pads sit at the reset idle, not at the halted program's last level. Header
+  re-reading takes ~290 cycles, so nothing drives in that window.
+
+**What an aborted transaction looks like to a peer** (measured by
+`test/run_reload.py`):
+
+| bus | at the abort | after the reload |
+| --- | --- | --- |
+| UART | a cut frame (no stop bit at its expected place) | frames from the first byte pushed after PROG fell |
+| SPI master | CS rises first; the byte in flight is lost, not written | the next transaction runs clean |
+| I²C | ⚠ releasing SCL from low **is** an SCL rise: the peer latches whatever is on SDA as the next bit, so a cut after 7 bits of a byte **completes that byte** with an arbitrary bit 8, and a FRAM may write it. **Reload an I²C lane between transactions.** | the next transaction runs clean (peer isolated during the load) |
+| 1-Wire | the release shortens the low pulse in progress (an aborted slot) | the new program's reset pulse re-synchronizes the part; presence and the ROM read are exact |
+
+**Known limits:**
+
+- `rst_n` is asynchronous and forces all four `uo_out` outputs in the same
+  cycle; the two-step order applies to a reload, not to a reset.
+- On I²C, the order in which SDA and SCL rise at a release is decided by the
+  bus pull-ups, not the chip.
+- The `uio` isolation requirement above. ⭐ Fix candidate, not on this chip: a
+  **bit-serial program load on `ui_in`**, so `uio` never carries load traffic.
+
 ## The serial host view (`uo_out[6:4]`)
 
 | bit | name |
@@ -375,6 +454,16 @@ four tagged queues (`TXN = 4`, `TXD = 2`) since the tag was added, and
   stream is the only honest answer, the same reasoning as RX overflow.
 - **A lane that consumes with the FIFO empty records an underrun** (status
   bit 1), per lane. Staging one byte ahead is what the FIFO is for.
+- **Every byte a TX lane sends is a host byte, from the first** (silicon fix
+  #8, WF2). A byte's first bit is taken from the queue head, and that is
+  when the byte is **popped**; the remaining bits shift from the lane's
+  register. If the queue is empty at a byte's first bit, the lane underruns
+  and sends a zero byte, so the byte alignment is kept.
+  ⛔ Before the fix a lane loaded its next byte at the END of each byte, so
+  the first byte after every load was the register's reset value `0x00`: a
+  UART peer received a NUL, an I²C program's first transaction addressed
+  `0x00` (the General Call), an SPI FRAM's first WREN was no opcode at all.
+  Programs had been written around it; those workarounds are removed.
 
 ### Minimum host feed rate (the host contract for TX)
 
@@ -393,9 +482,9 @@ and a queue is not refilled retroactively). Correct feeding, per TX lane:
     waits for the observed rise).
 - **Rate:** on average, at least **one byte per `B` cycles** into that
   lane's queue.
-- **Latency:** the next byte loads at the end of each byte, from a 2-deep
-  queue, so **refill a queue within `B` cycles of each pop**. That leaves the
-  one staged byte as the margin.
+- **Latency:** a byte is popped at its first bit, from a 2-deep queue, so
+  **refill a queue within `B` cycles of each pop**. That leaves the one
+  queued byte as the margin.
 - **Channel capacity:** a byte is two PUSH edges. At the pacing the bench
   uses (`test/host_feed.vh`: 2 cycles setup, 3 high, 1 low per nibble), that
   is **12 cycles per byte**, shared by all four queues. So the lanes a host

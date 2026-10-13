@@ -1131,10 +1131,13 @@ async def test_clocked_tx_bytes_at_the_pins(dut):
     bit per byte: 5B fed went out 00, B5, 6A, D5. Every timing check passed
     it. This reads the BYTES off `uio_oe` alone, so it holds at gate level,
     where nothing internal exists. The program is one open-drain lane, MSB
-    first: START, a clocked 8-bit SHIFT, a clocked ACK slot, STOP. The first
-    byte out is the reset 0x00 (documented: the register resets to 0).
+    first: START, a clocked 8-bit SHIFT, a clocked ACK slot, STOP.
+    ⭐ EVERY BYTE, FROM THE FIRST (silicon fix #8): the first byte out used to
+    be the register's reset 0x00 and this test skipped it; now byte 0 is held
+    to 0x5B too, so the test is also #8's pins-only, gate-level witness.
     ⛔ Must-fire: built with `M_TX_LOAD_ANYPHASE` this test FAILS in RTL
-    simulation with the drifting pattern.
+    simulation with the drifting pattern; with `M_TX_PRELOAD` it fails on
+    byte 0.
     """
     sda, scl, d = P_SDA, P_SCL, 70
     prog = [pe_isa.act(pe_isa.OP_START, sda, 0, d),
@@ -1167,10 +1170,11 @@ async def test_clocked_tx_bytes_at_the_pins(dut):
                   % " ".join("%02X" % b for b in got))
     assert len(got) >= 5, ("only %d byte(s) on the wire in 12000 cycles -- "
                            "nothing to judge" % len(got))
-    bad = [(i, b) for i, b in enumerate(got[1:], 1) if b != 0x5B]
+    bad = [(i, b) for i, b in enumerate(got) if b != 0x5B]
     assert not bad, ("CLOCKED TX BYTES WRONG: 5B pushed, the wire carried %s "
-                     "(byte, index) %s -- the drifting pattern 00 B5 6A D5 is "
-                     "the pre-fix host load (silicon fix #2)"
+                     "(index, byte) %s -- the drifting pattern 00 B5 6A D5 is "
+                     "the pre-fix host load (silicon fix #2); a lone 00 at "
+                     "index 0 is the reset register (silicon fix #8)"
                      % (" ".join("%02X" % b for b in got), bad[:4]))
 
 

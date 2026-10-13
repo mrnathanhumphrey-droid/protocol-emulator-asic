@@ -105,7 +105,27 @@ EXPECT = {
     "M_TM2_STORE_ADD":   (2, None),
     # ruling CE1 / CE2: each new mode bit read as 0 -- the selector ignored
     "M_HALF_IGNORED":    (2, None),
-    "M_CLKINV_IGNORED":  (3, None),
+    # 2 since option 1' (WF2): the XOR now lives in the one-line `run_out`,
+    # so each arm is one line (it was a two-line `proto_out`: 3)
+    "M_CLKINV_IGNORED":  (2, None),
+    # WF2 #9 / #10 / #11: each re-asserts a register's own value AFTER the
+    # shared halt clear (last NBA wins) -- ONE added line, the list untouched
+    "M_NO_RELOAD_RESET": (1, None),
+    "M_NO_HALT_IDLE":    (1, None),
+    "M_HALT_KEEP_CKBIT": (1, None),
+    "M_HALT_KEEP_HOLD":  (1, None),
+    # WF2 silicon fix #8 undone: THREE sites, declared
+    "M_TX_PRELOAD":      (9,
+        "THREE sites, declared, because the fix touched three: the driven "
+        "bit (register only, 1 line per arm), the writeback (always shift, 1 "
+        "line per arm), and the end-of-byte PRELOAD the fix removed (4 lines "
+        "of host load + pop + underrun against the fix's one `l_txv` clear). "
+        "Reverting fewer would not restore the old behaviour: run_lockstep "
+        "requires this mutant to reproduce the pre-fix digests exactly, and "
+        "it does on all 12 images."),
+    # WF2 rule 1 / option 1': an ifdef/else pair on one switch wire each
+    "M_NO_RELOAD_FLUSH": (2, None),
+    "M_ONE_PHASE_HALT":  (2, None),
     # ruling CDC2: the 94cebb7 wiring -- raw PROG / PTR_RST / ena and a raw
     # reset release (silicon fixes #4 and #5 undone)
     "M_CDC_RAW":         (8,
@@ -129,7 +149,10 @@ EXPECT = {
         "one site, TWO lines per arm, declared: `ck_pin` and `clk_real` both "
         "revert to the select. Reverting one alone would leave the clock "
         "index and its range test reading different sources."),
-    "M_SHARED_BITP":     (14,
+    # 15 since WF2 #11 (+1): the shared pointer's reset now expands in the
+    # HALT branch too, from the same list -- the mutant's register is cleared
+    # at a reload like every other
+    "M_SHARED_BITP":     (15,
         "a BLOCK substitution across FOUR sites, declared: the mutation "
         "re-merges the TX and RX bit pointers, and the pointer is named in the "
         "reset, in OP_SHIFT's advance, in OP_SHIFTIN's advance-and-complete, "

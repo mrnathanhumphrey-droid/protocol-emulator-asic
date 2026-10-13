@@ -100,6 +100,10 @@ module tb_onewire;
   // ---- the serial host view: decoded from the pins only --------------------
   reg  [11:0] fr_sh;
   integer     fr_cnt, n_rx, n_status;
+  // +RELOAD_AT (see `do_reload`): declared here, ahead of their first use
+  integer     reload_at, rx_base = 0;
+  reg         rl_req = 1'b0, rl_done = 1'b0;
+  realtime    rl_low;
   reg         prev_v, poll_active, poll_done;
   always @(posedge clk) begin
     if (rst_n !== 1'b1) begin
@@ -114,7 +118,7 @@ module tb_onewire;
         if (fr_sh[11]) n_status = n_status + 1;
         else if (fr_sh[10:8] == 3'd0) begin
           $display("OW-RX %0d %02h", n_rx, fr_sh[7:0]);
-          if (poll_active && n_rx >= pollidx && fr_sh[7:0] != 8'h00)
+          if (poll_active && n_rx - rx_base >= pollidx && fr_sh[7:0] != 8'h00)
             poll_done = 1'b1;
           n_rx = n_rx + 1;
         end
@@ -164,10 +168,58 @@ module tb_onewire;
 
   task push(input [7:0] b);
     begin
-      while (dut.tx_cnt[0] == 2'd2 && cyc < ncyc_max) @(negedge clk);
+      while (dut.tx_cnt[0] == 2'd2 && cyc < ncyc_max && !rl_req) @(negedge clk);
       // past the cycle budget the run is already red; never push into a
-      // full queue (that would be the FEEDER's tx_full, not the chip's)
-      if (cyc < ncyc_max) hf_push_byte(b, 2'd0);
+      // full queue (that would be the FEEDER's tx_full, not the chip's).
+      // A pending reload takes the channel first (ui_in[5]/[6] become PTR/WR)
+      if (cyc < ncyc_max && !rl_req) hf_push_byte(b, 2'd0);
+    end
+  endtask
+
+  // ---- RELOAD MID WRITE-0 SLOT (+RELOAD_AT, Wilson WF2 #9-#11) -------------
+  // Once the feed has reached word RELOAD_AT, the first master low that lasts
+  // past 20 us once the first reset's two bytes are in -- a write-0 slot (a
+  // write-1 is <= 15 us) -- triggers a real reload: PROG high, the image
+  // rewritten, PROG low; the feed then restarts from word 0. The release
+  // SHORTENS that low pulse: an ABORT, which the new program's reset pulse
+  // re-synchronises. ⭐ The DS18B20 never sees the load data -- `dq` is driven
+  // only by the chip's pull-down and the part, so the bus switch HOST_INTERFACE
+  // requires is built in. The verdict is the runner's: the bytes the host
+  // receives after the reload equal a clean run's, from the first.
+  // ⚠ ON THE NEGEDGE: `n_rx` is written with `=` in the posedge frame
+  // decoder, so a posedge read here would race it (gate_bench_races RA3)
+  always @(negedge clk) if (!rl_req && !rl_done && reload_at >= 0
+                            && fi >= reload_at && m_low
+                            // past the first reset: its 2 bytes are in (a
+                            // reset pulse is also low past 20 us)
+                            && n_rx - rx_base >= 2
+                            && $realtime - t_mfall > 20000.0) begin
+    rl_req = 1'b1; rl_low = $realtime - t_mfall;
+  end
+  task do_reload;
+    begin
+      $display("OW-RELOAD at cyc %0d, feed word %0d, %0d byte(s) received before; the master's low had lasted %0.0f ns (a write-0 slot, cut)",
+               cyc, fi, n_rx, rl_low);
+      ui_in[PIN_PROG] = 1'b1;
+      loading = 1'b1;
+      repeat (3) @(negedge clk); ui_in[PIN_PTR] = 1'b1; repeat (3) @(negedge clk);
+      ui_in[PIN_PTR] = 1'b0; repeat (3) @(negedge clk);
+      for (i = 0; i < img_bytes; i = i + 1) begin
+        peer = img[i];
+        @(negedge clk); @(negedge clk);
+        ui_in[PIN_WR] = 1'b1;
+        @(negedge clk); @(negedge clk); @(negedge clk);
+        ui_in[PIN_WR] = 1'b0;
+        @(negedge clk);
+      end
+      repeat (4) @(negedge clk);
+      ui_in[PIN_PROG] = 1'b0;
+      peer = 8'hFF;
+      loading = 1'b0;
+      repeat (4) @(negedge clk);
+      rx_base = n_rx; fi = 0; poll_done = 1'b0; poll_active = 1'b0;
+      rl_done = 1'b1; rl_req = 1'b0;
+      $display("OW-RELOAD resumed: received bytes from index %0d on are the new program's", rx_base);
     end
   endtask
 
@@ -191,6 +243,7 @@ module tb_onewire;
     // OW6: no stall unless asked (-1 never matches a feed index)
     if (!$value$plusargs("STALL_AT=%d", stall_at)) stall_at = -1;
     if (!$value$plusargs("STALL_CYC=%d", stall_cyc)) stall_cyc = 0;
+    if (!$value$plusargs("RELOAD_AT=%d", reload_at)) reload_at = -1;
     if (nfeed > FEED_MAX) begin
       $display("tb_onewire: FATAL -- feed of %0d words > %0d", nfeed, FEED_MAX); $finish;
     end
@@ -236,6 +289,7 @@ module tb_onewire;
     // ---- the host: the feed, reactive only at the poll -------------------
     fi = 0;
     while (fi < nfeed && cyc < ncyc_max) begin
+      if (rl_req) do_reload;
       if (fi == stall_at) begin
         $display("OW-STALL host stops pushing for %0d cycles before feed word %0d (cyc %0d)",
                  stall_cyc, fi, cyc);
@@ -245,7 +299,7 @@ module tb_onewire;
       if (feed[fi][8]) begin
         poll_active = 1'b1;
         g = 0;
-        while (!poll_done && cyc < ncyc_max) begin
+        while (!poll_done && cyc < ncyc_max && !rl_req) begin
           push(feed[fi][7:0]); push(feed[fi + 1][7:0]);
           push(feed[fi + 2][7:0]); push(feed[fi + 3][7:0]);
           g = g + 1;

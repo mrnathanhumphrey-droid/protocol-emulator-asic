@@ -1,68 +1,68 @@
 {
  "_ncyc_after_priming": 60000,
- "_recorded_from": "src/ after rulings CDC2 + CS1 (silicon fixes #4, #5, #6: PROG / PTR_RST / ena synchronized k = 2, reset release synchronized k = 2, MISO enable D qualified by the synchronized CS). Re-recorded under ruling LR with the shift analysis as its justification: the 10 images that never drive the SPI-target CS pin are byte-identical; ckfive_image.hex (a6e0fcbb551e -> 1629d456c41f) and ckod_image.hex moved PINS ONLY -- dispatch streams IDENTICAL, 5373 / 3548 dispatches -- because those programs drive uio[6] (CS) themselves and uio_oe[7] now rises 2 cycles after CS falls (the stated CS k = 2; with uio_oe[7] masked the streams are identical). Priming time +2 on all 12 (reported, not compared). Wider evidence (probe lockstep vs 29aaeb3, 1,040 images): priming +2 on all; post-priming byte-identical except uio_oe[7] on the 4 CS-driving images. Before that: src/ after silicon fix #3 (rulings PN + CI): a clocked SHIFTIN samples the ACTION's pin, and a push-pull clocked capture fires at the engine's own rise (ppc slot). Only ckfive_image.hex moved -- its lane 4 now captures -- sha256 bbba669835e3 -> a6e0fcbb551e, 5373 dispatches, dispatch stream IDENTICAL, pins moved; the other 11 unchanged. Before that: src/ after ruling RC (2026-10-09): corpus_i2c and ckread rebuilt as valid I2C (MSB-first, measured STOP), so their DISPATCH streams moved (ckread 1316 -> 1317, corpus_i2c 1319 -> 1320 dispatches in the window). Before that: src/ after silicon fix #2 (ruling TX5) -- the fix's pre-form reproduced all 12 old digests, dispatch streams identical, pins moved on the 5 clocked images. Originally src/ at 5cb00c1 (pre-TF RTL).",
+ "_recorded_from": "src",
  "census_image.hex": {
   "dispatch_sha256": "cf95eae806e222f47fb6e5892fa0057261d6db14bac705fbe1b5139114eb5af0",
   "dispatches": 2763,
-  "lines": 62686,
+  "lines": 62711,
   "primed_at": 123,
-  "sha256": "7405217fbb0498d86a92dbc80cb4e0d9338bc363a07578b160db42d8d2a10ab4"
+  "sha256": "fa62c7e22c6d52b4535dfcacebdedeeee70a2d8107dd96e0d19d5a50a20354db"
  },
  "ckfive_image.hex": {
   "dispatch_sha256": "779ec9cb4da4a8f653c07cd77a1023ea736345b648120280c33c52cbc9001031",
   "dispatches": 5373,
-  "lines": 65052,
+  "lines": 65370,
   "primed_at": 135,
-  "sha256": "1629d456c41ff7dea25705e3e229d2f70b4b5d9d24c4ccfd7dd3e493f0061348"
+  "sha256": "be12786ba7296e9d2119fdd6ad234e48bf409c2e6618cfde8c700b5246a2a076"
  },
  "ckheavy_image.hex": {
   "dispatch_sha256": "6742a6bb923e5f5e7d1ebbee933d04aeb11decab722d9882accc3cc2e27b0be4",
   "dispatches": 11237,
-  "lines": 70858,
+  "lines": 71230,
   "primed_at": 135,
-  "sha256": "5990cc50c4b77447294634b1dcf912c864b66193a8de3cc16f7653dd06980ec3"
+  "sha256": "13e21c791c85d39c0c0bb2b41e585693cdad78c08c19303166df8b232f1372aa"
  },
  "ckod_image.hex": {
   "dispatch_sha256": "8125ec484ca7fb535da790f06aeb1c1ee8984523ce08360ea251c2f8af8f86a9",
   "dispatches": 3548,
-  "lines": 63088,
+  "lines": 63545,
   "primed_at": 131,
-  "sha256": "0f7cdee18ebac56bb7bd835bc6da89f5a25dbb9e0a623432d00ccfe6ef7e2ca2"
+  "sha256": "1357e3a5380ad040fa118000ba7a789c8d9787369be8ba327a2aa4543be3a03d"
  },
  "ckread_image.hex": {
   "dispatch_sha256": "8ce10732d179be90165f87043433e07ce86be03ffcddb3d233650e0917c93dc3",
   "dispatches": 1317,
-  "lines": 60248,
+  "lines": 61244,
   "primed_at": 118,
-  "sha256": "94f7ddb5cdb53e552d0f21e9051d23d4ab0abfa206441920856beb99eb9d6304"
+  "sha256": "722f88088d7e334dec69a373d3004ddc0a3c415ed6e6f2036da258a12c1b6550"
  },
  "corpus_i2c.hex": {
   "dispatch_sha256": "c857c4022266a43bc3366afe0639236cfa869a148151b0922f35356c6a79884b",
   "dispatches": 1320,
-  "lines": 60251,
+  "lines": 61247,
   "primed_at": 118,
-  "sha256": "c6e6d0136be47c5d43bf1ac653d8fb2b35024bb4b301536392b72dd7573e98f3"
+  "sha256": "ce82d6883bec3749bbeab006488f850f80835f7defcfdc0ebad97bd885d1fc0e"
  },
  "half_image.hex": {
   "dispatch_sha256": "a4ebdbd8eef0cf77b0689458510ef418eb5518ba719024f7069480060e0b86d1",
   "dispatches": 5360,
-  "lines": 65049,
+  "lines": 65356,
   "primed_at": 123,
-  "sha256": "eef3aa2568790d51442f9155bec018c2fe934bc803d4122b2a2cecf51af081a3"
+  "sha256": "ec7b9d50f3a27dca0e40ad875d492632d289004bc5e805dd3dffc115b54b0cdb"
  },
  "i2caddr_image.hex": {
   "dispatch_sha256": "ea57fb7fbfe454f696e618a9bbf37ae4bd66b6b85d3822edc757a1394dcd57bb",
   "dispatches": 1448,
-  "lines": 60467,
+  "lines": 61321,
   "primed_at": 118,
-  "sha256": "aea3ac0931b0fa70f2a7b1313eb453a3dbf49f35adfb2275cfddadefceb9e450"
+  "sha256": "a9d8bf5c22e22049ca08164e1b10397e0fa2afc522b5fe2a4d145c6cbc69857c"
  },
  "i2cframe_image.hex": {
   "dispatch_sha256": "60a1d9250a42d35c6772f466cbc69d817c999f3356eb5c8218819e3c0379ba0d",
   "dispatches": 1448,
-  "lines": 60467,
+  "lines": 61321,
   "primed_at": 118,
-  "sha256": "10b1aaed02661380f681007a1b5358b646994d56445451806d5d1b5666692411"
+  "sha256": "c9028efc137747428d3a4a150cca44b56ea40439a3c95b7cbc4171a8b056fa8c"
  },
  "rxfast_image.hex": {
   "dispatch_sha256": "cf3dd84c52cb30152da351fee35b0e717901ba83e44bf9c712d55fe4cb0e3942",

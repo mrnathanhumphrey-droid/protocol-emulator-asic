@@ -133,9 +133,11 @@ def tx_header_pin_engine():
     with open(os.path.join(ROOT, "src", "pe_engine.v"), encoding="utf-8",
               newline="") as fh:
         txt = fh.read().replace("\r\n", "\n")
-    a = ("                      pin_out[a_pin] <= l_tx[cur][0] & pin_pp[a_pin];\n"
+    # (the driven bit is `tx_bit` since silicon fix #8: a byte's first bit
+    # comes from the queue head, not `l_tx[cur][0]`)
+    a = ("                      pin_out[a_pin] <= tx_bit & pin_pp[a_pin];\n"
          "                      pin_oe[a_pin]  <= 1'b1;\n")
-    b = ("                      pin_out[l_pin[cur]] <= l_tx[cur][0];  // S_TX_HEADER_PIN\n"
+    b = ("                      pin_out[l_pin[cur]] <= tx_bit;  // S_TX_HEADER_PIN\n"
          "                      pin_oe[l_pin[cur]]  <= 1'b1;\n")
     txt = scratch_sub(txt, a, b, "S_TX_HEADER_PIN")
     os.makedirs(SCRATCH, exist_ok=True)
@@ -184,10 +186,12 @@ def run(vvp, img, ncyc, starve, starve_len):
 
 
 def lanes(txt):
-    """{lane: (shifts, popped, sent, underrun)} from Layer V2's lane lines."""
+    """{lane: (shifts, popped-and-sent, underrun)} from Layer V2's lane lines.
+    ⭐ Since silicon fix #8 a clocked SHIFT sends the byte it pops, so popped
+    and sent are one number (they used to differ by the byte in flight)."""
     return {int(m[0]): tuple(int(x) for x in m[1:]) for m in re.findall(
         r"\[V2\] lane (\d+): (\d+) clocked SHIFT\(s\), (\d+) host byte\(s\) "
-        r"popped, (\d+) sent, (\d+) underrun", txt)}
+        r"popped and sent, (\d+) underrun", txt)}
 
 
 def main() -> int:
@@ -218,9 +222,10 @@ def main() -> int:
     say("[V1]: ok" in t and "[V2]: ok" in t, "Layer V1 and V2 report ok")
     say(set(ln) == {0, 1}, "both lanes transmitted clocked bytes: %s"
         % sorted(ln))
-    say(all(v[3] == 0 for v in ln.values()), "no underrun action on a fed run")
-    say(all(v[1] - v[2] in (0, 1) and v[2] >= 20 for v in ln.values()),
-        "bytes consumed == bytes on the wire (+1 in flight), >= 20 each")
+    say(all(v[2] == 0 for v in ln.values()), "no underrun action on a fed run")
+    say(all(v[0] - v[1] in (0, 1) and v[1] >= 20 for v in ln.values()),
+        "every clocked SHIFT sent the byte it popped (+1 not yet at its "
+        "first HIGH), >= 20 each")
     print("      lanes %s" % ln)
 
     print("  --- starve: the queues run empty, then refill ---")
@@ -229,10 +234,10 @@ def main() -> int:
     fails = [l for l in t.splitlines() if "*** FAIL" in l]
     for l in fails[:6]:
         print("      %s" % l)
-    say(not fails, "no FAIL line: the residue went out as V2 predicts")
-    say(any(v[3] > 0 for v in ln.values()),
+    say(not fails, "no FAIL line: an underrun sent zeros, as V2 predicts")
+    say(any(v[2] > 0 for v in ln.values()),
         "some lane UNDERRAN (the boundary was reached): %s"
-        % {k: v[3] for k, v in ln.items()})
+        % {k: v[2] for k, v in ln.items()})
     say(re.search(r"CKTX underrun=0*1", t) is not None,
         "the engine's own underrun sticky agrees")
 

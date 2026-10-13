@@ -232,9 +232,17 @@ module tb_trace;
   // lint-clean in two simulators and connected to nothing, so "SPI master ->
   // SPI FRAM peer" had never once run against the DUT. A peer that compiles is
   // not a peer that is wired.
+  // ⛔⛔ THE BUS SWITCH (HOST_INTERFACE, WF2): `uio` is the LOAD DATA PORT, so
+  // a peer on those pins must be isolated during ANY load or it sees the image
+  // as bus traffic. Both I2C peers were wired straight to `uio_in` through the
+  // load, and passed only because the corpus image happens to put no START on
+  // SCL/SDA. Now they see their own pull-ups (idle high) while `ld_en` is set
+  // -- a bidirectional FET switch the host opens for the load.
+  wire sw_scl = ld_en ? 1'b1 : uio_in[P_SCL];
+  wire sw_sda = ld_en ? 1'b1 : uio_in[P_SDA];
   fram_i2c u_i2c (
       .clk(clk),
-      .scl_in(uio_in[P_SCL]), .sda_in(uio_in[P_SDA]),
+      .scl_in(sw_scl), .sda_in(sw_sda),
       .sda_oe(i2c_sda_oe), .scl_oe(i2c_scl_oe)
   );
 
@@ -248,7 +256,7 @@ module tb_trace;
   // you it is a SHORT rather than a stretch.
   fram_i2c #(.STRETCH(12)) u_i2cs (
       .clk(clk),
-      .scl_in(uio_in[P_SCL]), .sda_in(uio_in[P_SDA]),
+      .scl_in(sw_scl), .sda_in(sw_sda),
       .sda_oe(i2cs_sda_oe), .scl_oe(i2cs_scl_oe)
   );
 
