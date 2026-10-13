@@ -1125,43 +1125,21 @@ always @(posedge dut.clk) begin
       for (tv_k = 0; tv_k < 8; tv_k = tv_k + 1) tv_ub[tv_k] = 0;
       tv_half = 0;
     end
-    // ---- a host POP: `host_pop` pulses the cycle after the WB that loaded
-    if (dut.u_eng.host_pop === 1'b1) begin
-      if (tv_pst != 2) begin
-        tv_anom = tv_anom + 1;
-      end else begin
-        tv_p = tv_q[tv_phq * 256 + (tv_qr[tv_phq] % 256)];
-        tv_qr[tv_phq] = tv_qr[tv_phq] + 1;
-        // ⭐ SILICON FIX #8: A SHIFT POPS THE BYTE IT SENDS, at its first bit.
-        // So a pop during a CLOCKED action is THAT action's byte (it used to
-        // feed the NEXT action, and the first action sent the reset 0x00). A
-        // pop during an unclocked SHIFT belongs to an unclocked byte, which
-        // Layer V3 judges; the queue pointer above still advances for it, so
-        // a lane mixing the two on one queue (PN4's pindiv) stays in order.
-        if (tv_pcur < 8 && tv_on[tv_pcur] != 0) begin
-          tv_pops[tv_pcur] = tv_pops[tv_pcur] + 1;
-          tv_ld[tv_pcur] = tv_pn;
-          // V1: the byte the ENGINE loaded, in register order
-          tv_reg[tv_pcur] = (dut.u_eng.l_order[tv_pcur] === 1'b1)
-                            ? tv_rev(dut.u_eng.host_data) : dut.u_eng.host_data;
-          tv_rv[tv_pcur] = 1;
-          // (V2 does NOT read the pop: it takes the host's byte at the
-          // program's slot boundary, below)
-        end
-      end
-    end
+    // ---- the chip's POPS, per queue (`do_popq`, the same interface for
+    // every TX variant): V1's load-point check counts them. Which action a
+    // pop belongs to is NOT inferred -- under (b4) a pop is a fill, not a
+    // writeback, and attributing it would mirror the design (#6).
+    for (tv_k = 0; tv_k < 4; tv_k = tv_k + 1)
+      if (dut.do_popq[tv_k] === 1'b1) tv_qr[tv_k] = tv_qr[tv_k] + 1;
+    // a reload empties the queues: the chip has "consumed" everything V2's
+    // model just discarded, so both counts restart from the same point
+    if (dut.ui_in[7] === 1'b1)
+      for (tv_k = 0; tv_k < 4; tv_k = tv_k + 1) tv_qr[tv_k] = tv_qt[tv_k];
     // ---- a writeback ----------------------------------------------------
     if (dut.u_eng.st === 2'd2 && dut.u_eng.cur < 8) begin
       tv_k = dut.u_eng.cur;
       if (tv_pc[tv_k] !== dut.u_eng.l_pc[tv_k] || tv_on[tv_k] == 0) begin
-        // a new action on this lane: close the old one (V1's load point)
-        if (tv_on[tv_k] != 0 && tv_low[tv_k] == tv_cnt[tv_k] + 1) begin
-          if (tv_ld[tv_k] != 0 && tv_ld[tv_k] != ck_load_at(tv_cnt[tv_k])) begin
-            tv1_ldbad = tv1_ldbad + 1;
-            if (tv1_ldbad <= 4)
-              $display("*** FAIL clocked_conform[V1]: lane %0d SHIFT cnt=%0d loaded the next host byte at dispatch %0d; the model says %0d", tv_k, tv_cnt[tv_k], tv_ld[tv_k], ck_load_at(tv_cnt[tv_k]));
-          end
-        end
+        // a new action on this lane
         tv_on[tv_k] = (dut.u_eng.ck_shift === 1'b1) ? 1 : 0;
         tv_pc[tv_k] = dut.u_eng.l_pc[tv_k];
         tv_cnt[tv_k] = dut.u_eng.a_cnt;
@@ -1198,6 +1176,14 @@ always @(posedge dut.clk) begin
               tv_w[tv_k] = (dut.u_eng.l_order[tv_k] === 1'b1) ? tv_p
                            : tv_rev(tv_p);
               tv_tk[tv_k] = tv_tk[tv_k] + 1;
+              // V1 (secondary): the golden model's register is the same
+              // host byte in REGISTER order, and the model says it is loaded
+              // by the FIRST LOW (`ck_load_at` = 1): remember which queue
+              // position the chip must have consumed by this slot's HIGH
+              tv_reg[tv_k] = (dut.u_eng.l_order[tv_k] === 1'b1) ? tv_rev(tv_p)
+                             : tv_p;
+              tv_rv[tv_k] = 1;
+              tv_ld[tv_k] = tv_aq * 65536 + tv_qt[tv_aq];
             end else begin
               tv_w[tv_k] = 8'h00;
               tv_under[tv_k] = tv_under[tv_k] + 1;
@@ -1216,6 +1202,16 @@ always @(posedge dut.clk) begin
           // underrun loads nothing, and V2 holds it to zeros)
           tv_v1[tv_k] = tv_rv[tv_k];
           tv_e1[tv_k] = tv_reg[tv_k][ck_tx_bit(tv_low[tv_k] - 1)];
+          // ⛔ V1's LOAD POINT, variant-agnostic: by the slot's FIRST HIGH
+          // the chip must have popped this slot's byte from its queue (the
+          // model loads on the first LOW). The pre-#8 silicon loaded on the
+          // LAST LOW -- the pop came a byte late -- and is red here.
+          if (tv_low[tv_k] == 1 && tv_rv[tv_k] != 0
+              && tv_qr[tv_ld[tv_k] / 65536] < tv_ld[tv_k] % 65536) begin
+            tv1_ldbad = tv1_ldbad + 1;
+            if (tv1_ldbad <= 4)
+              $display("*** FAIL clocked_conform[V1]: lane %0d SHIFT cnt=%0d: its byte was not consumed from queue %0d by its first HIGH (%0d of %0d popped) -- the model loads on dispatch %0d, the FIRST LOW", tv_k, tv_cnt[tv_k], tv_ld[tv_k] / 65536, tv_qr[tv_ld[tv_k] / 65536], tv_ld[tv_k] % 65536, ck_load_at(tv_cnt[tv_k]));
+          end
           // V2: the slot's byte (the host's, or zeros on an underrun)
           tv_e2[tv_k] = tv_w[tv_k][8 - tv_low[tv_k]];
           tv1_chk = tv1_chk + 1; tv2_chk = tv2_chk + 1;
@@ -1234,7 +1230,6 @@ always @(posedge dut.clk) begin
         end
       end
     end
-    tv_pst = dut.u_eng.st; tv_pcur = dut.u_eng.cur; tv_phq = dut.u_eng.host_q;
   end
 end
 
@@ -1900,8 +1895,6 @@ final begin
           // action still before its first LOW when the run ended
           $display("  clocked_conform[V2] lane %0d: %0d clocked SHIFT(s), %0d host byte(s) taken and sent, %0d underrun action(s)%0s", tv_k, tv_acts[tv_k], tv_tk[tv_k], tv_under[tv_k], (tv_acts[tv_k] - tv_tk[tv_k] - tv_under[tv_k] > 1 || tv_acts[tv_k] < tv_tk[tv_k] + tv_under[tv_k]) ? " *** FAIL: slots != bytes taken + underruns" : "");
         end
-      if (tv_anom != 0)
-        $display("*** FAIL clocked_conform[V]: %0d host pop(s) not following a writeback -- the load is not where the layer looks", tv_anom);
     end
     // ⭐ THE GAP LAYER REPORTS ITS OWN NON-VACUITY. Zero checks means no
     // open-drain clocked HIGH was ever followed by another clocked dispatch in

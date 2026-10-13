@@ -497,10 +497,13 @@ module tt_um_protocol_emulator #(
   wire          tx_valid = (tx_cnt[q_sel] != 2'd0);
   wire [7:0]    tx_head  = tx_mem[{q_sel, tx_rp[q_sel]}];
 
+  // ⭐ THE POP AS A PER-QUEUE VECTOR, so the queue block below is the same
+  // for every variant of the TX path (silicon fix #8's (a) pops one queue,
+  // the action's; (b4) may pop several) and the benches read one interface.
+  wire [3:0] do_popq = (e_host_pop & tx_valid) ? (4'b0001 << q_sel) : 4'b0000;
+
   wire nib_lo  = push_rise & tx_half;         // the push that completes a byte
-  wire do_pop  = e_host_pop & tx_valid;
-  wire do_push = nib_lo & ((tx_cnt[tx_tag] != TXD[1:0])
-                           | (do_pop & (q_sel == tx_tag)));
+  wire do_push = nib_lo & ((tx_cnt[tx_tag] != TXD[1:0]) | do_popq[tx_tag]);
 
   always @(posedge clk or negedge rst_n_s) begin
     if (!rst_n_s) begin
@@ -526,15 +529,16 @@ module tt_um_protocol_emulator #(
         tx_mem[{tx_tag, tx_wp[tx_tag]}] <= {tx_asm[7:4], ui_in[4:1]};
         tx_wp[tx_tag]                   <= ~tx_wp[tx_tag];
       end
-      if (do_pop) tx_rp[q_sel] <= ~tx_rp[q_sel];
-
       // ⭐ ONE ASSIGNMENT PER COUNTER, with the same-queue push+pop enumerated.
       // Different queues are independent, so each updates on its own.
-      if (do_push && do_pop && (q_sel == tx_tag)) begin
-        tx_cnt[tx_tag] <= tx_cnt[tx_tag];     // one in, one out
-      end else begin
-        if (do_push) tx_cnt[tx_tag] <= tx_cnt[tx_tag] + 2'd1;
-        if (do_pop)  tx_cnt[q_sel]  <= tx_cnt[q_sel]  - 2'd1;
+      for (ti = 0; ti < TXN; ti = ti + 1) begin
+        if (do_popq[ti]) tx_rp[ti] <= ~tx_rp[ti];
+        if (do_push && tx_tag == ti[1:0] && do_popq[ti])
+          tx_cnt[ti] <= tx_cnt[ti];             // one in, one out
+        else if (do_push && tx_tag == ti[1:0])
+          tx_cnt[ti] <= tx_cnt[ti] + 2'd1;
+        else if (do_popq[ti])
+          tx_cnt[ti] <= tx_cnt[ti] - 2'd1;
       end
 
       // ⛔ A PUSH ON A FULL QUEUE IS REPORTED, NEVER A STALL. The host has no

@@ -7,8 +7,8 @@
  * enumerates the case where a host PUSH and an engine POP land on the SAME
  * queue in the SAME cycle:
  *
- *     if (do_push && do_pop && (q_sel == tx_tag))
- *       tx_cnt[tx_tag] <= tx_cnt[tx_tag];      // one in, one out
+ *     if (do_push && tx_tag == ti && do_popq[ti])
+ *       tx_cnt[ti] <= tx_cnt[ti];              // one in, one out
  *
  * The coverage sweep reported that arm UNCOVERED and it was tabled as OWED --
  * and then the cocotb cross-check reported it EXECUTED 48 TIMES. So no test
@@ -20,7 +20,7 @@
  *
  * ⛔⛔ WHY THE PHASE IS **WALKED** AND NOT COMPUTED, which is the one design
  * decision here. `do_push` is `nib_lo & ...` where `nib_lo` is the LOW-nibble
- * push after a THREE-STAGE SYNCHRONISER (`wr_sync`), and `do_pop` is the
+ * push after a THREE-STAGE SYNCHRONISER (`wr_sync`), and `do_popq[q]` is the
  * engine's `host_pop`, which fires once per BYTE LOAD -- every eight shifts of
  * a lane whose period is its action delay. Computing the alignment means
  * composing the synchroniser latency, the nibble pairing and the lane's
@@ -36,8 +36,9 @@
  * WHAT IS ASSERTED ON THAT CYCLE -- the three things a FIFO breaks on:
  *   1. BOTH operations take effect: the write pointer AND the read pointer flip
  *   2. the COUNT is unchanged: one in, one out
- *   3. ORDER is preserved: the byte popped is the OLDER of the two resident,
- *      and the byte pushed lands in the slot the write pointer named
+ *   3. ORDER is preserved: the read pointer moves past the OLDER of the two
+ *      resident (the head is read through it, in one expression), and the
+ *      byte pushed lands in the slot the write pointer named
  */
 `include "test/imgload.vh"
 module tb_fifo ();
@@ -86,7 +87,6 @@ module tb_fifo ();
   // the captured corner
   integer cnt_before, cnt_after, wp_before, wp_after, rp_before, rp_after;
   integer hit_cycle, hit_phase;
-  reg [7:0] popped, older;
 
   task fail(input [8*72-1:0] why);
     begin
@@ -157,16 +157,15 @@ module tb_fifo ();
   // coincidence is a single cycle and a procedural check could step past it.
   always @(posedge clk) if (rst_n) begin
     cyc <= cyc + 1;
-    if (dut.do_push && dut.do_pop && (dut.q_sel == dut.tx_tag) && hits == 0) begin
+    // ⭐ `do_popq` IS PER QUEUE (every TX variant pops through it), so the
+    // corner is a push and a pop on the SAME queue in the same cycle
+    if (dut.do_push && dut.do_popq[dut.tx_tag] && hits == 0) begin
       hits      = 1;
       hit_cycle = cyc;
       hit_phase = phase;
       cnt_before = dut.tx_cnt[dut.tx_tag];
       wp_before  = dut.tx_wp[dut.tx_tag];
       rp_before  = dut.tx_rp[dut.tx_tag];
-      // the byte the engine is taking, and the OLDER of the two resident
-      popped = dut.tx_head;
-      older  = dut.tx_mem[{dut.tx_tag, dut.tx_rp[dut.tx_tag]}];
     end
   end
 
@@ -194,7 +193,8 @@ module tb_fifo ();
     // same pops, 1746 -> 1747, 1854 -> 1855, ...), and the old walk then missed
     // every one of them. A walk whose coverage depends on where cycle 0 falls
     // has not swept the phase.
-    // ⛔ FILL FIRST: `do_pop` is `e_host_pop & tx_valid`, so with an empty
+    // ⛔ FILL FIRST: a pop needs a byte (`do_popq` is gated by the queue's
+    // valid), so with an empty
     // queue there is no pop to anchor to and the walk would wait forever.
     // Two bytes fill the TXD = 2 queue; each step then pushes one per pop.
     push_nib(4'hA, 2'd0, 3);
@@ -214,7 +214,7 @@ module tb_fifo ();
         push_nib(4'h5, 2'd0, 3);
       end
       @(posedge clk);
-      while (!dut.do_pop) @(posedge clk);
+      while (!dut.do_popq[0]) @(posedge clk);
       @(negedge clk);
       repeat (phase) @(negedge clk);
       push_nib(4'hA, 2'd0, 3);
@@ -243,10 +243,13 @@ module tb_fifo ();
       // 2. the count is unchanged -- one in, one out
       if (cnt_after !== cnt_before)
         fail("the count MOVED on a same-cycle push+pop (one in, one out)");
-      // 3. order preserved: the byte handed to the engine is the OLDER one
-      if (popped !== older)
-        fail("the engine was handed the NEWER byte: order was not preserved");
-      $display("    both pointers flipped, count held at %0d, order preserved",
+      // 3. ORDER IS THE READ POINTER: a queue's head is `tx_mem[{q, rp[q]}]`
+      // in ONE expression for every variant, so "the engine got the older
+      // byte" could not fail separately from check 1's read-pointer flip.
+      // (It was a check against an implementation that read the head
+      // through a second pointer; there is no such path.) Removed rather
+      // than kept as a check that cannot fire.
+      $display("    both pointers flipped, count held at %0d (order: the read pointer advanced past the older byte)",
                cnt_before);
     end
     $display();
