@@ -90,8 +90,39 @@ def _gen_uart_tx_msb():
 
 
 def _gen_rxfast60():
+    # ⛔ THE FULL STORE, as the runner writes it (make_smoke_image --rxfast 60
+    # goes through pe_isa.write_image). This returned the bare 60-byte
+    # program, whose hash no bench ever loads -- so the d = 60 arm was
+    # V3-unknown from the day it was registered, and nobody saw: that arm is
+    # a must-fire that is SUPPOSED to fail, and the V3-ID line was absorbed
+    # into its expected red. Fatal V3-ID exposed it (WF2 #8 follow-up).
     import make_smoke_image
-    return bytes(make_smoke_image.build_rxfast(60))
+    import pe_isa
+    return bytes(pe_isa.full_store(bytes(make_smoke_image.build_rxfast(60))))
+
+
+def _gen_store_falloff():
+    """store_run.sh's M3 must-fire: a lane with no terminating REARM."""
+    import pe_isa
+    import store_probe
+    return bytes(pe_isa.full_store(store_probe.build_falloff()[0]))
+
+
+def _gen_store_short51():
+    """store_run.sh's M5 arm: corpus_i2c loaded as its 51 program bytes only
+    -- the bench hashes exactly the bytes written, so 51, not 256."""
+    import gate_degenerate_fields as dgf
+    return bytes(dgf.load(os.path.join(ROOT, "test", "corpus_i2c.hex"))[:51])
+
+
+def _gen_spim(mode0, clkinv):
+    """run_spifram's scratch builds of corpus_spim (CI4 mode 0, CE2 CLK_INV)."""
+    def f():
+        import corpus
+        import pe_isa
+        img = corpus.build_spi_master(mode0=mode0, clkinv=clkinv)[0]
+        return bytes(pe_isa.full_store(bytes(img)))
+    return f
 
 
 def _gen_ckack(half):
@@ -146,6 +177,19 @@ GENERATED = (
     # pe_asm would refuse, never a published program.
     # ⛔ FOUND LATE TOO: run_ckack runs only in the local A2 suite, which the
     # unknown-fingerprint sweep never ran, so its images were V3-red there.
+    # ⛔ AND THESE, exposed by FATAL V3-ID on its first full run: every one
+    # ran on an unknown image, and every runner still passed, because each
+    # arm either failed anyway by design or read only one layer.
+    ("run_spifram: corpus_spim mode0", _gen_spim(True, False), 0,
+     "ruling CI4's mode-0 arm (SCK parked low before each select)"),
+    ("run_spifram: corpus_spim CLK_INV", _gen_spim(False, True), 0,
+     "ruling CE2's inverted-clock arm (SPI mode 1)"),
+    ("run_spifram: corpus_spim mode0 + CLK_INV", _gen_spim(True, True), 0,
+     "both: SCK parked and inverted (SPI mode 2)"),
+    ("store_run: falloff", _gen_store_falloff, 1,
+     "M3's must-fire: a lane with no terminating REARM -- broken on purpose"),
+    ("store_run: corpus_i2c as 51 bytes", _gen_store_short51, 1,
+     "M5's short load: REFUSED by the clean build, RUN by M_NO_STORE_FULL"),
     ("run_ckack: ckack.hex", _gen_ckack(False), 0,
      "the clocked random read (ruling ACK), sigrok-judged"),
     ("run_ckack: ckack_half.hex", _gen_ckack(True), 0,
@@ -162,6 +206,11 @@ GENERATED = (
      "the delay-0 build pe_asm REFUSES today; run only as the must-fire, "
      "with its V3 facts supplied by allowlisted override"),
 )
+
+
+#: GENERATED entries whose runner loads FEWER than 256 bytes on purpose (the
+#: bench hashes exactly the bytes written)
+SHORT_LOADS = {"store_run: corpus_i2c as 51 bytes"}
 
 
 #: ⛔⛔ OVERRIDES MAY ONLY TIGHTEN (Wilson, WF2 round 2). A `+V3...` plusarg
@@ -197,6 +246,14 @@ def rows():
     exempt = wf.exempt_set()
     for name, gen, ex, _why in GENERATED:
         imgs[name] = gen()
+        # ⛔ A GENERATOR RETURNS WHAT THE BENCH LOADS: the full store, since
+        # every runner writes images through pe_isa.write_image. The rxfast
+        # d = 60 entry returned the bare program and was unknown for a whole
+        # arc. The one exception is declared: a deliberate short load.
+        if len(imgs[name]) != 256 and name not in SHORT_LOADS:
+            raise RuntimeError("v3_table: %s's generator returned %d bytes, "
+                               "not the 256-byte store the bench loads"
+                               % (name, len(imgs[name])))
         if ex:
             exempt[name] = "GENERATED (declared)"
     with open(RESP, encoding="utf-8") as fh:

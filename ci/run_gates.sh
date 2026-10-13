@@ -225,6 +225,11 @@ GATES=(
   # second check: no register reset outside the list, every block halts, the
   # keep-list is exactly the ruled status flags. Must-fires on mutated text.
   model/gate_halt_reset.py
+  # ⭐⭐ WF2 #8 follow-up (Wilson): EVERY runner is enumerated once
+  # (test/runner_registry.py: this list, the A2 suite, and the declared rest);
+  # a script that runs a bench outside it is red. With V3-ID fatal in the
+  # bench, an unknown image cannot pass in any runner that runs.
+  model/gate_runner_registry.py
   # ⭐⭐ SP2 -- the pe_asm protocol front-end (model/pe_proto.py): every
   # shipped FRAM program re-expressed as a TRANSACTION (START / rSTART / STOP
   # and CS framing generated from context), byte-identical to the verified

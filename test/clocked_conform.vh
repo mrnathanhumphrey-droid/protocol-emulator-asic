@@ -1354,8 +1354,17 @@ always @(posedge dut.clk) begin
       // "not judged" would be a fourth way for an absent result to pass. A
       // generated image is registered through its GENERATOR
       // (model/v3_table.py GENERATED), never waved through.
-      if (v3_tab(v3_h, 0) == -2)
+      // ⛔⛔ AND IT IS FATAL (Wilson, WF2 #8 follow-up): a FAIL line alone
+      // was invisible to runners that read one layer (gate_sda_hold) or ran
+      // outside the swept list (run_ckack, the A2 suite) -- twice in a day.
+      // Stopping here means no runner can reach its pass token on an unknown
+      // image, whichever layer it reads; `model/gate_runner_registry.py`
+      // makes sure every runner is one that runs.
+      if (v3_tab(v3_h, 0) == -2) begin
         $display("*** FAIL clocked_conform[V3-ID]: the loaded image (hash %h) is not in test/v3_table.vh -- register it, or its generator, in model/v3_table.py", v3_h);
+        $display("*** FAIL clocked_conform[V3-ID]: FATAL -- the bench stops here");
+        $finish;
+      end
       if (v3_tab(v3_h, 0) != -2) begin
         if (!v3_exg) v3_ex = v3_tab(v3_h, 0);
         for (v3_f = 0; v3_f < 5; v3_f = v3_f + 1) begin

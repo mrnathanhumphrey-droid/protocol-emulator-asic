@@ -45,6 +45,7 @@ test/run_wirefeed_mf.py             ^\s*GATE wirefeed-mustfire: PASSED\s*$
 test/run_uarttx.py                  ^\s*UART-TX GATE: PASSED\s*$
 test/run_reload.py                  ^\s*RELOAD GATE: PASSED\s*$
 model/gate_halt_reset.py            ^\s*HALT-RESET GATE: PASSED\s*$
+model/gate_runner_registry.py       ^\s*RUNNER REGISTRY: PASSED\s*$
 test/run_mutants.py                 ^\s*GATE mutants: PASSED\s*$
 model/gate_mutant_kills.py          ^\s*GATE mutant-kills: PASSED\s*$
 model/gate_bench_races.py           ^\s*GATE bench-races: PASSED\s*$
