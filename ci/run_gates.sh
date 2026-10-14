@@ -30,6 +30,73 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT" || exit 1
 
+# ---------------------------------------------------------------------------
+# ⛔⛔ ONE RUN PER TREE, AND EVERY RUN ITS OWN SCRATCH (Wilson). Two gate runs
+# were started on one tree at once; both used the SAME scratch directories, so
+# a gate could have found a valid pass token in a log the OTHER run wrote -- a
+# false green no per-gate token can rule out. Two halves, both required:
+#   * A LOCK PER TREE, in the tree's own git dir (a worktree has its own), so
+#     a second run on the same tree REFUSES to start and says why. `mkdir` is
+#     the atomic test-and-set. A lock whose owner is dead is reported and
+#     taken over, never silently.
+#   * A PRIVATE TEMP PER RUN: ~15 runners put scratch under `$TEMP/pe_*` and
+#     others use Python's tempfile -- shared by EVERY checkout, worktrees
+#     included, which no per-tree lock covers. TEMP/TMP/TMPDIR point at a
+#     directory named by this run's ID for the whole run.
+# MUST-FIRE (below, every run): a second invocation while this one holds the
+# lock must exit red NAMING the lock.
+# ---------------------------------------------------------------------------
+GIT_DIR_ABS="$(git rev-parse --absolute-git-dir 2>/dev/null)"
+[ -n "$GIT_DIR_ABS" ] || { echo "  *** not a git tree -- no lock can be taken: RED"; exit 1; }
+GATE_LOCK="$GIT_DIR_ABS/pe_gate_run.lock"
+take_gate_lock() {
+  if mkdir "$GATE_LOCK" 2>/dev/null; then
+    echo "$$ $(date '+%Y-%m-%d %H:%M:%S')" > "$GATE_LOCK/owner"
+    return 0
+  fi
+  local owner pid
+  owner="$(cat "$GATE_LOCK/owner" 2>/dev/null)"
+  pid="${owner%% *}"
+  if [ -n "$pid" ] && ! kill -0 "$pid" 2>/dev/null; then
+    echo "  ⚠ stale gate lock $GATE_LOCK (owner '$owner' is not running) -- taking it over"
+    rm -rf "$GATE_LOCK" && mkdir "$GATE_LOCK" 2>/dev/null \
+      && echo "$$ $(date '+%Y-%m-%d %H:%M:%S')" > "$GATE_LOCK/owner" && return 0
+  fi
+  echo "  *** ANOTHER GATE RUN HOLDS THE LOCK $GATE_LOCK (owner: ${owner:-unknown})"
+  echo "  *** two runs on one tree share scratch and can read each other's pass"
+  echo "      tokens -- this run REFUSES to start: RED"
+  return 1
+}
+take_gate_lock || exit 1
+if [ "${1:-}" = "--lock-probe" ]; then
+  # the must-fire's probe: reaching here means the lock was FREE
+  rm -rf "$GATE_LOCK"
+  echo "  lock-probe: the lock was free"
+  exit 0
+fi
+trap 'rm -rf "$GATE_LOCK"' EXIT
+RUN_ID="$(date '+%Y%m%d_%H%M%S')_$$"
+RUN_TMP="${TMPDIR:-${TEMP:-/tmp}}"
+RUN_TMP="$(cd "$RUN_TMP" 2>/dev/null && pwd || echo /tmp)/pe_gates_$RUN_ID"
+mkdir -p "$RUN_TMP" || { echo "  *** cannot create $RUN_TMP: RED"; exit 1; }
+RUN_TMP_W="$(cygpath -w "$RUN_TMP" 2>/dev/null || echo "$RUN_TMP")"
+export TMPDIR="$RUN_TMP" TEMP="$RUN_TMP_W" TMP="$RUN_TMP_W"
+echo "  --- gate run $RUN_ID: lock $GATE_LOCK, private scratch $RUN_TMP_W ---"
+# MUST-FIRE: a second run on this tree, now, must refuse and name the lock
+if LOCK_MF="$(bash "$ROOT/ci/run_gates.sh" --lock-probe 2>&1)"; then
+  LOCK_MF_RC=0
+else
+  LOCK_MF_RC=1
+fi
+if [ "$LOCK_MF_RC" -ne 0 ] && printf '%s' "$LOCK_MF" | grep -q "HOLDS THE LOCK $GATE_LOCK"; then
+  echo "  lock must-fire: a concurrent second run refused, naming the lock  red ok"
+else
+  echo "  *** LOCK MUST-FIRE FAILED: a second run while this one holds the lock"
+  echo "      exited $LOCK_MF_RC without naming it -- the lock does not protect: RED"
+  printf '%s\n' "$LOCK_MF" | sed 's/^/      | /' | head -5
+  exit 1
+fi
+
 PY="${PE_PYTHON:-python}"
 command -v "$PY" >/dev/null 2>&1 || PY=python3
 
