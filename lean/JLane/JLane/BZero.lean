@@ -34,20 +34,20 @@ theorem chargeSum_zero (P : Program) (win : Engine → Option Lane) (y : Lane) :
     show charge P y e + chargeSum P win y n (step P win e) = 0
     omega
 
-/-- **(2)** A head that was valid and is now empty: the lane just wrote back. -/
+/-- **(2)** A head that was valid and is now empty: the lane just retired. -/
 theorem head_drop_wb (P : Program) (win : Engine → Option Lane) (e : Engine) (w : Lane)
     (hv : e.headValid w = true) (hn : (step P win e).headValid w = false) :
-    IsWB w e := by
-  by_cases hw : e.st = .wb ∧ w = e.cur
-  · exact ⟨hw.1, hw.2.symm⟩
+    IsRet P w e := by
+  by_cases hw : e.st = .wb ∧ w = e.cur ∧ P.ret e.now e.cur = true
+  · exact ⟨hw.1, hw.2.1.symm, by rw [hw.2.1]; exact hw.2.2⟩
   · exfalso
-    have hs : selNext e w = e.sel w := by
+    have hs : selNext P e w = e.sel w := by
       unfold selNext
       rw [if_neg hw]
-    have hk : actvNext e w (selNext e w) = true := by
+    have hk : actvNext P e w (selNext P e w) = true := by
       rw [hs]
-      exact actvNext_keep_true e w _ hw hv
-    change actvNext e w (selNext e w) = false at hn
+      exact actvNext_keep_true P e w _ hw hv
+    change actvNext P e w (selNext P e w) = false at hn
     rw [hk] at hn
     cases hn
 

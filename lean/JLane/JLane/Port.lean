@@ -172,10 +172,10 @@ theorem owed_pos_of (e : Engine) (l : Lane) (s : Slot) (h : e.actv l s = false) 
   | false => rw [h]; cases e.actv l true <;> decide
   | true  => rw [h]; cases e.actv l false <;> decide
 
-theorem actvNext_false_of (e : Engine) (l : Lane) (s : Slot)
-    (hn : ¬(e.pst = .cap ∧ l = e.pl)) (h : e.actv l s = false) : actvNext e l s = false := by
+theorem actvNext_false_of (P : Program) (e : Engine) (l : Lane) (s : Slot)
+    (hn : ¬(e.pst = .cap ∧ l = e.pl)) (h : e.actv l s = false) : actvNext P e l s = false := by
   unfold actvNext
-  by_cases hw : e.st = .wb ∧ l = e.cur ∧ s = e.sel e.cur
+  by_cases hw : e.st = .wb ∧ l = e.cur ∧ s = e.sel e.cur ∧ P.ret e.now e.cur = true
   · rw [if_pos hw]
   · rw [if_neg hw, if_neg (fun h' => hn ⟨h'.1, h'.2.1⟩), h]
 
@@ -192,7 +192,7 @@ theorem want_step (P : Program) (win : Engine → Option Lane) (y : Lane) (e : E
       · exact ⟨true, h1⟩
       · rw [h0, h1] at hw
         exact absurd hw (by decide)
-  exact owed_pos_of (step P win e) y s (actvNext_false_of e y s hn' hs)
+  exact owed_pos_of (step P win e) y s (actvNext_false_of P e y s hn' hs)
 
 /-! ### The bound -/
 

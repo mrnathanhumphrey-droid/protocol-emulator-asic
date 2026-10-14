@@ -16,23 +16,23 @@ def DispHeadValid (e : Engine) : Prop :=
 
 /-! ### Small facts about the update functions -/
 
-theorem actvNext_false (e : Engine) (l : Lane) (s : Slot) (hc : e.pst ≠ .cap)
-    (h : e.actv l s = false) : actvNext e l s = false := by
+theorem actvNext_false (P : Program) (e : Engine) (l : Lane) (s : Slot) (hc : e.pst ≠ .cap)
+    (h : e.actv l s = false) : actvNext P e l s = false := by
   unfold actvNext
-  by_cases hw : e.st = .wb ∧ l = e.cur ∧ s = e.sel e.cur
+  by_cases hw : e.st = .wb ∧ l = e.cur ∧ s = e.sel e.cur ∧ P.ret e.now e.cur = true
   · rw [if_pos hw]
   · rw [if_neg hw, if_neg (fun h' => hc h'.1), h]
 
-theorem actvNext_true (e : Engine) (l : Lane) (s : Slot) (hw : e.st ≠ .wb)
-    (h : e.actv l s = true) : actvNext e l s = true := by
+theorem actvNext_true (P : Program) (e : Engine) (l : Lane) (s : Slot) (hw : e.st ≠ .wb)
+    (h : e.actv l s = true) : actvNext P e l s = true := by
   unfold actvNext
   rw [if_neg (fun h' => hw h'.1)]
   by_cases hc : e.pst = .cap ∧ l = e.pl ∧ s = e.pslot
   · rw [if_pos hc]
   · rw [if_neg hc, h]
 
-theorem selNext_of_not_wb (e : Engine) (l : Lane) (hw : e.st ≠ .wb) :
-    selNext e l = e.sel l := by
+theorem selNext_of_not_wb (P : Program) (e : Engine) (l : Lane) (hw : e.st ≠ .wb) :
+    selNext P e l = e.sel l := by
   unfold selNext
   rw [if_neg (fun h' => hw h'.1)]
 
@@ -94,20 +94,20 @@ theorem inFlightEmpty_step (P : Program) (win : Engine → Option Lane) (e : Eng
   unfold InFlightEmpty at h1 ⊢
   intro hne
   change (portNext P e).pst ≠ .scan at hne
-  show actvNext e (portNext P e).pl (portNext P e).pslot = false
+  show actvNext P e (portNext P e).pl (portNext P e).pslot = false
   cases hp : e.pst with
   | scan =>
-    exact actvNext_false e _ _ (by rw [hp]; decide) (scan_issue_empty P e hp hne)
+    exact actvNext_false P e _ _ (by rw [hp]; decide) (scan_issue_empty P e hp hne)
   | req =>
     have hne' : e.pst ≠ .scan := by rw [hp]; decide
     obtain ⟨hl, hs⟩ := portNext_keeps P e hne'
     rw [hl, hs]
-    exact actvNext_false e _ _ (by rw [hp]; decide) (h1 hne')
+    exact actvNext_false P e _ _ (by rw [hp]; decide) (h1 hne')
   | wait =>
     have hne' : e.pst ≠ .scan := by rw [hp]; decide
     obtain ⟨hl, hs⟩ := portNext_keeps P e hne'
     rw [hl, hs]
-    exact actvNext_false e _ _ (by rw [hp]; decide) (h1 hne')
+    exact actvNext_false P e _ _ (by rw [hp]; decide) (h1 hne')
   | cap =>
     have : (portNext P e).pst = .scan := by simp [portNext, hp]
     exact absurd this hne
@@ -117,7 +117,7 @@ theorem dispHeadValid_step (P : Program) (win : Engine → Option Lane) (e : Eng
   unfold DispHeadValid at h2 ⊢
   intro hne
   change (dispNext win e).st ≠ .idle at hne
-  show actvNext e (dispNext win e).cur (selNext e (dispNext win e).cur) = true
+  show actvNext P e (dispNext win e).cur (selNext P e (dispNext win e).cur) = true
   cases hs : e.st with
   | wb =>
     have : (dispNext win e).st = .idle := by simp [dispNext, hs]
@@ -125,8 +125,8 @@ theorem dispHeadValid_step (P : Program) (win : Engine → Option Lane) (e : Eng
   | drive =>
     have hd : (dispNext win e).cur = e.cur := by simp [dispNext, hs]
     have hw : e.st ≠ .wb := by rw [hs]; decide
-    rw [hd, selNext_of_not_wb e e.cur hw]
-    exact actvNext_true e _ _ hw (h2 (by rw [hs]; decide))
+    rw [hd, selNext_of_not_wb P e e.cur hw]
+    exact actvNext_true P e _ _ hw (h2 (by rw [hs]; decide))
   | idle =>
     have hw : e.st ≠ .wb := by rw [hs]; decide
     revert hne
@@ -143,9 +143,9 @@ theorem dispHeadValid_step (P : Program) (win : Engine → Option Lane) (e : Eng
       by_cases hv : e.headValid w = true
       · rw [if_pos hv]
         intro _hne
-        show actvNext e w (selNext e w) = true
-        rw [selNext_of_not_wb e w hw]
-        exact actvNext_true e w (e.sel w) hw hv
+        show actvNext P e w (selNext P e w) = true
+        rw [selNext_of_not_wb P e w hw]
+        exact actvNext_true P e w (e.sel w) hw hv
       · rw [if_neg hv]
         intro h
         exact (h (by simp)).elim
@@ -174,10 +174,10 @@ theorem struct_run (P : Program) (win : Engine → Option Lane) :
   | n + 1, e, h => struct_run P win n (step P win e) (struct_step P win e h)
 
 /-- A capture and a WB invalidation never hit the same slot. -/
-theorem no_collision (e : Engine) (h1 : InFlightEmpty e) (h2 : DispHeadValid e)
+theorem no_collision (P : Program) (e : Engine) (h1 : InFlightEmpty e) (h2 : DispHeadValid e)
     (hw : e.st = .wb) (hc : e.pst = .cap) :
-    ¬(e.st = .wb ∧ e.pl = e.cur ∧ e.pslot = e.sel e.cur) := by
-  rintro ⟨_, hl, hs⟩
+    ¬(e.st = .wb ∧ e.pl = e.cur ∧ e.pslot = e.sel e.cur ∧ P.ret e.now e.cur = true) := by
+  rintro ⟨_, hl, hs, _⟩
   have a : e.actv e.pl e.pslot = false := h1 (by rw [hc]; decide)
   have b : e.headValid e.cur = true := h2 (by rw [hw]; decide)
   unfold Engine.headValid at b
@@ -190,7 +190,7 @@ theorem step_cap_fills_struct (P : Program) (win : Engine → Option Lane) (e : 
     (step P win e).actv e.pl e.pslot = true := by
   obtain ⟨h1, h2⟩ := h
   by_cases hw : e.st = .wb
-  · exact step_cap_fills P win e hc (no_collision e h1 h2 hw hc)
+  · exact step_cap_fills P win e hc (no_collision P e h1 h2 hw hc)
   · exact step_cap_fills P win e hc (fun h' => hw h'.1)
 
 end JLane

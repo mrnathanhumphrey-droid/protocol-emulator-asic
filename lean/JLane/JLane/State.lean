@@ -35,13 +35,15 @@ inductive DState where
 abbrev Slot := Bool
 
 /-- A program. A writeback of lane `l` at cycle `t` advances its timestamp by
-`dly l + ext t l`: `dly` is the lane's minimum delay, `ext` the extra on that writeback
-(0 for a plain lane; the LOW phases of a HALF_HIGH clocked lane; a park or armed-edge
-rebase). `ext` defaults to 0, so `{ live, dly }` is the constant-delay program of v1. -/
+`dly l + ext t l`: `dly` is the lane's minimum delay, `ext` the extra on that writeback.
+It **retires** its action (invalidates the head, flips the select, owes a refill) iff
+`ret t l`: a held clocked phase (7C) or a chaining re-arm (7A) does not.
+Defaults `ext = 0`, `ret = true`: `{ live, dly }` is the program of v1. -/
 structure Program where
   live : Lane → Bool
   dly  : Lane → Nat
   ext  : Nat → Lane → Nat := fun _ _ => 0
+  ret  : Nat → Lane → Bool := fun _ _ => true
 
 structure Engine where
   now   : Nat

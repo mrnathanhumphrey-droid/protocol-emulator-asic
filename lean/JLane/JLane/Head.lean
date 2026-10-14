@@ -14,11 +14,12 @@ def HeadFirst (e : Engine) : Prop :=
 def SpareFill (e : Engine) : Prop :=
   e.pst ≠ .scan → e.pslot ≠ e.sel e.pl → e.headValid e.pl = true
 
-/-- A valid slot stays valid unless its lane is writing back. -/
-theorem actvNext_keep_true (e : Engine) (l : Lane) (s : Slot)
-    (hn : ¬(e.st = .wb ∧ l = e.cur)) (h : e.actv l s = true) : actvNext e l s = true := by
+/-- A valid slot stays valid unless its lane retires this cycle. -/
+theorem actvNext_keep_true (P : Program) (e : Engine) (l : Lane) (s : Slot)
+    (hn : ¬(e.st = .wb ∧ l = e.cur ∧ P.ret e.now e.cur = true)) (h : e.actv l s = true) :
+    actvNext P e l s = true := by
   unfold actvNext
-  rw [if_neg (fun h' => hn ⟨h'.1, h'.2.1⟩)]
+  rw [if_neg (fun h' => hn ⟨h'.1, h'.2.1, h'.2.2.2⟩)]
   by_cases hc : e.pst = .cap ∧ l = e.pl ∧ s = e.pslot
   · rw [if_pos hc]
   · rw [if_neg hc, h]
@@ -27,24 +28,24 @@ theorem headFirst_step (P : Program) (win : Engine → Option Lane) (e : Engine)
     (hH : HeadFirst e) (hF : SpareFill e) : HeadFirst (step P win e) := by
   unfold HeadFirst
   intro l hl
-  change actvNext e l (selNext e l) = false at hl
-  show actvNext e l (!selNext e l) = false
-  by_cases hw : e.st = .wb ∧ l = e.cur
-  · -- writeback of `l`: the new spare is the head just invalidated
-    have hs : selNext e l = !e.sel l := by
+  change actvNext P e l (selNext P e l) = false at hl
+  show actvNext P e l (!selNext P e l) = false
+  by_cases hw : e.st = .wb ∧ l = e.cur ∧ P.ret e.now e.cur = true
+  · -- `l` retires: the new spare is the head just invalidated
+    have hs : selNext P e l = !e.sel l := by
       unfold selNext
       rw [if_pos hw]
     rw [hs, Bool.not_not]
     unfold actvNext
-    rw [if_pos ⟨hw.1, hw.2, congrArg e.sel hw.2⟩]
-  · have hs : selNext e l = e.sel l := by
+    rw [if_pos ⟨hw.1, hw.2.1, congrArg e.sel hw.2.1, hw.2.2⟩]
+  · have hs : selNext P e l = e.sel l := by
       unfold selNext
       rw [if_neg hw]
-    have hA : ∀ s, actvNext e l s
+    have hA : ∀ s, actvNext P e l s
         = if e.pst = .cap ∧ l = e.pl ∧ s = e.pslot then true else e.actv l s := by
       intro s
       unfold actvNext
-      rw [if_neg (fun h => hw ⟨h.1, h.2.1⟩)]
+      rw [if_neg (fun h => hw ⟨h.1, h.2.1, h.2.2.2⟩)]
     rw [hs, hA] at hl
     rw [hs, hA]
     by_cases hc : e.pst = .cap ∧ l = e.pl
@@ -65,14 +66,14 @@ theorem headFirst_step (P : Program) (win : Engine → Option Lane) (e : Engine)
       exact hH l hl
 
 /-- SpareFill survives a cycle where the in-flight refill is unchanged. -/
-theorem spare_keep (e : Engine) (h1 : InFlightEmpty e) (h2 : DispHeadValid e)
-    (hF : SpareFill e) (hne : e.pst ≠ .scan) (hsp : e.pslot ≠ selNext e e.pl) :
-    actvNext e e.pl (selNext e e.pl) = true := by
-  by_cases hw : e.st = .wb ∧ e.pl = e.cur
-  · -- the lane writes back mid-refill: the slot being filled would be the old head,
+theorem spare_keep (P : Program) (e : Engine) (h1 : InFlightEmpty e) (h2 : DispHeadValid e)
+    (hF : SpareFill e) (hne : e.pst ≠ .scan) (hsp : e.pslot ≠ selNext P e e.pl) :
+    actvNext P e e.pl (selNext P e e.pl) = true := by
+  by_cases hw : e.st = .wb ∧ e.pl = e.cur ∧ P.ret e.now e.cur = true
+  · -- the lane retires mid-refill: the slot being filled would be the old head,
     -- which is both valid (dispatched) and empty (in flight) — impossible
     exfalso
-    have hsel : selNext e e.pl = !e.sel e.pl := by
+    have hsel : selNext P e e.pl = !e.sel e.pl := by
       unfold selNext
       rw [if_pos hw]
     rw [hsel] at hsp
@@ -82,14 +83,14 @@ theorem spare_keep (e : Engine) (h1 : InFlightEmpty e) (h2 : DispHeadValid e)
     have a := h1 hne
     have b := h2 (by rw [hw.1]; decide)
     unfold Engine.headValid at b
-    rw [← hw.2] at b
+    rw [← hw.2.1] at b
     rw [hps, b] at a
     cases a
-  · have hsel : selNext e e.pl = e.sel e.pl := by
+  · have hsel : selNext P e e.pl = e.sel e.pl := by
       unfold selNext
       rw [if_neg hw]
     rw [hsel] at hsp ⊢
-    exact actvNext_keep_true e e.pl _ hw (hF hne hsp)
+    exact actvNext_keep_true P e e.pl _ hw (hF hne hsp)
 
 theorem spareFill_step (P : Program) (win : Engine → Option Lane) (e : Engine)
     (hS : Struct e) (hF : SpareFill e) : SpareFill (step P win e) := by
@@ -97,8 +98,8 @@ theorem spareFill_step (P : Program) (win : Engine → Option Lane) (e : Engine)
   unfold SpareFill at hF ⊢
   intro hne hsp
   change (portNext P e).pst ≠ .scan at hne
-  change (portNext P e).pslot ≠ selNext e (portNext P e).pl at hsp
-  show actvNext e (portNext P e).pl (selNext e (portNext P e).pl) = true
+  change (portNext P e).pslot ≠ selNext P e (portNext P e).pl at hsp
+  show actvNext P e (portNext P e).pl (selNext P e (portNext P e).pl) = true
   cases hp : e.pst with
   | cap =>
     have : (portNext P e).pst = .scan := by simp [portNext, hp]
@@ -108,51 +109,51 @@ theorem spareFill_step (P : Program) (win : Engine → Option Lane) (e : Engine)
     obtain ⟨hl, hs⟩ := portNext_keeps P e hne'
     rw [hl, hs] at hsp
     rw [hl]
-    exact spare_keep e h1 h2 hF hne' hsp
+    exact spare_keep P e h1 h2 hF hne' hsp
   | wait =>
     have hne' : e.pst ≠ .scan := by rw [hp]; decide
     obtain ⟨hl, hs⟩ := portNext_keeps P e hne'
     rw [hl, hs] at hsp
     rw [hl]
-    exact spare_keep e h1 h2 hF hne' hsp
+    exact spare_keep P e h1 h2 hF hne' hsp
   | scan =>
     cases hb : br1 P e with
     | some w =>
-      -- branch 1 fills the head of a lane that is not writing back
+      -- branch 1 fills the head of a lane that is not retiring
       exfalso
-      have hsp' : e.sel w ≠ selNext e w := by
+      have hsp' : e.sel w ≠ selNext P e w := by
         rw [portNext_br1 P e hp hb] at hsp
         exact hsp
       have hv := (br1_spec P e w hb).2
       unfold Engine.headValid at hv
-      by_cases hw : e.st = .wb ∧ w = e.cur
+      by_cases hw : e.st = .wb ∧ w = e.cur ∧ P.ret e.now e.cur = true
       · have b := h2 (by rw [hw.1]; decide)
         unfold Engine.headValid at b
-        rw [← hw.2, hv] at b
+        rw [← hw.2.1, hv] at b
         cases b
-      · have hsel : selNext e w = e.sel w := by
+      · have hsel : selNext P e w = e.sel w := by
           unfold selNext
           rw [if_neg hw]
         exact hsp' hsel.symm
     | none =>
       by_cases hc : (P.live e.prr && e.wantFetch e.prr) = true
-      · have hsp' : e.fetchSlot e.prr ≠ selNext e e.prr := by
+      · have hsp' : e.fetchSlot e.prr ≠ selNext P e e.prr := by
           rw [portNext_br2 P e hp hb hc] at hsp
           exact hsp
         rw [portNext_br2 P e hp hb hc]
-        show actvNext e e.prr (selNext e e.prr) = true
-        by_cases hw : e.st = .wb ∧ e.prr = e.cur
+        show actvNext P e e.prr (selNext P e e.prr) = true
+        by_cases hw : e.st = .wb ∧ e.prr = e.cur ∧ P.ret e.now e.cur = true
         · exfalso
           have b := h2 (by rw [hw.1]; decide)
           unfold Engine.headValid at b
-          rw [← hw.2] at b
+          rw [← hw.2.1] at b
           have hf : e.fetchSlot e.prr = !e.sel e.prr := by
             simp [Engine.fetchSlot, Engine.headValid, b]
-          have hsel : selNext e e.prr = !e.sel e.prr := by
+          have hsel : selNext P e e.prr = !e.sel e.prr := by
             unfold selNext
             rw [if_pos hw]
           exact hsp' (hf.trans hsel.symm)
-        · have hsel : selNext e e.prr = e.sel e.prr := by
+        · have hsel : selNext P e e.prr = e.sel e.prr := by
             unfold selNext
             rw [if_neg hw]
           rw [hsel] at hsp' ⊢
@@ -162,7 +163,7 @@ theorem spareFill_step (P : Program) (win : Engine → Option Lane) (e : Engine)
               apply hsp'
               simp [Engine.fetchSlot, Engine.headValid, hh]
             · rfl
-          exact actvNext_keep_true e e.prr _ hw hv
+          exact actvNext_keep_true P e e.prr _ hw hv
       · have : (portNext P e).pst = .scan := by simp [portNext_skip P e hp hb hc]
         exact absurd this hne
 
@@ -235,7 +236,7 @@ theorem head_of_owed_le_one (e : Engine) (l : Lane) (hH : HeadFirst e)
 writebacks are at most its hits + 1. -/
 theorem head_valid_of_counts (P : Program) (win : Engine → Option Lane) (y : Lane)
     (n : Nat) (e0 : Engine) (hW : Wf e0) (hfull : ∀ s, e0.actv y s = true)
-    (h : cnt P win (IsWB y) n e0 ≤ cnt P win (Hit y) n e0 + 1) :
+    (h : cnt P win (IsRet P y) n e0 ≤ cnt P win (Hit y) n e0 + 1) :
     (run P win n e0).headValid y = true := by
   have hS : Struct e0 := by
     have hw := hW

@@ -101,26 +101,21 @@ theorem dstar39 (P : Program) (win : Engine → Option Lane) (e0 : Engine)
               have h2 := owed_two_of_head _ w hH hinv
               have hown := owed_run P win w (m + 1) e0 hS
               have h0w := owed_full e0 w (fun s => hfull w s hlive)
-              have hcb := cnt_succ_back P win (IsWB w) m e0
+              have hcb := cnt_succ_back P win (IsRet P w) m e0
               rw [if_pos hwb] at hcb
-              have hJ : 1 ≤ cnt P win (IsWB w) m e0 := by omega
+              have hJ : 1 ≤ cnt P win (IsRet P w) m e0 := by omega
               have hdw := hd w hlive
-              -- the refill owed at the previous writeback is still pending at m + 1
-              -- writeback #(J − 1) of w, at some w' < m: its refill is still pending at m + 1
+              -- retirement #(J − 1) of w, at some w' < m: its refill is still pending at m + 1
               obtain ⟨w', hw'm, hw'k, hw'b⟩ :=
-                cnt_reach P win (IsWB w) m e0 (cnt P win (IsWB w) m e0 - 1) (by omega)
+                cnt_reach P win (IsRet P w) m e0 (cnt P win (IsRet P w) m e0 - 1) (by omega)
               have hpb := pending_bound P win w e0 (P.dly w) 14 0 (m + 1) hW hfull hlive rfl
                 (by omega)
                 (fun t ht hwb' => hRof (m + 1) (fun t ht => (ih t ht).1) w hlive t ht hwb')
                 (fun a k hak hk => hBof (m + 1) (fun t ht => (ih t ht).2) w a k hak hk)
-                (cnt P win (IsWB w) m e0 - 1) (m + 1) w' (Nat.le_refl _) (by omega) hw'k hw'b
+                (cnt P win (IsRet P w) m e0 - 1) (m + 1) w' (Nat.le_refl _) (by omega) hw'k hw'b
                 (by omega)
-              -- ... yet w was ready at m, one full writeback after w': at least d later
-              have hsp := ts_spacing P win w e0 w' (m - w')
-              have hmw : w' + (m - w') = m := by omega
-              rw [hmw, hw'k] at hsp
-              have h1 : cnt P win (IsWB w) m e0 - (cnt P win (IsWB w) m e0 - 1) = 1 := by omega
-              rw [h1, Nat.mul_one] at hsp
+              -- ... yet w was ready at m, and w' was a writeback: at least d later
+              have hsp := ts_ge_after_wb P win w e0 w' m hw'm (isWB_of_ret P w _ hw'b)
               have hnow := now_run P win m e0
               omega
   intro T
