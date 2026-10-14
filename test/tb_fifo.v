@@ -106,7 +106,30 @@ module tb_fifo ();
   reg  [7:0] o_acc = 8'h00;
   integer    o_k, o_bad, o_first;
 
+  // ⭐⭐ THE CLOSED-LOOP WALK'S MEASUREMENTS (Wilson: deterministic, and the
+  // corner COUNTED). Kept in THIS block with the order capture so nothing
+  // reads another block's same-edge write (ruling RA3); the stimulus reads
+  // them only on negedges. `m_land` is where the low nibble LANDED (`nib_lo`
+  // on queue 0, taken or dropped); `m_pop` logs every queue-0 pop; `m_corner`
+  // counts EVERY same-cycle push+pop on queue 0, not just the first.
+  localparam integer PMAX = 4096;
+  integer    m_cyc = 0, m_land = -1, m_npop = 0, m_corner = 0;
+  integer    m_pop [0:PMAX-1];
+  // the walk: targets OFF_LO..OFF_HI (0 = the corner), ATT_MAX tries each
+  localparam integer OFF_LO = -3, OFF_HI = 3, ATT_MAX = 8;
+  integer    w_ph, w_t, w_a, w_i, w_r, w_got = 0, w_miss = 0, w_done = 0;
+  integer    w_hist [0:(OFF_HI - OFF_LO + 16)];
+  initial for (w_i = 0; w_i <= OFF_HI - OFF_LO + 16; w_i = w_i + 1) w_hist[w_i] = 0;
+
   always @(posedge clk) if (rst_n) begin
+    m_cyc = m_cyc + 1;
+    if (dut.nib_lo === 1'b1 && dut.tx_tag == 2'd0) m_land = m_cyc;
+    if (dut.do_popq[0] === 1'b1 && m_npop < PMAX) begin
+      m_pop[m_npop] = m_cyc;
+      m_npop = m_npop + 1;
+    end
+    if (dut.do_push === 1'b1 && dut.tx_tag == 2'd0 && dut.do_popq[0] === 1'b1)
+      m_corner = m_corner + 1;
     if (dut.do_push === 1'b1 && dut.tx_tag == 2'd0 && npushed < OMAX) begin
       pushed[npushed] = cur_byte;
       npushed = npushed + 1;
@@ -243,32 +266,65 @@ module tb_fifo ();
     // Two bytes fill the TXD = 2 queue; each step then pushes one per pop.
     push_byte;
     push_byte;
-    for (phase = 0; phase < 400 && hits < 2; phase = phase + 1) begin
-      // ⛔ TOP THE QUEUE UP BEFORE EVERY ANCHOR. When the landing point walks
-      // past a pop, that pop falls inside the previous step's push and is not
-      // seen as an anchor -- two pops for one push -- and the 2-deep queue
-      // drains to empty just as the walk reaches the coincidence (MEASURED:
-      // phase 98 landed one cycle before a pop, then the queue emptied). A full
-      // queue at the coincidence is also the harder case: the push is accepted
-      // ONLY because the pop frees a slot in the same cycle.
-      while (dut.tx_cnt[0] < 2) push_byte;
-      @(posedge clk);
-      while (!dut.do_popq[0]) @(posedge clk);
-      @(negedge clk);
-      repeat (phase) @(negedge clk);
-      push_byte;
+    // ⛔⛔ CLOSED LOOP, NOT OPEN (Wilson). The open walk advanced `phase` by one
+    // per byte and hoped the landing crossed the next pop; but the pop PERIOD
+    // jitters by +-1 cycle (EDF arbitration: 107/108/109 on tx_image), so the
+    // realised offset jumped -1 -> +1 and skipped 0 -- MEASURED under (b4),
+    // 400 phases, never the corner. Now each attempt MEASURES its realised
+    // offset r = (low-nibble landing) - (the first pop after the anchor) and
+    // steers `phase` by (target - r). Targets sweep OFF_LO..OFF_HI around 0,
+    // each until realised or ATT_MAX attempts; a bounded jitter cannot skip
+    // a target the loop corrects toward. The realised histogram is printed.
+    w_ph = 90;                                   // a first guess; r corrects it
+    for (w_t = OFF_LO; w_t <= OFF_HI; w_t = w_t + 1) begin
+      for (w_a = 0; w_a < ATT_MAX && !w_got; w_a = w_a + 1) begin
+        // ⛔ TOP THE QUEUE UP BEFORE EVERY ANCHOR. A full queue at the
+        // coincidence is also the harder case: the push is accepted ONLY
+        // because the pop frees a slot in the same cycle.
+        while (dut.tx_cnt[0] < 2) push_byte;
+        @(negedge clk);
+        w_i = m_npop;                            // the anchor = the next pop
+        while (m_npop <= w_i) @(negedge clk);
+        @(negedge clk);
+        phase = w_ph;
+        repeat (w_ph) @(negedge clk);
+        push_byte;
+        while (m_npop <= w_i + 1) @(negedge clk);  // the first pop after it
+        w_r = m_land - m_pop[w_i + 1];
+        if (w_r >= OFF_LO - 8 && w_r <= OFF_HI + 8)
+          w_hist[w_r - OFF_LO + 8] = w_hist[w_r - OFF_LO + 8] + 1;
+        if (w_r == w_t) w_got = 1;
+        else begin
+          w_ph = w_ph + (w_t - w_r);
+          if (w_ph < 0) w_ph = 0;
+        end
+      end
+      if (!w_got) w_miss = w_miss + 1;
+      w_got = 0;
     end
+    w_done = 1;
   end
 
   initial begin
     wait (loaded);
     repeat (ncyc) @(negedge clk);
     $display();
-    if (hits < 2) begin
+    $write("  walk: realised offset histogram (push landing - next pop):");
+    for (w_i = 0; w_i <= OFF_HI - OFF_LO + 16; w_i = w_i + 1)
+      if (w_hist[w_i] != 0) $write(" %0d:%0d", w_i + OFF_LO - 8, w_hist[w_i]);
+    $display("");
+    $display("  same-cycle push+pop on queue 0 (the corner): %0d time(s)", m_corner);
+    if (!w_done)
+      fail("the closed-loop walk did not finish its targets within the run");
+    else if (w_miss != 0) begin
+      $display("    %0d target offset(s) in [%0d, %0d] never realised in %0d tries",
+               w_miss, OFF_LO, OFF_HI, ATT_MAX);
+      fail("the walk did not realise every target offset -- not by construction");
+    end
+    if (m_corner == 0 || hits < 2) begin
       $display("  FAIL tb_fifo: the same-cycle push+pop corner was NEVER");
-      $display("      reached in %0d cycles over %0d phases -- a bench that", ncyc, phase);
-      $display("      swept every phase and never saw the corner has not");
-      $display("      tested it, so this is a FAILURE and not a pass.");
+      $display("      reached in %0d cycles -- a corner that was never", ncyc);
+      $display("      exercised is not a pass (Wilson), so this is a FAILURE.");
       fails = fails + 1;
     end else begin
       $display("  the corner occurred at cycle %0d, phase %0d", hit_cycle,
