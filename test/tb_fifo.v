@@ -88,6 +88,40 @@ module tb_fifo ();
   integer cnt_before, cnt_after, wp_before, wp_after, rp_before, rp_after;
   integer hit_cycle, hit_phase;
 
+  // ⭐⭐ THE ORDER CLAIM, MADE FALSIFIABLE (Wilson). This bench pushed `A5`
+  // every time, so no value check could see an ordering defect -- the old
+  // check 3 was vacuous for that reason, and a planted "head read from the
+  // newer slot" passed. Now the bench pushes DISTINCT ALTERNATING bytes
+  // (A5, 3C, ...), records the BENCH'S OWN byte at every ACCEPTED push on
+  // queue 0 (`do_push` says only whether it was taken, never what), and
+  // rebuilds lane 0's emitted bytes from the bit the engine drives
+  // (`tx_bit`, LSB first, as tb_tx). Underrun bytes are 00, which neither
+  // pushed byte is, so dropping them leaves exactly the bytes that were fed:
+  // they must be the pushed sequence, in order.
+  localparam integer OMAX = 1024;
+  reg  [7:0] cur_byte = 8'h00, b_alt = 8'h00;
+  reg  [7:0] pushed [0:OMAX-1];
+  reg  [7:0] emit   [0:OMAX-1];
+  integer    npushed = 0, nemit = 0, nunder = 0, o_nbit = 0;
+  reg  [7:0] o_acc = 8'h00;
+  integer    o_k, o_bad, o_first;
+
+  always @(posedge clk) if (rst_n) begin
+    if (dut.do_push === 1'b1 && dut.tx_tag == 2'd0 && npushed < OMAX) begin
+      pushed[npushed] = cur_byte;
+      npushed = npushed + 1;
+    end
+    if (dut.u_eng.st == 1 && dut.u_eng.a_op == 3'd1 && dut.u_eng.cur == 0) begin
+      o_acc  = {dut.u_eng.tx_bit, o_acc[7:1]};
+      o_nbit = o_nbit + 1;
+      if (o_nbit == 8) begin
+        if (o_acc == 8'h00) nunder = nunder + 1;
+        else if (nemit < OMAX) begin emit[nemit] = o_acc; nemit = nemit + 1; end
+        o_nbit = 0;
+      end
+    end
+  end
+
   task fail(input [8*72-1:0] why);
     begin
       fails = fails + 1;
@@ -109,6 +143,16 @@ module tb_fifo ();
       repeat (hold) @(negedge clk);
       ui_in[PIN_WR] = 1'b0;
       @(negedge clk);
+    end
+  endtask
+
+  // one whole byte on queue 0, ALTERNATING A5 / 3C (distinct, both non-zero)
+  task push_byte;
+    begin
+      b_alt    = (b_alt == 8'hA5) ? 8'h3C : 8'hA5;
+      cur_byte = b_alt;
+      push_nib(b_alt[7:4], 2'd0, 3);
+      push_nib(b_alt[3:0], 2'd0, 3);
     end
   endtask
 
@@ -197,10 +241,8 @@ module tb_fifo ();
     // valid), so with an empty
     // queue there is no pop to anchor to and the walk would wait forever.
     // Two bytes fill the TXD = 2 queue; each step then pushes one per pop.
-    push_nib(4'hA, 2'd0, 3);
-    push_nib(4'h5, 2'd0, 3);
-    push_nib(4'hA, 2'd0, 3);
-    push_nib(4'h5, 2'd0, 3);
+    push_byte;
+    push_byte;
     for (phase = 0; phase < 400 && hits < 2; phase = phase + 1) begin
       // ⛔ TOP THE QUEUE UP BEFORE EVERY ANCHOR. When the landing point walks
       // past a pop, that pop falls inside the previous step's push and is not
@@ -209,16 +251,12 @@ module tb_fifo ();
       // phase 98 landed one cycle before a pop, then the queue emptied). A full
       // queue at the coincidence is also the harder case: the push is accepted
       // ONLY because the pop frees a slot in the same cycle.
-      while (dut.tx_cnt[0] < 2) begin
-        push_nib(4'hA, 2'd0, 3);
-        push_nib(4'h5, 2'd0, 3);
-      end
+      while (dut.tx_cnt[0] < 2) push_byte;
       @(posedge clk);
       while (!dut.do_popq[0]) @(posedge clk);
       @(negedge clk);
       repeat (phase) @(negedge clk);
-      push_nib(4'hA, 2'd0, 3);
-      push_nib(4'h5, 2'd0, 3);
+      push_byte;
     end
   end
 
@@ -252,6 +290,25 @@ module tb_fifo ();
       $display("    both pointers flipped, count held at %0d (order: the read pointer advanced past the older byte)",
                cnt_before);
     end
+    // 3. ORDER ON THE WIRE (Wilson): the fed bytes lane 0 emitted are the
+    // pushed bytes, in push order. A minimum count, so it cannot pass on
+    // nothing: a check over zero bytes is the vacuous check it replaces.
+    o_bad = 0; o_first = -1;
+    for (o_k = 0; o_k < nemit; o_k = o_k + 1)
+      if (o_k >= npushed || emit[o_k] !== pushed[o_k]) begin
+        o_bad = o_bad + 1;
+        if (o_first < 0) o_first = o_k;
+      end
+    $display("    order: %0d fed byte(s) emitted, %0d pushed, %0d underrun byte(s)",
+             nemit, npushed, nunder);
+    if (nemit < 20)
+      fail("ORDER: fewer than 20 fed bytes emitted -- the order check is vacuous");
+    else if (o_bad != 0) begin
+      $display("    ORDER: emitted byte %0d is %02h, pushed byte %0d was %02h",
+               o_first, emit[o_first], o_first, pushed[o_first]);
+      fail("ORDER: lane 0 emitted the pushed bytes out of order");
+    end else
+      $display("    ok -- every fed byte left in push order (A5/3C alternating)");
     $display();
     if (fails == 0) $display("  tb_fifo: PASS");
     else            $display("  tb_fifo: *** FAILED %0d check(s)", fails);

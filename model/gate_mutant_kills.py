@@ -175,6 +175,12 @@ SCRATCH = {
     # ruling CI5: the clocked SHIFT drives the header pin; V2 on the action
     # pin must catch it (a header-pin checker would not); CI
     "S_TX_HEADER_PIN": "test/run_cktx.py",
+    # Wilson (WF2 #8 follow-up): the queue head read from the NEWER slot --
+    # tb_tx's per-byte order check kills it (CI, run_mutants)
+    "S_HEAD_NEWER": "test/run_mutants.py",
+    # Wilson: two queues' heads swapped -- tb_tx's cross-queue diagnosis
+    # (distinct per-queue data); also V2 pins-only red in run_cktx
+    "S_QUEUE_SWAP": "test/run_mutants.py",
 }
 
 

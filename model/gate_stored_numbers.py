@@ -622,6 +622,15 @@ SPEC_SYMBOLS = {
     # same grounds.
     ("test/run_mutants.py", "TX_MUTANTS"),
     ("test/run_mutants.py", "HALF_MUTANTS"),
+    # the queue-head SCRATCH mutants (Wilson): the same inventory shape --
+    # a name, what it breaks, the failure text that certifies the kill. Its
+    # numbers are the byte values named in that text.
+    ("test/run_mutants.py", "TX_SCRATCH"),
+    # ...and their one-line PATCHES: Verilog source text (landmark -> mutant
+    # line, one per TX variant). Its numbers are literals like `2'd1` and
+    # `8*gq` inside RTL lines, matched against src/ at run time -- a patch
+    # that no longer applies is red there, not here.
+    ("test/scratch_heads.py", "PATCHES"),
     # ⭐ A SWEEP'S POINTS ARE AN EXPERIMENT'S DESIGN, not its result. The
     # points straddle the derived payload slot and are CONSECUTIVE INTEGERS
     # around it, for the reason ruling 3 gives: this project has three cases

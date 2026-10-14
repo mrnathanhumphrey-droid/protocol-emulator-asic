@@ -219,6 +219,11 @@ module tb_smoke;
     // end read the same both ways.
     // 0x5B/0x01/0x7A/0xC7 reverse to DA/80/5E/E3 -- all different, and 0x01
     // is the asymmetric extreme the ruling asks for.
+    // ⛔ NO QUEUE-ATTRIBUTION CLAIM (Wilson). Every queue carries the SAME
+    // pattern, so a lane sending another queue's byte cannot be seen here --
+    // this bench's job is scheduling and smoke coverage. Attribution is held
+    // where the per-queue data is DISTINCT: S_QUEUE_SWAP is killed by tb_tx
+    // (run_mutants) and by V2 pins-only on run_cktx's two-queue `fed` arm.
     hf_set(0, 8'h5B, 8'h01, 8'h7A, 8'hC7);
     hf_set(1, 8'h5B, 8'h01, 8'h7A, 8'hC7);
     hf_set(2, 8'h5B, 8'h01, 8'h7A, 8'hC7);

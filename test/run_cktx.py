@@ -34,6 +34,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 from toolchain import banner, tool, scratch_sub  # noqa: E402  ruling V
+import scratch_heads                              # noqa: E402
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")
@@ -286,6 +287,16 @@ def main() -> int:
     print("  --- MUST-FIRE: the pre-#8 silicon (%s) on fed ---" % PRE8)
     t = run(build([], "pre8", srcdir=pre8_srcdir()), img, 60000, 0, 0)
     say("*** FAIL clocked_conform[V1]" in t, "V1 red on the real pre-#8 RTL")
+
+    # ⛔ ATTRIBUTION, PINS ONLY (Wilson): two queues' heads swapped must be
+    # caught by V2 from the pins -- `fed` drives two lanes on queues 0 and 1
+    # with DISTINCT non-palindromic bytes, so a swap cannot hide. The patch
+    # is test/scratch_heads.py's, applied to the CURRENT src/ (declared and
+    # registered in test/run_mutants.py, whose tb_tx arm is the killer).
+    print("  --- MUST-FIRE: S_QUEUE_SWAP (queues 0<->1 heads swapped) on fed ---")
+    t = run(build([], "qswap", srcdir=scratch_heads.patched_srcdir(
+        "S_QUEUE_SWAP", SCRATCH)), img, 60000, 0, 0)
+    say("*** FAIL clocked_conform[V2]" in t, "V2 red from the pins alone")
 
     # ---- PN4: every pin-taking opcode with action pin != header pin -------
     print("  --- pindiv: action pin != header pin, every pin-taking opcode ---")

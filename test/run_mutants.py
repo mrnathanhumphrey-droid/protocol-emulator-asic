@@ -342,6 +342,28 @@ DEFAULT_IMG = "test/smoke_image.hex"
 # with different content. The generator owns them.
 from make_smoke_image import FIVE_STRESS as STRESS_FIVE   # noqa: E402
 from toolchain import banner, tool          # noqa: E402  ruling V
+import scratch_heads                        # noqa: E402
+
+# ⭐ SCRATCH MUTANTS (gate_mutant_kills SCRATCH): one-line patches applied at
+# run time to the CURRENT src/ (test/scratch_heads.py), so the frozen RTL
+# (CE5) carries no ifdef for them; a patch that no longer applies is RED.
+SCRATCH_MUTANTS = {
+    "S_HEAD_NEWER": "the engine reads a queue's NEWER slot (`~tx_rp`) "
+                    "instead of its head -- bytes leave out of order",
+    "S_QUEUE_SWAP": "queues 0<->1 have their heads swapped -- a lane pops "
+                    "its own queue but sends the other queue's byte",
+}
+# (mutant, what it breaks, the text that certifies the kill)
+# ⛔ S_HEAD_NEWER is certified by the ORDER check (MUST-FIRE 2's per-byte
+# compare), not MUST-FIRE 1, whose label for a wrong first byte reads "not
+# byte-aligned"; S_QUEUE_SWAP by the CROSS-QUEUE diagnosis, the attribution
+# claim tb_tx exists to make (distinct per-queue data -- Wilson)
+TX_SCRATCH = [
+    ("S_HEAD_NEWER", "the head read from the newer slot",
+     "lane 0 byte 1: got 7c want 4e"),
+    ("S_QUEUE_SWAP", "queues 0<->1 heads swapped",
+     "lane 0 emitted a QUEUE 1 byte -- the queue tag was ignored"),
+]
 STRESS_IMG = "test/five_image.hex"
 
 # mode "assert": a named bench assertion must fire.
@@ -713,6 +735,30 @@ def main() -> int:
                     elif not right:
                         print("        *** died, but not of `%s` ***" % want)
                         wrong_reason.append((define, "wrong reason"))
+                # ⭐ THE QUEUE-HEAD SCRATCH MUTANTS (Wilson): each a copy of
+                # the CURRENT src/ plus one patch -- the frozen src/ untouched
+                for name, breaks, want in TX_SCRATCH:
+                    v = os.path.join(SCRATCH, "mut_t_%s.vvp" % name.lower())
+                    d = scratch_heads.patched_srcdir(name, SCRATCH)
+                    rc, log = build([], v, src=[SRC_TX[0]] + [
+                        os.path.join(d, f) for f in
+                        ("pe_engine.v", "pe_store.v", "project.v")])
+                    if rc != 0:
+                        print("    %-19s BUILD FAIL -- not a kill" % name)
+                        wrong_reason.append((name, "build"))
+                        continue
+                    o = run(v, img=TX_IMG, extra=extra)
+                    killed = "tb_tx: PASS" not in o
+                    right = want in o
+                    RAN.append(name)
+                    print("    %-19s %-40s %s"
+                          % (name, breaks[:40],
+                             "RED" if killed else "*** SURVIVED ***"))
+                    if not killed:
+                        survivors.append(name)
+                    elif not right:
+                        print("        *** died, but not of `%s` ***" % want)
+                        wrong_reason.append((name, "wrong reason"))
 
     # ---- the OUT-OF-RANGE SAMPLE mutant, on tb_pinrange -------------
     # ⛔ ITS BASELINE IS THE GUARD HOLDING, so a kill is readable: the
