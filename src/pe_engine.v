@@ -198,12 +198,12 @@
 
 // ---- the keep-list: POWER-ON ONLY (status the host reads after halting) --
 `define PE_RST_KEEP \
-      sticky_ovr      <= 1'b0; \
-      config_err      <= 1'b0; \
-      clk_stretch_err <= 1'b0; \
-      lane_underrun   <= {N_LANES{1'b0}}; \
-      lane_overflow   <= {N_LANES{1'b0}}; \
-      for (i = 0; i < N_LANES; i = i + 1) l_timeout[i] <= 1'b0;
+      sticky_ovr_m      <= 1'b0; \
+      config_err_m      <= 1'b0; \
+      clk_stretch_err_m <= 1'b0; \
+      lane_underrun_m   <= {N_LANES{1'b0}}; \
+      lane_overflow_m   <= {N_LANES{1'b0}}; \
+      for (i = 0; i < N_LANES; i = i + 1) l_timeout_m[i] <= 1'b0;
 
 // ---- the other blocks, one macro each -------------------------------------
 `define PE_RST_NOW    now <= {TS_W{1'b0}};
@@ -372,7 +372,13 @@ module pe_engine #(
     parameter integer SPL     = 2
 ) (
     input  wire                 clk,
+    // ⭐ CANARY (reset-network halt, Wilson): `rst_n` is now POWER-ON OR HALT
+    // -- a single flop's Q in the top (async-cleared by the synchronised
+    // power-on reset, set/cleared synchronously from the run condition), so
+    // no gate sits on the reset net. `por_n` is power-on ONLY: it resets the
+    // keep-list twins, the status that must survive a halt.
     input  wire                 rst_n,
+    input  wire                 por_n,
     input  wire                 run,          // 1 = executing, 0 = load/halt
 
     // program store, shared with the loader
@@ -431,9 +437,9 @@ module pe_engine #(
     // ⭐ WHICH QUEUE the consuming action names. The lane index is exported
     // only for diagnostics now; the ROUTING is by queue.
     output wire [1:0]           host_q,
-    output reg  [N_LANES-1:0]   lane_underrun,
-    output reg  [N_LANES-1:0]   lane_overflow,
-    output reg                  sticky_ovr,
+    output wire [N_LANES-1:0]   lane_underrun,
+    output wire [N_LANES-1:0]   lane_overflow,
+    output wire                 sticky_ovr,
     output reg                  cfg_err,
     // ⭐ ITS OWN STATUS BIT rather than folding into `cfg_err`: a config error
     // means THE PROGRAM is wrong and the lane is halted; this means THE PEER
@@ -639,13 +645,13 @@ module pe_engine #(
   // and move measured timing. At the D input the pin stays a flop Q and the
   // mask costs nothing.
   reg [N_PINS-1:0] pin_pp;                  // 1 = this pin may drive a 1
-  reg              config_err;              // sticky: 1.6s violation
+  reg              config_err_m;            // sticky: 1.6s violation (see twins)
   // sticky: a clocked SHIFTIN consume point found no captured bit -- the peer
   // held the clock past this lane's next dispatch. ⛔ IT IS NOT A PROGRAM
   // ERROR: a slow peer is legal. It says the bit REPORTED WAS NOT SAMPLED,
   // which for an ACK is the difference between "acknowledged" and "never
   // answered" -- and the substituted 0 reads as the former.
-  reg              clk_stretch_err;
+  reg              clk_stretch_err_m;
   // ⛔⛔⛔ TX AND RX HAVE SEPARATE STATE, AND THEY USED TO SHARE IT. Ruling 1
   // after `beb8862`, and the defect it fixes is the one T5.1's host-channel
   // audit uncovered: on a lane that mixes `OP_SHIFT` (transmit) with
@@ -952,7 +958,40 @@ module pe_engine #(
                                             // program" for a 15-flop saving.
   reg             l_armedge[0:N_LANES-1];   // 1 = rise, 0 = fall
   reg             l_notmo  [0:N_LANES-1];   // "no timeout": wait indefinitely
-  reg             l_timeout[0:N_LANES-1];   // STICKY: the peer went silent
+  reg             l_timeout_m[0:N_LANES-1]; // STICKY: the peer went silent
+
+  // ⭐⭐ CANARY (reset-network halt): THE KEEP-LIST TWINS. The `_m` flags live
+  // in the main block, whose reset is now power-on OR halt; each has a twin
+  // here, reset at POWER-ON ONLY, that latches `twin | flag` every cycle.
+  // Every reader sees `twin | flag` under the flag's old name, so a halt can
+  // never erase status: a flag set before the halt is in its twin by the
+  // edge the halt reset asserts on (that reset is itself a flop's Q, so the
+  // twin samples the pre-reset value on that edge).
+  reg             config_err_k, clk_stretch_err_k, sticky_ovr_k;
+  reg [N_LANES-1:0] lane_underrun_k, lane_overflow_k, l_timeout_k;
+  reg               sticky_ovr_m;
+  reg [N_LANES-1:0] lane_underrun_m, lane_overflow_m;
+  wire config_err      = config_err_k | config_err_m;
+  wire clk_stretch_err = clk_stretch_err_k | clk_stretch_err_m;
+  assign sticky_ovr    = sticky_ovr_k | sticky_ovr_m;
+  assign lane_underrun = lane_underrun_k | lane_underrun_m;
+  assign lane_overflow = lane_overflow_k | lane_overflow_m;
+  integer kt;
+  always @(posedge clk or negedge por_n) begin
+    if (!por_n) begin
+      config_err_k <= 1'b0; clk_stretch_err_k <= 1'b0; sticky_ovr_k <= 1'b0;
+      lane_underrun_k <= {N_LANES{1'b0}}; lane_overflow_k <= {N_LANES{1'b0}};
+      l_timeout_k <= {N_LANES{1'b0}};
+    end else begin
+      config_err_k      <= config_err_k | config_err_m;
+      clk_stretch_err_k <= clk_stretch_err_k | clk_stretch_err_m;
+      sticky_ovr_k      <= sticky_ovr_k | sticky_ovr_m;
+      lane_underrun_k   <= lane_underrun_k | lane_underrun_m;
+      lane_overflow_k   <= lane_overflow_k | lane_overflow_m;
+      for (kt = 0; kt < N_LANES; kt = kt + 1)
+        l_timeout_k[kt] <= l_timeout_k[kt] | l_timeout_m[kt];
+    end
+  end
 
   localparam integer NSLOT = SPL * N_LANES;
   // index width for a slot number 0..NSLOT-1
@@ -1033,8 +1072,7 @@ module pe_engine #(
   reg [JW-1:0] jitter_cnt, jitter_max;
 
   always @(posedge clk or negedge rst_n) begin
-    if (!rst_n)      `PE_RST_NOW
-    else if (!run)   `PE_RST_NOW         // #11: halt == reset
+    if (!rst_n)      `PE_RST_NOW         // CANARY: rst_n IS the halt now
     // ⭐⭐ `now` DOES NOT ADVANCE UNTIL PRIMED, and that is the half of
     // prime-before-release that actually removes the cold start. Gating only
     // DISPATCH would relocate the problem, not remove it: `now` would run on
@@ -1937,9 +1975,7 @@ module pe_engine #(
       // `now`, every `l_timestamp` and every `l_d` reset to 0. The release
       // term `rel_q` lives in the lane block (TF2-R3), beside the writes of
       // `l_live` / `l_armed` / `l_notmo` it needs the next values of.
-      `PE_RST_SCHED
-    end else if (!run) begin
-      `PE_RST_SCHED                     // #11: halt == reset
+      `PE_RST_SCHED                     // CANARY: rst_n IS the halt now
     end else begin
       for (ti = 0; ti < N_LANES; ti = ti + 1) begin
 `ifdef M_TF1_LATE
@@ -2123,8 +2159,7 @@ module pe_engine #(
   reg prime_unp;
   integer pi;
   always @(posedge clk or negedge rst_n) begin
-    if (!rst_n)      `PE_RST_PRIMED
-    else if (!run)   `PE_RST_PRIMED      // HALT re-primes on the next run
+    if (!rst_n)      `PE_RST_PRIMED      // CANARY: rst_n IS the halt now
     else if (!primed_q) begin
       prime_unp = 1'b0;
       for (pi = 0; pi < N_LANES; pi = pi + 1)
@@ -2150,9 +2185,7 @@ module pe_engine #(
     // design that CANNOT BE BUILT. ⇒ A simulation bench cannot see multi-driver;
     // only synthesis can. That is why CI is a gate and not a formality.
     if (!rst_n) begin
-      `PE_RST_PORT
-    end else if (!run) begin
-      `PE_RST_PORT                      // #11: halt == reset
+      `PE_RST_PORT                      // CANARY: rst_n IS the halt now
     end else begin
       s_re <= 1'b0;
       if (hst == H_REQ) begin
@@ -2187,16 +2220,12 @@ module pe_engine #(
     if (!rst_n) begin
       // ⛔⛔ ONE LIST FOR RESET AND HALT: the macros at the top of this
       // file (#11).
+      // ⭐ CANARY (reset-network halt): this branch IS the halt now -- rst_n
+      // is power-on OR halt, so "halt state = reset state" is literal. The
+      // keep-list `_m` flags clear here too; their twins (power-on only)
+      // hold the status across the halt.
       `PE_RST_MAIN
       `PE_RST_KEEP
-    end else if (!run) begin
-      // HALT, RELOAD, RESUME -- never a mid-transaction swap. THE HALT STATE
-      // EQUALS THE RESET STATE minus the keep-list (Wilson, #10/#11): the
-      // same macro as the power-on branch, so the two cannot drift. (The F2
-      // face-3 note on `pin_oe` -- release behind the flop, one cycle of
-      // latency -- is carried with the list at the top of this file.)
-      `PE_RST_MAIN
-      `PE_HALT_MUTANTS
     end else begin
       rx_push <= 1'b0;
         host_pop <= 1'b0;   // one-cycle pulse; the consume site re-asserts
@@ -2262,9 +2291,9 @@ module pe_engine #(
                     // exactly the asymmetry D2 was.
                     if (hsh_n[HDR_BYTES*8-1-2*PINW] == 1'b0) begin
                       if (hsh_n[HDR_BYTES*8-1 -: PINW] >= N_UIO[PINW-1:0])
-                        config_err <= 1'b1;
+                        config_err_m <= 1'b1;
                       if (hsh_n[HDR_BYTES*8-1-PINW -: PINW] >= N_UIO[PINW-1:0])
-                        config_err <= 1'b1;
+                        config_err_m <= 1'b1;
                     end
                     // ⭐ RULING 1.5: the per-PIN drive class, derived here from
                     // the lane that owns the pin. Both the data pin and the
@@ -2426,8 +2455,8 @@ module pe_engine #(
                    if (w_armed) begin
                      live_n[winner]    = 1'b0;       // HALT this lane
                      armed_n[winner]   = 1'b0;
-                     l_timeout[winner] <= 1'b1;      // STICKY -- status stream
-                     sticky_ovr        <= 1'b1;
+                     l_timeout_m[winner] <= 1'b1;    // STICKY -- status stream
+                     sticky_ovr_m        <= 1'b1;
                    end else
 `endif
                    // ⭐ dispatch reads the HEAD slot. With the spare already
@@ -2525,8 +2554,8 @@ module pe_engine #(
             OP_SHIFT: if (pin_real && !ck_refuse) begin
 `ifndef M_SHIFT_CLK_ALIAS
               if (ck_pin == a_pin) begin
-                config_err   <= 1'b1;
-                sticky_ovr   <= 1'b1;
+                config_err_m <= 1'b1;
+                sticky_ovr_m <= 1'b1;
                 live_n[cur]  = 1'b0;
               end else begin
 `endif
@@ -2904,8 +2933,8 @@ module pe_engine #(
           // not redundant: it is what makes the halt survive a host that
           // clears the sticky without reloading the program.
           if (ck_refuse) begin
-            config_err  <= 1'b1;
-            sticky_ovr  <= 1'b1;
+            config_err_m <= 1'b1;
+            sticky_ovr_m <= 1'b1;
             live_n[cur] = 1'b0;         // HALT: the action has no meaning
           end
           if (ck_act) begin
@@ -2984,7 +3013,7 @@ module pe_engine #(
                   host_pop  <= 1'b1;        // consumed: advance the host FIFO
                 end else begin
                   l_tx[cur] <= 8'h00;
-                  lane_underrun[cur] <= 1'b1;
+                  lane_underrun_m[cur] <= 1'b1;
                 end
                 l_txv[cur] <= 1'b1;
               end
@@ -3004,8 +3033,8 @@ module pe_engine #(
             // which is why this needs a status bit and not a comment.
             OP_SHIFTIN: if (!ck_shiftin || ck_consume) begin
               if (ck_consume & ~l_ckgot[cur]) begin
-                clk_stretch_err <= 1'b1;
-                sticky_ovr      <= 1'b1;
+                clk_stretch_err_m <= 1'b1;
+                sticky_ovr_m    <= 1'b1;
               end
               if (ck_consume) l_ckgot[cur] <= 1'b0;
               // RX ONLY. Neither `l_tx` nor `tx_bitp` is named here, which
@@ -3229,7 +3258,7 @@ module pe_engine #(
             if (host_valid) begin
               l_tx[cur] <= host_ord;
               host_pop  <= 1'b1;
-            end else lane_underrun[cur] <= 1'b1;
+            end else lane_underrun_m[cur] <= 1'b1;
 `else
             l_txv[cur] <= 1'b0;
 `endif
@@ -3303,7 +3332,7 @@ module pe_engine #(
       //      arrived, i.e. the queue-depth-one assumption (1.6a) was violated.
       for (i = 0; i < N_LANES; i = i + 1) begin
         if (l_live[i] && ready[i] && busy && (i[LW-1:0] != cur))
-          sticky_ovr <= sticky_ovr;             // observed, not an error here
+          sticky_ovr_m <= sticky_ovr_m;         // observed, not an error here
       end
 
       // ---- ⭐⭐ EDGE CAPTURE AND REBASE (Ruling 1) ---------------------
@@ -3361,8 +3390,8 @@ module pe_engine #(
             armed_n[i]      = 1'b0;
             l_ckpark[i]     <= 1'b0;
             l_ckwait[i]     <= 1'b0;
-            clk_stretch_err <= 1'b1;        // STICKY -- status bit 7
-            sticky_ovr      <= 1'b1;
+            clk_stretch_err_m <= 1'b1;        // STICKY -- status bit 7
+            sticky_ovr_m    <= 1'b1;
           end else if (ck_tick) begin
             l_ckwdog[i] <= l_ckwdog[i] + 7'd1;
           end

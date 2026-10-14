@@ -333,6 +333,18 @@ module tt_um_protocol_emulator #(
 `else
   wire eng_run = run & store_full;
 `endif
+  // ⭐⭐ CANARY (reset-network halt, Wilson): THE ENGINE'S RESET IS ONE FLOP.
+  // Async-cleared by the synchronised power-on reset; otherwise it follows
+  // `eng_run` on the clock, so a halt (PROG high, or a store not yet full)
+  // ASSERTS it synchronously and a run DEASSERTS it synchronously. A flop's
+  // Q drives the reset net: no gate, so no glitch, and STA times its
+  // recovery/removal like any reset. ⚠ It is one cycle behind `eng_run` in
+  // both directions -- the engine starts one cycle later than the
+  // synchronous-halt design did (cycle digests would move; timing-canary only).
+  reg eng_rst_n;
+  always @(posedge clk or negedge rst_n_s)
+    if (!rst_n_s) eng_rst_n <= 1'b0;
+    else          eng_rst_n <= eng_run;
   wire cfg_err_any;          // the engine's CONFIG_ERR, or a short load
 
   // =====================================================================
@@ -574,7 +586,7 @@ module tt_um_protocol_emulator #(
       // ends rather than only at its floor.
       .SDA_HOLD_NS(SDA_HOLD_NS)
   ) u_eng (
-      .clk(clk), .rst_n(rst_n_s), .run(eng_run),
+      .clk(clk), .rst_n(eng_rst_n), .por_n(rst_n_s), .run(eng_run),
       .s_raddr(e_raddr), .s_re(e_re), .s_rdata(s_rdata),
       .s_wraddr(e_wraddr), .s_wraddrk(e_wraddrk), .s_wre(e_wre),
       .s_wrdata(s_wrdata),
