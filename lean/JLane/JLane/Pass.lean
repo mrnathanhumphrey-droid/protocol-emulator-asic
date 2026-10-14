@@ -46,14 +46,15 @@ theorem port_wait_bound_19 (P : Program) (win : Engine → Option Lane) (y : Lan
   have h2 := phi_le_19 y (portOf e) hq
   omega
 
-/-- A writeback leaves the dispatched lane owing a slot. -/
-theorem wb_owes (P : Program) (win : Engine → Option Lane) (e : Engine) (hw : e.st = .wb) :
+/-- A retiring writeback leaves the dispatched lane owing a slot. -/
+theorem wb_owes (P : Program) (win : Engine → Option Lane) (e : Engine) (hw : e.st = .wb)
+    (hr : P.ret e.now e.cur = true) :
     (step P win e).wantFetch e.cur = true := by
   rw [Engine.wantFetch_iff]
   apply owed_pos_of (step P win e) e.cur (e.sel e.cur)
-  show actvNext e e.cur (e.sel e.cur) = false
+  show actvNext P e e.cur (e.sel e.cur) = false
   unfold actvNext
-  rw [if_pos ⟨hw, rfl, rfl⟩]
+  rw [if_pos ⟨hw, rfl, rfl, hr⟩]
 
 /-- A hit fills the latched slot. -/
 theorem hit_fills (P : Program) (win : Engine → Option Lane) (y : Lane) (e : Engine)

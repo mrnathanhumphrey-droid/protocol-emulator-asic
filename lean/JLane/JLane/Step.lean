@@ -70,16 +70,17 @@ def dispNext (win : Engine → Option Lane) (e : Engine) : Disp :=
   | .drive => ⟨.wb, e.cur⟩
   | .wb    => ⟨.idle, e.cur⟩
 
-/-- §2 capture (`fix = pl * SPL ...`, slot latched at scan) and §4 WB invalidation
-of the head (ordinary retire / looping re-arm). -/
-def actvNext (e : Engine) (l : Lane) (s : Slot) : Bool :=
-  if e.st = .wb ∧ l = e.cur ∧ s = e.sel e.cur then false
+/-- §2 capture (`fix = pl * SPL ...`, slot latched at scan) and §4 WB invalidation of the
+head, on a **retiring** writeback only (`act_retire`): a held clocked phase or a chaining
+re-arm re-dispatches the same head (7A, 7C). -/
+def actvNext (P : Program) (e : Engine) (l : Lane) (s : Slot) : Bool :=
+  if e.st = .wb ∧ l = e.cur ∧ s = e.sel e.cur ∧ P.ret e.now e.cur = true then false
   else if e.pst = .cap ∧ l = e.pl ∧ s = e.pslot then true
   else e.actv l s
 
-/-- §4: WB flips the select. -/
-def selNext (e : Engine) (l : Lane) : Slot :=
-  if e.st = .wb ∧ l = e.cur then !e.sel l else e.sel l
+/-- §4: a retiring WB flips the select. -/
+def selNext (P : Program) (e : Engine) (l : Lane) : Slot :=
+  if e.st = .wb ∧ l = e.cur ∧ P.ret e.now e.cur = true then !e.sel l else e.sel l
 
 /-- §3 / P8: absolute advance at WB, by the lane's minimum delay plus this writeback's extra.
 Anchor `l_timestamp[cur] <= l_timestamp[cur] + {{(TS_W-DLY_W){1'b0}}, wb_dly};`. -/
@@ -92,8 +93,8 @@ def step (P : Program) (win : Engine → Option Lane) (e : Engine) : Engine :=
   let p := portNext P e
   let d := dispNext win e
   { now := e.now + 1
-    actv := actvNext e
-    sel := selNext e
+    actv := actvNext P e
+    sel := selNext P e
     ts := tsNext P e
     pst := p.pst, pl := p.pl, prr := p.prr, pbr1 := p.pbr1, pslot := p.pslot
     winq := win e
@@ -103,9 +104,10 @@ def step (P : Program) (win : Engine → Option Lane) (e : Engine) : Engine :=
 
 /-- A capture lands (absent the unreachable collision). -/
 theorem step_cap_fills (P : Program) (win : Engine → Option Lane) (e : Engine)
-    (hc : e.pst = .cap) (hn : ¬(e.st = .wb ∧ e.pl = e.cur ∧ e.pslot = e.sel e.cur)) :
+    (hc : e.pst = .cap)
+    (hn : ¬(e.st = .wb ∧ e.pl = e.cur ∧ e.pslot = e.sel e.cur ∧ P.ret e.now e.cur = true)) :
     (step P win e).actv e.pl e.pslot = true := by
-  show actvNext e e.pl e.pslot = true
+  show actvNext P e e.pl e.pslot = true
   unfold actvNext
   rw [if_neg hn, if_pos ⟨hc, rfl, rfl⟩]
 
@@ -116,11 +118,11 @@ theorem step_prr_br1_cap (P : Program) (win : Engine → Option Lane) (e : Engin
   show (portNext P e).prr = e.prr
   simp [portNext, hc, hb]
 
-/-- §4: WB flips the select of the dispatched lane. -/
+/-- §4: a retiring WB flips the select of the dispatched lane. -/
 theorem step_wb_flips (P : Program) (win : Engine → Option Lane) (e : Engine)
-    (hw : e.st = .wb) :
+    (hw : e.st = .wb) (hr : P.ret e.now e.cur = true) :
     (step P win e).sel e.cur = !e.sel e.cur := by
-  show selNext e e.cur = !e.sel e.cur
-  simp [selNext, hw]
+  show selNext P e e.cur = !e.sel e.cur
+  simp [selNext, hw, hr]
 
 end JLane

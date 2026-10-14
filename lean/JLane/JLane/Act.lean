@@ -252,14 +252,14 @@ theorem step2_proj (P : Program2) (dly : Lane → Nat) (fw : Engine2 → Word)
   have hp : portNextW (P.toP (fun _ => 0)) x.wantFetch x.e = portNext (P.toP dly) x.e := by
     rw [portNextW_congr _ _ _ _ (Engine2.wantFetch_plain dly x h)]
     rfl
-  have ha : x.actvNext = actvNext x.e := by
+  have ha : x.actvNext = actvNext (P.toP dly) x.e := by
     funext l s
     unfold Engine2.actvNext actvNext
-    simp [hr]
-  have hs : x.selNext = selNext x.e := by
+    simp [hr, Program2.toP]
+  have hs : x.selNext = selNext (P.toP dly) x.e := by
     funext l
     unfold Engine2.selNext selNext
-    simp [hr]
+    simp [hr, Program2.toP]
   have ht : x.tsNext P = tsNext (P.toP dly) x.e := by
     funext l
     unfold Engine2.tsNext tsNext
