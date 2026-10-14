@@ -144,7 +144,8 @@ def main():
 
     tbr = ["test/tb_reload.v", "test/fram_spi.v", "test/fram_i2c.v"]
     defines = ["", "M_NO_RELOAD_RESET", "M_NO_HALT_IDLE", "M_NO_RELOAD_FLUSH",
-               "M_HALT_KEEP_CKBIT", "M_ONE_PHASE_HALT", "M_HALT_KEEP_HOLD"]
+               "M_HALT_KEEP_CKBIT", "M_ONE_PHASE_HALT", "M_HALT_KEEP_HOLD",
+               "M_KEEP_ON_HALT"]
     vvp = {d: build(src, "tb_reload", tbr, d, d or "good") for d in defines}
     owv = build(src, "tb_onewire",
                 ["test/tb_onewire.v", "test/ds18b20_model.v"], "", "good")
@@ -157,6 +158,9 @@ def main():
         "spi": ["+MODE=4", "+IMG=" + rel(spim), "+RLF=5", "+RLB=7"],
         "i2c": ["+MODE=5", "+IMG=" + rel(i2cw), "+RLF=4", "+RLB=7"],
         "i2c_harm": ["+MODE=7", "+IMG=" + rel(i2cw), "+RLF=4", "+RLB=7"],
+        # the keep-list arm: a REFUSED program sets status, the reload must
+        # not erase it (reset-network halt: the twins are on power-on only)
+        "keep": [tx, "+MODE=8", "+IMG0=test/tx_badclk_image.hex"],
     }
     mustfire = [   # (define, arm, the reason its red must carry)
         ("M_NO_RELOAD_RESET", "tx5", "TX frame"),
@@ -167,6 +171,7 @@ def main():
         ("M_HALT_KEEP_CKBIT", "spi", "READ returned"),
         ("M_ONE_PHASE_HALT", "spi", "CS must lead"),
         ("M_HALT_KEEP_HOLD", "i2c", "a pad moved"),
+        ("M_KEEP_ON_HALT", "keep", "KEEP-LIST CLEARED"),
     ]
     owa = ["+IMG=" + rel(owimg), "+NBYTES=256", "+FEED=" + rel(owfeed),
            "+NFEED=%d" % len(lines), "+POLLIDX=%d" % len(_rx)]

@@ -100,6 +100,8 @@ KILLERS = {
     "M_NO_RELOAD_FLUSH": "test/run_reload.py",
     "M_HALT_KEEP_CKBIT": "test/run_reload.py",
     "M_HALT_KEEP_HOLD": "test/run_reload.py",
+    # reset-network halt: the twins on the halting reset -- the `keep` arm
+    "M_KEEP_ON_HALT": "test/run_reload.py",
     "M_ONE_PHASE_HALT": "test/run_reload.py",
     # silicon fix #8 undone: moves the 9 TX images' digests (and reproduces
     # the pre-fix ones exactly -- the re-record's proof)

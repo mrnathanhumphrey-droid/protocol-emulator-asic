@@ -222,13 +222,39 @@
 // ---- MUST-FIRE MUTANTS: re-assert a register's own value AFTER the halt
 // clear (the last nonblocking assignment wins), so the list itself is never
 // edited by a mutant.
+// ⭐ RESET-NETWORK HALT: the halt IS the reset branch now, so the mutants sit
+// at its end GUARDED BY `por_n` -- they keep their register across a HALT
+// (the defect each must-fire names) but never at power-on, where keeping an
+// unreset value would make the bench die of X, a wrong reason.
+// ⛔ THE CLEAN BUILD EXPANDS TO NOTHING: an `if (por_n)` around the lane loop
+// in an async reset branch is NOT synthesisable (yosys PROC_ARST: "async
+// reset yields non-constant value for signal i") -- iverilog accepted it,
+// the netlist build refused it. So the guard exists only in a mutant build.
+`ifdef M_NO_RELOAD_RESET
+`define PE_ANY_HALT_MUT
+`endif
+`ifdef M_HALT_KEEP_CKBIT
+`define PE_ANY_HALT_MUT
+`endif
+`ifdef M_HALT_KEEP_HOLD
+`define PE_ANY_HALT_MUT
+`endif
+`ifdef M_NO_HALT_IDLE
+`define PE_ANY_HALT_MUT
+`endif
+`ifdef PE_ANY_HALT_MUT
 `define PE_HALT_MUTANTS \
-      for (i = 0; i < N_LANES; i = i + 1) begin \
-        `PE_MUT_RELOAD_RESET \
-        `PE_MUT_CKBIT \
-        `PE_MUT_HOLD \
-      end \
-      `PE_MUT_HALT_IDLE
+      if (por_n) begin \
+        for (i = 0; i < N_LANES; i = i + 1) begin \
+          `PE_MUT_RELOAD_RESET \
+          `PE_MUT_CKBIT \
+          `PE_MUT_HOLD \
+        end \
+        `PE_MUT_HALT_IDLE \
+      end
+`else
+`define PE_HALT_MUTANTS
+`endif
 
 `ifdef M_NO_RELOAD_RESET
 `define PE_MUT_RELOAD_RESET l_txv[i] <= l_txv[i]; tx_bitp[i] <= tx_bitp[i]; rx_bitp[i] <= rx_bitp[i];
@@ -977,8 +1003,15 @@ module pe_engine #(
   assign lane_underrun = lane_underrun_k | lane_underrun_m;
   assign lane_overflow = lane_overflow_k | lane_overflow_m;
   integer kt;
+  // `M_KEEP_ON_HALT`: the twins on the HALTING reset -- a reload erases the
+  // status the host reads after halting (run_reload's KEEP must-fire)
+`ifdef M_KEEP_ON_HALT
+  always @(posedge clk or negedge rst_n) begin
+    if (!rst_n) begin
+`else
   always @(posedge clk or negedge por_n) begin
     if (!por_n) begin
+`endif
       config_err_k <= 1'b0; clk_stretch_err_k <= 1'b0; sticky_ovr_k <= 1'b0;
       lane_underrun_k <= {N_LANES{1'b0}}; lane_overflow_k <= {N_LANES{1'b0}};
       l_timeout_k <= {N_LANES{1'b0}};
@@ -2220,12 +2253,14 @@ module pe_engine #(
     if (!rst_n) begin
       // ⛔⛔ ONE LIST FOR RESET AND HALT: the macros at the top of this
       // file (#11).
-      // ⭐ CANARY (reset-network halt): this branch IS the halt now -- rst_n
-      // is power-on OR halt, so "halt state = reset state" is literal. The
+      // ⭐ RESET-NETWORK HALT (Wilson): this branch IS the halt -- rst_n is
+      // power-on OR halt, so "halt state = reset state" is literal. The
       // keep-list `_m` flags clear here too; their twins (power-on only)
-      // hold the status across the halt.
+      // hold the status across the halt. The must-fire mutants come LAST
+      // (last write wins), guarded to a halt.
       `PE_RST_MAIN
       `PE_RST_KEEP
+      `PE_HALT_MUTANTS
     end else begin
       rx_push <= 1'b0;
         host_pop <= 1'b0;   // one-cycle pulse; the consume site re-asserts

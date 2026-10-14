@@ -109,11 +109,21 @@ EXPECT = {
     # so each arm is one line (it was a two-line `proto_out`: 3)
     "M_CLKINV_IGNORED":  (2, None),
     # WF2 #9 / #10 / #11: each re-asserts a register's own value AFTER the
-    # shared halt clear (last NBA wins) -- ONE added line, the list untouched
-    "M_NO_RELOAD_RESET": (1, None),
-    "M_NO_HALT_IDLE":    (1, None),
-    "M_HALT_KEEP_CKBIT": (1, None),
-    "M_HALT_KEEP_HOLD":  (1, None),
+    # shared halt clear (last NBA wins) -- ONE own line, the list untouched,
+    # PLUS the shared 4-line `if (por_n) begin / for ... begin / end / end`
+    # guard, which exists ONLY in a mutant build (reset-network halt: the
+    # guard in the clean async reset branch is not synthesisable)
+    "M_NO_RELOAD_RESET": (5, "ONE own line + the shared 4-line por_n guard "
+                             "(mutant builds only), declared"),
+    "M_NO_HALT_IDLE":    (5, "ONE own line + the shared 4-line por_n guard "
+                             "(mutant builds only), declared"),
+    "M_HALT_KEEP_CKBIT": (5, "ONE own line + the shared 4-line por_n guard "
+                             "(mutant builds only), declared"),
+    "M_HALT_KEEP_HOLD":  (5, "ONE own line + the shared 4-line por_n guard "
+                             "(mutant builds only), declared"),
+    # reset-network halt: the keep-list twins' block on the HALTING reset --
+    # the two-line block header swapped
+    "M_KEEP_ON_HALT":    (4, None),
     # WF2 silicon fix #8 undone: THREE sites, declared
     "M_TX_PRELOAD":      (9,
         "THREE sites, declared, because the fix touched three: the driven "
@@ -152,7 +162,9 @@ EXPECT = {
     # 15 since WF2 #11 (+1): the shared pointer's reset now expands in the
     # HALT branch too, from the same list -- the mutant's register is cleared
     # at a reload like every other
-    "M_SHARED_BITP":     (15,
+    # 14 since the reset-network halt: the reset list (with its shared-
+    # pointer line) is expanded in ONE reset branch now, not power-on + halt
+    "M_SHARED_BITP":     (14,
         "a BLOCK substitution across FOUR sites, declared: the mutation "
         "re-merges the TX and RX bit pointers, and the pointer is named in the "
         "reset, in OP_SHIFT's advance, in OP_SHIFTIN's advance-and-complete, "

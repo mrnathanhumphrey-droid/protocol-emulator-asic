@@ -80,6 +80,8 @@ module tb_reload;
   integer    mode;
   // ---- the shared reload handshake ----------------------------------------
   reg req_reload = 1'b0, req_quiet = 1'b0, in_reload = 1'b0, reloaded = 1'b0;
+  reg [7:0] keep_pre = 8'h00, keep_post = 8'h00;   // the keep-list across the reload
+  reg [8*256-1:0] img0;                            // mode 8: the refused program
   // ---- the I2C bus (modes 5, 7): open-drain, pull-ups on both sides ------
   // ⭐ THE BUS SWITCH (Wilson, HOST_INTERFACE): a peer on the `uio` protocol
   // pins must be ISOLATED during ANY load, because `uio` is the load data
@@ -415,6 +417,42 @@ module tb_reload;
              rlb, npost, imgfile);
 
     repeat (4) @(negedge clk); rst_n = 1; @(negedge clk);
+    // ⭐⭐ MODE 8 -- THE KEEP-LIST ARM (Wilson: "a reload never clears
+    // keep-list status"). No other arm carries status INTO its reload (each
+    // runs a clean program to the cut), so a keep check there is vacuous.
+    // Here status is CREATED first: +IMG0 is a program the engine REFUSES
+    // (the 1.6x aliased-clock SHIFT -> sticky config_err), then the good
+    // +IMG is reloaded, and every status bit set before PROG rose must still
+    // read set after the engine runs again. Red if the refusal set nothing.
+    if (mode == 8) begin
+      // a refusal test: the refused program never runs, and the kept
+      // config_err holds dispatch off after the reload too (power-on clears it)
+      pg_quiescent_ok = 1'b1;
+      if (!$value$plusargs("IMG0=%s", img0)) begin
+        $display("tb_reload: FATAL -- mode 8 needs +IMG0 (the refused program)"); $finish;
+      end
+      write_image(img0);
+      run_now;
+      repeat (4000) @(posedge clk);
+      in_reload = 1'b1;
+      keep_pre = {dut.u_eng.config_err, dut.u_eng.clk_stretch_err,
+                  dut.u_eng.sticky_ovr, dut.u_eng.lane_underrun};
+      write_image(imgfile);
+      reloaded = 1'b1;
+      run_now;
+      repeat (16) @(posedge clk); #1;
+      keep_post = {dut.u_eng.config_err, dut.u_eng.clk_stretch_err,
+                   dut.u_eng.sticky_ovr, dut.u_eng.lane_underrun};
+      if (keep_pre == 0)
+        $display("*** FAIL reload: KEEP arm vacuous -- the refused program set no status before the reload");
+      else if ((keep_pre & ~keep_post) != 0)
+        $display("*** FAIL reload: KEEP-LIST CLEARED by the reload -- status %b before PROG rose, %b after (config_err, clk_stretch_err, sticky_ovr, lane_underrun[4:0])",
+                 keep_pre, keep_post);
+      else
+        $display("RELOAD: ok -- mode 8, the keep-list survived the reload: status %b before PROG rose, %b after (config_err, clk_stretch_err, sticky_ovr, lane_underrun[4:0])",
+                 keep_pre, keep_post);
+      $finish;
+    end
     sw = (mode == 7);                   // isolated through the first load too
     write_image(mode == 2 ? "test/uart_rx_image.hex" : imgfile);
     run_now;
@@ -460,6 +498,12 @@ module tb_reload;
     // the host opens the bus switch BEFORE it raises PROG (mode 5)
     if (mode == 5) sw = 1'b0;
     in_reload = 1'b1;
+    // ⭐ THE KEEP-LIST SURVIVES A RELOAD (Wilson): the status the host reads
+    // AFTER halting -- snapshot it before PROG rises, re-check it once the
+    // engine runs again (below). A bit set before and clear after is a
+    // reload that erased the reason the host halted.
+    keep_pre = {dut.u_eng.config_err, dut.u_eng.clk_stretch_err,
+                dut.u_eng.sticky_ovr, dut.u_eng.lane_underrun};
     if (mode == 4)
       for (a = 0; a < 8; a = a + 1) snap[a] = u_spi.mem[13'h0120 + a];
     if (i2c_mode) begin
@@ -490,6 +534,18 @@ module tb_reload;
     if (mode == 5) sw = 1'b1;           // reconnect once PROG is low
     @(posedge clk); #1;
     diag;
+    // the engine's reset releases a cycle after the run condition; check past it
+    repeat (8) @(posedge clk); #1;
+    keep_post = {dut.u_eng.config_err, dut.u_eng.clk_stretch_err,
+                 dut.u_eng.sticky_ovr, dut.u_eng.lane_underrun};
+    if ((keep_pre & ~keep_post) != 0)
+      $display("*** FAIL reload: KEEP-LIST CLEARED by the reload -- status %b before PROG rose, %b after (config_err, clk_stretch_err, sticky_ovr, lane_underrun[4:0])",
+               keep_pre, keep_post);
+    $display("  KEEP: %0d status bit(s) set before the reload, %0s",
+             $countones(keep_pre),
+             (keep_pre == 0) ? "none -- this arm does not exercise the keep-list"
+             : ((keep_pre & ~keep_post) == 0) ? "every one still set after it"
+             : "*** some CLEARED");
     in_reload = 1'b0;
     if (mode == 0 || mode == 2 || mode == 4 || i2c_mode) begin
       // the host's pushes after PROG fell: mode 0 continues its pattern from
