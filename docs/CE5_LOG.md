@@ -31,6 +31,10 @@ is the whole claim.
 
 ### The freeze moved again (2026-10-13): `5f59d25`, on a formal equivalence
 
+**Basis: equivalence-proven** — 4,466 of 4,466 cells, `model/rtl_equiv.py`
+(yosys `equiv_*`), `5f59d25` against `2b34dc0`. The full CE5 set was re-run
+as a cross-check; the freeze claim rests on the proof (Wilson).
+
 The TX queue's pop became a per-queue vector, so the queue block is the same
 for every variant of the TX path. `model/rtl_equiv.py` proved it equivalent
 to `2b34dc0` (4,466 of 4,466 cells: "the change moves nothing"), which is the
@@ -38,6 +42,9 @@ rebase precedent for re-pinning. CE5 was re-run on `5f59d25` anyway: the full
 set passes, and all five must-fires are red.
 
 ### ⛔ The freeze moved (WF2, 2026-10-13): CE5 re-certified on `b3cf898`
+
+**Basis: re-certified (the full CE5 set)** on `b3cf898` — the RTL changed
+behaviour, so no equivalence was available.
 
 "Frozen RTL" means the RTL that ships, so when the RTL changed the freeze
 moved with it **and CE5 was re-run in full**, not re-pinned as bookkeeping.

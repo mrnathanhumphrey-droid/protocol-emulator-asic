@@ -135,6 +135,13 @@ cycle's start, not the edge that ends it (not TM1: `M_TM1_UNREG` gives +20 too).
   a missing pyRTA bound became a budget. Standing rule since: every verdict is
   an explicit positive token (`ci/gate_tokens.txt`, `ci/pass_token.py`); a
   missing token or a missing bound is red.
+- ⛔ **Methodology: a measuring bench's own same-edge race moved the number
+  it measured.** The first synchronizer-window reading (`tb_v2win`) was 4
+  cycles; its cycle counter and its slot detector were separate
+  `always @(posedge)` blocks, so whether the slot saw the counter before or
+  after its increment was the simulator's choice. With both in one block the
+  number is 5 (`gate_bench_races` RA3 flagged it). A measured constant is
+  only as good as the bench's ordering.
 
 ### Receive paths — which witness covers which (Wilson's UART ruling)
 

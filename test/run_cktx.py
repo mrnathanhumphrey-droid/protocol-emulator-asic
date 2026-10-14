@@ -154,13 +154,42 @@ SCRATCH_MUTANTS = {
 }
 
 
-def build(defines, tag, engine=None):
+#: the last commit BEFORE silicon fix #8 (its RTL is V1's must-fire)
+PRE8 = "ff60d45"
+
+
+def pre8_srcdir():
+    """`src/` at PRE8, written to scratch, with ONE observation wire added:
+    the queue pop as the per-queue vector `do_popq` the benches read (the
+    same value as the old single `do_pop` on `q_sel`; no behaviour change)."""
+    d = os.path.join(SCRATCH, "pre8_src")
+    os.makedirs(d, exist_ok=True)
+    for s in SRCS:
+        r = subprocess.run(["git", "show", "%s:src/%s" % (PRE8, s)], cwd=ROOT,
+                           capture_output=True, text=True, encoding="utf-8",
+                           errors="replace")
+        if r.returncode != 0:
+            raise SystemExit("*** git show %s:src/%s failed" % (PRE8, s))
+        txt = r.stdout.replace("\r\n", "\n")
+        if s == "project.v":
+            txt = scratch_sub(
+                txt, "  wire do_pop  = e_host_pop & tx_valid;\n",
+                "  wire do_pop  = e_host_pop & tx_valid;\n"
+                "  wire [3:0] do_popq = do_pop ? (4'b0001 << q_sel) : 4'b0000;"
+                "  // PRE8 observation wire\n", "PRE8_OBS")
+        with open(os.path.join(d, s), "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(txt)
+    return d
+
+
+def build(defines, tag, engine=None, srcdir=None):
     os.makedirs(SCRATCH, exist_ok=True)
     out = os.path.join(SCRATCH, "cktx_%s.vvp" % tag)
     cmd = [tool("iverilog"), "-g2012", "-o", out, "-s", "tb_cktx"]
     cmd += ["-D%s" % d for d in defines]
-    cmd += ["test/tb_cktx.v", engine or os.path.join(ROOT, "src", SRCS[0])]
-    cmd += [os.path.join(ROOT, "src", s) for s in SRCS[1:]]
+    sd = srcdir or os.path.join(ROOT, "src")
+    cmd += ["test/tb_cktx.v", engine or os.path.join(sd, SRCS[0])]
+    cmd += [os.path.join(sd, s) for s in SRCS[1:]]
     r = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True,
                        encoding="utf-8", errors="replace")
     if r.returncode != 0:
@@ -245,6 +274,18 @@ def main() -> int:
     t = run(mut, img, 60000, 0, 0)
     say("*** FAIL clocked_conform[V1]" in t, "V1 red (load point / model bit)")
     say("*** FAIL clocked_conform[V2]" in t, "V2 red (the pushed bytes)")
+
+    # ⛔ V1 IS THE SECONDARY CHECK SINCE V2 WENT PINS-ONLY (Wilson): its load
+    # point became "the slot's byte is consumed by its first HIGH", and it
+    # must still be RED on silicon fix #8 undone -- both the mutant and the
+    # real pre-#8 RTL.
+    print("  --- MUST-FIRE: M_TX_PRELOAD (silicon fix #8 undone) on fed ---")
+    t = run(build(["M_TX_PRELOAD"], "preload"), img, 60000, 0, 0)
+    say("*** FAIL clocked_conform[V1]" in t, "V1 red (the byte is popped a "
+        "byte late -- the model loads on the first LOW)")
+    print("  --- MUST-FIRE: the pre-#8 silicon (%s) on fed ---" % PRE8)
+    t = run(build([], "pre8", srcdir=pre8_srcdir()), img, 60000, 0, 0)
+    say("*** FAIL clocked_conform[V1]" in t, "V1 red on the real pre-#8 RTL")
 
     # ---- PN4: every pin-taking opcode with action pin != header pin -------
     print("  --- pindiv: action pin != header pin, every pin-taking opcode ---")
