@@ -3,13 +3,13 @@ image test/smoke_image.hex
 fed 8
 pops 0
 underrun 0
-jobs 344
-svc_cycles 687
+jobs 343
+svc_cycles 686
 jmiss_max 0
 jmiss_cold 0
 jmiss_steady 0
 steady_stall_events 0
 cycles 4000
-hdr_cyc 94
+hdr_cyc 95
 op 0 n 214 min 2 max 2
 op 7 n 129 min 2 max 2
