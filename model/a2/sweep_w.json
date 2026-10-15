@@ -17,9 +17,9 @@
  "_ncyc_synthetic": 1000000,
  "_recipe": "python test/run_w_sweep.py --full",
  "_src_sha256": {
-  "pe_engine.v": "00522625a8d867e7e74ccb07ec4a054a53288fca226349cc1038a40470f117d4",
+  "pe_engine.v": "5e0f07d5989b1387000216a1e537483354b13074e02d4d376135554964250201",
   "pe_store.v": "5d0a0a6fe0d4e44732074066f536079441b6af344e0eab3d71347cdfb34394e2",
-  "project.v": "03643154bfc4d4a1f4198d308283e69bade57ec695958516258fb57d4de40794"
+  "project.v": "4f9c8723e655f18c2fdb612aa1e4ba806125cf2eb37c7ad95208707e3747bbdf"
  },
  "_warmup_image": 20000,
  "_warmup_synthetic": 200000,
@@ -36,8 +36,8 @@
     "anomalies": 0,
     "cold_fills": 10,
     "head": 63673,
-    "scan": 185975,
-    "warm_from": 200094
+    "scan": 185974,
+    "warm_from": 200095
    },
    "kind": "mustfire",
    "lanes": [
@@ -45,8 +45,8 @@
      "ahead_b1_max": 6,
      "ahead_b2_max": 9,
      "ahead_max": 10,
-     "consumed": 44440,
-     "decisions": 44440,
+     "consumed": 44439,
+     "decisions": 44439,
      "gap_le13": 4901,
      "gap_min": 9,
      "lane": 0,
@@ -147,7 +147,7 @@
     "cold_fills": 10,
     "head": 83021,
     "scan": 27146,
-    "warm_from": 200094
+    "warm_from": 200095
    },
    "kind": "mustfire",
    "lanes": [
@@ -218,7 +218,7 @@
      "r_max": 29536,
      "slack_min": 0,
      "vfwb_max": 21966,
-     "viol_cyc": 59047,
+     "viol_cyc": 59046,
      "viol_ev": 11189,
      "wc_max": 21965,
      "wi_max": 21962
@@ -257,7 +257,7 @@
     "cold_fills": 10,
     "head": 72906,
     "scan": 41449,
-    "warm_from": 200094
+    "warm_from": 200095
    },
    "kind": "mustfire",
    "lanes": [
@@ -346,7 +346,7 @@
      "r_max": 13380,
      "slack_min": 0,
      "vfwb_max": 422,
-     "viol_cyc": 73774,
+     "viol_cyc": 73773,
      "viol_ev": 13708,
      "wc_max": 421,
      "wi_max": 418
@@ -367,7 +367,7 @@
     "cold_fills": 10,
     "head": 40176,
     "scan": 198604,
-    "warm_from": 200094
+    "warm_from": 200095
    },
    "kind": "mustfire",
    "lanes": [
@@ -476,8 +476,8 @@
     "anomalies": 0,
     "cold_fills": 10,
     "head": 1,
-    "scan": 220506,
-    "warm_from": 200094
+    "scan": 220505,
+    "warm_from": 200095
    },
    "kind": "synthetic",
    "lanes": [
@@ -587,7 +587,7 @@
     "cold_fills": 10,
     "head": 1,
     "scan": 209980,
-    "warm_from": 200094
+    "warm_from": 200095
    },
    "kind": "synthetic",
    "lanes": [
@@ -696,8 +696,8 @@
     "anomalies": 0,
     "cold_fills": 10,
     "head": 1,
-    "scan": 200459,
-    "warm_from": 200094
+    "scan": 200458,
+    "warm_from": 200095
    },
    "kind": "synthetic",
    "lanes": [
@@ -807,7 +807,7 @@
     "cold_fills": 10,
     "head": 1,
     "scan": 191801,
-    "warm_from": 200094
+    "warm_from": 200095
    },
    "kind": "synthetic",
    "lanes": [
@@ -917,7 +917,7 @@
     "cold_fills": 10,
     "head": 1,
     "scan": 169987,
-    "warm_from": 200094
+    "warm_from": 200095
    },
    "kind": "synthetic",
    "lanes": [
@@ -1027,7 +1027,7 @@
     "cold_fills": 10,
     "head": 1,
     "scan": 143324,
-    "warm_from": 200094
+    "warm_from": 200095
    },
    "kind": "synthetic",
    "lanes": [
@@ -1137,7 +1137,7 @@
     "cold_fills": 10,
     "head": 1,
     "scan": 109996,
-    "warm_from": 200094
+    "warm_from": 200095
    },
    "kind": "synthetic",
    "lanes": [
@@ -1247,7 +1247,7 @@
     "cold_fills": 10,
     "head": 1,
     "scan": 76668,
-    "warm_from": 200094
+    "warm_from": 200095
    },
    "kind": "synthetic",
    "lanes": [
@@ -1357,7 +1357,7 @@
     "cold_fills": 10,
     "head": 1,
     "scan": 211506,
-    "warm_from": 200094
+    "warm_from": 200095
    },
    "kind": "synthetic",
    "lanes": [
@@ -1467,7 +1467,7 @@
     "cold_fills": 10,
     "head": 1,
     "scan": 200981,
-    "warm_from": 200094
+    "warm_from": 200095
    },
    "kind": "synthetic",
    "lanes": [
@@ -1577,7 +1577,7 @@
     "cold_fills": 10,
     "head": 1,
     "scan": 191459,
-    "warm_from": 200094
+    "warm_from": 200095
    },
    "kind": "synthetic",
    "lanes": [
@@ -1687,7 +1687,7 @@
     "cold_fills": 10,
     "head": 1,
     "scan": 182802,
-    "warm_from": 200094
+    "warm_from": 200095
    },
    "kind": "synthetic",
    "lanes": [
@@ -1797,7 +1797,7 @@
     "cold_fills": 10,
     "head": 1,
     "scan": 160987,
-    "warm_from": 200094
+    "warm_from": 200095
    },
    "kind": "synthetic",
    "lanes": [
@@ -1907,7 +1907,7 @@
     "cold_fills": 10,
     "head": 1,
     "scan": 134325,
-    "warm_from": 200094
+    "warm_from": 200095
    },
    "kind": "synthetic",
    "lanes": [
@@ -2017,7 +2017,7 @@
     "cold_fills": 10,
     "head": 1,
     "scan": 100997,
-    "warm_from": 200094
+    "warm_from": 200095
    },
    "kind": "synthetic",
    "lanes": [
@@ -2127,7 +2127,7 @@
     "cold_fills": 10,
     "head": 1,
     "scan": 67669,
-    "warm_from": 200094
+    "warm_from": 200095
    },
    "kind": "synthetic",
    "lanes": [
@@ -2236,8 +2236,8 @@
     "anomalies": 0,
     "cold_fills": 10,
     "head": 1,
-    "scan": 205687,
-    "warm_from": 200094
+    "scan": 205686,
+    "warm_from": 200095
    },
    "kind": "synthetic",
    "lanes": [
@@ -2347,7 +2347,7 @@
     "cold_fills": 10,
     "head": 1,
     "scan": 196535,
-    "warm_from": 200094
+    "warm_from": 200095
    },
    "kind": "synthetic",
    "lanes": [
@@ -2456,8 +2456,8 @@
     "anomalies": 0,
     "cold_fills": 10,
     "head": 1,
-    "scan": 188204,
-    "warm_from": 200094
+    "scan": 188203,
+    "warm_from": 200095
    },
    "kind": "synthetic",
    "lanes": [
@@ -2519,8 +2519,8 @@
      "ahead_b1_max": 0,
      "ahead_b2_max": 4,
      "ahead_max": 4,
-     "consumed": 33330,
-     "decisions": 33330,
+     "consumed": 33329,
+     "decisions": 33329,
      "gap_le13": 0,
      "gap_min": 15,
      "lane": 3,
@@ -2566,8 +2566,8 @@
     "anomalies": 0,
     "cold_fills": 10,
     "head": 1,
-    "scan": 180586,
-    "warm_from": 200094
+    "scan": 180585,
+    "warm_from": 200095
    },
    "kind": "synthetic",
    "lanes": [
@@ -2611,8 +2611,8 @@
      "ahead_b1_max": 0,
      "ahead_b2_max": 4,
      "ahead_max": 4,
-     "consumed": 33330,
-     "decisions": 33330,
+     "consumed": 33329,
+     "decisions": 33329,
      "gap_le13": 0,
      "gap_min": 16,
      "lane": 2,
@@ -2677,7 +2677,7 @@
     "cold_fills": 10,
     "head": 1,
     "scan": 161201,
-    "warm_from": 200094
+    "warm_from": 200095
    },
    "kind": "synthetic",
    "lanes": [
@@ -2721,8 +2721,8 @@
      "ahead_b1_max": 0,
      "ahead_b2_max": 3,
      "ahead_max": 3,
-     "consumed": 29627,
-     "decisions": 29627,
+     "consumed": 29626,
+     "decisions": 29626,
      "gap_le13": 0,
      "gap_min": 20,
      "lane": 2,
@@ -2787,7 +2787,7 @@
     "cold_fills": 10,
     "head": 1,
     "scan": 137136,
-    "warm_from": 200094
+    "warm_from": 200095
    },
    "kind": "synthetic",
    "lanes": [
@@ -2897,7 +2897,7 @@
     "cold_fills": 10,
     "head": 1,
     "scan": 106452,
-    "warm_from": 200094
+    "warm_from": 200095
    },
    "kind": "synthetic",
    "lanes": [
@@ -3007,7 +3007,7 @@
     "cold_fills": 10,
     "head": 1,
     "scan": 75063,
-    "warm_from": 200094
+    "warm_from": 200095
    },
    "kind": "synthetic",
    "lanes": [
@@ -3116,8 +3116,8 @@
     "anomalies": 0,
     "cold_fills": 10,
     "head": 1,
-    "scan": 196688,
-    "warm_from": 200094
+    "scan": 196687,
+    "warm_from": 200095
    },
    "kind": "synthetic",
    "lanes": [
@@ -3226,8 +3226,8 @@
     "anomalies": 0,
     "cold_fills": 10,
     "head": 1,
-    "scan": 187537,
-    "warm_from": 200094
+    "scan": 187536,
+    "warm_from": 200095
    },
    "kind": "synthetic",
    "lanes": [
@@ -3337,7 +3337,7 @@
     "cold_fills": 10,
     "head": 1,
     "scan": 179204,
-    "warm_from": 200094
+    "warm_from": 200095
    },
    "kind": "synthetic",
    "lanes": [
@@ -3399,8 +3399,8 @@
      "ahead_b1_max": 0,
      "ahead_b2_max": 4,
      "ahead_max": 4,
-     "consumed": 33330,
-     "decisions": 33330,
+     "consumed": 33329,
+     "decisions": 33329,
      "gap_le13": 0,
      "gap_min": 15,
      "lane": 3,
@@ -3447,7 +3447,7 @@
     "cold_fills": 10,
     "head": 1,
     "scan": 171586,
-    "warm_from": 200094
+    "warm_from": 200095
    },
    "kind": "synthetic",
    "lanes": [
@@ -3491,8 +3491,8 @@
      "ahead_b1_max": 0,
      "ahead_b2_max": 4,
      "ahead_max": 4,
-     "consumed": 33330,
-     "decisions": 33330,
+     "consumed": 33329,
+     "decisions": 33329,
      "gap_le13": 0,
      "gap_min": 16,
      "lane": 2,
@@ -3557,7 +3557,7 @@
     "cold_fills": 10,
     "head": 1,
     "scan": 152202,
-    "warm_from": 200094
+    "warm_from": 200095
    },
    "kind": "synthetic",
    "lanes": [
@@ -3601,8 +3601,8 @@
      "ahead_b1_max": 0,
      "ahead_b2_max": 3,
      "ahead_max": 3,
-     "consumed": 29627,
-     "decisions": 29627,
+     "consumed": 29626,
+     "decisions": 29626,
      "gap_le13": 0,
      "gap_min": 20,
      "lane": 2,
@@ -3667,7 +3667,7 @@
     "cold_fills": 10,
     "head": 1,
     "scan": 128137,
-    "warm_from": 200094
+    "warm_from": 200095
    },
    "kind": "synthetic",
    "lanes": [
@@ -3777,7 +3777,7 @@
     "cold_fills": 10,
     "head": 1,
     "scan": 97453,
-    "warm_from": 200094
+    "warm_from": 200095
    },
    "kind": "synthetic",
    "lanes": [
@@ -3887,7 +3887,7 @@
     "cold_fills": 10,
     "head": 1,
     "scan": 66064,
-    "warm_from": 200094
+    "warm_from": 200095
    },
    "kind": "synthetic",
    "lanes": [
@@ -3991,7 +3991,7 @@
     "cold_fills": 7,
     "head": 1,
     "scan": 8004,
-    "warm_from": 20094
+    "warm_from": 20095
    },
    "kind": "image",
    "lanes": [
@@ -4095,7 +4095,7 @@
     "cold_fills": 10,
     "head": 1,
     "scan": 2091,
-    "warm_from": 20094
+    "warm_from": 20095
    },
    "kind": "image",
    "lanes": [
@@ -4198,8 +4198,8 @@
     "anomalies": 0,
     "cold_fills": 10,
     "head": 1,
-    "scan": 21625,
-    "warm_from": 20094
+    "scan": 21624,
+    "warm_from": 20095
    },
    "kind": "image",
    "lanes": [
@@ -4303,7 +4303,7 @@
     "cold_fills": 9,
     "head": 1,
     "scan": 1346,
-    "warm_from": 20094
+    "warm_from": 20095
    },
    "kind": "image",
    "lanes": [
@@ -4407,7 +4407,7 @@
     "cold_fills": 6,
     "head": 1,
     "scan": 534,
-    "warm_from": 20094
+    "warm_from": 20095
    },
    "kind": "image",
    "lanes": [
@@ -4511,7 +4511,7 @@
     "cold_fills": 6,
     "head": 1,
     "scan": 899,
-    "warm_from": 20094
+    "warm_from": 20095
    },
    "kind": "image",
    "lanes": [
@@ -4614,8 +4614,8 @@
     "anomalies": 0,
     "cold_fills": 7,
     "head": 1,
-    "scan": 16663,
-    "warm_from": 20094
+    "scan": 16662,
+    "warm_from": 20095
    },
    "kind": "image",
    "lanes": [
@@ -4719,7 +4719,7 @@
     "cold_fills": 6,
     "head": 1,
     "scan": 3229,
-    "warm_from": 20094
+    "warm_from": 20095
    },
    "kind": "image",
    "lanes": [
@@ -4823,7 +4823,7 @@
     "cold_fills": 6,
     "head": 1,
     "scan": 3229,
-    "warm_from": 20094
+    "warm_from": 20095
    },
    "kind": "image",
    "lanes": [
@@ -4927,7 +4927,7 @@
     "cold_fills": 6,
     "head": 1,
     "scan": 8334,
-    "warm_from": 20094
+    "warm_from": 20095
    },
    "kind": "image",
    "lanes": [
@@ -5031,7 +5031,7 @@
     "cold_fills": 7,
     "head": 1,
     "scan": 16448,
-    "warm_from": 20094
+    "warm_from": 20095
    },
    "kind": "image",
    "lanes": [
@@ -5135,7 +5135,7 @@
     "cold_fills": 7,
     "head": 1,
     "scan": 14449,
-    "warm_from": 20094
+    "warm_from": 20095
    },
    "kind": "image",
    "lanes": [
@@ -5244,8 +5244,8 @@
     "anomalies": 0,
     "cold_fills": 10,
     "head": 92,
-    "scan": 239069,
-    "warm_from": 200094
+    "scan": 239068,
+    "warm_from": 200095
    },
    "kind": "synthetic",
    "lanes": [
@@ -5355,7 +5355,7 @@
     "cold_fills": 10,
     "head": 1,
     "scan": 228197,
-    "warm_from": 200094
+    "warm_from": 200095
    },
    "kind": "synthetic",
    "lanes": [
@@ -5465,7 +5465,7 @@
     "cold_fills": 10,
     "head": 1,
     "scan": 218199,
-    "warm_from": 200094
+    "warm_from": 200095
    },
    "kind": "synthetic",
    "lanes": [
@@ -5527,8 +5527,8 @@
      "ahead_b1_max": 0,
      "ahead_b2_max": 4,
      "ahead_max": 4,
-     "consumed": 33330,
-     "decisions": 33330,
+     "consumed": 33329,
+     "decisions": 33329,
      "gap_le13": 2,
      "gap_min": 13,
      "lane": 3,
@@ -5575,7 +5575,7 @@
     "cold_fills": 10,
     "head": 1,
     "scan": 209042,
-    "warm_from": 200094
+    "warm_from": 200095
    },
    "kind": "synthetic",
    "lanes": [
@@ -5685,7 +5685,7 @@
     "cold_fills": 10,
     "head": 1,
     "scan": 185680,
-    "warm_from": 200094
+    "warm_from": 200095
    },
    "kind": "synthetic",
    "lanes": [
@@ -5795,7 +5795,7 @@
     "cold_fills": 10,
     "head": 1,
     "scan": 156545,
-    "warm_from": 200094
+    "warm_from": 200095
    },
    "kind": "synthetic",
    "lanes": [
@@ -5905,7 +5905,7 @@
     "cold_fills": 10,
     "head": 1,
     "scan": 119178,
-    "warm_from": 200094
+    "warm_from": 200095
    },
    "kind": "synthetic",
    "lanes": [
@@ -6015,7 +6015,7 @@
     "cold_fills": 10,
     "head": 1,
     "scan": 80687,
-    "warm_from": 200094
+    "warm_from": 200095
    },
    "kind": "synthetic",
    "lanes": [
@@ -6125,7 +6125,7 @@
     "cold_fills": 10,
     "head": 50597,
     "scan": 196641,
-    "warm_from": 200094
+    "warm_from": 200095
    },
    "kind": "synthetic",
    "lanes": [
@@ -6133,8 +6133,8 @@
      "ahead_b1_max": 5,
      "ahead_b2_max": 9,
      "ahead_max": 10,
-     "consumed": 42100,
-     "decisions": 42100,
+     "consumed": 42099,
+     "decisions": 42099,
      "gap_le13": 707,
      "gap_min": 12,
      "lane": 0,
@@ -6234,8 +6234,8 @@
     "anomalies": 0,
     "cold_fills": 10,
     "head": 1,
-    "scan": 241643,
-    "warm_from": 200094
+    "scan": 241642,
+    "warm_from": 200095
    },
    "kind": "synthetic",
    "lanes": [
@@ -6345,7 +6345,7 @@
     "cold_fills": 10,
     "head": 1,
     "scan": 230454,
-    "warm_from": 200094
+    "warm_from": 200095
    },
    "kind": "synthetic",
    "lanes": [
@@ -6454,8 +6454,8 @@
     "anomalies": 0,
     "cold_fills": 10,
     "head": 1,
-    "scan": 220258,
-    "warm_from": 200094
+    "scan": 220257,
+    "warm_from": 200095
    },
    "kind": "synthetic",
    "lanes": [
@@ -6565,7 +6565,7 @@
     "cold_fills": 10,
     "head": 1,
     "scan": 194465,
-    "warm_from": 200094
+    "warm_from": 200095
    },
    "kind": "synthetic",
    "lanes": [
@@ -6675,7 +6675,7 @@
     "cold_fills": 10,
     "head": 1,
     "scan": 162733,
-    "warm_from": 200094
+    "warm_from": 200095
    },
    "kind": "synthetic",
    "lanes": [
@@ -6785,7 +6785,7 @@
     "cold_fills": 10,
     "head": 1,
     "scan": 122722,
-    "warm_from": 200094
+    "warm_from": 200095
    },
    "kind": "synthetic",
    "lanes": [
@@ -6895,7 +6895,7 @@
     "cold_fills": 10,
     "head": 1,
     "scan": 82292,
-    "warm_from": 200094
+    "warm_from": 200095
    },
    "kind": "synthetic",
    "lanes": [
@@ -7005,7 +7005,7 @@
     "cold_fills": 10,
     "head": 2291,
     "scan": 242536,
-    "warm_from": 200094
+    "warm_from": 200095
    },
    "kind": "synthetic",
    "lanes": [
@@ -7115,7 +7115,7 @@
     "cold_fills": 10,
     "head": 1,
     "scan": 233309,
-    "warm_from": 200094
+    "warm_from": 200095
    },
    "kind": "synthetic",
    "lanes": [
@@ -7225,7 +7225,7 @@
     "cold_fills": 10,
     "head": 1,
     "scan": 222835,
-    "warm_from": 200094
+    "warm_from": 200095
    },
    "kind": "synthetic",
    "lanes": [
@@ -7335,7 +7335,7 @@
     "cold_fills": 10,
     "head": 1,
     "scan": 213266,
-    "warm_from": 200094
+    "warm_from": 200095
    },
    "kind": "synthetic",
    "lanes": [
@@ -7444,8 +7444,8 @@
     "anomalies": 0,
     "cold_fills": 10,
     "head": 1,
-    "scan": 188950,
-    "warm_from": 200094
+    "scan": 188949,
+    "warm_from": 200095
    },
    "kind": "synthetic",
    "lanes": [
@@ -7554,8 +7554,8 @@
     "anomalies": 0,
     "cold_fills": 10,
     "head": 1,
-    "scan": 158812,
-    "warm_from": 200094
+    "scan": 158811,
+    "warm_from": 200095
    },
    "kind": "synthetic",
    "lanes": [
@@ -7665,7 +7665,7 @@
     "cold_fills": 10,
     "head": 1,
     "scan": 120449,
-    "warm_from": 200094
+    "warm_from": 200095
    },
    "kind": "synthetic",
    "lanes": [
@@ -7775,7 +7775,7 @@
     "cold_fills": 10,
     "head": 1,
     "scan": 81250,
-    "warm_from": 200094
+    "warm_from": 200095
    },
    "kind": "synthetic",
    "lanes": [
@@ -7885,7 +7885,7 @@
     "cold_fills": 10,
     "head": 51991,
     "scan": 195997,
-    "warm_from": 200094
+    "warm_from": 200095
    },
    "kind": "synthetic",
    "lanes": [
@@ -7947,8 +7947,8 @@
      "ahead_b1_max": 7,
      "ahead_b2_max": 9,
      "ahead_max": 15,
-     "consumed": 37930,
-     "decisions": 37930,
+     "consumed": 37929,
+     "decisions": 37929,
      "gap_le13": 2616,
      "gap_min": 6,
      "lane": 3,
@@ -7995,7 +7995,7 @@
     "cold_fills": 10,
     "head": 1,
     "scan": 249974,
-    "warm_from": 200094
+    "warm_from": 200095
    },
    "kind": "synthetic",
    "lanes": [
@@ -8104,8 +8104,8 @@
     "anomalies": 0,
     "cold_fills": 10,
     "head": 1,
-    "scan": 238071,
-    "warm_from": 200094
+    "scan": 238070,
+    "warm_from": 200095
    },
    "kind": "synthetic",
    "lanes": [
@@ -8185,8 +8185,8 @@
      "ahead_b1_max": 0,
      "ahead_b2_max": 2,
      "ahead_max": 2,
-     "consumed": 38091,
-     "decisions": 38091,
+     "consumed": 38090,
+     "decisions": 38090,
      "gap_le13": 0,
      "gap_min": 21,
      "lane": 4,
@@ -8214,8 +8214,8 @@
     "anomalies": 0,
     "cold_fills": 10,
     "head": 1,
-    "scan": 227251,
-    "warm_from": 200094
+    "scan": 227250,
+    "warm_from": 200095
    },
    "kind": "synthetic",
    "lanes": [
@@ -8325,7 +8325,7 @@
     "cold_fills": 10,
     "head": 1,
     "scan": 199982,
-    "warm_from": 200094
+    "warm_from": 200095
    },
    "kind": "synthetic",
    "lanes": [
@@ -8435,7 +8435,7 @@
     "cold_fills": 10,
     "head": 1,
     "scan": 166654,
-    "warm_from": 200094
+    "warm_from": 200095
    },
    "kind": "synthetic",
    "lanes": [
@@ -8545,7 +8545,7 @@
     "cold_fills": 10,
     "head": 1,
     "scan": 124994,
-    "warm_from": 200094
+    "warm_from": 200095
    },
    "kind": "synthetic",
    "lanes": [
@@ -8655,7 +8655,7 @@
     "cold_fills": 10,
     "head": 1,
     "scan": 83334,
-    "warm_from": 200094
+    "warm_from": 200095
    },
    "kind": "synthetic",
    "lanes": [
