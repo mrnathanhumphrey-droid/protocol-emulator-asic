@@ -65,6 +65,9 @@ DECLARED = {
     "test/clean_room.py": ("manual", "model/gate_ruling_audit.py",
                            "the clean-room recipe check (every artefact has "
                            "a recipe)"),
+    "test/check_reset_shift.py": ("manual", "model/a2/gate_j_program.py",
+                                  "the reset-network +1 proof run before the "
+                                  "sweep_w / cj_measured re-records"),
     "test/measure_a2_widest.py": ("manual", "model/a2/program_a2.py",
                                   "the recipe for an EMPIRICAL A2 budget"),
     "test/race_remeasure.py": ("manual", "model/gate_stored_numbers.py",
