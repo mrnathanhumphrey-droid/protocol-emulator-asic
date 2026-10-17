@@ -41,7 +41,7 @@ from toolchain import banner, tool                     # noqa: E402
 import benchset                                        # noqa: E402
 import gate_corpus_trace as gct                        # noqa: E402  vrun/vpath/pin
 from gate_bench_race import (RECORD_BENCHES,           # noqa: E402
-                             MF_FIXED, MF_RACY)
+                             RECORD_ARMS, MF_FIXED, MF_RACY)
 
 #: inside the checkout (`probe_*` is gitignored), so one RELATIVE path reaches
 #: it from both simulators
@@ -64,6 +64,11 @@ def rel(p):
     return os.path.relpath(p, ROOT).replace(os.sep, "/")
 
 
+#: ⭐ EVERY LINE IN EXACT ORDER, NO SPECIAL CASE. `clocked_conform.vh`'s layer
+#: banners once printed in simulator-chosen order when two layers first fired
+#: on the same edge ([R]/[B] swapped on corpus_spim25); they now come from one
+#: reporting block in a fixed order, stamped with the cycle, so the bench --
+#: not this comparison -- removed the ambiguity.
 def first_diff(a, b):
     for k, (x, y) in enumerate(zip(a, b)):
         if x != y:
@@ -166,6 +171,15 @@ def main() -> int:
             res = both(top, group[0]["srcs"], group[0]["gparams"],
                        [(r["label"], r["args"]) for r in group], key)
             judge(top, res, problems)
+    for top, label in RECORD_ARMS:
+        arm = [r for r in recs if r["top"] == top and r["label"] == label]
+        if not arm:
+            problems.append("%s/%s: no such benchset arm" % (top, label))
+            print("    *** %s/%s has no benchset arm" % (top, label))
+            continue
+        judge(top, both(top, arm[0]["srcs"], arm[0]["gparams"],
+                        [(label, arm[0]["args"])], "%s_%s" % (top, label)),
+              problems)
 
     # ⛔ MUST-FIRE: the known real race, restored in a scratch copy
     # ⚠ THE ENGINE START, not the reset release: restoring the rising-edge

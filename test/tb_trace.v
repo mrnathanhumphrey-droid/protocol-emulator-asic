@@ -276,6 +276,18 @@ module tb_trace;
       .so  (spi_so), .so_oe(spi_so_oe)
   );
 
+  // ⛔ THE SPI-MASTER WITNESS'S "MISO = PEER" MUST-FIRE (`run_spim_witness`):
+  // `+SPI_MEMFLIP=1` flips one bit of the peer's stored byte at 0x0123 each
+  // time the WRITE leaves 5B there, so every READ returns 5A. The witness's
+  // MISO check must go red while chip RX == wire stays green -- the chip reads
+  // faithfully what the corrupted peer sent. Off by default; a falling edge,
+  // away from every sampling edge.
+  reg spi_memflip = 1'b0;
+  integer spi_memflip_arg;
+  always @(negedge clk)
+    if (spi_memflip && u_spi.mem[13'h0123] === 8'h5B)
+      u_spi.mem[13'h0123] = 8'h5A;
+
   // =====================================================================
   // THE BENCH AS A PEER MASTER -- SPI-target's SCK/CS/MOSI, and UART-rx's RX
   // =====================================================================
@@ -372,6 +384,8 @@ module tb_trace;
     if (!$value$plusargs("PEER=%s", peersel)) peersel = "none";
     if (!$value$plusargs("SPI_SCK_INV=%d", spi_inv_arg)) spi_inv_arg = 0;
     spi_sck_inv = (spi_inv_arg != 0);
+    if (!$value$plusargs("SPI_MEMFLIP=%d", spi_memflip_arg)) spi_memflip_arg = 0;
+    spi_memflip = (spi_memflip_arg != 0);
 
     // ⛔⛔ THE LENGTH IS PASSED IN, NOT DERIVED FROM UNINITIALISED STATE, AND
     // THE REASON IS A BUG THIS BENCH ALREADY HAD. tb_smoke derives it by

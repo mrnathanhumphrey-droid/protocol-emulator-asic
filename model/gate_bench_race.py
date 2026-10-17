@@ -53,6 +53,11 @@ from gate_bench_lint import strip_comments          # noqa: E402
 #: with `test/gate_xsim.py`, so the two gates cannot drift apart.
 RECORD_BENCHES = ["tb_edge", "tb_fifo", "tb_lock", "tb_pinrange", "tb_reload",
                   "tb_smoke", "tb_status", "tb_v2win", "tb_w"]
+#: ... and single (bench, benchset arm) pairs whose checks are cycle-exact,
+#: where the whole bench is not: tb_trace runs every corpus image, and the
+#: SPI-master witness (`test/run_spim_witness.py`) is the one judged at a
+#: cycle-exact rate and phase floor.
+RECORD_ARMS = [("tb_trace", "corpus_spim25")]
 
 #: ⭐ THE SHARED MUST-FIRE PLANT (this gate and `test/gate_xsim.py`): the smoke
 #: bench's engine start -- the PROG fall, written with the CS release --

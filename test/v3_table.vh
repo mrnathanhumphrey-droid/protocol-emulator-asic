@@ -30,6 +30,7 @@ function integer v3_tab;
       32'h4ea2ae74: case (field) 0: v3_tab = 1; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = 210; 7: v3_tab = 30; 8: v3_tab = 33; 9: v3_tab = 36; 10: v3_tab = 39; endcase  // corpus_all5.hex
       32'ha1cd7d33: case (field) 0: v3_tab = 0; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // corpus_i2c.hex
       32'h0f202638: case (field) 0: v3_tab = 1; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // corpus_spim.hex
+      32'hda2985d2: case (field) 0: v3_tab = 0; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // corpus_spim25.hex
       32'h77489720: case (field) 0: v3_tab = 1; 1: v3_tab = 16; 2: v3_tab = 38; 3: v3_tab = 38; 4: v3_tab = 38; 5: v3_tab = 38; 6: v3_tab = 18; 7: v3_tab = 240; 8: v3_tab = 240; 9: v3_tab = 240; 10: v3_tab = 240; endcase  // corpus_sptgt.hex
       32'h21539a36: case (field) 0: v3_tab = 1; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // corpus_uartrx.hex
       32'h21b269ee: case (field) 0: v3_tab = 1; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // edge_image.hex
@@ -103,6 +104,7 @@ task v3_tab_name;
       32'h4ea2ae74: $display("  clocked_conform[V3] image: corpus_all5.hex (by its loaded bytes)");
       32'ha1cd7d33: $display("  clocked_conform[V3] image: corpus_i2c.hex (by its loaded bytes)");
       32'h0f202638: $display("  clocked_conform[V3] image: corpus_spim.hex (by its loaded bytes)");
+      32'hda2985d2: $display("  clocked_conform[V3] image: corpus_spim25.hex (by its loaded bytes)");
       32'h77489720: $display("  clocked_conform[V3] image: corpus_sptgt.hex (by its loaded bytes)");
       32'h21539a36: $display("  clocked_conform[V3] image: corpus_uartrx.hex (by its loaded bytes)");
       32'h21b269ee: $display("  clocked_conform[V3] image: edge_image.hex (by its loaded bytes)");

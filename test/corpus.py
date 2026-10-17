@@ -572,16 +572,31 @@ OPEN = {}
 FEEDS = {
     "corpus_spim": [0x06, 0x02, 0x01, 0x23, 0x5B, 0xC4, 0x1E, 0x03, 0x01,
                     0x23],
+    # the same transaction at the published rating (d = 25, 1 MHz)
+    "corpus_spim25": [0x06, 0x02, 0x01, 0x23, 0x5B, 0xC4, 0x1E, 0x03, 0x01,
+                      0x23],
 }
 
 # ports whose single BIT must vary, where a whole-port check would be gameable
 BIT_PRECONDITION = {
     "corpus_spim": ("uio_in", P_M_MISO),
+    "corpus_spim25": ("uio_in", P_M_MISO),
 }
+
+
+def build_spi_master_1mhz():
+    """⭐ THE SPI-MASTER WITNESS IMAGE (WF1, the published 1 MHz lane): the same
+    WREN / WRITE / READ as `corpus_spim`, at d = 25 -- one 50-cycle SCK period,
+    1 MHz at 50 MHz. `corpus_spim` stays at d = 7 as the TRACE image (declared
+    non-admissible); this one is admissible with pe_asm's timing checks ON, and
+    `test/run_spim_witness.py` checks its wire against its feed."""
+    return build_spi_master(d=25)
+
 
 CORPUS = {
     "corpus_i2c":    (build_i2c,        "i2c"),
     "corpus_spim":   (build_spi_master, "spi"),
+    "corpus_spim25": (build_spi_master_1mhz, "spi"),
     "corpus_sptgt":  (build_spi_target, "tgt"),
     "corpus_uartrx": (build_uart_rx,    "rx"),
     "corpus_all5":   (build_all5,       "all"),

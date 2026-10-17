@@ -569,7 +569,8 @@ def corpus_arms():
         out.append((name, ["+IMG=test/%s.hex" % name, "+PEER=%s" % peer,
                            "+OUT=probe_cov_trace_%s.txt" % name,
                            "+NCYC=200000", "+SEED=1", "+ASYNC=0",
-                           "+STAYLOAD=0", "+SCLHOLD=0", "+SPI_SCK_INV=0"]
+                           "+STAYLOAD=0", "+SCLHOLD=0", "+SPI_SCK_INV=0",
+                           "+SPI_MEMFLIP=0"]
                     + feed))
         # ⛔⛔ RULING RX5: THE FIVE-LANE CONTENTION IMAGE ON SEEDS 2-6 TOO.
         # Silicon fix #7's lost bits needed a particular interleaving -- 3 of
@@ -582,7 +583,8 @@ def corpus_arms():
                             ["+IMG=test/%s.hex" % name, "+PEER=%s" % peer,
                              "+OUT=probe_cov_trace_%s_s%d.txt" % (name, sd),
                              "+NCYC=200000", "+SEED=%d" % sd, "+ASYNC=0",
-                             "+STAYLOAD=0", "+SCLHOLD=0", "+SPI_SCK_INV=0"]
+                             "+STAYLOAD=0", "+SCLHOLD=0", "+SPI_SCK_INV=0",
+                           "+SPI_MEMFLIP=0"]
                             + feed))
     # ⭐ THE TWO CLOCK-STRETCH ARMS, both of which `gate_corpus_trace.py`
     # already certifies: `+SCLHOLD` is a BENCH-DRIVEN hold on SCL (its line

@@ -68,6 +68,30 @@
  * no dispatch count). This is the layer that sees it.
  */
 
+// ⭐ THE LAYER BANNERS, FROM ONE REPORTER. Each layer used to $display its own
+// `live --` line at its first check, from its own `always` block -- and two
+// layers whose first check falls on the SAME clock edge printed in whatever
+// order the simulator ran those blocks (measured: [R] and [B] swapped between
+// iverilog and Verilator on corpus_spim25). Now a layer only RAISES its flag
+// (`cc_live[k]`), and this one block prints every newly raised flag on the
+// falling edge, in a fixed order, with the cycle -- so the order is the code's
+// and the text says when the layer first fired.
+reg     [4:0] cc_live = 5'b0, cc_said = 5'b0;
+integer       cc_cyc = 0;
+always @(posedge dut.clk) cc_cyc = cc_cyc + 1;
+always @(negedge dut.clk) begin
+  if (cc_live[0] && !cc_said[0]) begin cc_said[0] = 1'b1;
+    $display("  clocked_conform[B]: live (cycle %0d) -- checking clocked actions against the model", cc_cyc); end
+  if (cc_live[1] && !cc_said[1]) begin cc_said[1] = 1'b1;
+    $display("  clocked_conform[R]: live (cycle %0d) -- counting refills per retired clocked action", cc_cyc); end
+  if (cc_live[2] && !cc_said[2]) begin cc_said[2] = 1'b1;
+    $display("  clocked_conform[R4]: live (cycle %0d) -- checking Theorem 3's P10 and P1 as written", cc_cyc); end
+  if (cc_live[3] && !cc_said[3]) begin cc_said[3] = 1'b1;
+    $display("  clocked_conform[V]: live (cycle %0d) -- checking clocked transmit BITS", cc_cyc); end
+  if (cc_live[4] && !cc_said[4]) begin cc_said[4] = 1'b1;
+    $display("  clocked_conform[V-RX]: live (cycle %0d) -- checking received BYTES against the pins", cc_cyc); end
+end
+
 integer cb_n   [0:7];      // dispatches on the current action
 integer cb_pc  [0:7];
 integer cb_op  [0:7];
@@ -105,8 +129,7 @@ always @(posedge dut.clk) begin
         // failure mode layer A's header is about. ⇒ Non-vacuity is now
         // visible from the FIRST check instead of at the end: no line at
         // all means layer B never saw a clocked action.
-        if (cb_acts == 1)
-          $display("  clocked_conform[B]: live -- checking clocked actions against the model");
+        if (cb_acts == 1) cc_live[0] = 1'b1;    // banner: the reporter above
         if (ck_expect(cb_op[dut.u_eng.cur], cb_cnt[dut.u_eng.cur]) < 0) begin
           $display("*** FAIL clocked_conform: no model entry for op=%0d cnt=%0d -- the generated table and the ISA disagree about what a clocked action is", cb_op[dut.u_eng.cur], cb_cnt[dut.u_eng.cur]);
           cb_fails = cb_fails + 1;
@@ -231,8 +254,7 @@ always @(posedge dut.clk) begin
         // action's refills to its unclocked successor.
         if (cr_pc[dut.u_eng.cur] !== -1 && cr_ck[dut.u_eng.cur]) begin
           cr_checks = cr_checks + 1;
-          if (cr_checks == 1)
-            $display("  clocked_conform[R]: live -- counting refills per retired clocked action");
+          if (cr_checks == 1) cc_live[1] = 1'b1;  // banner: the reporter
           if (cr_ref[dut.u_eng.cur] > cr_max[dut.u_eng.cur])
             cr_max[dut.u_eng.cur] = cr_ref[dut.u_eng.cur];
           if (cr_ref[dut.u_eng.cur] > cr_worst)
@@ -377,8 +399,7 @@ always @(posedge dut.clk) begin
     // ---- P10: a dispatch leaves AT MOST ONE slot to be refilled --------
     if (p4_wb) begin
       p4_checks = p4_checks + 1;
-      if (p4_checks == 1)
-        $display("  clocked_conform[R4]: live -- checking Theorem 3's P10 and P1 as written");
+      if (p4_checks == 1) cc_live[2] = 1'b1;    // banner: the reporter
       if (p4_fell > p4_worst) p4_worst = p4_fell;
       if (p4_fell > 1) begin
         $display("*** FAIL clocked_conform[R4a]: lane %0d's dispatch left %0d slots to be refilled. Theorem 3's P10 says a dispatch \"consumes a valid head and leaves AT MOST ONE slot per lane to be refilled\" -- D* = k * L_REFILL counts one refill per lane per period, so a dispatch owing two doubles the port demand the bound is computed from", p4_lane, p4_fell);
@@ -1220,8 +1241,7 @@ always @(posedge dut.clk) begin
           // V2: the slot's byte (the host's, or zeros on an underrun)
           tv_e2[tv_k] = tv_w[tv_k][8 - tv_low[tv_k]];
           tv1_chk = tv1_chk + 1; tv2_chk = tv2_chk + 1;
-          if (tv1_chk == 1)
-            $display("  clocked_conform[V]: live -- checking clocked transmit BITS");
+          if (tv1_chk == 1) cc_live[3] = 1'b1;    // banner: the reporter
           if (tv_v1[tv_k] != 0 && tv_lvl != tv_e1[tv_k]) begin
             tv1_bad = tv1_bad + 1;
             if (tv1_bad <= 4)
@@ -1771,8 +1791,7 @@ always @(posedge dut.clk) begin
             $display("*** FAIL clocked_conform[V-RX]: an RX frame for lane %0d (%02h) with no byte the pins put there", vr_kind, vr_pay);
         end else begin
           vr_chk = vr_chk + 1;
-          if (vr_chk == 1)
-            $display("  clocked_conform[V-RX]: live -- checking received BYTES against the pins");
+          if (vr_chk == 1) cc_live[4] = 1'b1;     // banner: the reporter
           if (vr_f[7:0] !== vr_q[vr_kind * 16 + (vr_qr[vr_kind] % 16)]) begin
             vr_bad = vr_bad + 1;
             if (vr_bad <= 4)

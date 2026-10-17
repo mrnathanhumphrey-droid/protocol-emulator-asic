@@ -28,6 +28,10 @@ EVERY ACCEPTED IMAGE WITH A FEED HAS EXACTLY ONE ENTRY:
                `ci/gate_tokens.txt`, and name the image -- or the image must be
                byte-identical to one that has such a witness (`same_as`).
     OWED       no exact witness yet; the gap and the step that closes it.
+    INTERNAL   not a published claim, checked ANOTHER way (Wilson): names the
+               CI check that already runs it (`checked_by`, in CI with a
+               token) and what that check proves. Not a witness, and no
+               further work is owed.
     MECHANISM  wire != feed BY DESIGN, with the reason -- AND a `check`: the
                CI runner that checks EXACTLY what the image is for, held to the
                witness rules (Wilson: MECHANISM must not become a third way for
@@ -60,6 +64,7 @@ import nonadmissible as NA                                        # noqa: E402
 import pe_isa as I                                                # noqa: E402
 
 WITNESS, OWED, MECHANISM = "WITNESS", "OWED", "MECHANISM"
+INTERNAL = "INTERNAL"
 
 #: ⛔⛔ THE REGISTRY. One entry per accepted image with a feed.
 REGISTRY = {
@@ -84,6 +89,14 @@ REGISTRY = {
     "uart_rx_434.hex": (WITNESS, {
         "same_as": "uart_rx_image.hex",
         "how": "the board's BRAM image is byte-identical to the bench image"}),
+    # ⚠ SIMULATION: the hardware witness is the FPGA with the real MB85RS64V
+    "corpus_spim25.hex": (WITNESS, {
+        "runner": "test/run_spim_witness.py",
+        "how": "SIMULATION, tb_trace + fram_spi model: every CS frame's MOSI "
+               "decoded at the pins is the feed's frame in order (count "
+               "exact), every READ's MISO is the peer's 5B C4, the chip's "
+               "serial-host bytes equal the wire's; SCK at 1 MHz, phases >= "
+               "the image's own A2 floor; one must-fire per check"}),
     # ---- mechanism images: wire != feed by design ---------------------------
     # ⛔⛔ MECHANISM IS NOT "UNCHECKED" (Wilson): each names the CI runner that
     # checks EXACTLY what the image is for, held to the witness rules (in CI,
@@ -105,46 +118,56 @@ REGISTRY = {
         "check": "tb_rxbw +SATURATED=1: every slot used, payload = capacity, "
                  "drops = completions - capacity - in flight, exactly; "
                  "must-fire: d = 60 (unsaturated) is red"}),
-    # ---- owed (WF2 / WF3) ----------------------------------------------------
-    "census_image.hex": (OWED, {
-        "gap": "TX (unclocked SHIFT) and RX (SHIFTIN/READBIT): no wire check "
-               "at all", "closes": "WF3"}),
-    "ckheavy_image.hex": (OWED, {
-        "gap": "three clocked SHIFT lanes, never fed where a verdict is read",
-        "closes": "WF3 (a fed arm graded by WF2)"}),
-    "half_image.hex": (OWED, {
-        "gap": "tb_half checks 4 bytes per lane, TX from the drive decision "
-               "not the pin; unclocked SHIFT is outside V2",
-        "closes": "WF2 (unclocked TX at the pin) + WF3"}),
-    "i2cframe_image.hex": (OWED, {
-        "gap": "bit-banged I2C: only 'the peer ACKed'; sigrok frame check is "
-               "local, not CI", "closes": "WF2 + WF3"}),
-    "i2caddr_image.hex": (OWED, {
-        "gap": "only the peer's address register end state",
-        "closes": "WF2 + WF3"}),
-    "onewire_image.hex": (OWED, {
-        "gap": "RX exact (ROM, scratchpad vs the model); TX only via the "
-               "chip's self-sampled echo -- the peer's decoded command stream "
-               "is not compared, reset/poll symbols unchecked",
-        "closes": "WF3 (parse OW-MODEL cmd)"}),
-    "onewire_fpga_image.hex": (OWED, {
-        "gap": "as onewire_image.hex", "closes": "WF3"}),
-    "corpus_i2c.hex": (OWED, {
-        "gap": "V2 + rx_e2e: bit-exact on clocked bits, but the chip's drive "
-               "not the bus, and the count is partial",
-        "closes": "WF2 (bus per ownership window, count exact)"}),
-    "ckread_image.hex": (OWED, {
-        "gap": "as corpus_i2c (V2 + rx_e2e; sigrok check local only)",
-        "closes": "WF2"}),
-    "ckfive_image.hex": (OWED, {
-        "gap": "V2 only (drive not bus, partial count)", "closes": "WF2"}),
-    "ckod_image.hex": (OWED, {
-        "gap": "V2 only (drive not bus, partial count)", "closes": "WF2"}),
-    "probe_cov_pindiv.hex": (OWED, {
-        "gap": "V2 covers its clocked SHIFTs; its unclocked SHIFTs are not "
-               "checked", "closes": "WF2"}),
-    "probe_cov_cemodes.hex": (OWED, {
-        "gap": "V2 only (drive not bus, partial count)", "closes": "WF2"}),
+    # ---- internal: not published claims, checked another way (Wilson) -------
+    # ⛔ INTERNAL IS NOT WITNESSED. Each names the CI check that already runs
+    # it; that check proves what it proves (a digest proves which image ran
+    # and that its streams match a record, not that its wire matched its
+    # feed). The label stays true; no further work is owed on these.
+    "census_image.hex": (INTERNAL, {
+        "checked_by": "test/run_lockstep.py",
+        "how": "dispatch and pin streams byte-identical to the recorded "
+               "digests (TF4); also the two-simulator corpus trace"}),
+    "ckheavy_image.hex": (INTERNAL, {
+        "checked_by": "test/run_lockstep.py",
+        "how": "lockstep digests; its A2 bound by gate_a2_program"}),
+    "half_image.hex": (INTERNAL, {
+        "checked_by": "test/run_lockstep.py",
+        "how": "lockstep digests; tb_half's own 4-byte-per-lane and rx_e2e "
+               "checks in the bench sweep"}),
+    "i2cframe_image.hex": (INTERNAL, {
+        "checked_by": "model/gate_sda_hold.py",
+        "how": "every chip-driven SDA move holds across the fall (Layer H); "
+               "the peer ACKs"}),
+    "i2caddr_image.hex": (INTERNAL, {
+        "checked_by": "test/run_lockstep.py",
+        "how": "lockstep digests; the peer's address register end state"}),
+    "onewire_image.hex": (INTERNAL, {
+        "checked_by": "test/run_onewire.py",
+        "how": "CE5: ROM and scratchpad exact against the model with CRC-8, "
+               "every slot inside the DS18B20 windows, five must-fires"}),
+    "onewire_fpga_image.hex": (INTERNAL, {
+        "checked_by": "test/run_onewire.py",
+        "how": "CE5's FPGA-timing arm"}),
+    "corpus_i2c.hex": (INTERNAL, {
+        "checked_by": "test/gate_corpus_trace.py",
+        "how": "the two-simulator pin trace; V2 + rx_e2e bit-exact on "
+               "clocked bits; UM10204 phases (gate_um10204)"}),
+    "ckread_image.hex": (INTERNAL, {
+        "checked_by": "model/gate_sda_hold.py",
+        "how": "Layer H on its SDA moves; V2 + rx_e2e; lockstep digests"}),
+    "ckfive_image.hex": (INTERNAL, {
+        "checked_by": "test/run_lockstep.py",
+        "how": "lockstep digests; V2 on its clocked bits"}),
+    "ckod_image.hex": (INTERNAL, {
+        "checked_by": "model/gate_sda_hold.py",
+        "how": "Layer H; V2 on its clocked bits; port demand measured"}),
+    "probe_cov_pindiv.hex": (INTERNAL, {
+        "checked_by": "test/gate_coverage.py",
+        "how": "the coverage sweep's pin-diversity arm; V2 on its clocked "
+               "SHIFTs"}),
+    "probe_cov_cemodes.hex": (INTERNAL, {
+        "checked_by": "test/gate_coverage.py",
+        "how": "the coverage sweep's CE-modes arm; V2 on its clocked bits"}),
 }
 
 
@@ -167,11 +190,12 @@ PUBLISHED = {
     "UART-tx 115200": (WITNESS, {"image": "uart_tx_image.hex",
                                  "rate_hz": 115200,
                                  "ledger_id": "UART-tx 115200"}),
-    "SPI-master 1 MHz": (OWED, {"rate_hz": 1000000,
-                                "ledger_id": "SPI-tx 1 MHz",
-        "gap": "corpus_spim.hex is NON_ADMISSIBLE at d = 7; the d = 25 "
-               "transaction (inside the rating) exists only as run_spifram's "
-               "untracked, local-only variants"}),
+    # ⭐ CLOSED (was OWED: corpus_spim.hex is NON_ADMISSIBLE at d = 7 and the
+    # d = 25 transaction existed only as run_spifram's local-only variants).
+    # In SIMULATION; the hardware witness is the FPGA bring-up's.
+    "SPI-master 1 MHz": (WITNESS, {"image": "corpus_spim25.hex",
+                                   "rate_hz": 1000000,
+                                   "ledger_id": "SPI-tx 1 MHz"}),
     # ⭐ Wilson: the ACHIEVED rate (CE1 HALF_HIGH), not the mode's nominal
     # 400 kHz -- so the rated number and the witnessed number are one number.
     "I²C Fast-mode 397 kHz": (OWED, {"rate_hz": 397000,
@@ -289,7 +313,8 @@ def audit(imgs, registry, exempt, listed, tokens):
             continue
         kind, d = ent
         rows.append((n, fd, kind, d.get("gap") or d.get("why")
-                     or d.get("how", "")))
+                     or (("by %s: " % d["checked_by"]) if "checked_by" in d else "")
+                     + d.get("how", "")))
         if kind == MECHANISM and not d.get("check"):
             probs.append("%s is MECHANISM with no `check`: a mechanism image "
                          "is still checked exactly for what it is for" % n)
@@ -315,6 +340,14 @@ def audit(imgs, registry, exempt, listed, tokens):
             if n not in body:
                 probs.append("%s: witness runner %s does not name the image"
                              % (n, r))
+        elif kind == INTERNAL:
+            r = d.get("checked_by", "")
+            if r not in listed:
+                probs.append("%s is INTERNAL but its check %s is not in "
+                             "ci/run_gates.sh" % (n, r))
+            if r not in tokens:
+                probs.append("%s is INTERNAL but its check %s has no positive "
+                             "token" % (n, r))
         elif kind != OWED:
             probs.append("%s: unknown entry kind %r" % (n, kind))
     for n in sorted(set(registry) - set(imgs)):
@@ -388,6 +421,9 @@ def main() -> int:
     ok &= fires("the rxfast mechanism check's runner dropped from CI",
                 REGISTRY, lst=listed - {"test/run_rxfast.py"},
                 needle="rxfast_image.hex: witness runner")
+    ok &= fires("an INTERNAL image's check dropped from CI (onewire)",
+                REGISTRY, lst=listed - {"test/run_onewire.py"},
+                needle="onewire_image.hex is INTERNAL but its check")
     r3 = dict(REGISTRY)
     r3["corpus_all5.hex"] = (OWED, {"gap": "x", "closes": "x"})
     ok &= fires("an entry on an exempt (NON_ADMISSIBLE) image", r3,
@@ -450,12 +486,13 @@ def main() -> int:
           % ("red  ok" if hit else "*** MISSED"))
     rc |= 0 if hit else 1
 
-    owed = counts.get(OWED, 0)
     owed_lanes = sum(1 for k, _d in PUBLISHED.values() if k == OWED)
     print()
-    print("  OWED: %d image(s) and %d published lane(s) without an exact "
-          "witness -- the lock checklist requires 0 at the sub-v1 SHA "
-          "(WF2, WF3)" % (owed, owed_lanes))
+    # ⭐ THE LOCK RULE (Wilson): zero OWED PUBLISHED lanes -- the claims made
+    # to the outside world. INTERNAL images are not published claims.
+    print("  OWED published lanes: %d -- the lock requires 0 at the sub-v1 SHA. "
+          "INTERNAL images (%d) are checked another way and are not published "
+          "claims." % (owed_lanes, counts.get(INTERNAL, 0)))
     print("  GATE wire-feed: %s" % ("PASSED" if rc == 0 else "*** FAILED"))
     return rc
 
