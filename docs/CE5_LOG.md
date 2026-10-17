@@ -29,6 +29,30 @@ is the whole claim.
   checked against Maxim AN27's worked example `02 1C B8 01 00 00 00 → A2`).
   On-chip CRC belongs to the reach branch.
 
+### The freeze moved (2026-10-17): CE5 re-certified on `effe478`
+
+**Basis: re-certified (the full CE5 set)** on `effe478`, the reset-network
+adoption. The RTL changed behaviour (the engine now leaves reset one cycle
+later), so no equivalence was available.
+
+* **CE5 passes in full**: every arm and every must-fire (`CE5-ONEWIRE:
+  PASSED`), unchanged program image and feed.
+* **Old against new.** The same CE5 run on the pre-adoption tree (`afaf8b5`,
+  whose `src/` is identical to the previous freeze `5f59d25`) and on
+  `effe478`; every other CE5 input (the gate, bench, program, images, peer
+  model, shared includes) is identical between them. **71 of 72 output lines
+  are byte-identical**; the 72nd is the timestamp below.
+* ⚠ **Prediction miss, recorded.** The prediction stamped before the runs
+  said nothing CE5 prints is measured from power-on. The `underrun_reset`
+  must-fire's evidence line prints a raw simulation timestamp: `tRSTH ... =
+  252737.0 ns at t=6434031.0 ns` became `at t=6434051.0 ns`. It moved
+  **exactly +20 ns (one cycle)**, consistent with the reset network's
+  one-cycle-later reset release; the measured quantity (252,737 ns) is
+  unchanged. It is the **only** absolute timestamp in CE5's output, so every
+  absolute time moved +1 cycle and every relative quantity is identical. A
+  shift of two cycles, or any change in a measured value, would have broken
+  the explanation.
+
 ### The freeze moved again (2026-10-13): `5f59d25`, on a formal equivalence
 
 **Basis: equivalence-proven** — 4,466 of 4,466 cells, `model/rtl_equiv.py`

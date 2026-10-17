@@ -50,7 +50,12 @@ ROOT = os.path.dirname(HERE)
 #: queue pop became a per-queue vector, and model/rtl_equiv.py proved it
 #: against 2b34dc0, 4,466 of 4,466 cells -- the change moves nothing. CE5
 #: was re-run on it anyway (docs/CE5_LOG.md).
-FREEZE_SHA = "5f59d259e217c8706de2ed91ed1924705df2d014"
+#: ⛔ RE-PINNED to effe478 (the reset-network adoption) -- RE-CERTIFIED, not an
+#: equivalence: the engine leaves reset one cycle later. The full CE5 set
+#: passes; 71 of 72 output lines match the previous freeze's run, the 72nd an
+#: absolute timestamp moved exactly one cycle (docs/CE5_LOG.md, with the
+#: prediction miss recorded).
+FREEZE_SHA = "effe478756943c3a1112d23b398837a942ea7ef1"
 
 
 def git(args, env=None):
