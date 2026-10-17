@@ -193,9 +193,18 @@ both):
 - **a received byte not yet read** when PROG rises. ⇒ **Drain RX before
   raising PROG.**
 
-**What is kept:** the sticky status flags — `l_timeout`, overflow,
-`CONFIG_ERR`, clock-stretch, per-lane underrun/overflow. They are the host's
-to read after halting; only `rst_n` clears them.
+**What is kept:** the sticky status flags — timeout, overflow, `CONFIG_ERR`,
+clock-stretch, underrun. They are the host's to read after halting; only
+`rst_n` clears them. What the host can learn from them:
+- a timeout reaches the host as **status bit 3 (`ovr`)**, which every engine
+  fault sets: a timeout reads as bit 3 with bits 5 and 7 clear, and once
+  another fault has set, a timeout can't be distinguished. The per-lane
+  `l_timeout` register is internal, with no host readout;
+- underrun and overflow are reported **OR-ed across lanes** (bits 1 and 2), so
+  the host learns *that* one happened, not *which lane*.
+
+⚠ **Limitation:** the host cannot identify which lane timed out, underran or
+overflowed.
 
 **The pins at the halt:**
 
@@ -207,8 +216,9 @@ to read after halting; only `rst_n` clears them.
   edge the halt causes, and no pad skew can let SCK clock a stale bit into
   the part.
 - After PROG falls, no pad moves until the new program's first action: the
-  pads sit at the reset idle, not at the halted program's last level. Header
-  re-reading takes ~290 cycles, so nothing drives in that window.
+  pads sit at the reset idle, not at the halted program's last level. The
+  header load and priming take 96 + 4R + S cycles before the first dispatch
+  (see *Start-up* below), so nothing drives in that window.
 
 **What an aborted transaction looks like to a peer** (measured by
 `test/run_reload.py`):
@@ -228,6 +238,40 @@ to read after halting; only `rst_n` clears them.
   bus pull-ups, not the chip.
 - The `uio` isolation requirement above. ⭐ Fix candidate, not on this chip: a
   **bit-serial program load on `ui_in`**, so `uio` never carries load traffic.
+
+### Start-up: from PROG released to the first dispatch
+
+With the store fully written, the engine reaches its first dispatch a fixed
+chain of steps after the PROG pad is sampled low, plus one term that depends on
+the program:
+
+| step | cycles (50 MHz) |
+| --- | --- |
+| PROG sampled low → engine run (`prog` 2-flop synchronizer) | 2 |
+| engine reset releases (one flop, `eng_rst_n`) | 1 |
+| header load: 1 + 3 × N_LANES × HDR_BYTES | 91 (5 lanes × 6 bytes) |
+| priming: 4R + S + 1 | at most 42 |
+| first dispatch | 1 |
+| **total** | **96 + 4R + S**, and never more than **137** (2.74 µs) |
+
+- **R**, the action slots filled before any lane is released: one head slot
+  per lane, plus that lane's spare slot **unless the lane's first action is a
+  chaining REARM** (level 0), whose successor is the head itself.
+- **S**, idle cycles of the refill scan: each refill takes 4 cycles; a scan
+  step that finds a lane with nothing to fetch costs 1. The scan serves the
+  lane with the **smallest D_sched** first (ties to the lowest lane index),
+  then goes round-robin from lane 0. S is 0 or 1 on every shipped image.
+- Both are computable from the image alone, before loading it: the formula is
+  the **exact** start-up of a given image.
+- **The guarantee for any image is 137 cycles:** 4R + S is at most 41 (every
+  lane is always live after the header load; R = 10 when no lane starts on a
+  chaining REARM, and every winner and REARM pattern was enumerated). The
+  shipped images span 120–137; that range describes them, it is not a bound.
+- **A reload starts up exactly like a first load:** the same chain, measured
+  on `test/run_reload.py`'s reload arms, including a reload into a different
+  program.
+
+The engine starts only on a program load: there is no start path at power-on.
 
 ## The serial host view (`uo_out[6:4]`)
 
@@ -253,8 +297,13 @@ to read after halting; only `rst_n` clears them.
   expect a short frame.
 - One bit per two clocks; `strobe` is high for one clock per bit. Sample `data`
   while `strobe` is high.
-- Payload and status frames **alternate**, so liveness is in the stream even
-  when no payload is moving.
+- Payload and status frames **alternate**. In run mode the stream carries a
+  frame only when there is RX payload or a status flag set: **an idle chip is
+  silent.**
+- ⚠ **Limitation:** a host cannot tell an idle chip from a dead one through
+  the stream. It can watch its own protocol pins for expected activity, or
+  reload, which produces readback frames (at the cost of restarting the
+  program).
 
 ⭐ **Why `kind` exists.** The frame was 9 bits — 8 payload plus the marker —
 which could not say *which lane* produced a received byte. With two receiving
@@ -408,9 +457,10 @@ verify what it loaded. In **run mode** they carry RX payload.
 3. **The stream is only meaningful once the load is complete.** Reading it during
    the load returns whatever has been written so far, and the walk may pass
    addresses before the host writes them.
-4. Reading past the loaded region returns **X**, not 0 — the store is left
-   uninitialised on purpose, so a program that reads past its end looks wrong
-   rather than plausible.
+4. In a run the chip accepts there is no unloaded region: every image writes
+   the whole store. The store is left uninitialised on purpose, so an address
+   never written reads **X** in simulation and, on silicon, whatever the store
+   powered up with; a load that stops short is refused rather than run.
 
 ⛔ **Points 1 and 2 are a ruling, not a description of an accident.** Byte 0 used
 to be unreachable: the readback incremented its pointer in the same cycle it
@@ -453,7 +503,10 @@ four tagged queues (`TXN = 4`, `TXD = 2`) since the tag was added, and
   the status frame (bit 4). The host has no back-pressure pin, so a flag in the
   stream is the only honest answer, the same reasoning as RX overflow.
 - **A lane that consumes with the FIFO empty records an underrun** (status
-  bit 1), per lane. Staging one byte ahead is what the FIFO is for.
+  bit 1). It is recorded per lane inside the chip but reported OR-ed across
+  lanes, so the host learns that an underrun happened, not which lane (see
+  *What is kept* under Reloading). Staging one byte ahead is what the FIFO is
+  for.
 - **Every byte a TX lane sends is a host byte, from the first** (silicon fix
   #8, WF2). A byte's first bit is taken from the queue head, and that is
   when the byte is **popped**; the remaining bits shift from the lane's
@@ -593,34 +646,61 @@ sample on the **observed** rise, so a stretching target is read when it lets go.
 it was at the SCK pad's rise. That's 2 cycles after the pad edge, the input
 path's depth as measured from the pads. A `uo_out` SCK pad rises 2 cycles after
 the HIGH-phase dispatch (one extra cycle behind its output register), so the
-capture fires 4 cycles after that dispatch; a `uio` clock fires at 3. On silicon
-the synchroniser moves this by **±1 cycle (±20 ns at 50 MHz)**.
+capture fires 4 cycles after that dispatch; a `uio` clock fires at 3. What
+simulation doesn't model (the SCK output pad, the MISO input pad and board
+flight time) is covered by the hold window below: one cycle of margin either
+side of the sample edge.
 
-**What the peer must do, in ns at 50 MHz.** SCK low lasts `T_low = d × 20 ns`
-for the action's delay `d`. A late LOW dispatch shortens it to
-`d − (r_i − C)` cycles; this is the same quantity the I²C mode floor uses. For a
-correct read:
-- MISO must be **valid on the pad by `T_low − 20 ns` after SCK falls** (setup
-  of one cycle, covering the synchroniser's ±1);
-- MISO must **hold until 20 ns after SCK rises**.
+**When MISO is sampled.** The chip samples MISO on a single system-clock edge,
+one cycle after the edge that launches SCK high. This was measured identically
+on both RTLs by flipping MISO for one cycle at each offset: only that edge
+corrupts the read. The peer must hold MISO stable **from the SCK rise until
+40 ns (2 cycles at 50 MHz) after it**, at the chip's pins. That allows one cycle
+of margin on either side of the sample edge, assuming total pad and board delay
+below 20 ns.
 
-**Against the MB85RS64V** (RAMXEED datasheet, AC characteristics, in `refs/`):
+**How short an SCK phase can be.** Each SCK phase lasts `d` cycles nominally. A
+late dispatch shortens it, high or low, because both phases are dispatch gaps:
 
-| parameter | symbol | figure | requirement | margin |
+**shortest phase ≥ d − (r_i − C)**, with C = 3 and r_i the lane's worst-case
+response from **A2's response-time analysis for this program**.
+
+r_i depends on the whole program, other lanes included.
+- ⚠ `pe_asm` computes r_i for every lane (its condition 1.6a check) but doesn't
+  report it for SPI lanes. A host gets its own figure from
+  `program_a2.lane_responses(image, pyrta_src)`.
+
+- **Admissible programs** (every delay ≥ D* = 20, and an A2 bound exists): the
+  floor above is the guarantee.
+  - For the **shipped 1 MHz lane** (d = 25, r_i = 12): **16 cycles = 320 ns**.
+  - Measured on a five-lane admissible image (the A2 reference workload's
+    closest buildable equivalent, with reactive lanes modelled as self-timed
+    periodic lanes at the same rate) under an adversarial phase sweep:
+    - the lateness bound was reached exactly (9 of 9);
+    - the shortest observed phase was 17 cycles, so the 16-cycle floor holds,
+      with one cycle not exercised.
+- **Programs below the floor** (non-admissible, such as the d = 7 trace image
+  `corpus_spim`): no phase guarantee. The half-period shrinks by the
+  scheduler's lateness, measured here as 7 cycles down to 5.
+
+**Against the MB85RS64V** (RAMXEED DS501-00015-6v1-E, AC characteristics p. 12;
+test conditions p. 13: VDD 3.0–5.5 V, 30 pF load, judged at VDD/2):
+
+| parameter | symbol | datasheet | requirement | shipped 1 MHz lane |
 |---|---|---|---|---|
-| output data valid time | tODV | max 20 ns from SCK fall | ≤ `T_low − 20 ns` | `d·20 − 40 ns`: 100 ns at d = 7, 460 ns at the shipped 1 MHz lane (d = 25) |
-| output hold time | tOH | min 0 ns | MISO changes only at the *next* fall, d cycles after the rise | `d·20 − 20 ns` |
-| clock low / high time | tCL / tCH | min 25 ns each | `d ≥ 2` | met at every legal d |
+| output data valid time | tODV | max 20 ns after SCK fall | MISO valid by the SCK rise: ≤ shortest low phase | budget **320 ns**: 300 ns left for board flight time |
+| output hold time | tOH | min 0 ns | MISO changes only at the next fall, ≥ shortest high phase after the rise | shortest high phase 16 cycles; the hold window is 40 ns |
+| clock high / low time | tCH / tCL | min 25 ns each | shortest phase ≥ 25 ns | 320 ns |
 
-**Measured (CI3).** The peer was given an adjustable MISO delay of N cycles on
-the real WREN / WRITE / READ program (d = 7):
-- every read was correct for N ≤ 5;
-- every read was wrong for N ≥ 8 (the chip takes the previous bit);
-- N = 6 and 7 form the band in between.
+**Measured (CI3, `test/run_spidelay.py`, d = 7, non-admissible).** The peer
+delays MISO by N cycles after each SCK fall:
+- every read is correct for N ≤ 5;
+- every read is wrong for N ≥ 8;
+- N = 6 and 7 form a band.
 
-The band is the bits whose low phase was shortened to 5 or 6 cycles by a late
-LOW dispatch: 59 of about 2,000 bits. The prediction from this section,
-"correct while N ≤ d − 1", agrees within one cycle.
+A bit is read wrong exactly when its low phase is at most N − 1 cycles and the
+MISO pad changes late. All 336 data bits were checked at N = 6 and 7, and no
+bit with a full 7-cycle low phase failed.
 
 ## Lane mode bits (header bits 0–1: `HALF_HIGH`, `CLK_INV`)
 

@@ -473,7 +473,7 @@ phase.
 | `l_notmo` | "no timeout": an `OP_ARM` with `a_dly == 0`, or a park | `notmo_n[cur]   = (a_dly == {DLY_W{1'b0}});` |
 | when release is withheld | the release term is `live & (now ≥ timestamp) & ~(armed & notmo)`, registered from next-state values: an armed **no-timeout** lane is never released until its edge; an armed lane **with** a timeout is released at its timestamp (the deadline) like any other | `) & ~tf_diff(now_n, ts_n[i]) & ~(armed_n[i] & notmo_n[i]);` |
 | the edge | `arm_hit` disarms and rebases the timestamp (`ck_rebase`): the lane continues `d` after the edge | `armed_n[i] = 1'b0;                    // capture DISARMS: a second` |
-| timeout-halt at decision | if the EDF winner is **still armed** when it is picked (its deadline came first), the engine **does not dispatch**: the lane is HALTed (`live_n = 0`), disarmed, `l_timeout` and `sticky_ovr` set; `st` stays `ST_IDLE` | `if (w_armed) begin` / `l_timeout[winner] <= 1'b1;      // STICKY -- status stream` |
+| timeout-halt at decision | if the EDF winner is **still armed** when it is picked (its deadline came first), the engine **does not dispatch**: the lane is HALTed (`live_n = 0`), disarmed, `l_timeout` and `sticky_ovr` set; `st` stays `ST_IDLE` | `if (w_armed) begin` / `l_timeout_m[winner] <= 1'b1;    // STICKY -- status stream` |
 | trace detection | `armed`, `notmo` (TR-2) | — |
 
 ### TR-2: the extra per-row columns
