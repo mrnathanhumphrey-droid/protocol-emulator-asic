@@ -60,6 +60,8 @@ DECLARED = {
                           "the WSL store sentinel run_gates drives"),
     "test/verilator_trace.sh": ("helper", "test/gate_corpus_trace.py",
                                 "the corpus gate's second simulator"),
+    "test/xsim_run.sh": ("helper", "test/gate_xsim.py",
+                         "the cross-simulator gate's Verilator half"),
     "test/toolchain.py": ("helper", "test/run_reload.py",
                           "the tool probe every runner imports; runs none"),
     "test/clean_room.py": ("manual", "model/gate_ruling_audit.py",

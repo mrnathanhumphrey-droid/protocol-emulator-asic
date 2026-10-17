@@ -160,6 +160,33 @@ module tb_half;
   // encodes its design).
   wire       tx_bit   = dut.u_eng.tx_bit;
 
+  // ⛔⛔ THE PEER CHANGES ITS PINS ON THE FALLING EDGE (Wilson, after the
+  // reset-network shift). Both lines below used to be BLOCKING writes made
+  // right after `@(posedge clk)` -- the same edge the chip's input
+  // synchroniser samples on -- which is a simulation race: the two
+  // simulators may order it differently. It stayed latent until the engine
+  // started one cycle later, which put a MISO change on a sampling edge:
+  // iverilog's `rx_e2e` then disagreed with the chip, and under the other
+  // simulator the chip received bytes one bit off (40 of 50), with tb_half
+  // still printing PASS. A real peer changes its output away from the edge
+  // that samples it;
+  // half a cycle off every rising edge, the answer is the same under both
+  // simulators, on both RTLs, and every recorded output is unchanged.
+  // ⛔ MUST-FIRE `+PLANT_EDGE_RACE`: the race put back ON PURPOSE, and on EVERY
+  // edge rather than tonight's lucky alignment -- MISO is written BLOCKING,
+  // right after the rising edge, with a fresh pseudo-random bit each cycle,
+  // so every sample edge races whatever the schedule. The verdict must go
+  // red under BOTH simulators (they split between `rx_e2e` and
+  // received == presented).
+  reg     plant_race = 1'b0;
+  integer plant_seed = 7;
+  initial plant_race = $test$plusargs("PLANT_EDGE_RACE");
+  reg peer_run = 1'b0;
+  always @(negedge clk) if (peer_run) begin
+    if (!plant_race) peer[P_MISO] = cyc[5];
+    peer[P_SDA]  = ack_low ? 1'b0 : 1'b1;
+  end
+
   task fail;
     input [8*72-1:0] msg;
     begin
@@ -229,6 +256,7 @@ module tb_half;
     ui_in = 8'h00;
     peer  = 8'hFF;                  // the bus idles high, as pull-ups give
     hf_en = 1'b1;
+    peer_run = 1'b1;               // the peer now drives MISO / SDA (negedge)
 
     // ---- run -----------------------------------------------------------
     for (i = 0; i < ncyc; i = i + 1) begin
@@ -252,7 +280,9 @@ module tb_half;
             sync_m[sd] = sync_m[sd] + 1;
       end
       peer_hist = {peer_hist[SYNC_MAX-1:0], peer[P_MISO]};
-      peer[P_MISO] = cyc[5];
+      // MISO itself is written by the falling-edge block above -- except
+      // under the planted race, which writes it here, on the edge
+      if (plant_race && peer_run) peer[P_MISO] = $random(plant_seed);
       // the ACK: SDA low in the window after the eighth data bit, which is
       // where lane 0's SHIFTIN lands -- and ONLY there.
       // ⛔⛔ IT WAS PRESENTED CONTINUOUSLY, and that is a bus conflict: the
@@ -264,7 +294,7 @@ module tb_half;
       // the gap taken from the lane's own measured bit spacing.
       if (ack_t0 >= 0 && ack_gap > 0 && cyc >= ack_t0 + ack_gap - 3)
         ack_low = 1'b1;
-      peer[P_SDA]  = ack_low ? 1'b0 : 1'b1;
+      // SDA follows `ack_low` in the falling-edge block above
 
       if (drive) begin
         n_shift_all = n_shift_all + 1;
@@ -519,6 +549,17 @@ module tb_half;
              : "*** FAIL -- one direction is silent");
     if (!(tn[1] >= 3 && rgn > 0))
       fail("lane 1 did not exercise both directions");
+
+    // ⛔⛔ RULING RX2 IN THE VERDICT. `rx_e2e` prints its own result AFTER
+    // `$finish`, so this verdict never saw it: 40 of 50 received bytes once
+    // differed from the wire while this bench printed PASS. Its counters are
+    // read here instead, and a run that exercised no clocked receive is red,
+    // not a vacuous pass.
+    $display("  RX2: rx_e2e checked %0d clocked received byte(s), %0d differ, %0d stuck",
+             e2e_chk, e2e_bad, e2e_stuck);
+    if (e2e_chk == 0) fail("rx_e2e checked no clocked received byte");
+    if (e2e_bad != 0) fail("rx_e2e: received bytes differ from the wire");
+    if (e2e_stuck != 0) fail("rx_e2e: a receive lane stopped with work owed");
 
     $display();
     $display("================ VERDICT ================");

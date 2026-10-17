@@ -142,6 +142,18 @@ GATES=(
   # reached 144. Both shapes are "a check that cannot speak", which reads
   # exactly like a check that passed.
   model/gate_bench_lint.py
+  # ⛔⛔ AUDIT #3 -- NO CHIP-INPUT WRITE IN THE TIMESTEP OF A RISING EDGE. The
+  # simulators order such a write differently: the smoke bench read 94 / 344
+  # under one of them (the race swallowing the reset network's +1), the edge
+  # bench's latencies moved a cycle, the reload bench reported a false
+  # load-mode push. Task-hidden timing followed; allowlist entries carry
+  # evidence. Must-fire: the smoke bench's original rising-edge reset release.
+  model/gate_bench_race.py
+  # ⛔⛔ ... AND THE OUTCOME: every arm of every record-feeding bench (the same
+  # list as the gate above) prints the same thing under both simulators, both
+  # versions in the log, Verilator pinned. ~2.5 min. Must-fire: the smoke
+  # bench's racing engine start restored -- 343 vs 344 jobs.
+  test/gate_xsim.py
   # ⛔ EVERY OPCODE x FIELD x DEGENERATE VALUE, enumerated. `count = 0` was
   # found by accident (a corrupted store reached the engine) and a SECOND
   # route to the same state -- a clocked SHIFT with `count = 15`, where
@@ -453,7 +465,7 @@ can_run() {
     # ⛔ THE CORPUS WITNESS NEEDS BOTH SIMULATORS, and a missing one is a
     # failure named as itself -- a two-simulator comparison with one simulator
     # compares nothing.
-    test/gate_corpus_trace.py)
+    test/gate_corpus_trace.py|test/gate_xsim.py)
       command -v "$IV" >/dev/null 2>&1 || { echo "iverilog not found (PE_IVERILOG unset and not on PATH)"; return 1; }
       { command -v "$VL" >/dev/null 2>&1 || [ -n "${PE_VERILATOR:-}" ] \
         || command -v wsl.exe >/dev/null 2>&1; } \

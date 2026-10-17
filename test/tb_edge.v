@@ -71,30 +71,37 @@ module tb_edge;
   localparam integer PIN_WR   = 6;
 
   // ------------------------------------------------------------------
+  // ⛔⛔ EVERY CHIP-INPUT WRITE LANDS ON A FALLING EDGE (audit #3). A blocking
+  // write right after `@(posedge clk)` races the chip's input flops in the
+  // same timestep: iverilog applied these one edge later than Verilator, so
+  // the edge-capture numbers below differed by a cycle between simulators.
+  // Each `@(negedge clk);` puts the write half a cycle before the edge that
+  // samples it -- the order iverilog already chose, so its output is unchanged.
   task load_and_run;
     begin
+      @(negedge clk);
       ui_in = 8'h00; uio_oe_tb = 8'h00; uio_drv = 8'h00;
       rst_n = 0;
       repeat (4) @(posedge clk);
-      rst_n = 1;
+      @(negedge clk); rst_n = 1;
       @(posedge clk);
       // LOAD
-      ui_in[PIN_PROG] = 1'b1;
+      @(negedge clk); ui_in[PIN_PROG] = 1'b1;
       uio_oe_tb = 8'hFF;                  // the bench owns uio during load
-      repeat (3) @(posedge clk); ui_in[PIN_PTR] = 1'b1; repeat (3) @(posedge clk);  // CDC3: prog >= 3 cy before ptr; ptr >= 3 cy wide
-      ui_in[PIN_PTR] = 1'b0; repeat (3) @(posedge clk);
+      repeat (3) @(posedge clk); @(negedge clk); ui_in[PIN_PTR] = 1'b1; repeat (3) @(posedge clk);  // CDC3: prog >= 3 cy before ptr; ptr >= 3 cy wide
+      @(negedge clk); ui_in[PIN_PTR] = 1'b0; repeat (3) @(posedge clk);
       for (i = 0; i < img_bytes; i = i + 1) begin
-        uio_drv = img[i];
+        @(negedge clk); uio_drv = img[i];
         @(posedge clk); @(posedge clk);
-        ui_in[PIN_WR] = 1'b1;
+        @(negedge clk); ui_in[PIN_WR] = 1'b1;
         @(posedge clk); @(posedge clk); @(posedge clk);
-        ui_in[PIN_WR] = 1'b0;
+        @(negedge clk); ui_in[PIN_WR] = 1'b0;
         @(posedge clk);
       end
       // RUN. ⛔ release every uio bit EXCEPT the arm pin, which the bench now
       // drives as the peer. The engine must not be driving it either -- an
       // input pin is one no action targets.
-      ui_in[PIN_PROG] = 1'b0;
+      @(negedge clk); ui_in[PIN_PROG] = 1'b0;
       uio_oe_tb = (8'h01 << arm_pin);
       uio_drv   = 8'hFF;                  // peer idle HIGH
       @(posedge clk);
@@ -191,7 +198,7 @@ module tb_edge;
       end
       run_cycles(phase);
       // THE PEER EDGE: drive the arm pin low (the program arms on a FALL)
-      uio_drv[arm_pin] = 1'b0;
+      @(negedge clk); uio_drv[arm_pin] = 1'b0;
       t_edge = cyc;
       run_cycles(120);
       delta = (t_out < 0) ? -1 : (t_out - t_edge);
@@ -256,7 +263,11 @@ module tb_edge;
     load_and_run;
     run_cycles(700);                  // peer silent, well past the 200 timeout
     to_lane_live = dut.u_eng.l_live[0];
-    to_flag      = dut.u_eng.l_timeout[0];
+    // since the reset-network halt the per-lane flag is two registers: the
+    // flop `l_timeout_m` (cleared with the engine) OR its power-on-only twin
+    // `l_timeout_k`. ⚠ Neither has a logic reader -- the host learns of a
+    // timeout through `sticky_ovr`, set in the same branch; this is a probe.
+    to_flag      = dut.u_eng.l_timeout_m[0] | dut.u_eng.l_timeout_k[0];
     acts_after   = seen_out;
     $display("      lane 0 live after the timeout : %0d (want 0)", to_lane_live);
     $display("      sticky TIMEOUT flag           : %0d (want 1)", to_flag);
@@ -291,14 +302,14 @@ module tb_edge;
                                       // AFTER the lane has armed
       cyc = 0; t_edge = -1; t_out = -1; seen_out = 0; prev_uo0 = 1;
       load_and_run;
-      uio_drv[arm_pin] = 1'b0;        // peer holds SCL LOW from the start
+      @(negedge clk); uio_drv[arm_pin] = 1'b0;        // peer holds SCL LOW from the start
       wait_armed(400);
       if (armed_at < 0) begin
         $display("      *** the lane never ARMED within 400 cycles");
         errors = errors + 1;
       end
       run_cycles(phase);              // keep stretching
-      uio_drv[arm_pin] = 1'b1;        // peer finally releases -> RISE
+      @(negedge clk); uio_drv[arm_pin] = 1'b1;        // peer finally releases -> RISE
       t_edge = cyc;
       run_cycles(120);
       delta = (t_out < 0) ? -1 : (t_out - t_edge);
@@ -352,7 +363,7 @@ module tb_edge;
       errors = errors + 1;
     end
     run_cycles(20);
-    uio_drv[arm_pin] = 1'b0;          // the peer edge
+    @(negedge clk); uio_drv[arm_pin] = 1'b0;          // the peer edge
     t_edge = cyc;
     run_cycles(140);
     $display("      uio_oe non-zero cycles  : %0d (want 0)", oe_viol);
@@ -388,7 +399,7 @@ module tb_edge;
     load_and_run;
     wait_armed(400);
     run_cycles(20);
-    uio_drv[arm_pin] = 1'b0;
+    @(negedge clk); uio_drv[arm_pin] = 1'b0;
     t_edge = cyc;
     run_cycles(160);
     noop_b = t_out - t_edge;
@@ -430,7 +441,7 @@ module tb_edge;
     load_and_run;
     wait_armed(400);
     run_cycles(20);
-    uio_drv[arm_pin] = 1'b0;
+    @(negedge clk); uio_drv[arm_pin] = 1'b0;
     t_edge = cyc;
     run_cycles(140);
     $display("      uio_oe non-zero cycles  : %0d (want > 0 -- it DRIVES)",

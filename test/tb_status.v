@@ -83,7 +83,10 @@ module tb_status ();
 
   task load_image;
     begin
-      ui_in[PIN_PROG] = 1'b1;
+      // ⛔ on a FALLING edge, like the rest of this load (audit #3): the task
+      // is entered right after a rising edge, where a blocking write races
+      // the chip's input flops and the simulators order it differently
+      @(negedge clk); ui_in[PIN_PROG] = 1'b1;
       repeat (3) @(negedge clk); ui_in[PIN_PTR] = 1'b1; repeat (3) @(negedge clk);  // CDC3: prog >= 3 cy before ptr; ptr >= 3 cy wide
       ui_in[PIN_PTR] = 1'b0; repeat (3) @(negedge clk);
       for (i = 0; i < img_bytes; i = i + 1) begin
@@ -125,7 +128,7 @@ module tb_status ();
              imgfile, img_bytes, mode, SPL_CFG);
 
     repeat (4) @(posedge clk);
-    rst_n = 1;
+    @(negedge clk); rst_n = 1;               // falling edge: audit #3
     @(posedge clk);
     load_image;
 

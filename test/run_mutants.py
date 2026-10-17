@@ -860,6 +860,22 @@ def main() -> int:
                     elif not right:
                         print("        *** died, but not of `%s` ***" % want)
                         wrong_reason.append((define, "wrong reason"))
+                # ⛔ THE PLANTED EDGE RACE (Wilson): MISO written blocking on
+                # every rising edge. Not an RTL mutant -- a bench plusarg -- so
+                # it is not in RAN; it must still turn the verdict red, and for
+                # a receive reason (rx_e2e or a received byte), under THIS
+                # simulator; the Verilator sweep holds the same arm as XFAIL.
+                o = run(base_h, img=HALF_IMG, extra=h_extra + ["+PLANT_EDGE_RACE"])
+                killed = "tb_half: PASS" not in o
+                right = "rx_e2e" in o or "RX byte" in o
+                print("    %-19s %-40s %s" % ("+PLANT_EDGE_RACE",
+                      "MISO changed ON the sampling edge",
+                      "RED" if killed and right else "*** SURVIVED ***"))
+                if not killed:
+                    survivors.append("+PLANT_EDGE_RACE")
+                elif not right:
+                    print("        *** died, but not of a receive check ***")
+                    wrong_reason.append(("+PLANT_EDGE_RACE", "wrong reason"))
 
     # ---- RULING MU: the clocked family, on tb_trace --------------------
     # ⛔ BASELINE FIRST, per image: the unmutated design must produce ZERO
@@ -922,6 +938,23 @@ def main() -> int:
                 wrong_reason.append((define, "wrong reason"))
         for define, why in sorted(CLOCKED_SURVIVORS.items()):
             print("    %-19s declared survivor -- %s" % (define, why[:90]))
+    # ⛔ THE FEED LIMIT (a bench plusarg, not an RTL mutant, so not in RAN):
+    # +FEEDN past `feedv`'s 16 bytes must stop the bench; 16 must not.
+    if rc == 0:
+        for n, want_fatal in ((17, True), (16, False)):
+            o = run(base_c, img="test/corpus_spim.hex",
+                    extra=["+NBYTES=256", "+PEER=spi", "+NCYC=2000",
+                           "+OUT=%s" % os.path.join(SCRATCH, "mut_feed.txt"),
+                           "+SEED=1", "+ASYNC=0", "+STAYLOAD=0", "+SCLHOLD=0",
+                           "+FEEDN=%d" % n, "+FEED=%s" % ("11" * n)])
+            fatal = ("tb_trace: FATAL -- +FEEDN=%d exceeds" % n) in o
+            ok = fatal == want_fatal
+            print("    %-19s %-40s %s" % ("+FEEDN=%d" % n,
+                  "feed past 16 bytes refused" if want_fatal
+                  else "16-byte feed accepted (control)",
+                  ("RED" if want_fatal else "clean") if ok else "*** WRONG ***"))
+            if not ok:
+                survivors.append("+FEEDN=%d" % n)
 
     print()
     print("=" * 78)

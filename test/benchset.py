@@ -83,7 +83,7 @@ EXCLUDED = {
 #:   pattern TOGETHER and permanently: if either regresses, this arm starts
 #:   passing and the sweep fails on it. A checker that has stopped checking
 #:   announces itself no other way.
-XFAIL = {("tb_verdict", "pipeline")}
+XFAIL = {("tb_verdict", "pipeline"), ("tb_half", "race")}
 
 NEEDS_NBYTES = {"tb_tx", "tb_half", "tb_i2c", "tb_csat", "tb_jlane", "tb_status",
                 "tb_fifo", "tb_lock", "tb_w", "tb_ckack", "tb_cktx",
@@ -283,7 +283,12 @@ CONFIG = {
     },
     "tb_half": {
         "srcs": [],
-        "arms": [("default", ["+IMG=test/half_image.hex", "+NCYC=40000"])],
+        "arms": [("default", ["+IMG=test/half_image.hex", "+NCYC=40000"]),
+                 # the planted edge race: MUST be red (XFAIL) -- the second
+                 # simulator's half of tb_half's must-fire (run_mutants has
+                 # the iverilog half)
+                 ("race", ["+IMG=test/half_image.hex", "+NCYC=40000",
+                           "+PLANT_EDGE_RACE"])],
     },
     # ⭐ RULING TF4's schedule freeze. Its verdict lives in
     # `test/run_lockstep.py`, which compares the printed stream with the
@@ -501,7 +506,11 @@ CONFIG = {
                  ("rx2tx", ["+IMG=test/uart_tx_image.hex", "+MODE=2",
                             "+RLF=3", "+RLB=5", "+NPOST=12"]),
                  ("unread", ["+IMG=test/uart_rx_image.hex", "+MODE=3",
-                             "+RLF=3", "+RLB=5", "+NPOST=12"])],
+                             "+RLF=3", "+RLB=5", "+NPOST=12"]),
+                 # the keep-list arm, as run_reload.py runs it: a refused
+                 # program sets status and the reload must not erase it
+                 ("keep", ["+IMG=test/uart_tx_image.hex", "+MODE=8",
+                           "+IMG0=test/tx_badclk_image.hex"])],
     },
     # WF2 round 2: the published UART-tx lane at 115200, judged by a peer on
     # its own clock; the busy image covers it beside four d = D* lanes.

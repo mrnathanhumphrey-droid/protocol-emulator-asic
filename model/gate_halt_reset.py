@@ -52,6 +52,12 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "model"))
 import gate_reset_audit as RA                       # noqa: E402  one allowlist
 
+#: ⚠ SIX REGISTERS, FIVE THAT CARRY STATUS. `l_timeout` (its `_m` / `_k`
+#: pair) has no logic reader: the host learns of a timeout only through
+#: `sticky_ovr` (status bit 3), and synthesis is expected to prune it. It stays
+#: on the keep-list so the reset network is uniform; removal is deferred to
+#: after the lock (`docs/REACH.md`). Do not read this set as "six flags that
+#: survive a reload" -- five do anything.
 KEEP_RULED = {"l_timeout", "sticky_ovr", "config_err", "clk_stretch_err",
               "lane_underrun", "lane_overflow"}
 BLOCK_HEAD = "always @(posedge clk or negedge rst_n)"

@@ -10,6 +10,8 @@
 #
 # Format: <gate path> <TAB-or-spaces> <python regex, matched per line>
 model/gate_bench_lint.py            ^\s*GATE bench-lint: PASSED\s*$
+model/gate_bench_race.py            ^\s*GATE bench-race: PASSED\s*$
+test/gate_xsim.py                   ^\s*GATE xsim: PASSED\s*$
 model/gate_degenerate_fields.py     ^\s*GATE degenerate-fields: PASSED\s*$
 test/gate_tb_elaborates.py          ^\s*GATE tb-elaborates: PASSED\s*$
 model/gate_ruling_audit.py          ^\s*GATE ruling-audit: PASSED\s*$

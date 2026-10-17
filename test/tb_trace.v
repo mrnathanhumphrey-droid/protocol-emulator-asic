@@ -531,6 +531,15 @@ module tb_trace;
     // real transaction's opcodes and addresses, which the default pattern can
     // never spell (`corpus.FEEDS`). `+FEEDN=0` keeps the default.
     if (!$value$plusargs("FEEDN=%d", feedn)) feedn = 0;
+    // ⛔ AT MOST `feedv`'s 16 BYTES, AND A LONGER FEED USED TO RUN SILENTLY:
+    // the hex parse truncates to `feedv` and `hf_put` drops entries past
+    // host_feed's HF_PAT, so the lane sent 00 in their place with no FAIL
+    // line (a 30-byte probe feed: 14 bytes went out as 00). Must-fire:
+    // `run_mutants.py`, +FEEDN=17 red and +FEEDN=16 clean.
+    if (feedn > $bits(feedv) / 8) begin
+      $display("tb_trace: FATAL -- +FEEDN=%0d exceeds the %0d-byte feed", feedn, $bits(feedv) / 8);
+      $finish;
+    end
     if (feedn > 0) begin
       if (!$value$plusargs("FEED=%h", feedv)) begin
         $display("tb_trace: FATAL -- +FEEDN=%0d without +FEED", feedn);

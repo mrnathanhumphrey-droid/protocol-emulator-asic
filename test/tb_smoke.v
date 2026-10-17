@@ -170,8 +170,14 @@ module tb_smoke;
       errors = errors + 1;
     end
     hf_init;
+    // ⛔⛔ EVERY CHIP-INPUT WRITE LANDS ON A FALLING EDGE (audit #3). A blocking
+    // write right after `@(posedge clk)` races the chip's input flops in the
+    // same timestep. Verilator resolved it the other way from iverilog and
+    // read `hdr_done` 94 / `jobs` 344 -- the pre-reset-network values, the
+    // race swallowing that change's +1 cycle; race-free, both read 95 / 343.
+    // Writing on the falling edge is the order iverilog already chose.
     repeat (4) @(posedge clk);
-    rst_n = 1;
+    @(negedge clk); rst_n = 1;
     @(posedge clk);
 
     // ---- check reset state: uo_out protocol pins HIGH, uio released ----
@@ -185,17 +191,17 @@ module tb_smoke;
     end
 
     // ---- LOAD MODE ------------------------------------------------------
-    ui_in[7] = 1'b1;                       // prog_mode
+    @(negedge clk); ui_in[7] = 1'b1;       // prog_mode
     repeat (3) @(posedge clk);             // CDC3: prog >= 3 cy before ptr
-    ui_in[5] = 1'b1;  repeat (3) @(posedge clk);  // pointer reset, >= 3 cy wide
-    ui_in[5] = 1'b0;  repeat (3) @(posedge clk);
+    @(negedge clk); ui_in[5] = 1'b1;  repeat (3) @(posedge clk);  // pointer reset, >= 3 cy wide
+    @(negedge clk); ui_in[5] = 1'b0;  repeat (3) @(posedge clk);
 
     for (i = 0; i < img_bytes; i = i + 1) begin
-      uio_drv  = img[i];
+      @(negedge clk); uio_drv  = img[i];
       @(posedge clk); @(posedge clk);
-      ui_in[6] = 1'b1;                     // WR rising edge
+      @(negedge clk); ui_in[6] = 1'b1;     // WR rising edge
       @(posedge clk); @(posedge clk); @(posedge clk);
-      ui_in[6] = 1'b0;
+      @(negedge clk); ui_in[6] = 1'b0;
       @(posedge clk); @(posedge clk);
       // (a) protocol outputs must stay at IDLE while loading
       if (uo_out[3:0] !== 4'b1111) load_drive_viol = load_drive_viol + 1;
@@ -204,7 +210,7 @@ module tb_smoke;
     end
 
     // ---- RUN MODE -------------------------------------------------------
-    uio_drv  = 8'hFF;                      // CS high = deselected
+    @(negedge clk); uio_drv  = 8'hFF;      // CS high = deselected
     ui_in[7] = 1'b0;
     ui_in[6] = 1'b0;
     // FEED EVERY QUEUE. This bench runs whatever image it is given, so it

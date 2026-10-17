@@ -172,6 +172,12 @@ module tb_reload;
     begin
       $readmemh(f, img);
       `PE_REQUIRE_IMG_LOADED(f)
+      // ⛔ CALL THIS ON A FALLING EDGE (audit #3): its first writes raise PROG
+      // at once. Called right after a rising edge, that raced `progress.vh`'s
+      // host-channel check -- Verilator ran the check before `pg_pushing`
+      // followed `hf_en` to 0 and reported a push in load mode that never
+      // happened. The first load arrives on one already (the reset sequence
+      // ends on `@(negedge clk)`); the two reload call sites wait for one.
       loading = 1'b1;
       ui_in[PIN_PROG] = 1'b1;
       repeat (3) @(negedge clk); ui_in[PIN_PTR] = 1'b1; repeat (3) @(negedge clk);
@@ -260,15 +266,17 @@ module tb_reload;
       // counted at its START: the data byte is pushed before the stop bit
       // ends (the same convention as tb_uartrx)
       rx_sent = rx_sent + 1;
-      rxline = 1'b0; repeat (BITP) @(posedge clk);
+      // each bit edge on a FALLING edge (audit #3): never the timestep of the
+      // rising edge that samples the line
+      @(negedge clk); rxline = 1'b0; repeat (BITP) @(posedge clk);
       for (b = 0; b < 8; b = b + 1) begin
         if (b + 1 == rlb && rx_sent - 1 == rlf && !reloaded
             && (mode == 1 || mode == 2)) begin
           req_reload = 1'b1; rx_cut = rx_sent - 1;
         end
-        rxline = sent[rx_sent - 1][b]; repeat (BITP) @(posedge clk);
+        @(negedge clk); rxline = sent[rx_sent - 1][b]; repeat (BITP) @(posedge clk);
       end
-      rxline = 1'b1; repeat (BITP) @(posedge clk);          // stop
+      @(negedge clk); rxline = 1'b1; repeat (BITP) @(posedge clk);          // stop
       rx_idle = 1'b1;
       repeat (2 * BITP) @(posedge clk);                     // idle
       // after a reload the chip re-reads its headers before it can arm
@@ -437,7 +445,7 @@ module tb_reload;
       in_reload = 1'b1;
       keep_pre = {dut.u_eng.config_err, dut.u_eng.clk_stretch_err,
                   dut.u_eng.sticky_ovr, dut.u_eng.lane_underrun};
-      write_image(imgfile);
+      @(negedge clk); write_image(imgfile);    // falling edge: see write_image
       reloaded = 1'b1;
       run_now;
       repeat (16) @(posedge clk); #1;
@@ -494,6 +502,9 @@ module tb_reload;
       hf_mask = 4'b0000;
       repeat (40) @(posedge clk);
     end
+    // falling edge (audit #3): `hf_en`, the switch and PROG (`write_image`
+    // below) all change away from the rising edge the checks sample on
+    @(negedge clk);
     hf_en = 1'b0;
     // the host opens the bus switch BEFORE it raises PROG (mode 5)
     if (mode == 5) sw = 1'b0;
