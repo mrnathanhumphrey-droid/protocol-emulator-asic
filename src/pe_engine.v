@@ -2294,12 +2294,12 @@ module pe_engine #(
                     // ⭐ unpack: pin, clkpin, t, C_i, D_sched. D_tol is the
                     //   remaining field and is DELIBERATELY NOT STORED.
                     // ⛔⛔ MSB-ALIGNED INSIDE HDR_BYTES*8, NOT HDR_BITS.
-                    // The header is HDR_BITS = 38 bits inside a HDR_BYTES*8 =
-                    // 40-bit byte-shift register, so slicing from HDR_BITS-1
-                    // reads 2 bits LOW and every field straddles a byte
-                    // boundary that the image writer did not intend. Aligning
-                    // to the top of the shift register makes the layout
-                    // hand-assemblable: byte0 = {pin, clkpin}, and the 2 spare
+                    // The header is HDR_BITS = 48 bits inside a HDR_BYTES*8 =
+                    // 48-bit byte-shift register (the order bit took the last
+                    // spare), so the two coincide today; slicing from
+                    // HDR_BITS-1 would read LOW the moment they differ. Aligning
+                    // to the top of the shift register keeps the layout
+                    // hand-assemblable: byte0 = {pin, clkpin}, and any spare
                     // bits land at the BOTTOM where nothing reads them.
                     l_pin[hl]    <= hsh_n[HDR_BYTES*8-1 -: PINW];
                     l_clkpin[hl] <= hsh_n[HDR_BYTES*8-1-PINW -: PINW];
