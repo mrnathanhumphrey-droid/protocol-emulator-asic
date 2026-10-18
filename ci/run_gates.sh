@@ -243,6 +243,10 @@ GATES=(
   # MB85RC256V, DSLogic captures) re-checked here in seconds, no simulator --
   # not a hardware run in CI (Wilson 10-17).
   model/gate_i2c_hw_witness.py
+  # ⛔ The lock's flow config IS the one the timing of record was measured
+  # with: src/config.json's hardening keys hash to model/timing_of_record.json
+  # (Wilson 10-17 -- the hold fix sat on the canary branch for three days).
+  model/gate_flow_config.py
   # ⛔⛔ E+ -- A SHELL EXIT CODE IS READ ONLY WHERE IT CAN BELONG. Four times in
   # one arc a checking loop printed an exit code belonging to something else
   # (`| tail`, `| head`, and `"$(basename $g)" "$?"` -- the substitution reset

@@ -15,6 +15,12 @@ reverted: +3.36 ns.
 
 ## Timing ledger (ship setting: density 60 %, `RUN_POST_GRT_RESIZER_TIMING: 1`, `GRT_RESIZER_HOLD_SLACK_MARGIN` 0.10)
 
+Measured with the flow config whose hardening keys hash to
+`dada746cd015f3ce…` (`model/timing_of_record.json`). `model/gate_flow_config.py`
+fails if the tree's `src/config.json` drifts from it. That is how the
+hold-fix gap was found: the two settings above were missing from the lock
+branch until 10-17.
+
 | layout | slow setup (ns) | worst hold (ns) | hold endpoints < +0.10 | hold buffers added by the post-GRT step |
 | --- | --- | --- | --- | --- |
 | reset network, 57 % | +1.87 | +0.106 | 0 | 22 (~359 µm²) |

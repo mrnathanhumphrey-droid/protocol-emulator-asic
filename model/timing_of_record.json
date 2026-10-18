@@ -1,0 +1,50 @@
+{
+ "what": "THE PUBLISHED TIMING OF RECORD and the flow config it was measured with. model/gate_flow_config.py recomputes the hash from src/config.json and is red on drift (Wilson 10-17). Human-readable ledger: docs/ADOPT_RESET_NETWORK.md.",
+ "measured_on": ["canary-rst 04253a2 (60 %)", "d1c6b0d (57 %)", "bf2a40d (63 %)"],
+ "source_commit": "04253a2",
+ "flow": "local C1 canary (probe_c1/c1_run.sh): tt-support-tools d66cf17, LibreLane 3.1.0.dev3, IHP-Open-PDK 2bbec755, to OpenROAD.STAPostPNR",
+ "rtl": "src/ as of 04253a2; proven equivalent to the lock branch's src/ by model/rtl_equiv.py --base 04253a2 (4547 / 4547 $equiv cells, 0 unproven; must-fire 3366 unproven)",
+ "ship_density_pct": 60,
+ "tiles": "6x4",
+ "tools_of_record": {
+  "tt_support_tools": "d66cf17",
+  "librelane": "3.1.0.dev3",
+  "ihp_open_pdk": "2bbec755dc67ca3db0261c3d6163e15735d66710",
+  "where_pinned": "probe_c1/c1_run.sh (the local C1 canary flow; not in the repository)"
+ },
+ "ci_harden_action": "TinyTapeout/tt-gds-action@ihp-cmos5l",
+ "ci_harden_action_note": "a BRANCH ref, not a pinned SHA: the tool versions a CI harden resolves are not determinable from the repository; the harden of record's own log must be read for them and compared with tools_of_record",
+ "flow_config_sha256": "dada746cd015f3ce7d3a0915b30ab08f1ecdb9ca44c3a9393d680dafce0dc8da",
+ "flow_keys": {
+  "BOTTOM_MARGIN_MULT": 1,
+  "CLOCK_PERIOD": 20,
+  "CLOCK_PORT": "clk",
+  "DESIGN_REPAIR_BUFFER_OUTPUT_PORTS": 0,
+  "FP_IO_HLENGTH": 2,
+  "FP_IO_VLENGTH": 2,
+  "FP_PDN_MULTILAYER": 0,
+  "FP_PDN_VPITCH": 50.0,
+  "FP_PDN_VWIDTH": 2.1,
+  "FP_SIZING": "absolute",
+  "GRT_ALLOW_CONGESTION": 1,
+  "GRT_RESIZER_HOLD_SLACK_MARGIN": 0.1,
+  "LEFT_MARGIN_MULT": 6,
+  "LINTER_INCLUDE_PDK_MODELS": 1,
+  "MAGIC_DEF_LABELS": 0,
+  "MAGIC_WRITE_LEF_PINONLY": 1,
+  "PL_RESIZER_HOLD_SLACK_MARGIN": 0.1,
+  "RIGHT_MARGIN_MULT": 6,
+  "RUN_CTS": 1,
+  "RUN_KLAYOUT_DRC": 0,
+  "RUN_KLAYOUT_XOR": 0,
+  "RUN_LINTER": 1,
+  "RUN_POST_GRT_RESIZER_TIMING": 1,
+  "TOP_MARGIN_MULT": 1
+ },
+ "timing": [
+  {"layout": "reset network, 57 %", "slow_setup_ns": 1.87, "worst_hold_ns": 0.106},
+  {"layout": "reset network, 60 %", "slow_setup_ns": 2.68, "worst_hold_ns": 0.105},
+  {"layout": "reset network, 63 %", "slow_setup_ns": 1.78, "worst_hold_ns": 0.101}
+ ],
+ "harden_of_record_prediction": "the lock's harden of record must reproduce these: slow setup +1.87 / +2.68 / +1.78 by density, hold clean on all corners; a miss is reported and explained before tagging (Wilson 10-17)"
+}
