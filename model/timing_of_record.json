@@ -12,8 +12,9 @@
   "ihp_open_pdk": "2bbec755dc67ca3db0261c3d6163e15735d66710",
   "where_pinned": "probe_c1/c1_run.sh (the local C1 canary flow; not in the repository)"
  },
- "ci_harden_action": "TinyTapeout/tt-gds-action@ihp-cmos5l",
- "ci_harden_action_note": "a BRANCH ref, not a pinned SHA: the tool versions a CI harden resolves are not determinable from the repository; the harden of record's own log must be read for them and compared with tools_of_record",
+ "ci_harden_action": "TinyTapeout/tt-gds-action@3412659307918422f3f0727917cf9b499aaca588",
+ "ci_tools_ref": "d66cf17",
+ "ci_harden_action_note": "PINNED (Wilson 10-18): the action to a commit SHA (ihp-cmos5l branch head of 2026-09-14, 'fix: install ihp-sg13cmos5l from the merged IHP-Open-PDK tree #52') on all four steps, and tools-ref d66cf17 on the two that accept it (the main action and precheck; gl_test and viewer take no tools input). Before the pin the action was the branch ref @ihp-cmos5l.",
  "flow_config_sha256": "dada746cd015f3ce7d3a0915b30ab08f1ecdb9ca44c3a9393d680dafce0dc8da",
  "flow_keys": {
   "BOTTOM_MARGIN_MULT": 1,

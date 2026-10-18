@@ -18,14 +18,15 @@ only there, so it is recorded separately and checked against the ship density
 CHECKED FIELDS beside the hash (Wilson 10-18, closing the scope gap):
   * info.yaml `tiles` == the record's (the die size the timing was measured on)
   * every `TinyTapeout/tt-gds-action...@<ref>` in .github/workflows/gds.yaml ==
-    the record's `ci_harden_action` ref.
-⚠ LIMIT, STATED: the TOOL VERSIONS are not determinable here. The timing of
-record came from the local C1 flow (tt-support-tools, LibreLane and PDK pinned in
-probe_c1/c1_run.sh, recorded in `tools_of_record`), while CI hardens through
-tt-gds-action at a BRANCH ref, which resolves whatever the branch holds on the
-day. This gate checks the ref string -- what the repository determines -- and
-the harden of record's own log must be read for the versions it used and
-compared with `tools_of_record`.
+    the record's `ci_harden_action` -- a COMMIT SHA since the pin, not a branch
+  * every `tools-ref:` in gds.yaml == the record's `ci_tools_ref`, which must
+    equal `tools_of_record.tt_support_tools` (d66cf17: the tt-support-tools the
+    timing of record was measured with), and it is set on BOTH steps that
+    accept it (the main action and precheck).
+⚠ LIMIT, STATED (what is left after the pin): LibreLane and the PDK are fixed
+BY tt-support-tools d66cf17 and the action SHA (their own pins), not re-read
+here -- the gate trusts two commit SHAs to name fixed content. gl_test and
+viewer take no tools input; their tooling is fixed by the action SHA alone.
 
 LOCAL CROSS-CHECK (informative, NOT counted toward the pass): when the record's
 source commit exists locally, its config is hashed too and must equal the
@@ -41,6 +42,7 @@ import copy
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 
@@ -72,6 +74,7 @@ def action_refs(gds_text):
 
 
 def env_audit(info_text, gds_text, rec):
+    import re
     probs = []
     t = tiles_of(info_text)
     if t != rec["tiles"]:
@@ -85,6 +88,19 @@ def env_audit(info_text, gds_text, rec):
         if r != want:
             probs.append("gds.yaml uses tt-gds-action@%s; the record names @%s"
                          % (r, want))
+    if not re.fullmatch(r"[0-9a-f]{40}", want):
+        probs.append("the recorded action ref %r is not a commit SHA" % want)
+    tr = re.findall(r"^\s*tools-ref:\s*(\S+)", gds_text, re.M)
+    if rec.get("ci_tools_ref") != rec["tools_of_record"]["tt_support_tools"]:
+        probs.append("the record's ci_tools_ref %r is not the tools of record %r"
+                     % (rec.get("ci_tools_ref"), rec["tools_of_record"]["tt_support_tools"]))
+    if len(tr) != 2:
+        probs.append("gds.yaml sets tools-ref on %d step(s); the main action and "
+                     "precheck both accept it -- expected 2" % len(tr))
+    for t in tr:
+        if t != rec.get("ci_tools_ref"):
+            probs.append("gds.yaml tools-ref %s; the timing of record used %s"
+                         % (t, rec.get("ci_tools_ref")))
     return probs
 
 
@@ -162,8 +178,11 @@ def main() -> int:
     t = rec["tools_of_record"]
     print("  tools of record (local C1 flow): tt-support-tools %s, LibreLane %s, "
           "PDK %s" % (t["tt_support_tools"], t["librelane"], t["ihp_open_pdk"][:12]))
-    print("  ⚠ LIMIT: the tool versions a CI harden resolves are NOT checked here "
-          "(the action is a branch ref) -- read them from the harden of record's log")
+    print("  CI tools-ref: %s (record %s)" % (
+        sorted(set(re.findall(r"^\s*tools-ref:\s*(\S+)", gds, re.M))),
+        rec.get("ci_tools_ref")))
+    print("  ⚠ LIMIT: LibreLane and the PDK are fixed by tt-support-tools %s and the "
+          "action SHA, not re-read here" % rec.get("ci_tools_ref"))
     probs += env_audit(info, gds, rec)
     for p in probs:
         print("  *** %s" % p)
@@ -211,13 +230,17 @@ def main() -> int:
         print("    %-38s %s" % (label, ("red  ok" if want_red else "green ok") if ok
                                  else "*** WRONG (%s)" % ("green" if not ps else "red")))
         rc |= 0 if ok else 1
-    # the checked fields (Wilson 10-18): tile size, and the CI action ref
-    import re
+    # the checked fields (Wilson 10-18): tile size, the action SHA, tools-ref
+    sha = rec["ci_harden_action"].split("@", 1)[1]
     env_cases = [
         ("tile size changed to 8x2",
          re.sub(r'(tiles:\s*)"[^"]*"', r'\1"8x2"', info, count=1), gds),
-        ("CI harden action ref changed",
-         info, gds.replace("tt-gds-action@ihp-cmos5l", "tt-gds-action@main", 1)),
+        ("CI action back to the branch ref",
+         info, gds.replace("tt-gds-action@" + sha, "tt-gds-action@ihp-cmos5l", 1)),
+        ("tools-ref changed",
+         info, re.sub(r"(tools-ref:\s*)\S+", r"\g<1>main", gds, count=1)),
+        ("tools-ref dropped from one step",
+         info, re.sub(r"\n\s*tools-ref:\s*\S+", "", gds, count=1)),
     ]
     for label, inf, gd in env_cases:
         ps = env_audit(inf, gd, rec)

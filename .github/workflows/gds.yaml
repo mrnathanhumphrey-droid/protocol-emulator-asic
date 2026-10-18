@@ -100,17 +100,26 @@ jobs:
         with:
           submodules: recursive
 
+      # ⛔ PINNED (Wilson 10-18): the action to a commit SHA (the ihp-cmos5l
+      # branch head of 2026-09-14), and tt-support-tools to d66cf17 -- the
+      # tools the timing of record was measured with (model/timing_of_record.json).
+      # A branch ref resolves whatever the branch holds on the day; the harden
+      # of record must run what was measured. model/gate_flow_config.py checks
+      # both pins.
       - name: Build GDS
-        uses: TinyTapeout/tt-gds-action@ihp-cmos5l
+        uses: TinyTapeout/tt-gds-action@3412659307918422f3f0727917cf9b499aaca588
         with:
           pdk: ihp-sg13cmos5l
+          tools-ref: d66cf17
 
   precheck:
     needs: gds
     runs-on: ubuntu-24.04
     steps:
       - name: Run Tiny Tapeout Precheck
-        uses: TinyTapeout/tt-gds-action/precheck@ihp-cmos5l
+        uses: TinyTapeout/tt-gds-action/precheck@3412659307918422f3f0727917cf9b499aaca588
+        with:
+          tools-ref: d66cf17
 
   gl_test:
     needs: gds
@@ -122,7 +131,7 @@ jobs:
           submodules: recursive
 
       - name: GL test
-        uses: TinyTapeout/tt-gds-action/gl_test@ihp-cmos5l
+        uses: TinyTapeout/tt-gds-action/gl_test@3412659307918422f3f0727917cf9b499aaca588
 
   viewer:
     needs: gds
@@ -140,4 +149,4 @@ jobs:
       pages: write # to deploy to Pages
       id-token: write # to verify the deployment originates from an appropriate source
     steps:
-      - uses: TinyTapeout/tt-gds-action/viewer@ihp-cmos5l
+      - uses: TinyTapeout/tt-gds-action/viewer@3412659307918422f3f0727917cf9b499aaca588
