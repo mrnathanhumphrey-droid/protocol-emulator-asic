@@ -10,12 +10,20 @@
 // is DQ, OPEN DRAIN: pulled low or released, never driven high (the 4.7k on the
 // breadboard pulls it up; pa100t_j11_ow.xdc). Without PE_OW this file is the
 // UART build exactly as before.
+// PE_I2C (`build.tcl i2c` only): the I2C build -- J11 pin 3 (B20) = SCL and
+// J11 pin 4 (A20) = SDA, BOTH open drain (pa100t_j11_i2c.xdc; the pull-ups
+// are on the breadboard).
 `default_nettype none
 module pa100t_top #(
     parameter IMG = "uart_rx_434.hex"
 `ifdef PE_OW
   , parameter FEED = "onewire_fpga_feed.hex",
     parameter integer NFEED = 0, POLLIDX = 0, PER2 = 0, MARGIN = 0
+`endif
+`ifdef PE_I2C
+  , parameter FEED = "i2c_fram_feed.hex",
+    parameter FALLS = "i2c_fram_falls.hex",
+    parameter integer NFEED = 0, NRX = 0
 `endif
 ) (
     input  wire       sys_clk_p,
@@ -25,6 +33,10 @@ module pa100t_top #(
     output wire       uart_tx,
 `ifdef PE_OW
     inout  wire       j11_dq,
+`endif
+`ifdef PE_I2C
+    inout  wire       j11_scl,
+    inout  wire       j11_sda,
 `endif
     output wire [5:0] led
 );
@@ -63,12 +75,24 @@ module pa100t_top #(
   pe_fpga_core #(.IMG(IMG), .OW(1), .FEED(FEED), .NFEED(NFEED),
                  .POLLIDX(POLLIDX), .PER2(PER2), .MARGIN(MARGIN)) u_core (
       .clk(clk50), .rst_n(rst_n), .uart_rx(rxs[1]), .uart_tx(uart_tx),
-      .led(core_led), .running(running), .dq_in(j11_dq), .dq_low(dq_low)
+      .led(core_led), .running(running), .dq_in(j11_dq), .dq_low(dq_low),
+      .p3_in(1'b1), .p3_low()
+  );
+`elsif PE_I2C
+  wire sda_low, scl_low;
+  assign j11_sda = sda_low ? 1'b0 : 1'bz;        // open drain
+  assign j11_scl = scl_low ? 1'b0 : 1'bz;        // open drain
+  pe_fpga_core #(.IMG(IMG), .OW(2), .FEED(FEED), .FALLS(FALLS),
+                 .NFEED(NFEED), .NRX(NRX)) u_core (
+      .clk(clk50), .rst_n(rst_n), .uart_rx(rxs[1]), .uart_tx(uart_tx),
+      .led(core_led), .running(running), .dq_in(j11_sda), .dq_low(sda_low),
+      .p3_in(j11_scl), .p3_low(scl_low)
   );
 `else
   pe_fpga_core #(.IMG(IMG)) u_core (
       .clk(clk50), .rst_n(rst_n), .uart_rx(rxs[1]), .uart_tx(uart_tx),
-      .led(core_led), .running(running), .dq_in(1'b1), .dq_low()
+      .led(core_led), .running(running), .dq_in(1'b1), .dq_low(),
+      .p3_in(1'b1), .p3_low()
   );
 `endif
   assign led = {core_led[5:2], locked, core_led[0]};

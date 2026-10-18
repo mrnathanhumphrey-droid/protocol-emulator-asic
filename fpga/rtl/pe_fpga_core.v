@@ -43,6 +43,24 @@
 //              is held in reset until then. Lane-0 bytes are forwarded to the
 //              PC until the feed's own replies are all out.
 //
+//   OW = 2   (I2C on J11, Wilson 10-17) -- SCL = uio[1] on J11 pin 3 (B20),
+//            SDA = uio[2] on J11 pin 4 (A20), both OPEN DRAIN, both released
+//            while loading / held / in reset (ISO_MF copies load bytes onto
+//            both). No UART on uio.
+//            * 'G' is followed by 4 bytes from the PC: fresh data the feed
+//              takes wherever a word is marked (bit 9 set, slot in [1:0]).
+//            * THE FEEDER IS PACED BY THE CHIP'S SCL FALLS AS SEEN AT J11,
+//              not a timer: an I2C byte's length depends on its framing and
+//              on how fast the pull-ups raise each high. SCL passes a 2-flop
+//              synchroniser and a DEGLITCH (a level counts only once stable
+//              for DEGLITCH cycles), and every filtered fall is counted. FALLS
+//              holds, per fed byte k, how many falls come before the chip pops
+//              it (the count model -- fpga/sim/i2c_fram.py, checked against
+//              the simulation); byte k (k >= 2) is pushed at fall FALLS[k-2]+1,
+//              strictly after pop k-2, so the 2-deep queue never overflows.
+//            * The program PARKS after one pass (a level-0 REARM): no second
+//              pass, so the feed simply ends. NRX bytes are forwarded.
+//
 // ⛔ THE GLUE CHECKS NOTHING. The judge is the PC: it knows what it sent.
 `default_nettype none
 module pe_fpga_core #(
@@ -59,9 +77,13 @@ module pe_fpga_core #(
     parameter integer POLLIDX  = 0,           // rx index of the first poll reply
     parameter integer PER2     = 12800,       // byte time = 2 symbols (P = 6400)
     parameter integer MARGIN   = 6400,        // push offset after the pop it follows
+    // ---- OW = 2 only ----
+    parameter FALLS            = "",          // per fed byte: SCL falls before its pop
+    parameter integer NRX      = 0,           // bytes the chip receives in the pass
+    parameter integer DEGLITCH = 8,           // SCL stable this many cycles (160 ns)
     // TEST KNOBS (simulation must-fires; 0 / -1 in every real build)
     parameter integer BAD_AT   = -1,          // byte index pushed off-schedule ...
-    parameter integer BAD_SHIFT = 0,          // ... by this many cycles
+    parameter integer BAD_SHIFT = 0,          // ... by this many cycles (OW 2: falls)
     parameter integer LATE     = 0,           // poll decision delayed by this
     parameter integer ISO_MF   = 0            // copy load bytes onto J11
 ) (
@@ -71,11 +93,14 @@ module pe_fpga_core #(
     output wire       uart_tx,      // to the PC
     output wire [5:0] led,
     output wire       running,      // program loaded, chip running
-    input  wire       dq_in,        // OW: J11 DQ pad, raw (synchronised here)
-    output wire       dq_low        // OW: 1 = pull J11 DQ low
+    input  wire       dq_in,        // J11 pin 4 pad, raw: OW 1 DQ, OW 2 SDA
+    output wire       dq_low,       // 1 = pull J11 pin 4 low
+    input  wire       p3_in,        // J11 pin 3 pad, raw: OW 2 SCL
+    output wire       p3_low        // 1 = pull J11 pin 3 low
 );
   localparam integer P_RX = 3;
   localparam integer P_DQ = 2, P_DQS = 3;
+  localparam integer P_SCL = 1, P_SDA = 2;
 
   // ---------------------------------------------------------------- loader
   // Boot loads the BRAM ROM (as before). The PC-UART loader (below) fills
@@ -160,9 +185,16 @@ module pe_fpga_core #(
   (* ASYNC_REG = "TRUE" *) reg [1:0] dqs;
   always @(posedge clk) dqs <= {dqs[0], dq_in};
   wire       dq_s = dqs[1];
+  // J11 pin 3 pad (OW 2: SCL), 2 flops
+  (* ASYNC_REG = "TRUE" *) reg [1:0] p3s;
+  always @(posedge clk) p3s <= {p3s[0], p3_in};
+  wire       p3_s = p3s[1];
   // the outside world on each uio pin: the load byte, then UART on P_RX, else
-  // a pull-up. OW: DQ (and its sense pin) read J11 instead, and no UART.
+  // a pull-up. OW 1: DQ (and its sense pin) read J11 instead, and no UART.
+  // OW 2: SCL and SDA read J11 pins 3 and 4, and no UART.
   wire [7:0] ext   = loading ? ldata
+                   : (OW == 2) ? (8'hFF & ~((8'h01 << P_SCL) | (8'h01 << P_SDA)))
+                                 | ({7'd0, p3_s} << P_SCL) | ({7'd0, dq_s} << P_SDA)
                    : (OW != 0) ? (8'hFF & ~((8'h01 << P_DQ) | (8'h01 << P_DQS)))
                                  | ({7'd0, dq_s} << P_DQ) | ({7'd0, dq_s} << P_DQS)
                    : (8'hFF & ~(8'h01 << P_RX)) | ({7'd0, uart_rx} << P_RX);
@@ -170,14 +202,43 @@ module pe_fpga_core #(
 
   // ⛔ J11 RELEASED UNLESS THE PROGRAM IS RUNNING (Wilson 10-17): loading,
   // chip reset and loader hold all release it. Registered, so it never
-  // glitches on the AND of independent flops.
-  reg dq_low_q;
-  always @(posedge clk)
+  // glitches on the AND of independent flops. Pin 4 is uio[2] in both modes
+  // (DQ / SDA); pin 3 is uio[1] (SCL), OW 2 only.
+  wire run_ok = !loading && !hold && chip_rst_n;
+  reg dq_low_q, p3_low_q;
+  always @(posedge clk) begin
     dq_low_q <= (OW != 0) && (
-        (!loading && !hold && chip_rst_n && uio_oe[P_DQ] && !uio_out[P_DQ])
+        (run_ok && uio_oe[P_DQ] && !uio_out[P_DQ])
       // ISO_MF (test only): what the real chip's pads would put on the bus
       || (ISO_MF != 0 && loading && chip_rst_n && !ldata[P_DQ]));
+    p3_low_q <= (OW == 2) && (
+        (run_ok && uio_oe[P_SCL] && !uio_out[P_SCL])
+      || (ISO_MF != 0 && loading && chip_rst_n && !ldata[P_SCL]));
+  end
   assign dq_low = dq_low_q;
+  assign p3_low = p3_low_q;
+
+  // ---- OW 2: SCL, deglitched, and its falls counted (Wilson 1b) ----------
+  // A level is accepted only after DEGLITCH cycles stable at the 2-flop
+  // output, so a bounce near the threshold on a slow rise or fall is counted
+  // once. DEGLITCH = 8 cycles = 160 ns at 50 MHz: under the shortest SCL
+  // phase of the Fm program (HIGH d/2 = 41 cycles), over UM10204's 50 ns
+  // spike width.
+  reg        sclf;           // the filtered SCL level
+  reg  [7:0] scl_stab;       // cycles p3_s has differed from sclf
+  reg [15:0] falls;          // filtered SCL falls since the load
+  always @(posedge clk) begin
+    if (!rst_n || go_ld || relo) begin
+      sclf <= 1'b1; scl_stab <= 8'd0; falls <= 16'd0;
+    end else if (p3_s == sclf) begin
+      scl_stab <= 8'd0;
+    end else if (scl_stab + 8'd1 >= DEGLITCH) begin
+      sclf <= p3_s; scl_stab <= 8'd0;
+      if (!p3_s && !loading) falls <= falls + 16'd1;
+    end else begin
+      scl_stab <= scl_stab + 8'd1;
+    end
+  end
 
   tt_um_protocol_emulator chip (
       .ui_in(ui_in), .uo_out(uo_out),
@@ -252,7 +313,10 @@ module pe_fpga_core #(
   end
 
   localparam [2:0] S_RUN = 3'd0, S_H1 = 3'd1, S_H2 = 3'd2, S_DATA = 3'd3,
-                   S_CK = 3'd4;
+                   S_CK = 3'd4, S_PCD = 3'd5;
+  // OW 2: the 4 fresh data bytes that follow 'G' (Wilson decision 2)
+  reg  [7:0]  pcd [0:3];
+  reg  [1:0]  pcn;
   reg  [2:0]  ls;
   reg  [8:0]  lidx;
   reg  [7:0]  lsum;
@@ -268,8 +332,14 @@ module pe_fpga_core #(
       ls <= S_H1; hold <= 1'b1;
     end else if (rx_v) begin
       case (ls)
-        // OW: 'G' = one run -- load (BRAM, or the last PC load), prefill, feed
-        S_RUN:  if (OW != 0 && rx_b == "G") begin hold <= 1'b0; go_ld <= 1'b1; end
+        // OW: 'G' = one run -- load (BRAM, or the last PC load), prefill, feed.
+        // OW 2: 'G' then 4 data bytes; the run starts after the 4th.
+        S_RUN:  if (OW == 2 && rx_b == "G") begin ls <= S_PCD; pcn <= 2'd0; end
+                else if (OW != 0 && rx_b == "G") begin hold <= 1'b0; go_ld <= 1'b1; end
+        S_PCD:  begin
+                  pcd[pcn] <= rx_b; pcn <= pcn + 2'd1;
+                  if (pcn == 2'd3) begin ls <= S_RUN; hold <= 1'b0; go_ld <= 1'b1; end
+                end
         S_H1:   if (rx_b == 8'hA5) ls <= S_H2;
         S_H2:   if (rx_b == 8'h5A) begin ls <= S_DATA; lidx <= 9'd0; lsum <= 8'd0; end
                 else ls <= S_H1;
@@ -296,12 +366,16 @@ module pe_fpga_core #(
   // shape = test/host_feed.vh's hf_push_nib: nibble set, 2 cycles, PUSH high
   // 3 cycles, low 1 -- 6 cycles per nibble, HIGH nibble first, tag 0.
   reg  [11:0] feedm [0:1023];
+  reg  [15:0] fallsm [0:255];   // OW 2: SCL falls before byte k's pop
   generate if (OW != 0) begin : g_feedrom
     initial $readmemh(FEED, feedm, 0, NFEED - 1);
   end endgenerate
+  generate if (OW == 2) begin : g_fallsrom
+    initial $readmemh(FALLS, fallsm, 0, NFEED - 1);
+  end endgenerate
 
   localparam [2:0] F_OFF = 3'd0, F_WAIT = 3'd1, F_PRE = 3'd2, F_ANCH = 3'd3,
-                   F_DUE = 3'd4, F_PUSH = 3'd5, F_REPLY = 3'd6;
+                   F_DUE = 3'd4, F_PUSH = 3'd5, F_REPLY = 3'd6, F_FALL = 3'd7;
   reg  [2:0]  fst, fret;       // state, and where F_PUSH returns
   reg  [3:0]  fph;             // push phase, 0..11
   reg  [7:0]  fbyte;           // the byte being pushed
@@ -319,8 +393,10 @@ module pe_fpga_core #(
   reg         dq_q;
   wire        pay = f_ok && !f_marker && f_kind == 3'd0 && !loading;
 
-  // the next byte to push, and what follows it
+  // the next byte to push, and what follows it; bit 9 = "the PC's data byte
+  // number fw[1:0]" (OW 2; no 1-Wire word sets it)
   wire [11:0] fw = feedm[fi + gi];
+  wire [7:0]  fval = fw[9] ? pcd[fw[1:0]] : fw[7:0];
   always @(posedge clk) begin
     now  <= now + 32'd1;
     dq_q <= dq_low_q;
@@ -336,8 +412,16 @@ module pe_fpga_core #(
         // CDC3: PROG low >= 3 cycles before the first PUSH edge
         F_WAIT: if (!loading && !hold) begin fst <= F_PRE; late_c <= 32'd3; end
         F_PRE: if (late_c != 0) late_c <= late_c - 32'd1;
-               else if (kb == 16'd2) fst <= F_ANCH;
-               else begin fbyte <= fw[7:0]; fret <= F_PRE; fst <= F_PUSH; end
+               else if (kb == 16'd2) fst <= (OW == 2) ? F_FALL : F_ANCH;
+               else begin fbyte <= fval; fret <= F_PRE; fst <= F_PUSH; end
+        // OW 2: byte k at SCL fall FALLS[k-2] + 1 -- strictly after pop k-2
+        F_FALL: if (!feed_done) begin
+          tgt = {16'd0, fallsm[kb - 16'd2]} + 32'd1
+              + ((kb == BAD_AT) ? BAD_SHIFT : 0);
+          if ($signed({16'd0, falls} - tgt) >= 0) begin
+            fbyte <= fval; fret <= F_FALL; fst <= F_PUSH;
+          end
+        end
         // t0 = the FIRST DQ FALL the chip shows
         F_ANCH: if (dq_low_q && !dq_q) begin
                   due <= now + MARGIN; fst <= F_DUE;
@@ -345,7 +429,7 @@ module pe_fpga_core #(
         F_DUE: begin
           tgt = (kb == BAD_AT) ? due + BAD_SHIFT : due;
           if ($signed(now - tgt) >= 0) begin
-            fbyte <= feed_done ? 8'hFF : fw[7:0];
+            fbyte <= feed_done ? 8'hFF : fval;
             fret  <= F_DUE;
             fst   <= F_PUSH;
           end
@@ -395,8 +479,10 @@ module pe_fpga_core #(
     end
   end
   // forward the chip's bytes to the PC until the feed's own replies are out:
-  // one reply per 4 bytes fed (every block is a multiple of 8 symbols)
-  wire fwd = (OW == 0) || !feed_done || (rx_cnt < (nfed >> 2));
+  // OW 1: one reply per 4 bytes fed (every block is a multiple of 8 symbols);
+  // OW 2: the pass's NRX receives
+  wire fwd = (OW == 0) || !feed_done
+          || (rx_cnt < ((OW == 2) ? NRX[15:0] : (nfed >> 2)));
 
   // ⭐ THE STATUS TRAILER (Wilson #3): once the replies are out, the PC gets
   // 'S' then every status bit the glue decoded this run (st_or), so the HOST

@@ -14,6 +14,8 @@
 set root [file normalize [file join [file dirname [info script]] .. ..]]
 if {[lsearch -exact $argv ow] >= 0} {
   set bit [file join $root fpga build pa100t_ow pa100t_ow1wire.bit]
+} elseif {[lsearch -exact $argv i2c] >= 0} {
+  set bit [file join $root fpga build pa100t_i2c pa100t_i2cfram.bit]
 } else {
   set bit [file join $root fpga build pa100t pa100t_top.bit]
 }
