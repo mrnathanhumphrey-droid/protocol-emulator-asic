@@ -55,7 +55,12 @@ ROOT = os.path.dirname(HERE)
 #: passes; 71 of 72 output lines match the previous freeze's run, the 72nd an
 #: absolute timestamp moved exactly one cycle (docs/CE5_LOG.md, with the
 #: prediction miss recorded).
-FREEZE_SHA = "effe478756943c3a1112d23b398837a942ea7ef1"
+#: ⛔ RE-PINNED to c95af23 (2026-10-18) -- RE-CERTIFIED under the rule as
+#: written: 5607b88 changed src/config.json (the hold-fix port; a flow setting,
+#: no .v file). Prediction stamped first: identical output. Result: 74 of 74
+#: CE5 output lines byte-identical to the effe478 run, the timestamp included
+#: (docs/CE5_LOG.md).
+FREEZE_SHA = "c95af2379d15da5edc7749f3a18df8c21eee52f7"
 
 
 def git(args, env=None):

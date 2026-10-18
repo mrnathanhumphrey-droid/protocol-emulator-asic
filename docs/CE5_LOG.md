@@ -29,6 +29,36 @@ is the whole claim.
   checked against Maxim AN27's worked example `02 1C B8 01 00 00 00 → A2`).
   On-chip CRC belongs to the reach branch.
 
+### The freeze moved (2026-10-18): CE5 re-certified on `c95af23`
+
+**Basis: re-certified (the full CE5 set)** on `c95af23`, under the freeze rule
+as written (Wilson): the freeze pins all of `src/`, and `5607b88` changed
+`src/config.json`.
+
+* **Why `src/` changed.** `5607b88` ported the 10-14 hold fix
+  (`GRT_RESIZER_HOLD_SLACK_MARGIN` 0.10, `RUN_POST_GRT_RESIZER_TIMING` 1) to
+  the lock branch. It had sat only on the canary branch where the timing of
+  record was measured. It is a flow setting: no `.v` file changed, and the RTL
+  is proven equivalent to that canary (`model/rtl_equiv.py --base 04253a2`,
+  4547 of 4547 cells).
+* ⛔ **The slip, recorded.** `5607b88` was committed after only the two gates
+  that read `src/config.json`, not the full suite. The full suite then showed
+  this gate red (CE5 VOID), and `5607b88`'s message does not say so. Standing
+  rule restated (Wilson): the full suite before every commit, no exception for
+  "config-only" changes.
+* **Prediction, stamped before any run**
+  (`probe_reports/ce5_recert_prediction_c95af23.txt`): identical output on the
+  two trees, the one absolute timestamp included, because among CE5's inputs
+  only `src/config.json` (read by no simulation) and the previous re-pin's own
+  edit differ.
+* **Result: the prediction held exactly.** `test/run_onewire.py` on the old
+  freeze `effe478` and on `c95af23`: **74 of 74 output lines byte-identical**,
+  the `underrun_reset` timestamp included (`at t=6434051.0 ns` on both).
+  `CE5-ONEWIRE: PASSED` on both, all five must-fires red on both.
+* Next (Wilson): the freeze is narrowed, in its own commit, to exactly the
+  files CE5's simulation reads, with `model/gate_flow_config.py` covering the
+  flow settings. Between them the two gates cover everything.
+
 ### The freeze moved (2026-10-17): CE5 re-certified on `effe478`
 
 **Basis: re-certified (the full CE5 set)** on `effe478`, the reset-network
