@@ -10,8 +10,19 @@
 # ⛔ A NEGATIVE WNS IS A FAILED BUILD: the script exits non-zero and writes no
 # bitstream, so a board never runs a design that does not meet 50 MHz.
 
+#
+# THE 1-WIRE BUILD (Wilson 10-17):  ... -source fpga/pa100t/build.tcl -tclargs ow
+#   defines PE_OW (pa100t_top.v: J11 pin 4 = DQ, open drain), adds
+#   pa100t_j11_ow.xdc, loads test/onewire_fpga_image.hex + the feed
+#   fpga/feeds/onewire_fpga_feed.{hex,params} -- the files
+#   fpga/sim/run_fpga_onewire.py simulated and checks are tracked unchanged.
+#   Output: fpga/build/pa100t_ow/pa100t_ow1wire.bit (its own folder and name,
+#   so it is never mistaken for the UART build).
+
 set root [file normalize [file join [file dirname [info script]] .. ..]]
-set out  [file join $root fpga build pa100t]
+set ow   [expr {[lsearch -exact $argv ow] >= 0}]
+set out  [file join $root fpga build [expr {$ow ? "pa100t_ow" : "pa100t"}]]
+set bitname [expr {$ow ? "pa100t_ow1wire.bit" : "pa100t_top.bit"}]
 file mkdir $out
 set part xc7a100tfgg484-2
 
@@ -23,11 +34,27 @@ read_verilog [file join $root fpga pa100t pa100t_top.v]
 read_xdc     [file join $root fpga pa100t pa100t_uart.xdc]
 
 # the ROM image: $readmemh resolves against the working directory
-set img [file join $root fpga images uart_rx_434.hex]
-file copy -force $img [file join $out uart_rx_434.hex]
+if {$ow} {
+  read_xdc [file join $root fpga pa100t pa100t_j11_ow.xdc]
+  file copy -force [file join $root test onewire_fpga_image.hex] [file join $out onewire_fpga_image.hex]
+  file copy -force [file join $root fpga feeds onewire_fpga_feed.hex] [file join $out onewire_fpga_feed.hex]
+  set fh [open [file join $root fpga feeds onewire_fpga_feed.params]]
+  array set prm [string map {"\n" " "} [read $fh]]
+  close $fh
+  set gen [list "IMG=\"onewire_fpga_image.hex\"" "FEED=\"onewire_fpga_feed.hex\"" \
+               NFEED=$prm(NFEED) POLLIDX=$prm(POLLIDX) PER2=$prm(PER2) MARGIN=$prm(MARGIN)]
+  puts "PE_FPGA: 1-Wire build, generics $gen"
+} else {
+  set img [file join $root fpga images uart_rx_434.hex]
+  file copy -force $img [file join $out uart_rx_434.hex]
+}
 cd $out
 
-synth_design -top pa100t_top -part $part
+if {$ow} {
+  synth_design -top pa100t_top -part $part -verilog_define PE_OW -generic $gen
+} else {
+  synth_design -top pa100t_top -part $part
+}
 opt_design
 place_design
 route_design
@@ -41,5 +68,29 @@ if {$wns < 0 || $whs < 0} {
   puts "PE_FPGA: *** TIMING NOT MET -- no bitstream written"
   exit 1
 }
-write_bitstream -force [file join $out pa100t_top.bit]
-puts "PE_FPGA: bitstream [file join $out pa100t_top.bit]"
+if {$ow} {
+  # ⭐ A20 IS OPEN DRAIN IN THE NETLIST (Wilson's check): the pad's buffer is
+  # an OBUFT / IOBUF whose data input is constant 0 -- it can only pull low
+  # or release. Printed for the record, and a hard stop if not.
+  set pin [get_ports j11_dq]
+  set buf [get_cells -of_objects [get_nets -of_objects $pin]]
+  puts "PE_FPGA: j11_dq -> [get_property PACKAGE_PIN $pin] [get_property IOSTANDARD $pin] PULLUP=[get_property PULLUP $pin], buffer(s): [get_property REF_NAME $buf]"
+  report_io -file [file join $out io.rpt]
+  if {[get_property PACKAGE_PIN $pin] ne "A20"} {
+    puts "PE_FPGA: *** j11_dq is not on A20 -- no bitstream written"; exit 1
+  }
+  set tbuf [get_cells -quiet $buf -filter {REF_NAME == IOBUF || REF_NAME == OBUFT}]
+  set ok_od 0
+  if {[llength $tbuf] == 1} {
+    set inet [get_nets -of_objects [get_pins -of_objects $tbuf -filter {REF_PIN_NAME == I}]]
+    set ntype [get_property TYPE $inet]
+    puts "PE_FPGA: j11_dq [get_property REF_NAME $tbuf] data input I <- net $inet (TYPE $ntype)"
+    set ok_od [expr {$ntype eq "GROUND"}]
+  }
+  if {!$ok_od} {
+    puts "PE_FPGA: *** j11_dq is NOT open drain (I not tied to ground) -- no bitstream written"; exit 1
+  }
+  puts "PE_FPGA: j11_dq OPEN DRAIN: data input tied to ground; it only pulls low or releases"
+}
+write_bitstream -force [file join $out $bitname]
+puts "PE_FPGA: bitstream [file join $out $bitname]"

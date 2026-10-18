@@ -8,8 +8,15 @@
 # The board has TWO USB ports and only one is JTAG: the FT232H. The CH340E is
 # UART only -- a cable on it alone looks exactly like a dead board.
 
+#   ... -source fpga/pa100t/program.tcl -tclargs ow   -> the 1-Wire build
+#   (fpga/build/pa100t_ow/pa100t_ow1wire.bit)
+
 set root [file normalize [file join [file dirname [info script]] .. ..]]
-set bit  [file join $root fpga build pa100t pa100t_top.bit]
+if {[lsearch -exact $argv ow] >= 0} {
+  set bit [file join $root fpga build pa100t_ow pa100t_ow1wire.bit]
+} else {
+  set bit [file join $root fpga build pa100t pa100t_top.bit]
+}
 if {![file exists $bit]} { error "no bitstream at $bit -- run build.tcl first" }
 puts "PE_PROGRAM: bitstream $bit ([file size $bit] bytes, built [clock format [file mtime $bit] -format {%Y-%m-%d %H:%M:%S}])"
 

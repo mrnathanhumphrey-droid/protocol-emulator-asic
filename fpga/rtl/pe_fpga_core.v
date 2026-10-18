@@ -18,6 +18,31 @@
 //            the PC, RAW -- data byte and stop byte both -- so the PC, not this
 //            glue, judges every byte. Status frames light LEDs.
 //
+//   OW = 1   (1-Wire on J11, Wilson 10-17) -- the default build (OW = 0) is
+//            unchanged. DQ = uio[2] (the chip pulls it low or releases it),
+//            sensed back on uio[3]; uio[4] is the program's spare clock pin,
+//            left unconnected. The PC UART no longer reaches uio[3].
+//            * J11 IS RELEASED whenever the chip is loading, held in reset or
+//              held for the loader: on the real chip the host's load bytes
+//              ride the uio pins, so a peer there would see them. Here they
+//              never reach J11, by construction. ISO_MF = 1 (test only) copies
+//              the load bytes onto J11 the way the real chip's pads would.
+//            * THE FEEDER is the host's byte channel (HOST_INTERFACE "TX
+//              nibble channel"), PACED BY A FIXED TIMER, because the chip has
+//              no back-pressure pin: the program's symbol period P is exact,
+//              a byte is 2 symbols, so byte k is pushed at
+//                 t0 + (k - 2) * PER2 + MARGIN       (PER2 = 2P)
+//              where t0 is the FIRST DQ FALL THE CHIP SHOWS -- not the reset
+//              release, whose distance to the first slot depends on the program
+//              (header load + priming). Bytes 0 and 1 are pushed before the
+//              chip starts, filling the 2-deep queue. A wrong schedule is
+//              reported by the chip itself (underrun / TX-full status bits).
+//            * THE POLL READS BEFORE IT DECIDES: after a poll group's 4 bytes,
+//              the next byte waits for that group's reply byte; non-zero = done.
+//            * 'G' from the PC starts one run (load, prefill, feed). The chip
+//              is held in reset until then. Lane-0 bytes are forwarded to the
+//              PC until the feed's own replies are all out.
+//
 // ⛔ THE GLUE CHECKS NOTHING. The judge is the PC: it knows what it sent.
 `default_nettype none
 module pe_fpga_core #(
@@ -26,16 +51,31 @@ module pe_fpga_core #(
     // PC-UART LOADER (Wilson: the FPGA stand-in for the Pico 2's role). A line
     // held low this long is "enter the loader" -- 20 ms at 50 MHz, ten times
     // the 2 ms break the UART-rx test sends as a framing frame.
-    parameter integer BRK_CYC  = 1000000
+    parameter integer BRK_CYC  = 1000000,
+    // ---- OW = 1 only (see above) ----
+    parameter integer OW       = 0,
+    parameter FEED             = "",          // 12-bit words: 0xx byte, 1xx poll group
+    parameter integer NFEED    = 0,
+    parameter integer POLLIDX  = 0,           // rx index of the first poll reply
+    parameter integer PER2     = 12800,       // byte time = 2 symbols (P = 6400)
+    parameter integer MARGIN   = 6400,        // push offset after the pop it follows
+    // TEST KNOBS (simulation must-fires; 0 / -1 in every real build)
+    parameter integer BAD_AT   = -1,          // byte index pushed off-schedule ...
+    parameter integer BAD_SHIFT = 0,          // ... by this many cycles
+    parameter integer LATE     = 0,           // poll decision delayed by this
+    parameter integer ISO_MF   = 0            // copy load bytes onto J11
 ) (
     input  wire       clk,          // 50 MHz
     input  wire       rst_n,        // synchronous to clk, active low
     input  wire       uart_rx,      // from the PC (board USB-UART)
     output wire       uart_tx,      // to the PC
     output wire [5:0] led,
-    output wire       running       // program loaded, chip running
+    output wire       running,      // program loaded, chip running
+    input  wire       dq_in,        // OW: J11 DQ pad, raw (synchronised here)
+    output wire       dq_low        // OW: 1 = pull J11 DQ low
 );
   localparam integer P_RX = 3;
+  localparam integer P_DQ = 2, P_DQS = 3;
 
   // ---------------------------------------------------------------- loader
   // Boot loads the BRAM ROM (as before). The PC-UART loader (below) fills
@@ -46,6 +86,7 @@ module pe_fpga_core #(
   reg        use_buf;
   reg        relo;          // pulse: restart the load from `lbuf`
   reg        hold;          // level: hold the chip in reset (listening)
+  reg        go_ld;         // OW: pulse, 'G' -- restart the load as it stands
 
   localparam [2:0] L_RST = 3'd0, L_PROG = 3'd1, L_PTR = 3'd2, L_PTR0 = 3'd3,
                    L_BYTE = 3'd4, L_DONE = 3'd5, L_HOLD = 3'd6;
@@ -66,8 +107,10 @@ module pe_fpga_core #(
       // listening: chip in reset, the uio bus idle (pull-ups)
       lst <= L_HOLD; chip_rst_n <= 1'b0; prog <= 1'b0; ptr <= 1'b0;
       wr <= 1'b0; ldata <= 8'hFF; loading <= 1'b1;
-    end else if (relo) begin
-      lst <= L_RST; lcnt <= 8'd0; use_buf <= 1'b1; chip_rst_n <= 1'b0;
+    end else if (relo || go_ld) begin
+      lst <= L_RST; lcnt <= 8'd0; chip_rst_n <= 1'b0;
+      if (relo) use_buf <= 1'b1;
+      prog <= 1'b0; ptr <= 1'b0; wr <= 1'b0; ldata <= 8'hFF; loading <= 1'b1;
     end else begin
       lcnt <= lcnt + 8'd1;
       case (lst)
@@ -107,12 +150,34 @@ module pe_fpga_core #(
 
   // ----------------------------------------------------------------- chip
   wire [7:0] uo_out, uio_out, uio_oe;
-  wire [7:0] ui_in = {prog, wr, ptr, 5'b00000};      // ui[7] PROG, [6] WR, [5] PTR
+  // ui[7] PROG, [6] WR, [5] PTR in load mode. In run mode (OW only) the
+  // feeder's push: [6] PUSH, [4:1] nibble, {[5], [0]} the queue tag (0).
+  // With OW = 0, p_wr / p_nib are constant 0: the original {prog, wr, ptr, 0}.
+  reg        p_wr;
+  reg  [3:0] p_nib;
+  wire [7:0] ui_in = {prog, wr | p_wr, ptr, p_nib, 1'b0};
+  // J11 DQ pad, 2 flops (the chip synchronises its pins again, as a real pad)
+  (* ASYNC_REG = "TRUE" *) reg [1:0] dqs;
+  always @(posedge clk) dqs <= {dqs[0], dq_in};
+  wire       dq_s = dqs[1];
   // the outside world on each uio pin: the load byte, then UART on P_RX, else
-  // a pull-up
+  // a pull-up. OW: DQ (and its sense pin) read J11 instead, and no UART.
   wire [7:0] ext   = loading ? ldata
-                             : (8'hFF & ~(8'h01 << P_RX)) | ({7'd0, uart_rx} << P_RX);
+                   : (OW != 0) ? (8'hFF & ~((8'h01 << P_DQ) | (8'h01 << P_DQS)))
+                                 | ({7'd0, dq_s} << P_DQ) | ({7'd0, dq_s} << P_DQS)
+                   : (8'hFF & ~(8'h01 << P_RX)) | ({7'd0, uart_rx} << P_RX);
   wire [7:0] uio_in = (uio_oe & uio_out) | (~uio_oe & ext);
+
+  // ⛔ J11 RELEASED UNLESS THE PROGRAM IS RUNNING (Wilson 10-17): loading,
+  // chip reset and loader hold all release it. Registered, so it never
+  // glitches on the AND of independent flops.
+  reg dq_low_q;
+  always @(posedge clk)
+    dq_low_q <= (OW != 0) && (
+        (!loading && !hold && chip_rst_n && uio_oe[P_DQ] && !uio_out[P_DQ])
+      // ISO_MF (test only): what the real chip's pads would put on the bus
+      || (ISO_MF != 0 && loading && chip_rst_n && !ldata[P_DQ]));
+  assign dq_low = dq_low_q;
 
   tt_um_protocol_emulator chip (
       .ui_in(ui_in), .uo_out(uo_out),
@@ -195,13 +260,16 @@ module pe_fpga_core #(
   reg  [7:0]  rp_data;
   reg  [7:0]  nloads;        // PC loads accepted (LED / debug)
   always @(posedge clk) begin
-    relo <= 1'b0; rp_push <= 1'b0;
+    relo <= 1'b0; rp_push <= 1'b0; go_ld <= 1'b0;
     if (!rst_n) begin
-      ls <= S_RUN; hold <= 1'b0; nloads <= 8'd0;
+      // OW: the chip waits in reset (J11 released) until the PC says 'G'
+      ls <= S_RUN; hold <= (OW != 0); nloads <= 8'd0;
     end else if (brk) begin
       ls <= S_H1; hold <= 1'b1;
     end else if (rx_v) begin
       case (ls)
+        // OW: 'G' = one run -- load (BRAM, or the last PC load), prefill, feed
+        S_RUN:  if (OW != 0 && rx_b == "G") begin hold <= 1'b0; go_ld <= 1'b1; end
         S_H1:   if (rx_b == 8'hA5) ls <= S_H2;
         S_H2:   if (rx_b == 8'h5A) begin ls <= S_DATA; lidx <= 9'd0; lsum <= 8'd0; end
                 else ls <= S_H1;
@@ -223,11 +291,118 @@ module pe_fpga_core #(
     end
   end
 
+  // ------------------------------------------------------- feeder (OW = 1)
+  // The host's TX channel, paced by a FIXED TIMER (see the header). Push
+  // shape = test/host_feed.vh's hf_push_nib: nibble set, 2 cycles, PUSH high
+  // 3 cycles, low 1 -- 6 cycles per nibble, HIGH nibble first, tag 0.
+  reg  [11:0] feedm [0:1023];
+  generate if (OW != 0) begin : g_feedrom
+    initial $readmemh(FEED, feedm, 0, NFEED - 1);
+  end endgenerate
+
+  localparam [2:0] F_OFF = 3'd0, F_WAIT = 3'd1, F_PRE = 3'd2, F_ANCH = 3'd3,
+                   F_DUE = 3'd4, F_PUSH = 3'd5, F_REPLY = 3'd6;
+  reg  [2:0]  fst, fret;       // state, and where F_PUSH returns
+  reg  [3:0]  fph;             // push phase, 0..11
+  reg  [7:0]  fbyte;           // the byte being pushed
+  reg  [10:0] fi;              // feed word index
+  reg  [1:0]  gi;              // byte within a poll group
+  reg         in_poll;
+  reg  [31:0] now, due, tgt;   // free-running cycle count; schedule
+  reg  [15:0] kb;              // bytes pushed since the load (byte index k)
+  reg  [15:0] nfed;            // bytes pushed while the feed lasted
+  reg         feed_done;
+  reg  [15:0] rx_cnt;          // lane-0 payload bytes received since the load
+  reg  [15:0] pg;              // poll groups pushed
+  reg  [7:0]  reply;
+  reg  [31:0] late_c;
+  reg         dq_q;
+  wire        pay = f_ok && !f_marker && f_kind == 3'd0 && !loading;
+
+  // the next byte to push, and what follows it
+  wire [11:0] fw = feedm[fi + gi];
+  always @(posedge clk) begin
+    now  <= now + 32'd1;
+    dq_q <= dq_low_q;
+    if (!rst_n || go_ld || relo || OW == 0) begin
+      fst <= (OW != 0) ? F_WAIT : F_OFF; fph <= 4'd0; p_wr <= 1'b0;
+      p_nib <= 4'd0; fi <= 11'd0; gi <= 2'd0; in_poll <= 1'b0; kb <= 16'd0;
+      nfed <= 16'd0; feed_done <= 1'b0; rx_cnt <= 16'd0; pg <= 16'd0;
+      if (!rst_n) now <= 32'd0;
+    end else begin
+      if (pay) rx_cnt <= rx_cnt + 16'd1;
+      case (fst)
+        F_OFF: ;
+        // CDC3: PROG low >= 3 cycles before the first PUSH edge
+        F_WAIT: if (!loading && !hold) begin fst <= F_PRE; late_c <= 32'd3; end
+        F_PRE: if (late_c != 0) late_c <= late_c - 32'd1;
+               else if (kb == 16'd2) fst <= F_ANCH;
+               else begin fbyte <= fw[7:0]; fret <= F_PRE; fst <= F_PUSH; end
+        // t0 = the FIRST DQ FALL the chip shows
+        F_ANCH: if (dq_low_q && !dq_q) begin
+                  due <= now + MARGIN; fst <= F_DUE;
+                end
+        F_DUE: begin
+          tgt = (kb == BAD_AT) ? due + BAD_SHIFT : due;
+          if ($signed(now - tgt) >= 0) begin
+            fbyte <= feed_done ? 8'hFF : fw[7:0];
+            fret  <= F_DUE;
+            fst   <= F_PUSH;
+          end
+        end
+        // ⭐ THE POLL READS BEFORE IT DECIDES: the reply for group pg is rx
+        // index POLLIDX + pg (one reply per 8 symbols = per 4 pushed bytes)
+        F_REPLY: begin
+          if (pay && rx_cnt == POLLIDX + pg) begin reply <= f_data; late_c <= LATE; end
+          if (rx_cnt > POLLIDX + pg && !pay) begin
+            if (late_c != 0) late_c <= late_c - 32'd1;
+            else begin
+              pg <= pg + 16'd1;
+              if (reply != 8'h00) begin in_poll <= 1'b0; fi <= fi + 11'd4; end
+              fst <= F_DUE;
+            end
+          end
+        end
+        F_PUSH: begin
+          fph <= fph + 4'd1;
+          case (fph)
+            4'd0:  p_nib <= fbyte[7:4];
+            4'd2:  p_wr  <= 1'b1;
+            4'd5:  p_wr  <= 1'b0;
+            4'd6:  p_nib <= fbyte[3:0];
+            4'd8:  p_wr  <= 1'b1;
+            4'd11: begin
+              p_wr <= 1'b0; fph <= 4'd0; kb <= kb + 16'd1;
+              if (fret == F_DUE) due <= due + PER2;
+              fst <= fret;
+              if (!feed_done) begin
+                nfed <= nfed + 16'd1;
+                // advance through the feed: a poll group is 4 words, pushed
+                // whole, then the reply decides (repeat it, or move on)
+                if (fw[8] || in_poll) begin
+                  in_poll <= 1'b1;
+                  if (gi == 2'd3) begin gi <= 2'd0; fst <= F_REPLY; end
+                  else gi <= gi + 2'd1;
+                end else if (fi + 11'd1 >= NFEED) feed_done <= 1'b1;
+                else fi <= fi + 11'd1;
+              end
+            end
+            default: ;
+          endcase
+        end
+        default: fst <= F_OFF;
+      endcase
+    end
+  end
+  // forward the chip's bytes to the PC until the feed's own replies are out:
+  // one reply per 4 bytes fed (every block is a multiple of 8 symbols)
+  wire fwd = (OW == 0) || !feed_done || (rx_cnt < (nfed >> 2));
+
   // ------------------------------------------------------------- the FIFO
   reg [7:0]  fifo [0:1023];
   reg [9:0]  wp, rp;
   reg        ovf;
-  wire       f_chip  = f_ok && !f_marker && f_kind == 3'd0 && !loading;
+  wire       f_chip  = f_ok && !f_marker && f_kind == 3'd0 && !loading && fwd;
   // the loader's reply shares the FIFO; it never coincides with a chip byte
   // (the chip is in reset while the loader listens)
   wire       f_push  = f_chip || rp_push;
@@ -281,10 +456,13 @@ module pe_fpga_core #(
   // ----------------------------------------------------------------- LEDs
   reg [24:0] hb;
   reg        st_err, rx_tog;
+  reg  [7:0] st_or;         // every status bit seen since the load (the host's view)
   always @(posedge clk) begin
-    if (!rst_n) begin hb <= 25'd0; st_err <= 1'b0; rx_tog <= 1'b0; end
+    if (!rst_n) begin hb <= 25'd0; st_err <= 1'b0; rx_tog <= 1'b0; st_or <= 8'd0; end
     else begin
       hb <= hb + 25'd1;
+      if (OW != 0 && (go_ld || relo)) begin st_err <= 1'b0; st_or <= 8'd0; end
+      if (f_ok && f_marker) st_or <= st_or | f_data;
       // status frame (marker 1): any error bit (7..1; bit 0 is "alive")
       if (f_ok && f_marker && |f_data[7:1]) st_err <= 1'b1;
       if (f_push) rx_tog <= ~rx_tog;

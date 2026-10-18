@@ -5,15 +5,27 @@
 // directly (its RST is asynchronous by design) and is SYNCHRONISED before it
 // reaches fabric; the core leaves reset only once the MMCM is locked.
 // Board facts and their provenance: pa100t_uart.xdc.
+//
+// PE_OW (defined by `build.tcl ow` only): the 1-Wire build -- J11 pin 4 (A20)
+// is DQ, OPEN DRAIN: pulled low or released, never driven high (the 4.7k on the
+// breadboard pulls it up; pa100t_j11_ow.xdc). Without PE_OW this file is the
+// UART build exactly as before.
 `default_nettype none
 module pa100t_top #(
     parameter IMG = "uart_rx_434.hex"
+`ifdef PE_OW
+  , parameter FEED = "onewire_fpga_feed.hex",
+    parameter integer NFEED = 0, POLLIDX = 0, PER2 = 0, MARGIN = 0
+`endif
 ) (
     input  wire       sys_clk_p,
     input  wire       sys_clk_n,
     input  wire       sys_rstn,
     input  wire       uart_rx,
     output wire       uart_tx,
+`ifdef PE_OW
+    inout  wire       j11_dq,
+`endif
     output wire [5:0] led
 );
   wire clk_in, clk_fb, clk50_u, clk50, locked;
@@ -45,10 +57,20 @@ module pa100t_top #(
 
   wire [5:0] core_led;
   wire       running;
+`ifdef PE_OW
+  wire dq_low;
+  assign j11_dq = dq_low ? 1'b0 : 1'bz;          // open drain
+  pe_fpga_core #(.IMG(IMG), .OW(1), .FEED(FEED), .NFEED(NFEED),
+                 .POLLIDX(POLLIDX), .PER2(PER2), .MARGIN(MARGIN)) u_core (
+      .clk(clk50), .rst_n(rst_n), .uart_rx(rxs[1]), .uart_tx(uart_tx),
+      .led(core_led), .running(running), .dq_in(j11_dq), .dq_low(dq_low)
+  );
+`else
   pe_fpga_core #(.IMG(IMG)) u_core (
       .clk(clk50), .rst_n(rst_n), .uart_rx(rxs[1]), .uart_tx(uart_tx),
-      .led(core_led), .running(running)
+      .led(core_led), .running(running), .dq_in(1'b1), .dq_low()
   );
+`endif
   assign led = {core_led[5:2], locked, core_led[0]};
 endmodule
 `default_nettype wire
