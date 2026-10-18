@@ -20,6 +20,8 @@ MUST-FIRES (each must reach the END token, and be red for its own reason)
   slow        one byte (k = BAD_AT) pushed 2 byte times late: the chip's
               UNDERRUN status bit must light and the run must fail
   fast        one byte pushed 1 byte time early: TX-FULL must light, run fails
+              (both judged from the STATUS TRAILER the PC receives -- 'S' +
+              st_or, the last two bytes -- not from inside the simulation)
   late_over   the poll decision delayed past the slack: underrun, run fails
 
 THE POLL SLACK (Wilson condition 3). After a poll group's 4 bytes the feeder
@@ -124,6 +126,42 @@ def sim(name, e, nfeed, pidx, fpath, **kw):
     return open(log, encoding="utf-8", errors="replace").read()
 
 
+#: the chip's status byte (src/project.v): bit 0 = alive
+STATUS_BITS = {1: "underrun", 2: "ovf", 3: "ovr", 4: "TX-full",
+               5: "config_err", 6: "RX-drop", 7: "clock-stretch"}
+
+
+def idle_replies(lines):
+    """The feed ends in IDLE bytes (0xFF, `feed_file`), whose replies the glue
+    forwards too: one reply per 4 bytes. Counted from the feed itself."""
+    n = 0
+    for w in reversed(lines):
+        if w != "0ff":
+            break
+        n += 1
+    return n // 4
+
+
+def trailer(rx, nseq, nidle):
+    """The status trailer is the LAST two bytes the PC receives (forwarding
+    stops before it, nothing follows it), so a corrupted run cannot hide it
+    by moving where the parse thinks the transaction ended. Between the
+    transaction and the trailer: exactly `nidle` idle replies, each FF.
+    -> (status or None, the count and the idle bytes are right?, the two bytes)"""
+    tr = rx[-2:] if len(rx) >= 2 else []
+    st = tr[1] if len(tr) == 2 and tr[0] == 0x53 else None
+    idle = rx[nseq:nseq + nidle]
+    ok = len(rx) == nseq + nidle + 2 and idle == [0xFF] * nidle
+    return st, ok, tr
+
+
+def status_names(st):
+    if st is None:
+        return "--"
+    on = [n for b, n in sorted(STATUS_BITS.items()) if (st >> b) & 1]
+    return "%02X%s" % (st, (" (" + ", ".join(on) + ")") if on else "")
+
+
 def walk(rx, rxmap):
     """The PC's parse: rxmap in order; a poll entry consumes bytes up to and
     including the first non-zero. -> [(entry, byte)] or None if short."""
@@ -145,7 +183,7 @@ def walk(rx, rxmap):
     return out, True
 
 
-def judge(txt, rxmap):
+def judge(txt, rxmap, nidle):
     d = RO.parse(txt)
     ck = []
 
@@ -190,11 +228,22 @@ def judge(txt, rxmap):
         chk("timing %s in [%s, %s] us" % (nm, lo / 1000, "inf" if hi is None else hi / 1000),
             n > 0 and mn >= lo and (hi is None or mx <= hi),
             "n=%d min %.3f max %.3f us" % (n, mn / 1000, mx / 1000))
-    m = re.search(r"^OW-STATUS ([0-9a-fx]{2})", txt, re.M)
-    st = int(m.group(1), 16) if m and "x" not in m.group(1) else None
+    # ⭐ THE STATUS TRAILER, AS THE PC RECEIVES IT (Wilson #3): 'S' then the
+    # status bits, right after the transaction's bytes -- the same check
+    # fpga/host/ow_run.py makes on the board
+    st, right_after, tr = trailer(d["rx"], len(seq), nidle)
     d["status"] = st
-    chk("status bits clean, as the host decoded them (bits 7..1 == 0)",
-        st is not None and st & 0xFE == 0, "%s" % ("%02X" % st if st is not None else "--"))
+    chk("status trailer received: 'S' + status byte, the last 2 bytes (PC-side)",
+        st is not None, " ".join("%02X" % b for b in tr) or "none")
+    chk("transaction + %d idle replies (FF) + trailer, nothing missing or extra"
+        % nidle, full and right_after,
+        "%d bytes = %d + %d + 2?" % (len(d["rx"]), len(seq), nidle))
+    chk("status bits clean, as the PC received them (bits 7..1 == 0)",
+        st is not None and st & 0xFE == 0, status_names(st))
+    m = re.search(r"^OW-STATUS ([0-9a-fx]{2})", txt, re.M)
+    sim_st = int(m.group(1), 16) if m and "x" not in m.group(1) else None
+    chk("PC status byte == the glue's st_or (simulation cross-check)",
+        st is not None and st == sim_st, "sim %s" % ("%02X" % sim_st if sim_st is not None else "--"))
     chk("chip sticky flags clear", d["sticky"] == (0, 0, 0, 0), "%s" % (d["sticky"],))
     m = re.search(r"^OW-ISO falls=(\d+)", txt, re.M)
     d["iso"] = int(m.group(1)) if m else None
@@ -236,6 +285,8 @@ def main():
           % (e.P, e.P / 50.0, 2 * e.P, e.P))
     print("  feed: %d words, first poll reply at rx %d" % (len(lines), pidx))
     rc = 0 if tracked(e, lines, pidx) else 1
+    nidle = idle_replies(lines)
+    print("  idle replies after the transaction: %d (FF each), then the trailer" % nidle)
     if "--write" in sys.argv and not want:
         return rc
     sl_min = None
@@ -245,7 +296,7 @@ def main():
 
     if not want or "ok" in want or "late_edge" in want or "late_over" in want:
         txt = go("ok")
-        d, ck = judge(txt, rxmap)
+        d, ck = judge(txt, rxmap, nidle)
         show("ok (the real build)", ck)
         rc |= 0 if all(o for _c, o, _d in ck) else 1
         sl = slack(txt)
@@ -260,7 +311,7 @@ def main():
             rc = 1
     if sl_min is not None and (not want or "late_edge" in want):
         txt = go("late_edge", LATE=sl_min)
-        d, ck = judge(txt, rxmap)
+        d, ck = judge(txt, rxmap, nidle)
         show("late_edge (decision delayed by the full slack, %d cycles)" % sl_min, ck)
         rc |= 0 if all(o for _c, o, _d in ck) else 1
 
@@ -282,7 +333,7 @@ def main():
         if want and name not in want:
             continue
         txt = go(name, **kw)
-        d, ck = judge(txt, rxmap)
+        d, ck = judge(txt, rxmap, nidle)
         reds = [c for c, o, _d in ck if not o]
         fired = bool(d["end"] and red(d, ck) and reds)
         print("  must-fire %-9s (%s): %s" % (

@@ -9,7 +9,10 @@ JUDGES THEM, with the same parse the simulation's runner uses
   presence after every reset; the bus idle after it; the command echoes;
   the ROM's CRC-8, family 28h, and == the probe's known ROM (--rom);
   Convert T busy (00) first, done last; the scratchpad's CRC-8;
-  the temperature, printed (compare it with the Pico's reading).
+  the temperature, printed (compare it with the Pico's reading);
+  the STATUS TRAILER ('S' + the chip's status bits, the last two bytes):
+  fails unless bits 7..1 are 0 (no underrun, TX-full, ...);
+  and it prints the SHA-256 of the bitstream file, to tie a pass to a build.
 
 Usage:  python fpga/host/ow_run.py COM3 [--rom 288A7AA911000030]
 Needs pyserial. Default --rom: the probe's ROM (Wilson, 10-17).
@@ -48,16 +51,35 @@ def main():
         raise SystemExit("*** fpga/feeds/onewire_fpga_feed.hex is not the feed "
                          "this script parses -- rebuild")
 
+    # ⭐ WHICH BUILD (Wilson #5): the bitstream FILE's hash -- the one
+    # program.tcl loads; its log names the same path and build time
+    bit = os.path.join(ROOT, "fpga", "build", "pa100t_ow", "pa100t_ow1wire.bit")
+    if os.path.exists(bit):
+        import hashlib
+        h = hashlib.sha256(open(bit, "rb").read()).hexdigest()
+        print("bitstream %s  sha256 %s  built %s" % (
+            os.path.relpath(bit, ROOT), h,
+            time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(os.path.getmtime(bit)))))
+    else:
+        print("bitstream: *** %s not found -- which build is on the board?" % bit)
+
     s = serial.Serial(port, BAUD, timeout=0.1)
     s.reset_input_buffer()
     s.write(b"G")
     s.flush()
-    rx, t0 = [], time.time()
+    rx, t0, quiet = [], time.time(), None
+    # read the transaction, then on until the line is quiet for 0.3 s: the
+    # STATUS TRAILER ('S' + status byte) is the last thing the board sends
     while time.time() - t0 < TIMEOUT_S:
-        rx += list(s.read(256))
-        seq, full = RF.walk(rx, rxmap)
-        if full:
-            break
+        got = list(s.read(256))
+        rx += got
+        if RF.walk(rx, rxmap)[1]:
+            if got:
+                quiet = time.time()
+            elif quiet is None:
+                quiet = time.time()
+            elif time.time() - quiet > 0.3:
+                break
     s.close()
     seq, full = RF.walk(rx, rxmap)
     print("received %d byte(s) in %.2f s" % (len(rx), time.time() - t0))
@@ -92,6 +114,16 @@ def main():
     sp = [b for r, b in seq if r[0] == "read" and r[1] == "sp"]
     chk("scratchpad CRC-8 valid", len(sp) == 9 and RO.crc8(sp[:8]) == sp[8],
         " ".join("%02X" % b for b in sp))
+    # ⭐ THE CHIP'S OWN FLAGS (Wilson #3): the same trailer check as the sim
+    nidle = RF.idle_replies(lines)
+    st, right_after, tr = RF.trailer(rx, len(seq), nidle)
+    chk("status trailer: 'S' + status byte, the last 2 bytes", st is not None,
+        " ".join("%02X" % b for b in tr) or "none")
+    chk("transaction + %d idle replies (FF) + trailer, exactly" % nidle,
+        full and right_after,
+        "%d bytes = %d + %d + 2?" % (len(rx), len(seq), nidle))
+    chk("chip status clean (bits 7..1 == 0: no underrun, TX-full, ...)",
+        st is not None and st & 0xFE == 0, RF.status_names(st))
     if len(sp) == 9:
         raw = sp[0] | sp[1] << 8
         raw = raw - 0x10000 if raw & 0x8000 else raw

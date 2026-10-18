@@ -398,6 +398,26 @@ module pe_fpga_core #(
   // one reply per 4 bytes fed (every block is a multiple of 8 symbols)
   wire fwd = (OW == 0) || !feed_done || (rx_cnt < (nfed >> 2));
 
+  // ⭐ THE STATUS TRAILER (Wilson #3): once the replies are out, the PC gets
+  // 'S' then every status bit the glue decoded this run (st_or), so the HOST
+  // -- not only the simulation -- sees underrun / TX-full. Sent after
+  // ST_SETTLE cycles, so the status frame that follows the last payload frame
+  // (24 cycles) has been decoded first.
+  localparam integer ST_SETTLE = 256;
+  reg  [1:0]  st_sent;
+  reg  [8:0]  st_wait;
+  reg  [7:0]  st_or;
+  wire        st_push = (OW != 0) && !fwd && st_wait == ST_SETTLE && st_sent != 2'd2;
+  wire [7:0]  st_byte = (st_sent == 2'd0) ? "S" : st_or;
+  always @(posedge clk) begin
+    if (!rst_n || go_ld || relo) begin
+      st_sent <= 2'd0; st_wait <= 9'd0;
+    end else if (OW != 0 && !fwd) begin
+      if (st_wait != ST_SETTLE) st_wait <= st_wait + 9'd1;
+      else if (st_sent != 2'd2) st_sent <= st_sent + 2'd1;
+    end
+  end
+
   // ------------------------------------------------------------- the FIFO
   reg [7:0]  fifo [0:1023];
   reg [9:0]  wp, rp;
@@ -405,8 +425,10 @@ module pe_fpga_core #(
   wire       f_chip  = f_ok && !f_marker && f_kind == 3'd0 && !loading && fwd;
   // the loader's reply shares the FIFO; it never coincides with a chip byte
   // (the chip is in reset while the loader listens)
-  wire       f_push  = f_chip || rp_push;
-  wire [7:0] f_in    = rp_push ? rp_data : f_data;
+  // the status trailer is pushed only after forwarding has stopped, so it
+  // never coincides with a chip byte (nor with a loader reply)
+  wire       f_push  = f_chip || rp_push || st_push;
+  wire [7:0] f_in    = rp_push ? rp_data : st_push ? st_byte : f_data;
   wire       f_empty = (wp == rp);
   wire       f_full  = ((wp + 10'd1) == rp);
   reg  [7:0] f_q;
@@ -456,7 +478,8 @@ module pe_fpga_core #(
   // ----------------------------------------------------------------- LEDs
   reg [24:0] hb;
   reg        st_err, rx_tog;
-  reg  [7:0] st_or;         // every status bit seen since the load (the host's view)
+  // st_or (declared with the status trailer): every status bit seen since
+  // the load -- the host's view
   always @(posedge clk) begin
     if (!rst_n) begin hb <= 25'd0; st_err <= 1'b0; rx_tog <= 1'b0; st_or <= 8'd0; end
     else begin

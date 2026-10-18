@@ -109,8 +109,8 @@ module tb_fpga_onewire;
     if (running !== 1'b0) $display("*** FAIL fpga_onewire: chip running before 'G'");
     send("G");
     // done: the feed is consumed, every reply forwarded, the UART drained
-    wait ((dut.feed_done && !dut.fwd && dut.wp == dut.rp && !dut.tx_busy)
-          || cyc >= NCYC_MAX);
+    wait ((dut.feed_done && !dut.fwd && dut.st_sent == 2'd2 && dut.wp == dut.rp
+           && !dut.tx_busy) || cyc >= NCYC_MAX);
     #(BT * 30);
     // ⭐ THREE MORE BYTE TIMES OF IDLE: the timer keeps the lane fed after
     // the feed (0xFF), so no underrun may appear afterwards either
