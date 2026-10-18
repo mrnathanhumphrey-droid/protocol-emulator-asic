@@ -1,0 +1,526 @@
+{
+ "what": "a RECORDED BENCH WITNESS of i2c_fram_fpga.hex, re-checked in CI by model/gate_i2c_hw_witness.py -- not a hardware run in CI",
+ "bench": "Puzhi PA100T-EDU (XC7A100T), I2C build on J11 (SCL B20, SDA A20, open drain); Adafruit #1895 MB85RC256V at 0x50; 4.7 kOhm to 3V3 on each line in parallel with the breakout's (~3.2 kOhm); breadboard; DSLogic U3Pro16 at 100 MHz, CH0 SCL, CH1 SDA",
+ "bitstream": "pa100t_i2cfram.bit",
+ "bitstream_sha256": "f20512e2b05aea920850aa9678528f24bd75baa8a8904a2e4e1d0b17f9fbed58",
+ "program_sha256": {
+  "image": "be83adc295456c37bbfdf15a721f060a0d07c8656001304f1547144521f162ee",
+  "feed": "21eb0c7cb7a5697542262fd447918e7922218cbb537df111e6f8325f77677859",
+  "falls": "8b1eefe33be8190a83826a6b3cf40f1b57ff5f06edd7ab7180c492ffe0bf0f76"
+ },
+ "captures": [
+  {
+   "file": "DSLogic U3Pro16-la-261017-222220.csv",
+   "threshold": "1.0 V",
+   "csv_sha256": "a497ac3ba5a2e9815056be5074416089b8e2281e1424705bd9a8f456bf1a4a2b",
+   "run_time": "2026-10-17 22:22:27",
+   "data": "1DC3F133",
+   "old": "00000000",
+   "events": [
+    [
+     "Start",
+     null
+    ],
+    [
+     "Address write",
+     80
+    ],
+    [
+     "ACK",
+     null
+    ],
+    [
+     "Data write",
+     0
+    ],
+    [
+     "ACK",
+     null
+    ],
+    [
+     "Data write",
+     16
+    ],
+    [
+     "ACK",
+     null
+    ],
+    [
+     "Start repeat",
+     null
+    ],
+    [
+     "Address read",
+     80
+    ],
+    [
+     "ACK",
+     null
+    ],
+    [
+     "Data read",
+     0
+    ],
+    [
+     "ACK",
+     null
+    ],
+    [
+     "Data read",
+     0
+    ],
+    [
+     "ACK",
+     null
+    ],
+    [
+     "Data read",
+     0
+    ],
+    [
+     "ACK",
+     null
+    ],
+    [
+     "Data read",
+     0
+    ],
+    [
+     "NACK",
+     null
+    ],
+    [
+     "Stop",
+     null
+    ],
+    [
+     "Start",
+     null
+    ],
+    [
+     "Address write",
+     80
+    ],
+    [
+     "ACK",
+     null
+    ],
+    [
+     "Data write",
+     0
+    ],
+    [
+     "ACK",
+     null
+    ],
+    [
+     "Data write",
+     16
+    ],
+    [
+     "ACK",
+     null
+    ],
+    [
+     "Data write",
+     29
+    ],
+    [
+     "ACK",
+     null
+    ],
+    [
+     "Data write",
+     195
+    ],
+    [
+     "ACK",
+     null
+    ],
+    [
+     "Data write",
+     241
+    ],
+    [
+     "ACK",
+     null
+    ],
+    [
+     "Data write",
+     51
+    ],
+    [
+     "ACK",
+     null
+    ],
+    [
+     "Stop",
+     null
+    ],
+    [
+     "Start",
+     null
+    ],
+    [
+     "Address write",
+     80
+    ],
+    [
+     "ACK",
+     null
+    ],
+    [
+     "Data write",
+     0
+    ],
+    [
+     "ACK",
+     null
+    ],
+    [
+     "Data write",
+     16
+    ],
+    [
+     "ACK",
+     null
+    ],
+    [
+     "Start repeat",
+     null
+    ],
+    [
+     "Address read",
+     80
+    ],
+    [
+     "ACK",
+     null
+    ],
+    [
+     "Data read",
+     29
+    ],
+    [
+     "ACK",
+     null
+    ],
+    [
+     "Data read",
+     195
+    ],
+    [
+     "ACK",
+     null
+    ],
+    [
+     "Data read",
+     241
+    ],
+    [
+     "ACK",
+     null
+    ],
+    [
+     "Data read",
+     51
+    ],
+    [
+     "NACK",
+     null
+    ],
+    [
+     "Stop",
+     null
+    ]
+   ]
+  },
+  {
+   "file": "DSLogic U3Pro16-la-261017-222328.csv",
+   "threshold": "2.3 V",
+   "csv_sha256": "b2a84367ec333e025e7320b4d9bbac749046adbcab37a6b229f8d14a3bdbe2ce",
+   "run_time": "2026-10-17 22:23:34",
+   "data": "4823CD62",
+   "old": "1DC3F133",
+   "events": [
+    [
+     "Start",
+     null
+    ],
+    [
+     "Address write",
+     80
+    ],
+    [
+     "ACK",
+     null
+    ],
+    [
+     "Data write",
+     0
+    ],
+    [
+     "ACK",
+     null
+    ],
+    [
+     "Data write",
+     16
+    ],
+    [
+     "ACK",
+     null
+    ],
+    [
+     "Start repeat",
+     null
+    ],
+    [
+     "Address read",
+     80
+    ],
+    [
+     "ACK",
+     null
+    ],
+    [
+     "Data read",
+     29
+    ],
+    [
+     "ACK",
+     null
+    ],
+    [
+     "Data read",
+     195
+    ],
+    [
+     "ACK",
+     null
+    ],
+    [
+     "Data read",
+     241
+    ],
+    [
+     "ACK",
+     null
+    ],
+    [
+     "Data read",
+     51
+    ],
+    [
+     "NACK",
+     null
+    ],
+    [
+     "Stop",
+     null
+    ],
+    [
+     "Start",
+     null
+    ],
+    [
+     "Address write",
+     80
+    ],
+    [
+     "ACK",
+     null
+    ],
+    [
+     "Data write",
+     0
+    ],
+    [
+     "ACK",
+     null
+    ],
+    [
+     "Data write",
+     16
+    ],
+    [
+     "ACK",
+     null
+    ],
+    [
+     "Data write",
+     72
+    ],
+    [
+     "ACK",
+     null
+    ],
+    [
+     "Data write",
+     35
+    ],
+    [
+     "ACK",
+     null
+    ],
+    [
+     "Data write",
+     205
+    ],
+    [
+     "ACK",
+     null
+    ],
+    [
+     "Data write",
+     98
+    ],
+    [
+     "ACK",
+     null
+    ],
+    [
+     "Stop",
+     null
+    ],
+    [
+     "Start",
+     null
+    ],
+    [
+     "Address write",
+     80
+    ],
+    [
+     "ACK",
+     null
+    ],
+    [
+     "Data write",
+     0
+    ],
+    [
+     "ACK",
+     null
+    ],
+    [
+     "Data write",
+     16
+    ],
+    [
+     "ACK",
+     null
+    ],
+    [
+     "Start repeat",
+     null
+    ],
+    [
+     "Address read",
+     80
+    ],
+    [
+     "ACK",
+     null
+    ],
+    [
+     "Data read",
+     72
+    ],
+    [
+     "ACK",
+     null
+    ],
+    [
+     "Data read",
+     35
+    ],
+    [
+     "ACK",
+     null
+    ],
+    [
+     "Data read",
+     205
+    ],
+    [
+     "ACK",
+     null
+    ],
+    [
+     "Data read",
+     98
+    ],
+    [
+     "NACK",
+     null
+    ],
+    [
+     "Stop",
+     null
+    ]
+   ]
+  }
+ ],
+ "runs": [
+  {
+   "time": "2026-10-17 22:22:27",
+   "data": "1DC3F133",
+   "old_read": "00 00 00 00",
+   "new_read": "1D C3 F1 33",
+   "status": "01",
+   "pass": true,
+   "bit_sha256": "f20512e2b05aea920850aa9678528f24bd75baa8a8904a2e4e1d0b17f9fbed58",
+   "after_power_off": false
+  },
+  {
+   "time": "2026-10-17 22:23:34",
+   "data": "4823CD62",
+   "old_read": "1D C3 F1 33",
+   "new_read": "48 23 CD 62",
+   "status": "01",
+   "pass": true,
+   "bit_sha256": "f20512e2b05aea920850aa9678528f24bd75baa8a8904a2e4e1d0b17f9fbed58",
+   "after_power_off": false
+  },
+  {
+   "time": "2026-10-17 22:26:40",
+   "data": "9392B11F",
+   "old_read": "48 23 CD 62",
+   "new_read": "93 92 B1 1F",
+   "status": "01",
+   "pass": true,
+   "bit_sha256": "f20512e2b05aea920850aa9678528f24bd75baa8a8904a2e4e1d0b17f9fbed58",
+   "after_power_off": true
+  }
+ ],
+ "timing": {
+  "fscl_khz": {
+   "typical": 370.4,
+   "min": 365.0,
+   "max": 374.5
+  },
+  "tlow_us": {
+   "min": 1.64,
+   "typical": 1.68
+  },
+  "thigh_us": {
+   "min": 0.88,
+   "typical": 0.92
+  },
+  "rise_ns": {
+   "scl": {
+    "max": 150,
+    "typical": 100,
+    "min": 60,
+    "n": 211
+   },
+   "sda": {
+    "max": 110,
+    "typical": 110,
+    "n": 15
+   }
+  }
+ },
+ "methods": "Write the I2C FRAM bench witness RECORD from the raw DSLogic captures.\n\nRun by hand on the bench PC (the CSVs are hundreds of MB and stay OUT of git);\nwrites fpga/witness/i2c_fram_hw_witness.json, which model/gate_i2c_hw_witness.py\nre-checks in CI. Two captures of two runs (Wilson 10-17):\n  run A  threshold 1.0 V (~30 % of 3.3 V) -- tLOW is measured here\n  run B  threshold 2.3 V (~70 %)          -- tHIGH is measured here\nCH0 = SCL, CH1 = SDA, 100 MHz. Per capture: sigrok's `i2c` decoder (foreign,\nsigrok-cli in WSL) -> the event list, recorded as decoded. Timing:\n  fSCL   rise to rise inside bytes (intervals <= 1.5 x the median)\n  tLOW   SCL fall -> rise at 30 %;  tHIGH  rise -> fall at 70 %\n  rise   per SCL pulse k: (rise - preceding fall) at 70 % minus at 30 % --\n         valid because the chip's release follows its own fall by a fixed\n         count (deterministic build) and falls are fast; an UPPER ESTIMATE\n         (the pulse-to-pulse spread exceeds the 10 ns sample step). SDA: the\n         same over bits identical in both runs (the address phases)."
+}

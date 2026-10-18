@@ -97,6 +97,17 @@ REGISTRY = {
                "exact), every READ's MISO is the peer's 5B C4, the chip's "
                "serial-host bytes equal the wire's; SCK at 1 MHz, phases >= "
                "the image's own A2 floor; one must-fire per check"}),
+    # ⭐ HARDWARE, RECORDED: a bench witness re-checked in CI (Wilson 10-17) --
+    # not a hardware run in CI. The board ran it; the record is checked here.
+    "i2c_fram_fpga.hex": (WITNESS, {
+        "runner": "model/gate_i2c_hw_witness.py",
+        "how": "RECORDED BENCH WITNESS (PA100T-EDU, MB85RC256V, ~3.2 kOhm "
+               "pull-ups, breadboard; DSLogic captures): sigrok's decoded "
+               "events == the feed's transaction exactly in both captured "
+               "runs, the FRAM's bytes == each run's old / new, persistence "
+               "across a power-off, Fm timings in spec (fSCL 370.4 kHz "
+               "measured); the record's image / feed SHA-256 must equal the "
+               "repository's"}),
     # ---- mechanism images: wire != feed by design ---------------------------
     # ⛔⛔ MECHANISM IS NOT "UNCHECKED" (Wilson): each names the CI runner that
     # checks EXACTLY what the image is for, held to the witness rules (in CI,
@@ -198,11 +209,16 @@ PUBLISHED = {
                                    "ledger_id": "SPI-tx 1 MHz"}),
     # ⭐ Wilson: the ACHIEVED rate (CE1 HALF_HIGH), not the mode's nominal
     # 400 kHz -- so the rated number and the witnessed number are one number.
-    "I²C Fast-mode 397 kHz": (OWED, {"rate_hz": 397000,
-                                     "ledger_id": "I2C 400 kHz",
-        "gap": "corpus_i2c.hex is accepted but witnessed only by V2 (the "
-               "chip's drive, partial count) -- closes with WF2's V2 "
-               "tightening"}),
+    # ⭐⭐ CLOSED ON HARDWARE (Wilson 10-17): BOTH numbers are published, each
+    # with its conditions -- 397 kHz nominal (simulation, ideal edges) and
+    # 370.4 kHz MEASURED (PA100T, ~3.2 kOhm pull-ups, breadboard; 365.0-374.5).
+    # The rate depends on the bus by design: the chip waits for each real
+    # rise. The rise-matched simulation reproduces the measured rate.
+    "I²C Fast-mode 397 kHz nominal, 370.4 kHz measured": (WITNESS, {
+        "image": "i2c_fram_fpga.hex",
+        "rate_hz": 397000,
+        "measured_hz": 370400,
+        "ledger_id": "I2C 400 kHz"}),
     "SPI-target 1 MHz": (OWED, {"rate_hz": 1000000,
                                 "ledger_id": "SPI-target 1 MHz",
         "gap": "NO functional SPI-target program exists: corpus_sptgt.hex is "

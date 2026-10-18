@@ -239,6 +239,10 @@ GATES=(
   # with a feed names its wire == feed witness (WITNESS / OWED / MECHANISM).
   # Same image universe as N1; OWED must reach 0 at the sub-v1 SHA.
   model/gate_wire_feed.py
+  # ⭐ The I2C Fast-mode lane's witness: a RECORDED BENCH WITNESS (PA100T +
+  # MB85RC256V, DSLogic captures) re-checked here in seconds, no simulator --
+  # not a hardware run in CI (Wilson 10-17).
+  model/gate_i2c_hw_witness.py
   # ⛔⛔ E+ -- A SHELL EXIT CODE IS READ ONLY WHERE IT CAN BELONG. Four times in
   # one arc a checking loop printed an exit code belonging to something else
   # (`| tail`, `| head`, and `"$(basename $g)" "$?"` -- the substitution reset

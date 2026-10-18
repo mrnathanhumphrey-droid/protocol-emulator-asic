@@ -1027,7 +1027,8 @@ def readme_check():
          _LANE_ROW.sub(lambda m: m.group(0).replace(
              "| %s |" % m.group("C"), "| 2 |", 1), text, 1), "C = 2"),
         ("a planted 'I²C 400 kHz' lane label",
-         text.replace("| I²C Fast-mode 397 kHz |", "| I²C 400 kHz |", 1),
+         text.replace("| I²C Fast-mode 397 kHz nominal, 370.4 kHz measured |",
+                      "| I²C 400 kHz |", 1),
          "is not a published lane label"),
         ("a stale UART-rx T_MIN (224) in the prose",
          text.replace("down to %d" % src["uart"]["tmin"], "down to 224", 1),

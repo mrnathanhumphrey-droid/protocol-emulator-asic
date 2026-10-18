@@ -50,6 +50,16 @@ has not been estimated, it says so.
 - **Parametric Lean port FSM** (`wait n` from `L_REFILL`).
   - From: ruled.
   - Cost: not yet estimated; LN1 referees before merge.
+- **I²C at a full 397–400 kHz on a real bus.**
+  - From: the FPGA bench witness. The published Fast-mode lane runs at
+    397 kHz with ideal edges, and measured 370.4 kHz (range 365.0–374.5) on
+    the PA100T with ~3.2 kΩ pull-ups on a breadboard. The chip waits for each
+    real SCL rise before counting the high phase, so the rate depends on the
+    bus by design. A rise-matched simulation reproduces the measured rate:
+    each bit adds the FPGA glue's 3 cycles plus the real rise.
+  - Cost: a shorter programmed delay for a known bus, or stronger pull-ups.
+    Either is a bench re-measurement, not a silicon change. The claim stays
+    "measured" until a run measures it.
 - **`.gitattributes` pinning line endings** for the fingerprinted files.
   - From: CRLF noise in recorded hashes.
   - Cost: small; can land right after the lock.

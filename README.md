@@ -88,13 +88,24 @@ Five lanes, derived from the protocols rather than chosen:
 |---|---|---|---|---|---|---|
 | UART-tx 115200 | 434 | 3 | 1 | 434 | 1 | 216 |
 | SPI-master 1 MHz | 25 | 3 | 1 | 25 | 1 | 23 |
-| I²C Fast-mode 397 kHz | 45 | 3 | 1 | 45 | 2 | 15 |
+| I²C Fast-mode 397 kHz nominal, 370.4 kHz measured | 45 | 3 | 1 | 45 | 2 | 15 |
 | UART-rx 115200 | 4140 | 3 | 10 | 414 | 1 | 213 |
 | SPI-target 1 MHz | 400 | 3 | 16 | 25 | 1 | 17 |
 
 Cycles at 50 MHz. `n`/`t` describe the bursty lanes: UART-rx is 10 bits of 414,
 SPI-target 16 bits of 25, so a periodic model with the outer period alone
 understates the burst.
+
+**The I²C rate has two numbers, each with its conditions.** Fast-mode
+(≤ 400 kHz): 397 kHz nominal (simulation, ideal edges); 370.4 kHz measured
+(PA100T, ~3.2 kΩ pull-ups, breadboard; range 365.0–374.5). The chip waits for
+each real rise of SCL before counting its high phase, so the rate depends on
+the bus — its pull-ups and capacitance — by design. A simulation with the
+measured rise reproduces the measured rate. The measured figure is a
+**recorded bench witness re-checked in CI, not a hardware run in CI**: the
+FPGA prototype wrote and read back an MB85RC256V FRAM while a logic analyser
+captured the wire, and `model/gate_i2c_hw_witness.py` re-checks that record —
+decoded bytes equal to the feed, Fast-mode timings — on every CI run.
 
 **UART receive speed.** `pe_asm` certifies the UART-rx program down to 232
 cycles per bit, which is up to about 215.5 kbaud at the 50 MHz design clock.
