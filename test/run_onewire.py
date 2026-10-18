@@ -89,12 +89,18 @@ def vvp_path(rise_ns):
     return os.path.join(TMP, "tb_onewire_r%d.vvp" % rise_ns)
 
 
+#: ⭐ THE FILES CE5'S SIMULATION COMPILES -- ONE LIST, read by build_vvp below
+#: AND by model/gate_ce5_freeze.py, whose freeze is exactly these plus their
+#: `include closure and the tracked images (Wilson 10-18). Add a file here and
+#: the freeze covers it; there is no second copy to forget.
+CE5_SIM_SOURCES = ["test/tb_onewire.v", "test/ds18b20_model.v",
+                   "src/pe_engine.v", "src/pe_store.v", "src/project.v"]
+
+
 def build_vvp(rise_ns):
     out = vvp_path(rise_ns)
     r = run([tool("iverilog"), "-g2012", "-o", out, "-s", "tb_onewire",
-             "-Ptb_onewire.RISE_NS=%d" % rise_ns,
-             "test/tb_onewire.v", "test/ds18b20_model.v", "src/pe_engine.v",
-             "src/pe_store.v", "src/project.v"])
+             "-Ptb_onewire.RISE_NS=%d" % rise_ns] + CE5_SIM_SOURCES)
     if r.returncode != 0:
         raise SystemExit("*** build failed\n" + r.stdout + r.stderr)
     return out
