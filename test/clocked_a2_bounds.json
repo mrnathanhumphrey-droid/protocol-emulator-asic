@@ -326,5 +326,28 @@
   "w1_pyrta": {
    "0": 0
   }
+ },
+ "i2c_fram_fpga.hex": {
+  "J": 1,
+  "U": 0.0972,
+  "d_min": 41,
+  "k": 5,
+  "lanes": {
+   "0": {
+    "T": 41,
+    "budget": "pyRTA",
+    "r_floor": 7,
+    "r_ours": 7,
+    "r_pyrta": 7,
+    "slack": 8,
+    "why": null
+   }
+  },
+  "w1": {
+   "0": 0
+  },
+  "w1_pyrta": {
+   "0": 0
+  }
  }
 }

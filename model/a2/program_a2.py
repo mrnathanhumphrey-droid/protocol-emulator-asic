@@ -605,10 +605,35 @@ def lane_responses(img, src=None):
     return out
 
 
+#: the directories a tracked image can live in. ⛔ ONE list for the writer and
+#: for every reader that loads an image BY NAME (gate_a2_program): when the
+#: writer learned fpga/images/ and the reader did not, the gate crashed on the
+#: first fpga image (10-18). The shared image-universe function replaces this
+#: in its own commit (Wilson).
+IMAGE_DIRS = [os.path.join(ROOT, "test"), os.path.join(ROOT, "fpga", "images")]
+
+
+def image_path(name):
+    """The tracked image `name`, from IMAGE_DIRS; FileNotFoundError if none.
+    A name in two directories is refused -- which one would be ambiguous."""
+    hits = [os.path.join(d, name) for d in IMAGE_DIRS
+            if os.path.isfile(os.path.join(d, name))]
+    if len(hits) != 1:
+        raise FileNotFoundError("image %s: %s" % (
+            name, "in no image directory" if not hits else "in two: %s" % hits))
+    return hits[0]
+
+
 def clocked_images():
-    """Every tracked image that has at least one clocked open-drain lane."""
+    """Every tracked image that has at least one clocked open-drain lane.
+
+    ⛔ fpga/images/ INCLUDED (Wilson 10-18): this scanned test/*.hex only, so
+    the witnessed I2C lane's image (fpga/images/i2c_fram_fpga.hex) had no
+    clocked A2 bound -- two tools disagreeing about which images exist. The
+    shared image-universe function replaces this list in its own commit."""
     out = []
-    for p in sorted(glob.glob(os.path.join(ROOT, "test", "*.hex"))):
+    paths = [p for d in IMAGE_DIRS for p in sorted(glob.glob(os.path.join(d, "*.hex")))]
+    for p in paths:
         name = os.path.basename(p)
         if name.startswith("probe_"):
             continue

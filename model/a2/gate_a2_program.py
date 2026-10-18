@@ -196,7 +196,9 @@ def main() -> int:
     import gate_admissible_images as ga
     n_ok, below = 0, []
     for name, row in sorted(on_disk.items()):
-        img = dgf.load(os.path.join(ROOT, "test", name))
+        # ⛔ by NAME through program_a2's resolver: the bounds file holds
+        # fpga/images/ entries too (10-18), and a test/-only path crashed here
+        img = dgf.load(program_a2.image_path(name))
         if ga.conditions(name, img)[0]:
             continue                      # non-admissible: declared in N1
         for ln, e in sorted(row["lanes"].items()):
