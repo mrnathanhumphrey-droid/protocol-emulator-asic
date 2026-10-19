@@ -15,8 +15,21 @@ bound is cross-checked against a third-party real-time-analysis library, and the
 RTL is held to it by a test suite where every guard has been shown to fail on a
 mutant.
 
-> **Status: private, pre-submission.** Not yet public. Gate-level results for the
+> **Status: pre-submission.** Gate-level results for the
 > current suite have not landed yet — see [Open items](#open-items).
+
+## Contents
+
+- [Architecture](#architecture)
+  - [The instruction set](#the-instruction-set)
+  - [Two pin banks, and why](#two-pin-banks-and-why)
+- [Timing](#timing)
+- [Verification](#verification)
+  - [Things found this way](#things-found-this-way)
+- [Layout](#layout)
+- [Running it](#running-it)
+- [Open items](#open-items)
+- [Silicon](#silicon)
 
 ---
 
