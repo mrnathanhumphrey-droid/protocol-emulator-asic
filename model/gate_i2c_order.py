@@ -48,8 +48,10 @@ EXEMPT = {
 
 
 def images():
-    return [p for p in sorted(glob.glob(os.path.join(ROOT, "test", "*.hex")))
-            if not os.path.basename(p).startswith("probe_")]
+    """Paths of the shared image universe (`model/image_universe.py`, Wilson
+    10-18): this scanned test/*.hex only."""
+    import image_universe
+    return [p for _n, p in image_universe.items()]
 
 
 def read(p):

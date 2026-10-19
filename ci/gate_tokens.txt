@@ -30,6 +30,7 @@ test/gate_corpus_trace.py           ^\s*GATE corpus-trace: PASSED\s*$
 model/gate_gates_complete.py        ^\s*GATE gates-complete: PASSED\s*$
 model/gate_admissible_images.py     ^\s*GATE admissible-images: PASSED\s*$
 model/gate_wire_feed.py             ^\s*GATE wire-feed: PASSED\s*$
+model/gate_image_bounds.py          ^\s*GATE image-bounds: PASSED\s*$
 model/gate_i2c_hw_witness.py        ^\s*GATE i2c-hw-witness: PASSED\s*$
 model/gate_flow_config.py           ^\s*GATE flow-config: PASSED\s*$
 model/gate_shell_rc.py              ^\s*GATE shell-rc: PASSED\s*$

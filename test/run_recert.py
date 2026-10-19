@@ -92,15 +92,28 @@ NOT_CERTIFIABLE = {
                          "refused, nothing reaches the wire",
     "ckdegen2_image.hex": "refusal image: the wrapping-count route to the "
                           "same refusal",
+    # ⭐ THREE MORE SINCE THE SHARED UNIVERSE (Wilson 10-18): this scanned
+    # test/ only, so these were never classed at all
+    "i2c_fram_fpga.hex": "certified ON HARDWARE, not here: gate_i2c_hw_"
+                         "witness holds sigrok's decode of the real FRAM bus "
+                         "(DSLogic); its feed lives in fpga/feeds, which this "
+                         "sim re-cert's trace path (corpus.FEEDS) cannot run",
+    "probe_cov_pindiv.hex": "coverage image (gate_coverage's pin-diversity "
+                            "arm): action pin != header pin on every opcode, "
+                            "not a protocol transaction; tb_cktx runs it",
+    "probe_cov_cemodes.hex": "coverage image (gate_coverage's CE-modes arm): "
+                             "HALF_HIGH + CLK_INV reach, not a protocol "
+                             "transaction; tb_cktx runs it",
 }
 
 
 def clocked_images():
+    """Clocked images of the SHARED universe (`model/image_universe.py`,
+    Wilson 10-18); this listed test/ only."""
+    import image_universe
     out = {}
-    for p in sorted(os.listdir(HERE)):
-        if not p.endswith(".hex") or p.startswith("probe_"):
-            continue
-        img = read(os.path.join(HERE, p))
+    for p, path in image_universe.items():
+        img = read(path)
         lanes = [ln for ln, (h, _a) in I.lane_programs(img).items()
                  if h["clkpin"] not in (I.PIN_NONE, h["pin"])
                  and any(a["op"] in (I.OP_SHIFT, I.OP_SHIFTIN) and a["level"]

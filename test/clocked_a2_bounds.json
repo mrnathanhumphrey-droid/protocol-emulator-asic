@@ -349,5 +349,51 @@
   "w1_pyrta": {
    "0": 0
   }
+ },
+ "probe_cov_cemodes.hex": {
+  "J": 1,
+  "U": 0.3846,
+  "d_min": 23,
+  "k": 5,
+  "lanes": {
+   "0": {
+    "T": 41,
+    "budget": "pyRTA",
+    "r_floor": 16,
+    "r_ours": 16,
+    "r_pyrta": 16,
+    "slack": 17,
+    "why": null
+   }
+  },
+  "w1": {
+   "0": 0
+  },
+  "w1_pyrta": {
+   "0": 0
+  }
+ },
+ "probe_cov_pindiv.hex": {
+  "J": 1,
+  "U": 0.4083,
+  "d_min": 23,
+  "k": 5,
+  "lanes": {
+   "3": {
+    "T": 70,
+    "budget": "pyRTA",
+    "r_floor": 17,
+    "r_ours": 17,
+    "r_pyrta": 17,
+    "slack": 18,
+    "why": null
+   }
+  },
+  "w1": {
+   "3": 0
+  },
+  "w1_pyrta": {
+   "3": 0
+  }
  }
 }

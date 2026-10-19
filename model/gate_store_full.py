@@ -187,12 +187,10 @@ def sim_check(path):
 
 
 def images():
-    out = []
-    for p in sorted(glob.glob(os.path.join(ROOT, "test", "*.hex"))):
-        n = os.path.basename(p)
-        if not n.startswith("probe_"):
-            out.append((n, dgf.load(p)))
-    return out
+    """The shared image universe (`model/image_universe.py`, Wilson 10-18):
+    this scanned test/*.hex only, missing fpga/images/ and the bench arms."""
+    import image_universe
+    return image_universe.images()
 
 
 def main() -> int:

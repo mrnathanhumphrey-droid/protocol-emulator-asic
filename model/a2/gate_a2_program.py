@@ -53,6 +53,7 @@ sys.path.insert(0, os.path.join(ROOT, "model"))
 
 import gate_degenerate_fields as dgf                              # noqa: E402
 import program_a2                                                 # noqa: E402
+import image_universe                                             # noqa: E402
 from pyrta_src import pinned_pyrta                                # noqa: E402
 
 #: Ruling S's must-fire subject (DT-C). `test/a2_run.sh` measures the same one.
@@ -198,7 +199,7 @@ def main() -> int:
     for name, row in sorted(on_disk.items()):
         # ⛔ by NAME through program_a2's resolver: the bounds file holds
         # fpga/images/ entries too (10-18), and a test/-only path crashed here
-        img = dgf.load(program_a2.image_path(name))
+        img = dgf.load(image_universe.resolve(name))
         if ga.conditions(name, img)[0]:
             continue                      # non-admissible: declared in N1
         for ln, e in sorted(row["lanes"].items()):

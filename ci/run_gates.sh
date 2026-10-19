@@ -237,8 +237,14 @@ GATES=(
   model/gate_admissible_images.py
   # ⭐ WF1 (Wilson, delay-0 REARM ruling step 4) -- every ACCEPTED bench image
   # with a feed names its wire == feed witness (WITNESS / OWED / MECHANISM).
-  # Same image universe as N1; OWED must reach 0 at the sub-v1 SHA.
+  # The shared image universe (model/image_universe.py); OWED must reach 0 at
+  # the sub-v1 SHA.
   model/gate_wire_feed.py
+  # ⛔ ONE IMAGE UNIVERSE, AND EVERY IMAGE IN IT HAS ITS BOUNDS (Wilson 10-18):
+  # eight tools listed images eight ways, so two swept clocked arms ran with
+  # A2 off. Clocked lane -> clocked A2 record, unclocked SHIFT -> response
+  # record, the bench lookup fails closed, names are unique.
+  model/gate_image_bounds.py
   # ⭐ The I2C Fast-mode lane's witness: a RECORDED BENCH WITNESS (PA100T +
   # MB85RC256V, DSLogic captures) re-checked here in seconds, no simulator --
   # not a hardware run in CI (Wilson 10-17).

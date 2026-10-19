@@ -732,27 +732,60 @@ def discovered():
 
 A2_BOUNDS_JSON = os.path.join(HERE, "clocked_a2_bounds.json")
 
+#: ⛔⛔ THE ONLY ESCAPE FROM THE A2 BOUND (Wilson 10-18): an image named here
+#: may run a clocked arm WITHOUT a clocked A2 bound. It is EMPTY, and an entry
+#: needs its reason as the value -- no image runs unbounded by being absent.
+A2_UNBOUNDED_EXEMPT: dict = {}
 
-def a2_slack_arg(img):
+
+def has_clocked_od_lane(img):
+    """Does `img` (a path relative to the repo root) have a clocked
+    open-drain lane? Decided by the WRITER's own `lane_set`, not a second
+    copy of the rule."""
+    sys.path.insert(0, os.path.join(ROOT, "model", "a2"))
+    sys.path.insert(0, os.path.join(ROOT, "model"))
+    import gate_degenerate_fields as dgf
+    import program_a2
+    ls = program_a2.lane_set(dgf.load(os.path.join(ROOT, img)))[0]
+    return any(r["clocked_od"] for r in ls)
+
+
+def a2_slack_arg(img, blob=None):
     """`+A2SLACK=s0,..,s4` for `img`, from the generated per-program bounds.
 
-    Returns None when the image has no clocked open-drain lane. ⚠ A lane the
-    derivation could not bound (an OVERLOADED lane set) is -1, which the bench
-    reports without a verdict -- unbounded is a result there, not an omission.
+    Returns None ONLY when the image has no clocked open-drain lane. ⚠ A lane
+    the derivation could not bound (an OVERLOADED lane set) is -1, which the
+    bench reports without a verdict -- unbounded is a result there, not an
+    omission.
     ⛔ A MISSING JSON IS AN ERROR, NOT "NO BOUND". Returning None would let
     every clocked arm run unbounded in silence, which is exactly the state
     ruling S ended.
+    ⛔⛔ AND SO IS A MISSING RECORD (Wilson 10-18, fail-closed at the bound
+    lookup). This returned None for an image absent from the file, so the
+    tb_cktx arms probe_cov_pindiv and probe_cov_cemodes -- clocked open-drain
+    lanes, never in the writer's universe -- ran with A2 off and the bench
+    printed "NO BOUND SUPPLIED". Now an image with a clocked open-drain lane
+    and no record RAISES, naming the image, before any capture runs. The
+    only escape is `A2_UNBOUNDED_EXEMPT` (empty). `blob` is for must-fires.
     """
-    if not os.path.isfile(A2_BOUNDS_JSON):
-        raise RuntimeError(
-            "test/clocked_a2_bounds.json is absent -- run "
-            "`python model/a2/program_a2.py`. Without it every clocked arm "
-            "would run with A2's upper bound switched off.")
-    with open(A2_BOUNDS_JSON, encoding="utf-8") as fh:
-        blob = json.load(fh)
-    rec = blob.get(os.path.basename(img))
+    if blob is None:
+        if not os.path.isfile(A2_BOUNDS_JSON):
+            raise RuntimeError(
+                "test/clocked_a2_bounds.json is absent -- run "
+                "`python model/a2/program_a2.py`. Without it every clocked arm "
+                "would run with A2's upper bound switched off.")
+        with open(A2_BOUNDS_JSON, encoding="utf-8") as fh:
+            blob = json.load(fh)
+    name = os.path.basename(img)
+    rec = blob.get(name)
     if rec is None:
-        return None
+        if name in A2_UNBOUNDED_EXEMPT or not has_clocked_od_lane(img):
+            return None
+        raise RuntimeError(
+            "%s has a clocked open-drain lane and NO clocked A2 bound in "
+            "test/clocked_a2_bounds.json -- refusing the arm (it would run "
+            "with A2 switched off). Re-run `python model/a2/program_a2.py`, "
+            "or name it in benchset.A2_UNBOUNDED_EXEMPT with a reason." % name)
     sl = [-1] * N_LANES_A2
     for ln, e in rec["lanes"].items():
         if e.get("slack") is not None:
@@ -1053,7 +1086,14 @@ def plan():
             # lane set, and no clocked arm can be left out -- the two failures
             # the single `CK_GAP_SLACK` constant had at once.
             if img is not None:
-                a2 = a2_slack_arg(img)
+                # ⛔ fail-closed (Wilson 10-18): a clocked image with no bound
+                # is a refused ARM, reported by name -- never an arm run
+                # with A2 off
+                try:
+                    a2 = a2_slack_arg(img)
+                except RuntimeError as exc:
+                    probs.append("%s/%s: %s" % (top, label, exc))
+                    continue
                 if a2 is not None:
                     full.append(a2)
             # ⛔ THE BUILD KEY CARRIES THE PARAMETERS. Two arms that differ in

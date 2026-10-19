@@ -10,9 +10,11 @@ standing against it VISIBLE, by name, on day one (WF1). WF2 (a pin-level
 decoder, V2 tightened) and WF3 (each gap closed) turn OWED entries into
 witnesses; the lock checklist requires OWED = 0 at the `sub-v1` SHA.
 
-THE UNIVERSE: every image the bench set runs -- N1's (`test/*.hex` on disk,
-minus `probe_*`), every `+IMG=` a `test/benchset.py` arm names (its `gen`
-images built here by the sweep's own builder), and `fpga/images/*.hex`.
+THE UNIVERSE: `model/image_universe.py`, shared by every image-enumerating
+writer and gate -- `test/*.hex` on disk minus `probe_*`, every `+IMG=` a
+`test/benchset.py` arm names (its `gen` images built by the sweep's own
+builder), and `fpga/images/*.hex`. (This said "N1's" universe; N1 scanned
+test/ only until the unify, so the claim was false.)
 EXEMPT, by declaration elsewhere: N1's NON_ADMISSIBLE and the DELIBERATE refusal
 images (wire != feed is allowed there). PINMAP images are NOT exempt (Wilson Q1:
 real programs, refused only over a measurement pin).
@@ -256,41 +258,13 @@ def feed_of(img):
     return out
 
 
-def bench_images():
-    """Every `+IMG=` a benchset arm names, its `gen` images built first."""
-    import benchset
-    names, probs = set(), []
-    for top, cfg in sorted(benchset.CONFIG.items()):
-        err = benchset.generate(cfg, top)
-        if err:
-            probs.append(err)
-        arms = cfg.get("arms")
-        if not isinstance(arms, list):
-            continue
-        for arm in arms:
-            args = [a for f in arm[1:] if isinstance(f, list) for a in f]
-            for a in args:
-                m = re.match(r"\+IMG=(.+\.hex)$", a)
-                if m:
-                    names.add(os.path.normpath(os.path.join(ROOT, m.group(1))))
-    return names, probs
-
-
 def universe():
-    paths, probs = bench_images()
-    for p in glob.glob(os.path.join(ROOT, "test", "*.hex")):
-        if not os.path.basename(p).startswith("probe_"):
-            paths.add(os.path.normpath(p))
-    for p in glob.glob(os.path.join(ROOT, "fpga", "images", "*.hex")):
-        paths.add(os.path.normpath(p))
-    imgs = {}
-    for p in sorted(paths):
-        n = os.path.basename(p)
-        if not os.path.isfile(p):
-            probs.append("%s is named by a bench arm but is not on disk" % n)
-            continue
-        imgs[n] = dgf.load(p)
-    return imgs, probs
+    """{name: image}, problems -- THE SHARED UNIVERSE (`model/image_universe.py`,
+    Wilson 10-18). This gate's own enumeration was the widest of eight and is
+    now the one every writer and gate uses."""
+    import image_universe
+    u = image_universe.default()
+    return ({n: dgf.load(p) for n, p in u.items()}, list(u.probs))
 
 
 def ci_runners():

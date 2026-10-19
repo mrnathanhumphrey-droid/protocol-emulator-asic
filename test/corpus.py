@@ -698,8 +698,10 @@ def audit_pad_collisions() -> int:
     print("    project.v MISO_PIN=%d CS_PIN=%d"
           % (RTL_PINS["MISO_PIN"], RTL_PINS["CS_PIN"]))
     rc, seen = 0, set()
-    imgs = sorted(glob.glob(os.path.join(HERE, "*.hex")))
-    imgs = [p for p in imgs if not os.path.basename(p).startswith("probe_")]
+    # the shared image universe (`model/image_universe.py`, Wilson 10-18);
+    # this scanned test/*.hex only
+    import image_universe
+    imgs = [p for _n, p in image_universe.items()]
     for p in imgs:
         name = os.path.basename(p)
         bad = pad_collisions(dgf.load(p))

@@ -420,25 +420,17 @@ RESP_JSON = os.path.join(ROOT, "test", "lane_response_bounds.json")
 
 
 def response_images():
-    """(name, img) for every image with an UNCLOCKED SHIFT on some lane:
-    the tracked/generated `test/*.hex` (not probe_*), plus the bench set's
-    generated `probe_cov_*` images that carry one."""
-    # ⛔ THE GENERATED IMAGES ARE BUILT HERE, by the sweep's own builder, so the
-    # set does not depend on whether a sweep ran first (CI's freshness check
-    # and this writer must see the same universe).
-    import benchset
-    for top, cfg in sorted(benchset.CONFIG.items()):
-        err = benchset.generate(cfg, top)
-        if err:
-            raise RuntimeError("response_images: %s" % err)
+    """(name, img) for every image of the SHARED universe
+    (`model/image_universe.py`, Wilson 10-18) with an UNCLOCKED SHIFT on some
+    lane. This scanned test/*.hex plus the generated probe_cov_* images and
+    missed fpga/images/ (none carries one today, so no bound moves)."""
+    # ⛔ THE GENERATED IMAGES ARE BUILT by the universe, with the sweep's own
+    # builder, so the set does not depend on whether a sweep ran first. A
+    # generator failure or an image that does not load RAISES (gate_except):
+    # it must stop the writer, not drop silently out of the bound set.
+    import image_universe
     out = []
-    for p in sorted(glob.glob(os.path.join(ROOT, "test", "*.hex"))):
-        n = os.path.basename(p)
-        if n.startswith("probe_") and not n.startswith("probe_cov_"):
-            continue
-        # ⛔ NO `except: continue` (gate_except, measured): an image that does
-        # not load must stop the writer, not drop silently out of the bound set
-        img = dgf.load(p)
+    for n, img in image_universe.images():
         if any(a["op"] == I.OP_SHIFT and not is_clocked(h, a)
                for _ln, h, acts in lanes_of(img) for a in acts):
             out.append((n, img))
@@ -605,39 +597,18 @@ def lane_responses(img, src=None):
     return out
 
 
-#: the directories a tracked image can live in. ⛔ ONE list for the writer and
-#: for every reader that loads an image BY NAME (gate_a2_program): when the
-#: writer learned fpga/images/ and the reader did not, the gate crashed on the
-#: first fpga image (10-18). The shared image-universe function replaces this
-#: in its own commit (Wilson).
-IMAGE_DIRS = [os.path.join(ROOT, "test"), os.path.join(ROOT, "fpga", "images")]
-
-
-def image_path(name):
-    """The tracked image `name`, from IMAGE_DIRS; FileNotFoundError if none.
-    A name in two directories is refused -- which one would be ambiguous."""
-    hits = [os.path.join(d, name) for d in IMAGE_DIRS
-            if os.path.isfile(os.path.join(d, name))]
-    if len(hits) != 1:
-        raise FileNotFoundError("image %s: %s" % (
-            name, "in no image directory" if not hits else "in two: %s" % hits))
-    return hits[0]
-
-
 def clocked_images():
-    """Every tracked image that has at least one clocked open-drain lane.
+    """Every image of the SHARED universe (`model/image_universe.py`) that has
+    at least one clocked open-drain lane.
 
-    ⛔ fpga/images/ INCLUDED (Wilson 10-18): this scanned test/*.hex only, so
-    the witnessed I2C lane's image (fpga/images/i2c_fram_fpga.hex) had no
-    clocked A2 bound -- two tools disagreeing about which images exist. The
-    shared image-universe function replaces this list in its own commit."""
+    ⛔ THE UNIVERSE IS SHARED (Wilson 10-18). This scanned test/*.hex, then
+    test/ + fpga/images/ -- and both times missed images the bench runs: the
+    tb_cktx arms probe_cov_pindiv (lane 3) and probe_cov_cemodes (lane 0) had
+    clocked open-drain lanes and no bound, so they ran with A2 switched off.
+    Readers that load an image BY NAME use `image_universe.resolve`."""
+    import image_universe
     out = []
-    paths = [p for d in IMAGE_DIRS for p in sorted(glob.glob(os.path.join(d, "*.hex")))]
-    for p in paths:
-        name = os.path.basename(p)
-        if name.startswith("probe_"):
-            continue
-        img = dgf.load(p)
+    for name, img in image_universe.images():
         ls, _d, _k, _j = lane_set(img)
         if any(r["clocked_od"] for r in ls):
             out.append((name, img))
