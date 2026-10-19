@@ -31,6 +31,7 @@ import subprocess
 import sys
 import time
 from toolchain import banner, tool          # noqa: E402  ruling V
+import sim_run                              # noqa: E402
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")
@@ -163,7 +164,9 @@ def suite():
         if b.returncode != 0:
             out.append((name, False, "build failed"))
             continue
-        r = run([tool("vvp"), vvp] + pargs)
+        r = run(sim_run.vvp([vvp] + pargs,
+                            images=sim_run.images_in(pargs)
+                            + sim_run.hardcoded_images(top)))
         txt = r.stdout + r.stderr
         ok = ("PASS" in txt and "FAILURE" not in txt)
         why = "PASS" if ok else [l for l in txt.splitlines()

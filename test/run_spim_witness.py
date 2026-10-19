@@ -46,6 +46,7 @@ for _p in (HERE, os.path.join(ROOT, "model"), os.path.join(ROOT, "model", "a2"))
     if _p not in sys.path:
         sys.path.insert(0, _p)
 from toolchain import banner, tool          # noqa: E402
+import sim_run                              # noqa: E402
 import corpus                               # noqa: E402
 import run_recert as R                      # noqa: E402  one trace reader
 from run_spifram import serial_rx           # noqa: E402  one frame decoder
@@ -70,11 +71,12 @@ def frames_want():
 def run(vvp, extra=()):
     out = os.path.join(R.SCRATCH, "spimw_%s.txt" % os.path.basename(vvp))
     seq = corpus.FEEDS[NAME]
-    cmd = [tool("vvp"), vvp, "+IMG=%s" % IMG, "+NBYTES=256", "+PEER=spi",
-           "+NCYC=%d" % NCYC, "+OUT=%s" % out, "+SEED=1", "+ASYNC=0",
-           "+STAYLOAD=0", "+SCLHOLD=0", "+SPI_SCK_INV=0",
-           "+FEEDN=%d" % len(seq),
-           "+FEED=%s" % "".join("%02x" % b for b in seq)] + list(extra)
+    cmd = sim_run.vvp([vvp, "+IMG=%s" % IMG, "+NBYTES=256", "+PEER=spi",
+                       "+NCYC=%d" % NCYC, "+OUT=%s" % out, "+SEED=1", "+ASYNC=0",
+                       "+STAYLOAD=0", "+SCLHOLD=0", "+SPI_SCK_INV=0",
+                       "+FEEDN=%d" % len(seq),
+                       "+FEED=%s" % "".join("%02x" % b for b in seq)] + list(extra),
+                      images=[IMG])
     r = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True,
                        encoding="utf-8", errors="replace")
     rows = []

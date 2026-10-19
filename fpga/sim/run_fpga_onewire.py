@@ -44,6 +44,7 @@ ROOT = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, os.path.join(ROOT, "test"))
 sys.path.insert(0, os.path.join(ROOT, "model"))
 from toolchain import banner, tool          # noqa: E402
+import sim_run                               # noqa: E402
 import onewire                               # noqa: E402
 import pe_proto as P                         # noqa: E402
 import run_onewire as RO                     # noqa: E402
@@ -54,6 +55,8 @@ except Exception:
     pass
 
 TMP = os.environ.get("PE_FOW_TMP") or os.path.join(ROOT, "probe_fpga_onewire")
+#: the image tb_fpga_onewire.v binds into the core at compile time
+OW_IMG = "test/onewire_fpga_image.hex"
 PUSH_TO_LOW_EDGE = 9       # F_PUSH: low-nibble PUSH edge 9 cycles after start
 WINDOW = 6                 # HOST_INTERFACE "Push before the slot"
 BAD_AT = 20                # a READ ROM byte: well inside the transaction
@@ -120,7 +123,9 @@ def sim(name, e, nfeed, pidx, fpath, **kw):
     log = os.path.join(TMP, "%s.log" % name)
     if os.path.exists(log):
         os.remove(log)
-    run([tool("vvp"), "-l", rel(log), rel(vvp)])
+    # the program image is bound at compile time by tb_fpga_onewire's
+    # instantiation (IMG = test/onewire_fpga_image.hex), so it is named here
+    run(sim_run.vvp(["-l", rel(log), rel(vvp)], images=[OW_IMG]))
     if not os.path.exists(log):
         return ""
     return open(log, encoding="utf-8", errors="replace").read()

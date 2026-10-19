@@ -739,15 +739,21 @@ A2_UNBOUNDED_EXEMPT: dict = {}
 
 
 def has_clocked_od_lane(img):
-    """Does `img` (a path relative to the repo root) have a clocked
-    open-drain lane? Decided by the WRITER's own `lane_set`, not a second
-    copy of the rule."""
+    """Does `img` (a path relative to the repo root, or absolute) have a
+    clocked open-drain lane? Decided by the WRITER's own functions -- the two
+    `program_a2.lane_set` builds its `clocked_od` flag from (`lanes_of`,
+    `is_clocked`, mode 0) -- not a second copy of the rule.
+    ⛔ NOT `lane_set` itself: it REFUSES a zero-spacing program
+    (ZeroSpacingError), and a refused program still has lanes to classify --
+    run_wirefeed_mf's delay-0 must-fire image crashed this lookup (measured,
+    the launch-helper record pass)."""
     sys.path.insert(0, os.path.join(ROOT, "model", "a2"))
     sys.path.insert(0, os.path.join(ROOT, "model"))
     import gate_degenerate_fields as dgf
     import program_a2
-    ls = program_a2.lane_set(dgf.load(os.path.join(ROOT, img)))[0]
-    return any(r["clocked_od"] for r in ls)
+    img = dgf.load(os.path.join(ROOT, img))
+    return any(h["mode"] == 0 and any(program_a2.is_clocked(h, a) for a in acts)
+               for _ln, h, acts in program_a2.lanes_of(img))
 
 
 def a2_slack_arg(img, blob=None):

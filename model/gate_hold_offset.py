@@ -27,6 +27,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path[:0] = [os.path.join(ROOT, "model", "a2"), os.path.join(ROOT, "model"),
                 os.path.join(ROOT, "test")]
 from toolchain import banner, tool        # noqa: E402
+import sim_run                            # noqa: E402
 import hold_bound                         # noqa: E402
 import program_a2                         # noqa: E402
 
@@ -46,10 +47,11 @@ def measure():
                        cwd=ROOT, capture_output=True, text=True)
     if r.returncode != 0:
         raise SystemExit("*** build failed\n" + r.stdout + r.stderr)
-    o = subprocess.run([tool("vvp"), vvp, "+IMG=" + IMG, "+NBYTES=256",
-                        "+PEER=none", "+NCYC=%d" % NCYC,
-                        "+OUT=" + os.path.join(TMP, "o.txt"), "+SEED=1",
-                        "+ASYNC=0", "+STAYLOAD=0", "+SCLHOLD=0"],
+    o = subprocess.run(sim_run.vvp([vvp, "+IMG=" + IMG, "+NBYTES=256",
+                                    "+PEER=none", "+NCYC=%d" % NCYC,
+                                    "+OUT=" + os.path.join(TMP, "o.txt"), "+SEED=1",
+                                    "+ASYNC=0", "+STAYLOAD=0", "+SCLHOLD=0"],
+                                   images=[IMG]),
                        cwd=ROOT, capture_output=True, text=True)
     return [list(map(int, l.split()[1:])) for l in o.stdout.splitlines()
             if l.startswith("HOLD ")]

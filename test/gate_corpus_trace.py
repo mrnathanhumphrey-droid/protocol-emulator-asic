@@ -42,6 +42,7 @@ ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 
 import corpus  # noqa: E402
+import sim_run                                       # noqa: E402
 from toolchain import (banner, tool, tool_or_none,   # noqa: E402  ruling V
                        pinned_ok, PINNED_VERILATOR, PINNED_WSL_VERILATOR)
 
@@ -99,11 +100,11 @@ def feed_args(img):
 
 def iverilog_run(vvp, img, nbytes, peer, out, phase=1, async_arm=0,
                  stayload=0, sclhold=0):
-    r = run([tool("vvp"), vvp, "+IMG=%s" % img, "+NBYTES=%d" % nbytes,
-             "+PEER=%s" % peer, "+OUT=%s" % out, "+NCYC=%d" % NCYC,
-             "+SEED=%d" % phase, "+ASYNC=%d" % async_arm,
-             "+STAYLOAD=%d" % stayload, "+SCLHOLD=%d" % sclhold]
-            + feed_args(img))
+    r = run(sim_run.vvp([vvp, "+IMG=%s" % img, "+NBYTES=%d" % nbytes,
+                         "+PEER=%s" % peer, "+OUT=%s" % out, "+NCYC=%d" % NCYC,
+                         "+SEED=%d" % phase, "+ASYNC=%d" % async_arm,
+                         "+STAYLOAD=%d" % stayload, "+SCLHOLD=%d" % sclhold]
+                        + feed_args(img), images=[img]))
     return r.returncode == 0, (r.stdout + r.stderr)
 
 
@@ -619,10 +620,11 @@ def main() -> int:
     nb5 = len(open(a5).read().split())
 
     def all5(v, seed):
-        r = run([tool("vvp"), v, "+IMG=%s" % a5, "+NBYTES=%d" % nb5,
-                 "+PEER=all", "+OUT=%s" % os.path.join(TMP, "rx_all5.txt"),
-                 "+NCYC=200000", "+SEED=%d" % seed, "+ASYNC=0",
-                 "+STAYLOAD=0", "+SCLHOLD=0", "+SPI_SCK_INV=0"])
+        r = run(sim_run.vvp([v, "+IMG=%s" % a5, "+NBYTES=%d" % nb5,
+                             "+PEER=all", "+OUT=%s" % os.path.join(TMP, "rx_all5.txt"),
+                             "+NCYC=200000", "+SEED=%d" % seed, "+ASYNC=0",
+                             "+STAYLOAD=0", "+SCLHOLD=0", "+SPI_SCK_INV=0"],
+                            images=[a5]))
         return r.stdout + r.stderr
 
     for seed in range(1, 7):
@@ -680,12 +682,12 @@ def main() -> int:
         fh.write("\n".join("%02x" % b for b in store4) + "\n")
 
     def spim4(v, extra=()):
-        r = run([tool("vvp"), v, "+IMG=%s" % d4, "+NBYTES=256", "+PEER=spi",
-                 "+OUT=%s" % os.path.join(TMP, "rx_d4.txt"), "+NCYC=60000",
-                 "+SEED=1", "+ASYNC=0", "+STAYLOAD=0", "+SCLHOLD=0",
-                 "+SPI_SCK_INV=0"] + feed_args(os.path.join(ROOT, "test",
-                                                            "corpus_spim.hex"))
-                + list(extra))
+        r = run(sim_run.vvp([v, "+IMG=%s" % d4, "+NBYTES=256", "+PEER=spi",
+                             "+OUT=%s" % os.path.join(TMP, "rx_d4.txt"), "+NCYC=60000",
+                             "+SEED=1", "+ASYNC=0", "+STAYLOAD=0", "+SCLHOLD=0",
+                             "+SPI_SCK_INV=0"] + feed_args(os.path.join(ROOT, "test",
+                                                                        "corpus_spim.hex"))
+                            + list(extra), images=[d4]))
         o = r.stdout + r.stderr
         m = re.search(r"boundary consumes \(= 1\): (\d+)", o)
         return o, (int(m.group(1)) if m else None)

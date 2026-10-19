@@ -151,6 +151,17 @@ GATES = [
     ("../../test/run_spifram.py",
      "SP1  SPI FRAM write + read: chip RX == sigrok MISO == written, modes 3/0",
      False),
+    # ⛔ THE FPGA BENCHES (Wilson 10-17, registry-scan fix): their runners sat
+    # in fpga/sim/, outside the registry's walk, so no suite ran them, and the
+    # PC-UART loader's twin had no runner at all. LOCAL, like the sigrok
+    # gates above: whole-chip iverilog runs of minutes each, not CI.
+    ("../../fpga/sim/run_fpga_loader.py",
+     "FLD  FPGA PC-UART loader twin: boot, refused load, load, reload", False),
+    ("../../fpga/sim/run_fpga_onewire.py",
+     "FOW  FPGA 1-Wire build: DS18B20 model, timed feeder, status trailer",
+     False),
+    ("../../fpga/sim/run_fpga_i2c.py",
+     "FI2C FPGA I2C FRAM build: SCL-fall-paced feeder, FRAM model", False),
     ("../ta02/run_ta02.py",
      "TA02 the TA-02 harness (gate_fields, gate_pwm, gate_uart_identity)",
      False),

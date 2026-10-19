@@ -19,6 +19,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 from toolchain import banner, tool     # noqa: E402
+import sim_run                         # noqa: E402
 
 
 def main():
@@ -37,10 +38,10 @@ def main():
         raise SystemExit(r.stdout + r.stderr)
     worst = None
     for s in seeds:
-        o = subprocess.run([tool("vvp"), vvp, "+IMG=" + img, "+NBYTES=256",
-                            "+PEER=none", "+NCYC=%d" % ncyc, "+SEED=%d" % s,
-                            "+OUT=" + os.path.join(tmp, "a2w.txt"), "+ASYNC=0",
-                            "+STAYLOAD=0", "+SCLHOLD=0"],
+        o = subprocess.run(sim_run.vvp([vvp, "+IMG=" + img, "+NBYTES=256",
+                                        "+PEER=none", "+NCYC=%d" % ncyc, "+SEED=%d" % s,
+                                        "+OUT=" + os.path.join(tmp, "a2w.txt"), "+ASYNC=0",
+                                        "+STAYLOAD=0", "+SCLHOLD=0"], images=[img]),
                            cwd=ROOT, capture_output=True, text=True).stdout
         m = re.search(r"clocked_conform\[A2\] lanes: budget .* widest (\S+)", o)
         if not m:

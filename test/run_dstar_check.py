@@ -38,6 +38,7 @@ import re
 import subprocess
 import sys
 from toolchain import banner, tool          # noqa: E402  ruling V
+import sim_run                              # noqa: E402
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")
@@ -95,8 +96,9 @@ def build():
 
 
 def one(vvp, base, nbytes, lane, ncyc=NCYC, warmup=WARMUP):
-    r = run([tool("vvp"), vvp, "+IMG=test/%s.hex" % base, "+NBYTES=%d" % nbytes,
-             "+LANE=%d" % lane, "+NCYC=%d" % ncyc, "+WARMUP=%d" % warmup])
+    r = run(sim_run.vvp([vvp, "+IMG=test/%s.hex" % base, "+NBYTES=%d" % nbytes,
+                         "+LANE=%d" % lane, "+NCYC=%d" % ncyc, "+WARMUP=%d" % warmup],
+                        images=["test/%s.hex" % base]))
     txt = r.stdout + r.stderr
     m = re.search(r"JLANE lane=(\d+) sum=(\d+) run=(\d+) wall=(\d+) iv=(\d+) "
                   r"drop=(\d+) fire=(\d+) win=(\d+) agg=(\d+) rdy=(\d+) "

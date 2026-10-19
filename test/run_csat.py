@@ -28,6 +28,7 @@ import re
 import subprocess
 import sys
 from toolchain import banner, tool          # noqa: E402  ruling V
+import sim_run                              # noqa: E402
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")
@@ -85,8 +86,8 @@ KEYS = ("btbmin", "dmin", "dmax", "btb", "nsp", "ndisp", "ntrans", "win",
 
 
 def one(vvp, img, nbytes):
-    r = run([tool("vvp"), vvp, "+IMG=%s" % img, "+NBYTES=%d" % nbytes,
-             "+NCYC=%d" % NCYC, "+WARMUP=%d" % WARMUP])
+    r = run(sim_run.vvp([vvp, "+IMG=%s" % img, "+NBYTES=%d" % nbytes,
+                         "+NCYC=%d" % NCYC, "+WARMUP=%d" % WARMUP], images=[img]))
     txt = r.stdout + r.stderr
     m = re.search(r"CSAT img=\S+ " + " ".join(
         r"%s=(-?\d+)" % k for k in KEYS), txt)

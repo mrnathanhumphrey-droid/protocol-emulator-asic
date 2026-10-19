@@ -36,6 +36,7 @@ fi
 while read -r LABEL ARGS; do
     [ -z "$LABEL" ] && continue
     # shellcheck disable=SC2086
-    nice -n 19 "$OBJ/sim" +verilator+rand+reset+0 $ARGS > "$OUTDIR/$LABEL.vl.txt" 2>&1
+    sim_exec "--bench $TOP $ARGS" \
+        nice -n 19 "$OBJ/sim" +verilator+rand+reset+0 $ARGS > "$OUTDIR/$LABEL.vl.txt" 2>&1
     echo "  ran $LABEL"
 done < "$ARMS"

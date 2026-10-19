@@ -29,6 +29,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 from toolchain import banner, tool      # noqa: E402
+import sim_run                          # noqa: E402
 import pe_isa as I                      # noqa: E402
 
 TMP = os.environ.get("PE_V2WIN_TMP") or os.path.join(HERE, "sim_build_v2win")
@@ -69,7 +70,7 @@ def main():
     if r.returncode != 0:
         print("*** build failed\n" + (r.stdout + r.stderr)[-800:])
         return 1
-    dry = run([tool("vvp"), vvp, "+IMG=" + img, "+DRY=1"]).stdout
+    dry = run(sim_run.vvp([vvp, "+IMG=" + img, "+DRY=1"], images=[img])).stdout
     slots = [int(c) for c in re.findall(r"^SLOT \d+ WB (\d+)", dry, re.M)]
     if len(slots) <= SLOT:
         print("*** the dry run found %d slot(s)" % len(slots))
@@ -79,8 +80,8 @@ def main():
           % (slots[:5], SLOT, at))
     took = {}
     for k in LEADS:
-        o = run([tool("vvp"), vvp, "+IMG=" + img, "+AT=%d" % at,
-                 "+LEAD=%d" % k]).stdout
+        o = run(sim_run.vvp([vvp, "+IMG=" + img, "+AT=%d" % at,
+                             "+LEAD=%d" % k], images=[img])).stdout
         m = re.search(r"V2WIN lead=\d+ taken=(\d)", o)
         took[k] = int(m.group(1)) if m else None
     print("  lead -> taken: %s" % " ".join("%d:%s" % (k, took[k])

@@ -34,6 +34,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 from toolchain import banner, tool, scratch_sub  # noqa: E402  ruling V
+import sim_run                                   # noqa: E402
 import scratch_heads                              # noqa: E402
 
 try:
@@ -70,6 +71,8 @@ def image(path):
                hdr(dat, ck, 1, d1, 0, 2 * d1, 3 * d1, b1, order=ORDER_LSB)]
     headers += [hdr(p, p, 0, 500, 0, 200, 240, park) for p in (0, 5, 6)]
     write_image(path, b"".join(headers) + b"".join(l0 + l1 + tail))
+    # a CLOCKED scratch image: its provenance for test/sim_run.py
+    sim_run.scratch_image("run_cktx", path)
     return path
 
 
@@ -202,11 +205,12 @@ def build(defines, tag, engine=None, srcdir=None):
 def run(vvp, img, ncyc, starve, starve_len):
     with open(img, encoding="ascii") as fh:
         nb = len(fh.read().split())
-    r = subprocess.run([tool("vvp"), vvp, "+IMG=" + img.replace(os.sep, "/"),
-                        "+NBYTES=%d" % nb, "+NCYC=%d" % ncyc,
-                        "+STARVE=%d" % starve, "+STARVE_LEN=%d" % starve_len]
-                       # ⭐ WF2 ruling 3: a starve window is a DECLARED underrun
-                       + (["+V3_UNDERRUN=2"] if starve else []),
+    r = subprocess.run(sim_run.vvp([vvp, "+IMG=" + img.replace(os.sep, "/"),
+                                    "+NBYTES=%d" % nb, "+NCYC=%d" % ncyc,
+                                    "+STARVE=%d" % starve, "+STARVE_LEN=%d" % starve_len]
+                                   # ⭐ WF2 ruling 3: a starve window is a DECLARED underrun
+                                   + (["+V3_UNDERRUN=2"] if starve else []),
+                                   images=[img]),
                        cwd=ROOT, capture_output=True, encoding="utf-8",
                        errors="replace")
     txt = (r.stdout or "") + (r.stderr or "")

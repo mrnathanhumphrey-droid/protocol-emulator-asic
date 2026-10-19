@@ -44,6 +44,7 @@ sys.path.insert(0, os.path.join(ROOT, "test"))
 
 import pe_isa  # noqa: E402
 from toolchain import banner, tool, PINNED_WSL_VERILATOR   # noqa: E402  V
+import sim_run                                              # noqa: E402
 
 OWNER = "test/pe_isa.py"
 SCAN_DIRS = ("test", "model", os.path.join("model", "a2"))
@@ -111,7 +112,8 @@ def dump_iverilog(src_root=None):
                        encoding="utf-8", errors="replace")
     if r.returncode != 0:
         return None, (r.stdout + r.stderr)[-400:]
-    r2 = subprocess.run([tool("vvp"), out], capture_output=True, text=True,
+    # an encoder cross-check bench: it loads no program image
+    r2 = subprocess.run(sim_run.vvp([out], images=[]), capture_output=True, text=True,
                         encoding="utf-8", errors="replace")
     vals = {}
     for m in re.finditer(r"PARAM (\w+)=(-?\d+)", r2.stdout):

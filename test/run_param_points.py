@@ -48,6 +48,7 @@ sys.path.insert(0, HERE)
 # rest of the store unwritten -- the defect M closes.
 from pe_isa import STORE_BYTES                                    # noqa: E402
 from toolchain import banner, tool          # noqa: E402  ruling V
+import sim_run                              # noqa: E402
 SCRATCH = os.environ.get("PE_SCRATCH",
                          os.path.join(os.environ.get("TEMP", "/tmp"), "pe_pp"))
 
@@ -299,7 +300,9 @@ def main() -> int:
             if b.returncode != 0:
                 passed, note = False, "BUILD FAILED"
             else:
-                r = run([tool("vvp"), vvp] + args)
+                r = run(sim_run.vvp([vvp] + args,
+                                    images=sim_run.images_in(args)
+                                    + sim_run.hardcoded_images(top)))
                 txt = r.stdout + r.stderr
                 # ⛔ A FAILURE LINE COUNTS EVEN IF THE PASS LINE IS PRESENT:
                 # some benches print both when one arm of several fails.

@@ -306,6 +306,11 @@ def read_hex(name):
     trace corpus uses, so this suite and that comparison speak about the same
     programs rather than about two sets of bytes that happen to share a name."""
     path = os.path.join(HERE, name)
+    # ⛔ cocotb's "run" loads its program here, in Python, not by a plusarg:
+    # the one lookup (test/sim_run.py) refuses a clocked image with no A2
+    # bound before the program reaches the chip (Wilson 10-19)
+    import sim_run
+    print(sim_run.check([path]), flush=True)
     with open(path, encoding="ascii") as fh:
         return [int(t, 16) for t in fh.read().split()]
 

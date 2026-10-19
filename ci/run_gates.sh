@@ -245,6 +245,11 @@ GATES=(
   # A2 off. Clocked lane -> clocked A2 record, unclocked SHIFT -> response
   # record, the bench lookup fails closed, names are unique.
   model/gate_image_bounds.py
+  # ⛔⛔ EVERY SIMULATION RUN GOES THROUGH test/sim_run.py (Wilson 10-19):
+  # the bound lookup lives inside the one run path, so skipping it is not
+  # possible; this is red on any run (vvp, a Verilator binary, cocotb's image
+  # load) built any other way. Compile lines are not runs.
+  model/gate_sim_runs.py
   # ⭐ The I2C Fast-mode lane's witness: a RECORDED BENCH WITNESS (PA100T +
   # MB85RC256V, DSLogic captures) re-checked here in seconds, no simulator --
   # not a hardware run in CI (Wilson 10-17).

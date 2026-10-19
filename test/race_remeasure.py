@@ -20,6 +20,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "test"))
 os.chdir(ROOT)
 from toolchain import tool, banner          # noqa: E402
+import sim_run                              # noqa: E402
 import refill_collect as rc                 # noqa: E402
 
 SIM = sys.argv[1]
@@ -41,7 +42,7 @@ def build(arm, defs):
               ["-D" + d for d in defs] + ["-o", out, "-s", "tb_trace"] + SRCS
         r = subprocess.run(cmd, capture_output=True, text=True)
         assert r.returncode == 0, r.stderr[-500:]
-        return [tool("vvp"), out]
+        return ("iverilog", out)
     bdir = "/tmp/ra1_%s" % arm
     subprocess.run(["rm", "-rf", bdir])
     cmd = [tool("verilator"), "--cc", "--exe", "--main", "--timing",
@@ -53,7 +54,15 @@ def build(arm, defs):
     r = subprocess.run(["make", "-C", bdir, "-f", "Vtb_trace.mk", "-j", "4"],
                        capture_output=True, text=True)
     assert r.returncode == 0, r.stderr[-800:]
-    return [os.path.join(bdir, "ra1.sim")]
+    return ("bin", bdir)
+
+
+def run_cmd(built, args, images):
+    """The run command for what `build` made, through the one helper."""
+    kind, where = built
+    if kind == "iverilog":
+        return sim_run.vvp([where] + args, images=images)
+    return sim_run.argv([os.path.join(where, "ra1.sim")] + args, images=images)
 
 
 res = {}
@@ -65,7 +74,8 @@ for arm, defs in ARMS:
                 "+OUT=%s/tr.txt" % OUT]
         if SIM == "verilator":
             args += ["--x-initial", "unique", "+verilator+rand+reset+2"]
-        r = subprocess.run(run + args, capture_output=True, text=True,
+        r = subprocess.run(run_cmd(run, args, sim_run.images_in(args)),
+                           capture_output=True, text=True,
                            encoding="utf-8", errors="replace")
         log = os.path.join(OUT, "%s_%s_%s.log" % (SIM, arm, img))
         open(log, "w", encoding="utf-8").write(r.stdout + r.stderr)

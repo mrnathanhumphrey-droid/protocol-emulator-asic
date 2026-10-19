@@ -41,6 +41,7 @@ sys.path.insert(0, os.path.join(ROOT, "test"))
 import run_w_sweep as w                                   # noqa: E402
 from run_lockstep import IMAGES                           # noqa: E402
 from toolchain import banner, tool, PINNED_WSL_VERILATOR  # noqa: E402
+import sim_run                                            # noqa: E402
 
 LEAN = os.path.join(ROOT, "lean", "JLane")
 THEOREMS = ["JLane.dstar", "JLane.dstar29", "JLane.dstar39"]
@@ -183,9 +184,10 @@ def export(out, rows, rtl):
         name, tag, hexp = j
         img = os.path.relpath(hexp, ROOT).replace(os.sep, "/")
         trace = os.path.join(out, "trace_%s.csv" % name).replace(os.sep, "/")
-        r = run([tool("vvp"), vvp[tag], "+IMG=" + img, "+NBYTES=%d" % nbytes(hexp),
-                 "+NCYC=%d" % (rows + 5000), "+WARMUP=0", "+TRACE=" + trace,
-                 "+MAXROWS=%d" % rows, "+META=%s rtl=%s" % (name, rtl)])
+        r = run(sim_run.vvp([vvp[tag], "+IMG=" + img, "+NBYTES=%d" % nbytes(hexp),
+                             "+NCYC=%d" % (rows + 5000), "+WARMUP=0", "+TRACE=" + trace,
+                             "+MAXROWS=%d" % rows, "+META=%s rtl=%s" % (name, rtl)],
+                            images=[img]))
         return name, r.returncode
 
     with ThreadPoolExecutor(3) as ex:

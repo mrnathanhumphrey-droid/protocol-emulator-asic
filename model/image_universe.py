@@ -53,18 +53,20 @@ class Universe:
         return sorted(self.paths.items())
 
 
-def _bench_arm_paths():
+def _bench_arm_paths(generate=True):
     """(set of normalised paths every benchset `+IMG=` arm names, problems).
 
     The generated images are BUILT first (`benchset.generate`) and the
     long-path copy made (`ensure_longpath_image`), so a clean checkout and a
-    post-sweep tree see the same set."""
+    post-sweep tree see the same set. `generate=False` (test/sim_run.py's
+    per-run content index) lists the arms without building anything."""
     sys.path.insert(0, os.path.join(ROOT, "test"))
     import benchset
     paths, probs = set(), []
-    benchset.ensure_longpath_image()
+    if generate:
+        benchset.ensure_longpath_image()
     for top, cfg in sorted(benchset.CONFIG.items()):
-        err = benchset.generate(cfg, top)
+        err = benchset.generate(cfg, top) if generate else None
         if err:
             probs.append(err)
         arms = cfg.get("arms")
@@ -93,16 +95,18 @@ def _rank(p, dirs):
     return (idx[0] if idx else len(dirs), p)
 
 
-def scan(dirs=DIRS, arms=True):
+def scan(dirs=DIRS, arms=True, generate=True):
     """The universe as a `Universe`. Raises `NameCollision` on two different
-    images under one name. `dirs` / `arms` exist for the must-fires only."""
+    images under one name. `dirs` / `arms` exist for the must-fires only;
+    `generate=False` builds nothing (an absent generated arm is a `probs`
+    entry, as always)."""
     cands, probs = set(), []
     for d in dirs:
         for p in glob.glob(os.path.join(d, "*.hex")):
             if not os.path.basename(p).startswith("probe_"):
                 cands.add(os.path.normpath(p))
     if arms:
-        ap, aprobs = _bench_arm_paths()
+        ap, aprobs = _bench_arm_paths(generate)
         cands |= ap
         probs += aprobs
     by_name = {}

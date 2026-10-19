@@ -47,6 +47,7 @@ ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(ROOT, "model"))
 from toolchain import banner, tool          # noqa: E402
+import sim_run                              # noqa: E402
 import onewire                               # noqa: E402
 import pe_proto as P                         # noqa: E402
 
@@ -118,9 +119,10 @@ def sim(name, variant, txn, rise_ns, extra=()):
     rel = lambda p: os.path.relpath(p, ROOT).replace(os.sep, "/")
     import time
     t0 = time.time() - 2.0
-    r = run([tool("vvp"), "-l", rel(log), rel(vvp_path(rise_ns)),
-             "+IMG=" + rel(img), "+NBYTES=256", "+FEED=" + rel(fpath),
-             "+NFEED=%d" % len(lines), "+POLLIDX=%d" % pidx] + list(extra))
+    r = run(sim_run.vvp(["-l", rel(log), rel(vvp_path(rise_ns)),
+                         "+IMG=" + rel(img), "+NBYTES=256", "+FEED=" + rel(fpath),
+                         "+NFEED=%d" % len(lines), "+POLLIDX=%d" % pidx] + list(extra),
+                        images=[rel(img)]))
     # ⛔ a log from an EARLIER run must not be judged as this one's
     if not os.path.exists(log) or os.path.getmtime(log) < t0:
         return "*** FAIL run_onewire: no fresh log for %s\n" % name, []

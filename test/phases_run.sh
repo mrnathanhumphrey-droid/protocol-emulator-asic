@@ -75,7 +75,7 @@ run_arm() {     # $1=armname $2=image $3=nbytes $4=ncyc $5=label $6=sclhold
   local hold="${6:-0}"
   local hns
   hns="$(arm_hold_ns "$arm")"
-  ( cd "$OUT/build_$arm" && ./trace.sim \
+  ( cd "$OUT/build_$arm" && sim_exec "$ROOT/$img" ./trace.sim \
       +IMG="$ROOT/$img" +NBYTES="$nb" +PEER=none +NCYC="$ncyc" \
       +SCLHOLD="$hold" +OUT="$OUT/trace_$label.txt" \
       --x-initial unique +verilator+rand+reset+2 ) \

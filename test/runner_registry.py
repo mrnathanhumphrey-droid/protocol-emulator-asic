@@ -64,6 +64,10 @@ DECLARED = {
                          "the cross-simulator gate's Verilator half"),
     "test/toolchain.py": ("helper", "test/run_reload.py",
                           "the tool probe every runner imports; runs none"),
+    "test/sim_run.py": ("helper", "test/run_lockstep.py",
+                        "THE run path (Wilson's launch-helper ruling): every simulation run "
+                        "takes its command from it, after the bound lookup; "
+                        "it launches nothing itself"),
     "test/clean_room.py": ("manual", "model/gate_ruling_audit.py",
                            "the clean-room recipe check (every artefact has "
                            "a recipe)"),
@@ -126,13 +130,19 @@ def registry():
     return reg
 
 
+#: the trees walked for bench invokers. ⛔ fpga/sim ADDED (Wilson 10-17): the
+#: FPGA benches' runners (run_fpga_onewire, run_fpga_i2c) lived there, outside
+#: the walk, so they were in no registry and no suite ran them.
+SCAN_TOPS = ("test", "model", "ci", "fpga/sim")
+
+
 def bench_invokers(root=ROOT):
-    """{path: text} for every .py / .sh under test/, model/, ci/ that names a
+    """{path: text} for every .py / .sh under SCAN_TOPS that names a
     simulator and a bench. ⚠ Over-approximates (a mention in a comment
     counts), which is the safe direction: an extra entry is declared, a
     missing one is a runner nobody sweeps."""
     out = {}
-    for top in ("test", "model", "ci"):
+    for top in SCAN_TOPS:
         for dp, dn, fn in os.walk(os.path.join(root, top)):
             dn[:] = [d for d in dn if not d.startswith(
                 ("sim_build", "probe", "__pycache__", "build", "fixtures"))]

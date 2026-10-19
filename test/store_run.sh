@@ -74,7 +74,7 @@ short51|clean|pad_corpus_i2c|51
 mut_short51|nofull|pad_corpus_i2c|51"
 while IFS='|' read -r base build imgb nb; do
   img="$OUT/$imgb.hex"
-  ( cd "$OUT/build_$build" && ./store.sim +IMG="$img" +NBYTES="$nb" +PEER=none \
+  ( cd "$OUT/build_$build" && sim_exec "$img" ./store.sim +IMG="$img" +NBYTES="$nb" +PEER=none \
         +NCYC=60000 +SCLHOLD=0 +OUT="$OUT/trace_$base.txt" \
         --x-initial unique +verilator+rand+reset+2 ) > "$OUT/run_$base.log" 2>&1
   verdict="$(grep 'clocked_conform\[M\]' "$OUT/run_$base.log" | tail -1)"

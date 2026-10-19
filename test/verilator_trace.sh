@@ -144,7 +144,7 @@ PV
     -o pr --Mdir "$PRE/obj" "$PRE/probe.v" > "$PRE/build.log" 2>&1
 PV_VALS=""
 for S in $SEEDS; do
-    V=$("$PRE/obj/pr" "+verilator+rand+reset+2" "+verilator+seed+$S" \
+    V=$(sim_exec "" "$PRE/obj/pr" "+verilator+rand+reset+2" "+verilator+seed+$S" \
         2>/dev/null | sed -n 's/^PROBE //p')
     PV_VALS="$PV_VALS ${V:-MISSING}"
 done
@@ -170,7 +170,7 @@ echo
 for S in $SEEDS; do
     # BOTH FLAGS: rand+reset+2 selects RANDOM initial state; without it the
     # seed is accepted and silently ignored and every seed is all-zeros.
-    "$OBJ/tr" "+IMG=$IMG" "+NBYTES=$NBYTES" \
+    sim_exec "$IMG" "$OBJ/tr" "+IMG=$IMG" "+NBYTES=$NBYTES" \
               "+OUT=$OUTDIR/s$S.txt" "+NCYC=$NCYC" \
               "+PEER=$PEER" "+ASYNC=$ASYNCA" "+SEED=$PHASE" \
               "+STAYLOAD=$STAYLOAD" "+SCLHOLD=$SCLHOLD" $EXTRA \

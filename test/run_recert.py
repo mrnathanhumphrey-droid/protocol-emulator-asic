@@ -38,6 +38,7 @@ ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(ROOT, "model"))
 from toolchain import banner, tool          # noqa: E402  ruling V
+import sim_run                              # noqa: E402
 import pe_isa as I                          # noqa: E402
 from run_i2c import wsl_path                # noqa: E402
 
@@ -59,7 +60,11 @@ I2C = {"corpus_i2c.hex": ("i2c", [0]),
 #: image -> (peer, [lane, ...]) certified as SPI (push-pull clocked)
 SPI = {"ckfive_image.hex": ("none", [0, 1, 2]),
        "corpus_all5.hex": ("spi", [2]),
-       "corpus_spim.hex": ("spi", [0])}
+       "corpus_spim.hex": ("spi", [0]),
+       # the same 1 MHz SPI-master transaction at d = 25 (admissible; WF1's
+       # SPI-master witness, 6c919bc) -- unclassed from 6c919bc until the
+       # class guard (gate_image_bounds G5, Wilson 10-19) found it
+       "corpus_spim25.hex": ("spi", [0])}
 #: clocked lanes of a certified image that are NOT certified, by name
 RX_ONLY = {
     ("ckfive_image.hex", 3):
@@ -92,19 +97,39 @@ NOT_CERTIFIABLE = {
                          "refused, nothing reaches the wire",
     "ckdegen2_image.hex": "refusal image: the wrapping-count route to the "
                           "same refusal",
-    # ⭐ THREE MORE SINCE THE SHARED UNIVERSE (Wilson 10-18): this scanned
-    # test/ only, so these were never classed at all
-    "i2c_fram_fpga.hex": "certified ON HARDWARE, not here: gate_i2c_hw_"
-                         "witness holds sigrok's decode of the real FRAM bus "
-                         "(DSLogic); its feed lives in fpga/feeds, which this "
-                         "sim re-cert's trace path (corpus.FEEDS) cannot run",
-    "probe_cov_pindiv.hex": "coverage image (gate_coverage's pin-diversity "
-                            "arm): action pin != header pin on every opcode, "
-                            "not a protocol transaction; tb_cktx runs it",
-    "probe_cov_cemodes.hex": "coverage image (gate_coverage's CE-modes arm): "
-                             "HALF_HIGH + CLK_INV reach, not a protocol "
-                             "transaction; tb_cktx runs it",
 }
+
+
+#: the wire-feed check that marks an image as a COVERAGE image
+COVERAGE_CHECK = "test/gate_coverage.py"
+
+
+def derived_not_certifiable():
+    """{image: reason} for clocked images whose class FOLLOWS from what
+    `gate_wire_feed.REGISTRY` already declares about them -- derived, never
+    typed (Wilson 10-19: the three images the shared universe brought in on
+    23daef3 had been hand-declared here):
+      * WITNESS by a recorded HARDWARE-witness gate (model/gate_*_hw_witness.py)
+        -> certified on hardware by that gate, not by this simulation;
+      * INTERNAL, checked by the coverage sweep -> a coverage image, not a
+        protocol transaction.
+    """
+    sys.path.insert(0, os.path.join(ROOT, "model", "a2"))
+    import gate_wire_feed as W
+    ck = clocked_images()        # only a CLOCKED image has a class here
+    out = {}
+    for name, (kind, d) in W.REGISTRY.items():
+        if name not in ck:
+            continue
+        r = d.get("runner", "")
+        if kind == W.WITNESS and re.fullmatch(r"model/gate_\w+_hw_witness\.py", r):
+            out[name] = ("certified ON HARDWARE by %s (derived from its "
+                         "wire-feed WITNESS entry), not by this simulation" % r)
+        elif kind == W.INTERNAL and d.get("checked_by") == COVERAGE_CHECK:
+            out[name] = ("coverage image, checked by %s (derived from its "
+                         "wire-feed INTERNAL entry), not a protocol "
+                         "transaction" % COVERAGE_CHECK)
+    return out
 
 
 def clocked_images():
@@ -128,6 +153,21 @@ def read(p):
         return bytes(int(t, 16) for t in fh.read().split())
 
 
+NOT_CERTIFIABLE.update(derived_not_certifiable())
+
+
+def classes():
+    """{image: class name} -- every image run_recert classes."""
+    out = {}
+    for n in I2C:
+        out[n] = "I2C"
+    for n in SPI:
+        out.setdefault(n, "SPI")
+    for n in NOT_CERTIFIABLE:
+        out.setdefault(n, "NOT_CERTIFIABLE")
+    return out
+
+
 def build():
     import gate_sda_hold as g
     return g.build([], "recert")
@@ -148,16 +188,21 @@ def trace(vvp, img, peer, ncyc=NCYC, img_path=None, feed_of=None,
                                                    else ""))
     import benchset
     import corpus
-    a2 = benchset.a2_slack_arg("test/" + img)
+    ipath = (img_path.replace("\\", "/") if img_path else "test/%s" % img)
+    # ⛔ the bound of the image ACTUALLY RUN: this looked up "test/" + img,
+    # and since 23daef3 a missing record classifies the image -- so a scratch
+    # variant (run_spifram's corpus_spim_mode0.hex, not under test/) crashed
+    # the lookup. Found by the launch-helper record pass (Wilson 10-19).
+    a2 = benchset.a2_slack_arg(ipath)
     seq = corpus.FEEDS.get(feed_of or img.replace(".hex", ""), [])
     feed = (["+FEEDN=%d" % len(seq),
              "+FEED=%s" % "".join("%02x" % b for b in seq)] if seq else [])
-    ipath = (img_path.replace("\\", "/") if img_path else "test/%s" % img)
-    r = subprocess.run([tool("vvp"), vvp, "+IMG=%s" % ipath, "+NBYTES=256",
-                        "+PEER=%s" % peer, "+NCYC=%d" % ncyc, "+OUT=%s" % out,
-                        "+SEED=1", "+ASYNC=0", "+STAYLOAD=0", "+SCLHOLD=0",
-                        "+SPI_SCK_INV=%d" % (1 if sck_inv else 0)]
-                       + ([a2] if a2 else []) + feed, cwd=ROOT,
+    r = subprocess.run(sim_run.vvp([vvp, "+IMG=%s" % ipath, "+NBYTES=256",
+                                    "+PEER=%s" % peer, "+NCYC=%d" % ncyc, "+OUT=%s" % out,
+                                    "+SEED=1", "+ASYNC=0", "+STAYLOAD=0", "+SCLHOLD=0",
+                                    "+SPI_SCK_INV=%d" % (1 if sck_inv else 0)]
+                                   + ([a2] if a2 else []) + feed, images=[ipath]),
+                       cwd=ROOT,
                        capture_output=True, text=True, encoding="utf-8",
                        errors="replace")
     rows = []

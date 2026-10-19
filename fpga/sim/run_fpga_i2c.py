@@ -43,6 +43,7 @@ sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(ROOT, "test"))
 sys.path.insert(0, os.path.join(ROOT, "model"))
 from toolchain import banner, tool          # noqa: E402
+import sim_run                               # noqa: E402
 import i2c_fram as IF                        # noqa: E402
 import run_fpga_onewire as RF                # noqa: E402  status_names
 
@@ -116,7 +117,9 @@ def sim(name, **kw):
     log = os.path.join(TMP, "%s.log" % name)
     if os.path.exists(log):
         os.remove(log)
-    run([tool("vvp"), "-l", rel(log), rel(vvp)])
+    # the program image is the core's compile-time IMG parameter, so it is
+    # named here (sim_run cannot see it in a plusarg)
+    run(sim_run.vvp(["-l", rel(log), rel(vvp)], images=[rel(IMG)]))
     return open(log, encoding="utf-8", errors="replace").read() \
         if os.path.exists(log) else ""
 

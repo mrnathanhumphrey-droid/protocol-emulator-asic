@@ -46,6 +46,7 @@ import os
 import subprocess
 import sys
 from toolchain import banner, tool          # noqa: E402  ruling V
+import sim_run                              # noqa: E402
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")
@@ -93,8 +94,9 @@ def stream(vvp, img):
     path = os.path.join(HERE, img)
     with open(path, encoding="ascii") as fh:
         nb = len([w for w in fh.read().split() if w])
-    r = subprocess.run([tool("vvp"), vvp, "+IMG=test/%s" % img,
-                        "+NBYTES=%d" % nb, "+NCYC=%d" % NCYC], cwd=ROOT,
+    r = subprocess.run(sim_run.vvp([vvp, "+IMG=test/%s" % img,
+                                    "+NBYTES=%d" % nb, "+NCYC=%d" % NCYC],
+                                   images=["test/%s" % img]), cwd=ROOT,
                        capture_output=True, encoding="utf-8", errors="replace")
     txt = (r.stdout or "") + (r.stderr or "")
     body = [l for l in txt.splitlines() if l[:2] in ("D ", "P ")]

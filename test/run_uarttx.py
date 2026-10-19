@@ -21,6 +21,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 from toolchain import banner, tool          # noqa: E402
+import sim_run                              # noqa: E402
 import uart_tx                               # noqa: E402
 
 TMP = os.environ.get("PE_UARTTX_TMP") or os.path.join(ROOT, "test",
@@ -64,9 +65,9 @@ def main():
         return 1
 
     def sim(img, err=0):
-        o = run([tool("vvp"), vvp, "+IMG=" + img, "+NBYTES=256",
-                 "+NCYC=%d" % NCYC, "+BITP=%d" % uart_tx.T_NOMINAL,
-                 "+ERR=%d" % err])
+        o = run(sim_run.vvp([vvp, "+IMG=" + img, "+NBYTES=256",
+                             "+NCYC=%d" % NCYC, "+BITP=%d" % uart_tx.T_NOMINAL,
+                             "+ERR=%d" % err], images=[img]))
         return o.stdout + o.stderr
 
     for name in ("uart_tx_image.hex", "uart_tx_busy_image.hex"):

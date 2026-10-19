@@ -31,6 +31,7 @@ import re
 import subprocess
 import sys
 from toolchain import banner, tool          # noqa: E402  ruling V
+import sim_run                              # noqa: E402
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")
@@ -191,8 +192,9 @@ def main() -> int:
         print("  *** build failed")
         print((b.stdout + b.stderr)[-700:])
         return 1
-    r = run([tool("vvp"), vvp, "+IMG=test/i2cframe_image.hex", "+NBYTES=%d" % nb,
-             "+NCYC=%d" % NCYC, "+DUMP=%s" % DUMP])
+    r = run(sim_run.vvp([vvp, "+IMG=test/i2cframe_image.hex", "+NBYTES=%d" % nb,
+                         "+NCYC=%d" % NCYC, "+DUMP=%s" % DUMP],
+                        images=["test/i2cframe_image.hex"]))
     txt = r.stdout + r.stderr
     m = re.search(r"I2CDUMP file=(\S+) samples=(\d+) sda_edges=(\d+) "
                   r"scl_edges=(\d+) acks=(\d+)", txt)
@@ -314,9 +316,10 @@ def main() -> int:
         print("        %s" % ((bm.stdout + bm.stderr).strip()[:200]))
         rc = 1
     else:
-        rm = run([tool("vvp"), mv, "+IMG=test/i2cframe_image.hex",
-                  "+NBYTES=%d" % nb, "+NCYC=%d" % NCYC,
-                  "+DUMP=probe_i2c_mut.bin"])
+        rm = run(sim_run.vvp([mv, "+IMG=test/i2cframe_image.hex",
+                              "+NBYTES=%d" % nb, "+NCYC=%d" % NCYC,
+                              "+DUMP=probe_i2c_mut.bin"],
+                             images=["test/i2cframe_image.hex"]))
         dm = sigrok_i2c("probe_i2c_mut.bin")
         if dm["rc"] != 0:
             print("    *** sigrok did not run on the mutant dump, so nothing")

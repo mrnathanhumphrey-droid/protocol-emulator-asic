@@ -58,7 +58,7 @@ build_arm() {   # $1=armname  $2=extra verilator defines
 run_arm() {     # $1=armname $2=image-path $3=label
   local arm="$1" img="$2" label="$3" nb
   nb=$(tr -s ' \n' '\n' < "$img" | grep -cv '^$')
-  ( cd "$OUT/build_$arm" && ./refill.sim \
+  ( cd "$OUT/build_$arm" && sim_exec "$ROOT/$img" ./refill.sim \
       +IMG="$ROOT/$img" +NBYTES="$nb" +PEER=none +NCYC=60000 \
       +SCLHOLD=0 +OUT="$OUT/trace_$label.txt" \
       --x-initial unique +verilator+rand+reset+2 ) \

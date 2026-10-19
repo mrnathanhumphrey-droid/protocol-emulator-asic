@@ -5,16 +5,18 @@ outside the CI gate list twice in one day. `test/runner_registry.py` is the
 one enumeration (the CI list and the A2 suite are READ from their own files;
 everything else is declared with a kind and a reason). This gate:
 
-  1. every script under test/, model/, ci/ that invokes a bench (names a
-     simulator and a `tb_*`) is in the registry -- an unregistered runner is
-     RED, so the next one cannot hide;
+  1. every script under `runner_registry.SCAN_TOPS` (test/, model/, ci/,
+     fpga/sim/) that invokes a bench (names a simulator and a `tb_*`) is in
+     the registry -- an unregistered runner is RED, so the next one cannot
+     hide;
   2. every registered path exists, and both read lists are non-empty;
   3. a declared "helper" is actually named by the caller it claims, and every
      declared owner exists.
 
 MUST-FIRES (on in-memory copies, never the tree): a planted unregistered
 runner is red; a CI runner deleted from run_gates.sh's list is red (the
-registry reads the real list, not a copy of it).
+registry reads the real list, not a copy of it); an fpga/sim runner
+un-registered is red (the walk reaches fpga/sim).
 Verdict: `RUNNER REGISTRY: PASSED` or `*** FAIL ...`.
 """
 import os
@@ -84,7 +86,16 @@ def main():
     print("  must-fire  %s deleted from the CI list       %s"
           % (victim, "red" if red2 else "*** NOT RED%s" % (
               "" if cut != gates else " (the deletion did not apply)")))
-    ok = red1 and red2
+    # ⛔ THE WALK REACHES fpga/sim (Wilson 10-17): the planted runner above sits
+    # in test/, so it cannot prove the widened walk. Un-register a runner that
+    # ONLY the fpga/sim walk finds -> it must come back red.
+    victim3 = "fpga/sim/run_fpga_onewire.py"
+    reg3 = {p: k for p, k in reg.items() if p != victim3}
+    red3 = victim3 in inv and any(victim3 in q
+                                  for q in check(inv, reg3, RR.DECLARED))
+    print("  must-fire  %s un-registered       %s"
+          % (victim3, "red" if red3 else "*** NOT RED"))
+    ok = red1 and red2 and red3
 
     if not probs and ok:
         print("RUNNER REGISTRY: PASSED")

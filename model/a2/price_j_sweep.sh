@@ -105,7 +105,7 @@ for d in $DS; do
     # So: a 200k-cycle run, a fixed warm-up well inside it, and the window
     # length is CHECKED. A number from an empty window is refused.
     M=""; WINDOW=""
-    OUT=$("$VVP" "$VVPF" +IMG=test/probe_five.hex +NCYC=200000 +WARMUP=4000 2>&1)
+    OUT=$(sim_exec "test/probe_five.hex" "$VVP" "$VVPF" +IMG=test/probe_five.hex +NCYC=200000 +WARMUP=4000 2>&1)
     NB=$(echo "$OUT" | grep -o "probe_five.hex: [0-9]* bytes" | grep -o "[0-9]*" | head -1)
     WINDOW=$(echo "$OUT" | grep -o "window length *: *[0-9]*" | grep -o "[0-9]*$" | head -1)
     CUR=$(echo "$OUT" | grep -o "STEADY *: *[0-9]*" | grep -o "[0-9]*$" | head -1)

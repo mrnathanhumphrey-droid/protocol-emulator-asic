@@ -39,6 +39,7 @@ sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(ROOT, "model"))
 from toolchain import banner, tool                     # noqa: E402
 import benchset                                        # noqa: E402
+import sim_run                                         # noqa: E402
 import gate_corpus_trace as gct                        # noqa: E402  vrun/vpath/pin
 from gate_bench_race import (RECORD_BENCHES,           # noqa: E402
                              RECORD_ARMS, MF_FIXED, MF_RACY)
@@ -107,7 +108,9 @@ def both(top, srcs, gparams, arms, tag):
         return "verilator side failed: " + (r.stdout + r.stderr)[-300:]
     out = {}
     for label, args in arms:
-        iv = run([tool("vvp"), vvp] + list(args)).stdout
+        iv = run(sim_run.vvp([vvp] + list(args),
+                             images=sim_run.images_in(args)
+                             + sim_run.hardcoded_images(top))).stdout
         vp = os.path.join(d, label + ".vl.txt")
         vl = open(vp, encoding="utf-8", errors="replace").read() \
             if os.path.exists(vp) else ""

@@ -55,6 +55,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path[:0] = [HERE, os.path.join(ROOT, "model")]
 from toolchain import banner, tool            # noqa: E402
+import sim_run                                # noqa: E402
 import corpus                                 # noqa: E402
 import onewire                                # noqa: E402
 import pe_isa as I                            # noqa: E402
@@ -135,6 +136,7 @@ def main():
     spim = hexfile(os.path.join(TMP, "spim_mode0.hex"),
                    corpus.build_spi_master(mode0=True)[0])
     i2cw = hexfile(os.path.join(TMP, "i2c_write.hex"), i2c_write_image())
+    sim_run.scratch_image("run_reload", i2cw)   # a CLOCKED scratch image
     owimg = os.path.join(TMP, "ow_img.hex")
     onewire.write_hex(owimg, onewire.build("tt"))
     lines, _rx = onewire.engine("tt").feed_file(OW_TXN)
@@ -179,10 +181,12 @@ def main():
     jobs = [("", a) for a in arms] + [(d, a) for d, a, _w in mustfire]
     def one(job):
         d, a = job
-        r = run([tool("vvp"), rel(vvp[d])] + arms[a])
+        r = run(sim_run.vvp([rel(vvp[d])] + arms[a],
+                            images=sim_run.images_in(arms[a])))
         return job, r.stdout + r.stderr
     def ow(extra):
-        r = run([tool("vvp"), rel(owv)] + owa + extra)
+        r = run(sim_run.vvp([rel(owv)] + owa + extra,
+                            images=sim_run.images_in(owa + extra)))
         return r.stdout + r.stderr
     with ThreadPoolExecutor(SIMS) as ex:
         res = dict(ex.map(one, jobs))

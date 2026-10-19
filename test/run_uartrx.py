@@ -26,6 +26,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 from toolchain import banner, tool          # noqa: E402
+import sim_run                              # noqa: E402
 import uart_rx                               # noqa: E402
 
 TMP = os.environ.get("PE_UART_TMP") or os.path.join(ROOT, "test", "sim_build_uartrx")
@@ -100,9 +101,10 @@ def main():
     ok = lim
 
     def sim(var, err, seed, extra=(), t=T):
-        o = run([tool("vvp"), vvp, "+IMG=" + imgs[(var, t)], "+NBYTES=256",
-                 "+BITP=%d" % t, "+ERR=%d" % err, "+SEED=%d" % seed,
-                 "+NFR=%d" % NFR] + list(extra))
+        o = run(sim_run.vvp([vvp, "+IMG=" + imgs[(var, t)], "+NBYTES=256",
+                             "+BITP=%d" % t, "+ERR=%d" % err, "+SEED=%d" % seed,
+                             "+NFR=%d" % NFR] + list(extra),
+                            images=[imgs[(var, t)]]))
         return o.stdout + o.stderr
 
     jobs = [("ok", e, s, (), t) for t in (T, TM) for e in ERRS for s in SEEDS]

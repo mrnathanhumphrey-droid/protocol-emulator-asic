@@ -194,7 +194,8 @@ print('\n'.join(json.load(open(sys.argv[1]))[int(sys.argv[2])]['args']))
   # images are named by relative path) and that arms must stay SEQUENTIAL --
   # two at once would race for the same default filename.
   rm -f coverage.dat "$OUT/build_$key/coverage.dat"
-  timeout 900 "$bin" "+verilator+rand+reset+$RMODE" "${ARGS[@]}" > "$log" 2>&1
+  sim_exec "--bench $top ${ARGS[*]}" \
+      timeout 900 "$bin" "+verilator+rand+reset+$RMODE" "${ARGS[@]}" > "$log" 2>&1
   rc=$?
   # ⛔ AND IT IS SEARCHED FOR, NOT ASSUMED TO BE IN THE CWD. Under Verilator
   # 5.020 the arms RAN AND PASSED (rc=0, no failure line) and produced no

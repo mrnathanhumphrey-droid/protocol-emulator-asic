@@ -45,7 +45,11 @@ sys.path.insert(0, HERE)
 import gate_shell_rc as shrc                                      # noqa: E402
 
 TOOLS = r"(?:verilator|iverilog|vvp|yosys)"
-EXEMPT = {"ci/tools.sh", "test/toolchain.py", "model/gate_tool_pinning.py"}
+#: test/sim_run.py builds the vvp command FOR its callers (Wilson 10-19: the
+#: one run path); each caller still calls banner() for the tools it runs, so
+#: the log names the binary there, not in the helper.
+EXEMPT = {"ci/tools.sh", "test/toolchain.py", "model/gate_tool_pinning.py",
+          "test/sim_run.py"}
 
 SH_CMD = re.compile(
     r"(?:^|[;&|(`]|\bthen\b|\bdo\b|\belse\b|\bcommand\s+-v\b|\bwhich\b|"

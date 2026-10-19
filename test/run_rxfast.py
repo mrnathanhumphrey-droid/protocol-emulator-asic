@@ -26,6 +26,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 from toolchain import banner, tool          # noqa: E402
+import sim_run                              # noqa: E402
 
 TMP = os.environ.get("PE_RXFAST_TMP") or os.path.join(ROOT, "test",
                                                         "sim_build_rxfast")
@@ -69,8 +70,8 @@ def main():
         return 1
 
     def sim(img, ncyc):
-        o = run([tool("vvp"), vvp, "+IMG=" + img, "+NBYTES=%d" % nbytes(img),
-                 "+NCYC=%d" % ncyc, "+SATURATED=1"])
+        o = run(sim_run.vvp([vvp, "+IMG=" + img, "+NBYTES=%d" % nbytes(img),
+                             "+NCYC=%d" % ncyc, "+SATURATED=1"], images=[img]))
         return o.stdout + o.stderr
 
     for ncyc in (200000, 123457):

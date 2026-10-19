@@ -1486,6 +1486,9 @@ def main() -> int:
         img = build_ckod(delays, flags=FLAG_HALF_HIGH)
         out = os.path.join(here, base + ".hex")
         write_image(out, img)
+        # a CLOCKED scratch image: its provenance for test/sim_run.py
+        import sim_run
+        sim_run.scratch_image("make_smoke_image --ckhalf", out)
         print("ckhalf image (open-drain self-clocked, HALF_HIGH, delays %s), "
               "%d bytes -> %s" % (delays, len(img), out))
         return 0

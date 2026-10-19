@@ -24,6 +24,7 @@ import re
 import subprocess
 import sys
 from toolchain import banner, tool          # noqa: E402  ruling V
+import sim_run                              # noqa: E402
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")
@@ -152,12 +153,13 @@ def cell(vvp, base, nbytes, lane, delays, arm, ncyc, warmup, tag=""):
     code as the first attempt -- a retry judged by looser rules would be a
     second standard wearing the first one's name.
     """
-    r = run([tool("vvp"), vvp,
-             "+IMG=test/%s.hex" % base,
-             "+NBYTES=%d" % nbytes,
-             "+LANE=%d" % lane,
-             "+NCYC=%d" % ncyc,
-             "+WARMUP=%d" % warmup])
+    r = run(sim_run.vvp([vvp,
+                         "+IMG=test/%s.hex" % base,
+                         "+NBYTES=%d" % nbytes,
+                         "+LANE=%d" % lane,
+                         "+NCYC=%d" % ncyc,
+                         "+WARMUP=%d" % warmup],
+                        images=["test/%s.hex" % base]))
     log = os.path.join(SCRATCH, "probe_jl_spl%d_%s_L%d%s.log"
                        % (SPL, arm, lane, tag))
     with open(log, "w", encoding="utf-8") as fh:

@@ -64,7 +64,7 @@ NB=$(tr -s ' \n' '\n' < "$IMG" | grep -cv '^$')
 rc=0
 for arm in own light; do
   if [ "$arm" = own ]; then SL="$OWN"; else SL="$LIGHT"; fi
-  ( cd "$OUT/build" && ./a2.sim +IMG="$ROOT/$IMG" +NBYTES="$NB" +PEER=none \
+  ( cd "$OUT/build" && sim_exec "$ROOT/$IMG" ./a2.sim +IMG="$ROOT/$IMG" +NBYTES="$NB" +PEER=none \
       +NCYC=60000 +SCLHOLD=0 +A2SLACK="$SL" +OUT="$OUT/trace_$arm.txt" \
       --x-initial unique +verilator+rand+reset+2 ) > "$OUT/run_$arm.log" 2>&1
   if ! grep -q "clocked_conform\[A2\]" "$OUT/run_$arm.log"; then

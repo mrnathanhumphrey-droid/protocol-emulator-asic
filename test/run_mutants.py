@@ -342,6 +342,9 @@ DEFAULT_IMG = "test/smoke_image.hex"
 # with different content. The generator owns them.
 from make_smoke_image import FIVE_STRESS as STRESS_FIVE   # noqa: E402
 from toolchain import banner, tool          # noqa: E402  ruling V
+import sim_run                              # noqa: E402
+#: the images tb_edge $readmemh's by hardcoded path (read from its source)
+EDGE_IMGS = sim_run.hardcoded_images("tb_edge")
 import scratch_heads                        # noqa: E402
 
 # ⭐ SCRATCH MUTANTS (gate_mutant_kills SCRATCH): one-line patches applied at
@@ -482,8 +485,12 @@ def build(defines, out, src=None):
     return r.returncode, (r.stdout or "") + (r.stderr or "")
 
 
-def run(vvp, img=DEFAULT_IMG, extra=None):
-    cmd = [tool("vvp"), vvp] + ([] if img is None else ["+IMG=%s" % img])         + (extra or [])
+def run(vvp, img=DEFAULT_IMG, extra=None, hard=()):
+    """`hard`: images the bench `$readmemh`s by hardcoded path (tb_edge), named
+    so the helper's lookup sees every image the run loads."""
+    cmd = sim_run.vvp([vvp] + ([] if img is None else ["+IMG=%s" % img])
+                      + (extra or []),
+                      images=([] if img is None else [img]) + list(hard))
     # ⛔⛔ UTF-8, EXPLICITLY. `text=True` uses the locale codec, which on this
     # box is cp1252 -- and every bench prints ⭐/⛔, so the reader thread raised
     # UnicodeDecodeError, DIED, and left the captured output TRUNCATED. The
@@ -625,7 +632,7 @@ def main() -> int:
         print("    *** tb_edge does not compile: %s" % log[:300])
         survivors.append("tb_edge build")
     else:
-        out_e = run(base_e, img=None)
+        out_e = run(base_e, img=None, hard=EDGE_IMGS)
         if "tb_edge: PASS" not in out_e:
             print("    *** the UNMUTATED tb_edge does not pass -- nothing below")
             print("        is interpretable.")
@@ -645,7 +652,7 @@ def main() -> int:
                     print("    %-19s BUILD FAIL -- not a kill" % define)
                     wrong_reason.append((define, "build"))
                     continue
-                o = run(v, img=None)
+                o = run(v, img=None, hard=EDGE_IMGS)
                 killed = "tb_edge: PASS" not in o
                 right = want in o
                 RAN.append(define)

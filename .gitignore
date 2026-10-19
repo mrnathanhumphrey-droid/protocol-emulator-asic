@@ -112,5 +112,12 @@ test/sim_build_wfmf/
 test/sim_build_uarttx/
 test/sim_build_reload/
 test/sim_build_v2win/
+# ⛔ EVERY runner build dir, by pattern (Wilson 10-19): test/sim_run.py grants
+# a scratch pass only to IGNORED, untracked paths, and the list above left a
+# new `test/sim_build_<x>/` tracked by default
+test/sim_build*/
+# test/sim_run.py's provenance manifest, written beside each registered
+# generator's scratch image (found in test/ after the first full suite)
+.sim_run_scratch.json
 # agent worktrees (Claude Code) -- never part of the tree
 .claude/

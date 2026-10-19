@@ -53,6 +53,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 from toolchain import banner, tool, scratch_sub  # noqa: E402  ruling V
+import sim_run                                   # noqa: E402
 from run_i2c import sigrok_i2c, transactions  # noqa: E402  one decoder path
 
 try:
@@ -155,6 +156,8 @@ def image(path, d=D, flags=0):
                    order=ORDER_MSB)]
     headers += [hdr(p, p, 0, 500, 0, 200, 240, park) for p in (0, 3, 4, 5)]
     write_image(path, b"".join(headers) + b"".join(prog))
+    # a CLOCKED scratch image: its provenance for test/sim_run.py
+    sim_run.scratch_image("run_ckack", path)
     return path
 
 
@@ -201,10 +204,11 @@ def run_arm(name, kind, late, skip, once, ncyc, devw="A0", devr="A1",
     dump = os.path.join(ROOT, "probe_ckack_%s.bin" % name)
     with open(img, encoding="ascii") as fh:
         nb = len(fh.read().split())
-    r = subprocess.run([tool("vvp"), vvp, "+IMG=" + img.replace(os.sep, "/"),
-                        "+NBYTES=%d" % nb, "+NCYC=%d" % ncyc,
-                        "+DUMP=" + dump.replace(os.sep, "/"),
-                        "+DEVW=" + devw, "+DEVR=" + devr], cwd=ROOT,
+    r = subprocess.run(sim_run.vvp([vvp, "+IMG=" + img.replace(os.sep, "/"),
+                                    "+NBYTES=%d" % nb, "+NCYC=%d" % ncyc,
+                                    "+DUMP=" + dump.replace(os.sep, "/"),
+                                    "+DEVW=" + devw, "+DEVR=" + devr],
+                                   images=[img]), cwd=ROOT,
                        capture_output=True, encoding="utf-8", errors="replace")
     txt = (r.stdout or "") + (r.stderr or "")
     if "END tb_ckack" not in txt:

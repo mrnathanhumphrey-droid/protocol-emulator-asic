@@ -15,6 +15,10 @@ A2 switched off, printing "NO BOUND SUPPLIED". Nothing was red.
       escape, `benchset.A2_UNBOUNDED_EXEMPT`, carries a reason per entry
   G4  names are unique: a byte-identical copy is de-duplicated and LISTED, a
       different image under a known name is a hard error
+  G5  every clocked image is in a run_recert class -- at least one; corpus_all5
+      is in both I2C and SPI, one lane each (Wilson 10-19:
+      corpus_spim25 sat unclassed from 6c919bc because run_recert is local
+      and nothing in CI asked); a stale class is red too
 "Clocked open-drain" and "unclocked SHIFT" are decided by the WRITER's own
 functions (`program_a2.lane_set`, `program_a2.is_clocked`), not a second copy.
 
@@ -24,6 +28,7 @@ MUST-FIRES (each must turn the gate red):
   M3 probe_cov_pindiv's bound removed -> its bench arm's lookup raises, naming it
   M4 a DIFFERENT tx_image.hex in a scanned directory -> NameCollision
      (a temporary directory added to the scan; nothing in the tree is touched)
+  M5 corpus_spim25's run_recert class deleted -> red naming it
 and the controls that must stay GREEN: a byte-identical tx_image.hex copy is
 de-duplicated and listed; a non-clocked image with no record (tx_image) gets
 no bound and no refusal.
@@ -89,6 +94,17 @@ def audit(imgs, clocked, resp):
     return probs
 
 
+def class_problems(clocked, classes):
+    """(unclassed, stale) problems for G5: run_recert's clocked images vs its
+    classes. Pure, so M5 can price it."""
+    unc = ["%s: a clocked image in NO run_recert class (I2C / SPI / "
+           "NOT_CERTIFIABLE)" % n for n in sorted(set(clocked) - set(classes))]
+    stale = ["%s: a run_recert class names an image that is not clocked (or "
+             "not in the universe) -- stale" % n
+             for n in sorted(set(classes) - set(clocked))]
+    return unc, stale
+
+
 def main() -> int:
     print()
     print("=" * 78)
@@ -141,8 +157,26 @@ def main() -> int:
     say(not bad, "G3: every clocked image's bench lookup returns its bound"
         "%s" % ("" if not bad else " (not: %s)" % ", ".join(bad)))
 
+    # G5: every clocked image is classed in run_recert (Wilson 10-19)
+    import run_recert as RC
+    ck5 = RC.clocked_images()
+    cl5 = RC.classes()
+    unc, stale = class_problems(ck5, cl5)
+    for q in unc + stale:
+        print("    *** %s" % q)
+    say(not unc and not stale,
+        "G5: every clocked image (%d) is in a run_recert class "
+        "(I2C %d, SPI %d, NOT_CERTIFIABLE %d of which %d derived)"
+        % (len(ck5), len(RC.I2C), len(RC.SPI), len(RC.NOT_CERTIFIABLE),
+           len(RC.derived_not_certifiable())))
+
     print()
     print("  --- must-fires (each must be RED) and controls (GREEN) ---")
+    # M5: a class entry deleted -> red naming that image
+    cl_m = {k: v for k, v in cl5.items() if k != "corpus_spim25.hex"}
+    m5 = class_problems(ck5, cl_m)[0]
+    say(any("corpus_spim25.hex" in q for q in m5),
+        "M5 corpus_spim25's class deleted -> red, naming it")
     # M1
     c2 = copy.deepcopy(clocked)
     c2.pop("i2c_fram_fpga.hex", None)

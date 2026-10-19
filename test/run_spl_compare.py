@@ -28,6 +28,7 @@ import re
 import subprocess
 import sys
 from toolchain import banner, tool          # noqa: E402  ruling V
+import sim_run                              # noqa: E402
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")
@@ -76,8 +77,9 @@ def smoke_point(vvp, d):
              "probe_spl"])
     if g.returncode != 0:
         return None, "image build failed"
-    r = run([tool("vvp"), vvp, "+IMG=test/probe_spl.hex",
-             "+NCYC=%d" % NCYC, "+WARMUP=%d" % WARMUP])
+    r = run(sim_run.vvp([vvp, "+IMG=test/probe_spl.hex",
+                         "+NCYC=%d" % NCYC, "+WARMUP=%d" % WARMUP],
+                        images=["test/probe_spl.hex"]))
     txt = r.stdout + r.stderr
 
     def num(pat):
@@ -135,7 +137,8 @@ def main() -> int:
         v = build("tb_smoke", "test/tb_smoke.v", spl)
         if v is None:
             return 1
-        r = run([tool("vvp"), v])
+        # no +IMG: tb_smoke loads its default image (named by the helper)
+        r = run(sim_run.vvp([v], images=sim_run.hardcoded_images("tb_smoke")))
         txt = r.stdout + r.stderr
         ok = "SMOKE: PASS" in txt
         e0 = re.search(r"edges on uo_out\[0\] \(lane 0\) *: *(\d+)", txt)

@@ -48,6 +48,26 @@ else
   VVP="$(_pe_resolve "" vvp)"
 fi
 
+# ⛔⛔ sim_exec -- THE SHELL SIDE OF test/sim_run.py (Wilson 10-19). Every
+# simulation RUN in shell (vvp, a Verilator-built binary) is written as
+#     sim_exec "<image> <image> ..." <run command...>
+# The image list is REQUIRED ("" = loads no program image). It runs the ONE
+# lookup (`python test/sim_run.py check ...`), which refuses a clocked image
+# with no A2 bound, naming it, and only then runs the command.
+# `model/gate_sim_runs.py` is red on a run not written this way.
+_PE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# this run's provenance token (test/sim_run.py run_token): set once, exported,
+# so a generator this script starts and the check before its run agree
+export SIM_RUN_TOKEN="${SIM_RUN_TOKEN:-sh$$-$RANDOM$RANDOM}"
+sim_exec() {
+  local imgs="$1" py="${PE_PYTHON:-python3}"
+  shift
+  command -v "$py" >/dev/null 2>&1 || py=python
+  # shellcheck disable=SC2086
+  "$py" "$_PE_ROOT/test/sim_run.py" check $imgs || return 97
+  "$@"
+}
+
 tool_banner() {   # tool_banner verilator iverilog vvp yosys ...
   local t p f v
   for t in "$@"; do

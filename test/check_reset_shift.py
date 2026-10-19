@@ -88,6 +88,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 from toolchain import banner, tool          # noqa: E402  ruling V
+import sim_run                              # noqa: E402
 from run_lockstep import IMAGES, NCYC as LOCK_NCYC   # noqa: E402
 
 try:
@@ -159,7 +160,8 @@ def build(wt, tb, scratch, label):
 
 def sim(wt, vvp, args):
     """-> (T rows as tuples of strings, D/P stream lines, raw stdout)."""
-    r = subprocess.run([tool("vvp"), vvp] + args, cwd=wt, capture_output=True,
+    r = subprocess.run(sim_run.vvp([vvp] + args, images=sim_run.images_in(args)),
+                       cwd=wt, capture_output=True,
                        text=True, encoding="utf-8", errors="replace")
     t, dp = [], []
     for l in r.stdout.splitlines():

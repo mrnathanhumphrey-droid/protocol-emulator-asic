@@ -26,7 +26,7 @@ arm() {   # $1=build label $2=defines $3=arm name $4=seed
       --top-module tr_top $SRCS > "$OUT/vl_$1.log" 2>&1
   make -C "$b" -f Vtr_top.mk -j 4 >> "$OUT/vl_$1.log" 2>&1
   [ -x "$b/tr.sim" ] || { echo "*** $1 build failed"; grep -E '^%Error' "$OUT/vl_$1.log" | head -5; rc=1; return; }
-  "$b/tr.sim" +IMG="$HEX" +NBYTES="$NB" +NCYC=$((ROWS + 5000)) +WARMUP=0 \
+  sim_exec "$HEX" "$b/tr.sim" +IMG="$HEX" +NBYTES="$NB" +NCYC=$((ROWS + 5000)) +WARMUP=0 \
       +TRACE="$OUT/trace_$3.csv" +MAXROWS="$ROWS" "+META=$3 rtl=$RTL" \
       +verilator+rand+reset+2 +verilator+seed+"$4" >> "$OUT/vl_$1.log" 2>&1
   echo "$3 rows $(( $(wc -l < "$OUT/trace_$3.csv") - 2 ))"

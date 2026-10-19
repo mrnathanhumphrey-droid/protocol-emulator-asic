@@ -45,6 +45,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 from toolchain import banner, tool, scratch_sub  # noqa: E402  ruling V
+import sim_run                                   # noqa: E402
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")
@@ -146,8 +147,9 @@ def run(vvp, hexpath, ncyc, warmup):
     ap, rp = os.path.abspath(hexpath), os.path.abspath(ROOT)
     img = (os.path.relpath(ap, rp) if ap.startswith(rp + os.sep) else ap
            ).replace(os.sep, "/")
-    r = subprocess.run([tool("vvp"), vvp, "+IMG=" + img, "+NBYTES=%d" % nb,
-                        "+NCYC=%d" % ncyc, "+WARMUP=%d" % warmup], cwd=ROOT,
+    r = subprocess.run(sim_run.vvp([vvp, "+IMG=" + img, "+NBYTES=%d" % nb,
+                                    "+NCYC=%d" % ncyc, "+WARMUP=%d" % warmup],
+                                   images=[img]), cwd=ROOT,
                        capture_output=True, encoding="utf-8", errors="replace")
     txt = (r.stdout or "") + (r.stderr or "")
     lanes = [{k: int(v) for k, v in re.findall(r"(\w+)=(-?\d+)", l)}
@@ -204,9 +206,10 @@ def subset():
     img = five_image("m20", (20, 21, 22, 23, 24))
     with open(img, encoding="ascii") as fh:
         nb = len(fh.read().split())
-    r = subprocess.run([tool("vvp"), stale, "+IMG=" + os.path.abspath(img)
-                        .replace(os.sep, "/"), "+NBYTES=%d" % nb,
-                        "+NCYC=20000", "+WARMUP=0"], cwd=ROOT,
+    r = subprocess.run(sim_run.vvp([stale, "+IMG=" + os.path.abspath(img)
+                                    .replace(os.sep, "/"), "+NBYTES=%d" % nb,
+                                    "+NCYC=20000", "+WARMUP=0"],
+                                   images=[os.path.abspath(img)]), cwd=ROOT,
                        capture_output=True, encoding="utf-8", errors="replace")
     fired = "*** FAIL inv_curck" in (r.stdout or "") + (r.stderr or "")
     print("  %-9s %-16s %s" % ("ckstale", "20 21 22 23 24",
