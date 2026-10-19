@@ -53,19 +53,29 @@ fi
 #     sim_exec "<image> <image> ..." <run command...>
 # The image list is REQUIRED ("" = loads no program image). It runs the ONE
 # lookup (`python test/sim_run.py check ...`), which refuses a clocked image
-# with no A2 bound, naming it, and only then runs the command.
+# with no A2 bound, naming it, and only then runs the command -- with the
+# image's +A2SLACK appended when it has a bound and the command carries none.
 # `model/gate_sim_runs.py` is red on a run not written this way.
 _PE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # this run's provenance token (test/sim_run.py run_token): set once, exported,
 # so a generator this script starts and the check before its run agree
 export SIM_RUN_TOKEN="${SIM_RUN_TOKEN:-sh$$-$RANDOM$RANDOM}"
 sim_exec() {
-  local imgs="$1" py="${PE_PYTHON:-python3}"
+  local imgs="$1" py="${PE_PYTHON:-python3}" a2 x has=0
   shift
   command -v "$py" >/dev/null 2>&1 || py=python
   # shellcheck disable=SC2086
-  "$py" "$_PE_ROOT/test/sim_run.py" check $imgs || return 97
-  "$@"
+  a2="$("$py" "$_PE_ROOT/test/sim_run.py" check $imgs)" || return 97
+  # queue 3b: a bound that exists is ENFORCED -- append the run's +A2SLACK
+  # unless the command already carries one (a2_run.sh's light arm, the sweep)
+  for x in "$@"; do
+    case "$x" in +A2SLACK=*) has=1 ;; esac
+  done
+  if [ -n "$a2" ] && [ "$has" = 0 ]; then
+    "$@" "$a2"
+  else
+    "$@"
+  fi
 }
 
 tool_banner() {   # tool_banner verilator iverilog vvp yosys ...

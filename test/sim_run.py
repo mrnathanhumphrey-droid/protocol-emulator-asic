@@ -24,10 +24,14 @@ THE CONTRACT:
   the Python form adds ONE stamp line on the CALLER's stdout per run (never
   in the simulation's captured output). The shell form is silent on a pass.
 
-⚠ IT CHECKS, IT DOES NOT INJECT. A clocked image WITH a bound still runs
-without +A2SLACK unless the caller passes it (as benchset's sweep does):
-injecting would change direct runners' outputs, which the rewire commit may
-not do (Wilson point 5). Stated for the follow-up.
+⭐ AND IT ENFORCES (queue 3b, Wilson: "bound exists but isn't enforced is half
+a guarantee"). When exactly one image of a run has a bound record, its
+`+A2SLACK` is APPENDED to the run unless the command already carries one (the
+sweep's arms, a2_run.sh's deliberately light arm). Two different bounded
+images in one run are refused as ambiguous. The rewire commit only checked,
+because point 5 forbade changing outputs there; this one changes them on
+purpose, arm by arm, against a stamped prediction
+(probe_reports/a2slack_injection_prediction.txt).
 
 SHELL: `python test/sim_run.py check [--bench TOP] [+PLUSARG ...] [image ...]`
 (exit 3 naming the image on a refusal; no argument = loads no image).
@@ -300,12 +304,20 @@ def check(images):
     """Run the lookup on every image; return the stamp text. Raises
     SimRefused on a clocked image with no bound and no registered
     provenance."""
+    return lookup(images)[0]
+
+
+def lookup(images):
+    """(stamp, the +A2SLACK plusarg to INJECT or None). Queue 3b (Wilson
+    10-19): a bound that exists is ENFORCED -- when exactly one image of a run
+    has a bound record, its plusarg is returned for the run; two different
+    bounded images in one run are REFUSED as ambiguous."""
     if images is None or isinstance(images, (str, bytes)):
         raise TypeError("sim_run: `images` must be a LIST of image paths "
                         "([] for a run that loads no program image)")
     import benchset
     by_path, by_sha = _universe_index()
-    req, notes = [], []
+    req, notes, args = [], [], set()
     for img in images:
         a = os.path.abspath(img if os.path.isabs(img)
                             else os.path.join(ROOT, img))
@@ -339,23 +351,35 @@ def check(images):
                              % (a, type(exc).__name__, exc)) from exc
         if arg is not None:
             req.append(name)
+            args.add(arg)
+    if len(args) > 1:
+        raise SimRefused("sim_run REFUSED: %d bounded clocked images in one run "
+                         "(%s) -- which bound to enforce is ambiguous"
+                         % (len(args), ", ".join(req)))
     names = [os.path.basename(_rel(i)) for i in images]
-    return "sim_run: images=%s bound=%s%s" % (
+    stamp = "sim_run: images=%s bound=%s%s" % (
         ",".join(names) or "-",
         ("ok(%s)" % ",".join(req)) if req else "not-required",
         (" " + " ".join(notes)) if notes else "")
+    return stamp, (next(iter(args)) if args else None)
 
 
 def argv(cmd, images):
-    """`cmd` unchanged, after the lookup. THE function every run takes its
-    command from."""
-    stamp = check(images)
+    """`cmd` after the lookup -- with the run's A2 bound APPENDED when exactly
+    one of its images has one and `cmd` carries no +A2SLACK yet (queue 3b).
+    THE function every run takes its command from."""
+    stamp, inject = lookup(images)
+    cmd = list(cmd)
+    if inject and not any(isinstance(c, str) and c.startswith("+A2SLACK=")
+                          for c in cmd):
+        cmd.append(inject)
+        stamp += " a2=injected"
     # ⛔ STDOUT, the caller's own stream: on stderr (unbuffered) beside the
     # caller's block-buffered stdout, a stamp landed MID-LINE in the combined
     # log -- measured, 1 of 301 in the identity run; on a pass-token line that
     # would turn a gate red. Same stream = same order, whole lines.
     print(stamp, flush=True)
-    return list(cmd)
+    return cmd
 
 
 def images_in(args):
@@ -423,11 +447,16 @@ def main(args):
     # simulation's output and change it -- measured: every gate_xsim
     # comparison differed at line 1. A refusal is loud (exit 3, the image
     # named) and the run never starts.
+    # (queue 3b) the ONE thing printed on a pass: the +A2SLACK plusarg to
+    # inject, on stdout, which `sim_exec` CAPTURES -- so it never reaches the
+    # run's log; it appends it unless the command already carries one.
     try:
-        check(cli_images(args[1:]))
+        _stamp, inject = lookup(cli_images(args[1:]))
     except SimRefused as exc:
         print("*** %s" % exc, file=sys.stderr, flush=True)
         return 3
+    if inject:
+        print(inject, flush=True)
     return 0
 
 

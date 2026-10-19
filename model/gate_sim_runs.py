@@ -238,6 +238,7 @@ def main() -> int:
     _scratch_git_checks(S, say)
     _classifier_mustfire(S, say)
     _hidden_load_crosscheck(S, say)
+    _injection_mustfires(S, say)
     print()
     print("GATE sim-runs: %s" % ("PASSED" if rc == 0 else "FAILED"))
     return rc
@@ -329,6 +330,25 @@ def _hidden_load_crosscheck(S, say):
     mf, _r = hidden_problems({"fpga/sim/tb_fpga_loader.v": alt})
     say(any("tb_fpga_loader.v" in q and "LOADER_IMGS" in q for q in mf),
         "M10 a caller's images= altered -> red, naming bench and caller")
+
+
+def _injection_mustfires(S, say):
+    """Queue 3b: a bound that exists is ENFORCED on the run."""
+    import benchset
+    print()
+    print("  --- +A2SLACK injection (queue 3b)")
+    want = benchset.a2_slack_arg("test/ckod_image.hex")
+    got = S.argv(["sim", "+IMG=test/ckod_image.hex"], ["test/ckod_image.hex"])
+    say(got[-1] == want and got.count(want) == 1,
+        "I1 one bounded image -> its +A2SLACK appended, exactly (%s)" % want)
+    keep = ["sim", "+A2SLACK=1,2,3,4,5"]
+    got = S.argv(list(keep), ["test/ckod_image.hex"])
+    say(got == keep, "I2 a run already carrying +A2SLACK is untouched")
+    got = S.argv(["sim"], ["test/tx_image.hex"])
+    say(got == ["sim"], "I3 a non-clocked image -> nothing appended")
+    why = _refused(S, ["test/ckod_image.hex", "test/corpus_i2c.hex"])
+    say(bool(why) and "ambiguous" in why,
+        "I4 two bounded clocked images in one run -> refused as ambiguous")
 
 
 def _scratch_git_checks(S, say):
