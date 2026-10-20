@@ -433,6 +433,16 @@ SPEC_SYMBOLS = {
     # requirement the design is measured against, which nothing here may
     # derive or adjust.
     ("model/a2/gate_clocked_lane_a2.py", "MODE_MAX_HZ"),
+    # ⭐ THE 1-WIRE BENCH WITNESS'S INPUTS. `WINDOWS` is the DS18B20
+    # datasheet's timing windows (19-7487 Rev 6, the same numbers
+    # test/ds18b20_model.v quotes) -- requirements the record is measured
+    # against, like UM10204 above. `PROBE_ROM` is the probe's serial number
+    # (Wilson 10-17), a fact about the part, re-checked against the wire and
+    # the PC every run. `WRITES_PER_RESET` is the transaction's shape
+    # (33 | CC 44 | CC BE), an input. Nothing in the three is observed.
+    ("model/gate_onewire_hw_witness.py", "WINDOWS"),
+    ("model/gate_onewire_hw_witness.py", "PROBE_ROM"),
+    ("model/gate_onewire_hw_witness.py", "WRITES_PER_RESET"),
     # ⭐ The degenerate-field audit's two tables. `TABLE` is the enumerated
     # verdict per (opcode, field, degenerate value) and `DELIBERATE` names the
     # must-fire images that trip a refusal ON PURPOSE. Both are

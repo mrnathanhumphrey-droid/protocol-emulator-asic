@@ -259,6 +259,10 @@ GATES=(
   # MB85RC256V, DSLogic captures) re-checked here in seconds, no simulator --
   # not a hardware run in CI (Wilson 10-17).
   model/gate_i2c_hw_witness.py
+  # ⭐ The 1-Wire lane's witness, the same pattern: capture 182359 of the OW = 1
+  # build (DS18B20 probe), decoded events == DS18B20_TXN, the probe's ROM, wire
+  # == the PC's run, DS18B20 windows -- re-checked in seconds, no simulator.
+  model/gate_onewire_hw_witness.py
   # ⛔ The lock's flow config IS the one the timing of record was measured
   # with: src/config.json's hardening keys hash to model/timing_of_record.json
   # (Wilson 10-17 -- the hold fix sat on the canary branch for three days).

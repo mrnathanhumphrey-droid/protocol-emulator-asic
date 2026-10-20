@@ -158,9 +158,17 @@ REGISTRY = {
         "checked_by": "test/run_onewire.py",
         "how": "CE5: ROM and scratchpad exact against the model with CRC-8, "
                "every slot inside the DS18B20 windows, five must-fires"}),
-    "onewire_fpga_image.hex": (INTERNAL, {
-        "checked_by": "test/run_onewire.py",
-        "how": "CE5's FPGA-timing arm"}),
+    # ⭐ HARDWARE, RECORDED (Wilson lock order, the I2C pattern): capture 182359
+    # of the OW = 1 build, re-checked in CI -- not a hardware run in CI.
+    "onewire_fpga_image.hex": (WITNESS, {
+        "runner": "model/gate_onewire_hw_witness.py",
+        "how": "RECORDED BENCH WITNESS (PA100T-EDU, DS18B20 probe, 4.7 kOhm, "
+               "breadboard; DSLogic capture 182359): sigrok's decoded events "
+               "== DS18B20_TXN exactly, the probe's ROM and both CRC-8s, wire "
+               "== the PC's run, every DQ low accounted for, DS18B20 windows "
+               "met; the record's image / feed / params SHA-256 must equal the "
+               "repository's. CE5's FPGA-timing arm (test/run_onewire.py) "
+               "still runs it in simulation"}),
     "corpus_i2c.hex": (INTERNAL, {
         "checked_by": "test/gate_corpus_trace.py",
         "how": "the two-simulator pin trace; V2 + rx_e2e bit-exact on "

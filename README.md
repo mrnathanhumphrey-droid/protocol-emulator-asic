@@ -119,6 +119,10 @@ measured rise reproduces the measured rate. The measured figure is a
 FPGA prototype wrote and read back an MB85RC256V FRAM while a logic analyser
 captured the wire, and `model/gate_i2c_hw_witness.py` re-checks that record —
 decoded bytes equal to the feed, Fast-mode timings — on every CI run.
+1-Wire has the same kind of record: the FPGA prototype read a DS18B20's ROM
+and temperature while the analyser captured DQ, and
+`model/gate_onewire_hw_witness.py` re-checks the decoded transaction, the
+part's CRCs and the DS18B20 slot timings.
 
 **UART receive speed.** `pe_asm` certifies the UART-rx program down to 232
 cycles per bit, which is up to about 215.5 kbaud at the 50 MHz design clock.

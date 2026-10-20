@@ -34,6 +34,7 @@ model/gate_image_bounds.py          ^\s*GATE image-bounds: PASSED\s*$
 model/gate_sim_runs.py              ^\s*GATE sim-runs: PASSED\s*$
 model/gate_formal_miters.py         ^\s*GATE formal-miters: PASSED\s*$
 model/gate_i2c_hw_witness.py        ^\s*GATE i2c-hw-witness: PASSED\s*$
+model/gate_onewire_hw_witness.py    ^\s*GATE onewire-hw-witness: PASSED\s*$
 model/gate_flow_config.py           ^\s*GATE flow-config: PASSED\s*$
 model/gate_shell_rc.py              ^\s*GATE shell-rc: PASSED\s*$
 model/gate_except.py                ^\s*GATE except: PASSED\s*$
