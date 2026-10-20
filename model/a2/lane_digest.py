@@ -138,6 +138,19 @@ DIGEST_LEDGER = [
      "precisely because a tolerance correction had silently reordered the set "
      "once. Nothing shipped becomes infeasible: the bar is 4 and the minimum "
      "is 11."),
+    ("b9a51e13a772",
+     "SPI-TARGET: ONE EVENT PER BIT, NOT PER EDGE (Wilson 10-18 ruling 3, "
+     "built 10-20). The lane was modelled as n = 16 events per byte at t = 25 "
+     "-- an event on every SCK edge. The program that ships "
+     "(`pe_proto.SPITarget`, MISO out) answers one change-edge per bit, so "
+     "its demand is n = 8 at t = 50, the master's claimed maximum clock "
+     "(T_ext, 1 MHz); T 400 and D_tol 17 unchanged (the half-period is still "
+     "25). PREDICTED BEFORE THE CHANGE, ours and pinned pyRTA "
+     "(probe_reports/spi_target_b2_prediction.txt): "
+     "r = {16, 12, 7, 15, 9}, min margin 11 -- EVERY r UNCHANGED, U "
+     "0.32083 -> 0.26083. A re-quote of the burst shape, not a reschedule: "
+     "the EDF order and every published response stand; the bar is 4 and "
+     "the minimum is 11."),
 ]
 
 #: ⛔⛔ RULING A9 -- THE ANALYSIS LEDGER. `DIGEST_LEDGER` records why the
@@ -161,6 +174,12 @@ ANALYSIS_LEDGER = [
      "cycles high there. Ours is now the asserted cross-check (>= pyRTA) and "
      "CI's pyRTA-free floor; every published number reads pyRTA (ruling A).",
      {"ours_r": [16, 12, 9, 16, 9], "ours_margin": 9}),
+    ("b9a51e13a772", "SPI-target-one-event-per-bit",
+     "The same analysis on the re-quoted table (SPI-target n 8, t 50). OURS "
+     "unchanged lane for lane: r = {16, 12, 9, 16, 9}, min margin 9; pyRTA "
+     "unchanged: {16, 12, 7, 15, 9}, min margin 11. Computed before the "
+     "change (probe_reports/spi_target_b2_prediction.txt).",
+     {"ours_r": [16, 12, 9, 16, 9], "ours_margin": 9}),
 ]
 
 #: ⛔⛔ P6 -- THE pyRTA THESE NUMBERS ARE WITNESSED BY, recorded beside the
@@ -183,7 +202,7 @@ PYRTA_PIN = {
     "commit": "1f3a649ced61709620857ec28653b51a0c6ce28d",
     "repo": "https://github.com/PROSA-Project/pyRTA",
     "date": "2026-06-16",
-    "digest": "65bc3c8114e5",
+    "digest": "b9a51e13a772",
     "reproduces": {"UART-tx": 16, "SPI-tx": 12, "I2C": 7, "UART-rx": 15,
                    "SPI-target": 9},
 }

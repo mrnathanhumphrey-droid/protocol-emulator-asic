@@ -268,7 +268,7 @@ def check_clocked_hold_delay(lanes, headers):
     return hold
 
 
-def check_mode_floor(img):
+def check_mode_floor(img, t_ext=None):
     """Every clocked open-drain lane must clear SOME UM10204 mode (ruling D2).
 
     ⭐⭐ THE PER-PROGRAM HALF OF D2, landed on ruling S's machinery rather than a
@@ -303,7 +303,7 @@ def check_mode_floor(img):
     # ⛔ P6: an unpinned pyRTA is treated as ABSENT -- the floor then rests
     # on our recurrence alone and says so, rather than on an unknown copy.
     src = pinned_pyrta(quiet=True)
-    res = program_a2.derive(img, src)
+    res = program_a2.derive(img, src, t_ext)
     tc = um.table_cycles()
     claims = {}
     for ln, e in sorted(res["lanes"].items(), key=lambda kv: int(kv[0])):
@@ -821,7 +821,7 @@ def check_park_overlap(lanes, headers, park_pins, engine_text=None):
 
 
 def assemble(lanes, headers, park_pins=None, timing_checks=True,
-             exempt_as=None):
+             exempt_as=None, t_ext=None):
     """Emit the image. `headers` is {lane: (pin, clkpin, mode, t, dsched, dtol
     [, flags[, order]])}; an action is `(op, pin, level, delay, q[, count])`.
 
@@ -913,8 +913,16 @@ def assemble(lanes, headers, park_pins=None, timing_checks=True,
     # verdict of every program beside its identity. ⛔ And only for an image
     # REGISTERED for it (`exempt_as`, checked at the top of this function).
     if timing_checks:
-        check_mode_floor(img)
-        check_queue_slot(img)
+        # ⛔ AN EDGE-PACED LANE WITH NO T_ext IS REFUSED, AS A VERDICT (Wilson
+        # 10-18 ruling 3): every timing check derives the lane set, and an
+        # edge-paced lane has no period until its T_ext is declared
+        # (program_a2.T_EXT, by image sha). One guard here covers every
+        # check that derives it, not one call site at a time.
+        try:
+            check_mode_floor(img, t_ext)
+            check_queue_slot(img, t_ext)
+        except program_a2.EdgePacedNoTExt as exc:
+            raise Reject(str(exc))
     check_i2c_order(img)
     return img
 
@@ -930,7 +938,7 @@ def check_i2c_order(img):
                      "way and sent every byte reversed until sigrok read them.")
 
 
-def check_queue_slot(img):
+def check_queue_slot(img, t_ext=None):
     """RULING DT-A: condition 1.6a per program -- `r_i <= t_i` on every lane.
 
     A lane whose worst-case response (from its nominal release, W1's jitter
@@ -943,7 +951,7 @@ def check_queue_slot(img):
     form can only refuse MORE, never accept what pyRTA would refuse.
     """
     src = pinned_pyrta(quiet=True)
-    for ln, v in sorted(program_a2.queue_slot(img, src).items(),
+    for ln, v in sorted(program_a2.queue_slot(img, src, t_ext).items(),
                         key=lambda kv: int(kv[0])):
         # ⛔⛔ NO SKIP PATH (Wilson, WF2 round 2, finding 1). This line used to
         # `continue` with the comment "overload: refused by compute_j" -- but

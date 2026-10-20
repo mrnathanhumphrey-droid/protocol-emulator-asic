@@ -1086,10 +1086,21 @@ UART_RX = BLane("UART-rx 115200", T=4140, C=C_SHIPPED, D_tol=216 - L_SYNC,
 # 11 -> 14. Both C9 variants clear the >= 4 bar at 1 MHz by more than 15 cycles,
 # so C9 is NOT decided by 1 MHz feasibility; it is decided by the frequency
 # ceiling, which is 1.3's question and not this lane's.
-SPI_RX = BLane("SPI-target 1 MHz", T=400, C=C_SHIPPED, n=16, t=25,
+# ⛔⛔ ONE EVENT PER BIT, NOT PER EDGE (Wilson 10-18 ruling 3, built 10-20).
+# This lane was modelled as 16 events per byte at t = 25 -- an event on EVERY
+# SCK edge. The program that ships (pe_proto.SPITarget, MISO out) answers ONE
+# edge per bit: ARM(change-edge) ; SHIFT(MISO). So the real demand is 8 events
+# per byte at the SCK period, t = T_ext = 50 at 1 MHz -- the master's claimed
+# maximum clock, not anything inside the program. D_tol is unchanged: the
+# half-period is still 25. Computed before the change (probe_reports/
+# spi_target_b2_prediction.txt, ours and pinned pyRTA): every lane's r and the
+# min margin 11 are UNCHANGED; U falls 0.32083 -> 0.26083. The MOSI-capture
+# variant (16 events per byte) is witnessed at <= 500 kHz, i.e. t >= 50 too.
+SPI_RX = BLane("SPI-target 1 MHz", T=400, C=C_SHIPPED, n=8, t=50,
                J=J_SHIPPED,
                D_tol=abs_tolerance(25, c9_at_completion=True, C=C_SHIPPED),
-               note="master-clocked, 16 edges/byte, back-to-back: n*t == T; "
+               note="master-clocked, ONE event per bit (the change-edge), "
+                    "8/byte back-to-back: n*t == T; t = T_ext at 1 MHz; "
                     "D_tol DERIVED from the absolute budget (R1), C9=COMPLETION")
 
 

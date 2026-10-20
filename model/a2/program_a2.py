@@ -104,9 +104,43 @@ def gaps(h, a):
     return [a["delay"]]
 
 
-def lane_set(img):
-    """The program's own A2 lane set, plus which entries are clocked OD."""
+#: ⛔⛔ EDGE-PACED LANES (Wilson 10-18 ruling 3, built 10-20). A lane whose
+#: data actions are each released by a delay-0 ARM on a PEER edge -- the SPI
+#: target answers SCK one bit at a time -- has no period of its own: the
+#: smallest action delay (its SHIFT's 20) is the gap AFTER a bit, not the gap
+#: between bits, and taking it as T judged the lane at the wrong rate. Its T
+#: is the peer's claimed maximum clock, T_EXT, and its D_tol is that clock's
+#: half-period budget (`bursty.abs_tolerance`) -- at 2 MHz that budget is 4.
+#: ⭐ THE RULE: two or more delay-0 ARMs in one lane. One ARM that starts an
+#: internally timed frame (UART-rx, the edge images) is NOT edge-paced;
+#: checked 10-20 against all 49 universe images -- none has two.
+#: ⛔ FAIL CLOSED: an edge-paced lane with no T_EXT entry is REFUSED, never
+#: given a period. Keyed by the image's SHA-256 (images carry no name; the
+#: content is the identity, as in v3_table): sha -> {lane: T_ext cycles}.
+EDGE_PACED_MIN_ARMS = 2
+T_EXT = {}
+
+
+class EdgePacedNoTExt(ValueError):
+    pass
+
+
+def edge_paced(acts):
+    return sum(1 for a in acts
+               if a["op"] == I.OP_ARM and a["delay"] == 0) >= EDGE_PACED_MIN_ARMS
+
+
+def image_sha(img):
+    import hashlib
+    return hashlib.sha256(bytes(img)).hexdigest()
+
+
+def lane_set(img, t_ext=None):
+    """The program's own A2 lane set, plus which entries are clocked OD.
+    `t_ext` ({lane: cycles}) overrides the registry for edge-paced lanes."""
     rows = lanes_of(img)
+    if t_ext is None:
+        t_ext = T_EXT.get(image_sha(img), {})
     # ⛔⛔ DELAY-0 REARM RULING: the `delay > 0` filters below dropped a
     # delay-0 action's ZERO spacing, so 1.6a (`queue_slot`) certified the
     # WS2812 3-sub-bit build. A zero spacing has no lane set -- no T, no J --
@@ -130,6 +164,20 @@ def lane_set(img):
         ds, dt = h["dsched"], h["dtol"]
         if ds > dt:
             dt = ds
+        if edge_paced(acts):
+            if ln not in t_ext:
+                raise EdgePacedNoTExt(
+                    "lane %d is EDGE-PACED (%d delay-0 ARMs: the peer's edges "
+                    "release it) and has no T_ext -- its period is the peer's "
+                    "claimed maximum clock, not its smallest action delay (%d); "
+                    "add it to program_a2.T_EXT (image sha %s...)"
+                    % (ln, sum(1 for a in acts if a["op"] == I.OP_ARM
+                               and a["delay"] == 0), T, image_sha(img)[:12]))
+            from bursty import abs_tolerance
+            T = int(t_ext[ln])
+            dt = min(dt, abs_tolerance(T // 2, c9_at_completion=True,
+                                       C=C_SHIPPED))
+            ds = min(ds, dt)
         J = j_prog + (L_JIT if ck_od else 0)
         bl = BLane("lane%d%s" % (ln, " ckOD" if ck_od else ""), T=T,
                    C=C_SHIPPED, D_tol=dt, D_sched=ds, J=J)
@@ -358,7 +406,7 @@ def with_w1(ls, w1, i):
             for k in range(len(ls))]
 
 
-def queue_slot(img, src=None):
+def queue_slot(img, src=None, t_ext=None):
     """RULING DT-A -- condition 1.6a PER PROGRAM: r_i <= t_i on every lane.
 
     ⛔⛔ THE EXACT FORM, MEASURED AGAINST TCHECKER, NOT CHOSEN. `ovr` in the
@@ -376,8 +424,9 @@ def queue_slot(img, src=None):
     ⚠ `t_i` is the lane's tightest action delay (`T` in `lane_set`), which is
     the event spacing the queue slot has to clear.
     Returns {lane: {"r": r or None, "T": t, "ok": bool, "why": str or None}}.
+    `t_ext`: the edge-paced lanes' T_ext, declared at build time (lane_set).
     """
-    ls, _d, _k, _j = lane_set(img)
+    ls, _d, _k, _j = lane_set(img, t_ext)
     u = utilisation(ls)
     out = {}
     if u > 1.0:
@@ -464,7 +513,7 @@ def response_bounds(src, images=None):
     return blob
 
 
-def derive(img, src=None):
+def derive(img, src=None, t_ext=None):
     """Per clocked open-drain lane: r_i (pyRTA primary), and the bench slack.
 
     ⛔⛔ `src=None` IS A SUPPORTED MODE, AND THE FIRST VERSION DID NOT HAVE IT.
@@ -498,8 +547,9 @@ def derive(img, src=None):
     `gate_a2_program` §1b), which is what CI's pyRTA-free floor needs.
     ⚠ `ckdense` still has ours < pyRTA; it fails 1.6a (ruling DT-B) and is a
     declared stress image, outside what any exact witness adjudicates.
+    `t_ext`: the edge-paced lanes' T_ext, declared at build time (lane_set).
     """
-    ls, d_min, k, j_prog = lane_set(img)
+    ls, d_min, k, j_prog = lane_set(img, t_ext)
     blanes = [r["blane"] for r in ls]
     u = utilisation(ls)
     res = {"d_min": d_min, "k": k, "J": j_prog, "U": round(u, 4),

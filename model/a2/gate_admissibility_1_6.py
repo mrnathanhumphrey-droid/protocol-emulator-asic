@@ -481,7 +481,10 @@ def c_rx(lanes):
     TWO edges per bit, so one event is HALF a bit. Reading `t` as a bit period
     doubles SPI-target's rate, and this number is host-facing spec.
     """
-    BPE = {"UART-rx": 1.0, "SPI-target": 0.5}
+    # ⛔ SPI-target WAS 0.5 (two events per bit, the both-edges model); the
+    # shipped lane is ONE event per bit at t = 50 (lane_digest b9a51e13a772),
+    # so 1.0 -- left at 0.5 this rate would silently halve to 0.5 Mb/s.
+    BPE = {"UART-rx": 1.0, "SPI-target": 1.0}
     rx = [l for l in lanes if l.name.startswith(tuple(BPE))]
     agg = sum(next(v for k, v in BPE.items() if l.name.startswith(k))
               / (l.t * 20e-9) for l in rx)

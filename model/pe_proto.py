@@ -320,6 +320,12 @@ class SPITarget:
         acts.append((OP_REARM, 0, 1, self.d, 0))
         return acts
 
+    def t_ext(self, sck_hz=1_000_000, f_clk=50_000_000):
+        """{lane 0: T_ext}: the master's claimed maximum SCK period, in cycles
+        -- the period of this edge-paced lane (program_a2.T_EXT). 50 at
+        1 MHz MISO-only; the MOSI variant is witnessed at <= 500 kHz."""
+        return {0: f_clk // sck_hz}
+
     def header(self, dsched=25, dtol=17, flags=0):
         """MISO, no clock pin, push-pull, the bit order STATED. dsched 25 is
         the ruled deadline (half of a 1 MHz SCK period), dtol 17 the ledger's
@@ -328,7 +334,8 @@ class SPITarget:
                 self.order)
 
 
-def image(lanes, headers, park_pins=None, timing_checks=True, exempt_as=None):
+def image(lanes, headers, park_pins=None, timing_checks=True, exempt_as=None,
+          t_ext=None):
     """Through `pe_asm.assemble` -- every admissibility check applies (the
     per-program timing pair only when `timing_checks`, and then only for an
     image the non-admissible registry names: `exempt_as`, see pe_asm).
@@ -346,7 +353,8 @@ def image(lanes, headers, park_pins=None, timing_checks=True, exempt_as=None):
             "SPI mode 0/3 parts)." % bad)
     import pe_asm
     return pe_asm.assemble(lanes, headers, park_pins=park_pins,
-                           timing_checks=timing_checks, exempt_as=exempt_as)
+                           timing_checks=timing_checks, exempt_as=exempt_as,
+                           t_ext=t_ext)
 
 
 # ---------------------------------------------------------------------------

@@ -347,6 +347,47 @@ def main() -> int:
     if not (hit and clean):
         rc = 1
 
+    # ---- must-fire: an EDGE-PACED lane takes its period from T_ext ---------
+    # ⛔ Wilson 10-18 ruling 3. The SPI target's SHIFT delay (20) is the gap
+    # AFTER a bit; taking it as T judged the lane at the wrong rate. Built in
+    # memory from pe_proto.SPITarget (no image file needed).
+    print()
+    print("  --- must-fire: an edge-paced lane's period is T_ext ---")
+    sys.path.insert(0, os.path.join(ROOT, "model"))
+    import pe_asm
+    import pe_proto
+    tg = pe_proto.SPITarget(mode=0, sck=4, mosi_pin=5)
+    lanes_t, hdr_t = {0: tg.program()}, {0: tg.header()}
+    try:
+        pe_proto.image(lanes_t, hdr_t)
+        print("    pe_asm, no T_ext: *** ACCEPTED (an edge-paced lane certified)")
+        rc = 1
+    except pe_asm.Reject as e:
+        ok0 = "EDGE-PACED" in str(e)
+        print("    pe_asm, no T_ext: REFUSED (%s...)  %s"
+              % (str(e)[:44], "red ok" if ok0 else "*** wrong reason"))
+        rc |= 0 if ok0 else 1
+    # the build declares its T_ext (the master's claimed 1 MHz): accepted
+    timg = pe_proto.image(lanes_t, hdr_t, t_ext=tg.t_ext())
+    print("    pe_asm, T_ext 50 declared at build: ACCEPTED  ok")
+    try:
+        program_a2.lane_set(timg, t_ext={})
+        print("    lane_set, no T_ext: *** ACCEPTED")
+        rc = 1
+    except program_a2.EdgePacedNoTExt:
+        print("    lane_set, no T_ext: REFUSED  red ok")
+    l1 = program_a2.lane_set(timg, t_ext={0: 50})[0][0]["blane"]
+    ok1 = l1.T == 50 and l1.D_tol == 17
+    print("    T_ext 50 (1 MHz): T %d, D_tol %d   %s"
+          % (l1.T, l1.D_tol, "ok" if ok1 else "*** WRONG (want 50, 17)"))
+    l2 = program_a2.lane_set(timg, t_ext={0: 25})[0][0]["blane"]
+    ok2 = l2.T == 25 and l2.D_tol == 4
+    print("    T_ext 25 (2 MHz): T %d, D_tol %d   %s -- the budget the 9-cycle"
+          % (l2.T, l2.D_tol, "ok" if ok2 else "*** WRONG (want 25, 4)"))
+    print("      shipped r cannot meet (gate_reactive_2mhz: 2 MHz FAILS)")
+    if not (ok1 and ok2):
+        rc = 1
+
     print()
     print("  --- 5. what this gate does NOT check ---")
     print("    ⚠ J IS CONSERVATIVE: taken from the minimum ACTION delay, a")

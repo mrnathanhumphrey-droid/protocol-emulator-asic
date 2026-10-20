@@ -269,9 +269,9 @@ def main() -> int:
     # accepted, header byte 5 the only difference. Both sides again.
     print("  --- must-fire M3b: an SPI-TARGET header with no stated order ---")
     tg = P.SPITarget(mode=0, sck=4, mosi_pin=5)
-    tl, tbare = {0: tg.program()}, {0: tg.header()[:7]}
+    tl, tbare, tx = {0: tg.program()}, {0: tg.header()[:7]}, tg.t_ext()
     try:
-        P.image(tl, tbare)
+        P.image(tl, tbare, t_ext=tx)
         print("    *** MUST-FIRE FAILED: the front-end accepted an SPI-target "
               "lane with no stated order")
         rc = 1
@@ -281,7 +281,8 @@ def main() -> int:
               "" if ok else " *** but did not name lane 0 / order"))
         rc |= 0 if ok else 1
     try:
-        o = pe_isa.lane_programs(pe_asm.assemble(tl, tbare))[0][0]["order"]
+        o = pe_isa.lane_programs(
+            pe_asm.assemble(tl, tbare, t_ext=tx))[0][0]["order"]
         print("    raw pe_asm, same header: accepted, order %s (the documented "
               "default)%s" % ("MSB" if o else "LSB",
                               "" if o == pe_isa.ORDER_LSB else " *** WRONG"))
@@ -291,7 +292,8 @@ def main() -> int:
               % str(e)[:70])
         rc = 1
     try:
-        o = pe_isa.lane_programs(P.image(tl, {0: tg.header()}))[0][0]["order"]
+        o = pe_isa.lane_programs(
+            P.image(tl, {0: tg.header()}, t_ext=tx))[0][0]["order"]
         print("    control: the stated header assembles MSB-first%s"
               % ("" if o == pe_isa.ORDER_MSB else " *** WRONG"))
         rc |= 0 if o == pe_isa.ORDER_MSB else 1

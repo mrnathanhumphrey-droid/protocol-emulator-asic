@@ -110,12 +110,13 @@ The five lanes are derived from the protocols, not chosen:
 | SPI-master 1 MHz | 25 | 3 | 1 | 25 | 1 | 23 |
 | I²C Fast-mode 397 kHz nominal, 370.4 kHz measured | 45 | 3 | 1 | 45 | 2 | 15 |
 | UART-rx 115200 | 4140 | 3 | 10 | 414 | 1 | 213 |
-| SPI-target 1 MHz | 400 | 3 | 16 | 25 | 1 | 17 |
+| SPI-target 1 MHz | 400 | 3 | 8 | 50 | 1 | 17 |
 
 All in cycles at 50 MHz: period `T`, service time `C` (measured), release jitter
 `J`, tolerated response `D_tol`. `n` and `t` describe the bursty lanes — UART-rx
-is 10 bits spaced 414 apart, SPI-target 16 bits spaced 25 — because a periodic
-model using the outer period alone would understate the burst. The SPI-target
+is 10 bits spaced 414 apart, SPI-target 8 bits spaced 50 (one event per bit, at
+the master's 1 MHz clock) — because a periodic model using the outer period
+alone would understate the burst. The SPI-target
 lane is analysed, but its program is still owed.
 
 **The scheduler.** Non-preemptive EDF with a deadline-limited interference
