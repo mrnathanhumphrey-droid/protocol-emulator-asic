@@ -263,6 +263,42 @@ def main() -> int:
     except P.ProtoError:
         print("    red: P.SPI(order=None) refused at construction")
 
+    # ---- M3b: the SPI TARGET, the same rule (found building it, 10-20) ----
+    # ⛔ The master-only test skipped a lane with no clock pin, so a target
+    # header with no order assembled LSB-first: every MISO byte reversed,
+    # accepted, header byte 5 the only difference. Both sides again.
+    print("  --- must-fire M3b: an SPI-TARGET header with no stated order ---")
+    tg = P.SPITarget(mode=0, sck=4, mosi_pin=5)
+    tl, tbare = {0: tg.program()}, {0: tg.header()[:7]}
+    try:
+        P.image(tl, tbare)
+        print("    *** MUST-FIRE FAILED: the front-end accepted an SPI-target "
+              "lane with no stated order")
+        rc = 1
+    except P.ProtoError as e:
+        ok = "lane(s) [0]" in str(e) and "order" in str(e)
+        print("    red: front-end REFUSED (%s)%s" % (str(e)[:60],
+              "" if ok else " *** but did not name lane 0 / order"))
+        rc |= 0 if ok else 1
+    try:
+        o = pe_isa.lane_programs(pe_asm.assemble(tl, tbare))[0][0]["order"]
+        print("    raw pe_asm, same header: accepted, order %s (the documented "
+              "default)%s" % ("MSB" if o else "LSB",
+                              "" if o == pe_isa.ORDER_LSB else " *** WRONG"))
+        rc |= 0 if o == pe_isa.ORDER_LSB else 1
+    except pe_asm.Reject as e:
+        print("    *** raw pe_asm refused the default-order target header: %s"
+              % str(e)[:70])
+        rc = 1
+    try:
+        o = pe_isa.lane_programs(P.image(tl, {0: tg.header()}))[0][0]["order"]
+        print("    control: the stated header assembles MSB-first%s"
+              % ("" if o == pe_isa.ORDER_MSB else " *** WRONG"))
+        rc |= 0 if o == pe_isa.ORDER_MSB else 1
+    except (P.ProtoError, pe_asm.Reject) as e:
+        print("    *** control refused: %s" % str(e)[:70])
+        rc = 1
+
     print()
     print("  subjects %d, reference bytes compared %d" % (len(subj), compared))
     if rc == 0 and compared >= 256 * len(subj):

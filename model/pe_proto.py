@@ -48,9 +48,9 @@ ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(ROOT, "test"))
 
-from pe_isa import (OP_LEVEL, OP_READBIT, OP_REARM, OP_SHIFT,  # noqa: E402
-                    OP_SHIFTIN, OP_START, OP_STOP, ORDER_LSB, ORDER_MSB,
-                    SELF_CLOCKED)
+from pe_isa import (OP_ARM, OP_LEVEL, OP_READBIT, OP_REARM,  # noqa: E402
+                    OP_SHIFT, OP_SHIFTIN, OP_START, OP_STOP, ORDER_LSB,
+                    ORDER_MSB, PIN_NONE, SELF_CLOCKED)
 
 SCL_LOW, SCL_HIGH = 0, 1
 
@@ -222,22 +222,110 @@ class SPI:
         return (self.mosi, self.sclk, 1, d, 2 * d, 3 * d, flags, self.order)
 
 
+def _rtl_pin(name):
+    """`name`'s value in src/project.v (MISO_PIN, CS_PIN): the silicon's own
+    pins, read from the RTL rather than restated."""
+    import re
+    with open(os.path.join(ROOT, "src", "project.v"), encoding="utf-8") as fh:
+        m = re.search(r"parameter\s+integer\s+%s\s*=\s*(\d+)" % name, fh.read())
+    if not m:
+        raise ProtoError("%s not found in src/project.v" % name)
+    return int(m.group(1))
+
+
 def spi_lanes_without_order(lanes, headers):
-    """-> [lane]: every SPI lane (PUSH-PULL, a real clock pin, a self-clocked
-    SHIFT or SHIFTIN) whose header does not STATE its order (no 8th element).
+    """-> [lane]: every SPI lane whose header does not STATE its order (no 8th
+    element). Two kinds:
+      * an SPI MASTER: push-pull, a real clock pin, a self-clocked SHIFT or
+        SHIFTIN;
+      * an SPI TARGET: push-pull, NO clock pin (the master supplies SCK), a
+        SHIFT or SHIFTIN on the silicon's MISO_PIN. ⛔ Found building the
+        target (10-20): the master-only test skipped it, so a target header
+        with no order assembled LSB-first -- every byte bit-reversed on MISO,
+        accepted, header byte 5 the only difference. MISO_PIN is the one pin
+        whose CS-release hardware exists only for an SPI target, so a lane
+        shifting there is one.
     ⭐ I2C lanes are open-drain and their order is DERIVED (START/STOP, ruling
-    RC4); a lane with no real clock (UART, the SPI target) is not an SPI
-    master and keeps pe_asm's documented default."""
+    RC4); UART and 1-Wire have no clock and shift elsewhere, and keep pe_asm's
+    documented default (LSB, which is theirs)."""
     from pe_isa import N_PINS
+    miso = _rtl_pin("MISO_PIN")
     bad = []
     for ln in sorted(headers):
         h = headers[ln]
-        if int(h[2]) != 1 or int(h[1]) >= N_PINS:
+        if int(h[2]) != 1 or len(h) >= 8:
             continue
-        if any(a[0] in (OP_SHIFT, OP_SHIFTIN) and a[2] == SELF_CLOCKED
-               for a in lanes.get(ln, ())) and len(h) < 8:
+        acts = lanes.get(ln, ())
+        if int(h[1]) < N_PINS:
+            if any(a[0] in (OP_SHIFT, OP_SHIFTIN) and a[2] == SELF_CLOCKED
+                   for a in acts):
+                bad.append(ln)
+        elif any(a[0] in (OP_SHIFT, OP_SHIFTIN) and a[1] == miso
+                 for a in acts):
             bad.append(ln)
     return bad
+
+
+class SPITarget:
+    """One SPI-TARGET lane: the master drives SCK, MOSI and CS; this lane
+    shifts a host-fed byte out on MISO, one bit per change-edge of SCK, and
+    (`mosi=True`) samples MOSI after each. Wilson's ruling (10-18): MISO out
+    witnessed at 1 MHz, MOSI capture at <= 500 kHz, all four modes, a fixed
+    2-byte transaction.
+
+    ⭐ HOW IT IS TIMED (model/zero_spacing.py E1-E3): a delay-0 ARM waits on
+    its edge, and the edge releases its successor at once; an action's delay
+    spaces it from the NEXT action. So `ARM(edge) ; SHIFT(MISO, d)` drives
+    MISO a fixed latency after the edge, and the next ARM opens `d` later.
+    ⭐ THE MODE IS THE CHANGE-EDGE: CPHA 0 (modes 0, 2) drives bit 7 at CS
+    fall and every later bit on SCK's trailing edge; CPHA 1 (modes 1, 3)
+    drives each bit on SCK's leading edge. CPOL picks which level those
+    edges are: falling for modes 0 and 3, rising for modes 1 and 2.
+    ⛔ LIMITS, STATED (spi_target_proposal.md): no abort or resync on CS
+    rising mid-byte (no two-pin wait); an edge before the ARM's window opens
+    is lost; MOSI at 1 MHz has ~0-4 cycles of margin, hence <= 500 kHz."""
+
+    CHG_RISE = {0: 0, 1: 1, 2: 1, 3: 0}   # mode -> 1 if the change-edge rises
+
+    def __init__(self, mode, sck, mosi_pin, d=20, nbytes=2, mosi=False,
+                 order=ORDER_MSB):
+        if mode not in self.CHG_RISE:
+            raise ProtoError("SPI mode must be 0..3; got %r" % (mode,))
+        if order not in (ORDER_LSB, ORDER_MSB):
+            raise ProtoError("SPI order must be ORDER_MSB or ORDER_LSB, "
+                             "stated explicitly; got %r" % (order,))
+        if nbytes < 1:
+            raise ProtoError("an SPI-target frame needs at least one byte")
+        self.mode, self.sck, self.mosi_pin = mode, sck, mosi_pin
+        self.cs, self.miso = _rtl_pin("CS_PIN"), _rtl_pin("MISO_PIN")
+        self.d, self.nbytes, self.mosi, self.order = d, nbytes, mosi, order
+
+    def _bit(self):
+        out = [(OP_SHIFT, self.miso, 0, self.d, 0, 7)]
+        if self.mosi:
+            out.append((OP_SHIFTIN, self.mosi_pin, 0, self.d, 0, 8))
+        return out
+
+    def program(self):
+        edge = self.CHG_RISE[self.mode]
+        acts = [(OP_ARM, self.cs, 0, 0, 0)]              # frame start: CS fall
+        nbits = 8 * self.nbytes
+        first = 0
+        if self.mode in (0, 2):                          # CPHA 0: bit 7 at CS
+            acts += self._bit()
+            first = 1
+        for _ in range(first, nbits):
+            acts.append((OP_ARM, self.sck, edge, 0, 0))
+            acts += self._bit()
+        acts.append((OP_REARM, 0, 1, self.d, 0))
+        return acts
+
+    def header(self, dsched=25, dtol=17, flags=0):
+        """MISO, no clock pin, push-pull, the bit order STATED. dsched 25 is
+        the ruled deadline (half of a 1 MHz SCK period), dtol 17 the ledger's
+        SPI-target D_tol."""
+        return (self.miso, PIN_NONE, 1, self.d, dsched, dtol, flags,
+                self.order)
 
 
 def image(lanes, headers, park_pins=None, timing_checks=True, exempt_as=None):
@@ -250,8 +338,9 @@ def image(lanes, headers, park_pins=None, timing_checks=True, exempt_as=None):
     bad = spi_lanes_without_order(lanes, headers)
     if bad:
         raise ProtoError(
-            "lane(s) %s are SPI masters (push-pull, real clock, self-clocked "
-            "shifts) whose header does not state a bit order. SPI has no "
+            "lane(s) %s are SPI lanes (a master: push-pull, real clock, "
+            "self-clocked shifts; or a target: no clock, shifting on "
+            "MISO_PIN) whose header does not state a bit order. SPI has no "
             "START/STOP to derive it from and the raw default is LSB-first; "
             "the front-end requires the 8th header element (ORDER_MSB for "
             "SPI mode 0/3 parts)." % bad)
