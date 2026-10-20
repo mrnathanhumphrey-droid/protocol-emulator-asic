@@ -25,6 +25,12 @@
   "//": "HOLD REPAIR AFTER GLOBAL ROUTE (Wilson, hold bar +0.05 ns at every corner): without it the margin above is inert (the post-GRT resizer step does not run) and hold is repaired only after CTS, on placement parasitics; routing then left 3 short tx_bitp paths at -0.020 ns (fast corner) on the reset-network halt.",
   "RUN_POST_GRT_RESIZER_TIMING": 1,
 
+  "//": "v2 T1 + T2 CANARY ONLY (never v1): at 60 MHz the resizer logged 'No setup violations found' at post-CTS and post-GRT while the routed slow corner failed by 1.05 ns -- its estimate was optimistic. T1: ask for 2.5 ns setup slack so it repairs. T2: timing-driven placement and post-GRT design repair (slew).",
+  "PL_RESIZER_SETUP_SLACK_MARGIN": 2.5,
+  "GRT_RESIZER_SETUP_SLACK_MARGIN": 2.5,
+  "PL_TIMING_DRIVEN": 1,
+  "RUN_POST_GRT_DESIGN_REPAIR": 1,
+
   "//": "RUN_LINTER, LINTER_INCLUDE_PDK_MODELS - Disabling the linter is not recommended!",
   "RUN_LINTER": 1,
   "LINTER_INCLUDE_PDK_MODELS": 1,
