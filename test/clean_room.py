@@ -56,7 +56,16 @@ QUAR = os.environ.get(
 # d1db8a89415b -- and the bit-identity check reported it as UNCHANGED, which is
 # the dangerous direction. A manifest that lags is worse than no manifest,
 # because it answers.
+# ⛔⛔ AND IT ALSO RUNS FIRST, FROM A RED CI RUN (54f010a). `corpus.py`'s
+# pad-collision audit reads the shared image universe, which names every bench
+# arm -- including `edge_image`, `five_image` and `stress_image`, which only
+# `make_smoke_image.py --all` writes. On a fresh clone they did not exist yet,
+# so the audit refused and the coverage sweep had no images; this box carried
+# old generated copies and never saw it. Measured on a clean export of 54f010a:
+# this order succeeds and leaves `artefacts.sha256` byte-identical to the
+# tracked one. The LAST run is still the one whose manifest stands.
 GENERATORS = [
+    [sys.executable, os.path.join(HERE, "make_smoke_image.py"), "--all"],
     [sys.executable, os.path.join(HERE, "corpus.py")],
     [sys.executable, os.path.join(HERE, "make_smoke_image.py"), "--all"],
 ]
