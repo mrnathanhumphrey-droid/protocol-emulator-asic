@@ -1,0 +1,138 @@
+name: v2-canary
+# ⛔⛔ v2 TIMING CANARIES ONLY (Wilson 10-20). A harden stopped after post-PnR
+# STA, on a v2-* branch, run by hand -- the CI twin of the local canary
+# (probe_c1/c1_run.sh: same PDK, tools, LibreLane and --to step).
+#   * DISPATCH ONLY: no push / pull_request / schedule trigger, so nothing a
+#     commit, a fork or a PR does can start it. GitHub requires a dispatchable
+#     workflow to exist on the default branch; the job's `if:` makes it a
+#     no-op anywhere but a v2-* branch of this repository.
+#   * NO SECRETS: it reads nothing but public repositories; permissions are
+#     read-only.
+#   * SEPARATE from the lock: it never touches cmos5l, dev or gds.yaml (the
+#     harden of record), and it changes no flow config -- each v2-* branch
+#     carries its own src/config.json, hashed in the artifact.
+#   * EVERY RESULT IS STAMPED with the branch SHA and the config hash.
+#   ⚠ CI AND THE LOCAL CANARY ARE DIFFERENT ENVIRONMENTS: the same baseline
+#     config measured -0.62 ns here and -1.05 ns locally. A CI result is judged
+#     on its own terms (>= 0 at every corner), never mixed with a local one.
+on:
+  workflow_dispatch:
+    inputs:
+      label:
+        description: "what this canary measures (copied into the summary)"
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  canary:
+    if: startsWith(github.ref, 'refs/heads/v2-') && github.repository == 'mrnathanhumphrey-droid/protocol-emulator-asic'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 330
+    env:
+      PDK_SHA: 2bbec755dc67ca3db0261c3d6163e15735d66710
+      TT_REF: d66cf17
+      LL_VER: 3.1.0.dev3
+      PDK_ROOT: /home/runner/pdk
+      PDK: ihp-sg13cmos5l
+      TO_STEP: OpenROAD.STAPostPNR
+    steps:
+      - name: Checkout the v2 branch
+        uses: actions/checkout@v6
+
+      - name: Stamp the inputs (branch, SHA, config hash)
+        shell: bash
+        env:
+          LABEL: ${{ inputs.label }}
+        run: |
+          set -euo pipefail
+          mkdir -p canary_out
+          {
+            echo "label   : ${LABEL}"
+            echo "branch  : ${GITHUB_REF_NAME}"
+            echo "sha     : ${GITHUB_SHA}"
+            echo "config  : $(sha256sum src/config.json | cut -c1-64)  src/config.json"
+            echo "info    : $(sha256sum info.yaml | cut -c1-64)  info.yaml"
+            echo "tiles   : $(grep -E '^\s*tiles:' info.yaml)"
+            echo "pdk     : ${PDK_SHA}"
+            echo "tt-tools: ${TT_REF}   librelane ${LL_VER}"
+          } | tee canary_out/stamp.txt
+
+      - name: Setup python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Cache the pinned IHP PDK
+        id: pdk
+        uses: actions/cache@v4
+        with:
+          path: /home/runner/pdk
+          key: ihp-open-pdk-${{ env.PDK_SHA }}
+
+      - name: Fetch the pinned IHP PDK
+        if: steps.pdk.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$PDK_ROOT" && cd "$PDK_ROOT"
+          git init -q
+          git fetch -q --depth 1 https://github.com/IHP-GmbH/IHP-Open-PDK.git "$PDK_SHA"
+          git checkout -q FETCH_HEAD
+          echo "IHP-Open-PDK $PDK_SHA" > "$PDK_ROOT/ihp-sg13cmos5l/SOURCES"
+
+      - name: tt-support-tools and LibreLane (pinned)
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone -q --branch ihp-sg13cmos5l https://github.com/TinyTapeout/tt-support-tools tt
+          git -C tt checkout -q "$TT_REF"
+          pip -q install -r tt/requirements.txt
+          pip -q install "librelane==$LL_VER"
+          echo "tt=$(git -C tt rev-parse --short HEAD) librelane=$(pip show librelane | awk '/^Version/{print $2}')" | tee -a canary_out/stamp.txt
+
+      - name: Harden to post-PnR STA
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./tt/tt_tool.py --create-user-config --ihp
+          T0=$(date +%s)
+          python -m librelane --pdk-root "$PDK_ROOT" --docker-no-tty --dockerized \
+            --pdk "$PDK" --manual-pdk --run-tag wokwi --force-run-dir runs/wokwi \
+            --hide-progress-bar --to "$TO_STEP" src/config_merged.json > canary_out/harden.log 2>&1
+          echo "wall_s=$(( $(date +%s) - T0 ))" | tee -a canary_out/stamp.txt
+
+      - name: Per-corner table
+        if: always()
+        shell: bash
+        run: |
+          python - <<'EOF' | tee canary_out/corners.txt
+          import json, os
+          p = "runs/wokwi/final/metrics.json"
+          if not os.path.exists(p):
+              print("NO metrics.json -- the harden did not reach the end")
+              raise SystemExit(1)
+          d = json.load(open(p))
+          print("%-34s %10s %10s" % ("corner", "setup ws", "hold ws"))
+          for c in sorted({k.split("corner:")[1] for k in d if "corner:" in k
+                           and k.startswith("timing__setup__ws")}):
+              print("%-34s %+10.4f %+10.4f" % (c, d["timing__setup__ws__corner:" + c],
+                                               d["timing__hold__ws__corner:" + c]))
+          for k in ("timing__setup__ws", "timing__setup_vio__count", "timing__hold__ws",
+                    "timing__hold_vio__count", "design__instance__area__stdcell",
+                    "design__instance__count", "design__instance__utilization"):
+              print("%-34s %s" % (k, d.get(k)))
+          EOF
+          cp runs/wokwi/resolved.json canary_out/ 2>/dev/null || true
+          echo "resolved: $(sha256sum canary_out/resolved.json 2>/dev/null | cut -c1-64)" >> canary_out/stamp.txt
+
+      - name: Upload the canary
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: v2-canary-${{ github.ref_name }}-${{ github.sha }}
+          path: |
+            canary_out/
+            runs/wokwi/final/metrics.json
+            runs/wokwi/*-openroad-stapostpnr/*/*.rpt
