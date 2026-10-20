@@ -45,6 +45,9 @@ image without a plusarg ($readmemh literal, plusarg default, literal
 pe_fpga_core IMG) -- parsed here, independently of the helper -- is matched
 EXACTLY by what its callers name; M10 an altered caller list goes red, naming
 the bench and the caller.
+INJECTION (queue 3b): I1 one bounded image -> its exact +A2SLACK appended; I2
+a run already carrying one is untouched; I3 a non-clocked image -> nothing
+appended; I4 two bounded images -> refused as ambiguous.
 POSITIVE TOKEN: `GATE sim-runs: PASSED`.
 """
 from __future__ import annotations

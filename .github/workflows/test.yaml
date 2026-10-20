@@ -220,6 +220,9 @@ jobs:
         # run, and it failed on a point only the newer release emits.
         env:
           PE_VERILATOR: /opt/oss-cad-suite/bin/verilator
+          # the formal-miter gate's SymbiYosys, from the same pinned suite; its
+          # bin dir goes on PATH for the sby run only (its yosys + yices prove)
+          PE_SBY: /opt/oss-cad-suite/bin/sby
           # CE5's 1-Wire gate runs its simulations 3 at a time (~4 min serial)
           PE_OW_JOBS: "3"
         run: bash ci/run_gates.sh

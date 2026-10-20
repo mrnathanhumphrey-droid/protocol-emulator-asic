@@ -250,6 +250,11 @@ GATES=(
   # possible; this is red on any run (vvp, a Verilator binary, cocotb's image
   # load) built any other way. Compile lines are not runs.
   model/gate_sim_runs.py
+  # ⛔ THE DISPATCH-SELECT PROOFS (TF4 tree == loop, C2 AND-OR pick == mux)
+  # on the shipped RTL, every push (Wilson, queue 4) -- by hand they proved
+  # only the tree they last ran on. Each mutant must FAIL BY COUNTEREXAMPLE on
+  # the assertion it breaks; no sby is COULD NOT RUN, red. 6 runs, seconds.
+  model/gate_formal_miters.py
   # ⭐ The I2C Fast-mode lane's witness: a RECORDED BENCH WITNESS (PA100T +
   # MB85RC256V, DSLogic captures) re-checked here in seconds, no simulator --
   # not a hardware run in CI (Wilson 10-17).

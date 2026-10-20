@@ -247,6 +247,9 @@ python test/run_local.py
 # two simulators, cycle-exact, across the protocol corpus
 python test/corpus.py && python test/gate_corpus_trace.py
 
+# the dispatch select, proved equal to what it replaced (SymbiYosys; in CI)
+python model/gate_formal_miters.py
+
 # synthesis, structural, initial-state
 bash test/yosys_check.sh && python model/f2_flop_driven_outputs.py
 python model/gate_reset_audit.py
