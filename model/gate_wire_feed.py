@@ -99,6 +99,29 @@ REGISTRY = {
                "exact), every READ's MISO is the peer's 5B C4, the chip's "
                "serial-host bytes equal the wire's; SCK at 1 MHz, phases >= "
                "the image's own A2 floor; one must-fire per check"}),
+    # ⭐ THE SPI TARGET (Wilson 10-18 ruling; build plan B3/B4). SIMULATION:
+    # tb_spitgt, an SPI master on its own clock; the hardware witness (Pico 2
+    # as controller, microSD-slot pins) is later.
+    "sptgt_m0_image.hex": (WITNESS, {
+        "runner": "test/run_spitgt.py",
+        "how": "SIMULATION, tb_spitgt: an SPI master (mode 0, 1 MHz, own "
+               "clock) reads MISO at its sampling edges -- every byte is the "
+               "host's next pushed byte, count exact; every sample sees MISO "
+               "driven; edge -> MISO <= D_tol 17; V3 agrees; seven must-fires "
+               "each red for its own reason, recovery by host reload"}),
+    "sptgt_m1_image.hex": (WITNESS, {
+        "runner": "test/run_spitgt.py",
+        "how": "as sptgt_m0, SPI mode 1 (change on SCK rise, CPOL 0)"}),
+    "sptgt_m2_image.hex": (WITNESS, {
+        "runner": "test/run_spitgt.py",
+        "how": "as sptgt_m0, SPI mode 2 (change on SCK rise, CPOL 1)"}),
+    "sptgt_m3_image.hex": (WITNESS, {
+        "runner": "test/run_spitgt.py",
+        "how": "as sptgt_m0, SPI mode 3 (change on SCK fall, CPOL 1)"}),
+    "sptgt_mosi_image.hex": (WITNESS, {
+        "runner": "test/run_spitgt.py",
+        "how": "as sptgt_m0 at 500 kHz, plus MOSI captured: the chip's "
+               "received bytes == the master's, count exact"}),
     # ⭐ HARDWARE, RECORDED: a bench witness re-checked in CI (Wilson 10-17) --
     # not a hardware run in CI. The board ran it; the record is checked here.
     "i2c_fram_fpga.hex": (WITNESS, {
@@ -229,12 +252,13 @@ PUBLISHED = {
         "rate_hz": 397000,
         "measured_hz": 370400,
         "ledger_id": "I2C 400 kHz"}),
-    "SPI-target 1 MHz": (OWED, {"rate_hz": 1000000,
-                                "ledger_id": "SPI-target 1 MHz",
-        "gap": "NO functional SPI-target program exists: corpus_sptgt.hex is "
-               "the async MISO-clear MECHANISM image (self-timed SHIFTs at "
-               "d = 6, no clock pin, never synchronised to the master's SCK); "
-               "nothing receives SCK and shifts a fed byte out on MISO"}),
+    # ⭐⭐ CLOSED (was OWED: "NO functional SPI-target program exists"). The
+    # label is the ruled scope, exactly (Wilson 10-18): MISO out witnessed at
+    # 1 MHz in all four modes; MOSI capture witnessed at 500 kHz.
+    "SPI-target: MISO 1 MHz; MOSI capture 500 kHz": (WITNESS, {
+        "image": "sptgt_m0_image.hex",
+        "rate_hz": 1000000,
+        "ledger_id": "SPI-target 1 MHz"}),
 }
 
 

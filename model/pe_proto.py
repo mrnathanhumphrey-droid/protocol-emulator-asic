@@ -326,10 +326,12 @@ class SPITarget:
         1 MHz MISO-only; the MOSI variant is witnessed at <= 500 kHz."""
         return {0: f_clk // sck_hz}
 
-    def header(self, dsched=25, dtol=17, flags=0):
-        """MISO, no clock pin, push-pull, the bit order STATED. dsched 25 is
-        the ruled deadline (half of a 1 MHz SCK period), dtol 17 the ledger's
-        SPI-target D_tol."""
+    def header(self, dsched=17, dtol=17, flags=0):
+        """MISO, no clock pin, push-pull, the bit order STATED. dtol 17 is the
+        ledger's SPI-target D_tol, derived from the 25-cycle half-period of a
+        1 MHz SCK (`bursty.abs_tolerance`); the EDF key dsched may not be
+        looser than it (N1 refuses D_sched > D_tol -- caught there, 10-20:
+        this default was 25, the half-period itself)."""
         return (self.miso, PIN_NONE, 1, self.d, dsched, dtol, flags,
                 self.order)
 

@@ -350,13 +350,22 @@ def main() -> int:
     # ---- must-fire: an EDGE-PACED lane takes its period from T_ext ---------
     # ⛔ Wilson 10-18 ruling 3. The SPI target's SHIFT delay (20) is the gap
     # AFTER a bit; taking it as T judged the lane at the wrong rate. Built in
-    # memory from pe_proto.SPITarget (no image file needed).
+    # memory from pe_proto.SPITarget (no image file needed). nbytes=3 keeps
+    # the subject OUT of program_a2.T_EXT: the 2-byte mode-0 target is
+    # byte-identical to the shipped sptgt_m0_image.hex, whose sha is
+    # registered, so it would be accepted through the registry instead.
     print()
     print("  --- must-fire: an edge-paced lane's period is T_ext ---")
     sys.path.insert(0, os.path.join(ROOT, "model"))
     import pe_asm
     import pe_proto
-    tg = pe_proto.SPITarget(mode=0, sck=4, mosi_pin=5)
+    reg = pe_proto.SPITarget(mode=0, sck=4, mosi_pin=5)
+    rimg = pe_proto.image({0: reg.program()}, {0: reg.header()})
+    okr = program_a2.image_sha(rimg) in program_a2.T_EXT
+    print("    registered sptgt_m0, no T_ext at build: ACCEPTED via T_EXT  %s"
+          % ("ok" if okr else "*** NOT IN THE REGISTRY"))
+    rc |= 0 if okr else 1
+    tg = pe_proto.SPITarget(mode=0, sck=4, mosi_pin=5, nbytes=3)
     lanes_t, hdr_t = {0: tg.program()}, {0: tg.header()}
     try:
         pe_proto.image(lanes_t, hdr_t)

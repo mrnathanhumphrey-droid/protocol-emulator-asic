@@ -67,6 +67,7 @@ test/run_w_sweep.py                 ^\s*GATE w_subset: PASSED\s*$
 test/run_cktx.py                    ^\s*GATE cktx: PASSED\s*$
 test/run_spidelay.py                ^\s*GATE spidelay: PASSED\s*$
 test/run_spim_witness.py            ^\s*GATE spim-witness: PASSED\s*$
+test/run_spitgt.py                  ^\s*GATE spitgt-witness: PASSED\s*$
 model/gate_pin_matrix.py            ^\s*GATE pin-matrix: PASSED\s*$
 model/gate_i2c_order.py             ^\s*GATE i2c-order: PASSED\s*$
 model/gate_store_full.py            ^\s*GATE store-full: PASSED\s*$

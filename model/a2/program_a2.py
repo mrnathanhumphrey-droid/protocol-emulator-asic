@@ -118,7 +118,16 @@ def gaps(h, a):
 #: given a period. Keyed by the image's SHA-256 (images carry no name; the
 #: content is the identity, as in v3_table): sha -> {lane: T_ext cycles}.
 EDGE_PACED_MIN_ARMS = 2
-T_EXT = {}
+#: the SPI-target witness images (make_smoke_image.py --sptgt): the master's
+#: claimed maximum SCK period -- 50 cycles at 1 MHz MISO-only, 100 for the
+#: MOSI-capture variant witnessed at 500 kHz. Each sha is the image's own.
+T_EXT = {
+    "63a10e20a3ec58169d40b97abf5e51ce8912e42f56c338d6af7d5826df5404f4": {0: 50},   # sptgt_m0
+    "d9f3fb51aac86358a33f6747bfe6d3800504dbab09a6fc84af1dc9d9892ed84d": {0: 50},   # sptgt_m1
+    "9984ed54eff0f0c254d23be388dafe8c8387c87867b76d0dec34eb9360fb338b": {0: 50},   # sptgt_m2
+    "dbb28371bf956d6b96e1a30c9707406d98965ec800f1698aab6b817d9295582d": {0: 50},   # sptgt_m3
+    "3a2687c762cab0de86116ed930d8dbfdd33b5725d4e063b1a215560048c054bd": {0: 100},  # sptgt_mosi
+}
 
 
 class EdgePacedNoTExt(ValueError):

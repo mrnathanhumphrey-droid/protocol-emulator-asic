@@ -1286,6 +1286,18 @@ def main() -> int:
              "rxfast_image.hex"),
             (["--i2cframe", "62"], "a full I2C write: S | addr | A | data | A | P",
              "i2cframe_image.hex"),
+            # ⭐ THE SPI-TARGET WITNESS (Wilson 10-18): all four modes at
+            # 1 MHz, MISO out; and the MOSI-capture variant (mode 0, 500 kHz).
+            (["--sptgt", "0"], "SPI target, mode 0 (MISO, T_ext 50)",
+             "sptgt_m0_image.hex"),
+            (["--sptgt", "1"], "SPI target, mode 1 (MISO, T_ext 50)",
+             "sptgt_m1_image.hex"),
+            (["--sptgt", "2"], "SPI target, mode 2 (MISO, T_ext 50)",
+             "sptgt_m2_image.hex"),
+            (["--sptgt", "3"], "SPI target, mode 3 (MISO, T_ext 50)",
+             "sptgt_m3_image.hex"),
+            (["--sptgt", "0", "mosi"], "SPI target, mode 0 + MOSI capture (T_ext 100)",
+             "sptgt_mosi_image.hex"),
         ]
         import hashlib
         import subprocess
@@ -1525,6 +1537,28 @@ def main() -> int:
         write_image(out, img)
         print("pinnone image (lane on the reserved index, shifting), "
               "%d bytes -> %s" % (len(img), out))
+        return 0
+    if "--sptgt" in sys.argv:
+        # ⭐ THE SPI-TARGET WITNESS IMAGES (Wilson 10-18; build plan B3/B4):
+        # pe_proto.SPITarget -- MISO out, one bit per SCK change-edge --
+        # assembled with its T_ext DECLARED (the master's claimed clock: 50
+        # cycles at 1 MHz; 100 for the MOSI-capture variant, witnessed at
+        # 500 kHz). Pins: SCK uio[4], MOSI uio[5]; CS and MISO are the
+        # silicon's own (project.v CS_PIN / MISO_PIN).
+        k = sys.argv.index("--sptgt")
+        mode = int(sys.argv[k + 1])
+        mosi = len(sys.argv) > k + 2 and sys.argv[k + 2] == "mosi"
+        sys.path.insert(0, os.path.join(os.path.dirname(here), "model"))
+        import pe_proto
+        tg = pe_proto.SPITarget(mode=mode, sck=4, mosi_pin=5, mosi=mosi)
+        img = pe_proto.image({0: tg.program()}, {0: tg.header()},
+                             t_ext=tg.t_ext(500_000 if mosi else 1_000_000))
+        name = ("sptgt_mosi_image.hex" if mosi
+                else "sptgt_m%d_image.hex" % mode)
+        out = os.path.join(here, name)
+        write_image(out, img)
+        print("SPI-target image, mode %d%s, %d bytes -> %s"
+              % (mode, " + MOSI" if mosi else "", len(img), out))
         return 0
     if "--cfgerr" in sys.argv:
         img = build_cfgerr()

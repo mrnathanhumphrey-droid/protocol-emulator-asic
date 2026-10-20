@@ -69,6 +69,11 @@ function integer v3_tab;
       32'h596f41a7: case (field) 0: v3_tab = 1; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // run_wirefeed_mf: old WS2812 (REARM d=0)
       32'hbcc4035e: case (field) 0: v3_tab = 0; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // rxfast_image.hex
       32'h4729da37: case (field) 0: v3_tab = 0; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // smoke_image.hex
+      32'h7efb0bb5: case (field) 0: v3_tab = 0; 1: v3_tab = 6; 2: v3_tab = 16; 3: v3_tab = 16; 4: v3_tab = 16; 5: v3_tab = 16; 6: v3_tab = 17; 7: v3_tab = 240; 8: v3_tab = 240; 9: v3_tab = 240; 10: v3_tab = 240; endcase  // sptgt_m0_image.hex
+      32'h2ae3dcd4: case (field) 0: v3_tab = 0; 1: v3_tab = 6; 2: v3_tab = 16; 3: v3_tab = 16; 4: v3_tab = 16; 5: v3_tab = 16; 6: v3_tab = 17; 7: v3_tab = 240; 8: v3_tab = 240; 9: v3_tab = 240; 10: v3_tab = 240; endcase  // sptgt_m1_image.hex
+      32'h4aae621c: case (field) 0: v3_tab = 0; 1: v3_tab = 6; 2: v3_tab = 16; 3: v3_tab = 16; 4: v3_tab = 16; 5: v3_tab = 16; 6: v3_tab = 17; 7: v3_tab = 240; 8: v3_tab = 240; 9: v3_tab = 240; 10: v3_tab = 240; endcase  // sptgt_m2_image.hex
+      32'hfb8130f4: case (field) 0: v3_tab = 0; 1: v3_tab = 6; 2: v3_tab = 16; 3: v3_tab = 16; 4: v3_tab = 16; 5: v3_tab = 16; 6: v3_tab = 17; 7: v3_tab = 240; 8: v3_tab = 240; 9: v3_tab = 240; 10: v3_tab = 240; endcase  // sptgt_m3_image.hex
+      32'h67b870c5: case (field) 0: v3_tab = 0; 1: v3_tab = 6; 2: v3_tab = 16; 3: v3_tab = 16; 4: v3_tab = 16; 5: v3_tab = 16; 6: v3_tab = 17; 7: v3_tab = 240; 8: v3_tab = 240; 9: v3_tab = 240; 10: v3_tab = 240; endcase  // sptgt_mosi_image.hex
       32'hb0e1d516: case (field) 0: v3_tab = 1; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // store_run: corpus_i2c as 51 bytes
       32'hee764033: case (field) 0: v3_tab = 1; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // store_run: falloff
       32'h3b52890b: case (field) 0: v3_tab = 0; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // stress_image.hex
@@ -144,6 +149,11 @@ task v3_tab_name;
       32'h596f41a7: $display("  clocked_conform[V3] image: run_wirefeed_mf: old WS2812 (REARM d=0) (by its loaded bytes)");
       32'hbcc4035e: $display("  clocked_conform[V3] image: rxfast_image.hex (by its loaded bytes)");
       32'h4729da37: $display("  clocked_conform[V3] image: smoke_image.hex (by its loaded bytes)");
+      32'h7efb0bb5: $display("  clocked_conform[V3] image: sptgt_m0_image.hex (by its loaded bytes)");
+      32'h2ae3dcd4: $display("  clocked_conform[V3] image: sptgt_m1_image.hex (by its loaded bytes)");
+      32'h4aae621c: $display("  clocked_conform[V3] image: sptgt_m2_image.hex (by its loaded bytes)");
+      32'hfb8130f4: $display("  clocked_conform[V3] image: sptgt_m3_image.hex (by its loaded bytes)");
+      32'h67b870c5: $display("  clocked_conform[V3] image: sptgt_mosi_image.hex (by its loaded bytes)");
       32'hb0e1d516: $display("  clocked_conform[V3] image: store_run: corpus_i2c as 51 bytes (by its loaded bytes)");
       32'hee764033: $display("  clocked_conform[V3] image: store_run: falloff (by its loaded bytes)");
       32'h3b52890b: $display("  clocked_conform[V3] image: stress_image.hex (by its loaded bytes)");

@@ -440,6 +440,16 @@ SPEC_SYMBOLS = {
     # (Wilson 10-17), a fact about the part, re-checked against the wire and
     # the PC every run. `WRITES_PER_RESET` is the transaction's shape
     # (33 | CC 44 | CC BE), an input. Nothing in the three is observed.
+    # ⭐ THE SPI-TARGET WITNESS'S INPUTS (build plan B2-B4). `T_EXT` is the
+    # master's CLAIMED maximum SCK period per image (50 = 1 MHz, 100 = 500 kHz),
+    # keyed by the image's own sha -- a declaration the lane's period is taken
+    # FROM, never a measurement. The runner's `IMG`, `WITNESS` and `MUSTFIRE`
+    # are stimulus: image names, modes, SCK half-periods, transaction counts
+    # and host timings. Every verdict is re-measured from the bench each run.
+    ("model/a2/program_a2.py", "T_EXT"),
+    ("test/run_spitgt.py", "IMG"),
+    ("test/run_spitgt.py", "WITNESS"),
+    ("test/run_spitgt.py", "MUSTFIRE"),
     ("model/gate_onewire_hw_witness.py", "WINDOWS"),
     ("model/gate_onewire_hw_witness.py", "PROBE_ROM"),
     ("model/gate_onewire_hw_witness.py", "WRITES_PER_RESET"),

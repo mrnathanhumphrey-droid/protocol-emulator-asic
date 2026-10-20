@@ -421,6 +421,10 @@ GATES=(
   # the chip's received bytes the wire's -- exact, at a 50-cycle SCK, phases
   # above the image's own A2 floor. One must-fire per check.
   test/run_spim_witness.py
+  # ⭐ the SPI-TARGET witness (Wilson 10-18): all four modes at 1 MHz, MOSI at
+  # 500 kHz, seven must-fires each red for its own reason. Closes the last
+  # OWED published lane.
+  test/run_spitgt.py
   # ⛔⛔ PN4 -- EVERY PIN-TAKING OPCODE IS RUN WITH ITS ACTION PIN != THE
   # LANE's HEADER PIN. Silicon fix #3 hid where the two were always equal
   # (I2C); so did pe_asm's alias check and Layer V2. Red on a class with only
@@ -506,7 +510,7 @@ can_run() {
     model/gate_rtl_lint.py)
       { command -v "$VL" >/dev/null 2>&1 || command -v wsl.exe >/dev/null 2>&1; } \
         || { echo "no verilator and no wsl.exe to reach one"; return 1; } ;;
-    model/gate_one_encoder.py|test/gl_harness_check.py|test/gate_tb_elaborates.py|test/run_mutants.py|model/gate_sda_hold.py|test/run_w_sweep.py|test/run_cktx.py|test/run_spidelay.py|test/run_spim_witness.py)
+    model/gate_one_encoder.py|test/gl_harness_check.py|test/gate_tb_elaborates.py|test/run_mutants.py|model/gate_sda_hold.py|test/run_w_sweep.py|test/run_cktx.py|test/run_spidelay.py|test/run_spim_witness.py|test/run_spitgt.py)
       command -v "$IV" >/dev/null 2>&1 || { echo "iverilog not found (PE_IVERILOG unset and not on PATH)"; return 1; } ;;
     model/gate_reset_audit.py)
       [ -n "${PE_NETLIST_JSON:-}" ] && [ -f "${PE_NETLIST_JSON:-}" ] \

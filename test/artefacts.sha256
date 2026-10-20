@@ -36,6 +36,11 @@ b644dfce8dbad22332b4d8d7f5c9a8ec79ed80aeb89a25c9f700f392820a1247  tx_image.hex  
 8293e90d5798353e01c01666831b965576ea6cac4825000aeb7ec1dc0fef02c3  half_image.hex  # make_smoke_image.py --half 24
 ba191b7ed7ad9034400f74dca843749d88b7930aeb7210de97df3256eee66917  rxfast_image.hex  # make_smoke_image.py --rxfast 24
 2443d9412b2fb83bd9922dc3575d788deaf7b9ac0111b639be0522e76ce92fca  i2cframe_image.hex  # make_smoke_image.py --i2cframe 62
+5f1c99a84cc2d1d19d1aabc94d70ac0e6cc184be99f78b84c7832a0e84c90c68  sptgt_m0_image.hex  # make_smoke_image.py --sptgt 0
+110305cbb740985cd5f1629720a91cc8ad93dfd894715417d25f1c26aa314142  sptgt_m1_image.hex  # make_smoke_image.py --sptgt 1
+3dd9f68cbab02061795f57f8ba76eb7379711842d115b1091983b656c6ad54f3  sptgt_m2_image.hex  # make_smoke_image.py --sptgt 2
+78af701641384f70b98060f260e28c7a0c71faaa0eb9f5bbdfbb69c36d0753f7  sptgt_m3_image.hex  # make_smoke_image.py --sptgt 3
+ba5c0ae9fe1b431c21e7a725d7416e0fe2574b7af0be84a753e901ef0c313a22  sptgt_mosi_image.hex  # make_smoke_image.py --sptgt 0 mosi
 499bad6ee3a4d094917ce3357e2e2f82bab89b7b6ed64ff0466fe74d47b9c83d  corpus_all5.hex  # corpus.py
 9dac85078c04f240398e761dd63c6c4d664fe9aca055798a1cc4905743508679  corpus_i2c.hex  # corpus.py
 39c684dd173ef4062e1b657a3b465449d18d3d4e3d83b5955cbca9da34fe671e  corpus_spim.hex  # corpus.py

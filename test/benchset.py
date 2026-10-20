@@ -41,6 +41,13 @@ ENGINE = ["src/pe_engine.v", "src/pe_store.v", "src/project.v"]
 # ⛔ An exclusion is a DECLARATION, checked below against what is on disk.
 # ---------------------------------------------------------------------------
 EXCLUDED = {
+    "tb_spitgt.v": (
+        "THE SPI-TARGET WITNESS (build plan B3/B4). An SPI master on its own "
+        "clock drives each arm with a mode, a rate and host timing (tCSS, "
+        "tCSH, an early CS, a 7-clock transaction with a mid-run program "
+        "RELOAD) that a fixed arm list does not express, and one arm needs a "
+        "build without the conformance layers. Every claim it makes is "
+        "judged by `test/run_spitgt.py` in `ci/run_gates.sh`."),
     "tb_v2win.v": (
         "THE SYNCHRONIZER-WINDOW MEASUREMENT (V2 pins-only). Each arm pushes "
         "one byte at an instant the runner computes from a dry run of the "

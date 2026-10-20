@@ -631,6 +631,62 @@ that this was benign was refuted by its own bench check
 The input is now qualified by the synchronized CS, so a marginal release
 resolves to 0 by construction. Must-fire: `M_CS_RAW_D`.
 
+### Measured: the SPI-target witness (`test/run_spitgt.py`)
+
+The program is `pe_proto.SPITarget`: one bit per SCK change-edge, all four
+modes; images `test/sptgt_m{0,1,2,3}_image.hex` and `sptgt_mosi_image.hex`.
+It runs against an SPI master on its own clock (`test/tb_spitgt.v`). These
+are simulation numbers from a single lane, and they sit inside the analytic
+bounds above, which remain the contract because they cover contention. The
+1 MHz limit is A2's worst-case analysis; the multi-lane contention arm that
+would measure it under load (B3b) has not run yet:
+
+| quantity | measured | contract |
+| --- | --- | --- |
+| CS falls → MISO valid, bit 7 (modes 0/2) | 6 cycles = 120 ns | ≤ 13 cycles |
+| SCK change-edge → MISO carries the new bit | 6–8 cycles = 120–160 ns | ≤ D_tol 17 cycles |
+| ARM re-arms before the next change-edge, 1 MHz | ≥ 23 cycles of margin | — |
+| ARM re-arms before the next change-edge, MOSI variant, 500 kHz | ≥ 34 cycles | — |
+
+**CS hold (tCSH ≥ 0).** Keep CS low **through the master's final sampling
+edge**. That is sufficient: the witness's `tCSH = 0` arm (CS rising at the
+final sampling edge) reads every byte and passes the bit checker. CS rising
+before that edge releases MISO under the master, which samples the pull-up
+(must-fire M6: the master's byte and the chip's own V3 check both go red).
+
+**The master samples a driven MISO only.** A released MISO reads as the
+pull-up's 1, and that can match the data by luck. The witness fails any
+sample of a released MISO on its own (must-fire M5: `tCSS = 2` cycles). It
+first *passed* because the first fed byte had bit 7 = 1.
+
+**Measured minimum CS lead: 6 cycles = 120 ns.** A sweep of the master's lead
+from CS falling to its first SCK edge (the sampling edge in modes 0 and 2),
+`TCSS` = 2 … 7 cycles at 1 MHz: 2–5 fail (MISO is still released at the
+sampling edge), 6 and 7 pass, identically in modes 0 and 2. One master clock
+phase was swept. The 280 ns setup above is the contract; 120 ns is what one
+uncontended lane needs.
+
+**Recovery after a short transaction.** The lane has no CS abort: it can't
+wait on two pins at once. A transaction cut short (a missing SCK edge) leaves
+it a bit out of step until **the host reloads the program**, using the
+procedure in [Reloading a program](#reloading-a-program--a-reload-is-a-clean-slate).
+A reload flushes the TX queues and resets the lane; the next byte MISO
+carries is the first one pushed after PROG falls. Must-fires M3 (desync) and
+M3R (exact again after the reload).
+
+**Compared with a real SPI part.** Fujitsu MB85RS64V FRAM, datasheet
+DS501-00015-4v0-E, p. 14 (AC characteristics): CS setup tCSU ≥ 10 ns, CS hold
+tCSH ≥ 10 ns, output valid tODV ≤ 20 ns, deselect tD ≥ 60 ns, at up to 20 MHz.
+This chip asks more of the master: a 280 ns CS setup and ~160 ns to valid
+data, at 1 MHz. **Our target needs more CS setup than that FRAM**: 120 ns
+measured and 280 ns contracted, against its 10 ns. A master tuned to the FRAM's
+minimum would fail here. Typical masters provide the lead anyway: at 1 MHz
+the first sampling edge comes ≥ 500 ns after the clock starts, even with zero
+CS lead (see above). Our CS hold (≥ 0 through the final sampling edge) is
+looser than the FRAM's 10 ns. The *form* of the requirement is the same one
+a datasheet states, and the numbers are what a scheduled lane on a 50 MHz
+engine delivers.
+
 ## SPI master receive timing (clocked SHIFTIN on a push-pull clock)
 
 *Ruling CI2, silicon fix #3. Measured in `test/run_spidelay.py` (CI).*

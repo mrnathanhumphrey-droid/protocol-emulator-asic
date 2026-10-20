@@ -4,7 +4,7 @@
 
 An entry to the Jane Street ASIC competition: a programmable serial-protocol
 engine for the Tiny Tapeout shuttle on IHP `sg13cmos5l`, in 6×4 tiles at 50 MHz.
-The same silicon speaks UART, SPI master, I²C or 1-Wire depending on the program
+The same silicon speaks UART, SPI (master or target), I²C or 1-Wire depending on the program
 loaded into it — and it can speak a protocol nobody had written down when the
 die was taped out, as long as that protocol fits the instruction set and the
 timing envelope.
@@ -34,9 +34,9 @@ Pre-submission, for the March 2027 `sg13cmos5l` shuttle.
 
 | | |
 |---|---|
-| **Done** | RTL frozen; 68 CI gates green on every push; UART, SPI master, I²C and 1-Wire programs verified in simulation; UART, I²C and 1-Wire also on an FPGA prototype with real parts |
+| **Done** | RTL frozen; every CI gate green on every push; UART, SPI master, SPI target (all four modes), I²C and 1-Wire programs verified in simulation; UART, I²C and 1-Wire also on an FPGA prototype with real parts |
 | **Measured, not yet of record** | local hardens close at 50 MHz with positive slack at three densities; the CI harden of record must reproduce them |
-| **Open** | an SPI-*target* program; gate-level simulation of the full suite — see [Open items](#open-items) |
+| **Open** | gate-level simulation of the full suite; hardware runs of the SPI target — see [Open items](#open-items) |
 
 ---
 
@@ -110,14 +110,15 @@ The five lanes are derived from the protocols, not chosen:
 | SPI-master 1 MHz | 25 | 3 | 1 | 25 | 1 | 23 |
 | I²C Fast-mode 397 kHz nominal, 370.4 kHz measured | 45 | 3 | 1 | 45 | 2 | 15 |
 | UART-rx 115200 | 4140 | 3 | 10 | 414 | 1 | 213 |
-| SPI-target 1 MHz | 400 | 3 | 8 | 50 | 1 | 17 |
+| SPI-target: MISO 1 MHz; MOSI capture 500 kHz | 400 | 3 | 8 | 50 | 1 | 17 |
 
 All in cycles at 50 MHz: period `T`, service time `C` (measured), release jitter
 `J`, tolerated response `D_tol`. `n` and `t` describe the bursty lanes — UART-rx
 is 10 bits spaced 414 apart, SPI-target 8 bits spaced 50 (one event per bit, at
 the master's 1 MHz clock) — because a periodic model using the outer period
-alone would understate the burst. The SPI-target
-lane is analysed, but its program is still owed.
+alone would understate the burst. The SPI target answers the master's clock one
+bit per edge, so its period is the master's claimed maximum SCK, declared when
+the program is built; a program that leaves it undeclared is refused.
 
 **The scheduler.** Non-preemptive EDF with a deadline-limited interference
 bound. The scheduling key is kept separate from the requirement `D_tol`, and
@@ -309,8 +310,14 @@ The documents are indexed, by what each one is for, in
 
 ## Open items
 
-- **No SPI-target program yet.** The lane is analysed and the pins are reserved;
-  the program that receives SCK and shifts a byte out on MISO is the next build.
+- **The SPI target is witnessed in simulation only**, against a master model on
+  its own clock: all four modes at 1 MHz, MOSI capture at 500 kHz. The 1 MHz
+  limit is A2's worst-case analysis; the multi-lane contention arm that would
+  measure it under load is pending. The host must lead its first SCK edge by
+  at least 6 cycles (120 ns measured; 280 ns is the contract) after CS falls,
+  which is more CS setup than a typical SPI FRAM needs, and hold CS through
+  its final sampling edge. A transaction cut short desynchronises the lane
+  until the host reloads the program. Hardware runs follow.
 - **Gate-level simulation of the full suite is owed.** The bench is ports-only so
   it can run on the netlist unchanged.
 - **The CI harden of record is pending.** Local hardens show slow-corner setup
