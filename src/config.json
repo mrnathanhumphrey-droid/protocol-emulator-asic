@@ -17,7 +17,10 @@
 
   "//": "CLOCK_PERIOD - Increase this in case you are getting setup time violations.",
   "//": "The value is in nanoseconds, so 20ns == 50MHz.",
-  "CLOCK_PERIOD": 20,
+  "CLOCK_PERIOD": 16.667,
+
+  "//": "v2 8x4 CANARY ONLY (never v1). I/O delay = TT's pad estimate: ~10 ns round trip through pads and mux, Tiny Tapeout estimate -> 30 % of 16.667 ns = 5.0 ns in + 5.0 ns out. TT ESTIMATE, UNMEASURED (no cmos5l silicon yet). Output toggle ceiling ~66 MHz is the same estimate; it is not an STA constraint.",
+  "IO_DELAY_CONSTRAINT": 30,
 
   "//": "Hold slack margin - Increase them in case you are getting hold violations.",
   "PL_RESIZER_HOLD_SLACK_MARGIN": 0.1,
