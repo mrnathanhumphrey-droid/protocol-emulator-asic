@@ -311,9 +311,11 @@ The documents are indexed, by what each one is for, in
 ## Open items
 
 - **The SPI target is witnessed in simulation only**, against a master model on
-  its own clock: all four modes at 1 MHz, MOSI capture at 500 kHz. The 1 MHz
-  limit is A2's worst-case analysis; the multi-lane contention arm that would
-  measure it under load is pending. The host must lead its first SCK edge by
+  its own clock: all four modes at 1 MHz, MOSI capture at 500 kHz. Under
+  five-lane contention at shipped rates (every other lane busy, every clock
+  phase visited) the worst bit reaches the pad in 8 cycles against A2's bound
+  of 10 (r = 6 ≤ D_tol 17); with I²C at A2's envelope deadline, 10 against 13.
+  The host must lead its first SCK edge by
   at least 6 cycles (120 ns measured; 280 ns is the contract) after CS falls,
   which is more CS setup than a typical SPI FRAM needs, and hold CS through
   its final sampling edge. A transaction cut short desynchronises the lane

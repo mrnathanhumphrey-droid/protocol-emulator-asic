@@ -14,6 +14,10 @@ function integer v3_tab;
     v3_tab = -2;
     case (h)
       32'h9fefc244: case (field) 0: v3_tab = 1; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // armnone_image.hex
+      32'h57c4ab65: case (field) 0: v3_tab = 0; 1: v3_tab = 6; 2: v3_tab = 9; 3: v3_tab = 13; 4: v3_tab = 16; 5: v3_tab = 16; 6: v3_tab = 17; 7: v3_tab = 75; 8: v3_tab = 210; 9: v3_tab = 255; 10: v3_tab = 255; endcase  // b3b_a3_image.hex
+      32'hd927d8b8: case (field) 0: v3_tab = 0; 1: v3_tab = 6; 2: v3_tab = 9; 3: v3_tab = 13; 4: v3_tab = 16; 5: v3_tab = 16; 6: v3_tab = 17; 7: v3_tab = 75; 8: v3_tab = 210; 9: v3_tab = 255; 10: v3_tab = 255; endcase  // b3b_a_image.hex
+      32'h44545f09: case (field) 0: v3_tab = 0; 1: v3_tab = 9; 2: v3_tab = 12; 3: v3_tab = 7; 4: v3_tab = 16; 5: v3_tab = 16; 6: v3_tab = 17; 7: v3_tab = 75; 8: v3_tab = 15; 9: v3_tab = 255; 10: v3_tab = 255; endcase  // b3b_b_image.hex
+      32'ha009ece6: case (field) 0: v3_tab = 0; 1: v3_tab = 6; 2: v3_tab = 9; 3: v3_tab = 12; 4: v3_tab = 16; 5: v3_tab = 16; 6: v3_tab = 17; 7: v3_tab = 75; 8: v3_tab = 240; 9: v3_tab = 255; 10: v3_tab = 255; endcase  // b3b_bnoi2c_image.hex
       32'h29adbd14: case (field) 0: v3_tab = 0; 1: v3_tab = 9; 2: v3_tab = 9; 3: v3_tab = 16; 4: v3_tab = 16; 5: v3_tab = 16; 6: v3_tab = 75; 7: v3_tab = 75; 8: v3_tab = 240; 9: v3_tab = 240; 10: v3_tab = 240; endcase  // census_image.hex
       32'h72f18916: case (field) 0: v3_tab = 1; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // cfgerr_image.hex
       32'hc5dc543e: case (field) 0: v3_tab = 1; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // chain_image.hex
@@ -94,6 +98,10 @@ task v3_tab_name;
   begin
     case (h)
       32'h9fefc244: $display("  clocked_conform[V3] image: armnone_image.hex (by its loaded bytes)");
+      32'h57c4ab65: $display("  clocked_conform[V3] image: b3b_a3_image.hex (by its loaded bytes)");
+      32'hd927d8b8: $display("  clocked_conform[V3] image: b3b_a_image.hex (by its loaded bytes)");
+      32'h44545f09: $display("  clocked_conform[V3] image: b3b_b_image.hex (by its loaded bytes)");
+      32'ha009ece6: $display("  clocked_conform[V3] image: b3b_bnoi2c_image.hex (by its loaded bytes)");
       32'h29adbd14: $display("  clocked_conform[V3] image: census_image.hex (by its loaded bytes)");
       32'h72f18916: $display("  clocked_conform[V3] image: cfgerr_image.hex (by its loaded bytes)");
       32'hc5dc543e: $display("  clocked_conform[V3] image: chain_image.hex (by its loaded bytes)");

@@ -1,4 +1,164 @@
 {
+ "b3b_a3_image.hex": {
+  "lanes": {
+   "0": {
+    "T": 50,
+    "dtol": 17,
+    "r_ours": 6,
+    "r_pyrta": 6,
+    "why": null
+   },
+   "1": {
+    "T": 25,
+    "dtol": 75,
+    "r_ours": 9,
+    "r_pyrta": 9,
+    "why": null
+   },
+   "2": {
+    "T": 70,
+    "dtol": 210,
+    "r_ours": 13,
+    "r_pyrta": 13,
+    "why": null
+   },
+   "3": {
+    "T": 20,
+    "dtol": 255,
+    "r_ours": 16,
+    "r_pyrta": 16,
+    "why": null
+   },
+   "4": {
+    "T": 20,
+    "dtol": 255,
+    "r_ours": 16,
+    "r_pyrta": 16,
+    "why": null
+   }
+  },
+  "why": null
+ },
+ "b3b_a_image.hex": {
+  "lanes": {
+   "0": {
+    "T": 50,
+    "dtol": 17,
+    "r_ours": 6,
+    "r_pyrta": 6,
+    "why": null
+   },
+   "1": {
+    "T": 25,
+    "dtol": 75,
+    "r_ours": 9,
+    "r_pyrta": 9,
+    "why": null
+   },
+   "2": {
+    "T": 70,
+    "dtol": 210,
+    "r_ours": 13,
+    "r_pyrta": 13,
+    "why": null
+   },
+   "3": {
+    "T": 20,
+    "dtol": 255,
+    "r_ours": 16,
+    "r_pyrta": 16,
+    "why": null
+   },
+   "4": {
+    "T": 20,
+    "dtol": 255,
+    "r_ours": 16,
+    "r_pyrta": 16,
+    "why": null
+   }
+  },
+  "why": null
+ },
+ "b3b_b_image.hex": {
+  "lanes": {
+   "0": {
+    "T": 50,
+    "dtol": 17,
+    "r_ours": 9,
+    "r_pyrta": 9,
+    "why": null
+   },
+   "1": {
+    "T": 25,
+    "dtol": 75,
+    "r_ours": 12,
+    "r_pyrta": 12,
+    "why": null
+   },
+   "2": {
+    "T": 45,
+    "dtol": 15,
+    "r_ours": 9,
+    "r_pyrta": 7,
+    "why": null
+   },
+   "3": {
+    "T": 20,
+    "dtol": 255,
+    "r_ours": 16,
+    "r_pyrta": 16,
+    "why": null
+   },
+   "4": {
+    "T": 20,
+    "dtol": 255,
+    "r_ours": 16,
+    "r_pyrta": 16,
+    "why": null
+   }
+  },
+  "why": null
+ },
+ "b3b_bnoi2c_image.hex": {
+  "lanes": {
+   "0": {
+    "T": 50,
+    "dtol": 17,
+    "r_ours": 6,
+    "r_pyrta": 6,
+    "why": null
+   },
+   "1": {
+    "T": 25,
+    "dtol": 75,
+    "r_ours": 9,
+    "r_pyrta": 9,
+    "why": null
+   },
+   "2": {
+    "T": 500,
+    "dtol": 240,
+    "r_ours": 12,
+    "r_pyrta": 12,
+    "why": null
+   },
+   "3": {
+    "T": 20,
+    "dtol": 255,
+    "r_ours": 16,
+    "r_pyrta": 16,
+    "why": null
+   },
+   "4": {
+    "T": 20,
+    "dtol": 255,
+    "r_ours": 16,
+    "r_pyrta": 16,
+    "why": null
+   }
+  },
+  "why": null
+ },
  "census_image.hex": {
   "lanes": {
    "0": {

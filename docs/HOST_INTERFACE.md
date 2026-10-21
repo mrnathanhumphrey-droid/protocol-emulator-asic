@@ -638,8 +638,8 @@ modes; images `test/sptgt_m{0,1,2,3}_image.hex` and `sptgt_mosi_image.hex`.
 It runs against an SPI master on its own clock (`test/tb_spitgt.v`). These
 are simulation numbers from a single lane, and they sit inside the analytic
 bounds above, which remain the contract because they cover contention. The
-1 MHz limit is A2's worst-case analysis; the multi-lane contention arm that
-would measure it under load (B3b) has not run yet:
+1 MHz limit is A2's worst-case analysis; the five-lane contention arm below
+measures it under load:
 
 | quantity | measured | contract |
 | --- | --- | --- |
@@ -647,6 +647,23 @@ would measure it under load (B3b) has not run yet:
 | SCK change-edge → MISO carries the new bit | 6–8 cycles = 120–160 ns | ≤ D_tol 17 cycles |
 | ARM re-arms before the next change-edge, 1 MHz | ≥ 23 cycles of margin | — |
 | ARM re-arms before the next change-edge, MOSI variant, 500 kHz | ≥ 34 cycles | — |
+
+**Under contention (B3b, `+FIVE`).** The SPI target beside the four other
+shipped lanes (SPI master 1 MHz, I²C, UART-tx and UART-rx at 115,200), every
+lane busy and checked on its own wire, the master detuned to a 500.3 ns half
+period over 200 transactions so its edges visit every phase of the clock. A2's
+bound at the pad is `r + L_SYNC + OUT_REG`, derived from each image:
+
+| image | worst edge → pad | A2 bound | min re-arm margin |
+| --- | --- | --- | --- |
+| shipped rates, modes 0 and 3 | 8 cycles | 10 (r = 6) | 21 cycles |
+| I²C at A2's envelope deadline | 10 cycles | 13 (r = 9) | 19 cycles |
+| ... with the I²C lane removed | 8 cycles | 10 (r = 6) | 22 cycles |
+
+Removing the I²C lane lowers the worst bit by 2, as A2 predicts (it is the
+interferer on that image). At 2 MHz under the same load every byte still read
+correctly, with the re-arm margin down to 0: A2 refuses 2 MHz, and the 1 MHz
+limit rests on A2, not on this bench.
 
 **CS hold (tCSH ≥ 0).** Keep CS low **through the master's final sampling
 edge**. That is sufficient: the witness's `tCSH = 0` arm (CS rising at the

@@ -1195,6 +1195,59 @@ def build_noop(timeout: int, half: int, d1: int = 12, arm_pin: int = 0,
     return b"".join(headers) + b"".join(prog)
 
 
+def build_b3b(arm: str):
+    """B3b, THE CONTENTION ARM -- the SPI target beside the shipped lanes.
+
+    Every lane is its SHIPPED builder, unmodified except for the TX queue its
+    SHIFTs name (one queue per shifting lane, `pe_asm` ruling 1):
+      0 SPI target, mode 0, queue 0, T_ext 50 (1 MHz) declared at build
+      1 SPI master 1 MHz (d 25, MSB, one 2-out/1-in frame), queue 1
+      2 I2C write (`i2c_fram_write`), queue 2 -- arm "a": the shipped d 70
+        and header; arm "b": d 45 with D_sched = D_tol = 15, the deadline the
+        A2 envelope table gives I2C, which ranks it ABOVE the SPI target
+      3 UART-tx 115200 (T 434), queue 3
+      4 UART-rx 115200 (T 434)
+    Arm "bnoi2c" is arm "b" with lane 2 removed: the interferer must-fire.
+    Arm "a3" is arm "a" with the SPI target in mode 3 (the other CPHA).
+    ⭐ The A2 numbers these arms are scored against (r 6 on "a", 9 on "b",
+    6 on "bnoi2c") are DERIVED by the runner from the image, never typed.
+    """
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                    "..", "model"))
+    import pe_proto
+    import uart_tx
+    import uart_rx
+    from corpus import (P_M_SCLK, P_M_MOSI, P_M_CS, P_M_MISO, P_SCL, P_SDA)
+
+    def on_queue(acts, q):
+        return [tuple(a[:4]) + (q,) + tuple(a[5:]) if a[0] == OP_SHIFT
+                else tuple(a) for a in acts]
+
+    if arm not in ("a", "a3", "b", "bnoi2c"):
+        raise SystemExit("--b3b takes a, a3, b or bnoi2c; got %r" % arm)
+    shipped = arm in ("a", "a3")
+    tg = pe_proto.SPITarget(mode=3 if arm == "a3" else 0, sck=4, mosi_pin=5)
+    spi = pe_proto.SPI(P_M_MOSI, P_M_SCLK, P_M_CS, P_M_MISO, d=25,
+                       order=pe_proto.ORDER_MSB)
+    i2d = 70 if shipped else 45
+    i2l, i2h, _ = pe_proto.i2c_fram_write(d=i2d, sda=P_SDA, scl=P_SCL)
+    i2hdr = list(i2h[0])
+    if not shipped:
+        i2hdr[4], i2hdr[5] = 15, 15
+    txl, txh = uart_tx.lanes_headers(T=434)
+    rxl, rxh = uart_rx.lanes_headers(T=434)
+    lanes = {0: on_queue(tg.program(), 0),
+             1: on_queue(spi.transactions([(2, 1)]), 1),
+             2: on_queue(i2l[0], 2),
+             3: on_queue(txl[0], 3),
+             4: rxl[0]}
+    hdrs = {0: tg.header(), 1: spi.header(), 2: tuple(i2hdr), 3: txh[0],
+            4: rxh[0]}
+    if arm == "bnoi2c":
+        del lanes[2], hdrs[2]
+    return pe_proto.image(lanes, hdrs, t_ext=tg.t_ext())
+
+
 def main() -> int:
     here = os.path.dirname(os.path.abspath(__file__))
     if "--all" in sys.argv:
@@ -1298,6 +1351,18 @@ def main() -> int:
              "sptgt_m3_image.hex"),
             (["--sptgt", "0", "mosi"], "SPI target, mode 0 + MOSI capture (T_ext 100)",
              "sptgt_mosi_image.hex"),
+            # ⭐ B3b, THE CONTENTION ARM (Wilson 10-20): the SPI target beside
+            # the four other shipped lanes. A = shipped rates (the claim arm);
+            # B = I2C at the ENVELOPE's deadline (d 45, D_sched/D_tol 15), the
+            # worst case A2 certifies; B without I2C = the interferer must-fire.
+            (["--b3b", "a"], "B3b arm A: five lanes at shipped rates",
+             "b3b_a_image.hex"),
+            (["--b3b", "a3"], "B3b arm A, SPI target in mode 3",
+             "b3b_a3_image.hex"),
+            (["--b3b", "b"], "B3b arm B: I2C at the envelope deadline",
+             "b3b_b_image.hex"),
+            (["--b3b", "bnoi2c"], "B3b arm B with the I2C lane removed",
+             "b3b_bnoi2c_image.hex"),
         ]
         import hashlib
         import subprocess
@@ -1559,6 +1624,13 @@ def main() -> int:
         write_image(out, img)
         print("SPI-target image, mode %d%s, %d bytes -> %s"
               % (mode, " + MOSI" if mosi else "", len(img), out))
+        return 0
+    if "--b3b" in sys.argv:
+        arm = sys.argv[sys.argv.index("--b3b") + 1]
+        img = build_b3b(arm)
+        out = os.path.join(here, "b3b_%s_image.hex" % arm)
+        write_image(out, img)
+        print("B3b image, arm %s, %d bytes -> %s" % (arm, len(img), out))
         return 0
     if "--cfgerr" in sys.argv:
         img = build_cfgerr()

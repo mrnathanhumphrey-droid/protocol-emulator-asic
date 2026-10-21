@@ -127,6 +127,12 @@ T_EXT = {
     "9984ed54eff0f0c254d23be388dafe8c8387c87867b76d0dec34eb9360fb338b": {0: 50},   # sptgt_m2
     "dbb28371bf956d6b96e1a30c9707406d98965ec800f1698aab6b817d9295582d": {0: 50},   # sptgt_m3
     "3a2687c762cab0de86116ed930d8dbfdd33b5725d4e063b1a215560048c054bd": {0: 100},  # sptgt_mosi
+    # B3b, the contention arm (make_smoke_image.py --b3b): lane 0 is the SPI
+    # target at 1 MHz beside the four other shipped lanes
+    "d58f491e6bcdfe94d89662a5b889ce7ee999270dffa577b727ccfc127420ae56": {0: 50},   # b3b_a
+    "0656a43d7ba1491c7a750a9130d174e9822c3671f0196c97e560cd793464c211": {0: 50},   # b3b_a3
+    "110475383587f265568e3b637e1bcb1384fff41bd69f076506102cbc78cdb94b": {0: 50},   # b3b_b
+    "aad1c06753e687562ff70c87a352d7a4e269987c83d4765cd8fbab34fd3e6baa": {0: 50},   # b3b_bnoi2c
 }
 
 

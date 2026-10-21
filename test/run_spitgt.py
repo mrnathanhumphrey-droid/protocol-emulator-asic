@@ -63,7 +63,14 @@ SRCS = ["src/project.v", "src/pe_engine.v", "src/pe_store.v"]
 #: spelled out: gate_wire_feed requires a witness runner to NAME its images
 IMG = {0: "test/sptgt_m0_image.hex", 1: "test/sptgt_m1_image.hex",
        2: "test/sptgt_m2_image.hex", 3: "test/sptgt_m3_image.hex",
-       "mosi": "test/sptgt_mosi_image.hex"}
+       "mosi": "test/sptgt_mosi_image.hex",
+       "b3b_a": "test/b3b_a_image.hex", "b3b_a3": "test/b3b_a3_image.hex",
+       "b3b_b": "test/b3b_b_image.hex", "b3b_bnoi2c": "test/b3b_bnoi2c_image.hex"}
+
+#: B3b: the master DETUNED below 1 MHz (500.3 ns half period, not 500) so its
+#: change-edges walk through every phase of the chip clock and of the other
+#: lanes' schedules over NTX transactions; the coverage is printed as counts.
+B3B_HALFPS, B3B_NTX = 500300, 200
 
 
 def build(tag, defines=()):
@@ -167,7 +174,73 @@ def main() -> int:
         print("    %-24s %s" % (label, verdict))
         rc |= 0 if good else 1
     print()
+    rc |= b3b(full)
+    print()
     print("  GATE spitgt-witness: %s" % ("PASSED" if rc == 0 else "FAILED"))
+    return rc
+
+
+def a2_pad_bound(path):
+    """A2's bound for the SPI target (lane 0) on this image, AT THE PAD:
+    r + L_SYNC + OUT_REG (bursty.abs_tolerance's terms). Derived from the
+    image on every run -- never typed (gate_a2_program section 2)."""
+    import bursty
+    import program_a2
+    with open(os.path.join(ROOT, path)) as f:
+        img = bytes(int(x, 16) for x in f.read().split())
+    bl = [x["blane"] for x in program_a2.lane_set(img)[0]]
+    r = bursty.response_time_b(bl[0], bl)["r"]
+    return r, r + bursty.L_SYNC + bursty.OUT_REG
+
+
+def b3b(full) -> int:
+    """B3b, THE CONTENTION ARM (Wilson 10-20; prediction + addendum stamped
+    in probe_reports before any of this ran). The SPI target beside the other
+    four shipped lanes, all busy, each checked on its own wire."""
+    print("  --- B3b: five-lane contention (master %.1f ns half period, %d "
+          "transactions) ---" % (B3B_HALFPS / 1000.0, B3B_NTX))
+    rc, worst = 0, {}
+    # UART-rx peer at the NOMINAL 434 (the claim load); 421 = -3 %, the edge
+    # of the receiver's verified band (Wilson 10-20)
+    base = ["+FIVE=1", "+NTX=%d" % B3B_NTX, "+HALFPS=%d" % B3B_HALFPS]
+    arms = [("A shipped, mode 0", "b3b_a", ["+MODE=0", "+RXT=434"]),
+            ("A shipped, mode 3", "b3b_a3", ["+MODE=3", "+RXT=434"]),
+            ("A, UART-rx -3 %", "b3b_a", ["+MODE=0", "+RXT=421"]),
+            ("B envelope I2C", "b3b_b", ["+MODE=0", "+RXT=434"]),
+            ("B without I2C", "b3b_bnoi2c", ["+MODE=0", "+NOI2C=1", "+RXT=434"])]
+    for label, key, plus in arms:
+        r, bound = a2_pad_bound(IMG[key])
+        txt = run(full, IMG[key], base + plus + ["+BOUND=%d" % bound])
+        ok = ("SPI-TGT: ok" in txt and "*** FAIL" not in txt
+              and "clocked_conform[V3]: ok" in txt)
+        m = re.search(r"edge->MISO worst (\d+)", txt)
+        worst[key] = int(m.group(1)) if m else None
+        print("    %-20s %s  worst %s cycles, A2 r %d -> pad bound %d"
+              % (label, "ok " if ok else "***", worst[key], r, bound))
+        print("        " + measured(txt))
+        for ln in [l for l in txt.splitlines() if "b3b:" in l]:
+            print("        " + ln.strip()[:150])
+        if not ok:
+            rc = 1
+            for ln in [l for l in txt.splitlines() if "*** FAIL" in l][:4]:
+                print("        | " + ln[:130])
+    # the interferer must-fire: on arm B, A2 says I2C sets the bound (r 9 ->
+    # 6 without it), so removing it must LOWER the measured worst bit
+    wb, wn = worst.get("b3b_b"), worst.get("b3b_bnoi2c")
+    dropped = wb is not None and wn is not None and wn < wb
+    print("    interferer must-fire: B worst %s -> without I2C %s  %s"
+          % (wb, wn, "DROPPED ok" if dropped else "*** DID NOT DROP"))
+    rc |= 0 if dropped else 1
+    # 2 MHz under contention: RECORDED, NOT JUDGED (Wilson 10-20). It was a
+    # must-fire and it SURVIVED -- every byte exact -- so the bench cannot
+    # break the target at 2 MHz under this load. A2 refuses 2 MHz (D_tol 4 at
+    # T_ext 25 < r); the 1 MHz claim rests on A2, not on this arm. That the
+    # bench CATCHES wrong bytes is shown by M2 above (2.5 MHz, red).
+    txt = run(full, IMG["b3b_a"], ["+FIVE=1", "+NTX=%d" % B3B_NTX,
+                                   "+HALFPS=250150", "+MODE=0", "+RXT=434"])
+    print("    2 MHz, five lanes (recorded, no verdict): %s" % measured(txt))
+    print("      => A2 is conservative at 2 MHz under this load; the 1 MHz "
+          "claim rests on A2")
     return rc
 
 

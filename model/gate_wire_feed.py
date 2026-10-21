@@ -122,6 +122,26 @@ REGISTRY = {
         "runner": "test/run_spitgt.py",
         "how": "as sptgt_m0 at 500 kHz, plus MOSI captured: the chip's "
                "received bytes == the master's, count exact"}),
+    # ⭐ B3b, five-lane contention (Wilson 10-20): the SPI target beside the
+    # four other shipped lanes, every lane busy and checked on its own wire
+    "b3b_a_image.hex": (WITNESS, {
+        "runner": "test/run_spitgt.py",
+        "how": "SIMULATION, tb_spitgt +FIVE: the SPI target (mode 0, master "
+               "detuned to 500.3 ns, 200 transactions, every clock phase) "
+               "beside SPI master, I2C, UART-tx and UART-rx at shipped rates; "
+               "MISO == feed, edge -> pad <= A2's r + 4 derived from the image; "
+               "each other lane's wire == its own reference; V3 agrees"}),
+    "b3b_a3_image.hex": (WITNESS, {
+        "runner": "test/run_spitgt.py",
+        "how": "as b3b_a, the SPI target in mode 3"}),
+    "b3b_b_image.hex": (WITNESS, {
+        "runner": "test/run_spitgt.py",
+        "how": "as b3b_a with I2C at the A2 envelope deadline (d 45, D 15): "
+               "the worst case A2 certifies"}),
+    "b3b_bnoi2c_image.hex": (WITNESS, {
+        "runner": "test/run_spitgt.py",
+        "how": "as b3b_b without the I2C lane: the interferer must-fire (the "
+               "measured worst bit must DROP, as A2 predicts)"}),
     # ⭐ HARDWARE, RECORDED: a bench witness re-checked in CI (Wilson 10-17) --
     # not a hardware run in CI. The board ran it; the record is checked here.
     "i2c_fram_fpga.hex": (WITNESS, {

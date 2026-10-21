@@ -97,6 +97,16 @@ NOT_CERTIFIABLE = {
                          "refused, nothing reaches the wire",
     "ckdegen2_image.hex": "refusal image: the wrapping-count route to the "
                           "same refusal",
+    # B3b contention subjects: five protocols on one image, and this runner's
+    # foreign decode reads ONE protocol per image. Every lane's bytes are
+    # checked on its own wire by test/run_spitgt.py (tb_spitgt +FIVE).
+    "b3b_a_image.hex": "contention subject (B3b): five lanes on one image; "
+                       "each lane's wire checked by run_spitgt",
+    "b3b_a3_image.hex": "contention subject (B3b), as b3b_a in mode 3",
+    "b3b_b_image.hex": "contention subject (B3b), I2C at the A2 envelope "
+                       "deadline; each lane's wire checked by run_spitgt",
+    "b3b_bnoi2c_image.hex": "contention subject (B3b), b3b_b without I2C; "
+                            "each lane's wire checked by run_spitgt",
 }
 
 

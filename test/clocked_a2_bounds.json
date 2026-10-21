@@ -1,4 +1,73 @@
 {
+ "b3b_a3_image.hex": {
+  "J": 1,
+  "U": 0.5229,
+  "d_min": 20,
+  "k": 5,
+  "lanes": {
+   "2": {
+    "T": 70,
+    "budget": "pyRTA",
+    "r_floor": 13,
+    "r_ours": 13,
+    "r_pyrta": 13,
+    "slack": 14,
+    "why": null
+   }
+  },
+  "w1": {
+   "2": 0
+  },
+  "w1_pyrta": {
+   "2": 0
+  }
+ },
+ "b3b_a_image.hex": {
+  "J": 1,
+  "U": 0.5229,
+  "d_min": 20,
+  "k": 5,
+  "lanes": {
+   "2": {
+    "T": 70,
+    "budget": "pyRTA",
+    "r_floor": 13,
+    "r_ours": 13,
+    "r_pyrta": 13,
+    "slack": 14,
+    "why": null
+   }
+  },
+  "w1": {
+   "2": 0
+  },
+  "w1_pyrta": {
+   "2": 0
+  }
+ },
+ "b3b_b_image.hex": {
+  "J": 1,
+  "U": 0.5467,
+  "d_min": 20,
+  "k": 5,
+  "lanes": {
+   "2": {
+    "T": 45,
+    "budget": "pyRTA",
+    "r_floor": 9,
+    "r_ours": 9,
+    "r_pyrta": 7,
+    "slack": 8,
+    "why": null
+   }
+  },
+  "w1": {
+   "2": 0
+  },
+  "w1_pyrta": {
+   "2": 0
+  }
+ },
  "ckdegen2_image.hex": {
   "J": 1,
   "U": 0.174,
