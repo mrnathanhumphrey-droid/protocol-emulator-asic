@@ -151,6 +151,18 @@ DIGEST_LEDGER = [
      "0.32083 -> 0.26083. A re-quote of the burst shape, not a reschedule: "
      "the EDF order and every published response stand; the bar is 4 and "
      "the minimum is 11."),
+    ("5cf5d9412aea",
+     "UART-RX AT THE VERIFIED BACK-TO-BACK FLOOR, 421 NOT 414 (B3b Finding 1, "
+     "Wilson 10-20). The admitted peer band was the single-frame sampling-"
+     "phase band [414, 458]; B3b measured a 414 peer failing every frame after "
+     "the first, back-to-back (the ARM re-arms after the next start edge). "
+     "UART_BAND -> [421, 447] = run_uartrx's verified 434 * (1 +- 0.030), and "
+     "the lane moves to its fastest admitted peer: t 414 -> 421, T 4140 -> "
+     "4210. PREDICTED BEFORE THE CHANGE (probe_reports/"
+     "uart_band_f1_prediction.txt): every r unchanged -- pinned pyRTA r = "
+     "{16, 12, 7, 15, 9}, min margin 11, measured after. A slower fastest "
+     "peer can only lower interference; the EDF order and every published "
+     "response stand; the bar is 4 and the minimum is 11."),
 ]
 
 #: ⛔⛔ RULING A9 -- THE ANALYSIS LEDGER. `DIGEST_LEDGER` records why the
@@ -180,6 +192,12 @@ ANALYSIS_LEDGER = [
      "unchanged: {16, 12, 7, 15, 9}, min margin 11. Computed before the "
      "change (probe_reports/spi_target_b2_prediction.txt).",
      {"ours_r": [16, 12, 9, 16, 9], "ours_margin": 9}),
+    ("5cf5d9412aea", "UART-rx-verified-band",
+     "The same analysis on the re-quoted table (UART-rx t 421, T 4210). OURS "
+     "unchanged lane for lane: r = {16, 12, 9, 16, 9}, min margin 9; pyRTA "
+     "unchanged: {16, 12, 7, 15, 9}, min margin 11 "
+     "(probe_reports/uart_band_f1_prediction.txt).",
+     {"ours_r": [16, 12, 9, 16, 9], "ours_margin": 9}),
 ]
 
 #: ⛔⛔ P6 -- THE pyRTA THESE NUMBERS ARE WITNESSED BY, recorded beside the
@@ -202,7 +220,7 @@ PYRTA_PIN = {
     "commit": "1f3a649ced61709620857ec28653b51a0c6ce28d",
     "repo": "https://github.com/PROSA-Project/pyRTA",
     "date": "2026-06-16",
-    "digest": "b9a51e13a772",
+    "digest": "5cf5d9412aea",
     "reproduces": {"UART-tx": 16, "SPI-tx": 12, "I2C": 7, "UART-rx": 15,
                    "SPI-target": 9},
 }

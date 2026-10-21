@@ -48,7 +48,14 @@ WRAP_BOUND = 2 ** (N_BITS - 1)
 T_SP = 3                 # MB85RC256V noise suppression, 50 ns rounded UP
 T_ODV = 1                # MB85RS64V output data valid, 20 ns
 N_LOW, N_HIGH = 80, 45   # the legal asymmetric I2C split (spec N1)
-UART_BAND = (414, 458)   # the re-synthesized peer band (spec P1)
+# ⛔⛔ (421, 447), NOT (414, 458) -- B3b Finding 1 (Wilson 10-20). 414..458 is
+# the SINGLE-FRAME sampling-phase band (TA-01/TA-02, bursty.py's UART_RX
+# comment); it has no term for the BACK-TO-BACK re-arm, and B3b measured a
+# 414 peer failing every frame after the first. The admitted band is the one
+# the receiver is VERIFIED to decode back-to-back: run_uartrx ERRS +-30/1000 at
+# T 434 = 420.98 .. 447.02 cycles/bit -> integer [421, 447]. The analysis
+# band must not exceed the verified functional band.
+UART_BAND = (421, 447)
 SPI_TARGET_MAX_HZ = 1_000_000
 
 
@@ -259,10 +266,22 @@ def c_peer(lanes):
 
 
 def c_peer_fire():
-    lo, _hi = UART_BAND
-    return True, ("a peer at Te = %d is REJECTED -- it is one cycle below the "
-                  "band floor, and Imitator's re-synthesis (5*Te > 2067 & "
-                  "4126 > 9*Te) excludes exactly it" % (lo - 1))
+    """⛔ EVALUATED, NOT ASSERTED: this used to return True with a sentence.
+    Each peer rate is put through `c_peer` on the shipped set: the old floor
+    (414), one below the band (420) and one above (448) must be REFUSED; both
+    band ends (421, 447) must be ADMITTED (boundary acceptance)."""
+    from bursty import TX, UART_RX, SPI_RX
+    lo, hi = UART_BAND
+    got = {}
+    for t in (414, lo - 1, hi + 1, lo, hi):
+        rx = BLane(UART_RX.name, T=10 * t, C=UART_RX.C, D_tol=UART_RX.D_tol,
+                   n=10, t=t, J=UART_RX.J)
+        got[t] = c_peer(TX + [rx, SPI_RX])[0]
+    want = {414: False, lo - 1: False, hi + 1: False, lo: True, hi: True}
+    ok = got == want
+    return ok, ("peer t %s -> %s (want 414/%d/%d refused, %d/%d admitted)"
+                % (sorted(got), [got[k] for k in sorted(got)],
+                   lo - 1, hi + 1, lo, hi))
 
 
 def c_part_scope(lanes):

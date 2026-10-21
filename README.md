@@ -109,12 +109,13 @@ The five lanes are derived from the protocols, not chosen:
 | UART-tx 115200 | 434 | 3 | 1 | 434 | 1 | 216 |
 | SPI-master 1 MHz | 25 | 3 | 1 | 25 | 1 | 23 |
 | I²C Fast-mode 397 kHz nominal, 370.4 kHz measured | 45 | 3 | 1 | 45 | 2 | 15 |
-| UART-rx 115200 | 4140 | 3 | 10 | 414 | 1 | 213 |
+| UART-rx 115200 | 4210 | 3 | 10 | 421 | 1 | 213 |
 | SPI-target: MISO 1 MHz; MOSI capture 500 kHz | 400 | 3 | 8 | 50 | 1 | 17 |
 
 All in cycles at 50 MHz: period `T`, service time `C` (measured), release jitter
 `J`, tolerated response `D_tol`. `n` and `t` describe the bursty lanes — UART-rx
-is 10 bits spaced 414 apart, SPI-target 8 bits spaced 50 (one event per bit, at
+is 10 bits spaced 421 apart (the fastest peer it is verified to decode back to
+back, 3% fast), SPI-target 8 bits spaced 50 (one event per bit, at
 the master's 1 MHz clock) — because a periodic model using the outer period
 alone would understate the burst. The SPI target answers the master's clock one
 bit per edge, so its period is the master's claimed maximum SCK, declared when
@@ -170,7 +171,9 @@ is bounded — the response times above — rather than designed away.
   simulation with the measured rise time reproduces the measured rate.
 - **UART receive.** `pe_asm` certifies the UART-rx program down to 232
   cycles per bit, which is up to about 215.5 kbaud at the 50 MHz design clock.
-  The simulation bench verifies it at that limit across a ±3% baud-error sweep.
+  The simulation bench verifies it at that limit across a ±3% baud-error sweep,
+  and the FPGA prototype measured every byte at ±2.5%. The timing analysis
+  admits peers only inside that verified ±3%.
   The fastest standard rate inside the limit is 115,200 baud: 434 cycles per
   bit, with a 0.006% rate error. 230,400 baud would need 217 cycles per bit,
   which is outside the certified range.

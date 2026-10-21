@@ -1046,11 +1046,20 @@ TX = [
 # model disagreed by 3 cycles on a 206-cycle margin. Costs nothing here -- and
 # that is exactly why it survived: a difference that changes no verdict is the
 # kind that stays wrong.
-UART_RX = BLane("UART-rx 115200", T=4140, C=C_SHIPPED, D_tol=216 - L_SYNC,
-                n=10, t=414,
+#
+# ⛔⛔ AND NOW 421, NOT 414 -- B3b FINDING 1 (Wilson 10-20). [414, 458] above is
+# the SINGLE-FRAME sampling-phase band and stays the record of that derivation.
+# It has no term for BACK-TO-BACK reception: after the mid-stop sample the ARM
+# re-arms ~46 cycles later (uart_rx.py T_MIN), and a fast enough peer's next
+# start edge comes first -- measured at 414, every frame after the first wrong.
+# The ADMITTED band (gate_admissibility_1_6.UART_BAND) is the verified
+# back-to-back one, 434 * (1 +- 0.030) -> [421, 447], and the lane is modelled
+# at its fastest admitted peer. Every r_i is unchanged by the move (checked).
+UART_RX = BLane("UART-rx 115200", T=4210, C=C_SHIPPED, D_tol=216 - L_SYNC,
+                n=10, t=421,
                 J=J_SHIPPED,
-                note="10 samples/frame at the fastest admitted peer (414, the "
-                     "sampler-realistic band floor); n*t == T, gapless; "
+                note="10 samples/frame at the fastest admitted peer (421, the "
+                     "verified back-to-back floor, -3 %); n*t == T, gapless; "
                      "D_tol = 216 - L_sync (REACTIVE-anchor, 0.9b)")
 
 # SPI-target: the MASTER supplies SCK, so our events are its edges -- two per bit,
