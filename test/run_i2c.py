@@ -351,6 +351,31 @@ def main() -> int:
                     print("        at least once -- and with a wrong address")
                     print("        it ACKs none, so the bench catches it too.")
 
+    # ---- PHASE COVERAGE: the same frame with the peer 11 ns late ---------
+    # ⭐ Wilson 10-20 phase-coverage rule. Undelayed, the peer's edges all
+    # land in the chip posedge's own timestep: ONE clock phase. PEER_DLY_NS
+    # (fram_i2c.v) gives it a real part's output delay; 11 ns is mid-cycle.
+    # The 10-21 sweep (0..19 ns, probe_reports/i2c_peer_delay_outcome.txt)
+    # found every output identical, so this arm must certify the SAME frame.
+    print()
+    print("  --- phase coverage: the peer 11 ns late (PEER_DLY_NS) ---")
+    dv = os.path.join(SCRATCH, "i2c_dly11.vvp")
+    bd = run([tool("iverilog"), "-g2012", "-DPEER_DLY_NS=11", "-o", dv,
+              "-s", "tb_i2c"] + SRCS)
+    rd = run(sim_run.vvp([dv, "+IMG=test/i2cframe_image.hex",
+                          "+NBYTES=%d" % nb, "+NCYC=%d" % NCYC,
+                          "+DUMP=probe_i2c_dly11.bin"],
+                         images=["test/i2cframe_image.hex"])) \
+        if bd.returncode == 0 else None
+    dd = sigrok_i2c("probe_i2c_dly11.bin") if rd is not None else {"rc": 1}
+    txd = transactions(dd["events"]) if dd["rc"] == 0 else []
+    same = (rd is not None and "tb_i2c: PASS" in rd.stdout + rd.stderr
+            and txd == tx)
+    print("    peer phases exercised : posedge + 0 ns, posedge + 11 ns")
+    print("    +11 ns: %d transaction(s) decoded, identical to + 0 ns: %s"
+          % (len(txd), "ok" if same else "*** NO"))
+    rc |= 0 if same else 1
+
     print()
     print("=" * 78)
     print("  GATE i2c-foreign: %s" % ("PASSED" if rc == 0 else "FAILED"))

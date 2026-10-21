@@ -342,6 +342,8 @@ def main() -> int:
         print("    not certifiable, by name: %-24s %s" % (n, why[:44]))
 
     vvp = build()
+    import gate_sda_hold
+    vvp_d = gate_sda_hold.build(["PEER_DLY_NS=11"], "recert_dly11")
     fall_differs = []
     for img, (peer, lanes) in sorted(I2C.items()):
         hdrs = I.lane_programs(read(os.path.join(HERE, img)))
@@ -375,6 +377,19 @@ def main() -> int:
                 "same dump (%d bytes)" % len(sd))
             say("[V2]: ok" in out, "Layer V2: the wire == the host-pushed "
                 "bytes (the intended ones)")
+            # ⭐ PHASE COVERAGE (Wilson 10-20): the same image with the I2C
+            # peer 11 ns late (PEER_DLY_NS, a real part's output delay). The
+            # 10-21 sweep found every output identical 0..19 ns, so sigrok
+            # must decode the SAME bytes. Peer phases: posedge + 0, + 11 ns.
+            out_d, rows_d = trace(vvp_d, img, peer)
+            path_d = dump(rows_d, [scl, sda], "%s_l%d_dly11" % (img, ln))
+            rc_d, lines_d = sigrok(path_d, "i2c:scl=0:sda=1 -A i2c")
+            ev_d = [l.split(":", 1)[1].strip() for l in lines_d
+                    if l.startswith("i2c-1:")]
+            say(rc_d == 0 and ev_d == ev and "[V2]: ok" in out_d,
+                "peer + 11 ns: sigrok's event list (bytes, START/STOP, "
+                "ACK/NACK, in order) == + 0 ns's; V2 ok (count %d, diagnostic "
+                "only: it is set by the dump window)" % len(ev_d))
     for img, (peer, lanes) in sorted(SPI.items()):
         hdrs = I.lane_programs(read(os.path.join(HERE, img)))
         out, rows = trace(vvp, img, peer)

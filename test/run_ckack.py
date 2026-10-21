@@ -187,6 +187,10 @@ def build(kind, late, skip, once):
         cmd.append("-DM_TX_LOAD_ANYPHASE")
     if kind == "halfign":
         cmd.append("-DM_HALF_IGNORED")
+    if kind == "dly11":
+        # ⭐ phase coverage (Wilson 10-20): the peer 11 ns late, a real part's
+        # output delay; the 10-21 sweep found every output identical 0..19 ns
+        cmd.append("-DPEER_DLY_NS=11")
     cmd += ["test/tb_ckack.v", "test/fram_i2c.v", engine(kind)]
     cmd += [os.path.join(ROOT, "src", s) for s in SRCS[1:]]
     r = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True,
@@ -307,6 +311,7 @@ def main() -> int:
           "the near-timeout arm stretches %d once" % (to, under))
     # (name, kind, LATE, LATE_SKIP, LATE_ONCE, ncyc)
     arms = [("n0", "good", 0, 0, 0, 50000),
+            ("n0_dly11", "dly11", 0, 0, 0, 50000),
             ("short", "good", 4 * D, 0, 0, 60000),
             ("long", "good", 5000, 0, 0, 260000),
             ("under", "good", under, 16, 1, under + 60000),
@@ -328,7 +333,9 @@ def main() -> int:
         if not ok:
             rc = 1
 
-    for n in ("n0", "short", "long", "under"):
+    # n0_dly11: the n0 arm with the peer 11 ns late -- peer phases exercised
+    # are posedge + 0 ns (every other arm) and posedge + 11 ns (this one)
+    for n in ("n0", "n0_dly11", "short", "long", "under"):
         a = res[n]
         rr, sd, cd = random_reads(a), sigrok_data_reads(a), chip_data_reads(a)
         print("  --- (b)/(c) %s: LATE=%d, park max %d ---" % (n, a["late"],

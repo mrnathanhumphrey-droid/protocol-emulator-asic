@@ -47,6 +47,11 @@
  */
 
 `default_nettype none
+// PEER_DLY_NS is in NANOSECONDS whatever the compile order, so the unit is
+// pinned here -- only when the delay is in use, leaving default builds as they were
+`ifdef PEER_DLY_NS
+`timescale 1ns / 1ps
+`endif
 
 module fram_i2c #(
     parameter integer AW = 15,              // 32768 x 8 = MB85RC256V
@@ -132,8 +137,18 @@ module fram_i2c #(
   // ⭐ THE EXPORTED ENABLES. Two sources of pull-low on SDA -- the ACK and a
   // read data 0 -- are ORed, which is exactly how an open-drain line behaves
   // and is why the ENABLE rather than the value is the thing to export.
+  // ⭐ PEER_DLY_NS: an OUTPUT DELAY on both pull-low enables, as a real
+  // part's tAA / output hold (phase-coverage rule, Wilson 10-20). Without it
+  // the peer's edges all land in the chip posedge's own timestep (after the
+  // NBA, so deterministic -- but ONE clock phase). Undefined = 0 = the
+  // historical behaviour, byte-identical builds.
+`ifdef PEER_DLY_NS
+  assign #(`PEER_DLY_NS) sda_oe = bus_active & (ack_low | data_low | (late_gate & late_low));
+  assign #(`PEER_DLY_NS) scl_oe = (stretch_n != 16'd0) | (late_n != 32'd0);
+`else
   assign sda_oe = bus_active & (ack_low | data_low | (late_gate & late_low));
   assign scl_oe = (stretch_n != 16'd0) | (late_n != 32'd0);
+`endif
 
   // =====================================================================
   // BLOCK A -- START / STOP. Owns `bus_active` and nothing else.

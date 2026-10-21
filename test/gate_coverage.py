@@ -366,7 +366,9 @@ CLASSIFIED = {
     # ⛔ `P_WDATA` (228, below) STAYS OWED AND IS NOT REACHABLE WITH THIS
     # IDIOM: the framing costs `51 + 60n` bytes, so a fourth byte is 291
     # against a 256-byte store. That is a ruling, not a missing test.
-    ("test/fram_i2c.v", 266, "v_line", "case"): (
+    # (266 -> 281 on 10-21: the PEER_DLY_NS block above it added 15 lines,
+    # MEASURED -- the anchor text below moved with it)
+    ("test/fram_i2c.v", 281, "v_line", "case"): (
         OWED,
         "⛔ P_WDATA -- SO NO BYTE HAS EVER BEEN WRITTEN INTO THE PEER'S "
         "MEMORY. `mem[addr] <= shin` lives here and its count is 0. The "
@@ -552,7 +554,7 @@ ANCHOR_TEXT = {
     # was recorded beside the line number, so the deletion had to account for
     # the anchor instead of leaving a live number pointing at whatever moved
     # into line 557.
-    ("test/fram_i2c.v", 266):
+    ("test/fram_i2c.v", 281):
         "P_WDATA: begin",
     # ruling SP1: what the real WREN/WRITE/READ transaction does not send
     ("test/fram_spi.v", 177):
