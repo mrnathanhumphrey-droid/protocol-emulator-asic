@@ -108,7 +108,7 @@ The five lanes are derived from the protocols, not chosen:
 |---|---|---|---|---|---|---|
 | UART-tx 115200 | 434 | 3 | 1 | 434 | 1 | 216 |
 | SPI-master 1 MHz | 25 | 3 | 1 | 25 | 1 | 23 |
-| I²C Fast-mode 397 kHz nominal, 370.4 kHz measured | 45 | 3 | 1 | 45 | 2 | 15 |
+| I²C Fast-mode 397 kHz formula, 393.7 kHz sim, 370.4 kHz board | 45 | 3 | 1 | 45 | 2 | 15 |
 | UART-rx 115200 | 4210 | 3 | 10 | 421 | 1 | 213 |
 | SPI-target: MISO 1 MHz; MOSI capture 500 kHz | 400 | 3 | 8 | 50 | 1 | 17 |
 
@@ -164,9 +164,10 @@ is bounded — the response times above — rather than designed away.
 
 **Rates, with their conditions.**
 
-- **I²C** has two numbers: 397 kHz nominal (simulation, ideal edges) and
-  370.4 kHz measured (FPGA prototype, ~3.2 kΩ pull-ups, breadboard; range
-  365.0–374.5). The chip waits for each real rise of SCL before timing the high
+- **I²C** has three numbers: 397 kHz from the formula (`d + d/2 + L_SYNC` =
+  126 cycles), 393.7 kHz measured in simulation (127 cycles, ideal edges; the
+  formula is one cycle short), and 370.4 kHz measured on the FPGA prototype
+  (~3.2 kΩ pull-ups, breadboard; range 365.0–374.5). The chip waits for each real rise of SCL before timing the high
   phase, so the rate depends on the bus's pull-ups and capacitance by design. A
   simulation with the measured rise time reproduces the measured rate.
 - **UART receive.** `pe_asm` certifies the UART-rx program down to 232

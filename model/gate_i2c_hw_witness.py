@@ -27,7 +27,8 @@ MUST-FIRES: (i) one recorded byte flipped -> red; (ii) the feed / image
 changed -> red; (iii) one timing pushed past its Fm limit -> red.
 
 The measured rate is recorded as measured (370.4 kHz typical, PA100T,
-breadboard) -- the 397 kHz figure is the simulation's, with ideal edges.
+breadboard) -- against 393.7 kHz measured in simulation with ideal edges
+(127 cycles; the 397 kHz formula figure is one cycle short).
 POSITIVE TOKEN: `GATE i2c-hw-witness: PASSED`.
 """
 from __future__ import annotations
@@ -153,8 +154,8 @@ def main() -> int:
         print("  run %s: old %s -> data %s%s" % (
             r["time"], r["old_read"], r["data"],
             "   <- after a POWER-OFF (retention)" if r.get("after_power_off") else ""))
-    print("  fSCL MEASURED: typical %.1f kHz, range %.1f-%.1f kHz (nominal 397 kHz "
-          "is the simulation's, ideal edges)"
+    print("  fSCL MEASURED: typical %.1f kHz, range %.1f-%.1f kHz (simulation, "
+          "ideal edges: 393.7 kHz measured; 397 kHz is the formula)"
           % (t["fscl_khz"]["typical"], t["fscl_khz"]["min"], t["fscl_khz"]["max"]))
     print("  tLOW min %.3f us, tHIGH min %.3f us, rise max SCL %d / SDA %d ns"
           % (t["tlow_us"]["min"], t["thigh_us"]["min"], t["rise_ns"]["scl"]["max"],

@@ -1047,8 +1047,13 @@ def readme_check():
          _LANE_ROW.sub(lambda m: m.group(0).replace(
              "| %s |" % m.group("C"), "| 2 |", 1), text, 1), "C = 2"),
         ("a planted 'I²C 400 kHz' lane label",
-         text.replace("| I²C Fast-mode 397 kHz nominal, 370.4 kHz measured |",
+         text.replace("| I²C Fast-mode 397 kHz formula, 393.7 kHz sim, 370.4 kHz board |",
                       "| I²C 400 kHz |", 1),
+         "is not a published lane label"),
+        # 10-22 audit item 4: the formula's 397 passed off as the measured sim rate
+        ("I²C label: the formula's 397 as the sim rate",
+         text.replace("393.7 kHz sim, 370.4 kHz board |",
+                      "397 kHz sim, 370.4 kHz board |", 1),
          "is not a published lane label"),
         ("a stale UART-rx T_MIN (224) in the prose",
          text.replace("down to %d" % src["uart"]["tmin"], "down to 224", 1),

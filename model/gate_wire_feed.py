@@ -267,7 +267,12 @@ PUBLISHED = {
     # 370.4 kHz MEASURED (PA100T, ~3.2 kOhm pull-ups, breadboard; 365.0-374.5).
     # The rate depends on the bus by design: the chip waits for each real
     # rise. The rise-matched simulation reproduces the measured rate.
-    "I²C Fast-mode 397 kHz nominal, 370.4 kHz measured": (WITNESS, {
+    # ⭐ (10-22, documented-numbers audit item 4): THREE numbers now -- the
+    # formula's 397 kHz (126 cycles), the simulation's MEASURED 393.7 kHz (127
+    # cycles, run_ckack + sigrok; the formula is a cycle short), and the
+    # board's 370.4 kHz. rate_hz stays the formula rate the program is built
+    # for; the label names all three.
+    "I²C Fast-mode 397 kHz formula, 393.7 kHz sim, 370.4 kHz board": (WITNESS, {
         "image": "i2c_fram_fpga.hex",
         "rate_hz": 397000,
         "measured_hz": 370400,

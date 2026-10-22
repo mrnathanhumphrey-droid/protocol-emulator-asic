@@ -52,7 +52,8 @@ has not been estimated, it says so.
   - Cost: not yet estimated; LN1 referees before merge.
 - **I²C at a full 397–400 kHz on a real bus.**
   - From: the FPGA bench witness. The published Fast-mode lane runs at
-    397 kHz with ideal edges, and measured 370.4 kHz (range 365.0–374.5) on
+    393.7 kHz with ideal edges (measured in simulation, 127 cycles; the
+    397 kHz formula figure is one cycle short), and measured 370.4 kHz (range 365.0–374.5) on
     the PA100T with ~3.2 kΩ pull-ups on a breadboard. The chip waits for each
     real SCL rise before counting the high phase, so the rate depends on the
     bus by design. A rise-matched simulation reproduces the measured rate:
