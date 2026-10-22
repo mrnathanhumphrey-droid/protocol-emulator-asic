@@ -319,7 +319,8 @@ The documents are indexed, by what each one is for, in
   phase visited) the worst bit reaches the pad in 8 cycles against A2's bound
   of 10 (r = 6 ≤ D_tol 17); with I²C at A2's envelope deadline, 10 against 13.
   The host must lead its first SCK edge by
-  at least 6 cycles (120 ns measured; 280 ns is the contract) after CS falls,
+  at least 6 cycles (120 ns measured, worst over every clock phase; 280 ns is
+  the contract) after CS falls,
   which is more CS setup than a typical SPI FRAM needs, and hold CS through
   its final sampling edge. A transaction cut short desynchronises the lane
   until the host reloads the program. Hardware runs follow.

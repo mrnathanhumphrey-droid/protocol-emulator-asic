@@ -158,6 +158,43 @@ def main() -> int:
                 print("        | " + ln[:110])
     print("    tCSS seen (CS fall -> MISO valid, modes 0/2): worst %s cycles"
           % (max(tcss) if tcss else "--"))
+    # ⭐ PHASE COVERAGE (Wilson 10-20): with HALFPS = 0 the half period is whole
+    # cycles, so ONE transaction is ONE phase and the arms above sit at 1/20.
+    # Each witness arm again with +PHWALK=1 (a golden-ratio offset per
+    # transaction). 40 transactions reach 20/20 WITH the bench's never-on-an-
+    # edge nudge (a model of walk + nudge reproduced the measured 32 -> 19 and
+    # 16 -> 14; probe_reports/spitgt_phase_addendum.txt). Held to its twin's
+    # verdict, and its worst edge -> MISO to A2's pad bound for the image
+    # (r + L_SYNC + OUT_REG, derived): the unwalked 6 in modes 0/2 was a
+    # one-phase artifact, the walked worst is 8 = the bound.
+    print()
+    print("  --- the witness again, phase-walked (+PHWALK=1) ---")
+
+    def phase(txt):
+        m = re.search(r"SPI-PHASE edges=(\d+)/20", txt)
+        return int(m.group(1)) if m else -1
+
+    def worst(txt):
+        m = re.search(r"edge->MISO worst (\d+) cycles", txt)
+        return int(m.group(1)) if m else None
+
+    for label, key, plus in WITNESS:
+        base_txt = run(full, IMG[key], plus)
+        wplus = [p for p in plus if not p.startswith("+NTX=")] + [
+            "+NTX=40", "+PHWALK=1"]
+        txt = run(full, IMG[key], wplus)
+        ok = ("SPI-TGT: ok" in txt and "*** FAIL" not in txt
+              and "clocked_conform[V3]: ok" in txt)
+        wb, ww = worst(base_txt), worst(txt)
+        _r, bound = a2_pad_bound(IMG[key])
+        same = (wb is not None and ww is not None and wb <= ww <= bound)
+        cov = phase(txt) >= 20
+        print("    %-24s %s  phase %d/20 (unwalked %d/20); worst %s "
+              "(unwalked %s, A2 pad bound %d)"
+              % (label, "ok " if ok and same and cov else "***",
+                 phase(txt), phase(base_txt), ww, wb, bound))
+        if not (ok and same and cov):
+            rc = 1
     print()
     print("  --- must-fires: each red for ITS OWN reason ---")
     for label, key, plus, wonly, must_fail, reason in MUSTFIRE:

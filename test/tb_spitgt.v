@@ -82,7 +82,7 @@ module tb_spitgt;
   integer    img_bytes, i, cyc;
   reg [8*256-1:0] imgfile;
   integer    mode, half, ntx, nb, tcss, tcsh, gap, mosi_on, nofeed, shortk,
-             recover, csearly, halfps, bound, noi2c;
+             recover, csearly, halfps, bound, noi2c, phwalk;
   reg        cpol, cpha;
 
   always #10 clk = ~clk;
@@ -405,6 +405,9 @@ module tb_spitgt;
     if (!$value$plusargs("RECOVER=%d", recover)) recover = 0;
     if (!$value$plusargs("CSEARLY=%d", csearly)) csearly = 0;
     if (!$value$plusargs("HALFPS=%d", halfps)) halfps = 0;
+    // +PHWALK: the per-transaction golden-ratio offset WITHOUT a detune (the
+    // non-FIVE arms; phase-coverage rule, Wilson 10-20)
+    if (!$value$plusargs("PHWALK=%d", phwalk)) phwalk = 0;
     if (!$value$plusargs("BOUND=%d", bound)) bound = -1;
     if (!$value$plusargs("FIVE=%d", five)) five = 0;
     if (!$value$plusargs("NOI2C=%d", noi2c)) noi2c = 0;
@@ -458,7 +461,7 @@ module tb_spitgt;
       // 3 ns after a clock edge -- the gap is counted in edges -- and the
       // detune walked only ~10 ns inside one transaction (9/20 phases seen).
       tnow = $realtime + 3.0
-             + (halfps > 0 ? 20.0 * (t_i * 0.618034 - $floor(t_i * 0.618034)) : 0.0);
+             + ((halfps > 0 || phwalk) ? 20.0 * (t_i * 0.618034 - $floor(t_i * 0.618034)) : 0.0);
       // CS falls; CPHA 0: bit 7 is driven by the target at CS fall
       wait_until(tnow); cs = 1'b0; t_csfall = $realtime;
       if (!cpha && !skip_txn) begin
@@ -584,6 +587,9 @@ module tb_spitgt;
     $display("  spi_tgt: bytes read %0d (wrong %0d); edge->MISO worst %0d cycles over %0d changes (D_tol %0d); re-arm margin min %0d cycles over %0d edges, level-heuristic misses %0d (diagnostic only: a real miss shows as a wrong byte); tCSS seen %0d cycles; oe-with-CS-high %0d; MOSI rx %0d/%0d",
              n_bytes_rd, n_bad, lat_max, lat_n, D_TOL, (n_margin ? margin_min : -1),
              n_margin, n_missed, tcss_seen, n_oe_cs, n_rx, n_mosi);
+    // measured phase coverage of the master's change-edges, EVERY run
+    $display("  SPI-PHASE edges=%0d/20 bins=%020b phwalk=%0d halfps=%0d",
+             popc({25'd0, ph_clk}), ph_clk, phwalk, halfps);
     if (fails == 0)
       $display("SPI-TGT: ok -- mode %0d, SCK half %0d cycles, %0d transaction(s) of %0d byte(s): every byte equals the host's feed, count exact",
                mode, half, ntx, nb);

@@ -639,14 +639,25 @@ It runs against an SPI master on its own clock (`test/tb_spitgt.v`). These
 are simulation numbers from a single lane, and they sit inside the analytic
 bounds above, which remain the contract because they cover contention. The
 1 MHz limit is A2's worst-case analysis; the five-lane contention arm below
-measures it under load:
+measures it under load.
 
-| quantity | measured | contract |
+Every number below is the **worst over all clock phases**: each witness arm
+also runs phase-walked (`+PHWALK=1`, a golden-ratio sub-cycle offset per
+transaction, 40 transactions, 20 of 20 phase bins measured). At a single
+phase two of them read better than they are (edge → MISO 6 in modes 0 and 2;
+re-arm margin 23), which is why the walk exists:
+
+| quantity | measured, worst over phases | contract |
 | --- | --- | --- |
 | CS falls → MISO valid, bit 7 (modes 0/2) | 6 cycles = 120 ns | ≤ 13 cycles |
-| SCK change-edge → MISO carries the new bit | 6–8 cycles = 120–160 ns | ≤ D_tol 17 cycles |
-| ARM re-arms before the next change-edge, 1 MHz | ≥ 23 cycles of margin | — |
+| SCK change-edge → MISO carries the new bit | 8 cycles = 160 ns, all four modes and MOSI | ≤ D_tol 17 cycles; A2's pad bound for these images 10 |
+| ARM re-arms before the next change-edge, 1 MHz | ≥ 22 cycles of margin | — |
 | ARM re-arms before the next change-edge, MOSI variant, 500 kHz | ≥ 34 cycles | — |
+
+A2's pad bound here is 10, not 8, because A2 analyses the image as built: the
+assembler fills each unused lane with a parked `REARM` (every 500 cycles),
+and those can block. The table model of the target alone gives 8, which is
+exactly the measured worst.
 
 **Under contention (B3b, `+FIVE`).** The SPI target beside the four other
 shipped lanes (SPI master 1 MHz, I²C, UART-tx and UART-rx at 115,200), every
@@ -678,10 +689,18 @@ first *passed* because the first fed byte had bit 7 = 1.
 
 **Measured minimum CS lead: 6 cycles = 120 ns.** A sweep of the master's lead
 from CS falling to its first SCK edge (the sampling edge in modes 0 and 2),
-`TCSS` = 2 … 7 cycles at 1 MHz: 2–5 fail (MISO is still released at the
-sampling edge), 6 and 7 pass, identically in modes 0 and 2. One master clock
-phase was swept. The 280 ns setup above is the contract; 120 ns is what one
-uncontended lane needs.
+`TCSS` = 2 … 8 cycles at 1 MHz, phase-walked (20 of 20 phase bins on every
+run): 2–5 fail (MISO is still released at the sampling edge), 6–8 pass,
+identically in modes 0 and 2. The first sweep was at one master phase and
+gave the same minimum. The 280 ns setup above is the contract; 120 ns, worst
+over phases, is what one uncontended lane needs, a margin of 160 ns.
+
+**Nothing in the chip samples on a falling edge.** In the RTL every `negedge`
+is an asynchronous reset. The hardened netlist (the harden of record) has one
+sequential cell type, `sg13cmos5l_dfrbpq_1` (3,449 instances, rising edge,
+active-low asynchronous reset): no latches, no negative-edge or scan cells,
+and every one of the 241 leaf clock nets reaches `clk` through buffers only,
+with no inverters. A timing argument about this chip needs only rising edges.
 
 **Recovery after a short transaction.** The lane has no CS abort: it can't
 wait on two pins at once. A transaction cut short (a missing SCK edge) leaves
