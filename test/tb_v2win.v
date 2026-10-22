@@ -28,6 +28,12 @@ module tb_v2win;
   reg  [7:0] img [0:255];
   reg [8*256-1:0] imgfile;
   integer    i, cyc = 0, dry, lead, at, nslot = 0, taken = -1, slot_wb = -1;
+  // +PHPS=p (audit item 2, 10-22): the LOW-nibble PUSH rise moves p ps after
+  // its negedge -- anywhere from 10 ns before the sampling posedge to 9 ns
+  // after one -- and both instants are printed in ns, so the window is
+  // measured edge -> slot, not posedge -> slot. 0 = the historical phase.
+  integer    phps, walk_now = 0;
+  real       t_rise = -1.0, t_slot = -1.0;
   always #10 clk = ~clk;
 
   tt_um_protocol_emulator #(.SPL(2)) dut (
@@ -46,7 +52,7 @@ module tb_v2win;
       if (dut.u_eng.ck_shift === 1'b1 && dut.u_eng.ck_is_low === 1'b1
           && dut.u_eng.l_ckbit[0] == 0) begin
         if (dry && nslot < 8) $display("SLOT %0d WB %0d", nslot, cyc);
-        if (!dry && cyc == at) slot_wb = cyc;
+        if (!dry && cyc == at) begin slot_wb = cyc; t_slot = $realtime; end
         nslot = nslot + 1;
       end
       if (!dry && slot_wb >= 0 && taken < 0 && dut.u_eng.ck_is_high === 1'b1)
@@ -58,7 +64,10 @@ module tb_v2win;
     begin
       ui_in[4:1] = n; ui_in[5] = 1'b0; ui_in[0] = 1'b0;
       while (cyc < when - 1) @(negedge clk);
-      @(negedge clk); ui_in[PIN_WR] = 1'b1;       // seen at the next posedge
+      @(negedge clk);
+      if (walk_now && phps > 0) #(phps / 1000.0);
+      ui_in[PIN_WR] = 1'b1;                       // seen at the next posedge
+      if (walk_now) t_rise = $realtime;
       @(negedge clk); @(negedge clk); @(negedge clk);
       ui_in[PIN_WR] = 1'b0;
     end
@@ -69,6 +78,7 @@ module tb_v2win;
     if (!$value$plusargs("DRY=%d", dry)) dry = 0;
     if (!$value$plusargs("LEAD=%d", lead)) lead = 0;
     if (!$value$plusargs("AT=%d", at)) at = 0;
+    if (!$value$plusargs("PHPS=%d", phps)) phps = 0;
     $readmemh(imgfile, img);
     repeat (4) @(negedge clk); rst_n = 1; @(negedge clk);
     ui_in[PIN_PROG] = 1'b1;
@@ -86,9 +96,13 @@ module tb_v2win;
       $finish;
     end
     nib(4'hF, at - lead - 40);                    // high nibble, well before
+    walk_now = 1;
     nib(4'hF, at - lead);                         // low nibble: decoded at at-lead
+    walk_now = 0;
     wait (taken >= 0 || cyc > at + 2000);
     $display("V2WIN lead=%0d taken=%0d", lead, taken < 0 ? 0 : taken);
+    $display("V2WIN-NS phps=%0d rise_ns=%0.3f slot_ns=%0.3f edge_to_slot_ns=%0.3f",
+             phps, t_rise, t_slot, t_slot - t_rise);
     $finish;
   end
 endmodule

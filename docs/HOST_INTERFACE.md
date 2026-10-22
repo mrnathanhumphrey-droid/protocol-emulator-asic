@@ -528,8 +528,13 @@ queue register, before a lane can take it. So a byte is **guaranteed taken by
 its slot only if its LOW-nibble PUSH edge reaches the pin at least 6 clock
 cycles (120 ns at 50 MHz) before the slot's first bit appears on the
 wire.**
-- **Measured:** `test/run_v2window.py` shows the chip needs 5 cycles. The 6th
-  covers an asynchronous host, whose edge can land anywhere within a cycle.
+- **Measured** (`test/run_v2window.py`): counted from the posedge that
+  decodes the push, the chip needs 5 cycles. Counted from the host's own
+  PUSH edge, with that edge walked through every 1 ns phase of the cycle (20
+  phases, 11 leads each), the boundary is sharp at **80 ns**: the largest lead
+  ever missed is 79 ns, and every lead of 80 ns or more is taken, at every
+  phase. So the 6-cycle (120 ns) contract has **40 ns of measured margin**
+  for an asynchronous host, not an argued one.
 - **Pushed later than that:** the byte may go out in that slot, or the slot
   underruns (whole zeros, flagged) and the byte goes out whole in the next
   slot. Either way the byte is never mixed with another.

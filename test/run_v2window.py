@@ -105,6 +105,50 @@ def main():
                                       if good_win else "*** must be in "
                                       "[threshold, threshold + 2]"))
     ok = ok and mono and good_win
+
+    # ---- THE WINDOW FROM AN ASYNCHRONOUS EDGE (audit item 2, 10-22) ------
+    # The arms above raise PUSH on a negedge -- ONE phase. A host's edge can
+    # land anywhere in a cycle, so the low-nibble rise is walked 0..19 ns
+    # after its negedge (+PHPS) and the lead is measured edge -> slot in ns.
+    # The contract's 6th cycle was ARGUED to cover this; here it is measured.
+    # (probe_reports/v2window_walk_prediction.txt)
+    from concurrent.futures import ThreadPoolExecutor
+
+    def walk_one(pk):
+        p, k = pk
+        o = run(sim_run.vvp([vvp, "+IMG=" + img, "+AT=%d" % at,
+                             "+LEAD=%d" % k, "+PHPS=%d" % (p * 1000)],
+                            images=[img])).stdout
+        mt = re.search(r"V2WIN lead=\d+ taken=(\d)", o)
+        mn = re.search(r"edge_to_slot_ns=(-?[\d.]+)", o)
+        return p, k, (int(mt.group(1)) if mt else None), \
+            (float(mn.group(1)) if mn else None)
+
+    with ThreadPoolExecutor(3) as ex:
+        pts = list(ex.map(walk_one, [(p, k) for p in range(20) for k in LEADS]))
+    walk_ok = all(t is not None and ns is not None for _p, _k, t, ns in pts)
+    for p in range(20):                      # monotone in k at EVERY phase
+        row = {k: t for pp, k, t, _ns in pts if pp == p}
+        th = next((k for k in LEADS
+                   if all(row[j] == 1 for j in LEADS if j >= k)), None)
+        if th is None or any(row[j] != 0 for j in LEADS if j < th):
+            walk_ok = False
+            print("  *** phase +%d ns: not monotone in k: %s" % (p, row))
+    missed = [ns for _p, _k, t, ns in pts if t == 0]
+    taken_ns = sorted(ns for _p, _k, t, ns in pts if t == 1)
+    worst_miss = max(missed) if missed else None
+    need = min(n for n in taken_ns if all(m < n for m in missed)) \
+        if taken_ns and missed else None
+    print("  walked (PUSH rise 0..19 ns after its negedge, 20 phases x %d "
+          "leads): largest edge->slot lead MISSED %s ns; every lead >= %s ns "
+          "TAKEN" % (len(LEADS), worst_miss, need))
+    if need is not None:
+        print("    = %.2f cycles from an asynchronous edge, worst over phases "
+              "(the contract asks 6 = 120 ns)" % (need / 20.0))
+    six_ok = worst_miss is not None and worst_miss < 120.0
+    print("  6 cycles (120 ns) from ANY edge phase always taken: %s"
+          % ("ok" if six_ok else "*** NO"))
+    ok = ok and walk_ok and six_ok
     if ok:
         print("V2 WINDOW: PASSED")
         return 0
