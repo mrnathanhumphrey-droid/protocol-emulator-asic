@@ -44,7 +44,11 @@ module ds18b20_model #(
     parameter integer T_PDH_NS  = 30000,
     parameter integer T_PDL_NS  = 120000,
     parameter integer T_RDV_NS  = 15000,
-    parameter integer T_CONV_NS = 2500000
+    parameter integer T_CONV_NS = 2500000,
+    // ⭐ phase coverage (Wilson 10-20/21): added to the part's own three
+    // delays (T_PDH, T_PDL, T_RDV), so its edges move OFF the 20 ns grid every
+    // other delay sits on. 0 = the historical model.
+    parameter integer T_PH_NS   = 0
 ) (
     input  wire dq,          // the bus as the part sees it
     output reg  pull         // 1 = the part pulls the bus low
@@ -185,7 +189,7 @@ module ds18b20_model #(
       if (state != S_CONV) nbit = nbit + 1;
       if (!txbit) begin
         pull = 1'b1;                       // read-0: hold for exactly tRDV
-        #(T_RDV_NS) pull = 1'b0;
+        #(T_RDV_NS + T_PH_NS) pull = 1'b0;
       end
     end
   end
@@ -211,8 +215,8 @@ module ds18b20_model #(
         nbit = 0;
         fork : presence
           begin
-            #(T_PDH_NS) pull = 1'b1;
-            #(T_PDL_NS) pres_done = 1'b1;
+            #(T_PDH_NS + T_PH_NS) pull = 1'b1;
+            #(T_PDL_NS + T_PH_NS) pres_done = 1'b1;
             pull = 1'b0;
           end
         join_none

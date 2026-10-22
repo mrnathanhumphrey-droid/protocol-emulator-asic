@@ -86,8 +86,8 @@ def run(cmd):
                           encoding="utf-8", errors="replace")
 
 
-def vvp_path(rise_ns):
-    return os.path.join(TMP, "tb_onewire_r%d.vvp" % rise_ns)
+def vvp_path(rise_ns, ph=0):
+    return os.path.join(TMP, "tb_onewire_r%d_p%d.vvp" % (rise_ns, ph))
 
 
 #: ⭐ THE FILES CE5'S SIMULATION COMPILES -- ONE LIST, read by build_vvp below
@@ -98,16 +98,18 @@ CE5_SIM_SOURCES = ["test/tb_onewire.v", "test/ds18b20_model.v",
                    "src/pe_engine.v", "src/pe_store.v", "src/project.v"]
 
 
-def build_vvp(rise_ns):
-    out = vvp_path(rise_ns)
+def build_vvp(rise_ns, ph=0):
+    """`ph`: the part's phase offset (tb_onewire T_PH_NS, Wilson 10-21)."""
+    out = vvp_path(rise_ns, ph)
     r = run([tool("iverilog"), "-g2012", "-o", out, "-s", "tb_onewire",
-             "-Ptb_onewire.RISE_NS=%d" % rise_ns] + CE5_SIM_SOURCES)
+             "-Ptb_onewire.RISE_NS=%d" % rise_ns,
+             "-Ptb_onewire.T_PH_NS=%d" % ph] + CE5_SIM_SOURCES)
     if r.returncode != 0:
         raise SystemExit("*** build failed\n" + r.stdout + r.stderr)
     return out
 
 
-def sim(name, variant, txn, rise_ns, extra=()):
+def sim(name, variant, txn, rise_ns, extra=(), ph=0):
     img = os.path.join(TMP, "ow_%s.hex" % name)
     onewire.write_hex(img, onewire.build(variant))
     lines, rxmap = onewire.engine(variant).feed_file(txn)
@@ -119,7 +121,7 @@ def sim(name, variant, txn, rise_ns, extra=()):
     rel = lambda p: os.path.relpath(p, ROOT).replace(os.sep, "/")
     import time
     t0 = time.time() - 2.0
-    r = run(sim_run.vvp(["-l", rel(log), rel(vvp_path(rise_ns)),
+    r = run(sim_run.vvp(["-l", rel(log), rel(vvp_path(rise_ns, ph)),
                          "+IMG=" + rel(img), "+NBYTES=256", "+FEED=" + rel(fpath),
                          "+NFEED=%d" % len(lines), "+POLLIDX=%d" % pidx] + list(extra),
                         images=[rel(img)]))
@@ -280,7 +282,15 @@ def main():
           % (e.P, e.P / 50.0, e.A, e.A + e.B, e.TW0, e.TAIL + e.A + e.B))
 
     arms = [("ok", "tt", P.DS18B20_TXN, 503, ()),
-            ("fpga", "fpga", ROM_TXN, 2003, ())]
+            ("fpga", "fpga", ROM_TXN, 2003, ()),
+            # ⭐ PHASE COVERAGE (Wilson 10-21): each arm again with the release
+            # rise 11 ns later and the part's own edges 7 ns off the grid --
+            # OFF the diagonal, so the master-vs-part relative phase moves too.
+            # The 120-run sweep (probe_reports/onewire_phase_outcome.txt) found
+            # every byte and verdict identical across 20/20 phases.
+            ("ok_ph", "tt", P.DS18B20_TXN, 503 + 11, ()),
+            ("fpga_ph", "fpga", ROM_TXN, 2003 + 11, ())]
+    PH = {"ok_ph": 7, "fpga_ph": 7}          # the part's offset, T_PH_NS
     mf = [("w0short", "w0short", ROM_TXN, 503, (),
            lambda d, ck: d["viol"] and any(
                "15..60 us sample window" in f or "tLOW0" in f for f in d["fails"])
@@ -318,12 +328,13 @@ def main():
     # ⛔ ONE SIMULATION AT A TIME BY DEFAULT (the machine-wide budget is
     # shared); CI, which owns its runner, sets PE_OW_JOBS=3
     jobs = int(os.environ.get("PE_OW_JOBS", "1"))
-    for rise in sorted({a[3] for a in arms + mf}):
-        build_vvp(rise)                    # built once, before any sim
+    for rise, ph in sorted({(a[3], PH.get(a[0], 0)) for a in arms + mf}):
+        build_vvp(rise, ph)                # built once, before any sim
     from concurrent.futures import ThreadPoolExecutor
     with ThreadPoolExecutor(max(1, jobs)) as ex:
         outs = dict(zip([a[0] for a in arms + mf], ex.map(
-            lambda a: sim(a[0], a[1], a[2], a[3], a[4]), arms + mf)))
+            lambda a: sim(a[0], a[1], a[2], a[3], a[4], PH.get(a[0], 0)),
+            arms + mf)))
     res = {}
     for name, var, txn, rise, extra in arms:
         txt, rxmap = outs[name]
@@ -331,10 +342,13 @@ def main():
         checks = judge(d, rxmap)
         res[name] = (d, checks)
         print()
-        print("  --- arm %s (%s image, RISE %d ns) ---" % (name, var, rise))
+        print("  --- arm %s (%s image, RISE %d ns, part offset %d ns) ---"
+              % (name, var, rise, PH.get(name, 0)))
         for c, okc, det in checks:
             print("    %-58s %s %s" % (c, "ok " if okc else "***", det))
             rc |= 0 if okc else 1
+        m = re.search(r"OW-PHASE (rise=\d+/20 partfall=\d+/20)", txt)
+        print("    phase coverage (this arm): %s" % (m.group(1) if m else "--"))
         if d["poll"] is not None:
             print("    poll groups: %d (8 read slots each)" % d["poll"])
 

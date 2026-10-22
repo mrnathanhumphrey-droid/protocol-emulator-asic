@@ -49,6 +49,7 @@ module tb_onewire;
   parameter integer S = 3;
   parameter integer T_PDH_NS = 30000;
   parameter integer T_PDL_NS = 120000;
+  parameter integer T_PH_NS = 0;      // the part's edges off the 20 ns grid
 
   reg        clk = 0, rst_n = 0, ena = 1;
   reg  [7:0] ui_in = 8'h00;
@@ -85,7 +86,8 @@ module tb_onewire;
       .ena(ena), .clk(clk), .rst_n(rst_n)
   );
 
-  ds18b20_model #(.T_PDH_NS(T_PDH_NS), .T_PDL_NS(T_PDL_NS)) u_ds (
+  ds18b20_model #(.T_PDH_NS(T_PDH_NS), .T_PDL_NS(T_PDL_NS),
+                  .T_PH_NS(T_PH_NS)) u_ds (
       .dq(dq), .pull(dev_pull));
 
 `include "test/progress.vh"
@@ -330,10 +332,26 @@ module tb_onewire;
              dut.u_eng.config_err, dut.tx_full_sticky);
     $display("OW-HOST pushes=%0d bytes=%0d pops=%0d rx=%0d status=%0d fed=%0d/%0d cyc=%0d",
              hf_pushes, hf_bytes, hf_pops, n_rx, n_status, fi, nfeed, cyc);
+    // the MASKS, not only the counts: coverage across runs is their union
+    $display("OW-PHASE rise=%0d/20 partfall=%0d/20 (bins of the 20 ns clock after its posedge) rise_bins=%020b partfall_bins=%020b",
+             pc20(ph_rise), pc20(ph_pfall), ph_rise, ph_pfall);
     if (fi >= nfeed) $display("OW-BENCH: END");
     else $display("*** FAIL tb_onewire: NCYC_MAX reached with the feed at %0d of %0d", fi, nfeed);
     $finish;
   end
+
+  // ⭐ PHASE COVERAGE, MEASURED (Wilson 10-20): the phase, after the chip's
+  // posedge (at 10 + 20n ns), of every bus rise and of every fall the PART
+  // causes (it pulls while the master does not). 1 ns bins.
+  reg [19:0] ph_rise = 20'd0, ph_pfall = 20'd0;
+  function integer pc20(input [19:0] v);
+    integer b;
+    begin pc20 = 0; for (b = 0; b < 20; b = b + 1) pc20 = pc20 + v[b]; end
+  endfunction
+  always @(posedge dq) if (!loading)
+    ph_rise[$rtoi(($realtime - 10.0) - 20.0 * $floor(($realtime - 10.0) / 20.0))] = 1'b1;
+  always @(posedge dev_pull) if (!loading && !m_low)
+    ph_pfall[$rtoi(($realtime - 10.0) - 20.0 * $floor(($realtime - 10.0) / 20.0))] = 1'b1;
 
   always @(posedge clk) if (rst_n === 1'b1 && !loading) begin
     cyc = cyc + 1;
