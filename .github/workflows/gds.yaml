@@ -112,6 +112,42 @@ jobs:
           pdk: ihp-sg13cmos5l
           tools-ref: d66cf17
 
+      # ⭐ THE HARDEN'S RECORD (Wilson 10-21): what this harden ran ON, so a
+      # gate at the lock SHA can check the tree still matches it -- chip RTL,
+      # flow config and the gl_test image set. A mismatch there is red and
+      # the harden reruns; nothing is assumed from "only bench work landed".
+      - name: Record what was hardened
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'EOF' > harden_record.json
+          import hashlib, json, os, re
+          def h(paths):
+              d = hashlib.sha256()
+              for p in sorted(paths):
+                  d.update(p.encode() + b"\0" + open(p, "rb").read() + b"\0")
+              return d.hexdigest()
+          rtl = sorted("src/" + f for f in os.listdir("src") if f.endswith(".v"))
+          cfg = ["src/config.json", "info.yaml"]
+          imgs = sorted({"test/" + m for m in re.findall(
+              r'read_hex\("([^"]+)"\)', open("test/test.py", encoding="utf-8").read())})
+          print(json.dumps({
+              "sha": os.environ["GITHUB_SHA"], "run": os.environ["GITHUB_RUN_ID"],
+              "chip_rtl": {"files": rtl, "sha256": h(rtl)},
+              "flow_config": {"files": cfg, "sha256": h(cfg),
+                              "action": "tt-gds-action@3412659307918422f3f0727917cf9b499aaca588",
+                              "tools_ref": "d66cf17", "pdk": "ihp-sg13cmos5l"},
+              "gl_test_images": {"files": imgs, "sha256": h(imgs)}}, indent=1))
+          EOF
+          cat harden_record.json
+          { echo '### What this harden ran on'; echo '```json'; cat harden_record.json; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the harden record
+        uses: actions/upload-artifact@v7
+        with:
+          name: harden-record-${{ github.sha }}
+          path: harden_record.json
+
   precheck:
     needs: gds
     runs-on: ubuntu-24.04
