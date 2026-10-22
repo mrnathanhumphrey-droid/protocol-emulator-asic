@@ -7,13 +7,14 @@
  "ship_density_pct": 60,
  "tiles": "6x4",
  "tools_of_record": {
-  "tt_support_tools": "d66cf17",
+  "tt_support_tools": "d66cf179e7bc4d296362ab7e2e3b344dc3c4f665",
   "librelane": "3.1.0.dev3",
   "ihp_open_pdk": "2bbec755dc67ca3db0261c3d6163e15735d66710",
   "where_pinned": "probe_c1/c1_run.sh (the local C1 canary flow; not in the repository)"
  },
  "ci_harden_action": "TinyTapeout/tt-gds-action@3412659307918422f3f0727917cf9b499aaca588",
- "ci_tools_ref": "d66cf17",
+ "ci_tools_ref": "d66cf179e7bc4d296362ab7e2e3b344dc3c4f665",
+ "ci_tools_ref_note": "FULL SHA since 10-21: the abbreviation d66cf17 (the same commit, 'feat(ihp): 8x4 tile size for ihp-sg13cmos5l', resolved via the GitHub API) was fetched by the action's actions/checkout as refs/heads/d66cf17* and failed the first harden that used it (gds run 39712867598). gate_flow_config now requires 40 hex.",
  "ci_harden_action_note": "PINNED (Wilson 10-18): the action to a commit SHA (ihp-cmos5l branch head of 2026-09-14, 'fix: install ihp-sg13cmos5l from the merged IHP-Open-PDK tree #52') on all four steps, and tools-ref d66cf17 on the two that accept it (the main action and precheck; gl_test and viewer take no tools input). Before the pin the action was the branch ref @ihp-cmos5l.",
  "flow_config_sha256": "dada746cd015f3ce7d3a0915b30ab08f1ecdb9ca44c3a9393d680dafce0dc8da",
  "flow_keys": {

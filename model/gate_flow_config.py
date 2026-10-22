@@ -91,6 +91,16 @@ def env_audit(info_text, gds_text, rec):
     if not re.fullmatch(r"[0-9a-f]{40}", want):
         probs.append("the recorded action ref %r is not a commit SHA" % want)
     tr = re.findall(r"^\s*tools-ref:\s*(\S+)", gds_text, re.M)
+    # ⛔⛔ A FULL SHA, NOT AN ABBREVIATION (10-21). tools-ref was "d66cf17",
+    # string-equal to the record, and this gate passed it -- but the action's
+    # actions/checkout treats a short ref as a BRANCH/TAG name, fetched
+    # refs/heads/d66cf17*, found nothing, and the first harden that used the
+    # pin (gds 39712867598) died before building. Equal strings are not a
+    # fetchable ref.
+    if not re.fullmatch(r"[0-9a-f]{40}", str(rec.get("ci_tools_ref"))):
+        probs.append("the record's ci_tools_ref %r is not a full 40-hex commit "
+                     "SHA -- actions/checkout cannot fetch an abbreviation"
+                     % rec.get("ci_tools_ref"))
     if rec.get("ci_tools_ref") != rec["tools_of_record"]["tt_support_tools"]:
         probs.append("the record's ci_tools_ref %r is not the tools of record %r"
                      % (rec.get("ci_tools_ref"), rec["tools_of_record"]["tt_support_tools"]))
@@ -246,6 +256,17 @@ def main() -> int:
         ps = env_audit(inf, gd, rec)
         print("    %-38s %s" % (label, "red  ok" if ps else "*** NOT RED"))
         rc |= 0 if ps else 1
+    # the 10-21 defect, rebuilt: record AND workflow consistently abbreviated
+    # to 7 hex (string-equal everywhere, as it was) -- must still be red
+    full = rec["ci_tools_ref"]
+    short = copy.deepcopy(rec)
+    short["ci_tools_ref"] = full[:7]
+    short["tools_of_record"]["tt_support_tools"] = full[:7]
+    ps = env_audit(info, gds.replace(full, full[:7]), short)
+    hit = any("40-hex" in p for p in ps)
+    print("    %-38s %s" % ("tools-ref abbreviated to 7 hex",
+                             "red  ok" if hit else "*** NOT RED (for its reason)"))
+    rc |= 0 if hit else 1
     print()
     print("  GATE flow-config: %s" % ("PASSED" if rc == 0 else "FAILED"))
     return rc
