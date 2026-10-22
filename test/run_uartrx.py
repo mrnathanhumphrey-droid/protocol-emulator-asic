@@ -139,6 +139,40 @@ def main():
               % (t, e, s, line.strip()[:100] if good
                  else "*** " + line.strip()[:100]))
 
+    # ⭐ PHASE COVERAGE (Wilson 10-20): at ERR = 0 every bit time is whole
+    # cycles, so the arms above put EVERY RX edge at one phase. The same ERR = 0
+    # arms again with +PHWALK=1 (each frame's start walks a golden-ratio
+    # sub-cycle offset; probe_reports/uartrx_phase_prediction.txt), each held
+    # to its twin's verdict AND to >= 18/20 measured phase bins.
+    def bins(o):
+        m = re.search(r"UART-PHASE edges=(\d+)/20", o)
+        return int(m.group(1)) if m else -1
+    o0 = sim("ok", 0, 1)
+    print("  phase    ERR 0 without the walk: %d/20 bins (measured)" % bins(o0))
+    jobs = ([("ok", 0, s, ["+PHWALK=1"], t) for t in (T, TM) for s in SEEDS]
+            + [("nostop", 0, s, ["+PPF=1", "+PHWALK=1"], T) for s in SEEDS])
+    with ThreadPoolExecutor(3) as ex:
+        outs = list(ex.map(lambda j: (j, sim(*j)), jobs))
+    for (var, e, s, x, t), o in outs:
+        m = re.search(r"\((\d+) back-to-back\)", o)
+        good = ("UART-RX: ok" in o and "*** FAIL" not in o and m is not None
+                and int(m.group(1)) > 0 and bins(o) >= 18
+                and ("+PPF=1" not in x or "(1 per frame)" in o))
+        ok = ok and good
+        print("  walk  %-6s T %3d err %+3d seed %d  %s  phase %d/20"
+              % (var, t, e, s, "ok" if good else "*** FAIL", bins(o)))
+    ow = sim("ok", 0, 1, ["+BADSTOP=5", "+PHWALK=1"])
+    hitw = ("FRAMING ERROR reported on frame 5" in ow and "UART-RX: ok" in ow
+            and ow.count("FRAMING ERROR") == 1)
+    print("  walk  framing  bad stop on frame 5: %s" % (
+        "reported, exactly once" if hitw else "*** NOT REPORTED AS EXPECTED"))
+    ok = ok and hitw
+    on = sim("nostop", 0, 1, ["+PHWALK=1"])
+    redw = "*** FAIL uart_rx" in on and "UART-RX: ok" not in on
+    print("  walk  must-fire nostop err +0: %s" % (
+        "red  ok" if redw else "*** MUST-FIRE FAILED (passed)"))
+    ok = ok and redw
+
     o = sim("ok", 0, 1, ["+BADSTOP=5"])
     hit = ("FRAMING ERROR reported on frame 5" in o and "UART-RX: ok" in o
            and o.count("FRAMING ERROR") == 1)

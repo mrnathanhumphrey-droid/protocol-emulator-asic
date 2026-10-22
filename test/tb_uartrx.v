@@ -75,9 +75,16 @@ module tb_uartrx;
       tq = t;
       if (tq - 10.0 * $floor(tq / 10.0) < 0.5) tq = tq + 1.0;
       if (tq > $realtime) #(tq - $realtime);
+      // phase coverage, MEASURED: the bin (1 ns, after the posedge at
+      // 10 + 20n) of every edge the peer actually drives
+      if (peer[P_RX] !== v)
+        ph_rx[$rtoi((tq - 10.0) - 20.0 * $floor((tq - 10.0) / 20.0))] = 1'b1;
       peer[P_RX] = v;
     end
   endtask
+  reg [19:0] ph_rx = 20'd0;
+  integer    phwalk, phb, phn;
+  real       ph_d;
 
   // ---- THE PEER -----------------------------------------------------------
   initial begin
@@ -88,6 +95,16 @@ module tb_uartrx;
       rnd = lcg(rnd);
       sent[f] = rnd[23:16];
       n_sent = f + 1;                    // counted at its START: the data byte
+      // ⭐ +PHWALK (phase coverage, Wilson 10-20): frame f starts at a sub-
+      // cycle offset 20 * frac(f * 0.618034) ns. The step from frame f-1's
+      // offset is taken MOD 20 so it is always >= 0: the idle (or a back-to-
+      // back stop bit) before the frame lengthens by < 20 ns, never shortens.
+      if (phwalk && f > 0) begin
+        ph_d = 20.0 * ((f * 0.618034) - $floor(f * 0.618034))
+             - 20.0 * (((f - 1) * 0.618034) - $floor((f - 1) * 0.618034));
+        if (ph_d < 0.0) ph_d = ph_d + 20.0;
+        tnext = tnext + ph_d;
+      end
       at(tnext, 1'b0);                   // is pushed before the stop bit ends
       for (b = 0; b < 8; b = b + 1) begin
         tnext = tnext + bt;
@@ -145,6 +162,7 @@ module tb_uartrx;
     if (!$value$plusargs("SEED=%d", seed)) seed = 1;
     if (!$value$plusargs("BADSTOP=%d", badstop)) badstop = -1;
     if (!$value$plusargs("PPF=%d", ppf)) ppf = 2;
+    if (!$value$plusargs("PHWALK=%d", phwalk)) phwalk = 0;
     if (nfr > FMAX) nfr = FMAX;
     bt = 20.0 * bitp * (1000.0 + err) / 1000.0;
     rnd = seed;
@@ -202,6 +220,10 @@ module tb_uartrx;
       $display("*** FAIL uart_rx: %0d framing error(s) reported, expected %0d",
                n_frame_err, (badstop >= 0 && badstop < n_sent) ? 1 : 0);
     end
+    phn = 0;
+    for (phb = 0; phb < 20; phb = phb + 1) phn = phn + ph_rx[phb];
+    $display("UART-PHASE edges=%0d/20 bins=%020b phwalk=%0d (1 ns bins after the posedge, every RX edge the peer drove)",
+             phn, ph_rx, phwalk);
     if (fails == 0)
       $display("UART-RX: ok -- %0d frame(s) (%0d back-to-back) at %0d cycles/bit, baud error %0d/1000: %0d push(es) exact (%0d per frame), every byte equals the peer's, framing errors %0d (expected %0d)",
                n_sent, n_b2b, bitp, err, n_push, ppf, n_frame_err,

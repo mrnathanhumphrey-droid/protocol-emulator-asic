@@ -532,7 +532,7 @@ CONFIG = {
         "srcs": [],
         "arms": [("err+20", ["+IMG=test/uart_rx_image.hex", "+BITP=434",
                              "+ERR=20", "+NFR=40", "+SEED=1",
-                             "+BADSTOP=-1", "+PPF=2"])],
+                             "+BADSTOP=-1", "+PPF=2", "+PHWALK=0"])],
     },
     # ⭐⭐ THE PEER MODELS ARE COVERED HERE, AND THAT IS THE POINT WILSON MADE:
     # the I2C peer's address-match branch had never fired, and coverage would
