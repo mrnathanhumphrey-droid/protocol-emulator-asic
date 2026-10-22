@@ -29,6 +29,38 @@ is the whole claim.
   checked against Maxim AN27's worked example `02 1C B8 01 00 00 00 → A2`).
   On-chip CRC belongs to the reach branch.
 
+### The freeze moved (2026-10-21): CE5 re-certified on `0fb37a0`
+
+**Basis: re-certified (the full CE5 set)** on `0fb37a0`, the 1-Wire
+phase-coverage bench change. No RTL file changed.
+
+* **Why the frozen set changed.** The phase-coverage rule (Wilson 10-20) found
+  every bus edge this bench drives at one of two fixed clock phases. `0fb37a0`
+  added a part offset `T_PH_NS` (default 0) to the DS18B20 model's three own
+  delays and a measured phase-coverage display to `tb_onewire.v`, both frozen
+  files. A 120-run sweep (`probe_reports/onewire_phase_outcome.txt`) found
+  every byte and verdict identical across 20/20 phases per offset.
+* **A deliberately red commit.** The freeze pins a commit SHA, and the pin
+  cannot name a commit before it exists, so `0fb37a0` was red on this gate
+  only (suite 68 of 69), said so in its message, and was pushed together with
+  the re-pin. Step 3 moves the pin to blob hashes so a re-pin needs no red
+  commit.
+* **Prediction, stamped before the comparison**
+  (`probe_reports/ce5_recert_prediction_onewire_phase.txt`): with the lines
+  the change adds removed by exact patterns, the freeze's and the current
+  outputs are byte-identical, the timestamp included.
+* **The stamped filter MISSED, by 2 lines,** both empty: lines 72 and 102 of
+  the current output, the `print()` separator `run_onewire` emits before every
+  arm header (line 344), here before the two new arms. Per the stamp, the
+  re-pin stopped and the difference was reported.
+* **Narrow addendum, stamped before the re-score**
+  (`probe_reports/ce5_recert_addendum_onewire_phase.txt`): a new arm's block
+  begins at the single blank line immediately before its header, nothing
+  else. Structural check: the original arms' separators present and empty in
+  both outputs. **Re-score on the same saved outputs: freeze 72 lines,
+  current 72, byte-identical**, `at t=6434051.0 ns` on both.
+  `CE5-ONEWIRE: PASSED` on both, all five must-fires red on both.
+
 ### The freeze moved (2026-10-18): CE5 re-certified on `c95af23`
 
 **Basis: re-certified (the full CE5 set)** on `c95af23`, under the freeze rule

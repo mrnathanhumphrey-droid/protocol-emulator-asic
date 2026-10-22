@@ -98,7 +98,15 @@ def frozen_set():
 #: no .v file). Prediction stamped first: identical output. Result: 74 of 74
 #: CE5 output lines byte-identical to the effe478 run, the timestamp included
 #: (docs/CE5_LOG.md).
-FREEZE_SHA = "c95af2379d15da5edc7749f3a18df8c21eee52f7"
+#: ⛔ RE-PINNED to 0fb37a0 (2026-10-21) -- RE-CERTIFIED: the 1-Wire phase-
+#: coverage change edited two frozen BENCH files (ds18b20_model.v T_PH_NS,
+#: default 0; tb_onewire.v coverage display). No RTL. 0fb37a0 was red on this
+#: gate only, by design (the pin cannot name a commit before it exists).
+#: Prediction stamped first; the stamped filter MISSED by 2 blank lines (the
+#: new arms' own print() separators), a narrow addendum then held: freeze 72
+#: lines, current 72, byte-identical, the timestamp included (docs/CE5_LOG.md).
+#: The blob-hash pin (step 3) removes the need for a red commit.
+FREEZE_SHA = "0fb37a0002ab773d12d992500f927c584e32a1ea"
 
 
 def git(args, env=None):
