@@ -765,12 +765,16 @@ r_i depends on the whole program, other lanes included.
 - **Admissible programs** (every delay ≥ D* = 20, and an A2 bound exists): the
   floor above is the guarantee.
   - For the **shipped 1 MHz lane** (d = 25, r_i = 12): **16 cycles = 320 ns**.
-  - Measured on a five-lane admissible image (the A2 reference workload's
-    closest buildable equivalent, with reactive lanes modelled as self-timed
-    periodic lanes at the same rate) under an adversarial phase sweep:
-    - the lateness bound was reached exactly (9 of 9);
-    - the shortest observed phase was 17 cycles, so the 16-cycle floor holds,
-      with one cycle not exercised.
+  - **Reproduced on every suite run** (`test/run_spim_witness.py`, the
+    single-lane `corpus_spim25` at d = 25): the floor derived for that image
+    is 25 − (6 − 3) = 22 cycles, and the shortest observed SCK phase is 25
+    cycles, over every phase the run produces.
+  - ⚠ **Historical, not reproducible today.** Commit `164d857` (2026-10-17)
+    recorded a five-lane admissible-image result: an adversarial phase sweep
+    reaching the lateness bound in 9 of 9 cases, shortest observed phase 17
+    cycles against the 16-cycle floor. No runner or gate in the repository
+    regenerates it (audit, 2026-10-22), so it is kept only as a record of that
+    commit, not as a measured claim.
 - **Programs below the floor** (non-admissible, such as the d = 7 trace image
   `corpus_spim`): no phase guarantee. The half-period shrinks by the
   scheduler's lateness, measured here as 7 cycles down to 5.
