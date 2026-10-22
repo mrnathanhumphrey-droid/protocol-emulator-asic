@@ -78,7 +78,7 @@ module tb_rxbw;
   // payload loads and cleared when its status frame loads), plus `rx_pend`.
   //     predicted drops = completions - capacity - (rx_pend + status_turn)
   // must equal the drops counted at the RTL's own condition, exactly.
-  integer    max_gap, first_pay, sat, end_pend, end_st;
+  integer    max_gap, first_pay, sat, end_pend, end_st, progdly;
   // THE DROP COUNTED AT THE DESIGN'S OWN CONDITION. `project.v` does
   //     if (e_rx_push) begin if (rx_pend) rx_drop_sticky <= 1; else ... end
   // so a drop IS `rx_push && rx_pend`, and counting it there is exact.
@@ -143,6 +143,10 @@ module tb_rxbw;
     last_pay = -1; min_gap = 1000000; drop_seen = 1'b0;
     max_gap = 0; first_pay = -1; end_pend = 0; end_st = 0;
     if (!$value$plusargs("SATURATED=%d", sat)) sat = 0;
+    // +PROGDLY=k: k extra cycles before PROG falls -- the START ALIGNMENT of
+    // the lane against the serialiser's free-running slot, which is what sets
+    // the forced over-rate drop count (audit item 1, 10-22). 0 = as before.
+    if (!$value$plusargs("PROGDLY=%d", progdly)) progdly = 0;
     cn = 0; cscan = 0; n_matched = 0; n_unmatched = 0;
     inflight = 0; n_lost = 0; n_drop = 0;
     cyc = 0; fails = 0; primed_seen = 1'b0; cfgerr_seen = 1'b0;
@@ -165,6 +169,7 @@ module tb_rxbw;
       ui_in[PIN_WR] = 1'b0;
       @(negedge clk);
     end
+    repeat (progdly) @(negedge clk);
     ui_in[PIN_PROG] = 1'b0;
     ui_in = 8'h00;
     peer  = 8'hFF;

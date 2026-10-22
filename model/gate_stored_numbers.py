@@ -551,6 +551,10 @@ SPEC_SYMBOLS = {
     # test/v3_table.vh and requires it identical, and the bench reds any
     # unknown image or non-allowlisted loosening.
     ("model/v3_table.py", "GENERATED"),
+    # ⭐ 10-22 (audit item 1): run_rxbw's sweep delays -- builder ARGUMENTS of
+    # the same kind as GENERATED's (make_smoke_image --rxfast d), inputs, not
+    # results; staleness is caught the same way (V3 reds an unknown image).
+    ("model/v3_table.py", "RXBW_SWEEP_D"),
     ("model/v3_table.py", "ALLOW"),
     ("model/v3_table.py", "FIELD"),
     # ⭐ SP2/P1's TEXT ANCHORS into src/pe_engine.v: Verilog substrings whose

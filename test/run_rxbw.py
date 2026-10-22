@@ -103,9 +103,9 @@ def build():
     return out
 
 
-def one(vvp, img, nbytes):
+def one(vvp, img, nbytes, extra=()):
     r = run(sim_run.vvp([vvp, "+IMG=%s" % img, "+NBYTES=%d" % nbytes,
-                         "+NCYC=%d" % NCYC], images=[img]))
+                         "+NCYC=%d" % NCYC] + list(extra), images=[img]))
     txt = r.stdout + r.stderr
     m = re.search(r"RXBW " + " ".join(r"%s=(-?\d+)" % k for k in KEYS), txt)
     if not m:
@@ -218,6 +218,39 @@ def main() -> int:
         print("       reached its ceiling and the sweep proved nothing.")
         rc = 1
 
+    # ---- THE DROP COUNT IS A RANGE, NOT A NUMBER (audit item 1, 10-22) ----
+    # One self-timed lane against the serialiser's free-running slot: the
+    # count is set by the START ALIGNMENT -- where PROG falls in the slot --
+    # so the d = 24 arm runs at every alignment of one slot (+PROGDLY = 0..49)
+    # and the claim is the range, with the flag and the order on every run.
+    # (probe_reports/rxbw_range_prediction.txt)
+    print()
+    print("  --- forced over-rate, d = 24, every start alignment of one slot ---")
+    g = run([sys.executable, os.path.join(HERE, "make_smoke_image.py"),
+             "--rxfast", "24", "probe_rxfast"])
+    with open(os.path.join(HERE, "probe_rxfast.hex"), encoding="ascii") as fh:
+        nb = len([w for w in fh.read().split() if w])
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(3) as ex:
+        res = list(ex.map(lambda k: (k, one(vvp, "test/probe_rxfast.hex", nb,
+                                            ["+PROGDLY=%d" % k])),
+                          range(SLOT_DERIVED)))
+    lost, bad_k = [], []
+    for k, (r, bad) in res:
+        if r is None or bad or r["drop"] != 1 or r["unmatched"] != 0 \
+                or r["lost"] <= 0:
+            bad_k.append(k)
+        else:
+            lost.append(r["lost"])
+    if bad_k or not lost:
+        print("    *** start alignment(s) %s: no reading, a bench FAIL, loss "
+              "without the flag, or reordering" % bad_k[:10])
+        rc = 1
+    else:
+        print("    %d alignments: lost %d .. %d bytes (of ~%d completions); "
+              "RX-drop set and every surviving byte in order on EVERY one"
+              % (len(lost), min(lost), max(lost), res[0][1][0]["compl"]))
+
     # ---- the shipped lane set, re-quoted -------------------------------
     print()
     print("  --- 1.6p RE-QUOTED (the shipped two RX lanes) ---")
@@ -228,7 +261,11 @@ def main() -> int:
         print("    *** could not import the lane table: %s" % e)
         return 1
     lanes = list(TX) + [UART_RX, SPI_RX]
-    bpe = {"UART-rx": 1.0, "SPI-target": 0.5}
+    # ⛔ SPI-target is ONE event per bit (1.0) since 10-20 (gate_admissibility_
+    # 1_6 BPE, the B1 burst re-quote); this said 0.5 -- the old both-edges
+    # model -- and printed 7.7 % against HOST_INTERFACE's published 14.0 %,
+    # unseen because this runner was not in the suite (audit item 1, 10-22).
+    bpe = {"UART-rx": 1.0, "SPI-target": 1.0}
     rx = [l for l in lanes if l.name.startswith(tuple(bpe))]
     agg = sum(next(v for k, v in bpe.items() if l.name.startswith(k))
               / (l.t * 20e-9) for l in rx)
@@ -251,7 +288,8 @@ def main() -> int:
     print("       so the error PREDATES this round's widening: the frame going")
     print("       9 -> 12 bits moved it from %.1f%% to %.1f%%, while the"
           % (100 * agg / cap9, 100 * agg / cap))
-    print("       mis-stated capacity accounted for the other 4.8x.")
+    print("       mis-stated capacity accounted for the other %.1fx."
+          % ((100 * agg / cap9) / 2.2))
     print()
     print("  --- the ONE-DEEP PENDING MARGIN, which is the binding one ---")
     print("    Average utilisation says nothing about a one-deep register.")

@@ -403,8 +403,11 @@ That is bounded rather than harmful, and the two reasons are worth knowing:
   cycles, unrelated, so the phase drifts and a collision is reachable.
 
   ⇒ **What is guaranteed is that a collision is reported, not that it cannot
-  happen.** `test/run_rxbw.py` measures both halves: forced over-rate, 3,405
-  bytes dropped with **RX-drop set every time and never silently**, and every
+  happen.** `test/run_rxbw.py` measures both halves: forced over-rate (one
+  self-timed lane completing every 24 cycles against the 50-cycle slot),
+  3,405 of 7,404 bytes dropped at **every one of the 50 start alignments of a
+  slot** (PROG released 0–49 cycles later; the count does not move), with
+  **RX-drop set every time and never silently**, and every
   surviving byte delivered **in order** — so the register refuses the new byte
   rather than clobbering the pending one. A host that must not lose a byte
   should keep the aggregate completion rate below one per 50 cycles and read

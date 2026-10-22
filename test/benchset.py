@@ -498,7 +498,7 @@ CONFIG = {
     "tb_rxbw": {
         "srcs": [],
         "arms": [("default", ["+IMG=test/rxfast_image.hex", "+NCYC=200000",
-                              "+SATURATED=1"])],
+                              "+SATURATED=1", "+PROGDLY=0"])],
     },
     # WF2 #9/#10/#11 + rule 1: a reload is a clean slate. The four arms on
     # tracked images (the bench picks them by MODE); the SPI (4) and I2C (5,

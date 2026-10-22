@@ -101,6 +101,24 @@ def _gen_rxfast60():
     return bytes(pe_isa.full_store(bytes(make_smoke_image.build_rxfast(60))))
 
 
+def _gen_rxfast(d):
+    """run_rxbw's sweep image at delay d (make_smoke_image --rxfast d, written
+    through pe_isa.write_image -- the full store, as the bench loads it)."""
+    def f():
+        import make_smoke_image
+        import pe_isa
+        return bytes(pe_isa.full_store(bytes(make_smoke_image.build_rxfast(d))))
+    return f
+
+
+#: ⛔ run_rxbw's sweep points (10-22, documented-numbers audit item 1): every
+#: one but d = 24 (the tracked rxfast_image.hex) had been V3-UNKNOWN -- fatal
+#: -- since V3 became image-keyed, and run_rxbw is not in the suite, so its
+#: boundary sweep sat broken unseen. Spelled out, not imported, so this table
+#: does not depend on a runner's module state.
+RXBW_SWEEP_D = (32, 40, 44, 45, 46, 47, 48, 49, 50, 52, 64)
+
+
 def _gen_store_falloff():
     """store_run.sh's M3 must-fire: a lane with no terminating REARM."""
     import pe_isa
@@ -207,6 +225,11 @@ GENERATED = (
      "with its V3 facts supplied by allowlisted override"),
 )
 
+#: run_rxbw's sweep images, registered the same way (see RXBW_SWEEP_D)
+GENERATED_RXBW = tuple(("run_rxbw: rxfast d=%d" % _d, _gen_rxfast(_d), 0,
+                        "run_rxbw's boundary sweep point d = %d" % _d)
+                       for _d in RXBW_SWEEP_D)
+
 
 #: GENERATED entries whose runner loads FEWER than 256 bytes on purpose (the
 #: bench hashes exactly the bytes written)
@@ -244,7 +267,7 @@ def rows():
     if probs:
         raise RuntimeError("v3_table: " + "; ".join(probs))
     exempt = wf.exempt_set()
-    for name, gen, ex, _why in GENERATED:
+    for name, gen, ex, _why in GENERATED + GENERATED_RXBW:
         imgs[name] = gen()
         # ⛔ A GENERATOR RETURNS WHAT THE BENCH LOADS: the full store, since
         # every runner writes images through pe_isa.write_image. The rxfast
