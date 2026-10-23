@@ -939,33 +939,48 @@ def check_anchors() -> int:
     return rc
 
 
+def reason_problems(classified):
+    """-> dict of problem lists for a CLASSIFIED-shaped dict: cocotb (a
+    COCOTB_ONLY entry naming no swept bench), short (< 60 chars), vague
+    (boilerplate), unknown (status). THE ONE rule set: check_reasons() and
+    its must-fire both call it (10-22 must-fire audit: the must-fire had
+    re-typed the length test inline)."""
+    BOILER = ("n/a", "todo", "tbd", "unreachable", "not reachable", "see above",
+              "obvious", "by design", "")
+    out = {"cocotb": [], "short": [], "vague": [], "unknown": []}
+    for key, (st, why) in sorted(classified.items()):
+        # ⛔ A COCOTB_ONLY entry must NAME the swept bench that will retire
+        # it. Without that the status is a parking space, and the whole
+        # reason it was ratified is that it is INTERIM.
+        if st == COCOTB_ONLY and COCOTB_ONLY_NEEDS not in (why or ""):
+            out["cocotb"].append(key)
+        w = (why or "").strip()
+        if len(w) < 60:
+            out["short"].append((key, len(w)))
+        if w.lower().rstrip(". ") in BOILER:
+            out["vague"].append(key)
+        if st not in (UNREACHABLE, OWED, DEAD_CONFIG, TOOL_DIVERGENT,
+                      COCOTB_ONLY):
+            out["unknown"].append((key, st))
+    return out
+
+
 def check_reasons() -> int:
     """The reasons themselves are checked, as the reset allowlist's are."""
     rc = 0
     print()
     print("  --- the reasons ---")
-    short, vague = [], []
-    BOILER = ("n/a", "todo", "tbd", "unreachable", "not reachable", "see above",
-              "obvious", "by design", "")
-    for key, (st, why) in sorted(CLASSIFIED.items()):
-        # ⛔ A COCOTB_ONLY entry must NAME the swept bench that will retire
-        # it. Without that the status is a parking space, and the whole
-        # reason it was ratified is that it is INTERIM.
-        if st == COCOTB_ONLY and COCOTB_ONLY_NEEDS not in (why or ""):
-            print("    *** %s line %d is COCOTB_ONLY but names no swept"
-                  % (key[0], key[1]))
-            print("        stimulus (a `%s...` bench) that will retire it"
-                  % COCOTB_ONLY_NEEDS)
-            rc = 1
-        w = (why or "").strip()
-        if len(w) < 60:
-            short.append((key, len(w)))
-        if w.lower().rstrip(". ") in BOILER:
-            vague.append(key)
-        if st not in (UNREACHABLE, OWED, DEAD_CONFIG, TOOL_DIVERGENT,
-                      COCOTB_ONLY):
-            print("    *** %s line %d has unknown status %r" % (key[0], key[1], st))
-            rc = 1
+    p = reason_problems(CLASSIFIED)
+    short, vague = p["short"], p["vague"]
+    for key in p["cocotb"]:
+        print("    *** %s line %d is COCOTB_ONLY but names no swept"
+              % (key[0], key[1]))
+        print("        stimulus (a `%s...` bench) that will retire it"
+              % COCOTB_ONLY_NEEDS)
+        rc = 1
+    for key, st in p["unknown"]:
+        print("    *** %s line %d has unknown status %r" % (key[0], key[1], st))
+        rc = 1
     for key, n in short:
         print("    *** REASON TOO SHORT (%d chars)  %s line %d %s/%s"
               % (n, key[0], key[1], key[2].replace("v_", ""), key[3]))
@@ -1323,8 +1338,10 @@ def selftest(agg) -> int:
         print("        %s -> %s, wanted %s" % (i, got, want))
         rc = 1
     # (3) a short reason
+    # ⛔ HOLLOW UNTIL 10-22 (must-fire audit): this checked len("because.") < 60
+    # inline. It now runs the gate's own rule set on the probe.
     probe = {("x.v", 1, "v_line", "case"): (UNREACHABLE, "because.")}
-    short = any(len((w or "").strip()) < 60 for _s, w in probe.values())
+    short = bool(reason_problems(probe)["short"])
     print("    %-52s %s" % ("a one-line reason is rejected",
                             "ok" if short else "*** ACCEPTED"))
     if not short:

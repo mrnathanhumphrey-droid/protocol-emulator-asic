@@ -119,6 +119,38 @@ def check_elaborates() -> int:
     return rc
 
 
+def reachins(src):
+    """-> (hits, bad): every `dut.user_project.<internal>` read in `src` as
+    (line, name), and the subset outside a GL-aware function as (line, name,
+    function, False). THE ONE rule: check_reachins() and its must-fire both
+    call it (10-22 must-fire audit: the must-fire had re-typed the rule)."""
+    tree = ast.parse(src)
+    lines = src.splitlines()
+    hits = []
+    for m in re.finditer(r"dut\.user_project\.([A-Za-z_][A-Za-z_0-9]*)", src):
+        name = m.group(1)
+        if name in PORTS:
+            continue
+        hits.append((src[:m.start()].count("\n") + 1, name))
+    funcs = []
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            end = getattr(node, "end_lineno", None) or node.lineno
+            body = "\n".join(lines[node.lineno - 1:end])
+            funcs.append((node.lineno, end, node.name, "GL" in body))
+    bad = []
+    for ln, name in hits:
+        owner = None
+        for a, b, fn, has_gl in funcs:
+            if a <= ln <= b:
+                owner = (fn, has_gl)
+        if owner is None:
+            bad.append((ln, name, "<module level>", False))
+        elif not owner[1]:
+            bad.append((ln, name, owner[0], False))
+    return hits, bad
+
+
 def check_reachins() -> int:
     """(2) every `dut.user_project.<internal>` read must be GL-guarded.
 
@@ -139,39 +171,12 @@ def check_reachins() -> int:
     path = os.path.join(HERE, "test.py")
     with open(path, encoding="utf-8") as fh:
         src = fh.read()
-    tree = ast.parse(src)
-    lines = src.splitlines()
-
-    # every `dut.user_project.X` where X is not a port
-    hits = []
-    for m in re.finditer(r"dut\.user_project\.([A-Za-z_][A-Za-z_0-9]*)", src):
-        name = m.group(1)
-        if name in PORTS:
-            continue
-        ln = src[:m.start()].count("\n") + 1
-        hits.append((ln, name))
+    hits, bad = reachins(src)
     print("    internal reach-ins found : %d" % len(hits))
-
-    # which function each line belongs to, and whether that function mentions GL
-    funcs = []
-    for node in ast.walk(tree):
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            end = getattr(node, "end_lineno", None) or node.lineno
-            body = "\n".join(lines[node.lineno - 1:end])
-            funcs.append((node.lineno, end, node.name, "GL" in body))
-    bad = []
+    flagged = {(b[0], b[1]) for b in bad}
     for ln, name in hits:
-        owner = None
-        for a, b, fn, has_gl in funcs:
-            if a <= ln <= b:
-                owner = (fn, has_gl)
-        if owner is None:
-            bad.append((ln, name, "<module level>", False))
-        elif not owner[1]:
-            bad.append((ln, name, owner[0], False))
-        else:
-            print("    line %-4d %-16s in %-18s GL-aware  ok"
-                  % (ln, name, owner[0]))
+        if (ln, name) not in flagged:
+            print("    line %-4d %-16s GL-aware  ok" % (ln, name))
     for ln, name, fn, _ in bad:
         print("    *** line %d reads `%s` inside `%s`, which never mentions GL"
               % (ln, name, fn))
@@ -220,12 +225,9 @@ def selftest() -> int:
     snippet = ("async def f(dut):\n"
                "    x = int(dut.user_project.u_eng.lane_underrun.value)\n"
                "    return x\n")
-    tree = ast.parse(snippet)
-    body = snippet
-    has_gl = "GL" in body
-    reaches = bool(re.search(r"dut\.user_project\.([A-Za-z_][A-Za-z_0-9]*)",
-                             snippet))
-    caught = reaches and not has_gl
+    # ⛔ HOLLOW UNTIL 10-22 (must-fire audit): this re-typed the rule on the
+    # snippet ("GL" in body + a regex). Both snippets now go through reachins().
+    caught = bool(reachins(snippet)[1])
     print("    %-52s %s" % ("an unguarded internal reach-in is rejected",
                             "ok" if caught else "*** MISSED"))
     if not caught:
@@ -234,13 +236,12 @@ def selftest() -> int:
     ok_snippet = ("async def g(dut):\n"
                   "    if GL:\n        return 0\n"
                   "    return int(dut.user_project.u_eng.host_pop.value)\n")
-    accepted = ("GL" in ok_snippet) and bool(
-        re.search(r"dut\.user_project\.", ok_snippet))
+    h_ok, b_ok = reachins(ok_snippet)
+    accepted = bool(h_ok) and not b_ok
     print("    %-52s %s" % ("a GL-guarded reach-in is accepted",
                             "ok" if accepted else "*** REJECTED"))
     if not accepted:
         rc = 1
-    _ = tree
     return rc
 
 

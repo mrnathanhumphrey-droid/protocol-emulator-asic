@@ -409,6 +409,18 @@ def exempt_set():
     return out
 
 
+def v3_table_currency(path, want):
+    """None if the table at `path` is the generated text `want`, else 'absent'
+    or 'STALE'. THE ONE check: the gate and its must-fire both call it (10-22
+    must-fire audit: the must-fire compared its own edited string)."""
+    try:
+        with open(path, encoding="utf-8") as fh:
+            have = fh.read().replace("\r\n", "\n")
+    except OSError:
+        return "absent"
+    return None if have == want else "STALE"
+
+
 def main() -> int:
     print()
     print("=" * 78)
@@ -484,14 +496,10 @@ def main() -> int:
     print()
     print("  --- test/v3_table.vh matches the registry, the bounds and the images ---")
     want = v3_table.text()
-    try:
-        with open(v3_table.OUT, encoding="utf-8") as fh:
-            have = fh.read().replace("\r\n", "\n")
-    except OSError:
-        have = None
-    if have != want:
+    cur = v3_table_currency(v3_table.OUT, want)
+    if cur:
         print("  *** test/v3_table.vh is %s -- run `python model/v3_table.py`"
-              % ("absent" if have is None else "STALE"))
+              % cur)
         rc = 1
     else:
         print("    current -- %d image(s), keyed by their bytes"
@@ -500,7 +508,14 @@ def main() -> int:
     edited = want.replace("v3_tab = 16;", "v3_tab = 17;", 1)
     moved = bytearray(imgs["half_image.hex"])
     moved[200] ^= 1
-    seen_edit = edited != want
+    import tempfile
+    fd, epath = tempfile.mkstemp(suffix="_v3_table.vh")
+    with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:
+        fh.write(edited)
+    try:
+        seen_edit = v3_table_currency(epath, want) == "STALE" and edited != want
+    finally:
+        os.remove(epath)
     seen_move = v3_table.fnv(bytes(moved)) != v3_table.fnv(imgs["half_image.hex"])
     print("    must-fire: a hand-edited bound is not the generated text  %s"
           % ("red  ok" if seen_edit else "*** MISSED"))

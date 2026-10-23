@@ -237,10 +237,14 @@ def audit(ev, files_sha=None, prm=None, feed_ok=None):
     return probs
 
 
-def feed_matches():
+def feed_matches(path=None):
+    """Is the feed at `path` (default: the tracked feed) the one test/onewire.py
+    builds from DS18B20_TXN? A path parameter so the must-fire runs THIS
+    comparator on a mutated copy (10-22 must-fire audit: it used to force
+    feed_ok=False and never ran it)."""
     import onewire
     lines, _rx, _p = onewire.feed("fpga")
-    trk = open(FILES["feed"], encoding="ascii").read().replace("\r\n", "\n")
+    trk = open(path or FILES["feed"], encoding="ascii").read().replace("\r\n", "\n")
     return trk == "\n".join(lines) + "\n"
 
 
@@ -302,7 +306,22 @@ def main() -> int:
     mf.append(("(ii) a generic != the params",
                audit(ev, prm=dict(params(FILES["params"]), POLLIDX=16)),
                "generics"))
-    mf.append(("(ii) feed not DS18B20_TXN's", audit(ev, feed_ok=False),
+    # ⛔ HOLLOW UNTIL 10-22 (must-fire audit): this passed feed_ok=False, and
+    # audit() reports exactly when told False -- the comparator never ran.
+    # Now the REAL comparator judges a one-hex-digit-changed copy of the feed.
+    import tempfile
+    with open(FILES["feed"], encoding="ascii") as fh:
+        ftxt = fh.read()
+    fi = next(i for i, ch in enumerate(ftxt) if ch in "0123456789abcdefABCDEF")
+    ftxt = ftxt[:fi] + ("1" if ftxt[fi] != "1" else "2") + ftxt[fi + 1:]
+    fd, fpath = tempfile.mkstemp(suffix="_feed.hex")
+    with os.fdopen(fd, "w", encoding="ascii", newline="") as fh:
+        fh.write(ftxt)
+    try:
+        fm_mut = feed_matches(fpath)
+    finally:
+        os.remove(fpath)
+    mf.append(("(ii) feed not DS18B20_TXN's", audit(ev, feed_ok=fm_mut),
                "the tracked feed is not"))
     for key, val, needle in (("tLOW0_us", ("max", 120.1), "tLOW0"),
                              ("tPDHIGH_us", ("max", 60.1), "tPDHIGH"),

@@ -118,6 +118,21 @@ def strip_comments(t: str) -> str:
     return re.sub(r"/\*.*?\*/", "", t, flags=re.S)
 
 
+def rx_lane_verdict(src: str):
+    """-> (n_lanes, declared, need, width_ok, kind_ok), or None if either value
+    cannot be read. THE ONE verdict: check_rx_lane_width() and its must-fire
+    both call it (10-22 must-fire audit: the must-fire had re-typed it)."""
+    m = re.search(r"parameter\s+integer\s+N_LANES\s*=\s*(\d+)", src)
+    w = re.search(r"wire\s*\[(\d+):0\]\s+e_rx_lane\s*;", src)
+    if not m or not w:
+        return None
+    n_lanes, declared = int(m.group(1)), int(w.group(1)) + 1
+    need = 1
+    while (1 << need) < n_lanes:
+        need += 1
+    return n_lanes, declared, need, declared >= need, n_lanes <= 7
+
+
 def check_rx_lane_width(allsrc: str) -> int:
     """The RX frame's lane field must be wide enough for `N_LANES`.
 
@@ -148,27 +163,20 @@ def check_rx_lane_width(allsrc: str) -> int:
     # reason (it refuses to pass on a value it could not find) but for the
     # wrong cause. A regex that cannot find what it is looking for is
     # indistinguishable from a violation unless it says which.
-    m = re.search(r"parameter\s+integer\s+N_LANES\s*=\s*(\d+)", allsrc)
-    n_lanes = int(m.group(1)) if m else None
-    w = re.search(r"wire\s*\[(\d+):0\]\s+e_rx_lane\s*;", allsrc)
-    declared = (int(w.group(1)) + 1) if w else None
+    v = rx_lane_verdict(allsrc)
+    if v is None:
+        print("    *** could not read N_LANES or e_rx_lane's width out of the")
+        print("        RTL, so the check cannot be made -- RED rather than skipped.")
+        return 1
+    n_lanes, declared, need, ok, kind_ok = v
     print("    N_LANES                     : %s" % n_lanes)
     print("    e_rx_lane declared width    : %s" % declared)
-    if n_lanes is None or declared is None:
-        print("    *** could not read one of them out of the RTL, so the")
-        print("        check cannot be made -- RED rather than skipped.")
-        return 1
-    need = 1
-    while (1 << need) < n_lanes:
-        need += 1
     print("    width LW would compute      : %d" % need)
-    ok = declared >= need
     print("    declared >= needed          : %s  %s"
           % (ok, "ok" if ok else "*** TRUNCATION -- a received byte would be "
                                  "attributed to the WRONG LANE"))
     if not ok:
         rc = 1
-    kind_ok = n_lanes <= 7
     print("    N_LANES <= 7 (frame `kind`) : %s  %s"
           % (kind_ok, "ok" if kind_ok
              else "*** the 3-bit `kind` field cannot name this many lanes and "
@@ -190,13 +198,8 @@ def check_rx_lane_width(allsrc: str) -> int:
     for name, nl, dw, want_ok in cases:
         src = ("parameter integer N_LANES  = %d,\n"
                "  wire [%d:0] e_rx_lane;\n" % (nl, dw - 1))
-        m2 = re.search(r"parameter\s+integer\s+N_LANES\s*=\s*(\d+)", src)
-        w2 = re.search(r"wire\s*\[(\d+):0\]\s+e_rx_lane\s*;", src)
-        nn, dd = int(m2.group(1)), int(w2.group(1)) + 1
-        nd = 1
-        while (1 << nd) < nn:
-            nd += 1
-        got_ok = (dd >= nd) and (nn <= 7)
+        v = rx_lane_verdict(src)
+        got_ok = v is not None and v[3] and v[4]
         agree = got_ok == want_ok
         print("      %-46s %-9s %s"
               % (name, "accepted" if got_ok else "REJECTED",

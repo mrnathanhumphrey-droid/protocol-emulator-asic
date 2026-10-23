@@ -151,11 +151,14 @@ def port_spec_s7_anchors(text):
     return out
 
 
-def check():
+def check(premises=None, rtl=None):
+    """The premises not found in the RTL. `premises` / `rtl` are parameters so
+    the must-fire runs THIS function, not a copy of its test."""
     bad = []
-    with open(RTL, encoding="utf-8", errors="replace") as fh:
-        rtl = fh.read()
-    for tag, what, needle in PREMISES:
+    if rtl is None:
+        with open(RTL, encoding="utf-8", errors="replace") as fh:
+            rtl = fh.read()
+    for tag, what, needle in (PREMISES if premises is None else premises):
         if needle not in rtl:
             bad.append((tag, what, needle))
     return bad, rtl
@@ -163,19 +166,21 @@ def check():
 
 def selftest(rtl):
     """⛔ PRICE IT: a bogus needle must be rejected and a real one accepted,
-    or this gate cannot tell a missing premise from a present one."""
+    or this gate cannot tell a missing premise from a present one.
+    ⛔ HOLLOW UNTIL 10-22 (must-fire audit): it tested `bogus not in rtl` on a
+    literal and never called check(). Both cases now go through check()."""
     rc = 0
     print("  --- must-fire: the anchors are checked, not assumed ---")
-    bogus = "if (winner_v && NO_SUCH_SIGNAL_xyz) begin"
-    print("    %-44s %s" % ("a premise that is NOT in the RTL",
-                            "rejected" if bogus not in rtl
-                            else "*** ACCEPTED"))
-    if bogus in rtl:
+    bogus = ("MF", "a premise that is NOT in the RTL",
+             "if (winner_v && NO_SUCH_SIGNAL_xyz) begin")
+    rejected = bool(check([bogus], rtl)[0])
+    print("    %-44s %s" % (bogus[1], "rejected" if rejected else "*** ACCEPTED"))
+    if not rejected:
         rc = 1
-    real = PREMISES[3][2]
+    accepted = not check([PREMISES[3]], rtl)[0]
     print("    %-44s %s" % ("the real winner-first premise",
-                            "accepted" if real in rtl else "*** REJECTED"))
-    if real not in rtl:
+                            "accepted" if accepted else "*** REJECTED"))
+    if not accepted:
         rc = 1
     return rc
 
