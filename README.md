@@ -173,7 +173,8 @@ is bounded — the response times above — rather than designed away.
 - **UART receive.** `pe_asm` certifies the UART-rx program down to 232
   cycles per bit, which is up to about 215.5 kbaud at the 50 MHz design clock.
   The simulation bench verifies it at that limit across a ±3% baud-error sweep,
-  and the FPGA prototype measured every byte at ±2.5%. The timing analysis
+  and the FPGA prototype received every byte at ±2.5% (2026-10-12, an
+  unrecorded run; see "On real hardware"). The timing analysis
   admits peers only inside that verified ±3%.
   The fastest standard rate inside the limit is 115,200 baud: 434 cycles per
   bit, with a 0.006% rate error. 230,400 baud would need 217 cycles per bit,
@@ -259,6 +260,13 @@ captured the wire, the decoded transaction and timings were written to
 wire against the program's feed, the part's answers, the timing windows, and the
 SHA-256 of the program that ran. It is not a hardware run in CI; it is the
 bench's evidence, kept honest by the repository.
+
+The UART run is **not** a recorded witness. It was measured on 2026-10-12
+(PA100T-EDU, onboard CH340E: 3,600 bytes exact at 115,200 baud, and 1,200
+bytes exact at each of −2.5% and +2.5%), but the test script prints to the
+console only and the raw output was not kept. The run is described in
+[`docs/RESUME_CLOCKED_ARC.md`](docs/RESUME_CLOCKED_ARC.md) and nowhere else, so
+it is a dated account, not evidence CI can re-check.
 
 ---
 
