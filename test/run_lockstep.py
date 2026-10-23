@@ -192,11 +192,20 @@ def main() -> int:
         if mvvp is None:
             return 1
         msame, mbad, _ = compare(mvvp, gold, "mutant")
+        # ⛔ A BENCH FAILURE IS NOT A MOVED STREAM (10-22 must-fire audit):
+        # `mbad` also holds images whose bench failed, so a mutant that only
+        # crashed the bench passed without the digest comparison -- the thing
+        # this gate is -- ever seeing a difference. The must-fire needs one
+        # image whose stream was compared AND moved.
+        moved_d = [i for i, w in mbad if not w.startswith("bench failed")]
+        crashed = [i for i, w in mbad if w.startswith("bench failed")]
         print("    streams that moved under the mutant: %d of %d (%s)"
-              % (len(mbad), len(IMAGES),
-                 ", ".join(i for i, _w in mbad) or "none"))
-        if not mbad:
-            print("    *** MUST-FIRE FAILED: %s left every stream identical "
+              % (len(moved_d), len(IMAGES), ", ".join(moved_d) or "none"))
+        if crashed:
+            print("    bench failed (not counted as moved): %s"
+                  % ", ".join(crashed))
+        if not moved_d:
+            print("    *** MUST-FIRE FAILED: %s moved no compared stream "
                   "-- this gate does not see the schedule" % define)
             rc = 1
     print()

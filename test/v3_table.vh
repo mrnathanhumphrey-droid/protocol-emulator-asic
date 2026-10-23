@@ -55,6 +55,7 @@ function integer v3_tab;
       32'h276a60f5: case (field) 0: v3_tab = 1; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // noop_image_h19.hex
       32'hd4ae6897: case (field) 0: v3_tab = 0; 1: v3_tab = 16; 2: v3_tab = 16; 3: v3_tab = 16; 4: v3_tab = 16; 5: v3_tab = 16; 6: v3_tab = 255; 7: v3_tab = 240; 8: v3_tab = 240; 9: v3_tab = 240; 10: v3_tab = 240; endcase  // onewire_fpga_image.hex
       32'h25978007: case (field) 0: v3_tab = 0; 1: v3_tab = 16; 2: v3_tab = 15; 3: v3_tab = 15; 4: v3_tab = 15; 5: v3_tab = 15; 6: v3_tab = 255; 7: v3_tab = 240; 8: v3_tab = 240; 9: v3_tab = 240; 10: v3_tab = 240; endcase  // onewire_image.hex
+      32'hed7a9929: case (field) 0: v3_tab = 0; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // phases_run: probe_ckhalf.hex
       32'h8c3f866a: case (field) 0: v3_tab = 1; 1: v3_tab = 6; 2: v3_tab = 16; 3: v3_tab = 16; 4: v3_tab = 16; 5: v3_tab = 16; 6: v3_tab = 60; 7: v3_tab = 240; 8: v3_tab = 240; 9: v3_tab = 240; 10: v3_tab = 240; endcase  // pinnone_image.hex
       32'hef71ddff: case (field) 0: v3_tab = 0; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // probe_cov_cemodes.hex
       32'h4fd6fbfa: case (field) 0: v3_tab = 0; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // probe_cov_ds20.hex
@@ -150,6 +151,7 @@ task v3_tab_name;
       32'h276a60f5: $display("  clocked_conform[V3] image: noop_image_h19.hex (by its loaded bytes)");
       32'hd4ae6897: $display("  clocked_conform[V3] image: onewire_fpga_image.hex (by its loaded bytes)");
       32'h25978007: $display("  clocked_conform[V3] image: onewire_image.hex (by its loaded bytes)");
+      32'hed7a9929: $display("  clocked_conform[V3] image: phases_run: probe_ckhalf.hex (by its loaded bytes)");
       32'h8c3f866a: $display("  clocked_conform[V3] image: pinnone_image.hex (by its loaded bytes)");
       32'hef71ddff: $display("  clocked_conform[V3] image: probe_cov_cemodes.hex (by its loaded bytes)");
       32'h4fd6fbfa: $display("  clocked_conform[V3] image: probe_cov_ds20.hex (by its loaded bytes)");

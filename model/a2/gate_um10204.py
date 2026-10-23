@@ -132,6 +132,18 @@ def load():
 OD_ARMS = ("clean", "stretch_mid", "stretch_long", "half")
 
 
+def empty_arms(counts, arms, what):
+    """⛔ S1g (10-22): an arm that contributed ZERO measured items to a section
+    is red, per arm -- never pooled. §1 and §4b(a) counted lanes across every
+    arm together, so the `half` arm measured nothing for nine days while the
+    other arms kept the pooled count above 0. Returns 1 if any arm is empty."""
+    bad = [arm for arm in arms if counts.get(arm, 0) == 0]
+    for arm in bad:
+        print("    *** FAIL %s: the `%s` arm measured nothing here -- a section "
+              "with zero measured items is not a pass" % (what, arm))
+    return 1 if bad else 0
+
+
 def high_len(lane):
     """The lane's programmed HIGH length: `d`, or `d // 2` on a HALF_HIGH lane
     (ruling CE1) -- the golden model's own rule, imported, not restated."""
@@ -175,6 +187,7 @@ def main() -> int:
     print("    %-14s %-6s %-6s %-8s %-8s %-9s %s"
           % ("arm", "lane", "d", "t_HIGH", "t_LOW", "high-d", "verdict"))
     seen_od = 0
+    per1 = {}
     for arm in OD_ARMS:
         a = blob.get(arm)
         if a is None:
@@ -185,6 +198,7 @@ def main() -> int:
             if l["mode"] != 0 or not l.get("t_HIGH"):
                 continue
             seen_od += 1
+            per1[arm] = per1.get(arm, 0) + 1
             # ⭐ CE1: held to the lane's OWN HIGH length (d, or d/2 when
             # HALF_HIGH) -- `d` in the table is still the programmed delay
             d, hi = high_len(l), l["t_HIGH"]["min"]
@@ -197,6 +211,7 @@ def main() -> int:
                                                else ""),
                      hi, lo, "%+d" % (hi - d),
                      "ok" if ok else "*** FAIL t_HIGH < its HIGH length"))
+    rc |= empty_arms(per1, [x for x in OD_ARMS if x in blob], "§1")
     if seen_od == 0:
         print("    *** FAIL no open-drain clocked lane in any arm, so the")
         print("        claim was not measured at all")
@@ -219,9 +234,15 @@ def main() -> int:
             print("    %-12s *** FAIL arm absent from the measurement" % arm)
             rc = 1
             continue
+        # ⛔ AN ARM WITH NO CHECKED LANE IS RED, NOT A PASS (10-22 must-fire
+        # audit): the filter below can drop every lane, and the loop then
+        # printed nothing and left rc alone -- for `half_mutant`, a must-fire
+        # that "did not fail" because it examined nothing.
+        checked = 0
         for l in a["lanes"]:
             if l["mode"] != 0 or not l.get("t_HIGH") or not l.get("t_LOW"):
                 continue
+            checked += 1
             hi, lo = l["t_HIGH"]["min"], l["t_LOW"]["min"]
             landed = hi < l["d"]           # the d/2 phase, not d
             # ⛔ THE LANE'S OWN MODE, NOT THE LOOSEST ONE ITS PHASES MEET: the
@@ -254,6 +275,10 @@ def main() -> int:
                 rc = 1
             print("    %-12s lane %d d=%-4d t_HIGH %-4d t_LOW %-4d %s"
                   % (arm, l["lane"], l["d"], hi, lo, verdict))
+        if checked == 0:
+            print("    %-12s *** FAIL no open-drain lane with both phases "
+                  "measured -- nothing was checked" % arm)
+            rc = 1
 
     # -----------------------------------------------------------------
     # 2. MUST-FIRE: the pre-fix design must MISS it
@@ -323,6 +348,7 @@ def main() -> int:
             print("    %-6s %-6d %-8d %-8d %s"
                   % (l["lane"], l["d"], hi, lo,
                      "yes" if sym else "*** no (%+d)" % (hi - lo)))
+        rc |= empty_arms({"control": len(rows)}, ["control"], "§3")
         if asym:
             # ⛔ THE ARGUMENT WAS MISSING HERE and the line printed a literal
             # `%d`. That is the "a check that cannot speak" shape
@@ -398,6 +424,7 @@ def main() -> int:
     print("      %-13s %-6s %-11s %-9s %s"
           % ("arm", "d", "t_HD;DAT", "periods", "verdict"))
     nmeas = 0
+    per4a = {}
     # ⛔ RULING K4: `corpus_i2c` is REQUIRED, not optional -- it is the arm that
     # contains the clocked SHIFTIN release, and skipping it when absent would
     # restore the blindness that hid the defect.
@@ -422,12 +449,16 @@ def main() -> int:
                          "not measured -- SDA moved in no period"))
                 continue
             nmeas += 1
+            per4a[arm] = per4a.get(arm, 0) + 1
             ok = hd["min"] >= need
             if not ok:
                 rc = 1
             print("      %-13s %-6d %-11d %-9s %s"
                   % (arm, l["d"], hd["min"], l.get("periods"),
                      "ok" if ok else "*** FAIL below %d" % need))
+    rc |= empty_arms(per4a, [x for x in ("clean", "certified", "stretch_mid",
+                                         "stretch_long", "corpus_i2c")
+                             if x in blob], "§4b(a)")
     if nmeas == 0:
         print("      *** FAIL no lane in any arm produced a t_HD;DAT")
         print("          measurement, so the requirement was not checked")
@@ -443,6 +474,7 @@ def main() -> int:
     print("      every lane that has a transition to measure.")
     print("      %-13s %-6s %-7s %-9s %-9s %-9s %s"
           % ("arm", "d", "hold", "mode", "t_r(max)", "budget", "verdict"))
+    per4b = {}
     for arm in ("clean", "certified", "stretch_mid", "stretch_long"):
         a = blob.get(arm)
         if a is None:
@@ -461,6 +493,7 @@ def main() -> int:
                 continue
             tr = cycles(UM10204_MAX[m]["t_r"])
             budget = cycles(UM10204_MAX[m]["t_VD_DAT"]) - tr
+            per4b[arm] = per4b.get(arm, 0) + 1
             ok = hd["modal"] <= budget
             if not ok:
                 rc = 1
@@ -468,10 +501,14 @@ def main() -> int:
                   % (arm, l["d"], hd["modal"], m.split()[0], tr, budget,
                      "ok" if ok else "*** FAIL hold over the budget"))
 
+    rc |= empty_arms(per4b, [x for x in ("clean", "certified", "stretch_mid",
+                                         "stretch_long") if x in blob],
+                     "§4b(b)")
     print()
     print("    (c) setup: t_SU;DAT before the next rise, PER LANE")
     print("      %-13s %-6s %-9s %-9s %-11s %s"
           % ("arm", "d", "mode", "need", "worst seen", "verdict"))
+    per4c = {}
     for arm in ("clean", "certified", "stretch_mid", "stretch_long"):
         a = blob.get(arm)
         if a is None:
@@ -489,6 +526,7 @@ def main() -> int:
                          "not checked -- this clock claims no mode"))
                 continue
             need_su = tc[m]["t_SU_DAT"]
+            per4c[arm] = per4c.get(arm, 0) + 1
             ok = su["min"] >= need_su
             if not ok:
                 rc = 1
@@ -496,6 +534,9 @@ def main() -> int:
                   % (arm, l["d"], m.split()[0], need_su, su["min"],
                      "ok" if ok else "*** FAIL setup below the minimum"))
 
+    rc |= empty_arms(per4c, [x for x in ("clean", "certified", "stretch_mid",
+                                         "stretch_long") if x in blob],
+                     "§4b(c)")
     print()
     print("    (d) SDA must NOT move while SCL is high")
     print("      ⛔⛔ THE FIX FOR (a) CAN CREATE THIS, which is why it")
@@ -527,14 +568,16 @@ def main() -> int:
     cert = blob.get("certified")
     if cert:
         for l in cert["lanes"]:
-            mv = l.get("sda_moves_in_high") or 0
-            even = (mv % 2 == 0)
+            # ⛔ a MISSING field is not "0 moves" (10-22 sweep)
+            mv = l.get("sda_moves_in_high")
+            even = mv is not None and mv % 2 == 0
             if not even:
                 rc = 1
             print("      %-13s %-6d %-9s %-9s %s"
                   % ("certified", l["d"], mv, l.get("periods"),
                      "ok -- %d transaction(s) x (START + STOP)" % (mv // 2)
-                     if even else "*** FAIL not two per transaction"))
+                     if even else "*** FAIL not two per transaction (or not "
+                     "measured)"))
 
     print()
     print("    (e) the MINIMUM LEGAL d the hold implies")
@@ -642,6 +685,9 @@ def main() -> int:
     print("  --- 5. C2: the d each mode needs, and whether d can carry it ---")
     print("    ⛔⛔ `d >= t_LOW(min)` IS NOT THE RULE, AND THE MEASUREMENT IS")
     print("    WHY. t_LOW came out BELOW the programmed d on every lane --")
+    # ⛔ THE CLEAN ARM, by name (10-22 sweep): `a` here was whatever arm the
+    # §4b(d) loop ended on (stretch_long). Same numbers today, wrong source.
+    a = blob.get("clean")
     if a is not None:
         jit = [(l["d"], l["d"] - l["t_LOW"]["min"])
                for l in a["lanes"] if l["mode"] == 0 and l.get("t_LOW")]

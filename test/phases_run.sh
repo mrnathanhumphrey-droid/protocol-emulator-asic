@@ -93,9 +93,39 @@ run_arm() {     # $1=armname $2=image $3=nbytes $4=ncyc $5=label $6=sclhold
     sed -n '1,12p' "$OUT/run_$label.log" 2>/dev/null | sed 's/^/      | /'
     return 1
   fi
+  # ⛔⛔ S1g (10-22): A TRACE THAT EXISTS IS NOT A RUN THAT FINISHED. The two
+  # CE1 half arms ran an image missing from v3_table.vh, V3-ID stopped the
+  # bench FATAL at 34 us of 60,000 cycles, the partial trace was non-empty, and
+  # `gate_um10204` passed on zero lanes from 10-13 to 10-22. So every arm must
+  # now prove it COMPLETED: no fatal stop, the bench's own end-of-loop line
+  # with the planned cycle count, at least one retired action, and (after the
+  # measurement) at least one clock period.
+  if grep -q "FATAL" "$OUT/run_$label.log"; then
+    echo "  *** $label: the bench stopped FATAL -- no measurement"
+    grep -m3 "FATAL" "$OUT/run_$label.log" | sed 's/^/      | /'
+    return 1
+  fi
+  if ! grep -q "^tb_trace: $ncyc cycles" "$OUT/run_$label.log"; then
+    echo "  *** $label: the bench did not reach its planned $ncyc cycles"
+    tail -3 "$OUT/run_$label.log" | sed 's/^/      | /'
+    return 1
+  fi
+  local nret
+  nret=$(grep -o '[0-9]* action(s) retired' "$OUT/run_$label.log" | head -1 \
+         | cut -d' ' -f1)
+  if [ -z "$nret" ] || [ "$nret" -eq 0 ]; then
+    echo "  *** $label: 0 actions retired -- the program never ran"
+    return 1
+  fi
   "$PY" test/measure_phases.py --trace "$OUT/trace_$label.txt" \
         --image "$img" --arm "$label" --json "$JSON" \
         --hold-ns "$hns" || return 1
+  if ! "$PY" -c "import json,sys; a=json.load(open(sys.argv[1]))[sys.argv[2]]; \
+sys.exit(0 if sum(l['periods'] for l in a['lanes']) > 0 else 1)" \
+        "$JSON" "$label"; then
+    echo "  *** $label: 0 clock periods measured on every lane"
+    return 1
+  fi
   return 0
 }
 
@@ -171,7 +201,13 @@ run_arm holdbig "$IMG" "$NB" 40000 holdbig       || rc=1
 # same shape as the clocked defect. Whether the certified frame violates
 # t_HD;DAT is therefore a question to MEASURE, not to assume either way, and
 # sigrok's decode certification says nothing about it.
-"$PY" test/make_smoke_image.py --i2cframe 62 >> "$OUT/img.log" 2>&1
+# ⛔ THE GENERATOR'S EXIT IS CHECKED (10-22 sweep): the image is TRACKED, so
+# `-f` below is always true and a failed regeneration measured the committed
+# file in silence.
+if ! "$PY" test/make_smoke_image.py --i2cframe 62 >> "$OUT/img.log" 2>&1; then
+  echo "  *** make_smoke_image --i2cframe 62 failed; H4 NOT MEASURED"
+  rc=1
+fi
 CERT=test/i2cframe_image.hex
 if [ -f "$CERT" ]; then
   NCERT=$(tr -s ' 

@@ -309,7 +309,11 @@ def identical_arm_is_red():
         if a is None or b is None:
             return False, "preprocess failed"
         d = gma.diff_lines(a, b)
-        return (len(d) == 0), "%d diff line(s)" % len(d)
+        _a, _d, _c, flags = gma.arm_flags("M_MU_SAME", d)
+        return (any(f.startswith("EMPTY") for f in flags),
+                "%d diff line(s), EMPTY rule %s"
+                % (len(d), "fired" if any(f.startswith("EMPTY")
+                                          for f in flags) else "silent"))
     finally:
         os.remove(path)
 

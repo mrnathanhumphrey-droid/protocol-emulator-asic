@@ -88,24 +88,33 @@ SCRATCH_GENERATORS: dict = {
         "clocked": True,
         "why": "the F1 phase instrument with every lane HALF_HIGH, for "
                "phases_run.sh / gate_um10204: it measures t_HIGH / t_LOW / "
-               "t_SU;DAT / t_HD;DAT against UM10204, not the A2 gap"},
+               "t_SU;DAT / t_HD;DAT against UM10204, not the A2 gap",
+        "v3": ["phases_run: probe_ckhalf.hex"]},
     "run_ckack": {
         "script": "test/run_ckack.py", "pattern": "ckack*.hex",
         "clocked": True,
         "why": "the clocked I2C random read against a stretching peer "
                "(ruling ACK): judged by chip bytes == sigrok bytes at every "
-               "stretch, and by its v3_table row"},
+               "stretch, and by its v3_table row",
+        "v3": ["run_ckack: ckack.hex", "run_ckack: ckack_half.hex"]},
     "run_cktx": {
         "script": "test/run_cktx.py", "pattern": "cktx.hex",
         "clocked": True,
         "why": "TX4's clocked widths 1..8 image: judged by Layer V2/V3 "
-               "against its v3_table row"},
+               "against its v3_table row",
+        "v3": ["run_cktx: cktx.hex"]},
     "run_reload": {
         "script": "test/run_reload.py", "pattern": "i2c_write.hex",
         "clocked": True,
         "why": "tb_reload's I2C write program: judged by the FRAM bytes "
-               "written across a reload, not by the A2 gap"},
+               "written across a reload, not by the A2 gap",
+        "v3": {"no_v3_layer": "test/tb_reload.v"}},
 }
+# ⛔⛔ `v3` IS REQUIRED ON EVERY CLOCKED ENTRY (S1g, 10-22): the GENERATED
+# names in model/v3_table.py that register this generator's images, or the
+# bench that loads them and has no V3 layer (its include closure carries no
+# clocked_conform.vh -- gate_wire_feed verifies that). `--ckhalf` had no row,
+# V3-ID stopped both CE1 arms FATAL, and nothing static said so.
 
 TOKEN_ENV = "SIM_RUN_TOKEN"
 MANIFEST = ".sim_run_scratch.json"

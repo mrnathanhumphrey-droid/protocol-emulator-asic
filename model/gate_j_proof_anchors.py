@@ -151,6 +151,12 @@ def port_spec_s7_anchors(text):
     return out
 
 
+def s7_gone(anchors, rtl):
+    """The §7 anchors not found in the RTL. The gate and its must-fire both
+    call this (10-22 must-fire audit: the must-fire retyped the test)."""
+    return [a for a in anchors if a not in rtl]
+
+
 def check(premises=None, rtl=None):
     """The premises not found in the RTL. `premises` / `rtl` are parameters so
     the must-fire runs THIS function, not a copy of its test."""
@@ -261,7 +267,7 @@ def main() -> int:
         print("    *** §7 not found or it has no anchors -- RED, not skipped")
         rc = 1
     else:
-        gone = [a for a in anchors if a not in rtl]
+        gone = s7_gone(anchors, rtl)
         print("    anchors checked : %d, missing : %d" % (len(anchors), len(gone)))
         for a in gone:
             print("    *** GONE from src/pe_engine.v: %r" % a)
@@ -270,7 +276,7 @@ def main() -> int:
         # must-fire: the parser must see an anchor it can reject
         planted = port_spec_s7_anchors(
             "## 7. The v1 exclusions\n| x | `NO_SUCH_SIGNAL_xyz;` |\n### TR-2\n")
-        mf = bool(planted) and planted[0] not in rtl
+        mf = bool(planted) and s7_gone(planted, rtl) == planted
         print("    must-fire: a planted §7 anchor not in the RTL is rejected  %s"
               % ("ok" if mf else "*** NOT REJECTED"))
         if not mf:

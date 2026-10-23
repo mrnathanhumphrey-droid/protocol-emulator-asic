@@ -622,3 +622,11 @@ lane's clocked action.* It is anchored on both lines, the advance and the
   is sigrok-certified at 393.7 kHz.
 - `probe_ckhalf` (`d = 82, 120, 240, 470`) has every HIGH at `d/2` + 4
   cycles, measured.
+  ⚠ **Re-measured 2026-10-22 (S1g).** From 2026-10-13 to 2026-10-22 this
+  measurement did not run: `probe_ckhalf.hex` was missing from
+  `test/v3_table.vh`, V3-ID stopped both CE1 arms FATAL at 34 µs, and
+  `gate_um10204` §1b passed on zero lanes. On 2026-10-22, with the image
+  registered (byte-identical to the 2026-10-09 image, fnv `ed7a9929`):
+  `d = 82, 120, 240` HIGH 45 / 64 / 124 = `d/2` + 4, each meeting Fm. The
+  `d = 470` lane sits on a pad-overridden pin and records no period, so the
+  Sm point above is **not re-measured**.

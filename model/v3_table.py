@@ -160,6 +160,15 @@ def _gen_ckack(half):
     return f
 
 
+def _gen_ckhalf():
+    """phases_run.sh's CE1 arm (`make_smoke_image --ckhalf`): the same call."""
+    import make_smoke_image
+    import pe_isa
+    from pe_isa import FLAG_HALF_HIGH
+    return bytes(pe_isa.full_store(bytes(make_smoke_image.build_ckod(
+        list(make_smoke_image.CKHALF_DELAYS), flags=FLAG_HALF_HIGH))))
+
+
 def _gen_sda_frame(k):
     """gate_sda_hold's `frame_image(hold + k)`: the same call it makes."""
     def f():
@@ -212,6 +221,12 @@ GENERATED = (
      "the clocked random read (ruling ACK), sigrok-judged"),
     ("run_ckack: ckack_half.hex", _gen_ckack(True), 0,
      "the same read at CE1's HALF_HIGH Fm delay"),
+    # ⛔ FOUND 10-22 (S1g): unregistered since V3-ID went fatal (3133e4c,
+    # 10-13), so both CE1 half arms stopped at 34 us and gate_um10204 passed
+    # on zero lanes. Nothing was red because phases_run checked only that a
+    # trace file existed.
+    ("phases_run: probe_ckhalf.hex", _gen_ckhalf, 0,
+     "CE1's HALF_HIGH phase measurement (and its M_HALF_IGNORED must-fire)"),
     ("gate_sda_hold: i2cframe d = hold", _gen_sda_frame(0), 1,
      "the hold-window probe at d = SDA_HOLD, below D*"),
     ("gate_sda_hold: i2cframe d = hold + 1", _gen_sda_frame(1), 1,

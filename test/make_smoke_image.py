@@ -379,6 +379,13 @@ def build_cemodes():
     return full_store(b"".join(hs) + b"".join(prog))
 
 
+#: RULING CE1's phase-measurement delays (`--ckhalf`). One constant, because
+#: model/v3_table.py registers the image through the SAME call (S1g, 10-22:
+#: the image was unregistered, V3-ID stopped both half arms at 34 us, and the
+#: CE1 check passed on zero lanes from 10-13 to 10-22).
+CKHALF_DELAYS = (82, 120, 240, 470)
+
+
 def build_ckod(delays=None, flags=0):
     """OPEN-DRAIN self-clocked lanes at a SPAN of delays -- the F1 instrument.
 
@@ -1559,7 +1566,7 @@ def main() -> int:
         if not base.startswith("probe_"):
             print("--ckhalf needs a probe_ base name, got %r" % base)
             return 1
-        delays = [82, 120, 240, 470]
+        delays = list(CKHALF_DELAYS)
         img = build_ckod(delays, flags=FLAG_HALF_HIGH)
         out = os.path.join(here, base + ".hex")
         write_image(out, img)

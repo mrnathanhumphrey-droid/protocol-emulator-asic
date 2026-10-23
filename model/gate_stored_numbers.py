@@ -506,6 +506,13 @@ SPEC_SYMBOLS = {
     # current by `gate_a2_program`) and measured (`test/a2_run.sh`), never
     # stored here.
     ("test/make_smoke_image.py", "CKDENSE_DELAYS"),
+    # ⭐ `CKHALF_DELAYS` IS CE1's PHASE-INSTRUMENT DESIGN (S1g, 10-22): the four
+    # HALF_HIGH delays `--ckhalf` builds (82 = run_ckack's derived Fm point,
+    # 470 an Sm point), moved to one constant so model/v3_table.py registers
+    # the image through the same call. What it MEASURES -- t_HIGH / t_LOW per
+    # lane -- goes to the phase JSON every run and is adjudicated by
+    # `gate_um10204`, never stored here (as `CKOD_DELAYS` above).
+    ("test/make_smoke_image.py", "CKHALF_DELAYS"),
     ("test/gate_corpus_trace.py", "COLS"),
     # ⭐ `PAD_COLLISION` IS A NAMED-EXEMPTION LIST (ruling P5), like
     # `gate_degenerate_fields.DELIBERATE`: an image, the LANES of it that

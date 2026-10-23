@@ -166,16 +166,19 @@ _JSON_FLOP = ("$_dff", "$_sdff", "$_dffe", "$dff", "$_aldff", "$_dlatch",
               "$_ff", "$_dffsr")
 
 
-def check_json(path: str) -> int:
+def json_verdict(path: str):
+    """(status, info, bad) for a yosys JSON netlist. status: "ok", "comb" (bits
+    driven by a function -- THE F2 failure), or a structural refusal
+    "no_top" / "no_port" / "shape". gate_f2_local's mutant must be "comb":
+    rc == 1 alone also accepted a netlist that failed for being the wrong
+    netlist (10-22 must-fire audit)."""
     import json
     with open(path, encoding="utf-8") as fh:
         d = json.load(fh)
     mods = d.get("modules", {})
     top = "tt_um_protocol_emulator"
     if top not in mods:
-        print("    *** %s not in the JSON (modules: %s)"
-              % (top, list(mods)[:4]))
-        return 1
+        return "no_top", {"modules": list(mods)[:4]}, []
     m = mods[top]
     drv = {}
     for _cn, c in m["cells"].items():
@@ -185,15 +188,14 @@ def check_json(path: str) -> int:
                 for b in bits:
                     if isinstance(b, int):
                         drv[b] = c["type"]
-    print("    cells: %d   driven nets: %d" % (len(m["cells"]), len(drv)))
-    bad, checked = [], 0
+    info = {"cells": len(m["cells"]), "driven": len(drv), "checked": 0}
+    bad = []
     for pname in ("uo_out", "uio_out", "uio_oe"):
         if pname not in m["ports"]:
-            print("    *** port %s absent -- not the netlist we think it is"
-                  % pname)
-            return 1
+            info["port"] = pname
+            return "no_port", info, []
         for i, b in enumerate(m["ports"][pname]["bits"]):
-            checked += 1
+            info["checked"] += 1
             if not isinstance(b, int):
                 kind = "CONST"              # tied 0/1: cannot glitch
             else:
@@ -204,12 +206,28 @@ def check_json(path: str) -> int:
                 bad.append(("%s[%d]" % (pname, i), kind))
     # ⛔ ANTI-VACUITY, same rule as the Verilog path: a check that examined
     # nothing has not run, and 0 violations out of 0 bits is not a pass.
-    if checked != 24:
+    if info["checked"] != 24:
+        return "shape", info, bad
+    return ("comb" if bad else "ok"), info, bad
+
+
+def check_json(path: str) -> int:
+    status, info, bad = json_verdict(path)
+    if status == "no_top":
+        print("    *** tt_um_protocol_emulator not in the JSON (modules: %s)"
+              % info["modules"])
+        return 1
+    print("    cells: %d   driven nets: %d" % (info["cells"], info["driven"]))
+    if status == "no_port":
+        print("    *** port %s absent -- not the netlist we think it is"
+              % info["port"])
+        return 1
+    if status == "shape":
         print("    *** examined %d output bits, expected 24 (8+8+8). The port "
-              "shape changed or the parse is wrong." % checked)
+              "shape changed or the parse is wrong." % info["checked"])
         return 1
     print("    output bits examined: %d   flop-or-const: %d"
-          % (checked, checked - len(bad)))
+          % (info["checked"], info["checked"] - len(bad)))
     if bad:
         print("    *** FAIL: %d bit(s) driven by a function, not a register:"
               % len(bad))

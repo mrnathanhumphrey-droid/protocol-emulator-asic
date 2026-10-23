@@ -487,6 +487,32 @@ def is_comment(t):
     return t.startswith("//") or t.startswith("/*") or t.startswith("*")
 
 
+def arm_flags(mut, changed):
+    """The rule flags for one mutant's diff lines. `audit` and
+    gate_mutant_kills' identical-arm must-fire both call this (10-22
+    must-fire audit: that must-fire checked the diff was empty and never ran
+    the EMPTY rule)."""
+    nadd = sum(1 for s, _ in changed if s == "+")
+    ndel = sum(1 for s, _ in changed if s == "-")
+    ncmt = sum(1 for _, t in changed if is_comment(t))
+    flags = []
+    exp, reason = EXPECT.get(mut, (None, None))
+    if ncmt:
+        flags.append("%d COMMENT line(s) inside an arm: the ifdef "
+                     "wraps more than the delta" % ncmt)
+    if nadd + ndel == 0:
+        flags.append("EMPTY: this mutant changes nothing")
+    if nadd + ndel > MINIMAL and not reason:
+        flags.append("%d lines with no declared reason (budget %d)"
+                     % (nadd + ndel, MINIMAL))
+    if exp is None:
+        flags.append("NOT IN THE EXPECT TABLE -- unreviewed")
+    elif nadd + ndel != exp:
+        flags.append("DRIFT: %d diff lines, expected %d"
+                     % (nadd + ndel, exp))
+    return nadd, ndel, ncmt, flags
+
+
 def audit(src_dir=None):
     """Returns (rc, rows). `src_dir` lets the must-fire point at a mutated copy."""
     global SRC
@@ -505,24 +531,7 @@ def audit(src_dir=None):
                     break
                 changed += diff_lines(off, on)
             else:
-                nadd = sum(1 for s, _ in changed if s == "+")
-                ndel = sum(1 for s, _ in changed if s == "-")
-                ncmt = sum(1 for _, t in changed if is_comment(t))
-                flags = []
-                exp, reason = EXPECT.get(mut, (None, None))
-                if ncmt:
-                    flags.append("%d COMMENT line(s) inside an arm: the ifdef "
-                                 "wraps more than the delta" % ncmt)
-                if nadd + ndel == 0:
-                    flags.append("EMPTY: this mutant changes nothing")
-                if nadd + ndel > MINIMAL and not reason:
-                    flags.append("%d lines with no declared reason (budget %d)"
-                                 % (nadd + ndel, MINIMAL))
-                if exp is None:
-                    flags.append("NOT IN THE EXPECT TABLE -- unreviewed")
-                elif nadd + ndel != exp:
-                    flags.append("DRIFT: %d diff lines, expected %d"
-                                 % (nadd + ndel, exp))
+                nadd, ndel, ncmt, flags = arm_flags(mut, changed)
                 if flags:
                     rc = 1
                 rows.append((mut, nadd, ndel, ncmt, "; ".join(flags)))

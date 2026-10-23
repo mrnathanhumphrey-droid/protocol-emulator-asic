@@ -144,6 +144,26 @@ def distinct_bit(rows, col, bit):
     return len(out)
 
 
+def precondition(name, rows, expect):
+    """[(label, n distinct, required?)] for every port the program's `expect`
+    says it must move. THE precondition: the corpus arms and the census
+    must-fire both call it (10-22 must-fire audit: the must-fire had its own
+    inline `distinct(...) < 2` test)."""
+    out = []
+    for port in ("uo_out", "uio_out", "uio_oe", "uio_in"):
+        if not expect.get(port, False):
+            continue
+        bp = corpus.BIT_PRECONDITION.get(name)
+        if bp and bp[0] == port:
+            n = distinct_bit(rows, port, bp[1])
+            label = "%s[%d]" % (port, bp[1])
+        else:
+            n = distinct(rows, port)
+            label = port
+        out.append((label, n))
+    return out
+
+
 def od_violations(rows, od_pins):
     """D2's INVARIANT: no open-drain pin may ever have oe=1 AND out=1.
 
@@ -283,17 +303,7 @@ def main() -> int:
 
         # ---- THE PRECONDITION -----------------------------------------
         pre_ok = True
-        for port in ("uo_out", "uio_out", "uio_oe", "uio_in"):
-            want = expect.get(port, False)
-            if not want:
-                continue
-            bp = corpus.BIT_PRECONDITION.get(name)
-            if bp and bp[0] == port:
-                n = distinct_bit(rows, port, bp[1])
-                label = "%s[%d]" % (port, bp[1])
-            else:
-                n = distinct(rows, port)
-                label = port
+        for label, n in precondition(name, rows, expect):
             if n < 2:
                 print("      *** %s is CONSTANT (%d value) but this program "
                       "must move it" % (label, n))
@@ -585,8 +595,10 @@ def main() -> int:
     ok, log = iverilog_run(vvp, cen, cen_bytes, "all", ivc)
     if ok and os.path.isfile(ivc):
         _, rows = read_trace(ivc)
-        n_oe = distinct(rows, "uio_oe")
-        n_uo = distinct(rows, "uo_out")
+        # the ALL-LANE expectation: every bank must move
+        pre = dict(precondition("census_image", rows,
+                                {"uo_out": True, "uio_oe": True}))
+        n_oe, n_uo = pre.get("uio_oe", 0), pre.get("uo_out", 0)
         print("  census image: uo_out %d distinct, uio_oe %d distinct"
               % (n_uo, n_oe))
         if n_oe < 2 and n_uo >= 2:

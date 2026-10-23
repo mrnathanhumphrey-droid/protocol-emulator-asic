@@ -46,6 +46,13 @@ def palindrome(b: int) -> bool:
     return rev8(b) == b
 
 
+def pattern_ok(vals) -> bool:
+    """THE RULE: at least one byte that is not its own bit reversal. The gate
+    and its must-fire both call this (10-22 must-fire audit: the must-fire
+    had its own inline copy of the rule)."""
+    return any(not palindrome(b) for b in vals)
+
+
 def patterns():
     """(file, line, label, [bytes]) for every declared payload pattern."""
     out = []
@@ -91,7 +98,7 @@ def selftest() -> int:
         ("0x01, the asymmetric extreme", [0x01], True),
     )
     for label, vals, want_ok in cases:
-        ok = any(not palindrome(b) for b in vals)
+        ok = pattern_ok(vals)
         agree = ok == want_ok
         print("    %-42s %-9s %s"
               % (label, "accepted" if ok else "REJECTED",
@@ -128,10 +135,9 @@ def main() -> int:
     print()
     print("  %-18s %-6s %-20s %s" % ("file", "line", "pattern", "bytes"))
     for name, ln, label, vals in pats:
-        asym = [b for b in vals if not palindrome(b)]
         marks = " ".join("%02X%s" % (b, "" if not palindrome(b) else "(pal)")
                          for b in vals)
-        ok = bool(asym)
+        ok = pattern_ok(vals)
         print("  %-18s %-6d %-20s %s  %s"
               % (name, ln, label, marks,
                  "ok" if ok else "*** PALINDROME-ONLY"))

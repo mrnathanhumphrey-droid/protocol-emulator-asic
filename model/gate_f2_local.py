@@ -40,7 +40,7 @@ def run(path):
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
         rc = f2.check_json(path)
-    return rc, buf.getvalue()
+    return rc, buf.getvalue(), f2.json_verdict(path)[0]
 
 
 def main() -> int:
@@ -50,19 +50,21 @@ def main() -> int:
     print("=" * 78)
     rc = 0
     for env, want, label in (
-            ("PE_NETLIST_JSON", 0, "clean design       must PASS"),
-            ("PE_NETLIST_COMB_JSON", 1, "M_COMB_OUT mutant  must FAIL")):
+            ("PE_NETLIST_JSON", "ok", "clean design       must PASS"),
+            # ⛔ "comb", not rc == 1: a wrong netlist (no top, no port, wrong
+            # bit count) also returns 1 and is not the F2 failure
+            ("PE_NETLIST_COMB_JSON", "comb", "M_COMB_OUT mutant  must FAIL")):
         p = os.environ.get(env)
         if not p or not os.path.isfile(p):
             print("  *** no netlist at %s -- RED rather than skipped" % env)
             rc = 1
             continue
-        got, out = run(p)
+        got_rc, out, got = run(p)
         summary = [l.strip() for l in out.splitlines()
                    if "output bits examined" in l or "$_" in l][:3]
-        ok = (got == want)
-        print("  %-30s %s   (%s)" % (label, "ok" if ok else "*** WRONG",
-                                     os.path.basename(p)))
+        ok = (got == want) and (got_rc == (0 if want == "ok" else 1))
+        print("  %-30s %s   (%s, verdict %s)"
+              % (label, "ok" if ok else "*** WRONG", os.path.basename(p), got))
         for s in summary:
             print("      | %s" % s)
         if not ok:

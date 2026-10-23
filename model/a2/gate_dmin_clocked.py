@@ -484,7 +484,11 @@ def main() -> int:
     fired = 0
     trials = 0
     for dd in (7, 9, 12, 14):
-        naive_d = dd                      # the tightest all-dispatch gap IS d
+        # ⛔ MEASURED, not asserted (10-22 must-fire audit): this read
+        # `naive_d = dd` on the strength of the F1 argument above, so the
+        # must-fire judged a number nobody had composed. It is now the
+        # tightest all-dispatch spacing of the claimed programs AT dd.
+        naive_d = min(min(measure(n, PROGRAMS[n], dd)[3]) for n in CLAIMED)
         corr_d = structural_floor(dd)
         na, ca = jp.admissible(naive_d), jp.admissible(corr_d)
         this = (not na) and ca

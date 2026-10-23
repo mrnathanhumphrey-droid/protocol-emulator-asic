@@ -753,6 +753,64 @@ def check_cocotb(agg) -> int:
     return 1 if rescued else 0
 
 
+def point_problems(agg, classified):
+    """Uncovered line/branch subject points with no classification. The gate
+    and its must-fire both call this (10-22 must-fire audit: the must-fire
+    ran a quiet copy)."""
+    return sorted(key for key, c in agg.items()
+                  if subject(key) and key[2] in ("v_line", "v_branch")
+                  and c == 0 and classified.get(key) is None)
+
+
+def stale_problems(agg, classified):
+    """[(kind, key, count)] for every classified entry that must leave or move:
+    GONE (a tool-divergent anchor absent from the data), ABSENT (any other
+    entry absent), FALSE (UNREACHABLE but covered), PAID (any other covered
+    entry). TOOL_DIVERGENT is exempt from "covered" and only from it."""
+    out = []
+    for key, (st, _why) in sorted(classified.items()):
+        c = agg.get(key)
+        if st == TOOL_DIVERGENT:
+            if c is None:
+                out.append(("GONE", key, c))
+        elif c is None:
+            out.append(("ABSENT", key, c))
+        elif c > 0:
+            out.append(("FALSE" if st == UNREACHABLE else "PAID", key, c))
+    return out
+
+
+def anchor_problems(classified, anchor_text, root=None):
+    """[(kind, f, l, expect, found)]: NOTEXT (a classified anchor with no
+    recorded text), ORPHAN (text for a point nobody classifies), MISSING (the
+    file is gone), MOVED (the line no longer reads as recorded)."""
+    root = ROOT if root is None else root
+    out = []
+    want = {(f, l) for (f, l, _k, _a) in classified}
+    for f, l in sorted(want - set(anchor_text)):
+        out.append(("NOTEXT", f, l, None, None))
+    for f, l in sorted(set(anchor_text) - want):
+        out.append(("ORPHAN", f, l, None, None))
+    src = {}
+    for (f, l), expect in sorted(anchor_text.items()):
+        if f not in src:
+            path = os.path.join(root, f)
+            if not os.path.isfile(path):
+                out.append(("MISSING", f, l, expect, None))
+                src[f] = None
+            else:
+                with open(path, encoding="utf-8", errors="replace") as fh:
+                    src[f] = fh.read().splitlines()
+        lines = src[f]
+        if lines is None:
+            continue
+        found = (lines[l - 1].strip() if 0 < l <= len(lines)
+                 else "<past end of file>")
+        if found != expect:
+            out.append(("MOVED", f, l, expect, found))
+    return out
+
+
 def check_points(agg) -> int:
     """Every uncovered line/branch point in the subject must be classified."""
     rc = 0
@@ -779,13 +837,11 @@ def check_points(agg) -> int:
     print("  --- adjudication: %d uncovered point(s), measured with %s ---"
           % (len(uncovered), TOOL_LABEL))
     by_status = collections.Counter()
-    unclassified = []
     for key in sorted(uncovered):
         hit = CLASSIFIED.get(key)
-        if hit is None:
-            unclassified.append(key)
-        else:
+        if hit is not None:
             by_status[hit[0]] += 1
+    unclassified = point_problems(agg, CLASSIFIED)
     for st, n in sorted(by_status.items()):
         print("    %-14s %d" % (st, n))
     for key in unclassified:
@@ -812,60 +868,43 @@ def check_stale(agg) -> int:
     rc = 0
     print()
     print("  --- stale entries: classified but now covered ---")
-    stale = 0
+    # ⛔ TOOL_DIVERGENT IS EXEMPT FROM "COVERED", AND ONLY IT -- those points
+    # are covered on one Verilator release and not another. ⛔⛔ BUT NOT FROM
+    # "ABSENT": the first version skipped both, and a DRIFTED ANCHOR survived
+    # in silence (the `rx_bit` guard moved an entry by +24, the point came
+    # back absent, and CI -- where that arm reads uncovered -- went red on the
+    # new line). The rules live in `stale_problems`, which the must-fire calls.
     for key, (st, _why) in sorted(CLASSIFIED.items()):
         c = agg.get(key)
-        # ⛔ TOOL_DIVERGENT IS EXEMPT, AND ONLY IT. Those points are covered
-        # on one Verilator release and not another, so "covered" is the
-        # expected reading half the time and failing on it would make the
-        # gate red on whichever version it was not tuned against. ⚠ The
-        # exemption is this narrow on purpose: an UNREACHABLE point that got
-        # covered stays fatal, because that means the written reason is false.
-        if st == TOOL_DIVERGENT:
-            # ⛔⛔ EXEMPT FROM "COVERED", NOT FROM "ABSENT". The first version
-            # skipped both, and a DRIFTED ANCHOR then survived in silence: the
-            # `rx_bit` guard moved this entry's line by +24, the point came
-            # back `absent`, and the gate said nothing -- while on the CI
-            # toolchain, where that arm reads uncovered, its new line number
-            # would have been UNCLASSIFIED and CI would have gone red. Being
-            # covered on some releases is the entry's whole premise; not
-            # existing at all is an anchor that needs moving.
-            if c is None:
-                print("    *** ANCHOR IS GONE  %s line %d %s/%s"
-                      % (key[0], key[1], key[2].replace("v_", ""), key[3]))
-                print("        A tool-divergent entry may be COVERED, but it")
-                print("        must still EXIST. Re-anchor it to the line the")
-                print("        construct moved to.")
-                rc = 1
-                continue
+        if st == TOOL_DIVERGENT and c is not None:
             print("    %-20s line %-5d %s/%-5s tool-divergent (count %s)"
                   % (key[0], key[1], key[2].replace("v_", ""), key[3], c))
-            continue
-        if c is None:
-            print("    *** NOT IN THE DATA  %s line %d %s/%s"
-                  % (key[0], key[1], key[2].replace("v_", ""), key[3]))
+    probs = stale_problems(agg, CLASSIFIED)
+    stale = sum(1 for kind, _k, _c in probs if kind != "GONE")
+    for kind, key, c in probs:
+        rc = 1
+        where = "%s line %d %s/%s" % (key[0], key[1],
+                                       key[2].replace("v_", ""), key[3])
+        if kind == "GONE":
+            print("    *** ANCHOR IS GONE  %s" % where)
+            print("        A tool-divergent entry may be COVERED, but it")
+            print("        must still EXIST. Re-anchor it to the line the")
+            print("        construct moved to.")
+        elif kind == "ABSENT":
+            print("    *** NOT IN THE DATA  %s" % where)
             print("        The point does not exist in the merged coverage.")
             print("        Either the line moved, or the sweep no longer")
             print("        builds the file -- a waiver for a point nothing")
             print("        measures is a waiver that can never be retired.")
-            rc = 1
-            stale += 1
-        elif c > 0:
-            stale += 1
-            if st == UNREACHABLE:
-                print("    *** THE REASON WAS FALSE  %s line %d %s/%s "
-                      "(count %d)" % (key[0], key[1],
-                                      key[2].replace("v_", ""), key[3], c))
-                print("        It was classified UNREACHABLE and a test")
-                print("        reached it. The written reason is wrong and")
-                print("        the mechanism behind it needs re-reading.")
-            else:
-                print("    *** DEBT PAID, ENTRY STALE  %s line %d %s/%s "
-                      "(count %d)" % (key[0], key[1],
-                                      key[2].replace("v_", ""), key[3], c))
-                print("        Remove it: a stale OWED entry claims")
-                print("        something is untested when it is tested.")
-            rc = 1
+        elif kind == "FALSE":
+            print("    *** THE REASON WAS FALSE  %s (count %d)" % (where, c))
+            print("        It was classified UNREACHABLE and a test")
+            print("        reached it. The written reason is wrong and")
+            print("        the mechanism behind it needs re-reading.")
+        else:
+            print("    *** DEBT PAID, ENTRY STALE  %s (count %d)" % (where, c))
+            print("        Remove it: a stale OWED entry claims")
+            print("        something is untested when it is tested.")
     if not stale:
         print("    none -- every classified point is still uncovered")
     return rc
@@ -899,41 +938,26 @@ def check_anchors() -> int:
     rc = 0
     print()
     print("  --- anchors still read as recorded ---")
-    want = {(f, l) for (f, l, _k, _a) in CLASSIFIED}
-    missing = sorted(want - set(ANCHOR_TEXT))
-    for f, l in missing:
-        print("    *** NO RECORDED TEXT  %s line %d" % (f, l))
-        print("        A classified anchor with no source text cannot be")
-        print("        checked for drift. Add it to ANCHOR_TEXT.")
+    probs = anchor_problems(CLASSIFIED, ANCHOR_TEXT)
+    for kind, f, l, expect, found in probs:
         rc = 1
-    stale = sorted(set(ANCHOR_TEXT) - want)
-    for f, l in stale:
-        print("    *** TEXT FOR A POINT NOBODY CLASSIFIES  %s line %d" % (f, l))
-        rc = 1
-    src = {}
-    ok = 0
-    for (f, l), expect in sorted(ANCHOR_TEXT.items()):
-        path = os.path.join(ROOT, f)
-        if f not in src:
-            if not os.path.isfile(path):
-                print("    *** %s is missing entirely" % f)
-                rc = 1
-                src[f] = []
-            else:
-                with open(path, encoding="utf-8", errors="replace") as fh:
-                    src[f] = fh.read().splitlines()
-        lines = src[f]
-        found = lines[l - 1].strip() if 0 < l <= len(lines) else "<past end of file>"
-        if found == expect:
-            ok += 1
-            continue
-        print("    *** ANCHOR MOVED  %s line %d" % (f, l))
-        print("        expected: %s" % expect)
-        print("        found   : %s" % found)
-        print("        ⛔ Re-anchor by applying the MEASURED line shift, not by")
-        print("           grepping for a statement you remember. Then update")
-        print("           ANCHOR_TEXT and the entry's reason together.")
-        rc = 1
+        if kind == "NOTEXT":
+            print("    *** NO RECORDED TEXT  %s line %d" % (f, l))
+            print("        A classified anchor with no source text cannot be")
+            print("        checked for drift. Add it to ANCHOR_TEXT.")
+        elif kind == "ORPHAN":
+            print("    *** TEXT FOR A POINT NOBODY CLASSIFIES  %s line %d"
+                  % (f, l))
+        elif kind == "MISSING":
+            print("    *** %s is missing entirely (anchor line %d)" % (f, l))
+        else:
+            print("    *** ANCHOR MOVED  %s line %d" % (f, l))
+            print("        expected: %s" % expect)
+            print("        found   : %s" % found)
+            print("        ⛔ Re-anchor by applying the MEASURED line shift, not by")
+            print("           grepping for a statement you remember. Then update")
+            print("           ANCHOR_TEXT and the entry's reason together.")
+    ok = len(ANCHOR_TEXT) - sum(1 for p in probs if p[0] in ("MOVED", "MISSING"))
     if rc == 0:
         print("    %d anchors, every one reads as recorded" % ok)
     return rc
@@ -1269,7 +1293,7 @@ def selftest(agg) -> int:
     fake[("src/pe_engine.v", 999999, "v_branch", "if")] = 0
     saved = dict(CLASSIFIED)
     try:
-        bad = check_points_quiet(fake)
+        bad = bool(point_problems(fake, CLASSIFIED))
     finally:
         CLASSIFIED.clear()
         CLASSIFIED.update(saved)
@@ -1278,10 +1302,13 @@ def selftest(agg) -> int:
     if not bad:
         rc = 1
     # (2) a classified point that is covered
+    # ⛔ A NON-DIVERGENT key: the gate exempts TOOL_DIVERGENT from "covered",
+    # so a divergent key here would test a rule the gate does not have
     fake2 = dict(agg)
-    key = next(iter(CLASSIFIED))
+    key = next(k for k, (st, _w) in CLASSIFIED.items() if st != TOOL_DIVERGENT)
     fake2[key] = 7
-    bad2 = check_stale_quiet(fake2)
+    bad2 = any(kind in ("FALSE", "PAID") and k == key
+               for kind, k, _c in stale_problems(fake2, CLASSIFIED))
     print("    %-52s %s" % ("a covered point still in the table is rejected",
                             "ok" if bad2 else "*** ACCEPTED"))
     if not bad2:
@@ -1295,7 +1322,7 @@ def selftest(agg) -> int:
     saved2 = dict(CLASSIFIED)
     CLASSIFIED[probe_key] = (TOOL_DIVERGENT, "x" * 80)
     try:
-        gone = check_stale_quiet_absent(agg)
+        gone = ("GONE", probe_key, None) in stale_problems(agg, CLASSIFIED)
     finally:
         CLASSIFIED.clear()
         CLASSIFIED.update(saved2)
@@ -1309,7 +1336,8 @@ def selftest(agg) -> int:
     saved3 = dict(ANCHOR_TEXT)
     ANCHOR_TEXT[("src/pe_engine.v", 1)] = "this is not what line 1 says"
     try:
-        moved = check_anchors_quiet()
+        moved = any(p[0] == "MOVED" and p[1:3] == ("src/pe_engine.v", 1)
+                    for p in anchor_problems(CLASSIFIED, ANCHOR_TEXT))
     finally:
         ANCHOR_TEXT.clear()
         ANCHOR_TEXT.update(saved3)
@@ -1381,48 +1409,6 @@ def selftest(agg) -> int:
         print("           is what a broken hierarchy aggregation looks like.")
         rc = 1
     return rc
-
-
-def check_points_quiet(agg):
-    out = []
-    for key, c in agg.items():
-        if not subject(key) or key[2] not in ("v_line", "v_branch"):
-            continue
-        if c == 0 and CLASSIFIED.get(key) is None:
-            out.append(key)
-    return bool(out)
-
-
-def check_anchors_quiet():
-    """True if any recorded anchor text no longer matches its line."""
-    src = {}
-    for (f, l), expect in ANCHOR_TEXT.items():
-        path = os.path.join(ROOT, f)
-        if f not in src:
-            if not os.path.isfile(path):
-                return True
-            with open(path, encoding="utf-8", errors="replace") as fh:
-                src[f] = fh.read().splitlines()
-        lines = src[f]
-        found = lines[l - 1].strip() if 0 < l <= len(lines) else None
-        if found != expect:
-            return True
-    return False
-
-
-def check_stale_quiet_absent(agg):
-    """True if any TOOL_DIVERGENT entry's anchor is missing from the data."""
-    for key, (st, _why) in CLASSIFIED.items():
-        if st == TOOL_DIVERGENT and agg.get(key) is None:
-            return True
-    return False
-
-
-def check_stale_quiet(agg):
-    for key in CLASSIFIED:
-        if agg.get(key, 0) > 0:
-            return True
-    return False
 
 
 def main() -> int:

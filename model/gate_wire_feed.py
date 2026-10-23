@@ -421,6 +421,54 @@ def v3_table_currency(path, want):
     return None if have == want else "STALE"
 
 
+def _include_closure(bench, root=ROOT):
+    """Every file `bench` pulls in through `include, transitively."""
+    seen, todo = set(), [bench]
+    while todo:
+        f = todo.pop()
+        if f in seen:
+            continue
+        seen.add(f)
+        try:
+            with open(os.path.join(root, f), encoding="utf-8",
+                      errors="replace") as fh:
+                src = fh.read()
+        except OSError:
+            continue
+        todo += re.findall(r'^\s*`include\s+"([^"]+)"', src, re.M)
+    return seen
+
+
+def scratch_v3_problems(gens, generated_names, closure=_include_closure):
+    """S1g (10-22): every CLOCKED scratch generator in sim_run's registry must
+    name its v3_table rows, or a bench with no V3 layer. STATIC, so a missing
+    row is red before anything runs -- at run time V3-ID stops the bench FATAL,
+    and that stop was swallowed for nine days. The gate and its must-fire both
+    call this."""
+    probs = []
+    for g, e in sorted(gens.items()):
+        if not e.get("clocked"):
+            continue
+        v = e.get("v3")
+        if isinstance(v, list) and v:
+            for n in v:
+                if n not in generated_names:
+                    probs.append("%s names v3_table row %r, which "
+                                 "model/v3_table.py does not register" % (g, n))
+        elif isinstance(v, dict) and v.get("no_v3_layer"):
+            b = v["no_v3_layer"]
+            cl = closure(b)
+            if b not in cl or not os.path.isfile(os.path.join(ROOT, b)):
+                probs.append("%s: bench %s does not exist" % (g, b))
+            elif any(f.endswith("clocked_conform.vh") for f in cl):
+                probs.append("%s claims %s has no V3 layer, but it includes "
+                             "clocked_conform.vh" % (g, b))
+        else:
+            probs.append("%s is a CLOCKED scratch generator with no `v3` "
+                         "declaration (rows, or a bench with no V3 layer)" % g)
+    return probs
+
+
 def main() -> int:
     print()
     print("=" * 78)
@@ -516,12 +564,61 @@ def main() -> int:
         seen_edit = v3_table_currency(epath, want) == "STALE" and edited != want
     finally:
         os.remove(epath)
-    seen_move = v3_table.fnv(bytes(moved)) != v3_table.fnv(imgs["half_image.hex"])
+    # ⛔ THE MOVED BYTE GOES THROUGH THE TABLE, not through fnv() alone (10-22
+    # must-fire audit: this compared two hashes, which proves fnv differs and
+    # nothing about the gate). The table is regenerated from a universe with
+    # one half_image byte moved, and the TRACKED table must then read STALE.
+    # (v3_table imports this file as the module `gate_wire_feed`, which is not
+    # `__main__` when the gate runs as a script: patch THAT module)
+    import gate_wire_feed as wfmod
+    real_universe = wfmod.universe
+    try:
+        def moved_universe():
+            u, p = real_universe()
+            u["half_image.hex"] = bytes(moved)
+            return u, p
+        wfmod.universe = moved_universe
+        moved_text = v3_table.text()
+    finally:
+        wfmod.universe = real_universe
+    seen_move = v3_table_currency(v3_table.OUT, moved_text) == "STALE"
     print("    must-fire: a hand-edited bound is not the generated text  %s"
           % ("red  ok" if seen_edit else "*** MISSED"))
-    print("    must-fire: one image byte moved changes its key           %s"
+    print("    must-fire: one image byte moved makes the table STALE     %s"
           % ("red  ok" if seen_move else "*** MISSED"))
     rc |= 0 if (seen_edit and seen_move) else 1
+
+    # ---- S1g: every clocked scratch generator names its V3 rows (static) ---
+    print()
+    print("  --- every clocked scratch generator is registered in v3_table ---")
+    sys.path.insert(0, os.path.join(ROOT, "test"))
+    import copy
+    import sim_run
+    gnames = {n for n, *_r in v3_table.GENERATED + v3_table.GENERATED_RXBW}
+    gens = sim_run.SCRATCH_GENERATORS
+    sp = scratch_v3_problems(gens, gnames)
+    for p in sp:
+        print("    *** %s" % p)
+    if sp:
+        rc = 1
+    else:
+        print("    %d clocked generator(s), each with its rows or a bench "
+              "with no V3 layer" % sum(1 for e in gens.values()
+                                       if e.get("clocked")))
+    g1 = copy.deepcopy(gens)
+    g1["make_smoke_image --ckhalf"].pop("v3", None)
+    g2 = copy.deepcopy(gens)
+    g2["make_smoke_image --ckhalf"]["v3"] = ["phases_run: no_such.hex"]
+    g3 = copy.deepcopy(gens)
+    g3["run_reload"]["v3"] = {"no_v3_layer": "test/tb_trace.v"}
+    for what, g in (("the S1g state: --ckhalf with no `v3`", g1),
+                    ("a row v3_table does not register", g2),
+                    ("'no V3 layer' on a bench that has one", g3)):
+        red = bool(scratch_v3_problems(g, gnames))
+        print("    must-fire: %-44s %s" % (what, "red  ok" if red
+                                            else "*** MISSED"))
+        if not red:
+            rc = 1
 
     # ---- the five published lanes ------------------------------------------
     print()

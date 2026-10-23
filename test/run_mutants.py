@@ -185,7 +185,10 @@ HALF_IMG = "test/half_image.hex"
 HALF_MUTANTS = [
     ("M_SHARED_BITP",
      "re-merge the TX and RX bit pointers into one",
-     "*** FAIL",
+     # ⛔ THE BYTE-CONTENT CHECK, not "*** FAIL" (10-22 must-fire audit: any
+     # failure at all -- a timeout, a liveness line -- satisfied it). MEASURED:
+     # it dies of `lane 0 byte 1: got 90 want 69 *** FAIL`.
+     re.compile(r"lane \d byte \d+: got [0-9a-f]{2} want [0-9a-f]{2} \*\*\* FAIL"),
      "⛔ WHAT SHIPPED FOR THE LIFE OF THE HOST CHANNEL. OP_SHIFT and OP_SHIFTIN "
      "shared the bit pointer, so the RX byte-complete reset at `a_cnt - 1` "
      "always fired BEFORE the TX host load at `a_cnt`: on corpus_i2c, 124 "
@@ -602,7 +605,11 @@ def main() -> int:
         else:   # "effect" -- a characterised survivor that must still DO something
             fl = flips(out)
             bl = flips(base_out_flips)
-            killed = fl is not None and bl is not None and fl != bl
+            # ⛔ MORE flips, not different ones (10-22 must-fire audit): the
+            # mutation adds a needless refill per park dispatch, so it can
+            # only add swaps; a DROP would be a different defect. MEASURED
+            # 343 vs 319 on the default image.
+            killed = fl is not None and bl is not None and fl > bl
             right = killed
             evidence = "sel flips %s vs baseline %s" % (fl, bl)
         RAN.append(define)
@@ -856,7 +863,8 @@ def main() -> int:
                         continue
                     o = run(v, img=HALF_IMG, extra=h_extra)
                     killed = "tb_half: PASS" not in o
-                    right = want in o
+                    right = (bool(want.search(o)) if hasattr(want, "search")
+                             else want in o)
                     RAN.append(define)
                     print("    %-19s %-40s %s"
                           % (define, breaks[:40],
@@ -874,7 +882,12 @@ def main() -> int:
                 # simulator; the Verilator sweep holds the same arm as XFAIL.
                 o = run(base_h, img=HALF_IMG, extra=h_extra + ["+PLANT_EDGE_RACE"])
                 killed = "tb_half: PASS" not in o
-                right = "rx_e2e" in o or "RX byte" in o
+                # ⛔ A FAILED receive check, not the name of one (10-22
+                # must-fire audit): tb_half prints "RX2: rx_e2e checked ..."
+                # on EVERY run, so `"rx_e2e" in o` was constant True.
+                right = bool(re.search(r"\*\*\* FAIL rx_e2e|RX byte \d+: got "
+                                       r"[0-9a-f]{2}, presented [0-9a-f]{2} "
+                                       r"\*\*\* FAIL", o))
                 print("    %-19s %-40s %s" % ("+PLANT_EDGE_RACE",
                       "MISO changed ON the sampling edge",
                       "RED" if killed and right else "*** SURVIVED ***"))
