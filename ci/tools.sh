@@ -78,6 +78,32 @@ sim_exec() {
   fi
 }
 
+# ⛔⛔ R3 (10-23): A tb_trace RUN COUNTS ONLY IF IT FINISHED. Every layer's
+# verdict line prints from a `final` block, which runs on ANY $finish -- so
+# "layer X spoke" is true of a run that stopped a third of the way through
+# (MEASURED: refill_run, a2_run and store_run accepted a run cut at cycle
+# 20,000 of 60,000 and gate_port_demand, gate_a2_program and gate_store_full
+# all PASSED on it). The proof of completion is tb_trace's normal-path line
+# carrying the cycles that RAN (tb_trace.v prints `cyc` since R3), with the
+# planned count. `*** FAIL` lines are NOT judged here: a must-fire arm is red
+# on purpose. Usage: trace_completed <log> <planned ncyc> <label>
+# ⚠ PIPE-FREE ON PURPOSE: this file is gate_shell_rc's E1-exempt sourced
+# library, which may set no shell options and so may carry no pipe.
+trace_completed() {
+  local log="$1" ncyc="$2" label="$3"
+  if grep -q "FATAL" "$log"; then
+    echo "  *** $label: the bench stopped FATAL -- no verdict"
+    grep -m3 "FATAL" "$log"
+    return 1
+  fi
+  if ! grep -q "^tb_trace: $ncyc cycles" "$log"; then
+    echo "  *** $label: the bench did not run its planned $ncyc cycles"
+    grep -m2 "^tb_trace: \|Verilog \$finish" "$log"
+    return 1
+  fi
+  return 0
+}
+
 tool_banner() {   # tool_banner verilator iverilog vvp yosys ...
   local t p f v
   for t in "$@"; do

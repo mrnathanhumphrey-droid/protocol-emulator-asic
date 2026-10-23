@@ -910,14 +910,14 @@ def main() -> int:
     def trace_run(vvp, img, peer):
         a2 = benchset.a2_slack_arg("test/%s.hex" % img)
         tr = os.path.join(SCRATCH, "mut_ck_trace.txt")
-        o = run(vvp, img="test/%s.hex" % img,
-                extra=["+NBYTES=256", "+PEER=%s" % peer, "+NCYC=40000",
-                       "+OUT=%s" % tr, "+SEED=1", "+ASYNC=0", "+STAYLOAD=0",
-                       "+SCLHOLD=0"] + ([a2] if a2 else [])
-                + gct.feed_args("test/%s.hex" % img))
+        extra = (["+NBYTES=256", "+PEER=%s" % peer, "+NCYC=40000",
+                  "+OUT=%s" % tr, "+SEED=1", "+ASYNC=0", "+STAYLOAD=0",
+                  "+SCLHOLD=0"] + ([a2] if a2 else [])
+                 + gct.feed_args("test/%s.hex" % img))
+        o = run(vvp, img="test/%s.hex" % img, extra=extra)
         _h, rows = gct.read_trace(tr)
         hard = len(gct.od_violations(rows, (gct.corpus.P_SCL, gct.corpus.P_SDA)))
-        return o, hard
+        return o, hard, sim_run.trace_incomplete(o, extra)
 
     base_c = os.path.join(SCRATCH, "mut_ck_base.vvp")
     rc, log = build([], base_c, src=SRC_TRACE)
@@ -927,12 +927,14 @@ def main() -> int:
         survivors.append("tb_trace build")
     else:
         for img, peer in sorted({(e[1], e[2]) for e in CLOCKED_MUTANTS}):
-            o, hard = trace_run(base_c, img, peer)
+            o, hard, why = trace_run(base_c, img, peer)
             nf = o.count("*** FAIL")
+            # ⛔ R3: a baseline that did not FINISH is not clean, FAIL lines
+            # or not -- its verdicts print from `final` after any stop
             print("    baseline %-11s %d FAIL line(s), %d hard-1 cycle(s)   %s"
-                  % (img, nf, hard, "clean" if nf == 0 and hard == 0
-                     else "*** NOT CLEAN"))
-            if nf or hard:
+                  % (img, nf, hard, "clean" if nf == 0 and hard == 0 and not why
+                     else "*** NOT CLEAN%s" % (" (%s)" % why if why else "")))
+            if nf or hard or why:
                 survivors.append("tb_trace baseline %s" % img)
                 ck_ok = False
     if ck_ok:
@@ -943,7 +945,7 @@ def main() -> int:
                 print("    %-19s BUILD FAIL -- not a kill" % define)
                 wrong_reason.append((define, "build"))
                 continue
-            o, hard = trace_run(v, img, peer)
+            o, hard, _why = trace_run(v, img, peer)
             killed = ("*** FAIL" in o) or hard > 0
             right = (hard > 0) if want == "OD_HARD1" else (want in o)
             RAN.append(define)

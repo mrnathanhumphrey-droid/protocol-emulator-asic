@@ -38,11 +38,15 @@ def main():
         raise SystemExit(r.stdout + r.stderr)
     worst = None
     for s in seeds:
-        o = subprocess.run(sim_run.vvp([vvp, "+IMG=" + img, "+NBYTES=256",
-                                        "+PEER=none", "+NCYC=%d" % ncyc, "+SEED=%d" % s,
-                                        "+OUT=" + os.path.join(tmp, "a2w.txt"), "+ASYNC=0",
-                                        "+STAYLOAD=0", "+SCLHOLD=0"], images=[img]),
-                           cwd=ROOT, capture_output=True, text=True).stdout
+        cmd = sim_run.vvp([vvp, "+IMG=" + img, "+NBYTES=256",
+                           "+PEER=none", "+NCYC=%d" % ncyc, "+SEED=%d" % s,
+                           "+OUT=" + os.path.join(tmp, "a2w.txt"), "+ASYNC=0",
+                           "+STAYLOAD=0", "+SCLHOLD=0"], images=[img])
+        o = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True).stdout
+        # ⛔ R3: the [A2] widest line prints from `final` after ANY stop
+        why = sim_run.trace_incomplete(o, cmd)
+        if why:
+            raise SystemExit("*** seed %d: %s" % (s, why))
         m = re.search(r"clocked_conform\[A2\] lanes: budget .* widest (\S+)", o)
         if not m:
             raise SystemExit("*** seed %d: no A2 lanes line -- the bench did not "

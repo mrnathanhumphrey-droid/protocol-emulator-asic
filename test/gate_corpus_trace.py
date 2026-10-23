@@ -100,12 +100,19 @@ def feed_args(img):
 
 def iverilog_run(vvp, img, nbytes, peer, out, phase=1, async_arm=0,
                  stayload=0, sclhold=0):
-    r = run(sim_run.vvp([vvp, "+IMG=%s" % img, "+NBYTES=%d" % nbytes,
-                         "+PEER=%s" % peer, "+OUT=%s" % out, "+NCYC=%d" % NCYC,
-                         "+SEED=%d" % phase, "+ASYNC=%d" % async_arm,
-                         "+STAYLOAD=%d" % stayload, "+SCLHOLD=%d" % sclhold]
-                        + feed_args(img), images=[img]))
-    return r.returncode == 0, (r.stdout + r.stderr)
+    cmd = sim_run.vvp([vvp, "+IMG=%s" % img, "+NBYTES=%d" % nbytes,
+                       "+PEER=%s" % peer, "+OUT=%s" % out, "+NCYC=%d" % NCYC,
+                       "+SEED=%d" % phase, "+ASYNC=%d" % async_arm,
+                       "+STAYLOAD=%d" % stayload, "+SCLHOLD=%d" % sclhold]
+                      + feed_args(img), images=[img])
+    r = run(cmd)
+    log = r.stdout + r.stderr
+    # ⛔ R3: rc 0 and a trace file are true of a run that stopped early; the
+    # verdict lines print from `final` either way. Finished, or not ok.
+    why = sim_run.trace_incomplete(log, cmd)
+    if why:
+        return False, log + "\n*** R3: the run did not finish: %s" % why
+    return r.returncode == 0, log
 
 
 # ⛔ PHASES ARE A SEPARATE AXIS FROM THE X-INITIAL SEED. Wilson's item 3 asks

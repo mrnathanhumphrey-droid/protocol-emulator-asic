@@ -67,6 +67,7 @@ for arm in own light; do
   ( cd "$OUT/build" && sim_exec "$ROOT/$IMG" ./a2.sim +IMG="$ROOT/$IMG" +NBYTES="$NB" +PEER=none \
       +NCYC=60000 +SCLHOLD=0 +A2SLACK="$SL" +OUT="$OUT/trace_$arm.txt" \
       --x-initial unique +verilator+rand+reset+2 ) > "$OUT/run_$arm.log" 2>&1
+  trace_completed "$OUT/run_$arm.log" 60000 "$arm" || rc=1
   if ! grep -q "clocked_conform\[A2\]" "$OUT/run_$arm.log"; then
     echo "  *** $arm: layer A2 never spoke"
     sed -n '1,12p' "$OUT/run_$arm.log" | sed 's/^/      | /'

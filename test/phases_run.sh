@@ -100,16 +100,9 @@ run_arm() {     # $1=armname $2=image $3=nbytes $4=ncyc $5=label $6=sclhold
   # now prove it COMPLETED: no fatal stop, the bench's own end-of-loop line
   # with the planned cycle count, at least one retired action, and (after the
   # measurement) at least one clock period.
-  if grep -q "FATAL" "$OUT/run_$label.log"; then
-    echo "  *** $label: the bench stopped FATAL -- no measurement"
-    grep -m3 "FATAL" "$OUT/run_$label.log" | sed 's/^/      | /'
-    return 1
-  fi
-  if ! grep -q "^tb_trace: $ncyc cycles" "$OUT/run_$label.log"; then
-    echo "  *** $label: the bench did not reach its planned $ncyc cycles"
-    tail -3 "$OUT/run_$label.log" | sed 's/^/      | /'
-    return 1
-  fi
+  # (the FATAL + planned-cycles check is ci/tools.sh's trace_completed, shared
+  # with refill_run / a2_run / store_run; R3 made the cycle line honest)
+  trace_completed "$OUT/run_$label.log" "$ncyc" "$label" || return 1
   local nret
   nret=$(grep -o '[0-9]* action(s) retired' "$OUT/run_$label.log" | head -1 \
          | cut -d' ' -f1)

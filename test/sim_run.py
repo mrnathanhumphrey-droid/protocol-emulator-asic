@@ -429,6 +429,31 @@ def vvp(args, images):
     return argv([tool("vvp")] + list(args), images)
 
 
+def trace_incomplete(out, cmd):
+    """None if a tb_trace run FINISHED, else why not. ⛔⛔ R3 (10-23): every
+    layer's verdict line prints from a `final` block, which runs on ANY
+    $finish, so a run stopped a third of the way through still prints
+    "ok --" lines (MEASURED: 10-15 per arm). Finished means no FATAL line and
+    tb_trace's normal-path line with the cycles that RAN equal to the run's
+    own `+NCYC` -- read from `cmd`, the very list handed to the bench, so the
+    check can never carry a second constant. The shell form is ci/tools.sh's
+    `trace_completed`. `*** FAIL` lines are NOT judged: a must-fire arm is red
+    on purpose."""
+    import re as _re
+    ncyc = [a.split("=", 1)[1] for a in cmd if str(a).startswith("+NCYC=")]
+    if not ncyc:
+        return "no +NCYC on the command line, so completion is undefined"
+    if "FATAL" in out:
+        return "the bench stopped FATAL: %s" % next(
+            l.strip() for l in out.splitlines() if "FATAL" in l)[:120]
+    m = _re.search(r"^tb_trace: (\d+) cycles", out, _re.M)
+    if m is None:
+        return "no 'tb_trace: N cycles' line -- the bench did not reach its end"
+    if m.group(1) != ncyc[-1]:
+        return "ran %s of its planned %s cycles" % (m.group(1), ncyc[-1])
+    return None
+
+
 def cli_images(items):
     """The shell form's image list: `--bench TOP` adds that bench's hardcoded
     / default images; an item starting with `+` is a run plusarg whose

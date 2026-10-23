@@ -77,6 +77,7 @@ while IFS='|' read -r base build imgb nb; do
   ( cd "$OUT/build_$build" && sim_exec "$img" ./store.sim +IMG="$img" +NBYTES="$nb" +PEER=none \
         +NCYC=60000 +SCLHOLD=0 +OUT="$OUT/trace_$base.txt" \
         --x-initial unique +verilator+rand+reset+2 ) > "$OUT/run_$base.log" 2>&1
+  if ! trace_completed "$OUT/run_$base.log" 60000 "$base"; then rc=1; continue; fi
   verdict="$(grep 'clocked_conform\[M\]' "$OUT/run_$base.log" | tail -1)"
   m5="$(grep 'clocked_conform\[M5\]' "$OUT/run_$base.log" | tail -1)"
   if [ -z "$verdict" ] || [ -z "$m5" ]; then

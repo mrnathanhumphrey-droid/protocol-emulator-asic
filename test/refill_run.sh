@@ -65,6 +65,7 @@ run_arm() {     # $1=armname $2=image-path $3=label
       > "$OUT/run_$label.log" 2>&1
   # ⛔ NO `+RBOUND` ON PURPOSE: the arms must run at the ENFORCED DEFAULT, or
   # this measurement would describe a bound the shipped benches do not use.
+  trace_completed "$OUT/run_$label.log" 60000 "$label" || return 1
   if ! grep -q "clocked_conform\[R\]" "$OUT/run_$label.log"; then
     echo "  *** $label: layer R never spoke -- the run produced no verdict"
     sed -n '1,12p' "$OUT/run_$label.log" | sed 's/^/      | /'

@@ -575,7 +575,14 @@ module tb_trace;
     end
 
     $fclose(fd);
-    $display("tb_trace: %0d cycles -> %0s", ncyc, outfile);
+    // ⛔⛔ R3 (10-23): THE COUNT THAT RAN, NOT THE COUNT PLANNED. When
+    // built by Verilator, a $finish called from this process (a task in the loop, or
+    // clocked_conform's V3-ID stop at prime) does NOT end it: the loop exits
+    // early and THIS line still runs. It printed `ncyc`, so a run cut at cycle
+    // 20,000 of 60,000 read "tb_trace: 60000 cycles" (MEASURED), and so did
+    // both S1g half arms stopped FATAL at 34 us. Runners require this line
+    // with their planned count; it now says what actually ran.
+    $display("tb_trace: %0d cycles -> %0s", cyc, outfile);
     $finish;
   end
 

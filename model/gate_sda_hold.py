@@ -128,14 +128,19 @@ def run(vvp, img, peer, feed=None):
     a2 = benchset.a2_slack_arg(img) if img.startswith("test/") else None
     fa = (["+FEEDN=%d" % len(feed), "+FEED=%s" % "".join(
         "%02x" % b for b in feed)] if feed else [])
-    r = subprocess.run(sim_run.vvp([vvp, "+IMG=%s" % img, "+NBYTES=256",
-                                    "+PEER=%s" % peer, "+NCYC=60000",
-                                    "+OUT=%s" % os.path.join(OUT, "t.txt"), "+SEED=1",
-                                    "+ASYNC=0", "+STAYLOAD=0", "+SCLHOLD=0"]
-                                   + ([a2] if a2 else []) + fa, images=[img]),
-                       cwd=ROOT, capture_output=True, text=True,
+    cmd = sim_run.vvp([vvp, "+IMG=%s" % img, "+NBYTES=256",
+                       "+PEER=%s" % peer, "+NCYC=60000",
+                       "+OUT=%s" % os.path.join(OUT, "t.txt"), "+SEED=1",
+                       "+ASYNC=0", "+STAYLOAD=0", "+SCLHOLD=0"]
+                      + ([a2] if a2 else []) + fa, images=[img])
+    r = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True,
                        encoding="utf-8", errors="replace")
     o = r.stdout
+    # ⛔ R3: a run that did not FINISH has no verdict -- its layer H line still
+    # prints from `final` (10-23: this gate read only that line)
+    why = sim_run.trace_incomplete(o, cmd)
+    if why:
+        raise SystemExit("*** gate_sda_hold: %s on %s: %s" % (vvp, img, why))
     rows = {int(m.group(1)): tuple(int(x) for x in m.groups()[1:])
             for m in ROW.finditer(o)}
     cfg, su, wb = CFG.search(o), SU.search(o), WB.search(o)

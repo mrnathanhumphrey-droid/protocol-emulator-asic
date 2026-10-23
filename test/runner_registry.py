@@ -50,6 +50,13 @@ DECLARED = {
                        "the WSL A2 measurement run_gates drives"),
     "test/coverage_sweep.sh": ("helper", "ci/run_gates.sh",
                                "the WSL coverage sweep run_gates drives"),
+    # ⛔ R3 (10-23): it now READS bench output -- `trace_completed` judges a
+    # trace-bench log (FATAL line, the cycles-run line) for the shell runners
+    # that source it. It invokes no bench itself.
+    "ci/tools.sh": ("helper", "test/phases_run.sh",
+                    "the sourced shell library; its trace_completed judges "
+                    "whether a trace-bench run FINISHED for the runners that "
+                    "source it (refill_run, a2_run, store_run, phases_run)"),
     "test/ln1_vl.sh": ("helper", "ci/ln1_replay.py",
                        "the Verilator trace export LN1 drives"),
     "test/phases_run.sh": ("helper", "ci/run_gates.sh",
