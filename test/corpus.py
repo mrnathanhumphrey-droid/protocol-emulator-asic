@@ -639,6 +639,13 @@ PAD_COLLISION = {
         "layout at d = 22..25, so lane 3 is on pins 6/7 for the same reason. "
         "Harmless to its purpose: A2 bounds DISPATCH TIMING, which the "
         "bench reads from the engine, not from the overridden pad."),
+    "probe_ckhalf.hex": (
+        [3],
+        "CE1's HALF_HIGH instrument on `ckod`'s consecutive-pairs layout, so "
+        "lane 3 is on pins 6/7. ⛔ Until 10-23 that lane was the Sm point "
+        "(d = 470) and was NOT declared here: its 10-09 'Sm met' reading came "
+        "off the SPI target's pad. Re-laid out so lane 3 is the span point "
+        "d = 240; Sm (470) is lane 0 on pins 0/1."),
     "ckod_image.hex": (
         [3],
         "the same consecutive-pairs layout, so its highest-delay lane (d = 240) "
@@ -702,9 +709,16 @@ def audit_pad_collisions() -> int:
     # this scanned test/*.hex only
     import image_universe
     imgs = [p for _n, p in image_universe.items()]
-    for p in imgs:
+    # ⛔ R2 (10-23): AND THE SCRATCH IMAGES A RUNNER BUILDS. The universe is the
+    # tracked images, so `probe_ckhalf` (CE1's phase instrument) was never
+    # scanned and its pins-6/7 lane -- the Sm point -- went undeclared from
+    # 10-09 to 10-23. Built through the same call v3_table registers it with.
+    import make_smoke_image
+    scratch = {"probe_ckhalf.hex": make_smoke_image.ckhalf_store}
+    for p in imgs + sorted(scratch):
         name = os.path.basename(p)
-        bad = pad_collisions(dgf.load(p))
+        bad = pad_collisions(list(scratch[p]()) if p in scratch
+                             else dgf.load(p))
         if not bad:
             continue
         if name not in PAD_COLLISION:

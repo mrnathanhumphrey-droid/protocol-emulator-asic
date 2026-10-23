@@ -144,6 +144,95 @@ def empty_arms(counts, arms, what):
     return 1 if bad else 0
 
 
+#: ⛔⛔ R2 (10-23): EVERY SECTION ACCOUNTS FOR EVERY LANE IT EXPECTS. "At least
+#: one measured item per arm" (S1g's guard) passes whenever an arm has OTHER
+#: lanes, which is exactly how CE1's Sm lane (d = 470) went quiet: it sat on
+#: pins 6/7, whose pad the SPI target owns, and no list said so. The expected
+#: lanes are the IMAGE's clocked lanes (its own headers, re-read here, not the
+#: JSON's list); each must be measured in each section that covers its arm, or
+#: carry a reason -- a declared pad collision (test/corpus.py PAD_COLLISION), a
+#: pin this instrument cannot read, or an entry below. A skipped lane that IS
+#: measured is red too: a skip whose reason stopped holding is a stale claim.
+#: (section, arms, measured(lane, claim)) -- `claim` is the mode a lane's own
+#: timings can claim (None = none); §4b(b)/(c) judge only lanes that claim one.
+SECTION_LANES = (
+    ("§1", OD_ARMS, lambda l, c: l["mode"] == 0 and bool(l.get("t_HIGH"))),
+    ("§1b", ("half", "half_mutant"),
+     lambda l, c: l["mode"] == 0 and bool(l.get("t_HIGH")) and bool(l.get("t_LOW"))),
+    ("§2", ("mutant",), lambda l, c: l["mode"] == 0 and bool(l.get("t_HIGH"))),
+    ("§3", ("control",), lambda l, c: bool(l.get("t_HIGH")) and bool(l.get("t_LOW"))
+     and not l.get("pad_overridden")),
+    ("§4b(a)", ("clean", "certified", "stretch_mid", "stretch_long", "corpus_i2c"),
+     lambda l, c: bool(l.get("t_HD_DAT"))),
+    ("§4b(b)", ("clean", "certified", "stretch_mid", "stretch_long"),
+     lambda l, c: bool(l.get("t_HD_DAT")) and c is not None),
+    ("§4b(c)", ("clean", "certified", "stretch_mid", "stretch_long"),
+     lambda l, c: bool(l.get("t_SU_DAT")) and c is not None),
+)
+#: (section, image, lane) -> why that lane is not measured THERE. Empty today:
+#: every unmeasured lane is a pad collision or an unreadable pin.
+SECTION_SKIPS: dict = {}
+#: the instrument reads `uio_in` (8 bits) -- measure_phases.read_trace
+UIO_PINS = 8
+
+
+def lane_problems(blob, tc, root=None, collisions=None, skips=None):
+    """[problem] for the expected-lane rule; the gate and its must-fire call it."""
+    root = os.path.dirname(os.path.dirname(HERE)) if root is None else root
+    if collisions is None:
+        sys.path.insert(0, os.path.join(root, "test"))
+        import corpus
+        collisions = corpus.PAD_COLLISION
+    skips = SECTION_SKIPS if skips is None else skips
+    import measure_phases as mp
+    probs = []
+    for sec, arms, measured in SECTION_LANES:
+        for arm in arms:
+            a = blob.get(arm)
+            if a is None:
+                continue                  # absence is each section's own red
+            img = a.get("image")
+            ipath = os.path.join(root, "test", img or "")
+            if not img or not os.path.isfile(ipath):
+                probs.append("%s %s: image %r not found -- expected lanes "
+                             "unknown" % (sec, arm, img))
+                continue
+            want = {e["lane"] for e in mp.lanes_of(mp.load_image(ipath))}
+            got = {l["lane"]: l for l in a["lanes"]}
+            if set(got) != want:
+                probs.append("%s %s: the measurement's lanes %s are not the "
+                             "image's clocked lanes %s" % (sec, arm,
+                                                           sorted(got), sorted(want)))
+            for ln in sorted(want):
+                l = got.get(ln)
+                if l is None:
+                    continue
+                lo = (l.get("t_LOW") or {}).get("min")
+                hi = (l.get("t_HIGH") or {}).get("min")
+                claim = claimable(lo, hi, tc) if lo is not None and hi is not None else None
+                is_m = measured(l, claim)
+                why = None
+                if ln in collisions.get(img, ([], ""))[0]:
+                    why = "pad collision (corpus.PAD_COLLISION)"
+                elif l["pin"] >= UIO_PINS or l["clkpin"] >= UIO_PINS:
+                    why = "pin %d/%d is not uio -- this instrument reads uio_in" % (
+                        l["pin"], l["clkpin"])
+                elif (sec, img, ln) in skips:
+                    why = skips[(sec, img, ln)]
+                if not is_m and why is None:
+                    probs.append("%s %s lane %d (d = %d, pins %d/%d): EXPECTED "
+                                 "and NOT MEASURED, with no declared reason"
+                                 % (sec, arm, ln, l["d"], l["pin"], l["clkpin"]))
+                elif is_m and why is not None:
+                    # ⛔ a skipped lane with readings: either the skip is stale,
+                    # or (a pad collision) a FOREIGN pad's reading is about to be
+                    # judged as this lane's -- the 10-09 Sm "measurement"
+                    probs.append("%s %s lane %d is MEASURED but skipped (%s) -- "
+                                 "a stale skip, or a reading this lane does not "
+                                 "own" % (sec, arm, ln, why))
+    return probs
+
+
 def high_len(lane):
     """The lane's programmed HIGH length: `d`, or `d // 2` on a HALF_HIGH lane
     (ruling CE1) -- the golden model's own rule, imported, not restated."""
@@ -167,6 +256,46 @@ def main() -> int:
         print("      passes because of what it guards.")
         return 1
     print("  measurement : %s" % path)
+    tc = table_cycles()
+
+    # -----------------------------------------------------------------
+    # 0. R2: every section accounts for every lane its arms' images program
+    # -----------------------------------------------------------------
+    print()
+    print("  --- 0. expected lanes: measured, or skipped for a stated reason ---")
+    lp = lane_problems(blob, tc)
+    for p in lp:
+        print("    *** FAIL %s" % p)
+    if lp:
+        rc = 1
+    else:
+        print("    every expected lane in every section is measured, a declared")
+        print("    pad collision, or on a pin this instrument cannot read")
+    import copy
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(HERE)), "test"))
+    import corpus
+    m1 = copy.deepcopy(blob)
+    for l in m1["half"]["lanes"]:
+        if l["d"] == 470:
+            l["t_HIGH"] = l["t_LOW"] = None
+    m2 = copy.deepcopy(blob)
+    for l in m2["clean"]["lanes"]:
+        if l["lane"] == 3:
+            l["t_HIGH"] = {"min": 245, "max": 245, "n": 8}
+    m3 = copy.deepcopy(blob)
+    m3["half"]["lanes"] = [l for l in m3["half"]["lanes"] if l["lane"] != 0]
+    no_ckhalf = {k: v for k, v in corpus.PAD_COLLISION.items()
+                 if k != "probe_ckhalf.hex"}
+    for what, probs in (
+            ("the Sm lane unmeasured (the S1g shape)", lane_problems(m1, tc)),
+            ("a collision lane with readings (10-09)", lane_problems(m2, tc)),
+            ("a lane missing from the measurement", lane_problems(m3, tc)),
+            ("probe_ckhalf not declared a collision",
+             lane_problems(blob, tc, collisions=no_ckhalf))):
+        red = bool(probs)
+        print("    must-fire: %-42s %s" % (what, "red  ok" if red else "*** MISSED"))
+        if not red:
+            rc = 1
     print("  arms        : %s" % ", ".join(sorted(blob)))
     tc = table_cycles()
     print()

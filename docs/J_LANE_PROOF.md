@@ -630,3 +630,12 @@ lane's clocked action.* It is anchored on both lines, the advance and the
   `d = 82, 120, 240` HIGH 45 / 64 / 124 = `d/2` + 4, each meeting Fm. The
   `d = 470` lane sits on a pad-overridden pin and records no period, so the
   Sm point above is **not re-measured**.
+  ⚠ **And the 2026-10-09 Sm reading was not evidence (R2, 2026-10-23).** That
+  lane was on pins 6/7 -- CS_PIN / MISO_PIN, whose pad the SPI target owns
+  (`test/corpus.py` PAD_COLLISION) -- and `probe_ckhalf` was never declared a
+  collision. Its 8 periods in 60,000 cycles were the foreign pad, not the
+  lane's clock. The instrument is re-laid out (`CKHALF_DELAYS = (470, 82, 120,
+  240)`): Sm is lane 0 on pins 0/1, and on 2026-10-23 measured `t_HIGH` 239
+  (`d/2` + 4) and `t_LOW` 461 over 77 periods (period 700 cycles): an Sm clock
+  meeting 200 / 235. That is the first live Sm measurement. `d = 240` now takes
+  the colliding pair and is declared there.

@@ -163,10 +163,7 @@ def _gen_ckack(half):
 def _gen_ckhalf():
     """phases_run.sh's CE1 arm (`make_smoke_image --ckhalf`): the same call."""
     import make_smoke_image
-    import pe_isa
-    from pe_isa import FLAG_HALF_HIGH
-    return bytes(pe_isa.full_store(bytes(make_smoke_image.build_ckod(
-        list(make_smoke_image.CKHALF_DELAYS), flags=FLAG_HALF_HIGH))))
+    return make_smoke_image.ckhalf_store()
 
 
 def _gen_sda_frame(k):

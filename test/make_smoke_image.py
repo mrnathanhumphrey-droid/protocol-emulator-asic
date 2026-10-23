@@ -383,7 +383,22 @@ def build_cemodes():
 #: model/v3_table.py registers the image through the SAME call (S1g, 10-22:
 #: the image was unregistered, V3-ID stopped both half arms at 34 us, and the
 #: CE1 check passed on zero lanes from 10-13 to 10-22).
-CKHALF_DELAYS = (82, 120, 240, 470)
+#: ⛔⛔ R2 (10-23): THE Sm LANE IS FIRST, NOT LAST. `build_ckod` puts lane k on
+#: pins 2k / 2k+1, so lane 3 lands on 6/7 -- CS_PIN / MISO_PIN, whose pad the
+#: SPI target owns (corpus.PAD_COLLISION). Until 10-23 that lane was d = 470,
+#: the Sm point, and its 10-09 "Sm met" reading was taken off that foreign pad.
+#: The span point 240, which no mode claim rests on, takes the colliding pair.
+CKHALF_DELAYS = (470, 82, 120, 240)
+
+
+def ckhalf_store():
+    """The full 256-byte store `--ckhalf` loads -- THE one builder, used by
+    model/v3_table.py (its V3 row) and test/corpus.py (its pad-collision
+    audit, which scans the image universe and so never saw this scratch image:
+    R2, 10-23, why its pins-6/7 lane went undeclared from 10-09)."""
+    import pe_isa
+    return bytes(pe_isa.full_store(bytes(build_ckod(
+        list(CKHALF_DELAYS), flags=FLAG_HALF_HIGH))))
 
 
 def build_ckod(delays=None, flags=0):

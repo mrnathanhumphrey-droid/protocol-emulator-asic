@@ -402,6 +402,11 @@ SPEC_SYMBOLS = {
     # the data change past the next clock rise -- a worse defect than the one
     # the hold fixes.
     ("model/a2/gate_um10204.py", "UM10204_MAX"),
+    # ⭐ R2's expected-lane rule (10-23): which sections cover which arms, and
+    # what "measured" means in each. A SPECIFICATION -- its digits are section
+    # labels (§1, §4b) and the I2C mode code 0 -- with nothing observed in it;
+    # the lanes it expects come from each arm's image headers at run time.
+    ("model/a2/gate_um10204.py", "SECTION_LANES"),
     # ⭐ THE DELAY SPAN THE HIGH-PHASE INSTRUMENT SWEEPS. An experiment design,
     # not an observation: four periods spanning 13x, chosen because the defect
     # being caught was a high phase that did not move with `d` AT ALL, and a
