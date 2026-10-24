@@ -66,6 +66,10 @@ INTENDED_ROM56 = [0x28, 0xA2, 0xC3, 0x4D, 0x05, 0x00, 0x00]
 #: the self-test of `crc8` below
 AN27_ROM56, AN27_CRC = [0x02, 0x1C, 0xB8, 0x01, 0x00, 0x00, 0x00], 0xA2
 TEMP_RAW = 0x0191                       # the model's result: +25.0625 C
+#: the timing classes test/ds18b20_model.v reports as `OW-T <name>` (R4 #18):
+#: every one must appear, or the timing checks below ran on nothing
+OW_T_NAMES = frozenset(("tLOW1", "tLOW0", "tRSTL", "tRSTH", "tREC",
+                        "tSLOT+tREC"))
 ROM_TXN = [("reset",), ("write", 0x33), ("read", 8, "rom")]
 
 
@@ -149,6 +153,7 @@ def parse(txt):
     m = re.search(r"^OW-MODEL violations=(\d+)", txt, re.M)
     d["viol"] = int(m.group(1)) if m else None
     d["t"] = {}
+    # (the six names ds18b20_model.v prints; R4 #18 requires every one)
     for nm, n, mn, mx, lo, hi in re.findall(
             r"^OW-T (\S+) n=(\d+) min_ns=([\d.]+) max_ns=([\d.]+) "
             r"lo_ns=([\d.]+) hi_ns=(\S+)", txt, re.M):
@@ -232,6 +237,12 @@ def judge(d, rxmap):
             len(pol) >= 2 and pol[0] == 0x00 and pol[-1] not in (None, 0x00),
             " ".join("%02X" % b if b is not None else "--" for b in pol))
     chk("peer model: zero timing violations", d["viol"] == 0, "%s" % d["viol"])
+    # ⛔ R4 #18 (10-23): ALL SIX timing classes the peer model reports
+    # (ds18b20_model.v) -- with none, the loop below checked nothing and passed
+    chk("peer model reported all 6 timing classes",
+        set(d["t"]) == OW_T_NAMES,
+        "missing %s" % sorted(OW_T_NAMES - set(d["t"])) if set(d["t"]) != OW_T_NAMES
+        else "")
     for nm, v in sorted(d["t"].items()):
         n, mn, mx, lo, hi = v
         chk("timing %s in [%s, %s] us" % (nm, lo / 1000,

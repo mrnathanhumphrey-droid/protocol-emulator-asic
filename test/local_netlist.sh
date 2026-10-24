@@ -9,20 +9,26 @@
 set -uo pipefail
 cd "${1:-/mnt/d/ProtocolEmulator}" || exit 1
 DEFS="${2:-}"      # e.g. M_COMB_OUT, to price the check
-cat > /tmp/nl.ys <<'YS'
+# ⛔ R4 #28 (10-23): A PRIVATE DIRECTORY, not /tmp/nl.ys + /tmp/local_netlist.json.
+# WSL's /tmp is shared by every worktree, and the gate lock is per tree, so two
+# trees building at once could read each other's netlist.
+NLD="$(mktemp -d)"
+trap 'rm -rf "$NLD"' EXIT
+cat > "$NLD/nl.ys" <<'YS'
 read_verilog DEFARGS src/pe_store.v
 read_verilog DEFARGS src/pe_engine.v
 read_verilog DEFARGS src/project.v
 hierarchy -top tt_um_protocol_emulator
 synth -top tt_um_protocol_emulator -flatten
-write_json /tmp/local_netlist.json
+write_json NLJSON
 YS
-if [ -n "$DEFS" ]; then sed -i "s|DEFARGS|-D $DEFS|g" /tmp/nl.ys; else sed -i "s|DEFARGS ||g" /tmp/nl.ys; fi
+sed -i "s|NLJSON|$NLD/local_netlist.json|" "$NLD/nl.ys"
+if [ -n "$DEFS" ]; then sed -i "s|DEFARGS|-D $DEFS|g" "$NLD/nl.ys"; else sed -i "s|DEFARGS ||g" "$NLD/nl.ys"; fi
 . ci/tools.sh              # ruling V: $YS from PE_YOSYS, made absolute
 tool_banner yosys
-"$YS" -s /tmp/nl.ys > /tmp/nl.log 2>&1
+"$YS" -s "$NLD/nl.ys" > "$NLD/nl.log" 2>&1
 RC=$?
-if [ "$RC" -ne 0 ]; then echo "yosys failed ($RC); see /tmp/nl.log"; exit 1; fi
+if [ "$RC" -ne 0 ]; then echo "yosys failed ($RC):"; tail -20 "$NLD/nl.log"; exit 1; fi
 OUT="${3:-local_netlist}"
 # ⭐ THE DESTINATION IS AN ARGUMENT, so a Linux CI runner uses THIS script
 # rather than a second copy of the yosys recipe pasted into the workflow. A
@@ -31,5 +37,5 @@ OUT="${3:-local_netlist}"
 # /mnt/c/tmp that the local flow reads.
 OUTDIR="${4:-/mnt/c/tmp}"
 mkdir -p "$OUTDIR"
-cp /tmp/local_netlist.json "$OUTDIR/$OUT.json"
-echo "json -> $OUTDIR/$OUT.json ($(wc -c < /tmp/local_netlist.json) bytes) defs=[$DEFS]"
+cp "$NLD/local_netlist.json" "$OUTDIR/$OUT.json"
+echo "json -> $OUTDIR/$OUT.json ($(wc -c < "$NLD/local_netlist.json") bytes) defs=[$DEFS]"

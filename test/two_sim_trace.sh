@@ -49,6 +49,18 @@ NORM="$(mktemp -d)"
 trap 'rm -rf "$NORM"' EXIT
 tr -d '\r' < "$IV" > "$NORM/iv.norm" || { echo "  *** cannot write $NORM"; exit 1; }
 tr -d '\r' < "$VL" > "$NORM/vl.norm" || { echo "  *** cannot write $NORM"; exit 1; }
+# ⛔ R4 #10 (10-23): EACH TRACE MUST BE WHOLE. Two traces cut at the same row
+# are "CYCLE-EXACT" (MEASURED: 100 rows of a 60,000-cycle run). The header
+# names the planned cycle count; the body must carry exactly that many rows.
+for f in "$NORM/iv.norm" "$NORM/vl.norm"; do
+    want=$(head -1 "$f" | sed -n 's/.* ncyc=\([0-9]*\).*/\1/p')
+    got=$(grep -vc '^#' "$f")
+    if [ -z "$want" ] || [ "$got" != "$want" ]; then
+        echo "  *** $(basename "$f" .norm): $got body row(s), header ncyc=${want:-?}"
+        echo "      -- the run did not finish; a comparison would prove nothing"
+        exit 1
+    fi
+done
 
 # ---- PROVENANCE FIRST ------------------------------------------------------
 # The header is compared BEFORE the body, because the first run of this pair

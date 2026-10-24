@@ -639,12 +639,18 @@ def main() -> int:
     nb5 = len(open(a5).read().split())
 
     def all5(v, seed):
-        r = run(sim_run.vvp([v, "+IMG=%s" % a5, "+NBYTES=%d" % nb5,
-                             "+PEER=all", "+OUT=%s" % os.path.join(TMP, "rx_all5.txt"),
-                             "+NCYC=200000", "+SEED=%d" % seed, "+ASYNC=0",
-                             "+STAYLOAD=0", "+SCLHOLD=0", "+SPI_SCK_INV=0"],
-                            images=[a5]))
-        return r.stdout + r.stderr
+        cmd = sim_run.vvp([v, "+IMG=%s" % a5, "+NBYTES=%d" % nb5,
+                           "+PEER=all", "+OUT=%s" % os.path.join(TMP, "rx_all5.txt"),
+                           "+NCYC=200000", "+SEED=%d" % seed, "+ASYNC=0",
+                           "+STAYLOAD=0", "+SCLHOLD=0", "+SPI_SCK_INV=0"],
+                          images=[a5])
+        r = run(cmd)
+        o = r.stdout + r.stderr
+        # ⛔ R4 #11: rx_e2e's verdict prints from `final` after any stop
+        why = sim_run.trace_incomplete(o, cmd)
+        if why:
+            raise SystemExit("*** corpus_all5 seed %d: %s" % (seed, why))
+        return o
 
     for seed in range(1, 7):
         o = all5(vvp, seed)
@@ -701,13 +707,18 @@ def main() -> int:
         fh.write("\n".join("%02x" % b for b in store4) + "\n")
 
     def spim4(v, extra=()):
-        r = run(sim_run.vvp([v, "+IMG=%s" % d4, "+NBYTES=256", "+PEER=spi",
-                             "+OUT=%s" % os.path.join(TMP, "rx_d4.txt"), "+NCYC=60000",
-                             "+SEED=1", "+ASYNC=0", "+STAYLOAD=0", "+SCLHOLD=0",
-                             "+SPI_SCK_INV=0"] + feed_args(os.path.join(ROOT, "test",
-                                                                        "corpus_spim.hex"))
-                            + list(extra), images=[d4]))
+        cmd = sim_run.vvp([v, "+IMG=%s" % d4, "+NBYTES=256", "+PEER=spi",
+                           "+OUT=%s" % os.path.join(TMP, "rx_d4.txt"), "+NCYC=60000",
+                           "+SEED=1", "+ASYNC=0", "+STAYLOAD=0", "+SCLHOLD=0",
+                           "+SPI_SCK_INV=0"] + feed_args(os.path.join(ROOT, "test",
+                                                                      "corpus_spim.hex"))
+                          + list(extra), images=[d4])
+        r = run(cmd)
         o = r.stdout + r.stderr
+        # ⛔ R4 #11: EX1 / rx_e2e print from `final` after any stop
+        why = sim_run.trace_incomplete(o, cmd)
+        if why:
+            raise SystemExit("*** spim_d4 %s: %s" % (" ".join(extra) or "clean", why))
         m = re.search(r"boundary consumes \(= 1\): (\d+)", o)
         return o, (int(m.group(1)) if m else None)
 

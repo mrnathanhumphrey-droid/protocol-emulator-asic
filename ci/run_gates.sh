@@ -770,6 +770,9 @@ if [ -z "${PE_COCOTB_DAT:-}" ] && [ "${PE_SKIP_COVERAGE:-0}" != "1" ]; then
   echo
   echo "  --- cocotb coverage arm (ruling 2) ---"
   CC_OK=0
+  # ⛔ R4 #5 (10-23): a failed arm must not leave an EARLIER run's data where
+  # the gate looks -- gate_coverage reads only an exported PE_COCOTB_DAT now
+  rm -f "$ROOT/probe_cov/cocotb_coverage.dat"
   if command -v "$VL" >/dev/null 2>&1 || [ -n "${PE_VERILATOR:-}" ]; then
     if bash test/coverage_cocotb.sh "$ROOT/probe_cov"; then CC_OK=1; fi
   elif command -v wsl.exe >/dev/null 2>&1; then

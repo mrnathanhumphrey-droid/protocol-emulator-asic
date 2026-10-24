@@ -642,7 +642,10 @@ def subject(key):
 
 #: the cocotb suite's own coverage, produced by `test/coverage_cocotb.sh`
 COCOTB_DAT = os.environ.get(
-    "PE_COCOTB_DAT", os.path.join(ROOT, "probe_cov", "cocotb_coverage.dat"))
+    # ⛔ R4 #5 (10-23): NO DEFAULT PATH. run_gates exports this only when the
+    # cocotb arm produced data THIS run; a default read an earlier run's file
+    # whenever the arm failed.
+    "PE_COCOTB_DAT", "")
 
 
 def norm_path(fn):

@@ -238,12 +238,17 @@ print('\n'.join(json.load(open(sys.argv[1]))[int(sys.argv[2])]['args']))
   # `$finish`, then ran a verdict that of course failed). A `final` block is
   # DIFFERENT: it is defined to run at `$finish`, it is instrumentation
   # rather than bench-verdict code, and both simulators honour it.
+  # ⛔ R4 #3b (10-23): AND rx_e2e.vh, which reports from `final` too -- its
+  # "*** FAIL rx_e2e" lines (DL1's "STOPPED with receive work owed" among
+  # them) and its EX1 lines were CUT before the grep below ever saw them.
   awk '/Verilog \$finish/{seen=1} !seen{print}
-       seen && (/progress\.vh/ || /clocked_conform/){print}' "$log" > "$cut"
+       seen && (/progress\.vh/ || /clocked_conform/ || /rx_e2e/ || /EX1/){print}' "$log" > "$cut"
   # ⚠ CASE-SENSITIVE ON PURPOSE. `-i` matched the word "failure" inside
   # `tb_csat`'s own line "sticky_ovr observed : 0 (recorded, not a failure)"
   # and failed an arm that had passed.
-  nf=$(grep -cE '\*\*\* FAIL|FAILURE\(S\)|FAILED|%Error|Aborting' "$cut")
+  # ⛔ R4 #3: and FATAL -- 53 bench FATAL lines carry no "*** FAIL", and a
+  # bench without progress.vh had nothing else to go red on.
+  nf=$(grep -cE '\*\*\* FAIL|FAILURE\(S\)|FAILED|FATAL|%Error|Aborting' "$cut")
   # ⛔⛔ A DECLARED XFAIL ARM MUST COME OUT RED, and that is how the VERDICT
   # PIPELINE itself is priced. This extraction is a checker, and it was
   # silently broken for as long as the watchdogs existed: the grep above

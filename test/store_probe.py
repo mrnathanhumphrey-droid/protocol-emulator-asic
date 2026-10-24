@@ -53,6 +53,12 @@ def build_falloff():
 
 
 def main() -> int:
+    # ⛔ R4 #S (10-23): the caller's directory. store_run.sh takes an OUT and
+    # ran its arms from it, while this always wrote probe_store/ -- so any
+    # non-default OUT ran no arm at all.
+    global OUT
+    if len(sys.argv) > 1:
+        OUT = os.path.abspath(sys.argv[1])
     os.makedirs(OUT, exist_ok=True)
     for name in SHIPPED:
         img = load(os.path.join(HERE, name))

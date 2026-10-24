@@ -176,12 +176,18 @@ for S in $SEEDS; do
               "+STAYLOAD=$STAYLOAD" "+SCLHOLD=$SCLHOLD" $EXTRA \
               "+verilator+rand+reset+2" "+verilator+seed+$S" \
               > "$OUTDIR/run_s$S.log" 2>&1
-              > "$OUTDIR/run_s$S.log" 2>&1
+    # ⛔ R4 (10-23): THE REDIRECT WAS HERE TWICE. The second copy, on its own
+    # line, is a separate EMPTY command -- it truncated every run log to 0
+    # bytes right after the simulation wrote it, so `tail` below showed
+    # nothing and no check could read the log. Found by trace_completed.
     if [ ! -s "$OUTDIR/s$S.txt" ]; then
         echo "  *** seed $S produced no trace. Log: $OUTDIR/run_s$S.log"
         tail -15 "$OUTDIR/run_s$S.log"
         exit 1
     fi
+    # ⛔ R4 #9 (10-23): a non-empty trace is not a finished run -- three
+    # equally cut traces "agree" across seeds
+    trace_completed "$OUTDIR/run_s$S.log" "$NCYC" "seed $S" || exit 1
     printf "  seed %-6s lines=%-6s sha=%s  %s\n" "$S" \
         "$(wc -l < "$OUTDIR/s$S.txt")" \
         "$(sha256sum "$OUTDIR/s$S.txt" | cut -c1-12)" \

@@ -79,6 +79,13 @@ def run(vvp, extra=()):
                       images=[IMG])
     r = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True,
                        encoding="utf-8", errors="replace")
+    # ⛔ R4 #21 (10-23): with zero rows every check is False, so a must-fire
+    # with no wrong-reason check (M_TX_LOAD_ANYPHASE) "fired" on a run that
+    # never happened. A run that did not finish is no evidence either way.
+    why = sim_run.trace_incomplete((r.stdout or "") + (r.stderr or ""), cmd)
+    if why:
+        raise SystemExit("*** run_spim_witness %s: %s"
+                         % (os.path.basename(vvp), why))
     rows = []
     with open(out, encoding="ascii", errors="replace") as fh:
         for line in fh:

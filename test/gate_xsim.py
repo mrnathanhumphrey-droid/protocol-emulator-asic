@@ -125,6 +125,11 @@ def judge(name, res, problems):
         return
     for label, (iv, vl) in sorted(res.items()):
         d = first_diff(iv, vl)
+        # ⛔ R4 #12 (10-23): two simulators that both STOPPED agree about
+        # nothing -- a FATAL on either side is a problem, identical or not
+        fat = next((l for l in iv + vl if "FATAL" in l), None)
+        if fat is not None:
+            d = "a FATAL stop: %s" % fat.strip()[:60]
         if not iv or not vl:
             d = d or "empty output"
             d = "EMPTY on %s" % ("iverilog" if not iv else "verilator")

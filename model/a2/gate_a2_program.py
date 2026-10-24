@@ -227,6 +227,11 @@ def main() -> int:
         rc = 1
     print("    %d admissible lane(s): ours >= pyRTA on every one%s"
           % (n_ok, "" if not below else " EXCEPT the above"))
+    # ⛔ R4 #20 (10-23): zero compared lanes is not "every one"
+    if n_ok == 0:
+        print("    *** FAIL no admissible lane carried both bounds -- nothing "
+              "was compared")
+        rc = 1
 
     # ---- 2. no bound is typed --------------------------------------------
     print()
@@ -261,6 +266,11 @@ def main() -> int:
     if not mism:
         print("    %d clocked arm(s), every one carrying its generated budget"
               % checked)
+    # ⛔ R4 #19 (10-23): zero clocked arms is not "every one"
+    if checked == 0:
+        print("    *** FAIL the bench plan yielded no clocked arm -- nothing "
+              "was checked")
+        rc = 1
 
     # ---- 3. the must-fire ------------------------------------------------
     print()

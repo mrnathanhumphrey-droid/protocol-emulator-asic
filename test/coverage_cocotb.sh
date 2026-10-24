@@ -94,6 +94,16 @@ rc=$?
 TALLY="$(grep -oE 'TESTS=[0-9]+ PASS=[0-9]+ FAIL=[0-9]+ SKIP=[0-9]+' \
          "$OUT/cocotb_cov.log" | tail -1)"
 echo "  make rc=$rc   $TALLY"
+# ⛔ R4 #4 (10-23): make's rc was printed and never tested, and a suite that
+# found NO tests ("TESTS=0 PASS=0 FAIL=0 SKIP=0") matched the pass case below.
+if [ "$rc" -ne 0 ]; then
+  echo "  *** make exited $rc -- not a clean cocotb run"
+  exit 1
+fi
+case "$TALLY" in
+  "TESTS=0 "*) echo "  *** the cocotb suite ran ZERO tests -- nothing was covered"
+               exit 1 ;;
+esac
 # ⛔ THE TALLY IS REQUIRED, NOT OPTIONAL. A run that built and then failed to
 # start would leave no tally and `rc=0` on some paths -- "no failures" because
 # nothing ran is the vacuous pass this project keeps finding.

@@ -39,7 +39,7 @@ tool_banner verilator
 echo
 
 rm -rf "$OUT"; mkdir -p "$OUT"
-"$PY" test/store_probe.py || exit 1
+"$PY" test/store_probe.py "$OUT" || exit 1
 echo
 
 SRCS="test/tb_trace.v test/fram_i2c.v test/fram_spi.v src/pe_engine.v src/pe_store.v src/project.v"
