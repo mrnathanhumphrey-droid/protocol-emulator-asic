@@ -4,20 +4,23 @@
 # boundary -- that has eaten arguments in this project before.
 set -uo pipefail
 cd "${1:-/mnt/d/ProtocolEmulator}" || exit 1
-rm -rf /tmp/pdobj
+echo "param_dump: elaborating $(pwd)"
+# ⛔ F13 (10-23): a PRIVATE build dir -- $PD/pdobj was shared by every worktree
+PD="$(mktemp -d)"
+trap 'rm -rf "$PD"' EXIT
 # ⛔ THE PINNED VERILATOR via PE_VERILATOR, never a bare `verilator` from PATH:
 # CI keeps the pin off PATH and apt's 5.020 on it. `verilator_trace.sh` made
 # that mistake and its witness ran against the wrong Verilator in CI.
 . ci/tools.sh              # ruling V: the one resolver
 tool_banner verilator
 "$VL" --binary --timing -Wno-fatal --top-module param_dump -o pd \
-    --Mdir /tmp/pdobj +incdir+test \
+    --Mdir $PD/pdobj +incdir+test \
     test/param_dump.v src/pe_engine.v src/pe_store.v src/project.v \
-    > /tmp/pd_build.log 2>&1
+    > $PD/pd_build.log 2>&1
 RC=$?
-if [ "$RC" -ne 0 ] || [ ! -x /tmp/pdobj/pd ]; then
+if [ "$RC" -ne 0 ] || [ ! -x $PD/pdobj/pd ]; then
     echo "VERILATOR BUILD FAILED (exit $RC)"
-    tail -20 /tmp/pd_build.log
+    tail -20 $PD/pd_build.log
     exit 1
 fi
-/tmp/pdobj/pd 2>&1 | grep PARAM
+$PD/pdobj/pd 2>&1 | grep PARAM

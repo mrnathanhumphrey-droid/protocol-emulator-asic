@@ -137,9 +137,17 @@ def dump_verilator():
     if shutil.which("wsl.exe"):
         # ⛔ RULING V: the pinned Verilator travels with the call (a fixed
         # argv, no shell); without it WSL resolved its own PATH's Verilator.
+        # ⛔ F1 (meta-test, 10-23): THIS tree, translated. The call named
+        # /mnt/d/ProtocolEmulator/test/param_dump.sh with no root, so the
+        # script cd'd to the MAIN CHECKOUT and elaborated ITS RTL -- every
+        # local worktree run compared the wrong tree's Verilator side (it
+        # was at 10-14's de18501; no parameter line had moved, so the
+        # verdicts held by luck).
+        drive, rest = os.path.splitdrive(os.path.abspath(ROOT))
+        wroot = "/mnt/%s%s" % (drive[0].lower(), rest.replace("\\", "/"))
         cmd = ["wsl.exe", "-d", "Ubuntu", "--", "env",
                "PE_VERILATOR=%s" % PINNED_WSL_VERILATOR, "bash",
-               "/mnt/d/ProtocolEmulator/test/param_dump.sh"]
+               wroot + "/test/param_dump.sh", wroot]
     else:
         cmd = ["bash", os.path.join(ROOT, "test", "param_dump.sh"), ROOT]
     r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",

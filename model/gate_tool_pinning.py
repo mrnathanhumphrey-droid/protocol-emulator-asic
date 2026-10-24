@@ -186,21 +186,24 @@ def main() -> int:
     else:
         print("    fixture vs git f8f952c                          (no history "
               "here -- shallow checkout; fixture used as committed)")
+    # ⛔ F2 (meta-test, 10-23): THROUGH audit(), the dispatcher main()
+    # uses -- these called audit_sh / audit_py directly, so a stub on
+    # audit() left the gate GREEN with its real check disabled.
     cases.append(("verilator_trace.sh at f8f952c (CI ran 5.020)",
                   any("V1" in x for x in
-                      audit_sh("old/verilator_trace.sh", old))))
+                      audit("old/verilator_trace.sh", old))))
     cases.append(("a Python argv headed by bare \"iverilog\"",
-                  bool(audit_py("x.py", 'r = run(["iverilog", "-g2012"])\n'))))
+                  bool(audit("x.py", 'r = run(["iverilog", "-g2012"])\n'))))
     cases.append(("a shell `VL=\"${PE_VERILATOR:-verilator}\"`",
-                  bool(audit_sh("x.sh", 'set -o pipefail\nVL="${PE_VERILATOR:-verilator}"\n'))))
+                  bool(audit("x.sh", 'set -o pipefail\nVL="${PE_VERILATOR:-verilator}"\n'))))
     cases.append(("sourcing ci/tools.sh with no tool_banner",
-                  any("V2" in x for x in audit_sh(
+                  any("V2" in x for x in audit(
                       "x.sh", 'set -o pipefail\n. ci/tools.sh\n"$VL" --cc x.v\n'))))
     cases.append(("tool() without banner()",
-                  any("V2" in x for x in audit_py(
+                  any("V2" in x for x in audit(
                       "x.py", 'cmd = [tool("vvp"), out]\n'))))
     cases.append(("a clean resolved script is accepted",
-                  not audit_sh("x.sh", 'set -o pipefail\n. ci/tools.sh\n'
+                  not audit("x.sh", 'set -o pipefail\n. ci/tools.sh\n'
                                        'tool_banner verilator\n"$VL" --cc x.v\n')))
     for label, hit in cases:
         print("    %-48s %s" % (label, "ok" if hit else "*** MISSED"))

@@ -432,9 +432,14 @@ MUTANTS = [
 
 
 def make_stress():
-    subprocess.run([sys.executable, "test/make_smoke_image.py", "--five"]
-                   + [str(x) for x in STRESS_FIVE],
-                   cwd=ROOT, capture_output=True, text=True)
+    r = subprocess.run([sys.executable, "test/make_smoke_image.py", "--five"]
+                       + [str(x) for x in STRESS_FIVE],
+                       cwd=ROOT, capture_output=True, text=True)
+    # ⛔ F6 (meta-test, 10-23): its exit code was ignored, so a failed
+    # generation ran the stress arm on whatever five_image.hex was on disk
+    if r.returncode != 0:
+        raise SystemExit("*** make_stress: make_smoke_image --five exited %d: %s"
+                         % (r.returncode, (r.stdout + r.stderr)[-300:]))
 
 
 def steady(out):
@@ -962,7 +967,13 @@ def main() -> int:
             print("    %-19s declared survivor -- %s" % (define, why[:90]))
     # ⛔ THE FEED LIMIT (a bench plusarg, not an RTL mutant, so not in RAN):
     # +FEEDN past `feedv`'s 16 bytes must stop the bench; 16 must not.
-    if rc == 0:
+    # ⛔ F6 (meta-test, 10-23): gated on THE BASE tb_trace BUILD (ck_ok's
+    # build), not on `rc` -- which was the LAST clocked mutant's build, so a
+    # failed mutant build skipped these two arms in silence.
+    if not os.path.isfile(base_c):
+        print("    *** +FEEDN arms NOT RUN: the base tb_trace did not build")
+        survivors.append("+FEEDN (no base build)")
+    else:
         for n, want_fatal in ((17, True), (16, False)):
             o = run(base_c, img="test/corpus_spim.hex",
                     extra=["+NBYTES=256", "+PEER=spi", "+NCYC=2000",

@@ -421,13 +421,15 @@ def main() -> int:
         rc = 1
     else:
         rows = [l for l in mut["lanes"] if l["mode"] == 0 and l.get("t_HIGH")]
-        bad = [l for l in rows if l["t_HIGH"]["min"] < l["d"]]
+        # ⛔ F7 (meta-test, 10-23): against the lane's OWN HIGH length, as §1
+        # judges -- this read l["d"], which drifts from §1 on a HALF_HIGH lane
+        bad = [l for l in rows if l["t_HIGH"]["min"] < high_len(l)]
         flat = sorted({l["t_HIGH"]["min"] for l in rows})
         print("    %-6s %-6s %-8s %s" % ("lane", "d", "t_HIGH", "fails?"))
         for l in rows:
             print("    %-6d %-6d %-8d %s"
                   % (l["lane"], l["d"], l["t_HIGH"]["min"],
-                     "fires" if l["t_HIGH"]["min"] < l["d"] else "*** NO"))
+                     "fires" if l["t_HIGH"]["min"] < high_len(l) else "*** NO"))
         if len(bad) != len(rows) or not rows:
             print("    *** MUST-FIRE FAILED: %d of %d lanes missed the bound;"
                   % (len(bad), len(rows)))
@@ -771,8 +773,10 @@ def main() -> int:
         lab = ("SDA_HOLD=%d" % hb_hold) if hb_hold is not None \
             else "SDA_HOLD=UNRECORDED"
         moved = [l for l in hb["lanes"] if (l.get("sda_moves_in_high") or 0) > 0]
+        # ⛔ F7 (meta-test, 10-23): the MODAL hold, as §4b(b) judges the
+        # ceiling -- this read `min`, a different statistic than the check
         over = [l for l in hb["lanes"]
-                if l.get("t_HD_DAT") and l["t_HD_DAT"]["min"] > budget]
+                if l.get("t_HD_DAT") and l["t_HD_DAT"]["modal"] > budget]
         # ⛔⛔ AND THE ARM MUST HAVE PRODUCED TRAFFIC AT ALL. Ruling D1 refuses
         # a clocked open-drain action with `d <= SDA_HOLD`, so a `holdbig` hold
         # at or above the image's smallest delay REFUSES THE PROGRAM: the

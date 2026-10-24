@@ -39,9 +39,6 @@ STUB = os.path.join(HERE, "meta_stub.py")
 #: E empty problems, E0/E1 empty element 0/1, T True, Z 0, NONE None, NORAISE
 #: never raise, and named shapes. Slow-tier policies are OWED to the CI-matrix
 #: item (a `--tier slow` run reports an OWED seam by name, it does not guess).
-#: ⚠ Left out on purpose -- production functions main() never calls on real
-#: data (a stub would replay a PLANT's answer): sim_run.check / scratch_image /
-#: is_scratch (gate_sim_runs), nonadmissible.require (gate_admissible_images).
 SEAMS = (
     ("model/gate_bench_lint.py", "gate_bench_lint.scan", "fast", "E"),
     ("model/gate_bench_lint.py", "gate_bench_lint.narrow_names", "fast", "E"),
@@ -76,6 +73,12 @@ SEAMS = (
     ("model/gate_sim_runs.py", "gate_sim_runs.scan", "fast", "E"),
     ("model/gate_sim_runs.py", "gate_sim_runs.cocotb_ok", "fast", "T"),
     ("model/gate_sim_runs.py", "gate_sim_runs.hidden_problems", "fast", "E0"),
+    # ⭐ production functions main() never calls on real data -- unstubbable
+    # under the first (replay) design, fine under constant-pass policies
+    ("model/gate_sim_runs.py", "sim_run.trace_incomplete", "fast", "NONE"),
+    ("model/gate_sim_runs.py", "sim_run.check", "fast", "NORAISE"),
+    ("model/gate_sim_runs.py", "sim_run.is_scratch", "fast", "T"),
+    ("model/gate_admissible_images.py", "nonadmissible.require", "fast", "NORAISE"),
     ("model/gate_i2c_hw_witness.py", "gate_i2c_hw_witness.audit", "fast", "E"),
     ("model/gate_onewire_hw_witness.py", "gate_onewire_hw_witness.audit", "fast", "E"),
     ("model/gate_onewire_hw_witness.py", "gate_onewire_hw_witness.feed_matches", "fast", "T"),
@@ -170,10 +173,9 @@ NOT_STUBBABLE = {
 
 #: (gate, seam) -> finding id: stubs that stay GREEN today. Each must go red
 #: when its finding is fixed, and is then STALE (red) until removed.
-KNOWN_GAPS = {
-    ("model/gate_tool_pinning.py", "gate_tool_pinning.audit"):
-        "F2: main judges through audit(); the must-fires call audit_sh / "
-        "audit_py directly",
+KNOWN_GAPS: dict = {
+    # F2 (gate_tool_pinning.audit) CLOSED 10-24: its must-fires now go
+    # through audit(), the dispatcher main() uses.
 }
 
 LINE = re.compile(r"^META-STUB \S+ \S+ calls=(\d+) rc=(\S+)", re.M)

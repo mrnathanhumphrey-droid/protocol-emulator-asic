@@ -242,6 +242,7 @@ def main() -> int:
     _classifier_mustfire(S, say)
     _hidden_load_crosscheck(S, say)
     _injection_mustfires(S, say)
+    _completion_mustfires(S, say)
     print()
     print("GATE sim-runs: %s" % ("PASSED" if rc == 0 else "FAILED"))
     return rc
@@ -333,6 +334,56 @@ def _hidden_load_crosscheck(S, say):
     mf, _r = hidden_problems({"fpga/sim/tb_fpga_loader.v": alt})
     say(any("tb_fpga_loader.v" in q and "LOADER_IMGS" in q for q in mf),
         "M10 a caller's images= altered -> red, naming bench and caller")
+
+
+def _completion_mustfires(S, say):
+    """⛔ F3 (meta-test, 10-23): R3/R4's completion checks priced IN the suite.
+    sim_run.trace_incomplete (Python) and ci/tools.sh trace_completed (shell)
+    were proven only by out-of-suite plant runs. Each form is fed the same
+    four logs: a finished run passes; a FATAL, a short count and a missing
+    end line are refused -- and a command with no +NCYC is refused too."""
+    import subprocess
+    import tempfile
+    print()
+    print("  --- run completion (R3/R4): a verdict counts only if the run finished")
+    done = "  layer: ok -- 9 thing(s)\ntb_trace: 8000 cycles -> t.txt\n"
+    cases = (("finished", done, None),
+             ("a FATAL stop", "tb_trace: FATAL -- +NBYTES=<n> is required.\n"
+              + done, "FATAL"),
+             ("a short count (the Verilator post-$finish line)",
+              "*** FAIL x\ntb_trace: 5000 cycles -> t.txt\n", "5000 of"),
+             ("no end line (iverilog stopped)", "*** FAIL x\n", "did not reach"))
+    cmd = ["sim", "+NCYC=8000"]   # only +NCYC matters
+    for what, out, want in cases:
+        why = S.trace_incomplete(out, cmd)
+        say((why is None) if want is None else (bool(why) and want in why),
+            "C trace_incomplete: %-46s %s" % (what, "passes" if want is None
+                                               else "refused"))
+    say(bool(S.trace_incomplete(done, ["sim"])),
+        "C trace_incomplete: a command with no +NCYC is refused")
+    # ⚠ a REPO-RELATIVE scratch dir: on Windows `bash` may resolve to WSL's,
+    # which cannot open a C:/ temp path (measured: the finished log read as
+    # refused); a relative path from cwd=ROOT works under both
+    import shutil
+    d = tempfile.mkdtemp(prefix="probe_complete_", dir=ROOT)
+    try:
+        for k, (what, out, want) in enumerate(cases):
+            log = os.path.join(d, "r%d.log" % k)
+            with open(log, "w", encoding="utf-8", newline="\n") as fh:
+                fh.write(out)
+            # ⚠ THE RESOLVED bash, never bare "bash": Windows' process search
+            # finds System32's WSL launcher first, which also mangles $0
+            # (measured: the finished log never reached the function)
+            r = subprocess.run([shutil.which("bash") or "bash", "-c",
+                                '. ci/tools.sh >/dev/null 2>&1; '
+                                'trace_completed "$0" 8000 mf',
+                                os.path.relpath(log, ROOT).replace("\\", "/")],
+                               cwd=ROOT, capture_output=True, text=True)
+            ok = (r.returncode == 0) if want is None else (r.returncode != 0)
+            say(ok, "C trace_completed (shell): %-38s %s"
+                % (what, "passes" if want is None else "refused"))
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
 
 
 def _injection_mustfires(S, say):

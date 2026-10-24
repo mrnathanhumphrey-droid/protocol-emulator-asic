@@ -471,7 +471,13 @@ def main() -> int:
         nb = len(open(os.path.join(ROOT, img)).read().split())
         # (a) the invariant must fire on the mutant
         mi = os.path.join(TMP, "mut_i2c.txt")
-        iverilog_run(mvvp, img, nb, "i2c", mi)
+        # ⛔ F11 (meta-test, 10-23): the run's ok flag is READ -- both D2 arms
+        # threw it away and judged whatever trace was there; a clean arm cut
+        # short counts 0 contended cycles and reads as "released"
+        okm, logm = iverilog_run(mvvp, img, nb, "i2c", mi)
+        if not okm:
+            print("  *** D2 (a): the mutant run did not finish: %s" % logm[-200:])
+            d2_ok = False
         _, mrows = read_trace(mi)
         mbad = od_violations(mrows, (corpus.P_SCL, corpus.P_SDA))
         print("  (a) invariant on the mutant: %d hard-1 cycle(s)" % len(mbad))
@@ -486,7 +492,11 @@ def main() -> int:
         res = {}
         for tag, vv in (("clean", vvp), ("mutant", mvvp)):
             o = os.path.join(TMP, "hold_%s.txt" % tag)
-            iverilog_run(vv, img, nb, "i2c", o, sclhold=200)
+            okh, logh = iverilog_run(vv, img, nb, "i2c", o, sclhold=200)
+            if not okh:
+                print("  *** D2 (b) %s: the run did not finish: %s"
+                      % (tag, logh[-200:]))
+                d2_ok = False
             _, rws = read_trace(o)
             win = [r for r in rws if 100 < int(r[0]) <= 300]
             nx = 0

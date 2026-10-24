@@ -124,7 +124,11 @@ def main() -> int:
     fx = os.path.join(ROOT, "model", "fixtures", "artefacts_231b37c.sha256.txt")
     with open(fx, encoding="ascii", errors="replace") as fh:
         p4, _ = check(fh.read(), read_file)
-    stale = sorted(x.split(":")[0] for x in p4 if x.startswith("corpus_"))
+    # ⛔ F5 (meta-test, 10-23): the STALE-HASH message only. "corpus_" alone
+    # also matched "is pinned but not on disk", so with the images missing
+    # this read 5 for the wrong reason.
+    stale = sorted(x.split(":")[0] for x in p4
+                   if x.startswith("corpus_") and "file hashes" in x)
     hit3 = len(stale) == 5
     print("    the 231b37c manifest (5 stale corpus hashes) %s  %s"
           % ("ok" if hit3 else "*** MISSED", stale))
