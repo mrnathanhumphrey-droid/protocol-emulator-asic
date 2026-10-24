@@ -446,6 +446,28 @@ def j_of(d_min: int, k: int = N_LANES) -> int:
     return j_stall(d_min, k) + J_WINNER_REG
 
 
+def sweep_violations(sweep):
+    """(violations [(d, derived, sim)] at ADMISSIBLE points, inadmissible [d])
+    over a recorded sweep: `sim > derived` is a must-stop. The gate and its
+    must-fire both call this (F8, meta-test 10-24: the comparison was inline
+    and nothing planted a violation)."""
+    violations, inadmissible = [], []
+    for d in sorted(sweep):
+        der, sim = j_stall(d), sweep[d]
+        if not admissible(d):
+            inadmissible.append(d)
+        elif sim > der:
+            violations.append((d, der, sim))
+    return violations, inadmissible
+
+
+def live_violations(live):
+    """[(d, derived, live, adm now, adm as published)] where the LIVE
+    measurement exceeds the derivation -- the retraction's evidence."""
+    return [(d, j_stall(d), live[d], admissible(d), admissible_as_published(d))
+            for d in sorted(live) if live[d] > j_stall(d)]
+
+
 def main() -> int:
     rc = 0
     print()
@@ -474,17 +496,13 @@ def main() -> int:
     print("    scope -- docs/PREREG_C_SAT.md §6.1.")
     print("    %-5s %-8s %-6s %-6s %-9s %-9s %s"
           % ("d", "U", "adm?", "was?", "derived", "measured", "verdict"))
-    violations, inadmissible = [], []
+    violations, inadmissible = sweep_violations(SWEEP)
     for d in sorted(SWEEP):
         der = j_stall(d)
         sim = SWEEP[d]
         adm = admissible(d)
         was = admissible_as_published(d)
-        if not adm:
-            inadmissible.append(d)
         bad = sim > der
-        if bad and adm:
-            violations.append((d, der, sim))
         print("    %-5d %-8.3f %-6s %-6s %-9d %-9d %s"
               % (d, utilisation(d), "yes" if adm else "NO",
                  "yes" if was else "NO", der, sim,
@@ -519,12 +537,7 @@ def main() -> int:
     print("    missing data was found.")
     print("    %-5s %-9s %-9s %-7s %s"
           % ("d", "derived", "live", "adm now", "adm as published"))
-    all_viol = []
-    for d in sorted(SWEEP_LIVE):
-        der, sim = j_stall(d), SWEEP_LIVE[d]
-        if sim > der:
-            all_viol.append((d, der, sim, admissible(d),
-                             admissible_as_published(d)))
+    all_viol = live_violations(SWEEP_LIVE)
     for d, der, sim, adm, was in all_viol:
         print("    %-5d %-9d %-9d %-7s %s"
               % (d, der, sim, "yes" if adm else "NO", "yes" if was else "NO"))
@@ -746,6 +759,23 @@ def main() -> int:
             print("      %-36s %s" % (what, "red  ok" if red else "*** WRONG"))
             if not red:
                 rc = 1
+    # ⛔ F8 (meta-test, 10-24): THE MUST-STOP AND THE RETRACTION COUNT, priced.
+    # Both comparisons ran only on the recorded tables.
+    print("    --- must-fires (the recorded sweeps) ---")
+    adm_d = next(d for d in sorted(SWEEP) if admissible(d))
+    hot = {**SWEEP, adm_d: j_stall(adm_d) + 1}
+    drop = dict(SWEEP_LIVE)
+    # the PLANT is chosen from the table directly, so a broken
+    # live_violations cannot also break the plant (meta-test, 10-24)
+    drop.pop(next(d for d in sorted(SWEEP_LIVE) if SWEEP_LIVE[d] > j_stall(d)))
+    for what, red in (
+            ("an admissible SWEEP point above derived (d = %d)" % adm_d,
+             bool(sweep_violations(hot)[0])),
+            ("one violation removed counts exactly 9",
+             len(live_violations(drop)) == VIOLATIONS_RECORDED - 1)):
+        print("      %-36s %s" % (what, "red  ok" if red else "*** WRONG"))
+        if not red:
+            rc = 1
 
     print()
     print("=" * 78)

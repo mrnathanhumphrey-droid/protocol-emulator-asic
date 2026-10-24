@@ -78,9 +78,11 @@ ALLOW = {
     ("model/gate_one_encoder.py", "main",
      "print('    *** %s did not import: %s' % (mod, e))"):
         "prints `***` and sets rc = 1.",
-    ("model/gate_sda_hold.py", "main",
-     "print('  *** %s claims a mode but the mode floor REJECTS it: %s' % (img, str(e)[:80]))"):
-        "prints `***` and sets rc = 1.",
+    ("model/gate_sda_hold.py", "image_problems",
+     "probs.append('%s claims a mode but the mode floor REJECTS it: %s' % (img, str(e)[:80]))"):
+        "the refusal IS the finding: appended to the image's problems, which "
+        "main prints as `***` and turns into rc = 1 (moved out of main by the "
+        "meta-test's F8 refactor, 10-24).",
     ("model/macro_harden_gate.py", "read_config",
      "return (None, 'src/config.json does not parse: %s' % e)"):
         "returns (None, err); `main` fails on a None config.",

@@ -62,7 +62,14 @@ RTL_EXPECT = {
 }
 
 
-def find_second_definitions():
+def find_second_definitions(texts=None):
+    """[(rel, packer)] for every file outside the owner that names a packer.
+    `texts` ({rel: source}) replaces the tree scan, so the must-fire runs THIS
+    function on a planted file (F8, meta-test 10-24: it had no planted input)."""
+    if texts is not None:
+        return [(rel, pk) for rel, txt in sorted(texts.items())
+                if rel not in (OWNER, "model/gate_one_encoder.py")
+                for pk in PACKERS if pk in txt]
     hits = []
     for d in SCAN_DIRS:
         full = os.path.join(ROOT, d)
@@ -234,6 +241,22 @@ def rtl_params(path):
     return env
 
 
+def width_problems(iv, vl, expect):
+    """[problem] for the elaborated widths: each must equal pe_isa's, under
+    BOTH tools, and the two tools must agree. The gate and its must-fire both
+    call this (F8, meta-test 10-24: the compare was inline)."""
+    probs = []
+    for name, want in sorted(expect.items()):
+        a, b = iv.get(name), vl.get(name)
+        if not (a == want and b == want):
+            probs.append("%s: pe_isa %s, iverilog %s, verilator %s"
+                         % (name, want, a, b))
+    disagree = sorted(k for k in set(iv) & set(vl) if iv[k] != vl[k])
+    if disagree:
+        probs.append("the two elaborators disagree on %s" % disagree)
+    return probs
+
+
 def main() -> int:
     banner("iverilog", "vvp")   # ruling V2: the log names the binary that ran
     rc = 0
@@ -297,22 +320,20 @@ def main() -> int:
     if iv and vl:
         print("    %-10s %8s %10s %10s" % ("param", "pe_isa", "iverilog",
                                            "verilator"))
+        wp = width_problems(iv, vl, RTL_EXPECT)
         for name, want in sorted(RTL_EXPECT.items()):
             a, b = iv.get(name), vl.get(name)
-            ok = (a == want and b == want)
             print("    %-10s %8s %10s %10s  %s"
-                  % (name, want, a, b, "" if ok else "*** MISMATCH"))
-            if not ok:
-                rc = 1
-        # the two elaborators must also agree with each other
-        both = set(iv) & set(vl)
-        disagree = [k for k in both if iv[k] != vl[k]]
-        if disagree:
-            print("    *** THE TWO ELABORATORS DISAGREE on %s" % disagree)
+                  % (name, want, a, b, "" if (a == want and b == want)
+                     else "*** MISMATCH"))
+        for p in wp:
+            if p.startswith("the two elaborators"):
+                print("    *** %s" % p.upper())
+        if wp:
             rc = 1
         else:
             print("    the two elaborators agree on all %d dumped values"
-                  % len(both))
+                  % len(set(iv) & set(vl)))
 
     # ---- the regex parser, kept as a THIRD READING only ---------------
     # ⭐ Reported, never authoritative. It is a useful cross-check precisely
@@ -331,6 +352,24 @@ def main() -> int:
         print("    agrees on all %d values" % len(RTL_EXPECT))
 
     # ---- the must-fire: a drifted RTL width, through the TOOL ----------
+    print()
+    # ⛔ F8 (meta-test, 10-24): the second-definition scan and the width
+    # compare, priced on planted inputs (both ran only on the real tree).
+    print("  --- must-fire: a second packer, a drifted Verilator width ---")
+    pk = PACKERS[0]
+    for label, ok in (
+            ("a planted file that defines %s is found" % pk,
+             find_second_definitions({"model/x.py": "def %s(x): pass\n" % pk})
+             == [("model/x.py", pk)]),
+            ("a Verilator dump with ACT_W + 1 is a MISMATCH",
+             bool(width_problems(dict(RTL_EXPECT),
+                                 dict(RTL_EXPECT, ACT_W=RTL_EXPECT["ACT_W"] + 1),
+                                 RTL_EXPECT))),
+            ("matching dumps pass (control)",
+             not width_problems(dict(RTL_EXPECT), dict(RTL_EXPECT), RTL_EXPECT))):
+        print("    %-52s %s" % (label, "ok" if ok else "*** MISSED"))
+        if not ok:
+            rc = 1
     print()
     print("  --- must-fire: a drifted RTL width, via iverilog ---")
     import shutil, tempfile

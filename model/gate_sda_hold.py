@@ -152,6 +152,39 @@ def run(vvp, img, peer, feed=None):
             "binds": (int(wb.group(1)), int(wb.group(2))) if wb else None}
 
 
+def image_problems(img, res, need, claims, setup, floor=None, load=None):
+    """[problem] for one shipped image's run. The gate and its must-fires both
+    call this (F8, meta-test 10-24: the mode-floor claim, the setup check and
+    the rest were inline and nothing planted against them). `floor` / `load`
+    default to pe_asm.check_mode_floor on the image file."""
+    probs = []
+    if claims:
+        # ⛔ a claim must be TRUE of the image, not asserted
+        if floor is None:
+            import gate_degenerate_fields as dgf
+            import pe_asm
+            floor = pe_asm.check_mode_floor
+            load = load or (lambda: dgf.load(os.path.join(ROOT, "test",
+                                                           img + ".hex")))
+        try:
+            floor(load())
+        except Exception as e:      # a refusal IS the finding: named below
+            probs.append("%s claims a mode but the mode floor REJECTS it: %s"
+                         % (img, str(e)[:80]))
+    for c in sorted(need):
+        if res["rows"].get(c, (0,))[0] == 0:
+            probs.append("%s: required class %r is EMPTY -- nothing checked it"
+                         % (img, CLASS[c]))
+    if res["hfail"] or released(res):
+        probs.append("%s: Layer H reports a data move under SDA_HOLD or with "
+                     "SCL released" % img)
+    if res["su"] is not None and res["su"] < setup:
+        probs.append("%s: setup %d < SDA_SETUP %d" % (img, res["su"], setup))
+    if res["config_err"] != 0:
+        probs.append("%s: refused (CONFIG_ERR) -- a shipped image must run" % img)
+    return probs
+
+
 def released(res):
     """Data moves made with SCL released, summed over the data classes."""
     return sum(res["rows"].get(c, (0, 0, 0, 0))[3] for c in DATA)
@@ -189,41 +222,43 @@ def main() -> int:
     print()
     print("  %-16s %-24s %6s %8s %8s %8s" % ("image", "class", "n", "min",
                                            "max", "high"))
-    import gate_degenerate_fields as dgf
-    import pe_asm
     binds = {}
     for img, (peer, need, claims) in IMAGES.items():
         res = run(clean, "test/%s.hex" % img, peer)
         binds[img] = (res["binds"], claims)
-        if claims:
-            # ⛔ a claim must be TRUE of the image, not asserted
-            try:
-                pe_asm.check_mode_floor(dgf.load(
-                    os.path.join(ROOT, "test", img + ".hex")))
-            except Exception as e:
-                print("  *** %s claims a mode but the mode floor REJECTS it: "
-                      "%s" % (img, str(e)[:80]))
-                rc = 1
         for c in sorted(res["rows"]):
             n, lo, hi, high = res["rows"][c]
             print("  %-16s %-24s %6d %8d %8d %8d" % (img, CLASS[c], n, lo, hi,
                                                    high))
-        for c in sorted(need):
-            if res["rows"].get(c, (0,))[0] == 0:
-                print("  *** %s: required class %r is EMPTY -- nothing checked "
-                      "it" % (img, CLASS[c]))
-                rc = 1
-        if res["hfail"] or released(res):
-            print("  *** %s: Layer H reports a data move under SDA_HOLD or with "
-                  "SCL released" % img)
+        for pr in image_problems(img, res, need, claims, setup):
+            print("  *** %s" % pr)
             rc = 1
-        if res["su"] is not None and res["su"] < setup:
-            print("  *** %s: setup %d < SDA_SETUP %d" % (img, res["su"], setup))
+    # ⛔ F8 (meta-test, 10-24): the per-image checks, priced on synthetic run
+    # results -- no simulation; each plants exactly one defect.
+    print("  --- must-fire: the per-image checks ---")
+    good = {"rows": {1: (9, 15, 15, 0)}, "hfail": False, "su": setup + 5,
+            "config_err": 0}
+
+    def refuse(_img):
+        raise ValueError("under every t_LOW")
+    for label, res, need, claims, fl in (
+            ("setup below SDA_SETUP", dict(good, su=setup - 1), [1], False, None),
+            ("a required class EMPTY", dict(good, rows={}), [1], False, None),
+            ("a claimed mode the floor rejects", good, [1], True, refuse),
+            ("CONFIG_ERR on a shipped image", dict(good, config_err=1), [1],
+             False, None),
+            ("Layer H red", dict(good, hfail=True), [1], False, None)):
+        red = bool(image_problems("plant", res, need, claims, setup, floor=fl,
+                                  load=lambda: b""))
+        print("    %-44s %s" % (label, "red  ok" if red else "*** MISSED"))
+        if not red:
             rc = 1
-        if res["config_err"] != 0:
-            print("  *** %s: refused (CONFIG_ERR) -- a shipped image must run"
-                  % img)
-            rc = 1
+    ok = not image_problems("plant", good, [1], True, setup,
+                            floor=lambda _i: None, load=lambda: b"")
+    print("    %-44s %s" % ("a clean result passes (control)",
+                            "ok" if ok else "*** REJECTED"))
+    if not ok:
+        rc = 1
     if rc == 0:
         print("  ⇒ every required cell exercised; every data move held >= %d "
               "and landed before the release" % hold)

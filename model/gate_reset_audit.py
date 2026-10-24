@@ -194,6 +194,51 @@ def check_fix_alias(m, bit2name) -> int:
     return rc
 
 
+FF = ("$_dff", "$_sdff", "$_dffe", "$_aldff")
+
+
+def unreset_groups(m, bit2name):
+    """(flops by type, {base name: unreset bit count}) for one netlist module.
+    The gate and its must-fires both call this (F8, meta-test 10-24: the
+    classification was inline in main() and nothing planted against it)."""
+    by_type = collections.Counter()
+    unreset = collections.Counter()
+    for _n, c in m["cells"].items():
+        t = c["type"]
+        if not t.lower().startswith(FF):
+            continue
+        by_type[t] += 1
+        # a reset-bearing generic cell names its reset polarity
+        if any(k in t for k in ("N0", "N1", "P0", "P1")):
+            continue
+        pd = c.get("port_directions", {})
+        for port, bits in c["connections"].items():
+            if pd.get(port) == "output":
+                for b in bits:
+                    nm = bit2name.get(b, "<unnamed>")
+                    # ⛔ GROUP BY BASE NAME. A memory appears in the netlist
+                    # as 256 separate netnames (`u_store.mem[0]`, `[1]`, ...),
+                    # so keying on the raw name turned ONE allowlisted group
+                    # into 256 unlisted ones. A per-bit view of an array is
+                    # not 256 signals.
+                    unreset[nm.split("[")[0]] += 1
+    return by_type, unreset
+
+
+def allowlist_problems(unreset, allowed):
+    """(bad = [(name, n)] not allowlisted, drift = [(name, want, n)] whose
+    width changed) -- the gate and its must-fires both call this."""
+    bad, drift = [], []
+    for nm, n in sorted(unreset.items(), key=lambda kv: -kv[1]):
+        if nm in allowed:
+            want, _why = allowed[nm]
+            if want is not None and n != want:
+                drift.append((nm, want, n))
+        else:
+            bad.append((nm, n))
+    return bad, drift
+
+
 def stale_entries(allowed, unreset):
     """Allowlist keys that match nothing in the netlist.
 
@@ -262,6 +307,34 @@ def selftest() -> int:
                                                    else "a pass")))
         if not ok:
             rc = 1
+
+    # ⛔ F8 (meta-test, 10-24): THE CLASSIFICATION AND THE ALLOWLIST, priced.
+    # They were inline in main() and only ever seen to pass on the real
+    # netlist; these plant the three ways they can be wrong.
+    print("  --- must-fire: unreset classification and the allowlist ---")
+
+    def mod(cells):
+        return {"cells": {"c%d" % i: {"type": t, "port_directions": {"Q": "output"},
+                                      "connections": {"Q": [i]}}
+                          for i, t in enumerate(cells)}}
+    names = {0: "u_eng.newflop", 1: "u_eng.held[0]", 2: "u_eng.held[1]"}
+    allowed = {"u_eng.held": (2, "written before read")}
+    _bt, un = unreset_groups(mod(["$_DFF_P_", "$_DFF_P_", "$_DFF_P_"]), names)
+    bad, drift = allowlist_problems(un, allowed)
+    for label, ok in (
+            ("an unreset flop on a new net is NOT ALLOWLISTED",
+             bad == [("u_eng.newflop", 1)]),
+            ("an allowlisted array groups by base name (2 bits, 1 group)",
+             un.get("u_eng.held") == 2 and not drift),
+            ("a reset-bearing cell ($_DFF_PN0_) is not counted",
+             not unreset_groups(mod(["$_DFF_PN0_"]), names)[1]),
+            ("an allowlisted group that GREW is drift",
+             allowlist_problems(un, {"u_eng.held": (1, "x"),
+                                     "u_eng.newflop": (1, "x")})[1]
+             == [("u_eng.held", 1, 2)])):
+        print("    %-58s %s" % (label, "ok" if ok else "*** MISSED"))
+        if not ok:
+            rc = 1
     return rc
 
 
@@ -291,30 +364,7 @@ def main() -> int:
 
     rc_fix = check_fix_alias(m, bit2name)
 
-    FF = ("$_dff", "$_sdff", "$_dffe", "$_aldff")
-    by_type = collections.Counter()
-    unreset = collections.Counter()
-    for _n, c in m["cells"].items():
-        t = c["type"]
-        if not t.lower().startswith(FF):
-            continue
-        by_type[t] += 1
-        # a reset-bearing generic cell names its reset polarity
-        has_rst = any(k in t for k in ("N0", "N1", "P0", "P1"))
-        if has_rst:
-            continue
-        pd = c.get("port_directions", {})
-        for port, bits in c["connections"].items():
-            if pd.get(port) == "output":
-                for b in bits:
-                    nm = bit2name.get(b, "<unnamed>")
-                    # ⛔ GROUP BY BASE NAME. A memory appears in the netlist as
-                    # 256 separate netnames (`u_store.mem[0]`, `[1]`, ...), so
-                    # keying on the raw name turned ONE allowlisted group into
-                    # 256 unlisted ones and the gate reported 256 findings
-                    # about a signal it had an entry for. A per-bit view of an
-                    # array is not 256 signals.
-                    unreset[nm.split("[")[0]] += 1
+    by_type, unreset = unreset_groups(m, bit2name)
 
     total = sum(by_type.values())
     n_unreset = sum(unreset.values())
@@ -334,19 +384,16 @@ def main() -> int:
 
     print()
     print("  --- unreset flops, against the allowlist ---")
-    bad, drift = [], []
+    bad, drift = allowlist_problems(unreset, ALLOWED)
     for nm, n in sorted(unreset.items(), key=lambda kv: -kv[1]):
         if nm in ALLOWED:
             want, why = ALLOWED[nm]
-            flag = ""
-            if want is not None and n != want:
-                flag = "*** %d expected %d" % (n, want)
-                drift.append((nm, want, n))
+            flag = ("*** %d expected %d" % (n, want)
+                    if any(d[0] == nm for d in drift) else "")
             print("    %-24s %5d  ALLOWED %s" % (nm, n, flag))
             for line in _wrap(why, 64):
                 print("        %s" % line)
         else:
-            bad.append((nm, n))
             print("    %-24s %5d  *** NOT ON THE ALLOWLIST" % (nm, n))
 
     rc = 0

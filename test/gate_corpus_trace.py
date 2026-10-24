@@ -254,17 +254,26 @@ VERILATOR_SCRIPTS = {"verilator_trace.sh"}
 PIN_PROBLEMS = []
 
 
-def _pin_check(out, script):
+def pin_problem(out, script):
+    """None if `out` carries the pinned Verilator's banner, else why not.
+    _pin_check and its must-fire both call this (F8, meta-test 10-24: no
+    must-fire planted a bad banner)."""
     lines = [l for l in (out or "").splitlines()
              if l.strip().startswith("tool verilator")]
     if not lines:
-        PIN_PROBLEMS.append("%s printed no `tool verilator` banner" % script)
-        return
+        return "%s printed no `tool verilator` banner" % script
     ver = lines[0].split(":", 1)[1].strip().split("  ", 1)
     label = ver[1] if len(ver) > 1 else ""
     if not pinned_ok(label):
-        PIN_PROBLEMS.append("%s ran %r, not the pinned %s"
-                            % (script, lines[0].strip(), PINNED_VERILATOR))
+        return ("%s ran %r, not the pinned %s"
+                % (script, lines[0].strip(), PINNED_VERILATOR))
+    return None
+
+
+def _pin_check(out, script):
+    why = pin_problem(out, script)
+    if why:
+        PIN_PROBLEMS.append(why)
 
 
 def main() -> int:
@@ -280,6 +289,23 @@ def main() -> int:
           % (corpus.P_T_MISO, corpus.P_T_CS))
     print()
 
+    # ⛔ F8 (meta-test, 10-24): RULING V's banner check, priced -- no
+    # must-fire had ever planted a bad banner.
+    print("  --- must-fire: the pinned-Verilator banner (ruling V) ---")
+    pin_ok = True
+    for what, out, want_bad in (
+            ("no banner at all", "built ok\n", True),
+            ("an unpinned Verilator (apt's 5.020)",
+             "  tool verilator: /usr/bin/verilator  Verilator 5.020 2024-01-01\n",
+             True),
+            ("the pinned banner (control)",
+             "  tool verilator: /opt/v  %s devel rev x\n" % PINNED_VERILATOR,
+             False)):
+        ok = bool(pin_problem(out, "mf.sh")) == want_bad
+        print("    %-44s %s" % (what, ("red  ok" if want_bad else "ok")
+                                if ok else "*** WRONG"))
+        if not ok:
+            pin_ok = False
     vvp = os.path.join(TMP, "tr.vvp")
     ok, log = iverilog_build(vvp)
     if not ok:
@@ -288,6 +314,8 @@ def main() -> int:
         return 1
 
     results, failures, opens = [], [], []
+    if not pin_ok:
+        failures.append(("ruling V must-fire", "the banner check mis-judged a plant"))
     for name in sorted(corpus.CORPUS):
         fn, peer = corpus.CORPUS[name]
         img_bytes, expect = fn()

@@ -407,6 +407,11 @@ SPEC_SYMBOLS = {
     # labels (§1, §4b) and the I2C mode code 0 -- with nothing observed in it;
     # the lanes it expects come from each arm's image headers at run time.
     ("model/a2/gate_um10204.py", "SECTION_LANES"),
+    # ⭐ gate_except's ALLOW: (file, function, handler statement) -> the reason a
+    # broad handler is not a swallow. A SPECIFICATION of reviewed code; its
+    # digits are in the quoted statements and the prose (dates, `rc = 1`).
+    # It crossed the 3-number line when a reason gained a date (10-24).
+    ("model/gate_except.py", "ALLOW"),
     # ⭐ THE DELAY SPAN THE HIGH-PHASE INSTRUMENT SWEEPS. An experiment design,
     # not an observation: four periods spanning 13x, chosen because the defect
     # being caught was a high phase that did not move with `d` AT ALL, and a
@@ -757,25 +762,44 @@ def scrape():
                 # so its stored numbers left this audit without a word. It
                 # now fails here, loudly, with the file named.
                 with open(p, encoding="utf-8") as fh:
-                    tree = ast.parse(fh.read(), filename=rel)
-                for node in tree.body:
-                    if not isinstance(node, ast.Assign):
-                        continue
-                    if not isinstance(node.value, (ast.Dict, ast.List,
-                                                   ast.Tuple, ast.Set)):
-                        continue
-                    for t in node.targets:
-                        if not isinstance(t, ast.Name):
-                            continue
-                        if not re.fullmatch(r"[A-Z][A-Z0-9_]{2,}", t.id):
-                            continue
-                        # ⛔ RULING E: no fallback to "" -- an unparse failure
-                        # would have hidden the node's numbers from the audit.
-                        src = ast.unparse(node.value)
-                        nums = re.findall(r"(?<![\w.])\d+(?![\w.])", src)
-                        if len(nums) >= 3:
-                            found.append((rel, t.id, len(nums)))
+                    found += scrape_text(rel, fh.read())
     return sorted(set(found))
+
+
+def scrape_text(rel, text):
+    """[(rel, NAME, n numbers)] for one file's module-level ALL-CAPS literal
+    collections carrying >= 3 numbers. scrape() and the must-fire both call
+    this (F8, meta-test 10-24: the scraper had no planted input)."""
+    found = []
+    tree = ast.parse(text, filename=rel)
+    for node in tree.body:
+        if not isinstance(node, ast.Assign):
+            continue
+        if not isinstance(node.value, (ast.Dict, ast.List, ast.Tuple, ast.Set)):
+            continue
+        for t in node.targets:
+            if not isinstance(t, ast.Name):
+                continue
+            if not re.fullmatch(r"[A-Z][A-Z0-9_]{2,}", t.id):
+                continue
+            # ⛔ RULING E: no fallback to "" -- an unparse failure would have
+            # hidden the node's numbers from the audit.
+            src = ast.unparse(node.value)
+            nums = re.findall(r"(?<![\w.])\d+(?![\w.])", src)
+            if len(nums) >= 3:
+                found.append((rel, t.id, len(nums)))
+    return found
+
+
+def coverage_problems(scraped, tabled, spec):
+    """(unreviewed [(path, sym, n)], stale [(path, sym)]): scraped collections
+    neither tabled nor excluded, and exclusions the scraper no longer sees.
+    The gate and its must-fires both call this (F8, meta-test 10-24)."""
+    unreviewed = [(p, sym, n) for p, sym, n in scraped
+                  if (p, sym) not in tabled and (p, sym) not in spec]
+    seen = {(p, sym) for p, sym, _n in scraped}
+    stale = sorted(x for x in spec if x not in seen)
+    return unreviewed, stale
 
 
 def check_sites():
@@ -851,6 +875,22 @@ def selftest():
             rc = 1
     finally:
         SITES = keep
+    # ⛔ F8 (meta-test, 10-24): THE COVERAGE MEASURE, priced. The scraper and
+    # the unreviewed / stale split ran only on the real tree.
+    print("  --- must-fire: the coverage measure ---")
+    planted = scrape_text("model/x.py", "SWEEP_Z = (11, 22, 33)\nlow = (1, 2, 3)\n")
+    un, st = coverage_problems([("model/x.py", "SWEEP_Z", 3)], set(),
+                               {("model/y.py", "GONE"): "x"})
+    for label, ok in (
+            ("a planted ALL-CAPS tuple of 3 numbers is scraped",
+             planted == [("model/x.py", "SWEEP_Z", 3)]),
+            ("an untabled, unexcluded collection is UNREVIEWED",
+             un == [("model/x.py", "SWEEP_Z", 3)]),
+            ("an exclusion the scraper no longer sees is STALE",
+             st == [("model/y.py", "GONE")])):
+        print("    %-52s %s" % (label, "ok" if ok else "*** MISSED"))
+        if not ok:
+            rc = 1
     return rc
 
 
@@ -1122,8 +1162,7 @@ def main() -> int:
     print("  --- coverage: scraped vs tabled ---")
     scraped = scrape()
     tabled = {(s.path, s.symbol) for s in SITES}
-    unreviewed = [(p, sym, n) for p, sym, n in scraped
-                  if (p, sym) not in tabled and (p, sym) not in SPEC_SYMBOLS]
+    unreviewed, stale = coverage_problems(scraped, tabled, SPEC_SYMBOLS)
     print("    constant collections carrying >= 3 numbers : %d" % len(scraped))
     print("    tabled as stored numbers                   : %d" % len(tabled))
     print("    excluded by name as specifications         : %d"
@@ -1137,8 +1176,6 @@ def main() -> int:
     # scraper no longer sees means the list is drifting out of contact with
     # the tree, and the next real sweep could be excluded by a name that
     # happens to match.
-    seen = {(p, sym) for p, sym, _n in scraped}
-    stale = sorted(x for x in SPEC_SYMBOLS if x not in seen)
     if stale:
         print("    *** STALE EXCLUSIONS (named but not found): %d" % len(stale))
         for p, sym in stale:

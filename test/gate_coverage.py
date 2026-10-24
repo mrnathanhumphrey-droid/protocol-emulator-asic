@@ -728,14 +728,11 @@ def check_cocotb(agg) -> int:
         return 1
     uncovered = [k for k, c in agg.items()
                  if c == 0 and subject(k) and k[2] in ("v_line", "v_branch")]
-    rescued = sorted(k for k in uncovered if coco.get(k, 0) > 0)
     # ⚠ A point TABLED as COCOTB_ONLY is acknowledged, not rescued -- it is
     # still printed below so it cannot hide, but it does not fail the gate.
     # ⛔ ONLY A TABLED ONE: an untabled rescued point still fails, so this
     # cannot become a way to make the cross-check quiet.
-    tabled = [k for k in rescued
-              if CLASSIFIED.get(k, (None,))[0] == COCOTB_ONLY]
-    rescued = [k for k in rescued if k not in tabled]
+    rescued, tabled = false_gaps(agg, coco, CLASSIFIED)
     for k in tabled:
         print("    ⚠ COCOTB-ONLY  %s line %d %s/%s -- cocotb executes it "
               "%d time(s), the sweep does not"
@@ -754,6 +751,19 @@ def check_cocotb(agg) -> int:
         print("    none -- every point we call uncovered is uncovered by")
         print("    cocotb too, so the uncovered set stands on its own.")
     return 1 if rescued else 0
+
+
+def false_gaps(agg, coco, classified):
+    """(rescued, tabled): points WE call uncovered that cocotb executes --
+    untabled ones are FALSE GAPS (a failure), ones tabled COCOTB_ONLY are
+    acknowledged. check_cocotb and its must-fire both call this (F8,
+    meta-test 10-24: the branch had no must-fire, and no data reaches it on
+    the dev box at all)."""
+    uncovered = [k for k, c in agg.items()
+                 if c == 0 and subject(k) and k[2] in ("v_line", "v_branch")]
+    hit = sorted(k for k in uncovered if coco.get(k, 0) > 0)
+    tabled = [k for k in hit if classified.get(k, (None,))[0] == COCOTB_ONLY]
+    return [k for k in hit if k not in tabled], tabled
 
 
 def point_problems(agg, classified):
@@ -1348,6 +1358,27 @@ def selftest(agg) -> int:
                             "ok" if moved else "*** ACCEPTED"))
     if not moved:
         rc = 1
+    # (2e) ⛔ F8 (meta-test, 10-24): THE FALSE-GAP BRANCH. No cocotb data
+    # reaches it on the dev box (WSL has no cocotb), so it had never run --
+    # priced here on planted data so the branch is known to work when it does.
+    pt = ("src/pe_engine.v", 999997, "v_line", "")
+    fake_agg = dict(agg)
+    fake_agg[pt] = 0
+    resc, _t = false_gaps(fake_agg, {pt: 4}, CLASSIFIED)
+    saved4 = dict(CLASSIFIED)
+    CLASSIFIED[pt] = (COCOTB_ONLY, "x" * 80)
+    try:
+        resc2, tab2 = false_gaps(fake_agg, {pt: 4}, CLASSIFIED)
+    finally:
+        CLASSIFIED.clear()
+        CLASSIFIED.update(saved4)
+    for what, ok in (("an uncovered point cocotb executes is a FALSE GAP",
+                      resc == [pt]),
+                     ("... tabled COCOTB_ONLY it is acknowledged, not failed",
+                      resc2 == [] and tab2 == [pt])):
+        print("    %-52s %s" % (what, "ok" if ok else "*** MISSED"))
+        if not ok:
+            rc = 1
     # (2d) ⛔ THE PATH NORMALISER, ON EVERY SPELLING IT MUST HANDLE. It was
     # keyed on this machine's checkout directory name once, matched nothing in
     # CI, and the gate failed with "no subject points at all". A normaliser
