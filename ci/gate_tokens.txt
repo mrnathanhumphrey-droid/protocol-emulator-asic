@@ -79,3 +79,4 @@ test/check_vectors.py               ^\s*GATE test-vectors: PASSED\s*$
 test/benchset.py                    ^\s*BENCH SET: ok\s*$
 test/gate_coverage.py               ^\s*GATE coverage: PASSED\s*$
 model/pe_asm.py                     ^\s*pe_asm: PASSED\s*$
+model/gate_meta.py                  ^\s*GATE meta: PASSED\s*$

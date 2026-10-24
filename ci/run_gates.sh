@@ -491,6 +491,13 @@ GATES=(
   test/benchset.py
   test/gate_coverage.py
   model/pe_asm.py
+  # ⛔⛔ THE META-TEST (must-fire audit, 10-23), LAST because it re-runs other
+  # gates: each gate's real check stubbed to ALWAYS PASS must turn that gate
+  # red -- a gate that stays green has a check no must-fire prices. Fast tier
+  # here (pure Python, using this run's PE_* measurements); the slow tier is
+  # the CI matrix's. Known gaps are declared with finding ids and go stale
+  # (red) when fixed.
+  model/gate_meta.py
 )
 
 # What each gate actually needs, so a missing prerequisite is NAMED rather than

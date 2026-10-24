@@ -51,6 +51,11 @@ BROAD = {"Exception", "BaseException"}
 
 # (file, function, first statement of the handler) -> where the verdict goes
 ALLOW = {
+    ("model/meta_stub.py", "stub", "v, exc = (None, e)"):
+        "the meta-test's always-pass stub: the exception is HANDED to the "
+        "seam's policy (_pass), which re-raises it unless the policy is "
+        "NORAISE -- and NORAISE is the declared meaning 'a check that "
+        "never rejects'. Nothing is dropped.",
     ("model/a2/gate_dmin_clocked.py", "main",
      "print('    *** FAIL could not import the UM10204 table: %s' % exc)"):
         "prints `*** FAIL` and sets rc = 1 on the next line.",
