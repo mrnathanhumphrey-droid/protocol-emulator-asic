@@ -74,10 +74,31 @@ if [ "${1:-}" = "--lock-probe" ]; then
   echo "  lock-probe: the lock was free"
   exit 0
 fi
-trap 'rm -rf "$GATE_LOCK"' EXIT
+# ⛔ A GREEN RUN REMOVES ITS PRIVATE SCRATCH; A RED RUN KEEPS IT and says where
+# (10-24: every run left a pe_gates_* dir behind -- 79 of them, 3.78 GB, on the
+# dev box's OS drive). `PE_SCRATCH_ROOT` puts the scratch on a named disk.
+trap 'rc=$?; rm -rf "$GATE_LOCK"
+      if [ -n "${RUN_TMP:-}" ] && [ "$rc" -eq 0 ]; then rm -rf "$RUN_TMP"
+      elif [ -n "${RUN_TMP:-}" ]; then echo "  scratch KEPT (red run): ${RUN_TMP_W:-$RUN_TMP}"; fi' EXIT
+scratch_base() {
+  # a named root that does not exist is RED, never a silent fall-back
+  if [ -n "${PE_SCRATCH_ROOT:-}" ] && [ ! -d "$PE_SCRATCH_ROOT" ]; then
+    echo "  *** PE_SCRATCH_ROOT=$PE_SCRATCH_ROOT is not a directory: RED"
+    return 1
+  fi
+  local b="${PE_SCRATCH_ROOT:-${TMPDIR:-${TEMP:-/tmp}}}"
+  (cd "$b" 2>/dev/null && pwd) || echo /tmp
+}
+if SB_MF="$(PE_SCRATCH_ROOT=/nonexistent_pe_scratch_root scratch_base)"; then
+  echo "  *** SCRATCH MUST-FIRE FAILED: a PE_SCRATCH_ROOT that does not exist was accepted: RED"
+  exit 1
+fi
+printf '%s' "$SB_MF" | grep -q "PE_SCRATCH_ROOT=/nonexistent_pe_scratch_root is not a directory" \
+  || { echo "  *** SCRATCH MUST-FIRE: refused, but without naming the root: RED"; exit 1; }
+echo "  scratch must-fire: a PE_SCRATCH_ROOT that does not exist refused, named  red ok"
 RUN_ID="$(date '+%Y%m%d_%H%M%S')_$$"
-RUN_TMP="${TMPDIR:-${TEMP:-/tmp}}"
-RUN_TMP="$(cd "$RUN_TMP" 2>/dev/null && pwd || echo /tmp)/pe_gates_$RUN_ID"
+RUN_TMP="$(scratch_base)" || { echo "$RUN_TMP"; exit 1; }
+RUN_TMP="$RUN_TMP/pe_gates_$RUN_ID"
 mkdir -p "$RUN_TMP" || { echo "  *** cannot create $RUN_TMP: RED"; exit 1; }
 RUN_TMP_W="$(cygpath -w "$RUN_TMP" 2>/dev/null || echo "$RUN_TMP")"
 export TMPDIR="$RUN_TMP" TEMP="$RUN_TMP_W" TMP="$RUN_TMP_W"

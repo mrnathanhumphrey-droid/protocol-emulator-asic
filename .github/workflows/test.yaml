@@ -97,6 +97,87 @@ jobs:
           path: ln1_out/**/*.log
 
 
+  # ⛔⛔ THE META-TEST'S SLOW TIER (3b, 10-24): each slow gate re-run with ONE
+  # check stubbed to always pass must go RED (model/gate_meta.py). The local
+  # suite runs only the fast tier; these rebuild and simulate, minutes each, so
+  # CI owns them, one job per seam.
+  # ⭐ THE MATRIX IS READ FROM gate_meta.SEAMS (`--list slow`), never typed
+  # here: a seam added to the table is in CI with no workflow edit, and none
+  # can drop out of CI silently.
+  meta-seams:
+    runs-on: ubuntu-24.04
+    outputs:
+      seams: ${{ steps.list.outputs.seams }}
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v6
+      - name: Setup python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - name: List the slow seams
+        id: list
+        shell: bash
+        run: |
+          set -euo pipefail
+          s="$(python model/gate_meta.py --list slow)"
+          echo "slow seams: $s"
+          [ "$s" != "[]" ] || { echo "*** no slow seams listed: RED"; exit 1; }
+          echo "seams=$s" >> "$GITHUB_OUTPUT"
+
+  meta-slow:
+    needs: meta-seams
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        seam: ${{ fromJSON(needs.meta-seams.outputs.seams) }}
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      # the test job's toolchain, exactly (see its comments)
+      - name: Install iverilog, verilator and yosys
+        shell: bash
+        run: sudo apt-get update && sudo apt-get install -y iverilog verilator yosys
+
+      - name: Cache the pinned OSS CAD Suite
+        id: osscad
+        uses: actions/cache@v4
+        with:
+          path: /opt/oss-cad-suite
+          key: oss-cad-suite-linux-x64-20260930
+
+      - name: Download the pinned OSS CAD Suite
+        if: steps.osscad.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          URL=https://github.com/YosysHQ/oss-cad-suite-build/releases/download/2026-09-30/oss-cad-suite-linux-x64-20260930.tgz
+          curl -fL --retry 3 -o /tmp/oss-cad-suite.tgz "$URL"
+          sudo mkdir -p /opt/oss-cad-suite
+          sudo tar -xzf /tmp/oss-cad-suite.tgz -C /opt/oss-cad-suite --strip-components=1
+
+      - name: Setup python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Install Python packages
+        shell: bash
+        run: pip install -r test/requirements.txt
+
+      - name: Meta-test seam ${{ matrix.seam }}
+        shell: bash
+        env:
+          PE_VERILATOR: /opt/oss-cad-suite/bin/verilator
+          PE_SBY: /opt/oss-cad-suite/bin/sby
+          PE_OW_JOBS: "3"
+        run: python model/gate_meta.py --seam "${{ matrix.seam }}"
+
   test:
     runs-on: ubuntu-24.04
     steps:

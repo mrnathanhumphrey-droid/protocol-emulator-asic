@@ -264,19 +264,38 @@ def judge(results, gaps):
     return probs
 
 
+def select(tier, seam=None):
+    """[(gate, seam, policy)] for a tier, or the ONE row naming `seam`."""
+    if seam is not None:
+        return [(g, s, p) for g, s, _t, p in SEAMS if s == seam]
+    return [(g, s, p) for g, s, t, p in SEAMS if tier == "all" or t == tier]
+
+
 def main() -> int:
     tier = "fast"
     if "--tier" in sys.argv:
         tier = sys.argv[sys.argv.index("--tier") + 1]
+    if "--list" in sys.argv:
+        # ⭐ THE CI MATRIX IS READ FROM SEAMS, never typed into the workflow:
+        # a seam added here is in CI, and none can drop out silently (3b)
+        import json
+        print(json.dumps([s for _g, s, _p in
+                          select(sys.argv[sys.argv.index("--list") + 1])]))
+        return 0
+    seam = sys.argv[sys.argv.index("--seam") + 1] if "--seam" in sys.argv else None
     jobs = int(sys.argv[sys.argv.index("--jobs") + 1]) if "--jobs" in sys.argv else 4
-    todo = [(g, s, p) for g, s, t, p in SEAMS if tier == "all" or t == tier]
+    todo = select(tier, seam)
+    if seam is not None and len(todo) != 1:
+        print("  *** --seam %s names %d SEAMS rows (want exactly 1)" % (seam, len(todo)))
+        print("  GATE meta: FAILED")
+        return 1
     print()
     print("=" * 78)
     print("  META-TEST -- each gate's check stubbed to always pass must turn it red")
     print("=" * 78)
-    print("  tier %s: %d seam(s) over %d gate(s), %d job(s)"
-          % (tier, len(todo), len({g for g, _s, _p in todo}), jobs))
-    timeout = 1800 if tier != "fast" else 600
+    print("  %s: %d seam(s) over %d gate(s), %d job(s)"
+          % ("seam " + seam if seam else "tier " + tier, len(todo), len({g for g, _s, _p in todo}), jobs))
+    timeout = 1800 if tier != "fast" or seam is not None else 600
     with cf.ThreadPoolExecutor(max_workers=jobs) as ex:
         results = list(ex.map(lambda gs: one(gs[0], gs[1], gs[2], timeout),
                               todo))
@@ -313,6 +332,12 @@ def main() -> int:
         print("    %-46s %s" % (what, "red  ok" if red else "*** MISSED"))
         if not red:
             rc = 1
+    # a --seam that names no row would run nothing and pass (the CI matrix job)
+    red = len(select("slow", "no_such.seam")) != 1
+    print("    %-46s %s" % ("a --seam naming no SEAMS row",
+                            "red  ok" if red else "*** MISSED"))
+    if not red:
+        rc = 1
     print()
     print("  GATE meta: %s" % ("PASSED" if rc == 0 else "FAILED"))
     return rc
