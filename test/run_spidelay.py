@@ -71,6 +71,26 @@ def reads(n):
     return sum(1 for p in pairs if p == WANT), len(pairs), rows
 
 
+def transition_checks(res, d):
+    """[(what, good)] for a sweep `res` {N: (correct reads, reads)}."""
+    clean = max((n for n in res if res[n][0] == res[n][1]), default=-99)
+    first_bad = min((n for n in res if res[n][0] == 0), default=-99)
+    return [
+        ("every read correct for N <= d - 2 = %d" % (d - 2),
+         all(res[n][0] == res[n][1] and res[n][1] >= 4 for n in range(0, d - 1))),
+        ("every read wrong for N >= d + 1 = %d" % (d + 1),
+         all(res[n][0] == 0 for n in range(d + 1, d + 3))),
+        ("transition within 1 cycle of the prediction (last clean N = %d, "
+         "first all-wrong N = %d; predicted d - 1 = %d)"
+         % (clean, first_bad, d - 1),
+         abs(clean - (d - 1)) <= 1 and abs(first_bad - d) <= 1)]
+
+
+def transition_problems(res, d):
+    """[problem] -- the gate and its must-fires both call this."""
+    return [what for what, good in transition_checks(res, d) if not good]
+
+
 def main() -> int:
     banner("iverilog", "vvp")
     print()
@@ -102,22 +122,29 @@ def main() -> int:
     print("    SCK low phase (cycles, CS low): %s  (d = %d)"
           % (dict(sorted(lows.items())), d))
 
-    def say(good, what):
-        nonlocal rc
+    for what, good in transition_checks(res, d):
         print("    %-62s %s" % (what, "ok" if good else "*** FAIL"))
-        if not good:
+    if transition_problems(res, d):
+        rc = 1
+    # ⛔ F8 (meta-test 3a, 10-24): this gate had NO must-fire -- the sweep's
+    # three checks were inline and nothing planted a wrong sweep against them.
+    print()
+    print("  --- must-fire: the transition checks reject a wrong sweep ---")
+    span = range(0, d + 3)
+    for what, plant, want_bad in (
+            ("every read correct (MISO delay never bites)",
+             {n: (4, 4) for n in span}, True),
+            ("every read wrong (nothing samples)",
+             {n: (0, 4) for n in span}, True),
+            ("transition 3 cycles early",
+             {n: ((4, 4) if n <= d - 4 else (0, 4)) for n in span}, True),
+            ("the predicted transition (control)",
+             {n: ((4, 4) if n <= d - 1 else (0, 4)) for n in span}, False)):
+        ok = bool(transition_problems(plant, d)) == want_bad
+        print("    %-62s %s" % (what, ("red  ok" if want_bad else "ok")
+                                if ok else "*** WRONG"))
+        if not ok:
             rc = 1
-    say(all(res[n][0] == res[n][1] and res[n][1] >= 4
-            for n in range(0, d - 1)),
-        "every read correct for N <= d - 2 = %d" % (d - 2))
-    say(all(res[n][0] == 0 for n in range(d + 1, d + 3)),
-        "every read wrong for N >= d + 1 = %d" % (d + 1))
-    clean = max(n for n in res if res[n][0] == res[n][1])
-    first_bad = min(n for n in res if res[n][0] == 0)
-    say(abs(clean - (d - 1)) <= 1 and abs(first_bad - d) <= 1,
-        "transition within 1 cycle of the prediction (last clean N = %d, "
-        "first all-wrong N = %d; predicted d - 1 = %d)"
-        % (clean, first_bad, d - 1))
     print()
     print("  GATE spidelay: %s" % ("PASSED" if rc == 0 else "FAILED"))
     return rc

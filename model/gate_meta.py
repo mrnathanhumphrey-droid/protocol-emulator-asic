@@ -37,8 +37,8 @@ STUB = os.path.join(HERE, "meta_stub.py")
 #: (gate, seam = module.function, tier, policy). `policy` is the seam's
 #: ALWAYS-PASS answer, by its return contract (model/meta_stub.py _pass):
 #: E empty problems, E0/E1 empty element 0/1, T True, Z 0, NONE None, NORAISE
-#: never raise, and named shapes. Slow-tier policies are OWED to the CI-matrix
-#: item (a `--tier slow` run reports an OWED seam by name, it does not guess).
+#: never raise, and named shapes. An OWED policy (none since 3a, 10-24) is
+#: reported by name by a run, never guessed.
 SEAMS = (
     ("model/gate_bench_lint.py", "gate_bench_lint.scan", "fast", "E"),
     ("model/gate_bench_lint.py", "gate_bench_lint.narrow_names", "fast", "E"),
@@ -138,25 +138,25 @@ SEAMS = (
     # path to raise (measured, meta run 2)
     ("model/pe_asm.py", "zero_spacing.check", "fast", "NORAISE"),
     # ---- slow: rebuild + simulate; the CI matrix owns these --------------
-    ("test/gate_xsim.py", "gate_xsim.first_diff", "slow", "OWED"),
-    ("model/gate_one_encoder.py", "gate_one_encoder.dump_iverilog", "slow", "OWED"),
+    ("test/gate_xsim.py", "gate_xsim.first_diff", "slow", "S"),
+    ("model/gate_one_encoder.py", "gate_one_encoder.dump_iverilog", "slow", "CLEANVALS"),
     ("model/gate_one_encoder.py", "gate_one_encoder.find_second_definitions", "slow", "E"),
     ("model/gate_one_encoder.py", "gate_one_encoder.width_problems", "slow", "E"),
-    ("test/gate_corpus_trace.py", "gate_corpus_trace.precondition", "slow", "OWED"),
+    ("test/gate_corpus_trace.py", "gate_corpus_trace.precondition", "slow", "PREC"),
     ("test/gate_corpus_trace.py", "gate_corpus_trace.od_violations", "slow", "E"),
     ("test/gate_corpus_trace.py", "gate_corpus_trace.pin_problem", "slow", "NONE"),
-    ("model/gate_formal_miters.py", "gate_formal_miters.verdict", "slow", "OWED"),
-    ("model/gate_rtl_lint.py", "gate_rtl_lint.judge", "slow", "OWED"),
-    ("model/gate_hold_offset.py", "gate_hold_offset.judge", "slow", "OWED"),
+    ("model/gate_formal_miters.py", "gate_formal_miters.verdict", "slow", "OK"),
+    ("model/gate_rtl_lint.py", "gate_rtl_lint.judge", "slow", "E0"),
+    ("model/gate_hold_offset.py", "gate_hold_offset.judge", "slow", "E0"),
     ("test/run_uartrx.py", "uart_rx.build", "slow", "NORAISE"),
     ("test/run_wirefeed_mf.py", "zero_spacing.find", "slow", "E"),
-    ("test/run_onewire.py", "run_onewire.judge", "slow", "OWED"),
-    ("test/run_mutants.py", "run_mutants.verdict", "slow", "OWED"),
-    ("test/run_lockstep.py", "run_lockstep.compare", "slow", "OWED"),
+    ("test/run_onewire.py", "run_onewire.judge", "slow", "ALLOK"),
+    ("test/run_mutants.py", "run_mutants.verdict", "slow", "NOFIRE"),
+    ("test/run_lockstep.py", "run_lockstep.compare", "slow", "LOCK"),
     ("test/run_w_sweep.py", "run_w_sweep.viol", "slow", "Z"),
-    ("test/run_spidelay.py", "run_spidelay.reads", "slow", "OWED"),
-    ("test/run_spim_witness.py", "run_spim_witness.judge", "slow", "OWED"),
-    ("model/gate_sda_hold.py", "gate_sda_hold.run", "slow", "OWED"),
+    ("test/run_spidelay.py", "run_spidelay.transition_problems", "slow", "E"),
+    ("test/run_spim_witness.py", "run_spim_witness.judge", "slow", "DOK"),
+    ("model/gate_sda_hold.py", "gate_sda_hold.run", "slow", "NOFAIL"),
     ("model/gate_sda_hold.py", "gate_sda_hold.image_problems", "slow", "E"),
 )
 

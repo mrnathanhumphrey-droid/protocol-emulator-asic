@@ -310,6 +310,12 @@ def full():
     return 0
 
 
+def main():
+    # a main() so model/meta_stub.py can run the gate as a module (3a, 10-24:
+    # the first slow-tier run found the seam unreachable -- there was none)
+    return (full() if "--full" in sys.argv
+            else images_only() if "--images" in sys.argv else subset())
+
+
 if __name__ == "__main__":
-    sys.exit(full() if "--full" in sys.argv
-             else images_only() if "--images" in sys.argv else subset())
+    sys.exit(main())

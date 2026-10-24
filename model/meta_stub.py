@@ -89,6 +89,25 @@ def _pass(policy, v, exc, last):
         return v if v is not None else 1
     if policy == "RXOK":              # (n, declared, need, width_ok, kind_ok) or None
         return v if v is None else tuple(v[:3]) + (True, True)
+    # ---- slow tier (meta-test 3a, 10-24) ----
+    if policy == "S":                 # "" = the two sides agree
+        return ""
+    if policy == "OK":                # (ok, why, ...)
+        return (True,) + tuple(v[1:])
+    if policy == "NOFIRE":            # (failures, assertions fired)
+        return (0, [])
+    if policy == "CLEANVALS":         # (vals, error): the UNMUTATED tree's vals
+        return ((last or v)[0], None)
+    if policy == "PREC":              # [(port, n distinct)]
+        return [(lb, max(n, 2)) for lb, n in v]
+    if policy == "ALLOK":             # [(check, ok, detail)]
+        return [(c, True, d) for c, _ok, d in v]
+    if policy == "DOK":               # ({check: (ok, detail)}, ...)
+        return ({c: (True, d) for c, (_ok, d) in v[0].items()},) + tuple(v[1:])
+    if policy == "LOCK":              # (n identical, mismatches, priming moves)
+        return (v[0] + len(v[1]), [], v[2])
+    if policy == "NOFAIL":            # one sim's {flags}
+        return dict(v, hfail=False, anyfail=False, exercised=True)
     raise SystemExit("meta_stub: unknown policy %r" % policy)
 
 
@@ -117,6 +136,10 @@ def install(modname, fn, policy):
             return v
         if exc is None and policy in ("NORAISE", "P1NONE") and (
                 policy == "NORAISE" or v[1] is None):
+            state["last"] = v
+        # CLEANVALS keeps the call on the REAL tree, chosen by its argument
+        # (no src_root), never by call order -- the replay lesson
+        if exc is None and policy == "CLEANVALS" and not (a or k.get("src_root")):
             state["last"] = v
         return _pass(policy, v, exc, state["last"])
 
