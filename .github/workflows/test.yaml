@@ -379,6 +379,8 @@ jobs:
           PE_OW_JOBS: "3"
         run: |
           set -o pipefail
+          # RED-PATH PROBE D1 (throwaway branch): the uart shard fails outright
+          [ "${{ matrix.shard }}" = "uart" ] && { echo "*** D1 planted shard failure"; exit 1; }
           bash ci/run_gates.sh --shard "${{ matrix.shard }}" 2>&1 | tee gates.log
           mkdir -p shard_out
           grep -E "^  GATES: " gates.log > "shard_out/${{ matrix.shard }}.txt"
