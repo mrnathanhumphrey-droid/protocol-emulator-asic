@@ -413,9 +413,14 @@ jobs:
           [ "${{ needs.shards.result }}" = "success" ] || { echo "*** the shard list job did not succeed"; rc=1; }
           [ "${{ needs.test.result }}" = "success" ] || { echo "*** not every shard job succeeded"; rc=1; }
           gh run download "${{ github.run_id }}" -R "${{ github.repository }}" -p 'shard-*' -D verdicts || true
+          # ⛔ NO COMMAND HERE MAY FAIL: Actions runs `bash -e`, and the red-path
+          # probe (10-25) showed a missing verdict file ABORTING the loop at the
+          # first absent shard -- red for a crash, not for its named reason, and
+          # every later shard left unchecked. Existence is tested, never `ls`ed.
           for s in $(echo "${SHARDS:-[]}" | tr -d '[]",' ); do
-            f="$(ls verdicts/shard-$s/$s.txt 2>/dev/null)"
-            line="$(cat "$f" 2>/dev/null)"
+            f="verdicts/shard-$s/$s.txt"
+            line=""
+            [ -f "$f" ] && line="$(cat "$f")"
             if printf '%s' "$line" | grep -qE "GATES: ([0-9]+) of \1 passed"; then
               echo "  ok   $s: $line"
             else
