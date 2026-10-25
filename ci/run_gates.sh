@@ -388,6 +388,10 @@ GATES=(
   # ⭐⭐ LN1 RECORD (Wilson R4) -- the full 200k Lean replay, bound to what it
   # read by blob hash; any moved input is red: re-dispatch the 200k run.
   model/gate_ln1_record.py
+  # ⭐⭐ A2 RECORD (Wilson 10-25) -- the by-hand A2 suite (pyRTA bounds, sigrok
+  # certifications, FRAM demos), bound to what it read by blob hash; any moved
+  # input is red: re-run model/a2/run_a2.py --record.
+  model/gate_a2_record.py
   # ⭐⭐ CE5 -- 1-Wire DS18B20 on the frozen RTL, a pe_asm program only:
   # presence, READ ROM + CRC, CONVERT T polled, READ SCRATCHPAD + CRC, every
   # slot in its datasheet window (19-7487 Rev 6) against a same-hand peer;

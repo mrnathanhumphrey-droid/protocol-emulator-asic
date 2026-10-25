@@ -82,6 +82,7 @@ fast model/gate_ce5_freeze.py
 fast model/gate_harden_record.py
 fast model/gate_phase_coverage.py
 fast model/gate_ln1_record.py
+fast model/gate_a2_record.py
 fast model/gate_bench_races.py
 fast test/gate_manifest.py
 fast model/gate_rtl_lint.py
