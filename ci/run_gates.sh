@@ -521,6 +521,44 @@ GATES=(
   model/gate_meta.py
 )
 
+# ---------------------------------------------------------------------------
+# ⛔⛔ SHARDS (10-25; Wilson's caveats): `--shard NAME` runs ONE slice of the
+# list above, as ci/shards.txt maps it, so CI can run the slices in parallel.
+# The map must cover GATES EXACTLY -- checked, with its own must-fires, on
+# EVERY run (sharded or not), so a gate can never fall out of every shard.
+# The slice keeps GATES order; the summary below counts the slice and names it.
+# A measurement step runs only if a gate in the slice needs it (needs_step).
+# ---------------------------------------------------------------------------
+"$PY" ci/shards.py check || { echo "  *** the shard map does not cover GATES exactly: RED"; exit 1; }
+SHARD=""
+if [ "${1:-}" = "--shard" ]; then
+  SHARD="${2:-}"
+  mapfile -t GATES < <("$PY" ci/shards.py gates "$SHARD" | tr -d '\r') || true
+  [ ${#GATES[@]} -gt 0 ] || { echo "  *** --shard '$SHARD' names no shard in ci/shards.txt: RED"; exit 1; }
+  echo "  --- SHARD $SHARD: ${#GATES[@]} gate(s) of the list ---"
+fi
+in_slice() {
+  local g
+  for g in "${GATES[@]}"; do [ "$g" = "$1" ] && return 0; done
+  return 1
+}
+# which gates read each measurement (can_run's table below, plus gate_meta,
+# whose fast tier re-runs those gates and so needs every one)
+needs_step() {
+  [ -z "$SHARD" ] && return 0
+  in_slice model/gate_meta.py && return 0
+  case "$1" in
+    netlist) in_slice model/gate_reset_audit.py || in_slice model/gate_f2_local.py \
+               || in_slice model/gate_cdc.py ;;
+    coverage) in_slice test/gate_coverage.py ;;
+    phases)  in_slice model/a2/gate_um10204.py ;;
+    refill)  in_slice model/gate_port_demand.py ;;
+    a2)      in_slice model/a2/gate_a2_program.py ;;
+    store)   in_slice model/gate_store_full.py ;;
+    *) echo "  *** needs_step: unknown step $1: RED" >&2; exit 1 ;;
+  esac
+}
+
 # What each gate actually needs, so a missing prerequisite is NAMED rather than
 # showing up as that gate's own failure.
 # ⛔ `gate_reset_audit` NEEDS THE NETLIST, NOT `yosys` ON PATH, and the first
@@ -677,7 +715,7 @@ fi
 # ⭐ VIA THE SAME SCRIPT THE LOCAL FLOW USES (`test/local_netlist.sh`), whose
 # output directory is an argument for exactly this reason.
 NL_DIR="${PE_NETLIST_DIR:-/tmp}"
-if [ -z "${PE_NETLIST_JSON:-}" ]; then
+if [ -z "${PE_NETLIST_JSON:-}" ] && needs_step netlist; then
   echo
   echo "  --- netlist for the reset audit ---"
   if command -v "$YS" >/dev/null 2>&1; then
@@ -757,7 +795,7 @@ fi
 # pretending. ⛔ The reuse path is for iterating on the WAIVER TABLE, not for
 # reporting a green: data from an older tree describes that tree, which is the
 # dirty-tree lesson above in another form.
-if [ -z "${PE_COVERAGE_DAT:-}" ] && [ "${PE_SKIP_COVERAGE:-0}" != "1" ]; then
+if [ -z "${PE_COVERAGE_DAT:-}" ] && [ "${PE_SKIP_COVERAGE:-0}" != "1" ] && needs_step coverage; then
   echo
   echo "  --- coverage sweep for the coverage gate ---"
   # ⛔⛔ THE EXPORT IS GUARDED ON THE SWEEP'S EXIT CODE, NOT ON THE FILE
@@ -823,7 +861,7 @@ fi
 # ⚠ A MISSING ARM IS REPORTED, NOT FAILED. It needs Verilator >= 5.036 (cocotb
 # 2.0.1's floor) and Python <= 3.13; `gate_coverage` then names what it did NOT
 # check rather than reading as "no false gaps".
-if [ -z "${PE_COCOTB_DAT:-}" ] && [ "${PE_SKIP_COVERAGE:-0}" != "1" ]; then
+if [ -z "${PE_COCOTB_DAT:-}" ] && [ "${PE_SKIP_COVERAGE:-0}" != "1" ] && needs_step coverage; then
   echo
   echo "  --- cocotb coverage arm (ruling 2) ---"
   CC_OK=0
@@ -865,7 +903,7 @@ fi
 # ⚠ ~40s for two Verilator builds, declared. `PE_PHASES_JSON=<path>` reuses an
 # existing measurement; as with coverage, reuse is for iterating on the TABLE,
 # not for reporting a green on a tree the data does not describe.
-if [ -z "${PE_PHASES_JSON:-}" ] && [ "${PE_SKIP_PHASES:-0}" != "1" ]; then
+if [ -z "${PE_PHASES_JSON:-}" ] && [ "${PE_SKIP_PHASES:-0}" != "1" ] && needs_step phases; then
   echo
   echo "  --- clocked phase measurement (F4) ---"
   PH_OK=0
@@ -910,7 +948,7 @@ fi
 # refill changes no dispatch count so B sees nothing either. A clean arm alone
 # would be a check nobody has seen fail, on the premise `D*` is computed from.
 # ⚠ ~80s for two Verilator builds, declared, same as the phase measurement.
-if [ -z "${PE_REFILL_JSON:-}" ] && [ "${PE_SKIP_REFILL:-0}" != "1" ]; then
+if [ -z "${PE_REFILL_JSON:-}" ] && [ "${PE_SKIP_REFILL:-0}" != "1" ] && needs_step refill; then
   echo
   echo "  --- port-demand measurement (R) ---"
   RF_OK=0
@@ -953,7 +991,7 @@ fi
 # swept arms already hold every clocked program to its own bound; this is the
 # arm that shows the bound is PER PROGRAM rather than one number.
 # ⚠ ~40s for one Verilator build, declared.
-if [ -z "${PE_A2_JSON:-}" ] && [ "${PE_SKIP_A2:-0}" != "1" ]; then
+if [ -z "${PE_A2_JSON:-}" ] && [ "${PE_SKIP_A2:-0}" != "1" ] && needs_step a2; then
   echo
   echo "  --- A2 per-program must-fire (S) ---"
   A2_OK=0
@@ -995,7 +1033,7 @@ fi
 # terminating REARM must be NAMED at the first filler address. The second arm
 # is the one that shows Layer M can fire at all.
 # ⚠ ~40s for one Verilator build, declared.
-if [ -z "${PE_STORE_JSON:-}" ] && [ "${PE_SKIP_STORE:-0}" != "1" ]; then
+if [ -z "${PE_STORE_JSON:-}" ] && [ "${PE_SKIP_STORE:-0}" != "1" ] && needs_step store; then
   echo
   echo "  --- store sentinel (M3) ---"
   ST_OK=0
@@ -1075,7 +1113,7 @@ rm -f "$TOKLOG"
 
 echo
 echo "=============================================================================="
-echo "  GATES: $(( ${#GATES[@]} - ${#FAILED[@]} - ${#MISSING[@]} )) of ${#GATES[@]} passed"
+echo "  GATES: $(( ${#GATES[@]} - ${#FAILED[@]} - ${#MISSING[@]} )) of ${#GATES[@]} passed${SHARD:+ (SHARD $SHARD only -- not the whole suite)}"
 if [ ${#FAILED[@]} -gt 0 ]; then
   echo "  FAILED:"
   for f in "${FAILED[@]}"; do echo "    $f"; done
@@ -1087,6 +1125,11 @@ fi
 if [ -n "$REUSED" ]; then
   echo "  REUSED INPUTS (not made by this run): $REUSED -- NOT A GREEN"
   exit 1
+fi
+if [ -n "$SHARD" ] && [ ${#FAILED[@]} -eq 0 ] && [ ${#MISSING[@]} -eq 0 ]; then
+  echo "  ⇒ every gate in SHARD $SHARD passed. The suite is green only when CI's"
+  echo "    gates-complete job sees EVERY shard green."
+  exit 0
 fi
 if [ ${#FAILED[@]} -eq 0 ] && [ ${#MISSING[@]} -eq 0 ]; then
   echo "  ⇒ every gate in the list ran and passed. This is the SAME list CI"

@@ -1,0 +1,93 @@
+# THE SHARD MAP -- `<shard> <gate>`, one row per ci/run_gates.sh GATES entry.
+# CI runs one job per shard (`run_gates.sh --shard NAME`); ci/shards.py checks
+# that the rows cover GATES EXACTLY (none missing, none twice, none extra).
+# Balanced by MEASURED runtime (CI test job, run 40186033753 on 53e3e5a), not
+# by gate count: the long gates get their own shard, the short ones pack.
+# A shard runs only the measurement steps its own gates need; gate_meta needs
+# all of them (its fast tier re-runs those gates), so it rides with `cov`.
+# Re-balance with a one-line move when a runtime shifts. Seconds in comments.
+
+# cov -- coverage sweep ~1790 + cocotb/phases/refill/a2/store
+cov test/gate_coverage.py
+cov model/gate_meta.py
+cov model/a2/gate_um10204.py
+cov model/gate_port_demand.py
+cov model/a2/gate_a2_program.py
+cov model/gate_store_full.py
+
+# rxbw -- 1305 + 93
+rxbw test/run_rxbw.py
+rxbw test/run_rxfast.py
+
+# uart -- 766 + 138 + 83 + 50 + 26
+uart test/run_uartrx.py
+uart test/run_uarttx.py
+uart test/run_reload.py
+uart test/run_wirefeed_mf.py
+uart test/run_v2window.py
+
+# trace -- 452 + 261 + 68 + 46
+trace test/gate_corpus_trace.py
+trace test/gate_xsim.py
+trace test/run_spidelay.py
+trace test/run_spim_witness.py
+
+# sim1 -- 285 + 275 + 258
+sim1 test/run_lockstep.py
+sim1 test/run_onewire.py
+sim1 test/run_spitgt.py
+
+# sim2 -- 201 (+ its kill audit) + 197 + 106 + 100 + 9
+sim2 test/run_mutants.py
+sim2 model/gate_mutant_kills.py
+sim2 model/gate_sda_hold.py
+sim2 test/run_w_sweep.py
+sim2 test/run_cktx.py
+sim2 model/gate_hold_offset.py
+
+# fast -- netlist ~55 + every short gate
+fast model/gate_bench_lint.py
+fast model/gate_bench_race.py
+fast model/gate_degenerate_fields.py
+fast test/gate_tb_elaborates.py
+fast model/gate_ruling_audit.py
+fast model/gate_one_encoder.py
+fast model/gate_mutant_arms.py
+fast model/gate_reset_audit.py
+fast model/gate_stored_numbers.py
+fast model/gate_bench_indices.py
+fast model/gate_j_proof_anchors.py
+fast model/a2/gate_j_program.py
+fast model/a2/gate_dmin_clocked.py
+fast model/gate_gates_complete.py
+fast model/gate_admissible_images.py
+fast model/gate_wire_feed.py
+fast model/gate_image_bounds.py
+fast model/gate_sim_runs.py
+fast model/gate_formal_miters.py
+fast model/gate_i2c_hw_witness.py
+fast model/gate_onewire_hw_witness.py
+fast model/gate_flow_config.py
+fast model/gate_shell_rc.py
+fast model/gate_except.py
+fast model/gate_tool_pinning.py
+fast model/gate_f2_local.py
+fast model/gate_cdc.py
+fast model/gate_slang_lint.py
+fast model/gate_halt_reset.py
+fast model/gate_runner_registry.py
+fast model/gate_sp2_frontend.py
+fast model/gate_count_ranges.py
+fast model/gate_ce5_freeze.py
+fast model/gate_bench_races.py
+fast test/gate_manifest.py
+fast model/gate_rtl_lint.py
+fast model/gate_spuri_candidates.py
+fast model/gate_pin_matrix.py
+fast model/gate_i2c_order.py
+fast model/gate_program_index.py
+fast model/part1_param_contract.py
+fast test/gl_harness_check.py
+fast test/check_vectors.py
+fast test/benchset.py
+fast model/pe_asm.py

@@ -130,6 +130,9 @@ jobs:
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
+      # ⚠ the account runs ~20 jobs at once across ALL repos (Wilson 10-25):
+      # 7 gate shards + ln1 + cocotb + the list jobs + 8 seams stays under it
+      max-parallel: 8
       matrix:
         seam: ${{ fromJSON(needs.meta-seams.outputs.seams) }}
     steps:
@@ -190,8 +193,52 @@ jobs:
           PE_OW_JOBS: "3"
         run: python model/gate_meta.py --seam "${{ matrix.seam }}"
 
-  test:
+  # ⛔⛔ A MATRIX IS GREEN ONLY IF EVERY EXPECTED LEG RAN GREEN (Wilson 10-25,
+  # S1g at the CI layer): a leg that never started must not read as a pass.
+  meta-complete:
+    needs: [meta-seams, meta-slow]
+    if: always()
     runs-on: ubuntu-24.04
+    steps:
+      - name: Every slow seam reported green
+        shell: bash
+        run: |
+          echo "meta-seams: ${{ needs.meta-seams.result }}  meta-slow: ${{ needs.meta-slow.result }}"
+          [ "${{ needs.meta-seams.result }}" = "success" ] && [ "${{ needs.meta-slow.result }}" = "success" ] \
+            || { echo "*** not every slow seam ran green: RED"; exit 1; }
+
+  # ⛔⛔ THE SUITE AS SHARDS (10-25): ci/run_gates.sh --shard NAME, one job per
+  # shard. The shard list is READ from ci/shards.txt (which ci/shards.py holds
+  # to GATES exactly), never typed here.
+  shards:
+    runs-on: ubuntu-24.04
+    outputs:
+      shards: ${{ steps.list.outputs.shards }}
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v6
+      - name: Setup python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - name: Check and list the shards
+        id: list
+        shell: bash
+        run: |
+          set -euo pipefail
+          python ci/shards.py check
+          s="$(python ci/shards.py list)"
+          echo "shards: $s"
+          echo "shards=$s" >> "$GITHUB_OUTPUT"
+
+  test:
+    needs: shards
+    name: test (${{ matrix.shard }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJSON(needs.shards.outputs.shards) }}
     steps:
       - name: Checkout repo
         uses: actions/checkout@v6
@@ -279,16 +326,15 @@ jobs:
         shell: bash
         run: pip install -r test/requirements.txt
 
-      # ⛔⛔ info.yaml AND test/Makefile MUST NAME THE SAME SOURCES. The Makefile
-      # builds what CI TESTS; info.yaml lists what the flow HARDENS. A
-      # divergence means the tests pass on one design and the chip is built from
-      # another, and neither tool would say so. A third, STALE copy in
-      # test/run_local.py had already broken the local runner outright.
-      - name: Source lists agree (info.yaml vs test/Makefile)
+      # ⛔ THE GENERATED IMAGES, BY THE ONE RECIPE (3d's lesson, again): the
+      # unsharded run got them from the coverage sweep, which only the `cov`
+      # shard runs now -- every shard builds them first.
+      - name: Build the generated images (benchset.base_images)
+        shell: bash
         run: |
-          python -c "import sys; sys.path.insert(0, 'test'); import run_local; \
-            s = run_local.project_sources(); run_local.assert_info_yaml_agrees(s); \
-            print('source lists agree:', ' '.join(s))"
+          python -c "import sys; sys.path[:0] = ['test', 'model']; import benchset; \
+            p = benchset.base_images(); [print('***', x) for x in p]; \
+            print('generated images:', 'FAILED' if p else 'ok'); sys.exit(1 if p else 0)"
 
       # ⛔⛔ THE MODEL GATES RUN IN CI, THROUGH ONE ENTRY POINT.
       # `ci/run_gates.sh` is the ONLY thing this workflow calls for them, and
@@ -323,7 +369,87 @@ jobs:
           PE_SBY: /opt/oss-cad-suite/bin/sby
           # CE5's 1-Wire gate runs its simulations 3 at a time (~4 min serial)
           PE_OW_JOBS: "3"
-        run: bash ci/run_gates.sh
+        run: |
+          set -o pipefail
+          bash ci/run_gates.sh --shard "${{ matrix.shard }}" 2>&1 | tee gates.log
+          mkdir -p shard_out
+          grep -E "^  GATES: " gates.log > "shard_out/${{ matrix.shard }}.txt"
+
+      # the shard's own GATES line, read back by gates-complete
+      - name: Upload the shard verdict
+        uses: actions/upload-artifact@v7
+        with:
+          name: shard-${{ matrix.shard }}
+          path: shard_out/${{ matrix.shard }}.txt
+
+  # ⛔⛔ THE SUITE IS GREEN ONLY IF EVERY SHARD RAN GREEN (Wilson 10-25; S1g at
+  # the CI layer). `needs` alone is not enough: each shard's OWN verdict line is
+  # read back, every listed shard must have one, and each must say N of N.
+  gates-complete:
+    needs: [shards, test]
+    if: always()
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Every shard reported green
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHARDS: ${{ needs.shards.outputs.shards }}
+        run: |
+          set -uo pipefail
+          echo "shards: ${{ needs.shards.result }}  test: ${{ needs.test.result }}"
+          rc=0
+          [ "${{ needs.shards.result }}" = "success" ] || { echo "*** the shard list job did not succeed"; rc=1; }
+          [ "${{ needs.test.result }}" = "success" ] || { echo "*** not every shard job succeeded"; rc=1; }
+          gh run download "${{ github.run_id }}" -R "${{ github.repository }}" -p 'shard-*' -D verdicts || true
+          for s in $(echo "${SHARDS:-[]}" | tr -d '[]",' ); do
+            f="$(ls verdicts/shard-$s/$s.txt 2>/dev/null)"
+            line="$(cat "$f" 2>/dev/null)"
+            if printf '%s' "$line" | grep -qE "GATES: ([0-9]+) of \1 passed"; then
+              echo "  ok   $s: $line"
+            else
+              echo "  ***  $s: ${line:-NO VERDICT -- the shard never reported}"; rc=1
+            fi
+          done
+          [ -n "$(echo "${SHARDS:-}" | tr -d '[]", ')" ] || { echo "*** no shards listed"; rc=1; }
+          [ $rc -eq 0 ] && echo "  every shard green: the suite is green" || echo "  SUITE: RED"
+          exit $rc
+
+  # the cocotb suite (test/Makefile), its own job now the gates are sharded
+  cocotb:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Install iverilog
+        shell: bash
+        run: sudo apt-get update && sudo apt-get install -y iverilog
+
+      - name: Setup python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Install Python packages
+        shell: bash
+        run: pip install -r test/requirements.txt
+
+      # ⛔⛔ info.yaml AND test/Makefile MUST NAME THE SAME SOURCES. The Makefile
+      # builds what CI TESTS; info.yaml lists what the flow HARDENS. A
+      # divergence means the tests pass on one design and the chip is built from
+      # another, and neither tool would say so. A third, STALE copy in
+      # test/run_local.py had already broken the local runner outright.
+      - name: Source lists agree (info.yaml vs test/Makefile)
+        run: |
+          python -c "import sys; sys.path.insert(0, 'test'); import run_local; \
+            s = run_local.project_sources(); run_local.assert_info_yaml_agrees(s); \
+            print('source lists agree:', ' '.join(s))"
 
       - name: Run tests
         run: |
