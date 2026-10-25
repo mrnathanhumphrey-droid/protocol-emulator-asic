@@ -247,6 +247,9 @@ jobs:
       fail-fast: false
       matrix:
         shard: ${{ fromJSON(needs.shards.outputs.shards) }}
+        # RED-PATH PROBE D2 (throwaway branch): the rxbw leg never starts
+        exclude:
+          - shard: rxbw
     steps:
       - name: Checkout repo
         uses: actions/checkout@v6
