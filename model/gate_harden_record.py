@@ -77,8 +77,10 @@ def main() -> int:
     for p in probs:
         print("  *** %s" % p)
     ok = not probs
+    INPUTS = sorted({p for v in sets.values() for p in v})
 
     print("  --- must-fire: the check rejects what it claims to ---")
+    mf_ok = True
     for what, prec, psets, pdirty in (
             ("a record hash that does not match",
              dict(rec, chip_rtl=dict(rec["chip_rtl"], sha256="0" * 64)), sets, []),
@@ -89,7 +91,18 @@ def main() -> int:
         red = bool(record_problems(prec, psets, hashes, pdirty))
         print("    %-46s %s" % (what, "red  ok" if red else "*** MISSED"))
         ok = ok and red
+        mf_ok = mf_ok and red
     print()
+    # ⭐ v2 (Wilson 10-25): a record whose inputs moved ONLY inside step 2's
+    # declared change set is STALE, not FAIL (model/stale_records.py) -- and
+    # only if every must-fire above still went red
+    if probs and mf_ok:
+        import stale_records as SR
+        v, why = SR.stale_verdict("model/gate_harden_record.py", SR.moved(INPUTS))
+        print("  stale_records: %s -- %s" % (v, why))
+        if v == "STALE":
+            print(SR.token("harden_record", why))
+            return 0
     print("  GATE harden_record: %s" % ("PASSED" if ok else "FAILED"))
     return 0 if ok else 1
 

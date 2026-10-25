@@ -73,11 +73,13 @@ def main() -> int:
     for p in probs:
         print("  *** %s" % p)
     ok = not probs
+    INPUTS = list(files)
     if ok:
         print("  inputs at HEAD hash %s... == the record" % head[:12])
 
     print("  --- must-fire: the check rejects what it claims to ---")
     good = dict(rec, verdict="GREEN", rows=FULL_ROWS)
+    mf_ok = True
     for what, prec, ph, pdirty in (
             ("a 20k-row record", dict(good, rows=20000), good["inputs"]["sha256"], []),
             ("a RED record", dict(good, verdict="RED"), good["inputs"]["sha256"], []),
@@ -87,7 +89,18 @@ def main() -> int:
         red = bool(ln1_problems(prec, ph, pdirty))
         print("    %-46s %s" % (what, "red  ok" if red else "*** MISSED"))
         ok = ok and red
+        mf_ok = mf_ok and red
     print()
+    # ⭐ v2 (Wilson 10-25): a record whose inputs moved ONLY inside step 2's
+    # declared change set is STALE, not FAIL (model/stale_records.py) -- and
+    # only if every must-fire above still went red
+    if probs and mf_ok:
+        import stale_records as SR
+        v, why = SR.stale_verdict("model/gate_ln1_record.py", SR.moved(INPUTS))
+        print("  stale_records: %s -- %s" % (v, why))
+        if v == "STALE":
+            print(SR.token("ln1_record", why))
+            return 0
     print("  GATE ln1_record: %s" % ("PASSED" if ok else "FAILED"))
     return 0 if ok else 1
 

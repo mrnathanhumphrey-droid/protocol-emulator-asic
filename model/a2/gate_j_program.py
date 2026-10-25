@@ -732,9 +732,10 @@ def main() -> int:
                      if l["consumed"] > 0)))
     for p in wp:
         print("    *** %s" % p)
-    if wp:
-        rc = 1
-    else:
+    # ⭐ v2 (Wilson 10-25): the W record's staleness is judged LAST, against
+    # model/stale_records.py -- STALE only if every other check here is green
+    sw_bad = bool(wp)
+    if not wp:
         print("    every arm at d >= D* and every image: 0 violations; every")
         print("    must-fire red; d = 19 as ruled (m, drift clean; u, mb stall)")
     # ⛔ PRICE IT: the check must reject a stale record, a violation above D*
@@ -777,8 +778,24 @@ def main() -> int:
         if not red:
             rc = 1
 
+    stale_line = None
+    if sw_bad:
+        sys.path.insert(0, os.path.dirname(HERE))   # model/, for stale_records
+        import stale_records as SR
+        from run_w_sweep import SRCS as _W_SRCS
+        from run_lockstep import IMAGES as _W_IMAGES
+        inputs = ["src/" + s for s in _W_SRCS] + ["test/" + i for i in _W_IMAGES]
+        v, why = SR.stale_verdict("model/a2/gate_j_program.py", SR.moved(inputs))
+        print("    stale_records: %s -- %s" % (v, why))
+        if v == "STALE" and rc == 0:
+            stale_line = SR.token("j-program", why)
+        else:
+            rc = 1
     print()
     print("=" * 78)
+    if stale_line:
+        print(stale_line)
+        return 0
     print("  GATE j-program: %s -- on the SCOPED claim"
           % ("PASSED" if rc == 0 else "FAILED"))
     print("    * D* = k * L_REFILL derived from the refill FSM and the")

@@ -152,6 +152,20 @@ def main() -> int:
             pending += pend
             line += " %s%s" % (spec["record"], "  PENDING" if pend else "  fresh")
         print("  %-22s %s" % (os.path.basename(b), line))
+    # ⭐ v2 (Wilson 10-25): a pending sweep whose inputs moved ONLY inside step
+    # 2's declared change set is STALE (model/stale_records.py); any input
+    # outside it is a FAIL, not a quiet PENDING
+    stale_why = None
+    if pending:
+        import stale_records as SR
+        ins = sorted({f for r in recs.values() if r
+                      for f in (r.get("inputs") or {}).get("files") or []})
+        v, why = SR.stale_verdict("model/gate_phase_coverage.py", SR.moved(ins))
+        print("  stale_records: %s -- %s" % (v, why))
+        if v == "STALE":
+            stale_why = why
+        elif v == "FAIL" and not tag:
+            probs.append("pending sweep(s) are not the declared staleness: %s" % why)
     for p in probs:
         print("  *** %s" % p)
     for p in pending:
@@ -191,6 +205,10 @@ def main() -> int:
     ok = ok and bool(pend) and not ctl[0] and not ctl[1]
     print()
     print("  %d rows: %d PENDING" % (len(rows), len(pending)))
+    ok = ok and not probs
+    if ok and stale_why:
+        print("  GATE phase_coverage: STALE (declared: %s)" % stale_why)
+        return 0
     print("  GATE phase_coverage: %s" % ("PASSED" if ok else "FAILED"))
     return 0 if ok else 1
 

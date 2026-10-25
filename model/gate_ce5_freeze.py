@@ -187,6 +187,10 @@ def main() -> int:
     print("    %-60s %s" % ("equivalence: set_hash(FREEZE_SHA) == FREEZE_BLOBS",
                             "ok" if eq else "*** DIFFERENT"))
     ok = ok and eq
+    # the real-tree check and the equivalence are the RECORD (stale-able on v2);
+    # the planted must-fires below are not
+    record_bad = bool(probs) or not eq
+    mf_ok = True
     # (1) a simulated file changed -> RED
     data = bytearray(contents["src/pe_engine.v"])
     k = data.index(b"localparam")                 # a real token, mid-file
@@ -196,11 +200,13 @@ def main() -> int:
     print("    %-60s %s" % ("a simulated file changed (src/pe_engine.v): freeze",
                             "RED  ok" if red else "*** MUST-FIRE FAILED"))
     ok = ok and red
+    mf_ok = mf_ok and red
     # (2) an uncommitted edit is red even when HEAD's bytes match
     red = bool(freeze_problems(contents, ["src/pe_engine.v"]))
     print("    %-60s %s" % ("an uncommitted edit to a frozen file: freeze",
                             "RED  ok" if red else "*** MUST-FIRE FAILED"))
     ok = ok and red
+    mf_ok = mf_ok and red
     # (3) the flow config changed -> freeze GREEN, gate_flow_config RED
     ctext = blobhash.blobs(["src/config.json"])["src/config.json"].decode("utf-8")
     mut = ctext.replace('"GRT_RESIZER_HOLD_SLACK_MARGIN": 0.10',
@@ -210,7 +216,10 @@ def main() -> int:
     with open(GFC.RECORD, encoding="utf-8") as fh:
         rec = json.load(fh)
     fc_probs, _h = GFC.audit(mut, rec)
-    frz = freeze_problems(contents, [])           # config.json is not in the set
+    # the claim: config.json is not in the frozen set, so editing it leaves the
+    # set's hash where it IS -- judged against the current hash, so the
+    # must-fire still tests something on a (declared-)stale tree
+    frz = freeze_problems(contents, [], pin=blobhash.hash_contents(contents))
     if mut == ctext:
         ok = False
         print("    *** MUST-FIRE FAILED: the config landmark was not found")
@@ -218,10 +227,20 @@ def main() -> int:
         print("    src/config.json changed: freeze GREEN and gate_flow_config "
               "RED  ok -- the two gates cover it together")
     else:
+        mf_ok = False
         ok = False
         print("    *** MUST-FIRE FAILED: config edit -> freeze %s, flow-config %s"
               % (frz or "green", "red" if fc_probs else "GREEN"))
     print()
+    # ⭐ v2 (Wilson 10-25): staleness inside step 2's declared change set is
+    # STALE, not FAIL (model/stale_records.py) -- only with every must-fire red
+    if record_bad and mf_ok:
+        import stale_records as SR
+        v, why = SR.stale_verdict("model/gate_ce5_freeze.py", SR.moved(fs))
+        print("  stale_records: %s -- %s" % (v, why))
+        if v == "STALE":
+            print("  CE5-FREEZE: STALE (declared: %s)" % why)
+            return 0
     if ok:
         print("  CE5-FREEZE: PASSED")
         return 0

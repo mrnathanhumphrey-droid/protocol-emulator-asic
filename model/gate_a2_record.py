@@ -81,12 +81,14 @@ def main() -> int:
     for p in probs:
         print("  *** %s" % p)
     ok = not probs
+    INPUTS = list(files)
     if ok:
         print("  inputs at HEAD hash %s... == the record" % head[:12])
 
     print("  --- must-fire: the check rejects what it claims to ---")
     h = (rec.get("inputs") or {}).get("sha256")
     good = dict(rec, result=dict(res, passed=res.get("total")))
+    mf_ok = True
     for what, prec, gl, pin, ph, pd in (
             ("a failed A2 gate", dict(good, result=dict(good["result"], passed=0)),
              gates_now, PINNED_COMMIT, h, []),
@@ -99,7 +101,18 @@ def main() -> int:
         red = bool(a2_problems(prec, gl, pin, ph, pd))
         print("    %-46s %s" % (what, "red  ok" if red else "*** MISSED"))
         ok = ok and red
+        mf_ok = mf_ok and red
     print()
+    # ⭐ v2 (Wilson 10-25): a record whose inputs moved ONLY inside step 2's
+    # declared change set is STALE, not FAIL (model/stale_records.py) -- and
+    # only if every must-fire above still went red
+    if probs and mf_ok:
+        import stale_records as SR
+        v, why = SR.stale_verdict("model/gate_a2_record.py", SR.moved(INPUTS))
+        print("  stale_records: %s -- %s" % (v, why))
+        if v == "STALE":
+            print(SR.token("a2_record", why))
+            return 0
     print("  GATE a2_record: %s" % ("PASSED" if ok else "FAILED"))
     return 0 if ok else 1
 

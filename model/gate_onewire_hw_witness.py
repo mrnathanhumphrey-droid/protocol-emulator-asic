@@ -330,11 +330,27 @@ def main() -> int:
         e = copy.deepcopy(ev)
         e["timing"][key][val[0]] = val[1]
         mf.append(("(iii) %s pushed out of window" % key[:-3], audit(e), needle))
+    mf_bad = False
     for label, ps, needle in mf:
         hit = any(needle in p for p in ps)
         print("    %-38s %s" % (label, "red  ok" if hit else "*** NOT RED"))
         rc |= 0 if hit else 1
+        mf_bad = mf_bad or not hit
     print()
+    # ⭐ v2 (Wilson 10-25): a HARDWARE record of the v1 image. If the ONLY
+    # problems are that a recorded file is not the repository's (the image
+    # step 2 re-encoded), and every must-fire is red, the record is STALE
+    # (model/stale_records.py) -- a timing-window or wire problem stays FAIL.
+    mf_ok = not mf_bad
+    hash_only = probs and all("is not the repository's" in p for p in probs)
+    if hash_only and mf_ok:
+        import stale_records as SR
+        inputs = [os.path.relpath(v, ROOT).replace(os.sep, "/") for v in FILES.values()]
+        v, why = SR.stale_verdict("model/gate_onewire_hw_witness.py", SR.moved(inputs))
+        print("  stale_records: %s -- %s" % (v, why))
+        if v == "STALE":
+            print(SR.token("onewire-hw-witness", why))
+            return 0
     print("  GATE onewire-hw-witness: %s" % ("PASSED" if rc == 0 else "FAILED"))
     return rc
 
