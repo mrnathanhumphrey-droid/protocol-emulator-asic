@@ -45,9 +45,11 @@ ROWS = {
     "test/tb_onewire.v": ("SWEEP", {"record": "model/phase_sweep_onewire.json",
                                     "recipe": "test/sweep_onewire_phase.py"}),
     # ---- the peer reacts only to the chip's edges ----------------------------
-    "test/tb_rxbw.v": ("CHIP_DRIVEN", "the serial host link's capacity: the chip "
-                       "clocks every bit it sends and receives; the start alignment "
-                       "is swept over 50 offsets in the runner"),
+    "test/tb_rxbw.v": ("CHIP_DRIVEN", "the host link it measures is the chip's OUTPUT "
+                       "stream (data / strobe / valid on uo_out, clocked by the "
+                       "chip); the host drives nothing on it (Wilson 10-25: stated). "
+                       "Its RX peers enter through the uio 2-flop synchroniser, "
+                       "whose sub-cycle phase tb_uartrx walks (IN_SUITE)"),
     "test/tb_uarttx.v": ("CHIP_DRIVEN", "the peer is a RECEIVER timing the chip's own "
                          "TX edges; it drives nothing back"),
     "test/tb_cktx.v": ("CHIP_DRIVEN", "clocked TRANSMIT values: the chip drives clock "
@@ -57,10 +59,14 @@ ROWS = {
                        "(scheduler; pre-registered docs/PREREG_C_SAT.md)"),
     "test/tb_edge.v": ("NOT_TIMING", "the reactive-release must-fires: every input "
                        "written on a negedge by design (audit #3); edge placement "
-                       "varied in whole cycles and checked differentially"),
+                       "varied in whole cycles and checked differentially. The "
+                       "timing side of edge capture is phase-walked by tb_spitgt "
+                       "(CS/SCK releases, 20/20) and tb_uartrx (start edge, 18/20)"),
     "test/tb_fifo.v": ("NOT_TIMING", "same-cycle host push + engine pop (structural)"),
     "test/tb_half.v": ("NOT_TIMING", "TX and RX on one lane: the peer is driven on "
-                       "the negedge by design, so the claim cannot ride on phase"),
+                       "the negedge by design, so the claim cannot ride on phase. "
+                       "The timing side of one-lane TX + RX is phase-walked by "
+                       "tb_spitgt (MOSI capture + MISO drive, 20/20)"),
     "test/tb_jlane.v": ("NOT_TIMING", "per-lane dispatch jitter instrument (scheduler)"),
     "test/tb_lock.v": ("NOT_TIMING", "the schedule freeze: dispatch + pin streams vs "
                        "a golden (scheduler)"),

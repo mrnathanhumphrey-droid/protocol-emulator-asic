@@ -342,6 +342,27 @@ def main(argv=None) -> int:
           % ("%d of %d gates green, one lane table, no gate opted out"
              % (len(passed), len(results)) if rc == 0
              else "*** NOT GREEN -- see above ***"))
+    # ⭐ THE BOUND RECORD (Wilson 10-25): a green run writes what it read, by
+    # blob hash, so model/gate_a2_record.py can hold the baseline's A2 claims
+    # to the tree without a re-run unless an input moved.
+    if rc == 0 and "--record" in argv:
+        sys.path.insert(0, os.path.join(ROOT, "test"))
+        import sweep_record
+        path = argv[argv.index("--record") + 1]
+        rec = sweep_record.write(
+            path, "a2_suite",
+            {"passed": len(passed), "total": len(results),
+             "gates": [f for f, *_r in results], "lane_table": distinct[0],
+             "pyrta_commit": PINNED_COMMIT, "pyrta_label": _label if _src else None},
+            ["model/a2/run_a2.py"] + [os.path.normpath("model/a2/" + f).replace(os.sep, "/")
+                                     for f, *_r in results]
+            # fpga/sim's runners import their own siblings, which the shared
+            # walk does not search: every tracked fpga/sim script, a superset
+            + sorted(p for p in subprocess.run(
+                ["git", "ls-files", "fpga/sim/*.py"], cwd=ROOT, capture_output=True,
+                text=True).stdout.split()))
+        print("  record: %d inputs, %s... -> %s"
+              % (len(rec["inputs"]["files"]), rec["inputs"]["sha256"][:12], path))
     return rc
 
 

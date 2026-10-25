@@ -15,6 +15,8 @@ carries it; anything not listed here is not claimed.
 | Refill spacing `d ≥ D* = 20` gives `J = 1` | measured (`test/run_dstar_check.py`) and proved in Lean (`dstar`, `dstar29`, `dstar39`), under the hypotheses those theorems state |
 | The restructured lane select and dispatch pick equal what they replaced | SymbiYosys proofs with refuted mutants (`formal/`) |
 | Every check can fail | each gate's must-fires, and `model/gate_meta.py` (each check stubbed to always pass must turn its gate red) |
+| UART-tx baud accuracy: 115,200 baud is 434 cycles per bit, 50 MHz / 434 = 115,207 baud, +0.006 % | the divider arithmetic: the chip's TX edges are set by its own clock, so no sweep backs this (Wilson 10-25) |
+| SPI master MISO timing in nanoseconds (the 320 ns tODV budget, the 40 ns hold window) | whole cycles of the 50 MHz clock (16 cycles = 320 ns; 2 cycles = 40 ns), measured in `test/run_spidelay.py` in whole-cycle steps; inside a cycle the sample instant is bounded ANALYTICALLY -- one sampling edge, measured, with one cycle of margin either side, assuming pad + board delay < 20 ns (`docs/HOST_INTERFACE.md`, SPI receive timing). Not a sub-cycle sweep. |
 | UART-rx, I²C and 1-Wire on real parts | Artix-7 prototype; I²C and 1-Wire as recorded bench witnesses re-checked in CI (`fpga/witness/`) |
 
 ## Not claimed
