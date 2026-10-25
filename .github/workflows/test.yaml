@@ -170,6 +170,18 @@ jobs:
         shell: bash
         run: pip install -r test/requirements.txt
 
+      # ⛔ 3d (10-25): THE GENERATED IMAGES, BY THE ONE RECIPE. census_image,
+      # edge_image(_noto), five_image and stress_image are GENERATED, not
+      # tracked; the test job gets them from the coverage sweep's
+      # benchset.base_images(), and 7 seams here crashed on a fresh checkout
+      # without them (dd2cb42) -- the failure benchset.py's docstring records.
+      - name: Build the generated images (benchset.base_images)
+        shell: bash
+        run: |
+          python -c "import sys; sys.path[:0] = ['test', 'model']; import benchset; \
+            p = benchset.base_images(); [print('***', x) for x in p]; \
+            print('generated images:', 'FAILED' if p else 'ok'); sys.exit(1 if p else 0)"
+
       - name: Meta-test seam ${{ matrix.seam }}
         shell: bash
         env:
