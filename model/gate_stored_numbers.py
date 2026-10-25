@@ -412,6 +412,13 @@ SPEC_SYMBOLS = {
     # digits are in the quoted statements and the prose (dates, `rc = 1`).
     # It crossed the 3-number line when a reason gained a date (10-24).
     ("model/gate_except.py", "ALLOW"),
+    # ⭐ PHASE COVERAGE (10-25): the registry's per-bench classes and floors
+    # (a SPECIFICATION each runner's PHASE_FLOOR is held to), and the two
+    # sweeps' DESIGNS -- the I2C delays swept and the 1-Wire union claim --
+    # stated before their runs (phasecov_prediction.txt), not readings.
+    ("model/phase_coverage.py", "ROWS"),
+    ("test/sweep_i2c_delay.py", "DELAYS"),
+    ("test/sweep_onewire_phase.py", "CLAIM"),
     # ⭐ THE DELAY SPAN THE HIGH-PHASE INSTRUMENT SWEEPS. An experiment design,
     # not an observation: four periods spanning 13x, chosen because the defect
     # being caught was a high phase that did not move with `d` AT ALL, and a

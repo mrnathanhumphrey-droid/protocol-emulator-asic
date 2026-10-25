@@ -38,6 +38,10 @@ BENCH_NAME = re.compile(r"\btb_[a-z0-9_]+")
 DECLARED = {
     "ci/ln1_replay.py": ("workflow", ".github/workflows/test.yaml",
                          "the LN1 Lean replay job (JLane.step vs the RTL)"),
+    "test/sweep_i2c_delay.py": ("manual", "model/gate_phase_coverage.py",
+                                "the I2C peer-delay sweep (sigrok, local): its "
+                                "record model/phase_sweep_i2c.json is held "
+                                "fresh by the phase-coverage gate"),
     "model/a2/gate_cj_bounds.py": ("retired", "model/a2/gate_c3_requote.py",
                                    "ruling CJ: every claim moved to gates "
                                    "that run"),

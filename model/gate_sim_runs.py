@@ -76,6 +76,9 @@ ALLOW = {
     "model/gate_sim_runs.py": "this gate names the patterns it looks for",
     "model/gate_tool_pinning.py": "its must-fire plants a raw `tool(\"vvp\")` "
                                   "command as scratch TEXT; it runs nothing",
+    "test/sweep_i2c_delay.py": "resolves vvp's PATH only to hand it to the "
+                               "unchanged runners via PE_VVP (they run through "
+                               "sim_run); it launches no simulation itself",
 }
 COCOTB = "test/test.py"
 

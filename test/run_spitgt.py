@@ -59,7 +59,10 @@ except Exception:
     pass
 
 SCRATCH = os.path.join(HERE, "sim_build_spitgt")
-SRCS = ["src/project.v", "src/pe_engine.v", "src/pe_store.v"]
+#: the phase-walked witness's floor of measured phase bins (of 20); held to
+#: model/phase_coverage.py's row by model/gate_phase_coverage.py
+PHASE_FLOOR = 20
+SRCS =["src/project.v", "src/pe_engine.v", "src/pe_store.v"]
 #: spelled out: gate_wire_feed requires a witness runner to NAME its images
 IMG = {0: "test/sptgt_m0_image.hex", 1: "test/sptgt_m1_image.hex",
        2: "test/sptgt_m2_image.hex", 3: "test/sptgt_m3_image.hex",
@@ -188,7 +191,7 @@ def main() -> int:
         wb, ww = worst(base_txt), worst(txt)
         _r, bound = a2_pad_bound(IMG[key])
         same = (wb is not None and ww is not None and wb <= ww <= bound)
-        cov = phase(txt) >= 20
+        cov = phase(txt) >= PHASE_FLOOR
         print("    %-24s %s  phase %d/20 (unwalked %d/20); worst %s "
               "(unwalked %s, A2 pad bound %d)"
               % (label, "ok " if ok and same and cov else "***",

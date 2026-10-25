@@ -380,6 +380,11 @@ GATES=(
   # config and gl_test images still hash, from git blobs, to what it ran on;
   # a mismatch is red: re-run the harden.
   model/gate_harden_record.py
+  # ⭐⭐ PHASE COVERAGE (step 3a; Wilson R3) -- every tracked bench has a row
+  # saying how its full phase coverage is established (in-suite floor, a
+  # blob-hash-bound sweep record, or a stated reason); a stale sweep is
+  # PENDING here and RED under --tag (the lock step).
+  model/gate_phase_coverage.py
   # ⭐⭐ CE5 -- 1-Wire DS18B20 on the frozen RTL, a pe_asm program only:
   # presence, READ ROM + CRC, CONVERT T polled, READ SCRATCHPAD + CRC, every
   # slot in its datasheet window (19-7487 Rev 6) against a same-hand peer;

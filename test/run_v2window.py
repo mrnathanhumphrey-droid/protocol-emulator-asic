@@ -33,6 +33,9 @@ import sim_run                          # noqa: E402
 import pe_isa as I                      # noqa: E402
 
 TMP = os.environ.get("PE_V2WIN_TMP") or os.path.join(HERE, "sim_build_v2win")
+#: phases (1 ns steps after the negedge) the asynchronous-edge walk covers,
+#: each judged; held to model/phase_coverage.py's row by gate_phase_coverage
+PHASE_FLOOR = 20
 CONFORM = os.path.join(HERE, "clocked_conform.vh")
 SLOT = 2
 LEADS = range(0, 11)
@@ -125,9 +128,10 @@ def main():
             (float(mn.group(1)) if mn else None)
 
     with ThreadPoolExecutor(3) as ex:
-        pts = list(ex.map(walk_one, [(p, k) for p in range(20) for k in LEADS]))
+        pts = list(ex.map(walk_one, [(p, k) for p in range(PHASE_FLOOR)
+                                     for k in LEADS]))
     walk_ok = all(t is not None and ns is not None for _p, _k, t, ns in pts)
-    for p in range(20):                      # monotone in k at EVERY phase
+    for p in range(PHASE_FLOOR):             # monotone in k at EVERY phase
         row = {k: t for pp, k, t, _ns in pts if pp == p}
         th = next((k for k in LEADS
                    if all(row[j] == 1 for j in LEADS if j >= k)), None)

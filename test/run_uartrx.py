@@ -31,6 +31,9 @@ import uart_rx                               # noqa: E402
 
 TMP = os.environ.get("PE_UART_TMP") or os.path.join(ROOT, "test", "sim_build_uartrx")
 T = uart_rx.T_NOMINAL
+#: the phase-walked arms' floor of measured phase bins (of 20); held to
+#: model/phase_coverage.py's row by model/gate_phase_coverage.py
+PHASE_FLOOR = 18
 ERRS = (-30, -20, 0, 20, 30)
 SEEDS = (1, 2)
 NFR = 40
@@ -156,7 +159,7 @@ def main():
     for (var, e, s, x, t), o in outs:
         m = re.search(r"\((\d+) back-to-back\)", o)
         good = ("UART-RX: ok" in o and "*** FAIL" not in o and m is not None
-                and int(m.group(1)) > 0 and bins(o) >= 18
+                and int(m.group(1)) > 0 and bins(o) >= PHASE_FLOOR
                 and ("+PPF=1" not in x or "(1 per frame)" in o))
         ok = ok and good
         print("  walk  %-6s T %3d err %+3d seed %d  %s  phase %d/20"
