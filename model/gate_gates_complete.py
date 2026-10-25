@@ -45,11 +45,6 @@ EXCLUDED = {
         "reads the HARDENING FLOW's post-synthesis netlist, which costs a "
         "~3.5-hour run, so it cannot be per-push or per-checkpoint; it runs "
         "after each harden (documented in ci/run_gates.sh's header).",
-    "model/gate_ln1_record.py":
-        "OWED, NOT RETIRED (10-25): it checks model/ln1_of_record.json, which "
-        "exists only after the next 200k LN1 dispatch with --record. It joins "
-        "GATES in the commit that adds that record -- this entry then goes "
-        "STALE (red) and is removed in the same commit.",
 }
 
 #: ⛔⛔ RULING CJ -- gate files RETIRED because every claim they made now lives

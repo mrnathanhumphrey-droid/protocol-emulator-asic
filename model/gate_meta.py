@@ -109,6 +109,7 @@ SEAMS = (
     ("model/gate_phase_coverage.py", "gate_phase_coverage.world_problems", "fast", "E"),
     ("model/gate_phase_coverage.py", "gate_phase_coverage.floor_problems", "fast", "E"),
     ("model/gate_phase_coverage.py", "gate_phase_coverage.sweep_state", "fast", "E"),
+    ("model/gate_ln1_record.py", "gate_ln1_record.ln1_problems", "fast", "E"),
     ("model/gate_mutant_kills.py", "gate_mutant_kills.audit", "fast", "E"),
     ("model/gate_mutant_kills.py", "gate_mutant_kills.audit_scratch", "fast", "E"),
     ("model/gate_bench_races.py", "gate_bench_races.races", "fast", "E"),

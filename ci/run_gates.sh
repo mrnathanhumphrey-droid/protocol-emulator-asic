@@ -385,6 +385,9 @@ GATES=(
   # blob-hash-bound sweep record, or a stated reason); a stale sweep is
   # PENDING here and RED under --tag (the lock step).
   model/gate_phase_coverage.py
+  # ⭐⭐ LN1 RECORD (Wilson R4) -- the full 200k Lean replay, bound to what it
+  # read by blob hash; any moved input is red: re-dispatch the 200k run.
+  model/gate_ln1_record.py
   # ⭐⭐ CE5 -- 1-Wire DS18B20 on the frozen RTL, a pe_asm program only:
   # presence, READ ROM + CRC, CONVERT T polled, READ SCRATCHPAD + CRC, every
   # slot in its datasheet window (19-7487 Rev 6) against a same-hand peer;

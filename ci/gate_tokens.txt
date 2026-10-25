@@ -48,6 +48,7 @@ model/gate_count_ranges.py          ^\s*GATE count-ranges: PASSED\s*$
 model/gate_ce5_freeze.py            ^\s*CE5-FREEZE: PASSED\s*$
 model/gate_harden_record.py         ^\s*GATE harden_record: PASSED\s*$
 model/gate_phase_coverage.py        ^\s*GATE phase_coverage: PASSED\s*$
+model/gate_ln1_record.py            ^\s*GATE ln1_record: PASSED\s*$
 test/run_onewire.py                 ^\s*CE5-ONEWIRE: PASSED\s*$
 test/run_uartrx.py                  ^\s*UART-RX GATE: PASSED\s*$
 test/run_rxfast.py                  ^\s*GATE rxfast: PASSED\s*$
