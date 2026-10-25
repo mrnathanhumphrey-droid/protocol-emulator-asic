@@ -67,8 +67,8 @@ def main() -> int:
                                encoding="utf-8", errors="replace")
             out = p.stdout + p.stderr
             # the shim must really have been used (the 10-21 check, kept)
-            banner = re.search(r"tool iverilog\s*:\s*(\S+)", out)
-            used = (banner.group(1) if banner else "?")
+            seen_iv = re.search(r"tool iverilog\s*:\s*(\S+)", out)
+            used = (seen_iv.group(1) if seen_iv else "?")
             shim_ok = (d == 0) or ("iv_dly%d" % d) in used
             ok = p.returncode == 0 and re.search(r"^\s*%s\s*$" % re.escape(token),
                                                  out, re.M) is not None and shim_ok
