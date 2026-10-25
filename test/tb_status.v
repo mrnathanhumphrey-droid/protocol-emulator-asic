@@ -36,7 +36,8 @@ module tb_status ();
   wire [7:0] uo_out, uio_out, uio_oe;
   integer    i, fails = 0, mode, img_bytes, ncyc, cyc;
   reg [8*256-1:0] imgfile;
-  reg  [7:0] img [0:255];
+`include "test/store_filler.vh"   // v2: PE_STORE_BYTES, never a typed 256
+  reg  [7:0] img [0:PE_STORE_BYTES-1];
 
   localparam integer PIN_PROG = 7, PIN_PTR = 5, PIN_WR = 6;
   localparam integer N_LANES = 5;

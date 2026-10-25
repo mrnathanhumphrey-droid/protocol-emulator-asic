@@ -198,7 +198,7 @@ def rtl_params(path):
     """Extract `localparam integer NAME = <expr>;` and evaluate the integer ones.
 
     ⛔ EVALUATED, NOT STRING-MATCHED. The Verilog says
-    `ACT_W = 3 + PINW + 1 + DLY_W + BPW + BQW`, which no literal comparison
+    `ACT_W = OP_W + PINW + 1 + DLY_W + BPW + BQW + PINB_W + MOD_W` (v2), which no literal comparison
     could check against 24 -- and a string match would also pass if the
     expression were rewritten to a different value with the same text shape.
     """

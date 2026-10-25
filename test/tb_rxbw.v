@@ -43,7 +43,8 @@ module tb_rxbw;
   wire [7:0] uio_in = peer;
 
   localparam integer PIN_PROG = 7, PIN_PTR = 5, PIN_WR = 6;
-  localparam integer IMG_MAX  = 256;
+`include "test/store_filler.vh"   // v2: PE_STORE_BYTES, never a typed 256
+  localparam integer IMG_MAX  = PE_STORE_BYTES;
   localparam integer SER_DATA = 4, SER_STRB = 5, SER_VLD = 6;
   localparam integer FRAME_BITS = 12;
   localparam integer KIND_NONE  = 7;

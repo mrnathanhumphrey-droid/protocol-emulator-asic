@@ -19,6 +19,7 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "test"))
 os.chdir(ROOT)
+from pe_isa import STORE_BYTES as _STORE_BYTES  # noqa: E402  v2: never a typed 256
 from toolchain import tool, banner          # noqa: E402
 import sim_run                              # noqa: E402
 import refill_collect as rc                 # noqa: E402
@@ -69,7 +70,7 @@ res = {}
 for arm, defs in ARMS:
     run = build(arm, defs)
     for img in IMAGES:
-        args = ["+IMG=%s/test/%s.hex" % (ROOT, img), "+NBYTES=256",
+        args = ["+IMG=%s/test/%s.hex" % (ROOT, img), "+NBYTES=%d" % _STORE_BYTES,
                 "+PEER=none", "+NCYC=60000", "+SCLHOLD=0",
                 "+OUT=%s/tr.txt" % OUT]
         if SIM == "verilator":

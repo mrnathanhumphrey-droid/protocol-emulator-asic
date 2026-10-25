@@ -56,7 +56,8 @@ module tb_edge;
 
   always #10 clk = ~clk;
 
-  localparam integer IMG_MAX = 256;
+`include "test/store_filler.vh"   // v2: PE_STORE_BYTES, never a typed 256
+  localparam integer IMG_MAX = PE_STORE_BYTES;
   reg [7:0] img [0:IMG_MAX-1];
   integer   img_bytes;
   reg [8*256-1:0] imgfile;

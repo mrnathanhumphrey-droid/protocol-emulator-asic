@@ -217,7 +217,7 @@
       s_raddr   <= {AW{1'b0}}; \
       s_wre     <= 1'b0; \
       s_wraddr  <= {AW{1'b0}}; \
-      s_wraddrk <= {(3*AW){1'b0}};
+
 
 // ---- MUST-FIRE MUTANTS: re-assert a register's own value AFTER the halt
 // clear (the last nonblocking assignment wins), so the list itself is never
@@ -413,10 +413,13 @@ module pe_engine #(
     input  wire [7:0]           s_rdata,
     // ⭐ the WIDE action fetch: one registered cycle for a whole action word
     output reg  [AW-1:0]        s_wraddr,
-    // TM2: s_wraddr + 0/1/2, registered with it (the store's WIDE_B = 3)
-    output reg  [3*AW-1:0]      s_wraddrk,
+    // ⭐ v2: the store is WORD-organised (4 byte banks), so a wide read is one
+    // word address -- the TM2 per-byte address registers (`s_wraddrk`) went
+    // with the byte-wide array they existed for.
     output reg                  s_wre,
-    input  wire [((3+((N_PINS<=2)?1:(N_PINS<=4)?2:(N_PINS<=8)?3:(N_PINS<=16)?4:5)+1+DLY_W+4+7)/8)*8-1:0] s_wrdata,
+    // = ACT_BYTES*8, INLINED (see host_lane): OP_W + PINW + 1 + DLY_W + BPW +
+    // BQW + PINB_W + MOD_W, rounded up to bytes
+    input  wire [((5+((N_PINS<=2)?1:(N_PINS<=4)?2:(N_PINS<=8)?3:(N_PINS<=16)?4:5)+1+DLY_W+4+2+4+2+7)/8)*8-1:0] s_wrdata,
 
     // pin interface. ⭐ Both outputs are REGISTERED (ruling F2): every engine
     // driven bit comes from a flop, because a glitch on a clock pin is an extra
@@ -517,18 +520,29 @@ module pe_engine #(
   // naming its queue too is the same idea one level finer, and it drops the
   // baked lane->queue mapping entirely.
   localparam integer BQW   = 2;                      // TX queue index
-  localparam integer ACT_W = 3 + PINW + 1 + DLY_W + BPW + BQW;
+  // ⭐⭐ v2 STEP 2 (Wilson ruling on design 5cf27c1f): THE 32-BIT WORD.
+  // op 3 -> 5 bits (v1's eight keep their values), + PINB (a second pin) and
+  // MOD (two per-action modifiers) at the bottom. RESERVED opcodes 8..31 are
+  // refused by the assembler and given NO behaviour here until a primitive
+  // step builds one. LOWX = the bits below the v1 fields.
+  localparam integer OP_W   = 5;
+  localparam integer PINB_W = 4;
+  localparam integer MOD_W  = 2;
+  localparam integer LOWX   = PINB_W + MOD_W;
+  localparam integer ACT_W = OP_W + PINW + 1 + DLY_W + BPW + BQW + PINB_W + MOD_W;
+  // header `base` is a WORD INDEX (v2), so the header does not grow with AW
+  localparam integer BASE_W = 8;
 
   // ---- opcodes. ⭐ Eight, which is exactly the 3-bit field: level, shift,
   // shift-in, read-bit, start, stop, arm, no-op re-arm.
-  localparam [2:0] OP_LEVEL   = 3'd0;
-  localparam [2:0] OP_SHIFT   = 3'd1;
-  localparam [2:0] OP_SHIFTIN = 3'd2;
-  localparam [2:0] OP_READBIT = 3'd3;
-  localparam [2:0] OP_START   = 3'd4;
-  localparam [2:0] OP_STOP    = 3'd5;
-  localparam [2:0] OP_ARM     = 3'd6;
-  localparam [2:0] OP_REARM   = 3'd7;
+  localparam [OP_W-1:0] OP_LEVEL   = 0;
+  localparam [OP_W-1:0] OP_SHIFT   = 1;
+  localparam [OP_W-1:0] OP_SHIFTIN = 2;
+  localparam [OP_W-1:0] OP_READBIT = 3;
+  localparam [OP_W-1:0] OP_START   = 4;
+  localparam [OP_W-1:0] OP_STOP    = 5;
+  localparam [OP_W-1:0] OP_ARM     = 6;
+  localparam [OP_W-1:0] OP_REARM   = 7;
 
   // ---- image layout, all derived -------------------------------------
   // ⛔⛔ `base` IS A THIRD FIELD THE S2 FREEZE DID NOT HAVE. Without it every
@@ -553,7 +567,7 @@ module pe_engine #(
   // the Python encoder, which is why a one-line omission in the RTL could not
   // slip through as "the images still load".
   localparam integer HDR_BITS  = PINW + PINW + 1 + DLY_W + CW + D_W + D_W
-                                 + AW + 1;
+                                 + BASE_W + 1;
   localparam integer HDR_BYTES = (HDR_BITS + 7) / 8;
   // ⭐⭐ SIZED COMPARISON CONSTANTS, so every comparison is width-matched.
   // ⛔ WHY, AND WHY NOT A LINT WAIVER. Verilator rejects the design on six
@@ -604,7 +618,15 @@ module pe_engine #(
     end
   endfunction
   localparam integer ACT_BYTES = (ACT_W + 7) / 8;
-  localparam integer ACT_BASE  = N_LANES * HDR_BYTES;
+  // ⛔ v2: bytes HDR_REGION..+1 are the image's 16-bit MAGIC + version (the
+  // loader checks it in project.v); word 0 starts after it, word-aligned
+  localparam integer MAGIC_BYTES = 2;
+  localparam integer ACT_BASE  = N_LANES * HDR_BYTES + MAGIC_BYTES;
+  generate
+    if ((ACT_BASE % ACT_BYTES) != 0) begin : g_act_aligned
+      ACTION_REGION_NOT_WORD_ALIGNED _static_assert ();
+    end
+  endgenerate
 
   // =====================================================================
   // PER-LANE STATE
@@ -1309,7 +1331,7 @@ module pe_engine #(
 `ifdef M_CKRX_HEADER_PIN
       wire [PINW-1:0] ck_rpin = l_pin[gi];
 `else
-      wire [PINW-1:0] ck_rpin = l_act[hix[gi]][ACT_W-4 -: PINW];
+      wire [PINW-1:0] ck_rpin = l_act[hix[gi]][ACT_W-1-OP_W -: PINW];
 `endif
       wire ckp_real = (l_clkpin[gi] < N_PINS[PINW-1:0]);
       wire ckd_real = (ck_rpin      < N_PINS[PINW-1:0]);
@@ -1332,7 +1354,7 @@ module pe_engine #(
       // the unclocked path, guarded here at birth instead.
       assign ck_bit[gi] = ckd_real ? pin_in[ck_rpin] : 1'b0;
       // the delay field of the action this lane is currently clocking
-      assign ck_dly[gi] = l_act[hix[gi]][BQW+BPW +: DLY_W];
+      assign ck_dly[gi] = l_act[hix[gi]][LOWX+BQW+BPW +: DLY_W];
       // ⭐ CE1: the parked lane's HIGH length after the observed rise --
       // `d`, or `d/2` on a HALF_HIGH lane (the rebase below adds it)
       assign ck_hdly[gi] = half_v[gi] ? (ck_dly[gi] >> 1) : ck_dly[gi];
@@ -1634,14 +1656,14 @@ module pe_engine #(
   assign busy = (st != ST_IDLE);
 
   // ---- action field slices -------------------------------------------
-  wire [2:0]       a_op    = cur_act[ACT_W-1 -: 3];
-  wire [PINW-1:0]  a_pin   = cur_act[ACT_W-4 -: PINW];
-  wire             a_lvl   = cur_act[ACT_W-4-PINW];
-  wire [DLY_W-1:0] a_dly   = cur_act[BQW+BPW +: DLY_W];
-  wire [BPW-1:0]   a_cnt   = cur_act[BQW +: BPW];
+  wire [OP_W-1:0]  a_op    = cur_act[ACT_W-1 -: OP_W];
+  wire [PINW-1:0]  a_pin   = cur_act[ACT_W-1-OP_W -: PINW];
+  wire             a_lvl   = cur_act[ACT_W-1-OP_W-PINW];
+  wire [DLY_W-1:0] a_dly   = cur_act[LOWX+BQW+BPW +: DLY_W];
+  wire [BPW-1:0]   a_cnt   = cur_act[LOWX+BQW +: BPW];
   // ⭐ WHICH TX QUEUE THIS ACTION DRAWS FROM. Per-ACTION, so a lane's queue is
   // assigned by the PROGRAM and no lane number is baked into the hardware.
-  assign           a_q     = cur_act[0 +: BQW];
+  assign           a_q     = cur_act[LOWX +: BQW];
 
   // ⭐⭐ THE RESERVED NON-DRIVING PIN INDEX. PINW encodes 2**PINW codes and only
   // N_PINS are real, so `PIN_NONE` costs nothing: it is a value that already
@@ -1943,6 +1965,11 @@ module pe_engine #(
   // timestamp of X, which made `ready` X and left the engine idle forever --
   // while elaborating perfectly cleanly.
   wire [HDR_BYTES*8-1:0] hsh_n = {hsh[HDR_BYTES*8-9:0], s_rdata};
+  // ⭐ v2: the header's `base` is a WORD INDEX; the PC stays a BYTE address
+  // (unchanged PC logic, stepping by ACT_BYTES), so it is converted ONCE here:
+  // ACT_BASE + base * ACT_BYTES. pe_asm refuses a base past the store.
+  wire [BASE_W-1:0] hbase = hsh_n[HDR_BYTES*8-2-2*PINW-DLY_W-CW-D_W-D_W -: BASE_W];
+  wire [AW-1:0] hbase_addr = ACT_BASE[AW-1:0] + hbase * ACT_BYTES[AW-1:0];
 
   // =====================================================================
   // ⛔⛔ RULING TF1 -- THE NEXT-STATE VALUES THE REGISTERED READINESS READS
@@ -2087,7 +2114,7 @@ module pe_engine #(
       hact   = l_act [hix[ln]];
       if (!hvalid)
         fetch_addr = l_pc[ln];                       // filling the head itself
-      else if (hact[ACT_W-1 -: 3] == OP_REARM && hact[ACT_W-4-PINW])
+      else if (hact[ACT_W-1 -: OP_W] == OP_REARM && hact[ACT_W-1-OP_W-PINW])
         fetch_addr = l_base[ln];                     // the loop, prefetched
       else
         fetch_addr = l_fpc[ln];
@@ -2125,7 +2152,7 @@ module pe_engine #(
       // coincidence in an index is how lane 4's slots aliased onto lane 0's.
       else if (SPL == 1)
         want_fetch = 1'b0;
-      else if (hact[ACT_W-1 -: 3] == OP_REARM && !hact[ACT_W-4-PINW])
+      else if (hact[ACT_W-1 -: OP_W] == OP_REARM && !hact[ACT_W-1-OP_W-PINW])
         want_fetch = 1'b0;                           // chaining: successor is
                                                      // the head; spare unused
       else
@@ -2240,8 +2267,7 @@ module pe_engine #(
         // refill atomic with respect to the dispatch pipeline.
         s_wraddr <= paddr;
         // TM2: each byte's address, added HERE (off the store read path)
-        s_wraddrk <= {paddr + {{(AW-2){1'b0}}, 2'd2},
-                      paddr + {{(AW-1){1'b0}}, 1'b1}, paddr};
+
       end
     end
   end
@@ -2362,13 +2388,13 @@ module pe_engine #(
                           <= hsh_n[HDR_BYTES*8-2-2*PINW-DLY_W-CW+2]
                              & hsh_n[HDR_BYTES*8-1-2*PINW];
                     l_d[hl]      <= hsh_n[HDR_BYTES*8-2-2*PINW-DLY_W-CW -: D_W];
-                    l_pc[hl]     <= hsh_n[HDR_BYTES*8-2-2*PINW-DLY_W-CW-D_W-D_W -: AW];
-                    l_base[hl]   <= hsh_n[HDR_BYTES*8-2-2*PINW-DLY_W-CW-D_W-D_W -: AW];
+                    l_pc[hl]     <= hbase_addr;
+                    l_base[hl]   <= hbase_addr;
                     // ⭐ the fetch pointer starts WITH the PC, not ahead of it:
                     // both slots are empty, so the first refill targets the
                     // head at `l_pc` and `fetch_addr` reads `l_pc` directly.
                     // `l_fpc` then takes over from P_CAP onward.
-                    l_fpc[hl]    <= hsh_n[HDR_BYTES*8-2-2*PINW-DLY_W-CW-D_W-D_W -: AW];
+                    l_fpc[hl]    <= hbase_addr;
                     live_n[hl]   = 1'b1;
                     hb <= 4'd0;
                     if (hl == LANE_LAST) begin

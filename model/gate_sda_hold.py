@@ -60,6 +60,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, os.path.join(ROOT, "test"))
 sys.path.insert(0, HERE)
+from pe_isa import STORE_BYTES as _STORE_BYTES  # noqa: E402  v2: never a typed 256
 from toolchain import banner, tool                                # noqa: E402
 import sim_run                                                    # noqa: E402
 import hold_bound                                                 # noqa: E402
@@ -128,7 +129,7 @@ def run(vvp, img, peer, feed=None):
     a2 = benchset.a2_slack_arg(img) if img.startswith("test/") else None
     fa = (["+FEEDN=%d" % len(feed), "+FEED=%s" % "".join(
         "%02x" % b for b in feed)] if feed else [])
-    cmd = sim_run.vvp([vvp, "+IMG=%s" % img, "+NBYTES=256",
+    cmd = sim_run.vvp([vvp, "+IMG=%s" % img, "+NBYTES=%d" % _STORE_BYTES,
                        "+PEER=%s" % peer, "+NCYC=60000",
                        "+OUT=%s" % os.path.join(OUT, "t.txt"), "+SEED=1",
                        "+ASYNC=0", "+STAYLOAD=0", "+SCLHOLD=0"]

@@ -37,6 +37,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(ROOT, "model"))
+from pe_isa import STORE_BYTES as _STORE_BYTES  # noqa: E402  v2: never a typed 256
 from toolchain import banner, tool          # noqa: E402  ruling V
 import sim_run                              # noqa: E402
 import pe_isa as I                          # noqa: E402
@@ -207,7 +208,7 @@ def trace(vvp, img, peer, ncyc=NCYC, img_path=None, feed_of=None,
     seq = corpus.FEEDS.get(feed_of or img.replace(".hex", ""), [])
     feed = (["+FEEDN=%d" % len(seq),
              "+FEED=%s" % "".join("%02x" % b for b in seq)] if seq else [])
-    r = subprocess.run(sim_run.vvp([vvp, "+IMG=%s" % ipath, "+NBYTES=256",
+    r = subprocess.run(sim_run.vvp([vvp, "+IMG=%s" % ipath, "+NBYTES=%d" % _STORE_BYTES,
                                     "+PEER=%s" % peer, "+NCYC=%d" % ncyc, "+OUT=%s" % out,
                                     "+SEED=1", "+ASYNC=0", "+STAYLOAD=0", "+SCLHOLD=0",
                                     "+SPI_SCK_INV=%d" % (1 if sck_inv else 0)]

@@ -25,7 +25,8 @@ module tb_v2win;
   wire [7:0] uo_out, uio_out, uio_oe;
   wire [7:0] uio_in = (uio_oe & uio_out) | (~uio_oe & uio_drv);
   localparam integer PIN_PROG = 7, PIN_PTR = 5, PIN_WR = 6;
-  reg  [7:0] img [0:255];
+`include "test/store_filler.vh"   // v2: PE_STORE_BYTES, never a typed 256
+  reg  [7:0] img [0:PE_STORE_BYTES-1];
   reg [8*256-1:0] imgfile;
   integer    i, cyc = 0, dry, lead, at, nslot = 0, taken = -1, slot_wb = -1;
   // +PHPS=p (audit item 2, 10-22): the LOW-nibble PUSH rise moves p ps after

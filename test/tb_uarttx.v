@@ -31,7 +31,8 @@ module tb_uarttx;
   wire [7:0] uo_out, uio_out, uio_oe;
   wire [7:0] uio_in = (uio_oe & uio_out) | (~uio_oe & uio_drv);
 
-  localparam integer IMG_MAX = 256;
+`include "test/store_filler.vh"   // v2: PE_STORE_BYTES, never a typed 256
+  localparam integer IMG_MAX = PE_STORE_BYTES;
   localparam integer PIN_PROG = 7, PIN_PTR = 5, PIN_WR = 6;
   localparam integer TX_BIT = 0;              // uo_out[0], P_TX_UO
 

@@ -45,6 +45,7 @@ ROOT = os.path.dirname(HERE)
 for _p in (HERE, os.path.join(ROOT, "model"), os.path.join(ROOT, "model", "a2")):
     if _p not in sys.path:
         sys.path.insert(0, _p)
+from pe_isa import STORE_BYTES as _STORE_BYTES  # noqa: E402  v2: never a typed 256
 from toolchain import banner, tool          # noqa: E402
 import sim_run                              # noqa: E402
 import corpus                               # noqa: E402
@@ -71,7 +72,7 @@ def frames_want():
 def run(vvp, extra=()):
     out = os.path.join(R.SCRATCH, "spimw_%s.txt" % os.path.basename(vvp))
     seq = corpus.FEEDS[NAME]
-    cmd = sim_run.vvp([vvp, "+IMG=%s" % IMG, "+NBYTES=256", "+PEER=spi",
+    cmd = sim_run.vvp([vvp, "+IMG=%s" % IMG, "+NBYTES=%d" % _STORE_BYTES, "+PEER=spi",
                        "+NCYC=%d" % NCYC, "+OUT=%s" % out, "+SEED=1", "+ASYNC=0",
                        "+STAYLOAD=0", "+SCLHOLD=0", "+SPI_SCK_INV=0",
                        "+FEEDN=%d" % len(seq),

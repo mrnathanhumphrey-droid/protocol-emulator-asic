@@ -54,6 +54,7 @@ from concurrent.futures import ThreadPoolExecutor
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path[:0] = [HERE, os.path.join(ROOT, "model")]
+from pe_isa import STORE_BYTES as _STORE_BYTES  # noqa: E402  v2: never a typed 256
 from toolchain import banner, tool            # noqa: E402
 import sim_run                                # noqa: E402
 import corpus                                 # noqa: E402
@@ -175,7 +176,7 @@ def main():
         ("M_HALT_KEEP_HOLD", "i2c", "a pad moved"),
         ("M_KEEP_ON_HALT", "keep", "KEEP-LIST CLEARED"),
     ]
-    owa = ["+IMG=" + rel(owimg), "+NBYTES=256", "+FEED=" + rel(owfeed),
+    owa = ["+IMG=" + rel(owimg), "+NBYTES=%d" % _STORE_BYTES, "+FEED=" + rel(owfeed),
            "+NFEED=%d" % len(lines), "+POLLIDX=%d" % len(_rx)]
 
     jobs = [("", a) for a in arms] + [(d, a) for d, a, _w in mustfire]

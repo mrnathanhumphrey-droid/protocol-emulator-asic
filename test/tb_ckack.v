@@ -38,7 +38,8 @@ module tb_ckack;
   wire [7:0] uo_out, uio_out, uio_oe;
 
   localparam integer PIN_PROG = 7, PIN_PTR = 5, PIN_WR = 6;
-  localparam integer IMG_MAX  = 256;
+`include "test/store_filler.vh"   // v2: PE_STORE_BYTES, never a typed 256
+  localparam integer IMG_MAX  = PE_STORE_BYTES;
   localparam integer P_SDA = 2, P_SCL = 1;
 
   reg  [7:0] img [0:IMG_MAX-1];

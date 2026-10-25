@@ -36,6 +36,7 @@ ROOT = os.path.dirname(HERE)
 for _p in (HERE, os.path.join(HERE, "a2"), os.path.join(ROOT, "test")):
     if _p not in sys.path:
         sys.path.insert(0, _p)
+import pe_isa as _ISA                      # noqa: E402  v2: STORE_BYTES
 
 OUT = os.path.join(ROOT, "test", "v3_table.vh")
 RESP = os.path.join(ROOT, "test", "lane_response_bounds.json")
@@ -45,7 +46,9 @@ N_LANES = 5
 def fnv(img):
     """The bench's hash of a loaded image (bytes written at 0..len-1)."""
     h = 0x811C9DC5
-    for a in range(256):
+    # v2: over every STORE position (pe_isa.STORE_BYTES); 256 stays the
+    # never-written marker -- it is not a byte value, at any store size
+    for a in range(_ISA.STORE_BYTES):
         v = img[a] if a < len(img) else 256
         h = ((h ^ v) * 0x01000193) & 0xFFFFFFFF
     return h
@@ -285,7 +288,7 @@ def rows():
         # every runner writes images through pe_isa.write_image. The rxfast
         # d = 60 entry returned the bare program and was unknown for a whole
         # arc. The one exception is declared: a deliberate short load.
-        if len(imgs[name]) != 256 and name not in SHORT_LOADS:
+        if len(imgs[name]) != _ISA.STORE_BYTES and name not in SHORT_LOADS:
             raise RuntimeError("v3_table: %s's generator returned %d bytes, "
                                "not the 256-byte store the bench loads"
                                % (name, len(imgs[name])))

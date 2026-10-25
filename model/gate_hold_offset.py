@@ -26,6 +26,7 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path[:0] = [os.path.join(ROOT, "model", "a2"), os.path.join(ROOT, "model"),
                 os.path.join(ROOT, "test")]
+from pe_isa import STORE_BYTES as _STORE_BYTES  # noqa: E402  v2: never a typed 256
 from toolchain import banner, tool        # noqa: E402
 import sim_run                            # noqa: E402
 import hold_bound                         # noqa: E402
@@ -47,7 +48,7 @@ def measure():
                        cwd=ROOT, capture_output=True, text=True)
     if r.returncode != 0:
         raise SystemExit("*** build failed\n" + r.stdout + r.stderr)
-    o = subprocess.run(sim_run.vvp([vvp, "+IMG=" + IMG, "+NBYTES=256",
+    o = subprocess.run(sim_run.vvp([vvp, "+IMG=" + IMG, "+NBYTES=%d" % _STORE_BYTES,
                                     "+PEER=none", "+NCYC=%d" % NCYC,
                                     "+OUT=" + os.path.join(TMP, "o.txt"), "+SEED=1",
                                     "+ASYNC=0", "+STAYLOAD=0", "+SCLHOLD=0"],

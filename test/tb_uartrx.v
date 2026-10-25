@@ -35,7 +35,8 @@ module tb_uartrx;
   reg  [7:0] peer = 8'hFF;
   wire [7:0] uio_in = peer;
   localparam integer PIN_PROG = 7, PIN_PTR = 5, PIN_WR = 6;
-  localparam integer IMG_MAX = 256;
+`include "test/store_filler.vh"   // v2: PE_STORE_BYTES, never a typed 256
+  localparam integer IMG_MAX = PE_STORE_BYTES;
   localparam integer P_RX = 3;
   localparam integer FMAX = 4096;
 

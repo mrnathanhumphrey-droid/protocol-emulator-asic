@@ -46,6 +46,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(ROOT, "model"))
+from pe_isa import STORE_BYTES as _STORE_BYTES  # noqa: E402  v2: never a typed 256
 from toolchain import banner, tool          # noqa: E402
 import sim_run                              # noqa: E402
 import onewire                               # noqa: E402
@@ -126,7 +127,7 @@ def sim(name, variant, txn, rise_ns, extra=(), ph=0):
     import time
     t0 = time.time() - 2.0
     r = run(sim_run.vvp(["-l", rel(log), rel(vvp_path(rise_ns, ph)),
-                         "+IMG=" + rel(img), "+NBYTES=256", "+FEED=" + rel(fpath),
+                         "+IMG=" + rel(img), "+NBYTES=%d" % _STORE_BYTES, "+FEED=" + rel(fpath),
                          "+NFEED=%d" % len(lines), "+POLLIDX=%d" % pidx] + list(extra),
                         images=[rel(img)]))
     # ⛔ a log from an EARLIER run must not be judged as this one's

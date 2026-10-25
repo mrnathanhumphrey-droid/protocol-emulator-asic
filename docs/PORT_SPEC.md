@@ -397,7 +397,7 @@ of a HALF_HIGH lane (D). A rebase on an observed edge overrides it (D, G).
 | at WB: timestamp | advances by `a_dly` (the rule above): the lane's next release is `a_dly` later | (rule above) |
 | does it re-dispatch the same head every period? | **yes**: the head stays valid and is the same word, so the lane is released every `a_dly` and dispatches the same REARM each time | same as row 1 |
 | what ends the chain | **nothing inside the lane.** A chaining re-arm is a park: it repeats until the lane stops being live (HALT by a timeout or a stretch fault, G and D), `run` drops, or the program is reloaded | `//    level = 0  extend the delay, PC unchanged   (Ruling 2's chaining)` |
-| is the spare consumed? | **never while the chain runs**: `want_fetch` returns 0 for a lane whose valid head is a chaining re-arm, so the spare is not refilled; whatever it held stays unread | `else if (hact[ACT_W-1 -: 3] == OP_REARM && !hact[ACT_W-4-PINW])` |
+| is the spare consumed? | **never while the chain runs**: `want_fetch` returns 0 for a lane whose valid head is a chaining re-arm, so the spare is not refilled; whatever it held stays unread | `else if (hact[ACT_W-1 -: OP_W] == OP_REARM && !hact[ACT_W-1-OP_W-PINW])` |
 | `want_fetch`, exactly | `!head_valid` → 1; else `SPL == 1` → 0; else head is `OP_REARM` with level 0 → 0; else `!spare_valid` | `want_fetch = 1'b0;                           // chaining: successor is` |
 | fetch port effect | none after the head is in: the lane is never a branch-2 candidate (§1) while parked; branch 1 only fires for an **invalid** winner head | §1 |
 | eligibility | ordinary: `rel_due & hz_q & cap_ok`, no extra term | (7E, 7F) |

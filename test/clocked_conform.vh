@@ -994,7 +994,7 @@ always @(posedge dut.clk) begin
   if (dut.rst_n === 1'b1 && dut.u_eng.st === 2'd2) cm_wbs = cm_wbs + 1;
   if (dut.rst_n === 1'b1 && dut.u_eng.pst === 3'd3) begin
     cm_caps = cm_caps + 1;
-    if (dut.u_eng.s_wrdata[23:0] === PE_STORE_FILLER) begin
+    if (dut.u_eng.s_wrdata[PE_ACT_W-1:0] === PE_STORE_FILLER) begin
       cm_fills = cm_fills + 1;
       if (cm_fills <= 4)
         $display("*** FAIL clocked_conform[M]: lane %0d fetched the STORE FILLER at address %0d -- its fetch path left its program", dut.u_eng.pl, dut.u_eng.paddr);
@@ -1336,7 +1336,7 @@ integer   v3_unfed, v3_lok;         // the declaration; loads that found a byte
 // (FNV-1a; never written = 256) when the engine primes; `test/v3_table.vh`
 // maps the hash to exempt / r_i / D_tol. A `+V3...` plusarg OVERRIDES the
 // table (the must-fire prices the comparison with one); none is needed.
-integer   v3_wimg [0:255];
+integer   v3_wimg [0:PE_STORE_BYTES-1];
 integer   v3_exg, v3_hashed, v3_a, v3_f, v3_ovl;
 reg [31:0] v3_h;
 reg       v3_prim_q;
@@ -1360,7 +1360,7 @@ initial begin
   v3_exg = $value$plusargs("V3_EXEMPT=%d", v3_ex);
   if (!v3_exg) v3_ex = 0;
   v3_hashed = 0; v3_prim_q = 1'b0;
-  for (v3_a = 0; v3_a < 256; v3_a = v3_a + 1) v3_wimg[v3_a] = 256;
+  for (v3_a = 0; v3_a < PE_STORE_BYTES; v3_a = v3_a + 1) v3_wimg[v3_a] = PE_STORE_BYTES;
   if (!$value$plusargs("V3_UNDERRUN=%d", v3_unfed)) v3_unfed = 0;
   v3_lok = 0;
   // ⛔ a malformed vector is a FAIL, never a silent "unbounded" (as A2SLACK)
@@ -1439,7 +1439,7 @@ always @(posedge dut.clk) begin
     // ... and identified once, when the engine primes on it
     if (dut.u_eng.primed === 1'b1 && !v3_prim_q && v3_hashed == 0) begin
       v3_h = 32'h811C9DC5;
-      for (v3_a = 0; v3_a < 256; v3_a = v3_a + 1)
+      for (v3_a = 0; v3_a < PE_STORE_BYTES; v3_a = v3_a + 1)
         v3_h = (v3_h ^ v3_wimg[v3_a]) * 32'h01000193;
       v3_hashed = 1;
       v3_tab_name(v3_h);

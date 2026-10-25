@@ -58,7 +58,8 @@ module tb_spitgt;
   reg  [7:0] ui_in = 8'h00;
   wire [7:0] uo_out, uio_out, uio_oe;
   localparam integer PIN_PROG = 7, PIN_PTR = 5, PIN_WR = 6;
-  localparam integer IMG_MAX = 256;
+`include "test/store_filler.vh"   // v2: PE_STORE_BYTES, never a typed 256
+  localparam integer IMG_MAX = PE_STORE_BYTES;
   localparam integer P_SCK = 4, P_MOSI = 5, P_CS = 6, P_MISO = 7;
   localparam integer D_TOL = 17;
 

@@ -42,6 +42,7 @@ ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 
 import corpus  # noqa: E402
+from pe_isa import STORE_BYTES as _STORE_BYTES  # noqa: E402  v2: never a typed 256
 import sim_run                                       # noqa: E402
 from toolchain import (banner, tool, tool_or_none,   # noqa: E402  ruling V
                        pinned_ok, PINNED_VERILATOR, PINNED_WSL_VERILATOR)
@@ -745,7 +746,7 @@ def main() -> int:
         fh.write("\n".join("%02x" % b for b in store4) + "\n")
 
     def spim4(v, extra=()):
-        cmd = sim_run.vvp([v, "+IMG=%s" % d4, "+NBYTES=256", "+PEER=spi",
+        cmd = sim_run.vvp([v, "+IMG=%s" % d4, "+NBYTES=%d" % _STORE_BYTES, "+PEER=spi",
                            "+OUT=%s" % os.path.join(TMP, "rx_d4.txt"), "+NCYC=60000",
                            "+SEED=1", "+ASYNC=0", "+STAYLOAD=0", "+SCLHOLD=0",
                            "+SPI_SCK_INV=0"] + feed_args(os.path.join(ROOT, "test",

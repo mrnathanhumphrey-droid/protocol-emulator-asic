@@ -36,9 +36,9 @@
 `default_nettype none
 
 module pe_store #(
-    parameter integer AW       = 8,
+    parameter integer AW       = 9,
     parameter         MEM_TYPE = "flops",
-    parameter integer WIDE_B   = 3      // bytes per wide read (one action)
+    parameter integer WIDE_B   = 4      // bytes per wide read (one action word)
 ) (
     input  wire            clk,
     input  wire            rst_n,
@@ -64,14 +64,26 @@ module pe_store #(
     // with "flops" J can be ~1; with "sram" J >= 3. The flop path is what
     // ships, so the rule is violated only on a path that is currently blocked.
     input  wire            wre,
-    input  wire [AW-1:0]   wraddr,
-    // ⛔ RULING TM2: byte wb's address, PRE-ADDED by the engine (wraddr + wb,
-    // registered beside `wraddr`). See the wide read below.
-    input  wire [WIDE_B*AW-1:0] wraddrk,
+    input  wire [AW-1:0]   wraddr,     // WORD-aligned (the low WB_W bits are 0)
     output reg  [WIDE_B*8-1:0] wrdata
 );
 
   localparam integer DEPTH = (1 << AW);
+  // ⭐⭐ v2 (Wilson ruling on design 5cf27c1f): THE STORE IS WORD-ORGANISED --
+  // WIDE_B byte BANKS of NW entries, byte k in bank k % WIDE_B at row
+  // k / WIDE_B. Every action read is word-aligned (word w at ACT_BASE + 4w,
+  // ACT_BASE a multiple of 4), so the wide read is ONE row of all banks: a
+  // NW:1 mux per bank (128:1 at AW = 9), not WIDE_B separate 2**AW:1 byte
+  // muxes, and no address adder at all. Only the narrow port (header load)
+  // needs byte addressing, and it is the same rows plus a WIDE_B:1 select.
+  localparam integer WB_W = (WIDE_B <= 1) ? 1 : (WIDE_B <= 2) ? 1 :
+                            (WIDE_B <= 4) ? 2 : 3;
+  localparam integer NW   = DEPTH / WIDE_B;
+  generate
+    if ((1 << WB_W) != WIDE_B) begin : g_wide_pow2
+      STORE_WIDE_B_NOT_A_POWER_OF_TWO _static_assert ();
+    end
+  endgenerate
 
   // --------------------------------------------------------------------
   // ⭐ ONE storage array, TWO generate arms that differ only in how they
@@ -79,48 +91,37 @@ module pe_store #(
   // "same-author re-derivation is not an independent witness" lesson
   // applies to RTL too: two copies of a read path WILL drift.
   // --------------------------------------------------------------------
-  reg [7:0] mem [0:DEPTH-1];
-
+  // ⚠ ONE array per bank; both MEM_TYPE arms share these and differ only in
+  // how they would be bound, so the read side cannot diverge between arms.
+  // (The "sram" arm is still blocked -- S0's Metal4 conflict -- and is now
+  // WIDE_B narrow banks, which is what a macro binding would see.)
+  wire [WB_W-1:0]    wsel = waddr[WB_W-1:0];
+  wire [AW-WB_W-1:0] wrow = waddr[AW-1:WB_W];
+  wire [WB_W-1:0]    rsel = raddr[WB_W-1:0];
+  wire [AW-WB_W-1:0] rrow = raddr[AW-1:WB_W];
+  wire [AW-WB_W-1:0] xrow = wraddr[AW-1:WB_W];
+  wire [7:0] rbyte [0:WIDE_B-1];
+  genvar gb;
   generate
-    if (MEM_TYPE == "sram") begin : g_sram
-      // Single-port synchronous RAM shape: write-first is NOT modelled, so a
-      // read and write to the same address in one cycle returns OLD data.
-      // ⛔ The engine never does that -- load and run are mutually exclusive
-      // (HALT, RELOAD, RESUME) -- but it is written down because an SRAM macro
-      // would behave this way and the flop arm must not accidentally be nicer.
+    for (gb = 0; gb < WIDE_B; gb = gb + 1) begin : g_bank
+      reg [7:0] mem [0:NW-1];
       always @(posedge clk) begin
-        if (we) mem[waddr] <= wdata;
-        if (re) rdata      <= mem[raddr];
+        if (we && wsel == gb) mem[wrow] <= wdata;
+        // byte gb of the word is the gb-th LOWEST address = the MSB-first
+        // byte position WIDE_B-1-gb, as the v1 byte read put it
+        if (wre) wrdata[(WIDE_B-1-gb)*8 +: 8] <= mem[xrow];
       end
-    end else begin : g_flops
-      // Register array. Same timing contract: registered read, one cycle.
-      always @(posedge clk) begin
-        if (we) mem[waddr] <= wdata;
-        if (re) rdata      <= mem[raddr];
-      end
+      assign rbyte[gb] = mem[rrow];
     end
   endgenerate
-
-  // ---- the wide read, shared by both arms so they cannot drift ----------
-  // ⛔⛔ RULING TM2 -- NO ADDER IN FRONT OF THE 256-WAY MUX. Byte wb used to
-  // read `mem[wraddr + wb]`, so an 8-bit add sat in series with the read mux,
-  // and the shared address fanned out to all three byte muxes: the second
-  // family under the +0.5 ns bar (117e55c: `e_wraddr` -> `s_wrdata`, +0.140;
-  // R6's limiter at +0.108). The engine now registers each byte's address
-  // (`wraddrk`, the same sums, the same cycle), so the add moved before the
-  // register and each byte's mux has its own address flops.
-  // `M_TM2_STORE_ADD` keeps the add here (an equivalent mutant: same values).
-  integer wb;
   always @(posedge clk) begin
-    if (wre) begin
-      for (wb = 0; wb < WIDE_B; wb = wb + 1)
-`ifdef M_TM2_STORE_ADD
-        wrdata[(WIDE_B-1-wb)*8 +: 8] <= mem[(wraddr + wb[AW-1:0])];
-`else
-        wrdata[(WIDE_B-1-wb)*8 +: 8] <= mem[wraddrk[wb*AW +: AW]];
-`endif
-    end
+    if (re) rdata <= rbyte[rsel];
   end
+
+  // ⛔ RULING TM2's per-byte address registers are GONE with the byte-wide
+  // array: a word read has no `wraddr + k` add to move out of the mux path.
+  // (So is `M_TM2_STORE_ADD`, the mutant that restored that add.)
+  wire _unused_lo = &{1'b0, wraddr[WB_W-1:0]};
 
   // ⚠ `rst_n` is intentionally NOT used to clear the array. Clearing 2**AW
   // bytes would add a reset fanout to every storage bit for no benefit: the

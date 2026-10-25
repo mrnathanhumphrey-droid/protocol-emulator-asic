@@ -40,6 +40,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(ROOT, "model"))
+from pe_isa import STORE_BYTES as _STORE_BYTES  # noqa: E402  v2: never a typed 256
 from toolchain import banner, tool          # noqa: E402
 import sim_run                              # noqa: E402
 import pe_asm                               # noqa: E402
@@ -124,7 +125,7 @@ def main():
         return 1
 
     def sim(which, bound):
-        cmd = sim_run.vvp([vvp, "+IMG=" + imgs[which], "+NBYTES=256",
+        cmd = sim_run.vvp([vvp, "+IMG=" + imgs[which], "+NBYTES=%d" % _STORE_BYTES,
                            "+PEER=none", "+OUT=" + os.path.join(TMP, which + ".txt"),
                            "+NCYC=60000", "+SEED=1", "+ASYNC=0", "+STAYLOAD=0",
                            "+SCLHOLD=0", "+SPI_SCK_INV=0", "+FEEDN=0", "+V3_EXEMPT=0",
@@ -180,7 +181,7 @@ def main():
     alt = bytearray(ctl)
     alt[250] ^= 0x01                     # store filler, never executed
     imgs["altered"] = write(bytes(alt), "ws2812_sub3_rearm21_altered.hex")
-    o = run(sim_run.vvp([vvp, "+IMG=" + imgs["altered"], "+NBYTES=256",
+    o = run(sim_run.vvp([vvp, "+IMG=" + imgs["altered"], "+NBYTES=%d" % _STORE_BYTES,
                          "+PEER=none", "+OUT=" + os.path.join(TMP, "alt.txt"),
                          "+NCYC=20000", "+SEED=1", "+ASYNC=0", "+STAYLOAD=0",
                          "+SCLHOLD=0", "+SPI_SCK_INV=0", "+FEEDN=0"],

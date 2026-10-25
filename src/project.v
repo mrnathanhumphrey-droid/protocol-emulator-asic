@@ -89,7 +89,7 @@ module tt_um_protocol_emulator #(
     // ⭐ EVERY quantity a scaling sweep would vary is a PARAMETER, so scaling
     //    costs a RUN and not a refactor. Checked by part1_param_contract.py.
     parameter integer N_LANES  = 5,     // lanes the engine schedules
-    parameter integer AW       = 8,     // 2**AW program bytes -- S1 census
+    parameter integer AW       = 9,     // 2**AW program bytes (v2: 512 B)
     parameter integer N_PINS   = 12,    // addressable protocol pins, both banks
     parameter integer TS_W     = 16,    // global counter / timestamp width
     parameter integer DLY_W    = 10,    // program delay field
@@ -328,10 +328,40 @@ module tt_um_protocol_emulator #(
   // ⛔ M_NO_STORE_FULL restores the old behaviour: the engine runs whatever
   //   the store holds. `test/store_run.sh` requires a 51-byte load to RUN on
   //   that build, so the gate below is shown to be what refuses it.
-`ifdef M_NO_STORE_FULL
-  wire eng_run = run;
+  // ⛔⛔ v2 (Wilson Q3): THE IMAGE'S 16-BIT MAGIC + VERSION, checked AS IT
+  // LOADS. In v1 byte 30 was the first action's first byte, so a v1 image can
+  // hold anything there; bytes 30-31 = 0x56 0x32 leave 1 in 65,536. Latched
+  // from the write stream -- ZERO cycles at run, so a good image's trace is
+  // untouched -- and an image without it is refused exactly as a short load
+  // is: the engine does not run and CONFIG_ERR is reported.
+  // MAGIC_AT is derived from the header layout (model/gate_one_encoder.py
+  // holds it to test/pe_isa.py's HDR_REGION).
+  localparam integer MAGIC_PINW = (N_PINS <= 2) ? 1 : (N_PINS <= 4) ? 2 :
+                                  (N_PINS <= 8) ? 3 : (N_PINS <= 16) ? 4 : 5;
+  localparam integer MAGIC_AT = N_LANES *
+      ((MAGIC_PINW * 2 + 1 + DLY_W + 4 + D_W + D_W + 8 + 1 + 7) / 8);
+  localparam [7:0] MAGIC_HI = 8'h56, MAGIC_LO = 8'h32;
+  localparam [AW-1:0] MAGIC_A0 = MAGIC_AT[AW-1:0];
+  localparam [AW-1:0] MAGIC_A1 = MAGIC_A0 + {{(AW-1){1'b0}}, 1'b1};
+  reg magic_hi, magic_lo;
+  always @(posedge clk or negedge rst_n_s) begin
+    if (!rst_n_s) begin
+      magic_hi <= 1'b0;
+      magic_lo <= 1'b0;
+    end else if (prog_mode & wr_rise) begin
+      if (ptr == MAGIC_A0) magic_hi <= (uio_q1 == MAGIC_HI);
+      if (ptr == MAGIC_A1) magic_lo <= (uio_q1 == MAGIC_LO);
+    end
+  end
+`ifdef M_NO_MAGIC
+  wire bad_magic = 1'b0;
 `else
-  wire eng_run = run & store_full;
+  wire bad_magic = store_full & ~(magic_hi & magic_lo);
+`endif
+`ifdef M_NO_STORE_FULL
+  wire eng_run = run & ~bad_magic;
+`else
+  wire eng_run = run & store_full & ~bad_magic;
 `endif
   // ⭐⭐ CANARY (reset-network halt, Wilson): THE ENGINE'S RESET IS ONE FLOP.
   // Async-cleared by the synchronised power-on reset; otherwise it follows
@@ -383,17 +413,21 @@ module tt_um_protocol_emulator #(
   reg          rb_re;
 
   wire [AW-1:0]  e_wraddr;
-  wire [3*AW-1:0] e_wraddrk;                  // TM2: per-byte addresses
   wire           e_wre;
-  wire [3*8-1:0] s_wrdata;
+  // ⭐ v2: one action word = ACT_BYTES bytes, read as one store row. DERIVED
+  // (the engine's ACT_W, inlined: OP_W 5 + PINW + 1 + DLY_W + BPW 4 + BQW 2 +
+  // PINB_W 4 + MOD_W 2); model/gate_one_encoder.py holds it to pe_isa.
+  localparam integer ACT_BYTES_T =
+      (5 + MAGIC_PINW + 1 + DLY_W + 4 + 2 + 4 + 2 + 7) / 8;
+  wire [ACT_BYTES_T*8-1:0] s_wrdata;
 
-  pe_store #(.AW(AW), .MEM_TYPE(MEM_TYPE), .WIDE_B(3)) u_store (
+  pe_store #(.AW(AW), .MEM_TYPE(MEM_TYPE), .WIDE_B(ACT_BYTES_T)) u_store (
       .clk(clk), .rst_n(rst_n_s),
       .we(prog_mode & wr_rise), .waddr(ptr), .wdata(uio_q1),
       .re(prog_mode ? rb_re : e_re),
       .raddr(prog_mode ? rb_addr : e_raddr),
       .rdata(s_rdata),
-      .wre(e_wre & run), .wraddr(e_wraddr), .wraddrk(e_wraddrk),
+      .wre(e_wre & run), .wraddr(e_wraddr),
       .wrdata(s_wrdata)
   );
 
@@ -407,7 +441,7 @@ module tt_um_protocol_emulator #(
   wire               e_ovr, e_busy, e_rx_push;
   wire               e_host_pop;
   wire               e_cfg_err;
-  assign cfg_err_any = e_cfg_err | short_load;   // M5: one status bit
+  assign cfg_err_any = e_cfg_err | short_load | bad_magic;   // M5: one status bit
   wire               e_clk_stretch;
   wire [7:0]         e_rx_data;
   // DECLARED WITH AN EXPLICIT WIDTH, NOT `LW`, because `LW` is a localparam
@@ -588,7 +622,7 @@ module tt_um_protocol_emulator #(
   ) u_eng (
       .clk(clk), .rst_n(eng_rst_n), .por_n(rst_n_s), .run(eng_run),
       .s_raddr(e_raddr), .s_re(e_re), .s_rdata(s_rdata),
-      .s_wraddr(e_wraddr), .s_wraddrk(e_wraddrk), .s_wre(e_wre),
+      .s_wraddr(e_wraddr), .s_wre(e_wre),
       .s_wrdata(s_wrdata),
       .pin_out(e_pin_out), .pin_oe(e_pin_oe), .pin_inv(e_pin_inv),
       .pin_isck(e_pin_isck),

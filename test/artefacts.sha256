@@ -6,48 +6,48 @@
 # tool iverilog = Icarus Verilog version 12.0 (devel) (s20150603-1539-g2693dd32b)
 # tool verilator = Verilator 5.053 devel rev v5.052-258-ga419e9157 (mod)
 # tool yosys = Yosys 0.52 (git sha1 fee39a3284c90249e1d9684cf6944ffbbcbb8f90)
-ab70c397cc250b03faac0918deda1430335e443c8ee8cf1a64235d8f8d260506  smoke_image.hex  # make_smoke_image.py (default)
-bda6ed7bc08b78fbc3521987d65e15c9e3fa3ea3dab9281dbf78883d72acb518  census_image.hex  # make_smoke_image.py --census
-a972c351db7cbd56572c42e16914a6bbe1f88fc8013e3ece7b6d4dbd63323ac1  cfgerr_image.hex  # make_smoke_image.py --cfgerr
-6ea67f9b130c6de4912927e1f38eeae6be753233469d08a6bdeb911e494d8c66  pinnone_image.hex  # make_smoke_image.py --pinnone
-66a5dfeff958dc6712c79838b7b14b92a9af46030ee2ed24062c5927a9ca4a1a  armnone_image.hex  # make_smoke_image.py --armnone
-341140e8511635ea6ddd8c72dff64252f773ec1f46d27739a62af96234027fbf  ckdegen_image.hex  # make_smoke_image.py --ckdegen
-72d41876b8569fa5ce75b29297626aa35587c79d38327e0857d5230fb6a1edef  ckdegen2_image.hex  # make_smoke_image.py --ckdegen
-ac31f8dddb9d3f2fa668f93e5b62368dc01d580098881244515e3d5edbadf6fe  ckfive_image.hex  # make_smoke_image.py --ckfive
-1f1e7868fca870947b924bb4d56a506f83919a672f251501cb37c840fd9c1fd2  ckod_image.hex  # make_smoke_image.py --ckod
-96229055688011d52ae120e179fb333bc7fcf38e93a817ee91d32760e65f6d59  ckread_image.hex  # make_smoke_image.py --ckread
-a350306a1d5916e2416ac570bc86be352dad6c98646557f9a86e31777f64878e  ckdense_image.hex  # make_smoke_image.py --ckdense
-6a5b59da8e12ccce72af664c7d438aa037bde4254e4d82ea719336eb8707e0cb  ckheavy_image.hex  # make_smoke_image.py --ckheavy
-a81256ee86f156dd1c839a52b2fe0362fe4c82b0584318d3d9da985265cbc000  ckhold_at_image.hex  # make_smoke_image.py --ckhold
-dc5823b275212a93a6510074497d7e9bf6bb809bedc0d234ebe7c38275820795  ckhold_under_image.hex  # make_smoke_image.py --ckhold
-311846c3ed614188485e06763f2841d7713b1c420b8e1af9464d170bfcd5856d  ckhold_over_image.hex  # make_smoke_image.py --ckhold
-639e0550c49c6c4311c1c8d316e4ff8bbf5104382d76c28399aa8be418dbf498  i2caddr_image.hex  # make_smoke_image.py --i2caddr
-de99be7ac147eae35e5a74893c95129c2552f178ffdddd47d8674e0c0c77d4ae  five_image.hex  # make_smoke_image.py --five 12 13 14 15 16
-bf1d340703b00645023d15980c431caedeb29a09234083e1315b338c1e6ee503  chain_image.hex  # make_smoke_image.py --chain 12 40
-ab77fb6504b215020bea377dbfb6e7ffebf9906b5cb9dfef867705766587bad4  stress_image.hex  # make_smoke_image.py --stress 25 31
-d75638ee2700e75bbf3b025e67771ee1b82a7369e71bd4331e8ea3af4c1af471  edge_image.hex  # make_smoke_image.py --edge 200 0 edge_image
-3e76d90314d2d05cd3540a1fc5548a81c8c2e417c7dd42eeb7b7d983c37ecbef  edge_image_noto.hex  # make_smoke_image.py --edge 0 0 edge_image_noto
-805f84647de59e58d8ecf9360d1f534500c3dafb2c284d181c3831c195fe0edb  edge_image_rise.hex  # make_smoke_image.py --edge 0 1 edge_image_rise
-0363934c595c5dd33cce94cb55dbcd4694a4126a821ae60d105230392b63e4cb  noop_image.hex  # make_smoke_image.py --noop 0 7 noop_image
-392d9b71c56b222120ee3b7bd00ed26400fa4a4e3483dbc86e7c06bc952d85f0  noop_image_h19.hex  # make_smoke_image.py --noop 0 19 noop_image_h19
-1ca74a621fc94c7938af93a245fa4a47a813c97c3bc5f146a76bcf4071a1d715  noop_image_bad.hex  # make_smoke_image.py --noop 0 7 bad
-b644dfce8dbad22332b4d8d7f5c9a8ec79ed80aeb89a25c9f700f392820a1247  tx_image.hex  # make_smoke_image.py --tx 12 13
-46da84c2172b0458c3f208ef564f75cabfba1767b768aa21fb24c4facbeb5571  tx_badclk_image.hex  # make_smoke_image.py --txbadclk
-8293e90d5798353e01c01666831b965576ea6cac4825000aeb7ec1dc0fef02c3  half_image.hex  # make_smoke_image.py --half 24
-ba191b7ed7ad9034400f74dca843749d88b7930aeb7210de97df3256eee66917  rxfast_image.hex  # make_smoke_image.py --rxfast 24
-2443d9412b2fb83bd9922dc3575d788deaf7b9ac0111b639be0522e76ce92fca  i2cframe_image.hex  # make_smoke_image.py --i2cframe 62
-5f1c99a84cc2d1d19d1aabc94d70ac0e6cc184be99f78b84c7832a0e84c90c68  sptgt_m0_image.hex  # make_smoke_image.py --sptgt 0
-110305cbb740985cd5f1629720a91cc8ad93dfd894715417d25f1c26aa314142  sptgt_m1_image.hex  # make_smoke_image.py --sptgt 1
-3dd9f68cbab02061795f57f8ba76eb7379711842d115b1091983b656c6ad54f3  sptgt_m2_image.hex  # make_smoke_image.py --sptgt 2
-78af701641384f70b98060f260e28c7a0c71faaa0eb9f5bbdfbb69c36d0753f7  sptgt_m3_image.hex  # make_smoke_image.py --sptgt 3
-ba5c0ae9fe1b431c21e7a725d7416e0fe2574b7af0be84a753e901ef0c313a22  sptgt_mosi_image.hex  # make_smoke_image.py --sptgt 0 mosi
-c49e9a637163daf883933bb10a593a46d80fb31880218e8dadb24694386ad20e  b3b_a_image.hex  # make_smoke_image.py --b3b a
-b1cd38ce1d65143021b9ca7f2f15f233de6b1f979592375bb76cc0175aaae4ed  b3b_a3_image.hex  # make_smoke_image.py --b3b a3
-35e4ce53eefc290b2e544e923a9bf28b11d8429a7f1098e502263df629add8da  b3b_b_image.hex  # make_smoke_image.py --b3b b
-c1fd852dee14d6de4efd202777ca2b4d2078566f2a66696f7f8333e1681ee75a  b3b_bnoi2c_image.hex  # make_smoke_image.py --b3b bnoi2c
-499bad6ee3a4d094917ce3357e2e2f82bab89b7b6ed64ff0466fe74d47b9c83d  corpus_all5.hex  # corpus.py
-9dac85078c04f240398e761dd63c6c4d664fe9aca055798a1cc4905743508679  corpus_i2c.hex  # corpus.py
-39c684dd173ef4062e1b657a3b465449d18d3d4e3d83b5955cbca9da34fe671e  corpus_spim.hex  # corpus.py
-807b6b71fb8430bfbad029271f10ae50f990bdb742d94a066d986b556c92034d  corpus_spim25.hex  # corpus.py
-a8fa6d8f94c002028c95659707422af6ed38305e050b50be9d580d306f1cd000  corpus_sptgt.hex  # corpus.py
-8a2f239b9810ebff4c2c61d021dc947f9a85773e31bdbe2433f8520056c29798  corpus_uartrx.hex  # corpus.py
+075aaacd2a58d176ddb4cf0fec5aa66d20cdda156601d5d98ec42268b6abdcb7  smoke_image.hex  # make_smoke_image.py (default)
+28d2d9360a326b708854dc0394da00273f42307545dc422a915a8cd3ae566ce2  census_image.hex  # make_smoke_image.py --census
+bfd9206db7ad62d0e7c3c3c28fc88596aff4cd82f3775703915d3cfe7c867cd4  cfgerr_image.hex  # make_smoke_image.py --cfgerr
+dd23dab52c11fdcbbd5a9c414edb1e3b01910a82247a8caaa0a31f011230306d  pinnone_image.hex  # make_smoke_image.py --pinnone
+8671c4f82fb5faa6692c1c08cddf537271278df6d14131c6afdc35d31fe1588e  armnone_image.hex  # make_smoke_image.py --armnone
+39582d831fc1a44a187d570bd6a64a63e38d050961d31fa4e1cea08e12a70a35  ckdegen_image.hex  # make_smoke_image.py --ckdegen
+6fcae7bdc9bd5f19905f3dcd7ce9d2c3bf72c7d90acc935923443f66b09fb326  ckdegen2_image.hex  # make_smoke_image.py --ckdegen
+7108b2ab88b4dee67bf48b66c32f00d618db8caa8019a516d217a3c09ec243e5  ckfive_image.hex  # make_smoke_image.py --ckfive
+6c54d4ca81776bd540c2360431ae8275c09edfabd18c637b7588cdbdca64c672  ckod_image.hex  # make_smoke_image.py --ckod
+7a3f182bf590894548c112a0a3ae4b56e4c01b4ff9eac6e39339b3cb4055331d  ckread_image.hex  # make_smoke_image.py --ckread
+9c5d1a39d5005f5942a66e1b4843536677167fd0b5b302f9f935517478b9f7ae  ckdense_image.hex  # make_smoke_image.py --ckdense
+253bfe3168f9f4eed15c4afae5fc4000645f7837a998bfd1429f831bc2c7c618  ckheavy_image.hex  # make_smoke_image.py --ckheavy
+efe1203dee6cf077bdde0208d84111477430ba4617e3ed00d18536c86ac0c087  ckhold_at_image.hex  # make_smoke_image.py --ckhold
+db05d8d56e52f0a75b4753c96925ca72c291b23c50c1e34904b45b23cae25cbd  ckhold_under_image.hex  # make_smoke_image.py --ckhold
+5193753dc0be1be790c787e5efe9f79bf1e11143240f0a773566ae414b0eefaa  ckhold_over_image.hex  # make_smoke_image.py --ckhold
+0302ed5b7b9708a49044caf4491f368cd07f4a175ebdd4f0a0d85cf1b359a1e8  i2caddr_image.hex  # make_smoke_image.py --i2caddr
+c80015bb657b348af4bfeafac0de416f2beb84fd632ab50bf7f7bbfb615d5530  five_image.hex  # make_smoke_image.py --five 12 13 14 15 16
+6109cd6bbef8da0e4c44c924879677389a653e5204eefe1b73b69824da4fa3c8  chain_image.hex  # make_smoke_image.py --chain 12 40
+6480ca2a99f207da791a3fecab2cf778a95d32730630ebbe16f4cc0a7a070282  stress_image.hex  # make_smoke_image.py --stress 25 31
+22bb426ced5bfdb59a0ed466fce2d109f3ad956dd8b98047801fa0307c9dee3a  edge_image.hex  # make_smoke_image.py --edge 200 0 edge_image
+3382f5bc554060df80dbac428a3a56e33e6c4b800db9c7b4a4086f0a07f3a344  edge_image_noto.hex  # make_smoke_image.py --edge 0 0 edge_image_noto
+4001b62231792b152d8deae176592e7e9fb213dd1fe04decbbcc16ffc4247c38  edge_image_rise.hex  # make_smoke_image.py --edge 0 1 edge_image_rise
+0913927ab87dec47a5a4908d9dcf5e2c08002edc85a539783718155942b18370  noop_image.hex  # make_smoke_image.py --noop 0 7 noop_image
+2dfdcf6cd8c6f3c3f3354ccc94f043e4950fa3c55fb9da755da4875b15df05f9  noop_image_h19.hex  # make_smoke_image.py --noop 0 19 noop_image_h19
+810f35069189c692dad96f817ab36d5643941c392d3e7bf09bd8dbda77463f95  noop_image_bad.hex  # make_smoke_image.py --noop 0 7 bad
+936ac54e46daaca5e7c00c6e7fa44d487fc866dd333458ab7e5be9c5c438be21  tx_image.hex  # make_smoke_image.py --tx 12 13
+16aca620fa80431705e81c9017486c80876e095b828f59e896c8046019f68515  tx_badclk_image.hex  # make_smoke_image.py --txbadclk
+a0db75d9a1dbbc92aa2ef56e00aa4b317205643505a43d9fa68a1be8d6814964  half_image.hex  # make_smoke_image.py --half 24
+120dcd8c4cbc787f4deee0631597bee2975297aab7f24acd0545711025ab8427  rxfast_image.hex  # make_smoke_image.py --rxfast 24
+78d713c8cde6e73475e8ccca6673aafecd52a1f054297194672c60d56741f589  i2cframe_image.hex  # make_smoke_image.py --i2cframe 62
+f5e311a53f4612d9bf975040902c4eac4ed8b800171cd3fb369edd8012aca381  sptgt_m0_image.hex  # make_smoke_image.py --sptgt 0
+9eb32ffd978071788a5a80489483dbc502ea40d76a0a8f750937a57bf448ab95  sptgt_m1_image.hex  # make_smoke_image.py --sptgt 1
+26f43aedcd94369602af5f58ac780184191e245e935e2e93df3b1b03cd7e28c5  sptgt_m2_image.hex  # make_smoke_image.py --sptgt 2
+715fa36beec71302915bedcde1370ec16a555a02a11dba555543aac819027495  sptgt_m3_image.hex  # make_smoke_image.py --sptgt 3
+a096f0b55d53d4bf7479769197351d10188d2e4b935eb4242696f8a081252ef7  sptgt_mosi_image.hex  # make_smoke_image.py --sptgt 0 mosi
+45689e6e8c83b5318bf5cde2ec2ce169c16cda661b35eb71dd679aac94ed3a4d  b3b_a_image.hex  # make_smoke_image.py --b3b a
+a8afab81b4e19bd57f3687e2ce2971161a2184dfb697037cc4704c0827e9b0de  b3b_a3_image.hex  # make_smoke_image.py --b3b a3
+c71dcb62d52e2e85ef141f8a923a0fdf1919ad690cc59fce350966b2888af383  b3b_b_image.hex  # make_smoke_image.py --b3b b
+6ae18b14d7dd2b77bd7a1c272703e50ceef914bc6aa944c6ff5d63c8a46d9b1c  b3b_bnoi2c_image.hex  # make_smoke_image.py --b3b bnoi2c
+2acd9975fc5ad1dfba2512a862b96148d2979f4b40f69c48a06369863c610e15  corpus_all5.hex  # corpus.py
+62c8f9f42a0c753ddd3f076cbac2e719f3bfcfbdf4020fb1184a2da814bf269e  corpus_i2c.hex  # corpus.py
+fd4de93a93799112e8b01e0392ce3d12e83da554dad090a38cf5803030e6966c  corpus_spim.hex  # corpus.py
+57e2a2f6998933405c25109bff5152f0becb831e3f8e2bf4a01fc1ccd3d6c46c  corpus_spim25.hex  # corpus.py
+9720215e9ea94f6f59bc9e2586ad0e9687b1f0f06012004baca3212d5ba0b6c2  corpus_sptgt.hex  # corpus.py
+59f30de3aac36ce96ed7144f9759c34e710904f68c9a9073001ed154d9d3a5cd  corpus_uartrx.hex  # corpus.py

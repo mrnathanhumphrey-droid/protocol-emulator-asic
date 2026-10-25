@@ -344,6 +344,7 @@ DEFAULT_IMG = "test/smoke_image.hex"
 # one filename, which the clean-room check caught as the same file reproducing
 # with different content. The generator owns them.
 from make_smoke_image import FIVE_STRESS as STRESS_FIVE   # noqa: E402
+from pe_isa import STORE_BYTES as _STORE_BYTES  # noqa: E402  v2: never a typed 256
 from toolchain import banner, tool          # noqa: E402  ruling V
 import sim_run                              # noqa: E402
 #: the images tb_edge $readmemh's by hardcoded path (read from its source)
@@ -915,7 +916,7 @@ def main() -> int:
     def trace_run(vvp, img, peer):
         a2 = benchset.a2_slack_arg("test/%s.hex" % img)
         tr = os.path.join(SCRATCH, "mut_ck_trace.txt")
-        extra = (["+NBYTES=256", "+PEER=%s" % peer, "+NCYC=40000",
+        extra = (["+NBYTES=%d" % _STORE_BYTES, "+PEER=%s" % peer, "+NCYC=40000",
                   "+OUT=%s" % tr, "+SEED=1", "+ASYNC=0", "+STAYLOAD=0",
                   "+SCLHOLD=0"] + ([a2] if a2 else [])
                  + gct.feed_args("test/%s.hex" % img))
@@ -976,7 +977,7 @@ def main() -> int:
     else:
         for n, want_fatal in ((17, True), (16, False)):
             o = run(base_c, img="test/corpus_spim.hex",
-                    extra=["+NBYTES=256", "+PEER=spi", "+NCYC=2000",
+                    extra=["+NBYTES=%d" % _STORE_BYTES, "+PEER=spi", "+NCYC=2000",
                            "+OUT=%s" % os.path.join(SCRATCH, "mut_feed.txt"),
                            "+SEED=1", "+ASYNC=0", "+STAYLOAD=0", "+SCLHOLD=0",
                            "+FEEDN=%d" % n, "+FEED=%s" % ("11" * n)])

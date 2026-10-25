@@ -50,6 +50,7 @@ ROOT = os.path.dirname(HERE)
 for _p in (HERE, os.path.join(ROOT, "model"), os.path.join(ROOT, "model", "a2")):
     if _p not in sys.path:
         sys.path.insert(0, _p)
+from pe_isa import STORE_BYTES as _STORE_BYTES  # noqa: E402  v2: never a typed 256
 from toolchain import banner, tool          # noqa: E402
 import sim_run                              # noqa: E402
 
@@ -91,7 +92,7 @@ def build(tag, defines=()):
 
 
 def run(vvp, img, plus):
-    r = subprocess.run(sim_run.vvp([vvp, "+IMG=" + img, "+NBYTES=256"] + plus,
+    r = subprocess.run(sim_run.vvp([vvp, "+IMG=" + img, "+NBYTES=%d" % _STORE_BYTES] + plus,
                                    images=[img]),
                        cwd=ROOT, capture_output=True, encoding="utf-8",
                        errors="replace")

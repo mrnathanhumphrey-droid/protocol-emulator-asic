@@ -18,6 +18,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
+from pe_isa import STORE_BYTES as _STORE_BYTES  # noqa: E402  v2: never a typed 256
 from toolchain import banner, tool     # noqa: E402
 import sim_run                         # noqa: E402
 
@@ -38,7 +39,7 @@ def main():
         raise SystemExit(r.stdout + r.stderr)
     worst = None
     for s in seeds:
-        cmd = sim_run.vvp([vvp, "+IMG=" + img, "+NBYTES=256",
+        cmd = sim_run.vvp([vvp, "+IMG=" + img, "+NBYTES=%d" % _STORE_BYTES,
                            "+PEER=none", "+NCYC=%d" % ncyc, "+SEED=%d" % s,
                            "+OUT=" + os.path.join(tmp, "a2w.txt"), "+ASYNC=0",
                            "+STAYLOAD=0", "+SCLHOLD=0"], images=[img])

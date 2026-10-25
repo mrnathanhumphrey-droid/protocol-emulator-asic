@@ -12,7 +12,7 @@ it never falls back to a typed table):
 
   A1  `localparam integer BPW   = <W>;`
         the count field is W bits, so every count lies in 0 .. 2^W - 1
-  A2  `wire [BPW-1:0]   a_cnt   = cur_act[BQW +: BPW];`
+  A2  `wire [BPW-1:0]   a_cnt   = cur_act[LOWX+BQW +: BPW];`
         `a_cnt` IS that field (W bits: arithmetic on it wraps mod 2^W)
   A3  `wire ck_shift   = clk_real & a_lvl & (a_op == OP_SHIFT);`
       `wire ck_shiftin = clk_real & a_lvl & (a_op == OP_SHIFTIN);`
@@ -53,7 +53,7 @@ ENGINE = os.path.join(ROOT, "src", "pe_engine.v")
 #: (id, what it establishes, the exact substring that must be present)
 ANCHORS = (
     ("A2", "a_cnt is the W-bit count field",
-     "wire [BPW-1:0]   a_cnt   = cur_act[BQW +: BPW];"),
+     "wire [BPW-1:0]   a_cnt   = cur_act[LOWX+BQW +: BPW];"),
     ("A3a", "clocked SHIFT decode",
      "wire ck_shift   = clk_real & a_lvl & (a_op == OP_SHIFT);"),
     ("A3b", "clocked SHIFTIN decode",

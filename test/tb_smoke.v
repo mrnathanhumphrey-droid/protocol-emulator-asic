@@ -80,7 +80,8 @@ module tb_smoke;
   // The length is now DERIVED: `$readmemh` leaves unwritten entries X, so the
   // highest initialised index + 1 is the image size. The array is sized to the
   // STORE (2**AW = 256) so no image can overflow it either.
-  localparam integer IMG_MAX = 256;
+`include "test/store_filler.vh"   // v2: PE_STORE_BYTES, never a typed 256
+  localparam integer IMG_MAX = PE_STORE_BYTES;
   reg [7:0] img [0:IMG_MAX-1];
   integer img_bytes;
 
@@ -124,14 +125,15 @@ module tb_smoke;
   reg [31:0] prev_now;
   reg [4:0] prev_sel;
   reg [8*256-1:0] imgfile;
-  reg [23:0] exp_act;
+  reg [PE_ACT_W-1:0] exp_act;
   // ⛔ 24, NOT 22, AND IT USED TO BE 22. The action word's bottom 2 bits were
   // zero padding and this bench compared `exp_act[23:2]` to match. Those bits
   // are now the TX QUEUE field, so the comparison is the WHOLE word -- and this
   // is a second copy of the action layout living in a bench, which is why the
   // invariant failed the moment the field was added rather than silently
   // ignoring it.
-  reg [23:0] got_act;
+  reg [PE_ACT_W-1:0] got_act;
+  integer   eb;
 
   initial begin
     // ⭐ THE IMAGE IS SELECTABLE so the same bench can run the default program
@@ -316,8 +318,10 @@ module tb_smoke;
             // reading it makes the bench depth-independent for free.
             && dut.u_eng.l_actv[dut.u_eng.hix[lk]]
             && dut.u_eng.st == 0) begin
-          exp_act = {img[dut.u_eng.l_pc[lk]], img[dut.u_eng.l_pc[lk] + 1],
-                     img[dut.u_eng.l_pc[lk] + 2]};
+          // v2: the word's bytes, MSB first, ACT_BYTES of them (never typed)
+          exp_act = 0;
+          for (eb = 0; eb < PE_ACT_BYTES; eb = eb + 1)
+            exp_act = (exp_act << 8) | img[dut.u_eng.l_pc[lk] + eb];
           got_act = dut.u_eng.l_act[dut.u_eng.hix[lk]];
           inv_checks = inv_checks + 1;
           if (got_act !== exp_act) begin

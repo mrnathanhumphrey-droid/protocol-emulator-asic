@@ -72,7 +72,8 @@ module tb_reload;
   wire [7:0] uo_out, uio_out, uio_oe;
   reg        rxline = 1'b1, loading = 1'b0;
   wire       spi_so, spi_so_oe;
-  localparam integer IMG_MAX = 256, PIN_PROG = 7, PIN_PTR = 5, PIN_WR = 6;
+`include "test/store_filler.vh"   // v2: PE_STORE_BYTES, never a typed 256
+  localparam integer IMG_MAX = PE_STORE_BYTES, PIN_PROG = 7, PIN_PTR = 5, PIN_WR = 6;
   localparam integer P_RX = 3, TX_BIT = 0, BITP = 434;
   localparam integer SCK_UO = 1, MOSI_UO = 2, CS_UO = 3, P_MISO = 0;
   localparam integer SER_D = 4, SER_S = 5, SER_V = 6;

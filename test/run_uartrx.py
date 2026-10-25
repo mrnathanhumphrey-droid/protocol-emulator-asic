@@ -25,6 +25,7 @@ from concurrent.futures import ThreadPoolExecutor
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
+from pe_isa import STORE_BYTES as _STORE_BYTES  # noqa: E402  v2: never a typed 256
 from toolchain import banner, tool          # noqa: E402
 import sim_run                              # noqa: E402
 import uart_rx                               # noqa: E402
@@ -104,7 +105,7 @@ def main():
     ok = lim
 
     def sim(var, err, seed, extra=(), t=T):
-        o = run(sim_run.vvp([vvp, "+IMG=" + imgs[(var, t)], "+NBYTES=256",
+        o = run(sim_run.vvp([vvp, "+IMG=" + imgs[(var, t)], "+NBYTES=%d" % _STORE_BYTES,
                              "+BITP=%d" % t, "+ERR=%d" % err, "+SEED=%d" % seed,
                              "+NFR=%d" % NFR] + list(extra),
                             images=[imgs[(var, t)]]))

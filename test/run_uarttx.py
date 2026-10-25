@@ -20,6 +20,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
+from pe_isa import STORE_BYTES as _STORE_BYTES  # noqa: E402  v2: never a typed 256
 from toolchain import banner, tool          # noqa: E402
 import sim_run                              # noqa: E402
 import uart_tx                               # noqa: E402
@@ -65,7 +66,7 @@ def main():
         return 1
 
     def sim(img, err=0):
-        o = run(sim_run.vvp([vvp, "+IMG=" + img, "+NBYTES=256",
+        o = run(sim_run.vvp([vvp, "+IMG=" + img, "+NBYTES=%d" % _STORE_BYTES,
                              "+NCYC=%d" % NCYC, "+BITP=%d" % uart_tx.T_NOMINAL,
                              "+ERR=%d" % err], images=[img]))
         return o.stdout + o.stderr
