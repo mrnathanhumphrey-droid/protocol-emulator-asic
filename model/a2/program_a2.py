@@ -122,17 +122,17 @@ EDGE_PACED_MIN_ARMS = 2
 #: claimed maximum SCK period -- 50 cycles at 1 MHz MISO-only, 100 for the
 #: MOSI-capture variant witnessed at 500 kHz. Each sha is the image's own.
 T_EXT = {
-    "63a10e20a3ec58169d40b97abf5e51ce8912e42f56c338d6af7d5826df5404f4": {0: 50},   # sptgt_m0
-    "d9f3fb51aac86358a33f6747bfe6d3800504dbab09a6fc84af1dc9d9892ed84d": {0: 50},   # sptgt_m1
-    "9984ed54eff0f0c254d23be388dafe8c8387c87867b76d0dec34eb9360fb338b": {0: 50},   # sptgt_m2
-    "dbb28371bf956d6b96e1a30c9707406d98965ec800f1698aab6b817d9295582d": {0: 50},   # sptgt_m3
-    "3a2687c762cab0de86116ed930d8dbfdd33b5725d4e063b1a215560048c054bd": {0: 100},  # sptgt_mosi
+    "35d541098fe2474e63479dd6dd62f15602e54661017fa14f776c3723854827f4": {0: 50},   # sptgt_m0
+    "5797accf894e88be22c22a0909649d8ad7fa3e4fd584144c252e7d512479ba79": {0: 50},   # sptgt_m1
+    "fc2c05993ef4df5db918ffe32599032394650fe9396ce51f01580a010a71c3a7": {0: 50},   # sptgt_m2
+    "6f048838f5709d0c8f016047fa7faa9795500ffa954af4b1f656c7a5ec64214a": {0: 50},   # sptgt_m3
+    "f35804d5ebf9b4720911f39c2d8d983fb1a43e758cea99687723d5903998881b": {0: 100},  # sptgt_mosi
     # B3b, the contention arm (make_smoke_image.py --b3b): lane 0 is the SPI
     # target at 1 MHz beside the four other shipped lanes
-    "d58f491e6bcdfe94d89662a5b889ce7ee999270dffa577b727ccfc127420ae56": {0: 50},   # b3b_a
-    "0656a43d7ba1491c7a750a9130d174e9822c3671f0196c97e560cd793464c211": {0: 50},   # b3b_a3
-    "110475383587f265568e3b637e1bcb1384fff41bd69f076506102cbc78cdb94b": {0: 50},   # b3b_b
-    "aad1c06753e687562ff70c87a352d7a4e269987c83d4765cd8fbab34fd3e6baa": {0: 50},   # b3b_bnoi2c
+    "2de02a022cde606c48af8468a036402118724da563ee9345695b8df9667b67b6": {0: 50},   # b3b_a
+    "077a132170c19b56b1eff88a98207678138570ac5e5f8d02e0155e7b98bf6fe4": {0: 50},   # b3b_a3
+    "896dcd8a8dcf0c69d1933931ccff698203b7cfb2764277aadd1f94b9f721deeb": {0: 50},   # b3b_b
+    "287dfbd76f4370f8a6c4c271a9a5f721d3832416f9442fec5e747b48b9ff5da8": {0: 50},   # b3b_bnoi2c
 }
 
 
