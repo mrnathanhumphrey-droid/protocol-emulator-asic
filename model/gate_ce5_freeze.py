@@ -4,8 +4,12 @@ CE5 (the 1-Wire DS18B20 demo, `test/run_onewire.py`) is a claim about what
 the FROZEN chip can do with a program alone. If anything the simulation reads
 moved, CE5 is VOID -- the program might be leaning on a change. So:
 
-    git diff --name-only FREEZE_SHA -- <the frozen set>      must print nothing
-    git ls-files --others --exclude-standard -- <the set>    (nothing untracked)
+    set_hash(<the frozen set>, HEAD) == FREEZE_BLOBS   (ci/blobhash.py, git blobs)
+    and nothing in the set differs from HEAD or is untracked
+
+⭐ SINCE 10-25 THE PIN IS A BLOB HASH (Wilson R2), not a commit SHA: content
+exists before its commit does, so a re-pin is one commit (the new hash + its
+re-certification in docs/CE5_LOG.md) instead of a red commit then a fix-up.
 
 ⭐ THE FROZEN SET IS EXACTLY WHAT CE5'S SIMULATION READS (Wilson 10-18), taken
 from the runner, never a glob: `run_onewire.CE5_SIM_SOURCES` (the files its
@@ -31,12 +35,11 @@ NAME. Only then is `CE5-FREEZE: PASSED` printed. A missing freeze commit (a
 shallow CI checkout) is fetched once by SHA; if it still cannot be resolved
 the gate is RED, never a skip.
 
-MUST-FIRES, on a COPY of the frozen set (and src/config.json) in a temp
-directory, checked against FREEZE_SHA through a TEMPORARY index (read from
-FREEZE_SHA) and `--work-tree` pointed at the copy -- the real tree and the real
-index are never touched:
-  * control: the unmodified copy lists nothing;
-  * one character changed in a simulated file (src/pe_engine.v) -> listed, RED;
+MUST-FIRES, on planted CONTENTS through freeze_problems() -- the function the
+real check calls; git, the tree and the index are never touched:
+  * equivalence: the old SHA pin and the blob pin name the same bytes;
+  * one character changed in a simulated file (src/pe_engine.v) -> RED;
+  * an uncommitted edit to a frozen file -> RED;
   * src/config.json's hold margin changed -> the freeze stays GREEN (it is not
     simulated) AND model/gate_flow_config.py's audit of that config is RED --
     the two gates together, priced in one place.
@@ -45,14 +48,13 @@ index are never touched:
 from __future__ import annotations
 
 import os
-import shutil
 import subprocess
 import sys
-import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, os.path.join(ROOT, "test"))
+sys.path.insert(0, os.path.join(ROOT, "ci"))
 sys.path.insert(0, HERE)
 
 
@@ -108,6 +110,14 @@ def frozen_set():
 #: The blob-hash pin (step 3) removes the need for a red commit.
 FREEZE_SHA = "0fb37a0002ab773d12d992500f927c584e32a1ea"
 
+#: ⭐ THE PIN, SINCE 10-25 (Wilson R2): the BLOB-HASH of the frozen set
+#: (ci/blobhash.py set_hash), not a commit. A re-pin is ONE commit: this value
+#: + the re-certification entry in docs/CE5_LOG.md -- no red commit first,
+#: because the hash names content, which exists before its commit does.
+#: Converted from FREEZE_SHA by a one-time equivalence, kept as a must-fire:
+#: set_hash(frozen set, FREEZE_SHA) == FREEZE_BLOBS.
+FREEZE_BLOBS = "4c05a2637aee1835e8b12e1e94e418d44700e9c553f482e7f088db3fcb58a8f8"
+
 
 def git(args, env=None):
     r = subprocess.run(["git"] + args, cwd=ROOT, capture_output=True,
@@ -125,32 +135,18 @@ def resolve():
     return rc == 0 and out.strip() == "commit"
 
 
-def changed(work_tree=None, paths=None):
-    """-> (ok_ran, [changed paths]) for the frozen set against FREEZE_SHA."""
-    paths = paths if paths is not None else frozen_set()
-    env, pre = None, []
-    tmp_index = None
-    if work_tree is not None:
-        fd, tmp_index = tempfile.mkstemp(prefix="ce5_index_")
-        os.close(fd)
-        os.remove(tmp_index)
-        env = dict(os.environ, GIT_INDEX_FILE=tmp_index)
-        rc, _o, e = git(["read-tree", FREEZE_SHA], env=env)
-        if rc != 0:
-            return False, ["<read-tree failed: %s>" % e.strip()[:80]]
-        pre = ["--work-tree=" + work_tree]
-    try:
-        rc1, out1, e1 = git(pre + ["diff", "--name-only", FREEZE_SHA, "--"]
-                            + paths, env=env)
-        rc2, out2, e2 = git(pre + ["ls-files", "--others",
-                                   "--exclude-standard", "--"] + paths, env=env)
-    finally:
-        if tmp_index and os.path.exists(tmp_index):
-            os.remove(tmp_index)
-    if rc1 != 0 or rc2 != 0:
-        return False, ["<git failed: %s %s>" % (e1.strip()[:60], e2.strip()[:60])]
-    names = [l for l in (out1 + out2).splitlines() if l.strip()]
-    return True, names
+def freeze_problems(contents, dirty_paths, pin=None):
+    """[problem] for the frozen set's committed `contents` {path: bytes} and
+    its uncommitted `dirty_paths` -- the gate and its must-fires both call it."""
+    import blobhash
+    pin = FREEZE_BLOBS if pin is None else pin
+    probs = ["%s differs from HEAD or is untracked (uncommitted) -- CE5 VOID"
+             % p for p in dirty_paths]
+    got = blobhash.hash_contents(contents)
+    if got != pin:
+        probs.append("the frozen set hashes %s..., the pin is %s... -- CE5 VOID"
+                     % (got[:12], pin[:12]))
+    return probs
 
 
 def main() -> int:
@@ -168,82 +164,63 @@ def main() -> int:
         print("  *** CE5-FREEZE: FAILED")
         return 1
     print("  FREEZE_SHA resolves to a commit")
+    import blobhash
     ok = True
     fs = frozen_set()
     print("  the frozen set (what CE5's simulation reads, from the runner): %d files"
           % len(fs))
     for p in fs:
         print("    %s" % p)
-    ran, names = changed(paths=fs)
-    if ran and not names:
-        print("  real tree: git diff --name-only FREEZE_SHA -- <the set> is EMPTY, "
-              "nothing untracked")
+    contents = blobhash.blobs(fs)
+    probs = freeze_problems(contents, blobhash.dirty(fs))
+    if not probs:
+        print("  real tree: committed, clean, and hashes to FREEZE_BLOBS %s..."
+              % FREEZE_BLOBS[:12])
+    for p in probs:
+        ok = False
+        print("  *** real tree: %s" % p)
+
+    print("  --- must-fires, on planted CONTENTS (git and the tree untouched) ---")
+    # (0) the one-time conversion stays checked: the SHA pin and the blob pin
+    # name the same bytes
+    eq = blobhash.set_hash(fs, FREEZE_SHA) == FREEZE_BLOBS
+    print("    %-60s %s" % ("equivalence: set_hash(FREEZE_SHA) == FREEZE_BLOBS",
+                            "ok" if eq else "*** DIFFERENT"))
+    ok = ok and eq
+    # (1) a simulated file changed -> RED
+    data = bytearray(contents["src/pe_engine.v"])
+    k = data.index(b"localparam")                 # a real token, mid-file
+    data[k] = ord("L")
+    planted = dict(contents, **{"src/pe_engine.v": bytes(data)})
+    red = bool(freeze_problems(planted, []))
+    print("    %-60s %s" % ("a simulated file changed (src/pe_engine.v): freeze",
+                            "RED  ok" if red else "*** MUST-FIRE FAILED"))
+    ok = ok and red
+    # (2) an uncommitted edit is red even when HEAD's bytes match
+    red = bool(freeze_problems(contents, ["src/pe_engine.v"]))
+    print("    %-60s %s" % ("an uncommitted edit to a frozen file: freeze",
+                            "RED  ok" if red else "*** MUST-FIRE FAILED"))
+    ok = ok and red
+    # (3) the flow config changed -> freeze GREEN, gate_flow_config RED
+    ctext = blobhash.blobs(["src/config.json"])["src/config.json"].decode("utf-8")
+    mut = ctext.replace('"GRT_RESIZER_HOLD_SLACK_MARGIN": 0.10',
+                        '"GRT_RESIZER_HOLD_SLACK_MARGIN": 0.05', 1)
+    import json
+    import gate_flow_config as GFC
+    with open(GFC.RECORD, encoding="utf-8") as fh:
+        rec = json.load(fh)
+    fc_probs, _h = GFC.audit(mut, rec)
+    frz = freeze_problems(contents, [])           # config.json is not in the set
+    if mut == ctext:
+        ok = False
+        print("    *** MUST-FIRE FAILED: the config landmark was not found")
+    elif not frz and fc_probs:
+        print("    src/config.json changed: freeze GREEN and gate_flow_config "
+              "RED  ok -- the two gates cover it together")
     else:
         ok = False
-        print("  *** real tree: the frozen set differs from the freeze: %s -- CE5 VOID"
-              % names)
-
-    print("  --- must-fires, on a COPY of the frozen set + src/config.json ---")
-    tmp = tempfile.mkdtemp(prefix="ce5_freeze_")
-    try:
-        for p in fs + ["src/config.json"]:
-            os.makedirs(os.path.dirname(os.path.join(tmp, p)), exist_ok=True)
-            shutil.copy2(os.path.join(ROOT, p), os.path.join(tmp, p))
-        ran_c, names_c = changed(tmp, fs)
-        if ran_c and not names_c:
-            print("    control: the unmodified copy reads clean")
-        else:
-            ok = False
-            print("    *** control: the unmodified copy reads %s" % names_c)
-        # (1) a simulated file changed -> RED
-        tgt = os.path.join(tmp, "src", "pe_engine.v")
-        with open(tgt, "rb") as fh:
-            orig = fh.read()
-        data = bytearray(orig)
-        k = data.index(b"localparam")             # a real token, mid-file
-        data[k] = ord("L")
-        with open(tgt, "wb") as fh:
-            fh.write(bytes(data))
-        ran_m, names_m = changed(tmp, fs)
-        if ran_m and "src/pe_engine.v" in names_m:
-            print("    a simulated file changed (src/pe_engine.v): freeze RED  ok")
-        else:
-            ok = False
-            print("    *** MUST-FIRE FAILED: planted copy reads %s (ran=%s)"
-                  % (names_m, ran_m))
-        with open(tgt, "wb") as fh:
-            fh.write(orig)
-        # (2) the flow config changed -> freeze GREEN, gate_flow_config RED
-        cfg = os.path.join(tmp, "src", "config.json")
-        with open(cfg, encoding="utf-8") as fh:
-            ctext = fh.read()
-        mut = ctext.replace('"GRT_RESIZER_HOLD_SLACK_MARGIN": 0.10',
-                            '"GRT_RESIZER_HOLD_SLACK_MARGIN": 0.05', 1)
-        with open(cfg, "w", encoding="utf-8") as fh:
-            fh.write(mut)
-        ran_g, names_g = changed(tmp, fs)
-        import json
-        import gate_flow_config as GFC
-        with open(GFC.RECORD, encoding="utf-8") as fh:
-            rec = json.load(fh)
-        fc_probs, _h = GFC.audit(mut, rec)
-        if mut == ctext:
-            ok = False
-            print("    *** MUST-FIRE FAILED: the config landmark was not found")
-        elif ran_g and not names_g and fc_probs:
-            print("    src/config.json changed: freeze GREEN and gate_flow_config "
-                  "RED  ok -- the two gates cover it together")
-        else:
-            ok = False
-            print("    *** MUST-FIRE FAILED: config edit -> freeze %s, flow-config %s"
-                  % (names_g or "green", "red" if fc_probs else "GREEN"))
-    finally:
-        shutil.rmtree(tmp, ignore_errors=True)
-    # the real file was never opened for writing; prove it is still clean
-    ran2, names2 = changed()
-    if not (ran2 and not names2):
-        ok = False
-        print("  *** after the must-fire the real tree reads %s" % names2)
+        print("    *** MUST-FIRE FAILED: config edit -> freeze %s, flow-config %s"
+              % (frz or "green", "red" if fc_probs else "GREEN"))
     print()
     if ok:
         print("  CE5-FREEZE: PASSED")

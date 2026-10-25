@@ -86,8 +86,16 @@ jobs:
         env:
           PE_VERILATOR: /opt/oss-cad-suite/bin/verilator
         run: |
-          python ci/ln1_replay.py --out ln1_out \
+          python ci/ln1_replay.py --out ln1_out --record ln1_out/ln1_record.json \
             --rows ${{ github.event_name == 'workflow_dispatch' && inputs.ln1_rows || '20000' }}
+
+      # ⭐ WHAT THE RUN READ (Wilson R4): a 200k dispatch's record is committed
+      # as model/ln1_of_record.json, which model/gate_ln1_record.py holds to the tree
+      - name: Upload the LN1 record
+        uses: actions/upload-artifact@v7
+        with:
+          name: ln1-record-${{ github.sha }}
+          path: ln1_out/ln1_record.json
 
       - name: Upload LN1 logs
         if: failure()

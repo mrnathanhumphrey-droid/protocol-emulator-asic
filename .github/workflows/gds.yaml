@@ -122,17 +122,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # ⭐ ONE RECIPE (10-25): the sets and their hashes come from the SAME
+          # code model/gate_harden_record.py checks with -- ci/blobhash.py over
+          # git blobs, the file lists from gate_harden_record.tree_sets()
           python3 - <<'EOF' > harden_record.json
-          import hashlib, json, os, re
-          def h(paths):
-              d = hashlib.sha256()
-              for p in sorted(paths):
-                  d.update(p.encode() + b"\0" + open(p, "rb").read() + b"\0")
-              return d.hexdigest()
-          rtl = sorted("src/" + f for f in os.listdir("src") if f.endswith(".v"))
-          cfg = ["src/config.json", "info.yaml"]
-          imgs = sorted({"test/" + m for m in re.findall(
-              r'read_hex\("([^"]+)"\)', open("test/test.py", encoding="utf-8").read())})
+          import json, os, sys
+          sys.path[:0] = ["ci", "model"]
+          import blobhash, gate_harden_record as g
+          s = g.tree_sets()
+          h = blobhash.set_hash
+          rtl, cfg, imgs = s["chip_rtl"], s["flow_config"], s["gl_test_images"]
           print(json.dumps({
               "sha": os.environ["GITHUB_SHA"], "run": os.environ["GITHUB_RUN_ID"],
               "chip_rtl": {"files": rtl, "sha256": h(rtl)},

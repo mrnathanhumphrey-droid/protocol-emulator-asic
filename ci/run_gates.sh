@@ -372,10 +372,14 @@ GATES=(
   # (ck_nbits, ck_degen), never typed. Must-fires: SHIFT 15 and SHIFTIN 0
   # refused; a mutated ck_nbits / ck_degen makes the derivation raise.
   model/gate_count_ranges.py
-  # ⭐⭐ CE5 FREEZE -- src/ unchanged since FREEZE_SHA (one constant, re-pin on
-  # rebase); CE5 is VOID if this is red. Must-fire: a planted 1-char change
-  # in a temp COPY of src/, via a temp index.
+  # ⭐⭐ CE5 FREEZE -- what CE5 simulates hashes to FREEZE_BLOBS (git blobs,
+  # ci/blobhash.py; one constant, re-pinned in ONE commit with its re-cert);
+  # CE5 is VOID if this is red. Must-fires on planted contents.
   model/gate_ce5_freeze.py
+  # ⭐⭐ HARDEN RECORD (Wilson R2) -- the harden of record's chip RTL, flow
+  # config and gl_test images still hash, from git blobs, to what it ran on;
+  # a mismatch is red: re-run the harden.
+  model/gate_harden_record.py
   # ⭐⭐ CE5 -- 1-Wire DS18B20 on the frozen RTL, a pe_asm program only:
   # presence, READ ROM + CRC, CONVERT T polled, READ SCRATCHPAD + CRC, every
   # slot in its datasheet window (19-7487 Rev 6) against a same-hand peer;

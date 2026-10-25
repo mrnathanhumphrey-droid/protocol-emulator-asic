@@ -1,0 +1,32 @@
+{
+ "sha": "a48af2e9d3e6d3b481c52f1375a5ce182cd80b59",
+ "run": "39719085897",
+ "chip_rtl": {
+  "files": [
+   "src/pe_engine.v",
+   "src/pe_store.v",
+   "src/project.v"
+  ],
+  "sha256": "998ff31bd3ac9d623a3fcae105341015373165216e086cc133bf30f32298a24b"
+ },
+ "flow_config": {
+  "files": [
+   "src/config.json",
+   "info.yaml"
+  ],
+  "sha256": "1498d4b8e82c5601452b7454560edc9e8425720ac3288917e7afefd9e472e7a0",
+  "action": "tt-gds-action@3412659307918422f3f0727917cf9b499aaca588",
+  "tools_ref": "d66cf179e7bc4d296362ab7e2e3b344dc3c4f665",
+  "pdk": "ihp-sg13cmos5l"
+ },
+ "gl_test_images": {
+  "files": [
+   "test/cfgerr_image.hex",
+   "test/ckhold_at_image.hex",
+   "test/ckhold_over_image.hex",
+   "test/corpus_all5.hex",
+   "test/corpus_i2c.hex"
+  ],
+  "sha256": "ad06ccc3021d7360054d0d2857e1ea06ceecde0072635b38ee817f85964e66b6"
+ }
+}

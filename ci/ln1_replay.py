@@ -38,6 +38,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "test"))
+sys.path.insert(0, os.path.join(ROOT, "ci"))
 import run_w_sweep as w                                   # noqa: E402
 from run_lockstep import IMAGES                           # noqa: E402
 from toolchain import banner, tool, PINNED_WSL_VERILATOR  # noqa: E402
@@ -291,6 +292,8 @@ def main():
     ap.add_argument("--out", default=os.path.join(ROOT, "probe_ln1"))
     ap.add_argument("--worktree", action="store_true",
                     help="local only: label a dirty bench with a content hash")
+    ap.add_argument("--record", default=None,
+                    help="on GREEN, write what this run read (model/gate_ln1_record.py)")
     a = ap.parse_args()
     rtl = rtl_label(a.worktree)
     # absolute: the proofs step runs Lean with cwd = lean/JLane
@@ -369,7 +372,45 @@ def main():
     print("\nLN1: GREEN -- %d arms each matched their pinned signature at %s; "
           "%s each depend on exactly %s"
           % (len(arms), rtl, ", ".join(THEOREMS), AXIOMS_OK))
+    if a.record:
+        rec = write_record(a.record, a.rows, len(arms))
+        print("  record: %d input files, set hash %s... -> %s"
+              % (len(rec["inputs"]["files"]), rec["inputs"]["sha256"][:12], a.record))
     return 0
+
+
+def ln1_inputs():
+    """⭐ WHAT THIS RUN READ (Wilson R4: LN1 bound to its inputs like the
+    harden), as tracked paths: the trace benches, every tracked Lean file but
+    its README, the tracked lockstep images, and every REPO MODULE this process
+    actually imported -- taken from sys.modules, never typed, so a new import
+    is in the list the moment it is used."""
+    import blobhash
+    tracked = set(blobhash._git(["ls-files"])[1].decode().splitlines())
+    mods = set()
+    for m in list(sys.modules.values()):
+        f = getattr(m, "__file__", None)
+        if f and os.path.abspath(f).startswith(ROOT + os.sep):
+            mods.add(os.path.relpath(os.path.abspath(f), ROOT).replace(os.sep, "/"))
+    lean = {p for p in tracked if p.startswith("lean/JLane/")
+            and not p.endswith(".md")}
+    imgs = {"test/" + i for i in IMAGES}
+    return sorted(p for p in set(BENCH) | lean | (imgs & tracked) | mods
+                  if p in tracked)
+
+
+def write_record(path, rows, n_arms):
+    import json
+    import blobhash
+    files = ln1_inputs()
+    rec = {"sha": run(["git", "rev-parse", "HEAD"]).stdout.strip(),
+           "run": os.environ.get("GITHUB_RUN_ID", "local"), "rows": rows,
+           "arms": n_arms, "verdict": "GREEN",
+           "inputs": {"files": files, "sha256": blobhash.set_hash(files)}}
+    with open(path, "w", encoding="utf-8", newline="\n") as fh:
+        json.dump(rec, fh, indent=1)
+        fh.write("\n")
+    return rec
 
 
 if __name__ == "__main__":
