@@ -643,6 +643,35 @@ wsl_root() {
 }
 
 # ---------------------------------------------------------------------------
+# ⛔⛔ FRESHNESS (3c, 10-24; R4 #14 / F9): A MEASUREMENT HANDED IN IS NOT A GREEN.
+# Each step below is skipped when its env var is already set, and the file is
+# then trusted whatever tree it describes -- an older tree's JSON could reach
+# "every gate passed". Reuse stays useful for iterating on a table, so every
+# gate still runs; but a run fed ANY measurement it did not make exits RED,
+# naming them. Read ONCE, here, before this script exports its own.
+# ---------------------------------------------------------------------------
+REUSABLE_INPUTS="PE_NETLIST_JSON PE_NETLIST_COMB_JSON PE_NETLIST_CDCRAW_JSON
+  PE_COVERAGE_DAT PE_COCOTB_DAT PE_PHASES_JSON PE_REFILL_JSON PE_A2_JSON
+  PE_STORE_JSON"
+reused_inputs() {
+  local v out=""
+  for v in $REUSABLE_INPUTS; do
+    [ -n "${!v:-}" ] && out="$out $v"
+  done
+  printf '%s' "${out# }"
+}
+REUSED="$(reused_inputs)"
+RU_MF="$(PE_A2_JSON=/planted_pe_a2.json reused_inputs)"
+RU_CTL="$(for v in $REUSABLE_INPUTS; do unset "$v"; done; reused_inputs)"
+if printf '%s' " $RU_MF " | grep -q " PE_A2_JSON " && [ -z "$RU_CTL" ]; then
+  echo "  freshness must-fire: a handed-in PE_A2_JSON is named, none -> none  red ok"
+else
+  echo "  *** FRESHNESS MUST-FIRE FAILED: planted -> '$RU_MF', control -> '$RU_CTL': RED"
+  exit 1
+fi
+[ -n "$REUSED" ] && echo "  ⚠ HANDED IN (not made by this run, so NOT A GREEN): $REUSED"
+
+# ---------------------------------------------------------------------------
 # the netlist the reset audit classifies flops from
 # ---------------------------------------------------------------------------
 # ⭐ VIA THE SAME SCRIPT THE LOCAL FLOW USES (`test/local_netlist.sh`), whose
@@ -1054,6 +1083,10 @@ fi
 if [ ${#MISSING[@]} -gt 0 ]; then
   echo "  COULD NOT RUN (a missing tool is NOT a pass):"
   for m in "${MISSING[@]}"; do echo "    $m"; done
+fi
+if [ -n "$REUSED" ]; then
+  echo "  REUSED INPUTS (not made by this run): $REUSED -- NOT A GREEN"
+  exit 1
 fi
 if [ ${#FAILED[@]} -eq 0 ] && [ ${#MISSING[@]} -eq 0 ]; then
   echo "  ⇒ every gate in the list ran and passed. This is the SAME list CI"

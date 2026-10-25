@@ -207,6 +207,13 @@ def one(gate, seam, policy, timeout):
     m = LINE.search(out)
     calls = int(m.group(1)) if m else None
     first = next((l.strip() for l in out.splitlines() if "***" in l), "")
+    if calls is None:
+        # ⛔ 3c (10-24): a stub run that CRASHED printed no `***` line, so CI
+        # said only "did not run to its end:" with nothing after it -- the
+        # traceback is in the tail, so the tail is what is reported
+        tail = [l.strip() for l in out.splitlines() if l.strip()][-4:]
+        return gate, seam, r.returncode, calls, (first[:110] + " || tail: "
+                                                 + " | ".join(tail))[:600]
     return gate, seam, r.returncode, calls, first[:110]
 
 
