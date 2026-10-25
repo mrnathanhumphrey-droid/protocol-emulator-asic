@@ -84,6 +84,7 @@ from make_smoke_image import (            # noqa: E402
     SELF_CLOCKED,
     OP_STOP, PIN_NONE, act, hdr, write_image,
 )
+import pe_isa
 from pe_isa import ORDER_MSB, order_for      # noqa: E402  ruling RC4
 from pe_isa import FLAG_CLK_INV               # noqa: E402  ruling CE2
 
@@ -256,7 +257,7 @@ def _assemble(seqs, headers_spec, park_at, queues=None):
                                base[lane], order=order))
         else:
             headers.append(hdr(park_at, park_at, MODE_OD, 500, 0, 200, 240, lp))
-    img = b"".join(headers) + b"".join(prog)
+    img = pe_isa.join_image(headers, prog)
     assert len(img) <= (1 << AW), "image %d > 2**AW" % len(img)
     return img
 

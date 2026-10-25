@@ -65,6 +65,7 @@ from make_smoke_image import (            # noqa: E402
     OP_SHIFT,
     OP_SHIFTIN, PIN_NONE, act, hdr,
 )
+import pe_isa
 from pe_isa import full_store                  # noqa: E402
 from pe_isa import i2c_order_problems, order_for  # noqa: E402  ruling RC4
 from pe_isa import (flag_problems, FLAG_HALF_HIGH,  # noqa: E402  ruling HDR
@@ -885,7 +886,7 @@ def assemble(lanes, headers, park_pins=None, timing_checks=True,
                 hs.append(hdr(pp, pp, 0, 500, 0, 200, 240, lp))
     except ValueError as exc:
         raise Reject("a value does not fit its encoding: %s" % exc)
-    img = b"".join(hs) + b"".join(prog)
+    img = pe_isa.join_image(hs, prog)
     if len(img) > (1 << AW):
         raise Reject("image is %d bytes, over the %d-byte program store"
                      % (len(img), 1 << AW))

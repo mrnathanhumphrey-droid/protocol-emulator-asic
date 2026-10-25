@@ -34,19 +34,34 @@ import hashlib
 # ---------------------------------------------------------------------------
 # WIDTHS -- the single source. `gate_one_encoder.py` checks the RTL agrees.
 # ---------------------------------------------------------------------------
-N_LANES, AW, DLY_W, PINW, CW, D_W = 5, 8, 10, 4, 4, 8
+N_LANES, AW, DLY_W, PINW, CW, D_W = 5, 9, 10, 4, 4, 8
 CNT_W = 4                  # the per-action count field
 BQW = 2                    # TX queue index, in what used to be zero padding
 N_TXQ = 1 << BQW           # TX queues the tag can name
+# ⭐⭐ v2 STEP 2 (Wilson ruling on design 5cf27c1f, 10-25): THE 32-BIT WORD.
+# The 24-bit v1 word was full (24 of 24, 8 of 8 opcodes) and six v1 images use
+# up to 71 actions -- more than a 256-byte store holds at 4 bytes each -- so
+# the word and the store grow together: AW 8 -> 9 (512 B), and the header's
+# `base` becomes a WORD INDEX (BASE_W = 8 bits, up to 256 words), so the
+# header stays 48 bits. Opcodes widen 3 -> 5 (v1's 8 keep their values);
+# PINB is a second pin, MOD two per-action modifier bits.
+OP_W, PINB_W, MOD_W = 5, 4, 2
+BASE_W = 8                 # header `base`: a word index into the action region
 
 # ⭐ THE HEADER'S LAST SPARE BIT IS THE BIT-ORDER BIT (Wilson's ruling 1).
 # The header was 47 bits in 6 bytes with ONE spare at the bottom; `order` takes
 # it, so the layout is now exactly 48 of 48 and the word is full.
-HDR_BITS = PINW * 2 + 1 + DLY_W + CW + D_W + D_W + AW + 1  # +1 mode, +1 order
+HDR_BITS = PINW * 2 + 1 + DLY_W + CW + D_W + D_W + BASE_W + 1  # +1 mode, +1 order
 HDR_BYTES = (HDR_BITS + 7) // 8
-ACT_W = 3 + PINW + 1 + DLY_W + CNT_W + BQW
+ACT_W = OP_W + PINW + 1 + DLY_W + CNT_W + BQW + PINB_W + MOD_W
 ACT_BYTES = (ACT_W + 7) // 8
-ACT_BASE = N_LANES * HDR_BYTES
+HDR_REGION = N_LANES * HDR_BYTES          # 30: the five lane headers
+# ⛔ BYTES 30-31 ARE A 16-BIT MAGIC + VERSION (Wilson Q3): in v1 byte 30 was
+# the first action's first byte and could hold any value, so a single version
+# byte cannot reliably refuse a v1 image; two bytes leave 1 in 65,536. They
+# also align the action region: word w sits at byte ACT_BASE + 4w.
+MAGIC = bytes((0x56, 0x32))               # "V2"
+ACT_BASE = HDR_REGION + len(MAGIC)        # 32
 
 OP_LEVEL, OP_SHIFT, OP_SHIFTIN, OP_READBIT = 0, 1, 2, 3
 OP_START, OP_STOP, OP_ARM, OP_REARM = 4, 5, 6, 7
@@ -55,6 +70,29 @@ OPCODES = {
     "READBIT": OP_READBIT, "START": OP_START, "STOP": OP_STOP,
     "ARM": OP_ARM, "REARM": OP_REARM,
 }
+# ⭐ RESERVED WITH THE FORMAT (frozen once, Wilson): one opcode per master-list
+# primitive, each with the field map it will use, shown here to fit ONE 32-bit
+# word (no multi-word actions -- Wilson Q2). RESERVED means NOT DECODED: the
+# assembler refuses them and the RTL gives them no behaviour until a primitive
+# step builds one (branches vs prefetch is that tier's problem, Wilson pt 1).
+RESERVED_OPCODES = {
+    8: ("BRANCH_BIT", "pin = the bit's pin, level = the taken value, delay[6:0] = target word"),
+    9: ("CMP_BRANCH", "imm[7:0] = {count, pinb} vs the lane's RX shift register, delay[6:0] = target word"),
+    10: ("LOOP", "count = iterations, delay[6:0] = loop-head word"),
+    11: ("ARM2", "pin + pinb = the two watched pins, level = edge, delay = timeout"),
+    12: ("DRIVE_SAMPLE", "pin = driven, pinb = sampled, level = drive value, delay"),
+    13: ("SER", "pin, delay = bit time, count = bits (per-lane serializer)"),
+    14: ("FRAC_TX", "pin, delay = integer bit time, {count, mod} = fraction"),
+    15: ("CRC_RX", "count = CRC kind, q = which accumulator"),
+    16: ("FLAG_SET", "pinb[1:0] = flag index, level = value"),
+    17: ("FLAG_WAIT", "pinb[1:0] = flag index, level = awaited value, delay = timeout"),
+    18: ("RESP", "q = response buffer, count = length"),
+    19: ("WAITQ", "q = the TX queue awaited, delay = timeout"),
+    20: ("NIBBLE_LOAD", "q = queue, count = nibble lane"),
+    21: ("RX_STATUS", "mod = status kind"),
+}
+N_OPCODES = 1 << OP_W                     # 32; 22..31 unassigned
+MOD_TIMEOUT_FALLTHROUGH, MOD_UNDERRUN_FILL1 = 0x1, 0x2   # reserved modifiers
 
 # pin indices: 0..7 = uio, 8..11 = uo_out[0..3]
 N_UIO = 8
@@ -64,7 +102,7 @@ PIN_NONE = (1 << PINW) - 1          # the reserved non-driving index
 
 # ---- the field order, declared as data so the digest covers it ------------
 HDR_FIELDS = (("pin", PINW), ("clkpin", PINW), ("mode", 1), ("t", DLY_W),
-              ("flags", CW), ("dsched", D_W), ("dtol", D_W), ("base", AW),
+              ("flags", CW), ("dsched", D_W), ("dtol", D_W), ("base", BASE_W),
               ("order", 1))
 
 # ⛔⛔ BIT ORDER IS A PER-LANE PROPERTY, AND IT HAD BEEN AN UNSTATED GLOBAL.
@@ -100,8 +138,8 @@ ORDER_LSB, ORDER_MSB = 0, 1
 # and the lockstep proves nothing moved).
 FLAG_HALF_HIGH, FLAG_CLK_INV = 0x1, 0x2
 FLAG_RESERVED = 0xC
-ACT_FIELDS =(("op", 3), ("pin", PINW), ("level", 1), ("delay", DLY_W),
-              ("count", CNT_W), ("q", BQW))
+ACT_FIELDS =(("op", OP_W), ("pin", PINW), ("level", 1), ("delay", DLY_W),
+              ("count", CNT_W), ("q", BQW), ("pinb", PINB_W), ("mod", MOD_W))
 
 
 def _pack(fields, values, nbytes):
@@ -142,8 +180,29 @@ def hdr(pin, clkpin, mode, t, flags, dsched, dtol, base,
         raise ValueError("header flags 0x%X set a RESERVED bit (only "
                          "HALF_HIGH = 1 and CLK_INV = 2 exist)" % int(flags))
     return _pack(HDR_FIELDS,
-                 (pin, clkpin, mode, t, flags, dsched, dtol, base, order),
+                 (pin, clkpin, mode, t, flags, dsched, dtol, base_word(base), order),
                  HDR_BYTES)
+
+
+def base_word(base) -> int:
+    """`base` (a BYTE address, as every builder writes it) -> the header's word
+    index. ⛔ Refused unless it is word-aligned inside the action region: v2's
+    words sit at ACT_BASE + ACT_BYTES * w, nowhere else."""
+    b = int(base)
+    if b < ACT_BASE or (b - ACT_BASE) % ACT_BYTES:
+        raise ValueError("base %d is not a word address (ACT_BASE %d + %d*w)"
+                         % (b, ACT_BASE, ACT_BYTES))
+    return (b - ACT_BASE) // ACT_BYTES
+
+
+def join_image(headers, prog) -> bytes:
+    """THE ONE ASSEMBLER of an image's bytes: the five headers, the MAGIC, the
+    action words. Every builder goes through here, so no image can omit the
+    magic or misplace word 0."""
+    h = b"".join(headers)
+    if len(h) != HDR_REGION:
+        raise ValueError("headers are %d bytes, want %d" % (len(h), HDR_REGION))
+    return h + MAGIC + b"".join(prog)
 
 
 def bitrev8(b: int) -> int:
@@ -157,14 +216,17 @@ def bitrev8(b: int) -> int:
     return int("{:08b}".format(int(b) & 0xFF)[::-1], 2)
 
 
-def act(op, pin, level, delay, count=0, q=0) -> bytes:
-    """`q` names the TX QUEUE this action draws its payload from.
+def act(op, pin, level, delay, count=0, q=0, pinb=0, mod=0) -> bytes:
+    """`q` names the TX QUEUE this action draws its payload from; `pinb` and
+    `mod` are v2's second pin and modifier bits (0 for every v1 action).
 
-    ⭐ It costs no layout: the action word was 22 bits inside 3 bytes, so the
-    bottom 2 bits were zero padding. Every image written before the field
-    existed is bit-identical to one written with `q = 0`.
+    ⛔ A RESERVED opcode (8..31) is refused here until its primitive is built
+    -- reserving is not decoding (Wilson, step 2).
     """
-    return _pack(ACT_FIELDS, (op, pin, level, delay, count, q), ACT_BYTES)
+    if int(op) >= len(OPCODES):
+        raise ValueError("opcode %d is RESERVED (%s), not built"
+                         % (int(op), RESERVED_OPCODES.get(int(op), ("unassigned",))[0]))
+    return _pack(ACT_FIELDS, (op, pin, level, delay, count, q, pinb, mod), ACT_BYTES)
 
 
 # ---------------------------------------------------------------------------
@@ -291,6 +353,11 @@ def full_store(img: bytes) -> bytes:
     if len(img) < ACT_BASE or (len(img) - ACT_BASE) % ACT_BYTES:
         raise ValueError("image ends mid-action (%d bytes), so the filler "
                          "would be misaligned" % len(img))
+    if img[HDR_REGION:ACT_BASE] != MAGIC:
+        raise ValueError("image bytes %d-%d are %s, not the v2 magic %s -- built "
+                         "without join_image(), or a v1 image"
+                         % (HDR_REGION, ACT_BASE - 1, img[HDR_REGION:ACT_BASE].hex(),
+                            MAGIC.hex()))
     pad = STORE_BYTES - len(img)
     reps = (STORE_FILLER * (pad // ACT_BYTES + 1))[:pad]
     return img + reps
@@ -319,14 +386,25 @@ def _unpack(fields, raw, nbytes):
     return out
 
 
+def read_header(img, ln):
+    """Lane `ln`'s header as {name: value}, with `base` decoded to the BYTE
+    address every caller uses (the raw word index kept as `base_word`).
+    ⛔ THE ONE HEADER DECODER: v2 made `base` a word index, and every private
+    `_unpack(HDR_FIELDS, ...)` that read it as a byte address went wrong at
+    once (found 10-25: gate_degenerate_fields.walk, gate_store_full, test.py)."""
+    h = _unpack(HDR_FIELDS, img[ln * HDR_BYTES:(ln + 1) * HDR_BYTES], HDR_BYTES)
+    h["base_word"] = h["base"]
+    h["base"] = ACT_BASE + ACT_BYTES * h["base"]
+    return h
+
+
 def lane_programs(img):
     """{lane: (header dict, [action dict, ...])}: each lane's actions from its
     header's base through its first OP_REARM, which is how every builder here
     ends a lane (a loop, or the parked lane's chaining wait)."""
     out = {}
     for ln in range(N_LANES):
-        h = _unpack(HDR_FIELDS, img[ln * HDR_BYTES:(ln + 1) * HDR_BYTES],
-                    HDR_BYTES)
+        h = read_header(img, ln)
         acts, a = [], h["base"]
         while a + ACT_BYTES <= len(img) and len(acts) <= STORE_BYTES:
             x = _unpack(ACT_FIELDS, img[a:a + ACT_BYTES], ACT_BYTES)
@@ -474,5 +552,6 @@ def digest() -> str:
         h.update(("A:%s:%d;" % (name, width)).encode())
     h.update(("B:%d,%d,%d,%d,%d;" % (HDR_BITS, HDR_BYTES, ACT_W, ACT_BYTES,
                                      ACT_BASE)).encode())
+    h.update(("M:%s,%d,%d;" % (MAGIC.hex(), AW, BASE_W)).encode())
     h.update(("P:%s;" % (host_pushes(0xA5, 1),)).encode())
     return h.hexdigest()[:12]

@@ -100,7 +100,7 @@ def i2c_write_image():
     hdrs = [I.hdr(sda, scl, 0, d, 0, 2 * d, 3 * d, I.ACT_BASE,
                   order=I.ORDER_MSB)]
     hdrs += [I.hdr(p, p, 0, 500, 0, 200, 240, park) for p in (0, 3, 4, 5)]
-    return b"".join(hdrs) + b"".join(prog)
+    return I.join_image(hdrs, prog)
 
 
 def sources(src):

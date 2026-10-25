@@ -280,8 +280,7 @@ def walk(img):
     if len(img) < I.ACT_BASE:
         return
     for ln in range(I.N_LANES):
-        h = unpack(I.HDR_FIELDS,
-                   img[ln * I.HDR_BYTES:(ln + 1) * I.HDR_BYTES], I.HDR_BYTES)
+        h = I.read_header(img, ln)
         pc, seen = h["base"], 0
         while pc + I.ACT_BYTES <= len(img) and seen < 200:
             a = unpack(I.ACT_FIELDS, img[pc:pc + I.ACT_BYTES], I.ACT_BYTES)

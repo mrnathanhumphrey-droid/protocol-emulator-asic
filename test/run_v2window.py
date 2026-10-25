@@ -56,7 +56,7 @@ def image(path):
     prog.append(I.act(I.OP_REARM, 0, 0, 500))
     hdrs = [I.hdr(mosi, sck, 1, d, 0, 2 * d, 3 * d, I.ACT_BASE)]
     hdrs += [I.hdr(p, p, 0, 500, 0, 200, 240, park) for p in (0, 3, 4, 5)]
-    I.write_image(path, b"".join(hdrs) + b"".join(prog))
+    I.write_image(path, I.join_image(hdrs, prog))
     return path
 
 

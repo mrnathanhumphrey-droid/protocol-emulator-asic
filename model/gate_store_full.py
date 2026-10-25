@@ -72,9 +72,7 @@ def audit(name, img):
                 % name], None
     probs = []
     for ln in range(I.N_LANES):
-        h = dgf.unpack(I.HDR_FIELDS,
-                       img[ln * I.HDR_BYTES:(ln + 1) * I.HDR_BYTES],
-                       I.HDR_BYTES)
+        h = I.read_header(img, ln)
         b = h["base"]
         if not (I.ACT_BASE <= b < L) or (b - I.ACT_BASE) % I.ACT_BYTES:
             probs.append("%s lane %d: header base %d is outside its program "
@@ -98,8 +96,7 @@ def audit(name, img):
 
 def _end_pc(img, ln):
     """The address of the action `walk` stops on for lane `ln`."""
-    h = dgf.unpack(I.HDR_FIELDS, img[ln * I.HDR_BYTES:(ln + 1) * I.HDR_BYTES],
-                   I.HDR_BYTES)
+    h = I.read_header(img, ln)
     pc, seen = h["base"], 0
     while pc + I.ACT_BYTES <= len(img) and seen < 200:
         a = dgf.unpack(I.ACT_FIELDS, img[pc:pc + I.ACT_BYTES], I.ACT_BYTES)

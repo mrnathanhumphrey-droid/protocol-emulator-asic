@@ -60,7 +60,7 @@ from pe_isa import (                      # noqa: F401,E402
     ORDER_LSB, ORDER_MSB, FLAG_HALF_HIGH, FLAG_CLK_INV,
     OP_START, OP_STOP, PINW, PIN_NONE, UO0, UO1, UO2, UO3, act, hdr,
     I2C_ORDER,
-    write_image,
+    write_image, join_image,
 )
 
 def build():
@@ -94,7 +94,7 @@ def build():
         hdr(1, 1, 0, 500, 0, 200, 240, l2),
         hdr(2, 2, 0, 500, 0, 200, 240, l2),
     ]
-    img = b"".join(headers) + b"".join(prog)
+    img = join_image(headers, prog)
     assert len(headers[0]) == HDR_BYTES
     return img
 
@@ -146,7 +146,7 @@ def build_stress(d0: int, d1: int):
         hdr(1, 1, 0, 500, 0, 200, 240, l2),
         hdr(2, 2, 0, 500, 0, 200, 240, l2),
     ]
-    return b"".join(headers) + b"".join(prog)
+    return join_image(headers, prog)
 
 
 # ⛔⛔ ONE RECIPE PER FILENAME. The clean-room check found `five_image.hex`
@@ -197,7 +197,7 @@ def build_five(delays):
         # REFILL PORT, and its deadlines only have to keep the set schedulable.
         headers.append(hdr(n, n, 1, min(d, 1023), 0,
                            min(2 * d, 255), min(3 * d, 255), base[n]))
-    return b"".join(headers) + b"".join(prog)
+    return join_image(headers, prog)
 
 
 def build_ckfive(delays):
@@ -247,7 +247,7 @@ def build_ckfive(delays):
     for n, d in enumerate(delays):
         headers.append(hdr(2 * n, 2 * n + 1, 1, min(d, 1023), 0,
                            min(2 * d, 255), min(3 * d, 255), base[n]))
-    return b"".join(headers) + b"".join(prog)
+    return join_image(headers, prog)
 
 # ⚠ LIKE `build_five`, A SCHEDULER STRESS IMAGE AND NOT A PIN-MAP-LEGAL
 # PROGRAM: it declares push-pull on `uio` pins, which is physically fine but is
@@ -376,7 +376,7 @@ def build_cemodes():
     # parked PUSH-PULL on PIN_NONE, as the corpus parks: an open-drain header
     # off the `uio` bank is a load-time CONFIG_ERR (1.6s)
     hs.append(hdr(PIN_NONE, PIN_NONE, 1, 500, 0, 200, 240, park))
-    return full_store(b"".join(hs) + b"".join(prog))
+    return full_store(join_image(hs, prog))
 
 
 #: RULING CE1's phase-measurement delays (`--ckhalf`). One constant, because
@@ -448,7 +448,7 @@ def build_ckod(delays=None, flags=0):
     # the inert fifth lane: `clkpin == pin` makes `clk_real` false, so nothing
     # it runs can be clocked, and a long re-arm keeps it out of the way.
     headers.append(hdr(4, 4, 0, 500, 0, 200, 240, idle))
-    return b"".join(headers) + b"".join(prog)
+    return join_image(headers, prog)
 
 
 #: ⭐⭐ RULING DT-C: Ruling S's must-fire subject, ADMISSIBLE this time.
@@ -488,7 +488,7 @@ def build_ckheavy(ck=None, pp=None, pp_dsched=CKHEAVY_PP_DSCHED):
     for m, d in enumerate(pp):
         headers.append(hdr(UO0 + m, UO0 + m, 1, d, 0, pp_dsched,
                            pp_dsched + 8, base[len(ck) + m]))
-    return b"".join(headers) + b"".join(prog)
+    return join_image(headers, prog)
 
 
 def build_ckread(d: int = D_FM_SHIPPABLE, sda: int = 2, scl: int = 1):
@@ -536,7 +536,7 @@ def build_ckread(d: int = D_FM_SHIPPABLE, sda: int = 2, scl: int = 1):
     # parked lanes OFF the pad-override pins (CS/MISO), so N1's PINMAP
     # condition has nothing to report
     headers += [hdr(p, p, 0, 500, 0, 200, 240, park) for p in (0, 3, 4, 5)]
-    return b"".join(headers) + b"".join(prog)
+    return join_image(headers, prog)
 
 
 def build_chain(d_tog: int, d_park: int):
@@ -579,7 +579,7 @@ def build_chain(d_tog: int, d_park: int):
     for n in range(n_tog, N_LANES):
         headers.append(hdr(n, n, 0, d_park, 0, min(2 * d_park, 255),
                            min(3 * d_park, 255), lp))
-    return b"".join(headers) + b"".join(prog)
+    return join_image(headers, prog)
 
 
 def build_cfgerr(d: int = 20):
@@ -597,7 +597,7 @@ def build_cfgerr(d: int = 20):
     headers = [hdr(UO0, UO0, 0, d, 0, 2 * d, 3 * d, l0)]   # mode 0 on uo_out!
     for n in range(1, N_LANES):
         headers.append(hdr(n, n, 0, 500, 0, 200, 240, lp))
-    return b"".join(headers) + b"".join(prog)
+    return join_image(headers, prog)
 
 
 def build_armnone(d: int = 20):
@@ -635,7 +635,7 @@ def build_armnone(d: int = 20):
     headers.append(hdr(0, PIN_NONE, 1, d, 0, 2 * d, 3 * d, l0))
     for n in range(1, N_LANES):
         headers.append(hdr(n, n, 0, 500, 0, 200, 240, lp))
-    return b"".join(headers) + b"".join(prog)
+    return join_image(headers, prog)
 
 
 def build_pinnone(d: int = 20):
@@ -682,7 +682,7 @@ def build_pinnone(d: int = 20):
     headers.append(hdr(PIN_NONE, PIN_NONE, 1, d, 0, 2 * d, 3 * d, l0))
     for n in range(1, N_LANES):
         headers.append(hdr(n, n, 0, 500, 0, 200, 240, lp))
-    return b"".join(headers) + b"".join(prog)
+    return join_image(headers, prog)
 
 
 def build_ckdegen(d: int = 20, route: int = 0):
@@ -729,7 +729,7 @@ def build_ckdegen(d: int = 20, route: int = 0):
     headers.append(hdr(2, 1, 0, d, 0, 2 * d, 3 * d, l0))
     for n in range(1, N_LANES):
         headers.append(hdr(n + 2, n + 2, 0, 500, 0, 200, 240, lp))
-    return b"".join(headers) + b"".join(prog)
+    return join_image(headers, prog)
 
 
 #: ⛔⛔ THE THREE D4 POINTS, AND THE BOUNDARY IS STATED ONCE. `hold_bound.bound()`
@@ -780,7 +780,7 @@ def build_ckhold(offset: int = 0):
     headers.append(hdr(2, 1, 0, d, 0, min(2 * d, 255), min(3 * d, 255), l0))
     for _n in range(1, N_LANES):
         headers.append(hdr(PIN_NONE, PIN_NONE, 1, 500, 0, 200, 240, lp))
-    return b"".join(headers) + b"".join(prog)
+    return join_image(headers, prog)
 
 
 def build_census(d: int = 25):
@@ -835,7 +835,7 @@ def build_census(d: int = 25):
     headers.append(hdr(UO1, UO1, 1, d + 1, 0, 2 * d, 3 * d, base[1]))
     for n in range(2, N_LANES):
         headers.append(hdr(n, n, 0, 500, 0, 200, 240, lp))
-    return b"".join(headers) + b"".join(prog)
+    return join_image(headers, prog)
 
 
 def build_half(d: int = 24):
@@ -915,7 +915,7 @@ def build_half(d: int = 24):
     headers.append(hdr(10, 9, 1, d, 0, 2 * d, 3 * d, base[1]))
     for n in range(2, N_LANES):
         headers.append(hdr(4, 4, 0, 500, 0, 200, 240, lp))
-    return b"".join(headers) + b"".join(prog)
+    return join_image(headers, prog)
 
 
 def build_i2cframe(d: int = 62, sda: int = 2, scl: int = 1, nbytes: int = 2):
@@ -995,7 +995,7 @@ def build_i2cframe(d: int = 62, sda: int = 2, scl: int = 1, nbytes: int = 2):
                        order=ORDER_MSB))
     for n in range(1, N_LANES):
         headers.append(hdr(4, 4, 0, 500, 0, 200, 240, lp))
-    img = b"".join(headers) + b"".join(prog)
+    img = join_image(headers, prog)
     return img
 
 
@@ -1033,7 +1033,7 @@ def build_rxfast(d: int = 24):
     headers.append(hdr(0, 1, 1, d, 0, 2 * d, 3 * d, base[0]))
     for n in range(1, N_LANES):
         headers.append(hdr(4, 4, 0, 500, 0, 200, 240, lp))
-    return b"".join(headers) + b"".join(prog)
+    return join_image(headers, prog)
 
 
 def build_tx_badclk(d: int = 12):
@@ -1061,7 +1061,7 @@ def build_tx_badclk(d: int = 12):
     headers.append(hdr(UO0, UO0, 1, d, 0, 2 * d, 3 * d, base[0]))
     for n in range(1, N_LANES):
         headers.append(hdr(n, n, 0, 500, 0, 200, 240, lp))
-    return b"".join(headers) + b"".join(prog)
+    return join_image(headers, prog)
 
 
 def build_tx(d0: int = 12, d1: int = 13, cnt: int = 7):
@@ -1138,7 +1138,7 @@ def build_tx(d0: int = 12, d1: int = 13, cnt: int = 7):
         headers.append(hdr(pin, clk, 1, d, 0, 2 * d, 3 * d, base[n]))
     for n in range(2, N_LANES):
         headers.append(hdr(n, n, 0, 500, 0, 200, 240, lp))
-    return b"".join(headers) + b"".join(prog)
+    return join_image(headers, prog)
 
 
 def build_edge(timeout: int, d1: int = 12, arm_pin: int = 0,
@@ -1178,7 +1178,7 @@ def build_edge(timeout: int, d1: int = 12, arm_pin: int = 0,
     headers.append(hdr(UO0, UO0, 1, d1, 0, 2 * d1, 3 * d1, l0))
     for n in range(1, N_LANES):
         headers.append(hdr(n, n, 0, 500, 0, 200, 240, lp))
-    return b"".join(headers) + b"".join(prog)
+    return join_image(headers, prog)
 
 
 
@@ -1214,7 +1214,7 @@ def build_noop(timeout: int, half: int, d1: int = 12, arm_pin: int = 0,
     headers.append(hdr(UO0, UO0, 1, d1, 0, 2 * d1, 3 * d1, l0))
     for n in range(1, N_LANES):
         headers.append(hdr(n, n, 0, 500, 0, 200, 240, lp))
-    return b"".join(headers) + b"".join(prog)
+    return join_image(headers, prog)
 
 
 def build_b3b(arm: str):

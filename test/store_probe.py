@@ -49,7 +49,7 @@ def build_falloff():
     prog.append(I.act(I.OP_LEVEL, I.UO0, 1, 20))     # ...and nothing after it
     headers = [I.hdr(I.UO0, I.UO0, 1, 20, 0, 40, 60, l0)]
     headers += [I.hdr(p, p, 0, 500, 0, 200, 240, park) for p in (0, 1, 2, 3)]
-    return b"".join(headers) + b"".join(prog), l0 + 2 * I.ACT_BYTES
+    return I.join_image(headers, prog), l0 + 2 * I.ACT_BYTES
 
 
 def main() -> int:

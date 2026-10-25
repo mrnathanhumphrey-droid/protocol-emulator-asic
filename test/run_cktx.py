@@ -25,6 +25,7 @@ ARMS:
 
 from __future__ import annotations
 
+import pe_isa  # noqa: E402
 import os
 import re
 import subprocess
@@ -48,6 +49,7 @@ SRCS = ["pe_engine.v", "pe_store.v", "project.v"]
 
 
 def image(path):
+    import pe_isa
     from pe_isa import (ACT_BASE, ACT_BYTES, OP_LEVEL, OP_REARM, OP_START,
                         OP_STOP, ORDER_LSB, ORDER_MSB, act, act_shift_clocked,
                         act_shiftin_clocked, hdr, write_image)
@@ -70,7 +72,7 @@ def image(path):
     headers = [hdr(sda, scl, 0, d0, 0, 2 * d0, 3 * d0, b0, order=ORDER_MSB),
                hdr(dat, ck, 1, d1, 0, 2 * d1, 3 * d1, b1, order=ORDER_LSB)]
     headers += [hdr(p, p, 0, 500, 0, 200, 240, park) for p in (0, 5, 6)]
-    write_image(path, b"".join(headers) + b"".join(l0 + l1 + tail))
+    write_image(path, pe_isa.join_image(headers, l0 + l1 + tail))
     # a CLOCKED scratch image: its provenance for test/sim_run.py
     sim_run.scratch_image("run_cktx", path)
     return path
@@ -123,7 +125,7 @@ def pindiv_image(path=None):
                       order=order_for(ops)))
         prog += acts
         base += len(acts) * ACT_BYTES
-    img = b"".join(hs) + b"".join(prog)
+    img = pe_isa.join_image(hs, prog)
     if path:
         write_image(path, img)
     return full_store(img)

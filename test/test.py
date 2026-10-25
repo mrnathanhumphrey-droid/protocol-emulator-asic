@@ -904,9 +904,7 @@ def _unpack(fields, raw, nbytes):
 
 def lane_delays(img, lane):
     """Every action delay lane `lane` can reach, from the image itself."""
-    h = _unpack(pe_isa.HDR_FIELDS,
-                img[lane * pe_isa.HDR_BYTES:(lane + 1) * pe_isa.HDR_BYTES],
-                pe_isa.HDR_BYTES)
+    h = pe_isa.read_header(img, lane)
     pc, out = h["base"], []
     for _ in range(200):
         a = _unpack(pe_isa.ACT_FIELDS, img[pc:pc + pe_isa.ACT_BYTES],
@@ -1158,7 +1156,7 @@ async def test_clocked_tx_bytes_at_the_pins(dut):
                        order=pe_isa.ORDER_MSB)]
     hdrs += [pe_isa.hdr(p, p, 0, 500, 0, 200, 240, park)
              for p in range(8) if p not in (sda, scl)][:4]
-    img = list(pe_isa.full_store(b"".join(hdrs) + b"".join(prog)))
+    img = list(pe_isa.full_store(pe_isa.join_image(hdrs, prog)))
     await run_loaded(dut, img, feed=False)
 
     async def feed_5b():
@@ -1209,7 +1207,7 @@ async def test_clocked_spi_read_at_the_pins(dut):
     hdrs = [pe_isa.hdr(P_M_MOSI, P_M_SCLK, 1, d, 0, 2 * d, 3 * d,
                        pe_isa.ACT_BASE, order=pe_isa.ORDER_MSB)]
     hdrs += [pe_isa.hdr(p, p, 0, 500, 0, 200, 240, park) for p in (1, 2, 3, 4)]
-    img = list(pe_isa.full_store(b"".join(hdrs) + b"".join(prog)))
+    img = list(pe_isa.full_store(pe_isa.join_image(hdrs, prog)))
     await run_loaded(dut, img, feed=False)
     cs_b, sck_b = P_M_CS - 8, P_M_SCLK - 8          # uo_out bit indices
 
@@ -1267,7 +1265,7 @@ def _spi_read_image(d, flags):
     hdrs = [pe_isa.hdr(P_M_MOSI, P_M_SCLK, 1, d, flags, 2 * d, 3 * d,
                        pe_isa.ACT_BASE, order=pe_isa.ORDER_MSB)]
     hdrs += [pe_isa.hdr(p, p, 0, 500, 0, 200, 240, park) for p in (1, 2, 3, 4)]
-    return list(pe_isa.full_store(b"".join(hdrs) + b"".join(prog)))
+    return list(pe_isa.full_store(pe_isa.join_image(hdrs, prog)))
 
 
 @cocotb.test()

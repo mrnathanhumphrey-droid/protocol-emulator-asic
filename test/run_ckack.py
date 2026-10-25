@@ -118,6 +118,7 @@ def stretch_timeout():
 def image(path, d=D, flags=0):
     """The part's random read. `flags` = FLAG_HALF_HIGH builds ruling CE1's
     Fm image (at `D_HALF`): the same program, the HIGH phase d/2."""
+    import pe_isa
     from pe_isa import (ACT_BASE, ACT_BYTES, OP_LEVEL, OP_REARM, OP_START,
                         OP_STOP, ORDER_MSB, act, act_shift_clocked,
                         act_shiftin_clocked, hdr, write_image)
@@ -155,7 +156,7 @@ def image(path, d=D, flags=0):
     headers = [hdr(sda, scl, 0, d, flags, 2 * d, 3 * d, ACT_BASE,
                    order=ORDER_MSB)]
     headers += [hdr(p, p, 0, 500, 0, 200, 240, park) for p in (0, 3, 4, 5)]
-    write_image(path, b"".join(headers) + b"".join(prog))
+    write_image(path, pe_isa.join_image(headers, prog))
     # a CLOCKED scratch image: its provenance for test/sim_run.py
     sim_run.scratch_image("run_ckack", path)
     return path
