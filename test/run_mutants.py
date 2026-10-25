@@ -381,6 +381,25 @@ STRESS_IMG = "test/five_image.hex"
 #   satisfied by the correct design -- a guard passing for the wrong reason,
 #   which is this project's signature defect.
 MUTANTS = [
+    # ⭐ v2 R1 (Wilson 10-25): the word-organised store's ADDRESSING, replacing
+    # M_TM2_STORE_ADD (whose adder no longer exists). Each lands a word in the
+    # wrong place, so the head slot no longer holds the image's word at l_pc.
+    ("M_STORE_BANK_SWAP", "assert", DEFAULT_IMG,
+     "the write bank select wired wrong (addr & 3, low bit flipped)",
+     "buffer-swap invariant",
+     "Every byte is written into its neighbour bank while reads use the right "
+     "one, so each fetched word is a byte-permutation of the image's: the head "
+     "slot no longer holds the action at l_pc."),
+    ("M_STORE_ROW_OFF1", "assert", DEFAULT_IMG,
+     "the wide read one row past its word",
+     "buffer-swap invariant",
+     "Every refill reads word w + 1, so the head holds the NEXT action -- the "
+     "image's word at l_pc is never the one dispatched."),
+    ("M_STORE_WRONG_BANK", "assert", DEFAULT_IMG,
+     "bank 3's writes land in bank 0",
+     "buffer-swap invariant",
+     "One byte lane of every word is lost and another overwritten, so the head "
+     "slot's word differs from the image's in its bottom byte."),
     ("M_BUF_NOINVAL", "assert", DEFAULT_IMG,
      "swap without invalidating the consumed head slot",
      "buffer-swap invariant",

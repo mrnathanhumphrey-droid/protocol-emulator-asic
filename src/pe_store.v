@@ -95,18 +95,34 @@ module pe_store #(
   // how they would be bound, so the read side cannot diverge between arms.
   // (The "sram" arm is still blocked -- S0's Metal4 conflict -- and is now
   // WIDE_B narrow banks, which is what a macro binding would see.)
+  // ⛔ R1 (Wilson 10-25): TM2's mutant guarded store ADDRESSING; the class
+  // survives the adder, so three must-fires replace it: M_STORE_BANK_SWAP
+  // (the write bank select wired wrong), M_STORE_ROW_OFF1 (the wide read one
+  // row off), M_STORE_WRONG_BANK (bank 3's writes land in bank 0).
+`ifdef M_STORE_BANK_SWAP
+  wire [WB_W-1:0]    wsel = waddr[WB_W-1:0] ^ {{(WB_W-1){1'b0}}, 1'b1};
+`else
   wire [WB_W-1:0]    wsel = waddr[WB_W-1:0];
+`endif
   wire [AW-WB_W-1:0] wrow = waddr[AW-1:WB_W];
   wire [WB_W-1:0]    rsel = raddr[WB_W-1:0];
   wire [AW-WB_W-1:0] rrow = raddr[AW-1:WB_W];
+`ifdef M_STORE_ROW_OFF1
+  wire [AW-WB_W-1:0] xrow = wraddr[AW-1:WB_W] + {{(AW-WB_W-1){1'b0}}, 1'b1};
+`else
   wire [AW-WB_W-1:0] xrow = wraddr[AW-1:WB_W];
+`endif
   wire [7:0] rbyte [0:WIDE_B-1];
   genvar gb;
   generate
     for (gb = 0; gb < WIDE_B; gb = gb + 1) begin : g_bank
       reg [7:0] mem [0:NW-1];
       always @(posedge clk) begin
+`ifdef M_STORE_WRONG_BANK
+        if (we && ((wsel == gb && gb != WIDE_B-1) || (gb == 0 && wsel == WIDE_B-1))) mem[wrow] <= wdata;
+`else
         if (we && wsel == gb) mem[wrow] <= wdata;
+`endif
         // byte gb of the word is the gb-th LOWEST address = the MSB-first
         // byte position WIDE_B-1-gb, as the v1 byte read put it
         if (wre) wrdata[(WIDE_B-1-gb)*8 +: 8] <= mem[xrow];

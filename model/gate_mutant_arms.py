@@ -102,7 +102,13 @@ EXPECT = {
         "the raw register (a 2-line mux -> 1). Neither half alone is the old "
         "form: without the second the wire would read SDA_HS for a load that "
         "never happens."),
-    "M_TM2_STORE_ADD":   (2, None),
+    # v2 R1 (Wilson 10-25): M_TM2_STORE_ADD's adder is gone with the byte-wide
+    # store; store ADDRESSING keeps three must-fires on the word-organised one
+    "M_STORE_BANK_SWAP":  (2, None),
+    "M_STORE_ROW_OFF1":   (2, None),
+    "M_STORE_WRONG_BANK": (2, None),
+    # v2 Q3: the loader's magic check bypassed (the refusal of a v1 image)
+    "M_NO_MAGIC":         (2, None),
     # ruling CE1 / CE2: each new mode bit read as 0 -- the selector ignored
     "M_HALF_IGNORED":    (2, None),
     # 2 since option 1' (WF2): the XOR now lives in the one-line `run_out`,

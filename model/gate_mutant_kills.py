@@ -57,6 +57,9 @@ KILLERS = {
     "M_BUF_NOINVAL": RUN_MUTANTS, "M_BUF_SWAP": RUN_MUTANTS,
     "M_BUF_CHAINFLIP": RUN_MUTANTS, "M_NO_PRIME": RUN_MUTANTS,
     "M_NO_REBASE": RUN_MUTANTS,
+    # -- v2 R1: the word-organised store's addressing (bench tb_smoke) ------
+    "M_STORE_BANK_SWAP": RUN_MUTANTS, "M_STORE_ROW_OFF1": RUN_MUTANTS,
+    "M_STORE_WRONG_BANK": RUN_MUTANTS,
     # silicon fix #2: killed on VALUE by Layer V1 (tb_trace, corpus_i2c)
     "M_TX_LOAD_ANYPHASE": RUN_MUTANTS,
     # silicon fix #3: killed on VALUE by Layer V-RX (tb_trace, corpus_spim)
@@ -145,9 +148,6 @@ SURVIVORS = {
     "M_TM1_UNREG": "the old direct hold-counter load; TM1 records the load "
                    "and lands it a cycle later as SDA_HS - 1, so `l_hcnt` is "
                    "equal in every cycle -- equivalent by requirement.",
-    "M_TM2_STORE_ADD": "the old in-store address add; TM2 registers the same "
-                       "sums beside `s_wraddr`, so every byte reads the same "
-                       "address in the same cycle -- equivalent by requirement.",
     # ⭐ RULING PR2: same standing. Its evidence is the lockstep vs 94cebb7
     # and `test/inv_curck.vh` in every bench (priced by S_PR_CKSTALE).
     "M_PR_CURSEL": "the old `l_clkpin[cur]` select; PR2 registers the same "
