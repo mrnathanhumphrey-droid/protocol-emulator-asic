@@ -35,8 +35,8 @@ Pre-submission, for the March 2027 `sg13cmos5l` shuttle.
 | | |
 |---|---|
 | **Done** | RTL frozen; every CI gate green on every push; UART, SPI master, SPI target (all four modes), I²C and 1-Wire programs verified in simulation; UART, I²C and 1-Wire also on an FPGA prototype with real parts |
-| **Measured, not yet of record** | local hardens close at 50 MHz with positive slack at three densities; the CI harden of record must reproduce them |
-| **Open** | gate-level simulation of the full suite; hardware runs of the SPI target — see [Open items](#open-items) |
+| **Of record** | the CI harden closes at 50 MHz: slow-corner setup slack +2.676 ns, hold +0.105 ns, 0 violations at every corner, precheck and gate-level cocotb green; a gate holds the tree to what it hardened |
+| **Open** | the trace corpus at gate level; hardware runs of the SPI target — see [Open items](#open-items) |
 
 ---
 
@@ -220,7 +220,7 @@ Each proof has mutants that must produce a counterexample.
 
 | check | result |
 |---|---|
-| `ci/run_gates.sh` — every push | **68 of 68** gates |
+| `ci/run_gates.sh` — every push, as 7 parallel CI shards | **74 of 74** gates |
 | `test/gate_corpus_trace.py` — two simulators, protocol corpus | **10 of 10**, 0 open |
 | `model/gate_mutant_kills.py` — injected defects | **50 of 56** killed, each by its named check; the other 6 are declared survivors, each with the reason no check should see it |
 | `model/gate_formal_miters.py` — SymbiYosys | **2 proofs** hold; 4 mutants refuted |
@@ -333,11 +333,10 @@ The documents are indexed, by what each one is for, in
   which is more CS setup than a typical SPI FRAM needs, and hold CS through
   its final sampling edge. A transaction cut short desynchronises the lane
   until the host reloads the program. Hardware runs follow.
-- **Gate-level simulation of the full suite is owed.** The bench is ports-only so
-  it can run on the netlist unchanged.
-- **The CI harden of record is pending.** Local hardens show slow-corner setup
-  slack of +1.87 / +2.68 / +1.78 ns at 57 / 60 / 63 % density with hold clean;
-  the harden of record must reproduce them.
+- **The trace corpus has not run at gate level.** The cocotb suite has: the
+  harden of record's gl_test runs it on the hardened netlist (zero-delay), loading
+  real program images. The corpus bench is ports-only, so it can run on the
+  netlist unchanged; that run is owed.
 - **Two synthetic refill-stress programs are not pin-map-legal** — they need five
   push-pull pins where the chip has four. They still measure refill contention;
   they are just not configurations the chip can be wired into.

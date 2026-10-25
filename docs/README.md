@@ -18,6 +18,7 @@ one. The CI gates (`ci/run_gates.sh`) are the current truth.
 
 | document | what it is |
 |---|---|
+| [SCOPE.md](SCOPE.md) | what v1 claims, each with its evidence, and what it does not claim |
 | [HOST_INTERFACE.md](HOST_INTERFACE.md) | pins, the program-load protocol, serial framing, the readback contract |
 | [PORT_SPEC.md](PORT_SPEC.md) | the fetch port and dispatch pipeline, read from the RTL |
 | [J_LANE_PROOF.md](J_LANE_PROOF.md) | the per-lane jitter bound, argued from the RTL, and where the argument stops |
