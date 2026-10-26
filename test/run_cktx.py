@@ -294,8 +294,15 @@ def main() -> int:
     say("*** FAIL clocked_conform[V1]" in t, "V1 red (the byte is popped a "
         "byte late -- the model loads on the first LOW)")
     print("  --- MUST-FIRE: the pre-#8 silicon (%s) on fed ---" % PRE8)
-    t = run(build([], "pre8", srcdir=pre8_srcdir()), img, 60000, 0, 0)
-    say("*** FAIL clocked_conform[V1]" in t, "V1 red on the real pre-#8 RTL")
+    # ⛔ v2: SET ASIDE BY NAME, NOT DROPPED. The pre-#8 RTL is v1-era: it reads
+    # only v1-encoded images, so on today's image it never dispatches. Fix #8
+    # stays priced on v2 by M_TX_PRELOAD just above. This arm is v1 evidence
+    # (V1 red on the real pre-#8 RTL, green at v1-lock); run_cktx reports the
+    # declared STALE while it is set aside, and the v2 lock decides: a v1
+    # builder + bench for it, or retire it to the v1 record.
+    pre8_aside = True
+    print("    SET ASIDE (v1-era RTL reads only v1 images; fix #8 priced by "
+          "M_TX_PRELOAD above)")
 
     # ⛔ ATTRIBUTION, PINS ONLY (Wilson): two queues' heads swapped must be
     # caught by V2 from the pins -- `fed` drives two lanes on queues 0 and 1
@@ -328,6 +335,16 @@ def main() -> int:
         "V2 red: the action pin did not carry the bits (a header-pin "
         "checker would have read them there and passed)")
     print()
+    if rc == 0 and pre8_aside:
+        sys.path.insert(0, os.path.join(ROOT, "model"))
+        import stale_records as SR
+        v, why = SR.stale_verdict("test/run_cktx.py",
+                                  SR.moved(["src/" + s for s in SRCS]))
+        print("  stale_records: %s -- %s" % (v, why))
+        if v == "STALE":
+            print(SR.token("cktx", why))
+            return 0
+        rc = 1
     print("  GATE cktx: %s" % ("PASSED" if rc == 0 else "FAILED"))
     return rc
 

@@ -80,6 +80,7 @@ function integer v3_tab;
       32'h2c0a28e6: case (field) 0: v3_tab = 0; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // run_spifram: corpus_spim mode0
       32'hb5ace5e2: case (field) 0: v3_tab = 0; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // run_spifram: corpus_spim mode0 + CLK_INV
       32'h66fc0aa1: case (field) 0: v3_tab = 0; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // run_uartrx: uart_rx.build(434, edge)
+      32'hf03c64c6: case (field) 0: v3_tab = 0; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // run_uartrx: uart_rx.build(434, nostop)
       32'he3de1e99: case (field) 0: v3_tab = 0; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // run_uartrx: uart_rx.build(T_MIN=232)
       32'h35634d65: case (field) 0: v3_tab = 0; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // run_uarttx: uart_tx MSB-first
       32'hfca33401: case (field) 0: v3_tab = 1; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // run_wirefeed_mf: old WS2812 (REARM d=0)
@@ -177,6 +178,7 @@ task v3_tab_name;
       32'h2c0a28e6: $display("  clocked_conform[V3] image: run_spifram: corpus_spim mode0 (by its loaded bytes)");
       32'hb5ace5e2: $display("  clocked_conform[V3] image: run_spifram: corpus_spim mode0 + CLK_INV (by its loaded bytes)");
       32'h66fc0aa1: $display("  clocked_conform[V3] image: run_uartrx: uart_rx.build(434, edge) (by its loaded bytes)");
+      32'hf03c64c6: $display("  clocked_conform[V3] image: run_uartrx: uart_rx.build(434, nostop) (by its loaded bytes)");
       32'he3de1e99: $display("  clocked_conform[V3] image: run_uartrx: uart_rx.build(T_MIN=232) (by its loaded bytes)");
       32'h35634d65: $display("  clocked_conform[V3] image: run_uarttx: uart_tx MSB-first (by its loaded bytes)");
       32'hfca33401: $display("  clocked_conform[V3] image: run_wirefeed_mf: old WS2812 (REARM d=0) (by its loaded bytes)");

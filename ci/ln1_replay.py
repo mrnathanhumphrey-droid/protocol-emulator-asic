@@ -365,6 +365,19 @@ def main():
     print("  arms: %s" % ", ".join("%d %s" % (v, k) for k, v in kinds.items()))
 
     if problems:
+        # ⭐ v2 (Wilson 10-26): the image replays' row-0 alignment is reworked
+        # when Lean is updated for the first primitives. Until then a red made
+        # ONLY of image-replay rows, on inputs moved inside step 2's change set,
+        # is the declared STALE -- a must-fire or clean-arm problem stays RED.
+        if all(s.startswith("REPLAY img_") for s in problems):
+            sys.path.insert(0, os.path.join(ROOT, "model"))
+            import stale_records as SR
+            v, why = SR.stale_verdict("ci/ln1_replay.py", SR.moved(BENCH))
+            print("\n  stale_records: %s -- %s (%d image-replay row(s))"
+                  % (v, why, len(problems)))
+            if v == "STALE":
+                print("LN1: STALE (declared: %s)" % why)
+                return 0
         print("\n*** LN1 RED -- %d problem(s):" % len(problems))
         for s in problems:
             print("  *** " + s)

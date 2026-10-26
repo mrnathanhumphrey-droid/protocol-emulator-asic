@@ -191,6 +191,12 @@ def board_stale_verdict(gate, names, extra=()):
     return SR.stale_verdict(gate, SR.moved(ins))
 
 
+def images_v2():
+    """`images()` with the board images read THROUGH v1_translate (see
+    board_as_v2) -> ([(name, bytes)], [the names translated])."""
+    return board_as_v2(images())
+
+
 def images():
     """[(name, image bytes)] for the whole universe, sorted by name."""
     import gate_degenerate_fields as dgf

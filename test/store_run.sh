@@ -64,12 +64,18 @@ rc=0
 JSON="$OUT/store.json"
 want="$(cat "$OUT/falloff_addr.txt")"
 rows=""
-# arm|build|image|nbytes -- `short51` loads only corpus_i2c's 51 program bytes
-RUNS="pad_ckod_image|clean|pad_ckod_image|256
-pad_corpus_all5|clean|pad_corpus_all5|256
-pad_corpus_i2c|clean|pad_corpus_i2c|256
-pad_smoke_image|clean|pad_smoke_image|256
-falloff|clean|falloff|256
+# ⛔ v2: a FULL load is the encoder's STORE_BYTES (512), never a typed 256 --
+# typed, the full arms loaded half the store and the engine never started
+NB="$("$PY" -c "import sys; sys.path.insert(0, '$ROOT/test'); import pe_isa; print(pe_isa.STORE_BYTES)")"
+# arm|build|image|nbytes -- `short51` loads only 51 bytes. ⚠ v2: 51 was v1's
+# corpus_i2c program length (30 + 7 x 3); v2's is 60 (32 + 7 x 4). The claim
+# is unchanged -- a load shorter than the store is REFUSED (M5) -- and the
+# v3_table row is the same 51 bytes, so the number stays.
+RUNS="pad_ckod_image|clean|pad_ckod_image|$NB
+pad_corpus_all5|clean|pad_corpus_all5|$NB
+pad_corpus_i2c|clean|pad_corpus_i2c|$NB
+pad_smoke_image|clean|pad_smoke_image|$NB
+falloff|clean|falloff|$NB
 short51|clean|pad_corpus_i2c|51
 mut_short51|nofull|pad_corpus_i2c|51"
 while IFS='|' read -r base build imgb nb; do

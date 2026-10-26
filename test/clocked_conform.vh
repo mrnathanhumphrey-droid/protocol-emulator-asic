@@ -1368,7 +1368,11 @@ initial begin
   v3_exg = $value$plusargs("V3_EXEMPT=%d", v3_ex);
   if (!v3_exg) v3_ex = 0;
   v3_hashed = 0; v3_prim_q = 1'b0;
-  for (v3_a = 0; v3_a < PE_STORE_BYTES; v3_a = v3_a + 1) v3_wimg[v3_a] = PE_STORE_BYTES;
+  // ⛔ 256 = "never written", the MARKER (not a byte value) -- NOT the store
+  // size: v2's 256 -> PE_STORE_BYTES sweep turned it into 512, and every
+  // short load then hashed to an image v3_table does not know (store_run
+  // mut_short51, 10-26). model/v3_table.py fnv() uses 256 at any store size.
+  for (v3_a = 0; v3_a < PE_STORE_BYTES; v3_a = v3_a + 1) v3_wimg[v3_a] = 256;
   if (!$value$plusargs("V3_UNDERRUN=%d", v3_unfed)) v3_unfed = 0;
   v3_lok = 0;
   // ⛔ a malformed vector is a FAIL, never a silent "unbounded" (as A2SLACK)

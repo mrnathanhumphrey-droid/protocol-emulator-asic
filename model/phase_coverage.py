@@ -55,6 +55,10 @@ ROWS = {
     "test/tb_cktx.v": ("CHIP_DRIVEN", "clocked TRANSMIT values: the chip drives clock "
                        "and data, Layer V checks them against the golden model"),
     # ---- no peer-timing claim --------------------------------------------------
+    "test/tb_equiv.v": ("NOT_TIMING", "the v1 == v2 equivalence bench "
+                        "(model/gate_v2_equiv.py): it compares two builds' "
+                        "dispatch + pin streams; its host pushes sit on clock "
+                        "edges by design and it makes no peer-timing claim"),
     "test/tb_csat.v": ("NOT_TIMING", "inter-dispatch spacing under saturation "
                        "(scheduler; pre-registered docs/PREREG_C_SAT.md)"),
     "test/tb_edge.v": ("NOT_TIMING", "the reactive-release must-fires: every input "

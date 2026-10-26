@@ -190,6 +190,10 @@ GENERATED = (
      "the published speed limit arm"),
     ("run_uartrx: uart_rx.build(434, edge)", _gen_uart(434, "edge"), 0,
      "the edge-sampling must-fire variant"),
+    # v2: the board copy (fpga/images) stays v1-encoded, so the v2 nostop
+    # build is no longer byte-identical to a universe image -- its own row
+    ("run_uartrx: uart_rx.build(434, nostop)", _gen_uart(434, "nostop"), 0,
+     "the nostop variant (one push per frame), the board image's v2 build"),
     ("run_cktx: cktx.hex", _gen_cktx, 0, "TX4's clocked widths 1..8 image"),
     ("run_uarttx: uart_tx MSB-first", _gen_uart_tx_msb, 0,
      "the byte-order must-fire variant"),

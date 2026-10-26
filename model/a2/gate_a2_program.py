@@ -200,6 +200,9 @@ def main() -> int:
         # ⛔ by NAME through program_a2's resolver: the bounds file holds
         # fpga/images/ entries too (10-18), and a test/-only path crashed here
         img = dgf.load(image_universe.resolve(name))
+        if name in image_universe.board_names():   # v2: a v1 board image
+            import v1_translate
+            img = v1_translate.translate(bytes(img))
         if ga.conditions(name, img)[0]:
             continue                      # non-admissible: declared in N1
         for ln, e in sorted(row["lanes"].items()):
@@ -418,6 +421,19 @@ def main() -> int:
 
     print()
     print("=" * 78)
+    # ⭐ v2: green only because the board images were read translated is the
+    # declared staleness (model/stale_records.py), not a PASS
+    if rc == 0:
+        v, why = image_universe.board_stale_verdict(
+            "model/a2/gate_a2_program.py", image_universe.board_names(),
+            extra=["model/a2/program_a2.py"])
+        print("  stale_records: %s -- %s" % (v, why))
+        if v == "STALE":
+            import stale_records as SR
+            print(SR.token("a2-program", why))
+            return 0
+        if v == "FAIL":
+            rc = 1
     print("  GATE a2-program: %s" % ("PASSED" if rc == 0 else "FAILED"))
     return rc
 

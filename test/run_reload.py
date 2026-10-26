@@ -66,8 +66,12 @@ TMP = os.environ.get("PE_RELOAD_TMP") or os.path.join(ROOT, "test",
 SIMS = 3                                       # local rule: <= 3 at a time
 OW_TXN = [("reset",), ("write", 0x33), ("read", 8, "rom")]   # READ ROM
 OW_RELOAD_AT = 12
-OW_ABORT = ("write slot low inside the 15..60 us sample window",
-            "slot (fall -> next fall) < tSLOT + tREC")
+# ⛔ v2: ONE flag, not two. v1 also flagged "slot (fall -> next fall) <
+# tSLOT + tREC": its reload (256 writes) ended inside the slot's recovery. v2's
+# reload is 256 writes longer (256 x 6 x 20 ns = 30.7 us), so the next fall
+# lands past tSLOT + tREC and only the cut write slot is flagged (measured
+# 10-26). The engine is unchanged (gate_v2_equiv); the reload is longer.
+OW_ABORT = ("write slot low inside the 15..60 us sample window",)
 
 
 def run(cmd):

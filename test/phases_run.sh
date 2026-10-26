@@ -216,7 +216,9 @@ fi
 # release into the ACK slot -- t_HD;DAT = 0 on every one before ruling K --
 # was a transition this measurement could not contain. `gate_um10204` now
 # holds this arm to the same hold floor as the others.
-run_arm clean "test/corpus_i2c.hex" 256 40000 corpus_i2c || rc=1
+# ⛔ v2: the store size from the ONE encoder (a typed 256 never started it)
+NB_STORE="$("$PY" -c "import sys; sys.path.insert(0, '$ROOT/test'); import pe_isa; print(pe_isa.STORE_BYTES)")"
+run_arm clean "test/corpus_i2c.hex" "$NB_STORE" 40000 corpus_i2c || rc=1
 
 echo
 if [ $rc -eq 0 ]; then

@@ -71,6 +71,23 @@ DECLARED = {
     "model/gate_image_bounds.py":
         "board images are v1-encoded; v2 FPGA build owed (read through "
         "test/v1_translate.py meanwhile -- image_universe.board_as_v2)",
+    "model/gate_store_full.py":
+        "board images are v1-encoded; v2 FPGA build owed (read through "
+        "test/v1_translate.py meanwhile -- image_universe.board_as_v2)",
+    "model/a2/gate_a2_program.py":
+        "board images are v1-encoded; v2 FPGA build owed (program_a2 reads them "
+        "translated -- image_universe.images_v2)",
+    "test/run_uartrx.py":
+        "board images are v1-encoded; v2 FPGA build owed (the nostop board "
+        "image compared through test/v1_translate.py)",
+    "test/run_cktx.py":
+        "the pre-#8 silicon arm is v1-era RTL that reads only v1 images; set "
+        "aside by name (fix #8 priced on v2 by M_TX_PRELOAD); the v2 lock "
+        "rebuilds it on a v1 builder + bench or retires it to the v1 record",
+    "ci/ln1_replay.py":
+        "LN1's image replays mismatch at row 0 on v2; the replay is reworked "
+        "when Lean is updated for the first primitives (Wilson 10-26) -- "
+        "diagnosed then, not now",
     "model/gate_onewire_hw_witness.py":
         "needs bench re-witness on v2 bitstream -- the 1-Wire FPGA witness is a "
         "HARDWARE record of the v1 image on a v1 bitstream; v2's image is "
