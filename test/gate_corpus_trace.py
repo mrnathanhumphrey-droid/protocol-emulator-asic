@@ -736,7 +736,11 @@ def main() -> int:
     # contention, 0 unexplained. Now 1184 = 1111 + 73, 0 unexplained: a
     # shorter loop fits more READs in the same 60k cycles; the classification
     # is unchanged and every must-fire below still fires.
-    EX1_PIN = {"726383c7533dfe41": dict(n=1184, boundary=1111, b_unexp=0,
+    # ⛔ RE-KEYED (v2 step 2, Wilson 10-25), VALUES UNCHANGED: the same
+    # program in the 32-bit word -- v1 digest 726383c7533dfe41 -> v2
+    # 7f79e56462382793. Measured on v2 before the re-key: 1184 = 1111 + 73,
+    # 0 unexplained -- equal to the pin, so no value was re-derived.
+    EX1_PIN = {"7f79e56462382793": dict(n=1184, boundary=1111, b_unexp=0,
                                         contention=73, late=0, o_unexp=0)}
     d4 = os.path.join(TMP, "spim_d4.hex")
     img4, _ = corpus.build_spi_master(d=4)
