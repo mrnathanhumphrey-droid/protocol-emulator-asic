@@ -120,7 +120,10 @@ print('\n'.join(seen[k] for k in seen))
 # `VerilatedContext::coveragep()` are present in 5.020's `verilated_cov.h`.
 # ⚠ `--binary` is exactly `--main --exe --build --timing`, so this spells those
 # out and inserts the patch between generating and building.
-FLAGS="--cc --exe --main --timing --coverage --public-flat-rw -Wno-fatal"
+# ⛔ v2: --coverage-max-width 512. The default (256) dropped half of `l_act` --
+# 10 slots x 32 bits = 320 > 256 -- from toggle coverage, so its count could not
+# be trusted (measured 10-26: 5 of 10 slots recorded; v1's 240 bits fit).
+FLAGS="--cc --exe --main --timing --coverage --coverage-max-width 512 --public-flat-rw -Wno-fatal"
 nbuild=0; nbfail=0
 for line in "${BUILDS[@]}"; do
   key="${line%% *}"; rest="${line#* }"

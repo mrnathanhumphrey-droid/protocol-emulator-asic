@@ -75,6 +75,12 @@ OPCODES = {
 # word (no multi-word actions -- Wilson Q2). RESERVED means NOT DECODED: the
 # assembler refuses them and the RTL gives them no behaviour until a primitive
 # step builds one (branches vs prefetch is that tier's problem, Wilson pt 1).
+#: ⭐ v2 (Wilson 10-26): opcodes BELOW this are built; the loader refuses an
+#: image holding any other (src/project.v `bad_op`, CONFIG_ERR), and `act()`
+#: refuses to encode one. ONE constant: the RTL's copy (`N_BUILT_OPS` in
+#: project.v) is held to it by model/gate_one_encoder.py, and each primitive
+#: that lands raises it by one IN THE COMMIT THAT BUILDS IT.
+N_BUILT_OPS = 8
 RESERVED_OPCODES = {
     8: ("BRANCH_BIT", "pin = the bit's pin, level = the taken value, delay[6:0] = target word"),
     9: ("CMP_BRANCH", "imm[7:0] = {count, pinb} vs the lane's RX shift register, delay[6:0] = target word"),
@@ -223,7 +229,7 @@ def act(op, pin, level, delay, count=0, q=0, pinb=0, mod=0) -> bytes:
     ⛔ A RESERVED opcode (8..31) is refused here until its primitive is built
     -- reserving is not decoding (Wilson, step 2).
     """
-    if int(op) >= len(OPCODES):
+    if int(op) >= N_BUILT_OPS:
         raise ValueError("opcode %d is RESERVED (%s), not built"
                          % (int(op), RESERVED_OPCODES.get(int(op), ("unassigned",))[0]))
     return _pack(ACT_FIELDS, (op, pin, level, delay, count, q, pinb, mod), ACT_BYTES)

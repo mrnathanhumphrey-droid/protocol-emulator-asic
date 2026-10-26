@@ -251,6 +251,8 @@ CHANGE_SET = frozenset([
     # ---- AMENDMENT 5 (10-26, Nate go): the second CI run's reds.
     ".github/workflows/test.yaml",     # ln1 job: full history for the STALE check
     "test/gate_coverage.py",           # 13 anchors re-anchored by their text
+    # ---- AMENDMENT 6 (10-26, Wilson: reserved opcodes refused at load).
+    "test/coverage_sweep.sh",          # --coverage-max-width 512 (l_act measured whole)
 ])
 
 

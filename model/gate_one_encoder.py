@@ -64,6 +64,9 @@ RTL_EXPECT = {
     "MAGIC_AT": pe_isa.HDR_REGION,
     "ACT_BYTES_T": pe_isa.ACT_BYTES,
     "WIDE_B": pe_isa.ACT_BYTES,
+    # Wilson 10-26: the loader's reserved-opcode refusal, ONE constant
+    "N_BUILT_OPS": pe_isa.N_BUILT_OPS,
+    "OP_W_T": pe_isa.OP_W,
 }
 
 

@@ -62,6 +62,8 @@ module param_dump;
     $display("PARAM MAGIC_AT=%0d",    dut.MAGIC_AT);
     $display("PARAM ACT_BYTES_T=%0d", dut.ACT_BYTES_T);
     $display("PARAM WIDE_B=%0d",      dut.u_store.WIDE_B);
+    $display("PARAM N_BUILT_OPS=%0d", dut.N_BUILT_OPS);
+    $display("PARAM OP_W_T=%0d",      dut.OP_W_T);
     $finish;
   end
 endmodule

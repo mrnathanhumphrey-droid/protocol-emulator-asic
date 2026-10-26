@@ -358,10 +358,42 @@ module tt_um_protocol_emulator #(
 `else
   wire bad_magic = store_full & ~(magic_hi & magic_lo);
 `endif
+  // ⭐ v2: one action word = ACT_BYTES bytes, read as one store row. DERIVED
+  // (the engine's ACT_W, inlined: OP_W 5 + PINW + 1 + DLY_W + BPW 4 + BQW 2 +
+  // PINB_W 4 + MOD_W 2); model/gate_one_encoder.py holds it to pe_isa.
+  localparam integer ACT_BYTES_T =
+      (5 + MAGIC_PINW + 1 + DLY_W + 4 + 2 + 4 + 2 + 7) / 8;
+  // ⛔⛔ v2 (Wilson 10-26): A RESERVED OPCODE IS REFUSED AT LOAD. The engine's
+  // `case (a_op)` names only the BUILT opcodes; v2's opcode is 5 bits, so a
+  // raw image (no pe_asm) holding opcode >= N_BUILT_OPS would reach its
+  // `default:` and dispatch a SILENT no-op on silicon. The loader already
+  // sees every byte (the magic check above): the FIRST byte of each action
+  // word carries the opcode in its top OP_W bits, so it is tested as it
+  // streams in -- zero run-time cost, nothing behind `cur` -- and an image
+  // holding one is refused exactly as a bad magic is: the engine never
+  // starts, CONFIG_ERR is reported. A new load (pointer reset) starts clean.
+  // N_BUILT_OPS and OP_W are held to test/pe_isa.py by gate_one_encoder.
+  localparam integer N_BUILT_OPS = 8;
+  localparam integer OP_W_T      = 5;
+  localparam integer ACT_BASE_T  = MAGIC_AT + 2;
+  localparam [AW-1:0] ACT_BASE_A = ACT_BASE_T[AW-1:0];
+  localparam [AW-1:0] ACT_MASK_A = ACT_BYTES_T[AW-1:0] - {{(AW-1){1'b0}}, 1'b1};
+  reg bad_op;
+  always @(posedge clk or negedge rst_n_s) begin
+    if (!rst_n_s) begin
+      bad_op <= 1'b0;
+    end else if (prog_mode & ptr_s) begin
+      bad_op <= 1'b0;
+    end else if (prog_mode & wr_rise & ~store_full & (ptr >= ACT_BASE_A)
+                 & (((ptr - ACT_BASE_A) & ACT_MASK_A) == {AW{1'b0}})
+                 & (uio_q1[7 -: OP_W_T] >= N_BUILT_OPS[OP_W_T-1:0])) begin
+      bad_op <= 1'b1;
+    end
+  end
 `ifdef M_NO_STORE_FULL
-  wire eng_run = run & ~bad_magic;
+  wire eng_run = run & ~bad_magic & ~bad_op;
 `else
-  wire eng_run = run & store_full & ~bad_magic;
+  wire eng_run = run & store_full & ~bad_magic & ~bad_op;
 `endif
   // ⭐⭐ CANARY (reset-network halt, Wilson): THE ENGINE'S RESET IS ONE FLOP.
   // Async-cleared by the synchronised power-on reset; otherwise it follows
@@ -414,11 +446,6 @@ module tt_um_protocol_emulator #(
 
   wire [AW-1:0]  e_wraddr;
   wire           e_wre;
-  // ⭐ v2: one action word = ACT_BYTES bytes, read as one store row. DERIVED
-  // (the engine's ACT_W, inlined: OP_W 5 + PINW + 1 + DLY_W + BPW 4 + BQW 2 +
-  // PINB_W 4 + MOD_W 2); model/gate_one_encoder.py holds it to pe_isa.
-  localparam integer ACT_BYTES_T =
-      (5 + MAGIC_PINW + 1 + DLY_W + 4 + 2 + 4 + 2 + 7) / 8;
   wire [ACT_BYTES_T*8-1:0] s_wrdata;
 
   pe_store #(.AW(AW), .MEM_TYPE(MEM_TYPE), .WIDE_B(ACT_BYTES_T)) u_store (
@@ -441,7 +468,7 @@ module tt_um_protocol_emulator #(
   wire               e_ovr, e_busy, e_rx_push;
   wire               e_host_pop;
   wire               e_cfg_err;
-  assign cfg_err_any = e_cfg_err | short_load | bad_magic;   // M5: one status bit
+  assign cfg_err_any = e_cfg_err | short_load | bad_magic | bad_op;   // M5: one status bit
   wire               e_clk_stretch;
   wire [7:0]         e_rx_data;
   // DECLARED WITH AN EXPLICIT WIDTH, NOT `LW`, because `LW` is a localparam

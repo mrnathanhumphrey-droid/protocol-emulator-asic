@@ -166,12 +166,17 @@ CLASSIFIED = {
         "of claim that survives the addition of a fifth state."),
     ("src/pe_engine.v", 2925, "v_line", "case"): (
         UNREACHABLE,
-        "The opcode `case`'s `default`. The opcode field is 3 bits and ALL "
-        "EIGHT encodings are named in arms -- OP_LEVEL, OP_SHIFT, OP_SHIFTIN, "
-        "OP_READBIT, OP_START, OP_STOP, OP_ARM, OP_REARM at 196..203 -- so no "
-        "value of a 3-bit selector reaches the default. ⭐ Checked by "
-        "`check_full_case`: if a ninth opcode were added without an arm, the "
-        "default would become reachable and this waiver must not survive it."),
+        "The opcode `case`'s `default`. ⭐ v2 (Wilson 10-26): the opcode is 5 "
+        "bits and the EIGHT BUILT opcodes are named in arms (OP_LEVEL .. "
+        "OP_REARM); opcodes N_BUILT_OPS..31 are REFUSED AT LOAD -- "
+        "src/project.v `bad_op` tests each action word's opcode as it "
+        "streams in and an image holding one sets CONFIG_ERR and never starts "
+        "the engine -- so no value that can reach dispatch reaches the "
+        "default. Must-fires: gate_v2_equiv's opcode 8 in the first and in the "
+        "last action word, both refused. ⭐ Checked by `check_full_case`'s "
+        "third mechanism: the arms must be exactly 0..N_BUILT_OPS-1 and the "
+        "loader check present, so a primitive built without its arm, or a "
+        "limit raised without the loader, makes this waiver false."),
     # ⭐ RETIRED (ruling (a) item 1): the host underrun path at 1627 is now
     # covered by `tb_status +MODE=0`, which starves the TX lanes with `hf_en`
     # never enabled and asserts `lane_underrun` SETS on lanes 0 and 1 and on no
@@ -470,8 +475,22 @@ TOGGLE_CEILING = {
     # OBSERVABLE rise, so a bus whose clock never transitions -- a dead board,
     # or a bench that does not model the bus -- would otherwise stall a lane
     # for ever.
-    "src/pe_engine.v": 819,
-    "src/pe_store.v": 6,
+    # ⚠ 819 -> 1153 (+334) FOR v2 STEP 2 (the 32-bit word, the 512-byte store),
+    # and the sweep now runs --coverage-max-width 512 (the default 256 dropped
+    # half of the 320-bit `l_act` from toggle coverage). ⛔ DESIGN GROWTH, NOT
+    # A REGRESSION, and checked FIELD BY FIELD against v1-lock's own sweep
+    # (10-26): every toggle point v1 covered is covered at its MAPPED v2 bit
+    # (v1 bit b -> v2 bit b + 6) on cur_act, w_act, l_act (362 = 362), hw,
+    # s_wrdata, wrdata -- 0 lost. The new dark points are: the reserved word
+    # bits (0-5 pinb/mod, 30-31 the opcode's top) no v1 image sets; byte
+    # addresses' bits 0-1 (the PC steps by 4); bit 8 of the 512-byte store
+    # (v1 images fit the bottom half); a_op bits 3-4 (opcodes 8-21 not built);
+    # l_base's low bits (bases moved from 30 + 3k to 32 + 4k).
+    "src/pe_engine.v": 1153,
+    # ⚠ 6 -> 28 (+22) for v2: the wide read's reserved bits (16), the row
+    # index's top bits (4: v1 images fit rows 0..31) and wraddr bits 0-1 (4:
+    # the engine writes whole words) -- same field-by-field check, 0 lost.
+    "src/pe_store.v": 28,
     "src/project.v": 186,
     # ⭐ RATCHETED DOWN BY THE SELF-CLOCKED CORPUS, and the cause is worth
     # recording: the rewritten corpus drives WHOLE BYTES through the peer
@@ -1129,14 +1148,42 @@ def check_toggle(agg) -> int:
 # count still looks about right after a ninth is added.
 # ---------------------------------------------------------------------------
 def _encodings(src):
-    """name -> (value, width) for every sized localparam constant."""
+    """name -> (value, width) for every sized localparam constant.
+
+    ⛔ v2 (Wilson 10-26): the opcodes are now `localparam [OP_W-1:0] OP_X =
+    n;` -- a SYMBOLIC width and a plain value -- and this parser, which read
+    only `[2:0] ... 3'dN`, found NONE of them and said "encodings=0": a check
+    reading nothing, the hollow pattern. The width may be `N` or `NAME-1`
+    (NAME a `localparam integer`), the value `W'dN` or `N`."""
+    ints = {m.group(1): int(m.group(2)) for m in re.finditer(
+        r"localparam\s+integer\s+([A-Za-z_]\w*)\s*=\s*(\d+)\s*[;,]", src)}
     out = {}
-    for m in re.finditer(r"localparam\s*\[(\d+):0\]\s*(.+?);", src, re.S):
-        width = int(m.group(1)) + 1
-        for a in re.finditer(r"([A-Za-z_][A-Za-z_0-9]*)\s*=\s*\d+'d(\d+)",
+    for m in re.finditer(r"localparam\s*\[([^\]:]+):0\]\s*(.+?);", src, re.S):
+        w = m.group(1).strip()
+        if re.fullmatch(r"\d+", w):
+            width = int(w) + 1
+        else:
+            mm = re.fullmatch(r"([A-Za-z_]\w*)\s*-\s*1", w)
+            if not mm or mm.group(1) not in ints:
+                continue
+            width = ints[mm.group(1)]
+        for a in re.finditer(r"([A-Za-z_][A-Za-z_0-9]*)\s*=\s*(?:\d+'d)?(\d+)\b",
                              m.group(2)):
             out[a.group(1)] = (int(a.group(2)), width)
     return out
+
+
+def _load_guard():
+    """(N_BUILT_OPS from project.v, the loader's refusal present?) -- the
+    third mechanism's evidence, read from the RTL (Wilson 10-26)."""
+    with open(os.path.join(ROOT, "src", "project.v"), encoding="utf-8",
+              errors="replace") as fh:
+        pv = fh.read()
+    m = re.search(r"localparam\s+integer\s+N_BUILT_OPS\s*=\s*(\d+)\s*;", pv)
+    present = ("uio_q1[7 -: OP_W_T] >= N_BUILT_OPS[OP_W_T-1:0]" in pv
+               and re.search(r"\bcfg_err_any\s*=.*\bbad_op\b", pv) is not None
+               and re.search(r"\beng_run\s*=.*~bad_op\b", pv) is not None)
+    return (int(m.group(1)) if m else None), present
 
 
 def _case_arms(lines, default_line):
@@ -1208,7 +1255,9 @@ def check_full_case() -> int:
     # skipping the check. Ruling TF moved them again: 1810 -> 1971,
     # 2249 -> 2410, 2632 -> 2793 (the same text match as ANCHOR_TEXT), and
     # TF2-R again: 1971 -> 2033, 2410 -> 2475, 2793 -> 2858.
-    for line in (2452, 2896, 3311):
+    # v2 step 2 (10-26): 2452 -> 2481, 2896 -> 2925, 3311 -> 3340 -- the same
+    # +29 text match as ANCHOR_TEXT (each line read back: the `default:` arm)
+    for line in (2481, 2925, 3340):
         sel, arms = _case_arms(lines, line)
         if sel is None:
             print("    line %-5d *** no enclosing `case` found -- the waiver's"
@@ -1250,10 +1299,24 @@ def check_full_case() -> int:
                 continue
             bad_assign.append(r)
         closed = not bad_assign and bool(assigns)
-        ok = full or closed
+        # ⭐ THE THIRD MECHANISM (Wilson 10-26): the opcode is 5 bits on v2 and
+        # only the BUILT opcodes have arms -- the rest cannot reach the
+        # default because the LOADER refuses any image holding one (project.v
+        # `bad_op`: CONFIG_ERR, the engine never starts). It holds only if the
+        # named arms are EXACTLY 0..N_BUILT_OPS-1, project.v's N_BUILT_OPS is
+        # pe_isa's, and the refusal is really in the RTL; its must-fires
+        # (opcode 8 in the first and the last word) live in gate_v2_equiv.
+        guarded = False
+        if not (full or closed) and sel == "a_op":
+            import pe_isa
+            nb, present = _load_guard()
+            guarded = (present and nb == pe_isa.N_BUILT_OPS
+                       and vals == set(range(nb)))
+        ok = full or closed or guarded
         how = ("every encoding named" if full
                else "every assignment writes a named arm" if closed
-               else "NEITHER")
+               else "every BUILT opcode named; the rest refused at load"
+               if guarded else "NEITHER")
         print("    line %-5d sel=%-6s arms=%-2d encodings=%-2d space=%-4s "
               "assigns=%-2d %s"
               % (line, sel, len(arms), len(vals), space if space else "?",

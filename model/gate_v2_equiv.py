@@ -311,6 +311,21 @@ def main() -> int:
         refused = r["started"] == 0 and r["cfg_err"] == 1
         say(refused, "a cleared magic is REFUSED: cfg_err=%s, started=%s"
             % (r["cfg_err"], r["started"]))
+        # ⛔ Wilson 10-26: a RAW image (no pe_asm) with a RESERVED opcode is
+        # refused AT LOAD -- in the FIRST action word, and in the LAST word of
+        # the store, so the loader's check is shown to cover the whole store
+        first_w = I.ACT_BASE
+        last_w = I.STORE_BYTES - I.ACT_BYTES
+        for where, at in (("the first", first_w), ("the last", last_w)):
+            ro = bytearray(img2)
+            ro[at] = (I.N_BUILT_OPS << (8 - I.OP_W)) | (ro[at] & ((1 << (8 - I.OP_W)) - 1))
+            pro = write_hex(os.path.join(tmp, "v2eq_resop_%d.hex" % at), bytes(ro),
+                            register=True)
+            r = sim(vv2, pro, I.STORE_BYTES, ncyc=NCYC_MF)
+            say(r["started"] == 0 and r["cfg_err"] == 1,
+                "opcode %d in %s action word (byte %d) is REFUSED at load: "
+                "cfg_err=%s, started=%s" % (I.N_BUILT_OPS, where, at,
+                                           r["cfg_err"], r["started"]))
         r = sim(vv2, sm[3], len(img2) // 2, ncyc=NCYC_MF)
         say(r["started"] == 0, "a %d-byte load never starts the engine (R3): started=%s"
             % (len(img2) // 2, r["started"]))
