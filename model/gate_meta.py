@@ -164,6 +164,8 @@ SEAMS = (
     ("test/run_spim_witness.py", "run_spim_witness.judge", "slow", "DOK"),
     ("model/gate_sda_hold.py", "gate_sda_hold.run", "slow", "NOFAIL"),
     ("model/gate_sda_hold.py", "gate_sda_hold.image_problems", "slow", "E"),
+    # v2 step 2: `same` always True -> the +-1 offset must-fire must MISS
+    ("model/gate_v2_equiv.py", "gate_v2_equiv.same", "slow", "T"),
 )
 
 #: Gates with NO stubbable check, each with why -- every gate in

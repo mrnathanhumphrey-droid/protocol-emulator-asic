@@ -60,6 +60,8 @@ KILLERS = {
     # -- v2 R1: the word-organised store's addressing (bench tb_smoke) ------
     "M_STORE_BANK_SWAP": RUN_MUTANTS, "M_STORE_ROW_OFF1": RUN_MUTANTS,
     "M_STORE_WRONG_BANK": RUN_MUTANTS,
+    # -- v2 step 2: the load's magic check (the equivalence gate's load section)
+    "M_NO_MAGIC": "model/gate_v2_equiv.py",
     # silicon fix #2: killed on VALUE by Layer V1 (tb_trace, corpus_i2c)
     "M_TX_LOAD_ANYPHASE": RUN_MUTANTS,
     # silicon fix #3: killed on VALUE by Layer V-RX (tb_trace, corpus_spim)

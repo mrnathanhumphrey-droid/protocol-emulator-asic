@@ -216,6 +216,14 @@ CHANGE_SET = frozenset([
     "model/gate_reset_audit.py",       # allowlist: u_store.g_bank 4096, s_wrdata 26
     "model/gate_stored_numbers.py",    # 3 new tables classified as specifications
     "test/param_dump.v",               # prints ACT_BASE, MAGIC_AT, ACT_BYTES_T, WIDE_B
+    # ---- AMENDMENT 3 (10-25, Nate go, item 5): the equivalence gate.
+    "model/gate_v2_equiv.py",          # NEW: v1 == v2 at the derived offset
+    "test/tb_equiv.v",                 # NEW: its bench, built against both RTLs
+    "test/sim_run.py",                 # its scratch generator registered
+    "test/benchset.py",                # tb_equiv.v excluded from the sweep, with why
+    "ci/shards.txt",                   # the gate in shard sim2
+    "ci/gate_tokens.txt",              # its pass token
+    "model/gate_meta.py",              # its seam (same -> always True)
 ])
 
 

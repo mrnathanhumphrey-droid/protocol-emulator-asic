@@ -109,6 +109,14 @@ SCRATCH_GENERATORS: dict = {
         "why": "tb_reload's I2C write program: judged by the FRAM bytes "
                "written across a reload, not by the A2 gap",
         "v3": {"no_v3_layer": "test/tb_reload.v"}},
+    "gate_v2_equiv": {
+        "script": "model/gate_v2_equiv.py", "pattern": "v2eq_*.hex",
+        "clocked": True,
+        "why": "v2 step 2's equivalence gate: translate(v1 image) variants --"
+               " falloff, the cleared-magic refusal, the encoding must-fires --"
+               " judged by v1 == v2 on tb_equiv's decoded dispatch + pin"
+               " stream, not by the A2 gap",
+        "v3": {"no_v3_layer": "test/tb_equiv.v"}},
 }
 # ⛔⛔ `v3` IS REQUIRED ON EVERY CLOCKED ENTRY (S1g, 10-22): the GENERATED
 # names in model/v3_table.py that register this generator's images, or the

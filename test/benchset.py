@@ -48,6 +48,13 @@ EXCLUDED = {
         "RELOAD) that a fixed arm list does not express, and one arm needs a "
         "build without the conformance layers. Every claim it makes is "
         "judged by `test/run_spitgt.py` in `ci/run_gates.sh`."),
+    "tb_equiv.v": (
+        "THE v1 == v2 EQUIVALENCE BENCH (v2 step 2 item 5). Compiled against "
+        "BOTH the v1-lock RTL and v2's by `model/gate_v2_equiv.py`, which "
+        "runs every v1-lock image on each at a DERIVED offset and compares "
+        "the decoded dispatch + pin streams; its arms are pairs of builds, "
+        "which a fixed arm list cannot express, and it reaches no RTL the "
+        "swept benches do not."),
     "tb_v2win.v": (
         "THE SYNCHRONIZER-WINDOW MEASUREMENT (V2 pins-only). Each arm pushes "
         "one byte at an instant the runner computes from a dry run of the "

@@ -362,6 +362,11 @@ GATES=(
   # the push lead the chip needs before a TX slot, V2's TV_WIN held to it,
   # and the deliberate inside-window arm (the slot underruns whole).
   test/run_v2window.py
+  # ⭐⭐ v2 step 2 item 5 (Wilson): THE EQUIVALENCE GATE -- every v1-lock image
+  # runs the same on v2 (decoded dispatches + pins, from the engine start) at
+  # an offset DERIVED from the load spec; +-1 red; v2's load section as spec;
+  # M_NO_MAGIC's killer.
+  model/gate_v2_equiv.py
   # ⭐⭐ SP2 -- the pe_asm protocol front-end (model/pe_proto.py): every
   # shipped FRAM program re-expressed as a TRANSACTION (START / rSTART / STOP
   # and CS framing generated from context), byte-identical to the verified
@@ -597,7 +602,7 @@ can_run() {
     model/gate_rtl_lint.py)
       { command -v "$VL" >/dev/null 2>&1 || command -v wsl.exe >/dev/null 2>&1; } \
         || { echo "no verilator and no wsl.exe to reach one"; return 1; } ;;
-    model/gate_one_encoder.py|test/gl_harness_check.py|test/gate_tb_elaborates.py|test/run_mutants.py|model/gate_sda_hold.py|test/run_w_sweep.py|test/run_cktx.py|test/run_spidelay.py|test/run_spim_witness.py|test/run_spitgt.py|test/run_rxbw.py)
+    model/gate_one_encoder.py|model/gate_v2_equiv.py|test/gl_harness_check.py|test/gate_tb_elaborates.py|test/run_mutants.py|model/gate_sda_hold.py|test/run_w_sweep.py|test/run_cktx.py|test/run_spidelay.py|test/run_spim_witness.py|test/run_spitgt.py|test/run_rxbw.py)
       command -v "$IV" >/dev/null 2>&1 || { echo "iverilog not found (PE_IVERILOG unset and not on PATH)"; return 1; } ;;
     model/gate_reset_audit.py)
       [ -n "${PE_NETLIST_JSON:-}" ] && [ -f "${PE_NETLIST_JSON:-}" ] \

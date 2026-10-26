@@ -339,6 +339,9 @@ SPEC_SYMBOLS = {
     ("model/stale_records.py", "DECLARED"),
     ("test/pe_isa.py", "RESERVED_OPCODES"),
     ("test/run_mutants.py", "MUTANTS"),
+    # the bench set's EXCLUSIONS: written reasons a bench is not swept (their
+    # numbers are prose -- "v1", "v2", "item 5"), declarations, not observations
+    ("test/benchset.py", "EXCLUDED"),
     # ⭐ The clocked phase model's PROGRAMS: the ACTION SHAPES it runs its
     # invariants over -- the corpus lanes, a full 4-byte FRAM write, a random
     # read with repeated START. The numbers are BIT COUNTS the protocols
