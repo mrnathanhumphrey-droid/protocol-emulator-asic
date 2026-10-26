@@ -241,6 +241,13 @@ CHANGE_SET = frozenset([
     "ci/shards.txt",                   # the gate in shard sim2
     "ci/gate_tokens.txt",              # its pass token
     "model/gate_meta.py",              # its seam (same -> always True)
+    # ---- AMENDMENT 4 (10-26, Nate go): the first-CI reds on v2-main.
+    "ci/ln1_replay.py",                # image-replay rows -> declared STALE
+    "model/a2/gate_a2_program.py",     # board images translated (STALE)
+    "model/phase_coverage.py",         # the tb_equiv row
+    "test/lockstep_golden.json",       # re-pinned on v2 (proof: gate_v2_equiv)
+    "test/phases_run.sh",              # store size from pe_isa, not 256
+    "test/store_run.sh",               # store size from pe_isa, not 256
 ])
 
 
