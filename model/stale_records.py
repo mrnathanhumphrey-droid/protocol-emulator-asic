@@ -66,9 +66,14 @@ DECLARED = {
         "until it exists -- no v2 image beside a v1 bitstream; checked through "
         "test/v1_translate.py meanwhile)",
     "model/gate_onewire_hw_witness.py":
-        "the 1-Wire FPGA witness is a HARDWARE record of the v1 image; v2's "
-        "image is translate(v1) -- re-witnessed on the board, or bound by the "
-        "translation, at the v2 milestone (Wilson to rule)",
+        "needs bench re-witness on v2 bitstream -- the 1-Wire FPGA witness is a "
+        "HARDWARE record of the v1 image on a v1 bitstream; v2's image is "
+        "translate(v1). At the v2 lock: re-run at the bench, or SCOPE.md says "
+        "the board evidence is v1's (Wilson 10-25)",
+    "model/gate_i2c_hw_witness.py":
+        "needs bench re-witness on v2 bitstream -- the I2C FRAM witness ran a "
+        "bitstream built from v1's RTL. At the v2 lock: re-run at the bench, or "
+        "SCOPE.md says the board evidence is v1's (Wilson 10-25)",
 }
 
 #: FROZEN: the files step 2 is declared to touch (git diff v1-lock..HEAD at

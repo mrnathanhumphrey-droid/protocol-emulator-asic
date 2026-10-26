@@ -1090,6 +1090,10 @@ fi
 echo
 FAILED=()
 MISSING=()
+# ⭐ v2 (Wilson 10-25): a gate on model/stale_records.DECLARED that printed its
+# STALE line passes NON-BLOCKING and is LISTED BY NAME below and in the verdict
+# line (ci/pass_token.py exits 3 for it). With PE_TAG=1 it is red.
+STALE=()
 # ⛔⛔ POSITIVE TOKENS (Wilson): a gate passes only on exit 0 AND its declared
 # pass line (ci/gate_tokens.txt) in its OWN output. The judge proves itself
 # first -- an empty output, a FAILED verdict and an undeclared gate must all
@@ -1120,7 +1124,10 @@ for g in "${GATES[@]}"; do
     FAILED+=("$g (exit $rc)")
   else
     "$PY" ci/pass_token.py "$g" "$TOKLOG"
-    if [ $? -ne 0 ]; then
+    prc=$?
+    if [ $prc -eq 3 ]; then
+      STALE+=("$g")
+    elif [ $prc -ne 0 ]; then
       FAILED+=("$g (exit 0 but NO PASS TOKEN)")
     fi
   fi
@@ -1129,7 +1136,13 @@ rm -f "$TOKLOG"
 
 echo
 echo "=============================================================================="
-echo "  GATES: $(( ${#GATES[@]} - ${#FAILED[@]} - ${#MISSING[@]} )) of ${#GATES[@]} passed${SHARD:+ (SHARD $SHARD only -- not the whole suite)}"
+# ⛔ the verdict regex gates-complete reads ("GATES: (n) of \1 passed") is
+# unchanged; the STALE names ride after it, into the shard's verdict file
+STALE_NOTE=""
+if [ ${#STALE[@]} -gt 0 ]; then
+  STALE_NOTE=" (${#STALE[@]} STALE, declared: $(printf '%s ' "${STALE[@]}"| sed 's/ $//'))"
+fi
+echo "  GATES: $(( ${#GATES[@]} - ${#FAILED[@]} - ${#MISSING[@]} )) of ${#GATES[@]} passed${STALE_NOTE}${SHARD:+ (SHARD $SHARD only -- not the whole suite)}"
 if [ ${#FAILED[@]} -gt 0 ]; then
   echo "  FAILED:"
   for f in "${FAILED[@]}"; do echo "    $f"; done

@@ -53,6 +53,11 @@ EVIDENCE = os.path.join(ROOT, "fpga", "witness", "i2c_fram_hw_witness.json")
 FILES = {"image": os.path.join(ROOT, "fpga", "images", IMAGE),
          "feed": os.path.join(ROOT, "fpga", "feeds", "i2c_fram_feed.hex"),
          "falls": os.path.join(ROOT, "fpga", "feeds", "i2c_fram_falls.hex")}
+#: ⭐ v2 (Wilson 10-25): this is v1 BOARD EVIDENCE. The bitstream it records was
+#: built (fpga/pa100t/build.tcl) from these RTL files; when they have moved the
+#: record is the declared STALE -- re-witnessed at the bench on a v2 bitstream,
+#: or v2's SCOPE.md says the board evidence is v1's (decided at the v2 lock).
+BITSTREAM_RTL = ["src/pe_engine.v", "src/pe_store.v", "src/project.v"]
 #: UM10204 Fast-mode limits
 FM = {"fscl_max_khz": 400.0, "tlow_min_us": 1.3, "thigh_min_us": 0.6,
       "rise_max_ns": 300.0}
@@ -193,6 +198,18 @@ def main() -> int:
         print("    %-38s %s" % (label, "red  ok" if hit else "*** NOT RED"))
         rc |= 0 if hit else 1
     print()
+    if rc == 0:
+        sys.path.insert(0, HERE)
+        import stale_records as SR
+        inputs = BITSTREAM_RTL + [os.path.relpath(v, ROOT).replace(os.sep, "/")
+                                  for v in FILES.values()]
+        v, why = SR.stale_verdict("model/gate_i2c_hw_witness.py", SR.moved(inputs))
+        print("  stale_records: %s -- %s" % (v, why))
+        if v == "STALE":
+            print(SR.token("i2c-hw-witness", why))
+            return 0
+        if v == "FAIL":
+            rc = 1
     print("  GATE i2c-hw-witness: %s" % ("PASSED" if rc == 0 else "FAILED"))
     return rc
 
