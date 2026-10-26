@@ -61,6 +61,10 @@ DECLARED = {
     "model/a2/gate_j_program.py":
         "the W sweep record (model/a2/sweep_w.json) ran on v1's RTL and "
         "images; `run_w_sweep.py --full` re-run at v2",
+    "model/gate_wire_feed.py":
+        "board images are v1-encoded; v2 FPGA build owed (fpga/images stay v1 "
+        "until it exists -- no v2 image beside a v1 bitstream; checked through "
+        "test/v1_translate.py meanwhile)",
     "model/gate_onewire_hw_witness.py":
         "the 1-Wire FPGA witness is a HARDWARE record of the v1 image; v2's "
         "image is translate(v1) -- re-witnessed on the board, or bound by the "

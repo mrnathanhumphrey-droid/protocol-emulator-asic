@@ -324,6 +324,36 @@ def universe():
     return ({n: dgf.load(p) for n, p in u.items()}, list(u.probs))
 
 
+#: ⭐ v2 (Nate + Wilson 10-25): the BOARD images stay v1-encoded until a v2
+#: FPGA build exists -- no v2 image beside a v1 bitstream. This gate reads
+#: them through test/v1_translate.py, so every check below (feed class,
+#: `same_as` the bench image) is about the SAME program in v2's word; a board
+#: image that does not translate to its bench image is still red.
+BOARD = os.path.join(ROOT, "fpga", "images")
+
+
+def board_as_v2(imgs):
+    """-> (imgs with every fpga/images/*.hex translated, [those names])."""
+    import v1_translate
+    out, names = dict(imgs), []
+    for n in sorted(os.listdir(BOARD)):
+        if n.endswith(".hex") and n in out:
+            out[n] = v1_translate.translate(bytes(out[n]))
+            names.append(n)
+    return out, names
+
+
+def board_stale_inputs(names):
+    """The board images (must NOT move) and the bench images they are
+    `same_as` (moved by step 2, inside its change set)."""
+    ins = ["fpga/images/" + n for n in names]
+    for n in names:
+        src = (REGISTRY.get(n) or (None, {}))[1].get("same_as")
+        if src:
+            ins.append("test/" + src)
+    return ins
+
+
 def ci_runners():
     with open(os.path.join(ROOT, "ci", "run_gates.sh"), encoding="utf-8") as fh:
         listed = {ln.strip() for ln in fh if ln.strip()
@@ -475,6 +505,7 @@ def main() -> int:
     print("  WF1 -- EVERY ACCEPTED IMAGE NAMES ITS WIRE == FEED WITNESS")
     print("=" * 78)
     imgs, probs = universe()
+    imgs, board = board_as_v2(imgs)
     listed, tokens = ci_runners()
     exempt = exempt_set()
     p2, rows = audit(imgs, REGISTRY, exempt, listed, tokens)
@@ -652,6 +683,18 @@ def main() -> int:
     print("  OWED published lanes: %d -- the lock requires 0 at the sub-v1 SHA. "
           "INTERNAL images (%d) are checked another way and are not published "
           "claims." % (owed_lanes, counts.get(INTERNAL, 0)))
+    # ⭐ v2: green only BECAUSE the board images were translated is the
+    # declared staleness (model/stale_records.py), not a PASS
+    if rc == 0 and board:
+        import stale_records as SR
+        v, why = SR.stale_verdict("model/gate_wire_feed.py",
+                                  SR.moved(board_stale_inputs(board)))
+        print("  stale_records: %s -- %s" % (v, why))
+        if v == "STALE":
+            print(SR.token("wire-feed", why))
+            return 0
+        if v == "FAIL":
+            rc = 1
     print("  GATE wire-feed: %s" % ("PASSED" if rc == 0 else "*** FAILED"))
     return rc
 
