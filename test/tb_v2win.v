@@ -46,7 +46,11 @@ module tb_v2win;
   // initial block reads `cyc` only on negedges.
   // a slot = a clocked SHIFT's first LOW writeback on lane 0; the slot's
   // first bit is read on the pin at its first HIGH
-  always @(posedge clk) if (rst_n) begin
+  // ⭐ v2 (option 1): `cyc` counts from RUN START -- the cycles the engine is
+  // running -- not from reset, so a slot's cycle is the same number on v1 and
+  // v2 although v2's load is 256 writes longer. `+AT` is measured by the dry
+  // run on the same count, so the walk is unchanged.
+  always @(posedge clk) if (rst_n && dut.eng_run === 1'b1) begin
     cyc = cyc + 1;
     if (ui_in[PIN_PROG] === 1'b0 && dut.u_eng.st === 2'd2
         && dut.u_eng.cur == 0) begin
@@ -85,7 +89,10 @@ module tb_v2win;
     ui_in[PIN_PROG] = 1'b1;
     repeat (3) @(negedge clk); ui_in[PIN_PTR] = 1'b1; repeat (3) @(negedge clk);
     ui_in[PIN_PTR] = 1'b0; repeat (3) @(negedge clk);
-    for (i = 0; i < 256; i = i + 1) begin
+    // ⛔ v2: THE WHOLE STORE. This loop was `i < 256` -- v1's store size,
+    // typed -- and on v2's 512-byte store the engine never started
+    // (`run_v2window`: "the dry run found 0 slot(s)"). Wilson R3.
+    for (i = 0; i < PE_STORE_BYTES; i = i + 1) begin
       uio_drv = img[i];
       @(negedge clk); @(negedge clk); ui_in[PIN_WR] = 1'b1;
       @(negedge clk); @(negedge clk); @(negedge clk); ui_in[PIN_WR] = 1'b0;
@@ -106,5 +113,6 @@ module tb_v2win;
              phps, t_rise, t_slot, t_slot - t_rise);
     $finish;
   end
+`include "test/runstart.vh"   // v2: the engine-started guard (R3)
 endmodule
 `default_nettype wire

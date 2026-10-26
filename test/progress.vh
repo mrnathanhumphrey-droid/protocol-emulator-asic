@@ -67,6 +67,10 @@
  * USAGE:   `include "test/progress.vh"      // after the `dut` instance
  */
 
+// ⭐ v2: the run-start anchor and the engine-started guard ride along, so
+// every bench that has the watchdog has them too (test/runstart.vh)
+`include "test/runstart.vh"
+
 // ⛔ A DECLARED UPPER BOUND, not a second copy of N_LANES. The watchdog never
 // iterates lanes -- it only touches the lane in `cur` -- so this sizes storage
 // and nothing else. A lane index beyond it is REPORTED, not silently dropped.

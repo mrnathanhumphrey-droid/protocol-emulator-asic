@@ -238,4 +238,5 @@ module tb_w;
     $display("END tb_w cycles=%0d", cyc);
     $finish;
   end
+`include "test/runstart.vh"   // v2: the engine-started guard (R3)
 endmodule

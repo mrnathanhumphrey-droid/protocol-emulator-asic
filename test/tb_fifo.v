@@ -328,8 +328,11 @@ module tb_fifo ();
       $display("      exercised is not a pass (Wilson), so this is a FAILURE.");
       fails = fails + 1;
     end else begin
-      $display("  the corner occurred at cycle %0d, phase %0d", hit_cycle,
-               hit_phase);
+      // ⭐ v2 (option 1): reported from RUN START (runstart.vh's `rs_start`),
+      // so the number is the same on v1 and v2; `cyc` itself counts from
+      // reset and moves with the load length
+      $display("  the corner occurred at run cycle %0d, phase %0d",
+               hit_cycle - rs_start, hit_phase);
       // 1. both operations take effect
       if (wp_after === wp_before)
         fail("the WRITE pointer did not flip: the push did not take effect");

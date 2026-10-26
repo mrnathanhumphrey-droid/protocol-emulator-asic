@@ -77,19 +77,27 @@
 // falling edge, in a fixed order, with the cycle -- so the order is the code's
 // and the text says when the layer first fired.
 reg     [4:0] cc_live = 5'b0, cc_said = 5'b0;
+// ⭐ v2 (option 1): the banner cycle counts from RUN START -- the first edge
+// the engine is seen running -- not from time 0, so it is the same number on
+// v1 and v2 although v2's load is 256 writes longer (measured: every banner
+// moved by exactly the load delta, 1536 / 1792, before this)
 integer       cc_cyc = 0;
-always @(posedge dut.clk) cc_cyc = cc_cyc + 1;
+reg           cc_run = 1'b0;
+always @(posedge dut.clk) begin
+  if (dut.eng_run === 1'b1) cc_run = 1'b1;
+  if (cc_run) cc_cyc = cc_cyc + 1;
+end
 always @(negedge dut.clk) begin
   if (cc_live[0] && !cc_said[0]) begin cc_said[0] = 1'b1;
-    $display("  clocked_conform[B]: live (cycle %0d) -- checking clocked actions against the model", cc_cyc); end
+    $display("  clocked_conform[B]: live (run cycle %0d) -- checking clocked actions against the model", cc_cyc); end
   if (cc_live[1] && !cc_said[1]) begin cc_said[1] = 1'b1;
-    $display("  clocked_conform[R]: live (cycle %0d) -- counting refills per retired clocked action", cc_cyc); end
+    $display("  clocked_conform[R]: live (run cycle %0d) -- counting refills per retired clocked action", cc_cyc); end
   if (cc_live[2] && !cc_said[2]) begin cc_said[2] = 1'b1;
-    $display("  clocked_conform[R4]: live (cycle %0d) -- checking Theorem 3's P10 and P1 as written", cc_cyc); end
+    $display("  clocked_conform[R4]: live (run cycle %0d) -- checking Theorem 3's P10 and P1 as written", cc_cyc); end
   if (cc_live[3] && !cc_said[3]) begin cc_said[3] = 1'b1;
-    $display("  clocked_conform[V]: live (cycle %0d) -- checking clocked transmit BITS", cc_cyc); end
+    $display("  clocked_conform[V]: live (run cycle %0d) -- checking clocked transmit BITS", cc_cyc); end
   if (cc_live[4] && !cc_said[4]) begin cc_said[4] = 1'b1;
-    $display("  clocked_conform[V-RX]: live (cycle %0d) -- checking received BYTES against the pins", cc_cyc); end
+    $display("  clocked_conform[V-RX]: live (run cycle %0d) -- checking received BYTES against the pins", cc_cyc); end
 end
 
 integer cb_n   [0:7];      // dispatches on the current action
@@ -1395,7 +1403,9 @@ task v3_judge;
     if (lvl != v3_tx[k]) begin
       v3_bad = v3_bad + 1;
       if (v3_bad <= 4)
-        $display("%0s clocked_conform[V3]: lane %0d unclocked bit on pin %0d was %0d on the bus at mid-window (cycle %0d); the host feed puts %0d there (its dispatch was %0d cycle(s) after its release)", (v3_ex != 0) ? "  EXEMPT (declared):" : "*** FAIL", k, v3_tp[k], lvl, v3_tgt[k], v3_tx[k], v3_late[k]);
+        // v2 (option 1): printed from RUN START (cc_cyc's anchor); v3_cyc itself
+        // stays the free count its ring buffer is indexed by
+        $display("%0s clocked_conform[V3]: lane %0d unclocked bit on pin %0d was %0d on the bus at mid-window (run cycle %0d); the host feed puts %0d there (its dispatch was %0d cycle(s) after its release)", (v3_ex != 0) ? "  EXEMPT (declared):" : "*** FAIL", k, v3_tp[k], lvl, v3_tgt[k] - (v3_cyc - cc_cyc), v3_tx[k], v3_late[k]);
     end
     v3_tgt[k] = -1;
     end

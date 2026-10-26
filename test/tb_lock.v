@@ -104,4 +104,5 @@ module tb_lock;
     $display("END dispatches=%0d", nd);
     $finish;
   end
+`include "test/runstart.vh"   // v2: the engine-started guard (R3)
 endmodule

@@ -665,10 +665,14 @@ end
 // and then asserts the refusal itself: the status CONFIG_ERR set, `store_full`
 // clear, and ZERO writebacks. Quiescence alone would also be true of an engine
 // that never started for some other reason.
-integer m5_refused;
+integer m5_refused, rs_stayload;
 initial begin
   if (!$value$plusargs("EXPECT_REFUSED=%d", m5_refused)) m5_refused = 0;
   pg_quiescent_ok = (m5_refused != 0);
+  // ⭐ v2 (runstart.vh): the two arms whose engine must NEVER start -- a
+  // refused load, and STAYLOAD's load-mode readback trace -- say so
+  if (!$value$plusargs("STAYLOAD=%d", rs_stayload)) rs_stayload = 0;
+  rs_nostart_ok = (m5_refused != 0) || (rs_stayload != 0);
 end
 
 final begin

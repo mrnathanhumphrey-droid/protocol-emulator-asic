@@ -77,7 +77,9 @@ module tb_reload;
   localparam integer P_RX = 3, TX_BIT = 0, BITP = 434;
   localparam integer SCK_UO = 1, MOSI_UO = 2, CS_UO = 3, P_MISO = 0;
   localparam integer SER_D = 4, SER_S = 5, SER_V = 6;
-  localparam integer NBYTES = 256;
+  // ⛔ v2: the whole store. This was a typed `256` that step 2's sweep missed,
+  // and on the 512-byte store the engine never started (runstart.vh, 10-25)
+  localparam integer NBYTES = PE_STORE_BYTES;
   integer    mode;
   // ---- the shared reload handshake ----------------------------------------
   reg req_reload = 1'b0, req_quiet = 1'b0, in_reload = 1'b0, reloaded = 1'b0;

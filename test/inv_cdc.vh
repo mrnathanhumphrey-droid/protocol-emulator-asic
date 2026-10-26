@@ -19,11 +19,13 @@
 reg     inv_cs_q   = 1'b1;
 integer inv_cs_age = 99;
 integer inv_cs_n   = 0;
+integer inv_cs_run = 0;   // v2 (option 1): the falls while the engine RAN
 always @(posedge `INV_DUT.clk) begin
   if (`INV_DUT.rst_n === 1'b1) begin
     if (inv_cs_q === 1'b1 && `INV_DUT.uio_in[`INV_DUT.CS_PIN] === 1'b0) begin
       inv_cs_age = 0;
       inv_cs_n   = inv_cs_n + 1;
+      if (`INV_DUT.eng_run === 1'b1) inv_cs_run = inv_cs_run + 1;
     end else if (inv_cs_age < 99) begin
       inv_cs_age = inv_cs_age + 1;
     end
@@ -37,4 +39,6 @@ always @(posedge `INV_DUT.clk) begin
   end
   inv_cs_q = `INV_DUT.uio_in[`INV_DUT.CS_PIN];
 end
-final if (inv_cs_n > 0) $display("  inv_cdc: %0d CS fall(s) checked", inv_cs_n);
+// ⭐ v2: the total includes the LOAD (every load write strobes the shared
+// pins), so it grows with the store; the run count is the comparable one
+final if (inv_cs_n > 0) $display("  inv_cdc: %0d CS fall(s) checked, %0d while the engine ran", inv_cs_n, inv_cs_run);
