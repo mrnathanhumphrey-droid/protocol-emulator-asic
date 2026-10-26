@@ -324,25 +324,10 @@ def universe():
     return ({n: dgf.load(p) for n, p in u.items()}, list(u.probs))
 
 
-#: ⭐ v2 (Nate + Wilson 10-25): the BOARD images stay v1-encoded until a v2
-#: FPGA build exists -- no v2 image beside a v1 bitstream. This gate reads
-#: them through test/v1_translate.py, so every check below (feed class,
-#: `same_as` the bench image) is about the SAME program in v2's word; a board
-#: image that does not translate to its bench image is still red.
-BOARD = os.path.join(ROOT, "fpga", "images")
-
-
-def board_as_v2(imgs):
-    """-> (imgs with every fpga/images/*.hex translated, [those names])."""
-    import v1_translate
-    out, names = dict(imgs), []
-    for n in sorted(os.listdir(BOARD)):
-        if n.endswith(".hex") and n in out:
-            out[n] = v1_translate.translate(bytes(out[n]))
-            names.append(n)
-    return out, names
-
-
+#: ⭐ v2 (Nate + Wilson 10-25): the BOARD images stay v1-encoded; this gate
+#: reads them translated (image_universe.board_as_v2), so every check below
+#: (feed class, `same_as` the bench image) is about the SAME program in v2's
+#: word; a board image that does not translate to its bench image is red.
 def board_stale_inputs(names):
     """The board images (must NOT move) and the bench images they are
     `same_as` (moved by step 2, inside its change set)."""
@@ -505,7 +490,8 @@ def main() -> int:
     print("  WF1 -- EVERY ACCEPTED IMAGE NAMES ITS WIRE == FEED WITNESS")
     print("=" * 78)
     imgs, probs = universe()
-    imgs, board = board_as_v2(imgs)
+    import image_universe
+    imgs, board = image_universe.board_as_v2(imgs)
     listed, tokens = ci_runners()
     exempt = exempt_set()
     p2, rows = audit(imgs, REGISTRY, exempt, listed, tokens)

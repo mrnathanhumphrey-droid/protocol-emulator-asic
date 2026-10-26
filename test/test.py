@@ -893,13 +893,9 @@ import pe_isa                                        # noqa: E402
 
 
 def _unpack(fields, raw, nbytes):
-    w = int.from_bytes(bytes(raw), "big") >> (nbytes * 8
-                                              - sum(x for _n, x in fields))
-    out = {}
-    for name, width in reversed(fields):
-        out[name] = w & ((1 << width) - 1)
-        w >>= width
-    return out
+    # v2: the ONE decoder -- this was a private copy of pe_isa._unpack
+    # (gate_one_encoder's static check (a), 10-25)
+    return pe_isa._unpack(fields, bytes(raw), nbytes)
 
 
 def lane_delays(img, lane):

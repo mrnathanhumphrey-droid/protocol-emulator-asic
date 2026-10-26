@@ -129,10 +129,11 @@ def main() -> int:
     # must leave that class empty -- through `matrix`, not a restatement
     acts = [I.act_shiftin_clocked(1, 70, nbits=8), I.act(I.OP_REARM, 0, 1, 70)]
     park = I.ACT_BASE + len(acts) * I.ACT_BYTES
-    plant = I.full_store(b"".join(
+    # v2: through the ONE assembler (pe_isa.join_image) -- it adds the magic
+    plant = I.full_store(I.join_image(
         [I.hdr(2, 1, 0, 70, 0, 140, 210, I.ACT_BASE)]
-        + [I.hdr(p, p, 0, 500, 0, 200, 240, park) for p in (0, 3, 4, 5)])
-        + b"".join(acts) + I.act(I.OP_REARM, 0, 0, 500))
+        + [I.hdr(p, p, 0, 500, 0, 200, 240, park) for p in (0, 3, 4, 5)],
+        acts + [I.act(I.OP_REARM, 0, 0, 500)]))
     ok2 = not matrix([("plant", plant)])["SHIFTIN clocked open-drain"]
     print("    an action on the CLOCK pin is not diversity          %s"
           % ("ok" if ok2 else "*** WRONG"))

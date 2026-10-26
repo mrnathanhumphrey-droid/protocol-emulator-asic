@@ -1472,10 +1472,11 @@ def main() -> int:
     i2c = [act(_S, 2, 0, 70), act(OP_SHIFT, 2, 1, 70), act(_P, 2, 1, 70),
            act(OP_REARM, 0, 1, 70)]
     park = _AB + len(i2c) * ACT_BYTES
-    bad = full_store(b"".join(
+    # v2: through the ONE assembler (pe_isa.join_image) -- it adds the magic
+    bad = full_store(pe_isa.join_image(
         [hdr(2, 1, 0, 70, 0, 140, 210, _AB, order=_LSB)]
-        + [hdr(p, p, 0, 500, 0, 200, 240, park) for p in (0, 3, 4, 5)])
-        + b"".join(i2c) + act(OP_REARM, 0, 0, 500))
+        + [hdr(p, p, 0, 500, 0, 200, 240, park) for p in (0, 3, 4, 5)],
+        i2c + [act(OP_REARM, 0, 0, 500)]))
     try:
         check_i2c_order(bad)
         print("    *** an LSB-first START/STOP lane was ACCEPTED")
@@ -1485,11 +1486,11 @@ def main() -> int:
         print("    an LSB-first START/STOP lane -> REJECTED%s"
               % ("" if ok else " *** but did not name lane 0 / LSB-first"))
         rc |= 0 if ok else 1
-    order = _lp(full_store(b"".join(
+    order = _lp(full_store(pe_isa.join_image(
         [hdr(2, 1, 0, 70, 0, 140, 210, _AB,
              order=order_for([_S, OP_SHIFT, _P, OP_REARM]))]
-        + [hdr(p, p, 0, 500, 0, 200, 240, park) for p in (0, 3, 4, 5)])
-        + b"".join(i2c) + act(OP_REARM, 0, 0, 500)))[0][0]["order"]
+        + [hdr(p, p, 0, 500, 0, 200, 240, park) for p in (0, 3, 4, 5)],
+        i2c + [act(OP_REARM, 0, 0, 500)])))[0][0]["order"]
     print("    the same lane, order derived by order_for: %s  %s"
           % ("MSB" if order else "LSB", "ok" if order else "*** WRONG"))
     rc |= 0 if order else 1

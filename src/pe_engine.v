@@ -1969,7 +1969,10 @@ module pe_engine #(
   // (unchanged PC logic, stepping by ACT_BYTES), so it is converted ONCE here:
   // ACT_BASE + base * ACT_BYTES. pe_asm refuses a base past the store.
   wire [BASE_W-1:0] hbase = hsh_n[HDR_BYTES*8-2-2*PINW-DLY_W-CW-D_W-D_W -: BASE_W];
-  wire [AW-1:0] hbase_addr = ACT_BASE[AW-1:0] + hbase * ACT_BYTES[AW-1:0];
+  // the zero-extension written out (what Verilog does anyway): the product is
+  // AW bits on both sides -- no ArithOpMismatch (model/gate_slang_lint.py)
+  wire [AW-1:0] hbase_addr = ACT_BASE[AW-1:0]
+                           + {{(AW-BASE_W){1'b0}}, hbase} * ACT_BYTES[AW-1:0];
 
   // =====================================================================
   // ⛔⛔ RULING TF1 -- THE NEXT-STATE VALUES THE REGISTERED READINESS READS

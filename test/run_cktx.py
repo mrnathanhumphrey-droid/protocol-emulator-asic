@@ -120,7 +120,10 @@ def pindiv_image(path=None):
     base, prog, hs = ACT_BASE, [], []
     for ln in range(5):
         pin, ck, mode, d, acts = lanes[ln]
-        ops = [int.from_bytes(a, "big") >> (ACT_BYTES * 8 - 3) for a in acts]
+        # v2: the opcode by the ONE encoder's field table -- this read the top 3
+        # bits by hand, and v2's opcode is 5 wide: order_for got the wrong ops
+        # and lane 4's I2C lane came out LSB-first (gate_i2c_order, 10-25)
+        ops = [pe_isa._unpack(pe_isa.ACT_FIELDS, a, ACT_BYTES)["op"] for a in acts]
         hs.append(hdr(pin, ck, mode, d, 0, 2 * d, 3 * d, base,
                       order=order_for(ops)))
         prog += acts

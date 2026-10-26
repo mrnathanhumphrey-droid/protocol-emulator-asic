@@ -81,10 +81,11 @@ def plant(order):
     i2c = [I.act(I.OP_START, 2, 0, 70), I.act(I.OP_SHIFT, 2, 1, 70),
            I.act(I.OP_STOP, 2, 1, 70), I.act(I.OP_REARM, 0, 1, 70)]
     park = I.ACT_BASE + len(i2c) * I.ACT_BYTES
-    return I.full_store(b"".join(
+    # v2: through the ONE assembler (pe_isa.join_image) -- it adds the magic
+    return I.full_store(I.join_image(
         [I.hdr(2, 1, 0, 70, 0, 140, 210, I.ACT_BASE, order=order)]
-        + [I.hdr(p, p, 0, 500, 0, 200, 240, park) for p in (0, 3, 4, 5)])
-        + b"".join(i2c) + I.act(I.OP_REARM, 0, 0, 500))
+        + [I.hdr(p, p, 0, 500, 0, 200, 240, park) for p in (0, 3, 4, 5)],
+        i2c + [I.act(I.OP_REARM, 0, 0, 500)]))
 
 
 def main() -> int:

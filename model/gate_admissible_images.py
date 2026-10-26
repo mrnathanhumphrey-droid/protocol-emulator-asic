@@ -178,7 +178,8 @@ def main() -> int:
     print("=" * 78)
     print("  N1 -- NON-ADMISSIBLE IMAGES, DECLARED BY NAME")
     print("=" * 78)
-    imgs = images()
+    import image_universe
+    imgs, board = image_universe.board_as_v2(images())   # v2: board images, translated
     probs, rows = audit(imgs, NON_ADMISSIBLE, corpus.PAD_COLLISION,
                         dgf.DELIBERATE)
     print("  QUEUE (1.6a) reads OUR recurrence here (no pyRTA in CI) -- intended "
@@ -352,6 +353,16 @@ def main() -> int:
 
     print()
     print("=" * 78)
+    if rc == 0 and board:
+        v, why = image_universe.board_stale_verdict(
+            "model/gate_admissible_images.py", board)
+        print("  stale_records: %s -- %s" % (v, why))
+        if v == "STALE":
+            import stale_records as SR
+            print(SR.token("admissible-images", why))
+            return 0
+        if v == "FAIL":
+            rc = 1
     print("  GATE admissible-images: %s" % ("PASSED" if rc == 0 else "FAILED"))
     return rc
 

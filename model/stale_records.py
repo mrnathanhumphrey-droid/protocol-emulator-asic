@@ -65,6 +65,12 @@ DECLARED = {
         "board images are v1-encoded; v2 FPGA build owed (fpga/images stay v1 "
         "until it exists -- no v2 image beside a v1 bitstream; checked through "
         "test/v1_translate.py meanwhile)",
+    "model/gate_admissible_images.py":
+        "board images are v1-encoded; v2 FPGA build owed (read through "
+        "test/v1_translate.py meanwhile -- image_universe.board_as_v2)",
+    "model/gate_image_bounds.py":
+        "board images are v1-encoded; v2 FPGA build owed (read through "
+        "test/v1_translate.py meanwhile -- image_universe.board_as_v2)",
     "model/gate_onewire_hw_witness.py":
         "needs bench re-witness on v2 bitstream -- the 1-Wire FPGA witness is a "
         "HARDWARE record of the v1 image on a v1 bitstream; v2's image is "
@@ -201,6 +207,15 @@ CHANGE_SET = frozenset([
     "ci/pass_token.py",              # d189e97: the STALE verdict accepted, named
     "ci/run_gates.sh",               # d189e97: STALE listed in the verdict line
     "model/gate_i2c_hw_witness.py",  # d189e97: board witness as v1 evidence
+    # ---- AMENDMENT 2 (10-25, Nate go, item 4): the 9 fast-shard reds fixed.
+    "model/gate_admissible_images.py", # board images read translated (STALE)
+    "model/gate_image_bounds.py",      # board images read translated (STALE)
+    "model/image_universe.py",         # board_as_v2 / board_stale_verdict, the ONE helper
+    "model/gate_i2c_order.py",         # its plant through pe_isa.join_image
+    "model/gate_pin_matrix.py",        # its plant through pe_isa.join_image
+    "model/gate_reset_audit.py",       # allowlist: u_store.g_bank 4096, s_wrdata 26
+    "model/gate_stored_numbers.py",    # 3 new tables classified as specifications
+    "test/param_dump.v",               # prints ACT_BASE, MAGIC_AT, ACT_BYTES_T, WIDE_B
 ])
 
 

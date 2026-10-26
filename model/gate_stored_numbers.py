@@ -331,6 +331,14 @@ SITES = [
 # before it was ever committed, which is why the stale-exclusion check below
 # exists and why it fired immediately.
 SPEC_SYMBOLS = {
+    # ⭐ v2 step 2 (10-25): three tables that are INPUTS, not observations --
+    # the declared-STALE reasons (their numbers are words like "200k" and
+    # "v2" in prose), the reserved opcodes' NUMBERS (the ISA's own spec, 8-21,
+    # refused until built), and the mutant descriptions (which name banks and
+    # rows, "bank 3", "w + 1", in their text).
+    ("model/stale_records.py", "DECLARED"),
+    ("test/pe_isa.py", "RESERVED_OPCODES"),
+    ("test/run_mutants.py", "MUTANTS"),
     # ⭐ The clocked phase model's PROGRAMS: the ACTION SHAPES it runs its
     # invariants over -- the corpus lanes, a full 4-byte FRAM write, a random
     # read with repeated START. The numbers are BIT COUNTS the protocols

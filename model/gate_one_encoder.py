@@ -59,7 +59,112 @@ RTL_EXPECT = {
     "DLY_W": pe_isa.DLY_W,
     "HDR_BITS": pe_isa.HDR_BITS,
     "HDR_BYTES": pe_isa.HDR_BYTES,
+    # v2: the store layout's copies outside the engine (test/param_dump.v)
+    "ACT_BASE": pe_isa.ACT_BASE,
+    "MAGIC_AT": pe_isa.HDR_REGION,
+    "ACT_BYTES_T": pe_isa.ACT_BYTES,
+    "WIDE_B": pe_isa.ACT_BYTES,
 }
+
+
+# ---- v2 STATIC CHECKS (Wilson, step 2 item 4) ------------------------------
+#: (a) the image's bytes are written, sliced and decoded by pe_isa ONLY.
+#: A header slot indexed by hand (`[x * HDR_BYTES`) or an action word decoded
+#: by shifting its integer (`int.from_bytes(..) >>`) is a private copy of the
+#: layout -- run_cktx's pindiv builder read the opcode as the top 3 bits and
+#: put an I2C lane LSB-first on v2 (10-25).
+PRIVATE_LAYOUT = [
+    (re.compile(r"\[[^\]\n]*\*\s*(?:\w+\.)?HDR_BYTES\b"), "a header slot indexed by hand"),
+    (re.compile(r"int\.from_bytes\([^\n]*\)\s*>>"), "an action word decoded by shifting"),
+]
+#: the declared exceptions: the admissible-image gate's raw round-trip, and
+#: the v1 -> v2 translator, which reads V1's header slots by V1's own encoder
+#: (loaded from the v1-lock blob) -- the one place v1's layout must be read
+PRIVATE_LAYOUT_OK = {OWNER, "model/gate_admissible_images.py",
+                     "model/gate_one_encoder.py", "test/v1_translate.py"}
+#: (b) no v1 store / word size typed in the RTL or a bench
+V1_LITERALS = [re.compile(p) for p in
+               (r"\[0:255\]", r"<\s*256\s*;", r"=\s*256\s*;", r"'d255\b", r"'d256\b")]
+
+
+def private_layout_hits(texts):
+    """[(rel, line no, what)] over {rel: source} (python files)."""
+    out = []
+    for rel, txt in sorted(texts.items()):
+        if rel in PRIVATE_LAYOUT_OK:
+            continue
+        for i, ln in enumerate(txt.splitlines(), 1):
+            code = ln.split("#", 1)[0]
+            for rx, what in PRIVATE_LAYOUT:
+                if rx.search(code):
+                    out.append((rel, i, what))
+    return out
+
+
+def v1_literal_hits(texts):
+    """[(rel, line no, pattern)] over {rel: source} (Verilog; // and /* */
+    comment text excluded)."""
+    out = []
+    for rel, txt in sorted(texts.items()):
+        txt = re.sub(r"/\*.*?\*/", lambda m: "\n" * m.group(0).count("\n"), txt,
+                     flags=re.S)
+        for i, ln in enumerate(txt.splitlines(), 1):
+            code = ln.split("//", 1)[0]
+            for rx in V1_LITERALS:
+                if rx.search(code):
+                    out.append((rel, i, rx.pattern))
+    return out
+
+
+def _tree(globs):
+    import glob
+    out = {}
+    for g in globs:
+        for f in glob.glob(os.path.join(ROOT, g)):
+            rel = os.path.relpath(f, ROOT).replace(os.sep, "/")
+            with open(f, encoding="utf-8", errors="replace") as fh:
+                out[rel] = fh.read()
+    return out
+
+
+def static_checks():
+    """-> rc. Both checks on the tree, then each on a planted file."""
+    rc = 0
+    print()
+    print("  --- v2 static checks: the layout has ONE owner; no v1 sizes ---")
+    py = _tree(["test/*.py", "model/*.py", "model/a2/*.py", "ci/*.py"])
+    hits = private_layout_hits(py)
+    for rel, i, what in hits:
+        print("    *** %s:%d %s (outside test/pe_isa.py)" % (rel, i, what))
+    print("    (a) private layout code in %d python files: %d hit(s)"
+          % (len(py), len(hits)))
+    vl = _tree(["src/*.v", "test/*.v", "test/*.vh"])
+    lits = v1_literal_hits(vl)
+    for rel, i, pat in lits:
+        print("    *** %s:%d a v1 store/word literal /%s/" % (rel, i, pat))
+    print("    (b) v1 literals in %d Verilog files: %d hit(s)" % (len(vl), len(lits)))
+    rc |= 1 if (hits or lits) else 0
+    planted = [
+        ("a header slot indexed by hand",
+         private_layout_hits({"model/x.py": "b[ln * I.HDR_BYTES:(ln + 1)] = h\n"})),
+        ("an action word decoded by shifting",
+         private_layout_hits({"test/x.py": "op = int.from_bytes(a, 'big') >> 27\n"})),
+        ("the same text in a comment is not code",
+         not private_layout_hits({"test/x.py": "# b[ln * HDR_BYTES]\n"})),
+    ] + [("a planted /%s/" % rx.pattern,
+          v1_literal_hits({"test/x.v": line}))
+         for rx, line in zip(V1_LITERALS, ("reg [7:0] m [0:255];\n",
+                                            "for (i = 0; i < 256; i = i + 1)\n",
+                                            "localparam integer N = 256;\n",
+                                            "if (a == 9'd255) x = 1;\n",
+                                            "y = 10'd256;\n"))] + [
+        ("a v1 literal inside a comment is not code",
+         not v1_literal_hits({"test/x.v": "// was i < 256;\n/* [0:255] */\n"})),
+    ]
+    for what, fired in planted:
+        print("    must-fire: %-46s %s" % (what, "red  ok" if fired else "*** MISSED"))
+        rc |= 0 if fired else 1
+    return rc
 
 
 def find_second_definitions(texts=None):
@@ -381,8 +486,11 @@ def main() -> int:
         tgt = os.path.join(td, "src", "pe_engine.v")
         with open(tgt, encoding="utf-8") as fh:
             txt = fh.read()
+        # ⛔ v2: 2 -> 1, not 2 -> 3. A 33-bit word is 5 bytes, which v2's
+        # word-alignment assert (ACTION_REGION_NOT_WORD_ALIGNED) refuses at
+        # elaboration -- the dump never ran. 31 bits is still 4 bytes.
         bad = txt.replace("localparam integer BQW   = 2;",
-                          "localparam integer BQW   = 3;", 1)
+                          "localparam integer BQW   = 1;", 1)
         if bad == txt:
             print("    *** could not inject a drift -- the anchor moved")
             rc = 1
@@ -394,14 +502,16 @@ def main() -> int:
                 print("    *** the mutated dump did not elaborate: %s" % mverr)
                 rc = 1
             elif mv.get("ACT_W") == pe_isa.ACT_W:
-                print("    *** DID NOT FIRE: BQW 2->3 left ACT_W unchanged")
+                print("    *** DID NOT FIRE: BQW 2->1 left ACT_W unchanged")
                 rc = 1
             else:
-                print("    BQW 2->3 -> the tool resolves ACT_W %s against "
+                print("    BQW 2->1 -> the tool resolves ACT_W %s against "
                       "pe_isa %s" % (mv.get("ACT_W"), pe_isa.ACT_W))
                 print("    => a drift in either language is caught, and the")
                 print("       finding comes from an elaborator rather than")
                 print("       from our own reading of the language.")
+
+    rc |= static_checks()
 
     print()
     print("=" * 78)

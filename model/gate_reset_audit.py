@@ -46,8 +46,8 @@ NETLIST = os.environ.get("PE_NETLIST_JSON", r"C:\tmp\local_netlist.json")
 # ⛔ Anything unreset and NOT here is a finding.
 # ---------------------------------------------------------------------------
 ALLOWED = {
-    "u_store.mem": (
-        2048,
+    "u_store.g_bank": (
+        4096,        # v2: 512 bytes x 8, in WIDE_B byte banks (was u_store.mem, 2048)
         "THE STORE. Explicitly loaded before `run` is asserted -- the loader "
         "walks every byte and `hdr_done` gates dispatch until the headers are "
         "in. ⭐ And it is left X rather than zeroed ON PURPOSE: a zero-filled "
@@ -55,7 +55,9 @@ ALLOWED = {
         "program that reads past its end looks correct. The image loader "
         "asserts its own length for the same reason."),
     "s_wrdata": (
-        24,          # was 22: ACT_W absorbed the 2-bit TX queue field
+        26,          # v2: the 32-bit word minus the 6 reserved pinb/mod bits the
+                     # engine never reads (synthesis trims them); was 24 in v1,
+                     # was 22 before ACT_W absorbed the 2-bit TX queue field
         "the store's WIDE action read, now 24 bits. ⭐ THE WIDTH CHECK "
         "EARNED ITS KEEP HERE: it went 22 -> 24 when ACT_W absorbed the TX "
         "queue field, and the gate refused to absorb two new bits nobody "

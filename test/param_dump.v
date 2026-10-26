@@ -55,6 +55,13 @@ module param_dump;
     $display("PARAM SPL=%0d",       dut.u_eng.SPL);
     $display("PARAM NSLOT=%0d",     dut.u_eng.NSLOT);
     $display("PARAM SIW=%0d",       dut.u_eng.SIW);
+    // ⭐ v2: the store layout's OTHER copies -- project.v derives the magic's
+    // position and the word size for the store, and the store reads WIDE_B
+    // bytes per word; all four must be the encoder's (gate_one_encoder)
+    $display("PARAM ACT_BASE=%0d",    dut.u_eng.ACT_BASE);
+    $display("PARAM MAGIC_AT=%0d",    dut.MAGIC_AT);
+    $display("PARAM ACT_BYTES_T=%0d", dut.ACT_BYTES_T);
+    $display("PARAM WIDE_B=%0d",      dut.u_store.WIDE_B);
     $finish;
   end
 endmodule

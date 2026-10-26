@@ -375,13 +375,11 @@ def selftest():
     # `hold + 1` RATHER THAN A LITERAL 16: the boundary lives in the RTL, and a
     # selftest carrying its own copy is how the probe stops tracking the design.
     legal = hold + 1
-    base = bytearray(I.ACT_BASE + 4 * I.ACT_BYTES)
     # one lane, real distinct clock pin, program at ACT_BASE
-    hdr = I.hdr(2, 1, 0, legal, 0, 2 * legal, 3 * legal, I.ACT_BASE)
-    base[0:I.HDR_BYTES] = hdr
-    for ln in range(1, I.N_LANES):
-        base[ln * I.HDR_BYTES:(ln + 1) * I.HDR_BYTES] = \
-            I.hdr(I.PIN_NONE, I.PIN_NONE, 0, 500, 0, 200, 240, I.ACT_BASE)
+    # v2: through the ONE assembler (pe_isa.join_image) -- it adds the magic
+    hdrs = [I.hdr(2, 1, 0, legal, 0, 2 * legal, 3 * legal, I.ACT_BASE)] + [
+        I.hdr(I.PIN_NONE, I.PIN_NONE, 0, 500, 0, 200, 240, I.ACT_BASE)
+        for _ln in range(1, I.N_LANES)]
     cases = [
         ("a clocked SHIFTIN with count = 0",
          I.act(I.OP_SHIFTIN, 2, 1, legal, count=0), R_CKDEGEN),
@@ -406,11 +404,9 @@ def selftest():
          I.act(I.OP_SHIFT, 2, 1, hold + 1, count=7), None),
     ]
     for label, act, want in cases:
-        img = bytearray(base)
-        img[I.ACT_BASE:I.ACT_BASE + I.ACT_BYTES] = act
-        img[I.ACT_BASE + I.ACT_BYTES:I.ACT_BASE + 2 * I.ACT_BYTES] = \
-            I.act(I.OP_REARM, 0, 1, legal)
-        v = violations(bytes(img), sda_hold=hold)
+        img = I.join_image(hdrs, [act, I.act(I.OP_REARM, 0, 1, legal),
+                                  bytes(I.ACT_BYTES), bytes(I.ACT_BYTES)])
+        v = violations(img, sda_hold=hold)
         kinds = sorted({k for k, _l, _o, _f, _p, _x in v})
         # ⛔ THE CLASS IS CHECKED, NOT JUST "SOMETHING FIRED". The old probe
         # compared `bool(v)`, which cannot tell the refusal it names from a
@@ -428,12 +424,10 @@ def selftest():
     # parameter arm's own premise: `test/phases_run.sh`'s `hold0` arm must be
     # able to RUN the program it measures, so a gate that refused it against
     # the default boundary would be adjudicating the wrong build.
-    img0 = bytearray(base)
-    img0[I.ACT_BASE:I.ACT_BASE + I.ACT_BYTES] = \
-        I.act(I.OP_SHIFT, 2, 1, 1, count=7)
-    img0[I.ACT_BASE + I.ACT_BYTES:I.ACT_BASE + 2 * I.ACT_BYTES] = \
-        I.act(I.OP_REARM, 0, 1, legal)
-    v0 = violations(bytes(img0), sda_hold=0)
+    img0 = I.join_image(hdrs, [I.act(I.OP_SHIFT, 2, 1, 1, count=7),
+                               I.act(I.OP_REARM, 0, 1, legal),
+                               bytes(I.ACT_BYTES), bytes(I.ACT_BYTES)])
+    v0 = violations(img0, sda_hold=0)
     ok0 = not v0
     print("    %-52s %s" % ("d = 1 against SDA_HOLD = 0 (the hold0 build)",
                             "ok" if ok0 else "*** refused with no hold to fit"))

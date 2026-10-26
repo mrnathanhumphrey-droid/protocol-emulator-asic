@@ -757,10 +757,9 @@ def audit_pad_collisions() -> int:
     # reported because a parked filler lane sat on pin 6. That is what sent
     # `build_ckhold`'s fillers to PIN_NONE and scoped the predicate.
     print("    --- must-fire: the scope holds in both directions ---")
-    base = bytearray(ACT_BASE + 4 * ACT_BYTES)
-    for ln in range(1, N_LANES):
-        base[ln * HDR_BYTES:(ln + 1) * HDR_BYTES] = \
-            hdr(PIN_NONE, PIN_NONE, 1, 500, 0, 200, 240, ACT_BASE)
+    # v2: through the ONE assembler (pe_isa.join_image) -- it adds the magic
+    fillers = [hdr(PIN_NONE, PIN_NONE, 1, 500, 0, 200, 240, ACT_BASE)
+               for _ln in range(1, N_LANES)]
     cases = [
         ("a SHIFT lane clocked on MISO_PIN", P_T_MISO, P_T_SCLK,
          (OP_SHIFT, P_T_SCLK, SELF_CLOCKED), True),
@@ -770,12 +769,11 @@ def audit_pad_collisions() -> int:
          (OP_LEVEL, P_T_CS, 1), True),
     ]
     for label, clkpin, pin, (op, apin, lvl), want in cases:
-        img = bytearray(base)
-        img[0:HDR_BYTES] = hdr(pin, clkpin, 1, 70, 0, 140, 210, ACT_BASE)
-        img[ACT_BASE:ACT_BASE + ACT_BYTES] = act(op, apin, lvl, 70, count=7)
-        img[ACT_BASE + ACT_BYTES:ACT_BASE + 2 * ACT_BYTES] = \
-            act(OP_REARM, 0, 1, 70)
-        got = bool(pad_collisions(bytes(img)))
+        img = pe_isa.join_image(
+            [hdr(pin, clkpin, 1, 70, 0, 140, 210, ACT_BASE)] + fillers,
+            [act(op, apin, lvl, 70, count=7), act(OP_REARM, 0, 1, 70),
+             bytes(ACT_BYTES), bytes(ACT_BYTES)])
+        got = bool(pad_collisions(img))
         ok = (got == want)
         print("      %-44s %s"
               % (label, "ok" if ok else
