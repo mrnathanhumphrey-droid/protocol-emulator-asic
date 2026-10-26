@@ -502,6 +502,12 @@ module tb_trace;
     ui_in[PIN_PTR] = 1'b0; repeat (3) @(negedge clk);
     for (i = 0; i < img_bytes; i = i + 1) begin
       ld_val = img[i];
+      // ⭐ v2 (Wilson 10-26): +RESOP_AT=<byte> writes a RESERVED opcode
+      // (PE_N_BUILT_OPS) into that byte's opcode bits AS IT LOADS -- the raw
+      // image the loader must refuse, made from a tracked image rather than
+      // a new one (the shortload arm's `+NBYTES=51` pattern)
+      if (i == resop_at)
+        ld_val = {PE_N_BUILT_OPS[PE_OP_W-1:0], img[i][7-PE_OP_W:0]};
       @(negedge clk); @(negedge clk);
       ui_in[PIN_WR] = 1'b1;
       @(negedge clk); @(negedge clk); @(negedge clk);
@@ -665,9 +671,14 @@ end
 // and then asserts the refusal itself: the status CONFIG_ERR set, `store_full`
 // clear, and ZERO writebacks. Quiescence alone would also be true of an engine
 // that never started for some other reason.
-integer m5_refused, rs_stayload;
+// ⭐ v2 (Wilson 10-26): `+EXPECT_REFUSED=2` is the OTHER refusal -- a FULL
+// load holding a reserved opcode (`+RESOP_AT`): CONFIG_ERR set, store_full SET
+// (the load completed), `bad_op` set, zero writebacks. The coverage sweep's
+// `resop` arm, so the loader's refusal branch is reached under Verilator too.
+integer m5_refused, rs_stayload, resop_at;
 initial begin
   if (!$value$plusargs("EXPECT_REFUSED=%d", m5_refused)) m5_refused = 0;
+  if (!$value$plusargs("RESOP_AT=%d", resop_at)) resop_at = -1;
   pg_quiescent_ok = (m5_refused != 0);
   // ⭐ v2 (runstart.vh): the two arms whose engine must NEVER start -- a
   // refused load, and STAYLOAD's load-mode readback trace -- say so
@@ -676,7 +687,12 @@ initial begin
 end
 
 final begin
-  if (m5_refused != 0) begin
+  if (m5_refused == 2) begin
+    if (dut.cfg_err_any !== 1'b1 || dut.store_full !== 1'b1 || dut.bad_op !== 1'b1 || cm_wbs != 0)
+      $display("*** FAIL tb_trace[RESOP]: a reserved opcode was NOT refused at load -- CONFIG_ERR=%0b store_full=%0b bad_op=%0b writebacks=%0d", dut.cfg_err_any, dut.store_full, dut.bad_op, cm_wbs);
+    else
+      $display("  tb_trace[RESOP]: ok -- the reserved opcode was refused at load: CONFIG_ERR set, 0 writebacks");
+  end else if (m5_refused != 0) begin
     if (dut.cfg_err_any !== 1'b1 || dut.store_full !== 1'b0 || cm_wbs != 0)
       $display("*** FAIL tb_trace[M5]: a partial load was NOT refused -- CONFIG_ERR=%0b store_full=%0b writebacks=%0d", dut.cfg_err_any, dut.store_full, cm_wbs);
     else

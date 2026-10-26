@@ -12,4 +12,8 @@ localparam integer PE_ACT_W = 32;
 localparam integer PE_ACT_BYTES = 4;
 // v2: the store size, so no bench types 256 (or 512)
 localparam integer PE_STORE_BYTES = 512;
+// v2 (Wilson 10-26): the built-opcode limit the loader refuses
+// beyond, and the opcode's width (tb_trace's +RESOP_AT arm)
+localparam integer PE_N_BUILT_OPS = 8;
+localparam integer PE_OP_W = 5;
 `endif

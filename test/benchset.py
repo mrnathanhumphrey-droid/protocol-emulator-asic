@@ -678,6 +678,18 @@ def corpus_arms():
                  "+OUT=probe_cov_trace_shortload.txt",
                  "+NCYC=4000", "+SEED=1", "+ASYNC=0",
                  "+STAYLOAD=0", "+SCLHOLD=0", "+EXPECT_REFUSED=1"]))
+    # ⭐ v2 (Wilson 10-26): THE RESERVED-OPCODE REFUSAL, in the coverage sweep.
+    # The smoke image with opcode N_BUILT_OPS written into its first action
+    # word AS IT LOADS (+RESOP_AT, the byte at ACT_BASE) -- so the loader's
+    # refusal branch (project.v `bad_op`) is reached here, not only by
+    # gate_v2_equiv's iverilog must-fires.
+    import pe_isa as _ISA
+    out.append(("resop",
+                ["+IMG=test/smoke_image.hex", "+PEER=none",
+                 "+OUT=probe_cov_trace_resop.txt",
+                 "+NCYC=4000", "+SEED=1", "+ASYNC=0",
+                 "+STAYLOAD=0", "+SCLHOLD=0", "+EXPECT_REFUSED=2",
+                 "+RESOP_AT=%d" % _ISA.ACT_BASE]))
     # ⭐⭐ THE ZERO-HOLD BUILD, IN THE COVERAGE SWEEP (ruling D3). Removing the
     # `ck_hold_fits` clamp from the clocked site left ONE branch reachable only
     # at `SDA_HOLD == 0`: the open-drain side of the clocked direct-drive arm.

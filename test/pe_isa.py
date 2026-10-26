@@ -512,9 +512,13 @@ def filler_vh() -> str:
             "localparam integer PE_ACT_BYTES = %d;\n"
             "// v2: the store size, so no bench types 256 (or 512)\n"
             "localparam integer PE_STORE_BYTES = %d;\n"
+            "// v2 (Wilson 10-26): the built-opcode limit the loader refuses\n"
+            "// beyond, and the opcode's width (tb_trace's +RESOP_AT arm)\n"
+            "localparam integer PE_N_BUILT_OPS = %d;\n"
+            "localparam integer PE_OP_W = %d;\n"
             "`endif\n"
             % (ACT_W - 1, ACT_W, (ACT_W + 3) // 4, word, ACT_W, ACT_BYTES,
-               STORE_BYTES))
+               STORE_BYTES, N_BUILT_OPS, OP_W))
 
 
 # ---------------------------------------------------------------------------
