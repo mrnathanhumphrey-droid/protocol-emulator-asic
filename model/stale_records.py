@@ -191,6 +191,16 @@ CHANGE_SET = frozenset([
     "test/v1_translate.py",
     "test/v3_table.vh",
     "test/ws2812_sub3_rearm21.hex",
+    # ---- AMENDMENT 1 (10-25, Nate go): files step 2's own later commits
+    # touched, caught by this guard (phase_coverage / a2_record went FAIL).
+    # Reviewed, one by one, never a glob:
+    "test/runstart.vh",              # fe0eeb5: engine-started guard (Wilson R3), NEW
+    "test/progress.vh",              # fe0eeb5: includes runstart.vh
+    "test/inv_cdc.vh",               # fe0eeb5: CS falls while the engine ran
+    "model/gate_wire_feed.py",       # 8a666fd: board images read through v1_translate
+    "ci/pass_token.py",              # d189e97: the STALE verdict accepted, named
+    "ci/run_gates.sh",               # d189e97: STALE listed in the verdict line
+    "model/gate_i2c_hw_witness.py",  # d189e97: board witness as v1 evidence
 ])
 
 

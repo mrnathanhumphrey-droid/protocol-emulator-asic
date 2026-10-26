@@ -58,9 +58,12 @@ sys.path.insert(0, os.path.join(ROOT, "ci"))
 sys.path.insert(0, HERE)
 
 
-def frozen_set():
+def frozen_set(rev=None):
     """-> sorted repo-relative paths: run_onewire.CE5_SIM_SOURCES, their
-    `include closure, and the tracked CE5 images."""
+    `include closure, and the tracked CE5 images. With `rev`, the closure is
+    read from THAT commit's files (v2: the closure grows -- the set AS IT WAS
+    at the freeze is what FREEZE_BLOBS pins); a path absent at `rev` is not
+    followed."""
     import re
     import run_onewire
     import onewire
@@ -70,10 +73,17 @@ def frozen_set():
         p = todo.pop()
         if p in seen:
             continue
+        if rev is None:
+            with open(os.path.join(ROOT, p), encoding="utf-8", errors="replace") as fh:
+                text = fh.read()
+        else:
+            rc, out, _ = git(["show", "%s:%s" % (rev, p)])
+            if rc != 0:
+                continue
+            text = out
         seen.add(p)
-        with open(os.path.join(ROOT, p), encoding="utf-8", errors="replace") as fh:
-            for m in inc.finditer(fh.read()):
-                todo.append(m.group(1))
+        for m in inc.finditer(text):
+            todo.append(m.group(1))
     seen |= {"test/" + fn for fn in onewire.TRACKED.values()}
     return sorted(seen)
 
@@ -183,7 +193,14 @@ def main() -> int:
     print("  --- must-fires, on planted CONTENTS (git and the tree untouched) ---")
     # (0) the one-time conversion stays checked: the SHA pin and the blob pin
     # name the same bytes
-    eq = blobhash.set_hash(fs, FREEZE_SHA) == FREEZE_BLOBS
+    # ⭐ v2: the closure can GROW (step 2 added store_filler.vh, fe0eeb5
+    # runstart.vh). The equivalence is over the set AS IT WAS at the freeze,
+    # read from FREEZE_SHA's own files; paths in today's set and not in that
+    # one are named, and count as moved inputs (stale_records.moved).
+    fs0 = frozen_set(FREEZE_SHA)
+    for q in sorted(set(fs) - set(fs0)):
+        print("    in today's set, not the freeze's (a moved input): %s" % q)
+    eq = blobhash.set_hash(fs0, FREEZE_SHA) == FREEZE_BLOBS
     print("    %-60s %s" % ("equivalence: set_hash(FREEZE_SHA) == FREEZE_BLOBS",
                             "ok" if eq else "*** DIFFERENT"))
     ok = ok and eq
@@ -234,7 +251,9 @@ def main() -> int:
     print()
     # ⭐ v2 (Wilson 10-25): staleness inside step 2's declared change set is
     # STALE, not FAIL (model/stale_records.py) -- only with every must-fire red
-    if record_bad and mf_ok:
+    # ...and with the pin equivalence holding: a STALE over a broken pin is
+    # not the declared staleness
+    if record_bad and mf_ok and eq:
         import stale_records as SR
         v, why = SR.stale_verdict("model/gate_ce5_freeze.py", SR.moved(fs))
         print("  stale_records: %s -- %s" % (v, why))
