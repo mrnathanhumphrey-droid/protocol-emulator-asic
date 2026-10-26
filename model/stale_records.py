@@ -248,6 +248,9 @@ CHANGE_SET = frozenset([
     "test/lockstep_golden.json",       # re-pinned on v2 (proof: gate_v2_equiv)
     "test/phases_run.sh",              # store size from pe_isa, not 256
     "test/store_run.sh",               # store size from pe_isa, not 256
+    # ---- AMENDMENT 5 (10-26, Nate go): the second CI run's reds.
+    ".github/workflows/test.yaml",     # ln1 job: full history for the STALE check
+    "test/gate_coverage.py",           # 13 anchors re-anchored by their text
 ])
 
 

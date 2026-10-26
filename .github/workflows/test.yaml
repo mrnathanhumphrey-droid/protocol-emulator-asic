@@ -21,6 +21,10 @@ jobs:
     steps:
       - name: Checkout repo
         uses: actions/checkout@v6
+        # v2: full history -- ci/ln1_replay.py's declared STALE compares the
+        # inputs against the v1-lock tag (model/stale_records.py)
+        with:
+          fetch-depth: 0
 
       - name: Install iverilog
         shell: bash

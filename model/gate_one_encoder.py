@@ -101,14 +101,22 @@ def private_layout_hits(texts):
     return out
 
 
+#: a line that MEANS one of those numbers -- not a store or word size -- says
+#: so on the line: `// v1-literal-ok: <the reason>` (a reason is required)
+LITERAL_OK = re.compile(r"//\s*v1-literal-ok:\s*\S")
+
+
 def v1_literal_hits(texts):
     """[(rel, line no, pattern)] over {rel: source} (Verilog; // and /* */
-    comment text excluded)."""
+    comment text excluded; a line carrying `// v1-literal-ok: <reason>` is
+    exempt -- by name, with its reason, on the line itself)."""
     out = []
     for rel, txt in sorted(texts.items()):
         txt = re.sub(r"/\*.*?\*/", lambda m: "\n" * m.group(0).count("\n"), txt,
                      flags=re.S)
         for i, ln in enumerate(txt.splitlines(), 1):
+            if LITERAL_OK.search(ln):
+                continue
             code = ln.split("//", 1)[0]
             for rx in V1_LITERALS:
                 if rx.search(code):
@@ -160,6 +168,10 @@ def static_checks():
                                             "y = 10'd256;\n"))] + [
         ("a v1 literal inside a comment is not code",
          not v1_literal_hits({"test/x.v": "// was i < 256;\n/* [0:255] */\n"})),
+        ("an exemption with NO reason is still red",
+         v1_literal_hits({"test/x.v": "x = 256; // v1-literal-ok:\n"})),
+        ("an exemption with a reason is honoured",
+         not v1_literal_hits({"test/x.v": "x = 256; // v1-literal-ok: a marker\n"})),
     ]
     for what, fired in planted:
         print("    must-fire: %-46s %s" % (what, "red  ok" if fired else "*** MISSED"))
