@@ -189,8 +189,32 @@ module tt_um_protocol_emulator #(
   wire ena_s   = ena_sync[1];
 `endif
 
+  // ⛔⛔ v2 (Wilson 10-27, store-write recovery step 1): `prog_mode` and `run`
+  // ARE FLOPS, not gates after the synchronisers. They are mode signals (they
+  // change only on entering / leaving load mode), and as a gate `prog_mode`
+  // led the slow corner's worst path: ena_s -> nand -> inv -> the store's
+  // fanout (canary 40421958249, +0.870 ns). Each loads `prog_sync[0] &
+  // ena_sync[0]` -- the value the old gate takes NEXT cycle -- so it EQUALS
+  // the old `prog_s & ena_s` in every cycle: no latency, no behaviour change
+  // (gate_v2_equiv 42/42 is the check). ⚠ REPLICATION (one copy per bank /
+  // cone) WAS TRIED AND SYNTHESIS UNDID IT: yosys merged every copy back into
+  // one flop despite (* keep *) on the regs (10-27), so the fanout is left to
+  // the resizer. M_CDC_RAW (the raw-pin mutant) keeps the combinational form.
+`ifdef M_CDC_RAW
   wire prog_mode = prog_s & ena_s;
   wire run       = ~prog_s & ena_s;
+`else
+  reg prog_mode, run;
+  always @(posedge clk or negedge rst_n) begin
+    if (!rst_n) begin
+      prog_mode <= 1'b0;
+      run       <= 1'b0;
+    end else begin
+      prog_mode <= prog_sync[0] & ena_sync[0];
+      run       <= ~prog_sync[0] & ena_sync[0];
+    end
+  end
+`endif
 
   // =====================================================================
   // INPUT SYNCHRONISERS. ⛔ Every pin input is asynchronous to `clk`; sampling
