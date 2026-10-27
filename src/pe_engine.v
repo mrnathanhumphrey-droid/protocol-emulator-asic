@@ -548,6 +548,13 @@ module pe_engine #(
   localparam [OP_W-1:0] OP_STOP    = 5;
   localparam [OP_W-1:0] OP_ARM     = 6;
   localparam [OP_W-1:0] OP_REARM   = 7;
+  // ⭐ v2 PRIMITIVE 1 (Wilson 10-26/27, option A): BRANCH ON BIT. `pin` = the
+  // bit sampled (as READBIT samples it), `level` = the TAKEN value,
+  // `delay[6:0]` = the ABSOLUTE target word. ZERO-TIME: its writeback adds 0
+  // to the timestamp. OPTION A: nothing is prefetched past a branch head, so
+  // the successor is fetched at the branch's writeback from the chosen PC --
+  // at most one refill per retired action still holds.
+  localparam [OP_W-1:0] OP_BRANCH_BIT = 8;
 
   // ---- image layout, all derived -------------------------------------
   // ⛔⛔ `base` IS A THIRD FIELD THE S2 FREEZE DID NOT HAVE. Without it every
@@ -627,6 +634,11 @@ module pe_engine #(
   // loader checks it in project.v); word 0 starts after it, word-aligned
   localparam integer MAGIC_BYTES = 2;
   localparam integer ACT_BASE  = N_LANES * HDR_BYTES + MAGIC_BYTES;
+  // BRANCH_BIT's target: a WORD index into the action region. BR_NWORDS words
+  // fit the store; a target >= BR_NWORDS (which includes any of delay[9:7]
+  // set) is refused at dispatch -- config_err, the lane halts.
+  localparam integer BR_NWORDS = ((1 << AW) - ACT_BASE) / ACT_BYTES;
+  localparam integer BR_W      = AW - $clog2(ACT_BYTES);
   generate
     if ((ACT_BASE % ACT_BYTES) != 0) begin : g_act_aligned
       ACTION_REGION_NOT_WORD_ALIGNED _static_assert ();
@@ -1739,7 +1751,9 @@ module pe_engine #(
   // half of it for the HIGH phase of a HALF_HIGH lane's clocked action. ONE
   // wire, read by both the WB and TF1's next-state mirror `ts_n`, so the two
   // cannot drift. (On an open-drain lane the park rebase then overrides it.)
-  wire [DLY_W-1:0] wb_dly = (ck_act & ck_is_high & half_v[cur])
+  // ⭐ BRANCH_BIT is ZERO-TIME: its delay field is the target, so it adds 0
+  wire [DLY_W-1:0] wb_dly = (a_op == OP_BRANCH_BIT) ? {DLY_W{1'b0}}
+                          : (ck_act & ck_is_high & half_v[cur])
                             ? (a_dly >> 1) : a_dly;
   // ⚠ THE TWO OPCODES COUNT BITS DIFFERENTLY, and this is pre-existing ISA
   // semantics preserved rather than tidied: `OP_SHIFT` compares the
@@ -1927,6 +1941,25 @@ module pe_engine #(
   wire       rx_bit     = pin_in[a_pin];      // the mutant: the defect restored
 `else
   wire       rx_bit     = pin_real ? pin_in[a_pin] : 1'b0;
+`endif
+  // ⭐ BRANCH_BIT: the bit is `rx_bit` (READBIT's guarded sample), read at
+  // writeback; taken when it equals `level`. The target address is formed as
+  // the header base is: ACT_BASE + word * ACT_BYTES.
+  wire [AW-1:0] br_tgt_w = {{(AW-BR_W){1'b0}}, a_dly[BR_W-1:0]};
+`ifdef M_BR_TGT_OFF1
+  wire [AW-1:0] br_tgt   = ACT_BASE[AW-1:0] + (br_tgt_w + {{(AW-1){1'b0}}, 1'b1}) * ACT_BYTES[AW-1:0];
+`else
+  wire [AW-1:0] br_tgt   = ACT_BASE[AW-1:0] + br_tgt_w * ACT_BYTES[AW-1:0];
+`endif
+  wire          br_bad   = (a_dly >= BR_NWORDS[DLY_W-1:0]);
+`ifdef M_BR_ALWAYS
+  wire          br_taken = 1'b1;
+`elsif M_BR_NEVER
+  wire          br_taken = 1'b0;
+`elsif M_BR_LVL_INV
+  wire          br_taken = (rx_bit != a_lvl);
+`else
+  wire          br_taken = (rx_bit == a_lvl);
 `endif
   // the byte an OP_SHIFTIN completes: the sample being taken now, followed by
   // the seven already in `l_rx`
@@ -2163,6 +2196,12 @@ module pe_engine #(
       else if (hact[ACT_W-1 -: OP_W] == OP_REARM && !hact[ACT_W-1-OP_W-PINW])
         want_fetch = 1'b0;                           // chaining: successor is
                                                      // the head; spare unused
+`ifndef M_BR_FETCH_PAST
+      else if (hact[ACT_W-1 -: OP_W] == OP_BRANCH_BIT)
+        want_fetch = 1'b0;                           // OPTION A: the successor
+`endif
+                                                     // is unknown until the
+                                                     // branch writes back
       else
         want_fetch = !fvalid;                        // fill the spare
     end
@@ -2927,6 +2966,11 @@ module pe_engine #(
             // ⭐ OP_ARM moves no pin -- it RELEASES the lane on a peer edge.
             // Its state goes in at writeback, below.
             OP_ARM, OP_REARM: ;                 // no pin movement
+            // BRANCH_BIT moves no pin; a target outside the store is refused
+            OP_BRANCH_BIT: if (br_bad) begin
+              config_err_m <= 1'b1;
+              live_n[cur]  = 1'b0;
+            end
             default: ;
           endcase
           st <= ST_WB;
@@ -3238,6 +3282,12 @@ module pe_engine #(
             l_actv[hix[cur]] <= 1'b0;
             l_pc[cur] <= l_pc[cur] + ACT_BYTES[AW-1:0];
 `endif
+          end else if (a_op == OP_BRANCH_BIT) begin
+            // ⭐ THE PC CHOICE, merged into the writeback: retire as any
+            // action does (invalidate the head, swap), to the target or on
+            l_pc[cur]   <= br_taken ? br_tgt : l_pc[cur] + ACT_BYTES[AW-1:0];
+            l_actv[hix[cur]] <= 1'b0;
+            if (SPL > 1) l_sel[cur] <= !l_sel[cur];
           end else if (a_op != OP_REARM) begin
             l_pc[cur]   <= l_pc[cur] + ACT_BYTES[AW-1:0];
 `ifndef M_BUF_NOINVAL

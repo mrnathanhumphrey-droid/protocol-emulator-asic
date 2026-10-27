@@ -55,6 +55,7 @@ module tb_equiv;
   );
 `include "test/progress.vh"
 `include "test/host_feed.vh"
+`include "test/branch_check.vh"   // v2 primitive 1: ON only with +BRCHECK=1
 
   // ⚠ ONE BLOCK for the count and every record, so nothing reads another
   // block's same-edge write (ruling RA3)

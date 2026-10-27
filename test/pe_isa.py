@@ -65,10 +65,12 @@ ACT_BASE = HDR_REGION + len(MAGIC)        # 32
 
 OP_LEVEL, OP_SHIFT, OP_SHIFTIN, OP_READBIT = 0, 1, 2, 3
 OP_START, OP_STOP, OP_ARM, OP_REARM = 4, 5, 6, 7
+# ⭐ v2 PRIMITIVE 1 (Wilson 10-26/27, option A): branch on a sampled bit
+OP_BRANCH_BIT = 8
 OPCODES = {
     "LEVEL": OP_LEVEL, "SHIFT": OP_SHIFT, "SHIFTIN": OP_SHIFTIN,
     "READBIT": OP_READBIT, "START": OP_START, "STOP": OP_STOP,
-    "ARM": OP_ARM, "REARM": OP_REARM,
+    "ARM": OP_ARM, "REARM": OP_REARM, "BRANCH_BIT": OP_BRANCH_BIT,
 }
 # ⭐ RESERVED WITH THE FORMAT (frozen once, Wilson): one opcode per master-list
 # primitive, each with the field map it will use, shown here to fit ONE 32-bit
@@ -80,9 +82,8 @@ OPCODES = {
 #: refuses to encode one. ONE constant: the RTL's copy (`N_BUILT_OPS` in
 #: project.v) is held to it by model/gate_one_encoder.py, and each primitive
 #: that lands raises it by one IN THE COMMIT THAT BUILDS IT.
-N_BUILT_OPS = 8
+N_BUILT_OPS = 9                      # 8 -> 9: BRANCH_BIT built (primitive 1)
 RESERVED_OPCODES = {
-    8: ("BRANCH_BIT", "pin = the bit's pin, level = the taken value, delay[6:0] = target word"),
     9: ("CMP_BRANCH", "imm[7:0] = {count, pinb} vs the lane's RX shift register, delay[6:0] = target word"),
     10: ("LOOP", "count = iterations, delay[6:0] = loop-head word"),
     11: ("ARM2", "pin + pinb = the two watched pins, level = edge, delay = timeout"),
@@ -267,6 +268,19 @@ def act(op, pin, level, delay, count=0, q=0, pinb=0, mod=0) -> bytes:
 SELF_CLOCKED = 1        # the `level` value that means "self-clocked"
 
 
+def act_branch_bit(pin, level, target) -> bytes:
+    """BRANCH_BIT (opcode 8, primitive 1): sample `pin` (READBIT's sample) at
+    writeback; if it equals `level`, continue at word `target`, else at the
+    next word. ZERO-TIME -- the delay field IS the target, so the branch adds
+    no time and the successor's own delay counts from the same release.
+    delay[9:7], count, q, pinb and mod are must-be-zero."""
+    t = int(target)
+    if not 0 <= t < (STORE_BYTES - ACT_BASE) // ACT_BYTES:
+        raise ValueError("branch target word %d outside the store (0..%d)"
+                         % (t, (STORE_BYTES - ACT_BASE) // ACT_BYTES - 1))
+    return act(OP_BRANCH_BIT, pin, level, t)
+
+
 def act_shift_clocked(pin, delay, nbits=8, q=0) -> bytes:
     """A self-clocked transmit of `nbits` bits (a whole byte by default).
 
@@ -433,6 +447,41 @@ def lane_programs(img):
 I2C_ORDER = ORDER_MSB
 
 
+def branch_problems(img):
+    """[problem] for every BRANCH_BIT in `img` the chip would refuse or that
+    makes no sense (Wilson 10-26 Q4/Q5): a target outside the store (also
+    refused at runtime), a SELF-target (waiting on a pin is ARM's job), a
+    branch in the store's LAST word (its not-taken successor is off the end),
+    a pin that is not real, or a must-be-zero field set (delay[9:7], count,
+    q, pinb, mod)."""
+    out = []
+    nwords = (STORE_BYTES - ACT_BASE) // ACT_BYTES
+    for w in range(nwords):
+        a = ACT_BASE + w * ACT_BYTES
+        if a + ACT_BYTES > len(img):
+            break
+        x = _unpack(ACT_FIELDS, img[a:a + ACT_BYTES], ACT_BYTES)
+        if x["op"] != OP_BRANCH_BIT:
+            continue
+        t = x["delay"]
+        if t >= nwords:
+            out.append("word %d: BRANCH_BIT target %d is outside the store "
+                       "(0..%d) -- the chip refuses it at dispatch" % (w, t, nwords - 1))
+        elif t == w:
+            out.append("word %d: BRANCH_BIT targets ITSELF -- a self-branch "
+                       "busy-polls; waiting on a pin is ARM's job" % w)
+        if w == nwords - 1:
+            out.append("word %d: BRANCH_BIT is the store's LAST word -- its "
+                       "not-taken successor is off the end" % w)
+        if x["pin"] >= N_PINS:
+            out.append("word %d: BRANCH_BIT samples pin %d, which is not a real "
+                       "pin (flags as virtual pins come later)" % (w, x["pin"]))
+        for f in ("count", "q", "pinb", "mod"):
+            if x[f]:
+                out.append("word %d: BRANCH_BIT field %s = %d must be zero" % (w, f, x[f]))
+    return out
+
+
 def order_for(ops):
     """The bit order a lane's program requires: MSB-first if it frames with
     START/STOP (I2C), else the LSB default."""
@@ -516,9 +565,11 @@ def filler_vh() -> str:
             "// beyond, and the opcode's width (tb_trace's +RESOP_AT arm)\n"
             "localparam integer PE_N_BUILT_OPS = %d;\n"
             "localparam integer PE_OP_W = %d;\n"
+            "// v2: the action region's first byte (BRANCH_BIT targets, branch_check)\n"
+            "localparam integer PE_ACT_BASE = %d;\n"
             "`endif\n"
             % (ACT_W - 1, ACT_W, (ACT_W + 3) // 4, word, ACT_W, ACT_BYTES,
-               STORE_BYTES, N_BUILT_OPS, OP_W))
+               STORE_BYTES, N_BUILT_OPS, OP_W, ACT_BASE))
 
 
 # ---------------------------------------------------------------------------

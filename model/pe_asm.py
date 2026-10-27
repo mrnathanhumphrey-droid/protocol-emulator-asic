@@ -925,7 +925,17 @@ def assemble(lanes, headers, park_pins=None, timing_checks=True,
         except program_a2.EdgePacedNoTExt as exc:
             raise Reject(str(exc))
     check_i2c_order(img)
+    check_branches(img)
     return img
+
+
+def check_branches(img):
+    """BRANCH_BIT's static refusals (primitive 1, Wilson Q4/Q5): a target
+    outside the store, a self-target, a branch in the last word, an unreal
+    pin, a must-be-zero field set -- on the IMAGE, so any route is held to it."""
+    probs = pe_isa.branch_problems(img)
+    if probs:
+        raise Reject("; ".join(probs))
 
 
 def check_i2c_order(img):
