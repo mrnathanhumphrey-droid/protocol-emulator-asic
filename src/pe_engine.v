@@ -416,7 +416,7 @@ module pe_engine #(
     // INLINED as s_wrdata's width is). The single register drove every
     // bank's 128:1 row mux through a 17-buffer tree, the canary's worst
     // family (+2.10 ns). Zero latency: each copy loads `paddr` at P_REQ, as
-    // the one register did; (* keep_hierarchy *) pe_dup_reg stops opt_merge.
+    // the one register did; (* keep_hierarchy *) pe_dup_ffe stops opt_merge.
     output wire [((5+((N_PINS<=2)?1:(N_PINS<=4)?2:(N_PINS<=8)?3:(N_PINS<=16)?4:5)+1+DLY_W+4+2+4+2+7)/8)*AW-1:0] s_wraddr_bk,
     // ⭐ v2: the store is WORD-organised (4 byte banks), so a wide read is one
     // word address -- the TM2 per-byte address registers (`s_wraddrk`) went
@@ -3536,11 +3536,17 @@ module pe_engine #(
   wire _unused_eng = &{l_pin[0], 1'b0};
 
   // ⭐ step 2: the per-bank refill-address copies (see the s_wraddr_bk port)
-  genvar gwa;
+  // ⛔ ONE BIT PER pe_dup_ffe, not a W-bit parameterised register: yosys
+  // names a kept PARAMETERISED module `$paramod\...`, and LibreLane's
+  // unmapped-cell checker reads a `$` cell type as an unmapped internal --
+  // the first step-2 canary stopped at synthesis on exactly the 4 copies.
+  genvar gwa, gwb;
   generate
     for (gwa = 0; gwa < ACT_BYTES; gwa = gwa + 1) begin : g_wraddr
-      pe_dup_reg #(.W(AW)) u_wra (.clk(clk), .rst_n(rst_n), .en(pst == P_REQ),
-                                 .d(paddr), .q(s_wraddr_bk[gwa*AW +: AW]));
+      for (gwb = 0; gwb < AW; gwb = gwb + 1) begin : g_bit
+        pe_dup_ffe u_wra (.clk(clk), .rst_n(rst_n), .en(pst == P_REQ),
+                          .d(paddr[gwb]), .q(s_wraddr_bk[gwa*AW + gwb]));
+      end
     end
   endgenerate
 

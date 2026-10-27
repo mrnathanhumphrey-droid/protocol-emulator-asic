@@ -1058,20 +1058,14 @@ module pe_dup_ff (
   end
 endmodule
 
-// A register that synthesis must NOT merge with its twins (replication for
-// fan-out): measured on yosys 0.69, (* keep *) does not stop opt_merge, a
-// kept hierarchy does (pe_dup_ff above, multi-bit with a load enable; v2 slack recovery step 2,
-// instantiated by pe_engine's g_wraddr).
+// pe_dup_ff with a load enable (v2 slack recovery step 2: pe_engine's
+// g_wraddr, one per address bit per bank). Deliberately NOT parameterised:
+// a kept `$paramod` module reads as an unmapped cell to LibreLane.
 (* keep_hierarchy *)
-module pe_dup_reg #(parameter integer W = 1) (
-    input  wire         clk,
-    input  wire         rst_n,
-    input  wire         en,
-    input  wire [W-1:0] d,
-    output reg  [W-1:0] q
-);
+module pe_dup_ffe (input wire clk, input wire rst_n, input wire en,
+                   input wire d, output reg q);
   always @(posedge clk or negedge rst_n) begin
-    if (!rst_n) q <= {W{1'b0}};
+    if (!rst_n) q <= 1'b0;
     else if (en) q <= d;
   end
 endmodule
