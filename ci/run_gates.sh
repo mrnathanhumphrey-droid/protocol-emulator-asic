@@ -368,7 +368,7 @@ GATES=(
   # M_NO_MAGIC's killer.
   model/gate_v2_equiv.py
   # ⭐⭐ v2 primitive 1 (Wilson 10-26/27, R2c): BRANCH_BIT, the timed branch --
-  # next PC and head checked on tb_equiv (+BRCHECK), 0 stalls and every lane
+  # next PC and head checked by branch_check.vh, 0 stalls and every lane
   # within A2's r - C (branch priced as an action of delay W), chains and the
   # runtime refusals, and the six M_BR_* must-fires' killer.
   test/run_branch_check.py

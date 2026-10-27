@@ -1758,15 +1758,16 @@ module pe_engine #(
   // wire, read by both the WB and TF1's next-state mirror `ts_n`, so the two
   // cannot drift. (On an open-drain lane the park rebase then overrides it.)
   // ⭐ BRANCH_BIT is TIMED: its delay field is the target, so it adds its
-  // WAIT W (count:pinb) instead. M_BR_W_ZERO restores the zero-time branch
-  // R2b measured (the successor's refill had no window).
+  // WAIT W (count:pinb) instead -- `a_dly_wb`, read by the line below in
+  // place of `a_dly` (a branch is never `ck_act`, so the half arm cannot
+  // see it). M_BR_W_ZERO restores the zero-time branch R2b measured.
 `ifdef M_BR_W_ZERO
-  wire [DLY_W-1:0] wb_dly = (a_op == OP_BRANCH_BIT) ? {DLY_W{1'b0}}
+  wire [DLY_W-1:0] a_dly_wb = (a_op == OP_BRANCH_BIT) ? {DLY_W{1'b0}} : a_dly;
 `else
-  wire [DLY_W-1:0] wb_dly = (a_op == OP_BRANCH_BIT) ? {{(DLY_W-BPW-PINB_W){1'b0}}, br_wait}
+  wire [DLY_W-1:0] a_dly_wb = (a_op == OP_BRANCH_BIT) ? {{(DLY_W-BPW-PINB_W){1'b0}}, br_wait} : a_dly;
 `endif
-                          : (ck_act & ck_is_high & half_v[cur])
-                            ? (a_dly >> 1) : a_dly;
+  wire [DLY_W-1:0] wb_dly = (ck_act & ck_is_high & half_v[cur])
+                            ? (a_dly >> 1) : a_dly_wb;
   // ⚠ THE TWO OPCODES COUNT BITS DIFFERENTLY, and this is pre-existing ISA
   // semantics preserved rather than tidied: `OP_SHIFT` compares the
   // PRE-increment pointer against `a_cnt` (so a_cnt = 7 is eight bits, and it

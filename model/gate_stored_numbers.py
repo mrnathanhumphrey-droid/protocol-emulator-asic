@@ -703,6 +703,15 @@ SPEC_SYMBOLS = {
     # explains each choice. The RESULT is `btbmin`, which lives in
     # `gate_c3_requote.C_SPACING` and is tabled above.
     ("test/run_csat.py", "ARMS"),
+    # ⭐ v2 primitive 1: THE BRANCH CORPUS IS AN EXPERIMENT'S DESIGN, not a
+    # result. SPACING / BR_WAIT are the chosen delays (every spacing >= D* + B
+    # = 32, W = 32 and 40 per Wilson 10-27); CORPUS / REFUSED_CHAINS / BASE name
+    # which images to build and run. The RESULTS are branch_check.vh's
+    # counters, judged live by test/run_branch_check.py.
+    ("test/branch_corpus.py", "SPACING"),
+    ("test/branch_corpus.py", "CORPUS"),
+    ("test/branch_corpus.py", "REFUSED_CHAINS"),
+    ("test/run_branch_check.py", "BASE"),
     # ⭐ A TEST PAYLOAD IS STIMULUS, NOT A MEASUREMENT. The four bytes the
     # cocotb host feeder pushes are chosen to be distinguishable on a wire;
     # nothing is concluded from their values. `host_feed.vh` carries the same

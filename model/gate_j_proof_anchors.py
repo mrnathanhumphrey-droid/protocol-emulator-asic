@@ -85,6 +85,12 @@ PREMISES = [
      "l_timestamp[cur] <= l_timestamp[cur] + {{(TS_W-DLY_W){1'b0}}, wb_dly};"),
     ("P8h", "the writeback delay: d, or d/2 for a HALF_HIGH lane's HIGH",
      "wire [DLY_W-1:0] wb_dly = (ck_act & ck_is_high & half_v[cur])"),
+    # ⭐ v2 primitive 1 (Wilson 10-27): a BRANCH_BIT's writeback delay is its
+    # wait W >= D* + B -- a per-writeback delay with a lower bound, which V4
+    # already admits, so the core is untouched; the line is anchored so a
+    # change to how a branch advances the timestamp is seen here.
+    ("P8br", "a branch's writeback delay is its wait W (>= D* + B)",
+     "wire [DLY_W-1:0] a_dly_wb = (a_op == OP_BRANCH_BIT) ? {{(DLY_W-BPW-PINB_W){1'b0}}, br_wait} : a_dly;"),
     # ⛔⛔ RULING W SPLIT READINESS IN TWO. `rel_due` is still "the timestamp
     # has arrived" (P9, re-anchored); `ready` adds W1's own-hold gate (P9w).
     # P9w is release jitter on a lane that loads the SDA hold, bounded by
