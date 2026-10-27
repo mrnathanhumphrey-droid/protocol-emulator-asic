@@ -27,6 +27,12 @@ TOGGLE_PIN = 0
 #: adds 0). "br" is R2's; "bra" is R2b's ADMISSIBLE set (Wilson 10-27 Q1):
 #: every spacing >= D* + B = 20 + 4*3 = 32, with margin.
 SPACING = {"br": (37, 53, 40, 23), "bra": (41, 53, 40, 40)}
+#: R2b's re-run (Wilson 10-27): the branch is TIMED, its wait W per image.
+#: R2 and R2b ran a ZERO-time branch; that word no longer encodes (W >= 32),
+#: so their images are built at W = BR_W_MIN and R2b's numbers are history.
+BR_WAIT = {"br": I.BR_W_MIN, "bra": I.BR_W_MIN,
+           "braw32": 32, "braw40": 40}
+SPACING["braw32"] = SPACING["braw40"] = SPACING["bra"]
 
 
 def _toggler(sp):
@@ -36,11 +42,14 @@ def _toggler(sp):
             I.act(I.OP_REARM, 0, 1, d_loop)]
 
 
-def _brancher(base_word, pin, chain, sp, merged=None):
+def _brancher(base_word, pin, chain, sp, merged=None, wait=None):
     """[words] for one brancher lane at word `base_word`: `chain` branches on
     TOGGLE_PIN, then the not-taken path, then the taken path. `merged` =
     "nt" / "tk" returns that path alone with the branch REMOVED -- the
-    branch-merged lane A2 prices (Wilson 10-27 Q3), never a chip image."""
+    branch-merged lane A2 prices (Wilson 10-27 Q3), never a chip image.
+    `merged` = "rb_nt" / "rb_tk" keeps that path with the branch REPLACED by
+    an ordinary action of delay W (a READBIT of the same pin): the fair
+    control once the branch is timed (Wilson 10-27)."""
     _d_on, _d_off, d_act, d_loop = sp
     n_br = chain
     nt = base_word + n_br                 # not-taken path: 2 words
@@ -49,11 +58,13 @@ def _brancher(base_word, pin, chain, sp, merged=None):
     for k in range(n_br):
         # every branch but the last falls through to the next branch when not
         # taken and jumps to the taken path when taken
-        words.append(I.act_branch_bit(TOGGLE_PIN, 1, tk))
+        words.append(I.act_branch_bit(TOGGLE_PIN, 1, tk, wait))
     nt_w = [I.act(I.OP_LEVEL, pin, 0, d_act), I.act(I.OP_REARM, 0, 1, d_loop)]
     tk_w = [I.act(I.OP_LEVEL, pin, 1, d_act), I.act(I.OP_REARM, 0, 1, d_loop)]
-    if merged is not None:
+    if merged in ("nt", "tk"):
         return nt_w if merged == "nt" else tk_w
+    if merged in ("rb_nt", "rb_tk"):
+        return [I.act(I.OP_READBIT, TOGGLE_PIN, 0, wait)] + (nt_w if merged == "rb_nt" else tk_w)
     return words + nt_w + tk_w
 
 
@@ -62,6 +73,7 @@ def build(n_branchers=1, chain=1, sp="br", merged=None):
     the rest parked. `merged` ("nt"/"tk"): every brancher's branch removed,
     one path kept -- A2's branch-merged view, not refused for branches."""
     spc = SPACING[sp]
+    wait = BR_WAIT[sp]
     d_on, d_off, d_act, _d_loop = spc
     hdrs, prog = [], []
     pins = [8, 9, 10, 11]
@@ -72,7 +84,7 @@ def build(n_branchers=1, chain=1, sp="br", merged=None):
             ws = _toggler(spc)
             hdrs.append(I.hdr(TOGGLE_PIN, I.PIN_NONE, 1, d_on + d_off, 0, 200, 240, base))
         elif ln <= n_branchers:
-            ws = _brancher(word, pins[ln - 1], chain, spc, merged)
+            ws = _brancher(word, pins[ln - 1], chain, spc, merged, wait)
             hdrs.append(I.hdr(pins[ln - 1], I.PIN_NONE, 1, 2 * d_act, 0, 200, 240, base))
         else:
             ws = [I.act(I.OP_REARM, 0, 0, 500)]
@@ -94,6 +106,10 @@ CORPUS = {
     "br_chain3": (4, 3, "br"),
     "bra_alone": (1, 1, "bra"),          # R2b: the admissible corpus
     "bra_contend4": (4, 1, "bra"),
+    "braw32_alone": (1, 1, "braw32"),    # R2b re-run: the TIMED branch
+    "braw32_contend4": (4, 1, "braw32"),
+    "braw40_alone": (1, 1, "braw40"),
+    "braw40_contend4": (4, 1, "braw40"),
 }
 
 

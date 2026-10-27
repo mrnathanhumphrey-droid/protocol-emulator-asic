@@ -639,6 +639,10 @@ module pe_engine #(
   // set) is refused at dispatch -- config_err, the lane halts.
   localparam integer BR_NWORDS = ((1 << AW) - ACT_BASE) / ACT_BYTES;
   localparam integer BR_W      = AW - $clog2(ACT_BYTES);
+  // BRANCH_BIT's WAIT W (Wilson 10-27, R2b): count:pinb, >= D* + B. The
+  // successor releases W after the branch, so its refill has a window
+  // (option A fetches nothing past a branch head). pe_isa.BR_W_MIN mirrors it.
+  localparam integer BR_W_MIN  = N_LANES * 4 + (N_LANES - 1) * 3;   // 32
   generate
     if ((ACT_BASE % ACT_BYTES) != 0) begin : g_act_aligned
       ACTION_REGION_NOT_WORD_ALIGNED _static_assert ();
@@ -1681,6 +1685,8 @@ module pe_engine #(
   // ⭐ WHICH TX QUEUE THIS ACTION DRAWS FROM. Per-ACTION, so a lane's queue is
   // assigned by the PROGRAM and no lane number is baked into the hardware.
   assign           a_q     = cur_act[LOWX +: BQW];
+  // BRANCH_BIT's WAIT W: count is its high nibble, pinb its low
+  wire [BPW+PINB_W-1:0] br_wait = {a_cnt, cur_act[MOD_W +: PINB_W]};
 
   // ⭐⭐ THE RESERVED NON-DRIVING PIN INDEX. PINW encodes 2**PINW codes and only
   // N_PINS are real, so `PIN_NONE` costs nothing: it is a value that already
@@ -1751,8 +1757,14 @@ module pe_engine #(
   // half of it for the HIGH phase of a HALF_HIGH lane's clocked action. ONE
   // wire, read by both the WB and TF1's next-state mirror `ts_n`, so the two
   // cannot drift. (On an open-drain lane the park rebase then overrides it.)
-  // ⭐ BRANCH_BIT is ZERO-TIME: its delay field is the target, so it adds 0
+  // ⭐ BRANCH_BIT is TIMED: its delay field is the target, so it adds its
+  // WAIT W (count:pinb) instead. M_BR_W_ZERO restores the zero-time branch
+  // R2b measured (the successor's refill had no window).
+`ifdef M_BR_W_ZERO
   wire [DLY_W-1:0] wb_dly = (a_op == OP_BRANCH_BIT) ? {DLY_W{1'b0}}
+`else
+  wire [DLY_W-1:0] wb_dly = (a_op == OP_BRANCH_BIT) ? {{(DLY_W-BPW-PINB_W){1'b0}}, br_wait}
+`endif
                           : (ck_act & ck_is_high & half_v[cur])
                             ? (a_dly >> 1) : a_dly;
   // ⚠ THE TWO OPCODES COUNT BITS DIFFERENTLY, and this is pre-existing ISA
@@ -1951,7 +1963,8 @@ module pe_engine #(
 `else
   wire [AW-1:0] br_tgt   = ACT_BASE[AW-1:0] + br_tgt_w * ACT_BYTES[AW-1:0];
 `endif
-  wire          br_bad   = (a_dly >= BR_NWORDS[DLY_W-1:0]);
+  wire          br_bad   = (a_dly >= BR_NWORDS[DLY_W-1:0])
+                         | (br_wait < BR_W_MIN[BPW+PINB_W-1:0]);
 `ifdef M_BR_ALWAYS
   wire          br_taken = 1'b1;
 `elsif M_BR_NEVER

@@ -10,8 +10,8 @@
  *       the lane's PC -- the buffer-swap invariant, which is what a word fetched
  *       PAST a branch (M_BR_FETCH_PAST) breaks.
  * And Wilson's R2 measurement under option A, per branch: the successor's
- * LATENESS (its dispatch minus its release -- the branch's own release, since
- * a branch adds 0) and the STALL cycles (lane released, head slot empty).
+ * LATENESS (its dispatch minus its OWN release -- the branch's release plus
+ * the branch's wait W) and the STALL cycles (lane released, head slot empty).
  * ⛔ Every message is a plain literal (progress.vh's lesson).
  */
 integer bc_dbg, bc_on, bc_k, bc_wb = 0, bc_taken = 0, bc_not = 0, bc_bad = 0, bc_inv = 0;
@@ -44,7 +44,9 @@ always @(posedge clk) if (rst_n === 1'b1 && bc_on != 0 && !done) begin
     end else begin
       bc_exp[dut.u_eng.cur] = bc_pc + PE_ACT_BYTES;  bc_not = bc_not + 1;
     end
-    bc_rel[dut.u_eng.cur] = dut.u_eng.l_timestamp[dut.u_eng.cur];
+    // the SUCCESSOR's own release: the branch's plus its wait W (R2c: a
+    // timed branch; reading the branch's release alone counted W as lateness)
+    bc_rel[dut.u_eng.cur] = dut.u_eng.l_timestamp[dut.u_eng.cur] + dut.u_eng.wb_dly;
     // the SAMPLE-TIME jitter: the branch reads its bit at writeback, this
     // late after its own release (Wilson R2: priced like READBIT's J?)
     bc_samp = (dut.u_eng.now - dut.u_eng.l_timestamp[dut.u_eng.cur]) & 16'hFFFF;

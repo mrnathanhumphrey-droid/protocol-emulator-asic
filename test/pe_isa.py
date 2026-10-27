@@ -268,17 +268,40 @@ def act(op, pin, level, delay, count=0, q=0, pinb=0, mod=0) -> bytes:
 SELF_CLOCKED = 1        # the `level` value that means "self-clocked"
 
 
-def act_branch_bit(pin, level, target) -> bytes:
+#: BRANCH_BIT's WAIT W: the branch is a TIMED action (Wilson 10-27, R2b). It
+#: samples at its own release and its successor releases W later, so the
+#: successor's refill -- which option A cannot start before the bit decides
+#: it -- has the window every ordinary action has. W >= D* + B: the port's
+#: throughput floor D* = N_LANES * L_REFILL plus the EDF blocking of the
+#: other lanes at the dispatch spacing C (model/a2/gate_j_program.py).
+#: ⛔ R2b measured the zero-time branch: ~4-5 stall cycles per branch at any
+#: spacing, and ordinary actions on OTHER lanes pushed past A2's bound.
+BR_L_REFILL, BR_C_SPACING = 4, 3
+BR_W_MIN = N_LANES * BR_L_REFILL + (N_LANES - 1) * BR_C_SPACING     # 32
+BR_W_MAX = (1 << (CNT_W + PINB_W)) - 1                              # 255
+
+
+def branch_wait(x):
+    """W from an unpacked word: `count` is its high nibble, `pinb` its low."""
+    return (x["count"] << PINB_W) | x["pinb"]
+
+
+def act_branch_bit(pin, level, target, wait) -> bytes:
     """BRANCH_BIT (opcode 8, primitive 1): sample `pin` (READBIT's sample) at
-    writeback; if it equals `level`, continue at word `target`, else at the
-    next word. ZERO-TIME -- the delay field IS the target, so the branch adds
-    no time and the successor's own delay counts from the same release.
-    delay[9:7], count, q, pinb and mod are must-be-zero."""
+    the branch's writeback; if it equals `level`, continue at word `target`,
+    else at the next word. TIMED: the successor releases `wait` (W) cycles
+    after the branch, W in count:pinb (8 bits), BR_W_MIN <= W <= BR_W_MAX.
+    The target is delay[6:0]; delay[9:7], q and mod are must-be-zero."""
+    w = int(wait)
+    if not BR_W_MIN <= w <= BR_W_MAX:
+        raise ValueError("branch wait W = %d outside %d..%d (W >= D* + B)"
+                         % (w, BR_W_MIN, BR_W_MAX))
     t = int(target)
     if not 0 <= t < (STORE_BYTES - ACT_BASE) // ACT_BYTES:
         raise ValueError("branch target word %d outside the store (0..%d)"
                          % (t, (STORE_BYTES - ACT_BASE) // ACT_BYTES - 1))
-    return act(OP_BRANCH_BIT, pin, level, t)
+    return act(OP_BRANCH_BIT, pin, level, t,
+               count=w >> PINB_W, pinb=w & ((1 << PINB_W) - 1))
 
 
 def act_shift_clocked(pin, delay, nbits=8, q=0) -> bytes:
@@ -452,8 +475,8 @@ def branch_problems(img):
     makes no sense (Wilson 10-26 Q4/Q5): a target outside the store (also
     refused at runtime), a SELF-target (waiting on a pin is ARM's job), a
     branch in the store's LAST word (its not-taken successor is off the end),
-    a pin that is not real, or a must-be-zero field set (delay[9:7], count,
-    q, pinb, mod)."""
+    a pin that is not real, a WAIT W below BR_W_MIN (also refused at
+    runtime), or a must-be-zero field set (q, mod)."""
     out = []
     nwords = (STORE_BYTES - ACT_BASE) // ACT_BYTES
     for w in range(nwords):
@@ -476,7 +499,11 @@ def branch_problems(img):
         if x["pin"] >= N_PINS:
             out.append("word %d: BRANCH_BIT samples pin %d, which is not a real "
                        "pin (flags as virtual pins come later)" % (w, x["pin"]))
-        for f in ("count", "q", "pinb", "mod"):
+        if branch_wait(x) < BR_W_MIN:
+            out.append("word %d: BRANCH_BIT wait W = %d is below D* + B = %d -- "
+                       "the successor's refill has no window; the chip refuses "
+                       "it at dispatch" % (w, branch_wait(x), BR_W_MIN))
+        for f in ("q", "mod"):
             if x[f]:
                 out.append("word %d: BRANCH_BIT field %s = %d must be zero" % (w, f, x[f]))
     return out
