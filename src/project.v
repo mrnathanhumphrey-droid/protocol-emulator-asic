@@ -473,7 +473,7 @@ module tt_um_protocol_emulator #(
   reg [2:0]    rb_bit;
   reg          rb_re;
 
-  wire [AW-1:0]  e_wraddr;
+  wire [ACT_BYTES_T*AW-1:0] e_wraddr_bk;   // step 2: one copy per bank
   wire           e_wre;
   wire [ACT_BYTES_T*8-1:0] s_wrdata;
 
@@ -492,7 +492,7 @@ module tt_um_protocol_emulator #(
       .re(pm_rd ? rb_re : e_re),
       .raddr(pm_rd ? rb_addr : e_raddr),
       .rdata(s_rdata),
-      .wre(e_wre & run), .wraddr(e_wraddr),
+      .wre(e_wre & run), .wraddr_bk(e_wraddr_bk),
       .wrdata(s_wrdata)
   );
 
@@ -687,7 +687,7 @@ module tt_um_protocol_emulator #(
   ) u_eng (
       .clk(clk), .rst_n(eng_rst_n), .por_n(rst_n_s), .run(eng_run),
       .s_raddr(e_raddr), .s_re(e_re), .s_rdata(s_rdata),
-      .s_wraddr(e_wraddr), .s_wre(e_wre),
+      .s_wraddr_bk(e_wraddr_bk), .s_wre(e_wre),
       .s_wrdata(s_wrdata),
       .pin_out(e_pin_out), .pin_oe(e_pin_oe), .pin_inv(e_pin_inv),
       .pin_isck(e_pin_isck),
@@ -1055,5 +1055,23 @@ module pe_dup_ff (
   always @(posedge clk or negedge rst_n) begin
     if (!rst_n) q <= 1'b0;
     else        q <= d;
+  end
+endmodule
+
+// A register that synthesis must NOT merge with its twins (replication for
+// fan-out): measured on yosys 0.69, (* keep *) does not stop opt_merge, a
+// kept hierarchy does (pe_dup_ff above, multi-bit with a load enable; v2 slack recovery step 2,
+// instantiated by pe_engine's g_wraddr).
+(* keep_hierarchy *)
+module pe_dup_reg #(parameter integer W = 1) (
+    input  wire         clk,
+    input  wire         rst_n,
+    input  wire         en,
+    input  wire [W-1:0] d,
+    output reg  [W-1:0] q
+);
+  always @(posedge clk or negedge rst_n) begin
+    if (!rst_n) q <= {W{1'b0}};
+    else if (en) q <= d;
   end
 endmodule

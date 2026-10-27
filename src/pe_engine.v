@@ -216,7 +216,6 @@
       s_re      <= 1'b0; \
       s_raddr   <= {AW{1'b0}}; \
       s_wre     <= 1'b0; \
-      s_wraddr  <= {AW{1'b0}}; \
 
 
 // ---- MUST-FIRE MUTANTS: re-assert a register's own value AFTER the halt
@@ -412,7 +411,13 @@ module pe_engine #(
     output reg                  s_re,
     input  wire [7:0]           s_rdata,
     // ⭐ the WIDE action fetch: one registered cycle for a whole action word
-    output reg  [AW-1:0]        s_wraddr,
+    // ⭐ v2 slack recovery step 2 (Wilson 10-27): ONE COPY OF THE REFILL READ
+    // ADDRESS PER STORE BANK, bank k at [k*AW +: AW] (ACT_BYTES copies,
+    // INLINED as s_wrdata's width is). The single register drove every
+    // bank's 128:1 row mux through a 17-buffer tree, the canary's worst
+    // family (+2.10 ns). Zero latency: each copy loads `paddr` at P_REQ, as
+    // the one register did; (* keep_hierarchy *) pe_dup_reg stops opt_merge.
+    output wire [((5+((N_PINS<=2)?1:(N_PINS<=4)?2:(N_PINS<=8)?3:(N_PINS<=16)?4:5)+1+DLY_W+4+2+4+2+7)/8)*AW-1:0] s_wraddr_bk,
     // ⭐ v2: the store is WORD-organised (4 byte banks), so a wide read is one
     // word address -- the TM2 per-byte address registers (`s_wraddrk`) went
     // with the byte-wide array they existed for.
@@ -2268,7 +2273,7 @@ module pe_engine #(
         // while P_CAP files the word into the slot chosen for a different one.
         // Latching the (lane, slot, address) triple together is what keeps the
         // refill atomic with respect to the dispatch pipeline.
-        s_wraddr <= paddr;
+        // (the address itself: the per-bank copies below, same condition)
         // TM2: each byte's address, added HERE (off the store read path)
 
       end
@@ -3530,4 +3535,14 @@ module pe_engine #(
   // count a second time.
   wire _unused_eng = &{l_pin[0], 1'b0};
 
+  // ⭐ step 2: the per-bank refill-address copies (see the s_wraddr_bk port)
+  genvar gwa;
+  generate
+    for (gwa = 0; gwa < ACT_BYTES; gwa = gwa + 1) begin : g_wraddr
+      pe_dup_reg #(.W(AW)) u_wra (.clk(clk), .rst_n(rst_n), .en(pst == P_REQ),
+                                 .d(paddr), .q(s_wraddr_bk[gwa*AW +: AW]));
+    end
+  endgenerate
+
 endmodule
+

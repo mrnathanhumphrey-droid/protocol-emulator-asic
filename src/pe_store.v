@@ -65,7 +65,9 @@ module pe_store #(
     // with "flops" J can be ~1; with "sram" J >= 3. The flop path is what
     // ships, so the rule is violated only on a path that is currently blocked.
     input  wire            wre,
-    input  wire [AW-1:0]   wraddr,     // WORD-aligned (the low WB_W bits are 0)
+    // WORD-aligned (the low WB_W bits are 0); ONE COPY PER BANK, bank k at
+    // [k*AW +: AW] (v2 slack recovery step 2: the fan-out is the bank's own)
+    input  wire [WIDE_B*AW-1:0] wraddr_bk,
     output reg  [WIDE_B*8-1:0] wrdata
 );
 
@@ -108,16 +110,18 @@ module pe_store #(
   wire [AW-WB_W-1:0] wrow = waddr[AW-1:WB_W];
   wire [WB_W-1:0]    rsel = raddr[WB_W-1:0];
   wire [AW-WB_W-1:0] rrow = raddr[AW-1:WB_W];
-`ifdef M_STORE_ROW_OFF1
-  wire [AW-WB_W-1:0] xrow = wraddr[AW-1:WB_W] + {{(AW-WB_W-1){1'b0}}, 1'b1};
-`else
-  wire [AW-WB_W-1:0] xrow = wraddr[AW-1:WB_W];
-`endif
   wire [7:0] rbyte [0:WIDE_B-1];
   genvar gb;
   generate
     for (gb = 0; gb < WIDE_B; gb = gb + 1) begin : g_bank
       reg [7:0] mem [0:NW-1];
+      // this bank's own copy of the wide-read row
+`ifdef M_STORE_ROW_OFF1
+      wire [AW-WB_W-1:0] xrow = wraddr_bk[gb*AW+WB_W +: AW-WB_W] + {{(AW-WB_W-1){1'b0}}, 1'b1};
+`else
+      wire [AW-WB_W-1:0] xrow = wraddr_bk[gb*AW+WB_W +: AW-WB_W];
+`endif
+      wire _unused_lo = &{1'b0, wraddr_bk[gb*AW +: WB_W]};
       always @(posedge clk) begin
 `ifdef M_STORE_WRONG_BANK
         if (we[gb] && ((wsel == gb && gb != WIDE_B-1) || (gb == 0 && wsel == WIDE_B-1))) mem[wrow] <= wdata;
@@ -138,7 +142,6 @@ module pe_store #(
   // ⛔ RULING TM2's per-byte address registers are GONE with the byte-wide
   // array: a word read has no `wraddr + k` add to move out of the mux path.
   // (So is `M_TM2_STORE_ADD`, the mutant that restored that add.)
-  wire _unused_lo = &{1'b0, wraddr[WB_W-1:0]};
 
   // ⚠ `rst_n` is intentionally NOT used to clear the array. Clearing 2**AW
   // bytes would add a reset fanout to every storage bit for no benefit: the
