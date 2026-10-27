@@ -21,20 +21,27 @@ sys.path.insert(0, HERE)
 import pe_isa as I                                              # noqa: E402
 
 TOGGLE_PIN = 0
-D_ON, D_OFF = 37, 53          # the toggler: odd, coprime, so phases walk
-D_ACT = 40                    # every brancher's drive actions
-D_LOOP = 23                   # the loop re-arm
+#: spacing sets (d_on, d_off, d_act, d_loop). The toggler's two are odd and
+#: coprime, so phases walk; d_act is every brancher's drive action, d_loop the
+#: loop re-arm (the spacing before each branch AND its successor -- a branch
+#: adds 0). "br" is R2's; "bra" is R2b's ADMISSIBLE set (Wilson 10-27 Q1):
+#: every spacing >= D* + B = 20 + 4*3 = 32, with margin.
+SPACING = {"br": (37, 53, 40, 23), "bra": (41, 53, 40, 40)}
 
 
-def _toggler():
-    return [I.act(I.OP_LEVEL, TOGGLE_PIN, 1, D_ON),
-            I.act(I.OP_LEVEL, TOGGLE_PIN, 0, D_OFF),
-            I.act(I.OP_REARM, 0, 1, D_LOOP)]
+def _toggler(sp):
+    d_on, d_off, _d_act, d_loop = sp
+    return [I.act(I.OP_LEVEL, TOGGLE_PIN, 1, d_on),
+            I.act(I.OP_LEVEL, TOGGLE_PIN, 0, d_off),
+            I.act(I.OP_REARM, 0, 1, d_loop)]
 
 
-def _brancher(base_word, pin, chain=1):
+def _brancher(base_word, pin, chain, sp, merged=None):
     """[words] for one brancher lane at word `base_word`: `chain` branches on
-    TOGGLE_PIN, then the not-taken path, then the taken path."""
+    TOGGLE_PIN, then the not-taken path, then the taken path. `merged` =
+    "nt" / "tk" returns that path alone with the branch REMOVED -- the
+    branch-merged lane A2 prices (Wilson 10-27 Q3), never a chip image."""
+    _d_on, _d_off, d_act, d_loop = sp
     n_br = chain
     nt = base_word + n_br                 # not-taken path: 2 words
     tk = nt + 2                           # taken path: 2 words
@@ -43,25 +50,30 @@ def _brancher(base_word, pin, chain=1):
         # every branch but the last falls through to the next branch when not
         # taken and jumps to the taken path when taken
         words.append(I.act_branch_bit(TOGGLE_PIN, 1, tk))
-    words += [I.act(I.OP_LEVEL, pin, 0, D_ACT), I.act(I.OP_REARM, 0, 1, D_LOOP)]
-    words += [I.act(I.OP_LEVEL, pin, 1, D_ACT), I.act(I.OP_REARM, 0, 1, D_LOOP)]
-    return words
+    nt_w = [I.act(I.OP_LEVEL, pin, 0, d_act), I.act(I.OP_REARM, 0, 1, d_loop)]
+    tk_w = [I.act(I.OP_LEVEL, pin, 1, d_act), I.act(I.OP_REARM, 0, 1, d_loop)]
+    if merged is not None:
+        return nt_w if merged == "nt" else tk_w
+    return words + nt_w + tk_w
 
 
-def build(n_branchers=1, chain=1):
+def build(n_branchers=1, chain=1, sp="br", merged=None):
     """One image: the toggler on lane 0, `n_branchers` branchers (lanes 1..),
-    the rest parked."""
+    the rest parked. `merged` ("nt"/"tk"): every brancher's branch removed,
+    one path kept -- A2's branch-merged view, not refused for branches."""
+    spc = SPACING[sp]
+    d_on, d_off, d_act, _d_loop = spc
     hdrs, prog = [], []
     pins = [8, 9, 10, 11]
     word = 0
     for ln in range(I.N_LANES):
         base = I.ACT_BASE + word * I.ACT_BYTES
         if ln == 0:
-            ws = _toggler()
-            hdrs.append(I.hdr(TOGGLE_PIN, I.PIN_NONE, 1, D_ON + D_OFF, 0, 200, 240, base))
+            ws = _toggler(spc)
+            hdrs.append(I.hdr(TOGGLE_PIN, I.PIN_NONE, 1, d_on + d_off, 0, 200, 240, base))
         elif ln <= n_branchers:
-            ws = _brancher(word, pins[ln - 1], chain)
-            hdrs.append(I.hdr(pins[ln - 1], I.PIN_NONE, 1, 2 * D_ACT, 0, 200, 240, base))
+            ws = _brancher(word, pins[ln - 1], chain, spc, merged)
+            hdrs.append(I.hdr(pins[ln - 1], I.PIN_NONE, 1, 2 * d_act, 0, 200, 240, base))
         else:
             ws = [I.act(I.OP_REARM, 0, 0, 500)]
             hdrs.append(I.hdr(I.PIN_NONE, I.PIN_NONE, 1, 500, 0, 200, 240, base))
@@ -74,21 +86,23 @@ def build(n_branchers=1, chain=1):
     return img
 
 
-#: name -> (branchers, chain length)
+#: name -> (branchers, chain length, spacing set)
 CORPUS = {
-    "br_alone": (1, 1),
-    "br_contend4": (4, 1),
-    "br_chain2": (4, 2),
-    "br_chain3": (4, 3),
+    "br_alone": (1, 1, "br"),
+    "br_contend4": (4, 1, "br"),
+    "br_chain2": (4, 2, "br"),
+    "br_chain3": (4, 3, "br"),
+    "bra_alone": (1, 1, "bra"),          # R2b: the admissible corpus
+    "bra_contend4": (4, 1, "bra"),
 }
 
 
 def main(argv) -> int:
     out = argv[1] if len(argv) > 1 else os.path.join(HERE, "..", "probe_branch")
     os.makedirs(out, exist_ok=True)
-    for name, (nb, ch) in CORPUS.items():
+    for name, (nb, ch, sp) in CORPUS.items():
         p = os.path.join(out, name + ".hex")
-        I.write_image(p, build(nb, ch))
+        I.write_image(p, build(nb, ch, sp))
         print("  %-14s %d brancher lane(s), chain %d -> %s" % (name, nb, ch, p))
     return 0
 

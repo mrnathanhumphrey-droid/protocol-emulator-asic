@@ -14,15 +14,17 @@
  * a branch adds 0) and the STALL cycles (lane released, head slot empty).
  * ⛔ Every message is a plain literal (progress.vh's lesson).
  */
-integer bc_on, bc_k, bc_wb = 0, bc_taken = 0, bc_not = 0, bc_bad = 0, bc_inv = 0;
+integer bc_dbg, bc_on, bc_k, bc_wb = 0, bc_taken = 0, bc_not = 0, bc_bad = 0, bc_inv = 0;
 integer bc_disp = 0, bc_late_max = 0, bc_late_sum = 0, bc_late_n = 0, bc_stall = 0;
 integer bc_exp [0:7];
 integer bc_rel [0:7];
 integer bc_pc, bc_tgt, bc_late, bc_samp, bc_samp_max = 0, bc_samp_sum = 0;
+integer bc_ctl, bc_ctl_n = 0, bc_ctl_max = 0, bc_ctl_sum = 0;   // R2b's CONTROL
 reg     bc_bit;
 reg [PE_ACT_W-1:0] bc_word;
 initial begin
   if (!$value$plusargs("BRCHECK=%d", bc_on)) bc_on = 0;
+  if (!$value$plusargs("BRDBG=%d", bc_dbg)) bc_dbg = 0;
   for (bc_k = 0; bc_k < 8; bc_k = bc_k + 1) begin bc_exp[bc_k] = -1; bc_rel[bc_k] = 0; end
 end
 
@@ -63,7 +65,17 @@ always @(posedge clk) if (rst_n === 1'b1 && bc_on != 0 && !done) begin
       bc_late = (dut.u_eng.now - bc_rel[dut.u_eng.cur]) & 16'hFFFF;
       bc_late_sum = bc_late_sum + bc_late;  bc_late_n = bc_late_n + 1;
       if (bc_late > bc_late_max) bc_late_max = bc_late;
+      if (bc_dbg != 0)
+        $display("BRDBG suc lane %0d op %0d late %0d now %0d", dut.u_eng.cur, dut.u_eng.cur_act[PE_ACT_W-1 -: PE_OP_W], bc_late, dut.u_eng.now);
       bc_exp[dut.u_eng.cur] = -1;
+    end else if (dut.u_eng.cur_act[PE_ACT_W-1 -: PE_OP_W] != PE_N_BUILT_OPS - 1) begin
+      // the CONTROL (Wilson R2b): an ordinary action -- not a branch, not a
+      // branch's successor -- dispatch minus its own release
+      bc_ctl = (dut.u_eng.now - dut.u_eng.l_timestamp[dut.u_eng.cur]) & 16'hFFFF;
+      bc_ctl_sum = bc_ctl_sum + bc_ctl;  bc_ctl_n = bc_ctl_n + 1;
+      if (bc_ctl > bc_ctl_max) bc_ctl_max = bc_ctl;
+      if (bc_dbg != 0)
+        $display("BRDBG ctl lane %0d op %0d late %0d now %0d", dut.u_eng.cur, dut.u_eng.cur_act[PE_ACT_W-1 -: PE_OP_W], bc_ctl, dut.u_eng.now);
     end
     bc_word = {img[bc_pc], img[bc_pc + 1], img[bc_pc + 2], img[bc_pc + 3]};
     if (dut.u_eng.cur_act !== bc_word) begin
@@ -75,4 +87,4 @@ always @(posedge clk) if (rst_n === 1'b1 && bc_on != 0 && !done) begin
 end
 
 final if (bc_on != 0)
-  $display("BRCHECK wb=%0d taken=%0d not=%0d pc_bad=%0d head_bad=%0d dispatches=%0d late_n=%0d late_max=%0d late_sum=%0d stall_cycles=%0d samp_max=%0d samp_sum=%0d", bc_wb, bc_taken, bc_not, bc_bad, bc_inv, bc_disp, bc_late_n, bc_late_max, bc_late_sum, bc_stall, bc_samp_max, bc_samp_sum);
+  $display("BRCHECK wb=%0d taken=%0d not=%0d pc_bad=%0d head_bad=%0d dispatches=%0d late_n=%0d late_max=%0d late_sum=%0d stall_cycles=%0d samp_max=%0d samp_sum=%0d ctl_n=%0d ctl_max=%0d ctl_sum=%0d", bc_wb, bc_taken, bc_not, bc_bad, bc_inv, bc_disp, bc_late_n, bc_late_max, bc_late_sum, bc_stall, bc_samp_max, bc_samp_sum, bc_ctl_n, bc_ctl_max, bc_ctl_sum);
