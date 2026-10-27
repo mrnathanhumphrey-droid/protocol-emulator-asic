@@ -476,7 +476,9 @@ def branch_problems(img):
     refused at runtime), a SELF-target (waiting on a pin is ARM's job), a
     branch in the store's LAST word (its not-taken successor is off the end),
     a pin that is not real, a WAIT W below BR_W_MIN (also refused at
-    runtime), or a must-be-zero field set (q, mod)."""
+    runtime), a must-be-zero field set (q, mod), or a branch->branch CHAIN
+    (either successor a BRANCH_BIT: Wilson 10-27 Q2, refused statically
+    until timed chains are measured)."""
     out = []
     nwords = (STORE_BYTES - ACT_BASE) // ACT_BYTES
     for w in range(nwords):
@@ -503,6 +505,14 @@ def branch_problems(img):
             out.append("word %d: BRANCH_BIT wait W = %d is below D* + B = %d -- "
                        "the successor's refill has no window; the chip refuses "
                        "it at dispatch" % (w, branch_wait(x), BR_W_MIN))
+        for kind, s in (("not-taken", w + 1), ("taken", t)):
+            sa = ACT_BASE + s * ACT_BYTES
+            if s < nwords and s != w and sa + ACT_BYTES <= len(img) and \
+                    _unpack(ACT_FIELDS, img[sa:sa + ACT_BYTES], ACT_BYTES)["op"] == OP_BRANCH_BIT:
+                out.append("word %d: BRANCH_BIT's %s successor (word %d) is a "
+                           "BRANCH_BIT -- a branch->branch chain, refused until "
+                           "timed chains are measured (Wilson 10-27 Q2)"
+                           % (w, kind, s))
         for f in ("q", "mod"):
             if x[f]:
                 out.append("word %d: BRANCH_BIT field %s = %d must be zero" % (w, f, x[f]))

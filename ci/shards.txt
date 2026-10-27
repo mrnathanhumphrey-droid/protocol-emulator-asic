@@ -40,6 +40,7 @@ sim1 test/run_spitgt.py
 # sim2 -- 201 (+ its kill audit) + 197 + 106 + 100 + 9
 sim2 test/run_mutants.py
 sim2 model/gate_v2_equiv.py
+sim2 test/run_branch_check.py
 sim2 model/gate_mutant_kills.py
 sim2 model/gate_sda_hold.py
 sim2 test/run_w_sweep.py

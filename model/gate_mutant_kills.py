@@ -62,6 +62,13 @@ KILLERS = {
     "M_STORE_WRONG_BANK": RUN_MUTANTS,
     # -- v2 step 2: the load's magic check (the equivalence gate's load section)
     "M_NO_MAGIC": "model/gate_v2_equiv.py",
+    # CE1: the rebase at the observed rise (an `elsif` arm, undiscovered
+    # until 10-27) -- killed on t_HIGH >= d by the UM10204 gate
+    "M_CK_RISE_ELIGIBLE": "model/a2/gate_um10204.py",
+    # -- v2 primitive 1: BRANCH_BIT (bench tb_equiv +BRCHECK) ---------------
+    "M_BR_TGT_OFF1": "test/run_branch_check.py", "M_BR_ALWAYS": "test/run_branch_check.py",
+    "M_BR_NEVER": "test/run_branch_check.py", "M_BR_LVL_INV": "test/run_branch_check.py",
+    "M_BR_FETCH_PAST": "test/run_branch_check.py", "M_BR_W_ZERO": "test/run_branch_check.py",
     # silicon fix #2: killed on VALUE by Layer V1 (tb_trace, corpus_i2c)
     "M_TX_LOAD_ANYPHASE": RUN_MUTANTS,
     # silicon fix #3: killed on VALUE by Layer V-RX (tb_trace, corpus_spim)
@@ -233,7 +240,10 @@ def audit_scratch(found, table, ran):
 
 
 def discover():
-    """Every `ifdef`/`ifndef M_*` in the RTL and the bench includes."""
+    """Every `ifdef`/`ifndef`/`elsif M_*` in the RTL and the bench includes.
+    ⛔ `elsif` added 10-27 (v2 primitive 1): an `elsif` mutant arm was never
+    discovered, so M_CK_RISE_ELIGIBLE (killed by gate_um10204) sat outside
+    this audit since CE1 -- found when BRANCH_BIT's taken-test chain was."""
     found = set()
     pats = [os.path.join(ROOT, "src", "*.v"), os.path.join(ROOT, "test", "*.v"),
             os.path.join(ROOT, "test", "*.vh")]
@@ -242,7 +252,7 @@ def discover():
             if os.path.basename(p).startswith("probe_"):
                 continue
             with open(p, encoding="utf-8", errors="replace") as fh:
-                found |= set(re.findall(r"`ifn?def\s+(M_[A-Z0-9_]+)", fh.read()))
+                found |= set(re.findall(r"`(?:ifn?def|elsif)\s+(M_[A-Z0-9_]+)", fh.read()))
     return found
 
 

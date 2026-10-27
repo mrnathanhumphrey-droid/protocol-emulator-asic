@@ -253,6 +253,10 @@ CHANGE_SET = frozenset([
     "test/gate_coverage.py",           # 13 anchors re-anchored by their text
     # ---- AMENDMENT 6 (10-26, Wilson: reserved opcodes refused at load).
     "test/coverage_sweep.sh",          # --coverage-max-width 512 (l_act measured whole)
+    # ---- AMENDMENT 7 (10-27, Nate go: primitive 1, BRANCH_BIT, Wilson R2c).
+    "test/branch_check.vh",            # NEW: tb_equiv +BRCHECK, the PC / head / stall checks
+    "test/branch_corpus.py",           # NEW: the branch images, chain + runtime refusals
+    "test/run_branch_check.py",        # NEW: the gate, the six M_BR_* must-fires' killer
 ])
 
 

@@ -2209,12 +2209,11 @@ module pe_engine #(
       else if (hact[ACT_W-1 -: OP_W] == OP_REARM && !hact[ACT_W-1-OP_W-PINW])
         want_fetch = 1'b0;                           // chaining: successor is
                                                      // the head; spare unused
+      // OPTION A: a branch head's successor is unknown until it writes back
 `ifndef M_BR_FETCH_PAST
       else if (hact[ACT_W-1 -: OP_W] == OP_BRANCH_BIT)
-        want_fetch = 1'b0;                           // OPTION A: the successor
+        want_fetch = 1'b0;
 `endif
-                                                     // is unknown until the
-                                                     // branch writes back
       else
         want_fetch = !fvalid;                        // fill the spare
     end

@@ -89,4 +89,4 @@ always @(posedge clk) if (rst_n === 1'b1 && bc_on != 0 && !done) begin
 end
 
 final if (bc_on != 0)
-  $display("BRCHECK wb=%0d taken=%0d not=%0d pc_bad=%0d head_bad=%0d dispatches=%0d late_n=%0d late_max=%0d late_sum=%0d stall_cycles=%0d samp_max=%0d samp_sum=%0d ctl_n=%0d ctl_max=%0d ctl_sum=%0d", bc_wb, bc_taken, bc_not, bc_bad, bc_inv, bc_disp, bc_late_n, bc_late_max, bc_late_sum, bc_stall, bc_samp_max, bc_samp_sum, bc_ctl_n, bc_ctl_max, bc_ctl_sum);
+  $display("BRCHECK wb=%0d taken=%0d not=%0d pc_bad=%0d head_bad=%0d dispatches=%0d late_n=%0d late_max=%0d late_sum=%0d stall_cycles=%0d samp_max=%0d samp_sum=%0d ctl_n=%0d ctl_max=%0d ctl_sum=%0d cfgerr=%0d live1=%0d", bc_wb, bc_taken, bc_not, bc_bad, bc_inv, bc_disp, bc_late_n, bc_late_max, bc_late_sum, bc_stall, bc_samp_max, bc_samp_sum, bc_ctl_n, bc_ctl_max, bc_ctl_sum, dut.u_eng.config_err, dut.u_eng.l_live[1]);

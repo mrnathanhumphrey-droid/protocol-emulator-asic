@@ -281,22 +281,31 @@ def walk(img):
         return
     for ln in range(I.N_LANES):
         h = I.read_header(img, ln)
-        pc, seen = h["base"], 0
-        while pc + I.ACT_BYTES <= len(img) and seen < 200:
-            a = unpack(I.ACT_FIELDS, img[pc:pc + I.ACT_BYTES], I.ACT_BYTES)
-            yield ln, h, a
-            seen += 1
-            # ⛔ ANY REARM ENDS THE LANE, not only a looping one (ruling M).
-            # The RTL never moves a PC past a REARM: level 1 loops to `l_base`,
-            # level 0 does not retire at all (`act_retire`). This walk used to
-            # stop only at level 1 and so ran on past a chaining REARM into
-            # whatever followed -- harmless while every parked lane's REARM was
-            # the image's last word, and 60-70 phantom actions per parked lane
-            # once images are written whole with the store filler. MEASURED on
-            # every tracked image before the change: identical walks unpadded.
-            if a["op"] == I.OP_REARM:
-                break
-            pc += I.ACT_BYTES
+        # ⭐ v2 primitive 1: a BRANCH_BIT also reaches its TARGET, so the lane
+        # is walked from a worklist; each word is yielded once. A lane with no
+        # branch walks exactly as before (one entry, no revisits).
+        todo, done, seen = [h["base"]], set(), 0
+        while todo and seen < 200:
+            pc = todo.pop(0)
+            while pc + I.ACT_BYTES <= len(img) and seen < 200 and pc not in done:
+                done.add(pc)
+                a = unpack(I.ACT_FIELDS, img[pc:pc + I.ACT_BYTES], I.ACT_BYTES)
+                yield ln, h, a
+                seen += 1
+                if a["op"] == I.OP_BRANCH_BIT:
+                    todo.append(I.ACT_BASE + a["delay"] * I.ACT_BYTES)
+                # ⛔ ANY REARM ENDS THE LANE, not only a looping one (ruling M).
+                # The RTL never moves a PC past a REARM: level 1 loops to
+                # `l_base`, level 0 does not retire at all (`act_retire`). This
+                # walk used to stop only at level 1 and so ran on past a
+                # chaining REARM into whatever followed -- harmless while every
+                # parked lane's REARM was the image's last word, and 60-70
+                # phantom actions per parked lane once images are written whole
+                # with the store filler. MEASURED on every tracked image before
+                # the change: identical walks unpadded.
+                if a["op"] == I.OP_REARM:
+                    break
+                pc += I.ACT_BYTES
 
 
 OPNAME = {v: k for k, v in I.OPCODES.items()}

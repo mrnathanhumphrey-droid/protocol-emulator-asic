@@ -117,6 +117,14 @@ SCRATCH_GENERATORS: dict = {
                " judged by v1 == v2 on tb_equiv's decoded dispatch + pin"
                " stream, not by the A2 gap",
         "v3": {"no_v3_layer": "test/tb_equiv.v"}},
+    "run_branch_check": {
+        "script": "test/run_branch_check.py", "pattern": "brchk_*.hex",
+        "clocked": True,
+        "why": "v2 primitive 1's branch corpus (test/branch_corpus.py) and its"
+               " packed-past-the-encoder refusal arms: judged by"
+               " branch_check.vh's PC / head / stall counters on tb_equiv,"
+               " not by the A2 gap",
+        "v3": {"no_v3_layer": "test/tb_equiv.v"}},
 }
 # ⛔⛔ `v3` IS REQUIRED ON EVERY CLOCKED ENTRY (S1g, 10-22): the GENERATED
 # names in model/v3_table.py that register this generator's images, or the

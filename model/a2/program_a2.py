@@ -75,6 +75,13 @@ def lanes_of(img):
     """Every lane the image runs, as (lane, header, actions)."""
     by = {}
     for ln, h, a in dgf.walk(img):
+        # ⭐ v2 primitive 1 (Wilson 10-27, R2c): a BRANCH_BIT is a TIMED
+        # action -- its successor releases W after it -- so A2 prices it as
+        # an ordinary action whose delay is W (its delay field is the
+        # target). The walk reaches both paths. Measured: the W-replaced
+        # control matches the branch image lane for lane (R2c).
+        if a["op"] == I.OP_BRANCH_BIT:
+            a = dict(a, delay=I.branch_wait(a))
         by.setdefault(ln, (h, []))[1].append(a)
     return [(ln, h, acts) for ln, (h, acts) in sorted(by.items())]
 

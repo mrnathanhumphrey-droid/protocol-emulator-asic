@@ -68,7 +68,7 @@ def _brancher(base_word, pin, chain, sp, merged=None, wait=None):
     return words + nt_w + tk_w
 
 
-def build(n_branchers=1, chain=1, sp="br", merged=None):
+def build(n_branchers=1, chain=1, sp="br", merged=None, check=True):
     """One image: the toggler on lane 0, `n_branchers` branchers (lanes 1..),
     the rest parked. `merged` ("nt"/"tk"): every brancher's branch removed,
     one path kept -- A2's branch-merged view, not refused for branches."""
@@ -93,17 +93,41 @@ def build(n_branchers=1, chain=1, sp="br", merged=None):
         word += len(ws)
     img = I.full_store(I.join_image(hdrs, prog))
     probs = I.branch_problems(img)
-    if probs:
+    if probs and check:
         raise ValueError("branch corpus image refused: " + "; ".join(probs))
     return img
+
+
+#: the CHAINS (Wilson 10-27 Q2): refused by pe_isa.branch_problems, so they
+#: are refusal tests now -- build(check=False) and the refusal must name them
+REFUSED_CHAINS = {
+    "br_chain2": (4, 2, "br"),
+    "br_chain3": (4, 3, "br"),
+}
+
+
+def patch_branches(img, wait=None, target=None):
+    """`img` with every BRANCH_BIT's W and/or target overwritten PAST the
+    encoder -- the runtime refusal's arms (a corrupted store reaches the
+    engine whatever pe_asm refuses)."""
+    out = bytearray(img)
+    nwords = (I.STORE_BYTES - I.ACT_BASE) // I.ACT_BYTES
+    for w in range(nwords):
+        a = I.ACT_BASE + w * I.ACT_BYTES
+        x = I._unpack(I.ACT_FIELDS, out[a:a + I.ACT_BYTES], I.ACT_BYTES)
+        if x["op"] != I.OP_BRANCH_BIT:
+            continue
+        wt = I.branch_wait(x) if wait is None else int(wait)
+        tg = x["delay"] if target is None else int(target)
+        out[a:a + I.ACT_BYTES] = I.act(I.OP_BRANCH_BIT, x["pin"], x["level"], tg,
+                                       count=wt >> I.PINB_W, pinb=wt & ((1 << I.PINB_W) - 1))
+    return bytes(out)
 
 
 #: name -> (branchers, chain length, spacing set)
 CORPUS = {
     "br_alone": (1, 1, "br"),
     "br_contend4": (4, 1, "br"),
-    "br_chain2": (4, 2, "br"),
-    "br_chain3": (4, 3, "br"),
     "bra_alone": (1, 1, "bra"),          # R2b: the admissible corpus
     "bra_contend4": (4, 1, "bra"),
     "braw32_alone": (1, 1, "braw32"),    # R2b re-run: the TIMED branch
@@ -120,6 +144,9 @@ def main(argv) -> int:
         p = os.path.join(out, name + ".hex")
         I.write_image(p, build(nb, ch, sp))
         print("  %-14s %d brancher lane(s), chain %d -> %s" % (name, nb, ch, p))
+    for name, (nb, ch, sp) in REFUSED_CHAINS.items():
+        probs = I.branch_problems(build(nb, ch, sp, check=False))
+        print("  %-14s REFUSED (%d problem(s)): %s" % (name, len(probs), probs[0][:70]))
     return 0
 
 
