@@ -182,48 +182,44 @@ module tt_um_protocol_emulator #(
   wire prog_s  = ui_in[PIN_PROG];
   wire ptr_s   = ui_in[PIN_RST];
   wire ena_s   = ena;
+  wire prog_n  = ui_in[PIN_PROG];
+  wire ena_n   = ena;
 `else
   wire rst_n_s = rst_sync[1];
   wire prog_s  = prog_sync[1];
   wire ptr_s   = ptr_sync[1];
   wire ena_s   = ena_sync[1];
+  wire prog_n  = prog_sync[0];   // prog_s's NEXT value (step 1: the mode flops)
+  wire ena_n   = ena_sync[0];
 `endif
 
-  // ⛔⛔ v2 (Wilson 10-27, store-write recovery step 1): `prog_mode` and `run`
-  // ARE FLOPS, not gates after the synchronisers. They are mode signals (they
-  // change only on entering / leaving load mode), and as a gate `prog_mode`
-  // led the slow corner's worst path: ena_s -> nand -> inv -> the store's
-  // fanout (canary 40421958249, +0.870 ns). Each loads `prog_sync[0] &
-  // ena_sync[0]` -- the value the old gate takes NEXT cycle -- so it EQUALS
-  // the old `prog_s & ena_s` in every cycle: no latency, no behaviour change
-  // (gate_v2_equiv 42/42 is the check). ⚠ REPLICATION (one copy per bank /
-  // cone) WAS TRIED AND SYNTHESIS UNDID IT: yosys merged every copy back into
-  // one flop despite (* keep *) on the regs (10-27), so the fanout is left to
-  // the resizer. M_CDC_RAW (the raw-pin mutant) keeps the combinational form.
-  // ⭐ STEP 1b (10-27): `prog_mode` IS REPLICATED -- one copy per consumer
-  // cone (loader, store read select, pins) and ONE PER STORE BANK (the write
-  // enable). Each copy is a `pe_dup_ff` (end of this file), a module marked
-  // (* keep_hierarchy *): measured on yosys 0.69, identical flops are merged
-  // back into one by opt_merge after flattening whatever `keep` says, and
-  // only a kept hierarchy stops it (R:\ research, 10-27). Every copy loads
-  // the same next value, so they are all equal to the old gate every cycle.
-`ifdef M_CDC_RAW
-  wire prog_mode = prog_s & ena_s;
-  wire run       = ~prog_s & ena_s;
-  wire pm_rd     = prog_mode;
-  wire pm_pin    = prog_mode;
-`else
+  // ⛔⛔ v2 SLACK RECOVERY (Wilson 10-27), steps 1 + 1b. `prog_mode` and `run`
+  // ARE FLOPS, and `prog_mode` IS REPLICATED. They are mode signals (they
+  // change only on entering / leaving load mode); as a gate, `prog_mode` led
+  // the slow corner's worst path -- ena_s -> nand -> inv -> one buffer tree
+  // across the store (canary 40421958249, +0.870 ns; +2.073 as one flop,
+  // +3.124 replicated). Each flop loads `prog_n & ena_n` -- prog_s/ena_s's
+  // NEXT value -- so it EQUALS the old `prog_s & ena_s` in every cycle after
+  // the synchronised reset releases (gate_v2_equiv 42/42 is the check).
+  // ⚠ RESET FROM `rst_n_s`, like all non-synchroniser logic (gate_cdc): the
+  // one difference from the old gate is a PROG held high THROUGH reset
+  // release, which this flop sees one cycle later.
+  // REPLICATION: one copy per consumer cone (loader, store read select, pins)
+  // and one per store bank (the write enable), each a `pe_dup_ff` (end of
+  // this file) marked (* keep_hierarchy *) -- measured on yosys 0.69,
+  // identical flops are merged back into one by opt_merge after flattening
+  // whatever `keep` on a reg or an instance says; only a kept hierarchy
+  // stops it. Under M_CDC_RAW the same flops load the RAW pins.
   wire prog_mode, pm_rd, pm_pin;
-  wire pm_next = prog_sync[0] & ena_sync[0];
-  pe_dup_ff u_pm_ld  (.clk(clk), .rst_n(rst_n), .d(pm_next), .q(prog_mode));
-  pe_dup_ff u_pm_rd  (.clk(clk), .rst_n(rst_n), .d(pm_next), .q(pm_rd));
-  pe_dup_ff u_pm_pin (.clk(clk), .rst_n(rst_n), .d(pm_next), .q(pm_pin));
+  wire pm_next = prog_n & ena_n;
+  pe_dup_ff u_pm_ld  (.clk(clk), .rst_n(rst_n_s), .d(pm_next), .q(prog_mode));
+  pe_dup_ff u_pm_rd  (.clk(clk), .rst_n(rst_n_s), .d(pm_next), .q(pm_rd));
+  pe_dup_ff u_pm_pin (.clk(clk), .rst_n(rst_n_s), .d(pm_next), .q(pm_pin));
   reg run;
-  always @(posedge clk or negedge rst_n) begin
-    if (!rst_n) run <= 1'b0;
-    else        run <= ~prog_sync[0] & ena_sync[0];
+  always @(posedge clk or negedge rst_n_s) begin
+    if (!rst_n_s) run <= 1'b0;
+    else          run <= ~prog_n & ena_n;
   end
-`endif
 
   // =====================================================================
   // INPUT SYNCHRONISERS. ⛔ Every pin input is asynchronous to `clk`; sampling
@@ -483,16 +479,12 @@ module tt_um_protocol_emulator #(
 
   // ⭐ step 1b: ONE prog_mode copy PER STORE BANK for the write enable
   wire [ACT_BYTES_T-1:0] pm_we;
-`ifdef M_CDC_RAW
-  assign pm_we = {ACT_BYTES_T{prog_mode}};
-`else
   genvar gpw;
   generate
     for (gpw = 0; gpw < ACT_BYTES_T; gpw = gpw + 1) begin : g_pm_we
-      pe_dup_ff u_pm_we (.clk(clk), .rst_n(rst_n), .d(pm_next), .q(pm_we[gpw]));
+      pe_dup_ff u_pm_we (.clk(clk), .rst_n(rst_n_s), .d(pm_next), .q(pm_we[gpw]));
     end
   endgenerate
-`endif
 
   pe_store #(.AW(AW), .MEM_TYPE(MEM_TYPE), .WIDE_B(ACT_BYTES_T)) u_store (
       .clk(clk), .rst_n(rst_n_s),

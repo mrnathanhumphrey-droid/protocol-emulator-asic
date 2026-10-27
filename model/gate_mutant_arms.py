@@ -144,11 +144,13 @@ EXPECT = {
     "M_ONE_PHASE_HALT":  (2, None),
     # ruling CDC2: the 94cebb7 wiring -- raw PROG / PTR_RST / ena and a raw
     # reset release (silicon fixes #4 and #5 undone)
-    "M_CDC_RAW":         (8,
-        "one site, FOUR lines per arm, declared: the reset release and the "
-        "three host level controls each revert to the raw pin. Reverting "
-        "fewer would leave a mutant that is part-synchronised, which is not "
-        "the 94cebb7 design the must-fire names."),
+    "M_CDC_RAW":         (12,
+        "one site, SIX lines per arm, declared: the reset release and the "
+        "three host level controls each revert to the raw pin, and (v2 slack "
+        "recovery, 10-27) so do `prog_n` / `ena_n`, the NEXT values the "
+        "prog_mode / run flops load. Reverting fewer would leave a mutant "
+        "that is part-synchronised, which is not the 94cebb7 design the "
+        "must-fire names."),
     # ruling RX1: silicon fix #7 undone -- no capture-pending eligibility gate
     "M_RX_NO_CAPGATE":   (3,
         "one site, declared: the clean `cap_ok` is a two-line expression (the "
