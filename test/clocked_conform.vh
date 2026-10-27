@@ -1447,7 +1447,7 @@ always @(posedge dut.clk) begin
     end
     v3_wrp = (dut.ui_in[6] === 1'b1);
     // ---- the image, snooped off the store's write port during load ------
-    if (dut.u_store.we === 1'b1)
+    if ((|dut.u_store.we) === 1'b1)   // step 1b: one enable per bank, all equal
       v3_wimg[dut.u_store.waddr] = ((^dut.u_store.wdata) === 1'bx) ? 256
                                    : dut.u_store.wdata;
     // ... and identified once, when the engine primes on it

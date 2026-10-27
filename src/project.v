@@ -200,19 +200,28 @@ module tt_um_protocol_emulator #(
   // cone) WAS TRIED AND SYNTHESIS UNDID IT: yosys merged every copy back into
   // one flop despite (* keep *) on the regs (10-27), so the fanout is left to
   // the resizer. M_CDC_RAW (the raw-pin mutant) keeps the combinational form.
+  // ⭐ STEP 1b (10-27): `prog_mode` IS REPLICATED -- one copy per consumer
+  // cone (loader, store read select, pins) and ONE PER STORE BANK (the write
+  // enable). Each copy is a `pe_dup_ff` (end of this file), a module marked
+  // (* keep_hierarchy *): measured on yosys 0.69, identical flops are merged
+  // back into one by opt_merge after flattening whatever `keep` says, and
+  // only a kept hierarchy stops it (R:\ research, 10-27). Every copy loads
+  // the same next value, so they are all equal to the old gate every cycle.
 `ifdef M_CDC_RAW
   wire prog_mode = prog_s & ena_s;
   wire run       = ~prog_s & ena_s;
+  wire pm_rd     = prog_mode;
+  wire pm_pin    = prog_mode;
 `else
-  reg prog_mode, run;
+  wire prog_mode, pm_rd, pm_pin;
+  wire pm_next = prog_sync[0] & ena_sync[0];
+  pe_dup_ff u_pm_ld  (.clk(clk), .rst_n(rst_n), .d(pm_next), .q(prog_mode));
+  pe_dup_ff u_pm_rd  (.clk(clk), .rst_n(rst_n), .d(pm_next), .q(pm_rd));
+  pe_dup_ff u_pm_pin (.clk(clk), .rst_n(rst_n), .d(pm_next), .q(pm_pin));
+  reg run;
   always @(posedge clk or negedge rst_n) begin
-    if (!rst_n) begin
-      prog_mode <= 1'b0;
-      run       <= 1'b0;
-    end else begin
-      prog_mode <= prog_sync[0] & ena_sync[0];
-      run       <= ~prog_sync[0] & ena_sync[0];
-    end
+    if (!rst_n) run <= 1'b0;
+    else        run <= ~prog_sync[0] & ena_sync[0];
   end
 `endif
 
@@ -472,11 +481,24 @@ module tt_um_protocol_emulator #(
   wire           e_wre;
   wire [ACT_BYTES_T*8-1:0] s_wrdata;
 
+  // ⭐ step 1b: ONE prog_mode copy PER STORE BANK for the write enable
+  wire [ACT_BYTES_T-1:0] pm_we;
+`ifdef M_CDC_RAW
+  assign pm_we = {ACT_BYTES_T{prog_mode}};
+`else
+  genvar gpw;
+  generate
+    for (gpw = 0; gpw < ACT_BYTES_T; gpw = gpw + 1) begin : g_pm_we
+      pe_dup_ff u_pm_we (.clk(clk), .rst_n(rst_n), .d(pm_next), .q(pm_we[gpw]));
+    end
+  endgenerate
+`endif
+
   pe_store #(.AW(AW), .MEM_TYPE(MEM_TYPE), .WIDE_B(ACT_BYTES_T)) u_store (
       .clk(clk), .rst_n(rst_n_s),
-      .we(prog_mode & wr_rise), .waddr(ptr), .wdata(uio_q1),
-      .re(prog_mode ? rb_re : e_re),
-      .raddr(prog_mode ? rb_addr : e_raddr),
+      .we(pm_we & {ACT_BYTES_T{wr_rise}}), .waddr(ptr), .wdata(uio_q1),
+      .re(pm_rd ? rb_re : e_re),
+      .raddr(pm_rd ? rb_addr : e_raddr),
       .rdata(s_rdata),
       .wre(e_wre & run), .wraddr(e_wraddr),
       .wrdata(s_wrdata)
@@ -964,8 +986,8 @@ module tt_um_protocol_emulator #(
   // structural check that has only ever been seen pass has unknown strength,
   // and this one is new. The mutant must make it RED.
 `ifdef M_COMB_OUT
-  assign uio_oe  = prog_mode ? 8'h00 : uio_oe_run;
-  assign uio_out = prog_mode ? 8'h00 : e_pin_out[7:0];
+  assign uio_oe  = pm_pin ? 8'h00 : uio_oe_run;
+  assign uio_out = pm_pin ? 8'h00 : e_pin_out[7:0];
 `else
   assign uio_oe  = uio_oe_run;
   assign uio_out = e_pin_out[7:0];
@@ -1004,7 +1026,7 @@ module tt_um_protocol_emulator #(
 `else
   wire [3:0] run_out   = e_pin_out[11:8] ^ e_pin_inv[11:8];
 `endif
-  wire [3:0] proto_out = prog_mode ? (halt_force | (run_out & ~halt_force))
+  wire [3:0] proto_out = pm_pin ? (halt_force | (run_out & ~halt_force))
                                    : run_out;
 
   reg [7:0] uo_q;
@@ -1021,4 +1043,25 @@ module tt_um_protocol_emulator #(
   // is the whole point of the fix above. `uio_q2` is the edge-detect tail.
   wire _unused = &{e_busy, uio_q2, 1'b0};   // `ena` is read via `ena_sync` (CDC2)
 
+endmodule
+
+// ---------------------------------------------------------------------------
+// pe_dup_ff -- ONE resettable flop that synthesis may NOT merge with its twins
+// (step 1b, 10-27). (* keep_hierarchy *) keeps each instance a module through
+// `flatten`, so yosys's opt_merge cannot fold identical copies back into one
+// flop (measured: `keep` on a reg or an instance does not stop it). Used to
+// REPLICATE a high-fanout mode signal (prog_mode) so each copy drives a local
+// load instead of one buffer tree across the store.
+// ---------------------------------------------------------------------------
+(* keep_hierarchy *)
+module pe_dup_ff (
+    input  wire clk,
+    input  wire rst_n,
+    input  wire d,
+    output reg  q
+);
+  always @(posedge clk or negedge rst_n) begin
+    if (!rst_n) q <= 1'b0;
+    else        q <= d;
+  end
 endmodule

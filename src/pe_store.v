@@ -42,8 +42,9 @@ module pe_store #(
 ) (
     input  wire            clk,
     input  wire            rst_n,
-    // write port (program load)
-    input  wire            we,
+    // write port (program load). ⭐ step 1b: ONE ENABLE PER BANK (all equal),
+    // each from its own replicated prog_mode flop in project.v
+    input  wire [WIDE_B-1:0] we,
     input  wire [AW-1:0]   waddr,
     input  wire [7:0]      wdata,
     // read port -- SYNCHRONOUS, one cycle
@@ -119,9 +120,9 @@ module pe_store #(
       reg [7:0] mem [0:NW-1];
       always @(posedge clk) begin
 `ifdef M_STORE_WRONG_BANK
-        if (we && ((wsel == gb && gb != WIDE_B-1) || (gb == 0 && wsel == WIDE_B-1))) mem[wrow] <= wdata;
+        if (we[gb] && ((wsel == gb && gb != WIDE_B-1) || (gb == 0 && wsel == WIDE_B-1))) mem[wrow] <= wdata;
 `else
-        if (we && wsel == gb) mem[wrow] <= wdata;
+        if (we[gb] && wsel == gb) mem[wrow] <= wdata;
 `endif
         // byte gb of the word is the gb-th LOWEST address = the MSB-first
         // byte position WIDE_B-1-gb, as the v1 byte read put it
