@@ -494,7 +494,7 @@ TOGGLE_CEILING = {
     # ⭐ RATCHETED DOWN by v2 primitive 1's sweep arms (branch, branch_wbad,
     # branch_spl1): the branch images drive words, targets and the wait W
     # through bits no v1 image sets (measured locally; local == CI on step 2).
-    "src/pe_engine.v": 1038,
+    "src/pe_engine.v": 941,       # primitive 2's CMP arms: -97
     # ⚠ 6 -> 28 (+22) for v2: the wide read's reserved bits (16), the row
     # index's top bits (4: v1 images fit rows 0..31) and wraddr bits 0-1 (4:
     # the engine writes whole words) -- same field-by-field check, 0 lost.
@@ -506,11 +506,11 @@ TOGGLE_CEILING = {
     # ⭐ RATCHETED DOWN by v2 primitive 1's sweep arms (branch, branch_wbad,
     # branch_spl1): the branch images drive words, targets and the wait W
     # through bits no v1 image sets (measured locally; local == CI on step 2).
-    "src/pe_store.v": 30,
+    "src/pe_store.v": 26,         # primitive 2's CMP arms: -4
     # ⚠ 186 -> 187: e_wraddr_bk's same 16 dark points (bits 0,1 of each
     # bank's copy, +12 over e_wraddr's 4); the old ceiling sat ~11 above
     # its measured count, so the rise reads as +1.
-    "src/project.v": 177,      # primitive 1's arms: -10
+    "src/project.v": 173,      # primitive 1's arms -10, primitive 2's -4
     # ⭐ RATCHETED DOWN BY THE SELF-CLOCKED CORPUS, and the cause is worth
     # recording: the rewritten corpus drives WHOLE BYTES through the peer
     # models instead of two bits per clock, so `fram_spi` went 54 -> 30
