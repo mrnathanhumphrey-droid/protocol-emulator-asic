@@ -1131,6 +1131,9 @@ module pe_pit #(parameter integer AW = 9) (
   reg [8:0]  wr_idx;
   reg [1:0]  st_phase;
   reg        st_done;
+  // ⭐ the STOP REASON (Nate 10-28): 1 = OVERRUN (the accumulator would
+  // overflow: the bus outran the drain), 0 = FULL (the store is used up)
+  reg        why_ovr;
   wire [7:0]  chg   = (uio ^ prev) & m;
 `ifdef M_PIT_MASK_DROP
   wire [7:0]  rmask = chg & 8'hFE;
@@ -1166,6 +1169,11 @@ module pe_pit #(parameter integer AW = 9) (
   wire        room  = ({1'b0, acc_n_d} + {1'b0, l_all} <= 8'd64) &&
                       ({5'd0, total} + {10'd0, l_all} <= CAP_BITS);
 `endif
+`ifdef M_PIT_WHY_DROP
+  wire        ovr   = 1'b0;
+`else
+  wire        ovr   = ({1'b0, acc_n_d} + {1'b0, l_all} > 8'd64);
+`endif
   wire [19:0] sum_n = sum + {4'd0, tcnt};
   wire [19:0] mean  = sum_n >> 4;
   wire [23:0] v11   = ({4'd0, mean} * 24'd11) >> 4;
@@ -1180,7 +1188,7 @@ module pe_pit #(parameter integer AW = 9) (
     if (!rst_n) begin
       active <= 1'b0; prev <= 8'h00; tcnt <= 16'd0; n <= 16'd0; acc <= 64'd0;
       acc_n <= 7'd0; total <= 12'd0; sum <= 20'd0; k <= 4'd0; wr_idx <= 9'd0;
-      st_phase <= 2'd0; st_done <= 1'b0; stopped <= 1'b0;
+      st_phase <= 2'd0; st_done <= 1'b0; stopped <= 1'b0; why_ovr <= 1'b0;
       we <= 1'b0; waddr <= {AW{1'b0}}; wdata <= 8'h00;
     end else if (!run) begin
       active <= 1'b0;
@@ -1189,7 +1197,7 @@ module pe_pit #(parameter integer AW = 9) (
       // the PIT's cycle 0: take the levels, start the interval
       active <= 1'b1; prev <= uio; tcnt <= 16'd1; n <= 16'd0; acc <= 64'd0;
       acc_n <= 7'd0; total <= 12'd0; sum <= 20'd0; k <= 4'd0; wr_idx <= 9'd0;
-      st_phase <= 2'd0; st_done <= 1'b0; stopped <= 1'b0; we <= 1'b0;
+      st_phase <= 2'd0; st_done <= 1'b0; stopped <= 1'b0; why_ovr <= 1'b0; we <= 1'b0;
     end else begin
       prev <= uio;
       we <= 1'b0;
@@ -1213,14 +1221,16 @@ module pe_pit #(parameter integer AW = 9) (
           if (n == 16'd15) k <= k_new;
         end else begin
           stopped <= 1'b1;
+          why_ovr <= ovr;
         end
       end
-      // the status, once stopped and drained: byte 2 = overflow, 28/29 = count
+      // the status, once stopped and drained: byte 2 bit 7 = truncated (every
+      // result is PARTIAL), byte 28 bit 7 = the stop reason, {28[6:0], 29} = count
       if (stopped && !drain && !st_done) begin
         we <= 1'b1;
         case (st_phase)
           2'd0: begin waddr <= 9'd2;  wdata <= 8'h80; end
-          2'd1: begin waddr <= 9'd28; wdata <= n[15:8]; end
+          2'd1: begin waddr <= 9'd28; wdata <= {why_ovr, n[14:8]}; end
           default: begin waddr <= 9'd29; wdata <= n[7:0]; st_done <= 1'b1; end
         endcase
         st_phase <= st_phase + 2'd1;

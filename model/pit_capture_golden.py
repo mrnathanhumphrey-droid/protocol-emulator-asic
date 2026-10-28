@@ -36,6 +36,15 @@ def record_bits(i, mask, k, raw):
     return body + _b(mask, 8)
 
 
+def status(n, overflow, why):
+    """the status bytes the RTL writes once stopped and drained ({} if it never
+    stopped): byte 2 bit 7 = capture TRUNCATED (every result PARTIAL); byte 28
+    bit 7 = the stop reason (1 overrun, 0 full); {28[6:0], 29} = records stored."""
+    if not overflow:
+        return {2: 0x00, 28: 0x00, 29: 0x00}
+    return {2: 0x80, 28: (0x80 if why == "overrun" else 0x00) | ((n >> 8) & 0x7F), 29: n & 0xFF}
+
+
 def encode(log):
     """-> (bytes[384], records_stored, overflow, why): why = "overrun" (the
     accumulator would overflow), "full" (the store would), or None."""

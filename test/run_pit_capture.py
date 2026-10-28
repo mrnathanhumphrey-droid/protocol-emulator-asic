@@ -40,7 +40,8 @@ RTL = ["src/pe_engine.v", "src/pe_store.v", "src/project.v"]
 GEN = "run_pit_capture"
 NCYC = 60000
 MUTANTS = [("M_PIT_K_OFF1", "k one too large"), ("M_PIT_MASK_DROP", "mask bit 0 never recorded"),
-           ("M_PIT_NO_OVERRUN", "no stop on an accumulator overrun")]
+           ("M_PIT_NO_OVERRUN", "no stop on an accumulator overrun"),
+           ("M_PIT_WHY_DROP", "the stop reason always reads FULL")]
 RNG = random.Random(20261028)
 
 
@@ -166,7 +167,7 @@ def compare(log, mem):
         if mem.get(PG.CAP_BASE + i) != cap[i]:
             probs.append("capture byte %d: RTL %s, golden %02x" % (PG.CAP_BASE + i, mem.get(PG.CAP_BASE + i), cap[i]))
             break
-    want = {2: 0x80 if ovf else 0x00, 28: (n >> 8) & 0xFF if ovf else 0, 29: n & 0xFF if ovf else 0}
+    want = PG.status(n, ovf, why)
     for a, v in want.items():
         if mem.get(a) != v:
             probs.append("status byte %d: RTL %s, golden %02x" % (a, mem.get(a), v))
@@ -180,7 +181,7 @@ def main() -> int:
     print("PIT CAPTURE -- SNIFF mode, bit for bit against model/pit_capture_golden.py")
     print("=" * 78)
     tmp = tempfile.mkdtemp(prefix="pe_pitcap_")
-    probs = []
+    probs, whys = [], set()
     vvp = os.path.join(tmp, "pit.vvp")
     build(vvp)
     for name, waves, mask in CASES:
@@ -190,9 +191,14 @@ def main() -> int:
                                                                     "bit-exact" if not p else "*** " + p[0]))
         if not log:
             p.append("no edge was logged -- the case is vacuous")
+        whys.add(why)
         if name == "fast_overrun" and why != "overrun":
             p.append("the overrun case stopped on %r, not an overrun" % why)
         probs += ["%s: %s" % (name, x) for x in p]
+    # the stop-reason bit is checked in BOTH directions only if both reasons occur
+    if not {"overrun", "full"} <= whys:
+        probs.append("the cases stop on %s only -- the stop-reason bit is not checked both ways"
+                     % sorted(map(str, whys)))
     print("\n  must-fires")
     for define, what in MUTANTS:
         mv = os.path.join(tmp, "pit_%s.vvp" % define.lower())
