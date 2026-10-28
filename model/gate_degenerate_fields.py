@@ -292,8 +292,8 @@ def walk(img):
                 a = unpack(I.ACT_FIELDS, img[pc:pc + I.ACT_BYTES], I.ACT_BYTES)
                 yield ln, h, a
                 seen += 1
-                if a["op"] == I.OP_BRANCH_BIT:
-                    todo.append(I.ACT_BASE + a["delay"] * I.ACT_BYTES)
+                if a["op"] in I.BRANCH_OPS:
+                    todo.append(I.ACT_BASE + I.branch_target(a) * I.ACT_BYTES)
                 # ⛔ ANY REARM ENDS THE LANE, not only a looping one (ruling M).
                 # The RTL never moves a PC past a REARM: level 1 loops to
                 # `l_base`, level 0 does not retire at all (`act_retire`). This

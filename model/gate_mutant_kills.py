@@ -69,6 +69,9 @@ KILLERS = {
     "M_BR_TGT_OFF1": "test/run_branch_check.py", "M_BR_ALWAYS": "test/run_branch_check.py",
     "M_BR_NEVER": "test/run_branch_check.py", "M_BR_LVL_INV": "test/run_branch_check.py",
     "M_BR_FETCH_PAST": "test/run_branch_check.py", "M_BR_W_ZERO": "test/run_branch_check.py",
+    # -- v2 primitive 2: CMP_BRANCH (same bench) ------------------------------
+    "M_CMP_ORDER_IGN": "test/run_branch_check.py", "M_CMP_IMM_OFF1": "test/run_branch_check.py",
+    "M_CMP_MASK_IGN": "test/run_branch_check.py", "M_CMP_INV": "test/run_branch_check.py",
     # silicon fix #2: killed on VALUE by Layer V1 (tb_trace, corpus_i2c)
     "M_TX_LOAD_ANYPHASE": RUN_MUTANTS,
     # silicon fix #3: killed on VALUE by Layer V-RX (tb_trace, corpus_spim)

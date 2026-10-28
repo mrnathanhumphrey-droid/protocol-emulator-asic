@@ -14,8 +14,11 @@ localparam integer PE_ACT_BYTES = 4;
 localparam integer PE_STORE_BYTES = 512;
 // v2 (Wilson 10-26): the built-opcode limit the loader refuses
 // beyond, and the opcode's width (tb_trace's +RESOP_AT arm)
-localparam integer PE_N_BUILT_OPS = 9;
+localparam integer PE_N_BUILT_OPS = 10;
 localparam integer PE_OP_W = 5;
 // v2: the action region's first byte (BRANCH_BIT targets, branch_check)
 localparam integer PE_ACT_BASE = 32;
+// v2: the branch opcodes (branch_check.vh)
+localparam integer PE_OP_BRANCH_BIT = 8;
+localparam integer PE_OP_CMP_BRANCH = 9;
 `endif

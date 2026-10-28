@@ -117,6 +117,12 @@ EXPECT = {
     "M_BR_LVL_INV":       (2, None),
     "M_BR_FETCH_PAST":    (2, None),
     "M_BR_W_ZERO":        (2, None),
+    # v2 primitive 2: CMP_BRANCH -- the order reversal, the immediate, the
+    # mask (a 2-line mux arm), the inverting bit
+    "M_CMP_ORDER_IGN":    (2, None),
+    "M_CMP_IMM_OFF1":     (2, None),
+    "M_CMP_MASK_IGN":     (3, "the mask mux is two lines (four modes); the mutant is one constant"),
+    "M_CMP_INV":          (2, None),
     # ruling CE1 / CE2: each new mode bit read as 0 -- the selector ignored
     "M_HALF_IGNORED":    (2, None),
     # 2 since option 1' (WF2): the XOR now lives in the one-line `run_out`,

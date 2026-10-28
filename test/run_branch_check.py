@@ -53,17 +53,30 @@ RTL = ["src/pe_engine.v", "src/pe_store.v", "src/project.v"]
 NCYC = 30000
 STEADY = 1000          # per-dispatch stats from this cycle on (past the start)
 GEN = "run_branch_check"
-BASE = [("braw32_alone", 1, "braw32"), ("braw32_contend4", 4, "braw32"),
-        ("braw40_alone", 1, "braw40"), ("braw40_contend4", 4, "braw40")]
-MF_IMG = ("braw32_contend4", 4, "braw32")
-#: mutant -> (BRCHECK counter that must go non-zero, what it breaks)
+#: image name -> its builder. braw* = BRANCH_BIT (primitive 1); cmp_* =
+#: CMP_BRANCH (primitive 2): the bit-order pair and the mask/inv pair.
+IMAGES = {
+    "braw32_alone": lambda: B.build(1, 1, "braw32"),
+    "braw32_contend4": lambda: B.build(4, 1, "braw32"),
+    "braw40_alone": lambda: B.build(1, 1, "braw40"),
+    "braw40_contend4": lambda: B.build(4, 1, "braw40"),
+    "cmp_order": lambda: B.build_cmp("ok", kind="order"),
+    "cmp_mask": lambda: B.build_cmp("ok", kind="mask"),
+}
+BASE = list(IMAGES)
+#: mutant -> (BRCHECK counter that must go non-zero, what it breaks, image)
 MUTANTS = [
-    ("M_BR_TGT_OFF1", "pc_bad", "the taken target one word past its own"),
-    ("M_BR_ALWAYS", "pc_bad", "every branch taken"),
-    ("M_BR_NEVER", "pc_bad", "no branch taken"),
-    ("M_BR_LVL_INV", "pc_bad", "taken on the opposite level"),
-    ("M_BR_FETCH_PAST", "head_bad", "the spare fetched past a branch head"),
-    ("M_BR_W_ZERO", "stall_cycles", "the zero-time branch (no refill window)"),
+    ("M_BR_TGT_OFF1", "pc_bad", "the taken target one word past its own", "braw32_contend4"),
+    ("M_BR_ALWAYS", "pc_bad", "every branch taken", "braw32_contend4"),
+    ("M_BR_NEVER", "pc_bad", "no branch taken", "braw32_contend4"),
+    ("M_BR_LVL_INV", "pc_bad", "taken on the opposite level", "braw32_contend4"),
+    ("M_BR_FETCH_PAST", "head_bad", "the spare fetched past a branch head", "braw32_contend4"),
+    ("M_BR_W_ZERO", "stall_cycles", "the zero-time branch (no refill window)", "braw32_contend4"),
+    # v2 primitive 2: CMP_BRANCH, each on the image whose pair it breaks
+    ("M_CMP_ORDER_IGN", "pc_bad", "no wire-order reversal on an MSB lane", "cmp_order"),
+    ("M_CMP_IMM_OFF1", "pc_bad", "the immediate one off", "cmp_order"),
+    ("M_CMP_MASK_IGN", "pc_bad", "the mask mode ignored (all 8 bits)", "cmp_mask"),
+    ("M_CMP_INV", "pc_bad", "q[0] (taken on mismatch) ignored", "cmp_mask"),
 ]
 
 
@@ -147,8 +160,8 @@ def main() -> int:
     build(vvp)
 
     print("\n  B1 baseline (%d cycles, stats from cycle %d)" % (NCYC, STEADY))
-    for name, nb, sp in BASE:
-        img = B.build(nb, 1, sp)
+    for name in BASE:
+        img = IMAGES[name]()
         p = write_hex(os.path.join(tmp, "brchk_%s.hex" % name), img)
         c, per, raw = sim(vvp, p)
         if not c:
@@ -156,6 +169,8 @@ def main() -> int:
             continue
         bound = a2_dispatch_bound(img)
         bad = run_problems(c, per, bound)
+        if name.startswith("cmp_") and not c.get("cmp"):
+            bad.append("cmp=0 -- no CMP_BRANCH ran, so nothing was compared")
         print("    %-16s wb %4d  stall %d  pc_bad %d  head_bad %d  A2 r-C %s  %s"
               % (name, c["wb"], c["stall_cycles"], c["pc_bad"], c["head_bad"], bound,
                  "ok" if not bad else "*** " + "; ".join(bad)))
@@ -168,6 +183,16 @@ def main() -> int:
         print("    %-16s %s" % (name, "REFUSED" if ok else "*** NOT REFUSED ***"))
         if not ok:
             probs.append("%s: the chain is not refused" % name)
+    # v2 primitive 2: whole bytes only, and something must have arrived
+    # (Wilson 10-27 addition 1); q[1] held for LOOP's break-out flag
+    for v in B.CMP_REFUSED:
+        pr = I.branch_problems(B.build_cmp(v, check=False))
+        want = {"bit7": "after 7 bit(s)", "norx": "NOTHING received",
+                "q1": "q[1] must be zero"}[v]
+        ok = any(want in x for x in pr)
+        print("    cmp_%-12s %s" % (v, "REFUSED" if ok else "*** NOT REFUSED ***"))
+        if not ok:
+            probs.append("cmp_%s: not refused for its own reason" % v)
 
     print("\n  B3 runtime refusals (packed past the encoder)")
     good = B.build(1, 1, "braw32")
@@ -187,11 +212,14 @@ def main() -> int:
             probs.append("%s: not refused (static %d, cfgerr %s, live %s)"
                          % (name, len(static), c.get("cfgerr"), live))
 
-    print("\n  B4 must-fires on %s" % MF_IMG[0])
-    mf_img = B.build(MF_IMG[1], 1, MF_IMG[2])
-    mp = write_hex(os.path.join(tmp, "brchk_mf.hex"), mf_img)
-    mf_bound = a2_dispatch_bound(mf_img)
-    for define, counter, what in MUTANTS:
+    print("\n  B4 must-fires")
+    mf = {}
+    for define, counter, what, imgname in MUTANTS:
+        if imgname not in mf:
+            mi = IMAGES[imgname]()
+            mf[imgname] = (write_hex(os.path.join(tmp, "brchk_mf_%s.hex" % imgname), mi),
+                           a2_dispatch_bound(mi))
+        mp, mf_bound = mf[imgname]
         mv = os.path.join(tmp, "brchk_%s.vvp" % define.lower())
         try:
             build(mv, [define])

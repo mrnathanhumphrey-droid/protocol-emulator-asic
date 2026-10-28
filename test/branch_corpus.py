@@ -137,6 +137,101 @@ CORPUS = {
 }
 
 
+# ---------------------------------------------------------------------------
+# v2 PRIMITIVE 2: THE CMP_BRANCH CORPUS (Wilson 10-27; Nate 10-28 option 1)
+# ---------------------------------------------------------------------------
+#: the two bytes the senders send, alternately. ⭐ 0xB4 is NOT a bit-palindrome
+#: (reversed it is 0x2D), so a lane that skipped the order reversal compares
+#: the wrong byte -- M_CMP_ORDER_IGN must be visible.
+CMP_A, CMP_B = 0xB4, 0x3C
+CMP_BIT_T = 40          # sender bit slot; the receivers sample 20 into it
+CMP_W = 40              # the CMP's wait W
+CMP_RX_LOOP = 540       # receiver re-arm: period 20 + 8*40 + 40 + 40 + 540 = 960
+
+
+def _sender(pin, msb_first, pair=(CMP_A, CMP_B)):
+    """`pair` (CMP_A, CMP_B by default), one bit per CMP_BIT_T slot, period 640."""
+    bits = []
+    for byte in pair:
+        order = range(7, -1, -1) if msb_first else range(8)
+        bits += [(byte >> i) & 1 for i in order]
+    ws = [I.act(I.OP_LEVEL, pin, b, CMP_BIT_T) for b in bits[:-1]]
+    ws.append(I.act(I.OP_LEVEL, pin, bits[-1], CMP_BIT_T // 2))
+    ws.append(I.act(I.OP_REARM, 0, 1, CMP_BIT_T // 2))
+    return ws
+
+
+def _receiver(base_word, in_pin, out_pin, byte, mask, inv, variant):
+    """offset no-op, 8 READBITs of `in_pin`, the CMP, then the two paths.
+    Period 960 = 1.5 sender periods, so passes alternate CMP_A / CMP_B and the
+    compare both matches and mismatches. `variant` builds the refusal arms."""
+    nrx = {"bit7": 7, "norx": 0}.get(variant, 8)
+    ws = [I.act(I.OP_LEVEL, I.PIN_NONE, 0, CMP_BIT_T // 2)]
+    ws += [I.act(I.OP_READBIT, in_pin, 0, CMP_BIT_T) for _ in range(nrx)]
+    ws += [I.act(I.OP_LEVEL, I.PIN_NONE, 0, CMP_BIT_T) for _ in range(8 - nrx)]
+    cmpw = base_word + len(ws)
+    nt, tk = cmpw + 1, cmpw + 3
+    w = I.act_cmp_branch(byte, tk, CMP_W, mask=mask, inv=inv)
+    if variant == "q1":
+        x = I._unpack(I.ACT_FIELDS, w, I.ACT_BYTES)
+        w = I.act(I.OP_CMP_BRANCH, x["pin"], x["level"], x["delay"], count=x["count"],
+                  q=x["q"] | 2, pinb=x["pinb"], mod=x["mod"])
+    ws.append(w)
+    ws += [I.act(I.OP_LEVEL, out_pin, 0, CMP_BIT_T), I.act(I.OP_REARM, 0, 1, CMP_RX_LOOP)]
+    ws += [I.act(I.OP_LEVEL, out_pin, 1, CMP_BIT_T), I.act(I.OP_REARM, 0, 1, CMP_RX_LOOP)]
+    return ws
+
+
+def build_cmp(variant="ok", check=True, kind="order"):
+    """Two sender -> receiver PAIRS, one sender pin per receiver.
+    ⛔ ONE RECEIVER PER SENDER PIN: a SHIFTIN / READBIT RELEASES the pin it
+    samples (v1 semantics -- the I2C ACK read lets SDA go), so a second
+    receiver on the same pin reads it released (MEASURED on the first build:
+    the later receiver read the bench's default 1 every bit). And uo_out has
+    no readback (project.v ties pin_in[11:8] to 0), so the senders are uio.
+      kind "order": an LSB-first pair (uio0 -> lane 2) and an MSB-first pair
+        (uio1 -> lane 3); the SAME byte (CMP_A) must match on both lanes.
+      kind "mask": uio0 sends CMP_A / CMP_B to lane 2 (high-nibble mask, imm
+        CMP_A & 0xF0, inverted); uio1 sends CMP_A ^ 1 / CMP_B to lane 3
+        (ignore-bit-0 mask, imm CMP_A) -- each matches ONLY under its mask."""
+    if kind == "order":
+        lanes = [("send", 0, False, (CMP_A, CMP_B)),
+                 ("send", 1, True, (CMP_A, CMP_B)),
+                 ("recv", 0, 2, CMP_A, I.CMP_MASK_ALL, False, I.ORDER_LSB),
+                 ("recv", 1, 3, CMP_A, I.CMP_MASK_ALL, False, I.ORDER_MSB)]
+    else:
+        lanes = [("send", 0, False, (CMP_A, CMP_B)),
+                 ("send", 1, False, (CMP_A ^ 1, CMP_B)),
+                 ("recv", 0, 2, CMP_A & 0xF0, I.CMP_MASK_HI, True, I.ORDER_LSB),
+                 ("recv", 1, 3, CMP_A, I.CMP_MASK_NO_BIT0, False, I.ORDER_LSB)]
+    hdrs, prog, word = [], [], 0
+    for ln in range(I.N_LANES):
+        base = I.ACT_BASE + word * I.ACT_BYTES
+        spec = lanes[ln] if ln < len(lanes) else None
+        if spec is None:
+            ws = [I.act(I.OP_REARM, 0, 0, 500)]
+            hdrs.append(I.hdr(I.PIN_NONE, I.PIN_NONE, 1, 500, 0, 200, 240, base))
+        elif spec[0] == "send":
+            _k, pin, msb, pair = spec
+            ws = _sender(pin, msb, pair)
+            hdrs.append(I.hdr(pin, I.PIN_NONE, 1, 16 * CMP_BIT_T, 0, 200, 240, base))
+        else:
+            _k, inp, outp, byte, mask, inv, order = spec
+            ws = _receiver(word, inp, outp, byte, mask, inv, variant)
+            hdrs.append(I.hdr(outp, I.PIN_NONE, 1, 960, 0, 200, 240, base, order=order))
+        prog += ws
+        word += len(ws)
+    img = I.full_store(I.join_image(hdrs, prog))
+    probs = I.branch_problems(img)
+    if probs and check:
+        raise ValueError("CMP corpus image refused: " + "; ".join(probs))
+    return img
+
+
+#: the CMP refusal arms: each must be refused by pe_isa.branch_problems
+CMP_REFUSED = ("bit7", "norx", "q1")
+
+
 def main(argv) -> int:
     out = argv[1] if len(argv) > 1 else os.path.join(HERE, "..", "probe_branch")
     os.makedirs(out, exist_ok=True)
@@ -144,6 +239,13 @@ def main(argv) -> int:
         p = os.path.join(out, name + ".hex")
         I.write_image(p, build(nb, ch, sp))
         print("  %-14s %d brancher lane(s), chain %d -> %s" % (name, nb, ch, p))
+    for kind in ("order", "mask"):
+        p = os.path.join(out, "cmp_%s.hex" % kind)
+        I.write_image(p, build_cmp("ok", kind=kind))
+        print("  %-14s 2 sender -> CMP receiver pairs -> %s" % ("cmp_" + kind, p))
+    for v in CMP_REFUSED:
+        probs = I.branch_problems(build_cmp(v, check=False))
+        print("  cmp_%-10s REFUSED (%d problem(s)): %s" % (v, len(probs), probs[0][:70] if probs else "*** NONE ***"))
     for name, (nb, ch, sp) in REFUSED_CHAINS.items():
         probs = I.branch_problems(build(nb, ch, sp, check=False))
         print("  %-14s REFUSED (%d problem(s)): %s" % (name, len(probs), probs[0][:70]))

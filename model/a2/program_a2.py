@@ -80,7 +80,7 @@ def lanes_of(img):
         # an ordinary action whose delay is W (its delay field is the
         # target). The walk reaches both paths. Measured: the W-replaced
         # control matches the branch image lane for lane (R2c).
-        if a["op"] == I.OP_BRANCH_BIT:
+        if a["op"] in I.BRANCH_OPS:
             a = dict(a, delay=I.branch_wait(a))
         by.setdefault(ln, (h, []))[1].append(a)
     return [(ln, h, acts) for ln, (h, acts) in sorted(by.items())]

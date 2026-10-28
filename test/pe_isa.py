@@ -67,10 +67,19 @@ OP_LEVEL, OP_SHIFT, OP_SHIFTIN, OP_READBIT = 0, 1, 2, 3
 OP_START, OP_STOP, OP_ARM, OP_REARM = 4, 5, 6, 7
 # ⭐ v2 PRIMITIVE 1 (Wilson 10-26/27, option A): branch on a sampled bit
 OP_BRANCH_BIT = 8
+# ⭐ v2 PRIMITIVE 2 (Wilson 10-27): the same timed branch, its condition a
+# masked compare of the lane's received byte (WIRE order) with an immediate.
+# 8 and 9 differ only in bit 0 -- the RTL's one-compare branch decode.
+OP_CMP_BRANCH = 9
+BRANCH_OPS = (OP_BRANCH_BIT, OP_CMP_BRANCH)
+#: CMP_BRANCH's mask modes (mod[1:0]), in the byte's natural order
+CMP_MASK_ALL, CMP_MASK_NO_BIT0, CMP_MASK_HI, CMP_MASK_LO = 0, 1, 2, 3
+CMP_MASKS = {0: 0xFF, 1: 0xFE, 2: 0xF0, 3: 0x0F}
 OPCODES = {
     "LEVEL": OP_LEVEL, "SHIFT": OP_SHIFT, "SHIFTIN": OP_SHIFTIN,
     "READBIT": OP_READBIT, "START": OP_START, "STOP": OP_STOP,
     "ARM": OP_ARM, "REARM": OP_REARM, "BRANCH_BIT": OP_BRANCH_BIT,
+    "CMP_BRANCH": OP_CMP_BRANCH,
 }
 # ⭐ RESERVED WITH THE FORMAT (frozen once, Wilson): one opcode per master-list
 # primitive, each with the field map it will use, shown here to fit ONE 32-bit
@@ -82,9 +91,8 @@ OPCODES = {
 #: refuses to encode one. ONE constant: the RTL's copy (`N_BUILT_OPS` in
 #: project.v) is held to it by model/gate_one_encoder.py, and each primitive
 #: that lands raises it by one IN THE COMMIT THAT BUILDS IT.
-N_BUILT_OPS = 9                      # 8 -> 9: BRANCH_BIT built (primitive 1)
+N_BUILT_OPS = 10                     # 9 -> 10: CMP_BRANCH built (primitive 2)
 RESERVED_OPCODES = {
-    9: ("CMP_BRANCH", "imm[7:0] = {count, pinb} vs the lane's RX shift register, delay[6:0] = target word"),
     10: ("LOOP", "count = iterations, delay[6:0] = loop-head word"),
     11: ("ARM2", "pin + pinb = the two watched pins, level = edge, delay = timeout"),
     12: ("DRIVE_SAMPLE", "pin = driven, pinb = sampled, level = drive value, delay"),
@@ -304,6 +312,40 @@ def act_branch_bit(pin, level, target, wait) -> bytes:
                count=w >> PINB_W, pinb=w & ((1 << PINB_W) - 1))
 
 
+def act_cmp_branch(byte, target, wait, mask=CMP_MASK_ALL, inv=False) -> bytes:
+    """CMP_BRANCH (opcode 9, primitive 2): at the branch's DRIVE, compare the
+    lane's received byte -- in WIRE order, the RTL reverses an MSB-first lane's
+    register (Nate 10-28) -- with `byte` under `mask` (CMP_MASK_*); taken on
+    a match, or on a MISMATCH with `inv`. Target and wait W exactly as
+    BRANCH_BIT's. The immediate is {pin, delay[9:7], level}; q[0] = inv,
+    mod = the mask mode, q[1] must be zero."""
+    b, t, w = int(byte), int(target), int(wait)
+    if not 0 <= b <= 0xFF:
+        raise ValueError("CMP byte %r outside 0..255" % (byte,))
+    if not BR_W_MIN <= w <= BR_W_MAX:
+        raise ValueError("branch wait W = %d outside %d..%d (W >= D* + B)"
+                         % (w, BR_W_MIN, BR_W_MAX))
+    nw = (STORE_BYTES - ACT_BASE) // ACT_BYTES
+    if not 0 <= t < nw:
+        raise ValueError("branch target word %d outside the store (0..%d)" % (t, nw - 1))
+    if int(mask) not in CMP_MASKS:
+        raise ValueError("CMP mask mode %r is not one of %s" % (mask, sorted(CMP_MASKS)))
+    return act(OP_CMP_BRANCH, b >> 4, b & 1, t | (((b >> 1) & 7) << 7),
+               count=w >> PINB_W, pinb=w & ((1 << PINB_W) - 1),
+               q=1 if inv else 0, mod=int(mask))
+
+
+def cmp_byte(x):
+    """CMP_BRANCH's immediate from an unpacked word."""
+    return (x["pin"] << 4) | (((x["delay"] >> 7) & 7) << 1) | x["level"]
+
+
+def branch_target(x):
+    """A branch op's target word: BRANCH_BIT uses the whole delay field
+    (delay[9:7] must be zero, so >= 120 is the refusal), CMP_BRANCH delay[6:0]."""
+    return x["delay"] if x["op"] == OP_BRANCH_BIT else x["delay"] & 0x7F
+
+
 def act_shift_clocked(pin, delay, nbits=8, q=0) -> bytes:
     """A self-clocked transmit of `nbits` bits (a whole byte by default).
 
@@ -486,36 +528,88 @@ def branch_problems(img):
         if a + ACT_BYTES > len(img):
             break
         x = _unpack(ACT_FIELDS, img[a:a + ACT_BYTES], ACT_BYTES)
-        if x["op"] != OP_BRANCH_BIT:
+        if x["op"] not in BRANCH_OPS:
             continue
-        t = x["delay"]
+        nm = "BRANCH_BIT" if x["op"] == OP_BRANCH_BIT else "CMP_BRANCH"
+        t = branch_target(x)
         if t >= nwords:
-            out.append("word %d: BRANCH_BIT target %d is outside the store "
-                       "(0..%d) -- the chip refuses it at dispatch" % (w, t, nwords - 1))
+            out.append("word %d: %s target %d is outside the store "
+                       "(0..%d) -- the chip refuses it at dispatch" % (w, nm, t, nwords - 1))
         elif t == w:
-            out.append("word %d: BRANCH_BIT targets ITSELF -- a self-branch "
-                       "busy-polls; waiting on a pin is ARM's job" % w)
+            out.append("word %d: %s targets ITSELF -- a self-branch "
+                       "busy-polls; waiting on a pin is ARM's job" % (w, nm))
         if w == nwords - 1:
-            out.append("word %d: BRANCH_BIT is the store's LAST word -- its "
-                       "not-taken successor is off the end" % w)
-        if x["pin"] >= N_PINS:
+            out.append("word %d: %s is the store's LAST word -- its "
+                       "not-taken successor is off the end" % (w, nm))
+        if x["op"] == OP_BRANCH_BIT and x["pin"] >= N_PINS:
             out.append("word %d: BRANCH_BIT samples pin %d, which is not a real "
                        "pin (flags as virtual pins come later)" % (w, x["pin"]))
         if branch_wait(x) < BR_W_MIN:
-            out.append("word %d: BRANCH_BIT wait W = %d is below D* + B = %d -- "
+            out.append("word %d: %s wait W = %d is below D* + B = %d -- "
                        "the successor's refill has no window; the chip refuses "
-                       "it at dispatch" % (w, branch_wait(x), BR_W_MIN))
+                       "it at dispatch" % (w, nm, branch_wait(x), BR_W_MIN))
         for kind, s in (("not-taken", w + 1), ("taken", t)):
             sa = ACT_BASE + s * ACT_BYTES
             if s < nwords and s != w and sa + ACT_BYTES <= len(img) and \
-                    _unpack(ACT_FIELDS, img[sa:sa + ACT_BYTES], ACT_BYTES)["op"] == OP_BRANCH_BIT:
-                out.append("word %d: BRANCH_BIT's %s successor (word %d) is a "
-                           "BRANCH_BIT -- a branch->branch chain, refused until "
+                    _unpack(ACT_FIELDS, img[sa:sa + ACT_BYTES], ACT_BYTES)["op"] in BRANCH_OPS:
+                out.append("word %d: %s's %s successor (word %d) is a "
+                           "branch -- a branch->branch chain, refused until "
                            "timed chains are measured (Wilson 10-27 Q2)"
-                           % (w, kind, s))
-        for f in ("q", "mod"):
-            if x[f]:
-                out.append("word %d: BRANCH_BIT field %s = %d must be zero" % (w, f, x[f]))
+                           % (w, nm, kind, s))
+        if x["op"] == OP_BRANCH_BIT:
+            for f in ("q", "mod"):
+                if x[f]:
+                    out.append("word %d: BRANCH_BIT field %s = %d must be zero" % (w, f, x[f]))
+        elif x["q"] >> 1:
+            out.append("word %d: CMP_BRANCH q[1] must be zero (held for LOOP's "
+                       "break-out flag)" % w)
+    return out + cmp_byte_problems(img)
+
+
+def _rx_bits(h, x):
+    """Bits one action shifts into its lane's l_rx: a clocked SHIFTIN its
+    count, an unclocked SHIFTIN or a READBIT one, anything else none."""
+    if x["op"] == OP_SHIFTIN:
+        clocked = h["clkpin"] < N_PINS and x["level"] == 1
+        return x["count"] if clocked else 1
+    return 1 if x["op"] == OP_READBIT else 0
+
+
+def cmp_byte_problems(img):
+    """[problem] for every CMP_BRANCH that could compare a PARTIAL byte (Wilson
+    10-27 addition 1). `l_rx` is a shift register, so a CMP is legal only where
+    the bits its lane has shifted in since its last byte boundary are a
+    multiple of 8 on EVERY path that reaches it -- and some byte must have
+    arrived. ⛔ STATIC ONLY, stated: the RTL has no byte-complete flag
+    (`rx_bitp` is the SHIFTIN unit pointer and READBIT does not move it)."""
+    out = []
+    nwords = (STORE_BYTES - ACT_BASE) // ACT_BYTES
+    for ln in range(N_LANES):
+        h = read_header(img, ln)
+        b0 = (h["base"] - ACT_BASE) // ACT_BYTES
+        seen, todo, bad = set(), [(b0, None)], set()
+        while todo:
+            w, st = todo.pop()
+            if (w, st) in seen or not 0 <= w < nwords:
+                continue
+            seen.add((w, st))
+            a = ACT_BASE + w * ACT_BYTES
+            x = _unpack(ACT_FIELDS, img[a:a + ACT_BYTES], ACT_BYTES)
+            if x["op"] == OP_CMP_BRANCH and (st is None or st % 8) and w not in bad:
+                bad.add(w)
+                out.append("lane %d word %d: CMP_BRANCH compares %s -- l_rx is a "
+                           "shift register, so only a whole byte is compared "
+                           "(Wilson 10-27)" % (ln, w, "a byte NOTHING received"
+                           if st is None else "after %d bit(s) of a byte" % (st % 8)))
+            n = _rx_bits(h, x)
+            nst = st if n == 0 else ((0 if st is None else st) + n) % 8
+            if x["op"] == OP_REARM:
+                if x["level"]:
+                    todo.append((b0, nst))
+                continue
+            todo.append((w + 1, nst))
+            if x["op"] in BRANCH_OPS:
+                todo.append((branch_target(x), nst))
     return out
 
 
@@ -604,9 +698,12 @@ def filler_vh() -> str:
             "localparam integer PE_OP_W = %d;\n"
             "// v2: the action region's first byte (BRANCH_BIT targets, branch_check)\n"
             "localparam integer PE_ACT_BASE = %d;\n"
+            "// v2: the branch opcodes (branch_check.vh)\n"
+            "localparam integer PE_OP_BRANCH_BIT = %d;\n"
+            "localparam integer PE_OP_CMP_BRANCH = %d;\n"
             "`endif\n"
             % (ACT_W - 1, ACT_W, (ACT_W + 3) // 4, word, ACT_W, ACT_BYTES,
-               STORE_BYTES, N_BUILT_OPS, OP_W, ACT_BASE))
+               STORE_BYTES, N_BUILT_OPS, OP_W, ACT_BASE, OP_BRANCH_BIT, OP_CMP_BRANCH))
 
 
 # ---------------------------------------------------------------------------

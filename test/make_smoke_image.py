@@ -1350,6 +1350,11 @@ def main() -> int:
              "branch_image.hex"),
             (["--branch", "wbad"], "BRANCH_BIT with W = 31 (refused at dispatch)",
              "branch_wbad_image.hex"),
+            # v2 primitive 2: CMP_BRANCH, both corpus images (bit order; mask/inv)
+            (["--branch", "cmp_order"], "CMP_BRANCH, LSB + MSB lanes, same byte",
+             "branch_cmp_order_image.hex"),
+            (["--branch", "cmp_mask"], "CMP_BRANCH, high-nibble/inv + ignore-bit-0",
+             "branch_cmp_mask_image.hex"),
             (["--edge", "200", "0", "edge_image"], "timeout 200, FALL", "edge_image.hex"),
             (["--edge", "0", "0", "edge_image_noto"], "no timeout, FALL", "edge_image_noto.hex"),
             (["--edge", "0", "1", "edge_image_rise"], "no timeout, RISE", "edge_image_rise.hex"),
@@ -1772,12 +1777,15 @@ def main() -> int:
         import branch_corpus as BC
         import pe_isa as _I
         img = BC.build(4, 1, "braw32")
-        if mode == "wbad":
+        if mode in ("cmp_order", "cmp_mask"):
+            img = BC.build_cmp("ok", kind=mode[4:])
+        elif mode == "wbad":
             img = BC.patch_branches(img, wait=_I.BR_W_MIN - 1)
         elif mode != "ok":
-            raise SystemExit("--branch ok|wbad, not %r" % mode)
-        out = os.path.join(here, "branch_image.hex" if mode == "ok"
-                           else "branch_wbad_image.hex")
+            raise SystemExit("--branch ok|wbad|cmp_order|cmp_mask, not %r" % mode)
+        out = os.path.join(here, {"ok": "branch_image.hex", "wbad": "branch_wbad_image.hex",
+                                  "cmp_order": "branch_cmp_order_image.hex",
+                                  "cmp_mask": "branch_cmp_mask_image.hex"}[mode])
         write_image(out, img)
         print("branch image (%s), %d bytes -> %s" % (mode, len(img), out))
         return 0

@@ -129,6 +129,7 @@
       cur_act    <= {ACT_W{1'b0}}; \
       cur_ck     <= {PINW{1'b0}}; \
       cur_ckr    <= 1'b1; \
+      br_take_q  <= 1'b0; \
       hst        <= H_IDLE; \
       hl         <= {LW{1'b0}}; \
       hb         <= 4'd0; \
@@ -555,6 +556,12 @@ module pe_engine #(
   // the successor is fetched at the branch's writeback from the chosen PC --
   // at most one refill per retired action still holds.
   localparam [OP_W-1:0] OP_BRANCH_BIT = 8;
+  // ⭐ v2 primitive 2: CMP_BRANCH (9) -- the same timed branch, its condition
+  // a compare of the lane's received byte (in WIRE order) with an immediate
+  // under a mask. 8 and 9 differ ONLY in bit 0, so "is a branch" is ONE
+  // compare on a_op[4:1] (the a_op family the canary named) and bit 0
+  // picks the condition.
+  localparam [OP_W-1:0] OP_CMP_BRANCH = 9;
 
   // ---- image layout, all derived -------------------------------------
   // ⛔⛔ `base` IS A THIRD FIELD THE S2 FREEZE DID NOT HAVE. Without it every
@@ -1687,6 +1694,9 @@ module pe_engine #(
   assign           a_q     = cur_act[LOWX +: BQW];
   // BRANCH_BIT's WAIT W: count is its high nibble, pinb its low
   wire [BPW+PINB_W-1:0] br_wait = {a_cnt, cur_act[MOD_W +: PINB_W]};
+  wire [MOD_W-1:0] a_mod  = cur_act[MOD_W-1:0];
+  // a branch op (BRANCH_BIT or CMP_BRANCH): opcodes 8 / 9, one 4-bit compare
+  wire             a_is_br = (a_op[OP_W-1:1] == OP_BRANCH_BIT[OP_W-1:1]);
 
   // ⭐⭐ THE RESERVED NON-DRIVING PIN INDEX. PINW encodes 2**PINW codes and only
   // N_PINS are real, so `PIN_NONE` costs nothing: it is a value that already
@@ -1762,9 +1772,9 @@ module pe_engine #(
   // place of `a_dly` (a branch is never `ck_act`, so the half arm cannot
   // see it). M_BR_W_ZERO restores the zero-time branch R2b measured.
 `ifdef M_BR_W_ZERO
-  wire [DLY_W-1:0] a_dly_wb = (a_op == OP_BRANCH_BIT) ? {DLY_W{1'b0}} : a_dly;
+  wire [DLY_W-1:0] a_dly_wb = a_is_br ? {DLY_W{1'b0}} : a_dly;
 `else
-  wire [DLY_W-1:0] a_dly_wb = (a_op == OP_BRANCH_BIT) ? {{(DLY_W-BPW-PINB_W){1'b0}}, br_wait} : a_dly;
+  wire [DLY_W-1:0] a_dly_wb = a_is_br ? {{(DLY_W-BPW-PINB_W){1'b0}}, br_wait} : a_dly;
 `endif
   wire [DLY_W-1:0] wb_dly = (ck_act & ck_is_high & half_v[cur])
                             ? (a_dly >> 1) : a_dly_wb;
@@ -1964,16 +1974,58 @@ module pe_engine #(
 `else
   wire [AW-1:0] br_tgt   = ACT_BASE[AW-1:0] + br_tgt_w * ACT_BYTES[AW-1:0];
 `endif
-  wire          br_bad   = (a_dly >= BR_NWORDS[DLY_W-1:0])
+  // the target the bound is checked on: BRANCH_BIT's whole delay field
+  // (delay[9:7] set is >= 120, refused), CMP_BRANCH's delay[6:0] only --
+  // its delay[9:7] carry the immediate (opcode bit 0 tells them apart)
+  wire [DLY_W-1:0] br_tdly = a_op[0] ? {{(DLY_W-BR_W){1'b0}}, a_dly[BR_W-1:0]} : a_dly;
+  wire          br_bad   = (br_tdly >= BR_NWORDS[DLY_W-1:0])
                          | (br_wait < BR_W_MIN[BPW+PINB_W-1:0]);
+  // ⭐ v2 primitive 2 (Wilson 10-27 Q4): THE DECISION IS REGISTERED AT DRIVE
+  // (`br_take_q`), for both branch ops, so the WB cone sees one flop. A
+  // branch's own DRIVE -> WB is one cycle and nothing writes l_rx[cur] in
+  // between (only a SHIFTIN/READBIT's own WB does), so the compare reads the
+  // same byte either side; BRANCH_BIT's pin sample moves WB -> DRIVE.
+`ifdef M_BR_LVL_INV
+  wire          br_bit_take = (rx_bit != a_lvl);
+`else
+  wire          br_bit_take = (rx_bit == a_lvl);
+`endif
+  // CMP_BRANCH: the received byte in WIRE order -- l_rx shifts LSB-first on
+  // every lane, so an MSB-first lane (l_order) compares it bit-reversed
+  // (Nate 10-28, option 1: chosen by the lane's own order, no word field).
+  wire [7:0]    cmp_rev  = {l_rx[cur][0], l_rx[cur][1], l_rx[cur][2], l_rx[cur][3],
+                            l_rx[cur][4], l_rx[cur][5], l_rx[cur][6], l_rx[cur][7]};
+`ifdef M_CMP_ORDER_IGN
+  wire [7:0]    cmp_src  = l_rx[cur];
+`else
+  wire [7:0]    cmp_src  = l_order[cur] ? cmp_rev : l_rx[cur];
+`endif
+  // the immediate: {pin, delay[9:7], level}, in the byte's natural order
+`ifdef M_CMP_IMM_OFF1
+  wire [7:0]    cmp_imm  = {a_pin, a_dly[DLY_W-1 -: 3], a_lvl} + 8'd1;
+`else
+  wire [7:0]    cmp_imm  = {a_pin, a_dly[DLY_W-1 -: 3], a_lvl};
+`endif
+  // mod: 0 all 8 bits, 1 ignore bit 0, 2 high nibble, 3 low nibble
+`ifdef M_CMP_MASK_IGN
+  wire [7:0]    cmp_mask = 8'hFF;
+`else
+  wire [7:0]    cmp_mask = (a_mod == 2'd1) ? 8'hFE : (a_mod == 2'd2) ? 8'hF0
+                         : (a_mod == 2'd3) ? 8'h0F : 8'hFF;
+`endif
+  // q[0] = inv: taken on MISMATCH
+`ifdef M_CMP_INV
+  wire          br_cmp_take = (((cmp_src ^ cmp_imm) & cmp_mask) == 8'h00);
+`else
+  wire          br_cmp_take = (((cmp_src ^ cmp_imm) & cmp_mask) == 8'h00) ^ a_q[0];
+`endif
+  reg           br_take_q;     // the decision, registered at ST_DRIVE
 `ifdef M_BR_ALWAYS
   wire          br_taken = 1'b1;
 `elsif M_BR_NEVER
   wire          br_taken = 1'b0;
-`elsif M_BR_LVL_INV
-  wire          br_taken = (rx_bit != a_lvl);
 `else
-  wire          br_taken = (rx_bit == a_lvl);
+  wire          br_taken = br_take_q;
 `endif
   // the byte an OP_SHIFTIN completes: the sample being taken now, followed by
   // the seven already in `l_rx`
@@ -2212,7 +2264,7 @@ module pe_engine #(
                                                      // the head; spare unused
       // OPTION A: a branch head's successor is unknown until it writes back
 `ifndef M_BR_FETCH_PAST
-      else if (hact[ACT_W-1 -: OP_W] == OP_BRANCH_BIT)
+      else if (hact[ACT_W-1 -: OP_W-1] == OP_BRANCH_BIT[OP_W-1:1])
         want_fetch = 1'b0;
 `endif
       else
@@ -2980,12 +3032,13 @@ module pe_engine #(
             // Its state goes in at writeback, below.
             OP_ARM, OP_REARM: ;                 // no pin movement
             // BRANCH_BIT moves no pin; a target outside the store is refused
-            OP_BRANCH_BIT: if (br_bad) begin
+            OP_BRANCH_BIT, OP_CMP_BRANCH: if (br_bad) begin
               config_err_m <= 1'b1;
               live_n[cur]  = 1'b0;
             end
             default: ;
           endcase
+          br_take_q <= a_op[0] ? br_cmp_take : br_bit_take;
           st <= ST_WB;
         end
 
@@ -3295,7 +3348,7 @@ module pe_engine #(
             l_actv[hix[cur]] <= 1'b0;
             l_pc[cur] <= l_pc[cur] + ACT_BYTES[AW-1:0];
 `endif
-          end else if (a_op == OP_BRANCH_BIT) begin
+          end else if (a_is_br) begin
             // ⭐ THE PC CHOICE, merged into the writeback: retire as any
             // action does (invalidate the head, swap), to the target or on
             l_pc[cur]   <= br_taken ? br_tgt : l_pc[cur] + ACT_BYTES[AW-1:0];

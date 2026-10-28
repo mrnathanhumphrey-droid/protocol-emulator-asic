@@ -90,7 +90,7 @@ PREMISES = [
     # already admits, so the core is untouched; the line is anchored so a
     # change to how a branch advances the timestamp is seen here.
     ("P8br", "a branch's writeback delay is its wait W (>= D* + B)",
-     "wire [DLY_W-1:0] a_dly_wb = (a_op == OP_BRANCH_BIT) ? {{(DLY_W-BPW-PINB_W){1'b0}}, br_wait} : a_dly;"),
+     "wire [DLY_W-1:0] a_dly_wb = a_is_br ? {{(DLY_W-BPW-PINB_W){1'b0}}, br_wait} : a_dly;"),
     # ⛔⛔ RULING W SPLIT READINESS IN TWO. `rel_due` is still "the timestamp
     # has arrived" (P9, re-anchored); `ready` adds W1's own-hold gate (P9w).
     # P9w is release jitter on a lane that loads the SDA hold, bounded by
