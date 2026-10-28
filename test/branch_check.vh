@@ -49,8 +49,10 @@ always @(posedge clk) if (rst_n === 1'b1 && bc_on != 0 && !done) begin
       if (dut.u_eng.l_order[dut.u_eng.cur] === 1'b1)
         bc_rx = {bc_rx[0], bc_rx[1], bc_rx[2], bc_rx[3], bc_rx[4], bc_rx[5], bc_rx[6], bc_rx[7]};
       bc_imm  = {dut.u_eng.a_pin, dut.u_eng.a_dly[9:7], dut.u_eng.a_lvl};
-      bc_mask = (dut.u_eng.a_mod == 1) ? 8'hFE : (dut.u_eng.a_mod == 2) ? 8'hF0
-              : (dut.u_eng.a_mod == 3) ? 8'h0F : 8'hFF;
+      // mod = the word's low 2 bits (cur_act, not a_mod: gate_v2_equiv also
+      // elaborates this file against the v1-lock RTL, which has no a_mod)
+      bc_mask = (dut.u_eng.cur_act[1:0] == 1) ? 8'hFE : (dut.u_eng.cur_act[1:0] == 2) ? 8'hF0
+              : (dut.u_eng.cur_act[1:0] == 3) ? 8'h0F : 8'hFF;
       bc_take = (((bc_rx ^ bc_imm) & bc_mask) == 8'h00) ^ dut.u_eng.a_q[0];
       bc_cmp = bc_cmp + 1;
       if (bc_dbg != 0)

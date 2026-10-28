@@ -711,7 +711,7 @@ def corpus_arms():
                  "+NCYC=40000", "+SEED=1", "+ASYNC=0",
                  "+STAYLOAD=0", "+SCLHOLD=0"], {"SPL_CFG": 1}))
     # ⭐ v2 primitive 2: the CMP_BRANCH images, the same pattern
-    for _k in ("cmp_order", "cmp_mask"):
+    for _k in ("cmp_order", "cmp_mask", "cmp_lo"):
         out.append(("branch_" + _k,
                     ["+IMG=test/branch_%s_image.hex" % _k, "+PEER=none",
                      "+OUT=probe_cov_trace_branch_%s.txt" % _k,

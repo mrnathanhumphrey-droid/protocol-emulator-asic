@@ -55,9 +55,9 @@ ALLOWED = {
         "program that reads past its end looks correct. The image loader "
         "asserts its own length for the same reason."),
     "s_wrdata": (
-        30,          # v2 primitive 1: BRANCH_BIT's wait W reads pinb (W's low
-                     # nibble), so only the 2 mod bits are trimmed now; 26 before
-                     # (32 minus pinb/mod), 24 in v1, 22 before the TX queue field
+        32,          # v2 primitive 2: CMP_BRANCH reads mod (its mask mode), so no
+                     # bit is trimmed now -- the whole 32-bit word; 30 at primitive 1
+                     # (W reads pinb), 26 before, 24 in v1, 22 before the TX queue
         "the store's WIDE action read, now 24 bits. ⭐ THE WIDTH CHECK "
         "EARNED ITS KEEP HERE: it went 22 -> 24 when ACT_W absorbed the TX "
         "queue field, and the gate refused to absorb two new bits nobody "

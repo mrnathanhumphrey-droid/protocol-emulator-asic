@@ -179,6 +179,18 @@ REGISTRY = {
     # it; that check proves what it proves (a digest proves which image ran
     # and that its streams match a record, not that its wire matched its
     # feed). The label stays true; no further work is owed on these.
+    # v2 primitive 2: the CMP_BRANCH sweep images. Their READBIT lanes receive a
+    # sender lane's byte to COMPARE it, not to feed the host.
+    "branch_cmp_order_image.hex": (INTERNAL, {
+        "checked_by": "test/run_branch_check.py",
+        "how": "branch_check.vh recomputes every CMP's decision from the received "
+               "byte (wire order) and the word; next PC and head exact, 0 stalls"}),
+    "branch_cmp_mask_image.hex": (INTERNAL, {
+        "checked_by": "test/run_branch_check.py",
+        "how": "as branch_cmp_order: the mask/inv pair, decision recomputed per CMP"}),
+    "branch_cmp_lo_image.hex": (INTERNAL, {
+        "checked_by": "test/run_branch_check.py",
+        "how": "as branch_cmp_order: the low-nibble mode, decision recomputed per CMP"}),
     "census_image.hex": (INTERNAL, {
         "checked_by": "test/run_lockstep.py",
         "how": "dispatch and pin streams byte-identical to the recorded "

@@ -711,7 +711,9 @@ SPEC_SYMBOLS = {
     ("test/branch_corpus.py", "SPACING"),
     ("test/branch_corpus.py", "CORPUS"),
     ("test/branch_corpus.py", "REFUSED_CHAINS"),
-    ("test/run_branch_check.py", "BASE"),
+    ("test/run_branch_check.py", "IMAGES"),
+    # the CMP mask modes: the ISA's own definition (the RTL's mux), not a reading
+    ("test/pe_isa.py", "CMP_MASKS"),
     # ⭐ A TEST PAYLOAD IS STIMULUS, NOT A MEASUREMENT. The four bytes the
     # cocotb host feeder pushes are chosen to be distinguishable on a wire;
     # nothing is concluded from their values. `host_feed.vh` carries the same

@@ -18,6 +18,7 @@ function integer v3_tab;
       32'hba3b46e8: case (field) 0: v3_tab = 0; 1: v3_tab = 6; 2: v3_tab = 9; 3: v3_tab = 13; 4: v3_tab = 16; 5: v3_tab = 16; 6: v3_tab = 17; 7: v3_tab = 75; 8: v3_tab = 210; 9: v3_tab = 255; 10: v3_tab = 255; endcase  // b3b_a_image.hex
       32'h6a2287d9: case (field) 0: v3_tab = 0; 1: v3_tab = 9; 2: v3_tab = 12; 3: v3_tab = 7; 4: v3_tab = 16; 5: v3_tab = 16; 6: v3_tab = 17; 7: v3_tab = 75; 8: v3_tab = 15; 9: v3_tab = 255; 10: v3_tab = 255; endcase  // b3b_b_image.hex
       32'h10302985: case (field) 0: v3_tab = 0; 1: v3_tab = 6; 2: v3_tab = 9; 3: v3_tab = 12; 4: v3_tab = 16; 5: v3_tab = 16; 6: v3_tab = 17; 7: v3_tab = 75; 8: v3_tab = 240; 9: v3_tab = 255; 10: v3_tab = 255; endcase  // b3b_bnoi2c_image.hex
+      32'h510f7e1f: case (field) 0: v3_tab = 0; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // branch_cmp_lo_image.hex
       32'h5a4f60e1: case (field) 0: v3_tab = 0; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // branch_cmp_mask_image.hex
       32'h3a76740f: case (field) 0: v3_tab = 0; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // branch_cmp_order_image.hex
       32'h1fc91fce: case (field) 0: v3_tab = 0; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // branch_image.hex
@@ -120,6 +121,7 @@ task v3_tab_name;
       32'hba3b46e8: $display("  clocked_conform[V3] image: b3b_a_image.hex (by its loaded bytes)");
       32'h6a2287d9: $display("  clocked_conform[V3] image: b3b_b_image.hex (by its loaded bytes)");
       32'h10302985: $display("  clocked_conform[V3] image: b3b_bnoi2c_image.hex (by its loaded bytes)");
+      32'h510f7e1f: $display("  clocked_conform[V3] image: branch_cmp_lo_image.hex (by its loaded bytes)");
       32'h5a4f60e1: $display("  clocked_conform[V3] image: branch_cmp_mask_image.hex (by its loaded bytes)");
       32'h3a76740f: $display("  clocked_conform[V3] image: branch_cmp_order_image.hex (by its loaded bytes)");
       32'h1fc91fce: $display("  clocked_conform[V3] image: branch_image.hex (by its loaded bytes)");

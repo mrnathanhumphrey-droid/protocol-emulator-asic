@@ -199,6 +199,10 @@ def build_cmp(variant="ok", check=True, kind="order"):
                  ("send", 1, True, (CMP_A, CMP_B)),
                  ("recv", 0, 2, CMP_A, I.CMP_MASK_ALL, False, I.ORDER_LSB),
                  ("recv", 1, 3, CMP_A, I.CMP_MASK_ALL, False, I.ORDER_MSB)]
+    elif kind == "lo":
+        # the low-nibble mode: CMP_A & 0x0F = 0x4 matches CMP_A, not CMP_B (0xC)
+        lanes = [("send", 0, False, (CMP_A, CMP_B)),
+                 ("recv", 0, 2, CMP_A & 0x0F, I.CMP_MASK_LO, False, I.ORDER_LSB)]
     else:
         lanes = [("send", 0, False, (CMP_A, CMP_B)),
                  ("send", 1, False, (CMP_A ^ 1, CMP_B)),
@@ -239,7 +243,7 @@ def main(argv) -> int:
         p = os.path.join(out, name + ".hex")
         I.write_image(p, build(nb, ch, sp))
         print("  %-14s %d brancher lane(s), chain %d -> %s" % (name, nb, ch, p))
-    for kind in ("order", "mask"):
+    for kind in ("order", "mask", "lo"):
         p = os.path.join(out, "cmp_%s.hex" % kind)
         I.write_image(p, build_cmp("ok", kind=kind))
         print("  %-14s 2 sender -> CMP receiver pairs -> %s" % ("cmp_" + kind, p))

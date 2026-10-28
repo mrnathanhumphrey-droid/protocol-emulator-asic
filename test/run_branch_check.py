@@ -62,6 +62,7 @@ IMAGES = {
     "braw40_contend4": lambda: B.build(4, 1, "braw40"),
     "cmp_order": lambda: B.build_cmp("ok", kind="order"),
     "cmp_mask": lambda: B.build_cmp("ok", kind="mask"),
+    "cmp_lo": lambda: B.build_cmp("ok", kind="lo"),
 }
 BASE = list(IMAGES)
 #: mutant -> (BRCHECK counter that must go non-zero, what it breaks, image)
