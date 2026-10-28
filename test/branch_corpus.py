@@ -28,11 +28,11 @@ TOGGLE_PIN = 0
 #: every spacing >= D* + B = 20 + 4*3 = 32, with margin.
 SPACING = {"br": (37, 53, 40, 23), "bra": (41, 53, 40, 40)}
 #: R2b's re-run (Wilson 10-27): the branch is TIMED, its wait W per image.
-#: R2 and R2b ran a ZERO-time branch; that word no longer encodes (W >= 32),
+#: R2 and R2b ran a ZERO-time branch; that word no longer encodes (W >= W_MIN = 33),
 #: so their images are built at W = BR_W_MIN and R2b's numbers are history.
 BR_WAIT = {"br": I.BR_W_MIN, "bra": I.BR_W_MIN,
-           "braw32": 32, "braw40": 40}
-SPACING["braw32"] = SPACING["braw40"] = SPACING["bra"]
+           "braw33": 33, "braw40": 40}
+SPACING["braw33"] = SPACING["braw40"] = SPACING["bra"]
 
 
 def _toggler(sp):
@@ -130,8 +130,8 @@ CORPUS = {
     "br_contend4": (4, 1, "br"),
     "bra_alone": (1, 1, "bra"),          # R2b: the admissible corpus
     "bra_contend4": (4, 1, "bra"),
-    "braw32_alone": (1, 1, "braw32"),    # R2b re-run: the TIMED branch
-    "braw32_contend4": (4, 1, "braw32"),
+    "braw33_alone": (1, 1, "braw33"),    # R2b re-run: the TIMED branch
+    "braw33_contend4": (4, 1, "braw33"),
     "braw40_alone": (1, 1, "braw40"),
     "braw40_contend4": (4, 1, "braw40"),
 }
@@ -239,7 +239,7 @@ CMP_REFUSED = ("bit7", "norx", "q1")
 # ---------------------------------------------------------------------------
 # v2 PRIMITIVE 2, BUNDLE 2: THE LOOP CORPUS
 # ---------------------------------------------------------------------------
-LOOP_D = 32             # every spacing at D* + B: n = 255 fits a 60k-cycle run
+LOOP_D = 33             # every spacing at W_MIN: n = 255 fits a 60k-cycle run
 LOOP_REARM = 300
 
 

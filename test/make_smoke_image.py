@@ -1343,7 +1343,7 @@ def main() -> int:
             (["--chain", "12", "40"], "chaining re-arm", "chain_image.hex"),
             (["--stress", "25", "31"], "single-buffer stress", "stress_image.hex"),
             # ⭐ v2 primitive 1: THE BRANCH SWEEP ARMS (Wilson 10-27, the pattern
-            # every primitive follows) -- branch_corpus's braw32_contend4, and the
+            # every primitive follows) -- branch_corpus's braw33_contend4, and the
             # same image with W = BR_W_MIN - 1 packed past the encoder (the
             # dispatch refusal: config_err, the lane halted).
             (["--branch", "ok"], "BRANCH_BIT, W = 32, 4 branchers",
@@ -1778,7 +1778,7 @@ def main() -> int:
         mode = sys.argv[sys.argv.index("--branch") + 1]
         import branch_corpus as BC
         import pe_isa as _I
-        img = BC.build(4, 1, "braw32")
+        img = BC.build(4, 1, "braw33")
         if mode in ("cmp_order", "cmp_mask", "cmp_lo"):
             img = BC.build_cmp("ok", kind=mode[4:])
         elif mode == "wbad":

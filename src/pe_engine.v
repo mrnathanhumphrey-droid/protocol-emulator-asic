@@ -655,7 +655,8 @@ module pe_engine #(
   // BRANCH_BIT's WAIT W (Wilson 10-27, R2b): count:pinb, >= D* + B. The
   // successor releases W after the branch, so its refill has a window
   // (option A fetches nothing past a branch head). pe_isa.BR_W_MIN mirrors it.
-  localparam integer BR_W_MIN  = N_LANES * 4 + (N_LANES - 1) * 3;   // 32
+  // 32 -> 33 (measured, 10-28): + the winner-registration cycle; pe_isa.BR_W_MIN
+  localparam integer BR_W_MIN  = N_LANES * 4 + (N_LANES - 1) * 3 + 1;   // 33
   generate
     if ((ACT_BASE % ACT_BYTES) != 0) begin : g_act_aligned
       ACTION_REGION_NOT_WORD_ALIGNED _static_assert ();

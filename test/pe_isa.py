@@ -288,7 +288,13 @@ SELF_CLOCKED = 1        # the `level` value that means "self-clocked"
 #: ⛔ R2b measured the zero-time branch: ~4-5 stall cycles per branch at any
 #: spacing, and ordinary actions on OTHER lanes pushed past A2's bound.
 BR_L_REFILL, BR_C_SPACING = 4, 3
-BR_W_MIN = N_LANES * BR_L_REFILL + (N_LANES - 1) * BR_C_SPACING     # 32
+#: ⛔ 32 -> 33 (Nate 10-28, measured: rulings/p2b_wmin_sweep): with all five
+#: lanes at W = 32 a branch successor stalled ONE cycle (at cold start); 33 is
+#: the smallest W with 0 stalls on every variant. The +1 is J_WINNER_REG, the
+#: winner-registration cycle: B = (k - 1) * C + 1 = 13 = A2's own r - C, so
+#: W_MIN = D* + (r - C).
+BR_J_WINNER_REG = 1
+BR_W_MIN = N_LANES * BR_L_REFILL + (N_LANES - 1) * BR_C_SPACING + BR_J_WINNER_REG  # 33
 BR_W_MAX = (1 << (CNT_W + PINB_W)) - 1                              # 255
 
 

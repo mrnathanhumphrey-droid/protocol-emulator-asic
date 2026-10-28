@@ -10,7 +10,7 @@ Bench: test/tb_equiv.v with +BRCHECK=1 (test/branch_check.vh computes the
 expected next PC from the word and the pin, and checks every dispatched head
 against the image). Images: test/branch_corpus.py, written to scratch.
 
-  B1  baseline, W = 32 and 40, 1 and 4 branchers: pc_bad 0, head_bad 0,
+  B1  baseline, W = 33 and 40, 1 and 4 branchers: pc_bad 0, head_bad 0,
       stall 0; every lane's branch-successor lateness <= the same lane's
       ordinary actions' (the control, same run); every ordinary action
       within A2's bound r - C, A2 pricing the branch as an action of delay W.
@@ -56,8 +56,8 @@ GEN = "run_branch_check"
 #: image name -> its builder. braw* = BRANCH_BIT (primitive 1); cmp_* =
 #: CMP_BRANCH (primitive 2): the bit-order pair and the mask/inv pair.
 IMAGES = {
-    "braw32_alone": lambda: B.build(1, 1, "braw32"),
-    "braw32_contend4": lambda: B.build(4, 1, "braw32"),
+    "braw33_alone": lambda: B.build(1, 1, "braw33"),
+    "braw33_contend4": lambda: B.build(4, 1, "braw33"),
     "braw40_alone": lambda: B.build(1, 1, "braw40"),
     "braw40_contend4": lambda: B.build(4, 1, "braw40"),
     "cmp_order": lambda: B.build_cmp("ok", kind="order"),
@@ -70,12 +70,12 @@ IMAGES = {
 BASE = list(IMAGES)
 #: mutant -> (BRCHECK counter that must go non-zero, what it breaks, image)
 MUTANTS = [
-    ("M_BR_TGT_OFF1", "pc_bad", "the taken target one word past its own", "braw32_contend4"),
-    ("M_BR_ALWAYS", "pc_bad", "every branch taken", "braw32_contend4"),
-    ("M_BR_NEVER", "pc_bad", "no branch taken", "braw32_contend4"),
-    ("M_BR_LVL_INV", "pc_bad", "taken on the opposite level", "braw32_contend4"),
-    ("M_BR_FETCH_PAST", "head_bad", "the spare fetched past a branch head", "braw32_contend4"),
-    ("M_BR_W_ZERO", "stall_cycles", "the zero-time branch (no refill window)", "braw32_contend4"),
+    ("M_BR_TGT_OFF1", "pc_bad", "the taken target one word past its own", "braw33_contend4"),
+    ("M_BR_ALWAYS", "pc_bad", "every branch taken", "braw33_contend4"),
+    ("M_BR_NEVER", "pc_bad", "no branch taken", "braw33_contend4"),
+    ("M_BR_LVL_INV", "pc_bad", "taken on the opposite level", "braw33_contend4"),
+    ("M_BR_FETCH_PAST", "head_bad", "the spare fetched past a branch head", "braw33_contend4"),
+    ("M_BR_W_ZERO", "stall_cycles", "the zero-time branch (no refill window)", "braw33_contend4"),
     # v2 primitive 2: CMP_BRANCH, each on the image whose pair it breaks
     ("M_CMP_ORDER_IGN", "pc_bad", "no wire-order reversal on an MSB lane", "cmp_order"),
     ("M_CMP_IMM_OFF1", "pc_bad", "the immediate one off", "cmp_order"),
@@ -214,7 +214,7 @@ def main() -> int:
             probs.append("cmp_%s: not refused for its own reason" % v)
 
     print("\n  B3 runtime refusals (packed past the encoder)")
-    good = B.build(1, 1, "braw32")
+    good = B.build(1, 1, "braw33")
     for name, kw in (("w_below_min", {"wait": I.BR_W_MIN - 1}),
                      ("tgt_past_store", {"target": (I.STORE_BYTES - I.ACT_BASE) // I.ACT_BYTES})):
         img = B.patch_branches(good, **kw)
