@@ -675,6 +675,11 @@ end
 // load holding a reserved opcode (`+RESOP_AT`): CONFIG_ERR set, store_full SET
 // (the load completed), `bad_op` set, zero writebacks. The coverage sweep's
 // `resop` arm, so the loader's refusal branch is reached under Verilator too.
+// ⭐ v2 primitive 1: `+EXPECT_REFUSED=3` is the DISPATCH refusal -- a full,
+// legal-at-load image whose BRANCH_BIT carries W < BR_W_MIN (packed past the
+// encoder): the engine STARTS, then CONFIG_ERR set, store_full set, bad_op
+// clear, and the branching lane (lane 1) halted. Writebacks before the
+// branch dispatches are legal, so they are not counted.
 integer m5_refused, rs_stayload, resop_at;
 initial begin
   if (!$value$plusargs("EXPECT_REFUSED=%d", m5_refused)) m5_refused = 0;
@@ -683,11 +688,16 @@ initial begin
   // ⭐ v2 (runstart.vh): the two arms whose engine must NEVER start -- a
   // refused load, and STAYLOAD's load-mode readback trace -- say so
   if (!$value$plusargs("STAYLOAD=%d", rs_stayload)) rs_stayload = 0;
-  rs_nostart_ok = (m5_refused != 0) || (rs_stayload != 0);
+  rs_nostart_ok = (m5_refused == 1) || (m5_refused == 2) || (rs_stayload != 0);
 end
 
 final begin
-  if (m5_refused == 2) begin
+  if (m5_refused == 3) begin
+    if (dut.cfg_err_any !== 1'b1 || dut.store_full !== 1'b1 || dut.bad_op !== 1'b0 || dut.u_eng.l_live[1] !== 1'b0)
+      $display("*** FAIL tb_trace[BRREF]: a branch with W below D* + B was NOT refused at dispatch -- CONFIG_ERR=%0b store_full=%0b bad_op=%0b lane1_live=%0b", dut.cfg_err_any, dut.store_full, dut.bad_op, dut.u_eng.l_live[1]);
+    else
+      $display("  tb_trace[BRREF]: ok -- the branch's W < D* + B was refused at dispatch: CONFIG_ERR set, lane 1 halted");
+  end else if (m5_refused == 2) begin
     if (dut.cfg_err_any !== 1'b1 || dut.store_full !== 1'b1 || dut.bad_op !== 1'b1 || cm_wbs != 0)
       $display("*** FAIL tb_trace[RESOP]: a reserved opcode was NOT refused at load -- CONFIG_ERR=%0b store_full=%0b bad_op=%0b writebacks=%0d", dut.cfg_err_any, dut.store_full, dut.bad_op, cm_wbs);
     else

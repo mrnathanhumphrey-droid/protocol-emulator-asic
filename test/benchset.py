@@ -690,6 +690,23 @@ def corpus_arms():
                  "+NCYC=4000", "+SEED=1", "+ASYNC=0",
                  "+STAYLOAD=0", "+SCLHOLD=0", "+EXPECT_REFUSED=2",
                  "+RESOP_AT=%d" % _ISA.ACT_BASE]))
+    # ⭐⭐ v2 primitive 1 (Wilson 10-27): THE BRANCH ARMS -- the pattern every
+    # primitive follows: its own image in the sweep (make_smoke_image.py
+    # --branch), so the engine's new lines are covered here and not only by
+    # the primitive's gate on tb_equiv (test/run_branch_check.py). `branch`
+    # runs 4 branchers at W = 32 both ways; `branch_wbad` is the same image
+    # with W = 31 packed past the encoder, refused at dispatch
+    # (+EXPECT_REFUSED=3: CONFIG_ERR, lane 1 halted).
+    out.append(("branch",
+                ["+IMG=test/branch_image.hex", "+PEER=none",
+                 "+OUT=probe_cov_trace_branch.txt",
+                 "+NCYC=40000", "+SEED=1", "+ASYNC=0",
+                 "+STAYLOAD=0", "+SCLHOLD=0"]))
+    out.append(("branch_wbad",
+                ["+IMG=test/branch_wbad_image.hex", "+PEER=none",
+                 "+OUT=probe_cov_trace_branch_wbad.txt",
+                 "+NCYC=4000", "+SEED=1", "+ASYNC=0",
+                 "+STAYLOAD=0", "+SCLHOLD=0", "+EXPECT_REFUSED=3"]))
     # ⭐⭐ THE ZERO-HOLD BUILD, IN THE COVERAGE SWEEP (ruling D3). Removing the
     # `ck_hold_fits` clamp from the clocked site left ONE branch reachable only
     # at `SDA_HOLD == 0`: the open-drain side of the clocked direct-drive arm.

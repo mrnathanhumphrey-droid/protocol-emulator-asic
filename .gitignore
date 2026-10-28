@@ -121,3 +121,5 @@ test/sim_build*/
 .sim_run_scratch.json
 # agent worktrees (Claude Code) -- never part of the tree
 .claude/
+test/branch_image.hex
+test/branch_wbad_image.hex

@@ -1342,6 +1342,14 @@ def main() -> int:
              "five_image.hex"),
             (["--chain", "12", "40"], "chaining re-arm", "chain_image.hex"),
             (["--stress", "25", "31"], "single-buffer stress", "stress_image.hex"),
+            # ⭐ v2 primitive 1: THE BRANCH SWEEP ARMS (Wilson 10-27, the pattern
+            # every primitive follows) -- branch_corpus's braw32_contend4, and the
+            # same image with W = BR_W_MIN - 1 packed past the encoder (the
+            # dispatch refusal: config_err, the lane halted).
+            (["--branch", "ok"], "BRANCH_BIT, W = 32, 4 branchers",
+             "branch_image.hex"),
+            (["--branch", "wbad"], "BRANCH_BIT with W = 31 (refused at dispatch)",
+             "branch_wbad_image.hex"),
             (["--edge", "200", "0", "edge_image"], "timeout 200, FALL", "edge_image.hex"),
             (["--edge", "0", "0", "edge_image_noto"], "no timeout, FALL", "edge_image_noto.hex"),
             (["--edge", "0", "1", "edge_image_rise"], "no timeout, RISE", "edge_image_rise.hex"),
@@ -1758,6 +1766,20 @@ def main() -> int:
         out = os.path.join(here, "tx_image.hex")
         write_image(out, img)
         print("tx image d0=%d d1=%d, %d bytes -> %s" % (d0, d1, len(img), out))
+        return 0
+    if "--branch" in sys.argv:
+        mode = sys.argv[sys.argv.index("--branch") + 1]
+        import branch_corpus as BC
+        import pe_isa as _I
+        img = BC.build(4, 1, "braw32")
+        if mode == "wbad":
+            img = BC.patch_branches(img, wait=_I.BR_W_MIN - 1)
+        elif mode != "ok":
+            raise SystemExit("--branch ok|wbad, not %r" % mode)
+        out = os.path.join(here, "branch_image.hex" if mode == "ok"
+                           else "branch_wbad_image.hex")
+        write_image(out, img)
+        print("branch image (%s), %d bytes -> %s" % (mode, len(img), out))
         return 0
     if "--stress" in sys.argv:
         k = sys.argv.index("--stress")
