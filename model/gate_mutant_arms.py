@@ -123,6 +123,10 @@ EXPECT = {
     "M_CMP_IMM_OFF1":     (2, None),
     "M_CMP_MASK_IGN":     (3, "the mask mux is two lines (four modes); the mutant is one constant"),
     "M_CMP_INV":          (2, None),
+    # v2 primitive 2 bundle 2: LOOP -- the count, the exit, the reset at exit
+    "M_LOOP_OFF1":        (2, None),
+    "M_LOOP_NOEXIT":      (2, None),
+    "M_LOOP_NORESET":     (2, None),
     # ruling CE1 / CE2: each new mode bit read as 0 -- the selector ignored
     "M_HALF_IGNORED":    (2, None),
     # 2 since option 1' (WF2): the XOR now lives in the one-line `run_out`,

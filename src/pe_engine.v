@@ -164,6 +164,7 @@
         l_tx[i]        <= 8'h00; \
         l_txv[i]       <= 1'b0; \
         l_rx[i]        <= 8'h00; \
+        l_loop[i]      <= 8'h00; \
         tx_bitp[i]     <= {BPW{1'b0}}; \
         rx_bitp[i]     <= {BPW{1'b0}}; \
         l_ckph[i]      <= CK_LOW; \
@@ -562,6 +563,11 @@ module pe_engine #(
   // compare on a_op[4:1] (the a_op family the canary named) and bit 0
   // picks the condition.
   localparam [OP_W-1:0] OP_CMP_BRANCH = 9;
+  // ⭐ v2 primitive 2, bundle 2: LOOP (10) -- repeat a body n times, the same
+  // timed branch with a per-lane counter. 8..11 share a_op[4:2] = 3'b010
+  // (11 is reserved and refused at load), so "is a branch" stays ONE
+  // compare and a_op[1:0] picks BIT / CMP / LOOP.
+  localparam [OP_W-1:0] OP_LOOP       = 10;
 
   // ---- image layout, all derived -------------------------------------
   // ⛔⛔ `base` IS A THIRD FIELD THE S2 FREEZE DID NOT HAVE. Without it every
@@ -915,6 +921,7 @@ module pe_engine #(
   // the wire that the host did not push (the reset 0x00 used to).
   reg             l_txv    [0:N_LANES-1];
   reg [7:0]       l_rx     [0:N_LANES-1];   // the RX accumulator
+  reg [7:0]       l_loop   [0:N_LANES-1];   // LOOP's counter: 0 = idle / fresh
   reg [BPW-1:0]   tx_bitp  [0:N_LANES-1];   // advanced/reset ONLY by OP_SHIFT
   reg [BPW-1:0]   rx_bitp  [0:N_LANES-1];   // ... ONLY by OP_SHIFTIN
   // THE MUTANT'S SHARED POINTER: one for both directions, which is what
@@ -1696,7 +1703,7 @@ module pe_engine #(
   wire [BPW+PINB_W-1:0] br_wait = {a_cnt, cur_act[MOD_W +: PINB_W]};
   wire [MOD_W-1:0] a_mod  = cur_act[MOD_W-1:0];
   // a branch op (BRANCH_BIT or CMP_BRANCH): opcodes 8 / 9, one 4-bit compare
-  wire             a_is_br = (a_op[OP_W-1:1] == OP_BRANCH_BIT[OP_W-1:1]);
+  wire             a_is_br = (a_op[OP_W-1:2] == OP_BRANCH_BIT[OP_W-1:2]);
 
   // ⭐⭐ THE RESERVED NON-DRIVING PIN INDEX. PINW encodes 2**PINW codes and only
   // N_PINS are real, so `PIN_NONE` costs nothing: it is a value that already
@@ -1977,7 +1984,7 @@ module pe_engine #(
   // the target the bound is checked on: BRANCH_BIT's whole delay field
   // (delay[9:7] set is >= 120, refused), CMP_BRANCH's delay[6:0] only --
   // its delay[9:7] carry the immediate (opcode bit 0 tells them apart)
-  wire [DLY_W-1:0] br_tdly = a_op[0] ? {{(DLY_W-BR_W){1'b0}}, a_dly[BR_W-1:0]} : a_dly;
+  wire [DLY_W-1:0] br_tdly = (a_op[1:0] != 2'b00) ? {{(DLY_W-BR_W){1'b0}}, a_dly[BR_W-1:0]} : a_dly;
   wire          br_bad   = (br_tdly >= BR_NWORDS[DLY_W-1:0])
                          | (br_wait < BR_W_MIN[BPW+PINB_W-1:0]);
   // ⭐ v2 primitive 2 (Wilson 10-27 Q4): THE DECISION IS REGISTERED AT DRIVE
@@ -2018,6 +2025,27 @@ module pe_engine #(
   wire          br_cmp_take = (((cmp_src ^ cmp_imm) & cmp_mask) == 8'h00);
 `else
   wire          br_cmp_take = (((cmp_src ^ cmp_imm) & cmp_mask) == 8'h00) ^ a_q[0];
+`endif
+  // LOOP: n = {pin, delay[9:7], level} (as CMP's immediate); the effective
+  // count is n on a fresh entry (l_loop = 0), else the running counter.
+  // taken = eff != 1, and the WB writes eff - 1, so the body runs EXACTLY n
+  // times and the counter is 0 again at the exit (re-entrant).
+  wire [7:0]    lp_cur  = l_loop[cur];
+`ifdef M_LOOP_OFF1
+  wire [7:0]    lp_n    = {a_pin, a_dly[DLY_W-1 -: 3], a_lvl} + 8'd1;
+`else
+  wire [7:0]    lp_n    = {a_pin, a_dly[DLY_W-1 -: 3], a_lvl};
+`endif
+  wire [7:0]    lp_eff  = (lp_cur == 8'd0) ? lp_n : lp_cur;
+`ifdef M_LOOP_NOEXIT
+  wire          br_loop_take = 1'b1;
+`else
+  wire          br_loop_take = (lp_eff != 8'd1);
+`endif
+`ifdef M_LOOP_NORESET
+  wire [7:0]    lp_next = (lp_eff == 8'd1) ? 8'd1 : lp_eff - 8'd1;
+`else
+  wire [7:0]    lp_next = lp_eff - 8'd1;
 `endif
   reg           br_take_q;     // the decision, registered at ST_DRIVE
 `ifdef M_BR_ALWAYS
@@ -2264,7 +2292,7 @@ module pe_engine #(
                                                      // the head; spare unused
       // OPTION A: a branch head's successor is unknown until it writes back
 `ifndef M_BR_FETCH_PAST
-      else if (hact[ACT_W-1 -: OP_W-1] == OP_BRANCH_BIT[OP_W-1:1])
+      else if (hact[ACT_W-1 -: OP_W-2] == OP_BRANCH_BIT[OP_W-1:2])
         want_fetch = 1'b0;
 `endif
       else
@@ -3032,13 +3060,13 @@ module pe_engine #(
             // Its state goes in at writeback, below.
             OP_ARM, OP_REARM: ;                 // no pin movement
             // BRANCH_BIT moves no pin; a target outside the store is refused
-            OP_BRANCH_BIT, OP_CMP_BRANCH: if (br_bad) begin
+            OP_BRANCH_BIT, OP_CMP_BRANCH, OP_LOOP: if (br_bad) begin
               config_err_m <= 1'b1;
               live_n[cur]  = 1'b0;
             end
             default: ;
           endcase
-          br_take_q <= a_op[0] ? br_cmp_take : br_bit_take;
+          br_take_q <= a_op[1] ? br_loop_take : a_op[0] ? br_cmp_take : br_bit_take;
           st <= ST_WB;
         end
 
@@ -3349,6 +3377,7 @@ module pe_engine #(
             l_pc[cur] <= l_pc[cur] + ACT_BYTES[AW-1:0];
 `endif
           end else if (a_is_br) begin
+            if (a_op[1]) l_loop[cur] <= lp_next;   // LOOP's counter step
             // ⭐ THE PC CHOICE, merged into the writeback: retire as any
             // action does (invalidate the head, swap), to the target or on
             l_pc[cur]   <= br_taken ? br_tgt : l_pc[cur] + ACT_BYTES[AW-1:0];

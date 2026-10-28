@@ -71,7 +71,11 @@ OP_BRANCH_BIT = 8
 # masked compare of the lane's received byte (WIRE order) with an immediate.
 # 8 and 9 differ only in bit 0 -- the RTL's one-compare branch decode.
 OP_CMP_BRANCH = 9
-BRANCH_OPS = (OP_BRANCH_BIT, OP_CMP_BRANCH)
+# ⭐ v2 PRIMITIVE 2, bundle 2: LOOP -- repeat a body n times (a per-lane
+# counter), the same timed branch. 8..11 share op[4:2] = 0b010.
+OP_LOOP = 10
+BRANCH_OPS = (OP_BRANCH_BIT, OP_CMP_BRANCH, OP_LOOP)
+BRANCH_NAMES = {OP_BRANCH_BIT: "BRANCH_BIT", OP_CMP_BRANCH: "CMP_BRANCH", OP_LOOP: "LOOP"}
 #: CMP_BRANCH's mask modes (mod[1:0]), in the byte's natural order
 CMP_MASK_ALL, CMP_MASK_NO_BIT0, CMP_MASK_HI, CMP_MASK_LO = 0, 1, 2, 3
 CMP_MASKS = {0: 0xFF, 1: 0xFE, 2: 0xF0, 3: 0x0F}
@@ -79,7 +83,7 @@ OPCODES = {
     "LEVEL": OP_LEVEL, "SHIFT": OP_SHIFT, "SHIFTIN": OP_SHIFTIN,
     "READBIT": OP_READBIT, "START": OP_START, "STOP": OP_STOP,
     "ARM": OP_ARM, "REARM": OP_REARM, "BRANCH_BIT": OP_BRANCH_BIT,
-    "CMP_BRANCH": OP_CMP_BRANCH,
+    "CMP_BRANCH": OP_CMP_BRANCH, "LOOP": OP_LOOP,
 }
 # ⭐ RESERVED WITH THE FORMAT (frozen once, Wilson): one opcode per master-list
 # primitive, each with the field map it will use, shown here to fit ONE 32-bit
@@ -91,9 +95,8 @@ OPCODES = {
 #: refuses to encode one. ONE constant: the RTL's copy (`N_BUILT_OPS` in
 #: project.v) is held to it by model/gate_one_encoder.py, and each primitive
 #: that lands raises it by one IN THE COMMIT THAT BUILDS IT.
-N_BUILT_OPS = 10                     # 9 -> 10: CMP_BRANCH built (primitive 2)
+N_BUILT_OPS = 11                     # 10 -> 11: LOOP built (primitive 2, bundle 2)
 RESERVED_OPCODES = {
-    10: ("LOOP", "count = iterations, delay[6:0] = loop-head word"),
     11: ("ARM2", "pin + pinb = the two watched pins, level = edge, delay = timeout"),
     12: ("DRIVE_SAMPLE", "pin = driven, pinb = sampled, level = drive value, delay"),
     13: ("SER", "pin, delay = bit time, count = bits (per-lane serializer)"),
@@ -346,6 +349,24 @@ def branch_target(x):
     return x["delay"] if x["op"] == OP_BRANCH_BIT else x["delay"] & 0x7F
 
 
+def act_loop(n, head, wait) -> bytes:
+    """LOOP (opcode 10, primitive 2 bundle 2): the body [head .. this word]
+    runs EXACTLY n times per entry (1..255), then falls through; the lane's
+    counter is 0 again at the exit. head = delay[6:0] (BACKWARD), W =
+    count:pinb, n = {pin, delay[9:7], level}; q and mod must be zero."""
+    n, t, w = int(n), int(head), int(wait)
+    if not 1 <= n <= 255:
+        raise ValueError("LOOP count %r outside 1..255" % (n,))
+    if not BR_W_MIN <= w <= BR_W_MAX:
+        raise ValueError("branch wait W = %d outside %d..%d" % (w, BR_W_MIN, BR_W_MAX))
+    return act(OP_LOOP, n >> 4, n & 1, t | (((n >> 1) & 7) << 7),
+               count=w >> PINB_W, pinb=w & ((1 << PINB_W) - 1))
+
+
+def loop_count(x):
+    return cmp_byte(x)                       # the same {pin, delay[9:7], level}
+
+
 def act_shift_clocked(pin, delay, nbits=8, q=0) -> bytes:
     """A self-clocked transmit of `nbits` bits (a whole byte by default).
 
@@ -530,7 +551,7 @@ def branch_problems(img):
         x = _unpack(ACT_FIELDS, img[a:a + ACT_BYTES], ACT_BYTES)
         if x["op"] not in BRANCH_OPS:
             continue
-        nm = "BRANCH_BIT" if x["op"] == OP_BRANCH_BIT else "CMP_BRANCH"
+        nm = BRANCH_NAMES[x["op"]]
         t = branch_target(x)
         if t >= nwords:
             out.append("word %d: %s target %d is outside the store "
@@ -560,10 +581,50 @@ def branch_problems(img):
             for f in ("q", "mod"):
                 if x[f]:
                     out.append("word %d: BRANCH_BIT field %s = %d must be zero" % (w, f, x[f]))
-        elif x["q"] >> 1:
+        elif x["op"] == OP_CMP_BRANCH and x["q"] >> 1:
             out.append("word %d: CMP_BRANCH q[1] must be zero (held for LOOP's "
                        "break-out flag)" % w)
-    return out + cmp_byte_problems(img)
+        elif x["op"] == OP_LOOP:
+            for f in ("q", "mod"):
+                if x[f]:
+                    out.append("word %d: LOOP field %s = %d must be zero" % (w, f, x[f]))
+    return out + cmp_byte_problems(img) + loop_problems(img)
+
+
+def loop_problems(img):
+    """LOOP's structural refusals (Wilson 10-27 Q5 + addition 2): n = 0; a
+    head that is not BACKWARD; a LOOP inside another LOOP's body (one counter
+    per lane); and a BREAK-OUT -- a BRANCH_BIT / CMP_BRANCH whose target leaves
+    the body, or a REARM inside it -- which would leave the counter non-zero
+    so the next entry starts mid-count."""
+    out, words = [], []
+    nwords = (STORE_BYTES - ACT_BASE) // ACT_BYTES
+    for w in range(nwords):
+        a = ACT_BASE + w * ACT_BYTES
+        if a + ACT_BYTES > len(img):
+            break
+        words.append(_unpack(ACT_FIELDS, img[a:a + ACT_BYTES], ACT_BYTES))
+    for w, x in enumerate(words):
+        if x["op"] != OP_LOOP:
+            continue
+        h = branch_target(x)
+        if loop_count(x) == 0:
+            out.append("word %d: LOOP count n = 0 (1..255)" % w)
+        if h >= w:
+            out.append("word %d: LOOP head word %d is not BACKWARD" % (w, h))
+            continue
+        for b in range(h, w):
+            y = words[b]
+            if y["op"] == OP_LOOP:
+                out.append("word %d: LOOP inside LOOP word %d's body -- one counter "
+                           "per lane, no nesting" % (b, w))
+            elif y["op"] in (OP_BRANCH_BIT, OP_CMP_BRANCH) and not h <= branch_target(y) <= w:
+                out.append("word %d: %s jumps OUT of LOOP word %d's body -- a break-out "
+                           "leaves the counter mid-count (Wilson 10-27)" % (b, BRANCH_NAMES[y["op"]], w))
+            elif y["op"] == OP_REARM:
+                out.append("word %d: REARM inside LOOP word %d's body -- a break-out "
+                           "(the lane restarts with the counter mid-count)" % (b, w))
+    return out
 
 
 def _rx_bits(h, x):
@@ -701,9 +762,10 @@ def filler_vh() -> str:
             "// v2: the branch opcodes (branch_check.vh)\n"
             "localparam integer PE_OP_BRANCH_BIT = %d;\n"
             "localparam integer PE_OP_CMP_BRANCH = %d;\n"
+            "localparam integer PE_OP_LOOP = %d;\n"
             "`endif\n"
             % (ACT_W - 1, ACT_W, (ACT_W + 3) // 4, word, ACT_W, ACT_BYTES,
-               STORE_BYTES, N_BUILT_OPS, OP_W, ACT_BASE, OP_BRANCH_BIT, OP_CMP_BRANCH))
+               STORE_BYTES, N_BUILT_OPS, OP_W, ACT_BASE, OP_BRANCH_BIT, OP_CMP_BRANCH, OP_LOOP))
 
 
 # ---------------------------------------------------------------------------

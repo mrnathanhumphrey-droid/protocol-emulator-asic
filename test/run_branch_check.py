@@ -50,7 +50,7 @@ import branch_corpus as B               # noqa: E402
 
 BENCH = "test/tb_equiv.v"
 RTL = ["src/pe_engine.v", "src/pe_store.v", "src/project.v"]
-NCYC = 30000
+NCYC = 60000          # LOOP n = 255 needs ~25k cycles per entry
 STEADY = 1000          # per-dispatch stats from this cycle on (past the start)
 GEN = "run_branch_check"
 #: image name -> its builder. braw* = BRANCH_BIT (primitive 1); cmp_* =
@@ -63,6 +63,9 @@ IMAGES = {
     "cmp_order": lambda: B.build_cmp("ok", kind="order"),
     "cmp_mask": lambda: B.build_cmp("ok", kind="mask"),
     "cmp_lo": lambda: B.build_cmp("ok", kind="lo"),
+    # v2 primitive 2 bundle 2: LOOP -- one lane n = 7, and five contending (n = 1 2 3 7 255)
+    "loop_alone": lambda: B.build_loop("alone"),
+    "loop_mix": lambda: B.build_loop("mix"),
 }
 BASE = list(IMAGES)
 #: mutant -> (BRCHECK counter that must go non-zero, what it breaks, image)
@@ -78,6 +81,10 @@ MUTANTS = [
     ("M_CMP_IMM_OFF1", "pc_bad", "the immediate one off", "cmp_order"),
     ("M_CMP_MASK_IGN", "pc_bad", "the mask mode ignored (all 8 bits)", "cmp_mask"),
     ("M_CMP_INV", "pc_bad", "q[0] (taken on mismatch) ignored", "cmp_mask"),
+    # LOOP
+    ("M_LOOP_OFF1", "pc_bad", "n + 1 iterations", "loop_mix"),
+    ("M_LOOP_NOEXIT", "pc_bad", "the loop never exits", "loop_mix"),
+    ("M_LOOP_NORESET", "pc_bad", "the counter survives the exit", "loop_mix"),
 ]
 
 
@@ -125,7 +132,7 @@ def run_problems(c, per, bound):
     """[problem] for ONE branch run, each `name=value` -- THE judge every
     verdict below goes through (baseline clean, mutant red), so gate_meta's
     always-pass stub of it must turn the gate red."""
-    out = ["%s=%d" % (k, c[k]) for k in ("pc_bad", "head_bad", "stall_cycles")
+    out = ["%s=%d" % (k, c[k]) for k in ("pc_bad", "head_bad", "stall_cycles", "loop_bad")
            if c.get(k)]
     if c.get("wb", 0) == 0 or c.get("taken", 0) == 0 or c.get("not", 0) == 0:
         out.append("both_ways=0 (wb %s taken %s not %s)"
@@ -172,6 +179,8 @@ def main() -> int:
         bad = run_problems(c, per, bound)
         if name.startswith("cmp_") and not c.get("cmp"):
             bad.append("cmp=0 -- no CMP_BRANCH ran, so nothing was compared")
+        if name.startswith("loop_") and not c.get("loops"):
+            bad.append("loops=0 -- no LOOP exited, so no count was checked")
         print("    %-16s wb %4d  stall %d  pc_bad %d  head_bad %d  A2 r-C %s  %s"
               % (name, c["wb"], c["stall_cycles"], c["pc_bad"], c["head_bad"], bound,
                  "ok" if not bad else "*** " + "; ".join(bad)))
@@ -186,6 +195,15 @@ def main() -> int:
             probs.append("%s: the chain is not refused" % name)
     # v2 primitive 2: whole bytes only, and something must have arrived
     # (Wilson 10-27 addition 1); q[1] held for LOOP's break-out flag
+    # LOOP: n = 0, forward head, nested, break-out by a branch, by a REARM
+    for v in B.LOOP_REFUSED:
+        pr = I.branch_problems(B.build_loop("alone", v, check=False))
+        want = {"n0": "count n = 0", "fwd": "not BACKWARD", "nested": "LOOP inside LOOP",
+                "breakout": "jumps OUT of LOOP", "rearm": "REARM inside LOOP"}[v]
+        ok = any(want in x for x in pr)
+        print("    loop_%-11s %s" % (v, "REFUSED" if ok else "*** NOT REFUSED ***"))
+        if not ok:
+            probs.append("loop_%s: not refused for its own reason" % v)
     for v in B.CMP_REFUSED:
         pr = I.branch_problems(B.build_cmp(v, check=False))
         want = {"bit7": "after 7 bit(s)", "norx": "NOTHING received",

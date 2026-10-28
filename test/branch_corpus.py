@@ -236,6 +236,58 @@ def build_cmp(variant="ok", check=True, kind="order"):
 CMP_REFUSED = ("bit7", "norx", "q1")
 
 
+# ---------------------------------------------------------------------------
+# v2 PRIMITIVE 2, BUNDLE 2: THE LOOP CORPUS
+# ---------------------------------------------------------------------------
+LOOP_D = 32             # every spacing at D* + B: n = 255 fits a 60k-cycle run
+LOOP_REARM = 300
+
+
+def _loop_lane(base_word, pin, n, variant="ok"):
+    """head: LEVEL hi, LEVEL lo, then LOOP(n -> head); after the exit a marker
+    LEVEL and the re-arm. `variant` builds the refusal arms."""
+    head = base_word
+    body = [I.act(I.OP_LEVEL, pin, 1, LOOP_D), I.act(I.OP_LEVEL, pin, 0, LOOP_D)]
+    # nested / breakout: the offending word sits MID-body, away from the LOOP
+    # word, so it is refused for ITS reason, not as a branch->branch chain
+    if variant == "nested":
+        body = [body[0], I.act_loop(2, head, LOOP_D), body[1]]
+    elif variant == "breakout":
+        body = [body[0], I.act_branch_bit(0, 1, base_word + 5, LOOP_D), body[1]]
+    elif variant == "rearm":
+        body[1] = I.act(I.OP_REARM, 0, 1, LOOP_D)
+    w = I.act_loop(max(n, 1), head if variant != "fwd" else base_word + len(body) + 1, LOOP_D)
+    if variant == "n0":
+        x = I._unpack(I.ACT_FIELDS, w, I.ACT_BYTES)
+        w = I.act(I.OP_LOOP, 0, 0, x["delay"] & 0x7F, count=x["count"], pinb=x["pinb"])
+    return body + [w, I.act(I.OP_LEVEL, pin, 1, LOOP_D), I.act(I.OP_REARM, 0, 1, LOOP_REARM)]
+
+
+#: kind -> the n of each looping lane (the rest parked)
+LOOP_KINDS = {"alone": (7,), "mix": (1, 2, 3, 7, 255)}
+LOOP_REFUSED = ("n0", "fwd", "nested", "breakout", "rearm")
+
+
+def build_loop(kind="mix", variant="ok", check=True):
+    ns = LOOP_KINDS[kind]
+    hdrs, prog, word = [], [], 0
+    for ln in range(I.N_LANES):
+        base = I.ACT_BASE + word * I.ACT_BYTES
+        if ln < len(ns):
+            ws = _loop_lane(word, ln, ns[ln], variant if ln == 0 else "ok")
+            hdrs.append(I.hdr(ln, I.PIN_NONE, 1, 2 * LOOP_D, 0, 200, 240, base))
+        else:
+            ws = [I.act(I.OP_REARM, 0, 0, 500)]
+            hdrs.append(I.hdr(I.PIN_NONE, I.PIN_NONE, 1, 500, 0, 200, 240, base))
+        prog += ws
+        word += len(ws)
+    img = I.full_store(I.join_image(hdrs, prog))
+    probs = I.branch_problems(img)
+    if probs and check:
+        raise ValueError("LOOP corpus image refused: " + "; ".join(probs))
+    return img
+
+
 def main(argv) -> int:
     out = argv[1] if len(argv) > 1 else os.path.join(HERE, "..", "probe_branch")
     os.makedirs(out, exist_ok=True)

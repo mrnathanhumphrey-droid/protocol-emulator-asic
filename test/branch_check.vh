@@ -21,13 +21,20 @@ integer bc_rel [0:7];
 integer bc_pc, bc_tgt, bc_late, bc_samp, bc_samp_max = 0, bc_samp_sum = 0;
 integer bc_ctl, bc_ctl_n = 0, bc_ctl_max = 0, bc_ctl_sum = 0;   // R2b's CONTROL
 reg     bc_bit, bc_take;
+// LOOP (primitive 2 bundle 2): the bench's OWN counter per lane -- the spec,
+// not the RTL's -- and the COUNT check: an exit after exactly n writebacks
+integer bc_loop [0:7];
+integer bc_lcnt [0:7];
+integer bc_lnext, bc_ln, bc_leff, bc_loops = 0, bc_loop_bad = 0;
 reg [7:0] bc_rx, bc_imm, bc_mask;
 integer bc_cmp = 0;
 reg [PE_ACT_W-1:0] bc_word;
 initial begin
   if (!$value$plusargs("BRCHECK=%d", bc_on)) bc_on = 0;
   if (!$value$plusargs("BRDBG=%d", bc_dbg)) bc_dbg = 0;
-  for (bc_k = 0; bc_k < 8; bc_k = bc_k + 1) begin bc_exp[bc_k] = -1; bc_rel[bc_k] = 0; end
+  for (bc_k = 0; bc_k < 8; bc_k = bc_k + 1) begin
+    bc_exp[bc_k] = -1; bc_rel[bc_k] = 0; bc_loop[bc_k] = 0; bc_lcnt[bc_k] = 0;
+  end
 end
 
 always @(posedge clk) if (rst_n === 1'b1 && bc_on != 0 && !done) begin
@@ -40,8 +47,14 @@ always @(posedge clk) if (rst_n === 1'b1 && bc_on != 0 && !done) begin
   // registered at DRIVE): the bench's OWN condition, from the word's fields and
   // the lane's state -- BRANCH_BIT the pin, CMP_BRANCH the received byte in
   // wire order (an MSB-first lane's register reversed) under the mask
-  if (dut.u_eng.st == 1 && (dut.u_eng.a_op == PE_OP_BRANCH_BIT || dut.u_eng.a_op == PE_OP_CMP_BRANCH)) begin
-    if (dut.u_eng.a_op == PE_OP_BRANCH_BIT) begin
+  if (dut.u_eng.st == 1 && (dut.u_eng.a_op == PE_OP_BRANCH_BIT || dut.u_eng.a_op == PE_OP_CMP_BRANCH ||
+                            dut.u_eng.a_op == PE_OP_LOOP)) begin
+    if (dut.u_eng.a_op == PE_OP_LOOP) begin
+      bc_ln   = {dut.u_eng.a_pin, dut.u_eng.a_dly[9:7], dut.u_eng.a_lvl};
+      bc_leff = (bc_loop[dut.u_eng.cur] == 0) ? bc_ln : bc_loop[dut.u_eng.cur];
+      bc_take = (bc_leff != 1);
+      bc_lnext = bc_leff - 1;
+    end else if (dut.u_eng.a_op == PE_OP_BRANCH_BIT) begin
       bc_bit  = (dut.u_eng.a_pin < 12) ? dut.u_eng.pin_in[dut.u_eng.a_pin] : 1'b0;
       bc_take = (bc_bit === dut.u_eng.a_lvl);
     end else begin
@@ -65,7 +78,21 @@ always @(posedge clk) if (rst_n === 1'b1 && bc_on != 0 && !done) begin
     if (bc_samp > bc_samp_max) bc_samp_max = bc_samp;
   end
   // ---- (1) a branch writeback: the expected next PC, from the word itself
-  if (dut.u_eng.st == 2 && (dut.u_eng.a_op == PE_OP_BRANCH_BIT || dut.u_eng.a_op == PE_OP_CMP_BRANCH)) begin
+  if (dut.u_eng.st == 2 && dut.u_eng.a_op == PE_OP_LOOP) begin
+    bc_loop[dut.u_eng.cur] = bc_lnext;
+    bc_lcnt[dut.u_eng.cur] = bc_lcnt[dut.u_eng.cur] + 1;
+    if (!bc_take) begin                     // the exit: exactly n writebacks
+      if (bc_lcnt[dut.u_eng.cur] != bc_ln) begin
+        if (bc_loop_bad < 5)
+          $display("*** FAIL branch_check: lane %0d LOOP exited after %0d writebacks, n = %0d", dut.u_eng.cur, bc_lcnt[dut.u_eng.cur], bc_ln);
+        bc_loop_bad = bc_loop_bad + 1;
+      end
+      bc_lcnt[dut.u_eng.cur] = 0;
+      bc_loops = bc_loops + 1;
+    end
+  end
+  if (dut.u_eng.st == 2 && (dut.u_eng.a_op == PE_OP_BRANCH_BIT || dut.u_eng.a_op == PE_OP_CMP_BRANCH ||
+                            dut.u_eng.a_op == PE_OP_LOOP)) begin
     bc_tgt = PE_ACT_BASE + PE_ACT_BYTES * (dut.u_eng.a_dly % 128);
     bc_pc  = dut.u_eng.l_pc[dut.u_eng.cur];
     if (bc_take) begin
@@ -95,7 +122,8 @@ always @(posedge clk) if (rst_n === 1'b1 && bc_on != 0 && !done) begin
         $display("BRDBG suc lane %0d op %0d late %0d now %0d", dut.u_eng.cur, dut.u_eng.cur_act[PE_ACT_W-1 -: PE_OP_W], bc_late, dut.u_eng.now);
       bc_exp[dut.u_eng.cur] = -1;
     end else if (dut.u_eng.cur_act[PE_ACT_W-1 -: PE_OP_W] != PE_OP_BRANCH_BIT &&
-               dut.u_eng.cur_act[PE_ACT_W-1 -: PE_OP_W] != PE_OP_CMP_BRANCH) begin
+               dut.u_eng.cur_act[PE_ACT_W-1 -: PE_OP_W] != PE_OP_CMP_BRANCH &&
+               dut.u_eng.cur_act[PE_ACT_W-1 -: PE_OP_W] != PE_OP_LOOP) begin
       // the CONTROL (Wilson R2b): an ordinary action -- not a branch, not a
       // branch's successor -- dispatch minus its own release
       bc_ctl = (dut.u_eng.now - dut.u_eng.l_timestamp[dut.u_eng.cur]) & 16'hFFFF;
@@ -114,4 +142,4 @@ always @(posedge clk) if (rst_n === 1'b1 && bc_on != 0 && !done) begin
 end
 
 final if (bc_on != 0)
-  $display("BRCHECK cmp=%0d wb=%0d taken=%0d not=%0d pc_bad=%0d head_bad=%0d dispatches=%0d late_n=%0d late_max=%0d late_sum=%0d stall_cycles=%0d samp_max=%0d samp_sum=%0d ctl_n=%0d ctl_max=%0d ctl_sum=%0d cfgerr=%0d live1=%0d", bc_cmp, bc_wb, bc_taken, bc_not, bc_bad, bc_inv, bc_disp, bc_late_n, bc_late_max, bc_late_sum, bc_stall, bc_samp_max, bc_samp_sum, bc_ctl_n, bc_ctl_max, bc_ctl_sum, dut.u_eng.config_err, dut.u_eng.l_live[1]);
+  $display("BRCHECK loops=%0d loop_bad=%0d cmp=%0d wb=%0d taken=%0d not=%0d pc_bad=%0d head_bad=%0d dispatches=%0d late_n=%0d late_max=%0d late_sum=%0d stall_cycles=%0d samp_max=%0d samp_sum=%0d ctl_n=%0d ctl_max=%0d ctl_sum=%0d cfgerr=%0d live1=%0d", bc_loops, bc_loop_bad, bc_cmp, bc_wb, bc_taken, bc_not, bc_bad, bc_inv, bc_disp, bc_late_n, bc_late_max, bc_late_sum, bc_stall, bc_samp_max, bc_samp_sum, bc_ctl_n, bc_ctl_max, bc_ctl_sum, dut.u_eng.config_err, dut.u_eng.l_live[1]);
