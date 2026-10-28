@@ -166,6 +166,8 @@ SEAMS = (
     ("model/gate_sda_hold.py", "gate_sda_hold.image_problems", "slow", "E"),
     # v2 step 2: `same` always True -> the +-1 offset must-fire must MISS
     ("model/gate_v2_equiv.py", "gate_v2_equiv.same", "slow", "T"),
+    # v2 primitive 1: `run_problems` always empty -> the six M_BR_* survive
+    ("test/run_branch_check.py", "run_branch_check.run_problems", "slow", "E"),
 )
 
 #: Gates with NO stubbable check, each with why -- every gate in

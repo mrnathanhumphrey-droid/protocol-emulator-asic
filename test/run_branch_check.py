@@ -107,6 +107,25 @@ def sim(vvp, img):
     return cnt, per, out
 
 
+def run_problems(c, per, bound):
+    """[problem] for ONE branch run, each `name=value` -- THE judge every
+    verdict below goes through (baseline clean, mutant red), so gate_meta's
+    always-pass stub of it must turn the gate red."""
+    out = ["%s=%d" % (k, c[k]) for k in ("pc_bad", "head_bad", "stall_cycles")
+           if c.get(k)]
+    if c.get("wb", 0) == 0 or c.get("taken", 0) == 0 or c.get("not", 0) == 0:
+        out.append("both_ways=0 (wb %s taken %s not %s)"
+                   % (c.get("wb"), c.get("taken"), c.get("not")))
+    for (kind, ln), (_n, mx) in sorted(per.items()):
+        if kind == "suc":
+            _cn, cmx = per.get(("ctl", ln), (0, None))
+            if cmx is None or mx > cmx:
+                out.append("succ_late=%d lane %d > its control max %s" % (mx, ln, cmx))
+        elif bound is None or mx > bound:
+            out.append("ctl_late=%d lane %d > A2's r - C = %s" % (mx, ln, bound))
+    return out
+
+
 def a2_dispatch_bound(img):
     """max over lanes of r - C, A2 pricing each branch as an action of delay W."""
     import program_a2 as P
@@ -136,17 +155,7 @@ def main() -> int:
             probs.append("%s: no BRCHECK line (%s)" % (name, raw[-200:]))
             continue
         bound = a2_dispatch_bound(img)
-        bad = [k for k in ("pc_bad", "head_bad", "stall_cycles") if c.get(k)]
-        if c.get("wb", 0) == 0 or c.get("taken", 0) == 0 or c.get("not", 0) == 0:
-            bad.append("the branch never ran both ways (wb %s taken %s not %s)"
-                       % (c.get("wb"), c.get("taken"), c.get("not")))
-        for (kind, ln), (n, mx) in sorted(per.items()):
-            if kind == "suc":
-                cn, cmx = per.get(("ctl", ln), (0, None))
-                if cmx is None or mx > cmx:
-                    bad.append("lane %d successor max %d > its control max %s" % (ln, mx, cmx))
-            elif bound is None or mx > bound:
-                bad.append("lane %d ordinary action %d late > A2's r - C = %s" % (ln, mx, bound))
+        bad = run_problems(c, per, bound)
         print("    %-16s wb %4d  stall %d  pc_bad %d  head_bad %d  A2 r-C %s  %s"
               % (name, c["wb"], c["stall_cycles"], c["pc_bad"], c["head_bad"], bound,
                  "ok" if not bad else "*** " + "; ".join(bad)))
@@ -179,7 +188,9 @@ def main() -> int:
                          % (name, len(static), c.get("cfgerr"), live))
 
     print("\n  B4 must-fires on %s" % MF_IMG[0])
-    mp = write_hex(os.path.join(tmp, "brchk_mf.hex"), B.build(MF_IMG[1], 1, MF_IMG[2]))
+    mf_img = B.build(MF_IMG[1], 1, MF_IMG[2])
+    mp = write_hex(os.path.join(tmp, "brchk_mf.hex"), mf_img)
+    mf_bound = a2_dispatch_bound(mf_img)
     for define, counter, what in MUTANTS:
         mv = os.path.join(tmp, "brchk_%s.vvp" % define.lower())
         try:
@@ -188,8 +199,9 @@ def main() -> int:
             print("    %-16s BUILD FAIL -- not a kill" % define)
             probs.append("%s: %s" % (define, exc))
             continue
-        c, _per, _raw = sim(mv, mp)
-        red = c.get(counter, 0) > 0
+        c, per, _raw = sim(mv, mp)
+        # red FOR ITS OWN REASON: the judge must name the mutant's counter
+        red = any(p.startswith(counter + "=") for p in run_problems(c, per, mf_bound))
         print("    %-16s %-42s %s=%s  %s" % (define, what, counter, c.get(counter),
                                            "RED" if red else "*** SURVIVED ***"))
         if not red:
