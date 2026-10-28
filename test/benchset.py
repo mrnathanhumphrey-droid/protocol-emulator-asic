@@ -702,6 +702,14 @@ def corpus_arms():
                  "+OUT=probe_cov_trace_branch.txt",
                  "+NCYC=40000", "+SEED=1", "+ASYNC=0",
                  "+STAYLOAD=0", "+SCLHOLD=0"]))
+    # ...and at SPL = 1, where the branch writeback's `if (SPL > 1)` slot
+    # flip takes its else (MEASURED: the one point the two arms above left
+    # uncovered, as tb_smoke's spl1 arm covers the retire's same flip).
+    out.append(("branch_spl1",
+                ["+IMG=test/branch_image.hex", "+PEER=none",
+                 "+OUT=probe_cov_trace_branch_spl1.txt",
+                 "+NCYC=40000", "+SEED=1", "+ASYNC=0",
+                 "+STAYLOAD=0", "+SCLHOLD=0"], {"SPL_CFG": 1}))
     out.append(("branch_wbad",
                 ["+IMG=test/branch_wbad_image.hex", "+PEER=none",
                  "+OUT=probe_cov_trace_branch_wbad.txt",
