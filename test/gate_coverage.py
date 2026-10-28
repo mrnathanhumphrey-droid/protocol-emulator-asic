@@ -486,12 +486,25 @@ TOGGLE_CEILING = {
     # addresses' bits 0-1 (the PC steps by 4); bit 8 of the 512-byte store
     # (v1 images fit the bottom half); a_op bits 3-4 (opcodes 8-21 not built);
     # l_base's low bits (bases moved from 30 + 3k to 32 + 4k).
-    "src/pe_engine.v": 1153,
+    # ⚠ +12 for v2 slack recovery step 2 (Wilson 10-27): the refill-read
+    # address is ONE COPY PER BANK, and each copy carries the 2 word-offset
+    # bits a word-aligned refill never sets -- 4 copies x 2 bits x 2
+    # directions = 16 dark points where the single register had 4. MEASURED
+    # name by name (local cov on fb88833 == CI run 40600811925 exactly).
+    "src/pe_engine.v": 1165,
     # ⚠ 6 -> 28 (+22) for v2: the wide read's reserved bits (16), the row
     # index's top bits (4: v1 images fit rows 0..31) and wraddr bits 0-1 (4:
     # the engine writes whole words) -- same field-by-field check, 0 lost.
-    "src/pe_store.v": 28,
-    "src/project.v": 186,
+    # ⚠ +12 for v2 slack recovery step 2 (Wilson 10-27): the refill-read
+    # address is ONE COPY PER BANK, and each copy carries the 2 word-offset
+    # bits a word-aligned refill never sets -- 4 copies x 2 bits x 2
+    # directions = 16 dark points where the single register had 4. MEASURED
+    # name by name (local cov on fb88833 == CI run 40600811925 exactly).
+    "src/pe_store.v": 40,
+    # ⚠ 186 -> 187: e_wraddr_bk's same 16 dark points (bits 0,1 of each
+    # bank's copy, +12 over e_wraddr's 4); the old ceiling sat ~11 above
+    # its measured count, so the rise reads as +1.
+    "src/project.v": 187,
     # ⭐ RATCHETED DOWN BY THE SELF-CLOCKED CORPUS, and the cause is worth
     # recording: the rewritten corpus drives WHOLE BYTES through the peer
     # models instead of two bits per clock, so `fram_spi` went 54 -> 30
