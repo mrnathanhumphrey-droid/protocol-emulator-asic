@@ -22,9 +22,16 @@ have "fixed" it by weakening the only check that can detect the problem.
 
 So the contract here is explicit, and it is the whole point of the module:
 
-    PYRTA_SRC unset            -> search (TEMP, ~) for a clone; convenience
+    PYRTA_SRC unset            -> return None. NO SEARCH (Nate 10-27).
     PYRTA_SRC set to a dir     -> use exactly that; no search
     PYRTA_SRC set to a NON-dir -> return None. DO NOT SEARCH.
+
+⛔⛔ THE TEMP / ~ WALK IS GONE (Nate 10-27). With PYRTA_SRC unset it found a
+DIRTY clone under the user profile (a deleted tracked file) while the pinned
+clone sat elsewhere -- a witness nobody chose, picked by directory order. The
+pin check refused it that time; a clone that is dirty in a way the pin check
+does not see would have quietly become the authority. So the authority is
+named, always: no setting, no pyRTA, and the gates say so.
 
 The third line is what makes the gate priceable: an explicitly-set-but-invalid
 path means "use this and nothing else", so the pricing arm can actually take the
@@ -64,21 +71,12 @@ def _is_pyrta_src(path: str) -> bool:
 def find_pyrta() -> str | None:
     """The clone's `src/`, or None. See the module docstring for the contract."""
     raw = os.environ.get(ENV)
-    if raw is not None:
-        # EXPLICIT: honour it exactly, including the refusal. No fallback --
-        # that is what makes `price_gates.sh` able to remove the authority.
-        return raw if _is_pyrta_src(raw) else None
-    for base in (os.environ.get("TEMP", ""), os.path.expanduser("~")):
-        if not base or not os.path.isdir(base):
-            continue
-        for root, dirs, _ in os.walk(base):
-            if os.path.basename(root).lower() == "pyrta" and "src" in dirs:
-                cand = os.path.join(root, "src")
-                if _is_pyrta_src(cand):
-                    return cand
-            if root.count(os.sep) - base.count(os.sep) > 6:
-                dirs[:] = []
-    return None
+    # EXPLICIT ONLY: honour the setting exactly, including the refusal, and
+    # never search -- unset is None (no fallback walk, Nate 10-27), which is
+    # also what lets `price_gates.sh` remove the authority.
+    if raw is None:
+        return None
+    return raw if _is_pyrta_src(raw) else None
 
 
 # ===========================================================================
@@ -212,7 +210,9 @@ def require_pyrta(gate: str) -> str | None:
     raw = os.environ.get(ENV)
     print("  *** pyRTA NOT FOUND -- %s is RED." % gate)
     if raw is None:
-        print("      %s is unset and no clone was found under TEMP or ~." % ENV)
+        print("      %s is unset. Set it to the PINNED clone's src/ -- nothing" % ENV)
+        print("      is searched for (a clone found by walking a directory is a")
+        print("      witness nobody chose).")
     else:
         print("      %s is set to %r, which is not a pyRTA src/ directory" % (ENV, raw))
         print("      (no %s/ inside it). An explicit setting is honoured" % _MARKER)
@@ -240,15 +240,20 @@ def selftest() -> int:
     saved = os.environ.get(ENV)
     rc = 0
     try:
-        # --- face 1: tool present ---------------------------------------
-        # ⛔ Honour a VALID explicit setting; only clear an unset or invalid one
-        # so the search path gets its chance. Unconditionally popping it would
-        # red this gate on any machine whose clone lives outside TEMP and ~ --
-        # i.e. it would fail for the one deployment the env var exists to serve.
+        # --- face 0: the must-fire -- UNSET finds nothing (no search) -----
+        os.environ.pop(ENV, None)
+        unset = find_pyrta()
+        print("  face 0  PYRTA_SRC unset -> %s" % (unset or "None (no search)"))
+        if unset is not None:
+            print("    *** FAIL: an UNSET PYRTA_SRC found a clone -- a fallback")
+            print("        search is back, and the authority is whatever it finds ***")
+            rc = 1
+        # --- face 1: tool present -- only by the EXPLICIT setting ----------
         how = "explicit"
-        if not _is_pyrta_src(saved or ""):
-            os.environ.pop(ENV, None)
-            how = "unset, search allowed"
+        if saved is not None:
+            os.environ[ENV] = saved
+        else:
+            how = "unset"
         found = find_pyrta()
         print("  face 1  PYRTA_SRC %s -> %s" % (how, found or "NOT FOUND"))
         if not found:

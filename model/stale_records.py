@@ -257,6 +257,7 @@ CHANGE_SET = frozenset([
     "test/branch_check.vh",            # NEW: tb_equiv +BRCHECK, the PC / head / stall checks
     "test/branch_corpus.py",           # NEW: the branch images, chain + runtime refusals
     "test/run_branch_check.py",        # NEW: the gate, the six M_BR_* must-fires' killer
+    "model/a2/pyrta_src.py",           # no fallback clone search: PYRTA_SRC or nothing (Nate 10-27)
 ])
 
 
