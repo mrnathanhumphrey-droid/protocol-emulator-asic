@@ -125,6 +125,13 @@ SCRATCH_GENERATORS: dict = {
                " branch_check.vh's PC / head / stall counters on tb_equiv,"
                " not by the A2 gap",
         "v3": {"no_v3_layer": "test/tb_equiv.v"}},
+    "run_pit_capture": {
+        "script": "test/run_pit_capture.py", "pattern": "pitcap_*.hex",
+        "clocked": True,
+        "why": "v2 PIT chunk 1: SNIFF images (the SN magic, a wire mask, an empty"
+               " store) whose capture is judged byte for byte against"
+               " model/pit_capture_golden.py, not by the A2 gap",
+        "v3": {"no_v3_layer": "test/tb_pit.v"}},
 }
 # ⛔⛔ `v3` IS REQUIRED ON EVERY CLOCKED ENTRY (S1g, 10-22): the GENERATED
 # names in model/v3_table.py that register this generator's images, or the

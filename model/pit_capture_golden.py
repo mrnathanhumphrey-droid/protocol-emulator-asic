@@ -1,0 +1,69 @@
+"""PIT RTL chunk 1 golden: the CAPTURE ENCODING, bit-exact (prediction
+rulings/pit_rtl_c1.a5b1ccee.stamped.txt). Input: the edge log -- [(cycle,
+mask)] of changes of the masked uio_q1 wires, cycles counted from the PIT's
+start (cycle 0 = the first PIT cycle). Output: the 384 capture bytes (store
+128..511), the records stored, and the overflow flag -- what the RTL writes.
+
+THE PACKER, as the RTL builds it: record bits enter a 64-bit accumulator at
+the record's cycle; from the NEXT cycle on, one whole byte drains to the store
+per cycle. A record that would not fit the accumulator is an OVERRUN, and one
+that would push the written total past 384 bytes is FULL: either stops the
+capture (overflow = 1; nothing after it is recorded). Bits that never make a
+whole byte are not written (documented: up to 7 trailing bits are lost).
+"""
+CAP_BASE, CAP_BYTES = 128, 384
+N_RAW = 16
+QMAX = 16
+SAT = 0xFFFF
+ACC_BITS = 64
+
+
+def k_of(raw_intervals):
+    mean = sum(raw_intervals) >> 4
+    return max(0, ((mean * 11) >> 4).bit_length() - 1)
+
+
+def _b(v, n):
+    return [(v >> b) & 1 for b in range(n - 1, -1, -1)]
+
+
+def record_bits(i, mask, k, raw):
+    i = min(i, SAT)
+    if raw:
+        return _b(i, 16) + _b(mask, 8)
+    q = i >> k
+    body = ([1] * QMAX + _b(i, 16)) if q >= QMAX else ([1] * q + [0] + _b(i, k))
+    return body + _b(mask, 8)
+
+
+def encode(log):
+    """-> (bytes[384], records_stored, overflow, why): why = "overrun" (the
+    accumulator would overflow), "full" (the store would), or None."""
+    bits, n, overflow, k, raws, why = [], 0, 0, 0, [], None
+    acc, last_t = 0, 0
+    for t, mask in log:
+        if n > 0:
+            acc -= 8 * min(acc // 8, t - last_t)      # one byte per cycle since the last record
+        rb = record_bits(t - last_t, mask, k, n < N_RAW)
+        if n == N_RAW:
+            rb = _b(k, 4) + rb                         # k precedes the first coded record
+        if acc + len(rb) > ACC_BITS or len(bits) + len(rb) > CAP_BYTES * 8:
+            overflow = 1
+            why = "overrun" if acc + len(rb) > ACC_BITS else "full"
+            break
+        bits += rb
+        acc += len(rb)
+        if n < N_RAW:
+            raws.append(min(t - last_t, SAT))
+            if n == N_RAW - 1:
+                k = k_of(raws)
+        n += 1
+        last_t = t
+    out = bytearray(CAP_BYTES)
+    whole = len(bits) - len(bits) % 8
+    for i in range(0, whole, 8):
+        v = 0
+        for b in bits[i:i + 8]:
+            v = (v << 1) | b
+        out[i // 8] = v
+    return bytes(out), n, overflow, why

@@ -373,19 +373,32 @@ module tt_um_protocol_emulator #(
   localparam [AW-1:0] MAGIC_A0 = MAGIC_AT[AW-1:0];
   localparam [AW-1:0] MAGIC_A1 = MAGIC_A0 + {{(AW-1){1'b0}}, 1'b1};
   reg magic_hi, magic_lo;
+  // ⭐ v2 PIT (Wilson 10-28): the SNIFF magic 'S' 'N' at the same two bytes
+  // selects SNIFF mode -- NO new pin (all 8 ui_in are used). Byte 0 of a
+  // SNIFF image is the wire mask. The engine never runs on a SNIFF image.
+  localparam [7:0] SNIFF_HI = 8'h53, SNIFF_LO = 8'h4E;
+  reg sniff_hi, sniff_lo;
+  reg [7:0] pit_mask;
   always @(posedge clk or negedge rst_n_s) begin
     if (!rst_n_s) begin
       magic_hi <= 1'b0;
       magic_lo <= 1'b0;
+      sniff_hi <= 1'b0;
+      sniff_lo <= 1'b0;
+      pit_mask <= 8'h00;
     end else if (prog_mode & wr_rise) begin
       if (ptr == MAGIC_A0) magic_hi <= (uio_q1 == MAGIC_HI);
       if (ptr == MAGIC_A1) magic_lo <= (uio_q1 == MAGIC_LO);
+      if (ptr == MAGIC_A0) sniff_hi <= (uio_q1 == SNIFF_HI);
+      if (ptr == MAGIC_A1) sniff_lo <= (uio_q1 == SNIFF_LO);
+      if (ptr == {AW{1'b0}}) pit_mask <= uio_q1;
     end
   end
+  wire sniff = sniff_hi & sniff_lo;
 `ifdef M_NO_MAGIC
   wire bad_magic = 1'b0;
 `else
-  wire bad_magic = store_full & ~(magic_hi & magic_lo);
+  wire bad_magic = store_full & ~((magic_hi & magic_lo) | sniff);
 `endif
   // ⭐ v2: one action word = ACT_BYTES bytes, read as one store row. DERIVED
   // (the engine's ACT_W, inlined: OP_W 5 + PINW + 1 + DLY_W + BPW 4 + BQW 2 +
@@ -420,9 +433,9 @@ module tt_um_protocol_emulator #(
     end
   end
 `ifdef M_NO_STORE_FULL
-  wire eng_run = run & ~bad_magic & ~bad_op;
+  wire eng_run = run & ~bad_magic & ~bad_op & ~sniff;
 `else
-  wire eng_run = run & store_full & ~bad_magic & ~bad_op;
+  wire eng_run = run & store_full & ~bad_magic & ~bad_op & ~sniff;
 `endif
   // ⭐⭐ CANARY (reset-network halt, Wilson): THE ENGINE'S RESET IS ONE FLOP.
   // Async-cleared by the synchronised power-on reset; otherwise it follows
@@ -486,9 +499,20 @@ module tt_um_protocol_emulator #(
     end
   endgenerate
 
+  // ⭐ v2 PIT: SNIFF mode's capture is the store's third write source (the
+  // engine never writes it; the loader writes only in load mode)
+  wire           pit_run = run & store_full & sniff;
+  wire           pit_we;
+  wire [AW-1:0]  pit_waddr;
+  wire [7:0]     pit_wdata;
+  wire           pit_stopped;
+  pe_pit #(.AW(AW)) u_pit (
+      .clk(clk), .rst_n(rst_n_s), .run(pit_run), .uio(uio_q1), .mask_cfg(pit_mask),
+      .we(pit_we), .waddr(pit_waddr), .wdata(pit_wdata), .stopped(pit_stopped));
   pe_store #(.AW(AW), .MEM_TYPE(MEM_TYPE), .WIDE_B(ACT_BYTES_T)) u_store (
       .clk(clk), .rst_n(rst_n_s),
-      .we(pm_we & {ACT_BYTES_T{wr_rise}}), .waddr(ptr), .wdata(uio_q1),
+      .we((pm_we & {ACT_BYTES_T{wr_rise}}) | {ACT_BYTES_T{pit_we}}),
+      .waddr(pit_we ? pit_waddr : ptr), .wdata(pit_we ? pit_wdata : uio_q1),
       .re(pm_rd ? rb_re : e_re),
       .raddr(pm_rd ? rb_addr : e_raddr),
       .rdata(s_rdata),
@@ -1067,5 +1091,140 @@ module pe_dup_ffe (input wire clk, input wire rst_n, input wire en,
   always @(posedge clk or negedge rst_n) begin
     if (!rst_n) q <= 1'b0;
     else if (en) q <= d;
+  end
+endmodule
+
+// =========================================================================
+// v2 PIT, chunk 1 (Wilson 10-28): the SNIFF-mode capture. Records every change
+// of the masked uio wires (after the existing 2-flop sync) as (interval since
+// the previous record, changed-mask) into store bytes 128..511: the first 16
+// raw (16 + 8 bits), then the Rice parameter k (4 bits), then Golomb-Rice
+// records (q = I >> k unary, k low bits, the mask; q >= 16 escapes to 16 ones +
+// the raw 16 bits). A 64-bit accumulator drains one byte per cycle; a record
+// that does not fit it (OVERRUN) or the store (FULL) stops the capture, and the
+// status (overflow, record count) is written to bytes 2, 28, 29 once drained.
+// Bit-exact golden: pit/pit_capture_golden.py (internal), checked by
+// test/run_pit_capture.py. Off every engine path: its inputs are uio_q1 and
+// its own registers; its output is the store's byte write port.
+// =========================================================================
+module pe_pit #(parameter integer AW = 9) (
+    input  wire          clk,
+    input  wire          rst_n,
+    input  wire          run,          // SNIFF mode, running
+    input  wire [7:0]    uio,          // the synchronised uio bus
+    input  wire [7:0]    mask_cfg,     // store byte 0 (0 = all 8 wires)
+    output reg           we,
+    output reg  [AW-1:0] waddr,
+    output reg  [7:0]    wdata,
+    output reg           stopped
+);
+  localparam integer CAP_BASE = 128, CAP_BITS = 384 * 8;
+  wire [7:0] m = (mask_cfg == 8'h00) ? 8'hFF : mask_cfg;
+  reg        active;
+  reg [7:0]  prev;
+  reg [15:0] tcnt, n;
+  reg [63:0] acc;
+  reg [6:0]  acc_n;
+  reg [11:0] total;
+  reg [19:0] sum;
+  reg [3:0]  k;
+  reg [8:0]  wr_idx;
+  reg [1:0]  st_phase;
+  reg        st_done;
+  wire [7:0]  chg   = (uio ^ prev) & m;
+`ifdef M_PIT_MASK_DROP
+  wire [7:0]  rmask = chg & 8'hFE;
+`else
+  wire [7:0]  rmask = chg;
+`endif
+`ifdef M_PIT_K_OFF1
+  wire [4:0]  ke    = {1'b0, k} + 5'd1;
+`else
+  wire [4:0]  ke    = {1'b0, k};
+`endif
+  wire        rawr  = (n < 16'd16);
+  wire [15:0] q     = tcnt >> ke;
+  wire        esc   = (q >= 16'd16);
+  wire [63:0] kmask = (64'd1 << ke) - 64'd1;
+  wire [63:0] unary = ((64'd1 << q[4:0]) - 64'd1) << 1;           // q ones, then a 0
+  wire [63:0] v_raw = {40'd0, tcnt, rmask};
+  wire [63:0] v_esc = {24'd0, 16'hFFFF, tcnt, rmask};
+  wire [63:0] v_gr  = ((((unary << ke) | ({48'd0, tcnt} & kmask)) << 8) | {56'd0, rmask});
+  wire [6:0]  l_gr  = {2'b0, q[4:0]} + 7'd1 + {2'b0, ke} + 7'd8;
+  wire [63:0] v_rec = rawr ? v_raw : esc ? v_esc : v_gr;
+  wire [6:0]  l_rec = rawr ? 7'd24 : esc ? 7'd40 : l_gr;
+  wire        kpre  = (n == 16'd16);                                // k precedes the first coded record
+  wire [63:0] v_all = kpre ? (v_rec | ({60'd0, k} << l_rec)) : v_rec;
+  wire [6:0]  l_all = kpre ? l_rec + 7'd4 : l_rec;
+  // the drain happens first each cycle; the record goes in after it
+  wire        drain   = (acc_n >= 7'd8);
+  wire [63:0] acc_d   = drain ? (acc << 8) : acc;
+  wire [6:0]  acc_n_d = drain ? acc_n - 7'd8 : acc_n;
+`ifdef M_PIT_NO_OVERRUN
+  wire        room  = ({5'd0, total} + {10'd0, l_all} <= CAP_BITS);
+`else
+  wire        room  = ({1'b0, acc_n_d} + {1'b0, l_all} <= 8'd64) &&
+                      ({5'd0, total} + {10'd0, l_all} <= CAP_BITS);
+`endif
+  wire [19:0] sum_n = sum + {4'd0, tcnt};
+  wire [19:0] mean  = sum_n >> 4;
+  wire [23:0] v11   = ({4'd0, mean} * 24'd11) >> 4;
+  reg  [3:0]  k_new;
+  integer     bi;
+  always @(*) begin
+    k_new = 4'd0;
+    for (bi = 0; bi < 16; bi = bi + 1)
+      if (v11[bi]) k_new = bi[3:0];
+  end
+  always @(posedge clk or negedge rst_n) begin
+    if (!rst_n) begin
+      active <= 1'b0; prev <= 8'h00; tcnt <= 16'd0; n <= 16'd0; acc <= 64'd0;
+      acc_n <= 7'd0; total <= 12'd0; sum <= 20'd0; k <= 4'd0; wr_idx <= 9'd0;
+      st_phase <= 2'd0; st_done <= 1'b0; stopped <= 1'b0;
+      we <= 1'b0; waddr <= {AW{1'b0}}; wdata <= 8'h00;
+    end else if (!run) begin
+      active <= 1'b0;
+      we <= 1'b0;
+    end else if (!active) begin
+      // the PIT's cycle 0: take the levels, start the interval
+      active <= 1'b1; prev <= uio; tcnt <= 16'd1; n <= 16'd0; acc <= 64'd0;
+      acc_n <= 7'd0; total <= 12'd0; sum <= 20'd0; k <= 4'd0; wr_idx <= 9'd0;
+      st_phase <= 2'd0; st_done <= 1'b0; stopped <= 1'b0; we <= 1'b0;
+    end else begin
+      prev <= uio;
+      we <= 1'b0;
+      if (drain) begin
+        we    <= 1'b1;
+        waddr <= CAP_BASE[AW-1:0] + wr_idx;
+        wdata <= acc[63:56];
+        wr_idx <= wr_idx + 9'd1;
+      end
+      acc   <= acc_d;
+      acc_n <= acc_n_d;
+      tcnt  <= (tcnt == 16'hFFFF) ? tcnt : tcnt + 16'd1;
+      if (chg != 8'h00 && !stopped) begin
+        if (room) begin
+          acc   <= acc_d | (v_all << (7'd64 - acc_n_d - l_all));
+          acc_n <= acc_n_d + l_all;
+          total <= total + {5'd0, l_all};
+          n     <= n + 16'd1;
+          tcnt  <= 16'd1;
+          if (rawr) sum <= sum_n;
+          if (n == 16'd15) k <= k_new;
+        end else begin
+          stopped <= 1'b1;
+        end
+      end
+      // the status, once stopped and drained: byte 2 = overflow, 28/29 = count
+      if (stopped && !drain && !st_done) begin
+        we <= 1'b1;
+        case (st_phase)
+          2'd0: begin waddr <= 9'd2;  wdata <= 8'h80; end
+          2'd1: begin waddr <= 9'd28; wdata <= n[15:8]; end
+          default: begin waddr <= 9'd29; wdata <= n[7:0]; st_done <= 1'b1; end
+        endcase
+        st_phase <= st_phase + 2'd1;
+      end
+    end
   end
 endmodule
