@@ -130,6 +130,22 @@ jobs:
           cp runs/wokwi/resolved.json canary_out/ 2>/dev/null || true
           echo "resolved: $(sha256sum canary_out/resolved.json 2>/dev/null | cut -c1-64)" >> canary_out/stamp.txt
 
+      # ⭐ THE FINAL GATE NETLIST (Wilson 10-28): a timing path whose endpoint
+      # flop cannot be NAMED is half a measurement -- the reports give only
+      # `_52602_`. The newest *.nl.v of the run, gzipped (one file, not every
+      # step's copy), so a path's start/end instances map to RTL net names.
+      - name: Keep the final netlist
+        if: always()
+        shell: bash
+        run: |
+          f=$(ls -t runs/wokwi/*/*.nl.v 2>/dev/null | head -1)
+          if [ -n "$f" ]; then
+            gzip -c "$f" > canary_out/final.nl.v.gz
+            echo "netlist: $f ($(wc -c < canary_out/final.nl.v.gz) bytes gz)" >> canary_out/stamp.txt
+          else
+            echo "netlist: NONE FOUND" >> canary_out/stamp.txt
+          fi
+
       - name: Upload the canary
         if: always()
         uses: actions/upload-artifact@v7
