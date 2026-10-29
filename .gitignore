@@ -135,3 +135,9 @@ test/pit_fast_overrun.stim
 test/pit_long_gap.stim
 test/pit_mask00_b12_image.hex
 test/pit_quiet_budget.stim
+test/pit_i2c.stim
+test/pit_twin2cs.stim
+test/pit_floor_edge.stim
+test/pit_mosi_cs_offpin.stim
+test/pit_mask00_b14_image.hex
+test/pit_mask00_b11_image.hex

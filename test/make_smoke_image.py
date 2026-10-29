@@ -1377,6 +1377,18 @@ def main() -> int:
              "pit_mask00_b12_image.hex"),
             (["--pit", "stim", "quiet_budget"], "PIT stimulus: a quiet bus (three edges, then nothing)",
              "pit_quiet_budget.stim"),
+            # v2 PIT chunk 2: stage 0's branches -- the I2C bus, the ambiguity pass
+            # (two chip selects), the floor's median refusal, the failing signature
+            (["--pit", "stim", "i2c"], "PIT stimulus: I2C (stage 0's I2C branch)", "pit_i2c.stim"),
+            (["--pit", "stim", "twin2cs"], "PIT stimulus: CPOL-1 SPI, two chip selects (AMBIGUOUS)",
+             "pit_twin2cs.stim"),
+            (["--pit", "stim", "floor_edge"], "PIT stimulus: one wire on the rate floor", "pit_floor_edge.stim"),
+            (["--pit", "stim", "mosi_cs_offpin"], "PIT stimulus: MOSI + CS, SCK off the pins",
+             "pit_mosi_cs_offpin.stim"),
+            (["--pit", "image", "00", "14"], "PIT SNIFF image, mask 0x00, budget 2^14 cycles",
+             "pit_mask00_b14_image.hex"),
+            (["--pit", "image", "00", "11"], "PIT SNIFF image, mask 0x00, budget 2^11 cycles",
+             "pit_mask00_b11_image.hex"),
             (["--edge", "200", "0", "edge_image"], "timeout 200, FALL", "edge_image.hex"),
             (["--edge", "0", "0", "edge_image_noto"], "no timeout, FALL", "edge_image_noto.hex"),
             (["--edge", "0", "1", "edge_image_rise"], "no timeout, RISE", "edge_image_rise.hex"),
@@ -1807,7 +1819,11 @@ def main() -> int:
             out = os.path.join(here, "pit_mask%s%s_image.hex" % (arg, "_b%d" % b if b else ""))
             write_image(out, RP.sniff_image(int(arg, 16), b))
         elif what == "stim":
-            waves = {n: w for n, w, _m in RP.CASES}[arg]
+            # the capture gate's cases, then stage 0's own (chunk 2)
+            waves = {n: w for n, w, _m in RP.CASES}.get(arg)
+            if waves is None:
+                import run_pit_s0 as RS0
+                waves = {c[0]: c[1] for c in RS0.cases()}[arg]
             out = os.path.join(here, "pit_%s.stim" % arg)
             with open(out, "w", encoding="ascii", newline="\n") as fh:
                 for t, v in RP.waves_to_stim(waves):

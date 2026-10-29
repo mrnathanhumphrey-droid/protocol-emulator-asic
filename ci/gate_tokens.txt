@@ -29,6 +29,7 @@ model/a2/gate_a2_program.py         ^\s*GATE a2-program: PASSED\s*$
 test/gate_corpus_trace.py           ^\s*GATE corpus-trace: PASSED\s*$
 model/gate_v2_equiv.py              ^\s*GATE v2-equiv: PASSED\s*$
 test/run_pit_capture.py             ^\s*GATE pit-capture: PASSED\s*$
+test/run_pit_s0.py                  ^\s*GATE pit-s0: PASSED\s*$
 test/run_branch_check.py            ^\s*GATE branch-check: PASSED\s*$
 model/gate_gates_complete.py        ^\s*GATE gates-complete: PASSED\s*$
 model/gate_admissible_images.py     ^\s*GATE admissible-images: PASSED\s*$

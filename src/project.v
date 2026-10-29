@@ -1238,11 +1238,11 @@ module pe_pit_s0 #(parameter integer AW = 9) (
   wire [TW+1:0] four_h = {half, 2'b00};
   wire [TW-1:0] med_l  = last_l ? med1 : med0;
   wire [TW-1:0] dlt    = (civ > med_l) ? civ - med_l : med_l - civ;
+  // a START's gap is bad when < 9 falls, or (Wilson 10-28) not 1 + 9n with n >= 1
 `ifdef M_S0_NO_MOD9
   wire          gap_bad = (g_sat < 4'd9);
 `else
-  // gaps < 9, or (Wilson 10-28) not 1 + 9n with n >= 1
-  wire          gap_bad = (g_sat < 4'd9) | (g_sat < 4'd10) | (g_m9 != 4'd1);
+  wire          gap_bad = (g_sat < 4'd10) | (g_m9 != 4'd1);
 `endif
   integer i;
   always @(posedge clk or negedge rst_n) begin

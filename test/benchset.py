@@ -264,15 +264,17 @@ CONFIG = {
     # is judged by test/run_pit_capture.py; the sweep measures reach.
     "tb_pit": {
         "srcs": [],
+        # ⭐ chunk 2: the arms that STOP run on to stage 0's end (+S0WAIT=1), so
+        # pe_pit_s0 is reached; NCYC is the ceiling, not the run length
         "arms": [("spi0", ["+IMG=test/pit_mask00_image.hex", "+NBYTES=512",
                            "+STIM=test/pit_spi0.stim", "+OUT=probe_cov_pit_spi0.out",
-                           "+NCYC=60000"]),
+                           "+NCYC=2000000", "+S0WAIT=1"]),
                  ("mask03", ["+IMG=test/pit_mask03_image.hex", "+NBYTES=512",
                              "+STIM=test/pit_spi0.stim", "+OUT=probe_cov_pit_mask03.out",
-                             "+NCYC=60000"]),
+                             "+NCYC=2000000", "+S0WAIT=1"]),
                  ("overrun", ["+IMG=test/pit_mask00_image.hex", "+NBYTES=512",
                               "+STIM=test/pit_fast_overrun.stim",
-                              "+OUT=probe_cov_pit_overrun.out", "+NCYC=60000"]),
+                              "+OUT=probe_cov_pit_overrun.out", "+NCYC=200000", "+S0WAIT=1"]),
                  # the idle bus (Nate / Wilson 10-28): the interval saturates
                  ("longgap", ["+IMG=test/pit_mask00_image.hex", "+NBYTES=512",
                               "+STIM=test/pit_long_gap.stim",
@@ -280,7 +282,20 @@ CONFIG = {
                  # the BUDGET stop (Wilson 10-29): a quiet bus ends on 2^12 cycles
                  ("budget", ["+IMG=test/pit_mask00_b12_image.hex", "+NBYTES=512",
                              "+STIM=test/pit_quiet_budget.stim",
-                             "+OUT=probe_cov_pit_budget.out", "+NCYC=8000"])],
+                             "+OUT=probe_cov_pit_budget.out", "+NCYC=200000", "+S0WAIT=1"]),
+                 # stage 0's branches (chunk 2): I2C, AMBIGUOUS, the floor's median, a bad signature
+                 ("s0_i2c", ["+IMG=test/pit_mask00_image.hex", "+NBYTES=512",
+                             "+STIM=test/pit_i2c.stim", "+OUT=probe_cov_pit_s0_i2c.out",
+                             "+NCYC=2000000", "+S0WAIT=1"]),
+                 ("s0_twin2cs", ["+IMG=test/pit_mask00_b14_image.hex", "+NBYTES=512",
+                                 "+STIM=test/pit_twin2cs.stim", "+OUT=probe_cov_pit_s0_twin2cs.out",
+                                 "+NCYC=2000000", "+S0WAIT=1"]),
+                 ("s0_floor", ["+IMG=test/pit_mask00_b11_image.hex", "+NBYTES=512",
+                               "+STIM=test/pit_floor_edge.stim", "+OUT=probe_cov_pit_s0_floor.out",
+                               "+NCYC=200000", "+S0WAIT=1"]),
+                 ("s0_offpin", ["+IMG=test/pit_mask00_b14_image.hex", "+NBYTES=512",
+                                "+STIM=test/pit_mosi_cs_offpin.stim", "+OUT=probe_cov_pit_s0_offpin.out",
+                                "+NCYC=2000000", "+S0WAIT=1"])],
     },
     "tb_edge": {
         "srcs": [],

@@ -211,6 +211,12 @@ def sim(vvp, tmp, tag, img, stim, ncyc):
     return log, mem, lv0, s0
 
 
+def table_problems(got, want):
+    """THE ONE COMPARE (the meta seam): [problem] if the RTL's table is not the
+    golden's. Used by the cases (must be empty) and the must-fires (must not)."""
+    return [] if got == want else ["table RTL %s, golden %s" % (got.hex(), want.hex())]
+
+
 def judge(case, log, mem, lv0, s0):
     """-> (problems, golden table, roles, stage-0 pc)."""
     name, _w, _m, b, ncyc, _e = case
@@ -226,8 +232,7 @@ def judge(case, log, mem, lv0, s0):
     else:
         if s0 is None or s0.get("s0done") != "1":
             probs.append("stage 0 never finished (pc %s)" % (s0 or {}).get("pc"))
-        if got != want:
-            probs.append("table RTL %s, golden %s" % (got.hex(), want.hex()))
+        probs += table_problems(got, want)
     return probs, want, roles, int((s0 or {}).get("pc", "0"))
 
 
@@ -306,7 +311,7 @@ def main() -> int:
             log, mem, lv0, s0 = sim(mv, tmp, tname + "_m", RP.sniff_image(c[2], c[3]), RP.waves_to_stim(c[1]),
                                     NCYC_MAX)
             got = bytes((mem.get(S0.TABLE_AT + i, -1) & 0xFF) for i in range(S0.TABLE_BYTES))
-            if got != results[tname][2]:
+            if table_problems(got, results[tname][2]):
                 broke.append(tname)
         print("    %-18s %-36s %s" % (define, what, ("RED on " + ", ".join(broke)) if broke else "*** SURVIVED ***"))
         if not broke:

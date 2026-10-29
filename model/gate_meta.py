@@ -170,6 +170,8 @@ SEAMS = (
     ("test/run_branch_check.py", "run_branch_check.run_problems", "slow", "E"),
     # v2 PIT chunk 1: `compare` always finds no problem -> the five M_PIT_* survive
     ("test/run_pit_capture.py", "run_pit_capture.compare", "slow", "E0"),
+    # v2 PIT chunk 2: `table_problems` always empty -> every M_S0_* survives
+    ("test/run_pit_s0.py", "run_pit_s0.table_problems", "slow", "E"),
 )
 
 #: Gates with NO stubbable check, each with why -- every gate in

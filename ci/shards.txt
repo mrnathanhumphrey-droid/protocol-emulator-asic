@@ -36,6 +36,7 @@ trace test/run_spim_witness.py
 sim1 test/run_lockstep.py
 sim1 test/run_onewire.py
 sim1 test/run_spitgt.py
+sim1 test/run_pit_s0.py
 
 # sim2 -- 201 (+ its kill audit) + 197 + 106 + 100 + 9
 sim2 test/run_mutants.py

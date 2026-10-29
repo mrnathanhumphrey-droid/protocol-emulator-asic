@@ -138,7 +138,14 @@ EXPECT = {
     "M_PIT_NO_SAT":       (2, None),
     # the budget stop and the starting levels (Wilson 10-29)
     "M_PIT_NO_BUDGET":    (2, None),
-    "M_PIT_LV0_INV":      (2, None),
+    "M_PIT_LV0_INV":      (4, "two lines per arm, declared: the byte-39 write AND cap_lv0, the copy stage 0 reads -- the inverted start level must reach the role table (Wilson 10-29)"),
+    # v2 PIT chunk 2: stage 0 -- the pair order, the median index, the 1 + 9n
+    # rule, the rate floor, the ambiguity pass (its whole phase skipped: a 3-line arm)
+    "M_S0_PAIR_ORDER":    (2, None),
+    "M_S0_MED_OFF1":      (2, None),
+    "M_S0_NO_MOD9":       (2, None),
+    "M_S0_NO_FLOOR":      (2, None),
+    "M_S0_NO_AMBIG":      (4, "the ambiguity phase is a 3-line state; the mutant is one jump past it"),
     # ruling CE1 / CE2: each new mode bit read as 0 -- the selector ignored
     "M_HALF_IGNORED":    (2, None),
     # 2 since option 1' (WF2): the XOR now lives in the one-line `run_out`,

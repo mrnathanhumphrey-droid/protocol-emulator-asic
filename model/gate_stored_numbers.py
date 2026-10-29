@@ -723,6 +723,12 @@ SPEC_SYMBOLS = {
     # play (SPI modes 0 / 3, a wire mask, I2C, two UARTs, a line fast enough
     # to overrun) and their chosen masks; the result is the bit-exact compare.
     ("test/run_pit_capture.py", "CASES"),
+    # v2 PIT chunk 2: the FROZEN stage-0 model (e55d0b63, never edited here):
+    # CATALOGUE is the published CRC parameter catalogue (Rocksoft model) and
+    # WIDTHS the CRC widths it searches (8 / 16 / 32) -- specifications, not
+    # readings; stage 3 is judged against them, they are not results.
+    ("model/pit_golden.py", "CATALOGUE"),
+    ("model/pit_golden.py", "WIDTHS"),
     # the CMP mask modes: the ISA's own definition (the RTL's mux), not a reading
     ("test/pe_isa.py", "CMP_MASKS"),
     # ⭐ A TEST PAYLOAD IS STIMULUS, NOT A MEASUREMENT. The four bytes the
