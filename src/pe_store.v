@@ -143,8 +143,13 @@ module pe_store #(
   // -- and any new flop elsewhere moved that stream (LOOP's l_loop shifted the
   // pinned signature a row, 10-29). A CONSTANT keeps the mutant's signature a
   // property of the RTL, not of the random stream (Wilson 10-29).
+  // ⛔ VERILATOR ONLY: under iverilog the register stays X, and run_mutants'
+  // kill IS that X (the tree select propagates it until nothing retires);
+  // a constant there moved its pinned reason (CI sim2, 10-29).
 `ifdef M_PFETCH_NOWAIT
+`ifdef VERILATOR
   initial wrdata = {WIDE_B*8{1'b0}};
+`endif
 `endif
 
   // ⛔ RULING TM2's per-byte address registers are GONE with the byte-wide

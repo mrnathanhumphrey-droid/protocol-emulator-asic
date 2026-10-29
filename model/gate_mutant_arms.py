@@ -72,7 +72,7 @@ EXPECT = {
     # TF2-R3's must-fire: the release term reads the CURRENT `l_live`, so a
     # lane halted this cycle stays eligible one more -- one token, one line
     "M_TF2_LIVE_LATE":   (2, None),
-    "M_PFETCH_NOWAIT":   (3, "2 lines: the skipped wait; +1 (Wilson 10-29): the never-written read register tied to 0 so the signature does not ride the random-init stream"),
+    "M_PFETCH_NOWAIT":   (2, "the skipped wait; under VERILATOR only (not seen here) +1: the never-written read register tied to 0 so LN1's signature does not ride the random-init stream (Wilson 10-29)"),
     "M_BUF_NOINVAL":     (2, None),
     "M_BUF_SWAP":        (2, None),
     "M_COMB_OUT":        (4, None),
