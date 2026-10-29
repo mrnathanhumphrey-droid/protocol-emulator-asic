@@ -126,3 +126,4 @@ test/branch_wbad_image.hex
 test/branch_cmp_order_image.hex
 test/branch_cmp_mask_image.hex
 test/branch_cmp_lo_image.hex
+test/branch_loop_image.hex

@@ -712,6 +712,13 @@ SPEC_SYMBOLS = {
     ("test/branch_corpus.py", "CORPUS"),
     ("test/branch_corpus.py", "REFUSED_CHAINS"),
     ("test/run_branch_check.py", "IMAGES"),
+    # ⭐ v2 primitive 2 (LOOP): LOOP_KINDS are the CHOSEN iteration counts (1, 2,
+    # 3, 7, 255: the floor, small, a non-power-of-two and the 8-bit ceiling) --
+    # design; the result is branch_check.vh's COUNT check, judged live. MUTANTS
+    # names each mutant, the counter it must trip and the image it breaks; its
+    # numbers are words in the labels ("n + 1"), not readings.
+    ("test/branch_corpus.py", "LOOP_KINDS"),
+    ("test/run_branch_check.py", "MUTANTS"),
     # the CMP mask modes: the ISA's own definition (the RTL's mux), not a reading
     ("test/pe_isa.py", "CMP_MASKS"),
     # ⭐ A TEST PAYLOAD IS STIMULUS, NOT A MEASUREMENT. The four bytes the

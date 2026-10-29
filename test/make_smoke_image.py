@@ -1346,7 +1346,7 @@ def main() -> int:
             # every primitive follows) -- branch_corpus's braw33_contend4, and the
             # same image with W = BR_W_MIN - 1 packed past the encoder (the
             # dispatch refusal: config_err, the lane halted).
-            (["--branch", "ok"], "BRANCH_BIT, W = 32, 4 branchers",
+            (["--branch", "ok"], "BRANCH_BIT, W = 33, 4 branchers",
              "branch_image.hex"),
             (["--branch", "wbad"], "BRANCH_BIT with W = 31 (refused at dispatch)",
              "branch_wbad_image.hex"),
@@ -1357,6 +1357,9 @@ def main() -> int:
              "branch_cmp_mask_image.hex"),
             (["--branch", "cmp_lo"], "CMP_BRANCH, the low-nibble mode",
              "branch_cmp_lo_image.hex"),
+            # v2 primitive 2 bundle 2: LOOP, five contending lanes, n = 1 2 3 7 255
+            (["--branch", "loop"], "LOOP, five lanes, n = 1 / 2 / 3 / 7 / 255",
+             "branch_loop_image.hex"),
             (["--edge", "200", "0", "edge_image"], "timeout 200, FALL", "edge_image.hex"),
             (["--edge", "0", "0", "edge_image_noto"], "no timeout, FALL", "edge_image_noto.hex"),
             (["--edge", "0", "1", "edge_image_rise"], "no timeout, RISE", "edge_image_rise.hex"),
@@ -1781,14 +1784,23 @@ def main() -> int:
         img = BC.build(4, 1, "braw33")
         if mode in ("cmp_order", "cmp_mask", "cmp_lo"):
             img = BC.build_cmp("ok", kind=mode[4:])
+        elif mode == "loop":
+            img = BC.build_loop("mix")
         elif mode == "wbad":
-            img = BC.patch_branches(img, wait=_I.BR_W_MIN - 1)
+            # ⛔ W = 31 (0001_1111), NOT BR_W_MIN - 1 (Wilson 10-28). Any W < W_MIN
+            # is refused, and the floor case W_MIN - 1 is run_branch_check's
+            # refusal; this SWEEP image is the only one that sets W's bits 1-4
+            # (pinb = word bits 2-5, count bit 0 = word bit 8). At W_MIN 33 the
+            # old recipe gave W = 32 (0010_0000) and 37 toggle points went dark.
+            img = BC.patch_branches(img, wait=31)
+            assert 31 < _I.BR_W_MIN, "the refused image must stay under W_MIN"
         elif mode != "ok":
-            raise SystemExit("--branch ok|wbad|cmp_order|cmp_mask|cmp_lo, not %r" % mode)
+            raise SystemExit("--branch ok|wbad|cmp_order|cmp_mask|cmp_lo|loop, not %r" % mode)
         out = os.path.join(here, {"ok": "branch_image.hex", "wbad": "branch_wbad_image.hex",
                                   "cmp_order": "branch_cmp_order_image.hex",
                                   "cmp_mask": "branch_cmp_mask_image.hex",
-                                  "cmp_lo": "branch_cmp_lo_image.hex"}[mode])
+                                  "cmp_lo": "branch_cmp_lo_image.hex",
+                                  "loop": "branch_loop_image.hex"}[mode])
         write_image(out, img)
         print("branch image (%s), %d bytes -> %s" % (mode, len(img), out))
         return 0
