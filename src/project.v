@@ -509,15 +509,33 @@ module tt_um_protocol_emulator #(
   wire [AW-1:0]  pit_waddr;
   wire [7:0]     pit_wdata;
   wire           pit_stopped;
+  wire           pit_cap_done;
+  wire [13:0]    pit_cap_n;
+  wire [7:0]     pit_cap_lv0;
   pe_pit #(.AW(AW)) u_pit (
       .clk(clk), .rst_n(rst_n_s), .run(pit_run), .uio(uio_q1), .mask_cfg(pit_mask), .bud_cfg(pit_bud),
-      .we(pit_we), .waddr(pit_waddr), .wdata(pit_wdata), .stopped(pit_stopped));
+      .we(pit_we), .waddr(pit_waddr), .wdata(pit_wdata), .stopped(pit_stopped),
+      .cap_done(pit_cap_done), .cap_n(pit_cap_n), .cap_lv0(pit_cap_lv0));
+  // ⭐ v2 PIT chunk 2: STAGE 0, run once the capture has stopped. It READS the
+  // store through the narrow port (the engine is halted in SNIFF, so the
+  // select never contends with refill) and writes the role table, 32..38.
+  wire           s0_re, s0_we, s0_done;
+  wire [AW-1:0]  s0_raddr, s0_waddr;
+  wire [7:0]     s0_wdata;
+  pe_pit_s0 #(.AW(AW)) u_s0 (
+      .clk(clk), .rst_n(rst_n_s), .run(pit_run), .start(pit_cap_done), .n_rec(pit_cap_n),
+      .lv0(pit_cap_lv0), .re(s0_re), .raddr(s0_raddr), .rdata(s_rdata),
+      .we(s0_we), .waddr(s0_waddr), .wdata(s0_wdata), .done(s0_done));
+  wire _unused_s0 = &{1'b0, s0_done};
   pe_store #(.AW(AW), .MEM_TYPE(MEM_TYPE), .WIDE_B(ACT_BYTES_T)) u_store (
       .clk(clk), .rst_n(rst_n_s),
-      .we((pm_we & {ACT_BYTES_T{wr_rise}}) | {ACT_BYTES_T{pit_we}}),
-      .waddr(pit_we ? pit_waddr : ptr), .wdata(pit_we ? pit_wdata : uio_q1),
-      .re(pm_rd ? rb_re : e_re),
-      .raddr(pm_rd ? rb_addr : e_raddr),
+      .we((pm_we & {ACT_BYTES_T{wr_rise}}) | {ACT_BYTES_T{pit_we | s0_we}}),
+      .waddr(pit_we ? pit_waddr : s0_we ? s0_waddr : ptr),
+      .wdata(pit_we ? pit_wdata : s0_we ? s0_wdata : uio_q1),
+      // the SNIFF-only select sits on the ENGINE side of pm_rd's mux: pm_rd's
+      // own level is unchanged (sniff is a static mode bit)
+      .re(pm_rd ? rb_re : (sniff ? s0_re : e_re)),
+      .raddr(pm_rd ? rb_addr : (sniff ? s0_raddr : e_raddr)),
       .rdata(s_rdata),
       .wre(e_wre & run), .wraddr_bk(e_wraddr_bk),
       .wrdata(s_wrdata)
@@ -1065,6 +1083,468 @@ module tt_um_protocol_emulator #(
 endmodule
 
 // ---------------------------------------------------------------------------
+// ============================================================================
+// pe_pit_s0 -- v2 PIT chunk 2: STAGE 0 (multi-wire roles) IN RTL. Bit-exact
+// against the frozen model's stage0 (pit_golden.py e55d0b63) run on the capture
+// AS STORED (pit_capture_golden.decode: whole records, saturating intervals,
+// levels rebuilt from byte 39). Stamped prediction: rulings pit_rtl_c2.ea932f34.
+// FULLY SEQUENTIAL (Wilson 10-29): every quantity is a FOLD over one WALK of the
+// stored records -- a bit-serial decode of bytes 128.. through the store's
+// narrow read port, idle in SNIFF -- and the phases replay stage0 in its exact
+// order: the pair loop (c ascending, d ascending, roles mutated in place), the
+// FRAME pass (clocks ascending), the AMBIGUOUS rule (FRAME wires in INSERTION
+// order, as a Python dict iterates), the rate floor. Medians are exact: a
+// binary search on value, one walk per bit, the model's own indices.
+// The role table (bytes 32..38): wire w's 7 bits {change level, partner (3),
+// role (3)} at bit 7w of a 56-bit word; byte 32 + i = its bits 8i+7 .. 8i.
+// ============================================================================
+module pe_pit_s0 #(parameter integer AW = 9) (
+    input  wire          clk,
+    input  wire          rst_n,
+    input  wire          run,          // SNIFF running (low: clear, ready for a new capture)
+    input  wire          start,        // the capture has stopped and written its status
+    input  wire [13:0]   n_rec,        // whole records stored
+    input  wire [7:0]    lv0,          // the starting levels (byte 39)
+    output reg           re,
+    output reg  [AW-1:0] raddr,
+    input  wire [7:0]    rdata,
+    output reg           we,
+    output reg  [AW-1:0] waddr,
+    output reg  [7:0]    wdata,
+    output reg           done
+);
+  // ---- widths and codes -----------------------------------------------------
+  localparam integer TW  = 25;               // t: ~341 records x 0xFFFF
+  localparam integer NW  = 9;                // a count of records / edges
+  localparam integer IVW = 16;               // a stored interval
+  localparam [13:0] N_RAW = 14'd16;
+  localparam [2:0] R_NONE = 3'd0, R_CLOCK = 3'd1, R_SYNC = 3'd2, R_FRAME = 3'd3,
+                   R_AMBIG = 3'd4, R_CLOCK_I2C = 3'd5, R_SYNC_I2C = 3'd6, R_REFUSED = 3'd7;
+  localparam [NW-1:0] MIN_CLOCK_EDGES = 9'd16;   // S0_MIN_CLOCK_EDGES
+  localparam [TW-1:0] RATE_FLOOR      = 25'd8;   // S0_RATE_FLOOR
+  localparam [AW-1:0] CAP_BASE = 9'd128, TABLE_AT = 9'd32;
+  localparam [NW-1:0] ONE = {{(NW-1){1'b0}}, 1'b1};
+
+  // ===========================================================================
+  // THE DECODER: one walk = every stored record in order, one bit a cycle.
+  // ===========================================================================
+  localparam [1:0] D_IDLE = 2'd0, D_REQ = 2'd1, D_LAT = 2'd2, D_BIT = 2'd3;
+  localparam [2:0] F_RAW = 3'd0, F_K = 3'd1, F_Q = 3'd2, F_LO = 3'd3, F_ESC = 3'd4, F_MASK = 3'd5;
+  reg  [1:0]     ds;
+  reg            dload;
+  reg  [7:0]     sh;
+  reg  [3:0]     nb;
+  reg  [2:0]     fs;
+  reg  [4:0]     fc;
+  reg  [3:0]     kk;
+  reg  [IVW-1:0] iv;
+  reg  [7:0]     mk;
+  reg  [13:0]    r;
+  reg  [AW-1:0]  ba;
+  reg  [TW-1:0]  t;                     // the record's time (valid with rec_v)
+  reg  [7:0]     lv;                    // every wire's level just after it
+  reg  [7:0]     rm;                    // its change mask
+  reg            rec_v, walk_done, walk_go;
+  wire           b    = sh[7];
+  wire [7:0]     mk_n = {mk[6:0], b};
+  wire [13:0]    r_n  = r + 14'd1;
+  always @(posedge clk or negedge rst_n) begin
+    if (!rst_n) begin
+      ds <= D_IDLE; dload <= 1'b0; sh <= 8'h00; nb <= 4'd0; fs <= F_RAW; fc <= 5'd0; kk <= 4'd0;
+      iv <= {IVW{1'b0}}; mk <= 8'h00; r <= 14'd0; ba <= CAP_BASE; t <= {TW{1'b0}}; lv <= 8'h00;
+      rm <= 8'h00; rec_v <= 1'b0; walk_done <= 1'b0; re <= 1'b0; raddr <= {AW{1'b0}};
+    end else if (!run) begin
+      ds <= D_IDLE; rec_v <= 1'b0; walk_done <= 1'b0; re <= 1'b0;
+    end else begin
+      rec_v <= 1'b0; walk_done <= 1'b0; re <= 1'b0;
+      case (ds)
+        D_IDLE: if (walk_go) begin
+          t <= {TW{1'b0}}; lv <= lv0; r <= 14'd0; fs <= F_RAW; fc <= 5'd0; ba <= CAP_BASE;
+          if (n_rec == 14'd0) walk_done <= 1'b1;
+          else ds <= D_REQ;
+        end
+        D_REQ: begin re <= 1'b1; raddr <= ba; ba <= ba + {{(AW-1){1'b0}}, 1'b1}; dload <= 1'b0; ds <= D_LAT; end
+        // the store registers rdata on the edge that sees `re`: one cycle to wait
+        D_LAT: begin
+          if (dload) begin sh <= rdata; nb <= 4'd8; ds <= D_BIT; end
+          dload <= 1'b1;
+        end
+        default: begin   // D_BIT
+          sh <= {sh[6:0], 1'b0};
+          nb <= nb - 4'd1;
+          if (nb == 4'd1) ds <= D_REQ;
+          case (fs)
+            F_RAW: begin iv <= {iv[IVW-2:0], b}; fc <= fc + 5'd1;
+                     if (fc == 5'd15) begin fc <= 5'd0; fs <= F_MASK; end end
+            F_K:   begin kk <= {kk[2:0], b}; fc <= fc + 5'd1;
+                     if (fc == 5'd3) begin fc <= 5'd0; fs <= F_Q; end end
+            F_Q:   if (b) begin
+                     fc <= fc + 5'd1;
+                     if (fc == 5'd15) begin fc <= 5'd0; fs <= F_ESC; end   // 16 ones: the escape
+                   end else begin
+                     iv <= {11'd0, fc}; fc <= 5'd0; fs <= (kk == 4'd0) ? F_MASK : F_LO;
+                   end
+            F_LO:  begin iv <= {iv[IVW-2:0], b}; fc <= fc + 5'd1;
+                     if (fc + 5'd1 == {1'b0, kk}) begin fc <= 5'd0; fs <= F_MASK; end end
+            F_ESC: begin iv <= {iv[IVW-2:0], b}; fc <= fc + 5'd1;
+                     if (fc == 5'd15) begin fc <= 5'd0; fs <= F_MASK; end end
+            default: begin   // F_MASK: the record completes on its 8th mask bit
+              mk <= mk_n; fc <= fc + 5'd1;
+              if (fc == 5'd7) begin
+                fc <= 5'd0;
+                t <= t + {{(TW-IVW){1'b0}}, iv};
+                lv <= lv ^ mk_n; rm <= mk_n; rec_v <= 1'b1; r <= r_n;
+                if (r_n == n_rec) begin ds <= D_IDLE; walk_done <= 1'b1; end
+                else if (r_n == N_RAW) fs <= F_K;
+                else if (r_n < N_RAW) fs <= F_RAW;
+                else fs <= F_Q;
+              end
+            end
+          endcase
+        end
+      endcase
+    end
+  end
+
+  // ===========================================================================
+  // THE FOLDS: one consumer per walk, chosen by `wk`, over wires c / d.
+  // ===========================================================================
+  localparam [2:0] W_CNT = 3'd0, W_LVL = 3'd1, W_PROBE = 3'd2, W_NEAR = 3'd3, W_PAIR = 3'd4;
+  reg  [2:0]    wk;
+  reg  [2:0]    wc, wd;
+  reg  [1:0]    psel;                  // W_PROBE: 0 / 1 = the level-0 / level-1 intervals, 2 = all
+  reg  [NW-1:0] cnt [0:7];             // edges per wire (W_CNT)
+  reg           has_c, last_l;         // the walk's previous c edge, and c's level after it
+  reg  [TW-1:0] last_t;
+  wire          ce = rm[wc], de = rm[wd];
+  wire          cl = lv[wc], dl = lv[wd];
+  wire [TW-1:0] civ = t - last_t;      // the interval this record closes on c (valid if has_c)
+  reg  [NW-1:0] nlv0, nlv1, near0, near1;
+  reg  [TW-1:0] med0, med1, half;
+  // the median unit (k-th smallest of the selected intervals, MSB first)
+  reg  [TW-1:0] m_ans;
+  reg  [4:0]    m_bit;
+  reg  [NW-1:0] m_k, pcnt;
+  wire [TW-1:0] m_cand = m_ans | ({{(TW-1){1'b0}}, 1'b1} << m_bit);
+  // the pair folds
+  reg  [NW-1:0] in0, in1, nd, nc;
+  reg           idle_ok, frame_ok, all_high;
+  reg           pend_i, pend_f;        // d edges waiting for the next c edge (idle / FRAME)
+  reg  [TW-1:0] pend_x;                // the latest of them (the closest to that c edge)
+  reg           ev_any, ev_prev_start, sig_bad;
+  reg  [1:0]    starts;
+  reg  [3:0]    g_sat, g_m9;           // SCL falls since the last event: min(g, 10) and g mod 9
+  wire [TW+1:0] two_h  = {1'b0, half, 1'b0};
+  wire [TW+1:0] four_h = {half, 2'b00};
+  wire [TW-1:0] med_l  = last_l ? med1 : med0;
+  wire [TW-1:0] dlt    = (civ > med_l) ? civ - med_l : med_l - civ;
+`ifdef M_S0_NO_MOD9
+  wire          gap_bad = (g_sat < 4'd9);
+`else
+  // gaps < 9, or (Wilson 10-28) not 1 + 9n with n >= 1
+  wire          gap_bad = (g_sat < 4'd9) | (g_sat < 4'd10) | (g_m9 != 4'd1);
+`endif
+  integer i;
+  always @(posedge clk or negedge rst_n) begin
+    if (!rst_n) begin
+      for (i = 0; i < 8; i = i + 1) cnt[i] <= {NW{1'b0}};
+      has_c <= 1'b0; last_l <= 1'b0; last_t <= {TW{1'b0}};
+      nlv0 <= {NW{1'b0}}; nlv1 <= {NW{1'b0}}; near0 <= {NW{1'b0}}; near1 <= {NW{1'b0}};
+      pcnt <= {NW{1'b0}};
+      in0 <= {NW{1'b0}}; in1 <= {NW{1'b0}}; nd <= {NW{1'b0}}; nc <= {NW{1'b0}};
+      idle_ok <= 1'b1; frame_ok <= 1'b1; all_high <= 1'b1;
+      pend_i <= 1'b0; pend_f <= 1'b0; pend_x <= {TW{1'b0}};
+      ev_any <= 1'b0; ev_prev_start <= 1'b0; sig_bad <= 1'b0; starts <= 2'd0;
+      g_sat <= 4'd0; g_m9 <= 4'd0;
+    end else if (walk_go) begin
+      has_c <= 1'b0;
+      if (wk == W_CNT) for (i = 0; i < 8; i = i + 1) cnt[i] <= {NW{1'b0}};
+      if (wk == W_LVL) begin nlv0 <= {NW{1'b0}}; nlv1 <= {NW{1'b0}}; end
+      if (wk == W_NEAR) begin near0 <= {NW{1'b0}}; near1 <= {NW{1'b0}}; end
+      pcnt <= {NW{1'b0}};
+      in0 <= {NW{1'b0}}; in1 <= {NW{1'b0}}; nd <= {NW{1'b0}}; nc <= {NW{1'b0}};
+      idle_ok <= 1'b1; frame_ok <= 1'b1; all_high <= 1'b1; pend_i <= 1'b0; pend_f <= 1'b0;
+      ev_any <= 1'b0; ev_prev_start <= 1'b0; sig_bad <= 1'b0; starts <= 2'd0;
+      g_sat <= 4'd0; g_m9 <= 4'd0;
+    end else if (rec_v) begin
+      if (wk == W_CNT)
+        for (i = 0; i < 8; i = i + 1) if (rm[i]) cnt[i] <= cnt[i] + ONE;
+      // ---- the c wire's own intervals: LVL / PROBE / NEAR ----
+      if (ce) begin
+        if (has_c) begin
+          if (wk == W_LVL) begin
+            if (last_l) nlv1 <= nlv1 + ONE; else nlv0 <= nlv0 + ONE;
+          end
+          if (wk == W_PROBE && (psel == 2'd2 || psel[0] == last_l) && civ < m_cand)
+            pcnt <= pcnt + ONE;
+          if (wk == W_NEAR && ({dlt, 3'b000} <= {3'b000, med_l})) begin
+            if (last_l) near1 <= near1 + ONE; else near0 <= near0 + ONE;
+          end
+        end
+        has_c <= 1'b1; last_t <= t; last_l <= cl;
+      end
+      // ---- the pair (c, d): bracket, in_idle_gaps, FRAME pass, I2C, all_high ----
+      if (wk == W_PAIR) begin
+        if (ce) begin
+          nc <= nc + ONE;
+          // in_idle_gaps: d edges with a c edge before them (k > 0), closing on
+          // this c edge (ce[k], possibly in the same record): its gap vs 2 half
+          if (has_c && (pend_i || de) && ({2'b00, civ} <= two_h)) idle_ok <= 1'b0;
+          // FRAME pass, the right neighbour: this c edge vs the latest d edge
+          if (pend_f && ({2'b00, t - pend_x} <= four_h)) frame_ok <= 1'b0;
+          if (de) frame_ok <= 1'b0;            // a c edge AT the d edge: distance 0
+          pend_i <= 1'b0; pend_f <= 1'b0;
+        end
+        if (de) begin
+          nd <= nd + ONE;
+          if (cl) in1 <= in1 + ONE; else in0 <= in0 + ONE;
+          if (!cl) all_high <= 1'b0;
+          if (!ce) begin
+            pend_i <= has_c; pend_f <= 1'b1; pend_x <= t;
+            // FRAME pass, the left neighbour: the c edge before it (ce[k-1])
+            if (has_c && ({2'b00, civ} <= four_h)) frame_ok <= 1'b0;
+          end
+        end
+        // the I2C signature (c = SCL, d = SDA). A fall (c low after) and an
+        // event (c high after) cannot share a record, so the order is moot.
+        if (ce && !cl) begin
+          g_sat <= (g_sat == 4'd10) ? 4'd10 : g_sat + 4'd1;
+          g_m9  <= (g_m9 == 4'd8) ? 4'd0 : g_m9 + 4'd1;
+        end
+        if (de && cl) begin
+          if (ev_any && ev_prev_start && gap_bad) sig_bad <= 1'b1;
+          if (ev_any && !ev_prev_start && dl) sig_bad <= 1'b1;   // STOP after STOP
+          ev_any <= 1'b1; ev_prev_start <= ~dl;
+          if (!dl && starts != 2'd3) starts <= starts + 2'd1;
+          g_sat <= 4'd0; g_m9 <= 4'd0;
+        end
+      end
+    end
+  end
+
+  // ===========================================================================
+  // THE ROLE TABLE + the insertion order the AMBIGUOUS pass walks
+  // ===========================================================================
+  reg  [2:0] role [0:7];
+  reg  [2:0] part [0:7];
+  reg        clvl [0:7];
+  reg  [2:0] rank [0:7];
+  reg  [3:0] nrank;
+  wire [7:0] act;
+  genvar ga;
+  generate
+    for (ga = 0; ga < 8; ga = ga + 1) begin : g_act
+      assign act[ga] = (cnt[ga] >= {{(NW-2){1'b0}}, 2'd2});
+    end
+  endgenerate
+  wire          c_none  = (role[wc] == R_NONE);
+  wire          c_clock = (role[wc] == R_CLOCK) | (role[wc] == R_CLOCK_I2C);
+  // stage0's bracket test and its I2C branch, on the folded pair
+  wire [NW-1:0] best = (in0 >= in1) ? in0 : in1;
+  wire          blvl = ~(in0 >= in1);
+  reg           regular;
+  wire          brk  = regular && (nd >= 9'd4) && ({best, 3'b000} >= ({nd, 3'b000} - {3'b000, nd}))
+                       && ({nd, 4'b0000} <= ({1'b0, nc, 3'b000} + {4'b0000, nc}));
+  wire          sig_ok = !sig_bad && (starts >= 2'd2);
+  wire          i2c  = sig_ok && (in0 >= 9'd4) && ({in0, 4'b0000} <= ({1'b0, nc, 3'b000} + {4'b0000, nc}));
+  reg           sync_of_c;              // a SYNC_DATA of clock c exists (the tie-break)
+  reg           ar_hit;
+  reg  [2:0]    ar_w;                   // the wire with insertion rank `ar`
+  reg  [3:0]    ar;
+  reg           refused;
+  reg  [2:0]    refuse_w;
+  reg  [55:0]   tword;
+  integer       j;
+  always @(*) begin
+    sync_of_c = 1'b0; ar_hit = 1'b0; ar_w = 3'd0; tword = 56'd0;
+    for (j = 0; j < 8; j = j + 1) begin
+      if ((role[j] == R_SYNC || role[j] == R_SYNC_I2C) && part[j] == wc) sync_of_c = 1'b1;
+      if (role[j] != R_NONE && {1'b0, rank[j]} == ar && !ar_hit) begin ar_hit = 1'b1; ar_w = j[2:0]; end
+      tword = tword | ({49'd0, (refused ? {1'b0, refuse_w, R_REFUSED} : {clvl[j], part[j], role[j]})} << (7 * j));
+    end
+  end
+
+  // ===========================================================================
+  // THE SEQUENCER: stage0's phases, in its order.
+  // ===========================================================================
+  localparam [4:0] P_IDLE  = 5'd0,  P_CNEXT = 5'd1,  P_CLVL  = 5'd2,  P_CMED0 = 5'd3,
+                   P_CMED1 = 5'd4,  P_CNEAR = 5'd5,  P_CHALF = 5'd6,  P_DNEXT = 5'd7,
+                   P_DASGN = 5'd8,  P_FCNEXT = 5'd9, P_FHALF = 5'd10, P_FENEXT = 5'd11,
+                   P_FASGN = 5'd12, P_ARANK = 5'd13, P_AASGN = 5'd14, P_RNEXT = 5'd15,
+                   P_RMED  = 5'd16, P_WRITE = 5'd17, P_DONE = 5'd18,
+                   P_MSTART = 5'd19, P_MSTEP = 5'd20, P_WAIT = 5'd21;
+  reg  [4:0] ph, m_ret, w_ret;          // the median and a walk return to these
+  reg  [3:0] ci, di;
+  reg  [2:0] wbyte;
+`ifdef M_S0_MED_OFF1
+  wire [NW-1:0] m_keff = m_k + ONE;     // the must-fire: every median one index high
+`else
+  wire [NW-1:0] m_keff = m_k;
+`endif
+  always @(posedge clk or negedge rst_n) begin
+    if (!rst_n) begin
+      ph <= P_IDLE; m_ret <= P_IDLE; w_ret <= P_IDLE; walk_go <= 1'b0; wk <= W_CNT;
+      wc <= 3'd0; wd <= 3'd0; psel <= 2'd0; regular <= 1'b0; ci <= 4'd0; di <= 4'd0; ar <= 4'd0;
+      refuse_w <= 3'd0; refused <= 1'b0; wbyte <= 3'd0; done <= 1'b0;
+      med0 <= {TW{1'b0}}; med1 <= {TW{1'b0}}; half <= {TW{1'b0}};
+      m_ans <= {TW{1'b0}}; m_bit <= 5'd0; m_k <= {NW{1'b0}};
+      we <= 1'b0; waddr <= {AW{1'b0}}; wdata <= 8'h00; nrank <= 4'd0;
+      for (i = 0; i < 8; i = i + 1) begin role[i] <= R_NONE; part[i] <= 3'd0; clvl[i] <= 1'b0; rank[i] <= 3'd0; end
+    end else if (!run) begin
+      ph <= P_IDLE; walk_go <= 1'b0; we <= 1'b0; done <= 1'b0; refused <= 1'b0; nrank <= 4'd0;
+      for (i = 0; i < 8; i = i + 1) begin role[i] <= R_NONE; part[i] <= 3'd0; clvl[i] <= 1'b0; rank[i] <= 3'd0; end
+    end else begin
+      walk_go <= 1'b0;
+      we <= 1'b0;
+      case (ph)
+        P_IDLE: if (start && !done) begin
+                  wk <= W_CNT; walk_go <= 1'b1; ph <= P_WAIT; w_ret <= P_CNEXT; ci <= 4'd0;
+                end
+        // a walk is running: wait for its last record
+        P_WAIT: if (walk_done) ph <= w_ret;
+        // ---- the exact median (k = m_k): one probe walk per bit ----
+        P_MSTART: begin wk <= W_PROBE; walk_go <= 1'b1; ph <= P_WAIT; w_ret <= P_MSTEP; end
+        P_MSTEP: begin
+                   if (pcnt <= m_keff) m_ans <= m_cand;    // fewer than k + 1 below: the bit is set
+                   if (m_bit == 5'd0) ph <= m_ret;
+                   else begin m_bit <= m_bit - 5'd1; ph <= P_MSTART; end
+                 end
+        // ---- the pair loop: c ascending ----
+        P_CNEXT: if (ci == 4'd8) begin ph <= P_FCNEXT; ci <= 4'd0; end
+                 else if (act[ci[2:0]] && cnt[ci[2:0]] >= MIN_CLOCK_EDGES
+                          && (role[ci[2:0]] == R_NONE || role[ci[2:0]] == R_CLOCK || role[ci[2:0]] == R_CLOCK_I2C)) begin
+                   wc <= ci[2:0]; wk <= W_LVL; walk_go <= 1'b1; ph <= P_WAIT; w_ret <= P_CLVL;
+                 end else ci <= ci + 4'd1;
+        // clock_like: each level needs >= 4 intervals, then its median and near count
+        P_CLVL: if (nlv0 < 9'd4 || nlv1 < 9'd4) begin regular <= 1'b0; ph <= P_CHALF; end
+                else begin
+                  psel <= 2'd0; m_k <= nlv0 >> 1; m_ans <= {TW{1'b0}}; m_bit <= 5'd24;
+                  ph <= P_MSTART; m_ret <= P_CMED0;
+                end
+        P_CMED0: begin
+                   med0 <= m_ans;
+                   psel <= 2'd1; m_k <= nlv1 >> 1; m_ans <= {TW{1'b0}}; m_bit <= 5'd24;
+                   ph <= P_MSTART; m_ret <= P_CMED1;
+                 end
+        P_CMED1: begin med1 <= m_ans; wk <= W_NEAR; walk_go <= 1'b1; ph <= P_WAIT; w_ret <= P_CNEAR; end
+        P_CNEAR: begin
+                   regular <= ({near0, 2'b00} >= ({nlv0, 1'b0} + {1'b0, nlv0}))
+                            && ({near1, 2'b00} >= ({nlv1, 1'b0} + {1'b0, nlv1}));
+                   ph <= P_CHALF;
+                 end
+        // half = sorted(every c interval)[len(ce) // 2]
+        P_CHALF: begin
+                   psel <= 2'd2; m_k <= cnt[wc] >> 1; m_ans <= {TW{1'b0}}; m_bit <= 5'd24;
+                   ph <= P_MSTART; m_ret <= P_DNEXT; di <= 4'd0;
+                 end
+        P_DNEXT: begin
+                   if (m_ret == P_DNEXT) begin half <= m_ans; m_ret <= P_IDLE; end
+                   if (di == 4'd8) begin ci <= ci + 4'd1; ph <= P_CNEXT; end
+                   else begin
+`ifdef M_S0_PAIR_ORDER
+                     wd <= 3'd7 - di[2:0];            // the must-fire: d descending
+`else
+                     wd <= di[2:0];
+`endif
+                     ph <= P_DASGN; w_ret <= P_IDLE;
+                   end
+                 end
+        P_DASGN: begin
+                   // stage0's skip: d == c, d inactive, c holding a non-CLOCK role, d holding any
+                   if (w_ret == P_IDLE) begin
+                     if (wd == wc || !act[wd] || (!c_none && !c_clock) || role[wd] != R_NONE) begin
+                       di <= di + 4'd1; ph <= P_DNEXT;
+                     end else begin
+                       wk <= W_PAIR; walk_go <= 1'b1; ph <= P_WAIT; w_ret <= P_DASGN;
+                     end
+                   end else begin
+                     w_ret <= P_IDLE;
+                     if (brk || i2c) begin
+                       // insertion order: c (setdefault) first, then d
+                       if (c_none) begin rank[wc] <= nrank[2:0]; rank[wd] <= nrank[2:0] + 3'd1; nrank <= nrank + 4'd2; end
+                       else begin rank[wd] <= nrank[2:0]; nrank <= nrank + 4'd1; end
+                       part[wd] <= wc;
+                       if (brk) begin
+                         if (c_none) role[wc] <= R_CLOCK;
+                         if (idle_ok) begin role[wd] <= R_FRAME; clvl[wd] <= 1'b0; end
+                         else begin role[wd] <= R_SYNC; clvl[wd] <= blvl; end
+                       end else begin   // the I2C branch: c's bus becomes I2C
+                         role[wc] <= R_CLOCK_I2C;
+                         role[wd] <= R_SYNC_I2C; clvl[wd] <= 1'b0;
+                       end
+                     end
+                     di <= di + 4'd1; ph <= P_DNEXT;
+                   end
+                 end
+        // ---- the FRAME pass: clocks ascending, role-less active e ascending ----
+        P_FCNEXT: if (ci == 4'd8) begin ph <= P_ARANK; ar <= 4'd0; end
+                  else if (role[ci[2:0]] == R_CLOCK || role[ci[2:0]] == R_CLOCK_I2C) begin
+                    wc <= ci[2:0]; psel <= 2'd2; m_k <= cnt[ci[2:0]] >> 1; m_ans <= {TW{1'b0}};
+                    m_bit <= 5'd24; ph <= P_MSTART; m_ret <= P_FHALF;
+                  end else ci <= ci + 4'd1;
+        P_FHALF: begin half <= m_ans; di <= 4'd0; ph <= P_FENEXT; end
+        P_FENEXT: if (di == 4'd8) begin ci <= ci + 4'd1; ph <= P_FCNEXT; end
+                  else if (!act[di[2:0]] || role[di[2:0]] != R_NONE) di <= di + 4'd1;
+                  else begin wd <= di[2:0]; wk <= W_PAIR; walk_go <= 1'b1; ph <= P_WAIT; w_ret <= P_FASGN; end
+        P_FASGN: begin
+                   if (frame_ok) begin
+                     role[wd] <= R_FRAME; part[wd] <= wc; clvl[wd] <= 1'b0;
+                     rank[wd] <= nrank[2:0]; nrank <= nrank + 4'd1;
+                   end
+                   di <= di + 4'd1; ph <= P_FENEXT;
+                 end
+        // ---- the AMBIGUOUS rule: FRAME wires in insertion order ----
+        P_ARANK:
+`ifdef M_S0_NO_AMBIG
+                 begin ph <= P_RNEXT; ci <= 4'd0; end
+`else
+                 if (ar == 4'd8) begin ph <= P_RNEXT; ci <= 4'd0; end
+                 else if (!ar_hit || role[ar_w] != R_FRAME) ar <= ar + 4'd1;
+                 else begin wd <= ar_w; wc <= part[ar_w]; ph <= P_AASGN; w_ret <= P_IDLE; end
+`endif
+        P_AASGN: begin
+                   if (w_ret == P_IDLE) begin
+                     // the tie-break reads the CURRENT table, as stage0's roles.values()
+                     if (sync_of_c) begin ar <= ar + 4'd1; ph <= P_ARANK; end
+                     else begin wk <= W_PAIR; walk_go <= 1'b1; ph <= P_WAIT; w_ret <= P_AASGN; end
+                   end else begin
+                     w_ret <= P_IDLE;
+                     if (all_high && sig_ok) begin
+                       role[wc] <= R_AMBIG; part[wc] <= wd; clvl[wc] <= 1'b0;
+                       role[wd] <= R_AMBIG; part[wd] <= wc; clvl[wd] <= 1'b0;
+                     end
+                     ar <= ar + 4'd1; ph <= P_ARANK;
+                   end
+                 end
+        // ---- the rate floor: role-less active wires, ascending ----
+        P_RNEXT: if (ci == 4'd8) begin ph <= P_WRITE; wbyte <= 3'd0; end
+                 else if (!act[ci[2:0]] || role[ci[2:0]] != R_NONE) ci <= ci + 4'd1;
+                 else begin   // sorted(intervals)[(len(ee) - 1) // 2] < 8: the bus is refused
+                   wc <= ci[2:0]; psel <= 2'd2; m_k <= (cnt[ci[2:0]] - ONE) >> 1;
+                   m_ans <= {TW{1'b0}}; m_bit <= 5'd24; ph <= P_MSTART; m_ret <= P_RMED;
+                 end
+        P_RMED: begin
+`ifdef M_S0_NO_FLOOR
+                  if (1'b0) begin
+`else
+                  if (m_ans < RATE_FLOOR) begin
+`endif
+                    refused <= 1'b1; refuse_w <= ci[2:0]; ph <= P_WRITE; wbyte <= 3'd0;
+                  end else begin ci <= ci + 4'd1; ph <= P_RNEXT; end
+                end
+        // ---- write the table, bytes 32..38 ----
+        P_WRITE: begin
+                   we <= 1'b1; waddr <= TABLE_AT + {{(AW-3){1'b0}}, wbyte};
+                   wdata <= tword[{wbyte, 3'b000} +: 8];
+                   if (wbyte == 3'd6) ph <= P_DONE; else wbyte <= wbyte + 3'd1;
+                 end
+        P_DONE: done <= 1'b1;
+        default: ph <= P_IDLE;
+      endcase
+    end
+  end
+endmodule
+
 // pe_dup_ff -- ONE resettable flop that synthesis may NOT merge with its twins
 // (step 1b, 10-27). (* keep_hierarchy *) keeps each instance a module through
 // `flatten`, so yosys's opt_merge cannot fold identical copies back into one
@@ -1120,7 +1600,11 @@ module pe_pit #(parameter integer AW = 9) (
     output reg           we,
     output reg  [AW-1:0] waddr,
     output reg  [7:0]    wdata,
-    output reg           stopped
+    output reg           stopped,
+    // stage 0's inputs (chunk 2): the capture is done, its whole count, its start levels
+    output wire          cap_done,
+    output wire [13:0]   cap_n,
+    output reg  [7:0]    cap_lv0
 );
   localparam integer CAP_BASE = 128, CAP_BITS = 384 * 8;
   localparam integer SLV_AT = 39;   // the starting-levels byte (results 32-39)
@@ -1185,6 +1669,8 @@ module pe_pit #(parameter integer AW = 9) (
   wire [63:0] v_rec = rawr ? v_raw : esc ? v_esc : v_gr;
   wire [6:0]  l_rec = rawr ? 7'd24 : esc ? 7'd40 : l_gr;
   wire [CW-1:0] n_whole = n - {{(CW-1){1'b0}}, (total[2:0] != 3'd0)};
+  assign      cap_done = st_done;
+  assign      cap_n    = n_whole[13:0];
   wire        kpre  = (n == 16'd16);                                // k precedes the first coded record
   wire [63:0] v_all = kpre ? (v_rec | ({60'd0, k} << l_rec)) : v_rec;
   wire [6:0]  l_all = kpre ? l_rec + 7'd4 : l_rec;
@@ -1218,7 +1704,7 @@ module pe_pit #(parameter integer AW = 9) (
       active <= 1'b0; prev <= 8'h00; tcnt <= 16'd0; n <= 16'd0; acc <= 64'd0;
       acc_n <= 7'd0; total <= 12'd0; sum <= 20'd0; k <= 4'd0; wr_idx <= 9'd0;
       st_phase <= 2'd0; st_done <= 1'b0; stopped <= 1'b0; why_ovr <= 1'b0;
-      why_bud <= 1'b0; bud_cnt <= {BW{1'b0}};
+      why_bud <= 1'b0; bud_cnt <= {BW{1'b0}}; cap_lv0 <= 8'h00;
       we <= 1'b0; waddr <= {AW{1'b0}}; wdata <= 8'h00;
     end else if (!run) begin
       active <= 1'b0;
@@ -1235,8 +1721,10 @@ module pe_pit #(parameter integer AW = 9) (
       we <= 1'b1; waddr <= SLV_AT[AW-1:0];
 `ifdef M_PIT_LV0_INV
       wdata <= (uio & m) ^ 8'h01;
+      cap_lv0 <= (uio & m) ^ 8'h01;
 `else
       wdata <= uio & m;
+      cap_lv0 <= uio & m;
 `endif
     end else begin
       prev <= uio;

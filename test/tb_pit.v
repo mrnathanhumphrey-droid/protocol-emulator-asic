@@ -20,7 +20,7 @@ module tb_pit;
   localparam integer PIN_PROG = 7, PIN_PTR = 5, PIN_WR = 6;
 
   reg  [7:0] img [0:IMG_MAX-1];
-  integer    img_bytes, i, ncyc, fd, sfd, pc = -1, a, n_st, st_cyc, st_val, r;
+  integer    img_bytes, i, ncyc, fd, sfd, pc = -1, a, n_st, st_cyc, st_val, r, s0wait;
   reg [8*256-1:0] imgfile, stimfile, outfile;
   reg [7:0]  prevq, mk;
   reg        done = 1'b0;
@@ -57,6 +57,8 @@ module tb_pit;
     if (!$value$plusargs("STIM=%s", stimfile)) begin $display("tb_pit: FATAL -- +STIM required"); $finish; end
     if (!$value$plusargs("OUT=%s", outfile)) begin $display("tb_pit: FATAL -- +OUT required"); $finish; end
     if (!$value$plusargs("NCYC=%d", ncyc)) ncyc = 200000;
+    // +S0WAIT=1: end as soon as stage 0 (chunk 2) has written its table
+    if (!$value$plusargs("S0WAIT=%d", s0wait)) s0wait = 0;
     $readmemh(imgfile, img);
     `PE_REQUIRE_IMG_LOADED(imgfile)
     fd = $fopen(outfile, "w");
@@ -89,7 +91,7 @@ module tb_pit;
       end
     end
     $fclose(sfd);
-    while (pc < ncyc) @(negedge clk);
+    while (pc < ncyc && !(s0wait != 0 && dut.u_s0.done === 1'b1)) @(negedge clk);
     done = 1'b1;
     // generate-block scopes need constant indices: one loop per bank
     for (a = 0; a < IMG_MAX / 4; a = a + 1) begin
@@ -99,6 +101,7 @@ module tb_pit;
       $fdisplay(fd, "M %0d %h", 4 * a + 3, dut.u_store.g_bank[3].mem[a]);
     end
     $fdisplay(fd, "X stopped=%0d", dut.pit_stopped);
+    $fdisplay(fd, "S s0done=%0d pc=%0d", dut.u_s0.done, pc);
     $fclose(fd);
     $display("tb_pit: %0d PIT cycles -> %0s", pc, outfile);
     $finish;
