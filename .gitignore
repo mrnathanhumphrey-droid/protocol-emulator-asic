@@ -133,3 +133,5 @@ test/pit_mask03_image.hex
 test/pit_spi0.stim
 test/pit_fast_overrun.stim
 test/pit_long_gap.stim
+test/pit_mask00_b12_image.hex
+test/pit_quiet_budget.stim

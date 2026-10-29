@@ -136,6 +136,9 @@ EXPECT = {
     "M_PIT_NO_OVERRUN":   (3, "`room` is a two-line expression; the mutant keeps only its full test"),
     "M_PIT_WHY_DROP":     (2, None),
     "M_PIT_NO_SAT":       (2, None),
+    # the budget stop and the starting levels (Wilson 10-29)
+    "M_PIT_NO_BUDGET":    (2, None),
+    "M_PIT_LV0_INV":      (2, None),
     # ruling CE1 / CE2: each new mode bit read as 0 -- the selector ignored
     "M_HALF_IGNORED":    (2, None),
     # 2 since option 1' (WF2): the XOR now lives in the one-line `run_out`,

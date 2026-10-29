@@ -36,6 +36,8 @@ a8d3b21b0506eea064f1293e6be6703f2ff40b4fb58490f100eaeb6bd32cbd77  pit_mask03_ima
 9493de74ff18367968e881e1ca38b3a8c7c073259c2024186fd410969557467e  pit_spi0.stim  # make_smoke_image.py --pit stim spi0
 11ae6a6086777e963e9f0c8991d3d483a777b8fef5721b72d67d9a9b1cb33b06  pit_fast_overrun.stim  # make_smoke_image.py --pit stim fast_overrun
 4ddf714af2b3a4f69fcd7b57978c77f91ed246684e94dd5cba94e9181b2e7a99  pit_long_gap.stim  # make_smoke_image.py --pit stim long_gap
+a07741753abe575d6b4e9382a7b3938b6d691e8e48b4a0cd49fcc7732878b988  pit_mask00_b12_image.hex  # make_smoke_image.py --pit image 00 12
+8bb5ecad3c60379f00d6459399944bfeb5e7eade6bfacfd841cae5ddacd7349f  pit_quiet_budget.stim  # make_smoke_image.py --pit stim quiet_budget
 22bb426ced5bfdb59a0ed466fce2d109f3ad956dd8b98047801fa0307c9dee3a  edge_image.hex  # make_smoke_image.py --edge 200 0 edge_image
 3382f5bc554060df80dbac428a3a56e33e6c4b800db9c7b4a4086f0a07f3a344  edge_image_noto.hex  # make_smoke_image.py --edge 0 0 edge_image_noto
 4001b62231792b152d8deae176592e7e9fb213dd1fe04decbbcc16ffc4247c38  edge_image_rise.hex  # make_smoke_image.py --edge 0 1 edge_image_rise

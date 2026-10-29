@@ -276,7 +276,11 @@ CONFIG = {
                  # the idle bus (Nate / Wilson 10-28): the interval saturates
                  ("longgap", ["+IMG=test/pit_mask00_image.hex", "+NBYTES=512",
                               "+STIM=test/pit_long_gap.stim",
-                              "+OUT=probe_cov_pit_longgap.out", "+NCYC=175000"])],
+                              "+OUT=probe_cov_pit_longgap.out", "+NCYC=175000"]),
+                 # the BUDGET stop (Wilson 10-29): a quiet bus ends on 2^12 cycles
+                 ("budget", ["+IMG=test/pit_mask00_b12_image.hex", "+NBYTES=512",
+                             "+STIM=test/pit_quiet_budget.stim",
+                             "+OUT=probe_cov_pit_budget.out", "+NCYC=8000"])],
     },
     "tb_edge": {
         "srcs": [],

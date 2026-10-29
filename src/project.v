@@ -379,6 +379,7 @@ module tt_um_protocol_emulator #(
   localparam [7:0] SNIFF_HI = 8'h53, SNIFF_LO = 8'h4E;
   reg sniff_hi, sniff_lo;
   reg [7:0] pit_mask;
+  reg [7:0] pit_bud;     // SNIFF image byte 1: the capture budget, 2^b cycles (0 = off)
   always @(posedge clk or negedge rst_n_s) begin
     if (!rst_n_s) begin
       magic_hi <= 1'b0;
@@ -386,12 +387,14 @@ module tt_um_protocol_emulator #(
       sniff_hi <= 1'b0;
       sniff_lo <= 1'b0;
       pit_mask <= 8'h00;
+      pit_bud  <= 8'h00;
     end else if (prog_mode & wr_rise) begin
       if (ptr == MAGIC_A0) magic_hi <= (uio_q1 == MAGIC_HI);
       if (ptr == MAGIC_A1) magic_lo <= (uio_q1 == MAGIC_LO);
       if (ptr == MAGIC_A0) sniff_hi <= (uio_q1 == SNIFF_HI);
       if (ptr == MAGIC_A1) sniff_lo <= (uio_q1 == SNIFF_LO);
       if (ptr == {AW{1'b0}}) pit_mask <= uio_q1;
+      if (ptr == {{(AW-1){1'b0}}, 1'b1}) pit_bud <= uio_q1;
     end
   end
   wire sniff = sniff_hi & sniff_lo;
@@ -507,7 +510,7 @@ module tt_um_protocol_emulator #(
   wire [7:0]     pit_wdata;
   wire           pit_stopped;
   pe_pit #(.AW(AW)) u_pit (
-      .clk(clk), .rst_n(rst_n_s), .run(pit_run), .uio(uio_q1), .mask_cfg(pit_mask),
+      .clk(clk), .rst_n(rst_n_s), .run(pit_run), .uio(uio_q1), .mask_cfg(pit_mask), .bud_cfg(pit_bud),
       .we(pit_we), .waddr(pit_waddr), .wdata(pit_wdata), .stopped(pit_stopped));
   pe_store #(.AW(AW), .MEM_TYPE(MEM_TYPE), .WIDE_B(ACT_BYTES_T)) u_store (
       .clk(clk), .rst_n(rst_n_s),
@@ -1113,17 +1116,37 @@ module pe_pit #(parameter integer AW = 9) (
     input  wire          run,          // SNIFF mode, running
     input  wire [7:0]    uio,          // the synchronised uio bus
     input  wire [7:0]    mask_cfg,     // store byte 0 (0 = all 8 wires)
+    input  wire [7:0]    bud_cfg,      // store byte 1: budget 2^b cycles (0 = off)
     output reg           we,
     output reg  [AW-1:0] waddr,
     output reg  [7:0]    wdata,
     output reg           stopped
 );
   localparam integer CAP_BASE = 128, CAP_BITS = 384 * 8;
+  localparam integer SLV_AT = 39;   // the starting-levels byte (results 32-39)
   // named widths: the interval / record counters (16 bits) and the k-choice
   // product (24) -- no bare protocol-looking literal in the RTL
   localparam integer CW = 16, MW = 24;
   // the capture limit as an UNSIGNED 17-bit value, the width `total + l_all` has
   localparam [16:0] CAP_LIM = CAP_BITS;
+  // ⭐ THE BUDGET STOP (Wilson 10-29): "listened for as long as asked" -- a
+  // NORMAL completion, not PARTIAL. b = image byte 1: 0 = off (every older
+  // SNIFF image), 1 .. BMAX = 2^b cycles (b = 6 ~ 1 us .. 35 ~ 9.5 min at
+  // 60 MHz), larger b clamps. A DOWN-counter loaded with 2^b - 1 at the PIT's
+  // cycle 0 expires exactly at cycle 2^b -- no 36-bit variable shift (the
+  // barrel-shifter lesson of chunk 1's area). An edge AT cycle 2^b is not
+  // recorded: the budget is checked first.
+  localparam integer BW = 36, BMAX = BW - 1;
+  localparam [7:0] BMAX8 = BMAX;   // unsigned, the width bud_cfg has
+  wire [5:0]    bsel   = (bud_cfg > BMAX8) ? BMAX8[5:0] : bud_cfg[5:0];
+  wire          bud_en = (bud_cfg != 8'h00);
+  reg  [BW-1:0] bud_cnt;
+  reg           why_bud;
+`ifdef M_PIT_NO_BUDGET
+  wire          bud_hit = 1'b0;
+`else
+  wire          bud_hit = bud_en & (bud_cnt == {BW{1'b0}});
+`endif
   wire [7:0] m = (mask_cfg == 8'h00) ? 8'hFF : mask_cfg;
   reg        active;
   reg [7:0]  prev;
@@ -1161,6 +1184,7 @@ module pe_pit #(parameter integer AW = 9) (
   wire [6:0]  l_gr  = {2'b0, q[4:0]} + 7'd1 + {2'b0, ke} + 7'd8;
   wire [63:0] v_rec = rawr ? v_raw : esc ? v_esc : v_gr;
   wire [6:0]  l_rec = rawr ? 7'd24 : esc ? 7'd40 : l_gr;
+  wire [CW-1:0] n_whole = n - {{(CW-1){1'b0}}, (total[2:0] != 3'd0)};
   wire        kpre  = (n == 16'd16);                                // k precedes the first coded record
   wire [63:0] v_all = kpre ? (v_rec | ({60'd0, k} << l_rec)) : v_rec;
   wire [6:0]  l_all = kpre ? l_rec + 7'd4 : l_rec;
@@ -1194,6 +1218,7 @@ module pe_pit #(parameter integer AW = 9) (
       active <= 1'b0; prev <= 8'h00; tcnt <= 16'd0; n <= 16'd0; acc <= 64'd0;
       acc_n <= 7'd0; total <= 12'd0; sum <= 20'd0; k <= 4'd0; wr_idx <= 9'd0;
       st_phase <= 2'd0; st_done <= 1'b0; stopped <= 1'b0; why_ovr <= 1'b0;
+      why_bud <= 1'b0; bud_cnt <= {BW{1'b0}};
       we <= 1'b0; waddr <= {AW{1'b0}}; wdata <= 8'h00;
     end else if (!run) begin
       active <= 1'b0;
@@ -1202,10 +1227,25 @@ module pe_pit #(parameter integer AW = 9) (
       // the PIT's cycle 0: take the levels, start the interval
       active <= 1'b1; prev <= uio; tcnt <= 16'd1; n <= 16'd0; acc <= 64'd0;
       acc_n <= 7'd0; total <= 12'd0; sum <= 20'd0; k <= 4'd0; wr_idx <= 9'd0;
-      st_phase <= 2'd0; st_done <= 1'b0; stopped <= 1'b0; why_ovr <= 1'b0; we <= 1'b0;
+      st_phase <= 2'd0; st_done <= 1'b0; stopped <= 1'b0; why_ovr <= 1'b0;
+      why_bud <= 1'b0;
+      bud_cnt <= ({{(BW-1){1'b0}}, 1'b1} << bsel) - {{(BW-1){1'b0}}, 1'b1};
+      // ⭐ THE STARTING LEVELS (Wilson 10-29): stage 0 reads ABSOLUTE levels,
+      // and the records carry only changes -- byte 39 = uio & mask here.
+      we <= 1'b1; waddr <= SLV_AT[AW-1:0];
+`ifdef M_PIT_LV0_INV
+      wdata <= (uio & m) ^ 8'h01;
+`else
+      wdata <= uio & m;
+`endif
     end else begin
       prev <= uio;
       we <= 1'b0;
+      if (bud_cnt != {BW{1'b0}}) bud_cnt <= bud_cnt - {{(BW-1){1'b0}}, 1'b1};
+      if (bud_hit && !stopped) begin
+        stopped <= 1'b1;
+        why_bud <= 1'b1;
+      end
       if (drain) begin
         we    <= 1'b1;
         waddr <= CAP_BASE[AW-1:0] + wr_idx;
@@ -1219,7 +1259,7 @@ module pe_pit #(parameter integer AW = 9) (
 `else
       tcnt  <= (tcnt == 16'hFFFF) ? tcnt : tcnt + 16'd1;   // an idle bus saturates
 `endif
-      if (chg != 8'h00 && !stopped) begin
+      if (chg != 8'h00 && !stopped && !bud_hit) begin
         if (room) begin
           acc   <= acc_d | (v_all << (7'd64 - acc_n_d - l_all));
           acc_n <= acc_n_d + l_all;
@@ -1233,14 +1273,18 @@ module pe_pit #(parameter integer AW = 9) (
           why_ovr <= ovr;
         end
       end
-      // the status, once stopped and drained: byte 2 bit 7 = truncated (every
-      // result is PARTIAL), byte 28 bit 7 = the stop reason, {28[6:0], 29} = count
+      // the status, once stopped and drained (every stop, budget included):
+      // byte 2 bit 7 = TRUNCATED (FULL / OVERRUN: every result PARTIAL; a
+      // budget stop is a normal completion), byte 28 bit 7 = overrun, bit 6 =
+      // budget, {28[5:0], 29} = WHOLE records -- the last record is cut when
+      // the bit total is not byte-aligned (every record is >= 9 bits, so at
+      // most one), and the count excludes it (Wilson 10-29).
       if (stopped && !drain && !st_done) begin
         we <= 1'b1;
         case (st_phase)
-          2'd0: begin waddr <= 9'd2;  wdata <= 8'h80; end
-          2'd1: begin waddr <= 9'd28; wdata <= {why_ovr, n[14:8]}; end
-          default: begin waddr <= 9'd29; wdata <= n[7:0]; st_done <= 1'b1; end
+          2'd0: begin waddr <= 9'd2;  wdata <= why_bud ? 8'h00 : 8'h80; end
+          2'd1: begin waddr <= 9'd28; wdata <= {why_ovr, why_bud, n_whole[13:8]}; end
+          default: begin waddr <= 9'd29; wdata <= n_whole[7:0]; st_done <= 1'b1; end
         endcase
         st_phase <= st_phase + 2'd1;
       end

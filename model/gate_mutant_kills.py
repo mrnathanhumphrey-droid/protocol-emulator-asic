@@ -67,6 +67,7 @@ KILLERS = {
     "M_PIT_K_OFF1": "test/run_pit_capture.py", "M_PIT_MASK_DROP": "test/run_pit_capture.py",
     "M_PIT_NO_OVERRUN": "test/run_pit_capture.py", "M_PIT_WHY_DROP": "test/run_pit_capture.py",
     "M_PIT_NO_SAT": "test/run_pit_capture.py",
+    "M_PIT_NO_BUDGET": "test/run_pit_capture.py", "M_PIT_LV0_INV": "test/run_pit_capture.py",
     # CE1: the rebase at the observed rise (an `elsif` arm, undiscovered
     # until 10-27) -- killed on t_HIGH >= d by the UM10204 gate
     "M_CK_RISE_ELIGIBLE": "model/a2/gate_um10204.py",

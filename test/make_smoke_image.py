@@ -1372,6 +1372,11 @@ def main() -> int:
              "pit_fast_overrun.stim"),
             (['--pit', 'stim', 'long_gap'], "PIT stimulus: an idle line, two gaps past 0xFFFF (saturates)",
              "pit_long_gap.stim"),
+            # Wilson 10-29: the budget stop -- a quiet bus that must END on 2^12 cycles
+            (["--pit", "image", "00", "12"], "PIT SNIFF image, mask 0x00, budget 2^12 cycles",
+             "pit_mask00_b12_image.hex"),
+            (["--pit", "stim", "quiet_budget"], "PIT stimulus: a quiet bus (three edges, then nothing)",
+             "pit_quiet_budget.stim"),
             (["--edge", "200", "0", "edge_image"], "timeout 200, FALL", "edge_image.hex"),
             (["--edge", "0", "0", "edge_image_noto"], "no timeout, FALL", "edge_image_noto.hex"),
             (["--edge", "0", "1", "edge_image_rise"], "no timeout, RISE", "edge_image_rise.hex"),
@@ -1797,8 +1802,10 @@ def main() -> int:
         what, arg = sys.argv[k + 1], sys.argv[k + 2]
         import run_pit_capture as RP
         if what == "image":
-            out = os.path.join(here, "pit_mask%s_image.hex" % arg)
-            write_image(out, RP.sniff_image(int(arg, 16)))
+            # --pit image <mask> [b]: b = the budget exponent (image byte 1)
+            b = int(sys.argv[k + 3]) if len(sys.argv) > k + 3 and sys.argv[k + 3].isdigit() else 0
+            out = os.path.join(here, "pit_mask%s%s_image.hex" % (arg, "_b%d" % b if b else ""))
+            write_image(out, RP.sniff_image(int(arg, 16), b))
         elif what == "stim":
             waves = {n: w for n, w, _m in RP.CASES}[arg]
             out = os.path.join(here, "pit_%s.stim" % arg)

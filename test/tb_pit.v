@@ -40,6 +40,8 @@ module tb_pit;
       if (pc < 0) begin
         pc = 0;
         prevq = dut.uio_q1;
+        // the starting levels the capture must write to byte 39 (Wilson 10-29)
+        $fdisplay(fd, "L %h", dut.uio_q1 & mk);
       end else begin
         pc = pc + 1;
         if (((dut.uio_q1 ^ prevq) & mk) != 8'h00)

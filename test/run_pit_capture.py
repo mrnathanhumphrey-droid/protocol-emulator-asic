@@ -42,13 +42,17 @@ NCYC = 60000
 MUTANTS = [("M_PIT_K_OFF1", "k one too large"), ("M_PIT_MASK_DROP", "mask bit 0 never recorded"),
            ("M_PIT_NO_OVERRUN", "no stop on an accumulator overrun"),
            ("M_PIT_WHY_DROP", "the stop reason always reads FULL"),
-           ("M_PIT_NO_SAT", "the interval wraps instead of saturating")]
+           ("M_PIT_NO_SAT", "the interval wraps instead of saturating"),
+           # Wilson 10-29: a quiet bus must END on its budget (disabled -> the hang)
+           ("M_PIT_NO_BUDGET", "the budget never expires (the hang)"),
+           ("M_PIT_LV0_INV", "one wire's starting level inverted")]
 RNG = random.Random(20261028)
 
 
-def sniff_image(mask):
+def sniff_image(mask, b=0):
     img = bytearray(I.STORE_BYTES)
     img[0] = mask
+    img[1] = b                             # the budget: 2^b cycles, 0 = off
     img[30], img[31] = 0x53, 0x4E          # the SNIFF magic 'S' 'N'
     return bytes(img)
 
@@ -142,9 +146,16 @@ def long_gap():
 
 CASES = [("spi0", spi(0), 0x00), ("spi3", spi(3), 0x00), ("spi0_mask03", spi(0), 0x03),
          ("i2c", i2c(), 0x00), ("uarts_2to1", uarts(), 0x00), ("fast_overrun", fast(), 0x00),
-         ("long_gap", long_gap(), 0x00)]
+         ("long_gap", long_gap(), 0x00),
+         # Wilson 10-29: the BUDGET stop. A QUIET bus (three edges, then nothing)
+         # must still end -- on its budget, 2^12 cycles -- and write its status;
+         # a busy line must stop mid-stream at 2^13, its later edges unrecorded.
+         ("quiet_budget", {3: [(1, 300), (0, 40), (1, 40), (0, 40)]}, 0x00),
+         ("budget_mid", {2: [((k & 1), 50) for k in range(1200)]}, 0x00)]
 #: per-case PIT cycles where a case outlasts NCYC (the long gaps: 160k + bursts)
 NCYC_FOR = {"long_gap": 175000}
+#: per-case budget exponent (SNIFF image byte 1); every other case runs with it off
+BUDGET_FOR = {"quiet_budget": 12, "budget_mid": 13}
 
 
 def run(cmd):
@@ -170,26 +181,31 @@ def sim(vvp, tmp, name, img, stim):
     r = run(sim_run.vvp([vvp, "+IMG=%s" % ip, "+NBYTES=%d" % I.STORE_BYTES, "+STIM=%s" % sp,
                          "+OUT=%s" % op, "+NCYC=%d" % NCYC_FOR.get(name[:-2] if name.endswith("_m") else name, NCYC)],
                         images=[ip]))
-    log, mem = [], {}
+    log, mem, lv0 = [], {}, None
     with open(op, encoding="ascii") as fh:
         for ln in fh:
             t = ln.split()
-            if t and t[0] == "E":
+            if t and t[0] == "L":
+                lv0 = int(t[1], 16)
+            elif t and t[0] == "E":
                 log.append((int(t[1]), int(t[2], 16)))
             elif t and t[0] == "M":
                 mem[int(t[1])] = int(t[2], 16) if re.fullmatch(r"[0-9a-fA-F]+", t[2]) else -1
-    return log, mem, r.stdout + r.stderr
+    return log, mem, lv0, r.stdout + r.stderr
 
 
-def compare(log, mem):
-    """-> [problem]: every RTL byte against the golden encoding of the log."""
-    cap, n, ovf, why = PG.encode(log)
+def compare(log, mem, lv0, name):
+    """-> [problem]: every RTL byte against the golden encoding of the log, the
+    starting-levels byte against the bench's own view at cycle 0."""
+    base = name[:-2] if name.endswith("_m") else name
+    cap, n, ovf, why = PG.encode(log, PG.budget_cycles(BUDGET_FOR.get(base, 0)), NCYC_FOR.get(base, NCYC))
     probs = []
     for i in range(PG.CAP_BYTES):
         if mem.get(PG.CAP_BASE + i) != cap[i]:
             probs.append("capture byte %d: RTL %s, golden %02x" % (PG.CAP_BASE + i, mem.get(PG.CAP_BASE + i), cap[i]))
             break
-    want = PG.status(n, ovf, why)
+    want = PG.status(n, why)
+    want[PG.SLV_AT] = lv0
     for a, v in want.items():
         if mem.get(a) != v:
             probs.append("status byte %d: RTL %s, golden %02x" % (a, mem.get(a), v))
@@ -207,8 +223,8 @@ def main() -> int:
     vvp = os.path.join(tmp, "pit.vvp")
     build(vvp)
     for name, waves, mask in CASES:
-        log, mem, raw = sim(vvp, tmp, name, sniff_image(mask), waves_to_stim(waves))
-        p, n, ovf, why = compare(log, mem)
+        log, mem, lv0, raw = sim(vvp, tmp, name, sniff_image(mask, BUDGET_FOR.get(name, 0)), waves_to_stim(waves))
+        p, n, ovf, why = compare(log, mem, lv0, name)
         print("  %-14s edges %5d  records %4d  stop %-7s %s" % (name, len(log), n, why,
                                                                     "bit-exact" if not p else "*** " + p[0]))
         if not log:
@@ -220,11 +236,13 @@ def main() -> int:
             ivs = [b[0] - a[0] for a, b in zip([(0, 0)] + log, log)]
             if not (any(i > PG.SAT for i in ivs[:PG.N_RAW]) and any(i > PG.SAT for i in ivs[PG.N_RAW:n])):
                 p.append("no saturated interval in both the raw and the coded phase -- vacuous")
+        if name in BUDGET_FOR and why != "budget":
+            p.append("the budget case stopped on %r, not its budget" % why)
         if name == "fast_overrun" and why != "overrun":
             p.append("the overrun case stopped on %r, not an overrun" % why)
         probs += ["%s: %s" % (name, x) for x in p]
     # the stop-reason bit is checked in BOTH directions only if both reasons occur
-    if not {"overrun", "full"} <= whys:
+    if not {"overrun", "full", "budget"} <= whys:
         probs.append("the cases stop on %s only -- the stop-reason bit is not checked both ways"
                      % sorted(map(str, whys)))
     print("\n  must-fires")
@@ -233,8 +251,9 @@ def main() -> int:
         build(mv, [define])
         broke = []
         for name, waves, mask in CASES:
-            log, mem, _raw = sim(mv, tmp, name + "_m", sniff_image(mask), waves_to_stim(waves))
-            if compare(log, mem)[0]:
+            log, mem, lv0, _raw = sim(mv, tmp, name + "_m", sniff_image(mask, BUDGET_FOR.get(name, 0)),
+                                      waves_to_stim(waves))
+            if compare(log, mem, lv0, name + "_m")[0]:
                 broke.append(name)
         print("    %-18s %-36s %s" % (define, what, ("RED on " + ", ".join(broke)) if broke else "*** SURVIVED ***"))
         if not broke:

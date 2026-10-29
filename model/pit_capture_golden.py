@@ -36,26 +36,39 @@ def record_bits(i, mask, k, raw):
     return body + _b(mask, 8)
 
 
-def status(n, overflow, why):
-    """the status bytes the RTL writes once stopped and drained ({} if it never
-    stopped): byte 2 bit 7 = capture TRUNCATED (every result PARTIAL); byte 28
-    bit 7 = the stop reason (1 overrun, 0 full); {28[6:0], 29} = records stored."""
-    if not overflow:
+#: the starting-levels byte (Wilson 10-29): uio & mask at the PIT's cycle 0
+SLV_AT = 39
+
+
+def budget_cycles(b):
+    """SNIFF image byte 1 -> the budget in cycles (None = off): 2^b, b clamped to 35."""
+    return None if b == 0 else 1 << min(b, 35)
+
+
+def status(n, why):
+    """the status bytes the RTL writes once stopped and drained (all zero if it
+    never stopped). Every stop writes them, budget included (Wilson 10-29):
+    byte 2 bit 7 = TRUNCATED (full / overrun: every result PARTIAL; a budget
+    stop is a normal completion); byte 28 bit 7 = overrun, bit 6 = budget;
+    {28[5:0], 29} = WHOLE records stored."""
+    if why is None:
         return {2: 0x00, 28: 0x00, 29: 0x00}
-    return {2: 0x80, 28: (0x80 if why == "overrun" else 0x00) | ((n >> 8) & 0x7F), 29: n & 0xFF}
+    return {2: 0x00 if why == "budget" else 0x80,
+            28: (0x80 if why == "overrun" else 0) | (0x40 if why == "budget" else 0) | ((n >> 8) & 0x3F),
+            29: n & 0xFF}
 
 
 def decode(cap, n):
     """THE INVERSE of `encode` (PIT chunk 2, stage 0's input): the first `n`
     records of the 384 capture bytes -> [(t, mask)], t accumulated from the
     STORED intervals (so a saturated interval reads 0xFFFF -- what the RTL sees).
-    Records whose bits run past the written bytes are not returned: encode
-    writes whole bytes only, so up to 7 trailing bits (part of the last record)
-    are never stored. -> (records, k)."""
+    `n` is the results' count, which is WHOLE records (Wilson 10-29: a final
+    record cut by the unwritten 0-7 trailing bits is not counted), so every
+    one of the n is fully in the written bytes. -> (records, k)."""
     bits = []
     for byte in cap:
         bits += _b(byte, 8)
-    pos, k, t, out, ends = 0, 0, 0, [], []
+    pos, k, t, out = 0, 0, 0, []
 
     def take(w):
         nonlocal pos
@@ -80,22 +93,23 @@ def decode(cap, n):
             mask = take(8)
             t += i
             out.append((t, mask))
-            ends.append(pos)
     except EOFError:
         pass
-    # the store holds whole bytes of the TOTAL bit stream only: a record that
-    # ends past them was cut (its tail was never written) and is dropped
-    written = (ends[-1] // 8) * 8 if ends else 0
-    keep = sum(1 for e in ends if e <= written)
-    return out[:keep], k
+    return out, k
 
 
-def encode(log):
-    """-> (bytes[384], records_stored, overflow, why): why = "overrun" (the
-    accumulator would overflow), "full" (the store would), or None."""
+def encode(log, budget=None, ncyc=None):
+    """-> (bytes[384], WHOLE records stored, overflow, why): why = "overrun"
+    (the accumulator would overflow), "full" (the store would), "budget" (the
+    capture reached `budget` cycles -- edges at t >= budget are not recorded),
+    or None (still listening at `ncyc`). overflow = 1 for full / overrun only.
+    The count excludes a final record cut by the unwritten 0-7 trailing bits."""
     bits, n, overflow, k, raws, why = [], 0, 0, 0, [], None
     acc, last_t = 0, 0
     for t, mask in log:
+        if budget is not None and t >= budget:
+            why = "budget"
+            break
         if n > 0:
             acc -= 8 * min(acc // 8, t - last_t)      # one byte per cycle since the last record
         rb = record_bits(t - last_t, mask, k, n < N_RAW)
@@ -113,6 +127,10 @@ def encode(log):
                 k = k_of(raws)
         n += 1
         last_t = t
+    if why is None and budget is not None and (ncyc is None or budget <= ncyc):
+        why = "budget"                                 # a quiet tail: the budget still ends it
+    if len(bits) % 8:
+        n -= 1                                         # the last record is cut (never fully written)
     out = bytearray(CAP_BYTES)
     whole = len(bits) - len(bits) % 8
     for i in range(0, whole, 8):
