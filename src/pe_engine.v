@@ -127,6 +127,7 @@
       jitter_max <= {JW{1'b0}}; \
       cur        <= {LW{1'b0}}; \
       cur_act    <= {ACT_W{1'b0}}; \
+      cur_cls    <= {CLS_W{1'b0}}; \
       cur_ck     <= {PINW{1'b0}}; \
       cur_ckr    <= 1'b1; \
       br_take_q  <= 1'b0; \
@@ -196,6 +197,7 @@
       for (i = 0; i < NSLOT; i = i + 1) begin \
         l_act[i]  <= {ACT_W{1'b0}}; \
         l_actv[i] <= 1'b0; \
+        l_cls[i]  <= {CLS_W{1'b0}}; \
       end
 
 // ---- the keep-list: POWER-ON ONLY (status the host reads after halting) --
@@ -1091,6 +1093,31 @@ module pe_engine #(
                              (NSLOT <= 32) ? 5 : 6;
   reg [ACT_W-1:0] l_act    [0:NSLOT-1];
   reg             l_actv   [0:NSLOT-1];
+  // ⭐⭐ PRE-DECODE AT FETCH (Wilson 10-29, after LOOP's L1 miss). The opcode
+  // CLASSES the release, retire and prefetch paths test are decoded ONCE, when
+  // the word is captured into its slot (P_CAP, off the critical path), and
+  // stored beside it: `l_cls[s] == pre_cls(l_act[s])` and `cur_cls ==
+  // pre_cls(cur_act)` hold at every cycle (both written only where their
+  // words are). The critical path selects on ONE stored bit. A new primitive
+  // adds an entry HERE, not depth to the release path -- LOOP's widened
+  // compare cost 1.45 ns of slow-corner slack (canaries 10-29) by re-decoding
+  // a_op in front of the timestamp adder. M_PREDECODE_STALE never writes it.
+  localparam integer CLS_W = 4;
+  localparam integer C_BR = 0, C_SHIFT = 1, C_SHIFTIN = 2, C_REARM = 3;
+  function [CLS_W-1:0] pre_cls(input [ACT_W-1:0] w);
+    reg [OP_W-1:0] op;
+    begin
+      op = w[ACT_W-1 -: OP_W];
+      pre_cls          = {CLS_W{1'b0}};
+      // timed branch (BRANCH_BIT / CMP_BRANCH / LOOP, 11 refused at load):
+      // its delay field is the target, its release delay is W
+      pre_cls[C_BR]    = (op[OP_W-1:2] == OP_BRANCH_BIT[OP_W-1:2]);
+      pre_cls[C_SHIFT]   = (op == OP_SHIFT);
+      pre_cls[C_SHIFTIN] = (op == OP_SHIFTIN);
+      pre_cls[C_REARM]   = (op == OP_REARM);
+    end
+  endfunction
+  reg [CLS_W-1:0] l_cls    [0:NSLOT-1];   // == pre_cls(l_act[s])
   reg             l_sel    [0:N_LANES-1];   // 0/1: which slot is the HEAD
   reg [AW-1:0]    l_fpc    [0:N_LANES-1];   // the FETCH pointer, ahead of l_pc
 
@@ -1631,24 +1658,28 @@ module pe_engine #(
   // `l_act[hix[i]]` by definition, so there is no second copy of state to
   // keep in step and no update site that could be missed.
   wire [ACT_W-1:0] hw [0:N_LANES-1];
+  wire [CLS_W-1:0] hc [0:N_LANES-1];   // == pre_cls(hw[i])
   wire [N_LANES-1:0] hv;
   generate
     for (gi = 0; gi < N_LANES; gi = gi + 1) begin : g_head
       assign hw[gi] = l_act[hix[gi]];
+      assign hc[gi] = l_cls[hix[gi]];
       assign hv[gi] = l_actv[hix[gi]];
     end
   endgenerate
   reg [ACT_W-1:0] w_act;           // == l_act[hix[winner]] when winner_v
+  reg [CLS_W-1:0] w_cls;           // == l_cls[hix[winner]]
   reg             w_hv;            // == l_actv[hix[winner]]
   reg             w_armed;         // == l_armed[winner]
   reg [PINW-1:0]  w_ck;            // == l_clkpin[winner]           (PR2)
   reg             w_ckr;           // == (l_clkpin[winner] < N_PINS) (PR2)
   integer         wk;
   always @* begin
-    w_act = {ACT_W{1'b0}}; w_hv = 1'b0; w_armed = 1'b0;
+    w_act = {ACT_W{1'b0}}; w_cls = {CLS_W{1'b0}}; w_hv = 1'b0; w_armed = 1'b0;
     w_ck = {PINW{1'b0}}; w_ckr = 1'b0;
     for (wk = 0; wk < N_LANES; wk = wk + 1) begin
       w_act   = w_act   | ({ACT_W{winner_oh[wk]}} & hw[wk]);
+      w_cls   = w_cls   | ({CLS_W{winner_oh[wk]}} & hc[wk]);
       w_hv    = w_hv    | (winner_oh[wk] & hv[wk]);
       w_armed = w_armed | (winner_oh[wk] & l_armed[wk]);
       w_ck    = w_ck    | ({PINW{winner_oh[wk]}} & l_clkpin[wk]);
@@ -1688,6 +1719,7 @@ module pe_engine #(
   always @(*) cfg_err = config_err;
   always @(*) clk_stretch = clk_stretch_err;
   reg [ACT_W-1:0] cur_act;
+  reg [CLS_W-1:0] cur_cls;          // == pre_cls(cur_act)
 
   assign busy = (st != ST_IDLE);
 
@@ -1703,8 +1735,8 @@ module pe_engine #(
   // BRANCH_BIT's WAIT W: count is its high nibble, pinb its low
   wire [BPW+PINB_W-1:0] br_wait = {a_cnt, cur_act[MOD_W +: PINB_W]};
   wire [MOD_W-1:0] a_mod  = cur_act[MOD_W-1:0];
-  // a branch op (BRANCH_BIT or CMP_BRANCH): opcodes 8 / 9, one 4-bit compare
-  wire             a_is_br = (a_op[OP_W-1:2] == OP_BRANCH_BIT[OP_W-1:2]);
+  // a timed branch (BRANCH_BIT / CMP_BRANCH / LOOP): the PRE-DECODED bit
+  wire             a_is_br = cur_cls[C_BR];
 
   // ⭐⭐ THE RESERVED NON-DRIVING PIN INDEX. PINW encodes 2**PINW codes and only
   // N_PINS are real, so `PIN_NONE` costs nothing: it is a value that already
@@ -1762,8 +1794,8 @@ module pe_engine #(
   // redundant: without `clk_real` there is no clock to drive and `level` keeps
   // its old meaning; without `a_lvl` this would capture the 83 existing
   // `clk_real, level = 0` SHIFTs in the shipped images.
-  wire ck_shift   = clk_real & a_lvl & (a_op == OP_SHIFT);
-  wire ck_shiftin = clk_real & a_lvl & (a_op == OP_SHIFTIN);
+  wire ck_shift   = clk_real & a_lvl & cur_cls[C_SHIFT];     // pre-decoded
+  wire ck_shiftin = clk_real & a_lvl & cur_cls[C_SHIFTIN];
   wire ck_act     = ck_shift | ck_shiftin;
   wire ck_is_low  = (l_ckph[cur] == CK_LOW);
   wire ck_is_high = (l_ckph[cur] == CK_HIGH);
@@ -1840,7 +1872,7 @@ module pe_engine #(
   // back to a CLAMP (zero hold, program left running and reported below the
   // requirement); D1's reasoning applies unchanged, so it is now REFUSED and
   // the clamp is retired. `M_HOLD_CLOCKED_ONLY` restores the old scope.
-  wire uc_hold = (a_op == OP_SHIFT) & clk_real & ~a_lvl;
+  wire uc_hold = cur_cls[C_SHIFT] & clk_real & ~a_lvl;
 `ifdef M_HOLD_CLOCKED_ONLY
   wire ck_holdviol = ck_act & ~l_mode[cur] & (SDA_HOLD != 0)
                      & (a_dly <= SDA_HOLD[DLY_W-1:0]);
@@ -1898,7 +1930,7 @@ module pe_engine #(
   // retire chain, the phase reset and the bit-counter reset. Writing the
   // condition three times is how the three drift apart -- and the phase
   // reset getting it wrong is precisely the defect being fixed.
-  wire act_retire = ~ck_hold_eff & ((a_op != OP_REARM) | a_lvl);
+  wire act_retire = ~ck_hold_eff & (~cur_cls[C_REARM] | a_lvl);
   // ⛔ M_CK_NO_PARK removes the post-HIGH park, so the capture races the
   // lane's own next dispatch again and a long stretch LOSES BITS. MEASURED
   // both ways: without the park a 500-cycle SCL hold sets `clk_stretch_err`
@@ -2250,7 +2282,7 @@ module pe_engine #(
       hact   = l_act [hix[ln]];
       if (!hvalid)
         fetch_addr = l_pc[ln];                       // filling the head itself
-      else if (hact[ACT_W-1 -: OP_W] == OP_REARM && hact[ACT_W-1-OP_W-PINW])
+      else if (l_cls[hix[ln]][C_REARM] && hact[ACT_W-1-OP_W-PINW])
         fetch_addr = l_base[ln];                     // the loop, prefetched
       else
         fetch_addr = l_fpc[ln];
@@ -2288,12 +2320,12 @@ module pe_engine #(
       // coincidence in an index is how lane 4's slots aliased onto lane 0's.
       else if (SPL == 1)
         want_fetch = 1'b0;
-      else if (hact[ACT_W-1 -: OP_W] == OP_REARM && !hact[ACT_W-1-OP_W-PINW])
+      else if (l_cls[hix[ln]][C_REARM] && !hact[ACT_W-1-OP_W-PINW])
         want_fetch = 1'b0;                           // chaining: successor is
                                                      // the head; spare unused
       // OPTION A: a branch head's successor is unknown until it writes back
 `ifndef M_BR_FETCH_PAST
-      else if (hact[ACT_W-1 -: OP_W-2] == OP_BRANCH_BIT[OP_W-1:2])
+      else if (l_cls[hix[ln]][C_BR])
         want_fetch = 1'b0;
 `endif
       else
@@ -2606,6 +2638,9 @@ module pe_engine #(
             // MSB-aligned: byte0 = {opcode, pin, level}, 2 spare at the bottom
             l_act [fix] <= s_wrdata[ACT_BYTES*8-1 -: ACT_W];
             l_actv[fix] <= 1'b1;
+`ifndef M_PREDECODE_STALE
+            l_cls [fix] <= pre_cls(s_wrdata[ACT_BYTES*8-1 -: ACT_W]);
+`endif
             // ⭐ THE SUCCESSOR POINTER ADVANCES FROM THE ADDRESS JUST FETCHED,
             // which is what makes the loop case need no special handling here:
             // after a `l_base` fetch, `l_fpc` becomes `l_base + ACT_BYTES`,
@@ -2670,6 +2705,7 @@ module pe_engine #(
                    if (w_hv) begin
                      cur     <= winner;
                      cur_act <= w_act;
+                     cur_cls <= w_cls;   // == pre_cls(w_act)
                      cur_ck  <= w_ck;          // PR2: == l_clkpin[winner]
                      cur_ckr <= w_ckr;
                      st      <= ST_DRIVE;

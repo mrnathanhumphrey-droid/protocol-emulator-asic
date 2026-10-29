@@ -138,6 +138,14 @@ module pe_store #(
   always @(posedge clk) begin
     if (re) rdata <= rbyte[rsel];
   end
+  // ⛔ LN1's must-fire (M_PFETCH_NOWAIT) skips P_WAIT, so P_CAP takes `wrdata`
+  // before any read lands. Unreset, its value is the simulator's random init
+  // -- and any new flop elsewhere moved that stream (LOOP's l_loop shifted the
+  // pinned signature a row, 10-29). A CONSTANT keeps the mutant's signature a
+  // property of the RTL, not of the random stream (Wilson 10-29).
+`ifdef M_PFETCH_NOWAIT
+  initial wrdata = {WIDE_B*8{1'b0}};
+`endif
 
   // ⛔ RULING TM2's per-byte address registers are GONE with the byte-wide
   // array: a word read has no `wraddr + k` add to move out of the mux path.

@@ -14,8 +14,11 @@ it never falls back to a typed table):
         the count field is W bits, so every count lies in 0 .. 2^W - 1
   A2  `wire [BPW-1:0]   a_cnt   = cur_act[LOWX+BQW +: BPW];`
         `a_cnt` IS that field (W bits: arithmetic on it wraps mod 2^W)
-  A3  `wire ck_shift   = clk_real & a_lvl & (a_op == OP_SHIFT);`
-      `wire ck_shiftin = clk_real & a_lvl & (a_op == OP_SHIFTIN);`
+  A3  `wire ck_shift   = clk_real & a_lvl & cur_cls[C_SHIFT];`
+      `wire ck_shiftin = clk_real & a_lvl & cur_cls[C_SHIFTIN];`
+      with the PRE-DECODER (Wilson 10-29: the class bits are decoded once, at
+      the slot capture) `pre_cls[C_SHIFT]   = (op == OP_SHIFT);` and
+      `pre_cls[C_SHIFTIN] = (op == OP_SHIFTIN);`
         the two counted opcodes are SHIFT and SHIFTIN; no other opcode feeds
         `ck_nbits`, so every other opcode has no count rule (full field)
   A4  `wire [BPW-1:0] ck_nbits = ck_shift ? (a_cnt + {{(BPW-1){1'b0}}, 1'b1})`
@@ -54,10 +57,14 @@ ENGINE = os.path.join(ROOT, "src", "pe_engine.v")
 ANCHORS = (
     ("A2", "a_cnt is the W-bit count field",
      "wire [BPW-1:0]   a_cnt   = cur_act[LOWX+BQW +: BPW];"),
-    ("A3a", "clocked SHIFT decode",
-     "wire ck_shift   = clk_real & a_lvl & (a_op == OP_SHIFT);"),
-    ("A3b", "clocked SHIFTIN decode",
-     "wire ck_shiftin = clk_real & a_lvl & (a_op == OP_SHIFTIN);"),
+    ("A3a", "clocked SHIFT decode (the pre-decoded class bit)",
+     "wire ck_shift   = clk_real & a_lvl & cur_cls[C_SHIFT];"),
+    ("A3b", "clocked SHIFTIN decode (the pre-decoded class bit)",
+     "wire ck_shiftin = clk_real & a_lvl & cur_cls[C_SHIFTIN];"),
+    ("A3c", "the SHIFT class is exactly opcode SHIFT (the pre-decoder)",
+     "pre_cls[C_SHIFT]   = (op == OP_SHIFT);"),
+    ("A3d", "the SHIFTIN class is exactly opcode SHIFTIN (the pre-decoder)",
+     "pre_cls[C_SHIFTIN] = (op == OP_SHIFTIN);"),
     ("A4a", "SHIFT moves count + 1 bits (W-bit add, wraps)",
      "wire [BPW-1:0] ck_nbits = ck_shift ? (a_cnt + {{(BPW-1){1'b0}}, 1'b1})"),
     ("A4b", "SHIFTIN moves count bits",
