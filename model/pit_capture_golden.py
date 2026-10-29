@@ -45,6 +45,51 @@ def status(n, overflow, why):
     return {2: 0x80, 28: (0x80 if why == "overrun" else 0x00) | ((n >> 8) & 0x7F), 29: n & 0xFF}
 
 
+def decode(cap, n):
+    """THE INVERSE of `encode` (PIT chunk 2, stage 0's input): the first `n`
+    records of the 384 capture bytes -> [(t, mask)], t accumulated from the
+    STORED intervals (so a saturated interval reads 0xFFFF -- what the RTL sees).
+    Records whose bits run past the written bytes are not returned: encode
+    writes whole bytes only, so up to 7 trailing bits (part of the last record)
+    are never stored. -> (records, k)."""
+    bits = []
+    for byte in cap:
+        bits += _b(byte, 8)
+    pos, k, t, out, ends = 0, 0, 0, [], []
+
+    def take(w):
+        nonlocal pos
+        if pos + w > len(bits):
+            raise EOFError
+        v = 0
+        for b in bits[pos:pos + w]:
+            v = (v << 1) | b
+        pos += w
+        return v
+    try:
+        for r in range(n):
+            if r < N_RAW:
+                i = take(16)
+            else:
+                if r == N_RAW:
+                    k = take(4)
+                q = 0
+                while q < QMAX and take(1):
+                    q += 1
+                i = take(16) if q >= QMAX else (q << k) | take(k)
+            mask = take(8)
+            t += i
+            out.append((t, mask))
+            ends.append(pos)
+    except EOFError:
+        pass
+    # the store holds whole bytes of the TOTAL bit stream only: a record that
+    # ends past them was cut (its tail was never written) and is dropped
+    written = (ends[-1] // 8) * 8 if ends else 0
+    keep = sum(1 for e in ends if e <= written)
+    return out[:keep], k
+
+
 def encode(log):
     """-> (bytes[384], records_stored, overflow, why): why = "overrun" (the
     accumulator would overflow), "full" (the store would), or None."""
