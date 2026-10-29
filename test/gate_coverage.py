@@ -528,7 +528,13 @@ TOGGLE_CEILING = {
     # OVERRUN) are what reach the rest.
     # ⭐ 888 -> 843 (RATCHETED DOWN): the long-gap arm (an idle bus, the
     # interval saturates -- Nate / Wilson 10-28) pays line 1217 and 45 toggles.
-    "src/project.v": 843,      # primitive 1's arms -10, primitive 2's -4, PIT c1 +670
+    # ⚠ 843 -> 923 (+80) FOR PIT CHUNK 2 PART A (Wilson 10-29: the budget stop,
+    # the starting levels, whole counts): 154 new points, 82 dark, 0 covered
+    # points lost (2 paid), name by name vs chunk 1's own sweep. STRUCTURAL:
+    # the one budget arm is b = 12, so bud_cnt's 24 high bits (48), the budget
+    # byte's other bits (bsel / bud_cfg / pit_bud 16), n_whole's high bits (17)
+    # and one direction of why_bud never toggle.
+    "src/project.v": 923,      # primitive 1's arms -10, primitive 2's -4, PIT c1 +670, c2a +80
     # ⭐ RATCHETED DOWN BY THE SELF-CLOCKED CORPUS, and the cause is worth
     # recording: the rewritten corpus drives WHOLE BYTES through the peer
     # models instead of two bits per clock, so `fram_spi` went 54 -> 30
