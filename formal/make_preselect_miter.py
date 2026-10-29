@@ -9,6 +9,7 @@ AND-OR pick over per-lane heads equals the indexed mux it replaced,
     w_armed == winner_v & l_armed[winner]
     w_ck    == winner_v ? l_clkpin[winner] : 0          (ruling PR2)
     w_ckr   == winner_v & (l_clkpin[winner] < N_PINS)   (ruling PR2)
+    w_cls   == winner_v ? l_cls [hix[winner]] : 0       (pre-decode, Wilson 10-29)
 
 for EVERY slot contents, select bits and armed bits, under the one premise
 the argmin proof discharges: `winner_oh == (winner_v ? 1 << winner : 0)`.
@@ -51,11 +52,13 @@ module preselect_miter (
   input  wire [4:0]  l_armed,
   input  wire [9:0]  l_actv,
   input  wire [23:0] a0, a1, a2, a3, a4, a5, a6, a7, a8, a9,
-  input  wire [3:0]  c0, c1, c2, c3, c4
+  input  wire [3:0]  c0, c1, c2, c3, c4,
+  input  wire [3:0]  k0, k1, k2, k3, k4, k5, k6, k7, k8, k9
 );
   // ACT_W is a free width here: every operation lifted is bitwise.
   localparam integer N_LANES = 5, SPL = 2, SIW = 4, ACT_W = 24;
   localparam integer PINW = 4, N_PINS = 12;
+  localparam integer CLS_W = 4;   // the pre-decoded class bits, free here too
   wire [PINW-1:0] l_clkpin [0:4];
   assign l_clkpin[0] = c0; assign l_clkpin[1] = c1; assign l_clkpin[2] = c2;
   assign l_clkpin[3] = c3; assign l_clkpin[4] = c4;
@@ -64,6 +67,11 @@ module preselect_miter (
   assign l_act[3] = a3; assign l_act[4] = a4; assign l_act[5] = a5;
   assign l_act[6] = a6; assign l_act[7] = a7; assign l_act[8] = a8;
   assign l_act[9] = a9;
+  wire [CLS_W-1:0] l_cls [0:9];
+  assign l_cls[0] = k0; assign l_cls[1] = k1; assign l_cls[2] = k2;
+  assign l_cls[3] = k3; assign l_cls[4] = k4; assign l_cls[5] = k5;
+  assign l_cls[6] = k6; assign l_cls[7] = k7; assign l_cls[8] = k8;
+  assign l_cls[9] = k9;
 
   // ---- the premise argmin_equiv.sby proves ----
   always @* begin
@@ -86,6 +94,7 @@ TAIL = """
     assert (w_armed == (winner_v & l_armed[winner]));
     assert (w_ck    == (winner_v ? l_clkpin[winner] : {PINW{1'b0}}));
     assert (w_ckr   == (winner_v & (l_clkpin[winner] < N_PINS[PINW-1:0])));
+    assert (w_cls   == (winner_v ? l_cls[hix[winner]] : {CLS_W{1'b0}}));
   end
 endmodule
 """
