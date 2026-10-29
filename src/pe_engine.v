@@ -1720,6 +1720,29 @@ module pe_engine #(
   always @(*) clk_stretch = clk_stretch_err;
   reg [ACT_W-1:0] cur_act;
   reg [CLS_W-1:0] cur_cls;          // == pre_cls(cur_act)
+  // ⭐ ARM B (Wilson 10-29): `cur_rel` == `cur` at every cycle -- the same
+  // load (`cur_ld` is the exact condition of `cur <= winner`), the same
+  // reset -- in its own kept flops, so the release path's lane selects do
+  // not share `cur`'s fan-out (and its hold buffer). NOT a pipeline stage.
+  wire cur_ld = (st == ST_IDLE)
+`ifdef M_NO_PRIME
+                & hdr_done
+`else
+                & primed
+`endif
+                & !config_err & winner_v
+`ifndef M_TIMEOUT_PROCEED
+                & ~w_armed
+`endif
+                & w_hv;
+  wire [LW-1:0] cur_rel;
+  genvar gcr;
+  generate
+    for (gcr = 0; gcr < LW; gcr = gcr + 1) begin : g_currel
+      pe_dup_ffe u_currel (.clk(clk), .rst_n(rst_n), .en(cur_ld),
+                           .d(winner[gcr]), .q(cur_rel[gcr]));
+    end
+  endgenerate
 
   assign busy = (st != ST_IDLE);
 
@@ -1816,7 +1839,7 @@ module pe_engine #(
 `else
   wire [DLY_W-1:0] a_dly_wb = a_is_br ? {{(DLY_W-BPW-PINB_W){1'b0}}, br_wait} : a_dly;
 `endif
-  wire [DLY_W-1:0] wb_dly = (ck_act & ck_is_high & half_v[cur])
+  wire [DLY_W-1:0] wb_dly = (ck_act & (l_ckph[cur_rel] == CK_HIGH) & half_v[cur_rel])
                             ? (a_dly >> 1) : a_dly_wb;
   // ⚠ THE TWO OPCODES COUNT BITS DIFFERENTLY, and this is pre-existing ISA
   // semantics preserved rather than tidied: `OP_SHIFT` compares the
@@ -2172,7 +2195,7 @@ module pe_engine #(
 `ifndef M_NO_REBASE
         : arm_hit[gi] ? ck_rebase[gi]
 `endif
-        : (st == ST_WB && cur == gi)
+        : (st == ST_WB && cur_rel == gi)
             ? l_timestamp[gi] + {{(TS_W-DLY_W){1'b0}}, wb_dly}
             : l_timestamp[gi];
       assign ld_n[gi] = (hdr_wr && hl == gi)
