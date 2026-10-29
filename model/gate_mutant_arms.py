@@ -72,7 +72,7 @@ EXPECT = {
     # TF2-R3's must-fire: the release term reads the CURRENT `l_live`, so a
     # lane halted this cycle stays eligible one more -- one token, one line
     "M_TF2_LIVE_LATE":   (2, None),
-    "M_PFETCH_NOWAIT":   (2, None),
+    "M_PFETCH_NOWAIT":   (3, "2 lines: the skipped wait; +1 (Wilson 10-29): the never-written read register tied to 0 so the signature does not ride the random-init stream"),
     "M_BUF_NOINVAL":     (2, None),
     "M_BUF_SWAP":        (2, None),
     "M_COMB_OUT":        (4, None),
@@ -123,6 +123,8 @@ EXPECT = {
     "M_CMP_IMM_OFF1":     (2, None),
     "M_CMP_MASK_IGN":     (3, "the mask mux is two lines (four modes); the mutant is one constant"),
     "M_CMP_INV":          (2, None),
+    # the pre-decoder: the class-bit write at the slot capture removed
+    "M_PREDECODE_STALE":  (1, "a pure deletion: the one class-bit write line"),
     # v2 primitive 2 bundle 2: LOOP -- the count, the exit, the reset at exit
     "M_LOOP_OFF1":        (2, None),
     "M_LOOP_NOEXIT":      (2, None),

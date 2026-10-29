@@ -25,6 +25,12 @@ db05d8d56e52f0a75b4753c96925ca72c291b23c50c1e34904b45b23cae25cbd  ckhold_under_i
 c80015bb657b348af4bfeafac0de416f2beb84fd632ab50bf7f7bbfb615d5530  five_image.hex  # make_smoke_image.py --five 12 13 14 15 16
 6109cd6bbef8da0e4c44c924879677389a653e5204eefe1b73b69824da4fa3c8  chain_image.hex  # make_smoke_image.py --chain 12 40
 6480ca2a99f207da791a3fecab2cf778a95d32730630ebbe16f4cc0a7a070282  stress_image.hex  # make_smoke_image.py --stress 25 31
+c2978112eb971330a016d4f5c87c87fe7deeb3695eded4817ba28b542bd2d7e5  branch_image.hex  # make_smoke_image.py --branch ok
+b41d3bebfcbf1473b75f1be49970db71c476da8249d068e81e69331cbd62dcef  branch_wbad_image.hex  # make_smoke_image.py --branch wbad
+297b7bc2708b25b65ceeca0f58eaf8b703c2a8574f8fde80d7baf17b5151e2f1  branch_cmp_order_image.hex  # make_smoke_image.py --branch cmp_order
+523edd8cdf16e14c0ae08d820f27a7e3d09dc46f832835ecd0042dbbb4ae5f9c  branch_cmp_mask_image.hex  # make_smoke_image.py --branch cmp_mask
+b78ddb8cdee95c8605e1a5d6c1eeaf89b19eea5b54faa06d09c1ff4ad8eff9bd  branch_cmp_lo_image.hex  # make_smoke_image.py --branch cmp_lo
+2ec97558d7ac89c9c8807dc89b3a0c922f89f7fcc4ed852902357dc7b53bb867  branch_loop_image.hex  # make_smoke_image.py --branch loop
 22bb426ced5bfdb59a0ed466fce2d109f3ad956dd8b98047801fa0307c9dee3a  edge_image.hex  # make_smoke_image.py --edge 200 0 edge_image
 3382f5bc554060df80dbac428a3a56e33e6c4b800db9c7b4a4086f0a07f3a344  edge_image_noto.hex  # make_smoke_image.py --edge 0 0 edge_image_noto
 4001b62231792b152d8deae176592e7e9fb213dd1fe04decbbcc16ffc4247c38  edge_image_rise.hex  # make_smoke_image.py --edge 0 1 edge_image_rise

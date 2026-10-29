@@ -85,6 +85,8 @@ MUTANTS = [
     ("M_LOOP_OFF1", "pc_bad", "n + 1 iterations", "loop_mix"),
     ("M_LOOP_NOEXIT", "pc_bad", "the loop never exits", "loop_mix"),
     ("M_LOOP_NORESET", "pc_bad", "the counter survives the exit", "loop_mix"),
+    # the pre-decoder (Wilson 10-29): class bits never written at the capture
+    ("M_PREDECODE_STALE", "pc_bad", "the opcode-class bits never written", "braw33_contend4"),
 ]
 
 
