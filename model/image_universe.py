@@ -15,6 +15,11 @@ THE UNIVERSE, by PATH:
   * every image a benchset arm names with `+IMG=` (generated first, by the
     sweep's own builder, so the set does not depend on whether a sweep ran)
 
+⭐ v2 PIT (10-28): an image carrying the SNIFF magic 'S' 'N' at bytes 30-31 is
+NOT a program -- byte 0 is a wire mask and the engine never runs it. It goes in
+`sniff`, LISTED by `report` (never silently dropped), and stays out of `paths`,
+so no program gate decodes a wire mask as an action.
+
 ⛔ NAMES MUST BE UNIQUE, because every output file is keyed by image NAME. Two
 paths with one name:
   * byte-identical -> DE-DUPLICATED, the copy LISTED (`dups`): the benchset
@@ -43,10 +48,11 @@ class NameCollision(RuntimeError):
 
 
 class Universe:
-    def __init__(self, paths, dups, probs):
+    def __init__(self, paths, dups, probs, sniff=None):
         self.paths = paths    # {name: path}, one per name
         self.dups = dups      # [(name, kept path, de-duplicated path)]
         self.probs = probs    # [str]: a generator failed / an arm's file absent
+        self.sniff = sniff or {}   # {name: path}: SNIFF images, not programs
 
     def items(self):
         """[(name, path)] sorted by name."""
@@ -131,7 +137,31 @@ def scan(dirs=DIRS, arms=True, generate=True):
                         % (name, _rel(keep), _rel(other)))
             dups.append((name, keep, other))
         paths[name] = keep
-    return Universe(paths, dups, probs)
+    sniff = {n: p for n, p in paths.items() if _is_sniff(p)}
+    for n in sniff:
+        del paths[n]
+    return Universe(paths, dups, probs, sniff)
+
+
+#: the SNIFF magic (src/project.v SNIFF_HI / SNIFF_LO) at the v2 magic's bytes
+SNIFF_MAGIC, SNIFF_AT = (0x53, 0x4E), 30
+
+
+def _is_sniff(path):
+    """True if the image's bytes 30-31 are the SNIFF magic (a byte-per-line
+    .hex, as pe_isa.write_image writes it)."""
+    toks = []
+    with open(path, encoding="ascii", errors="replace") as fh:
+        for ln in fh:
+            ln = ln.split("//")[0].strip()
+            if ln and not ln.startswith("@"):
+                toks += ln.split()
+            if len(toks) > SNIFF_AT + 1:
+                break
+    try:
+        return tuple(int(t, 16) for t in toks[SNIFF_AT:SNIFF_AT + 2]) == SNIFF_MAGIC
+    except ValueError:
+        return False
 
 
 _CACHE = []
@@ -213,7 +243,11 @@ def resolve(name):
 
 
 def report(u, out=print):
-    """Print the de-duplicated copies (Wilson: listed, never silent)."""
+    """Print the de-duplicated copies and the SNIFF images (Wilson: listed,
+    never silent)."""
+    if u.sniff:
+        out("  image universe: %d SNIFF image(s) held out of the program set "
+            "(not programs): %s" % (len(u.sniff), ", ".join(sorted(u.sniff))))
     if not u.dups:
         out("  image universe: %d images, no duplicate names" % len(u.paths))
         return

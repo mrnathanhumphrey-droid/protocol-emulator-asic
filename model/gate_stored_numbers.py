@@ -719,6 +719,10 @@ SPEC_SYMBOLS = {
     # numbers are words in the labels ("n + 1"), not readings.
     ("test/branch_corpus.py", "LOOP_KINDS"),
     ("test/run_branch_check.py", "MUTANTS"),
+    # ⭐ v2 PIT chunk 1: CASES is the capture gate's DESIGN -- which buses to
+    # play (SPI modes 0 / 3, a wire mask, I2C, two UARTs, a line fast enough
+    # to overrun) and their chosen masks; the result is the bit-exact compare.
+    ("test/run_pit_capture.py", "CASES"),
     # the CMP mask modes: the ISA's own definition (the RTL's mux), not a reading
     ("test/pe_isa.py", "CMP_MASKS"),
     # ⭐ A TEST PAYLOAD IS STIMULUS, NOT A MEASUREMENT. The four bytes the

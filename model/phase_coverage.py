@@ -55,6 +55,10 @@ ROWS = {
     "test/tb_cktx.v": ("CHIP_DRIVEN", "clocked TRANSMIT values: the chip drives clock "
                        "and data, Layer V checks them against the golden model"),
     # ---- no peer-timing claim --------------------------------------------------
+    "test/tb_pit.v": ("NOT_TIMING", "the PIT SNIFF capture bench "
+                     "(test/run_pit_capture.py): it plays a recorded uio "
+                     "stimulus on negedges and checks the stored bytes bit "
+                     "for bit against the golden encoder; no peer-timing claim"),
     "test/tb_equiv.v": ("NOT_TIMING", "the v1 == v2 equivalence bench "
                         "(model/gate_v2_equiv.py): it compares two builds' "
                         "dispatch + pin streams; its host pushes sit on clock "

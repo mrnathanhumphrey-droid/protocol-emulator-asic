@@ -1119,10 +1119,15 @@ module pe_pit #(parameter integer AW = 9) (
     output reg           stopped
 );
   localparam integer CAP_BASE = 128, CAP_BITS = 384 * 8;
+  // named widths: the interval / record counters (16 bits) and the k-choice
+  // product (24) -- no bare protocol-looking literal in the RTL
+  localparam integer CW = 16, MW = 24;
+  // the capture limit as an UNSIGNED 17-bit value, the width `total + l_all` has
+  localparam [16:0] CAP_LIM = CAP_BITS;
   wire [7:0] m = (mask_cfg == 8'h00) ? 8'hFF : mask_cfg;
   reg        active;
   reg [7:0]  prev;
-  reg [15:0] tcnt, n;
+  reg [CW-1:0] tcnt, n;
   reg [63:0] acc;
   reg [6:0]  acc_n;
   reg [11:0] total;
@@ -1146,7 +1151,7 @@ module pe_pit #(parameter integer AW = 9) (
   wire [4:0]  ke    = {1'b0, k};
 `endif
   wire        rawr  = (n < 16'd16);
-  wire [15:0] q     = tcnt >> ke;
+  wire [CW-1:0] q   = tcnt >> ke;
   wire        esc   = (q >= 16'd16);
   wire [63:0] kmask = (64'd1 << ke) - 64'd1;
   wire [63:0] unary = ((64'd1 << q[4:0]) - 64'd1) << 1;           // q ones, then a 0
@@ -1164,10 +1169,10 @@ module pe_pit #(parameter integer AW = 9) (
   wire [63:0] acc_d   = drain ? (acc << 8) : acc;
   wire [6:0]  acc_n_d = drain ? acc_n - 7'd8 : acc_n;
 `ifdef M_PIT_NO_OVERRUN
-  wire        room  = ({5'd0, total} + {10'd0, l_all} <= CAP_BITS);
+  wire        room  = ({5'd0, total} + {10'd0, l_all} <= CAP_LIM);
 `else
   wire        room  = ({1'b0, acc_n_d} + {1'b0, l_all} <= 8'd64) &&
-                      ({5'd0, total} + {10'd0, l_all} <= CAP_BITS);
+                      ({5'd0, total} + {10'd0, l_all} <= CAP_LIM);
 `endif
 `ifdef M_PIT_WHY_DROP
   wire        ovr   = 1'b0;
@@ -1176,7 +1181,7 @@ module pe_pit #(parameter integer AW = 9) (
 `endif
   wire [19:0] sum_n = sum + {4'd0, tcnt};
   wire [19:0] mean  = sum_n >> 4;
-  wire [23:0] v11   = ({4'd0, mean} * 24'd11) >> 4;
+  wire [MW-1:0] v11 = ({4'd0, mean} * 24'd11) >> 4;
   reg  [3:0]  k_new;
   integer     bi;
   always @(*) begin
@@ -1209,7 +1214,11 @@ module pe_pit #(parameter integer AW = 9) (
       end
       acc   <= acc_d;
       acc_n <= acc_n_d;
-      tcnt  <= (tcnt == 16'hFFFF) ? tcnt : tcnt + 16'd1;
+`ifdef M_PIT_NO_SAT
+      tcnt  <= tcnt + 16'd1;
+`else
+      tcnt  <= (tcnt == 16'hFFFF) ? tcnt : tcnt + 16'd1;   // an idle bus saturates
+`endif
       if (chg != 8'h00 && !stopped) begin
         if (room) begin
           acc   <= acc_d | (v_all << (7'd64 - acc_n_d - l_all));

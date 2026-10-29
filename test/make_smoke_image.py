@@ -1360,6 +1360,18 @@ def main() -> int:
             # v2 primitive 2 bundle 2: LOOP, five contending lanes, n = 1 2 3 7 255
             (["--branch", "loop"], "LOOP, five lanes, n = 1 / 2 / 3 / 7 / 255",
              "branch_loop_image.hex"),
+            # v2 PIT chunk 1: the SNIFF images (wire mask 0x00 / 0x03) and the
+            # stimuli tb_pit plays, from test/run_pit_capture.py's own CASES
+            (["--pit", "image", "00"], "PIT SNIFF image, mask 0x00 (all wires)",
+             "pit_mask00_image.hex"),
+            (["--pit", "image", "03"], "PIT SNIFF image, mask 0x03",
+             "pit_mask03_image.hex"),
+            (["--pit", "stim", "spi0"], "PIT stimulus: SPI mode 0 (stops FULL)",
+             "pit_spi0.stim"),
+            (["--pit", "stim", "fast_overrun"], "PIT stimulus: 2 wires, 1 edge/cycle (stops OVERRUN)",
+             "pit_fast_overrun.stim"),
+            (['--pit', 'stim', 'long_gap'], "PIT stimulus: an idle line, two gaps past 0xFFFF (saturates)",
+             "pit_long_gap.stim"),
             (["--edge", "200", "0", "edge_image"], "timeout 200, FALL", "edge_image.hex"),
             (["--edge", "0", "0", "edge_image_noto"], "no timeout, FALL", "edge_image_noto.hex"),
             (["--edge", "0", "1", "edge_image_rise"], "no timeout, RISE", "edge_image_rise.hex"),
@@ -1776,6 +1788,26 @@ def main() -> int:
         out = os.path.join(here, "tx_image.hex")
         write_image(out, img)
         print("tx image d0=%d d1=%d, %d bytes -> %s" % (d0, d1, len(img), out))
+        return 0
+    if "--pit" in sys.argv:
+        # --pit image <mask hex> | --pit stim <case>: the ONE recipe for the PIT
+        # sweep arms' inputs -- run_pit_capture's own sniff_image / CASES /
+        # waves_to_stim, so the arm plays exactly what the gate checks
+        k = sys.argv.index("--pit")
+        what, arg = sys.argv[k + 1], sys.argv[k + 2]
+        import run_pit_capture as RP
+        if what == "image":
+            out = os.path.join(here, "pit_mask%s_image.hex" % arg)
+            write_image(out, RP.sniff_image(int(arg, 16)))
+        elif what == "stim":
+            waves = {n: w for n, w, _m in RP.CASES}[arg]
+            out = os.path.join(here, "pit_%s.stim" % arg)
+            with open(out, "w", encoding="ascii", newline="\n") as fh:
+                for t, v in RP.waves_to_stim(waves):
+                    fh.write("%d %02x\n" % (t, v))
+        else:
+            raise SystemExit("--pit image <mask> | --pit stim <case>, not %r" % what)
+        print("pit %s (%s) -> %s" % (what, arg, out))
         return 0
     if "--branch" in sys.argv:
         mode = sys.argv[sys.argv.index("--branch") + 1]

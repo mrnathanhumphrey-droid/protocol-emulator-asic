@@ -129,6 +129,13 @@ EXPECT = {
     "M_LOOP_OFF1":        (2, None),
     "M_LOOP_NOEXIT":      (2, None),
     "M_LOOP_NORESET":     (2, None),
+    # v2 PIT chunk 1: the capture -- k off by one, a mask bit dropped, the
+    # overrun test dropped from `room` (a 2-line expression), the stop reason
+    "M_PIT_K_OFF1":       (2, None),
+    "M_PIT_MASK_DROP":    (2, None),
+    "M_PIT_NO_OVERRUN":   (3, "`room` is a two-line expression; the mutant keeps only its full test"),
+    "M_PIT_WHY_DROP":     (2, None),
+    "M_PIT_NO_SAT":       (2, None),
     # ruling CE1 / CE2: each new mode bit read as 0 -- the selector ignored
     "M_HALF_IGNORED":    (2, None),
     # 2 since option 1' (WF2): the XOR now lives in the one-line `run_out`,

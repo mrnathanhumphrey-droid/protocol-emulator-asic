@@ -127,3 +127,9 @@ test/branch_cmp_order_image.hex
 test/branch_cmp_mask_image.hex
 test/branch_cmp_lo_image.hex
 test/branch_loop_image.hex
+# v2 PIT chunk 1: the sweep arms' SNIFF images + stimuli (make_smoke_image.py --pit)
+test/pit_mask00_image.hex
+test/pit_mask03_image.hex
+test/pit_spi0.stim
+test/pit_fast_overrun.stim
+test/pit_long_gap.stim

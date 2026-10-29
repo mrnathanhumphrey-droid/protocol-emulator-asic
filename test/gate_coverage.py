@@ -515,7 +515,20 @@ TOGGLE_CEILING = {
     # ⚠ 186 -> 187: e_wraddr_bk's same 16 dark points (bits 0,1 of each
     # bank's copy, +12 over e_wraddr's 4); the old ceiling sat ~11 above
     # its measured count, so the rise reads as +1.
-    "src/project.v": 173,      # primitive 1's arms -10, primitive 2's -4
+    # ⚠ 173 -> 888 (+715) FOR v2 PIT CHUNK 1 (Wilson 10-28: named design
+    # growth, as LOOP's). `pe_pit` adds 1,772 toggle points and 714 are dark;
+    # ⛔ ZERO points that were covered went dark, in any file (name by name
+    # against the CMP baseline's own sweep, R:/claude_scratch/toggle_diff.py).
+    # The dark ones are STRUCTURAL to a packer: the high bits of fixed-width
+    # record wires a small k and short intervals never set (kmask 124,
+    # v_raw 81, unary 66, v_esc 65, v_gr / v_all / v_rec 136, acc / acc_d
+    # 100), the k-choice's sum / mean / v11 high bits (74), and ONE direction
+    # of each SNIFF control bit (active, sniff, stopped, ...: no arm leaves
+    # SNIFF or resets mid-run). The three tb_pit arms (FULL, mask 0x03,
+    # OVERRUN) are what reach the rest.
+    # ⭐ 888 -> 843 (RATCHETED DOWN): the long-gap arm (an idle bus, the
+    # interval saturates -- Nate / Wilson 10-28) pays line 1217 and 45 toggles.
+    "src/project.v": 843,      # primitive 1's arms -10, primitive 2's -4, PIT c1 +670
     # ⭐ RATCHETED DOWN BY THE SELF-CLOCKED CORPUS, and the cause is worth
     # recording: the rewritten corpus drives WHOLE BYTES through the peer
     # models instead of two bits per clock, so `fram_spi` went 54 -> 30

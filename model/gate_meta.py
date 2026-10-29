@@ -168,6 +168,8 @@ SEAMS = (
     ("model/gate_v2_equiv.py", "gate_v2_equiv.same", "slow", "T"),
     # v2 primitive 1: `run_problems` always empty -> the six M_BR_* survive
     ("test/run_branch_check.py", "run_branch_check.run_problems", "slow", "E"),
+    # v2 PIT chunk 1: `compare` always finds no problem -> the five M_PIT_* survive
+    ("test/run_pit_capture.py", "run_pit_capture.compare", "slow", "E0"),
 )
 
 #: Gates with NO stubbable check, each with why -- every gate in

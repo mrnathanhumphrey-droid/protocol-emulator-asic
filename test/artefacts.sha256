@@ -31,6 +31,11 @@ b41d3bebfcbf1473b75f1be49970db71c476da8249d068e81e69331cbd62dcef  branch_wbad_im
 523edd8cdf16e14c0ae08d820f27a7e3d09dc46f832835ecd0042dbbb4ae5f9c  branch_cmp_mask_image.hex  # make_smoke_image.py --branch cmp_mask
 b78ddb8cdee95c8605e1a5d6c1eeaf89b19eea5b54faa06d09c1ff4ad8eff9bd  branch_cmp_lo_image.hex  # make_smoke_image.py --branch cmp_lo
 2ec97558d7ac89c9c8807dc89b3a0c922f89f7fcc4ed852902357dc7b53bb867  branch_loop_image.hex  # make_smoke_image.py --branch loop
+2e4eb7591f33e6496b0b438fbdcf98b1634c55238fd2cb8fa1f0fedc838d5364  pit_mask00_image.hex  # make_smoke_image.py --pit image 00
+a8d3b21b0506eea064f1293e6be6703f2ff40b4fb58490f100eaeb6bd32cbd77  pit_mask03_image.hex  # make_smoke_image.py --pit image 03
+9493de74ff18367968e881e1ca38b3a8c7c073259c2024186fd410969557467e  pit_spi0.stim  # make_smoke_image.py --pit stim spi0
+11ae6a6086777e963e9f0c8991d3d483a777b8fef5721b72d67d9a9b1cb33b06  pit_fast_overrun.stim  # make_smoke_image.py --pit stim fast_overrun
+4ddf714af2b3a4f69fcd7b57978c77f91ed246684e94dd5cba94e9181b2e7a99  pit_long_gap.stim  # make_smoke_image.py --pit stim long_gap
 22bb426ced5bfdb59a0ed466fce2d109f3ad956dd8b98047801fa0307c9dee3a  edge_image.hex  # make_smoke_image.py --edge 200 0 edge_image
 3382f5bc554060df80dbac428a3a56e33e6c4b800db9c7b4a4086f0a07f3a344  edge_image_noto.hex  # make_smoke_image.py --edge 0 0 edge_image_noto
 4001b62231792b152d8deae176592e7e9fb213dd1fe04decbbcc16ffc4247c38  edge_image_rise.hex  # make_smoke_image.py --edge 0 1 edge_image_rise

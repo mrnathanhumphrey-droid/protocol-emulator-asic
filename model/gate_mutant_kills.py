@@ -63,6 +63,10 @@ KILLERS = {
     # -- v2 step 2: the load's magic check (the equivalence gate's load section)
     "M_NO_MAGIC": "model/gate_v2_equiv.py",
     "M_PREDECODE_STALE": "test/run_branch_check.py",
+    # -- v2 PIT chunk 1: the SNIFF capture, bit for bit vs the golden encoder
+    "M_PIT_K_OFF1": "test/run_pit_capture.py", "M_PIT_MASK_DROP": "test/run_pit_capture.py",
+    "M_PIT_NO_OVERRUN": "test/run_pit_capture.py", "M_PIT_WHY_DROP": "test/run_pit_capture.py",
+    "M_PIT_NO_SAT": "test/run_pit_capture.py",
     # CE1: the rebase at the observed rise (an `elsif` arm, undiscovered
     # until 10-27) -- killed on t_HIGH >= d by the UM10204 gate
     "M_CK_RISE_ELIGIBLE": "model/a2/gate_um10204.py",

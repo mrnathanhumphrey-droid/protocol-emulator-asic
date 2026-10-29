@@ -41,7 +41,8 @@ GEN = "run_pit_capture"
 NCYC = 60000
 MUTANTS = [("M_PIT_K_OFF1", "k one too large"), ("M_PIT_MASK_DROP", "mask bit 0 never recorded"),
            ("M_PIT_NO_OVERRUN", "no stop on an accumulator overrun"),
-           ("M_PIT_WHY_DROP", "the stop reason always reads FULL")]
+           ("M_PIT_WHY_DROP", "the stop reason always reads FULL"),
+           ("M_PIT_NO_SAT", "the interval wraps instead of saturating")]
 RNG = random.Random(20261028)
 
 
@@ -122,8 +123,28 @@ def fast():
     return {6: [((k & 1), 2) for k in range(200)], 7: [(0, 1)] + [((k & 1), 2) for k in range(200)]}
 
 
+def long_gap():
+    """a line that IDLES past the 16-bit interval (Nate / Wilson 10-28: real buses
+    sit idle between bursts, so the saturated interval is in nearly every real
+    capture). Two gaps over 0xFFFF cycles: one inside the 16 RAW records (the
+    raw interval field saturates) and one after k is chosen (the coded record's
+    ESCAPE carries the saturated interval)."""
+    segs, lvl = [(1, 60)], 0
+    for gap_at, n in ((None, 8), (70000, 12), (90000, 10)):
+        if gap_at:
+            segs.append((lvl, gap_at))
+            lvl ^= 1
+        for _ in range(n):
+            segs.append((lvl, 50 + RNG.randint(0, 20)))
+            lvl ^= 1
+    return {5: segs}
+
+
 CASES = [("spi0", spi(0), 0x00), ("spi3", spi(3), 0x00), ("spi0_mask03", spi(0), 0x03),
-         ("i2c", i2c(), 0x00), ("uarts_2to1", uarts(), 0x00), ("fast_overrun", fast(), 0x00)]
+         ("i2c", i2c(), 0x00), ("uarts_2to1", uarts(), 0x00), ("fast_overrun", fast(), 0x00),
+         ("long_gap", long_gap(), 0x00)]
+#: per-case PIT cycles where a case outlasts NCYC (the long gaps: 160k + bursts)
+NCYC_FOR = {"long_gap": 175000}
 
 
 def run(cmd):
@@ -147,7 +168,8 @@ def sim(vvp, tmp, name, img, stim):
             fh.write("%d %02x\n" % (t, v))
     op = os.path.join(tmp, "pitcap_%s.out" % name)
     r = run(sim_run.vvp([vvp, "+IMG=%s" % ip, "+NBYTES=%d" % I.STORE_BYTES, "+STIM=%s" % sp,
-                         "+OUT=%s" % op, "+NCYC=%d" % NCYC], images=[ip]))
+                         "+OUT=%s" % op, "+NCYC=%d" % NCYC_FOR.get(name[:-2] if name.endswith("_m") else name, NCYC)],
+                        images=[ip]))
     log, mem = [], {}
     with open(op, encoding="ascii") as fh:
         for ln in fh:
@@ -192,6 +214,12 @@ def main() -> int:
         if not log:
             p.append("no edge was logged -- the case is vacuous")
         whys.add(why)
+        if name == "long_gap":
+            # the case is vacuous unless an interval really passes 0xFFFF in BOTH
+            # phases: one among the 16 raw records, one among the coded ones
+            ivs = [b[0] - a[0] for a, b in zip([(0, 0)] + log, log)]
+            if not (any(i > PG.SAT for i in ivs[:PG.N_RAW]) and any(i > PG.SAT for i in ivs[PG.N_RAW:n])):
+                p.append("no saturated interval in both the raw and the coded phase -- vacuous")
         if name == "fast_overrun" and why != "overrun":
             p.append("the overrun case stopped on %r, not an overrun" % why)
         probs += ["%s: %s" % (name, x) for x in p]
