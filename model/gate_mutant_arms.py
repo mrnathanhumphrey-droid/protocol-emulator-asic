@@ -76,7 +76,7 @@ EXPECT = {
     "M_BUF_NOINVAL":     (2, None),
     "M_BUF_SWAP":        (2, None),
     "M_COMB_OUT":        (4, None),
-    "M_NO_PRIME":        (4, None),
+    "M_NO_PRIME":        (6, "4 + 2 (arm B, 10-29): the `cur_rel` replica's enable repeats the dispatch condition so the replica loads exactly when `cur` does under this mutant too"),
     "M_BUF_CHAINFLIP":   (3, None),
     # ⭐ TWO LINES, WHICH IS ONE SUBSTITUTION: `assign host_q = a_q;` becomes
     # `assign host_q = 2'd0;`, so the diff is one line removed and one added --
@@ -441,7 +441,7 @@ EXPECT = {
         "else, and the clock write then drove the aliased pin anyway: a "
         "refusal that still drives the pin it refuses is the defect with a "
         "flag set beside it."),
-    "M_TIMEOUT_PROCEED": (6,
+    "M_TIMEOUT_PROCEED": (7,  # +1 (arm B, 10-29): the replica enable's `& ~w_armed`, the same condition
         "a BLOCK substitution, declared: the mutation removes the halt -- "
         "clearing l_live, l_armed and the sticky flag -- and there is no single "
         "expression whose value expresses 'do not halt'. The arms share no "

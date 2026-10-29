@@ -84,7 +84,7 @@ PREMISES = [
     ("P8", "a lane's gap is exactly its writeback delay -- ABSOLUTE advance",
      "l_timestamp[cur] <= l_timestamp[cur] + {{(TS_W-DLY_W){1'b0}}, wb_dly};"),
     ("P8h", "the writeback delay: d, or d/2 for a HALF_HIGH lane's HIGH",
-     "wire [DLY_W-1:0] wb_dly = (ck_act & ck_is_high & half_v[cur])"),
+     "wire [DLY_W-1:0] wb_dly = (ck_act & (l_ckph[cur_rel] == CK_HIGH) & half_v[cur_rel])"),
     # ⭐ v2 primitive 1 (Wilson 10-27): a BRANCH_BIT's writeback delay is its
     # wait W >= D* + B -- a per-writeback delay with a lower bound, which V4
     # already admits, so the core is untouched; the line is anchored so a
