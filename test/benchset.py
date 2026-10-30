@@ -295,7 +295,21 @@ CONFIG = {
                                "+NCYC=200000", "+S0WAIT=1"]),
                  ("s0_offpin", ["+IMG=test/pit_mask00_b14_image.hex", "+NBYTES=512",
                                 "+STIM=test/pit_mosi_cs_offpin.stim", "+OUT=probe_cov_pit_s0_offpin.out",
-                                "+NCYC=2000000", "+S0WAIT=1"])],
+                                "+NCYC=2000000", "+S0WAIT=1"]),
+                 # coverage arms (10-29): the second FRAME pass + start levels, k = 0, the empty walk
+                 ("s0_frame2", ["+IMG=test/pit_mask00_b12_image.hex", "+NBYTES=512",
+                                "+STIM=test/pit_frame2.stim", "+OUT=probe_cov_pit_s0_frame2.out",
+                                "+NCYC=2000000", "+S0WAIT=1"]),
+                 ("s0_k0", ["+IMG=test/pit_mask00_b9_image.hex", "+NBYTES=512",
+                            "+STIM=test/pit_k0.stim", "+OUT=probe_cov_pit_s0_k0.out",
+                            "+NCYC=200000", "+S0WAIT=1"]),
+                 ("s0_empty", ["+IMG=test/pit_mask00_b10_image.hex", "+NBYTES=512",
+                               "+STIM=test/pit_empty.stim", "+OUT=probe_cov_pit_s0_empty.out",
+                               "+NCYC=200000", "+S0WAIT=1"]),
+                 # Nate 10-29: the bus joined mid-transfer (start levels CS low / SCK high)
+                 ("s0_midstream", ["+IMG=test/pit_mask00_b13_image.hex", "+NBYTES=512",
+                                   "+STIM=test/pit_midstream.stim", "+OUT=probe_cov_pit_s0_midstream.out",
+                                   "+NCYC=2000000", "+S0WAIT=1"])],
     },
     "tb_edge": {
         "srcs": [],

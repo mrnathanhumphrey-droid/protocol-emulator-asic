@@ -57,8 +57,10 @@ def sniff_image(mask, b=0):
     return bytes(img)
 
 
-def waves_to_stim(waves, t0=50):
-    """{wire: [(level, cycles)]} -> [(cycle, uio value)] (one line per change)."""
+def waves_to_stim(waves, t0=50, pre=False):
+    """{wire: [(level, cycles)]} -> [(cycle, uio value)] (one line per change).
+    pre=True: the starting levels go at cycle -1, which tb_pit drives BEFORE
+    the PIT starts (so they are the start levels, not an edge at t0 - 1)."""
     ev = {}
     for w, segs in waves.items():
         t, prev = t0, None
@@ -66,7 +68,7 @@ def waves_to_stim(waves, t0=50):
             if prev is not None and lvl != prev:
                 ev.setdefault(t, {})[w] = lvl
             elif prev is None:
-                ev.setdefault(t0 - 1, {})[w] = lvl
+                ev.setdefault(-1 if pre else t0 - 1, {})[w] = lvl
             prev = lvl
             t += c
     out, v = [], 0

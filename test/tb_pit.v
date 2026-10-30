@@ -76,13 +76,20 @@ module tb_pit;
       ui_in[PIN_WR] = 1'b0;
       @(negedge clk);
     end
-    uio_drv = 8'h00;
+    // a first line at a NEGATIVE cycle is the bus's level BEFORE the PIT
+    // starts (the start-levels byte, coverage 10-29); otherwise the bus is 0
+    sfd = $fopen(stimfile, "r");
+    st_cyc = 0;
+    r = $fscanf(sfd, "%d %h\n", st_cyc, st_val);
+    uio_drv = (r == 2 && st_cyc < 0) ? st_val[7:0] : 8'h00;
     ui_in[PIN_PROG] = 1'b0;
     ui_in = 8'h00;
     // wait for the PIT to start, then play the stimulus on its own clock
     while (pc < 0) @(negedge clk);
-    sfd = $fopen(stimfile, "r");
-    st_cyc = 0;
+    if (r == 2 && st_cyc >= 0) begin
+      while (pc < st_cyc) @(negedge clk);
+      uio_drv = st_val[7:0];
+    end
     while (!$feof(sfd)) begin
       r = $fscanf(sfd, "%d %h\n", st_cyc, st_val);
       if (r == 2) begin

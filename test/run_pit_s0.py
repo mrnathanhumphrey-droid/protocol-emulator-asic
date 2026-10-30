@@ -140,6 +140,79 @@ def floor_edge(m=40):
     return edges_to_waves(edges, {4: 0}, t + 100), t + 100
 
 
+def frame2(B=1, n_bursts=6, half=12, seed=5):
+    """the second FRAME pass and the ambiguity rule's refusal (coverage, 10-29):
+    SCK 0 CPOL 0 (idle low), CS 1 per burst (the pair loop's FRAME, which makes
+    SCK a CLOCK), CS 2 around ONE burst only -- 2 edges, so the pair loop
+    rejects it and only the FRAME pass can claim it -- and a stray wire 3 with
+    3 edges mid-burst: a rise with SCK high, a fall with it low, a rise with it
+    high (the I2C check's STOP after STOP; not in an idle gap, so no FRAME).
+    Both CS idle HIGH from cycle 0: the start-levels byte is not 0. SCK is low
+    at every CS edge, so no FRAME is AMBIGUOUS."""
+    rng = random.Random(seed)
+    edges = {0: [], 1: [], 2: [], 3: []}
+    t = 300
+    for g in range(n_bursts):
+        edges[1].append((t - half - 10, 0))
+        if g == 2:
+            # > 4 SCK half-periods (48) from any SCK edge: the FRAME pass's test
+            edges[2].append((t - 100, 0))
+        for k in range(B):
+            for i in range(8):
+                edges[0] += [(t, 1), (t + half, 0)]
+                if g == 3 and k == 0 and i in (1, 3, 5):
+                    # SCK is high over [t, t + half): rise, then fall low, then rise
+                    edges[3].append((t + 2, 1) if i != 3 else (t + half + 2, 0))
+                t += 2 * half
+            rng.getrandbits(8)
+        edges[1].append((t - half + 10, 1))
+        if g == 2:
+            edges[2].append((t - half + 100, 1))
+        t += 260 + rng.randint(0, 140)
+    return edges_to_waves(edges, {0: 0, 1: 1, 2: 1, 3: 0}, t + 100), t + 100
+
+
+def midstream(k=7):
+    """plugging into a bus ALREADY MID-TRANSFER (Nate 10-29): CPOL-1 SPI with CS
+    + MOSI, 1-byte bursts, the capture starting 2 cycles before SCK's k-th fall
+    inside burst 0 -- CS asserted (0), SCK high, MOSI at its data level, the
+    first edge in the first few cycles (asserted on the bench's log in main())."""
+    w, te = spi_cpol1(1, 10, 12, mosi=True, seed=11)
+    ev = {}
+    for wire, segs in w.items():
+        t, out = 0, []
+        for lvl, c in segs:
+            out.append((t, lvl))
+            t += c
+        ev[wire] = out                       # [(t, level from t)], the first at 0
+    falls = [t for t, l in ev[0][1:] if l == 0]
+    tc = falls[k] - 2
+    init, edges = {}, {}
+    for wire, out in ev.items():
+        init[wire] = [l for t, l in out if t <= tc][-1]
+        edges[wire] = [(t - tc, l) for t, l in out[1:] if t > tc]
+    return edges_to_waves(edges, init, te - tc), te - tc
+
+
+def k0(n=40):
+    """the coded record with NO low bits (k = 0, coverage 10-29): a wire that
+    toggles 3, 3, 3, 2 cycles apart from cycle 1, so the first 16 raw
+    intervals average under 3 (k_of -> 0) while the accumulator stays under
+    its 64 bits (asserted on the stored capture in main())."""
+    edges, t, lvl = {5: []}, 1, 0
+    for i in range(n):
+        lvl ^= 1
+        edges[5].append((t, lvl))
+        t += 2 if i % 4 == 3 else 3
+    return edges_to_waves(edges, {5: 0}, t + 100), t + 100
+
+
+#: per-case stimulus options (waves_to_stim): the start levels driven BEFORE
+#: the PIT starts, and k0's first edge right after it (coverage, 10-29)
+STIM_OPTS = {"frame2": {"pre": True}, "k0": {"pre": True, "t0": 1},
+             "midstream": {"pre": True, "t0": 1}}
+
+
 def budget_for(t_end):
     """the smallest power-of-two budget past the case's own end."""
     b = 1
@@ -169,6 +242,14 @@ def cases():
     out.append(("mosi_cs_offpin", w, 0x00, budget_for(te), None, None))
     w, te = floor_edge()
     out.append(("floor_edge", w, 0x00, budget_for(te), None, None))
+    w, te = frame2()
+    out.append(("frame2", w, 0x00, budget_for(te), None, None))
+    w, te = k0()
+    out.append(("k0", w, 0x00, budget_for(te), None, None))
+    w, te = midstream()
+    out.append(("midstream", w, 0x00, budget_for(te), None, None))
+    # the empty walk: the budget ends a capture that recorded nothing
+    out.append(("empty", {0: [(0, 2000)]}, 0x00, 10, None, None))
     return out
 
 
@@ -241,6 +322,12 @@ def role_codes(table_bytes):
     return {(word >> (7 * w)) & 7 for w in range(8)}
 
 
+def role_of(table_bytes, w):
+    """wire w's role code in a stage-0 table (entry w at bit 7w, role in [2:0])."""
+    word = int.from_bytes(table_bytes, "little")
+    return (word >> (7 * w)) & 7
+
+
 def main() -> int:
     banner("iverilog", "vvp")
     print()
@@ -255,7 +342,7 @@ def main() -> int:
     cs = cases()
     for case in cs:
         name, waves, mask, b, ncyc, _e = case
-        stim = RP.waves_to_stim(waves)
+        stim = RP.waves_to_stim(waves, **STIM_OPTS.get(name, {}))
         # a no-budget case with its own cycle count is the IDLE line that never
         # stops (long_gap): stage 0 must not run, so it runs only that long
         run_len = ncyc if (not b and name in RP.NCYC_FOR) else NCYC_MAX
@@ -284,6 +371,30 @@ def main() -> int:
     if not (srt[kf] < 8 <= srt[kf + 1]):
         probs.append("floor_edge has no teeth as stored: sorted[%d] = %d, sorted[%d] = %d"
                      % (kf, srt[kf], kf + 1, srt[kf + 1]))
+    # k0 and frame2 have teeth only AS STORED (coverage arms, 10-29): k0's
+    # first 16 raw intervals give k = 0 without an overrun; frame2's wire 2 is
+    # a FRAME with 2 edges (only the FRAME pass can make it one)
+    log_k, lv_k, _w = results["k0"]
+    kc = [c for c in cs if c[0] == "k0"][0]
+    st_k = S0.stored_capture(log_k, lv_k, RP.PG.budget_cycles(kc[3]), NCYC_MAX)
+    tk = [t for t, _m_, _l in st_k]
+    k_st = RP.PG.k_of([b_ - a for a, b_ in zip([0] + tk, tk)][:16])
+    why_k = RP.PG.encode(log_k, RP.PG.budget_cycles(kc[3]), NCYC_MAX)[3]
+    if len(tk) <= 16 or k_st != 0 or why_k != "budget":
+        probs.append("k0 has no teeth as stored: %d records, k = %d, stop %s" % (len(tk), k_st, why_k))
+    log_f, lv_f, want_f = results["frame2"]
+    fc_ = [c for c in cs if c[0] == "frame2"][0]
+    st_f = S0.stored_capture(log_f, lv_f, RP.PG.budget_cycles(fc_[3]), NCYC_MAX)
+    n2 = sum(1 for _t, m_, _l in st_f if m_ >> 2 & 1)
+    w2 = role_of(want_f, 2)
+    if n2 != 2 or w2 != S0.R_FRAME or not (lv_f >> 1 & 1):
+        probs.append("frame2 has no teeth as stored: wire 2 edges %d, role %d, start levels %02x" % (n2, w2, lv_f))
+    # midstream has teeth only if the bench REALLY woke up mid-transfer: CS (1)
+    # asserted and SCK (0) high at the start, the first edge within 8 cycles
+    log_m, lv_m, _w = results["midstream"]
+    if not log_m or log_m[0][0] > 8 or (lv_m >> 1 & 1) or not (lv_m & 1):
+        probs.append("midstream did not start mid-transfer: start levels %02x, first edge at %s"
+                     % (lv_m, log_m[0][0] if log_m else None))
     print("\n  must-fires")
     model = S0.frozen_model()
     by = {c[0]: c for c in cs}
@@ -308,7 +419,8 @@ def main() -> int:
         broke = []
         for tname in targets:
             c = by[tname]
-            log, mem, lv0, s0 = sim(mv, tmp, tname + "_m", RP.sniff_image(c[2], c[3]), RP.waves_to_stim(c[1]),
+            log, mem, lv0, s0 = sim(mv, tmp, tname + "_m", RP.sniff_image(c[2], c[3]),
+                                    RP.waves_to_stim(c[1], **STIM_OPTS.get(tname, {})),
                                     NCYC_MAX)
             got = bytes((mem.get(S0.TABLE_AT + i, -1) & 0xFF) for i in range(S0.TABLE_BYTES))
             if table_problems(got, results[tname][2]):

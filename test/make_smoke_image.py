@@ -1389,6 +1389,21 @@ def main() -> int:
              "pit_mask00_b14_image.hex"),
             (["--pit", "image", "00", "11"], "PIT SNIFF image, mask 0x00, budget 2^11 cycles",
              "pit_mask00_b11_image.hex"),
+            # coverage arms (10-29): the second FRAME pass, k = 0, the empty walk
+            (["--pit", "stim", "frame2"], "PIT stimulus: CPOL-0 SPI, a 2-edge CS, a stray wire",
+             "pit_frame2.stim"),
+            (["--pit", "stim", "k0"], "PIT stimulus: one wire 3, 3, 3, 2 cycles apart (k = 0)", "pit_k0.stim"),
+            (["--pit", "stim", "empty"], "PIT stimulus: a silent bus (the budget ends it empty)",
+             "pit_empty.stim"),
+            (["--pit", "image", "00", "9"], "PIT SNIFF image, mask 0x00, budget 2^9 cycles",
+             "pit_mask00_b9_image.hex"),
+            (["--pit", "image", "00", "10"], "PIT SNIFF image, mask 0x00, budget 2^10 cycles",
+             "pit_mask00_b10_image.hex"),
+            # Nate 10-29: plugging into a bus ALREADY mid-transfer
+            (["--pit", "stim", "midstream"], "PIT stimulus: SPI joined mid-byte (CS low, SCK high)",
+             "pit_midstream.stim"),
+            (["--pit", "image", "00", "13"], "PIT SNIFF image, mask 0x00, budget 2^13 cycles",
+             "pit_mask00_b13_image.hex"),
             (["--edge", "200", "0", "edge_image"], "timeout 200, FALL", "edge_image.hex"),
             (["--edge", "0", "0", "edge_image_noto"], "no timeout, FALL", "edge_image_noto.hex"),
             (["--edge", "0", "1", "edge_image_rise"], "no timeout, RISE", "edge_image_rise.hex"),
@@ -1820,13 +1835,13 @@ def main() -> int:
             write_image(out, RP.sniff_image(int(arg, 16), b))
         elif what == "stim":
             # the capture gate's cases, then stage 0's own (chunk 2)
-            waves = {n: w for n, w, _m in RP.CASES}.get(arg)
+            waves, opts = {n: w for n, w, _m in RP.CASES}.get(arg), {}
             if waves is None:
                 import run_pit_s0 as RS0
-                waves = {c[0]: c[1] for c in RS0.cases()}[arg]
+                waves, opts = {c[0]: c[1] for c in RS0.cases()}[arg], RS0.STIM_OPTS.get(arg, {})
             out = os.path.join(here, "pit_%s.stim" % arg)
             with open(out, "w", encoding="ascii", newline="\n") as fh:
-                for t, v in RP.waves_to_stim(waves):
+                for t, v in RP.waves_to_stim(waves, **opts):
                     fh.write("%d %02x\n" % (t, v))
         else:
             raise SystemExit("--pit image <mask> | --pit stim <case>, not %r" % what)

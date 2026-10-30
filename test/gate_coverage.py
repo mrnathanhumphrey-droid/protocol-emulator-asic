@@ -193,6 +193,24 @@ CLASSIFIED = {
         "what underwrites `st` being reset at all."),
 
     # ---- src/project.v ----------------------------------------------------
+    # ⭐ PIT chunk 2, stage 0 (Wilson 10-29, both proofs accepted)
+    ("src/project.v", 1419, "v_branch", "if"): (
+        UNREACHABLE,
+        "stage 0's clock_like guard: each level needs >= 4 intervals. P_CLVL "
+        "is entered only from P_CNEXT, which requires cnt[ci] >= "
+        "MIN_CLOCK_EDGES = 16 edges on the candidate c. One wire's edges "
+        "ALTERNATE level (each edge toggles it), so 16 edges give 15 "
+        "intervals split 8 / 7 between the two levels: nlv0, nlv1 >= 7 > 4. "
+        "The guard mirrors the frozen model's own check and stays."),
+    ("src/project.v", 1542, "v_line", "case"): (
+        UNREACHABLE,
+        "stage 0's sequencer `default`. `ph` is [4:0] with 19 named states "
+        "P_IDLE .. P_DONE = 5'd0 .. 5'd18; every `ph <=` writes a named P_* "
+        "or m_ret / w_ret, and those two are written only with named P_* "
+        "states, so 5'd19 .. 5'd31 is reachable only by corruption of a "
+        "reset-bearing flop. The arm stays as a defensive return to P_IDLE. "
+        "NOT in the structural check, which reads pe_engine.v only and would "
+        "read m_ret / w_ret as unnamed encodings."),
     # ⭐⭐ COVERED NOW, AND IT PASSED THROUGH `COCOTB_ONLY` TO GET HERE.
     # `src/project.v` 411 -- a host PUSH and an engine POP on the SAME queue
     # in one cycle -- was tabled OWED, then the cocotb cross-check reported
@@ -511,7 +529,9 @@ TOGGLE_CEILING = {
     # ⭐ RATCHETED DOWN by v2 primitive 1's sweep arms (branch, branch_wbad,
     # branch_spl1): the branch images drive words, targets and the wait W
     # through bits no v1 image sets (measured locally; local == CI on step 2).
-    "src/pe_store.v": 26,         # primitive 2's CMP arms: -4
+    # ⭐ 26 -> 18 (RATCHETED DOWN, Wilson 10-29): stage 0 reads the capture
+    # through the narrow port, so raddr / rrow's high bits toggle (8 paid).
+    "src/pe_store.v": 18,         # primitive 2's CMP arms: -4; PIT c2 stage 0 -8
     # ⚠ 186 -> 187: e_wraddr_bk's same 16 dark points (bits 0,1 of each
     # bank's copy, +12 over e_wraddr's 4); the old ceiling sat ~11 above
     # its measured count, so the rise reads as +1.
@@ -534,7 +554,18 @@ TOGGLE_CEILING = {
     # the one budget arm is b = 12, so bud_cnt's 24 high bits (48), the budget
     # byte's other bits (bsel / bud_cfg / pit_bud 16), n_whole's high bits (17)
     # and one direction of why_bud never toggle.
-    "src/project.v": 923,      # primitive 1's arms -10, primitive 2's -4, PIT c1 +670, c2a +80
+    # ⚠ 923 -> 1738 (+815) FOR PIT CHUNK 2, STAGE 0 (Wilson 10-29: named design
+    # growth): 906 new dark points, 0 covered points lost, 24 paid (acc /
+    # acc_d / prev), name by name vs chunk 1's sweep (toggle_diff.py). The
+    # dark ones are STRUCTURAL to fixed-width state small cases never fill:
+    # the 25-bit times / medians' high bits (t, last_t, pend_x, med0 / med1 /
+    # med_l / half / m_ans, two_h / four_h: ~300), the per-wire tables for
+    # wires no arm uses (cnt 64, role / part / rank / clvl ~130, tword 58),
+    # the budget counter's high bits (bud_cnt 44), and one direction of each
+    # done / refused bit (no arm runs stage 0 twice). The arms frame2, k0,
+    # empty and midstream (Nate 10-29) are what reach the rest, and the start
+    # levels now toggle on wires 0, 1 and 3 (cap_lv0 16 -> 12).
+    "src/project.v": 1738,     # primitive 1's arms -10, primitive 2's -4, PIT c1 +670, c2a +80, c2 +815
     # ⭐ RATCHETED DOWN BY THE SELF-CLOCKED CORPUS, and the cause is worth
     # recording: the rewritten corpus drives WHOLE BYTES through the peer
     # models instead of two bits per clock, so `fram_spi` went 54 -> 30
@@ -621,6 +652,10 @@ ANCHOR_TEXT = {
     # was recorded beside the line number, so the deletion had to account for
     # the anchor instead of leaving a live number pointing at whatever moved
     # into line 557.
+    ("src/project.v", 1419):
+        "P_CLVL: if (nlv0 < 9'd4 || nlv1 < 9'd4) begin regular <= 1'b0; ph <= P_CHALF; end",
+    ("src/project.v", 1542):
+        "default: ph <= P_IDLE;",
     ("test/fram_i2c.v", 281):
         "P_WDATA: begin",
     # ruling SP1: what the real WREN/WRITE/READ transaction does not send

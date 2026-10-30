@@ -141,3 +141,10 @@ test/pit_floor_edge.stim
 test/pit_mosi_cs_offpin.stim
 test/pit_mask00_b14_image.hex
 test/pit_mask00_b11_image.hex
+test/pit_frame2.stim
+test/pit_k0.stim
+test/pit_empty.stim
+test/pit_mask00_b9_image.hex
+test/pit_mask00_b10_image.hex
+test/pit_midstream.stim
+test/pit_mask00_b13_image.hex
