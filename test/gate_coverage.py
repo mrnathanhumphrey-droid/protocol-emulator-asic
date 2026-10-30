@@ -194,7 +194,7 @@ CLASSIFIED = {
 
     # ---- src/project.v ----------------------------------------------------
     # ⭐ PIT chunk 2, stage 0 (Wilson 10-29, both proofs accepted)
-    ("src/project.v", 1419, "v_branch", "if"): (
+    ("src/project.v", 1423, "v_branch", "if"): (
         UNREACHABLE,
         "stage 0's clock_like guard: each level needs >= 4 intervals. P_CLVL "
         "is entered only from P_CNEXT, which requires cnt[ci] >= "
@@ -202,7 +202,7 @@ CLASSIFIED = {
         "ALTERNATE level (each edge toggles it), so 16 edges give 15 "
         "intervals split 8 / 7 between the two levels: nlv0, nlv1 >= 7 > 4. "
         "The guard mirrors the frozen model's own check and stays."),
-    ("src/project.v", 1542, "v_line", "case"): (
+    ("src/project.v", 1546, "v_line", "case"): (
         UNREACHABLE,
         "stage 0's sequencer `default`. `ph` is [4:0] with 19 named states "
         "P_IDLE .. P_DONE = 5'd0 .. 5'd18; every `ph <=` writes a named P_* "
@@ -652,9 +652,9 @@ ANCHOR_TEXT = {
     # was recorded beside the line number, so the deletion had to account for
     # the anchor instead of leaving a live number pointing at whatever moved
     # into line 557.
-    ("src/project.v", 1419):
+    ("src/project.v", 1423):
         "P_CLVL: if (nlv0 < 9'd4 || nlv1 < 9'd4) begin regular <= 1'b0; ph <= P_CHALF; end",
-    ("src/project.v", 1542):
+    ("src/project.v", 1546):
         "default: ph <= P_IDLE;",
     ("test/fram_i2c.v", 281):
         "P_WDATA: begin",

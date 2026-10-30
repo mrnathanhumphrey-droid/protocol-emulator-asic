@@ -1381,6 +1381,10 @@ module pe_pit_s0 #(parameter integer AW = 9) (
 `else
   wire [NW-1:0] m_keff = m_k;
 `endif
+  // ⛔ ITS OWN loop variable: `i` belongs to the counting block above, and an
+  // integer written by two processes is 32 conflicting drivers to synthesis
+  // (LibreLane's pre-synth check, canary 10-30) though simulation never minds
+  integer ri;
   always @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
       ph <= P_IDLE; m_ret <= P_IDLE; w_ret <= P_IDLE; walk_go <= 1'b0; wk <= W_CNT;
@@ -1389,10 +1393,10 @@ module pe_pit_s0 #(parameter integer AW = 9) (
       med0 <= {TW{1'b0}}; med1 <= {TW{1'b0}}; half <= {TW{1'b0}};
       m_ans <= {TW{1'b0}}; m_bit <= 5'd0; m_k <= {NW{1'b0}};
       we <= 1'b0; waddr <= {AW{1'b0}}; wdata <= 8'h00; nrank <= 4'd0;
-      for (i = 0; i < 8; i = i + 1) begin role[i] <= R_NONE; part[i] <= 3'd0; clvl[i] <= 1'b0; rank[i] <= 3'd0; end
+      for (ri = 0; ri < 8; ri = ri + 1) begin role[ri] <= R_NONE; part[ri] <= 3'd0; clvl[ri] <= 1'b0; rank[ri] <= 3'd0; end
     end else if (!run) begin
       ph <= P_IDLE; walk_go <= 1'b0; we <= 1'b0; done <= 1'b0; refused <= 1'b0; nrank <= 4'd0;
-      for (i = 0; i < 8; i = i + 1) begin role[i] <= R_NONE; part[i] <= 3'd0; clvl[i] <= 1'b0; rank[i] <= 3'd0; end
+      for (ri = 0; ri < 8; ri = ri + 1) begin role[ri] <= R_NONE; part[ri] <= 3'd0; clvl[ri] <= 1'b0; rank[ri] <= 3'd0; end
     end else begin
       walk_go <= 1'b0;
       we <= 1'b0;

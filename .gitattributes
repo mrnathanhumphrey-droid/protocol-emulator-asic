@@ -17,3 +17,10 @@
 # ending of a byte-identical file and showed it as modified. Pinned to LF on
 # checkout, a regeneration that changes nothing now shows nothing.
 *.hex text eol=lf
+
+# Python -- the models, the gates and every frozen-hash check (Wilson 10-30).
+# A check that hashes a file's bytes saw CRLF here and LF on CI: the frozen
+# stage-0 model (e55d0b63 on Windows, f19f2177 on CI, the same text) made the
+# gate refuse to run on CI only. The checks now normalise CRLF -> LF; this pins
+# the checkout too, so both platforms hold the same bytes.
+*.py text eol=lf

@@ -18,7 +18,12 @@ import re
 import pit_capture_golden as PG
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-FROZEN = "e55d0b631037afade63ae98193a7f4f35520998a667d123b4b3f3a61d6b304b9"
+# ⛔ HASHED WITH LF LINE ENDINGS (CI 40989880597, 10-30). The rule set was
+# stamped as e55d0b63 -- the sha256 of a Windows CRLF checkout -- and CI's LF
+# checkout of the SAME text hashed f19f2177, so the gate refused to run there.
+# f19f2177 IS e55d0b63's text with LF endings (verified byte for byte); the
+# check normalises CRLF -> LF first, as gate_manifest / run_w_sweep do.
+FROZEN = "f19f2177d243b9f1bdea124d6ef2d16d6c9effeddd47da02c1c57b65da7d86eb"   # = e55d0b63 as LF
 TABLE_AT, TABLE_BYTES = 32, 7
 R_NONE, R_CLOCK, R_SYNC, R_FRAME, R_AMBIG, R_CLOCK_I2C, R_SYNC_I2C, R_REFUSED = range(8)
 
@@ -26,7 +31,7 @@ R_NONE, R_CLOCK, R_SYNC, R_FRAME, R_AMBIG, R_CLOCK_I2C, R_SYNC_I2C, R_REFUSED = 
 def frozen_model():
     path = os.path.join(HERE, "pit_golden.py")
     with open(path, "rb") as fh:
-        got = hashlib.sha256(fh.read()).hexdigest()
+        got = hashlib.sha256(fh.read().replace(b"\r\n", b"\n")).hexdigest()
     if got != FROZEN:
         raise RuntimeError("model/pit_golden.py is NOT the frozen stage-0 rule set (%s, want %s)"
                            % (got[:8], FROZEN[:8]))
