@@ -1629,6 +1629,17 @@ module pe_pit #(parameter integer AW = 9) (
   wire [5:0]    bsel   = (bud_cfg > BMAX8) ? BMAX8[5:0] : bud_cfg[5:0];
   wire          bud_en = (bud_cfg != 8'h00);
   reg  [BW-1:0] bud_cnt;
+  // ⛔ THE RELOAD VALUE IN ITS OWN REGISTER (canary 10-30). Computed inside the
+  // `!active` branch, `1 << bsel` was mutually exclusive with the record
+  // builder's `<< ke` / `>> ke`, and yosys's `share` pass merged them into ONE
+  // shifter with muxed inputs: bud_cnt's next state then carried k's whole
+  // record-building path (k -> bud_cnt, +2.107 ns, the second-worst family).
+  // bud_cfg is store byte 1, fixed long before the PIT starts, so a register
+  // that follows it every cycle holds the same value -- and shares nothing.
+  reg  [BW-1:0] bud_init;
+  always @(posedge clk or negedge rst_n)
+    if (!rst_n) bud_init <= {BW{1'b0}};
+    else        bud_init <= ({{(BW-1){1'b0}}, 1'b1} << bsel) - {{(BW-1){1'b0}}, 1'b1};
   reg           why_bud;
 `ifdef M_PIT_NO_BUDGET
   wire          bud_hit = 1'b0;
@@ -1719,7 +1730,7 @@ module pe_pit #(parameter integer AW = 9) (
       acc_n <= 7'd0; total <= 12'd0; sum <= 20'd0; k <= 4'd0; wr_idx <= 9'd0;
       st_phase <= 2'd0; st_done <= 1'b0; stopped <= 1'b0; why_ovr <= 1'b0;
       why_bud <= 1'b0;
-      bud_cnt <= ({{(BW-1){1'b0}}, 1'b1} << bsel) - {{(BW-1){1'b0}}, 1'b1};
+      bud_cnt <= bud_init;
       // ⭐ THE STARTING LEVELS (Wilson 10-29): stage 0 reads ABSOLUTE levels,
       // and the records carry only changes -- byte 39 = uio & mask here.
       we <= 1'b1; waddr <= SLV_AT[AW-1:0];

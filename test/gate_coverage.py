@@ -565,7 +565,11 @@ TOGGLE_CEILING = {
     # done / refused bit (no arm runs stage 0 twice). The arms frame2, k0,
     # empty and midstream (Nate 10-29) are what reach the rest, and the start
     # levels now toggle on wires 0, 1 and 3 (cap_lv0 16 -> 12).
-    "src/project.v": 1738,     # primitive 1's arms -10, primitive 2's -4, PIT c1 +670, c2a +80, c2 +815
+    # ⚠ 1738 -> 1740 (+2): bud_init (the budget's reload value in its own
+    # register, 10-30) adds 72 points; the 2 dark ones are bud_init[35] both
+    # ways -- STRUCTURAL: bsel is clamped to BMAX = 35, so the largest reload
+    # value is 2^35 - 1 and bit 35 is never set.
+    "src/project.v": 1740,     # primitive 1's arms -10, primitive 2's -4, PIT c1 +670, c2a +80, c2 +815, bud_init +2
     # ⭐ RATCHETED DOWN BY THE SELF-CLOCKED CORPUS, and the cause is worth
     # recording: the rewritten corpus drives WHOLE BYTES through the peer
     # models instead of two bits per clock, so `fram_spi` went 54 -> 30
