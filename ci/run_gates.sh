@@ -191,6 +191,8 @@ GATES=(
   model/gate_one_encoder.py
   model/gate_mutant_arms.py
   model/gate_reset_audit.py
+  # yosys `share` coupling (canary 10-30): reads the same netlist
+  model/gate_share_coupling.py
   model/gate_stored_numbers.py
   model/gate_bench_indices.py
   model/gate_j_proof_anchors.py
@@ -582,8 +584,8 @@ needs_step() {
   [ -z "$SHARD" ] && return 0
   in_slice model/gate_meta.py && return 0
   case "$1" in
-    netlist) in_slice model/gate_reset_audit.py || in_slice model/gate_f2_local.py \
-               || in_slice model/gate_cdc.py ;;
+    netlist) in_slice model/gate_reset_audit.py || in_slice model/gate_share_coupling.py \
+               || in_slice model/gate_f2_local.py || in_slice model/gate_cdc.py ;;
     coverage) in_slice test/gate_coverage.py ;;
     phases)  in_slice model/a2/gate_um10204.py ;;
     refill)  in_slice model/gate_port_demand.py ;;
@@ -617,7 +619,7 @@ can_run() {
         || { echo "no verilator and no wsl.exe to reach one"; return 1; } ;;
     model/gate_one_encoder.py|model/gate_v2_equiv.py|test/run_pit_capture.py|test/run_pit_s0.py|test/run_branch_check.py|test/gl_harness_check.py|test/gate_tb_elaborates.py|test/run_mutants.py|model/gate_sda_hold.py|test/run_w_sweep.py|test/run_cktx.py|test/run_spidelay.py|test/run_spim_witness.py|test/run_spitgt.py|test/run_rxbw.py)
       command -v "$IV" >/dev/null 2>&1 || { echo "iverilog not found (PE_IVERILOG unset and not on PATH)"; return 1; } ;;
-    model/gate_reset_audit.py)
+    model/gate_reset_audit.py|model/gate_share_coupling.py)
       [ -n "${PE_NETLIST_JSON:-}" ] && [ -f "${PE_NETLIST_JSON:-}" ] \
         || { echo "no netlist at PE_NETLIST_JSON"; return 1; } ;;
     model/gate_f2_local.py)

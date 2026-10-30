@@ -18,6 +18,7 @@ model/gate_ruling_audit.py          ^\s*GATE ruling-audit: PASSED\s*$
 model/gate_one_encoder.py           ^\s*GATE one-encoder: PASSED\s*$
 model/gate_mutant_arms.py           ^\s*GATE mutant-arms: PASSED\s*$
 model/gate_reset_audit.py           ^\s*GATE reset-audit: PASSED\s*$
+model/gate_share_coupling.py        ^\s*GATE share-coupling: PASSED\s*$
 model/gate_stored_numbers.py        ^\s*STORED-NUMBER AUDIT: PASSED\s*$
 model/gate_bench_indices.py         ^\s*BENCH INDEX GUARD: PASSED\s*$
 model/gate_j_proof_anchors.py       ^\s*GATE j-proof-anchors: PASSED\s*$

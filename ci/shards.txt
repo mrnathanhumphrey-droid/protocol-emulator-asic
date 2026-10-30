@@ -58,6 +58,7 @@ fast model/gate_ruling_audit.py
 fast model/gate_one_encoder.py
 fast model/gate_mutant_arms.py
 fast model/gate_reset_audit.py
+fast model/gate_share_coupling.py
 fast model/gate_stored_numbers.py
 fast model/gate_bench_indices.py
 fast model/gate_j_proof_anchors.py

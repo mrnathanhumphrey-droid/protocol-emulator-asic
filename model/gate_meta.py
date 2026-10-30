@@ -51,6 +51,7 @@ SEAMS = (
     ("model/gate_reset_audit.py", "gate_reset_audit.check_fix_alias", "fast", "Z"),
     ("model/gate_reset_audit.py", "gate_reset_audit.unreset_groups", "fast", "E"),
     ("model/gate_reset_audit.py", "gate_reset_audit.allowlist_problems", "fast", "E"),
+    ("model/gate_share_coupling.py", "gate_share_coupling.coupling_problems", "fast", "E"),
     ("model/gate_stored_numbers.py", "gate_stored_numbers.check_sites", "fast", "E"),
     ("model/gate_stored_numbers.py", "gate_stored_numbers.readme_audit", "fast", "E"),
     ("model/gate_stored_numbers.py", "gate_stored_numbers.coverage_problems", "fast", "E"),
