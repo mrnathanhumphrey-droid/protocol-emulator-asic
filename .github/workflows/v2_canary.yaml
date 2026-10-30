@@ -130,6 +130,25 @@ jobs:
           cp runs/wokwi/resolved.json canary_out/ 2>/dev/null || true
           echo "resolved: $(sha256sum canary_out/resolved.json 2>/dev/null | cut -c1-64)" >> canary_out/stamp.txt
 
+      # ⛔ THE DENSITY SWEEP MUST BE REAL (Wilson 10-30). PIT chunk 2's three
+      # canaries (59 / 60 / 61) came back BYTE-IDENTICAL: placement utilization
+      # (62.9 %) was above every target, and global placement silently replaced
+      # each with a uniform 0.63 (GPL-0302) -- one measurement reported as a
+      # median of three. A run whose requested density was overridden is not a
+      # sample of that density: it FAILS here, loudly, with the numbers.
+      - name: Density sweep is real (no GPL-0302 override)
+        shell: bash
+        run: |
+          echo "density : requested $(grep -o '"PL_TARGET_DENSITY_PCT": *[0-9]*' src/config.json | grep -o '[0-9]*$') %" | tee -a canary_out/stamp.txt
+          grep -m1 'GPL-0019\] Utilization' canary_out/harden.log | sed 's/^.*Utilization: */density : placement utilization /' | tee -a canary_out/stamp.txt || true
+          if grep -q 'GPL-0302' canary_out/harden.log; then
+            grep -A1 'GPL-0302' canary_out/harden.log | head -2
+            echo "density : OVERRIDDEN by global placement (GPL-0302) -- set PL_TARGET_DENSITY_PCT above the utilization" | tee -a canary_out/stamp.txt
+            echo "::error::GPL-0302: the requested placement density was below utilization and was overridden; this run does not sample the density it names"
+            exit 1
+          fi
+          echo "density : honoured (no GPL-0302)" | tee -a canary_out/stamp.txt
+
       # ⭐ THE FINAL GATE NETLIST (Wilson 10-28): a timing path whose endpoint
       # flop cannot be NAMED is half a measurement -- the reports give only
       # `_52602_`. The newest *.nl.v of the run, gzipped (one file, not every
