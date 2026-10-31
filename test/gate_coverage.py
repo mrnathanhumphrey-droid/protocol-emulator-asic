@@ -194,7 +194,7 @@ CLASSIFIED = {
 
     # ---- src/project.v ----------------------------------------------------
     # ⭐ PIT chunk 2, stage 0 (Wilson 10-29, both proofs accepted)
-    ("src/project.v", 1423, "v_branch", "if"): (
+    ("src/project.v", 1466, "v_branch", "if"): (
         UNREACHABLE,
         "stage 0's clock_like guard: each level needs >= 4 intervals. P_CLVL "
         "is entered only from P_CNEXT, which requires cnt[ci] >= "
@@ -202,7 +202,7 @@ CLASSIFIED = {
         "ALTERNATE level (each edge toggles it), so 16 edges give 15 "
         "intervals split 8 / 7 between the two levels: nlv0, nlv1 >= 7 > 4. "
         "The guard mirrors the frozen model's own check and stays."),
-    ("src/project.v", 1546, "v_line", "case"): (
+    ("src/project.v", 1589, "v_line", "case"): (
         UNREACHABLE,
         "stage 0's sequencer `default`. `ph` is [4:0] with 19 named states "
         "P_IDLE .. P_DONE = 5'd0 .. 5'd18; every `ph <=` writes a named P_* "
@@ -569,7 +569,7 @@ TOGGLE_CEILING = {
     # register, 10-30) adds 72 points; the 2 dark ones are bud_init[35] both
     # ways -- STRUCTURAL: bsel is clamped to BMAX = 35, so the largest reload
     # value is 2^35 - 1 and bit 35 is never set.
-    "src/project.v": 1740,     # primitive 1's arms -10, primitive 2's -4, PIT c1 +670, c2a +80, c2 +815, bud_init +2
+    "src/project.v": 1725,     # primitive 1's arms -10, primitive 2's -4, PIT c1 +670, c2a +80, c2 +815, bud_init +2, lever 1 + item 1 -15
     # ⭐ RATCHETED DOWN BY THE SELF-CLOCKED CORPUS, and the cause is worth
     # recording: the rewritten corpus drives WHOLE BYTES through the peer
     # models instead of two bits per clock, so `fram_spi` went 54 -> 30
@@ -656,9 +656,9 @@ ANCHOR_TEXT = {
     # was recorded beside the line number, so the deletion had to account for
     # the anchor instead of leaving a live number pointing at whatever moved
     # into line 557.
-    ("src/project.v", 1423):
+    ("src/project.v", 1466):
         "P_CLVL: if (nlv0 < 9'd4 || nlv1 < 9'd4) begin regular <= 1'b0; ph <= P_CHALF; end",
-    ("src/project.v", 1546):
+    ("src/project.v", 1589):
         "default: ph <= P_IDLE;",
     ("test/fram_i2c.v", 281):
         "P_WDATA: begin",

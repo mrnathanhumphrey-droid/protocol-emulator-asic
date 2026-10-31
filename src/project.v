@@ -1216,11 +1216,36 @@ module pe_pit_s0 #(parameter integer AW = 9) (
   reg  [NW-1:0] cnt [0:7];             // edges per wire (W_CNT)
   reg           has_c, last_l;         // the walk's previous c edge, and c's level after it
   reg  [TW-1:0] last_t;
-  wire          ce = rm[wc], de = rm[wd];
-  wire          cl = lv[wc], dl = lv[wd];
-  wire [TW-1:0] civ = t - last_t;      // the interval this record closes on c (valid if has_c)
+  // ⛔ THE FOLD IS PIPELINED (canary 10-30: u_s0.t -> near1, 42 stages, +0.334 ns,
+  // the binder). Each record passes two register stages before it is folded:
+  // P1 takes the record and the two subtractions against the fold's state
+  // (t - last_t, t - pend_x), P2 takes |interval - median|; the fold then reads
+  // only registers. Free because records are >= 8 cycles apart (8 mask bits
+  // are decoded one per cycle), so the state P1 reads was folded long before;
+  // the walk's done signal is delayed to match. Bit-exact: gate pit-s0.
+  // ⭐ TRIMMED (lever 3, 10-30): P1 LOADS ONLY ON A RECORD and so holds it
+  // until the next (>= 8 cycles) -- the fold reads P1 directly, and only
+  // |interval - median| needs a second stage. last_t and pend_x update as the
+  // record enters P1 (the next record's P1 is >= 8 cycles later), so no copy
+  // of t is kept. 216 pipeline flops -> 91.
+  reg           p1_v, p2_v;
+  reg  [7:0]    p1_rm, p1_lv;
+  reg  [TW-1:0] p1_civ;
+  // ⭐ p_aux: ONE register for two walks' values (lever 3, 10-30): in a W_PAIR
+  // walk it is t - pend_x (the FRAME pass's right neighbour), loaded as the
+  // record enters P1; in every other walk it is |interval - median| (W_NEAR's
+  // fold), registered in P2. `wk` is fixed for a whole walk, so they never meet.
+  reg  [TW-1:0] p_aux;
+  reg           wdone_p1, wdone_p2;
+  wire          ce = p1_rm[wc], de = p1_rm[wd];
+  wire          cl = p1_lv[wc], dl = p1_lv[wd];
+  wire [TW-1:0] civ = p1_civ;          // the interval this record closes on c (valid if has_c)
   reg  [NW-1:0] nlv0, nlv1, near0, near1;
-  reg  [TW-1:0] med0, med1, half;
+  reg  [TW-1:0] med0, med1;
+  // ⭐ half SHARES med0's register (lever 3): the two medians are dead once
+  // clock_like's near walk is done, before half is computed for that c, and
+  // half is dead before the next c's clock_like overwrites med0.
+  wire [TW-1:0] half = med0;
   // the median unit (k-th smallest of the selected intervals, MSB first)
   reg  [TW-1:0] m_ans;
   reg  [4:0]    m_bit;
@@ -1237,7 +1262,25 @@ module pe_pit_s0 #(parameter integer AW = 9) (
   wire [TW+1:0] two_h  = {1'b0, half, 1'b0};
   wire [TW+1:0] four_h = {half, 2'b00};
   wire [TW-1:0] med_l  = last_l ? med1 : med0;
-  wire [TW-1:0] dlt    = (civ > med_l) ? civ - med_l : med_l - civ;
+  wire [TW-1:0] dlt    = p_aux;      // |interval - median| (not in a W_PAIR walk)
+  always @(posedge clk or negedge rst_n) begin
+    if (!rst_n) begin
+      p1_v <= 1'b0; p2_v <= 1'b0; wdone_p1 <= 1'b0; wdone_p2 <= 1'b0;
+      p1_rm <= 8'h00; p1_lv <= 8'h00;
+      p1_civ <= {TW{1'b0}}; p_aux <= {TW{1'b0}};
+      last_t <= {TW{1'b0}}; pend_x <= {TW{1'b0}};
+    end else begin
+      p1_v <= rec_v; p2_v <= p1_v; wdone_p1 <= walk_done; wdone_p2 <= wdone_p1;
+      if (rec_v) begin
+        p1_rm <= rm; p1_lv <= lv;
+        p1_civ <= t - last_t;
+        if (wk == W_PAIR) p_aux <= t - pend_x;
+        if (rm[wc]) last_t <= t;                          // the fold's c edge
+        if (wk == W_PAIR && rm[wd] && !rm[wc]) pend_x <= t;   // the fold's pending d edge
+      end
+      if (wk != W_PAIR) p_aux <= (p1_civ > med_l) ? p1_civ - med_l : med_l - p1_civ;
+    end
+  end
   // a START's gap is bad when < 9 falls, or (Wilson 10-28) not 1 + 9n with n >= 1
 `ifdef M_S0_NO_MOD9
   wire          gap_bad = (g_sat < 4'd9);
@@ -1248,12 +1291,12 @@ module pe_pit_s0 #(parameter integer AW = 9) (
   always @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
       for (i = 0; i < 8; i = i + 1) cnt[i] <= {NW{1'b0}};
-      has_c <= 1'b0; last_l <= 1'b0; last_t <= {TW{1'b0}};
+      has_c <= 1'b0; last_l <= 1'b0;
       nlv0 <= {NW{1'b0}}; nlv1 <= {NW{1'b0}}; near0 <= {NW{1'b0}}; near1 <= {NW{1'b0}};
       pcnt <= {NW{1'b0}};
       in0 <= {NW{1'b0}}; in1 <= {NW{1'b0}}; nd <= {NW{1'b0}}; nc <= {NW{1'b0}};
       idle_ok <= 1'b1; frame_ok <= 1'b1; all_high <= 1'b1;
-      pend_i <= 1'b0; pend_f <= 1'b0; pend_x <= {TW{1'b0}};
+      pend_i <= 1'b0; pend_f <= 1'b0;
       ev_any <= 1'b0; ev_prev_start <= 1'b0; sig_bad <= 1'b0; starts <= 2'd0;
       g_sat <= 4'd0; g_m9 <= 4'd0;
     end else if (walk_go) begin
@@ -1266,9 +1309,9 @@ module pe_pit_s0 #(parameter integer AW = 9) (
       idle_ok <= 1'b1; frame_ok <= 1'b1; all_high <= 1'b1; pend_i <= 1'b0; pend_f <= 1'b0;
       ev_any <= 1'b0; ev_prev_start <= 1'b0; sig_bad <= 1'b0; starts <= 2'd0;
       g_sat <= 4'd0; g_m9 <= 4'd0;
-    end else if (rec_v) begin
+    end else if (p2_v) begin
       if (wk == W_CNT)
-        for (i = 0; i < 8; i = i + 1) if (rm[i]) cnt[i] <= cnt[i] + ONE;
+        for (i = 0; i < 8; i = i + 1) if (p1_rm[i]) cnt[i] <= cnt[i] + ONE;
       // ---- the c wire's own intervals: LVL / PROBE / NEAR ----
       if (ce) begin
         if (has_c) begin
@@ -1281,7 +1324,7 @@ module pe_pit_s0 #(parameter integer AW = 9) (
             if (last_l) near1 <= near1 + ONE; else near0 <= near0 + ONE;
           end
         end
-        has_c <= 1'b1; last_t <= t; last_l <= cl;
+        has_c <= 1'b1; last_l <= cl;          // last_t: set as the record entered P1
       end
       // ---- the pair (c, d): bracket, in_idle_gaps, FRAME pass, I2C, all_high ----
       if (wk == W_PAIR) begin
@@ -1291,7 +1334,7 @@ module pe_pit_s0 #(parameter integer AW = 9) (
           // this c edge (ce[k], possibly in the same record): its gap vs 2 half
           if (has_c && (pend_i || de) && ({2'b00, civ} <= two_h)) idle_ok <= 1'b0;
           // FRAME pass, the right neighbour: this c edge vs the latest d edge
-          if (pend_f && ({2'b00, t - pend_x} <= four_h)) frame_ok <= 1'b0;
+          if (pend_f && ({2'b00, p_aux} <= four_h)) frame_ok <= 1'b0;   // t - pend_x
           if (de) frame_ok <= 1'b0;            // a c edge AT the d edge: distance 0
           pend_i <= 1'b0; pend_f <= 1'b0;
         end
@@ -1300,7 +1343,7 @@ module pe_pit_s0 #(parameter integer AW = 9) (
           if (cl) in1 <= in1 + ONE; else in0 <= in0 + ONE;
           if (!cl) all_high <= 1'b0;
           if (!ce) begin
-            pend_i <= has_c; pend_f <= 1'b1; pend_x <= t;
+            pend_i <= has_c; pend_f <= 1'b1;   // pend_x: set as the record entered P1
             // FRAME pass, the left neighbour: the c edge before it (ce[k-1])
             if (has_c && ({2'b00, civ} <= four_h)) frame_ok <= 1'b0;
           end
@@ -1390,7 +1433,7 @@ module pe_pit_s0 #(parameter integer AW = 9) (
       ph <= P_IDLE; m_ret <= P_IDLE; w_ret <= P_IDLE; walk_go <= 1'b0; wk <= W_CNT;
       wc <= 3'd0; wd <= 3'd0; psel <= 2'd0; regular <= 1'b0; ci <= 4'd0; di <= 4'd0; ar <= 4'd0;
       refuse_w <= 3'd0; refused <= 1'b0; wbyte <= 3'd0; done <= 1'b0;
-      med0 <= {TW{1'b0}}; med1 <= {TW{1'b0}}; half <= {TW{1'b0}};
+      med0 <= {TW{1'b0}}; med1 <= {TW{1'b0}};
       m_ans <= {TW{1'b0}}; m_bit <= 5'd0; m_k <= {NW{1'b0}};
       we <= 1'b0; waddr <= {AW{1'b0}}; wdata <= 8'h00; nrank <= 4'd0;
       for (ri = 0; ri < 8; ri = ri + 1) begin role[ri] <= R_NONE; part[ri] <= 3'd0; clvl[ri] <= 1'b0; rank[ri] <= 3'd0; end
@@ -1405,7 +1448,7 @@ module pe_pit_s0 #(parameter integer AW = 9) (
                   wk <= W_CNT; walk_go <= 1'b1; ph <= P_WAIT; w_ret <= P_CNEXT; ci <= 4'd0;
                 end
         // a walk is running: wait for its last record
-        P_WAIT: if (walk_done) ph <= w_ret;
+        P_WAIT: if (wdone_p2) ph <= w_ret;
         // ---- the exact median (k = m_k): one probe walk per bit ----
         P_MSTART: begin wk <= W_PROBE; walk_go <= 1'b1; ph <= P_WAIT; w_ret <= P_MSTEP; end
         P_MSTEP: begin
@@ -1442,7 +1485,7 @@ module pe_pit_s0 #(parameter integer AW = 9) (
                    ph <= P_MSTART; m_ret <= P_DNEXT; di <= 4'd0;
                  end
         P_DNEXT: begin
-                   if (m_ret == P_DNEXT) begin half <= m_ans; m_ret <= P_IDLE; end
+                   if (m_ret == P_DNEXT) begin med0 <= m_ans; m_ret <= P_IDLE; end   // = half
                    if (di == 4'd8) begin ci <= ci + 4'd1; ph <= P_CNEXT; end
                    else begin
 `ifdef M_S0_PAIR_ORDER
@@ -1486,7 +1529,7 @@ module pe_pit_s0 #(parameter integer AW = 9) (
                     wc <= ci[2:0]; psel <= 2'd2; m_k <= cnt[ci[2:0]] >> 1; m_ans <= {TW{1'b0}};
                     m_bit <= 5'd24; ph <= P_MSTART; m_ret <= P_FHALF;
                   end else ci <= ci + 4'd1;
-        P_FHALF: begin half <= m_ans; di <= 4'd0; ph <= P_FENEXT; end
+        P_FHALF: begin med0 <= m_ans; di <= 4'd0; ph <= P_FENEXT; end   // = half
         P_FENEXT: if (di == 4'd8) begin ci <= ci + 4'd1; ph <= P_FCNEXT; end
                   else if (!act[di[2:0]] || role[di[2:0]] != R_NONE) di <= di + 4'd1;
                   else begin wd <= di[2:0]; wk <= W_PAIR; walk_go <= 1'b1; ph <= P_WAIT; w_ret <= P_FASGN; end
