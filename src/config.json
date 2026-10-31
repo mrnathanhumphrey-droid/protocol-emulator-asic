@@ -13,17 +13,27 @@
 
   "//": "PL_TARGET_DENSITY_PCT - You can increase this if Global Placement fails with error GPL-0302.",
   "//": "Users have reported that values up to 80 worked well for them.",
+  "//": "v2 SEED SWEEP (Wilson 10-27): a DENSITY SENSITIVITY setting, not pure noise -- 59/60/61, the stop rule reads the median of the three.",
   "PL_TARGET_DENSITY_PCT": 60,
 
   "//": "CLOCK_PERIOD - Increase this in case you are getting setup time violations.",
   "//": "The value is in nanoseconds, so 20ns == 50MHz.",
-  "CLOCK_PERIOD": 20,
+  "CLOCK_PERIOD": 16.667,
+
+  "//": "v2 8x4 CANARY ONLY (never v1). I/O delay = TT's pad estimate: ~10 ns round trip through pads and mux, Tiny Tapeout estimate -> 30 % of 16.667 ns = 5.0 ns in + 5.0 ns out. TT ESTIMATE, UNMEASURED (no cmos5l silicon yet). Output toggle ceiling ~66 MHz is the same estimate; it is not an STA constraint.",
+  "IO_DELAY_CONSTRAINT": 30,
 
   "//": "Hold slack margin - Increase them in case you are getting hold violations.",
   "PL_RESIZER_HOLD_SLACK_MARGIN": 0.1,
   "GRT_RESIZER_HOLD_SLACK_MARGIN": 0.10,
   "//": "HOLD REPAIR AFTER GLOBAL ROUTE (Wilson, hold bar +0.05 ns at every corner): without it the margin above is inert (the post-GRT resizer step does not run) and hold is repaired only after CTS, on placement parasitics; routing then left 3 short tx_bitp paths at -0.020 ns (fast corner) on the reset-network halt.",
   "RUN_POST_GRT_RESIZER_TIMING": 1,
+
+  "//": "v2 STEP 1 (Wilson 10-25): T2 ON 8x4 -- the v2-8x4 canary (+1.200, no T2) with ONLY v2-t2io-d63's T1/T2 block added. T1: 2.5 ns setup slack asked of the resizer; T2: timing-driven placement + post-GRT design repair. CANARY ONLY (never v1).",
+  "PL_RESIZER_SETUP_SLACK_MARGIN": 2.5,
+  "GRT_RESIZER_SETUP_SLACK_MARGIN": 2.5,
+  "PL_TIMING_DRIVEN": 1,
+  "RUN_POST_GRT_DESIGN_REPAIR": 1,
 
   "//": "RUN_LINTER, LINTER_INCLUDE_PDK_MODELS - Disabling the linter is not recommended!",
   "RUN_LINTER": 1,
@@ -34,6 +44,36 @@
   "CLOCK_PORT": "clk",
 
   "//": "Configuration docs: https://librelane.readthedocs.io/en/latest/reference/configuration.html",
+
+  "//": "SRAM TRIAL CANARY ONLY (Wilson 10-30): the store's RAM is the IHP 1 KB single-port macro (RM_IHPSG13_1P_256x32), placed and powered by Ken Pettit's recipe for this 8x4 cmos5l tile. PE_SRAM_MACRO makes pe_store bind it through src/pe_sram_macro_ihp.v. Magic DRC off: Magic reports the macro's Metal4 power columns as illegal overlaps (Pettit waived the same); KLayout DRC and LVS are the signoff. The fast lib is characterised at -55 C, mapped onto the -40 C corner name (the closest file; Pettit did the same). The Metal4 PDN stripes below (FP_PDN_V*) are re-pitched onto the macro's own Metal4 power columns.",
+  "VERILOG_DEFINES": ["PE_SRAM_MACRO"],
+  "MACROS": {
+    "RM_IHPSG13_1P_256x32_c2_bm_bist": {
+      "gds": ["pdk_dir::libs.ref/sg13cmos5l_sram/gds/RM_IHPSG13_1P_256x32_c2_bm_bist.gds"],
+      "lef": ["pdk_dir::libs.ref/sg13cmos5l_sram/lef/RM_IHPSG13_1P_256x32_c2_bm_bist.lef"],
+      "spice": ["pdk_dir::libs.ref/sg13cmos5l_sram/cdl/RM_IHPSG13_1P_256x32_c2_bm_bist.cdl"],
+      "lib": {
+        "nom_typ_1p20V_25C": ["pdk_dir::libs.ref/sg13cmos5l_sram/lib/RM_IHPSG13_1P_256x32_c2_bm_bist_typ_1p20V_25C.lib"],
+        "nom_slow_1p08V_125C": ["pdk_dir::libs.ref/sg13cmos5l_sram/lib/RM_IHPSG13_1P_256x32_c2_bm_bist_slow_1p08V_125C.lib"],
+        "nom_fast_1p32V_m40C": ["pdk_dir::libs.ref/sg13cmos5l_sram/lib/RM_IHPSG13_1P_256x32_c2_bm_bist_fast_1p32V_m55C.lib"]
+      },
+      "instances": {
+        "u_store.g_mem.u_macro.u_sram": {"location": [3.36, 3.78], "orientation": "FS"}
+      }
+    }
+  },
+  "PDN_MACRO_CONNECTIONS": [
+    "u_store\\.g_mem\\.u_macro\\.u_sram VPWR VGND VDD! VSS!",
+    "u_store\\.g_mem\\.u_macro\\.u_sram VPWR VGND VDDARRAY! VSS!"
+  ],
+  "FP_MACRO_HORIZONTAL_HALO": 2,
+  "ROUTING_OBSTRUCTIONS": [
+    "Metal2 3.36 3.78 420.0 122.56",
+    "Metal3 3.36 3.78 420.0 122.56",
+    "Metal4 3.36 3.78 420.0 122.56"
+  ],
+  "RUN_MAGIC_DRC": 0,
+  "ERROR_ON_ILLEGAL_OVERLAPS": 0,
 
   "//": "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!",
   "//": "!!! DO NOT CHANGE ANYTHING BELOW THIS POINT !!!",
@@ -60,8 +100,10 @@
   "FP_IO_HLENGTH": 2,
   "FP_IO_VLENGTH": 2,
 
-  "FP_PDN_VPITCH": 50.0,
+  "FP_PDN_VPITCH": 44.96,
   "FP_PDN_VWIDTH": 2.1,
+  "FP_PDN_VSPACING": 3.52,
+  "FP_PDN_VOFFSET": 6.15,
 
   "//": "Clock",
   "RUN_CTS": 1,
