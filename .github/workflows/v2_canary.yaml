@@ -36,7 +36,7 @@ jobs:
       LL_VER: 3.1.0.dev3
       PDK_ROOT: /home/runner/pdk
       PDK: ihp-sg13cmos5l
-      TO_STEP: OpenROAD.STAPostPNR
+      TO_STEP: ""   # SRAM SIGNOFF variant: run the whole flow (KLayout DRC + LVS)
     steps:
       - name: Checkout the v2 branch
         uses: actions/checkout@v6
@@ -103,7 +103,7 @@ jobs:
           T0=$(date +%s)
           python -m librelane --pdk-root "$PDK_ROOT" --docker-no-tty --dockerized \
             --pdk "$PDK" --manual-pdk --run-tag wokwi --force-run-dir runs/wokwi \
-            --hide-progress-bar --to "$TO_STEP" src/config_merged.json > canary_out/harden.log 2>&1
+            --hide-progress-bar ${TO_STEP:+--to "$TO_STEP"} src/config_merged.json > canary_out/harden.log 2>&1
           echo "wall_s=$(( $(date +%s) - T0 ))" | tee -a canary_out/stamp.txt
 
       - name: Per-corner table
@@ -124,7 +124,10 @@ jobs:
                                                d["timing__hold__ws__corner:" + c]))
           for k in ("timing__setup__ws", "timing__setup_vio__count", "timing__hold__ws",
                     "timing__hold_vio__count", "design__instance__area__stdcell",
-                    "design__instance__count", "design__instance__utilization"):
+                    "design__instance__count", "design__instance__utilization",
+                    "klayout__drc_error__count", "magic__drc_error__count", "route__drc_errors",
+                    "design__lvs_error__count", "design__lvs_device_difference__count",
+                    "design__lvs_net_difference__count", "design__lvs_unmatched_pin__count"):
               print("%-34s %s" % (k, d.get(k)))
           EOF
           cp runs/wokwi/resolved.json canary_out/ 2>/dev/null || true
