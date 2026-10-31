@@ -178,7 +178,13 @@ def run(cmd):
     return subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True, encoding="utf-8", errors="replace")
 
 
+#: PE_DEFINES (comma list): defines added to EVERY build of the PIT benches -- the
+#: store arm (Wilson 11-07: PE_MEM_SRAM runs the PIT gates on the SRAM store)
+ENV_DEFINES = tuple(filter(None, os.environ.get("PE_DEFINES", "").split(",")))
+
+
 def build(out, defines=(), iverilog=None, extra=()):
+    defines = tuple(defines) + ENV_DEFINES
     if SIM == "verilator" and iverilog is None and not extra:
         return vl_build(out, defines)
     r = run([iverilog or tool("iverilog"), "-g2012", "-I", ROOT, "-o", out, "-s", "tb_pit"]
@@ -242,6 +248,7 @@ def _snapshot():
 
 
 def vl_build(out, defines=(), bench=BENCH, top="tb_pit"):
+    defines = tuple(dict.fromkeys(tuple(defines) + ENV_DEFINES))
     """build `top` (tb_pit by default) on Verilator into a WSL-native cache; `out` names the binary"""
     import hashlib
     key, snap = _snapshot()

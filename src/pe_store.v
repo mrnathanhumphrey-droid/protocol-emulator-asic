@@ -271,6 +271,163 @@ module pe_store #(
         input [AW-1:0] a;
         peek = lmem[a];
       endfunction
+    end else if (MEM_TYPE == "sram") begin : g_mem
+      // ⭐⭐ THE SRAM ARM (Wilson 10-30, the SRAM trial). ONE single-port word
+      // RAM (inline below: the IHP 1P_bm_bist macro's behaviour; the macro is
+      // bound by file substitution). The modes are exclusive -- PROG writes and
+      // reads back, RUN reads the header then refills, SNIFF captures then
+      // runs stage 0 -- so a request mux is the whole arbitration, with ONE
+      // same-cycle pair to order: a write and a narrow read.
+      // ⛔ THE READ WINS; THE WRITE WAITS (Wilson 11-07, the PIT on the SRAM).
+      // The trial made the read wait, which suited the loader alone: stage 3
+      // reads and writes the store back to back, and a read one cycle late
+      // gave it stale data (5 same-cycle pairs on s3_crc32_full). Now the
+      // write goes to a ONE-ENTRY BUFFER and drains on the next cycle with no
+      // read; a narrow read of the buffered word is FORWARDED its bytes. So
+      // every client sees the flop arm's timing exactly: a read in a write's
+      // own cycle returns the old byte, any later read the new one. A second
+      // write while one is buffered is a contract break (checked below).
+      // Read timing is the flop arm's: the
+      // RAM samples on the edge the flop arm registers rdata / wrdata, and its
+      // dout holds until the next read -- so L_REFILL and the Lean core are
+      // untouched, and only the read data's arrival time moves (~5.4 ns slow).
+      localparam integer AWW = 8;                 // 256 words (the macro); AW = 9 uses 128
+      wire              wr  = |we;
+`ifdef M_STORE_ROW_OFF1
+      wire [AW-WB_W-1:0] xrow = wraddr_bk[WB_W +: AW-WB_W] + {{(AW-WB_W-1){1'b0}}, 1'b1};
+`else
+      wire [AW-WB_W-1:0] xrow = wraddr_bk[WB_W +: AW-WB_W];   // the copies are equal: bank 0's
+`endif
+      wire _unused_bk = &{1'b0, wraddr_bk[WIDE_B*AW-1:AW], wraddr_bk[WB_W-1:0]};
+      // the read always goes now; a write meeting it waits in the buffer
+      wire              rd_now  = re | wre;
+      wire [AW-1:0]     rd_addr = raddr;
+      // the written byte's lane: byte k of a word at bit (WIDE_B-1-k)*8 (the flop arm's order)
+`ifdef M_STORE_WRONG_BANK
+      wire [WB_W-1:0]   wlane = (wsel == WIDE_B-1) ? {WB_W{1'b0}} : wsel;
+`else
+      wire [WB_W-1:0]   wlane = wsel;
+`endif
+      wire [WIDE_B*8-1:0] bm  = {{(WIDE_B-1)*8{1'b0}}, 8'hFF} << {~wlane, 3'b000};   // lane WIDE_B-1-k = ~k (WIDE_B a power of 2)
+      wire [WIDE_B*8-1:0] din = {WIDE_B{wdata}};
+      // THE WRITE BUFFER: pw = a write is waiting (word pa, data pd, mask pbm)
+      reg                 pw;
+      reg  [AW-WB_W-1:0]  pa;
+      reg  [WIDE_B*8-1:0] pd, pbm;
+      wire              w_now = ~rd_now & (pw | wr);          // the port writes this cycle
+      wire [AW-WB_W-1:0] w_row = pw ? pa : wrow;
+      wire [WIDE_B*8-1:0] w_d  = pw ? pd : din;
+      wire [WIDE_B*8-1:0] w_bm = pw ? pbm : bm;
+      wire              men = w_now | rd_now;
+      wire              ren = rd_now;
+      wire [AWW-1:0]    ram_a = w_now ? {{(AWW-(AW-WB_W)){1'b0}}, w_row}
+                              : wre   ? {{(AWW-(AW-WB_W)){1'b0}}, xrow}
+                              :         {{(AWW-(AW-WB_W)){1'b0}}, rd_addr[AW-1:WB_W]};
+      // ---- the RAM: the macro in the canary flow, its exact behaviour here ----
+      // (inline, not a submodule: the bench's peek below reads the array, and
+      // a design function cannot reach into a child instance under Verilator)
+`ifdef PE_SRAM_MACRO
+      // the flow binds the macro: pe_sram_macro is defined by the canary
+      // branch's PDK-specific file (src/pe_sram_macro_ihp.v), NOT here
+      wire [WIDE_B*8-1:0] dout;
+      pe_sram_macro #(.AWW(AWW), .DW(WIDE_B*8)) u_macro (.clk(clk), .men(men), .wen(w_now),
+          .ren(ren), .addr(ram_a), .din(w_d), .bm(w_bm), .dout(dout));
+`else
+      // the IHP RM_IHPSG13_1P_*_bm_bist macro's behaviour, as its own model:
+      //   men & wen   mem[a] = (mem & ~bm) | (din & bm)  (ren is never with wen:
+      //               w_now = ~rd_now & ..., so the macro's write-through is not modelled)
+      //   men & ren   dout <= mem[a];  otherwise dout HOLDS (it changes only on a read)
+      reg  [WIDE_B*8-1:0] mem [0:(1 << AWW) - 1];
+      reg  [WIDE_B*8-1:0] dout;
+      wire [WIDE_B*8-1:0] merged = (mem[ram_a] & ~w_bm) | (w_d & w_bm);
+      always @(posedge clk) begin
+        if (men && w_now) begin
+          mem[ram_a] <= merged;
+        end else if (men && ren) begin
+          dout <= mem[ram_a];
+        end
+      end
+`ifndef SYNTHESIS
+      // ⛔ THE ARRAY POWERS UP RANDOM (Wilson's must-fire): neither the macro
+      // nor the flop store it replaces has a reset
+      integer pi;
+      initial for (pi = 0; pi < (1 << AWW); pi = pi + 1) mem[pi] = $unsigned($random);
+`endif
+      // ⛔ dout before the first read: LN1's must-fire (M_PFETCH_NOWAIT)
+      // captures the wide read before any read lands, and its pinned behaviour
+      // is X under iverilog, and 0 when the simulator is Verilator (the
+      // pinned LN1 signature). Otherwise random.
+`ifdef M_PFETCH_NOWAIT
+`ifdef VERILATOR
+      initial dout = {WIDE_B*8{1'b0}};
+`endif
+`else
+`ifndef SYNTHESIS
+      initial dout = $unsigned($random);
+`endif
+`endif
+`endif
+      // the buffer, and the narrow read's forward: a read of the buffered word
+      // (pw at the read's edge) takes those bytes over the RAM's (old) ones
+      reg  [WB_W-1:0]     rsel_q;
+      reg                 fw_q;
+      reg  [WIDE_B*8-1:0] fd_q, fbm_q;
+      always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+          pw <= 1'b0; pa <= {(AW-WB_W){1'b0}}; pd <= {WIDE_B*8{1'b0}}; pbm <= {WIDE_B*8{1'b0}};
+          rsel_q <= {WB_W{1'b0}}; fw_q <= 1'b0; fd_q <= {WIDE_B*8{1'b0}}; fbm_q <= {WIDE_B*8{1'b0}};
+        end else begin
+          if (wr && (rd_now || pw)) begin                      // the new write waits
+            pw <= 1'b1; pa <= wrow; pd <= din; pbm <= bm;
+          end else if (w_now) pw <= 1'b0;                      // the buffer drained
+          if (re) begin
+            rsel_q <= rd_addr[WB_W-1:0];
+            fw_q   <= pw && (pa == rd_addr[AW-1:WB_W]);
+            fd_q   <= pd; fbm_q <= pbm;
+          end
+        end
+      end
+      wire [WIDE_B*8-1:0] rword = fw_q ? ((dout & ~fbm_q) | (fd_q & fbm_q)) : dout;
+      always @(*) begin
+        rdata  = rword[{~rsel_q, 3'b000} +: 8];
+        wrdata = dout;
+      end
+`ifndef SYNTHESIS
+      // ⛔ THE ONE-PORT CONTRACT, checked in every bench: never a wide read
+      // with a write or a narrow read in the same cycle (the modes are
+      // exclusive); the only allowed pair is a write with a narrow read.
+      // ⚠ only after the store has SEEN a reset: before it, every request
+      // register holds its power-up value (Verilator's random init put a write
+      // and a wide read on the first edge at one seed), as silicon would --
+      // and the RAM's contents are garbage until the loader writes them anyway
+      reg rst_seen = 1'b0;
+      always @(negedge rst_n) rst_seen <= 1'b1;
+      always @(posedge clk) if (rst_seen && rst_n === 1'b1 && wre === 1'b1 && (wr === 1'b1 || re === 1'b1 || pw === 1'b1)) begin
+        $display("pe_store: *** ONE-PORT CONTRACT BROKEN at %0t: wre with %s", $time,
+                 wr ? "a write" : re ? "a narrow read" : "a buffered write");
+        $finish;
+      end
+      // the buffer holds ONE write: a second while it is full and the port is
+      // reading would be lost
+      always @(posedge clk) if (rst_seen && rst_n === 1'b1 && wr === 1'b1 && pw === 1'b1 && rd_now === 1'b1) begin
+        $display("pe_store: *** WRITE BUFFER OVERFLOW at %0t: a write, a buffered write and a read", $time);
+        $finish;
+      end
+`endif
+      // a bench's view of one byte (both arms define it)
+      function [7:0] peek;
+        input [AW-1:0] a;
+        reg [WIDE_B*8-1:0] wd;
+        begin
+`ifdef PE_SRAM_MACRO
+          wd   = {WIDE_B*8{1'b0}};          // the macro's array is not visible here
+`else
+          wd   = mem[{{(AWW-(AW-WB_W)){1'b0}}, a[AW-1:WB_W]}];
+          if (pw && pa == a[AW-1:WB_W]) wd = (wd & ~pbm) | (pd & pbm);
+`endif
+          peek = wd[{~a[WB_W-1:0], 3'b000} +: 8];
+        end
+      endfunction
     end else begin : g_mem
       wire [7:0] rbyte [0:WIDE_B-1];
       for (gb = 0; gb < WIDE_B; gb = gb + 1) begin : g_bank
