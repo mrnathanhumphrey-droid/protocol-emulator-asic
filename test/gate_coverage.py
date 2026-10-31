@@ -461,6 +461,15 @@ CLASSIFIED[("test/fram_spi.v", 217, "v_line", "case")] = (
     "the phase case's `default`: `phase` is 2 bits and P_OP, P_AHI, P_ALO, "
     "P_DATA enumerate all four values, so no phase reaches it. Defensive.")
 
+CLASSIFIED[("src/pe_store.v", 220, "v_branch", "if")] = (
+    UNREACHABLE,
+    "the SRAM arm's ONE-PORT CONTRACT check (simulation only): it fires only "
+    "if a wide read meets a write or a narrow read in the same cycle, and the "
+    "store's modes are exclusive (PROG: loader writes + readback reads; RUN: "
+    "header and refill reads; SNIFF: capture then stage 0), so a passing run "
+    "never reaches it. It is a tripwire, not a path: covering it would mean "
+    "a broken contract.")
+
 #: ⚠ TOGGLE CEILINGS -- uncovered toggle points per file, which may only FALL.
 #: ⛔ Measured, not chosen: these are the values of the sweep that shipped with
 #: this gate. A ratchet seeded from a guess is a ratchet that permits a
@@ -517,7 +526,7 @@ TOGGLE_CEILING = {
     # dark (name by name vs LOOP's own sweep). The 12 are the SHIFT and
     # SHIFTIN class bits of slots 6-9 (lanes 3-4) and lane 4's head copy: no
     # swept program shifts on lanes 3-4 -- structural, as their l_act op bits.
-    "src/pe_engine.v": 953,       # primitive 2's CMP arms: -97; pre-decode +12
+    "src/pe_engine.v": 951,       # primitive 2's CMP arms: -97; pre-decode +12
     # ⚠ 6 -> 28 (+22) for v2: the wide read's reserved bits (16), the row
     # index's top bits (4: v1 images fit rows 0..31) and wraddr bits 0-1 (4:
     # the engine writes whole words) -- same field-by-field check, 0 lost.
@@ -675,6 +684,8 @@ ANCHOR_TEXT = {
         "end else if (opcode == OP_READ) begin",
     ("test/fram_spi.v", 217):
         "default: ;",
+    ("src/pe_store.v", 220):
+        "always @(posedge clk) if (rst_seen && rst_n === 1'b1 && wre === 1'b1 && (wr === 1'b1 || re === 1'b1)) begin",
 }
 
 #: ⛔⛔ EVERY COVERAGE FIGURE IS LABELLED WITH THE TOOL THAT MEASURED IT

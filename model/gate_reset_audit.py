@@ -46,8 +46,13 @@ NETLIST = os.environ.get("PE_NETLIST_JSON", r"C:\tmp\local_netlist.json")
 # ⛔ Anything unreset and NOT here is a finding.
 # ---------------------------------------------------------------------------
 ALLOWED = {
-    "u_store.g_bank": (
-        4096,        # v2: 512 bytes x 8, in WIDE_B byte banks (was u_store.mem, 2048)
+    # ⭐ THE SRAM TRIAL (Wilson 10-30): MEM_TYPE "sram" -- the store is ONE word
+    # RAM (inline in the arm, 256 x 32; AW = 9 uses 128 words). In the canary flow it
+    # is the IHP macro, a black box with no flops; in this behavioural netlist
+    # its array synthesises to flops, unreset like the banks it replaces.
+    # (was "u_store.g_bank" 4096, the flop arm)
+    "u_store.g_mem.mem": (
+        4096,        # 128 words x 32 bits (the upper 128 of the macro's 256 are unused at AW = 9)
         "THE STORE. Explicitly loaded before `run` is asserted -- the loader "
         "walks every byte and `hdr_done` gates dispatch until the headers are "
         "in. ⭐ And it is left X rather than zeroed ON PURPOSE: a zero-filled "
@@ -66,19 +71,24 @@ ALLOWED = {
         "write-before-read. ⛔ If that ordering ever broke, an X action word "
         "would reach `l_act`, and the engine has already shown what that costs: "
         "`l_timestamp + a_dly` with a_dly X made a lane PERMANENTLY unready."),
-    "s_rdata": (
-        8,
-        "the store's BYTE read, for the header FSM AND for the load-mode "
-        "serial readback. H_CAP only runs after H_REQ, and the readback now "
-        "PRIMES -- its first two visits issue the read and let it land without "
-        "queueing a frame -- so both consumers read it only after a real read. "
-        "⛔⛔ THIS REASON WAS FALSE UNTIL D1 WAS FIXED, and the "
-        "entry named only the header FSM. The load-mode readback also consumed "
-        "s_rdata, and there the H_REQ ordering said nothing: the first frame "
-        "carried the register unwritten, which put X on uo_out[4] on a cold "
-        "part and a stale byte after a rewind. An allowlist entry is only as "
-        "good as the set of consumers it names, and a second consumer added "
-        "later inherits a reason that was never about it."),
+    # ⭐ RETIRED ON THE SRAM TRIAL (Wilson 10-30): MEM_TYPE "sram" has NO
+    # s_rdata register -- the narrow read is a byte select of the RAM's dout,
+    # whose 32 flops are the s_wrdata entry below. The reason still holds
+    # for that dout: both consumers read only after a real read. Kept, as
+    # it read on the flop arm:
+    # "s_rdata": (
+    #     8,
+    #     "the store's BYTE read, for the header FSM AND for the load-mode "
+    #     "serial readback. H_CAP only runs after H_REQ, and the readback now "
+    #     "PRIMES -- its first two visits issue the read and let it land without "
+    #     "queueing a frame -- so both consumers read it only after a real read. "
+    #     "⛔⛔ THIS REASON WAS FALSE UNTIL D1 WAS FIXED, and the "
+    #     "entry named only the header FSM. The load-mode readback also consumed "
+    #     "s_rdata, and there the H_REQ ordering said nothing: the first frame "
+    #     "carried the register unwritten, which put X on uo_out[4] on a cold "
+    #     "part and a stale byte after a rewind. An allowlist entry is only as "
+    #     "good as the set of consumers it names, and a second consumer added "
+    #     "later inherits a reason that was never about it."),
     "tx_mem": (
         64,
         "the HOST TX QUEUES: 4 lanes x 2 bytes. ⭐ ONE CONSUMER, NAMED: `tx_head "

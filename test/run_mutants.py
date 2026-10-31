@@ -121,12 +121,19 @@ CLOCKED_MUTANTS = [
     # byte-identical streams). The defect is still caught where it is a
     # 2-state fact: verilator_trace.sh with -DM_PFETCH_NOWAIT, MEASURED after
     # TF on corpus_i2c -- SEEDS DISAGREE on both pairs.
-    ("M_PFETCH_NOWAIT", "corpus_i2c", "i2c", "*** FAIL progress.vh",
+    # ⭐ THE SRAM TRIAL MOVES THE REASON AGAIN (10-30), and this is why: the
+    # flop store had SEPARATE narrow and wide read registers, so the early
+    # sample saw a never-written one (X). The word RAM has ONE output register
+    # shared by both reads, so the early sample files the LAST HEADER WORD --
+    # real, wrong data -- and Layer M names it: "lane 0 fetched the STORE
+    # FILLER at address 40" (MEASURED, tb_trace corpus_i2c, iverilog). The
+    # defect is the same; it is a 2-state fact now even under iverilog.
+    ("M_PFETCH_NOWAIT", "corpus_i2c", "i2c", "*** FAIL clocked_conform[M]",
      "P_CAP samples the store before the read is registered, so it files the "
-     "PREVIOUS read's word -- on the first refill a never-written register, "
-     "X in iverilog, which the tree select propagates until nothing retires. "
-     "(Under Verilator --x-initial unique the same defect shows as seeds "
-     "disagreeing, which is verilator_trace.sh's arm.)"),
+     "PREVIOUS read's word -- with the word RAM's one shared output register "
+     "that is the last header word, and Layer M sees the lane fetch the store "
+     "filler. (On the flop store it was a never-written register, X, and "
+     "progress.vh fired first.)"),
     # ⛔⛔ SILICON FIX #2 (ruling TX1/TX2): the pre-fix host load, on the HIGH
     # phase after the 7th bit. Every timing layer passes it -- the dispatch
     # stream is byte-identical -- so the kill must be a VALUE: Layer V1 sees
