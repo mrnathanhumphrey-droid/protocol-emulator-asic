@@ -89,13 +89,9 @@ module tb_pit;
     $fclose(sfd);
     while (pc < ncyc) @(negedge clk);
     done = 1'b1;
-    // generate-block scopes need constant indices: one loop per bank
-    for (a = 0; a < IMG_MAX / 4; a = a + 1) begin
-      $fdisplay(fd, "M %0d %h", 4 * a + 0, dut.u_store.g_bank[0].mem[a]);
-      $fdisplay(fd, "M %0d %h", 4 * a + 1, dut.u_store.g_bank[1].mem[a]);
-      $fdisplay(fd, "M %0d %h", 4 * a + 2, dut.u_store.g_bank[2].mem[a]);
-      $fdisplay(fd, "M %0d %h", 4 * a + 3, dut.u_store.g_bank[3].mem[a]);
-    end
+    // the store's own view of each byte (both MEM_TYPE arms define peek)
+    for (a = 0; a < IMG_MAX; a = a + 1)
+      $fdisplay(fd, "M %0d %h", a, dut.u_store.g_mem.peek(a[8:0]));
     $fdisplay(fd, "X stopped=%0d", dut.pit_stopped);
     $fclose(fd);
     $display("tb_pit: %0d PIT cycles -> %0s", pc, outfile);

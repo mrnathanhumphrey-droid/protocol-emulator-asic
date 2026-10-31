@@ -443,6 +443,15 @@ CLASSIFIED[("test/fram_spi.v", 217, "v_line", "case")] = (
     "the phase case's `default`: `phase` is 2 bits and P_OP, P_AHI, P_ALO, "
     "P_DATA enumerate all four values, so no phase reaches it. Defensive.")
 
+CLASSIFIED[("src/pe_store.v", 220, "v_branch", "if")] = (
+    UNREACHABLE,
+    "the SRAM arm's ONE-PORT CONTRACT check (simulation only): it fires only "
+    "if a wide read meets a write or a narrow read in the same cycle, and the "
+    "store's modes are exclusive (PROG: loader writes + readback reads; RUN: "
+    "header and refill reads; SNIFF: capture then stage 0), so a passing run "
+    "never reaches it. It is a tripwire, not a path: covering it would mean "
+    "a broken contract.")
+
 #: ⚠ TOGGLE CEILINGS -- uncovered toggle points per file, which may only FALL.
 #: ⛔ Measured, not chosen: these are the values of the sweep that shipped with
 #: this gate. A ratchet seeded from a guess is a ratchet that permits a
@@ -499,7 +508,7 @@ TOGGLE_CEILING = {
     # dark (name by name vs LOOP's own sweep). The 12 are the SHIFT and
     # SHIFTIN class bits of slots 6-9 (lanes 3-4) and lane 4's head copy: no
     # swept program shifts on lanes 3-4 -- structural, as their l_act op bits.
-    "src/pe_engine.v": 953,       # primitive 2's CMP arms: -97; pre-decode +12
+    "src/pe_engine.v": 951,       # primitive 2's CMP arms: -97; pre-decode +12
     # ⚠ 6 -> 28 (+22) for v2: the wide read's reserved bits (16), the row
     # index's top bits (4: v1 images fit rows 0..31) and wraddr bits 0-1 (4:
     # the engine writes whole words) -- same field-by-field check, 0 lost.
@@ -511,7 +520,15 @@ TOGGLE_CEILING = {
     # ⭐ RATCHETED DOWN by v2 primitive 1's sweep arms (branch, branch_wbad,
     # branch_spl1): the branch images drive words, targets and the wait W
     # through bits no v1 image sets (measured locally; local == CI on step 2).
-    "src/pe_store.v": 26,         # primitive 2's CMP arms: -4
+    # ⚠ 26 -> 35 (+9) FOR THE SRAM TRIAL (Wilson 10-30): the store's RAM
+    # becomes one 256x32 single-port macro behind a request mux. Measured name
+    # by name against the flop store's own sweep (toggle_diff.py): 342 new
+    # points, 11 dark, 0 covered points went dark, 2 dark points paid (wrdata).
+    # The 11: ram_a[7] (2) -- the 512-byte image uses rows 0..127 of the
+    # macro's 256 (format A); rd_addr[8:7] and rd_addr_q[8:7] (8) -- no swept
+    # narrow read lands above byte 127; rst_seen 1->0 (1) -- a sim-only flag
+    # that never clears.
+    "src/pe_store.v": 35,         # primitive 2's CMP arms: -4; SRAM trial +9
     # ⚠ 186 -> 187: e_wraddr_bk's same 16 dark points (bits 0,1 of each
     # bank's copy, +12 over e_wraddr's 4); the old ceiling sat ~11 above
     # its measured count, so the rise reads as +1.
@@ -528,7 +545,7 @@ TOGGLE_CEILING = {
     # OVERRUN) are what reach the rest.
     # ⭐ 888 -> 843 (RATCHETED DOWN): the long-gap arm (an idle bus, the
     # interval saturates -- Nate / Wilson 10-28) pays line 1217 and 45 toggles.
-    "src/project.v": 843,      # primitive 1's arms -10, primitive 2's -4, PIT c1 +670
+    "src/project.v": 841,      # primitive 1's arms -10, primitive 2's -4, PIT c1 +670
     # ⭐ RATCHETED DOWN BY THE SELF-CLOCKED CORPUS, and the cause is worth
     # recording: the rewritten corpus drives WHOLE BYTES through the peer
     # models instead of two bits per clock, so `fram_spi` went 54 -> 30
@@ -630,6 +647,8 @@ ANCHOR_TEXT = {
         "end else if (opcode == OP_READ) begin",
     ("test/fram_spi.v", 217):
         "default: ;",
+    ("src/pe_store.v", 220):
+        "always @(posedge clk) if (rst_seen && rst_n === 1'b1 && wre === 1'b1 && (wr === 1'b1 || re === 1'b1)) begin",
 }
 
 #: ⛔⛔ EVERY COVERAGE FIGURE IS LABELLED WITH THE TOOL THAT MEASURED IT

@@ -94,7 +94,10 @@ module tt_um_protocol_emulator #(
     parameter integer TS_W     = 16,    // global counter / timestamp width
     parameter integer DLY_W    = 10,    // program delay field
     parameter integer D_W      = 8,     // D_sched field
-    parameter         MEM_TYPE = "flops",  // ⛔ default: S0 = SRAM-BLOCKED
+    // ⭐ THE SRAM TRIAL (Wilson 10-30): S0's Metal4 blocker is answered by
+    // aligning the PDN's Metal4 stripes ON the macro's own power columns (Ken
+    // Pettit's recipe, same 8x4 cmos5l tile); this branch measures it.
+    parameter         MEM_TYPE = "sram",
     // ⛔ `RX_SERIAL` WAS DELETED HERE, by ruling. It was overridden nowhere in
     // the tree, so its `else` was source no configuration executed; the serial
     // RX view is now unconditional at its one use site. It is NOT coming back
