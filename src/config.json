@@ -47,7 +47,7 @@
 
   "//": "LATCH STORE CANARY ONLY (Wilson 10-31, Track 2): the 512-byte store in IHP stock latches (sg13cmos5l_dlhq_1), one latch_posedge clock gate per row (sg13cmos5l_lgcp_1), the write data through 8 hold delays (sg13cmos5l_dlygate4sd3_1). PE_IHP_CELLS makes pe_store use src/pe_cells_ihp.v's bindings instead of its generic cells. RSZ_DONT_TOUCH_RX keeps the resizer from removing the 8 hold delays (they are the hold margin by design).",
   "VERILOG_DEFINES": ["PE_IHP_CELLS"],
-  "RSZ_DONT_TOUCH_RX": ".*g_hold.*u_hold.*",
+  "RSZ_DONT_TOUCH_RX": ".*g_hold.*u_hold[.]u_d$",
 
   "//": "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!",
   "//": "!!! DO NOT CHANGE ANYTHING BELOW THIS POINT !!!",
