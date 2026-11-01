@@ -85,6 +85,9 @@ ROWS = {
                          "its peers only complete transactions, no timing claim"),
     "test/tb_smoke.v": ("NOT_TIMING", "load port + pins move (smoke)"),
     "test/tb_status.v": ("NOT_TIMING", "the two host status bits (structural)"),
+    "test/tb_store_latch.v": ("NOT_TIMING", "the latch store alone: power-up fill, both "
+                              "read ports and the read-after-write / shared-read checks, "
+                              "inputs on negedges by design; no peer, no phase claim"),
     "test/tb_tx.v": ("NOT_TIMING", "two TX lanes interleave their own bytes (host data path)"),
     "test/tb_verdict.v": ("NOT_TIMING", "the arm-verdict pipeline must-fire (exists to fail)"),
     "test/tb_w.v": ("NOT_TIMING", "Theorem 3 on the bench: the port ledger (scheduler)"),
