@@ -294,7 +294,7 @@ module pe_store #(
 
 endmodule
 
-// the latch arm's row read, (a) (Wilson 11-01): a 2**SW:1 byte mux built as a
+// the latch arm's row read, shared by both reads (Wilson 11-01): a 2**SW:1 byte mux built as a
 // tree of 4:1 muxes on address-bit pairs from the leaves up (s[1:0] first),
 // with one 2:1 level at the root when SW is odd. Level k holds N/4**k nodes,
 // stored back to back in `t` from offset lvl_off(k). Every level boundary is a
@@ -324,12 +324,21 @@ module pe_rowmux #(
     for (k = 1; k <= L4; k = k + 1) begin : g_lv
       wire [1:0] q = s[2*k-1 -: 2];
       for (i = 0; i < (N >> (2*k)); i = i + 1) begin : g_n
-        wire [8*4-1:0] c = t[(lvl_off(k-1) + 4*i)*8 +: 32];
-        assign t[(lvl_off(k) + i)*8 +: 8] = q[1] ? (q[0] ? c[31:24] : c[23:16])
-                                                 : (q[0] ? c[15:8]  : c[7:0]);
+        // the node's four children, in address order
+        wire [7:0] c0 = t[(lvl_off(k-1) + 4*i)*8 +: 8];
+        wire [7:0] c1 = t[(lvl_off(k-1) + 4*i + 1)*8 +: 8];
+        wire [7:0] c2 = t[(lvl_off(k-1) + 4*i + 2)*8 +: 8];
+        wire [7:0] c3 = t[(lvl_off(k-1) + 4*i + 3)*8 +: 8];
+        // M_ROWMUX_NODE, the tree bench's must-fire: one leaf-level node (level
+        // 1, node 1 = rows 4..7) reads its children in reverse order
+`ifdef M_ROWMUX_NODE
+        assign t[(lvl_off(k) + i)*8 +: 8] = (k == 1 && i == 1) ? (q[1] ? (q[0] ? c0 : c1) : (q[0] ? c2 : c3)) : (q[1] ? (q[0] ? c3 : c2) : (q[0] ? c1 : c0));
+`else
+        assign t[(lvl_off(k) + i)*8 +: 8] = q[1] ? (q[0] ? c3 : c2) : (q[0] ? c1 : c0);
+`endif
       end
     end
-    if (SW % 2) begin : g_root2
+    if (SW % 2 == 1) begin : g_root2
       assign y = s[SW-1] ? t[(lvl_off(L4) + 1)*8 +: 8] : t[lvl_off(L4)*8 +: 8];
     end else begin : g_root
       assign y = t[lvl_off(L4)*8 +: 8];

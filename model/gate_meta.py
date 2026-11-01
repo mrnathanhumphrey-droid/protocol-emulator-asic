@@ -197,7 +197,8 @@ NOT_STUBBABLE = {
     "model/gate_pin_matrix.py": "matrix() computes a coverage map, not a "
                                 "verdict: there is no 'always pass' answer",
     "test/gate_store_latch.py": "verdict made in main() from tb_store_latch.v's "
-                                "output; priced by its four must-fire arms",
+                                "and tb_rowmux.v's output; priced by its six "
+                                "must-fire arms",
     "model/gate_meta.py": "this gate",
 }
 

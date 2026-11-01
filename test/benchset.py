@@ -59,9 +59,16 @@ EXCLUDED = {
         "THE LATCH STORE'S OWN BENCH (Wilson 10-31, Track 2): pe_store at "
         "MEM_TYPE \"latch\" alone, driven by `test/gate_store_latch.py` -- the "
         "random power-up fill and the read-after-write contract, each with its "
-        "must-fire (M_STORE_NO_FILL, M_STORE_DROP_ROW0, ARM_RAW, ARM_RAW_WIDE). "
+        "must-fire (M_STORE_NO_FILL, M_STORE_DROP_ROW0, ARM_RAW, ARM_RAW_WIDE, "
+        "ARM_SHARED). "
         "Its arms are defines a fixed arm list does not carry, and the chip "
         "benches reach the same store through the swept images."),
+    "tb_rowmux.v": (
+        "THE LATCH STORE'S ROW-READ TREE ALONE (Wilson 11-01): pe_rowmux at "
+        "three sizes against the plain array read, driven by "
+        "`test/gate_store_latch.py` with its must-fire (M_ROWMUX_NODE). It has "
+        "no clock and no image, and the chip benches reach the same tree "
+        "through the store."),
     "tb_v2win.v": (
         "THE SYNCHRONIZER-WINDOW MEASUREMENT (V2 pins-only). Each arm pushes "
         "one byte at an instant the runner computes from a dry run of the "

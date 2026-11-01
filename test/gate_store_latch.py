@@ -14,6 +14,9 @@ chip-level benches cannot see from outside.
   3. NEVER BOTH READS IN ONE CYCLE (Wilson 11-01). Each bank's one row-mux tree
      serves both reads, selected by `wre`; pe_store's check stops any bench where
      `re` and `wre` are high together, and the ARM_SHARED arm proves it fires.
+  4. THE TREE READS EVERY ROW (Wilson 11-01). tb_rowmux checks pe_rowmux
+     against the plain array read for every row at three tree sizes; the
+     must-fire M_ROWMUX_NODE (one node's children reversed) fails it.
 
 Legal arm: all 512 bytes written, read back on both ports.
 token: GATE store-latch: PASSED
@@ -50,6 +53,13 @@ ARMS = [
     ("raw wide",       ["ARM_RAW_WIDE"],       "pe_store: *** READ-AFTER-WRITE",          "was NOT stopped"),
     ("shared read",    ["ARM_SHARED"],         "pe_store: *** SHARED READ",               "was NOT stopped"),
 ]
+# the row-read tree alone (Wilson 11-01): every row at three tree sizes
+TREE_BENCH = "test/tb_rowmux.v"
+TREE_ARMS = [
+    ("tree",           [],                     "ROWMUX PASS",                             "***"),
+    ("tree node",      ["M_ROWMUX_NODE"],      "ROWMUX *** FAIL",                         "ROWMUX PASS"),
+]
+BENCHES = [(BENCH, "tb_store_latch", ARMS), (TREE_BENCH, "tb_rowmux", TREE_ARMS)]
 
 
 def run(cmd):
@@ -60,22 +70,23 @@ def main() -> int:
     banner("iverilog", "vvp")
     probs = []
     with tempfile.TemporaryDirectory() as tmp:
-        for name, defs, want, refuse in ARMS:
-            vvp = os.path.join(tmp, "store_latch_%s.vvp" % name.replace(" ", "_"))
-            b = run([tool("iverilog"), "-g2012", "-o", vvp, "-s", "tb_store_latch"]
-                    + ["-D%s" % d for d in defs] + [BENCH] + RTL)
-            if b.returncode != 0:
-                probs.append("%s: build failed: %s" % (name, (b.stdout + b.stderr)[-300:]))
-                continue
-            r = run(sim_run.vvp([vvp], images=[]))
-            out = r.stdout + r.stderr
-            got = want in out and refuse not in out
-            kind = "legal    " if name == "legal" else "must-fire"
-            line = next((l for l in out.splitlines() if want in l), out.strip().splitlines()[-1:] or [""])
-            line = line if isinstance(line, str) else line[0]
-            print("  %-9s %-14s %s  %s" % (kind, name, "ok " if got else "***", line.strip()[:90]))
-            if not got:
-                probs.append("%s: expected %r (and no %r)" % (name, want, refuse))
+        for bench, top, arms in BENCHES:
+            for name, defs, want, refuse in arms:
+                vvp = os.path.join(tmp, "store_latch_%s.vvp" % name.replace(" ", "_"))
+                b = run([tool("iverilog"), "-g2012", "-o", vvp, "-s", top]
+                        + ["-D%s" % d for d in defs] + [bench] + RTL)
+                if b.returncode != 0:
+                    probs.append("%s: build failed: %s" % (name, (b.stdout + b.stderr)[-300:]))
+                    continue
+                r = run(sim_run.vvp([vvp], images=[]))
+                out = r.stdout + r.stderr
+                got = want in out and refuse not in out
+                kind = "legal    " if not defs else "must-fire"
+                line = next((l for l in out.splitlines() if want in l), out.strip().splitlines()[-1:] or [""])
+                line = line if isinstance(line, str) else line[0]
+                print("  %-9s %-14s %s  %s" % (kind, name, "ok " if got else "***", line.strip()[:90]))
+                if not got:
+                    probs.append("%s: expected %r (and no %r)" % (name, want, refuse))
     for p in probs:
         print("  *** " + p)
     print("  GATE store-latch: %s" % ("FAILED" if probs else "PASSED"))

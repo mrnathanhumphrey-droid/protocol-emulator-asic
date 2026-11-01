@@ -79,6 +79,8 @@ ROWS = {
     "test/tb_lock.v": ("NOT_TIMING", "the schedule freeze: dispatch + pin streams vs "
                        "a golden (scheduler)"),
     "test/tb_pinrange.v": ("NOT_TIMING", "pins outside the real range (structural)"),
+    "test/tb_rowmux.v": ("NOT_TIMING", "the store's row-read tree alone: combinational, "
+                         "no clock and no peer (structural)"),
     "test/tb_reload.v": ("NOT_TIMING", "a reload is a clean slate (state reset); "
                          "its peers only complete transactions, no timing claim"),
     "test/tb_smoke.v": ("NOT_TIMING", "load port + pins move (smoke)"),

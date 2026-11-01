@@ -110,6 +110,8 @@ EXPECT = {
     # v2 latch store (Wilson 10-31): the power-up fill's must-fires (gate store-latch)
     "M_STORE_DROP_ROW0":  (2, None),
     "M_STORE_NO_FILL":    (1, None),
+    # the shared row-read tree (Wilson 11-01): one node's children reversed (gate store-latch's tree arm)
+    "M_ROWMUX_NODE":      (2, None),
     # v2 Q3: the loader's magic check bypassed (the refusal of a v1 image)
     "M_NO_MAGIC":         (2, None),
     # v2 primitive 1: BRANCH_BIT -- the target, the taken test (three
