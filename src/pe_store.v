@@ -177,9 +177,22 @@ module pe_store #(
         wire [AW-WB_W-1:0] xrow = wraddr_bk[gb*AW+WB_W +: AW-WB_W];
 `endif
         wire _unused_lo = &{1'b0, wraddr_bk[gb*AW +: WB_W]};
+        // ⭐ (a) (Wilson 11-01): the reads go through an explicit mux tree on the
+        // row address. `mem[row]` on a wire array became 686 one-hot row selects,
+        // and the placer then grouped the latches by BIT, so every row-level net
+        // crossed the bank; with the tree it groups them by ROW (routes, 0 overflow).
+        // ONE tree per bank, shared by both reads: `re` and `wre` are never high in
+        // the same cycle (the mode flops, SNIFF's engine reset, hdr_done --
+        // checked below in every bench).
+        wire [8*NW-1:0] memf;
+        for (gr = 0; gr < NW; gr = gr + 1) begin : g_flat
+          assign memf[gr*8 +: 8] = mem[gr];
+        end
+        wire [7:0] sbyte;
+        pe_rowmux #(.SW(AW-WB_W)) u_mux (.d(memf), .s(wre ? xrow : rrow), .y(sbyte));
+        assign rbyte[gb] = sbyte;
         always @(posedge clk)
-          if (wre) wrdata[(WIDE_B-1-gb)*8 +: 8] <= mem[xrow];
-        assign rbyte[gb] = mem[rrow];
+          if (wre) wrdata[(WIDE_B-1-gb)*8 +: 8] <= sbyte;
 `ifndef SYNTHESIS
         // the read-after-write contract, per bank: no wide read of the row
         // whose latch closes on this edge
@@ -192,6 +205,11 @@ module pe_store #(
       always @(posedge clk)
         if (re) rdata <= rbyte[rsel];
 `ifndef SYNTHESIS
+      // the shared tree's precondition: never both reads in one cycle
+      always @(posedge clk) if (re === 1'b1 && wre === 1'b1) begin
+        $display("pe_store: *** SHARED READ at %0t: re and wre both high", $time);
+        $finish;
+      end
       // the narrow read's half of the contract
       always @(posedge clk) if (wv_q === 1'b1 && re === 1'b1 && raddr == {wrow_q, wsel_q}) begin
         $display("pe_store: *** READ-AFTER-WRITE at %0t: a read of byte %0d, written the previous cycle", $time, raddr);
@@ -274,6 +292,49 @@ module pe_store #(
   // omission reads as a decision.
   wire _unused_store = &{rst_n, 1'b0};
 
+endmodule
+
+// the latch arm's row read, (a) (Wilson 11-01): a 2**SW:1 byte mux built as a
+// tree of 4:1 muxes on address-bit pairs from the leaves up (s[1:0] first),
+// with one 2:1 level at the root when SW is odd. Level k holds N/4**k nodes,
+// stored back to back in `t` from offset lvl_off(k). Every level boundary is a
+// KEPT wire, so synthesis cannot fold the tree back into a one-hot decode.
+module pe_rowmux #(
+    parameter integer SW = 7
+) (
+    input  wire [8*(1<<SW)-1:0] d,
+    input  wire [SW-1:0]        s,
+    output wire [7:0]           y
+);
+  localparam integer N  = 1 << SW;
+  localparam integer L4 = SW / 2;           // 4:1 levels
+  function integer lvl_off;                 // first node of level k
+    input integer k;
+    integer j;
+    begin
+      lvl_off = 0;
+      for (j = 0; j < k; j = j + 1) lvl_off = lvl_off + (N >> (2*j));
+    end
+  endfunction
+  localparam integer NT = lvl_off(L4 + 1);  // nodes in all levels
+  (* keep *) wire [8*NT-1:0] t;
+  assign t[0 +: 8*N] = d;
+  genvar k, i;
+  generate
+    for (k = 1; k <= L4; k = k + 1) begin : g_lv
+      wire [1:0] q = s[2*k-1 -: 2];
+      for (i = 0; i < (N >> (2*k)); i = i + 1) begin : g_n
+        wire [8*4-1:0] c = t[(lvl_off(k-1) + 4*i)*8 +: 32];
+        assign t[(lvl_off(k) + i)*8 +: 8] = q[1] ? (q[0] ? c[31:24] : c[23:16])
+                                                 : (q[0] ? c[15:8]  : c[7:0]);
+      end
+    end
+    if (SW % 2) begin : g_root2
+      assign y = s[SW-1] ? t[(lvl_off(L4) + 1)*8 +: 8] : t[lvl_off(L4)*8 +: 8];
+    end else begin : g_root
+      assign y = t[lvl_off(L4)*8 +: 8];
+    end
+  endgenerate
 endmodule
 
 // ---------------------------------------------------------------------------

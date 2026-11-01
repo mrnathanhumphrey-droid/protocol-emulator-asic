@@ -11,6 +11,9 @@ chip-level benches cannot see from outside.
      modes keep that apart, and pe_store's contract check stops any bench that
      breaks it -- so EVERY chip bench proves the chip never does; this gate proves
      the check fires (narrow and wide arms).
+  3. NEVER BOTH READS IN ONE CYCLE (Wilson 11-01). Each bank's one row-mux tree
+     serves both reads, selected by `wre`; pe_store's check stops any bench where
+     `re` and `wre` are high together, and the ARM_SHARED arm proves it fires.
 
 Legal arm: all 512 bytes written, read back on both ports.
 token: GATE store-latch: PASSED
@@ -45,6 +48,7 @@ ARMS = [
     ("row 0 dropped",  ["M_STORE_DROP_ROW0"],  "STORE-LATCH *** narrow read of 0",        "STORE-LATCH PASS"),
     ("raw narrow",     ["ARM_RAW"],            "pe_store: *** READ-AFTER-WRITE",          "was NOT stopped"),
     ("raw wide",       ["ARM_RAW_WIDE"],       "pe_store: *** READ-AFTER-WRITE",          "was NOT stopped"),
+    ("shared read",    ["ARM_SHARED"],         "pe_store: *** SHARED READ",               "was NOT stopped"),
 ]
 
 

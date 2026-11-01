@@ -5,6 +5,8 @@
 //   ARM_RAW      a narrow read of the byte written the cycle before -> the store's
 //                READ-AFTER-WRITE contract must stop the bench
 //   ARM_RAW_WIDE the same for a wide read of the row written the cycle before
+//   ARM_SHARED   a narrow and a wide read in one cycle -> the shared read tree's
+//                precondition check must stop the bench
 // Must-fires through the store's own defines: M_STORE_NO_FILL (the fill check
 // fails), M_STORE_DROP_ROW0 (row 0's writes are lost; only the random fill shows it).
 `timescale 1ns/1ps
@@ -92,6 +94,15 @@ module tb_store_latch;
     @(negedge clk); we = 0; wre = 1'b1; for (k = 0; k < WB; k = k + 1) wraddr_bk[k*AW +: AW] = 9'd76;
     @(negedge clk); wre = 1'b0;
     $display("STORE-LATCH *** ARM_RAW_WIDE: the read-after-write was NOT stopped");
+    $finish;
+`endif
+`ifdef ARM_SHARED
+    // a narrow read (byte 42 = bank 2, row 10) and a wide read (row 20, every bank)
+    // in ONE cycle -> the shared tree's precondition check must stop the bench
+    @(negedge clk); re = 1'b1; raddr = 9'd42;
+    wre = 1'b1; for (k = 0; k < WB; k = k + 1) wraddr_bk[k*AW +: AW] = 9'd80;
+    @(negedge clk); re = 1'b0; wre = 1'b0;
+    $display("STORE-LATCH *** ARM_SHARED: the shared read was NOT stopped");
     $finish;
 `endif
     if (bad == 0) $display("STORE-LATCH PASS: 512 bytes written, read back on both ports");
