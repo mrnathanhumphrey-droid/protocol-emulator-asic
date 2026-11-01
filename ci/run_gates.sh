@@ -377,6 +377,10 @@ GATES=(
   # writes (bytes 32..38) == the frozen stage0 (e55d0b63) on the capture as
   # stored, bit for bit; the M_S0_* killer.
   test/run_pit_s0.py
+  # ⭐ v2 LATCH STORE (Wilson 10-31, Track 2): the array powers up random (M_STORE_NO_FILL
+  # and M_STORE_DROP_ROW0 must fail), and pe_store's read-after-write contract
+  # stops a bench that reads a byte the cycle after it was written (both ports).
+  test/gate_store_latch.py
   # ⭐⭐ v2 primitive 1 (Wilson 10-26/27, R2c): BRANCH_BIT, the timed branch --
   # next PC and head checked by branch_check.vh, 0 stalls and every lane
   # within A2's r - C (branch priced as an action of delay W), chains and the
@@ -617,7 +621,7 @@ can_run() {
     model/gate_rtl_lint.py)
       { command -v "$VL" >/dev/null 2>&1 || command -v wsl.exe >/dev/null 2>&1; } \
         || { echo "no verilator and no wsl.exe to reach one"; return 1; } ;;
-    model/gate_one_encoder.py|model/gate_v2_equiv.py|test/run_pit_capture.py|test/run_pit_s0.py|test/run_branch_check.py|test/gl_harness_check.py|test/gate_tb_elaborates.py|test/run_mutants.py|model/gate_sda_hold.py|test/run_w_sweep.py|test/run_cktx.py|test/run_spidelay.py|test/run_spim_witness.py|test/run_spitgt.py|test/run_rxbw.py)
+    model/gate_one_encoder.py|model/gate_v2_equiv.py|test/run_pit_capture.py|test/run_pit_s0.py|test/gate_store_latch.py|test/run_branch_check.py|test/gl_harness_check.py|test/gate_tb_elaborates.py|test/run_mutants.py|model/gate_sda_hold.py|test/run_w_sweep.py|test/run_cktx.py|test/run_spidelay.py|test/run_spim_witness.py|test/run_spitgt.py|test/run_rxbw.py)
       command -v "$IV" >/dev/null 2>&1 || { echo "iverilog not found (PE_IVERILOG unset and not on PATH)"; return 1; } ;;
     model/gate_reset_audit.py|model/gate_share_coupling.py)
       [ -n "${PE_NETLIST_JSON:-}" ] && [ -f "${PE_NETLIST_JSON:-}" ] \

@@ -69,6 +69,10 @@ KILLERS = {
     "M_PIT_NO_SAT": "test/run_pit_capture.py",
     "M_PIT_NO_BUDGET": "test/run_pit_capture.py", "M_PIT_LV0_INV": "test/run_pit_capture.py",
     # -- v2 PIT chunk 2: stage 0, the role table bit for bit vs the frozen model
+    # -- v2 latch store (Wilson 10-31): the power-up fill's must-fires, killed by
+    # gate store-latch (its "must-fire" rows: FILL NOT RANDOM, a narrow read of 0)
+    "M_STORE_NO_FILL": "test/gate_store_latch.py",
+    "M_STORE_DROP_ROW0": "test/gate_store_latch.py",
     "M_S0_PAIR_ORDER": "test/run_pit_s0.py", "M_S0_MED_OFF1": "test/run_pit_s0.py",
     "M_S0_NO_MOD9": "test/run_pit_s0.py", "M_S0_NO_FLOOR": "test/run_pit_s0.py",
     "M_S0_NO_AMBIG": "test/run_pit_s0.py",

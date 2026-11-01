@@ -110,130 +110,103 @@ module pe_store #(
   wire [AW-WB_W-1:0] wrow = waddr[AW-1:WB_W];
   wire [WB_W-1:0]    rsel = raddr[WB_W-1:0];
   wire [AW-WB_W-1:0] rrow = raddr[AW-1:WB_W];
-  genvar gb;
+  genvar gb, gr, gh;
   generate
-    if (MEM_TYPE == "sram") begin : g_mem
-      // ⭐⭐ THE SRAM ARM (Wilson 10-30, the SRAM trial). ONE single-port word
-      // RAM (inline below: the IHP 1P_bm_bist macro's behaviour; the macro is
-      // bound by file substitution). The modes are exclusive -- PROG writes and
-      // reads back, RUN reads the header then refills, SNIFF captures then
-      // runs stage 0 -- so a request mux is the whole arbitration, with ONE
-      // same-cycle pair to order: a PROG loader write and a readback read.
-      // The WRITE wins and the read issues the next cycle (the readback is
-      // bit-serial, many cycles per byte). Read timing is the flop arm's: the
-      // RAM samples on the edge the flop arm registers rdata / wrdata, and its
-      // dout holds until the next read -- so L_REFILL and the Lean core are
-      // untouched, and only the read data's arrival time moves (~5.4 ns slow).
-      localparam integer AWW = 8;                 // 256 words (the macro); AW = 9 uses 128
-      wire              wr  = |we;
-`ifdef M_STORE_ROW_OFF1
-      wire [AW-WB_W-1:0] xrow = wraddr_bk[WB_W +: AW-WB_W] + {{(AW-WB_W-1){1'b0}}, 1'b1};
-`else
-      wire [AW-WB_W-1:0] xrow = wraddr_bk[WB_W +: AW-WB_W];   // the copies are equal: bank 0's
-`endif
-      wire _unused_bk = &{1'b0, wraddr_bk[WIDE_B*AW-1:AW], wraddr_bk[WB_W-1:0]};
-      // a narrow read that met a write waits one cycle
-      reg               rd_pend;
-      reg  [AW-1:0]     rd_addr_q;
-      wire              rd_now  = (re | rd_pend) & ~wr;
-      wire [AW-1:0]     rd_addr = rd_pend ? rd_addr_q : raddr;
-      // the written byte's lane: byte k of a word at bit (WIDE_B-1-k)*8 (the flop arm's order)
-`ifdef M_STORE_WRONG_BANK
-      wire [WB_W-1:0]   wlane = (wsel == WIDE_B-1) ? {WB_W{1'b0}} : wsel;
-`else
-      wire [WB_W-1:0]   wlane = wsel;
-`endif
-      wire [WIDE_B*8-1:0] bm  = {{(WIDE_B-1)*8{1'b0}}, 8'hFF} << {~wlane, 3'b000};   // lane WIDE_B-1-k = ~k (WIDE_B a power of 2)
-      wire              men = wr | wre | rd_now;
-      wire              ren = ~wr & (wre | rd_now);
-      wire [AWW-1:0]    ram_a = wr  ? {{(AWW-(AW-WB_W)){1'b0}}, wrow}
-                              : wre ? {{(AWW-(AW-WB_W)){1'b0}}, xrow}
-                              :       {{(AWW-(AW-WB_W)){1'b0}}, rd_addr[AW-1:WB_W]};
-      // ---- the RAM: the macro in the canary flow, its exact behaviour here ----
-      // (inline, not a submodule: the bench's peek below reads the array, and
-      // a design function cannot reach into a child instance under Verilator)
-      wire [WIDE_B*8-1:0] din = {WIDE_B{wdata}};
-`ifdef PE_SRAM_MACRO
-      // the flow binds the macro: pe_sram_macro is defined by the canary
-      // branch's PDK-specific file (src/pe_sram_macro_ihp.v), NOT here
-      wire [WIDE_B*8-1:0] dout;
-      pe_sram_macro #(.AWW(AWW), .DW(WIDE_B*8)) u_macro (.clk(clk), .men(men), .wen(wr),
-          .ren(ren), .addr(ram_a), .din(din), .bm(bm), .dout(dout));
-`else
-      // the IHP RM_IHPSG13_1P_*_bm_bist macro's behaviour, as its own model:
-      //   men & wen   mem[a] = (mem & ~bm) | (din & bm)  (ren is never with wen:
-      //               ren = ~wr & ..., so the macro's write-through is not modelled)
-      //   men & ren   dout <= mem[a];  otherwise dout HOLDS (it changes only on a read)
-      reg  [WIDE_B*8-1:0] mem [0:(1 << AWW) - 1];
-      reg  [WIDE_B*8-1:0] dout;
-      wire [WIDE_B*8-1:0] merged = (mem[ram_a] & ~bm) | (din & bm);
+    if (MEM_TYPE == "latch") begin : g_mem
+      // ⭐⭐ THE LATCH ARM (Wilson 10-31, Track 2): the same 512 bytes in IHP
+      // latches -- ~-45 % of the store, -30 % of the chip, stock cells only.
+      // WRITE: the request is STAGED at posedge t0 (data, bank, row, valid). One
+      // clock gate per row per bank (pe_icg = sg13cmos5l_lgcp_1), clocked by
+      // ~clk, opens that row's 8 latches for the LOW half of the next cycle;
+      // the staged data holds still for the whole window. READ: the flop arm's
+      // registered row selects, unchanged.
+      // ⛔ READ-AFTER-WRITE (Wilson's risk 3): a byte written in cycle C is
+      // only safe to read from cycle C+2 -- a read in C+1 samples on the edge
+      // that closes the latch (a half-cycle path). The modes keep that apart
+      // (RUN only reads; LOAD and SNIFF read later), and the contract check
+      // below proves it in every bench; its must-fire is gate store-latch.
+      // ⛔ HOLD (Wilson's risk 2): the latch closes on the rising edge through
+      // the inverter and the gate, the SAME edge that restages the data -- so
+      // the data passes 8 hold buffers by design (pe_hold_buf, kept by
+      // RSZ_DONT_TOUCH_RX in config.json).
+      reg  [7:0]          wd_q;
+      reg  [WB_W-1:0]     wsel_q;
+      reg  [AW-WB_W-1:0]  wrow_q;
+      reg                 wv_q;
+      always @(posedge clk or negedge rst_n)
+        if (!rst_n) wv_q <= 1'b0;
+        else        wv_q <= |we;
       always @(posedge clk) begin
-        if (men && wr) begin
-          mem[ram_a] <= merged;
-        end else if (men && ren) begin
-          dout <= mem[ram_a];
-        end
+        wd_q   <= wdata;
+        wsel_q <= wsel;
+        wrow_q <= wrow;
       end
-`ifndef SYNTHESIS
-      // ⛔ THE ARRAY POWERS UP RANDOM (Wilson's must-fire): neither the macro
-      // nor the flop store it replaces has a reset
-      integer pi;
-      initial for (pi = 0; pi < (1 << AWW); pi = pi + 1) mem[pi] = $unsigned($random);
-`endif
-      // ⛔ dout before the first read: LN1's must-fire (M_PFETCH_NOWAIT)
-      // captures the wide read before any read lands, and its pinned behaviour
-      // is X under iverilog, and 0 when the simulator is Verilator (the
-      // pinned LN1 signature). Otherwise random.
-`ifdef M_PFETCH_NOWAIT
-`ifdef VERILATOR
-      initial dout = {WIDE_B*8{1'b0}};
-`endif
+      wire       clk_n = ~clk;
+      wire [7:0] wd_h;
+      for (gh = 0; gh < 8; gh = gh + 1) begin : g_hold
+        pe_hold_buf u_hold (.A(wd_q[gh]), .X(wd_h[gh]));
+      end
+      wire [7:0] rbyte [0:WIDE_B-1];
+      // every byte, flat (address order), for `peek` -- Verilator cannot reach
+      // a net array inside a nested generate from a function (cov sweep, 10-31)
+      wire [7:0] lmem [0:(1 << AW) - 1];
+      for (gb = 0; gb < WIDE_B; gb = gb + 1) begin : g_bank
+`ifdef M_STORE_WRONG_BANK
+        wire bank_hit = (wsel_q == gb && gb != WIDE_B-1) || (gb == 0 && wsel_q == WIDE_B-1);
 `else
-`ifndef SYNTHESIS
-      initial dout = $unsigned($random);
+        wire bank_hit = (wsel_q == gb);
 `endif
+        wire [7:0] mem [0:NW-1];
+        for (gr = 0; gr < NW; gr = gr + 1) begin : g_row
+          wire gclk;
+          // M_STORE_DROP_ROW0, the must-fire of the power-up fill: row 0's writes
+          // are lost, so its bytes keep their RANDOM power-up value -- only the
+          // fill exposes it
+`ifdef M_STORE_DROP_ROW0
+          pe_icg u_icg (.CLK(clk_n), .GATE(wv_q && bank_hit && wrow_q == gr && gr != 0), .GCLK(gclk));
+`else
+          pe_icg u_icg (.CLK(clk_n), .GATE(wv_q && bank_hit && wrow_q == gr), .GCLK(gclk));
 `endif
-`endif
-      reg  [WB_W-1:0]   rsel_q;
-      always @(posedge clk or negedge rst_n) begin
-        if (!rst_n) begin rd_pend <= 1'b0; rd_addr_q <= {AW{1'b0}}; rsel_q <= {WB_W{1'b0}}; end
-        else begin
-          rd_pend <= re & wr;
-          if (re) rd_addr_q <= raddr;
-          if (rd_now && !wre) rsel_q <= rd_addr[WB_W-1:0];
+          pe_latch8 u_row (.G(gclk), .D(wd_h), .Q(mem[gr]));
+          assign lmem[gr * WIDE_B + gb] = mem[gr];
         end
-      end
-      always @(*) begin
-        rdata  = dout[{~rsel_q, 3'b000} +: 8];
-        wrdata = dout;
-      end
+        // this bank's own copy of the wide-read row
+`ifdef M_STORE_ROW_OFF1
+        wire [AW-WB_W-1:0] xrow = wraddr_bk[gb*AW+WB_W +: AW-WB_W] + {{(AW-WB_W-1){1'b0}}, 1'b1};
+`else
+        wire [AW-WB_W-1:0] xrow = wraddr_bk[gb*AW+WB_W +: AW-WB_W];
+`endif
+        wire _unused_lo = &{1'b0, wraddr_bk[gb*AW +: WB_W]};
+        always @(posedge clk)
+          if (wre) wrdata[(WIDE_B-1-gb)*8 +: 8] <= mem[xrow];
+        assign rbyte[gb] = mem[rrow];
 `ifndef SYNTHESIS
-      // ⛔ THE ONE-PORT CONTRACT, checked in every bench: never a wide read
-      // with a write or a narrow read in the same cycle (the modes are
-      // exclusive); the only allowed pair is a write with a narrow read.
-      // ⚠ only after the store has SEEN a reset: before it, every request
-      // register holds its power-up value (Verilator's random init put a write
-      // and a wide read on the first edge at one seed), as silicon would --
-      // and the RAM's contents are garbage until the loader writes them anyway
-      reg rst_seen = 1'b0;
-      always @(negedge rst_n) rst_seen <= 1'b1;
-      always @(posedge clk) if (rst_seen && rst_n === 1'b1 && wre === 1'b1 && (wr === 1'b1 || re === 1'b1)) begin
-        $display("pe_store: *** ONE-PORT CONTRACT BROKEN at %0t: wre with %s", $time, wr ? "a write" : "a narrow read");
+        // the read-after-write contract, per bank: no wide read of the row
+        // whose latch closes on this edge
+        always @(posedge clk) if (wv_q === 1'b1 && bank_hit && wre === 1'b1 && xrow == wrow_q) begin
+          $display("pe_store: *** READ-AFTER-WRITE at %0t: a wide read of row %0d, written the previous cycle", $time, xrow);
+          $finish;
+        end
+`endif
+      end
+      always @(posedge clk)
+        if (re) rdata <= rbyte[rsel];
+`ifndef SYNTHESIS
+      // the narrow read's half of the contract
+      always @(posedge clk) if (wv_q === 1'b1 && re === 1'b1 && raddr == {wrow_q, wsel_q}) begin
+        $display("pe_store: *** READ-AFTER-WRITE at %0t: a read of byte %0d, written the previous cycle", $time, raddr);
         $finish;
       end
 `endif
-      // a bench's view of one byte (both arms define it)
+`ifdef M_PFETCH_NOWAIT
+`ifdef VERILATOR
+      initial wrdata = {WIDE_B*8{1'b0}};
+`endif
+`endif
+      // a bench's view of one byte (every arm defines it)
       function [7:0] peek;
         input [AW-1:0] a;
-        reg [WIDE_B*8-1:0] wd;
-        begin
-`ifdef PE_SRAM_MACRO
-          wd   = {WIDE_B*8{1'b0}};          // the macro's array is not visible here
-`else
-          wd   = mem[{{(AWW-(AW-WB_W)){1'b0}}, a[AW-1:WB_W]}];
-`endif
-          peek = wd[{~a[WB_W-1:0], 3'b000} +: 8];
-        end
+        peek = lmem[a];
       endfunction
     end else begin : g_mem
       wire [7:0] rbyte [0:WIDE_B-1];
@@ -302,3 +275,49 @@ module pe_store #(
   wire _unused_store = &{rst_n, 1'b0};
 
 endmodule
+
+// ---------------------------------------------------------------------------
+// The latch arm's three cells, GENERIC here (Part 1: no PDK cell names in RTL).
+// A canary / tapeout tree binds them to IHP stock cells by FILE SUBSTITUTION:
+// src/pe_cells_ihp.v (sg13cmos5l_lgcp_1,
+// _dlhq_1, _dlygate4sd3_1) under PE_IHP_CELLS, listed in info.yaml there only.
+// ---------------------------------------------------------------------------
+`ifndef PE_IHP_CELLS
+// a latch_posedge integrated clock gate: GATE is captured while CLK is low
+module pe_icg (
+    input  wire CLK,
+    input  wire GATE,
+    output wire GCLK
+);
+  reg en;
+  always_latch if (!CLK) en = GATE;
+  assign GCLK = CLK & en;
+endmodule
+
+// one row of the array: 8 transparent-high latches, no reset
+module pe_latch8 (
+    input  wire       G,
+    input  wire [7:0] D,
+    output wire [7:0] Q
+);
+  reg [7:0] q;
+  always_latch if (G) q = D;
+`ifndef SYNTHESIS
+  // ⛔ THE ARRAY POWERS UP RANDOM: latches have no reset, so neither does the
+  // model (gate store-latch checks it; its must-fire is M_STORE_NO_FILL)
+  reg [31:0] seed_r;
+`ifndef M_STORE_NO_FILL
+  initial begin seed_r = $unsigned($random); q = seed_r[7:0]; end
+`endif
+`endif
+  assign Q = q;
+endmodule
+
+// a hold buffer on the latch array's write data (a wire until bound to a cell)
+module pe_hold_buf (
+    input  wire A,
+    output wire X
+);
+  assign X = A;
+endmodule
+`endif

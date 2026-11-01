@@ -72,7 +72,7 @@ EXPECT = {
     # TF2-R3's must-fire: the release term reads the CURRENT `l_live`, so a
     # lane halted this cycle stays eligible one more -- one token, one line
     "M_TF2_LIVE_LATE":   (2, None),
-    "M_PFETCH_NOWAIT":   (3, "the skipped wait; under VERILATOR only (not seen here) +1: the never-written read register tied to 0 so LN1's signature does not ride the random-init stream (Wilson 10-29); +1 on the SRAM trial (10-30): the RAM's dout keeps the same X / 0 before its first read, its random init dropped under the mutant"),
+    "M_PFETCH_NOWAIT":   (2, "the skipped wait; under VERILATOR only (not seen here) +1: the never-written read register tied to 0 so LN1's signature does not ride the random-init stream (Wilson 10-29)"),
     "M_BUF_NOINVAL":     (2, None),
     "M_BUF_SWAP":        (2, None),
     "M_COMB_OUT":        (4, None),
@@ -105,8 +105,11 @@ EXPECT = {
     # v2 R1 (Wilson 10-25): M_TM2_STORE_ADD's adder is gone with the byte-wide
     # store; store ADDRESSING keeps three must-fires on the word-organised one
     "M_STORE_BANK_SWAP":  (2, None),
-    "M_STORE_ROW_OFF1":   (4, "2 per MEM_TYPE arm (SRAM trial, 10-30): the wide-read row one off in the flop banks AND in the word RAM's address"),
-    "M_STORE_WRONG_BANK": (4, "2 per MEM_TYPE arm (SRAM trial, 10-30): bank 3's writes land in bank 0 -- in the flop banks AND as the word RAM's byte-lane mask"),
+    "M_STORE_ROW_OFF1":   (4, "2 per MEM_TYPE arm (latch store, 10-31): the wide-read row one off in the flop banks AND the latch banks"),
+    "M_STORE_WRONG_BANK": (4, "2 per MEM_TYPE arm (latch store, 10-31): bank 3's writes land in bank 0 -- in the flop banks AND in the latch banks' clock-gate select"),
+    # v2 latch store (Wilson 10-31): the power-up fill's must-fires (gate store-latch)
+    "M_STORE_DROP_ROW0":  (2, None),
+    "M_STORE_NO_FILL":    (1, None),
     # v2 Q3: the loader's magic check bypassed (the refusal of a v1 image)
     "M_NO_MAGIC":         (2, None),
     # v2 primitive 1: BRANCH_BIT -- the target, the taken test (three

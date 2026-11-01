@@ -15,7 +15,7 @@ DEFS="${2:-}"      # e.g. M_COMB_OUT, to price the check
 NLD="$(mktemp -d)"
 trap 'rm -rf "$NLD"' EXIT
 cat > "$NLD/nl.ys" <<'YS'
-read_verilog DEFARGS src/pe_store.v
+read_verilog -sv DEFARGS src/pe_store.v
 read_verilog DEFARGS src/pe_engine.v
 read_verilog DEFARGS src/project.v
 hierarchy -top tt_um_protocol_emulator

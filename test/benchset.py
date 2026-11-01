@@ -55,6 +55,13 @@ EXCLUDED = {
         "the decoded dispatch + pin streams; its arms are pairs of builds, "
         "which a fixed arm list cannot express, and it reaches no RTL the "
         "swept benches do not."),
+    "tb_store_latch.v": (
+        "THE LATCH STORE'S OWN BENCH (Wilson 10-31, Track 2): pe_store at "
+        "MEM_TYPE \"latch\" alone, driven by `test/gate_store_latch.py` -- the "
+        "random power-up fill and the read-after-write contract, each with its "
+        "must-fire (M_STORE_NO_FILL, M_STORE_DROP_ROW0, ARM_RAW, ARM_RAW_WIDE). "
+        "Its arms are defines a fixed arm list does not carry, and the chip "
+        "benches reach the same store through the swept images."),
     "tb_v2win.v": (
         "THE SYNCHRONIZER-WINDOW MEASUREMENT (V2 pins-only). Each arm pushes "
         "one byte at an instant the runner computes from a dry run of the "

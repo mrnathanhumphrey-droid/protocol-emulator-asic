@@ -100,6 +100,11 @@ module tb_pit;
     $fclose(sfd);
     while (pc < ncyc && !(s0wait != 0 && dut.u_s0.done === 1'b1)) @(negedge clk);
     done = 1'b1;
+    // the store settles before the dump: the LATCH store makes a write visible
+    // one cycle later than flops (staged, then the next low half-cycle), so a
+    // write in stage 0's last cycle would race a dump taken at once (pc is
+    // frozen by `done`, so the count printed is unchanged)
+    repeat (2) @(negedge clk);
     // the store's own view of each byte (both MEM_TYPE arms define peek)
     for (a = 0; a < IMG_MAX; a = a + 1)
       $fdisplay(fd, "M %0d %h", a, dut.u_store.g_mem.peek(a[8:0]));

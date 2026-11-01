@@ -194,7 +194,7 @@ CLASSIFIED = {
 
     # ---- src/project.v ----------------------------------------------------
     # ⭐ PIT chunk 2, stage 0 (Wilson 10-29, both proofs accepted)
-    ("src/project.v", 1466, "v_branch", "if"): (
+    ("src/project.v", 1469, "v_branch", "if"): (
         UNREACHABLE,
         "stage 0's clock_like guard: each level needs >= 4 intervals. P_CLVL "
         "is entered only from P_CNEXT, which requires cnt[ci] >= "
@@ -202,7 +202,7 @@ CLASSIFIED = {
         "ALTERNATE level (each edge toggles it), so 16 edges give 15 "
         "intervals split 8 / 7 between the two levels: nlv0, nlv1 >= 7 > 4. "
         "The guard mirrors the frozen model's own check and stays."),
-    ("src/project.v", 1589, "v_line", "case"): (
+    ("src/project.v", 1592, "v_line", "case"): (
         UNREACHABLE,
         "stage 0's sequencer `default`. `ph` is [4:0] with 19 named states "
         "P_IDLE .. P_DONE = 5'd0 .. 5'd18; every `ph <=` writes a named P_* "
@@ -461,14 +461,19 @@ CLASSIFIED[("test/fram_spi.v", 217, "v_line", "case")] = (
     "the phase case's `default`: `phase` is 2 bits and P_OP, P_AHI, P_ALO, "
     "P_DATA enumerate all four values, so no phase reaches it. Defensive.")
 
-CLASSIFIED[("src/pe_store.v", 220, "v_branch", "if")] = (
+CLASSIFIED[("src/pe_store.v", 186, "v_branch", "if")] = (
     UNREACHABLE,
-    "the SRAM arm's ONE-PORT CONTRACT check (simulation only): it fires only "
-    "if a wide read meets a write or a narrow read in the same cycle, and the "
-    "store's modes are exclusive (PROG: loader writes + readback reads; RUN: "
-    "header and refill reads; SNIFF: capture then stage 0), so a passing run "
-    "never reaches it. It is a tripwire, not a path: covering it would mean "
-    "a broken contract.")
+    "the latch store's READ-AFTER-WRITE contract check, wide port (simulation "
+    "only): it fires only if a wide read samples the row whose latch closes on "
+    "the same edge -- a row written the cycle before. The modes keep reads and "
+    "writes apart (RUN only reads; LOAD and SNIFF read later), so a passing run "
+    "never reaches it. A tripwire, not a path; its must-fire is gate "
+    "store-latch's ARM_RAW_WIDE.")
+CLASSIFIED[("src/pe_store.v", 196, "v_branch", "if")] = (
+    UNREACHABLE,
+    "the same contract check, narrow port: a read of the byte written the "
+    "cycle before. Unreachable in a passing run for the same reason; its "
+    "must-fire is gate store-latch's ARM_RAW.")
 
 #: ⚠ TOGGLE CEILINGS -- uncovered toggle points per file, which may only FALL.
 #: ⛔ Measured, not chosen: these are the values of the sweep that shipped with
@@ -526,7 +531,7 @@ TOGGLE_CEILING = {
     # dark (name by name vs LOOP's own sweep). The 12 are the SHIFT and
     # SHIFTIN class bits of slots 6-9 (lanes 3-4) and lane 4's head copy: no
     # swept program shifts on lanes 3-4 -- structural, as their l_act op bits.
-    "src/pe_engine.v": 951,       # primitive 2's CMP arms: -97; pre-decode +12
+    "src/pe_engine.v": 953,       # primitive 2's CMP arms: -97; pre-decode +12
     # ⚠ 6 -> 28 (+22) for v2: the wide read's reserved bits (16), the row
     # index's top bits (4: v1 images fit rows 0..31) and wraddr bits 0-1 (4:
     # the engine writes whole words) -- same field-by-field check, 0 lost.
@@ -540,7 +545,13 @@ TOGGLE_CEILING = {
     # through bits no v1 image sets (measured locally; local == CI on step 2).
     # ⭐ 26 -> 18 (RATCHETED DOWN, Wilson 10-29): stage 0 reads the capture
     # through the narrow port, so raddr / rrow's high bits toggle (8 paid).
-    "src/pe_store.v": 18,         # primitive 2's CMP arms: -4; PIT c2 stage 0 -8
+    # ⚠ 18 -> 50 (+32) FOR THE LATCH STORE (Wilson 10-31), MEASURED (cov sweep
+    # 11-01, name by name vs stage 0's own sweep, toggle_diff.py): 1332 new
+    # points, 0 covered points went dark. ALL 32 dark ones are `seed_r` -- the
+    # SIMULATION-ONLY 32-bit draw that gives each latch row its random power-up
+    # byte (`ifndef SYNTHESIS`): written once at time 0, never again, and no
+    # hardware. Every point of the latch array itself is covered.
+    "src/pe_store.v": 50,         # primitive 2's CMP arms: -4; PIT c2 stage 0 -8; latch store +32 (seed_r, sim-only)
     # ⚠ 186 -> 187: e_wraddr_bk's same 16 dark points (bits 0,1 of each
     # bank's copy, +12 over e_wraddr's 4); the old ceiling sat ~11 above
     # its measured count, so the rise reads as +1.
@@ -665,9 +676,9 @@ ANCHOR_TEXT = {
     # was recorded beside the line number, so the deletion had to account for
     # the anchor instead of leaving a live number pointing at whatever moved
     # into line 557.
-    ("src/project.v", 1466):
+    ("src/project.v", 1469):
         "P_CLVL: if (nlv0 < 9'd4 || nlv1 < 9'd4) begin regular <= 1'b0; ph <= P_CHALF; end",
-    ("src/project.v", 1589):
+    ("src/project.v", 1592):
         "default: ph <= P_IDLE;",
     ("test/fram_i2c.v", 281):
         "P_WDATA: begin",
@@ -684,8 +695,10 @@ ANCHOR_TEXT = {
         "end else if (opcode == OP_READ) begin",
     ("test/fram_spi.v", 217):
         "default: ;",
-    ("src/pe_store.v", 220):
-        "always @(posedge clk) if (rst_seen && rst_n === 1'b1 && wre === 1'b1 && (wr === 1'b1 || re === 1'b1)) begin",
+    ("src/pe_store.v", 186):
+        "always @(posedge clk) if (wv_q === 1'b1 && bank_hit && wre === 1'b1 && xrow == wrow_q) begin",
+    ("src/pe_store.v", 196):
+        "always @(posedge clk) if (wv_q === 1'b1 && re === 1'b1 && raddr == {wrow_q, wsel_q}) begin",
 }
 
 #: ⛔⛔ EVERY COVERAGE FIGURE IS LABELLED WITH THE TOOL THAT MEASURED IT
