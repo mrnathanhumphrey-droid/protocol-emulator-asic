@@ -461,7 +461,7 @@ CLASSIFIED[("test/fram_spi.v", 217, "v_line", "case")] = (
     "the phase case's `default`: `phase` is 2 bits and P_OP, P_AHI, P_ALO, "
     "P_DATA enumerate all four values, so no phase reaches it. Defensive.")
 
-CLASSIFIED[("src/pe_store.v", 186, "v_branch", "if")] = (
+CLASSIFIED[("src/pe_store.v", 199, "v_branch", "if")] = (
     UNREACHABLE,
     "the latch store's READ-AFTER-WRITE contract check, wide port (simulation "
     "only): it fires only if a wide read samples the row whose latch closes on "
@@ -469,11 +469,18 @@ CLASSIFIED[("src/pe_store.v", 186, "v_branch", "if")] = (
     "writes apart (RUN only reads; LOAD and SNIFF read later), so a passing run "
     "never reaches it. A tripwire, not a path; its must-fire is gate "
     "store-latch's ARM_RAW_WIDE.")
-CLASSIFIED[("src/pe_store.v", 196, "v_branch", "if")] = (
+CLASSIFIED[("src/pe_store.v", 214, "v_branch", "if")] = (
     UNREACHABLE,
     "the same contract check, narrow port: a read of the byte written the "
     "cycle before. Unreachable in a passing run for the same reason; its "
     "must-fire is gate store-latch's ARM_RAW.")
+CLASSIFIED[("src/pe_store.v", 209, "v_branch", "if")] = (
+    UNREACHABLE,
+    "the shared read tree's precondition check (simulation only): it fires "
+    "only if `re` and `wre` are high in the same cycle. `re` comes only from "
+    "H_REQ (before hdr_done), `wre` only from P_REQ (after it), and SNIFF "
+    "holds the engine in reset, so a passing run never reaches it. A "
+    "tripwire, not a path; its must-fire is gate store-latch's ARM_SHARED.")
 
 #: ⚠ TOGGLE CEILINGS -- uncovered toggle points per file, which may only FALL.
 #: ⛔ Measured, not chosen: these are the values of the sweep that shipped with
@@ -551,7 +558,14 @@ TOGGLE_CEILING = {
     # SIMULATION-ONLY 32-bit draw that gives each latch row its random power-up
     # byte (`ifndef SYNTHESIS`): written once at time 0, never again, and no
     # hardware. Every point of the latch array itself is covered.
-    "src/pe_store.v": 50,         # primitive 2's CMP arms: -4; PIT c2 stage 0 -8; latch store +32 (seed_r, sim-only)
+    # ⚠ 50 -> 111 (+61) FOR THE SHARED READ TREE (Wilson 11-01), MEASURED (cov
+    # shard on 01ae936, 11-02, the merged data read name by name): total 4382,
+    # uncovered 111. The 50 already here are unchanged (seed_r 32, wraddr_bk
+    # 16, wrdata 2). ALL 61 new dark points are falling edges (->0) of
+    # pe_rowmux's per-node child aliases c0 / c1 / c2 / c3 (15 / 14 / 17 / 15),
+    # the four named slices of `t` each tree node reads. No covered point
+    # went dark: the line/branch adjudication reports nothing newly dark.
+    "src/pe_store.v": 111,        # primitive 2's CMP arms: -4; PIT c2 stage 0 -8; latch store +32 (seed_r, sim-only); shared tree +61 (c0..c3)
     # ⚠ 186 -> 187: e_wraddr_bk's same 16 dark points (bits 0,1 of each
     # bank's copy, +12 over e_wraddr's 4); the old ceiling sat ~11 above
     # its measured count, so the rise reads as +1.
@@ -695,9 +709,13 @@ ANCHOR_TEXT = {
         "end else if (opcode == OP_READ) begin",
     ("test/fram_spi.v", 217):
         "default: ;",
-    ("src/pe_store.v", 186):
+    # 186 -> 199 and 196 -> 214: the measured shift of the shared tree rewrite
+    # (78f647e); the source text is unchanged, so the anchors moved, not the checks.
+    ("src/pe_store.v", 199):
         "always @(posedge clk) if (wv_q === 1'b1 && bank_hit && wre === 1'b1 && xrow == wrow_q) begin",
-    ("src/pe_store.v", 196):
+    ("src/pe_store.v", 209):
+        "always @(posedge clk) if (re === 1'b1 && wre === 1'b1) begin",
+    ("src/pe_store.v", 214):
         "always @(posedge clk) if (wv_q === 1'b1 && re === 1'b1 && raddr == {wrow_q, wsel_q}) begin",
 }
 
