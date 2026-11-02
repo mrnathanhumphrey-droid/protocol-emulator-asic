@@ -1,6 +1,9 @@
 name: test
 on:
   push:
+    # CANARY BRANCHES ONLY (Wilson 11-02): a canary differs from work/latch-store
+    # in config alone and its source is tested there; the harden is dispatched
+    branches-ignore: ['v2-canary-*']
   # ⭐ A MANUAL DISPATCH IS THE FULL LN1 RUN (200k rows per arm); a push runs
   # 20k. A `schedule` would only ever fire on the default branch (cmos5l), i.e.
   # test the locked tree rather than dev, so the full run is dispatched by hand.
