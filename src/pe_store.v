@@ -141,6 +141,14 @@ module pe_store #(
         wsel_q <= wsel;
         wrow_q <= wrow;
       end
+`ifndef SYNTHESIS
+      // the contract checks below are ARMED only once this store has seen its
+      // reset low on an edge: before that every flop is power-up state (seed
+      // 1 of the 2-state seed sweep fired SHARED READ at the first edge, 10 ns;
+      // rst_n itself comes from a synchroniser and is random there)
+      reg chk_armed = 1'b0;
+      always @(posedge clk) if (rst_n === 1'b0) chk_armed <= 1'b1;
+`endif
       wire       clk_n = ~clk;
       wire [7:0] wd_h;
       for (gh = 0; gh < 8; gh = gh + 1) begin : g_hold
@@ -196,7 +204,7 @@ module pe_store #(
 `ifndef SYNTHESIS
         // the read-after-write contract, per bank: no wide read of the row
         // whose latch closes on this edge
-        always @(posedge clk) if (wv_q === 1'b1 && bank_hit && wre === 1'b1 && xrow == wrow_q) begin
+        always @(posedge clk) if (chk_armed && rst_n === 1'b1 && wv_q === 1'b1 && bank_hit && wre === 1'b1 && xrow == wrow_q) begin
           $display("pe_store: *** READ-AFTER-WRITE at %0t: a wide read of row %0d, written the previous cycle", $time, xrow);
           $finish;
         end
@@ -206,12 +214,12 @@ module pe_store #(
         if (re) rdata <= rbyte[rsel];
 `ifndef SYNTHESIS
       // the shared tree's precondition: never both reads in one cycle
-      always @(posedge clk) if (re === 1'b1 && wre === 1'b1) begin
+      always @(posedge clk) if (chk_armed && rst_n === 1'b1 && re === 1'b1 && wre === 1'b1) begin
         $display("pe_store: *** SHARED READ at %0t: re and wre both high", $time);
         $finish;
       end
       // the narrow read's half of the contract
-      always @(posedge clk) if (wv_q === 1'b1 && re === 1'b1 && raddr == {wrow_q, wsel_q}) begin
+      always @(posedge clk) if (chk_armed && rst_n === 1'b1 && wv_q === 1'b1 && re === 1'b1 && raddr == {wrow_q, wsel_q}) begin
         $display("pe_store: *** READ-AFTER-WRITE at %0t: a read of byte %0d, written the previous cycle", $time, raddr);
         $finish;
       end

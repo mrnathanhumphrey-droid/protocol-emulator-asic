@@ -461,7 +461,7 @@ CLASSIFIED[("test/fram_spi.v", 217, "v_line", "case")] = (
     "the phase case's `default`: `phase` is 2 bits and P_OP, P_AHI, P_ALO, "
     "P_DATA enumerate all four values, so no phase reaches it. Defensive.")
 
-CLASSIFIED[("src/pe_store.v", 199, "v_branch", "if")] = (
+CLASSIFIED[("src/pe_store.v", 207, "v_branch", "if")] = (
     UNREACHABLE,
     "the latch store's READ-AFTER-WRITE contract check, wide port (simulation "
     "only): it fires only if a wide read samples the row whose latch closes on "
@@ -469,12 +469,12 @@ CLASSIFIED[("src/pe_store.v", 199, "v_branch", "if")] = (
     "writes apart (RUN only reads; LOAD and SNIFF read later), so a passing run "
     "never reaches it. A tripwire, not a path; its must-fire is gate "
     "store-latch's ARM_RAW_WIDE.")
-CLASSIFIED[("src/pe_store.v", 214, "v_branch", "if")] = (
+CLASSIFIED[("src/pe_store.v", 222, "v_branch", "if")] = (
     UNREACHABLE,
     "the same contract check, narrow port: a read of the byte written the "
     "cycle before. Unreachable in a passing run for the same reason; its "
     "must-fire is gate store-latch's ARM_RAW.")
-CLASSIFIED[("src/pe_store.v", 209, "v_branch", "if")] = (
+CLASSIFIED[("src/pe_store.v", 217, "v_branch", "if")] = (
     UNREACHABLE,
     "the shared read tree's precondition check (simulation only): it fires "
     "only if `re` and `wre` are high in the same cycle. `re` comes only from "
@@ -710,13 +710,15 @@ ANCHOR_TEXT = {
     ("test/fram_spi.v", 217):
         "default: ;",
     # 186 -> 199 and 196 -> 214: the measured shift of the shared tree rewrite
-    # (78f647e); the source text is unchanged, so the anchors moved, not the checks.
-    ("src/pe_store.v", 199):
-        "always @(posedge clk) if (wv_q === 1'b1 && bank_hit && wre === 1'b1 && xrow == wrow_q) begin",
-    ("src/pe_store.v", 209):
-        "always @(posedge clk) if (re === 1'b1 && wre === 1'b1) begin",
-    ("src/pe_store.v", 214):
-        "always @(posedge clk) if (wv_q === 1'b1 && re === 1'b1 && raddr == {wrow_q, wsel_q}) begin",
+    # (78f647e). Then +8 (199 -> 207, 209 -> 217, 214 -> 222) and the text
+    # gained `chk_armed && rst_n === 1'b1 &&`: the checks are armed only after
+    # the store has seen its reset (the Verilator seed sweep, 11-02).
+    ("src/pe_store.v", 207):
+        "always @(posedge clk) if (chk_armed && rst_n === 1'b1 && wv_q === 1'b1 && bank_hit && wre === 1'b1 && xrow == wrow_q) begin",
+    ("src/pe_store.v", 217):
+        "always @(posedge clk) if (chk_armed && rst_n === 1'b1 && re === 1'b1 && wre === 1'b1) begin",
+    ("src/pe_store.v", 222):
+        "always @(posedge clk) if (chk_armed && rst_n === 1'b1 && wv_q === 1'b1 && re === 1'b1 && raddr == {wrow_q, wsel_q}) begin",
 }
 
 #: ⛔⛔ EVERY COVERAGE FIGURE IS LABELLED WITH THE TOOL THAT MEASURED IT
