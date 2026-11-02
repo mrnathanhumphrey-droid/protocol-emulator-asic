@@ -325,9 +325,18 @@ module pe_rowmux #(
     end
   endfunction
   localparam integer NT = lvl_off(L4 + 1);  // nodes in all levels
+  genvar k, i;
+  // ⛔ TWO DESCRIPTIONS OF ONE TREE (Wilson 11-02). Synthesis reads the flat
+  // vector below, the text every canary hardened. Simulation reads the same
+  // nodes as an UNPACKED array, one net per node: in iverilog every change to
+  // the flat `t` re-sent all 8*NT bits to every slice reader, which made the
+  // latch store's benches ~30x slower than the flop store's (11-02: one PIT
+  // stage-0 sim 1,212.7 s flat, 182.0 s unpacked, byte-identical output).
+  // model/gate_rowmux_equiv.py proves the two equal, at every SW the chip and
+  // the benches use, on every push. ⛔ EDIT BOTH OR THE GATE GOES RED.
+`ifdef SYNTHESIS
   (* keep *) wire [8*NT-1:0] t;
   assign t[0 +: 8*N] = d;
-  genvar k, i;
   generate
     for (k = 1; k <= L4; k = k + 1) begin : g_lv
       wire [1:0] q = s[2*k-1 -: 2];
@@ -352,6 +361,34 @@ module pe_rowmux #(
       assign y = t[lvl_off(L4)*8 +: 8];
     end
   endgenerate
+`else
+  (* keep *) wire [7:0] t [0:NT-1];
+  generate
+    for (i = 0; i < N; i = i + 1) begin : g_leaf
+      assign t[i] = d[i*8 +: 8];
+    end
+    for (k = 1; k <= L4; k = k + 1) begin : g_lv
+      wire [1:0] q = s[2*k-1 -: 2];
+      for (i = 0; i < (N >> (2*k)); i = i + 1) begin : g_n
+        // the node's four children, in address order
+        wire [7:0] c0 = t[lvl_off(k-1) + 4*i];
+        wire [7:0] c1 = t[lvl_off(k-1) + 4*i + 1];
+        wire [7:0] c2 = t[lvl_off(k-1) + 4*i + 2];
+        wire [7:0] c3 = t[lvl_off(k-1) + 4*i + 3];
+`ifdef M_ROWMUX_NODE
+        assign t[lvl_off(k) + i] = (k == 1 && i == 1) ? (q[1] ? (q[0] ? c0 : c1) : (q[0] ? c2 : c3)) : (q[1] ? (q[0] ? c3 : c2) : (q[0] ? c1 : c0));
+`else
+        assign t[lvl_off(k) + i] = q[1] ? (q[0] ? c3 : c2) : (q[0] ? c1 : c0);
+`endif
+      end
+    end
+    if (SW % 2 == 1) begin : g_root2
+      assign y = s[SW-1] ? t[lvl_off(L4) + 1] : t[lvl_off(L4)];
+    end else begin : g_root
+      assign y = t[lvl_off(L4)];
+    end
+  endgenerate
+`endif
 endmodule
 
 // ---------------------------------------------------------------------------

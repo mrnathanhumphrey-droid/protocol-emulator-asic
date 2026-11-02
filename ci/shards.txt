@@ -71,6 +71,7 @@ fast model/gate_wire_feed.py
 fast model/gate_image_bounds.py
 fast model/gate_sim_runs.py
 fast model/gate_formal_miters.py
+fast model/gate_rowmux_equiv.py
 fast model/gate_i2c_hw_witness.py
 fast model/gate_onewire_hw_witness.py
 fast model/gate_flow_config.py

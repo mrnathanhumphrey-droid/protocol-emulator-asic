@@ -278,6 +278,10 @@ GATES=(
   # only the tree they last ran on. Each mutant must FAIL BY COUNTEREXAMPLE on
   # the assertion it breaks; no sby is COULD NOT RUN, red. 6 runs, seconds.
   model/gate_formal_miters.py
+  # ⛔ THE ROW-READ TREE'S TWO TEXTS (Wilson 11-02): synthesis reads the flat
+  # pe_rowmux, simulation the unpacked one (~6.7x faster); Yosys proves them
+  # equal at SW 7/4/3 every push, and M_ROWMUX_NODE must be NOT PROVEN. Seconds.
+  model/gate_rowmux_equiv.py
   # ⭐ The I2C Fast-mode lane's witness: a RECORDED BENCH WITNESS (PA100T +
   # MB85RC256V, DSLogic captures) re-checked here in seconds, no simulator --
   # not a hardware run in CI (Wilson 10-17).

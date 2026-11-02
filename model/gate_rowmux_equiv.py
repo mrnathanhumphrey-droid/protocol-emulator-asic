@@ -1,0 +1,172 @@
+"""THE ROW-READ TREE'S TWO DESCRIPTIONS ARE ONE BLOCK (Wilson 11-02).
+
+⛔⛔ WHY. `pe_rowmux` (src/pe_store.v) is written twice: a FLAT vector under
+`ifdef SYNTHESIS` -- the text every canary hardened -- and an UNPACKED node array
+for simulation, ~6.7x faster in iverilog (one PIT stage-0 sim 1,212.7 s flat,
+182.0 s unpacked, byte-identical output). Two descriptions of one block drift
+the first time someone edits one and forgets the other, so the proof that they
+are equal runs on EVERY push, not once.
+
+THE PROOF: Yosys `equiv_make` / `equiv_simple` / `equiv_induct` on the two texts,
+read from the SHIPPED file (the module is lifted verbatim, then elaborated with
+and without `SYNTHESIS`), at every SW the chip and the benches use:
+  SW = 7  the store's real bank (AW 9 - WB_W 2: 128 rows of 8 bits), and
+          tb_rowmux's first size;  SW = 4, 3  tb_rowmux's other two.
+The tree is combinational, so the proof is complete -- every input, not a sample.
+
+ARMS, per SW:  clean -> PROVEN (every $equiv cell proven, none unproven, and at
+least the 8 output bits matched);  M_ROWMUX_NODE on the simulation text -> NOT
+PROVEN (the must-fire: one level-1 node's children reversed).
+⛔ A VERDICT IS READ FROM `equiv_status`, never the exit code alone; a log with no
+status line is red (a run that did not reach the check proved nothing).
+⛔ A MISSING TOOL IS `COULD NOT RUN`, and red. The tool is the pinned suite's
+yosys, found the way gate_formal_miters finds its sby (`PE_SBY`, PATH, WSL).
+POSITIVE TOKEN: `GATE rowmux-equiv: PASSED`.
+"""
+from __future__ import annotations
+
+import os
+import re
+import subprocess
+import sys
+import tempfile
+
+try:
+    sys.stdout.reconfigure(encoding="utf-8")
+except Exception:
+    pass
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(HERE)
+sys.path.insert(0, HERE)
+import gate_formal_miters as FM          # noqa: E402  (the suite resolver)
+
+STORE = os.path.join(ROOT, "src", "pe_store.v")
+SWS = (7, 4, 3)
+STATUS = re.compile(r"Of those cells (\d+) are proven and (\d+) are unproven")
+FOUND = re.compile(r"Found (\d+) \$equiv cells")
+
+SCRIPT = """read_verilog -sv -DSYNTHESIS rowmux.v
+hierarchy -top pe_rowmux -chparam SW {sw}
+proc
+rename -top gold
+design -stash gold
+read_verilog -sv {defs} rowmux.v
+hierarchy -top pe_rowmux -chparam SW {sw}
+proc
+rename -top gate
+design -stash gate
+design -copy-from gold -as gold gold
+design -copy-from gate -as gate gate
+equiv_make gold gate equiv
+hierarchy -top equiv
+equiv_simple
+equiv_induct
+equiv_status
+"""
+
+
+def lift(text):
+    """The `pe_rowmux` module, verbatim, from the shipped file."""
+    i = text.find("module pe_rowmux")
+    if i < 0:
+        raise ValueError("no `module pe_rowmux` in src/pe_store.v")
+    j = text.find("endmodule", i)
+    if j < 0:
+        raise ValueError("pe_rowmux has no `endmodule`")
+    body = text[i:j + len("endmodule")]
+    if "`ifdef SYNTHESIS" not in body or "`else" not in body:
+        raise ValueError("pe_rowmux no longer has its two descriptions "
+                         "(`ifdef SYNTHESIS ... `else)")
+    return body + "\n"
+
+
+def verdict(log, expect):
+    """(ok, why) for one yosys run, read from equiv_status."""
+    st = STATUS.findall(log)
+    if not st:
+        return False, "no `equiv_status` line -- the proof did not run to its check"
+    proven, unproven = (int(x) for x in st[-1])
+    found = FOUND.findall(log)
+    n = int(found[-1]) if found else proven + unproven
+    if expect == "PROVEN":
+        if unproven == 0 and proven >= 8:
+            return True, "PROVEN: %d of %d $equiv cells" % (proven, n)
+        return False, "%d proven, %d UNPROVEN of %d" % (proven, unproven, n)
+    if unproven > 0:
+        return True, "NOT PROVEN, as required: %d unproven of %d" % (unproven, n)
+    return False, "the mutant PROVED EQUAL (%d of %d) -- the proof cannot see a " \
+                  "reversed node" % (proven, n)
+
+
+def yosys_argv(how, sby, workdir, script):
+    ydir = sby.rsplit("/", 1)[0] if how == "wsl" else os.path.dirname(sby)
+    if how == "wsl":
+        return ["wsl.exe", "--cd", FM.wslpath(workdir), "--", ydir + "/yosys",
+                "-s", script]
+    return [os.path.join(ydir, "yosys"), "-s", script]
+
+
+def mustfires_verdict():
+    """The verdict reader itself: a log with no status line, and an unproven
+    clean log, are both red."""
+    bad = 0
+    for label, log, expect in (
+            ("no status line", "Found 8 $equiv cells in equiv:\n", "PROVEN"),
+            ("unproven clean", "Found 8 $equiv cells\n Of those cells 7 are "
+                               "proven and 1 are unproven.\n", "PROVEN"),
+            ("mutant proved", "Found 8 $equiv cells\n Of those cells 8 are "
+                              "proven and 0 are unproven.\n", "NOT PROVEN")):
+        ok, _why = verdict(log, expect)
+        print("  verdict must-fire: %-16s %s" % (label, "red ok" if not ok
+                                                 else "*** GREEN"))
+        bad += ok
+    return bad
+
+
+def main() -> int:
+    print("GATE rowmux-equiv: pe_rowmux's synthesis text == its simulation text")
+    bad = mustfires_verdict()
+    try:
+        how, sby = FM.resolve()
+    except FM.CouldNotRun as e:
+        print("  *** COULD NOT RUN: %s -- no proof ran, so none passed" % e)
+        print("GATE rowmux-equiv: COULD NOT RUN")
+        return 1
+    try:
+        body = lift(open(STORE, encoding="utf-8").read())
+    except ValueError as e:
+        print("  *** %s" % e)
+        print("GATE rowmux-equiv: FAILED (1)")
+        return 1
+    work = tempfile.mkdtemp(prefix="pe_rowmux_equiv_")
+    with open(os.path.join(work, "rowmux.v"), "w", encoding="utf-8",
+              newline="\n") as fh:
+        fh.write(body)
+    for sw in SWS:
+        for arm, defs, expect in (("clean", "", "PROVEN"),
+                                  ("M_ROWMUX_NODE", "-DM_ROWMUX_NODE", "NOT PROVEN")):
+            name = "sw%d_%s.ys" % (sw, arm.lower())
+            with open(os.path.join(work, name), "w", encoding="utf-8",
+                      newline="\n") as fh:
+                fh.write(SCRIPT.format(sw=sw, defs=defs))
+            r = subprocess.run(yosys_argv(how, sby, work, name), cwd=work,
+                               capture_output=True, text=True,
+                               encoding="utf-8", errors="replace")
+            log = r.stdout + r.stderr
+            ok, why = verdict(log, expect)
+            print("  %s SW=%d %-14s expect %-10s: %s" % (
+                "ok " if ok else "***", sw, arm, expect, why))
+            if not ok:
+                bad += 1
+                for ln in log.strip().splitlines()[-6:]:
+                    print("      | " + ln)
+    if bad:
+        print("GATE rowmux-equiv: FAILED (%d)" % bad)
+        return 1
+    print("GATE rowmux-equiv: PASSED")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

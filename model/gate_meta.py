@@ -153,6 +153,7 @@ SEAMS = (
     ("test/gate_corpus_trace.py", "gate_corpus_trace.od_violations", "slow", "E"),
     ("test/gate_corpus_trace.py", "gate_corpus_trace.pin_problem", "slow", "NONE"),
     ("model/gate_formal_miters.py", "gate_formal_miters.verdict", "slow", "OK"),
+    ("model/gate_rowmux_equiv.py", "gate_rowmux_equiv.verdict", "slow", "OK"),
     ("model/gate_rtl_lint.py", "gate_rtl_lint.judge", "slow", "E0"),
     ("model/gate_hold_offset.py", "gate_hold_offset.judge", "slow", "E0"),
     ("test/run_uartrx.py", "uart_rx.build", "slow", "NORAISE"),

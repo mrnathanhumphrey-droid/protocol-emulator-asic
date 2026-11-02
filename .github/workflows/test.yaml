@@ -18,6 +18,7 @@ jobs:
   # and dstar39 == exactly [propext, Quot.sound]. Divergence = red.
   ln1:
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
       - name: Checkout repo
         uses: actions/checkout@v6
@@ -118,6 +119,7 @@ jobs:
   # can drop out of CI silently.
   meta-seams:
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     outputs:
       seams: ${{ steps.list.outputs.seams }}
     steps:
@@ -140,6 +142,7 @@ jobs:
   meta-slow:
     needs: meta-seams
     runs-on: ubuntu-24.04
+    timeout-minutes: 45            # gate_meta's own per-seam limit is 30 min
     strategy:
       fail-fast: false
       # ⚠ the account runs ~20 jobs at once across ALL repos (Wilson 10-25):
@@ -211,6 +214,7 @@ jobs:
     needs: [meta-seams, meta-slow]
     if: always()
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
       - name: Every slow seam reported green
         shell: bash
@@ -224,6 +228,7 @@ jobs:
   # to GATES exactly), never typed here.
   shards:
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     outputs:
       shards: ${{ steps.list.outputs.shards }}
     steps:
@@ -247,6 +252,11 @@ jobs:
     needs: shards
     name: test (${{ matrix.shard }})
     runs-on: ubuntu-24.04
+    # ⛔ TIMEOUTS (Wilson 11-02): a hang or a slow shard fails in this many
+    # minutes and says so, not after GitHub's 6 hours. Sized from the LAST
+    # measured CI run (41293526842, the latch store before its sim fix -- an
+    # upper bound): cov 173 min, the rest <= 77. Tighten after the post-fix run.
+    timeout-minutes: ${{ matrix.shard == 'cov' && 240 || 120 }}
     strategy:
       fail-fast: false
       matrix:
@@ -401,6 +411,7 @@ jobs:
     needs: [shards, test]
     if: always()
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     permissions:
       actions: read
       contents: read
@@ -438,6 +449,7 @@ jobs:
   # the cocotb suite (test/Makefile), its own job now the gates are sharded
   cocotb:
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
     steps:
       - name: Checkout repo
         uses: actions/checkout@v6
