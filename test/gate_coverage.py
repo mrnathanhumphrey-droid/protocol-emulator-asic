@@ -565,7 +565,12 @@ TOGGLE_CEILING = {
     # pe_rowmux's per-node child aliases c0 / c1 / c2 / c3 (15 / 14 / 17 / 15),
     # the four named slices of `t` each tree node reads. No covered point
     # went dark: the line/branch adjudication reports nothing newly dark.
-    "src/pe_store.v": 111,        # primitive 2's CMP arms: -4; PIT c2 stage 0 -8; latch store +32 (seed_r, sim-only); shared tree +61 (c0..c3)
+    # ⚠ 111 -> 112 (+1), MEASURED (cov shard on b2725e1, 11-02, read name by
+    # name): total 4384, uncovered 112. The one new point is `chk_armed`'s
+    # falling edge -- the SIMULATION-ONLY flag (`ifndef SYNTHESIS`, e93e8b5)
+    # that arms the contract checks once reset has been seen: it rises once and
+    # by design never falls. The 111 above are unchanged, point for point.
+    "src/pe_store.v": 112,        # primitive 2's CMP arms: -4; PIT c2 stage 0 -8; latch store +32 (seed_r, sim-only); shared tree +61 (c0..c3); chk_armed +1 (sim-only)
     # ⚠ 186 -> 187: e_wraddr_bk's same 16 dark points (bits 0,1 of each
     # bank's copy, +12 over e_wraddr's 4); the old ceiling sat ~11 above
     # its measured count, so the rise reads as +1.
