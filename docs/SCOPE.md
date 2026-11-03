@@ -4,6 +4,11 @@ v1 is the design as tagged `sub-v1`: IHP `sg13cmos5l`, 6×4 tiles, 50 MHz, for
 the Tiny Tapeout shuttle. Every claim below points at the evidence that
 carries it; anything not listed here is not claimed.
 
+⚠ **This is v1's scope, at 50 MHz.** v2 moves the chip to 60 MHz. The README's
+[The clock](../README.md#the-clock) section says what each claim at 60 MHz rests
+on. The formal analysis is still at 50 MHz; 60 MHz is verified in simulation and by
+the assembler's per-target checks.
+
 ## Claimed
 
 | claim | evidence |

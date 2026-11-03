@@ -317,6 +317,11 @@ CHANGE_SET = frozenset([
     "test/sweep_onewire_phase.py",         # per-arm phase plan (17 / 20)
     "test/uart_rx.py",                     # T_NOMINAL = 115200 at the target
     "test/uart_tx.py",                     # T_NOMINAL = 115200 at the target
+    # ---- AMENDMENT 10 (11-03, Wilson: clock (c), proofs + docs).
+    "lean/JLane/JLane/Hold.lean",          # holdCycles_meets: every period; SDA_HS 23
+    "lean/JLane/JLane/HoldGate.lean",      # SDA_HS computed; d >= SDA_HS + 16 = 39
+    "docs/HOST_INTERFACE.md",              # the clock note: cycles hold, ns are 50 MHz
+    "docs/SCOPE.md",                       # v1 scope at 50 MHz, pointer to v2's clock
 ])
 
 

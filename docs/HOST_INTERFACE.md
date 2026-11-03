@@ -8,6 +8,12 @@ contract** ruled after the byte-0 defect.
 Everything here is observable at the pins. Nothing requires reading internal
 state, which is what lets the same suite run against the gate-level netlist.
 
+**The clock (Wilson 11-03).** The rules below are counted in **cycles**, and a
+count holds at any clock. The nanosecond and microsecond figures were written at
+**50 MHz**, the v1 chip and the FPGA board. On the v2 chip at **60 MHz** each is
+50/60 of what is shown: for example, 3 cycles is 60 ns at 50 MHz and 50 ns at
+60 MHz. The clock is `info.yaml` / `fpga/board.yaml`, read through `model/clock.py`.
+
 ## Pins
 
 `uio` carries everything that must be able to **stop driving** (inputs,

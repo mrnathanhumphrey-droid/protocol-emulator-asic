@@ -3,7 +3,9 @@
 # Protocol Emulator
 
 An entry to the Jane Street ASIC competition: a programmable serial-protocol
-engine for the Tiny Tapeout shuttle on IHP `sg13cmos5l`, in 6×4 tiles at 50 MHz.
+engine for the Tiny Tapeout shuttle on IHP `sg13cmos5l`, in 6×4 tiles. v2 runs the
+chip at 60 MHz; v1 as tagged, and the FPGA board, run at 50 MHz (see
+[The clock](#the-clock)).
 The same silicon speaks UART, SPI (master or target), I²C or 1-Wire depending on the program
 loaded into it — and it can speak a protocol nobody had written down when the
 die was taped out, as long as that protocol fits the instruction set and the
@@ -35,7 +37,7 @@ Pre-submission, for the March 2027 `sg13cmos5l` shuttle.
 | | |
 |---|---|
 | **Done** | RTL frozen; every CI gate green on every push; UART, SPI master, SPI target (all four modes), I²C and 1-Wire programs verified in simulation; UART, I²C and 1-Wire also on an FPGA prototype with real parts |
-| **Of record** | the CI harden closes at 50 MHz: slow-corner setup slack +2.676 ns, hold +0.105 ns, 0 violations at every corner, precheck and gate-level cocotb green; a gate holds the tree to what it hardened |
+| **Of record** | v1: the CI harden closes at 50 MHz: slow-corner setup slack +2.676 ns, hold +0.105 ns, 0 violations at every corner, precheck and gate-level cocotb green; a gate holds the tree to what it hardened |
 | **Open** | the trace corpus at gate level; hardware runs of the SPI target — see [Open items](#open-items) |
 
 ---
@@ -112,7 +114,7 @@ The five lanes are derived from the protocols, not chosen:
 | UART-rx 115200 | 4210 | 3 | 10 | 421 | 1 | 213 |
 | SPI-target: MISO 1 MHz; MOSI capture 500 kHz | 400 | 3 | 8 | 50 | 1 | 17 |
 
-All in cycles at 50 MHz: period `T`, service time `C` (measured), release jitter
+All in cycles at **50 MHz**: period `T`, service time `C` (measured), release jitter
 `J`, tolerated response `D_tol`. `n` and `t` describe the bursty lanes — UART-rx
 is 10 bits spaced 421 apart (the fastest peer it is verified to decode back to
 back, 3% fast), SPI-target 8 bits spaced 50 (one event per bit, at
@@ -120,6 +122,28 @@ the master's 1 MHz clock) — because a periodic model using the outer period
 alone would understate the burst. The SPI target answers the master's clock one
 bit per edge, so its period is the master's claimed maximum SCK, declared when
 the program is built; a program that leaves it undeclared is refused.
+
+### The clock
+
+Programs are written in real time (a rate, or a minimum in nanoseconds), and the
+toolchain converts them into cycles for each target's clock. Every minimum gets a 5%
+guard band. The clock is written once per target, in `info.yaml` (the chip, 60 MHz)
+and `fpga/board.yaml` (the PA100T board, 50 MHz), and read through `model/clock.py`.
+`model/gate_clock_consistency.py` holds every copy of it to those two files.
+
+**What each clock's claims rest on:**
+
+- **The formal analysis holds at 50 MHz.** This is the A2 lane table above and
+  everything derived from it: the Imitator band, the TChecker, pyRTA and recurrence
+  records, and the measured bands. It was derived at 50 MHz, the FPGA board's clock,
+  and has not yet been re-certified at the chip's 60 MHz. That re-certification is
+  its own open item.
+- **60 MHz is verified in simulation and by the assembler's per-target checks,
+  not by formal analysis.** `pe_asm` checks every program's I²C minimums at the
+  chip's clock. `model/gate_clock_cross.py` builds the shipped I²C, SPI and UART
+  programs for both clocks and checks that their wire timing matches in nanoseconds.
+- **The FPGA board's I²C program** is rebuilt exactly as its hardware witness
+  captured it at 50 MHz, without the band, until it is re-witnessed.
 
 **The scheduler.** Non-preemptive EDF with a deadline-limited interference
 bound. The scheduling key is kept separate from the requirement `D_tol`, and
@@ -351,7 +375,7 @@ The documents are indexed, by what each one is for, in
 |---|---|
 | process | IHP `sg13cmos5l` |
 | tiles | 6×4 |
-| clock | 50 MHz |
+| clock | 60 MHz (v1 and the FPGA board: 50 MHz) |
 | flops | 3,449 (Yosys, pre-layout) |
 | flow | Tiny Tapeout / LibreLane |
 

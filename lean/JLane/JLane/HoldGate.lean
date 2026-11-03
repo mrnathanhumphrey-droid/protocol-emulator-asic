@@ -3,10 +3,11 @@ import JLane.HoldRun
 # Brick V3b-2 — the gate is open at every decision, and D* survives SDA holds
 Induction on time. If the gate was open at every decision before `n`, the hold run is the
 v1 run up to `n` (`runH_coinc`). A released lane with a running hold at an idle `n` would
-trace back to a DRIVE at `t0 < n ≤ t0 + 18`, written back at `t0 + 1` within `14 + 2` of its
-release (`wb_bound`), pushing its timestamp to `≥ t0 + 24` for `d ≥ 39`, with no further
+trace back to a DRIVE at `t0 < n ≤ t0 + SDA_HS`, written back at `t0 + 1` within `14 + 2` of
+its release (`wb_bound`), pushing its timestamp to `≥ t0 + 24` for `d ≥ 39`, with no further
 writeback (it cannot be picked while gated) — so it is not released at `n`. Contradiction.
-The arithmetic needs only `d ≥ 34`. Hold timing as measured (HC1): load visible at
+The arithmetic needs `d ≥ SDA_HS + 16`: 34 at 50 MHz (SDA_HS 18), EXACTLY 39 at 60 MHz
+(SDA_HS 23, Wilson 11-03) -- the premise holds with no cycle to spare. Hold timing as measured at 50 MHz (HC1): load visible at
 decision + 2, gate open at decision + 20.
 -/
 namespace JLane
@@ -73,7 +74,7 @@ theorem gate_open_at (P2 : Program2) (dly : Lane → Nat) (fw : Engine2 → Word
   by_cases hz : (runH P2 fw hl sched n y0).hcnt l = 0
   · exact hz
   exfalso
-  have hS : SDA_HS = 18 := rfl
+  have hS : SDA_HS = 23 := by decide
   -- the v1 run under win1H: meets the v1 contract everywhere, so stall-free forever
   have hwin := win1H_ready (P2.toP dly) P2 fw hl sched y0
   have hws := win1H_wc (P2.toP dly) P2 fw hl sched y0

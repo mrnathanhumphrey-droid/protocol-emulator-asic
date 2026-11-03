@@ -17,8 +17,43 @@ Which DRIVEs raise `hold_ld` (open-drain, SDA_HOLD ≠ 0, data-moving actions) i
 -/
 namespace JLane
 
-/-- `SDA_HS = SDA_HOLD + SDA_SETUP = ⌈300/20⌉ + ⌈50/20⌉ = 15 + 3` at 50 MHz. -/
-abbrev SDA_HS : Nat := 18
+/-! ### The hold, for ANY clock (Wilson 11-03)
+The RTL sizes every real-time minimum as `ceil(ns × 1000 × BAND_NUM / (BAND_DEN × ps))`
+(`src/pe_engine.v`, `model/hold_bound.py`). `holdCycles_meets` is the fact that makes it
+correct at every period: the count it gives, times the period, is at least the banded
+minimum. So a new clock needs a new NUMBER, never a new proof. -/
+
+/-- The RTL's ceiling formula: cycles meeting `ns` at `ps` per cycle with band `num/den`. -/
+def holdCycles (ns ps num den : Nat) : Nat :=
+  (ns * 1000 * num + den * ps - 1) / (den * ps)
+
+/-- A ceiling division times its divisor covers the dividend. -/
+theorem ceil_mul_ge (a b : Nat) (hb : 0 < b) : a ≤ (a + b - 1) / b * b := by
+  have h := Nat.div_add_mod (a + b - 1) b
+  have hr := Nat.mod_lt (a + b - 1) hb
+  rw [Nat.mul_comm]
+  generalize b * ((a + b - 1) / b) = X at h ⊢
+  omega
+
+/-- **For every period**: `holdCycles` cycles of `ps` meet `ns` with the band, i.e.
+`count × (den × ps) ≥ ns × 1000 × num` -- `count × period ≥ min × band`. -/
+theorem holdCycles_meets (ns ps num den : Nat) (h : 0 < den * ps) :
+    ns * 1000 * num ≤ holdCycles ns ps num den * (den * ps) :=
+  ceil_mul_ge _ _ h
+
+/-- The chip's period, whole ps rounded down (`info.yaml` 60 MHz;
+`model/gate_clock_consistency.py` holds `src/project.v` and `pe_engine.v` to it). -/
+abbrev CLK_PERIOD_PS : Nat := 16666
+
+/-- `SDA_HS = SDA_HOLD + SDA_SETUP`, the RTL's banded counts at the chip's clock:
+`⌈300 × 1.05 / 16.666⌉ + ⌈50 × 1.05 / 16.666⌉ = 19 + 4`. It was the literal 18
+(⌈300/20⌉ + ⌈50/20⌉) at 50 MHz, unbanded. -/
+abbrev SDA_HS : Nat := holdCycles 300 CLK_PERIOD_PS 21 20 + holdCycles 50 CLK_PERIOD_PS 21 20
+
+/-- The instance: the hold and setup at the chip's clock meet 300 / 50 ns with the band. -/
+theorem sda_hold_meets : 300 * 1000 * 21 ≤ holdCycles 300 CLK_PERIOD_PS 21 20 * (20 * CLK_PERIOD_PS) ∧
+    50 * 1000 * 21 ≤ holdCycles 50 CLK_PERIOD_PS 21 20 * (20 * CLK_PERIOD_PS) :=
+  ⟨holdCycles_meets _ _ _ _ (by decide), holdCycles_meets _ _ _ _ (by decide)⟩
 
 /-- The v2 engine plus the effective hold counters `l_hcnt`. -/
 structure EngineH where

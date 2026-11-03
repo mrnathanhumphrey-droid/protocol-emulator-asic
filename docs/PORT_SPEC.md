@@ -166,7 +166,7 @@ warm-up, for each listed image:
   rises with lane index, as EDF predicts.
 - **W1's hold wait (P9w)** is 0 on every admissible arm. On `ckdense` it
   reaches 8, which shows the probe can see it. Bound: a hold is loaded with
-  `SDA_HS = SDA_HOLD + SDA_SETUP = 18` at a DRIVE, and only on the K and W2
+  `SDA_HS = SDA_HOLD + SDA_SETUP` (23 at 60 MHz, 18 in v1) at a DRIVE, and only on the K and W2
   arms. Since TF1 those arms raise `hold_ld` (`:2161`, `:2274`, `:2359`,
   `:2377`) and the single load is at `:2819`. The counter counts down every
   cycle, at block level, whatever `st` is (`:2820–2845`). The pin lands at
@@ -447,7 +447,7 @@ phase.
 | question | answer | anchor |
 |---|---|---|
 | which actions load it | **open-drain lanes only, SDA_HOLD ≠ 0, at DRIVE**: a clocked SHIFT's data move, an unclocked SHIFT, a clocked SHIFTIN's release of a driven SDA (not on HIGH), an unclocked SHIFTIN's release of a driven SDA | `hold_ld = 1'b1;` (4 sites) |
-| value | `SDA_HS = SDA_HOLD + SDA_SETUP` = ⌈300/20⌉ + ⌈50/20⌉ = **15 + 3 = 18** at 50 MHz | `localparam integer SDA_HS = SDA_HOLD + SDA_SETUP;` |
+| value | `SDA_HS = SDA_HOLD + SDA_SETUP`, each ⌈min × 1.05 / period⌉ (the RTL's banded formula, Wilson 11-03) = ⌈315/16.666⌉ + ⌈52.5/16.666⌉ = **19 + 4 = 23** at 60 MHz (v1: ⌈300/20⌉ + ⌈50/20⌉ = 15 + 3 = 18 at 50 MHz, unbanded); `lean/JLane/JLane/Hold.lean` proves the formula meets its minimum at every period | `localparam integer SDA_HS = SDA_HOLD + SDA_SETUP;` |
 | TM1 registration | the load is recorded (`hl_v`, `hl_l`) and lands a cycle later as `SDA_HS − 1`; `l_hcnt` reads `SDA_HS` while pending, so the count is equal in every cycle | `hl_v <= hold_ld & hz_q[cur];` |
 | countdown | every cycle while non-zero; the pin lands at `SDA_SETUP1` | `l_hcr[i] <= l_hcnt[i] - {{(HOLDW-1){1'b0}}, 1'b1};` |
 | eligibility | `ready = rel_due & hz_q & cap_ok`; `hz_q` is "the count reaches 0 this cycle", registered | `hz_q[i] <= (l_hcnt[i] == {{(HOLDW-1){1'b0}}, 1'b1});` |
