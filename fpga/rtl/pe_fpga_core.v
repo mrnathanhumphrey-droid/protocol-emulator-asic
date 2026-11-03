@@ -1,7 +1,8 @@
 // pe_fpga_core.v -- the protocol emulator on an FPGA, board-agnostic.
 //
 // FPGA BRING-UP, PHASE 0 (Wilson): the chip RTL runs UNCHANGED
-// (`tt_um_protocol_emulator`) at its design clock, 50 MHz. Around it:
+// (`tt_um_protocol_emulator`) at THE BOARD's clock, `CLK_HZ` (fpga/board.yaml,
+// passed by fpga/pa100t/build.tcl -- 50 MHz on the PA100T). Around it:
 //
 //   LOADER   the FPGA stand-in for the real chip's host, the Pico 2: writes the
 //            program image (a BRAM ROM) through the chip's REAL host interface
@@ -65,11 +66,18 @@
 `default_nettype none
 module pe_fpga_core #(
     parameter IMG      = "uart_rx_434.hex",   // 256-byte store image
-    parameter integer UART_DIV = 434,         // 50 MHz / 115200 = 434.03
+    // ⛔⛔ THE BOARD'S CLOCK, IN Hz, AND NO DEFAULT (Wilson 11-03). It comes
+    // from fpga/board.yaml through build.tcl (or the sim's fpga_clock.vh);
+    // a build that forgets it does not elaborate (g_need_clk_hz below)
+    // rather than run at a typed 50 MHz. Everything timed below is derived.
+    parameter integer CLK_HZ   = 0,
+    parameter integer BAUD     = 115200,
+    parameter integer UART_DIV = (CLK_HZ + BAUD / 2) / BAUD,   // 434 at 50 MHz
     // PC-UART LOADER (Wilson: the FPGA stand-in for the Pico 2's role). A line
-    // held low this long is "enter the loader" -- 20 ms at 50 MHz, ten times
-    // the 2 ms break the UART-rx test sends as a framing frame.
-    parameter integer BRK_CYC  = 1000000,
+    // held low this long is "enter the loader" -- 20 ms, ten times the 2 ms
+    // break the UART-rx test sends as a framing frame.
+    parameter integer BRK_MS   = 20,
+    parameter integer BRK_CYC  = CLK_HZ / 1000 * BRK_MS,
     // ---- OW = 1 only (see above) ----
     parameter integer OW       = 0,
     parameter FEED             = "",          // 12-bit words: 0xx byte, 1xx poll group
@@ -80,14 +88,16 @@ module pe_fpga_core #(
     // ---- OW = 2 only ----
     parameter FALLS            = "",          // per fed byte: SCL falls before its pop
     parameter integer NRX      = 0,           // bytes the chip receives in the pass
-    parameter integer DEGLITCH = 8,           // SCL stable this many cycles (160 ns)
+    // SCL stable this long: 160 ns, 8 cycles at 50 MHz (rounded up)
+    parameter integer DEGLITCH_NS = 160,
+    parameter integer DEGLITCH = (CLK_HZ / 1000 * DEGLITCH_NS + 999999) / 1000000,
     // TEST KNOBS (simulation must-fires; 0 / -1 in every real build)
     parameter integer BAD_AT   = -1,          // byte index pushed off-schedule ...
     parameter integer BAD_SHIFT = 0,          // ... by this many cycles (OW 2: falls)
     parameter integer LATE     = 0,           // poll decision delayed by this
     parameter integer ISO_MF   = 0            // copy load bytes onto J11
 ) (
-    input  wire       clk,          // 50 MHz
+    input  wire       clk,          // CLK_HZ
     input  wire       rst_n,        // synchronous to clk, active low
     input  wire       uart_rx,      // from the PC (board USB-UART)
     output wire       uart_tx,      // to the PC
@@ -221,7 +231,7 @@ module pe_fpga_core #(
   // ---- OW 2: SCL, deglitched, and its falls counted (Wilson 1b) ----------
   // A level is accepted only after DEGLITCH cycles stable at the 2-flop
   // output, so a bounce near the threshold on a slow rise or fall is counted
-  // once. DEGLITCH = 8 cycles = 160 ns at 50 MHz: under the shortest SCL
+  // once. DEGLITCH = 160 ns (8 cycles at 50 MHz): under the shortest SCL
   // phase of the Fm program (HIGH d/2 = 41 cycles), over UM10204's 50 ns
   // spike width.
   reg        sclf;           // the filtered SCL level
@@ -240,7 +250,15 @@ module pe_fpga_core #(
     end
   end
 
-  tt_um_protocol_emulator chip (
+  // ⛔ NO CLOCK, NO BUILD: an undefined module is an elaboration error in
+  // every tool this core meets (iverilog, yosys, Vivado).
+  generate if (CLK_HZ <= 0) begin : g_need_clk_hz
+    CLK_HZ_must_come_from_fpga_board_yaml u_missing ();
+  end endgenerate
+
+  // ⭐ THE CHIP IS SIZED FOR THIS BOARD'S CLOCK (Wilson 11-03): its SDA hold
+  // and setup counts and its stretch bound derive from the period it is given.
+  tt_um_protocol_emulator #(.CLK_PERIOD_PS(1000000000 / (CLK_HZ / 1000))) chip (
       .ui_in(ui_in), .uo_out(uo_out),
       .uio_in(uio_in), .uio_out(uio_out), .uio_oe(uio_oe),
       .ena(1'b1), .clk(clk), .rst_n(chip_rst_n)

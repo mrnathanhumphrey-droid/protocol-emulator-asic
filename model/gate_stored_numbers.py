@@ -461,6 +461,10 @@ SPEC_SYMBOLS = {
     # requirement the design is measured against, which nothing here may
     # derive or adjust.
     ("model/a2/gate_clocked_lane_a2.py", "MODE_MAX_HZ"),
+    # ⭐ THE NO-LITERALS GATE'S SEARCH SHAPES (Wilson 11-03): regexes for the
+    # ways a typed 50 MHz has been written (50_000_000, 50e6, `always #10`,
+    # `/ 50.0`) -- the digits are the PATTERNS being banned, not values used.
+    ("model/gate_clock_literals.py", "SHAPES"),
     # ⭐ THE 1-WIRE BENCH WITNESS'S INPUTS. `WINDOWS` is the DS18B20
     # datasheet's timing windows (19-7487 Rev 6, the same numbers
     # test/ds18b20_model.v quotes) -- requirements the record is measured

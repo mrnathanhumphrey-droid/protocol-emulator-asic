@@ -20,9 +20,10 @@ module tb_fpga_uart;
   wire tx;
   wire [5:0] led;
   wire running;
-  always #10 clk = ~clk;                       // 50 MHz
+  `include "fpga/sim/fpga_clock.vh"
+  always #(PE_CLK_HALF_NS) clk = ~clk;   // the target's clock, never typed
 
-  pe_fpga_core #(.IMG("fpga/images/uart_rx_434.hex")) dut (
+  pe_fpga_core #(.IMG("fpga/images/uart_rx_434.hex"), .CLK_HZ(PE_FPGA_CLK_HZ)) dut (
       .clk(clk), .rst_n(rst_n), .uart_rx(rx), .uart_tx(tx),
       .led(led), .running(running));
 
@@ -63,7 +64,7 @@ module tb_fpga_uart;
         at(tn, 1'b0);
         tn = tn + 2.0e6;
         at(tn, 1'b1);
-        tn = tn + 20.0 * bt;
+        tn = tn + 20.0 * bt;   // clock-ok: 20 bit times of idle after the break, not a period
       end else begin
         at(tn, 1'b0);                                     // start
         for (b = 0; b < 8; b = b + 1) begin tn = tn + bt; at(tn, sent[f][b]); end

@@ -258,6 +258,52 @@ CHANGE_SET = frozenset([
     "test/branch_corpus.py",           # NEW: the branch images, chain + runtime refusals
     "test/run_branch_check.py",        # NEW: the gate, the six M_BR_* must-fires' killer
     "model/a2/pyrta_src.py",           # no fallback clone search: PYRTA_SRC or nothing (Nate 10-27)
+    # ---- AMENDMENT 8 (11-03, Wilson: the clock bundle, retargetable). One
+    # clock source (model/clock.py, info.yaml / fpga/board.yaml); every typed
+    # 50 MHz in a record's inputs reads it. Commit (a) is byte-identical at
+    # 50 MHz (band off); the records re-run once after the 60 MHz move.
+    "model/clock.py",                  # NEW: the clock source
+    "model/gate_clock_consistency.py", # NEW: the copies agree, counts meet spec
+    "model/gate_clock_literals.py",    # NEW: no typed clock returns
+    "test/pe_clock.vh",                # NEW: generated bench clock (chip)
+    "fpga/board.yaml",                 # NEW: the FPGA board's clock
+    "fpga/sim/fpga_clock.vh",          # NEW: generated bench clock (fpga)
+    "model/hold_bound.py",             # reads CLK_PERIOD_PS + the band
+    "model/a2/gate_um10204.py",        # mode floors via clock; maxima rounded down
+    "model/pe_proto.py",               # t_ext / OneWire read the target clock
+    "model/macro_harden_gate.py",      # docstring: CLOCK_PERIOD is held, not typed
+    "model/a2/a2_close.py",            # F_CLK = clock.hz()
+    "model/a2/bursty.py",              # F_CLK = clock.hz()
+    "model/a2/gate_admissibility_1_6.py",  # rx cap / us prints via clock
+    "model/a2/gate_clocked_lane_a2.py",    # F_CLK = clock.hz()
+    "model/a2/gate_descriptor_1_5.py",     # SLOW_PERIOD_NS marked a v1 RECORD
+    "model/a2/gate_differential.py",       # F_CLK = clock.hz()
+    "model/a2/gate_i2c_phase.py",          # Table 11 in ns, cycles via clock
+    "model/a2/gate_microarch_1_3.py",      # SLOW_PERIOD_NS marked a v1 RECORD
+    "model/a2/gate_miso_tristate.py",      # HZ = clock.hz()
+    "model/a2/gate_pin_subsets.py",        # agg / clock.hz()
+    "model/a2/gate_reactive_2mhz.py",      # F_CLK = clock.hz()
+    "model/a2/gate_rearm.py",              # F_CLK, us prints via clock
+    "model/a2/grid_quantization.py",       # F_CLK = clock.hz()
+    "model/a2/task_model.py",              # F_CLK = clock.hz()
+    "model/ta01/uart_ta.py",               # F_CLK = clock.hz()
+    "model/ta01b/uart_stream.py",          # F_CLK = clock.hz()
+    "model/ta02/gate0_spi.py",             # F_CLK = clock.hz()
+    "model/ta02/gate_pwm.py",              # F_CLK = clock.hz()
+    "model/ta02/probe_band_edge.py",       # baud via clock.hz()
+    "test/run_i2c.py",                     # F_CLK = clock.hz()
+    "test/run_rxbw.py",                    # rx cap via clock.hz()
+    "test/tb_pit.v",                       # bench clock from pe_clock.vh
+    "test/tb_store_latch.v",               # clock-ok: cycle-only unit bench
+    "test/tb_verdict.v",                   # bench clock from pe_clock.vh
+    "fpga/pa100t/build.tcl",               # passes board.yaml clock_hz as CLK_HZ
+    "fpga/pa100t/pa100t_top.v",            # CLK_HZ through to the core
+    "fpga/rtl/pe_fpga_core.v",             # UART/break/deglitch + chip period from CLK_HZ
+    "fpga/sim/run_fpga_onewire.py",        # us prints at the board clock
+    "fpga/sim/tb_fpga_i2c.v",              # board clock from fpga_clock.vh
+    "fpga/sim/tb_fpga_loader.v",           # board clock from fpga_clock.vh
+    "fpga/sim/tb_fpga_onewire.v",          # board clock from fpga_clock.vh
+    "fpga/sim/tb_fpga_uart.v",             # board clock from fpga_clock.vh
 ])
 
 

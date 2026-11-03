@@ -55,7 +55,9 @@ module tb_uartrx;
   reg        peer_done, drop_seen;
   reg  [7:0] want;
 
-  always #10 clk = ~clk;
+  `include "test/pe_clock.vh"
+
+  always #(PE_CLK_HALF_NS) clk = ~clk;   // the target's clock, never typed
 
   tt_um_protocol_emulator dut (
       .ui_in(ui_in), .uo_out(uo_out),
@@ -74,12 +76,12 @@ module tb_uartrx;
   task at(input real t, input reg v);
     begin
       tq = t;
-      if (tq - 10.0 * $floor(tq / 10.0) < 0.5) tq = tq + 1.0;
+      if (tq - PE_CLK_HALF_NS * $floor(tq / PE_CLK_HALF_NS) < 0.5) tq = tq + 1.0;
       if (tq > $realtime) #(tq - $realtime);
       // phase coverage, MEASURED: the bin (1 ns, after the posedge at
       // 10 + 20n) of every edge the peer actually drives
       if (peer[P_RX] !== v)
-        ph_rx[$rtoi((tq - 10.0) - 20.0 * $floor((tq - 10.0) / 20.0))] = 1'b1;
+        ph_rx[$rtoi((tq - PE_CLK_HALF_NS) - PE_CLK_NS * $floor((tq - PE_CLK_HALF_NS) / PE_CLK_NS))] = 1'b1;
       peer[P_RX] = v;
     end
   endtask
@@ -101,9 +103,9 @@ module tb_uartrx;
       // offset is taken MOD 20 so it is always >= 0: the idle (or a back-to-
       // back stop bit) before the frame lengthens by < 20 ns, never shortens.
       if (phwalk && f > 0) begin
-        ph_d = 20.0 * ((f * 0.618034) - $floor(f * 0.618034))
-             - 20.0 * (((f - 1) * 0.618034) - $floor((f - 1) * 0.618034));
-        if (ph_d < 0.0) ph_d = ph_d + 20.0;
+        ph_d = PE_CLK_NS * ((f * 0.618034) - $floor(f * 0.618034))
+             - PE_CLK_NS * (((f - 1) * 0.618034) - $floor((f - 1) * 0.618034));
+        if (ph_d < 0.0) ph_d = ph_d + PE_CLK_NS;
         tnext = tnext + ph_d;
       end
       at(tnext, 1'b0);                   // is pushed before the stop bit ends
@@ -119,7 +121,7 @@ module tb_uartrx;
       if (f == badstop && gapc == 0) gapc = bitp;        // the line must idle
       if (gapc == 0 && f + 1 < nfr) n_b2b = n_b2b + 1;
       at(tnext, 1'b1);                                   // (idle high)
-      tnext = tnext + 20.0 * gapc;
+      tnext = tnext + PE_CLK_NS * gapc;
     end
     peer_done = 1'b1;
   end
@@ -165,7 +167,7 @@ module tb_uartrx;
     if (!$value$plusargs("PPF=%d", ppf)) ppf = 2;
     if (!$value$plusargs("PHWALK=%d", phwalk)) phwalk = 0;
     if (nfr > FMAX) nfr = FMAX;
-    bt = 20.0 * bitp * (1000.0 + err) / 1000.0;
+    bt = PE_CLK_NS * bitp * (1000.0 + err) / 1000.0;
     rnd = seed;
     n_sent = 0; n_push = 0; n_bad = 0; n_frame_err = 0; fails = 0; n_b2b = 0;
     drop_seen = 1'b0; cyc = 0;

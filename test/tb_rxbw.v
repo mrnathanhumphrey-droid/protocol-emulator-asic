@@ -111,7 +111,9 @@ module tb_rxbw;
   reg  [7:0] cval [0:CMAX-1];
   integer    cn, cscan, n_matched, n_unmatched;
 
-  always #10 clk = ~clk;
+  `include "test/pe_clock.vh"
+
+  always #(PE_CLK_HALF_NS) clk = ~clk;   // the target's clock, never typed
 
   parameter integer SPL_CFG = 2;
 

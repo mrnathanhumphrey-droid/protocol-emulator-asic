@@ -36,9 +36,17 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 ENGINE = os.path.join(ROOT, "src", "pe_engine.v")
 
-#: the expression this reader knows how to evaluate, whitespace-insensitive.
-#: ⛔ ANCHORED ON THE TEXT ON PURPOSE -- see the module docstring.
-_CEIL_FORM = r"\(\s*SDA_HOLD_NS\s*\+\s*CLK_PERIOD_NS\s*-\s*1\s*\)\s*/\s*CLK_PERIOD_NS"
+#: the expression this reader knows how to evaluate, whitespace-insensitive:
+#: ceil(NS x 1000 x BAND_NUM / (BAND_DEN x CLK_PERIOD_PS)), the banded
+#: picosecond form (Wilson 11-03). ⛔ ANCHORED ON THE TEXT ON PURPOSE -- see the
+#: module docstring.
+def _form(ns_name):
+    return (r"\(\s*%s\s*\*\s*1000\s*\*\s*BAND_NUM\s*\+\s*BAND_DEN\s*\*\s*"
+            r"CLK_PERIOD_PS\s*-\s*1\s*\)\s*/\s*\(\s*BAND_DEN\s*\*\s*"
+            r"CLK_PERIOD_PS\s*\)" % ns_name)
+
+
+_CEIL_FORM = _form("SDA_HOLD_NS")
 
 
 class HoldBoundError(RuntimeError):
@@ -47,8 +55,9 @@ class HoldBoundError(RuntimeError):
 
 def _params(text):
     out = {}
-    for name in ("SDA_HOLD_NS", "CLK_PERIOD_NS"):
-        m = re.search(r"parameter\s+integer\s+%s\s*=\s*(\d+)" % name, text)
+    for name in ("SDA_HOLD_NS", "CLK_PERIOD_PS", "BAND_NUM", "BAND_DEN"):
+        m = re.search(r"(?:local)?param(?:eter)?\s+integer\s+%s\s*=\s*(\d+)"
+                      % name, text)
         if m is None:
             raise HoldBoundError(
                 "src/pe_engine.v has no `parameter integer %s = <n>`. The hold "
@@ -59,19 +68,31 @@ def _params(text):
     return out
 
 
-def bound(engine_path=None, hold_ns=None):
+def _eval(ns, p, period_ps):
+    per = p["CLK_PERIOD_PS"] if period_ps is None else int(period_ps)
+    if per <= 0:
+        raise HoldBoundError("CLK_PERIOD_PS is %d; the hold is undefined" % per)
+    num, den = p["BAND_NUM"], p["BAND_DEN"]
+    return (ns * 1000 * num + den * per - 1) // (den * per)
+
+
+def bound(engine_path=None, hold_ns=None, period_ps=None, text=None):
     """`SDA_HOLD` in CYCLES, as the RTL computes it.
 
     `hold_ns` overrides the parameter's default, for the `-GSDA_HOLD_NS=<n>`
     builds (`test/phases_run.sh`'s `hold0` and `holdbig` arms). The FORMULA is
     still the RTL's -- only the input moves, which is exactly what `-G` does.
+    `period_ps` is the same for a build at another target's clock (the FPGA
+    passes its own `CLK_PERIOD_PS`). `text` is the engine source itself, for a
+    caller judging a mutated copy (`gate_clock_consistency`'s must-fire).
     """
     path = engine_path or ENGINE
-    try:
-        with io.open(path, encoding="utf-8", errors="replace") as fh:
-            text = fh.read()
-    except OSError as exc:
-        raise HoldBoundError("cannot read %s: %s" % (path, exc))
+    if text is None:
+        try:
+            with io.open(path, encoding="utf-8", errors="replace") as fh:
+                text = fh.read()
+        except OSError as exc:
+            raise HoldBoundError("cannot read %s: %s" % (path, exc))
     p = _params(text)
     m = re.search(r"localparam\s+integer\s+SDA_HOLD\s*=\s*(.+?);", text,
                   re.S)
@@ -86,24 +107,21 @@ def bound(engine_path=None, hold_ns=None):
         raise HoldBoundError(
             "src/pe_engine.v computes SDA_HOLD as `%s`, which is NOT the "
             "ceiling form this reader knows how to evaluate "
-            "(`(SDA_HOLD_NS + CLK_PERIOD_NS - 1) / CLK_PERIOD_NS`). ⛔ REFUSING "
+            "(`(SDA_HOLD_NS * 1000 * BAND_NUM + BAND_DEN * CLK_PERIOD_PS - 1) "
+            "/ (BAND_DEN * CLK_PERIOD_PS)`). ⛔ REFUSING "
             "rather than guessing: a rounding change here moves the legal "
             "delay floor in silicon, and a helper that kept returning 15 while "
             "the hardware held 14 would make every D4/D5/D6 verdict wrong in "
             "the SAFE-LOOKING direction. Update this reader deliberately."
             % expr)
     ns = p["SDA_HOLD_NS"] if hold_ns is None else int(hold_ns)
-    per = p["CLK_PERIOD_NS"]
-    if per <= 0:
-        raise HoldBoundError("CLK_PERIOD_NS is %d; the hold is undefined" % per)
-    return (ns + per - 1) // per
+    return _eval(ns, p, period_ps)
 
 
-_SETUP_FORM = (r"\(\s*SDA_SETUP_NS\s*\+\s*CLK_PERIOD_NS\s*-\s*1\s*\)\s*/\s*"
-               r"CLK_PERIOD_NS")
+_SETUP_FORM = _form("SDA_SETUP_NS")
 
 
-def setup(engine_path=None):
+def setup(engine_path=None, period_ps=None, text=None):
     """`SDA_SETUP` in CYCLES (ruling W1), read the same way as `bound()`.
 
     W1 gates a lane's next dispatch until SDA_HOLD + SDA_SETUP cycles after the
@@ -111,8 +129,9 @@ def setup(engine_path=None):
     tripwire: the RTL's expression must be the ceiling form, textually.
     """
     path = engine_path or ENGINE
-    with io.open(path, encoding="utf-8", errors="replace") as fh:
-        text = fh.read()
+    if text is None:
+        with io.open(path, encoding="utf-8", errors="replace") as fh:
+            text = fh.read()
     p = _params(text)
     m = re.search(r"parameter\s+integer\s+SDA_SETUP_NS\s*=\s*(\d+)", text)
     e = re.search(r"localparam\s+integer\s+SDA_SETUP\s*=\s*(.+?);", text, re.S)
@@ -124,12 +143,11 @@ def setup(engine_path=None):
         raise HoldBoundError("src/pe_engine.v computes SDA_SETUP in a form "
                              "this reader does not know; update it "
                              "deliberately.")
-    per = p["CLK_PERIOD_NS"]
-    return (int(m.group(1)) + per - 1) // per
+    return _eval(int(m.group(1)), p, period_ps)
 
 
 def params(engine_path=None):
-    """The two ns parameters, for callers that want to report the inputs."""
+    """The hold, period and band inputs, for callers that report them."""
     path = engine_path or ENGINE
     with io.open(path, encoding="utf-8", errors="replace") as fh:
         return _params(fh.read())
@@ -156,7 +174,8 @@ def check_against_dump(dump_path):
 def main() -> int:
     p = params()
     print("  SDA_HOLD_NS   = %d" % p["SDA_HOLD_NS"])
-    print("  CLK_PERIOD_NS = %d" % p["CLK_PERIOD_NS"])
+    print("  CLK_PERIOD_PS = %d" % p["CLK_PERIOD_PS"])
+    print("  band          = %d/%d" % (p["BAND_NUM"], p["BAND_DEN"]))
     print("  SDA_HOLD      = %d cycles  (read from src/pe_engine.v)" % bound())
     print("  legal clocked open-drain delay: d > %d" % bound())
     print("  SDA_SETUP     = %d cycles  (W1: dispatch gated SDA_HOLD + "

@@ -814,8 +814,9 @@ end
 //   moves SDA less than SDA_HOLD after the fall, or while SCL is released, is
 //   RED. START/STOP move SDA with SCL high BY DEFINITION and are reported only.
 // ⚠ SDA_HOLD IS DERIVED FROM THE ENGINE'S *PARAMETERS*, assigned, never
-//   compared hierarchically (`gate_bench_lint`'s rule): ceil(SDA_HOLD_NS /
-//   CLK_PERIOD_NS), the RTL's own formula, so `-GSDA_HOLD_NS=0` builds read 0.
+//   compared hierarchically (`gate_bench_lint`'s rule): ceil(SDA_HOLD_NS x
+//   band / CLK_PERIOD_PS), the RTL's own banded formula, so `-GSDA_HOLD_NS=0`
+//   builds read 0.
 integer h_min, h_nl, h_np, h_i, h_ck, h_dp, h_cls, h_hold, h_bad, h_moves;
 integer h_cyc_h;
 // ⛔⛔ RULING W (W4): SETUP and W1's binding, measured here as well.
@@ -848,12 +849,14 @@ integer h_lo  [0:9];
 integer h_hi  [0:9];
 integer h_high[0:9];
 initial begin
-  h_min = (dut.u_eng.SDA_HOLD_NS + dut.u_eng.CLK_PERIOD_NS - 1)
-          / dut.u_eng.CLK_PERIOD_NS;
+  h_min = (dut.u_eng.SDA_HOLD_NS * 1000 * dut.u_eng.BAND_NUM
+           + dut.u_eng.BAND_DEN * dut.u_eng.CLK_PERIOD_PS - 1)
+          / (dut.u_eng.BAND_DEN * dut.u_eng.CLK_PERIOD_PS);
   h_nl = dut.u_eng.N_LANES;
   h_np = dut.u_eng.N_PINS;
-  h_su = (dut.u_eng.SDA_SETUP_NS + dut.u_eng.CLK_PERIOD_NS - 1)
-         / dut.u_eng.CLK_PERIOD_NS;
+  h_su = (dut.u_eng.SDA_SETUP_NS * 1000 * dut.u_eng.BAND_NUM
+          + dut.u_eng.BAND_DEN * dut.u_eng.CLK_PERIOD_PS - 1)
+         / (dut.u_eng.BAND_DEN * dut.u_eng.CLK_PERIOD_PS);
   h_bad = 0;  h_moves = 0;  h_cyc_h = 0;
   h_sulo = 1000000;  h_sun = 0;  h_wb_ev = 0;  h_wb_cyc = 0;
   for (h_i = 0; h_i < 8; h_i = h_i + 1) begin

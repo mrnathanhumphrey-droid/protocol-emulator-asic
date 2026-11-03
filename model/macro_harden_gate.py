@@ -19,7 +19,8 @@ PRIMARY #1 -- OUR OWN FLOW SETTINGS: src/config.json
     FP_PDN_VWIDTH       2.1     um per strap
     GRT_ALLOW_CONGESTION 1      the global router is TOLD to tolerate
                                 congestion
-    CLOCK_PERIOD        20      ns = 50 MHz
+    CLOCK_PERIOD        ns      the chip's period, held to info.yaml clock_hz
+                                by gate_clock_consistency (Wilson 11-03)
 
 ⭐⭐ `GRT_ALLOW_CONGESTION = 1` IS WHY "ROUTED" HAS TO BE DEFINED. The router is
 instructed not to fail on congestion, so it can succeed by OVERFLOWING and pay

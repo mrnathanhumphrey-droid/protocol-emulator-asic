@@ -22,7 +22,7 @@ module tb_store_latch;
   reg  [WB*AW-1:0] wraddr_bk = 0;
   wire [7:0]     rdata;
   wire [WB*8-1:0] wrdata;
-  always #5 clk = ~clk;
+  always #5 clk = ~clk;   // clock-ok: a cycle-only unit bench -- nothing here is timed in ns
 
   pe_store #(.AW(AW), .MEM_TYPE("latch"), .WIDE_B(WB)) dut (
       .clk(clk), .rst_n(rst_n), .we(we), .waddr(waddr), .wdata(wdata),

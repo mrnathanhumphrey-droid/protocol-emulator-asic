@@ -79,7 +79,9 @@ module tb_onewire;
   // S_TXSP = 4, S_CONV = 5, S_PRES = 7
   wire ds_reading = (u_ds.state == 3) || (u_ds.state == 4) || (u_ds.state == 5);
 
-  always #10 clk = ~clk;
+  `include "test/pe_clock.vh"
+
+  always #(PE_CLK_HALF_NS) clk = ~clk;   // the target's clock, never typed
 
   tt_um_protocol_emulator dut (
       .ui_in(ui_in), .uo_out(uo_out),
@@ -156,7 +158,7 @@ module tb_onewire;
   always @(posedge clk) if (rst_n === 1'b1 && dut.u_eng.st === 2'd2
                             && dut.u_eng.cur == 0
                             && dut.u_eng.a_op === 3'd2) begin
-    ts = $realtime - 40.0;
+    ts = $realtime - 2.0 * PE_CLK_NS;   // the 2-flop synchroniser, in the target's cycles
     if (want_pres) begin
       want_pres = 1'b0;
       if (n_pr == 0 || ts - t_rel < pr_mn) pr_mn = ts - t_rel;
@@ -350,9 +352,9 @@ module tb_onewire;
     begin pc20 = 0; for (b = 0; b < 20; b = b + 1) pc20 = pc20 + v[b]; end
   endfunction
   always @(posedge dq) if (!loading)
-    ph_rise[$rtoi(($realtime - 10.0) - 20.0 * $floor(($realtime - 10.0) / 20.0))] = 1'b1;
+    ph_rise[$rtoi(($realtime - PE_CLK_HALF_NS) - PE_CLK_NS * $floor(($realtime - PE_CLK_HALF_NS) / PE_CLK_NS))] = 1'b1;
   always @(posedge dev_pull) if (!loading && !m_low)
-    ph_pfall[$rtoi(($realtime - 10.0) - 20.0 * $floor(($realtime - 10.0) / 20.0))] = 1'b1;
+    ph_pfall[$rtoi(($realtime - PE_CLK_HALF_NS) - PE_CLK_NS * $floor(($realtime - PE_CLK_HALF_NS) / PE_CLK_NS))] = 1'b1;
 
   always @(posedge clk) if (rst_n === 1'b1 && !loading) begin
     cyc = cyc + 1;

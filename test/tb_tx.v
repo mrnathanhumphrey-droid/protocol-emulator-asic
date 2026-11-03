@@ -97,7 +97,9 @@ module tb_tx;
   reg        primed_seen, cfgerr_seen;
   reg  [7:0] uo_seen_0, uo_seen_1;
 
-  always #10 clk = ~clk;
+  `include "test/pe_clock.vh"
+
+  always #(PE_CLK_HALF_NS) clk = ~clk;   // the target's clock, never typed
 
   parameter integer SPL_CFG = 2;
 

@@ -57,7 +57,9 @@ module tb_smoke;
 `include "test/clocked_conform.vh"
 `include "test/host_feed.vh"
 
-  always #10 clk = ~clk;                   // 50 MHz, the shipped clock
+  `include "test/pe_clock.vh"
+
+  always #(PE_CLK_HALF_NS) clk = ~clk;   // the target's clock, never typed
 
   // ---- image ----------------------------------------------------------
   // ⛔⛔⛔ THIS WAS `localparam IMG_BYTES = 51` AND IT SILENTLY TRUNCATED. The

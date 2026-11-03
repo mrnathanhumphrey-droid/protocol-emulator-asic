@@ -88,7 +88,9 @@ I2C_NAME_PREFIX = "I2C"
 MODE_MAX_HZ = {"Sm  100 kHz": 100_000,
                "Fm  400 kHz": 400_000,
                "Fm+ 1 MHz": 1_000_000}
-F_CLK = 50_000_000
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import clock  # noqa: E402  THE clock source (Wilson 11-03): never a typed copy
+F_CLK = clock.hz()
 
 #: the reserve this project requires of a shipped margin. ⛔ IMPORTED IN SPIRIT
 #: from `gate_noop_job`'s bar rather than invented here: a feasible margin of 0

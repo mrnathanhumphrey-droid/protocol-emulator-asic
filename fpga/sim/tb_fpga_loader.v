@@ -17,10 +17,11 @@ module tb_fpga_loader;
   wire tx;
   wire [5:0] led;
   wire running;
-  always #10 clk = ~clk;
+  `include "fpga/sim/fpga_clock.vh"
+  always #(PE_CLK_HALF_NS) clk = ~clk;   // the target's clock, never typed
 
   localparam integer BRK = 20000;          // 0.4 ms in simulation
-  pe_fpga_core #(.IMG("fpga/images/uart_rx_434.hex"), .BRK_CYC(BRK)) dut (
+  pe_fpga_core #(.IMG("fpga/images/uart_rx_434.hex"), .CLK_HZ(PE_FPGA_CLK_HZ), .BRK_CYC(BRK)) dut (
       .clk(clk), .rst_n(rst_n), .uart_rx(rx), .uart_tx(tx),
       .led(led), .running(running));
 
@@ -49,7 +50,7 @@ module tb_fpga_loader;
     end
   endtask
   task brk;
-    begin rx = 0; #(20.0 * (BRK + 5000)); rx = 1; #(BT * 20); end
+    begin rx = 0; #(PE_CLK_NS * (BRK + 5000)); rx = 1; #(BT * 20); end   // clock-ok: BT * 20 is 20 bit times of idle, not a period
   endtask
   task load(input integer which, input integer corrupt);
     begin

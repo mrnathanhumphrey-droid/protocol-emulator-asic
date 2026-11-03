@@ -904,7 +904,9 @@ OUT_REG = 1         # cycles, output register to pad
 TSU_MASTER = 1      # cycles, the PEER master's setup requirement. ⚠ PARAMETRIC:
                     # no SPI master device is picked, so 1 cycle (20 ns) stands
                     # in. Generous for a real master; the R1 gate sweeps it.
-F_CLK = 50_000_000
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import clock  # noqa: E402  THE clock source (Wilson 11-03): never a typed copy
+F_CLK = clock.hz()
 
 
 def abs_tolerance(half_period: int, c9_at_completion: bool, C: int,

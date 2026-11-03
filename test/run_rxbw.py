@@ -32,6 +32,8 @@ import subprocess
 import sys
 from toolchain import banner, tool          # noqa: E402  ruling V
 import sim_run                              # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "model"))
+import clock                                                      # noqa: E402  Wilson 11-03
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")
@@ -128,7 +130,7 @@ def main() -> int:
           % SLOT_DERIVED)
     print("                     frame that always follows it)")
     print("  payload capacity : %.3f Mb/s, against the 50 Mb/s `1.6p` quoted"
-          % (50e6 / SLOT_DERIVED * 8 / 1e6))
+          % (clock.hz() / SLOT_DERIVED * 8 / 1e6))
     print("  predictions, BOTH checked below:")
     print("    (a) the closest two payload frames can be is %d cycles"
           % SLOT_DERIVED)
@@ -269,7 +271,7 @@ def main() -> int:
     rx = [l for l in lanes if l.name.startswith(tuple(bpe))]
     agg = sum(next(v for k, v in bpe.items() if l.name.startswith(k))
               / (l.t * 20e-9) for l in rx)
-    cap = 50e6 / SLOT_DERIVED * 8
+    cap = clock.hz() / SLOT_DERIVED * 8
     print("    %-22s %s" % ("lane", "payload rate"))
     for l in rx:
         b = next(v for k, v in bpe.items() if l.name.startswith(k))
@@ -280,7 +282,7 @@ def main() -> int:
           % ("payload capacity", cap / 1e6))
     print("    %-22s %.1f%%   (1.6p published 2.2%%)"
           % ("utilisation", 100 * agg / cap))
-    cap9 = 50e6 / (2 * (9 * CYC_PER_BIT + 1)) * 8
+    cap9 = clock.hz() / (2 * (9 * CYC_PER_BIT + 1)) * 8
     print("    ⛔ THE PUBLISHED 2.2%% WAS THE RAW PIN RATE -- 1 bit per cycle")
     print("       on the data pin, which the stream never runs at. Corrected")
     print("       it is %.1f%%, and it was already %.1f%% at the 9-bit frame,"

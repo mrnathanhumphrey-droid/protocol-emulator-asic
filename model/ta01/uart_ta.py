@@ -31,12 +31,17 @@ from __future__ import annotations
 
 # ---- the competition's fixed clock, and integer time --------------------
 # Integer cycles keep the automaton finite here and dodge dense-clock issues.
-F_CLK = 50_000_000
+import os  # noqa: E402
+import sys  # noqa: E402
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import clock  # noqa: E402  THE clock source (Wilson 11-03): never a typed copy
+F_CLK = clock.hz()
 BAUD_DEFAULT = 115200
 
 
 def bit_period(baud: int = BAUD_DEFAULT, f_clk: int = F_CLK) -> int:
-    """Cycles per bit. 50e6/115200 = 434.027... -> 434."""
+    """Cycles per bit, rounded, at the target's clock (434 at 50 MHz:
+    434.027..., 521 at 60)."""
     return round(f_clk / baud)
 
 

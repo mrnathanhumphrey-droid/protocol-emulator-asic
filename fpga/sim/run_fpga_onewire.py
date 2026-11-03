@@ -48,6 +48,8 @@ import sim_run                               # noqa: E402
 import onewire                               # noqa: E402
 import pe_proto as P                         # noqa: E402
 import run_onewire as RO                     # noqa: E402
+import clock                                                      # noqa: E402  Wilson 11-03
+FPGA_HZ = clock.target_hz("fpga")   # the board this runs on, not the chip
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")
@@ -287,7 +289,7 @@ def main():
     want = set(a for a in sys.argv[1:] if not a.startswith("--"))
     e, lines, rxmap, pidx, fpath = feed()
     print("  program: P = %d cycles (%.1f us); byte time PER2 = %d; margin %d"
-          % (e.P, e.P / 50.0, 2 * e.P, e.P))
+          % (e.P, clock.us(e.P, FPGA_HZ), 2 * e.P, e.P))
     print("  feed: %d words, first poll reply at rx %d" % (len(lines), pidx))
     rc = 0 if tracked(e, lines, pidx) else 1
     nidle = idle_replies(lines)
@@ -307,10 +309,10 @@ def main():
         sl = slack(txt)
         for g, c, p, s in sl:
             print("    poll group %d: reply at cyc %d, next pop at %d -> slack %d cycles (%.1f us)"
-                  % (g, c, p, s, s / 50.0))
+                  % (g, c, p, s, clock.us(s, FPGA_HZ)))
         if sl:
             sl_min = min(s for *_x, s in sl)
-            print("    POLL SLACK (minimum): %d cycles = %.1f us" % (sl_min, sl_min / 50.0))
+            print("    POLL SLACK (minimum): %d cycles = %.1f us" % (sl_min, clock.us(sl_min, FPGA_HZ)))
         else:
             print("    *** no poll decision measured")
             rc = 1

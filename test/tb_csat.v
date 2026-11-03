@@ -84,7 +84,9 @@ module tb_csat;
   reg        live_seen, primed_seen, cfgerr_seen, halt_seen, ovr_seen;
   reg  [4:0] live_mask;
 
-  always #10 clk = ~clk;
+  `include "test/pe_clock.vh"
+
+  always #(PE_CLK_HALF_NS) clk = ~clk;   // the target's clock, never typed
 
   parameter integer SPL_CFG = 2;
 

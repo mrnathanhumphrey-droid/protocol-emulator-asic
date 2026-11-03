@@ -47,14 +47,13 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+sys.path.insert(0, os.path.dirname(HERE))
+import clock                                    # noqa: E402  Wilson 11-03
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")
 except Exception:
     pass
-
-#: ns per cycle at the shipped 50 MHz.
-NS_PER_CYCLE = 20
 
 #: UM10204 Table 10's own note: a device must INTERNALLY provide at least this
 #: much data hold to bridge the undefined region of SCL's falling edge. The
@@ -90,8 +89,26 @@ MODES = list(UM10204)
 
 
 def cycles(ns):
-    """ns -> whole cycles, rounding UP: a minimum is not met by rounding down."""
-    return -(-ns // NS_PER_CYCLE)
+    """A MINIMUM in ns -> whole cycles at the target clock, rounding UP, with
+    the guard band (`model/clock.py`): a minimum is not met by rounding down.
+    ⛔ It was `ceil(ns / 20)`, 50 MHz typed into the I2C mode floors the
+    assembler enforces."""
+    return clock.cycles_min(ns)
+
+
+def cycles_max(ns):
+    """A MAXIMUM in ns -> whole cycles, rounding DOWN and unbanded.
+    ⛔ The band protects a minimum against a FASTER clock; a maximum is broken
+    by a SLOWER one, so banding it is the wrong direction and rounding it UP
+    (what `cycles()` did for t_VD;DAT) let a hold exceed it by a cycle."""
+    f = clock.hz()
+    return int(ns) * f // 10 ** 9
+
+
+def cycles_budget(ns):
+    """A charged maximum (a rise time spent out of a budget) -> cycles,
+    rounding UP and unbanded: the whole worst case is spent."""
+    return clock.cycles_min(ns, band=1)
 
 
 def rate_hz(mode):
@@ -299,8 +316,8 @@ def main() -> int:
     print("  arms        : %s" % ", ".join(sorted(blob)))
     tc = table_cycles()
     print()
-    print("  --- the transcribed table, in cycles at 50 MHz (%d ns/cycle) ---"
-          % NS_PER_CYCLE)
+    print("  --- the transcribed table, in cycles at %g MHz (%d ps/cycle, "
+          "band x%s) ---" % (clock.mhz(), clock.period_ps(), clock.BAND))
     print("    %-13s %-9s %-9s %-10s %s"
           % ("mode", "t_LOW", "t_HIGH", "t_SU;DAT", "t_HD;DAT"))
     for m in MODES:
@@ -539,8 +556,8 @@ def main() -> int:
     print("  --- 4b. RULING H: the SDA data hold across the SCL fall ---")
     print("    ⛔⛔ IN SCOPE, AND THIS GATE FAILS ON IT. UM10204 Table 10")
     print("    tabulates t_HD;DAT min = 0 ns, but the table's own note requires")
-    print("    a DEVICE to internally provide >= %d ns (%d cycles at 50 MHz),"
-          % (HD_BRIDGE_NS, cycles(HD_BRIDGE_NS)))
+    print("    a DEVICE to internally provide >= %d ns (%d cycles at %g MHz),"
+          % (HD_BRIDGE_NS, cycles(HD_BRIDGE_NS), clock.mhz()))
     print("    and this chip is the device driving SDA. The hazard is concrete:")
     print("    SCL takes up to 300 ns (Fm) to fall through a receiver's")
     print("    undefined region, so SDA moving in the same cycle we pull SCL")
@@ -622,8 +639,8 @@ def main() -> int:
                       % (arm, l["d"], hd["modal"], "NONE", "-", "-",
                          "not checked -- this clock claims no mode"))
                 continue
-            tr = cycles(UM10204_MAX[m]["t_r"])
-            budget = cycles(UM10204_MAX[m]["t_VD_DAT"]) - tr
+            tr = cycles_budget(UM10204_MAX[m]["t_r"])
+            budget = cycles_max(UM10204_MAX[m]["t_VD_DAT"]) - tr
             per4b[arm] = per4b.get(arm, 0) + 1
             ok = hd["modal"] <= budget
             if not ok:
@@ -763,7 +780,7 @@ def main() -> int:
         rc = 1
     else:
         fmp = UM10204_MAX["Fm+ 1 MHz"]
-        budget = cycles(fmp["t_VD_DAT"]) - cycles(fmp["t_r"])
+        budget = cycles_max(fmp["t_VD_DAT"]) - cycles_budget(fmp["t_r"])
         # ⛔⛔ THE ARM'S OWN BOUNDARY, OUT OF ITS OWN DATA. This line used to
         # print a LITERAL `SDA_HOLD=40` while `test/phases_run.sh` decided the
         # actual value, and the two could disagree without a word -- which is

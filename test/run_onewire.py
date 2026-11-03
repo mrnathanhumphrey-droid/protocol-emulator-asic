@@ -51,6 +51,7 @@ from toolchain import banner, tool          # noqa: E402
 import sim_run                              # noqa: E402
 import onewire                               # noqa: E402
 import pe_proto as P                         # noqa: E402
+import clock                                                      # noqa: E402  Wilson 11-03
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")
@@ -291,7 +292,7 @@ def main():
     e = onewire.engine("tt")
     print("  engine: P = %d cycles (%.1f us), W1/read low %d, sample %d, "
           "W0 low %d, presence sample %d cycles after release"
-          % (e.P, e.P / 50.0, e.A, e.A + e.B, e.TW0, e.TAIL + e.A + e.B))
+          % (e.P, clock.us(e.P), e.A, e.A + e.B, e.TW0, e.TAIL + e.A + e.B))
 
     arms = [("ok", "tt", P.DS18B20_TXN, 503, ()),
             ("fpga", "fpga", ROM_TXN, 2003, ()),

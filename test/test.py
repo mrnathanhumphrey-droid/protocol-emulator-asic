@@ -50,7 +50,12 @@ sys.path.insert(0, HERE)
 # passes every check while watching the wrong wire.
 from corpus import P_SCL, P_SDA                      # noqa: E402
 
-CLK_NS = 20                        # 50 MHz, matching info.yaml clock_hz
+sys.path.insert(0, os.path.join(os.path.dirname(HERE), "model"))
+import clock                                         # noqa: E402  Wilson 11-03
+# ⛔ THE PERIOD IS READ, NOT TYPED: info.yaml clock_hz through model/clock.py, in
+# whole picoseconds rounded down (the RTL's own CLK_PERIOD_PS). It was
+# a typed CLK_NS of 20 -- 50 MHz, correct until the clock moved.
+CLK_PS = clock.period_ps()
 PIN_PROG, PIN_WR, PIN_PTR = 7, 6, 5
 
 # the 3-pin serial host view, `uo_out` indices (project.v SER_DATA/STRB/VLD)
@@ -77,8 +82,9 @@ def ctrl(prog=0, wr=0, ptr=0):
 
 
 async def start(dut):
-    dut._log.info("start: 50 MHz, reset low for 10 cycles")
-    cocotb.start_soon(Clock(dut.clk, CLK_NS, unit="ns").start())
+    dut._log.info("start: %g MHz (%d ps), reset low for 10 cycles"
+                  % (clock.mhz(), CLK_PS))
+    cocotb.start_soon(Clock(dut.clk, CLK_PS, unit="ps").start())
     dut.ena.value = 1
     dut.ui_in.value = 0
     dut.ob_oe.value = 0                 # the bench drives nothing yet
@@ -528,7 +534,7 @@ async def test_serial_readback_walks_the_image(dut):
         "means the frame costs fewer clocks than the RTL allows."
         % (min(gaps), FRAME_CLK, FRAME_BITS))
     dut._log.info("readback: %d clocks per byte -> a 256-byte walk is %.1f us "
-                  "at 50 MHz" % (SLOT, 256 * SLOT / 50.0))
+                  "at %g MHz" % (SLOT, clock.us(256 * SLOT), clock.mhz()))
     dut._log.info("readback reproduces image[1:] in order, status framed in")
 
 

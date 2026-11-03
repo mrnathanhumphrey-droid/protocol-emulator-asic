@@ -38,7 +38,10 @@ try:
 except Exception:
     pass
 
-F_CLK = 50_000_000
+import os  # noqa: E402
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import clock  # noqa: E402  THE clock source (Wilson 11-03): never a typed copy
+F_CLK = clock.hz()
 NS = 1e9
 
 

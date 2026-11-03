@@ -58,7 +58,7 @@ module tb_pinrange ();
   localparam integer N_LANES = 5;
   localparam [1:0]   ST_IDLE = 2'd0;
 
-  always #5 clk = ~clk;
+  always #5 clk = ~clk;   // clock-ok: a cycle-only unit bench -- nothing here is timed in ns
 
   tt_um_protocol_emulator #(.SPL(SPL_CFG)) dut (
       .ui_in(ui_in), .uo_out(uo_out), .uio_in(uio_in),

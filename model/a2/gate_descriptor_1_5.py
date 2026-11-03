@@ -67,7 +67,7 @@ FLOPS_TODAY = 535
 STORE_FLOPS_TODAY = 512
 UTIL_TODAY = 6.28
 WNS_NS = 1.5612
-SLOW_PERIOD_NS = 20.0
+SLOW_PERIOD_NS = 20.0   # clock-ok: RECORD -- the period the v1 harden in docs/SILICON_EVIDENCE.md ran at, not the clock
 
 
 def bits_for(n: int) -> int:

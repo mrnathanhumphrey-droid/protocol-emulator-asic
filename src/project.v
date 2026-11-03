@@ -105,14 +105,28 @@ module tt_um_protocol_emulator #(
     // not a priced alternative, and an `ifdef` would restore the dead arm
     // without restoring a build that runs it.
     // ⛔ fixed at build time because the async release path cannot be muxed
-    // the clock-stretch BUS-FAULT bound: 35 ms at 50 MHz (the SMBus figure),
-    // as 107 ticks of a 16384-cycle prescaler. See src/pe_engine.v.
+    // ⛔⛔ THE CHIP'S CLOCK, in whole picoseconds, rounded down (Wilson
+    // 11-03). `model/gate_clock_consistency.py` holds it to info.yaml's
+    // clock_hz, config.json's CLOCK_PERIOD and pe_engine.v's default. The FPGA
+    // core passes its own board's period. See src/pe_engine.v.
+    parameter integer CLK_PERIOD_PS = 20000,
+    // the clock-stretch BUS-FAULT bound: 35 ms (the SMBus figure), as ticks
+    // of a 16384-cycle prescaler -- 107 at 50 MHz, 129 at 60. See
+    // src/pe_engine.v.
     // ⛔ PASSED THROUGH so the two t_HD;DAT must-fire builds are ordinary
     // builds with one number changed: `-GSDA_HOLD=0` restores the measured
     // zero-hold defect, `-GSDA_HOLD=40` runs past `t_VD;DAT` at Fm+.
     parameter integer SDA_HOLD_NS = 300,
-    parameter integer CK_STRETCH_PRE = 16384,
-    parameter integer CK_STRETCH_TO  = 107,
+    parameter integer CK_STRETCH_NS  = 35000000,
+    // ⭐ THE TICK COUNT IS DERIVED FROM THE SHIPPED PRESCALER, NOT FROM
+    // `CK_STRETCH_PRE`: a bench shortens the prescaler to reach the SAME
+    // tick bound in hundreds of cycles (`corpus_i2c_sclfault`), so the bound
+    // must not grow when it does.
+    parameter integer CK_TICK_SHIPPED = 16384,
+    parameter integer CK_STRETCH_PRE = CK_TICK_SHIPPED,
+    parameter integer CK_STRETCH_TO  =
+        (CK_STRETCH_NS + (CK_TICK_SHIPPED * CLK_PERIOD_PS) / 1000 - 1)
+        / ((CK_TICK_SHIPPED * CLK_PERIOD_PS) / 1000),
     parameter integer MISO_PIN = 7,     // uio index of the SPI-target MISO
     parameter integer CS_PIN   = 6,     // uio index of its CS input
     // ⭐ ACTION SLOTS PER LANE: 2 = double buffer (shipped), 1 = single.
@@ -731,7 +745,7 @@ module tt_um_protocol_emulator #(
       // ⭐ PASSED THROUGH so a bench can build the zero-hold defect and an
       // over-long hold, which is what prices the t_HD;DAT requirement at both
       // ends rather than only at its floor.
-      .SDA_HOLD_NS(SDA_HOLD_NS)
+      .SDA_HOLD_NS(SDA_HOLD_NS), .CLK_PERIOD_PS(CLK_PERIOD_PS)
   ) u_eng (
       .clk(clk), .rst_n(eng_rst_n), .por_n(rst_n_s), .run(eng_run),
       .s_raddr(e_raddr), .s_re(e_re), .s_rdata(s_rdata),

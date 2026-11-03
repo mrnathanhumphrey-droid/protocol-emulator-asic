@@ -18,11 +18,13 @@ so the lane is denser than modelled, not slower.
 
 Source: NXP UM10204 Rev. 7.0 (1 Oct 2021), **Table 11** -- "Characteristics of
 the SDA and SCL bus lines". ⛔ Not Table 10: the numbering moved in Rev 7.0 and
-Table 10 is now the I/O stages. Fast mode, at 50 MHz (20 ns/cycle):
+Table 10 is now the I/O stages. Fast mode, in ns, converted to cycles at the
+target's clock by `model/clock.py` (minima banded, maxima charged whole):
 
-    tLOW  min 1.3 us = 65 cyc      tHIGH min 0.6 us = 30 cyc
-    tr    max 0.3 us = 15 cyc      tf    max 0.3 us = 15 cyc
-    tSU;DAT min 100 ns = 5 cyc     tHD;DAT min 0
+    tLOW  min 1300 ns              tHIGH min 600 ns
+    tr    max 300 ns               tf    max 300 ns
+    tSU;DAT min 100 ns             tHD;DAT min 0
+    period  min 2500 ns (400 kHz)
 
 ⭐ `D_I2C` IS NOW A DERIVED QUANTITY. For a lane whose clock WE generate, the
 peer judges the intervals between our edges, so the tolerance is how much
@@ -41,6 +43,9 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+sys.path.insert(0, os.path.dirname(HERE))
+
+import clock                                                     # noqa: E402
 
 import lane_digest                                               # noqa: E402
 from bursty import BLane, TX, UART_RX, SPI_RX, response_time_b   # noqa: E402
@@ -50,11 +55,13 @@ try:
 except Exception:
     pass
 
-CY_PER_US = 50.0                 # 50 MHz
-T_LOW, T_HIGH = 65, 30           # cycles, fast-mode minima
-T_SU_DAT = 5                     # cycles, fast-mode tSU;DAT min (100 ns)
-TR, TF = 15, 15                  # cycles, fast-mode MAXIMA
-PERIOD = 125                     # 400 kHz in cycles
+F_CLK = clock.hz()
+T_LOW = clock.cycles_min(1300)   # cycles, fast-mode minima (banded)
+T_HIGH = clock.cycles_min(600)
+T_SU_DAT = clock.cycles_min(100) # cycles, fast-mode tSU;DAT min
+TR = clock.cycles_min(300, band=1)   # cycles, fast-mode MAXIMA, charged whole
+TF = clock.cycles_min(300, band=1)
+PERIOD = clock.cycles_min(2500)  # 400 kHz: the shortest legal period
 
 # every lane except I2C, so the I2C lane can be varied.
 # ⛔ SELECTED from the shipped table, not REBUILT from it. This line used to be
@@ -182,7 +189,7 @@ def main() -> int:
         nl, nh = T_LOW + dm + m, T_HIGH + dm + m
         Tm = min(nl, nh)                      # conservative: assumes tr -> 0
         Dm = min(nl - T_LOW, nh - T_HIGH, (nl - T_SU_DAT) // 2)
-        f = 50e6 / (TF + nl + TR + nh) / 1000
+        f = F_CLK / (TF + nl + TR + nh) / 1000
         print("    %-4d %-7d %-8d %-6d %-7d %-10.0f %-3d %s"
               % (m, nl, nh, Tm, Dm, f, Dm - dm,
                  "<- A2-F6 zero margin" if Dm == dm else ""))
@@ -193,7 +200,7 @@ def main() -> int:
     print("     What replaces it is a DECLARED SCOPE POINT: at m=%d the lane runs"
           % 10)
     print("     at ~%d kHz worst-case rise, faster with better pull-ups."
-          % (50e6 / (TF + 80 + TR + 45) / 1000))
+          % (F_CLK / (TF + 80 + TR + 45) / 1000))
     print("     Only tf stays in the controller's budget.")
 
     # ---- N1b: D over EVERY Table 11 constraint, not the phases only ------
@@ -270,7 +277,7 @@ def main() -> int:
     print("     ⭐ IT RETIRES once Phase 2 measures C: after that, margins are quoted")
     print("     on the measured value and only A2-F6 (zero margin) is a hard stop.")
     print("  ⛔ LEDGER: f_SCL ~%d kHz worst-case is a DECLARED SCOPE POINT, not"
-          % (50e6 / (TF + NL + TR + NH) / 1000))
+          % (F_CLK / (TF + NL + TR + NH) / 1000))
     print("     400 kHz. Open-drain edge rates remain MODELLED until the board")
     print("     rung measures them; only tf is in the controller's budget.")
     return 0 if ok else 1

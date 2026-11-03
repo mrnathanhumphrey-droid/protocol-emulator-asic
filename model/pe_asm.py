@@ -253,6 +253,7 @@ def check_clocked_hold_delay(lanes, headers):
             if not (clocked or unclocked_low):
                 continue
             if dly <= hold:
+                _tc = um.table_cycles()
                 raise Reject(
                     "lane %d runs an OPEN-DRAIN %s%s with delay %d, which "
                     "is not above the %d-cycle SDA data hold. The held data bit "
@@ -261,11 +262,13 @@ def check_clocked_hold_delay(lanes, headers):
                     "or a STOP rather than a bit. The chip REFUSES this program "
                     "(CONFIG_ERR, engine-wide halt), so it would not run. Use "
                     "d >= %d, and note that the MODE floor is higher still: "
-                    "Fm+ needs t_LOW >= 25 cycles, Fm 65, Sm 235, plus that "
-                    "program's own service jitter (ruling S)."
+                    "Fm+ needs t_LOW >= %d cycles, Fm %d, Sm %d at this "
+                    "target's clock, plus that program's own service jitter "
+                    "(ruling S)."
                     % (ln, "CLOCKED " if clocked else "UNCLOCKED clock-low ",
                        "SHIFT" if op == OP_SHIFT else "SHIFTIN", dly,
-                       hold, hold + 1))
+                       hold, hold + 1, _tc["Fm+ 1 MHz"]["t_LOW"],
+                       _tc["Fm  400 kHz"]["t_LOW"], _tc["Sm  100 kHz"]["t_LOW"]))
     return hold
 
 

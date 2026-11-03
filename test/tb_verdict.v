@@ -55,7 +55,9 @@ module tb_verdict ();
 
   reg clk = 1'b0;
 
-  always #10 clk = ~clk;
+  `include "test/pe_clock.vh"
+
+  always #(PE_CLK_HALF_NS) clk = ~clk;   // the target's clock, never typed
 
   initial begin
     // a short, bounded run: the point is the verdict, not the simulation

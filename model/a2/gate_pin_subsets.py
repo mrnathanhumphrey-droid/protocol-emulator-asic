@@ -48,6 +48,8 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+sys.path.insert(0, os.path.dirname(HERE))
+import clock                                                      # noqa: E402  Wilson 11-03
 
 import lane_digest                                                 # noqa: E402
 from bursty import response_time_b                                 # noqa: E402
@@ -529,7 +531,7 @@ def main() -> int:
         print("      %-20s %.2f Mb/s total" % ("TOTAL", agg / 1e6))
         print("    3 pins (data, strobe, valid) at one bit per cycle carry up to")
         print("    50 Mb/s, so the serial channel is %.1f%% utilised."
-              % (100 * agg / 50e6))
+              % (100 * agg / clock.hz()))
         print("    ⭐ An RP2040 PIO on the TT board reads that without effort.")
         print()
         print("    ⛔ TWO COSTS, carried to 1.5 as flag-backs:")

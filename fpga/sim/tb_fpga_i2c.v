@@ -46,7 +46,8 @@ module tb_fpga_i2c;
   wire tx;
   wire [5:0] led;
   wire running;
-  always #10 clk = ~clk;
+  `include "fpga/sim/fpga_clock.vh"
+  always #(PE_CLK_HALF_NS) clk = ~clk;   // the target's clock, never typed
 
   // ---- the bus: open drain, pull-up rise RISE_NS (inertial) -------------
   wire scl_low_raw, sda_low_raw, f_scl, f_sda, scl, sda;
@@ -58,7 +59,7 @@ module tb_fpga_i2c;
   reg glitch = 1'b0;
   wire scl_fpga = scl | glitch;                // the FPGA's input only
 
-  pe_fpga_core #(.IMG(IMG), .BRK_CYC(20000), .OW(2), .FEED(FEED),
+  pe_fpga_core #(.IMG(IMG), .CLK_HZ(PE_FPGA_CLK_HZ), .BRK_CYC(20000), .OW(2), .FEED(FEED),
                  .FALLS(FALLS), .NFEED(NFEED), .NRX(NRX), .DEGLITCH(DEGLITCH),
                  .BAD_AT(BAD_AT), .BAD_SHIFT(BAD_SHIFT), .ISO_MF(ISO_MF)) dut (
       .clk(clk), .rst_n(rst_n), .uart_rx(rx), .uart_tx(tx),

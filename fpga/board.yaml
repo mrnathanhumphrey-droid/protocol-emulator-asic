@@ -1,0 +1,7 @@
+# The FPGA board target (Wilson 11-03): Puzhi PA100T-EDU.
+# ⛔ THE ONLY PLACE THE BOARD'S CLOCK IS WRITTEN DOWN. `model/clock.py` reads it
+# as target `fpga`; fpga/pa100t/build.tcl passes it to pe_fpga_core as CLK_HZ;
+# `model/gate_clock_consistency.py` checks it against the MMCM in
+# fpga/pa100t/pa100t_top.v (200 MHz in, x5 / 20 out).
+board:        "PA100T-EDU"
+clock_hz:     50000000

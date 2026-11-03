@@ -54,6 +54,8 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+sys.path.insert(0, os.path.dirname(HERE))
+import clock                                                      # noqa: E402  Wilson 11-03
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "ta01"))
 
 from uart_ta import (BAD_FRAME, DONE, START, STOP, UartExecutor, UartReceiver,
@@ -138,7 +140,7 @@ def main() -> int:
     eff = gaps[0] if len(set(gaps)) == 1 else None
     print("     => effective bit period = %s cycles, i.e. %s baud, against a "
           "nominal %d / %d"
-          % (eff, ("%d" % round(50_000_000 / eff)) if eff else "?", T,
+          % (eff, ("%d" % round(clock.hz() / eff)) if eff else "?", T,
              BAUD := 115200))
     print("     accumulated offset at the stop sample: %+d cycles"
           % (cyc[-1] - 19 * (T // 2)))

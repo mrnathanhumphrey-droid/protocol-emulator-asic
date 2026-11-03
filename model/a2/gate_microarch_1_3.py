@@ -92,7 +92,7 @@ CANDIDATES = [
 
 # ---- item 6: where the critical path sits ------------------------------
 # From docs/SILICON_EVIDENCE.md, slow corner nom_slow_1p08V_125C:
-SLOW_PERIOD_NS = 20.0
+SLOW_PERIOD_NS = 20.0   # clock-ok: RECORD -- the period the v1 harden in docs/SILICON_EVIDENCE.md ran at, not the clock
 WNS_NS = 1.5612          # worst setup slack, ALL paths
 WORST_FLOP_SLACK_NS = 9.18   # worst slack at a FLOP endpoint
 

@@ -46,7 +46,9 @@ SCRATCH = os.environ.get("PE_SCRATCH",
 SRCS = ["test/tb_i2c.v", "test/fram_i2c.v",
         "src/pe_engine.v", "src/pe_store.v", "src/project.v"]
 NCYC = 40000
-F_CLK = 50000000
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "model"))
+import clock  # noqa: E402  THE clock source (Wilson 11-03): never a typed copy
+F_CLK = clock.hz()
 DUMP = "probe_i2c.bin"
 
 # ⛔ THE HOST PUSHES 0x05 AND THE WIRE CARRIES 0xA0, WHICH IS NOT A TYPO.

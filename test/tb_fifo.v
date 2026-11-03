@@ -70,7 +70,9 @@ module tb_fifo ();
 `include "test/progress.vh"
 `include "test/clocked_conform.vh"
 
-  always #10 clk = ~clk;
+  `include "test/pe_clock.vh"
+
+  always #(PE_CLK_HALF_NS) clk = ~clk;   // the target's clock, never typed
 
   reg [7:0] img [0:IMG_MAX-1];
   integer   img_bytes, i, fails, cyc, phase, hits, ncyc;

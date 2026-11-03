@@ -32,6 +32,8 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+sys.path.insert(0, os.path.dirname(HERE))
+import clock                                                      # noqa: E402  Wilson 11-03
 
 import lane_digest                                                 # noqa: E402
 from bursty import (BLane, L_SYNC, OUT_REG, TSU_MASTER,            # noqa: E402
@@ -118,7 +120,7 @@ def c_delay_bound(lanes):
     """
     chunk = WRAP_BOUND - 1
     return True, ("per-action bound %d cycles (%.0f us); longer delays are SPLIT "
-                  "by the loader into re-arm chains" % (chunk, chunk / 50.0))
+                  "by the loader into re-arm chains" % (chunk, clock.us(chunk)))
 
 
 def c_delay_bound_fire():
@@ -508,7 +510,7 @@ def c_rx(lanes):
     agg = sum(next(v for k, v in BPE.items() if l.name.startswith(k))
               / (l.t * 20e-9) for l in rx)
     # ⛔⛔ THE CAPACITY WAS THE RAW PIN RATE AND THE STREAM NEVER RUNS AT IT.
-    # This read `cap = 50e6` -- "1 bit per cycle on the data pin" -- and
+    # This read a typed 50 MHz cap -- "1 bit per cycle on the data pin" -- and
     # published 2.2% utilised. Three factors were missing, every one of them
     # visible in `project.v`'s serialiser:
     #   the shift is ONE BIT PER TWO CYCLES          (`ser_phase` toggles)
@@ -527,7 +529,7 @@ def c_rx(lanes):
     # 10.6% -> 14.0%, and the mis-stated capacity accounted for the other 4.8x.
     FRAME_BITS, CYC_PER_BIT = 12, 2
     slot = 2 * (FRAME_BITS * CYC_PER_BIT + 1)
-    cap = 50e6 / slot * 8           # payload bits/s the link can carry
+    cap = clock.hz() / slot * 8     # payload bits/s the link can carry
     return agg <= cap, (
         "aggregate RX payload %.2f Mb/s against a PAYLOAD capacity of %.2f "
         "Mb/s (a %d-cycle payload slot: %d bits at %d cycles/bit plus a queue "

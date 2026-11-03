@@ -40,7 +40,9 @@ module tb_uarttx;
   integer    img_bytes, i, ncyc, bitp, err;
   reg [8*256-1:0] imgfile;
 
-  always #10 clk = ~clk;
+  `include "test/pe_clock.vh"
+
+  always #(PE_CLK_HALF_NS) clk = ~clk;   // the target's clock, never typed
 
   tt_um_protocol_emulator #(.SPL(2)) dut (
       .ui_in(ui_in), .uo_out(uo_out),
@@ -112,7 +114,7 @@ module tb_uarttx;
     end
     if (!$value$plusargs("BITP=%d", bitp)) bitp = 434;
     if (!$value$plusargs("ERR=%d", err)) err = 0;
-    bt = 20.0 * bitp * (1000.0 + err) / 1000.0;
+    bt = PE_CLK_NS * bitp * (1000.0 + err) / 1000.0;
     $readmemh(imgfile, img);
     `PE_REQUIRE_IMG_LOADED(imgfile)
     // ⭐ NON-PALINDROMIC (ruling 1b): a byte sent MSB-first by mistake is a

@@ -35,7 +35,8 @@ module tb_v2win;
   // measured edge -> slot, not posedge -> slot. 0 = the historical phase.
   integer    phps, walk_now = 0;
   real       t_rise = -1.0, t_slot = -1.0;
-  always #10 clk = ~clk;
+  `include "test/pe_clock.vh"
+  always #(PE_CLK_HALF_NS) clk = ~clk;   // the target's clock, never typed
 
   tt_um_protocol_emulator #(.SPL(2)) dut (
       .ui_in(ui_in), .uo_out(uo_out), .uio_in(uio_in), .uio_out(uio_out),

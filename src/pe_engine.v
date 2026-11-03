@@ -172,7 +172,7 @@
         l_ckbit[i]     <= {BPW{1'b0}}; \
         l_ckwait[i]    <= 1'b0; \
         l_ckpark[i]    <= 1'b0; \
-        l_ckwdog[i]    <= 7'd0; \
+        l_ckwdog[i]    <= {CKW{1'b0}}; \
         l_cksamp[i]    <= 1'b0; \
         l_ckgot[i]     <= 1'b0; \
         l_hcr[i]       <= {HOLDW{1'b0}}; \
@@ -297,7 +297,8 @@ module pe_engine #(
     // and 296 transitions on the clocked image, AND over 266 on the CERTIFIED
     // two-action frame, which has the same shape. UM10204 Table 10 tabulates
     // t_HD;DAT min = 0 ns, so 0 meets the TABLE -- but the table's own note
-    // requires a device to internally provide >= 300 ns (15 cycles at 50 MHz)
+    // requires a device to internally provide >= 300 ns (16 cycles at 50 MHz
+    // with the guard band, 19 at 60)
     // so SDA bridges the undefined region of SCL's falling edge.
     // ⚠ THE HAZARD IS CONCRETE, NOT A FORMALITY: SCL takes up to 300 ns (Fm)
     // to fall through a receiver's undefined region. If SDA moves in the same
@@ -340,8 +341,8 @@ module pe_engine #(
     // ⇒ The open-drain scoping therefore stands on UM10204 alone, which is
     //   where it always belonged; it was never load-bearing for this effect.
     // ⭐⭐ EXPRESSED AS A TIME, NOT A CYCLE COUNT, and that is the honest
-    // form: the requirement is 300 ns, and "15 cycles" is only correct at
-    // 50 MHz. `part1_param_contract` flags a bare protocol constant in the
+    // form: the requirement is 300 ns, and any cycle count is only correct at
+    // one clock. `part1_param_contract` flags a bare protocol constant in the
     // RTL -- correctly, since 15 is one -- and writing the ns requirement with
     // the clock period makes the cycle count DERIVED and the design portable
     // to another clock rate without editing a magic number.
@@ -350,10 +351,29 @@ module pe_engine #(
     // dispatch again until its held SDA change has landed AND this long has
     // passed, so the next SCL release always finds SDA settled. ONE global
     // constant covering the strictest declared mode: Fm+ is 50 ns (UM10204
-    // Table 10), 3 cycles at 50 MHz. Sm (250) and Fm (100) are mode floor
+    // Table 10), 3 cycles at 50 MHz and 4 at 60 with the band. Sm (250) and Fm (100) are mode floor
     // business (`pe_asm.check_mode_floor`); silicon guarantees the strictest.
     parameter integer SDA_SETUP_NS  = 50,
-    parameter integer CLK_PERIOD_NS = 20,
+    // ⛔⛔ THE CLOCK, IN WHOLE PICOSECONDS (Wilson 11-03). It was
+    // an integer `CLK_PERIOD_NS` of 20, a nanosecond count 16.667 cannot be
+    // written in, and nothing overrode it: at 60 MHz the hold above came out
+    // 15 cycles = 250 ns. ⭐ ONE SOURCE: `model/clock.py` reads the target's
+    // clock_hz, and `model/gate_clock_consistency.py` holds this default,
+    // project.v's, config.json's CLOCK_PERIOD and info.yaml's clock_hz to one
+    // value. Rounded DOWN to the picosecond (16666 at 60 MHz): a shorter
+    // period derives MORE cycles for every minimum, which is the safe side.
+    // ⭐ SIZED FOR THE TARGET BEING BUILT: the FPGA passes its own period.
+    // Slower than this is always safe for a minimum; faster is not.
+    parameter integer CLK_PERIOD_PS = 20000,
+    // ⛔⛔ THE GUARD BAND (Wilson 11-03): every real-time minimum is met at
+    // min x 21/20, so a fast clock source or a mild overclock still meets
+    // it. `model/clock.py` carries the same ratio and the consistency gate
+    // holds them equal. ⚠ A PARAMETER ONLY so a bench can READ it
+    // hierarchically (a hierarchical localparam never compares true --
+    // `gate_bench_lint`); it is not a per-build knob.
+    // ⚠ 1/1 (OFF) until the band lands with the 60 MHz move; 21/20 then.
+    parameter integer BAND_NUM = 1,
+    parameter integer BAND_DEN = 1,
     parameter integer TS_W    = 16,
     parameter integer DLY_W   = 10,
     parameter integer D_W     = 8,
@@ -396,8 +416,17 @@ module pe_engine #(
     // ⭐ FOUND BY CI, not by reasoning: the cocotb bench held `uio_in` CONSTANT,
     // so a released SCL never TRANSITIONED and `pin_rise` never fired. Two
     // open-drain tests hung. A dead board does the same thing.
+    // ⭐⭐ IN REAL TIME (Wilson 11-03): SMBus defines the timeout in
+    // milliseconds, so the bound is `CK_STRETCH_NS` and the tick count is
+    // derived for the clock -- 107 ticks at 50 MHz, 129 at 60. The prescaler
+    // is a GRANULARITY in cycles and stays one. The tick is floored to whole
+    // ns before dividing, so the count can only round toward the longer
+    // bound. ⚠ NOT BANDED: it is a fault bound, not a protocol minimum.
+    parameter integer CK_STRETCH_NS  = 35000000,  // 35 ms, the SMBus figure
     parameter integer CK_STRETCH_PRE = 16384,   // cycles per watchdog tick
-    parameter integer CK_STRETCH_TO  = 107,     // ticks before a bus fault
+    parameter integer CK_STRETCH_TO  =          // ticks before a bus fault
+        (CK_STRETCH_NS + (CK_STRETCH_PRE * CLK_PERIOD_PS) / 1000 - 1)
+        / ((CK_STRETCH_PRE * CLK_PERIOD_PS) / 1000),
     parameter integer SPL     = 2
 ) (
     input  wire                 clk,
@@ -826,7 +855,10 @@ module pe_engine #(
   reg             l_ckpark [0:N_LANES-1];
   // the parked-TICK count, per lane. ⚠ 49 flops all told, which is the price
   // of not hanging on a dead bus.
-  reg [6:0]       l_ckwdog [0:N_LANES-1];   // ticks, not cycles
+  // ⭐ ITS WIDTH IS DERIVED from the tick count, which is derived from the
+  // clock: 7 bits hold 107 (50 MHz) and not 129 (60 MHz).
+  localparam integer CKW = $clog2(CK_STRETCH_TO + 1);
+  reg [CKW-1:0]   l_ckwdog [0:N_LANES-1];   // ticks, not cycles
   // ⭐ ONE prescaler for every lane. It advances whenever ANY lane is parked,
   // which is sound for a FAULT bound: it can only make the bound fire up to
   // one tick EARLY for a lane that parked mid-prescale, and 0.33 ms of
@@ -870,9 +902,10 @@ module pe_engine #(
   // ⇒ COST: SDA_HOLD = 15 needs HOLDW = 4, so 4 + 1 + 1 = 6 bits per lane and
   //   30 flops at N_LANES = 5. Measured against the alternative of storing the
   //   pin index too, which would have been 50.
-  // ceil(SDA_HOLD_NS / CLK_PERIOD_NS) -- a minimum is not met by rounding down
-  localparam integer SDA_HOLD = (SDA_HOLD_NS + CLK_PERIOD_NS - 1)
-                                / CLK_PERIOD_NS;
+  // ceil(SDA_HOLD_NS x band / period) -- a minimum is not met by rounding down
+  localparam integer SDA_HOLD = (SDA_HOLD_NS * 1000 * BAND_NUM
+                                 + BAND_DEN * CLK_PERIOD_PS - 1)
+                                / (BAND_DEN * CLK_PERIOD_PS);
   // ⛔⛔ RULING W1 -- THE SAME COUNTER CARRIES THE SETUP. It is loaded with
   // SDA_HOLD + SDA_SETUP, the pin is written when it reaches SDA_SETUP + 1
   // (SDA_HOLD cycles after the load, exactly as before), and it keeps counting
@@ -885,8 +918,9 @@ module pe_engine #(
   // lane set. ⇒ COST: one more counter bit per lane (18 needs 5), 5 flops.
   // ⚠ AT SDA_HOLD = 0 nothing loads the counter, so nothing is gated: that
   //   build is the MEASURED defect and stays exactly that.
-  localparam integer SDA_SETUP = (SDA_SETUP_NS + CLK_PERIOD_NS - 1)
-                                 / CLK_PERIOD_NS;
+  localparam integer SDA_SETUP = (SDA_SETUP_NS * 1000 * BAND_NUM
+                                  + BAND_DEN * CLK_PERIOD_PS - 1)
+                                 / (BAND_DEN * CLK_PERIOD_PS);
   localparam integer SDA_HS = SDA_HOLD + SDA_SETUP;
   localparam integer SDA_SETUP1 = SDA_SETUP + 1;   // the count the pin lands at
   localparam integer HOLDW = (SDA_HS < 2)   ? 1 :
@@ -3659,7 +3693,7 @@ module pe_engine #(
         // answered" from "the peer never answered", and would read a frame
         // out of an idle line.
         if (l_ckpark[i]) begin
-          if (l_ckwdog[i] >= CK_STRETCH_TO[6:0]) begin
+          if (l_ckwdog[i] >= CK_STRETCH_TO[CKW-1:0]) begin
             live_n[i]       = 1'b0;         // HALT this lane
             armed_n[i]      = 1'b0;
             l_ckpark[i]     <= 1'b0;
@@ -3667,10 +3701,10 @@ module pe_engine #(
             clk_stretch_err_m <= 1'b1;        // STICKY -- status bit 7
             sticky_ovr_m    <= 1'b1;
           end else if (ck_tick) begin
-            l_ckwdog[i] <= l_ckwdog[i] + 7'd1;
+            l_ckwdog[i] <= l_ckwdog[i] + {{(CKW-1){1'b0}}, 1'b1};
           end
         end else begin
-          l_ckwdog[i] <= 7'd0;
+          l_ckwdog[i] <= {CKW{1'b0}};
         end
         if (ck_hit[i]) begin
           l_cksamp[i] <= ck_bit[i];

@@ -51,7 +51,9 @@ except Exception:
 SCRATCH = os.environ.get("PE_SCRATCH",
                          os.path.join(os.environ.get("TEMP", "/tmp"),
                                       "pe_recert"))
-F_CLK = 50000000
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "model"))
+import clock  # noqa: E402  THE clock source (Wilson 11-03): never a typed copy
+F_CLK = clock.hz()
 NCYC = 60000
 
 #: image -> (peer, [lane, ...]) certified as I2C

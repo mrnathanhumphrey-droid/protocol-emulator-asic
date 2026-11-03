@@ -61,7 +61,9 @@ module tb_witness;
   integer r_act  [0:RING-1];
   integer r_st   [0:RING-1];
 
-  always #10 clk = ~clk;
+  `include "test/pe_clock.vh"
+
+  always #(PE_CLK_HALF_NS) clk = ~clk;   // the target's clock, never typed
 
   // ⭐⭐ THE BUFFER DEPTH IS A PARAMETER, AND THE SUITE RUNS BOTH VALUES.
   // Build the single-buffer configuration with

@@ -115,7 +115,8 @@ module tb_reload;
   integer    i, rlf, rlb, npost, fails;
   reg [8*256-1:0] imgfile;
   real       bt;
-  always #10 clk = ~clk;
+  `include "test/pe_clock.vh"
+  always #(PE_CLK_HALF_NS) clk = ~clk;   // the target's clock, never typed
 
   tt_um_protocol_emulator #(.SPL(2)) dut (
       .ui_in(ui_in), .uo_out(uo_out),
@@ -406,7 +407,7 @@ module tb_reload;
     if (!$value$plusargs("IMG=%s", imgfile)) begin
       $display("tb_reload: FATAL -- +IMG is required (the program reloaded)"); $finish;
     end
-    bt = 20.0 * BITP;
+    bt = PE_CLK_NS * BITP;
     hf_init;
     if (mode == 4) begin
       // corpus.FEEDS["corpus_spim"]: WREN WRITE 01 23 5B C4 1E READ 01 23
@@ -618,7 +619,7 @@ module tb_reload;
       // ⛔ OPTION 1' (Wilson): CS high AT LEAST ONE FULL CLOCK before any SCK
       // edge the halt causes -- a same-cycle rise is RED, because on real
       // pads skew decides the order and SCK first commits a stale bit
-      if (t_sck_up >= 0 && (t_cs_up < 0 || t_sck_up - t_cs_up < 20.0)) begin
+      if (t_sck_up >= 0 && (t_cs_up < 0 || t_sck_up - t_cs_up < PE_CLK_NS)) begin
         fails = fails + 1;
         $display("*** FAIL reload: at the halt SCK moved %0.0f ns after CS rose -- CS must lead any halt-caused SCK edge by at least one clock (20 ns)",
                  t_sck_up - t_cs_up);

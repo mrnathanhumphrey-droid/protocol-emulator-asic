@@ -282,6 +282,13 @@ GATES=(
   # pe_rowmux, simulation the unpacked one (~6.7x faster); Yosys proves them
   # equal at SW 7/4/3 every push, and M_ROWMUX_NODE must be NOT PROVEN. Seconds.
   model/gate_rowmux_equiv.py
+  # ⛔⛔ THE CLOCK (Wilson 11-03): every copy of it agrees with its board config
+  # (info.yaml / fpga/board.yaml) and every derived real-time count meets its
+  # spec at that clock; and no typed clock returns outside model/clock.py.
+  # The 60 MHz move found 50 MHz typed in the RTL, benches, the assembler's
+  # I2C floors and the programs. Seconds, no simulator.
+  model/gate_clock_consistency.py
+  model/gate_clock_literals.py
   # ⭐ The I2C Fast-mode lane's witness: a RECORDED BENCH WITNESS (PA100T +
   # MB85RC256V, DSLogic captures) re-checked here in seconds, no simulator --
   # not a hardware run in CI (Wilson 10-17).

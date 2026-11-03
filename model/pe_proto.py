@@ -47,6 +47,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(ROOT, "test"))
+import clock                                                      # noqa: E402  Wilson 11-03
 
 from pe_isa import (OP_ARM, OP_LEVEL, OP_READBIT, OP_REARM,  # noqa: E402
                     OP_SHIFT, OP_SHIFTIN, OP_START, OP_STOP, ORDER_LSB,
@@ -320,10 +321,12 @@ class SPITarget:
         acts.append((OP_REARM, 0, 1, self.d, 0))
         return acts
 
-    def t_ext(self, sck_hz=1_000_000, f_clk=50_000_000):
+    def t_ext(self, sck_hz=1_000_000, f_clk=None):
         """{lane 0: T_ext}: the master's claimed maximum SCK period, in cycles
-        -- the period of this edge-paced lane (program_a2.T_EXT). 50 at
-        1 MHz MISO-only; the MOSI variant is witnessed at <= 500 kHz."""
+        -- the period of this edge-paced lane (program_a2.T_EXT), at the
+        target's clock (50 at 1 MHz on 50 MHz). The MOSI variant is
+        witnessed at <= 500 kHz."""
+        f_clk = clock.hz() if f_clk is None else f_clk
         return {0: f_clk // sck_hz}
 
     def header(self, dsched=17, dtol=17, flags=0):
@@ -440,8 +443,11 @@ class OneWire:
 
     SYM = {"W1": 0xE, "W0": 0xC, "RST": 0x0, "RSTEND": 0x8, "IDLE": 0xF}
 
-    def __init__(self, q=2, s=3, c=4, f_mhz=50, A_us=3.0, B_us=9.0,
+    def __init__(self, q=2, s=3, c=4, f_mhz=None, A_us=3.0, B_us=9.0,
                  TW0_us=70.0, D_us=2.0, TAIL_us=56.0, nc_count=8):
+        # ⭐ the slot is written in microseconds; the target's clock makes it
+        # cycles (Wilson 11-03). `f_mhz` stays for a caller holding a board.
+        f_mhz = clock.mhz() if f_mhz is None else f_mhz
         self.q, self.s, self.c, self.f, self.nc = q, s, c, f_mhz, nc_count
         cy = lambda us: int(round(us * f_mhz))
         self.A, self.B, self.TW0 = cy(A_us), cy(B_us), cy(TW0_us)
@@ -454,7 +460,7 @@ class OneWire:
     @staticmethod
     def _chunks(total, cap=1000, floor=20):
         """`total` cycles as delays each in [floor, cap] (DLY_W = 10 bits:
-        one action waits at most 1023 cycles = 20.46 us at 50 MHz)."""
+        one action waits at most 1023 cycles, 20.46 us at 50 MHz)."""
         n = -(-total // cap)
         out = [total // n] * n
         out[-1] += total - sum(out)
@@ -572,11 +578,13 @@ def onewire_tt():
 
 
 def onewire_fpga():
-    """The Puzhi PA100T-EDU variant: the same engine at 50 MHz, with the read
+    """The Puzhi PA100T-EDU variant: the same engine at THE BOARD's clock
+    (`fpga/board.yaml`, via `model/clock.py`), with the read
     slot's master-low cut to 2 us and the sample moved to 13 us -- datasheet
     Figure 18's advice (keep T_INIT short, sample late in the 15 us window)
     for a real 4.7 kOhm pull-up whose rise time the bench cannot know."""
-    return OneWire(A_us=2.0, B_us=11.0)
+    return OneWire(A_us=2.0, B_us=11.0,
+                   f_mhz=clock.mhz(clock.target_hz("fpga")))
 
 
 def spi_fram(d=7, mode0=False, clkinv=False):

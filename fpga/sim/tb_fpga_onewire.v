@@ -37,7 +37,8 @@ module tb_fpga_onewire;
   wire tx;
   wire [5:0] led;
   wire running;
-  always #10 clk = ~clk;
+  `include "fpga/sim/fpga_clock.vh"
+  always #(PE_CLK_HALF_NS) clk = ~clk;   // the target's clock, never typed
 
   // ---- the DQ net: open drain, pull-up rise RISE_NS (inertial) -------------
   wire dq_low_raw, dev_pull, dq;
@@ -45,7 +46,7 @@ module tb_fpga_onewire;
   assign #1 m_low = dq_low_raw;                // off the clock edges
   assign #(RISE_NS, 0) dq = ~(m_low | dev_pull);
 
-  pe_fpga_core #(.IMG("test/onewire_fpga_image.hex"), .BRK_CYC(20000),
+  pe_fpga_core #(.IMG("test/onewire_fpga_image.hex"), .CLK_HZ(PE_FPGA_CLK_HZ), .BRK_CYC(20000),
                  .OW(1), .FEED(FEED), .NFEED(NFEED), .POLLIDX(POLLIDX),
                  .PER2(PER2), .MARGIN(MARGIN), .BAD_AT(BAD_AT),
                  .BAD_SHIFT(BAD_SHIFT), .LATE(LATE), .ISO_MF(ISO_MF)) dut (

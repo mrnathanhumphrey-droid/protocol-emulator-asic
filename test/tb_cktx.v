@@ -33,7 +33,9 @@ module tb_cktx;
   integer    img_bytes, i, cyc, ncyc, starve, starve_len;
   reg [8*256-1:0] imgfile;
 
-  always #10 clk = ~clk;
+  `include "test/pe_clock.vh"
+
+  always #(PE_CLK_HALF_NS) clk = ~clk;   // the target's clock, never typed
 
   tt_um_protocol_emulator #(.SPL(2)) dut (
       .ui_in(ui_in), .uo_out(uo_out),

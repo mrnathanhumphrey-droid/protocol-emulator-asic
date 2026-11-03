@@ -60,7 +60,9 @@ N_BITS = 16
 WRAP_BOUND = 2 ** (N_BITS - 1)        # max delay must be strictly below this
 CHUNK = WRAP_BOUND - 1                # 32767, the largest legal chunk
 CONSERVATIVE_T = 2 ** 14              # 16384 -- the rate the ruling specifies
-F_CLK = 50_000_000
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import clock  # noqa: E402  THE clock source (Wilson 11-03): never a typed copy
+F_CLK = clock.hz()
 
 LANES = list(TX) + [UART_RX, SPI_RX]
 
@@ -95,8 +97,8 @@ def main() -> int:
                 "shown as the unaugmented base, which is what must match")
     print()
     print("  N = %d bits -> wrap bound 2^%d = %d cycles = %.0f us at %d MHz"
-          % (N_BITS, N_BITS - 1, WRAP_BOUND, WRAP_BOUND / 50.0, F_CLK // 1_000_000))
-    print("  largest legal chunk = %d cycles = %.1f us" % (CHUNK, CHUNK / 50.0))
+          % (N_BITS, N_BITS - 1, WRAP_BOUND, clock.us(WRAP_BOUND), F_CLK // 10 ** 6))
+    print("  largest legal chunk = %d cycles = %.1f us" % (CHUNK, clock.us(CHUNK)))
     print("  a 10 ms poll = %d cycles = %d chunks"
           % (500_000, -(-500_000 // CHUNK)))
     rc = 0

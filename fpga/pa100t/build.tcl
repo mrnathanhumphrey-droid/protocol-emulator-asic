@@ -43,6 +43,14 @@ read_verilog [file join $root fpga rtl pe_fpga_core.v]
 read_verilog [file join $root fpga pa100t pa100t_top.v]
 read_xdc     [file join $root fpga pa100t pa100t_uart.xdc]
 
+# ⛔ THE BOARD'S CLOCK, READ (Wilson 11-03): fpga/board.yaml's clock_hz is the
+# one place it is written; every build passes it to pa100t_top as CLK_HZ, and
+# pe_fpga_core refuses to elaborate without it.
+set fh [open [file join $root fpga board.yaml]]
+regexp -line {^\s*clock_hz:\s*(\d+)} [read $fh] -> clk_hz
+close $fh
+puts "PE_FPGA: board clock $clk_hz Hz (fpga/board.yaml)"
+
 # the ROM image: $readmemh resolves against the working directory
 if {$ow} {
   read_xdc [file join $root fpga pa100t pa100t_j11_ow.xdc]
@@ -52,7 +60,7 @@ if {$ow} {
   array set prm [string map {"\n" " "} [read $fh]]
   close $fh
   set gen [list "IMG=\"onewire_fpga_image.hex\"" "FEED=\"onewire_fpga_feed.hex\"" \
-               NFEED=$prm(NFEED) POLLIDX=$prm(POLLIDX) PER2=$prm(PER2) MARGIN=$prm(MARGIN)]
+               NFEED=$prm(NFEED) POLLIDX=$prm(POLLIDX) PER2=$prm(PER2) MARGIN=$prm(MARGIN)                CLK_HZ=$clk_hz]
   puts "PE_FPGA: 1-Wire build, generics $gen"
 } elseif {$i2c} {
   read_xdc [file join $root fpga pa100t pa100t_j11_i2c.xdc]
@@ -63,11 +71,12 @@ if {$ow} {
   array set prm [string map {"\n" " "} [read $fh]]
   close $fh
   set gen [list "IMG=\"i2c_fram_fpga.hex\"" "FEED=\"i2c_fram_feed.hex\"" \
-               "FALLS=\"i2c_fram_falls.hex\"" NFEED=$prm(NFEED) NRX=$prm(NRX)]
+               "FALLS=\"i2c_fram_falls.hex\"" NFEED=$prm(NFEED) NRX=$prm(NRX)                CLK_HZ=$clk_hz]
   puts "PE_FPGA: I2C build, generics $gen"
 } else {
   set img [file join $root fpga images uart_rx_434.hex]
   file copy -force $img [file join $out uart_rx_434.hex]
+  set gen [list CLK_HZ=$clk_hz]
 }
 cd $out
 
@@ -76,7 +85,7 @@ if {$ow} {
 } elseif {$i2c} {
   synth_design -top pa100t_top -part $part -verilog_define PE_I2C -generic $gen
 } else {
-  synth_design -top pa100t_top -part $part
+  synth_design -top pa100t_top -part $part -generic $gen
 }
 opt_design
 place_design

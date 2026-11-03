@@ -86,7 +86,9 @@ module tb_spitgt;
              recover, csearly, halfps, bound, noi2c, phwalk;
   reg        cpol, cpha;
 
-  always #10 clk = ~clk;
+  `include "test/pe_clock.vh"
+
+  always #(PE_CLK_HALF_NS) clk = ~clk;   // the target's clock, never typed
 
   tt_um_protocol_emulator dut (
       .ui_in(ui_in), .uo_out(uo_out),
@@ -113,7 +115,7 @@ module tb_spitgt;
   task wait_until(input real t);
     begin
       tq = t;
-      if (tq - 10.0 * $floor(tq / 10.0) < 0.5) tq = tq + 1.0;
+      if (tq - PE_CLK_HALF_NS * $floor(tq / PE_CLK_HALF_NS) < 0.5) tq = tq + 1.0;
       if (tq > $realtime) #(tq - $realtime);
     end
   endtask
@@ -175,8 +177,8 @@ module tb_spitgt;
       win_mask[dut.u_eng.cur] = 1'b1;
     if (lat_pend && uio_oe[P_MISO] === 1'b1 && uio_out[P_MISO] === want_bit) begin
       lat_pend = 1'b0;
-      if ($rtoi(($realtime - te) / 20.0 + 0.999) > lat_max) begin
-        lat_max = $rtoi(($realtime - te) / 20.0 + 0.999);
+      if ($rtoi(($realtime - te) / PE_CLK_NS + 0.999) > lat_max) begin
+        lat_max = $rtoi(($realtime - te) / PE_CLK_NS + 0.999);
         worst_mask = win_mask;
         worst_gbit = gbit_pend;
       end
@@ -184,7 +186,7 @@ module tb_spitgt;
     end
     if (tcss_pend && uio_oe[P_MISO] === 1'b1 && uio_out[P_MISO] === want_bit) begin
       tcss_pend = 1'b0;
-      tcss_seen = $rtoi(($realtime - t_csfall) / 20.0 + 0.999);
+      tcss_seen = $rtoi(($realtime - t_csfall) / PE_CLK_NS + 0.999);
     end
   end
 
@@ -215,10 +217,10 @@ module tb_spitgt;
     wait (five == 1 && hf_en === 1'b1);
     forever begin
       @(negedge uo_out[0]);
-      #(20.0 * UT * 1.5);
+      #(PE_CLK_NS * UT * 1.5);
       for (ub = 0; ub < 8; ub = ub + 1) begin
         utx[ub] = uo_out[0];
-        #(20.0 * UT);
+        #(PE_CLK_NS * UT);
       end
       if (utx !== hf_pat[3][n_utx % 16]) begin
         n_utx_bad = n_utx_bad + 1;
@@ -281,13 +283,13 @@ module tb_spitgt;
     // cycles, so without it every RX edge landed in the posedge's own
     // timestep -- a scheduling race (phase audit 10-20). 3 ns off the edge is
     // tb_uartrx's convention.
-    #(20.0 * rxt + 3.0);
+    #(PE_CLK_NS * rxt + 3.0);
     forever begin
       rxr = rxr * 32'd1103515245 + 32'd12345;
       urx_sent[n_urx_sent % 4096] = rxr[23:16];
-      rx_line = 1'b0; #(20.0 * rxt);
-      for (rb = 0; rb < 8; rb = rb + 1) begin rx_line = rxr[16 + rb]; #(20.0 * rxt); end
-      rx_line = 1'b1; #(20.0 * rxt);
+      rx_line = 1'b0; #(PE_CLK_NS * rxt);
+      for (rb = 0; rb < 8; rb = rb + 1) begin rx_line = rxr[16 + rb]; #(PE_CLK_NS * rxt); end
+      rx_line = 1'b1; #(PE_CLK_NS * rxt);
       n_urx_sent = n_urx_sent + 1;
     end
   end
@@ -309,8 +311,8 @@ module tb_spitgt;
     begin
       te = $realtime;
       if (armed_pend) begin
-        if ($rtoi((te - t_armed) / 20.0) < margin_min)
-          margin_min = $rtoi((te - t_armed) / 20.0);
+        if ($rtoi((te - t_armed) / PE_CLK_NS) < margin_min)
+          margin_min = $rtoi((te - t_armed) / PE_CLK_NS);
         n_margin = n_margin + 1;
         armed_pend = 1'b0;
       end else begin
@@ -321,8 +323,8 @@ module tb_spitgt;
       gbit_pend = gbit;
       // phase coverage: the edge's phase within the 20 ns clock (1 ns bins)
       // and within the I2C lane's 45-cycle period
-      ph_clk[$rtoi(te - 20.0 * $floor(te / 20.0))] = 1'b1;
-      ph_i2c[$rtoi(te / 20.0) % 45] = 1'b1;
+      ph_clk[$rtoi(te - PE_CLK_NS * $floor(te / PE_CLK_NS))] = 1'b1;
+      ph_i2c[$rtoi(te / PE_CLK_NS) % 45] = 1'b1;
       lat_pend = (gbit % 8 == 0) ? 1'b1
                  : (((expb(gbit / 8) >> (7 - (gbit % 8))) & 1)
                     != ((expb((gbit - 1) / 8) >> (7 - ((gbit - 1) % 8))) & 1));
@@ -414,7 +416,7 @@ module tb_spitgt;
     if (!$value$plusargs("NOI2C=%d", noi2c)) noi2c = 0;
     if (!$value$plusargs("RXT=%d", rxt)) rxt = 434;
     cpol = mode[1]; cpha = mode[0];
-    hp = (halfps > 0) ? halfps / 1000.0 : 20.0 * half;
+    hp = (halfps > 0) ? halfps / 1000.0 : PE_CLK_NS * half;
     worst_mask = 5'b00000; worst_gbit = -1;
     off = 0; n_undriven = 0; n_bits = 0; n_bytes_rd = 0; n_bad = 0; n_oe_cs = 0;
     lat_max = 0; lat_n = 0; n_missed = 0; margin_min = 1 << 20; n_margin = 0;
@@ -462,7 +464,7 @@ module tb_spitgt;
       // 3 ns after a clock edge -- the gap is counted in edges -- and the
       // detune walked only ~10 ns inside one transaction (9/20 phases seen).
       tnow = $realtime + 3.0
-             + ((halfps > 0 || phwalk) ? 20.0 * (t_i * 0.618034 - $floor(t_i * 0.618034)) : 0.0);
+             + ((halfps > 0 || phwalk) ? PE_CLK_NS * (t_i * 0.618034 - $floor(t_i * 0.618034)) : 0.0);
       // CS falls; CPHA 0: bit 7 is driven by the target at CS fall
       wait_until(tnow); cs = 1'b0; t_csfall = $realtime;
       if (!cpha && !skip_txn) begin
@@ -473,13 +475,13 @@ module tb_spitgt;
         rnd = lcg(rnd); mbyte = rnd[23:16];
         if (!cpha) mosi = mbyte[7];
       end
-      tnow = tnow + 20.0 * tcss;
+      tnow = tnow + PE_CLK_NS * tcss;
       for (k = 0; k < nbits_tx; k = k + 1) begin
         // M6: CS released EARLY -- CSEARLY cycles after the last change-edge,
         // i.e. before the master's final sample (it must be inside the loop:
         // after the loop every edge has already happened)
         if (csearly > 0 && k == nbits_tx - 1 && !cpha) begin
-          wait_until(te + 20.0 * csearly);
+          wait_until(te + PE_CLK_NS * csearly);
           cs = 1'b1;
         end
         // LEADING edge
@@ -506,7 +508,7 @@ module tb_spitgt;
       end
       if (mosi_on && !skip_txn) begin mosi_sent[n_mosi] = mbyte; n_mosi = n_mosi + 1; end
       // CS rises tCSH after the last edge (already high under CSEARLY)
-      if (csearly == 0) wait_until(tnow - hp + 20.0 * tcsh);
+      if (csearly == 0) wait_until(tnow - hp + PE_CLK_NS * tcsh);
       cs = 1'b1;
       armed_pend = 1'b0; lat_pend = 1'b0;
       if (!skip_txn) gb = gb + 8 * nb;

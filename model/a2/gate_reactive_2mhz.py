@@ -38,7 +38,9 @@ import pyrta_src                                     # noqa: E402
 from gate_j9_margins import lanes_d12                # noqa: E402
 from gate_j_sound import lanes_at                    # noqa: E402
 
-F_CLK = 50_000_000          # the shipped clock
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import clock  # noqa: E402  THE clock source (Wilson 11-03): never a typed copy
+F_CLK = clock.hz()
 
 # ---- the terms, each with its origin ------------------------------------
 L_SYNC = 3                  # the 3-flop edge-capture synchroniser

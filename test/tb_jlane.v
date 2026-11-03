@@ -127,7 +127,9 @@ module tb_jlane;
   // printed is not a controlled measurement.
   integer di, dn;
 
-  always #10 clk = ~clk;
+  `include "test/pe_clock.vh"
+
+  always #(PE_CLK_HALF_NS) clk = ~clk;   // the target's clock, never typed
 
   // ⭐⭐ THE BUFFER DEPTH IS A PARAMETER, SELECTED AT ELABORATION. Build the
   // single-buffer configuration with

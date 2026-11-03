@@ -66,7 +66,9 @@ module tb_i2c;
     uio_drv[P_SCL] = scl;
   end
 
-  always #10 clk = ~clk;
+  `include "test/pe_clock.vh"
+
+  always #(PE_CLK_HALF_NS) clk = ~clk;   // the target's clock, never typed
 
   parameter integer SPL_CFG = 2;
 

@@ -54,7 +54,9 @@ module tb_edge;
   wire [7:0] ob_val = uio_drv;
 `include "test/od_bus.vh"
 
-  always #10 clk = ~clk;
+  `include "test/pe_clock.vh"
+
+  always #(PE_CLK_HALF_NS) clk = ~clk;   // the target's clock, never typed
 
 `include "test/store_filler.vh"   // v2: PE_STORE_BYTES, never a typed 256
   localparam integer IMG_MAX = PE_STORE_BYTES;

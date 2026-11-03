@@ -15,7 +15,9 @@
 // are on the breadboard).
 `default_nettype none
 module pa100t_top #(
-    parameter IMG = "uart_rx_434.hex"
+    parameter IMG = "uart_rx_434.hex",
+    // the board's clock, from fpga/board.yaml via build.tcl; no default
+    parameter integer CLK_HZ = 0
 `ifdef PE_OW
   , parameter FEED = "onewire_fpga_feed.hex",
     parameter integer NFEED = 0, POLLIDX = 0, PER2 = 0, MARGIN = 0
@@ -72,7 +74,7 @@ module pa100t_top #(
 `ifdef PE_OW
   wire dq_low;
   assign j11_dq = dq_low ? 1'b0 : 1'bz;          // open drain
-  pe_fpga_core #(.IMG(IMG), .OW(1), .FEED(FEED), .NFEED(NFEED),
+  pe_fpga_core #(.IMG(IMG), .CLK_HZ(CLK_HZ), .OW(1), .FEED(FEED), .NFEED(NFEED),
                  .POLLIDX(POLLIDX), .PER2(PER2), .MARGIN(MARGIN)) u_core (
       .clk(clk50), .rst_n(rst_n), .uart_rx(rxs[1]), .uart_tx(uart_tx),
       .led(core_led), .running(running), .dq_in(j11_dq), .dq_low(dq_low),
@@ -82,14 +84,14 @@ module pa100t_top #(
   wire sda_low, scl_low;
   assign j11_sda = sda_low ? 1'b0 : 1'bz;        // open drain
   assign j11_scl = scl_low ? 1'b0 : 1'bz;        // open drain
-  pe_fpga_core #(.IMG(IMG), .OW(2), .FEED(FEED), .FALLS(FALLS),
+  pe_fpga_core #(.IMG(IMG), .CLK_HZ(CLK_HZ), .OW(2), .FEED(FEED), .FALLS(FALLS),
                  .NFEED(NFEED), .NRX(NRX)) u_core (
       .clk(clk50), .rst_n(rst_n), .uart_rx(rxs[1]), .uart_tx(uart_tx),
       .led(core_led), .running(running), .dq_in(j11_sda), .dq_low(sda_low),
       .p3_in(j11_scl), .p3_low(scl_low)
   );
 `else
-  pe_fpga_core #(.IMG(IMG)) u_core (
+  pe_fpga_core #(.IMG(IMG), .CLK_HZ(CLK_HZ)) u_core (
       .clk(clk50), .rst_n(rst_n), .uart_rx(rxs[1]), .uart_tx(uart_tx),
       .led(core_led), .running(running), .dq_in(1'b1), .dq_low(),
       .p3_in(1'b1), .p3_low()

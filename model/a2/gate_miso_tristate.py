@@ -58,7 +58,9 @@ except Exception:
     pass
 
 LANES = lane_digest.shipped()
-HZ = 50e6                       # the shipped clock, info.yaml clock_hz
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import clock  # noqa: E402  THE clock source (Wilson 11-03): never a typed copy
+HZ = clock.hz()  # info.yaml clock_hz, via the target
 
 Z = None                        # a driver that is not driving
 

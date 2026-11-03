@@ -25,7 +25,9 @@ module tb_pit;
   reg [7:0]  prevq, mk;
   reg        done = 1'b0;
 
-  always #10 clk = ~clk;
+  `include "test/pe_clock.vh"
+
+  always #(PE_CLK_HALF_NS) clk = ~clk;   // the target's clock, never typed
 
   tt_um_protocol_emulator #(.SPL(2)) dut (
       .ui_in(ui_in), .uo_out(uo_out),

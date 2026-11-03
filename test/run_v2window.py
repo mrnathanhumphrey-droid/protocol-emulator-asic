@@ -30,6 +30,8 @@ ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 from toolchain import banner, tool      # noqa: E402
 import sim_run                          # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(HERE), "model"))
+import clock                            # noqa: E402  Wilson 11-03
 import pe_isa as I                      # noqa: E402
 
 TMP = os.environ.get("PE_V2WIN_TMP") or os.path.join(HERE, "sim_build_v2win")
@@ -148,10 +150,10 @@ def main():
           "TAKEN" % (len(LEADS), worst_miss, need))
     if need is not None:
         print("    = %.2f cycles from an asynchronous edge, worst over phases "
-              "(the contract asks 6 = 120 ns)" % (need / 20.0))
-    six_ok = worst_miss is not None and worst_miss < 120.0
-    print("  6 cycles (120 ns) from ANY edge phase always taken: %s"
-          % ("ok" if six_ok else "*** NO"))
+              "(the contract asks 6 = %.0f ns)" % (need / clock.ns(1), clock.ns(6)))
+    six_ok = worst_miss is not None and worst_miss < clock.ns(6)
+    print("  6 cycles (%.0f ns) from ANY edge phase always taken: %s"
+          % (clock.ns(6), "ok" if six_ok else "*** NO"))
     ok = ok and walk_ok and six_ok
     if ok:
         print("V2 WINDOW: PASSED")
