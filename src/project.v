@@ -109,7 +109,7 @@ module tt_um_protocol_emulator #(
     // 11-03). `model/gate_clock_consistency.py` holds it to info.yaml's
     // clock_hz, config.json's CLOCK_PERIOD and pe_engine.v's default. The FPGA
     // core passes its own board's period. See src/pe_engine.v.
-    parameter integer CLK_PERIOD_PS = 20000,
+    parameter integer CLK_PERIOD_PS = 16666,
     // the clock-stretch BUS-FAULT bound: 35 ms (the SMBus figure), as ticks
     // of a 16384-cycle prescaler -- 107 at 50 MHz, 129 at 60. See
     // src/pe_engine.v.

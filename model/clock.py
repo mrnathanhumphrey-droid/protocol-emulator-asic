@@ -38,11 +38,10 @@ from fractions import Fraction
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 
-#: the guard band on every real-time minimum. ⚠ 1 (OFF) in the clock commit:
-#: the source and every reader land first as a pure refactor, byte-identical at
-#: 50 MHz; the band (21/20, +5 %) is switched on WITH the real-time programs
-#: and the 60 MHz move, so every cycle-typed edge is re-derived once.
-BAND = Fraction(1, 1)
+#: the guard band on every real-time minimum: +5 % (21/20). It landed OFF in
+#: clock commit (a), a pure refactor, and was switched on WITH the real-time
+#: programs and the 60 MHz move, so every cycle-typed edge was re-derived once.
+BAND = Fraction(21, 20)
 
 #: target -> (file, the line that carries its clock in Hz). A board config is
 #: the ONLY other place a frequency is written down.
@@ -81,6 +80,22 @@ def target_hz(name):
         raise ClockError("target %s: %s declares no positive clock_hz"
                          % (name, rel))
     return int(m.group(1))
+
+
+#: ⛔⛔ THE A2 ANALYSIS LAYER IS A RECORD AT THIS TARGET (Wilson 11-03). The
+#: shipped lane table (model/a2/bursty.py) and every analysis on it -- the
+#: Imitator band, the TChecker / pyRTA / recurrence records, the measured
+#: bands -- were derived at 50 MHz, the FPGA board's clock, where they stay
+#: true. Until A2 is RE-CERTIFIED at the chip's clock (its own pre-registered
+#: item), A2 code converts at THIS target, never the chip's; the chip's 60 MHz
+#: is covered by the assembler's per-target checks and the cross-clock gate's
+#: simulation, NOT by formal analysis.
+A2_TARGET = "fpga"
+
+
+def a2_hz():
+    """The clock the A2 record was derived at (see A2_TARGET)."""
+    return target_hz(A2_TARGET)
 
 
 def hz():
@@ -134,6 +149,12 @@ def ns(n_cycles, f=None):
 
 def us(n_cycles, f=None):
     return ns(n_cycles, f) / 1000.0
+
+
+def phases(f=None):
+    """Whole 1 ns phases in one period -- the bins a phase walk can cover:
+    20 at 50 MHz, 17 at 60 (16.666 ns: bins 0..16)."""
+    return -(-period_ps(f) // 1000)
 
 
 def mhz(f=None):

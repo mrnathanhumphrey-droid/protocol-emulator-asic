@@ -48,8 +48,13 @@ NDATA = 4
 
 
 def delay():
+    """⛔ THE BOARD's clock, and UNBANDED: this program is the one the
+    hardware witness (fpga/witness/i2c_fram_hw_witness.json) captured on the
+    PA100T at 50 MHz, so it is rebuilt exactly as witnessed -- a RECORD, like
+    the A2 layer -- until it is re-witnessed with the band (Wilson 11-03)."""
     import run_ckack
-    return run_ckack.d_half_fm()
+    import clock
+    return run_ckack.d_half_fm(clock.target_hz("fpga"), band=1)
 
 
 def actions():

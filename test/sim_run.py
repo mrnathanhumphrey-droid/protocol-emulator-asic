@@ -83,6 +83,13 @@ import tempfile as _tf
 #:   id -> {"script": the generating script, "pattern": output basename glob,
 #:          "clocked": True, "why": the reason it runs without a bound}
 SCRATCH_GENERATORS: dict = {
+    "gate_clock_cross": {
+        "script": "model/gate_clock_cross.py", "pattern": "probe_xclk_*.hex",
+        "clocked": True,
+        "why": "the shipped programs assembled at BOTH targets' clocks (Wilson "
+               "11-03), run on tb_xclock with no peer and judged in "
+               "nanoseconds against each other -- not the A2 gap",
+        "v3": {"no_v3_layer": "test/tb_xclock.v"}},
     "make_smoke_image --ckhalf": {
         "script": "test/make_smoke_image.py", "pattern": "probe_*.hex",
         "clocked": True,

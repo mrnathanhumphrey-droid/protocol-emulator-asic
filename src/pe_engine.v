@@ -364,16 +364,15 @@ module pe_engine #(
     // period derives MORE cycles for every minimum, which is the safe side.
     // ⭐ SIZED FOR THE TARGET BEING BUILT: the FPGA passes its own period.
     // Slower than this is always safe for a minimum; faster is not.
-    parameter integer CLK_PERIOD_PS = 20000,
+    parameter integer CLK_PERIOD_PS = 16666,
     // ⛔⛔ THE GUARD BAND (Wilson 11-03): every real-time minimum is met at
     // min x 21/20, so a fast clock source or a mild overclock still meets
     // it. `model/clock.py` carries the same ratio and the consistency gate
     // holds them equal. ⚠ A PARAMETER ONLY so a bench can READ it
     // hierarchically (a hierarchical localparam never compares true --
     // `gate_bench_lint`); it is not a per-build knob.
-    // ⚠ 1/1 (OFF) until the band lands with the 60 MHz move; 21/20 then.
-    parameter integer BAND_NUM = 1,
-    parameter integer BAND_DEN = 1,
+    parameter integer BAND_NUM = 21,
+    parameter integer BAND_DEN = 20,
     parameter integer TS_W    = 16,
     parameter integer DLY_W   = 10,
     parameter integer D_W     = 8,

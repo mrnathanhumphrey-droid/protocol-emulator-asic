@@ -289,6 +289,10 @@ GATES=(
   # I2C floors and the programs. Seconds, no simulator.
   model/gate_clock_consistency.py
   model/gate_clock_literals.py
+  # ⭐ THE SAME PROGRAMS AT BOTH TARGETS' CLOCKS behave the same in REAL TIME
+  # (I2C phases, SPI period, UART bit; tb_xclock, 8 runs), and a typed delay
+  # is caught (must-fire). Minutes.
+  model/gate_clock_cross.py
   # ⭐ The I2C Fast-mode lane's witness: a RECORDED BENCH WITNESS (PA100T +
   # MB85RC256V, DSLogic captures) re-checked here in seconds, no simulator --
   # not a hardware run in CI (Wilson 10-17).

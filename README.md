@@ -171,14 +171,15 @@ is bounded — the response times above — rather than designed away.
   phase, so the rate depends on the bus's pull-ups and capacitance by design. A
   simulation with the measured rise time reproduces the measured rate.
 - **UART receive.** `pe_asm` certifies the UART-rx program down to 232
-  cycles per bit, which is up to about 215.5 kbaud at the 50 MHz design clock.
+  cycles per bit, which is up to about 258.6 kbaud at the 60 MHz design clock.
   The simulation bench verifies it at that limit across a ±3% baud-error sweep,
   and the FPGA prototype received every byte at ±2.5% (2026-10-12, an
   unrecorded run; see "On real hardware"). The timing analysis
   admits peers only inside that verified ±3%.
-  The fastest standard rate inside the limit is 115,200 baud: 434 cycles per
-  bit, with a 0.006% rate error. 230,400 baud would need 217 cycles per bit,
-  which is outside the certified range.
+  At 115,200 baud: 521 cycles per
+  bit, with a 0.032% rate error. 230,400 baud would need 260 cycles per bit,
+  which is inside the certified range at 60 MHz (at 50 MHz it needed 217,
+  outside it); no bench or board run has exercised 230,400 baud yet.
 
 ---
 

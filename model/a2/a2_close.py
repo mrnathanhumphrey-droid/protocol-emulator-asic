@@ -32,7 +32,7 @@ except Exception:
 import os  # noqa: E402
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import clock  # noqa: E402  THE clock source (Wilson 11-03): never a typed copy
-F_CLK = clock.hz()
+F_CLK = clock.a2_hz()  # A2 RECORD clock (clock.A2_TARGET): 50 MHz until re-certified, Wilson 11-03
 C_EVENT = 2                      # ARCH_PREREG_01: "engine busy at 2 clk/event"
 
 

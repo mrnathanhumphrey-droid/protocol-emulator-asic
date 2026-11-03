@@ -906,7 +906,7 @@ TSU_MASTER = 1      # cycles, the PEER master's setup requirement. ⚠ PARAMETRI
                     # in. Generous for a real master; the R1 gate sweeps it.
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import clock  # noqa: E402  THE clock source (Wilson 11-03): never a typed copy
-F_CLK = clock.hz()
+F_CLK = clock.a2_hz()  # A2 RECORD clock (clock.A2_TARGET): 50 MHz until re-certified, Wilson 11-03
 
 
 def abs_tolerance(half_period: int, c9_at_completion: bool, C: int,

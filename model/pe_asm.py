@@ -49,6 +49,7 @@ sys.path.insert(0, os.path.join(ROOT, "test"))
 sys.path.insert(0, os.path.join(HERE, "a2"))
 
 import hold_bound                         # noqa: E402
+import clock                              # noqa: E402  Wilson 11-03
 import count_ranges                       # noqa: E402  ruling SP2/P1
 import nonadmissible                      # noqa: E402  ruling SP2/P4
 import park_class                         # noqa: E402  ruling SP2/P3
@@ -1278,21 +1279,39 @@ def main() -> int:
     # d = 20 clears the SDA hold (> 15) so `check_clocked_hold_delay` accepts
     # it -- yet its worst low phase is under every mode's t_LOW, so the
     # assembler used to call it "hold-legal" and wave it through.
-    # ⭐ THE OTHER TWO ARE THE SAME LANE AT d = 32 IN TWO PROGRAMS. Searched,
-    # not guessed: the lane alone clears Fm+ from d = 30, and beside three busy
-    # lanes only from d = 38. A floor that did not depend on the neighbours
-    # would give the same verdict for both, which is the shared-constant error
-    # ruling S removed from the bench.
+    # ⭐ THE OTHER TWO ARE THE SAME LANE AT ONE d IN TWO PROGRAMS. SEARCHED,
+    # NOT TYPED, at the target's clock (Wilson 11-03: at 50 MHz the lane alone
+    # cleared Fm+ from d = 30 and beside three busy lanes from 38, so 32 sat
+    # between; the floors move with the clock): d is the lane-alone floor,
+    # which must sit BELOW the busy floor. A floor that did not depend on the
+    # neighbours would give the same verdict for both, which is the
+    # shared-constant error ruling S removed from the bench.
+    def _clears(heavy, d):
+        try:
+            lb, hb = _floor_demo(d, heavy)
+            check_clocked_hold_delay(lb, hb)
+            assemble(lb, hb)
+            return True
+        except Reject:
+            return False
+    _h1 = hold_bound.bound() + 1             # hold-legal, under every t_LOW
+    d_alone = next(d for d in range(_h1, 400) if _clears(False, d))
+    d_busy = next(d for d in range(_h1, 400) if _clears(True, d))
     print()
     print("  --- must-fire: D2's mode floor belongs to (program, lane) ---")
+    print("    searched at %g MHz: alone clears from d = %d, busy from d = %d"
+          % (clock.mhz(), d_alone, d_busy))
+    if not d_alone < d_busy:
+        print("    *** the two floors do not differ -- the pair cannot be shown")
+        rc = 1
     for name, build, want_reject, want in (
-            ("hold-legal (d = 20) but under every t_LOW",
-             lambda: _floor_demo(20, False), True,
+            ("hold-legal (d = %d) but under every t_LOW" % _h1,
+             lambda: _floor_demo(_h1, False), True,
              ("lane 2", "t_LOW", "per program")),
-            ("d = 32, the clocked lane ALONE",
-             lambda: _floor_demo(32, False), False, ()),
-            ("d = 32, the SAME lane beside three busy lanes",
-             lambda: _floor_demo(32, True), True, ("lane 2", "per program"))):
+            ("d = %d, the clocked lane ALONE" % d_alone,
+             lambda: _floor_demo(d_alone, False), False, ()),
+            ("d = %d, the SAME lane beside three busy lanes" % d_alone,
+             lambda: _floor_demo(d_alone, True), True, ("lane 2", "per program"))):
         lanes_b, headers_b = build()
         try:
             check_clocked_hold_delay(lanes_b, headers_b)
@@ -1656,36 +1675,40 @@ def main() -> int:
     print()
     print("  --- must-fire: chained hold loads / 1.6a refuses an unbounded lane ---")
     # ⭐ THE EDGE (Wilson's condition 3): the inequality's own boundary, so an
-    # off-by-one in it -- the HC1 bug class -- is caught. At gap 33 the window
-    # is EXACTLY met (HS 18 + HOLD_PICK_LAG 2 + (r 16 - C 3) = 33, asserted
-    # below from the live analysis, not typed): accepted; at 32 refused.
+    # off-by-one in it -- the HC1 bug class -- is caught. The window is
+    # HS + HOLD_PICK_LAG + (r - C), from the live analysis: r is read at a
+    # clearly bounded gap, the edge gap IS the window (accepted, and r there
+    # must give the same window), one less is refused. ⭐ DERIVED, NOT TYPED
+    # (Wilson 11-03): it was 33 at 50 MHz (HS 18 + 2 + 13); HS moves with the
+    # clock and the band.
     import program_a2 as _pa
     from bursty import C_SHIPPED as _C
-    edge_lanes = {0: [(OP_SHIFT, 2, 0, 33, 0, 7), (OP_SHIFT, 2, 0, 33, 0, 7),
-                      (OP_LEVEL, PIN_NONE, 0, 100, 0),
-                      (OP_REARM, 0, 1, 100, 0)]}
-    edge_img = assemble(edge_lanes, {0: (2, 4, 0, 150, 255, 255)},
-                        park_pins={1: 0, 2: 5, 3: 6, 4: 7})
-    edge_r = _pa.queue_slot(edge_img, None)["0"]["r"]
+
+    def _chain(gap):
+        return {0: [(OP_SHIFT, 2, 0, gap, 0, 7), (OP_SHIFT, 2, 0, gap, 0, 7),
+                    (OP_LEVEL, PIN_NONE, 0, 100, 0),
+                    (OP_REARM, 0, 1, 100, 0)]}
+    _hdr0 = {0: (2, 4, 0, 150, 255, 255)}
+    _park = {1: 0, 2: 5, 3: 6, 4: 7}
+    far_r = _pa.queue_slot(assemble(_chain(100), _hdr0, park_pins=_park), None)["0"]["r"]
+    edge = _pa._hs() + _pa.HOLD_PICK_LAG + (far_r - _C)
+    edge_r = _pa.queue_slot(assemble(_chain(edge), _hdr0, park_pins=_park), None)["0"]["r"]
     edge_w = _pa._hs() + _pa.HOLD_PICK_LAG + (edge_r - _C)
-    ok = edge_w == 33
-    print("    %-50s %s" % ("edge: HS + HOLD_PICK_LAG + (r - C) at gap 33",
+    ok = edge_w == edge
+    print("    %-50s %s" % ("edge: HS + HOLD_PICK_LAG + (r - C) at gap %d" % edge,
                             ("= %d, exactly the gap" % edge_w) if ok
-                            else "*** WRONG: = %d, not 33 -- re-derive the "
-                                 "edge pair" % edge_w))
+                            else "*** WRONG: = %d, not %d -- re-derive the "
+                                 "edge pair" % (edge_w, edge)))
     rc |= 0 if ok else 1
     for name, gap, want_reject in (("chained hold loads 100 apart", 100, False),
                                    ("chained hold loads 25 apart", 25, True),
-                                   ("edge: gap == window + lateness (33)", 33,
-                                    False),
-                                   ("edge: gap == window + lateness - 1 (32)",
-                                    32, True)):
-        lanes_b = {0: [(OP_SHIFT, 2, 0, gap, 0, 7), (OP_SHIFT, 2, 0, gap, 0, 7),
-                       (OP_LEVEL, PIN_NONE, 0, 100, 0),
-                       (OP_REARM, 0, 1, 100, 0)]}
+                                   ("edge: gap == window + lateness (%d)" % edge,
+                                    edge, False),
+                                   ("edge: gap == window + lateness - 1 (%d)"
+                                    % (edge - 1), edge - 1, True)):
+        lanes_b = _chain(gap)
         try:
-            assemble(lanes_b, {0: (2, 4, 0, 150, 255, 255)},
-                     park_pins={1: 0, 2: 5, 3: 6, 4: 7})
+            assemble(lanes_b, _hdr0, park_pins=_park)
             got, msg = False, ""
         except Reject as e:
             got, msg = True, str(e)

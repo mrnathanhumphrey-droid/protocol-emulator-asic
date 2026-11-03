@@ -64,24 +64,30 @@ except Exception:
 SCRATCH = os.environ.get("PE_SCRATCH",
                          os.path.join(os.environ.get("TEMP", "/tmp"), "pe_ckack"))
 SRCS = ["pe_engine.v", "pe_store.v", "project.v"]
-D = 70                       # D_FM_SHIPPABLE: the shipped clocked I2C delay
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "model"))
 import clock  # noqa: E402  THE clock source (Wilson 11-03): never a typed copy
 F_CLK = clock.hz()
 
 
-def d_half_fm():
-    """RULING CE1: the smallest HALF_HIGH delay whose bit period does not
-    exceed Fm's 400 kHz ceiling -- d + d//2 + L_SYNC >= ceil(F_CLK / 400k) --
-    and is not below the symmetric scheme's shippable Fm floor (`D`). DERIVED
-    here rather than typed, so a moved L_SYNC or floor moves it."""
-    sys.path.insert(0, os.path.join(ROOT, "model", "a2"))
-    from bursty import L_SYNC
-    need = -(-F_CLK // 400000)
-    d = D
-    while d + (d >> 1) + L_SYNC < need:
-        d += 1
-    return d
+def d_fm(f=None, band=None):
+    """The shipped clocked Fm delay at clock `f` (default: the target's):
+    `make_smoke_image.D_FM_SHIPPABLE`'s rule -- t_LOW(min) with the band,
+    plus the measured jitter. `band=1` rebuilds a RECORD derived without it
+    (the FPGA board's witnessed program, Wilson 11-03)."""
+    import make_smoke_image as msi
+    with clock.at(f or F_CLK):
+        return (msi._um.cycles(1300, band=band) + msi.FM_JITTER)
+
+
+D = d_fm()                   # D_FM_SHIPPABLE: the shipped clocked I2C delay
+
+
+def d_half_fm(f=None, band=None):
+    """RULING CE1's HALF_HIGH Fm delay at clock `f` -- ONE rule,
+    `make_smoke_image.half_fm_delay` (the ckhalf instrument uses it too).
+    DERIVED, so a moved L_SYNC, floor or clock moves it."""
+    import make_smoke_image as msi
+    return msi.half_fm_delay(f or F_CLK, band)
 
 
 WANT = (0x5B, 0xE2)          # what the peer holds at 0x0123 / 0x0124

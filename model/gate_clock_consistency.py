@@ -229,6 +229,12 @@ def main(argv):
     red = any(not ok for _w, ok, _d in spec(60_000_000, rtl_ps=20_000))   # clock-ok: the defect's two clocks
     print("    must-fire: %-40s %s" % ("hold sized for 20 ns, run at 60 MHz", "red  ok" if red else "*** MISSED"))
     rc |= 0 if red else 1
+    # ... and the MAXIMUM (Wilson 11-03): slower is safe for minima only. A hold
+    # sized for 60 MHz run on the 50 MHz board outlasts Fm+'s t_VD;DAT.
+    red = any(not ok for w, ok, _d in spec(50_000_000, rtl_ps=16_666)   # clock-ok: the two targets' clocks
+              if "t_VD;DAT" in w)
+    print("    must-fire: %-40s %s" % ("60 MHz hold on the 50 MHz board (max)", "red  ok" if red else "*** MISSED"))
+    rc |= 0 if red else 1
     # ... and the defect this gate exists for: the 20 ns RTL period at a 60 MHz
     # chip (project.v and pe_engine.v left at 50 MHz while info.yaml moved)
     f = dict(files)

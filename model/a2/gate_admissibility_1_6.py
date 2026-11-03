@@ -120,7 +120,7 @@ def c_delay_bound(lanes):
     """
     chunk = WRAP_BOUND - 1
     return True, ("per-action bound %d cycles (%.0f us); longer delays are SPLIT "
-                  "by the loader into re-arm chains" % (chunk, clock.us(chunk)))
+                  "by the loader into re-arm chains" % (chunk, clock.us(chunk, clock.a2_hz())))
 
 
 def c_delay_bound_fire():
@@ -529,7 +529,7 @@ def c_rx(lanes):
     # 10.6% -> 14.0%, and the mis-stated capacity accounted for the other 4.8x.
     FRAME_BITS, CYC_PER_BIT = 12, 2
     slot = 2 * (FRAME_BITS * CYC_PER_BIT + 1)
-    cap = clock.hz() / slot * 8     # payload bits/s the link can carry
+    cap = clock.a2_hz() / slot * 8     # payload bits/s the link can carry
     return agg <= cap, (
         "aggregate RX payload %.2f Mb/s against a PAYLOAD capacity of %.2f "
         "Mb/s (a %d-cycle payload slot: %d bits at %d cycles/bit plus a queue "

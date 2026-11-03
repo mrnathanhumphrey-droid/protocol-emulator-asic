@@ -159,7 +159,8 @@ module tb_uartrx;
     if (!$value$plusargs("NBYTES=%d", img_bytes)) begin
       $display("tb_uartrx: FATAL -- +NBYTES=<n> is required."); $finish;
     end
-    if (!$value$plusargs("BITP=%d", bitp)) bitp = 434;
+    // 115200 baud at this bench's clock (Wilson 11-03; it was 434, 50 MHz)
+    if (!$value$plusargs("BITP=%d", bitp)) bitp = $rtoi(1.0e9 / 115200.0 / PE_CLK_NS + 0.5);
     if (!$value$plusargs("ERR=%d", err)) err = 0;
     if (!$value$plusargs("NFR=%d", nfr)) nfr = 40;
     if (!$value$plusargs("SEED=%d", seed)) seed = 1;
@@ -225,8 +226,8 @@ module tb_uartrx;
     end
     phn = 0;
     for (phb = 0; phb < 20; phb = phb + 1) phn = phn + ph_rx[phb];
-    $display("UART-PHASE edges=%0d/20 bins=%020b phwalk=%0d (1 ns bins after the posedge, every RX edge the peer drove)",
-             phn, ph_rx, phwalk);
+    $display("UART-PHASE edges=%0d/%0d bins=%020b phwalk=%0d (1 ns bins after the posedge, every RX edge the peer drove)",
+             phn, PE_PHASES, ph_rx, phwalk);
     if (fails == 0)
       $display("UART-RX: ok -- %0d frame(s) (%0d back-to-back) at %0d cycles/bit, baud error %0d/1000: %0d push(es) exact (%0d per frame), every byte equals the peer's, framing errors %0d (expected %0d)",
                n_sent, n_b2b, bitp, err, n_push, ppf, n_frame_err,

@@ -40,7 +40,7 @@ from gate_j_sound import lanes_at                    # noqa: E402
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import clock  # noqa: E402  THE clock source (Wilson 11-03): never a typed copy
-F_CLK = clock.hz()
+F_CLK = clock.a2_hz()  # A2 RECORD clock (clock.A2_TARGET): 50 MHz until re-certified, Wilson 11-03
 
 # ---- the terms, each with its origin ------------------------------------
 L_SYNC = 3                  # the 3-flop edge-capture synchroniser

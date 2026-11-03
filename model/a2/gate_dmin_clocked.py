@@ -419,7 +419,8 @@ def main() -> int:
     print()
     try:
         import gate_um10204 as um
-        modes = um.table_cycles()
+        import clock          # on the path via gate_um10204
+        modes = um.table_cycles(clock.a2_hz(), band=1)   # A2 RECORD clock
     except Exception as exc:                            # noqa: BLE001
         print("    *** FAIL could not import the UM10204 table: %s" % exc)
         modes, rc = {}, 1

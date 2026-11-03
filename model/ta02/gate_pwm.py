@@ -70,7 +70,7 @@ def sigrok_pwm(binpath: str, row: str) -> list:
 
 
 def main() -> int:
-    period = 100                                 # 100 cycles @ 50 MHz = 500 kHz
+    period = clock.per_rate(500_000)             # 500 kHz at the target's clock
     print("=== TA-02 -- THE OFF-PATTERN TABLE (PWM), WRITTEN LAST ===")
     print("    machine: the SAME model/ta02/interp.py, unchanged")
     print("    foreign authority: sigrok `pwm` PD -- a THIRD decoder, independent")

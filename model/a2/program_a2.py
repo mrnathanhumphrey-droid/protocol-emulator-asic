@@ -126,20 +126,22 @@ def gaps(h, a):
 #: content is the identity, as in v3_table): sha -> {lane: T_ext cycles}.
 EDGE_PACED_MIN_ARMS = 2
 #: the SPI-target witness images (make_smoke_image.py --sptgt): the master's
-#: claimed maximum SCK period -- 50 cycles at 1 MHz MISO-only, 100 for the
-#: MOSI-capture variant witnessed at 500 kHz. Each sha is the image's own.
-T_EXT = {
-    "35d541098fe2474e63479dd6dd62f15602e54661017fa14f776c3723854827f4": {0: 50},   # sptgt_m0
-    "5797accf894e88be22c22a0909649d8ad7fa3e4fd584144c252e7d512479ba79": {0: 50},   # sptgt_m1
-    "fc2c05993ef4df5db918ffe32599032394650fe9396ce51f01580a010a71c3a7": {0: 50},   # sptgt_m2
-    "6f048838f5709d0c8f016047fa7faa9795500ffa954af4b1f656c7a5ec64214a": {0: 50},   # sptgt_m3
-    "f35804d5ebf9b4720911f39c2d8d983fb1a43e758cea99687723d5903998881b": {0: 100},  # sptgt_mosi
+#: claimed maximum SCK RATE -- 1 MHz MISO-only, 500 kHz for the MOSI-capture
+#: variant. ⭐ IN Hz, NOT CYCLES (Wilson 11-03): `t_ext_cycles` converts at the
+#: target's clock (50 / 100 cycles at 50 MHz, 60 / 120 at 60); they were
+#: typed 50 / 100. Each sha is the image's own.
+T_EXT_HZ = {
+    "35d541098fe2474e63479dd6dd62f15602e54661017fa14f776c3723854827f4": {0: 1_000_000},   # sptgt_m0
+    "5797accf894e88be22c22a0909649d8ad7fa3e4fd584144c252e7d512479ba79": {0: 1_000_000},   # sptgt_m1
+    "fc2c05993ef4df5db918ffe32599032394650fe9396ce51f01580a010a71c3a7": {0: 1_000_000},   # sptgt_m2
+    "6f048838f5709d0c8f016047fa7faa9795500ffa954af4b1f656c7a5ec64214a": {0: 1_000_000},   # sptgt_m3
+    "f35804d5ebf9b4720911f39c2d8d983fb1a43e758cea99687723d5903998881b": {0: 500_000},  # sptgt_mosi
     # B3b, the contention arm (make_smoke_image.py --b3b): lane 0 is the SPI
     # target at 1 MHz beside the four other shipped lanes
-    "2de02a022cde606c48af8468a036402118724da563ee9345695b8df9667b67b6": {0: 50},   # b3b_a
-    "077a132170c19b56b1eff88a98207678138570ac5e5f8d02e0155e7b98bf6fe4": {0: 50},   # b3b_a3
-    "896dcd8a8dcf0c69d1933931ccff698203b7cfb2764277aadd1f94b9f721deeb": {0: 50},   # b3b_b
-    "287dfbd76f4370f8a6c4c271a9a5f721d3832416f9442fec5e747b48b9ff5da8": {0: 50},   # b3b_bnoi2c
+    "2de02a022cde606c48af8468a036402118724da563ee9345695b8df9667b67b6": {0: 1_000_000},   # b3b_a
+    "077a132170c19b56b1eff88a98207678138570ac5e5f8d02e0155e7b98bf6fe4": {0: 1_000_000},   # b3b_a3
+    "896dcd8a8dcf0c69d1933931ccff698203b7cfb2764277aadd1f94b9f721deeb": {0: 1_000_000},   # b3b_b
+    "287dfbd76f4370f8a6c4c271a9a5f721d3832416f9442fec5e747b48b9ff5da8": {0: 1_000_000},   # b3b_bnoi2c
 }
 
 
@@ -155,6 +157,42 @@ def edge_paced(acts):
 def image_sha(img):
     import hashlib
     return hashlib.sha256(bytes(img)).hexdigest()
+
+
+def t_ext_cycles(sha):
+    """{lane: the peer's shortest clock period, in cycles at the target's
+    clock} -- floored, so the period assumed is never longer than the peer's
+    (the conservative side for a deadline)."""
+    import clock
+    return {ln: clock.hz() // hz for ln, hz in T_EXT_HZ.get(sha, {}).items()}
+
+
+#: kept as the {sha: {lane: cycles}} view at the target's clock, for callers
+#: that read it directly
+class _TExt(dict):
+    def get(self, sha, default=None):
+        v = t_ext_cycles(sha)
+        return v if v else default
+
+    def __contains__(self, sha):
+        return sha in T_EXT_HZ
+
+    def __getitem__(self, sha):
+        if sha not in T_EXT_HZ:
+            raise KeyError(sha)
+        return t_ext_cycles(sha)
+
+    def keys(self):
+        return T_EXT_HZ.keys()
+
+    def __iter__(self):
+        return iter(T_EXT_HZ)
+
+    def __len__(self):
+        return len(T_EXT_HZ)
+
+
+T_EXT = _TExt()
 
 
 def lane_set(img, t_ext=None):

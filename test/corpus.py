@@ -79,7 +79,7 @@ import gate_degenerate_fields as dgf      # noqa: E402
 # copies of a bit-packer is the exact failure `lane_digest` exists to catch,
 # and a corpus encoded by a second builder would be a different ISA.
 from make_smoke_image import (            # noqa: E402
-    ACT_BASE, ACT_BYTES, AW, D_FM_SHIPPABLE, HDR_BYTES, N_LANES,
+    ACT_BASE, ACT_BYTES, AW, D_FM_SHIPPABLE, HDR_BYTES, N_LANES, SPI_1MHZ_D,
     OP_ARM, OP_LEVEL, OP_READBIT, OP_REARM, OP_SHIFT, OP_SHIFTIN, OP_START,
     SELF_CLOCKED,
     OP_STOP, PIN_NONE, act, hdr, write_image,
@@ -311,7 +311,11 @@ def build_i2c(d: int = D_FM_SHIPPABLE):
         (OP_REARM, 0, 1, d),
     ]
     img = _assemble([(0, seq)],
-                    {0: (P_SDA, P_SCL, MODE_OD, d, 2 * d, 3 * d)},
+                    # D_tol is an 8-bit field: CAPPED (a tighter tolerance is
+                    # the safe side), as build_all5 already does -- 3d is 261
+                    # at the 60 MHz Fm delay (Wilson 11-03)
+                    {0: (P_SDA, P_SCL, MODE_OD, d, 2 * d,
+                         min(3 * d, (1 << pe_isa.D_W) - 1))},
                     park_at=P_SCL)
     return img, {"uio_oe": True, "uio_out": False, "uo_out": False,
                  "od_pins": (P_SCL, P_SDA)}
@@ -591,7 +595,7 @@ def build_spi_master_1mhz():
     1 MHz at 50 MHz. `corpus_spim` stays at d = 7 as the TRACE image (declared
     non-admissible); this one is admissible with pe_asm's timing checks ON, and
     `test/run_spim_witness.py` checks its wire against its feed."""
-    return build_spi_master(d=25)
+    return build_spi_master(d=SPI_1MHZ_D)
 
 
 CORPUS = {

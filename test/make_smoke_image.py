@@ -46,6 +46,28 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "model"))
 import hold_bound                                              # noqa: E402
+import clock                                                   # noqa: E402  Wilson 11-03
+sys.path.insert(0, os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "model", "a2"))
+import gate_um10204 as _um                                     # noqa: E402
+
+#: ⛔⛔ THE SHIPPED I2C DELAYS ARE REAL TIME PLUS SCHEDULING JITTER (Wilson
+#: 11-03). Each is the mode's UM10204 t_LOW minimum converted for the TARGET's
+#: clock with the guard band (`gate_um10204.cycles`, through model/clock.py),
+#: PLUS the measured EDF service jitter of the program's own lane set -- a
+#: CYCLE count by nature (dispatches are cycles), which is why it stays one.
+#: They were typed 33 / 70 / 240 at 50 MHz; at 60 MHz those ran Fm at 472 kHz.
+#: The jitters are the margins those 50 MHz numbers carried over their floors
+#: (33 - 25, 70 - 65, 240 - 235), and `pe_asm.check_mode_floor` re-derives
+#: each program's own lag at its clock and refuses one that falls short.
+FMP_JITTER = 8
+FM_JITTER = 5
+SM_JITTER = 5
+
+
+def i2c_delay(mode_t_low_ns, jitter):
+    """A shippable clocked I2C delay: t_LOW(min) at the target clock + jitter."""
+    return _um.cycles(mode_t_low_ns) + jitter
 
 # ⛔⛔ THE ENCODER IS IMPORTED, NOT DEFINED HERE. Field widths, `hdr`, `act`
 # and the host push sequence all live in `pe_isa`, because this file used to own
@@ -294,7 +316,7 @@ def build_ckfive(delays):
 #: ⛔ `test/corpus.py` IMPORTS IT rather than carrying a second 33, because D5
 #: raised both clocked corpus programs to this delay and two copies of a
 #: shippable floor is how a mode claim drifts from the program that earns it.
-D_FMPLUS_SHIPPABLE = 33
+D_FMPLUS_SHIPPABLE = i2c_delay(500, FMP_JITTER)      # 35 at 50 MHz, 40 at 60
 
 #: ⭐⭐ THE SHIPPABLE **Fm** DELAY, for a lane that claims 400 kHz. `ckod` is an
 #: Fm+ instrument, but the corpus I2C lane is named "I2C 400 kHz" in
@@ -310,9 +332,40 @@ D_FMPLUS_SHIPPABLE = 33
 #: against 5, and the bit period is 146 cycles = 342 kHz, inside the 400 kHz
 #: ceiling. ⇒ 70, and the 5 cycles over the arithmetic floor are MEASURED
 #: jitter rather than padding.
-D_FM_SHIPPABLE = 70
+D_FM_SHIPPABLE = i2c_delay(1300, FM_JITTER)          # 74 at 50 MHz, 87 at 60
 
-CKOD_DELAYS = [D_FMPLUS_SHIPPABLE, 60, 120, 240]
+#: ⭐ THE 1 MHz SPI MASTER's half period, a NOMINAL rate (our design point,
+#: well under the MB85RS64V's 20 MHz), so rounded rather than banded:
+#: 500 ns = 25 cycles at 50 MHz, 30 at 60.
+SPI_1MHZ_D = clock.cycles_nominal(500)
+
+def half_fm_delay(f=None, band=None):
+    """RULING CE1: the smallest HALF_HIGH delay whose bit period does not
+    exceed Fm's 400 kHz ceiling -- d + d//2 + L_SYNC >= the shortest legal
+    period (2500 ns, banded) -- and is not below the symmetric scheme's
+    shippable Fm floor, at clock `f` (default: the target's). `band=1`
+    rebuilds a record derived without the band (the FPGA's witnessed
+    program). `test/run_ckack.d_half_fm` is this."""
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__))), "model", "a2"))
+    from bursty import L_SYNC
+    band = clock.BAND if band is None else band
+    with clock.at(f or clock.hz()):
+        need = clock.cycles_min(2500, band=band)
+        d = _um.cycles(1300, band=band) + FM_JITTER
+    while d + (d >> 1) + L_SYNC < need:
+        d += 1
+    return d
+
+
+#: the Sm lane of the `ckod` span, the same way (4700 ns t_LOW)
+D_SM_SHIPPABLE = i2c_delay(4700, SM_JITTER)          # 252 at 50 MHz, 302 at 60
+
+#: the span, in real time: Fm+ shippable, 1.2 us and 2.4 us (two Fm+-to-Fm
+#: delays, 60 / 120 cycles at 50 MHz), Sm shippable. ⭐ It must still span
+#: about 7x so "t_HIGH tracks d" is distinguishable from flat.
+CKOD_DELAYS = [D_FMPLUS_SHIPPABLE, clock.cycles_nominal(1200),
+               clock.cycles_nominal(2400), D_SM_SHIPPABLE]
 
 #: ⭐⭐ RULING S's MUST-FIRE SUBJECT: the `ckod` layout at a DENSE span. It is a
 #: FEASIBLE program (U = 0.566, J = 1, d_min = D*) whose clocked lanes MEASURE
@@ -388,7 +441,12 @@ def build_cemodes():
 #: SPI target owns (corpus.PAD_COLLISION). Until 10-23 that lane was d = 470,
 #: the Sm point, and its 10-09 "Sm met" reading was taken off that foreign pad.
 #: The span point 240, which no mode claim rests on, takes the colliding pair.
-CKHALF_DELAYS = (470, 82, 120, 240)
+#: ⭐ IN REAL TIME (Wilson 11-03; it was (470, 82, 120, 240) at 50 MHz): the
+#: Sm point is TWICE Sm's t_LOW floor (its HALF_HIGH high phase d/2 must clear
+#: Sm's t_HIGH -- 470 = 2 x 235), the Fm point is `half_fm_delay()` (82 at
+#: 50 MHz), and the two span points are 2.4 / 4.8 us.
+CKHALF_DELAYS = (2 * _um.cycles(4700), half_fm_delay(),
+                 clock.cycles_nominal(2400), clock.cycles_nominal(4800))
 
 
 def ckhalf_store():
@@ -1249,9 +1307,11 @@ def build_b3b(arm: str):
         raise SystemExit("--b3b takes a, a3, b or bnoi2c; got %r" % arm)
     shipped = arm in ("a", "a3")
     tg = pe_proto.SPITarget(mode=3 if arm == "a3" else 0, sck=4, mosi_pin=5)
-    spi = pe_proto.SPI(P_M_MOSI, P_M_SCLK, P_M_CS, P_M_MISO, d=25,
+    spi = pe_proto.SPI(P_M_MOSI, P_M_SCLK, P_M_CS, P_M_MISO, d=SPI_1MHZ_D,
                        order=pe_proto.ORDER_MSB)
-    i2d = 70 if shipped else 45
+    # arm "b"'s 45 / 15 is the A2 RECORD's I2C row (50 MHz, clock.A2_TARGET):
+    # a scheduling stress shaped by that table, a cycle count on purpose
+    i2d = D_FM_SHIPPABLE if shipped else 45
     i2l, i2h, _ = pe_proto.i2c_fram_write(d=i2d, sda=P_SDA, scl=P_SCL)
     i2hdr = list(i2h[0])
     if not shipped:

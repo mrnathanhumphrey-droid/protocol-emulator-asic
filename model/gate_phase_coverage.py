@@ -34,6 +34,7 @@ sys.path.insert(0, os.path.join(ROOT, "ci"))
 sys.path.insert(0, HERE)
 import blobhash                                    # noqa: E402
 import phase_coverage                              # noqa: E402
+import clock                                       # noqa: E402  Wilson 11-03
 
 CLASSES = ("IN_SUITE", "SWEEP", "CHIP_DRIVEN", "NOT_TIMING")
 
@@ -62,22 +63,24 @@ def world_problems(rows, benches, files):
     return probs
 
 
-def floor_problems(bench, floor, src):
-    """G2 on one runner's source text."""
+def floor_problems(bench, short, src):
+    """G2 on one runner's source text. ⭐ The floor is the target clock's own
+    phase count less PHASE_SHORT (Wilson 11-03): the row holds `short`, the
+    runner states PHASE_SHORT as a literal and READS PHASE_FLOOR."""
     tree = ast.parse(src)
     val = None
     for n in tree.body:
-        if isinstance(n, ast.Assign) and any(getattr(t, "id", None) == "PHASE_FLOOR"
+        if isinstance(n, ast.Assign) and any(getattr(t, "id", None) == "PHASE_SHORT"
                                              for t in n.targets):
             val = getattr(n.value, "value", None)
     uses = sum(1 for n in ast.walk(tree)
                if isinstance(n, ast.Name) and n.id == "PHASE_FLOOR"
                and isinstance(n.ctx, ast.Load))
     if val is None:
-        return ["%s: its runner has no module-level PHASE_FLOOR" % bench]
+        return ["%s: its runner has no module-level PHASE_SHORT" % bench]
     probs = []
-    if val != floor:
-        probs.append("%s: runner PHASE_FLOOR = %s, the row says %s" % (bench, val, floor))
+    if val != short:
+        probs.append("%s: runner PHASE_SHORT = %s, the row says %s" % (bench, val, short))
     if uses == 0:
         probs.append("%s: PHASE_FLOOR is assigned but never READ -- the check "
                      "does not use it" % bench)
@@ -131,9 +134,10 @@ def main() -> int:
         line = cls
         if cls == "IN_SUITE":
             with open(os.path.join(ROOT, spec["runner"]), encoding="utf-8") as fh:
-                p = floor_problems(b, spec["floor"], fh.read())
+                p = floor_problems(b, spec["short"], fh.read())
             probs += p
-            line += " %s >= %d/20" % (os.path.basename(spec["runner"]), spec["floor"])
+            line += " %s >= %d/%d" % (os.path.basename(spec["runner"]),
+                                      clock.phases() - spec["short"], clock.phases())
         elif cls == "SWEEP":
             path = os.path.join(ROOT, spec["record"])
             if spec["record"] not in recs:
@@ -185,10 +189,12 @@ def main() -> int:
             ("a row for no bench", world_problems(one, set(), set())),
             ("an empty NOT_TIMING reason",
              world_problems({"test/tb_x.v": ("NOT_TIMING", " ")}, {"test/tb_x.v"}, set())),
-            ("a floor above the runner's",
-             floor_problems("b", 20, "PHASE_FLOOR = 18\nok = x >= PHASE_FLOOR\n")),
+            ("a floor below the row's (more phases short)",
+             floor_problems("b", 0, "PHASE_SHORT = 2\nPHASE_FLOOR = P - PHASE_SHORT\n"
+                                     "ok = x >= PHASE_FLOOR\n")),
             ("a floor constant never read",
-             floor_problems("b", 20, "PHASE_FLOOR = 20\nok = x >= 20\n")),
+             floor_problems("b", 0, "PHASE_SHORT = 0\nPHASE_FLOOR = P - PHASE_SHORT\n"
+                                     "ok = x >= 20\n")),
             ("a sweep record with a failed run",
              sweep_state("b", sp, dict(good_rec, result=dict(good_rec["result"], passed=1)),
                          "h", [])[0]),

@@ -90,7 +90,7 @@ MODE_MAX_HZ = {"Sm  100 kHz": 100_000,
                "Fm+ 1 MHz": 1_000_000}
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import clock  # noqa: E402  THE clock source (Wilson 11-03): never a typed copy
-F_CLK = clock.hz()
+F_CLK = clock.a2_hz()  # A2 RECORD clock (clock.A2_TARGET): 50 MHz until re-certified, Wilson 11-03
 
 #: the reserve this project requires of a shipped margin. ⛔ IMPORTED IN SPIRIT
 #: from `gate_noop_job`'s bar rather than invented here: a feasible margin of 0
@@ -161,7 +161,7 @@ def main() -> int:
     print("=" * 78)
     print("  THE CLOCKED I2C LANE IN A2 -- D_tol AND r DERIVED, NOT INHERITED")
     print("=" * 78)
-    tc = um.table_cycles()
+    tc = um.table_cycles(clock.a2_hz(), band=1)   # the A2 RECORD's own floors
     print("  C = %d   J = J_SHIPPED + L_JIT = %d   L_SYNC = %d"
           % (C_SHIPPED, J_SHIPPED + L_JIT, L_SYNC))
     print("  the row being REPLACED:")

@@ -157,7 +157,10 @@ class I2C:
 
     def header(self, flags=0):
         d = self.d
-        return (self.sda, self.scl, 0, d, 2 * d, 3 * d, flags)
+        # D_tol is an 8-bit field: capped, the safe side (3d = 261 at the
+        # 60 MHz Fm delay; corpus.build_i2c and build_all5 cap the same way)
+        from pe_isa import D_W
+        return (self.sda, self.scl, 0, d, 2 * d, min(3 * d, (1 << D_W) - 1), flags)
 
 
 DEFAULT_I2C_RULES = {

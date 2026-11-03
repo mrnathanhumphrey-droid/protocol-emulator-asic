@@ -32,9 +32,13 @@ import uart_rx                               # noqa: E402
 
 TMP = os.environ.get("PE_UART_TMP") or os.path.join(ROOT, "test", "sim_build_uartrx")
 T = uart_rx.T_NOMINAL
-#: the phase-walked arms' floor of measured phase bins (of 20); held to
-#: model/phase_coverage.py's row by model/gate_phase_coverage.py
-PHASE_FLOOR = 18
+#: the phase-walked arms' floor of measured phase bins; held to
+#: model/phase_coverage.py's row by model/gate_phase_coverage.py. PHASE_SHORT
+#: is how many of the period's 1 ns bins (clock.phases(): 20 at 50 MHz, 17 at
+#: 60) the walk may miss -- 18 of 20 at 50 MHz.
+import clock                                 # noqa: E402  via uart_rx's path
+PHASE_SHORT = 2
+PHASE_FLOOR = clock.phases() - PHASE_SHORT
 ERRS = (-30, -20, 0, 20, 30)
 SEEDS = (1, 2)
 NFR = 40
@@ -73,7 +77,10 @@ def main():
     # its behaviour -- ONE push per frame, each the peer's byte, count exact --
     # is checked below (`+PPF=1`), not only its must-fire red.
     ns_tracked = os.path.join(ROOT, "fpga", "images", "uart_rx_434_nostop.hex")
-    ns_want = "\n".join("%02x" % b for b in uart_rx.build(434, None, "nostop")) + "\n"
+    # the FPGA board's image: 115200 baud at the BOARD's clock (434 at 50 MHz)
+    import clock
+    t_board = clock.per_rate(uart_rx.BAUD, clock.target_hz("fpga"))
+    ns_want = "\n".join("%02x" % b for b in uart_rx.build(t_board, None, "nostop")) + "\n"
     # ⭐ v2: the board image stays v1-encoded until a v2 FPGA build
     # (Wilson); it is compared THROUGH v1_translate, and a pass by that route
     # is the declared STALE below, not a PASS
@@ -153,12 +160,13 @@ def main():
     # cycles, so the arms above put EVERY RX edge at one phase. The same ERR = 0
     # arms again with +PHWALK=1 (each frame's start walks a golden-ratio
     # sub-cycle offset; probe_reports/uartrx_phase_prediction.txt), each held
-    # to its twin's verdict AND to >= 18/20 measured phase bins.
+    # to its twin's verdict AND to >= PHASE_FLOOR measured phase bins.
     def bins(o):
-        m = re.search(r"UART-PHASE edges=(\d+)/20", o)
+        m = re.search(r"UART-PHASE edges=(\d+)/\d+", o)
         return int(m.group(1)) if m else -1
     o0 = sim("ok", 0, 1)
-    print("  phase    ERR 0 without the walk: %d/20 bins (measured)" % bins(o0))
+    print("  phase    ERR 0 without the walk: %d/%d bins (measured)"
+          % (bins(o0), clock.phases()))
     jobs = ([("ok", 0, s, ["+PHWALK=1"], t) for t in (T, TM) for s in SEEDS]
             + [("nostop", 0, s, ["+PPF=1", "+PHWALK=1"], T) for s in SEEDS])
     with ThreadPoolExecutor(3) as ex:
@@ -169,8 +177,9 @@ def main():
                 and int(m.group(1)) > 0 and bins(o) >= PHASE_FLOOR
                 and ("+PPF=1" not in x or "(1 per frame)" in o))
         ok = ok and good
-        print("  walk  %-6s T %3d err %+3d seed %d  %s  phase %d/20"
-              % (var, t, e, s, "ok" if good else "*** FAIL", bins(o)))
+        print("  walk  %-6s T %3d err %+3d seed %d  %s  phase %d/%d"
+              % (var, t, e, s, "ok" if good else "*** FAIL", bins(o),
+                 clock.phases()))
     ow = sim("ok", 0, 1, ["+BADSTOP=5", "+PHWALK=1"])
     hitw = ("FRAMING ERROR reported on frame 5" in ow and "UART-RX: ok" in ow
             and ow.count("FRAMING ERROR") == 1)

@@ -396,11 +396,14 @@ module tb_spitgt;
       $display("tb_spitgt: FATAL -- +NBYTES=<n> is required."); $finish;
     end
     if (!$value$plusargs("MODE=%d", mode)) mode = 0;
-    if (!$value$plusargs("HALF=%d", half)) half = 25;
+    // ⭐ PEER DEFAULTS IN REAL TIME (Wilson 11-03), converted at this bench's
+    // clock: SCK 1 MHz (500 ns half), tCSS / tCSH 600 ns, UART 115200 -- they
+    // were 25 / 30 / 434 cycles, 50 MHz numbers. A plusarg is still cycles.
+    if (!$value$plusargs("HALF=%d", half)) half = $rtoi(500.0 / PE_CLK_NS + 0.5);
     if (!$value$plusargs("NTX=%d", ntx)) ntx = 8;
     if (!$value$plusargs("NB=%d", nb)) nb = 2;
-    if (!$value$plusargs("TCSS=%d", tcss)) tcss = 30;
-    if (!$value$plusargs("TCSH=%d", tcsh)) tcsh = 30;
+    if (!$value$plusargs("TCSS=%d", tcss)) tcss = $rtoi(600.0 / PE_CLK_NS + 0.5);
+    if (!$value$plusargs("TCSH=%d", tcsh)) tcsh = $rtoi(600.0 / PE_CLK_NS + 0.5);
     if (!$value$plusargs("GAP=%d", gap)) gap = 60;
     if (!$value$plusargs("MOSI=%d", mosi_on)) mosi_on = 0;
     if (!$value$plusargs("NOFEED=%d", nofeed)) nofeed = 0;
@@ -414,7 +417,7 @@ module tb_spitgt;
     if (!$value$plusargs("BOUND=%d", bound)) bound = -1;
     if (!$value$plusargs("FIVE=%d", five)) five = 0;
     if (!$value$plusargs("NOI2C=%d", noi2c)) noi2c = 0;
-    if (!$value$plusargs("RXT=%d", rxt)) rxt = 434;
+    if (!$value$plusargs("RXT=%d", rxt)) rxt = $rtoi(1.0e9 / 115200.0 / PE_CLK_NS + 0.5);
     cpol = mode[1]; cpha = mode[0];
     hp = (halfps > 0) ? halfps / 1000.0 : PE_CLK_NS * half;
     worst_mask = 5'b00000; worst_gbit = -1;
@@ -591,8 +594,8 @@ module tb_spitgt;
              n_bytes_rd, n_bad, lat_max, lat_n, D_TOL, (n_margin ? margin_min : -1),
              n_margin, n_missed, tcss_seen, n_oe_cs, n_rx, n_mosi);
     // measured phase coverage of the master's change-edges, EVERY run
-    $display("  SPI-PHASE edges=%0d/20 bins=%020b phwalk=%0d halfps=%0d",
-             popc({25'd0, ph_clk}), ph_clk, phwalk, halfps);
+    $display("  SPI-PHASE edges=%0d/%0d bins=%020b phwalk=%0d halfps=%0d",
+             popc({25'd0, ph_clk}), PE_PHASES, ph_clk, phwalk, halfps);
     if (fails == 0)
       $display("SPI-TGT: ok -- mode %0d, SCK half %0d cycles, %0d transaction(s) of %0d byte(s): every byte equals the host's feed, count exact",
                mode, half, ntx, nb);

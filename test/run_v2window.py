@@ -36,8 +36,10 @@ import pe_isa as I                      # noqa: E402
 
 TMP = os.environ.get("PE_V2WIN_TMP") or os.path.join(HERE, "sim_build_v2win")
 #: phases (1 ns steps after the negedge) the asynchronous-edge walk covers,
-#: each judged; held to model/phase_coverage.py's row by gate_phase_coverage
-PHASE_FLOOR = 20
+#: each judged -- the whole period (clock.phases(): 20 at 50 MHz, 17 at 60);
+#: held to model/phase_coverage.py's row by gate_phase_coverage
+PHASE_SHORT = 0
+PHASE_FLOOR = clock.phases() - PHASE_SHORT
 CONFORM = os.path.join(HERE, "clocked_conform.vh")
 SLOT = 2
 LEADS = range(0, 11)
@@ -145,9 +147,9 @@ def main():
     worst_miss = max(missed) if missed else None
     need = min(n for n in taken_ns if all(m < n for m in missed)) \
         if taken_ns and missed else None
-    print("  walked (PUSH rise 0..19 ns after its negedge, 20 phases x %d "
+    print("  walked (PUSH rise 0..%d ns after its negedge, %d phases x %d "
           "leads): largest edge->slot lead MISSED %s ns; every lead >= %s ns "
-          "TAKEN" % (len(LEADS), worst_miss, need))
+          "TAKEN" % (PHASE_FLOOR - 1, PHASE_FLOOR, len(LEADS), worst_miss, need))
     if need is not None:
         print("    = %.2f cycles from an asynchronous edge, worst over phases "
               "(the contract asks 6 = %.0f ns)" % (need / clock.ns(1), clock.ns(6)))

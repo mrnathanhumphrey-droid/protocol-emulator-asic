@@ -531,7 +531,7 @@ def main() -> int:
         print("      %-20s %.2f Mb/s total" % ("TOTAL", agg / 1e6))
         print("    3 pins (data, strobe, valid) at one bit per cycle carry up to")
         print("    50 Mb/s, so the serial channel is %.1f%% utilised."
-              % (100 * agg / clock.hz()))
+              % (100 * agg / clock.a2_hz()))
         print("    ⭐ An RP2040 PIO on the TT board reads that without effort.")
         print()
         print("    ⛔ TWO COSTS, carried to 1.5 as flag-backs:")

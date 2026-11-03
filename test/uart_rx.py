@@ -46,9 +46,15 @@ from make_smoke_image import (OP_ARM, OP_LEVEL, OP_REARM,         # noqa: E402
                               OP_SHIFTIN, PIN_NONE)
 
 P_RX = 3            # uio[3], test/pinmap.vh
-# ⭐ THE BENCH RUNS AT THE BOARD'S OWN RATE (Wilson's (a)): 50 MHz / 115200
-# baud = 434 cycles per bit, the rate the FPGA board receives at.
-T_NOMINAL = 434
+# ⭐ THE BENCH RUNS AT THE TARGET'S OWN RATE (Wilson's (a); retargetable,
+# Wilson 11-03): 115200 baud at the target's clock -- 521 cycles per bit on
+# the 60 MHz chip, 434 on the 50 MHz FPGA board (whose images are built at
+# the board's clock explicitly).
+import clock                                                     # noqa: E402
+BAUD = 115200
+T_NOMINAL = clock.per_rate(BAUD)
+# ⚠ T_MIN BELOW IS A CYCLE COUNT ON PURPOSE: the ARM re-arm latency (~46
+# cycles) it rests on is dispatches, not time, so it holds at any clock.
 # ⛔⛔ THE SPEED LIMIT -- the smallest T this program is certified at
 # (Wilson: "fastest certified baud at 50 MHz" is a measured, published
 # number, not a gap). 232 cycles/bit = 215.5 kbaud at 50 MHz.

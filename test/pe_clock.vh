@@ -7,8 +7,10 @@
 // a bench that also passes `.CLK_PERIOD_PS(PE_CLK_PERIOD_PS)` to the dut sizes
 // the chip for it too. Included INSIDE the bench module.
 `ifndef PE_CLK_PS
-`define PE_CLK_PS 20000
+`define PE_CLK_PS 16666
 `endif
 localparam integer PE_CLK_PERIOD_PS = `PE_CLK_PS;
 localparam real    PE_CLK_NS        = `PE_CLK_PS / 1000.0;
 localparam real    PE_CLK_HALF_NS   = `PE_CLK_PS / 2000.0;
+// the 1 ns phase bins one period holds (model/clock.py phases()): 20 / 17
+localparam integer PE_PHASES        = (`PE_CLK_PS + 999) / 1000;

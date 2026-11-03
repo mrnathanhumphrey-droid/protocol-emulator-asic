@@ -92,8 +92,18 @@ def run(cmd):
                           encoding="utf-8", errors="replace")
 
 
-def vvp_path(rise_ns, ph=0):
-    return os.path.join(TMP, "tb_onewire_r%d_p%d.vvp" % (rise_ns, ph))
+def variant_ps(variant):
+    """⭐ THE CLOCK A VARIANT RUNS AT (Wilson 11-03): the `fpga` image is built
+    in the PA100T's cycles, so it is simulated at the BOARD's period (and the
+    chip sized for it); every other variant at the chip target's."""
+    if variant == "fpga":
+        return clock.period_ps(clock.target_hz("fpga"))
+    return clock.period_ps()
+
+
+def vvp_path(rise_ns, ph=0, ps=None):
+    ps = clock.period_ps() if ps is None else ps
+    return os.path.join(TMP, "tb_onewire_r%d_p%d_ps%d.vvp" % (rise_ns, ph, ps))
 
 
 #: ⭐ THE FILES CE5'S SIMULATION COMPILES -- ONE LIST, read by build_vvp below
@@ -104,10 +114,13 @@ CE5_SIM_SOURCES = ["test/tb_onewire.v", "test/ds18b20_model.v",
                    "src/pe_engine.v", "src/pe_store.v", "src/project.v"]
 
 
-def build_vvp(rise_ns, ph=0):
-    """`ph`: the part's phase offset (tb_onewire T_PH_NS, Wilson 10-21)."""
-    out = vvp_path(rise_ns, ph)
+def build_vvp(rise_ns, ph=0, ps=None):
+    """`ph`: the part's phase offset (tb_onewire T_PH_NS, Wilson 10-21);
+    `ps`: the clock period to simulate at (`variant_ps`)."""
+    ps = clock.period_ps() if ps is None else ps
+    out = vvp_path(rise_ns, ph, ps)
     r = run([tool("iverilog"), "-g2012", "-o", out, "-s", "tb_onewire",
+             "-DPE_CLK_PS=%d" % ps,
              "-Ptb_onewire.RISE_NS=%d" % rise_ns,
              "-Ptb_onewire.T_PH_NS=%d" % ph] + CE5_SIM_SOURCES)
     if r.returncode != 0:
@@ -127,7 +140,7 @@ def sim(name, variant, txn, rise_ns, extra=(), ph=0):
     rel = lambda p: os.path.relpath(p, ROOT).replace(os.sep, "/")
     import time
     t0 = time.time() - 2.0
-    r = run(sim_run.vvp(["-l", rel(log), rel(vvp_path(rise_ns, ph)),
+    r = run(sim_run.vvp(["-l", rel(log), rel(vvp_path(rise_ns, ph, variant_ps(variant))),
                          "+IMG=" + rel(img), "+NBYTES=%d" % _STORE_BYTES, "+FEED=" + rel(fpath),
                          "+NFEED=%d" % len(lines), "+POLLIDX=%d" % pidx] + list(extra),
                         images=[rel(img)]))
@@ -341,8 +354,9 @@ def main():
     # ⛔ ONE SIMULATION AT A TIME BY DEFAULT (the machine-wide budget is
     # shared); CI, which owns its runner, sets PE_OW_JOBS=3
     jobs = int(os.environ.get("PE_OW_JOBS", "1"))
-    for rise, ph in sorted({(a[3], PH.get(a[0], 0)) for a in arms + mf}):
-        build_vvp(rise, ph)                # built once, before any sim
+    for rise, ph, ps in sorted({(a[3], PH.get(a[0], 0), variant_ps(a[1]))
+                                for a in arms + mf}):
+        build_vvp(rise, ph, ps)            # built once, before any sim
     from concurrent.futures import ThreadPoolExecutor
     with ThreadPoolExecutor(max(1, jobs)) as ex:
         outs = dict(zip([a[0] for a in arms + mf], ex.map(
@@ -360,7 +374,7 @@ def main():
         for c, okc, det in checks:
             print("    %-58s %s %s" % (c, "ok " if okc else "***", det))
             rc |= 0 if okc else 1
-        m = re.search(r"OW-PHASE (rise=\d+/20 partfall=\d+/20)", txt)
+        m = re.search(r"OW-PHASE (rise=\d+/\d+ partfall=\d+/\d+)", txt)
         print("    phase coverage (this arm): %s" % (m.group(1) if m else "--"))
         if d["poll"] is not None:
             print("    poll groups: %d (8 read slots each)" % d["poll"])

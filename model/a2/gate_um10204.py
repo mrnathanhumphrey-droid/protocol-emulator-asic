@@ -88,12 +88,12 @@ UM10204_MAX = {
 MODES = list(UM10204)
 
 
-def cycles(ns):
+def cycles(ns, f=None, band=None):
     """A MINIMUM in ns -> whole cycles at the target clock, rounding UP, with
     the guard band (`model/clock.py`): a minimum is not met by rounding down.
     ⛔ It was `ceil(ns / 20)`, 50 MHz typed into the I2C mode floors the
     assembler enforces."""
-    return clock.cycles_min(ns)
+    return clock.cycles_min(ns, f, clock.BAND if band is None else band)
 
 
 def cycles_max(ns):
@@ -118,8 +118,12 @@ def rate_hz(mode):
     return int(num) * {"kHz": 1000, "MHz": 1000000}[unit]
 
 
-def table_cycles():
-    return {m: {k: cycles(v) for k, v in d.items()} for m, d in UM10204.items()}
+def table_cycles(f=None, band=None):
+    """The floors at the target's clock with the band (the assembler's), or at
+    `f` / `band` for a caller that holds a record at another clock -- the A2
+    layer asks for its own: `table_cycles(clock.a2_hz(), band=1)`."""
+    return {m: {k: cycles(v, f, band) for k, v in d.items()}
+            for m, d in UM10204.items()}
 
 
 def claimable(lo, hi, tc):

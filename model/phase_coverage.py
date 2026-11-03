@@ -5,8 +5,10 @@ Wilson's rule: every timing bench prints its phase coverage and a gate reds if
 it drops below full. "Full" is a property of the EVIDENCE, so each bench has a
 class (model/gate_phase_coverage.py checks every row):
 
-  IN_SUITE(runner, floor)  the suite runner itself asserts >= floor of the 20
-                           1 ns phases of the 50 MHz clock (its PHASE_FLOOR);
+  IN_SUITE(runner, short)  the suite runner itself asserts it covers all but
+                           `short` of the target clock's 1 ns phases (its
+                           PHASE_FLOOR = clock.phases() - PHASE_SHORT: 20
+                           phases at 50 MHz, 17 at 60 -- Wilson 11-03);
   SWEEP(record, runners)   full coverage is a committed sweep RECORD, bound by
                            blob hash to what it read (test/sweep_record.py); a
                            moved input makes the row PENDING;
@@ -24,9 +26,9 @@ blocks the tag (point 2: `gate_phase_coverage.py --tag`).
 
 ROWS = {
     # ---- the peer walks its own phase inside the suite ----------------------
-    "test/tb_spitgt.v": ("IN_SUITE", {"runner": "test/run_spitgt.py", "floor": 20}),
-    "test/tb_uartrx.v": ("IN_SUITE", {"runner": "test/run_uartrx.py", "floor": 18}),
-    "test/tb_v2win.v": ("IN_SUITE", {"runner": "test/run_v2window.py", "floor": 20}),
+    "test/tb_spitgt.v": ("IN_SUITE", {"runner": "test/run_spitgt.py", "short": 0}),
+    "test/tb_uartrx.v": ("IN_SUITE", {"runner": "test/run_uartrx.py", "short": 2}),
+    "test/tb_v2win.v": ("IN_SUITE", {"runner": "test/run_v2window.py", "short": 0}),
     # ---- full coverage is a sweep --------------------------------------------
     "test/tb_i2c.v": ("SWEEP", {"record": "model/phase_sweep_i2c.json",
                                 "recipe": "test/sweep_i2c_delay.py",
@@ -52,6 +54,10 @@ ROWS = {
                        "whose sub-cycle phase tb_uartrx walks (IN_SUITE)"),
     "test/tb_uarttx.v": ("CHIP_DRIVEN", "the peer is a RECEIVER timing the chip's own "
                          "TX edges; it drives nothing back"),
+    "test/tb_xclock.v": ("CHIP_DRIVEN", "the cross-clock bench (gate_clock_cross, "
+                         "Wilson 11-03): no peer -- every uio pin is pulled up -- "
+                         "and it only records the chip's own edges, judged in ns "
+                         "across two clocks; no independent peer phase to walk"),
     "test/tb_cktx.v": ("CHIP_DRIVEN", "clocked TRANSMIT values: the chip drives clock "
                        "and data, Layer V checks them against the golden model"),
     # ---- no peer-timing claim --------------------------------------------------

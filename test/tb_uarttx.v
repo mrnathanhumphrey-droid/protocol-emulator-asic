@@ -112,7 +112,8 @@ module tb_uarttx;
     if (!$value$plusargs("NCYC=%d", ncyc)) begin
       $display("tb_uarttx: FATAL -- +NCYC required"); $finish;
     end
-    if (!$value$plusargs("BITP=%d", bitp)) bitp = 434;
+    // 115200 baud at this bench's clock (Wilson 11-03; it was 434, 50 MHz)
+    if (!$value$plusargs("BITP=%d", bitp)) bitp = $rtoi(1.0e9 / 115200.0 / PE_CLK_NS + 0.5);
     if (!$value$plusargs("ERR=%d", err)) err = 0;
     bt = PE_CLK_NS * bitp * (1000.0 + err) / 1000.0;
     $readmemh(imgfile, img);

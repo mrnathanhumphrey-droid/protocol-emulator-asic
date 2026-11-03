@@ -429,7 +429,6 @@ SPEC_SYMBOLS = {
     # stated before their runs (phasecov_prediction.txt), not readings.
     ("model/phase_coverage.py", "ROWS"),
     ("test/sweep_i2c_delay.py", "DELAYS"),
-    ("test/sweep_onewire_phase.py", "CLAIM"),
     # ⭐ THE DELAY SPAN THE HIGH-PHASE INSTRUMENT SWEEPS. An experiment design,
     # not an observation: four periods spanning 13x, chosen because the defect
     # being caught was a high phase that did not move with `d` AT ALL, and a
@@ -437,8 +436,10 @@ SPEC_SYMBOLS = {
     # equal d here". ⛔ What the instrument MEASURES -- t_HIGH and t_LOW per
     # lane -- is not stored anywhere: it is written to the phase JSON by
     # `test/measure_phases.py` on every run and adjudicated from there, which
-    # is why there is no RECORD entry to pair with this exclusion either.
-    ("test/make_smoke_image.py", "CKOD_DELAYS"),
+    # is why there is no RECORD entry to pair with an exclusion either.
+    # ⭐ (Wilson 11-03) `CKOD_DELAYS` is no longer a stored table at all: it is
+    # derived from UM10204 in real time at the target's clock, so it needs no
+    # exclusion.
     # ⭐ Ruling DT-C's must-fire subject: a program DESIGN (searched, the
     # search recorded beside it), not an observation -- what it measures is
     # written to probe_a2/a2.json by test/a2_run.sh on every run.
@@ -473,13 +474,14 @@ SPEC_SYMBOLS = {
     # (Wilson 10-17), a fact about the part, re-checked against the wire and
     # the PC every run. `WRITES_PER_RESET` is the transaction's shape
     # (33 | CC 44 | CC BE), an input. Nothing in the three is observed.
-    # ⭐ THE SPI-TARGET WITNESS'S INPUTS (build plan B2-B4). `T_EXT` is the
-    # master's CLAIMED maximum SCK period per image (50 = 1 MHz, 100 = 500 kHz),
+    # ⭐ THE SPI-TARGET WITNESS'S INPUTS (build plan B2-B4). `T_EXT_HZ` is the
+    # master's CLAIMED maximum SCK RATE per image (1 MHz, 500 kHz; cycles at
+    # the target's clock are derived, Wilson 11-03),
     # keyed by the image's own sha -- a declaration the lane's period is taken
     # FROM, never a measurement. The runner's `IMG`, `WITNESS` and `MUSTFIRE`
     # are stimulus: image names, modes, SCK half-periods, transaction counts
     # and host timings. Every verdict is re-measured from the bench each run.
-    ("model/a2/program_a2.py", "T_EXT"),
+    ("model/a2/program_a2.py", "T_EXT_HZ"),
     ("test/run_spitgt.py", "IMG"),
     ("test/run_spitgt.py", "WITNESS"),
     ("test/run_spitgt.py", "MUSTFIRE"),
@@ -1110,10 +1112,19 @@ def readme_audit(text, src):
                     probs.append("UART-rx speed paragraph: %s = %s, computed "
                                  "%s (test/uart_rx.py T_MIN %d, T_NOMINAL %d)"
                                  % (k, u.group(k), v, tmin, tnom))
-            if round(f / 230400.0) >= tmin:
-                probs.append("UART-rx speed paragraph calls 230,400 baud "
-                             "outside the certified range, but %d >= T_MIN %d"
-                             % (round(f / 230400.0), tmin))
+            # THE VERDICT FOLLOWS THE CLOCK (Wilson 11-03): 230,400 baud was
+            # outside the range at 50 MHz (217 < 232) and is inside it at 60
+            # (260); the paragraph must say whichever is true
+            inside = round(f / 230400.0) >= tmin
+            said = re.search(r"230,400 baud would need \d+ cycles per bit,\s+"
+                             r"which is (inside|outside) the certified range",
+                             text[u.start():u.end() + 200])
+            if said is None or (said.group(1) == "inside") != inside:
+                probs.append("UART-rx speed paragraph calls 230,400 baud %s "
+                             "the certified range, but %d %s T_MIN %d"
+                             % (said.group(1) if said else "neither inside nor "
+                                "outside", round(f / 230400.0),
+                                ">=" if inside else "<", tmin))
     for pat, entry, what in WITHDRAWN:
         for m in re.finditer(pat, text):
             line = text.count("\n", 0, m.start()) + 1

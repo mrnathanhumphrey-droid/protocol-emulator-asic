@@ -83,7 +83,9 @@ module tb_onewire;
 
   always #(PE_CLK_HALF_NS) clk = ~clk;   // the target's clock, never typed
 
-  tt_um_protocol_emulator dut (
+  // the chip sized for the clock this bench runs at (test/pe_clock.vh; the
+  // FPGA variant runs at the board's period -- run_onewire.variant_ps)
+  tt_um_protocol_emulator #(.CLK_PERIOD_PS(PE_CLK_PERIOD_PS)) dut (
       .ui_in(ui_in), .uo_out(uo_out),
       .uio_in(uio_in), .uio_out(uio_out), .uio_oe(uio_oe),
       .ena(ena), .clk(clk), .rst_n(rst_n)
@@ -336,8 +338,8 @@ module tb_onewire;
     $display("OW-HOST pushes=%0d bytes=%0d pops=%0d rx=%0d status=%0d fed=%0d/%0d cyc=%0d",
              hf_pushes, hf_bytes, hf_pops, n_rx, n_status, fi, nfeed, cyc);
     // the MASKS, not only the counts: coverage across runs is their union
-    $display("OW-PHASE rise=%0d/20 partfall=%0d/20 (bins of the 20 ns clock after its posedge) rise_bins=%020b partfall_bins=%020b",
-             pc20(ph_rise), pc20(ph_pfall), ph_rise, ph_pfall);
+    $display("OW-PHASE rise=%0d/%0d partfall=%0d/%0d (1 ns bins of the clock period after its posedge) rise_bins=%020b partfall_bins=%020b",
+             pc20(ph_rise), PE_PHASES, pc20(ph_pfall), PE_PHASES, ph_rise, ph_pfall);
     if (fi >= nfeed) $display("OW-BENCH: END");
     else $display("*** FAIL tb_onewire: NCYC_MAX reached with the feed at %0d of %0d", fi, nfeed);
     $finish;

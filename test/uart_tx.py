@@ -40,7 +40,9 @@ from make_smoke_image import (OP_LEVEL, OP_REARM, OP_SHIFT,       # noqa: E402
                               PIN_NONE)
 
 P_TX = 8            # uo_out[0], test/pinmap.vh P_TX_UO
-T_NOMINAL = 434     # 50 MHz / 115200 baud
+import clock                                                    # noqa: E402
+BAUD = 115200
+T_NOMINAL = clock.per_rate(BAUD)   # 115200 baud at the target's clock (Wilson 11-03)
 
 
 def lanes_headers(T=T_NOMINAL, busy=False, msb=False):

@@ -5,7 +5,10 @@ project:
   discord:      ""      # Your discord username, for communication and automatically assigning you a Tapeout role (optional)
   description:  "Table-driven protocol emulator with a formally synthesized timing envelope"
   language:     "Verilog" # other examples include SystemVerilog, Amaranth, VHDL, etc
-  clock_hz:     50000000       # Clock frequency in Hz (or 0 if not applicable)
+  clock_hz:     60000000       # Clock frequency in Hz (or 0 if not applicable)
+                               # ⛔ THE CHIP'S CLOCK, written ONCE (Wilson 11-03): model/clock.py
+                               # reads it; gate_clock_consistency holds src/project.v, pe_engine.v,
+                               # config.json CLOCK_PERIOD and test/pe_clock.vh to it.
 
   # How many tiles your design occupies? A single tile is about 167x108 uM.
   tiles: "6x4"          # Jane Street brief: "Set the tile size in info.yaml to 6x4."

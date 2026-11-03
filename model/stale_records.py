@@ -304,6 +304,19 @@ CHANGE_SET = frozenset([
     "fpga/sim/tb_fpga_loader.v",           # board clock from fpga_clock.vh
     "fpga/sim/tb_fpga_onewire.v",          # board clock from fpga_clock.vh
     "fpga/sim/tb_fpga_uart.v",             # board clock from fpga_clock.vh
+    # ---- AMENDMENT 9 (11-03, Wilson: clock (b), the 60 MHz move). The band
+    # on, info.yaml / config.json / RTL to 60 MHz together, the programs in
+    # real time, the A2 layer a RECORD at 50 MHz, the cross-clock gate.
+    "info.yaml",                           # clock_hz 60000000
+    "src/config.json",                     # CLOCK_PERIOD 16.667
+    "README.md",                           # the UART-rx paragraph at 60 MHz
+    "fpga/sim/i2c_fram.py",                # the board program rebuilt as witnessed (band 1)
+    "model/a2/gate_dmin_clocked.py",       # mode floors at the A2 RECORD clock
+    "model/gate_clock_cross.py",           # NEW: the same programs at both clocks
+    "test/tb_xclock.v",                    # NEW: its bench
+    "test/sweep_onewire_phase.py",         # per-arm phase plan (17 / 20)
+    "test/uart_rx.py",                     # T_NOMINAL = 115200 at the target
+    "test/uart_tx.py",                     # T_NOMINAL = 115200 at the target
 ])
 
 

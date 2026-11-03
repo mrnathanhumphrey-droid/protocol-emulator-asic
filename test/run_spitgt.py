@@ -53,6 +53,7 @@ for _p in (HERE, os.path.join(ROOT, "model"), os.path.join(ROOT, "model", "a2"))
 from pe_isa import STORE_BYTES as _STORE_BYTES  # noqa: E402  v2: never a typed 256
 from toolchain import banner, tool          # noqa: E402
 import sim_run                              # noqa: E402
+import clock                                # noqa: E402  Wilson 11-03
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")
@@ -60,9 +61,12 @@ except Exception:
     pass
 
 SCRATCH = os.path.join(HERE, "sim_build_spitgt")
-#: the phase-walked witness's floor of measured phase bins (of 20); held to
+#: the phase-walked witness's floor of measured phase bins; held to
 #: model/phase_coverage.py's row by model/gate_phase_coverage.py
-PHASE_FLOOR = 20
+#: phases short of FULL this runner may cover (the floor is the target's own
+#: period in 1 ns bins, `clock.phases()`: 20 at 50 MHz, 17 at 60)
+PHASE_SHORT = 0
+PHASE_FLOOR = clock.phases() - PHASE_SHORT
 SRCS =["src/project.v", "src/pe_engine.v", "src/pe_store.v"]
 #: spelled out: gate_wire_feed requires a witness runner to NAME its images
 IMG = {0: "test/sptgt_m0_image.hex", 1: "test/sptgt_m1_image.hex",
@@ -114,7 +118,8 @@ WITNESS = [
     ("mode 1 @ 1 MHz", 1, ["+MODE=1", "+NTX=8"]),
     ("mode 2 @ 1 MHz", 2, ["+MODE=2", "+NTX=8"]),
     ("mode 3 @ 1 MHz", 3, ["+MODE=3", "+NTX=8"]),
-    ("MOSI @ 500 kHz", "mosi", ["+MODE=0", "+NTX=8", "+HALF=50", "+MOSI=1"]),
+    ("MOSI @ 500 kHz", "mosi", ["+MODE=0", "+NTX=8",
+                                "+HALF=%d" % clock.cycles_nominal(1000), "+MOSI=1"]),
     ("S7 tCSH = 0", 0, ["+MODE=0", "+NTX=4", "+TCSH=0"]),
 ]
 
@@ -122,7 +127,8 @@ WITNESS = [
 MUSTFIRE = [
     ("M1 no feed", 0, ["+MODE=0", "+NTX=2", "+NOFEED=1"], False, True,
      r"FAIL spi_tgt: byte 0 read 00"),
-    ("M2 SCK 2.5 MHz", 0, ["+MODE=0", "+NTX=2", "+HALF=10"], False, True,
+    ("M2 SCK 2.5 MHz", 0, ["+MODE=0", "+NTX=2",
+                           "+HALF=%d" % clock.cycles_nominal(200)], False, True,
      r"FAIL spi_tgt: byte \d+ read"),
     ("M3 7-clock transaction", 0, ["+MODE=0", "+NTX=4", "+SHORT=1"], False,
      True, r"FAIL spi_tgt: byte \d+ read"),
@@ -175,7 +181,7 @@ def main() -> int:
     print("  --- the witness again, phase-walked (+PHWALK=1) ---")
 
     def phase(txt):
-        m = re.search(r"SPI-PHASE edges=(\d+)/20", txt)
+        m = re.search(r"SPI-PHASE edges=(\d+)/\d+", txt)
         return int(m.group(1)) if m else -1
 
     def worst(txt):
@@ -193,10 +199,11 @@ def main() -> int:
         _r, bound = a2_pad_bound(IMG[key])
         same = (wb is not None and ww is not None and wb <= ww <= bound)
         cov = phase(txt) >= PHASE_FLOOR
-        print("    %-24s %s  phase %d/20 (unwalked %d/20); worst %s "
+        print("    %-24s %s  phase %d/%d (unwalked %d/%d); worst %s "
               "(unwalked %s, A2 pad bound %d)"
               % (label, "ok " if ok and same and cov else "***",
-                 phase(txt), phase(base_txt), ww, wb, bound))
+                 phase(txt), clock.phases(), phase(base_txt), clock.phases(),
+                 ww, wb, bound))
         if not (ok and same and cov):
             rc = 1
     print()
@@ -241,14 +248,16 @@ def b3b(full) -> int:
     print("  --- B3b: five-lane contention (master %.1f ns half period, %d "
           "transactions) ---" % (B3B_HALFPS / 1000.0, B3B_NTX))
     rc, worst = 0, {}
-    # UART-rx peer at the NOMINAL 434 (the claim load); 421 = -3 %, the edge
-    # of the receiver's verified band (Wilson 10-20)
+    # UART-rx peer at the NOMINAL 115200 (the claim load: 434 at 50 MHz, 521
+    # at 60); -3 %, the edge of the receiver's verified band (Wilson 10-20)
+    import uart_rx
+    rx_nom, rx_fast = uart_rx.T_NOMINAL, round(uart_rx.T_NOMINAL * 0.97)
     base = ["+FIVE=1", "+NTX=%d" % B3B_NTX, "+HALFPS=%d" % B3B_HALFPS]
-    arms = [("A shipped, mode 0", "b3b_a", ["+MODE=0", "+RXT=434"]),
-            ("A shipped, mode 3", "b3b_a3", ["+MODE=3", "+RXT=434"]),
-            ("A, UART-rx -3 %", "b3b_a", ["+MODE=0", "+RXT=421"]),
-            ("B envelope I2C", "b3b_b", ["+MODE=0", "+RXT=434"]),
-            ("B without I2C", "b3b_bnoi2c", ["+MODE=0", "+NOI2C=1", "+RXT=434"])]
+    arms = [("A shipped, mode 0", "b3b_a", ["+MODE=0", "+RXT=%d" % rx_nom]),
+            ("A shipped, mode 3", "b3b_a3", ["+MODE=3", "+RXT=%d" % rx_nom]),
+            ("A, UART-rx -3 %", "b3b_a", ["+MODE=0", "+RXT=%d" % rx_fast]),
+            ("B envelope I2C", "b3b_b", ["+MODE=0", "+RXT=%d" % rx_nom]),
+            ("B without I2C", "b3b_bnoi2c", ["+MODE=0", "+NOI2C=1", "+RXT=%d" % rx_nom])]
     for label, key, plus in arms:
         r, bound = a2_pad_bound(IMG[key])
         txt = run(full, IMG[key], base + plus + ["+BOUND=%d" % bound])
@@ -278,7 +287,7 @@ def b3b(full) -> int:
     # T_ext 25 < r); the 1 MHz claim rests on A2, not on this arm. That the
     # bench CATCHES wrong bytes is shown by M2 above (2.5 MHz, red).
     txt = run(full, IMG["b3b_a"], ["+FIVE=1", "+NTX=%d" % B3B_NTX,
-                                   "+HALFPS=250150", "+MODE=0", "+RXT=434"])
+                                   "+HALFPS=250150", "+MODE=0", "+RXT=%d" % rx_nom])
     print("    2 MHz, five lanes (recorded, no verdict): %s" % measured(txt))
     print("      => A2 is conservative at 2 MHz under this load; the 1 MHz "
           "claim rests on A2")

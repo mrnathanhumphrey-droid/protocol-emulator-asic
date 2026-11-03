@@ -62,7 +62,7 @@ CHUNK = WRAP_BOUND - 1                # 32767, the largest legal chunk
 CONSERVATIVE_T = 2 ** 14              # 16384 -- the rate the ruling specifies
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import clock  # noqa: E402  THE clock source (Wilson 11-03): never a typed copy
-F_CLK = clock.hz()
+F_CLK = clock.a2_hz()  # A2 RECORD clock (clock.A2_TARGET): 50 MHz until re-certified, Wilson 11-03
 
 LANES = list(TX) + [UART_RX, SPI_RX]
 
@@ -97,8 +97,8 @@ def main() -> int:
                 "shown as the unaugmented base, which is what must match")
     print()
     print("  N = %d bits -> wrap bound 2^%d = %d cycles = %.0f us at %d MHz"
-          % (N_BITS, N_BITS - 1, WRAP_BOUND, clock.us(WRAP_BOUND), F_CLK // 10 ** 6))
-    print("  largest legal chunk = %d cycles = %.1f us" % (CHUNK, clock.us(CHUNK)))
+          % (N_BITS, N_BITS - 1, WRAP_BOUND, clock.us(WRAP_BOUND, clock.a2_hz()), F_CLK // 10 ** 6))
+    print("  largest legal chunk = %d cycles = %.1f us" % (CHUNK, clock.us(CHUNK, clock.a2_hz())))
     print("  a 10 ms poll = %d cycles = %d chunks"
           % (500_000, -(-500_000 // CHUNK)))
     rc = 0

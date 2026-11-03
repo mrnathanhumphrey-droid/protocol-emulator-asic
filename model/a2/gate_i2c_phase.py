@@ -19,7 +19,8 @@ so the lane is denser than modelled, not slower.
 Source: NXP UM10204 Rev. 7.0 (1 Oct 2021), **Table 11** -- "Characteristics of
 the SDA and SCL bus lines". ⛔ Not Table 10: the numbering moved in Rev 7.0 and
 Table 10 is now the I/O stages. Fast mode, in ns, converted to cycles at the
-target's clock by `model/clock.py` (minima banded, maxima charged whole):
+A2 RECORD clock (clock.A2_TARGET, 50 MHz), UNBANDED as derived -- the record
+stays what it was until A2 is re-certified (Wilson 11-03):
 
     tLOW  min 1300 ns              tHIGH min 600 ns
     tr    max 300 ns               tf    max 300 ns
@@ -55,13 +56,13 @@ try:
 except Exception:
     pass
 
-F_CLK = clock.hz()
-T_LOW = clock.cycles_min(1300)   # cycles, fast-mode minima (banded)
-T_HIGH = clock.cycles_min(600)
-T_SU_DAT = clock.cycles_min(100) # cycles, fast-mode tSU;DAT min
-TR = clock.cycles_min(300, band=1)   # cycles, fast-mode MAXIMA, charged whole
-TF = clock.cycles_min(300, band=1)
-PERIOD = clock.cycles_min(2500)  # 400 kHz: the shortest legal period
+F_CLK = clock.a2_hz()  # A2 RECORD clock (clock.A2_TARGET): 50 MHz until re-certified, Wilson 11-03
+T_LOW = clock.cycles_min(1300, clock.a2_hz(), band=1)   # cycles, fast-mode minima (banded)
+T_HIGH = clock.cycles_min(600, clock.a2_hz(), band=1)
+T_SU_DAT = clock.cycles_min(100, clock.a2_hz(), band=1) # cycles, fast-mode tSU;DAT min
+TR = clock.cycles_min(300, clock.a2_hz(), band=1)   # cycles, fast-mode MAXIMA, charged whole
+TF = clock.cycles_min(300, clock.a2_hz(), band=1)
+PERIOD = clock.cycles_min(2500, clock.a2_hz(), band=1)  # 400 kHz: the shortest legal period
 
 # every lane except I2C, so the I2C lane can be varied.
 # ⛔ SELECTED from the shipped table, not REBUILT from it. This line used to be

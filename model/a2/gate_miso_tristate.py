@@ -60,7 +60,7 @@ except Exception:
 LANES = lane_digest.shipped()
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import clock  # noqa: E402  THE clock source (Wilson 11-03): never a typed copy
-HZ = clock.hz()  # info.yaml clock_hz, via the target
+HZ = clock.a2_hz()  # A2 RECORD clock (clock.A2_TARGET): 50 MHz until re-certified, Wilson 11-03
 
 Z = None                        # a driver that is not driving
 

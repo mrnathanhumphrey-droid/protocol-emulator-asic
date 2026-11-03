@@ -31,6 +31,15 @@ import os
 import re
 import sys
 
+def _uart_t():
+    """115200 baud in the target's cycles (Wilson 11-03: it was typed 434)."""
+    _m = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "model")
+    if _m not in sys.path:
+        sys.path.insert(0, _m)
+    import clock
+    return clock.per_rate(115200)
+
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 
@@ -599,13 +608,13 @@ CONFIG = {
     "tb_uarttx": {
         "srcs": [],
         "arms": [("busy", ["+IMG=test/uart_tx_busy_image.hex",
-                           "+NCYC=60000", "+BITP=434", "+ERR=0"])],
+                           "+NCYC=60000", "+BITP=%d" % _uart_t(), "+ERR=0"])],
     },
     # Wilson's UART ruling: the first program receiving a real UART stream,
     # against a baud-errored peer (2 % slow), bytes vs what the peer sent.
     "tb_uartrx": {
         "srcs": [],
-        "arms": [("err+20", ["+IMG=test/uart_rx_image.hex", "+BITP=434",
+        "arms": [("err+20", ["+IMG=test/uart_rx_image.hex", "+BITP=%d" % _uart_t(),
                              "+ERR=20", "+NFR=40", "+SEED=1",
                              "+BADSTOP=-1", "+PPF=2", "+PHWALK=0"])],
     },
