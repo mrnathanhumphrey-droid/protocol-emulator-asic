@@ -132,7 +132,8 @@ def main(argv):
         emit(argv[argv.index("--emit") + 1], os.environ.get("PE_TARGET", "chip"))
         return 0
     import sim_run
-    from toolchain import tool
+    from toolchain import banner, tool
+    banner("iverilog", "vvp")
     os.makedirs(TMP, exist_ok=True)
     rc = 0
     res = {}

@@ -55,6 +55,10 @@ DECLARED = {
         "--record on v2 (Wilson: it referees step 2 before merge)",
     "model/gate_a2_record.py":
         "the A2 suite ran on v1's tree; re-run with --record at v2",
+    "model/gate_flow_config.py":
+        "the timing of record was hardened with v1's flow config; v2 moves it "
+        "on purpose (60 MHz, the latch store, T1/T2 -- Wilson 11-03) and the "
+        "v2 harden of record re-binds it",
     "model/gate_phase_coverage.py":
         "the I2C and 1-Wire sweep records read v1's RTL and benches; both "
         "sweeps re-run with --record at v2",

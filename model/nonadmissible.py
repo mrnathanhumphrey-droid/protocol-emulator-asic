@@ -101,10 +101,11 @@ NON_ADMISSIBLE = {
         "the A2 scheduler stress image (four dense clocked lanes, d = 20..23). "
         "Fails 1.6a under W1's jitter (DT-B), so no claim rests on it; kept "
         "because it is where W1 binds hardest and where W6's term is priced."),
-    "ckhold_over_image.hex": ({QUEUE},
-        "D4's 'must RUN' boundary point at d = SDA_HOLD + 1 = 16, below every "
-        "mode floor: under W1 its lane's r = 18 > t = 16 (DT-A). It exists to "
-        "show the silicon RUNS one cycle above the hold, not to be scheduled."),
+    # ⭐ `ckhold_over_image.hex` LEFT THIS LIST AT 60 MHz (Wilson 11-03). At
+    # 50 MHz its lane (d = SDA_HOLD + 1 = 16) had r = 18 > t = 16 under W1, a
+    # QUEUE break; at 60 MHz d = 19 + 1 = 20 and r = 16 <= 20 (program_a2,
+    # measured), so it breaks none of the four conditions. It is still D4's
+    # "must RUN" point, below every mode floor -- which no condition here covers.
     "tx_image.hex": ({PORT, QUEUE},
         "`tb_tx`'s TX-queue ownership image at d = 12-13, below D*: it tests "
         "routing of host bytes, not schedulability."),

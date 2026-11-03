@@ -57,6 +57,12 @@ EXCLUDED = {
         "RELOAD) that a fixed arm list does not express, and one arm needs a "
         "build without the conformance layers. Every claim it makes is "
         "judged by `test/run_spitgt.py` in `ci/run_gates.sh`."),
+    "tb_xclock.v": (
+        "THE CROSS-CLOCK BENCH (Wilson 11-03): one image at the clock it was "
+        "assembled for, built with -DPE_CLK_PS per target, no peer; its arms "
+        "are PAIRS of builds at two clocks, which a fixed arm list cannot "
+        "express. Judged in nanoseconds by `model/gate_clock_cross.py` in "
+        "`ci/run_gates.sh`; it reaches no RTL the swept benches do not."),
     "tb_equiv.v": (
         "THE v1 == v2 EQUIVALENCE BENCH (v2 step 2 item 5). Compiled against "
         "BOTH the v1-lock RTL and v2's by `model/gate_v2_equiv.py`, which "

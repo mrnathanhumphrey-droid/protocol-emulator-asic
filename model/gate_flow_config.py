@@ -217,10 +217,25 @@ def main() -> int:
 
     print("  --- must-fire ---")
     rc = 1 if probs else 0
+    tree_probs = list(probs)
+    # ⭐ THE MUST-FIRES MUTATE A RECORD-CONSISTENT BASE (Wilson 11-03). On the
+    # v2 work branch the tree's config moves ON PURPOSE (the 60 MHz move, the
+    # latch store, T1/T2), so mutating the TREE would make every case read red
+    # -- including the one that must stay green -- and prove nothing. The base
+    # is the record's own keys, density and tile size: each case then tests
+    # exactly its rule.
+    base_cfg = json.dumps([(k, v) for k, v in sorted(rec["flow_keys"].items())]
+                          + [(DENSITY, rec["ship_density_pct"])], indent=1)
+    base_info = re.sub(r'(tiles:\s*)"[^"]*"', r'\1"%s"' % rec["tiles"], info, count=1)
 
     def mutate(fn):
-        d = copy.deepcopy(load_pairs(cfg))
+        d = copy.deepcopy(load_pairs(base_cfg))
         return json.dumps(fn(d), indent=1)
+
+    base_ok = not audit(base_cfg, rec)[0]
+    print("    %-38s %s" % ("the record-consistent base itself", "green ok" if base_ok
+                             else "*** RED -- the base does not reproduce the record"))
+    rc_mf = 0 if base_ok else 1
 
     def setk(k, v):
         return lambda d: [(kk, v if kk == k else vv) for kk, vv in d]
@@ -239,35 +254,48 @@ def main() -> int:
         ok = bool(ps) == want_red
         print("    %-38s %s" % (label, ("red  ok" if want_red else "green ok") if ok
                                  else "*** WRONG (%s)" % ("green" if not ps else "red")))
-        rc |= 0 if ok else 1
+        rc_mf |= 0 if ok else 1
     # the checked fields (Wilson 10-18): tile size, the action SHA, tools-ref
     sha = rec["ci_harden_action"].split("@", 1)[1]
     env_cases = [
         ("tile size changed to 8x2",
-         re.sub(r'(tiles:\s*)"[^"]*"', r'\1"8x2"', info, count=1), gds),
+         re.sub(r'(tiles:\s*)"[^"]*"', r'\1"8x2"', base_info, count=1), gds),
         ("CI action back to the branch ref",
-         info, gds.replace("tt-gds-action@" + sha, "tt-gds-action@ihp-cmos5l", 1)),
+         base_info, gds.replace("tt-gds-action@" + sha, "tt-gds-action@ihp-cmos5l", 1)),
         ("tools-ref changed",
-         info, re.sub(r"(tools-ref:\s*)\S+", r"\g<1>main", gds, count=1)),
+         base_info, re.sub(r"(tools-ref:\s*)\S+", r"\g<1>main", gds, count=1)),
         ("tools-ref dropped from one step",
-         info, re.sub(r"\n\s*tools-ref:\s*\S+", "", gds, count=1)),
+         base_info, re.sub(r"\n\s*tools-ref:\s*\S+", "", gds, count=1)),
     ]
     for label, inf, gd in env_cases:
         ps = env_audit(inf, gd, rec)
         print("    %-38s %s" % (label, "red  ok" if ps else "*** NOT RED"))
-        rc |= 0 if ps else 1
+        rc_mf |= 0 if ps else 1
     # the 10-21 defect, rebuilt: record AND workflow consistently abbreviated
     # to 7 hex (string-equal everywhere, as it was) -- must still be red
     full = rec["ci_tools_ref"]
     short = copy.deepcopy(rec)
     short["ci_tools_ref"] = full[:7]
     short["tools_of_record"]["tt_support_tools"] = full[:7]
-    ps = env_audit(info, gds.replace(full, full[:7]), short)
+    ps = env_audit(base_info, gds.replace(full, full[:7]), short)
     hit = any("40-hex" in p for p in ps)
     print("    %-38s %s" % ("tools-ref abbreviated to 7 hex",
                              "red  ok" if hit else "*** NOT RED (for its reason)"))
-    rc |= 0 if hit else 1
+    rc_mf |= 0 if hit else 1
+    rc |= rc_mf
     print()
+    # ⭐ v2 (Wilson 11-03): the tree's config moved ON PURPOSE, inside the
+    # declared change set, so the record is STALE (re-bound by the v2 harden
+    # of record), not FAIL -- and only if every must-fire above behaved
+    if tree_probs and not rc_mf:
+        import stale_records as SR
+        v, why = SR.stale_verdict("model/gate_flow_config.py",
+                                  SR.moved(["src/config.json", "info.yaml",
+                                            ".github/workflows/gds.yaml"]))
+        print("  stale_records: %s -- %s" % (v, why))
+        if v == "STALE":
+            print(SR.token("flow-config", why))
+            return 0
     print("  GATE flow-config: %s" % ("PASSED" if rc == 0 else "FAILED"))
     return rc
 

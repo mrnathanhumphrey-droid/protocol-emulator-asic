@@ -368,27 +368,37 @@ def image(lanes, headers, park_pins=None, timing_checks=True, exempt_as=None,
 # ---------------------------------------------------------------------------
 # THE SHIPPED FRAM PROGRAMS, RE-EXPRESSED (the SP2 regression's subjects)
 # ---------------------------------------------------------------------------
-def i2c_fram_write(d=70, sda=2, scl=1):
+def _d_fm():
+    """The chip's shipped clocked Fm delay (make_smoke_image.D_FM_SHIPPABLE:
+    t_LOW + jitter at the target's clock -- 87 at 60 MHz). It was a typed 70."""
+    import make_smoke_image
+    return make_smoke_image.D_FM_SHIPPABLE
+
+
+def i2c_fram_write(d=None, sda=2, scl=1):
     """`corpus_i2c`: one address byte + ACK slot, the corpus's coverage
     READBIT on SDA (raw; it does not move SCL), then STOP."""
+    d = _d_fm() if d is None else d
     m = I2C(sda, scl, d, nc_count=8)
     lanes = {0: m.transaction([("write", 1),
                                ("raw", (OP_READBIT, sda, 0, d, 0, 8))])}
     return lanes, {0: m.header()}, None
 
 
-def i2c_fram_random_read(d=70, flags=0, sda=2, scl=1, rules=None):
+def i2c_fram_random_read(d=None, flags=0, sda=2, scl=1, rules=None):
     """`run_ckack.image`: the MB85RC random read
     S A0 A 01 A 23 A Sr A1 A data A data NACK P -- written as a 3-byte write
     then a 2-byte read; the Sr and the P are generated."""
+    d = _d_fm() if d is None else d
     m = I2C(sda, scl, d, nc_count=0, rules=rules)
     lanes = {0: m.transaction([("write", 3), ("read", 2)])}
     return lanes, {0: m.header(flags)}, {1: 0, 2: 3, 3: 4, 4: 5}
 
 
-def i2c_read_timing(d=70, sda=2, scl=1):
+def i2c_read_timing(d=None, sda=2, scl=1):
     """`ckread_image`: a 2-byte read (address + ACK slot, 2 bytes in, ACK,
     NACK), then STOP."""
+    d = _d_fm() if d is None else d
     m = I2C(sda, scl, d, nc_count=0)
     lanes = {0: m.transaction([("read", 2)])}
     return lanes, {0: m.header()}, {1: 0, 2: 3, 3: 4, 4: 5}

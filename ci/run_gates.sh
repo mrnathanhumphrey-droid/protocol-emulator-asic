@@ -290,7 +290,7 @@ GATES=(
   model/gate_clock_consistency.py
   model/gate_clock_literals.py
   # ⭐ THE SAME PROGRAMS AT BOTH TARGETS' CLOCKS behave the same in REAL TIME
-  # (I2C phases, SPI period, UART bit; tb_xclock, 8 runs), and a typed delay
+  # (I2C phases, SPI period, UART bit; 8 runs), and a typed delay
   # is caught (must-fire). Minutes.
   model/gate_clock_cross.py
   # ⭐ The I2C Fast-mode lane's witness: a RECORDED BENCH WITNESS (PA100T +
