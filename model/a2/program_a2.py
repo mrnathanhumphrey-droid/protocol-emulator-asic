@@ -138,10 +138,10 @@ T_EXT_HZ = {
     "f35804d5ebf9b4720911f39c2d8d983fb1a43e758cea99687723d5903998881b": {0: 500_000},  # sptgt_mosi
     # B3b, the contention arm (make_smoke_image.py --b3b): lane 0 is the SPI
     # target at 1 MHz beside the four other shipped lanes
-    "2de02a022cde606c48af8468a036402118724da563ee9345695b8df9667b67b6": {0: 1_000_000},   # b3b_a
-    "077a132170c19b56b1eff88a98207678138570ac5e5f8d02e0155e7b98bf6fe4": {0: 1_000_000},   # b3b_a3
-    "896dcd8a8dcf0c69d1933931ccff698203b7cfb2764277aadd1f94b9f721deeb": {0: 1_000_000},   # b3b_b
-    "287dfbd76f4370f8a6c4c271a9a5f721d3832416f9442fec5e747b48b9ff5da8": {0: 1_000_000},   # b3b_bnoi2c
+    "56b8cefdee221019b30e9454fd86698e33d5afd86f3284315da17f1d82853774": {0: 1_000_000},   # b3b_a
+    "021145e9525add81bc19dc286b63646d9330df170b808cb92490a53359a0433d": {0: 1_000_000},   # b3b_a3
+    "e192e9c943815a995fc02f0d9bc6a976d478ad6f79a5b2890bf0e3983b34696e": {0: 1_000_000},   # b3b_b
+    "bb497f105efd5d43776a87329b94cac25d595deec11b4f869114ae8b20ddc773": {0: 1_000_000},   # b3b_bnoi2c
 }
 
 

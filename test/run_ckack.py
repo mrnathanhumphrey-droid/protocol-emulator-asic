@@ -161,7 +161,7 @@ def image(path, d=D, flags=0):
     ]
     park = ACT_BASE + len(prog) * ACT_BYTES
     prog.append(act(OP_REARM, 0, 0, 500))
-    headers = [hdr(sda, scl, 0, d, flags, 2 * d, 3 * d, ACT_BASE,
+    headers = [hdr(sda, scl, 0, d, flags, *pe_isa.d_fields(d), ACT_BASE,
                    order=ORDER_MSB)]
     headers += [hdr(p, p, 0, 500, 0, 200, 240, park) for p in (0, 3, 4, 5)]
     write_image(path, pe_isa.join_image(headers, prog))

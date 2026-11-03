@@ -314,8 +314,7 @@ def build_i2c(d: int = D_FM_SHIPPABLE):
                     # D_tol is an 8-bit field: CAPPED (a tighter tolerance is
                     # the safe side), as build_all5 already does -- 3d is 261
                     # at the 60 MHz Fm delay (Wilson 11-03)
-                    {0: (P_SDA, P_SCL, MODE_OD, d, 2 * d,
-                         min(3 * d, (1 << pe_isa.D_W) - 1))},
+                    {0: (P_SDA, P_SCL, MODE_OD, d, *pe_isa.d_fields(d))},
                     park_at=P_SCL)
     return img, {"uio_oe": True, "uio_out": False, "uo_out": False,
                  "od_pins": (P_SCL, P_SDA)}
@@ -379,7 +378,7 @@ def build_spi_master(d: int = 7, mode0: bool = False, clkinv: bool = False):
     # `mode0` (SCK parked low before each select) every transaction is MODE 2.
     # Scratch only (`run_spifram`); the tracked image is the default.
     img = _assemble([(0, seq)],
-                    {0: (P_M_MOSI, P_M_SCLK, MODE_PP, d, 2 * d, 3 * d,
+                    {0: (P_M_MOSI, P_M_SCLK, MODE_PP, d, *pe_isa.d_fields(d),
                          ORDER_MSB, FLAG_CLK_INV if clkinv else 0)},
                     park_at=P_SCL)
     return img, {"uio_oe": False, "uio_out": False, "uo_out": True,
@@ -417,7 +416,7 @@ def build_spi_target(d: int = 6):
     # (added with this fix) is what makes the non-driving code safe rather
     # than an out-of-range write.
     img = _assemble([(0, seq)],
-                    {0: (P_T_MISO, PIN_NONE, MODE_PP, d, 2 * d, 3 * d)},
+                    {0: (P_T_MISO, PIN_NONE, MODE_PP, d, *pe_isa.d_fields(d))},
                     park_at=P_SCL)
     return img, {"uio_oe": True, "uio_out": True, "uo_out": False,
                  "od_pins": (P_SCL,)}
@@ -438,7 +437,7 @@ def build_uart_rx(d: int = 11, timeout: int = 300):
         (OP_REARM, 0, 1, d),
     ]
     img = _assemble([(0, seq)],
-                    {0: (P_TX, P_TX, MODE_PP, d, 2 * d, 3 * d)},
+                    {0: (P_TX, P_TX, MODE_PP, d, *pe_isa.d_fields(d))},
                     park_at=P_SCL)
     return img, {"uio_oe": False, "uio_out": False, "uo_out": True,
                  "uio_in": True, "od_pins": (P_SCL,)}
@@ -496,7 +495,7 @@ def build_all5(d: int = 9, d0: int = D_FM_SHIPPABLE):
              (OP_REARM, 0, 1, d + 4)]
     seqs = [(0, s_i2c), (1, s_tgt), (2, s_mst), (3, s_tx), (4, s_rx)]
     spec = {
-        0: (P_SDA,    P_SCL,     MODE_OD, d0,    2 * d0,      min(3 * d0, 255)),
+        0: (P_SDA,    P_SCL,     MODE_OD, d0,    *pe_isa.d_fields(d0)),
         # lane 1 is the SPI TARGET: no clock to drive, so PIN_NONE. It read
         # `P_T_MISO` -- its own data pin -- so OP_SHIFT's clock write
         # overwrote every data bit. See `build_spi_target`.

@@ -49,6 +49,7 @@ sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(ROOT, "test"))
 import clock                                                      # noqa: E402  Wilson 11-03
 
+from pe_isa import d_fields                                # noqa: E402  Wilson 11-03
 from pe_isa import (OP_ARM, OP_LEVEL, OP_READBIT, OP_REARM,  # noqa: E402
                     OP_SHIFT, OP_SHIFTIN, OP_START, OP_STOP, ORDER_LSB,
                     ORDER_MSB, PIN_NONE, SELF_CLOCKED)
@@ -159,8 +160,7 @@ class I2C:
         d = self.d
         # D_tol is an 8-bit field: capped, the safe side (3d = 261 at the
         # 60 MHz Fm delay; corpus.build_i2c and build_all5 cap the same way)
-        from pe_isa import D_W
-        return (self.sda, self.scl, 0, d, 2 * d, min(3 * d, (1 << D_W) - 1), flags)
+        return (self.sda, self.scl, 0, d, *d_fields(d), flags)
 
 
 DEFAULT_I2C_RULES = {
@@ -223,7 +223,7 @@ class SPI:
 
     def header(self, flags=0):
         d = self.d
-        return (self.mosi, self.sclk, 1, d, 2 * d, 3 * d, flags, self.order)
+        return (self.mosi, self.sclk, 1, d, *d_fields(d), flags, self.order)
 
 
 def _rtl_pin(name):

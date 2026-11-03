@@ -179,6 +179,19 @@ def _pack(fields, values, nbytes):
     return w.to_bytes(nbytes, "big")
 
 
+#: the largest D_sched / D_tol a header field holds
+D_MAX = (1 << D_W) - 1
+
+
+def d_fields(d):
+    """The conventional (D_sched, D_tol) = (2d, 3d) for a lane at delay `d`,
+    each CAPPED at its 8-bit field (Wilson 11-03). A tighter tolerance is the
+    safe side; the encoder itself still REFUSES an over-wide field, so the cap
+    is said here, once, by the caller's choice. At 50 MHz no shipped delay
+    reached the cap; at 60 the Fm delay (87: 3d = 261) and Sm (302) do."""
+    return min(2 * d, D_MAX), min(3 * d, D_MAX)
+
+
 def hdr(pin, clkpin, mode, t, flags, dsched, dtol, base,
         order=ORDER_LSB) -> bytes:
     """`mode`: 1 = push-pull, 0 = open-drain.

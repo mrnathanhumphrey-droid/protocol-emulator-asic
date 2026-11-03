@@ -77,7 +77,7 @@ def i2c_delay(mode_t_low_ns, jitter):
 # reliable bug.
 from pe_isa import (                      # noqa: F401,E402
     ACT_BASE, ACT_BYTES, ACT_W, AW, BQW, CW, DLY_W, D_W, HDR_BITS, HDR_BYTES,
-    N_LANES, SELF_CLOCKED, act_shift_clocked,
+    N_LANES, SELF_CLOCKED, act_shift_clocked, d_fields,
     act_shiftin_clocked, OP_ARM, OP_LEVEL, OP_READBIT, OP_REARM, OP_SHIFT, OP_SHIFTIN,
     ORDER_LSB, ORDER_MSB, FLAG_HALF_HIGH, FLAG_CLK_INV,
     OP_START, OP_STOP, PINW, PIN_NONE, UO0, UO1, UO2, UO3, act, hdr,
@@ -162,7 +162,7 @@ def build_stress(d0: int, d1: int):
     # 40/60 against a 5-cycle period would make every lane permanently late and
     # the run would be measuring an OVERLOADED system, not a jitter mechanism.
     headers = [
-        hdr(UO0, UO0, 1, d0, 0, 2 * d0, 3 * d0, l0),
+        hdr(UO0, UO0, 1, d0, 0, *d_fields(d0), l0),
         hdr(UO1, UO1, 1, d1, 0, 2 * d1, 3 * d1, l1),
         hdr(0, 0, 0, 500, 0, 200, 240, l2),
         hdr(1, 1, 0, 500, 0, 200, 240, l2),
@@ -420,7 +420,7 @@ def build_cemodes():
     base, prog, hs = ACT_BASE, [], []
     for ln in range(4):
         pin, ck, mode, d, flags, acts = lanes[ln]
-        hs.append(hdr(pin, ck, mode, d, flags, 2 * d, 3 * d, base,
+        hs.append(hdr(pin, ck, mode, d, flags, *d_fields(d), base,
                       order=ORDER_MSB))
         prog += acts
         base += len(acts) * ACT_BYTES
@@ -590,7 +590,7 @@ def build_ckread(d: int = D_FM_SHIPPABLE, sda: int = 2, scl: int = 1):
     prog.append(act(OP_REARM, 0, 0, 500))
     # ⛔ RULING RC4: I2C is MSB-first. This took `hdr()`'s LSB default, so
     # every byte this program sent went out bit-reversed.
-    headers = [hdr(sda, scl, 0, d, 0, 2 * d, 3 * d, base, order=I2C_ORDER)]
+    headers = [hdr(sda, scl, 0, d, 0, *d_fields(d), base, order=I2C_ORDER)]
     # parked lanes OFF the pad-override pins (CS/MISO), so N1's PINMAP
     # condition has nothing to report
     headers += [hdr(p, p, 0, 500, 0, 200, 240, park) for p in (0, 3, 4, 5)]
@@ -652,7 +652,7 @@ def build_cfgerr(d: int = 20):
     l0 = ACT_BASE
     lp = l0 + 3 * ACT_BYTES
     prog.append(act(OP_REARM, 0, 0, 500))
-    headers = [hdr(UO0, UO0, 0, d, 0, 2 * d, 3 * d, l0)]   # mode 0 on uo_out!
+    headers = [hdr(UO0, UO0, 0, d, 0, *d_fields(d), l0)]   # mode 0 on uo_out!
     for n in range(1, N_LANES):
         headers.append(hdr(n, n, 0, 500, 0, 200, 240, lp))
     return join_image(headers, prog)
@@ -690,7 +690,7 @@ def build_armnone(d: int = 20):
     off += len(seq) * ACT_BYTES
     lp = off
     prog.append(act(OP_REARM, 0, 0, 500))
-    headers.append(hdr(0, PIN_NONE, 1, d, 0, 2 * d, 3 * d, l0))
+    headers.append(hdr(0, PIN_NONE, 1, d, 0, *d_fields(d), l0))
     for n in range(1, N_LANES):
         headers.append(hdr(n, n, 0, 500, 0, 200, 240, lp))
     return join_image(headers, prog)
@@ -737,7 +737,7 @@ def build_pinnone(d: int = 20):
     lp = off
     prog.append(act(OP_REARM, 0, 0, 500))
     # the violating lane: header pin AND clock pin both on the reserved index
-    headers.append(hdr(PIN_NONE, PIN_NONE, 1, d, 0, 2 * d, 3 * d, l0))
+    headers.append(hdr(PIN_NONE, PIN_NONE, 1, d, 0, *d_fields(d), l0))
     for n in range(1, N_LANES):
         headers.append(hdr(n, n, 0, 500, 0, 200, 240, lp))
     return join_image(headers, prog)
@@ -784,7 +784,7 @@ def build_ckdegen(d: int = 20, route: int = 0):
     prog.append(act(OP_REARM, 0, 0, 500))
     # the offending lane needs a REAL clock pin DISTINCT from its data pin, or
     # the action is not clocked at all and the degeneracy never arises
-    headers.append(hdr(2, 1, 0, d, 0, 2 * d, 3 * d, l0))
+    headers.append(hdr(2, 1, 0, d, 0, *d_fields(d), l0))
     for n in range(1, N_LANES):
         headers.append(hdr(n + 2, n + 2, 0, 500, 0, 200, 240, lp))
     return join_image(headers, prog)
@@ -889,8 +889,8 @@ def build_census(d: int = 25):
     # and ARM, none of which touch the clock pin, so the alias is a don't-care
     # there -- and leaving it is what keeps the 1.6x refusal SCOPED rather than
     # a blanket rule. `build_five` relies on the same scope.
-    headers.append(hdr(UO0, UO2, 1, d, 0, 2 * d, 3 * d, base[0]))
-    headers.append(hdr(UO1, UO1, 1, d + 1, 0, 2 * d, 3 * d, base[1]))
+    headers.append(hdr(UO0, UO2, 1, d, 0, *d_fields(d), base[0]))
+    headers.append(hdr(UO1, UO1, 1, d + 1, 0, *d_fields(d), base[1]))
     for n in range(2, N_LANES):
         headers.append(hdr(n, n, 0, 500, 0, 200, 240, lp))
     return join_image(headers, prog)
@@ -969,8 +969,8 @@ def build_half(d: int = 24):
     # lane 0 open-drain on uio (a releasable bank, as the pin map requires);
     # lane 1 push-pull on uo_out. Both name a clock pin DISTINCT from the data
     # pin, which 1.6x requires of any shifting lane.
-    headers.append(hdr(2, 1, 0, d, 0, 2 * d, 3 * d, base[0]))
-    headers.append(hdr(10, 9, 1, d, 0, 2 * d, 3 * d, base[1]))
+    headers.append(hdr(2, 1, 0, d, 0, *d_fields(d), base[0]))
+    headers.append(hdr(10, 9, 1, d, 0, *d_fields(d), base[1]))
     for n in range(2, N_LANES):
         headers.append(hdr(4, 4, 0, 500, 0, 200, 240, lp))
     return join_image(headers, prog)
@@ -1049,7 +1049,7 @@ def build_i2cframe(d: int = 62, sda: int = 2, scl: int = 1, nbytes: int = 2):
     # ⚠ BEFORE THIS BIT EXISTED the program had to push 0x05 -- the reversal --
     # and sigrok read the 7-bit address as 0x50 either way, which is exactly
     # how the engine's LSB-first order stayed invisible.
-    headers.append(hdr(sda, scl, 0, d, 0, 2 * d, 3 * d, base,
+    headers.append(hdr(sda, scl, 0, d, 0, *d_fields(d), base,
                        order=ORDER_MSB))
     for n in range(1, N_LANES):
         headers.append(hdr(4, 4, 0, 500, 0, 200, 240, lp))
@@ -1088,7 +1088,7 @@ def build_rxfast(d: int = 24):
     prog.append(act(OP_REARM, 0, 0, 500))
     # MISO = uio[0] as an input; the lane needs a clock pin distinct from its
     # data pin only if it SHIFTS (1.6x), and this lane only shifts IN.
-    headers.append(hdr(0, 1, 1, d, 0, 2 * d, 3 * d, base[0]))
+    headers.append(hdr(0, 1, 1, d, 0, *d_fields(d), base[0]))
     for n in range(1, N_LANES):
         headers.append(hdr(4, 4, 0, 500, 0, 200, 240, lp))
     return join_image(headers, prog)
@@ -1116,7 +1116,7 @@ def build_tx_badclk(d: int = 12):
     off += ACT_BYTES
     lp = off
     prog.append(act(OP_REARM, 0, 0, 500))
-    headers.append(hdr(UO0, UO0, 1, d, 0, 2 * d, 3 * d, base[0]))
+    headers.append(hdr(UO0, UO0, 1, d, 0, *d_fields(d), base[0]))
     for n in range(1, N_LANES):
         headers.append(hdr(n, n, 0, 500, 0, 200, 240, lp))
     return join_image(headers, prog)
@@ -1193,7 +1193,7 @@ def build_tx(d0: int = 12, d1: int = 13, cnt: int = 7):
     # ⭐ DATA AND CLOCK ON DIFFERENT PINS, which is also how a real SPI lane is
     # configured (MOSI + SCK). See the docstring for what happens otherwise.
     for n, (pin, clk, d, q) in enumerate(lanes):
-        headers.append(hdr(pin, clk, 1, d, 0, 2 * d, 3 * d, base[n]))
+        headers.append(hdr(pin, clk, 1, d, 0, *d_fields(d), base[n]))
     for n in range(2, N_LANES):
         headers.append(hdr(n, n, 0, 500, 0, 200, 240, lp))
     return join_image(headers, prog)

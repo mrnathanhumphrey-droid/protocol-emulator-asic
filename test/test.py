@@ -1154,7 +1154,7 @@ async def test_clocked_tx_bytes_at_the_pins(dut):
             pe_isa.act(pe_isa.OP_REARM, 0, 1, d)]
     park = pe_isa.ACT_BASE + len(prog) * pe_isa.ACT_BYTES
     prog.append(pe_isa.act(pe_isa.OP_REARM, 0, 0, 500))
-    hdrs = [pe_isa.hdr(sda, scl, 0, d, 0, 2 * d, 3 * d, pe_isa.ACT_BASE,
+    hdrs = [pe_isa.hdr(sda, scl, 0, d, 0, *pe_isa.d_fields(d), pe_isa.ACT_BASE,
                        order=pe_isa.ORDER_MSB)]
     hdrs += [pe_isa.hdr(p, p, 0, 500, 0, 200, 240, park)
              for p in range(8) if p not in (sda, scl)][:4]
@@ -1206,7 +1206,7 @@ async def test_clocked_spi_read_at_the_pins(dut):
             pe_isa.act(pe_isa.OP_REARM, 0, 1, d)]
     park = pe_isa.ACT_BASE + len(prog) * pe_isa.ACT_BYTES
     prog.append(pe_isa.act(pe_isa.OP_REARM, 0, 0, 500))
-    hdrs = [pe_isa.hdr(P_M_MOSI, P_M_SCLK, 1, d, 0, 2 * d, 3 * d,
+    hdrs = [pe_isa.hdr(P_M_MOSI, P_M_SCLK, 1, d, 0, *pe_isa.d_fields(d),
                        pe_isa.ACT_BASE, order=pe_isa.ORDER_MSB)]
     hdrs += [pe_isa.hdr(p, p, 0, 500, 0, 200, 240, park) for p in (1, 2, 3, 4)]
     img = list(pe_isa.full_store(pe_isa.join_image(hdrs, prog)))
@@ -1264,7 +1264,7 @@ def _spi_read_image(d, flags):
             pe_isa.act(pe_isa.OP_REARM, 0, 1, d)]
     park = pe_isa.ACT_BASE + len(prog) * pe_isa.ACT_BYTES
     prog.append(pe_isa.act(pe_isa.OP_REARM, 0, 0, 500))
-    hdrs = [pe_isa.hdr(P_M_MOSI, P_M_SCLK, 1, d, flags, 2 * d, 3 * d,
+    hdrs = [pe_isa.hdr(P_M_MOSI, P_M_SCLK, 1, d, flags, *pe_isa.d_fields(d),
                        pe_isa.ACT_BASE, order=pe_isa.ORDER_MSB)]
     hdrs += [pe_isa.hdr(p, p, 0, 500, 0, 200, 240, park) for p in (1, 2, 3, 4)]
     return list(pe_isa.full_store(pe_isa.join_image(hdrs, prog)))

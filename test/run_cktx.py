@@ -69,7 +69,7 @@ def image(path):
     b1 = b0 + len(l0) * ACT_BYTES
     park = b1 + len(l1) * ACT_BYTES
     tail = [act(OP_REARM, 0, 0, 500)]
-    headers = [hdr(sda, scl, 0, d0, 0, 2 * d0, 3 * d0, b0, order=ORDER_MSB),
+    headers = [hdr(sda, scl, 0, d0, 0, *pe_isa.d_fields(d0), b0, order=ORDER_MSB),
                hdr(dat, ck, 1, d1, 0, 2 * d1, 3 * d1, b1, order=ORDER_LSB)]
     headers += [hdr(p, p, 0, 500, 0, 200, 240, park) for p in (0, 5, 6)]
     write_image(path, pe_isa.join_image(headers, l0 + l1 + tail))
@@ -124,7 +124,7 @@ def pindiv_image(path=None):
         # bits by hand, and v2's opcode is 5 wide: order_for got the wrong ops
         # and lane 4's I2C lane came out LSB-first (gate_i2c_order, 10-25)
         ops = [pe_isa._unpack(pe_isa.ACT_FIELDS, a, ACT_BYTES)["op"] for a in acts]
-        hs.append(hdr(pin, ck, mode, d, 0, 2 * d, 3 * d, base,
+        hs.append(hdr(pin, ck, mode, d, 0, *pe_isa.d_fields(d), base,
                       order=order_for(ops)))
         prog += acts
         base += len(acts) * ACT_BYTES

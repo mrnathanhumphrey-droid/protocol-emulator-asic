@@ -102,7 +102,7 @@ def i2c_write_image():
              I.act(I.OP_STOP, sda, 1, d), I.act(I.OP_REARM, 0, 1, 1000)]
     park = I.ACT_BASE + len(prog) * I.ACT_BYTES
     prog.append(I.act(I.OP_REARM, 0, 0, 500))
-    hdrs = [I.hdr(sda, scl, 0, d, 0, 2 * d, 3 * d, I.ACT_BASE,
+    hdrs = [I.hdr(sda, scl, 0, d, 0, *I.d_fields(d), I.ACT_BASE,
                   order=I.ORDER_MSB)]
     hdrs += [I.hdr(p, p, 0, 500, 0, 200, 240, park) for p in (0, 3, 4, 5)]
     return I.join_image(hdrs, prog)
