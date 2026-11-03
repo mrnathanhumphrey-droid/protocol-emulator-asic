@@ -9,9 +9,13 @@ are equal runs on EVERY push, not once.
 
 THE PROOF: Yosys `equiv_make` / `equiv_simple` / `equiv_induct` on the two texts,
 read from the SHIPPED file (the module is lifted verbatim, then elaborated with
-and without `SYNTHESIS`), at every SW the chip and the benches use:
-  SW = 7  the store's real bank (AW 9 - WB_W 2: 128 rows of 8 bits), and
-          tb_rowmux's first size;  SW = 4, 3  tb_rowmux's other two.
+and without `SYNTHESIS`), at every SW the chip and the benches use.
+⛔ THE SIZES ARE FOUND, NEVER STORED (the stored-number audit, 11-02): a list
+typed here goes stale the day a bench adds a size. The CHIP's is elaborated --
+yosys `hierarchy` on info.yaml's top and sources, because there SW is AW - WB_W,
+an expression -- and each BENCH's is read from its `.SW(n)`; iverilog benches use
+`$random`, which yosys cannot read. A bench instance whose SW is not a literal is
+red, not skipped. (At 11-02: the chip 7; tb_rowmux 7, 4, 3.)
 The tree is combinational, so the proof is complete -- every input, not a sample.
 
 ARMS, per SW:  clean -> PROVEN (every $equiv cell proven, none unproven, and at
@@ -42,7 +46,9 @@ sys.path.insert(0, HERE)
 import gate_formal_miters as FM          # noqa: E402  (the suite resolver)
 
 STORE = os.path.join(ROOT, "src", "pe_store.v")
-SWS = (7, 4, 3)
+INST = re.compile(r"\bpe_rowmux\s*#\s*\(")
+LITERAL = re.compile(r"\bpe_rowmux\s*#\s*\(\s*\.SW\s*\(\s*(\d+)\s*\)\s*\)")
+PARAMOD = re.compile(r"\$paramod\\pe_rowmux\\SW=s?32'([01]+)")
 STATUS = re.compile(r"Of those cells (\d+) are proven and (\d+) are unproven")
 FOUND = re.compile(r"Found (\d+) \$equiv cells")
 
@@ -107,6 +113,51 @@ def yosys_argv(how, sby, workdir, script):
     return [os.path.join(ydir, "yosys"), "-s", script]
 
 
+def chip_sizes(how, sby, work):
+    """The SWs the chip builds pe_rowmux at: info.yaml's top and sources,
+    elaborated (`hierarchy` only), read from yosys's parameterised names."""
+    info = open(os.path.join(ROOT, "info.yaml"), encoding="utf-8").read()
+    top = re.search(r'^\s*top_module:\s*"([^"]+)"', info, re.M)
+    block = re.search(r"^\s*source_files:\s*\n((?:\s*-\s*\"[^\"]+\"\s*\n)+)",
+                      info, re.M)
+    if not top or not block:
+        raise ValueError("info.yaml: no top_module / source_files")
+    path = (lambda p: FM.wslpath(p)) if how == "wsl" else (lambda p: p)
+    files = [path(os.path.join(ROOT, "src", f)).replace("\\", "/")
+             for f in re.findall(r'"([^"]+)"', block.group(1))]
+    with open(os.path.join(work, "chip_sw.ys"), "w", encoding="utf-8",
+              newline="\n") as fh:
+        fh.write("read_verilog -sv %s\nhierarchy -top %s\n" % (
+            " ".join(files), top.group(1)))
+    r = subprocess.run(yosys_argv(how, sby, work, "chip_sw.ys"), cwd=work,
+                       capture_output=True, text=True, encoding="utf-8",
+                       errors="replace")
+    sws = {int(b, 2) for b in PARAMOD.findall(r.stdout + r.stderr)}
+    if r.returncode or not sws:
+        tail = (r.stdout + r.stderr).strip().splitlines()[-3:]
+        raise ValueError("the chip's elaboration found no pe_rowmux size "
+                         "(rc %d): %s" % (r.returncode, " | ".join(tail)))
+    return sws
+
+
+def bench_sizes():
+    """{sw: [bench]} from every test/*.v that instantiates pe_rowmux; an
+    instance whose SW is not a literal raises (red, not skipped)."""
+    out = {}
+    tdir = os.path.join(ROOT, "test")
+    for f in sorted(os.listdir(tdir)):
+        if not f.endswith(".v"):
+            continue
+        text = open(os.path.join(tdir, f), encoding="utf-8").read()
+        n, lits = len(INST.findall(text)), LITERAL.findall(text)
+        if n != len(lits):
+            raise ValueError("test/%s: %d pe_rowmux instances, %d with a "
+                             "literal .SW(n)" % (f, n, len(lits)))
+        for sw in lits:
+            out.setdefault(int(sw), []).append(f)
+    return out
+
+
 def mustfires_verdict():
     """The verdict reader itself: a log with no status line, and an unproven
     clean log, are both red."""
@@ -143,7 +194,16 @@ def main() -> int:
     with open(os.path.join(work, "rowmux.v"), "w", encoding="utf-8",
               newline="\n") as fh:
         fh.write(body)
-    for sw in SWS:
+    try:
+        chip, benches = chip_sizes(how, sby, work), bench_sizes()
+    except ValueError as e:
+        print("  *** %s" % e)
+        print("GATE rowmux-equiv: FAILED (1)")
+        return 1
+    for sw in sorted(chip | set(benches), reverse=True):
+        print("  SW=%d used by: %s" % (sw, ", ".join(
+            (["the chip"] if sw in chip else []) + benches.get(sw, []))))
+    for sw in sorted(chip | set(benches), reverse=True):
         for arm, defs, expect in (("clean", "", "PROVEN"),
                                   ("M_ROWMUX_NODE", "-DM_ROWMUX_NODE", "NOT PROVEN")):
             name = "sw%d_%s.ys" % (sw, arm.lower())
