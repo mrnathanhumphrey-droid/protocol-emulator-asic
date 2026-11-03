@@ -66,6 +66,9 @@ ARMS = [
     ("raw narrow",     ["ARM_RAW"],            "pe_store: *** READ-AFTER-WRITE",          "was NOT stopped"),
     ("raw wide",       ["ARM_RAW_WIDE"],       "pe_store: *** READ-AFTER-WRITE",          "was NOT stopped"),
     ("shared read",    ["ARM_SHARED"],         "pe_store: *** SHARED READ",               "was NOT stopped"),
+    # the pre-decode (Wilson 11-03): the one-hot registered from the address
+    # one cycle late writes the PREVIOUS write's row
+    ("predecode late", ["M_PREDECODE_LATE"],   "STORE-LATCH *** narrow read",             "STORE-LATCH PASS"),
 ]
 # the row-read tree alone (Wilson 11-01): every row at three tree sizes
 TREE_BENCH = "test/tb_rowmux.v"
@@ -90,9 +93,17 @@ _ICG = ".GATE(GATE), .GCLK(GCLK)"
 
 
 def cells_sim():
-    """(iverilog, vvp) for the bound arms -- named by env, or the suite's."""
+    """(iverilog, vvp or None) for the bound arms -- named by env, or the
+    suite's. vvp None = the suite's own, through sim_run.vvp."""
     return (os.environ.get("PE_IVERILOG_CELLS") or tool("iverilog"),
-            os.environ.get("PE_VVP_CELLS") or tool("vvp"))
+            os.environ.get("PE_VVP_CELLS"))
+
+
+def cells_run(vvp_bin, args):
+    """The sim_run command for a bound-arm run."""
+    if vvp_bin:
+        return sim_run.argv([vvp_bin, "-n"] + list(args), images=[])
+    return sim_run.vvp(list(args), images=[])
 
 
 def pdk_models():
@@ -154,7 +165,7 @@ def main() -> int:
             civ, cvvp = cells_sim()
             print("  bound arms simulate on: %s" % civ)
             b = run([civ, "-g2012", "-o", vvp, "-s", "tb_probe", pv] + models)
-            r = run(sim_run.argv([cvvp, "-n", vvp], images=[])) if b.returncode == 0 else None
+            r = run(cells_run(cvvp, [vvp])) if b.returncode == 0 else None
             if r is None or "PROBE q=1" not in r.stdout:
                 probs.append("COULD NOT RUN the bound store: this iverilog does not "
                              "drive the PDK models' $setuphold-delayed nets (a "
@@ -179,7 +190,7 @@ def main() -> int:
                     if b.returncode != 0:
                         probs.append("%s: build failed: %s" % (name, (b.stdout + b.stderr)[-300:]))
                         continue
-                    out = run(sim_run.argv([cvvp, "-n", vvp], images=[]))
+                    out = run(cells_run(cvvp, [vvp]))
                     out = out.stdout + out.stderr
                     got = want in out and refuse not in out
                     line = next((l for l in out.splitlines() if want in l), "")

@@ -104,6 +104,11 @@ FORBIDDEN_LITERALS = {
 PDK_CELL_RE = re.compile(
     r"\b(sg13[a-z0-9]*_|sky130_|RM_IHPSG13_|DFF_X|INV_X|NAND\d_X|ASAP7)",
     re.I)
+#: ⭐ THE ONE BINDING FILE (Wilson 10-31 / 11-03): src/pe_cells_ihp.v binds
+#: pe_store's three generic cells to IHP stock cells under `ifdef
+#: PE_IHP_CELLS`, so the generic RTL stays portable and THIS file is the whole
+#: of the PDK dependence -- one file to swap per PDK, and no other may name one.
+PDK_BINDING_FILES = {"pe_cells_ihp.v"}
 
 
 def verilog_files():
@@ -297,6 +302,8 @@ def main() -> int:
     print("  --- portability: no PDK cells instantiated in RTL ---")
     pdk = []
     for f, body in bodies.items():
+        if os.path.basename(f) in PDK_BINDING_FILES:
+            continue
         for m in PDK_CELL_RE.finditer(body):
             pdk.append((m.group(0), os.path.basename(f)))
     if pdk:

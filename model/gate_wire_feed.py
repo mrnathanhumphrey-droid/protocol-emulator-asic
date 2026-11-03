@@ -191,6 +191,12 @@ REGISTRY = {
     "branch_cmp_lo_image.hex": (INTERNAL, {
         "checked_by": "test/run_branch_check.py",
         "how": "as branch_cmp_order: the low-nibble mode, decision recomputed per CMP"}),
+    # ⭐ admissible since the 60 MHz move (model/nonadmissible: r 16 <= t 20),
+    # so it needs a class here; it was exempt as NON_ADMISSIBLE before
+    "ckhold_over_image.hex": (INTERNAL, {
+        "checked_by": "model/gate_sda_hold.py",
+        "how": "D4's must-RUN point one cycle above the SDA hold: W4 (no data "
+               "move with SCL released) and its W5 counts, measured each run"}),
     "census_image.hex": (INTERNAL, {
         "checked_by": "test/run_lockstep.py",
         "how": "dispatch and pin streams byte-identical to the recorded "
