@@ -47,6 +47,13 @@ module tb_store_latch;
   initial begin
     repeat (2) @(negedge clk);
     rst_n = 1'b1;
+`ifdef PE_IHP_CELLS
+    // ⭐ THE BOUND STORE (Wilson 11-03): the PDK's own latch models power up X,
+    // as a real latch with no reset does -- the random fill is the GENERIC
+    // model's stand-in for that. The bound arm proves the bindings write and
+    // read; the write/readback below must leave no X behind.
+    $display("STORE-LATCH bound cells: power-up X by the PDK models (no fill check)");
+`else
     // ---- the power-up fill: random, never X and never one value ----
     seen = 0; nd = 0; nx = 0; first = dut.g_mem.peek(0);
     for (a = 0; a < (1 << AW); a = a + 1) begin
@@ -59,6 +66,7 @@ module tb_store_latch;
       $finish;
     end
     $display("STORE-LATCH fill random: %0d distinct values over %0d bytes", nd, 1 << AW);
+`endif
     bad = 0;
     // ---- write every byte ----
     for (a = 0; a < (1 << AW); a = a + 1) wr(a[AW-1:0], pat(a[AW-1:0]));

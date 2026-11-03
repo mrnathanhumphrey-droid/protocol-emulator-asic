@@ -164,14 +164,14 @@ def run(cmd):
     return subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True, encoding="utf-8", errors="replace")
 
 
-def build(out, defines=()):
-    r = run([tool("iverilog"), "-g2012", "-I", ROOT, "-o", out, "-s", "tb_pit"]
-            + ["-D%s" % d for d in defines] + [BENCH] + RTL)
+def build(out, defines=(), iverilog=None, extra=()):
+    r = run([iverilog or tool("iverilog"), "-g2012", "-I", ROOT, "-o", out, "-s", "tb_pit"]
+            + ["-D%s" % d for d in defines] + [BENCH] + RTL + list(extra))
     if r.returncode != 0:
         raise RuntimeError("build failed: %s" % (r.stdout + r.stderr)[-400:])
 
 
-def sim(vvp, tmp, name, img, stim):
+def sim(vvp, tmp, name, img, stim, vvp_bin=None):
     ip = os.path.join(tmp, "pitcap_%s.hex" % name)
     I.write_image(ip, img)
     sim_run.scratch_image(GEN, ip)
@@ -180,9 +180,10 @@ def sim(vvp, tmp, name, img, stim):
         for t, v in stim:
             fh.write("%d %02x\n" % (t, v))
     op = os.path.join(tmp, "pitcap_%s.out" % name)
-    r = run(sim_run.vvp([vvp, "+IMG=%s" % ip, "+NBYTES=%d" % I.STORE_BYTES, "+STIM=%s" % sp,
-                         "+OUT=%s" % op, "+NCYC=%d" % NCYC_FOR.get(name[:-2] if name.endswith("_m") else name, NCYC)],
-                        images=[ip]))
+    args = [vvp, "+IMG=%s" % ip, "+NBYTES=%d" % I.STORE_BYTES, "+STIM=%s" % sp,
+            "+OUT=%s" % op, "+NCYC=%d" % NCYC_FOR.get(name[:-2] if name.endswith("_m") else name, NCYC)]
+    r = run(sim_run.vvp(args, images=[ip]) if vvp_bin is None
+            else sim_run.argv([vvp_bin, "-n"] + args, images=[ip]))
     log, mem, lv0 = [], {}, None
     with open(op, encoding="ascii") as fh:
         for ln in fh:
@@ -260,6 +261,44 @@ def main() -> int:
         print("    %-18s %-36s %s" % (define, what, ("RED on " + ", ".join(broke)) if broke else "*** SURVIVED ***"))
         if not broke:
             probs.append("%s survived" % define)
+    # ⭐ THE BOUND STORE (Wilson 11-03): the tapeout config builds pe_store on
+    # IHP stock cells (PE_IHP_CELLS, src/pe_cells_ihp.v). One PIT case runs on
+    # the generic and on the bound cells, ON THE SAME SIMULATOR (the bound
+    # arms' -- gate_store_latch.cells_sim), and the stored bytes must be
+    # BYTE-IDENTICAL as well as bit-exact against the golden encoder. No PDK
+    # models or a simulator that cannot drive them = COULD NOT RUN, red.
+    print()
+    print("  bound store (PE_IHP_CELLS on the PDK's cell models)")
+    import gate_store_latch as GSL
+    models = GSL.pdk_models()
+    civ, cvvp = GSL.cells_sim()
+    if models is None:
+        probs.append("COULD NOT RUN the bound PIT case: no PDK stdcell models")
+    else:
+        name, waves, mask = CASES[0]
+        got = {}
+        for arm, defs, extra in (("generic", [], []),
+                                 ("bound", ["PE_IHP_CELLS"], ["src/pe_cells_ihp.v"] + models)):
+            bv = os.path.join(tmp, "pit_%s.vvp" % arm)
+            try:
+                build(bv, defs, civ, extra)
+            except RuntimeError as exc:
+                probs.append("COULD NOT RUN the bound PIT case (%s build): %s" % (arm, exc))
+                break
+            got[arm] = sim(bv, tmp, "%s_%s" % (name, arm), sniff_image(mask, BUDGET_FOR.get(name, 0)),
+                           waves_to_stim(waves), cvvp)
+        if len(got) == 2:
+            same = got["generic"][1] == got["bound"][1]
+            p = compare(got["bound"][0], got["bound"][1], got["bound"][2], name)[0]
+            print("    %-14s on %s: bound %s generic (%d store bytes), %s" % (
+                name, os.path.basename(civ), "==" if same else "!=", len(got["bound"][1]),
+                "bit-exact" if not p else "*** " + p[0]))
+            if not same:
+                diff = sorted(a for a in set(got["generic"][1]) | set(got["bound"][1])
+                              if got["generic"][1].get(a) != got["bound"][1].get(a))
+                probs.append("bound store: %d byte(s) differ from the generic run, first at %s"
+                             % (len(diff), diff[:1]))
+            probs += ["bound %s: %s" % (name, x) for x in p]
     print()
     for p_ in probs:
         print("  *** " + p_)

@@ -213,6 +213,9 @@ SCRATCH = {
     # Wilson: two queues' heads swapped -- tb_tx's cross-queue diagnosis
     # (distinct per-queue data); also V2 pins-only red in run_cktx
     "S_QUEUE_SWAP": "test/run_mutants.py",
+    # Wilson 11-03: the bound store's clock-gate enable inverted -- the bound
+    # arm of gate store-latch, on the PDK's own models, must fail (CI)
+    "S_ICG_POLARITY": "test/gate_store_latch.py",
 }
 
 

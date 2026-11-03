@@ -12,8 +12,15 @@ cd "$ROOT" || exit 1
 tool_banner verilator
 SRC="${1:?src dir}"
 LOG="${2:?log path}"
+# optional 3rd argument: the PDK stdcell Verilog directory -> lint the BOUND
+# store (PE_IHP_CELLS, src/pe_cells_ihp.v on the PDK's models; Wilson 11-03)
+MODELS="${3:-}"
+EXTRA=()
+if [ -n "$MODELS" ]; then
+  EXTRA=(-DPE_IHP_CELLS "$SRC/pe_cells_ihp.v" "$MODELS/sg13cmos5l_stdcell.v" "$MODELS/sg13cmos5l_udp.v")
+fi
 "$VL" --lint-only -Wall --top-module tt_um_protocol_emulator \
-      "$SRC/pe_store.v" "$SRC/pe_engine.v" "$SRC/project.v" > "$LOG" 2>&1
+      "$SRC/pe_store.v" "$SRC/pe_engine.v" "$SRC/project.v" "${EXTRA[@]}" > "$LOG" 2>&1
 rc=$?
 echo "  lint exit $rc -> $LOG"
 exit 0

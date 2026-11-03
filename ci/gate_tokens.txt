@@ -13,6 +13,7 @@ model/gate_bench_lint.py            ^\s*GATE bench-lint: PASSED\s*$
 model/gate_clock_consistency.py     ^\s*GATE clock-consistency: PASSED\s*$
 model/gate_clock_literals.py        ^\s*GATE clock-literals: PASSED\s*$
 model/gate_clock_cross.py           ^\s*GATE clock-cross: PASSED\s*$
+model/gate_canary_check.py          ^\s*GATE canary-check: PASSED\s*$
 model/gate_bench_race.py            ^\s*GATE bench-race: PASSED\s*$
 test/gate_xsim.py                   ^\s*GATE xsim: PASSED\s*$
 model/gate_degenerate_fields.py     ^\s*GATE degenerate-fields: PASSED\s*$

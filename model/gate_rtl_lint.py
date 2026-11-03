@@ -78,14 +78,16 @@ def wsl_path(p):
     return "/mnt/%s%s" % (drive[0].lower(), rest.replace("\\", "/"))
 
 
-def lint(src_dir, log):
-    """Run test/rtl_lint.sh natively or via WSL (with the pin); return text."""
+def lint(src_dir, log, models=None):
+    """Run test/rtl_lint.sh natively or via WSL (with the pin); return text.
+    `models` (the PDK stdcell Verilog directory) lints the BOUND store."""
     sc = os.path.join(ROOT, "test", "rtl_lint.sh")
     if tool_or_none("verilator") or os.name != "nt":
-        cmd = ["bash", sc, src_dir, log]
+        cmd = ["bash", sc, src_dir, log] + ([models] if models else [])
     else:
         cmd = ["wsl.exe", "--", "env", "PE_VERILATOR=%s" % PINNED_WSL_VERILATOR,
-               "bash", wsl_path(sc), wsl_path(src_dir), wsl_path(log)]
+               "bash", wsl_path(sc), wsl_path(src_dir), wsl_path(log)] + \
+              ([wsl_path(models)] if models else [])
     r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",
                        errors="replace")
     print("    " + "\n    ".join(l for l in r.stdout.splitlines() if l.strip()))
@@ -192,6 +194,32 @@ def main() -> int:
         rc = 1
     if not probs:
         print("  no BLKSEQ or COMBDLY outside a checked block-local temporary")
+
+    # ---- the BOUND store (Wilson 11-03): PE_IHP_CELLS on the PDK's models --
+    print()
+    print("  --- the bound store: PE_IHP_CELLS + src/pe_cells_ihp.v on the PDK's models ---")
+    import gate_store_latch as GSL
+    models = GSL.pdk_models()
+    if models is None:
+        print("  *** COULD NOT RUN: no PDK stdcell models (PE_PDK_STDCELL_VERILOG / PDK_ROOT)")
+        rc = 1
+    else:
+        tb = lint(os.path.join(ROOT, "src"), os.path.join(SCRATCH, "bound.log"),
+                  os.path.dirname(models[0]))
+        if tb is None:
+            print("  *** the bound lint produced no log -- RED, not skipped")
+            rc = 1
+        else:
+            # the PDK's own files are not ours to judge: drop their warnings
+            tb = "\n".join(l for l in tb.splitlines() if "sg13cmos5l_" not in l)
+            pb, cb = judge(tb, os.path.join(ROOT, "src"))
+            print("  -Wall classes, bound: %s"
+                  % (", ".join("%s %d" % kv for kv in sorted(cb.items())) or "none"))
+            for p in pb:
+                print("  *** bound: %s" % p)
+                rc = 1
+            if not pb:
+                print("  bound: no BLKSEQ or COMBDLY in our files")
 
     print()
     print("  --- must-fire ---")

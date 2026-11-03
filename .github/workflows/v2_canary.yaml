@@ -31,7 +31,6 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 330
     env:
-      PDK_SHA: 2bbec755dc67ca3db0261c3d6163e15735d66710
       TT_REF: d66cf17
       LL_VER: 3.1.0.dev3
       PDK_ROOT: /home/runner/pdk
@@ -40,6 +39,21 @@ jobs:
     steps:
       - name: Checkout the v2 branch
         uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      # ⛔⛔ A CANARY IS ONE COMMIT ON A WORK COMMIT (Wilson 11-03, B1). It is
+      # built by ci/make_canary.py <density>, and this refuses anything else:
+      # HEAD~1 must be on origin/work/latch-store, and HEAD may change only
+      # src/config.json's PL_TARGET_DENSITY_PCT value and test.yaml's ignore
+      # line -- so a canary hardens EXACTLY the work branch's design and config.
+      - name: The canary is the work branch plus its density (B1)
+        shell: bash
+        run: python ci/make_canary.py --check
+
+      - name: The pinned PDK commit (ci/pdk.sha)
+        shell: bash
+        run: echo "PDK_SHA=$(tr -d '[:space:]' < ci/pdk.sha)" >> "$GITHUB_ENV"
 
       - name: Stamp the inputs (branch, SHA, config hash)
         shell: bash

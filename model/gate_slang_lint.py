@@ -146,6 +146,41 @@ def main():
                                          else "*** STAYED GREEN"))
         ok = ok and bool(p)
 
+    # ---- the BOUND store (Wilson 11-03): PE_IHP_CELLS + the PDK's models --
+    # The tapeout config builds pe_store on IHP stock cells; this compiles
+    # THAT version against the PDK's own cell models. Zero errors in OUR
+    # files is the bar; the models' own diagnostics are reported, not judged.
+    print("  --- the bound store: PE_IHP_CELLS on the PDK's cell models ---")
+    sys.path.insert(0, os.path.join(ROOT, "test"))
+    import gate_store_latch as GSL
+    models = GSL.pdk_models()
+    if models is None:
+        print("  *** COULD NOT RUN: no PDK stdcell models (PE_PDK_STDCELL_VERILOG / PDK_ROOT)")
+        ok = False
+    else:
+        b = dict(srcs)
+        with open(os.path.join(ROOT, GSL.CELLS), encoding="utf-8") as fh:
+            b[GSL.CELLS] = fh.read()
+        for f in ("src/pe_store.v", GSL.CELLS):
+            b[f] = "`define PE_IHP_CELLS\n" + b[f]
+        # the PDK models carry `timescale 1ns/10ps and our RTL none, which slang
+        # calls MissingTimeScale once the two are mixed; our files get the
+        # benches' `timescale for THIS compile only (it changes no logic)
+        for f in [f for f in b if f.startswith("src/")]:
+            b[f] = "`timescale 1ns / 1ps\n" + b[f]
+        for m in models:
+            with open(m, encoding="utf-8", errors="replace") as fh:
+                b[os.path.basename(m)] = fh.read()
+        ours = set(FILES) | {GSL.CELLS}
+        diags = diagnose(b)
+        mine = [d for d in diags if d[2] in ours]
+        errs = [d for d in mine if d[0]]
+        cls = sorted({d[1] for d in mine if not d[0]})
+        print("  bound    : errors in our files %d; warning classes %s; PDK-model "
+              "diagnostics %d (not judged)" % (len(errs), cls or "-", len(diags) - len(mine)))
+        for e in errs[:5]:
+            print("  *** bound: %s at %s:%s" % (e[1], e[2], e[3]))
+        ok = ok and not errs
     print()
     print("  SLANG LINT GATE: %s" % ("PASSED" if ok else "*** FAILED"))
     return 0 if ok else 1

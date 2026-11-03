@@ -326,6 +326,18 @@ CHANGE_SET = frozenset([
     "lean/JLane/JLane/HoldGate.lean",      # SDA_HS computed; d >= SDA_HS + 16 = 39
     "docs/HOST_INTERFACE.md",              # the clock note: cycles hold, ns are 50 MHz
     "docs/SCOPE.md",                       # v1 scope at 50 MHz, pointer to v2's clock
+    # ---- AMENDMENT 11 (11-03, Wilson: the config + bindings commit, A1/B1).
+    "src/pe_cells_ihp.v",                  # the IHP stock-cell bindings, now the tapeout's
+    "test/gate_store_latch.py",            # the bound store on the PDK's models + polarity
+    "test/run_pit_capture.py",             # one PIT case, bound == generic
+    "test/rtl_lint.sh",                    # the bound lint (3rd argument: the models)
+    "model/gate_rtl_lint.py",              # Verilator on the bound store
+    "model/gate_slang_lint.py",            # slang on the bound store
+    "model/gate_canary_check.py",          # NEW: B1, the canary builder + refusal
+    "ci/make_canary.py",                   # NEW: a canary = work commit + density
+    "ci/pdk.sha",                          # NEW: the pinned PDK commit, one place
+    "model/nonadmissible.py",              # ckhold_over admissible at 60 MHz (r 16 <= 20)
+    ".github/workflows/v2_canary.yaml",    # B1 check step; PDK_SHA from ci/pdk.sha
 ])
 
 

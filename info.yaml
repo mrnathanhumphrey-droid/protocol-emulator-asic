@@ -11,7 +11,7 @@ project:
                                # config.json CLOCK_PERIOD and test/pe_clock.vh to it.
 
   # How many tiles your design occupies? A single tile is about 167x108 uM.
-  tiles: "6x4"          # Jane Street brief: "Set the tile size in info.yaml to 6x4."
+  tiles: "8x4"          # v2: 8x4 confirmed final for the March shuttle (v1: 6x4, the Jane Street brief)
                         # NB the template comment lists only 1x1..8x2 -- the two
                         # primary sources CONFLICT; this push is the experiment.
 
@@ -25,6 +25,7 @@ project:
     - "project.v"
     - "pe_engine.v"
     - "pe_store.v"
+    - "pe_cells_ihp.v"
 
 # The pinout of your project. Leave unused pins blank. DO NOT delete or add any pins.
 # This section is for the datasheet/website. Use descriptive names (e.g., RX, TX, MOSI, SCL, SEG_A, etc.).

@@ -377,6 +377,32 @@ jobs:
       # vendored, reached via PYRTA_SRC, and those gates are RED by design
       # without it rather than degrading to our own recurrence.
       # `model/a2/run_a2.py` is their harness, by hand at each checkpoint.
+      # ⭐ THE PDK's STDCELL VERILOG, AT THE PINNED PDK COMMIT (ci/pdk.sha, the
+      # one the canaries harden with; Wilson 11-03, A1). The bound store's
+      # gates -- gate_store_latch, run_pit_capture, the two lints -- run the
+      # tapeout bindings (PE_IHP_CELLS) on the PDK's own cell models. Only
+      # libs.ref/sg13cmos5l_stdcell/verilog is fetched (sparse), and cached by
+      # the pin. A missing file is COULD NOT RUN in those gates -- red.
+      - name: Cache the PDK's stdcell Verilog (pinned)
+        id: pdkv
+        uses: actions/cache@v4
+        with:
+          path: /home/runner/pdk_stdcell
+          key: ihp-sg13cmos5l-stdcell-verilog-${{ hashFiles('ci/pdk.sha') }}
+      - name: Fetch the PDK's stdcell Verilog (sparse, pinned)
+        if: steps.pdkv.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha=$(tr -d '[:space:]' < ci/pdk.sha)
+          mkdir -p /home/runner/pdk_stdcell && cd /home/runner/pdk_stdcell
+          git init -q
+          git remote add origin https://github.com/IHP-GmbH/IHP-Open-PDK.git
+          git sparse-checkout set --no-cone /ihp-sg13cmos5l/libs.ref/sg13cmos5l_stdcell/verilog/
+          git fetch -q --depth 1 --filter=blob:none origin "$sha"
+          git checkout -q FETCH_HEAD
+          ls -l ihp-sg13cmos5l/libs.ref/sg13cmos5l_stdcell/verilog/
+
       - name: Model gates (ci/run_gates.sh)
         shell: bash
         # ⭐ THE PINNED VERILATOR, NAMED NOT PATHED, so the sweep and the cocotb
@@ -391,6 +417,12 @@ jobs:
           PE_SBY: /opt/oss-cad-suite/bin/sby
           # CE5's 1-Wire gate runs its simulations 3 at a time (~4 min serial)
           PE_OW_JOBS: "3"
+          # the bound store (Wilson 11-03): the PDK's cell models, and the
+          # pinned suite's iverilog 14 for THOSE arms only -- it drives the
+          # models' $setuphold-delayed nets; apt's stays the suite's iverilog
+          PE_PDK_STDCELL_VERILOG: /home/runner/pdk_stdcell/ihp-sg13cmos5l/libs.ref/sg13cmos5l_stdcell/verilog
+          PE_IVERILOG_CELLS: /opt/oss-cad-suite/bin/iverilog
+          PE_VVP_CELLS: /opt/oss-cad-suite/bin/vvp
         run: |
           set -o pipefail
           bash ci/run_gates.sh --shard "${{ matrix.shard }}" 2>&1 | tee gates.log

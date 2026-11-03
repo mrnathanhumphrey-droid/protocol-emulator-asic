@@ -293,6 +293,9 @@ GATES=(
   # (I2C phases, SPI period, UART bit; 8 runs), and a typed delay
   # is caught (must-fire). Minutes.
   model/gate_clock_cross.py
+  # ⭐ B1 (Wilson 11-03): a canary is the work commit plus its density, one
+  # commit (ci/make_canary.py); its builder and its refusal, checked. Seconds.
+  model/gate_canary_check.py
   # ⭐ The I2C Fast-mode lane's witness: a RECORDED BENCH WITNESS (PA100T +
   # MB85RC256V, DSLogic captures) re-checked here in seconds, no simulator --
   # not a hardware run in CI (Wilson 10-17).

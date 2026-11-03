@@ -75,6 +75,7 @@ fast model/gate_rowmux_equiv.py
 fast model/gate_clock_consistency.py
 fast model/gate_clock_literals.py
 sim2 model/gate_clock_cross.py
+fast model/gate_canary_check.py
 fast model/gate_i2c_hw_witness.py
 fast model/gate_onewire_hw_witness.py
 fast model/gate_flow_config.py
