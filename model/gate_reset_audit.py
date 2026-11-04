@@ -51,22 +51,19 @@ ALLOWED = {
     # The array's own unreset contract is gate store-latch's: it powers up
     # RANDOM in every simulation (must-fires M_STORE_NO_FILL, M_STORE_DROP_ROW0),
     # so a read of an unwritten byte is noise, never a plausible 0.
-    # The write is STAGED in three unreset registers, all consumed only through
-    # the reset-bearing `wv_q`, which is set the cycle after a real write loaded
-    # them -- write-before-read by construction:
+    # The write is STAGED; since the pre-decode (Wilson 11-03) the row/bank
+    # staging is the one-hot wpa_q (async reset, write valid folded in) and
+    # wpb_q, and the binary wrow_q / wsel_q / wv_q are simulation-only -- their
+    # entries went with them. ⚠ wpb_q synthesises as $_SDFF_ (its one-hot
+    # decode lands on the sync-reset pin), so this audit counts it as reset;
+    # it is not, and needs no entry, for the reason below: it is read only
+    # through `wpa_q & wpb_q`, and wpa_q is all zero until a real write.
     "u_store.g_mem.g_bank": (
         8,          # wd_q -- the netlist names it after the latch banks' D net it drives
         "the latch store's STAGED WRITE DATA (wd_q). Loaded on every edge; read "
         "only by a row whose clock gate opens, and a gate opens only when the "
-        "reset-bearing wv_q is set, which is the cycle after a real write loaded "
-        "wd_q. Write-before-read by construction."),
-    "u_store.g_mem.wrow_q": (
-        7,
-        "the latch store's STAGED WRITE ROW. Same consumer, same reason as the "
-        "staged data: it selects a clock gate only while wv_q is set."),
-    "u_store.g_mem.wsel_q": (
-        2,
-        "the latch store's STAGED WRITE BANK. Same consumer, same reason."),
+        "reset-bearing one-hot wpa_q has a bit set, which is the cycle after a "
+        "real write loaded wd_q. Write-before-read by construction."),
     # ⭐ s_rdata IS BACK (the latch arm registers the byte read as the flop arm
     # did); its reason, as it read on the flop arm, holds unchanged:
     "s_rdata": (
