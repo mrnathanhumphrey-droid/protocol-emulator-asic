@@ -296,6 +296,9 @@ GATES=(
   # ⭐ B1 (Wilson 11-03): a canary is the work commit plus its density, one
   # commit (ci/make_canary.py); its builder and its refusal, checked. Seconds.
   model/gate_canary_check.py
+  # ⭐ THE PRE-DECODE IS WHAT SYNTHESIS BUILDS (Wilson 11-03): 48 one-hot
+  # flops, no binary staging, every row GATE one AND of two of them. yosys.
+  model/gate_predecode_netlist.py
   # ⭐ The I2C Fast-mode lane's witness: a RECORDED BENCH WITNESS (PA100T +
   # MB85RC256V, DSLogic captures) re-checked here in seconds, no simulator --
   # not a hardware run in CI (Wilson 10-17).

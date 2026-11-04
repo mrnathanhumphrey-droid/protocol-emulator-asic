@@ -130,6 +130,36 @@ module pe_store #(
       // the data passes 8 hold buffers by design (pe_hold_buf, kept by
       // RSZ_DONT_TOUCH_RX in config.json).
       reg  [7:0]          wd_q;
+      always @(posedge clk) wd_q <= wdata;
+      // ⭐⭐ PRE-DECODE (Wilson 11-03). The row clock gate's GATE was
+      // `wv_q && bank_hit && wrow_q == gr` -- a 7-bit compare through a
+      // fanout-7 decode, the chip's binder at two of three densities (u_icg
+      // GATE, a HALF-cycle check). The address is now decoded at the STAGING
+      // edge into two one-hot groups, so every GATE is one flop pair -> one
+      // 2-input AND: 16 flops over {row[1:0], bank} with the write valid
+      // FOLDED IN (all zero when no write is staged), and 32 over row[6:2].
+      // 16 x 32 = 512, one AND per byte row. The writers do not change.
+      localparam integer RW  = AW - WB_W;            // row bits (7)
+      localparam integer RLO = 2;                    // row bits in group A
+      localparam integer NPA = 1 << (WB_W + RLO);    // 16
+      localparam integer NPB = 1 << (RW - RLO);      // 32
+`ifdef M_PREDECODE_LATE
+      wire [WB_W+RLO-1:0] pka = {wrow_q[RLO-1:0], wsel_q};
+`else
+      wire [WB_W+RLO-1:0] pka = {wrow[RLO-1:0], wsel};
+`endif
+      wire [RW-RLO-1:0]   pkb = wrow[RW-1:RLO];
+      reg  [NPA-1:0]      wpa_q;                     // {row[1:0], bank}, valid folded
+      reg  [NPB-1:0]      wpb_q;                     // row[6:2]
+      always @(posedge clk or negedge rst_n)
+        if (!rst_n) wpa_q <= {NPA{1'b0}};
+        else        wpa_q <= (|we) ? ({{(NPA-1){1'b0}}, 1'b1} << pka) : {NPA{1'b0}};
+      always @(posedge clk) wpb_q <= {{(NPB-1){1'b0}}, 1'b1} << pkb;
+`ifndef SYNTHESIS
+      // ⭐ THE BINARY STAGING, KEPT FOR ITS ONLY READERS -- the contract
+      // checks below (Wilson 11-03: keep a binary copy, never rebuild it from
+      // the one-hot). Simulation-only, so silicon carries none of it; the
+      // M_PREDECODE_LATE must-fire decodes from it, one cycle late.
       reg  [WB_W-1:0]     wsel_q;
       reg  [AW-WB_W-1:0]  wrow_q;
       reg                 wv_q;
@@ -137,10 +167,10 @@ module pe_store #(
         if (!rst_n) wv_q <= 1'b0;
         else        wv_q <= |we;
       always @(posedge clk) begin
-        wd_q   <= wdata;
         wsel_q <= wsel;
         wrow_q <= wrow;
       end
+`endif
 `ifndef SYNTHESIS
       // the contract checks below are ARMED only once this store has seen its
       // reset low on an edge: before that every flop is power-up state (seed
@@ -159,10 +189,15 @@ module pe_store #(
       // a net array inside a nested generate from a function (cov sweep, 10-31)
       wire [7:0] lmem [0:(1 << AW) - 1];
       for (gb = 0; gb < WIDE_B; gb = gb + 1) begin : g_bank
+`ifndef SYNTHESIS
+        wire bank_hit = (wsel_q == gb);                // the contract check's
+`endif
+        // M_STORE_WRONG_BANK, on the pre-decoded group A: banks 0 and 3 read
+        // each other's columns, so bank 3's writes land in bank 0 (and 0's in 3)
 `ifdef M_STORE_WRONG_BANK
-        wire bank_hit = (wsel_q == gb && gb != WIDE_B-1) || (gb == 0 && wsel_q == WIDE_B-1);
+        localparam integer GBW = (gb == 0) ? WIDE_B - 1 : (gb == WIDE_B - 1) ? 0 : gb;
 `else
-        wire bank_hit = (wsel_q == gb);
+        localparam integer GBW = gb;
 `endif
         wire [7:0] mem [0:NW-1];
         for (gr = 0; gr < NW; gr = gr + 1) begin : g_row
@@ -170,10 +205,12 @@ module pe_store #(
           // M_STORE_DROP_ROW0, the must-fire of the power-up fill: row 0's writes
           // are lost, so its bytes keep their RANDOM power-up value -- only the
           // fill exposes it
+          // ⭐ THE GATE: one flop of each group, one AND (pre-decode)
+          wire wen = wpa_q[(gr % (1 << RLO)) * WIDE_B + GBW] & wpb_q[gr >> RLO];
 `ifdef M_STORE_DROP_ROW0
-          pe_icg u_icg (.CLK(clk_n), .GATE(wv_q && bank_hit && wrow_q == gr && gr != 0), .GCLK(gclk));
+          pe_icg u_icg (.CLK(clk_n), .GATE(wen && gr != 0), .GCLK(gclk));
 `else
-          pe_icg u_icg (.CLK(clk_n), .GATE(wv_q && bank_hit && wrow_q == gr), .GCLK(gclk));
+          pe_icg u_icg (.CLK(clk_n), .GATE(wen), .GCLK(gclk));
 `endif
           pe_latch8 u_row (.G(gclk), .D(wd_h), .Q(mem[gr]));
           assign lmem[gr * WIDE_B + gb] = mem[gr];

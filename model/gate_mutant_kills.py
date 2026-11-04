@@ -75,6 +75,8 @@ KILLERS = {
     "M_STORE_DROP_ROW0": "test/gate_store_latch.py",
     # the shared row-read tree (Wilson 11-01): a reversed node, killed by the tree arm
     "M_ROWMUX_NODE": "test/gate_store_latch.py",
+    # the pre-decode (Wilson 11-03): registered one cycle late, the wrong row
+    "M_PREDECODE_LATE": "test/gate_store_latch.py",
     "M_S0_PAIR_ORDER": "test/run_pit_s0.py", "M_S0_MED_OFF1": "test/run_pit_s0.py",
     "M_S0_NO_MOD9": "test/run_pit_s0.py", "M_S0_NO_FLOOR": "test/run_pit_s0.py",
     "M_S0_NO_AMBIG": "test/run_pit_s0.py",
