@@ -97,6 +97,7 @@ fast model/gate_ln1_record.py
 fast model/gate_a2_record.py
 fast model/gate_bench_races.py
 fast test/gate_manifest.py
+fast test/gate_tracked_images.py
 fast model/gate_rtl_lint.py
 fast model/gate_spuri_candidates.py
 fast model/gate_pin_matrix.py

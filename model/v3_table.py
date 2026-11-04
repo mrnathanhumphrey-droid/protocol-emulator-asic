@@ -81,9 +81,13 @@ def _gen_spim_d4():
 
 
 def _gen_uart(T, variant):
+    """`T` None = uart_rx.T_NOMINAL (run_uartrx's T), read when the row is
+    built -- it was a typed 434, the 50 MHz count, and at 60 MHz the edge and
+    nostop arms ran on unregistered images"""
     def f():
         import uart_rx
-        return bytes(uart_rx.build(T, None, variant))
+        return bytes(uart_rx.build(uart_rx.T_NOMINAL if T is None else T, None,
+                                   variant))
     return f
 
 
@@ -188,11 +192,11 @@ def _gen_sda_frame(k):
 GENERATED = (
     ("run_uartrx: uart_rx.build(T_MIN=232)", _gen_uart(232, "ok"), 0,
      "the published speed limit arm"),
-    ("run_uartrx: uart_rx.build(434, edge)", _gen_uart(434, "edge"), 0,
+    ("run_uartrx: uart_rx.build(T_NOMINAL, edge)", _gen_uart(None, "edge"), 0,
      "the edge-sampling must-fire variant"),
     # v2: the board copy (fpga/images) stays v1-encoded, so the v2 nostop
     # build is no longer byte-identical to a universe image -- its own row
-    ("run_uartrx: uart_rx.build(434, nostop)", _gen_uart(434, "nostop"), 0,
+    ("run_uartrx: uart_rx.build(T_NOMINAL, nostop)", _gen_uart(None, "nostop"), 0,
      "the nostop variant (one push per frame), the board image's v2 build"),
     ("run_cktx: cktx.hex", _gen_cktx, 0, "TX4's clocked widths 1..8 image"),
     ("run_uarttx: uart_tx MSB-first", _gen_uart_tx_msb, 0,
@@ -204,8 +208,9 @@ GENERATED = (
     # ⛔ FOUND LATE (WF2 #8 follow-up): gate_sda_hold reads only Layer H's
     # verdict, so its generated frames ran V3-red (unknown image, no bound)
     # without failing anything. Registered here; exempt because every one is
-    # BELOW D* (d = hold .. hold + 3 = 15..18 < 20): a hold-window probe that
-    # pe_asm would refuse, never a published program.
+    # BELOW D* (d = hold - 5 .. hold + 3, under the mode floor at either
+    # target): a hold-window probe that pe_asm would refuse, never a published
+    # program.
     # ⛔ FOUND LATE TOO: run_ckack runs only in the local A2 suite, which the
     # unknown-fingerprint sweep never ran, so its images were V3-red there.
     # ⛔ AND THESE, exposed by FATAL V3-ID on its first full run: every one
@@ -231,6 +236,10 @@ GENERATED = (
     # trace file existed.
     ("phases_run: probe_ckhalf.hex", _gen_ckhalf, 0,
      "CE1's HALF_HIGH phase measurement (and its M_HALF_IGNORED must-fire)"),
+    # Wilson 11-04: the double-mutant UC_UNHELD kill's frame, BELOW the hold
+    # (only M_HOLD_CLOCKED_ONLY lets it run)
+    ("gate_sda_hold: i2cframe d = hold - 5", _gen_sda_frame(-5), 1,
+     "the double-mutant probe at d = SDA_HOLD - 5, refused by the clean chip"),
     ("gate_sda_hold: i2cframe d = hold", _gen_sda_frame(0), 1,
      "the hold-window probe at d = SDA_HOLD, below D*"),
     ("gate_sda_hold: i2cframe d = hold + 1", _gen_sda_frame(1), 1,

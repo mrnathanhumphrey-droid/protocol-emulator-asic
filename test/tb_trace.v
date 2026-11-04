@@ -624,8 +624,11 @@ module tb_trace;
   // cross-seed sweep were established on the STARVED path. Feeding them is
   // what makes those claims about the payload path they were read as covering.
   // The include is placed AFTER the dut because it references `dut.tx_cnt`.
+  // ⭐ THE DUT RUNS AT THE BENCH'S CLOCK (11-03): -DPE_CLK_PS=20000 is the
+  // 50 MHz target only if the engine derives its counts from that period too
   tt_um_protocol_emulator #(.SPL(SPL_CFG), .CK_STRETCH_PRE(CK_PRE),
-                            .SDA_HOLD_NS(SDA_HOLD_NS)) dut (
+                            .SDA_HOLD_NS(SDA_HOLD_NS),
+                            .CLK_PERIOD_PS(PE_CLK_PERIOD_PS)) dut (
       .ui_in(ui_in), .uo_out(uo_out),
       .uio_in(uio_in), .uio_out(uio_out), .uio_oe(uio_oe),
       .ena(ena), .clk(clk), .rst_n(rst_n)

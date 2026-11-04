@@ -590,8 +590,8 @@ BIT_PRECONDITION = {
 
 def build_spi_master_1mhz():
     """⭐ THE SPI-MASTER WITNESS IMAGE (WF1, the published 1 MHz lane): the same
-    WREN / WRITE / READ as `corpus_spim`, at d = 25 -- one 50-cycle SCK period,
-    1 MHz at 50 MHz. `corpus_spim` stays at d = 7 as the TRACE image (declared
+    WREN / WRITE / READ as `corpus_spim`, at d = SPI_1MHZ_D -- one SCK period of
+    2d, 1 MHz at the target's clock (25 at 50 MHz, 30 at 60). `corpus_spim` stays at d = 7 as the TRACE image (declared
     non-admissible); this one is admissible with pe_asm's timing checks ON, and
     `test/run_spim_witness.py` checks its wire against its feed."""
     return build_spi_master(d=SPI_1MHZ_D)

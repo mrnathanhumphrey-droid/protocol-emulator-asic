@@ -17,7 +17,7 @@
  * Layer V3 (clocked_conform.vh) checks the same lane's bits on the bus, the
  * count exact, and its scheduler conformance against the published bound.
  *
- * Plusargs: IMG NBYTES NCYC (required)  BITP(434)  ERR(0, per mille)
+ * Plusargs: IMG NBYTES NCYC (required)  BITP(115200 baud in bench cycles: 521 at 60 MHz)  ERR(0, per mille)
  * Verdict: `UART-TX: ok -- ...` or `*** FAIL uart_tx: ...`.
  */
 `default_nettype none

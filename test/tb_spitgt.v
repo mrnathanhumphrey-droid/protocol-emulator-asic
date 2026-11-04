@@ -34,7 +34,8 @@
  *   BOUND(-1: the A2 pad bound r + 4, passed by the runner from program_a2;
  *   edge -> MISO above it is a FAIL) FIVE(0: the B3b contention bench, below)
  *   NOI2C(0: the image has no I2C lane -- queue 2 unfed, its check skipped)
- *   RXT(434: the UART-rx peer's cycles per bit -- nominal 115200. ⛔ NOT 414:
+ *   RXT(the UART-rx peer's cycles per bit -- nominal 115200 at PE_CLK_NS
+ *   (434 at 50 MHz, 521 at 60). ⛔ NOT -4.6 % (414 at 50 MHz):
  *   back-to-back at -4.6 % the receiver misses every start after the first,
  *   outside its verified +-3 % band; B3b run 1 measured it, 10-20)
  *
@@ -42,7 +43,7 @@
  * lanes (SPI master q1, I2C q2, UART-tx q3, UART-rx), and every one is kept
  * busy and checked on its own wire against its own reference:
  *   uio[1:2]  I2C SCL/SDA, a wired-AND bus with pull-ups (no peer: NACKs)
- *   uio[3]    UART-rx stimulus, back-to-back 8N1 at RXT (414) cycles/bit
+ *   uio[3]    UART-rx stimulus, back-to-back 8N1 at RXT cycles/bit
  *   uio[0]    the SPI master's MISO, held at 1
  *   queues 1..3 fed 16 distinct bytes each; the SPI master's MOSI bytes, the
  *   I2C bytes after START and the UART-tx bytes must equal their feeds, and
@@ -209,8 +210,11 @@ module tb_spitgt;
   endfunction
 
   // ---- B3b: the other four lanes, each against its own reference -----------
-  // UART-tx on uo_out[0], LSB first, T 434: bytes must equal queue 3's feed
-  localparam integer UT = 434;
+  // UART-tx on uo_out[0], LSB first, 115200 baud in this bench's cycles
+  // (real -> integer rounds: 521 at 60 MHz, 434 at 50 -- uart_tx.T_NOMINAL,
+  // which built the b3b images): bytes must equal queue 3's feed. It was a
+  // typed 434 (11-04).
+  localparam integer UT = 1.0e9 / 115200.0 / PE_CLK_NS;
   integer n_utx = 0, n_utx_bad = 0, ub;
   reg [7:0] utx;
   initial begin
@@ -578,8 +582,8 @@ module tb_spitgt;
       end
       $display("  b3b: other lanes -- UART-tx %0d/%0d bad, SPI-master %0d/%0d bad, I2C %0d/%0d bad, UART-rx %0d frames/%0d bad pushes (%0d sent)",
                n_utx, n_utx_bad, n_spm, n_spm_bad, n_i2c, n_i2c_bad, n_urx / 2, n_urx_bad, n_urx_sent);
-      $display("  b3b: worst bit %0d at %0d cycles (A2 pad bound %0d); lanes dispatched in its window %05b (lane 4..0); edge phases seen %0d/20 of the clock, %0d/45 of the I2C period",
-               worst_gbit, lat_max, bound, worst_mask, popc({25'd0, ph_clk}), popc(ph_i2c));
+      $display("  b3b: worst bit %0d at %0d cycles (A2 pad bound %0d); lanes dispatched in its window %05b (lane 4..0); edge phases seen %0d/%0d of the clock, %0d/45 of the I2C period",
+               worst_gbit, lat_max, bound, worst_mask, popc({25'd0, ph_clk}), PE_PHASES, popc(ph_i2c));
     end
     // ⚠ `missed` IS REPORTED, NOT JUDGED: it is this bench's view of the
     // ARM's level (a rise of l_armed since the last edge), and at a tight

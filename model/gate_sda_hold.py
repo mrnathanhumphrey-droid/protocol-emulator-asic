@@ -42,6 +42,26 @@ and 3 at d = 17, and the unclocked SHIFTIN release held only 14 at d = 16.
       silicon fix #8 made the first byte the host's), `M_SHIFTIN_UC_UNHELD`
       reproduces the unclocked release hold of 14 -- on a feed that drives
       SDA low before every ACK, so the condition is built, not lucky
+  ⛔⛔ W5 REBUILT FOR THE 60 MHz MOVE (Wilson 11-04): BUILD THE CONDITION
+      EACH MUTANT NEEDS, NEVER PIN PHASE LUCK. MEASURED at 60 MHz (hold 19):
+      `M_SHIFTIN_UC_UNHELD` on i2cframe d = hold + 1..3 releases at 20/19/20 --
+      never below the hold, because d > SDA_HOLD already keeps an unheld
+      release at >= d (the 14 at 50 MHz was a timing accident); and
+      `M_NO_HOLD_GATE` on i2cframe d = hold + 1..3 gave 0/4/0.
+      * UC: the kill runs `M_SHIFTIN_UC_UNHELD` WITH `M_HOLD_CLOCKED_ONLY` (the
+        only build that lets a frame at d = hold - 5 run) and must release
+        below SDA_HOLD, Layer H red; `M_HOLD_CLOCKED_ONLY` alone is the control
+        and must hold >= SDA_HOLD; the clean chip must REFUSE that frame.
+        MEASURED: 60 MHz 12 vs 19 (control 31), 50 MHz 4 vs 16 (control 19).
+      * WHAT THAT MEANS: for every program the chip RUNS, two guards close
+        this. pe_asm refuses d <= SDA_HOLD statically, and the silicon refuses
+        it too, at DISPATCH (`ck_holdviol`, the chain head, before the pin
+        moves -- so a raw or corrupted load is refused as well). The hold
+        pipeline the mutant removes is a third line; this test proves it with
+        both refusals lifted.
+      * NG: ckhold_over is the live pin, re-recorded (below). i2cframe
+        d = hold + 1..3 is SUPPLEMENTARY, "at least one red", no exact counts
+        (MEASURED: 0/4/0 at 60 MHz, 12/3/0 at 50).
 """
 
 from __future__ import annotations
@@ -101,8 +121,12 @@ W4 = [("ckhold_over_image", "test/ckhold_over_image.hex", "none")]
 #: of moves the mutant exposes -- changed on all three. MEASURED: built with
 #: M_TX_PRELOAD (#8 undone) as well, the mutant gives exactly 14/688, 10 and
 #: 3 again; on the fixed RTL 15/691, 11 and 6.
-W5_FOUND = {"ckhold_over_image": (15, 691), "i2cframe_d16": (11, None),
-            "i2cframe_d17": (6, None)}
+#: ⛔ RE-RECORDED A THIRD TIME (the 60 MHz move, Wilson 11-04): 10/564 at
+#: hold 19. The i2cframe pins are RETIRED -- phase luck (0/4/0 at 60 MHz,
+#: 12/3/0 at 50), now a supplementary "at least one red".
+#: ⚠ MEASURED 11-04: on these (60 MHz-assembled) bytes at 50 MHz the mutant
+#: gives 0 of 564 -- the gate runs at the chip's clock only.
+W5_FOUND = {"ckhold_over_image": (10, 564)}
 #: the unheld-SHIFTIN must-fire's feed: bit 0 and bit 7 = 0 in every byte
 UC_FEED = [0x34, 0x2C, 0x16, 0x68]
 ROW = re.compile(r"clocked_conform\[H\] class (\d+): n=(\d+) hold_min=(-?\d+) "
@@ -335,10 +359,15 @@ def main() -> int:
              else "*** MISSED"))
     ng = build(["M_NO_HOLD_GATE"], "nogate")
     hit5 = True
-    for name, img, peer in subjects[:3]:
+    sup = []
+    for name, img, peer in subjects:
         r5 = run(ng, img, peer)
-        want, of = W5_FOUND.get(name, (None, None))
         got = released(r5)
+        if name not in W5_FOUND:
+            # supplementary (Wilson 11-04): phase luck, judged only as a set
+            sup.append((name, got, got > 0 and r5["hfail"]))
+            continue
+        want, of = W5_FOUND[name]
         same = (want == got) and (of is None or of == data_moves(r5))
         # ⛔ W5 asks the mutant to REPRODUCE the finding, so the recorded
         # count is a LIVE pin (`gate_stored_numbers`): drift is red, and a
@@ -350,7 +379,19 @@ def main() -> int:
               % (name, got, data_moves(r5), "ok" if hit else "*** MISSED",
                  "" if same else "  *** recorded finding was %s%s -- re-measure"
                  % (want, "/%s" % of if of else "")))
-    uc = build(["M_SHIFTIN_UC_UNHELD"], "ucunheld")
+    sup_hit = any(h for _n, _g, h in sup)
+    hit5 = hit5 and sup_hit
+    print("    W5  M_NO_HOLD_GATE on i2cframe d = hold+1..+3 (supplementary, "
+          "at least one red): %s   %s"
+          % (", ".join("%s %d" % (n[len("i2cframe_"):], g) for n, g, _h in sup),
+             "ok" if sup_hit else "*** MISSED"))
+    # ⛔⛔ W5 UC, BUILT (Wilson 11-04): see the docstring. The frame is BELOW
+    # the hold, which only M_HOLD_CLOCKED_ONLY runs; that build alone is the
+    # control, and the clean chip must refuse the frame.
+    below = frame_image(hold - 5)
+    rcl = run(clean, below, "i2c", feed=UC_FEED)
+    rco = run(co, below, "i2c", feed=UC_FEED)
+    uc = build(["M_HOLD_CLOCKED_ONLY", "M_SHIFTIN_UC_UNHELD"], "ucunheld")
     # ⛔⛔ THE STIMULUS GUARANTEES WHAT THE MUTANT NEEDS. An unheld SHIFTIN
     # release only shows when SDA was DRIVEN LOW before the ACK release; with
     # the bench's default feed the low came from the reset 0x00 that went
@@ -358,12 +399,20 @@ def main() -> int:
     # SILENT (hold 16 >= SDA_HOLD, MEASURED). Every byte below has bit 0 AND
     # bit 7 = 0, so the last data bit before every ACK is low whichever order
     # the lane shifts: 162 releases judged, not 40 by luck.
-    r6 = run(uc, frame_image(hold + 1), "i2c", feed=UC_FEED)
-    c6 = r6["rows"].get(2)
-    hit6 = bool(c6) and c6[1] < hold and r6["hfail"]
-    print("    W5  M_SHIFTIN_UC_UNHELD on i2cframe d = %d: SHIFTIN release hold "
-          "%s (recorded 14), Layer H red   %s"
-          % (hold + 1, c6[1] if c6 else "-", "ok" if hit6 else "*** MISSED"))
+    r6 = run(uc, below, "i2c", feed=UC_FEED)
+    c6, cc = r6["rows"].get(2), rco["rows"].get(2)
+    ok_ref = rcl["config_err"] == 1
+    ok_ctl = (bool(cc) and cc[1] >= hold and not rco["hfail"]
+              and rco["config_err"] == 0)
+    hit6 = (bool(c6) and 0 <= c6[1] < hold and r6["hfail"] and ok_ref and ok_ctl)
+    print("    W5  i2cframe d = %d (hold - 5): clean chip REFUSES   %s"
+          % (hold - 5, "ok" if ok_ref else "*** NOT REFUSED"))
+    print("    W5  control M_HOLD_CLOCKED_ONLY: SHIFTIN release hold %s >= %d, "
+          "Layer H clean   %s" % (cc[1] if cc else "-", hold,
+                                  "ok" if ok_ctl else "*** WRONG"))
+    print("    W5  M_SHIFTIN_UC_UNHELD + M_HOLD_CLOCKED_ONLY: SHIFTIN release "
+          "hold %s < %d, Layer H red   %s"
+          % (c6[1] if c6 else "-", hold, "ok" if hit6 else "*** MISSED"))
     if not (hit3 and hit4 and hit5 and hit6):
         rc = 1
 

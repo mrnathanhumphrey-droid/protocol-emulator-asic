@@ -22,6 +22,14 @@ with `M_TX_PRELOAD` (#8 alone undone) reproduced all 12 BYTE-IDENTICALLY, so
 the reload fixes and the shared reset list move nothing here; (3) the new
 RTL's DISPATCH stream is identical old -> new on all 12. `M_TX_PRELOAD` now
 moves 9 digests: it is this gate's third must-fire.
+⛔ RE-RECORDED A THIRD TIME, DELIBERATELY (the 60 MHz retarget; Wilson
+11-03, pre-decode): the old digests were the 50 MHz RTL's. The derived hold
+and stretch counts, and the images assembled in real time, change 7 of 12
+(dispatch AND pins: ckheavy, ckod, ckread, corpus_i2c, half; pins only:
+i2caddr, i2cframe); the other 5 are unchanged. Recorded from the RTL just
+BEFORE the pre-decode (90ec788, already at 60 MHz), then proven: this RTL
+(the pre-decode store) is BYTE-IDENTICAL on all 12, and the must-fires move
+12 / 1 / 9 as before. The pre-decode moves nothing this file freezes.
 
 ⭐ THE MUST-FIRE IS TF1's NAIVE RETIMING. `M_TF1_LATE` registers readiness
 from the CURRENT `now` and timestamp instead of the next-state ones. The

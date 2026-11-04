@@ -1,8 +1,8 @@
 """WF1 WITNESS -- SPI-master at the published 1 MHz: the WIRE equals the FEED.
 
 THE SUBJECT: `corpus_spim25.hex` (`corpus.build_spi_master_1mhz`): the MB85RS64V
-WREN / WRITE 01 23 5B C4 1E / READ 01 23 [in][in] at d = 25, one 50-cycle SCK
-period -- 1 MHz on the 50 MHz design clock. Admissible: pe_asm accepts it with
+WREN / WRITE 01 23 5B C4 1E / READ 01 23 [in][in] at d = SPI_1MHZ_D, one SCK
+period of 2d -- 1 MHz at the target's clock (25 at 50 MHz, 30 at 60). Admissible: pe_asm accepts it with
 its timing checks ON.
 
 ⚠ THE CLAIMING LAYER: SIMULATION -- `tb_trace` with the `fram_spi` peer model
@@ -61,7 +61,7 @@ NAME = "corpus_spim25"
 IMG = "test/%s.hex" % NAME
 NCYC = 60000
 TAIL = 3000
-D = 25
+D = corpus.SPI_1MHZ_D          # 1 MHz at the target's clock (Wilson 11-03)
 
 
 def frames_want():

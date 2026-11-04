@@ -30,7 +30,7 @@ END token, so a crash is not mistaken for a kill)
   romflip     one ROM bit flipped in the peer after its CRC: CRC red and the
               ROM differs from the intended one
   underrun_reset / underrun_slot   OW6, STANDING: the host stalls mid-READ
-              ROM (100k / 45k cycles), the lane underruns and holds DQ low;
+              ROM (2 ms / 900 us), the lane underruns and holds DQ low;
               the chip's underrun sticky must be set AND the host's CRC-8 on
               the pushed bytes must go red (the short one leaves the peer
               model with zero violations -- only the host sees it)
@@ -336,21 +336,23 @@ def main():
           # holds DQ low. Red needs BOTH: the chip's underrun sticky set (the
           # stall really starved the lane -- not a no-op) AND a HOST-SIDE
           # check red (CRC-8 of the pushed bytes). Two lengths:
-          #   long  100k cycles: ~1.2 ms low -> the part RESETS mid-read and
+          #   long  2 ms: ~1.2 ms low -> the part RESETS mid-read and
           #         answers with a presence pulse the host reads as data;
-          #   short  45k cycles: one 128 us low slot -> no reset, the peer
+          #   short 900 us: one 128 us low slot -> no reset, the peer
           #         model sees NOTHING wrong (0 violations), the bit stream
           #         slips -- only the host's CRC catches it.
+          # ⭐ IN REAL TIME (Wilson 11-03): these were 100k / 45k cycles, sized
+          # at 50 MHz; the lane drains in real time, so the stall must too.
           ("underrun_reset", "tt", ROM_TXN, 503,
-           ("+STALL_AT=19", "+STALL_CYC=100000"),
+           ("+STALL_AT=19", "+STALL_CYC=%d" % clock.cycles_nominal(2_000_000)),
            lambda d, ck: d["sticky"] is not None and d["sticky"][0] == 1
            and d["stalled"] and not ck["ROM CRC-8 valid (host-side)"],
-           "host stalls 100k cycles mid-ROM: underrun -> bus reset"),
+           "host stalls 2 ms mid-ROM: underrun -> bus reset"),
           ("underrun_slot", "tt", ROM_TXN, 503,
-           ("+STALL_AT=19", "+STALL_CYC=45000"),
+           ("+STALL_AT=19", "+STALL_CYC=%d" % clock.cycles_nominal(900_000)),
            lambda d, ck: d["sticky"] is not None and d["sticky"][0] == 1
            and d["stalled"] and not ck["ROM CRC-8 valid (host-side)"],
-           "host stalls 45k cycles mid-ROM: underrun -> one slot held low")]
+           "host stalls 900 us mid-ROM: underrun -> one slot held low")]
     # ⛔ ONE SIMULATION AT A TIME BY DEFAULT (the machine-wide budget is
     # shared); CI, which owns its runner, sets PE_OW_JOBS=3
     jobs = int(os.environ.get("PE_OW_JOBS", "1"))

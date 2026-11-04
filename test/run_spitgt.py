@@ -27,7 +27,7 @@ master's final sampling edge (the S7 arm shows tCSH = 0 is SUFFICIENT).
 
 MUST-FIRES, each red for ITS OWN reason (the reason is matched, not inferred):
   M1 no feed               wire != feed (zeros), V3-U underruns on a fed arm
-  M2 SCK 2.5 MHz           wire != feed (change-edges land before re-arm)
+  M2 SCK at half the limit wire != feed (change-edges land before re-arm)
   M3 a 7-clock transaction wire != feed (desync: no CS abort, no two-pin wait)
   M3R the same + RECOVERY  wire == feed after the host RELOADS the program
                            (wire-only build, as tb_reload: a reload is the event)
@@ -123,12 +123,24 @@ WITNESS = [
     ("S7 tCSH = 0", 0, ["+MODE=0", "+NTX=4", "+TCSH=0"]),
 ]
 
+#: the shortest SCK half period, in cycles, at which the target reads every
+#: byte right (MEASURED 11-03; 11 reads every byte wrong). A cycle count on
+#: purpose -- the limit is the engine's, not the clock's.  clock-ok: engine limit
+SPITGT_HALF_MIN_OK = 12
+
 #: (label, image key, plusargs, wire-only build?, must the arm FAIL?, reason)
 MUSTFIRE = [
     ("M1 no feed", 0, ["+MODE=0", "+NTX=2", "+NOFEED=1"], False, True,
      r"FAIL spi_tgt: byte 0 read 00"),
-    ("M2 SCK 2.5 MHz", 0, ["+MODE=0", "+NTX=2",
-                           "+HALF=%d" % clock.cycles_nominal(200)], False, True,
+    # ⭐⭐ IN CYCLES, OFF THE MEASURED LIMIT (Wilson 11-03). The target's limit
+    # is a cycle count: MEASURED, a half period of 12 cycles reads every byte
+    # right and 11 or fewer reads every byte wrong (sweep 6..16, mode 0, 8
+    # transactions). M2 was "2.5 MHz" -- 10 cycles at 50 MHz, two under the
+    # cliff, and EXACTLY 12 at 60, so it SURVIVED the clock move. A must-fire in
+    # real time drifts onto the cliff at the next speed change; half the
+    # limit is twice too fast at any clock (6 cycles: 5 MHz at 60).
+    ("M2 SCK at half the limit", 0, ["+MODE=0", "+NTX=2",
+                                     "+HALF=%d" % (SPITGT_HALF_MIN_OK // 2)], False, True,
      r"FAIL spi_tgt: byte \d+ read"),
     ("M3 7-clock transaction", 0, ["+MODE=0", "+NTX=4", "+SHORT=1"], False,
      True, r"FAIL spi_tgt: byte \d+ read"),

@@ -75,6 +75,7 @@ test/run_mutants.py                 ^\s*GATE mutants: PASSED\s*$
 model/gate_mutant_kills.py          ^\s*GATE mutant-kills: PASSED\s*$
 model/gate_bench_races.py           ^\s*GATE bench-races: PASSED\s*$
 test/gate_manifest.py               ^\s*GATE manifest: PASSED\s*$
+test/gate_tracked_images.py         ^\s*GATE tracked-images: PASSED\s*$
 model/gate_rtl_lint.py              ^\s*GATE rtl-lint: PASSED\s*$
 model/gate_sda_hold.py              ^\s*GATE sda-hold: PASSED\s*$
 model/gate_spuri_candidates.py      ^\s*GATE spuri-candidates: PASSED\s*$

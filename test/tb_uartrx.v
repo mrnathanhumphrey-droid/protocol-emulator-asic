@@ -21,7 +21,7 @@
  * {stop, d7..d1} from the mid-stop sample -- the ISA has no compare, so the
  * framing check is this bench's (the host's): bit 7 of every second byte.
  *
- * Plusargs: IMG NBYTES (required) BITP(434) ERR(0) NFR(40) SEED(1)
+ * Plusargs: IMG NBYTES (required) BITP(115200 baud in bench cycles: 521 at 60 MHz) ERR(0) NFR(40) SEED(1)
  *           BADSTOP(-1: frame index sent with stop = 0 -- the framing must-fire)
  * Verdict: `UART-RX: ok -- ...` or `*** FAIL uart_rx: ...`.
  */

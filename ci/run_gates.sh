@@ -457,6 +457,9 @@ GATES=(
   # COMMITTED manifest in CI (the working copy is regenerated here). The
   # manifest carried five stale corpus hashes through two green commits.
   test/gate_manifest.py
+  # ⭐ every TRACKED image is in that manifest or exempt with a reason
+  # (Wilson 11-03: four tracked images outside it went stale at 60 MHz)
+  test/gate_tracked_images.py
   # ⭐ RL1 -- the RTL's race classes: Verilator -Wall on src/ with BLKSEQ and
   # COMBDLY as errors, except a CHECKED block-local temporary. Must-fires: a
   # planted blocking assignment in a clocked block; a planted `<=` in a

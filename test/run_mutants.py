@@ -92,9 +92,12 @@ CLOCKED_MUTANTS = [
     ("M_CK_NO_ALTERNATE", "corpus_i2c", "i2c", "*** FAIL progress.vh[A]",
      "the clock phase never alternates, so the action never completes its "
      "bits; Layer A sees the lane stop retiring."),
-    ("M_CK_NO_PARK", "corpus_i2c", "i2c", "*** FAIL clocked_conform[G1]",
-     "the post-HIGH park is removed, so a release can follow the rise sooner "
-     "than d; G1 (post-HIGH gap >= d) is the lower bound it breaks."),
+    ("M_CK_NO_PARK", "corpus_i2c", "i2c", "*** FAIL rx_e2e",
+     "the post-HIGH park is removed, so under a 10 us SCL stretch the capture "
+     "races the lane's next dispatch and received bits differ from the wire "
+     "(rx_e2e), red at 50 and 60 MHz with the park-present baseline clean at "
+     "both (Wilson 11-03). G1 pin RETIRED: it was a 2-cycle phase accident "
+     "at 50 MHz that disappeared at 60."),
     ("M_CK_HOLD_RETIRES", "corpus_i2c", "i2c", "*** FAIL clocked_conform[A1]",
      "a held clocked dispatch invalidates the slot AND advances the PC, so "
      "the refill brings the next action's word; A1 (head-slot word stable "
@@ -350,6 +353,14 @@ import sim_run                              # noqa: E402
 #: the images tb_edge $readmemh's by hardcoded path (read from its source)
 EDGE_IMGS = sim_run.hardcoded_images("tb_edge")
 import scratch_heads                        # noqa: E402
+import clock                                # noqa: E402  Wilson 11-03
+
+#: per-mutant tb_trace plusargs (default `+SCLHOLD=0`); each set gets its own
+#: CLEAN BASELINE below, so a stretch arm is read against a stretched design
+CK_EXTRA = {
+    # 10 us of SCL held low from cycle 100, in REAL time (Wilson 11-03)
+    "M_CK_NO_PARK": ("+SCLHOLD=%d" % clock.cycles_nominal(10_000),),
+}
 
 # ⭐ SCRATCH MUTANTS (gate_mutant_kills SCRATCH): one-line patches applied at
 # run time to the CURRENT src/ (test/scratch_heads.py), so the frozen RTL
@@ -932,12 +943,12 @@ def main() -> int:
     import benchset
     import gate_corpus_trace as gct
 
-    def trace_run(vvp, img, peer):
+    def trace_run(vvp, img, peer, plus=("+SCLHOLD=0",)):
         a2 = benchset.a2_slack_arg("test/%s.hex" % img)
         tr = os.path.join(SCRATCH, "mut_ck_trace.txt")
         extra = (["+NBYTES=%d" % _STORE_BYTES, "+PEER=%s" % peer, "+NCYC=40000",
-                  "+OUT=%s" % tr, "+SEED=1", "+ASYNC=0", "+STAYLOAD=0",
-                  "+SCLHOLD=0"] + ([a2] if a2 else [])
+                  "+OUT=%s" % tr, "+SEED=1", "+ASYNC=0", "+STAYLOAD=0"]
+                 + list(plus) + ([a2] if a2 else [])
                  + gct.feed_args("test/%s.hex" % img))
         o = run(vvp, img="test/%s.hex" % img, extra=extra)
         _h, rows = gct.read_trace(tr)
@@ -951,16 +962,18 @@ def main() -> int:
         print("    *** tb_trace does not compile: %s" % log[:300])
         survivors.append("tb_trace build")
     else:
-        for img, peer in sorted({(e[1], e[2]) for e in CLOCKED_MUTANTS}):
-            o, hard, why = trace_run(base_c, img, peer)
+        for img, peer, plus in sorted({(e[1], e[2], CK_EXTRA.get(e[0], ("+SCLHOLD=0",)))
+                                       for e in CLOCKED_MUTANTS}):
+            o, hard, why = trace_run(base_c, img, peer, plus)
             nf = o.count("*** FAIL")
             # ⛔ R3: a baseline that did not FINISH is not clean, FAIL lines
             # or not -- its verdicts print from `final` after any stop
-            print("    baseline %-11s %d FAIL line(s), %d hard-1 cycle(s)   %s"
-                  % (img, nf, hard, "clean" if nf == 0 and hard == 0 and not why
+            print("    baseline %-11s %-14s %d FAIL line(s), %d hard-1 cycle(s)   %s"
+                  % (img, " ".join(plus), nf, hard,
+                     "clean" if nf == 0 and hard == 0 and not why
                      else "*** NOT CLEAN%s" % (" (%s)" % why if why else "")))
             if nf or hard or why:
-                survivors.append("tb_trace baseline %s" % img)
+                survivors.append("tb_trace baseline %s %s" % (img, " ".join(plus)))
                 ck_ok = False
     if ck_ok:
         for define, img, peer, want, why in CLOCKED_MUTANTS:
@@ -970,7 +983,8 @@ def main() -> int:
                 print("    %-19s BUILD FAIL -- not a kill" % define)
                 wrong_reason.append((define, "build"))
                 continue
-            o, hard, _why = trace_run(v, img, peer)
+            o, hard, _why = trace_run(v, img, peer,
+                                      CK_EXTRA.get(define, ("+SCLHOLD=0",)))
             killed = ("*** FAIL" in o) or hard > 0
             right = (hard > 0) if want == "OD_HARD1" else (want in o)
             RAN.append(define)

@@ -1285,8 +1285,8 @@ def build_b3b(arm: str):
       2 I2C write (`i2c_fram_write`), queue 2 -- arm "a": the shipped d 70
         and header; arm "b": d 45 with D_sched = D_tol = 15, the deadline the
         A2 envelope table gives I2C, which ranks it ABOVE the SPI target
-      3 UART-tx 115200 (T 434), queue 3
-      4 UART-rx 115200 (T 434)
+      3 UART-tx 115200 (T = uart_tx.T_NOMINAL: 434 at 50 MHz, 521 at 60), queue 3
+      4 UART-rx 115200 (T = uart_rx.T_NOMINAL)
     Arm "bnoi2c" is arm "b" with lane 2 removed: the interferer must-fire.
     Arm "a3" is arm "a" with the SPI target in mode 3 (the other CPHA).
     ⭐ The A2 numbers these arms are scored against (r 6 on "a", 9 on "b",
@@ -1316,8 +1316,11 @@ def build_b3b(arm: str):
     i2hdr = list(i2h[0])
     if not shipped:
         i2hdr[4], i2hdr[5] = 15, 15
-    txl, txh = uart_tx.lanes_headers(T=434)
-    rxl, rxh = uart_rx.lanes_headers(T=434)
+    # ⭐ THE TARGET'S 115200 (Wilson 11-03): a typed 434 here outlived the
+    # 60 MHz move, and the bench's peer (at uart_rx.T_NOMINAL) then read every
+    # frame one push late -- the b3b arms' UART-rx red, 11-03
+    txl, txh = uart_tx.lanes_headers(T=uart_tx.T_NOMINAL)
+    rxl, rxh = uart_rx.lanes_headers(T=uart_rx.T_NOMINAL)
     lanes = {0: on_queue(tg.program(), 0),
              1: on_queue(spi.transactions([(2, 1)]), 1),
              2: on_queue(i2l[0], 2),
@@ -1535,6 +1538,32 @@ def main() -> int:
         print("  %-46s %-44s %s" % ("corpus.py", "the trace corpus (hashed "
                                     "below)", "ok" if r.returncode == 0
                                     else "*** FAILED"))
+        # ⛔⛔ THE TRACKED IMAGES OTHER GENERATORS OWN (Wilson 11-03). Four of
+        # these went stale at the 60 MHz move BECAUSE they were outside this
+        # manifest; test/gate_tracked_images.py now holds every tracked image
+        # to "pinned here or exempt with a reason". Made here, by their own
+        # recipe, and hashed below with that recipe named.
+        external = [
+            (["onewire.py", "tt", "onewire_image.hex"], "onewire_image.hex"),
+            (["onewire.py", "fpga", "onewire_fpga_image.hex"],
+             "onewire_fpga_image.hex"),
+            (["uart_rx.py", "uart_rx_image.hex"], "uart_rx_image.hex"),
+            (["uart_tx.py", "uart_tx_image.hex"], "uart_tx_image.hex"),
+            (["uart_tx.py", "uart_tx_busy_image.hex", "busy"],
+             "uart_tx_busy_image.hex"),
+            (["run_wirefeed_mf.py", "--write"], "ws2812_sub3_rearm21.hex"),
+        ]
+        for argv, _outfn in external:
+            a = list(argv)
+            # outputs are named relative to test/
+            a = [a[0]] + [os.path.join(here, x) if x.endswith(".hex") else x
+                          for x in a[1:]]
+            r = subprocess.run([sys.executable, os.path.join(here, a[0])] + a[1:],
+                               capture_output=True, text=True, cwd=os.path.dirname(here),
+                               encoding="utf-8", errors="replace")
+            rc |= 0 if r.returncode == 0 else 1
+            print("  %-46s %-44s %s" % (" ".join(argv), "tracked, its own recipe",
+                                        "ok" if r.returncode == 0 else "*** FAILED"))
         # ⭐⭐ THE MANIFEST. Each reserved artefact is pinned by hash NEXT TO THE
         # RECIPE THAT MAKES IT, and the file is TRACKED -- so a recipe change
         # shows up as a diff in review, and an artefact that comes out
@@ -1562,6 +1591,8 @@ def main() -> int:
         for fn in sorted(os.listdir(here)):
             if fn.startswith("corpus_") and fn.endswith(".hex"):
                 manifest.append("%s  %s  # corpus.py" % (_sha(fn), fn))
+        for argv, outfn in external:
+            manifest.append("%s  %s  # %s" % (_sha(outfn), outfn, " ".join(argv)))
         # ⭐⭐ THE TOOLCHAIN HEADER. A hash that disagrees on another machine
         # is either a recipe change (the finding) or a different tool building
         # the same recipe (not one), and the hashes alone cannot tell those

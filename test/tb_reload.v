@@ -74,7 +74,7 @@ module tb_reload;
   wire       spi_so, spi_so_oe;
 `include "test/store_filler.vh"   // v2: PE_STORE_BYTES, never a typed 256
   localparam integer IMG_MAX = PE_STORE_BYTES, PIN_PROG = 7, PIN_PTR = 5, PIN_WR = 6;
-  localparam integer P_RX = 3, TX_BIT = 0, BITP = 434;
+  localparam integer P_RX = 3, TX_BIT = 0;
   localparam integer SCK_UO = 1, MOSI_UO = 2, CS_UO = 3, P_MISO = 0;
   localparam integer SER_D = 4, SER_S = 5, SER_V = 6;
   // ⛔ v2: the whole store. This was a typed `256` that step 2's sweep missed,
@@ -117,6 +117,10 @@ module tb_reload;
   real       bt;
   `include "test/pe_clock.vh"
   always #(PE_CLK_HALF_NS) clk = ~clk;   // the target's clock, never typed
+  // 115200 baud in THIS bench's cycles (real -> integer rounds): 521 at
+  // 60 MHz, 434 at 50 -- uart_rx/uart_tx.T_NOMINAL, which built the tracked
+  // images this bench loads. It was a typed 434 (11-04).
+  localparam integer BITP = 1.0e9 / 115200.0 / PE_CLK_NS;
 
   tt_um_protocol_emulator #(.SPL(2)) dut (
       .ui_in(ui_in), .uo_out(uo_out),
@@ -619,10 +623,13 @@ module tb_reload;
       // ⛔ OPTION 1' (Wilson): CS high AT LEAST ONE FULL CLOCK before any SCK
       // edge the halt causes -- a same-cycle rise is RED, because on real
       // pads skew decides the order and SCK first commits a stale bit
-      if (t_sck_up >= 0 && (t_cs_up < 0 || t_sck_up - t_cs_up < PE_CLK_NS)) begin
+      // ⭐ HALF A PICOSECOND OF SLACK (11-03): at 16.666 ns the gap of exactly
+      // one clock comes back from $realtime a float epsilon UNDER PE_CLK_NS
+      // (20.0 was exact), and that read as a same-cycle rise
+      if (t_sck_up >= 0 && (t_cs_up < 0 || t_sck_up - t_cs_up < PE_CLK_NS - 0.0005)) begin
         fails = fails + 1;
-        $display("*** FAIL reload: at the halt SCK moved %0.0f ns after CS rose -- CS must lead any halt-caused SCK edge by at least one clock (20 ns)",
-                 t_sck_up - t_cs_up);
+        $display("*** FAIL reload: at the halt SCK moved %0.3f ns after CS rose -- CS must lead any halt-caused SCK edge by at least one clock (%0.3f ns)",
+                 t_sck_up - t_cs_up, PE_CLK_NS);
       end
       if (snap_bad) begin
         fails = fails + 1;

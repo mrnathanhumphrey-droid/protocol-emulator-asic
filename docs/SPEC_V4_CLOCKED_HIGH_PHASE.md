@@ -2074,6 +2074,14 @@ every mode floor, and under the overload stress image's contention.
 | `M_NO_HOLD_GATE` | i2cframe d = 16 / 17 | **10 / 3**, Layer H red |
 | `M_SHIFTIN_UC_UNHELD` | i2cframe d = 16 | SHIFTIN release hold **14**, Layer H red |
 
+⛔ **Rebuilt for 60 MHz (Wilson 11-04).** The rows above are the 50 MHz record.
+At 60 MHz (hold 19) the i2cframe kills were phase luck: `M_NO_HOLD_GATE` gave
+0/4/0 at d = hold + 1..3, and `M_SHIFTIN_UC_UNHELD` could not release below the
+hold on any program the chip runs. Now: ckhold_over **10 of 564** is the live
+pin, with i2cframe d = hold + 1..3 as "at least one red". UC runs with
+`M_HOLD_CLOCKED_ONLY` at d = hold − 5 (release hold **12 < 19**; control 31;
+clean chip refuses). The full reasoning is in `gate_sda_hold`'s docstring.
+
 `M_HOLD_CLOCKED_ONLY` (ruling U) used to be caught by its setup moves. W1 removes
 those in silicon (0 of 695), so its must-fire is now the run itself: clean
 refuses d = 15 and the mutant runs it.

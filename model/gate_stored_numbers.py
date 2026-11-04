@@ -270,8 +270,8 @@ SITES = [
          "recomputed every run; drift is red"),
     Site("model/gate_sda_hold.py", "W5_FOUND", LIVE,
          "ruling W's recorded setup findings (data moves with SCL released "
-         "on ckhold_over and i2cframe d = 16/17), which M_NO_HOLD_GATE must "
-         "reproduce",
+         "on ckhold_over at 60 MHz; the i2cframe pins retired as phase luck, "
+         "Wilson 11-04), which M_NO_HOLD_GATE must reproduce",
          "model/gate_sda_hold.py",
          "SPEC §24 (measured at cd57eee, before W1), iverilog, 60k cycles, "
          "SEED=1",

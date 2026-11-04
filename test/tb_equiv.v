@@ -50,7 +50,15 @@ module tb_equiv;
 
   always #(PE_CLK_HALF_NS) clk = ~clk;   // the target's clock, never typed
 
+  // ⭐ v1 == v2 AT 50 MHz (Wilson 11-03): the v2 build is given the bench's
+  // period, so its derived counts are the 50 MHz ones v1 ran with. A BENCH
+  // define -- v1-lock's project.v has no CLK_PERIOD_PS, and no src/ file or
+  // flow config may name it (gate_clock_consistency checks).
+`ifdef PE_EQUIV_V2_PERIOD
+  tt_um_protocol_emulator #(.SPL(2), .CLK_PERIOD_PS(PE_CLK_PERIOD_PS)) dut (
+`else
   tt_um_protocol_emulator #(.SPL(2)) dut (
+`endif
       .ui_in(ui_in), .uo_out(uo_out),
       .uio_in(uio_in), .uio_out(uio_out), .uio_oe(uio_oe),
       .ena(ena), .clk(clk), .rst_n(rst_n)

@@ -127,7 +127,9 @@ def agree(a, b, slow_ps):
     return abs(a - b) <= tol, tol
 
 
-def main(argv):
+def main(argv=None):
+    # optional: model/meta_stub.py calls every gate's main() bare
+    argv = sys.argv[1:] if argv is None else argv
     if "--emit" in argv:
         emit(argv[argv.index("--emit") + 1], os.environ.get("PE_TARGET", "chip"))
         return 0

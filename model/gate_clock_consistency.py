@@ -21,7 +21,12 @@ to the board config HERE.
      the band; the hold stays under Fm+'s t_VD;DAT with the rise charged; the
      stretch bound brackets 35 ms; every UM10204 floor the assembler enforces
      (gate_um10204.table_cycles) meets its minimum with the band.
-  5. MUST-FIRES: each check is run against a mutated copy and must go red.
+  5. BENCH-ONLY CLOCK DEFINES NEVER REACH SYNTHESIS (Wilson 11-03): a define
+     that lets a bench run the v2 RTL at another period (tb_equiv's
+     PE_EQUIV_V2_PERIOD, v1 == v2 at 50 MHz) is named by no src/ file and by
+     no flow config's VERILOG_DEFINES -- so the 60 MHz build cannot see it,
+     and the period synthesis gets is check 1's default.
+  6. MUST-FIRES: each check is run against a mutated copy and must go red.
 
 `--write` regenerates the two bench headers' defaults from the board configs.
 """
@@ -59,6 +64,8 @@ FPGA_TCL = os.path.join("fpga", "pa100t", "build.tcl")
 HOLD_NS, SETUP_NS = 300, 50
 FMP_VD_DAT_NS, FMP_TR_NS = 450, 120
 STRETCH_NS = 35_000_000
+#: bench-only defines that move the RTL's clock -- never in synthesis's inputs
+BENCH_ONLY_DEFINES = ("PE_EQUIV_V2_PERIOD",)
 
 
 def read(rel):
@@ -162,6 +169,28 @@ def spec(hz, engine_text=None, band=None, rtl_ps=None):
     return out
 
 
+def bench_only(src, cfg_text):
+    """[(what, ok, detail)] for check 5: `src` {rel: text} is every src/
+    file synthesis reads, `cfg_text` the flow config."""
+    out = []
+    defs = json.loads(cfg_text).get("VERILOG_DEFINES") or []
+    for d in BENCH_ONLY_DEFINES:
+        hits = sorted(r for r, txt in src.items() if re.search(r"\b%s\b" % d, txt))
+        out.append(("%s absent from src/" % d, not hits,
+                    "named in %s" % ", ".join(hits) if hits else
+                    "no src/ file names it (%d read)" % len(src)))
+        cfg_hit = [x for x in defs if re.search(r"\b%s\b" % d, str(x))]
+        out.append(("%s absent from %s VERILOG_DEFINES" % (d, CONFIG), not cfg_hit,
+                    "set: %s" % cfg_hit if cfg_hit else "%s" % defs))
+    return out
+
+
+def src_files():
+    d = os.path.join(ROOT, "src")
+    return {os.path.join("src", n): read(os.path.join("src", n))
+            for n in sorted(os.listdir(d)) if n.endswith((".v", ".sv", ".vh"))}
+
+
 def write_headers():
     chip, fpga = clock.target_hz("chip"), clock.target_hz("fpga")
     for rel, macro, val in ((CHIP_VH, "PE_CLK_PS", clock.period_ps(chip)),
@@ -181,7 +210,9 @@ def report(rows):
     return rc
 
 
-def main(argv):
+def main(argv=None):
+    # optional: model/meta_stub.py calls every gate's main() bare
+    argv = sys.argv[1:] if argv is None else argv
     if "--write" in argv:
         write_headers()
         return 0
@@ -194,7 +225,10 @@ def main(argv):
     print("  --- 4. derived counts meet their spec, per target ---")
     for t in sorted(clock.TARGETS):
         rc |= report(spec(clock.target_hz(t)))
-    print("  --- 5. must-fires (a mutated copy must go red) ---")
+    print("  --- 5. bench-only clock defines never reach synthesis ---")
+    src = src_files()
+    rc |= report(bench_only(src, files[CONFIG]))
+    print("  --- 6. must-fires (a mutated copy must go red) ---")
     chip = clock.target_hz("chip")
     ps = clock.period_ps(chip)
     other = 60_000_000 if chip != 60_000_000 else 50_000_000   # clock-ok: the must-fire's mismatched clock
@@ -243,6 +277,17 @@ def main(argv):
                                 CLOCK_PERIOD=round(1e9 / other, 3)))
     red = any(not ok for _w, ok, _d in copies(f))
     print("    must-fire: %-40s %s" % ("clock moved in config, not in RTL", "red  ok" if red else "*** MISSED"))
+    rc |= 0 if red else 1
+    # check 5's two halves: the bench define planted in src/, and in the flow
+    s2 = dict(src)
+    s2[PROJECT] = src[PROJECT] + "\n`ifdef %s\n`endif\n" % BENCH_ONLY_DEFINES[0]
+    red = any(not ok for _w, ok, _d in bench_only(s2, files[CONFIG]))
+    print("    must-fire: %-40s %s" % ("bench define planted in project.v", "red  ok" if red else "*** MISSED"))
+    rc |= 0 if red else 1
+    cfg = json.loads(files[CONFIG])
+    cfg["VERILOG_DEFINES"] = list(cfg.get("VERILOG_DEFINES") or []) + [BENCH_ONLY_DEFINES[0]]
+    red = any(not ok for _w, ok, _d in bench_only(src, json.dumps(cfg)))
+    print("    must-fire: %-40s %s" % ("bench define in VERILOG_DEFINES", "red  ok" if red else "*** MISSED"))
     rc |= 0 if red else 1
     print()
     print("  GATE clock-consistency: %s" % ("PASSED" if rc == 0 else "FAILED"))

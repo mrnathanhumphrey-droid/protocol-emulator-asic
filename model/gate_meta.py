@@ -116,6 +116,13 @@ SEAMS = (
     ("model/gate_mutant_kills.py", "gate_mutant_kills.audit_scratch", "fast", "E"),
     ("model/gate_bench_races.py", "gate_bench_races.races", "fast", "E"),
     ("test/gate_manifest.py", "gate_manifest.check", "fast", "E0"),
+    # the clock bundle (11-03) and the manifest closure (Wilson 11-03):
+    # unregistered until the cov shard's gate_meta named them (11-04)
+    ("test/gate_tracked_images.py", "gate_tracked_images.judge", "fast", "E"),
+    ("model/gate_clock_literals.py", "gate_clock_literals.scan", "fast", "E"),
+    ("model/gate_clock_consistency.py", "gate_clock_consistency.copies", "fast", "ALLOK"),
+    ("model/gate_clock_consistency.py", "gate_clock_consistency.bench_only", "fast", "ALLOK"),
+    ("model/gate_canary_check.py", "make_canary.judge", "fast", "E"),
     ("model/gate_i2c_order.py", "gate_i2c_order.audit", "fast", "E"),
     ("model/gate_store_full.py", "gate_store_full.audit", "fast", "E0"),
     ("model/gate_program_index.py", "gate_program_index.guard_used", "fast", "NOTNONE"),
@@ -174,6 +181,11 @@ SEAMS = (
     ("test/run_pit_capture.py", "run_pit_capture.compare", "slow", "E0"),
     # v2 PIT chunk 2: `table_problems` always empty -> every M_S0_* survives
     ("test/run_pit_s0.py", "run_pit_s0.table_problems", "slow", "E"),
+    # the clock bundle: `agree` always True -> the typed-delay I2C must-fire
+    # must MISS; the pre-decode: `judge` always clean -> the planted decode
+    # must STAY GREEN
+    ("model/gate_clock_cross.py", "gate_clock_cross.agree", "slow", "OK"),
+    ("model/gate_predecode_netlist.py", "gate_predecode_netlist.judge", "slow", "E0"),
 )
 
 #: Gates with NO stubbable check, each with why -- every gate in

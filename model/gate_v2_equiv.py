@@ -1,14 +1,30 @@
-"""THE v1 == v2 EQUIVALENCE GATE (Wilson, v2 step 2 item 5).
+"""THE v1 == v2 AT 50 MHz EQUIVALENCE GATE (Wilson, v2 step 2 item 5; 11-03).
 
-WHAT IT CLAIMS. Every v1 image runs the SAME on v2 as on v1 -- the same
-dispatches (lane and DECODED fields) and the same output pins, cycle for cycle
-from the engine's start -- and v2's own load is what its spec says.
+WHAT IT CLAIMS: v1 == v2 AT 50 MHz. Every v1 image runs the SAME on v2 as on
+v1 -- the same dispatches (lane and DECODED fields) and the same output pins,
+cycle for cycle from the engine's start -- AT v1's CLOCK, and v2's own load is
+what its spec says.
+
+⛔⛔ AT 50 MHz, AND ONLY THERE (Wilson 11-03, option A). The claim is that the
+translator plus the v2 engine reproduce v1 cycle for cycle, and that means
+something only at v1's clock: v2's hold and stretch counts are DERIVED from
+the clock (60 MHz on the chip), and its shipped images are assembled in real
+time per target, so at 60 MHz neither the counts nor the bytes are v1's on
+purpose. Both builds run at v1's clock -- read from v1-lock's own info.yaml,
+never typed -- with the v2 dut given that period (the bench define
+PE_EQUIV_V2_PERIOD, which never reaches synthesis: gate_clock_consistency).
+The 60 MHz side is NOT this gate's: it is covered by model/gate_clock_cross.py
+(the same programs at both targets, matched in real time) and by the
+per-target assembler checks (pe_asm's refusals at each target's clock).
 
 HOW. One bench, `test/tb_equiv.v`, compiled against the v1-lock RTL (read from
 git, never checked out) and against this tree's. Each of the 41 v1-lock images
-runs on v1 as its v1-lock bytes and on v2 as the tracked v2 image, which must
-equal `test/v1_translate.translate(v1)` byte for byte. Cycles are counted from
-reset, so free-running counters (the status serialiser) are compared too.
+runs on v1 as its v1-lock bytes and on v2 as `test/v1_translate.translate(v1)`,
+BUILT IN SCRATCH. (The tracked v2 images were translate(v1) once; those the
+60 MHz move re-derived are pinned by test/artefacts.sha256 and their own
+runners, so whether each still equals translate(v1) is REPORTED, not judged.)
+Cycles are counted from reset, so free-running counters (the status
+serialiser) are compared too.
 
 ⛔⛔ THE OFFSET IS DERIVED, NEVER SEARCHED. v2's store is bigger, so its load
 is longer by (pe_isa.STORE_BYTES - v1 STORE_BYTES) writes; the v1 run holds
@@ -50,6 +66,7 @@ import sim_run                          # noqa: E402
 import v1_translate as T                # noqa: E402
 
 V1REV = "v1-lock"
+V2_PERIOD_DEFINE = "PE_EQUIV_V2_PERIOD"     # tb_equiv.v's bench-only define
 BENCH = "test/tb_equiv.v"
 RTL = ["src/pe_engine.v", "src/pe_store.v", "src/project.v"]
 NCYC = 12000          # cycles compared after the start, per image
@@ -77,9 +94,19 @@ def run(cmd):
                           encoding="utf-8", errors="replace")
 
 
-def build(out, srcs, defines=()):
+def v1_clock_hz():
+    """v1's clock, from v1-lock's own info.yaml -- never typed."""
+    m = re.search(r"^\s*clock_hz:\s*(\d+)", git("show", "%s:info.yaml" % V1REV)
+                  .decode("utf-8"), re.M)
+    if not m:
+        raise RuntimeError("%s:info.yaml declares no clock_hz" % V1REV)
+    return int(m.group(1))
+
+
+def build(out, srcs, defines=(), ps=None):
+    clk = ["-DPE_CLK_PS=%d" % ps] if ps else []
     r = run([tool("iverilog"), "-g2012", "-I", ROOT, "-o", out, "-s", "tb_equiv"]
-            + ["-D%s" % d for d in defines] + [BENCH] + srcs)
+            + clk + ["-D%s" % d for d in defines] + [BENCH] + srcs)
     if r.returncode != 0:
         raise RuntimeError("build %s failed: %s" % (out, (r.stdout + r.stderr)[-400:]))
 
@@ -155,9 +182,14 @@ def v1_falloff(tmp):
 def main() -> int:
     print()
     print("=" * 78)
-    print("  v2-EQUIV -- every v1 image runs the same on v2, from run start")
+    print("  v2-EQUIV -- v1 == v2 at 50 MHz: every v1 image runs the same on v2")
     print("=" * 78)
     banner("iverilog", "vvp")
+    import clock
+    v1_hz = v1_clock_hz()
+    ps = clock.period_ps(v1_hz)
+    print("  v1's clock (v1-lock info.yaml): %.1f MHz -> both builds at %d ps; the "
+          "60 MHz side is gate_clock_cross's" % (v1_hz / 1e6, ps))
     V1 = T.v1()
     cpb = load_cyc_per_byte()
     D = (I.STORE_BYTES - V1.STORE_BYTES) * cpb
@@ -173,29 +205,33 @@ def main() -> int:
                 fh.write(git("show", "%s:%s" % (V1REV, f)))
             v1src.append(p)
         vv1, vv2, vvm = (os.path.join(tmp, n) for n in ("v1.vvp", "v2.vvp", "nomagic.vvp"))
-        build(vv1, v1src)
-        build(vv2, RTL)
-        build(vvm, RTL, defines=["M_NO_MAGIC"])
+        build(vv1, v1src, ps=ps)
+        build(vv2, RTL, defines=[V2_PERIOD_DEFINE], ps=ps)
+        build(vvm, RTL, defines=[V2_PERIOD_DEFINE, "M_NO_MAGIC"], ps=ps)
 
         # ---- the image set: 41 v1-lock images + falloff ------------------
         names = sorted(os.path.basename(p) for p in
                        git("ls-tree", "-r", "--name-only", V1REV, "test")
                        .decode().split() if p.endswith(".hex"))
         cases = []      # (name, v1 bytes, v1 path, v2 path, v2 lookup path)
+        rederived = []  # tracked v2 images that are no longer translate(v1)
         for n in names:
             b1 = git("show", "%s:test/%s" % (V1REV, n))
             img1 = bytes(int(w, 16) for w in b1.decode("ascii").split())
-            p2 = os.path.join(ROOT, "test", n)
-            if not os.path.isfile(p2):
-                probs.append("%s: no v2 image in test/" % n)
-                continue
-            with open(p2, encoding="ascii") as fh:
-                img2 = bytes(int(w, 16) for w in fh.read().split())
-            if img2 != T.translate(img1):
-                probs.append("%s: the tracked v2 image is NOT translate(v1)" % n)
-                continue
+            # ⭐ v2 runs translate(v1) BUILT HERE, never the tracked file
+            p2 = write_hex(os.path.join(tmp, "v2eq_t_" + n), T.translate(img1),
+                           register=True)
+            pt = os.path.join(ROOT, "test", n)
+            if os.path.isfile(pt):
+                with open(pt, encoding="ascii") as fh:
+                    if bytes(int(w, 16) for w in fh.read().split()) != T.translate(img1):
+                        rederived.append(n)
             cases.append((n, img1, write_hex(os.path.join(tmp, "v1_" + n), img1),
                           p2, p2))
+        print("  %d of %d tracked v2 images still equal translate(v1); %d re-derived "
+              "for 60 MHz (reported, not judged -- the manifest pins them): %s"
+              % (len(names) - len(rederived), len(names), len(rederived),
+                 ", ".join(rederived) or "none"))
         f1 = v1_falloff(tmp)
         f2 = write_hex(os.path.join(tmp, "v2eq_falloff.hex"), T.translate(f1),
                        register=True)

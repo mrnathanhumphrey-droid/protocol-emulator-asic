@@ -295,10 +295,19 @@ def main() -> int:
     import copy
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(HERE)), "test"))
     import corpus
+    import make_smoke_image
+    # ⛔ the Sm lane by its DERIVED delay (CE1's first ckhalf lane, 2 x
+    # t_LOW(Sm) in cycles): it was a typed 470, the 50 MHz count, and at
+    # 60 MHz (594) the plant matched no lane and this must-fire went silent
+    sm_d = make_smoke_image.CKHALF_DELAYS[0]
     m1 = copy.deepcopy(blob)
     for l in m1["half"]["lanes"]:
-        if l["d"] == 470:
+        if l["d"] == sm_d:
             l["t_HIGH"] = l["t_LOW"] = None
+    if m1 == blob:
+        print("    *** must-fire PLANT FAILED: no half-arm lane has the Sm delay %d"
+              % sm_d)
+        rc = 1
     m2 = copy.deepcopy(blob)
     for l in m2["clean"]["lanes"]:
         if l["lane"] == 3:
