@@ -1,5 +1,7 @@
 """THE v1 == v2 AT 50 MHz EQUIVALENCE GATE (Wilson, v2 step 2 item 5; 11-03).
 
+SCOPE, AS IT PRINTS: translator + engine == v1 at 50 MHz, guard band aside.
+
 WHAT IT CLAIMS: v1 == v2 AT 50 MHz. Every v1 image runs the SAME on v2 as on
 v1 -- the same dispatches (lane and DECODED fields) and the same output pins,
 cycle for cycle from the engine's start -- AT v1's CLOCK, and v2's own load is
@@ -13,6 +15,13 @@ time per target, so at 60 MHz neither the counts nor the bytes are v1's on
 purpose. Both builds run at v1's clock -- read from v1-lock's own info.yaml,
 never typed -- with the v2 dut given that period (the bench define
 PE_EQUIV_V2_PERIOD, which never reaches synthesis: gate_clock_consistency).
+⛔⛔ GUARD BAND ASIDE (Wilson 11-04). v1 ran UNBANDED counts and v2 adds a
+21/20 guard band on purpose, so the v2 build here has the band OFF (tb_equiv's
+`defparam dut.u_eng.BAND_NUM/BAND_DEN = 1`, under the same bench define).
+MEASURED 11-04: band on, 27 of 42 identical, the 15 others moved by the band
+alone; band off, 42 of 42. The band itself is checked where it lives --
+gate_clock_consistency (engine == model/clock.py, and check 6: every synthesis
+and canary config keeps it) and Hold.lean -- never by this gate.
 The 60 MHz side is NOT this gate's: it is covered by model/gate_clock_cross.py
 (the same programs at both targets, matched in real time) and by the
 per-target assembler checks (pe_asm's refusals at each target's clock).
@@ -182,7 +191,7 @@ def v1_falloff(tmp):
 def main() -> int:
     print()
     print("=" * 78)
-    print("  v2-EQUIV -- v1 == v2 at 50 MHz: every v1 image runs the same on v2")
+    print("  v2-EQUIV -- translator + engine == v1 at 50 MHz, guard band aside")
     print("=" * 78)
     banner("iverilog", "vvp")
     import clock
@@ -379,6 +388,9 @@ def main() -> int:
     print()
     for p in probs:
         print("  *** %s" % p)
+    # the scope on its own line, beside the verdict (the token stays exact)
+    print("  scope: translator + engine == v1 at 50 MHz, guard band aside "
+          "(v2 built BAND 1/1 here only; the band: gate_clock_consistency)")
     print("  GATE v2-equiv: %s" % ("FAILED" if probs else "PASSED"))
     return 1 if probs else 0
 

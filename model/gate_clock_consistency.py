@@ -26,7 +26,14 @@ to the board config HERE.
      PE_EQUIV_V2_PERIOD, v1 == v2 at 50 MHz) is named by no src/ file and by
      no flow config's VERILOG_DEFINES -- so the 60 MHz build cannot see it,
      and the period synthesis gets is check 1's default.
-  6. MUST-FIRES: each check is run against a mutated copy and must go red.
+  6. THE BAND IS ON IN EVERY SYNTHESIS AND CANARY CONFIG (Wilson 11-04):
+     v2_equiv builds the band OFF in its bench, and that build exists only
+     there. Every config synthesis can be handed -- src/ with config.json, and
+     each canary ci/make_canary.py builds from it (densities 59/60/61) -- has
+     pe_engine.v's band == clock.BAND, no src/ file overriding BAND_NUM or
+     BAND_DEN (a `.BAND_*(` override or a defparam), no config naming them, and
+     no bench-only define in its VERILOG_DEFINES.
+  7. MUST-FIRES: each check is run against a mutated copy and must go red.
 
 `--write` regenerates the two bench headers' defaults from the board configs.
 """
@@ -185,6 +192,47 @@ def bench_only(src, cfg_text):
     return out
 
 
+_BAND_RX = re.compile(r"\bBAND_(NUM|DEN)\b")
+
+
+def canary_configs(cfg_text):
+    """{label: config text}: config.json and every canary built from it."""
+    sys.path.insert(0, os.path.join(ROOT, "ci"))
+    import make_canary as MC
+    out = {CONFIG: cfg_text}
+    for d in (59, 60, 61):
+        out["canary density %d" % d] = MC.with_density(cfg_text, d)
+    return out
+
+
+def band_on(src, cfgs):
+    """[(what, ok, detail)] for check 6: `src` {rel: text} is every src/
+    file synthesis reads, `cfgs` {label: config text} every config it gets."""
+    out = []
+    eng = src.get(ENGINE, "")
+    num, den = param(eng, "BAND_NUM"), param(eng, "BAND_DEN")
+    ok = bool(num and den) and Fraction(num, den) == clock.BAND
+    out.append(("%s band is clock.BAND" % ENGINE, ok,
+                "%s/%s, want %s" % (num, den, clock.BAND)))
+    over = []
+    for rel, txt in sorted(src.items()):
+        for ln in txt.split("\n"):
+            if re.search(r"\.BAND_(NUM|DEN)\s*\(", ln) or (
+                    "defparam" in ln and _BAND_RX.search(ln)):
+                over.append("%s: %s" % (rel, ln.strip()[:60]))
+    out.append(("no src/ file overrides the band", not over,
+                "; ".join(over[:3]) if over else "%d file(s) read" % len(src)))
+    for label, txt in sorted(cfgs.items()):
+        named = _BAND_RX.search(txt)
+        defs = json.loads(txt).get("VERILOG_DEFINES") or []
+        bench = [x for x in defs if any(re.search(r"\b%s\b" % d, str(x))
+                                        for d in BENCH_ONLY_DEFINES)]
+        out.append(("%s keeps the band" % label, not named and not bench,
+                    ("names %s" % named.group(0)) if named else
+                    ("bench define %s" % bench) if bench else "band on"))
+    return out
+
+
 def src_files():
     d = os.path.join(ROOT, "src")
     return {os.path.join("src", n): read(os.path.join("src", n))
@@ -228,7 +276,10 @@ def main(argv=None):
     print("  --- 5. bench-only clock defines never reach synthesis ---")
     src = src_files()
     rc |= report(bench_only(src, files[CONFIG]))
-    print("  --- 6. must-fires (a mutated copy must go red) ---")
+    print("  --- 6. the band is on in every synthesis and canary config ---")
+    cfgs = canary_configs(files[CONFIG])
+    rc |= report(band_on(src, cfgs))
+    print("  --- 7. must-fires (a mutated copy must go red) ---")
     chip = clock.target_hz("chip")
     ps = clock.period_ps(chip)
     other = 60_000_000 if chip != 60_000_000 else 50_000_000   # clock-ok: the must-fire's mismatched clock
@@ -289,6 +340,24 @@ def main(argv=None):
     red = any(not ok for _w, ok, _d in bench_only(src, json.dumps(cfg)))
     print("    must-fire: %-40s %s" % ("bench define in VERILOG_DEFINES", "red  ok" if red else "*** MISSED"))
     rc |= 0 if red else 1
+    # check 6: a band-off config, three ways it could reach synthesis
+    cb = dict(cfgs)
+    k = "canary density 60"
+    cb[k] = json.dumps(dict(json.loads(cfgs[k]), SYNTH_PARAMETERS=["BAND_NUM=1", "BAND_DEN=1"]))
+    s3 = dict(src)
+    s3[PROJECT] = src[PROJECT] + "\n  defparam u_eng.BAND_NUM = 1;\n"
+    s4 = dict(src)
+    s4[ENGINE] = re.sub(r"(parameter\s+integer\s+BAND_NUM\s*=\s*)\d+", r"\g<1>20", src[ENGINE])
+    cv = dict(cfgs)
+    cv[k] = json.dumps(dict(json.loads(cfgs[k]), VERILOG_DEFINES=list(
+        json.loads(cfgs[k]).get("VERILOG_DEFINES") or []) + [BENCH_ONLY_DEFINES[0]]))
+    for what, s_, c_ in (("a band-off canary config (BAND 1/1)", src, cb),
+                         ("a band defparam planted in project.v", s3, cfgs),
+                         ("the engine's band set to 20/20", s4, cfgs),
+                         ("the equivalence define in a canary", src, cv)):
+        red = any(not ok for _w, ok, _d in band_on(s_, c_))
+        print("    must-fire: %-40s %s" % (what, "red  ok" if red else "*** MISSED"))
+        rc |= 0 if red else 1
     print()
     print("  GATE clock-consistency: %s" % ("PASSED" if rc == 0 else "FAILED"))
     return rc

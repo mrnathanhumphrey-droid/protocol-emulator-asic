@@ -122,6 +122,7 @@ SEAMS = (
     ("model/gate_clock_literals.py", "gate_clock_literals.scan", "fast", "E"),
     ("model/gate_clock_consistency.py", "gate_clock_consistency.copies", "fast", "ALLOK"),
     ("model/gate_clock_consistency.py", "gate_clock_consistency.bench_only", "fast", "ALLOK"),
+    ("model/gate_clock_consistency.py", "gate_clock_consistency.band_on", "fast", "ALLOK"),
     ("model/gate_canary_check.py", "make_canary.judge", "fast", "E"),
     ("model/gate_i2c_order.py", "gate_i2c_order.audit", "fast", "E"),
     ("model/gate_store_full.py", "gate_store_full.audit", "fast", "E0"),

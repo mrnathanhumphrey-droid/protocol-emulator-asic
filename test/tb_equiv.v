@@ -63,6 +63,15 @@ module tb_equiv;
       .uio_in(uio_in), .uio_out(uio_out), .uio_oe(uio_oe),
       .ena(ena), .clk(clk), .rst_n(rst_n)
   );
+`ifdef PE_EQUIV_V2_PERIOD
+  // ⛔⛔ GUARD BAND ASIDE (Wilson 11-04): v1 ran UNBANDED counts, so the
+  // equivalence build has the band OFF (BAND 1/1) -- measured: band on, 15 of
+  // 42 images differ, every one by the band; off, 42 of 42 identical. This
+  // build exists ONLY here: gate_clock_consistency check 6 holds every
+  // synthesis and canary config at the band.
+  defparam dut.u_eng.BAND_NUM = 1;
+  defparam dut.u_eng.BAND_DEN = 1;
+`endif
 `include "test/progress.vh"
 `include "test/host_feed.vh"
 `include "test/branch_check.vh"   // v2 primitive 1: ON only with +BRCHECK=1

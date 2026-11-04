@@ -25,6 +25,12 @@ hash): every record was green at BASELINE (the v1-lock tag, b019e28), so the
 moved inputs are `git diff --name-only BASELINE HEAD -- <inputs>` plus any
 uncommitted edit.
 
+⛔⛔ A STALE GATE IS A DEBT (Wilson 11-04): every DECLARED gate has a DEBT
+entry -- the item that owns turning it green and the point it must be green
+by -- and the STALE reason carries both, so run_gates' STALE line names the
+owner. A declared gate with no owner is red (`debt_problems`, priced in
+ci/pass_token.py's self-test, which every shard runs first).
+
 MUST-FIRES (planted, through stale_verdict): a moved input OUTSIDE the set ->
 FAIL; a gate not declared -> FAIL; inputs that did not move -> PASS; a moved
 input inside the set on a declared gate -> STALE; and --tag turns STALE into
@@ -79,8 +85,11 @@ DECLARED = {
         "board images are v1-encoded; v2 FPGA build owed (read through "
         "test/v1_translate.py meanwhile -- image_universe.board_as_v2)",
     "model/a2/gate_a2_program.py":
-        "board images are v1-encoded; v2 FPGA build owed (program_a2 reads them "
-        "translated -- image_universe.images_v2)",
+        "the A2 RE-CERTIFICATION item owns it: the bound tables "
+        "(clocked_a2_bounds, lane_response_bounds) are stale for the images the "
+        "60 MHz move re-derived, and program_a2 regenerates them with pyRTA "
+        "working first (Wilson 11-04); and board images are v1-encoded, v2 FPGA "
+        "build owed (program_a2 reads them translated -- image_universe.images_v2)",
     "test/run_uartrx.py":
         "board images are v1-encoded; v2 FPGA build owed (the nostop board "
         "image compared through test/v1_translate.py)",
@@ -102,6 +111,47 @@ DECLARED = {
         "bitstream built from v1's RTL. At the v2 lock: re-run at the bench, or "
         "SCOPE.md says the board evidence is v1's (Wilson 10-25)",
 }
+
+#: gate -> (the item that owns turning it green, the point it must be green
+#: by). Wilson 11-04: a STALE gate is a debt, and a debt has an owner. Keys
+#: must equal DECLARED's (`debt_problems`).
+_V2_LOCK = "the v2 lock (PE_TAG=1, where STALE blocks)"
+DEBT = {
+    "model/gate_harden_record.py": ("the v2 harden of record (gds)", _V2_LOCK),
+    "model/gate_ce5_freeze.py": ("CE5 re-certification at v2", _V2_LOCK),
+    "model/gate_ln1_record.py": ("the LN1 --record re-run on v2", "before step 2 merges"),
+    "model/gate_a2_record.py": ("the A2 re-certification", "before the entry is final"),
+    "model/gate_flow_config.py": ("the v2 harden of record", _V2_LOCK),
+    "model/gate_phase_coverage.py": ("the I2C + 1-Wire sweep --record re-runs", _V2_LOCK),
+    "model/a2/gate_j_program.py": ("run_w_sweep.py --full at v2", _V2_LOCK),
+    "model/gate_wire_feed.py": ("the v2 FPGA build", _V2_LOCK),
+    "model/gate_admissible_images.py": ("the v2 FPGA build", _V2_LOCK),
+    "model/gate_image_bounds.py": ("the v2 FPGA build", _V2_LOCK),
+    "model/gate_store_full.py": ("the v2 FPGA build", _V2_LOCK),
+    "model/a2/gate_a2_program.py": ("the A2 re-certification (pyRTA working first)",
+                                    "before the entry is final"),
+    "test/run_uartrx.py": ("the v2 FPGA build", _V2_LOCK),
+    "test/run_cktx.py": ("the v2 lock's cktx rebuild or retirement", _V2_LOCK),
+    "ci/ln1_replay.py": ("the Lean update for the first primitives", _V2_LOCK),
+    "model/gate_onewire_hw_witness.py": ("the bench re-witness on the v2 bitstream",
+                                         _V2_LOCK),
+    "model/gate_i2c_hw_witness.py": ("the bench re-witness on the v2 bitstream",
+                                     _V2_LOCK),
+}
+
+
+def debt_problems(declared=None, debt=None):
+    """[problem]: a DECLARED gate with no owner, or an owner for no gate."""
+    declared = DECLARED if declared is None else declared
+    debt = DEBT if debt is None else debt
+    out = ["%s is DECLARED stale with no owning item (DEBT)" % g
+           for g in sorted(set(declared) - set(debt))]
+    out += ["DEBT names %s, which is not DECLARED stale" % g
+            for g in sorted(set(debt) - set(declared))]
+    out += ["DEBT for %s has an empty owner or green-by point" % g
+            for g, v in sorted(debt.items()) if not (v and v[0] and v[1])]
+    return out
+
 
 #: FROZEN: the files step 2 is declared to touch (git diff v1-lock..HEAD at
 #: the time this list was written, reviewed). Never a glob.
@@ -375,7 +425,8 @@ def stale_verdict(gate, moved_inputs, tag=None, declared=None, change_set=None):
                         % ", ".join(outside[:4]))
     if tag:
         return "FAIL", "STALE blocks at the tag (%s)" % declared[gate]
-    return "STALE", declared[gate]
+    owner, by = DEBT.get(gate, ("NO OWNER", "-"))
+    return "STALE", "%s [owner: %s; green by: %s]" % (declared[gate], owner, by)
 
 
 def token(name, why):

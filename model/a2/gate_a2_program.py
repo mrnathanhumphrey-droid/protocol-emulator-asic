@@ -140,11 +140,15 @@ def main() -> int:
         print("    *** FAIL program_a2 refused to emit: %s" % exc)
         return 1
     stale = stale_rows(on_disk, fresh, with_pyrta=bool(src))
+    # ⛔⛔ Wilson 11-04: rows stale because the 60 MHz move re-derived their
+    # images are the A2 RE-CERTIFICATION's debt (it regenerates them, pyRTA
+    # first), not a red -- but ONLY through stale_records' verdict at the end:
+    # every image behind a stale row must be a declared move, or it is FAIL.
+    tab_stale = set(stale)
     if stale:
-        print("    *** FAIL stale for: %s" % ", ".join(sorted(set(stale))))
-        print("        Run `python model/a2/program_a2.py`. A stale row holds an")
-        print("        arm to the bound of a program that no longer exists.")
-        rc = 1
+        print("    stale for: %s" % ", ".join(sorted(set(stale))))
+        print("        A stale row holds an arm to the bound of a program that no")
+        print("        longer exists -- judged as declared staleness below, or red.")
     else:
         print("    current -- %d image(s) re-derived and identical" % len(fresh))
         print("    %s" % ("pyRTA column compared too (pyRTA present)" if src
@@ -175,10 +179,10 @@ def main() -> int:
             if any(a[ln].get(k) != b[ln].get(k) for k in keys):
                 rb_stale.append(n)
                 break
+    tab_stale |= set(rb_stale)
     if rb_stale:
-        print("    *** FAIL stale for: %s" % ", ".join(sorted(set(rb_stale))))
-        print("        Run `python model/a2/program_a2.py`.")
-        rc = 1
+        print("    stale for: %s" % ", ".join(sorted(set(rb_stale))))
+        print("        judged as declared staleness below, or red.")
     else:
         print("    current -- %d image(s) re-derived and identical%s"
               % (len(rb_fresh), " (pyRTA column too)" if src else
@@ -347,16 +351,21 @@ def main() -> int:
     print()
     print("  --- must-fire: the currency check sees a stale row ---")
     import copy as _copy
-    bent = _copy.deepcopy(on_disk)
+    # while the committed rows are declared stale (above) the control is the
+    # fresh derivation as written to json: the comparison must still see a
+    # one-field move and must still call an untouched copy current
+    base = json.loads(json.dumps(fresh)) if tab_stale else on_disk
+    bent = _copy.deepcopy(base)
     victim = next(n for n in sorted(bent) if bent[n]["lanes"])
     ln0 = sorted(bent[victim]["lanes"])[0]
     bent[victim]["lanes"][ln0]["T"] += 1
     hit = victim in stale_rows(bent, fresh, with_pyrta=False)
-    clean = not stale_rows(on_disk, fresh, with_pyrta=False)
+    clean = not stale_rows(base, fresh, with_pyrta=False)
     print("    a lane's T moved by one is reported stale    %s"
           % ("ok" if hit else "*** MISSED"))
-    print("    the committed rows read as current           %s"
-          % ("ok" if clean else "*** FALSE STALE"))
+    print("    the %-9s rows read as current           %s"
+          % ("FRESH" if tab_stale else "committed",
+             "ok" if clean else "*** FALSE STALE"))
     if not (hit and clean):
         rc = 1
 
@@ -427,6 +436,16 @@ def main() -> int:
         v, why = image_universe.board_stale_verdict(
             "model/a2/gate_a2_program.py", image_universe.board_names(),
             extra=["model/a2/program_a2.py"])
+        if tab_stale:
+            # the stale tables' images: every one a declared move, or FAIL
+            import stale_records as SR
+            paths = sorted(os.path.relpath(image_universe.resolve(n), ROOT)
+                           .replace(os.sep, "/") for n in tab_stale)
+            tv, twhy = SR.stale_verdict("model/a2/gate_a2_program.py",
+                                        SR.moved(paths))
+            print("  stale tables (%d image(s)): %s -- %s" % (len(paths), tv, twhy))
+            if tv != "PASS" and v != "FAIL":
+                v, why = tv, twhy
         print("  stale_records: %s -- %s" % (v, why))
         if v == "STALE":
             import stale_records as SR

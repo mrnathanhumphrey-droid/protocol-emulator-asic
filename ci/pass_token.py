@@ -104,6 +104,20 @@ def self_test():
         bad += not good
         print("  pass-token self-test: %-34s %s" % (
             name, ("green ok" if want else "red ok") if good else "*** WRONG"))
+    # ⛔ Wilson 11-04: every STALE gate is a debt with an owner -- the real
+    # lists, and a planted declared gate with no owner must go red
+    sys.path.insert(0, os.path.join(ROOT, "model"))
+    import stale_records as SR
+    for p in SR.debt_problems():
+        print("  pass-token self-test: *** %s" % p)
+        bad += 1
+    planted = SR.debt_problems(declared={"g.py": "r"}, debt={})
+    good = bool(planted)
+    bad += not good
+    print("  pass-token self-test: %-34s %s" % (
+        "a STALE gate with no owner", "red ok" if good else "*** WRONG"))
+    print("  stale debts: %d, each with an owner and a green-by point"
+          % len(SR.DEBT))
     tab_real = load_table()
     print("  pass-token table: %d gates declared" % len(tab_real))
     if bad:
