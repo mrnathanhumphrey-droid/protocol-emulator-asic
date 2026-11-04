@@ -1467,6 +1467,9 @@ def main() -> int:
              "pit_midstream.stim"),
             (["--pit", "image", "00", "13"], "PIT SNIFF image, mask 0x00, budget 2^13 cycles",
              "pit_mask00_b13_image.hex"),
+            # Wilson 11-04: budget bit 5 set (b = 33), the spi0 stimulus, stops FULL
+            (["--pit", "image", "00", "33"], "PIT SNIFF image, mask 0x00, budget 2^33 cycles",
+             "pit_mask00_b33_image.hex"),
             (["--edge", "200", "0", "edge_image"], "timeout 200, FALL", "edge_image.hex"),
             (["--edge", "0", "0", "edge_image_noto"], "no timeout, FALL", "edge_image_noto.hex"),
             (["--edge", "0", "1", "edge_image_rise"], "no timeout, RISE", "edge_image_rise.hex"),

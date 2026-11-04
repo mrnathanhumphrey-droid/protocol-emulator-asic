@@ -388,6 +388,8 @@ CHANGE_SET = frozenset([
     "ci/pdk.sha",                          # NEW: the pinned PDK commit, one place
     "model/nonadmissible.py",              # ckhold_over admissible at 60 MHz (r 16 <= 20)
     ".github/workflows/v2_canary.yaml",    # B1 check step; PDK_SHA from ci/pdk.sha
+    # ---- AMENDMENT 12 (11-04, Nate go; Wilson 11-03: the lockstep re-record).
+    "test/run_lockstep.py",                # the 60 MHz re-record note (12 proven identical)
 ])
 
 

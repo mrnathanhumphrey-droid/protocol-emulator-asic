@@ -153,11 +153,18 @@ CASES = [("spi0", spi(0), 0x00), ("spi3", spi(3), 0x00), ("spi0_mask03", spi(0),
          # must still end -- on its budget, 2^12 cycles -- and write its status;
          # a busy line must stop mid-stream at 2^13, its later edges unrecorded.
          ("quiet_budget", {3: [(1, 300), (0, 40), (1, 40), (0, 40)]}, 0x00),
-         ("budget_mid", {2: [((k & 1), 50) for k in range(1200)]}, 0x00)]
+         ("budget_mid", {2: [((k & 1), 50) for k in range(1200)]}, 0x00),
+         # Wilson 11-04: a budget with bit 5 SET (b = 33, 2^33 cycles) -- after
+         # the real-time scaling no case set bud_cfg[5] / pit_bud[5]. The budget
+         # never expires inside the run, so the capture stops FULL as spi0 does;
+         # a dropped bit 5 would leave b = 1 and stop it on its budget at once.
+         ("spi0_b33", spi(0), 0x00)]
 #: per-case PIT cycles where a case outlasts NCYC (the long gaps: 160k + bursts)
 NCYC_FOR = {"long_gap": 175000}
 #: per-case budget exponent (SNIFF image byte 1); every other case runs with it off
-BUDGET_FOR = {"quiet_budget": 12, "budget_mid": 13}
+BUDGET_FOR = {"quiet_budget": 12, "budget_mid": 13, "spi0_b33": 33}
+#: the cases whose budget must be what stops them (spi0_b33's must NOT be)
+BUDGET_STOPS = {"quiet_budget", "budget_mid"}
 
 
 def run(cmd):
@@ -239,8 +246,10 @@ def main() -> int:
             ivs = [b[0] - a[0] for a, b in zip([(0, 0)] + log, log)]
             if not (any(i > PG.SAT for i in ivs[:PG.N_RAW]) and any(i > PG.SAT for i in ivs[PG.N_RAW:n])):
                 p.append("no saturated interval in both the raw and the coded phase -- vacuous")
-        if name in BUDGET_FOR and why != "budget":
+        if name in BUDGET_STOPS and why != "budget":
             p.append("the budget case stopped on %r, not its budget" % why)
+        if name == "spi0_b33" and why != "full":
+            p.append("the 2^33 budget case stopped on %r, not FULL" % why)
         if name == "fast_overrun" and why != "overrun":
             p.append("the overrun case stopped on %r, not an overrun" % why)
         probs += ["%s: %s" % (name, x) for x in p]

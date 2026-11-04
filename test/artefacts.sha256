@@ -44,6 +44,14 @@ ccea44c9fe33187cae39fbe8d483bca35d193c7d53ee0a2347c4d8e38237261a  pit_twin2cs.st
 6c446acceb2350d363133e6051572f09b2dc4b8c92c543d39db9a8a9641a84ca  pit_mosi_cs_offpin.stim  # make_smoke_image.py --pit stim mosi_cs_offpin
 5303b08501028f17b6858eec0e77cd708b6a89545289fb2c669d808a33682b03  pit_mask00_b14_image.hex  # make_smoke_image.py --pit image 00 14
 3f067b347cb72da4ee8ee50daa48e929c419fa73c455aac52d8fc91c8b5ee1ca  pit_mask00_b11_image.hex  # make_smoke_image.py --pit image 00 11
+7fac36913d6fbf0ee76223573df6943cc178934fbd8cc7677d5c6d556f0e96d4  pit_frame2.stim  # make_smoke_image.py --pit stim frame2
+1e345250216c5b887a75b594ef4b04f250f697d0c20629c0c12bb48043b9cda2  pit_k0.stim  # make_smoke_image.py --pit stim k0
+3ddc667fedd0039d13cfef9d8a23d1ed951ea3ae7ef617d7537f38330c5e0aaa  pit_empty.stim  # make_smoke_image.py --pit stim empty
+00730e58aef0b6940e21fa466db9b5e770735fa9bd432cf96e93d739aa4a1806  pit_mask00_b9_image.hex  # make_smoke_image.py --pit image 00 9
+ec6644c2672718ed631d87fde82a3e1d38134c0b6b0f25cb1a1de9f0079e1dff  pit_mask00_b10_image.hex  # make_smoke_image.py --pit image 00 10
+dc14ba7798a7cf6c2b34938ec4abd2b68470c4d0076d16b7583f9ed0f8205a6e  pit_midstream.stim  # make_smoke_image.py --pit stim midstream
+67e9fc3253979bf65f78da1724adcd019336421d68b50f832c1859d943a14a6f  pit_mask00_b13_image.hex  # make_smoke_image.py --pit image 00 13
+5cf24aaf6ba4e2deb9308b190c3d58045c41d3eaec1fb2782a2d10285aeacd4d  pit_mask00_b33_image.hex  # make_smoke_image.py --pit image 00 33
 22bb426ced5bfdb59a0ed466fce2d109f3ad956dd8b98047801fa0307c9dee3a  edge_image.hex  # make_smoke_image.py --edge 200 0 edge_image
 3382f5bc554060df80dbac428a3a56e33e6c4b800db9c7b4a4086f0a07f3a344  edge_image_noto.hex  # make_smoke_image.py --edge 0 0 edge_image_noto
 4001b62231792b152d8deae176592e7e9fb213dd1fe04decbbcc16ffc4247c38  edge_image_rise.hex  # make_smoke_image.py --edge 0 1 edge_image_rise

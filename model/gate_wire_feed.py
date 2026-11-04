@@ -88,9 +88,14 @@ REGISTRY = {
         "how": "the WS2812 3-sub-bit control (REARM d = 21) beside four "
                "d = 20 lanes: V3 content exact on the bus, count exact, and "
                "V3-T worst response within its pyRTA bound"}),
+    # ⛔ Wilson 11-04 (option b): the board runs 50 MHz, the bench 60, so the
+    # board image is held to the bench program REBUILT AT THE BOARD'S TARGET
+    # (PE_TARGET=fpga) -- which also tests that retargeting reproduces the
+    # board program exactly. A mismatch is a toolchain finding, never STALE.
     "uart_rx_434.hex": (WITNESS, {
-        "same_as": "uart_rx_image.hex",
-        "how": "the board's BRAM image is byte-identical to the bench image"}),
+        "same_as": "uart_rx_image.hex", "same_as_target": "fpga",
+        "how": "the board's BRAM image is byte-identical to the bench "
+               "program rebuilt at the board's 50 MHz target"}),
     # ⚠ SIMULATION: the hardware witness is the FPGA with the real MB85RS64V
     "corpus_spim25.hex": (WITNESS, {
         "runner": "test/run_spim_witness.py",
@@ -368,8 +373,37 @@ def ci_runners():
     return listed, tok
 
 
-def audit(imgs, registry, exempt, listed, tokens):
-    """Problems + rows. Pure, so the must-fires can price it."""
+#: bench image -> its recipe, for a `same_as_target` rebuild (Wilson 11-04)
+TARGET_RECIPES = {"uart_rx_image.hex": ["test/uart_rx.py"]}
+
+
+def target_builds(registry):
+    """{"<bench>@<target>": bytes}: each `same_as_target` bench image rebuilt
+    by its own recipe with PE_TARGET=<target>, in a scratch file."""
+    import subprocess
+    import tempfile
+    out = {}
+    for _n, (_k, d) in sorted(registry.items()):
+        src, tgt = d.get("same_as"), d.get("same_as_target")
+        if not tgt or "%s@%s" % (src, tgt) in out:
+            continue
+        rec = TARGET_RECIPES.get(src)
+        if rec is None:
+            continue  # audit names it: no recipe, no rebuilt image
+        tmp = tempfile.mkdtemp(prefix="pe_wf_target_")
+        path = os.path.join(tmp, src)
+        env = dict(os.environ, PE_TARGET=tgt)
+        r = subprocess.run([sys.executable] + rec + [path], cwd=ROOT, env=env,
+                           capture_output=True, text=True)
+        if r.returncode == 0 and os.path.isfile(path):
+            out["%s@%s" % (src, tgt)] = bytes(dgf.load(path))
+    return out
+
+
+def audit(imgs, registry, exempt, listed, tokens, built=None):
+    """Problems + rows. Pure, so the must-fires can price it. `built` holds the
+    `same_as_target` rebuilds (target_builds)."""
+    built = built or {}
     probs, rows = [], []
     for n, img in sorted(imgs.items()):
         fd = feed_of(img)
@@ -401,6 +435,22 @@ def audit(imgs, registry, exempt, listed, tokens):
         if kind in (WITNESS, MECHANISM):
             if "same_as" in d:
                 src = d["same_as"]
+                if d.get("same_as_target"):
+                    key = "%s@%s" % (src, d["same_as_target"])
+                    if key not in built:
+                        probs.append("%s: %s could not be rebuilt at target %s "
+                                     "(no recipe, or the recipe failed)"
+                                     % (n, src, d["same_as_target"]))
+                    elif built[key] != img:
+                        probs.append("%s claims same_as %s rebuilt at target %s "
+                                     "but the bytes differ -- a TOOLCHAIN "
+                                     "finding: retargeting does not reproduce "
+                                     "the board program" % (n, src,
+                                                             d["same_as_target"]))
+                    elif registry.get(src, ("",))[0] != WITNESS:
+                        probs.append("%s is same_as %s, which is not itself "
+                                     "WITNESSED" % (n, src))
+                    continue
                 if src not in imgs or imgs[src] != img:
                     probs.append("%s claims same_as %s but the bytes differ (or "
                                  "%s is absent)" % (n, src, src))
@@ -512,7 +562,10 @@ def main() -> int:
     imgs, board = image_universe.board_as_v2(imgs)
     listed, tokens = ci_runners()
     exempt = exempt_set()
-    p2, rows = audit(imgs, REGISTRY, exempt, listed, tokens)
+    built = target_builds(REGISTRY)
+    for k in sorted(built):
+        print("  rebuilt %s (%d bytes) for a same_as_target check" % (k, len(built[k])))
+    p2, rows = audit(imgs, REGISTRY, exempt, listed, tokens, built)
     probs += p2
     counts = {}
     print("  %-28s %-6s %-11s %s" % ("image", "feed", "status", "detail"))
@@ -533,8 +586,8 @@ def main() -> int:
     # witness whose runner left CI, and a same_as whose bytes moved.
     print()
     print("  --- must-fire ---")
-    def fires(label, reg, ims=imgs, lst=listed, tok=tokens, needle=""):
-        got = audit(ims, reg, exempt, lst, tok)[0]
+    def fires(label, reg, ims=imgs, lst=listed, tok=tokens, needle="", blt=built):
+        got = audit(ims, reg, exempt, lst, tok, blt)[0]
         hit = any(needle in g for g in got)
         print("    %-52s %s" % (label, "red  ok" if hit else "*** MISSED"))
         return hit
@@ -556,6 +609,15 @@ def main() -> int:
     ims["uart_rx_434.hex"] = bytes(b)
     ok &= fires("the board image no longer the bench image", REGISTRY,
                 ims=ims, needle="bytes differ")
+    bl = dict(built)
+    for k in bl:
+        bb = bytearray(bl[k])
+        bb[-1] ^= 1
+        bl[k] = bytes(bb)
+    ok &= fires("the 50 MHz rebuild no longer the board image", REGISTRY,
+                blt=bl, needle="TOOLCHAIN finding")
+    ok &= fires("the 50 MHz rebuild missing", REGISTRY,
+                blt={}, needle="could not be rebuilt")
     r4 = dict(REGISTRY)
     r4["rxfast_image.hex"] = (MECHANISM, {"why": "drops by design"})
     ok &= fires("a MECHANISM with no check (rxfast, 'why' only)", r4,

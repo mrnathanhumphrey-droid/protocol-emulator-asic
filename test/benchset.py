@@ -338,7 +338,11 @@ CONFIG = {
                  # Nate 10-29: the bus joined mid-transfer (start levels CS low / SCK high)
                  ("s0_midstream", ["+IMG=test/pit_mask00_b13_image.hex", "+NBYTES=512",
                                    "+STIM=test/pit_midstream.stim", "+OUT=probe_cov_pit_s0_midstream.out",
-                                   "+NCYC=2000000", "+S0WAIT=1"])],
+                                   "+NCYC=2000000", "+S0WAIT=1"]),
+                 # Wilson 11-04: budget bit 5 set (b = 33) -- bud_cfg[5] / pit_bud[5]
+                 ("budget_b33", ["+IMG=test/pit_mask00_b33_image.hex", "+NBYTES=512",
+                                 "+STIM=test/pit_spi0.stim", "+OUT=probe_cov_pit_budget_b33.out",
+                                 "+NCYC=2000000", "+S0WAIT=1"])],
     },
     "tb_edge": {
         "srcs": [],

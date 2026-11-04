@@ -700,19 +700,31 @@ def main() -> int:
         print("  seed %d  %-62s %s" % (seed, line[:62], "ok" if good
                                          else "*** %d FAIL line(s)" % nf))
         rx_ok = rx_ok and good
+    # ⛔⛔ Wilson 11-04: seed 1 stopped catching M_RX_NO_CAPGATE at 60 MHz --
+    # timing LUCK ran out, and pinning seed 2 would be the same luck. The
+    # must-fire is now the DETERMINISTIC spim_d4 case below (a 4-cycle HIGH
+    # puts the LOW's pick inside the capture window by construction: red
+    # with the gate removed, clean with it, at BOTH clocks). This sweep stays
+    # SUPPLEMENTARY: red on at least one of seeds 1-6, no seed pinned
+    # (measured 11-04 at 60 MHz: red on 2 and 4, silent on 1 3 5 6).
     mvvp = os.path.join(TMP, "tr_rxnocap.vvp")
     bok, blog = iverilog_build(mvvp, ["M_RX_NO_CAPGATE"])
     if not bok:
         print("  *** M_RX_NO_CAPGATE build FAILED: %s" % blog[-300:])
         rx_ok = False
     else:
-        o = all5(mvvp, 1)
-        bad = [l.strip() for l in o.splitlines()
-               if l.startswith("*** FAIL rx_e2e") and " of " in l]
-        print("  must-fire M_RX_NO_CAPGATE seed 1: %s" % (
-            ("red  ok -- " + bad[0][len("*** FAIL "):]) if bad
-            else "*** MUST-FIRE FAILED (rx_e2e silent)"))
-        rx_ok = rx_ok and bool(bad)
+        hit_seed, bad = None, []
+        for seed in range(1, 7):
+            o = all5(mvvp, seed)
+            bad = [l.strip() for l in o.splitlines()
+                   if l.startswith("*** FAIL rx_e2e") and " of " in l]
+            if bad:
+                hit_seed = seed
+                break
+        print("  supplementary M_RX_NO_CAPGATE seeds 1-6: %s" % (
+            ("red  ok -- seed %d: %s" % (hit_seed, bad[0][len("*** FAIL "):]))
+            if hit_seed else "*** MISSED (rx_e2e silent on all six)"))
+        rx_ok = rx_ok and hit_seed is not None
     # ---- RULING EX1: the capture gate is EXACT, checked at its boundary ----
     # corpus_all5 never asks the gate to decide AT its edge (0 boundary
     # consumes on seeds 1-6), so a gate one cycle late would pass there. An
@@ -799,6 +811,38 @@ def main() -> int:
             mh.group(1), int(mh.group(1)) // 8)) if hit
         else "*** MUST-FIRE FAILED (a part-way hang passed)"))
     ex_ok = ex_ok and hit
+    # ⛔⛔ THE M_RX_NO_CAPGATE MUST-FIRE (Wilson 11-04), at BOTH clocks: the
+    # d = 4 SPI read is cycle-typed, so its LOW's pick lands at ppc_n = 2 on
+    # every boundary consume whatever the period. Measured 11-04: clean
+    # 148 / 148 at 60 and 50 MHz; gate removed, 23 of 148 bytes differ at both.
+    sys.path.insert(0, os.path.join(ROOT, "model"))
+    import clock
+    for ps in (None, clock.period_ps(clock.target_hz("fpga"))):
+        tag = "%g MHz" % (clock.target_hz("chip" if ps is None else "fpga") / 1e6)
+        cdefs = [] if ps is None else ["PE_CLK_PS=%d" % ps]
+        cv = vvp
+        if ps is not None:
+            cv = os.path.join(TMP, "tr_clean_%d.vvp" % ps)
+            if not iverilog_build(cv, cdefs)[0]:
+                print("  *** clean build at %s FAILED" % tag)
+                ex_ok = False
+                continue
+        mv = os.path.join(TMP, "tr_rxnocap_d4_%s.vvp" % (ps or "chip"))
+        if not iverilog_build(mv, cdefs + ["M_RX_NO_CAPGATE"])[0]:
+            print("  *** M_RX_NO_CAPGATE build at %s FAILED" % tag)
+            ex_ok = False
+            continue
+        oc, _ = spim4(cv)
+        om, _ = spim4(mv)
+        clean = ("rx_e2e: ok --" in oc and oc.count("*** FAIL") == 0)
+        bad = [l.strip() for l in om.splitlines()
+               if l.startswith("*** FAIL rx_e2e") and " of " in l]
+        hit = clean and bool(bad)
+        print("  must-fire M_RX_NO_CAPGATE d=4 %s: %s" % (tag, (
+            "red  ok -- %s (clean: ok)" % bad[0][len("*** FAIL "):]) if hit
+            else "*** MUST-FIRE FAILED (clean %s, mutant %s)" % (
+                "ok" if clean else "RED", "red" if bad else "silent")))
+        ex_ok = ex_ok and hit
     for mut, want in (("M_RX_CAPGATE_LATE", "late"), ("M_RX_CAPGATE_EARLY", "early")):
         mv = os.path.join(TMP, "tr_%s.vvp" % mut.lower())
         bok, blog = iverilog_build(mv, [mut])
