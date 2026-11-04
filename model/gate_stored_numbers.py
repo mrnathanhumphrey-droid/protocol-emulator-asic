@@ -730,6 +730,10 @@ SPEC_SYMBOLS = {
     # play (SPI modes 0 / 3, a wire mask, I2C, two UARTs, a line fast enough
     # to overrun) and their chosen masks; the result is the bit-exact compare.
     ("test/run_pit_capture.py", "CASES"),
+    # BUDGET_FOR is each case's CHOSEN budget exponent (12 and 13 to stop on
+    # the budget, 33 to set bit 5 and never expire -- Wilson 11-04): design;
+    # the result is the bit-exact compare and the stop reason, judged live.
+    ("test/run_pit_capture.py", "BUDGET_FOR"),
     # v2 PIT chunk 2: the FROZEN stage-0 model (e55d0b63, never edited here):
     # CATALOGUE is the published CRC parameter catalogue (Rocksoft model) and
     # WIDTHS the CRC widths it searches (8 / 16 / 32) -- specifications, not
