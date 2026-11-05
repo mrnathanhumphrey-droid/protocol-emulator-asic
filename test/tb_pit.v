@@ -100,7 +100,10 @@ module tb_pit;
       end
     end
     $fclose(sfd);
-    while (pc < ncyc && !(s0wait != 0 && dut.u_s0.done === 1'b1)) @(negedge clk);
+    // S0WAIT=1: until stage 0's TABLE is written (gate pit-s0); S0WAIT=2: until
+    // stages 1-2 are done too (gate pit-s12, Wilson 10-31)
+    while (pc < ncyc && !(s0wait == 1 && dut.u_s0.tbl_done === 1'b1)
+                     && !(s0wait == 2 && dut.u_s0.done === 1'b1)) @(negedge clk);
     done = 1'b1;
     // the store settles before the dump: the LATCH store makes a write visible
     // one cycle later than flops (staged, then the next low half-cycle), so a
@@ -111,7 +114,7 @@ module tb_pit;
     for (a = 0; a < IMG_MAX; a = a + 1)
       $fdisplay(fd, "M %0d %h", a, dut.u_store.g_mem.peek(a[8:0]));
     $fdisplay(fd, "X stopped=%0d", dut.pit_stopped);
-    $fdisplay(fd, "S s0done=%0d pc=%0d", dut.u_s0.done, pc);
+    $fdisplay(fd, "S s0done=%0d pc=%0d s12done=%0d", dut.u_s0.tbl_done, pc, dut.u_s0.done);
     $fclose(fd);
     $display("tb_pit: %0d PIT cycles -> %0s", pc, outfile);
     $finish;

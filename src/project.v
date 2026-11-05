@@ -1125,9 +1125,9 @@ module pe_pit_s0 #(parameter integer AW = 9) (
     output reg           re,
     output reg  [AW-1:0] raddr,
     input  wire [7:0]    rdata,
-    output reg           we,
-    output reg  [AW-1:0] waddr,
-    output reg  [7:0]    wdata,
+    output wire          we,
+    output wire [AW-1:0] waddr,
+    output wire [7:0]    wdata,
     output reg           done
 );
   // ---- widths and codes -----------------------------------------------------
@@ -1162,6 +1162,10 @@ module pe_pit_s0 #(parameter integer AW = 9) (
   reg  [7:0]     lv;                    // every wire's level just after it
   reg  [7:0]     rm;                    // its change mask
   reg            rec_v, walk_done, walk_go;
+  wire           s12_walk_go, s12_hold, s12_we, s12_done;
+  wire [2:0]     s12_w;
+  wire [AW-1:0]  s12_waddr;
+  wire [7:0]     s12_wdata;
   wire           b    = sh[7];
   wire [7:0]     mk_n = {mk[6:0], b};
   wire [13:0]    r_n  = r + 14'd1;
@@ -1174,8 +1178,12 @@ module pe_pit_s0 #(parameter integer AW = 9) (
       ds <= D_IDLE; rec_v <= 1'b0; walk_done <= 1'b0; re <= 1'b0;
     end else begin
       rec_v <= 1'b0; walk_done <= 1'b0; re <= 1'b0;
+      // ⭐ HOLD (Wilson 10-31): stages 1-2 freeze the walk while an interval divides
+      // (29 cycles; records are >= 8 apart). Never raised during stage 0, which
+      // stays bit-exact (gate pit-s0).
+      if (!s12_hold)
       case (ds)
-        D_IDLE: if (walk_go) begin
+        D_IDLE: if (walk_go | s12_walk_go) begin
           t <= {TW{1'b0}}; lv <= lv0; r <= 14'd0; fs <= F_RAW; fc <= 5'd0; ba <= CAP_BASE;
           if (n_rec == 14'd0) walk_done <= 1'b1;
           else ds <= D_REQ;
@@ -1226,7 +1234,8 @@ module pe_pit_s0 #(parameter integer AW = 9) (
   // ===========================================================================
   // THE FOLDS: one consumer per walk, chosen by `wk`, over wires c / d.
   // ===========================================================================
-  localparam [2:0] W_CNT = 3'd0, W_LVL = 3'd1, W_PROBE = 3'd2, W_NEAR = 3'd3, W_PAIR = 3'd4;
+  // W_S12: stages 1-2's walks -- no stage-0 fold reads them (cnt[] keeps W_CNT's counts)
+  localparam [2:0] W_CNT = 3'd0, W_LVL = 3'd1, W_PROBE = 3'd2, W_NEAR = 3'd3, W_PAIR = 3'd4, W_S12 = 3'd5;
   reg  [2:0]    wk;
   reg  [2:0]    wc, wd;
   reg  [1:0]    psel;                  // W_PROBE: 0 / 1 = the level-0 / level-1 intervals, 2 = all
@@ -1425,6 +1434,28 @@ module pe_pit_s0 #(parameter integer AW = 9) (
   end
 
   // ===========================================================================
+  // STAGES 1-2 (Wilson 10-31): after the table, per role-less active wire
+  // ===========================================================================
+  wire [7:0]  roled;
+  wire [71:0] cnt_flat;
+  genvar gs;
+  generate
+    for (gs = 0; gs < 8; gs = gs + 1) begin : g_s12
+      assign roled[gs] = (role[gs] != R_NONE);
+      assign cnt_flat[gs*9 +: 9] = cnt[gs];
+    end
+  endgenerate
+  pe_pit_s12 #(.AW(AW)) u_s12 (
+      .clk(clk), .rst_n(rst_n), .run(run), .go(ph == P_S12),
+      .act(act), .roled(roled), .refused(refused), .cnt_flat(cnt_flat),
+      .walk_go(s12_walk_go), .hold(s12_hold), .w(s12_w),
+      .p1_v(p1_v), .p1_rm(p1_rm), .p1_lv(p1_lv), .p1_civ(p1_civ), .wdone_p1(wdone_p1),
+      .we(s12_we), .waddr(s12_waddr), .wdata(s12_wdata), .done(s12_done));
+  assign we    = we0 | s12_we;
+  assign waddr = s12_we ? s12_waddr : waddr0;
+  assign wdata = s12_we ? s12_wdata : wdata0;
+
+  // ===========================================================================
   // THE SEQUENCER: stage0's phases, in its order.
   // ===========================================================================
   localparam [4:0] P_IDLE  = 5'd0,  P_CNEXT = 5'd1,  P_CLVL  = 5'd2,  P_CMED0 = 5'd3,
@@ -1432,8 +1463,12 @@ module pe_pit_s0 #(parameter integer AW = 9) (
                    P_DASGN = 5'd8,  P_FCNEXT = 5'd9, P_FHALF = 5'd10, P_FENEXT = 5'd11,
                    P_FASGN = 5'd12, P_ARANK = 5'd13, P_AASGN = 5'd14, P_RNEXT = 5'd15,
                    P_RMED  = 5'd16, P_WRITE = 5'd17, P_DONE = 5'd18,
-                   P_MSTART = 5'd19, P_MSTEP = 5'd20, P_WAIT = 5'd21;
+                   P_MSTART = 5'd19, P_MSTEP = 5'd20, P_WAIT = 5'd21, P_S12 = 5'd22;
   reg  [4:0] ph, m_ret, w_ret;          // the median and a walk return to these
+  reg            we0;                   // stage 0's own table write
+  reg            tbl_done;              // stage 0's table is written (stages 1-2 may still run)
+  reg  [AW-1:0]  waddr0;
+  reg  [7:0]     wdata0;
   reg  [3:0] ci, di;
   reg  [2:0] wbyte;
 `ifdef M_S0_MED_OFF1
@@ -1449,17 +1484,17 @@ module pe_pit_s0 #(parameter integer AW = 9) (
     if (!rst_n) begin
       ph <= P_IDLE; m_ret <= P_IDLE; w_ret <= P_IDLE; walk_go <= 1'b0; wk <= W_CNT;
       wc <= 3'd0; wd <= 3'd0; psel <= 2'd0; regular <= 1'b0; ci <= 4'd0; di <= 4'd0; ar <= 4'd0;
-      refuse_w <= 3'd0; refused <= 1'b0; wbyte <= 3'd0; done <= 1'b0;
+      refuse_w <= 3'd0; refused <= 1'b0; wbyte <= 3'd0; done <= 1'b0; tbl_done <= 1'b0;
       med0 <= {TW{1'b0}}; med1 <= {TW{1'b0}};
       m_ans <= {TW{1'b0}}; m_bit <= 5'd0; m_k <= {NW{1'b0}};
-      we <= 1'b0; waddr <= {AW{1'b0}}; wdata <= 8'h00; nrank <= 4'd0;
+      we0 <= 1'b0; waddr0 <= {AW{1'b0}}; wdata0 <= 8'h00; nrank <= 4'd0;
       for (ri = 0; ri < 8; ri = ri + 1) begin role[ri] <= R_NONE; part[ri] <= 3'd0; clvl[ri] <= 1'b0; rank[ri] <= 3'd0; end
     end else if (!run) begin
-      ph <= P_IDLE; walk_go <= 1'b0; we <= 1'b0; done <= 1'b0; refused <= 1'b0; nrank <= 4'd0;
+      ph <= P_IDLE; walk_go <= 1'b0; we0 <= 1'b0; done <= 1'b0; tbl_done <= 1'b0; refused <= 1'b0; nrank <= 4'd0;
       for (ri = 0; ri < 8; ri = ri + 1) begin role[ri] <= R_NONE; part[ri] <= 3'd0; clvl[ri] <= 1'b0; rank[ri] <= 3'd0; end
     end else begin
       walk_go <= 1'b0;
-      we <= 1'b0;
+      we0 <= 1'b0;
       case (ph)
         P_IDLE: if (start && !done) begin
                   wk <= W_CNT; walk_go <= 1'b1; ph <= P_WAIT; w_ret <= P_CNEXT; ci <= 4'd0;
@@ -1598,16 +1633,451 @@ module pe_pit_s0 #(parameter integer AW = 9) (
                 end
         // ---- write the table, bytes 32..38 ----
         P_WRITE: begin
-                   we <= 1'b1; waddr <= TABLE_AT + {{(AW-3){1'b0}}, wbyte};
-                   wdata <= tword[{wbyte, 3'b000} +: 8];
-                   if (wbyte == 3'd6) ph <= P_DONE; else wbyte <= wbyte + 3'd1;
+                   we0 <= 1'b1; waddr0 <= TABLE_AT + {{(AW-3){1'b0}}, wbyte};
+                   wdata0 <= tword[{wbyte, 3'b000} +: 8];
+                   // ⭐ then stages 1-2 (Wilson 10-31), on this decoder, over the role-less wires
+                   if (wbyte == 3'd6) begin ph <= P_S12; wk <= W_S12; end else wbyte <= wbyte + 3'd1;
                  end
+        // stages 1-2 read wire s12_w's intervals off this fold (`wc`)
+        P_S12:  begin tbl_done <= 1'b1; wc <= s12_w; if (s12_done) ph <= P_DONE; end
         P_DONE: done <= 1'b1;
         default: ph <= P_IDLE;
       endcase
     end
   end
 endmodule
+
+// ===========================================================================
+// pe_pit_s12 -- PIT STAGES 1-2 (Wilson 10-31, Track 3): per role-less active
+// wire, model/pit_golden.py's stage1 (the hypothesis bank, both refines, the
+// phase) and stage2 (the encoding class, its condition and the R2 guard), as
+// classify_bus runs them. Bit-exact target: the frozen golden (f19f2177 LF).
+// It runs AFTER stage 0 has written its table, on stage 0's own decoder walk
+// (one walk per pass; nothing per-interval or per-candidate is stored -- a
+// value needed twice is recomputed by another walk), and it writes one 10-byte
+// record per wire at 40 + 10w (Wilson 10-31: bytes 40..119):
+//   b0 {cls[2:0], why[2:0], cond, wh}   b1 {idle, p16[18:16], fb[12:9]}
+//   b2 p16[15:8]  b3 p16[7:0]  b4 {fb[8], phase[14:8]}  b5 phase[7:0]
+//   b6 score (sat 255)  b7 n (sat 255)  b8 frames (sat 255)  b9 fb[7:0]
+// cls: 0 inactive, 1 CLOCK, 2 MANCHESTER, 3 NRZ_ASYNC, 4 NRZI_STUFFED,
+//      5 LEVEL_CODE, 6 UNKNOWN, 7 a stage-0 role (see bytes 32..38)
+// why (UNKNOWN): 1 < 16 intervals, 2 no candidate reaches 7/8, 3 a
+//      non-harmonic rival, 4 no non-idle runs, 5 clock-shaped but irregular,
+//      6 stage 0 refused the bus, 7 withheld by R2 (wh: 0 MANCHESTER, 1 NRZ_ASYNC)
+// cond: the (b) condition -- "every wire of the bus is on the sniffed pins".
+// ⭐ ONE divider, no multiplier: m = round(I/P) is q or q+1, so |I - mP| is the
+//   remainder or P minus it. ⭐ ONE accumulator for every pass (measured lever).
+// ===========================================================================
+module pe_pit_s12 #(parameter integer AW = 9) (
+    input  wire          clk,
+    input  wire          rst_n,
+    input  wire          run,
+    input  wire          go,           // stage 0 has written its table
+    input  wire [7:0]    act,          // >= 2 edges (stage 0's W_CNT)
+    input  wire [7:0]    roled,        // stage 0 gave the wire a role
+    input  wire          refused,      // stage 0 refused the bus
+    input  wire [71:0]   cnt_flat,     // edges per wire, 8 x 9 bits
+    output reg           walk_go,      // a walk of stage 0's decoder
+    output reg           hold,         // freeze the decoder: an interval is in flight
+    output reg  [2:0]    w,            // the wire: stage 0 points its fold's `wc` at it
+    // cut 1 (Wilson's budget, 10-31): STAGE 0'S OWN FOLD gives the interval --
+    // its P1 stage holds the record and `t - last_t` of wire wc until the next
+    // record, which `hold` keeps from coming. No second subtractor, no copy of t.
+    input  wire          p1_v,         // a record entered P1 this cycle
+    input  wire [7:0]    p1_rm,
+    input  wire [7:0]    p1_lv,
+    input  wire [24:0]   p1_civ,       // t - (wire wc's previous edge)
+    input  wire          wdone_p1,     // the walk's last record is in P1
+    output reg           we,
+    output reg  [AW-1:0] waddr,
+    output reg  [7:0]    wdata,
+    output reg           done
+);
+  localparam [15:0] OVF     = 16'hFFFF;
+  localparam [14:0] P_FIRST = 15'd4, P_LAST = 15'd16384;
+  localparam [3:0]  IDLE_M  = 4'd15;
+  localparam [2:0]  C_NONE = 3'd0, C_CLOCK = 3'd1, C_MANCH = 3'd2, C_ASYNC = 3'd3, C_NRZI = 3'd4,
+                    C_LEVEL = 3'd5, C_UNK = 3'd6, C_ROLE = 3'd7;
+
+  // ---------------- the shared divider: 29 / 23 bits, restoring, 29 cycles ------
+  reg  [28:0] dv_q;                 // dividend in, quotient out
+  reg  [23:0] dv_r;                 // remainder
+  reg  [22:0] dv_d;                 // divisor
+  reg  [4:0]  dv_n;
+  reg         dv_busy;
+  wire [23:0] dv_try = {dv_r[22:0], dv_q[28]} - {1'b0, dv_d};
+  // round(dividend / divisor) and its distance, from the quotient and remainder
+  wire        rnd_up = ({dv_r[22:0], 1'b0} >= {1'b0, dv_d});
+  wire [22:0] err    = rnd_up ? (dv_d - dv_r[22:0]) : dv_r[22:0];
+  wire [28:0] m_r    = dv_q + {28'd0, rnd_up};
+  wire        hit    = (m_r != 29'd0) && ({err, 3'b000} <= {3'b000, dv_d});
+  wire [4:0]  m16    = (m_r > 29'd15) ? 5'd16 : {1'b0, m_r[3:0]};   // a run in bit periods (> 15 = idle)
+
+  // ---------------- control ---------------------------------------------------------
+  localparam [4:0] S_IDLE = 5'd0,  S_WIRE = 5'd1,  S_PRE = 5'd2,  S_BANK = 5'd3,  S_RIVAL = 5'd4,
+                   S_HARM = 5'd5,  S_RB = 5'd6,    S_REF1 = 5'd7, S_REF2 = 5'd8,  S_REF2D = 5'd9,
+                   S_PHASE = 5'd10, S_ST2 = 5'd11, S_ASYNC = 5'd12, S_SPAN = 5'd13, S_CLASS = 5'd14,
+                   S_WR = 5'd15,   S_NEXT = 5'd16;
+  reg  [4:0]  st;
+  reg  [14:0] p;
+  wire [14:0] p_step = (p[14:5] == 10'd0) ? 15'd1 : {5'd0, p[14:5]};
+  wire [15:0] p_next = {1'b0, p} + {1'b0, p_step};
+  wire        p_end  = (p_next > {1'b0, P_LAST});
+
+  // the walk: one wire's intervals, one in flight at a time
+  reg         has_prev, last_l, wend;
+  reg         x_v, x_lvl;
+  reg  [1:0]  x_ph;                 // 0 new, 1 dividing, 2 stepping (ASYNC)
+  // the interval in flight, saturated (golden wire_ivs: min(t - prev, OVF)).
+  // P1 holds it: `hold` keeps the next record out
+  wire [15:0] x_iv = (p1_civ > {9'd0, OVF}) ? OVF : p1_civ[15:0];
+
+  // stage 1
+  reg  [8:0]  n, n1;                // non-OVF intervals, and those at level 1
+  reg         idle_lvl;
+  wire [8:0]  n_act = idle_lvl ? (n - n1) : n1;
+  wire [8:0]  n_idl = idle_lvl ? n1 : (n - n1);
+  reg  [14:0] bp;
+  reg  [8:0]  bh;
+  reg         bq, rival, s1ok;          // s1ok: stage 1 returned OK (P_hat, phase, score are claims)
+  // cut 2: the harmonic test's larger period, from P and P_best (both stable)
+  wire [14:0] rv_hi = (p > bp) ? p : bp;
+  reg  [18:0] p16;
+  // ⭐ ONE accumulator for every pass (Wilson 10-31, measured lever 3):
+  //   stage 1:  HA [8:0]  HI [17:9]  H [26:18]  SI [51:27]  SM [74:52]
+  //   stage 2:  BODY [8:0]  IDLE [17:9]  LE0 [26:18]  LE1 [35:27]  N0 [44:36]  N1 [53:45]
+  //             ILV [55:54]  BLV [57:56]  M1 58  M2 59  MO 60  M7 61  MMAX [65:62]
+  //   ASYNC:    FR [8:0]  FJ [12:9]  INFR 13  ABAD 14  RUN [19:15]
+  //   SPAN:     CUR [21:9]  MAX [34:22]  NSP [43:35]
+  //   PRE:      IVMAX [15:0] (cut 3: the longest interval, free before the bank)
+  //   PHASE:    PH [58:44]  PHDONE 59 (cut 7: the phase from a closing walk -- the
+  //             first interval again, divided by the FINAL P_hat; no t0, no phase register)
+  reg  [74:0] acc;
+  wire        qual   = (acc[8:0] >= n_act - {3'd0, n_act[8:3]}) && ({acc[17:9], 1'b0} >= {1'b0, n_idl});
+  // stage 2's tests, reduced to flags as its walk ends (frees the accumulator)
+  reg         f_clock, f_manch, f_nrzi, f_irreg, f_atry, f_body, a_idle;
+  // ASYNC: the frame length under test, and the one found
+  reg  [3:0]  L, a_L;
+  // the record. cut 4: frame bits and frames are READ from the accumulator as
+  // the record is written (SPAN's result stays there until the next wire)
+  reg  [2:0]  cls, why;
+  reg         cond, wh, f_span;
+  reg  [3:0]  wb;
+  wire [12:0] fb     = (cls != C_ASYNC) ? 13'd0 : f_span ? acc[34:22] + 13'd1 : {9'd0, a_L};
+  wire [7:0]  frames = (cls != C_ASYNC || !f_span) ? 8'd0 : (acc[43:35] > 9'd255) ? 8'd255 : acc[42:35];
+
+  wire [8:0]  cnt_w [0:7];
+  genvar gi;
+  generate for (gi = 0; gi < 8; gi = gi + 1) begin : g_cnt
+    assign cnt_w[gi] = cnt_flat[gi*9 +: 9];
+  end endgenerate
+  // R2: another active wire with at least as many edges as this wire has intervals
+  reg r2_hit;
+  integer j;
+  always @(*) begin
+    r2_hit = 1'b0;
+    for (j = 0; j < 8; j = j + 1)
+      if (j[2:0] != w && act[j] && cnt_w[j] >= cnt_w[w] - 9'd1) r2_hit = 1'b1;
+  end
+  wire [7:0] sc8 = (bh > 9'd255) ? 8'd255 : bh[7:0];
+  wire [7:0] n8  = (n  > 9'd255) ? 8'd255 : n[7:0];
+
+  // the pass that consumes a divided interval
+  wire div_ip  = (st == S_BANK) || (st == S_RIVAL) || (st == S_RB);   // I / P
+  wire div_i16 = (st == S_REF2) || (st == S_ST2) || (st == S_ASYNC) || (st == S_SPAN) || (st == S_PHASE);  // 16 I / P_hat
+  // ⛔ ONLY ITS OWN WALKS: stage 0's decoder walks for stage 0 first, and an
+  // interval taken then would raise `hold` and freeze a decoder that must not
+  // miss stage 0's one-cycle walk_go (measured: stage 0 hung in P_WAIT)
+  wire mine = (st == S_PRE) || (st == S_BANK) || (st == S_RIVAL) || (st == S_RB) ||
+              (st == S_REF2) || (st == S_ST2) || (st == S_ASYNC) || (st == S_SPAN) || (st == S_PHASE);
+  // !walk_go: the cycle a new walk is issued still sees the last walk's `wend`
+  wire pass_end = wend && !x_v && !dv_busy && !walk_go;
+
+  always @(posedge clk or negedge rst_n) begin
+    if (!rst_n) begin
+      dv_q <= 29'd0; dv_r <= 24'd0; dv_d <= 23'd0; dv_n <= 5'd0; dv_busy <= 1'b0;
+      st <= S_IDLE; w <= 3'd0; p <= P_FIRST; walk_go <= 1'b0; hold <= 1'b0; done <= 1'b0;
+      we <= 1'b0; waddr <= {AW{1'b0}}; wdata <= 8'h00;
+      has_prev <= 1'b0; last_l <= 1'b0; wend <= 1'b0;
+      x_v <= 1'b0; x_lvl <= 1'b0; x_ph <= 2'd0;
+      n <= 9'd0; n1 <= 9'd0; idle_lvl <= 1'b0;
+      bp <= 15'd0; bh <= 9'd0; bq <= 1'b0; rival <= 1'b0; s1ok <= 1'b0; p16 <= 19'd0;
+      acc <= 75'd0; f_clock <= 1'b0; f_manch <= 1'b0; f_nrzi <= 1'b0; f_irreg <= 1'b0; f_atry <= 1'b0;
+      f_body <= 1'b0; a_idle <= 1'b0; L <= 4'd7; a_L <= 4'd0;
+      cls <= C_NONE; why <= 3'd0; cond <= 1'b0; wh <= 1'b0; f_span <= 1'b0; wb <= 4'd0;
+    end else if (!run) begin
+      st <= S_IDLE; walk_go <= 1'b0; hold <= 1'b0; we <= 1'b0; done <= 1'b0; dv_busy <= 1'b0;
+      x_v <= 1'b0; wend <= 1'b0;
+    end else begin
+      walk_go <= 1'b0; we <= 1'b0;
+      // ---- the divider ----
+      if (dv_busy) begin
+        if (!dv_try[23]) begin dv_r <= dv_try; dv_q <= {dv_q[27:0], 1'b1}; end
+        else begin dv_r <= {dv_r[22:0], dv_q[28]}; dv_q <= {dv_q[27:0], 1'b0}; end
+        dv_n <= dv_n - 5'd1;
+        if (dv_n == 5'd1) dv_busy <= 1'b0;
+      end
+      // ---- the walk: this wire's next interval (golden wire_ivs) ----
+      if (walk_go) begin has_prev <= 1'b0; wend <= 1'b0; end
+      if (wdone_p1 && mine) wend <= 1'b1;
+      if (p1_v && p1_rm[w] && mine) begin
+        if (has_prev) begin
+          x_v <= 1'b1; x_ph <= 2'd0; hold <= 1'b1;
+          x_lvl <= last_l;
+        end
+        last_l <= p1_lv[w]; has_prev <= 1'b1;
+      end
+      // ---- one interval, by pass ----
+      if (x_v) begin
+        if (st == S_PRE) begin
+          if (x_iv != OVF) begin
+            n <= n + 9'd1;
+            if (x_lvl) n1 <= n1 + 9'd1;
+            if (x_iv > acc[15:0]) begin acc[15:0] <= x_iv; idle_lvl <= x_lvl; end   // IVMAX
+          end
+          x_v <= 1'b0; hold <= 1'b0;
+        end else if (x_ph == 2'd0) begin
+          if (x_iv == OVF && div_ip) begin x_v <= 1'b0; hold <= 1'b0; end     // stage 1: data excludes OVF
+          else if (x_iv == OVF && st == S_REF2) begin x_v <= 1'b0; hold <= 1'b0; end
+          // the phase walk: golden t0 = the FIRST non-OVF interval, then nothing
+          else if (st == S_PHASE && (x_iv == OVF || acc[59])) begin x_v <= 1'b0; hold <= 1'b0; end
+          else if (x_iv == OVF) begin                                         // stage 2: an idle run
+            x_ph <= 2'd1;                                                     // no divide: m is idle
+          end else begin
+            x_ph <= 2'd1; dv_busy <= 1'b1; dv_n <= 5'd29; dv_r <= 24'd0;
+            dv_q <= div_ip ? {13'd0, x_iv} : {9'd0, x_iv, 4'd0};
+            dv_d <= div_ip ? {8'd0, p} : {4'd0, p16};
+          end
+        end else if (x_ph == 2'd1 && !dv_busy) begin
+          // the divide is done (an OVF interval arrives here with m forced idle)
+          case (st)
+            S_BANK, S_RIVAL, S_RB, S_REF2: begin
+              if (hit) begin
+                acc[26:18] <= acc[26:18] + 9'd1;                              // H
+                if (x_lvl != idle_lvl) acc[8:0] <= acc[8:0] + 9'd1;           // HA
+                else acc[17:9] <= acc[17:9] + 9'd1;                           // HI
+                acc[51:27] <= acc[51:27] + {9'd0, x_iv};                      // SI
+                acc[74:52] <= acc[74:52] + m_r[22:0];                         // SM
+              end
+              x_v <= 1'b0; hold <= 1'b0;
+            end
+            S_ST2: begin
+              if (x_iv == OVF || m_r > 29'd15) begin
+                acc[17:9] <= acc[17:9] + 9'd1; acc[54 + x_lvl] <= 1'b1;      // IDLE, ILV
+              end else begin
+                acc[8:0] <= acc[8:0] + 9'd1; acc[56 + x_lvl] <= 1'b1;        // BODY, BLV
+                if (m_r == 29'd1) acc[58] <= 1'b1;
+                else if (m_r == 29'd2) acc[59] <= 1'b1;
+                else acc[60] <= 1'b1;
+                if (m_r == 29'd7) acc[61] <= 1'b1;
+                if (m_r[3:0] > acc[65:62]) acc[65:62] <= m_r[3:0];
+                if (x_lvl) begin acc[53:45] <= acc[53:45] + 9'd1; if (m_r <= 29'd1) acc[35:27] <= acc[35:27] + 9'd1; end
+                else begin acc[44:36] <= acc[44:36] + 9'd1; if (m_r <= 29'd1) acc[26:18] <= acc[26:18] + 9'd1; end
+              end
+              x_v <= 1'b0; hold <= 1'b0;
+            end
+            S_PHASE: begin
+              acc[58:44] <= dv_r[18:4]; acc[59] <= 1'b1;                       // (16 t0) mod P_hat, / 16
+              x_v <= 1'b0; hold <= 1'b0;
+            end
+            S_ASYNC: begin
+              acc[19:15] <= (x_iv == OVF) ? 5'd16 : m16;                       // RUN
+              x_ph <= 2'd2;
+            end
+            default: begin   // S_SPAN
+              if (x_iv == OVF || m_r > 29'd15) begin
+                if (acc[21:9] != 13'd0) begin
+                  acc[43:35] <= acc[43:35] + 9'd1;
+                  if (acc[21:9] > acc[34:22]) acc[34:22] <= acc[21:9];
+                end
+                acc[21:9] <= 13'd0;
+              end else acc[21:9] <= acc[21:9] + {9'd0, m_r[3:0]};
+              x_v <= 1'b0; hold <= 1'b0;
+            end
+          endcase
+        end else if (x_ph == 2'd2) begin
+          // ASYNC: one bit of the run per cycle (golden async_frame_len's bits)
+          if (acc[19:15] == 5'd0) begin x_v <= 1'b0; hold <= 1'b0; end
+          else begin
+            acc[19:15] <= acc[19:15] - 5'd1;                                     // RUN
+            if (!acc[14]) begin                                                 // !ABAD
+              if (!acc[13]) begin                                               // !INFR
+                if (x_lvl != a_idle) begin acc[13] <= 1'b1; acc[12:9] <= 4'd1; end
+              end else if (acc[12:9] == L - 4'd1) begin
+                acc[13] <= 1'b0;
+                if (x_lvl != a_idle) acc[14] <= 1'b1;
+                else acc[8:0] <= acc[8:0] + 9'd1;                             // FR
+              end else acc[12:9] <= acc[12:9] + 4'd1;                            // FJ
+            end
+          end
+        end
+      end
+      // ---- the passes ----
+      case (st)
+        S_IDLE: if (go && !done) begin w <= 3'd0; st <= S_WIRE; end
+        S_WIRE: begin
+          cls <= C_NONE; why <= 3'd0; cond <= 1'b0; wh <= 1'b0; f_span <= 1'b0; a_L <= 4'd0;
+          bq <= 1'b0; rival <= 1'b0; s1ok <= 1'b0; bh <= 9'd0; p16 <= 19'd0; a_idle <= 1'b0;
+          n <= 9'd0; n1 <= 9'd0; acc <= 75'd0; wb <= 4'd0;
+          if (!act[w]) st <= S_WR;                                             // inactive: a zero record
+          else if (refused) begin cls <= C_UNK; why <= 3'd6; st <= S_WR; end
+          else if (roled[w]) begin cls <= C_ROLE; st <= S_WR; end
+          else begin walk_go <= 1'b1; st <= S_PRE; end
+        end
+        S_PRE: if (pass_end) begin
+          if (n < 9'd16) begin cls <= C_UNK; why <= 3'd1; acc <= 75'd0; st <= S_WR; end
+          else begin p <= P_FIRST; acc <= 75'd0; walk_go <= 1'b1; st <= S_BANK; end
+        end
+        S_BANK: if (pass_end) begin
+          // ascending P: the last qualifier is the LARGEST qualifying period
+          if (qual) begin bq <= 1'b1; bp <= p; bh <= acc[26:18]; end
+          acc <= 75'd0;
+          if (p_end) begin
+            if (!(bq || qual)) begin cls <= C_UNK; why <= 3'd2; st <= S_WR; end
+`ifdef M_S12_NO_RIVAL
+            // the must-fire: no rival check -- a non-harmonic tie reports a period
+            else begin p <= bp; s1ok <= 1'b1; walk_go <= 1'b1; st <= S_RB; end
+`else
+            else begin p <= P_FIRST; walk_go <= 1'b1; st <= S_RIVAL; end
+`endif
+          end else begin p <= p_next[14:0]; walk_go <= 1'b1; end
+        end
+        S_RIVAL: if (pass_end) begin
+          if (qual && acc[26:18] + {4'd0, n[8:4]} >= bh) begin
+            // _harmonic(P_best, q): k = round(hi / lo), |hi - k lo| * 8 <= hi
+            dv_busy <= 1'b1; dv_n <= 5'd29; dv_r <= 24'd0;
+            dv_q <= {14'd0, (p > bp) ? p : bp}; dv_d <= {8'd0, (p > bp) ? bp : p};
+            st <= S_HARM;
+          end else if (p_end) begin p <= bp; s1ok <= 1'b1; walk_go <= 1'b1; st <= S_RB; end
+          else begin p <= p_next[14:0]; walk_go <= 1'b1; end
+          acc <= 75'd0;
+        end
+        S_HARM: if (!dv_busy) begin
+          if (!(m_r != 29'd0 && {err, 3'b000} <= {11'd0, rv_hi})) begin
+            rival <= 1'b1; cls <= C_UNK; why <= 3'd3; st <= S_WR;               // a non-harmonic rival
+          end else if (p_end) begin p <= bp; s1ok <= 1'b1; walk_go <= 1'b1; st <= S_RB; end
+          else begin p <= p_next[14:0]; walk_go <= 1'b1; st <= S_RIVAL; end
+        end
+        S_RB: if (pass_end) begin
+          // refine 1: P_hat = (16 SI + SM / 2) / SM over the best's hits (recomputed by this walk)
+          dv_busy <= 1'b1; dv_n <= 5'd29; dv_r <= 24'd0;
+          dv_q <= {acc[51:27], 4'd0} + {7'd0, acc[74:53]}; dv_d <= acc[74:52];
+          st <= S_REF1;
+        end
+        S_REF1: if (!dv_busy) begin
+          p16 <= dv_q[18:0]; acc <= 75'd0; walk_go <= 1'b1; st <= S_REF2;
+        end
+        S_REF2: if (pass_end) begin
+          // refine 2 over the full hit set at P_hat (M2)
+          if (acc[74:52] != 23'd0) begin
+            dv_busy <= 1'b1; dv_n <= 5'd29; dv_r <= 24'd0;
+            dv_q <= {acc[51:27], 4'd0} + {7'd0, acc[74:53]}; dv_d <= acc[74:52];
+          end
+          st <= S_REF2D;
+        end
+        S_REF2D: if (!dv_busy) begin
+`ifndef M_S12_NO_REF2
+          if (acc[74:52] != 23'd0) p16 <= dv_q[18:0];
+`endif
+          acc <= 75'd0; walk_go <= 1'b1; st <= S_ST2;
+        end
+        S_PHASE: if (pass_end) st <= S_CLASS;
+        S_ST2: if (pass_end) begin
+          f_body  <= (acc[8:0] != 9'd0);
+          f_clock <= (acc[17:9] == 9'd0) && acc[58] && !acc[59] && !acc[60] && (acc[57:56] == 2'b11);
+          f_manch <= acc[58] && acc[59] && !acc[60] && (acc[8:0] >= 9'd16);
+          f_atry  <= (acc[17:9] >= 9'd2) && (acc[55:54] != 2'b11);
+          f_nrzi  <= (acc[17:9] == 9'd0) && (acc[65:62] <= 4'd7) && acc[61] && (acc[8:0] >= 9'd64);
+          f_irreg <= (acc[44:36] != 9'd0) && (acc[53:45] != 9'd0)
+                     && ({acc[26:18], 2'b00} >= {2'b00, acc[44:36]} + {1'b0, acc[44:36], 1'b0})
+                     && ({acc[35:27], 2'b00} >= {2'b00, acc[53:45]} + {1'b0, acc[53:45], 1'b0});
+          a_idle  <= acc[55];                                                   // the idle runs' one level
+          acc <= 75'd0;
+          st <= S_PHASE; walk_go <= 1'b1; a_L <= 4'd0; L <= 4'd7;
+          // the async frame length is needed only on the NRZ_ASYNC branch
+          if ((acc[8:0] != 9'd0)
+              && !((acc[17:9] == 9'd0) && acc[58] && !acc[59] && !acc[60] && (acc[57:56] == 2'b11))
+              && !(acc[58] && acc[59] && !acc[60] && (acc[8:0] >= 9'd16))
+              && (acc[17:9] >= 9'd2) && (acc[55:54] != 2'b11)) begin
+            st <= S_ASYNC; walk_go <= 1'b1;                                   // FJ, INFR, ABAD: clear (acc)
+          end
+        end
+        S_ASYNC: if (pass_end) begin
+          if (!acc[14] && acc[8:0] >= 9'd4) begin a_L <= L; acc <= 75'd0; walk_go <= 1'b1; st <= S_PHASE; end   // the SMALLEST such L
+          else if (L == 4'd12) begin acc <= 75'd0; walk_go <= 1'b1; st <= S_SPAN; end
+          else begin L <= L + 4'd1; acc <= 75'd0; walk_go <= 1'b1; end
+        end
+        S_SPAN: if (pass_end) begin
+          // the open span at the end of the walk counts too
+          if (acc[21:9] != 13'd0) begin
+            acc[43:35] <= acc[43:35] + 9'd1;
+            if (acc[21:9] > acc[34:22]) acc[34:22] <= acc[21:9];
+          end
+          acc[21:9] <= 13'd0;
+          walk_go <= 1'b1; st <= S_PHASE;
+        end
+        S_CLASS: begin
+          // golden _stage2's order, then stage2's condition and the R2 guard
+`ifdef M_S12_NO_BODYCHK
+          if (1'b0) begin end  // the must-fire: "no non-idle runs" never reported
+`else
+          if (!f_body) begin cls <= C_UNK; why <= 3'd4; end
+`endif
+          else if (f_clock) cls <= C_CLOCK;
+          else if (f_manch) begin cls <= C_MANCH; cond <= 1'b1; end
+          else if (f_atry && a_L != 4'd0) begin
+            cls <= C_ASYNC; cond <= 1'b1;
+`ifdef M_S12_NO_SPAN
+          end else if (1'b0) begin      // the must-fire: the span fallback off
+`else
+          end else if (f_atry && acc[43:35] >= 9'd2) begin
+`endif
+            cls <= C_ASYNC; cond <= 1'b1; f_span <= 1'b1;
+          end else if (f_nrzi) begin cls <= C_NRZI; cond <= 1'b1; end
+`ifdef M_S12_NO_IRREG
+          else if (1'b0) begin end      // the must-fire: the stretched-clock refusal off
+`else
+          else if (f_irreg) begin cls <= C_UNK; why <= 3'd5; end
+`endif
+          else cls <= C_LEVEL;
+          st <= S_WR;
+        end
+        S_WR: begin
+          // the R2 guard (golden stage2, guard=True), applied as the record is written
+`ifdef M_S12_NO_R2
+          if (1'b0) begin      // the must-fire: the R2 guard off (a clock on another pin is ignored)
+`else
+          if (wb == 4'd0 && r2_hit && (cls == C_MANCH || cls == C_ASYNC)) begin
+`endif
+            wh <= (cls == C_ASYNC); cls <= C_UNK; why <= 3'd7; cond <= 1'b0;
+          end else begin
+            we <= 1'b1;
+            waddr <= 9'd40 + {3'd0, w, 3'b000} + {5'd0, w, 1'b0} + {5'd0, wb};
+            case (wb)
+              4'd0: wdata <= {cls, why, cond, wh};
+              4'd1: wdata <= {(cls == C_ASYNC) ? a_idle : 1'b0, p16[18:16], fb[12:9]};
+              4'd2: wdata <= p16[15:8];
+              4'd3: wdata <= p16[7:0];
+              4'd4: wdata <= {fb[8], acc[58:52]};                                 // PH
+              4'd5: wdata <= acc[51:44];
+              4'd6: wdata <= s1ok ? sc8 : 8'd0;
+              4'd7: wdata <= n8;
+              4'd8: wdata <= frames;
+              default: wdata <= fb[7:0];
+            endcase
+            wb <= wb + 4'd1;
+            if (wb == 4'd9) st <= S_NEXT;
+          end
+        end
+        S_NEXT: if (w == 3'd7) begin done <= 1'b1; st <= S_IDLE; end
+                else begin w <= w + 3'd1; st <= S_WIRE; end
+        default: st <= S_IDLE;
+      endcase
+    end
+  end
+  wire _unused = &{1'b0, rival};
+endmodule
+
 
 // pe_dup_ff -- ONE resettable flop that synthesis may NOT merge with its twins
 // (step 1b, 10-27). (* keep_hierarchy *) keeps each instance a module through
