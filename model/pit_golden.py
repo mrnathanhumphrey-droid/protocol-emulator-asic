@@ -721,3 +721,127 @@ def classify_bus(cap, lv0=0, guard=True):
         s1 = stage1(iv)
         out[w] = stage2(iv, s1, others)
     return out
+
+
+# ---------------------------------------------------------------------------
+# stage 3 composition (Wilson 11-04) -- APPENDED; everything above is the
+# f19f2177 rule set byte for byte (pit_s0_golden checks the prefix hash).
+# One record per bus at bytes 120..135, from the FIRST NRZ_ASYNC wire in index
+# order (classify_bus). Little-endian:
+#   120  wire[2:0] | found<<3 | poly_ok<<4 | io_ok<<5 | reflected<<6 | kernel<<7
+#   121  width code[1:0] (0 none, 1 = 8, 2 = 16, 3 = 32) | frame length [7:2] (sat 63)
+#   122  differences used (sat 255)
+#   123  frames decoded (sat 255)
+#   124..127 poly (normal form, implicit top bit; 0 unless poly_ok)
+#   128..131 init   (0 unless io_ok)
+#   132..135 xorout (0 unless io_ok)
+# The catalogue name lives in the emitter, not on chip.
+# ---------------------------------------------------------------------------
+S3_AT, S3_BYTES = 120, 16
+_WCODE = {8: 1, 16: 2, 32: 3}
+
+
+def crc_poly_gcd_s3(msgs):
+    """crc_poly_gcd with every factor of x stripped from the GCD before the
+    width check (Wilson 11-04, fix 3): a CRC generator has constant term 1, so
+    x is never part of one. (x+1) is NEVER stripped (0x8005, 0x1021 carry it)."""
+    by_len = {}
+    for m in msgs:
+        by_len.setdefault(len(m), []).append(m)
+    best = None
+    for lsb in (False, True):
+        for L, group in sorted(by_len.items(), key=lambda kv: -len(kv[1])):
+            if len(group) < 2:
+                continue
+            polys = [bits_to_poly(msg_bits(m, lsb)) for m in group]
+            g, used = 0, 0
+            for a in polys[1:]:
+                d = a ^ polys[0]
+                if d == 0:
+                    continue
+                g = pgcd(g, d) if g else d
+                used += 1
+            while g and not g & 1:
+                g >>= 1
+            if g and deg(g) in WIDTHS and used >= MIN_DIFFS:
+                cand = {"status": "OK", "width": deg(g), "poly": g & ((1 << deg(g)) - 1),
+                        "full": g, "reflected": lsb, "diffs_used": used, "frame_len": L}
+                if best is None or cand["diffs_used"] > best["diffs_used"]:
+                    best = cand
+    if best is None:
+        return {"status": "UNKNOWN", "why": "no difference GCD of a supported width"}
+    return best
+
+
+def io_evidence(msgs, res):
+    """the frames init/xorout may be solved from (Wilson 11-04, fixes 1-2):
+    ⛔ the last decoded frame is never evidence, whatever the stop (budget,
+    FULL or OVERRUN can each cut it);
+    ⛔ a length counts only with >= 2 frames whose differences are all
+    multiples of g -- one frame per length is one equation that always has an
+    answer, so a corrupted frame became a confident wrong init/xorout."""
+    g, lsb = res["full"], res["reflected"]
+    by_len = {}
+    for m in msgs[:-1]:
+        by_len.setdefault(len(m), []).append(m)
+    keep = []
+    for L in sorted(by_len):
+        group = by_len[L]
+        if len(group) < 2:
+            continue
+        p0 = bits_to_poly(msg_bits(group[0], lsb))
+        if all(pmod(bits_to_poly(msg_bits(m, lsb)) ^ p0, g) == 0 for m in group[1:]):
+            keep += group
+    return keep
+
+
+def canonical_member(msgs, res, io):
+    """the SMALLEST-INIT member of the (init, xorout) class (Wilson 11-05,
+    option 1). A kernel class cannot be told apart by the data; the frozen
+    solver's catalogue pick is a prior, so the chip reports the canonical
+    member + the kernel flag and the EMITTER names any catalogue match.
+    xorout follows from the same frame the frozen solver anchors on (the first
+    of the shorter length): c1 = reg(d1, init) ^ xorout."""
+    if io.get("init") is None:
+        return io
+    w, g, lsb = res["width"], res["full"], res["reflected"]
+    nb = w // 8
+    span = {0}
+    for k in io["kernel"]:
+        span |= {x ^ k for x in span}
+    init = min(io["init"] ^ k for k in span)
+    lens = sorted({len(m) for m in msgs if len(m) > nb})
+    bits = msg_bits(next(m for m in msgs if len(m) == lens[0]), lsb)
+    xorout = bits_to_poly(bits[-w:]) ^ _crc_reg(bits[:-w], g, w, init)
+    return dict(io, init=init, xorout=xorout)
+
+
+def stage3(cap, lv0, cls):
+    """-> (the 16-byte record, detail). cls = classify_bus(cap, lv0)."""
+    rec = bytearray(S3_BYTES)
+    w = next((x for x in sorted(cls) if cls[x].get("cls") == "NRZ_ASYNC"), None)
+    if w is None:
+        return bytes(rec), {"status": "UNKNOWN", "why": "no NRZ_ASYNC wire"}
+    c = cls[w]
+    msgs = async_bytes(wire_ivs(cap, w, lv0), c["bit16"], c["frame_bits"])
+    res = crc_poly_gcd_s3(msgs)
+    out = {"wire": w, "msgs": msgs, "poly": res}
+    rec[0] = w | 1 << 3
+    rec[3] = min(len(msgs), 255)
+    if res["status"] != "OK":
+        out["status"] = "UNKNOWN"
+        return bytes(rec), out
+    ev = io_evidence(msgs, res)
+    out["evidence"] = ev
+    io = canonical_member(ev, res, crc_init_xorout(ev, res))
+    out["io"] = io
+    rec[0] |= 1 << 4 | (1 << 6 if res["reflected"] else 0)
+    rec[1] = _WCODE[res["width"]] | min(res["frame_len"], 63) << 2
+    rec[2] = min(res["diffs_used"], 255)
+    rec[4:8] = res["poly"].to_bytes(4, "little")
+    if io.get("init") is not None:
+        rec[0] |= 1 << 5 | (1 << 7 if io["class_size"] > 1 else 0)
+        rec[8:12] = io["init"].to_bytes(4, "little")
+        rec[12:16] = io["xorout"].to_bytes(4, "little")
+    out["status"] = "OK"
+    return bytes(rec), out

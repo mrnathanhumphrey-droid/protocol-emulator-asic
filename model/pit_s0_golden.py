@@ -23,7 +23,12 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 # checkout of the SAME text hashed f19f2177, so the gate refused to run there.
 # f19f2177 IS e55d0b63's text with LF endings (verified byte for byte); the
 # check normalises CRLF -> LF first, as gate_manifest / run_w_sweep do.
-FROZEN = "f19f2177d243b9f1bdea124d6ef2d16d6c9effeddd47da02c1c57b65da7d86eb"   # = e55d0b63 as LF
+# ⛔ RE-FROZEN 11-04 (Wilson): stage 3's composition APPENDED. The first
+# FROZEN_PREFIX_LEN bytes must still hash to f19f2177 -- the stage 0-2 rules
+# byte for byte -- and the whole file to FROZEN.
+FROZEN = "f1fb037febec84b143c72e740ed255baf40207b43b60c58463fc51e3eeec7b68"
+FROZEN_PREFIX = "f19f2177d243b9f1bdea124d6ef2d16d6c9effeddd47da02c1c57b65da7d86eb"   # = e55d0b63 as LF
+FROZEN_PREFIX_LEN = 29070
 TABLE_AT, TABLE_BYTES = 32, 7
 R_NONE, R_CLOCK, R_SYNC, R_FRAME, R_AMBIG, R_CLOCK_I2C, R_SYNC_I2C, R_REFUSED = range(8)
 
@@ -31,7 +36,12 @@ R_NONE, R_CLOCK, R_SYNC, R_FRAME, R_AMBIG, R_CLOCK_I2C, R_SYNC_I2C, R_REFUSED = 
 def frozen_model():
     path = os.path.join(HERE, "pit_golden.py")
     with open(path, "rb") as fh:
-        got = hashlib.sha256(fh.read().replace(b"\r\n", b"\n")).hexdigest()
+        text = fh.read().replace(b"\r\n", b"\n")
+    got = hashlib.sha256(text).hexdigest()
+    pre = hashlib.sha256(text[:FROZEN_PREFIX_LEN]).hexdigest()
+    if pre != FROZEN_PREFIX:
+        raise RuntimeError("model/pit_golden.py's stage 0-2 rules changed (prefix %s, want %s)"
+                           % (pre[:8], FROZEN_PREFIX[:8]))
     if got != FROZEN:
         raise RuntimeError("model/pit_golden.py is NOT the frozen stage-0 rule set (%s, want %s)"
                            % (got[:8], FROZEN[:8]))
