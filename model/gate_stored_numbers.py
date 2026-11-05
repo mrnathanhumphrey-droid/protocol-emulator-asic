@@ -734,6 +734,11 @@ SPEC_SYMBOLS = {
     # the budget, 33 to set bit 5 and never expire -- Wilson 11-04): design;
     # the result is the bit-exact compare and the stop reason, judged live.
     ("test/run_pit_capture.py", "BUDGET_FOR"),
+    # stages 1-2 (11-04): S12_WAVES is the cases' STIMULUS (waveform shapes,
+    # seeds) and WHY the record's reason-code ENCODING -- design; the result is
+    # the bit-exact compare against frozen classify_bus, judged live.
+    ("test/run_pit_s12.py", "S12_WAVES"),
+    ("test/run_pit_s12.py", "WHY"),
     # v2 PIT chunk 2: the FROZEN stage-0 model (e55d0b63, never edited here):
     # CATALOGUE is the published CRC parameter catalogue (Rocksoft model) and
     # WIDTHS the CRC widths it searches (8 / 16 / 32) -- specifications, not
