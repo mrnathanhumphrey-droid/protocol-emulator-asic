@@ -1122,8 +1122,8 @@ module pe_pit_s0 #(parameter integer AW = 9) (
     input  wire          start,        // the capture has stopped and written its status
     input  wire [13:0]   n_rec,        // whole records stored
     input  wire [7:0]    lv0,          // the starting levels (byte 39)
-    output reg           re,
-    output reg  [AW-1:0] raddr,
+    output wire          re,           // the decoder's reads, or stage 3's (after every walk)
+    output wire [AW-1:0] raddr,
     input  wire [7:0]    rdata,
     output wire          we,
     output wire [AW-1:0] waddr,
@@ -1162,7 +1162,14 @@ module pe_pit_s0 #(parameter integer AW = 9) (
   reg  [7:0]     lv;                    // every wire's level just after it
   reg  [7:0]     rm;                    // its change mask
   reg            rec_v, walk_done, walk_go;
-  wire           s12_walk_go, s12_hold, s12_we, s12_done;
+  wire           s12_walk_go, s12_hold, s12_we, s12_done, s12_re;
+  wire [AW-1:0]  s12_raddr;
+  reg            dre;                   // the decoder's own read (stage 3 reads only after every walk)
+  reg  [AW-1:0]  draddr;
+  wire           s3_found, s3_fbs;
+  wire [7:0]     s3_nmsg;
+  assign re    = dre | s12_re;
+  assign raddr = s12_re ? s12_raddr : draddr;
   wire [2:0]     s12_w;
   wire [AW-1:0]  s12_waddr;
   wire [7:0]     s12_wdata;
@@ -1173,11 +1180,11 @@ module pe_pit_s0 #(parameter integer AW = 9) (
     if (!rst_n) begin
       ds <= D_IDLE; dload <= 1'b0; sh <= 8'h00; nb <= 4'd0; fs <= F_RAW; fc <= 5'd0; kk <= 4'd0;
       iv <= {IVW{1'b0}}; mk <= 8'h00; r <= 14'd0; ba <= CAP_BASE; t <= {TW{1'b0}}; lv <= 8'h00;
-      rm <= 8'h00; rec_v <= 1'b0; walk_done <= 1'b0; re <= 1'b0; raddr <= {AW{1'b0}};
+      rm <= 8'h00; rec_v <= 1'b0; walk_done <= 1'b0; dre <= 1'b0; draddr <= {AW{1'b0}};
     end else if (!run) begin
-      ds <= D_IDLE; rec_v <= 1'b0; walk_done <= 1'b0; re <= 1'b0;
+      ds <= D_IDLE; rec_v <= 1'b0; walk_done <= 1'b0; dre <= 1'b0;
     end else begin
-      rec_v <= 1'b0; walk_done <= 1'b0; re <= 1'b0;
+      rec_v <= 1'b0; walk_done <= 1'b0; dre <= 1'b0;
       // ⭐ HOLD (Wilson 10-31): stages 1-2 freeze the walk while an interval divides
       // (29 cycles; records are >= 8 apart). Never raised during stage 0, which
       // stays bit-exact (gate pit-s0).
@@ -1188,7 +1195,7 @@ module pe_pit_s0 #(parameter integer AW = 9) (
           if (n_rec == 14'd0) walk_done <= 1'b1;
           else ds <= D_REQ;
         end
-        D_REQ: begin re <= 1'b1; raddr <= ba; ba <= ba + {{(AW-1){1'b0}}, 1'b1}; dload <= 1'b0; ds <= D_LAT; end
+        D_REQ: begin dre <= 1'b1; draddr <= ba; ba <= ba + {{(AW-1){1'b0}}, 1'b1}; dload <= 1'b0; ds <= D_LAT; end
         // the store registers rdata on the edge that sees `re`: one cycle to wait
         D_LAT: begin
           if (dload) begin sh <= rdata; nb <= 4'd8; ds <= D_BIT; end
@@ -1445,15 +1452,15 @@ module pe_pit_s0 #(parameter integer AW = 9) (
       assign cnt_flat[gs*9 +: 9] = cnt[gs];
     end
   endgenerate
+  wire           s12_go;               // = (ph == P_S12), assigned after the sequencer's declarations
   pe_pit_s12 #(.AW(AW)) u_s12 (
-      .clk(clk), .rst_n(rst_n), .run(run), .go(ph == P_S12),
+      .clk(clk), .rst_n(rst_n), .run(run), .go(s12_go),
       .act(act), .roled(roled), .refused(refused), .cnt_flat(cnt_flat),
       .walk_go(s12_walk_go), .hold(s12_hold), .w(s12_w),
       .p1_v(p1_v), .p1_rm(p1_rm), .p1_lv(p1_lv), .p1_civ(p1_civ), .wdone_p1(wdone_p1),
-      .we(s12_we), .waddr(s12_waddr), .wdata(s12_wdata), .done(s12_done));
-  assign we    = we0 | s12_we;
-  assign waddr = s12_we ? s12_waddr : waddr0;
-  assign wdata = s12_we ? s12_wdata : wdata0;
+      .we(s12_we), .waddr(s12_waddr), .wdata(s12_wdata), .done(s12_done),
+      .re(s12_re), .raddr(s12_raddr), .rdata(rdata),
+      .s3_found(s3_found), .s3_fbs(s3_fbs), .s3_nmsg(s3_nmsg));
 
   // ===========================================================================
   // THE SEQUENCER: stage0's phases, in its order.
@@ -1469,6 +1476,11 @@ module pe_pit_s0 #(parameter integer AW = 9) (
   reg            tbl_done;              // stage 0's table is written (stages 1-2 may still run)
   reg  [AW-1:0]  waddr0;
   reg  [7:0]     wdata0;
+  // after the declarations (WSL iverilog: no use before declaration)
+  assign s12_go = (ph == P_S12);
+  assign we    = we0 | s12_we;
+  assign waddr = s12_we ? s12_waddr : waddr0;
+  assign wdata = s12_we ? s12_wdata : wdata0;
   reg  [3:0] ci, di;
   reg  [2:0] wbyte;
 `ifdef M_S0_MED_OFF1
@@ -1691,7 +1703,15 @@ module pe_pit_s12 #(parameter integer AW = 9) (
     output reg           we,
     output reg  [AW-1:0] waddr,
     output reg  [7:0]    wdata,
-    output reg           done
+    output reg           done,
+    // stage 3 (Wilson 11-05): its reads of stage 2's records and of the decoded
+    // messages, through stage 0's read port (idle once its walks are done)
+    output reg           re,
+    output wire [AW-1:0] raddr,
+    input  wire [7:0]    rdata,
+    output reg           s3_found,     // an NRZ_ASYNC wire exists
+    output reg           s3_fbs,       // ... with frame_bits < 9: UNKNOWN, not decoded
+    output reg  [7:0]    s3_nmsg       // messages decoded (sat 255)
 );
   localparam [15:0] OVF     = 16'hFFFF;
   localparam [14:0] P_FIRST = 15'd4, P_LAST = 15'd16384;
@@ -1717,7 +1737,7 @@ module pe_pit_s12 #(parameter integer AW = 9) (
   localparam [4:0] S_IDLE = 5'd0,  S_WIRE = 5'd1,  S_PRE = 5'd2,  S_BANK = 5'd3,  S_RIVAL = 5'd4,
                    S_HARM = 5'd5,  S_RB = 5'd6,    S_REF1 = 5'd7, S_REF2 = 5'd8,  S_REF2D = 5'd9,
                    S_PHASE = 5'd10, S_ST2 = 5'd11, S_ASYNC = 5'd12, S_SPAN = 5'd13, S_CLASS = 5'd14,
-                   S_WR = 5'd15,   S_NEXT = 5'd16;
+                   S_WR = 5'd15,   S_NEXT = 5'd16, S_S3 = 5'd17;
   reg  [4:0]  st;
   reg  [14:0] p;
   wire [14:0] p_step = (p[14:5] == 10'd0) ? 15'd1 : {5'd0, p[14:5]};
@@ -1782,6 +1802,75 @@ module pe_pit_s12 #(parameter integer AW = 9) (
   wire [7:0] sc8 = (bh > 9'd255) ? 8'd255 : bh[7:0];
   wire [7:0] n8  = (n  > 9'd255) ? 8'd255 : n[7:0];
 
+
+  // ===========================================================================
+  // STAGE 3, PIECE 1 (Wilson 11-05): the decode walk -- golden async_bytes on
+  // the first NRZ_ASYNC wire, its messages written BEHIND the read pointer from
+  // byte 128 as [length][bytes...] (frame_bits >= 9 keeps the decode moving
+  // forward; each decoded byte costs >= 2 records of >= 9 bits). ONE 26-bit ALU
+  // (its borrow is every compare), a few cycles a step, and every wide value in
+  // a register stages 1-2 are done with (their records are written):
+  // ===========================================================================
+`define S3_X     acc[24:0]                  // the scan point; the byte's start s while sampling
+`define S3_LQ    acc[49:25]                 // le + p16 + p16/4 (the gap test); the sample point while sampling
+`define S3_P30   acc[29:0]                  // the fl product {LQ[4:0], X}, before the decode
+`define S3_SA    acc[72:50]                 // (2b + 3) p16 (< 17 x 2^18)
+`define S3_FB    acc[62:50]                 // frame_bits, before the multiply
+`define S3_OPEN  acc[73]                    // a message is open
+`define S3_MBYTE acc[74]                    // sampling a byte (else scanning)
+`define S3_E     dv_q[24:0]                 // the current interval's end
+`define S3_TOT   {dv_q[25], dv_r[23:0]}     // the total time (< 341 x 0xFFFF < 2^25)
+`define S3_FL    {dv_q[28:26], dv_d[21:0]}  // (fb p16) >> 4, all ones if >= 2^25
+`define S3_CLEN  {dv_d[22], bp}             // the current interval's length; the pre-pass maximum
+`define S3_BY    bh[7:0]
+`define S3_MLEN  n[7:0]
+`define S3_WP    p[8:0]
+`define S3_LA    n1
+`define S3_BI    L[2:0]
+`define S3_HLE   a_L[0]                     // last_end exists (the multiply's sticky overflow before)
+`define S3_CUR   a_L[1]                     // an interval is current
+`define S3_L     a_L[2]                     // its level
+`define S3_IDLE  a_L[3]                     // the idle level
+  localparam [4:0] T_RD = 5'd0, T_RW = 5'd1, T_RV = 5'd2, T_MUL = 5'd3, T_PRE = 5'd4, T_PRE1 = 5'd5,
+                   T_CHK = 5'd6, T_LOC = 5'd7, T_ADV = 5'd8, T_STEP = 5'd9, T_FOUND = 5'd10,
+                   T_SPL = 5'd11, T_SA0 = 5'd12, T_MID = 5'd13, T_MLOC = 5'd14, T_SAI = 5'd15,
+                   T_XE = 5'd16, T_LQ1 = 5'd17, T_LQ2 = 5'd18, T_END = 5'd19, T_DRAIN = 5'd20,
+                   T_DONE = 5'd21;
+  localparam [12:0] S3_MIN_FB = 13'd9;      // start + 8 data bits (Wilson 11-05)
+  localparam [AW-1:0] S3_CAP = 9'd128;
+  reg  [4:0]  t3;
+  wire        t3_walk = (st == S_S3) && (t3 >= T_PRE) && (t3 <= T_DRAIN);
+  wire        exh = wend & ~x_v & ~walk_go;      // no interval will come (not the last walk's wend)
+  assign      raddr = 9'd40 + {3'd0, w, 3'b000} + {5'd0, w, 1'b0} + {5'd0, wb};
+  // THE ALU: a + b or a - b; on a subtract, al_lt = (a < b)
+  reg  [25:0] al_a, al_b;
+  reg         al_sub;
+  wire [26:0] al    = {1'b0, al_a} + {1'b0, al_sub ? ~al_b : al_b} + {26'd0, al_sub};
+  wire        al_lt = al_sub & ~al[26];
+  wire [4:0]  hi5   = {1'b0, acc[28:25]} + {4'd0, al[26]};      // the product's top, doubled + carry
+  wire [25:0] w_p16 = {7'd0, p16};
+  always @(*) begin
+    al_sub = 1'b0; al_a = {1'b0, `S3_X}; al_b = 26'd0;
+    case (t3)
+      T_MUL:   begin al_a = {acc[24:0], 1'b0}; al_b = acc[7'd50 + {3'd0, wb}] ? w_p16 : 26'd0; end
+      T_PRE:   begin al_a = {1'b0, `S3_TOT}; al_b = {10'd0, x_iv}; end
+      T_PRE1:  begin al_a = {10'd0, `S3_CLEN}; al_b = {10'd0, x_iv}; al_sub = 1'b1; end
+      T_CHK:   begin al_b = {1'b0, `S3_TOT}; al_sub = 1'b1; end
+      T_LOC:   begin al_b = {1'b0, `S3_E}; al_sub = 1'b1; end
+      T_ADV:   begin al_a = {1'b0, `S3_E}; al_b = {10'd0, x_iv}; end
+      T_STEP:  al_b = {13'd0, p16[18:6]};                  // p16 >= 64: stage 1's smallest P is 4
+      T_FOUND: begin al_a = {1'b0, `S3_E}; al_b = {10'd0, `S3_CLEN}; al_sub = 1'b1; end
+      T_SPL:   begin al_a = {1'b0, `S3_LQ}; al_b = {1'b0, `S3_X}; al_sub = 1'b1; end
+      T_SA0:   begin al_a = w_p16; al_b = {w_p16[24:0], 1'b0}; end
+      T_MID:   al_b = {8'd0, acc[72:55]};
+      T_MLOC:  begin al_a = {1'b0, `S3_LQ}; al_b = {1'b0, `S3_E}; al_sub = 1'b1; end
+      T_SAI:   begin al_a = {3'd0, `S3_SA}; al_b = {w_p16[24:0], 1'b0}; end
+      T_XE:    al_b = {1'b0, `S3_FL};
+      T_LQ1:   al_b = w_p16;
+      T_LQ2:   begin al_a = {1'b0, `S3_LQ}; al_b = {9'd0, p16[18:2]}; end
+      default: ;
+    endcase
+  end
   // the pass that consumes a divided interval
   wire div_ip  = (st == S_BANK) || (st == S_RIVAL) || (st == S_RB);   // I / P
   wire div_i16 = (st == S_REF2) || (st == S_ST2) || (st == S_ASYNC) || (st == S_SPAN) || (st == S_PHASE);  // 16 I / P_hat
@@ -1789,7 +1878,8 @@ module pe_pit_s12 #(parameter integer AW = 9) (
   // interval taken then would raise `hold` and freeze a decoder that must not
   // miss stage 0's one-cycle walk_go (measured: stage 0 hung in P_WAIT)
   wire mine = (st == S_PRE) || (st == S_BANK) || (st == S_RIVAL) || (st == S_RB) ||
-              (st == S_REF2) || (st == S_ST2) || (st == S_ASYNC) || (st == S_SPAN) || (st == S_PHASE);
+              (st == S_REF2) || (st == S_ST2) || (st == S_ASYNC) || (st == S_SPAN) || (st == S_PHASE) ||
+              t3_walk;
   // !walk_go: the cycle a new walk is issued still sees the last walk's `wend`
   wire pass_end = wend && !x_v && !dv_busy && !walk_go;
 
@@ -1805,11 +1895,12 @@ module pe_pit_s12 #(parameter integer AW = 9) (
       acc <= 75'd0; f_clock <= 1'b0; f_manch <= 1'b0; f_nrzi <= 1'b0; f_irreg <= 1'b0; f_atry <= 1'b0;
       f_body <= 1'b0; a_idle <= 1'b0; L <= 4'd7; a_L <= 4'd0;
       cls <= C_NONE; why <= 3'd0; cond <= 1'b0; wh <= 1'b0; f_span <= 1'b0; wb <= 4'd0;
+      t3 <= T_RD; re <= 1'b0; s3_found <= 1'b0; s3_fbs <= 1'b0; s3_nmsg <= 8'd0;
     end else if (!run) begin
       st <= S_IDLE; walk_go <= 1'b0; hold <= 1'b0; we <= 1'b0; done <= 1'b0; dv_busy <= 1'b0;
-      x_v <= 1'b0; wend <= 1'b0;
+      x_v <= 1'b0; wend <= 1'b0; re <= 1'b0;
     end else begin
-      walk_go <= 1'b0; we <= 1'b0;
+      walk_go <= 1'b0; we <= 1'b0; re <= 1'b0;
       // ---- the divider ----
       if (dv_busy) begin
         if (!dv_try[23]) begin dv_r <= dv_try; dv_q <= {dv_q[27:0], 1'b1}; end
@@ -1827,8 +1918,8 @@ module pe_pit_s12 #(parameter integer AW = 9) (
         end
         last_l <= p1_lv[w]; has_prev <= 1'b1;
       end
-      // ---- one interval, by pass ----
-      if (x_v) begin
+      // ---- one interval, by pass (stage 3 takes its own: S_S3 below) ----
+      if (x_v && st != S_S3) begin
         if (st == S_PRE) begin
           if (x_iv != OVF) begin
             n <= n + 9'd1;
@@ -2069,13 +2160,129 @@ module pe_pit_s12 #(parameter integer AW = 9) (
             if (wb == 4'd9) st <= S_NEXT;
           end
         end
-        S_NEXT: if (w == 3'd7) begin done <= 1'b1; st <= S_IDLE; end
-                else begin w <= w + 3'd1; st <= S_WIRE; end
+        // stage 3 follows wire 7's record (Wilson 11-05): `done` is stages 1-3
+        S_NEXT: if (w == 3'd7) begin
+                  w <= 3'd0; wb <= 4'd0; st <= S_S3; t3 <= T_RD;
+                  s3_found <= 1'b0; s3_fbs <= 1'b0; s3_nmsg <= 8'd0;
+                end else begin w <= w + 3'd1; st <= S_WIRE; end
+        S_S3: begin
+          case (t3)
+            // ---- stage 2's record of the first NRZ_ASYNC wire (40 + 10w + wb) ----
+            T_RD: begin re <= 1'b1; t3 <= T_RW; end
+            T_RW: t3 <= T_RV;                          // the store registers rdata
+            T_RV: begin
+              t3 <= T_RD;
+              case (wb)
+                4'd0: if (rdata[7:5] == C_ASYNC) begin s3_found <= 1'b1; wb <= 4'd1; end
+                      else if (w == 3'd7) t3 <= T_DONE;
+                      else w <= w + 3'd1;
+                4'd1: begin p16[18:16] <= rdata[6:4]; acc[62:59] <= rdata[3:0]; wb <= 4'd2; end
+                4'd2: begin p16[15:8] <= rdata; wb <= 4'd3; end
+                4'd3: begin p16[7:0] <= rdata; wb <= 4'd4; end
+                4'd4: begin acc[58] <= rdata[7]; wb <= 4'd9; end
+                default: begin
+                  acc[57:50] <= rdata;
+                  if ({acc[62:58], rdata} < S3_MIN_FB) begin s3_fbs <= 1'b1; t3 <= T_DONE; end
+                  else begin `S3_P30 <= 30'd0; `S3_HLE <= 1'b0; wb <= 4'd12; t3 <= T_MUL; end
+                end
+              endcase
+            end
+            // ---- fl = (fb * p16) >> 4 into the product {LQ[4:0], X}: 13 shift-adds;
+            //      >= 2^29 (or a sticky overflow) saturates fl past any total ----
+            T_MUL: begin
+              `S3_P30 <= {hi5[3:0], al[25:0]};
+              if (acc[29] | hi5[4]) `S3_HLE <= 1'b1;
+              wb <= wb - 4'd1;
+              if (wb == 4'd0) begin
+                `S3_FL <= (`S3_HLE | acc[29] | hi5[4] | hi5[3]) ? {25{1'b1}} : {hi5[2:0], al[25:4]};
+                `S3_TOT <= 25'd0; `S3_CLEN <= 16'd0; `S3_IDLE <= 1'b0;
+                walk_go <= 1'b1; t3 <= T_PRE;
+              end
+            end
+            // ---- the pre-pass: total, and the level of the FIRST longest interval ----
+            T_PRE: if (x_v) begin `S3_TOT <= al[24:0]; t3 <= T_PRE1; end
+                   else if (pass_end) begin
+                     walk_go <= 1'b1; t3 <= T_CHK;
+                     `S3_X <= 25'd0; `S3_E <= 25'd0; `S3_CUR <= 1'b0; `S3_HLE <= 1'b0;
+                     `S3_OPEN <= 1'b0; `S3_MBYTE <= 1'b0; `S3_WP <= S3_CAP; s3_nmsg <= 8'd0;
+                   end
+            T_PRE1: begin
+              if (al_lt) begin `S3_CLEN <= x_iv; `S3_IDLE <= x_lvl; end   // max < interval
+              x_v <= 1'b0; hold <= 1'b0; t3 <= T_PRE;
+            end
+            // ---- the decode (golden async_bytes): scan, locate, step / find ----
+            T_CHK: t3 <= al_lt ? T_LOC : T_END;                 // x < total
+            T_LOC: if (!`S3_CUR) begin
+                     if (x_v) t3 <= T_ADV; else if (exh) t3 <= T_END;
+                   end else if (al_lt | exh) t3 <= (`S3_L == `S3_IDLE) ? T_STEP : T_FOUND;
+                   else if (x_v) t3 <= T_ADV;
+            T_ADV: begin                                        // the next interval [e, e + len)
+              `S3_E <= al[24:0]; `S3_CLEN <= x_iv; `S3_L <= x_lvl; `S3_CUR <= 1'b1;
+              x_v <= 1'b0; hold <= 1'b0; t3 <= `S3_MBYTE ? T_MLOC : T_LOC;
+            end
+            T_STEP:  begin `S3_X <= al[24:0]; t3 <= T_CHK; end  // x += step
+            T_FOUND: begin `S3_X <= al[24:0]; t3 <= T_SPL; end  // s = e - len: back up to the edge
+            T_SPL: begin                                        // s > le + 5 p16 / 4: a new message
+              if (`S3_HLE & `S3_OPEN & al_lt) begin
+                we <= 1'b1; waddr <= `S3_LA; wdata <= `S3_MLEN; `S3_OPEN <= 1'b0;
+                if (s3_nmsg != 8'hFF) s3_nmsg <= s3_nmsg + 8'd1;
+              end
+              t3 <= T_SA0;
+            end
+            T_SA0: begin `S3_SA <= al[22:0]; `S3_BI <= 3'd0; `S3_MBYTE <= 1'b1; t3 <= T_MID; end
+            T_MID: begin `S3_LQ <= al[24:0]; t3 <= T_MLOC; end   // mid = s + (2b + 3) p16 / 32
+            T_MLOC: if (al_lt | exh) begin `S3_BY <= {`S3_L, bh[7:1]}; t3 <= T_SAI; end
+                    else if (x_v) t3 <= T_ADV;
+            T_SAI: begin
+              `S3_SA <= al[22:0]; `S3_BI <= `S3_BI + 3'd1; t3 <= T_MID;
+              if (`S3_BI == 3'd7) begin
+                we <= 1'b1; wdata <= `S3_BY; t3 <= T_XE;
+                if (`S3_OPEN) begin waddr <= `S3_WP; `S3_WP <= `S3_WP + 9'd1; `S3_MLEN <= `S3_MLEN + 8'd1; end
+                else begin
+                  `S3_LA <= `S3_WP; waddr <= `S3_WP + 9'd1; `S3_WP <= `S3_WP + 9'd2;
+                  `S3_MLEN <= 8'd1; `S3_OPEN <= 1'b1;
+                end
+              end
+            end
+            T_XE:  begin `S3_X <= al[25] ? {25{1'b1}} : al[24:0]; `S3_MBYTE <= 1'b0; t3 <= T_LQ1; end
+            T_LQ1: begin `S3_LQ <= al[24:0]; t3 <= T_LQ2; end
+            T_LQ2: begin `S3_LQ <= al[24:0]; `S3_HLE <= 1'b1; t3 <= T_CHK; end
+            T_END: begin
+              if (`S3_OPEN) begin
+                we <= 1'b1; waddr <= `S3_LA; wdata <= `S3_MLEN; `S3_OPEN <= 1'b0;
+                if (s3_nmsg != 8'hFF) s3_nmsg <= s3_nmsg + 8'd1;
+              end
+              x_v <= 1'b0; hold <= 1'b0; t3 <= T_DRAIN;
+            end
+            T_DRAIN: begin x_v <= 1'b0; hold <= 1'b0; if (pass_end) t3 <= T_DONE; end
+            default: begin done <= 1'b1; st <= S_IDLE; end      // T_DONE
+          endcase
+        end
         default: st <= S_IDLE;
       endcase
     end
   end
   wire _unused = &{1'b0, rival};
+`undef S3_X
+`undef S3_LQ
+`undef S3_P30
+`undef S3_SA
+`undef S3_FB
+`undef S3_OPEN
+`undef S3_MBYTE
+`undef S3_E
+`undef S3_TOT
+`undef S3_FL
+`undef S3_CLEN
+`undef S3_BY
+`undef S3_MLEN
+`undef S3_WP
+`undef S3_LA
+`undef S3_BI
+`undef S3_HLE
+`undef S3_CUR
+`undef S3_L
+`undef S3_IDLE
 endmodule
 
 

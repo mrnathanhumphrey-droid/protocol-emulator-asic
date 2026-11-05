@@ -739,6 +739,13 @@ SPEC_SYMBOLS = {
     # the bit-exact compare against frozen classify_bus, judged live.
     ("test/run_pit_s12.py", "S12_WAVES"),
     ("test/run_pit_s12.py", "WHY"),
+    # stage 3 piece 1 (11-05): MODBUS and CRC32 are published Rocksoft CRC
+    # parameters (specifications) and S3_WAVES the cases' STIMULUS (frame
+    # lengths, seeds) -- design; the result is the bit-exact compare against
+    # frozen stage3's decoded messages, judged live.
+    ("test/run_pit_s3.py", "MODBUS"),
+    ("test/run_pit_s3.py", "CRC32"),
+    ("test/run_pit_s3.py", "S3_WAVES"),
     # v2 PIT chunk 2: the FROZEN stage-0 model (e55d0b63, never edited here):
     # CATALOGUE is the published CRC parameter catalogue (Rocksoft model) and
     # WIDTHS the CRC widths it searches (8 / 16 / 32) -- specifications, not
