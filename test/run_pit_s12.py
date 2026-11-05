@@ -202,7 +202,7 @@ def sim(vvp, tmp, tag, img, stim, ncyc):
         for t, v in stim:
             fh.write("%d %02x\n" % (t, v))
     op = os.path.join(tmp, "s12_%s.out" % tag)
-    RP.run(sim_run.vvp([vvp, "+IMG=%s" % ip, "+NBYTES=%d" % I.STORE_BYTES, "+STIM=%s" % sp,
+    RP.run(RP.simcmd([vvp, "+IMG=%s" % ip, "+NBYTES=%d" % I.STORE_BYTES, "+STIM=%s" % sp,
                         "+OUT=%s" % op, "+NCYC=%d" % ncyc, "+S0WAIT=2"], images=[ip]))
     log, mem, lv0, st = [], {}, None, None
     with open(op, encoding="ascii") as fh:

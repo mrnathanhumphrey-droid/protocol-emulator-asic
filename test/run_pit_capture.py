@@ -172,10 +172,92 @@ def run(cmd):
 
 
 def build(out, defines=(), iverilog=None, extra=()):
+    if SIM == "verilator" and iverilog is None and not extra:
+        return vl_build(out, defines)
     r = run([iverilog or tool("iverilog"), "-g2012", "-I", ROOT, "-o", out, "-s", "tb_pit"]
             + ["-D%s" % d for d in defines] + [BENCH] + RTL + list(extra))
     if r.returncode != 0:
         raise RuntimeError("build failed: %s" % (r.stdout + r.stderr)[-400:])
+
+
+# ---------------------------------------------------------------------------
+# PE_SIM=verilator (Wilson 11-05): Verilator is the DEVELOPMENT engine, iverilog
+# the certifying one (CI + the lock). Step A: s3_uart 30.6x, s3_modbus 57.9x,
+# both byte-identical. The bound (cell-model) arm always stays on iverilog.
+# The source tree is SNAPSHOT once per process, at the first build, so a must-
+# fire built later in the run never sees an edit made while the gate runs; each
+# build is cached by the snapshot's hash + the defines + the Verilator binary.
+# ---------------------------------------------------------------------------
+SIM = os.environ.get("PE_SIM", "iverilog")
+VL = "/opt/oss-cad-suite-2026-09-30/bin/verilator"      # CI's pinned suite (test.yaml)
+VL_FLAGS = ["--binary", "--timing", "-O3", "-j", "16", "-Wno-fatal", "-Wno-lint", "-Wno-style"]
+WSL = ["wsl", "-d", "Ubuntu", "--"]
+_SNAP = {}
+
+
+def wsl_path(p):
+    p = os.path.abspath(p).replace("\\", "/")
+    return "/mnt/%s%s" % (p[0].lower(), p[2:])
+
+
+def _snapshot():
+    """(hash, WSL path) of a copy of src/ and test/*.v, *.vh, taken once"""
+    if not _SNAP:
+        import hashlib
+        import shutil
+        files = sorted([os.path.join("src", f) for f in os.listdir(os.path.join(ROOT, "src"))] +
+                       [os.path.join("test", f) for f in os.listdir(HERE) if f.endswith((".v", ".vh"))])
+        files = [f for f in files if os.path.isfile(os.path.join(ROOT, f))]
+        h = hashlib.sha256()
+        for f in files:
+            h.update(f.replace("\\", "/").encode() + b"\0" + open(os.path.join(ROOT, f), "rb").read() + b"\0")
+        key = h.hexdigest()[:16]
+        d = os.path.join(os.environ.get("PE_VL_SNAP", r"R:\claude_scratch\vlsnap"), key)
+        if not os.path.isdir(d):
+            tmp = d + ".part%d" % os.getpid()
+            for f in files:
+                os.makedirs(os.path.join(tmp, os.path.dirname(f)), exist_ok=True)
+                shutil.copyfile(os.path.join(ROOT, f), os.path.join(tmp, f))
+            try:
+                os.rename(tmp, d)
+            except OSError:                    # a parallel process made it first
+                shutil.rmtree(tmp, ignore_errors=True)
+        _SNAP.update(key=key, path=wsl_path(d))
+    return _SNAP["key"], _SNAP["path"]
+
+
+def vl_build(out, defines=()):
+    """build tb_pit on Verilator into a WSL-native cache; `out` names the binary"""
+    import hashlib
+    key, snap = _snapshot()
+    bk = hashlib.sha256(("%s|%s|%s|%s" % (key, sorted(defines), VL, VL_FLAGS)).encode()).hexdigest()[:16]
+    b = "$HOME/vlcache/%s" % bk
+    sh = ('set -e; B=%s; if [ ! -x "$B/obj_dir/vtb" ]; then rm -rf "$B.p$$"; mkdir -p "$B.p$$"; '
+          'cp -r %s/. "$B.p$$"/; cd "$B.p$$"; %s %s -I. --top-module tb_pit -o vtb %s %s %s '
+          '> build.log 2>&1 || { tail -30 build.log; exit 1; }; cd /; '
+          'mv -T "$B.p$$" "$B" 2>/dev/null || rm -rf "$B.p$$"; fi; echo "$B/obj_dir/vtb"') % (
+        b, snap, VL, " ".join(VL_FLAGS), " ".join("-D%s" % d for d in defines), BENCH, " ".join(RTL))
+    r = subprocess.run(["wsl", "-d", "Ubuntu", "--exec", "bash", "-c", sh], capture_output=True, text=True,
+                       encoding="utf-8", errors="replace")
+    if r.returncode != 0:
+        raise RuntimeError("verilator build failed: %s" % (r.stdout + r.stderr)[-600:])
+    with open(out, "w", encoding="ascii") as fh:
+        fh.write("VLBIN %s\n" % r.stdout.strip().splitlines()[-1])
+
+
+def simcmd(args, images):
+    """the run's command: vvp on an iverilog build, the WSL binary on a Verilator
+    one (paths in the plusargs translated). Both go through sim_run's lookup."""
+    with open(args[0], "rb") as fh:
+        head = fh.read(6)
+    if head != b"VLBIN ":
+        return sim_run.vvp(args, images)
+    vbin = open(args[0], encoding="ascii").read().split(None, 1)[1].strip()
+    plus = []
+    for a in args[1:]:
+        k, eq, v = a.partition("=")
+        plus.append(k + eq + (wsl_path(v) if k in ("+IMG", "+STIM", "+OUT") else v))
+    return sim_run.argv(WSL + [vbin] + plus, images)
 
 
 def sim(vvp, tmp, name, img, stim, vvp_bin=None):
@@ -189,7 +271,7 @@ def sim(vvp, tmp, name, img, stim, vvp_bin=None):
     op = os.path.join(tmp, "pitcap_%s.out" % name)
     args = [vvp, "+IMG=%s" % ip, "+NBYTES=%d" % I.STORE_BYTES, "+STIM=%s" % sp,
             "+OUT=%s" % op, "+NCYC=%d" % NCYC_FOR.get(name[:-2] if name.endswith("_m") else name, NCYC)]
-    r = run(sim_run.vvp(args, images=[ip]) if vvp_bin is None
+    r = run(simcmd(args, images=[ip]) if vvp_bin is None
             else sim_run.argv([vvp_bin, "-n"] + args, images=[ip]))
     log, mem, lv0 = [], {}, None
     with open(op, encoding="ascii") as fh:
