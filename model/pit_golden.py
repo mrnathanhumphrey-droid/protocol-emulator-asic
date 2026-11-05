@@ -739,6 +739,7 @@ def classify_bus(cap, lv0=0, guard=True):
 # ---------------------------------------------------------------------------
 S3_AT, S3_BYTES = 120, 16
 _WCODE = {8: 1, 16: 2, 32: 3}
+S3_MIN_FRAME_BITS = 9   # start + 8 data bits
 
 
 def crc_poly_gcd_s3(msgs):
@@ -823,10 +824,17 @@ def stage3(cap, lv0, cls):
     if w is None:
         return bytes(rec), {"status": "UNKNOWN", "why": "no NRZ_ASYNC wire"}
     c = cls[w]
+    rec[0] = w | 1 << 3
+    # ⛔ (Wilson 11-05) a frame shorter than start + 8 data bits is not a UART
+    # byte: async_bytes would restart its search INSIDE the byte it just read
+    # (last_end < the 8th sample), stepping back in time. Refused, not decoded;
+    # with frame_bits >= 9 the decode only moves forward (write-behind is safe).
+    if c["frame_bits"] < S3_MIN_FRAME_BITS:
+        return bytes(rec), {"status": "UNKNOWN", "wire": w,
+                            "why": "frame shorter than start + 8 data bits"}
     msgs = async_bytes(wire_ivs(cap, w, lv0), c["bit16"], c["frame_bits"])
     res = crc_poly_gcd_s3(msgs)
     out = {"wire": w, "msgs": msgs, "poly": res}
-    rec[0] = w | 1 << 3
     rec[3] = min(len(msgs), 255)
     if res["status"] != "OK":
         out["status"] = "UNKNOWN"
