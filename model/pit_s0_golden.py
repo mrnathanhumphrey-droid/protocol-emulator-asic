@@ -26,7 +26,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 # ⛔ RE-FROZEN 11-04 (Wilson): stage 3's composition APPENDED. The first
 # FROZEN_PREFIX_LEN bytes must still hash to f19f2177 -- the stage 0-2 rules
 # byte for byte -- and the whole file to FROZEN.
-FROZEN = "df3552dac5b55a61e435e16788ce5185f8bd598e19494d9ba39f5eae146cdf89"
+# Re-frozen 11-05 (Wilson): the GCD capacity rule (crc_poly_gcd_s3_fit) in the
+# stage 3 composition; was df3552da.
+FROZEN = "73e25c61f075e00fea575a99f0d859d2ada68e957584f9ec6561def1258ed1fc"
 FROZEN_PREFIX = "f19f2177d243b9f1bdea124d6ef2d16d6c9effeddd47da02c1c57b65da7d86eb"   # = e55d0b63 as LF
 FROZEN_PREFIX_LEN = 29070
 TABLE_AT, TABLE_BYTES = 32, 7

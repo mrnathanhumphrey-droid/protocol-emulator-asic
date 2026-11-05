@@ -774,6 +774,49 @@ def crc_poly_gcd_s3(msgs):
     return best
 
 
+S3_DEC_AT, S3_STORE = 128, 512     # the decoded messages, [len][bytes...] from 128
+
+
+def crc_poly_gcd_s3_fit(msgs):
+    """crc_poly_gcd_s3 under the store's CAPACITY RULE (Wilson 11-05): the chip
+    runs the GCD in two L-byte buffers in the store after the decoded messages,
+    so a length group is tried only if 2 L <= 512 - (the end of the decoded
+    messages); otherwise it is skipped like a group with too few frames. If no
+    group with >= 2 frames fits, the reason is "insufficient store for the GCD"."""
+    free = S3_STORE - (S3_DEC_AT + sum(len(m) + 1 for m in msgs))
+    by_len = {}
+    for m in msgs:
+        by_len.setdefault(len(m), []).append(m)
+    best, tried, skipped = None, False, False
+    for lsb in (False, True):
+        for L, group in sorted(by_len.items(), key=lambda kv: -len(kv[1])):
+            if len(group) < 2:
+                continue
+            if 2 * L > free:
+                skipped = True
+                continue
+            tried = True
+            polys = [bits_to_poly(msg_bits(m, lsb)) for m in group]
+            g, used = 0, 0
+            for a in polys[1:]:
+                d = a ^ polys[0]
+                if d == 0:
+                    continue
+                g = pgcd(g, d) if g else d
+                used += 1
+            while g and not g & 1:
+                g >>= 1
+            if g and deg(g) in WIDTHS and used >= MIN_DIFFS:
+                cand = {"status": "OK", "width": deg(g), "poly": g & ((1 << deg(g)) - 1),
+                        "full": g, "reflected": lsb, "diffs_used": used, "frame_len": L}
+                if best is None or cand["diffs_used"] > best["diffs_used"]:
+                    best = cand
+    if best is None:
+        return {"status": "UNKNOWN", "why": "insufficient store for the GCD" if skipped and not tried
+                else "no difference GCD of a supported width"}
+    return best
+
+
 def io_evidence(msgs, res):
     """the frames init/xorout may be solved from (Wilson 11-04, fixes 1-2):
     ⛔ the last decoded frame is never evidence, whatever the stop (budget,
@@ -833,8 +876,10 @@ def stage3(cap, lv0, cls):
         return bytes(rec), {"status": "UNKNOWN", "wire": w,
                             "why": "frame shorter than start + 8 data bits"}
     msgs = async_bytes(wire_ivs(cap, w, lv0), c["bit16"], c["frame_bits"])
-    res = crc_poly_gcd_s3(msgs)
+    res = crc_poly_gcd_s3_fit(msgs)
     out = {"wire": w, "msgs": msgs, "poly": res}
+    if res.get("why") == "insufficient store for the GCD":
+        out["why"] = res["why"]
     rec[3] = min(len(msgs), 255)
     if res["status"] != "OK":
         out["status"] = "UNKNOWN"
