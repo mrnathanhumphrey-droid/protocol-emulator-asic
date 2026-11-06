@@ -746,6 +746,10 @@ SPEC_SYMBOLS = {
     ("test/run_pit_s3.py", "MODBUS"),
     ("test/run_pit_s3.py", "CRC32"),
     ("test/run_pit_s3.py", "S3_WAVES"),
+    # stage 3 piece 2 (11-05): CRCS are published Rocksoft CRC parameters
+    # (specifications) the bench frames its STIMULUS with; the result is the
+    # bit-exact compare against frozen crc_poly_gcd_s3_fit, judged live.
+    ("test/run_pit_gcd.py", "CRCS"),
     # v2 PIT chunk 2: the FROZEN stage-0 model (e55d0b63, never edited here):
     # CATALOGUE is the published CRC parameter catalogue (Rocksoft model) and
     # WIDTHS the CRC widths it searches (8 / 16 / 32) -- specifications, not

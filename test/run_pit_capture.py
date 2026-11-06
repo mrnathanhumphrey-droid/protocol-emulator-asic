@@ -226,17 +226,17 @@ def _snapshot():
     return _SNAP["key"], _SNAP["path"]
 
 
-def vl_build(out, defines=()):
-    """build tb_pit on Verilator into a WSL-native cache; `out` names the binary"""
+def vl_build(out, defines=(), bench=BENCH, top="tb_pit"):
+    """build `top` (tb_pit by default) on Verilator into a WSL-native cache; `out` names the binary"""
     import hashlib
     key, snap = _snapshot()
-    bk = hashlib.sha256(("%s|%s|%s|%s" % (key, sorted(defines), VL, VL_FLAGS)).encode()).hexdigest()[:16]
+    bk = hashlib.sha256(("%s|%s|%s|%s|%s|%s" % (key, sorted(defines), VL, VL_FLAGS, bench, top)).encode()).hexdigest()[:16]
     b = "$HOME/vlcache/%s" % bk
     sh = ('set -e; B=%s; if [ ! -x "$B/obj_dir/vtb" ]; then rm -rf "$B.p$$"; mkdir -p "$B.p$$"; '
-          'cp -r %s/. "$B.p$$"/; cd "$B.p$$"; %s %s -I. --top-module tb_pit -o vtb %s %s %s '
+          'cp -r %s/. "$B.p$$"/; cd "$B.p$$"; %s %s -I. --top-module %s -o vtb %s %s %s '
           '> build.log 2>&1 || { tail -30 build.log; exit 1; }; cd /; '
           'mv -T "$B.p$$" "$B" 2>/dev/null || rm -rf "$B.p$$"; fi; echo "$B/obj_dir/vtb"') % (
-        b, snap, VL, " ".join(VL_FLAGS), " ".join("-D%s" % d for d in defines), BENCH, " ".join(RTL))
+        b, snap, VL, " ".join(VL_FLAGS), top, " ".join("-D%s" % d for d in defines), bench, " ".join(RTL))
     r = subprocess.run(["wsl", "-d", "Ubuntu", "--exec", "bash", "-c", sh], capture_output=True, text=True,
                        encoding="utf-8", errors="replace")
     if r.returncode != 0:
@@ -256,7 +256,7 @@ def simcmd(args, images):
     plus = []
     for a in args[1:]:
         k, eq, v = a.partition("=")
-        plus.append(k + eq + (wsl_path(v) if k in ("+IMG", "+STIM", "+OUT") else v))
+        plus.append(k + eq + (wsl_path(v) if k in ("+IMG", "+STIM", "+OUT", "+MEM") else v))
     return sim_run.argv(WSL + [vbin] + plus, images)
 
 
