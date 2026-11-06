@@ -161,6 +161,24 @@ def mixed():
     return b
 
 
+def uart_refl_xorout():
+    """a reflected CRC with an ASYMMETRIC xorout: the record's transmission-
+    order 0xF0F0 is Rocksoft's 0x0F0F (CRC-16 poly 0x8005, refin / refout)"""
+    b = img()
+    rec(b, 1, E.C_ASYNC, cond=1, idle=1, p16=24 * 16, fb=10)
+    s3(b, 1, poly=0x8005, refl=1, frame=4, init=0x1234, xorout=0xF0F0, multi=1)
+    return b
+
+
+REFL_TEXT = """-- PE PIT spec v1: the chip's claims only (results bytes 0..135)
+spec sniff is
+  captured at 60000000 Hz;
+  wire uio1 : NRZ_ASYNC idle 1 rate 2500000.000 Bd frame 10 bits given all-wires-sniffed;
+  crc on uio1 : width 16 refin refout poly 0x8005 frame 4 bytes init 0x1234 xorout 0x0F0F source data class multi;
+end sniff;
+"""
+
+
 def uart_nopoly():
     b = img()
     rec(b, 0, E.C_ASYNC, cond=1, idle=1, p16=10 * 16, fb=10)
@@ -170,8 +188,10 @@ def uart_nopoly():
 
 IMAGES = {"uart_crc": uart_crc, "uart_poly_only": uart_poly_only, "spi": spi, "i2c": i2c,
           "refused": refused, "no_cs": no_cs, "mixed": mixed, "uart_nopoly": uart_nopoly,
+          "uart_refl_xorout": uart_refl_xorout,
           "empty": img}
-TEXTS = {"uart_crc": UART_CRC_TEXT, "spi": SPI_TEXT, "no_cs": NO_CS_TEXT}
+TEXTS = {"uart_crc": UART_CRC_TEXT, "spi": SPI_TEXT, "no_cs": NO_CS_TEXT,
+         "uart_refl_xorout": REFL_TEXT}
 
 BAD = {
     "no end line": "spec sniff is\n  captured at 60000000 Hz;\n",

@@ -60,7 +60,6 @@ BENCH, TOP = "test/tb_rt.v", "tb_rt"
 P_TX_UO = 0                 # the UART-tx lane's pin: uo_out[0] (pinmap P_TX_UO, pe pin 8)
 P_TX = 8
 GAP_BITS = 40               # idle between messages: > async_bytes' 20-bit message gap
-WARM = 2000
 SEED = 20261106
 
 #: the ruled cases (Wilson 11-06, D4): these must PASS -- NOT EMULABLE is red here
@@ -74,19 +73,30 @@ class NotEmulable(Exception):
     pass
 
 
-def uart_program(T, L):
-    """the UART-tx 8N1 lane (test/uart_tx.py's frame), L frames per message,
-    then GAP_BITS of idle; loops."""
+def uart_program(T, lens):
+    """the UART-tx 8N1 lane (test/uart_tx.py's frame): one message per entry of
+    `lens` (that many byte frames, then GAP_BITS of idle); loops. Too big for
+    the store -> NOT EMULABLE (program size), D4."""
     seq = []
-    for _ in range(L):
-        seq += [(OP_LEVEL, P_TX, 0, T, 0)] + [(OP_SHIFT, P_TX, 0, T, 0, 7)] * 8
-        seq += [(OP_LEVEL, P_TX, 1, T, 0)]
-    g = GAP_BITS * T - D_STAR
-    while g > I.D_MAX:
-        seq.append((OP_LEVEL, P_TX, 1, I.D_MAX, 0))
-        g -= I.D_MAX
-    seq += [(OP_LEVEL, P_TX, 1, g, 0), (OP_REARM, 0, 1, D_STAR, 0)]
-    return pe_asm.assemble({0: seq}, {0: (P_TX, PIN_NONE, 1, T, min(T, 255), min(2 * T, 255))})
+    for L in lens:
+        # the idle FIRST: uo_out[0] leaves reset low, so the line must go high
+        # before the first start bit, and the sniffer opens inside this gap
+        g = GAP_BITS * T
+        while g > I.D_MAX:
+            seq.append((OP_LEVEL, P_TX, 1, I.D_MAX, 0))
+            g -= I.D_MAX
+        seq.append((OP_LEVEL, P_TX, 1, g, 0))
+        for _ in range(L):
+            seq += [(OP_LEVEL, P_TX, 0, T, 0)] + [(OP_SHIFT, P_TX, 0, T, 0, 7)] * 8
+            seq += [(OP_LEVEL, P_TX, 1, T, 0)]
+    # the REARM's D* is idle time too: taken from the loop's first gap, so
+    # every stop bit stays exactly T (a T - D* stop is under the timing floor)
+    seq[0] = seq[0][:3] + (seq[0][3] - D_STAR,) + seq[0][4:]
+    seq.append((OP_REARM, 0, 1, D_STAR, 0))
+    try:
+        return pe_asm.assemble({0: seq}, {0: (P_TX, PIN_NONE, 1, T, min(T, 255), min(2 * T, 255))})
+    except pe_asm.Reject as e:
+        raise NotEmulable("program size: %d-message loop %s at T=%d -- %s" % (len(lens), list(lens), T, e))
 
 
 def target_cycles(p16, cap_hz):
@@ -95,7 +105,7 @@ def target_cycles(p16, cap_hz):
 
 
 def emulation(cl, rng, nbytes=4000):
-    """-> (emulator image, feed bytes, ROUTE, what) from the parsed claims."""
+    """-> (emulator image, feed bytes, ROUTE, what, warm cycles) from the parsed claims."""
     ua = [w for w, v in cl["wires"].items() if v["cls"] == "NRZ_ASYNC"]
     if not ua:
         raise NotEmulable("no NRZ_ASYNC wire claimed (clocked buses: the next step)")
@@ -114,21 +124,26 @@ def emulation(cl, rng, nbytes=4000):
         if L <= nb:
             raise NotEmulable("CRC frame %d bytes leaves no payload" % L)
         p = (c["width"], c["poly"] | 0, c["init"], c["xorout"], c["reflected"])
+        # D3 as amended (Wilson 11-06): frames ALTERNATE L and L+1 bytes, the
+        # init / xorout solver's precondition (two lengths)
+        lens = (L, L + 1)
         while sum(map(len, msgs)) < nbytes:
-            msgs.append(R3.frame([rng.getrandbits(8) for _ in range(L - nb)], *p))
-        what = "8N1 T=%d, %d-byte frames, CRC-%d poly %#x init %#x xorout %#x%s" % (
-            T, L, c["width"], c["poly"], c["init"], c["xorout"], " refl" if c["reflected"] else "")
+            msgs.append(R3.frame([rng.getrandbits(8) for _ in range(lens[len(msgs) % 2] - nb)], *p))
+        what = "8N1 T=%d, %d/%d-byte frames, CRC-%d poly %#x init %#x xorout %#x%s" % (
+            T, L, L + 1, c["width"], c["poly"], c["init"], c["xorout"], " refl" if c["reflected"] else "")
     elif c is not None and c["wire"] == w:
         raise NotEmulable("CRC poly claimed with init / xorout UNKNOWN: no payload rule ruled yet")
     else:
         L = 6
+        lens = (L,)
         while sum(map(len, msgs)) < nbytes:
             msgs.append([rng.getrandbits(8) for _ in range(L)])
         what = "8N1 T=%d, %d-byte frames, NO CRC (the spec claims none)" % (T, L)
-    img = uart_program(T, L)
+    img = uart_program(T, lens)
     feed = [b for m in msgs for b in m]
     route = 0x10 | P_TX_UO
-    return img, feed, route << (8 * w), what
+    # the sniffer opens half-way into the first message's leading idle
+    return img, feed, route << (8 * w), what, GAP_BITS * T // 2
 
 
 # ---------------------------------------------------------------------------
@@ -142,7 +157,7 @@ def build(out):
         raise RuntimeError("build failed: %s" % (r.stdout + r.stderr)[-400:])
 
 
-def sim(vvp, tmp, tag, simg, eimg, feed, route, ncyc):
+def sim(vvp, tmp, tag, simg, eimg, feed, route, ncyc, warm):
     ip = os.path.join(tmp, "pitcap_rt_%s.hex" % tag)
     I.write_image(ip, simg)
     sim_run.scratch_image(RP.GEN, ip)
@@ -153,13 +168,13 @@ def sim(vvp, tmp, tag, simg, eimg, feed, route, ncyc):
         fh.write("".join("%02x\n" % b for b in feed))
     op = os.path.join(tmp, "rt_%s.out" % tag)
     args = [vvp, "+IMG=%s" % ip, "+EIMG=%s" % ep, "+NBYTES=%d" % I.STORE_BYTES, "+OUT=%s" % op,
-            "+FEED=%s" % fp, "+ROUTE=%016x" % route, "+NCYC=%d" % ncyc, "+WARM=%d" % WARM]
+            "+FEED=%s" % fp, "+ROUTE=%016x" % route, "+NCYC=%d" % ncyc, "+WARM=%d" % warm]
     cmd = RP.simcmd(args, images=[ip, ep])
     if RP.SIM == "verilator":               # simcmd translates only its own path plusargs
         cmd = [a.split("=", 1)[0] + "=" + RP.wsl_path(a.split("=", 1)[1])
                if isinstance(a, str) and a.startswith(("+EIMG=", "+FEED=")) else a for a in cmd]
     r = RP.run(cmd)
-    mem, st, h = {}, None, None
+    mem, st, h, lv0 = {}, None, None, None
     if not os.path.isfile(op):
         raise RuntimeError("tb_rt wrote no dump: %s" % (r.stdout + r.stderr)[-600:])
     with open(op, encoding="ascii") as fh:
@@ -169,8 +184,12 @@ def sim(vvp, tmp, tag, simg, eimg, feed, route, ncyc):
                 mem[int(t[1])] = int(t[2], 16) if all(ch in "0123456789abcdefABCDEF" for ch in t[2]) else -1
             elif t and t[0] == "S":
                 st = dict(kv.split("=") for kv in t[1:])
+            elif t and t[0] == "L":
+                lv0 = int(t[1], 16)
             elif t and t[0] == "H":
                 h = dict(kv.split("=") for kv in t[1:])
+    if h is not None:
+        h["lv0"] = lv0
     return mem, st, h
 
 
@@ -271,7 +290,7 @@ def main() -> int:
         for ln in spec.splitlines()[1:]:
             print("      " + ln)
         try:
-            eimg, feed, route, what = emulation(cl, random.Random("%d|%s" % (SEED, name)))
+            eimg, feed, route, what, warm = emulation(cl, random.Random("%d|%s" % (SEED, name)))
         except NotEmulable as e:
             counts["NOT EMULABLE"] += 1
             print("  %-16s NOT EMULABLE: %s" % (name, e))
@@ -279,13 +298,20 @@ def main() -> int:
                 probs.append("%s: NOT EMULABLE, but a ruled case: %s" % (name, e))
             continue
         mem, st, h = sim(vr, tmp, name, RP.sniff_image(case[2], case[3]), eimg, feed, route,
-                         R0.NCYC_MAX * 40)
+                         R0.NCYC_MAX * 40, warm)
         regen = results_of(mem)
         bad, notes = [], []
         if regen is None:
             bad.append("the emulation's sniff left results bytes unwritten (pc %s)" % (st or {}).get("pc"))
         else:
-            bad, notes = compare(cl, E.parse(E.emit(regen)), tol16)
+            cl2 = E.parse(E.emit(regen))
+            bad, notes = compare(cl, cl2, tol16)
+            notes.append("stop: original %s, regenerated %s (partial is not compared)" % tuple(
+                "partial %s after %d records" % x["partial"] if x["partial"] else "budget / complete"
+                for x in (cl, cl2)))
+        idle = sum(1 << w for w, v in cl["wires"].items() if v.get("idle") == 1)
+        if h and h.get("lv0") is not None and (h["lv0"] & idle) != idle:
+            bad.append("the sniffer opened on a non-idle line (start levels %02x)" % h["lv0"])
         if h and (h.get("underrun") != "00000" or h.get("full") != "0"):
             bad.append("host feed: underrun %s, overrun %s -- the emulation was starved" % (h["underrun"], h["full"]))
         verdict = "FAIL" if bad else "PASS"

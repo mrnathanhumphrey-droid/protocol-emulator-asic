@@ -30,6 +30,11 @@ THE SYNTAX (Wilson 11-06, D1). One statement per line, each ending in `;`:
     `class multi` (the record's class flag: the data cannot tell the members
     of a multi class apart). A validator reads clauses; `--` comments are for
     people and the parser drops them.
+  * CRC PARAMETERS ARE ROCKSOFT'S (the reveng catalogue's convention): the
+    record holds xorout in TRANSMISSION order, so a reflected CRC's xorout is
+    bit-reversed on the way out (measured on the frozen solver: Rocksoft
+    xorout 0x0F0F, refin / refout, is stored 0xF0F0; init is stored as
+    Rocksoft's). The catalogue match is made on the record's own values.
   * `given all-wires-sniffed`: the record's condition bit (Wilson 10-28 (b)) --
     a one-wire data class holds only if no clock hides off the sniffed pins.
   * v2's order-and-bounds edges parse today with no new syntax (vol5's
@@ -176,10 +181,16 @@ def claims(results, clock_hz=None):
         c["multi"] = bool(s[0] & 0x80)
         key = (c["width"], c["poly"], c["init"], c["xorout"], c["reflected"])
         c["source"] = next((n for n, v in CATALOGUE.items() if v == key), "data")
+        if c["reflected"]:                  # the record's transmission order -> Rocksoft
+            c["xorout"] = _rev(c["xorout"], c["width"])
     else:
         unk.append(("uio%d.crc.init" % w, "not solved from the frames"))
         unk.append(("uio%d.crc.xorout" % w, "not solved from the frames"))
     return out
+
+
+def _rev(v, n):
+    return int(bin(v)[2:].zfill(n)[::-1], 2)
 
 
 # ---------------------------------------------------------------------------
