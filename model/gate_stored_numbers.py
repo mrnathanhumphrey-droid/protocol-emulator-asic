@@ -750,6 +750,10 @@ SPEC_SYMBOLS = {
     # (specifications) the bench frames its STIMULUS with; the result is the
     # bit-exact compare against frozen crc_poly_gcd_s3_fit, judged live.
     ("test/run_pit_gcd.py", "CRCS"),
+    # stage 3 piece 3 (11-05): POLYS are published Rocksoft polynomials
+    # (specifications) the method check frames its cases with; the result is
+    # the compare against frozen crc_init_xorout + canonical_member, live.
+    ("model/pit_solver_evidence.py", "POLYS"),
     # v2 PIT chunk 2: the FROZEN stage-0 model (e55d0b63, never edited here):
     # CATALOGUE is the published CRC parameter catalogue (Rocksoft model) and
     # WIDTHS the CRC widths it searches (8 / 16 / 32) -- specifications, not
