@@ -9,6 +9,11 @@ done, the store from byte 128 holds golden async_bytes' messages as
 capture), and stage 1-2's records at 40..119 are unchanged. The capture as
 stored is the bench's own edge log through pit_capture_golden.encode / decode,
 exactly as gates pit-s0 / pit-s12 build it.
+
+PIECES 2-3 -- THE GCD AND init / xorout: the whole 16-byte record at 120..135
+equals frozen stage3's. 128..135 are the record's and written LAST (option (a),
+Wilson 11-05), so the messages are read from the store as that write starts
+(tb_pit's snapshot); pieces 2-3's own preloaded-store bench is gate pit-gcd.
                                                     token: GATE pit-s3: PASSED
 """
 from __future__ import annotations
@@ -37,7 +42,7 @@ import run_pit_s12 as R12                   # noqa: E402
 import pit_s0_golden as S0                  # noqa: E402
 
 DEC_AT = 128
-S3_AT = 120          # the stage 3 record; pieces 1-2 own bytes 120..127 (Wilson 11-05)
+S3_AT = 120          # the stage 3 record, 120..135 (Wilson 11-05; 128..135 written last)
 
 
 # ---------------------------------------------------------------------------
@@ -115,12 +120,11 @@ def cases():
 
 def expect(cap):
     """(stage 1-2's 80 record bytes, the decoded-message bytes from 128, detail);
-    detail["rec8"] = the stage 3 record's first 8 bytes (piece 2: the GCD's
-    result; byte 0's io / class bits 5 and 7 are piece 3's, masked)"""
+    detail["rec"] = the WHOLE stage 3 record, 120..135 (pieces 1-3)"""
     G = S0.frozen_model()
     recs, _res = R12.expect(cap)
     rec, out = G.stage3(cap, 0, G.classify_bus(cap, 0))
-    out["rec8"] = bytes([rec[0] & 0x5F]) + rec[1:8]
+    out["rec"] = bytes(rec)
     enc = []
     for m in out.get("msgs") or []:
         enc += [len(m)] + list(m)
@@ -131,7 +135,7 @@ def main() -> int:
     banner("iverilog", "vvp")
     print()
     print("=" * 78)
-    print("PIT STAGE 3 (piece 1: the decode walk) -- bit for bit against frozen stage3")
+    print("PIT STAGE 3 (pieces 1-3: decode, GCD, init / xorout) -- bit for bit against frozen stage3")
     print("=" * 78)
     S0.frozen_model()
     only = set(filter(None, os.environ.get("PE_S3_CASES", "").split(",")))
@@ -152,13 +156,18 @@ def main() -> int:
             probs.append("%s: stages 1-3 never finished (pc %s)" % (name, (st or {}).get("pc")))
         _r, enc, out = expect(cap)
         mem = R12_MEM.get(name, {})
-        dec = bytes((mem.get(DEC_AT + i, -1) & 0xFF) for i in range(len(enc)))
+        # option (a) (Wilson 11-05): the record's 128..135 are written LAST, so
+        # the messages are read from the store as that write started
+        pre = (st or {}).get("pre") or {}
+        if not pre:
+            probs.append("%s: no snapshot -- stage 3 never reached its record write" % name)
+        dec = bytes((pre.get(DEC_AT + i, -1) & 0xFF) for i in range(len(enc)))
         bad = []
         if got != want12:
             bad.append("stage 1-2 records")
-        r8 = bytes((mem.get(S3_AT + i, -1) & 0xFF) for i in range(8))
-        if r8 != out["rec8"]:
-            bad.append("record %d..%d: RTL %s, golden %s" % (S3_AT, S3_AT + 7, r8.hex(), out["rec8"].hex()))
+        r16 = bytes((mem.get(S3_AT + i, -1) & 0xFF) for i in range(16))
+        if r16 != out["rec"]:
+            bad.append("record %d..%d: RTL %s, golden %s" % (S3_AT, S3_AT + 15, r16.hex(), out["rec"].hex()))
         if dec != enc:
             i = next(i for i in range(len(enc)) if dec[i] != enc[i])
             bad.append("messages at byte %d: RTL %s, golden %s" % (

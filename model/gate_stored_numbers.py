@@ -750,6 +750,9 @@ SPEC_SYMBOLS = {
     # (specifications) the bench frames its STIMULUS with; the result is the
     # bit-exact compare against frozen crc_poly_gcd_s3_fit, judged live.
     ("test/run_pit_gcd.py", "CRCS"),
+    # piece 3 (11-05): the solver sets' published Rocksoft polynomials
+    # (specifications); judged live against the frozen solver.
+    ("test/run_pit_gcd.py", "POLYS"),
     # stage 3 piece 3 (11-05): POLYS are published Rocksoft polynomials
     # (specifications) the method check frames its cases with; the result is
     # the compare against frozen crc_init_xorout + canonical_member, live.

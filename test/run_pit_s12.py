@@ -235,7 +235,7 @@ def sim(vvp, tmp, tag, img, stim, ncyc):
             part = cached + ".part%d" % os.getpid()
             shutil.copyfile(op, part)
             os.replace(part, cached)
-    log, mem, lv0, st = [], {}, None, None
+    log, mem, lv0, st, pre = [], {}, None, None, {}
     with open(op, encoding="ascii") as fh:
         for ln in fh:
             t = ln.split()
@@ -243,12 +243,15 @@ def sim(vvp, tmp, tag, img, stim, ncyc):
                 continue
             if t[0] == "E":
                 log.append((int(t[1]), int(t[2], 16)))
-            elif t[0] == "M":
-                mem[int(t[1])] = int(t[2], 16) if all(c in "0123456789abcdefABCDEF" for c in t[2]) else -1
+            elif t[0] in ("M", "P"):
+                v = int(t[2], 16) if all(c in "0123456789abcdefABCDEF" for c in t[2]) else -1
+                (mem if t[0] == "M" else pre)[int(t[1])] = v
             elif t[0] == "L":
                 lv0 = int(t[1], 16)
             elif t[0] == "S":
                 st = dict(kv.split("=") for kv in t[1:])
+    if st is not None:
+        st["pre"] = pre          # the store as stage 3's record write started (pit-s3)
     return log, mem, lv0, st
 
 

@@ -20,6 +20,15 @@ module tb_pit;
   localparam integer PIN_PROG = 7, PIN_PTR = 5, PIN_WR = 6;
 
   reg  [7:0] img [0:IMG_MAX-1];
+  // stage 3's record writes 128..135 LAST (option (a), Wilson 11-05): the store
+  // as that write starts, for the decoded-message check
+  reg  [7:0] pre [0:IMG_MAX-1];
+  reg        snap = 1'b0;
+  integer    sa;
+  always @(posedge clk) if (rst_n === 1'b1 && !snap && dut.u_s0.u_s12.s3_rec_wr === 1'b1) begin
+    snap <= 1'b1;
+    for (sa = 0; sa < IMG_MAX; sa = sa + 1) pre[sa] <= dut.u_store.g_mem.peek(sa[8:0]);
+  end
   integer    img_bytes, i, ncyc, fd, sfd, pc = -1, a, n_st, st_cyc, st_val, r, s0wait;
   reg [8*256-1:0] imgfile, stimfile, outfile;
   reg [7:0]  prevq, mk;
@@ -118,6 +127,7 @@ module tb_pit;
     // the store's own view of each byte (both MEM_TYPE arms define peek)
     for (a = 0; a < IMG_MAX; a = a + 1)
       $fdisplay(fd, "M %0d %h", a, dut.u_store.g_mem.peek(a[8:0]));
+    if (snap) for (a = 0; a < IMG_MAX; a = a + 1) $fdisplay(fd, "P %0d %h", a, pre[a]);
     $fdisplay(fd, "X stopped=%0d", dut.pit_stopped);
     $fdisplay(fd, "S s0done=%0d pc=%0d s12done=%0d", dut.u_s0.tbl_done, pc, dut.u_s0.done);
     $fclose(fd);

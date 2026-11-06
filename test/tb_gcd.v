@@ -1,4 +1,4 @@
-// tb_gcd -- piece 2's own bench (Wilson 11-05): pe_pit_s12 started AT the GCD
+// tb_gcd -- pieces 2-3's bench (Wilson 11-05): pe_pit_s12 started AT the GCD
 // (G_INI) on a PRELOADED store of decoded messages [len][bytes...] from 128 --
 // the only way to reach the capacity rule, which no real capture can.
 //   +MEM=<512-line hex> +END=<end of messages, hex> +NMSG=<n> +OUT=<dump>
@@ -11,7 +11,9 @@ module tb_gcd;
   wire [2:0] w; wire [8:0] waddr, raddr; wire [7:0] wdata, nmsg;
   reg  [7:0] rdata = 0;
   reg  [7:0] mem [0:511];
-  integer    fd, a, cyc, ncyc, endm, nm;
+  reg  [7:0] pre [0:511];                       // the store as the record's last write starts
+  reg        snap = 1'b0;
+  integer    fd, a, sa, cyc, ncyc, endm, nm;
   reg [8*256-1:0] memfile, outfile;
   always #5 clk = ~clk;
   pe_pit_s12 #(.AW(9)) dut (
@@ -27,6 +29,12 @@ module tb_gcd;
     // once. Measured 11-05 under the random start-up arm: a random `we` wrote
     // one byte (310 <- 82) at that first edge.
     if (we && rst_n) mem[waddr] <= wdata;
+    // option (a) (Wilson 11-05): 128..135 are the record's, written LAST -- the
+    // messages are checked from the store as that write starts
+    if (rst_n && dut.s3_rec_wr === 1'b1 && !snap) begin
+      snap <= 1'b1;
+      for (sa = 0; sa < 512; sa = sa + 1) pre[sa] <= mem[sa];
+    end
   end
   initial begin
     if (!$value$plusargs("MEM=%s", memfile) || !$value$plusargs("OUT=%s", outfile)
@@ -45,7 +53,8 @@ module tb_gcd;
     repeat (2) @(negedge clk);
     fd = $fopen(outfile, "w");
     for (a = 0; a < 512; a = a + 1) $fdisplay(fd, "M %0d %h", a, mem[a]);
-    $fdisplay(fd, "N done=%0d cyc=%0d", done, cyc);
+    if (snap) for (a = 0; a < 512; a = a + 1) $fdisplay(fd, "P %0d %h", a, pre[a]);
+    $fdisplay(fd, "N done=%0d cyc=%0d snap=%0d", done, cyc, snap);
     $fclose(fd);
     $finish;
   end
