@@ -1188,6 +1188,8 @@ module pe_pit_s0 #(parameter integer AW = 9) (
   wire [7:0]     s3_nmsg;
   wire           ck_req;                // stage 3 found no UART wire: the clocked bus, if any
   reg            ck_fin, ck_ok;         // ... answered: ck_ok = its second capture's messages are in
+  reg  [3:0]     ck_why;                // ... else why (golden WHY3 6..10, Wilson 11-06)
+  reg            k_seen;                // P_KSEL met a SYNC_DATA wire (6 vs 7)
   assign re    = dre | s12_re;
   assign raddr = s12_re ? s12_raddr : draddr;
   wire [2:0]     s12_w;
@@ -1527,7 +1529,8 @@ module pe_pit_s0 #(parameter integer AW = 9) (
       .we(s12_we), .waddr(s12_waddr), .wdata(s12_wdata), .done(s12_done),
       .re(s12_re), .raddr(s12_raddr), .rdata(rdata),
       .s3_found(s3_found), .s3_fbs(s3_fbs), .s3_nmsg(s3_nmsg),
-      .ck_req(ck_req), .ck_fin(ck_fin), .ck_ok(ck_ok), .ck_w(ck_d), .ck_wp(ck_wp), .ck_nmsg(ck_nmsg));
+      .ck_req(ck_req), .ck_fin(ck_fin), .ck_ok(ck_ok), .ck_w(ck_d), .ck_wp(ck_wp), .ck_nmsg(ck_nmsg),
+      .ck_why(ck_why));
 
   // ===========================================================================
   // THE SEQUENCER: stage0's phases, in its order.
@@ -1586,6 +1589,7 @@ module pe_pit_s0 #(parameter integer AW = 9) (
       we0 <= 1'b0; waddr0 <= {AW{1'b0}}; wdata0 <= 8'h00; nrank <= 4'd0;
       ck_arm <= 1'b0; ck_i2c <= 1'b0; ck_c <= 3'd0; ck_d <= 3'd0; ck_f <= 3'd0; ck_act <= 1'b0;
       ck_edge <= 1'b0; ck_pass <= 1'b0; ck_fin <= 1'b0; ck_ok <= 1'b0; ck_used <= 1'b0; k_maybe <= 1'b0;
+      ck_why <= 4'd0; k_seen <= 1'b0;
       for (ri = 0; ri < 8; ri = ri + 1) begin role[ri] <= R_NONE; part[ri] <= 3'd0; clvl[ri] <= 1'b0; rank[ri] <= 3'd0; end
     end else if (!run) begin
       ph <= P_IDLE; walk_go <= 1'b0; we0 <= 1'b0; done <= 1'b0; tbl_done <= 1'b0; refused <= 1'b0; nrank <= 4'd0;
@@ -1742,14 +1746,24 @@ module pe_pit_s0 #(parameter integer AW = 9) (
         P_S12:  begin
                   tbl_done <= 1'b1; wc <= s12_w;
                   if (s12_done) ph <= P_DONE;
-                  else if (ck_req && !ck_used) begin di <= 4'd0; ck_ok <= 1'b0; ph <= P_KSEL; end
+                  else if (ck_req && !ck_used) begin
+                    di <= 4'd0; ck_ok <= 1'b0; ck_why <= 4'd0; k_seen <= 1'b0; ph <= P_KSEL;
+                  end
                 end
         // ---- stage 3 on a clocked bus (golden clocked_bus, Wilson 11-06) ----
         // the first SYNC_DATA wire with frame markers: I2C's tag, a CS (FRAME) of
         // its clock, or (neither) the I2C signature, from pass 0
-        P_KSEL: if (di == 4'd8) ph <= P_KFIN;                      // none: no clocked record
+        P_KSEL: if (di == 4'd8) begin                              // none: no clocked record
+`ifdef M_CK_WHY_SWAP
+                  ck_why <= k_seen ? 4'd6 : 4'd7;
+`else
+                  ck_why <= k_seen ? 4'd7 : 4'd6;                   // no frame markers / no data wire
+`endif
+                  ph <= P_KFIN;
+                end
                 else if (!k_dsync) di <= di + 4'd1;
                 else begin
+                  k_seen <= 1'b1;
                   ck_d <= k_d; ck_c <= part[k_d]; ck_f <= k_fw;
                   ck_i2c <= (role[k_d] == R_SYNC_I2C) || !k_hf;
                   k_maybe <= (role[k_d] != R_SYNC_I2C) && !k_hf;
@@ -1761,7 +1775,9 @@ module pe_pit_s0 #(parameter integer AW = 9) (
                   k_maybe <= 1'b0;
                   if (!ck_i2c && k_hi8 >= k_nc7) ck_act <= 1'b1;
                   else if (!ck_i2c && k_lo8 >= k_nc7) ck_act <= 1'b0;
-                  if (!ck_i2c && k_hi8 < k_nc7 && k_lo8 < k_nc7) ph <= P_KFIN;   // CS level unclear
+                  if (!ck_i2c && k_hi8 < k_nc7 && k_lo8 < k_nc7) begin    // CS level unclear
+                    ck_why <= 4'd8; ph <= P_KFIN;
+                  end
                   else begin ck_pass <= 1'b1; walk_go <= 1'b1; ph <= P_WAIT; w_ret <= P_KC2; end
                 end
         // the sample edge: the clean one; both clean -> the edge ending the data's level
@@ -1773,7 +1789,10 @@ module pe_pit_s0 #(parameter integer AW = 9) (
                   else ck_edge <= ck_sn0;
 `else
                   else if (k_cr && k_cf && (ck_sn0 ^ ck_sn1)) ck_edge <= ck_sn0;
-                  else begin ph <= P_KFIN; ck_arm <= 1'b0; end      // no clean sample edge
+                  else begin                                       // no clean sample edge:
+                    ph <= P_KFIN; ck_arm <= 1'b0;                  // both clean = data in both levels
+                    ck_why <= (k_cr && k_cf) ? 4'd10 : 4'd9;
+                  end
 `endif
                 end
         P_KCAP: if (ck_done) begin ck_ok <= 1'b1; ph <= P_KFIN; end
@@ -1844,7 +1863,8 @@ module pe_pit_s12 #(parameter integer AW = 9) (
     input  wire          ck_ok,
     input  wire [2:0]    ck_w,
     input  wire [AW-1:0] ck_wp,        // their end
-    input  wire [7:0]    ck_nmsg
+    input  wire [7:0]    ck_nmsg,
+    input  wire [3:0]    ck_why        // its refusal's reason code (golden WHY3)
 );
   localparam [15:0] OVF     = 16'hFFFF;
   localparam [14:0] P_FIRST = 15'd4, P_LAST = 15'd16384;
@@ -1972,6 +1992,12 @@ module pe_pit_s12 #(parameter integer AW = 9) (
   localparam [12:0] S3_MIN_FB = 13'd9;      // start + 8 data bits (Wilson 11-05)
   localparam [AW-1:0] S3_CAP = 9'd128;
   reg  [6:0]  t3;
+  // THE REASON CODE (Wilson 11-06; golden WHY3): why the record has no
+  // polynomial or no init, written in byte 128's low nibble when init is not.
+  // g_try / g_skip: a group of >= 2 frames fit the store / was too big for it
+  // (golden: "insufficient store" = skipped and none tried)
+  reg  [3:0]  s3_why;
+  reg         g_try, g_skip;
   // the benches' snapshot point: the record's last write is about to start
   // (option (a): the messages are checked from a dump taken here)
   wire        s3_rec_wr = (st == S_S3) && (t3 == 7'd112);
@@ -2145,6 +2171,15 @@ module pe_pit_s12 #(parameter integer AW = 9) (
   wire [32:0] p_cx  = (t3 == P_S0) ? `P_A : p_ri ^ p_d;
   wire [32:0] p_cy  = (t3 == P_S0) ? `P_B : p_ri;
   wire        p_lt  = (p_cx < p_cy);                 // THE compare
+  // MESSAGE POINTERS as 10 bits (Wilson 11-06, found by the reason code):
+  // messages that fill the store end at 512, which a 9-bit pointer holds as 0
+  // -- the end then read as an empty store (the capacity rule saw a free one)
+  // and a scan's next header wrapped to address 0 and ran on. A message
+  // pointer is never otherwise 0 (they start at 128), so 0 IS 512.
+  function [9:0] e10(input [8:0] v);
+    e10 = {(v == 9'd0), v};
+  endfunction
+  wire [9:0]  s3_end = e10(`S3_WP);
   // THE ALU: a + b or a - b (+ a carry in); on a subtract, al_lt = (a < b)
   reg  [25:0] al_a, al_b;
   reg         al_sub, al_ci;
@@ -2156,13 +2191,13 @@ module pe_pit_s12 #(parameter integer AW = 9) (
     al_sub = 1'b0; al_ci = 1'b0; al_a = {1'b0, `S3_X}; al_b = 26'd0;
     case (t3)
       // piece 2: addresses, scans and degrees (a + b + 1 steps over a [len] header)
-      G_HDR:   begin al_a = {17'd0, `G_HP}; al_b = {17'd0, `S3_WP}; al_sub = 1'b1; end
-      G_CS:    begin al_a = {17'd0, `G_Q};  al_b = {17'd0, `S3_WP}; al_sub = 1'b1; end
+      G_HDR:   begin al_a = {16'd0, e10(`G_HP)}; al_b = {16'd0, s3_end}; al_sub = 1'b1; end
+      G_CS:    begin al_a = {16'd0, e10(`G_Q)};  al_b = {16'd0, s3_end}; al_sub = 1'b1; end
       G_CS1:   begin al_a = {17'd0, `G_Q};  al_b = {18'd0, `G_GRD}; al_ci = 1'b1; end
-      G_CAP:   begin al_a = {17'd0, `S3_WP}; al_b = {17'd0, `G_LEN, 1'b0}; end
+      G_CAP:   begin al_a = {16'd0, s3_end}; al_b = {17'd0, `G_LEN, 1'b0}; end
       G_CAP1:  begin al_a = {17'd0, `S3_WP}; al_b = {18'd0, `G_LEN}; end
       G_GRP:   begin al_a = {17'd0, `G_HP}; al_b = {18'd0, `G_LEN}; al_ci = 1'b1; end
-      G_MS:    begin al_a = {17'd0, `G_A};  al_b = {17'd0, `S3_WP}; al_sub = 1'b1; end
+      G_MS:    begin al_a = {16'd0, e10(`G_A)};  al_b = {16'd0, s3_end}; al_sub = 1'b1; end
       G_MS1:   begin al_a = {17'd0, `G_A};  al_b = {18'd0, `G_GRD}; al_ci = 1'b1; end
       G_D1:    begin al_a = {17'd0, `G_A};  al_b = {18'd0, `G_J}; al_ci = 1'b1; end
       G_D2:    begin al_a = {17'd0, `G_HP}; al_b = {18'd0, `G_J}; al_ci = 1'b1; end
@@ -2179,7 +2214,7 @@ module pe_pit_s12 #(parameter integer AW = 9) (
       G_SHE:   begin al_a = {15'd0, `G_DX}; al_b = {15'd0, `G_TZ}; al_sub = 1'b1; end
       // piece 3: the evidence scan (q < end; q + len + 1)
       P_E1, P_G1:
-               begin al_a = {17'd0, `P_Q};  al_b = {17'd0, `S3_WP}; al_sub = 1'b1; end
+               begin al_a = {16'd0, e10(`P_Q)};  al_b = {16'd0, s3_end}; al_sub = 1'b1; end
       P_E2, P_G2:
                begin al_a = {17'd0, `P_Q};  al_b = {18'd0, `G_GRD}; al_ci = 1'b1; end
       T_MUL:   begin al_a = {acc[24:0], 1'b0}; al_b = acc[7'd50 + {3'd0, wb}] ? w_p16 : 26'd0; end
@@ -2303,6 +2338,7 @@ module pe_pit_s12 #(parameter integer AW = 9) (
       f_body <= 1'b0; a_idle <= 1'b0; L <= 4'd7; a_L <= 4'd0;
       cls <= C_NONE; why <= 3'd0; cond <= 1'b0; wh <= 1'b0; f_span <= 1'b0; wb <= 4'd0;
       t3 <= T_RD; re <= 1'b0; s3_found <= 1'b0; s3_fbs <= 1'b0; s3_nmsg <= 8'd0;
+      s3_why <= 4'd0; g_try <= 1'b0; g_skip <= 1'b0;
     end else if (!run) begin
       st <= S_IDLE; walk_go <= 1'b0; hold <= 1'b0; we <= 1'b0; done <= 1'b0; dv_busy <= 1'b0;
       x_v <= 1'b0; wend <= 1'b0; re <= 1'b0;
@@ -2571,6 +2607,7 @@ module pe_pit_s12 #(parameter integer AW = 9) (
         S_NEXT: if (w == 3'd7) begin
                   w <= 3'd0; wb <= 4'd0; st <= S_S3; t3 <= T_RD;
                   s3_found <= 1'b0; s3_fbs <= 1'b0; s3_nmsg <= 8'd0;
+                  s3_why <= 4'd0; g_try <= 1'b0; g_skip <= 1'b0;
                 end else begin w <= w + 3'd1; st <= S_WIRE; end
         S_S3: begin
           case (t3)
@@ -2589,7 +2626,9 @@ module pe_pit_s12 #(parameter integer AW = 9) (
                 4'd4: begin acc[58] <= rdata[7]; wb <= 4'd9; end
                 default: begin
                   acc[57:50] <= rdata;
-                  if ({acc[62:58], rdata} < S3_MIN_FB) begin s3_fbs <= 1'b1; t3 <= G_INI; `G_K <= 8'd0; end
+                  if ({acc[62:58], rdata} < S3_MIN_FB) begin
+                    s3_fbs <= 1'b1; s3_why <= 4'd1; t3 <= G_INI; `G_K <= 8'd0;
+                  end
                   else begin `S3_P30 <= 30'd0; `S3_HLE <= 1'b0; wb <= 4'd12; t3 <= T_MUL; end
                 end
               endcase
@@ -2667,6 +2706,7 @@ module pe_pit_s12 #(parameter integer AW = 9) (
             T_CK: if (ck_fin) begin
                     t3 <= G_INI; `G_K <= 8'd0;
                     if (ck_ok) begin s3_found <= 1'b1; w <= ck_w; `S3_WP <= ck_wp; s3_nmsg <= ck_nmsg; end
+                    else s3_why <= ck_why;
                   end
             // ================= piece 2: the GCD (golden crc_poly_gcd_s3_fit) =================
             // the record 120..127: wire | 8 (0 with no NRZ_ASYNC wire), the rest 0
@@ -2689,24 +2729,39 @@ module pe_pit_s12 #(parameter integer AW = 9) (
                     else begin `G_RA <= `G_Q; `G_RRET <= G_CS1; t3 <= G_RD; end
             G_CS1: begin                                                    // count, and "first?"
               if (`G_Q == `G_HP) `G_PAST <= 1'b1;
+              // the LAST message is never evidence (Wilson 11-06): its q + len + 1 is the end
+`ifdef M_S3_LAST_KEEP
               if (`G_GRD == `G_LEN) begin
+`else
+              if (`G_GRD == `G_LEN && al[8:0] != `S3_WP) begin
+`endif
                 `G_CNT <= `G_CNT + 8'd1;
                 if (!`G_PAST && `G_Q != `G_HP) `G_NF <= 1'b1;
               end
               `G_Q <= al[8:0]; t3 <= G_CS;                                  // q + len + 1
             end
-            // < 4 frames: < 3 differences, never a candidate; skipped like the golden
-            G_CSE:  if (`G_NF || `G_CNT < 8'd4) begin `G_LSB <= 1'b1; t3 <= G_GNX; end
+            // < 2 frames: not a group (golden); the capacity rule then decides
+            // tried / skipped (the reason code), and < 4 frames (< 3
+            // differences) is never a candidate
+            G_CSE:  if (`G_NF || `G_CNT < 8'd2) begin `G_LSB <= 1'b1; t3 <= G_GNX; end
                     else t3 <= G_CAP;
             // the capacity rule: end + 2 L <= 512
-            G_CAP:  if (al[9] && al[8:0] != 9'd0) begin `G_LSB <= 1'b1; t3 <= G_GNX; end
-                    else t3 <= G_CAP1;
+            G_CAP:  if (al[9] && al[8:0] != 9'd0) begin g_skip <= 1'b1; `G_LSB <= 1'b1; t3 <= G_GNX; end
+                    else begin
+                      g_try <= 1'b1;
+                      if (`G_CNT < 8'd4) begin `G_LSB <= 1'b1; t3 <= G_GNX; end
+                      else t3 <= G_CAP1;
+                    end
             G_CAP1: begin `G_BB <= al[8:0]; `G_LSB <= 1'b0; t3 <= G_GRP; end
             // ---- one group in one bit order ----
             G_GRP:  begin `G_USED <= 8'd0; `G_GV <= 1'b0; `G_A <= al[8:0]; t3 <= G_MS; end
             G_MS:   if (!al_lt) t3 <= G_GEND;                              // a >= end
                     else begin `G_RA <= `G_A; `G_RRET <= G_MS1; t3 <= G_RD; end
+`ifdef M_S3_LAST_KEEP
             G_MS1:  if (`G_GRD == `G_LEN) t3 <= G_D0;
+`else
+            G_MS1:  if (`G_GRD == `G_LEN && al[8:0] != `S3_WP) t3 <= G_D0;    // the last: not evidence
+`endif
                     else begin `G_A <= al[8:0]; t3 <= G_MS; end
             // d = m_a ^ m_0 into x's buffer, bottom byte first: its top bit and lowest bit
             G_D0: begin
@@ -2804,7 +2859,10 @@ module pe_pit_s12 #(parameter integer AW = 9) (
             // crc_init_xorout + canonical_member, the method in the header) =========
             // the GCD's result from the record: found? bit order, width, g
             P_R0:   begin `G_RA <= 9'd120; `G_RRET <= P_R1; t3 <= G_RD; end
-            P_R1:   if (!acc[65]) t3 <= P_F;                               // byte 0 bit 4: a polynomial
+            P_R1:   if (!acc[65]) begin                                    // byte 0 bit 4: a polynomial
+                      t3 <= P_F;
+                      if (s3_found && !s3_fbs) s3_why <= (g_skip && !g_try) ? 4'd2 : 4'd3;
+                    end
                     else begin `P_LSB <= acc[67]; `G_RA <= 9'd121; `G_RRET <= P_R2; t3 <= G_RD; end
             P_R2:   begin `P_WC <= acc[62:61]; `G_RA <= 9'd124; `G_RRET <= P_R3; t3 <= G_RD; end
             P_R3: begin
@@ -2820,7 +2878,7 @@ module pe_pit_s12 #(parameter integer AW = 9) (
               if (al[8:0] != `S3_WP && `G_GRD > `P_LP && (`P_LC == 8'd0 || `G_GRD < `P_LC)) `P_LC <= `G_GRD;
               `P_Q <= al[8:0]; t3 <= P_E1;
             end
-            P_E3:   if (`P_LC == 8'd0) t3 <= P_F;                          // fewer than two lengths
+            P_E3:   if (`P_LC == 8'd0) begin t3 <= P_F; s3_why <= 4'd4; end  // fewer than two lengths
                     else begin
                       `P_LP <= `P_LC;
                       if (`P_LC <= p_nb) t3 <= P_E0;                       // no data bits: not a length
@@ -2886,11 +2944,11 @@ module pe_pit_s12 #(parameter integer AW = 9) (
             //  the operations, pa_op .. pv_op)
             P_S0:   if (`P_A == 33'd0) t3 <= P_V0;
             // u = 0, or no init solves; q = v / h (h | v, or none); f = g / h; init = q mod f
-            P_V0:   if (p_uu != 33'd0) t3 <= P_F;
+            P_V0:   if (p_uu != 33'd0) begin t3 <= P_F; s3_why <= 4'd5; end
                     else begin `P_KER <= (`P_B != 33'd1); `P_J_W((8'd32)) t3 <= P_V1; end
             P_V1, P_V3, P_V5:                                              // the steps: the operations
                     if (`P_J == 8'd1) t3 <= t3 + 7'd1; else `P_J_W((`P_J - 8'd1))
-            P_V2:   if (`P_A != 33'd0) t3 <= P_F;
+            P_V2:   if (`P_A != 33'd0) begin t3 <= P_F; s3_why <= 4'd5; end
                     else begin `P_J_W((8'd33)) t3 <= P_V3; end
             P_V4:   begin `P_J_W((8'd32)) t3 <= P_V5; end
             // ---- init is a; xorout = c1 ^ reg(d1, init) ----
@@ -2916,7 +2974,9 @@ module pe_pit_s12 #(parameter integer AW = 9) (
             end
             P_W2: begin
               we <= 1'b1; waddr <= 9'd128 + {1'b0, `P_J}; `P_J_W((`P_J + 8'd1))
-              wdata <= (`P_J < 8'd4) ? dv_q[7:0] : acc[16:9];
+              // init unsolved: 128..135 are zero but for the reason code (128, bits 3..0)
+              wdata <= !`P_IO ? ((`P_J == 8'd0) ? {4'd0, s3_why} : 8'd0)
+                       : (`P_J < 8'd4) ? dv_q[7:0] : acc[16:9];
               if (`P_J == 8'd7) t3 <= T_DONE;
             end
             // a store read: data 2 cycles after the request

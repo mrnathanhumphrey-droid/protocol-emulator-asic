@@ -179,19 +179,51 @@ end sniff;
 """
 
 
+def clk_refused():
+    """a clocked bus refused for its sample edge: no stage 3 record, reason 9"""
+    b = img()
+    table(b, {1: E.R_CLOCK, 2: E.R_SYNC | 1 << 3, 3: E.R_FRAME | 1 << 3})
+    for w in (1, 2, 3):
+        rec(b, w, E.C_ROLE)
+    b[128] = 9
+    return b
+
+
+CLK_REFUSED_TEXT = """-- PE PIT spec v1: the chip's claims only (results bytes 0..135)
+spec sniff is
+  captured at 60000000 Hz;
+  wire uio1 : role CLOCK;
+  wire uio2 : role SYNC_DATA of uio1 change 0;
+  wire uio3 : role FRAME of uio1;
+  ? unknown crc -- no clean sample edge (data changes on both clock edges);
+end sniff;
+"""
+
+
+def uart_one_len():
+    """a polynomial but one frame length only: init / xorout UNKNOWN, reason 4"""
+    b = img()
+    rec(b, 0, E.C_ASYNC, cond=1, idle=1, p16=24 * 16, fb=10)
+    s3(b, 0, poly=0x07, width=8, frame=3)
+    b[128] = 4
+    return b
+
+
 def uart_nopoly():
     b = img()
     rec(b, 0, E.C_ASYNC, cond=1, idle=1, p16=10 * 16, fb=10)
     s3(b, 0, nmsg=7)
+    b[128] = 3
     return b
 
 
 IMAGES = {"uart_crc": uart_crc, "uart_poly_only": uart_poly_only, "spi": spi, "i2c": i2c,
           "refused": refused, "no_cs": no_cs, "mixed": mixed, "uart_nopoly": uart_nopoly,
-          "uart_refl_xorout": uart_refl_xorout,
+          "uart_refl_xorout": uart_refl_xorout, "clk_refused": clk_refused,
+          "uart_one_len": uart_one_len,
           "empty": img}
 TEXTS = {"uart_crc": UART_CRC_TEXT, "spi": SPI_TEXT, "no_cs": NO_CS_TEXT,
-         "uart_refl_xorout": REFL_TEXT}
+         "uart_refl_xorout": REFL_TEXT, "clk_refused": CLK_REFUSED_TEXT}
 
 BAD = {
     "no end line": "spec sniff is\n  captured at 60000000 Hz;\n",
@@ -243,6 +275,17 @@ def main() -> int:
           % ("yes" if not nbad else "*** %d miss" % nbad))
     if nbad:
         probs.append("rate precision: %d p16 values not recovered" % nbad)
+    # an unknown reason code is refused, not printed as a guess
+    try:
+        b = bytearray(uart_nopoly())
+        b[128] = 15
+        E.claims(bytes(b), HZ)
+        probs.append("emitter accepted reason code 15")
+        print("  refuse %-24s *** accepted" % "reason code 15")
+    except E.SpecError as e:
+        print("  refuse %-24s ok (%s)" % ("reason code 15", e))
+    print("  reason lines: %s" % [ln.strip() for n in ("uart_nopoly", "uart_one_len")
+                                  for ln in E.emit(bytes(IMAGES[n]()), HZ).splitlines() if "?" in ln])
     for why, t in BAD.items():
         try:
             E.parse(t)

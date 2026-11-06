@@ -101,6 +101,7 @@ def crc_waves(p, L, seed, nshort=4, longs=(1, 3), **kw):
     return uart_waves(msgs + [[0x00]], **kw)
 
 
+MUTANTS = [("M_S3_LAST_KEEP", "the last message kept as evidence", "s3_cut_full")]
 MODBUS = (16, 0x8005, 0xFFFF, 0x0000, True)
 CRC32 = (32, 0x04C11DB7, 0xFFFFFFFF, 0xFFFFFFFF, True)
 S3_WAVES = {
@@ -110,11 +111,25 @@ S3_WAVES = {
 }
 
 
+def cut_waves(seed=3, n=12):
+    """⭐ THE CUT MESSAGE (Wilson 11-06): MODBUS frames of 2 and 3 data bytes
+    (L, L+1, L ...) with NO budget, so the capture stops FULL -- for this seed
+    exactly between the 4th and 5th byte of a 5-byte frame (found by search on
+    the golden, asserted per run below). The decoder cannot tell the cut frame
+    from a whole 4-byte one; in the 4-byte group it spoiled the old GCD
+    (crc_poly_gcd_s3_fit: UNKNOWN). The last message is never evidence: the
+    polynomial must come out RIGHT (0x8005), or UNKNOWN, never wrong."""
+    rng = random.Random(seed)
+    msgs = [frame([rng.getrandbits(8) for _ in range(3 if k % 3 == 1 else 2)], *MODBUS) for k in range(n)]
+    return uart_waves(msgs)
+
+
 def cases():
     out = []
     for name, wv in S3_WAVES.items():
         t_end = max(sum(c for _l, c in segs) for segs in wv.values())
         out.append((name, wv, 0x00, R0.budget_for(t_end + R0.T0 + 200), None, None))
+    out.append(("s3_cut_full", {0: cut_waves()}, 0x00, 0, None, None))     # budget off: FULL
     return out
 
 
@@ -123,7 +138,7 @@ def expect(cap):
     detail["rec"] = the WHOLE stage 3 record, 120..135 (pieces 1-3)"""
     G = S0.frozen_model()
     recs, _res = R12.expect(cap)
-    rec, out = G.stage3(cap, 0, G.classify_bus(cap, 0))
+    rec, out = G.stage3_rc(cap, 0, G.classify_bus(cap, 0))
     out["rec"] = bytes(rec)
     enc = []
     for m in out.get("msgs") or []:
@@ -173,10 +188,35 @@ def main() -> int:
             bad.append("messages at byte %d: RTL %s, golden %s" % (
                 DEC_AT + i, dec[max(0, i - 4):i + 8].hex(), enc[max(0, i - 4):i + 8].hex()))
         msgs = out.get("msgs") or []
+        if name == "s3_cut_full":
+            # the case's teeth, on the golden: the last decoded message IS a cut
+            # 5-byte frame, the old rule lost the polynomial, the new one finds it
+            old = S0.frozen_model().crc_poly_gcd_s3_fit(msgs) if msgs else {}
+            ok = (len(msgs) > 1 and len(msgs[-1]) == 4 and old.get("status") == "UNKNOWN"
+                  and (out.get("poly") or {}).get("poly") == MODBUS[1])
+            if not ok:
+                bad.append("PATH: not the cut-message case (lengths %s, old %s, new %s)" % (
+                    [len(m) for m in msgs], old.get("status"), (out.get("poly") or {}).get("poly")))
         print("  %-16s edges %4d  %6.1fs  %-8s msgs %2d bytes %3d  %s" % (
             name, len(log), time.time() - t0, out.get("status"), len(msgs), sum(map(len, msgs)),
             "bit-exact" if not bad else "*** " + "; ".join(bad)))
         probs += ["%s: %s" % (name, b) for b in bad]
+    # the must-fire (Wilson 11-06): the last message kept as evidence -- the cut
+    # case's poisoned 4-byte group comes back, and its polynomial is lost
+    if not only and os.environ.get("PE_S3_MUTANTS", "1") == "1":
+        print("  must-fires (each mutant must turn its case red):")
+        cs = {c[0]: c for c in cases()}
+        for define, what, name in MUTANTS:
+            mv = os.path.join(tmp, "mut_%s.vvp" % define)
+            RP.build(mv, [define])
+            tag = "%s_%s" % (define, name)
+            log, st, cap, got, want12, _res = R12.run_case(mv, tmp, cs[name], tag)
+            _r, _enc, out = expect(cap)
+            r16 = bytes((R12_MEM.get(tag, {}).get(S3_AT + i, -1) & 0xFF) for i in range(16))
+            red = r16 != out["rec"]
+            print("    %-16s %-36s %s" % (define, what, "red (fires)" if red else "*** stayed GREEN"))
+            if not red:
+                probs.append("must-fire %s (%s) stayed green" % (define, what))
     for p in probs:
         print("  *** " + p)
     print("  GATE pit-s3: %s" % ("FAILED" if probs else "PASSED"))

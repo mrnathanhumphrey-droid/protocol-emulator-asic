@@ -1102,3 +1102,128 @@ def stage3_clocked(cap, lv0, cls, log2, lv2, budget=None, ncyc=None):
         rec[12:16] = io["xorout"].to_bytes(4, "little")
     out["status"] = "OK"
     return bytes(rec), out
+
+
+# ---------------------------------------------------------------------------
+# THE LAST MESSAGE IS NEVER EVIDENCE, AND THE RECORD SAYS WHY (Wilson 11-06) --
+# APPENDED; every function above is unchanged.
+#  * the polynomial: crc_poly_gcd_s3_fit's groups are built from msgs[:-1]
+#    (io_evidence's rule since 11-04). A capture that stops between two bytes
+#    of a message leaves a shorter one that looks whole; in a group of that
+#    length it spoiled the GCD (the round trip, s3_modbus). The capacity rule
+#    still counts every decoded message: they are all in the store.
+#  * the REASON CODE, a 4-bit nibble in the low half of byte 128 (the record's
+#    byte 8, init's low byte -- zero whenever there is a reason: init is not
+#    written). Byte 120 has no free bit. 0 = no reason (init / xorout found).
+# ---------------------------------------------------------------------------
+WHY3 = {
+    "frame shorter than start + 8 data bits": 1,
+    "insufficient store for the GCD": 2,
+    "no difference GCD of a supported width": 3,
+    "one frame length only": 4,
+    "no init solves the two lengths": 5,
+    "no clocked bus with a data wire": 6,
+    "no clocked bus with frame markers": 7,
+    "CS active level unclear": 8,
+    "no clean sample edge (data changes on both clock edges)": 9,
+    "no clean sample edge (data changes in both clock levels)": 10,
+}
+WHY3_AT = 8                  # the record's byte 8 = store byte 128, bits 3..0
+
+
+def crc_poly_gcd_s3_last(msgs):
+    """crc_poly_gcd_s3_fit with the LAST decoded message out of every group."""
+    free = S3_STORE - (S3_DEC_AT + sum(len(m) + 1 for m in msgs))
+    by_len = {}
+    for m in msgs[:-1]:
+        by_len.setdefault(len(m), []).append(m)
+    best, tried, skipped = None, False, False
+    for lsb in (False, True):
+        for L, group in sorted(by_len.items(), key=lambda kv: -len(kv[1])):
+            if len(group) < 2:
+                continue
+            if 2 * L > free:
+                skipped = True
+                continue
+            tried = True
+            polys = [bits_to_poly(msg_bits(m, lsb)) for m in group]
+            g, used = 0, 0
+            for a in polys[1:]:
+                d = a ^ polys[0]
+                if d == 0:
+                    continue
+                g = pgcd(g, d) if g else d
+                used += 1
+            while g and not g & 1:
+                g >>= 1
+            if g and deg(g) in WIDTHS and used >= MIN_DIFFS:
+                cand = {"status": "OK", "width": deg(g), "poly": g & ((1 << deg(g)) - 1),
+                        "full": g, "reflected": lsb, "diffs_used": used, "frame_len": L}
+                if best is None or cand["diffs_used"] > best["diffs_used"]:
+                    best = cand
+    if best is None:
+        return {"status": "UNKNOWN", "why": "insufficient store for the GCD" if skipped and not tried
+                else "no difference GCD of a supported width"}
+    return best
+
+
+def _s3_solve(rec, w, msgs, out):
+    """the solver on decoded messages, into the record (stage3 / stage3_clocked's
+    tail, with crc_poly_gcd_s3_last); -> the reason text or None"""
+    rec[0] = w | 1 << 3
+    res = crc_poly_gcd_s3_last(msgs)
+    out.update(wire=w, msgs=msgs, poly=res)
+    rec[3] = min(len(msgs), 255)
+    if res["status"] != "OK":
+        out["status"] = "UNKNOWN"
+        return res["why"]
+    ev = io_evidence(msgs, res)
+    out["evidence"] = ev
+    io = canonical_member(ev, res, crc_init_xorout(ev, res))
+    out["io"] = io
+    rec[0] |= 1 << 4 | (1 << 6 if res["reflected"] else 0)
+    rec[1] = _WCODE[res["width"]] | min(res["frame_len"], 63) << 2
+    rec[2] = min(res["diffs_used"], 255)
+    rec[4:8] = res["poly"].to_bytes(4, "little")
+    out["status"] = "OK"
+    if io.get("init") is None:
+        return io["why"]
+    rec[0] |= 1 << 5 | (1 << 7 if io["class_size"] > 1 else 0)
+    rec[8:12] = io["init"].to_bytes(4, "little")
+    rec[12:16] = io["xorout"].to_bytes(4, "little")
+    return None
+
+
+def _s3_why(rec, out, why):
+    if why is not None:
+        out["why"] = why
+        rec[WHY3_AT] |= WHY3[why]
+    return bytes(rec), out
+
+
+def stage3_rc(cap, lv0, cls):
+    """stage3 with the last message out of the GCD and the reason code."""
+    rec = bytearray(S3_BYTES)
+    w = next((x for x in sorted(cls) if cls[x].get("cls") == "NRZ_ASYNC"), None)
+    if w is None:
+        return bytes(rec), {"status": "UNKNOWN", "why": "no NRZ_ASYNC wire"}
+    c = cls[w]
+    if c["frame_bits"] < S3_MIN_FRAME_BITS:
+        rec[0] = w | 1 << 3
+        return _s3_why(rec, {"status": "UNKNOWN", "wire": w}, "frame shorter than start + 8 data bits")
+    msgs = async_bytes(wire_ivs(cap, w, lv0), c["bit16"], c["frame_bits"])
+    out = {}
+    return _s3_why(rec, out, _s3_solve(rec, w, msgs, out))
+
+
+def stage3_clocked_rc(cap, lv0, cls, log2, lv2, budget=None, ncyc=None):
+    """stage3_clocked with the last message out of the GCD and the reason code."""
+    if any(cls[x].get("cls") == "NRZ_ASYNC" for x in cls):
+        return stage3_rc(cap, lv0, cls)
+    rec = bytearray(S3_BYTES)
+    bus = clocked_bus(cap, lv0, cls)
+    if "why" in bus:
+        return _s3_why(rec, {"status": "UNKNOWN", "bus": bus, "second": False}, bus["why"])
+    msgs, stop = sampled_capture(log2, lv2, bus, budget, ncyc)
+    out = {"bus": bus, "stop": stop, "second": True}
+    return _s3_why(rec, out, _s3_solve(rec, bus["data"], msgs, out))

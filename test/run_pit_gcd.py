@@ -3,8 +3,10 @@
 the init / xorout solver on pe_pit_s12, started AT the GCD (tb_gcd.v) on
 PRELOADED stores of decoded messages [len][bytes...] from 128; the whole
 16-byte record at 120..135 compared BIT FOR BIT with the frozen golden's
-(model/pit_golden.py: crc_poly_gcd_s3_fit, io_evidence, crc_init_xorout,
-canonical_member -- composed as stage3 composes them).
+(model/pit_golden.py: crc_poly_gcd_s3_last, io_evidence, crc_init_xorout,
+canonical_member -- composed as stage3_rc composes them, with the REASON CODE in
+the record's byte 8, bits 3..0; Wilson 11-06: the last message is never
+evidence for the polynomial either).
 
 Preloading is the only way to reach the capacity rule -- no real capture can
 (<= 314 stored edges, ~157 decoded bytes).
@@ -72,7 +74,7 @@ POLYS = [(8, 0x07), (8, 0x31), (8, 0x9B), (16, 0x8005), (16, 0x1021), (32, 0x04C
 
 def golden_io(msgs):
     """(res, io): the frozen golden's GCD and solver, as stage3 composes them"""
-    res = G.crc_poly_gcd_s3_fit(msgs)
+    res = G.crc_poly_gcd_s3_last(msgs)
     if res["status"] != "OK":
         return res, {}
     ev = G.io_evidence(msgs, res)
@@ -92,6 +94,9 @@ def golden_rec(msgs):
             rec[0] |= 1 << 5 | (1 << 7 if io["class_size"] > 1 else 0)
             rec[8:12] = list(io["init"].to_bytes(4, "little"))
             rec[12:16] = list(io["xorout"].to_bytes(4, "little"))
+    why = res.get("why") if res["status"] != "OK" else io.get("why") if io.get("init") is None else None
+    if why is not None:
+        rec[G.WHY3_AT] |= G.WHY3[why]
     return rec, dict(res, io=io)
 
 
@@ -135,12 +140,15 @@ def tie_sets(n, seed):
         B = [R3.frame([rng.getrandbits(8) for _ in range(lb)], *pb) for _ in range(5)]
         if len(A[0]) == len(B[0]):
             continue
-        ra, rb = G.crc_poly_gcd_s3_fit(A), G.crc_poly_gcd_s3_fit(B)
+        # a 1-byte tail: the last message is never evidence (Wilson 11-06),
+        # so without it the group that comes last would lose a member
+        tail = [[rng.getrandbits(8)]]
+        ra, rb = G.crc_poly_gcd_s3_last(A + tail), G.crc_poly_gcd_s3_last(B + tail)
         if ra["status"] != "OK" or rb["status"] != "OK" or ra["reflected"] or rb["reflected"] \
                 or ra["diffs_used"] != rb["diffs_used"]:
             continue
-        msgs = B + A if rng.random() < 0.5 else A + B         # first appearance both ways
-        if G.crc_poly_gcd_s3_fit(msgs).get("frame_len") != len(A[0]):
+        msgs = (B + A if rng.random() < 0.5 else A + B) + tail  # first appearance both ways
+        if G.crc_poly_gcd_s3_last(msgs).get("frame_len") != len(A[0]):
             continue
         out.append(msgs)
     return out

@@ -41,12 +41,11 @@ THE SYNTAX (Wilson 11-06, D1). One statement per line, each ending in `;`:
     operators, `during` from its Timing macro):
         pattern Frame(uio0) -> Frame(uio0) during (100 ns, 2000 ns);
 
-⚠ WHAT THE BYTES CANNOT SAY. The clocked bus's refusals (no CS level, no
-clean sample edge, data in both levels) and stage 3's own UNKNOWN reasons
-leave the stage 3 record all zero, and byte 2's flag bits are never written:
-the reason is in the golden, not on the chip. v1 says what the bytes do
-show (the role table: e.g. a clock and data with no frame wire) and otherwise
-"no stage 3 record". A reason code would be an RTL change: a ruling.
+⭐ THE REASON CODE (Wilson 11-06): every stage 3 UNKNOWN and every clocked
+refusal (no data wire, no frame markers, CS level unclear, no clean sample
+edge) is a 4-bit code in byte 128 (bits 3..0, whenever init is not written),
+and the `? unknown` line carries the golden's own reason text for it. A
+record from before the code (0) falls back to what the role table shows.
 """
 from __future__ import annotations
 
@@ -57,6 +56,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import clock                                                      # noqa: E402
+import pit_golden                                                 # noqa: E402  (WHY3: the reason codes)
 
 TABLE_AT, TABLE_BYTES = 32, 7
 REC_AT, REC_BYTES = 40, 10
@@ -88,6 +88,9 @@ CATALOGUE = {
     "CRC-32":             (32, 0x04C11DB7, 0xFFFFFFFF, 0xFFFFFFFF, True),
 }
 CONDITION = "all-wires-sniffed"
+#: the stage 3 record's REASON CODE (Wilson 11-06): byte 128 bits 3..0 when
+#: init is not written -> the golden's own reason text
+WHY3_TEXT = {v: k for k, v in pit_golden.WHY3.items()}
 
 
 class SpecError(Exception):
@@ -159,7 +162,14 @@ def claims(results, clock_hz=None):
                            "given": bool(cond)}
     # the stage 3 record
     s = r[S3_AT:S3_AT + S3_BYTES]
+    code = s[pit_golden.WHY3_AT] & 0xF if not s[0] & 0x20 else 0
+    if code and code not in WHY3_TEXT:
+        raise SpecError("stage 3 reason code %d is not a known reason" % code)
+    reason = WHY3_TEXT.get(code)
     if not s[0] & 0x08:
+        if reason:
+            unk.append(("crc", reason))
+            return out
         if any(v["role"] == "SYNC_DATA" for v in out["roles"].values()) and not \
                 any(v["role"] == "FRAME" or v["i2c"] for v in out["roles"].values()):
             why = "no stage 3 record: a clocked bus with no frame wire"
@@ -169,7 +179,8 @@ def claims(results, clock_hz=None):
         return out
     w = s[0] & 7
     if not s[0] & 0x10:
-        unk.append(("uio%d.crc" % w, "no polynomial from %d frames" % s[3]))
+        unk.append(("uio%d.crc" % w, "%s (%d frames)" % (reason, s[3]) if reason
+                    else "no polynomial from %d frames" % s[3]))
         return out
     c = {"wire": w, "width": WCODE[s[1] & 3], "reflected": bool(s[0] & 0x40),
          "poly": int.from_bytes(s[4:8], "little"), "frame": s[1] >> 2,
@@ -184,8 +195,8 @@ def claims(results, clock_hz=None):
         if c["reflected"]:                  # the record's transmission order -> Rocksoft
             c["xorout"] = _rev(c["xorout"], c["width"])
     else:
-        unk.append(("uio%d.crc.init" % w, "not solved from the frames"))
-        unk.append(("uio%d.crc.xorout" % w, "not solved from the frames"))
+        unk.append(("uio%d.crc.init" % w, reason or "not solved from the frames"))
+        unk.append(("uio%d.crc.xorout" % w, reason or "not solved from the frames"))
     return out
 
 

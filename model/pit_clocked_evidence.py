@@ -112,7 +112,7 @@ def run(kind, mode, skew, H, cat, seed):
             lv2 ^= m
         else:
             log2.append((t - T2 + 1, m))
-    rec, out = G.stage3_clocked(cap, lv0, cls, log2, lv2, 1 << 30, T - T2 + 10)
+    rec, out = G.stage3_clocked_rc(cap, lv0, cls, log2, lv2, 1 << 30, T - T2 + 10)
     want_edge = None
     if kind == "SPI":
         want_edge = 1 - ((mode >> 1) ^ (mode & 1))     # modes 0, 3 sample on the rise

@@ -772,6 +772,10 @@ SPEC_SYMBOLS = {
     # WCODE / WHY / WHY_TIMING are the results region's field codes (the
     # layout in src/project.v) -- design. BAD is the parser's refusal cases'
     # spec TEXT (stimulus). Judged live by gate pit-emit.
+    # the stage 3 reason code (11-06): WHY3 maps the frozen golden's own
+    # reason texts to the record's 4-bit field codes -- design, judged live
+    # bit for bit by pit-s3 / pit-clk / pit-gcd.
+    ("model/pit_golden.py", "WHY3"),
     ("model/pit_emit.py", "CATALOGUE"),
     ("model/pit_emit.py", "WCODE"),
     ("model/pit_emit.py", "WHY"),

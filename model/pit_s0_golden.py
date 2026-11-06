@@ -30,7 +30,10 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 # stage 3 composition; was df3552da.
 # Re-frozen 11-06 (Wilson): stage 3 on a clocked bus, the sampled second
 # capture (clocked_bus, sampled_capture, stage3_clocked) APPENDED; was 73e25c61.
-FROZEN = "81ae9563ca3d4790db033fe19f07fe847b84284d348ab9327048245d15c31741"
+# Re-frozen 11-06 (Wilson): the last decoded message never evidence for the
+# polynomial (crc_poly_gcd_s3_last) + the stage 3 reason code (stage3_rc,
+# stage3_clocked_rc) APPENDED; was 81ae9563.
+FROZEN = "a685c14ec0297e08397c02d477ed580a23dd9317bc1f885a7c75989919d13052"
 FROZEN_PREFIX = "f19f2177d243b9f1bdea124d6ef2d16d6c9effeddd47da02c1c57b65da7d86eb"   # = e55d0b63 as LF
 FROZEN_PREFIX_LEN = 29070
 TABLE_AT, TABLE_BYTES = 32, 7

@@ -228,7 +228,7 @@ def expect(log, lv0, b, arm, pc_end):
                 lv2 ^= m
             else:
                 log2.append((t - arm, m))
-    rec, out = G.stage3_clocked(cap, lv0, cls, log2, lv2, bud, (pc_end - arm) if arm is not None else 0)
+    rec, out = G.stage3_clocked_rc(cap, lv0, cls, log2, lv2, bud, (pc_end - arm) if arm is not None else 0)
     enc = []
     for m in out.get("msgs") or []:
         enc += [len(m)] + list(m)
@@ -276,6 +276,8 @@ MUTANTS = [
     ("M_CK_CS_INV", "CS polarity inverted", ["spi_m1"]),
     ("M_CK_LSB", "bits packed LSB-first", ["spi_m2"]),
     ("M_CK_NO_REFUSE", "no clean edge: guess, not refuse", ["no_clean_edge"]),
+    # the reason code (11-06): "no frame markers" <-> "no data wire" swapped
+    ("M_CK_WHY_SWAP", "reason codes 6 / 7 swapped", ["no_cs"]),
 ]
 
 
