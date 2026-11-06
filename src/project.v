@@ -1987,7 +1987,6 @@ module pe_pit_s12 #(parameter integer AW = 9) (
                    P_V5 = 7'd104, P_V6 = 7'd105, P_X1 = 7'd106, P_X2 = 7'd107, P_X3 = 7'd108, P_X4 = 7'd109,
                    P_X5 = 7'd110, P_F = 7'd111, P_W0 = 7'd112, P_W1 = 7'd113, P_W2 = 7'd114;
   // the width: w = 8 / 16 / 32 (code 1 / 2 / 3), w / 8 CRC bytes, g with its top bit
-  wire [5:0]  p_w   = (`P_WC == 2'd1) ? 6'd8 : (`P_WC == 2'd2) ? 6'd16 : 6'd32;
   wire [7:0]  p_nb  = (`P_WC == 2'd1) ? 8'd1 : (`P_WC == 2'd2) ? 8'd2 : 8'd4;
   wire [32:0] p_gf  = {1'b0, `P_G} | ((`P_WC == 2'd1) ? 33'h100 : (`P_WC == 2'd2) ? 33'h10000 : 33'h100000000);
   // one shift of the register (golden _crc_reg): fb = top ^ bit; and the rotate
@@ -2001,19 +2000,17 @@ module pe_pit_s12 #(parameter integer AW = 9) (
   wire        p_in  = (t3 == P_P2 || t3 == P_P5) ? 1'b0 : p_bit;       // P': zeros
   wire [31:0] p_lf  = p_sh ^ ((p_top ^ p_in) ? `P_G : 32'd0);
   wire [31:0] p_rot = p_sh | {31'd0, p_top ^ p_in};
-  // the division step: {r, Q} <<= 1 at bit i, subtract when deg r = deg d
+  // the division step: {r, Q} <<= 1, subtract when deg r = deg d. Q shifts
+  // left, its top bit into r, the quotient bit in at the bottom: 32 steps for
+  // a 32-bit dividend (v), 33 for g with its top (u) -- leading zeros do nothing
   wire [32:0] p_uu  = `P_U;
   wire [31:0] p_vv  = `P_V;
-  wire [7:0]  p_j1  = `P_J - 8'd1;
-  wire [5:0]  p_i   = p_j1[5:0];                  // the bit: J - 1 (J <= 33)
-  wire        p_qv  = (t3 == P_V3) ? p_uu[p_i] : p_vv[p_i[4:0]];
+  wire        p_qv  = (t3 == P_V3) ? p_uu[32] : p_vv[31];
   wire [32:0] p_ri  = {acc[40:9], p_qv};
   wire [32:0] p_d   = (t3 == P_V5) ? `P_U : `P_B;
   wire [32:0] p_cx  = (t3 == P_S0) ? `P_A : p_ri ^ p_d;
   wire [32:0] p_cy  = (t3 == P_S0) ? `P_B : p_ri;
   wire        p_lt  = (p_cx < p_cy);                 // THE compare
-  wire [32:0] p_qm  = ~(33'd1 << p_i);
-  wire [32:0] p_qb  = {32'd0, p_lt} << p_i;
   // THE ALU: a + b or a - b (+ a carry in); on a subtract, al_lt = (a < b)
   reg  [25:0] al_a, al_b;
   reg         al_sub, al_ci;
@@ -2068,6 +2065,83 @@ module pe_pit_s12 #(parameter integer AW = 9) (
       T_LQ1:   al_b = w_p16;
       T_LQ2:   begin al_a = {1'b0, `S3_LQ}; al_b = {9'd0, p16[18:2]}; end
       default: ;
+    endcase
+  end
+  // ⭐ AREA (Wilson 11-05): a, b, u, v are written by a FEW OPERATIONS, chosen
+  // per state, through ONE write each -- a write per state put a mux input on
+  // every reused bit per state (measured: +25.9k; this is the first cut)
+  localparam [3:0] PA_HOLD = 4'd0, PA_ZERO = 4'd1, PA_ONE = 4'd2, PA_SHX = 4'd3,
+                   PA_B = 4'd5, PA_XB = 4'd6, PA_SH = 4'd7, PA_S8 = 4'd9;
+  localparam [2:0] PB_HOLD = 3'd0, PB_A = 3'd1, PB_XA = 3'd2, PB_GF = 3'd3, PB_ZERO = 3'd4, PB_S8 = 3'd5;
+  localparam [2:0] PU_HOLD = 3'd0, PU_HALF = 3'd2, PU_V = 3'd3, PU_XV = 3'd4, PU_GF = 3'd5,
+                   PU_DIV = 3'd6;
+  localparam [2:0] PV_HOLD = 3'd0, PV_A = 3'd1, PV_ZERO = 3'd2, PV_U = 3'd3, PV_DIV = 3'd4;
+  reg [3:0] pa_op;
+  reg [2:0] pb_op, pu_op, pv_op;
+  always @(*) begin
+    pa_op = PA_HOLD; pb_op = PB_HOLD; pu_op = PU_HOLD; pv_op = PV_HOLD;
+    if (st == S_S3)
+      case (t3)
+        P_G2:   if (`G_GRD == `P_LC && al[8:0] != `S3_WP && `P_M0F && `P_OK) pa_op = PA_ZERO;
+        P_D4, P_P2, P_P5, P_Y4, P_X4:
+                pa_op = PA_SHX;
+        P_P1, P_P4: pa_op = PA_ONE;
+        P_Y1, P_V0, P_V4:
+                pa_op = PA_ZERO;
+        P_P3, P_V6: pb_op = PB_A;
+        P_P6:   pb_op = PB_XA;
+        P_Y6:   if (!`P_YF) pv_op = PV_A;
+                else begin pu_op = PU_XV; pa_op = PA_B; pb_op = PB_GF; pv_op = PV_ZERO; end
+        P_S0:   if (`P_A != 33'd0) begin
+                  if (!acc[9]) begin pa_op = PA_SH; pu_op = PU_HALF; end                // a even
+                  else if (p_lt) begin pa_op = PA_B; pb_op = PB_A; pu_op = PU_V; pv_op = PV_U; end  // swap
+                  else begin pa_op = PA_XB; pu_op = PU_XV; end
+                end
+        P_V1, P_V5: begin pa_op = PA_SHX; pv_op = PV_DIV; end
+        P_V3:   begin pa_op = PA_SHX; pu_op = PU_DIV; end
+        P_V2:   begin pa_op = PA_ZERO; pu_op = PU_GF; end
+        P_F:    begin pa_op = PA_ZERO; pb_op = PB_ZERO; end
+        P_W2:   if (`P_J < 8'd4) pb_op = PB_S8; else pa_op = PA_S8;
+        default: ;
+      endcase
+  end
+  reg [32:0] pa_nx, pb_nx, pu_nx;
+  // a's shift-left step, (a << 1 | bit) ^ (c ? K : 0): the register (fb, g), the
+  // rotate (top ^ bit, 1: sh | x = sh ^ x as sh[0] = 0), the division (lt, d)
+  wire        p_dv  = (t3 == P_V1) || (t3 == P_V3) || (t3 == P_V5);
+  wire [32:0] p_sx  = p_dv ? p_ri : {1'b0, p_sh};
+  wire        p_sc  = p_dv ? p_lt : (p_top ^ p_in);
+  wire [32:0] p_sk  = p_dv ? p_d : (t3 == P_X4 && `P_YF) ? 33'd1 : {1'b0, `P_G};
+  reg [31:0] pv_nx;
+  always @(*) begin
+    case (pa_op)
+      PA_ONE:  pa_nx = 33'd1;
+      PA_SHX:  pa_nx = p_sx ^ (p_sc ? p_sk : 33'd0);
+      PA_B:    pa_nx = `P_B;
+      PA_XB:   pa_nx = `P_A ^ `P_B;
+      PA_SH:   pa_nx = `P_A >> 1;
+      PA_S8:   pa_nx = `P_A >> 8;
+      default: pa_nx = 33'd0;
+    endcase
+    case (pb_op)
+      PB_A:    pb_nx = `P_A;
+      PB_XA:   pb_nx = `P_A ^ `P_B;
+      PB_GF:   pb_nx = p_gf;
+      PB_S8:   pb_nx = `P_B >> 8;
+      default: pb_nx = 33'd0;
+    endcase
+    case (pu_op)
+      PU_HALF: pu_nx = p_uu[0] ? ((p_uu ^ p_gf) >> 1) : (p_uu >> 1);   // u / x mod g
+      PU_V:    pu_nx = {1'b0, p_vv};
+      PU_XV:   pu_nx = ((t3 == P_Y6) ? `P_A : p_uu) ^ {1'b0, p_vv};   // y' = a ^ v; the gcd's u ^= v
+      PU_GF:   pu_nx = p_gf;
+      default: pu_nx = {p_uu[31:0], p_lt};                              // PU_DIV
+    endcase
+    case (pv_op)
+      PV_A:    pv_nx = acc[40:9];
+      PV_U:    pv_nx = p_uu[31:0];
+      PV_DIV:  pv_nx = {p_vv[30:0], p_lt};
+      default: pv_nx = 32'd0;
     endcase
   end
   // the pass that consumes a divided interval
@@ -2622,7 +2696,7 @@ module pe_pit_s12 #(parameter integer AW = 9) (
                 else begin
                   `P_TWO <= 1'b1;
                   if (`P_OK) begin
-                    `P_PM <= `P_Q + 9'd1; `P_PZ <= `P_M0 + 9'd1; `P_J_W((`P_LC)) `P_A <= 33'd0; t3 <= P_D1;
+                    `P_PM <= `P_Q + 9'd1; `P_PZ <= `P_M0 + 9'd1; `P_J_W((`P_LC)) t3 <= P_D1;
                   end
                 end
               end
@@ -2630,7 +2704,7 @@ module pe_pit_s12 #(parameter integer AW = 9) (
             P_D1:   begin `G_RA <= `P_PM; `G_RRET <= P_D2; t3 <= G_RD; end
             P_D2:   begin `G_CB <= `G_GRD; `G_RA <= `P_PZ; `G_RRET <= P_D3; t3 <= G_RD; end
             P_D3:   begin `G_CB <= `G_CB ^ `G_GRD; `P_BI_W((3'd0)) t3 <= P_D4; end
-            P_D4:   begin `P_A <= {1'b0, p_lf}; `P_BI_W((`P_BI + 3'd1)) if (`P_BI == 3'd7) t3 <= P_D5; end
+            P_D4:   begin `P_BI_W((`P_BI + 3'd1)) if (`P_BI == 3'd7) t3 <= P_D5; end
             P_D5: begin
               `P_PM <= `P_PM + 9'd1; `P_PZ <= `P_PZ + 9'd1;
               if (`P_J == 8'd1) t3 <= P_D6; else begin `P_J_W((`P_J - 8'd1)) t3 <= P_D1; end
@@ -2642,58 +2716,50 @@ module pe_pit_s12 #(parameter integer AW = 9) (
                     end else t3 <= P_E0;
             // ---- P' = x^(8 L1) + x^(8 L2) mod g: a register shifting zeros from 1 ----
             P_P0:   begin `G_RA <= `P_A1; `G_RRET <= P_P1; t3 <= G_RD; end
-            P_P1:   begin `P_J_W((`G_GRD)) `P_A <= 33'd1; `P_BI_W((3'd0)) t3 <= P_P2; end
+            P_P1:   begin `P_J_W((`G_GRD)) `P_BI_W((3'd0)) t3 <= P_P2; end
             P_P2: begin
-              `P_A <= {1'b0, p_lf}; `P_BI_W((`P_BI + 3'd1))
+              `P_BI_W((`P_BI + 3'd1))
               if (`P_BI == 3'd7) begin if (`P_J == 8'd1) t3 <= P_P3; else `P_J_W((`P_J - 8'd1)) end
             end
-            P_P3:   begin `P_B_W((`P_A)) `G_RA <= `P_A2; `G_RRET <= P_P4; t3 <= G_RD; end
-            P_P4:   begin `P_J_W((`G_GRD)) `P_A <= 33'd1; `P_BI_W((3'd0)) t3 <= P_P5; end
+            P_P3:   begin `G_RA <= `P_A2; `G_RRET <= P_P4; t3 <= G_RD; end
+            P_P4:   begin `P_J_W((`G_GRD)) `P_BI_W((3'd0)) t3 <= P_P5; end
             P_P5: begin
-              `P_A <= {1'b0, p_lf}; `P_BI_W((`P_BI + 3'd1))
+              `P_BI_W((`P_BI + 3'd1))
               if (`P_BI == 3'd7) begin if (`P_J == 8'd1) t3 <= P_P6; else `P_J_W((`P_J - 8'd1)) end
             end
-            P_P6:   begin `P_B_W((`P_A ^ `P_B)) `P_YF <= 1'b0; `G_RA <= `P_A1; `G_RRET <= P_Y1; t3 <= G_RD; end
+            P_P6:   begin `P_YF <= 1'b0; `G_RA <= `P_A1; `G_RRET <= P_Y1; t3 <= G_RD; end
             // ---- y' = reg(m1) ^ reg(m2), whole frames ----
-            P_Y1:   begin `P_J_W((`G_GRD)) `P_A <= 33'd0; `G_RA <= `G_RA + 9'd1; t3 <= P_Y2; end
+            P_Y1:   begin `P_J_W((`G_GRD)) `G_RA <= `G_RA + 9'd1; t3 <= P_Y2; end
             P_Y2:   begin `G_RRET <= P_Y3; t3 <= G_RD; end
             P_Y3:   begin `G_CB <= `G_GRD; `P_BI_W((3'd0)) t3 <= P_Y4; end
-            P_Y4:   begin `P_A <= {1'b0, p_lf}; `P_BI_W((`P_BI + 3'd1)) if (`P_BI == 3'd7) t3 <= P_Y5; end
+            P_Y4:   begin `P_BI_W((`P_BI + 3'd1)) if (`P_BI == 3'd7) t3 <= P_Y5; end
             P_Y5: begin
               `G_RA <= `G_RA + 9'd1;
               if (`P_J == 8'd1) t3 <= P_Y6; else begin `P_J_W((`P_J - 8'd1)) t3 <= P_Y2; end
             end
-            P_Y6:   if (!`P_YF) begin `P_V_W((acc[40:9])) `P_YF <= 1'b1; `G_RA <= `P_A2; `G_RRET <= P_Y1; t3 <= G_RD; end
+            P_Y6:   if (!`P_YF) begin `P_YF <= 1'b1; `G_RA <= `P_A2; `G_RRET <= P_Y1; t3 <= G_RD; end
                     else begin
-                      `P_U_W((`P_A ^ {1'b0, p_vv})) `P_A <= `P_B; `P_B_W((p_gf)) `P_V_W((32'd0)) t3 <= P_S0;
+                      t3 <= P_S0;
                     end
             // ---- the binary gcd as a modular division (one step a cycle) ----
+            // (a even: halve a, u / x mod g; else swap so a >= b; then a ^= b, u ^= v --
+            //  the operations, pa_op .. pv_op)
             P_S0:   if (`P_A == 33'd0) t3 <= P_V0;
-                    else if (!acc[9]) begin                                // a even: halve a, u / x mod g
-                      `P_A <= `P_A >> 1;
-                      `P_U_W((p_uu[0] ? ((p_uu ^ p_gf) >> 1) : (p_uu >> 1)))
-                    end else if (p_lt) begin                               // a < b: swap
-                      `P_A <= `P_B; `P_B_W((`P_A)) `P_U_W(({1'b0, p_vv})) `P_V_W((p_uu[31:0]))
-                    end else begin `P_A <= `P_A ^ `P_B; `P_U_W((p_uu ^ {1'b0, p_vv})) end
             // u = 0, or no init solves; q = v / h (h | v, or none); f = g / h; init = q mod f
             P_V0:   if (p_uu != 33'd0) t3 <= P_F;
-                    else begin `P_KER <= (`P_B != 33'd1); `P_A <= 33'd0; `P_J_W(({2'd0, p_w})) t3 <= P_V1; end
-            P_V1, P_V3, P_V5: begin
-              `P_A <= p_lt ? (p_ri ^ p_d) : p_ri;
-              if (t3 == P_V3) `P_U_W(((p_uu & p_qm) | p_qb))
-              else `P_V_W(((p_vv & p_qm[31:0]) | p_qb[31:0]))
-              if (`P_J == 8'd1) t3 <= t3 + 7'd1; else `P_J_W((`P_J - 8'd1))
-            end
+                    else begin `P_KER <= (`P_B != 33'd1); `P_J_W((8'd32)) t3 <= P_V1; end
+            P_V1, P_V3, P_V5:                                              // the steps: the operations
+                    if (`P_J == 8'd1) t3 <= t3 + 7'd1; else `P_J_W((`P_J - 8'd1))
             P_V2:   if (`P_A != 33'd0) t3 <= P_F;
-                    else begin `P_U_W((p_gf)) `P_A <= 33'd0; `P_J_W(({2'd0, p_w} + 8'd1)) t3 <= P_V3; end
-            P_V4:   begin `P_A <= 33'd0; `P_J_W(({2'd0, p_w})) t3 <= P_V5; end
+                    else begin `P_J_W((8'd33)) t3 <= P_V3; end
+            P_V4:   begin `P_J_W((8'd32)) t3 <= P_V5; end
             // ---- init is a; xorout = c1 ^ reg(d1, init) ----
-            P_V6:   begin `P_B_W((`P_A)) `P_IO <= 1'b1; `P_YF <= 1'b0; `G_RA <= `P_A1; `G_RRET <= P_X1; t3 <= G_RD; end
+            P_V6:   begin `P_IO <= 1'b1; `P_YF <= 1'b0; `G_RA <= `P_A1; `G_RRET <= P_X1; t3 <= G_RD; end
             P_X1:   begin `P_J_W((`G_GRD - p_nb)) `G_RA <= `G_RA + 9'd1; t3 <= P_X2; end
             P_X2:   begin `G_RRET <= P_X3; t3 <= G_RD; end
             P_X3:   begin `G_CB <= `G_GRD; `P_BI_W((3'd0)) t3 <= P_X4; end
             P_X4:   begin
-              `P_A <= {1'b0, `P_YF ? p_rot : p_lf}; `P_BI_W((`P_BI + 3'd1)) if (`P_BI == 3'd7) t3 <= P_X5;
+              `P_BI_W((`P_BI + 3'd1)) if (`P_BI == 3'd7) t3 <= P_X5;
             end
             P_X5: begin
               `G_RA <= `G_RA + 9'd1;
@@ -2701,7 +2767,7 @@ module pe_pit_s12 #(parameter integer AW = 9) (
               else if (!`P_YF) begin `P_YF <= 1'b1; `P_J_W((p_nb)) t3 <= P_X2; end
               else t3 <= P_W0;
             end
-            P_F:    begin `P_A <= 33'd0; `P_B_W((33'd0)) `P_IO <= 1'b0; `P_KER <= 1'b0; t3 <= P_W0; end
+            P_F:    begin `P_IO <= 1'b0; `P_KER <= 1'b0; t3 <= P_W0; end
             // ---- the record, LAST (option (a)): byte 0's io / kernel bits; 128..135 ----
             P_W0:   begin `G_RA <= 9'd120; `G_RRET <= P_W1; t3 <= G_RD; end
             P_W1: begin
@@ -2710,8 +2776,7 @@ module pe_pit_s12 #(parameter integer AW = 9) (
             end
             P_W2: begin
               we <= 1'b1; waddr <= 9'd128 + {1'b0, `P_J}; `P_J_W((`P_J + 8'd1))
-              if (`P_J < 8'd4) begin wdata <= dv_q[7:0]; `P_B_W((`P_B >> 8)) end
-              else begin wdata <= acc[16:9]; `P_A <= `P_A >> 8; end
+              wdata <= (`P_J < 8'd4) ? dv_q[7:0] : acc[16:9];
               if (`P_J == 8'd7) t3 <= T_DONE;
             end
             // a store read: data 2 cycles after the request
@@ -2720,6 +2785,11 @@ module pe_pit_s12 #(parameter integer AW = 9) (
             G_RV:   begin `G_GRD <= rdata; t3 <= `G_RRET; end
             default: begin done <= 1'b1; st <= S_IDLE; end      // T_DONE
           endcase
+          // piece 3's a, b, u, v: one write each, its operation chosen above
+          if (pa_op != PA_HOLD) `P_A <= pa_nx;
+          if (pb_op != PB_HOLD) `P_B_W((pb_nx))
+          if (pu_op != PU_HOLD) `P_U_W((pu_nx))
+          if (pv_op != PV_HOLD) `P_V_W((pv_nx))
         end
         default: st <= S_IDLE;
       endcase
