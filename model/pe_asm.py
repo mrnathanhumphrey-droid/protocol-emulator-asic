@@ -772,7 +772,7 @@ def active_pins(lanes, headers):
                 out.setdefault(int(p), []).append(
                     (ln, int(h[2]), what + " pin"))
         for (op, p, _l, _d, _q) in lanes.get(ln, ()):
-            if int(p) < N_PINS and op not in (OP_REARM,):
+            if int(p) < N_PINS and op not in (OP_REARM, pe_isa.OP_LOOP):
                 out.setdefault(int(p), []).append(
                     (ln, int(h[2]), "action pin"))
     return out
@@ -868,8 +868,20 @@ def assemble(lanes, headers, park_pins=None, timing_checks=True,
         for ln in sorted(lanes):
             base[ln] = off
             for i, (op, pin, lvl, dly, q) in enumerate(lanes[ln]):
-                prog.append(act(op, pin, lvl, dly, count=counts[(ln, i)],
-                                q=q))
+                if op == pe_isa.OP_LOOP:
+                    # ⭐ LOOP (primitive 2; the round trip, Wilson 11-06):
+                    # `(OP_LOOP, n, head, wait, 0)` -- the body [head .. this
+                    # action] runs n times; `head` is the lane's own action
+                    # index (BACKWARD), `wait` its spacing W after the branch.
+                    # The image-level branch checks below refuse a bad one.
+                    if not 0 <= lvl < i:
+                        raise Reject("lane %d action %d: LOOP head %d is not a "
+                                     "BACKWARD action of the lane" % (ln, i, lvl))
+                    prog.append(pe_isa.act_loop(
+                        pin, (base[ln] - ACT_BASE) // ACT_BYTES + lvl, dly))
+                else:
+                    prog.append(act(op, pin, lvl, dly, count=counts[(ln, i)],
+                                    q=q))
                 off += ACT_BYTES
         lp = off
         prog.append(act(OP_REARM, 0, 0, 500))

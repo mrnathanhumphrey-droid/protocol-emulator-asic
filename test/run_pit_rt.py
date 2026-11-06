@@ -52,6 +52,7 @@ import run_pit_capture as RP                # noqa: E402
 import run_pit_s0 as R0                     # noqa: E402
 import run_pit_s12 as R12                   # noqa: E402
 import run_pit_s3 as R3                     # noqa: E402  (patches R12.sim to keep the whole dump)
+import pit_s0_golden as S0                  # noqa: E402
 import pit_emit as E                        # noqa: E402
 from gate_j_program import D_STAR           # noqa: E402
 from make_smoke_image import OP_LEVEL, OP_REARM, OP_SHIFT, PIN_NONE   # noqa: E402
@@ -61,6 +62,9 @@ P_TX_UO = 0                 # the UART-tx lane's pin: uo_out[0] (pinmap P_TX_UO,
 P_TX = 8
 GAP_BITS = 40               # idle between messages: > async_bytes' 20-bit message gap
 SEED = 20261106
+MSG_GAP_BITS = 20          # pit_golden.async_bytes' message gap
+STOP_MIN = 13              # the lane's tightest admissible delay here (pe_asm's 1.6a verdict)
+LOOP_W = I.BR_W_MIN        # LOOP's wait: the shortest the ISA allows (33)
 
 #: the ruled cases (Wilson 11-06, D4): these must PASS -- NOT EMULABLE is red here
 RULED = {"s3_uart", "s3_modbus", "s3_crc32_full"}
@@ -75,8 +79,11 @@ class NotEmulable(Exception):
 
 def uart_program(T, lens):
     """the UART-tx 8N1 lane (test/uart_tx.py's frame): one message per entry of
-    `lens` (that many byte frames, then GAP_BITS of idle); loops. Too big for
-    the store -> NOT EMULABLE (program size), D4."""
+    `lens` -- GAP_BITS of idle, then that many byte frames written ONCE and run
+    by the chip's own LOOP (primitive 2; Wilson 11-06: the store holds any L).
+    Between two bytes of a message the line idles the stop bit plus LOOP's
+    wait W (LOOP_W cycles), far under async_bytes' 20-bit message gap -- the
+    run measures it. Too big for the store -> NOT EMULABLE (program size)."""
     seq = []
     for L in lens:
         # the idle FIRST: uo_out[0] leaves reset low, so the line must go high
@@ -86,17 +93,20 @@ def uart_program(T, lens):
             seq.append((OP_LEVEL, P_TX, 1, I.D_MAX, 0))
             g -= I.D_MAX
         seq.append((OP_LEVEL, P_TX, 1, g, 0))
-        for _ in range(L):
-            seq += [(OP_LEVEL, P_TX, 0, T, 0)] + [(OP_SHIFT, P_TX, 0, T, 0, 7)] * 8
-            seq += [(OP_LEVEL, P_TX, 1, T, 0)]
-    # the REARM's D* is idle time too: taken from the loop's first gap, so
-    # every stop bit stays exactly T (a T - D* stop is under the timing floor)
+        head = len(seq)
+        seq += [(OP_LEVEL, P_TX, 0, T, 0)] + [(OP_SHIFT, P_TX, 0, T, 0, 7)] * 8
+        # the stop bit + LOOP's wait idle a WHOLE number of bit times (k T):
+        # a 1.4-bit run between bytes is not a multiple of the bit and pulled
+        # stage 1's period off by 2/16 cycle (measured, s3_crc32_full)
+        k = max(2, -(-(LOOP_W + STOP_MIN) // T))
+        seq += [(OP_LEVEL, P_TX, 1, k * T - LOOP_W, 0), (I.OP_LOOP, L, head, LOOP_W, 0)]
+    # the REARM's D* is idle time too: taken from the loop's first gap
     seq[0] = seq[0][:3] + (seq[0][3] - D_STAR,) + seq[0][4:]
     seq.append((OP_REARM, 0, 1, D_STAR, 0))
     try:
         return pe_asm.assemble({0: seq}, {0: (P_TX, PIN_NONE, 1, T, min(T, 255), min(2 * T, 255))})
     except pe_asm.Reject as e:
-        raise NotEmulable("program size: %d-message loop %s at T=%d -- %s" % (len(lens), list(lens), T, e))
+        raise NotEmulable("program size / timing: %d-message loop %s at T=%d -- %s" % (len(lens), list(lens), T, e))
 
 
 def target_cycles(p16, cap_hz):
@@ -124,11 +134,12 @@ def emulation(cl, rng, nbytes=4000):
         if L <= nb:
             raise NotEmulable("CRC frame %d bytes leaves no payload" % L)
         p = (c["width"], c["poly"] | 0, c["init"], c["xorout"], c["reflected"])
-        # D3 as amended (Wilson 11-06): frames ALTERNATE L and L+1 bytes, the
-        # init / xorout solver's precondition (two lengths)
-        lens = (L, L + 1)
+        # D3 as amended twice (Wilson 11-06): L, L+1, L repeating -- >= 4 frames
+        # of L for the polynomial and >= 2 of L+1 for init / xorout (the
+        # solver's two lengths) inside the ~6 frames the edge capture holds
+        lens = (L, L + 1, L)
         while sum(map(len, msgs)) < nbytes:
-            msgs.append(R3.frame([rng.getrandbits(8) for _ in range(lens[len(msgs) % 2] - nb)], *p))
+            msgs.append(R3.frame([rng.getrandbits(8) for _ in range(lens[len(msgs) % 3] - nb)], *p))
         what = "8N1 T=%d, %d/%d-byte frames, CRC-%d poly %#x init %#x xorout %#x%s" % (
             T, L, L + 1, c["width"], c["poly"], c["init"], c["xorout"], " refl" if c["reflected"] else "")
     elif c is not None and c["wire"] == w:
@@ -174,7 +185,7 @@ def sim(vvp, tmp, tag, simg, eimg, feed, route, ncyc, warm):
         cmd = [a.split("=", 1)[0] + "=" + RP.wsl_path(a.split("=", 1)[1])
                if isinstance(a, str) and a.startswith(("+EIMG=", "+FEED=")) else a for a in cmd]
     r = RP.run(cmd)
-    mem, st, h, lv0 = {}, None, None, None
+    mem, st, h, lv0, log = {}, None, None, None, []
     if not os.path.isfile(op):
         raise RuntimeError("tb_rt wrote no dump: %s" % (r.stdout + r.stderr)[-600:])
     with open(op, encoding="ascii") as fh:
@@ -186,11 +197,36 @@ def sim(vvp, tmp, tag, simg, eimg, feed, route, ncyc, warm):
                 st = dict(kv.split("=") for kv in t[1:])
             elif t and t[0] == "L":
                 lv0 = int(t[1], 16)
+            elif t and t[0] == "E":
+                log.append((int(t[1]), int(t[2], 16)))
             elif t and t[0] == "H":
                 h = dict(kv.split("=") for kv in t[1:])
     if h is not None:
-        h["lv0"] = lv0
+        h["lv0"], h["log"] = lv0, log
     return mem, st, h
+
+
+def idle_runs(log, lv0, w, bit):
+    """the measured idle (high) runs on wire w, in bit times, split at the
+    decoder's message gap (pit_golden.async_bytes: msg_gap_bits = 20)
+    -> (longest run INSIDE a message, shortest run BETWEEN messages)"""
+    lv, t0, runs = (lv0 >> w) & 1, None, []
+    for t, m in log:
+        if not m >> w & 1:
+            continue
+        if lv == 1 and t0 is not None:
+            runs.append((t - t0) / bit)
+        lv ^= 1
+        t0 = t
+    inside = [r for r in runs if r < MSG_GAP_BITS]
+    between = [r for r in runs if r >= MSG_GAP_BITS]
+    return max(inside, default=None), min(between, default=None)
+
+
+def lens_of(what):
+    import re
+    m = re.search(r"([\d/]+)-byte frames", what)
+    return [int(x) for x in m.group(1).split("/")] if m else []
 
 
 def results_of(mem):
@@ -309,6 +345,26 @@ def main() -> int:
             notes.append("stop: original %s, regenerated %s (partial is not compared)" % tuple(
                 "partial %s after %d records" % x["partial"] if x["partial"] else "budget / complete"
                 for x in (cl, cl2)))
+        for w, v in cl["wires"].items():
+            if h and v["cls"] == "NRZ_ASYNC" and regen is not None:
+                # what the frozen decoder made of the emulation's capture: a
+                # message split by a gap inside it shows as a length outside
+                # the emulated set
+                G = S0.frozen_model()
+                cap = S0.stored_capture(h["log"], h["lv0"] or 0, RP.PG.budget_cycles(case[3]), R0.NCYC_MAX)
+                c2 = cl2["wires"].get(w)
+                if cap and c2 and c2["fb"]:
+                    dm = G.async_bytes(G.wire_ivs(cap, w, h["lv0"] or 0), c2["p16"], c2["fb"])
+                    notes.append("uio%d decoded message lengths %s (emulated %s)" % (
+                        w, [len(m) for m in dm], "/".join(map(str, sorted(set(lens_of(what)))))))
+            if h and v["cls"] == "NRZ_ASYNC":
+                mi, mb = idle_runs(h["log"], h["lv0"] or 0, w, v["p16"] / 16.0)
+                notes.append("uio%d high runs: longest %s bit times inside a message (data 1s included), "
+                             "shortest %s between messages (the decoder splits at %d)" % (
+                                 w, "%.2f" % mi if mi is not None else "-",
+                                 "%.2f" % mb if mb is not None else "-", MSG_GAP_BITS))
+                if mi is not None and mi >= MSG_GAP_BITS:
+                    bad.append("uio%d: a gap inside a message reaches the message gap" % w)
         idle = sum(1 << w for w, v in cl["wires"].items() if v.get("idle") == 1)
         if h and h.get("lv0") is not None and (h["lv0"] & idle) != idle:
             bad.append("the sniffer opened on a non-idle line (start levels %02x)" % h["lv0"])
