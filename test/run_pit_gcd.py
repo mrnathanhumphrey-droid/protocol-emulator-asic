@@ -165,7 +165,9 @@ def main() -> int:
     cand = refused = cmax = shown = 0
     with ThreadPoolExecutor(14) as ex:
         res_iter = ex.map(run_one, [(vbin, tmp, i, m) for i, (_, m) in enumerate(sets)])
-        for (kind, _), (good, g, want, res, cyc, intact) in zip(sets, res_iter):
+        for k, ((kind, _), (good, g, want, res, cyc, intact)) in enumerate(zip(sets, res_iter), 1):
+            if k % 500 == 0:                    # the heartbeat (red-team 4): watch.sh reads log growth
+                print("  ... %d / %d sets" % (k, len(sets)), flush=True)
             ok[kind] += good
             cand += res["status"] == "OK"
             refused += res.get("why") == "insufficient store for the GCD"

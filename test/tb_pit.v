@@ -101,9 +101,14 @@ module tb_pit;
     end
     $fclose(sfd);
     // S0WAIT=1: until stage 0's TABLE is written (gate pit-s0); S0WAIT=2: until
-    // stages 1-2 are done too (gate pit-s12, Wilson 10-31)
+    // stages 1-2 are done too (gate pit-s12, Wilson 10-31); S0WAIT=0 (the
+    // capture gate): until the capture has STOPPED AND WRITTEN ITS STATUS
+    // (u_pit.st_done: drained, then bytes 2, 28, 29) -- it used to run on to
+    // NCYC with nothing left to record (red-team 5, Wilson 11-05). Measured:
+    // ending on `stopped` alone dumped quiet_budget before bytes 28/29 landed.
     while (pc < ncyc && !(s0wait == 1 && dut.u_s0.tbl_done === 1'b1)
-                     && !(s0wait == 2 && dut.u_s0.done === 1'b1)) @(negedge clk);
+                     && !(s0wait == 2 && dut.u_s0.done === 1'b1)
+                     && !(s0wait == 0 && dut.u_pit.st_done === 1'b1)) @(negedge clk);
     done = 1'b1;
     // the store settles before the dump: the LATCH store makes a write visible
     // one cycle later than flops (staged, then the next low half-cycle), so a

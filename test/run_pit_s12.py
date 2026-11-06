@@ -16,7 +16,9 @@ Layout (src/project.v, pe_pit_s12):
 """
 from __future__ import annotations
 
+import hashlib
 import os
+import shutil
 import random
 import sys
 import tempfile
@@ -192,6 +194,26 @@ def expect(cap):
     return out, res
 
 
+# ⭐ THE DUMP CACHE (Wilson 11-05, red-team 6): pit-s3's s3_uart is pit-s12's
+# s12_uart, the same simulation run twice. PE_SIMCACHE=<dir> keeps each dump
+# under the hash of EVERYTHING the run depends on -- the built binary's bytes
+# (an iverilog .vvp, or the Verilator VLBIN line, which names a build keyed by
+# the source snapshot + defines + flags), the image, the stimulus, NCYC, the
+# simulator and the random start-up seed -- so a dump is reused only for the
+# very same RTL and run. Unset (CI) = no cache.
+def _cache_path(vvp, ip, sp, ncyc):
+    d = os.environ.get("PE_SIMCACHE")
+    if not d:
+        return None
+    h = hashlib.sha256()
+    for f in (vvp, ip, sp):
+        with open(f, "rb") as fh:
+            h.update(fh.read() + b"\0")
+    h.update(("%d|S0WAIT=2|%s|%s" % (ncyc, RP.SIM, RP.XINIT)).encode())
+    os.makedirs(d, exist_ok=True)
+    return os.path.join(d, "s12_%s.out" % h.hexdigest()[:32])
+
+
 def sim(vvp, tmp, tag, img, stim, ncyc):
     """gate pit-s0's sim, but run until stages 1-2 are done (+S0WAIT=2)."""
     ip = os.path.join(tmp, "pitcap_s12_%s.hex" % tag)
@@ -202,8 +224,17 @@ def sim(vvp, tmp, tag, img, stim, ncyc):
         for t, v in stim:
             fh.write("%d %02x\n" % (t, v))
     op = os.path.join(tmp, "s12_%s.out" % tag)
-    RP.run(RP.simcmd([vvp, "+IMG=%s" % ip, "+NBYTES=%d" % I.STORE_BYTES, "+STIM=%s" % sp,
-                        "+OUT=%s" % op, "+NCYC=%d" % ncyc, "+S0WAIT=2"], images=[ip]))
+    cached = _cache_path(vvp, ip, sp, ncyc)
+    if cached and os.path.isfile(cached):
+        shutil.copyfile(cached, op)
+        print("sim_run: cached dump %s" % os.path.basename(cached), flush=True)
+    else:
+        RP.run(RP.simcmd([vvp, "+IMG=%s" % ip, "+NBYTES=%d" % I.STORE_BYTES, "+STIM=%s" % sp,
+                            "+OUT=%s" % op, "+NCYC=%d" % ncyc, "+S0WAIT=2"], images=[ip]))
+        if cached and os.path.isfile(op):
+            part = cached + ".part%d" % os.getpid()
+            shutil.copyfile(op, part)
+            os.replace(part, cached)
     log, mem, lv0, st = [], {}, None, None
     with open(op, encoding="ascii") as fh:
         for ln in fh:
