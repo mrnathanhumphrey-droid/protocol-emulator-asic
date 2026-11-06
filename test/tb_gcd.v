@@ -22,7 +22,11 @@ module tb_gcd;
       .re(re), .raddr(raddr), .rdata(rdata), .s3_found(found), .s3_fbs(fb_short), .s3_nmsg(nmsg));
   always @(posedge clk) begin
     if (re) rdata <= mem[raddr];
-    if (we) mem[waddr] <= wdata;
+    // only out of reset: rst_n starts LOW with no negedge, so in simulation the
+    // async reset lands at the first posedge -- on silicon it clears `we` at
+    // once. Measured 11-05 under the random start-up arm: a random `we` wrote
+    // one byte (310 <- 82) at that first edge.
+    if (we && rst_n) mem[waddr] <= wdata;
   end
   initial begin
     if (!$value$plusargs("MEM=%s", memfile) || !$value$plusargs("OUT=%s", outfile)

@@ -191,6 +191,14 @@ def build(out, defines=(), iverilog=None, extra=()):
 SIM = os.environ.get("PE_SIM", "iverilog")
 VL = "/opt/oss-cad-suite-2026-09-30/bin/verilator"      # CI's pinned suite (test.yaml)
 VL_FLAGS = ["--binary", "--timing", "-O3", "-j", "16", "-Wno-fatal", "-Wno-lint", "-Wno-style"]
+# ⛔ THE RANDOM START-UP ARM (Wilson 11-05, red-team item 1): Verilator is
+# 2-state and starts every register at 0, so a MISSING RESET -- a real silicon
+# bug -- passes silently until the iverilog lock. PE_VL_XINIT=<seed> builds with
+# --x-initial unique and runs with every unreset register (and every memory) at
+# random values from that fixed seed; the gate must stay green.
+XINIT = os.environ.get("PE_VL_XINIT")
+if XINIT:
+    VL_FLAGS = VL_FLAGS + ["--x-initial", "unique"]
 WSL = ["wsl", "-d", "Ubuntu", "--"]
 _SNAP = {}
 
@@ -257,6 +265,8 @@ def simcmd(args, images):
     for a in args[1:]:
         k, eq, v = a.partition("=")
         plus.append(k + eq + (wsl_path(v) if k in ("+IMG", "+STIM", "+OUT", "+MEM") else v))
+    if XINIT:
+        plus += ["+verilator+rand+reset+2", "+verilator+seed+%d" % int(XINIT)]
     return sim_run.argv(WSL + [vbin] + plus, images)
 
 
