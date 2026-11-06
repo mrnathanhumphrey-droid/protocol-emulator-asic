@@ -56,7 +56,13 @@
   // `pe_asm.check_queue_ownership` refuses a lane that spreads its bytes over
   // several queues (the host could not know which queue a lane takes next).
   // `hf_set` still loads four, and every bench that uses only it is unchanged.
-  localparam integer HF_PAT = 16;
+  // `HF_PAT_N` (default 16): the pattern's capacity. The round-trip bench
+  // (tb_rt, Wilson 11-06) feeds a whole seeded byte stream through it --
+  // frames with their CRCs -- so it defines a larger one before the include.
+`ifndef HF_PAT_N
+`define HF_PAT_N 16
+`endif
+  localparam integer HF_PAT = `HF_PAT_N;
   reg  [7:0] hf_pat [0:3][0:HF_PAT-1];
   integer    hf_idx [0:3];
   integer    hf_len [0:3];
