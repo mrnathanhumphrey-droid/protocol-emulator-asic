@@ -529,10 +529,17 @@ module tt_um_protocol_emulator #(
   wire           pit_cap_done;
   wire [13:0]    pit_cap_n;
   wire [7:0]     pit_cap_lv0;
+  // the clocked bus's second capture (Wilson 11-06): stage 0 configures it
+  wire           ck_arm, ck_i2c, ck_act, ck_edge, ck_done;
+  wire [2:0]     ck_c, ck_d, ck_f;
+  wire [AW-1:0]  ck_wp;
+  wire [7:0]     ck_nmsg;
   pe_pit #(.AW(AW)) u_pit (
       .clk(clk), .rst_n(rst_n_s), .run(pit_run), .uio(uio_q1), .mask_cfg(pit_mask), .bud_cfg(pit_bud),
       .we(pit_we), .waddr(pit_waddr), .wdata(pit_wdata), .stopped(pit_stopped),
-      .cap_done(pit_cap_done), .cap_n(pit_cap_n), .cap_lv0(pit_cap_lv0));
+      .cap_done(pit_cap_done), .cap_n(pit_cap_n), .cap_lv0(pit_cap_lv0),
+      .ck_arm(ck_arm), .ck_i2c(ck_i2c), .ck_c(ck_c), .ck_d(ck_d), .ck_f(ck_f), .ck_act(ck_act),
+      .ck_edge(ck_edge), .ck_done(ck_done), .ck_wp(ck_wp), .ck_nmsg(ck_nmsg));
   // ⭐ v2 PIT chunk 2: STAGE 0, run once the capture has stopped. It READS the
   // store through the narrow port (the engine is halted in SNIFF, so the
   // select never contends with refill) and writes the role table, 32..38.
@@ -542,7 +549,9 @@ module tt_um_protocol_emulator #(
   pe_pit_s0 #(.AW(AW)) u_s0 (
       .clk(clk), .rst_n(rst_n_s), .run(pit_run), .start(pit_cap_done), .n_rec(pit_cap_n),
       .lv0(pit_cap_lv0), .re(s0_re), .raddr(s0_raddr), .rdata(s_rdata),
-      .we(s0_we), .waddr(s0_waddr), .wdata(s0_wdata), .done(s0_done));
+      .we(s0_we), .waddr(s0_waddr), .wdata(s0_wdata), .done(s0_done),
+      .ck_arm(ck_arm), .ck_i2c(ck_i2c), .ck_c(ck_c), .ck_d(ck_d), .ck_f(ck_f), .ck_act(ck_act),
+      .ck_edge(ck_edge), .ck_done(ck_done), .ck_wp(ck_wp), .ck_nmsg(ck_nmsg));
   wire _unused_s0 = &{1'b0, s0_done};
   pe_store #(.AW(AW), .MEM_TYPE(MEM_TYPE), .WIDE_B(ACT_BYTES_T)) u_store (
       .clk(clk), .rst_n(rst_n_s),
@@ -1128,7 +1137,16 @@ module pe_pit_s0 #(parameter integer AW = 9) (
     output wire          we,
     output wire [AW-1:0] waddr,
     output wire [7:0]    wdata,
-    output reg           done
+    output reg           done,
+    // the clocked bus's second capture (Wilson 11-06): its configuration to pe_pit
+    output reg           ck_arm,
+    output reg           ck_i2c,
+    output reg  [2:0]    ck_c, ck_d, ck_f,
+    output reg           ck_act,
+    output reg           ck_edge,
+    input  wire          ck_done,
+    input  wire [AW-1:0] ck_wp,
+    input  wire [7:0]    ck_nmsg
 );
   // ---- widths and codes -----------------------------------------------------
   localparam integer TW  = 25;               // t: ~341 records x 0xFFFF
@@ -1168,6 +1186,8 @@ module pe_pit_s0 #(parameter integer AW = 9) (
   reg  [AW-1:0]  draddr;
   wire           s3_found, s3_fbs;
   wire [7:0]     s3_nmsg;
+  wire           ck_req;                // stage 3 found no UART wire: the clocked bus, if any
+  reg            ck_fin, ck_ok;         // ... answered: ck_ok = its second capture's messages are in
   assign re    = dre | s12_re;
   assign raddr = s12_re ? s12_raddr : draddr;
   wire [2:0]     s12_w;
@@ -1263,6 +1283,7 @@ module pe_pit_s0 #(parameter integer AW = 9) (
   // of t is kept. 216 pipeline flops -> 91.
   reg           p1_v, p2_v;
   reg  [7:0]    p1_rm, p1_lv;
+  reg  [1:0]    p1_dt;                 // the record's own interval, saturated at 2
   reg  [TW-1:0] p1_civ;
   // ⭐ p_aux: ONE register for two walks' values (lever 3, 10-30): in a W_PAIR
   // walk it is t - pend_x (the FRAME pass's right neighbour), loaded as the
@@ -1299,13 +1320,14 @@ module pe_pit_s0 #(parameter integer AW = 9) (
   always @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
       p1_v <= 1'b0; p2_v <= 1'b0; wdone_p1 <= 1'b0; wdone_p2 <= 1'b0;
-      p1_rm <= 8'h00; p1_lv <= 8'h00;
+      p1_rm <= 8'h00; p1_lv <= 8'h00; p1_dt <= 2'd0;
       p1_civ <= {TW{1'b0}}; p_aux <= {TW{1'b0}};
       last_t <= {TW{1'b0}}; pend_x <= {TW{1'b0}};
     end else begin
       p1_v <= rec_v; p2_v <= p1_v; wdone_p1 <= walk_done; wdone_p2 <= wdone_p1;
       if (rec_v) begin
         p1_rm <= rm; p1_lv <= lv;
+        p1_dt <= (iv >= 16'd2) ? 2'd2 : iv[1:0];          // the clocked fold's ages (sat 2)
         p1_civ <= t - last_t;
         if (wk == W_PAIR) p_aux <= t - pend_x;
         if (rm[wc]) last_t <= t;                          // the fold's c edge
@@ -1398,6 +1420,50 @@ module pe_pit_s0 #(parameter integer AW = 9) (
     end
   end
 
+  // ---- THE CLOCKED BUS's folds (golden clocked_bus, Wilson 11-06), in W_PAIR
+  // walks on (c = ck_c, d = ck_d) with f = ck_f. Pass 0 (and stage 0's own
+  // pair folds): CS high at c's edges (ck_hi, of nc), and the I2C signature.
+  // Pass 1: is any COUNTED data edge within 1 cycle of a rise / a fall?
+  // Counted: I2C, not START / STOP (c high before and after); SPI, CS active
+  // before and after. Ages since the last rise / fall / counted edge, from
+  // each record's own interval, saturate at 2: only <= 1 is ever asked.
+  reg           ck_pass;
+  reg  [NW-1:0] ck_hi;
+  reg           ck_dr, ck_df, ck_sn0, ck_sn1;      // dirty rise / fall; counted edges seen in c level 0 / 1
+  reg  [1:0]    ck_ar, ck_af, ck_ad;
+  reg           ck_vr, ck_vf, ck_vd;
+  wire          k_fe = p1_rm[ck_f], k_fl = p1_lv[ck_f];
+  wire          k_rise = ce & cl, k_fall = ce & ~cl;
+  wire          k_cnt = de & (ck_i2c ? ~(cl & ~ce) : (~k_fe & (k_fl == ck_act)));
+  wire [2:0]    k_ar = {1'b0, ck_ar} + {1'b0, p1_dt};
+  wire [2:0]    k_af = {1'b0, ck_af} + {1'b0, p1_dt};
+  wire [2:0]    k_ad = {1'b0, ck_ad} + {1'b0, p1_dt};
+  wire          k_nr = ck_vr & (k_ar <= 3'd1), k_nf = ck_vf & (k_af <= 3'd1), k_nd = ck_vd & (k_ad <= 3'd1);
+  always @(posedge clk or negedge rst_n) begin
+    if (!rst_n) begin
+      ck_hi <= {NW{1'b0}}; ck_dr <= 1'b0; ck_df <= 1'b0; ck_sn0 <= 1'b0; ck_sn1 <= 1'b0;
+      ck_ar <= 2'd0; ck_af <= 2'd0; ck_ad <= 2'd0; ck_vr <= 1'b0; ck_vf <= 1'b0; ck_vd <= 1'b0;
+    end else if (walk_go) begin
+      ck_hi <= {NW{1'b0}}; ck_dr <= 1'b0; ck_df <= 1'b0; ck_sn0 <= 1'b0; ck_sn1 <= 1'b0;
+      ck_vr <= 1'b0; ck_vf <= 1'b0; ck_vd <= 1'b0;
+    end else if (p2_v && wk == W_PAIR) begin
+      if (ce && k_fl) ck_hi <= ck_hi + ONE;
+      if (ck_pass) begin
+        if (k_cnt && (k_nr || k_rise)) ck_dr <= 1'b1;
+        if (k_cnt && (k_nf || k_fall)) ck_df <= 1'b1;
+        if (k_rise && k_nd) ck_dr <= 1'b1;
+        if (k_fall && k_nd) ck_df <= 1'b1;
+        if (k_cnt) begin if (cl) ck_sn1 <= 1'b1; else ck_sn0 <= 1'b1; end
+      end
+      ck_ar <= k_rise ? 2'd0 : (k_ar[2:1] != 2'd0) ? 2'd2 : k_ar[1:0];
+      ck_af <= k_fall ? 2'd0 : (k_af[2:1] != 2'd0) ? 2'd2 : k_af[1:0];
+      ck_ad <= k_cnt  ? 2'd0 : (k_ad[2:1] != 2'd0) ? 2'd2 : k_ad[1:0];
+      if (k_rise) ck_vr <= 1'b1;
+      if (k_fall) ck_vf <= 1'b1;
+      if (k_cnt)  ck_vd <= 1'b1;
+    end
+  end
+
   // ===========================================================================
   // THE ROLE TABLE + the insertion order the AMBIGUOUS pass walks
   // ===========================================================================
@@ -1460,7 +1526,8 @@ module pe_pit_s0 #(parameter integer AW = 9) (
       .p1_v(p1_v), .p1_rm(p1_rm), .p1_lv(p1_lv), .p1_civ(p1_civ), .wdone_p1(wdone_p1),
       .we(s12_we), .waddr(s12_waddr), .wdata(s12_wdata), .done(s12_done),
       .re(s12_re), .raddr(s12_raddr), .rdata(rdata),
-      .s3_found(s3_found), .s3_fbs(s3_fbs), .s3_nmsg(s3_nmsg));
+      .s3_found(s3_found), .s3_fbs(s3_fbs), .s3_nmsg(s3_nmsg),
+      .ck_req(ck_req), .ck_fin(ck_fin), .ck_ok(ck_ok), .ck_w(ck_d), .ck_wp(ck_wp), .ck_nmsg(ck_nmsg));
 
   // ===========================================================================
   // THE SEQUENCER: stage0's phases, in its order.
@@ -1470,7 +1537,8 @@ module pe_pit_s0 #(parameter integer AW = 9) (
                    P_DASGN = 5'd8,  P_FCNEXT = 5'd9, P_FHALF = 5'd10, P_FENEXT = 5'd11,
                    P_FASGN = 5'd12, P_ARANK = 5'd13, P_AASGN = 5'd14, P_RNEXT = 5'd15,
                    P_RMED  = 5'd16, P_WRITE = 5'd17, P_DONE = 5'd18,
-                   P_MSTART = 5'd19, P_MSTEP = 5'd20, P_WAIT = 5'd21, P_S12 = 5'd22;
+                   P_MSTART = 5'd19, P_MSTEP = 5'd20, P_WAIT = 5'd21, P_S12 = 5'd22,
+                   P_KSEL = 5'd23, P_KC1 = 5'd24, P_KC2 = 5'd25, P_KCAP = 5'd26, P_KFIN = 5'd27;
   reg  [4:0] ph, m_ret, w_ret;          // the median and a walk return to these
   reg            we0;                   // stage 0's own table write
   reg            tbl_done;              // stage 0's table is written (stages 1-2 may still run)
@@ -1483,6 +1551,22 @@ module pe_pit_s0 #(parameter integer AW = 9) (
   assign wdata = s12_we ? s12_wdata : wdata0;
   reg  [3:0] ci, di;
   reg  [2:0] wbyte;
+  // the clocked bus: candidate d = di's wire; its FRAME (CS) = the lowest of its clock's
+  reg        k_maybe;                   // no tag, no CS: I2C only if the signature holds
+  reg        ck_used;                   // one answer per run
+  wire [2:0] k_d  = di[2:0];
+  wire       k_dsync = !refused && (role[k_d] == R_SYNC || role[k_d] == R_SYNC_I2C);
+  reg        k_hf;
+  reg  [2:0] k_fw;
+  integer    kj;
+  always @(*) begin
+    k_hf = 1'b0; k_fw = 3'd0;
+    for (kj = 7; kj >= 0; kj = kj - 1)
+      if (role[kj] == R_FRAME && part[kj] == part[k_d]) begin k_hf = 1'b1; k_fw = kj[2:0]; end
+  end
+  // pass 0's CS level: active 1 at >= 7/8 of c's edges high, 0 at >= 7/8 low
+  wire [NW+2:0] k_hi8 = {ck_hi, 3'b000}, k_lo8 = {nc - ck_hi, 3'b000}, k_nc7 = {3'b000, nc} * 7;
+  wire          k_cr = !ck_dr, k_cf = !ck_df;
 `ifdef M_S0_MED_OFF1
   wire [NW-1:0] m_keff = m_k + ONE;     // the must-fire: every median one index high
 `else
@@ -1500,13 +1584,17 @@ module pe_pit_s0 #(parameter integer AW = 9) (
       med0 <= {TW{1'b0}}; med1 <= {TW{1'b0}};
       m_ans <= {TW{1'b0}}; m_bit <= 5'd0; m_k <= {NW{1'b0}};
       we0 <= 1'b0; waddr0 <= {AW{1'b0}}; wdata0 <= 8'h00; nrank <= 4'd0;
+      ck_arm <= 1'b0; ck_i2c <= 1'b0; ck_c <= 3'd0; ck_d <= 3'd0; ck_f <= 3'd0; ck_act <= 1'b0;
+      ck_edge <= 1'b0; ck_pass <= 1'b0; ck_fin <= 1'b0; ck_ok <= 1'b0; ck_used <= 1'b0; k_maybe <= 1'b0;
       for (ri = 0; ri < 8; ri = ri + 1) begin role[ri] <= R_NONE; part[ri] <= 3'd0; clvl[ri] <= 1'b0; rank[ri] <= 3'd0; end
     end else if (!run) begin
       ph <= P_IDLE; walk_go <= 1'b0; we0 <= 1'b0; done <= 1'b0; tbl_done <= 1'b0; refused <= 1'b0; nrank <= 4'd0;
+      ck_arm <= 1'b0; ck_fin <= 1'b0; ck_ok <= 1'b0; ck_used <= 1'b0;
       for (ri = 0; ri < 8; ri = ri + 1) begin role[ri] <= R_NONE; part[ri] <= 3'd0; clvl[ri] <= 1'b0; rank[ri] <= 3'd0; end
     end else begin
       walk_go <= 1'b0;
       we0 <= 1'b0;
+      ck_arm <= 1'b0; ck_fin <= 1'b0;
       case (ph)
         P_IDLE: if (start && !done) begin
                   wk <= W_CNT; walk_go <= 1'b1; ph <= P_WAIT; w_ret <= P_CNEXT; ci <= 4'd0;
@@ -1651,7 +1739,45 @@ module pe_pit_s0 #(parameter integer AW = 9) (
                    if (wbyte == 3'd6) begin ph <= P_S12; wk <= W_S12; end else wbyte <= wbyte + 3'd1;
                  end
         // stages 1-2 read wire s12_w's intervals off this fold (`wc`)
-        P_S12:  begin tbl_done <= 1'b1; wc <= s12_w; if (s12_done) ph <= P_DONE; end
+        P_S12:  begin
+                  tbl_done <= 1'b1; wc <= s12_w;
+                  if (s12_done) ph <= P_DONE;
+                  else if (ck_req && !ck_used) begin di <= 4'd0; ck_ok <= 1'b0; ph <= P_KSEL; end
+                end
+        // ---- stage 3 on a clocked bus (golden clocked_bus, Wilson 11-06) ----
+        // the first SYNC_DATA wire with frame markers: I2C's tag, a CS (FRAME) of
+        // its clock, or (neither) the I2C signature, from pass 0
+        P_KSEL: if (di == 4'd8) ph <= P_KFIN;                      // none: no clocked record
+                else if (!k_dsync) di <= di + 4'd1;
+                else begin
+                  ck_d <= k_d; ck_c <= part[k_d]; ck_f <= k_fw;
+                  ck_i2c <= (role[k_d] == R_SYNC_I2C) || !k_hf;
+                  k_maybe <= (role[k_d] != R_SYNC_I2C) && !k_hf;
+                  wk <= W_PAIR; wc <= part[k_d]; wd <= k_d; ck_pass <= 1'b0;
+                  walk_go <= 1'b1; ph <= P_WAIT; w_ret <= P_KC1;
+                end
+        P_KC1:  if (k_maybe && !sig_ok) begin di <= di + 4'd1; ph <= P_KSEL; end
+                else begin
+                  k_maybe <= 1'b0;
+                  if (!ck_i2c && k_hi8 >= k_nc7) ck_act <= 1'b1;
+                  else if (!ck_i2c && k_lo8 >= k_nc7) ck_act <= 1'b0;
+                  if (!ck_i2c && k_hi8 < k_nc7 && k_lo8 < k_nc7) ph <= P_KFIN;   // CS level unclear
+                  else begin ck_pass <= 1'b1; walk_go <= 1'b1; ph <= P_WAIT; w_ret <= P_KC2; end
+                end
+        // the sample edge: the clean one; both clean -> the edge ending the data's level
+        P_KC2:  begin
+                  ph <= P_KCAP; ck_arm <= 1'b1;
+                  if (k_cr && !k_cf) ck_edge <= 1'b1;
+                  else if (k_cf && !k_cr) ck_edge <= 1'b0;
+`ifdef M_CK_NO_REFUSE
+                  else ck_edge <= ck_sn0;
+`else
+                  else if (k_cr && k_cf && (ck_sn0 ^ ck_sn1)) ck_edge <= ck_sn0;
+                  else begin ph <= P_KFIN; ck_arm <= 1'b0; end      // no clean sample edge
+`endif
+                end
+        P_KCAP: if (ck_done) begin ck_ok <= 1'b1; ph <= P_KFIN; end
+        P_KFIN: begin ck_fin <= 1'b1; ck_used <= 1'b1; wk <= W_S12; ph <= P_S12; end
         P_DONE: done <= 1'b1;
         default: ph <= P_IDLE;
       endcase
@@ -1711,7 +1837,14 @@ module pe_pit_s12 #(parameter integer AW = 9) (
     input  wire [7:0]    rdata,
     output reg           s3_found,     // an NRZ_ASYNC wire exists
     output reg           s3_fbs,       // ... with frame_bits < 9: UNKNOWN, not decoded
-    output reg  [7:0]    s3_nmsg       // messages decoded (sat 255)
+    output reg  [7:0]    s3_nmsg,      // messages decoded (sat 255)
+    // no NRZ_ASYNC wire: ask stage 0 for the clocked bus's second capture (Wilson 11-06)
+    output wire          ck_req,
+    input  wire          ck_fin,       // answered; ck_ok = messages in, from data wire ck_w
+    input  wire          ck_ok,
+    input  wire [2:0]    ck_w,
+    input  wire [AW-1:0] ck_wp,        // their end
+    input  wire [7:0]    ck_nmsg
 );
   localparam [15:0] OVF     = 16'hFFFF;
   localparam [14:0] P_FIRST = 15'd4, P_LAST = 15'd16384;
@@ -1835,13 +1968,14 @@ module pe_pit_s12 #(parameter integer AW = 9) (
                    T_CHK = 7'd6, T_LOC = 7'd7, T_ADV = 7'd8, T_STEP = 7'd9, T_FOUND = 7'd10,
                    T_SPL = 7'd11, T_SA0 = 7'd12, T_MID = 7'd13, T_MLOC = 7'd14, T_SAI = 7'd15,
                    T_XE = 7'd16, T_LQ1 = 7'd17, T_LQ2 = 7'd18, T_END = 7'd19, T_DRAIN = 7'd20,
-                   T_DONE = 7'd21;
+                   T_DONE = 7'd21, T_CK = 7'd115;
   localparam [12:0] S3_MIN_FB = 13'd9;      // start + 8 data bits (Wilson 11-05)
   localparam [AW-1:0] S3_CAP = 9'd128;
   reg  [6:0]  t3;
   // the benches' snapshot point: the record's last write is about to start
   // (option (a): the messages are checked from a dump taken here)
   wire        s3_rec_wr = (st == S_S3) && (t3 == 7'd112);
+  assign      ck_req = (st == S_S3) && (t3 == T_CK);
   wire        t3_walk = (st == S_S3) && (t3 >= T_PRE) && (t3 <= T_DRAIN);
   wire        exh = wend & ~x_v & ~walk_go;      // no interval will come (not the last walk's wend)
   // ===========================================================================
@@ -2447,7 +2581,7 @@ module pe_pit_s12 #(parameter integer AW = 9) (
               t3 <= T_RD;
               case (wb)
                 4'd0: if (rdata[7:5] == C_ASYNC) begin s3_found <= 1'b1; wb <= 4'd1; end
-                      else if (w == 3'd7) begin t3 <= G_INI; `G_K <= 8'd0; end
+                      else if (w == 3'd7) t3 <= T_CK;         // no UART wire: a clocked bus?
                       else w <= w + 3'd1;
                 4'd1: begin p16[18:16] <= rdata[6:4]; acc[62:59] <= rdata[3:0]; wb <= 4'd2; end
                 4'd2: begin p16[15:8] <= rdata; wb <= 4'd3; end
@@ -2528,6 +2662,12 @@ module pe_pit_s12 #(parameter integer AW = 9) (
               x_v <= 1'b0; hold <= 1'b0; t3 <= T_DRAIN;
             end
             T_DRAIN: begin x_v <= 1'b0; hold <= 1'b0; if (pass_end) begin t3 <= G_INI; `G_K <= 8'd0; end end
+            // ---- the clocked bus (Wilson 11-06): stage 0 picks it, pe_pit captures it
+            //      again as messages; the solver below runs on them unchanged ----
+            T_CK: if (ck_fin) begin
+                    t3 <= G_INI; `G_K <= 8'd0;
+                    if (ck_ok) begin s3_found <= 1'b1; w <= ck_w; `S3_WP <= ck_wp; s3_nmsg <= ck_nmsg; end
+                  end
             // ================= piece 2: the GCD (golden crc_poly_gcd_s3_fit) =================
             // the record 120..127: wire | 8 (0 with no NRZ_ASYNC wire), the rest 0
             G_INI: begin
@@ -2940,7 +3080,18 @@ module pe_pit #(parameter integer AW = 9) (
     // stage 0's inputs (chunk 2): the capture is done, its whole count, its start levels
     output wire          cap_done,
     output wire [13:0]   cap_n,
-    output reg  [7:0]    cap_lv0
+    output reg  [7:0]    cap_lv0,
+    // ⭐ THE SECOND CAPTURE (Wilson 11-06): stage 3 found no UART wire but stage 0
+    // named a clocked bus -- look again, SAMPLED: one bit per sample edge of the
+    // data wire, written as the decoded messages, [len][bytes] from 128
+    input  wire          ck_arm,       // pulse: cycle 0 of the second capture
+    input  wire          ck_i2c,       // 1 = I2C (START / STOP frames), 0 = SPI (CS frames)
+    input  wire [2:0]    ck_c, ck_d, ck_f,   // clock, data, CS wires
+    input  wire          ck_act,       // CS's active level
+    input  wire          ck_edge,      // the sample edge: 1 = rise, 0 = fall
+    output reg           ck_done,
+    output reg  [AW-1:0] ck_wp,        // the end of the messages
+    output reg  [7:0]    ck_nmsg       // frames stored (sat 255)
 );
   localparam integer CAP_BASE = 128, CAP_BITS = 384 * 8;
   localparam integer SLV_AT = 39;   // the starting-levels byte (results 32-39)
@@ -3036,6 +3187,64 @@ module pe_pit #(parameter integer AW = 9) (
 `else
   wire        ovr   = ({1'b0, acc_n_d} + {1'b0, l_all} > 8'd64);
 `endif
+  // ---- THE SECOND CAPTURE, sampled (golden sampled_capture, frozen 81ae9563).
+  // It runs after the first capture stopped, through the same write port and
+  // budget counter (reloaded at its cycle 0). Per cycle, from prev -> uio:
+  //   SPI: CS going inactive closes the frame; else a sample edge while open
+  //        shifts in the data level of the cycle BEFORE the edge (MSB-first);
+  //        CS going active opens a frame.
+  //   I2C: SDA moving with SCL high before and after is START (opens; closes
+  //        any open frame first: a repeated START) or STOP (closes). A bit
+  //        sampled on SCL's rise counts on its next fall; the 9th (ACK) of
+  //        each 9 is dropped.
+  //   A close KEEPS the frame only with >= 1 byte and no partial byte: its
+  //   length goes to its slot. A whole byte that would pass 383 stops it
+  //   ("full", the open frame dropped), as the budget does.
+  localparam [9:0] S_END = 10'd384;   // 128..383: the GCD's two buffers keep 384..511
+  reg         s_on, s_open, s_pv, s_pend;
+  reg [AW-1:0] s_la;
+  reg [7:0]   s_mlen, s_byte;
+  reg [3:0]   s_nbit;
+  wire        s_pc   = prev[ck_c], s_cn = uio[ck_c];
+  wire        s_cch  = s_pc ^ s_cn;
+  wire        s_dch  = prev[ck_d] ^ uio[ck_d];
+  wire        s_fch  = prev[ck_f] ^ uio[ck_f];
+  wire        s_ev   = ck_i2c & s_dch & s_pc & s_cn;
+`ifdef M_CK_CS_INV
+  wire        s_actv = ~ck_act;
+`else
+  wire        s_actv = ck_act;
+`endif
+`ifdef M_CK_NO_SR
+  wire        s_close = ck_i2c ? (s_ev & uio[ck_d]) : (s_fch & (uio[ck_f] != s_actv));
+  wire        s_openv = ck_i2c ? (s_ev & ~uio[ck_d] & ~s_open) : (s_fch & (uio[ck_f] == s_actv));
+`else
+  wire        s_close = ck_i2c ? s_ev : (s_fch & (uio[ck_f] != s_actv));
+  wire        s_openv = ck_i2c ? (s_ev & ~uio[ck_d]) : (s_fch & (uio[ck_f] == s_actv));
+`endif
+`ifdef M_CK_EDGE_INV
+  wire        s_edge = ~ck_edge;
+`else
+  wire        s_edge = ck_edge;
+`endif
+  wire        s_bit  = ck_i2c ? (~s_ev & s_cch & ~s_cn & s_pv)
+                              : (~s_close & s_cch & (s_cn == s_edge) & s_open);
+  wire        s_bv   = ck_i2c ? s_pend : prev[ck_d];
+  wire [3:0]  s_nb_n = s_nbit + 4'd1;
+`ifdef M_CK_ACK_KEEP
+  wire [3:0]  s_unit = 4'd8;
+`else
+  wire [3:0]  s_unit = ck_i2c ? 4'd9 : 4'd8;
+`endif
+`ifdef M_CK_LSB
+  wire [7:0]  s_by_n = (s_nbit < 4'd8) ? {s_bv, s_byte[7:1]} : s_byte;
+`else
+  wire [7:0]  s_by_n = (s_nbit < 4'd8) ? {s_byte[6:0], s_bv} : s_byte;
+`endif
+  wire        s_keep = s_close & s_open & (s_mlen != 8'd0) & (s_nbit == 4'd0);
+  wire [AW-1:0] s_end = s_la + {{(AW-1){1'b0}}, 1'b1} + {1'b0, s_mlen};   // the next free byte
+  wire        s_whole = s_bit & s_open & (s_nb_n == s_unit);
+  wire        s_full  = s_whole & ({1'b0, s_end} + 10'd1 > S_END);
   wire [19:0] sum_n = sum + {4'd0, tcnt};
   wire [19:0] mean  = sum_n >> 4;
   wire [MW-1:0] v11 = ({4'd0, mean} * 24'd11) >> 4;
@@ -3053,9 +3262,13 @@ module pe_pit #(parameter integer AW = 9) (
       st_phase <= 2'd0; st_done <= 1'b0; stopped <= 1'b0; why_ovr <= 1'b0;
       why_bud <= 1'b0; bud_cnt <= {BW{1'b0}}; cap_lv0 <= 8'h00;
       we <= 1'b0; waddr <= {AW{1'b0}}; wdata <= 8'h00;
+      s_on <= 1'b0; s_open <= 1'b0; s_pv <= 1'b0; s_pend <= 1'b0; s_la <= {AW{1'b0}};
+      s_mlen <= 8'd0; s_byte <= 8'd0; s_nbit <= 4'd0;
+      ck_done <= 1'b0; ck_wp <= {AW{1'b0}}; ck_nmsg <= 8'd0;
     end else if (!run) begin
       active <= 1'b0;
       we <= 1'b0;
+      s_on <= 1'b0; ck_done <= 1'b0;
     end else if (!active) begin
       // the PIT's cycle 0: take the levels, start the interval
       active <= 1'b1; prev <= uio; tcnt <= 16'd1; n <= 16'd0; acc <= 64'd0;
@@ -3122,6 +3335,39 @@ module pe_pit #(parameter integer AW = 9) (
           default: begin waddr <= 9'd29; wdata <= n_whole[7:0]; st_done <= 1'b1; end
         endcase
         st_phase <= st_phase + 2'd1;
+      end
+      // ---- the second capture (after st_done: the first one's writes are over) ----
+      if (ck_arm) begin                                  // its cycle 0: prev <= uio above
+        s_on <= 1'b1; s_open <= 1'b0; s_pv <= 1'b0; s_nbit <= 4'd0; s_byte <= 8'd0;
+        ck_done <= 1'b0; ck_wp <= CAP_BASE[AW-1:0]; ck_nmsg <= 8'd0;
+        bud_cnt <= bud_init;
+      end else if (s_on) begin
+        if (bud_hit || s_full) begin                     // the budget (edges at 2^b unseen) or full
+          s_on <= 1'b0; ck_done <= 1'b1;
+        end else begin
+          if (ck_i2c) begin
+            if (s_ev) s_pv <= 1'b0;
+            else if (s_cch && s_cn && s_open) begin s_pv <= 1'b1; s_pend <= prev[ck_d]; end
+            else if (s_bit) s_pv <= 1'b0;
+          end
+          if (s_bit) begin s_nbit <= s_nb_n; s_byte <= s_by_n; end
+          if (s_whole) begin                             // a whole byte -> its slot
+            we <= 1'b1; waddr <= s_end; wdata <= s_by_n;
+            s_mlen <= s_mlen + 8'd1; s_nbit <= 4'd0; s_byte <= 8'd0;
+          end
+          if (s_close) begin
+            s_open <= 1'b0;
+            if (s_keep) begin                            // the length, into the frame's slot
+              we <= 1'b1; waddr <= s_la; wdata <= s_mlen;
+              ck_wp <= s_end;
+              if (ck_nmsg != 8'hFF) ck_nmsg <= ck_nmsg + 8'd1;
+            end
+          end
+          if (s_openv) begin
+            s_open <= 1'b1; s_la <= s_keep ? s_end : ck_wp;
+            s_mlen <= 8'd0; s_nbit <= 4'd0; s_byte <= 8'd0;
+          end
+        end
       end
     end
   end

@@ -58,6 +58,9 @@ module tb_pit;
         if (((dut.uio_q1 ^ prevq) & mk) != 8'h00)
           $fdisplay(fd, "E %0d %h", pc, (dut.uio_q1 ^ prevq) & mk);
         prevq = dut.uio_q1;
+        // the clocked bus's second capture (Wilson 11-06): its cycle 0 -- an E at
+        // a later cycle t is its edge t - K (gate pit-clk)
+        if (dut.ck_arm === 1'b1) $fdisplay(fd, "K %0d", pc);
       end
     end
   end

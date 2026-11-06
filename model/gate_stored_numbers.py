@@ -761,6 +761,12 @@ SPEC_SYMBOLS = {
     # Rocksoft XMODEM / CCITT-FALSE) the synthetic buses' frames are built with;
     # the result is the frozen stage3_clocked's record, checked live per case.
     ("model/pit_clocked_evidence.py", "CATS"),
+    # gate pit-clk (11-06): XMODEM / CCITT / SMBUS are published CRC parameter
+    # sets the bench frames its stimulus with; judged live against the frozen
+    # stage3_clocked, bit for bit.
+    ("test/run_pit_clk.py", "XMODEM"),
+    ("test/run_pit_clk.py", "CCITT"),
+    ("test/run_pit_clk.py", "SMBUS"),
     # v2 PIT chunk 2: the FROZEN stage-0 model (e55d0b63, never edited here):
     # CATALOGUE is the published CRC parameter catalogue (Rocksoft model) and
     # WIDTHS the CRC widths it searches (8 / 16 / 32) -- specifications, not
