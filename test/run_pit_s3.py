@@ -106,8 +106,8 @@ MODBUS = (16, 0x8005, 0xFFFF, 0x0000, True)
 CRC32 = (32, 0x04C11DB7, 0xFFFFFFFF, 0xFFFFFFFF, True)
 S3_WAVES = {
     "s3_uart": {0: R12.uart()},                          # one message, 6 bytes (32 edges: fast)
-    "s3_modbus": {0: crc_waves(MODBUS, 2, 1000)},        # 6 messages, split at the gaps
-    "s3_crc32_full": {0: crc_waves(CRC32, 1, 1005)},     # FULL cuts the capture mid-frame
+    "s3_modbus": {0: crc_waves(MODBUS, 2, 1000, nshort=5)},   # 7 messages; 5 short: the last decoded is never evidence (Wilson 11-06)
+    "s3_crc32_full": {0: crc_waves(CRC32, 1, 1005, nshort=5)},  # FULL cuts the capture mid-frame; 5 short (11-06)
 }
 
 
