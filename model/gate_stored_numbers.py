@@ -757,6 +757,10 @@ SPEC_SYMBOLS = {
     # (specifications) the method check frames its cases with; the result is
     # the compare against frozen crc_init_xorout + canonical_member, live.
     ("model/pit_solver_evidence.py", "POLYS"),
+    # clocked bus (11-06): CATS are published CRC parameter sets (SMBus PEC,
+    # Rocksoft XMODEM / CCITT-FALSE) the synthetic buses' frames are built with;
+    # the result is the frozen stage3_clocked's record, checked live per case.
+    ("model/pit_clocked_evidence.py", "CATS"),
     # v2 PIT chunk 2: the FROZEN stage-0 model (e55d0b63, never edited here):
     # CATALOGUE is the published CRC parameter catalogue (Rocksoft model) and
     # WIDTHS the CRC widths it searches (8 / 16 / 32) -- specifications, not

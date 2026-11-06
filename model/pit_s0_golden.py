@@ -28,7 +28,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 # byte for byte -- and the whole file to FROZEN.
 # Re-frozen 11-05 (Wilson): the GCD capacity rule (crc_poly_gcd_s3_fit) in the
 # stage 3 composition; was df3552da.
-FROZEN = "73e25c61f075e00fea575a99f0d859d2ada68e957584f9ec6561def1258ed1fc"
+# Re-frozen 11-06 (Wilson): stage 3 on a clocked bus, the sampled second
+# capture (clocked_bus, sampled_capture, stage3_clocked) APPENDED; was 73e25c61.
+FROZEN = "81ae9563ca3d4790db033fe19f07fe847b84284d348ab9327048245d15c31741"
 FROZEN_PREFIX = "f19f2177d243b9f1bdea124d6ef2d16d6c9effeddd47da02c1c57b65da7d86eb"   # = e55d0b63 as LF
 FROZEN_PREFIX_LEN = 29070
 TABLE_AT, TABLE_BYTES = 32, 7

@@ -898,3 +898,207 @@ def stage3(cap, lv0, cls):
         rec[12:16] = io["xorout"].to_bytes(4, "little")
     out["status"] = "OK"
     return bytes(rec), out
+
+
+# ---------------------------------------------------------------------------
+# stage 3 on a CLOCKED bus (Wilson 11-06): a SAMPLED SECOND CAPTURE -- APPENDED.
+# The edge capture holds 1.5-4 whole I2C / SPI frames (22 records a byte), too
+# few for the GCD. When classify_bus gives NO NRZ_ASYNC wire (UART keeps
+# priority: its records never change) and stage 0 named a clocked bus, the PIT
+# captures the bus AGAIN, storing one bit per sample edge of the data wire as
+# the decoded messages themselves, [len][bytes...] from 128, the layout the
+# UART decode writes; stage 3's solver then runs unchanged. The record's layout
+# does not change: the bus type is in the role table (32..38).
+#  * the bus: the first SYNC_DATA wire in index order that has frame markers.
+#    SPI: a FRAME wire (the CS) of the same clock, the lowest-indexed. I2C: stage
+#    0's I2C tag, or no CS and the pair passes i2c_signature (a REGULAR SCL is
+#    typed by stage 0's plain bracket test first and never gets the tag).
+#    An AMBIGUOUS or REFUSED bus never qualifies (no SYNC_DATA in it).
+#  * THE SAMPLE EDGE, inferred from the FIRST capture: the clock edge data never
+#    changes on -- no counted data edge within 1 cycle of it (the synchroniser's
+#    0 / +1). Counted: SPI, the data edges with CS active before and after; I2C,
+#    the data edges that are not START / STOP. One clean edge -> it. Both clean
+#    -> the edge that ENDS the clock level every counted data edge lies in (the
+#    level after the record, as stage 0's bracket reads it). Neither clean, or
+#    both clean with data in both levels -> REFUSED: no clocked record, a reason.
+#  * CS's active level: the CS level at >= 7/8 of the clock's edges; else refused.
+#  * the second capture (cycle 0 = its first cycle, levels lv2 before any change):
+#    a sample = the data wire's level in the cycle BEFORE the sample edge.
+#    SPI: a frame opens on CS going active and closes on CS going inactive (a
+#    sample edge in the cycle CS goes active is not in it); bits are sampled
+#    while it is open, packed MSB-first as sent; a frame that is not whole bytes
+#    is dropped. I2C: START (SDA falls, SCL high before and after) opens a frame,
+#    STOP (SDA rises, the same) closes it, a repeated START closes one and opens
+#    the next; a bit sampled on SCL's rise counts only when SCL falls again
+#    before any START / STOP; of each 9 the 9th (ACK) is dropped; a frame of not
+#    9n bits is dropped. A frame with no bytes, or still open when the capture
+#    stops, is dropped.
+#  * it stops on the budget (2^b cycles from ITS cycle 0, edges at t >= budget
+#    unseen -- a quiet bus ends it) or when a byte would pass S3_SAMP_END: the
+#    window 128..383 leaves 128 bytes for the GCD's two buffers (frames <= 64).
+# ---------------------------------------------------------------------------
+S3_SAMP_END = 384
+
+
+def clocked_bus(cap, lv0, cls):
+    """-> the bus the sampled capture reads, or a dict with "why" (no record)."""
+    data = [w for w in sorted(cls) if cls[w].get("cls") == "SYNC_DATA"]
+    if not data:
+        return {"why": "no clocked bus with a data wire"}
+    for d in data:
+        c = cls[d]["clock"]
+        if cls[d].get("bus") == "I2C":
+            bus = {"kind": "I2C", "clock": c, "data": d}
+            break
+        fr = [w for w in sorted(cls) if cls[w].get("cls") == "FRAME" and cls[w].get("clock") == c]
+        if fr:
+            bus = {"kind": "SPI", "clock": c, "data": d, "cs": fr[0]}
+            break
+        if i2c_signature(cap, c, d):          # a regular SCL passes stage 0's plain test first
+            bus = {"kind": "I2C", "clock": c, "data": d}
+            break
+    else:
+        return {"why": "no clocked bus with frame markers"}
+    c, d = bus["clock"], bus["data"]
+    if bus["kind"] == "SPI":
+        f = bus["cs"]
+        at = [lv >> f & 1 for t, mask, lv in cap if mask >> c & 1]
+        hi = sum(at)
+        if 8 * hi >= 7 * len(at):
+            bus["cs_active"] = 1
+        elif 8 * (len(at) - hi) >= 7 * len(at):
+            bus["cs_active"] = 0
+        else:
+            return dict(bus, why="CS active level unclear")
+    counted, before = [], lv0              # (cycle, clock level after the record)
+    for t, mask, lv in cap:
+        if mask >> d & 1:
+            if bus["kind"] == "I2C":
+                if not (before >> c & 1 and lv >> c & 1):
+                    counted.append((t, lv >> c & 1))
+            elif before >> bus["cs"] & 1 == bus["cs_active"] and lv >> bus["cs"] & 1 == bus["cs_active"]:
+                counted.append((t, lv >> c & 1))
+        before = lv
+    rise = [t for t, mask, lv in cap if mask >> c & 1 and lv >> c & 1]
+    fall = [t for t, mask, lv in cap if mask >> c & 1 and not (lv >> c & 1)]
+
+    def clean(edges):
+        import bisect
+        for t, _l in counted:
+            k = bisect.bisect_left(edges, t - 1)
+            if k < len(edges) and edges[k] <= t + 1:
+                return False
+        return True
+    cr, cf = clean(rise), clean(fall)
+    if cr and not cf:
+        bus["edge"] = 1                       # sample on the rise
+    elif cf and not cr:
+        bus["edge"] = 0                       # sample on the fall
+    elif cr and cf:
+        lvls = {l for _t, l in counted}
+        if len(lvls) != 1:
+            return dict(bus, why="no clean sample edge (data changes in both clock levels)")
+        bus["edge"] = 1 - lvls.pop()          # the edge that ENDS the data's level
+    else:
+        return dict(bus, why="no clean sample edge (data changes on both clock edges)")
+    return bus
+
+
+def sampled_capture(log2, lv2, bus, budget=None, ncyc=None):
+    """the second capture -> (msgs as stored, why it stopped: "budget", "full"
+    or None = still listening at ncyc). log2 = [(cycle >= 1, mask)]."""
+    c, d = bus["clock"], bus["data"]
+    unit = 9 if bus["kind"] == "I2C" else 8
+    st = {"cur": None, "nbit": 0, "byte": 0, "wp": S3_DEC_AT}
+    msgs, pend, lv, why = [], None, lv2, None
+
+    def close():
+        cur = st["cur"]
+        if cur is not None and cur and st["nbit"] == 0:
+            msgs.append(cur)
+            st["wp"] += len(cur) + 1
+        st["cur"] = None
+
+    def open_():
+        close()
+        st["cur"], st["nbit"], st["byte"] = [], 0, 0
+
+    def bit(b):
+        if st["nbit"] < 8:
+            st["byte"] = (st["byte"] << 1) | b
+        st["nbit"] += 1
+
+    for t, mask in log2:
+        assert t >= 1
+        if budget is not None and t >= budget:
+            why = "budget"
+            break
+        new = lv ^ mask
+        cb, ca = lv >> c & 1, new >> c & 1
+        if bus["kind"] == "SPI":
+            f, a = bus["cs"], bus["cs_active"]
+            if mask >> f & 1 and (new >> f & 1) != a:
+                close()                       # CS inactive: the frame ends (ragged -> dropped)
+            elif mask >> c & 1 and ca == bus["edge"] and st["cur"] is not None:
+                bit(lv >> d & 1)
+            if mask >> f & 1 and (new >> f & 1) == a:
+                open_()
+        else:
+            if mask >> d & 1 and cb and ca:   # SDA moves with SCL high: START / STOP
+                close()
+                pend = None
+                if not (new >> d & 1):
+                    open_()
+            elif mask >> c & 1:
+                if ca and st["cur"] is not None:
+                    pend = lv >> d & 1        # sampled on the rise
+                elif not ca and pend is not None:
+                    bit(pend)                 # confirmed by the fall
+                    pend = None
+        if st["cur"] is not None and st["nbit"] == unit:
+            if st["wp"] + 1 + len(st["cur"]) + 1 > S3_SAMP_END:
+                st["cur"], why = None, "full"
+                break
+            st["cur"].append(st["byte"])
+            st["nbit"], st["byte"] = 0, 0
+        lv = new
+    if why is None and budget is not None and (ncyc is None or budget <= ncyc):
+        why = "budget"
+    return msgs, why
+
+
+def stage3_clocked(cap, lv0, cls, log2, lv2, budget=None, ncyc=None):
+    """-> (the 16-byte record, detail). stage3 when there is an NRZ_ASYNC wire
+    (UART keeps priority); else the clocked bus's sampled second capture."""
+    if any(cls[x].get("cls") == "NRZ_ASYNC" for x in cls):
+        return stage3(cap, lv0, cls)
+    rec = bytearray(S3_BYTES)
+    bus = clocked_bus(cap, lv0, cls)
+    if "why" in bus:
+        return bytes(rec), {"status": "UNKNOWN", "bus": bus, "why": bus["why"], "second": False}
+    msgs, stop = sampled_capture(log2, lv2, bus, budget, ncyc)
+    w = bus["data"]
+    rec[0] = w | 1 << 3
+    res = crc_poly_gcd_s3_fit(msgs)
+    out = {"wire": w, "bus": bus, "msgs": msgs, "poly": res, "stop": stop, "second": True}
+    if res.get("why") == "insufficient store for the GCD":
+        out["why"] = res["why"]
+    rec[3] = min(len(msgs), 255)
+    if res["status"] != "OK":
+        out["status"] = "UNKNOWN"
+        out.setdefault("why", res.get("why"))
+        return bytes(rec), out
+    ev = io_evidence(msgs, res)
+    out["evidence"] = ev
+    io = canonical_member(ev, res, crc_init_xorout(ev, res))
+    out["io"] = io
+    rec[0] |= 1 << 4 | (1 << 6 if res["reflected"] else 0)
+    rec[1] = _WCODE[res["width"]] | min(res["frame_len"], 63) << 2
+    rec[2] = min(res["diffs_used"], 255)
+    rec[4:8] = res["poly"].to_bytes(4, "little")
+    if io.get("init") is not None:
+        rec[0] |= 1 << 5 | (1 << 7 if io["class_size"] > 1 else 0)
+        rec[8:12] = io["init"].to_bytes(4, "little")
+        rec[12:16] = io["xorout"].to_bytes(4, "little")
+    out["status"] = "OK"
+    return bytes(rec), out
