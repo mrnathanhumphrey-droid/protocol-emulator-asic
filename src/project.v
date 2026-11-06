@@ -1831,27 +1831,124 @@ module pe_pit_s12 #(parameter integer AW = 9) (
 `define S3_CUR   a_L[1]                     // an interval is current
 `define S3_L     a_L[2]                     // its level
 `define S3_IDLE  a_L[3]                     // the idle level
-  localparam [4:0] T_RD = 5'd0, T_RW = 5'd1, T_RV = 5'd2, T_MUL = 5'd3, T_PRE = 5'd4, T_PRE1 = 5'd5,
-                   T_CHK = 5'd6, T_LOC = 5'd7, T_ADV = 5'd8, T_STEP = 5'd9, T_FOUND = 5'd10,
-                   T_SPL = 5'd11, T_SA0 = 5'd12, T_MID = 5'd13, T_MLOC = 5'd14, T_SAI = 5'd15,
-                   T_XE = 5'd16, T_LQ1 = 5'd17, T_LQ2 = 5'd18, T_END = 5'd19, T_DRAIN = 5'd20,
-                   T_DONE = 5'd21;
+  localparam [6:0] T_RD = 7'd0, T_RW = 7'd1, T_RV = 7'd2, T_MUL = 7'd3, T_PRE = 7'd4, T_PRE1 = 7'd5,
+                   T_CHK = 7'd6, T_LOC = 7'd7, T_ADV = 7'd8, T_STEP = 7'd9, T_FOUND = 7'd10,
+                   T_SPL = 7'd11, T_SA0 = 7'd12, T_MID = 7'd13, T_MLOC = 7'd14, T_SAI = 7'd15,
+                   T_XE = 7'd16, T_LQ1 = 7'd17, T_LQ2 = 7'd18, T_END = 7'd19, T_DRAIN = 7'd20,
+                   T_DONE = 7'd21;
   localparam [12:0] S3_MIN_FB = 13'd9;      // start + 8 data bits (Wilson 11-05)
   localparam [AW-1:0] S3_CAP = 9'd128;
-  reg  [4:0]  t3;
+  reg  [6:0]  t3;
   wire        t3_walk = (st == S_S3) && (t3 >= T_PRE) && (t3 <= T_DRAIN);
   wire        exh = wend & ~x_v & ~walk_go;      // no interval will come (not the last walk's wend)
-  assign      raddr = 9'd40 + {3'd0, w, 3'b000} + {5'd0, w, 1'b0} + {5'd0, wb};
-  // THE ALU: a + b or a - b; on a subtract, al_lt = (a < b)
+  // ===========================================================================
+  // STAGE 3, PIECE 2 (Wilson 11-05): the GCD -- golden crc_poly_gcd_s3_fit,
+  // bit for bit. Per length group (first-appearance order, >= 4 frames, and
+  // 2 L <= 512 - end of messages), per bit order: the differences m_a ^ m_0 into
+  // two L-byte buffers after the messages, polynomials RIGHT-ALIGNED (constant
+  // term = bit 0 of the last byte), and the BINARY gcd on odd parts (over GF(2)
+  // odd(gcd(d...)) = gcd(odd(d)...), which is what the golden keeps): swap so
+  // deg x >= deg y, x ^= y, shift x right by its trailing zeros, until x = 0.
+  // The best candidate lives in the record (120..127) and the golden's order is
+  // a key: more differences, then bit order MSB-first, then the larger group,
+  // then the earlier (= the one found first). Every value in an idle register.
+  // ===========================================================================
+`define G_RA     acc[8:0]                   // the read address
+`define G_DX     acc[19:9]                  // deg x (the buffer being reduced)
+`define G_DY     acc[30:20]                 // deg y (= g between differences)
+`define G_DN     acc[41:31]                 // a pass's top set bit
+`define G_TZ     acc[52:42]                 // a pass's lowest set bit (the shift)
+`define G_CB     acc[60:53]                 // a byte held across reads
+`define G_GRD    acc[68:61]                 // the byte read
+`define G_RRET   p16[6:0]                   // where a read returns
+`define G_J      dv_q[7:0]                  // byte index from the top (counts down)
+`define G_K      dv_q[15:8]                 // byte index from the bottom; the record byte
+`define G_S      dv_q[25:16]                // the shift's source index
+`define G_HP     dv_r[8:0]                  // the group's first message
+`define G_Q      dv_r[17:9]                 // the counting scan
+`define G_A      dv_d[8:0]                  // the member being differenced
+`define G_BB     dv_d[17:9]                 // buffer B = end + L (buffer A = end)
+`define G_LEN    bh[7:0]
+`define G_CNT    n[7:0]                     // frames of this length
+`define G_USED   n1[7:0]                    // nonzero differences
+`define G_SRET   bp[5:0]                    // where a shift returns
+`define G_BU     bp[13:6]                   // the best's differences
+`define G_LSB    a_L[0]
+`define G_GV     a_L[1]                     // g exists
+`define G_YS     a_L[2]                     // y's buffer (1 = B)
+`define G_XS     a_L[3]                     // x's buffer
+`define G_NZ     L[0]                       // a pass saw a set bit
+`define G_PAST   L[1]                       // the counting scan has passed the group's first
+`define G_NF     L[2]                       // not the first of its length
+`define G_NX0    L[3]                       // the shift's source ran out (zeros)
+`define G_BF     wb[0]                      // the record holds a candidate
+`define G_BL     wb[1]                      // ... in LSB-first order
+  localparam [6:0] G_INI = 7'd22, G_HDR = 7'd23, G_HDR1 = 7'd24, G_CS = 7'd25, G_CS1 = 7'd26,
+                   G_CSE = 7'd27, G_CAP = 7'd28, G_CAP1 = 7'd29, G_GRP = 7'd30, G_MS = 7'd31,
+                   G_MS1 = 7'd32, G_D0 = 7'd33, G_D1 = 7'd34, G_D2 = 7'd35, G_D3 = 7'd36,
+                   G_D4 = 7'd37, G_DEND = 7'd38, G_DSH = 7'd39, G_NXM = 7'd40, G_ST = 7'd41,
+                   G_X0 = 7'd42, G_X1 = 7'd43, G_X2 = 7'd44, G_X3 = 7'd45, G_X4 = 7'd46,
+                   G_XEND = 7'd47, G_SH0 = 7'd48, G_SH1 = 7'd49, G_SH3 = 7'd50, G_SH3B = 7'd51,
+                   G_SH4 = 7'd52, G_SH5 = 7'd53, G_SHE = 7'd54, G_GEND = 7'd55, G_C0 = 7'd56,
+                   G_C1 = 7'd57, G_C2 = 7'd58, G_C3 = 7'd59, G_CW = 7'd60, G_CW1 = 7'd61,
+                   G_GNX = 7'd62, G_RD = 7'd63, G_RW = 7'd64, G_RV = 7'd65, G_FIN = 7'd66, G_SH2 = 7'd67;
+  wire [AW-1:0] g_xb = `G_XS ? `G_BB : `S3_WP;  // the buffers' bases
+  wire [AW-1:0] g_yb = `G_YS ? `G_BB : `S3_WP;
+  function [2:0] g_msb(input [7:0] v);          // the top set bit of a nonzero byte
+    g_msb = v[7] ? 3'd7 : v[6] ? 3'd6 : v[5] ? 3'd5 : v[4] ? 3'd4 :
+            v[3] ? 3'd3 : v[2] ? 3'd2 : v[1] ? 3'd1 : 3'd0;
+  endfunction
+  function [2:0] g_lsb(input [7:0] v);          // the lowest set bit of a nonzero byte
+    g_lsb = v[0] ? 3'd0 : v[1] ? 3'd1 : v[2] ? 3'd2 : v[3] ? 3'd3 :
+            v[4] ? 3'd4 : v[5] ? 3'd5 : v[6] ? 3'd6 : 3'd7;
+  endfunction
+  // the difference byte, in the group's bit order (LSB-first = each byte reversed)
+  wire [7:0]  g_dv  = `G_CB ^ `G_GRD;
+  wire [7:0]  g_d   = `G_LSB ? {g_dv[0], g_dv[1], g_dv[2], g_dv[3], g_dv[4], g_dv[5], g_dv[6], g_dv[7]} : g_dv;
+  wire [7:0]  g_xv  = `G_CB ^ `G_GRD;            // x ^ y
+  wire [7:0]  g_nx  = `G_NX0 ? 8'd0 : `G_GRD;    // the shift's next-higher source byte
+  wire [15:0] g_fn  = {g_nx, `G_CB} >> acc[44:42];
+  wire [1:0]  g_wc  = (`G_DY == 11'd8) ? 2'd1 : (`G_DY == 11'd16) ? 2'd2 : 2'd3;
+  wire        g_cand = `G_GV && (`G_USED >= 8'd3) &&
+                       ((`G_DY == 11'd8) || (`G_DY == 11'd16) || (`G_DY == 11'd32));
+  // the golden's order as a key (the record holds the best so far)
+  wire        g_better = !`G_BF || (`G_USED > `G_BU) ||
+                         ((`G_USED == `G_BU) && ((!`G_LSB && `G_BL) || ((`G_LSB == `G_BL) && (`G_CNT > `G_GRD))));
+  // the poly bytes: the low w bits of g are its last w / 8 bytes
+  wire        g_pb  = (`G_K == 8'd4) || ((`G_K == 8'd5) && (g_wc != 2'd1)) || (dv_q[15:9] == 7'd3 && g_wc == 2'd3);
+  assign      raddr = (t3 >= G_INI) ? `G_RA : 9'd40 + {3'd0, w, 3'b000} + {5'd0, w, 1'b0} + {5'd0, wb};
+  // THE ALU: a + b or a - b (+ a carry in); on a subtract, al_lt = (a < b)
   reg  [25:0] al_a, al_b;
-  reg         al_sub;
-  wire [26:0] al    = {1'b0, al_a} + {1'b0, al_sub ? ~al_b : al_b} + {26'd0, al_sub};
+  reg         al_sub, al_ci;
+  wire [26:0] al    = {1'b0, al_a} + {1'b0, al_sub ? ~al_b : al_b} + {26'd0, al_sub | al_ci};
   wire        al_lt = al_sub & ~al[26];
   wire [4:0]  hi5   = {1'b0, acc[28:25]} + {4'd0, al[26]};      // the product's top, doubled + carry
   wire [25:0] w_p16 = {7'd0, p16};
   always @(*) begin
-    al_sub = 1'b0; al_a = {1'b0, `S3_X}; al_b = 26'd0;
+    al_sub = 1'b0; al_ci = 1'b0; al_a = {1'b0, `S3_X}; al_b = 26'd0;
     case (t3)
+      // piece 2: addresses, scans and degrees (a + b + 1 steps over a [len] header)
+      G_HDR:   begin al_a = {17'd0, `G_HP}; al_b = {17'd0, `S3_WP}; al_sub = 1'b1; end
+      G_CS:    begin al_a = {17'd0, `G_Q};  al_b = {17'd0, `S3_WP}; al_sub = 1'b1; end
+      G_CS1:   begin al_a = {17'd0, `G_Q};  al_b = {18'd0, `G_GRD}; al_ci = 1'b1; end
+      G_CAP:   begin al_a = {17'd0, `S3_WP}; al_b = {17'd0, `G_LEN, 1'b0}; end
+      G_CAP1:  begin al_a = {17'd0, `S3_WP}; al_b = {18'd0, `G_LEN}; end
+      G_GRP:   begin al_a = {17'd0, `G_HP}; al_b = {18'd0, `G_LEN}; al_ci = 1'b1; end
+      G_MS:    begin al_a = {17'd0, `G_A};  al_b = {17'd0, `S3_WP}; al_sub = 1'b1; end
+      G_MS1:   begin al_a = {17'd0, `G_A};  al_b = {18'd0, `G_GRD}; al_ci = 1'b1; end
+      G_D1:    begin al_a = {17'd0, `G_A};  al_b = {18'd0, `G_J}; al_ci = 1'b1; end
+      G_D2:    begin al_a = {17'd0, `G_HP}; al_b = {18'd0, `G_J}; al_ci = 1'b1; end
+      G_D3, G_X1, G_X3, G_SH4:
+               begin al_a = {17'd0, g_xb};  al_b = {18'd0, `G_J}; end
+      G_X2, G_CW:
+               begin al_a = {17'd0, g_yb};  al_b = {18'd0, `G_J}; end
+      G_NXM:   begin al_a = {17'd0, `G_A};  al_b = {18'd0, `G_LEN}; al_ci = 1'b1; end
+      G_GNX:   begin al_a = {17'd0, `G_HP}; al_b = {18'd0, `G_LEN}; al_ci = 1'b1; end
+      G_ST:    begin al_a = {15'd0, `G_DX}; al_b = {15'd0, `G_DY}; al_sub = 1'b1; end
+      G_SH0:   begin al_a = {18'd0, `G_LEN}; al_b = ~{18'd0, acc[52:45]}; end   // L - q - 1
+      G_SH1, G_SH3B:
+               begin al_a = {17'd0, g_xb};  al_b = {16'd0, `G_S}; end
+      G_SHE:   begin al_a = {15'd0, `G_DX}; al_b = {15'd0, `G_TZ}; al_sub = 1'b1; end
       T_MUL:   begin al_a = {acc[24:0], 1'b0}; al_b = acc[7'd50 + {3'd0, wb}] ? w_p16 : 26'd0; end
       T_PRE:   begin al_a = {1'b0, `S3_TOT}; al_b = {10'd0, x_iv}; end
       T_PRE1:  begin al_a = {10'd0, `S3_CLEN}; al_b = {10'd0, x_iv}; al_sub = 1'b1; end
@@ -2174,7 +2271,7 @@ module pe_pit_s12 #(parameter integer AW = 9) (
               t3 <= T_RD;
               case (wb)
                 4'd0: if (rdata[7:5] == C_ASYNC) begin s3_found <= 1'b1; wb <= 4'd1; end
-                      else if (w == 3'd7) t3 <= T_DONE;
+                      else if (w == 3'd7) begin t3 <= G_INI; `G_K <= 8'd0; end
                       else w <= w + 3'd1;
                 4'd1: begin p16[18:16] <= rdata[6:4]; acc[62:59] <= rdata[3:0]; wb <= 4'd2; end
                 4'd2: begin p16[15:8] <= rdata; wb <= 4'd3; end
@@ -2182,7 +2279,7 @@ module pe_pit_s12 #(parameter integer AW = 9) (
                 4'd4: begin acc[58] <= rdata[7]; wb <= 4'd9; end
                 default: begin
                   acc[57:50] <= rdata;
-                  if ({acc[62:58], rdata} < S3_MIN_FB) begin s3_fbs <= 1'b1; t3 <= T_DONE; end
+                  if ({acc[62:58], rdata} < S3_MIN_FB) begin s3_fbs <= 1'b1; t3 <= G_INI; `G_K <= 8'd0; end
                   else begin `S3_P30 <= 30'd0; `S3_HLE <= 1'b0; wb <= 4'd12; t3 <= T_MUL; end
                 end
               endcase
@@ -2254,7 +2351,143 @@ module pe_pit_s12 #(parameter integer AW = 9) (
               end
               x_v <= 1'b0; hold <= 1'b0; t3 <= T_DRAIN;
             end
-            T_DRAIN: begin x_v <= 1'b0; hold <= 1'b0; if (pass_end) t3 <= T_DONE; end
+            T_DRAIN: begin x_v <= 1'b0; hold <= 1'b0; if (pass_end) begin t3 <= G_INI; `G_K <= 8'd0; end end
+            // ================= piece 2: the GCD (golden crc_poly_gcd_s3_fit) =================
+            // the record 120..127: wire | 8 (0 with no NRZ_ASYNC wire), the rest 0
+            G_INI: begin
+              we <= 1'b1; waddr <= {6'b001111, dv_q[10:8]};
+              wdata <= (dv_q[10:8] == 3'd0 && s3_found) ? {5'b00001, w} : 8'd0;
+              `G_K <= `G_K + 8'd1;
+              if (dv_q[10:8] == 3'd7) begin
+                if (s3_found && !s3_fbs) begin `G_HP <= S3_CAP; t3 <= G_HDR; end
+                else t3 <= G_FIN;
+              end
+            end
+            // ---- each message that is the FIRST of its length starts a group ----
+            G_HDR:  if (!al_lt) t3 <= G_FIN;                               // hp >= end
+                    else begin `G_RA <= `G_HP; `G_RRET <= G_HDR1; t3 <= G_RD; end
+            G_HDR1: begin
+              `G_LEN <= `G_GRD; `G_Q <= S3_CAP; `G_CNT <= 8'd0; `G_NF <= 1'b0; `G_PAST <= 1'b0; t3 <= G_CS;
+            end
+            G_CS:   if (!al_lt) t3 <= G_CSE;                               // q >= end
+                    else begin `G_RA <= `G_Q; `G_RRET <= G_CS1; t3 <= G_RD; end
+            G_CS1: begin                                                    // count, and "first?"
+              if (`G_Q == `G_HP) `G_PAST <= 1'b1;
+              if (`G_GRD == `G_LEN) begin
+                `G_CNT <= `G_CNT + 8'd1;
+                if (!`G_PAST && `G_Q != `G_HP) `G_NF <= 1'b1;
+              end
+              `G_Q <= al[8:0]; t3 <= G_CS;                                  // q + len + 1
+            end
+            // < 4 frames: < 3 differences, never a candidate; skipped like the golden
+            G_CSE:  if (`G_NF || `G_CNT < 8'd4) begin `G_LSB <= 1'b1; t3 <= G_GNX; end
+                    else t3 <= G_CAP;
+            // the capacity rule: end + 2 L <= 512
+            G_CAP:  if (al[9] && al[8:0] != 9'd0) begin `G_LSB <= 1'b1; t3 <= G_GNX; end
+                    else t3 <= G_CAP1;
+            G_CAP1: begin `G_BB <= al[8:0]; `G_LSB <= 1'b0; t3 <= G_GRP; end
+            // ---- one group in one bit order ----
+            G_GRP:  begin `G_USED <= 8'd0; `G_GV <= 1'b0; `G_A <= al[8:0]; t3 <= G_MS; end
+            G_MS:   if (!al_lt) t3 <= G_GEND;                              // a >= end
+                    else begin `G_RA <= `G_A; `G_RRET <= G_MS1; t3 <= G_RD; end
+            G_MS1:  if (`G_GRD == `G_LEN) t3 <= G_D0;
+                    else begin `G_A <= al[8:0]; t3 <= G_MS; end
+            // d = m_a ^ m_0 into x's buffer, bottom byte first: its top bit and lowest bit
+            G_D0: begin
+              `G_XS <= `G_GV ? ~`G_YS : 1'b0; `G_J <= `G_LEN - 8'd1; `G_K <= 8'd0; `G_NZ <= 1'b0; t3 <= G_D1;
+            end
+            G_D1: begin `G_RA <= al[8:0]; `G_RRET <= G_D2; t3 <= G_RD; end
+            G_D2: begin `G_CB <= `G_GRD; `G_RA <= al[8:0]; `G_RRET <= G_D3; t3 <= G_RD; end
+            G_D3: begin
+              we <= 1'b1; waddr <= al[8:0]; wdata <= g_d;
+              if (g_d != 8'd0) begin
+                `G_DN <= {`G_K, g_msb(g_d)};
+                if (!`G_NZ) `G_TZ <= {`G_K, g_lsb(g_d)};
+                `G_NZ <= 1'b1;
+              end
+              t3 <= G_D4;
+            end
+            G_D4:   if (`G_J == 8'd0) t3 <= G_DEND;
+                    else begin `G_J <= `G_J - 8'd1; `G_K <= `G_K + 8'd1; t3 <= G_D1; end
+            G_DEND: if (!`G_NZ) t3 <= G_NXM;                               // d = 0: not counted
+                    else begin
+                      `G_USED <= `G_USED + 8'd1; `G_DX <= `G_DN;
+                      if (`G_TZ != 11'd0) begin `G_SRET <= G_DSH[5:0]; t3 <= G_SH0; end
+                      else t3 <= G_DSH;
+                    end
+            G_DSH:  if (!`G_GV) begin `G_GV <= 1'b1; `G_YS <= `G_XS; `G_DY <= `G_DX; t3 <= G_NXM; end
+                    else t3 <= G_ST;
+            G_NXM:  begin `G_A <= al[8:0]; t3 <= G_MS; end                 // a + L + 1
+            // ---- the binary gcd: deg x >= deg y (a swap is two buffer bits), x ^= y ----
+            G_ST: begin
+              if (al_lt) begin `G_XS <= `G_YS; `G_YS <= `G_XS; `G_DX <= `G_DY; `G_DY <= `G_DX; end
+              `G_J <= `G_LEN - 8'd1; `G_K <= 8'd0; `G_NZ <= 1'b0; t3 <= G_X1;
+            end
+            G_X1: begin `G_RA <= al[8:0]; `G_RRET <= G_X2; t3 <= G_RD; end
+            G_X2: begin `G_CB <= `G_GRD; `G_RA <= al[8:0]; `G_RRET <= G_X3; t3 <= G_RD; end
+            G_X3: begin
+              we <= 1'b1; waddr <= al[8:0]; wdata <= g_xv;
+              if (g_xv != 8'd0) begin
+                `G_DN <= {`G_K, g_msb(g_xv)};
+                if (!`G_NZ) `G_TZ <= {`G_K, g_lsb(g_xv)};
+                `G_NZ <= 1'b1;
+              end
+              t3 <= G_X4;
+            end
+            G_X4:   if (`G_J == 8'd0) t3 <= G_XEND;
+                    else begin `G_J <= `G_J - 8'd1; `G_K <= `G_K + 8'd1; t3 <= G_X1; end
+            G_XEND: if (!`G_NZ) t3 <= G_NXM;                               // x = 0: gcd = y
+                    else begin `G_DX <= `G_DN; `G_SRET <= G_ST[5:0]; t3 <= G_SH0; end
+            // ---- x >>= tz, in place, top byte last: new[j] = ({old[j-q-1], old[j-q]} >> r) ----
+            G_SH0:  begin `G_S <= al[9:0]; `G_J <= `G_LEN - 8'd1; `G_NX0 <= 1'b0; t3 <= G_SH1; end
+            G_SH1:  begin `G_RA <= al[8:0]; `G_RRET <= G_SH2; t3 <= G_RD; end   // old[S]
+            G_SH2:  begin `G_CB <= `G_GRD; t3 <= G_SH3; end
+            G_SH3:  if (`G_S == 10'd0) begin `G_NX0 <= 1'b1; t3 <= G_SH4; end  // above the top: 0
+                    else begin `G_S <= `G_S - 10'd1; t3 <= G_SH3B; end
+            G_SH3B: begin `G_RA <= al[8:0]; `G_RRET <= G_SH4; t3 <= G_RD; end   // old[S - 1]
+            G_SH4:  begin we <= 1'b1; waddr <= al[8:0]; wdata <= g_fn[7:0]; `G_CB <= g_nx; t3 <= G_SH5; end
+            G_SH5:  if (`G_J == 8'd0) t3 <= G_SHE;
+                    else begin `G_J <= `G_J - 8'd1; t3 <= G_SH3; end
+            G_SHE:  begin `G_DX <= al[10:0]; t3 <= {1'b0, `G_SRET}; end     // deg -= tz
+            // ---- the group's candidate against the record's best (the golden's order) ----
+            G_GEND: if (g_cand) begin `G_RA <= 9'd120; `G_RRET <= G_C1; t3 <= G_RD; end
+                    else t3 <= G_GNX;
+            G_C1: begin `G_BF <= acc[65]; `G_BL <= acc[67]; `G_RA <= 9'd122; `G_RRET <= G_C2; t3 <= G_RD; end
+            G_C2: begin `G_BU <= `G_GRD; `G_RA <= 9'd123; `G_RRET <= G_C3; t3 <= G_RD; end
+            G_C3:   if (g_better) begin `G_K <= 8'd0; `G_J <= `G_LEN - 8'd1; t3 <= G_CW; end
+                    else t3 <= G_GNX;
+            // write it: 0..3 from registers (byte 3 = the group's size until G_FIN),
+            // 4..7 = g's last w / 8 bytes (the low w bits: the poly without its top)
+            G_CW: begin
+              if (dv_q[10]) begin
+                if (g_pb) begin `G_RA <= al[8:0]; `G_RRET <= G_CW1; t3 <= G_RD; end
+                else begin
+                  we <= 1'b1; waddr <= {6'b001111, dv_q[10:8]}; wdata <= 8'd0; `G_K <= `G_K + 8'd1;
+                  if (dv_q[10:8] == 3'd7) t3 <= G_GNX;
+                end
+              end else begin
+                we <= 1'b1; waddr <= {6'b001111, dv_q[10:8]}; `G_K <= `G_K + 8'd1;
+                case (dv_q[9:8])
+                  2'd0:    wdata <= {1'b0, `G_LSB, 1'b0, 1'b1, 1'b1, w};
+                  2'd1:    wdata <= {(`G_LEN > 8'd63) ? 6'd63 : bh[5:0], g_wc};
+                  2'd2:    wdata <= `G_USED;
+                  default: wdata <= `G_CNT;
+                endcase
+              end
+            end
+            G_CW1: begin
+              we <= 1'b1; waddr <= {6'b001111, dv_q[10:8]}; wdata <= `G_GRD;
+              `G_J <= `G_J - 8'd1; `G_K <= `G_K + 8'd1;
+              t3 <= (dv_q[10:8] == 3'd7) ? G_GNX : G_CW;
+            end
+            // the other bit order, else the next header (hp + L + 1)
+            G_GNX:  if (!`G_LSB) begin `G_LSB <= 1'b1; t3 <= G_GRP; end
+                    else begin `G_HP <= al[8:0]; t3 <= G_HDR; end
+            G_FIN:  begin we <= 1'b1; waddr <= 9'd123; wdata <= s3_nmsg; t3 <= T_DONE; end
+            // a store read: data 2 cycles after the request
+            G_RD:   begin re <= 1'b1; t3 <= G_RW; end
+            G_RW:   t3 <= G_RV;
+            G_RV:   begin `G_GRD <= rdata; t3 <= `G_RRET; end
             default: begin done <= 1'b1; st <= S_IDLE; end      // T_DONE
           endcase
         end
@@ -2283,6 +2516,36 @@ module pe_pit_s12 #(parameter integer AW = 9) (
 `undef S3_CUR
 `undef S3_L
 `undef S3_IDLE
+`undef G_RA
+`undef G_DX
+`undef G_DY
+`undef G_DN
+`undef G_TZ
+`undef G_CB
+`undef G_GRD
+`undef G_RRET
+`undef G_J
+`undef G_K
+`undef G_S
+`undef G_HP
+`undef G_Q
+`undef G_A
+`undef G_BB
+`undef G_LEN
+`undef G_CNT
+`undef G_USED
+`undef G_SRET
+`undef G_BU
+`undef G_LSB
+`undef G_GV
+`undef G_YS
+`undef G_XS
+`undef G_NZ
+`undef G_PAST
+`undef G_NF
+`undef G_NX0
+`undef G_BF
+`undef G_BL
 endmodule
 
 

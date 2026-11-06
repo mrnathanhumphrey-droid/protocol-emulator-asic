@@ -37,6 +37,7 @@ import run_pit_s12 as R12                   # noqa: E402
 import pit_s0_golden as S0                  # noqa: E402
 
 DEC_AT = 128
+S3_AT = 120          # the stage 3 record; pieces 1-2 own bytes 120..127 (Wilson 11-05)
 
 
 # ---------------------------------------------------------------------------
@@ -113,10 +114,13 @@ def cases():
 
 
 def expect(cap):
-    """(stage 1-2's 80 record bytes, the decoded-message bytes from 128, detail)"""
+    """(stage 1-2's 80 record bytes, the decoded-message bytes from 128, detail);
+    detail["rec8"] = the stage 3 record's first 8 bytes (piece 2: the GCD's
+    result; byte 0's io / class bits 5 and 7 are piece 3's, masked)"""
     G = S0.frozen_model()
     recs, _res = R12.expect(cap)
     rec, out = G.stage3(cap, 0, G.classify_bus(cap, 0))
+    out["rec8"] = bytes([rec[0] & 0x5F]) + rec[1:8]
     enc = []
     for m in out.get("msgs") or []:
         enc += [len(m)] + list(m)
@@ -152,6 +156,9 @@ def main() -> int:
         bad = []
         if got != want12:
             bad.append("stage 1-2 records")
+        r8 = bytes((mem.get(S3_AT + i, -1) & 0xFF) for i in range(8))
+        if r8 != out["rec8"]:
+            bad.append("record %d..%d: RTL %s, golden %s" % (S3_AT, S3_AT + 7, r8.hex(), out["rec8"].hex()))
         if dec != enc:
             i = next(i for i in range(len(enc)) if dec[i] != enc[i])
             bad.append("messages at byte %d: RTL %s, golden %s" % (
