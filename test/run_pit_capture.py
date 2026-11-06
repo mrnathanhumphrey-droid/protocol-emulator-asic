@@ -46,6 +46,13 @@ MUTANTS = [("M_PIT_K_OFF1", "k one too large"), ("M_PIT_MASK_DROP", "mask bit 0 
            # Wilson 10-29: a quiet bus must END on its budget (disabled -> the hang)
            ("M_PIT_NO_BUDGET", "the budget never expires (the hang)"),
            ("M_PIT_LV0_INV", "one wire's starting level inverted")]
+#: ⭐ each must-fire runs ONLY the cases it targets (Wilson 11-05, red-team 3),
+#: and must go red on EVERY one of them. Measured 11-05 on the full run: each
+#: target below was red there (K_OFF1 on 8 cases, LV0_INV on all 10, ...).
+MUTANT_CASES = {"M_PIT_K_OFF1": ["spi0"], "M_PIT_MASK_DROP": ["spi0", "spi0_mask03"],
+                "M_PIT_NO_OVERRUN": ["fast_overrun"], "M_PIT_WHY_DROP": ["fast_overrun"],
+                "M_PIT_NO_SAT": ["long_gap"], "M_PIT_NO_BUDGET": ["quiet_budget", "budget_mid"],
+                "M_PIT_LV0_INV": ["i2c"]}
 RNG = random.Random(20261028)
 
 
@@ -323,6 +330,66 @@ def main() -> int:
     tmp = tempfile.mkdtemp(prefix="pe_pitcap_")
     probs, whys = [], set()
     vvp = os.path.join(tmp, "pit.vvp")
+    # ⭐ THE BOUND STORE (Wilson 11-03): the tapeout config builds pe_store on
+    # IHP stock cells (PE_IHP_CELLS, src/pe_cells_ihp.v). One PIT case runs on
+    # the generic and on the bound cells, ON THE SAME SIMULATOR (the bound
+    # arms' -- gate_store_latch.cells_sim), and the stored bytes must be
+    # BYTE-IDENTICAL as well as bit-exact against the golden encoder. No PDK
+    # models or a simulator that cannot drive them = COULD NOT RUN, red.
+    # ⛔ FIRST, and the gate STOPS red if it cannot run (Wilson 11-05, red-team
+    # 2): it used to run last, after minutes of cases, and a simulator that
+    # cannot drive the cell models read all -1 without saying so. The probe is
+    # gate_store_latch's: a transparent sg13cmos5l_dlhq_1 must read q=1.
+    print("  bound store (PE_IHP_CELLS on the PDK's cell models)")
+    import gate_store_latch as GSL
+    models = GSL.pdk_models()
+    civ, cvvp = GSL.cells_sim()
+    if models is not None:
+        pv = os.path.join(tmp, "probe.v")
+        with open(pv, "w", encoding="utf-8") as fh:
+            fh.write(GSL.PROBE)
+        pb = os.path.join(tmp, "probe.vvp")
+        b = run([civ, "-g2012", "-o", pb, "-s", "tb_probe", pv] + models)
+        r = run(GSL.cells_run(cvvp, [pb])) if b.returncode == 0 else None
+        if r is None or "PROBE q=1" not in r.stdout:
+            probs.append("COULD NOT RUN the bound PIT case: %s does not drive the PDK models "
+                         "(a transparent sg13cmos5l_dlhq_1 read %s)"
+                         % (civ, (r.stdout.strip() if r else "a build failure")[-40:]))
+            models = None
+    if models is None:
+        if not probs:
+            probs.append("COULD NOT RUN the bound PIT case: no PDK stdcell models")
+    else:
+        name, waves, mask = CASES[0]
+        got = {}
+        for arm, defs, extra in (("generic", [], []),
+                                 ("bound", ["PE_IHP_CELLS"], ["src/pe_cells_ihp.v"] + models)):
+            bv = os.path.join(tmp, "pit_%s.vvp" % arm)
+            try:
+                build(bv, defs, civ, extra)
+            except RuntimeError as exc:
+                probs.append("COULD NOT RUN the bound PIT case (%s build): %s" % (arm, exc))
+                break
+            got[arm] = sim(bv, tmp, "%s_%s" % (name, arm), sniff_image(mask, BUDGET_FOR.get(name, 0)),
+                           waves_to_stim(waves), cvvp)
+        if len(got) == 2:
+            same = got["generic"][1] == got["bound"][1]
+            p = compare(got["bound"][0], got["bound"][1], got["bound"][2], name)[0]
+            print("    %-14s on %s: bound %s generic (%d store bytes), %s" % (
+                name, os.path.basename(civ), "==" if same else "!=", len(got["bound"][1]),
+                "bit-exact" if not p else "*** " + p[0]))
+            if not same:
+                diff = sorted(a for a in set(got["generic"][1]) | set(got["bound"][1])
+                              if got["generic"][1].get(a) != got["bound"][1].get(a))
+                probs.append("bound store: %d byte(s) differ from the generic run, first at %s"
+                             % (len(diff), diff[:1]))
+            probs += ["bound %s: %s" % (name, x) for x in p]
+    if probs:
+        for p_ in probs:
+            print("  *** " + p_)
+        print("  GATE pit-capture: FAILED")
+        return 1
+    print()
     build(vvp)
     for name, waves, mask in CASES:
         log, mem, lv0, raw = sim(vvp, tmp, name, sniff_image(mask, BUDGET_FOR.get(name, 0)), waves_to_stim(waves))
@@ -353,53 +420,19 @@ def main() -> int:
     for define, what in MUTANTS:
         mv = os.path.join(tmp, "pit_%s.vvp" % define.lower())
         build(mv, [define])
-        broke = []
+        broke, want = [], MUTANT_CASES[define]
         for name, waves, mask in CASES:
+            if name not in want:
+                continue
             log, mem, lv0, _raw = sim(mv, tmp, name + "_m", sniff_image(mask, BUDGET_FOR.get(name, 0)),
                                       waves_to_stim(waves))
             if compare(log, mem, lv0, name + "_m")[0]:
                 broke.append(name)
-        print("    %-18s %-36s %s" % (define, what, ("RED on " + ", ".join(broke)) if broke else "*** SURVIVED ***"))
-        if not broke:
-            probs.append("%s survived" % define)
-    # ⭐ THE BOUND STORE (Wilson 11-03): the tapeout config builds pe_store on
-    # IHP stock cells (PE_IHP_CELLS, src/pe_cells_ihp.v). One PIT case runs on
-    # the generic and on the bound cells, ON THE SAME SIMULATOR (the bound
-    # arms' -- gate_store_latch.cells_sim), and the stored bytes must be
-    # BYTE-IDENTICAL as well as bit-exact against the golden encoder. No PDK
-    # models or a simulator that cannot drive them = COULD NOT RUN, red.
-    print()
-    print("  bound store (PE_IHP_CELLS on the PDK's cell models)")
-    import gate_store_latch as GSL
-    models = GSL.pdk_models()
-    civ, cvvp = GSL.cells_sim()
-    if models is None:
-        probs.append("COULD NOT RUN the bound PIT case: no PDK stdcell models")
-    else:
-        name, waves, mask = CASES[0]
-        got = {}
-        for arm, defs, extra in (("generic", [], []),
-                                 ("bound", ["PE_IHP_CELLS"], ["src/pe_cells_ihp.v"] + models)):
-            bv = os.path.join(tmp, "pit_%s.vvp" % arm)
-            try:
-                build(bv, defs, civ, extra)
-            except RuntimeError as exc:
-                probs.append("COULD NOT RUN the bound PIT case (%s build): %s" % (arm, exc))
-                break
-            got[arm] = sim(bv, tmp, "%s_%s" % (name, arm), sniff_image(mask, BUDGET_FOR.get(name, 0)),
-                           waves_to_stim(waves), cvvp)
-        if len(got) == 2:
-            same = got["generic"][1] == got["bound"][1]
-            p = compare(got["bound"][0], got["bound"][1], got["bound"][2], name)[0]
-            print("    %-14s on %s: bound %s generic (%d store bytes), %s" % (
-                name, os.path.basename(civ), "==" if same else "!=", len(got["bound"][1]),
-                "bit-exact" if not p else "*** " + p[0]))
-            if not same:
-                diff = sorted(a for a in set(got["generic"][1]) | set(got["bound"][1])
-                              if got["generic"][1].get(a) != got["bound"][1].get(a))
-                probs.append("bound store: %d byte(s) differ from the generic run, first at %s"
-                             % (len(diff), diff[:1]))
-            probs += ["bound %s: %s" % (name, x) for x in p]
+        missed = [c for c in want if c not in broke]
+        print("    %-18s %-36s %s" % (define, what, ("RED on " + ", ".join(broke)) if not missed
+                                     else "*** SURVIVED on %s ***" % ", ".join(missed)))
+        if missed:
+            probs.append("%s survived on %s" % (define, ", ".join(missed)))
     print()
     for p_ in probs:
         print("  *** " + p_)
