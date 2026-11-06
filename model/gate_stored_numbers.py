@@ -767,6 +767,16 @@ SPEC_SYMBOLS = {
     ("test/run_pit_clk.py", "XMODEM"),
     ("test/run_pit_clk.py", "CCITT"),
     ("test/run_pit_clk.py", "SMBUS"),
+    # the RPL emitter (11-06, item 2): CATALOGUE is the frozen golden's
+    # published CRC catalogue (a copy of pit_golden.CATALOGUE, specifications);
+    # WCODE / WHY / WHY_TIMING are the results region's field codes (the
+    # layout in src/project.v) -- design. BAD is the parser's refusal cases'
+    # spec TEXT (stimulus). Judged live by gate pit-emit.
+    ("model/pit_emit.py", "CATALOGUE"),
+    ("model/pit_emit.py", "WCODE"),
+    ("model/pit_emit.py", "WHY"),
+    ("model/pit_emit.py", "WHY_TIMING"),
+    ("test/run_pit_emit.py", "BAD"),
     # v2 PIT chunk 2: the FROZEN stage-0 model (e55d0b63, never edited here):
     # CATALOGUE is the published CRC parameter catalogue (Rocksoft model) and
     # WIDTHS the CRC widths it searches (8 / 16 / 32) -- specifications, not
