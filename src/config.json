@@ -46,8 +46,33 @@
   "//": "Configuration docs: https://librelane.readthedocs.io/en/latest/reference/configuration.html",
 
   "//": "THE LATCH STORE (Wilson 10-31 / 11-03): the 512-byte store in IHP stock latches (sg13cmos5l_dlhq_1), one latch_posedge clock gate per row (sg13cmos5l_lgcp_1), the write data through 8 hold delays (sg13cmos5l_dlygate4sd3_1). PE_IHP_CELLS makes pe_store use src/pe_cells_ihp.v's bindings instead of its generic cells; gate_store_latch simulates the bound version against the PDK's own cell models. RSZ_DONT_TOUCH_RX keeps the resizer from removing the 8 hold delays (they are the hold margin by design).",
-  "VERILOG_DEFINES": ["PE_IHP_CELLS"],
+  "VERILOG_DEFINES": ["PE_IHP_CELLS", "PE_SRAM_MACRO"],
   "RSZ_DONT_TOUCH_RX": ".*g_hold.*u_hold[.]u_d$",
+
+  "//": "THE SRAM STORE (Wilson 11-07): the store is the IHP RM_IHPSG13_1P_256x32_c2_bm_bist macro (pe_store's MEM_TYPE sram, the default; PE_SRAM_MACRO binds it through src/pe_sram_macro_ihp.v). Powered Tiny Tapeout's way -- github.com/TinyTapeout/ttihp-cmos5l-sram-example 15ac9bc, README steps 1-4: the Project.ExtendPowerStripes step (librelane_plugin_sram_pdn.py + odb_stripes.py at the repository root, Apache-2.0, adapted there from Ken Pettit's design) runs after OpenROAD.GeneratePDN and moves the Metal4 stripes onto the macro's power columns; src/pdn_cfg.tcl is the stock script minus the per-macro grid. Proven on LibreLane 3.1.0.dev3 (11-07): check_power_grid connects both nets after the step and fails before it. The macro sits at (3.36, 3.78) FS, its pins facing the logic; the 256x32's columns are on the 11.24 um pitch the FP_PDN_V* values below land on. The instance name is yosys's flattened one.",
+  "meta": {"flow": "Classic", "substituting_steps": {"+OpenROAD.GeneratePDN": "Project.ExtendPowerStripes"}},
+  "MACROS": {
+    "RM_IHPSG13_1P_256x32_c2_bm_bist": {
+      "instances": {"u_store.genblk2.g_mem.u_macro.u_sram": {"location": [3.36, 3.78], "orientation": "FS"}},
+      "gds": ["pdk_dir::libs.ref/sg13cmos5l_sram/gds/RM_IHPSG13_1P_256x32_c2_bm_bist.gds"],
+      "lef": ["pdk_dir::libs.ref/sg13cmos5l_sram/lef/RM_IHPSG13_1P_256x32_c2_bm_bist.lef"],
+      "lib": {
+        "*_typ_*": ["pdk_dir::libs.ref/sg13cmos5l_sram/lib/RM_IHPSG13_1P_256x32_c2_bm_bist_typ_1p20V_25C.lib"],
+        "*_fast_*": ["pdk_dir::libs.ref/sg13cmos5l_sram/lib/RM_IHPSG13_1P_256x32_c2_bm_bist_fast_1p32V_m55C.lib"],
+        "*_slow_*": ["pdk_dir::libs.ref/sg13cmos5l_sram/lib/RM_IHPSG13_1P_256x32_c2_bm_bist_slow_1p08V_125C.lib"]
+      }
+    }
+  },
+  "PDN_MACRO_CONNECTIONS": [
+    "u_store\\.genblk2\\.g_mem\\.u_macro\\.u_sram VPWR VGND VDD! VSS!",
+    "u_store\\.genblk2\\.g_mem\\.u_macro\\.u_sram VPWR VGND VDDARRAY! VSS!"
+  ],
+  "PDN_CFG": "dir::pdn_cfg.tcl",
+  "EXTEND_STRIPES_SRAM_ARRAY_EVERY_OTHER": true,
+  "//": "pdngen checks the macro's power before ExtendPowerStripes connects it: its errors are expected there (the example). Magic extracts the macro from its LEF, so stripes over its Metal4 obstruction read as overlaps that the GDS does not have; KLayout DRC on the final GDS is the check.",
+  "ERROR_ON_PDN_VIOLATIONS": 0,
+  "RUN_MAGIC_DRC": 0,
+  "ERROR_ON_ILLEGAL_OVERLAPS": 0,
 
   "//": "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!",
   "//": "!!! DO NOT CHANGE ANYTHING BELOW THIS POINT !!!",
@@ -74,8 +99,10 @@
   "FP_IO_HLENGTH": 2,
   "FP_IO_VLENGTH": 2,
 
-  "FP_PDN_VPITCH": 50.0,
+  "FP_PDN_VPITCH": 44.96,
   "FP_PDN_VWIDTH": 2.1,
+  "FP_PDN_VSPACING": 3.52,
+  "FP_PDN_VOFFSET": 6.15,
 
   "//": "Clock",
   "RUN_CTS": 1,

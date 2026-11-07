@@ -101,7 +101,11 @@ def crc_waves(p, L, seed, nshort=4, longs=(1, 3), **kw):
     return uart_waves(msgs + [[0x00]], **kw)
 
 
-MUTANTS = [("M_S3_LAST_KEEP", "the last message kept as evidence", "s3_cut_full")]
+MUTANTS = [("M_S3_LAST_KEEP", "the last message kept as evidence", "s3_cut_full"),
+           # the SRAM store's write buffer (Wilson 11-07): every write treated as
+           # meeting a read -- stage 0's back-to-back table writes overflow it,
+           # and the store's check stops the run (no record: red)
+           ("M_SRAM_WBUF_OVF", "the SRAM write buffer overflowed", "s3_crc32_full")]
 MODBUS = (16, 0x8005, 0xFFFF, 0x0000, True)
 CRC32 = (32, 0x04C11DB7, 0xFFFFFFFF, 0xFFFFFFFF, True)
 S3_WAVES = {

@@ -300,7 +300,34 @@ module pe_store #(
 `endif
       wire _unused_bk = &{1'b0, wraddr_bk[WIDE_B*AW-1:AW], wraddr_bk[WB_W-1:0]};
       // the read always goes now; a write meeting it waits in the buffer
+      // ⭐ WHY ONE ENTRY CANNOT OVERFLOW (Wilson 11-07: a sim $finish does not
+      // protect silicon, so the argument is from the RTL). It overflows only on a
+      // write AND a read while a write is buffered -- writes in two consecutive
+      // cycles with reads still landing. Every writer, its worst pattern:
+      //   loader (PROG)      one byte per host push, >= 6 cycles apart; the only
+      //                      reader is the bit-serial readback  -> fills once, drains next cycle
+      //   pe_pit capture     maybe every cycle, but NO reader runs: stage 0 starts
+      //   (both captures)    at cap_done; in the second, stage 0 waits (P_KCAP) and
+      //                      stages 1-3 sit at T_CK              -> never fills
+      //   stage 0 table /    consecutive, with its walks done and stages 1-3 not
+      //   descriptor         reading                               -> never fills
+      //   stages 1-2 (S_WR)  consecutive, after the wire's walk  -> never fills
+      //   stage 3 decode     WRITE-BEHIND during stage 0's walk: never two writes
+      //                      in consecutive cycles (each write state -- T_SPL,
+      //                      T_SAI, T_END -- is followed by one that does not
+      //                      write); the walk reads at most once per 10 cycles
+      //                      (D_REQ, D_LAT, 8 x D_BIT; a hold only lengthens it)
+      //                                                           -> fills once, drains next cycle
+      //   stage 3 GCD /      stages 1-3 alone, and they never set re and we in the
+      //   solver / record    same state (one-cycle pulses, separate case arms)
+      //                                                           -> never fills
+      // ⇒ at most ONE cycle occupied. The checks below hold it in every bench;
+      // M_SRAM_WBUF_OVF (every write treated as meeting a read) must trip them.
+`ifdef M_SRAM_WBUF_OVF
+      wire              rd_now  = re | wre | wr;
+`else
       wire              rd_now  = re | wre;
+`endif
       wire [AW-1:0]     rd_addr = raddr;
       // the written byte's lane: byte k of a word at bit (WIDE_B-1-k)*8 (the flop arm's order)
 `ifdef M_STORE_WRONG_BANK
@@ -400,8 +427,12 @@ module pe_store #(
       // register holds its power-up value (Verilator's random init put a write
       // and a wide read on the first edge at one seed), as silicon would --
       // and the RAM's contents are garbage until the loader writes them anyway
+      // ⛔ ARMED ON A CLOCK EDGE THAT SEES RESET LOW, as the latch arm's
+      // chk_armed (11-02). The trial armed on `negedge rst_n`, which no bench
+      // produces (rst_n STARTS low): every check below was dead in every SRAM
+      // run -- found by M_SRAM_WBUF_OVF staying green (Wilson 11-07).
       reg rst_seen = 1'b0;
-      always @(negedge rst_n) rst_seen <= 1'b1;
+      always @(posedge clk) if (rst_n === 1'b0) rst_seen <= 1'b1;
       always @(posedge clk) if (rst_seen && rst_n === 1'b1 && wre === 1'b1 && (wr === 1'b1 || re === 1'b1 || pw === 1'b1)) begin
         $display("pe_store: *** ONE-PORT CONTRACT BROKEN at %0t: wre with %s", $time,
                  wr ? "a write" : re ? "a narrow read" : "a buffered write");

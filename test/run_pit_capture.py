@@ -179,7 +179,7 @@ def run(cmd):
 
 
 #: PE_DEFINES (comma list): defines added to EVERY build of the PIT benches -- the
-#: store arm (Wilson 11-07: PE_MEM_SRAM runs the PIT gates on the SRAM store)
+#: store arm (Wilson 11-07: PE_MEM_LATCH runs the PIT gates on the latch fallback)
 ENV_DEFINES = tuple(filter(None, os.environ.get("PE_DEFINES", "").split(",")))
 
 

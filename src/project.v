@@ -97,13 +97,17 @@ module tt_um_protocol_emulator #(
     // ⭐ THE LATCH STORE (Wilson 10-31, Track 2): the 512 bytes in latches, one
     // clock gate per row -- -30 % of the chip in stock cells. "flops" is the
     // reference arm (and v1-lock's store).
-`ifdef PE_MEM_SRAM
-    // THE SRAM STORE (Wilson 11-07): the latch store fails CTS at density 60
-    // (DPL-0036, the gated-row clock buffers); PE_MEM_SRAM selects the IHP
-    // 1P 256x32 macro arm. All three arms stay selectable (flops, latch, sram).
-    parameter         MEM_TYPE = "sram",
-`else
+    // ⭐ THE SRAM STORE IS THE STORE (Wilson 11-07): the latch store fails CTS at
+    // density 60 and worse at 58 (DPL-0036 on its gated-row clock buffers, a
+    // local clock-tree wall); the IHP 1P 256x32 macro clears CTS and global
+    // routing and saves ~146k placed. The fallbacks stay selectable:
+    // PE_MEM_LATCH (the latch store), PE_MEM_FLOPS (the reference / v1-lock).
+`ifdef PE_MEM_LATCH
     parameter         MEM_TYPE = "latch",
+`elsif PE_MEM_FLOPS
+    parameter         MEM_TYPE = "flops",
+`else
+    parameter         MEM_TYPE = "sram",
 `endif
     // ⛔ `RX_SERIAL` WAS DELETED HERE, by ruling. It was overridden nowhere in
     // the tree, so its `else` was source no configuration executed; the serial
