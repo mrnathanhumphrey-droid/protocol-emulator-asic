@@ -780,6 +780,9 @@ SPEC_SYMBOLS = {
     ("model/pit_emit.py", "WCODE"),
     ("model/pit_emit.py", "WHY"),
     ("model/pit_emit.py", "WHY_TIMING"),
+    # SPI_MODE (11-06): the SPI standard's (CPOL, sample edge) -> mode table --
+    # a specification, judged live by pit-emit and pit-rt.
+    ("model/pit_emit.py", "SPI_MODE"),
     ("test/run_pit_emit.py", "BAD"),
     # v2 PIT chunk 2: the FROZEN stage-0 model (e55d0b63, never edited here):
     # CATALOGUE is the published CRC parameter catalogue (Rocksoft model) and

@@ -183,6 +183,8 @@ def main() -> int:
         r16 = bytes((mem.get(S3_AT + i, -1) & 0xFF) for i in range(16))
         if r16 != out["rec"]:
             bad.append("record %d..%d: RTL %s, golden %s" % (S3_AT, S3_AT + 15, r16.hex(), out["rec"].hex()))
+        if mem.get(3, -1) != 0:                 # UART: no clocked-bus descriptor (byte 3)
+            bad.append("byte 3 = %02x on a UART capture, want 00" % (mem.get(3, -1) & 0xFF))
         if dec != enc:
             i = next(i for i in range(len(enc)) if dec[i] != enc[i])
             bad.append("messages at byte %d: RTL %s, golden %s" % (

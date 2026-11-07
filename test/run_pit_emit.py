@@ -108,12 +108,31 @@ end sniff;
 """
 
 
+def spi_m3():
+    """the descriptor (byte 3, Wilson 11-06): valid, CPOL known 1, sample rise,
+    CS active low -> SPI mode 3"""
+    b = bytearray(spi())
+    b[3] = 0x80 | 0x40 | 0x20 | 0x10
+    return b
+
+
+SPI_M3_TEXT = SPI_TEXT.replace("  crc on uio2", "  bus on uio2 : spi mode 3 sample rise cs low order msb assumed;\n  crc on uio2")
+
+
+def spi_nocpol():
+    """CPOL not agreed: the mode is UNKNOWN, the rest still claimed"""
+    b = bytearray(spi())
+    b[3] = 0x80 | 0x08                     # sample fall, CS active HIGH, no CPOL
+    return b
+
+
 def i2c():
     b = img()
     table(b, {6: E.R_CLOCK_I2C, 7: E.R_SYNC_I2C | 6 << 3 | 1 << 6})
     rec(b, 6, E.C_ROLE)
     rec(b, 7, E.C_ROLE)
     s3(b, 7, poly=0x07, width=8, frame=5, init=0x00, xorout=0x00)
+    b[3] = 0x90                            # the descriptor: valid, sample rise
     return b
 
 
@@ -220,10 +239,10 @@ def uart_nopoly():
 IMAGES = {"uart_crc": uart_crc, "uart_poly_only": uart_poly_only, "spi": spi, "i2c": i2c,
           "refused": refused, "no_cs": no_cs, "mixed": mixed, "uart_nopoly": uart_nopoly,
           "uart_refl_xorout": uart_refl_xorout, "clk_refused": clk_refused,
-          "uart_one_len": uart_one_len,
+          "uart_one_len": uart_one_len, "spi_m3": spi_m3, "spi_nocpol": spi_nocpol,
           "empty": img}
 TEXTS = {"uart_crc": UART_CRC_TEXT, "spi": SPI_TEXT, "no_cs": NO_CS_TEXT,
-         "uart_refl_xorout": REFL_TEXT, "clk_refused": CLK_REFUSED_TEXT}
+         "uart_refl_xorout": REFL_TEXT, "clk_refused": CLK_REFUSED_TEXT, "spi_m3": SPI_M3_TEXT}
 
 BAD = {
     "no end line": "spec sniff is\n  captured at 60000000 Hz;\n",
@@ -237,6 +256,10 @@ BAD = {
     "bad wire name": "spec sniff is\n  captured at 60000000 Hz;\n  wire uio9 : role CLOCK;\nend sniff;\n",
     "provenance as a comment": "spec sniff is\n  captured at 60000000 Hz;\n"
                                "  crc on uio0 : width 8 poly 0x07 frame 3 bytes init 0x00 xorout 0x00; -- source data\nend sniff;\n",
+    "bus without cs": "spec sniff is\n  captured at 60000000 Hz;\n"
+                      "  bus on uio1 : spi mode 0 sample rise order msb assumed;\nend sniff;\n",
+    "bus order as a comment": "spec sniff is\n  captured at 60000000 Hz;\n"
+                              "  bus on uio1 : i2c sample rise; -- order msb\nend sniff;\n",
     "bad pattern": "spec sniff is\n  captured at 60000000 Hz;\n  pattern Frame(uio0) => Frame(uio0);\nend sniff;\n",
 }
 GOOD_PATTERN = ("spec sniff is\n  captured at 60000000 Hz;\n"
@@ -284,6 +307,8 @@ def main() -> int:
         print("  refuse %-24s *** accepted" % "reason code 15")
     except E.SpecError as e:
         print("  refuse %-24s ok (%s)" % ("reason code 15", e))
+    print("  bus lines: %s" % [ln.strip() for n in ("spi_m3", "spi_nocpol", "i2c")
+                               for ln in E.emit(bytes(IMAGES[n]()), HZ).splitlines() if "bus" in ln])
     print("  reason lines: %s" % [ln.strip() for n in ("uart_nopoly", "uart_one_len")
                                   for ln in E.emit(bytes(IMAGES[n]()), HZ).splitlines() if "?" in ln])
     for why, t in BAD.items():

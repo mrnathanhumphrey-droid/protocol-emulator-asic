@@ -1434,6 +1434,10 @@ module pe_pit_s0 #(parameter integer AW = 9) (
   reg           ck_dr, ck_df, ck_sn0, ck_sn1;      // dirty rise / fall; counted edges seen in c level 0 / 1
   reg  [1:0]    ck_ar, ck_af, ck_ad;
   reg           ck_vr, ck_vf, ck_vd;
+  // THE DESCRIPTOR's CPOL (Wilson 11-06, golden clocked_desc), pass 1: the
+  // records where CS goes ACTIVE (ck_cn) and, of them, those with the clock
+  // HIGH before the record (ck_ch: cl ^ ce, the level the record left)
+  reg  [NW-1:0] ck_cn, ck_ch;
   wire          k_fe = p1_rm[ck_f], k_fl = p1_lv[ck_f];
   wire          k_rise = ce & cl, k_fall = ce & ~cl;
   wire          k_cnt = de & (ck_i2c ? ~(cl & ~ce) : (~k_fe & (k_fl == ck_act)));
@@ -1445,9 +1449,11 @@ module pe_pit_s0 #(parameter integer AW = 9) (
     if (!rst_n) begin
       ck_hi <= {NW{1'b0}}; ck_dr <= 1'b0; ck_df <= 1'b0; ck_sn0 <= 1'b0; ck_sn1 <= 1'b0;
       ck_ar <= 2'd0; ck_af <= 2'd0; ck_ad <= 2'd0; ck_vr <= 1'b0; ck_vf <= 1'b0; ck_vd <= 1'b0;
+      ck_cn <= {NW{1'b0}}; ck_ch <= {NW{1'b0}};
     end else if (walk_go) begin
       ck_hi <= {NW{1'b0}}; ck_dr <= 1'b0; ck_df <= 1'b0; ck_sn0 <= 1'b0; ck_sn1 <= 1'b0;
       ck_vr <= 1'b0; ck_vf <= 1'b0; ck_vd <= 1'b0;
+      ck_cn <= {NW{1'b0}}; ck_ch <= {NW{1'b0}};
     end else if (p2_v && wk == W_PAIR) begin
       if (ce && k_fl) ck_hi <= ck_hi + ONE;
       if (ck_pass) begin
@@ -1456,6 +1462,10 @@ module pe_pit_s0 #(parameter integer AW = 9) (
         if (k_rise && k_nd) ck_dr <= 1'b1;
         if (k_fall && k_nd) ck_df <= 1'b1;
         if (k_cnt) begin if (cl) ck_sn1 <= 1'b1; else ck_sn0 <= 1'b1; end
+        if (k_fe && k_fl == ck_act) begin
+          ck_cn <= ck_cn + ONE;
+          if (cl ^ ce) ck_ch <= ck_ch + ONE;
+        end
       end
       ck_ar <= k_rise ? 2'd0 : (k_ar[2:1] != 2'd0) ? 2'd2 : k_ar[1:0];
       ck_af <= k_fall ? 2'd0 : (k_af[2:1] != 2'd0) ? 2'd2 : k_af[1:0];
@@ -1569,6 +1579,16 @@ module pe_pit_s0 #(parameter integer AW = 9) (
   end
   // pass 0's CS level: active 1 at >= 7/8 of c's edges high, 0 at >= 7/8 low
   wire [NW+2:0] k_hi8 = {ck_hi, 3'b000}, k_lo8 = {nc - ck_hi, 3'b000}, k_nc7 = {3'b000, nc} * 7;
+  // the descriptor (results byte 3): CPOL known / CPOL, >= 7/8 of CS's activations
+  wire [NW+2:0] k_ch8 = {ck_ch, 3'b000}, k_cl8 = {ck_cn - ck_ch, 3'b000}, k_cn7 = {3'b000, ck_cn} * 7;
+  wire          k_cphi = !ck_i2c && (ck_cn != {NW{1'b0}}) && (k_ch8 >= k_cn7);
+  wire          k_cplo = !ck_i2c && (ck_cn != {NW{1'b0}}) && (k_cl8 >= k_cn7);
+`ifdef M_CK_CPOL_INV
+  wire          k_cpol = !k_cphi && k_cplo;
+`else
+  wire          k_cpol = k_cphi;
+`endif
+  wire [7:0]    k_desc = {1'b1, k_cphi | k_cplo, k_cpol, ck_edge, !ck_i2c && ck_act, 3'b000};
   wire          k_cr = !ck_dr, k_cf = !ck_df;
 `ifdef M_S0_MED_OFF1
   wire [NW-1:0] m_keff = m_k + ONE;     // the must-fire: every median one index high
@@ -1796,7 +1816,11 @@ module pe_pit_s0 #(parameter integer AW = 9) (
 `endif
                 end
         P_KCAP: if (ck_done) begin ck_ok <= 1'b1; ph <= P_KFIN; end
-        P_KFIN: begin ck_fin <= 1'b1; ck_used <= 1'b1; wk <= W_S12; ph <= P_S12; end
+        P_KFIN: begin
+                  ck_fin <= 1'b1; ck_used <= 1'b1; wk <= W_S12; ph <= P_S12;
+                  // the clocked-bus descriptor (golden clocked_desc), once its capture is in
+                  if (ck_ok) begin we0 <= 1'b1; waddr0 <= 9'd3; wdata0 <= k_desc; end
+                end
         P_DONE: done <= 1'b1;
         default: ph <= P_IDLE;
       endcase

@@ -1227,3 +1227,46 @@ def stage3_clocked_rc(cap, lv0, cls, log2, lv2, budget=None, ncyc=None):
     msgs, stop = sampled_capture(log2, lv2, bus, budget, ncyc)
     out = {"bus": bus, "stop": stop, "second": True}
     return _s3_why(rec, out, _s3_solve(rec, bus["data"], msgs, out))
+
+
+# ---------------------------------------------------------------------------
+# THE CLOCKED-BUS DESCRIPTOR, results byte 3 (Wilson 11-06) -- APPENDED.
+# Written when stage 3's clocked path chose a bus and armed its second capture
+# (no NRZ_ASYNC wire; clocked_bus gave no "why"); 0 otherwise.
+#   bit 7  valid
+#   bit 6  CPOL known: the clock level BEFORE each record where CS goes ACTIVE,
+#          agreed on >= 7/8 of them (SPI; never for I2C, which has no CS)
+#   bit 5  CPOL (the clock's idle level, from those records)
+#   bit 4  the sample edge clocked_bus inferred (1 = rise)
+#   bit 3  CS active level (SPI; 0 for I2C)
+# The bus KIND is not stored: it follows from the record's data wire and the
+# role table, in clocked_bus's order. The BIT ORDER is not inferred: the
+# sampled capture packs MSB first by rule (an LSB-first bus with a normal CRC
+# looks the same as MSB-first bytes with a reflected one).
+# ---------------------------------------------------------------------------
+DESC_AT = 3
+
+
+def clocked_desc(cap, lv0, cls):
+    """-> results byte 3 (0 = no clocked bus armed)."""
+    if any(cls[x].get("cls") == "NRZ_ASYNC" for x in cls):
+        return 0
+    bus = clocked_bus(cap, lv0, cls)
+    if "why" in bus:
+        return 0
+    v = 0x80 | bus["edge"] << 4
+    if bus["kind"] == "SPI":
+        c, f, act = bus["clock"], bus["cs"], bus["cs_active"]
+        v |= act << 3
+        n = hi = 0
+        before = lv0
+        for t, mask, lv in cap:
+            if mask >> f & 1 and lv >> f & 1 == act:
+                n += 1
+                hi += before >> c & 1
+            before = lv
+        if n and 8 * hi >= 7 * n:
+            v |= 0x40 | 0x20
+        elif n and 8 * (n - hi) >= 7 * n:
+            v |= 0x40
+    return v

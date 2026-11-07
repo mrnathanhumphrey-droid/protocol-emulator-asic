@@ -87,8 +87,16 @@ class Refused(Exception):
     pass
 
 
-#: the must-fire's cases: a claimed init on UART, SPI and I2C
+#: the must-fires' cases: a claimed init on UART, SPI and I2C; a claimed
+#: SPI mode at each CPOL
 MUTANT_CASES = ("s3_modbus", "spi_m0", "i2c_pec")
+CPOL_CASES = ("spi_m0", "spi_m3")
+
+
+def emit_wrong_cpol(results):
+    """THE MUTANT DESCRIPTOR: the spec's SPI mode with CPOL flipped (mode ^ 2)"""
+    import re
+    return re.sub(r"(spi mode )([0-3])", lambda m: m.group(1) + str(int(m.group(2)) ^ 2), E.emit(results), count=1)
 
 
 def emit_wrong_init(results):
@@ -169,13 +177,20 @@ def clocked_emulation(cl, rng, nbytes=3000):
         if cl["crc"] is not None:
             raise Refused("*** a refusal (%s) AND a crc claim" % unk["crc"])
         raise Refused(unk["crc"])
+    bus = cl.get("bus")
     data = [w for w, v in sorted(cl["roles"].items()) if v["role"] == "SYNC_DATA"]
     if not data:
         raise NotEmulable("no NRZ_ASYNC or SYNC_DATA wire claimed")
-    d = data[0]
+    d = bus["wire"] if bus else data[0]
     ck = cl["roles"][d]["of"]
     fr = [w for w, v in sorted(cl["roles"].items()) if v["role"] == "FRAME" and v["of"] == ck]
     chg = cl["roles"][d]["change"]
+    # the spec's BUS LINE (Wilson 11-06) states the kind, the SPI mode and CS's
+    # polarity; a record without one (none here) falls back to the roles
+    if bus and bus["kind"] == "i2c":
+        fr = []
+    mode = bus["mode"] if bus and bus["mode"] is not None else (0 if chg == 0 else 1)
+    cs_hi = bool(bus and bus["cs"] == "high")
     c = cl["crc"] if cl["crc"] is not None and cl["crc"]["wire"] == d else None
     if c is not None and c["init"] is None:
         raise NotEmulable("CRC poly claimed with init / xorout UNKNOWN: no payload rule ruled yet")
@@ -186,16 +201,19 @@ def clocked_emulation(cl, rng, nbytes=3000):
     lens = (L, L + 1, L) if c is not None else (L,)
     msgs = crc_frames(c, rng, lens, nbytes)
     if fr:
+        # mode -> the master: CPOL 0 programs park SCK low (mode0), CLK_INV
+        # flips the pin: 0 = park, 1 = idle-high program + inv, 2 = park + inv, 3 = idle high
+        park, inv = mode in (0, 2), mode in (1, 2)
         m = pe_proto.SPI(corpus.P_M_MOSI, corpus.P_M_SCLK, corpus.P_M_CS, corpus.P_M_MISO,
-                         SPI_D, pe_proto.ORDER_MSB, nc_count=8, mode0=(chg == 0))
+                         SPI_D, pe_proto.ORDER_MSB, nc_count=8, mode0=park)
         acts = m.transactions([(n, 0) for n in lens])
         # CS high for SPI_GAP between frames (the original benches' gap: stage
         # 0 needs two WHOLE CS frames in the first capture), and a long idle
         # first in each loop for the sniffer to open in
         acts = [a[:3] + (SPI_GAP,) + a[4:] if a[0] == OP_LEVEL and a[1] == corpus.P_M_CS and a[2] == 1 else a
                 for a in acts]
-        if chg == 0:
-            # mode 0: SCK back LOW before CS rises -- a SHIFT ends with SCK high
+        if park:
+            # mode 0 / 2: SCK back to the parked level before CS rises -- a SHIFT ends with SCK high
             # (docs/RESUME_CLOCKED_ARC.md, "a program wanting one mode throughout
             # parks SCK with an OP_LEVEL"); otherwise CS rises with SCK high and
             # falls with it low, and stage 0 cannot call it a frame wire
@@ -206,11 +224,14 @@ def clocked_emulation(cl, rng, nbytes=3000):
                 out.append(a)
             acts = out
         acts = [(OP_LEVEL, corpus.P_M_CS, 1, SPI_IDLE, 0, 8)] + acts
+        if cs_hi:                           # CS active HIGH: every CS level inverted
+            acts = [a[:2] + (1 - a[2],) + a[3:] if a[0] == OP_LEVEL and a[1] == corpus.P_M_CS else a
+                    for a in acts]
         lanes = {0: acts}
-        hdr = {0: m.header(I.FLAG_CLK_INV if chg == 1 else 0)}
+        hdr = {0: m.header(I.FLAG_CLK_INV if inv else 0)}
         route = {ck: 0x10 | (corpus.P_M_SCLK - I.N_UIO), d: 0x10 | (corpus.P_M_MOSI - I.N_UIO),
                  fr[0]: 0x10 | (corpus.P_M_CS - I.N_UIO)}
-        what = "SPI mode %d d=%d, %s-byte frames, %s" % (0 if chg == 0 else 1, SPI_D,
+        what = "SPI mode %d%s d=%d, %s-byte frames, %s" % (mode, " CS active-high" if cs_hi else "", SPI_D,
                                                         "/".join(map(str, sorted(set(lens)))),
                                                         crc_what(c))
     else:
@@ -400,6 +421,14 @@ def compare(a, b, tol16):
         if d > tol16:
             bad.append("uio%d bit period %d/16 -> %d/16 cycles, off by %.1f/16 > %d/16"
                        % (w, v["p16"], u["p16"], d, tol16))
+    ba, bb = a.get("bus"), b.get("bus")
+    if ba:
+        if not bb:
+            bad.append("bus on uio%d claimed (%s), came back with none" % (ba["wire"], ba["kind"]))
+        else:
+            for k in ("wire", "kind", "edge", "cs") + (("mode",) if ba["mode"] is not None else ()):
+                if bb[k] != ba[k]:
+                    bad.append("bus %s %s -> %s" % (k, ba[k], bb[k]))
     c, d = a["crc"], b["crc"]
     if c:
         if not d:
@@ -428,6 +457,8 @@ def compare(a, b, tol16):
             conf = b["wires"][int(w[3:])]["cls"]
         elif f.endswith(".rate") and w[3:].isdigit() and int(w[3:]) in b["wires"]:
             conf = "a rate"
+        elif f.endswith(".bus.mode") and bb and bb["mode"] is not None:
+            conf = "SPI mode %d" % bb["mode"]
         if conf:
             bad.append("UNKNOWN %s came back confident: %s" % (f, conf))
         else:
@@ -557,20 +588,20 @@ def main() -> int:
     # ⛔ THE MUST-FIRE (Wilson 11-06): an emitter that writes a WRONG CRC INIT
     # must fail the round trip -- one UART, one SPI, one I2C case
     if not only and os.environ.get("PE_RT_MUTANTS", "1") == "1":
-        print("  must-fire: the emitter writes init ^ 1 (each case must FAIL):")
+        print("  must-fires: the emitter writes init ^ 1 / the descriptor's CPOL flipped (each must FAIL):")
         cs = {n: (k, c) for n, k, c in originals()}
         keep = (list(probs), dict(counts))
-        for n in MUTANT_CASES:
+        for n, emit, lab in [(n, emit_wrong_init, "wrong init") for n in MUTANT_CASES] + \
+                [(n, emit_wrong_cpol, "CPOL flipped") for n in CPOL_CASES]:
             before = len(probs)
-            one(n, cs[n][0], cs[n][1], emit=emit_wrong_init, label=" [mutant: wrong init]")
+            one(n, cs[n][0], cs[n][1], emit=emit, label=" [mutant: %s]" % lab)
             red = len(probs) > before
             why = probs[before:]
             del probs[before:]
-            print("    %-16s %s%s" % (n, "red (fires)" if red else "*** stayed GREEN",
-                                     "".join("
-        : " + w for w in why)))
+            print("    %-16s %-13s %s%s" % (n, lab, "red (fires)" if red else "*** stayed GREEN",
+                                     "".join("\n        : " + w for w in why)))
             if not red:
-                keep[0].append("must-fire: a wrong CRC init passed the round trip on %s" % n)
+                keep[0].append("must-fire: %s passed the round trip on %s" % (lab, n))
         probs[:], counts = keep[0], keep[1]
     miss = sorted(RULED - seen) if not only else []
     for n in miss:

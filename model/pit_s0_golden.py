@@ -33,7 +33,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 # Re-frozen 11-06 (Wilson): the last decoded message never evidence for the
 # polynomial (crc_poly_gcd_s3_last) + the stage 3 reason code (stage3_rc,
 # stage3_clocked_rc) APPENDED; was 81ae9563.
-FROZEN = "a685c14ec0297e08397c02d477ed580a23dd9317bc1f885a7c75989919d13052"
+# Re-frozen 11-06 (Wilson): the clocked-bus descriptor (clocked_desc, results
+# byte 3) APPENDED; was a685c14e.
+FROZEN = "b56e0272918914ba970f7ccf9ceb33047b62ba2380e72de1aadc6dc2bf5108b3"
 FROZEN_PREFIX = "f19f2177d243b9f1bdea124d6ef2d16d6c9effeddd47da02c1c57b65da7d86eb"   # = e55d0b63 as LF
 FROZEN_PREFIX_LEN = 29070
 TABLE_AT, TABLE_BYTES = 32, 7

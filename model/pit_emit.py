@@ -35,6 +35,15 @@ THE SYNTAX (Wilson 11-06, D1). One statement per line, each ending in `;`:
     bit-reversed on the way out (measured on the frozen solver: Rocksoft
     xorout 0x0F0F, refin / refout, is stored 0xF0F0; init is stored as
     Rocksoft's). The catalogue match is made on the record's own values.
+  * THE CLOCKED BUS (Wilson 11-06): `bus on uio<d> : spi mode <0..3> sample
+    <rise|fall> cs <low|high> order msb assumed;` or `... : i2c sample rise
+    order msb assumed;`, from results byte 3 (the descriptor: CPOL, the sample
+    edge, CS's active level) and the role table. The KIND is derived, in
+    clocked_bus's order (the data wire's I2C tag -> i2c; a FRAME of its clock
+    -> spi; else i2c, stage 3's signature path). `order msb assumed`: the
+    capture packs MSB first by rule -- the data cannot tell an LSB-first bus
+    from a reflected CRC, so the order is stated as the convention, not as a
+    finding. CPOL not agreed -> `? unknown uio<d>.bus.mode`.
   * `given all-wires-sniffed`: the record's condition bit (Wilson 10-28 (b)) --
     a one-wire data class holds only if no clock hides off the sniffed pins.
   * v2's order-and-bounds edges parse today with no new syntax (vol5's
@@ -118,7 +127,7 @@ def claims(results, clock_hz=None):
     if len(r) < RESULTS_BYTES:
         raise SpecError("results: %d bytes, need %d" % (len(r), RESULTS_BYTES))
     out = {"clock_hz": int(clock_hz or clock.hz()), "partial": None, "roles": {},
-           "wires": {}, "crc": None, "unknown": [], "patterns": []}
+           "wires": {}, "crc": None, "bus": None, "unknown": [], "patterns": []}
     unk = out["unknown"]
     if r[2] & 0x80:
         n = (r[28] & 0x3F) << 8 | r[29]
@@ -162,6 +171,7 @@ def claims(results, clock_hz=None):
                            "given": bool(cond)}
     # the stage 3 record
     s = r[S3_AT:S3_AT + S3_BYTES]
+    _bus(out, r[pit_golden.DESC_AT], s)
     code = s[pit_golden.WHY3_AT] & 0xF if not s[0] & 0x20 else 0
     if code and code not in WHY3_TEXT:
         raise SpecError("stage 3 reason code %d is not a known reason" % code)
@@ -204,6 +214,33 @@ def _rev(v, n):
     return int(bin(v)[2:].zfill(n)[::-1], 2)
 
 
+#: (CPOL, sample edge 1 = rise) -> SPI mode
+SPI_MODE = {(0, 1): 0, (0, 0): 1, (1, 0): 2, (1, 1): 3}
+
+
+def _bus(out, desc, s):
+    """the clocked-bus line from results byte 3 + the record's data wire"""
+    if not desc & 0x80:
+        return
+    if not s[0] & 0x08:
+        raise SpecError("results byte 3 says a clocked bus was armed, but there is no stage 3 record")
+    w = s[0] & 7
+    r = out["roles"].get(w)
+    if r is None or r["role"] != "SYNC_DATA":
+        raise SpecError("the descriptor's data wire uio%d has no SYNC_DATA role" % w)
+    fr = any(v["role"] == "FRAME" and v["of"] == r["of"] for v in out["roles"].values())
+    kind = "i2c" if r["i2c"] or not fr else "spi"
+    b = {"wire": w, "kind": kind, "edge": "rise" if desc >> 4 & 1 else "fall", "mode": None,
+         "cs": None, "order": "msb"}
+    if kind == "spi":
+        b["cs"] = "high" if desc >> 3 & 1 else "low"
+        if desc & 0x40:
+            b["mode"] = SPI_MODE[(desc >> 5 & 1, desc >> 4 & 1)]
+        else:
+            out["unknown"].append(("uio%d.bus.mode" % w, "CPOL not agreed at CS activation"))
+    out["bus"] = b
+
+
 # ---------------------------------------------------------------------------
 # claims -> text
 # ---------------------------------------------------------------------------
@@ -235,6 +272,15 @@ def render(cl):
         if v["change"] is not None:
             t += " change %d" % v["change"]
         L.append(t + ";")
+    b = cl.get("bus")
+    if b:
+        t = "  bus on uio%d : %s" % (b["wire"], b["kind"])
+        if b["mode"] is not None:
+            t += " mode %d" % b["mode"]
+        t += " sample %s" % b["edge"]
+        if b["cs"]:
+            t += " cs %s" % b["cs"]
+        L.append(t + " order msb assumed;")
     for w in sorted(cl["wires"]):
         v = cl["wires"][w]
         t = "  wire uio%d :" % w
@@ -293,7 +339,7 @@ def _wire(tok):
 
 def parse(text):
     cl = {"clock_hz": None, "partial": None, "roles": {}, "wires": {}, "crc": None,
-          "unknown": [], "patterns": []}
+          "bus": None, "unknown": [], "patterns": []}
     body = [ln.strip() for ln in text.splitlines()]
     body = [ln for ln in body if ln and not ln.startswith("--")]
     if not body or body[0] != "spec sniff is" or body[-1] != "end sniff;":
@@ -323,6 +369,8 @@ def parse(text):
             cl["partial"] = (tk[1], int(tk[3]))
         elif tk[0] == "wire" and tk[2] == ":":
             _parse_wire(cl, _wire(tk[1]), tk[3:])
+        elif tk[:2] == ["bus", "on"] and tk[3] == ":":
+            cl["bus"] = _parse_bus(_wire(tk[2]), tk[4:])
         elif tk[:2] == ["crc", "on"] and tk[3] == ":":
             cl["crc"] = _parse_crc(_wire(tk[2]), tk[4:], s)
         else:
@@ -372,6 +420,30 @@ def _parse_wire(cl, w, tk):
     if "_t" not in v:
         raise SpecError("wire uio%d: no rate" % w)
     cl["wires"][w] = v
+
+
+def _parse_bus(w, tk):
+    if not tk or tk[0] not in ("spi", "i2c"):
+        raise SpecError("bus on uio%d: the kind (spi | i2c) comes first" % w)
+    b = {"wire": w, "kind": tk[0], "edge": None, "mode": None, "cs": None, "order": None}
+    i = 1
+    while i < len(tk):
+        k = tk[i]
+        if k == "mode" and b["kind"] == "spi":
+            b["mode"], i = int(tk[i + 1]), i + 2
+            if b["mode"] not in range(4):
+                raise SpecError("bus on uio%d: SPI mode %d" % (w, b["mode"]))
+        elif k == "sample" and tk[i + 1] in ("rise", "fall"):
+            b["edge"], i = tk[i + 1], i + 2
+        elif k == "cs" and b["kind"] == "spi" and tk[i + 1] in ("low", "high"):
+            b["cs"], i = tk[i + 1], i + 2
+        elif k == "order" and tk[i + 1:i + 3] == ["msb", "assumed"]:
+            b["order"], i = "msb", i + 3
+        else:
+            raise SpecError("bus on uio%d: %r" % (w, k))
+    if b["edge"] is None or b["order"] is None or (b["kind"] == "spi" and b["cs"] is None):
+        raise SpecError("bus on uio%d: sample, order (and an SPI bus's cs) are required" % w)
+    return b
 
 
 def _parse_crc(w, tk, s):

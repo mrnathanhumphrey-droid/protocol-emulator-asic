@@ -229,6 +229,7 @@ def expect(log, lv0, b, arm, pc_end):
             else:
                 log2.append((t - arm, m))
     rec, out = G.stage3_clocked_rc(cap, lv0, cls, log2, lv2, bud, (pc_end - arm) if arm is not None else 0)
+    out["desc"] = G.clocked_desc(cap, lv0, cls)          # results byte 3 (Wilson 11-06)
     enc = []
     for m in out.get("msgs") or []:
         enc += [len(m)] + list(m)
@@ -253,6 +254,8 @@ def run_case(vvp, tmp, case, tag=None):
     r16 = bytes((mem.get(S3_AT + i, -1) & 0xFF) for i in range(16))
     if r16 != rec:
         bad.append("record %d..%d: RTL %s, golden %s" % (S3_AT, S3_AT + 15, r16.hex(), rec.hex()))
+    if mem.get(3, -1) != out["desc"]:
+        bad.append("descriptor (byte 3): RTL %02x, golden %02x" % (mem.get(3, -1) & 0xFF, out["desc"]))
     if enc:
         src = pre if pre else mem
         dec = bytes((src.get(DEC_AT + i, -1) & 0xFF) for i in range(len(enc)))
@@ -278,6 +281,8 @@ MUTANTS = [
     ("M_CK_NO_REFUSE", "no clean edge: guess, not refuse", ["no_clean_edge"]),
     # the reason code (11-06): "no frame markers" <-> "no data wire" swapped
     ("M_CK_WHY_SWAP", "reason codes 6 / 7 swapped", ["no_cs"]),
+    # the descriptor (11-06): CPOL flipped -- mode 2 read as mode 1
+    ("M_CK_CPOL_INV", "the descriptor's CPOL flipped", ["spi_m2"]),
 ]
 
 
