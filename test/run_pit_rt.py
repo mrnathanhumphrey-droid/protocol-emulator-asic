@@ -87,6 +87,17 @@ class Refused(Exception):
     pass
 
 
+#: the must-fire's cases: a claimed init on UART, SPI and I2C
+MUTANT_CASES = ("s3_modbus", "spi_m0", "i2c_pec")
+
+
+def emit_wrong_init(results):
+    """THE MUTANT EMITTER: the spec's crc init written with its low bit flipped"""
+    import re
+    return re.sub(r"(init 0x)([0-9A-F]+)", lambda m: m.group(1) + "%0*X" % (len(m.group(2)), int(m.group(2), 16) ^ 1),
+                  E.emit(results), count=1)
+
+
 # ---------------------------------------------------------------------------
 # the emulation, from the PARSED spec
 # ---------------------------------------------------------------------------
@@ -371,7 +382,9 @@ def compare(a, b, tol16):
     -> [problems], [notes]"""
     bad, notes = [], []
     for w, v in a["roles"].items():
-        if b["roles"].get(w) != v:
+        # the I2C TAG is provenance (Wilson 11-06): which of stage 0's tests
+        # typed the pair, not a property of the bus -- written, not compared
+        if {k: x for k, x in (b["roles"].get(w) or {}).items() if k != "i2c"} !=                 {k: x for k, x in v.items() if k != "i2c"}:
             bad.append("uio%d role %s -> %s" % (w, v, b["roles"].get(w)))
     for w, v in a["wires"].items():
         u = b["wires"].get(w)
@@ -453,18 +466,21 @@ def main() -> int:
     build(vr)
     tol16 = 1                    # 1/16 cycle; the scheduler-jitter bound if larger (measured below)
     probs, counts, seen = [], {"PASS": 0, "FAIL": 0, "NOT EMULABLE": 0}, set()
-    for name, kind, case in originals():
-        if only and name not in only:
-            continue
+    def one(name, kind, case, emit=E.emit, label=""):
+        """one round trip; the regenerated record is compared with the ORIGINAL
+        RECORD's claims (E.claims of its bytes), never with the spec: a wrong
+        spec would be emulated and 'reproduced' (the must-fire)."""
         t0 = time.time()
-        orig, simg = original_results(kind, vo, tmp, name, case)
+        orig, simg = ORIG.get(name) or original_results(kind, vo, tmp, name, case)
+        ORIG[name] = (orig, simg)
         seen.add(name)
         if orig is None:
             probs.append("%s: the original run left results bytes unwritten" % name)
-            continue
-        spec = E.emit(orig)
-        cl = E.parse(spec)
-        print("  --- %s: the spec" % name)
+            return
+        spec = emit(orig)
+        cl = E.parse(spec)                 # the emulator reads the SPEC
+        ref = E.claims(orig)               # the comparison reads the original RECORD
+        print("  --- %s%s: the spec" % (name, label))
         for ln in spec.splitlines()[1:]:
             print("      " + ln)
         try:
@@ -474,7 +490,7 @@ def main() -> int:
             print("  %-16s NOT EMULABLE: %s" % (name, e))
             if name in RULED:
                 probs.append("%s: NOT EMULABLE, but a ruled case: %s" % (name, e))
-            continue
+            return
         except Refused as e:
             # D3: a refused bus emulates nothing; the spec must claim nothing
             # beyond the refusal (no CRC; the refusal's reason on its line)
@@ -484,7 +500,7 @@ def main() -> int:
                 name, "PASS" if ok else "FAIL", time.time() - t0, e))
             if not ok:
                 probs.append("%s: %s" % (name, e))
-            continue
+            return
         mem, st, h = sim(vr, tmp, name, simg, eimg, feed, route, R0.NCYC_MAX * 40, warm, ack)
         regen = results_of(mem)
         bad, notes = [], []
@@ -492,7 +508,7 @@ def main() -> int:
             bad.append("the emulation's sniff left results bytes unwritten (pc %s)" % (st or {}).get("pc"))
         else:
             cl2 = E.parse(E.emit(regen))
-            bad, notes = compare(cl, cl2, tol16)
+            bad, notes = compare(ref, cl2, tol16)
             notes.append("stop: original %s, regenerated %s (partial is not compared)" % tuple(
                 "partial %s after %d records" % x["partial"] if x["partial"] else "budget / complete"
                 for x in (cl, cl2)))
@@ -530,8 +546,32 @@ def main() -> int:
             print("      regenerated spec:")
             for ln in E.emit(regen).splitlines()[2:-1]:
                 print("        " + ln)
-        probs += ["%s: %s" % (name, b) for b in bad]
+        probs.extend("%s: %s" % (name, b) for b in bad)
+
+    ORIG = {}
+    for name, kind, case in originals():
+        if only and name not in only:
+            continue
+        one(name, kind, case)
     print("  round trips: %d PASS, %d FAIL, %d NOT EMULABLE" % (counts["PASS"], counts["FAIL"], counts["NOT EMULABLE"]))
+    # ⛔ THE MUST-FIRE (Wilson 11-06): an emitter that writes a WRONG CRC INIT
+    # must fail the round trip -- one UART, one SPI, one I2C case
+    if not only and os.environ.get("PE_RT_MUTANTS", "1") == "1":
+        print("  must-fire: the emitter writes init ^ 1 (each case must FAIL):")
+        cs = {n: (k, c) for n, k, c in originals()}
+        keep = (list(probs), dict(counts))
+        for n in MUTANT_CASES:
+            before = len(probs)
+            one(n, cs[n][0], cs[n][1], emit=emit_wrong_init, label=" [mutant: wrong init]")
+            red = len(probs) > before
+            why = probs[before:]
+            del probs[before:]
+            print("    %-16s %s%s" % (n, "red (fires)" if red else "*** stayed GREEN",
+                                     "".join("
+        : " + w for w in why)))
+            if not red:
+                keep[0].append("must-fire: a wrong CRC init passed the round trip on %s" % n)
+        probs[:], counts = keep[0], keep[1]
     miss = sorted(RULED - seen) if not only else []
     for n in miss:
         probs.append("%s: a ruled case that never ran" % n)
