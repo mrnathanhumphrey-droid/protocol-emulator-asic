@@ -52,6 +52,9 @@ import run_pit_capture as RP                # noqa: E402
 import run_pit_s0 as R0                     # noqa: E402
 import run_pit_s12 as R12                   # noqa: E402
 import run_pit_s3 as R3                     # noqa: E402  (patches R12.sim to keep the whole dump)
+import run_pit_clk as C                     # noqa: E402  (the clocked cases)
+import corpus                               # noqa: E402  (the SPI master / I2C pin map)
+import pe_proto                             # noqa: E402
 import pit_s0_golden as S0                  # noqa: E402
 import pit_emit as E                        # noqa: E402
 from gate_j_program import D_STAR           # noqa: E402
@@ -67,7 +70,21 @@ STOP_MIN = 13              # the lane's tightest admissible delay here (pe_asm's
 LOOP_W = I.BR_W_MIN        # LOOP's wait: the shortest the ISA allows (33)
 
 #: the ruled cases (Wilson 11-06, D4): these must PASS -- NOT EMULABLE is red here
-RULED = {"s3_uart", "s3_modbus", "s3_crc32_full"}
+RULED = {"s3_uart", "s3_modbus", "s3_crc32_full", "s3_cut_full",
+         "i2c_pec", "i2c_sr", "spi_m0", "no_cs", "no_clean_edge", "both_levels"}
+#: the clocked emulation's delays: SPI at the original benches' half period;
+#: I2C at the shippable Fm delay (D1 refuses a clocked open-drain d <= SDA_HOLD)
+SPI_D = 20
+SPI_GAP, SPI_IDLE = 600, 1000          # CS high between frames / first in each loop
+from make_smoke_image import D_FM_SHIPPABLE as I2C_D   # noqa: E402
+#: the clocked refusals (golden WHY3 6..10): a refused bus emulates nothing (D3)
+CLK_REFUSALS = {"no clocked bus with a data wire", "no clocked bus with frame markers",
+                "CS active level unclear", "no clean sample edge (data changes on both clock edges)",
+                "no clean sample edge (data changes in both clock levels)"}
+
+
+class Refused(Exception):
+    pass
 
 
 # ---------------------------------------------------------------------------
@@ -114,11 +131,121 @@ def target_cycles(p16, cap_hz):
     return round(p16 / 16.0 / cap_hz * clock.hz())
 
 
+def crc_frames(c, rng, lens, nbytes, frame=None):
+    """seeded random frames cycling through `lens` (whole frame bytes), the CRC
+    computed from the spec's parameters (Rocksoft, as the spec writes them);
+    no CRC claimed -> plain random frames"""
+    msgs = []
+    while sum(map(len, msgs)) < nbytes:
+        L = lens[len(msgs) % len(lens)]
+        if c is None:
+            msgs.append([rng.getrandbits(8) for _ in range(L)])
+        else:
+            p = (c["width"], c["poly"], c["init"], c["xorout"], c["reflected"])
+            msgs.append(R3.frame([rng.getrandbits(8) for _ in range(L - c["width"] // 8)], *p))
+    return msgs
+
+
+def clocked_emulation(cl, rng, nbytes=3000):
+    """the clocked bus from the spec's ROLES: a SYNC_DATA wire, its clock, and a
+    FRAME wire of that clock (SPI) or none (I2C: the record does not store the
+    bus kind -- a claimed CRC with no frame wire is stage 3's I2C signature).
+    The spec claims the data's CHANGE LEVEL, not the SPI mode: change 0 is
+    mode 0 (data with SCK low, read on the rise), change 1 mode 1 (CLK_INV on
+    mode 3). CS active low, MSB first: neither is in the record."""
+    unk = dict(cl["unknown"])
+    if unk.get("crc") in CLK_REFUSALS:
+        if cl["crc"] is not None:
+            raise Refused("*** a refusal (%s) AND a crc claim" % unk["crc"])
+        raise Refused(unk["crc"])
+    data = [w for w, v in sorted(cl["roles"].items()) if v["role"] == "SYNC_DATA"]
+    if not data:
+        raise NotEmulable("no NRZ_ASYNC or SYNC_DATA wire claimed")
+    d = data[0]
+    ck = cl["roles"][d]["of"]
+    fr = [w for w, v in sorted(cl["roles"].items()) if v["role"] == "FRAME" and v["of"] == ck]
+    chg = cl["roles"][d]["change"]
+    c = cl["crc"] if cl["crc"] is not None and cl["crc"]["wire"] == d else None
+    if c is not None and c["init"] is None:
+        raise NotEmulable("CRC poly claimed with init / xorout UNKNOWN: no payload rule ruled yet")
+    if c is not None and c["reflected"]:
+        raise NotEmulable("a reflected CRC on a clocked bus: the master shifts MSB first")
+    L = c["frame"] if c is not None else 3
+    # D3 as amended: L, L+1, L (the same rule as UART)
+    lens = (L, L + 1, L) if c is not None else (L,)
+    msgs = crc_frames(c, rng, lens, nbytes)
+    if fr:
+        m = pe_proto.SPI(corpus.P_M_MOSI, corpus.P_M_SCLK, corpus.P_M_CS, corpus.P_M_MISO,
+                         SPI_D, pe_proto.ORDER_MSB, nc_count=8, mode0=(chg == 0))
+        acts = m.transactions([(n, 0) for n in lens])
+        # CS high for SPI_GAP between frames (the original benches' gap: stage
+        # 0 needs two WHOLE CS frames in the first capture), and a long idle
+        # first in each loop for the sniffer to open in
+        acts = [a[:3] + (SPI_GAP,) + a[4:] if a[0] == OP_LEVEL and a[1] == corpus.P_M_CS and a[2] == 1 else a
+                for a in acts]
+        if chg == 0:
+            # mode 0: SCK back LOW before CS rises -- a SHIFT ends with SCK high
+            # (docs/RESUME_CLOCKED_ARC.md, "a program wanting one mode throughout
+            # parks SCK with an OP_LEVEL"); otherwise CS rises with SCK high and
+            # falls with it low, and stage 0 cannot call it a frame wire
+            out = []
+            for a in acts:
+                if a[0] == OP_LEVEL and a[1] == corpus.P_M_CS and a[2] == 1:
+                    out.append((OP_LEVEL, corpus.P_M_SCLK, 0, SPI_D, 0, 8))
+                out.append(a)
+            acts = out
+        acts = [(OP_LEVEL, corpus.P_M_CS, 1, SPI_IDLE, 0, 8)] + acts
+        lanes = {0: acts}
+        hdr = {0: m.header(I.FLAG_CLK_INV if chg == 1 else 0)}
+        route = {ck: 0x10 | (corpus.P_M_SCLK - I.N_UIO), d: 0x10 | (corpus.P_M_MOSI - I.N_UIO),
+                 fr[0]: 0x10 | (corpus.P_M_CS - I.N_UIO)}
+        what = "SPI mode %d d=%d, %s-byte frames, %s" % (0 if chg == 0 else 1, SPI_D,
+                                                        "/".join(map(str, sorted(set(lens)))),
+                                                        crc_what(c))
+    else:
+        if chg != 0:
+            raise NotEmulable("I2C data changing with SCL high is not I2C")
+        m = pe_proto.I2C(corpus.P_SDA, corpus.P_SCL, I2C_D, nc_count=8)
+        # the role's I2C TAG says stage 0 typed the pair by its START / STOP
+        # structure (the plain clocked test failed on them): one transaction a
+        # frame, START .. STOP. Untagged: one transaction, START, L, Sr, L+1,
+        # Sr, L, STOP -- the repeated START exercised
+        tagged = cl["roles"][d]["i2c"]
+        if tagged:
+            acts = []
+            for n in lens:
+                acts += m.transaction([("write", n)], loop=False)
+            acts.append((OP_REARM, 0, 1, I2C_D, 0, 8))
+        else:
+            acts = m.transaction([("write", n) for n in lens])
+        lanes = {0: acts}
+        hdr = {0: m.header()}
+        route = {ck: 0x20 | corpus.P_SCL, d: 0x20 | corpus.P_SDA}
+        ack = (corpus.P_SCL, corpus.P_SDA)
+        what = "I2C d=%d, %s-byte frames, %s, %s" % (
+            I2C_D, "/".join(map(str, sorted(set(lens)))),
+            "START .. STOP each" if tagged else "repeated STARTs", crc_what(c))
+    try:
+        img = pe_asm.assemble(lanes, hdr)
+    except pe_asm.Reject as e:
+        raise NotEmulable("pe_asm refused the %s program: %s" % ("SPI" if fr else "I2C", e))
+    rt = 0
+    for w, code in route.items():
+        rt |= code << (8 * w)
+    return img, [b for mm in msgs for b in mm], rt, what, SPI_IDLE // 2 if fr else 2000, (None if fr else ack)
+
+
+def crc_what(c):
+    if c is None:
+        return "NO CRC (the spec claims none)"
+    return "CRC-%d poly %#x init %#x xorout %#x" % (c["width"], c["poly"], c["init"], c["xorout"])
+
+
 def emulation(cl, rng, nbytes=4000):
     """-> (emulator image, feed bytes, ROUTE, what, warm cycles) from the parsed claims."""
     ua = [w for w, v in cl["wires"].items() if v["cls"] == "NRZ_ASYNC"]
     if not ua:
-        raise NotEmulable("no NRZ_ASYNC wire claimed (clocked buses: the next step)")
+        return clocked_emulation(cl, rng)
     if len(ua) > 1:
         raise NotEmulable("%d UART wires: the round trip drives one" % len(ua))
     w = ua[0]
@@ -154,7 +281,7 @@ def emulation(cl, rng, nbytes=4000):
     feed = [b for m in msgs for b in m]
     route = 0x10 | P_TX_UO
     # the sniffer opens half-way into the first message's leading idle
-    return img, feed, route << (8 * w), what, GAP_BITS * T // 2
+    return img, feed, route << (8 * w), what, GAP_BITS * T // 2, None
 
 
 # ---------------------------------------------------------------------------
@@ -168,18 +295,21 @@ def build(out):
         raise RuntimeError("build failed: %s" % (r.stdout + r.stderr)[-400:])
 
 
-def sim(vvp, tmp, tag, simg, eimg, feed, route, ncyc, warm):
+def sim(vvp, tmp, tag, simg, eimg, feed, route, ncyc, warm, ack=None):
     ip = os.path.join(tmp, "pitcap_rt_%s.hex" % tag)
     I.write_image(ip, simg)
     sim_run.scratch_image(RP.GEN, ip)
     ep = os.path.join(tmp, "rt_%s_emu.hex" % tag)
     I.write_image(ep, eimg)
+    sim_run.scratch_image("run_pit_rt", ep)
     fp = os.path.join(tmp, "rt_%s.feed" % tag)
     with open(fp, "w", encoding="ascii", newline="\n") as fh:
         fh.write("".join("%02x\n" % b for b in feed))
     op = os.path.join(tmp, "rt_%s.out" % tag)
     args = [vvp, "+IMG=%s" % ip, "+EIMG=%s" % ep, "+NBYTES=%d" % I.STORE_BYTES, "+OUT=%s" % op,
             "+FEED=%s" % fp, "+ROUTE=%016x" % route, "+NCYC=%d" % ncyc, "+WARM=%d" % warm]
+    if ack:                                 # an I2C target that ACKs every byte (tb_rt)
+        args.append("+ACK=%x%x" % ack)
     cmd = RP.simcmd(args, images=[ip, ep])
     if RP.SIM == "verilator":               # simcmd translates only its own path plusargs
         cmd = [a.split("=", 1)[0] + "=" + RP.wsl_path(a.split("=", 1)[1])
@@ -293,8 +423,20 @@ def compare(a, b, tol16):
 
 
 def originals():
-    """[(name, case)] -- the UART cases (gate pit-s3)."""
-    return [(c[0], c) for c in R3.cases()]
+    """[(name, kind, case)] -- the UART cases (gate pit-s3), the clocked ones (pit-clk)."""
+    return [(c[0], "uart", c) for c in R3.cases()] + [(c[0], "clk", c) for c in C.case_list()]
+
+
+def original_results(kind, vo, tmp, name, case):
+    """(results bytes 0..135, the sniff image) of the case's own tb_pit run"""
+    if kind == "uart":
+        R12.run_case(vo, tmp, case, name)
+        return results_of(R3.R12_MEM.get(name, {})), RP.sniff_image(case[2], case[3])
+    _n, waves, b0, _want = case
+    img = RP.sniff_image(0x00, b0 or C.BUDGET_B)
+    _log, mem, _pre, _lv0, _st, _arm = C.sim(vo, tmp, name, img, RP.waves_to_stim(waves, pre=True),
+                                              R0.NCYC_MAX * 40)
+    return results_of(mem), img
 
 
 def main() -> int:
@@ -310,13 +452,13 @@ def main() -> int:
     vr = os.path.join(tmp, "rt.vvp")
     build(vr)
     tol16 = 1                    # 1/16 cycle; the scheduler-jitter bound if larger (measured below)
-    probs, counts = [], {"PASS": 0, "FAIL": 0, "NOT EMULABLE": 0}
-    for name, case in originals():
+    probs, counts, seen = [], {"PASS": 0, "FAIL": 0, "NOT EMULABLE": 0}, set()
+    for name, kind, case in originals():
         if only and name not in only:
             continue
         t0 = time.time()
-        R12.run_case(vo, tmp, case, name)
-        orig = results_of(R3.R12_MEM.get(name, {}))
+        orig, simg = original_results(kind, vo, tmp, name, case)
+        seen.add(name)
         if orig is None:
             probs.append("%s: the original run left results bytes unwritten" % name)
             continue
@@ -326,15 +468,24 @@ def main() -> int:
         for ln in spec.splitlines()[1:]:
             print("      " + ln)
         try:
-            eimg, feed, route, what, warm = emulation(cl, random.Random("%d|%s" % (SEED, name)))
+            eimg, feed, route, what, warm, ack = emulation(cl, random.Random("%d|%s" % (SEED, name)))
         except NotEmulable as e:
             counts["NOT EMULABLE"] += 1
             print("  %-16s NOT EMULABLE: %s" % (name, e))
             if name in RULED:
                 probs.append("%s: NOT EMULABLE, but a ruled case: %s" % (name, e))
             continue
-        mem, st, h = sim(vr, tmp, name, RP.sniff_image(case[2], case[3]), eimg, feed, route,
-                         R0.NCYC_MAX * 40, warm)
+        except Refused as e:
+            # D3: a refused bus emulates nothing; the spec must claim nothing
+            # beyond the refusal (no CRC; the refusal's reason on its line)
+            ok = not str(e).startswith("***")
+            counts["PASS" if ok else "FAIL"] += 1
+            print("  %-16s %-6s %6.1fs  REFUSED, nothing emulated: %s" % (
+                name, "PASS" if ok else "FAIL", time.time() - t0, e))
+            if not ok:
+                probs.append("%s: %s" % (name, e))
+            continue
+        mem, st, h = sim(vr, tmp, name, simg, eimg, feed, route, R0.NCYC_MAX * 40, warm, ack)
         regen = results_of(mem)
         bad, notes = [], []
         if regen is None:
@@ -381,6 +532,9 @@ def main() -> int:
                 print("        " + ln)
         probs += ["%s: %s" % (name, b) for b in bad]
     print("  round trips: %d PASS, %d FAIL, %d NOT EMULABLE" % (counts["PASS"], counts["FAIL"], counts["NOT EMULABLE"]))
+    miss = sorted(RULED - seen) if not only else []
+    for n in miss:
+        probs.append("%s: a ruled case that never ran" % n)
     for p in probs:
         print("  *** " + p)
     print("  GATE pit-rt: %s" % ("FAILED" if probs else "PASSED"))

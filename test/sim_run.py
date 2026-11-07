@@ -139,6 +139,15 @@ SCRATCH_GENERATORS: dict = {
                " store) whose capture is judged byte for byte against"
                " model/pit_capture_golden.py, not by the A2 gap",
         "v3": {"no_v3_layer": "test/tb_pit.v"}},
+    "run_pit_rt": {
+        "script": "test/run_pit_rt.py", "pattern": "rt_*_emu.hex",
+        "clocked": True,
+        "why": "v2 PIT item 2, the round trip (Wilson 11-06): the EMULATOR"
+               " image pe_asm assembles from an emitted spec (SPI / I2C"
+               " master), run on tb_rt beside a sniffing chip and judged by"
+               " the sniffer's regenerated record against the original's"
+               " claims, not by the A2 gap",
+        "v3": {"no_v3_layer": "test/tb_rt.v"}},
 }
 # ⛔⛔ `v3` IS REQUIRED ON EVERY CLOCKED ENTRY (S1g, 10-22): the GENERATED
 # names in model/v3_table.py that register this generator's images, or the

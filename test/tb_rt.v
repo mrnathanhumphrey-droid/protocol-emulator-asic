@@ -21,7 +21,11 @@ module tb_rt;
   // the EMULATOR: named `dut` -- host_feed.vh and progress.vh address it
   reg  [7:0] ui_in = 8'h00, uio_drv = 8'h00;
   wire [7:0] uo_out, uio_out, uio_oe;
-  wire [7:0] uio_in = (uio_oe & uio_out) | (~uio_oe & uio_drv);
+  // +ACK=<scl><sda> (uio pins): an I2C TARGET THAT ACKS EVERY BYTE -- it pulls
+  // SDA low over each 9th bit after a START (the original buses' ACK = 0);
+  // without it the master's ACK slot reads the pull-up, a NACK
+  reg  [7:0] ack_mask = 8'h00;
+  wire [7:0] uio_in = (uio_oe & uio_out) | (~uio_oe & uio_drv & ~ack_mask);
   // the SNIFFER
   reg  [7:0] s_ui = 8'h00, s_drv = 8'h00;
   reg        s_load = 1'b1;
@@ -74,6 +78,24 @@ module tb_rt;
 `include "test/progress.vh"
 `include "test/host_feed.vh"
 
+  reg        ack_on = 1'b0, ack_pscl = 1'b1, ack_psda = 1'b1;
+  reg  [7:0] ack_cfg = 8'h00;
+  integer    ack_n = 0;
+  always @(posedge clk) if (ack_on && rst_n === 1'b1) begin
+    // a START (SDA falls with SCL high, not our own pull): bit count from 0
+    if (ack_pscl && uio_in[ack_cfg[6:4]] && ack_psda && !uio_in[ack_cfg[2:0]] && ack_mask == 8'h00)
+      ack_n <= 0;
+    else if (ack_pscl && !uio_in[ack_cfg[6:4]]) begin            // an SCL fall
+      if (ack_mask != 8'h00) begin ack_mask <= 8'h00; ack_n <= 1; end   // the 9th bit ends
+      else begin
+        ack_n <= ack_n + 1;
+        if (ack_n == 8) ack_mask <= 8'h01 << ack_cfg[2:0];        // the 8th bit ends: ACK
+      end
+    end
+    ack_pscl <= uio_in[ack_cfg[6:4]];
+    ack_psda <= uio_in[ack_cfg[2:0]];
+  end
+
   // the sniffer's edge log: tb_pit's, on `snf`
   always @(posedge clk) if (rst_n === 1'b1 && !done) begin
     if (snf.pit_run === 1'b1) begin
@@ -100,6 +122,7 @@ module tb_rt;
     if (!$value$plusargs("ROUTE=%h", route)) begin $display("tb_rt: FATAL -- +ROUTE required"); $finish; end
     if (!$value$plusargs("NCYC=%d", ncyc)) ncyc = 200000;
     if (!$value$plusargs("WARM=%d", warm)) warm = 2000;
+    if ($value$plusargs("ACK=%h", ack_cfg)) ack_on = 1'b1;
     $readmemh(imgfile, img);
     begin : chk_snf
       `PE_REQUIRE_IMG_LOADED(imgfile)
