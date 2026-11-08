@@ -41,6 +41,19 @@ the unclocked arithmetic ever diverges from the clocked one, this reader stops.
 
   A6  `if (a_op == OP_SHIFT && (!ck_shift || ck_is_low) && tx_bitp[cur] == a_cnt) begin`
   A7  `if (rx_bitp[cur] == a_cnt - {{(BPW-1){1'b0}}, 1'b1}) begin`
+
+⭐ v2 PRIMITIVE 3, BUNDLE 2 (Wilson 11-08): four anchors MOVED with the RTL, and
+the derived ranges are UNCHANGED -- re-derived, not re-typed:
+  A2  `a_cnt` is the raw field for every opcode but SHIFTI, whose count is
+      fixed at 7 (8 bits) because its field carries the immediate byte; so
+      SHIFTI falls under "every other opcode" (full field), which is right.
+  A3c the SHIFT class is SHIFT or SHIFTI. SHIFTI is level 0 (pe_isa refuses
+      level 1), so `ck_shift` stays 0 for it and it never feeds `ck_nbits`;
+      even if it did, its fixed count 7 is in SHIFT's legal 0 .. 2^W - 2.
+  A5  `ck_degen` gained a second term: a SELF-TIMED SHIFTIN with count 0 --
+      the same zero-bit refusal, now also in silicon on the unclocked form,
+      matching SHIFTIN's 1 .. 2^W - 1.
+  A6  the unclocked TX load keys on the pre-decoded class, same arithmetic.
 """
 
 from __future__ import annotations
@@ -56,13 +69,13 @@ ENGINE = os.path.join(ROOT, "src", "pe_engine.v")
 #: (id, what it establishes, the exact substring that must be present)
 ANCHORS = (
     ("A2", "a_cnt is the W-bit count field",
-     "wire [BPW-1:0]   a_cnt   = cur_act[LOWX+BQW +: BPW];"),
+     "wire [BPW-1:0]   a_cnt   = cur_cls[C_SHI] ? 4'd7 : cur_act[LOWX+BQW +: BPW];"),
     ("A3a", "clocked SHIFT decode (the pre-decoded class bit)",
      "wire ck_shift   = clk_real & a_lvl & cur_cls[C_SHIFT];"),
     ("A3b", "clocked SHIFTIN decode (the pre-decoded class bit)",
      "wire ck_shiftin = clk_real & a_lvl & cur_cls[C_SHIFTIN];"),
     ("A3c", "the SHIFT class is exactly opcode SHIFT (the pre-decoder)",
-     "pre_cls[C_SHIFT]   = (op == OP_SHIFT);"),
+     "pre_cls[C_SHIFT]   = (op == OP_SHIFT) || (op == OP_SHIFTI);"),
     ("A3d", "the SHIFTIN class is exactly opcode SHIFTIN (the pre-decoder)",
      "pre_cls[C_SHIFTIN] = (op == OP_SHIFTIN);"),
     ("A4a", "SHIFT moves count + 1 bits (W-bit add, wraps)",
@@ -70,11 +83,11 @@ ANCHORS = (
     ("A4b", "SHIFTIN moves count bits",
      "                                     : a_cnt;"),
     ("A5", "zero bits is CONFIG_ERR",
-     "wire ck_degen = ck_act & (ck_nbits == {BPW{1'b0}});"),
+     "wire ck_degen = (ck_act & (ck_nbits == {BPW{1'b0}})) |"),
     ("A5b", "ck_degen is a refusal",
      "wire ck_refuse = ck_degen | ck_holdviol;"),
     ("A6", "unclocked SHIFT loads after count + 1 bits",
-     "if (a_op == OP_SHIFT && (!ck_shift || ck_is_low) && tx_bitp[cur] == a_cnt) begin"),
+     "if (cur_cls[C_SHIFT] && (!ck_shift || ck_is_low) && tx_bitp[cur] == a_cnt) begin"),
     ("A7", "unclocked SHIFTIN pushes after count bits",
      "if (rx_bitp[cur] == a_cnt - {{(BPW-1){1'b0}}, 1'b1}) begin"),
 )

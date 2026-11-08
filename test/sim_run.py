@@ -140,6 +140,13 @@ SCRATCH_GENERATORS: dict = {
                " (fire = max(armed, last drive + 2), out = fire + the edge"
                " ARM's K) on tb_arm2, not by the A2 gap",
         "v3": {"no_v3_layer": "test/tb_arm2.v"}},
+    "run_pair": {
+        "script": "test/run_pair.py", "pattern": "pair_*.hex",
+        "clocked": True,
+        "why": "v2 primitive 3 bundle 2: the pin pair / SHIFTI / self-timed byte"
+               " images, judged cycle for cycle against run_pair's golden"
+               " waveform on tb_pair, not by the A2 gap",
+        "v3": {"no_v3_layer": "test/tb_pair.v"}},
     "run_pit_capture": {
         "script": "test/run_pit_capture.py", "pattern": "pitcap_*.hex",
         "clocked": True,

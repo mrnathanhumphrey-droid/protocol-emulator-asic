@@ -735,6 +735,12 @@ SPEC_SYMBOLS = {
     ("test/run_arm2.py", "SCEN"),
     # BAD: the encodings pe_isa must refuse -- chosen field values, not readings
     ("test/run_arm2.py", "BAD"),
+    # ⭐ v2 primitive 3 bundle 2 (pair / SHIFTI / self-timed byte): FEED is the
+    # TX payload STIMULUS (the four bytes tb_pair feeds queue 0, host_feed.vh);
+    # BAD the encodings pe_isa must refuse -- chosen field values. The results
+    # are tb_pair's recorded waveform, judged live against run_pair's golden.
+    ("test/run_pair.py", "FEED"),
+    ("test/run_pair.py", "BAD"),
     # ⭐ v2 PIT chunk 1: CASES is the capture gate's DESIGN -- which buses to
     # play (SPI modes 0 / 3, a wire mask, I2C, two UARTs, a line fast enough
     # to overrun) and their chosen masks; the result is the bit-exact compare.

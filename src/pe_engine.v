@@ -600,6 +600,13 @@ module pe_engine #(
   // (11 is reserved and refused at load), so "is a branch" stays ONE
   // compare and a_op[1:0] picks BIT / CMP / LOOP.
   localparam [OP_W-1:0] OP_LOOP       = 10;
+  // ⭐ v2 PRIMITIVE 3, BUNDLE 2 (Wilson 11-08): SHIFTI (11) -- SHIFT whose byte
+  // is an IMMEDIATE in the word ({count, q, delay[9:8]}, wire order, bit 0
+  // first) instead of the TX queue's head: no pop, no underrun. Always 8 bits,
+  // always self-timed, d = delay[7:0]. 11 sat in the branch family's
+  // a_op[4:2] = 010; `pre_cls` excludes it there, the only decode of that
+  // pattern, so the opcode range stays contiguous (N_BUILT_OPS 11 -> 12).
+  localparam [OP_W-1:0] OP_SHIFTI     = 11;
 
   // ---- image layout, all derived -------------------------------------
   // ⛔⛔ `base` IS A THIRD FIELD THE S2 FREEZE DID NOT HAVE. Without it every
@@ -1146,19 +1153,24 @@ module pe_engine #(
   // adds an entry HERE, not depth to the release path -- LOOP's widened
   // compare cost 1.45 ns of slow-corner slack (canaries 10-29) by re-decoding
   // a_op in front of the timestamp adder. M_PREDECODE_STALE never writes it.
-  localparam integer CLS_W = 4;
+  localparam integer CLS_W = 6;
   localparam integer C_BR = 0, C_SHIFT = 1, C_SHIFTIN = 2, C_REARM = 3;
+  // bundle 2: C_ST = a SELF-TIMED byte (SHIFT/SHIFTIN with mod[1], or SHIFTI),
+  // C_SHI = SHIFTI's immediate source
+  localparam integer C_ST = 4, C_SHI = 5;
   function [CLS_W-1:0] pre_cls(input [ACT_W-1:0] w);
     reg [OP_W-1:0] op;
     begin
       op = w[ACT_W-1 -: OP_W];
       pre_cls          = {CLS_W{1'b0}};
-      // timed branch (BRANCH_BIT / CMP_BRANCH / LOOP, 11 refused at load):
-      // its delay field is the target, its release delay is W
-      pre_cls[C_BR]    = (op[OP_W-1:2] == OP_BRANCH_BIT[OP_W-1:2]);
-      pre_cls[C_SHIFT]   = (op == OP_SHIFT);
+      // timed branch (BRANCH_BIT / CMP_BRANCH / LOOP): its delay field is the
+      // target, its release delay is W. 11 is SHIFTI, not a branch.
+      pre_cls[C_BR]    = (op[OP_W-1:2] == OP_BRANCH_BIT[OP_W-1:2]) && (op != OP_SHIFTI);
+      pre_cls[C_SHIFT]   = (op == OP_SHIFT) || (op == OP_SHIFTI);
       pre_cls[C_SHIFTIN] = (op == OP_SHIFTIN);
       pre_cls[C_REARM]   = (op == OP_REARM);
+      pre_cls[C_ST]      = (((op == OP_SHIFT) || (op == OP_SHIFTIN)) && w[1]) || (op == OP_SHIFTI);
+      pre_cls[C_SHI]     = (op == OP_SHIFTI);
     end
   endfunction
   reg [CLS_W-1:0] l_cls    [0:NSLOT-1];   // == pre_cls(l_act[s])
@@ -1823,8 +1835,15 @@ module pe_engine #(
   wire [OP_W-1:0]  a_op    = cur_act[ACT_W-1 -: OP_W];
   wire [PINW-1:0]  a_pin   = cur_act[ACT_W-1-OP_W -: PINW];
   wire             a_lvl   = cur_act[ACT_W-1-OP_W-PINW];
-  wire [DLY_W-1:0] a_dly   = cur_act[LOWX+BQW+BPW +: DLY_W];
-  wire [BPW-1:0]   a_cnt   = cur_act[LOWX+BQW +: BPW];
+  // ⭐ SHIFTI (bundle 2): its delay is delay[7:0] and its count is 8 -- the
+  // word's count, q and delay[9:8] carry the immediate. Both selects are on
+  // the PRE-DECODED class bit, never a compare on `a_op`.
+  wire [DLY_W-1:0] a_dly   = cur_cls[C_SHI] ? {{(DLY_W-8){1'b0}}, cur_act[LOWX+BQW+BPW +: 8]}
+                                            : cur_act[LOWX+BQW+BPW +: DLY_W];
+  // (count 7 = 8 bits: OP_SHIFT's `count` is bits - 1, its existing convention)
+  wire [BPW-1:0]   a_cnt   = cur_cls[C_SHI] ? 4'd7 : cur_act[LOWX+BQW +: BPW];
+  wire [7:0]       shi_imm = {cur_act[LOWX+BQW +: BPW], cur_act[LOWX +: BQW],
+                              cur_act[LOWX+BQW+BPW+8 +: 2]};   // wire order, bit 0 first
   // ⭐ WHICH TX QUEUE THIS ACTION DRAWS FROM. Per-ACTION, so a lane's queue is
   // assigned by the PROGRAM and no lane number is baked into the hardware.
   assign           a_q     = cur_act[LOWX +: BQW];
@@ -1851,6 +1870,19 @@ module pe_engine #(
   wire pin_real = 1'b1;           // the mutant: a no-op DRIVES its pin
 `else
   wire pin_real = (a_pin < N_PINS[PINW-1:0]);
+`endif
+  // ⭐ v2 PRIMITIVE 3, BUNDLE 2 (Wilson 11-08): THE COMPLEMENTARY PIN PAIR.
+  // `mod[0]` on a push-pull LEVEL / SHIFT / SHIFTI drives `pinb` as the
+  // COMPLEMENT of the data pin in the same flop update -- USB's D+/D- --
+  // and on SHIFTIN / READBIT releases `pinb` with the data pin (the bus turns
+  // around after the EOP). `mod = 11` on LEVEL ONLY drives BOTH LOW: SE0, the
+  // one deliberate both-same state; on SHIFT / SHIFTI `mod[1]` is the
+  // self-timed byte, never SE0. `pinb` is program-controlled: guarded.
+  wire pinb_real = (a_pinb < N_PINS[PINB_W-1:0]);
+`ifdef M_PAIR_COPY
+  wire pair_inv = 1'b0;           // the mutant: pinb a plain COPY of the data pin
+`else
+  wire pair_inv = 1'b1;
 `endif
   // ⛔⛔ THE SAME GUARD ON THE CLOCK PIN, AND IT WAS MISSING. Every DATA write
   // is guarded by `pin_real`; `OP_SHIFT`'s CLOCK write was not, so
@@ -1937,7 +1969,27 @@ module pe_engine #(
   // ⇒ The lane HALTS and the EXISTING `config_err` sticky is set: no new
   //   status bit, and the standing rule that an illegal state is an ERROR
   //   rather than silent success.
-  wire ck_degen = ck_act & (ck_nbits == {BPW{1'b0}});
+  // ⭐ v2 PRIMITIVE 3, BUNDLE 2 (Wilson 11-08): THE SELF-TIMED BYTE. An
+  // UNCLOCKED SHIFT / SHIFTIN with `mod[1]` (and every SHIFTI) runs the
+  // ordinary one-bit body on each dispatch and is HELD -- no PC advance, no
+  // invalidation, no swap, exactly the clocked shift's `ck_hold` -- until
+  // `count` bits are done, retiring on the last. Each bit is a dispatch paced
+  // by the LANE TIMESTAMP (`+ d` at every writeback): no sub-timer, so a
+  // rebase between bits (bundle 3's re-anchoring) moves the next bit. Clockless
+  // lanes only: a real clock pin keeps the clocked machinery. `l_ckbit` counts
+  // the bits, as it does for the clocked shift.
+  // The last bit's index follows each op's existing `count` convention: SHIFT
+  // carries bits - 1 (its byte boundary is `tx_bitp == count`), SHIFTIN carries
+  // bits (its byte completes at `rx_bitp == count - 1`).
+  wire st_act  = cur_cls[C_ST] & ~clk_real;
+  wire [BPW-1:0] st_lastix = cur_cls[C_SHIFT] ? a_cnt : (a_cnt - 4'd1);
+`ifdef M_ST_EARLY
+  wire st_last = (l_ckbit[cur] == st_lastix - 4'd1);   // the mutant: one bit short
+`else
+  wire st_last = (l_ckbit[cur] == st_lastix);
+`endif
+  wire ck_degen = (ck_act & (ck_nbits == {BPW{1'b0}})) |
+                  (st_act & cur_cls[C_SHIFTIN] & (a_cnt == {BPW{1'b0}}));
   // ⛔⛔⛔ D1 -- A CLOCKED OPEN-DRAIN ACTION WHOSE DELAY CANNOT HOLD ITS DATA
   // IS REFUSED, and the refusal replaces a CLAMP that merely declined to make
   // things worse. `SDA_HOLD` cycles of data hold only satisfy `t_HD;DAT` if
@@ -1996,7 +2048,7 @@ module pe_engine #(
   // no buffer swap -- the same mechanism a chaining `OP_REARM` already uses.
   // This is also Amendment A1 in silicon: a held dispatch owes NO refill, so
   // the proof's "exactly one slot per lane" became "at most one".
-  wire ck_hold    = ck_act & ~ck_retire;
+  wire ck_hold    = (ck_act & ~ck_retire) | (st_act & ~st_last);
   // A CONSUME POINT: where a captured bit is taken. The first LOW of an action
   // has nothing pending yet (`l_ckbit` is still 0), every later LOW takes the
   // previous bit, and the COLL takes the last one -- n consumes for n bits.
@@ -2076,7 +2128,8 @@ module pe_engine #(
 `ifdef M_TX_PRELOAD
   wire tx_bit   = l_tx[cur][0];
 `else
-  wire tx_bit   = l_txv[cur] ? l_tx[cur][0] : (host_valid & host_ord[0]);
+  wire tx_bit   = l_txv[cur] ? l_tx[cur][0]
+                : cur_cls[C_SHI] ? shi_imm[0] : (host_valid & host_ord[0]);
 `endif
   // ⛔⛔⛔ THE SAMPLE IS RANGE-GUARDED, AND IT IS ONE WIRE SO THERE IS ONE
   // GUARD. `a_pin` is a 4-bit PROGRAM-CONTROLLED field addressing 0..15 while
@@ -2855,6 +2908,11 @@ module pe_engine #(
                 // than relying on this branch being written correctly.
                 pin_out[a_pin] <= a_lvl & pin_pp[a_pin];
                 pin_oe[a_pin]  <= 1'b1;
+                // the pair (bundle 2): pinb = ~level, or LOW for SE0 (mod 11)
+                if (pinb_real & a_mod[0]) begin
+                  pin_out[a_pinb] <= (a_mod[1] ? 1'b0 : (a_lvl ^ pair_inv)) & pin_pp[a_pinb];
+                  pin_oe[a_pinb]  <= 1'b1;
+                end
               end else begin
                 pin_out[a_pin] <= 1'b0;         // open-drain: NEVER drives 1
                 pin_oe[a_pin]  <= ~a_lvl;       // low = drive, high = release
@@ -2886,7 +2944,7 @@ module pe_engine #(
             // added to one arm while a LATER arm (`else if (a_lvl)`) still
             // matched. A guard belongs at the HEAD of a chain, not bolted to
             // a branch of it.
-            OP_SHIFT: if (pin_real && !ck_refuse) begin
+            OP_SHIFT, OP_SHIFTI: if (pin_real && !ck_refuse) begin
 `ifndef M_SHIFT_CLK_ALIAS
               if (ck_pin == a_pin) begin
                 config_err_m <= 1'b1;
@@ -3046,6 +3104,16 @@ module pe_engine #(
                 if (l_mode[cur]) begin
                   pin_out[a_pin] <= tx_bit & pin_pp[a_pin];
                   pin_oe[a_pin]  <= 1'b1;
+                  // the pair (bundle 2): pinb = ~bit. mod[1] here is the
+                  // self-timed byte, NEVER SE0 -- the complement is unconditional
+                  if (pinb_real & a_mod[0]) begin
+`ifdef M_PAIR_SE0_SHIFT
+                    pin_out[a_pinb] <= (a_mod[1] ? 1'b0 : (tx_bit ^ pair_inv)) & pin_pp[a_pinb];   // the mutant
+`else
+                    pin_out[a_pinb] <= (tx_bit ^ pair_inv) & pin_pp[a_pinb];
+`endif
+                    pin_oe[a_pinb]  <= 1'b1;
+                  end
                 end else begin
                   pin_out[a_pin] <= 1'b0;
                   pin_oe[a_pin]  <= ~tx_bit;
@@ -3168,6 +3236,8 @@ module pe_engine #(
               // `pin_out` is not written on any SHIFTIN and the unclocked
               // path is unchanged.
               if (ck_shiftin & ack_drv[1]) pin_out[a_pin] <= ack_drv[0];
+              // the pair (bundle 2): the bus turns around -- pinb released too
+              if (pinb_real & a_mod[0]) pin_oe[a_pinb] <= 1'b0;
               if (ck_shiftin & clk_real) begin
                 if (ck_is_high) begin
                   // RELEASE, not drive -- see D2. The release is what makes
@@ -3280,6 +3350,12 @@ module pe_engine #(
             sticky_ovr_m <= 1'b1;
             live_n[cur] = 1'b0;         // HALT: the action has no meaning
           end
+          // bundle 2: the self-timed byte's bit counter -- one per dispatch,
+          // cleared at the retire on its last bit (no phases to wait on)
+          if (st_act) begin
+            if (act_retire) l_ckbit[cur] <= {BPW{1'b0}};
+            else            l_ckbit[cur] <= l_ckbit[cur] + {{(BPW-1){1'b0}}, 1'b1};
+          end
           if (ck_act) begin
             // the action's own bit counter: advances on LOW, cleared at the
             // retire that starts the next action. ⛔ NOT `tx_bitp`, which the
@@ -3335,7 +3411,7 @@ module pe_engine #(
           end
 
           case (a_op)
-            OP_SHIFT: if (!ck_shift || ck_is_low) begin
+            OP_SHIFT, OP_SHIFTI: if (!ck_shift || ck_is_low) begin
               // TX ONLY. Neither `l_rx` nor `rx_bitp` is named here.
               // ⛔ ON A CLOCKED SHIFT ONLY THE LOW PHASE SHIFTS: the high
               // phase emits no new bit, so shifting there would drain the
@@ -3352,7 +3428,9 @@ module pe_engine #(
 `endif
                 l_tx[cur] <= {1'b0, l_tx[cur][7:1]};
               end else begin
-                if (host_valid) begin
+                if (cur_cls[C_SHI]) begin
+                  l_tx[cur] <= {1'b0, shi_imm[7:1]};   // SHIFTI: the word's byte, no pop
+                end else if (host_valid) begin
                   l_tx[cur] <= {1'b0, host_ord[7:1]};
                   host_pop  <= 1'b1;        // consumed: advance the host FIFO
                 end else begin
@@ -3592,12 +3670,12 @@ module pe_engine #(
           //    values, so the dispatch stream was exact and the bytes wrong.
           //    `M_TX_LOAD_ANYPHASE` restores the ungated test.
 `ifdef M_SHARED_BITP
-          if (a_op == OP_SHIFT && (!ck_shift || ck_is_low) && l_bitp_shared == a_cnt) begin
+          if (cur_cls[C_SHIFT] && (!ck_shift || ck_is_low) && l_bitp_shared == a_cnt) begin
 `else
 `ifdef M_TX_LOAD_ANYPHASE
-          if (a_op == OP_SHIFT && tx_bitp[cur] == a_cnt) begin
+          if (cur_cls[C_SHIFT] && tx_bitp[cur] == a_cnt) begin
 `else
-          if (a_op == OP_SHIFT && (!ck_shift || ck_is_low) && tx_bitp[cur] == a_cnt) begin
+          if (cur_cls[C_SHIFT] && (!ck_shift || ck_is_low) && tx_bitp[cur] == a_cnt) begin
 `endif
 `endif
             // ⛔⛔ CANDIDATE #8: NO PRELOAD at the end of a byte. The next

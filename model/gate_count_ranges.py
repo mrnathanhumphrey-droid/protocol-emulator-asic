@@ -111,8 +111,10 @@ def main() -> int:
     for tag, old, new, why in (
             ("M3", "(a_cnt + {{(BPW-1){1'b0}}, 1'b1})", "(a_cnt)",
              "ck_nbits without the + 1"),
-            ("M4", "wire ck_degen = ck_act & (ck_nbits == {BPW{1'b0}});",
-             "wire ck_degen = 1'b0;", "ck_degen removed")):
+            # bundle 2 (11-08): ck_degen gained the self-timed SHIFTIN term on
+            # a second line; the mutation removes the clocked term, as before
+            ("M4", "wire ck_degen = (ck_act & (ck_nbits == {BPW{1'b0}})) |",
+             "wire ck_degen = 1'b0 |", "ck_degen removed")):
         if old not in text:
             print("  *** %s: the mutation site is not in the RTL" % tag)
             rc = 1

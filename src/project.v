@@ -446,7 +446,7 @@ module tt_um_protocol_emulator #(
   // holding one is refused exactly as a bad magic is: the engine never
   // starts, CONFIG_ERR is reported. A new load (pointer reset) starts clean.
   // N_BUILT_OPS and OP_W are held to test/pe_isa.py by gate_one_encoder.
-  localparam integer N_BUILT_OPS = 11;  // 10 -> 11: LOOP (primitive 2, bundle 2)
+  localparam integer N_BUILT_OPS = 12;  // 11 -> 12: SHIFTI (primitive 3, bundle 2)
   localparam integer OP_W_T      = 5;
   localparam integer ACT_BASE_T  = MAGIC_AT + 2;
   localparam [AW-1:0] ACT_BASE_A = ACT_BASE_T[AW-1:0];

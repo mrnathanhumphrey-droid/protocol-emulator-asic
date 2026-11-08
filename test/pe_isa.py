@@ -74,6 +74,10 @@ OP_CMP_BRANCH = 9
 # ⭐ v2 PRIMITIVE 2, bundle 2: LOOP -- repeat a body n times (a per-lane
 # counter), the same timed branch. 8..11 share op[4:2] = 0b010.
 OP_LOOP = 10
+# ⭐ v2 PRIMITIVE 3, bundle 2 (Wilson 11-08): SHIFTI -- SHIFT of an 8-bit
+# immediate (wire order, bit 0 first), always self-timed. Not a branch: the
+# RTL's pre-decode excludes 11 from op[4:2] = 0b010.
+OP_SHIFTI = 11
 BRANCH_OPS = (OP_BRANCH_BIT, OP_CMP_BRANCH, OP_LOOP)
 BRANCH_NAMES = {OP_BRANCH_BIT: "BRANCH_BIT", OP_CMP_BRANCH: "CMP_BRANCH", OP_LOOP: "LOOP"}
 #: CMP_BRANCH's mask modes (mod[1:0]), in the byte's natural order
@@ -83,7 +87,7 @@ OPCODES = {
     "LEVEL": OP_LEVEL, "SHIFT": OP_SHIFT, "SHIFTIN": OP_SHIFTIN,
     "READBIT": OP_READBIT, "START": OP_START, "STOP": OP_STOP,
     "ARM": OP_ARM, "REARM": OP_REARM, "BRANCH_BIT": OP_BRANCH_BIT,
-    "CMP_BRANCH": OP_CMP_BRANCH, "LOOP": OP_LOOP,
+    "CMP_BRANCH": OP_CMP_BRANCH, "LOOP": OP_LOOP, "SHIFTI": OP_SHIFTI,
 }
 # ⭐ RESERVED WITH THE FORMAT (frozen once, Wilson): one opcode per master-list
 # primitive, each with the field map it will use, shown here to fit ONE 32-bit
@@ -95,9 +99,9 @@ OPCODES = {
 #: refuses to encode one. ONE constant: the RTL's copy (`N_BUILT_OPS` in
 #: project.v) is held to it by model/gate_one_encoder.py, and each primitive
 #: that lands raises it by one IN THE COMMIT THAT BUILDS IT.
-N_BUILT_OPS = 11                     # 10 -> 11: LOOP built (primitive 2, bundle 2)
+N_BUILT_OPS = 12                     # 11 -> 12: SHIFTI built (primitive 3, bundle 2)
 RESERVED_OPCODES = {
-    11: ("ARM2", "pin + pinb = the two watched pins, level = edge, delay = timeout"),
+    # 11 was ARM2: built instead as ARM's mod[0] (primitive 3 bundle 1); 11 is SHIFTI
     12: ("DRIVE_SAMPLE", "pin = driven, pinb = sampled, level = drive value, delay"),
     13: ("SER", "pin, delay = bit time, count = bits (per-lane serializer)"),
     14: ("FRAC_TX", "pin, delay = integer bit time, {count, mod} = fraction"),
@@ -431,6 +435,107 @@ def arm_problems(img):
     return out
 
 
+# ---------------------------------------------------------------------------
+# v2 primitive 3, bundle 2 (Wilson 11-08): the PAIR, SHIFTI, the SELF-TIMED BYTE
+# ---------------------------------------------------------------------------
+#: mod bits: [0] = drive / release `pinb` as the pair; [1] on SHIFT/SHIFTIN =
+#: the self-timed byte; mod = 11 on LEVEL (level 0) = SE0, both pins low.
+MOD_PAIR, MOD_SELF_TIMED = 1, 2
+MOD_SE0 = 3
+
+
+def act_level_pair(pin, pinb, level, delay) -> bytes:
+    """LEVEL on a complementary pair: `pin` = level, `pinb` = ~level."""
+    return act(OP_LEVEL, pin, level, delay, pinb=pinb, mod=MOD_PAIR)
+
+
+def act_se0(pin, pinb, delay) -> bytes:
+    """SE0: both pins of the pair driven LOW -- the ONLY encoding that does it."""
+    return act(OP_LEVEL, pin, 0, delay, pinb=pinb, mod=MOD_SE0)
+
+
+def act_shifti(byte, pin, delay, pinb=None) -> bytes:
+    """Shift `byte` out of the word, bit 0 first (wire order), `delay` cycles a
+    bit (<= 255), 8 bits in ONE action (the RTL fixes its count at 7 = 8 bits). `pinb` set: the complementary pair."""
+    b, d = int(byte), int(delay)
+    if not 0 <= b <= 255 or not 0 < d <= 255:
+        raise ValueError("SHIFTI byte %r / delay %r out of range" % (byte, delay))
+    return act(OP_SHIFTI, pin, 0, d | ((b & 3) << 8), count=b >> 4, q=(b >> 2) & 3,
+               pinb=0 if pinb is None else pinb, mod=0 if pinb is None else MOD_PAIR)
+
+
+def shifti_byte(x):
+    """the immediate of an unpacked SHIFTI word, wire order"""
+    return (x["count"] << 4) | (x["q"] << 2) | (x["delay"] >> 8)
+
+
+def act_shift_timed(pin, delay, nbits=8, q=0, pinb=None) -> bytes:
+    """An unclocked SHIFT of `nbits` queue bits in ONE action (self-timed).
+    `count = nbits - 1`: OP_SHIFT's existing convention."""
+    if not 1 <= int(nbits) <= 8:
+        raise ValueError("nbits %r outside 1..8" % (nbits,))
+    return act(OP_SHIFT, pin, 0, delay, count=int(nbits) - 1, q=q, pinb=0 if pinb is None else pinb,
+               mod=MOD_SELF_TIMED | (0 if pinb is None else MOD_PAIR))
+
+
+def act_shiftin_timed(pin, delay, nbits=8, pinb=None) -> bytes:
+    """An unclocked SHIFTIN of `nbits` bits in ONE action (self-timed); `pinb`
+    set: the pair's second pin is released with the data pin."""
+    return act(OP_SHIFTIN, pin, 0, delay, count=nbits, pinb=0 if pinb is None else pinb,
+               mod=MOD_SELF_TIMED | (0 if pinb is None else MOD_PAIR))
+
+
+def pair_problems(img):
+    """[problem] for the bundle-2 encodings the chip would run wrongly or never
+    meant: SE0 with level 1 (only LEVEL level 0 drives both low); LEVEL mod 10
+    (reserved); a pair on START/STOP; a pair or self-timed byte on an
+    open-drain lane or a clocked lane (the pair is push-pull, the self-timed
+    byte clockless); a pair whose pinb is its own pin, not real, or another
+    lane's header pin; a self-timed count of 0; SHIFTI on a clocked lane or with
+    level set."""
+    out = []
+    progs = lane_programs(img)
+    owner = {}
+    for ln, (h, _acts) in progs.items():
+        for f in ("pin", "clkpin"):
+            if h[f] < N_PINS:
+                owner.setdefault(h[f], set()).add(ln)
+    for ln, (h, acts) in progs.items():
+        clocked = h["clkpin"] < N_PINS
+        for i, x in enumerate(acts):
+            w = h["base_word"] + i
+            op, m = x["op"], x["mod"]
+            if op in (OP_START, OP_STOP) and m:
+                out.append("word %d: START/STOP mod must be zero" % w)
+            if op == OP_LEVEL:
+                if m == 2:
+                    out.append("word %d: LEVEL mod 10 is reserved" % w)
+                if m == MOD_SE0 and x["level"]:
+                    out.append("word %d: SE0 (LEVEL mod 11) needs level 0" % w)
+            timed = op == OP_SHIFTI or (op in (OP_SHIFT, OP_SHIFTIN) and m & MOD_SELF_TIMED)
+            pair = op in (OP_LEVEL, OP_SHIFT, OP_SHIFTI, OP_SHIFTIN, OP_READBIT) and m & MOD_PAIR
+            if op == OP_READBIT and m & MOD_SELF_TIMED:
+                out.append("word %d: READBIT mod[1] must be zero" % w)
+            if timed and clocked:
+                out.append("word %d (lane %d): a self-timed byte / SHIFTI on a CLOCKED "
+                           "lane -- the clock pin keeps the clocked machinery" % (w, ln))
+            if timed and op == OP_SHIFTIN and x["count"] == 0:
+                out.append("word %d: self-timed SHIFTIN count 0 (no bits)" % w)
+            if op == OP_SHIFTI and x["level"]:
+                out.append("word %d: SHIFTI level must be zero" % w)
+            if pair:
+                if not h["mode"]:
+                    out.append("word %d (lane %d): the pair needs a PUSH-PULL lane" % (w, ln))
+                if x["pinb"] >= N_PINS or x["pinb"] == x["pin"]:
+                    out.append("word %d: pair pinb %d is not a real second pin" % (w, x["pinb"]))
+                elif owner.get(x["pinb"], set()) - {ln}:
+                    out.append("word %d: pair pinb %d is lane %s's header pin"
+                               % (w, x["pinb"], sorted(owner[x["pinb"]] - {ln})))
+            elif op in (OP_LEVEL, OP_SHIFT, OP_SHIFTI, OP_SHIFTIN) and x["pinb"] and not timed:
+                out.append("word %d: pinb %d set without the pair" % (w, x["pinb"]))
+    return out
+
+
 def act_shift_clocked(pin, delay, nbits=8, q=0) -> bytes:
     """A self-clocked transmit of `nbits` bits (a whole byte by default).
 
@@ -652,7 +757,8 @@ def branch_problems(img):
             for f in ("q", "mod"):
                 if x[f]:
                     out.append("word %d: LOOP field %s = %d must be zero" % (w, f, x[f]))
-    return out + cmp_byte_problems(img) + loop_problems(img) + arm_problems(img)
+    return (out + cmp_byte_problems(img) + loop_problems(img) + arm_problems(img)
+            + pair_problems(img))
 
 
 def loop_problems(img):
