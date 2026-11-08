@@ -215,13 +215,46 @@ def sim(vvp, img, wave, ncyc):
     rx = [(int(c), int(v), int(ln)) for c, v, ln in re.findall(r"^RX (\d+) (\d+) (\d+)$", out, re.M)]
     se = [(int(c), int(v)) for c, v in re.findall(r"^SE (\d+) (\d+)$", out, re.M)]
     ce = [int(c) for c in re.findall(r"^CE (\d+)$", out, re.M)]
-    return rx, se, ce, ("END" in out), out[-300:]
+    sa = [(int(c), int(t)) for c, t in re.findall(r"^SA (\d+) (\d+)$", out, re.M)]
+    return rx, se, ce, sa, ("END" in out), out[-300:]
 
 
-def judge(name, packets, rx, se, ce, end, tail, expect_se):
+def sample_timing(tr, sa):
+    """-> (set of edge-to-sample latencies, writeback jitter, [problem]).
+    THE TIMING CLAIM, exact, on each sample's SCHEDULED release `ts` (the lane
+    timestamp -- jitter-free by construction): a sample with no host edge since
+    the previous one is scheduled exactly D after it; a sample after an edge is
+    scheduled a CONSTANT K after the last such edge -- the same K for the
+    packet's first sample (the ARM + d/2 path) as for every re-anchor. `ts` is
+    in `now` units and edges in bench cycles; the offset is constant, so K
+    absorbs it. The registered re-anchor must keep that identity.
+    MEASURED, not judged: the spread of (writeback - ts), the dispatch jitter
+    a receive sample sees from other lanes' non-preemptive service."""
+    edges = sorted(c for c, _l in tr)
+    ks, probs, prev = set(), [], None
+    for w, ts in sa:
+        lo = prev if (prev is not None and w - prev[0] <= 3 * D) else None
+        between = [c for c in edges if c < w and (lo is None or c > lo[0])]
+        if lo is not None and not between:
+            if ts - lo[1] != D:
+                probs.append("samples scheduled at %d and %d are %d apart with no edge "
+                             "between, not %d" % (lo[1], ts, ts - lo[1], D))
+        elif between:
+            ks.add(ts - between[-1])
+        prev = (w, ts)
+    lat = [w - ts for w, ts in sa]
+    jit = (max(lat) - min(lat)) if lat else 0
+    return ks, jit, probs
+
+
+def judge(name, packets, rx, se, ce, sa, tr, end, tail, expect_se):
     probs = []
     if not end:
-        return ["%s: no END (%s)" % (name, tail)]
+        return ["%s: no END (%s)" % (name, tail)], set(), 0
+    ks, jit, tp = sample_timing(tr, sa)
+    probs += ["%s: %s" % (name, x) for x in tp[:2]]
+    if len(ks) != 1:
+        probs.append("%s: edge-to-sample latency not constant: %s" % (name, sorted(ks)))
     gold = []
     for wire, sent in packets:
         dec, _errs = decode(wire)
@@ -239,7 +272,7 @@ def judge(name, packets, rx, se, ce, end, tail, expect_se):
         probs.append("%s: stuff-error flag changes %s, golden %s" % (name, [v for _c, v in se], expect_se))
     if ce:
         probs.append("%s: config_err at cycle %d" % (name, ce[0]))
-    return probs
+    return probs, ks, jit
 
 
 def run_suite(vvp, tmp, tag, pool):
@@ -250,16 +283,26 @@ def run_suite(vvp, tmp, tag, pool):
         sim_run.scratch_image(GEN, img)
     jobs = {}
     for name, packets, e, E, seed, exp in cases():
-        wave = os.path.join(tmp, "wave_%s_%s.txt" % (tag, re.sub(r"[^A-Za-z0-9]+", "_", name)))
+        # ⛔ the SIGN stays in the name: "e-0.015" and "e+0.015" once both became
+        # "e_0_015" and the parallel runs overwrote each other's host line
+        safe = re.sub(r"[^A-Za-z0-9]+", "_", name.replace("+", "p").replace("-", "m"))
+        wave = os.path.join(tmp, "wave_%s_%s.txt" % (tag, safe))
         tr, t_end = line(packets, e, E, seed)
         with open(wave, "w") as fh:
             fh.write("".join("%d %d\n" % x for x in tr))
-        jobs[name] = (packets, exp, pool.submit(sim, vvp, img, wave, t_end + 400))
-    res = {}
-    for name, (packets, exp, fut) in jobs.items():
-        rx, se, ce, end, tail = fut.result()
-        res[name] = judge(name, packets, rx, se, ce, end, tail, exp)
-    return res
+        jobs[name] = (packets, exp, tr, pool.submit(sim, vvp, img, wave, t_end + 400))
+    res, ks, jit = {}, set(), 0
+    for name, (packets, exp, tr, fut) in jobs.items():
+        rx, se, ce, sa, end, tail = fut.result()
+        res[name], k, j = judge(name, packets, rx, se, ce, sa, tr, end, tail, exp)
+        ks |= k
+        jit = max(jit, j)
+    # one latency across EVERY case: the identity is global, not per run
+    if len(ks) != 1:
+        res["latency"] = ["edge-to-sample latency differs across cases: %s" % sorted(ks)]
+    else:
+        res["latency"] = []
+    return res, ks, jit
 
 
 def main() -> int:
@@ -288,11 +331,15 @@ def main() -> int:
     vvp = os.path.join(tmp, "usbrx.vvp")
     build(vvp)
     with ThreadPoolExecutor(max_workers=8) as pool:
-        res = run_suite(vvp, tmp, "base", pool)
-        print("\n  U1/U2 the receive")
+        res, ks, jit = run_suite(vvp, tmp, "base", pool)
+        print("\n  U1/U2 the receive (bytes, flag, and every scheduled sample instant)")
         for name, pr in res.items():
             print("    %-16s %s" % (name, "exact" if not pr else "*** " + pr[0]))
             probs += pr
+        print("    edge-to-scheduled-sample latency: %s, the SOP path and every re-anchor alike"
+              % (sorted(ks),))
+        print("    MEASURED: receive-sample dispatch jitter (writeback - schedule spread): %d cycle(s)"
+              % jit)
 
         # U3: off the USB lane
         print("\n  U3 the encoding off the USB lane")
@@ -307,7 +354,7 @@ def main() -> int:
         wwave = os.path.join(tmp, "wave_wrong.txt")
         with open(wwave, "w") as fh:
             fh.write("".join("%d %d\n" % x for x in tr))
-        rx, _se, ce, end, tail = sim(vvp, wimg, wwave, t_end + 400)
+        rx, _se, ce, _sa, end, tail = sim(vvp, wimg, wwave, t_end + 400)
         ok = end and ce and not rx
         print("    chip:   %s" % ("config_err at cycle %d, no byte pushed" % ce[0] if ok
                                   else "*** not refused (pushes %d, config_err %s)" % (len(rx), ce)))
@@ -322,7 +369,7 @@ def main() -> int:
             except RuntimeError as exc:
                 probs.append("%s: %s" % (d, exc))
                 continue
-            r = run_suite(mv, tmp, d, pool)
+            r, _k, _j = run_suite(mv, tmp, d, pool)
             red = [(n, p[0]) for n, p in r.items() if p]
             print("    %-16s %-40s %s" % (d, what, ("RED in %d of %d cases: %s -- %s"
                                                      % (len(red), len(r), red[0][0], red[0][1][:70]))
@@ -349,6 +396,7 @@ MUTANTS = [
     ("M_NO_REANCHOR", "one anchor at SOP, none at the edges"),
     ("M_UNSTUFF_KEEP", "the stuffed bit kept as data"),
     ("M_STUFF_NOFLAG", "seven ones not flagged"),
+    ("M_REAN_NOCOMP", "registered re-anchor, cycle not taken off"),
 ]
 
 

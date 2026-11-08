@@ -12,6 +12,8 @@
  *
  * Prints, cycles counted from run entry:
  *   RX <c> <data> <lane>   every received byte
+ *   SA <c> <ts>            every USB-receive sample: its writeback cycle and its
+ *                          scheduled release (the USB lane's timestamp)
  *   SE <c> <0|1>           every change of the USB lane's stuff-error flag
  *   CE <c>                 config_err rising (the chip refused the program)
  *   END
@@ -49,7 +51,7 @@ module tb_usbrx;
   localparam integer PIN_WR   = 6;
   localparam integer DM       = 2;      // uio[2] = the host's D- (LS: J = 1)
 
-  integer i, k, cyc, ncyc, wfd, wc, wl, wok;
+  integer i, k, cyc, ncyc, wfd, wc, wl, wok, dbg;
   reg prev_se, prev_ce;
 
   task load_and_run;
@@ -83,6 +85,7 @@ module tb_usbrx;
     if (!$value$plusargs("IMG=%s", imgfile)) imgfile = "none";
     if (!$value$plusargs("WAVE=%s", wavefile)) wavefile = "none";
     if (!$value$plusargs("NCYC=%d", ncyc)) ncyc = 2000;
+    if (!$value$plusargs("DBG=%d", dbg)) dbg = 0;
     $readmemh(imgfile, img);
     `PE_REQUIRE_IMG_LOADED(imgfile)
     img_bytes = 0;
@@ -103,6 +106,12 @@ module tb_usbrx;
       @(posedge clk); cyc = cyc + 1;
       if (dut.u_eng.rx_push === 1'b1)
         $display("RX %0d %0d %0d", cyc, dut.u_eng.rx_data, dut.u_eng.rx_lane);
+      // the sample's writeback cycle AND its scheduled release (the lane
+      // timestamp, not yet advanced at writeback): the grid the claim is about
+      if (dut.u_eng.usb_act === 1'b1 && dut.u_eng.st === 2'd2)
+        $display("SA %0d %0d", cyc, dut.u_eng.l_timestamp[0]);
+      if (dbg && dut.u_eng.st === 2'd1)
+        $display("DS %0d %0d", cyc, dut.u_eng.cur);
       if (dut.u_eng.usb_serr !== prev_se)
         $display("SE %0d %0d", cyc, dut.u_eng.usb_serr);
       prev_se = dut.u_eng.usb_serr;

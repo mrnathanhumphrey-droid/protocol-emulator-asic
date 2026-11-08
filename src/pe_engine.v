@@ -2402,12 +2402,41 @@ module pe_engine #(
   wire             u_watch = hv[USB_LANE] & l_cls[hix[USB_LANE]][C_USB] &
                              ~(l_clkpin[USB_LANE] < N_PINS[PINW-1:0]) & ~l_armed[USB_LANE] & u_real;
   wire             u_edge  = u_real ? (pin_rise[u_pin] | pin_fall[u_pin]) : 1'b0;
+  // ⭐⭐ REGISTERED (Wilson 11-08, after bundle 3's synthesis): the capture and
+  // its target are FLOPS, so the `now + d/2` adder and the pin-edge select are
+  // off the readiness path (`ts_n` -> `rel_q` / `key_q`), which now sees a
+  // flop-to-mux. 17 flops. The target is computed in the CAPTURE cycle, so
+  // applied one cycle later it is `now + d/2 - 1` of the APPLY cycle: the
+  // sample instant is IDENTICAL to the unregistered rebase (run_usbrx holds
+  // the edge-to-sample latency equal to the SOP path's).
+  // ⛔ The release must still be in the future ONE CYCLE OUT (`now_n`, not
+  // `now`): the rebase lands a cycle after the edge, and a release due in that
+  // cycle would dispatch the bit and have the late rebase stack on its
+  // writeback's `+ d`. An edge that close to a sample is dropped, as before.
+  // `M_REAN_NOCOMP` is the off-by-one: the cycle not taken off.
+  reg              rean_q;
+  reg  [TS_W-1:0]  rean_tq;
 `ifdef M_NO_REANCHOR
-  assign rean_hit = 1'b0;                    // the mutant: one anchor, at SOP
+  wire             rean_cap = 1'b0;          // the mutant: one anchor, at SOP
 `else
-  assign rean_hit = u_watch & u_edge & tf_diff(now, l_timestamp[USB_LANE]);
+  wire             rean_cap = run & u_watch & u_edge & tf_diff(now_n, l_timestamp[USB_LANE]);
 `endif
-  assign rean_ts  = now + {{(TS_W-DLY_W+1){1'b0}}, u_head[LOWX+BQW+BPW+1 +: DLY_W-1]};
+  wire [TS_W-1:0]  u_half   = {{(TS_W-DLY_W+1){1'b0}}, u_head[LOWX+BQW+BPW+1 +: DLY_W-1]};
+  always @(posedge clk or negedge rst_n) begin
+    if (!rst_n) begin
+      rean_q  <= 1'b0;
+      rean_tq <= {TS_W{1'b0}};
+    end else begin
+      rean_q  <= rean_cap;
+`ifdef M_REAN_NOCOMP
+      rean_tq <= now_n + u_half;             // the mutant: one cycle late
+`else
+      rean_tq <= now + u_half;
+`endif
+    end
+  end
+  assign rean_hit = rean_q;
+  assign rean_ts  = rean_tq;
 
   // its own loop index: sharing `i` with the lane block would make two
   // always blocks write one variable on the same edge
