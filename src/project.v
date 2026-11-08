@@ -1915,11 +1915,24 @@ module pe_pit_s12 #(parameter integer AW = 9) (
   reg         dv_busy;
   wire [23:0] dv_try = {dv_r[22:0], dv_q[28]} - {1'b0, dv_d};
   // round(dividend / divisor) and its distance, from the quotient and remainder
-  wire        rnd_up = ({dv_r[22:0], 1'b0} >= {1'b0, dv_d});
-  wire [22:0] err    = rnd_up ? (dv_d - dv_r[22:0]) : dv_r[22:0];
-  wire [28:0] m_r    = dv_q + {28'd0, rnd_up};
-  wire        hit    = (m_r != 29'd0) && ({err, 3'b000} <= {3'b000, dv_d});
-  wire [4:0]  m16    = (m_r > 29'd15) ? 5'd16 : {1'b0, m_r[3:0]};   // a run in bit periods (> 15 = idle)
+  wire        rnd_c  = ({dv_r[22:0], 1'b0} >= {1'b0, dv_d});
+  wire [22:0] err_c  = rnd_c ? (dv_d - dv_r[22:0]) : dv_r[22:0];
+  wire [28:0] m_r_c  = dv_q + {28'd0, rnd_c};
+  // THE DIVIDER'S TAIL REGISTER (Wilson 11-07, the slow corner): the round / distance / hit chain above ran on
+  // through stage 1's harmonic test and stage 2's steps into p / acc in the same cycle. Its results are
+  // registered every cycle; a divide holds dv_busy one cycle past its last step, so every reader (all wait
+  // on !dv_busy) sees the registered values of the finished divide.
+  reg  [22:0] err;
+  reg  [28:0] m_r;
+  reg         hit;
+  reg  [4:0]  m16;                  // a run in bit periods (> 15 = idle)
+  always @(posedge clk or negedge rst_n)
+    if (!rst_n) begin err <= 23'd0; m_r <= 29'd0; hit <= 1'b0; m16 <= 5'd0; end
+    else begin
+      err <= err_c; m_r <= m_r_c;
+      hit <= (m_r_c != 29'd0) && ({err_c, 3'b000} <= {3'b000, dv_d});
+      m16 <= (m_r_c > 29'd15) ? 5'd16 : {1'b0, m_r_c[3:0]};
+    end
 
   // ---------------- control ---------------------------------------------------------
   localparam [4:0] S_IDLE = 5'd0,  S_WIRE = 5'd1,  S_PRE = 5'd2,  S_BANK = 5'd3,  S_RIVAL = 5'd4,
@@ -2398,10 +2411,12 @@ module pe_pit_s12 #(parameter integer AW = 9) (
       walk_go <= 1'b0; we <= 1'b0; re <= 1'b0;
       // ---- the divider ----
       if (dv_busy) begin
-        if (!dv_try[23]) begin dv_r <= dv_try; dv_q <= {dv_q[27:0], 1'b1}; end
-        else begin dv_r <= {dv_r[22:0], dv_q[28]}; dv_q <= {dv_q[27:0], 1'b0}; end
-        dv_n <= dv_n - 5'd1;
-        if (dv_n == 5'd1) dv_busy <= 1'b0;
+        if (dv_n == 5'd0) dv_busy <= 1'b0;          // the tail: err / m_r / hit / m16 register this cycle
+        else begin
+          if (!dv_try[23]) begin dv_r <= dv_try; dv_q <= {dv_q[27:0], 1'b1}; end
+          else begin dv_r <= {dv_r[22:0], dv_q[28]}; dv_q <= {dv_q[27:0], 1'b0}; end
+          dv_n <= dv_n - 5'd1;
+        end
       end
       // ---- the walk: this wire's next interval (golden wire_ivs) ----
       if (walk_go) begin has_prev <= 1'b0; wend <= 1'b0; end
