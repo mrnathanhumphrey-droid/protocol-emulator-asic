@@ -726,6 +726,15 @@ SPEC_SYMBOLS = {
     # numbers are words in the labels ("n + 1"), not readings.
     ("test/branch_corpus.py", "LOOP_KINDS"),
     ("test/run_branch_check.py", "MUTANTS"),
+    # ⭐ v2 primitive 3 bundle 1 (the two-pin ARM): IMAGES are the chosen
+    # timeouts (200 and none) and polarities; SCEN the chosen drive phases
+    # (cycles after arming: each pin order, a gap, one pin held 300 cycles, a
+    # condition already present) -- design. The RESULTS are tb_arm2's recorded
+    # cycles, judged live against run_arm2's golden.
+    ("test/run_arm2.py", "IMAGES"),
+    ("test/run_arm2.py", "SCEN"),
+    # BAD: the encodings pe_isa must refuse -- chosen field values, not readings
+    ("test/run_arm2.py", "BAD"),
     # ⭐ v2 PIT chunk 1: CASES is the capture gate's DESIGN -- which buses to
     # play (SPI modes 0 / 3, a wire mask, I2C, two UARTs, a line fast enough
     # to overrun) and their chosen masks; the result is the bit-exact compare.

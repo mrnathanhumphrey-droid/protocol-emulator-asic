@@ -178,6 +178,8 @@ SEAMS = (
     ("model/gate_v2_equiv.py", "gate_v2_equiv.same", "slow", "T"),
     # v2 primitive 1: `run_problems` always empty -> the six M_BR_* survive
     ("test/run_branch_check.py", "run_branch_check.run_problems", "slow", "E"),
+    # v2 primitive 3 bundle 1: `scenario_problems` always empty -> the four M_ARM2_* survive
+    ("test/run_arm2.py", "run_arm2.scenario_problems", "slow", "E"),
     # v2 PIT chunk 1: `compare` always finds no problem -> the five M_PIT_* survive
     ("test/run_pit_capture.py", "run_pit_capture.compare", "slow", "E0"),
     # v2 PIT chunk 2: `table_problems` always empty -> every M_S0_* survives

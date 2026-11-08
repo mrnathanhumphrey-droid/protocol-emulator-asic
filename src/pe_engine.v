@@ -192,6 +192,8 @@
         l_armed[i]     <= 1'b0; \
         l_armpin[i]    <= {PINW{1'b0}}; \
         l_armedge[i]   <= 1'b0; \
+        l_arm2[i]      <= 1'b0; \
+        l_armpinb[i]   <= {PINB_W{1'b0}}; \
         l_notmo[i]     <= 1'b0; \
       end \
       for (i = 0; i < NSLOT; i = i + 1) begin \
@@ -1076,6 +1078,15 @@ module pe_engine #(
                                             // erode "pins are assigned per
                                             // program" for a 15-flop saving.
   reg             l_armedge[0:N_LANES-1];   // 1 = rise, 0 = fall
+  // ⭐ v2 PRIMITIVE 3, BUNDLE 1 (Wilson 11-08): THE TWO-PIN LEVEL ARM. `mod[0]`
+  // = 1 on an ARM waits for BOTH `pin` and `pinb` to sit at `level` -- 0 =
+  // both low (USB's SE0, the end of every packet), 1 = both high. LEVEL, not
+  // edge: an ARM issued while the bus is already in SE0 fires at once, which
+  // is what the turnaround needs (the program arms inside the SE0). The
+  // polarity reuses `l_armedge`; the deadline, rebase and timeout are ARM's,
+  // unchanged. 5 flops a lane.
+  reg             l_arm2   [0:N_LANES-1];   // 1 = two-pin level mode
+  reg [PINB_W-1:0] l_armpinb[0:N_LANES-1];  // the second pin
   reg             l_notmo  [0:N_LANES-1];   // "no timeout": wait indefinitely
   reg             l_timeout_m[0:N_LANES-1]; // STICKY: the peer went silent
 
@@ -1397,9 +1408,38 @@ module pe_engine #(
 `else
       wire arm_real = (l_armpin[gi] < N_PINS[PINW-1:0]);
 `endif
-      assign arm_hit[gi] = l_armed[gi] & arm_real &
-                           (l_armedge[gi] ? pin_rise[l_armpin[gi]]
-                                          : pin_fall[l_armpin[gi]]);
+      // ⭐ THE TWO-PIN LEVEL ARM (bundle 1). `pin_in` is `uio_q1`, the stage
+      // the edge vectors are taken from, so a level fire has exactly an edge
+      // ARM's latency. ⛔ BOTH PINS MUST BE `uio` INPUTS: `pin_in` ties the
+      // `uo_out` bank (8..11) LOW, so a both-low ARM naming one would fire at
+      // once -- the UNSAFE direction, unlike an edge ARM there, which only
+      // ever times out. Out of the input bank the lane never fires (pe_isa
+      // refuses it statically). This is the FIFTH site of the index class.
+`ifdef M_ARM2_UNGUARDED
+      wire arm2_real = 1'b1;                // the mutant: the uo bank fires
+`else
+      wire arm2_real = (l_armpin[gi] < N_UIO[PINW-1:0]) && (l_armpinb[gi] < N_UIO[PINB_W-1:0]);
+`endif
+`ifdef M_ARM2_POL
+      wire arm2_pol = ~l_armedge[gi];       // the mutant: polarity swapped
+`else
+      wire arm2_pol = l_armedge[gi];
+`endif
+`ifdef M_ARM2_EDGE
+      wire arm2_a = arm2_real ? (arm2_pol ? pin_rise[l_armpin[gi]] : pin_fall[l_armpin[gi]]) : 1'b0;  // an edge: misses a present SE0
+`else
+      wire arm2_a = arm2_real ? (pin_in[l_armpin[gi]] == arm2_pol) : 1'b0;
+`endif
+`ifdef M_ARM2_ONEPIN
+      wire arm2_b = 1'b1;                   // the mutant: pinb ignored
+`else
+      wire arm2_b = arm2_real ? (pin_in[l_armpinb[gi]] == arm2_pol) : 1'b0;
+`endif
+      assign arm_hit[gi] = l_armed[gi] &
+                           (l_arm2[gi] ? (arm2_a & arm2_b)
+                                       : arm_real ? (l_armedge[gi] ? pin_rise[l_armpin[gi]]
+                                                                   : pin_fall[l_armpin[gi]])
+                                                  : 1'b0);
 
       // ⭐⭐ THE CLOCKED SHIFTIN'S SAMPLE, TAKEN ON THE OBSERVED CLOCK RISE.
       // Same shape as `arm_hit` above and for the same reason: a peer that
@@ -1791,6 +1831,7 @@ module pe_engine #(
   // BRANCH_BIT's WAIT W: count is its high nibble, pinb its low
   wire [BPW+PINB_W-1:0] br_wait = {a_cnt, cur_act[MOD_W +: PINB_W]};
   wire [MOD_W-1:0] a_mod  = cur_act[MOD_W-1:0];
+  wire [PINB_W-1:0] a_pinb = cur_act[MOD_W +: PINB_W];   // ARM's second pin
   // a timed branch (BRANCH_BIT / CMP_BRANCH / LOOP): the PRE-DECODED bit
   wire             a_is_br = cur_cls[C_BR];
 
@@ -3183,6 +3224,8 @@ module pe_engine #(
             armed_n[cur]   = 1'b1;
             l_armpin[cur]  <= a_pin;
             l_armedge[cur] <= a_lvl;
+            l_arm2[cur]    <= a_mod[0];          // bundle 1: two-pin level mode
+            l_armpinb[cur] <= a_pinb;
             notmo_n[cur]   = (a_dly == {DLY_W{1'b0}});
           end
 
@@ -3281,6 +3324,7 @@ module pe_engine #(
               armed_n[cur]   = 1'b1;
               l_armpin[cur]  <= ck_pin;
               l_armedge[cur] <= 1'b1;        // a RISE
+              l_arm2[cur]    <= 1'b0;        // an EDGE park, never the level ARM
               notmo_n[cur]   = 1'b1;         // unbounded: a slow peer is legal
               l_ckpark[cur]  <= 1'b1;
             end

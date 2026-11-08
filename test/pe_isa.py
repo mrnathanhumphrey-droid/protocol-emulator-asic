@@ -386,6 +386,51 @@ def loop_count(x):
     return cmp_byte(x)                       # the same {pin, delay[9:7], level}
 
 
+#: ARM's `mod[0]` (v2 primitive 3 bundle 1): two-pin LEVEL mode
+ARM_MOD_LEVEL2 = 1
+
+
+def act_arm2(pin, pinb, level, timeout) -> bytes:
+    """The TWO-PIN LEVEL ARM (primitive 3 bundle 1, Wilson 11-08): release when
+    BOTH `pin` and `pinb` sit at `level` (0 = both low, USB's SE0; 1 = both
+    high). A level, not an edge, so it fires at once if the condition already
+    holds. `timeout` is ARM's (0 = none). Both pins must be `uio` inputs."""
+    return act(OP_ARM, pin, level, timeout, pinb=pinb, mod=ARM_MOD_LEVEL2)
+
+
+def arm_problems(img):
+    """[problem] for every ARM the chip would never fire usefully: `mod[1]`
+    set (reserved); an EDGE ARM with `pinb` set (unread there); a two-pin
+    LEVEL ARM naming a pin outside the `uio` input bank (`pin_in` ties the
+    `uo_out` bank LOW, so a both-low ARM there would fire at once -- the chip
+    guards it by never firing) or naming the same pin twice (one pin's level is
+    an edge ARM's job)."""
+    out = []
+    nwords = (STORE_BYTES - ACT_BASE) // ACT_BYTES
+    for w in range(nwords):
+        a = ACT_BASE + w * ACT_BYTES
+        if a + ACT_BYTES > len(img):
+            break
+        x = _unpack(ACT_FIELDS, img[a:a + ACT_BYTES], ACT_BYTES)
+        if x["op"] != OP_ARM:
+            continue
+        if x["mod"] >> 1:
+            out.append("word %d: ARM mod[1] must be zero (reserved)" % w)
+        if not x["mod"] & ARM_MOD_LEVEL2:
+            if x["pinb"]:
+                out.append("word %d: edge ARM pinb = %d must be zero" % (w, x["pinb"]))
+            continue
+        for f in ("pin", "pinb"):
+            if x[f] >= N_UIO:
+                out.append("word %d: two-pin ARM %s = %d is not a uio input (0..%d) -- "
+                           "the uo_out bank reads LOW, so the chip never fires it"
+                           % (w, f, x[f], N_UIO - 1))
+        if x["pin"] == x["pinb"]:
+            out.append("word %d: two-pin ARM names pin %d twice -- one pin's level "
+                       "is an edge ARM" % (w, x["pin"]))
+    return out
+
+
 def act_shift_clocked(pin, delay, nbits=8, q=0) -> bytes:
     """A self-clocked transmit of `nbits` bits (a whole byte by default).
 
@@ -607,7 +652,7 @@ def branch_problems(img):
             for f in ("q", "mod"):
                 if x[f]:
                     out.append("word %d: LOOP field %s = %d must be zero" % (w, f, x[f]))
-    return out + cmp_byte_problems(img) + loop_problems(img)
+    return out + cmp_byte_problems(img) + loop_problems(img) + arm_problems(img)
 
 
 def loop_problems(img):

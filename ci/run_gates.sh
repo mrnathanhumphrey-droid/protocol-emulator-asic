@@ -407,6 +407,10 @@ GATES=(
   # within A2's r - C (branch priced as an action of delay W), chains and the
   # runtime refusals, and the six M_BR_* must-fires' killer.
   test/run_branch_check.py
+  # ⭐ v2 primitive 3 bundle 1 (Wilson 11-08): the two-pin level ARM -- every
+  # fire and pin cycle against run_arm2's golden, pe_isa's refusals, and the
+  # four M_ARM2_* must-fires' killer.
+  test/run_arm2.py
   # ⭐⭐ SP2 -- the pe_asm protocol front-end (model/pe_proto.py): every
   # shipped FRAM program re-expressed as a TRANSACTION (START / rSTART / STOP
   # and CS framing generated from context), byte-identical to the verified
@@ -645,7 +649,7 @@ can_run() {
     model/gate_rtl_lint.py)
       { command -v "$VL" >/dev/null 2>&1 || command -v wsl.exe >/dev/null 2>&1; } \
         || { echo "no verilator and no wsl.exe to reach one"; return 1; } ;;
-    model/gate_one_encoder.py|model/gate_v2_equiv.py|test/run_pit_capture.py|test/run_pit_s0.py|test/gate_store_latch.py|test/run_branch_check.py|test/gl_harness_check.py|test/gate_tb_elaborates.py|test/run_mutants.py|model/gate_sda_hold.py|test/run_w_sweep.py|test/run_cktx.py|test/run_spidelay.py|test/run_spim_witness.py|test/run_spitgt.py|test/run_rxbw.py)
+    model/gate_one_encoder.py|model/gate_v2_equiv.py|test/run_pit_capture.py|test/run_pit_s0.py|test/gate_store_latch.py|test/run_branch_check.py|test/run_arm2.py|test/gl_harness_check.py|test/gate_tb_elaborates.py|test/run_mutants.py|model/gate_sda_hold.py|test/run_w_sweep.py|test/run_cktx.py|test/run_spidelay.py|test/run_spim_witness.py|test/run_spitgt.py|test/run_rxbw.py)
       command -v "$IV" >/dev/null 2>&1 || { echo "iverilog not found (PE_IVERILOG unset and not on PATH)"; return 1; } ;;
     model/gate_reset_audit.py|model/gate_share_coupling.py)
       [ -n "${PE_NETLIST_JSON:-}" ] && [ -f "${PE_NETLIST_JSON:-}" ] \

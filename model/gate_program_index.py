@@ -69,6 +69,8 @@ PROGRAM_INDEX = (
     (r"l_clkpin\[[a-z_0-9]+\]", "l_clkpin[*]"),
     (r"l_pin\[[a-z_0-9]+\]", "l_pin[*]"),
     (r"l_armpin\[[a-z_0-9]+\]", "l_armpin[*]"),
+    # v2 primitive 3 bundle 1: the two-pin ARM's second pin, from the action word
+    (r"l_armpinb\[[a-z_0-9]+\]", "l_armpinb[*]"),
     (r"hsh_n\[[^\]]*\]", "hsh_n[*]"),
     # ⛔ SILICON FIX #3a (ruling PN1): the clocked sample's pin is now the head
     # slot's ACTION pin, read out of `l_act` into a named wire. Under the old
@@ -155,6 +157,18 @@ CLASSIFIED = {
         "expression and under the same guard. Both arms of the `?:` index the "
         "same program field, so guarding one would leave the other open -- "
         "which is the asymmetry that made D2 a defect."),
+    ("src/pe_engine.v", "pin_in", "l_armpin[*]"): (
+        "arm2_real",
+        "THE FIFTH INSTANCE (v2 primitive 3 bundle 1, Wilson 11-08): the two-pin "
+        "LEVEL ARM reads `pin_in` at the ARM's pin. `pin_in` is [11:0] and ties "
+        "the uo_out bank (8..11) LOW, so the guard is stricter than in range: "
+        "BOTH pins must be uio inputs (< N_UIO), or a both-low ARM on a uo pin "
+        "would fire at once -- the unsafe direction. Priced by "
+        "`M_ARM2_UNGUARDED` (run_arm2's uo_guard scenario fires)."),
+    ("src/pe_engine.v", "pin_in", "l_armpinb[*]"): (
+        "arm2_real",
+        "The second pin of the same two-pin ARM, `pinb` straight from the "
+        "action word; the same `< N_UIO` guard covers both reads."),
     ("src/pe_engine.v", "pin_pp", "hsh_n[*]"): (
         "< N_PINS",
         "The HEADER-TIME write of the drive class, indexed by a raw header "

@@ -138,6 +138,12 @@ EXPECT = {
     "M_LOOP_OFF1":        (2, None),
     "M_LOOP_NOEXIT":      (2, None),
     "M_LOOP_NORESET":     (2, None),
+    # v2 primitive 3 bundle 1: the two-pin level ARM -- pinb ignored, an edge
+    # instead of a level, the polarity, the uio-bank guard (one line each)
+    "M_ARM2_ONEPIN":      (2, None),
+    "M_ARM2_EDGE":        (2, None),
+    "M_ARM2_POL":         (2, None),
+    "M_ARM2_UNGUARDED":   (2, None),
     # v2 PIT chunk 1: the capture -- k off by one, a mask bit dropped, the
     # overrun test dropped from `room` (a 2-line expression), the stop reason
     "M_PIT_K_OFF1":       (2, None),

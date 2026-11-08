@@ -132,6 +132,14 @@ SCRATCH_GENERATORS: dict = {
                " branch_check.vh's PC / head / stall counters on tb_equiv,"
                " not by the A2 gap",
         "v3": {"no_v3_layer": "test/tb_equiv.v"}},
+    "run_arm2": {
+        "script": "test/run_arm2.py", "pattern": "arm2_*.hex",
+        "clocked": True,
+        "why": "v2 primitive 3 bundle 1: the two-pin level ARM's scenario"
+               " images, judged cycle for cycle against run_arm2's golden"
+               " (fire = max(armed, last drive + 2), out = fire + the edge"
+               " ARM's K) on tb_arm2, not by the A2 gap",
+        "v3": {"no_v3_layer": "test/tb_arm2.v"}},
     "run_pit_capture": {
         "script": "test/run_pit_capture.py", "pattern": "pitcap_*.hex",
         "clocked": True,

@@ -92,6 +92,9 @@ KILLERS = {
     "M_CMP_MASK_IGN": "test/run_branch_check.py", "M_CMP_INV": "test/run_branch_check.py",
     "M_LOOP_OFF1": "test/run_branch_check.py", "M_LOOP_NOEXIT": "test/run_branch_check.py",
     "M_LOOP_NORESET": "test/run_branch_check.py",
+    # -- v2 primitive 3 bundle 1: the two-pin level ARM (bench tb_arm2) -------
+    "M_ARM2_ONEPIN": "test/run_arm2.py", "M_ARM2_EDGE": "test/run_arm2.py",
+    "M_ARM2_POL": "test/run_arm2.py", "M_ARM2_UNGUARDED": "test/run_arm2.py",
     # silicon fix #2: killed on VALUE by Layer V1 (tb_trace, corpus_i2c)
     "M_TX_LOAD_ANYPHASE": RUN_MUTANTS,
     # silicon fix #3: killed on VALUE by Layer V-RX (tb_trace, corpus_spim)
