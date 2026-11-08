@@ -31,9 +31,18 @@
 
   "//": "v2 timing closure at 60 MHz (Wilson 10-25, T1/T2): 2.5 ns of setup slack asked of the resizer, timing-driven placement, post-GRT design repair.",
   "PL_RESIZER_SETUP_SLACK_MARGIN": 2.5,
-  "GRT_RESIZER_SETUP_SLACK_MARGIN": 2.5,
+  "//": "4.0 after global routing (Wilson 11-08): the GRT parasitic estimate runs 1.6-2x low on the heaviest nets (acc[63] -> dv_r: est 0.32 pF, extracted 0.53 pF), so a path the resizer saw at >= +2.5 came out -0.64 at slow. 4.0 covers that gap: slow +0.70, 0 violations, area flat (81.0 % of the line).",
+  "GRT_RESIZER_SETUP_SLACK_MARGIN": 4.0,
   "PL_TIMING_DRIVEN": 1,
   "RUN_POST_GRT_DESIGN_REPAIR": 1,
+
+  "//": "Stage 3 closure (Wilson 11-07/08, option C + one window): the ORFS delay synthesis script (default AREA 0; DELAY 4 closed where AREA 0 left -2.79), slew held to 1.5 ns (the library allows 2.507), repair margins 40 % at placement and 30 % after global routing (defaults 20 / 10).",
+  "SYNTH_STRATEGY": "DELAY 4",
+  "MAX_TRANSITION_CONSTRAINT": 1.5,
+  "DESIGN_REPAIR_MAX_SLEW_PCT": 40,
+  "DESIGN_REPAIR_MAX_CAP_PCT": 40,
+  "GRT_DESIGN_REPAIR_MAX_SLEW_PCT": 30,
+  "GRT_DESIGN_REPAIR_MAX_CAP_PCT": 30,
 
   "//": "RUN_LINTER, LINTER_INCLUDE_PDK_MODELS - Disabling the linter is not recommended!",
   "RUN_LINTER": 1,
