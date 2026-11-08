@@ -741,6 +741,11 @@ SPEC_SYMBOLS = {
     # are tb_pair's recorded waveform, judged live against run_pair's golden.
     ("test/run_pair.py", "FEED"),
     ("test/run_pair.py", "BAD"),
+    # ⭐ v2 primitive 3 bundle 3 (the USB receive): PAYLOADS is the packet
+    # STIMULUS (8 x 0xFF for the most stuffing, runs crossing byte
+    # boundaries, zeros, one seeded random); the results are tb_usbrx's
+    # pushes, judged live against run_usbrx's golden decode of the line.
+    ("test/run_usbrx.py", "PAYLOADS"),
     # ⭐ v2 PIT chunk 1: CASES is the capture gate's DESIGN -- which buses to
     # play (SPI modes 0 / 3, a wire mask, I2C, two UARTs, a line fast enough
     # to overrun) and their chosen masks; the result is the bit-exact compare.

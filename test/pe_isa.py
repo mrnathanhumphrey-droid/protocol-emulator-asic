@@ -485,6 +485,43 @@ def act_shiftin_timed(pin, delay, nbits=8, pinb=None) -> bytes:
                mod=MOD_SELF_TIMED | (0 if pinb is None else MOD_PAIR))
 
 
+# ---------------------------------------------------------------------------
+# v2 primitive 3, bundle 3 (Wilson 11-08): the USB RECEIVE -- NRZI decode,
+# unstuffing and re-anchoring on the self-timed SHIFTIN, ONE lane only
+# ---------------------------------------------------------------------------
+#: the one USB-capable lane (the RTL's `USB_LANE`; run_usbrx's wrong-lane image
+#: checks the chip refuses the encoding anywhere else)
+USB_LANE = 0
+
+
+def act_shiftin_usb(pin, delay, nbits=8):
+    """A USB receive of `nbits` DECODED bits in ONE action: a self-timed
+    SHIFTIN (mod[1]) with `level` set, on the USB lane, clockless. Each
+    dispatch samples `pin`; the bit is NRZI-decoded (1 = no change), a bit
+    after six ones is unstuffed (dropped, not counted; a 1 there is a stuffing
+    error), and every edge re-anchors the next sample to edge + d/2."""
+    if not 1 <= int(nbits) <= 8:
+        raise ValueError("nbits %r outside 1..8" % (nbits,))
+    return act(OP_SHIFTIN, pin, 1, delay, count=int(nbits), mod=MOD_SELF_TIMED)
+
+
+def usb_problems(img):
+    """[problem] for a USB receive the chip refuses (config_err) or never
+    meant: outside the USB lane, or with the pair bit (the receive watches one
+    pin; the bus turnaround is the pair's own SHIFTIN / READBIT)."""
+    out = []
+    for ln, (h, acts) in lane_programs(img).items():
+        for i, x in enumerate(acts):
+            if x["op"] == OP_SHIFTIN and x["mod"] & MOD_SELF_TIMED and x["level"]:
+                w = h["base_word"] + i
+                if ln != USB_LANE:
+                    out.append("word %d (lane %d): a USB receive outside the USB lane "
+                               "(lane %d) -- CONFIG_ERR in silicon" % (w, ln, USB_LANE))
+                if x["mod"] & MOD_PAIR:
+                    out.append("word %d: a USB receive with the pair bit set" % w)
+    return out
+
+
 def pair_problems(img):
     """[problem] for the bundle-2 encodings the chip would run wrongly or never
     meant: SE0 with level 1 (only LEVEL level 0 drives both low); LEVEL mod 10
@@ -758,7 +795,7 @@ def branch_problems(img):
                 if x[f]:
                     out.append("word %d: LOOP field %s = %d must be zero" % (w, f, x[f]))
     return (out + cmp_byte_problems(img) + loop_problems(img) + arm_problems(img)
-            + pair_problems(img))
+            + pair_problems(img) + usb_problems(img))
 
 
 def loop_problems(img):

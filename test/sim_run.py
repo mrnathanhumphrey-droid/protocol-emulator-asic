@@ -147,6 +147,13 @@ SCRATCH_GENERATORS: dict = {
                " images, judged cycle for cycle against run_pair's golden"
                " waveform on tb_pair, not by the A2 gap",
         "v3": {"no_v3_layer": "test/tb_pair.v"}},
+    "run_usbrx": {
+        "script": "test/run_usbrx.py", "pattern": "usbrx_*.hex",
+        "clocked": True,
+        "why": "v2 primitive 3 bundle 3: the USB receive images (NRZI, unstuffing,"
+               " re-anchoring), judged byte for byte against run_usbrx's golden"
+               " decode of the host line it drives on tb_usbrx, not by the A2 gap",
+        "v3": {"no_v3_layer": "test/tb_usbrx.v"}},
     "run_pit_capture": {
         "script": "test/run_pit_capture.py", "pattern": "pitcap_*.hex",
         "clocked": True,

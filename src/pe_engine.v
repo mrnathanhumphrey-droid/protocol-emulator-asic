@@ -157,6 +157,9 @@
       ppc_l      <= {LW{1'b0}}; \
       ppc_n      <= 2'd0; \
       host_pop   <= 1'b0; \
+      usb_prev   <= 1'b1; \
+      usb_ones   <= 3'd0; \
+      usb_serr   <= 1'b0; \
       for (i = 0; i < N_LANES; i = i + 1) begin \
         l_pin[i]       <= {PINW{1'b0}}; \
         l_clkpin[i]    <= {PINW{1'b0}}; \
@@ -1153,11 +1156,16 @@ module pe_engine #(
   // adds an entry HERE, not depth to the release path -- LOOP's widened
   // compare cost 1.45 ns of slow-corner slack (canaries 10-29) by re-decoding
   // a_op in front of the timestamp adder. M_PREDECODE_STALE never writes it.
-  localparam integer CLS_W = 6;
+  localparam integer CLS_W = 7;
   localparam integer C_BR = 0, C_SHIFT = 1, C_SHIFTIN = 2, C_REARM = 3;
   // bundle 2: C_ST = a SELF-TIMED byte (SHIFT/SHIFTIN with mod[1], or SHIFTI),
   // C_SHI = SHIFTI's immediate source
   localparam integer C_ST = 4, C_SHI = 5;
+  // bundle 3: C_USB = a USB RECEIVE -- a self-timed SHIFTIN (mod[1]) with
+  // `level` set. On a clockless lane `level` on a SHIFTIN was vacuous (it
+  // selects the CLOCKED receive, which needs a clock pin), and the self-timed
+  // byte is new in bundle 2, so no existing image carries this encoding.
+  localparam integer C_USB = 6;
   function [CLS_W-1:0] pre_cls(input [ACT_W-1:0] w);
     reg [OP_W-1:0] op;
     begin
@@ -1171,6 +1179,7 @@ module pe_engine #(
       pre_cls[C_REARM]   = (op == OP_REARM);
       pre_cls[C_ST]      = (((op == OP_SHIFT) || (op == OP_SHIFTIN)) && w[1]) || (op == OP_SHIFTI);
       pre_cls[C_SHI]     = (op == OP_SHIFTI);
+      pre_cls[C_USB]     = (op == OP_SHIFTIN) && w[1] && w[ACT_W-1-OP_W-PINW];
     end
   endfunction
   reg [CLS_W-1:0] l_cls    [0:NSLOT-1];   // == pre_cls(l_act[s])
@@ -1988,8 +1997,33 @@ module pe_engine #(
 `else
   wire st_last = (l_ckbit[cur] == st_lastix);
 `endif
+  // ⭐ v2 PRIMITIVE 3, BUNDLE 3 (Wilson 11-08): NRZI DECODE + UNSTUFFING on the
+  // self-timed SHIFTIN, ONE lane only (Wilson: "one USB lane"). The state is
+  // five flops, not five per lane. A USB receive on any other lane is REFUSED
+  // (config_err, the halt) -- never silently a plain receive.
+  //   NRZI: the decoded bit is 1 when the sample equals the previous one, 0
+  //     on a change. An edge ARM firing on this lane starts a packet: the
+  //     reference is primed to the level BEFORE the edge (J), the ones run and
+  //     the stuff-error flag clear.
+  //   UNSTUFFING: after six decoded ones the next dispatch is the STUFF SLOT:
+  //     held like any other bit, but it moves no pointer, shifts nothing and
+  //     never retires -- so the action's length is data-dependent (+1 dispatch
+  //     per six ones; the A2 term owed at the lock). A 1 in the stuff slot is
+  //     seven ones: `usb_serr`, sticky until the next packet starts, read by
+  //     programs as the STUFF_ERR virtual pin in bundle 4 (piece 7).
+  localparam integer USB_LANE = 0;
+  reg        usb_prev;
+  reg  [2:0] usb_ones;
+  reg        usb_serr;
+  wire usb_act   = st_act & cur_cls[C_USB] & (cur == USB_LANE[LW-1:0]);
+  wire usb_wrong = st_act & cur_cls[C_USB] & (cur != USB_LANE[LW-1:0]);
+`ifdef M_UNSTUFF_KEEP
+  wire usb_stuff = 1'b0;                     // the mutant: the stuffed bit kept as data
+`else
+  wire usb_stuff = usb_act & (usb_ones == 3'd6);
+`endif
   wire ck_degen = (ck_act & (ck_nbits == {BPW{1'b0}})) |
-                  (st_act & cur_cls[C_SHIFTIN] & (a_cnt == {BPW{1'b0}}));
+                  (st_act & cur_cls[C_SHIFTIN] & (a_cnt == {BPW{1'b0}})) | usb_wrong;
   // ⛔⛔⛔ D1 -- A CLOCKED OPEN-DRAIN ACTION WHOSE DELAY CANNOT HOLD ITS DATA
   // IS REFUSED, and the refusal replaces a CLAMP that merely declined to make
   // things worse. `SDA_HOLD` cycles of data hold only satisfy `t_HD;DAT` if
@@ -2048,7 +2082,7 @@ module pe_engine #(
   // no buffer swap -- the same mechanism a chaining `OP_REARM` already uses.
   // This is also Amendment A1 in silicon: a held dispatch owes NO refill, so
   // the proof's "exactly one slot per lane" became "at most one".
-  wire ck_hold    = (ck_act & ~ck_retire) | (st_act & ~st_last);
+  wire ck_hold    = (ck_act & ~ck_retire) | (st_act & ~(st_last & ~usb_stuff));
   // A CONSUME POINT: where a captured bit is taken. The first LOW of an action
   // has nothing pending yet (`l_ckbit` is still 0), every later LOW takes the
   // previous bit, and the COLL takes the last one -- n consumes for n bits.
@@ -2249,7 +2283,9 @@ module pe_engine #(
   // live read would silently substitute a plausible bit for a missing one,
   // and `clk_stretch_err` is what distinguishes them.
   wire       ck_rxbit  = l_ckgot[cur] & l_cksamp[cur];
-  wire       rx_bit_sel = ck_shiftin ? ck_rxbit : rx_bit;
+  // bundle 3: on the USB receive the accumulator takes the NRZI-DECODED bit
+  wire       usb_dec    = (rx_bit == usb_prev);
+  wire       rx_bit_sel = ck_shiftin ? ck_rxbit : usb_act ? usb_dec : rx_bit;
   wire [7:0] rx_asm     = {rx_bit_sel, l_rx[cur][7:1]};
   wire [7:0] rx_asm_rev = {rx_asm[0], rx_asm[1], rx_asm[2], rx_asm[3],
                            rx_asm[4], rx_asm[5], rx_asm[6], rx_asm[7]};
@@ -2314,6 +2350,8 @@ module pe_engine #(
   wire [TS_W-1:0] now_n = now + {{(TS_W-1){1'b0}}, now_inc};
   wire            hdr_wr = run && (hst == H_RD) && (hb == HB_LAST);
   wire [TS_W-1:0] ts_n [0:N_LANES-1];
+  wire            rean_hit;            // bundle 3, assigned below `tf_diff`
+  wire [TS_W-1:0] rean_ts;
   wire [D_W-1:0]  ld_n [0:N_LANES-1];
   generate
     for (gi = 0; gi < N_LANES; gi = gi + 1) begin : g_next
@@ -2322,6 +2360,7 @@ module pe_engine #(
 `ifndef M_NO_REBASE
         : arm_hit[gi] ? ck_rebase[gi]
 `endif
+        : (gi == USB_LANE && rean_hit) ? rean_ts
         : (st == ST_WB && cur_rel == gi)
             ? l_timestamp[gi] + {{(TS_W-DLY_W){1'b0}}, wb_dly}
             : l_timestamp[gi];
@@ -2338,6 +2377,37 @@ module pe_engine #(
       tf_diff = d[TS_W-1];
     end
   endfunction
+
+  // =====================================================================
+  // ⭐ v2 PRIMITIVE 3, BUNDLE 3 (Wilson 11-08): RE-ANCHORING AT EVERY EDGE.
+  // While the USB lane's HEAD word is a USB receive, an edge on its pin
+  // rebases the lane timestamp to `now + d/2`: the next bit is sampled half a
+  // bit after the edge the host actually made. That is the ARM -> d/2 no-op
+  // path's own latency (edge seen -> `now`, then + d/2), so the synchronizer
+  // cancels exactly as at SOP. ZERO FLOPS: the pin and `d` are read from the
+  // head word, the way `ck_rpin` / `ck_dly` are, and the class bit is the
+  // pre-decoded `l_cls`. The watch spans byte boundaries (the next byte's
+  // word is the head as soon as the previous one retires) and ends with the
+  // packet (the next word is not a USB receive).
+  // ⛔ ONLY WHILE THE NEXT RELEASE IS STILL IN THE FUTURE. Between a bit's
+  // release and its writeback the writeback's `+ d` would land ON TOP of a
+  // rebase and push the next sample a whole bit late; an edge inside that
+  // window means the sample is already within a few cycles of a bit boundary,
+  // so it is dropped, not mis-applied. It also makes a rebase and the lane's
+  // own writeback mutually exclusive (at writeback the timestamp is reached).
+  // =====================================================================
+  wire [ACT_W-1:0] u_head  = l_act[hix[USB_LANE]];
+  wire [PINW-1:0]  u_pin   = u_head[ACT_W-1-OP_W -: PINW];
+  wire             u_real  = (u_pin < N_PINS[PINW-1:0]);   // index class: guarded
+  wire             u_watch = hv[USB_LANE] & l_cls[hix[USB_LANE]][C_USB] &
+                             ~(l_clkpin[USB_LANE] < N_PINS[PINW-1:0]) & ~l_armed[USB_LANE] & u_real;
+  wire             u_edge  = u_real ? (pin_rise[u_pin] | pin_fall[u_pin]) : 1'b0;
+`ifdef M_NO_REANCHOR
+  assign rean_hit = 1'b0;                    // the mutant: one anchor, at SOP
+`else
+  assign rean_hit = u_watch & u_edge & tf_diff(now, l_timestamp[USB_LANE]);
+`endif
+  assign rean_ts  = now + {{(TS_W-DLY_W+1){1'b0}}, u_head[LOWX+BQW+BPW+1 +: DLY_W-1]};
 
   // its own loop index: sharing `i` with the lane block would make two
   // always blocks write one variable on the same edge
@@ -3353,8 +3423,20 @@ module pe_engine #(
           // bundle 2: the self-timed byte's bit counter -- one per dispatch,
           // cleared at the retire on its last bit (no phases to wait on)
           if (st_act) begin
-            if (act_retire) l_ckbit[cur] <= {BPW{1'b0}};
-            else            l_ckbit[cur] <= l_ckbit[cur] + {{(BPW-1){1'b0}}, 1'b1};
+            if (act_retire)      l_ckbit[cur] <= {BPW{1'b0}};
+            else if (!usb_stuff) l_ckbit[cur] <= l_ckbit[cur] + {{(BPW-1){1'b0}}, 1'b1};
+          end
+          // bundle 3: the NRZI reference and the ones run, one sample at a time
+          if (usb_act) begin
+            usb_prev <= rx_bit;
+            if (usb_stuff) begin
+`ifndef M_STUFF_NOFLAG
+              if (usb_dec) usb_serr <= 1'b1;    // seven ones: a stuffing error
+`endif
+              usb_ones <= 3'd0;
+            end else begin
+              usb_ones <= usb_dec ? usb_ones + 3'd1 : 3'd0;
+            end
           end
           if (ck_act) begin
             // the action's own bit counter: advances on LOW, cleared at the
@@ -3453,7 +3535,7 @@ module pe_engine #(
             // peer held the clock past this lane's next dispatch, so the bit
             // is not late, it is ABSENT. The substituted 0 reads as an ACK,
             // which is why this needs a status bit and not a comment.
-            OP_SHIFTIN: if (!ck_shiftin || ck_consume) begin
+            OP_SHIFTIN: if ((!ck_shiftin || ck_consume) && !usb_stuff) begin
               if (ck_consume & ~l_ckgot[cur]) begin
                 clk_stretch_err_m <= 1'b1;
                 sticky_ovr_m    <= 1'b1;
@@ -3844,7 +3926,15 @@ module pe_engine #(
 `ifndef M_NO_REBASE
           l_timestamp[i] <= ck_rebase[i];
 `endif
+          // bundle 3: an EDGE ARM on the USB lane starts a packet
+          if (i == USB_LANE && !l_arm2[i]) begin
+            usb_prev <= ~l_armedge[i];          // the level BEFORE the edge
+            usb_ones <= 3'd0;
+            usb_serr <= 1'b0;
+          end
         end
+        // bundle 3: the re-anchor (exclusive with `arm_hit`: it needs ~l_armed)
+        if (i == USB_LANE && rean_hit) l_timestamp[i] <= rean_ts;
       end
 
       // ---- ⭐ TF2-R3: the one write of the live/armed/no-timeout registers,
