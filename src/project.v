@@ -2218,8 +2218,14 @@ module pe_pit_s12 #(parameter integer AW = 9) (
   // THE ALU: a + b or a - b (+ a carry in); on a subtract, al_lt = (a < b)
   reg  [25:0] al_a, al_b;
   reg         al_sub, al_ci;
-  wire [26:0] al    = {1'b0, al_a} + {1'b0, al_sub ? ~al_b : al_b} + {26'd0, al_sub | al_ci};
-  wire        al_lt = al_sub & ~al[26];
+  wire [26:0] al_c  = {1'b0, al_a} + {1'b0, al_sub ? ~al_b : al_b} + {26'd0, al_sub | al_ci};
+  // THE ALU'S REGISTER (Wilson 11-07, the slow corner): a step that reads the ALU takes two cycles -- the
+  // first (a_ph 0) only registers al_c, the second runs the step on the registered al. The carry chain
+  // ends at a flop instead of running on through the step's muxes into acc / dv_q in the same cycle.
+  // The operands stay put across the pair (nothing in stage 3 writes in the first cycle).
+  reg  [26:0] al;                   // the ALU result, a cycle late
+  reg         al_lt;                // on a subtract, (a < b), a cycle late
+  reg         a_ph;                 // 1: this step's result is in al
   wire [4:0]  hi5   = {1'b0, acc[28:25]} + {4'd0, al[26]};      // the product's top, doubled + carry
   wire [25:0] w_p16 = {7'd0, p16};
   always @(*) begin
@@ -2359,6 +2365,16 @@ module pe_pit_s12 #(parameter integer AW = 9) (
               t3_walk;
   // !walk_go: the cycle a new walk is issued still sees the last walk's `wend`
   wire pass_end = wend && !x_v && !dv_busy && !walk_go;
+  // the stage 3 steps that read al / al_lt / hi5 (in the step or in piece 3's pa_op): each takes the pair
+  wire s3_alu = (t3 == T_MUL) || (t3 == T_PRE) || (t3 == T_PRE1) || (t3 == T_CHK) || (t3 == T_LOC) ||
+                (t3 == T_ADV) || (t3 == T_STEP) || (t3 == T_FOUND) || (t3 == T_SPL) || (t3 == T_SA0) ||
+                (t3 == T_MID) || (t3 == T_MLOC) || (t3 == T_SAI) || (t3 == T_XE) || (t3 == T_LQ1) ||
+                (t3 == T_LQ2) || (t3 == G_HDR) || (t3 == G_CS) || (t3 == G_CS1) || (t3 == G_CAP) ||
+                (t3 == G_CAP1) || (t3 == G_GRP) || (t3 == G_MS) || (t3 == G_MS1) || (t3 == G_D1) ||
+                (t3 == G_D2) || (t3 == G_D3) || (t3 == G_NXM) || (t3 == G_ST) || (t3 == G_X1) ||
+                (t3 == G_X2) || (t3 == G_X3) || (t3 == G_SH0) || (t3 == G_SH1) || (t3 == G_SH3B) ||
+                (t3 == G_SH4) || (t3 == G_SHE) || (t3 == G_CW) || (t3 == G_GNX) || (t3 == P_E1) ||
+                (t3 == P_E2) || (t3 == P_G1) || (t3 == P_G2);
 
   always @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
@@ -2374,9 +2390,10 @@ module pe_pit_s12 #(parameter integer AW = 9) (
       cls <= C_NONE; why <= 3'd0; cond <= 1'b0; wh <= 1'b0; f_span <= 1'b0; wb <= 4'd0;
       t3 <= T_RD; re <= 1'b0; s3_found <= 1'b0; s3_fbs <= 1'b0; s3_nmsg <= 8'd0;
       s3_why <= 4'd0; g_try <= 1'b0; g_skip <= 1'b0;
+      al <= 27'd0; al_lt <= 1'b0; a_ph <= 1'b0;
     end else if (!run) begin
       st <= S_IDLE; walk_go <= 1'b0; hold <= 1'b0; we <= 1'b0; done <= 1'b0; dv_busy <= 1'b0;
-      x_v <= 1'b0; wend <= 1'b0; re <= 1'b0;
+      x_v <= 1'b0; wend <= 1'b0; re <= 1'b0; a_ph <= 1'b0;
     end else begin
       walk_go <= 1'b0; we <= 1'b0; re <= 1'b0;
       // ---- the divider ----
@@ -2644,7 +2661,10 @@ module pe_pit_s12 #(parameter integer AW = 9) (
                   s3_found <= 1'b0; s3_fbs <= 1'b0; s3_nmsg <= 8'd0;
                   s3_why <= 4'd0; g_try <= 1'b0; g_skip <= 1'b0;
                 end else begin w <= w + 3'd1; st <= S_WIRE; end
-        S_S3: begin
+        S_S3: if (s3_alu && !a_ph) begin
+          al <= al_c; al_lt <= al_sub & ~al_c[26]; a_ph <= 1'b1;
+        end else begin
+          a_ph <= 1'b0;
           case (t3)
             // ---- stage 2's record of the first NRZ_ASYNC wire (40 + 10w + wb) ----
             T_RD: begin re <= 1'b1; t3 <= T_RW; end
