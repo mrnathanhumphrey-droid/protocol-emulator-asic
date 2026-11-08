@@ -1974,6 +1974,26 @@ module pe_pit_s12 #(parameter integer AW = 9) (
   //   PHASE:    PH [58:44]  PHDONE 59 (cut 7: the phase from a closing walk -- the
   //             first interval again, divided by the FINAL P_hat; no t0, no phase register)
   reg  [74:0] acc;
+  // ⭐ v2 load split (Wilson 11-08): A COPY OF acc[68:61] (G_GRD, the byte read) for the evidence scan's
+  // P_LC load alone. acc[63] drove that path through a 0.53 pF buffered net that the post-route repair
+  // estimated at 0.32 pF and never flagged (slow -0.64 after extraction). Written beside acc at every
+  // site that touches bits 68:61, so it holds the same value every cycle. The two sites that READ those
+  // bits to compute them (SM's add, BLV's max) read the copy's own bits instead: same value, but a D
+  // net of its own -- a copy computed from acc has acc's D net, and yosys merges it back with or
+  // without (* keep *) (measured on the flow's yosys, 11-08). The keep is the marking; the self-read
+  // is what holds the copy apart.
+  (* keep *) reg [7:0] grd_c;
+  wire [16:0] grd_sm = {grd_c, acc[60:52]} + m_r[16:0];   // SM's low 17 bits, the copy's own top 8
+`ifndef SYNTHESIS
+  reg grd_armed = 1'b0;
+  always @(posedge clk) begin
+    if (rst_n === 1'b0) grd_armed <= 1'b1;
+    else if (grd_armed && grd_c !== acc[68:61]) begin
+      $display("pe_pit_s12: *** G_GRD COPY BROKEN at %0t: copy %h, acc[68:61] %h", $time, grd_c, acc[68:61]);
+      $finish;
+    end
+  end
+`endif
   wire        qual   = (acc[8:0] >= n_act - {3'd0, n_act[8:3]}) && ({acc[17:9], 1'b0} >= {1'b0, n_idl});
   // stage 2's tests, reduced to flags as its walk ends (frees the accumulator)
   reg         f_clock, f_manch, f_nrzi, f_irreg, f_atry, f_body, a_idle;
@@ -2398,7 +2418,7 @@ module pe_pit_s12 #(parameter integer AW = 9) (
       x_v <= 1'b0; x_lvl <= 1'b0; x_ph <= 2'd0;
       n <= 9'd0; n1 <= 9'd0; idle_lvl <= 1'b0;
       bp <= 15'd0; bh <= 9'd0; bq <= 1'b0; rival <= 1'b0; s1ok <= 1'b0; p16 <= 19'd0;
-      acc <= 75'd0; f_clock <= 1'b0; f_manch <= 1'b0; f_nrzi <= 1'b0; f_irreg <= 1'b0; f_atry <= 1'b0;
+      acc <= 75'd0; grd_c <= 8'd0; f_clock <= 1'b0; f_manch <= 1'b0; f_nrzi <= 1'b0; f_irreg <= 1'b0; f_atry <= 1'b0;
       f_body <= 1'b0; a_idle <= 1'b0; L <= 4'd7; a_L <= 4'd0;
       cls <= C_NONE; why <= 3'd0; cond <= 1'b0; wh <= 1'b0; f_span <= 1'b0; wb <= 4'd0;
       t3 <= T_RD; re <= 1'b0; s3_found <= 1'b0; s3_fbs <= 1'b0; s3_nmsg <= 8'd0;
@@ -2459,6 +2479,7 @@ module pe_pit_s12 #(parameter integer AW = 9) (
                 else acc[17:9] <= acc[17:9] + 9'd1;                           // HI
                 acc[51:27] <= acc[51:27] + {9'd0, x_iv};                      // SI
                 acc[74:52] <= acc[74:52] + m_r[22:0];                         // SM
+                grd_c <= grd_sm[16:9];                                        // SM's bits 68:61, the copy
               end
               x_v <= 1'b0; hold <= 1'b0;
             end
@@ -2470,8 +2491,9 @@ module pe_pit_s12 #(parameter integer AW = 9) (
                 if (m_r == 29'd1) acc[58] <= 1'b1;
                 else if (m_r == 29'd2) acc[59] <= 1'b1;
                 else acc[60] <= 1'b1;
-                if (m_r == 29'd7) acc[61] <= 1'b1;
+                if (m_r == 29'd7) begin acc[61] <= 1'b1; grd_c[0] <= 1'b1; end
                 if (m_r[3:0] > acc[65:62]) acc[65:62] <= m_r[3:0];
+                if (m_r[3:0] > grd_c[4:1]) grd_c[4:1] <= m_r[3:0];            // the copy, from its own bits
                 if (x_lvl) begin acc[53:45] <= acc[53:45] + 9'd1; if (m_r <= 29'd1) acc[35:27] <= acc[35:27] + 9'd1; end
                 else begin acc[44:36] <= acc[44:36] + 9'd1; if (m_r <= 29'd1) acc[26:18] <= acc[26:18] + 9'd1; end
               end
@@ -2519,20 +2541,20 @@ module pe_pit_s12 #(parameter integer AW = 9) (
         S_WIRE: begin
           cls <= C_NONE; why <= 3'd0; cond <= 1'b0; wh <= 1'b0; f_span <= 1'b0; a_L <= 4'd0;
           bq <= 1'b0; rival <= 1'b0; s1ok <= 1'b0; bh <= 9'd0; p16 <= 19'd0; a_idle <= 1'b0;
-          n <= 9'd0; n1 <= 9'd0; acc <= 75'd0; wb <= 4'd0;
+          n <= 9'd0; n1 <= 9'd0; acc <= 75'd0; grd_c <= 8'd0; wb <= 4'd0;
           if (!act[w]) st <= S_WR;                                             // inactive: a zero record
           else if (refused) begin cls <= C_UNK; why <= 3'd6; st <= S_WR; end
           else if (roled[w]) begin cls <= C_ROLE; st <= S_WR; end
           else begin walk_go <= 1'b1; st <= S_PRE; end
         end
         S_PRE: if (pass_end) begin
-          if (n < 9'd16) begin cls <= C_UNK; why <= 3'd1; acc <= 75'd0; st <= S_WR; end
-          else begin p <= P_FIRST; acc <= 75'd0; walk_go <= 1'b1; st <= S_BANK; end
+          if (n < 9'd16) begin cls <= C_UNK; why <= 3'd1; acc <= 75'd0; grd_c <= 8'd0; st <= S_WR; end
+          else begin p <= P_FIRST; acc <= 75'd0; grd_c <= 8'd0; walk_go <= 1'b1; st <= S_BANK; end
         end
         S_BANK: if (pass_end) begin
           // ascending P: the last qualifier is the LARGEST qualifying period
           if (qual) begin bq <= 1'b1; bp <= p; bh <= acc[26:18]; end
-          acc <= 75'd0;
+          acc <= 75'd0; grd_c <= 8'd0;
           if (p_end) begin
             if (!(bq || qual)) begin cls <= C_UNK; why <= 3'd2; st <= S_WR; end
 `ifdef M_S12_NO_RIVAL
@@ -2551,7 +2573,7 @@ module pe_pit_s12 #(parameter integer AW = 9) (
             st <= S_HARM;
           end else if (p_end) begin p <= bp; s1ok <= 1'b1; walk_go <= 1'b1; st <= S_RB; end
           else begin p <= p_next[14:0]; walk_go <= 1'b1; end
-          acc <= 75'd0;
+          acc <= 75'd0; grd_c <= 8'd0;
         end
         S_HARM: if (!dv_busy) begin
           if (!(m_r != 29'd0 && {err, 3'b000} <= {11'd0, rv_hi})) begin
@@ -2566,7 +2588,7 @@ module pe_pit_s12 #(parameter integer AW = 9) (
           st <= S_REF1;
         end
         S_REF1: if (!dv_busy) begin
-          p16 <= dv_q[18:0]; acc <= 75'd0; walk_go <= 1'b1; st <= S_REF2;
+          p16 <= dv_q[18:0]; acc <= 75'd0; grd_c <= 8'd0; walk_go <= 1'b1; st <= S_REF2;
         end
         S_REF2: if (pass_end) begin
           // refine 2 over the full hit set at P_hat (M2)
@@ -2580,7 +2602,7 @@ module pe_pit_s12 #(parameter integer AW = 9) (
 `ifndef M_S12_NO_REF2
           if (acc[74:52] != 23'd0) p16 <= dv_q[18:0];
 `endif
-          acc <= 75'd0; walk_go <= 1'b1; st <= S_ST2;
+          acc <= 75'd0; grd_c <= 8'd0; walk_go <= 1'b1; st <= S_ST2;
         end
         S_PHASE: if (pass_end) st <= S_CLASS;
         S_ST2: if (pass_end) begin
@@ -2593,7 +2615,7 @@ module pe_pit_s12 #(parameter integer AW = 9) (
                      && ({acc[26:18], 2'b00} >= {2'b00, acc[44:36]} + {1'b0, acc[44:36], 1'b0})
                      && ({acc[35:27], 2'b00} >= {2'b00, acc[53:45]} + {1'b0, acc[53:45], 1'b0});
           a_idle  <= acc[55];                                                   // the idle runs' one level
-          acc <= 75'd0;
+          acc <= 75'd0; grd_c <= 8'd0;
           st <= S_PHASE; walk_go <= 1'b1; a_L <= 4'd0; L <= 4'd7;
           // the async frame length is needed only on the NRZ_ASYNC branch
           if ((acc[8:0] != 9'd0)
@@ -2604,9 +2626,9 @@ module pe_pit_s12 #(parameter integer AW = 9) (
           end
         end
         S_ASYNC: if (pass_end) begin
-          if (!acc[14] && acc[8:0] >= 9'd4) begin a_L <= L; acc <= 75'd0; walk_go <= 1'b1; st <= S_PHASE; end   // the SMALLEST such L
-          else if (L == 4'd12) begin acc <= 75'd0; walk_go <= 1'b1; st <= S_SPAN; end
-          else begin L <= L + 4'd1; acc <= 75'd0; walk_go <= 1'b1; end
+          if (!acc[14] && acc[8:0] >= 9'd4) begin a_L <= L; acc <= 75'd0; grd_c <= 8'd0; walk_go <= 1'b1; st <= S_PHASE; end   // the SMALLEST such L
+          else if (L == 4'd12) begin acc <= 75'd0; grd_c <= 8'd0; walk_go <= 1'b1; st <= S_SPAN; end
+          else begin L <= L + 4'd1; acc <= 75'd0; grd_c <= 8'd0; walk_go <= 1'b1; end
         end
         S_SPAN: if (pass_end) begin
           // the open span at the end of the walk counts too
@@ -2690,7 +2712,7 @@ module pe_pit_s12 #(parameter integer AW = 9) (
                 4'd0: if (rdata[7:5] == C_ASYNC) begin s3_found <= 1'b1; wb <= 4'd1; end
                       else if (w == 3'd7) t3 <= T_CK;         // no UART wire: a clocked bus?
                       else w <= w + 3'd1;
-                4'd1: begin p16[18:16] <= rdata[6:4]; acc[62:59] <= rdata[3:0]; wb <= 4'd2; end
+                4'd1: begin p16[18:16] <= rdata[6:4]; acc[62:59] <= rdata[3:0]; grd_c[1:0] <= rdata[1:0]; wb <= 4'd2; end
                 4'd2: begin p16[15:8] <= rdata; wb <= 4'd3; end
                 4'd3: begin p16[7:0] <= rdata; wb <= 4'd4; end
                 4'd4: begin acc[58] <= rdata[7]; wb <= 4'd9; end
@@ -2745,12 +2767,12 @@ module pe_pit_s12 #(parameter integer AW = 9) (
               end
               t3 <= T_SA0;
             end
-            T_SA0: begin `S3_SA <= al[22:0]; `S3_BI <= 3'd0; `S3_MBYTE <= 1'b1; t3 <= T_MID; end
+            T_SA0: begin `S3_SA <= al[22:0]; grd_c <= al[18:11]; `S3_BI <= 3'd0; `S3_MBYTE <= 1'b1; t3 <= T_MID; end
             T_MID: begin `S3_LQ <= al[24:0]; t3 <= T_MLOC; end   // mid = s + (2b + 3) p16 / 32
             T_MLOC: if (al_lt | exh) begin `S3_BY <= {`S3_L, bh[7:1]}; t3 <= T_SAI; end
                     else if (x_v) t3 <= T_ADV;
             T_SAI: begin
-              `S3_SA <= al[22:0]; `S3_BI <= `S3_BI + 3'd1; t3 <= T_MID;
+              `S3_SA <= al[22:0]; grd_c <= al[18:11]; `S3_BI <= `S3_BI + 3'd1; t3 <= T_MID;
               if (`S3_BI == 3'd7) begin
                 we <= 1'b1; wdata <= `S3_BY; t3 <= T_XE;
                 if (`S3_OPEN) begin waddr <= `S3_WP; `S3_WP <= `S3_WP + 9'd1; `S3_MLEN <= `S3_MLEN + 8'd1; end
@@ -2945,7 +2967,7 @@ module pe_pit_s12 #(parameter integer AW = 9) (
             P_E1:   if (!al_lt) t3 <= P_E3;                                // q >= end
                     else begin `G_RA <= `P_Q; `G_RRET <= P_E2; t3 <= G_RD; end
             P_E2: begin
-              if (al[8:0] != `S3_WP && `G_GRD > `P_LP && (`P_LC == 8'd0 || `G_GRD < `P_LC)) `P_LC <= `G_GRD;
+              if (al[8:0] != `S3_WP && grd_c > `P_LP && (`P_LC == 8'd0 || grd_c < `P_LC)) `P_LC <= grd_c;   // G_GRD's copy
               `P_Q <= al[8:0]; t3 <= P_E1;
             end
             P_E3:   if (`P_LC == 8'd0) begin t3 <= P_F; s3_why <= 4'd4; end  // fewer than two lengths
@@ -3052,7 +3074,7 @@ module pe_pit_s12 #(parameter integer AW = 9) (
             // a store read: data 2 cycles after the request
             G_RD:   begin re <= 1'b1; t3 <= G_RW; end
             G_RW:   t3 <= G_RV;
-            G_RV:   begin `G_GRD <= rdata; t3 <= `G_RRET; end
+            G_RV:   begin `G_GRD <= rdata; grd_c <= rdata; t3 <= `G_RRET; end
             default: begin done <= 1'b1; st <= S_IDLE; end      // T_DONE
           endcase
           // piece 3's a, b, u, v: one write each, its operation chosen above
