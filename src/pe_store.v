@@ -68,7 +68,19 @@ module pe_store #(
     // WORD-aligned (the low WB_W bits are 0); ONE COPY PER BANK, bank k at
     // [k*AW +: AW] (v2 slack recovery step 2: the fan-out is the bank's own)
     input  wire [WIDE_B*AW-1:0] wraddr_bk,
-    output reg  [WIDE_B*8-1:0] wrdata
+    output reg  [WIDE_B*8-1:0] wrdata,
+    // ⭐ v2 primitive 3 bundle 5 (Wilson 11-08): the USB RESPONSE BUFFER, 16
+    // bytes, written and read in RUN. In the SRAM it is the SPARE HALF (rows
+    // 128-131; the program uses rows 0-127) -- the free-slot proof: a refill
+    // takes the port for 1 cycle in 4. A read goes only on an otherwise idle
+    // cycle (`bre_go`), and its byte is on `brd` the cycle after.
+    input  wire            bwe,
+    input  wire [3:0]      bwi,
+    input  wire [7:0]      bwd,
+    input  wire            bre,
+    input  wire [3:0]      bri,
+    output wire            bre_go,
+    output wire [7:0]      brd
 );
 
   localparam integer DEPTH = (1 << AW);
@@ -113,6 +125,18 @@ module pe_store #(
   genvar gb, gr, gh;
   generate
     if (MEM_TYPE == "latch") begin : g_mem
+      // ⭐ BUNDLE 5: the USB response buffer -- a plain 16-byte array here
+      // (the SRAM arm keeps it in the macro's spare half). Same contract: a
+      // read is issued at once and its byte is on `brd` the cycle after.
+      reg [7:0] ubuf [0:15];
+      reg [7:0] ubrd;
+      always @(posedge clk) begin
+        if (bwe) ubuf[bwi] <= bwd;
+        if (bre) ubrd <= ubuf[bri];
+      end
+      assign bre_go = bre;
+      assign brd    = ubrd;
+
       // ⭐⭐ THE LATCH ARM (Wilson 10-31, Track 2): the same 512 bytes in IHP
       // latches -- ~-45 % of the store, -30 % of the chip, stock cells only.
       // WRITE: the request is STAGED at posedge t0 (data, bank, row, valid). One
@@ -323,10 +347,20 @@ module pe_store #(
       //                                                           -> never fills
       // ⇒ at most ONE cycle occupied. The checks below hold it in every bench;
       // M_SRAM_WBUF_OVF (every write treated as meeting a read) must trip them.
+      // THE WRITE BUFFER: pw = a write is waiting (word pa, data pd, mask pbm)
+      // (declared here: the buffer read's gate reads pw)
+      reg                 pw;
+      reg  [AWW-1:0]      pa;
+      reg  [WIDE_B*8-1:0] pd, pbm;
+      // ⭐ BUNDLE 5: the buffer read goes only when NOTHING else wants the
+      // port -- no refill, no narrow read, no write arriving or waiting -- so
+      // it never meets a refill and never reads a byte still in the buffer
+      wire              bre_now = bre & ~re & ~wre & ~pw & ~wr & ~bwe;
+      assign            bre_go  = bre_now;
 `ifdef M_SRAM_WBUF_OVF
-      wire              rd_now  = re | wre | wr;
+      wire              rd_now  = re | wre | wr | bre_now;
 `else
-      wire              rd_now  = re | wre;
+      wire              rd_now  = re | wre | bre_now;
 `endif
       wire [AW-1:0]     rd_addr = raddr;
       // the written byte's lane: byte k of a word at bit (WIDE_B-1-k)*8 (the flop arm's order)
@@ -335,21 +369,22 @@ module pe_store #(
 `else
       wire [WB_W-1:0]   wlane = wsel;
 `endif
-      wire [WIDE_B*8-1:0] bm  = {{(WIDE_B-1)*8{1'b0}}, 8'hFF} << {~wlane, 3'b000};   // lane WIDE_B-1-k = ~k (WIDE_B a power of 2)
-      wire [WIDE_B*8-1:0] din = {WIDE_B{wdata}};
-      // THE WRITE BUFFER: pw = a write is waiting (word pa, data pd, mask pbm)
-      reg                 pw;
-      reg  [AW-WB_W-1:0]  pa;
-      reg  [WIDE_B*8-1:0] pd, pbm;
-      wire              w_now = ~rd_now & (pw | wr);          // the port writes this cycle
-      wire [AW-WB_W-1:0] w_row = pw ? pa : wrow;
+      // bundle 5: a buffer write takes the same path, to rows 128-131
+      wire [WB_W-1:0]   wlane_e = bwe ? bwi[WB_W-1:0] : wlane;
+      wire [AWW-1:0]    wrow_e  = bwe ? {1'b1, {(AWW-3){1'b0}}, bwi[3:2]}
+                                      : {{(AWW-(AW-WB_W)){1'b0}}, wrow};
+      wire [WIDE_B*8-1:0] bm  = {{(WIDE_B-1)*8{1'b0}}, 8'hFF} << {~wlane_e, 3'b000};   // lane WIDE_B-1-k = ~k (WIDE_B a power of 2)
+      wire [WIDE_B*8-1:0] din = {WIDE_B{bwe ? bwd : wdata}};
+      wire              w_now = ~rd_now & (pw | wr | bwe);    // the port writes this cycle
+      wire [AWW-1:0]    w_row = pw ? pa : wrow_e;
       wire [WIDE_B*8-1:0] w_d  = pw ? pd : din;
       wire [WIDE_B*8-1:0] w_bm = pw ? pbm : bm;
       wire              men = w_now | rd_now;
       wire              ren = rd_now;
-      wire [AWW-1:0]    ram_a = w_now ? {{(AWW-(AW-WB_W)){1'b0}}, w_row}
-                              : wre   ? {{(AWW-(AW-WB_W)){1'b0}}, xrow}
-                              :         {{(AWW-(AW-WB_W)){1'b0}}, rd_addr[AW-1:WB_W]};
+      wire [AWW-1:0]    ram_a = w_now   ? w_row
+                              : wre     ? {{(AWW-(AW-WB_W)){1'b0}}, xrow}
+                              : bre_now ? {1'b1, {(AWW-3){1'b0}}, bri[3:2]}
+                              :           {{(AWW-(AW-WB_W)){1'b0}}, rd_addr[AW-1:WB_W]};
       // ---- the RAM: the macro in the canary flow, its exact behaviour here ----
       // (inline, not a submodule: the bench's peek below reads the array, and
       // a design function cannot reach into a child instance under Verilator)
@@ -397,19 +432,22 @@ module pe_store #(
       // the buffer, and the narrow read's forward: a read of the buffered word
       // (pw at the read's edge) takes those bytes over the RAM's (old) ones
       reg  [WB_W-1:0]     rsel_q;
+      reg  [1:0]          bsel_q;                 // bundle 5: the buffer byte read
       reg                 fw_q;
       reg  [WIDE_B*8-1:0] fd_q, fbm_q;
       always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-          pw <= 1'b0; pa <= {(AW-WB_W){1'b0}}; pd <= {WIDE_B*8{1'b0}}; pbm <= {WIDE_B*8{1'b0}};
+          pw <= 1'b0; pa <= {AWW{1'b0}}; pd <= {WIDE_B*8{1'b0}}; pbm <= {WIDE_B*8{1'b0}};
           rsel_q <= {WB_W{1'b0}}; fw_q <= 1'b0; fd_q <= {WIDE_B*8{1'b0}}; fbm_q <= {WIDE_B*8{1'b0}};
+          bsel_q <= 2'd0;
         end else begin
-          if (wr && (rd_now || pw)) begin                      // the new write waits
-            pw <= 1'b1; pa <= wrow; pd <= din; pbm <= bm;
+          if ((wr | bwe) && (rd_now || pw)) begin              // the new write waits
+            pw <= 1'b1; pa <= wrow_e; pd <= din; pbm <= bm;
           end else if (w_now) pw <= 1'b0;                      // the buffer drained
+          if (bre_now) bsel_q <= bri[1:0];                     // bundle 5: the byte to take
           if (re) begin
             rsel_q <= rd_addr[WB_W-1:0];
-            fw_q   <= pw && (pa == rd_addr[AW-1:WB_W]);
+            fw_q   <= pw && (pa == {{(AWW-(AW-WB_W)){1'b0}}, rd_addr[AW-1:WB_W]});
             fd_q   <= pd; fbm_q <= pbm;
           end
         end
@@ -419,6 +457,7 @@ module pe_store #(
         rdata  = rword[{~rsel_q, 3'b000} +: 8];
         wrdata = dout;
       end
+      assign brd = dout[{~bsel_q, 3'b000} +: 8];
 `ifndef SYNTHESIS
       // ⛔ THE ONE-PORT CONTRACT, checked in every bench: never a wide read
       // with a write or a narrow read in the same cycle (the modes are
@@ -433,14 +472,16 @@ module pe_store #(
       // run -- found by M_SRAM_WBUF_OVF staying green (Wilson 11-07).
       reg rst_seen = 1'b0;
       always @(posedge clk) if (rst_n === 1'b0) rst_seen <= 1'b1;
-      always @(posedge clk) if (rst_seen && rst_n === 1'b1 && wre === 1'b1 && (wr === 1'b1 || re === 1'b1 || pw === 1'b1)) begin
+      // ⭐ bundle 5: a BUFFER write (rows 128+) may meet or wait across a
+      // refill -- no refill ever reads those rows, so nothing can be stale
+      always @(posedge clk) if (rst_seen && rst_n === 1'b1 && wre === 1'b1 && (wr === 1'b1 || re === 1'b1 || (pw === 1'b1 && pa[AWW-1] !== 1'b1))) begin
         $display("pe_store: *** ONE-PORT CONTRACT BROKEN at %0t: wre with %s", $time,
                  wr ? "a write" : re ? "a narrow read" : "a buffered write");
         $finish;
       end
       // the buffer holds ONE write: a second while it is full and the port is
       // reading would be lost
-      always @(posedge clk) if (rst_seen && rst_n === 1'b1 && wr === 1'b1 && pw === 1'b1 && rd_now === 1'b1) begin
+      always @(posedge clk) if (rst_seen && rst_n === 1'b1 && (wr === 1'b1 || bwe === 1'b1) && pw === 1'b1 && rd_now === 1'b1) begin
         $display("pe_store: *** WRITE BUFFER OVERFLOW at %0t: a write, a buffered write and a read", $time);
         $finish;
       end
@@ -454,12 +495,24 @@ module pe_store #(
           wd   = {WIDE_B*8{1'b0}};          // the macro's array is not visible here
 `else
           wd   = mem[{{(AWW-(AW-WB_W)){1'b0}}, a[AW-1:WB_W]}];
-          if (pw && pa == a[AW-1:WB_W]) wd = (wd & ~pbm) | (pd & pbm);
+          if (pw && pa == {{(AWW-(AW-WB_W)){1'b0}}, a[AW-1:WB_W]}) wd = (wd & ~pbm) | (pd & pbm);
 `endif
           peek = wd[{~a[WB_W-1:0], 3'b000} +: 8];
         end
       endfunction
     end else begin : g_mem
+      // ⭐ BUNDLE 5: the USB response buffer -- a plain 16-byte array here
+      // (the SRAM arm keeps it in the macro's spare half). Same contract: a
+      // read is issued at once and its byte is on `brd` the cycle after.
+      reg [7:0] ubuf [0:15];
+      reg [7:0] ubrd;
+      always @(posedge clk) begin
+        if (bwe) ubuf[bwi] <= bwd;
+        if (bre) ubrd <= ubuf[bri];
+      end
+      assign bre_go = bre;
+      assign brd    = ubrd;
+
       wire [7:0] rbyte [0:WIDE_B-1];
       for (gb = 0; gb < WIDE_B; gb = gb + 1) begin : g_bank
         reg [7:0] mem [0:NW-1];

@@ -21,16 +21,23 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 _A = "  wire [7:0]    tx_head  = tx_mem[{q_sel, tx_rp[q_sel]}];\n"
 _B = "      assign q_heads[8*gq +: 8] = tx_mem[{gq[1:0], tx_rp[gq]}];\n"
+# (a) with v2 primitive 3 bundle 5's response buffer in front of it (Wilson
+# 11-08): queue 3 is the buffer while the USB lane is live. The patches touch
+# only the QUEUE arm, exactly as they did on (a).
+_C = "  wire [7:0]    tx_head  = ub_sel ? ub_byte : tx_mem[{q_sel, tx_rp[q_sel]}];\n"
 PATCHES = {
     "S_HEAD_NEWER": [
         (_A, "  wire [7:0]    tx_head  = tx_mem[{q_sel, ~tx_rp[q_sel]}];\n"),
         (_B, "      assign q_heads[8*gq +: 8] = tx_mem[{gq[1:0], ~tx_rp[gq]}];\n"),
+        (_C, "  wire [7:0]    tx_head  = ub_sel ? ub_byte : tx_mem[{q_sel, ~tx_rp[q_sel]}];\n"),
     ],
     "S_QUEUE_SWAP": [
         (_A, "  wire [7:0]    tx_head  = tx_mem[{q_sel ^ 2'd1, "
              "tx_rp[q_sel ^ 2'd1]}];\n"),
         (_B, "      assign q_heads[8*gq +: 8] = tx_mem[{gq[1:0] ^ 2'd1, "
              "tx_rp[gq ^ 1]}];\n"),
+        (_C, "  wire [7:0]    tx_head  = ub_sel ? ub_byte : tx_mem[{q_sel ^ 2'd1, "
+             "tx_rp[q_sel ^ 2'd1]}];\n"),
     ],
 }
 

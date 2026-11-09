@@ -564,6 +564,13 @@ module tt_um_protocol_emulator #(
       .ck_arm(ck_arm), .ck_i2c(ck_i2c), .ck_c(ck_c), .ck_d(ck_d), .ck_f(ck_f), .ck_act(ck_act),
       .ck_edge(ck_edge), .ck_done(ck_done), .ck_wp(ck_wp), .ck_nmsg(ck_nmsg));
   wire _unused_s0 = &{1'b0, s0_done};
+  // bundle 5: the USB response buffer's store side, declared ahead of the
+  // store (the buffer block below the TX queue drives them)
+  reg  [4:0]    ub_wp;
+  reg  [3:0]    ub_rp;
+  wire [4:0]    ub_wpe;                         // the load index this byte takes
+  wire          ub_bwe, ub_bre, ub_bre_go;
+  wire [7:0]    ub_in, ub_brd;
   pe_store #(.AW(AW), .MEM_TYPE(MEM_TYPE), .WIDE_B(ACT_BYTES_T)) u_store (
       .clk(clk), .rst_n(rst_n_s),
       .we((pm_we & {ACT_BYTES_T{wr_rise}}) | {ACT_BYTES_T{pit_we | s0_we}}),
@@ -575,7 +582,9 @@ module tt_um_protocol_emulator #(
       .raddr(pm_rd ? rb_addr : (sniff ? s0_raddr : e_raddr)),
       .rdata(s_rdata),
       .wre(e_wre & run), .wraddr_bk(e_wraddr_bk),
-      .wrdata(s_wrdata)
+      .wrdata(s_wrdata),
+      .bwe(ub_bwe), .bwi(ub_wpe[3:0] - 4'd1), .bwd(ub_in),
+      .bre(ub_bre), .bri(ub_rp), .bre_go(ub_bre_go), .brd(ub_brd)
   );
 
   // =====================================================================
@@ -687,16 +696,104 @@ module tt_um_protocol_emulator #(
   wire [LW-1:0] e_host_lane;                  // diagnostics only
   wire [1:0]    e_host_q;
   wire [1:0]    q_sel    = e_host_q;
-  wire          tx_valid = (tx_cnt[q_sel] != 2'd0);
-  wire [7:0]    tx_head  = tx_mem[{q_sel, tx_rp[q_sel]}];
+  // ⭐ v2 primitive 3 bundle 5 (Wilson 11-08): while the USB lane is live
+  // (`e_usb_on`), queue 3 IS the response buffer -- on both sides: the
+  // engine's q = 3 reads the buffer's next line byte, and a host byte tagged 3
+  // is written to the buffer instead of the queue. Before that, and in every
+  // program without a USB receive, tag 3 is an ordinary TX queue.
+  wire          e_usb_on, e_usb_sent, e_usb_clr;
+  reg           ub_bv;                          // the next line byte is ready
+  reg  [7:0]    ub_byte;
+`ifdef M_TAG3_ALWAYS_BUF
+  wire          ub_sel   = (q_sel == 2'd3);     // the mutant: tag 3 is never a queue
+  wire          ub_tag   = (tx_tag == 2'd3);
+`else
+  wire          ub_sel   = e_usb_on & (q_sel == 2'd3);
+  wire          ub_tag   = e_usb_on & (tx_tag == 2'd3);
+`endif
+  wire          tx_valid = ub_sel ? ub_bv : (tx_cnt[q_sel] != 2'd0);
+  wire [7:0]    tx_head  = ub_sel ? ub_byte : tx_mem[{q_sel, tx_rp[q_sel]}];
 
   // ⭐ THE POP AS A PER-QUEUE VECTOR, so the queue block below is the same
   // for every variant of the TX path (silicon fix #8's (a) pops one queue,
   // the action's; (b4) may pop several) and the benches read one interface.
-  wire [3:0] do_popq = (e_host_pop & tx_valid) ? (4'b0001 << q_sel) : 4'b0000;
+  wire [3:0] do_popq = (e_host_pop & tx_valid & ~ub_sel) ? (4'b0001 << q_sel) : 4'b0000;
 
   wire nib_lo  = push_rise & tx_half;         // the push that completes a byte
-  wire do_push = nib_lo & ((tx_cnt[tx_tag] != TXD[1:0]) | do_popq[tx_tag]);
+  wire do_push = nib_lo & ~ub_tag & ((tx_cnt[tx_tag] != TXD[1:0]) | do_popq[tx_tag]);
+
+  // =====================================================================
+  // ⭐ BUNDLE 5: THE USB RESPONSE BUFFER (Wilson 11-08)
+  // =====================================================================
+  // The host loads one packet through tag 3: byte 0 is its length in BITS
+  // (1..112), then ceil(length/8) bytes of LINE bits (stuffed and NRZI-coded
+  // by the RP2040; D- levels, first bit in bit 0). The length is kept here
+  // (7 flops); the line bytes go to the SRAM's spare half. READY sets when the
+  // last byte lands. While READY is set every tag-3 byte is REFUSED with the
+  // existing TX-full bit -- so an unACKed packet cannot be overwritten, and a
+  // write landing mid-send (a send needs READY) is refused, never mixed in.
+  // A send never touches READY; the program clears it after an ACK
+  // (`e_usb_clr`), which also rewinds the load address. A finished send
+  // (`e_usb_sent`) rewinds the READ side, so a retransmit sends the same bits.
+  reg           ub_ready, ub_pend, ub_on_q;
+  reg  [6:0]    ub_len;
+  // ub_wp: bytes taken this load, the length byte included; ub_rp: the next
+  // line byte for the engine (both declared above the store)
+  assign        ub_in   = {tx_asm[7:4], ui_in[4:1]};     // the byte this push completes
+  wire [3:0]    ub_nb   = ub_len[6:3] + {3'd0, |ub_len[2:0]};   // ceil(length / 8)
+  wire          ub_wbyte  = nib_lo & ub_tag;
+  wire          ub_len_ok = (ub_in != 8'd0) && (ub_in <= 8'd112);
+`ifdef M_BUF_NO_REFUSE
+  // the mutant: a write while READY is not refused -- it starts a new load
+  // OVER the unACKed packet (what an unguarded buffer would do)
+  assign        ub_wpe    = ub_ready ? 5'd0 : ub_wp;
+  wire          ub_refuse = (ub_wpe == 5'd0) & ~ub_len_ok;
+`else
+  assign        ub_wpe    = ub_wp;
+  wire          ub_refuse = ub_ready | ((ub_wp == 5'd0) & ~ub_len_ok);
+`endif
+  assign        ub_bwe    = ub_wbyte & ~ub_refuse & (ub_wpe != 5'd0);
+  assign        ub_bre    = ub_ready & ~ub_bv & ~ub_pend & (ub_rp < ub_nb);
+  wire          ub_pop    = e_host_pop & ub_sel & ub_bv;
+  always @(posedge clk or negedge rst_n_s) begin
+    if (!rst_n_s) begin
+      ub_ready <= 1'b0; ub_pend <= 1'b0; ub_on_q <= 1'b0; ub_bv <= 1'b0;
+      ub_len <= 7'd0; ub_wp <= 5'd0; ub_rp <= 4'd0; ub_byte <= 8'h00;
+    end else begin
+      ub_on_q <= e_usb_on;
+      // load
+      if (ub_wbyte && !ub_refuse) begin
+        if (ub_wpe == 5'd0) ub_len <= ub_in[6:0];
+        ub_wp <= ub_wpe + 5'd1;
+        if (ub_wpe == 5'd0) ub_ready <= 1'b0;    // (only the mutant writes while READY)
+        if (ub_wpe != 5'd0 && ub_wpe[3:0] == ub_nb) begin
+          ub_ready <= 1'b1;
+          ub_rp    <= 4'd0;
+          ub_bv    <= 1'b0;
+        end
+      end
+      // read: one line byte ahead of the engine
+      if (ub_bre_go) ub_pend <= 1'b1;
+      if (ub_pend) begin
+        ub_byte <= ub_brd;
+        ub_bv   <= 1'b1;
+        ub_pend <= 1'b0;
+      end
+      if (ub_pop) begin
+        ub_bv <= 1'b0;
+        ub_rp <= ub_rp + 4'd1;
+      end
+      // a finished send rewinds the read side (a retransmit resends it)
+      if (e_usb_sent) begin
+        ub_rp <= 4'd0; ub_bv <= 1'b0; ub_pend <= 1'b0;
+      end
+      // the program's clear (after an ACK), the lane going live, a reload:
+      // the load starts again at the length byte
+      if (e_usb_clr || (e_usb_on && !ub_on_q) || reload_flush) begin
+        ub_ready <= 1'b0; ub_wp <= 5'd0; ub_rp <= 4'd0; ub_bv <= 1'b0; ub_pend <= 1'b0;
+      end
+    end
+  end
 
   always @(posedge clk or negedge rst_n_s) begin
     if (!rst_n_s) begin
@@ -738,7 +835,8 @@ module tt_um_protocol_emulator #(
       // back-pressure pin, so the only honest answer is a sticky flag in the
       // status frame -- the same reasoning as RX overflow: a host that has
       // stopped reading cannot be told by a pin it is not reading.
-      if (nib_lo && !do_push) tx_full_sticky <= 1'b1;
+      if (nib_lo && !do_push && !ub_tag) tx_full_sticky <= 1'b1;
+      if (ub_wbyte && ub_refuse)         tx_full_sticky <= 1'b1;   // bundle 5: refused
       // ⛔⛔ RELOAD IS A CLEAN SLATE (Wilson Q2, rule 1): the synchronised PROG
       // rise empties every TX queue and a half-assembled byte. Pushes while
       // PROG is high are store writes (`push_rise` is gated by `run`), so no
@@ -781,6 +879,8 @@ module tt_um_protocol_emulator #(
         .cfg_err(e_cfg_err),
         .clk_stretch(e_clk_stretch),
       .rx_data(e_rx_data), .rx_lane(e_rx_lane), .rx_push(e_rx_push),
+      .usb_ready(ub_ready), .usb_blen(ub_len),
+      .usb_on(e_usb_on), .usb_sent(e_usb_sent), .usb_clr(e_usb_clr),
       .busy(e_busy)
   );
 

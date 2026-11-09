@@ -187,6 +187,9 @@ SEAMS = (
     ("test/run_usbrx.py", "run_usbrx.judge", "slow", "E0"),
     # bundle 4: `judge` always empty -> M_CRC_ALWAYS_OK / M_CRC_NO_PRIME survive
     ("test/run_usbcrc.py", "run_usbcrc.judge", "slow", "E"),
+    # bundle 5: `judge` always clean -> M_READY_* / M_BUF_NO_REFUSE /
+    # M_TAG3_ALWAYS_BUF survive (its problems are element 0)
+    ("test/run_usbbuf.py", "run_usbbuf.judge", "slow", "E0"),
     # v2 PIT chunk 1: `compare` always finds no problem -> the five M_PIT_* survive
     ("test/run_pit_capture.py", "run_pit_capture.compare", "slow", "E0"),
     # v2 PIT chunk 2: `table_problems` always empty -> every M_S0_* survives

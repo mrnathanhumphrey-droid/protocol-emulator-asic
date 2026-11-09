@@ -57,6 +57,10 @@ ROWS = {
                        "whose sub-cycle phase tb_uartrx walks (IN_SUITE)"),
     "test/tb_uarttx.v": ("CHIP_DRIVEN", "the peer is a RECEIVER timing the chip's own "
                          "TX edges; it drives nothing back"),
+    "test/tb_usbbuf.v": ("CHIP_DRIVEN", "v2 primitive 3 bundle 5: the claims are the chip's OWN "
+                         "packets (bit for bit) and its turnaround after the host's EOP; "
+                         "the host's receive-side sub-cycle phase is walked by tb_usbrx "
+                         "(IN_SUITE), whose receive path this bench reuses unchanged"),
     "test/tb_pair.v": ("CHIP_DRIVEN", "v2 primitive 3 bundle 2: the claim is the chip's OWN "
                        "pair waveform (D+/D-, SHIFTI, self-timed bytes) cycle for cycle; its "
                        "one receive case is functional, and the unclocked sample's sub-cycle "

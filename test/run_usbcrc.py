@@ -21,7 +21,7 @@ Bench: test/tb_usbrx.v (its MK / BR lines). Images built here from pe_isa.
       good packets -> ACK, NAK, ACK, NAK, NAK, NAK, ACK; every received byte
       exact; the flags at each branch exact
   C2  forty seeded random packets at 0 drift, half corrupted (1-3 bits)
-  C3  pe_isa: branching on READY (12, bundle 5) and on 15 is refused
+  C3  pe_isa: branching on 15 (PIN_NONE) is refused (READY, 12, is built since bundle 5)
   C4  must-fires: M_CRC_ALWAYS_OK (a corrupted packet ACKed), M_CRC_NO_PRIME
       (the CRC carried over from the previous packet) each turn the gate red
 
@@ -211,7 +211,7 @@ def main() -> int:
             probs += p
 
         print("\n  C3 pe_isa: branching on a virtual pin that is not built")
-        for pin, why in ((I.VPIN_READY, "READY (bundle 5)"), (I.PIN_NONE, "PIN_NONE")):
+        for pin, why in ((I.PIN_NONE, "PIN_NONE"),):
             bad = bytearray(image())
             a = I.ACT_BASE + 16 * I.ACT_BYTES
             bad[a:a + I.ACT_BYTES] = I.act_branch_bit(pin, 1, 21, W)

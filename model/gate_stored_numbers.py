@@ -746,6 +746,14 @@ SPEC_SYMBOLS = {
     # boundaries, zeros, one seeded random); the results are tb_usbrx's
     # pushes, judged live against run_usbrx's golden decode of the line.
     ("test/run_usbrx.py", "PAYLOADS"),
+    # ⭐ v2 primitive 3 bundle 5 (the response buffer / READY): PAYLOAD and
+    # Q_BYTES are STIMULUS (the DATA payload the RP2040 loads, the bytes fed
+    # to queue 3); SCEN is the DESIGN of each scenario (host packet times and
+    # modes, the expected packet sequence). The results are tb_usbbuf's
+    # device packets, judged bit for bit against run_usbbuf's golden.
+    ("test/run_usbbuf.py", "PAYLOAD"),
+    ("test/run_usbbuf.py", "Q_BYTES"),
+    ("test/run_usbbuf.py", "SCEN"),
     # ⭐ v2 PIT chunk 1: CASES is the capture gate's DESIGN -- which buses to
     # play (SPI modes 0 / 3, a wire mask, I2C, two UARTs, a line fast enough
     # to overrun) and their chosen masks; the result is the bit-exact compare.

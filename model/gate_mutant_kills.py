@@ -103,6 +103,9 @@ KILLERS = {
     "M_STUFF_NOFLAG": "test/run_usbrx.py", "M_REAN_NOCOMP": "test/run_usbrx.py",
     # -- bundle 4: the RX CRC16 + the flags as virtual pins (tb_usbrx)
     "M_CRC_ALWAYS_OK": "test/run_usbcrc.py", "M_CRC_NO_PRIME": "test/run_usbcrc.py",
+    # -- bundle 5: the response buffer, READY, IN -> DATA -> ACK (tb_usbbuf)
+    "M_READY_ALWAYS": "test/run_usbbuf.py", "M_READY_CLR_ON_SEND": "test/run_usbbuf.py",
+    "M_BUF_NO_REFUSE": "test/run_usbbuf.py", "M_TAG3_ALWAYS_BUF": "test/run_usbbuf.py",
     # silicon fix #2: killed on VALUE by Layer V1 (tb_trace, corpus_i2c)
     "M_TX_LOAD_ANYPHASE": RUN_MUTANTS,
     # silicon fix #3: killed on VALUE by Layer V-RX (tb_trace, corpus_spim)

@@ -493,10 +493,31 @@ def act_shiftin_timed(pin, delay, nbits=8, pinb=None) -> bytes:
 #: checks the chip refuses the encoding anywhere else)
 USB_LANE = 0
 #: bundle 4: the USB lane's flags as VIRTUAL PINS past the real ones -- read by
-#: BRANCH_BIT (the RTL's VPIN_*). READY's source is bundle 5's response
-#: buffer; until then the chip reads it as 0 and this assembler refuses it.
+#: BRANCH_BIT (the RTL's VPIN_*). Bundle 5 built READY's source (the response
+#: buffer): READY sets when the host's packet has fully landed and clears only
+#: by the program (`act_ready_clear`, after an ACK).
 VPIN_READY, VPIN_CRC_OK, VPIN_STUFF_ERR = 12, 13, 14
-VPINS_BUILT = (VPIN_CRC_OK, VPIN_STUFF_ERR)
+VPINS_BUILT = (VPIN_READY, VPIN_CRC_OK, VPIN_STUFF_ERR)
+#: bundle 5: the TX tag / queue that IS the response buffer while the USB lane
+#: is live, and the buffer's packet limit in bits
+USB_BUF_Q, USB_BUF_MAX_BITS = 3, 112
+
+
+def act_send_buf(pin, pinb, delay) -> bytes:
+    """Bundle 5: send the WHOLE response buffer on the pair (`pin` = D-,
+    `pinb` = D+, complement) as ONE held action, `delay` cycles a bit: a
+    self-timed SHIFT drawing queue 3, which the chip maps to the buffer while
+    the USB lane is live. Its length is the buffer's (bits); READY is not
+    touched -- with no ACK, the next IN sends the same packet again."""
+    return act(OP_SHIFT, pin, 0, delay, count=7, q=USB_BUF_Q, pinb=pinb,
+               mod=MOD_SELF_TIMED | MOD_PAIR)
+
+
+def act_ready_clear(delay) -> bytes:
+    """Bundle 5: clear READY -- a LEVEL writing 0 to virtual pin 12 (no new
+    opcode). The program does it after an ACK; it also rewinds the load
+    address for the host's next packet."""
+    return act(OP_LEVEL, VPIN_READY, 0, delay)
 
 
 def act_shiftin_usb(pin, delay, nbits=8, crc=False):
@@ -536,6 +557,29 @@ def usb_problems(img):
     # of all lanes. A RULE, not a hardware priority bit: the scheduler stays
     # the EDF one the Lean `dstar` results and the R bound assume. Raw-loaded
     # programs bypass this check; a bad one breaks only its own USB timing.
+    # bundle 5: READY's clear and the buffer send (q = 3 is the buffer only
+    # when the USB lane carries a USB receive; otherwise it is a plain queue)
+    usb_live = USB_LANE in progs and any(
+        x["op"] == OP_SHIFTIN and x["mod"] & MOD_SELF_TIMED and x["level"]
+        for x in progs[USB_LANE][1])
+    for ln, (h, acts) in progs.items():
+        for i, x in enumerate(acts):
+            w = h["base_word"] + i
+            if x["op"] == OP_LEVEL and x["pin"] in (VPIN_CRC_OK, VPIN_STUFF_ERR):
+                out.append("word %d: LEVEL on virtual pin %d -- only READY (12) can be "
+                           "written, and only cleared" % (w, x["pin"]))
+            if x["op"] == OP_LEVEL and x["pin"] == VPIN_READY:
+                if ln != USB_LANE:
+                    out.append("word %d (lane %d): READY cleared outside the USB lane" % (w, ln))
+                if x["level"] or x["mod"] or x["pinb"]:
+                    out.append("word %d: READY can only be CLEARED (level 0, no pair) -- the "
+                               "host's last byte sets it" % w)
+            if (ln == USB_LANE and usb_live and x["op"] == OP_SHIFT and x["q"] == USB_BUF_Q
+                    and x["mod"] & MOD_SELF_TIMED):
+                if not x["mod"] & MOD_PAIR:
+                    out.append("word %d: the buffer send without the pair (D+/D-)" % w)
+                if x["count"] != 7:
+                    out.append("word %d: the buffer send's count must be 7 (byte framing)" % w)
     uh = progs.get(USB_LANE)
     if uh and any(x["op"] == OP_SHIFTIN and x["mod"] & MOD_SELF_TIMED and x["level"]
                   for x in uh[1]):
@@ -864,10 +908,13 @@ def loop_problems(img):
 
 def _rx_bits(h, x):
     """Bits one action shifts into its lane's l_rx: a clocked SHIFTIN its
-    count, an unclocked SHIFTIN or a READBIT one, anything else none."""
+    count, a SELF-TIMED SHIFTIN (v2 primitive 3 bundle 2, mod[1]; a USB
+    receive drops its stuffed bits, so it too shifts exactly `count`) its
+    count, any other unclocked SHIFTIN or a READBIT one, anything else none."""
     if x["op"] == OP_SHIFTIN:
         clocked = h["clkpin"] < N_PINS and x["level"] == 1
-        return x["count"] if clocked else 1
+        timed = h["clkpin"] >= N_PINS and x["mod"] & MOD_SELF_TIMED
+        return x["count"] if (clocked or timed) else 1
     return 1 if x["op"] == OP_READBIT else 0
 
 
@@ -898,7 +945,11 @@ def cmp_byte_problems(img):
                            "(Wilson 10-27)" % (ln, w, "a byte NOTHING received"
                            if st is None else "after %d bit(s) of a byte" % (st % 8)))
             n = _rx_bits(h, x)
-            nst = st if n == 0 else ((0 if st is None else st) + n) % 8
+            # ⭐ l_rx is EIGHT bits: one action that shifts in a whole byte or
+            # more (a self-timed / USB receive, bundle 2-3) leaves it holding
+            # exactly that byte, whatever partial bits came before (bundle 5's
+            # READBIT pair release, for one) -- the register is realigned
+            nst = st if n == 0 else (0 if n >= 8 else ((0 if st is None else st) + n) % 8)
             if x["op"] == OP_REARM:
                 if x["level"]:
                     todo.append((b0, nst))

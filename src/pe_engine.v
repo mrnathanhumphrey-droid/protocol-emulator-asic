@@ -161,6 +161,8 @@
       usb_ones   <= 3'd0; \
       usb_serr   <= 1'b0; \
       usb_crc    <= 16'hFFFF; \
+      usb_on     <= 1'b0; \
+      usb_bcnt   <= 7'd0; \
       for (i = 0; i < N_LANES; i = i + 1) begin \
         l_pin[i]       <= {PINW{1'b0}}; \
         l_clkpin[i]    <= {PINW{1'b0}}; \
@@ -536,6 +538,17 @@ module pe_engine #(
     // kind of wrong.
     output reg  [((N_LANES <= 2) ? 1 : (N_LANES <= 4) ? 2 : (N_LANES <= 8) ? 3 : 4)-1:0] rx_lane,   // = LW, inlined (see host_lane)
     output reg                  rx_push,
+
+    // ⭐ v2 primitive 3 bundle 5 (Wilson 11-08): the USB response buffer's
+    // engine side. READY and the packet's bit length come in from the buffer
+    // (project.v); out go: the USB lane is live (`usb_on`, which redirects TX
+    // tag 3 to the buffer), a send finished (`usb_sent`, rewind for a
+    // retransmit), and the program cleared READY (`usb_clr`, after an ACK).
+    input  wire                 usb_ready,
+    input  wire [6:0]           usb_blen,
+    output reg                  usb_on,
+    output wire                 usb_sent,
+    output wire                 usb_clr,
 
     output wire                 busy
 );
@@ -1996,9 +2009,9 @@ module pe_engine #(
   wire st_act  = cur_cls[C_ST] & ~clk_real;
   wire [BPW-1:0] st_lastix = cur_cls[C_SHIFT] ? a_cnt : (a_cnt - 4'd1);
 `ifdef M_ST_EARLY
-  wire st_last = (l_ckbit[cur] == st_lastix - 4'd1);   // the mutant: one bit short
+  wire st_last_b = (l_ckbit[cur] == st_lastix - 4'd1);   // the mutant: one bit short
 `else
-  wire st_last = (l_ckbit[cur] == st_lastix);
+  wire st_last_b = (l_ckbit[cur] == st_lastix);
 `endif
   // ⭐ v2 PRIMITIVE 3, BUNDLE 3 (Wilson 11-08): NRZI DECODE + UNSTUFFING on the
   // self-timed SHIFTIN, ONE lane only (Wilson: "one USB lane"). The state is
@@ -2041,6 +2054,17 @@ module pe_engine #(
 `else
   wire usb_stuff = usb_act & (usb_ones == 3'd6);
 `endif
+  // ⭐ BUNDLE 5: THE BUFFER SEND. A self-timed SHIFT with q = 3 on the USB
+  // lane sends the WHOLE buffer as one held action: its bytes come through
+  // the host-queue interface (project.v maps queue 3 to the buffer while the
+  // USB lane is live), and it is held for `usb_blen` bits -- the packet's
+  // length, which stuffing makes data-dependent -- counted in `usb_bcnt`.
+  reg  [6:0] usb_bcnt;
+  // ...and only while the USB lane is LIVE: before that (and in every program
+  // without a USB receive) q = 3 is an ordinary TX queue, its SHIFT ordinary
+  wire usb_send = st_act & cur_cls[C_SHIFT] & ~cur_cls[C_SHI] & (a_q == 2'd3) &
+                  (cur == USB_LANE[LW-1:0]) & usb_on;
+  wire st_last  = usb_send ? (usb_bcnt == usb_blen - 7'd1) : st_last_b;
   wire ck_degen = (ck_act & (ck_nbits == {BPW{1'b0}})) |
                   (st_act & cur_cls[C_SHIFTIN] & (a_cnt == {BPW{1'b0}})) | usb_wrong;
   // ⛔⛔⛔ D1 -- A CLOCKED OPEN-DRAIN ACTION WHOSE DELAY CANNOT HOLD ITS DATA
@@ -2209,8 +2233,26 @@ module pe_engine #(
   // bundle 5's response buffer: it reads 0 (not ready) until then, and pe_isa
   // refuses naming it. 15 stays PIN_NONE (0). Still ONE guarded wire.
   localparam [PINW-1:0] VPIN_READY = 4'd12, VPIN_CRC_OK = 4'd13, VPIN_STUFF_ERR = 4'd14;
-  wire       rx_vpin    = (a_pin == VPIN_CRC_OK)    ? usb_crc_ok :
+`ifdef M_READY_ALWAYS
+  wire       usb_ready_v = 1'b1;                 // the mutant: READY reads set
+`else
+  wire       usb_ready_v = usb_ready;
+`endif
+  wire       rx_vpin    = (a_pin == VPIN_READY)     ? usb_ready_v :
+                          (a_pin == VPIN_CRC_OK)    ? usb_crc_ok :
                           (a_pin == VPIN_STUFF_ERR) ? usb_serr   : 1'b0;
+  // ⭐ BUNDLE 5: READY CLEARS ON ACK, BY THE PROGRAM (Wilson 11-08). The clear
+  // is a LEVEL writing 0 to virtual pin 12 on the USB lane -- no new opcode;
+  // a LEVEL on a non-real pin otherwise writes nothing. A send never touches
+  // READY: with no ACK the buffer stays valid and the next IN resends it.
+  wire       usb_clr_lvl = (st == ST_WB) & (a_op == OP_LEVEL) & (a_pin == VPIN_READY) &
+                           ~a_lvl & (cur == USB_LANE[LW-1:0]);
+  assign     usb_sent    = (st == ST_WB) & usb_send & act_retire;
+`ifdef M_READY_CLR_ON_SEND
+  assign     usb_clr     = usb_clr_lvl | usb_sent;    // the mutant: cleared on send
+`else
+  assign     usb_clr     = usb_clr_lvl;
+`endif
 `ifdef M_UNGUARDED_SAMPLE
   wire       rx_bit     = pin_in[a_pin];      // the mutant: the defect restored
 `else
@@ -3481,6 +3523,9 @@ module pe_engine #(
             if (act_retire)      l_ckbit[cur] <= {BPW{1'b0}};
             else if (!usb_stuff) l_ckbit[cur] <= l_ckbit[cur] + {{(BPW-1){1'b0}}, 1'b1};
           end
+          // bundle 5: the send's bit counter; the USB lane is live once it receives
+          if (usb_send) usb_bcnt <= act_retire ? 7'd0 : usb_bcnt + 7'd1;
+          if (usb_act)  usb_on   <= 1'b1;
           // bundle 3: the NRZI reference and the ones run, one sample at a time
           // bundle 4: the CRC takes each decoded data bit of a CRC-enabled byte
           if (usb_act & ~usb_stuff & a_mod[0])
@@ -3836,6 +3881,12 @@ module pe_engine #(
 `else
             tx_bitp[cur] <= {BPW{1'b0}};
 `endif
+          end
+          // ⭐ bundle 5: a buffer send's last bit leaves the lane byte-ALIGNED
+          // whatever the length, so the next SHIFT / SHIFTI starts a fresh byte
+          if (usb_send && act_retire) begin
+            tx_bitp[cur] <= {BPW{1'b0}};
+            l_txv[cur]   <= 1'b0;
           end
 
           st <= ST_IDLE;
