@@ -55,6 +55,7 @@ for _p in (HERE, os.path.join(ROOT, "model")):
         sys.path.insert(0, _p)
 
 from toolchain import banner, tool       # noqa: E402
+import clock                             # noqa: E402
 import pe_isa as I                       # noqa: E402
 import sim_run                           # noqa: E402
 import run_usbrx as U                    # noqa: E402
@@ -365,6 +366,22 @@ def main() -> int:
         jmax = max([j for tag, j in [t for t in turns if isinstance(t, tuple)]] or [0])
         print("    device SOP after the host's EOP: %s cycles (window %d..%d)" % (sops, TURN_LO, TURN_HI))
         print("    MEASURED: worst device edge lateness off the bit grid: %d cycle(s) (J = %d)" % (jmax, J_MAX))
+        # ⭐ bundle 6 (step 7a M16): the measured driver term in ns against
+        # USB 2.0 Table 7-10's TUDJ1 / TUDJ2 (jitter INCLUDING frequency
+        # tolerance), the rest charged to the clock source over the longest
+        # runs Table 7-5 budgets (7 / 14 bits), against the declared source
+        f = clock.target_hz("chip")
+        jt = clock.ns(jmax, f)
+        tb = 1e9 / clock.USB_LS_RATE
+        q = float(clock.usb_quant_err(f))
+        src = clock.SOURCE_PPM["chip"] / 1e6
+        nxt = jt + 7 * tb * (q + src)
+        pair = jt + 14 * tb * (q + src)
+        print("    M16 MEASURED driver term %.1f ns (%d cyc); with the declared %d ppm source: next "
+              "transition %.1f of %d ns, paired %.1f of %d ns" % (jt, jmax, clock.SOURCE_PPM["chip"],
+                                                                   nxt, clock.USB_TUDJ1_NS, pair, clock.USB_TUDJ2_NS))
+        if nxt > clock.USB_TUDJ1_NS or pair > clock.USB_TUDJ2_NS:
+            probs.append("M16: device TX jitter %.1f / %.1f ns over TUDJ1 / TUDJ2" % (nxt, pair))
         print("\n  B6 must-fires")
         for d, what in MUTANTS:
             mv = os.path.join(tmp, "usbbuf_%s.vvp" % d)

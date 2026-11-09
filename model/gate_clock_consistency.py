@@ -176,6 +176,49 @@ def spec(hz, engine_text=None, band=None, rtl_ps=None):
     return out
 
 
+def usb_spec(hz, engine_text=None, ppm=None, t_rst_ns=None):
+    """[(what, ok, detail)] for check 8 (step 7a, Wilson 11-09 Q1 + Q7) at
+    clock `hz`: the RTL's bus-reset count N_RST (its own T_RST_NS, its own
+    banded formula) fits its 8-bit counter and, across the band, lands above
+    TDETRST's 2.5 us and twice the longest EOP and below TDRST's 10 ms; and
+    the target's DECLARED clock-source accuracy plus the bit's quantisation
+    stays inside USB_LS_TOL (the two-sided rate requirement BAND never held).
+    `ppm` / `t_rst_ns` override the declared values (the must-fires)."""
+    out = []
+    eng = engine_text if engine_text is not None else read(ENGINE)
+    m = re.search(r"localparam\s+integer\s+T_RST_NS\s*=\s*(\d+)", eng)
+    t_rst = t_rst_ns if t_rst_ns is not None else (int(m.group(1)) if m else None)
+    mhz = hz / 1e6
+    if t_rst is None:
+        return [("USB N_RST @ %g MHz" % mhz, False, "pe_engine.v declares no T_RST_NS")]
+    out.append(("USB T_RST_NS == clock.USB_T_RST_NS", t_rst_ns is not None or t_rst == clock.USB_T_RST_NS,
+                "RTL %s, model %d" % (t_rst, clock.USB_T_RST_NS)))
+    n = clock.usb_n_rst(hz, t_rst)
+    real = Fraction(n * 10 ** 9, hz)
+    band = clock.BAND
+    out.append(("USB N_RST fits 8 bits @ %g MHz" % mhz, 0 < n <= 255, "%d cycles" % n))
+    for what, ok, det in (
+            ("> TDETRST 2.5 us, clock fast by the band", real / band >= clock.USB_TDETRST_MIN_NS,
+             "%.0f ns / %s = %.0f >= %d" % (float(real), band, float(real / band), clock.USB_TDETRST_MIN_NS)),
+            (">= 2 x the longest EOP, clock fast", real / band >= 2 * clock.USB_TLEOPT_MAX_NS,
+             "%.0f >= %d" % (float(real / band), 2 * clock.USB_TLEOPT_MAX_NS)),
+            ("< TDRST 10 ms, clock slow by the band", real * band <= clock.USB_TDRST_MIN_NS,
+             "%.0f ns <= %d" % (float(real * band), clock.USB_TDRST_MIN_NS))):
+        out.append(("USB N_RST %s @ %g MHz" % (what, mhz), ok, det))
+    tgt = [t for t in clock.TARGETS if clock.target_hz(t) == hz]
+    p = ppm if ppm is not None else (clock.SOURCE_PPM.get(tgt[0]) if tgt else None)
+    if p is None:
+        out.append(("USB source accuracy @ %g MHz" % mhz, False, "no target declares this clock's source ppm"))
+        return out
+    q, tol = clock.usb_quant_err(hz), clock.usb_ls_tol(hz)
+    ok = Fraction(p, 10 ** 6) + q <= tol
+    out.append(("USB TX rate: source + quantisation <= USB_LS_TOL @ %g MHz" % mhz, ok,
+                "%d ppm%s + %.3f %% (bit %d cyc) vs %.3f %% -> margin %.3f %%"
+                % (p, "" if ppm is not None else " (declared, PROVISIONAL)", float(q) * 100,
+                   clock.usb_bit_cycles(hz), float(tol) * 100, float(tol - q - Fraction(p, 10 ** 6)) * 100)))
+    return out
+
+
 def bench_only(src, cfg_text):
     """[(what, ok, detail)] for check 5: `src` {rel: text} is every src/
     file synthesis reads, `cfg_text` the flow config."""
@@ -273,6 +316,9 @@ def main(argv=None):
     print("  --- 4. derived counts meet their spec, per target ---")
     for t in sorted(clock.TARGETS):
         rc |= report(spec(clock.target_hz(t)))
+    print("  --- 8. USB low speed: the bus-reset count and the TX rate, per target ---")
+    for t in sorted(clock.TARGETS):
+        rc |= report(usb_spec(clock.target_hz(t)))
     print("  --- 5. bench-only clock defines never reach synthesis ---")
     src = src_files()
     rc |= report(bench_only(src, files[CONFIG]))
@@ -328,6 +374,16 @@ def main(argv=None):
                                 CLOCK_PERIOD=round(1e9 / other, 3)))
     red = any(not ok for _w, ok, _d in copies(f))
     print("    must-fire: %-40s %s" % ("clock moved in config, not in RTL", "red  ok" if red else "*** MISSED"))
+    rc |= 0 if red else 1
+    # check 8 (step 7a, M17): the FPGA at 50 MHz with a declared +-0.5 %
+    # source (Wilson's retarget that must fail), and a reset threshold the
+    # band would let a keep-alive EOP reach
+    fp = 50_000_000                                       # clock-ok: the M17 retarget
+    red = any(not ok for _w, ok, _d in usb_spec(fp, ppm=5000))
+    print("    must-fire: %-40s %s" % ("USB: 50 MHz with a +-0.5 % source", "red  ok" if red else "*** MISSED"))
+    rc |= 0 if red else 1
+    red = any(not ok for _w, ok, _d in usb_spec(chip, t_rst_ns=2600))
+    print("    must-fire: %-40s %s" % ("USB: T_RST 2.6 us (< 2 x EOP, band)", "red  ok" if red else "*** MISSED"))
     rc |= 0 if red else 1
     # check 5's two halves: the bench define planted in src/, and in the flow
     s2 = dict(src)

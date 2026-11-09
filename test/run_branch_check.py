@@ -196,7 +196,8 @@ def main() -> int:
         if not ok:
             probs.append("%s: the chain is not refused" % name)
     # v2 primitive 2: whole bytes only, and something must have arrived
-    # (Wilson 10-27 addition 1); q[1] held for LOOP's break-out flag
+    # (Wilson 10-27 addition 1); q[1] = the USB lane's latched PID since bundle 6
+    # (Wilson 11-09), so off the live USB lane it is refused
     # LOOP: n = 0, forward head, nested, break-out by a branch, by a REARM
     for v in B.LOOP_REFUSED:
         pr = I.branch_problems(B.build_loop("alone", v, check=False))
@@ -209,7 +210,7 @@ def main() -> int:
     for v in B.CMP_REFUSED:
         pr = I.branch_problems(B.build_cmp(v, check=False))
         want = {"bit7": "after 7 bit(s)", "norx": "NOTHING received",
-                "q1": "q[1] must be zero"}[v]
+                "q1": "latched PID (q[1]) off the live USB lane"}[v]   # bundle 6: q[1] is the PID compare
         ok = any(want in x for x in pr)
         print("    cmp_%-12s %s" % (v, "REFUSED" if ok else "*** NOT REFUSED ***"))
         if not ok:

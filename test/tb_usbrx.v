@@ -57,6 +57,7 @@ module tb_usbrx;
 
   integer i, k, cyc, ncyc, wfd, wc, wl, wok, dbg;
   reg prev_se, prev_ce;
+  reg [5:0] prev_nb = 6'd0;
   real    t_neg0, wtr, tq, phs;            // the host's absolute-time drive
   reg     run_go = 1'b0;
   reg [31:0] ph_hit = 32'd0;
@@ -131,6 +132,11 @@ module tb_usbrx;
         $display("BR %0d %0d %0d", cyc, dut.u_eng.a_pin, dut.u_eng.rx_bit);
       if (dbg && dut.u_eng.st === 2'd1)
         $display("DS %0d %0d", cyc, dut.u_eng.cur);
+      // bundle 6 (step 7a M14): the hardware SYNC check's verdict, as each
+      // packet's eighth decoded bit lands
+      if (dut.u_eng.usb_nb === 6'd8 && prev_nb !== 6'd8)
+        $display("SY %0d %0d", cyc, dut.u_eng.usb_sok);
+      prev_nb = dut.u_eng.usb_nb;
       if (dut.u_eng.usb_serr !== prev_se)
         $display("SE %0d %0d", cyc, dut.u_eng.usb_serr);
       prev_se = dut.u_eng.usb_serr;

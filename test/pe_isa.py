@@ -338,13 +338,17 @@ def act_branch_bit(pin, level, target, wait) -> bytes:
                count=w >> PINB_W, pinb=w & ((1 << PINB_W) - 1))
 
 
-def act_cmp_branch(byte, target, wait, mask=CMP_MASK_ALL, inv=False) -> bytes:
+def act_cmp_branch(byte, target, wait, mask=CMP_MASK_ALL, inv=False, pid=False) -> bytes:
     """CMP_BRANCH (opcode 9, primitive 2): at the branch's DRIVE, compare the
     lane's received byte -- in WIRE order, the RTL reverses an MSB-first lane's
     register (Nate 10-28) -- with `byte` under `mask` (CMP_MASK_*); taken on
     a match, or on a MISMATCH with `inv`. Target and wait W exactly as
     BRANCH_BIT's. The immediate is {pin, delay[9:7], level}; q[0] = inv,
-    mod = the mask mode, q[1] must be zero."""
+    mod = the mask mode.
+    q[1] = `pid` (bundle 6, Wilson 11-09): compare the USB lane's LATCHED PID
+    (bits 8-15 of the current packet; 0x00 after a bad SYNC) instead of the
+    received byte. USB lane only. A self-timed receive cannot branch between
+    consecutive bits, so every decision on a packet is made after it ends."""
     b, t, w = int(byte), int(target), int(wait)
     if not 0 <= b <= 0xFF:
         raise ValueError("CMP byte %r outside 0..255" % (byte,))
@@ -358,7 +362,7 @@ def act_cmp_branch(byte, target, wait, mask=CMP_MASK_ALL, inv=False) -> bytes:
         raise ValueError("CMP mask mode %r is not one of %s" % (mask, sorted(CMP_MASKS)))
     return act(OP_CMP_BRANCH, b >> 4, b & 1, t | (((b >> 1) & 7) << 7),
                count=w >> PINB_W, pinb=w & ((1 << PINB_W) - 1),
-               q=1 if inv else 0, mod=int(mask))
+               q=(1 if inv else 0) | (2 if pid else 0), mod=int(mask))
 
 
 def cmp_byte(x):
@@ -497,10 +501,36 @@ USB_LANE = 0
 #: buffer): READY sets when the host's packet has fully landed and clears only
 #: by the program (`act_ready_clear`, after an ACK).
 VPIN_READY, VPIN_CRC_OK, VPIN_STUFF_ERR = 12, 13, 14
-VPINS_BUILT = (VPIN_READY, VPIN_CRC_OK, VPIN_STUFF_ERR)
+#: bundle 6 (Wilson 11-09): 15 = ADDR_OK, the token check latched at the
+#: token's last bit (CRC5 good and ADDR = the device or the pending address).
+#: It is also PIN_NONE: the chip gates it on the live USB lane, so a read of
+#: PIN_NONE anywhere else is the 0 it always was; pe_isa refuses BRANCH_BIT on
+#: it outside the USB lane.
+VPIN_ADDR_OK = 15
+VPINS_BUILT = (VPIN_READY, VPIN_CRC_OK, VPIN_STUFF_ERR, VPIN_ADDR_OK)
 #: bundle 5: the TX tag / queue that IS the response buffer while the USB lane
 #: is live, and the buffer's packet limit in bits
 USB_BUF_Q, USB_BUF_MAX_BITS = 3, 112
+#: bundle 6 (Wilson 11-09, step 7a §3a, E2): the TX tag that is the USB CONTROL
+#: CHANNEL while the USB lane is live -- one-byte records, never queued. A USB
+#: image may not draw queue 2. The buffer's length byte carries the endpoint
+#: in bit 7.
+USB_CTL_Q = 2
+CTL_RST_ACK = 0x01
+
+
+def ctl_pending_addr(addr):
+    """the control record that writes the pending address (1aaaaaaa)"""
+    if not 0 <= int(addr) <= 0x7F:
+        raise ValueError("USB address %r outside 0..127" % (addr,))
+    return 0x80 | int(addr)
+
+
+def buf_len_byte(bits, ep=0):
+    """the buffer's byte 0: the packet length in bits (1..112), the endpoint in bit 7"""
+    if not 1 <= int(bits) <= USB_BUF_MAX_BITS or ep not in (0, 1):
+        raise ValueError("buffer length %r / endpoint %r out of range" % (bits, ep))
+    return (int(ep) << 7) | int(bits)
 
 
 def act_send_buf(pin, pinb, delay) -> bytes:
@@ -580,6 +610,19 @@ def usb_problems(img):
                     out.append("word %d: the buffer send without the pair (D+/D-)" % w)
                 if x["count"] != 7:
                     out.append("word %d: the buffer send's count must be 7 (byte framing)" % w)
+            # bundle 6: the latched-PID compare and ADDR_OK exist only on the
+            # live USB lane; queue 2 is the control channel there
+            if x["op"] == OP_CMP_BRANCH and x["q"] >> 1 and (ln != USB_LANE or not usb_live):
+                out.append("word %d (lane %d): CMP_BRANCH on the latched PID (q[1]) off the "
+                           "live USB lane -- it reads 0x00 there" % (w, ln))
+            if (x["op"] == OP_BRANCH_BIT and x["pin"] == VPIN_ADDR_OK
+                    and (ln != USB_LANE or not usb_live)):
+                out.append("word %d (lane %d): BRANCH_BIT on ADDR_OK (15) off the live USB "
+                           "lane -- it is PIN_NONE there and reads 0" % (w, ln))
+            if usb_live and x["op"] == OP_SHIFT and x["q"] == USB_CTL_Q:
+                out.append("word %d (lane %d): a SHIFT draws queue %d in a USB image -- tag %d "
+                           "is the USB control channel while the USB lane is live (step 7a "
+                           "E2), so that queue never fills" % (w, ln, USB_CTL_Q, USB_CTL_Q))
     uh = progs.get(USB_LANE)
     if uh and any(x["op"] == OP_SHIFTIN and x["mod"] & MOD_SELF_TIMED and x["level"]
                   for x in uh[1]):
@@ -859,9 +902,6 @@ def branch_problems(img):
             for f in ("q", "mod"):
                 if x[f]:
                     out.append("word %d: BRANCH_BIT field %s = %d must be zero" % (w, f, x[f]))
-        elif x["op"] == OP_CMP_BRANCH and x["q"] >> 1:
-            out.append("word %d: CMP_BRANCH q[1] must be zero (held for LOOP's "
-                       "break-out flag)" % w)
         elif x["op"] == OP_LOOP:
             for f in ("q", "mod"):
                 if x[f]:
@@ -938,7 +978,9 @@ def cmp_byte_problems(img):
             seen.add((w, st))
             a = ACT_BASE + w * ACT_BYTES
             x = _unpack(ACT_FIELDS, img[a:a + ACT_BYTES], ACT_BYTES)
-            if x["op"] == OP_CMP_BRANCH and (st is None or st % 8) and w not in bad:
+            # bundle 6: a CMP on the latched PID (q[1]) does not read l_rx
+            if (x["op"] == OP_CMP_BRANCH and not x["q"] >> 1
+                    and (st is None or st % 8) and w not in bad):
                 bad.add(w)
                 out.append("lane %d word %d: CMP_BRANCH compares %s -- l_rx is a "
                            "shift register, so only a whole byte is compared "

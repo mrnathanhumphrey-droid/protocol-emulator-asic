@@ -168,6 +168,67 @@ def rtl_hold_cycles(min_ns, ps, num=BAND.numerator, den=BAND.denominator):
     return (min_ns * 1000 * num + den * ps - 1) // (den * ps)
 
 
+# ---------------------------------------------------------------------------
+# ⭐ USB LOW SPEED (step 7a §1 / §5, Wilson 11-09 Q1 + Q7). Every figure is the
+# USB 2.0 spec's (usb.org usb_20_20240604, usb_20.pdf), cited where it is used.
+# ---------------------------------------------------------------------------
+#: the bus-reset threshold the RTL derives N_RST from (pe_engine.v T_RST_NS)
+USB_T_RST_NS = 4000
+#: TDETRST, Table 7-14 / §7.1.7.5: a device MAY treat SE0 > 2.5 us as reset and
+#: must have detected one within 10 ms (TDRST: the hub drives >= 10 ms)
+USB_TDETRST_MIN_NS, USB_TDRST_MIN_NS = 2500, 10_000_000
+#: TLEOPT, Table 7-10: the longest legal low-speed EOP SE0 a source sends
+USB_TLEOPT_MAX_NS = 1500
+#: the LS bit (TLDRATE nominal 1.5 Mb/s, Table 7-10) and the source jitter
+#: TUDJ1 / TUDJ2 (Table 7-10, "including frequency tolerance") over the
+#: longest runs the Table 7-5 budget charges them to (7 and 14 bits)
+USB_LS_RATE = 1_500_000
+USB_TUDJ1_NS, USB_TUDJ2_NS = 95, 150
+#: the engine's dispatch jitter on a device edge (measured, bundle 5): J <= 2
+USB_J_CYCLES = 2
+
+#: ⭐ THE CLOCK SOURCE'S ACCURACY, DECLARED PER TARGET (Wilson 11-09 Q7): the
+#: rate requirement is TWO-SIDED, which BAND (a one-sided guard on minima)
+#: never expressed. ⛔ BOTH VALUES ARE PROVISIONAL and each is a LOCK ITEM in
+#: V2_MASTER_LIST: the TT demo board's project clock comes from its RP2040
+#: (whether it lands on exactly 60.000 MHz, and to what ppm, comes from the TT
+#: board docs); the PA100T's from its board oscillator's datasheet.
+SOURCE_PPM = {"chip": 100, "fpga": 100}
+
+
+def usb_n_rst(f=None, t_rst_ns=USB_T_RST_NS):
+    """The RTL's N_RST at clock `f`: its own banded integer formula."""
+    f = hz() if f is None else int(f)
+    return rtl_hold_cycles(t_rst_ns, period_ps(f))
+
+
+def usb_bit_cycles(f=None):
+    """Whole cycles per LS bit: the device's TX bit (nominal, rounded)."""
+    return per_rate(USB_LS_RATE, f)
+
+
+def usb_quant_err(f=None):
+    """|rate error| from the whole-cycle bit alone: |C x 1.5 MHz / f - 1|."""
+    f = hz() if f is None else int(f)
+    return abs(Fraction(usb_bit_cycles(f) * USB_LS_RATE, f) - 1)
+
+
+def usb_ls_tol(f=None):
+    """USB_LS_TOL: the TOTAL rate error a device may have at clock `f` and
+    still meet TUDJ1/TUDJ2 with its dispatch jitter J x T charged as the
+    driver term (Table 7-5's split; §7.1.11 lets driver jitter be traded
+    against clock accuracy): min((95 - JT) / (7 Tb), (150 - JT) / (14 Tb))."""
+    f = hz() if f is None else int(f)
+    tb = Fraction(10 ** 9, USB_LS_RATE)
+    jt = Fraction(USB_J_CYCLES * 10 ** 9, f)
+    return min((USB_TUDJ1_NS - jt) / (7 * tb), (USB_TUDJ2_NS - jt) / (14 * tb))
+
+
+def usb_osc_allowed(f=None):
+    """What the clock SOURCE may be off by: USB_LS_TOL minus quantisation."""
+    return usb_ls_tol(f) - usb_quant_err(f)
+
+
 def main():
     for t in sorted(TARGETS):
         f = target_hz(t)

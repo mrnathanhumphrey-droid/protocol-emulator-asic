@@ -702,6 +702,7 @@ module tt_um_protocol_emulator #(
   // is written to the buffer instead of the queue. Before that, and in every
   // program without a USB receive, tag 3 is an ordinary TX queue.
   wire          e_usb_on, e_usb_sent, e_usb_clr;
+  wire          e_usb_brst, e_usb_acmt;         // bundle 6: bus reset, hardware address commit
   reg           ub_bv;                          // the next line byte is ready
   reg  [7:0]    ub_byte;
 `ifdef M_TAG3_ALWAYS_BUF
@@ -719,8 +720,22 @@ module tt_um_protocol_emulator #(
   // the action's; (b4) may pop several) and the benches read one interface.
   wire [3:0] do_popq = (e_host_pop & tx_valid & ~ub_sel) ? (4'b0001 << q_sel) : 4'b0000;
 
+  // ⭐ BUNDLE 6 (Wilson 11-09, step 7a §3a, E2): while the USB lane is live,
+  // TX TAG 2 IS THE USB CONTROL CHANNEL -- one-byte records, never queued:
+  //     1aaaaaaa  the pending address aaaaaaa (refused while READY or the
+  //               reset fence is up)
+  //     0x01      the reset acknowledgement: lowers the fence
+  //     other     reserved: refused
+  // A refusal sets the existing TX-full bit. Before usb_on, and in every
+  // program without a USB receive, tag 2 is an ordinary queue (pe_isa refuses
+  // a USB image whose actions draw queue 2).
+`ifdef M_CTL_AS_QUEUE
+  wire ctl_tag = 1'b0;                        // the mutant: the record lands in queue 2
+`else
+  wire ctl_tag = e_usb_on & (tx_tag == 2'd2);
+`endif
   wire nib_lo  = push_rise & tx_half;         // the push that completes a byte
-  wire do_push = nib_lo & ~ub_tag & ((tx_cnt[tx_tag] != TXD[1:0]) | do_popq[tx_tag]);
+  wire do_push = nib_lo & ~ub_tag & ~ctl_tag & ((tx_cnt[tx_tag] != TXD[1:0]) | do_popq[tx_tag]);
 
   // =====================================================================
   // ⭐ BUNDLE 5: THE USB RESPONSE BUFFER (Wilson 11-08)
@@ -737,20 +752,82 @@ module tt_um_protocol_emulator #(
   // (`e_usb_sent`) rewinds the READ side, so a retransmit sends the same bits.
   reg           ub_ready, ub_pend, ub_on_q;
   reg  [6:0]    ub_len;
+  // ⭐ BUNDLE 6 (Wilson 11-09, step 7a §2-§3): the device address, the pending
+  // one, the reset fence, the buffer's endpoint and the reset notice.
+  //   usb_addr      the address we answer (0 after a bus reset)
+  //   usb_apend/pv  the pending address (tag 2), committed in HARDWARE on the
+  //                 first ACK-clear of READY (trigger 1) or on a CRC5-valid
+  //                 IN/OUT/SETUP token to it (trigger 2, `e_usb_acmt`, which
+  //                 also clears READY: the stale ZLP is never sent)
+  //   usb_fence     set by a bus reset, lowered by the RP2040's
+  //                 acknowledgement (tag 2, 0x01); while up, tag-3 and
+  //                 pending-address writes are refused. Correct because the TX
+  //                 link is in order: a stale record sent before the
+  //                 acknowledgement arrives while the fence is still up. An
+  //                 acknowledgement with the fence down changes nothing.
+  //   ub_ep         bit 7 of the buffer's length byte: the endpoint it is for
+  //   rn_pend       the reset notice (RX kind 5), its own pending flop: never
+  //                 dropped behind a busy link; two resets give one notice
+  reg  [6:0]    usb_addr, usb_apend;
+  reg           usb_apv, usb_fence, ub_ep;
+  wire          ctl_byte  = nib_lo & ctl_tag;
+  wire          ctl_addr  = ctl_byte & ub_in[7];
+  wire          ctl_ack   = ctl_byte & (ub_in == 8'h01);
+  wire          ctl_refuse = (ctl_addr & (ub_ready | usb_fence)) |
+                             (ctl_byte & ~ub_in[7] & (ub_in != 8'h01));
+`ifdef M_ADDR_ACK_ONLY
+  wire          acmt      = 1'b0;               // the mutant: trigger 2 never commits
+`else
+  wire          acmt      = e_usb_acmt;
+`endif
+`ifdef M_ADDR_EARLY
+  wire          commit    = ctl_addr & ~ctl_refuse;   // the mutant: switch on the write itself
+`else
+  wire          commit    = usb_apv & (e_usb_clr | acmt);
+`endif
+  always @(posedge clk or negedge rst_n_s) begin
+    if (!rst_n_s) begin
+      usb_addr <= 7'd0; usb_apend <= 7'd0; usb_apv <= 1'b0;
+      usb_fence <= 1'b0;
+    end else begin
+      if (ctl_addr && !ctl_refuse) begin
+        usb_apend <= ub_in[6:0];
+        usb_apv   <= 1'b1;
+      end
+      if (ctl_ack) usb_fence <= 1'b0;
+`ifdef M_ADDR_EARLY
+      if (commit) begin usb_addr <= ub_in[6:0]; usb_apv <= 1'b0; end
+`else
+      if (commit) begin usb_addr <= usb_apend; usb_apv <= 1'b0; end
+`endif
+      if (e_usb_brst) begin
+`ifndef M_RST_KEEP_ADDR
+        usb_addr  <= 7'd0;
+`endif
+        usb_apend <= 7'd0;
+        usb_apv   <= 1'b0;
+`ifndef M_RST_NO_FENCE
+        usb_fence <= 1'b1;
+`endif
+      end
+    end
+  end
   // ub_wp: bytes taken this load, the length byte included; ub_rp: the next
   // line byte for the engine (both declared above the store)
   assign        ub_in   = {tx_asm[7:4], ui_in[4:1]};     // the byte this push completes
   wire [3:0]    ub_nb   = ub_len[6:3] + {3'd0, |ub_len[2:0]};   // ceil(length / 8)
   wire          ub_wbyte  = nib_lo & ub_tag;
-  wire          ub_len_ok = (ub_in != 8'd0) && (ub_in <= 8'd112);
+  // bundle 6 (Q5): bit 7 of the length byte is the endpoint, 6:0 the length
+  wire          ub_len_ok = (ub_in[6:0] != 7'd0) && (ub_in[6:0] <= 7'd112);
 `ifdef M_BUF_NO_REFUSE
   // the mutant: a write while READY is not refused -- it starts a new load
   // OVER the unACKed packet (what an unguarded buffer would do)
   assign        ub_wpe    = ub_ready ? 5'd0 : ub_wp;
-  wire          ub_refuse = (ub_wpe == 5'd0) & ~ub_len_ok;
+  wire          ub_refuse = usb_fence | ((ub_wpe == 5'd0) & ~ub_len_ok);
 `else
   assign        ub_wpe    = ub_wp;
-  wire          ub_refuse = ub_ready | ((ub_wp == 5'd0) & ~ub_len_ok);
+  // bundle 6: and refused while the reset fence is up (addition A)
+  wire          ub_refuse = ub_ready | usb_fence | ((ub_wp == 5'd0) & ~ub_len_ok);
 `endif
   assign        ub_bwe    = ub_wbyte & ~ub_refuse & (ub_wpe != 5'd0);
   assign        ub_bre    = ub_ready & ~ub_bv & ~ub_pend & (ub_rp < ub_nb);
@@ -759,11 +836,13 @@ module tt_um_protocol_emulator #(
     if (!rst_n_s) begin
       ub_ready <= 1'b0; ub_pend <= 1'b0; ub_on_q <= 1'b0; ub_bv <= 1'b0;
       ub_len <= 7'd0; ub_wp <= 5'd0; ub_rp <= 4'd0; ub_byte <= 8'h00;
+      ub_ep <= 1'b0;
     end else begin
       ub_on_q <= e_usb_on;
       // load
       if (ub_wbyte && !ub_refuse) begin
         if (ub_wpe == 5'd0) ub_len <= ub_in[6:0];
+        if (ub_wpe == 5'd0) ub_ep  <= ub_in[7];
         ub_wp <= ub_wpe + 5'd1;
         if (ub_wpe == 5'd0) ub_ready <= 1'b0;    // (only the mutant writes while READY)
         if (ub_wpe != 5'd0 && ub_wpe[3:0] == ub_nb) begin
@@ -789,8 +868,17 @@ module tt_um_protocol_emulator #(
       end
       // the program's clear (after an ACK), the lane going live, a reload:
       // the load starts again at the length byte
-      if (e_usb_clr || (e_usb_on && !ub_on_q) || reload_flush) begin
+      // bundle 6: and the hardware address commit on a token to the pending
+      // address (the lost-ACK case: the stale ZLP must never go out)
+      if (e_usb_clr || (e_usb_on && !ub_on_q) || reload_flush || (usb_apv && acmt)) begin
         ub_ready <= 1'b0; ub_wp <= 5'd0; ub_rp <= 4'd0; ub_bv <= 1'b0; ub_pend <= 1'b0;
+      end
+      // bundle 6: a bus reset empties the buffer (Default state, §2)
+      if (e_usb_brst) begin
+`ifndef M_RST_KEEP_READY
+        ub_ready <= 1'b0;
+`endif
+        ub_wp <= 5'd0; ub_rp <= 4'd0; ub_bv <= 1'b0; ub_pend <= 1'b0; ub_ep <= 1'b0;
       end
     end
   end
@@ -835,8 +923,9 @@ module tt_um_protocol_emulator #(
       // back-pressure pin, so the only honest answer is a sticky flag in the
       // status frame -- the same reasoning as RX overflow: a host that has
       // stopped reading cannot be told by a pin it is not reading.
-      if (nib_lo && !do_push && !ub_tag) tx_full_sticky <= 1'b1;
+      if (nib_lo && !do_push && !ub_tag && !ctl_tag) tx_full_sticky <= 1'b1;
       if (ub_wbyte && ub_refuse)         tx_full_sticky <= 1'b1;   // bundle 5: refused
+      if (ctl_refuse)                    tx_full_sticky <= 1'b1;   // bundle 6: a refused control record
       // ⛔⛔ RELOAD IS A CLEAN SLATE (Wilson Q2, rule 1): the synchronised PROG
       // rise empties every TX queue and a half-assembled byte. Pushes while
       // PROG is high are store writes (`push_rise` is gated by `run`), so no
@@ -881,6 +970,8 @@ module tt_um_protocol_emulator #(
       .rx_data(e_rx_data), .rx_lane(e_rx_lane), .rx_push(e_rx_push),
       .usb_ready(ub_ready), .usb_blen(ub_len),
       .usb_on(e_usb_on), .usb_sent(e_usb_sent), .usb_clr(e_usb_clr),
+      .usb_addr(usb_addr), .usb_apend(usb_apend), .usb_apv(usb_apv), .usb_bep(ub_ep),
+      .usb_brst(e_usb_brst), .usb_acmt(e_usb_acmt),
       .busy(e_busy)
   );
 
@@ -913,6 +1004,10 @@ module tt_um_protocol_emulator #(
   //     marker 0, kind 7      -> READBACK byte, not a lane
   // Cost: 3 flops on `ser_sh`. `ser_cnt` already had the range.
   localparam [2:0] KIND_NONE = 3'd7;    // "not a lane"
+  // ⭐ bundle 6 (Wilson 11-09, Q2): kind 5 = the USB BUS RESET notice
+  // (marker 0, data 0). Kinds 5 and 6 were free; 6 stays free.
+  localparam [2:0] KIND_USBRST = 3'd5;
+  reg       rn_pend;                    // a reset notice not yet framed
   // THE EXPLICIT WIDTH ABOVE MUST EQUAL `LW`, AND THE CHECK IS IN THE
   // TOOLCHAIN, NOT HERE. `e_rx_lane` is declared [2:0] because `LW` is not in
   // scope that early; if `N_LANES` grew past 8 then `LW` would become 4 and
@@ -959,6 +1054,7 @@ module tt_um_protocol_emulator #(
       rx_pend <= 1'b0; rx_pend_data <= 8'h00;
       rx_pend_lane <= {LW{1'b0}};
       rx_drop_sticky <= 1'b0;
+      rn_pend <= 1'b0;
       ser_sh <= 12'h000; ser_cnt <= 4'd0; ser_phase <= 1'b0;
       status_byte <= 8'h00; status_turn <= 1'b0;
       rb_ptr <= {AW{1'b0}}; rb_addr <= {AW{1'b0}}; rb_bit <= 3'd0; rb_re <= 1'b0;
@@ -994,6 +1090,10 @@ module tt_um_protocol_emulator #(
       // ⛔ Q2 RX side: a received byte the host has not read yet is cleared
       // by the reload too (HOST_INTERFACE: drain RX before raising PROG).
       if (reload_flush) rx_pend <= 1'b0;
+      // bundle 6: a bus reset raises the notice; it is framed below, after
+      // any pending payload. Its own flop, so it is never dropped.
+      if (e_usb_brst) rn_pend <= 1'b1;
+      if (reload_flush) rn_pend <= 1'b0;
       if (ser_cnt != 4'd0) begin
         // shifting a frame out: one bit per two cycles, strobe in the middle
         ser_phase <= ~ser_phase;
@@ -1075,6 +1175,12 @@ module tt_um_protocol_emulator #(
 `endif
           ser_cnt     <= FRAME_LEN;
           rx_pend     <= 1'b0;
+          status_turn <= 1'b1;
+        end else if (rn_pend && !e_usb_brst) begin
+          // bundle 6: the USB bus reset notice (kind 5)
+          ser_sh      <= {1'b0, KIND_USBRST, 8'h00};
+          ser_cnt     <= FRAME_LEN;
+          rn_pend     <= 1'b0;
           status_turn <= 1'b1;
         end else if (status_pending) begin
           // ⛔⛔ A SILENT PART CANNOT REPORT WHY IT IS SILENT. In run mode the

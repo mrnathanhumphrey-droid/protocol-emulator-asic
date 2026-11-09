@@ -296,7 +296,26 @@ The engine starts only on a program load: there is no start path at power-on.
   | --- | --- | --- |
   | `1` | 7 | **status** — the byte below |
   | `0` | `0..4` | **RX payload from that lane** |
+  | `0` | 5 | **USB bus reset** notice (payload `0x00`) — v2 bundle 6 |
   | `0` | 7 | **readback** byte (program store), not a lane |
+
+- ⭐ **v2 bundle 6 (step 7a, Wilson 11-09): the USB device's host side.**
+  While the USB lane is live (after its first USB receive):
+  - **TX tag 3 is the response buffer** (bundle 5). Byte 0 is the packet's
+    length in bits (1..112) in bits 6:0 and **the endpoint it is for in bit 7**;
+    then its line bits. An IN to the other endpoint is NAKed.
+  - **TX tag 2 is the USB control channel** — one-byte records, never queued:
+    `1aaaaaaa` writes the **pending address** (the chip commits it itself when
+    the SET_ADDRESS status stage completes), `0x01` **acknowledges a bus
+    reset**, anything else is refused. A USB image may not use queue 2.
+  - **A bus reset** (SE0 of ~4 µs) clears the address, READY and the buffer and
+    sends **one kind-5 frame**. Until the RP2040 sends `0x01` on tag 2, every
+    tag-3 byte and pending-address record is **refused** (the TX-full bit), so
+    a record sent before the RP2040 learned of the reset can never land. An
+    acknowledgement with no reset pending changes nothing.
+  - ⚠ **If `rx_drop_sticky` is set while USB is on, assume a reset:** send
+    `0x01` and resynchronise (the backstop for a notice the host missed).
+  - Refusals of either tag set the existing TX-full status bit.
 
 - ⛔ **The marker arrives last**, so a host cannot use it to decide how many
   bits to read. Both frame types are therefore the **same width**; do not

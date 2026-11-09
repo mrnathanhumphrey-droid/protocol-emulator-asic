@@ -43,6 +43,8 @@ test/run_pair.py                    ^\s*GATE pair: PASSED\s*$
 test/run_usbrx.py                   ^\s*GATE usbrx: PASSED\s*$
 test/run_usbcrc.py                  ^\s*GATE usbcrc: PASSED\s*$
 test/run_usbbuf.py                  ^\s*GATE usbbuf: PASSED\s*$
+test/run_usbaddr.py                 ^\s*GATE usbaddr: PASSED\s*$
+test/run_usbrst.py                  ^\s*GATE usbrst: PASSED\s*$
 model/gate_gates_complete.py        ^\s*GATE gates-complete: PASSED\s*$
 model/gate_admissible_images.py     ^\s*GATE admissible-images: PASSED\s*$
 model/gate_wire_feed.py             ^\s*GATE wire-feed: PASSED\s*$

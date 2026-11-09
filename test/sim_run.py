@@ -154,6 +154,21 @@ SCRATCH_GENERATORS: dict = {
                " images, judged by the device's packets bit for bit against"
                " run_usbbuf's golden on tb_usbbuf, not by the A2 gap",
         "v3": {"no_v3_layer": "test/tb_usbbuf.v"}},
+    "run_usbaddr": {
+        "script": "test/run_usbaddr.py", "pattern": "usbaddr_*.hex",
+        "clocked": True,
+        "why": "v2 primitive 3 bundle 6: the USB device program (address, token"
+               " check, decisions after the packet), judged by the device's"
+               " packets bit for bit and its address/READY changes against"
+               " usbdev's golden on tb_usbdev, not by the A2 gap",
+        "v3": {"no_v3_layer": "test/tb_usbdev.v"}},
+    "run_usbrst": {
+        "script": "test/run_usbrst.py", "pattern": "usbrst_*.hex",
+        "clocked": True,
+        "why": "v2 primitive 3 bundle 6: the bus reset / fence / reset notice"
+               " images, judged against usbdev's golden on tb_usbdev, not by"
+               " the A2 gap",
+        "v3": {"no_v3_layer": "test/tb_usbdev.v"}},
     "run_usbcrc": {
         "script": "test/run_usbcrc.py", "pattern": "usbcrc_*.hex",
         "clocked": True,

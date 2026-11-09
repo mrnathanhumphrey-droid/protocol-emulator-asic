@@ -428,6 +428,11 @@ GATES=(
   # bit-identical, a mid-send write refused, tag 3 a queue without USB, SOP
   # inside 80..260; the four bundle-5 must-fires' killer.
   test/run_usbbuf.py
+  # ⭐ bundle 6 (Wilson 11-09, step 7a): the device address, the token check
+  # (CRC5, latched PID, ADDR_OK), the hardware commits, endpoint READY, the
+  # decisions after the packet; then the bus reset, the fence, the notice.
+  test/run_usbaddr.py
+  test/run_usbrst.py
   # ⭐⭐ SP2 -- the pe_asm protocol front-end (model/pe_proto.py): every
   # shipped FRAM program re-expressed as a TRANSACTION (START / rSTART / STOP
   # and CS framing generated from context), byte-identical to the verified
@@ -666,7 +671,7 @@ can_run() {
     model/gate_rtl_lint.py)
       { command -v "$VL" >/dev/null 2>&1 || command -v wsl.exe >/dev/null 2>&1; } \
         || { echo "no verilator and no wsl.exe to reach one"; return 1; } ;;
-    model/gate_one_encoder.py|model/gate_v2_equiv.py|test/run_pit_capture.py|test/run_pit_s0.py|test/gate_store_latch.py|test/run_branch_check.py|test/run_arm2.py|test/run_pair.py|test/run_usbrx.py|test/run_usbcrc.py|test/run_usbbuf.py|test/gl_harness_check.py|test/gate_tb_elaborates.py|test/run_mutants.py|model/gate_sda_hold.py|test/run_w_sweep.py|test/run_cktx.py|test/run_spidelay.py|test/run_spim_witness.py|test/run_spitgt.py|test/run_rxbw.py)
+    model/gate_one_encoder.py|model/gate_v2_equiv.py|test/run_pit_capture.py|test/run_pit_s0.py|test/gate_store_latch.py|test/run_branch_check.py|test/run_arm2.py|test/run_pair.py|test/run_usbrx.py|test/run_usbcrc.py|test/run_usbbuf.py|test/run_usbaddr.py|test/run_usbrst.py|test/gl_harness_check.py|test/gate_tb_elaborates.py|test/run_mutants.py|model/gate_sda_hold.py|test/run_w_sweep.py|test/run_cktx.py|test/run_spidelay.py|test/run_spim_witness.py|test/run_spitgt.py|test/run_rxbw.py)
       command -v "$IV" >/dev/null 2>&1 || { echo "iverilog not found (PE_IVERILOG unset and not on PATH)"; return 1; } ;;
     model/gate_reset_audit.py|model/gate_share_coupling.py)
       [ -n "${PE_NETLIST_JSON:-}" ] && [ -f "${PE_NETLIST_JSON:-}" ] \

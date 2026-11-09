@@ -106,6 +106,15 @@ KILLERS = {
     # -- bundle 5: the response buffer, READY, IN -> DATA -> ACK (tb_usbbuf)
     "M_READY_ALWAYS": "test/run_usbbuf.py", "M_READY_CLR_ON_SEND": "test/run_usbbuf.py",
     "M_BUF_NO_REFUSE": "test/run_usbbuf.py", "M_TAG3_ALWAYS_BUF": "test/run_usbbuf.py",
+    # -- bundle 6 (step 7a): the address, the token check, the commits (tb_usbdev)
+    "M_ADDR_EARLY": "test/run_usbaddr.py", "M_ADDR_NOCHECK": "test/run_usbaddr.py",
+    "M_ADDR_ACK_ONLY": "test/run_usbaddr.py", "M_EP_NOCHECK": "test/run_usbaddr.py",
+    "M_CRC5_OK": "test/run_usbaddr.py", "M_ADDR_OK_EARLY": "test/run_usbaddr.py",
+    "M_COMMIT_ON_DATA": "test/run_usbaddr.py", "M_CTL_AS_QUEUE": "test/run_usbaddr.py",
+    # -- bundle 6 (step 7a): the bus reset, the fence (tb_usbdev)
+    "M_RST_NEVER": "test/run_usbrst.py", "M_RST_SHORT": "test/run_usbrst.py",
+    "M_RST_KEEP_ADDR": "test/run_usbrst.py", "M_RST_KEEP_READY": "test/run_usbrst.py",
+    "M_RST_NO_FENCE": "test/run_usbrst.py", "M_RST_ANY": "test/run_usbrst.py",
     # silicon fix #2: killed on VALUE by Layer V1 (tb_trace, corpus_i2c)
     "M_TX_LOAD_ANYPHASE": RUN_MUTANTS,
     # silicon fix #3: killed on VALUE by Layer V-RX (tb_trace, corpus_spim)

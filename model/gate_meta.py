@@ -190,6 +190,10 @@ SEAMS = (
     # bundle 5: `judge` always clean -> M_READY_* / M_BUF_NO_REFUSE /
     # M_TAG3_ALWAYS_BUF survive (its problems are element 0)
     ("test/run_usbbuf.py", "run_usbbuf.judge", "slow", "E0"),
+    # bundle 6: usbdev.judge always clean -> every M_ADDR_* / M_RST_* /
+    # M_CRC5_OK / M_EP_NOCHECK / M_COMMIT_ON_DATA / M_CTL_AS_QUEUE survives
+    ("test/run_usbaddr.py", "usbdev.judge", "slow", "E0"),
+    ("test/run_usbrst.py", "usbdev.judge", "slow", "E0"),
     # v2 PIT chunk 1: `compare` always finds no problem -> the five M_PIT_* survive
     ("test/run_pit_capture.py", "run_pit_capture.compare", "slow", "E0"),
     # v2 PIT chunk 2: `table_problems` always empty -> every M_S0_* survives

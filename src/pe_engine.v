@@ -163,6 +163,19 @@
       usb_crc    <= 16'hFFFF; \
       usb_on     <= 1'b0; \
       usb_bcnt   <= 7'd0; \
+      usb_sp     <= {PINW{1'b0}}; \
+      usb_sn     <= {PINB_W{1'b0}}; \
+      usb_sv     <= 1'b0; \
+      usb_new    <= 1'b0; \
+      usb_nb     <= 6'd32; \
+      usb_sok    <= 1'b0; \
+      usb_pid    <= 8'h00; \
+      usb_mcur   <= 1'b0; \
+      usb_mpend  <= 1'b0; \
+      usb_crc5   <= 5'h1F; \
+      usb_tep    <= 1'b0; \
+      usb_tok    <= 1'b0; \
+      usb_acmt   <= 1'b0; \
       for (i = 0; i < N_LANES; i = i + 1) begin \
         l_pin[i]       <= {PINW{1'b0}}; \
         l_clkpin[i]    <= {PINW{1'b0}}; \
@@ -226,6 +239,8 @@
 `define PE_RST_PRIMED primed_q <= 1'b0;
 // v2 primitive 3 bundle 3: the registered re-anchor's capture and target
 `define PE_RST_REAN   rean_q <= 1'b0; rean_tq <= {TS_W{1'b0}};
+// v2 primitive 3 bundle 6: the bus-reset SE0 counter and its pulse
+`define PE_RST_USBRST usb_se0c <= 8'd0; usb_brst <= 1'b0;
 `define PE_RST_PORT \
       s_re      <= 1'b0; \
       s_raddr   <= {AW{1'b0}}; \
@@ -549,6 +564,17 @@ module pe_engine #(
     output reg                  usb_on,
     output wire                 usb_sent,
     output wire                 usb_clr,
+    // ⭐ v2 primitive 3 bundle 6 (Wilson 11-09, step 7a): the address and
+    // the bus reset. In: the device address, the pending one (and its valid
+    // bit) and the buffer's endpoint, all held in project.v next to the
+    // buffer. Out: a bus reset (an SE0 of N_RST cycles on the USB pair) and
+    // the hardware address commit on a token to the pending address.
+    input  wire [6:0]           usb_addr,
+    input  wire [6:0]           usb_apend,
+    input  wire                 usb_apv,
+    input  wire                 usb_bep,
+    output reg                  usb_brst,
+    output reg                  usb_acmt,
 
     output wire                 busy
 );
@@ -2065,6 +2091,52 @@ module pe_engine #(
   wire usb_send = st_act & cur_cls[C_SHIFT] & ~cur_cls[C_SHI] & (a_q == 2'd3) &
                   (cur == USB_LANE[LW-1:0]) & usb_on;
   wire st_last  = usb_send ? (usb_bcnt == usb_blen - 7'd1) : st_last_b;
+  // ⭐ BUNDLE 6 (Wilson 11-09, step 7a §1): THE BUS RESET. A saturating
+  // counter of consecutive SE0 cycles (both pins of the USB pair low) fires
+  // one `usb_brst` pulse at cycle N_RST of the SE0. N_RST is DERIVED from the
+  // clock, the SDA_HOLD way: T_RST_NS at min x BAND, so a keep-alive EOP
+  // (1.25-1.50 us, 75-90 cycles; our own EOP is 80) never reaches it and a
+  // host reset (>= 10 ms) always does; USB lets a device treat > 2.5 us as
+  // reset (TDETRST, Table 7-14 / §7.1.7.5). 8 bits: model/clock.py's USB rows
+  // hold N_RST inside them at every target.
+  // THE PAIR is the one the program names in the USB lane's SE0 wait (a
+  // two-pin ARM at level 0): latched there (`usb_sp`/`usb_sn`), because the
+  // header has no second pin. Counting runs only while the USB lane is LIVE
+  // (`usb_on`, Wilson 11-09 choice 3), so a non-USB program holding lane 0's
+  // pins low never resets anything.
+  localparam integer T_RST_NS = 4000;
+  localparam integer N_RST    = (T_RST_NS * 1000 * BAND_NUM + BAND_DEN * CLK_PERIOD_PS - 1)
+                                / (BAND_DEN * CLK_PERIOD_PS);
+`ifdef M_RST_SHORT
+  localparam integer N_RST_EFF = 64;           // the mutant: a keep-alive EOP resets
+`else
+  localparam integer N_RST_EFF = N_RST;
+`endif
+  reg  [PINW-1:0]   usb_sp;
+  reg  [PINB_W-1:0] usb_sn;
+  reg               usb_sv;
+  reg  [7:0]        usb_se0c;
+  wire              usb_se0 = usb_sv & ~pin_in[usb_sp] & ~pin_in[usb_sn];
+`ifdef M_RST_ANY
+  wire              usb_rst_en = usb_sv;       // the mutant: not gated on the USB lane being live
+`else
+  wire              usb_rst_en = usb_sv & usb_on;
+`endif
+  always @(posedge clk or negedge rst_n) begin
+    if (!rst_n) begin
+      `PE_RST_USBRST
+    end else begin
+      usb_brst <= 1'b0;
+      if (usb_rst_en & usb_se0) begin
+        if (usb_se0c != N_RST_EFF[7:0]) usb_se0c <= usb_se0c + 8'd1;
+`ifndef M_RST_NEVER
+        if (usb_se0c == N_RST_EFF[7:0] - 8'd1) usb_brst <= 1'b1;
+`endif
+      end else begin
+        usb_se0c <= 8'd0;
+      end
+    end
+  end
   wire ck_degen = (ck_act & (ck_nbits == {BPW{1'b0}})) |
                   (st_act & cur_cls[C_SHIFTIN] & (a_cnt == {BPW{1'b0}})) | usb_wrong;
   // ⛔⛔⛔ D1 -- A CLOCKED OPEN-DRAIN ACTION WHOSE DELAY CANNOT HOLD ITS DATA
@@ -2233,14 +2305,49 @@ module pe_engine #(
   // bundle 5's response buffer: it reads 0 (not ready) until then, and pe_isa
   // refuses naming it. 15 stays PIN_NONE (0). Still ONE guarded wire.
   localparam [PINW-1:0] VPIN_READY = 4'd12, VPIN_CRC_OK = 4'd13, VPIN_STUFF_ERR = 4'd14;
+  // ⭐ BUNDLE 6: 15 = ADDR_OK, the latched token check. It is also PIN_NONE,
+  // so it is GATED on the hardware condition (the USB lane live, read on the
+  // USB lane): every other read of PIN_NONE is the 0 it always was.
+  localparam [PINW-1:0] VPIN_ADDR_OK = 4'd15;
+  // THE PACKET TRACKER (bundle 6): every decoded data bit of a USB receive
+  // goes through it, counted from the packet's first bit (`usb_nb`, sat at
+  // 32): bits 0-7 are SYNC (checked as they arrive, `usb_sok`), 8-15 the PID
+  // (copied, `usb_pid`), 16-22 ADDR, compared BIT-SERIALLY against the device
+  // and the pending address (`usb_mcur`, `usb_mpend`: no stored address byte,
+  // no 7-bit comparator), 23 ENDP[0] (`usb_tep`), and 16-31 feed the CRC5.
+  // At bit 31 -- the token's LAST bit, so the CRC5 has seen all 16 bits after
+  // the PID (Wilson's addition C) -- a TOKEN (IN/OUT/SETUP PID, good SYNC)
+  // latches ADDR_OK (`usb_tok`) and may fire the hardware commit
+  // (`usb_acmt`); any other packet leaves ADDR_OK as the last token's verdict.
+  // A new packet (`usb_new`, set by the edge ARM that primes NRZI) restarts
+  // the tracker at its FIRST BIT, not at the ARM, so a later ARM in the same
+  // exchange (the J after the EOP) leaves the PID for the program's decisions.
+  reg        usb_tep;
+  reg        usb_tok;
+  reg        usb_new;
+  reg  [5:0] usb_nb;
+  reg        usb_sok;
+  reg  [7:0] usb_pid;
+  reg        usb_mcur, usb_mpend;
+  reg  [4:0] usb_crc5;
 `ifdef M_READY_ALWAYS
   wire       usb_ready_v = 1'b1;                 // the mutant: READY reads set
+`elsif M_EP_NOCHECK
+  wire       usb_ready_v = usb_ready;            // the mutant: the endpoint ignored
 `else
-  wire       usb_ready_v = usb_ready;
+  // bundle 6 (Q5): READY only for the endpoint the buffer was loaded for
+  wire       usb_ready_v = usb_ready & (usb_bep == usb_tep);
+`endif
+  wire       usb_l0      = usb_on & (cur == USB_LANE[LW-1:0]);
+`ifdef M_ADDR_NOCHECK
+  wire       usb_aok_v   = usb_l0;               // the mutant: every address matches
+`else
+  wire       usb_aok_v   = usb_l0 & usb_tok;
 `endif
   wire       rx_vpin    = (a_pin == VPIN_READY)     ? usb_ready_v :
                           (a_pin == VPIN_CRC_OK)    ? usb_crc_ok :
-                          (a_pin == VPIN_STUFF_ERR) ? usb_serr   : 1'b0;
+                          (a_pin == VPIN_STUFF_ERR) ? usb_serr   :
+                          (a_pin == VPIN_ADDR_OK)   ? usb_aok_v  : 1'b0;
   // ⭐ BUNDLE 5: READY CLEARS ON ACK, BY THE PROGRAM (Wilson 11-08). The clear
   // is a LEVEL writing 0 to virtual pin 12 on the USB lane -- no new opcode;
   // a LEVEL on a non-real pin otherwise writes nothing. A send never touches
@@ -2289,10 +2396,19 @@ module pe_engine #(
   wire [7:0]    cmp_rev  = {l_rx[cur][0], l_rx[cur][1], l_rx[cur][2], l_rx[cur][3],
                             l_rx[cur][4], l_rx[cur][5], l_rx[cur][6], l_rx[cur][7]};
 `ifdef M_CMP_ORDER_IGN
-  wire [7:0]    cmp_src  = l_rx[cur];
+  wire [7:0]    cmp_rx   = l_rx[cur];
 `else
-  wire [7:0]    cmp_src  = l_order[cur] ? cmp_rev : l_rx[cur];
+  wire [7:0]    cmp_rx   = l_order[cur] ? cmp_rev : l_rx[cur];
 `endif
+  // ⭐ BUNDLE 6 (Wilson 11-09): q[1] = compare the USB lane's LATCHED PID
+  // instead of the received byte. A self-timed receive cannot branch between
+  // consecutive bits (a branch takes the next bit's sample slot), so every
+  // decision on a packet is made after it ends -- by which time the receive
+  // register holds the packet's LAST byte. The copy reads 0x00 after a bad
+  // SYNC (no valid PID is 0x00: its high nibble complements its low one), and
+  // 0x00 off the live USB lane.
+  wire [7:0]    usb_pidc = (usb_l0 & usb_sok) ? usb_pid : 8'h00;
+  wire [7:0]    cmp_src  = a_q[1] ? usb_pidc : cmp_rx;
   // the immediate: {pin, delay[9:7], level}, in the byte's natural order
 `ifdef M_CMP_IMM_OFF1
   wire [7:0]    cmp_imm  = {a_pin, a_dly[DLY_W-1 -: 3], a_lvl} + 8'd1;
@@ -2354,6 +2470,37 @@ module pe_engine #(
   wire       ck_rxbit  = l_ckgot[cur] & l_cksamp[cur];
   // bundle 3: on the USB receive the accumulator takes the NRZI-DECODED bit
   wire       usb_dec    = (rx_bit == usb_prev);
+  // ---- bundle 6: the packet tracker's next state, for one decoded data bit.
+  // A new packet starts from the reset values, so this bit is its bit 0.
+  localparam [4:0] USB_CRC5_RESIDUAL = 5'b01100;   // USB 2.0 §8.3.5.1
+  localparam [7:0] PID_OUT = 8'hE1, PID_IN = 8'h69, PID_SETUP = 8'h2D;
+  wire [5:0] ut_nb   = usb_new ? 6'd0  : usb_nb;
+  wire       ut_sok  = usb_new | usb_sok;
+  wire [7:0] ut_pid  = usb_new ? 8'h00 : usb_pid;
+  wire       ut_mcur = usb_new | usb_mcur;
+  wire       ut_mpnd = usb_new | usb_mpend;
+  wire [4:0] ut_crc5 = usb_new ? 5'h1F : usb_crc5;
+  // the CRC16 (bundle 4) primes at the packet's first bit too
+`ifdef M_CRC_NO_PRIME
+  wire [15:0] ut_crc16 = usb_crc;                // the mutant: the last packet's remainder carries over
+`else
+  wire [15:0] ut_crc16 = usb_new ? 16'hFFFF : usb_crc;
+`endif
+  // the CRC5 in the spec's own form: register shifted toward x^4, fed bits in
+  // wire order, G = x^5 + x^2 + 1 (00101); a good token leaves 01100
+  wire [4:0] ut_crc5n = {ut_crc5[3:0], 1'b0} ^ ((usb_dec ^ ut_crc5[4]) ? 5'b00101 : 5'b00000);
+`ifdef M_CRC5_OK
+  wire       ut_c5ok = 1'b1;                     // the mutant: every token passes
+`else
+  wire       ut_c5ok = (ut_crc5n == USB_CRC5_RESIDUAL);
+`endif
+  wire       ut_ptok = ut_sok & ((ut_pid == PID_OUT) | (ut_pid == PID_IN) | (ut_pid == PID_SETUP));
+  wire       ut_aok  = ut_c5ok & (ut_mcur | (usb_apv & ut_mpnd));
+`ifdef M_COMMIT_ON_DATA
+  wire       ut_acmt = usb_apv & ut_mpnd & ut_c5ok;            // the mutant: no PID qualifier
+`else
+  wire       ut_acmt = usb_apv & ut_mpnd & ut_c5ok & ut_ptok;
+`endif
   wire       rx_bit_sel = ck_shiftin ? ck_rxbit : usb_act ? usb_dec : rx_bit;
   wire [7:0] rx_asm     = {rx_bit_sel, l_rx[cur][7:1]};
   wire [7:0] rx_asm_rev = {rx_asm[0], rx_asm[1], rx_asm[2], rx_asm[3],
@@ -2780,6 +2927,15 @@ module pe_engine #(
     end else begin
       rx_push <= 1'b0;
         host_pop <= 1'b0;   // one-cycle pulse; the consume site re-asserts
+      // bundle 6: the commit is a one-cycle pulse; a bus reset ends the last
+      // token's verdict and the PID copy (Default state, step 7a §2)
+      usb_acmt <= 1'b0;
+      if (usb_brst) begin
+        usb_tok <= 1'b0;
+        usb_sok <= 1'b0;
+        usb_pid <= 8'h00;
+        usb_tep <= 1'b0;
+      end
       // ⭐ TF1: the DRIVE arms that start an SDA hold raise this instead of
       // writing `l_hcnt` themselves; the one write, and the matching `hz_q`
       // update, are in the hold-expiry block below. One site, so the counter
@@ -3526,10 +3682,49 @@ module pe_engine #(
           // bundle 5: the send's bit counter; the USB lane is live once it receives
           if (usb_send) usb_bcnt <= act_retire ? 7'd0 : usb_bcnt + 7'd1;
           if (usb_act)  usb_on   <= 1'b1;
+          // bundle 6: the pair the bus-reset counter watches is the one the
+          // USB lane's program names for SE0 -- its SE0 wait (a two-pin ARM at
+          // level 0) or its EOP drive (LEVEL, mod 11) -- both `uio` inputs
+          if (cur == USB_LANE[LW-1:0] && !a_lvl &&
+              ((a_op == OP_ARM && a_mod[0]) || (a_op == OP_LEVEL && a_mod == 2'b11)) &&
+              a_pin < N_UIO[PINW-1:0] && a_pinb < N_UIO[PINB_W-1:0]) begin
+            usb_sp <= a_pin;
+            usb_sn <= a_pinb;
+            usb_sv <= 1'b1;
+          end
+          // bundle 6: the packet tracker, one decoded data bit at a time
+          if (usb_act & ~usb_stuff) begin
+            usb_new  <= 1'b0;
+            usb_nb   <= (ut_nb == 6'd32) ? ut_nb : ut_nb + 6'd1;
+            usb_sok  <= (ut_nb < 6'd8)  ? (ut_sok & (usb_dec == (ut_nb == 6'd7))) : ut_sok;
+            usb_pid  <= (ut_nb >= 6'd8 && ut_nb < 6'd16) ? {usb_dec, ut_pid[7:1]} : ut_pid;
+            usb_mcur <= (ut_nb >= 6'd16 && ut_nb < 6'd23)
+                        ? (ut_mcur & (usb_dec == usb_addr[ut_nb[2:0]])) : ut_mcur;
+            usb_mpend <= (ut_nb >= 6'd16 && ut_nb < 6'd23)
+                        ? (ut_mpnd & (usb_dec == usb_apend[ut_nb[2:0]])) : ut_mpnd;
+            usb_crc5 <= (ut_nb >= 6'd16 && ut_nb < 6'd32) ? ut_crc5n : ut_crc5;
+            // ADDR_OK and ENDP[0] are the verdict of the most recent TOKEN
+            // (IN/OUT/SETUP, good SYNC): a DATA packet leaves them alone, so the
+            // program checks a SETUP's or OUT's address after its DATA packet
+            // (it must arm for that packet within the host's 2-bit gap)
+            if (ut_nb == 6'd23 && ut_ptok) usb_tep <= usb_dec;
+`ifdef M_ADDR_OK_EARLY
+            // the mutant: ADDR_OK latched after the address byte, before the CRC5
+            if (ut_nb == 6'd23 && ut_ptok) usb_tok <= ut_mcur | (usb_apv & ut_mpnd);
+`else
+            if (ut_nb == 6'd31 && ut_ptok) usb_tok <= ut_aok;
+`endif
+            if (ut_nb == 6'd31) usb_acmt <= ut_acmt;
+          end
           // bundle 3: the NRZI reference and the ones run, one sample at a time
           // bundle 4: the CRC takes each decoded data bit of a CRC-enabled byte
-          if (usb_act & ~usb_stuff & a_mod[0])
-            usb_crc <= ((usb_crc[0] ^ usb_dec) ? 16'hA001 : 16'h0000) ^ {1'b0, usb_crc[15:1]};
+          // bundle 6: primed at the packet's FIRST BIT (`usb_new`), not at the
+          // ARM -- a later edge ARM in the same exchange (the J after the EOP)
+          // must not wipe the verdict the program reads in the gap
+          if (usb_act & ~usb_stuff & (a_mod[0] | usb_new))
+            usb_crc <= a_mod[0] ? (((ut_crc16[0] ^ usb_dec) ? 16'hA001 : 16'h0000) ^ {1'b0, ut_crc16[15:1]})
+                                : ut_crc16;
+          if (usb_act & ~usb_stuff & usb_new) usb_serr <= 1'b0;
           if (usb_act) begin
             usb_prev <= rx_bit;
             if (usb_stuff) begin
@@ -4039,10 +4234,9 @@ module pe_engine #(
           if (i == USB_LANE && !l_arm2[i]) begin
             usb_prev <= ~l_armedge[i];          // the level BEFORE the edge
             usb_ones <= 3'd0;
-            usb_serr <= 1'b0;
-`ifndef M_CRC_NO_PRIME
-            usb_crc  <= 16'hFFFF;               // bundle 4: the CRC starts with the packet
-`endif
+            // bundle 6: STUFF_ERR, the CRC16 and the tracker restart at the
+            // packet's first bit (`usb_new`), so a later ARM keeps the verdicts
+            usb_new  <= 1'b1;
           end
         end
         // bundle 3: the re-anchor (exclusive with `arm_hit`: it needs ~l_armed)

@@ -446,14 +446,18 @@ def main() -> int:
             gold = [b for w, _s in pk for b in decode(w)[0]]
             ph = re.search(r"^PH (\d+) (\d+)$", out, re.M)
             nb = int(ph.group(1)) if ph else -1
-            se = re.findall(r"^SE ", out, re.M)
-            ok = ("END" in out and got == gold and not se and nb >= PHASE_FLOOR)
-            print("    e%+.3f  %s  phase bins %d/%d (floor %d)"
+            se = [l for l in re.findall(r"^SE \d+ (\d)$", out, re.M) if l == "1"]
+            # bundle 6 (step 7a M14): the hardware SYNC check says "good" on
+            # every packet, from every phase bin the walk reaches
+            sy = [int(v) for v in re.findall(r"^SY \d+ (\d)$", out, re.M)]
+            sy_ok = len(sy) == len(pk) and all(sy)
+            ok = ("END" in out and got == gold and not se and nb >= PHASE_FLOOR and sy_ok)
+            print("    e%+.3f  %s  SYNC good %d/%d  phase bins %d/%d (floor %d)"
                   % (e, "bytes exact" if got == gold else "*** %d bytes, golden %d" % (len(got), len(gold)),
-                     nb, clock.phases(), PHASE_FLOOR))
+                     sum(sy), len(pk), nb, clock.phases(), PHASE_FLOOR))
             if not ok:
-                probs.append("phase walk e%+.3f: bytes %s, stuff flag %s, bins %d < floor %d?"
-                             % (e, got == gold, bool(se), nb, PHASE_FLOOR))
+                probs.append("phase walk e%+.3f: bytes %s, stuff flag %s, SYNC %s, bins %d < floor %d?"
+                             % (e, got == gold, bool(se), sy, nb, PHASE_FLOOR))
 
         print("\n  U4 must-fires")
         for d, what in MUTANTS:

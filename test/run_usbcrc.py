@@ -21,7 +21,7 @@ Bench: test/tb_usbrx.v (its MK / BR lines). Images built here from pe_isa.
       good packets -> ACK, NAK, ACK, NAK, NAK, NAK, ACK; every received byte
       exact; the flags at each branch exact
   C2  forty seeded random packets at 0 drift, half corrupted (1-3 bits)
-  C3  pe_isa: branching on 15 (PIN_NONE) is refused (READY, 12, is built since bundle 5)
+  C3  pe_isa: branching on 15 (ADDR_OK since bundle 6) is refused where it is still PIN_NONE
   C4  must-fires: M_CRC_ALWAYS_OK (a corrupted packet ACKed), M_CRC_NO_PRIME
       (the CRC carried over from the previous packet) each turn the gate red
 
@@ -210,15 +210,21 @@ def main() -> int:
             print("    %-10s %s" % (name, "exact" if not p else "*** " + p[0]))
             probs += p
 
-        print("\n  C3 pe_isa: branching on a virtual pin that is not built")
-        for pin, why in ((I.PIN_NONE, "PIN_NONE"),):
+        # bundle 6 (Wilson 11-09): 15 is now ADDR_OK, so every index 12..15
+        # is a built virtual pin; what remains refused is 15 where it is still
+        # PIN_NONE -- a program with no live USB lane (the chip reads 0 there)
+        print("\n  C3 pe_isa: branching on ADDR_OK (15 = PIN_NONE) with no live USB lane")
+        for pin, why in ((I.PIN_NONE, "PIN_NONE / ADDR_OK"),):
             bad = bytearray(image())
+            for w in range(2, 14):                  # the USB receives -> plain no-ops
+                a = I.ACT_BASE + w * I.ACT_BYTES
+                bad[a:a + I.ACT_BYTES] = I.act(I.OP_LEVEL, I.PIN_NONE, 0, U.D)
             a = I.ACT_BASE + 16 * I.ACT_BYTES
             bad[a:a + I.ACT_BYTES] = I.act_branch_bit(pin, 1, 21, W)
             st = I.branch_problems(bytes(bad))
             print("    pin %-2d %-18s %s" % (pin, why, "refused" if st else "*** ACCEPTED"))
             if not st:
-                probs.append("pe_isa accepted BRANCH_BIT on pin %d" % pin)
+                probs.append("pe_isa accepted BRANCH_BIT on pin %d off a live USB lane" % pin)
 
         print("\n  C4 must-fires")
         for d, what in MUTANTS:
