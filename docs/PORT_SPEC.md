@@ -422,7 +422,7 @@ phase.
 
 | question | answer | anchor |
 |---|---|---|
-| hold condition | `ck_hold = ck_act & ~ck_retire`; it retires on a SHIFT's HIGH once all bits are done, and on a SHIFTIN's COLL | `wire ck_hold    = ck_act & ~ck_retire;` |
+| hold condition | `ck_hold = (ck_act & ~ck_retire) \| (st_act & ~(st_last & ~usb_stuff))`; a clocked action retires on a SHIFT's HIGH once all bits are done, and on a SHIFTIN's COLL; a SELF-TIMED byte (v2 primitive 3 bundle 2) retires on its last bit, never on a USB stuff slot (bundle 3). ⚠ The second term is NOT in `Act.lean`'s `hold` (which names only `.clk`): covered by `noretire_keeps`' argument, mechanisation owed at the lock (V2_MASTER_LIST lock item, Wilson 11-08) | `wire ck_hold    = (ck_act & ~ck_retire) \| (st_act & ~(st_last & ~usb_stuff));` |
 | which phases | SHIFT: LOW, HIGH per bit; SHIFTIN: LOW, HIGH per bit, then one COLL | `wire [1:0] ck_norm = ck_shift` |
 | phase advance at WB | `l_ckph <= ck_next`, reset to LOW on retire; the bit counter `l_ckbit` advances on LOW | `else if (ck_act) l_ckph[cur] <= ck_next;` |
 | timestamp advance at a held WB | **full `a_dly`**, except the HIGH of a HALF_HIGH lane (`a_dly >> 1`) and an open-drain HIGH (rebased, 7D) | `wire [DLY_W-1:0] wb_dly = (ck_act & (l_ckph[cur_rel] == CK_HIGH) & half_v[cur_rel])` (`cur_rel` == `cur`, a zero-latency replica) |

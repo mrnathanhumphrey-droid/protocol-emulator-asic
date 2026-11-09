@@ -454,7 +454,10 @@ def selftest() -> int:
         # silently passing: "could not find the OP_SHIFT guard to remove, so
         # this must-fire cannot run -- and an unpriced gate has unknown
         # strength". That message is why the drift was visible at all.
-        if re.search(r"OP_SHIFT:\s*if\s*\(\s*pin_real", strip_comment(raw)):
+        # ⚠ v2 primitive 3 bundle 2 (11-08): the label became `OP_SHIFT,
+        # OP_SHIFTI:` (SHIFTI shares the arm) and this search lost its victim
+        # -- reported, not passed, exactly as the comments above promise.
+        if re.search(r"OP_SHIFT(?:\s*,\s*OP_SHIFTI)?:\s*if\s*\(\s*pin_real", strip_comment(raw)):
             victim = n
             break
     if victim is None:

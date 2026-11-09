@@ -160,6 +160,7 @@
       usb_prev   <= 1'b1; \
       usb_ones   <= 3'd0; \
       usb_serr   <= 1'b0; \
+      usb_crc    <= 16'hFFFF; \
       for (i = 0; i < N_LANES; i = i + 1) begin \
         l_pin[i]       <= {PINW{1'b0}}; \
         l_clkpin[i]    <= {PINW{1'b0}}; \
@@ -221,6 +222,8 @@
       winner_q   <= {LW{1'b0}}; \
       winner_v_q <= 1'b0;
 `define PE_RST_PRIMED primed_q <= 1'b0;
+// v2 primitive 3 bundle 3: the registered re-anchor's capture and target
+`define PE_RST_REAN   rean_q <= 1'b0; rean_tq <= {TS_W{1'b0}};
 `define PE_RST_PORT \
       s_re      <= 1'b0; \
       s_raddr   <= {AW{1'b0}}; \
@@ -2015,6 +2018,22 @@ module pe_engine #(
   reg        usb_prev;
   reg  [2:0] usb_ones;
   reg        usb_serr;
+  // ⭐ v2 PRIMITIVE 3, BUNDLE 4 (Wilson 11-08): RX CRC16 on the USB lane. A USB
+  // receive with `mod[0]` set feeds its decoded, unstuffed bits to the USB
+  // CRC16 (x^16 + x^15 + x^2 + 1, LSB first: the shift-right form with 0xA001),
+  // primed to FFFF at the packet start (the same edge ARM that primes NRZI).
+  // Fed with the data AND the received CRC, a good packet leaves the RESIDUAL
+  // 0xB001 in the register: CRC_OK is that compare, combinational, read by
+  // programs as virtual pin 13. 16 flops. (`mod[0]` on a SHIFTIN is the pair
+  // release; on a USB receive it is the CRC enable, and the release is gated
+  // off -- the receive watches one pin.)
+  reg [15:0] usb_crc;
+  localparam [15:0] USB_CRC_RESIDUAL = 16'hB001;
+`ifdef M_CRC_ALWAYS_OK
+  wire usb_crc_ok = 1'b1;                    // the mutant: every packet passes
+`else
+  wire usb_crc_ok = (usb_crc == USB_CRC_RESIDUAL);
+`endif
   wire usb_act   = st_act & cur_cls[C_USB] & (cur == USB_LANE[LW-1:0]);
   wire usb_wrong = st_act & cur_cls[C_USB] & (cur != USB_LANE[LW-1:0]);
 `ifdef M_UNSTUFF_KEEP
@@ -2184,10 +2203,18 @@ module pe_engine #(
   // synthesiser.
   // ⇒ Every one of the three sample sites uses this wire, so a future site
   // cannot pick up the unguarded form by copying its neighbour.
+  // ⭐ BUNDLE 4: THE FLAGS AS VIRTUAL PINS (Wilson 11-08). Past the real pins
+  // the sample reads the USB lane's flags, so BRANCH_BIT (and READBIT) can
+  // branch on them: 13 = CRC_OK, 14 = STUFF_ERR. 12 is READY, whose source is
+  // bundle 5's response buffer: it reads 0 (not ready) until then, and pe_isa
+  // refuses naming it. 15 stays PIN_NONE (0). Still ONE guarded wire.
+  localparam [PINW-1:0] VPIN_READY = 4'd12, VPIN_CRC_OK = 4'd13, VPIN_STUFF_ERR = 4'd14;
+  wire       rx_vpin    = (a_pin == VPIN_CRC_OK)    ? usb_crc_ok :
+                          (a_pin == VPIN_STUFF_ERR) ? usb_serr   : 1'b0;
 `ifdef M_UNGUARDED_SAMPLE
   wire       rx_bit     = pin_in[a_pin];      // the mutant: the defect restored
 `else
-  wire       rx_bit     = pin_real ? pin_in[a_pin] : 1'b0;
+  wire       rx_bit     = pin_real ? pin_in[a_pin] : rx_vpin;
 `endif
   // ⭐ BRANCH_BIT: the bit is `rx_bit` (READBIT's guarded sample), read at
   // writeback; taken when it equals `level`. The target address is formed as
@@ -2424,8 +2451,7 @@ module pe_engine #(
   wire [TS_W-1:0]  u_half   = {{(TS_W-DLY_W+1){1'b0}}, u_head[LOWX+BQW+BPW+1 +: DLY_W-1]};
   always @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
-      rean_q  <= 1'b0;
-      rean_tq <= {TS_W{1'b0}};
+      `PE_RST_REAN
     end else begin
       rean_q  <= rean_cap;
 `ifdef M_REAN_NOCOMP
@@ -3336,7 +3362,7 @@ module pe_engine #(
               // path is unchanged.
               if (ck_shiftin & ack_drv[1]) pin_out[a_pin] <= ack_drv[0];
               // the pair (bundle 2): the bus turns around -- pinb released too
-              if (pinb_real & a_mod[0]) pin_oe[a_pinb] <= 1'b0;
+              if (pinb_real & a_mod[0] & ~cur_cls[C_USB]) pin_oe[a_pinb] <= 1'b0;
               if (ck_shiftin & clk_real) begin
                 if (ck_is_high) begin
                   // RELEASE, not drive -- see D2. The release is what makes
@@ -3456,6 +3482,9 @@ module pe_engine #(
             else if (!usb_stuff) l_ckbit[cur] <= l_ckbit[cur] + {{(BPW-1){1'b0}}, 1'b1};
           end
           // bundle 3: the NRZI reference and the ones run, one sample at a time
+          // bundle 4: the CRC takes each decoded data bit of a CRC-enabled byte
+          if (usb_act & ~usb_stuff & a_mod[0])
+            usb_crc <= ((usb_crc[0] ^ usb_dec) ? 16'hA001 : 16'h0000) ^ {1'b0, usb_crc[15:1]};
           if (usb_act) begin
             usb_prev <= rx_bit;
             if (usb_stuff) begin
@@ -3960,6 +3989,9 @@ module pe_engine #(
             usb_prev <= ~l_armedge[i];          // the level BEFORE the edge
             usb_ones <= 3'd0;
             usb_serr <= 1'b0;
+`ifndef M_CRC_NO_PRIME
+            usb_crc  <= 16'hFFFF;               // bundle 4: the CRC starts with the packet
+`endif
           end
         end
         // bundle 3: the re-anchor (exclusive with `arm_hit`: it needs ~l_armed)

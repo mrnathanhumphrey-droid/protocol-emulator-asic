@@ -183,7 +183,9 @@ EXPECT = {
     # the two-line block header swapped
     "M_KEEP_ON_HALT":    (4, None),
     # WF2 silicon fix #8 undone: THREE sites, declared
-    "M_TX_PRELOAD":      (9,
+    # 9 -> 10 (v2 primitive 3 bundle 2, 11-08): the driven-bit line gained
+    # SHIFTI's immediate arm and wraps onto a second line -- same three sites
+    "M_TX_PRELOAD":      (10,
         "THREE sites, declared, because the fix touched three: the driven "
         "bit (register only, 1 line per arm), the writeback (always shift, 1 "
         "line per arm), and the end-of-byte PRELOAD the fix removed (4 lines "

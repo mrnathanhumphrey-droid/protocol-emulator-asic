@@ -492,17 +492,25 @@ def act_shiftin_timed(pin, delay, nbits=8, pinb=None) -> bytes:
 #: the one USB-capable lane (the RTL's `USB_LANE`; run_usbrx's wrong-lane image
 #: checks the chip refuses the encoding anywhere else)
 USB_LANE = 0
+#: bundle 4: the USB lane's flags as VIRTUAL PINS past the real ones -- read by
+#: BRANCH_BIT (the RTL's VPIN_*). READY's source is bundle 5's response
+#: buffer; until then the chip reads it as 0 and this assembler refuses it.
+VPIN_READY, VPIN_CRC_OK, VPIN_STUFF_ERR = 12, 13, 14
+VPINS_BUILT = (VPIN_CRC_OK, VPIN_STUFF_ERR)
 
 
-def act_shiftin_usb(pin, delay, nbits=8):
+def act_shiftin_usb(pin, delay, nbits=8, crc=False):
     """A USB receive of `nbits` DECODED bits in ONE action: a self-timed
     SHIFTIN (mod[1]) with `level` set, on the USB lane, clockless. Each
     dispatch samples `pin`; the bit is NRZI-decoded (1 = no change), a bit
     after six ones is unstuffed (dropped, not counted; a 1 there is a stuffing
-    error), and every edge re-anchors the next sample to edge + d/2."""
+    error), and every edge re-anchors the next sample to edge + d/2.
+    `crc`: the byte's bits also feed the RX CRC16 (bundle 4, mod[0]) -- set on
+    the data and CRC bytes, not on SYNC or the PID."""
     if not 1 <= int(nbits) <= 8:
         raise ValueError("nbits %r outside 1..8" % (nbits,))
-    return act(OP_SHIFTIN, pin, 1, delay, count=int(nbits), mod=MOD_SELF_TIMED)
+    return act(OP_SHIFTIN, pin, 1, delay, count=int(nbits),
+               mod=MOD_SELF_TIMED | (MOD_PAIR if crc else 0))
 
 
 def usb_problems(img):
@@ -510,15 +518,32 @@ def usb_problems(img):
     meant: outside the USB lane, or with the pair bit (the receive watches one
     pin; the bus turnaround is the pair's own SHIFTIN / READBIT)."""
     out = []
-    for ln, (h, acts) in lane_programs(img).items():
+    progs = lane_programs(img)
+    for ln, (h, acts) in progs.items():
         for i, x in enumerate(acts):
             if x["op"] == OP_SHIFTIN and x["mod"] & MOD_SELF_TIMED and x["level"]:
                 w = h["base_word"] + i
                 if ln != USB_LANE:
                     out.append("word %d (lane %d): a USB receive outside the USB lane "
                                "(lane %d) -- CONFIG_ERR in silicon" % (w, ln, USB_LANE))
-                if x["mod"] & MOD_PAIR:
-                    out.append("word %d: a USB receive with the pair bit set" % w)
+                if x["pinb"]:
+                    out.append("word %d: a USB receive with pinb %d set -- mod[0] here is "
+                               "the CRC enable, not the pair" % (w, x["pinb"]))
+    # ⛔⛔ THE DEADLINE RULE (Wilson 11-08). A receive sample is taken at its
+    # writeback, so it waits for the dispatcher: behind at most ONE other
+    # lane's 3-cycle service (J = 2) only if no other ready lane's EDF deadline
+    # is earlier. The USB lane's D_sched must therefore be STRICTLY the earliest
+    # of all lanes. A RULE, not a hardware priority bit: the scheduler stays
+    # the EDF one the Lean `dstar` results and the R bound assume. Raw-loaded
+    # programs bypass this check; a bad one breaks only its own USB timing.
+    uh = progs.get(USB_LANE)
+    if uh and any(x["op"] == OP_SHIFTIN and x["mod"] & MOD_SELF_TIMED and x["level"]
+                  for x in uh[1]):
+        for ln, (h, _acts) in progs.items():
+            if ln != USB_LANE and h["dsched"] <= uh[0]["dsched"]:
+                out.append("lane %d: D_sched %d is not later than the USB lane's %d -- the USB "
+                           "lane's deadline must be strictly the earliest (its samples would "
+                           "wait behind this lane)" % (ln, h["dsched"], uh[0]["dsched"]))
     return out
 
 
@@ -550,7 +575,9 @@ def pair_problems(img):
                 if m == MOD_SE0 and x["level"]:
                     out.append("word %d: SE0 (LEVEL mod 11) needs level 0" % w)
             timed = op == OP_SHIFTI or (op in (OP_SHIFT, OP_SHIFTIN) and m & MOD_SELF_TIMED)
-            pair = op in (OP_LEVEL, OP_SHIFT, OP_SHIFTI, OP_SHIFTIN, OP_READBIT) and m & MOD_PAIR
+            # a USB receive (self-timed SHIFTIN + level) uses mod[0] as its CRC enable
+            usb = op == OP_SHIFTIN and m & MOD_SELF_TIMED and x["level"]
+            pair = op in (OP_LEVEL, OP_SHIFT, OP_SHIFTI, OP_SHIFTIN, OP_READBIT) and m & MOD_PAIR and not usb
             if op == OP_READBIT and m & MOD_SELF_TIMED:
                 out.append("word %d: READBIT mod[1] must be zero" % w)
             if timed and clocked:
@@ -768,9 +795,10 @@ def branch_problems(img):
         if w == nwords - 1:
             out.append("word %d: %s is the store's LAST word -- its "
                        "not-taken successor is off the end" % (w, nm))
-        if x["op"] == OP_BRANCH_BIT and x["pin"] >= N_PINS:
-            out.append("word %d: BRANCH_BIT samples pin %d, which is not a real "
-                       "pin (flags as virtual pins come later)" % (w, x["pin"]))
+        if x["op"] == OP_BRANCH_BIT and x["pin"] >= N_PINS and x["pin"] not in VPINS_BUILT:
+            out.append("word %d: BRANCH_BIT samples pin %d, which is neither a real pin "
+                       "nor a built virtual pin (13 CRC_OK, 14 STUFF_ERR; 12 READY "
+                       "comes with bundle 5's buffer)" % (w, x["pin"]))
         if branch_wait(x) < BR_W_MIN:
             out.append("word %d: %s wait W = %d is below D* + B = %d -- "
                        "the successor's refill has no window; the chip refuses "

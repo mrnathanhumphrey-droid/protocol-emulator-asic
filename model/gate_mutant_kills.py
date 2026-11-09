@@ -95,6 +95,14 @@ KILLERS = {
     # -- v2 primitive 3 bundle 1: the two-pin level ARM (bench tb_arm2) -------
     "M_ARM2_ONEPIN": "test/run_arm2.py", "M_ARM2_EDGE": "test/run_arm2.py",
     "M_ARM2_POL": "test/run_arm2.py", "M_ARM2_UNGUARDED": "test/run_arm2.py",
+    # -- v2 primitive 3 bundle 2: the pair, SHIFTI, the self-timed byte (tb_pair)
+    "M_PAIR_COPY": "test/run_pair.py", "M_PAIR_SE0_SHIFT": "test/run_pair.py",
+    "M_ST_EARLY": "test/run_pair.py",
+    # -- bundle 3: the USB receive -- NRZI, unstuffing, re-anchoring (tb_usbrx)
+    "M_NO_REANCHOR": "test/run_usbrx.py", "M_UNSTUFF_KEEP": "test/run_usbrx.py",
+    "M_STUFF_NOFLAG": "test/run_usbrx.py", "M_REAN_NOCOMP": "test/run_usbrx.py",
+    # -- bundle 4: the RX CRC16 + the flags as virtual pins (tb_usbrx)
+    "M_CRC_ALWAYS_OK": "test/run_usbcrc.py", "M_CRC_NO_PRIME": "test/run_usbcrc.py",
     # silicon fix #2: killed on VALUE by Layer V1 (tb_trace, corpus_i2c)
     "M_TX_LOAD_ANYPHASE": RUN_MUTANTS,
     # silicon fix #3: killed on VALUE by Layer V-RX (tb_trace, corpus_spim)

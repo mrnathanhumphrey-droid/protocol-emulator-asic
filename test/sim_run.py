@@ -147,6 +147,13 @@ SCRATCH_GENERATORS: dict = {
                " images, judged cycle for cycle against run_pair's golden"
                " waveform on tb_pair, not by the A2 gap",
         "v3": {"no_v3_layer": "test/tb_pair.v"}},
+    "run_usbcrc": {
+        "script": "test/run_usbcrc.py", "pattern": "usbcrc_*.hex",
+        "clocked": True,
+        "why": "v2 primitive 3 bundle 4: the USB RX CRC16 + virtual-pin flags image,"
+               " judged by its ACK/NAK decisions and branch flags against"
+               " run_usbcrc's golden on tb_usbrx, not by the A2 gap",
+        "v3": {"no_v3_layer": "test/tb_usbrx.v"}},
     "run_usbrx": {
         "script": "test/run_usbrx.py", "pattern": "usbrx_*.hex",
         "clocked": True,

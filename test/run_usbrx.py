@@ -53,6 +53,7 @@ for _p in (HERE, os.path.join(ROOT, "model")):
         sys.path.insert(0, _p)
 
 from toolchain import banner, tool      # noqa: E402
+import clock                            # noqa: E402
 import pe_isa as I                      # noqa: E402
 import sim_run                          # noqa: E402
 
@@ -122,31 +123,51 @@ def decode(wire):
     return out[:NBYTES], errs
 
 
-def line(packets, e, E, seed):
+def line(packets, e, E, seed, walk=False):
     """the D- transitions [(cycle, level)] for `packets`, bit time D*(1+e),
-    each edge 0..E cycles late; and the cycle the last one ends"""
+    each edge 0..E cycles late; and the cycle the last one ends. `walk`: the
+    edge times stay FRACTIONAL (each packet starts a golden-ratio fraction of a
+    cycle later, lateness is real-valued in 0..E), so the bench's absolute-
+    time host walks the sub-cycle phase; otherwise every edge is a whole cycle."""
     rng = random.Random(seed)
     T = D * (1.0 + e)
     tr, t0, lvl = [], float(T_FIRST), 1
-    for wire, _sent in packets:
+    q = (lambda t: t + rng.uniform(0, E)) if walk else (lambda t: int(round(t)) + rng.randint(0, E))
+    for p, (wire, _sent) in enumerate(packets):
+        if walk:
+            t0 += (p * 0.618034) % 1.0
         for k, b in enumerate(wire):
             if b == 0:
                 lvl ^= 1
-                tr.append((int(round(t0 + k * T)) + rng.randint(0, E), lvl))
+                tr.append((q(t0 + k * T), lvl))
         t_eop = t0 + len(wire) * T
         if lvl == 1:
-            tr.append((int(round(t_eop)) + rng.randint(0, E), 0))      # SE0
-        tr.append((int(round(t_eop + 2 * T)) + rng.randint(0, E), 1))  # J
+            tr.append((q(t_eop), 0))           # SE0
+        tr.append((q(t_eop + 2 * T), 1))       # J
         lvl = 1
         t0 = t_eop + 3 * T + GAP
     return tr, int(t0)
 
 
+def write_wave(path, tr):
+    with open(path, "w") as fh:
+        fh.write("".join("%.4f %d\n" % (c, l) for c, l in tr))
+
+
+#: PHASE COVERAGE (Wilson 10-20 standing rule; model/phase_coverage.py holds
+#: this runner's row IN_SUITE): the walk arm must put the host's edges in all
+#: but PHASE_SHORT of the period's 1 ns bins -- MEASURED by the bench.
+PHASE_SHORT = 0
+PHASE_FLOOR = clock.phases() - PHASE_SHORT
+
+
 # ---- the program -----------------------------------------------------------
 
 
-def image(lane=I.USB_LANE):
-    """one USB packet receive per pass on `lane`; every other lane idle"""
+def image(lane=I.USB_LANE, busy=None):
+    """one USB packet receive per pass on `lane`; every other lane idle -- or,
+    with `busy = (usb D_sched, other D_sched)`, the four other lanes toggling
+    `uo_out` every D* = 20 cycles (the dispatcher as loaded as it gets)"""
     prog = [I.act(I.OP_ARM, DM, 0, 0),                 # the SOP edge (J -> K), no timeout
             I.act(I.OP_LEVEL, I.PIN_NONE, 0, D // 2)]  # half a bit: sample mid-bit
     prog += [I.act_shiftin_usb(DM, D, 8) for _ in range(NBYTES)]
@@ -154,6 +175,15 @@ def image(lane=I.USB_LANE):
              I.act(I.OP_REARM, 0, 1, D // 2)]          # loop to the ARM
     l0 = I.ACT_BASE
     lp = l0 + len(prog) * I.ACT_BYTES
+    if busy is not None:
+        usb_ds, oth_ds = busy
+        headers = [I.hdr(DM, I.PIN_NONE, 1, D, 0, usb_ds, 3 * D, l0)]
+        for n in range(1, I.N_LANES):
+            b = lp + (n - 1) * 3 * I.ACT_BYTES
+            prog += [I.act(I.OP_LEVEL, I.UO0 + n - 1, 1, 20), I.act(I.OP_LEVEL, I.UO0 + n - 1, 0, 20),
+                     I.act(I.OP_REARM, 0, 1, 20)]
+            headers.append(I.hdr(I.UO0 + n - 1, I.UO0 + n - 1, 1, 20, 0, oth_ds, oth_ds + 20, b))
+        return I.join_image(headers, prog)
     prog.append(I.act(I.OP_REARM, 0, 0, 500))
     idle = lambda n: I.hdr(n + 2, n + 2, 0, 500, 0, 200, 240, lp)
     usb = I.hdr(DM, I.PIN_NONE, 1, D, 0, 2 * D, 3 * D, l0)
@@ -288,8 +318,7 @@ def run_suite(vvp, tmp, tag, pool):
         safe = re.sub(r"[^A-Za-z0-9]+", "_", name.replace("+", "p").replace("-", "m"))
         wave = os.path.join(tmp, "wave_%s_%s.txt" % (tag, safe))
         tr, t_end = line(packets, e, E, seed)
-        with open(wave, "w") as fh:
-            fh.write("".join("%d %d\n" % x for x in tr))
+        write_wave(wave, tr)
         jobs[name] = (packets, exp, tr, pool.submit(sim, vvp, img, wave, t_end + 400))
     res, ks, jit = {}, set(), 0
     for name, (packets, exp, tr, fut) in jobs.items():
@@ -352,14 +381,79 @@ def main() -> int:
             probs.append("pe_isa accepted a USB receive on lane 1")
         tr, t_end = line([packet(*PAYLOADS[3])], 0.0, 0, 5)
         wwave = os.path.join(tmp, "wave_wrong.txt")
-        with open(wwave, "w") as fh:
-            fh.write("".join("%d %d\n" % x for x in tr))
+        write_wave(wwave, tr)
         rx, _se, ce, _sa, end, tail = sim(vvp, wimg, wwave, t_end + 400)
         ok = end and ce and not rx
         print("    chip:   %s" % ("config_err at cycle %d, no byte pushed" % ce[0] if ok
                                   else "*** not refused (pushes %d, config_err %s)" % (len(rx), ce)))
         if not ok:
             probs.append("the chip did not refuse a USB receive on lane 1")
+
+        # U5: the deadline rule (Wilson 11-08) -- refused when broken, and
+        # LOAD-BEARING: shown once by running the broken image anyway
+        print("\n  U5 the deadline rule (USB lane D_sched strictly earliest), four lanes busy at D*")
+        for tag, cfg, want_ok in (("obeyed", (30, 40), True), ("broken", (80, 40), False)):
+            bimg = os.path.join(tmp, "usbrx_busy_%s.hex" % tag)
+            I.write_image(bimg, image(busy=cfg))
+            sim_run.scratch_image(GEN, bimg)
+            st = I.usb_problems(image(busy=cfg))
+            jobs = []
+            for e in DRIFTS:
+                pk = [packet(*p) for p in PAYLOADS]
+                tr, t_end = line(pk, e, 8, 500 + int(1000 * e))
+                wv = os.path.join(tmp, "wave_busy_%s_%s.txt" % (tag, "m" if e < 0 else ("p" if e > 0 else "0")))
+                write_wave(wv, tr)
+                jobs.append((e, pk, tr, pool.submit(sim, vvp, bimg, wv, t_end + 400)))
+            worst, bad = 0, []
+            for e, pk, tr, fut in jobs:
+                rx, se, ce, sa, end, tail = fut.result()
+                pr, _k, j = judge("busy %s e%+.3f" % (tag, e), pk, rx, se, ce, sa, tr, end, tail, [])
+                worst = max(worst, j)
+                bad += pr
+            print("    %-7s D_sched usb %d / others %d: pe_isa %s; receive-sample wait %d cycle(s); %s"
+                  % (tag, cfg[0], cfg[1], "refuses" if st else "accepts", worst,
+                     "every byte and sample instant exact" if not bad else "*** " + bad[0][:80]))
+            if want_ok:
+                if st:
+                    probs.append("deadline rule: pe_isa refused the obeying image: %s" % st[0])
+                if bad:
+                    probs.append("deadline rule obeyed, but: %s" % bad[0])
+                if worst > 2:
+                    probs.append("deadline rule obeyed, but the receive-sample wait is %d > 2" % worst)
+            else:
+                if not st:
+                    probs.append("MUST-FIRE: pe_isa accepted a USB image whose deadline is not the earliest")
+                if worst <= 2:
+                    probs.append("deadline rule broken, yet the wait stayed %d <= 2: the rule is "
+                                 "not shown load-bearing" % worst)
+
+        # U6: PHASE COVERAGE -- the same packets with every host edge at a
+        # fractional time; bytes and flag exact, and the MEASURED 1 ns bins
+        # must reach PHASE_FLOOR (the IN_SUITE row in model/phase_coverage.py)
+        print("\n  U6 the sub-cycle phase walk (host edges at fractional times)")
+        wjobs = []
+        for e in DRIFTS:
+            pk = [packet(*p) for p in PAYLOADS]
+            tr, t_end = line(pk, e, 8, 900 + int(1000 * e), walk=True)
+            wv = os.path.join(tmp, "wave_walk_%s.txt" % ("m" if e < 0 else ("p" if e > 0 else "0")))
+            write_wave(wv, tr)
+            wjobs.append((e, pk, pool.submit(run, sim_run.vvp(
+                [vvp, "+IMG=%s" % os.path.join(tmp, "usbrx_main.hex"), "+WAVE=%s" % wv,
+                 "+NCYC=%d" % (t_end + 400)], images=[os.path.join(tmp, "usbrx_main.hex")]))))
+        for e, pk, fut in wjobs:
+            out = fut.result().stdout
+            got = [int(v) for _c, v, _l in re.findall(r"^RX (\d+) (\d+) (\d+)$", out, re.M)]
+            gold = [b for w, _s in pk for b in decode(w)[0]]
+            ph = re.search(r"^PH (\d+) (\d+)$", out, re.M)
+            nb = int(ph.group(1)) if ph else -1
+            se = re.findall(r"^SE ", out, re.M)
+            ok = ("END" in out and got == gold and not se and nb >= PHASE_FLOOR)
+            print("    e%+.3f  %s  phase bins %d/%d (floor %d)"
+                  % (e, "bytes exact" if got == gold else "*** %d bytes, golden %d" % (len(got), len(gold)),
+                     nb, clock.phases(), PHASE_FLOOR))
+            if not ok:
+                probs.append("phase walk e%+.3f: bytes %s, stuff flag %s, bins %d < floor %d?"
+                             % (e, got == gold, bool(se), nb, PHASE_FLOOR))
 
         print("\n  U4 must-fires")
         for d, what in MUTANTS:

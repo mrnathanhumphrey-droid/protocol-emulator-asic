@@ -180,6 +180,13 @@ SEAMS = (
     ("test/run_branch_check.py", "run_branch_check.run_problems", "slow", "E"),
     # v2 primitive 3 bundle 1: `scenario_problems` always empty -> the four M_ARM2_* survive
     ("test/run_arm2.py", "run_arm2.scenario_problems", "slow", "E"),
+    # bundle 2: `tx_problems` always empty -> M_PAIR_* and M_ST_EARLY survive
+    ("test/run_pair.py", "run_pair.tx_problems", "slow", "E"),
+    # bundle 3: `judge` always clean -> M_NO_REANCHOR / M_UNSTUFF_KEEP /
+    # M_STUFF_NOFLAG / M_REAN_NOCOMP survive (its problems are element 0)
+    ("test/run_usbrx.py", "run_usbrx.judge", "slow", "E0"),
+    # bundle 4: `judge` always empty -> M_CRC_ALWAYS_OK / M_CRC_NO_PRIME survive
+    ("test/run_usbcrc.py", "run_usbcrc.judge", "slow", "E"),
     # v2 PIT chunk 1: `compare` always finds no problem -> the five M_PIT_* survive
     ("test/run_pit_capture.py", "run_pit_capture.compare", "slow", "E0"),
     # v2 PIT chunk 2: `table_problems` always empty -> every M_S0_* survives

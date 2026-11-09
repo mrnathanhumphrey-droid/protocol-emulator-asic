@@ -7,7 +7,8 @@
  *
  *   +IMG=<hex>    the image
  *   +WAVE=<txt>   the host's D- line: "<cycle> <level>" per transition, cycles
- *                 counted from run entry, ascending; idle (J) is 1
+ *                 counted from run entry (fractional = a sub-cycle phase),
+ *                 ascending; idle (J) is 1
  *   +NCYC=<n>     cycles to record after run entry
  *
  * Prints, cycles counted from run entry:
@@ -16,6 +17,9 @@
  *                          scheduled release (the USB lane's timestamp)
  *   SE <c> <0|1>           every change of the USB lane's stuff-error flag
  *   CE <c>                 config_err rising (the chip refused the program)
+ *   MK <c> <b1 b0>         every change of uo_out[1:0] (bundle 4's ACK / NAK markers)
+ *   BR <c> <pin> <bit>     every BRANCH_BIT writeback: the pin it sampled and the value
+ *   PH <n> <of>            how many of the period's 1 ns phase bins the host's edges hit
  *   END
  */
 
@@ -53,6 +57,11 @@ module tb_usbrx;
 
   integer i, k, cyc, ncyc, wfd, wc, wl, wok, dbg;
   reg prev_se, prev_ce;
+  real    t_neg0, wtr, tq, phs;            // the host's absolute-time drive
+  reg     run_go = 1'b0;
+  reg [31:0] ph_hit = 32'd0;
+  integer phn, phb;
+  reg [1:0] prev_mk;
 
   task load_and_run;
     begin
@@ -96,12 +105,15 @@ module tb_usbrx;
       $display("NO WAVE %0s", wavefile);
       $finish;
     end
-    wok = $fscanf(wfd, "%d %d\n", wc, wl);
+    wok = $fscanf(wfd, "%f %d\n", wtr, wl);
     hf_init;                     // the host feed idle: this bench sends nothing
     load_and_run;
+    t_neg0 = $realtime;          // the negedge the run starts on: cycle c = t_neg0 + c * period
+    run_go = 1'b1;
     cyc = 0;
     prev_se = dut.u_eng.usb_serr;
     prev_ce = dut.u_eng.cfg_err;
+    prev_mk = uo_out[1:0];
     for (k = 0; k < ncyc; k = k + 1) begin
       @(posedge clk); cyc = cyc + 1;
       if (dut.u_eng.rx_push === 1'b1)
@@ -110,6 +122,13 @@ module tb_usbrx;
       // timestamp, not yet advanced at writeback): the grid the claim is about
       if (dut.u_eng.usb_act === 1'b1 && dut.u_eng.st === 2'd2)
         $display("SA %0d %0d", cyc, dut.u_eng.l_timestamp[0]);
+      // bundle 4: the program's decision markers (uo_out[0] = ACK, [1] = NAK)
+      // and every BRANCH_BIT's sampled pin at its writeback
+      if (uo_out[1:0] !== prev_mk)
+        $display("MK %0d %b", cyc, uo_out[1:0]);
+      prev_mk = uo_out[1:0];
+      if (dut.u_eng.st === 2'd2 && dut.u_eng.a_op === 5'd8)
+        $display("BR %0d %0d %0d", cyc, dut.u_eng.a_pin, dut.u_eng.rx_bit);
       if (dbg && dut.u_eng.st === 2'd1)
         $display("DS %0d %0d", cyc, dut.u_eng.cur);
       if (dut.u_eng.usb_serr !== prev_se)
@@ -118,15 +137,35 @@ module tb_usbrx;
       if (dut.u_eng.cfg_err === 1'b1 && prev_ce !== 1'b1)
         $display("CE %0d", cyc);
       prev_ce = dut.u_eng.cfg_err;
-      // the host: apply every transition due at this cycle
       @(negedge clk);
-      while (wok == 2 && wc <= cyc) begin
-        uio_drv[DM] = wl[0];
-        wok = $fscanf(wfd, "%d %d\n", wc, wl);
-      end
     end
+    phn = 0;
+    for (phb = 0; phb < PE_PHASES; phb = phb + 1) phn = phn + ph_hit[phb];
+    $display("PH %0d %0d", phn, PE_PHASES);
     $display("END");
     $finish;
+  end
+
+  // ---- THE HOST: every transition at an ABSOLUTE time ----------------------
+  // `c` (cycles, may be fractional) lands at t_neg0 + c * period, so a WHOLE c
+  // is the negedge after posedge c -- the instant the integer cases have
+  // always used -- and a fractional c walks the sub-cycle phase (Wilson 10-20
+  // standing rule; phase_coverage IN_SUITE). Never ON a posedge: within 0.5 ns
+  // of one it moves 0.5 ns past it (tb_uartrx's rule). The 1 ns bin after the
+  // posedge of every edge actually driven is MEASURED, not assumed.
+  initial begin : host
+    wait (run_go === 1'b1);
+    while (wok == 2) begin
+      tq  = t_neg0 + wtr * PE_CLK_NS;
+      phs = (tq - t_neg0 - PE_CLK_HALF_NS) - PE_CLK_NS * $floor((tq - t_neg0 - PE_CLK_HALF_NS) / PE_CLK_NS);
+      if (phs < 0.5) tq = tq + (0.5 - phs);
+      else if (phs > PE_CLK_NS - 0.5) tq = tq + (PE_CLK_NS - phs) + 0.5;
+      phs = (tq - t_neg0 - PE_CLK_HALF_NS) - PE_CLK_NS * $floor((tq - t_neg0 - PE_CLK_HALF_NS) / PE_CLK_NS);
+      if (tq > $realtime) #(tq - $realtime);
+      if (uio_drv[DM] !== wl[0]) ph_hit[$rtoi(phs)] = 1'b1;
+      uio_drv[DM] = wl[0];
+      wok = $fscanf(wfd, "%f %d\n", wtr, wl);
+    end
   end
 
   parameter integer SPL_CFG = 2;

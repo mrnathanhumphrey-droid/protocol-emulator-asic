@@ -411,6 +411,18 @@ GATES=(
   # fire and pin cycle against run_arm2's golden, pe_isa's refusals, and the
   # four M_ARM2_* must-fires' killer.
   test/run_arm2.py
+  # ⭐ bundle 2 (Wilson 11-08): the complementary pair, SHIFTI and the self-
+  # timed byte -- the TX waveform bit-exact, the RX byte, pe_isa's refusals,
+  # and the M_PAIR_* / M_ST_EARLY must-fires' killer.
+  test/run_pair.py
+  # ⭐ bundle 3 (Wilson 11-08): the USB receive -- NRZI, unstuffing, the
+  # registered re-anchor; bytes and every scheduled sample exact at host drift
+  # +-1.5 %, the deadline rule, the sub-cycle phase walk (IN_SUITE), and the
+  # four re-anchor / unstuffing must-fires' killer.
+  test/run_usbrx.py
+  # ⭐ bundle 4 (Wilson 11-08): the RX CRC16 + the flags as virtual pins --
+  # ACK exactly the good packets, never a corrupted one; M_CRC_*'s killer.
+  test/run_usbcrc.py
   # ⭐⭐ SP2 -- the pe_asm protocol front-end (model/pe_proto.py): every
   # shipped FRAM program re-expressed as a TRANSACTION (START / rSTART / STOP
   # and CS framing generated from context), byte-identical to the verified
@@ -649,7 +661,7 @@ can_run() {
     model/gate_rtl_lint.py)
       { command -v "$VL" >/dev/null 2>&1 || command -v wsl.exe >/dev/null 2>&1; } \
         || { echo "no verilator and no wsl.exe to reach one"; return 1; } ;;
-    model/gate_one_encoder.py|model/gate_v2_equiv.py|test/run_pit_capture.py|test/run_pit_s0.py|test/gate_store_latch.py|test/run_branch_check.py|test/run_arm2.py|test/gl_harness_check.py|test/gate_tb_elaborates.py|test/run_mutants.py|model/gate_sda_hold.py|test/run_w_sweep.py|test/run_cktx.py|test/run_spidelay.py|test/run_spim_witness.py|test/run_spitgt.py|test/run_rxbw.py)
+    model/gate_one_encoder.py|model/gate_v2_equiv.py|test/run_pit_capture.py|test/run_pit_s0.py|test/gate_store_latch.py|test/run_branch_check.py|test/run_arm2.py|test/run_pair.py|test/run_usbrx.py|test/run_usbcrc.py|test/gl_harness_check.py|test/gate_tb_elaborates.py|test/run_mutants.py|model/gate_sda_hold.py|test/run_w_sweep.py|test/run_cktx.py|test/run_spidelay.py|test/run_spim_witness.py|test/run_spitgt.py|test/run_rxbw.py)
       command -v "$IV" >/dev/null 2>&1 || { echo "iverilog not found (PE_IVERILOG unset and not on PATH)"; return 1; } ;;
     model/gate_reset_audit.py|model/gate_share_coupling.py)
       [ -n "${PE_NETLIST_JSON:-}" ] && [ -f "${PE_NETLIST_JSON:-}" ] \

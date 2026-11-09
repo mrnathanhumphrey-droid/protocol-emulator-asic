@@ -28,6 +28,9 @@ ROWS = {
     # ---- the peer walks its own phase inside the suite ----------------------
     "test/tb_spitgt.v": ("IN_SUITE", {"runner": "test/run_spitgt.py", "short": 0}),
     "test/tb_uartrx.v": ("IN_SUITE", {"runner": "test/run_uartrx.py", "short": 2}),
+    # v2 primitive 3 bundle 3: the USB receive. Its U6 arm drives every host
+    # edge at a fractional time and MEASURES the 1 ns bins (17/17 at 60 MHz)
+    "test/tb_usbrx.v": ("IN_SUITE", {"runner": "test/run_usbrx.py", "short": 0}),
     "test/tb_v2win.v": ("IN_SUITE", {"runner": "test/run_v2window.py", "short": 0}),
     # ---- full coverage is a sweep --------------------------------------------
     "test/tb_i2c.v": ("SWEEP", {"record": "model/phase_sweep_i2c.json",
@@ -54,6 +57,15 @@ ROWS = {
                        "whose sub-cycle phase tb_uartrx walks (IN_SUITE)"),
     "test/tb_uarttx.v": ("CHIP_DRIVEN", "the peer is a RECEIVER timing the chip's own "
                          "TX edges; it drives nothing back"),
+    "test/tb_pair.v": ("CHIP_DRIVEN", "v2 primitive 3 bundle 2: the claim is the chip's OWN "
+                       "pair waveform (D+/D-, SHIFTI, self-timed bytes) cycle for cycle; its "
+                       "one receive case is functional, and the unclocked sample's sub-cycle "
+                       "phase is walked by tb_uartrx and tb_usbrx (IN_SUITE)"),
+    "test/tb_arm2.v": ("NOT_TIMING", "v2 primitive 3 bundle 1: the claim is the two-pin "
+                       "ARM's CYCLE latency from a synchronised input (fire 2 cycles after "
+                       "the later pin); the pins are placed on clock edges by design, and "
+                       "an edge's sub-cycle phase only moves which cycle the synchroniser "
+                       "takes it -- the quantisation the USB budget carries and tb_usbrx walks"),
     "test/tb_xclock.v": ("CHIP_DRIVEN", "the cross-clock bench (gate_clock_cross, "
                          "Wilson 11-03): no peer -- every uio pin is pulled up -- "
                          "and it only records the chip's own edges, judged in ns "
