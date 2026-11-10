@@ -52,6 +52,7 @@ The output folder is `fpga/build/pa100t`, `pa100t_ow` or `pa100t_i2c`.
 
 | date | commit | variant | clock | WNS (ns) | WHS (ns) | LUT / FF | bitstream | note |
 |---|---|---|---|---|---|---|---|---|
+| 2026-11-09 | **F1.5 (485fb29)** | UART | 50 MHz | +7.466 | +0.079 | 9,391 / 3,390 | `fpga/build/pa100t/pa100t_top.bit` (sha256 e6678fce27aa02fe…) | **First bitstream fit for the bench**: the glue loads the whole v2 store (512 bytes, MAGIC); sims green with exact load checks. 224 LUTs as memory (the RAM core plus the 512-byte boot ROM / PC buffer). |
 | 2026-11-09 | F1 (work/fpga-f1, on 73a387a) | UART | 50 MHz | +6.970 | +0.078 | 9,335 / 3,388 | `fpga/build/pa100t/pa100t_top.bit` | **F1 as ruled: the chip's own "sram" store** (no store define). The RAM core maps to 176 LUTs of distributed RAM, not block RAM (its byte-mask merge reads the array asynchronously). |
 | 2026-11-09 | F1 draft (1ea33ba) | UART | 50 MHz | +7.316 | +0.082 | 9,399 / 3,378 | superseded | Withdrawn draft with `PE_MEM_FLOPS` (the flop store). Kept for comparison. |
 | 2026-11-09 | 73a387a + scratch | UART | 60 MHz | +4.586 | +0.069 | 9,406 / 3,383 | scratch only | **Not F1.** Trial for F2: scratch copy with MMCM ×6 and `clock_hz` 60 MHz, plus the F1 fixes. Not for board use. |
