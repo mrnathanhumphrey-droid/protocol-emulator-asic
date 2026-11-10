@@ -390,6 +390,15 @@ CHANGE_SET = frozenset([
     ".github/workflows/v2_canary.yaml",    # B1 check step; PDK_SHA from ci/pdk.sha
     # ---- AMENDMENT 12 (11-04, Nate go; Wilson 11-03: the lockstep re-record).
     "test/run_lockstep.py",                # the 60 MHz re-record note (12 proven identical)
+    # ---- AMENDMENT 15 (11-10, Wilson's ttihp27a ruling is the review; Nate go).
+    # Numbered 15, not 13: 13 and 14 are F1.5 / F2 on work/fpga-f1, and the two
+    # branches meet at merge. The flow moved to TT's release ttihp27a ahead of
+    # the baseline that re-measures it; the flow-config debt above is the same
+    # debt (the v2 harden of record re-binds it). One by one, never a glob:
+    ".github/workflows/gds.yaml",          # action e7a50f8, tools-ref 9d13ff3, librelane 3.1.0.dev4
+    ".github/workflows/docs.yaml",         # off the @ihp-cmos5l branch: e7a50f8 + tools-ref
+    ".github/workflows/fpga.yaml",         # off the @ihp-cmos5l branch: e7a50f8 + tools-ref
+    "model/timing_of_record.json",         # tools of record moved; measured_with keeps the old pins
 ])
 
 
