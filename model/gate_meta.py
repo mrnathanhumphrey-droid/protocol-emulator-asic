@@ -203,6 +203,9 @@ SEAMS = (
     # must STAY GREEN
     ("model/gate_clock_cross.py", "gate_clock_cross.agree", "slow", "OK"),
     ("model/gate_predecode_netlist.py", "gate_predecode_netlist.judge", "slow", "E0"),
+    # ttihp27a (11-10): `audit` always clean -> the six pin mutants (a tag, a
+    # branch, an abbreviated SHA, a loose version) survive
+    ("model/gate_action_pins.py", "gate_action_pins.audit", "fast", "E0"),
 )
 
 #: Gates with NO stubbable check, each with why -- every gate in
