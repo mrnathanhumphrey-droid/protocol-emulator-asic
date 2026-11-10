@@ -248,6 +248,24 @@ def feed_matches(path=None):
     return trk == "\n".join(lines) + "\n"
 
 
+def stale_class(probs):
+    """True iff every problem is a recorded file that is not the repository's
+    -- the bench ran an older program, nothing on the wire is wrong (v2,
+    Wilson 10-25). F2 (11-10): a build-generics mismatch joins the class ONLY
+    when the recorded params file itself moved (the board clock re-derived
+    PER2 / MARGIN); on unchanged params it is a real mismatch and stays FAIL."""
+    if not probs:
+        return False
+    params_moved = any("the recorded params is not the repository's" in p for p in probs)
+    for p in probs:
+        if "is not the repository's" in p:
+            continue
+        if params_moved and p.startswith("the build's generics"):
+            continue
+        return False
+    return True
+
+
 def main() -> int:
     print("=" * 78)
     print("1-WIRE HW WITNESS -- a recorded bench witness of %s, re-checked in CI" % IMAGE)
@@ -330,6 +348,18 @@ def main() -> int:
         e = copy.deepcopy(ev)
         e["timing"][key][val[0]] = val[1]
         mf.append(("(iii) %s pushed out of window" % key[:-3], audit(e), needle))
+    # F2 (11-10): the STALE class itself. A generics mismatch is stale only
+    # beside a moved params file; on unchanged params it stays FAIL.
+    _ph = "the recorded params is not the repository's (x vs y)"
+    _gn = "the build's generics {} are not the tracked params {}"
+    # each entry is red (the needle present) exactly when stale_class answers
+    # as it must: FAIL for a lone generics mismatch, STALE beside moved params
+    mf.append(("(iv) lone generics mismatch stays FAIL",
+               [] if stale_class([_gn]) else ["stale_class: FAIL as it must"],
+               "stale_class"))
+    mf.append(("(iv) generics beside moved params STALE",
+               ["stale_class: STALE as it must"] if stale_class([_ph, _gn]) else [],
+               "stale_class"))
     mf_bad = False
     for label, ps, needle in mf:
         hit = any(needle in p for p in ps)
@@ -342,8 +372,7 @@ def main() -> int:
     # step 2 re-encoded), and every must-fire is red, the record is STALE
     # (model/stale_records.py) -- a timing-window or wire problem stays FAIL.
     mf_ok = not mf_bad
-    hash_only = probs and all("is not the repository's" in p for p in probs)
-    if hash_only and mf_ok:
+    if stale_class(probs) and mf_ok:
         import stale_records as SR
         inputs = [os.path.relpath(v, ROOT).replace(os.sep, "/") for v in FILES.values()]
         v, why = SR.stale_verdict("model/gate_onewire_hw_witness.py", SR.moved(inputs))

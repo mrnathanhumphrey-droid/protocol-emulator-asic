@@ -54,7 +54,7 @@ function integer v3_tab;
       32'h552cbb37: case (field) 0: v3_tab = 1; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // gate_sda_hold: i2cframe d = hold + 3
       32'hcf4895ea: case (field) 0: v3_tab = 1; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // gate_sda_hold: i2cframe d = hold - 5
       32'ha8bcbad8: case (field) 0: v3_tab = 0; 1: v3_tab = 9; 2: v3_tab = 9; 3: v3_tab = 16; 4: v3_tab = 16; 5: v3_tab = 16; 6: v3_tab = 72; 7: v3_tab = 72; 8: v3_tab = 240; 9: v3_tab = 240; 10: v3_tab = 240; endcase  // half_image.hex
-      32'h316ac380: case (field) 0: v3_tab = 0; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // i2c_fram_fpga.hex
+      32'hc517cfa5: case (field) 0: v3_tab = 0; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // i2c_fram_fpga.hex
       32'h1afa3b0a: case (field) 0: v3_tab = 0; 1: v3_tab = 6; 2: v3_tab = 16; 3: v3_tab = 16; 4: v3_tab = 16; 5: v3_tab = 16; 6: v3_tab = 186; 7: v3_tab = 240; 8: v3_tab = 240; 9: v3_tab = 240; 10: v3_tab = 240; endcase  // i2caddr_image.hex
       32'h8cedc13b: case (field) 0: v3_tab = 0; 1: v3_tab = 6; 2: v3_tab = 16; 3: v3_tab = 16; 4: v3_tab = 16; 5: v3_tab = 16; 6: v3_tab = 186; 7: v3_tab = 240; 8: v3_tab = 240; 9: v3_tab = 240; 10: v3_tab = 240; endcase  // i2cframe_image.hex
       32'h560f65c4: case (field) 0: v3_tab = 1; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // noop_image.hex
@@ -157,7 +157,7 @@ task v3_tab_name;
       32'h552cbb37: $display("  clocked_conform[V3] image: gate_sda_hold: i2cframe d = hold + 3 (by its loaded bytes)");
       32'hcf4895ea: $display("  clocked_conform[V3] image: gate_sda_hold: i2cframe d = hold - 5 (by its loaded bytes)");
       32'ha8bcbad8: $display("  clocked_conform[V3] image: half_image.hex (by its loaded bytes)");
-      32'h316ac380: $display("  clocked_conform[V3] image: i2c_fram_fpga.hex (by its loaded bytes)");
+      32'hc517cfa5: $display("  clocked_conform[V3] image: i2c_fram_fpga.hex (by its loaded bytes)");
       32'h1afa3b0a: $display("  clocked_conform[V3] image: i2caddr_image.hex (by its loaded bytes)");
       32'h8cedc13b: $display("  clocked_conform[V3] image: i2cframe_image.hex (by its loaded bytes)");
       32'h560f65c4: $display("  clocked_conform[V3] image: noop_image.hex (by its loaded bytes)");
