@@ -2,7 +2,7 @@
 //
 // FPGA BRING-UP, PHASE 0 (Wilson): the chip RTL runs UNCHANGED
 // (`tt_um_protocol_emulator`) at THE BOARD's clock, `CLK_HZ` (fpga/board.yaml,
-// passed by fpga/pa100t/build.tcl -- 50 MHz on the PA100T). Around it:
+// passed by fpga/pa100t/build.tcl -- 60 MHz on the PA100T, fpga/board.yaml). Around it:
 //
 //   LOADER   the FPGA stand-in for the real chip's host, the Pico 2: writes the
 //            program image (a BRAM ROM) through the chip's REAL host interface
@@ -65,14 +65,14 @@
 // ⛔ THE GLUE CHECKS NOTHING. The judge is the PC: it knows what it sent.
 `default_nettype none
 module pe_fpga_core #(
-    parameter IMG      = "uart_rx_434.hex",   // a whole-store image: PE_STORE_BYTES bytes
+    parameter IMG      = "uart_rx_board.hex",   // a whole-store image: PE_STORE_BYTES bytes
     // ⛔⛔ THE BOARD'S CLOCK, IN Hz, AND NO DEFAULT (Wilson 11-03). It comes
     // from fpga/board.yaml through build.tcl (or the sim's fpga_clock.vh);
     // a build that forgets it does not elaborate (g_need_clk_hz below)
-    // rather than run at a typed 50 MHz. Everything timed below is derived.
+    // rather than run at a typed clock. Everything timed below is derived.
     parameter integer CLK_HZ   = 0,
     parameter integer BAUD     = 115200,
-    parameter integer UART_DIV = (CLK_HZ + BAUD / 2) / BAUD,   // 434 at 50 MHz
+    parameter integer UART_DIV = (CLK_HZ + BAUD / 2) / BAUD,   // 521 at 60 MHz
     // PC-UART LOADER (Wilson: the FPGA stand-in for the Pico 2's role). A line
     // held low this long is "enter the loader" -- 20 ms, ten times the 2 ms
     // break the UART-rx test sends as a framing frame.
@@ -83,12 +83,16 @@ module pe_fpga_core #(
     parameter FEED             = "",          // 12-bit words: 0xx byte, 1xx poll group
     parameter integer NFEED    = 0,
     parameter integer POLLIDX  = 0,           // rx index of the first poll reply
-    parameter integer PER2     = 12800,       // byte time = 2 symbols (P = 6400)
-    parameter integer MARGIN   = 6400,        // push offset after the pop it follows
+    // F2: no default (they were 12800 / 6400, 50 MHz cycle counts). They are
+    // the 1-Wire program's P in cycles at CLK_HZ, from
+    // fpga/feeds/onewire_fpga_feed.params; an OW = 1 build without them does
+    // not elaborate (g_need_ow_timing below).
+    parameter integer PER2     = 0,           // byte time = 2 symbols (2P)
+    parameter integer MARGIN   = 0,           // push offset after the pop it follows (P)
     // ---- OW = 2 only ----
     parameter FALLS            = "",          // per fed byte: SCL falls before its pop
     parameter integer NRX      = 0,           // bytes the chip receives in the pass
-    // SCL stable this long: 160 ns, 8 cycles at 50 MHz (rounded up)
+    // SCL stable this long: 160 ns, 10 cycles at 60 MHz (rounded up)
     parameter integer DEGLITCH_NS = 160,
     parameter integer DEGLITCH = (CLK_HZ / 1000 * DEGLITCH_NS + 999999) / 1000000,
     // TEST KNOBS (simulation must-fires; 0 / -1 in every real build)
@@ -248,7 +252,7 @@ module pe_fpga_core #(
   // ---- OW 2: SCL, deglitched, and its falls counted (Wilson 1b) ----------
   // A level is accepted only after DEGLITCH cycles stable at the 2-flop
   // output, so a bounce near the threshold on a slow rise or fall is counted
-  // once. DEGLITCH = 160 ns (8 cycles at 50 MHz): under the shortest SCL
+  // once. DEGLITCH = 160 ns (10 cycles at 60 MHz): under the shortest SCL
   // phase of the Fm program (HIGH d/2 = 41 cycles), over UM10204's 50 ns
   // spike width.
   reg        sclf;           // the filtered SCL level
@@ -271,6 +275,9 @@ module pe_fpga_core #(
   // every tool this core meets (iverilog, yosys, Vivado).
   generate if (CLK_HZ <= 0) begin : g_need_clk_hz
     CLK_HZ_must_come_from_fpga_board_yaml u_missing ();
+  end endgenerate
+  generate if (OW == 1 && (PER2 <= 0 || MARGIN <= 0)) begin : g_need_ow_timing
+    PER2_MARGIN_must_come_from_onewire_fpga_feed_params u_missing ();
   end endgenerate
 
   // ⭐ THE CHIP IS SIZED FOR THIS BOARD'S CLOCK (Wilson 11-03): its SDA hold

@@ -1,7 +1,7 @@
 """UART-rx gate (Wilson's UART ruling): the 8N1 receive program against a
 baud-errored peer, bytes compared with what the PEER SENT, count exact.
 
-  PASS ARMS   the program (test/uart_rx.py, pe_asm) at T = 434 (the board's
+  PASS ARMS   the program (test/uart_rx.py, pe_asm) at T = 521 (the chip's
               115200 baud) AND at T_MIN = 232 (the published speed limit,
               Wilson) against baud error -3, -2, 0, +2, +3 % on two seeds,
               random idle gaps with a quarter back-to-back: every arm
@@ -73,11 +73,11 @@ def main():
         return 1
     # ⭐ THE BOARD'S NOSTOP IMAGE (the PC loader's demonstrator) is a
     # MECHANISM image in gate_wire_feed, and Wilson: MECHANISM is not
-    # "unchecked". It is pe_asm's nostop build at T = 434, byte for byte, and
+    # "unchecked". It is pe_asm's nostop build at the board's T (521 at 60 MHz), byte for byte, and
     # its behaviour -- ONE push per frame, each the peer's byte, count exact --
     # is checked below (`+PPF=1`), not only its must-fire red.
-    ns_tracked = os.path.join(ROOT, "fpga", "images", "uart_rx_434_nostop.hex")
-    # the FPGA board's image: 115200 baud at the BOARD's clock (434 at 50 MHz)
+    ns_tracked = os.path.join(ROOT, "fpga", "images", "uart_rx_board_nostop.hex")
+    # the FPGA board's image: 115200 baud at the BOARD's clock (521 at 60 MHz)
     import clock
     t_board = clock.per_rate(uart_rx.BAUD, clock.target_hz("fpga"))
     ns_want = "\n".join("%02x" % b for b in uart_rx.build(t_board, None, "nostop")) + "\n"
@@ -85,10 +85,10 @@ def main():
     with open(ns_tracked, encoding="ascii") as fh:
         ns_got = "\n".join("%02x" % int(w, 16) for w in fh.read().split()) + "\n"
     ns_same = ns_got == ns_want
-    print("  tracked fpga/images/uart_rx_434_nostop.hex == pe_asm nostop "
+    print("  tracked fpga/images/uart_rx_board_nostop.hex == pe_asm nostop "
           "build: %s" % ("yes" if ns_same else "*** NO -- regenerate: python "
-                         "test/uart_rx.py fpga/images/uart_rx_434_nostop.hex "
-                         "434 - nostop"))
+                         "test/uart_rx.py fpga/images/uart_rx_board_nostop.hex "
+                         "board - nostop"))
     if not ns_same:
         return 1
     TM = uart_rx.T_MIN

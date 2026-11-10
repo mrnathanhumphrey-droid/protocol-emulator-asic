@@ -25,8 +25,8 @@ module tb_fpga_onewire;
   parameter FEED             = "";
   parameter integer NFEED    = 0;
   parameter integer POLLIDX  = 0;
-  parameter integer PER2     = 12800;
-  parameter integer MARGIN   = 6400;
+  parameter integer PER2     = 0;      // F2: no 50 MHz default; run_fpga_onewire.py
+  parameter integer MARGIN   = 0;      // passes both (-P), derived at the board clock
   parameter integer BAD_AT   = -1;
   parameter integer BAD_SHIFT = 0;
   parameter integer LATE     = 0;

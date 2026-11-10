@@ -420,6 +420,13 @@ CHANGE_SET = frozenset([
     "fpga/feeds/i2c_fram.params",            # NFEED / NRX (unchanged)
     "fpga/feeds/onewire_fpga_feed.hex",      # the 1-Wire feed (unchanged), witnessed by gate_onewire_hw_witness
     "fpga/feeds/onewire_fpga_feed.params",   # its counts (unchanged)
+    # ---- AMENDMENT 14 (11-10, Wilson's F2 ruling is the review): the board at
+    # 60 MHz. The UART images are renamed off their cycle count (434 is a
+    # 50 MHz number) and rebuilt from CLK_HZ; the 434 paths above are now
+    # deletions, which are moves, so they stay listed. The I2C image and the
+    # 1-Wire params already above are rebuilt in place. One by one:
+    "fpga/images/uart_rx_board.hex",         # uart_rx.build ok at the board clock (T 521 at 60 MHz)
+    "fpga/images/uart_rx_board_nostop.hex",  # uart_rx.build nostop at the board clock
 ])
 
 

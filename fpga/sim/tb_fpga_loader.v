@@ -2,12 +2,12 @@
  * FPGA stand-in for the Pico 2's role; every image passes its sim first).
  *
  * The whole FPGA core against a model of the PC on one 115200 8N1 port:
- *   1. boot from BRAM (uart_rx_434.hex): frames come back as 2 bytes each
+ *   1. boot from BRAM (uart_rx_board.hex): frames come back as 2 bytes each
  *   2. BREAK, then a frame with a CORRUPT checksum: the board says 'E' and
  *      the chip stays silent (in reset)
- *   3. a good frame carrying uart_rx_434_nostop.hex: 'K', and frames now come
+ *   3. a good frame carrying uart_rx_board_nostop.hex: 'K', and frames now come
  *      back as ONE byte each -- the loaded program is the one running
- *   4. BREAK, reload uart_rx_434.hex: 'K', 2 bytes per frame again
+ *   4. BREAK, reload uart_rx_board.hex: 'K', 2 bytes per frame again
  * Verdict: `FPGA-LOADER: ok -- ...` or `*** FAIL fpga_loader: ...`.
  */
 `default_nettype none
@@ -21,7 +21,7 @@ module tb_fpga_loader;
   always #(PE_CLK_HALF_NS) clk = ~clk;   // the target's clock, never typed
 
   localparam integer BRK = 20000;          // 0.4 ms in simulation
-  pe_fpga_core #(.IMG("fpga/images/uart_rx_434.hex"), .CLK_HZ(PE_FPGA_CLK_HZ), .BRK_CYC(BRK)) dut (
+  pe_fpga_core #(.IMG("fpga/images/uart_rx_board.hex"), .CLK_HZ(PE_FPGA_CLK_HZ), .BRK_CYC(BRK)) dut (
       .clk(clk), .rst_n(rst_n), .uart_rx(rx), .uart_tx(tx),
       .led(led), .running(running));
 
@@ -96,8 +96,8 @@ module tb_fpga_loader;
 
   integer back;
   initial begin
-    $readmemh("fpga/images/uart_rx_434.hex", img_ok);
-    $readmemh("fpga/images/uart_rx_434_nostop.hex", img_ns);
+    $readmemh("fpga/images/uart_rx_board.hex", img_ok);
+    $readmemh("fpga/images/uart_rx_board_nostop.hex", img_ns);
     repeat (8) @(posedge clk); rst_n = 1;
     wait (running === 1'b1); #(50_000);
 

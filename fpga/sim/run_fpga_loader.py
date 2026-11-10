@@ -3,8 +3,8 @@
 `fpga/sim/tb_fpga_loader.v` is the simulation twin of the board's PC-UART
 loader (fpga/host/load.py): the whole FPGA core against a model of the PC on
 one 115200 8N1 port -- boot from BRAM, a corrupt-checksum load refused ('E',
-chip silent), a good load of uart_rx_434_nostop.hex ('K', one byte per frame),
-a reload of uart_rx_434.hex ('K', two bytes per frame). It passed by hand
+chip silent), a good load of uart_rx_board_nostop.hex ('K', one byte per frame),
+a reload of uart_rx_board.hex ('K', two bytes per frame). It passed by hand
 (10-11) and was then in NO suite: the registry walk did not reach fpga/sim
 (Wilson 10-17: a runner for it, LOCAL -- in the A2 suite, not CI).
 
@@ -12,7 +12,7 @@ ARMS
   ok      the shipped bench: its own verdict line `FPGA-LOADER: ok` and no
           `*** FAIL` line
 MUST-FIRE (must be red for its own reason)
-  boot    the core BOOTS from uart_rx_434_nostop.hex (an `-P` override of the
+  boot    the core BOOTS from uart_rx_board_nostop.hex (an `-P` override of the
           core's IMG): the boot check expects 12 bytes for 6 frames and gets 6,
           so the bench must print its boot-image FAIL -- proof the verdict
           reads what the core actually booted
@@ -51,8 +51,8 @@ TMP = os.environ.get("PE_FLOAD_TMP") or os.path.join(ROOT, "probe_fpga_loader")
 #: so they are named to the helper here. A MODULE CONSTANT so
 #: model/gate_sim_runs.py can cross-check it against the bench source
 #: (Wilson 10-19, ruling 1).
-LOADER_IMGS = ["fpga/images/uart_rx_434.hex",
-               "fpga/images/uart_rx_434_nostop.hex"]
+LOADER_IMGS = ["fpga/images/uart_rx_board.hex",
+               "fpga/images/uart_rx_board_nostop.hex"]
 SRCS = ["fpga/sim/tb_fpga_loader.v", "fpga/rtl/pe_fpga_core.v",
         "src/project.v", "src/pe_engine.v", "src/pe_store.v"]
 
@@ -126,7 +126,7 @@ def main():
 
     print()
     print("  --- must-fire ---")
-    txt = sim("boot_mf", IMG='"fpga/images/uart_rx_434_nostop.hex"')
+    txt = sim("boot_mf", IMG='"fpga/images/uart_rx_board_nostop.hex"')
     ok, fails = verdict(txt)
     fired = (not ok) and any("boot image" in f for f in fails)
     print("  must-fire boot      (core boots the nostop image): %s"

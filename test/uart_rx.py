@@ -49,8 +49,9 @@ from make_smoke_image import (OP_ARM, OP_LEVEL, OP_REARM,         # noqa: E402
 P_RX = 3            # uio[3], test/pinmap.vh
 # ⭐ THE BENCH RUNS AT THE TARGET'S OWN RATE (Wilson's (a); retargetable,
 # Wilson 11-03): 115200 baud at the target's clock -- 521 cycles per bit on
-# the 60 MHz chip, 434 on the 50 MHz FPGA board (whose images are built at
-# the board's clock explicitly).
+# the 60 MHz chip, and 521 on the FPGA board too since F2 put it at 60 MHz
+# (434 when it ran 50). The board's images are built at the board's clock
+# explicitly, so the two only agree because the two clocks do.
 import clock                                                     # noqa: E402
 BAUD = 115200
 T_NOMINAL = clock.per_rate(BAUD)

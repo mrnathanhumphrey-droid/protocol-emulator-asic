@@ -103,8 +103,8 @@ def variants():
     hz = clk_hz()
     ow, i2c = params("fpga/feeds/onewire_fpga_feed.params"), params("fpga/feeds/i2c_fram.params")
     return [
-        ("uart", "", ["fpga/images/uart_rx_434.hex"],
-         [("IMG", '"uart_rx_434.hex"'), ("CLK_HZ", hz)]),
+        ("uart", "", ["fpga/images/uart_rx_board.hex"],
+         [("IMG", '"uart_rx_board.hex"'), ("CLK_HZ", hz)]),
         ("onewire", "PE_OW", ["test/onewire_fpga_image.hex", "fpga/feeds/onewire_fpga_feed.hex"],
          [("IMG", '"onewire_fpga_image.hex"'), ("FEED", '"onewire_fpga_feed.hex"'),
           ("NFEED", ow["NFEED"]), ("POLLIDX", ow["POLLIDX"]), ("PER2", ow["PER2"]),

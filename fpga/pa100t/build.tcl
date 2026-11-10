@@ -20,7 +20,7 @@
 # builds all three variants in CI with this build's defines and asserts the
 # sram arm was built.
 # ⛔ A NEGATIVE WNS IS A FAILED BUILD: the script exits non-zero and writes no
-# bitstream, so a board never runs a design that does not meet 50 MHz.
+# bitstream, so a board never runs a design that does not meet the board clock (fpga/board.yaml).
 
 #
 # THE 1-WIRE BUILD (Wilson 10-17):  ... -source fpga/pa100t/build.tcl -tclargs ow
@@ -86,8 +86,8 @@ if {$ow} {
                "FALLS=\"i2c_fram_falls.hex\"" NFEED=$prm(NFEED) NRX=$prm(NRX)                CLK_HZ=$clk_hz]
   puts "PE_FPGA: I2C build, generics $gen"
 } else {
-  set img [file join $root fpga images uart_rx_434.hex]
-  file copy -force $img [file join $out uart_rx_434.hex]
+  set img [file join $root fpga images uart_rx_board.hex]
+  file copy -force $img [file join $out uart_rx_board.hex]
   set gen [list CLK_HZ=$clk_hz]
 }
 cd $out
