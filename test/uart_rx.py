@@ -31,7 +31,8 @@ link's payload slot (~48 cycles) or `rx_pend` (one deep) drops it.
 Variants (must-fires, Wilson): "edge" samples at the bit's START edge instead
 of mid-bit; "nostop" drops the stop sample (the framing check is gone).
 
-Usage:  python test/uart_rx.py <out.hex> [T] [offset] [variant]
+Usage:  python test/uart_rx.py <out.hex> [T | board] [offset] [variant]
+        (`board`: T = 115200 at the FPGA board's clock, fpga/board.yaml)
 """
 import os
 import sys
@@ -114,7 +115,14 @@ def build(T=T_NOMINAL, offset=None, variant="ok"):
 
 def main():
     out = sys.argv[1]
-    T = int(sys.argv[2]) if len(sys.argv) > 2 else T_NOMINAL
+    if len(sys.argv) > 2 and sys.argv[2] == "board":
+        # F1.5: the FPGA board's image -- 115200 at the BOARD's clock
+        # (fpga/board.yaml through model/clock.py), never a typed T
+        sys.path.insert(0, os.path.join(os.path.dirname(HERE), "model"))
+        import clock
+        T = clock.per_rate(BAUD, clock.target_hz("fpga"))
+    else:
+        T = int(sys.argv[2]) if len(sys.argv) > 2 else T_NOMINAL
     off = int(sys.argv[3]) if len(sys.argv) > 3 and sys.argv[3] != "-" else None
     var = sys.argv[4] if len(sys.argv) > 4 else "ok"
     img = build(T, off, var)

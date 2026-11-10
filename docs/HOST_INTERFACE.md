@@ -124,17 +124,48 @@ wiring, where `prog` alone reached 3,379 flop inputs).
    address bus.
 4. Deassert `prog` to run.
 
-### ⛔ Load the FULL store: all 256 bytes
+### ⛔ The v2 image: the WHOLE store, with its MAGIC
+
+⛔ **v2 changed this contract (10-25).** v1 loaded 256 bytes with no MAGIC. A
+host that still does is refused: the engine never runs and CONFIG_ERR is set.
+The F1.5 bundle found the FPGA board's glue still loading v1's size; this
+section is what a demo-board loader (the Pico) must follow.
+
+<!-- load-contract: every value in this table is checked against test/pe_isa.py
+     and src/project.v by model/gate_host_contract.py -- do not edit by hand -->
+| item | value |
+| --- | --- |
+| store size | **512 bytes** |
+| header region | bytes **0–29** (the five lane headers) |
+| MAGIC | bytes **30–31** = **0x56 0x32** ("V2") |
+| first action byte | **32** |
+| action word | **4 bytes** |
+| store filler word | **3F BF F0 00** (a parked, non-driving `OP_REARM`) |
+| refusal | **CONFIG_ERR**, status bit **5** |
+<!-- /load-contract -->
+
+The chip **refuses** an image (the engine never runs, CONFIG_ERR) when:
+
+* **it is short.** Load mode was released before a full store of
+  consecutive writes landed (below).
+* **its MAGIC is wrong.** Bytes 30–31 are checked as they stream in, at no run
+  cost. A SNIFF image carries `S` `N` there instead and is not refused.
+* **it holds a reserved opcode** in any action word's first byte.
+
+Build images with `pe_asm` / `pe_isa.write_image` and the MAGIC, the filler and
+the full size are already right; a hand-built image is where all three go wrong.
+
+### ⛔ Load the FULL store
 
 The program store has **no reset**. A byte the host never wrote holds whatever
 the SRAM powered up as, and a lane that ever reached one would execute it on a
 real pin. So the chip **refuses to run until every store byte has been
 written since power-on**:
 
-* It counts **consecutive** writes; a `ptr` pulse restarts the count until 256
-  have landed. Because the pointer auto-increments and wraps, 256 consecutive
-  writes from any start cover every address. Once reached, the condition holds
-  until `rst_n`.
+* It counts **consecutive** writes; a `ptr` pulse restarts the count until a
+  whole store has landed. Because the pointer auto-increments and wraps, a
+  store's worth of consecutive writes from any start covers every address.
+  Once reached, the condition holds until `rst_n`.
 * ⚠ **The full-store rule applies to the FIRST load after `rst_n`.** After
   that, partial reloads run: every byte is still defined, holding either the
   new program or the previous full load. The counter is a power-on guarantee,
@@ -142,13 +173,14 @@ written since power-on**:
   for what the rest of it still holds.
 * Until then the engine **does not run** (no dispatch, every pin released),
   including the window after reset if `prog` is low.
-* **Deasserting `prog` before 256 consecutive writes sets CONFIG_ERR** (status
-  bit 5, sticky until `rst_n`) so the host is told why the part is silent.
+* **Deasserting `prog` before a full store of consecutive writes sets
+  CONFIG_ERR** (status bit 5, sticky until `rst_n`) so the host is told why the
+  part is silent.
 
 ⇒ Write the program, then fill the rest of the store. The toolchain does this
-for you: every image `pe_asm` / `pe_isa.write_image` emits is already 256 bytes,
-the program followed by the **store filler** `FE FF C0` repeated (a parked,
-non-driving `OP_REARM`).
+for you: every image `pe_asm` / `pe_isa.write_image` emits is already the
+whole store, the program followed by the **store filler** word (the table
+above) repeated.
 
 Every `uio` pin is an **input** for the whole of load mode, which is what lets
 the 8 protocol pins double as the load data port at zero pin cost. The 4
@@ -453,11 +485,11 @@ makes it an error channel rather than a background load.
 | payload capacity | **8.00 Mb/s** |
 | shipped two RX lanes | 1.12 Mb/s = **14.0% utilised** |
 | readback, one byte | 50 clocks (readback frames alternate with status too) |
-| readback, full 256-byte store | 12,800 clocks = **256 µs** at 50 MHz |
+| readback, the full store (v2: 512 bytes) | 25,600 clocks = **512 µs** at 50 MHz, **427 µs** at 60 MHz |
 
 ⚠ **Readback got slower with the frame**, and it is worth stating because a
-host that polls the store after every load pays it: a full walk was 194.6 µs at
-9 bits and is **256 µs** at 12. That is the honest cost of the lane field —
+host that polls the store after every load pays it: a full v1 (256-byte) walk
+was 194.6 µs at 9 bits and 256 µs at 12; v2's store doubles it (above). That is the honest cost of the lane field —
 readback frames carry `kind = 7` and gain nothing from it, but the frame could
 not widen for payload alone (the marker arrives last, so both types must be the
 same width).

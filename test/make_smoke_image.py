@@ -1555,6 +1555,12 @@ def main() -> int:
             (["uart_tx.py", "uart_tx_busy_image.hex", "busy"],
              "uart_tx_busy_image.hex"),
             (["run_wirefeed_mf.py", "--write"], "ws2812_sub3_rearm21.hex"),
+            # F1.5 (Wilson 11-09): the FPGA board's UART images, native v2,
+            # T from the board's clock -- no longer exempt as "v1, no recipe"
+            (["uart_rx.py", "../fpga/images/uart_rx_434.hex", "board"],
+             "../fpga/images/uart_rx_434.hex"),
+            (["uart_rx.py", "../fpga/images/uart_rx_434_nostop.hex", "board", "-",
+              "nostop"], "../fpga/images/uart_rx_434_nostop.hex"),
         ]
         for argv, _outfn in external:
             a = list(argv)

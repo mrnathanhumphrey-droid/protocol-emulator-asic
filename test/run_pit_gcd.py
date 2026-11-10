@@ -55,6 +55,7 @@ for _p in (HERE, os.path.join(ROOT, "model")):
         sys.path.insert(0, _p)
 
 from toolchain import banner                # noqa: E402
+import pe_isa                               # noqa: E402  STORE_BYTES
 import run_pit_capture as RP                # noqa: E402
 import run_pit_s3 as R3                     # noqa: E402
 import pit_s0_golden as S0                  # noqa: E402
@@ -238,7 +239,7 @@ def directed_sets(n, seed):
 
 def run_one(args):
     vbin, tmp, i, msgs = args
-    mem = [0] * 512
+    mem = [0] * pe_isa.STORE_BYTES                  # the store's size from the one encoder
     p = DEC_AT
     for m in msgs:
         mem[p] = len(m)

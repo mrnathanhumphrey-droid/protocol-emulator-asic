@@ -2,6 +2,10 @@
 
 Board: Puzhi PA100T-EDU (xc7a100tfgg484-2). The board clock is set in `fpga/board.yaml` and nowhere else.
 
+## ⛔ No board session on a pre-F1.5 bitstream (Wilson 11-09)
+
+Every bitstream built before F1.5 has the board glue loading **v1's 256 bytes with no MAGIC**. The v2 chip refuses that load (CONFIG_ERR), so the board sits silent. F1.5 sizes the glue from `PE_STORE_BYTES` and regenerates the board images as v2. Only a bitstream built after it is worth taking to the bench.
+
 ## The rule (bundle F1, Wilson 11-09)
 
 **Before any board session, the full Vivado build runs on Nathan's machine. Its WNS and WHS go in the table below.**

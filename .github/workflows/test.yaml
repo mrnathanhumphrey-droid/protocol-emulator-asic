@@ -146,7 +146,7 @@ jobs:
     strategy:
       fail-fast: false
       # ⚠ the account runs ~20 jobs at once across ALL repos (Wilson 10-25):
-      # 7 gate shards + ln1 + cocotb + the list jobs + 8 seams stays under it
+      # 8 gate shards (F1.5 added `fpga`) + ln1 + cocotb + the list jobs + 8 seams: ~20, AT the limit
       max-parallel: 8
       matrix:
         seam: ${{ fromJSON(needs.meta-seams.outputs.seams) }}

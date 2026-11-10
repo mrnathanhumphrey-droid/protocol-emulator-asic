@@ -121,7 +121,7 @@ def script(defines, sv, gens, full):
     dflags = " ".join("-D%s" % d for d in defines)
     # -defer: nothing elaborates at read time, so no module is built with its
     # DEFAULT image (whose $readmemh file this variant does not have)
-    s = ["read_verilog -defer %s %s %s" % ("-sv" if sv else "", dflags, os.path.join(ROOT, f).replace(os.sep, "/"))
+    s = ["read_verilog -defer -I%s %s %s %s" % (ROOT.replace(os.sep, "/"), "-sv" if sv else "", dflags, os.path.join(ROOT, f).replace(os.sep, "/"))
          for f in SRCS]
     # chparam -set keeps a quoted string a string; hierarchy -chparam cannot
     # take one ("Can't decode value")

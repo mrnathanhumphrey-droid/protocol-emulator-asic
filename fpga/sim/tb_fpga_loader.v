@@ -26,8 +26,10 @@ module tb_fpga_loader;
       .led(led), .running(running));
 
   localparam real BT = 1.0e9 / 115200.0;
-  reg [7:0] img_ok [0:255];
-  reg [7:0] img_ns [0:255];
+  // the store's size from the one encoder (F1.5): the PC frame carries a whole store
+  `include "test/store_filler.vh"
+  reg [7:0] img_ok [0:PE_STORE_BYTES-1];
+  reg [7:0] img_ns [0:PE_STORE_BYTES-1];
   reg [7:0] got [0:1023];
   integer   ngot = 0, fails = 0, i, k, base;
   reg [7:0] b, sum;
@@ -55,7 +57,7 @@ module tb_fpga_loader;
   task load(input integer which, input integer corrupt);
     begin
       send(8'hA5); send(8'h5A); sum = 0;
-      for (i = 0; i < 256; i = i + 1) begin
+      for (i = 0; i < PE_STORE_BYTES; i = i + 1) begin
         b = which ? img_ns[i] : img_ok[i];
         send(b); sum = sum + b;
       end
@@ -85,6 +87,13 @@ module tb_fpga_loader;
     end
   endtask
 
+  // ⛔ F1.5 (Wilson 11-09): the BOOT load counted exactly -- the bytes the glue
+  // wrote (WR strobes under PROG since the pointer reset) -- and the chip's own
+  // verdict on them, printed once the boot frames are judged
+  integer load_bytes = 0;
+  always @(posedge dut.ptr) load_bytes = 0;
+  always @(posedge dut.wr) if (dut.prog) load_bytes = load_bytes + 1;
+
   integer back;
   initial begin
     $readmemh("fpga/images/uart_rx_434.hex", img_ok);
@@ -96,6 +105,8 @@ module tb_fpga_loader;
     if (back != 12) begin fails = fails + 1;
       $display("*** FAIL fpga_loader: boot image: %0d bytes for 6 frames, expected 12", back); end
     else $display("  boot (BRAM) image: 6 frames -> 12 bytes (data + stop)");
+    $display("LD-BOOT bytes=%0d full=%0b bad_magic=%0b short=%0b config_err=%0b", load_bytes,
+             dut.chip.store_full, dut.chip.bad_magic, dut.chip.short_load, dut.chip.cfg_err_any);
 
     brk; base = ngot; load(1, 1); expect_reply("E", "corrupt checksum");
     base = ngot; frames(4, back);

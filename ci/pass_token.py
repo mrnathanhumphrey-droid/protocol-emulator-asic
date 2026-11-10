@@ -118,6 +118,17 @@ def self_test():
         "a STALE gate with no owner", "red ok" if good else "*** WRONG"))
     print("  stale debts: %d, each with an owner and a green-by point"
           % len(SR.DEBT))
+    # ⛔ Wilson 11-09 (F1.5): every debt is SHOWN by a test that runs in CI --
+    # the real lists, and a planted debt whose test is unregistered goes red
+    for p in SR.ci_problems():
+        print("  pass-token self-test: *** %s" % p)
+        bad += 1
+    planted = SR.ci_problems(declared={"model/gate_planted_debt.py": "r"}, shown_by={})
+    good = bool(planted)
+    bad += not good
+    print("  pass-token self-test: %-34s %s" % (
+        "a debt shown by an unregistered gate", "red ok" if good else "*** WRONG"))
+    print("  stale debts shown in CI: %d, every one" % len(SR.DECLARED))
     tab_real = load_table()
     print("  pass-token table: %d gates declared" % len(tab_real))
     if bad:

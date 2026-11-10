@@ -49,6 +49,7 @@ import onewire                               # noqa: E402
 import pe_proto as P                         # noqa: E402
 import run_onewire as RO                     # noqa: E402
 import clock                                                      # noqa: E402  Wilson 11-03
+import pe_isa                                                     # noqa: E402  STORE_BYTES (F1.5)
 FPGA_HZ = clock.target_hz("fpga")   # the board this runs on, not the chip
 
 try:
@@ -258,9 +259,17 @@ def judge(txt, rxmap, nidle):
     d["loadcyc"] = int(m.group(1)) if m else 0
     chk("J11 silent during load/reset (DQ falls == 0)", d["iso"] == 0,
         "falls %s" % d["iso"])
-    # 256 bytes x 7 cycles each = 1792 cycles of load mode at the least
-    chk("a load was observed under the monitor (>= 1792 load-mode cycles)",
-        d["loadcyc"] >= 1792, "%d" % d["loadcyc"])
+    # ⛔ F1.5 (Wilson 11-09): EXACT, never a floor. ">= 1792 load-mode cycles"
+    # passed a load cut to v1's 256 bytes for 15 days: the bytes written must be
+    # the whole store, and the chip itself must have accepted them.
+    m = re.search(r"^OW-LOADBYTES (\d+)", txt, re.M)
+    d["ldbytes"] = int(m.group(1)) if m else None
+    chk("the load wrote exactly the store (== %d bytes, pe_isa.STORE_BYTES)" % pe_isa.STORE_BYTES,
+        d["ldbytes"] == pe_isa.STORE_BYTES, "%s" % d["ldbytes"])
+    m = re.search(r"^OW-CHIPLOAD full=(\d) bad_magic=(\d) short=(\d)", txt, re.M)
+    d["chipload"] = tuple(int(x) for x in m.groups()) if m else None
+    chk("the chip accepted the load (store full, MAGIC good, not short)",
+        d["chipload"] == (1, 0, 0), "full/bad_magic/short = %s" % (d["chipload"],))
     chk("no FAIL line", not d["fails"], d["fails"][0][:90] if d["fails"] else "")
     return d, ck
 
@@ -331,7 +340,13 @@ def main():
             "byte %d pushed 2 byte times late -> UNDERRUN" % BAD_AT),
            ("fast", dict(BAD_AT=BAD_AT, BAD_SHIFT=-2 * e.P),
             lambda d, ck: d["status"] is not None and d["status"] & 0x10,
-            "byte %d pushed 1 byte time early -> TX-FULL" % BAD_AT)]
+            "byte %d pushed 1 byte time early -> TX-FULL" % BAD_AT),
+           # ⛔ F1.5: the glue streaming v1's half-store -- the 10-25..11-09
+           # break. The CHIP must refuse it (short load); judged on the chip's
+           # verdict, so no END is needed (a refused load never reaches it)
+           ("v1load", dict(LOAD_N=pe_isa.STORE_BYTES // 2, NCYC_MAX=400000),
+            lambda d, ck: d["ldbytes"] == pe_isa.STORE_BYTES // 2 and d["chipload"] == (0, 0, 1),
+            "v1's half-store stream -> the chip refuses (short load)")]
     if sl_min is not None:
         mfs.append(("late_over", dict(LATE=sl_min + 2 * (PUSH_TO_LOW_EDGE + WINDOW) + 40),
                     lambda d, ck: d["status"] is not None and d["status"] & 0x02,
@@ -342,7 +357,7 @@ def main():
         txt = go(name, **kw)
         d, ck = judge(txt, rxmap, nidle)
         reds = [c for c, o, _d in ck if not o]
-        fired = bool(d["end"] and red(d, ck) and reds)
+        fired = bool((d["end"] or name == "v1load") and red(d, ck) and reds)
         print("  must-fire %-9s (%s): %s" % (
             name, why, ("red ok -- " + "; ".join(reds)[:160]) if fired
             else "*** MUST-FIRE FAILED (end=%s status=%s iso=%s reds=%s)"

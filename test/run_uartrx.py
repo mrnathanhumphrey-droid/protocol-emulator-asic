@@ -81,13 +81,9 @@ def main():
     import clock
     t_board = clock.per_rate(uart_rx.BAUD, clock.target_hz("fpga"))
     ns_want = "\n".join("%02x" % b for b in uart_rx.build(t_board, None, "nostop")) + "\n"
-    # ⭐ v2: the board image stays v1-encoded until a v2 FPGA build
-    # (Wilson); it is compared THROUGH v1_translate, and a pass by that route
-    # is the declared STALE below, not a PASS
-    import v1_translate
+    # F1.5 (Wilson 11-09): the board image is native v2, compared byte for byte
     with open(ns_tracked, encoding="ascii") as fh:
-        ns_v1 = bytes(int(w, 16) for w in fh.read().split())
-    ns_got = "\n".join("%02x" % b for b in v1_translate.translate(ns_v1)) + "\n"
+        ns_got = "\n".join("%02x" % int(w, 16) for w in fh.read().split()) + "\n"
     ns_same = ns_got == ns_want
     print("  tracked fpga/images/uart_rx_434_nostop.hex == pe_asm nostop "
           "build: %s" % ("yes" if ns_same else "*** NO -- regenerate: python "
@@ -220,16 +216,6 @@ def main():
             ok = ok and red
 
     print()
-    if ok:
-        sys.path.insert(0, os.path.join(os.path.dirname(HERE), "model"))
-        import image_universe
-        v, why = image_universe.board_stale_verdict(
-            "test/run_uartrx.py", ["uart_rx_434_nostop.hex"])
-        print("  stale_records: %s -- %s" % (v, why))
-        if v == "STALE":
-            print("  UART-RX GATE: STALE (declared: %s)" % why)
-            return 0
-        ok = v != "FAIL"
     print("  UART-RX GATE: %s" % ("PASSED" if ok else "*** FAILED"))
     return 0 if ok else 1
 

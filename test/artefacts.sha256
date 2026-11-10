@@ -84,3 +84,5 @@ b1fdf8b5f9f4e5867fc138ed59fa7fe52aae86df8154f6b17f7e81566264feb4  onewire_fpga_i
 428aee57a506bde8b816f20933fc199dfe18618995a9e3fce717ac2d116bf2d3  uart_tx_image.hex  # uart_tx.py uart_tx_image.hex
 833246eb5a7da1487296f43e635ad354d234bf078cf0d53ff55c42aa03c87bd6  uart_tx_busy_image.hex  # uart_tx.py uart_tx_busy_image.hex busy
 8cb3583f208e97b61d70420366360b38d043f9a8609c03f8cfafffe4a801c0d2  ws2812_sub3_rearm21.hex  # run_wirefeed_mf.py --write
+b9bcb7af06c1d4a61b786b39885cd689ac97d5cf895ddb9343c8758f1cc14a62  ../fpga/images/uart_rx_434.hex  # uart_rx.py ../fpga/images/uart_rx_434.hex board
+5fe2de8c7fc7deadbe0a0193896cc611f6ad440af6a2d4ed2c2a683c5d0f5e35  ../fpga/images/uart_rx_434_nostop.hex  # uart_rx.py ../fpga/images/uart_rx_434_nostop.hex board - nostop

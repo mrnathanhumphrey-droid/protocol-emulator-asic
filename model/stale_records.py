@@ -71,28 +71,12 @@ DECLARED = {
     "model/a2/gate_j_program.py":
         "the W sweep record (model/a2/sweep_w.json) ran on v1's RTL and "
         "images; `run_w_sweep.py --full` re-run at v2",
-    "model/gate_wire_feed.py":
-        "board images are v1-encoded; v2 FPGA build owed (fpga/images stay v1 "
-        "until it exists -- no v2 image beside a v1 bitstream; checked through "
-        "test/v1_translate.py meanwhile)",
-    "model/gate_admissible_images.py":
-        "board images are v1-encoded; v2 FPGA build owed (read through "
-        "test/v1_translate.py meanwhile -- image_universe.board_as_v2)",
-    "model/gate_image_bounds.py":
-        "board images are v1-encoded; v2 FPGA build owed (read through "
-        "test/v1_translate.py meanwhile -- image_universe.board_as_v2)",
-    "model/gate_store_full.py":
-        "board images are v1-encoded; v2 FPGA build owed (read through "
-        "test/v1_translate.py meanwhile -- image_universe.board_as_v2)",
     "model/a2/gate_a2_program.py":
         "the A2 RE-CERTIFICATION item owns it: the bound tables "
         "(clocked_a2_bounds, lane_response_bounds) are stale for the images the "
         "60 MHz move re-derived, and program_a2 regenerates them with pyRTA "
-        "working first (Wilson 11-04); and board images are v1-encoded, v2 FPGA "
-        "build owed (program_a2 reads them translated -- image_universe.images_v2)",
-    "test/run_uartrx.py":
-        "board images are v1-encoded; v2 FPGA build owed (the nostop board "
-        "image compared through test/v1_translate.py)",
+        "working first (Wilson 11-04). (The board images are native v2 since "
+        "F1.5, 11-09; only the bound tables remain.)",
     "test/run_cktx.py":
         "the pre-#8 silicon arm is v1-era RTL that reads only v1 images; set "
         "aside by name (fix #8 priced on v2 by M_TX_PRELOAD); the v2 lock "
@@ -124,13 +108,8 @@ DEBT = {
     "model/gate_flow_config.py": ("the v2 harden of record", _V2_LOCK),
     "model/gate_phase_coverage.py": ("the I2C + 1-Wire sweep --record re-runs", _V2_LOCK),
     "model/a2/gate_j_program.py": ("run_w_sweep.py --full at v2", _V2_LOCK),
-    "model/gate_wire_feed.py": ("the v2 FPGA build", _V2_LOCK),
-    "model/gate_admissible_images.py": ("the v2 FPGA build", _V2_LOCK),
-    "model/gate_image_bounds.py": ("the v2 FPGA build", _V2_LOCK),
-    "model/gate_store_full.py": ("the v2 FPGA build", _V2_LOCK),
     "model/a2/gate_a2_program.py": ("the A2 re-certification (pyRTA working first)",
                                     "before the entry is final"),
-    "test/run_uartrx.py": ("the v2 FPGA build", _V2_LOCK),
     "test/run_cktx.py": ("the v2 lock's cktx rebuild or retirement", _V2_LOCK),
     "ci/ln1_replay.py": ("the Lean update for the first primitives", _V2_LOCK),
     "model/gate_onewire_hw_witness.py": ("the bench re-witness on the v2 bitstream",
@@ -150,6 +129,45 @@ def debt_problems(declared=None, debt=None):
             for g in sorted(set(debt) - set(declared))]
     out += ["DEBT for %s has an empty owner or green-by point" % g
             for g, v in sorted(debt.items()) if not (v and v[0] and v[1])]
+    return out
+
+
+#: ⛔⛔ EVERY DEBT POINTS AT A TEST THAT RUNS IN CI (Wilson 11-09, F1.5). The
+#: board-image debt was DECLARED on 10-25 with an owner and a date -- and the
+#: FPGA sims that showed it red ran nowhere, so for 15 days nothing in CI
+#: showed the debt at all. Each DECLARED gate is shown by itself; SHOWN_BY adds
+#: any OTHER test that shows the same debt. Every one must be in CI: a
+#: `ci/run_gates.sh` GATES entry WITH a `ci/gate_tokens.txt` token, or run by
+#: name in a `.github/workflows/` job (ci/ln1_replay.py: its own `ln1` job).
+SHOWN_BY: dict = {}
+
+
+def _ci_text():
+    def rd(*p):
+        with open(os.path.join(ROOT, *p), encoding="utf-8", errors="replace") as fh:
+            return fh.read()
+    wf = os.path.join(ROOT, ".github", "workflows")
+    flows = "".join(rd(".github", "workflows", f) for f in sorted(os.listdir(wf))
+                    if f.endswith((".yaml", ".yml")))
+    return rd("ci", "gate_tokens.txt"), rd("ci", "run_gates.sh"), flows
+
+
+def ci_problems(declared=None, shown_by=None, texts=None):
+    """[problem]: a debt shown by a test that does not run in CI."""
+    import re as _re
+    declared = DECLARED if declared is None else declared
+    shown_by = SHOWN_BY if shown_by is None else shown_by
+    tokens, gates, flows = _ci_text() if texts is None else texts
+    out = []
+    for g in sorted(declared):
+        for t in [g] + list(shown_by.get(g, ())):
+            in_gates = bool(_re.search(r"^\s*%s\s*$" % _re.escape(t), gates, _re.M))
+            has_tok = bool(_re.search(r"^%s\s" % _re.escape(t), tokens, _re.M))
+            if not ((in_gates and has_tok) or t in flows):
+                out.append("debt %s is shown by %s, which does not run in CI (GATES %s, token %s, "
+                           "workflow %s)" % (g, t, in_gates, has_tok, t in flows))
+    for g in sorted(set(shown_by) - set(declared)):
+        out.append("SHOWN_BY names %s, which is not DECLARED stale" % g)
     return out
 
 
@@ -390,6 +408,18 @@ CHANGE_SET = frozenset([
     ".github/workflows/v2_canary.yaml",    # B1 check step; PDK_SHA from ci/pdk.sha
     # ---- AMENDMENT 12 (11-04, Nate go; Wilson 11-03: the lockstep re-record).
     "test/run_lockstep.py",                # the 60 MHz re-record note (12 proven identical)
+    # ---- AMENDMENT 13 (11-09, Wilson's F1.5 ruling is the review, option (a)):
+    # the board images regenerated as v2 and the feeds they are witnessed with,
+    # so both hardware witnesses read STALE (not re-run on hardware yet), not
+    # FAIL (nothing is broken). One by one, never a glob:
+    "fpga/images/i2c_fram_fpga.hex",         # v2 image (i2c_fram.image), witnessed by gate_i2c_hw_witness
+    "fpga/images/uart_rx_434.hex",           # v2 image (uart_rx.build ok, board clock)
+    "fpga/images/uart_rx_434_nostop.hex",    # v2 image (uart_rx.build nostop, board clock)
+    "fpga/feeds/i2c_fram_feed.hex",          # the I2C feed (unchanged by F1.5; listed per the ruling)
+    "fpga/feeds/i2c_fram_falls.hex",         # its SCL-fall count model (unchanged)
+    "fpga/feeds/i2c_fram.params",            # NFEED / NRX (unchanged)
+    "fpga/feeds/onewire_fpga_feed.hex",      # the 1-Wire feed (unchanged), witnessed by gate_onewire_hw_witness
+    "fpga/feeds/onewire_fpga_feed.params",   # its counts (unchanged)
 ])
 
 

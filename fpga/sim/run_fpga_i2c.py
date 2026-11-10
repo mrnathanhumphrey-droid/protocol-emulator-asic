@@ -45,6 +45,7 @@ sys.path.insert(0, os.path.join(ROOT, "model"))
 from toolchain import banner, tool          # noqa: E402
 import sim_run                               # noqa: E402
 import i2c_fram as IF                        # noqa: E402
+import pe_isa                                # noqa: E402  STORE_BYTES (F1.5)
 import run_fpga_onewire as RF                # noqa: E402  status_names
 
 try:
@@ -211,9 +212,16 @@ def judge(txt):
     d["iso"] = (int(m.group(1)) if m else None, int(s.group(1)) if s else None)
     chk("J11 silent during load/reset: no SCL/SDA fall, no START at the FRAM",
         d["iso"] == (0, 0), "falls %s, starts %s" % d["iso"])
-    m = re.search(r"^I2C-LOADCYC (\d+)", txt, re.M)
-    chk("a load was observed (>= 1792 load-mode cycles)",
-        m and int(m.group(1)) >= 1792, m.group(1) if m else "")
+    # ⛔ F1.5 (Wilson 11-09): EXACT, never a floor (">= 1792 load-mode cycles"
+    # passed a load cut to v1's 256 bytes): the whole store, accepted by the chip
+    m = re.search(r"^I2C-LOADBYTES (\d+)", txt, re.M)
+    d["ldbytes"] = int(m.group(1)) if m else None
+    chk("the load wrote exactly the store (== %d bytes, pe_isa.STORE_BYTES)" % pe_isa.STORE_BYTES,
+        d["ldbytes"] == pe_isa.STORE_BYTES, "%s" % d["ldbytes"])
+    m = re.search(r"^I2C-CHIPLOAD full=(\d) bad_magic=(\d) short=(\d)", txt, re.M)
+    d["chipload"] = tuple(int(x) for x in m.groups()) if m else None
+    chk("the chip accepted the load (store full, MAGIC good, not short)",
+        d["chipload"] == (1, 0, 0), "full/bad_magic/short = %s" % (d["chipload"],))
     m = re.search(r"^I2C-MEM ((?:[0-9a-fx]{2} ?){4})", txt, re.M)
     chk("the FRAM model holds the PC's bytes", m and m.group(1).split()
         == ["%02x" % b for b in DATA.to_bytes(4, "big")], m.group(1) if m else "")
@@ -270,13 +278,18 @@ def main():
             "byte 12 pushed 30 falls late -> UNDERRUN"),
            ("fast", {"BAD_AT": 12, "BAD_SHIFT": -1000},
             lambda d: d["status"] is not None and d["status"] & 0x10,
-            "byte 12 pushed without waiting -> TX-FULL")]
+            "byte 12 pushed without waiting -> TX-FULL"),
+           # ⛔ F1.5: the glue streaming v1's half-store; the CHIP must refuse
+           # it (short load), judged on its verdict -- no END (none comes)
+           ("v1load", {"LOAD_N": pe_isa.STORE_BYTES // 2},
+            lambda d: d["ldbytes"] == pe_isa.STORE_BYTES // 2 and d["chipload"] == (0, 0, 1),
+            "v1's half-store stream -> the chip refuses (short load)")]
     for name, kw, red, why in mfs:
         if want and name not in want:
             continue
         d, ck = judge(sim(name, **kw))
         reds = [c for c, o, _d in ck if not o]
-        fired = bool(d["end"] and red(d) and reds)
+        fired = bool((d["end"] or name == "v1load") and red(d) and reds)
         print("  must-fire %-10s (%s): %s" % (
             name, why, ("red ok -- trailer %s; %s" % (
                 RF.status_names(d["status"]), "; ".join(reds)[:140])) if fired

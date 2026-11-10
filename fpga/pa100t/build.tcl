@@ -93,11 +93,11 @@ if {$ow} {
 cd $out
 
 if {$ow} {
-  synth_design -top pa100t_top -part $part -verilog_define PE_OW -generic $gen
+  synth_design -top pa100t_top -part $part -include_dirs $root -verilog_define PE_OW -generic $gen
 } elseif {$i2c} {
-  synth_design -top pa100t_top -part $part -verilog_define PE_I2C -generic $gen
+  synth_design -top pa100t_top -part $part -include_dirs $root -verilog_define PE_I2C -generic $gen
 } else {
-  synth_design -top pa100t_top -part $part -generic $gen
+  synth_design -top pa100t_top -part $part -include_dirs $root -generic $gen
 }
 opt_design
 place_design
