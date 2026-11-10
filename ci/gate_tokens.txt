@@ -55,6 +55,7 @@ model/gate_rowmux_equiv.py          ^\s*GATE rowmux-equiv: PASSED\s*$
 model/gate_i2c_hw_witness.py        ^\s*GATE i2c-hw-witness: PASSED\s*$
 model/gate_onewire_hw_witness.py    ^\s*GATE onewire-hw-witness: PASSED\s*$
 model/gate_flow_config.py           ^\s*GATE flow-config: PASSED\s*$
+model/gate_action_pins.py           ^\s*GATE action-pins: PASSED\s*$
 model/gate_shell_rc.py              ^\s*GATE shell-rc: PASSED\s*$
 model/gate_except.py                ^\s*GATE except: PASSED\s*$
 model/gate_tool_pinning.py          ^\s*GATE tool-pinning: PASSED\s*$

@@ -311,6 +311,10 @@ GATES=(
   # with: src/config.json's hardening keys hash to model/timing_of_record.json
   # (Wilson 10-17 -- the hold fix sat on the canary branch for three days).
   model/gate_flow_config.py
+  # ⛔⛔ PINS (Wilson 11-10): every TinyTapeout action and flow pin is a
+  # 40-hex SHA or an exact version -- a branch or a TAG can be moved, and
+  # precheck judges on TT's release. Must-fire: a line set to @ttihp27a.
+  model/gate_action_pins.py
   # ⛔⛔ E+ -- A SHELL EXIT CODE IS READ ONLY WHERE IT CAN BELONG. Four times in
   # one arc a checking loop printed an exit code belonging to something else
   # (`| tail`, `| head`, and `"$(basename $g)" "$?"` -- the substitution reset
