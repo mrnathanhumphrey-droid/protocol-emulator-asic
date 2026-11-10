@@ -7,6 +7,13 @@
 #
 # ⛔ THE CHIP RTL IS READ FROM src/ UNCHANGED -- the same three files the TT
 # flow hardens (info.yaml). Nothing here may define an `M_*` mutant macro.
+# ⛔ F1 (Wilson 11-09): every source is read -sv (pe_store.v's latch store
+# uses always_latch; read as Verilog-2001 it broke this build on 11-07, two
+# days unseen) and every synth_design defines PE_MEM_FLOPS (the FPGA's store is
+# the flop store, by ruling). Without it the chip's default "sram" arm builds
+# here as a behavioural RAM -- the IHP macro is bound only under the TT flow's
+# PE_SRAM_MACRO. test/gate_fpga_synth.py builds all three variants in CI with
+# these same defines.
 # ⛔ A NEGATIVE WNS IS A FAILED BUILD: the script exits non-zero and writes no
 # bitstream, so a board never runs a design that does not meet 50 MHz.
 
@@ -37,10 +44,10 @@ file mkdir $out
 set part xc7a100tfgg484-2
 
 foreach f {pe_engine.v pe_store.v project.v} {
-  read_verilog [file join $root src $f]
+  read_verilog -sv [file join $root src $f]
 }
-read_verilog [file join $root fpga rtl pe_fpga_core.v]
-read_verilog [file join $root fpga pa100t pa100t_top.v]
+read_verilog -sv [file join $root fpga rtl pe_fpga_core.v]
+read_verilog -sv [file join $root fpga pa100t pa100t_top.v]
 read_xdc     [file join $root fpga pa100t pa100t_uart.xdc]
 
 # ⛔ THE BOARD'S CLOCK, READ (Wilson 11-03): fpga/board.yaml's clock_hz is the
@@ -81,11 +88,11 @@ if {$ow} {
 cd $out
 
 if {$ow} {
-  synth_design -top pa100t_top -part $part -verilog_define PE_OW -generic $gen
+  synth_design -top pa100t_top -part $part -verilog_define PE_OW -verilog_define PE_MEM_FLOPS -generic $gen
 } elseif {$i2c} {
-  synth_design -top pa100t_top -part $part -verilog_define PE_I2C -generic $gen
+  synth_design -top pa100t_top -part $part -verilog_define PE_I2C -verilog_define PE_MEM_FLOPS -generic $gen
 } else {
-  synth_design -top pa100t_top -part $part -generic $gen
+  synth_design -top pa100t_top -part $part -verilog_define PE_MEM_FLOPS -generic $gen
 }
 opt_design
 place_design
