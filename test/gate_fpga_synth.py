@@ -1,30 +1,42 @@
 """THE FPGA BUILD MUST BUILD -- checked in CI, without Vivado (bundle F1, Wilson 11-09).
 
-⛔⛔ WHY. On 11-07 the SRAM store landed: `pe_store.v` gained `always_latch`
-(SystemVerilog) and the chip's default store became the IHP 1P 256x32 SRAM
-macro (`RM_IHPSG13_1P_256x32_c2_bm_bist`), which no FPGA has. `fpga/pa100t/
-build.tcl` read the sources as Verilog-2001 and set no store, so the board
-build was broken on BOTH counts -- for two days, and no gate noticed, because
-only Vivado on Nathan's machine ever built it.
+⛔⛔ WHY. On 11-07 `pe_store.v` gained `always_latch` (SystemVerilog) and
+`fpga/pa100t/build.tcl` read the sources as Verilog-2001: the board build was
+broken for two days and no gate noticed, because only Vivado on Nathan's
+machine ever built it.
+
+⭐ THE STORE IS THE CHIP'S OWN (Wilson 11-09). The FPGA builds MEM_TYPE "sram",
+the chip's default, with NO store define: the sram arm's arbitration, write
+buffer, forwarding and buffer-read slot are the code that tapes out, and only
+the RAM core differs -- the TT flow's `PE_SRAM_MACRO` binds the IHP macro
+through `src/pe_sram_macro_ihp.v`; without it the inline core is that macro's
+behaviour (matched to the PDK's RM_IHPSG13_1P_core_behavioral_bm_bist.v).
+(Withdrawn 11-09: a must-fail "no PE_MEM_FLOPS -> RM_IHPSG13 unresolved". The
+macro is never referenced without PE_SRAM_MACRO, so it could not fire.)
 
 THE CHECK. Each FPGA variant -- UART (default), 1-Wire (`PE_OW`), I2C
 (`PE_I2C`) -- through yosys `synth_xilinx -family xc7`, with the build's OWN
 inputs, read from the files `build.tcl` reads:
-  * the same five sources, read `-sv`, with `PE_MEM_FLOPS` and the variant's
-    define -- the exact `-verilog_define` set of its `synth_design` line, parsed
-    out of `build.tcl` itself, so this gate cannot drift from the real build;
+  * the same five sources, read `-sv`, with the exact `-verilog_define` set of
+    the variant's `synth_design` line, parsed out of `build.tcl` itself, so this
+    gate cannot drift from the real build; a store define there is RED;
   * the same generics: `CLK_HZ` from `fpga/board.yaml`, the variant's image /
     feed files (copied into the run directory, as `build.tcl` does, so
     `$readmemh` resolves) and its `.params` counts;
-  * `hierarchy -check`: a module nobody defines is an ERROR, not a blackbox.
-Green only if all three parse, elaborate with no unresolved module, and map.
+  * `hierarchy -check`: a module nobody defines is an ERROR, not a blackbox;
+  * THE STORE CHECK: the elaborated pe_store holds the sram arm -- its RAM
+    array `g_mem.mem` and its write buffer `g_mem.pw`, exactly once each.
+Green only if all three parse, elaborate with no unresolved module, build the
+sram arm, and map.
 
 MUST-FAILS (each must fail, for ITS reason, or the gate is red):
-  * no_mem_flops -- `PE_MEM_FLOPS` dropped: must fail naming `RM_IHPSG13`
-    (the missing SRAM macro);
+  * flops_caught -- `PE_MEM_FLOPS` added: builds fine, but the store check
+    must fail (the flop store is not the chip's);
+  * sram_macro_leak -- `PE_SRAM_MACRO` added: must fail on an unresolved
+    `pe_sram_macro` (the TT flow's macro binding has no FPGA file);
   * no_sv -- the `-sv` reads dropped: must fail at `pe_store.v`'s
     `always_latch` line.
-Both run on the UART variant and stop at `hierarchy -check` (the break is in
+All run on the UART variant and stop after elaboration (every break is in
 front of mapping; a full synth would add minutes and prove nothing more).
 
 NOT CHECKED HERE: timing. The full Vivado build (WNS / WHS) runs on Nathan's
@@ -120,6 +132,9 @@ def script(defines, sv, gens, full):
           "read_verilog -lib +/xilinx/cells_xtra.v"]
     s += ["chparam -set %s %s pa100t_top" % (k, v) for k, v in gens]
     s.append("hierarchy -check -top pa100t_top")
+    # THE STORE CHECK: the sram arm's RAM array and write buffer, once each
+    s += ["select -assert-count 1 */m:*g_mem.mem",
+          "select -assert-count 1 */w:*g_mem.pw"]
     if full:
         s.append("synth_xilinx -family xc7 -top pa100t_top")
         s.append("stat")
@@ -155,8 +170,10 @@ def main():
     if not sv_ok:
         bad.append("build.tcl does not read every source -sv")
     for key in ("", "PE_OW", "PE_I2C"):
-        if "PE_MEM_FLOPS" not in defs[key]:
-            bad.append("build.tcl's %s synth_design does not define PE_MEM_FLOPS" % (key or "UART"))
+        for d in ("PE_MEM_FLOPS", "PE_MEM_LATCH", "PE_SRAM_MACRO"):
+            if d in defs[key]:
+                bad.append("build.tcl's %s synth_design defines %s (the FPGA builds the chip's sram arm, "
+                           "no store define)" % (key or "UART", d))
     print("  build.tcl defines: " + "; ".join("%s=%s" % (k or "uart", ",".join(v)) for k, v in sorted(defs.items())))
 
     vs = variants()
@@ -175,8 +192,12 @@ def main():
 
     # must-fails, on the UART variant, read + hierarchy only
     name, key, files, gens = vs[0]
-    mf = [("no_mem_flops", [d for d in defs[key] if d != "PE_MEM_FLOPS"], True,
-           lambda log: "RM_IHPSG13" in log),
+    mf = [("flops_caught", defs[key] + ["PE_MEM_FLOPS"], True,
+           # elaborated cleanly (no unresolved module), then the STORE CHECK failed
+           lambda log: "is not part of the design" not in log and
+           re.search(r"ERROR: Assertion failed: selection contains 0 elements .*g_mem\.(mem|pw)", log)),
+          ("sram_macro_leak", defs[key] + ["PE_SRAM_MACRO"], True,
+           lambda log: re.search(r"ERROR: Module `\\pe_sram_macro' referenced", log)),
           ("no_sv", defs[key], False,
            lambda log: _latch_line(log))]
     for tag, d, sv, why in mf:
@@ -205,7 +226,7 @@ def _latch_line(log):
     for m in re.finditer(r"pe_store\.v:(\d+)", log):
         if int(m.group(1)) in lines:
             return True
-    return "always_latch" in log and "pe_store.v" in log
+    return False
 
 
 if __name__ == "__main__":

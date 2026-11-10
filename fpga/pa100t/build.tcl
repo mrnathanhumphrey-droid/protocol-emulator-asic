@@ -9,11 +9,16 @@
 # flow hardens (info.yaml). Nothing here may define an `M_*` mutant macro.
 # ⛔ F1 (Wilson 11-09): every source is read -sv (pe_store.v's latch store
 # uses always_latch; read as Verilog-2001 it broke this build on 11-07, two
-# days unseen) and every synth_design defines PE_MEM_FLOPS (the FPGA's store is
-# the flop store, by ruling). Without it the chip's default "sram" arm builds
-# here as a behavioural RAM -- the IHP macro is bound only under the TT flow's
-# PE_SRAM_MACRO. test/gate_fpga_synth.py builds all three variants in CI with
-# these same defines.
+# days unseen).
+# ⭐ THE STORE IS THE CHIP'S OWN (Wilson 11-09): MEM_TYPE stays at its default,
+# "sram", and NO store define is set. pe_store's sram arm -- arbitration, write
+# buffer, forwarding, the buffer-read slot -- is the code that tapes out; only
+# the RAM core differs: the TT flow's PE_SRAM_MACRO binds the IHP macro, and
+# without it the inline core is that macro's behaviour (matched line for line
+# to the PDK's RM_IHPSG13_1P_core_behavioral_bm_bist.v). Never define
+# PE_SRAM_MACRO or PE_MEM_FLOPS / PE_MEM_LATCH here. test/gate_fpga_synth.py
+# builds all three variants in CI with this build's defines and asserts the
+# sram arm was built.
 # ⛔ A NEGATIVE WNS IS A FAILED BUILD: the script exits non-zero and writes no
 # bitstream, so a board never runs a design that does not meet 50 MHz.
 
@@ -88,11 +93,11 @@ if {$ow} {
 cd $out
 
 if {$ow} {
-  synth_design -top pa100t_top -part $part -verilog_define PE_OW -verilog_define PE_MEM_FLOPS -generic $gen
+  synth_design -top pa100t_top -part $part -verilog_define PE_OW -generic $gen
 } elseif {$i2c} {
-  synth_design -top pa100t_top -part $part -verilog_define PE_I2C -verilog_define PE_MEM_FLOPS -generic $gen
+  synth_design -top pa100t_top -part $part -verilog_define PE_I2C -generic $gen
 } else {
-  synth_design -top pa100t_top -part $part -verilog_define PE_MEM_FLOPS -generic $gen
+  synth_design -top pa100t_top -part $part -generic $gen
 }
 opt_design
 place_design

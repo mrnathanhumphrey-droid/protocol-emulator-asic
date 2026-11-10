@@ -10,6 +10,20 @@ Board: Puzhi PA100T-EDU (xc7a100tfgg484-2). The board clock is set in `fpga/boar
 - A negative WNS or WHS is a failed build: `build.tcl` exits non-zero and writes no bitstream.
 - A board session never runs a bitstream that has no row here.
 
+## The store
+
+**The board runs the chip's own store** (Wilson 11-09). `MEM_TYPE` stays at the chip's default, `"sram"`, and no store define is set.
+- The arbitration, the one-entry write buffer and its forwarding, and the buffer-read slot in `pe_store.v`'s sram arm are the code that tapes out.
+- Only the RAM core differs:
+  - The TT flow's `PE_SRAM_MACRO` binds the IHP `RM_IHPSG13_1P_256x32_c2_bm_bist` macro.
+  - Here, the inline core is that macro's behaviour.
+- The inline core was compared against the PDK's `RM_IHPSG13_1P_core_behavioral_bm_bist.v` (cmos5l, identical to the g2 copy):
+  - a write holds `dout`;
+  - a read registers `mem[a]`, a one-cycle latency;
+  - the macro's write-through needs WEN and REN together, which the store never issues;
+  - neither has a reset.
+- `test/gate_fpga_synth.py` asserts that this arm was built. It is red if `PE_MEM_FLOPS` or `PE_SRAM_MACRO` reaches this build.
+
 ## The command (admin PowerShell, from the repo root)
 
 ```powershell
@@ -34,5 +48,6 @@ The output folder is `fpga/build/pa100t`, `pa100t_ow` or `pa100t_i2c`.
 
 | date | commit | variant | clock | WNS (ns) | WHS (ns) | LUT / FF | bitstream | note |
 |---|---|---|---|---|---|---|---|---|
-| 2026-11-09 | F1 (work/fpga-f1, uncommitted on 73a387a) | UART | 50 MHz | +7.316 | +0.082 | 9,399 / 3,378 | `fpga/build/pa100t/pa100t_top.bit` | The F1 build itself: first clean Vivado build since 11-07. |
+| 2026-11-09 | F1 (work/fpga-f1, on 73a387a) | UART | 50 MHz | +6.970 | +0.078 | 9,335 / 3,388 | `fpga/build/pa100t/pa100t_top.bit` | **F1 as ruled: the chip's own "sram" store** (no store define). The RAM core maps to 176 LUTs of distributed RAM, not block RAM (its byte-mask merge reads the array asynchronously). |
+| 2026-11-09 | F1 draft (1ea33ba) | UART | 50 MHz | +7.316 | +0.082 | 9,399 / 3,378 | superseded | Withdrawn draft with `PE_MEM_FLOPS` (the flop store). Kept for comparison. |
 | 2026-11-09 | 73a387a + scratch | UART | 60 MHz | +4.586 | +0.069 | 9,406 / 3,383 | scratch only | **Not F1.** Trial for F2: scratch copy with MMCM ×6 and `clock_hz` 60 MHz, plus the F1 fixes. Not for board use. |

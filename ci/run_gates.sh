@@ -344,9 +344,10 @@ GATES=(
   # chip), warnings pinned per class, LW's inlined port widths text-anchored.
   model/gate_slang_lint.py
   # ⛔⛔ F1 (Wilson 11-09) -- THE FPGA BUILD BUILDS: yosys synth_xilinx on all
-  # three board variants with build.tcl's own defines (-sv, PE_MEM_FLOPS). The
-  # board build was broken two days (11-07 SRAM store) and nothing saw it.
-  # Must-fails: no PE_MEM_FLOPS -> RM_IHPSG13 unresolved; no -sv -> always_latch.
+  # three board variants with build.tcl's own defines (-sv reads), and the
+  # store elaborated is the chip's own sram arm. The board build was broken two
+  # days (11-07 always_latch) and nothing saw it. Must-fails: PE_MEM_FLOPS ->
+  # store check; PE_SRAM_MACRO -> pe_sram_macro unresolved; no -sv -> always_latch.
   test/gate_fpga_synth.py
   # ⛔⛔ HC1 -- W1's eligibility offset held to the RTL: the hold gate opens at
   # decision + HS + 2 on every load (ckdense, on RTL signals), and
