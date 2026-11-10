@@ -37,7 +37,8 @@ ROOT = os.path.dirname(HERE)
 
 
 def _paths():
-    for d in ("model", os.path.join("model", "a2"), "test", "ci"):
+    for d in ("model", os.path.join("model", "a2"), "test", "ci",
+              os.path.join("fpga", "sim")):
         p = os.path.join(ROOT, d)
         if p not in sys.path:
             sys.path.insert(0, p)
@@ -106,6 +107,8 @@ def _pass(policy, v, exc, last):
         return ({c: (True, d) for c, (_ok, d) in v[0].items()},) + tuple(v[1:])
     if policy == "LOCK":              # (n identical, mismatches, priming moves)
         return (v[0] + len(v[1]), [], v[2])
+    if policy == "ALLOK1":            # (info, [(check, ok, detail)]) -- the FPGA benches
+        return (v[0], [(c, True, d) for c, _ok, d in v[1]]) + tuple(v[2:])
     if policy == "NOFAIL":            # one sim's {flags}
         return dict(v, hfail=False, anyfail=False, exercised=True)
     raise SystemExit("meta_stub: unknown policy %r" % policy)
