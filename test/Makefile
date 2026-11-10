@@ -33,6 +33,14 @@ VERILOG_SOURCES += $(PDK_ROOT)/ihp-sg13cmos5l/libs.ref/sg13cmos5l_io/verilog/sg1
 # exactly sg13cmos5l_stdcell.v and sg13cmos5l_udp.v.
 VERILOG_SOURCES += $(PDK_ROOT)/ihp-sg13cmos5l/libs.ref/sg13cmos5l_stdcell/verilog/sg13cmos5l_udp.v
 VERILOG_SOURCES += $(PDK_ROOT)/ihp-sg13cmos5l/libs.ref/sg13cmos5l_stdcell/verilog/sg13cmos5l_stdcell.v
+# THE SRAM MACRO'S MODEL (11-10). The store is the IHP RM_IHPSG13_1P_256x32_c2_bm_bist
+# macro, and the gate-level netlist instantiates it -- but the stdcell files do not
+# define it, so iverilog stopped at "Unknown module type: RM_IHPSG13_1P_256x32_c2_bm_bist"
+# and NO test ran. The PDK ships the model: the 256x32 wrapper plus the shared
+# behavioural core it instantiates. Found by the local ttihp27a baseline gl_test on
+# 73a387a: 0 tests without these two files, TESTS=16 PASS=16 with them.
+VERILOG_SOURCES += $(PDK_ROOT)/ihp-sg13cmos5l/libs.ref/sg13cmos5l_sram/verilog/RM_IHPSG13_1P_core_behavioral_bm_bist.v
+VERILOG_SOURCES += $(PDK_ROOT)/ihp-sg13cmos5l/libs.ref/sg13cmos5l_sram/verilog/RM_IHPSG13_1P_256x32_c2_bm_bist.v
 
 # this gets copied in by the GDS action workflow
 VERILOG_SOURCES += $(PWD)/gate_level_netlist.v
