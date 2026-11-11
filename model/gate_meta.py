@@ -103,6 +103,8 @@ SEAMS = (
     ("model/gate_cdc_qual.py", "gate_cdc_qual.judge", "slow", "E"),
     # 11-10 macro inputs: `judge` always clean -> a raw pin on A_DIN reads green
     ("model/gate_macro_inputs.py", "gate_macro_inputs.judge", "slow", "E0"),
+    # 11-11 hold rule: `judge` always clean -> the 4-cycle late arm reads green
+    ("test/run_hold_rule.py", "run_hold_rule.judge", "slow", "E"),
     ("model/gate_slang_lint.py", "gate_slang_lint.judge", "fast", "E0"),
     ("model/gate_halt_reset.py", "gate_halt_reset.check_text", "fast", "E"),
     ("model/gate_halt_reset.py", "gate_halt_reset.check_netlist", "fast", "E0"),

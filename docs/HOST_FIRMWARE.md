@@ -31,6 +31,11 @@ longest chip cycle it may meet.
   the first synchroniser flop resolves late. 4 is the bare worst case; the 5th
   cycle is margin for the capture flop's hold time and for skew between the
   nibble pins and `wr` (TT's FAQ puts the I/O round trip near 10 ns).
+- **Skew assumption 10 ns, from the TT FAQ round-trip estimate; to be
+  replaced by a measured figure at the bench re-witness.** It is the skew
+  `test/run_hold_rule.py` uses to prove the number: with `wr` landing just
+  after a clock edge and the first synchroniser flop resolving late, a 4-cycle
+  hold fails and a 5-cycle hold passes.
 - *Depends on it:* every capture site on the synchronised edge
   (`model/gate_cdc_qual.py` proves no flop takes a raw pin while that edge is
   low), the SRAM macro's inputs (`model/gate_macro_inputs.py`), and check 9 of

@@ -138,6 +138,43 @@
 `ifndef HF_HOLD
 `define HF_HOLD 5
 `endif
+`ifdef HF_WORST_PHASE
+  // ⛔⛔ THE WORST-PHASE HOST -- SIMULATION ONLY, THE HOLD-RULE GATE ONLY (Wilson
+  // 11-11). Every other bench changes pins on the falling edge, half a cycle
+  // from every capture edge, so a 4-cycle hold can never fail there. Here:
+  //   * `wr` reaches the chip HF_SKEW_NS after the nibble (a transport delay),
+  //     timed to land 1 ps AFTER a rising edge -- the first synchroniser flop
+  //     then sees it a whole cycle later (phase = T);
+  //   * the nibble is set FW-2's 1 cycle before the host raises `wr`;
+  //   * the moment the hold expires (HF_HOLD cycles after the host raised
+  //     `wr`), the host INVERTS the nibble and tag -- the worst legal host.
+  // ⚠ HF_SKEW_NS = 10 is an ASSUMPTION (Wilson 11-11): the TT FAQ's ~10 ns I/O
+  // round-trip estimate, not a measured pin-to-pin skew. docs/HOST_FIRMWARE.md
+  // FW-1 says so; replaced by a measured figure at the bench re-witness.
+`ifndef HF_SKEW_NS
+`define HF_SKEW_NS 10.0
+`endif
+  task hf_push_nib;
+    input [3:0] nib;
+    input [1:0] tag;
+    begin
+      @(posedge clk);
+      #(PE_CLK_NS - `HF_SKEW_NS + 0.001);     // the host's setup point
+      ui_in[4:1] = nib;
+      ui_in[5]   = tag[1];
+      ui_in[0]   = tag[0];
+      #(PE_CLK_NS);                           // T0: the host raises wr ...
+      ui_in[6] <= #(`HF_SKEW_NS) 1'b1;        // ... which lands 1 ps after an edge
+      #(3 * PE_CLK_NS);
+      ui_in[6] <= #(`HF_SKEW_NS) 1'b0;
+      #((`HF_HOLD - 3) * PE_CLK_NS);          // T0 + HF_HOLD cycles: hold met
+      ui_in[4:1] = ~nib;
+      ui_in[5]   = ~tag[1];
+      ui_in[0]   = ~tag[0];
+      hf_pushes = hf_pushes + 1;
+    end
+  endtask
+`else
   task hf_push_nib;
     input [3:0] nib;
     input [1:0] tag;
@@ -153,6 +190,7 @@
       hf_pushes = hf_pushes + 1;
     end
   endtask
+`endif
 
   task hf_push_byte;
     input [7:0] b;
