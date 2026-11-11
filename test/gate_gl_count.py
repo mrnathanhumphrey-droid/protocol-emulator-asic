@@ -60,6 +60,32 @@ def problems(xml_text, want):
     return out
 
 
+def judge_file(results_xml, module_file):
+    """[problem] for a run on disk: results.xml (path or None) against the
+    tests MODULE_FILE declares. ⛔ THE LOCAL RUNNER'S JUDGE TOO (Wilson 11-10):
+    test/run_local.py read no results.xml at all, so failing tests reported
+    green; it now exits on this."""
+    text = None
+    if results_xml and os.path.isfile(str(results_xml)):
+        text = open(str(results_xml), encoding="utf-8", errors="replace").read()
+    want = declared(open(module_file, encoding="utf-8").read()) \
+        if os.path.isfile(module_file) else 0
+    return problems(text, want)
+
+
+#: run_local.py must route its verdict through judge_file (a text anchor:
+#: importing it here would pull cocotb into the fast shard).
+RUN_LOCAL = os.path.join(HERE, "run_local.py")
+_WIRING = (r"gate_gl_count\.judge_file\(", r"return 1 if bad else 0")
+
+
+def wiring_problems(text=None):
+    if text is None:
+        text = open(RUN_LOCAL, encoding="utf-8").read()
+    return ["test/run_local.py lacks /%s/ -- its exit code ignores results.xml" % p
+            for p in _WIRING if not re.search(p, text)]
+
+
 def _xml(n, bad=None):
     rows = []
     for i in range(n):
@@ -79,7 +105,13 @@ def must_fires():
             ("an error", bool(problems(_xml(w, "error"), w))),
             ("a skip", bool(problems(_xml(w, "skipped"), w))),
             ("not XML", bool(problems("<testsuites>", w))),
-            ("no test declared", bool(problems(_xml(0), 0)))], not problems(_xml(w), w)
+            ("no test declared", bool(problems(_xml(0), 0))),
+            ("judge_file: results.xml missing", bool(judge_file(None, TESTS))),
+            ("judge_file: module declares nothing",
+             bool(judge_file(None, os.path.join(HERE, "no_such_module.py")))),
+            ("run_local without judge_file",
+             bool(wiring_problems("runner.test()\nreturn 0\n")))], \
+        not problems(_xml(w), w)
 
 
 def main():
@@ -97,6 +129,9 @@ def main():
         for x in probs:
             print("  *** " + x)
         rc |= 1 if probs else 0
+    for x in wiring_problems():
+        print("  *** " + x)
+        rc = 1
     print("  --- must-fires ---")
     mf, clean = must_fires()
     for label, red in mf:

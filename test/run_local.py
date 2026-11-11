@@ -109,12 +109,23 @@ def main() -> int:
     # ⭐ PE_TEST_MODULE lets a throwaway diagnostic module run through the
     # SAME build and toplevel as the real suite. A diagnostic elaborated
     # differently from the suite measures a different thing.
-    runner.test(
+    module = os.environ.get("PE_TEST_MODULE", "test")
+    results = runner.test(
         hdl_toplevel="tb",
-        test_module=os.environ.get("PE_TEST_MODULE", "test"),
+        test_module=module,
         build_dir=build_dir,
     )
-    return 0
+    # ⛔⛔ THE EXIT CODE IS THE RESULTS FILE'S, NOT THE SIMULATOR'S (Wilson
+    # 11-10). Outside pytest, cocotb's runner never reads results.xml: failing
+    # tests exited 0 here, so anything "checked locally" was unchecked. Red
+    # unless every test the module declares ran and passed (no error, no skip).
+    sys.path.insert(0, HERE)
+    import gate_gl_count
+    bad = gate_gl_count.judge_file(results, os.path.join(HERE, module + ".py"))
+    for x in bad:
+        print("  *** run_local: " + x)
+    print("  run_local: %s" % ("FAILED" if bad else "every declared test ran and passed"))
+    return 1 if bad else 0
 
 
 if __name__ == "__main__":
