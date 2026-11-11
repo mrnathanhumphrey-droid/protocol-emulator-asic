@@ -315,6 +315,10 @@ GATES=(
   # 40-hex SHA or an exact version -- a branch or a TAG can be moved, and
   # precheck judges on TT's release. Must-fire: a line set to @ttihp27a.
   model/gate_action_pins.py
+  # ⛔⛔ ZERO TESTS IS NOT A PASS (Wilson 11-10): a gate-level run that ran
+  # fewer tests than test/test.py declares is red. Here: its must-fires; in
+  # gds.yaml's gl_test job: on the real results.xml.
+  test/gate_gl_count.py
   # ⛔⛔ E+ -- A SHELL EXIT CODE IS READ ONLY WHERE IT CAN BELONG. Four times in
   # one arc a checking loop printed an exit code belonging to something else
   # (`| tail`, `| head`, and `"$(basename $g)" "$?"` -- the substitution reset

@@ -206,6 +206,9 @@ SEAMS = (
     # ttihp27a (11-10): `audit` always clean -> the six pin mutants (a tag, a
     # branch, an abbreviated SHA, a loose version) survive
     ("model/gate_action_pins.py", "gate_action_pins.audit", "fast", "E0"),
+    # 11-10: `problems` always empty -> the nine planted results (missing, 0
+    # tests, one short, a failure, ...) all read green
+    ("test/gate_gl_count.py", "gate_gl_count.problems", "fast", "E"),
 )
 
 #: Gates with NO stubbable check, each with why -- every gate in

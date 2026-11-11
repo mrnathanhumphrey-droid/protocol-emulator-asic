@@ -88,6 +88,7 @@ fast model/gate_i2c_hw_witness.py
 fast model/gate_onewire_hw_witness.py
 fast model/gate_flow_config.py
 fast model/gate_action_pins.py
+fast test/gate_gl_count.py
 fast model/gate_shell_rc.py
 fast model/gate_except.py
 fast model/gate_tool_pinning.py
