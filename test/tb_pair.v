@@ -53,6 +53,12 @@ module tb_pair;
   reg [3:0] prev_drv;
   reg [3:0] prev_cb;
 
+  // Included ABOVE the stimulus (as every other bench does): the `initial`
+  // below assigns `hf_en`, and the pinned iverilog rejects a use before its
+  // declaration. `progress.vh` first: `host_feed.vh` drives its `pg_pushing`.
+`include "test/progress.vh"
+`include "test/host_feed.vh"
+
   task load_and_run;
     begin
       @(negedge clk);
@@ -129,9 +135,6 @@ module tb_pair;
       .uio_in(uio_in), .uio_out(uio_out), .uio_oe(uio_oe),
       .ena(ena), .clk(clk), .rst_n(rst_n)
   );
-
-`include "test/host_feed.vh"
-`include "test/progress.vh"
 
 endmodule
 

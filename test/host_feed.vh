@@ -247,6 +247,10 @@
   // the host channel without a single check noticing.
   // ⭐ `hf_bad` is the count to add into a bench's own failure tally, so the
   // precondition cannot be printed and then ignored.
+  // ⭐ POPS ARE COUNTED BELOW so every bench gets the same number from the
+  // same place. Declared HERE, above `hf_check`, because the pinned iverilog
+  // rejects a use before its declaration.
+  integer hf_pops;
   integer hf_bad, hf_i;
   task hf_check;
     input integer n_shifts;
@@ -279,9 +283,8 @@
     end
   endtask
 
-  // ⭐ POPS ARE COUNTED HERE so every bench gets the same number from the same
-  // place. `host_pop` is a one-cycle pulse.
-  integer hf_pops;
+  // ⭐ POPS ARE COUNTED HERE (`hf_pops` is declared above `hf_check`).
+  // `host_pop` is a one-cycle pulse.
   // ⭐ THE SHARED INTERLOCK (see test/progress.vh): `hf_en` IS this
   // bench's "I am driving the host channel" signal, so it feeds the guard
   // directly. The feeder already waits for PROG to drop; this is what

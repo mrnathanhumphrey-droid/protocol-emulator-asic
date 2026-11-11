@@ -212,8 +212,8 @@ module tb_usbbuf;
       .ena(ena), .clk(clk), .rst_n(rst_n)
   );
 
-`include "test/host_feed.vh"
 `include "test/progress.vh"
+`include "test/host_feed.vh"
 
 endmodule
 

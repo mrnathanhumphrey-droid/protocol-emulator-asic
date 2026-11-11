@@ -83,7 +83,27 @@ ALLOW = [
      "evidence is never a stored number that could go stale"),
 ]
 
-EV = r"@\s*\(\s*(?:posedge|negedge)\s+clk\s*\)|#\s*\d+|\bwait\s*\("
+#: ⛔ (11-11) `#(expr)` IS A DELAY TOO. The first version knew only `#<digits>`,
+#: so `@(posedge clk); #(PE_CLK_NS - 9.999); ui_in = ...` (host_feed.vh's
+#: worst-phase driver, ~10 ns after the edge) read as a write AT the edge.
+#: A `#` is a PROCEDURAL delay only where a statement starts: one after `=` /
+#: `<=` is an intra-assignment delay (the process does not wait), and one after
+#: an identifier is a parameter override (`mod #(.P(1)) u (...)`). Both are
+#: skipped by `_delay_ctl`, so neither can hide a real edge write.
+EV = r"@\s*\(\s*(?:posedge|negedge)\s+clk\s*\)|#\s*\d+|#\s*\(|\bwait\s*\("
+_STMT_KW = {"begin", "else", "fork", "join", "end", "initial", "always"}
+
+
+def _delay_ctl(c, tok):
+    """True unless a `#` token is an intra-assignment delay or a parameter
+    override (see EV)."""
+    if not tok.group(0).startswith("#"):
+        return True
+    before = c[:tok.start()].rstrip()
+    if before.endswith("="):
+        return False
+    m = re.search(r"([A-Za-z_]\w*)$", before)
+    return not (m and m.group(1) not in _STMT_KW)
 CALL = r"\b(\w+)\s*(?:\(|;)"
 DECL = re.compile(r"\b(task|endtask|function|endfunction)\b")
 STR = re.compile(r'"(?:[^"\\]|\\.)*"')
@@ -141,7 +161,8 @@ def task_tails(lines):
             for c in body:
                 for tok in re.finditer("%s|%s" % (EV, CALL), c):
                     if tok.group(1) is None:
-                        last = tok.group(0)
+                        if _delay_ctl(c, tok):
+                            last = tok.group(0)
                     elif tails.get(tok.group(1)):
                         last = tails[tok.group(1)]
             tails[t] = last
@@ -159,7 +180,8 @@ def _pass(lines, nets, tails, entry):
         for tok in re.finditer("%s|%s|\\b(\\w+)\\s*(\\[[^\\]]*\\])?\\s*=(?![=])"
                                % (EV, CALL), c):
             if tok.group(1) is None and tok.group(2) is None:
-                last = tok.group(0)                       # a timing control
+                if _delay_ctl(c, tok):
+                    last = tok.group(0)                   # a timing control
             elif tok.group(1) is not None:                # a call
                 if decl:
                     continue
@@ -235,6 +257,28 @@ def main() -> int:
         print("    must-fire (tb_smoke's original rising-edge engine start): %s"
               % ("RED" if fired else "*** NOT FLAGGED"))
         rc |= 0 if fired else 1
+
+    # ⛔ MUST-FIRE (11-11): the `#(expr)` delay forms, on a synthetic bench.
+    # Each arm: (name, task body, must it be flagged?)
+    arms = [
+        ("#(expr) after the edge is a delay", "@(posedge clk); #(T - 1); ui_in = 8'h01;", False),
+        ("the same write with the delay removed", "@(posedge clk); ui_in = 8'h01;", True),
+        ("an intra-assignment #( ) is not a delay", "@(posedge clk); x <= #(3) 1'b1; ui_in = 8'h01;", True),
+        ("an intra-assignment #<n> is not a delay", "@(posedge clk); x = #3 1'b1; ui_in = 8'h01;", True),
+        ("a parameter override is not a delay", "@(posedge clk); m #(.P(1)) u (); ui_in = 8'h01;", True),
+    ]
+    d = tempfile.mkdtemp(prefix="bench_race_delay_")
+    for name, body, want in arms:
+        p = os.path.join(d, "tb_mf.v")
+        open(p, "w", encoding="utf-8").write(
+            "module tb_mf;\n  reg clk; reg [7:0] ui_in; reg x;\n"
+            "  task t;\n    begin\n      %s\n    end\n  endtask\n"
+            "  dut u0 (.ui_in(ui_in), .clk(clk));\nendmodule\n" % body)
+        got = any(h[2] == "ui_in" for h in scan(p, d))
+        ok = got == want
+        print("    must-fire %-42s %-5s %s" % (name, "red" if got else "clean",
+                                                "ok" if ok else "*** WRONG"))
+        rc |= 0 if ok else 1
     print()
     print("  GATE bench-race: %s" % ("PASSED" if rc == 0 else "FAILED"))
     return rc
