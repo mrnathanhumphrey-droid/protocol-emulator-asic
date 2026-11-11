@@ -816,7 +816,13 @@ module tt_um_protocol_emulator #(
   // line byte for the engine (both declared above the store)
   assign        ub_in   = {tx_asm[7:4], ui_in[4:1]};     // the byte this push completes
   wire [3:0]    ub_nb   = ub_len[6:3] + {3'd0, |ub_len[2:0]};   // ceil(length / 8)
+  // M_CDC_RAW_WR (Wilson 11-10, CDC bundle): ONE capture site qualified by the
+  // UNSYNCHRONISED WR pad instead of nib_lo -- gate_cdc_qual must go red
+`ifdef M_CDC_RAW_WR
+  wire          ub_wbyte  = ui_in[6] & tx_half & ub_tag;
+`else
   wire          ub_wbyte  = nib_lo & ub_tag;
+`endif
   // bundle 6 (Q5): bit 7 of the length byte is the endpoint, 6:0 the length
   wire          ub_len_ok = (ub_in[6:0] != 7'd0) && (ub_in[6:0] <= 7'd112);
 `ifdef M_BUF_NO_REFUSE
@@ -839,6 +845,11 @@ module tt_um_protocol_emulator #(
       ub_ep <= 1'b0;
     end else begin
       ub_on_q <= e_usb_on;
+      // M_CDC_UB_UNGATED (Wilson 11-10, CDC bundle): the length register samples
+      // the raw nibble pins every cycle -- gate_cdc_qual must go red on ub_len
+`ifdef M_CDC_UB_UNGATED
+      ub_len <= ub_in[6:0];
+`endif
       // load
       if (ub_wbyte && !ub_refuse) begin
         if (ub_wpe == 5'd0) ub_len <= ub_in[6:0];

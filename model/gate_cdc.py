@@ -16,8 +16,10 @@ pre-mapping netlist the reset audit and F2 use):
   RESET       `rst_n` may reach ONLY the async reset pins of the declared
               synchronizer flops; every core flop resets on `rst_n_s`.
   QUALIFIED   (D4) the TX nibble / tag pins are sampled on the synchronised
-              WR edge, so their combinational cone may end ONLY at the D pins
-              of the declared capture flops (`tx_asm`, `tx_tag`, `tx_mem`).
+              WR edge, so their combinational cone may end at any SYNCHRONOUS
+              flop pin -- that no flop changes on them while the qualifier is
+              low is PROVEN by model/gate_cdc_qual.py (11-10; it replaced
+              the name list `tx_asm` / `tx_tag` / `tx_mem`) -- and at no async pin.
   ASYNC CLEAR (D5) SPI-target CS may also reach the async pins of
               `miso_oe_q`, its declared asynchronous release.
 
@@ -64,11 +66,16 @@ SYNC = {
 #: every flop allowed to see the RAW `rst_n` on its async pin
 RESET_OK = ("rst_sync", "prog_sync", "ptr_sync", "ena_sync", "wr_sync",
             "uio_q0", "uio_q1", "uio_q2")
-#: qualifier-sampled data pins (D4) and the flops their cones may end in.
-#: The qualifier is the synchronised WR edge (`push_rise` = run & wr_rise).
+#: qualifier-sampled data pins (D4). The qualifier is the synchronised WR edge
+#: (`push_rise` = run & wr_rise).
+#: ⛔⛔ CAPTURE_OK RETIRED (Wilson 11-10, CDC bundle). This gate used to name
+#: the flops these pins may reach (`tx_asm`, `tx_tag`, `tx_mem`); bundles 5 and
+#: 6 added capture sites the list did not know and the gate went red unseen. The
+#: PROPERTY -- no flop changes on a raw pin unless the qualifier is up -- is now
+#: proven for EVERY flop by model/gate_cdc_qual.py, so here a qualified pin may
+#: reach any SYNCHRONOUS flop pin; an ASYNC pin is still red.
 QUALIFIED = {("ui_in", 0), ("ui_in", 1), ("ui_in", 2), ("ui_in", 3),
              ("ui_in", 4), ("ui_in", 5)}
-CAPTURE_OK = ("tx_asm", "tx_tag", "tx_mem")
 ASYNC_PINS = ("R", "S", "AD", "L")
 
 
@@ -153,8 +160,8 @@ def check(path, verbose=True):
                     ok, why = True, "synchronizer first flop"
                 elif port == "uio_in" and p == "D" and direct and named(c, names, ("uio_q0",)):
                     ok, why = True, "synchronizer first flop"
-                elif (port, i) in QUALIFIED and p == "D" and named(c, names, CAPTURE_OK):
-                    ok, why = True, "qualifier-sampled capture (WR edge)"
+                elif (port, i) in QUALIFIED and p not in ASYNC_PINS:
+                    ok, why = True, "qualifier-sampled (proven: gate_cdc_qual)"
                 else:
                     ok, why = False, "UNSYNCHRONIZED"
                 kind.append(why)

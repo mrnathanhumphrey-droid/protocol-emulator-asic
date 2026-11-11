@@ -98,6 +98,9 @@ SEAMS = (
     ("model/gate_tool_pinning.py", "gate_tool_pinning.audit_py", "fast", "E"),
     ("model/gate_f2_local.py", "f2_flop_driven_outputs.json_verdict", "fast", "JV"),
     ("model/gate_cdc.py", "gate_cdc.check", "fast", "E"),
+    # 11-10 CDC-Q: `judge` always clean -> a mutant that proves, a coverage gap,
+    # a vacuous cut all read green
+    ("model/gate_cdc_qual.py", "gate_cdc_qual.judge", "slow", "E"),
     ("model/gate_slang_lint.py", "gate_slang_lint.judge", "fast", "E0"),
     ("model/gate_halt_reset.py", "gate_halt_reset.check_text", "fast", "E"),
     ("model/gate_halt_reset.py", "gate_halt_reset.check_netlist", "fast", "E0"),

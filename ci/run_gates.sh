@@ -346,6 +346,9 @@ GATES=(
   # synchronizer (silicon fixes #4 / #5). Priced by building M_CDC_RAW, the
   # 94cebb7 wiring, whose ui_in[7] -> run path must be named.
   model/gate_cdc.py
+  # CDC-Q (Wilson 11-10): no flop changes on a raw qualified pin unless the
+  # synchronised WR edge is up -- proven (yosys equiv_induct), mutants priced.
+  model/gate_cdc_qual.py
   # ⛔⛔ PORTABILITY -- a STRICT front end (slang) over src/: zero errors
   # (declare-before-use: iverilog, Verilator and yosys all accepted 8 uses
   # before declaration and Vivado refused one, so the FPGA could not build the
