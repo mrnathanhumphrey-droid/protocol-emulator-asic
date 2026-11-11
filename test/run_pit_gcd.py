@@ -251,20 +251,51 @@ def run_one(args):
     r = RP.run(cmd)
     if r.returncode != 0:
         raise RuntimeError("sim failed: %s" % (r.stdout + r.stderr)[-400:])
+    # ⛔ the s12 note's assertions (pe_pit_s12) STOP the run: the record is then
+    # missing, which is red below -- and the line is reported, never read past
+    asrt = "*** ASSERT pe_pit_s12" in (r.stdout + r.stderr)
     got, st, pre = {}, {}, {}
-    with open(op, encoding="ascii") as fh:
-        for ln in fh:
-            t = ln.split()
-            if t[0] == "M":
-                got[int(t[1])] = int(t[2], 16) if t[2] not in ("xx", "zz") else -1
-            elif t[0] == "P":
-                pre[int(t[1])] = int(t[2], 16) if t[2] not in ("xx", "zz") else -1
-            elif t[0] == "N":
-                st = dict(kv.split("=") for kv in t[1:])
+    if os.path.exists(op):
+        with open(op, encoding="ascii") as fh:
+            for ln in fh:
+                t = ln.split()
+                if not t:
+                    continue
+                if t[0] == "M":
+                    got[int(t[1])] = int(t[2], 16) if t[2] not in ("xx", "zz") else -1
+                elif t[0] == "P":
+                    pre[int(t[1])] = int(t[2], 16) if t[2] not in ("xx", "zz") else -1
+                elif t[0] == "N":
+                    st = dict(kv.split("=") for kv in t[1:])
     want, res = golden_rec(msgs)
-    g = [got[REC_AT + k] for k in range(16)]
+    g = [got.get(REC_AT + k, -1) for k in range(16)]
     intact = st.get("snap") == "1" and all(pre.get(a) == mem[a] for a in range(DEC_AT, p))
-    return g == want and st.get("done") == "1" and intact, g, want, res, int(st.get("cyc", -1)), intact
+    good = g == want and st.get("done") == "1" and intact and not asrt
+    return good, g, want, res, int(st.get("cyc", -1)), intact, asrt
+
+
+#: ⭐ THE s12 NOTE'S MUST-FIRES (Wilson 11-09 correction). Each mutant runs on the
+#: sets that reach the divisions and the gcd swap (the solver sets + directed),
+#: in TWO arms, so neither requirement is met by the other:
+#:   assert  -- built as is: pe_pit_s12's assertion must FIRE on some set;
+#:   record  -- built with PE_S12_NOASSERT: the record itself must stop being
+#:              bit-exact on some set (an assertion's stop is not a wrong answer).
+MUTANTS = [("M_DECODE_STALE", "the step flags decode the OLD t3 (one step late)"),
+           ("M_DIVMASK_LATE", "the divisor mask loaded a step late")]
+#: PE_GCD_RTL_DIR: build the RTL from another tree (the before/after cycle
+#: comparison); PE_GCD_CYCLES: write each set's cycle count there.
+RTL_DIR = os.environ.get("PE_GCD_RTL_DIR", ROOT)
+
+
+def build(vbin, defines=()):
+    rtl = [os.path.join(RTL_DIR, f) for f in RP.RTL]
+    if RP.SIM == "verilator":
+        RP.vl_build(vbin, defines, bench=BENCH, top="tb_gcd")
+        return
+    r = RP.run([RP.tool("iverilog"), "-g2012", "-I", ROOT, "-o", vbin, "-s", "tb_gcd"]
+               + ["-D%s" % d for d in defines] + [BENCH] + rtl)
+    if r.returncode != 0:
+        raise RuntimeError("build failed: %s" % (r.stdout + r.stderr)[-400:])
 
 
 def main() -> int:
@@ -273,19 +304,16 @@ def main() -> int:
         banner("iverilog", "vvp")
     tmp = tempfile.mkdtemp(prefix="pe_gcd_")
     vbin = os.path.join(tmp, "gcd.vvp")
-    if RP.SIM == "verilator":
-        RP.vl_build(vbin, bench=BENCH, top="tb_gcd")
-    else:
-        r = RP.run([RP.tool("iverilog"), "-g2012", "-I", ROOT, "-o", vbin, "-s", "tb_gcd", BENCH] + RP.RTL)
-        if r.returncode != 0:
-            raise RuntimeError("build failed: %s" % (r.stdout + r.stderr)[-400:])
+    build(vbin)
+    solver = ([("solve", m) for m in solve_sets(N_SOLVE, SOLVE_SEED)] + directed_sets(N_EACH, SOLVE_SEED + 1))
     sets = ([("random", m) for m in random_sets(N_RANDOM, SEED)] + [("tie", m) for m in tie_sets(N_TIE, TIE_SEED)]
-            + [("solve", m) for m in solve_sets(N_SOLVE, SOLVE_SEED)] + directed_sets(N_EACH, SOLVE_SEED + 1))
+            + solver)
     ok, tot = {}, {}
-    cand = refused = cmax = shown = io_ok = kern = 0
+    cand = refused = cmax = shown = io_ok = kern = asserts = 0
+    cycles = []
     with ThreadPoolExecutor(14) as ex:
         res_iter = ex.map(run_one, [(vbin, tmp, i, m) for i, (_, m) in enumerate(sets)])
-        for k, ((kind, _), (good, g, want, res, cyc, intact)) in enumerate(zip(sets, res_iter), 1):
+        for k, ((kind, _), (good, g, want, res, cyc, intact, asrt)) in enumerate(zip(sets, res_iter), 1):
             if k % 500 == 0:                    # the heartbeat (red-team 4): watch.sh reads log growth
                 print("  ... %d / %d sets" % (k, len(sets)), flush=True)
             ok[kind] = ok.get(kind, 0) + good
@@ -294,16 +322,39 @@ def main() -> int:
             kern += res["io"].get("class_size", 0) > 1
             cand += res["status"] == "OK"
             refused += res.get("why") == "insufficient store for the GCD"
+            asserts += asrt
             cmax = max(cmax, cyc)
+            cycles.append("%d %s %d" % (k - 1, kind, cyc))
             if not good and shown < 5:
                 shown += 1
-                print("  *** %s set: RTL %s / golden %s %s%s" % (kind, bytes(max(0, v) for v in g).hex(),
-                      bytes(want).hex(), res.get("why", ""), "" if intact else " (MESSAGES CLOBBERED)"))
+                print("  *** %s set: RTL %s / golden %s %s%s%s" % (kind, bytes(max(0, v) for v in g).hex(),
+                      bytes(want).hex(), res.get("why", ""), "" if intact else " (MESSAGES CLOBBERED)",
+                      " (pe_pit_s12 ASSERTION FIRED)" if asrt else ""))
+    if os.environ.get("PE_GCD_CYCLES"):
+        with open(os.environ["PE_GCD_CYCLES"], "w", encoding="ascii", newline="\n") as fh:
+            fh.write("\n".join(cycles) + "\n")
     print("  %d sets: %d with a polynomial, %d refused for space, %d with init/xorout (%d kernel classes); "
           "max %d cycles" % (len(sets), cand, refused, io_ok, kern, cmax))
     for k in tot:
         print("  %-14s %4d / %4d bit-exact" % (k, ok[k], tot[k]))
-    good = all(ok[k] == tot[k] for k in tot)
+    good = all(ok[k] == tot[k] for k in tot) and asserts == 0
+    if asserts:
+        print("  *** pe_pit_s12's s12 assertion fired on %d set(s)" % asserts)
+    print("\n  must-fires (s12 note), on the %d solver sets" % len(solver))
+    for define, what in MUTANTS:
+        arms = {}
+        for arm, defs in (("assert", [define]), ("record", [define, "PE_S12_NOASSERT"])):
+            mv = os.path.join(tmp, "gcd_%s_%s.vvp" % (define.lower(), arm))
+            build(mv, defs)
+            with ThreadPoolExecutor(14) as ex:
+                rr = list(ex.map(run_one, [(mv, tmp, 100000 + i, m) for i, (_, m) in enumerate(solver)]))
+            arms[arm] = (sum(1 for x in rr if x[6]), sum(1 for x in rr if not x[0]))
+        fired = arms["assert"][0] > 0
+        broke = arms["record"][1] > 0 and arms["record"][0] == 0
+        print("    %-15s %-48s assertion %s (%d sets); record %s (%d sets not bit-exact)"
+              % (define, what, "FIRED" if fired else "*** SILENT", arms["assert"][0],
+                 "RED" if broke else "*** SURVIVED", arms["record"][1]))
+        good = good and fired and broke
     print("GATE pit-gcd: %s" % ("PASSED" if good else "FAILED"))
     return 0 if good else 1
 

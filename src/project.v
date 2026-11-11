@@ -3397,8 +3397,11 @@ module pe_pit_s12 #(parameter integer AW = 9) (
   end
   wire _unused = &{1'b0, rival};
 `ifndef SYNTHESIS
+`ifndef PE_S12_NOASSERT
   // ⛔ THE s12 NOTE'S PROOFS, EVERY CYCLE (the PIT suite runs with them on). A
   // failure STOPS the run, so no runner can read past it as a pass.
+  // PE_S12_NOASSERT exists ONLY for run_pit_gcd's must-fire, which must show a
+  // mutant breaks the RECORD itself, not merely trips the assertion.
   //  §1: the flags are the decode of the CURRENT t3 (zero cycles, by construction).
   //  §2: on a division step the mask test equals THE compare it replaced.
   //  §3: pe_s3_opsel's codes are this module's.
@@ -3423,6 +3426,7 @@ module pe_pit_s12 #(parameter integer AW = 9) (
       $display("*** ASSERT pe_pit_s12 s12-3: pe_s3_opsel's op codes differ from pe_pit_s12's");
       $finish;
     end
+`endif
 `endif
 `undef S3_X
 `undef S3_LQ
