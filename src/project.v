@@ -571,6 +571,13 @@ module tt_um_protocol_emulator #(
   wire [4:0]    ub_wpe;                         // the load index this byte takes
   wire          ub_bwe, ub_bre, ub_bre_go;
   wire [7:0]    ub_in, ub_brd;
+  // ⛔⛔ CDC bundle (Wilson 11-10): NO RAW PIN REACHES THE SRAM MACRO. The write
+  // strobe and index are registered (ub_bwe / ub_wpe are decided from the raw
+  // nibble: the length check, the refusal), and the data is tx_asm, captured
+  // on nib_lo -- one cycle of write latency. Checked: model/gate_macro_inputs.py.
+  reg           ub_bwe_q;
+  reg  [3:0]    ub_bwi_q;
+  reg  [7:0]    tx_asm;                         // the half-assembled byte
   pe_store #(.AW(AW), .MEM_TYPE(MEM_TYPE), .WIDE_B(ACT_BYTES_T)) u_store (
       .clk(clk), .rst_n(rst_n_s),
       .we((pm_we & {ACT_BYTES_T{wr_rise}}) | {ACT_BYTES_T{pit_we | s0_we}}),
@@ -583,7 +590,13 @@ module tt_um_protocol_emulator #(
       .rdata(s_rdata),
       .wre(e_wre & run), .wraddr_bk(e_wraddr_bk),
       .wrdata(s_wrdata),
-      .bwe(ub_bwe), .bwi(ub_wpe[3:0] - 4'd1), .bwd(ub_in),
+      // M_MACRO_RAW_BWD: the pre-CDC-bundle data path (the raw byte) restored --
+      // gate_macro_inputs must go red on A_DIN
+`ifdef M_MACRO_RAW_BWD
+      .bwe(ub_bwe_q), .bwi(ub_bwi_q), .bwd(ub_in),
+`else
+      .bwe(ub_bwe_q), .bwi(ub_bwi_q), .bwd(tx_asm),
+`endif
       .bre(ub_bre), .bri(ub_rp), .bre_go(ub_bre_go), .brd(ub_brd)
   );
 
@@ -681,7 +694,8 @@ module tt_um_protocol_emulator #(
   reg  [1:0] tx_cnt [0:TXN-1];
   reg        tx_wp  [0:TXN-1];
   reg        tx_rp  [0:TXN-1];
-  reg  [7:0] tx_asm;                          // the half-assembled byte
+  // (tx_asm, the half-assembled byte, is declared above the store: its low
+  // nibble is the response buffer's write data since the CDC bundle)
   reg        tx_half;                         // 0 = expect HIGH nibble
   reg  [1:0] tx_tag;                          // LATCHED at the first push
   reg        tx_full_sticky;
@@ -836,15 +850,21 @@ module tt_um_protocol_emulator #(
   wire          ub_refuse = ub_ready | usb_fence | ((ub_wp == 5'd0) & ~ub_len_ok);
 `endif
   assign        ub_bwe    = ub_wbyte & ~ub_refuse & (ub_wpe != 5'd0);
-  assign        ub_bre    = ub_ready & ~ub_bv & ~ub_pend & (ub_rp < ub_nb);
+  // ⛔ CDC bundle: the buffer write lands one cycle after its push (ub_bwe_q),
+  // so a read must not meet it -- a 1-byte packet's only byte is written in
+  // the cycle READY first allows a read (the SRAM arm already holds bre off
+  // on bwe; the flop / latch arms' ubuf has no such order)
+  assign        ub_bre    = ub_ready & ~ub_bv & ~ub_pend & (ub_rp < ub_nb) & ~ub_bwe_q;
   wire          ub_pop    = e_host_pop & ub_sel & ub_bv;
   always @(posedge clk or negedge rst_n_s) begin
     if (!rst_n_s) begin
       ub_ready <= 1'b0; ub_pend <= 1'b0; ub_on_q <= 1'b0; ub_bv <= 1'b0;
       ub_len <= 7'd0; ub_wp <= 5'd0; ub_rp <= 4'd0; ub_byte <= 8'h00;
-      ub_ep <= 1'b0;
+      ub_ep <= 1'b0; ub_bwe_q <= 1'b0; ub_bwi_q <= 4'd0;
     end else begin
       ub_on_q <= e_usb_on;
+      ub_bwe_q <= ub_bwe;                          // CDC bundle: registered write
+      ub_bwi_q <= ub_wpe[3:0] - 4'd1;
       // M_CDC_UB_UNGATED (Wilson 11-10, CDC bundle): the length register samples
       // the raw nibble pins every cycle -- gate_cdc_qual must go red on ub_len
 `ifdef M_CDC_UB_UNGATED
@@ -913,6 +933,10 @@ module tt_um_protocol_emulator #(
         tx_asm[7:4] <= ui_in[4:1];
         tx_tag      <= tx_tag_pins;
       end
+      // ⛔⛔ CDC bundle (Wilson 11-10): the LOW nibble is captured too, on the
+      // same synchronised edge, so the response buffer's write data comes from
+      // a flop -- no raw pin reaches the SRAM macro's inputs (bwd = tx_asm)
+      if (nib_lo) tx_asm[3:0] <= ui_in[4:1];
 
       if (do_push) begin
         tx_mem[{tx_tag, tx_wp[tx_tag]}] <= {tx_asm[7:4], ui_in[4:1]};

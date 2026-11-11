@@ -145,6 +145,8 @@ KILLERS = {
     # CDC-Q (Wilson 11-10): equiv_induct leaves the mutated capture UNPROVEN
     "M_CDC_UB_UNGATED": "model/gate_cdc_qual.py",
     "M_CDC_RAW_WR": "model/gate_cdc_qual.py",
+    # macro inputs (Wilson 11-10): the raw byte back on the SRAM data pins
+    "M_MACRO_RAW_BWD": "model/gate_macro_inputs.py",
     # ruling RX2: rx_e2e on corpus_all5 seed 1, 200k cycles (corpus gate, CI)
     "M_RX_NO_CAPGATE": "test/gate_corpus_trace.py",
     # ruling EX1: the d = 4 SPI read -- EARLY fails EX1 + rx_e2e; LATE has no

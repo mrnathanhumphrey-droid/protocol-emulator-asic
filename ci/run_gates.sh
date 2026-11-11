@@ -349,6 +349,9 @@ GATES=(
   # CDC-Q (Wilson 11-10): no flop changes on a raw qualified pin unless the
   # synchronised WR edge is up -- proven (yosys equiv_induct), mutants priced.
   model/gate_cdc_qual.py
+  # MACRO INPUTS (Wilson 11-10): no raw pin reaches the SRAM macro's inputs
+  # combinationally -- the black box no property can see into.
+  model/gate_macro_inputs.py
   # ⛔⛔ PORTABILITY -- a STRICT front end (slang) over src/: zero errors
   # (declare-before-use: iverilog, Verilator and yosys all accepted 8 uses
   # before declaration and Vivado refused one, so the FPGA could not build the

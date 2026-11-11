@@ -95,6 +95,7 @@ fast model/gate_tool_pinning.py
 fast model/gate_f2_local.py
 fast model/gate_cdc.py
 cdcq model/gate_cdc_qual.py
+cdcq model/gate_macro_inputs.py
 fast model/gate_slang_lint.py
 fast model/gate_halt_reset.py
 fast model/gate_runner_registry.py

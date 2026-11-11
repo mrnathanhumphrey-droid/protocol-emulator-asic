@@ -63,6 +63,7 @@ model/gate_tool_pinning.py          ^\s*GATE tool-pinning: PASSED\s*$
 model/gate_f2_local.py              ^\s*GATE f2-local: PASSED\s*$
 model/gate_cdc.py                   ^\s*GATE cdc: PASSED\s*$
 model/gate_cdc_qual.py              ^\s*GATE cdc-qual: PASSED\s*$
+model/gate_macro_inputs.py          ^\s*GATE macro-inputs: PASSED\s*$
 model/gate_slang_lint.py            ^\s*SLANG LINT GATE: PASSED\s*$
 model/gate_hold_offset.py           ^\s*GATE hold-offset: PASSED\s*$
 model/gate_sp2_frontend.py          ^\s*SP2-FRONTEND: PASSED\s*$

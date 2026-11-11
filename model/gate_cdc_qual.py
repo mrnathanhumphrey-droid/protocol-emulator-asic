@@ -28,11 +28,15 @@ gate copy == $equiv cells, so no flop goes unmatched) and the ALLOWED set must
 actually appear UNPROVEN (the declared synchroniser of a qualified pin samples
 it raw -- if that cell proves, the cut did not reach the gate copy).
 
-THE BUILD: test/Makefile's PROJECT_SOURCES (the flop store, `g_mem`). The SRAM
-macro is a black box no property sees into; its inputs have their own rule
-(no raw pin reaches them at all -- the macro-input gate, CDC bundle step 4).
+THE BUILD: test/Makefile's PROJECT_SOURCES with NO defines -- pe_store's
+default MEM_TYPE "sram", the SHIPPED arm (write buffer, arbitration), with the
+RAM as its inline behavioural model (`mem`, so the RAM's contents are state the
+proof compares). ⚠ Corrected 11-11: the first version of this text and commit
+6b4f5ec called this "the flop store"; it never was. The bound IHP macro
+(PE_SRAM_MACRO) is a black box no property sees into; its inputs have their
+own rule -- no raw pin reaches them at all (model/gate_macro_inputs.py).
 
-ARMS (in parallel, ~11 min each, ~3 GB each):
+ARMS (in parallel by default -- PE_CDCQ_JOBS -- ~11 min each, ~3 GB each):
   clean              unproven == ALLOWED exactly, coverage full -> PASS
   M_CDC_UB_UNGATED   ub_len samples the raw nibble every cycle   -> ub_len UNPROVEN
   M_CDC_RAW_WR       one capture qualified by the RAW WR pad     -> beyond ALLOWED
@@ -230,7 +234,8 @@ def run_arm(how, sby, arm, define, result):
         m = re.search(r"(\d+) objects", nc)
         cells = int(m.group(1)) if m else -1
         result[arm] = (status, bits, cells)
-    except Exception as e:                                  # red, never skipped
+    # anything else escapes the thread: the arm has NO result, and main reds it
+    except (OSError, ValueError, subprocess.SubprocessError) as e:   # red, never skipped
         result[arm] = ["%s: %r" % (arm, e)]
     finally:
         shutil.rmtree(work, ignore_errors=True)
@@ -260,8 +265,8 @@ def main():
     try:
         print("  qualified pins : ui_in%s (gate_cdc.QUALIFIED)" % qualified_bits())
         print("  allowed raw    : %s (their gate_cdc.SYNC first flops)" % sorted(allowed()))
-        print("  build          : %s (test/Makefile PROJECT_SOURCES, the flop store)" % " ".join(sources()))
-    except Exception as e:
+        print("  build          : %s (test/Makefile PROJECT_SOURCES: the SRAM arm, RAM inline)" % " ".join(sources()))
+    except (OSError, ValueError) as e:      # the spec could not be read: red
         print("  *** %r" % e)
         print("\n  GATE cdc-qual: FAILED")
         return 1
@@ -279,13 +284,19 @@ def main():
         print("\n  GATE cdc-qual: FAILED")
         return 1
     print("  tool           : %s (%s) -- yosys from the same suite" % (sby, how))
-    result, threads = {}, []
-    for arm, define, _e, _m in ARMS:
-        th = threading.Thread(target=run_arm, args=(how, sby, arm, define, result))
-        th.start()
-        threads.append(th)
-    for th in threads:
-        th.join()
+    # PE_CDCQ_JOBS: arms run at once (default 3, CI). A shared machine whose
+    # WSL takes one CPU job at a time runs it with 1 (~3x the wall time).
+    jobs = max(1, int(os.environ.get("PE_CDCQ_JOBS", "3")))
+    print("  arms at once   : %d (PE_CDCQ_JOBS)" % jobs)
+    result, pending = {}, list(ARMS)
+    while pending:
+        batch, pending = pending[:jobs], pending[jobs:]
+        threads = [threading.Thread(target=run_arm, args=(how, sby, a, d, result))
+                   for a, d, _e, _m in batch]
+        for th in threads:
+            th.start()
+        for th in threads:
+            th.join()
     print("  --- arms ---")
     for arm, define, expect, must in ARMS:
         r = result.get(arm, ["%s: no result" % arm])

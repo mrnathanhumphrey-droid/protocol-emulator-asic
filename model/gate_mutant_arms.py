@@ -201,6 +201,7 @@ EXPECT = {
     # CDC-Q (Wilson 11-10): one added line; one swapped wire
     "M_CDC_UB_UNGATED":  (1, None),
     "M_CDC_RAW_WR":      (2, None),
+    "M_MACRO_RAW_BWD":   (2, None),
     "M_CDC_RAW":         (12,
         "one site, SIX lines per arm, declared: the reset release and the "
         "three host level controls each revert to the raw pin, and (v2 slack "
