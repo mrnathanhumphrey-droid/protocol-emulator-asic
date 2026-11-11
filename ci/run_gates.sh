@@ -415,6 +415,11 @@ GATES=(
   # writes (bytes 32..38) == the frozen stage0 (e55d0b63) on the capture as
   # stored, bit for bit; the M_S0_* killer.
   test/run_pit_s0.py
+  # ⭐ v2 PIT stage 3 pieces 2-3 (Wilson 11-05; CI home 11-11): the GCD and the
+  # init/xorout solver, the 16-byte record bit for bit vs pit_golden -- the CI
+  # SUBSET on Verilator (the full 3,688 sets nightly, iverilog at the lock);
+  # the s12 note's M_DECODE_STALE / M_DIVMASK_LATE killer, both must die on it.
+  test/run_pit_gcd.py
   # ⭐ v2 LATCH STORE (Wilson 10-31, Track 2): the array powers up random (M_STORE_NO_FILL
   # and M_STORE_DROP_ROW0 must fail), and pe_store's read-after-write contract
   # stops a bench that reads a byte the cycle after it was written (both ports).
@@ -687,6 +692,11 @@ can_run() {
         || { echo "no verilator and no wsl.exe to reach one"; return 1; } ;;
     model/gate_rtl_lint.py)
       { command -v "$VL" >/dev/null 2>&1 || command -v wsl.exe >/dev/null 2>&1; } \
+        || { echo "no verilator and no wsl.exe to reach one"; return 1; } ;;
+    # the CI subset runs on Verilator (PE_SIM unset -> verilator)
+    test/run_pit_gcd.py)
+      { command -v "$VL" >/dev/null 2>&1 || [ -n "${PE_VERILATOR:-}" ] \
+        || command -v wsl.exe >/dev/null 2>&1; } \
         || { echo "no verilator and no wsl.exe to reach one"; return 1; } ;;
     model/gate_one_encoder.py|model/gate_v2_equiv.py|test/run_pit_capture.py|test/run_pit_s0.py|test/gate_store_latch.py|test/run_branch_check.py|test/run_arm2.py|test/run_pair.py|test/run_usbrx.py|test/run_usbcrc.py|test/run_usbbuf.py|test/run_usbaddr.py|test/run_usbrst.py|test/gl_harness_check.py|test/gate_tb_elaborates.py|test/run_mutants.py|model/gate_sda_hold.py|test/run_w_sweep.py|test/run_cktx.py|test/run_spidelay.py|test/run_spim_witness.py|test/run_spitgt.py|test/run_rxbw.py)
       command -v "$IV" >/dev/null 2>&1 || { echo "iverilog not found (PE_IVERILOG unset and not on PATH)"; return 1; } ;;

@@ -37,6 +37,8 @@ sim1 test/run_lockstep.py
 sim1 test/run_onewire.py
 sim1 test/run_spitgt.py
 sim1 test/run_pit_s0.py
+# gcd -- the PIT GCD/solver CI subset on Verilator (s12 killer); own shard until timed
+gcd test/run_pit_gcd.py
 sim1 test/gate_store_latch.py
 
 # sim2 -- 201 (+ its kill audit) + 197 + 106 + 100 + 9

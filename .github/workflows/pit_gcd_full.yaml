@@ -1,0 +1,41 @@
+name: pit-gcd-full
+# ⭐ THE FULL run_pit_gcd (Wilson 11-11): all 3,696 seeded sets on iverilog, the
+# certifying engine, plus the s12 must-fires on the solver sets. CI's `test`
+# workflow runs only the fixed 214-set subset on Verilator (`gcd` shard).
+# ⚠ A `schedule` fires ONLY on the default branch (cmos5l, the locked tree), so
+# the nightly covers what has been merged; a dev branch runs it by hand
+# (workflow_dispatch), as the full LN1 run is.
+on:
+  schedule:
+    - cron: "17 7 * * *"
+  workflow_dispatch:
+jobs:
+  pit-gcd-full:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      # apt's release iverilog, as the test job: the pinned suite's 14.0-devel
+      # does not build this design (see test.yaml)
+      - name: Install iverilog
+        shell: bash
+        run: sudo apt-get update && sudo apt-get install -y iverilog
+
+      - name: Setup python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Install Python packages
+        shell: bash
+        run: pip install -r test/requirements.txt
+
+      - name: run_pit_gcd --full (iverilog)
+        shell: bash
+        env:
+          PE_SIM: iverilog
+        run: python test/run_pit_gcd.py --full | tee pit_gcd_full.log; test ${PIPESTATUS[0]} -eq 0 && grep -qE '^\s*GATE pit-gcd: PASSED\s*$' pit_gcd_full.log

@@ -205,6 +205,9 @@ SEAMS = (
     ("test/run_pit_capture.py", "run_pit_capture.compare", "slow", "E0"),
     # v2 PIT chunk 2: `table_problems` always empty -> every M_S0_* survives
     ("test/run_pit_s0.py", "run_pit_s0.table_problems", "slow", "E"),
+    # s12 note (11-11): `record_problems` always empty -> M_DECODE_STALE /
+    # M_DIVMASK_LATE's record arms survive on the CI subset
+    ("test/run_pit_gcd.py", "run_pit_gcd.record_problems", "slow", "E"),
     # the clock bundle: `agree` always True -> the typed-delay I2C must-fire
     # must MISS; the pre-decode: `judge` always clean -> the planted decode
     # must STAY GREEN
