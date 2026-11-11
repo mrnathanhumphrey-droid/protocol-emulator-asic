@@ -205,6 +205,9 @@ SEAMS = (
     ("model/gate_predecode_netlist.py", "gate_predecode_netlist.judge", "slow", "E0"),
     # F1.5 (11-09): the host's load contract -> both planted v1 phrasings survive
     ("model/gate_host_contract.py", "gate_host_contract.judge", "fast", "E"),
+    # 11-10: `problems` always empty -> a run missing its area keys, a zero
+    # die, a core larger than the die all read as a valid area line
+    ("model/area_line.py", "area_line.problems", "fast", "E"),
     # F1.5: no consumer types the store size -> the `rom [0:255]` plant survives
     ("model/gate_store_size_literals.py", "gate_store_size_literals.judge", "fast", "E"),
     # F1 / F1.5 board benches: every check ok -> no must-fire has a red reason

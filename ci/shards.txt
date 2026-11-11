@@ -98,6 +98,7 @@ fast test/gate_fpga_synth.py
 # F1.5 (11-09): two text lints, < 1 s each
 fast model/gate_store_size_literals.py
 fast model/gate_host_contract.py
+fast model/area_line.py
 
 # fpga -- F1.5 (11-09): the three board sims, measured locally (see below)
 fpga fpga/sim/run_fpga_loader.py

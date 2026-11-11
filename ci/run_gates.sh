@@ -362,6 +362,8 @@ GATES=(
   # test/), and docs/HOST_INTERFACE.md's load contract == pe_isa + the RTL.
   model/gate_store_size_literals.py
   model/gate_host_contract.py
+  # THE AREA LINE (Wilson 11-10): one definition, every report reads it.
+  model/area_line.py
   # ⛔⛔ HC1 -- W1's eligibility offset held to the RTL: the hold gate opens at
   # decision + HS + 2 on every load (ckdense, on RTL signals), and
   # program_a2.HOLD_PICK_LAG and PORT_SPEC §7E must say the same number.
