@@ -109,6 +109,8 @@ def _pass(policy, v, exc, last):
         return (v[0] + len(v[1]), [], v[2])
     if policy == "ALLOK1":            # (info, [(check, ok, detail)]) -- the FPGA benches
         return (v[0], [(c, True, d) for c, _ok, d in v[1]]) + tuple(v[2:])
+    if policy == "OKNF":              # (ok, fail lines)
+        return (True, [])
     if policy == "NOFAIL":            # one sim's {flags}
         return dict(v, hfail=False, anyfail=False, exercised=True)
     raise SystemExit("meta_stub: unknown policy %r" % policy)

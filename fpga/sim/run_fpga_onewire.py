@@ -50,6 +50,8 @@ import pe_proto as P                         # noqa: E402
 import run_onewire as RO                     # noqa: E402
 import clock                                                      # noqa: E402  Wilson 11-03
 import pe_isa                                                     # noqa: E402  STORE_BYTES (F1.5)
+sys.path.insert(0, HERE)
+import fpga_engine                           # noqa: E402  iverilog only (Wilson 11-10)
 FPGA_HZ = clock.target_hz("fpga")   # the board this runs on, not the chip
 
 try:
@@ -293,6 +295,12 @@ def show(name, ck):
 
 def main():
     print("FPGA 1-Wire build (OW = 1) -- simulation before Vivado")
+    # ⛔ NOT BIT-EXACT ON VERILATOR (11-10): the bus model's open-drain pull-up
+    # is `assign #(RISE_NS, 0)` -- an inertial rise, an instant fall -- which
+    # iverilog honours and Verilator does not; on Verilator the transaction
+    # stalls. Porting it is a bench change (Wilson's call), so: iverilog only.
+    fpga_engine.iverilog_only("tb_fpga_onewire", "the open-drain bus model's inertial "
+                              "rise delay (assign #(RISE_NS, 0)) is iverilog semantics")
     banner("iverilog", "vvp")
     os.makedirs(TMP, exist_ok=True)
     want = set(a for a in sys.argv[1:] if not a.startswith("--"))

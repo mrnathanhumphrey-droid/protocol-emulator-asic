@@ -210,7 +210,10 @@ SEAMS = (
     # F1 / F1.5 board benches: every check ok -> no must-fire has a red reason
     ("fpga/sim/run_fpga_i2c.py", "run_fpga_i2c.judge", "slow", "ALLOK1"),
     ("fpga/sim/run_fpga_onewire.py", "run_fpga_onewire.judge", "slow", "ALLOK1"),
-    # ⛔ the loader is NOT here: see NOT_STUBBABLE and META_DEBT (Wilson 11-10)
+    # the loader: `verdict` always (ok, no FAIL) -> boot / magic / short survive.
+    # Back from META_DEBT (11-10): its four scenarios now run in parallel,
+    # 12m02s on iverilog (was 47m49s in series) -- under the 30-min seam limit
+    ("fpga/sim/run_fpga_loader.py", "run_fpga_loader.verdict", "slow", "OKNF"),
     # F1: every yosys run rc 0 -> the three must-fails "pass"
     ("test/gate_fpga_synth.py", "gate_fpga_synth.run_yosys", "slow", "Z0"),
 )
@@ -240,11 +243,6 @@ NOT_STUBBABLE = {
                                 "and tb_rowmux.v's output; priced by its six "
                                 "must-fire arms",
     "model/gate_meta.py": "this gate",
-    # ⛔ A DEBT, NOT A DESIGN CHOICE (Wilson 11-10) -- META_DEBT below
-    "fpga/sim/run_fpga_loader.py": "a run is ~47 min on iverilog (CI 11-10: "
-                                   "47m49s), over the 30-min seam limit; its "
-                                   "three must-fires (boot / magic / short) "
-                                   "run in the `fpga` shard",
 }
 
 #: ⛔⛔ A GATE LEFT UNSTUBBED FOR A REASON THAT CAN BE FIXED IS A DEBT (Wilson
@@ -256,10 +254,10 @@ NOT_STUBBABLE = {
 #: 30-min seam limit (the Verilator port, its four scenarios in parallel), its
 #: row goes back in SEAMS (policy: `verdict` -> (True, [])) and this entry is
 #: deleted. The seam and meta-slow job limits are NOT raised for it.
-META_DEBT = {
-    "fpga/sim/run_fpga_loader.py": ("the Verilator port of the FPGA benches",
-                                    "the v2 lock (PE_TAG=1, where STALE blocks)"),
-}
+#: ⇒ EMPTY since 11-10: the loader's debt is paid (its scenarios in parallel,
+#:   12m02s on iverilog) and its row is back in SEAMS. The check and its
+#:   must-fires stay, for the next gate that cannot be stubbed in time.
+META_DEBT: dict = {}
 
 #: (gate, seam) -> finding id: stubs that stay GREEN today. Each must go red
 #: when its finding is fixed, and is then STALE (red) until removed.
@@ -433,7 +431,8 @@ def main() -> int:
             rc = 1
     lo = "fpga/sim/run_fpga_loader.py"
     for what, dbt, nts in (
-            ("a debt with an empty owner", {lo: ("", "the v2 lock")}, NOT_STUBBABLE),
+            ("a debt with an empty owner", {lo: ("", "the v2 lock")},
+             dict(NOT_STUBBABLE, **{lo: "x"})),
             ("a debt for a gate not in NOT_STUBBABLE",
              {"model/gate_new.py": ("x", "y")}, NOT_STUBBABLE),
             ("a debt for a gate that does not run in CI", {lo: ("x", "y")},

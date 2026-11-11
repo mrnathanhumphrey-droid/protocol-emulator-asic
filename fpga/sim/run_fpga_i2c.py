@@ -47,6 +47,7 @@ import sim_run                               # noqa: E402
 import i2c_fram as IF                        # noqa: E402
 import pe_isa                                # noqa: E402  STORE_BYTES (F1.5)
 import run_fpga_onewire as RF                # noqa: E402  status_names
+import fpga_engine                           # noqa: E402  iverilog only (Wilson 11-10)
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")
@@ -251,6 +252,12 @@ def count_model_table():
 
 def main():
     print("FPGA I2C FRAM build (OW = 2) -- simulation before Vivado")
+    # ⛔ NOT BIT-EXACT ON VERILATOR (11-10): the bus model's open-drain pull-up
+    # is `assign #(RISE_NS, 0)` -- an inertial rise, an instant fall -- which
+    # iverilog honours and Verilator does not; on Verilator the transaction
+    # stalls. Porting it is a bench change (Wilson's call), so: iverilog only.
+    fpga_engine.iverilog_only("tb_fpga_i2c", "the open-drain bus model's inertial "
+                              "rise delay (assign #(RISE_NS, 0)) is iverilog semantics")
     banner("iverilog", "vvp")
     os.makedirs(TMP, exist_ok=True)
     rc = 0 if tracked() else 1
