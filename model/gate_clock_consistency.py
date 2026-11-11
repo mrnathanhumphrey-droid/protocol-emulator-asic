@@ -34,8 +34,14 @@ to the board config HERE.
      BAND_DEN (a `.BAND_*(` override or a defparam), no config naming them, and
      no bench-only define in its VERILOG_DEFINES.
   7. MUST-FIRES: each check is run against a mutated copy and must go red.
+  9. THE HOST'S PUSH TIMING (Wilson 11-10, CDC bundle): the capture edge is
+     derived from project.v's `wr_rise` (early / late); clock.py's
+     FW_HOLD_CYCLES covers the late edge + 1 and FW_SETUP_CYCLES >= 1; every
+     `gen:` value in docs/HOST_FIRMWARE.md equals clock.py's (cycles, and ns
+     at the band's slow edge -- never typed).
 
-`--write` regenerates the two bench headers' defaults from the board configs.
+`--write` regenerates the two bench headers' defaults from the board configs,
+and the generated values in docs/HOST_FIRMWARE.md.
 """
 
 from __future__ import annotations
@@ -293,6 +299,65 @@ def write_headers():
         print("  wrote %s: %s %d%s" % (rel, macro, val, "" if t2 != t else " (unchanged)"))
 
 
+FIRMWARE = os.path.join("docs", "HOST_FIRMWARE.md")
+GEN = re.compile(r"<!--gen:(\w+)-->(.*?)<!--/gen-->", re.S)
+
+
+def fw_capture_edges(project_text):
+    """(early, late): the chip clock edge, counted from the `wr` pad edge, on
+    which every push captures. `wr_rise = (wr_sync[L+1:L] == 2'b01)`: bit L
+    holds the pad level after edge L+1, so the rise is seen during the cycle
+    after edge L+1 and captured on edge L+2; one later if the synchroniser's
+    first flop resolves late."""
+    m = re.search(r"wire\s+wr_rise\s*=\s*\(\s*wr_sync\s*\[\s*(\d+)\s*:\s*(\d+)\s*\]\s*==\s*2'b01\s*\)",
+                  project_text)
+    if not m or int(m.group(1)) != int(m.group(2)) + 1:
+        return None
+    lo = int(m.group(2))
+    return lo + 2, lo + 3
+
+
+def fw_gen(hz):
+    """{marker: text} for docs/HOST_FIRMWARE.md, from model/clock.py."""
+    slow = float(clock.slow_edge_hz(hz)) / 1e6
+    def t(n):
+        return ("**%d chip cycle%s** (%s ns at the band's slow edge, %.3f MHz, for a %g MHz chip)"
+                % (n, "" if n == 1 else "s", ("%.3f" % float(clock.fw_ns(n, hz))).rstrip("0").rstrip("."),
+                   slow, hz / 1e6))
+    osc = float(clock.usb_osc_allowed(hz)) * 100
+    return {"fw_hold": t(clock.FW_HOLD_CYCLES), "fw_setup": t(clock.FW_SETUP_CYCLES),
+            "fw_usb_osc": "**±%s %%** of nominal (at %g MHz)" % (("%.3f" % osc).rstrip("0").rstrip("."), hz / 1e6)}
+
+
+def fw_check(project_text, doc_text, hz, hold=None, setup=None):
+    """check 9 rows. `hold` / `setup` override clock.py's (the must-fires)."""
+    hold = clock.FW_HOLD_CYCLES if hold is None else hold
+    setup = clock.FW_SETUP_CYCLES if setup is None else setup
+    rows = []
+    edges = fw_capture_edges(project_text)
+    if edges is None:
+        rows.append(("9. wr_rise found in project.v", False, "no `wr_rise = (wr_sync[L+1:L] == 2'b01)`"))
+        return rows
+    early, late = edges
+    rows.append(("9. FW-1 hold covers the late capture + 1", hold >= late + 1,
+                 "hold %d, capture edge %d (late %d)" % (hold, early, late)))
+    rows.append(("9. FW-2 setup >= 1 cycle", setup >= 1, "setup %d" % setup))
+    want, have = fw_gen(hz), dict(GEN.findall(doc_text))
+    for k, v in sorted(want.items()):
+        rows.append(("9. HOST_FIRMWARE.md %s == model/clock.py" % k, have.get(k) == v,
+                     "doc %r" % (have.get(k),) if have.get(k) != v else v))
+    return rows
+
+
+def write_firmware():
+    t = read(FIRMWARE)
+    want = fw_gen(clock.target_hz("chip"))
+    t2 = GEN.sub(lambda m: "<!--gen:%s-->%s<!--/gen-->" % (m.group(1), want.get(m.group(1), m.group(2))), t)
+    with open(os.path.join(ROOT, FIRMWARE), "w", encoding="utf-8", newline="\n") as fh:
+        fh.write(t2)
+    print("  wrote %s%s" % (FIRMWARE, "" if t2 != t else " (unchanged)"))
+
+
 def report(rows):
     rc = 0
     for what, ok, detail in rows:
@@ -306,6 +371,7 @@ def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
     if "--write" in argv:
         write_headers()
+        write_firmware()
         return 0
     rels = ["info.yaml", "fpga/board.yaml", PROJECT, ENGINE, CONFIG, CHIP_VH,
             FPGA_VH, FPGA_TOP, FPGA_TCL]
@@ -325,8 +391,25 @@ def main(argv=None):
     print("  --- 6. the band is on in every synthesis and canary config ---")
     cfgs = canary_configs(files[CONFIG])
     rc |= report(band_on(src, cfgs))
+    print("  --- 9. the host's push timing: derived from the RTL, generated into HOST_FIRMWARE.md ---")
+    chip_hz = clock.target_hz("chip")
+    fw_doc = read(FIRMWARE)
+    rc |= report(fw_check(files[PROJECT], fw_doc, chip_hz))
     print("  --- 7. must-fires (a mutated copy must go red) ---")
     chip = clock.target_hz("chip")
+    # check 9's own: a deeper synchroniser, a typed number, a short hold
+    for what, red in (
+            ("9: a 4-flop wr synchroniser, hold left at 5",
+             any(not ok for _w, ok, _d in fw_check(re.sub(r"wr_sync\[2:1\]", "wr_sync[3:2]", files[PROJECT]),
+                                                     fw_doc, chip_hz))),
+            ("9: 87.7 ns typed into HOST_FIRMWARE.md",
+             any(not ok for _w, ok, _d in fw_check(files[PROJECT], fw_doc.replace("87.5 ns", "87.7 ns"), chip_hz))),
+            ("9: the hold set to 4 cycles",
+             any(not ok for _w, ok, _d in fw_check(files[PROJECT], fw_doc, chip_hz, hold=4))),
+            ("9: the setup set to 0 cycles",
+             any(not ok for _w, ok, _d in fw_check(files[PROJECT], fw_doc, chip_hz, setup=0)))):
+        print("    must-fire: %-40s %s" % (what, "red  ok" if red else "*** MISSED"))
+        rc |= 0 if red else 1
     ps = clock.period_ps(chip)
     other = 60_000_000 if chip != 60_000_000 else 50_000_000   # clock-ok: the must-fire's mismatched clock
     mut = []

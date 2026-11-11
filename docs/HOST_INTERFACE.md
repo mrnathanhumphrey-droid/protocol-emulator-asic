@@ -84,13 +84,14 @@ stable, so no data flop can go metastable.
 
 **The host's rules, at 50 MHz:**
 
-- **Data and tag hold:** `tx_nibble` and `tag` must be stable from **≥ 1 cycle
-  (20 ns) before `wr` rises** until **≥ 4 cycles (80 ns) after it**. The chip
-  samples on the cycle after the synchronized edge is detected. That's 3
-  cycles after the pad edge, or 4 if the first synchronizer flop resolves
-  late. This applies equally to the byte on `uio[7:0]` in load mode, which the
-  load procedure's "hold ≥ 3 clocks" before `wr` and the 3-clock `wr` pulse
-  already cover.
+- **Data and tag hold and setup: see `docs/HOST_FIRMWARE.md` FW-1 and FW-2**
+  (Wilson 11-10: the hold is 5 cycles, the setup 1, every tag included; the
+  numbers live there, generated from `model/clock.py`). The chip samples on
+  the cycle after the synchronized edge is detected: the 3rd clock edge after
+  the pad edge, or the 4th if the first synchronizer flop resolves late. (The
+  rule here read "≥ 4 cycles" until 11-10: the bare worst case, no margin.)
+  The byte on `uio[7:0]` in load mode is covered by the load procedure's
+  "hold ≥ 3 clocks" before `wr` and the 3-clock `wr` pulse.
 - **Level-control ordering:** `prog` and `ptr` must be stable **≥ 3 cycles
   (60 ns) before** the `wr` edge they qualify (their 2-flop synchronizer plus
   one) and stay stable until that edge has been taken, ≥ 4 cycles after it.
@@ -308,13 +309,11 @@ The engine starts only on a program load: there is no start path at power-on.
     `1aaaaaaa` writes the **pending address** (the chip commits it itself when
     the SET_ADDRESS status stage completes), `0x01` **acknowledges a bus
     reset**, anything else is refused. A USB image may not use queue 2.
-  - **A bus reset** (SE0 of ~4 µs) clears the address, READY and the buffer and
-    sends **one kind-5 frame**. Until the RP2040 sends `0x01` on tag 2, every
-    tag-3 byte and pending-address record is **refused** (the TX-full bit), so
-    a record sent before the RP2040 learned of the reset can never land. An
-    acknowledgement with no reset pending changes nothing.
-  - ⚠ **If `rx_drop_sticky` is set while USB is on, assume a reset:** send
-    `0x01` and resynchronise (the backstop for a notice the host missed).
+  - **A bus reset** (SE0 of ~4 µs) clears the address, READY and the buffer,
+    sends **one kind-5 frame**, and refuses tag-3 bytes and pending-address
+    records (the TX-full bit) until it is acknowledged. **The firmware's side
+    -- acknowledging it, and treating `rx_drop_sticky` as a missed reset -- is
+    `docs/HOST_FIRMWARE.md` FW-4 and FW-5** (moved there 11-10).
   - Refusals of either tag set the existing TX-full status bit.
 
 - ⛔ **The marker arrives last**, so a host cannot use it to decide how many

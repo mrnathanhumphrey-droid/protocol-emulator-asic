@@ -263,6 +263,16 @@ module tt_um_protocol_emulator #(
   // that did not exist. `uio_q2` completes the chain and gives edge detection
   // for free off it.
   reg [7:0] uio_q0, uio_q1, uio_q2;
+  // ⭐ PE_SIM_LATE_WR -- SIMULATION ONLY (Wilson 11-10, the host hold rule): the
+  // synchroniser's first flop RESOLVING LATE, the case a zero-delay simulator
+  // never produces. The pad level reaches wr_sync[0] one cycle later, so every
+  // push captures on the 4th edge after the pad edge instead of the 3rd -- the
+  // worst case docs/HOST_FIRMWARE.md FW-1 is sized for. Never in a flow config
+  // (gate_clock_consistency check 5 refuses bench-only defines in synthesis).
+`ifdef PE_SIM_LATE_WR
+  reg wr_pad_late;
+  always @(posedge clk) wr_pad_late <= ui_in[PIN_WR];
+`endif
   always @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
       wr_sync <= 3'b000;
@@ -270,7 +280,11 @@ module tt_um_protocol_emulator #(
       uio_q1  <= 8'h00;
       uio_q2  <= 8'h00;
     end else begin
+`ifdef PE_SIM_LATE_WR
+      wr_sync <= {wr_sync[1:0], wr_pad_late};
+`else
       wr_sync <= {wr_sync[1:0], ui_in[PIN_WR]};
+`endif
       uio_q0  <= uio_in;
       uio_q1  <= uio_q0;
       uio_q2  <= uio_q1;

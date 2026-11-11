@@ -128,6 +128,16 @@
   // MISSED push is invisible: the byte simply never arrives and the lane
   // underruns, which looks exactly like the starved regime this file exists
   // to leave.
+  // ⛔⛔ THE HOLD IS docs/HOST_FIRMWARE.md FW-1 (Wilson 11-10): a bench driver
+  // that breaks the documented rule is a host the spec forbids, and every bench
+  // passing on it is evidence for the wrong host. `wr` rises at the 2nd negedge,
+  // stays high 3 cycles, and the nibble changes at the NEXT call's start:
+  // hold = 3 + (HF_HOLD - 3) cycles after `wr` rises. Until 11-10 it was 4
+  // (the bare worst case). HF_HOLD may be overridden ONLY by the hold-rule
+  // gate's must-fire (test/run_hold_rule.py), which proves 4 is too short.
+`ifndef HF_HOLD
+`define HF_HOLD 5
+`endif
   task hf_push_nib;
     input [3:0] nib;
     input [1:0] tag;
@@ -139,7 +149,7 @@
       ui_in[6]   = 1'b1;
       @(negedge clk); @(negedge clk); @(negedge clk);
       ui_in[6]   = 1'b0;
-      @(negedge clk);
+      repeat (`HF_HOLD - 3) @(negedge clk);
       hf_pushes = hf_pushes + 1;
     end
   endtask

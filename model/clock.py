@@ -229,6 +229,34 @@ def usb_osc_allowed(f=None):
     return usb_ls_tol(f) - usb_quant_err(f)
 
 
+# ---------------------------------------------------------------------------
+# ⭐ THE HOST'S PUSH TIMING (Wilson 11-10, CDC bundle). Every push holds the
+# nibble / tag pins (ui_in[4:0]) from FW_SETUP_CYCLES before `wr` rises until
+# FW_HOLD_CYCLES after it, in CHIP cycles. Derived from the RTL by
+# gate_clock_consistency check 9 (`wr` passes WR_SYNC_FLOPS flops; the data is
+# captured on edge WR_SYNC_FLOPS after the pad edge, or one later if the first
+# flop resolves late): hold = that late edge + 1 cycle of margin (capture-flop
+# hold, nibble-to-WR pin skew -- TT's FAQ puts the I/O round trip near 10 ns).
+# Setup: the earliest capture is >= 2 cycles after the pad edge, so a nibble
+# stable when `wr` rises is already safe; the 1 cycle is skew margin, the same
+# margin the hold carries.
+# ---------------------------------------------------------------------------
+FW_HOLD_CYCLES = 5
+FW_SETUP_CYCLES = 1
+
+
+def slow_edge_hz(f=None):
+    """The slowest clock the band covers: f / BAND (57.142857 MHz at 60)."""
+    f = hz() if f is None else int(f)
+    return Fraction(f) / BAND
+
+
+def fw_ns(cycles, f=None):
+    """A host-side time for `cycles` chip cycles, at the SLOW edge of the band
+    (Wilson 11-10): the firmware must cover the longest cycle it may meet."""
+    return Fraction(cycles * 10 ** 9) / slow_edge_hz(f)
+
+
 def main():
     for t in sorted(TARGETS):
         f = target_hz(t)
