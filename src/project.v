@@ -2449,6 +2449,48 @@ module pe_pit_s12 #(parameter integer AW = 9) (
                    P_S0 = 7'd98, P_V0 = 7'd99, P_V1 = 7'd100, P_V2 = 7'd101, P_V3 = 7'd102, P_V4 = 7'd103,
                    P_V5 = 7'd104, P_V6 = 7'd105, P_X1 = 7'd106, P_X2 = 7'd107, P_X3 = 7'd108, P_X4 = 7'd109,
                    P_X5 = 7'd110, P_F = 7'd111, P_W0 = 7'd112, P_W1 = 7'd113, P_W2 = 7'd114;
+  // ===========================================================================
+  // ⭐ s12 NOTE §1 (Wilson 11-09 correction): THE STEP DECODES, REGISTERED FROM
+  // THE VALUE t3 IS ABOUT TO TAKE. Every ``T3((X` is `T3(X), which writes t3
+  // and f3 = t3fl(X) in the same statement, so f3 is ALWAYS the decode of the
+  // current t3: the datapath sees exactly the decode it saw before, from a flop
+  // instead of a 7-bit compare (the slow corner's worst path started with that
+  // compare and its buffer). Zero cycles. Conditions on DATA stay combinational.
+  // Proved every cycle in simulation (the assertion at the end of the module)));
+  // M_DECODE_STALE decodes the OLD t3 and must make it fire.
+  // ===========================================================================
+  localparam integer NF3 = 19;
+  localparam integer F_S0 = 0, F_V0 = 1, F_V1 = 2, F_V2 = 3, F_V3 = 4, F_V4 = 5, F_V5 = 6, F_DV = 7, F_P25 = 8, F_X4 = 9, F_Y6 = 10, F_G2 = 11, F_SHX = 12, F_ONE = 13, F_ZERO = 14, F_PBA = 15, F_P6 = 16, F_F = 17, F_W2 = 18;
+  function [NF3-1:0] t3fl(input [6:0] v);
+    begin
+      t3fl = {NF3{1'b0}};
+      t3fl[F_S0] = (v == P_S0);
+      t3fl[F_V0] = (v == P_V0);
+      t3fl[F_V1] = (v == P_V1);
+      t3fl[F_V2] = (v == P_V2);
+      t3fl[F_V3] = (v == P_V3);
+      t3fl[F_V4] = (v == P_V4);
+      t3fl[F_V5] = (v == P_V5);
+      t3fl[F_DV] = (v == P_V1 || v == P_V3 || v == P_V5);
+      t3fl[F_P25] = (v == P_P2 || v == P_P5);
+      t3fl[F_X4] = (v == P_X4);
+      t3fl[F_Y6] = (v == P_Y6);
+      t3fl[F_G2] = (v == P_G2);
+      t3fl[F_SHX] = (v == P_D4 || v == P_P2 || v == P_P5 || v == P_Y4 || v == P_X4);
+      t3fl[F_ONE] = (v == P_P1 || v == P_P4);
+      t3fl[F_ZERO] = (v == P_Y1 || v == P_V0 || v == P_V4);
+      t3fl[F_PBA] = (v == P_P3 || v == P_V6);
+      t3fl[F_P6] = (v == P_P6);
+      t3fl[F_F] = (v == P_F);
+      t3fl[F_W2] = (v == P_W2);
+    end
+  endfunction
+  reg  [NF3-1:0] f3;
+`ifdef M_DECODE_STALE
+`define T3(x) {t3, f3} <= {(x), t3fl(t3)}
+`else
+`define T3(x) {t3, f3} <= {(x), t3fl(x)}
+`endif
   // the width: w = 8 / 16 / 32 (code 1 / 2 / 3), w / 8 CRC bytes, g with its top bit
   wire [7:0]  p_nb  = (`P_WC == 2'd1) ? 8'd1 : (`P_WC == 2'd2) ? 8'd2 : 8'd4;
   wire [32:0] p_gf  = {1'b0, `P_G} | ((`P_WC == 2'd1) ? 33'h100 : (`P_WC == 2'd2) ? 33'h10000 : 33'h100000000);
@@ -2460,7 +2502,7 @@ module pe_pit_s12 #(parameter integer AW = 9) (
   wire        p_top = (`P_WC == 2'd1) ? p_ar[7] : (`P_WC == 2'd2) ? p_ar[15] : p_ar[31];
   wire [31:0] p_sh  = (`P_WC == 2'd1) ? {24'd0, p_ar[6:0], 1'b0} :
                       (`P_WC == 2'd2) ? {16'd0, p_ar[14:0], 1'b0} : {p_ar[30:0], 1'b0};
-  wire        p_in  = (t3 == P_P2 || t3 == P_P5) ? 1'b0 : p_bit;       // P': zeros
+  wire        p_in  = f3[F_P25] ? 1'b0 : p_bit;       // P': zeros
   wire [31:0] p_lf  = p_sh ^ ((p_top ^ p_in) ? `P_G : 32'd0);
   wire [31:0] p_rot = p_sh | {31'd0, p_top ^ p_in};
   // the division step: {r, Q} <<= 1, subtract when deg r = deg d. Q shifts
@@ -2468,12 +2510,29 @@ module pe_pit_s12 #(parameter integer AW = 9) (
   // a 32-bit dividend (v), 33 for g with its top (u) -- leading zeros do nothing
   wire [32:0] p_uu  = `P_U;
   wire [31:0] p_vv  = `P_V;
-  wire        p_qv  = (t3 == P_V3) ? p_uu[32] : p_vv[31];
+  wire        p_qv  = f3[F_V3] ? p_uu[32] : p_vv[31];
   wire [32:0] p_ri  = {acc[40:9], p_qv};
-  wire [32:0] p_d   = (t3 == P_V5) ? `P_U : `P_B;
-  wire [32:0] p_cx  = (t3 == P_S0) ? `P_A : p_ri ^ p_d;
-  wire [32:0] p_cy  = (t3 == P_S0) ? `P_B : p_ri;
-  wire        p_lt  = (p_cx < p_cy);                 // THE compare
+  wire [32:0] p_d   = f3[F_V5] ? `P_U : `P_B;
+  // ⭐ s12 NOTE §2: THE compare (one 33-bit magnitude compare behind a t3 select)
+  // is SPLIT BY USE. The gcd swap (P_S0) compares two flop groups directly, no
+  // select in front. A division step's degree test (r ^ d) < r is r[top(d)]: r and
+  // r ^ d differ only where d has ones, the highest at top(d) (both 0 when d = 0).
+  // d is FIXED for a whole loop (P_B across V1 and V3, P_U across V5; nothing in
+  // the loops writes them), so its one-hot top is loaded the step BEFORE each loop
+  // (V0, V2, V4) into p_dm, and the test is an AND-OR tree with no ripple.
+  // Bit-exact by the identity, 0 cycles; the assertion at the end of the module
+  // checks it against the old compare on every division step, and
+  // M_DIVMASK_LATE (the mask loaded a step late) must break it.
+  wire        p_lt_s0  = (`P_A < `P_B);              // the gcd swap test
+  reg  [32:0] p_dm;                                  // one-hot top(d)
+  wire        p_lt_div = |(p_ri & p_dm);             // (r ^ d) < r
+  function [32:0] top1(input [32:0] v);              // v's highest set bit, one-hot
+    integer k;
+    begin
+      top1 = 33'd0;
+      for (k = 0; k < 33; k = k + 1) if (v[k]) top1 = 33'd1 << k;
+    end
+  endfunction
   // MESSAGE POINTERS as 10 bits (Wilson 11-06, found by the reason code):
   // messages that fill the store end at 512, which a 9-bit pointer holds as 0
   // -- the end then read as an empty store (the capacity rule saw a free one)
@@ -2554,42 +2613,41 @@ module pe_pit_s12 #(parameter integer AW = 9) (
   localparam [2:0] PU_HOLD = 3'd0, PU_HALF = 3'd2, PU_V = 3'd3, PU_XV = 3'd4, PU_GF = 3'd5,
                    PU_DIV = 3'd6;
   localparam [2:0] PV_HOLD = 3'd0, PV_A = 3'd1, PV_ZERO = 3'd2, PV_U = 3'd3, PV_DIV = 3'd4;
-  reg [3:0] pa_op;
-  reg [2:0] pb_op, pu_op, pv_op;
-  always @(*) begin
-    pa_op = PA_HOLD; pb_op = PB_HOLD; pu_op = PU_HOLD; pv_op = PV_HOLD;
-    if (st == S_S3)
-      case (t3)
-        P_G2:   if (`G_GRD == `P_LC && al[8:0] != `S3_WP && `P_M0F && `P_OK) pa_op = PA_ZERO;
-        P_D4, P_P2, P_P5, P_Y4, P_X4:
-                pa_op = PA_SHX;
-        P_P1, P_P4: pa_op = PA_ONE;
-        P_Y1, P_V0, P_V4:
-                pa_op = PA_ZERO;
-        P_P3, P_V6: pb_op = PB_A;
-        P_P6:   pb_op = PB_XA;
-        P_Y6:   if (!`P_YF) pv_op = PV_A;
-                else begin pu_op = PU_XV; pa_op = PA_B; pb_op = PB_GF; pv_op = PV_ZERO; end
-        P_S0:   if (`P_A != 33'd0) begin
-                  if (!acc[9]) begin pa_op = PA_SH; pu_op = PU_HALF; end                // a even
-                  else if (p_lt) begin pa_op = PA_B; pb_op = PB_A; pu_op = PU_V; pv_op = PV_U; end  // swap
-                  else begin pa_op = PA_XB; pu_op = PU_XV; end
-                end
-        P_V1, P_V5: begin pa_op = PA_SHX; pv_op = PV_DIV; end
-        P_V3:   begin pa_op = PA_SHX; pu_op = PU_DIV; end
-        P_V2:   begin pa_op = PA_ZERO; pu_op = PU_GF; end
-        P_F:    begin pa_op = PA_ZERO; pb_op = PB_ZERO; end
-        P_W2:   if (`P_J < 8'd4) pb_op = PB_S8; else pa_op = PA_S8;
-        default: ;
-      endcase
-  end
-  reg [32:0] pa_nx, pb_nx, pu_nx;
+  // ⭐ s12 NOTE §3: THE OP SELECT, ONE KEPT COPY PER REGISTER GROUP. The swap test
+  // chose every group's operation through ONE driver (b6: `_24011_`, a 7-buffer chain
+  // across the die; the new pin: `_72831_`, one weak cell on a 0.30 pF net). Each
+  // copy drives only its own group: A = acc (`P_A`), B = dv_r/dv_q (`P_B`, the low
+  // `P_U`), D = dv_d (the high `P_U`, `P_V`). `pe_s3_opsel` is (* keep_hierarchy *)
+  // so opt_merge cannot fold the copies back into one (the pe_dup_ff rule). Its
+  // inputs are the §1 flags, never t3.
+  wire [3:0] pa_op, pa_op_b, pa_op_d;
+  wire [2:0] pb_op, pb_op_a, pb_op_d;
+  wire [2:0] pu_op_lo, pu_op_hi, pu_op_a;
+  wire [2:0] pv_op, pv_op_a, pv_op_b;
+  wire       op_s3  = (st == S_S3);
+  wire       op_g2  = (`G_GRD == `P_LC) && (al[8:0] != `S3_WP) && `P_M0F && `P_OK;
+  wire       op_anz = (`P_A != 33'd0);
+  wire       op_j4  = (`P_J < 8'd4);
+  wire [9:0] op_f   = {f3[F_G2], f3[F_SHX], f3[F_ONE], f3[F_ZERO], f3[F_PBA], f3[F_P6],
+                       f3[F_Y6], f3[F_S0], f3[F_V2], f3[F_F]};
+  wire [2:0] op_fx  = {f3[F_V1] | f3[F_V5], f3[F_V3], f3[F_W2]};
+  pe_s3_opsel u_ops_a (.s3(op_s3), .f(op_f), .fx(op_fx), .g2(op_g2), .yf(`P_YF), .anz(op_anz),
+                       .aodd(acc[9]), .lt(p_lt_s0), .j4(op_j4),
+                       .pa_op(pa_op), .pb_op(pb_op_a), .pu_op(pu_op_a), .pv_op(pv_op_a));
+  pe_s3_opsel u_ops_b (.s3(op_s3), .f(op_f), .fx(op_fx), .g2(op_g2), .yf(`P_YF), .anz(op_anz),
+                       .aodd(acc[9]), .lt(p_lt_s0), .j4(op_j4),
+                       .pa_op(pa_op_b), .pb_op(pb_op), .pu_op(pu_op_lo), .pv_op(pv_op_b));
+  pe_s3_opsel u_ops_d (.s3(op_s3), .f(op_f), .fx(op_fx), .g2(op_g2), .yf(`P_YF), .anz(op_anz),
+                       .aodd(acc[9]), .lt(p_lt_s0), .j4(op_j4),
+                       .pa_op(pa_op_d), .pb_op(pb_op_d), .pu_op(pu_op_hi), .pv_op(pv_op));
+  wire _unused_ops = &{1'b0, pa_op_b, pa_op_d, pb_op_a, pb_op_d, pu_op_a, pv_op_a, pv_op_b};
+  reg [32:0] pa_nx, pb_nx, pu_nx_lo, pu_nx_hi;
   // a's shift-left step, (a << 1 | bit) ^ (c ? K : 0): the register (fb, g), the
   // rotate (top ^ bit, 1: sh | x = sh ^ x as sh[0] = 0), the division (lt, d)
-  wire        p_dv  = (t3 == P_V1) || (t3 == P_V3) || (t3 == P_V5);
+  wire        p_dv  = f3[F_DV];
   wire [32:0] p_sx  = p_dv ? p_ri : {1'b0, p_sh};
-  wire        p_sc  = p_dv ? p_lt : (p_top ^ p_in);
-  wire [32:0] p_sk  = p_dv ? p_d : (t3 == P_X4 && `P_YF) ? 33'd1 : {1'b0, `P_G};
+  wire        p_sc  = p_dv ? p_lt_div : (p_top ^ p_in);
+  wire [32:0] p_sk  = p_dv ? p_d : (f3[F_X4] && `P_YF) ? 33'd1 : {1'b0, `P_G};
   reg [31:0] pv_nx;
   always @(*) begin
     case (pa_op)
@@ -2608,17 +2666,25 @@ module pe_pit_s12 #(parameter integer AW = 9) (
       PB_S8:   pb_nx = `P_B >> 8;
       default: pb_nx = 33'd0;
     endcase
-    case (pu_op)
-      PU_HALF: pu_nx = p_uu[0] ? ((p_uu ^ p_gf) >> 1) : (p_uu >> 1);   // u / x mod g
-      PU_V:    pu_nx = {1'b0, p_vv};
-      PU_XV:   pu_nx = ((t3 == P_Y6) ? `P_A : p_uu) ^ {1'b0, p_vv};   // y' = a ^ v; the gcd's u ^= v
-      PU_GF:   pu_nx = p_gf;
-      default: pu_nx = {p_uu[31:0], p_lt};                              // PU_DIV
+    // u twice: its dv_r part on group B's op, its dv_d part on group D's (§3)
+    case (pu_op_lo)
+      PU_HALF: pu_nx_lo = p_uu[0] ? ((p_uu ^ p_gf) >> 1) : (p_uu >> 1);   // u / x mod g
+      PU_V:    pu_nx_lo = {1'b0, p_vv};
+      PU_XV:   pu_nx_lo = (f3[F_Y6] ? `P_A : p_uu) ^ {1'b0, p_vv};   // y' = a ^ v; the gcd's u ^= v
+      PU_GF:   pu_nx_lo = p_gf;
+      default: pu_nx_lo = {p_uu[31:0], p_lt_div};                       // PU_DIV
+    endcase
+    case (pu_op_hi)
+      PU_HALF: pu_nx_hi = p_uu[0] ? ((p_uu ^ p_gf) >> 1) : (p_uu >> 1);   // u / x mod g
+      PU_V:    pu_nx_hi = {1'b0, p_vv};
+      PU_XV:   pu_nx_hi = (f3[F_Y6] ? `P_A : p_uu) ^ {1'b0, p_vv};   // y' = a ^ v; the gcd's u ^= v
+      PU_GF:   pu_nx_hi = p_gf;
+      default: pu_nx_hi = {p_uu[31:0], p_lt_div};                       // PU_DIV
     endcase
     case (pv_op)
       PV_A:    pv_nx = acc[40:9];
       PV_U:    pv_nx = p_uu[31:0];
-      PV_DIV:  pv_nx = {p_vv[30:0], p_lt};
+      PV_DIV:  pv_nx = {p_vv[30:0], p_lt_div};
       default: pv_nx = 32'd0;
     endcase
   end
@@ -2656,9 +2722,9 @@ module pe_pit_s12 #(parameter integer AW = 9) (
       acc <= 75'd0; f_clock <= 1'b0; f_manch <= 1'b0; f_nrzi <= 1'b0; f_irreg <= 1'b0; f_atry <= 1'b0;
       f_body <= 1'b0; a_idle <= 1'b0; L <= 4'd7; a_L <= 4'd0;
       cls <= C_NONE; why <= 3'd0; cond <= 1'b0; wh <= 1'b0; f_span <= 1'b0; wb <= 4'd0;
-      t3 <= T_RD; re <= 1'b0; s3_found <= 1'b0; s3_fbs <= 1'b0; s3_nmsg <= 8'd0;
+      t3 <= T_RD; f3 <= t3fl(T_RD); re <= 1'b0; s3_found <= 1'b0; s3_fbs <= 1'b0; s3_nmsg <= 8'd0;
       s3_why <= 4'd0; g_try <= 1'b0; g_skip <= 1'b0;
-      al <= 27'd0; al_lt <= 1'b0; a_ph <= 1'b0;
+      al <= 27'd0; al_lt <= 1'b0; a_ph <= 1'b0; p_dm <= 33'd0;
     end else if (!run) begin
       st <= S_IDLE; walk_go <= 1'b0; hold <= 1'b0; we <= 1'b0; done <= 1'b0; dv_busy <= 1'b0;
       x_v <= 1'b0; wend <= 1'b0; re <= 1'b0; a_ph <= 1'b0;
@@ -2927,7 +2993,7 @@ module pe_pit_s12 #(parameter integer AW = 9) (
         end
         // stage 3 follows wire 7's record (Wilson 11-05): `done` is stages 1-3
         S_NEXT: if (w == 3'd7) begin
-                  w <= 3'd0; wb <= 4'd0; st <= S_S3; t3 <= T_RD;
+                  w <= 3'd0; wb <= 4'd0; st <= S_S3; `T3((T_RD));
                   s3_found <= 1'b0; s3_fbs <= 1'b0; s3_nmsg <= 8'd0;
                   s3_why <= 4'd0; g_try <= 1'b0; g_skip <= 1'b0;
                 end else begin w <= w + 3'd1; st <= S_WIRE; end
@@ -2937,13 +3003,13 @@ module pe_pit_s12 #(parameter integer AW = 9) (
           a_ph <= 1'b0;
           case (t3)
             // ---- stage 2's record of the first NRZ_ASYNC wire (40 + 10w + wb) ----
-            T_RD: begin re <= 1'b1; t3 <= T_RW; end
-            T_RW: t3 <= T_RV;                          // the store registers rdata
+            T_RD: begin re <= 1'b1; `T3((T_RW)); end
+            T_RW: `T3((T_RV));                          // the store registers rdata
             T_RV: begin
-              t3 <= T_RD;
+              `T3((T_RD));
               case (wb)
                 4'd0: if (rdata[7:5] == C_ASYNC) begin s3_found <= 1'b1; wb <= 4'd1; end
-                      else if (w == 3'd7) t3 <= T_CK;         // no UART wire: a clocked bus?
+                      else if (w == 3'd7) `T3((T_CK));         // no UART wire: a clocked bus?
                       else w <= w + 3'd1;
                 4'd1: begin p16[18:16] <= rdata[6:4]; acc[62:59] <= rdata[3:0]; wb <= 4'd2; end
                 4'd2: begin p16[15:8] <= rdata; wb <= 4'd3; end
@@ -2952,9 +3018,9 @@ module pe_pit_s12 #(parameter integer AW = 9) (
                 default: begin
                   acc[57:50] <= rdata;
                   if ({acc[62:58], rdata} < S3_MIN_FB) begin
-                    s3_fbs <= 1'b1; s3_why <= 4'd1; t3 <= G_INI; `G_K <= 8'd0;
+                    s3_fbs <= 1'b1; s3_why <= 4'd1; `T3((G_INI)); `G_K <= 8'd0;
                   end
-                  else begin `S3_P30 <= 30'd0; `S3_HLE <= 1'b0; wb <= 4'd12; t3 <= T_MUL; end
+                  else begin `S3_P30 <= 30'd0; `S3_HLE <= 1'b0; wb <= 4'd12; `T3((T_MUL)); end
                 end
               endcase
             end
@@ -2967,47 +3033,47 @@ module pe_pit_s12 #(parameter integer AW = 9) (
               if (wb == 4'd0) begin
                 `S3_FL <= (`S3_HLE | acc[29] | hi5[4] | hi5[3]) ? {25{1'b1}} : {hi5[2:0], al[25:4]};
                 `S3_TOT <= 25'd0; `S3_CLEN <= 16'd0; `S3_IDLE <= 1'b0;
-                walk_go <= 1'b1; t3 <= T_PRE;
+                walk_go <= 1'b1; `T3((T_PRE));
               end
             end
             // ---- the pre-pass: total, and the level of the FIRST longest interval ----
-            T_PRE: if (x_v) begin `S3_TOT <= al[24:0]; t3 <= T_PRE1; end
+            T_PRE: if (x_v) begin `S3_TOT <= al[24:0]; `T3((T_PRE1)); end
                    else if (pass_end) begin
-                     walk_go <= 1'b1; t3 <= T_CHK;
+                     walk_go <= 1'b1; `T3((T_CHK));
                      `S3_X <= 25'd0; `S3_E <= 25'd0; `S3_CUR <= 1'b0; `S3_HLE <= 1'b0;
                      `S3_OPEN <= 1'b0; `S3_MBYTE <= 1'b0; `S3_WP <= S3_CAP; s3_nmsg <= 8'd0;
                    end
             T_PRE1: begin
               if (al_lt) begin `S3_CLEN <= x_iv; `S3_IDLE <= x_lvl; end   // max < interval
-              x_v <= 1'b0; hold <= 1'b0; t3 <= T_PRE;
+              x_v <= 1'b0; hold <= 1'b0; `T3((T_PRE));
             end
             // ---- the decode (golden async_bytes): scan, locate, step / find ----
-            T_CHK: t3 <= al_lt ? T_LOC : T_END;                 // x < total
+            T_CHK: `T3((al_lt ? T_LOC : T_END));                 // x < total
             T_LOC: if (!`S3_CUR) begin
-                     if (x_v) t3 <= T_ADV; else if (exh) t3 <= T_END;
-                   end else if (al_lt | exh) t3 <= (`S3_L == `S3_IDLE) ? T_STEP : T_FOUND;
-                   else if (x_v) t3 <= T_ADV;
+                     if (x_v) `T3((T_ADV)); else if (exh) `T3((T_END));
+                   end else if (al_lt | exh) `T3(((`S3_L == `S3_IDLE) ? T_STEP : T_FOUND));
+                   else if (x_v) `T3((T_ADV));
             T_ADV: begin                                        // the next interval [e, e + len)
               `S3_E <= al[24:0]; `S3_CLEN <= x_iv; `S3_L <= x_lvl; `S3_CUR <= 1'b1;
-              x_v <= 1'b0; hold <= 1'b0; t3 <= `S3_MBYTE ? T_MLOC : T_LOC;
+              x_v <= 1'b0; hold <= 1'b0; `T3((`S3_MBYTE ? T_MLOC : T_LOC));
             end
-            T_STEP:  begin `S3_X <= al[24:0]; t3 <= T_CHK; end  // x += step
-            T_FOUND: begin `S3_X <= al[24:0]; t3 <= T_SPL; end  // s = e - len: back up to the edge
+            T_STEP:  begin `S3_X <= al[24:0]; `T3((T_CHK)); end  // x += step
+            T_FOUND: begin `S3_X <= al[24:0]; `T3((T_SPL)); end  // s = e - len: back up to the edge
             T_SPL: begin                                        // s > le + 5 p16 / 4: a new message
               if (`S3_HLE & `S3_OPEN & al_lt) begin
                 we <= 1'b1; waddr <= `S3_LA; wdata <= `S3_MLEN; `S3_OPEN <= 1'b0;
                 if (s3_nmsg != 8'hFF) s3_nmsg <= s3_nmsg + 8'd1;
               end
-              t3 <= T_SA0;
+              `T3((T_SA0));
             end
-            T_SA0: begin `S3_SA <= al[22:0]; `S3_BI <= 3'd0; `S3_MBYTE <= 1'b1; t3 <= T_MID; end
-            T_MID: begin `S3_LQ <= al[24:0]; t3 <= T_MLOC; end   // mid = s + (2b + 3) p16 / 32
-            T_MLOC: if (al_lt | exh) begin `S3_BY <= {`S3_L, bh[7:1]}; t3 <= T_SAI; end
-                    else if (x_v) t3 <= T_ADV;
+            T_SA0: begin `S3_SA <= al[22:0]; `S3_BI <= 3'd0; `S3_MBYTE <= 1'b1; `T3((T_MID)); end
+            T_MID: begin `S3_LQ <= al[24:0]; `T3((T_MLOC)); end   // mid = s + (2b + 3) p16 / 32
+            T_MLOC: if (al_lt | exh) begin `S3_BY <= {`S3_L, bh[7:1]}; `T3((T_SAI)); end
+                    else if (x_v) `T3((T_ADV));
             T_SAI: begin
-              `S3_SA <= al[22:0]; `S3_BI <= `S3_BI + 3'd1; t3 <= T_MID;
+              `S3_SA <= al[22:0]; `S3_BI <= `S3_BI + 3'd1; `T3((T_MID));
               if (`S3_BI == 3'd7) begin
-                we <= 1'b1; wdata <= `S3_BY; t3 <= T_XE;
+                we <= 1'b1; wdata <= `S3_BY; `T3((T_XE));
                 if (`S3_OPEN) begin waddr <= `S3_WP; `S3_WP <= `S3_WP + 9'd1; `S3_MLEN <= `S3_MLEN + 8'd1; end
                 else begin
                   `S3_LA <= `S3_WP; waddr <= `S3_WP + 9'd1; `S3_WP <= `S3_WP + 9'd2;
@@ -3015,21 +3081,21 @@ module pe_pit_s12 #(parameter integer AW = 9) (
                 end
               end
             end
-            T_XE:  begin `S3_X <= al[25] ? {25{1'b1}} : al[24:0]; `S3_MBYTE <= 1'b0; t3 <= T_LQ1; end
-            T_LQ1: begin `S3_LQ <= al[24:0]; t3 <= T_LQ2; end
-            T_LQ2: begin `S3_LQ <= al[24:0]; `S3_HLE <= 1'b1; t3 <= T_CHK; end
+            T_XE:  begin `S3_X <= al[25] ? {25{1'b1}} : al[24:0]; `S3_MBYTE <= 1'b0; `T3((T_LQ1)); end
+            T_LQ1: begin `S3_LQ <= al[24:0]; `T3((T_LQ2)); end
+            T_LQ2: begin `S3_LQ <= al[24:0]; `S3_HLE <= 1'b1; `T3((T_CHK)); end
             T_END: begin
               if (`S3_OPEN) begin
                 we <= 1'b1; waddr <= `S3_LA; wdata <= `S3_MLEN; `S3_OPEN <= 1'b0;
                 if (s3_nmsg != 8'hFF) s3_nmsg <= s3_nmsg + 8'd1;
               end
-              x_v <= 1'b0; hold <= 1'b0; t3 <= T_DRAIN;
+              x_v <= 1'b0; hold <= 1'b0; `T3((T_DRAIN));
             end
-            T_DRAIN: begin x_v <= 1'b0; hold <= 1'b0; if (pass_end) begin t3 <= G_INI; `G_K <= 8'd0; end end
+            T_DRAIN: begin x_v <= 1'b0; hold <= 1'b0; if (pass_end) begin `T3((G_INI)); `G_K <= 8'd0; end end
             // ---- the clocked bus (Wilson 11-06): stage 0 picks it, pe_pit captures it
             //      again as messages; the solver below runs on them unchanged ----
             T_CK: if (ck_fin) begin
-                    t3 <= G_INI; `G_K <= 8'd0;
+                    `T3((G_INI)); `G_K <= 8'd0;
                     if (ck_ok) begin s3_found <= 1'b1; w <= ck_w; `S3_WP <= ck_wp; s3_nmsg <= ck_nmsg; end
                     else s3_why <= ck_why;
                   end
@@ -3040,18 +3106,18 @@ module pe_pit_s12 #(parameter integer AW = 9) (
               wdata <= (dv_q[10:8] == 3'd0 && s3_found) ? {5'b00001, w} : 8'd0;
               `G_K <= `G_K + 8'd1;
               if (dv_q[10:8] == 3'd7) begin
-                if (s3_found && !s3_fbs) begin `G_HP <= S3_CAP; t3 <= G_HDR; end
-                else t3 <= G_FIN;
+                if (s3_found && !s3_fbs) begin `G_HP <= S3_CAP; `T3((G_HDR)); end
+                else `T3((G_FIN));
               end
             end
             // ---- each message that is the FIRST of its length starts a group ----
-            G_HDR:  if (!al_lt) t3 <= G_FIN;                               // hp >= end
-                    else begin `G_RA <= `G_HP; `G_RRET <= G_HDR1; t3 <= G_RD; end
+            G_HDR:  if (!al_lt) `T3((G_FIN));                               // hp >= end
+                    else begin `G_RA <= `G_HP; `G_RRET <= G_HDR1; `T3((G_RD)); end
             G_HDR1: begin
-              `G_LEN <= `G_GRD; `G_Q <= S3_CAP; `G_CNT <= 8'd0; `G_NF <= 1'b0; `G_PAST <= 1'b0; t3 <= G_CS;
+              `G_LEN <= `G_GRD; `G_Q <= S3_CAP; `G_CNT <= 8'd0; `G_NF <= 1'b0; `G_PAST <= 1'b0; `T3((G_CS));
             end
-            G_CS:   if (!al_lt) t3 <= G_CSE;                               // q >= end
-                    else begin `G_RA <= `G_Q; `G_RRET <= G_CS1; t3 <= G_RD; end
+            G_CS:   if (!al_lt) `T3((G_CSE));                               // q >= end
+                    else begin `G_RA <= `G_Q; `G_RRET <= G_CS1; `T3((G_RD)); end
             G_CS1: begin                                                    // count, and "first?"
               if (`G_Q == `G_HP) `G_PAST <= 1'b1;
               // the LAST message is never evidence (Wilson 11-06): its q + len + 1 is the end
@@ -3063,37 +3129,37 @@ module pe_pit_s12 #(parameter integer AW = 9) (
                 `G_CNT <= `G_CNT + 8'd1;
                 if (!`G_PAST && `G_Q != `G_HP) `G_NF <= 1'b1;
               end
-              `G_Q <= al[8:0]; t3 <= G_CS;                                  // q + len + 1
+              `G_Q <= al[8:0]; `T3((G_CS));                                  // q + len + 1
             end
             // < 2 frames: not a group (golden); the capacity rule then decides
             // tried / skipped (the reason code), and < 4 frames (< 3
             // differences) is never a candidate
-            G_CSE:  if (`G_NF || `G_CNT < 8'd2) begin `G_LSB <= 1'b1; t3 <= G_GNX; end
-                    else t3 <= G_CAP;
+            G_CSE:  if (`G_NF || `G_CNT < 8'd2) begin `G_LSB <= 1'b1; `T3((G_GNX)); end
+                    else `T3((G_CAP));
             // the capacity rule: end + 2 L <= 512
-            G_CAP:  if (al[9] && al[8:0] != 9'd0) begin g_skip <= 1'b1; `G_LSB <= 1'b1; t3 <= G_GNX; end
+            G_CAP:  if (al[9] && al[8:0] != 9'd0) begin g_skip <= 1'b1; `G_LSB <= 1'b1; `T3((G_GNX)); end
                     else begin
                       g_try <= 1'b1;
-                      if (`G_CNT < 8'd4) begin `G_LSB <= 1'b1; t3 <= G_GNX; end
-                      else t3 <= G_CAP1;
+                      if (`G_CNT < 8'd4) begin `G_LSB <= 1'b1; `T3((G_GNX)); end
+                      else `T3((G_CAP1));
                     end
-            G_CAP1: begin `G_BB <= al[8:0]; `G_LSB <= 1'b0; t3 <= G_GRP; end
+            G_CAP1: begin `G_BB <= al[8:0]; `G_LSB <= 1'b0; `T3((G_GRP)); end
             // ---- one group in one bit order ----
-            G_GRP:  begin `G_USED <= 8'd0; `G_GV <= 1'b0; `G_A <= al[8:0]; t3 <= G_MS; end
-            G_MS:   if (!al_lt) t3 <= G_GEND;                              // a >= end
-                    else begin `G_RA <= `G_A; `G_RRET <= G_MS1; t3 <= G_RD; end
+            G_GRP:  begin `G_USED <= 8'd0; `G_GV <= 1'b0; `G_A <= al[8:0]; `T3((G_MS)); end
+            G_MS:   if (!al_lt) `T3((G_GEND));                              // a >= end
+                    else begin `G_RA <= `G_A; `G_RRET <= G_MS1; `T3((G_RD)); end
 `ifdef M_S3_LAST_KEEP
-            G_MS1:  if (`G_GRD == `G_LEN) t3 <= G_D0;
+            G_MS1:  if (`G_GRD == `G_LEN) `T3((G_D0));
 `else
-            G_MS1:  if (`G_GRD == `G_LEN && al[8:0] != `S3_WP) t3 <= G_D0;    // the last: not evidence
+            G_MS1:  if (`G_GRD == `G_LEN && al[8:0] != `S3_WP) `T3((G_D0));    // the last: not evidence
 `endif
-                    else begin `G_A <= al[8:0]; t3 <= G_MS; end
+                    else begin `G_A <= al[8:0]; `T3((G_MS)); end
             // d = m_a ^ m_0 into x's buffer, bottom byte first: its top bit and lowest bit
             G_D0: begin
-              `G_XS <= `G_GV ? ~`G_YS : 1'b0; `G_J <= `G_LEN - 8'd1; `G_K <= 8'd0; `G_NZ <= 1'b0; t3 <= G_D1;
+              `G_XS <= `G_GV ? ~`G_YS : 1'b0; `G_J <= `G_LEN - 8'd1; `G_K <= 8'd0; `G_NZ <= 1'b0; `T3((G_D1));
             end
-            G_D1: begin `G_RA <= al[8:0]; `G_RRET <= G_D2; t3 <= G_RD; end
-            G_D2: begin `G_CB <= `G_GRD; `G_RA <= al[8:0]; `G_RRET <= G_D3; t3 <= G_RD; end
+            G_D1: begin `G_RA <= al[8:0]; `G_RRET <= G_D2; `T3((G_RD)); end
+            G_D2: begin `G_CB <= `G_GRD; `G_RA <= al[8:0]; `G_RRET <= G_D3; `T3((G_RD)); end
             G_D3: begin
               we <= 1'b1; waddr <= al[8:0]; wdata <= g_d;
               if (g_d != 8'd0) begin
@@ -3101,26 +3167,26 @@ module pe_pit_s12 #(parameter integer AW = 9) (
                 if (!`G_NZ) `G_TZ <= {`G_K, g_lsb(g_d)};
                 `G_NZ <= 1'b1;
               end
-              t3 <= G_D4;
+              `T3((G_D4));
             end
-            G_D4:   if (`G_J == 8'd0) t3 <= G_DEND;
-                    else begin `G_J <= `G_J - 8'd1; `G_K <= `G_K + 8'd1; t3 <= G_D1; end
-            G_DEND: if (!`G_NZ) t3 <= G_NXM;                               // d = 0: not counted
+            G_D4:   if (`G_J == 8'd0) `T3((G_DEND));
+                    else begin `G_J <= `G_J - 8'd1; `G_K <= `G_K + 8'd1; `T3((G_D1)); end
+            G_DEND: if (!`G_NZ) `T3((G_NXM));                               // d = 0: not counted
                     else begin
                       `G_USED <= `G_USED + 8'd1; `G_DX <= `G_DN;
-                      if (`G_TZ != 11'd0) begin `G_SRET <= G_DSH[5:0]; t3 <= G_SH0; end
-                      else t3 <= G_DSH;
+                      if (`G_TZ != 11'd0) begin `G_SRET <= G_DSH[5:0]; `T3((G_SH0)); end
+                      else `T3((G_DSH));
                     end
-            G_DSH:  if (!`G_GV) begin `G_GV <= 1'b1; `G_YS <= `G_XS; `G_DY <= `G_DX; t3 <= G_NXM; end
-                    else t3 <= G_ST;
-            G_NXM:  begin `G_A <= al[8:0]; t3 <= G_MS; end                 // a + L + 1
+            G_DSH:  if (!`G_GV) begin `G_GV <= 1'b1; `G_YS <= `G_XS; `G_DY <= `G_DX; `T3((G_NXM)); end
+                    else `T3((G_ST));
+            G_NXM:  begin `G_A <= al[8:0]; `T3((G_MS)); end                 // a + L + 1
             // ---- the binary gcd: deg x >= deg y (a swap is two buffer bits), x ^= y ----
             G_ST: begin
               if (al_lt) begin `G_XS <= `G_YS; `G_YS <= `G_XS; `G_DX <= `G_DY; `G_DY <= `G_DX; end
-              `G_J <= `G_LEN - 8'd1; `G_K <= 8'd0; `G_NZ <= 1'b0; t3 <= G_X1;
+              `G_J <= `G_LEN - 8'd1; `G_K <= 8'd0; `G_NZ <= 1'b0; `T3((G_X1));
             end
-            G_X1: begin `G_RA <= al[8:0]; `G_RRET <= G_X2; t3 <= G_RD; end
-            G_X2: begin `G_CB <= `G_GRD; `G_RA <= al[8:0]; `G_RRET <= G_X3; t3 <= G_RD; end
+            G_X1: begin `G_RA <= al[8:0]; `G_RRET <= G_X2; `T3((G_RD)); end
+            G_X2: begin `G_CB <= `G_GRD; `G_RA <= al[8:0]; `G_RRET <= G_X3; `T3((G_RD)); end
             G_X3: begin
               we <= 1'b1; waddr <= al[8:0]; wdata <= g_xv;
               if (g_xv != 8'd0) begin
@@ -3128,38 +3194,38 @@ module pe_pit_s12 #(parameter integer AW = 9) (
                 if (!`G_NZ) `G_TZ <= {`G_K, g_lsb(g_xv)};
                 `G_NZ <= 1'b1;
               end
-              t3 <= G_X4;
+              `T3((G_X4));
             end
-            G_X4:   if (`G_J == 8'd0) t3 <= G_XEND;
-                    else begin `G_J <= `G_J - 8'd1; `G_K <= `G_K + 8'd1; t3 <= G_X1; end
-            G_XEND: if (!`G_NZ) t3 <= G_NXM;                               // x = 0: gcd = y
-                    else begin `G_DX <= `G_DN; `G_SRET <= G_ST[5:0]; t3 <= G_SH0; end
+            G_X4:   if (`G_J == 8'd0) `T3((G_XEND));
+                    else begin `G_J <= `G_J - 8'd1; `G_K <= `G_K + 8'd1; `T3((G_X1)); end
+            G_XEND: if (!`G_NZ) `T3((G_NXM));                               // x = 0: gcd = y
+                    else begin `G_DX <= `G_DN; `G_SRET <= G_ST[5:0]; `T3((G_SH0)); end
             // ---- x >>= tz, in place, top byte last: new[j] = ({old[j-q-1], old[j-q]} >> r) ----
-            G_SH0:  begin `G_S <= al[9:0]; `G_J <= `G_LEN - 8'd1; `G_NX0 <= 1'b0; t3 <= G_SH1; end
-            G_SH1:  begin `G_RA <= al[8:0]; `G_RRET <= G_SH2; t3 <= G_RD; end   // old[S]
-            G_SH2:  begin `G_CB <= `G_GRD; t3 <= G_SH3; end
-            G_SH3:  if (`G_S == 10'd0) begin `G_NX0 <= 1'b1; t3 <= G_SH4; end  // above the top: 0
-                    else begin `G_S <= `G_S - 10'd1; t3 <= G_SH3B; end
-            G_SH3B: begin `G_RA <= al[8:0]; `G_RRET <= G_SH4; t3 <= G_RD; end   // old[S - 1]
-            G_SH4:  begin we <= 1'b1; waddr <= al[8:0]; wdata <= g_fn[7:0]; `G_CB <= g_nx; t3 <= G_SH5; end
-            G_SH5:  if (`G_J == 8'd0) t3 <= G_SHE;
-                    else begin `G_J <= `G_J - 8'd1; t3 <= G_SH3; end
-            G_SHE:  begin `G_DX <= al[10:0]; t3 <= {1'b0, `G_SRET}; end     // deg -= tz
+            G_SH0:  begin `G_S <= al[9:0]; `G_J <= `G_LEN - 8'd1; `G_NX0 <= 1'b0; `T3((G_SH1)); end
+            G_SH1:  begin `G_RA <= al[8:0]; `G_RRET <= G_SH2; `T3((G_RD)); end   // old[S]
+            G_SH2:  begin `G_CB <= `G_GRD; `T3((G_SH3)); end
+            G_SH3:  if (`G_S == 10'd0) begin `G_NX0 <= 1'b1; `T3((G_SH4)); end  // above the top: 0
+                    else begin `G_S <= `G_S - 10'd1; `T3((G_SH3B)); end
+            G_SH3B: begin `G_RA <= al[8:0]; `G_RRET <= G_SH4; `T3((G_RD)); end   // old[S - 1]
+            G_SH4:  begin we <= 1'b1; waddr <= al[8:0]; wdata <= g_fn[7:0]; `G_CB <= g_nx; `T3((G_SH5)); end
+            G_SH5:  if (`G_J == 8'd0) `T3((G_SHE));
+                    else begin `G_J <= `G_J - 8'd1; `T3((G_SH3)); end
+            G_SHE:  begin `G_DX <= al[10:0]; `T3(({1'b0, `G_SRET})); end     // deg -= tz
             // ---- the group's candidate against the record's best (the golden's order) ----
-            G_GEND: if (g_cand) begin `G_RA <= 9'd120; `G_RRET <= G_C1; t3 <= G_RD; end
-                    else t3 <= G_GNX;
-            G_C1: begin `G_BF <= acc[65]; `G_BL <= acc[67]; `G_RA <= 9'd122; `G_RRET <= G_C2; t3 <= G_RD; end
-            G_C2: begin `G_BU <= `G_GRD; `G_RA <= 9'd123; `G_RRET <= G_C3; t3 <= G_RD; end
-            G_C3:   if (g_better) begin `G_K <= 8'd0; `G_J <= `G_LEN - 8'd1; t3 <= G_CW; end
-                    else t3 <= G_GNX;
+            G_GEND: if (g_cand) begin `G_RA <= 9'd120; `G_RRET <= G_C1; `T3((G_RD)); end
+                    else `T3((G_GNX));
+            G_C1: begin `G_BF <= acc[65]; `G_BL <= acc[67]; `G_RA <= 9'd122; `G_RRET <= G_C2; `T3((G_RD)); end
+            G_C2: begin `G_BU <= `G_GRD; `G_RA <= 9'd123; `G_RRET <= G_C3; `T3((G_RD)); end
+            G_C3:   if (g_better) begin `G_K <= 8'd0; `G_J <= `G_LEN - 8'd1; `T3((G_CW)); end
+                    else `T3((G_GNX));
             // write it: 0..3 from registers (byte 3 = the group's size until G_FIN),
             // 4..7 = g's last w / 8 bytes (the low w bits: the poly without its top)
             G_CW: begin
               if (dv_q[10]) begin
-                if (g_pb) begin `G_RA <= al[8:0]; `G_RRET <= G_CW1; t3 <= G_RD; end
+                if (g_pb) begin `G_RA <= al[8:0]; `G_RRET <= G_CW1; `T3((G_RD)); end
                 else begin
                   we <= 1'b1; waddr <= {6'b001111, dv_q[10:8]}; wdata <= 8'd0; `G_K <= `G_K + 8'd1;
-                  if (dv_q[10:8] == 3'd7) t3 <= G_GNX;
+                  if (dv_q[10:8] == 3'd7) `T3((G_GNX));
                 end
               end else begin
                 we <= 1'b1; waddr <= {6'b001111, dv_q[10:8]}; `G_K <= `G_K + 8'd1;
@@ -3174,146 +3240,155 @@ module pe_pit_s12 #(parameter integer AW = 9) (
             G_CW1: begin
               we <= 1'b1; waddr <= {6'b001111, dv_q[10:8]}; wdata <= `G_GRD;
               `G_J <= `G_J - 8'd1; `G_K <= `G_K + 8'd1;
-              t3 <= (dv_q[10:8] == 3'd7) ? G_GNX : G_CW;
+              `T3(((dv_q[10:8] == 3'd7) ? G_GNX : G_CW));
             end
             // the other bit order, else the next header (hp + L + 1)
-            G_GNX:  if (!`G_LSB) begin `G_LSB <= 1'b1; t3 <= G_GRP; end
-                    else begin `G_HP <= al[8:0]; t3 <= G_HDR; end
-            G_FIN:  begin we <= 1'b1; waddr <= 9'd123; wdata <= s3_nmsg; t3 <= P_R0; end
+            G_GNX:  if (!`G_LSB) begin `G_LSB <= 1'b1; `T3((G_GRP)); end
+                    else begin `G_HP <= al[8:0]; `T3((G_HDR)); end
+            G_FIN:  begin we <= 1'b1; waddr <= 9'd123; wdata <= s3_nmsg; `T3((P_R0)); end
             // ================= piece 3: init and xorout (golden io_evidence +
             // crc_init_xorout + canonical_member, the method in the header) =========
             // the GCD's result from the record: found? bit order, width, g
-            P_R0:   begin `G_RA <= 9'd120; `G_RRET <= P_R1; t3 <= G_RD; end
+            P_R0:   begin `G_RA <= 9'd120; `G_RRET <= P_R1; `T3((G_RD)); end
             P_R1:   if (!acc[65]) begin                                    // byte 0 bit 4: a polynomial
-                      t3 <= P_F;
+                      `T3((P_F));
                       if (s3_found && !s3_fbs) s3_why <= (g_skip && !g_try) ? 4'd2 : 4'd3;
                     end
-                    else begin `P_LSB <= acc[67]; `G_RA <= 9'd121; `G_RRET <= P_R2; t3 <= G_RD; end
-            P_R2:   begin `P_WC <= acc[62:61]; `G_RA <= 9'd124; `G_RRET <= P_R3; t3 <= G_RD; end
+                    else begin `P_LSB <= acc[67]; `G_RA <= 9'd121; `G_RRET <= P_R2; `T3((G_RD)); end
+            P_R2:   begin `P_WC <= acc[62:61]; `G_RA <= 9'd124; `G_RRET <= P_R3; `T3((G_RD)); end
             P_R3: begin
               `P_G_W(({`G_GRD, n[7:0], bh[8:0], bp[14:8]}))                   // little-endian, in from the top
-              if (`G_RA == 9'd127) begin `P_NV_W((2'd0)) `P_LP <= 8'd0; t3 <= P_E0; end
-              else begin `G_RA <= `G_RA + 9'd1; t3 <= G_RD; end
+              if (`G_RA == 9'd127) begin `P_NV_W((2'd0)) `P_LP <= 8'd0; `T3((P_E0)); end
+              else begin `G_RA <= `G_RA + 9'd1; `T3((G_RD)); end
             end
             // ---- evidence: the next length (the smallest > the last tried), the last message excluded ----
-            P_E0:   begin `P_Q <= S3_CAP; `P_LC <= 8'd0; t3 <= P_E1; end
-            P_E1:   if (!al_lt) t3 <= P_E3;                                // q >= end
-                    else begin `G_RA <= `P_Q; `G_RRET <= P_E2; t3 <= G_RD; end
+            P_E0:   begin `P_Q <= S3_CAP; `P_LC <= 8'd0; `T3((P_E1)); end
+            P_E1:   if (!al_lt) `T3((P_E3));                                // q >= end
+                    else begin `G_RA <= `P_Q; `G_RRET <= P_E2; `T3((G_RD)); end
             P_E2: begin
               if (al[8:0] != `S3_WP && `G_GRD > `P_LP && (`P_LC == 8'd0 || `G_GRD < `P_LC)) `P_LC <= `G_GRD;
-              `P_Q <= al[8:0]; t3 <= P_E1;
+              `P_Q <= al[8:0]; `T3((P_E1));
             end
-            P_E3:   if (`P_LC == 8'd0) begin t3 <= P_F; s3_why <= 4'd4; end  // fewer than two lengths
+            P_E3:   if (`P_LC == 8'd0) begin `T3((P_F)); s3_why <= 4'd4; end  // fewer than two lengths
                     else begin
                       `P_LP <= `P_LC;
-                      if (`P_LC <= p_nb) t3 <= P_E0;                       // no data bits: not a length
-                      else begin `P_Q <= S3_CAP; `P_M0F <= 1'b0; `P_TWO <= 1'b0; `P_OK <= 1'b1; t3 <= P_G1; end
+                      if (`P_LC <= p_nb) `T3((P_E0));                       // no data bits: not a length
+                      else begin `P_Q <= S3_CAP; `P_M0F <= 1'b0; `P_TWO <= 1'b0; `P_OK <= 1'b1; `T3((P_G1)); end
                     end
             // ---- the group of length lc: every member's difference with the first, 0 mod g ----
-            P_G1:   if (!al_lt) t3 <= P_G5;
-                    else begin `G_RA <= `P_Q; `G_RRET <= P_G2; t3 <= G_RD; end
+            P_G1:   if (!al_lt) `T3((P_G5));
+                    else begin `G_RA <= `P_Q; `G_RRET <= P_G2; `T3((G_RD)); end
             P_G2: begin
-              `P_Q <= al[8:0]; t3 <= P_G1;
+              `P_Q <= al[8:0]; `T3((P_G1));
               if (`G_GRD == `P_LC && al[8:0] != `S3_WP) begin
                 if (!`P_M0F) begin `P_M0 <= `P_Q; `P_M0F <= 1'b1; end
                 else begin
                   `P_TWO <= 1'b1;
                   if (`P_OK) begin
-                    `P_PM <= `P_Q + 9'd1; `P_PZ <= `P_M0 + 9'd1; `P_J_W((`P_LC)) t3 <= P_D1;
+                    `P_PM <= `P_Q + 9'd1; `P_PZ <= `P_M0 + 9'd1; `P_J_W((`P_LC)) `T3((P_D1));
                   end
                 end
               end
             end
-            P_D1:   begin `G_RA <= `P_PM; `G_RRET <= P_D2; t3 <= G_RD; end
-            P_D2:   begin `G_CB <= `G_GRD; `G_RA <= `P_PZ; `G_RRET <= P_D3; t3 <= G_RD; end
-            P_D3:   begin `G_CB <= `G_CB ^ `G_GRD; `P_BI_W((3'd0)) t3 <= P_D4; end
-            P_D4:   begin `P_BI_W((`P_BI + 3'd1)) if (`P_BI == 3'd7) t3 <= P_D5; end
+            P_D1:   begin `G_RA <= `P_PM; `G_RRET <= P_D2; `T3((G_RD)); end
+            P_D2:   begin `G_CB <= `G_GRD; `G_RA <= `P_PZ; `G_RRET <= P_D3; `T3((G_RD)); end
+            P_D3:   begin `G_CB <= `G_CB ^ `G_GRD; `P_BI_W((3'd0)) `T3((P_D4)); end
+            P_D4:   begin `P_BI_W((`P_BI + 3'd1)) if (`P_BI == 3'd7) `T3((P_D5)); end
             P_D5: begin
               `P_PM <= `P_PM + 9'd1; `P_PZ <= `P_PZ + 9'd1;
-              if (`P_J == 8'd1) t3 <= P_D6; else begin `P_J_W((`P_J - 8'd1)) t3 <= P_D1; end
+              if (`P_J == 8'd1) `T3((P_D6)); else begin `P_J_W((`P_J - 8'd1)) `T3((P_D1)); end
             end
-            P_D6:   begin if (`P_A != 33'd0) `P_OK <= 1'b0; t3 <= P_G1; end
+            P_D6:   begin if (`P_A != 33'd0) `P_OK <= 1'b0; `T3((P_G1)); end
             P_G5:   if (`P_TWO && `P_OK) begin
-                      if (`P_NV == 2'd0) begin `P_A1 <= `P_M0; `P_NV_W((2'd1)) t3 <= P_E0; end
-                      else begin `P_A2_W((`P_M0)) t3 <= P_P0; end
-                    end else t3 <= P_E0;
+                      if (`P_NV == 2'd0) begin `P_A1 <= `P_M0; `P_NV_W((2'd1)) `T3((P_E0)); end
+                      else begin `P_A2_W((`P_M0)) `T3((P_P0)); end
+                    end else `T3((P_E0));
             // ---- P' = x^(8 L1) + x^(8 L2) mod g: a register shifting zeros from 1 ----
-            P_P0:   begin `G_RA <= `P_A1; `G_RRET <= P_P1; t3 <= G_RD; end
-            P_P1:   begin `P_J_W((`G_GRD)) `P_BI_W((3'd0)) t3 <= P_P2; end
+            P_P0:   begin `G_RA <= `P_A1; `G_RRET <= P_P1; `T3((G_RD)); end
+            P_P1:   begin `P_J_W((`G_GRD)) `P_BI_W((3'd0)) `T3((P_P2)); end
             P_P2: begin
               `P_BI_W((`P_BI + 3'd1))
-              if (`P_BI == 3'd7) begin if (`P_J == 8'd1) t3 <= P_P3; else `P_J_W((`P_J - 8'd1)) end
+              if (`P_BI == 3'd7) begin if (`P_J == 8'd1) `T3((P_P3)); else `P_J_W((`P_J - 8'd1)) end
             end
-            P_P3:   begin `G_RA <= `P_A2; `G_RRET <= P_P4; t3 <= G_RD; end
-            P_P4:   begin `P_J_W((`G_GRD)) `P_BI_W((3'd0)) t3 <= P_P5; end
+            P_P3:   begin `G_RA <= `P_A2; `G_RRET <= P_P4; `T3((G_RD)); end
+            P_P4:   begin `P_J_W((`G_GRD)) `P_BI_W((3'd0)) `T3((P_P5)); end
             P_P5: begin
               `P_BI_W((`P_BI + 3'd1))
-              if (`P_BI == 3'd7) begin if (`P_J == 8'd1) t3 <= P_P6; else `P_J_W((`P_J - 8'd1)) end
+              if (`P_BI == 3'd7) begin if (`P_J == 8'd1) `T3((P_P6)); else `P_J_W((`P_J - 8'd1)) end
             end
-            P_P6:   begin `P_YF <= 1'b0; `G_RA <= `P_A1; `G_RRET <= P_Y1; t3 <= G_RD; end
+            P_P6:   begin `P_YF <= 1'b0; `G_RA <= `P_A1; `G_RRET <= P_Y1; `T3((G_RD)); end
             // ---- y' = reg(m1) ^ reg(m2), whole frames ----
-            P_Y1:   begin `P_J_W((`G_GRD)) `G_RA <= `G_RA + 9'd1; t3 <= P_Y2; end
-            P_Y2:   begin `G_RRET <= P_Y3; t3 <= G_RD; end
-            P_Y3:   begin `G_CB <= `G_GRD; `P_BI_W((3'd0)) t3 <= P_Y4; end
-            P_Y4:   begin `P_BI_W((`P_BI + 3'd1)) if (`P_BI == 3'd7) t3 <= P_Y5; end
+            P_Y1:   begin `P_J_W((`G_GRD)) `G_RA <= `G_RA + 9'd1; `T3((P_Y2)); end
+            P_Y2:   begin `G_RRET <= P_Y3; `T3((G_RD)); end
+            P_Y3:   begin `G_CB <= `G_GRD; `P_BI_W((3'd0)) `T3((P_Y4)); end
+            P_Y4:   begin `P_BI_W((`P_BI + 3'd1)) if (`P_BI == 3'd7) `T3((P_Y5)); end
             P_Y5: begin
               `G_RA <= `G_RA + 9'd1;
-              if (`P_J == 8'd1) t3 <= P_Y6; else begin `P_J_W((`P_J - 8'd1)) t3 <= P_Y2; end
+              if (`P_J == 8'd1) `T3((P_Y6)); else begin `P_J_W((`P_J - 8'd1)) `T3((P_Y2)); end
             end
-            P_Y6:   if (!`P_YF) begin `P_YF <= 1'b1; `G_RA <= `P_A2; `G_RRET <= P_Y1; t3 <= G_RD; end
+            P_Y6:   if (!`P_YF) begin `P_YF <= 1'b1; `G_RA <= `P_A2; `G_RRET <= P_Y1; `T3((G_RD)); end
                     else begin
-                      t3 <= P_S0;
+                      `T3((P_S0));
                     end
             // ---- the binary gcd as a modular division (one step a cycle) ----
             // (a even: halve a, u / x mod g; else swap so a >= b; then a ^= b, u ^= v --
             //  the operations, pa_op .. pv_op)
-            P_S0:   if (`P_A == 33'd0) t3 <= P_V0;
+            P_S0:   if (`P_A == 33'd0) `T3((P_V0));
             // u = 0, or no init solves; q = v / h (h | v, or none); f = g / h; init = q mod f
-            P_V0:   if (p_uu != 33'd0) begin t3 <= P_F; s3_why <= 4'd5; end
-                    else begin `P_KER <= (`P_B != 33'd1); `P_J_W((8'd32)) t3 <= P_V1; end
+            P_V0:   if (p_uu != 33'd0) begin `T3((P_F)); s3_why <= 4'd5; end
+                    else begin `P_KER <= (`P_B != 33'd1); `P_J_W((8'd32)) `T3((P_V1)); end
             P_V1, P_V3, P_V5:                                              // the steps: the operations
-                    if (`P_J == 8'd1) t3 <= t3 + 7'd1; else `P_J_W((`P_J - 8'd1))
-            P_V2:   if (`P_A != 33'd0) begin t3 <= P_F; s3_why <= 4'd5; end
-                    else begin `P_J_W((8'd33)) t3 <= P_V3; end
-            P_V4:   begin `P_J_W((8'd32)) t3 <= P_V5; end
+                    if (`P_J == 8'd1) `T3((t3 + 7'd1)); else `P_J_W((`P_J - 8'd1))
+            P_V2:   if (`P_A != 33'd0) begin `T3((P_F)); s3_why <= 4'd5; end
+                    else begin `P_J_W((8'd33)) `T3((P_V3)); end
+            P_V4:   begin `P_J_W((8'd32)) `T3((P_V5)); end
             // ---- init is a; xorout = c1 ^ reg(d1, init) ----
-            P_V6:   begin `P_IO <= 1'b1; `P_YF <= 1'b0; `G_RA <= `P_A1; `G_RRET <= P_X1; t3 <= G_RD; end
-            P_X1:   begin `P_J_W((`G_GRD - p_nb)) `G_RA <= `G_RA + 9'd1; t3 <= P_X2; end
-            P_X2:   begin `G_RRET <= P_X3; t3 <= G_RD; end
-            P_X3:   begin `G_CB <= `G_GRD; `P_BI_W((3'd0)) t3 <= P_X4; end
+            P_V6:   begin `P_IO <= 1'b1; `P_YF <= 1'b0; `G_RA <= `P_A1; `G_RRET <= P_X1; `T3((G_RD)); end
+            P_X1:   begin `P_J_W((`G_GRD - p_nb)) `G_RA <= `G_RA + 9'd1; `T3((P_X2)); end
+            P_X2:   begin `G_RRET <= P_X3; `T3((G_RD)); end
+            P_X3:   begin `G_CB <= `G_GRD; `P_BI_W((3'd0)) `T3((P_X4)); end
             P_X4:   begin
-              `P_BI_W((`P_BI + 3'd1)) if (`P_BI == 3'd7) t3 <= P_X5;
+              `P_BI_W((`P_BI + 3'd1)) if (`P_BI == 3'd7) `T3((P_X5));
             end
             P_X5: begin
               `G_RA <= `G_RA + 9'd1;
-              if (`P_J != 8'd1) begin `P_J_W((`P_J - 8'd1)) t3 <= P_X2; end
-              else if (!`P_YF) begin `P_YF <= 1'b1; `P_J_W((p_nb)) t3 <= P_X2; end
-              else t3 <= P_W0;
+              if (`P_J != 8'd1) begin `P_J_W((`P_J - 8'd1)) `T3((P_X2)); end
+              else if (!`P_YF) begin `P_YF <= 1'b1; `P_J_W((p_nb)) `T3((P_X2)); end
+              else `T3((P_W0));
             end
-            P_F:    begin `P_IO <= 1'b0; `P_KER <= 1'b0; t3 <= P_W0; end
+            P_F:    begin `P_IO <= 1'b0; `P_KER <= 1'b0; `T3((P_W0)); end
             // ---- the record, LAST (option (a)): byte 0's io / kernel bits; 128..135 ----
-            P_W0:   begin `G_RA <= 9'd120; `G_RRET <= P_W1; t3 <= G_RD; end
+            P_W0:   begin `G_RA <= 9'd120; `G_RRET <= P_W1; `T3((G_RD)); end
             P_W1: begin
               we <= 1'b1; waddr <= 9'd120; wdata <= `G_GRD | {`P_IO & `P_KER, 1'b0, `P_IO, 5'd0};
-              `P_J_W((8'd0)) t3 <= P_W2;
+              `P_J_W((8'd0)) `T3((P_W2));
             end
             P_W2: begin
               we <= 1'b1; waddr <= 9'd128 + {1'b0, `P_J}; `P_J_W((`P_J + 8'd1))
               // init unsolved: 128..135 are zero but for the reason code (128, bits 3..0)
               wdata <= !`P_IO ? ((`P_J == 8'd0) ? {4'd0, s3_why} : 8'd0)
                        : (`P_J < 8'd4) ? dv_q[7:0] : acc[16:9];
-              if (`P_J == 8'd7) t3 <= T_DONE;
+              if (`P_J == 8'd7) `T3((T_DONE));
             end
             // a store read: data 2 cycles after the request
-            G_RD:   begin re <= 1'b1; t3 <= G_RW; end
-            G_RW:   t3 <= G_RV;
-            G_RV:   begin `G_GRD <= rdata; t3 <= `G_RRET; end
+            G_RD:   begin re <= 1'b1; `T3((G_RW)); end
+            G_RW:   `T3((G_RV));
+            G_RV:   begin `G_GRD <= rdata; `T3((`G_RRET)); end
             default: begin done <= 1'b1; st <= S_IDLE; end      // T_DONE
           endcase
           // piece 3's a, b, u, v: one write each, its operation chosen above
           if (pa_op != PA_HOLD) `P_A <= pa_nx;
           if (pb_op != PB_HOLD) `P_B_W((pb_nx))
-          if (pu_op != PU_HOLD) `P_U_W((pu_nx))
+          if (pu_op_hi != PU_HOLD) dv_d[12:0] <= pu_nx_hi >> 20;
+          if (pu_op_lo != PU_HOLD) dv_r[23:4] <= pu_nx_lo;
+          // §2: the divisor's top, the step before each loop (d is fixed through it)
+`ifdef M_DIVMASK_LATE
+          if (f3[F_V1] | f3[F_V3]) p_dm <= top1(`P_B);
+          else if (f3[F_V5]) p_dm <= top1(`P_U);
+`else
+          if (f3[F_V0] | f3[F_V2]) p_dm <= top1(`P_B);
+          else if (f3[F_V4]) p_dm <= top1(`P_U);
+`endif
           if (pv_op != PV_HOLD) `P_V_W((pv_nx))
         end
         default: st <= S_IDLE;
@@ -3321,6 +3396,34 @@ module pe_pit_s12 #(parameter integer AW = 9) (
     end
   end
   wire _unused = &{1'b0, rival};
+`ifndef SYNTHESIS
+  // ⛔ THE s12 NOTE'S PROOFS, EVERY CYCLE (the PIT suite runs with them on). A
+  // failure STOPS the run, so no runner can read past it as a pass.
+  //  §1: the flags are the decode of the CURRENT t3 (zero cycles, by construction).
+  //  §2: on a division step the mask test equals THE compare it replaced.
+  //  §3: pe_s3_opsel's codes are this module's.
+  always @(posedge clk)
+    if (rst_n === 1'b1 && f3 !== t3fl(t3)) begin
+      $display("*** ASSERT pe_pit_s12 s12-1: f3 %b is not the decode of t3 = %0d (%b)", f3, t3, t3fl(t3));
+      $finish;
+    end
+  always @(posedge clk)
+    if (rst_n === 1'b1 && run && st == S_S3 && f3[F_DV] && p_lt_div !== ((p_ri ^ p_d) < p_ri)) begin
+      $display("*** ASSERT pe_pit_s12 s12-2: mask test %b != (r ^ d) < r at t3 = %0d", p_lt_div, t3);
+      $finish;
+    end
+  initial
+    if (u_ops_a.PA_SHX != PA_SHX || u_ops_a.PA_SH != PA_SH || u_ops_a.PA_XB != PA_XB ||
+        u_ops_a.PA_B != PA_B || u_ops_a.PA_S8 != PA_S8 || u_ops_a.PA_ONE != PA_ONE ||
+        u_ops_a.PA_ZERO != PA_ZERO || u_ops_a.PB_A != PB_A || u_ops_a.PB_XA != PB_XA ||
+        u_ops_a.PB_GF != PB_GF || u_ops_a.PB_ZERO != PB_ZERO || u_ops_a.PB_S8 != PB_S8 ||
+        u_ops_a.PU_HALF != PU_HALF || u_ops_a.PU_V != PU_V || u_ops_a.PU_XV != PU_XV ||
+        u_ops_a.PU_GF != PU_GF || u_ops_a.PU_DIV != PU_DIV || u_ops_a.PV_A != PV_A ||
+        u_ops_a.PV_ZERO != PV_ZERO || u_ops_a.PV_U != PV_U || u_ops_a.PV_DIV != PV_DIV) begin
+      $display("*** ASSERT pe_pit_s12 s12-3: pe_s3_opsel's op codes differ from pe_pit_s12's");
+      $finish;
+    end
+`endif
 `undef S3_X
 `undef S3_LQ
 `undef S3_P30
@@ -3403,6 +3506,72 @@ module pe_pit_s12 #(parameter integer AW = 9) (
 `undef P_J_W
 `undef P_BI_W
 `undef P_NV_W
+`undef T3
+endmodule
+
+// ---------------------------------------------------------------------------
+// pe_s3_opsel -- pe_pit_s12 piece 3's operation select (s12 note §3, Wilson
+// 11-09): which of a / b / u / v each step writes, and how. (* keep_hierarchy *)
+// so the THREE instances (one per register group) survive opt_merge, as
+// pe_dup_ff does. Deliberately NOT parameterised (a kept `$paramod` reads as an
+// unmapped cell to LibreLane). Its inputs are pe_pit_s12's REGISTERED step
+// flags (§1), never t3. ⛔ THE CODES MUST EQUAL pe_pit_s12's PA_/PB_/PU_/PV_
+// localparams: pe_pit_s12 checks them at time 0 in simulation (s12-3).
+//   f  = {G2, SHX, ONE, ZERO, PBA, P6, Y6, S0, V2, F}   fx = {V1|V5, V3, W2}
+// ---------------------------------------------------------------------------
+(* keep_hierarchy *)
+module pe_s3_opsel (
+    input  wire       s3,
+    input  wire [9:0] f,
+    input  wire [2:0] fx,
+    input  wire       g2,      // P_G2's data condition
+    input  wire       yf,      // P_YF
+    input  wire       anz,     // P_A != 0
+    input  wire       aodd,    // a's low bit (acc[9])
+    input  wire       lt,      // the swap test, P_A < P_B
+    input  wire       j4,      // P_J < 4
+    output reg  [3:0] pa_op,
+    output reg  [2:0] pb_op,
+    output reg  [2:0] pu_op,
+    output reg  [2:0] pv_op
+);
+  localparam [3:0] PA_HOLD = 4'd0, PA_ZERO = 4'd1, PA_ONE = 4'd2, PA_SHX = 4'd3,
+                   PA_B = 4'd5, PA_XB = 4'd6, PA_SH = 4'd7, PA_S8 = 4'd9;
+  localparam [2:0] PB_HOLD = 3'd0, PB_A = 3'd1, PB_XA = 3'd2, PB_GF = 3'd3, PB_ZERO = 3'd4, PB_S8 = 3'd5;
+  localparam [2:0] PU_HOLD = 3'd0, PU_HALF = 3'd2, PU_V = 3'd3, PU_XV = 3'd4, PU_GF = 3'd5,
+                   PU_DIV = 3'd6;
+  localparam [2:0] PV_HOLD = 3'd0, PV_A = 3'd1, PV_ZERO = 3'd2, PV_U = 3'd3, PV_DIV = 3'd4;
+  wire f_g2 = f[9], f_shx = f[8], f_one = f[7], f_zero = f[6], f_pba = f[5], f_p6 = f[4],
+       f_y6 = f[3], f_s0 = f[2], f_v2 = f[1], f_f = f[0];
+  wire f_v15 = fx[2], f_v3 = fx[1], f_w2 = fx[0];
+  // the old `case (t3)`: its items are distinct steps, so its flags are exclusive
+  always @(*) begin
+    pa_op = PA_HOLD; pb_op = PB_HOLD; pu_op = PU_HOLD; pv_op = PV_HOLD;
+    if (s3) begin
+      if (f_g2) begin if (g2) pa_op = PA_ZERO; end
+      else if (f_shx) pa_op = PA_SHX;
+      else if (f_one) pa_op = PA_ONE;
+      else if (f_zero) pa_op = PA_ZERO;
+      else if (f_pba) pb_op = PB_A;
+      else if (f_p6) pb_op = PB_XA;
+      else if (f_y6) begin
+        if (!yf) pv_op = PV_A;
+        else begin pu_op = PU_XV; pa_op = PA_B; pb_op = PB_GF; pv_op = PV_ZERO; end
+      end
+      else if (f_s0) begin
+        if (anz) begin
+          if (!aodd) begin pa_op = PA_SH; pu_op = PU_HALF; end                            // a even
+          else if (lt) begin pa_op = PA_B; pb_op = PB_A; pu_op = PU_V; pv_op = PV_U; end   // swap
+          else begin pa_op = PA_XB; pu_op = PU_XV; end
+        end
+      end
+      else if (f_v15) begin pa_op = PA_SHX; pv_op = PV_DIV; end
+      else if (f_v3) begin pa_op = PA_SHX; pu_op = PU_DIV; end
+      else if (f_v2) begin pa_op = PA_ZERO; pu_op = PU_GF; end
+      else if (f_f) begin pa_op = PA_ZERO; pb_op = PB_ZERO; end
+      else if (f_w2) begin if (j4) pb_op = PB_S8; else pa_op = PA_S8; end
+    end
+  end
 endmodule
 
 
