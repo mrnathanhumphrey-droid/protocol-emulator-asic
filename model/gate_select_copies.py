@@ -249,7 +249,11 @@ exit $rc
 
 def run_arm(how, env, strip, top):
     """(netlist json, stripped count, note) or (None, count, error)."""
-    work = tempfile.mkdtemp(prefix="selcopies_")
+    # ⛔ UNDER THE REPO, NOT /tmp (CI 43305666324): the pinned tt-support-tools
+    # reads the ports with yowasp-yosys, whose sandbox cannot see /tmp -- the
+    # first CI run failed at create-user-config ("src/project.v not found").
+    # The canary builds in the checkout too. Removed below, run or fail.
+    work = tempfile.mkdtemp(prefix=".selcopies_", dir=ROOT)
     try:
         shutil.copytree(os.path.join(ROOT, "src"), os.path.join(work, "src"))
         # info.yaml, and every root-level .py: LibreLane imports any
@@ -284,7 +288,29 @@ def run_arm(how, env, strip, top):
                 r.returncode, " | ".join(out.splitlines()[-4:]))
         return json.load(open(js[0], encoding="utf-8")), n, out.splitlines()[-1] if out else ""
     finally:
+        cleanup(how, work)
+
+
+def cleanup(how, work):
+    """remove the work dir: it sits in the checkout now. rmtree can lose a race
+    with WSL's file handles (11-12, 3 files left per arm) and cannot remove the
+    root-owned files a dockerized flow writes on Linux -- so retry, then `rm -rf`,
+    then name what is left (a leftover is untidy, not a wrong verdict)."""
+    import time
+    for _ in range(3):
         shutil.rmtree(work, ignore_errors=True)
+        if not os.path.exists(work):
+            return
+        time.sleep(1)
+    if how == "wsl":
+        from gate_formal_miters import wslpath
+        subprocess.run(["wsl.exe", "--", "rm", "-rf", wslpath(work)], capture_output=True)
+    else:
+        subprocess.run(["rm", "-rf", work], capture_output=True)
+        if os.path.exists(work) and shutil.which("sudo"):
+            subprocess.run(["sudo", "-n", "rm", "-rf", work], capture_output=True)
+    if os.path.exists(work):
+        print("  (work dir left behind: %s)" % work)
 
 
 def top_module():
