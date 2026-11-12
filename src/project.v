@@ -2523,7 +2523,33 @@ module pe_pit_s12 #(parameter integer AW = 9) (
   // Bit-exact by the identity, 0 cycles; the assertion at the end of the module
   // checks it against the old compare on every division step, and
   // M_DIVMASK_LATE (the mask loaded a step late) must break it.
-  wire        p_lt_s0  = (`P_A < `P_B);              // the gcd swap test
+  // ⭐ §4 (Wilson 11-12): THE SWAP TEST AS A TREE. `P_A < `P_B written as `<`
+  // was mapped as a ~25-gate ripple behind a weak driver, and acc -> dv_q swung
+  // 2.7 ns across placements whenever it was exposed. lt33 is a balanced
+  // prefix tree (6 levels of lt = lt_hi | eq_hi & lt_lo, eq = eq_hi & eq_lo),
+  // zero cycles; assertion s12-4 holds it to `<` every S3 cycle, and
+  // M_LTTREE_NOEQ (the combine without its eq term) must break the record.
+  function lt33(input [32:0] a, input [32:0] b);    // a < b, unsigned
+    reg [63:0] l, e;
+    integer s, i;
+    begin
+      l = 64'd0;
+      e = {64{1'b1}};
+      l[32:0] = ~a & b;                              // a bit where a < b
+      e[32:0] = ~(a ^ b);                            // a bit where a == b
+      for (s = 1; s < 64; s = s * 2)
+        for (i = 0; i < 64; i = i + 2 * s) begin     // [i, i+s) lo, [i+s, i+2s) hi
+`ifdef M_LTTREE_NOEQ
+          l[i] = l[i + s] | l[i];
+`else
+          l[i] = l[i + s] | (e[i + s] & l[i]);
+`endif
+          e[i] = e[i + s] & e[i];
+        end
+      lt33 = l[0];
+    end
+  endfunction
+  wire        p_lt_s0  = lt33(`P_A, `P_B);           // the gcd swap test
   reg  [32:0] p_dm;                                  // one-hot top(d)
   wire        p_lt_div = |(p_ri & p_dm);             // (r ^ d) < r
   function [32:0] top1(input [32:0] v);              // v's highest set bit, one-hot
@@ -3424,6 +3450,12 @@ module pe_pit_s12 #(parameter integer AW = 9) (
   always @(posedge clk)
     if (rst_n === 1'b1 && run && st == S_S3 && f3[F_DV] && p_lt_div !== ((p_ri ^ p_d) < p_ri)) begin
       $display("*** ASSERT pe_pit_s12 s12-2: mask test %b != (r ^ d) < r at t3 = %0d", p_lt_div, t3);
+      $finish;
+    end
+  //  §4: the tree compare equals `<` (11-12)
+  always @(posedge clk)
+    if (rst_n === 1'b1 && run && st == S_S3 && p_lt_s0 !== (`P_A < `P_B)) begin
+      $display("*** ASSERT pe_pit_s12 s12-4: lt33 %b != (P_A < P_B) at t3 = %0d", p_lt_s0, t3);
       $finish;
     end
   initial

@@ -303,7 +303,8 @@ def record_problems(got, want, done, intact, asrt):
 #:   record  -- built with PE_S12_NOASSERT: the record itself must stop being
 #:              bit-exact on some set (an assertion's stop is not a wrong answer).
 MUTANTS = [("M_DECODE_STALE", "the step flags decode the OLD t3 (one step late)"),
-           ("M_DIVMASK_LATE", "the divisor mask loaded a step late")]
+           ("M_DIVMASK_LATE", "the divisor mask loaded a step late"),
+           ("M_LTTREE_NOEQ", "the swap tree's combine without its eq term")]
 #: PE_GCD_RTL_DIR: build the RTL from another tree (the before/after cycle
 #: comparison); PE_GCD_CYCLES: write each set's cycle count there.
 RTL_DIR = os.environ.get("PE_GCD_RTL_DIR", ROOT)
