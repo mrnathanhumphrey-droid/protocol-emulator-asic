@@ -76,7 +76,7 @@ FPGA_TCL = os.path.join("fpga", "pa100t", "build.tcl")
 #: UM10204 / SMBus numbers this gate holds the derived counts to, in ns.
 HOLD_NS, SETUP_NS = 300, 50
 FMP_VD_DAT_NS, FMP_TR_NS = 450, 120
-STRETCH_NS = 35_000_000
+STRETCH_NS = clock.CK_STRETCH_NS        # ONE source (Wilson 11-12): clock.py
 #: bench-only defines that move the RTL's clock -- never in synthesis's inputs
 BENCH_ONLY_DEFINES = ("PE_EQUIV_V2_PERIOD",)
 
@@ -164,9 +164,10 @@ def spec(hz, engine_text=None, band=None, rtl_ps=None):
                 "%.1f + t_r %d = %.1f ns, max %d" % (float(real(hold)), FMP_TR_NS,
                                                     float(real(hold)) + FMP_TR_NS,
                                                     FMP_VD_DAT_NS)))
-    tick_ns = (16384 * ps) // 1000                      # clock-ok: the RTL's shipped prescaler and its ns floor
-    ticks = -(-STRETCH_NS // tick_ns)
-    lo, hi = real((ticks - 1) * 16384 + 1), real(ticks * 16384)   # clock-ok: shipped prescaler
+    tick = clock.CK_TICK_SHIPPED                        # the RTL's shipped prescaler (clock.py)
+    with clock.at(hz):
+        ticks = clock.ck_stretch_to()                   # project.v's formula, from the one source
+    lo, hi = real((ticks - 1) * tick + 1), real(ticks * tick)
     ok = lo <= STRETCH_NS * Fraction(105, 100) and hi >= STRETCH_NS
     out.append(("stretch bound @ %g MHz" % (hz / 1e6), ok,
                 "%d ticks: %.2f..%.2f ms, must reach 35 ms" % (ticks, float(lo) / 1e6,
@@ -358,6 +359,55 @@ def write_firmware():
     print("  wrote %s%s" % (FIRMWARE, "" if t2 != t else " (unchanged)"))
 
 
+def stretch_elab(hz, project_text=None):
+    """CHECK 10 (Wilson 11-12): the stretch fault bound's ELABORATED values at
+    `hz` -- test/param_dump.v on iverilog, CLK_PERIOD_PS set by defparam to
+    clock.period_ps(hz) -- == model/clock.py's one source. The elaborator is
+    the authority on what the expression means; nothing here re-derives it.
+    A build that does not elaborate is RED, never a pass. `project_text`
+    substitutes project.v (the must-fire)."""
+    import shutil
+    import subprocess
+    import tempfile
+    sys.path.insert(0, os.path.join(ROOT, "test"))
+    from toolchain import tool                           # noqa: E402  ruling V
+    import sim_run                                       # noqa: E402
+    mhz = "@ %g MHz" % (hz / 1e6)
+    d = tempfile.mkdtemp(prefix="pe_ckst_")
+    try:
+        srcs = [os.path.join(ROOT, "src", "pe_engine.v"), os.path.join(ROOT, "src", "pe_store.v")]
+        proj = os.path.join(ROOT, PROJECT)
+        if project_text is not None:
+            proj = os.path.join(d, "project.v")
+            with open(proj, "w", encoding="utf-8", newline="\n") as fh:
+                fh.write(project_text)
+        ovr = os.path.join(d, "pd_ovr.v")
+        with open(ovr, "w", encoding="ascii", newline="\n") as fh:
+            fh.write("module pd_ovr;\n  defparam param_dump.dut.CLK_PERIOD_PS = %d;\nendmodule\n"
+                     % clock.period_ps(hz))
+        vvp = os.path.join(d, "pd.vvp")
+        b = subprocess.run([tool("iverilog"), "-g2012", "-o", vvp, "-s", "param_dump", "-s", "pd_ovr",
+                            os.path.join(ROOT, "test", "param_dump.v")] + srcs + [proj, ovr],
+                           capture_output=True, text=True, encoding="utf-8", errors="replace")
+        if b.returncode != 0:
+            return [("stretch bound elaborated %s" % mhz, False,
+                     "*** COULD NOT ELABORATE (not a pass): %s" % (b.stdout + b.stderr)[-200:])]
+        r = subprocess.run(sim_run.vvp([vvp], images=[]), capture_output=True, text=True,
+                           encoding="utf-8", errors="replace")
+        vals = {m.group(1): int(m.group(2)) for m in re.finditer(r"PARAM (\w+)=(-?\d+)", r.stdout)}
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+    with clock.at(hz):
+        want = clock.ck_stretch_to()
+    out = []
+    for name, exp in (("CK_STRETCH_TO", want), ("CK_STRETCH_PRE", clock.CK_TICK_SHIPPED),
+                      ("CK_STRETCH_NS", clock.CK_STRETCH_NS)):
+        got = vals.get(name)
+        out.append(("%s elaborated %s == clock.py" % (name, mhz), got == exp,
+                    "RTL %s, clock.py %d" % ("missing" if got is None else got, exp)))
+    return out
+
+
 def report(rows):
     rc = 0
     for what, ok, detail in rows:
@@ -395,8 +445,16 @@ def main(argv=None):
     chip_hz = clock.target_hz("chip")
     fw_doc = read(FIRMWARE)
     rc |= report(fw_check(files[PROJECT], fw_doc, chip_hz))
+    print("  --- 10. the stretch fault bound: the RTL's elaborated value == clock.py's, per target ---")
+    for t in sorted(clock.TARGETS):
+        rc |= report(stretch_elab(clock.target_hz(t)))
     print("  --- 7. must-fires (a mutated copy must go red) ---")
     chip = clock.target_hz("chip")
+    # check 10's own: the RTL's stretch figure moved without clock.py
+    red = any(not ok for _w, ok, _d in stretch_elab(
+        chip, re.sub(r"(parameter\s+integer\s+CK_STRETCH_NS\s*=\s*)\d+", r"\g<1>25000000", files[PROJECT])))
+    print("    must-fire: %-40s %s" % ("10: project.v CK_STRETCH_NS 25 ms", "red  ok" if red else "*** MISSED"))
+    rc |= 0 if red else 1
     # check 9's own: a deeper synchroniser, a typed number, a short hold
     for what, red in (
             ("9: a 4-flop wr synchroniser, hold left at 5",

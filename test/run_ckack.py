@@ -115,12 +115,12 @@ def commanded_rise_subs():
 
 
 def stretch_timeout():
-    """CK_STRETCH_PRE * CK_STRETCH_TO, read from the RTL's own defaults."""
-    with open(os.path.join(ROOT, "src", "pe_engine.v"), encoding="utf-8") as fh:
-        t = fh.read()
-    pre = int(re.search(r"parameter integer CK_STRETCH_PRE\s*=\s*(\d+)", t).group(1))
-    to = int(re.search(r"parameter integer CK_STRETCH_TO\s*=\s*(\d+)", t).group(1))
-    return pre * to
+    """CK_STRETCH_PRE * CK_STRETCH_TO at the chip's clock, from model/clock.py
+    -- the ONE source (Wilson 11-12). This read a literal out of pe_engine.v
+    with a regex; at 18bb252 the parameter became an expression and the runner
+    crashed before any simulation, unnoticed because no gate ran it.
+    gate_clock_consistency holds the RTL's elaborated value to clock.py's."""
+    return clock.ck_stretch_cycles()
 
 
 def image(path, d=D, flags=0):
