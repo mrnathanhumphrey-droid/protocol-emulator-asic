@@ -242,7 +242,7 @@ def directed_sets(n, seed):
 
 
 def run_one(args):
-    vbin, tmp, i, msgs = args
+    vbin, tmp, i, msgs, ncyc = args
     mem = [0] * 512
     p = DEC_AT
     for m in msgs:
@@ -252,7 +252,8 @@ def run_one(args):
     mp, op = os.path.join(tmp, "g%s.hex" % i), os.path.join(tmp, "g%s.out" % i)
     with open(mp, "w", encoding="ascii", newline="\n") as fh:
         fh.write("\n".join("%02x" % b for b in mem) + "\n")
-    cmd = RP.simcmd([vbin, "+MEM=" + mp, "+OUT=" + op, "+END=%x" % p, "+NMSG=%d" % min(len(msgs), 255)], [])
+    cmd = RP.simcmd([vbin, "+MEM=" + mp, "+OUT=" + op, "+END=%x" % p, "+NMSG=%d" % min(len(msgs), 255)]
+                    + (["+NCYC=%d" % ncyc] if ncyc else []), [])
     r = RP.run(cmd)
     if r.returncode != 0:
         raise RuntimeError("sim failed: %s" % (r.stdout + r.stderr)[-400:])
@@ -352,9 +353,19 @@ def ci_subset(n_sets):
     return sorted(chosen | set(rng.sample(rest, N_BREADTH_CI)))
 
 
-def run_idx(vbin, tmp, sets, idxs, tag):
+#: ⛔ THE MUST-FIRE ARMS ARE CAPPED (11-12). A mutant that breaks the swap compare
+#: (M_LTTREE_NOEQ) can stop the GCD from converging; with no assertion (the
+#: record arm) each such set ran tb_gcd's default 50,000,000-cycle cap -- hours
+#: per set on iverilog, so `--full` never finished. The arms now run at
+#: MUT_CAP_X times the clean pass's own maximum: a set that hits it does not
+#: reach done, which record_problems reads as red -- the kill is unchanged,
+#: only the wait is bounded. The clean pass keeps the bench default.
+MUT_CAP_X = 2
+
+
+def run_idx(vbin, tmp, sets, idxs, tag, ncyc=None):
     with ThreadPoolExecutor(14) as ex:
-        return list(ex.map(run_one, [(vbin, tmp, "%s%d" % (tag, i), sets[i][1]) for i in idxs]))
+        return list(ex.map(run_one, [(vbin, tmp, "%s%d" % (tag, i), sets[i][1], ncyc) for i in idxs]))
 
 
 def main() -> int:
@@ -410,13 +421,17 @@ def main() -> int:
     good = all(ok[k] == tot[k] for k in tot) and asserts == 0
     if asserts:
         print("  *** pe_pit_s12's s12 assertion fired on %d set(s)" % asserts)
-    print("\n  must-fires (s12 note), on %d sets" % len(mf_idxs))
+    mcap = MUT_CAP_X * cmax
+    print("\n  must-fires (s12 note), on %d sets; cycle cap %d (%dx the clean max)" % (len(mf_idxs), mcap, MUT_CAP_X))
+    if cmax <= 0:
+        print("  *** the clean pass reported no cycle count -- no cap to set")
+        good = False
     for define, what in MUTANTS:
         arms = {}
         for arm, defs in (("assert", [define]), ("record", [define, "PE_S12_NOASSERT"])):
             mv = os.path.join(tmp, "gcd_%s_%s.vvp" % (define.lower(), arm))
             build(mv, defs)
-            r2 = run_idx(mv, tmp, sets, mf_idxs, "m%s" % arm)
+            r2 = run_idx(mv, tmp, sets, mf_idxs, "m%s" % arm, ncyc=mcap if cmax > 0 else None)
             arms[arm] = (sum(1 for x in r2 if x[6]), sum(1 for x in r2 if not x[0]))
         fired = arms["assert"][0] > 0
         broke = arms["record"][1] > 0 and arms["record"][0] == 0
