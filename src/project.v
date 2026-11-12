@@ -3442,19 +3442,26 @@ module pe_pit_s12 #(parameter integer AW = 9) (
   //  §1: the flags are the decode of the CURRENT t3 (zero cycles, by construction).
   //  §2: on a division step the mask test equals THE compare it replaced.
   //  §3: pe_s3_opsel's codes are this module's.
+  // ⛔ ONLY AFTER A RESET HAS BEEN SEEN (11-12). `rst_n === 1'b1` alone held
+  // in iverilog (registers start X) but not in Verilator, which has no X:
+  // there rst_n reads 1 before the bench drives reset, t3 and f3 hold
+  // arbitrary values, and s12-1 stopped the LN1 export at 8 ns (CI 43305666324).
+  reg s12_rst_seen = 1'b0;
+  always @(posedge clk or negedge rst_n)
+    if (rst_n === 1'b0) s12_rst_seen <= 1'b1;
   always @(posedge clk)
-    if (rst_n === 1'b1 && f3 !== t3fl(t3)) begin
+    if (s12_rst_seen && rst_n === 1'b1 && f3 !== t3fl(t3)) begin
       $display("*** ASSERT pe_pit_s12 s12-1: f3 %b is not the decode of t3 = %0d (%b)", f3, t3, t3fl(t3));
       $finish;
     end
   always @(posedge clk)
-    if (rst_n === 1'b1 && run && st == S_S3 && f3[F_DV] && p_lt_div !== ((p_ri ^ p_d) < p_ri)) begin
+    if (s12_rst_seen && rst_n === 1'b1 && run && st == S_S3 && f3[F_DV] && p_lt_div !== ((p_ri ^ p_d) < p_ri)) begin
       $display("*** ASSERT pe_pit_s12 s12-2: mask test %b != (r ^ d) < r at t3 = %0d", p_lt_div, t3);
       $finish;
     end
   //  §4: the tree compare equals `<` (11-12)
   always @(posedge clk)
-    if (rst_n === 1'b1 && run && st == S_S3 && p_lt_s0 !== (`P_A < `P_B)) begin
+    if (s12_rst_seen && rst_n === 1'b1 && run && st == S_S3 && p_lt_s0 !== (`P_A < `P_B)) begin
       $display("*** ASSERT pe_pit_s12 s12-4: lt33 %b != (P_A < P_B) at t3 = %0d", p_lt_s0, t3);
       $finish;
     end
