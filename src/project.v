@@ -2617,13 +2617,24 @@ module pe_pit_s12 #(parameter integer AW = 9) (
   // chose every group's operation through ONE driver (b6: `_24011_`, a 7-buffer chain
   // across the die; the new pin: `_72831_`, one weak cell on a 0.30 pF net). Each
   // copy drives only its own group: A = acc (`P_A`), B = dv_r/dv_q (`P_B`, the low
-  // `P_U`), D = dv_d (the high `P_U`, `P_V`). `pe_s3_opsel` is (* keep_hierarchy *)
-  // so opt_merge cannot fold the copies back into one (the pe_dup_ff rule). Its
-  // inputs are the §1 flags, never t3.
-  wire [3:0] pa_op, pa_op_b, pa_op_d;
-  wire [2:0] pb_op, pb_op_a, pb_op_d;
-  wire [2:0] pu_op_lo, pu_op_hi, pu_op_a;
-  wire [2:0] pv_op, pv_op_a, pv_op_b;
+  // `P_U`), D = dv_d (the high `P_U`, `P_V`). The copies are held apart by
+  // (* keep *) on their select nets below (11-12; it was keep_hierarchy on the
+  // module until then). Their inputs are the §1 flags, never t3.
+  // ⭐ THE COPIES ARE KEPT BY (* keep *) ON THE SELECT NETS EACH GROUP'S MUXES
+  // USE, NOT BY A HIERARCHY BOUNDARY (Wilson 11-12): the boundary hid the swap
+  // compare's load from ABC (a ripple with a weak driver, acc -> dv_q swinging
+  // 2.7 ns across placements); with keep on these 5 nets and nothing else the
+  // copies survive (no net past the compare reaches two groups -- held by
+  // model/gate_select_copies.py) and acc -> dv_q stays off the top paths.
+  (* keep *) wire [3:0] pa_op;
+  wire [3:0] pa_op_b, pa_op_d;
+  (* keep *) wire [2:0] pb_op;
+  wire [2:0] pb_op_a, pb_op_d;
+  (* keep *) wire [2:0] pu_op_lo;
+  (* keep *) wire [2:0] pu_op_hi;
+  wire [2:0] pu_op_a;
+  (* keep *) wire [2:0] pv_op;
+  wire [2:0] pv_op_a, pv_op_b;
   wire       op_s3  = (st == S_S3);
   wire       op_g2  = (`G_GRD == `P_LC) && (al[8:0] != `S3_WP) && `P_M0F && `P_OK;
   wire       op_anz = (`P_A != 33'd0);
@@ -3523,7 +3534,8 @@ endmodule
 // localparams: pe_pit_s12 checks them at time 0 in simulation (s12-3).
 //   f  = {G2, SHX, ONE, ZERO, PBA, P6, Y6, S0, V2, F}   fx = {V1|V5, V3, W2}
 // ---------------------------------------------------------------------------
-(* keep_hierarchy *)
+// (Wilson 11-12) no keep_hierarchy: the copies are kept by (* keep *) on the
+// select nets in pe_pit_s12 instead.
 module pe_s3_opsel (
     input  wire       s3,
     input  wire [9:0] f,
