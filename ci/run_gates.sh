@@ -352,6 +352,10 @@ GATES=(
   # MACRO INPUTS (Wilson 11-10): no raw pin reaches the SRAM macro's inputs
   # combinationally -- the black box no property can see into.
   model/gate_macro_inputs.py
+  # SELECT COPIES (Wilson 11-12, option b): the s12 per-group select copies
+  # survive LIBRELANE's own synthesis (the generic netlist cannot see the
+  # merge); must-fire: the same synthesis with the five keeps stripped.
+  model/gate_select_copies.py
   # HOLD RULE (Wilson 11-11): FW-1's 5 cycles proven at the worst phase --
   # a 4-cycle host fails with a late synchroniser, a 5-cycle host does not.
   test/run_hold_rule.py

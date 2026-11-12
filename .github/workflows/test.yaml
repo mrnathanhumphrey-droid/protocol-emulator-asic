@@ -403,6 +403,67 @@ jobs:
           git checkout -q FETCH_HEAD
           ls -l ihp-sg13cmos5l/libs.ref/sg13cmos5l_stdcell/verilog/
 
+      # ⭐⭐ THE llsyn SHARD ONLY (Wilson 11-12, option b): model/gate_select_copies.py
+      # runs LibreLane's OWN Yosys.Synthesis step -- the generic netlist above
+      # reads keep and no-keep the same, so the s12 select merge is invisible
+      # to it. Same pins as gds.yaml / v2_canary.yaml: tt-support-tools
+      # 9d13ff3, LibreLane 3.1.0.dev4 dockerized, the PDK through Ciel at
+      # LibreLane's pin, checked against ci/pdk.sha after the gate.
+      # ⚠ THE IMAGE IS 7.6 GB LOADED: the runner's preinstalled SDKs go first,
+      # and the cached tarball is deleted once loaded (a hit never re-saves).
+      - name: "llsyn: free runner disk for the LibreLane image"
+        if: matrix.shard == 'llsyn'
+        shell: bash
+        run: |
+          df -h / | tail -1
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h / | tail -1
+      - name: "llsyn: the pinned PDK commit (ci/pdk.sha)"
+        if: matrix.shard == 'llsyn'
+        shell: bash
+        run: echo "PDK_SHA=$(tr -d '[:space:]' < ci/pdk.sha)" >> "$GITHUB_ENV"
+      - name: "llsyn: cache the pinned IHP PDK"
+        if: matrix.shard == 'llsyn'
+        uses: actions/cache@v4
+        with:
+          path: /home/runner/pdk
+          key: ihp-open-pdk-${{ env.PDK_SHA }}
+      - name: "llsyn: cache the LibreLane image"
+        if: matrix.shard == 'llsyn'
+        uses: actions/cache@v4
+        with:
+          path: /home/runner/llimg
+          key: librelane-image-3.1.0.dev4
+      - name: "llsyn: tt-support-tools, LibreLane and its image (pinned)"
+        if: matrix.shard == 'llsyn'
+        shell: bash
+        env:
+          TT_REF: 9d13ff3e3e6202090740110438c6a10c1d62ca0f
+          LL_VER: 3.1.0.dev4
+        run: |
+          set -euo pipefail
+          T0=$(date +%s)
+          git clone -q https://github.com/TinyTapeout/tt-support-tools tt
+          git -C tt checkout -q "$TT_REF"
+          pip -q install -r tt/requirements.txt
+          pip -q install "librelane==$LL_VER"
+          IMG="ghcr.io/librelane/librelane:$LL_VER"
+          if [ -f /home/runner/llimg/image.tar.zst ]; then
+            echo "image: cache hit ($(du -h /home/runner/llimg/image.tar.zst | cut -f1))"
+            zstd -dc /home/runner/llimg/image.tar.zst | docker load
+            rm -f /home/runner/llimg/image.tar.zst
+          else
+            echo "image: cache miss -- pulling, then saving for the cache"
+            docker pull -q "$IMG"
+            mkdir -p /home/runner/llimg
+            docker save "$IMG" | zstd -T0 -3 -q -o /home/runner/llimg/image.tar.zst
+            echo "image: cached tarball $(du -h /home/runner/llimg/image.tar.zst | cut -f1)"
+          fi
+          docker image inspect "$IMG" --format 'image: {{.Id}}'
+          echo "tt=$(git -C tt rev-parse --short HEAD) librelane=$(pip show librelane | awk '/^Version/{print $2}')"
+          echo "llsyn setup wall_s=$(( $(date +%s) - T0 ))"
+          { echo "PDK_ROOT=/home/runner/pdk"; echo "PE_TT_DIR=$PWD/tt"; } >> "$GITHUB_ENV"
+
       - name: Model gates (ci/run_gates.sh)
         shell: bash
         # ⭐ THE PINNED VERILATOR, NAMED NOT PATHED, so the sweep and the cocotb
@@ -428,6 +489,17 @@ jobs:
           bash ci/run_gates.sh --shard "${{ matrix.shard }}" 2>&1 | tee gates.log
           mkdir -p shard_out
           grep -E "^  GATES: " gates.log > "shard_out/${{ matrix.shard }}.txt"
+
+      # llsyn: the netlist the gate judged came from the PDK of record
+      - name: "llsyn: the PDK Ciel installed is ci/pdk.sha"
+        if: matrix.shard == 'llsyn'
+        shell: bash
+        run: |
+          set -euo pipefail
+          got=$(ls -d "$PDK_ROOT"/ciel/*/versions/*/ 2>/dev/null | xargs -n1 basename | sort -u | tr '\n' ' ')
+          echo "ciel versions: $got"
+          ls -d "$PDK_ROOT"/ciel/*/versions/"$PDK_SHA" >/dev/null 2>&1 \
+            || { echo "*** Ciel installed '$got', ci/pdk.sha says $PDK_SHA"; exit 1; }
 
       # the shard's own GATES line, read back by gates-complete
       - name: Upload the shard verdict

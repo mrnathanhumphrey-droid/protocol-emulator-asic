@@ -99,6 +99,10 @@ fast model/gate_f2_local.py
 fast model/gate_cdc.py
 cdcq model/gate_cdc_qual.py
 cdcq model/gate_macro_inputs.py
+
+# llsyn -- LibreLane's own synthesis, twice (clean + keep stripped); needs the
+# LibreLane image + PDK (test.yaml sets them up for this shard only). ~272 s local
+llsyn model/gate_select_copies.py
 fast model/gate_slang_lint.py
 fast model/gate_halt_reset.py
 fast model/gate_runner_registry.py
