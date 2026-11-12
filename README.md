@@ -152,9 +152,9 @@ The five lanes are derived from the protocols, not chosen:
 |---|---|---|---|---|---|---|
 | UART-tx 115200 | 434 | 3 | 1 | 434 | 1 | 216 |
 | SPI-master 1 MHz | 25 | 3 | 1 | 25 | 1 | 23 |
-| I²C Fast-mode | 45 | 3 | 1 | 45 | 2 | 15 |
+| I²C Fast-mode 397 kHz formula, 393.7 kHz sim, 370.4 kHz board | 45 | 3 | 1 | 45 | 2 | 15 |
 | UART-rx 115200 | 4210 | 3 | 10 | 421 | 1 | 213 |
-| SPI-target (MISO 1 MHz, MOSI 500 kHz) | 400 | 3 | 8 | 50 | 1 | 17 |
+| SPI-target: MISO 1 MHz; MOSI capture 500 kHz | 400 | 3 | 8 | 50 | 1 | 17 |
 
 Cycles at **50 MHz**: period `T`, service time `C` (measured), release jitter
 `J`, tolerated response `D_tol`. `n` and `t` describe the bursty lanes — UART-rx
@@ -168,6 +168,10 @@ interfering lane, and `J` is derived from the program rather than assumed.
 ```
 r = {16, 12, 7, 15, 9}      min margin 11      bar ≥ 4
 ```
+
+| | ours | pyRTA | bar |
+|---|---|---|---|
+| shipped `J = 1` | 9 | **11** — the published bound | PASS both |
 
 The published bound is pyRTA's. Our own analysis is a cross-check that may only
 be *more* pessimistic — and a gate fails if it is ever smaller. Removing a lane
@@ -204,8 +208,16 @@ other copy to those two.
 **Rates, with their conditions.** I²C has three numbers: 397 kHz from the
 formula, 393.7 kHz in simulation (ideal edges), 370.4 kHz on the FPGA prototype
 with ~3.2 kΩ pull-ups — the chip waits for each real rise of SCL, so the rate
-depends on the bus by design. UART receive is certified down to 232 cycles per
-bit, about 258.6 kbaud at 60 MHz, verified across a ±3% baud-error sweep.
+depends on the bus by design.
+
+**UART receive.** `pe_asm` certifies the UART-rx program down to 232
+cycles per bit, which is up to about 258.6 kbaud at the 60 MHz design clock.
+The simulation bench verifies it at that limit across a ±3% baud-error sweep,
+and the FPGA prototype received every byte at ±2.5%. The timing analysis admits
+peers only inside that verified ±3%. At 115,200 baud: 521 cycles per
+bit, with a 0.032% rate error. 230,400 baud would need 260 cycles per bit,
+which is inside the certified range at 60 MHz (at 50 MHz it needed 217,
+outside it); no bench or board run has exercised 230,400 baud yet.
 
 ---
 
