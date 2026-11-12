@@ -165,6 +165,14 @@ SITES = [
          "model/gate_mutant_arms.py",
          "n/a -- the arms are preprocessed every run",
          "a budget with a declared reason per arm; drift in an arm goes red"),
+    Site("test/run_hold_rule.py", "ARMS", LIVE,
+         "the host-hold arms (hold cycles, late capture, expected PASS/FAIL): "
+         "HOST_FIRMWARE.md FW-1, 4 fails / 5 holds",
+         "test/run_hold_rule.py",
+         "n/a -- every arm is simulated every run",
+         "each arm's outcome is judged against its expectation in the same run "
+         "(a FAIL arm must fail ON THE BUS); a hold change that breaks the "
+         "rule goes red instead of re-recording"),
 
     # ---- the C = 3 re-quote ---------------------------------------------
     # ⭐ THREE TABLES AND NOT ONE, which is itself the finding. The first

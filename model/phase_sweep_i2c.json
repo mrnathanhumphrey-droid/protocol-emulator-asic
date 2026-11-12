@@ -1,6 +1,6 @@
 {
  "kind": "i2c_peer_delay",
- "sha": "e6b087ee39be558d5bba4a7a1936fb6123fcdfd1",
+ "sha": "ac041ca4ff1976e409e59ac21a110ad97dedaa86",
  "result": {
   "runs": [
    {
@@ -29,126 +29,126 @@
     "runner": "test/run_i2c.py",
     "exit": 0,
     "token": true,
-    "iverilog": "R:\\claude_scratch\\sweeps_tmp\\pe_i2cdly_ugtd58ov\\iv_dly1.cmd"
+    "iverilog": "C:\\Users\\Nate\\AppData\\Local\\Temp\\pe_i2cdly_wge4ilvp\\iv_dly1.cmd"
    },
    {
     "delay_ns": 1,
     "runner": "test/run_ckack.py",
     "exit": 0,
     "token": true,
-    "iverilog": "R:\\claude_scratch\\sweeps_tmp\\pe_i2cdly_ugtd58ov\\iv_dly1.cmd"
+    "iverilog": "C:\\Users\\Nate\\AppData\\Local\\Temp\\pe_i2cdly_wge4ilvp\\iv_dly1.cmd"
    },
    {
     "delay_ns": 1,
     "runner": "test/run_recert.py",
     "exit": 0,
     "token": true,
-    "iverilog": "R:\\claude_scratch\\sweeps_tmp\\pe_i2cdly_ugtd58ov\\iv_dly1.cmd"
+    "iverilog": "C:\\Users\\Nate\\AppData\\Local\\Temp\\pe_i2cdly_wge4ilvp\\iv_dly1.cmd"
    },
    {
     "delay_ns": 3,
     "runner": "test/run_i2c.py",
     "exit": 0,
     "token": true,
-    "iverilog": "R:\\claude_scratch\\sweeps_tmp\\pe_i2cdly_ugtd58ov\\iv_dly3.cmd"
+    "iverilog": "C:\\Users\\Nate\\AppData\\Local\\Temp\\pe_i2cdly_wge4ilvp\\iv_dly3.cmd"
    },
    {
     "delay_ns": 3,
     "runner": "test/run_ckack.py",
     "exit": 0,
     "token": true,
-    "iverilog": "R:\\claude_scratch\\sweeps_tmp\\pe_i2cdly_ugtd58ov\\iv_dly3.cmd"
+    "iverilog": "C:\\Users\\Nate\\AppData\\Local\\Temp\\pe_i2cdly_wge4ilvp\\iv_dly3.cmd"
    },
    {
     "delay_ns": 3,
     "runner": "test/run_recert.py",
     "exit": 0,
     "token": true,
-    "iverilog": "R:\\claude_scratch\\sweeps_tmp\\pe_i2cdly_ugtd58ov\\iv_dly3.cmd"
+    "iverilog": "C:\\Users\\Nate\\AppData\\Local\\Temp\\pe_i2cdly_wge4ilvp\\iv_dly3.cmd"
    },
    {
     "delay_ns": 7,
     "runner": "test/run_i2c.py",
     "exit": 0,
     "token": true,
-    "iverilog": "R:\\claude_scratch\\sweeps_tmp\\pe_i2cdly_ugtd58ov\\iv_dly7.cmd"
+    "iverilog": "C:\\Users\\Nate\\AppData\\Local\\Temp\\pe_i2cdly_wge4ilvp\\iv_dly7.cmd"
    },
    {
     "delay_ns": 7,
     "runner": "test/run_ckack.py",
     "exit": 0,
     "token": true,
-    "iverilog": "R:\\claude_scratch\\sweeps_tmp\\pe_i2cdly_ugtd58ov\\iv_dly7.cmd"
+    "iverilog": "C:\\Users\\Nate\\AppData\\Local\\Temp\\pe_i2cdly_wge4ilvp\\iv_dly7.cmd"
    },
    {
     "delay_ns": 7,
     "runner": "test/run_recert.py",
     "exit": 0,
     "token": true,
-    "iverilog": "R:\\claude_scratch\\sweeps_tmp\\pe_i2cdly_ugtd58ov\\iv_dly7.cmd"
+    "iverilog": "C:\\Users\\Nate\\AppData\\Local\\Temp\\pe_i2cdly_wge4ilvp\\iv_dly7.cmd"
    },
    {
     "delay_ns": 11,
     "runner": "test/run_i2c.py",
     "exit": 0,
     "token": true,
-    "iverilog": "R:\\claude_scratch\\sweeps_tmp\\pe_i2cdly_ugtd58ov\\iv_dly11.cmd"
+    "iverilog": "C:\\Users\\Nate\\AppData\\Local\\Temp\\pe_i2cdly_wge4ilvp\\iv_dly11.cmd"
    },
    {
     "delay_ns": 11,
     "runner": "test/run_ckack.py",
     "exit": 0,
     "token": true,
-    "iverilog": "R:\\claude_scratch\\sweeps_tmp\\pe_i2cdly_ugtd58ov\\iv_dly11.cmd"
+    "iverilog": "C:\\Users\\Nate\\AppData\\Local\\Temp\\pe_i2cdly_wge4ilvp\\iv_dly11.cmd"
    },
    {
     "delay_ns": 11,
     "runner": "test/run_recert.py",
     "exit": 0,
     "token": true,
-    "iverilog": "R:\\claude_scratch\\sweeps_tmp\\pe_i2cdly_ugtd58ov\\iv_dly11.cmd"
+    "iverilog": "C:\\Users\\Nate\\AppData\\Local\\Temp\\pe_i2cdly_wge4ilvp\\iv_dly11.cmd"
    },
    {
     "delay_ns": 15,
     "runner": "test/run_i2c.py",
     "exit": 0,
     "token": true,
-    "iverilog": "R:\\claude_scratch\\sweeps_tmp\\pe_i2cdly_ugtd58ov\\iv_dly15.cmd"
+    "iverilog": "C:\\Users\\Nate\\AppData\\Local\\Temp\\pe_i2cdly_wge4ilvp\\iv_dly15.cmd"
    },
    {
     "delay_ns": 15,
     "runner": "test/run_ckack.py",
     "exit": 0,
     "token": true,
-    "iverilog": "R:\\claude_scratch\\sweeps_tmp\\pe_i2cdly_ugtd58ov\\iv_dly15.cmd"
+    "iverilog": "C:\\Users\\Nate\\AppData\\Local\\Temp\\pe_i2cdly_wge4ilvp\\iv_dly15.cmd"
    },
    {
     "delay_ns": 15,
     "runner": "test/run_recert.py",
     "exit": 0,
     "token": true,
-    "iverilog": "R:\\claude_scratch\\sweeps_tmp\\pe_i2cdly_ugtd58ov\\iv_dly15.cmd"
+    "iverilog": "C:\\Users\\Nate\\AppData\\Local\\Temp\\pe_i2cdly_wge4ilvp\\iv_dly15.cmd"
    },
    {
     "delay_ns": 19,
     "runner": "test/run_i2c.py",
     "exit": 0,
     "token": true,
-    "iverilog": "R:\\claude_scratch\\sweeps_tmp\\pe_i2cdly_ugtd58ov\\iv_dly19.cmd"
+    "iverilog": "C:\\Users\\Nate\\AppData\\Local\\Temp\\pe_i2cdly_wge4ilvp\\iv_dly19.cmd"
    },
    {
     "delay_ns": 19,
     "runner": "test/run_ckack.py",
     "exit": 0,
     "token": true,
-    "iverilog": "R:\\claude_scratch\\sweeps_tmp\\pe_i2cdly_ugtd58ov\\iv_dly19.cmd"
+    "iverilog": "C:\\Users\\Nate\\AppData\\Local\\Temp\\pe_i2cdly_wge4ilvp\\iv_dly19.cmd"
    },
    {
     "delay_ns": 19,
     "runner": "test/run_recert.py",
     "exit": 0,
     "token": true,
-    "iverilog": "R:\\claude_scratch\\sweeps_tmp\\pe_i2cdly_ugtd58ov\\iv_dly19.cmd"
+    "iverilog": "C:\\Users\\Nate\\AppData\\Local\\Temp\\pe_i2cdly_wge4ilvp\\iv_dly19.cmd"
    }
   ],
   "passed": 21,
@@ -175,6 +175,7 @@
    "model/a2/pyrta_bound.py",
    "model/a2/pyrta_src.py",
    "model/a2/rta_spuri.py",
+   "model/clock.py",
    "model/clocked_phase.py",
    "model/count_ranges.py",
    "model/gate_admissible_images.py",
@@ -187,9 +188,15 @@
    "model/park_class.py",
    "model/pe_asm.py",
    "model/pe_proto.py",
+   "model/pit_capture_golden.py",
+   "model/pit_golden.py",
+   "model/pit_s0_golden.py",
+   "model/stale_records.py",
    "model/v3_table.py",
    "model/zero_spacing.py",
+   "src/pe_cells_ihp.v",
    "src/pe_engine.v",
+   "src/pe_sram_macro_ihp.v",
    "src/pe_store.v",
    "src/project.v",
    "test/armnone_image.hex",
@@ -198,6 +205,8 @@
    "test/b3b_b_image.hex",
    "test/b3b_bnoi2c_image.hex",
    "test/benchset.py",
+   "test/branch_check.vh",
+   "test/branch_corpus.py",
    "test/cfgerr_image.hex",
    "test/ckdegen2_image.hex",
    "test/ckdegen_image.hex",
@@ -222,6 +231,7 @@
    "test/ds18b20_model.v",
    "test/fram_i2c.v",
    "test/fram_spi.v",
+   "test/gate_store_latch.py",
    "test/half_image.hex",
    "test/hold_mon.v",
    "test/host_feed.vh",
@@ -236,6 +246,7 @@
    "test/onewire_fpga_image.hex",
    "test/onewire_image.hex",
    "test/param_dump.v",
+   "test/pe_clock.vh",
    "test/pe_isa.py",
    "test/pinmap.vh",
    "test/pinnone_image.hex",
@@ -244,8 +255,11 @@
    "test/run_cktx.py",
    "test/run_i2c.py",
    "test/run_lockstep.py",
+   "test/run_pit_capture.py",
+   "test/run_pit_s0.py",
    "test/run_recert.py",
    "test/run_w_sweep.py",
+   "test/runstart.vh",
    "test/rx_e2e.vh",
    "test/rxfast_image.hex",
    "test/scratch_heads.py",
@@ -261,30 +275,42 @@
    "test/sweep_i2c_delay.py",
    "test/sweep_record.py",
    "test/tb.v",
+   "test/tb_arm2.v",
    "test/tb_ckack.v",
    "test/tb_cktx.v",
    "test/tb_csat.v",
    "test/tb_edge.v",
+   "test/tb_equiv.v",
    "test/tb_fifo.v",
+   "test/tb_gcd.v",
    "test/tb_half.v",
    "test/tb_i2c.v",
    "test/tb_jlane.v",
    "test/tb_lock.v",
    "test/tb_onewire.v",
+   "test/tb_pair.v",
    "test/tb_pinrange.v",
+   "test/tb_pit.v",
    "test/tb_reload.v",
+   "test/tb_rowmux.v",
+   "test/tb_rt.v",
    "test/tb_rxbw.v",
    "test/tb_smoke.v",
    "test/tb_spitgt.v",
    "test/tb_status.v",
+   "test/tb_store_latch.v",
    "test/tb_trace.v",
    "test/tb_tx.v",
    "test/tb_uartrx.v",
    "test/tb_uarttx.v",
+   "test/tb_usbbuf.v",
+   "test/tb_usbdev.v",
+   "test/tb_usbrx.v",
    "test/tb_v2win.v",
    "test/tb_verdict.v",
    "test/tb_w.v",
    "test/tb_witness.v",
+   "test/tb_xclock.v",
    "test/toolchain.py",
    "test/tr_mon.v",
    "test/tx_badclk_image.hex",
@@ -294,9 +320,10 @@
    "test/uart_tx.py",
    "test/uart_tx_busy_image.hex",
    "test/uart_tx_image.hex",
+   "test/v1_translate.py",
    "test/v3_table.vh",
    "test/ws2812_sub3_rearm21.hex"
   ],
-  "sha256": "0dfb97dd3f7d529ab9c766454d7dbc3eca47cb754691af9a36ae2b7ebb0fd9bb"
+  "sha256": "7119e771dbacd0945677d6f66d4ee32dad2dc0df8dffa9997dd0549de9cb849e"
  }
 }
