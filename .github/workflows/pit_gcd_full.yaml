@@ -2,21 +2,35 @@ name: pit-gcd-full
 # ⭐ THE FULL run_pit_gcd (Wilson 11-11): all 3,696 seeded sets on iverilog, the
 # certifying engine, plus the s12 must-fires on the solver sets. CI's `test`
 # workflow runs only the fixed 214-set subset on Verilator (`gcd` shard).
-# ⚠ A `schedule` fires ONLY on the default branch (cmos5l, the locked tree), so
-# the nightly covers what has been merged; a dev branch runs it by hand
-# (workflow_dispatch), as the full LN1 run is.
+# ⭐ THE NIGHTLY RUNS WHERE THE WORK HAPPENS (Wilson 11-12). A `schedule`
+# fires only from the DEFAULT branch's copy of this file (work/s3-alq -- not
+# cmos5l, as this comment wrongly said on 11-11), so the scheduled run checks
+# out each branch named in the repository variable PE_NIGHTLY_BRANCHES (a JSON
+# list, e.g. ["work/s3-alq", "work/s12-c"]); unset, it runs the default
+# branch. By hand: workflow_dispatch with `branch`.
 on:
   schedule:
     - cron: "17 7 * * *"
   workflow_dispatch:
+    inputs:
+      branch:
+        description: "branch to run (empty = the nightly set, PE_NIGHTLY_BRANCHES)"
+        required: false
+        default: ""
 jobs:
   pit-gcd-full:
     runs-on: ubuntu-24.04
     timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      matrix:
+        ref: ${{ fromJSON(inputs.branch && format('["{0}"]', inputs.branch) || vars.PE_NIGHTLY_BRANCHES || format('["{0}"]', github.event.repository.default_branch)) }}
+    name: pit-gcd-full (${{ matrix.ref }})
     steps:
       - name: Checkout repo
         uses: actions/checkout@v6
         with:
+          ref: ${{ matrix.ref }}
           fetch-depth: 0
 
       # apt's release iverilog, as the test job: the pinned suite's 14.0-devel
@@ -38,4 +52,8 @@ jobs:
         shell: bash
         env:
           PE_SIM: iverilog
-        run: python test/run_pit_gcd.py --full | tee pit_gcd_full.log; test ${PIPESTATUS[0]} -eq 0 && grep -qE '^\s*GATE pit-gcd: PASSED\s*$' pit_gcd_full.log
+        # a block scalar: the token's ": " inside a plain scalar is a YAML
+        # mapping, which made this file invalid as committed in e14cbe2
+        run: |
+          python test/run_pit_gcd.py --full | tee pit_gcd_full.log
+          test ${PIPESTATUS[0]} -eq 0 && grep -qE '^\s*GATE pit-gcd: PASSED\s*$' pit_gcd_full.log

@@ -202,7 +202,13 @@ def build(out, defines=(), iverilog=None, extra=()):
 # build is cached by the snapshot's hash + the defines + the Verilator binary.
 # ---------------------------------------------------------------------------
 SIM = os.environ.get("PE_SIM", "iverilog")
-VL = "/opt/oss-cad-suite-2026-09-30/bin/verilator"      # CI's pinned suite (test.yaml)
+# ⛔ TWO HOSTS (Wilson 11-12, the gcd CI home): on Windows the build and the
+# binary run in WSL through `wsl`; on a Linux runner (CI) there is no `wsl`
+# and Verilator is native -- the pin comes from PE_VERILATOR (ci/tools.sh
+# ruling V), never a bare `verilator` from PATH. Same commands, no WSL hop.
+NATIVE = os.name != "nt"
+VL = (os.environ.get("PE_VERILATOR") if NATIVE else None) \
+    or "/opt/oss-cad-suite-2026-09-30/bin/verilator"     # CI's pinned suite (test.yaml)
 VL_FLAGS = ["--binary", "--timing", "-O3", "-j", "16", "-Wno-fatal", "-Wno-lint", "-Wno-style"]
 # ⛔ THE RANDOM START-UP ARM (Wilson 11-05, red-team item 1): Verilator is
 # 2-state and starts every register at 0, so a MISSING RESET -- a real silicon
@@ -212,11 +218,15 @@ VL_FLAGS = ["--binary", "--timing", "-O3", "-j", "16", "-Wno-fatal", "-Wno-lint"
 XINIT = os.environ.get("PE_VL_XINIT")
 if XINIT:
     VL_FLAGS = VL_FLAGS + ["--x-initial", "unique"]
-WSL = ["wsl", "-d", "Ubuntu", "--"]
+WSL = [] if NATIVE else ["wsl", "-d", "Ubuntu", "--"]
 _SNAP = {}
 
 
 def wsl_path(p):
+    """the path as the Verilator host sees it: /mnt/<drive>/... through WSL,
+    unchanged on a native Linux host"""
+    if NATIVE:
+        return os.path.abspath(p)
     p = os.path.abspath(p).replace("\\", "/")
     return "/mnt/%s%s" % (p[0].lower(), p[2:])
 
@@ -233,7 +243,10 @@ def _snapshot():
         for f in files:
             h.update(f.replace("\\", "/").encode() + b"\0" + open(os.path.join(ROOT, f), "rb").read() + b"\0")
         key = h.hexdigest()[:16]
-        d = os.path.join(os.environ.get("PE_VL_SNAP", r"R:\claude_scratch\vlsnap"), key)
+        import tempfile
+        d = os.path.join(os.environ.get("PE_VL_SNAP") or (
+            os.path.join(tempfile.gettempdir(), "pe_vlsnap") if NATIVE else r"R:\claude_scratch\vlsnap"), key)
+        os.makedirs(os.path.dirname(d), exist_ok=True)
         if not os.path.isdir(d):
             tmp = d + ".part%d" % os.getpid()
             for f in files:
@@ -259,7 +272,8 @@ def vl_build(out, defines=(), bench=BENCH, top="tb_pit"):
           '> build.log 2>&1 || { tail -30 build.log; exit 1; }; cd /; '
           'mv -T "$B.p$$" "$B" 2>/dev/null || rm -rf "$B.p$$"; fi; echo "$B/obj_dir/vtb"') % (
         b, snap, VL, " ".join(VL_FLAGS), top, " ".join("-D%s" % d for d in defines), bench, " ".join(RTL))
-    r = subprocess.run(["wsl", "-d", "Ubuntu", "--exec", "bash", "-c", sh], capture_output=True, text=True,
+    host = ["bash", "-c", sh] if NATIVE else ["wsl", "-d", "Ubuntu", "--exec", "bash", "-c", sh]
+    r = subprocess.run(host, capture_output=True, text=True,
                        encoding="utf-8", errors="replace")
     if r.returncode != 0:
         raise RuntimeError("verilator build failed: %s" % (r.stdout + r.stderr)[-600:])
