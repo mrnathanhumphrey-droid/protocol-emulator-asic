@@ -34,6 +34,7 @@ reported.
 POSITIVE TOKEN: `FPGA-ONEWIRE: PASSED` only on the success path.
 Usage: python fpga/sim/run_fpga_onewire.py [arm ...]   (default: all)
 """
+import concurrent.futures as cf
 import os
 import re
 import subprocess
@@ -318,29 +319,15 @@ def main():
     def go(name, **kw):
         return sim(name, e, len(lines), pidx, fpath, **kw)
 
-    if not want or "ok" in want or "late_edge" in want or "late_over" in want:
-        txt = go("ok")
-        d, ck = judge(txt, rxmap, nidle)
-        show("ok (the real build)", ck)
-        rc |= 0 if all(o for _c, o, _d in ck) else 1
-        sl = slack(txt)
-        for g, c, p, s in sl:
-            print("    poll group %d: reply at cyc %d, next pop at %d -> slack %d cycles (%.1f us)"
-                  % (g, c, p, s, clock.us(s, FPGA_HZ)))
-        if sl:
-            sl_min = min(s for *_x, s in sl)
-            print("    POLL SLACK (minimum): %d cycles = %.1f us" % (sl_min, clock.us(sl_min, FPGA_HZ)))
-        else:
-            print("    *** no poll decision measured")
-            rc = 1
-    if sl_min is not None and (not want or "late_edge" in want):
-        txt = go("late_edge", LATE=sl_min)
-        d, ck = judge(txt, rxmap, nidle)
-        show("late_edge (decision delayed by the full slack, %d cycles)" % sl_min, ck)
-        rc |= 0 if all(o for _c, o, _d in ck) else 1
+    def parallel(runs):
+        """{name: kw} -> {name: log text}, every sim at once (each its own
+        tb_<name>.vvp and <name>.log, so they share no file)"""
+        if not runs:
+            return {}
+        with cf.ThreadPoolExecutor(max_workers=len(runs)) as ex:
+            fut = {n: ex.submit(go, n, **kw) for n, kw in runs.items()}
+            return {n: f.result() for n, f in fut.items()}
 
-    print()
-    print("  --- must-fires ---")
     mfs = [("iso", dict(ISO_MF=1), lambda d, ck: d["iso"] and d["iso"] > 0,
             "load bytes copied onto J11"),
            ("slow", dict(BAD_AT=BAD_AT, BAD_SHIFT=4 * e.P),
@@ -355,14 +342,54 @@ def main():
            ("v1load", dict(LOAD_N=pe_isa.STORE_BYTES // 2, NCYC_MAX=400000),
             lambda d, ck: d["ldbytes"] == pe_isa.STORE_BYTES // 2 and d["chipload"] == (0, 0, 1),
             "v1's half-store stream -> the chip refuses (short load)")]
+    # ⭐ THE ARMS RUN IN PARALLEL, AS THE LOADER'S DO (Wilson 11-10, D step 1).
+    # Wave 1: every sim that needs nothing measured -- ok and the four fixed
+    # must-fires. Wave 2: the two arms SET BY ok's measured slack (late_edge,
+    # late_over). Wall time = the slowest of wave 1 + the slower of wave 2.
+    # The verdicts are judged below in the old order, one at a time; the
+    # bench is untouched.
+    need_ok = not want or bool({"ok", "late_edge", "late_over"} & want)
+    wave1 = {"ok": {}} if need_ok else {}
+    wave1.update((n, kw) for n, kw, _r, _w in mfs if not want or n in want)
+    out = parallel(wave1)
+
+    if need_ok:
+        txt = out["ok"]
+        d, ck = judge(txt, rxmap, nidle)
+        show("ok (the real build)", ck)
+        rc |= 0 if all(o for _c, o, _d in ck) else 1
+        sl = slack(txt)
+        for g, c, p, s in sl:
+            print("    poll group %d: reply at cyc %d, next pop at %d -> slack %d cycles (%.1f us)"
+                  % (g, c, p, s, clock.us(s, FPGA_HZ)))
+        if sl:
+            sl_min = min(s for *_x, s in sl)
+            print("    POLL SLACK (minimum): %d cycles = %.1f us" % (sl_min, clock.us(sl_min, FPGA_HZ)))
+        else:
+            print("    *** no poll decision measured")
+            rc = 1
     if sl_min is not None:
         mfs.append(("late_over", dict(LATE=sl_min + 2 * (PUSH_TO_LOW_EDGE + WINDOW) + 40),
                     lambda d, ck: d["status"] is not None and d["status"] & 0x02,
                     "poll decision past the slack -> UNDERRUN"))
+        wave2 = {}
+        if not want or "late_edge" in want:
+            wave2["late_edge"] = dict(LATE=sl_min)
+        if not want or "late_over" in want:
+            wave2["late_over"] = mfs[-1][1]
+        out.update(parallel(wave2))
+    if sl_min is not None and (not want or "late_edge" in want):
+        txt = out["late_edge"]
+        d, ck = judge(txt, rxmap, nidle)
+        show("late_edge (decision delayed by the full slack, %d cycles)" % sl_min, ck)
+        rc |= 0 if all(o for _c, o, _d in ck) else 1
+
+    print()
+    print("  --- must-fires ---")
     for name, kw, red, why in mfs:
         if want and name not in want:
             continue
-        txt = go(name, **kw)
+        txt = out[name]
         d, ck = judge(txt, rxmap, nidle)
         reds = [c for c, o, _d in ck if not o]
         fired = bool((d["end"] or name == "v1load") and red(d, ck) and reds)

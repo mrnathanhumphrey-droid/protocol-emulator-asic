@@ -32,6 +32,7 @@ MUST-FIRES (each must reach END and be red for its own reason)
 POSITIVE TOKEN: `FPGA-I2C: PASSED` only on the success path.
 Usage: python fpga/sim/run_fpga_i2c.py [arm ...] [--write]
 """
+import concurrent.futures as cf
 import os
 import re
 import subprocess
@@ -266,16 +267,7 @@ def main():
         return rc
     count_model_table()
 
-    for name, kw in (("ok", {}), ("glitch", {"GLITCH_AT": 50})):
-        if want and name not in want:
-            continue
-        d, ck = judge(sim(name, **kw))
-        show(name, ck)
-        print("    push margin before pop: min %s cycles" % d["margin"])
-        rc |= 0 if all(o for _c, o, _d in ck) else 1
-
-    print()
-    print("  --- must-fires ---")
+    arms = (("ok", {}), ("glitch", {"GLITCH_AT": 50}))
     mfs = [("glitch_raw", {"GLITCH_AT": 50, "DEGLITCH": 1},
             lambda d: d["ahead"], "bounce, no deglitch -> glue counts AHEAD of the bus"),
            ("iso", {"ISO_MF": 1}, lambda d: d["iso"][0] and d["iso"][0] > 0,
@@ -291,10 +283,32 @@ def main():
            ("v1load", {"LOAD_N": pe_isa.STORE_BYTES // 2},
             lambda d: d["ldbytes"] == pe_isa.STORE_BYTES // 2 and d["chipload"] == (0, 0, 1),
             "v1's half-store stream -> the chip refuses (short load)")]
+    # ⭐ EVERY ARM RUNS IN PARALLEL, AS THE LOADER'S DO (Wilson 11-10, D step
+    # 1): all seven are independent, each its own tb_<name>.vvp and <name>.log,
+    # so the wall time is the slowest one's. The verdicts are judged below in
+    # the old order, one at a time; the bench is untouched.
+    runs = {n: kw for n, kw in arms if not want or n in want}
+    runs.update((n, kw) for n, kw, _r, _w in mfs if not want or n in want)
+    out = {}
+    if runs:
+        with cf.ThreadPoolExecutor(max_workers=len(runs)) as ex:
+            fut = {n: ex.submit(sim, n, **kw) for n, kw in runs.items()}
+            out = {n: f.result() for n, f in fut.items()}
+
+    for name, _kw in arms:
+        if want and name not in want:
+            continue
+        d, ck = judge(out[name])
+        show(name, ck)
+        print("    push margin before pop: min %s cycles" % d["margin"])
+        rc |= 0 if all(o for _c, o, _d in ck) else 1
+
+    print()
+    print("  --- must-fires ---")
     for name, kw, red, why in mfs:
         if want and name not in want:
             continue
-        d, ck = judge(sim(name, **kw))
+        d, ck = judge(out[name])
         reds = [c for c, o, _d in ck if not o]
         fired = bool((d["end"] or name == "v1load") and red(d) and reds)
         print("  must-fire %-10s (%s): %s" % (
