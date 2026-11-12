@@ -165,6 +165,30 @@ SITES = [
          "model/gate_mutant_arms.py",
          "n/a -- the arms are preprocessed every run",
          "a budget with a declared reason per arm; drift in an arm goes red"),
+    # ---- s12 (Wilson 11-11 / 11-12) ---------------------------------------
+    Site("test/run_pit_gcd.py", "DIVMASK_KILLS", RECORD,
+         "the CI subset's must-kill sets: ALL 27 full-set indices whose record "
+         "M_DIVMASK_LATE breaks",
+         "test/run_pit_gcd.py",
+         "`--find-kills` on iverilog, 11-11, e14cbe2",
+         "the subset proves itself every run: M_DIVMASK_LATE must die ON it in "
+         "both arms, so a set-generator drift that moves the kills out goes red; "
+         "re-run --find-kills after any change to the set generator"),
+    Site("test/run_pit_gcd.py", "STALE_KILLS", RECORD,
+         "the CI subset's must-kill sample: 40 of the 526 full-set indices whose "
+         "record M_DECODE_STALE breaks (random.Random(20261111).sample)",
+         "test/run_pit_gcd.py",
+         "`--find-kills` on iverilog, 11-11, e14cbe2",
+         "same self-proof as DIVMASK_KILLS: M_DECODE_STALE must die on the subset "
+         "in both arms every run"),
+    Site("model/gate_select_copies.py", "FLOORS", RECORD,
+         "minimum flops per register group (acc / dv_r+dv_q / dv_d) for the "
+         "copy walk to count as real: 64 / 40 / 16",
+         "model/gate_select_copies.py",
+         "set under the counts found 11-12 on LibreLane's synthesis "
+         "(A 75 / B 53 / D 23, 0dd6777 / 2c55a59)",
+         "a non-vacuity floor, not a measured value: every run prints the counts "
+         "it found; a group under its floor is red, never a vacuous pass"),
 
     # ---- the C = 3 re-quote ---------------------------------------------
     # ⭐ THREE TABLES AND NOT ONE, which is itself the finding. The first
