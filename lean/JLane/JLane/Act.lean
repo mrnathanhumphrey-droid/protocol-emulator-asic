@@ -30,6 +30,11 @@ inductive Op where
   | chainRe
   | clk (shiftin : Bool) (nbits : Nat)
   | arm
+  /-- v2 bundle 2 (Wilson 11-08): a SELF-TIMED byte (`st_act = cur_cls[C_ST] & ~clk_real`,
+  `pe_engine.v` l.2035): an unclocked SHIFT / SHIFTIN with `mod[1]`, or a SHIFTI, on a
+  clockless lane. Held on every dispatch until its last bit; which dispatch is the last is
+  the program input `Program2.stl` (Wilson 11-12: free inputs, every pattern). -/
+  | st
   deriving DecidableEq, Repr
 
 /-- `l_ckph`: `CK_LOW`, `CK_HIGH`, `CK_COLL`. -/
@@ -48,6 +53,14 @@ Delays live in the words. -/
 structure Program2 where
   live : Lane → Bool
   half : Lane → Bool
+  /-- `st_last` (l.2093) of a self-timed action dispatched on lane `l` at cycle `t`: the byte's
+  `l_ckbit == st_lastix`, or the buffer send's `usb_bcnt == usb_blen - 1`. A free input, like
+  V4b's `Program.ret`: the run is deterministic given `fw` and the scheduler, so a time-indexed
+  input covers every pattern the RTL can produce. Default: every dispatch is the last. -/
+  stl   : Nat → Lane → Bool := fun _ _ => true
+  /-- `usb_stuff` (l.2081): this dispatch is a USB stuff slot (held, counts no bit). Free input.
+  Default: never. -/
+  stuff : Nat → Lane → Bool := fun _ _ => false
 
 /-- The v2 engine: v1 registers plus slot words and the clocked-phase registers. -/
 structure Engine2 where
@@ -68,19 +81,22 @@ def wantFetch (x : Engine2) (l : Lane) : Bool :=
   else if (x.head l).op = .chainRe then false
   else !x.e.spareValid l
 
-/-- `ck_hold`: a clocked action that does not retire on this dispatch.
-SHIFT retires on its HIGH once all bits are counted; SHIFTIN on its COLL. -/
-def hold (x : Engine2) : Bool :=
+/-- `ck_hold` (l.2200): a clocked action that does not retire on this dispatch, or a
+self-timed one: `(ck_act & ~ck_retire) | (st_act & ~(st_last & ~usb_stuff))`.
+SHIFT retires on its HIGH once all bits are counted; SHIFTIN on its COLL; a self-timed
+action on its last bit, unless that dispatch is a stuff slot. -/
+def hold (x : Engine2) (P : Program2) : Bool :=
   match (x.head x.e.cur).op with
   | .clk false n => !(decide (x.ckph x.e.cur = .high) && decide (x.ckbit x.e.cur = n))
   | .clk true _  => !decide (x.ckph x.e.cur = .coll)
+  | .st          => !(P.stl x.e.now x.e.cur && !P.stuff x.e.now x.e.cur)
   | _            => false
 
 /-- `act_retire = ~ck_hold & ((a_op != OP_REARM) | a_lvl)`. -/
-def retire (x : Engine2) : Bool :=
-  !x.hold && (match (x.head x.e.cur).op with
-              | .chainRe => false
-              | _        => true)
+def retire (x : Engine2) (P : Program2) : Bool :=
+  !x.hold P && (match (x.head x.e.cur).op with
+                | .chainRe => false
+                | _        => true)
 
 /-- `ck_act`. -/
 def isClk (x : Engine2) : Bool :=
@@ -136,14 +152,14 @@ def Program2.toP (P : Program2) (dly : Lane → Nat) : Program := { live := P.li
 namespace Engine2
 
 /-- §4 + 7A/7C: only a retiring WB invalidates the head. -/
-def actvNext (x : Engine2) (l : Lane) (s : Slot) : Bool :=
-  if x.e.st = .wb ∧ x.retire = true ∧ l = x.e.cur ∧ s = x.e.sel x.e.cur then false
+def actvNext (x : Engine2) (P : Program2) (l : Lane) (s : Slot) : Bool :=
+  if x.e.st = .wb ∧ x.retire P = true ∧ l = x.e.cur ∧ s = x.e.sel x.e.cur then false
   else if x.e.pst = .cap ∧ l = x.e.pl ∧ s = x.e.pslot then true
   else x.e.actv l s
 
 /-- Only a retiring WB flips the select. -/
-def selNext (x : Engine2) (l : Lane) : Slot :=
-  if x.e.st = .wb ∧ x.retire = true ∧ l = x.e.cur then !x.e.sel l else x.e.sel l
+def selNext (x : Engine2) (P : Program2) (l : Lane) : Slot :=
+  if x.e.st = .wb ∧ x.retire P = true ∧ l = x.e.cur then !x.e.sel l else x.e.sel l
 
 /-- Every WB advances the timestamp by `wb_dly` (§7, the one rule). -/
 def tsNext (P : Program2) (x : Engine2) (l : Lane) : Nat :=
@@ -154,15 +170,20 @@ def wordNext (fw : Engine2 → Word) (x : Engine2) (l : Lane) (s : Slot) : Word 
   if x.e.pst = .cap ∧ l = x.e.pl ∧ s = x.e.pslot then fw x else x.word l s
 
 /-- `if (act_retire) l_ckph <= CK_LOW; else if (ck_act) l_ckph <= ck_next;` at WB. -/
-def ckphNext (x : Engine2) (l : Lane) : CkPh :=
+def ckphNext (x : Engine2) (P : Program2) (l : Lane) : CkPh :=
   if x.e.st = .wb ∧ l = x.e.cur then
-    (if x.retire = true then .low else if x.isClk = true then x.ckNext else x.ckph l)
+    (if x.retire P = true then .low else if x.isClk = true then x.ckNext else x.ckph l)
   else x.ckph l
 
-/-- `if (ck_act) { if (act_retire) l_ckbit <= 0; else if (ck_is_low) l_ckbit++ }` at WB. -/
-def ckbitNext (x : Engine2) (l : Lane) : Nat :=
+/-- `if (ck_act) { if (act_retire) l_ckbit <= 0; else if (ck_is_low) l_ckbit++ }` at WB;
+and bundle 2 (l.3678–3680): `if (st_act) { if (act_retire) l_ckbit <= 0;
+else if (!usb_stuff) l_ckbit++ }` -- one bit per dispatch, none on a stuff slot. -/
+def ckbitNext (x : Engine2) (P : Program2) (l : Lane) : Nat :=
   if x.e.st = .wb ∧ l = x.e.cur ∧ x.isClk = true then
-    (if x.retire = true then 0 else if x.ckph l = .low then x.ckbit l + 1 else x.ckbit l)
+    (if x.retire P = true then 0 else if x.ckph l = .low then x.ckbit l + 1 else x.ckbit l)
+  else if x.e.st = .wb ∧ l = x.e.cur ∧ (x.head x.e.cur).op = .st then
+    (if x.retire P = true then 0
+     else if P.stuff x.e.now x.e.cur = true then x.ckbit l else x.ckbit l + 1)
   else x.ckbit l
 
 end Engine2
@@ -174,15 +195,15 @@ def step2 (P : Program2) (fw : Engine2 → Word) (w : Option Lane) (x : Engine2)
   let p := portNextW (P.toP (fun _ => 0)) x.wantFetch e
   let d := dispNext (fun _ => w) e
   { e := { now := e.now + 1
-           actv := x.actvNext
-           sel := x.selNext
+           actv := x.actvNext P
+           sel := x.selNext P
            ts := x.tsNext P
            pst := p.pst, pl := p.pl, prr := p.prr, pbr1 := p.pbr1, pslot := p.pslot
            winq := w
            st := d.st, cur := d.cur }
     word := x.wordNext fw
-    ckph := x.ckphNext
-    ckbit := x.ckbitNext }
+    ckph := x.ckphNext P
+    ckbit := x.ckbitNext P }
 
 /-- The v1 step depends on its scheduler only through the value at the current state. -/
 theorem step_win_congr (P : Program) (win : Engine → Option Lane) (e : Engine) :
@@ -203,12 +224,14 @@ theorem op_not_chain {dly : Lane → Nat} {l : Lane} {w : Word} (h : PlainW dly 
     w.op ≠ .chainRe := by
   rcases h.1 with h1 | h1 <;> rw [h1] <;> decide
 
-theorem hold_plain (dly : Lane → Nat) (x : Engine2) (h : Plain dly x) : x.hold = false := by
+theorem hold_plain (P : Program2) (dly : Lane → Nat) (x : Engine2) (h : Plain dly x) :
+    x.hold P = false := by
   unfold hold
   rcases (h x.e.cur (x.e.sel x.e.cur)).1 with h1 | h1 <;>
     · show (match (x.head x.e.cur).op with
             | .clk false n => !(decide (x.ckph x.e.cur = .high) && decide (x.ckbit x.e.cur = n))
             | .clk true _  => !decide (x.ckph x.e.cur = .coll)
+            | .st          => !(P.stl x.e.now x.e.cur && !P.stuff x.e.now x.e.cur)
             | _            => false) = false
       unfold head
       rw [h1]
@@ -217,9 +240,10 @@ theorem isClk_plain (dly : Lane → Nat) (x : Engine2) (h : Plain dly x) : x.isC
   unfold isClk head
   rcases (h x.e.cur (x.e.sel x.e.cur)).1 with h1 | h1 <;> rw [h1]
 
-theorem retire_plain (dly : Lane → Nat) (x : Engine2) (h : Plain dly x) : x.retire = true := by
+theorem retire_plain (P : Program2) (dly : Lane → Nat) (x : Engine2) (h : Plain dly x) :
+    x.retire P = true := by
   unfold retire
-  rw [hold_plain dly x h]
+  rw [hold_plain P dly x h]
   unfold head
   rcases (h x.e.cur (x.e.sel x.e.cur)).1 with h1 | h1 <;> rw [h1] <;> rfl
 
@@ -248,15 +272,15 @@ lane delays `dly` and the same winner. -/
 theorem step2_proj (P : Program2) (dly : Lane → Nat) (fw : Engine2 → Word)
     (w : Option Lane) (x : Engine2) (h : Plain dly x) :
     proj (step2 P fw w x) = step (P.toP dly) (fun _ => w) (proj x) := by
-  have hr := Engine2.retire_plain dly x h
+  have hr := Engine2.retire_plain P dly x h
   have hp : portNextW (P.toP (fun _ => 0)) x.wantFetch x.e = portNext (P.toP dly) x.e := by
     rw [portNextW_congr _ _ _ _ (Engine2.wantFetch_plain dly x h)]
     rfl
-  have ha : x.actvNext = actvNext (P.toP dly) x.e := by
+  have ha : x.actvNext P = actvNext (P.toP dly) x.e := by
     funext l s
     unfold Engine2.actvNext actvNext
     simp [hr, Program2.toP]
-  have hs : x.selNext = selNext (P.toP dly) x.e := by
+  have hs : x.selNext P = selNext (P.toP dly) x.e := by
     funext l
     unfold Engine2.selNext selNext
     simp [hr, Program2.toP]
@@ -267,7 +291,7 @@ theorem step2_proj (P : Program2) (dly : Lane → Nat) (fw : Engine2 → Word)
     · rw [if_pos hc, if_pos hc, Engine2.wbDly_plain P dly x h, hc.2]
       rfl
     · rw [if_neg hc, if_neg hc]
-  show ({ now := x.e.now + 1, actv := x.actvNext, sel := x.selNext, ts := x.tsNext P,
+  show ({ now := x.e.now + 1, actv := x.actvNext P, sel := x.selNext P, ts := x.tsNext P,
           pst := (portNextW (P.toP (fun _ => 0)) x.wantFetch x.e).pst,
           pl := (portNextW (P.toP (fun _ => 0)) x.wantFetch x.e).pl,
           prr := (portNextW (P.toP (fun _ => 0)) x.wantFetch x.e).prr,
@@ -296,10 +320,11 @@ theorem plain_step (P : Program2) (dly : Lane → Nat) (fw : Engine2 → Word)
 
 /-- A non-retiring WB (chaining re-arm, held clocked phase) leaves the dispatched lane's
 slots and select untouched, apart from a capture: it owes no refill. -/
-theorem noretire_keeps (x : Engine2) (hr : x.retire = false) (l : Lane) (s : Slot) :
-    x.actvNext l s = (if x.e.pst = .cap ∧ l = x.e.pl ∧ s = x.e.pslot then true
-                      else x.e.actv l s) ∧
-    x.selNext l = x.e.sel l := by
+theorem noretire_keeps (x : Engine2) (P : Program2) (hr : x.retire P = false) (l : Lane)
+    (s : Slot) :
+    x.actvNext P l s = (if x.e.pst = .cap ∧ l = x.e.pl ∧ s = x.e.pslot then true
+                        else x.e.actv l s) ∧
+    x.selNext P l = x.e.sel l := by
   constructor
   · unfold Engine2.actvNext
     rw [if_neg (fun h' => by rw [hr] at h'; exact Bool.noConfusion h'.2.1)]
@@ -313,18 +338,53 @@ theorem chain_no_fetch (x : Engine2) (l : Lane) (hv : x.e.headValid l = true)
   rw [if_neg (by rw [hv]; decide), if_pos hc]
 
 /-- §7A: a chaining re-arm never retires. -/
-theorem chain_no_retire (x : Engine2) (hc : (x.head x.e.cur).op = .chainRe) :
-    x.retire = false := by
+theorem chain_no_retire (x : Engine2) (P : Program2) (hc : (x.head x.e.cur).op = .chainRe) :
+    x.retire P = false := by
   unfold Engine2.retire Engine2.hold
   rw [hc]
   rfl
 
 /-- §7C: a SHIFT holds on every phase except its last HIGH. -/
-theorem shift_hold_low (x : Engine2) (n : Nat) (hc : (x.head x.e.cur).op = .clk false n)
-    (hp : x.ckph x.e.cur = .low) : x.retire = false := by
+theorem shift_hold_low (x : Engine2) (P : Program2) (n : Nat)
+    (hc : (x.head x.e.cur).op = .clk false n)
+    (hp : x.ckph x.e.cur = .low) : x.retire P = false := by
   unfold Engine2.retire Engine2.hold
   rw [hc]
   simp [hp]
+
+/-! ### The self-timed byte (bundle 2, Wilson 11-08 / 11-12) -/
+
+/-- A self-timed action is held on every dispatch that is not its last bit. -/
+theorem st_hold_notlast (x : Engine2) (P : Program2) (hc : (x.head x.e.cur).op = .st)
+    (hn : P.stl x.e.now x.e.cur = false) : x.retire P = false := by
+  unfold Engine2.retire Engine2.hold
+  rw [hc]
+  simp [hn]
+
+/-- A stuff slot never retires, even on the last bit (`st_last & ~usb_stuff`). -/
+theorem st_hold_stuff (x : Engine2) (P : Program2) (hc : (x.head x.e.cur).op = .st)
+    (hs : P.stuff x.e.now x.e.cur = true) : x.retire P = false := by
+  unfold Engine2.retire Engine2.hold
+  rw [hc]
+  simp [hs]
+
+/-- A self-timed action retires on its last bit when that dispatch is not a stuff slot. -/
+theorem st_retire_last (x : Engine2) (P : Program2) (hc : (x.head x.e.cur).op = .st)
+    (hl : P.stl x.e.now x.e.cur = true) (hs : P.stuff x.e.now x.e.cur = false) :
+    x.retire P = true := by
+  unfold Engine2.retire Engine2.hold
+  rw [hc]
+  simp [hl, hs]
+
+/-- A self-timed action is not clocked: its writeback adds the word's whole delay
+(`wb_dly = a_dly`, no HALF_HIGH halving), so bits are paced by the lane timestamp. -/
+theorem st_wbDly (P : Program2) (x : Engine2) (hc : (x.head x.e.cur).op = .st) :
+    x.wbDly P = (x.head x.e.cur).dly := by
+  unfold Engine2.wbDly
+  have hk : x.isClk = false := by
+    unfold Engine2.isClk
+    rw [hc]
+  rw [if_neg (fun h' => by rw [hk] at h'; exact Bool.noConfusion h'.1)]
 
 #print axioms step2_proj
 
