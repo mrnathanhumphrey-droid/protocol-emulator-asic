@@ -215,9 +215,11 @@ def environment():
                        "label": "LOCAL WSL flow (development reading; CI is the record)"}
     py = os.environ.get("PE_LL_PY", sys.executable)
     tt = os.environ.get("PE_TT_DIR", os.path.join(ROOT, "tt"))
-    pdk = os.environ.get("PDK_ROOT")
+    # PE_LL_PDK_ROOT first: CI does not export PDK_ROOT into the fast shard,
+    # whose lints read it (test.yaml)
+    pdk = os.environ.get("PE_LL_PDK_ROOT") or os.environ.get("PDK_ROOT")
     if not pdk:
-        raise CouldNotRun("PDK_ROOT is not set")
+        raise CouldNotRun("PE_LL_PDK_ROOT / PDK_ROOT is not set")
     if not os.path.isfile(os.path.join(tt, "tt_tool.py")):
         raise CouldNotRun("no tt-support-tools at %s (PE_TT_DIR)" % tt)
     if subprocess.run([py, "-c", "import librelane"], capture_output=True).returncode:
