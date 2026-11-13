@@ -109,12 +109,44 @@ def scratch_sub(txt, a, b, name):
     return txt.replace(a, b)
 
 
+#: ⛔⛔ A VERILATOR THAT IS NOT THE PIN REFUSES TO START (Wilson 11-13: "the
+#: dev3/dev4 problem again"). WSL has the pin at PINNED_WSL_VERILATOR and apt's
+#: 5.032 on PATH, so a runner started in WSL without PE_VERILATOR resolved 5.032
+#: and ran -- and CI (5.053) measures the decision. `tool("verilator")` now
+#: checks the resolved binary's version banner against PINNED_VERILATOR and
+#: raises on a mismatch, whether it came from PE_VERILATOR or from PATH.
+#: MUST-FIRE: selftest() plants a fake binary reporting 5.032 and requires the
+#: refusal; the pinned banner must pass.
+_VERSION_SEEN = {}
+
+
+def refuse_unpinned(path, label=None):
+    """Raise ToolMissing unless the Verilator at `path` reports PINNED_VERILATOR.
+    `label` overrides the probe (the self-test's planted banner)."""
+    if label is None:
+        if path not in _VERSION_SEEN:
+            _VERSION_SEEN[path] = version_of([path, VERSION_FLAG["verilator"]])
+        label = _VERSION_SEEN[path]
+    if not pinned_ok(label):
+        raise ToolMissing(
+            "verilator at %s reports %r, the pin is %r -- refused: set "
+            "PE_VERILATOR to the pinned binary (WSL: %s)"
+            % (path, label, PINNED_VERILATOR, PINNED_WSL_VERILATOR))
+    return path
+
+
 def tool(name):
     """Absolute path of `name`, from its `PE_*` variable, else PATH.
 
     `vvp` without `PE_VVP` is taken from the SAME directory as the resolved
     iverilog, so the compiler and its runtime cannot come from two installs.
+    A Verilator that is not the pinned version is refused (refuse_unpinned).
     """
+    p = _resolve(name)
+    return refuse_unpinned(p) if name == "verilator" else p
+
+
+def _resolve(name):
     env = os.environ.get(TOOL_ENV[name])
     if env:
         p = shutil.which(env) or (env if os.path.isfile(env) else None)
@@ -325,6 +357,20 @@ def selftest():
     say([t for t, _s, _l in dd] == ["verilator"],
         "one changed version is reported, and only that one")
     say(not compare(fake, fake), "an identical toolchain reports no difference")
+
+    # the version pin at resolution (Wilson 11-13): apt's 5.032 is refused
+    try:
+        refuse_unpinned("/usr/bin/verilator", "Verilator 5.032 2025-01-01 rev (Debian 5.032-1)")
+        refused = False
+    except ToolMissing:
+        refused = True
+    say(refused, "an unpinned Verilator (5.032) is refused at resolution")
+    try:
+        refuse_unpinned("/opt/pin/verilator", "Verilator 5.053 devel rev v5.052-258-ga419e9157 (mod)")
+        passed = True
+    except ToolMissing:
+        passed = False
+    say(passed, "control: the pinned 5.053 banner resolves")
 
     # a probe that cannot run must record MISSING, not a plausible version
     keep = PROBES

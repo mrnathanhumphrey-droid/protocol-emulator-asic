@@ -494,6 +494,12 @@ CHANGE_SET = frozenset([
     "lean/JLane/JLane/Run.lean",           # V4b ts_ge_after_wb (0bc8d4a)
     "lean/JLane/JLane/State.lean",         # V4b (0bc8d4a); Op.st (84843d4); brick U (84739f9)
     "lean/JLane/JLane/Step.lean",          # V4b (0bc8d4a)
+    # ---- AMENDMENT 19 (11-13, Wilson's 11-13 chip-track ruling item 3 is the
+    # review; Nate go). The Verilator pin is enforced where every tool resolves:
+    # toolchain.tool("verilator") refuses a binary that is not PINNED_VERILATOR
+    # (WSL's apt 5.032 had been resolvable by PATH). The records' runs are
+    # already declared stale; this moves no measured number.
+    "test/toolchain.py",                   # the Verilator version refused at resolution
 ])
 
 
