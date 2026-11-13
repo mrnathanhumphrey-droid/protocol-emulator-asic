@@ -68,7 +68,7 @@ DECLARED = {
     # file is their shared golden + program + bench driver (it has no verdict
     # of its own), so it is registered as their helper; reported to Wilson.
     "test/usbdev.py": ("helper", "test/run_usbaddr.py",
-                       "the USB device's golden, program and tb_usbdev driver, "
+                       "the USB device's golden, program and bench driver, "
                        "shared by run_usbaddr and run_usbrst (both CI gates)"),
     "test/phases_run.sh": ("helper", "ci/run_gates.sh",
                            "the WSL phase measurement run_gates drives"),

@@ -369,6 +369,9 @@ SPEC_SYMBOLS = {
     # refused until built), and the mutant descriptions (which name banks and
     # rows, "bank 3", "w + 1", in their text).
     ("model/stale_records.py", "DECLARED"),
+    # ... and its DEBT table: each declared gate's owner and green-by point
+    # (dates and durations in prose -- "due 11-13", "~5 h"), declarations too
+    ("model/stale_records.py", "DEBT"),
     ("test/pe_isa.py", "RESERVED_OPCODES"),
     ("test/run_mutants.py", "MUTANTS"),
     # the bench set's EXCLUSIONS: written reasons a bench is not swept (their
@@ -786,6 +789,29 @@ SPEC_SYMBOLS = {
     ("test/run_usbbuf.py", "PAYLOAD"),
     ("test/run_usbbuf.py", "Q_BYTES"),
     ("test/run_usbbuf.py", "SCEN"),
+    # ⭐ v2 primitive 3 bundle 6 (address / token / reset; Wilson 11-12 ruling D:
+    # SPEC, "stimulus and designed expectations, judged again on every run").
+    # SETADDR5 / GETDESC are USB 2.0 §9.4 setup bytes; SA_HOST the host packet
+    # sequence; COMMIT5 the designed (pending, committed) address sequence;
+    # SCEN host packet times + expected device packets (run_usbrst's ms values
+    # come from clock.py at run time); MUTANTS the inventory and the scenario
+    # each must turn red. Results: tb_usbdev's packets vs usbdev's golden, live.
+    ("test/run_usbaddr.py", "SETADDR5"),
+    ("test/run_usbaddr.py", "GETDESC"),
+    ("test/run_usbaddr.py", "SA_HOST"),
+    ("test/run_usbaddr.py", "COMMIT5"),
+    ("test/run_usbaddr.py", "SCEN"),
+    ("test/run_usbaddr.py", "MUTANTS"),
+    ("test/run_usbrst.py", "GETDESC"),
+    ("test/run_usbrst.py", "SCEN"),
+    # ⭐ GATE CONFIGURATION (Wilson 11-12 ruling D: RULES is configuration, not a
+    # measured number). gate_action_pins RULES: regexes + value rules ("40-hex",
+    # version shapes). The same shape, merged from work/fpga-f1 (F1.5) and
+    # covered by that ruling: gate_store_size_literals ALLOWED (the sites that
+    # may name a store size) and ROLES (what each size means).
+    ("model/gate_action_pins.py", "RULES"),
+    ("model/gate_store_size_literals.py", "ALLOWED"),
+    ("model/gate_store_size_literals.py", "ROLES"),
     # ⭐ v2 PIT chunk 1: CASES is the capture gate's DESIGN -- which buses to
     # play (SPI modes 0 / 3, a wire mask, I2C, two UARTs, a line fast enough
     # to overrun) and their chosen masks; the result is the bit-exact compare.
