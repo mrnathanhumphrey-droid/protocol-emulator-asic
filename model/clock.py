@@ -198,6 +198,9 @@ def ck_stretch_cycles(f=None):
 # ---------------------------------------------------------------------------
 # ⭐ USB LOW SPEED (step 7a §1 / §5, Wilson 11-09 Q1 + Q7). Every figure is the
 # USB 2.0 spec's (usb.org usb_20_20240604, usb_20.pdf), cited where it is used.
+# The copy cited: D:\ProtocolEmulator_internal\refs\usb_20.pdf (internal, not
+# in this repo), SHA-256
+# d39698a33486c399124af92bd02e4f978fd9a836b5cf4e52e6e4633eb1d89f61 (Wilson 11-13).
 # ---------------------------------------------------------------------------
 #: the bus-reset threshold the RTL derives N_RST from (pe_engine.v T_RST_NS)
 USB_T_RST_NS = 4000
@@ -213,6 +216,12 @@ USB_LS_RATE = 1_500_000
 USB_TUDJ1_NS, USB_TUDJ2_NS = 95, 150
 #: the engine's dispatch jitter on a device edge (measured, bundle 5): J <= 2
 USB_J_CYCLES = 2
+#: TIPD, §7.1.18.1 (PDF page 196, printed p. 168): "The host must provide at
+#: least two bit times of J after the SE0 of an EOP and the start of a new
+#: packet (TIPD)." In LS bit times (USB_LS_RATE); convert with usb_bit_cycles().
+#: (The device's own rule, just above it: at least two bit times too; its
+#: response delay max is TRSPIPD1 = 6.5 bit times, detachable cable.)
+USB_TIPD_BITS = 2
 
 #: ⭐ THE CLOCK SOURCE'S ACCURACY, DECLARED PER TARGET (Wilson 11-09 Q7): the
 #: rate requirement is TWO-SIDED, which BAND (a one-sided guard on minima)

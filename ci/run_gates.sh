@@ -678,6 +678,11 @@ GATES=(
   test/benchset.py
   test/gate_coverage.py
   model/pe_asm.py
+  # THE LEAN PROOFS (Wilson 11-12, approved; landed by a2/proofs-host f0a3454):
+  # lake build, no sorry / axiom, #print axioms on every KEY theorem, and the
+  # proof's constants against model/proof_constants. Its own shard (`lean`),
+  # the only test leg that installs elan.
+  model/gate_lean_build.py
   # ⛔⛔ THE META-TEST (must-fire audit, 10-23), LAST because it re-runs other
   # gates: each gate's real check stubbed to ALWAYS PASS must turn that gate
   # red -- a gate that stays green has a check no must-fire prices. Fast tier

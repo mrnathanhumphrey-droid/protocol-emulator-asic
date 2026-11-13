@@ -391,8 +391,18 @@ def main() -> int:
 
         # U5: the deadline rule (Wilson 11-08) -- refused when broken, and
         # LOAD-BEARING: shown once by running the broken image anyway
-        print("\n  U5 the deadline rule (USB lane D_sched strictly earliest), four lanes busy at D*")
-        for tag, cfg, want_ok in (("obeyed", (30, 40), True), ("broken", (80, 40), False)):
+        print("\n  U5 the deadline rule (USB lane D_sched + margin %d <= every other), four lanes busy at D*"
+              % I.usb_deadline_margin())
+        # ⭐ the margin's boundary, static (Wilson 11-13: must-fires at 16 and 17):
+        # every other lane exactly margin - 1 above is refused, exactly margin above accepted
+        mg = I.usb_deadline_margin()
+        for gap, want in ((mg - 1, False), (mg, True)):
+            acc = not I.usb_problems(image(busy=(30, 30 + gap)))
+            print("    margin %2d (others at %d): pe_isa %s  %s" % (gap, 30 + gap, "accepts" if acc else "refuses",
+                  "ok" if acc == want else "*** WRONG"))
+            if acc != want:
+                probs.append("MUST-FIRE: margin %d %s by pe_isa" % (gap, "accepted" if acc else "refused"))
+        for tag, cfg, want_ok in (("obeyed", (30, 30 + mg), True), ("broken", (80, 40), False)):
             bimg = os.path.join(tmp, "usbrx_busy_%s.hex" % tag)
             I.write_image(bimg, image(busy=cfg))
             sim_run.scratch_image(GEN, bimg)
@@ -480,6 +490,8 @@ def main() -> int:
                     if not any(n.startswith("e%+.3f" % e) for n, _p in red):
                         probs.append("M_NO_REANCHOR survived at e = %+.3f" % e)
 
+        probs += startup_section(tmp, pool)
+
     print()
     if probs:
         print("  GATE usbrx: FAILED (%d)" % len(probs))
@@ -488,6 +500,91 @@ def main() -> int:
         return 1
     print("  GATE usbrx: PASSED")
     return 0
+
+
+# ---- U7: the start-up stall (Wilson 11-13 per-pair ruling, D) ----------------
+#: ⭐ OUTSIDE THE PROOFS, BOUNDED BY THE SPEC'S ATTACH TIMING. The Lean theorems
+#: start from a run with every slot filled; before the USB lane's first words
+#: load, its winner stalls (agent 2 measured 76 cycles, 23-98). Settled by
+#: argument, not a brick: a host sends nothing to a device it has not reset,
+#: so the stall must END before the bus reset does.
+#: ⭐ THE BOUND IS TDRST (Wilson 11-13, Update 5 ruling item 4): the host drives
+#: reset for >= 10 ms after attach and before any traffic -- clock.py's
+#: USB_TDRST_MIN_NS, already cited there (Table 7-14 / §7.1.7.5). Unambiguous,
+#: and alone ~6,000x the stall.
+#: ⚠ KNOWN INCONSISTENCY IN THE SPEC, NOT RELIED ON: TATTDB (the attach
+#: debounce) is "a debounce interval with a minimum duration of 100 ms" in
+#: §7.1.7.3 (printed p. 150), but Table 7-14 (printed p. 188, read off the
+#: rendered page 11-13) puts its 100 ms in the MAX column. Checked against
+#: the copy clock.py pins (usb_20.pdf, SHA-256 d39698a3...1d89f61).
+BOUND_CITED = ("USB 2.0 TDRST >= 10 ms, the bus reset before any traffic (clock.USB_TDRST_MIN_NS, "
+                "Table 7-14 / §7.1.7.5); TATTDB's min/max conflict (§7.1.7.3 vs Table 7-14) not relied on")
+PROBE = "test/usb_startup_probe.v"
+#: the arms: the gate's own image, and agent 2's busy image with the other
+#: lanes at D_sched 47 (the margin, Wilson 11-13) and at 20 (below it: a start-up measurement only)
+STARTUP_ARMS = [("idle others", None), ("busy, others at 47", (30, 47)),
+                ("busy, others at 20", (30, 20))]
+
+
+def startup_judge(stalls, bound):
+    """[problem] for one arm's USB-lane stall cycles against the bound (cycles)."""
+    if not stalls:
+        return ["VACUOUS: the probe saw no USB-lane stall, so it measured nothing"]
+    if max(stalls) >= bound:
+        return ["the start-up stall ends at cycle %d, not before the host's bus reset ends (TDRST, %d cycles)"
+                % (max(stalls), bound)]
+    return []
+
+
+def startup_section(tmp, pool):
+    print("\n  U7 the start-up stall vs the host's bus reset (TDRST) (outside the proofs)")
+    probs = []
+    bound = clock.cycles_nominal(clock.USB_TDRST_MIN_NS)
+    print("    bound: %s = %d cycles at %.3f MHz" % (BOUND_CITED, bound, clock.mhz()))
+    vvp = os.path.join(tmp, "usbrx_startup.vvp")
+    r = run([tool("iverilog"), "-g2012", "-I", ROOT, "-o", vvp, "-s", "tb_usbrx",
+             "-s", "usb_startup_probe", BENCH, PROBE] + RTL)
+    if r.returncode != 0:
+        return ["U7 build failed: %s" % (r.stdout + r.stderr)[-300:]]
+    tr, t_end = line([packet(*PAYLOADS[0])], 0.0, 0, 5)
+    wave = os.path.join(tmp, "wave_startup.txt")
+    write_wave(wave, tr)
+    jobs = []
+    for name, busy in STARTUP_ARMS:
+        img = os.path.join(tmp, "usbrx_startup_%d.hex" % len(jobs))
+        I.write_image(img, image(busy=busy))
+        sim_run.scratch_image(GEN, img)
+        jobs.append((name, pool.submit(run, sim_run.vvp(
+            [vvp, "+IMG=%s" % img, "+WAVE=%s" % wave, "+NCYC=%d" % (t_end + 400)], images=[img]))))
+    ends = []
+    for name, fut in jobs:
+        out = fut.result().stdout
+        js = [(int(c), int(ln), int(p)) for c, ln, p
+              in re.findall(r"^JS (\d+) (\d+) (\d+)$", out, re.M)]
+        usb = [c for c, ln, _p in js if ln == I.USB_LANE]
+        unprimed = sum(1 for _c, ln, p in js if ln == I.USB_LANE and not p)
+        pr = startup_judge(usb, bound) if "END" in out else ["%s: the sim did not finish" % name]
+        print("    %-20s USB-lane stall cycles %3d (%d before primed), %s; other lanes' %d  %s"
+              % (name, len(usb), unprimed,
+                 ("cycles %d-%d" % (min(usb), max(usb))) if usb else "none",
+                 len(js) - len(usb), "ok" if not pr else "*** " + pr[0]))
+        probs += ["U7 %s: %s" % (name, p) for p in pr]
+        if usb:
+            ends.append(max(usb))
+    if ends:
+        e = max(ends)
+        print("    the stall ends at cycle %d = %.2f us; the bound is %d cycles (%.0fx)"
+              % (e, e * 1e6 / clock.hz(), bound, bound / max(e, 1)))
+    # must-fires: the judge goes red on a stall that reaches the bound, and on none
+    print("    must-fire: a stall ending at the bound          %s"
+          % ("red  ok" if startup_judge([1, bound], bound) else "*** STAYED GREEN"))
+    print("    must-fire: no stall seen (a blind probe)        %s"
+          % ("red  ok" if startup_judge([], bound) else "*** STAYED GREEN"))
+    if not startup_judge([1, bound], bound) or not startup_judge([], bound):
+        probs.append("U7 must-fire: startup_judge stayed green")
+    if not startup_judge([bound - 1], bound) == []:
+        probs.append("U7 control: a stall ending before the bound read red")
+    return probs
 
 
 MUTANTS = [

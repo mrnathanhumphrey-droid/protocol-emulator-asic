@@ -347,6 +347,22 @@ The engine starts only on a program load: there is no start path at power-on.
     -- acknowledging it, and treating `rx_drop_sticky` as a missed reset -- is
     `docs/HOST_FIRMWARE.md` FW-4 and FW-5** (moved there 11-10).
   - Refusals of either tag set the existing TX-full status bit.
+  - ⛔ **An image that uses the USB receive restricts every other lane in it**
+    (Wilson 11-13). Two rules, both proved in Lean and both checked by
+    `pe_isa.usb_problems` / the poset compiler before an image is accepted:
+    - **The deadline margin:** every other lane's `D_sched` must be at least
+      the USB lane's `D_sched` **+ 17** (`usb_deadline_margin`; theorems
+      `usb_wins` / `usb_j2`). Otherwise the USB receive sample can wait more
+      than 2 cycles and bytes decode wrongly.
+    - **The co-resident spacing:** every other lane's per-action spacing must
+      be **≥ 50 cycles**, on every word reachable from it (`coresident_usb`;
+      theorem `usb_nostall`). So a protocol lane that needs actions faster than
+      50 cycles (fast SPI, for instance) **cannot share an image with the USB
+      receive**. The derivation is `host/poset/POSET_SPEC.md`'s generated
+      "Target rule" block.
+    - Both numbers come from `lean/JLane/proof_constants.json`, never typed
+      into a checker. A raw-loaded image bypasses the checks, and one that
+      breaks them loses only its own USB timing guarantee.
 
 - ⛔ **The marker arrives last**, so a host cannot use it to decide how many
   bits to read. Both frame types are therefore the **same width**; do not

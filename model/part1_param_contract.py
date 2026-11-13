@@ -104,11 +104,14 @@ FORBIDDEN_LITERALS = {
 PDK_CELL_RE = re.compile(
     r"\b(sg13[a-z0-9]*_|sky130_|RM_IHPSG13_|DFF_X|INV_X|NAND\d_X|ASAP7)",
     re.I)
-#: ⭐ THE ONE BINDING FILE (Wilson 10-31 / 11-03): src/pe_cells_ihp.v binds
-#: pe_store's three generic cells to IHP stock cells under `ifdef
-#: PE_IHP_CELLS`, so the generic RTL stays portable and THIS file is the whole
-#: of the PDK dependence -- one file to swap per PDK, and no other may name one.
-PDK_BINDING_FILES = {"pe_cells_ihp.v"}
+#: ⭐ THE BINDING FILES (Wilson 10-31 / 11-03; 11-13 W2): src/pe_cells_ihp.v
+#: binds pe_store's three generic cells to IHP stock cells under `ifdef
+#: PE_IHP_CELLS`, and src/pe_sram_macro_ihp.v binds the store to the IHP SRAM
+#: macro under PE_SRAM_MACRO (the SRAM ruling, 11-07). The generic RTL stays
+#: portable and THESE files are the whole of the PDK dependence -- the files to
+#: swap per PDK, and no other may name a PDK cell. The `_ihp.v` suffix is the
+#: convention, but the set is listed by name, never matched by a glob.
+PDK_BINDING_FILES = {"pe_cells_ihp.v", "pe_sram_macro_ihp.v"}
 
 
 def verilog_files():
@@ -121,6 +124,79 @@ def verilog_files():
 def strip_comments(t: str) -> str:
     t = re.sub(r"//[^\n]*", "", t)
     return re.sub(r"/\*.*?\*/", "", t, flags=re.S)
+
+
+#: ⭐ THE LITERAL SCAN'S TWO EXEMPTIONS (Wilson 11-13, W2 method, approved):
+#: (1) everything inside `[ ]` -- bit indices, part-selects, widths and array
+#:     bounds (`[15:0]`, `acc[26:18]`, `ubuf[0:15]`) are geometry, not timing;
+#: (2) a line carrying a `count-ok:` comment with its reason -- a number the
+#:     scan cannot tell from a tolerance (an enum code, a shift amount).
+#: ⛔ The marker is read from the RAW line, before comments are stripped (the
+#: scan strips comments, so a comment could never clear a hit by itself).
+#: ⛔ MUST-FIRE (literal_must_fire): a tolerance written OUTSIDE brackets still
+#: goes red, also on a line with a bracket before it -- the skip removes the
+#: bracket's contents, never the rest of the line.
+COUNT_OK = "count-ok:"
+
+
+def drop_brackets(t: str) -> str:
+    """t with the contents of every [ ] removed (innermost first, so nested
+    selects such as `a[b[3:0]]` go too)."""
+    while True:
+        u = re.sub(r"\[[^\[\]]*\]", "[]", t)
+        if u == t:
+            return t
+        t = u
+
+
+def literal_body(raw: str) -> str:
+    """The text the protocol-literal scan reads: count-ok lines blanked,
+    comments stripped, bracket contents dropped."""
+    lines = ["" if COUNT_OK in ln else ln for ln in raw.split("\n")]
+    return drop_brackets(strip_comments("\n".join(lines)))
+
+
+def literal_hits(raw_bodies):
+    """[(literal, what, file)] -- every protocol constant left in the scanned text."""
+    found = []
+    for f, raw in raw_bodies.items():
+        body = literal_body(raw)
+        for lit, what in sorted(FORBIDDEN_LITERALS.items()):
+            # a bare decimal, or a sized literal with that value
+            if re.search(r"(?<![\w'])%d(?![\w'])" % lit, body):
+                found.append((lit, what, os.path.basename(f)))
+    return sorted(found)
+
+
+def literal_must_fire(raw_bodies) -> int:
+    """0 if the exemptions skip what they claim to and nothing else. Each case
+    is planted into the first RTL file; only hits it ADDS are counted."""
+    f0 = sorted(raw_bodies)[0]
+    base = {f0: raw_bodies[f0]}
+    before = set(literal_hits(base))
+    cases = [
+        ("control: a width and part-select ([15:0], x[23:18])",
+         "  wire [15:0] mf_w; assign mf_w[23:18] = 6'd0;\n", False),
+        ("control: a count-ok line (an enum code 15)",
+         "  localparam integer MF_E = 15;  // count-ok: enum code\n", False),
+        ("must-fire: a tolerance outside brackets (cnt == 15)",
+         "  wire mf_t = (mf_cnt == 15);\n", True),
+        ("must-fire: a tolerance after a bracket on its line",
+         "  assign mf_y = mf_c[3:0] + 23;\n", True),
+        ("must-fire: a marker on the line ABOVE does not cover it",
+         "  // count-ok: decoy\n  wire mf_u = (mf_cnt > 45);\n", True),
+    ]
+    rc = 0
+    for name, plant, want_red in cases:
+        new = set(literal_hits({f0: base[f0] + "\n" + plant})) - before
+        red = bool(new)
+        if red == want_red:
+            verdict = "red  ok" if red else "green ok"
+        else:
+            verdict = "*** STAYED GREEN" if want_red else "*** WENT RED"
+            rc = 1
+        print("      %-56s %s" % (name, verdict))
+    return rc
 
 
 def rx_lane_verdict(src: str):
@@ -227,10 +303,11 @@ def main() -> int:
     if not files:
         print("  *** no RTL at all -- nothing to check")
         return 1
-    bodies = {}
+    bodies, raws = {}, {}
     for f in files:
         with open(f, encoding="utf-8", errors="replace") as fh:
-            bodies[f] = strip_comments(fh.read())
+            raws[f] = fh.read()
+            bodies[f] = strip_comments(raws[f])
     allsrc = "\n".join(bodies.values())
 
     rc |= check_rx_lane_width(allsrc)
@@ -274,13 +351,13 @@ def main() -> int:
     # ---- protocol constants must not appear -----------------------------
     print()
     print("  --- genericity: no protocol constant anywhere in the RTL ---")
-    found = []
-    for lit, what in sorted(FORBIDDEN_LITERALS.items()):
-        # a bare decimal, or a sized literal with that value
-        pat = r"(?<![\w'])%d(?![\w'])" % lit
-        for f, body in bodies.items():
-            if re.search(pat, body):
-                found.append((lit, what, os.path.basename(f)))
+    print("    (exempt: the contents of [ ], and lines marked `%s <reason>`)"
+          % COUNT_OK)
+    print("    must-fire -- the exemptions skip geometry, never a tolerance:")
+    if literal_must_fire(raws):
+        print("    *** the literal scan's must-fire FAILED")
+        rc = 1
+    found = literal_hits(raws)
     if found:
         print("    *** FOUND protocol constants in the RTL:")
         for lit, what, f in found:

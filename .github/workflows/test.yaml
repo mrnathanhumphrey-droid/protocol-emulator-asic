@@ -200,6 +200,34 @@ jobs:
             p = benchset.base_images(); [print('***', x) for x in p]; \
             print('generated images:', 'FAILED' if p else 'ok'); sys.exit(1 if p else 0)"
 
+      # Lean (the `lean` shard / gate_lean_build's seam only): elan + the
+      # toolchain cached on `lean-toolchain`, the build tree on lean-toolchain
+      # + lake-manifest.json -- the same keys as the ln1 job's
+      - name: "lean: cache elan and the Lean toolchain"
+        if: matrix.seam == 'gate_lean_build.judge'
+        id: elan_m
+        uses: actions/cache@v4
+        with:
+          path: ~/.elan
+          key: elan-${{ runner.os }}-${{ hashFiles('lean/JLane/lean-toolchain') }}
+      - name: "lean: install elan"
+        if: matrix.seam == 'gate_lean_build.judge' && steps.elan_m.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -sSfL https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh \
+            | sh -s -- -y --default-toolchain none
+      - name: "lean: put elan on PATH"
+        if: matrix.seam == 'gate_lean_build.judge'
+        shell: bash
+        run: echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+      - name: "lean: cache the Lean build tree"
+        if: matrix.seam == 'gate_lean_build.judge'
+        uses: actions/cache@v4
+        with:
+          path: lean/JLane/.lake
+          key: lake-${{ runner.os }}-${{ hashFiles('lean/JLane/lean-toolchain', 'lean/JLane/lake-manifest.json') }}
+
       # the bound store's cell models, as the test job (11-13: run_pit_capture's
       # seam stopped at COULD NOT RUN before its `compare` was ever called --
       # "the stub was NEVER CALLED" -- because this job had no PDK models)
@@ -230,6 +258,11 @@ jobs:
           PE_SBY: /opt/oss-cad-suite/bin/sby
           PE_OW_JOBS: "3"
           PE_PDK_STDCELL_VERILOG: /home/runner/pdk_stdcell/ihp-sg13cmos5l/libs.ref/sg13cmos5l_stdcell/verilog
+          # the bound arms' simulator, as in the shards: apt's iverilog cannot
+          # drive the models' $setuphold nets, so run_pit_capture's probe failed
+          # and stopped the gate before compare (11-13 CI: calls=0)
+          PE_IVERILOG_CELLS: /opt/oss-cad-suite/bin/iverilog
+          PE_VVP_CELLS: /opt/oss-cad-suite/bin/vvp
         run: python model/gate_meta.py --seam "${{ matrix.seam }}"
 
   # ⛔⛔ A MATRIX IS GREEN ONLY IF EVERY EXPECTED LEG RAN GREEN (Wilson 10-25,
@@ -316,6 +349,34 @@ jobs:
       # 0.5.3); the Debian revision differs per Ubuntu release, so the step
       # asserts the upstream numbers and is red on anything else. A missing
       # sigrok makes run_ckack print NOT RUN, which is red.
+      # Lean (the `lean` shard / gate_lean_build's seam only): elan + the
+      # toolchain cached on `lean-toolchain`, the build tree on lean-toolchain
+      # + lake-manifest.json -- the same keys as the ln1 job's
+      - name: "lean: cache elan and the Lean toolchain"
+        if: matrix.shard == 'lean'
+        id: elan_t
+        uses: actions/cache@v4
+        with:
+          path: ~/.elan
+          key: elan-${{ runner.os }}-${{ hashFiles('lean/JLane/lean-toolchain') }}
+      - name: "lean: install elan"
+        if: matrix.shard == 'lean' && steps.elan_t.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -sSfL https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh \
+            | sh -s -- -y --default-toolchain none
+      - name: "lean: put elan on PATH"
+        if: matrix.shard == 'lean'
+        shell: bash
+        run: echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+      - name: "lean: cache the Lean build tree"
+        if: matrix.shard == 'lean'
+        uses: actions/cache@v4
+        with:
+          path: lean/JLane/.lake
+          key: lake-${{ runner.os }}-${{ hashFiles('lean/JLane/lean-toolchain', 'lean/JLane/lake-manifest.json') }}
+
       - name: "sim2: sigrok-cli (pinned: 0.7.2 / libsigrokdecode 0.5.3)"
         if: matrix.shard == 'sim2'
         shell: bash

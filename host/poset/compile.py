@@ -214,6 +214,9 @@ def target_check(img):
     if not PC.usb_receive_live(progs, I):
         return used, "not applicable (no USB receive)"
     bad = [] if MUT == "M_PC_USB_NOCHECK" else PC.usb_coresident_problems(img, k)
+    # the deadline margin (usb_wins / usb_j2, Wilson 11-13: 17): pe_isa.usb_problems is
+    # the one statement of every USB image rule, applied here as gate_admissible_images does
+    bad += [] if MUT == "M_PC_USB_NOCHECK" else I.usb_problems(img)
     if bad:
         raise Refused("P5 target: %s" % "; ".join(bad))
     return used, ("checked: every co-resident lane >= %d (R_usb %d + pending_slack %d + "

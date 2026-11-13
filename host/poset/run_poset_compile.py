@@ -78,8 +78,11 @@ def usb_image(d_other, usb=True):
     b0 = I.ACT_BASE
     b1 = b0 + len(p0) * I.ACT_BYTES
     bp = b1 + len(p1) * I.ACT_BYTES
+    # the co-resident lane's D_sched is at least the USB lane's + the deadline margin
+    # (pe_isa.usb_problems, usb_wins / usb_j2): C7 tests the action SPACING, not the deadline
+    ds1 = max(d_other, 2 * D + I.usb_deadline_margin())
     hdrs = [I.hdr(DM, I.PIN_NONE, 1, D, 0, 2 * D, 3 * D, b0),
-            I.hdr(I.UO0, I.UO0, 1, d_other, 0, d_other, d_other + 20, b1)]
+            I.hdr(I.UO0, I.UO0, 1, d_other, 0, ds1, ds1 + 20, b1)]
     hdrs += [I.hdr(n + 2, n + 2, 0, 500, 0, 200, 240, bp) for n in range(2, I.N_LANES)]
     return I.join_image(hdrs, p0 + p1 + park)
 
@@ -100,8 +103,9 @@ def multisection_image(lim):
           I.act(I.OP_REARM, 0, 1, lim)]
     park = [I.act(I.OP_REARM, 0, 0, 500)]
     bp = b1 + len(p1) * I.ACT_BYTES
+    ds1 = max(lim, 2 * D + I.usb_deadline_margin())   # the deadline margin, as usb_image
     hdrs = [I.hdr(DM, I.PIN_NONE, 1, D, 0, 2 * D, 3 * D, b0),
-            I.hdr(I.UO0, I.UO0, 1, lim, 0, lim, lim + 20, b1)]
+            I.hdr(I.UO0, I.UO0, 1, lim, 0, ds1, ds1 + 20, b1)]
     hdrs += [I.hdr(n + 2, n + 2, 0, 500, 0, 200, 240, bp) for n in range(2, I.N_LANES)]
     return I.join_image(hdrs, p0 + p1 + park), w1 + 3
 

@@ -147,3 +147,6 @@ fast test/gl_harness_check.py
 fast test/check_vectors.py
 fast test/benchset.py
 fast model/pe_asm.py
+
+# lean -- the Lean proofs (lake build + #print axioms); its leg installs elan
+lean model/gate_lean_build.py

@@ -164,6 +164,13 @@ def main() -> int:
             probs.append("must-fire d=%d: minimum %s, not exactly floor - 1 = %d%s"
                          % (d, got, want, " -- the mutant does MORE than one cycle"
                             if got is not None and got < want else ""))
+        # ⛔ THE CHECK ITSELF MUST CONVICT THE MUTANT (gate_meta seam, 11-13 CI):
+        # the lines above read the sweep data, so with `judge` stubbed to clean
+        # they stayed green. `judge`'s own problem list must name d's floor.
+        conv = [p for p in mp if p.startswith("d=%d:" % d) and "floor" in p]
+        print("      judge on the mutant: %s" % (conv[0] if conv else "*** NO PROBLEM -- the check does not see it"))
+        if not conv:
+            probs.append("must-fire d=%d: judge() reported nothing on M_REAN_FLOOR_EARLY" % d)
     if probs:
         print("GATE rean_floor: FAILED (%d)" % len(probs))
         return 1

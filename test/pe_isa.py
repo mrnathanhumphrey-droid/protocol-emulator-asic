@@ -623,15 +623,37 @@ def usb_problems(img):
                 out.append("word %d (lane %d): a SHIFT draws queue %d in a USB image -- tag %d "
                            "is the USB control channel while the USB lane is live (step 7a "
                            "E2), so that queue never fills" % (w, ln, USB_CTL_Q, USB_CTL_Q))
+    # ⭐ THE MARGIN, DERIVED (Wilson 11-13: adopt 17). The RTL's EDF key is the
+    # ABSOLUTE deadline ts + D_sched, so "strictly earliest" relative D_sched
+    # was not enough (measured: margin 1 waited 10 cycles, bytes wrong). The
+    # Lean theorems `usb_wins` / `usb_j2` (lean/JLane/JLane/EdfUsb.lean) give
+    # J <= 2 under the hypothesis `hmargin`: every other live lane's D_sched >=
+    # the USB lane's + USB_DEADLINE_MARGIN (= R_USB = 17). Read from
+    # proof_constants (usb_deadline_margin), never typed here.
+    # MUST-FIRES (run_usbrx U5): margin 16 refused, margin 17 accepted.
     uh = progs.get(USB_LANE)
     if uh and any(x["op"] == OP_SHIFTIN and x["mod"] & MOD_SELF_TIMED and x["level"]
                   for x in uh[1]):
+        margin = usb_deadline_margin()
         for ln, (h, _acts) in progs.items():
-            if ln != USB_LANE and h["dsched"] <= uh[0]["dsched"]:
-                out.append("lane %d: D_sched %d is not later than the USB lane's %d -- the USB "
-                           "lane's deadline must be strictly the earliest (its samples would "
-                           "wait behind this lane)" % (ln, h["dsched"], uh[0]["dsched"]))
+            if ln != USB_LANE and h["dsched"] < uh[0]["dsched"] + margin:
+                out.append("lane %d: D_sched %d is less than the USB lane's %d + the margin %d "
+                           "(usb_wins / usb_j2, hypothesis hmargin) -- the USB receive sample "
+                           "would not be decided within J <= 2"
+                           % (ln, h["dsched"], uh[0]["dsched"], margin))
     return out
+
+
+def usb_deadline_margin():
+    """The proof's USB deadline margin (proof_constants.load()['usb_deadline_margin'])."""
+    import os
+    import sys
+    here = os.path.dirname(os.path.abspath(__file__))
+    mdir = os.path.join(os.path.dirname(here), "model")
+    if mdir not in sys.path:
+        sys.path.insert(0, mdir)
+    import proof_constants
+    return proof_constants.load()["usb_deadline_margin"]
 
 
 def pair_problems(img):

@@ -772,6 +772,11 @@ SPEC_SYMBOLS = {
     # boundaries, zeros, one seeded random); the results are tb_usbrx's
     # pushes, judged live against run_usbrx's golden decode of the line.
     ("test/run_usbrx.py", "PAYLOADS"),
+    # ⭐ U7 (Wilson 11-13, D): STARTUP_ARMS is STIMULUS -- the D_sched pairs
+    # (USB, other lanes) of the images the start-up stall is measured on (the
+    # margin's 47, and 20 as a below-margin contrast); the stall cycles are
+    # measured live by the probe and judged against TDRST in the same run.
+    ("test/run_usbrx.py", "STARTUP_ARMS"),
     # ⭐ v2 primitive 3 bundle 5 (the response buffer / READY): PAYLOAD and
     # Q_BYTES are STIMULUS (the DATA payload the RP2040 loads, the bytes fed
     # to queue 3); SCEN is the DESIGN of each scenario (host packet times and
