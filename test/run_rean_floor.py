@@ -40,8 +40,9 @@ import run_usbrx as U  # noqa: E402
 import pe_isa as I  # noqa: E402
 import sim_run  # noqa: E402
 
-with open(os.path.join(ROOT, "lean", "JLane", "proof_constants.json")) as _fh:
-    K = json.load(_fh)
+sys.path.insert(1, os.path.join(ROOT, "model"))
+import proof_constants  # noqa: E402  (the one loader of lean/JLane/proof_constants.json)
+K = proof_constants.load()
 PIPE, HALV = K["rean_pipe"], K["rean_halving"]
 #: the sweep brackets the guard: an edge reaches `rean_cap` only after the input synchronizer
 #: (measured 11-12: an edge 1 cycle after the writeback lands 3 cycles above the floor), so the

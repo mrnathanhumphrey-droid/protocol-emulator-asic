@@ -45,11 +45,13 @@ for _p in (os.path.join(ROOT, "test"), os.path.join(ROOT, "model")):
 import spec as S  # noqa: E402
 import pe_isa as I  # noqa: E402
 import clock  # noqa: E402
+import proof_constants as PC  # noqa: E402  (the proof's thresholds, derived; the one USB check)
 
 MUTANTS = ("M_PC_NO_CYCLE",      # cycles not refused
            "M_PC_NO_CLOSURE",    # width from direct edges only (path cover, not chain cover)
            "M_PC_WINDOW_SWAP",   # window bounds swapped
-           "M_PC_COMPOUND_PASS") # compound patterns silently dropped instead of refused
+           "M_PC_COMPOUND_PASS", # compound patterns silently dropped instead of refused
+           "M_PC_USB_NOCHECK")   # the USB co-resident threshold not checked
 MUT = os.environ.get("POSET_COMPILE_MUTANT", "")
 if MUT and MUT not in MUTANTS:
     raise SystemExit("poset compile: unknown mutant %r" % MUT)
@@ -200,6 +202,24 @@ def lower(v1_claims, seed):
     return bytes(img)
 
 
+def target_check(img):
+    """P5 on an image -> (words used, the USB co-resident certificate line); Refused by name.
+    The USB rule (Wilson 11-12, option (i)) is proof_constants.usb_coresident_problems --
+    the same function gate_admissible_images calls."""
+    used = words_used(img)
+    if used > N_WORDS:
+        raise Refused("P5 target: %d program words > %d" % (used, N_WORDS))
+    k = PC.load()
+    progs = I.lane_programs(img)
+    if not PC.usb_receive_live(progs, I):
+        return used, "not applicable (no USB receive)"
+    bad = [] if MUT == "M_PC_USB_NOCHECK" else PC.usb_coresident_problems(img, k)
+    if bad:
+        raise Refused("P5 target: %s" % bad[0])
+    return used, "checked: every co-resident lane >= %d (R_usb %d + pending_slack %d)" % (
+        k["dstar_retire_usb"], k["R_usb"], k["pending_slack"])
+
+
 def compile_spec(text, seed=1, hz=None):
     hz = hz or clock.hz()
     log = []
@@ -220,11 +240,11 @@ def compile_spec(text, seed=1, hz=None):
     cs = checkset(stmts, hz)
     log.append("P3 checkset: %d predicates (from the spec alone)" % len(cs))
     img = lower(parsed["v1"], seed)
-    used = words_used(img)
-    if used > N_WORDS:
-        raise Refused("P5 target: %d program words > %d" % (used, N_WORDS))
-    log.append("P4 lower: run_pit_rt.emulation, pe_asm accepted; P5 target: %d / %d words" % (used, N_WORDS))
+    used, usb = target_check(img)
+    log.append("P4 lower: run_pit_rt.emulation, pe_asm accepted; P5 target: %d / %d words; USB: %s"
+               % (used, N_WORDS, usb))
     return {"image": img, "words": used, "width": width, "checkset": cs, "log": log,
-            "cert": {"A2": "OWED (lanes not exposed by the delegated lowering)",
+            "cert": {"usb_coresident": usb,
+                     "A2": "OWED (lanes not exposed by the delegated lowering)",
                      "bounds": "UNCERTIFIED (emulate, sniff, re-run the golden: not wired)",
                      "J_floor": "OWED (needs pe_asm.compute_j on the lowered lanes)"}}

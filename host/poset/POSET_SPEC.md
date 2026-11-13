@@ -75,15 +75,23 @@ Instances of one kind are numbered in time order: the 1st, 2nd, … instance.
 | pattern | holds when |
 |---|---|
 | `A -> B` | every instance of A is followed, later, by its matching instance of B |
-| `A \|> B` | as `->`, and no other event *of the kinds this pattern names* falls between them (vol5's "no intervening event", scoped to the pattern's own alphabet) |
+| `A \|> B` | as `->`, and no other event *of the kinds this pattern names* falls between them (vol5's "no intervening event", scoped to the pattern's own alphabet: see the note below) |
 | `A \|\| B` | both orders occur among the instance pairs (§4: only ever emitted when both were seen) |
 | `A ~ B` | both occur; their order is not constrained |
 | `A or B`, `A and B` | either / both of the sub-patterns hold |
 | `[n ->] A` | n instances of A in sequence |
 
+**A deliberate difference from vol. 5 (Wilson 11-12, ruling 4b).** In vol. 5, `A |> B` forbids any intervening event in the whole match set S. Here it forbids only events of the kinds the pattern itself names. On a sniffed bus, S is every edge on every wire, so vol. 5's reading would almost never hold, and nothing the PIT emits could use it. Read a v2 `|>` as "immediately, among the events this pattern talks about", never as vol. 5's `|>`.
+
 **Timing.** `P during (lo, hi)` means: for every match of `P`, (last instant − first instant) ∈ [lo, hi]. Comparison uses the tolerance in guiding doc §7 step 6: ±J (J = 2 cycles), plus 1 sync cycle, plus the capture resolution, converted at the target clock. A bound tighter than ±J is refused by the compiler.
 
 **`never P`**: no match of `P` occurs. Validator verdicts are VIOLATION or ABSTAIN. "Conforms" means every armed check passed **on positive evidence** (guiding doc §5).
+
+**Target rule: lanes sharing an image with the USB receive** (generated from `lean/JLane/proof_constants.json` by `gen_spec_doc.py`; never edit inside the markers):
+
+<!-- gen:usb_coresident -->
+**In an image using the USB receive, every other lane's per-action spacing is ≥ 42 cycles** (a branch's wait W counts as its spacing). Why: the USB lane's re-anchor can bring its next release as close as 3 + ⌊d/2⌋ cycles (23 at d = 40), so it may be decided twice inside one 15-cycle Lemma-A window. The response bound becomes R = 14 + 3 = 17 instead of 14, and the no-stall theorem then needs d ≥ R + 25 = 42 on every co-resident lane (Wilson 11-12, option (i)). The compiler refuses a program that breaks this, by name; the A2 certificate records the threshold.
+<!-- /gen -->
 
 ## 4. What the PIT is allowed to emit (inference rules, guiding doc step 6)
 - `->` when A preceded B in every one of n ≥ 1 observed instance pairs. The statement carries `observed n`, and its confidence is the rule of three (3/n), stated in the clause and never rounded up.

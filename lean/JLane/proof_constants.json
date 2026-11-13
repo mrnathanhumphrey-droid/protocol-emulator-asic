@@ -1,9 +1,10 @@
 {
-  "_doc": "The one source for the proof's numeric thresholds (Wilson 11-12). The Lean build checks these against Params.lean (gate_lean_build, owed); run_rean_floor checks rean_* against the RTL; gate_clock_consistency's USB rows read them. Change a number here and in Params.lean together, or the gates go red.",
+  "_doc": "The proof's PRIMITIVE numbers (Wilson 11-12). Derived thresholds are computed by model/proof_constants.py, never stored. Lean pins each primitive and each derivation with an rfl lemma (Params.lean, ProofConstants section); gate_lean_build checks this file against them. run_rean_floor checks rean_* against the RTL. The clock gate's USB rows, the image admissibility gate and the compiler read the derived values.",
   "lemmaA_window": 15,
-  "R_usb": 17,
-  "noWB_min": 20,
-  "dstar_retire": 39,
+  "R_base": 14,
+  "dispatch_cycles": 3,
+  "usb_extra_decisions": 1,
+  "pending_slack": 25,
   "rean_pipe": 3,
   "rean_halving": 2
 }

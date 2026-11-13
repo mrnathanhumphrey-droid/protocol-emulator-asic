@@ -10,6 +10,9 @@
   C4 Dilworth on a DAG where a path cover (3) is not a chain cover (2): width 2
   C5 a compound pattern is refused by name
   C6 a v1 spec the lowering cannot emulate is refused with the lowering's own reason
+  C7 the USB co-resident threshold (Wilson 11-12 (i)): a USB image with a co-resident lane at
+     dstar_retire_usb - 1 is refused by name; at dstar_retire_usb accepted with the threshold in
+     the certificate; the same lane at - 1 in an image WITHOUT USB accepted
 Must-fires: every compile.MUTANTS entry, run IN-PROCESS through the same judge, turns this gate red.
 
 POSITIVE TOKEN: `GATE poset_compile: PASSED`.
@@ -38,6 +41,7 @@ SCRATCH_MUTANTS = {
     "M_PC_NO_CLOSURE": "killed in-process by this gate",
     "M_PC_WINDOW_SWAP": "killed in-process by this gate",
     "M_PC_COMPOUND_PASS": "killed in-process by this gate",
+    "M_PC_USB_NOCHECK": "killed in-process by this gate",
 }
 #: the literal above must name exactly the module's MUTANTS (checked at start-up)
 if set(SCRATCH_MUTANTS) != set(C.MUTANTS):
@@ -50,6 +54,29 @@ pit_emit = C.S.pit_emit
 def body(*stmts):
     base = pit_emit.emit(bytes(V1T.IMAGES["spi"]()), HZ).rstrip("\n").splitlines()
     return "\n".join(base[:-1] + ["  " + s for s in stmts] + [base[-1]]) + "\n"
+
+
+def usb_image(d_other, usb=True):
+    """lane 0: a USB receive (or, without USB, plain LEVELs); lane 1: a co-resident lane whose
+    every action is spaced `d_other`; lanes 2-4 parked. Shapes as run_usbrx.image()."""
+    I = C.I
+    D, DM = 40, 2                                   # the USB LS bit at 60 MHz; D- = uio[2]
+    if usb:
+        p0 = [I.act(I.OP_ARM, DM, 0, 0), I.act(I.OP_LEVEL, I.PIN_NONE, 0, D // 2),
+              I.act_shiftin_usb(DM, D, 8), I.act_shiftin_usb(DM, D, 8),
+              I.act(I.OP_REARM, 0, 1, D // 2)]
+    else:
+        p0 = [I.act(I.OP_LEVEL, I.PIN_NONE, 0, D)] * 3 + [I.act(I.OP_REARM, 0, 1, D)]
+    p1 = [I.act(I.OP_LEVEL, I.UO0, 1, d_other), I.act(I.OP_LEVEL, I.UO0, 0, d_other),
+          I.act(I.OP_REARM, 0, 1, d_other)]
+    park = [I.act(I.OP_REARM, 0, 0, 500)]
+    b0 = I.ACT_BASE
+    b1 = b0 + len(p0) * I.ACT_BYTES
+    bp = b1 + len(p1) * I.ACT_BYTES
+    hdrs = [I.hdr(DM, I.PIN_NONE, 1, D, 0, 2 * D, 3 * D, b0),
+            I.hdr(I.UO0, I.UO0, 1, d_other, 0, d_other, d_other + 20, b1)]
+    hdrs += [I.hdr(n + 2, n + 2, 0, 500, 0, 200, 240, bp) for n in range(2, I.N_LANES)]
+    return I.join_image(hdrs, p0 + p1 + park)
 
 
 def refused_with(text, needle):
@@ -86,8 +113,26 @@ def judge():
         if len(win) != 1 or (win[0]["lo_cycles"], win[0]["hi_cycles"]) != (min(leads), max(leads)):
             probs.append("C1 window %s, the golden bus drew %d..%d cycles"
                          % ([(p["lo_cycles"], p["hi_cycles"]) for p in win], min(leads), max(leads)))
-        if not all(v.startswith(("OWED", "UNCERTIFIED")) for v in r["cert"].values()):
+        rest = {a: v for a, v in r["cert"].items() if a != "usb_coresident"}
+        if not all(v.startswith(("OWED", "UNCERTIFIED")) for v in rest.values()):
             probs.append("C1 cert claims more than the skeleton does: %s" % r["cert"])
+        if r["cert"].get("usb_coresident") != "not applicable (no USB receive)":
+            probs.append("C1 SPI image: usb_coresident %r" % r["cert"].get("usb_coresident"))
+    # C8: POSET_SPEC.md's generated passages match the constants file
+    import gen_spec_doc
+    probs += ["C8 %s" % p for p in gen_spec_doc.stale()]
+    # C7: the USB co-resident threshold (Wilson 11-12, option (i)), on images built by pe_isa
+    lim = C.PC.load()["dstar_retire_usb"]
+    for usb, d, want in ((True, lim - 1, "refused"), (True, lim, "checked"), (False, lim - 1, "n/a")):
+        try:
+            _u, line = C.target_check(usb_image(d, usb))
+            got = "checked" if line.startswith("checked") and str(lim) in line else \
+                  "n/a" if line.startswith("not applicable") else line
+        except C.Refused as e:
+            got = "refused" if ("%d < %d" % (d, lim)) in str(e) else "refused for another reason: %s" % e
+        if got != want:
+            probs.append("C7 %s image, co-resident lane at d=%d: %s, expected %s"
+                         % ("USB" if usb else "non-USB", d, got, want))
     # C2
     ok, msg = refused_with(body("pattern Rise(uio1) -> Rise(uio2);", "pattern Rise(uio2) -> Rise(uio1);"),
                            "cycle")
@@ -152,7 +197,7 @@ def main() -> int:
     if probs:
         print("GATE poset_compile: FAILED (%d)" % len(probs))
         return 1
-    print("GATE poset_compile: PASSED (C1-C6; %d / %d mutants killed)" % (len(C.MUTANTS), len(C.MUTANTS)))
+    print("GATE poset_compile: PASSED (C1-C8; %d / %d mutants killed)" % (len(C.MUTANTS), len(C.MUTANTS)))
     return 0
 
 
