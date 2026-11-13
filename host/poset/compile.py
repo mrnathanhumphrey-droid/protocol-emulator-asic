@@ -215,9 +215,10 @@ def target_check(img):
         return used, "not applicable (no USB receive)"
     bad = [] if MUT == "M_PC_USB_NOCHECK" else PC.usb_coresident_problems(img, k)
     if bad:
-        raise Refused("P5 target: %s" % bad[0])
-    return used, "checked: every co-resident lane >= %d (R_usb %d + pending_slack %d)" % (
-        k["dstar_retire_usb"], k["R_usb"], k["pending_slack"])
+        raise Refused("P5 target: %s" % "; ".join(bad))
+    return used, ("checked: every co-resident lane >= %d (R_usb %d + pending_slack %d + "
+                  "br1_budget %d; usb_nostall)" % (k["coresident_usb"], k["R_usb"],
+                                                   k["pending_slack"], k["br1_budget"]))
 
 
 def compile_spec(text, seed=1, hz=None):

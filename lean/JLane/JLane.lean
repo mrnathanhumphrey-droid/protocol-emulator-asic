@@ -25,3 +25,6 @@ import JLane.HoldRun
 import JLane.HoldGate
 import JLane.SelfTimed
 import JLane.UsbLane
+import JLane.StRetire
+import JLane.EdfUsb
+import JLane.UsbNoStall

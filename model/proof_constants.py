@@ -25,6 +25,22 @@ def load(path=PATH):
     k["noWB_min"] = k["R_usb"] + k["dispatch_cycles"]
     k["dstar_retire"] = k["R_base"] + k["pending_slack"]
     k["dstar_retire_usb"] = k["R_usb"] + k["pending_slack"]
+    # Wilson 11-13: the USB lane's D_sched must sit this far below every other live lane's
+    # for J <= 2 (EdfUsb.lean usb_wins / usb_j2: a lane beating the ready USB lane would have
+    # waited more than R_usb). Sufficient, worst case; 9 measured on one periodic config.
+    k["usb_deadline_margin"] = k["R_usb"]
+    # Wilson 11-13, revised no-stall ruling (UsbNoStall.lean usb_nostall / usb_br1_window): the
+    # USB lane may take branch 1 on any retirement; at most usb_br1_per_window of them in any
+    # 23 + br1_budget window (proved), each costing another lane's refill one l_refill (read:
+    # SCAN -> REQ -> WAIT -> CAP, pe_engine.v l.2703).
+    k["dstar"] = k["n_lanes"] * k["l_refill"]
+    k["br1_budget"] = k["usb_br1_per_window"] * k["l_refill"]
+    k["coresident_usb"] = k["R_usb"] + k["pending_slack"] + k["br1_budget"]
+    k["coresident_min_d"] = k["dstar"] + k["br1_budget"]
+    if k["coresident_usb"] < k["coresident_min_d"]:
+        raise ValueError("proof_constants: coresident_usb %d no longer implies the co-resident "
+                         "delay floor coresident_min_d %d (head_valid_ret's D* + B)"
+                         % (k["coresident_usb"], k["coresident_min_d"]))
     return k
 
 
@@ -57,28 +73,56 @@ def spacing_of(x, I=None):
     return I.branch_wait(x) if x["op"] in I.BRANCH_OPS else x["delay"]
 
 
+def lane_words(img, lane, I=None):
+    """[(word index, action dict)] for EVERY word reachable from `lane`'s base: the next word,
+    a branch's target, a looping REARM back to the base (a chaining REARM ends the walk).
+    pe_isa.lane_programs stops at the first REARM, which under-checks a program with several
+    sections reached by branches (usbdev.py's device program); this walks them all."""
+    I = I or _isa()
+    h = I.read_header(img, lane)
+    nwords = (I.STORE_BYTES - I.ACT_BASE) // I.ACT_BYTES
+    seen, todo, out = set(), [h["base_word"]], []
+    while todo:
+        w = todo.pop()
+        a = I.ACT_BASE + w * I.ACT_BYTES
+        if w in seen or not 0 <= w < nwords or a + I.ACT_BYTES > len(img):
+            continue
+        seen.add(w)
+        x = I._unpack(I.ACT_FIELDS, img[a:a + I.ACT_BYTES], I.ACT_BYTES)
+        out.append((w, x))
+        if x["op"] == I.OP_REARM:
+            continue                      # looping: back to the base (seen); chaining: parks
+        todo.append(w + 1)
+        if x["op"] in I.BRANCH_OPS:
+            todo.append(I.branch_target(x))
+    return sorted(out, key=lambda p: p[0])
+
+
 def usb_coresident_problems(img, k=None):
     """[problem] for an image that turns on the USB receive and has another lane with a
-    positive per-action spacing below dstar_retire_usb (Wilson 11-12, option (i)).
+    positive per-action spacing below coresident_usb (Wilson 11-13, revised no-stall ruling:
+    UsbNoStall.lean usb_nostall, hypothesis `CORESIDENT_USB <= P.dly l` for every other live
+    lane; coresident_usb = R_usb + pending_slack + br1_budget, which also implies the delay
+    floor coresident_min_d). Every word reachable from each lane is checked (lane_words).
     THE ONE CHECK: the compiler and gate_admissible_images both call this."""
     I = _isa()
     k = k or load()
     progs = I.lane_programs(img)
     if not usb_receive_live(progs, I):
         return []
-    lim, out = k["dstar_retire_usb"], []
-    for ln, (h, acts) in sorted(progs.items()):
+    lim, out = k["coresident_usb"], []
+    for ln in range(I.N_LANES):
         if ln == I.USB_LANE:
             continue
-        for i, x in enumerate(acts):
+        for w, x in lane_words(img, ln, I):
             s = spacing_of(x, I)
             if 0 < s < lim:
-                out.append("lane %d word %d: spacing %d < %d -- in an image using the USB receive, "
-                           "every other lane's per-action spacing must be >= R_usb + pending_slack "
-                           "= %d + %d (the USB lane may be decided twice per Lemma-A window, so the "
-                           "response bound is %d, not %d)"
-                           % (ln, h["base_word"] + i, s, lim, k["R_usb"], k["pending_slack"],
-                              k["R_usb"], k["R_base"]))
+                out.append("lane %d word %d: spacing %d < %d -- in an image using the USB "
+                           "receive, every other lane's per-action spacing must be >= R_usb + "
+                           "pending_slack + br1_budget = %d + %d + %d (usb_nostall). A lane that "
+                           "needs actions faster than %d cycles (fast SPI, for instance) cannot "
+                           "share an image with the USB receive"
+                           % (ln, w, s, lim, k["R_usb"], k["pending_slack"], k["br1_budget"], lim))
     return out
 
 

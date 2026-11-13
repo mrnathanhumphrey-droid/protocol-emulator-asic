@@ -6,5 +6,8 @@
   "usb_extra_decisions": 1,
   "pending_slack": 25,
   "rean_pipe": 3,
-  "rean_halving": 2
+  "rean_halving": 2,
+  "n_lanes": 5,
+  "l_refill": 4,
+  "usb_br1_per_window": 2
 }

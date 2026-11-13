@@ -10,9 +10,13 @@
   C4 Dilworth on a DAG where a path cover (3) is not a chain cover (2): width 2
   C5 a compound pattern is refused by name
   C6 a v1 spec the lowering cannot emulate is refused with the lowering's own reason
-  C7 the USB co-resident threshold (Wilson 11-12 (i)): a USB image with a co-resident lane at
-     dstar_retire_usb - 1 is refused by name; at dstar_retire_usb accepted with the threshold in
-     the certificate; the same lane at - 1 in an image WITHOUT USB accepted
+  C7 the USB co-resident threshold (Wilson 11-13, revised: coresident_usb = R_usb +
+     pending_slack + br1_budget, usb_nostall): a USB image with a co-resident lane at
+     coresident_usb - 1 is refused naming that lane and stating the restriction; at
+     coresident_usb accepted with the threshold in the certificate; the same lane at - 1 in an
+     image WITHOUT USB accepted; coresident_usb implies coresident_min_d
+  C9 every reachable word is checked: a co-resident lane whose fast section (coresident_usb - 1)
+     sits past its first REARM, reached only by a branch, is refused naming that word
 Must-fires: every compile.MUTANTS entry, run IN-PROCESS through the same judge, turns this gate red.
 
 POSITIVE TOKEN: `GATE poset_compile: PASSED`.
@@ -21,6 +25,7 @@ from __future__ import annotations
 
 import os
 import random
+import re
 import subprocess
 import sys
 
@@ -79,6 +84,28 @@ def usb_image(d_other, usb=True):
     return I.join_image(hdrs, p0 + p1 + park)
 
 
+def multisection_image(lim):
+    """the USB image's lane 0, and lane 1 with TWO sections: LEVEL / BRANCH_BIT / REARM (all at
+    `lim`), then, reached only by the branch, LEVEL at `lim - 1` / REARM. -> (image, the fast
+    word's index). pe_isa.lane_programs stops at lane 1's first REARM and never sees it."""
+    I = C.I
+    D, DM = 40, 2
+    p0 = [I.act(I.OP_ARM, DM, 0, 0), I.act(I.OP_LEVEL, I.PIN_NONE, 0, D // 2),
+          I.act_shiftin_usb(DM, D, 8), I.act(I.OP_REARM, 0, 1, D // 2)]
+    b0 = I.ACT_BASE
+    b1 = b0 + len(p0) * I.ACT_BYTES
+    w1 = I.base_word(b1)
+    p1 = [I.act(I.OP_LEVEL, I.UO0, 1, lim), I.act_branch_bit(DM, 1, w1 + 3, lim),
+          I.act(I.OP_REARM, 0, 1, lim), I.act(I.OP_LEVEL, I.UO0, 0, lim - 1),
+          I.act(I.OP_REARM, 0, 1, lim)]
+    park = [I.act(I.OP_REARM, 0, 0, 500)]
+    bp = b1 + len(p1) * I.ACT_BYTES
+    hdrs = [I.hdr(DM, I.PIN_NONE, 1, D, 0, 2 * D, 3 * D, b0),
+            I.hdr(I.UO0, I.UO0, 1, lim, 0, lim, lim + 20, b1)]
+    hdrs += [I.hdr(n + 2, n + 2, 0, 500, 0, 200, 240, bp) for n in range(2, I.N_LANES)]
+    return I.join_image(hdrs, p0 + p1 + park), w1 + 3
+
+
 def refused_with(text, needle):
     try:
         C.compile_spec(text)
@@ -122,17 +149,36 @@ def judge():
     import gen_spec_doc
     probs += ["C8 %s" % p for p in gen_spec_doc.stale()]
     # C7: the USB co-resident threshold (Wilson 11-12, option (i)), on images built by pe_isa
-    lim = C.PC.load()["dstar_retire_usb"]
+    k = C.PC.load()
+    lim = k["coresident_usb"]
+    if k["coresident_min_d"] > lim:
+        probs.append("C7 coresident_usb %d no longer implies coresident_min_d %d"
+                     % (lim, k["coresident_min_d"]))
     for usb, d, want in ((True, lim - 1, "refused"), (True, lim, "checked"), (False, lim - 1, "n/a")):
         try:
             _u, line = C.target_check(usb_image(d, usb))
             got = "checked" if line.startswith("checked") and str(lim) in line else \
                   "n/a" if line.startswith("not applicable") else line
         except C.Refused as e:
-            got = "refused" if ("%d < %d" % (d, lim)) in str(e) else "refused for another reason: %s" % e
+            m = str(e)
+            got = "refused" if (re.search(r"lane 1 word \d+: spacing %d < %d" % (d, lim), m)
+                                and "cannot share an image" in m) else "refused otherwise: %s" % m
         if got != want:
             probs.append("C7 %s image, co-resident lane at d=%d: %s, expected %s"
                          % ("USB" if usb else "non-USB", d, got, want))
+    # C9: a co-resident lane whose fast section is reached only by a branch, past its first REARM
+    img, fast_word = multisection_image(lim)
+    first_rearm = [i for i, x in enumerate(C.I.lane_programs(img)[1][1])][-1]
+    if fast_word <= C.I.read_header(img, 1)["base_word"] + first_rearm:
+        probs.append("C9 the fast word is not past lane 1's first REARM (the case is void)")
+    try:
+        C.target_check(img)
+        probs.append("C9 multi-section image accepted: lane 1 word %d (spacing %d) not checked"
+                     % (fast_word, lim - 1))
+    except C.Refused as e:
+        if ("lane 1 word %d: spacing %d < %d" % (fast_word, lim - 1, lim)) not in str(e):
+            probs.append("C9 multi-section image refused, but not for lane 1 word %d: %s"
+                         % (fast_word, e))
     # C2
     ok, msg = refused_with(body("pattern Rise(uio1) -> Rise(uio2);", "pattern Rise(uio2) -> Rise(uio1);"),
                            "cycle")
@@ -197,7 +243,7 @@ def main() -> int:
     if probs:
         print("GATE poset_compile: FAILED (%d)" % len(probs))
         return 1
-    print("GATE poset_compile: PASSED (C1-C8; %d / %d mutants killed)" % (len(C.MUTANTS), len(C.MUTANTS)))
+    print("GATE poset_compile: PASSED (C1-C9; %d / %d mutants killed)" % (len(C.MUTANTS), len(C.MUTANTS)))
     return 0
 
 
