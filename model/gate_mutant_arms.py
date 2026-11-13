@@ -519,7 +519,9 @@ def discover():
 
 
 def preprocess(fn, define=None):
-    out = os.path.join(tempfile.gettempdir(), "pe_pp_%s.v" % (define or "off"))
+    # ⛔ PER-PROCESS NAMES (11-13): fixed names in the shared temp dir let two
+    # concurrent runs overwrite each other's output -- thousands of phantom diff lines.
+    out = os.path.join(tempfile.gettempdir(), "pe_pp_%d_%s.v" % (os.getpid(), define or "off"))
     cmd = [tool("iverilog"), "-E", "-o", out]
     if define:
         cmd.append("-D" + define)
@@ -534,7 +536,12 @@ def preprocess(fn, define=None):
         # length those blanks SHIFT and a line differ reports them as changes --
         # it made every delta read 3x its real size. Whitespace is not a mutation
         # class, so removing it is safe and makes the count mean what it says.
-        return [ln.rstrip() for ln in fh if ln.strip()]
+        lines = [ln.rstrip() for ln in fh if ln.strip()]
+    try:
+        os.remove(out)
+    except OSError:
+        pass
+    return lines
 
 
 def diff_lines(a, b):
