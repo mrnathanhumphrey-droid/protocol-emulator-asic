@@ -2330,12 +2330,12 @@ module pe_engine #(
   reg  [7:0] usb_pid;
   reg        usb_mcur, usb_mpend;
   reg  [4:0] usb_crc5;
+  // bundle 6 (Q5): READY only for the endpoint the buffer was loaded for
 `ifdef M_READY_ALWAYS
   wire       usb_ready_v = 1'b1;                 // the mutant: READY reads set
 `elsif M_EP_NOCHECK
   wire       usb_ready_v = usb_ready;            // the mutant: the endpoint ignored
 `else
-  // bundle 6 (Q5): READY only for the endpoint the buffer was loaded for
   wire       usb_ready_v = usb_ready & (usb_bep == usb_tep);
 `endif
   wire       usb_l0      = usb_on & (cur == USB_LANE[LW-1:0]);
@@ -3716,8 +3716,8 @@ module pe_engine #(
             // program checks a SETUP's or OUT's address after its DATA packet
             // (it must arm for that packet within the host's 2-bit gap)
             if (ut_nb == 6'd23 && ut_ptok) usb_tep <= usb_dec;
+            // `M_ADDR_OK_EARLY`: ADDR_OK latched after the address byte, before the CRC5
 `ifdef M_ADDR_OK_EARLY
-            // the mutant: ADDR_OK latched after the address byte, before the CRC5
             if (ut_nb == 6'd23 && ut_ptok) usb_tok <= ut_mcur | (usb_apv & ut_mpnd);
 `else
             if (ut_nb == 6'd31 && ut_ptok) usb_tok <= ut_aok;

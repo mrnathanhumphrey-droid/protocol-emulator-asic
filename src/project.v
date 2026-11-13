@@ -853,14 +853,14 @@ module tt_um_protocol_emulator #(
 `endif
   // bundle 6 (Q5): bit 7 of the length byte is the endpoint, 6:0 the length
   wire          ub_len_ok = (ub_in[6:0] != 7'd0) && (ub_in[6:0] <= 7'd112);
+  // bundle 6: and refused while the reset fence is up (addition A).
+  // `M_BUF_NO_REFUSE`: a write while READY is not refused -- it starts a new
+  // load OVER the unACKed packet (what an unguarded buffer would do)
 `ifdef M_BUF_NO_REFUSE
-  // the mutant: a write while READY is not refused -- it starts a new load
-  // OVER the unACKed packet (what an unguarded buffer would do)
   assign        ub_wpe    = ub_ready ? 5'd0 : ub_wp;
   wire          ub_refuse = usb_fence | ((ub_wpe == 5'd0) & ~ub_len_ok);
 `else
   assign        ub_wpe    = ub_wp;
-  // bundle 6: and refused while the reset fence is up (addition A)
   wire          ub_refuse = ub_ready | usb_fence | ((ub_wp == 5'd0) & ~ub_len_ok);
 `endif
   assign        ub_bwe    = ub_wbyte & ~ub_refuse & (ub_wpe != 5'd0);
@@ -2895,8 +2895,8 @@ module pe_pit_s12 #(parameter integer AW = 9) (
           acc <= 75'd0;
           if (p_end) begin
             if (!(bq || qual)) begin cls <= C_UNK; why <= 3'd2; st <= S_WR; end
+            // `M_S12_NO_RIVAL`, the must-fire: no rival check -- a non-harmonic tie reports a period
 `ifdef M_S12_NO_RIVAL
-            // the must-fire: no rival check -- a non-harmonic tie reports a period
             else begin p <= bp; s1ok <= 1'b1; walk_go <= 1'b1; st <= S_RB; end
 `else
             else begin p <= P_FIRST; walk_go <= 1'b1; st <= S_RIVAL; end

@@ -89,6 +89,60 @@ EXPECT = {
     # the re-anchor floor's must-fire (Wilson 11-12): one substitution,
     # `l_timestamp[USB_LANE]` -> `ts_n[USB_LANE]` in rean_cap
     "M_REAN_FLOOR_EARLY": (2, None),
+    # 11-13: comments moved OUT of these arms (they were counted as the delta)
+    "M_ADDR_OK_EARLY":    (2, None),
+    "M_BUF_NO_REFUSE":    (4, None),
+    "M_READY_ALWAYS":     (2, None),
+    "M_S12_NO_RIVAL":     (2, None),
+    # 11-13 reviewed, oversized BY CONSTRUCTION (declared):
+    "M_CK_NO_REFUSE": (6, "the mutation IS the deleted refusal branch: `else if "
+                          "(both clean edges) sample, else refuse (3 lines)` "
+                          "becomes one unconditional `else ck_edge <= ck_sn0`"),
+    "M_DECODE_STALE": (308, "one line in source -- the `T3` macro's definition "
+                            "(t3fl(t3) for t3fl(x)) -- expanded at its 154 call "
+                            "sites, so the preprocessed diff counts 154 in, 154 out"),
+    # ⭐ 11-13, the CI repair: the v2 USB / CK / PIT / S12 mutants added 11-04 ..
+    # 11-12 that were never entered here (the gate red on CI since). Each was
+    # reviewed as a single substitution (no comment inside the arm, <= the
+    # MINIMAL budget) and is recorded at the size the guard measured.
+    "M_ADDR_ACK_ONLY":    (2, None),
+    "M_ADDR_EARLY":       (4, None),
+    "M_ADDR_NOCHECK":     (2, None),
+    "M_CK_ACK_KEEP":      (2, None),
+    "M_CK_CPOL_INV":      (2, None),
+    "M_CK_CS_INV":        (2, None),
+    "M_CK_EDGE_INV":      (2, None),
+    "M_CK_LSB":           (2, None),
+    "M_CK_NO_SR":         (4, None),
+    "M_CK_WHY_SWAP":      (2, None),
+    "M_COMMIT_ON_DATA":   (2, None),
+    "M_CRC5_OK":          (2, None),
+    "M_CRC_ALWAYS_OK":    (2, None),
+    "M_CRC_NO_PRIME":     (2, None),
+    "M_CTL_AS_QUEUE":     (2, None),
+    "M_DIVMASK_LATE":     (4, None),
+    "M_LTTREE_NOEQ":      (2, None),
+    "M_NO_REANCHOR":      (2, None),
+    "M_PAIR_COPY":        (2, None),
+    "M_PAIR_SE0_SHIFT":   (2, None),
+    "M_READY_CLR_ON_SEND": (2, None),
+    "M_REAN_NOCOMP":      (2, None),
+    "M_RST_ANY":          (2, None),
+    "M_RST_KEEP_ADDR":    (1, None),
+    "M_RST_KEEP_READY":   (1, None),
+    "M_RST_NEVER":        (1, None),
+    "M_RST_NO_FENCE":     (1, None),
+    "M_RST_SHORT":        (2, None),
+    "M_S12_NO_BODYCHK":   (2, None),
+    "M_S12_NO_IRREG":     (2, None),
+    "M_S12_NO_R2":        (2, None),
+    "M_S12_NO_REF2":      (1, None),
+    "M_S12_NO_SPAN":      (2, None),
+    "M_S3_LAST_KEEP":     (4, None),
+    "M_STUFF_NOFLAG":     (1, None),
+    "M_ST_EARLY":         (2, None),
+    "M_TAG3_ALWAYS_BUF":  (4, None),
+    "M_UNSTUFF_KEEP":     (2, None),
     # silicon fix #2 (ruling TX1): the host load's LOW-phase gate removed --
     # one condition, one line out and one in
     "M_TX_LOAD_ANYPHASE": (2, None),
