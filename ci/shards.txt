@@ -57,6 +57,7 @@ sim2 test/run_usbcrc.py
 sim2 test/run_usbbuf.py
 sim2 test/run_usbaddr.py
 sim2 test/run_usbrst.py
+sim2 test/run_rean_floor.py
 sim2 test/run_hold_rule.py
 sim2 test/run_ckack.py
 sim2 test/run_i2c.py

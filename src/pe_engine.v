@@ -2632,10 +2632,18 @@ module pe_engine #(
   // `M_REAN_NOCOMP` is the off-by-one: the cycle not taken off.
   reg              rean_q;
   reg  [TS_W-1:0]  rean_tq;
+  // `M_REAN_FLOOR_EARLY` (Wilson 11-12): the writeback visible a cycle early --
+  // `ts_n` (the next cycle's timestamp) for `l_timestamp`; run_rean_floor's must-fire.
+  // Nested, not `elsif: the drift and kill gates read `ifdef arms only. (Comments
+  // stay OUTSIDE the arms: inside, the drift guard counts them against the arm.)
 `ifdef M_NO_REANCHOR
   wire             rean_cap = 1'b0;          // the mutant: one anchor, at SOP
 `else
+`ifdef M_REAN_FLOOR_EARLY
+  wire             rean_cap = run & u_watch & u_edge & tf_diff(now_n, ts_n[USB_LANE]);
+`else
   wire             rean_cap = run & u_watch & u_edge & tf_diff(now_n, l_timestamp[USB_LANE]);
+`endif
 `endif
   wire [TS_W-1:0]  u_half   = {{(TS_W-DLY_W+1){1'b0}}, u_head[LOWX+BQW+BPW+1 +: DLY_W-1]};
   always @(posedge clk or negedge rst_n) begin

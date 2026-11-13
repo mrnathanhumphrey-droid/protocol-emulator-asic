@@ -71,6 +71,9 @@ KILLERS = {
     # run_pit_s3 is a CI gate since 11-12 (Wilson: GATE); both die there, each
     # red on its own case (Linux Verilator, 11-12)
     "M_S3_LAST_KEEP": "test/run_pit_s3.py", "M_SRAM_WBUF_OVF": "test/run_pit_s3.py",
+    # the re-anchor floor (Wilson 11-12): the writeback visible a cycle early must
+    # land exactly one cycle under the floor at both d
+    "M_REAN_FLOOR_EARLY": "test/run_rean_floor.py",
     # the rest of the 11-07 orphans: run_pit_s12 / run_pit_clk are CI gates since
     # 11-12; each mutant red on its own case (Linux Verilator, 11-12)
     "M_S12_NO_RIVAL": "test/run_pit_s12.py",

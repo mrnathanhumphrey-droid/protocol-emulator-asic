@@ -470,6 +470,10 @@ GATES=(
   test/run_pit_s12.py
   test/run_pit_clk.py
   test/run_pit_emit.py
+  # ⭐ the re-anchor floor (Wilson 11-12, the Lean USB brick's named hardware
+  # hypothesis): a re-anchored release lands >= 3 + floor(d/2) after the sample
+  # before it, exactly; must-fire M_REAN_FLOOR_EARLY lands exactly one cycle under.
+  test/run_rean_floor.py
   # ⭐ v2 LATCH STORE (Wilson 10-31, Track 2): the array powers up random (M_STORE_NO_FILL
   # and M_STORE_DROP_ROW0 must fail), and pe_store's read-after-write contract
   # stops a bench that reads a byte the cycle after it was written (both ports).

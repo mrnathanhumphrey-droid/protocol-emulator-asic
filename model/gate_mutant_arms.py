@@ -86,6 +86,9 @@ EXPECT = {
     "M_TX_IGNORE_TAG":   (2, None),
     "M_RX_NO_LANE":      (2, None),
     "M_IGNORE_ORDER":    (2, None),
+    # the re-anchor floor's must-fire (Wilson 11-12): one substitution,
+    # `l_timestamp[USB_LANE]` -> `ts_n[USB_LANE]` in rean_cap
+    "M_REAN_FLOOR_EARLY": (2, None),
     # silicon fix #2 (ruling TX1): the host load's LOW-phase gate removed --
     # one condition, one line out and one in
     "M_TX_LOAD_ANYPHASE": (2, None),

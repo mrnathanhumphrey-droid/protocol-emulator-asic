@@ -210,6 +210,9 @@ SEAMS = (
     # 11-12 the round trip: `compare` always (no problem) -> the emitter's
     # init ^ 1 and the flipped CPOL both pass the round trip
     ("test/run_pit_rt.py", "run_pit_rt.compare", "slow", "E0"),
+    # 11-12 the re-anchor floor: `judge` always clean -> the clean arm reads green
+    # whatever the RTL does, and the mutant arm equals it (red: changed nothing)
+    ("test/run_rean_floor.py", "run_rean_floor.judge", "slow", "E0"),
     # s12 note (11-11): `record_problems` always empty -> M_DECODE_STALE /
     # M_DIVMASK_LATE's record arms survive on the CI subset
     ("test/run_pit_gcd.py", "run_pit_gcd.record_problems", "slow", "E"),
