@@ -40,7 +40,8 @@ ALLOWED = {"propext", "Quot.sound"}
 KEY = ("dstar", "dstar29", "dstar39", "dstar39_v2", "dstar39_st", "dstar39_hold",
        "hold_window", "runH_nohold", "runH_coinc", "step2_proj", "step2_proj_st",
        "run2_proj_st", "holdCycles_meets",
-       "lemmaA_usb", "wb_bound_usb", "dstar_usb", "dstar_usb_rean", "dstar_usb_st")
+       "lemmaA_usb", "wb_bound_usb", "dstar_usb", "dstar_usb_rean", "dstar_usb_st",
+       "retSpaced2", "retSpaced_of_pairs", "dstar_usb_pairs")
 #: proof_constants.load() key -> the Lean expression that must evaluate to it (SPEC: the map)
 CONSTS = {
     "lemmaA_window": "LEMMA_A_WINDOW", "R_base": "R_BASE", "dispatch_cycles": "DISPATCH_CYCLES",

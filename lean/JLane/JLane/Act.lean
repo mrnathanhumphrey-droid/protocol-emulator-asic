@@ -42,10 +42,14 @@ inductive CkPh where
   | low | high | coll
   deriving DecidableEq, Repr
 
-/-- The timing-relevant fields of an action word: opcode class and `a_dly`. -/
+/-- The timing-relevant fields of an action word: opcode class and `a_dly`. `lx` is a
+self-timed word's `st_lastix` (`pe_engine.v` l.2036: SHIFT / SHIFTI `a_cnt`, SHIFTIN
+`a_cnt - 1`; SHIFTI's `a_cnt` is fixed at 7, l.1895), read only by the bit-counter tie
+(`StRetire.lean`, Wilson 11-13). Default 0: the conservative value (no held bit is claimed). -/
 structure Word where
   op  : Op
   dly : Nat
+  lx  : Nat := 0
   deriving DecidableEq, Repr
 
 /-- A v2 program: liveness and the per-lane `HALF_HIGH` flag (`half_v`).

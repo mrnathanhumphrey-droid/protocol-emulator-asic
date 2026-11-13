@@ -11,8 +11,14 @@
   C5 a compound pattern is refused by name
   C6 a v1 spec the lowering cannot emulate is refused with the lowering's own reason
   C7 the USB co-resident threshold (Wilson 11-12 (i)): a USB image with a co-resident lane at
-     dstar_retire_usb - 1 is refused by name; at dstar_retire_usb accepted with the threshold in
-     the certificate; the same lane at - 1 in an image WITHOUT USB accepted
+     dstar_retire_usb - 1 is refused naming that lane; at dstar_retire_usb that lane is not
+     named (the image is still refused for its USB lane's pairs, C9); the same lane at - 1 in an
+     image WITHOUT USB accepted
+  C9 per-pair retirement spacing (Wilson 11-13): run_usbrx's receive image is refused naming
+     EXACTLY its short pairs -- the last byte -> LEVEL (the floor rean_floor(d) / d nominal) and
+     REARM -> ARM (the REARM's delay) -- and ARM -> LEVEL as outside the model; LEVEL -> the
+     first byte carries the byte's held bits at the floor; on a plain lane every pair at
+     dstar_retire_usb is ok and at - 1 every pair is short
 Must-fires: every compile.MUTANTS entry, run IN-PROCESS through the same judge, turns this gate red.
 
 POSITIVE TOKEN: `GATE poset_compile: PASSED`.
@@ -21,6 +27,7 @@ from __future__ import annotations
 
 import os
 import random
+import re
 import subprocess
 import sys
 
@@ -42,6 +49,7 @@ SCRATCH_MUTANTS = {
     "M_PC_WINDOW_SWAP": "killed in-process by this gate",
     "M_PC_COMPOUND_PASS": "killed in-process by this gate",
     "M_PC_USB_NOCHECK": "killed in-process by this gate",
+    "M_PC_PAIRS_NOCHECK": "killed in-process by this gate",
 }
 #: the literal above must name exactly the module's MUTANTS (checked at start-up)
 if set(SCRATCH_MUTANTS) != set(C.MUTANTS):
@@ -123,16 +131,61 @@ def judge():
     probs += ["C8 %s" % p for p in gen_spec_doc.stale()]
     # C7: the USB co-resident threshold (Wilson 11-12, option (i)), on images built by pe_isa
     lim = C.PC.load()["dstar_retire_usb"]
-    for usb, d, want in ((True, lim - 1, "refused"), (True, lim, "checked"), (False, lim - 1, "n/a")):
+    for usb, d, want in ((True, lim - 1, "lane 1 refused"), (True, lim, "lane 1 clear"),
+                         (False, lim - 1, "n/a")):
         try:
             _u, line = C.target_check(usb_image(d, usb))
-            got = "checked" if line.startswith("checked") and str(lim) in line else \
-                  "n/a" if line.startswith("not applicable") else line
+            got = "n/a" if line.startswith("not applicable") else \
+                  "lane 1 clear" if line.startswith("checked") else line
         except C.Refused as e:
-            got = "refused" if ("%d < %d" % (d, lim)) in str(e) else "refused for another reason: %s" % e
+            m = str(e)
+            got = "lane 1 refused" if re.search(r"lane 1 word \d+: spacing %d < %d" % (d, lim), m) \
+                else "lane 1 clear" if "lane 1 " not in m else "lane 1 refused otherwise: %s" % m
         if got != want:
             probs.append("C7 %s image, co-resident lane at d=%d: %s, expected %s"
                          % ("USB" if usb else "non-USB", d, got, want))
+    # C9: per-pair retirement spacing (Wilson 11-13), on run_usbrx's own receive image
+    import run_usbrx as RX
+    I = C.I
+    img = RX.image()
+    h, acts = I.lane_programs(img)[I.USB_LANE]
+    b0 = h["base_word"]
+    rx = [i for i, x in enumerate(acts)
+          if x["op"] == I.OP_SHIFTIN and x["mod"] & I.MOD_SELF_TIMED and x["level"]]
+    rearm = [i for i, x in enumerate(acts) if x["op"] == I.OP_REARM]
+    arm = [i for i, x in enumerate(acts) if x["op"] == I.OP_ARM]
+    want_short = {(b0 + rx[-1], b0 + rx[-1] + 1), (b0 + rearm[-1], b0)}
+    want_out = {(b0 + a, b0 + a + 1) for a in arm}
+    try:
+        C.target_check(img)
+        msg = ""
+    except C.Refused as e:
+        msg = str(e)
+    pat = r"lane %d pair word (\d+) \([^)]*\) -> word (\d+) \([^)]*\): " % I.USB_LANE
+    short = {(int(a), int(b)) for a, b in re.findall(pat + "spacing", msg)}
+    outside = {(int(a), int(b)) for a, b in re.findall(pat + "outside", msg)}
+    if short != want_short:
+        probs.append("C9 run_usbrx image: short pairs %s, expected exactly %s"
+                     % (sorted(short), sorted(want_short)))
+    if outside != want_out:
+        probs.append("C9 run_usbrx image: outside-the-model pairs %s, expected %s"
+                     % (sorted(outside), sorted(want_out)))
+    pr = {(p["a"], p["b"]): p for p in C.PC.retire_pairs(img, I.USB_LANE)}
+    first = acts[rx[0]]
+    exp = {(b0 + rx[-1], b0 + rx[-1] + 1): (C.PC.rean_floor(RX.D), RX.D),
+           (b0 + rearm[-1], b0): (acts[rearm[-1]]["delay"], acts[rearm[-1]]["delay"]),
+           (b0 + rx[0] - 1, b0 + rx[0]): (
+               acts[rx[0] - 1]["delay"] + (first["count"] - 1) * C.PC.rean_floor(first["delay"]),
+               acts[rx[0] - 1]["delay"] + (first["count"] - 1) * first["delay"])}
+    for key_, (s, n) in sorted(exp.items()):
+        p = pr.get(key_)
+        if not p or (p["spacing"], p["nominal"]) != (s, n):
+            probs.append("C9 pair %s: %s, expected spacing %d / nominal %d"
+                         % (key_, p and (p["spacing"], p["nominal"]), s, n))
+    for d, want in ((lim, "ok"), (lim - 1, "short")):
+        sts = {p["status"] for p in C.PC.retire_pairs(usb_image(d), 1)}
+        if sts != {want}:
+            probs.append("C9 plain lane at d=%d: pair statuses %s, expected all %s" % (d, sts, want))
     # C2
     ok, msg = refused_with(body("pattern Rise(uio1) -> Rise(uio2);", "pattern Rise(uio2) -> Rise(uio1);"),
                            "cycle")
@@ -197,7 +250,7 @@ def main() -> int:
     if probs:
         print("GATE poset_compile: FAILED (%d)" % len(probs))
         return 1
-    print("GATE poset_compile: PASSED (C1-C8; %d / %d mutants killed)" % (len(C.MUTANTS), len(C.MUTANTS)))
+    print("GATE poset_compile: PASSED (C1-C9; %d / %d mutants killed)" % (len(C.MUTANTS), len(C.MUTANTS)))
     return 0
 
 

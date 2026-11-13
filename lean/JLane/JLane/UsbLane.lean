@@ -16,7 +16,11 @@ guard seen dropping early edges; Wilson 11-12, floor ruling).
 What the theorem then needs, and which gate checks it:
 * USB lane, per dispatch: `NOWB_MIN = 20 ≤ dly u` (clock row 1: 23 ≥ 20 at d = 40);
 * USB lane, per retirement: releases of consecutive retirements `DSTAR_RETIRE_USB = 42` apart
-  (`RetSpaced`; clock row 2: a byte is 8 bit writebacks, 8 · 23 ≥ 42; `retSpaced_of_wbs`);
+  (`RetSpaced`). Byte to byte this is 8 · 23 ≥ 42, but **not** for every pair: a byte
+  followed by a LEVEL is spaced by its last bit alone (23–40 at d = 40), REARM → ARM by the
+  REARM's delay. Wilson 11-13: the condition is **per pair**, derived in `StRetire.lean`
+  (`retSpaced_of_pairs`, `dstar_usb_pairs`) and checked on the image by
+  `proof_constants.retire_pairs`;
 * every other live lane: `dly ≥ DSTAR_RETIRE_USB = 42` (the compiler and the image gate:
   `proof_constants.usb_coresident_problems`).
 -/

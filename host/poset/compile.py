@@ -51,7 +51,8 @@ MUTANTS = ("M_PC_NO_CYCLE",      # cycles not refused
            "M_PC_NO_CLOSURE",    # width from direct edges only (path cover, not chain cover)
            "M_PC_WINDOW_SWAP",   # window bounds swapped
            "M_PC_COMPOUND_PASS", # compound patterns silently dropped instead of refused
-           "M_PC_USB_NOCHECK")   # the USB co-resident threshold not checked
+           "M_PC_USB_NOCHECK",   # the USB co-resident threshold not checked
+           "M_PC_PAIRS_NOCHECK") # the USB lane's retirement pairs not checked (Wilson 11-13)
 MUT = os.environ.get("POSET_COMPILE_MUTANT", "")
 if MUT and MUT not in MUTANTS:
     raise SystemExit("poset compile: unknown mutant %r" % MUT)
@@ -213,11 +214,13 @@ def target_check(img):
     progs = I.lane_programs(img)
     if not PC.usb_receive_live(progs, I):
         return used, "not applicable (no USB receive)"
-    bad = [] if MUT == "M_PC_USB_NOCHECK" else PC.usb_coresident_problems(img, k)
+    bad = [] if MUT == "M_PC_USB_NOCHECK" else PC.usb_coresident_problems(
+        img, k, pairs=MUT != "M_PC_PAIRS_NOCHECK")
     if bad:
-        raise Refused("P5 target: %s" % bad[0])
-    return used, "checked: every co-resident lane >= %d (R_usb %d + pending_slack %d)" % (
-        k["dstar_retire_usb"], k["R_usb"], k["pending_slack"])
+        raise Refused("P5 target: %s" % "; ".join(bad))
+    return used, ("checked: every co-resident lane >= %d and every USB-lane retirement pair >= %d "
+                  "(R_usb %d + pending_slack %d)" % (k["dstar_retire_usb"], k["dstar_retire_usb"],
+                                                     k["R_usb"], k["pending_slack"]))
 
 
 def compile_spec(text, seed=1, hz=None):
