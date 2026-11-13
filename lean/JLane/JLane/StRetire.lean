@@ -2,6 +2,11 @@ import JLane.UsbLane
 /-!
 # Brick P — retirement spacing per pair (Wilson 11-13)
 
+**Superseded for the gates (Wilson 11-13, revised ruling).** A real USB device program retires
+words 20–33 cycles apart, back to back, so no per-pair rule can hold for it; the USB lane's
+no-stall theorem is now `usb_nostall` (`UsbNoStall.lean`), with branch 1 allowed on any USB
+retirement. The results below stay proved and correct, but no image check relies on them.
+
 The proof only ever needed this of a lane whose retirements drive branch 1: **consecutive
 retirements release at least `R + 25` apart** (`RetSpaced`). "d ≥ 42" was a per-lane shortcut
 for it. Wilson 11-13 replaces it by the **pair condition**: for every two consecutive

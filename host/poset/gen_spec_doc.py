@@ -25,15 +25,22 @@ def blocks():
     return {
         "usb_coresident": (
             "**In an image using the USB receive, every other lane's per-action spacing is "
-            "≥ %d cycles** (a branch's wait W counts as its spacing). Why: the USB lane's "
-            "re-anchor can bring its next release as close as %d + ⌊d/%d⌋ cycles (%d at d = 40), "
-            "so it may be decided twice inside one %d-cycle Lemma-A window. The response bound "
-            "becomes R = %d + %d = %d instead of %d, and the no-stall theorem then needs "
-            "d ≥ R + %d = %d on every co-resident lane (Wilson 11-12, option (i)). The compiler "
-            "refuses a program that breaks this, by name; the A2 certificate records the threshold."
-            % (k["dstar_retire_usb"], k["rean_pipe"], k["rean_halving"], PC.rean_floor(40, k),
-               k["lemmaA_window"], k["R_base"], k["dispatch_cycles"] * k["usb_extra_decisions"],
-               k["R_usb"], k["R_base"], k["pending_slack"], k["dstar_retire_usb"])),
+            "≥ %d cycles** (a branch's wait W counts as its spacing; every word reachable from "
+            "the lane is checked). So a protocol lane that needs actions faster than %d cycles "
+            "(fast SPI, for instance) cannot share a chip image with the USB receive. Why: the "
+            "USB lane's re-anchor can bring its next release as close as %d + ⌊d/%d⌋ cycles "
+            "(%d at d = 40), so it may be decided twice inside one %d-cycle Lemma-A window and "
+            "the response bound becomes R = %d + %d = %d instead of %d; and the USB lane may take "
+            "the slower refill path (branch 1) on any of its retirements, at most %d times in any "
+            "%d-cycle window, each costing another lane's refill %d cycles (budget B = %d). The "
+            "no-stall theorem (`usb_nostall`) then needs d ≥ R + %d + B = %d on every co-resident "
+            "lane (Wilson 11-13). The compiler refuses a program that breaks this, by name; the "
+            "A2 certificate records the threshold."
+            % (k["coresident_usb"], k["coresident_usb"], k["rean_pipe"], k["rean_halving"],
+               PC.rean_floor(40, k), k["lemmaA_window"], k["R_base"],
+               k["dispatch_cycles"] * k["usb_extra_decisions"], k["R_usb"], k["R_base"],
+               k["usb_br1_per_window"], k["pending_slack"] - 2 + k["br1_budget"], k["l_refill"],
+               k["br1_budget"], k["pending_slack"], k["coresident_usb"])),
     }
 
 

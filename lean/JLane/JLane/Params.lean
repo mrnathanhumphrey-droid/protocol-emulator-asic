@@ -66,6 +66,23 @@ abbrev DSTAR_RETIRE_USB : Nat := R_USB + PENDING_SLACK
 last one (`test/run_rean_floor.py`, exact on the RTL at d = 40 and 48). -/
 def reanFloor (d : Nat) : Nat := REAN_PIPE + d / REAN_HALVING
 
+/-- USB-lane branch-1 refills in any window of `23 + BR1_BUDGET` cycles, at most (Wilson 11-13,
+revised no-stall ruling; proved in `UsbNoStall.lean`, `usb_br1_window`). -/
+abbrev USB_BR1_PER_WINDOW : Nat := 2
+/-- Port cycles the USB lane's branch-1 refills can take from another lane's refill in such a
+window: one `L_REFILL` each (SCAN → REQ → WAIT → CAP, `pe_engine.v` l.2703, read). -/
+abbrev BR1_BUDGET : Nat := USB_BR1_PER_WINDOW * L_REFILL
+/-- Per-action spacing every other lane needs in an image with the USB receive (replaces 42). -/
+abbrev CORESIDENT_USB : Nat := R_USB + PENDING_SLACK + BR1_BUDGET
+/-- The co-resident lanes' delay floor from `head_valid_ret` (`D* + B`); implied by
+`CORESIDENT_USB` (`coresident_implies_min_d`). -/
+abbrev CORESIDENT_MIN_D : Nat := DSTAR + BR1_BUDGET
+
+theorem br1_budget_val : BR1_BUDGET = 8 := rfl
+theorem coresident_usb_val : CORESIDENT_USB = 50 := rfl
+theorem coresident_min_d_val : CORESIDENT_MIN_D = 28 := rfl
+theorem coresident_implies_min_d : CORESIDENT_MIN_D ≤ CORESIDENT_USB := by decide
+
 theorem lemmaA_window_val : LEMMA_A_WINDOW = 3 * (K - 1) + 2 + 1 := rfl
 theorem r_base_val : R_BASE + 1 = LEMMA_A_WINDOW := rfl
 theorem dispatch_cycles_val : DISPATCH_CYCLES = C_SPACING := rfl
