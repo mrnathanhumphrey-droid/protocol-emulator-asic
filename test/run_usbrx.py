@@ -391,8 +391,18 @@ def main() -> int:
 
         # U5: the deadline rule (Wilson 11-08) -- refused when broken, and
         # LOAD-BEARING: shown once by running the broken image anyway
-        print("\n  U5 the deadline rule (USB lane D_sched strictly earliest), four lanes busy at D*")
-        for tag, cfg, want_ok in (("obeyed", (30, 40), True), ("broken", (80, 40), False)):
+        print("\n  U5 the deadline rule (USB lane D_sched + margin %d <= every other), four lanes busy at D*"
+              % I.usb_deadline_margin())
+        # ⭐ the margin's boundary, static (Wilson 11-13: must-fires at 16 and 17):
+        # every other lane exactly margin - 1 above is refused, exactly margin above accepted
+        mg = I.usb_deadline_margin()
+        for gap, want in ((mg - 1, False), (mg, True)):
+            acc = not I.usb_problems(image(busy=(30, 30 + gap)))
+            print("    margin %2d (others at %d): pe_isa %s  %s" % (gap, 30 + gap, "accepts" if acc else "refuses",
+                  "ok" if acc == want else "*** WRONG"))
+            if acc != want:
+                probs.append("MUST-FIRE: margin %d %s by pe_isa" % (gap, "accepted" if acc else "refused"))
+        for tag, cfg, want_ok in (("obeyed", (30, 30 + mg), True), ("broken", (80, 40), False)):
             bimg = os.path.join(tmp, "usbrx_busy_%s.hex" % tag)
             I.write_image(bimg, image(busy=cfg))
             sim_run.scratch_image(GEN, bimg)
@@ -511,8 +521,8 @@ BOUND_CITED = ("USB 2.0 TDRST >= 10 ms, the bus reset before any traffic (clock.
                 "Table 7-14 / §7.1.7.5); TATTDB's min/max conflict (§7.1.7.3 vs Table 7-14) not relied on")
 PROBE = "test/usb_startup_probe.v"
 #: the arms: the gate's own image, and agent 2's busy image with the other
-#: lanes at 42 and at 20
-STARTUP_ARMS = [("idle others", None), ("busy, others at 42", (30, 42)),
+#: lanes at D_sched 47 (the margin, Wilson 11-13) and at 20 (below it: a start-up measurement only)
+STARTUP_ARMS = [("idle others", None), ("busy, others at 47", (30, 47)),
                 ("busy, others at 20", (30, 20))]
 
 
