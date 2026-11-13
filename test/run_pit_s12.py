@@ -38,6 +38,10 @@ for _p in (HERE, os.path.join(ROOT, "model")):
 from toolchain import banner                # noqa: E402
 import pe_isa as I                          # noqa: E402
 import sim_run                              # noqa: E402
+# ⭐ CI RUNS THIS ON VERILATOR (Wilson 11-12: the PIT's tier-1 evidence is CI-run);
+# an explicit PE_SIM wins (iverilog nightly / at the lock). Set before
+# run_pit_capture is imported, which reads it.
+os.environ.setdefault("PE_SIM", "verilator")
 import run_pit_capture as RP                # noqa: E402
 import run_pit_s0 as R0                     # noqa: E402
 import pit_s0_golden as S0                  # noqa: E402

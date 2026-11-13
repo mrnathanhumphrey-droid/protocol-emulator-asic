@@ -71,6 +71,22 @@ KILLERS = {
     # run_pit_s3 is a CI gate since 11-12 (Wilson: GATE); both die there, each
     # red on its own case (Linux Verilator, 11-12)
     "M_S3_LAST_KEEP": "test/run_pit_s3.py", "M_SRAM_WBUF_OVF": "test/run_pit_s3.py",
+    # the rest of the 11-07 orphans: run_pit_s12 / run_pit_clk are CI gates since
+    # 11-12; each mutant red on its own case (Linux Verilator, 11-12)
+    "M_S12_NO_RIVAL": "test/run_pit_s12.py",
+    "M_S12_NO_REF2": "test/run_pit_s12.py",
+    "M_S12_NO_R2": "test/run_pit_s12.py",
+    "M_S12_NO_BODYCHK": "test/run_pit_s12.py",
+    "M_S12_NO_IRREG": "test/run_pit_s12.py",
+    "M_S12_NO_SPAN": "test/run_pit_s12.py",
+    "M_CK_ACK_KEEP": "test/run_pit_clk.py",
+    "M_CK_EDGE_INV": "test/run_pit_clk.py",
+    "M_CK_NO_SR": "test/run_pit_clk.py",
+    "M_CK_CS_INV": "test/run_pit_clk.py",
+    "M_CK_LSB": "test/run_pit_clk.py",
+    "M_CK_NO_REFUSE": "test/run_pit_clk.py",
+    "M_CK_WHY_SWAP": "test/run_pit_clk.py",
+    "M_CK_CPOL_INV": "test/run_pit_clk.py",
     "M_PIT_K_OFF1": "test/run_pit_capture.py", "M_PIT_MASK_DROP": "test/run_pit_capture.py",
     "M_PIT_NO_OVERRUN": "test/run_pit_capture.py", "M_PIT_WHY_DROP": "test/run_pit_capture.py",
     "M_PIT_NO_SAT": "test/run_pit_capture.py",

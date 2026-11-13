@@ -270,6 +270,12 @@ NOT_STUBBABLE = {
                        "sigrok's decode); priced by its M_IGNORE_ORDER arm",
     "test/run_recert.py": "verdicts made inline by say() in main() against "
                           "sigrok's decode, per clocked image",
+    "test/run_pit_s12.py": "verdicts made inline in run_case()/main() against the "
+                           "golden records; priced by its six M_S12_* arms",
+    "test/run_pit_clk.py": "verdicts made inline in run_case()/main() against the "
+                           "golden; priced by its eight M_CK_* arms",
+    "test/run_pit_emit.py": "pure-Python checks inline in main() (spec text vs the "
+                            "results bytes, parser round trip); no simulation",
     "test/run_pit_s3.py": "verdicts made inline in main() (problems appended per "
                           "case: capture, stages, snapshot, record); priced by its "
                           "MUTANTS arms, each of which must turn a case red",

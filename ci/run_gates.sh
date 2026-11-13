@@ -463,6 +463,13 @@ GATES=(
   # sniff -> spec -> assemble -> emulate -> sniff -> compare; must-fires: the
   # emitter's init ^ 1 and a flipped CPOL. On Verilator (219 s on Linux).
   test/run_pit_rt.py
+  # ⭐ the rest of the PIT's evidence, CI-run (Wilson 11-12: the v2 status page's
+  # tier 1): stages 1-2 (period / phase / score records, 6 mutants), the
+  # clocked-bus path (SPI / I2C, 8 mutants), both on Verilator (141 s / 161 s on
+  # Linux); the spec emitter + its parser (7 s, no simulation).
+  test/run_pit_s12.py
+  test/run_pit_clk.py
+  test/run_pit_emit.py
   # ⭐ v2 LATCH STORE (Wilson 10-31, Track 2): the array powers up random (M_STORE_NO_FILL
   # and M_STORE_DROP_ROW0 must fail), and pe_store's read-after-write contract
   # stops a bench that reads a byte the cycle after it was written (both ports).
@@ -738,7 +745,7 @@ can_run() {
         || { echo "no verilator and no wsl.exe to reach one"; return 1; } ;;
     # the CI subset runs on Verilator (PE_SIM unset -> verilator); so do the
     # full-chip stage 3 and the round trip (Wilson 11-12)
-    test/run_pit_gcd.py|test/run_pit_s3.py|test/run_pit_rt.py)
+    test/run_pit_gcd.py|test/run_pit_s3.py|test/run_pit_rt.py|test/run_pit_s12.py|test/run_pit_clk.py)
       { command -v "$VL" >/dev/null 2>&1 || [ -n "${PE_VERILATOR:-}" ] \
         || command -v wsl.exe >/dev/null 2>&1; } \
         || { echo "no verilator and no wsl.exe to reach one"; return 1; } ;;
