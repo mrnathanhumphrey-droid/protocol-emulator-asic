@@ -63,6 +63,13 @@ DECLARED = {
                     "source it (refill_run, a2_run, store_run, phases_run)"),
     "test/ln1_vl.sh": ("helper", "ci/ln1_replay.py",
                        "the Verilator trace export LN1 drives"),
+    # Wilson 11-12 ruled "usbdev (the USB device) is GATE": the USB device IS
+    # gated -- by test/run_usbaddr.py and test/run_usbrst.py, both in CI. This
+    # file is their shared golden + program + bench driver (it has no verdict
+    # of its own), so it is registered as their helper; reported to Wilson.
+    "test/usbdev.py": ("helper", "test/run_usbaddr.py",
+                       "the USB device's golden, program and tb_usbdev driver, "
+                       "shared by run_usbaddr and run_usbrst (both CI gates)"),
     "test/phases_run.sh": ("helper", "ci/run_gates.sh",
                            "the WSL phase measurement run_gates drives"),
     "test/refill_run.sh": ("helper", "ci/run_gates.sh",

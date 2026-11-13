@@ -70,6 +70,15 @@ ROWS = {
                        "the later pin); the pins are placed on clock edges by design, and "
                        "an edge's sub-cycle phase only moves which cycle the synchroniser "
                        "takes it -- the quantisation the USB budget carries and tb_usbrx walks"),
+    "test/tb_usbdev.v": ("CHIP_DRIVEN", "v2 primitive 3 bundle 6 (run_usbaddr / run_usbrst): "
+                         "the claims are the device's OWN packets, address commit and "
+                         "bus-reset response; host packets are placed on clock edges, and "
+                         "the receive path's sub-cycle phase is walked by tb_usbrx "
+                         "(IN_SUITE), whose receive path this bench reuses unchanged"),
+    "test/tb_rt.v": ("CHIP_DRIVEN", "PIT round trip (run_pit_rt, Wilson 11-12: GATE): the "
+                     "sniffed bus is the emulating chip's OWN output on the shared clock; "
+                     "the sniff capture's own claim is tb_pit's (NOT_TIMING), and an input "
+                     "edge's sub-cycle phase is walked by tb_uartrx / tb_usbrx (IN_SUITE)"),
     "test/tb_xclock.v": ("CHIP_DRIVEN", "the cross-clock bench (gate_clock_cross, "
                          "Wilson 11-03): no peer -- every uio pin is pulled up -- "
                          "and it only records the chip's own edges, judged in ns "
@@ -81,6 +90,9 @@ ROWS = {
                      "(test/run_pit_capture.py): it plays a recorded uio "
                      "stimulus on negedges and checks the stored bytes bit "
                      "for bit against the golden encoder; no peer-timing claim"),
+    "test/tb_gcd.v": ("NOT_TIMING", "PIT stage 3 pieces 2-3 (run_pit_gcd): pe_pit_s12 started "
+                      "at the GCD on a PRELOADED store -- no peer, no input pin moves; "
+                      "the claim is the 16-byte record bit for bit against pit_golden"),
     "test/tb_equiv.v": ("NOT_TIMING", "the v1 == v2 equivalence bench "
                         "(model/gate_v2_equiv.py): it compares two builds' "
                         "dispatch + pin streams; its host pushes sit on clock "
