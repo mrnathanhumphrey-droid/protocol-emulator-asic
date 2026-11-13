@@ -41,13 +41,14 @@ KEY = ("dstar", "dstar29", "dstar39", "dstar39_v2", "dstar39_st", "dstar39_hold"
        "hold_window", "runH_nohold", "runH_coinc", "step2_proj", "step2_proj_st",
        "run2_proj_st", "holdCycles_meets",
        "lemmaA_usb", "wb_bound_usb", "dstar_usb", "dstar_usb_rean", "dstar_usb_st",
-       "retSpaced2", "retSpaced_of_pairs", "dstar_usb_pairs")
+       "retSpaced2", "retSpaced_of_pairs", "dstar_usb_pairs", "usb_wins", "usb_j2")
 #: proof_constants.load() key -> the Lean expression that must evaluate to it (SPEC: the map)
 CONSTS = {
     "lemmaA_window": "LEMMA_A_WINDOW", "R_base": "R_BASE", "dispatch_cycles": "DISPATCH_CYCLES",
     "usb_extra_decisions": "USB_EXTRA_DECISIONS", "pending_slack": "PENDING_SLACK",
     "rean_pipe": "REAN_PIPE", "rean_halving": "REAN_HALVING", "R_usb": "R_USB",
     "noWB_min": "NOWB_MIN", "dstar_retire": "DSTAR_RETIRE", "dstar_retire_usb": "DSTAR_RETIRE_USB",
+    "usb_deadline_margin": "USB_DEADLINE_MARGIN",
 }
 PLANT_THM = "planted_by_gate"
 #: gate_mutant_kills' scratch-mutant registry (ruling AC2): this gate is the killer

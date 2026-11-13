@@ -25,6 +25,10 @@ def load(path=PATH):
     k["noWB_min"] = k["R_usb"] + k["dispatch_cycles"]
     k["dstar_retire"] = k["R_base"] + k["pending_slack"]
     k["dstar_retire_usb"] = k["R_usb"] + k["pending_slack"]
+    # Wilson 11-13: the USB lane's D_sched must sit this far below every other live lane's
+    # for J <= 2 (EdfUsb.lean usb_wins / usb_j2: a lane beating the ready USB lane would have
+    # waited more than R_usb). Sufficient, worst case; 9 measured on one periodic config.
+    k["usb_deadline_margin"] = k["R_usb"]
     return k
 
 
