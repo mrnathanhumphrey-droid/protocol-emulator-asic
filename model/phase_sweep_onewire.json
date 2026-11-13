@@ -1,24 +1,24 @@
 {
  "kind": "onewire_phase",
- "sha": "e6b087ee39be558d5bba4a7a1936fb6123fcdfd1",
+ "sha": "ac041ca4ff1976e409e59ac21a110ad97dedaa86",
  "result": {
-  "passed": 120,
-  "total": 120,
+  "passed": 111,
+  "total": 111,
   "union": {
    "ok": {
     "S1": [
-     20,
-     20
+     17,
+     17
     ],
     "S2": [
-     20,
-     20
+     17,
+     17
     ],
     "S3": [
-     20,
-     13
+     16,
+     10
     ],
-    "S3_relative": 15
+    "S3_relative": 12
    },
    "fpga": {
     "S1": [
@@ -37,15 +37,28 @@
    }
   },
   "claim": {
-   "S1": [
-    20,
-    20
-   ],
-   "S2": [
-    20,
-    20
-   ],
-   "S3_relative": 15
+   "ok": {
+    "S1": [
+     17,
+     17
+    ],
+    "S2": [
+     17,
+     17
+    ],
+    "S3_relative": 12
+   },
+   "fpga": {
+    "S1": [
+     20,
+     20
+    ],
+    "S2": [
+     20,
+     20
+    ],
+    "S3_relative": 15
+   }
   }
  },
  "inputs": {
@@ -60,6 +73,7 @@
    "model/a2/pyrta_bound.py",
    "model/a2/pyrta_src.py",
    "model/a2/rta_spuri.py",
+   "model/clock.py",
    "model/clocked_phase.py",
    "model/count_ranges.py",
    "model/gate_admissible_images.py",
@@ -70,8 +84,14 @@
    "model/park_class.py",
    "model/pe_asm.py",
    "model/pe_proto.py",
+   "model/pit_capture_golden.py",
+   "model/pit_golden.py",
+   "model/pit_s0_golden.py",
+   "model/stale_records.py",
    "model/zero_spacing.py",
+   "src/pe_cells_ihp.v",
    "src/pe_engine.v",
+   "src/pe_sram_macro_ihp.v",
    "src/pe_store.v",
    "src/project.v",
    "test/armnone_image.hex",
@@ -80,6 +100,8 @@
    "test/b3b_b_image.hex",
    "test/b3b_bnoi2c_image.hex",
    "test/benchset.py",
+   "test/branch_check.vh",
+   "test/branch_corpus.py",
    "test/cfgerr_image.hex",
    "test/ckdegen2_image.hex",
    "test/ckdegen_image.hex",
@@ -98,11 +120,13 @@
    "test/corpus_all5.hex",
    "test/corpus_i2c.hex",
    "test/corpus_spim.hex",
+   "test/corpus_spim25.hex",
    "test/corpus_sptgt.hex",
    "test/corpus_uartrx.hex",
    "test/ds18b20_model.v",
    "test/fram_i2c.v",
    "test/fram_spi.v",
+   "test/gate_store_latch.py",
    "test/half_image.hex",
    "test/hold_mon.v",
    "test/host_feed.vh",
@@ -118,6 +142,7 @@
    "test/onewire_fpga_image.hex",
    "test/onewire_image.hex",
    "test/param_dump.v",
+   "test/pe_clock.vh",
    "test/pe_isa.py",
    "test/pinmap.vh",
    "test/pinnone_image.hex",
@@ -125,7 +150,10 @@
    "test/run_cktx.py",
    "test/run_lockstep.py",
    "test/run_onewire.py",
+   "test/run_pit_capture.py",
+   "test/run_pit_s0.py",
    "test/run_w_sweep.py",
+   "test/runstart.vh",
    "test/rx_e2e.vh",
    "test/rxfast_image.hex",
    "test/scratch_heads.py",
@@ -140,30 +168,42 @@
    "test/sweep_onewire_phase.py",
    "test/sweep_record.py",
    "test/tb.v",
+   "test/tb_arm2.v",
    "test/tb_ckack.v",
    "test/tb_cktx.v",
    "test/tb_csat.v",
    "test/tb_edge.v",
+   "test/tb_equiv.v",
    "test/tb_fifo.v",
+   "test/tb_gcd.v",
    "test/tb_half.v",
    "test/tb_i2c.v",
    "test/tb_jlane.v",
    "test/tb_lock.v",
    "test/tb_onewire.v",
+   "test/tb_pair.v",
    "test/tb_pinrange.v",
+   "test/tb_pit.v",
    "test/tb_reload.v",
+   "test/tb_rowmux.v",
+   "test/tb_rt.v",
    "test/tb_rxbw.v",
    "test/tb_smoke.v",
    "test/tb_spitgt.v",
    "test/tb_status.v",
+   "test/tb_store_latch.v",
    "test/tb_trace.v",
    "test/tb_tx.v",
    "test/tb_uartrx.v",
    "test/tb_uarttx.v",
+   "test/tb_usbbuf.v",
+   "test/tb_usbdev.v",
+   "test/tb_usbrx.v",
    "test/tb_v2win.v",
    "test/tb_verdict.v",
    "test/tb_w.v",
    "test/tb_witness.v",
+   "test/tb_xclock.v",
    "test/toolchain.py",
    "test/tr_mon.v",
    "test/tx_badclk_image.hex",
@@ -173,8 +213,10 @@
    "test/uart_tx.py",
    "test/uart_tx_busy_image.hex",
    "test/uart_tx_image.hex",
-   "test/v3_table.vh"
+   "test/v1_translate.py",
+   "test/v3_table.vh",
+   "test/ws2812_sub3_rearm21.hex"
   ],
-  "sha256": "07fb370cec2abd53703936b2130f5a314cb665ec4f3169b415be671d9ffc1bbd"
+  "sha256": "95b08d1779020836b0ac743ec9a94887159f0345003f907fe54c0547008861fd"
  }
 }

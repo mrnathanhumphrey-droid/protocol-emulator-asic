@@ -169,6 +169,33 @@ def rtl_hold_cycles(min_ns, ps, num=BAND.numerator, den=BAND.denominator):
 
 
 # ---------------------------------------------------------------------------
+# ⭐ THE I2C CLOCK-STRETCH FAULT BOUND -- ONE SOURCE (Wilson 11-12). project.v
+# derives CK_STRETCH_TO from these two numbers and CLK_PERIOD_PS; every Python
+# reader imports them from here. `run_ckack` regexed a literal out of
+# pe_engine.v, which became an expression at 18bb252 ("clock (a)") and crashed
+# it silently for weeks; `gate_clock_consistency` had a second hand copy.
+# The gate now holds the RTL's ELABORATED value to ck_stretch_to() per target.
+# ---------------------------------------------------------------------------
+#: SMBus t_TIMEOUT (35 ms): project.v CK_STRETCH_NS
+CK_STRETCH_NS = 35_000_000
+#: the shipped watchdog prescaler, cycles per tick: project.v CK_TICK_SHIPPED
+CK_TICK_SHIPPED = 16384
+
+
+def ck_stretch_to(f=None, ns=CK_STRETCH_NS, tick=CK_TICK_SHIPPED):
+    """Ticks before a bus fault -- project.v's CK_STRETCH_TO, the same integer
+    formula: ceil(ns / tick_ns) with tick_ns = floor(tick x period_ps / 1000)."""
+    tick_ns = (tick * period_ps(f)) // 1000
+    return (ns + tick_ns - 1) // tick_ns
+
+
+def ck_stretch_cycles(f=None):
+    """The stretch timeout in cycles: CK_STRETCH_PRE (= the shipped tick) x
+    CK_STRETCH_TO."""
+    return CK_TICK_SHIPPED * ck_stretch_to(f)
+
+
+# ---------------------------------------------------------------------------
 # ⭐ USB LOW SPEED (step 7a §1 / §5, Wilson 11-09 Q1 + Q7). Every figure is the
 # USB 2.0 spec's (usb.org usb_20_20240604, usb_20.pdf), cited where it is used.
 # ---------------------------------------------------------------------------

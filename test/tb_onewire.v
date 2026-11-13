@@ -139,6 +139,10 @@ module tb_onewire;
   reg      want_pres;
   integer  n_rd, n_pr, n_in;
   real     rd_mn, rd_mx, pr_mn, pr_mx, in_mn, in_mx;
+  // the phase-coverage masks (see PHASE COVERAGE below); declared here, above
+  // the `initial` that prints them -- the pinned iverilog rejects a use
+  // before its declaration
+  reg [19:0] ph_rise = 20'd0, ph_pfall = 20'd0;
   always @(posedge m_low) t_mfall = $realtime;
   always @(negedge m_low) begin
     t_mrise = $realtime;
@@ -347,8 +351,8 @@ module tb_onewire;
 
   // ⭐ PHASE COVERAGE, MEASURED (Wilson 10-20): the phase, after the chip's
   // posedge (at 10 + 20n ns), of every bus rise and of every fall the PART
-  // causes (it pulls while the master does not). 1 ns bins.
-  reg [19:0] ph_rise = 20'd0, ph_pfall = 20'd0;
+  // causes (it pulls while the master does not). 1 ns bins. The masks
+  // `ph_rise` / `ph_pfall` are declared above the `initial`.
   function integer pc20(input [19:0] v);
     integer b;
     begin pc20 = 0; for (b = 0; b < 20; b = b + 1) pc20 = pc20 + v[b]; end

@@ -55,6 +55,12 @@ module param_dump;
     $display("PARAM SPL=%0d",       dut.u_eng.SPL);
     $display("PARAM NSLOT=%0d",     dut.u_eng.NSLOT);
     $display("PARAM SIW=%0d",       dut.u_eng.SIW);
+    // ⭐ THE STRETCH FAULT BOUND (Wilson 11-12): the values the engine really
+    // gets, held to model/clock.py's one source by gate_clock_consistency
+    // check 10 at every target's period.
+    $display("PARAM CK_STRETCH_TO=%0d",  dut.u_eng.CK_STRETCH_TO);
+    $display("PARAM CK_STRETCH_PRE=%0d", dut.u_eng.CK_STRETCH_PRE);
+    $display("PARAM CK_STRETCH_NS=%0d",  dut.CK_STRETCH_NS);
     // ⭐ v2: the store layout's OTHER copies -- project.v derives the magic's
     // position and the word size for the store, and the store reads WIDE_B
     // bytes per word; all four must be the encoder's (gate_one_encoder)

@@ -298,6 +298,56 @@ module tb_trace;
   //    two peer-master processes race their own start condition.
   reg run_go = 1'b0;
 
+  // ⛔ (11-11) THE DUT AND THE THREE INCLUDES SIT HERE, ABOVE EVERY `initial`:
+  // the stimulus assigns `hf_en` (host_feed.vh) and the pinned iverilog
+  // rejects a use before its declaration. Moved as one block, order kept.
+  // ⭐⭐ THE BUFFER DEPTH IS A PARAMETER, AND THE SUITE RUNS BOTH VALUES.
+  // Build the single-buffer configuration with
+  //     iverilog -Ptb_trace.SPL_CFG=1 ...
+  // ⛔⛔ WHY EVERY BENCH CARRIES THIS. Four benches kept a PRIVATE COPY of the
+  // engine's slot index (`lane*2 + l_sel`), every copy silently assumed
+  // SPL = 2, and every one of them broke the moment SPL = 1 existed -- one of
+  // them after measuring and publishing a column. That is the generic
+  // detector: a hidden constant in a bench fails as soon as the parameter it
+  // assumes becomes variable. So the parameter point is swept rather than
+  // trusted, by `test/run_param_points.py`.
+  parameter integer SPL_CFG = 2;
+  // ⭐ THE STRETCH PRESCALER, OVERRIDABLE FROM THE SWEEP. The shipped bound is
+  // 35 ms (the SMBus bus-fault figure) = 107 ticks of 16384 cycles, which is
+  // 1.75 MILLION cycles -- far too long to simulate. Shortening the prescaler
+  // reaches the SAME halt in hundreds of cycles, so the fault path is
+  // EXERCISED rather than reasoned about. ⛔ The bound itself (`CK_STRETCH_TO`)
+  // is NOT touched: the arm tests the mechanism, not a different number.
+  parameter integer CK_PRE = 16384;
+
+  // ⛔ THE SDA DATA HOLD, overridable so the t_HD;DAT requirement is priced at
+  // BOTH ends: 0 restores the measured defect, 40 runs past `t_VD;DAT` at Fm+.
+  parameter integer SDA_HOLD_NS = 300;
+
+  // THE HOST CHANNEL (Wilson's ruling 0). Every corpus program shifts, and
+  // until now every one of those shifts found an empty queue and took the
+  // UNDERRUN branch -- so the cycle-exact two-simulator agreement and the
+  // cross-seed sweep were established on the STARVED path. Feeding them is
+  // what makes those claims about the payload path they were read as covering.
+  // The include is placed AFTER the dut because it references `dut.tx_cnt`.
+  // ⭐ THE DUT RUNS AT THE BENCH'S CLOCK (11-03): -DPE_CLK_PS=20000 is the
+  // 50 MHz target only if the engine derives its counts from that period too
+  tt_um_protocol_emulator #(.SPL(SPL_CFG), .CK_STRETCH_PRE(CK_PRE),
+                            .SDA_HOLD_NS(SDA_HOLD_NS),
+                            .CLK_PERIOD_PS(PE_CLK_PERIOD_PS)) dut (
+      .ui_in(ui_in), .uo_out(uo_out),
+      .uio_in(uio_in), .uio_out(uio_out), .uio_oe(uio_oe),
+      .ena(ena), .clk(clk), .rst_n(rst_n)
+  );
+
+`include "test/progress.vh"
+`include "test/clocked_conform.vh"
+`include "test/host_feed.vh"
+
+  // declared here for the same reason (read by the loader loop below; set
+  // from plusargs in the M5 block further down)
+  integer m5_refused, rs_stayload, resop_at;
+
   // ⛔⛔ EVERY STIMULUS WRITE BELOW IS NON-BLOCKING, because the trace sampler
   // (`emit`, in the main loop) wakes on `@(negedge clk)` -- the SAME event these
   // master processes apply their stimulus on. With blocking writes, two
@@ -595,48 +645,6 @@ module tb_trace;
     $finish;
   end
 
-  // ⭐⭐ THE BUFFER DEPTH IS A PARAMETER, AND THE SUITE RUNS BOTH VALUES.
-  // Build the single-buffer configuration with
-  //     iverilog -Ptb_trace.SPL_CFG=1 ...
-  // ⛔⛔ WHY EVERY BENCH CARRIES THIS. Four benches kept a PRIVATE COPY of the
-  // engine's slot index (`lane*2 + l_sel`), every copy silently assumed
-  // SPL = 2, and every one of them broke the moment SPL = 1 existed -- one of
-  // them after measuring and publishing a column. That is the generic
-  // detector: a hidden constant in a bench fails as soon as the parameter it
-  // assumes becomes variable. So the parameter point is swept rather than
-  // trusted, by `test/run_param_points.py`.
-  parameter integer SPL_CFG = 2;
-  // ⭐ THE STRETCH PRESCALER, OVERRIDABLE FROM THE SWEEP. The shipped bound is
-  // 35 ms (the SMBus bus-fault figure) = 107 ticks of 16384 cycles, which is
-  // 1.75 MILLION cycles -- far too long to simulate. Shortening the prescaler
-  // reaches the SAME halt in hundreds of cycles, so the fault path is
-  // EXERCISED rather than reasoned about. ⛔ The bound itself (`CK_STRETCH_TO`)
-  // is NOT touched: the arm tests the mechanism, not a different number.
-  parameter integer CK_PRE = 16384;
-
-  // ⛔ THE SDA DATA HOLD, overridable so the t_HD;DAT requirement is priced at
-  // BOTH ends: 0 restores the measured defect, 40 runs past `t_VD;DAT` at Fm+.
-  parameter integer SDA_HOLD_NS = 300;
-
-  // THE HOST CHANNEL (Wilson's ruling 0). Every corpus program shifts, and
-  // until now every one of those shifts found an empty queue and took the
-  // UNDERRUN branch -- so the cycle-exact two-simulator agreement and the
-  // cross-seed sweep were established on the STARVED path. Feeding them is
-  // what makes those claims about the payload path they were read as covering.
-  // The include is placed AFTER the dut because it references `dut.tx_cnt`.
-  // ⭐ THE DUT RUNS AT THE BENCH'S CLOCK (11-03): -DPE_CLK_PS=20000 is the
-  // 50 MHz target only if the engine derives its counts from that period too
-  tt_um_protocol_emulator #(.SPL(SPL_CFG), .CK_STRETCH_PRE(CK_PRE),
-                            .SDA_HOLD_NS(SDA_HOLD_NS),
-                            .CLK_PERIOD_PS(PE_CLK_PERIOD_PS)) dut (
-      .ui_in(ui_in), .uo_out(uo_out),
-      .uio_in(uio_in), .uio_out(uio_out), .uio_oe(uio_oe),
-      .ena(ena), .clk(clk), .rst_n(rst_n)
-  );
-
-`include "test/progress.vh"
-`include "test/clocked_conform.vh"
-`include "test/host_feed.vh"
 
 // ⭐⭐ D4's POSITIVE POINT: a clocked open-drain delay ONE CYCLE ABOVE
 // `SDA_HOLD` must RUN. D1's two refusing points run in `tb_pinrange`, where no
@@ -685,7 +693,7 @@ end
 // encoder): the engine STARTS, then CONFIG_ERR set, store_full set, bad_op
 // clear, and the branching lane (lane 1) halted. Writebacks before the
 // branch dispatches are legal, so they are not counted.
-integer m5_refused, rs_stayload, resop_at;
+// (`m5_refused`, `rs_stayload`, `resop_at` are declared above the stimulus.)
 initial begin
   if (!$value$plusargs("EXPECT_REFUSED=%d", m5_refused)) m5_refused = 0;
   if (!$value$plusargs("RESOP_AT=%d", resop_at)) resop_at = -1;

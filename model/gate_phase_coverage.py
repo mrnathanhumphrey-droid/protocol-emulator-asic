@@ -101,12 +101,21 @@ def sweep_state(bench, spec, rec, head_hash, dirty):
         probs.append("%s: the sweep covered %s phases, the row claims %d"
                      % (bench, res.get("phases_ns"), spec["phases_ns"]))
     claim = res.get("claim")
+    # ⭐ THE CLAIM IS PER ARM since 31954d1 (11-03, the chip to 60 MHz): the
+    # chip arm covers clock.phases() = 17, the FPGA arm stays at 50 MHz's 20,
+    # so the sweep writes {arm: claim}. A flat claim (one for every arm, the
+    # pre-11-03 shape) is still read; an arm with no claim of its own is red.
+    per_arm = bool(claim) and "S1" not in claim
     for arm, u in (res.get("union") or {}).items():
-        if claim and not (tuple(u["S1"]) >= tuple(claim["S1"])
-                          and tuple(u["S2"]) >= tuple(claim["S2"])
-                          and u["S3_relative"] >= claim["S3_relative"]):
+        c = (claim.get(arm) if per_arm else claim) if claim else None
+        if claim and c is None:
+            probs.append("%s: arm %s has no claim in the record" % (bench, arm))
+            continue
+        if c and not (tuple(u["S1"]) >= tuple(c["S1"])
+                      and tuple(u["S2"]) >= tuple(c["S2"])
+                      and u["S3_relative"] >= c["S3_relative"]):
             probs.append("%s: arm %s's union %s is below the claim %s"
-                         % (bench, arm, u, claim))
+                         % (bench, arm, u, c))
     pending = []
     if dirty:
         pending.append("%s: sweep inputs uncommitted: %s" % (bench, dirty[:3]))
@@ -116,6 +125,15 @@ def sweep_state(bench, spec, rec, head_hash, dirty):
                        % (bench, str((rec.get("inputs") or {}).get("sha256"))[:12],
                           str(head_hash)[:12], spec["recipe"], spec["record"]))
     return probs, pending
+
+
+def arms_rec(ok_s1):
+    """a per-arm sweep result (the 11-03 shape): the chip arm `ok` claims
+    17 / 17 / 12, the FPGA arm 20 / 20 / 15; `ok` covers `ok_s1` on S1."""
+    return {"union": {"ok": {"S1": [ok_s1, ok_s1], "S2": [17, 17], "S3_relative": 12},
+                      "fpga": {"S1": [20, 20], "S2": [20, 20], "S3_relative": 15}},
+            "claim": {"ok": {"S1": [17, 17], "S2": [17, 17], "S3_relative": 12},
+                      "fpga": {"S1": [20, 20], "S2": [20, 20], "S3_relative": 15}}}
 
 
 def main() -> int:
@@ -199,7 +217,19 @@ def main() -> int:
              sweep_state("b", sp, dict(good_rec, result=dict(good_rec["result"], passed=1)),
                          "h", [])[0]),
             ("a sweep below its claimed phases",
-             sweep_state("b", dict(sp, phases_ns=7), good_rec, "h", [])[0])):
+             sweep_state("b", dict(sp, phases_ns=7), good_rec, "h", [])[0]),
+            # per-arm claims (11-12): each arm against its OWN claim
+            ("an arm below its own per-arm claim",
+             sweep_state("b", sp, dict(good_rec, result=dict(good_rec["result"], **arms_rec(16))),
+                         "h", [])[0]),
+            ("an arm with no claim of its own",
+             sweep_state("b", sp, dict(good_rec, result=dict(
+                 good_rec["result"], union=arms_rec(17)["union"],
+                 claim={"ok": arms_rec(17)["claim"]["ok"]})), "h", [])[0]),
+            ("a flat claim the union misses (pre-11-03 shape)",
+             sweep_state("b", sp, dict(good_rec, result=dict(
+                 good_rec["result"], union=arms_rec(17)["union"],
+                 claim={"S1": [20, 20], "S2": [20, 20], "S3_relative": 15})), "h", [])[0])):
         print("    %-46s %s" % (what, "red  ok" if red else "*** MISSED"))
         ok = ok and bool(red)
     pend = sweep_state("b", sp, good_rec, "MOVED", [])[1]
@@ -209,6 +239,11 @@ def main() -> int:
     print("    %-46s %s" % ("the fresh record (control)",
                             "ok" if not ctl[0] and not ctl[1] else "*** WRONG"))
     ok = ok and bool(pend) and not ctl[0] and not ctl[1]
+    ctl2 = sweep_state("b", sp, dict(good_rec, result=dict(good_rec["result"], **arms_rec(17))),
+                       "h", [])[0]
+    print("    %-46s %s" % ("each arm at its own claim (control)",
+                            "ok" if not ctl2 else "*** WRONG %s" % ctl2))
+    ok = ok and not ctl2
     print()
     print("  %d rows: %d PENDING" % (len(rows), len(pending)))
     ok = ok and not probs
