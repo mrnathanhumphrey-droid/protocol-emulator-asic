@@ -242,17 +242,59 @@ def directed_sets(n, seed):
     return [(k, m) for k in KINDS for m in kinds[k]]
 
 
-def run_one(args):
-    vbin, tmp, i, msgs, ncyc = args
+def store_image(msgs):
+    """(store bytes, end address): the messages length-prefixed from DEC_AT"""
     mem = [0] * pe_isa.STORE_BYTES                  # the store's size from the one encoder
     p = DEC_AT
     for m in msgs:
         mem[p] = len(m)
         mem[p + 1:p + 1 + len(m)] = m
         p += 1 + len(m)
-    mp, op = os.path.join(tmp, "g%s.hex" % i), os.path.join(tmp, "g%s.out" % i)
-    with open(mp, "w", encoding="ascii", newline="\n") as fh:
+    return mem, p
+
+
+def write_store(path, mem):
+    with open(path, "w", encoding="ascii", newline="\n") as fh:
         fh.write("\n".join("%02x" % b for b in mem) + "\n")
+
+
+#: ⭐ THE COVERAGE SWEEP'S ARMS (Wilson 11-13: the v2 benches join the sweep,
+#: then what is left of the 791 is classified). pe_pit_s12 holds 583 of them
+#: and only this bench reaches it alone. The sweep measures REACH; bit-exactness
+#: stays judged here. The sets: every directed one (the solver's branches), the
+#: ties, every set a must-fire mutant is killed on (DIVMASK / STALE), and a
+#: seeded few of the random and solve breadth.
+COV_DIR = "probe_cov_gcd"
+COV_BREADTH = 8
+
+
+def coverage_arms():
+    """[(label, plusargs)] for test/benchset.py; writes each store under COV_DIR."""
+    sets, _solver = all_sets()
+    kinds = {}
+    for i, (k, _m) in enumerate(sets):
+        kinds.setdefault(k, []).append(i)
+    idx = set(DIVMASK_KILLS) | set(STALE_KILLS)
+    for k, ii in kinds.items():
+        idx |= set(ii if k not in ("random", "solve") else ii[:COV_BREADTH])
+    os.makedirs(os.path.join(ROOT, COV_DIR), exist_ok=True)
+    arms = []
+    for i in sorted(idx):
+        msgs = sets[i][1]
+        mem, end = store_image(msgs)
+        mp = "%s/g%d.hex" % (COV_DIR, i)
+        write_store(os.path.join(ROOT, mp), mem)
+        arms.append(("%s%d" % (sets[i][0], i),
+                     ["+MEM=" + mp, "+OUT=%s/g%d.out" % (COV_DIR, i), "+END=%x" % end,
+                      "+NMSG=%d" % min(len(msgs), 255), "+NCYC=50000000"]))
+    return arms
+
+
+def run_one(args):
+    vbin, tmp, i, msgs, ncyc = args
+    mem, p = store_image(msgs)
+    mp, op = os.path.join(tmp, "g%s.hex" % i), os.path.join(tmp, "g%s.out" % i)
+    write_store(mp, mem)
     cmd = RP.simcmd([vbin, "+MEM=" + mp, "+OUT=" + op, "+END=%x" % p, "+NMSG=%d" % min(len(msgs), 255)]
                     + (["+NCYC=%d" % ncyc] if ncyc else []), [])
     r = RP.run(cmd)
