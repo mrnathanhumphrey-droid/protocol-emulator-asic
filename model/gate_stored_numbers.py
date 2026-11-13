@@ -620,6 +620,10 @@ SPEC_SYMBOLS = {
     # the same kind as GENERATED's (make_smoke_image --rxfast d), inputs, not
     # results; staleness is caught the same way (V3 reds an unknown image).
     ("model/v3_table.py", "RXBW_SWEEP_D"),
+    # the same kind for run_dstar_check (Wilson 11-12b): its sweep points and
+    # sub-D* control arm -- inputs, not results; an unregistered one is V3-red
+    ("model/v3_table.py", "DSTAR_D"),
+    ("model/v3_table.py", "DSTAR_ARM_C"),
     ("model/v3_table.py", "ALLOW"),
     ("model/v3_table.py", "FIELD"),
     # ⭐ SP2/P1's TEXT ANCHORS into src/pe_engine.v: Verilog substrings whose

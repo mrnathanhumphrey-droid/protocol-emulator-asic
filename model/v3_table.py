@@ -270,14 +270,26 @@ GENERATED = (
     ("run_wirefeed_mf: old WS2812 (REARM d=0)", _gen_old_ws2812, 1,
      "the delay-0 build pe_asm REFUSES today; run only as the must-fire, "
      "with its V3 facts supplied by allowlisted override"),
-) + tuple(
-    ("run_dstar_check: --five d=%d..%d" % (d, d + 4), _gen_five([d + i for i in range(5)]), 0,
-     "the D* sweep's port-feasible point d = %d (Theorem 3 predicts RQ = 0)" % d)
-    for d in DSTAR_D) + (
-    ("run_dstar_check: arm C (8, 100 x4)", _gen_five(list(DSTAR_ARM_C)), 1,
+    # Wilson 11-12b: run_dstar_check's points (DSTAR_D), each `--five d..d+4`
+    ("run_dstar_check: --five d=21..25", _gen_five([21, 22, 23, 24, 25]), 0,
+     "the D* sweep's port-feasible point d = 21 (Theorem 3 predicts RQ = 0)"),
+    ("run_dstar_check: --five d=22..26", _gen_five([22, 23, 24, 25, 26]), 0,
+     "the D* sweep's port-feasible point d = 22"),
+    ("run_dstar_check: --five d=25..29", _gen_five([25, 26, 27, 28, 29]), 0,
+     "the D* sweep's port-feasible point d = 25"),
+    ("run_dstar_check: --five d=30..34", _gen_five([30, 31, 32, 33, 34]), 0,
+     "the D* sweep's port-feasible point d = 30"),
+    ("run_dstar_check: --five d=40..44", _gen_five([40, 41, 42, 43, 44]), 0,
+     "the D* sweep's port-feasible point d = 40"),
+    ("run_dstar_check: --five d=60..64", _gen_five([60, 61, 62, 63, 64]), 0,
+     "the D* sweep's port-feasible point d = 60"),
+    ("run_dstar_check: arm C (8, 100 x4)", _gen_five([8, 100, 100, 100, 100]), 1,
      "the D* control BELOW D* (lane 0 at d = 8): its RQ must be non-zero; "
      "a sub-D* probe, never a published program"),
 )
+#: the rows above must cover exactly run_dstar_check's points (checked at import)
+assert sorted(int(g[0].split("d=")[1].split("..")[0]) for g in GENERATED
+              if g[0].startswith("run_dstar_check: --five")) == list(DSTAR_D)
 
 #: run_rxbw's sweep images, registered the same way (see RXBW_SWEEP_D)
 GENERATED_RXBW = tuple(("run_rxbw: rxfast d=%d" % _d, _gen_rxfast(_d), 0,
