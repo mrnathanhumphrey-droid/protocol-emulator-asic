@@ -503,12 +503,14 @@ def main() -> int:
 #: §7.1.7.3, printed p. 150: "t3 (TATTDB) This is a debounce interval with a
 #: minimum duration of 100 ms ... power is stable at the device for at least
 #: 100 ms before any requests will be sent to the device."
-#: ⚠ Table 7-14 (printed p. 188) lists TATTDB at 100 ms, but its text layer
-#: does not say whether in the Min or the Max column -- that column is
-#: UNCONFIRMED until read off the page; the bound rests on §7.1.7.3's text.
+#: ⛔ THE SPEC DISAGREES WITH ITSELF (read off the rendered page, 11-13): Table
+#: 7-14 (printed p. 188) puts TATTDB's 100 ms in the MAX column, against
+#: §7.1.7.3's "minimum duration of 100 ms". The bound here rests on §7.1.7.3's
+#: text. Independently, the host's bus reset (TDRST >= 10 ms, clock.py
+#: USB_TDRST_MIN_NS) precedes any traffic, which alone is ~6,000x the stall.
 USB_TATTDB_MIN_NS = 100_000_000   # clock-ok: a spec duration, converted through clock
-TATTDB_CITED = ("USB 2.0 §7.1.7.3 (checked: TATTDB, minimum 100 ms); Table 7-14 lists it, "
-                "column unconfirmed")
+TATTDB_CITED = ("USB 2.0 §7.1.7.3, TATTDB minimum 100 ms (checked); Table 7-14 lists the same "
+                "100 ms under MAX -- the spec conflicts; TDRST >= 10 ms bounds it regardless")
 PROBE = "test/usb_startup_probe.v"
 #: the arms: the gate's own image, and agent 2's busy image with the other
 #: lanes at 42 and at 20

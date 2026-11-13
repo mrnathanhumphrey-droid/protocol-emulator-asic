@@ -66,10 +66,18 @@ DECLARED = {
         "on purpose (60 MHz, the latch store, T1/T2 -- Wilson 11-03) and the "
         "v2 harden of record re-binds it",
     "model/gate_phase_coverage.py":
-        "PIT-only change (s12) since recording; re-record owed when the s12 "
-        "line's RTL settles (Wilson 11-12). The I2C and 1-Wire records were "
-        "made on ac041ca (work/cdc-b56); on the merged line their inputs moved "
-        "only in src/project.v's PIT and test/run_pit_capture.py",
+        "the clean-build RTL changed only in the PIT (s12) since recording; "
+        "re-record owed when the s12 line's RTL settles (Wilson 11-12). The I2C "
+        "and 1-Wire records were made on ac041ca (work/cdc-b56). Every input "
+        "moved since (listed in full, Wilson 11-13): src/project.v (the PIT); "
+        "src/pe_engine.v (comments and the M_REAN_FLOOR_EARLY mutant arm only, "
+        "which the clean build does not compile); model/a2/program_a2.py, "
+        "model/clock.py, model/gate_admissible_images.py, model/image_universe.py, "
+        "model/stale_records.py, test/benchset.py, test/make_smoke_image.py, "
+        "test/onewire_fpga_image.hex, test/run_pit_capture.py, test/sim_run.py, "
+        "test/tb_gcd.v, test/toolchain.py, test/uart_rx.py, test/v3_table.vh "
+        "(both records); I2C's also model/gate_sda_hold.py, model/gate_wire_feed.py, "
+        "model/v3_table.py, test/run_ckack.py, test/run_i2c.py, test/run_recert.py",
     "model/a2/gate_j_program.py":
         "the W sweep record (model/a2/sweep_w.json) ran on v1's RTL and "
         "images; `run_w_sweep.py --full` re-run at v2",
