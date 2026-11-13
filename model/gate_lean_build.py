@@ -8,13 +8,18 @@
      `lake env lean` on a generated file, because a CACHED `lake build` prints no axiom lines
      and their absence would read as a pass. Every KEY theorem must REPORT (presence, not
      absence), and its axioms must be a subset of ALLOWED.
+  5. the proof's constants: every Lean value in CONSTS (Params.lean) is EVALUATED in the same
+     generated file and must equal model/proof_constants.load() on the tree's
+     proof_constants.json -- the primitives stored there, the derivations computed by the
+     loader. One source: a JSON edit the proofs were not rebuilt for turns this red.
 ALLOWED = {propext, Quot.sound}. Classical.choice is NOT allowed: the build does not depend on
 it today (11-12, measured), and admitting it needs a ruling with its reason.
 
 MUST-FIRES, on a temporary copy of the tree:
   M_LEAN_SORRY   a theorem proved by `sorry` appended to SelfTimed.lean   -> check 2 red
   M_LEAN_AXIOM   an axiom, and a KEY-listed theorem that uses it           -> checks 3 and 4 red
-Both are judged by the same `judge` as the clean arm (gate_meta's stub on it turns the gate red).
+  M_LEAN_CONST   proof_constants.json's pending_slack moved by one          -> check 5 red
+All three are judged by the same `judge` as the clean arm (gate_meta's stub on it turns the gate red).
 
 POSITIVE TOKEN: `GATE lean-build: PASSED`.
 """
@@ -34,12 +39,21 @@ ALLOWED = {"propext", "Quot.sound"}
 #: the published results: what the README / notes claim was proved (SPEC, not a measurement)
 KEY = ("dstar", "dstar29", "dstar39", "dstar39_v2", "dstar39_st", "dstar39_hold",
        "hold_window", "runH_nohold", "runH_coinc", "step2_proj", "step2_proj_st",
-       "run2_proj_st", "holdCycles_meets")
+       "run2_proj_st", "holdCycles_meets",
+       "lemmaA_usb", "wb_bound_usb", "dstar_usb", "dstar_usb_rean", "dstar_usb_st")
+#: proof_constants.load() key -> the Lean expression that must evaluate to it (SPEC: the map)
+CONSTS = {
+    "lemmaA_window": "LEMMA_A_WINDOW", "R_base": "R_BASE", "dispatch_cycles": "DISPATCH_CYCLES",
+    "usb_extra_decisions": "USB_EXTRA_DECISIONS", "pending_slack": "PENDING_SLACK",
+    "rean_pipe": "REAN_PIPE", "rean_halving": "REAN_HALVING", "R_usb": "R_USB",
+    "noWB_min": "NOWB_MIN", "dstar_retire": "DSTAR_RETIRE", "dstar_retire_usb": "DSTAR_RETIRE_USB",
+}
 PLANT_THM = "planted_by_gate"
 #: gate_mutant_kills' scratch-mutant registry (ruling AC2): this gate is the killer
 SCRATCH_MUTANTS = {
     "M_LEAN_SORRY": "a theorem proved by `sorry`, planted in a temp copy of the tree",
     "M_LEAN_AXIOM": "an axiom and a theorem using it, planted in a temp copy of the tree",
+    "M_LEAN_CONST": "proof_constants.json's pending_slack moved by one, in a temp copy of the tree",
 }
 
 
@@ -64,10 +78,12 @@ def scan(tree):
 
 
 def axioms(tree, names):
-    """-> ({name: [axioms]}, missing names, raw output)."""
+    """-> ({name: [axioms]}, missing names, raw output, {Lean constant: evaluated value})."""
     fd, path = tempfile.mkstemp(suffix=".lean", prefix="gate_lean_axioms_")
     with os.fdopen(fd, "w") as fh:
-        fh.write("import JLane\n" + "".join("#print axioms JLane.%s\n" % n for n in names))
+        fh.write("import JLane\n" + "".join("#print axioms JLane.%s\n" % n for n in names)
+                 + "".join('#eval IO.println s!"CONST %s {JLane.%s}"\n' % (c, c)
+                           for c in CONSTS.values()))
     try:
         r = subprocess.run(["lake", "env", "lean", path], cwd=tree, capture_output=True, text=True,
                            encoding="utf-8", errors="replace")
@@ -79,7 +95,25 @@ def axioms(tree, names):
         got[m.group(1)] = [x.strip() for x in m.group(2).split(",") if x.strip()]
     for m in re.finditer(r"'JLane\.(\w+)' does not depend on any axioms", out):
         got[m.group(1)] = []
-    return got, [n for n in names if n not in got], out
+    consts = {m.group(1): int(m.group(2)) for m in re.finditer(r"(?m)^CONST (\w+) (\d+)\s*$", out)}
+    return got, [n for n in names if n not in got], out, consts
+
+
+def const_problems(tree, consts):
+    """check 5: the Lean values against proof_constants.load() on THIS tree's JSON."""
+    sys.path.insert(0, HERE)
+    import proof_constants
+    want = proof_constants.load(os.path.join(tree, "proof_constants.json"))
+    probs = []
+    for key, lean in CONSTS.items():
+        if lean not in consts:
+            probs.append("constant %s: no value evaluated in Lean" % lean)
+        elif key not in want:
+            probs.append("constant %s: proof_constants has no %r" % (lean, key))
+        elif consts[lean] != want[key]:
+            probs.append("constant %s = %d in Lean, %s = %d in proof_constants"
+                         % (lean, consts[lean], key, want[key]))
+    return probs
 
 
 def judge(tree, names=KEY):
@@ -93,13 +127,15 @@ def judge(tree, names=KEY):
         probs.append("`sorry` in %s" % ", ".join(s))
     if a:
         probs.append("an `axiom` declaration in %s" % ", ".join(a))
-    got, missing, raw = axioms(tree, names)
+    got, missing, raw, consts = axioms(tree, names)
     if missing:
         probs.append("no axiom report for %s (%s)" % (", ".join(missing), raw.strip()[-200:]))
     for n, ax in sorted(got.items()):
         extra = set(ax) - ALLOWED
         if extra:
             probs.append("%s depends on %s, outside {%s}" % (n, sorted(extra), ", ".join(sorted(ALLOWED))))
+    probs += const_problems(tree, consts)
+    got["_consts"] = consts
     return probs, got
 
 
@@ -107,6 +143,14 @@ def _mutant_tree(kind):
     tmp = tempfile.mkdtemp(prefix="gate_lean_%s_" % kind)
     dst = os.path.join(tmp, "JLane")
     shutil.copytree(LEAN, dst)                    # .lake included: an incremental rebuild
+    if kind == "const":
+        import json
+        jp = os.path.join(dst, "proof_constants.json")
+        k = json.load(open(jp, encoding="utf-8"))
+        k["pending_slack"] += 1
+        with open(jp, "w", encoding="utf-8") as fh:
+            json.dump(k, fh, indent=2)
+        return tmp, dst
     p = os.path.join(dst, "JLane", "SelfTimed.lean")
     src = open(p, encoding="utf-8").read().rstrip()
     assert src.endswith("end JLane")
@@ -125,17 +169,19 @@ def main() -> int:
     probs, got = judge(LEAN)
     for n in KEY:
         print("    %-18s %s" % (n, got.get(n, "*** NO REPORT")))
+    print("    constants (Lean = proof_constants): %s"
+          % ", ".join("%s %s" % (c, v) for c, v in sorted(got.get("_consts", {}).items())))
     for p in probs:
         print("  ***", p)
-    for kind in ("sorry", "axiom"):
+    for kind in ("sorry", "axiom", "const"):
         tmp, tree = _mutant_tree(kind)
         try:
-            mp, _ = judge(tree, KEY + (PLANT_THM,))
+            mp, _ = judge(tree, KEY + ((PLANT_THM,) if kind != "const" else ()))
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
-        # each arm must be killed by ITS check: the sorry scan, and the #print axioms limit
-        # (not merely by the source grep for `axiom`)
-        want = "`sorry` in" if kind == "sorry" else "outside {"
+        # each arm must be killed by ITS check: the sorry scan, the #print axioms limit
+        # (not merely by the source grep for `axiom`), and the constants comparison
+        want = {"sorry": "`sorry` in", "axiom": "outside {", "const": "in proof_constants"}[kind]
         hit = [p for p in mp if want in p]
         red = bool(hit)
         print("  must-fire M_LEAN_%-6s %s  %s" % (kind.upper(), "RED (killed)" if red else "*** SURVIVED",

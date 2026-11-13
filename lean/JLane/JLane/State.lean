@@ -21,9 +21,11 @@ Abstracted away in v1 (auditable scoping):
   `l_timestamp[USB_LANE] <= rean_ts`, `rean_ts = now + d/2` at an edge): it rewrites the
   USB lane's timestamp between the bits of a self-timed receive, so its release is not
   `+ dly` per writeback. Measured 11-12 (`run_usbrx` arms, 13 runs): minimum release spacing
-  27 at d = 40. The self-timed theorems are stated for runs without it; covering the USB
-  lane under re-anchor is the lock item "No-stall coverage of the USB lane under
-  re-anchor (δ bound)";
+  27 at d = 40. The self-timed theorems (`dstar39_st`) are stated for runs without it. The USB
+  lane under re-anchor is covered by `UsbLane.lean` (`dstar_usb_st`, Wilson 11-12 option (i)):
+  the lane is modelled by its re-anchor floor `reanFloor d` (the named hardware hypothesis
+  `ReanFloorModel`, measured by `test/run_rean_floor.py`, minimum 23 at d = 40), the
+  response bound becomes `R_USB = 17`, and co-resident lanes need `d ≥ DSTAR_RETIRE_USB = 42`;
 * timestamps are `Nat`; the RTL compares 16-bit timestamps by signed
   difference, so the model is faithful while every lane stays inside ±2^15
   of `now` (PS3: only exceeded in overload, below `D*`);
