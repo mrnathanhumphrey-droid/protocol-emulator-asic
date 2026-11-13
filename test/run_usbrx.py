@@ -496,21 +496,19 @@ def main() -> int:
 #: ⭐ OUTSIDE THE PROOFS, BOUNDED BY THE SPEC'S ATTACH TIMING. The Lean theorems
 #: start from a run with every slot filled; before the USB lane's first words
 #: load, its winner stalls (agent 2 measured 76 cycles, 23-98). Settled by
-#: argument, not a brick: a host sends nothing until the attach debounce has
-#: passed, so the stall must END before that many cycles.
-#: TATTDB, the debounce interval after attach, >= 100 ms. CHECKED (11-13)
-#: against the copy clock.py cites (usb_20.pdf, SHA-256 d39698a3...1d89f61),
-#: §7.1.7.3, printed p. 150: "t3 (TATTDB) This is a debounce interval with a
-#: minimum duration of 100 ms ... power is stable at the device for at least
-#: 100 ms before any requests will be sent to the device."
-#: ⛔ THE SPEC DISAGREES WITH ITSELF (read off the rendered page, 11-13): Table
-#: 7-14 (printed p. 188) puts TATTDB's 100 ms in the MAX column, against
-#: §7.1.7.3's "minimum duration of 100 ms". The bound here rests on §7.1.7.3's
-#: text. Independently, the host's bus reset (TDRST >= 10 ms, clock.py
-#: USB_TDRST_MIN_NS) precedes any traffic, which alone is ~6,000x the stall.
-USB_TATTDB_MIN_NS = 100_000_000   # clock-ok: a spec duration, converted through clock
-TATTDB_CITED = ("USB 2.0 §7.1.7.3, TATTDB minimum 100 ms (checked); Table 7-14 lists the same "
-                "100 ms under MAX -- the spec conflicts; TDRST >= 10 ms bounds it regardless")
+#: argument, not a brick: a host sends nothing to a device it has not reset,
+#: so the stall must END before the bus reset does.
+#: ⭐ THE BOUND IS TDRST (Wilson 11-13, Update 5 ruling item 4): the host drives
+#: reset for >= 10 ms after attach and before any traffic -- clock.py's
+#: USB_TDRST_MIN_NS, already cited there (Table 7-14 / §7.1.7.5). Unambiguous,
+#: and alone ~6,000x the stall.
+#: ⚠ KNOWN INCONSISTENCY IN THE SPEC, NOT RELIED ON: TATTDB (the attach
+#: debounce) is "a debounce interval with a minimum duration of 100 ms" in
+#: §7.1.7.3 (printed p. 150), but Table 7-14 (printed p. 188, read off the
+#: rendered page 11-13) puts its 100 ms in the MAX column. Checked against
+#: the copy clock.py pins (usb_20.pdf, SHA-256 d39698a3...1d89f61).
+BOUND_CITED = ("USB 2.0 TDRST >= 10 ms, the bus reset before any traffic (clock.USB_TDRST_MIN_NS, "
+                "Table 7-14 / §7.1.7.5); TATTDB's min/max conflict (§7.1.7.3 vs Table 7-14) not relied on")
 PROBE = "test/usb_startup_probe.v"
 #: the arms: the gate's own image, and agent 2's busy image with the other
 #: lanes at 42 and at 20
@@ -523,16 +521,16 @@ def startup_judge(stalls, bound):
     if not stalls:
         return ["VACUOUS: the probe saw no USB-lane stall, so it measured nothing"]
     if max(stalls) >= bound:
-        return ["the start-up stall ends at cycle %d, not before the attach debounce (%d cycles)"
+        return ["the start-up stall ends at cycle %d, not before the host's bus reset ends (TDRST, %d cycles)"
                 % (max(stalls), bound)]
     return []
 
 
 def startup_section(tmp, pool):
-    print("\n  U7 the start-up stall vs the attach debounce (outside the proofs)")
+    print("\n  U7 the start-up stall vs the host's bus reset (TDRST) (outside the proofs)")
     probs = []
-    bound = clock.cycles_nominal(USB_TATTDB_MIN_NS)
-    print("    bound: %s = %d cycles at %.3f MHz" % (TATTDB_CITED, bound, clock.mhz()))
+    bound = clock.cycles_nominal(clock.USB_TDRST_MIN_NS)
+    print("    bound: %s = %d cycles at %.3f MHz" % (BOUND_CITED, bound, clock.mhz()))
     vvp = os.path.join(tmp, "usbrx_startup.vvp")
     r = run([tool("iverilog"), "-g2012", "-I", ROOT, "-o", vvp, "-s", "tb_usbrx",
              "-s", "usb_startup_probe", BENCH, PROBE] + RTL)
