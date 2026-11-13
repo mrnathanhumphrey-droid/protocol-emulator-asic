@@ -105,6 +105,57 @@ def judge(srcs):
     return probs, (len(errs), counts)
 
 
+#: W1 (Wilson 11-13): the warnings pe_pit_s12 brought are a DECLARED debt
+#: (model/stale_records.py) until the RTL fix with its equivalence proof.
+#: Excused ONLY inside this module's lines in project.v; anywhere else is red.
+STALE_MODULE = ("src/project.v", "pe_pit_s12")
+
+
+def module_span(text, name):
+    """(first, last) 1-based lines of `module name` .. its endmodule, or None."""
+    lines = text.splitlines()
+    for i, ln in enumerate(lines):
+        if re.match(r"\s*module\s+%s\b" % re.escape(name), ln):
+            for j in range(i + 1, len(lines)):
+                if re.match(r"\s*endmodule\b", lines[j]):
+                    return i + 1, j + 1
+    return None
+
+
+def excess_outside(srcs, diags):
+    """[(class, file, line)] of the over-pin / unpinned warnings that are NOT
+    inside STALE_MODULE. Over a pin, every warning of that class counts."""
+    f, mod = STALE_MODULE
+    span = module_span(srcs[f], mod)
+    counts = {}
+    for x in diags:
+        if not x[0]:
+            counts[x[1]] = counts.get(x[1], 0) + 1
+    bad_cls = {c for c, n in counts.items() if c not in PINNED or n > PINNED[c]}
+    out = []
+    for x in diags:
+        if x[0] or x[1] not in bad_cls:
+            continue
+        inside = span and x[2] == f and span[0] <= x[3] <= span[1]
+        if not inside:
+            out.append((x[1], x[2], x[3]))
+    # a pinned class over its pin: the pinned allowance covers that many outside
+    for c in [c for c in bad_cls if c in PINNED]:
+        outs = [o for o in out if o[0] == c]
+        if len(outs) <= PINNED[c]:
+            out = [o for o in out if o[0] != c]
+    return out
+
+
+def stale_ok(srcs, probs):
+    """True when every problem is a warning count AND every excess warning sits
+    inside STALE_MODULE: the declared W1 debt, nothing else."""
+    if any(not (p.startswith("NEW warning class") or p.startswith("warning "))
+           for p in probs):
+        return False
+    return not excess_outside(srcs, diagnose(srcs))
+
+
 def main():
     print("=" * 78)
     print("SLANG LINT GATE -- declare-before-use and a strict front end over src/")
@@ -117,7 +168,11 @@ def main():
         print("  warnings : %-18s x%d (pinned %s)" % (cls, n, PINNED.get(cls, "-")))
     for s in probs:
         print("  *** " + s)
-    ok = not probs
+    stale = bool(probs) and stale_ok(srcs, probs)
+    if stale:
+        print("  all excess warnings are inside %s (%s): the DECLARED W1 debt"
+              % (STALE_MODULE[1], STALE_MODULE[0]))
+    ok = not probs or stale
 
     # ---- must-fires ------------------------------------------------------
     print("  --- must-fires: each must go RED ---")
@@ -141,10 +196,25 @@ def main():
             print("  *** must-fire %-28s PLANT FAILED (anchor not found)" % name)
             ok = False
             continue
-        p, _ = judge(dict(srcs, **{"src/pe_engine.v": text}))
-        print("  must-fire %-28s %s" % (name, ("red  ok -- " + p[0][:70]) if p
+        s1 = dict(srcs, **{"src/pe_engine.v": text})
+        p, _ = judge(s1)
+        # red = a problem the W1 STALE scope does NOT excuse (while the real
+        # tree is over its pins, a bare `p` would be red for the tree's reason)
+        red = bool(p) and not stale_ok(s1, p)
+        new = [x for x in p if x not in probs] or p
+        print("  must-fire %-28s %s" % (name, ("red  ok -- " + new[0][:70]) if red
                                          else "*** STAYED GREEN"))
-        ok = ok and bool(p)
+        ok = ok and red
+
+    # W1 scope: a warning planted OUTSIDE pe_pit_s12 is never excused
+    plant = eng.replace(anchor, anchor + "  wire [1:0] mf_wt = 8'd200;   // PLANTED\n", 1)
+    s2 = dict(srcs, **{"src/pe_engine.v": plant})
+    p2, _ = judge(s2)
+    st2 = bool(p2) and stale_ok(s2, p2)
+    print("  must-fire %-28s %s" % ("truncation outside pe_pit_s12",
+                                    "red  ok -- not excused" if p2 and not st2
+                                    else "*** EXCUSED (the STALE scope leaks)"))
+    ok = ok and bool(p2) and not st2
 
     # ---- the BOUND store (Wilson 11-03): PE_IHP_CELLS + the PDK's models --
     # The tapeout config builds pe_store on IHP stock cells; this compiles
@@ -182,6 +252,23 @@ def main():
             print("  *** bound: %s at %s:%s" % (e[1], e[2], e[3]))
         ok = ok and not errs
     print()
+    if ok and stale:
+        import importlib.util
+        sp = importlib.util.spec_from_file_location("stale_records", os.path.join(ROOT, "model", "stale_records.py"))
+        SR = importlib.util.module_from_spec(sp); sp.loader.exec_module(SR)
+        g = "model/gate_slang_lint.py"
+        if g not in SR.DECLARED:
+            print("  *** excess warnings and %s is not DECLARED stale" % g)
+            ok = False
+        elif os.environ.get("PE_TAG") == "1" or "--tag" in sys.argv:
+            print("  *** STALE blocks at the tag (PE_TAG=1)")
+            ok = False
+        else:
+            owner, by = SR.DEBT.get(g, ("NO OWNER", "-"))
+            print()
+            print("  SLANG LINT GATE: STALE (declared: %s [owner: %s; green by: %s])"
+                  % (SR.DECLARED[g], owner, by))
+            return 0
     print("  SLANG LINT GATE: %s" % ("PASSED" if ok else "*** FAILED"))
     return 0 if ok else 1
 

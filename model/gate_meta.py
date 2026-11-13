@@ -243,6 +243,8 @@ SEAMS = (
     ("fpga/sim/run_fpga_loader.py", "run_fpga_loader.verdict", "slow", "OKNF"),
     # F1: every yosys run rc 0 -> the three must-fails "pass"
     ("test/gate_fpga_synth.py", "gate_fpga_synth.run_yosys", "slow", "Z0"),
+    # the Lean proofs: `judge` always clean -> M_LEAN_SORRY / AXIOM / CONST survive
+    ("model/gate_lean_build.py", "gate_lean_build.judge", "slow", "E0"),
 )
 
 #: Gates with NO stubbable check, each with why -- every gate in

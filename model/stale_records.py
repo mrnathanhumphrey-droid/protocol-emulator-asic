@@ -92,6 +92,13 @@ DECLARED = {
         "HARDWARE record of the v1 image on a v1 bitstream; v2's image is "
         "translate(v1). At the v2 lock: re-run at the bench, or SCOPE.md says "
         "the board evidence is v1's (Wilson 10-25)",
+    "model/gate_slang_lint.py":
+        "pe_pit_s12 (11-04) brought WidthTruncate x66, ConstantConversion x3 and "
+        "ArithOpMismatch over its pin; Wilson 11-13 W1: fixed in the RTL with "
+        "explicit widths and slices, proven unchanged by a formal equivalence "
+        "check of pe_pit_s12 before/after, and done AFTER the routed decision "
+        "settles s12's RTL. Only warnings inside pe_pit_s12 are excused; one "
+        "anywhere else is red",
     "model/gate_i2c_hw_witness.py":
         "needs bench re-witness on v2 bitstream -- the I2C FRAM witness ran a "
         "bitstream built from v1's RTL. At the v2 lock: re-run at the bench, or "
@@ -121,6 +128,9 @@ DEBT = {
                                          _V2_LOCK),
     "model/gate_i2c_hw_witness.py": ("the bench re-witness on the v2 bitstream",
                                      _V2_LOCK),
+    "model/gate_slang_lint.py": ("the W1 lint fix in pe_pit_s12 with a formal "
+                                 "equivalence proof (Wilson 11-13)",
+                                 "after the s12 routed decision; at the latest " + _V2_LOCK),
 }
 
 
@@ -466,6 +476,24 @@ CHANGE_SET = frozenset([
     # verdicts bit-exact. gate_a2_record read them as moved OUTSIDE the set.
     "fpga/sim/run_fpga_i2c.py",            # I2C / 1-Wire scenarios in parallel (28d244e)
     "fpga/sim/run_fpga_loader.py",         # loader scenarios in parallel (8c234bb)
+    # ---- AMENDMENT 18 (11-13, Wilson's 11-12 option (i) + 11-13 W4 are the
+    # review; Nate go: the CI repair). a2/proofs-host f0a3454 brought the Lean
+    # bricks (self-timed byte, V4b, brick U, Params) onto s12-c; LN1 reads the
+    # Lean model, so gate_ln1_record read them as moved OUTSIDE the set. Its
+    # re-dispatch on v2 is already the declared debt. One by one:
+    "lean/JLane/JLane.lean",               # imports SelfTimed / UsbLane (4ae2314, 84739f9)
+    "lean/JLane/JLane/Act.lean",           # V4b retire flag (0bc8d4a); self-timed byte (84843d4)
+    "lean/JLane/JLane/BZero.lean",         # V4b signatures (0bc8d4a)
+    "lean/JLane/JLane/Count.lean",         # slot ledger counts retirements (0bc8d4a)
+    "lean/JLane/JLane/DStar39.lean",       # V4b (0bc8d4a)
+    "lean/JLane/JLane/Head.lean",          # V4b (0bc8d4a)
+    "lean/JLane/JLane/Inv.lean",           # V4b (0bc8d4a)
+    "lean/JLane/JLane/Params.lean",        # NEW: constants pinned by rfl (84739f9)
+    "lean/JLane/JLane/Pass.lean",          # V4b (0bc8d4a)
+    "lean/JLane/JLane/Port.lean",          # V4b (0bc8d4a)
+    "lean/JLane/JLane/Run.lean",           # V4b ts_ge_after_wb (0bc8d4a)
+    "lean/JLane/JLane/State.lean",         # V4b (0bc8d4a); Op.st (84843d4); brick U (84739f9)
+    "lean/JLane/JLane/Step.lean",          # V4b (0bc8d4a)
 ])
 
 

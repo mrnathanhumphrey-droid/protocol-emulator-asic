@@ -104,11 +104,14 @@ FORBIDDEN_LITERALS = {
 PDK_CELL_RE = re.compile(
     r"\b(sg13[a-z0-9]*_|sky130_|RM_IHPSG13_|DFF_X|INV_X|NAND\d_X|ASAP7)",
     re.I)
-#: ⭐ THE ONE BINDING FILE (Wilson 10-31 / 11-03): src/pe_cells_ihp.v binds
-#: pe_store's three generic cells to IHP stock cells under `ifdef
-#: PE_IHP_CELLS`, so the generic RTL stays portable and THIS file is the whole
-#: of the PDK dependence -- one file to swap per PDK, and no other may name one.
-PDK_BINDING_FILES = {"pe_cells_ihp.v"}
+#: ⭐ THE BINDING FILES (Wilson 10-31 / 11-03; 11-13 W2): src/pe_cells_ihp.v
+#: binds pe_store's three generic cells to IHP stock cells under `ifdef
+#: PE_IHP_CELLS`, and src/pe_sram_macro_ihp.v binds the store to the IHP SRAM
+#: macro under PE_SRAM_MACRO (the SRAM ruling, 11-07). The generic RTL stays
+#: portable and THESE files are the whole of the PDK dependence -- the files to
+#: swap per PDK, and no other may name a PDK cell. The `_ihp.v` suffix is the
+#: convention, but the set is listed by name, never matched by a glob.
+PDK_BINDING_FILES = {"pe_cells_ihp.v", "pe_sram_macro_ihp.v"}
 
 
 def verilog_files():

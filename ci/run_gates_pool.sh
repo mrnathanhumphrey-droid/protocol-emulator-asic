@@ -17,7 +17,7 @@
 # ⛔ GREEN ONLY IF EVERY SHARD REPORTED: each shard's own `GATES: n of m passed` line
 #   is read back; a shard with no line (crash, kill) is RED as itself -- the rule CI's
 #   gates-complete job enforces. --self-test plants a missing and a failing verdict.
-set -u
+set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PY="${PE_PYTHON:-$(command -v python3 || command -v python)}"
 JOBS="${PE_GATE_JOBS:-4}"; ONLY=""; KEEP=0; SELF=0
@@ -77,6 +77,13 @@ run_one() {   # <shard>
   local s="$1" w="$POOL/$1" t0=$(date +%s)
   git worktree add -q --detach "$w" "$SNAP" > /dev/null 2>&1 || { echo 9 > "$POOL/_out/$s.rc"; return; }
   local f; for f in "${UNTRACKED[@]}"; do mkdir -p "$w/$(dirname "$f")"; cp -p "$f" "$w/$f"; done
+  # ⛔ THE GENERATED IMAGES, AS CI BUILDS THEM (its "Build the generated images"
+  # step): test/*_image.hex are ignored, so the copy above never carries them,
+  # and five fast gates read "named by a bench arm but is not on disk" (11-13)
+  ( cd "$w" && "$PY" -c "import sys; sys.path[:0] = ['test', 'model']; import benchset; \
+      p = benchset.base_images(); [print('***', x) for x in p]; \
+      print('generated images:', 'FAILED' if p else 'ok'); sys.exit(1 if p else 0)" \
+      > "$POOL/_out/$s.images.log" 2>&1 ) || { echo 8 > "$POOL/_out/$s.rc"; return; }
   ( cd "$w" && bash ci/run_gates.sh --shard "$s" > "$POOL/_out/$s.log" 2>&1 ); echo $? > "$POOL/_out/$s.rc"
   grep -E "^  GATES: " "$POOL/_out/$s.log" | tail -1 | sed 's/^  GATES:/ GATES:/' > "$POOL/_out/$s.gates"
   echo "  done $s rc $(cat "$POOL/_out/$s.rc") in $(( $(date +%s) - t0 )) s"
