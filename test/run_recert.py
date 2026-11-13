@@ -258,6 +258,23 @@ def dump(rows, pins, name, drive=False):
 
 def sigrok(path, decoder):
     """`decoder` is the -P argument; returns (rc, [annotation lines])."""
+    exe = os.environ.get("SIGROK_CLI", "sigrok-cli")
+    if os.name != "nt":
+        # ⭐ NATIVE ON LINUX (CI: sigrok-cli pinned in sim2, Wilson 11-12). A missing
+        # binary is rc 127, as from bash -- never a quiet "no annotations"
+        # ⛔ `decoder` carries MORE THAN ONE ARGUMENT ("spi:...:bitorder=msb-first
+        # -A spi=mosi-data"), word-split by the shell on the WSL path -- passed
+        # whole, sigrok read the bit order as "msb-first -A spi=mosi-data",
+        # ignored it and decoded LSB-first (11-12: every SPI word bit-reversed)
+        import shlex
+        try:
+            r = subprocess.run([exe, "-i", path, "-I", "binary:numchannels=4:samplerate=%d" % F_CLK,
+                                "-P"] + shlex.split(decoder), cwd=ROOT, capture_output=True, text=True,
+                               encoding="utf-8", errors="replace")
+            rc, out = r.returncode, (r.stdout or "") + (r.stderr or "")
+        except OSError as e:
+            rc, out = 127, "%s: %s" % (exe, e)
+        return rc, [l.strip() for l in out.replace("\r", "").split(chr(10)) if l.strip()]
     wrap = os.path.join(ROOT, "probe_recert_decode.sh")
     nl = chr(10)
     with open(wrap, "w", encoding="ascii", newline=nl) as fh:

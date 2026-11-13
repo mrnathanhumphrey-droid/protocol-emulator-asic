@@ -69,6 +69,8 @@ model/gate_cdc_qual.py              ^\s*GATE cdc-qual: PASSED\s*$
 model/gate_macro_inputs.py          ^\s*GATE macro-inputs: PASSED\s*$
 model/gate_select_copies.py         ^\s*GATE select-copies: PASSED\s*$
 test/run_ckack.py                   ^\s*GATE ckack: PASSED\s*$
+test/run_i2c.py                     ^\s*GATE i2c-foreign: PASSED\s*$
+test/run_recert.py                  ^\s*GATE recert: PASSED\s*$
 test/run_hold_rule.py               ^\s*GATE hold-rule: PASSED\s*$
 model/gate_slang_lint.py            ^\s*SLANG LINT GATE: PASSED\s*$
 model/gate_hold_offset.py           ^\s*GATE hold-offset: PASSED\s*$

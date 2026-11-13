@@ -137,6 +137,10 @@ WB = re.compile(r"clocked_conform\[W\] w1_binds=(\d+) w1_cycles=(\d+)")
 
 
 def build(defs, name):
+    # ⛔ made HERE, not only in build_i2cframe: run_recert calls build() first,
+    # and on a fresh checkout iverilog then had nowhere to write (11-12, Linux:
+    # "probe_sda/recert.vvp: No such file or directory")
+    os.makedirs(OUT, exist_ok=True)
     out = os.path.join(OUT, name + ".vvp")
     r = subprocess.run([tool("iverilog"), "-g2012", "-I", "test", "-I", "."]
                        + ["-D" + d for d in defs] + ["-o", out, "-s",

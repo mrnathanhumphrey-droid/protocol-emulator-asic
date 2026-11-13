@@ -266,6 +266,10 @@ NOT_STUBBABLE = {
     "test/gate_store_latch.py": "verdict made in main() from tb_store_latch.v's "
                                 "and tb_rowmux.v's output; priced by its six "
                                 "must-fire arms",
+    "test/run_i2c.py": "verdict made inline in main() (rc |= per check against "
+                       "sigrok's decode); priced by its M_IGNORE_ORDER arm",
+    "test/run_recert.py": "verdicts made inline by say() in main() against "
+                          "sigrok's decode, per clocked image",
     "test/run_pit_s3.py": "verdicts made inline in main() (problems appended per "
                           "case: capture, stages, snapshot, record); priced by its "
                           "MUTANTS arms, each of which must turn a case red",

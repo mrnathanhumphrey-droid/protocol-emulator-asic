@@ -359,6 +359,13 @@ GATES=(
   # ckack (Wilson 11-12): the clocked I2C random read judged by sigrok's own
   # i2c decoder (sigrok-cli pinned in CI); no sigrok is NOT RUN, which is red.
   test/run_ckack.py
+  # sigrok, the foreign judge (Wilson 11-12 triage: GATE; were A2-suite only
+  # because CI had no sigrok): run_i2c -- the shipping I2C programs decoded by
+  # sigrok's i2c PD, M_IGNORE_ORDER priced (65 s on Linux); run_recert -- every
+  # clocked image re-certified by bus type, RC1-RC3 (343 s on Linux). Both
+  # iverilog-only today; sigrok decodes natively on Linux.
+  test/run_i2c.py
+  test/run_recert.py
   # HOLD RULE (Wilson 11-11): FW-1's 5 cycles proven at the worst phase --
   # a 4-cycle host fails with a late synchroniser, a 5-cycle host does not.
   test/run_hold_rule.py
