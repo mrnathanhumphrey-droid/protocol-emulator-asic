@@ -216,6 +216,12 @@ USB_LS_RATE = 1_500_000
 USB_TUDJ1_NS, USB_TUDJ2_NS = 95, 150
 #: the engine's dispatch jitter on a device edge (measured, bundle 5): J <= 2
 USB_J_CYCLES = 2
+#: TIPD, §7.1.18.1 (PDF page 196, printed p. 168): "The host must provide at
+#: least two bit times of J after the SE0 of an EOP and the start of a new
+#: packet (TIPD)." In LS bit times (USB_LS_RATE); convert with usb_bit_cycles().
+#: (The device's own rule, just above it: at least two bit times too; its
+#: response delay max is TRSPIPD1 = 6.5 bit times, detachable cable.)
+USB_TIPD_BITS = 2
 
 #: ⭐ THE CLOCK SOURCE'S ACCURACY, DECLARED PER TARGET (Wilson 11-09 Q7): the
 #: rate requirement is TWO-SIDED, which BAND (a one-sided guard on minima)
