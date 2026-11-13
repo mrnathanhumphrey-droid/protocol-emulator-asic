@@ -2643,23 +2643,25 @@ module pe_pit_s12 #(parameter integer AW = 9) (
   // chose every group's operation through ONE driver (b6: `_24011_`, a 7-buffer chain
   // across the die; the new pin: `_72831_`, one weak cell on a 0.30 pF net). Each
   // copy drives only its own group: A = acc (`P_A`), B = dv_r/dv_q (`P_B`, the low
-  // `P_U`), D = dv_d (the high `P_U`, `P_V`). The copies are held apart by
-  // (* keep *) on their select nets below (11-12; it was keep_hierarchy on the
-  // module until then). Their inputs are the §1 flags, never t3.
-  // ⭐ THE COPIES ARE KEPT BY (* keep *) ON THE SELECT NETS EACH GROUP'S MUXES
-  // USE, NOT BY A HIERARCHY BOUNDARY (Wilson 11-12): the boundary hid the swap
-  // compare's load from ABC (a ripple with a weak driver, acc -> dv_q swinging
-  // 2.7 ns across placements); with keep on these 5 nets and nothing else the
-  // copies survive (no net past the compare reaches two groups -- held by
-  // model/gate_select_copies.py) and acc -> dv_q stays off the top paths.
-  (* keep *) wire [3:0] pa_op;
+  // `P_U`), D = dv_d (the high `P_U`, `P_V`). Their inputs are the §1 flags,
+  // never t3.
+  // ⭐ THE COPIES ARE KEPT BY (* keep_hierarchy *) ON pe_s3_opsel (Wilson 11-12,
+  // the copy-mechanism ruling). (* keep *) on these select nets was tried
+  // (0dd6777) and does NOT hold on the shipping flow: LibreLane 3.1.0.dev4's
+  // synthesis merged 6 nets past the compare into all three groups (CI
+  // 43329075711; local dev4 mirror identical) against 7 with no keep at all,
+  // while keep_hierarchy merged 0. (On dev3 both read 0.) Held by
+  // model/gate_select_copies.py, whose must-fire strips the keep_hierarchy.
+  // ⚠ keep_hierarchy WITH the log-depth compare (71a0668) has never been
+  // placed: the dev4 routed runs are its first measurement.
+  wire [3:0] pa_op;
   wire [3:0] pa_op_b, pa_op_d;
-  (* keep *) wire [2:0] pb_op;
+  wire [2:0] pb_op;
   wire [2:0] pb_op_a, pb_op_d;
-  (* keep *) wire [2:0] pu_op_lo;
-  (* keep *) wire [2:0] pu_op_hi;
+  wire [2:0] pu_op_lo;
+  wire [2:0] pu_op_hi;
   wire [2:0] pu_op_a;
-  (* keep *) wire [2:0] pv_op;
+  wire [2:0] pv_op;
   wire [2:0] pv_op_a, pv_op_b;
   wire       op_s3  = (st == S_S3);
   wire       op_g2  = (`G_GRD == `P_LC) && (al[8:0] != `S3_WP) && `P_M0F && `P_OK;
@@ -3573,8 +3575,10 @@ endmodule
 // localparams: pe_pit_s12 checks them at time 0 in simulation (s12-3).
 //   f  = {G2, SHX, ONE, ZERO, PBA, P6, Y6, S0, V2, F}   fx = {V1|V5, V3, W2}
 // ---------------------------------------------------------------------------
-// (Wilson 11-12) no keep_hierarchy: the copies are kept by (* keep *) on the
-// select nets in pe_pit_s12 instead.
+// (Wilson 11-12, the copy-mechanism ruling) keep_hierarchy RESTORED: (* keep *)
+// on the select nets did not hold on LibreLane 3.1.0.dev4 (6 merged); this does
+// (0). model/gate_select_copies.py holds it; its must-fire strips this line.
+(* keep_hierarchy *)
 module pe_s3_opsel (
     input  wire       s3,
     input  wire [9:0] f,

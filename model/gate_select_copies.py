@@ -3,27 +3,33 @@
 ⛔⛔ WHY. The s12 swap step drives three register groups -- A = acc,
 B = dv_r / dv_q, D = dv_d -- from one compare. b6's slow-corner path ran
 through ONE merged select net feeding all three (`_24011_`); the fix keeps a
-copy per group with `(* keep *)` on the five select nets in src/project.v
-(pa_op, pb_op, pu_op_lo, pu_op_hi, pv_op; 0dd6777).
-MEASURED 11-12 (LibreLane 3.1.0.dev3 synthesis, DELAY 4, depth 6 from acc[13]):
-keep on the nets 0 merged, keep_hierarchy 0, neither 13.
+copy per group: three instances of pe_s3_opsel, held apart by
+`(* keep_hierarchy *)` on that module in src/project.v.
+MEASURED on the SHIPPING flow (LibreLane 3.1.0.dev4, DELAY 4, depth 6 from
+acc[13]; CI 43329075711 and the local dev4 mirror, identical): keep_hierarchy
+0 merged; `(* keep *)` on the five select nets (0dd6777) 6; neither 7. (The
+retired dev3 flow read 0 for both mechanisms -- why keep-on-nets was chosen.)
 ⛔ THE MERGE ONLY HAPPENS IN LIBRELANE'S SYNTHESIS. CI's generic netlist
 (test/local_netlist.sh) and yosys + dfflibmap / abc -liberty read keep and
 no-keep the SAME -- a check on them cannot fail. So this gate runs LibreLane's
 own Yosys.Synthesis step (dockerized, the pinned version) on the tree, twice:
   clean   -> the tree as it is: merged must be 0
-  nokeep  -> the same tree with `(* keep *)` stripped from exactly those five
-             declarations: merged must be > 0. Without this arm the gate
-             proves nothing (Wilson 11-12).
+  nokeep  -> the same tree with the ONE `(* keep_hierarchy *)` on pe_s3_opsel
+             stripped: merged must be > 0. Without this arm the gate proves
+             nothing (Wilson 11-12).
+⛔ ONE FLOW (Wilson 11-12): the local path runs the ttihp27a mirror and is
+REFUSED unless ci/flow_pins.py matches gds.yaml's pins; the retired dev3 flow
+is a must-fire.
 "merged" = a net in the forward cone of u_s0.u_s12.acc[13] (combinational,
 flops stop the walk) that reaches flops of ALL of A, B and D within 6 levels.
 The group flops must be found (floors below) or the walk is vacuous: red.
 
 ENVIRONMENT. Linux (CI): python with librelane on PE_LL_PY (default: this
-python), the PDK through Ciel at $PDK_ROOT, tt-support-tools at $PE_TT_DIR
-(default ./tt), docker with the image. Windows: the local WSL flow
-(/opt/c1: LibreLane 3.1.0.dev3, manual PDK) -- a DEVELOPMENT reading; CI's
-pinned 3.1.0.dev4 is the one of record. A missing tool is COULD NOT RUN, red.
+python), the PDK through Ciel at $PE_LL_PDK_ROOT / $PDK_ROOT, tt-support-tools
+at $PE_TT_DIR, docker with the image. Windows: the local WSL ttihp27a mirror
+(/opt/c1/venv27a, /opt/c1/ciel27a, tt 9d13ff3; PE_LL_WSL_* override), checked
+against gds.yaml's pins first. A missing tool or a mismatched flow is COULD NOT
+RUN, red.
 Judge must-fires on planted netlists run first, without any tool.
 POSITIVE TOKEN: `GATE select-copies: PASSED`.
 """
@@ -53,14 +59,16 @@ GROUPS = (("A", r"u_s0\.u_s12\.acc\["), ("B", r"u_s0\.u_s12\.dv_[rq]\["), ("D", 
 #: group flops found 11-12: A 75, B 53, D 23. Floors well under, so an RTL
 #: change that renames or drops a group reads red rather than vacuously green.
 FLOORS = {"A": 64, "B": 40, "D": 16}
-#: the five kept select declarations (src/project.v), stripped in the nokeep arm
-KEPT = ("pa_op", "pb_op", "pu_op_lo", "pu_op_hi", "pv_op")
-KEEP_RX = re.compile(r"\(\*\s*keep\s*\*\)\s*(wire\s*\[\d+:0\]\s*(%s)\s*;)" % "|".join(KEPT))
+#: the ONE keep_hierarchy that keeps the three copies (src/project.v), stripped
+#: in the nokeep arm
+KEPT = ("pe_s3_opsel",)
+KEEP_RX = re.compile(r"\(\*\s*keep_hierarchy\s*\*\)\s*\n(module pe_s3_opsel\b)")
 STEP = "Yosys.Synthesis"
 ARMS = (("clean", False, "PASS"), ("nokeep", True, "FAIL"))
 
-# the local WSL flow (pr_cto.sh's environment)
-WSL_PY, WSL_PDK, WSL_TT = "/opt/c1/venv/bin/python", "/opt/c1/pdk", "/opt/c1/pitc2chk/tt"
+# the local WSL flow: the ttihp27a mirror (flowmove/c1_run_27a.sh's environment)
+WSL_PY, WSL_PDK, WSL_TT = ("/opt/c1/venv27a/bin/python", "/opt/c1/ciel27a",
+                           "/opt/c1/27a-b6-73a387a-r2/tt")
 
 
 class CouldNotRun(Exception):
@@ -147,8 +155,23 @@ def judge(nl, top, start=START, depth=DEPTH):
 
 
 def strip_keep(text):
-    """(text with `(* keep *)` removed from the five select declarations, count)."""
+    """(text with the `(* keep_hierarchy *)` on pe_s3_opsel removed, count)."""
     return KEEP_RX.subn(r"\1", text)
+
+
+def flow_check(env, wsl, pdk=True):
+    """ONE FLOW (Wilson 11-12): refuse a flow whose LibreLane / tt-support-tools
+    / PDK do not match gds.yaml + ci/pdk.sha. `pdk=False` on CI, where Ciel
+    installs the PDK during the first synthesis (test.yaml checks it after)."""
+    sys.path.insert(0, os.path.join(ROOT, "ci"))
+    import flow_pins as FP
+    want = FP.pins()
+    have = FP.probe(env["py"], env["tt"], env["pdk_root"], wsl=wsl)
+    if not pdk:
+        have["pdk_versions"] = [want["pdk"]]
+    p = FP.problems(have, want)
+    if p:
+        raise CouldNotRun("not the shipping flow: " + "; ".join(p))
 
 
 # ---------------------------------------------------------------------------
@@ -192,7 +215,11 @@ def must_fires():
     """([(label, red?)], control green?) -- the planted start net has its own
     name (the planted acc flops already carry acc[13])"""
     st = "u_s0.u_s12.p_start"
-    return [("one select net feeds A, B and D", bool(judge(_planted(True, st), "top", start=st)[0])),
+    sys.path.insert(0, os.path.join(ROOT, "ci"))
+    import flow_pins as FP
+    dev3_refused = bool(FP.problems(FP.DEV3, FP.pins()))
+    return [("the retired dev3 flow is refused (one flow)", dev3_refused),
+            ("one select net feeds A, B and D", bool(judge(_planted(True, st), "top", start=st)[0])),
             ("start net missing", bool(judge(_planted(False, st), "top", start="u_s0.u_s12.absent")[0])),
             ("group D has no flops", bool(judge(_planted(False, st, drop="D"), "top", start=st)[0])),
             ("top module missing", bool(judge(_planted(False, st), "nope", start=st)[0]))], \
@@ -207,17 +234,19 @@ def environment():
     if os.name == "nt":
         if not shutil.which("wsl.exe"):
             raise CouldNotRun("Windows without wsl.exe: no LibreLane to run")
-        # PE_LL_WSL_* select another local flow, e.g. the ttihp27a mirror (dev4,
-        # Ciel PDK) -- c1_run_27a.sh's: /opt/c1/venv27a, /opt/c1/ciel27a
+        # the ttihp27a mirror by default; PE_LL_WSL_* override -- and ANY local
+        # flow must match gds.yaml's pins (ci/flow_pins.py) or it is refused
         py = os.environ.get("PE_LL_WSL_PY", WSL_PY)
         r = subprocess.run(["wsl.exe", "--", "test", "-x", py])
         if r.returncode:
             raise CouldNotRun("no LibreLane python at %s in WSL" % py)
-        return "wsl", {"py": py, "pdk_root": os.environ.get("PE_LL_WSL_PDK", WSL_PDK),
-                       "tt": os.environ.get("PE_LL_WSL_TT", WSL_TT),
-                       "pdk_args": os.environ.get("PE_LL_WSL_PDK_ARGS", "--manual-pdk"),
-                       "tt_args": os.environ.get("PE_LL_WSL_TT_ARGS", "--ihp"),
-                       "label": "LOCAL WSL flow %s (development reading; CI is the record)" % py}
+        env = {"py": py, "pdk_root": os.environ.get("PE_LL_WSL_PDK", WSL_PDK),
+               "tt": os.environ.get("PE_LL_WSL_TT", WSL_TT),
+               "pdk_args": os.environ.get("PE_LL_WSL_PDK_ARGS", ""),
+               "tt_args": os.environ.get("PE_LL_WSL_TT_ARGS", "--pdk ihp-sg13cmos5l"),
+               "label": "LOCAL WSL flow %s (the ttihp27a mirror; CI is the record)" % py}
+        flow_check(env, wsl=True)
+        return "wsl", env
     py = os.environ.get("PE_LL_PY", sys.executable)
     tt = os.environ.get("PE_TT_DIR", os.path.join(ROOT, "tt"))
     # PE_LL_PDK_ROOT first: CI does not export PDK_ROOT into the fast shard,
@@ -231,8 +260,10 @@ def environment():
         raise CouldNotRun("%s cannot import librelane (PE_LL_PY)" % py)
     if not shutil.which("docker"):
         raise CouldNotRun("docker is not on PATH")
-    return "native", {"py": py, "pdk_root": pdk, "tt": tt, "pdk_args": "",
-                      "tt_args": "--pdk ihp-sg13cmos5l", "label": "native"}
+    env = {"py": py, "pdk_root": pdk, "tt": tt, "pdk_args": "",
+           "tt_args": "--pdk ihp-sg13cmos5l", "label": "native"}
+    flow_check(env, wsl=False, pdk=False)
+    return "native", env
 
 
 BUILD = r"""#!/usr/bin/env bash
@@ -341,7 +372,7 @@ def main():
     text = open(os.path.join(ROOT, "src", "project.v"), encoding="utf-8").read()
     n = strip_keep(text)[1]
     ok = n == len(KEPT)
-    print("  kept select declarations in src/project.v: %d of %d  %s"
+    print("  keep_hierarchy on pe_s3_opsel in src/project.v: %d of %d  %s"
           % (n, len(KEPT), "ok" if ok else "*** the nokeep arm would not strip what it names"))
     rc |= 0 if ok else 1
     try:
@@ -364,7 +395,7 @@ def main():
             ok = not probs
         else:   # red for its OWN reason: the walk is real and the copies merged
             ok = merged > 0 and stripped == len(KEPT)
-        print("  %-7s %-4s groups A %d / B %d / D %d, cone %d, merged %d, keep stripped %d  [%s]  %s"
+        print("  %-7s %-4s groups A %d / B %d / D %d, cone %d, merged %d, keep_hierarchy stripped %d  [%s]  %s"
               % (arm, expect, info.get("groups", {}).get("A", 0), info.get("groups", {}).get("B", 0),
                  info.get("groups", {}).get("D", 0), info.get("cone", 0), merged, stripped, note,
                  "ok" if ok else "***"))
