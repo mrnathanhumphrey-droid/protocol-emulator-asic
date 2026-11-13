@@ -1,0 +1,9 @@
+{
+  "_doc": "The one source for the proof's numeric thresholds (Wilson 11-12). The Lean build checks these against Params.lean (gate_lean_build, owed); run_rean_floor checks rean_* against the RTL; gate_clock_consistency's USB rows read them. Change a number here and in Params.lean together, or the gates go red.",
+  "lemmaA_window": 15,
+  "R_usb": 17,
+  "noWB_min": 20,
+  "dstar_retire": 39,
+  "rean_pipe": 3,
+  "rean_halving": 2
+}
