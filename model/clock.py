@@ -198,6 +198,9 @@ def ck_stretch_cycles(f=None):
 # ---------------------------------------------------------------------------
 # ⭐ USB LOW SPEED (step 7a §1 / §5, Wilson 11-09 Q1 + Q7). Every figure is the
 # USB 2.0 spec's (usb.org usb_20_20240604, usb_20.pdf), cited where it is used.
+# The copy cited: D:\ProtocolEmulator_internal\refs\usb_20.pdf (internal, not
+# in this repo), SHA-256
+# d39698a33486c399124af92bd02e4f978fd9a836b5cf4e52e6e4633eb1d89f61 (Wilson 11-13).
 # ---------------------------------------------------------------------------
 #: the bus-reset threshold the RTL derives N_RST from (pe_engine.v T_RST_NS)
 USB_T_RST_NS = 4000

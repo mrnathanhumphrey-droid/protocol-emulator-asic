@@ -498,11 +498,17 @@ def main() -> int:
 #: load, its winner stalls (agent 2 measured 76 cycles, 23-98). Settled by
 #: argument, not a brick: a host sends nothing until the attach debounce has
 #: passed, so the stall must END before that many cycles.
-#: TATTDB, the debounce interval after attach, >= 100 ms: USB 2.0 §7.1.7.3 /
-#: Table 7-14. ⚠ CITED FROM MEMORY -- not yet checked against usb_20.pdf
-#: (Wilson 11-13: the gate says so until it is).
+#: TATTDB, the debounce interval after attach, >= 100 ms. CHECKED (11-13)
+#: against the copy clock.py cites (usb_20.pdf, SHA-256 d39698a3...1d89f61),
+#: §7.1.7.3, printed p. 150: "t3 (TATTDB) This is a debounce interval with a
+#: minimum duration of 100 ms ... power is stable at the device for at least
+#: 100 ms before any requests will be sent to the device."
+#: ⚠ Table 7-14 (printed p. 188) lists TATTDB at 100 ms, but its text layer
+#: does not say whether in the Min or the Max column -- that column is
+#: UNCONFIRMED until read off the page; the bound rests on §7.1.7.3's text.
 USB_TATTDB_MIN_NS = 100_000_000   # clock-ok: a spec duration, converted through clock
-TATTDB_CITED = "USB 2.0 §7.1.7.3 / Table 7-14, TATTDB >= 100 ms (FROM MEMORY, not yet checked against the spec PDF)"
+TATTDB_CITED = ("USB 2.0 §7.1.7.3 (checked: TATTDB, minimum 100 ms); Table 7-14 lists it, "
+                "column unconfirmed")
 PROBE = "test/usb_startup_probe.v"
 #: the arms: the gate's own image, and agent 2's busy image with the other
 #: lanes at 42 and at 20
