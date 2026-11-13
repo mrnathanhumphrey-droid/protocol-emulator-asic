@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """run_poset_compile -- the gate for the compiler skeleton (host/poset/compile.py).
 
   C1 the end-to-end slice: emitter v2's SPI spec (v1 SPI image + golden records) compiles;
@@ -10,7 +10,7 @@
   C4 Dilworth on a DAG where a path cover (3) is not a chain cover (2): width 2
   C5 a compound pattern is refused by name
   C6 a v1 spec the lowering cannot emulate is refused with the lowering's own reason
-Must-fires: every compile.MUTANTS entry, in a subprocess, turns this gate red.
+Must-fires: every compile.MUTANTS entry, run IN-PROCESS through the same judge, turns this gate red.
 
 POSITIVE TOKEN: `GATE poset_compile: PASSED`.
 """
@@ -31,6 +31,17 @@ import golden as G  # noqa: E402
 import run_poset_golden as RG  # noqa: E402
 import run_pit_emit as V1T  # noqa: E402
 from golden import key  # noqa: E402
+
+#: gate_mutant_kills' scratch-mutant registry (ruling AC2): this gate is the killer
+SCRATCH_MUTANTS = {
+    "M_PC_NO_CYCLE": "killed in-process by this gate",
+    "M_PC_NO_CLOSURE": "killed in-process by this gate",
+    "M_PC_WINDOW_SWAP": "killed in-process by this gate",
+    "M_PC_COMPOUND_PASS": "killed in-process by this gate",
+}
+#: the literal above must name exactly the module's MUTANTS (checked at start-up)
+if set(SCRATCH_MUTANTS) != set(C.MUTANTS):
+    raise SystemExit("GATE poset_compile: FAILED -- SCRATCH_MUTANTS differs from C.MUTANTS")
 
 HZ = G.clock.hz()
 pit_emit = C.S.pit_emit
@@ -125,12 +136,17 @@ def main() -> int:
     for p in probs:
         print("  ***", p)
     for m in C.MUTANTS:
-        env = dict(os.environ, POSET_COMPILE_MUTANT=m)
-        rr = subprocess.run([sys.executable, os.path.abspath(__file__)], env=env,
-                            capture_output=True, text=True)
-        red = rr.returncode != 0 and ("MUTANT %s: RED" % m) in rr.stdout
-        why = next((ln.strip() for ln in rr.stdout.splitlines()[1:2]), "")
-        print("  must-fire %-19s %s  %s" % (m, "RED (killed)" if red else "*** SURVIVED", why[:80]))
+        # IN-PROCESS, through the same `judge` (gate_meta's stub hides the mutants too)
+        C.MUT = m
+        try:
+            mp, _ = judge()
+        except Exception as e:
+            mp = ["crash: %r" % e]
+        finally:
+            C.MUT = ""
+        red = bool(mp)
+        print("  must-fire %-19s %s  %s" % (m, "RED (killed)" if red else "*** SURVIVED",
+                                            (mp[0] if mp else "")[:80]))
         if not red:
             probs.append("mutant %s survived" % m)
     if probs:

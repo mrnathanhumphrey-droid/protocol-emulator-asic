@@ -146,7 +146,9 @@ def main() -> int:
     vm = os.path.join(tmp, "usbrx_mut.vvp")
     U.build(vm, defines=("M_REAN_FLOOR_EARLY",))
     mp, mrows = judge(vm, tmp, "mut")
-    below = any(v is not None and v < floor_of(d) for d, sp in mrows.items() for v in sp.values())
+    # the verdict is the JUDGE's own problem list (gate_meta's stub on `judge` empties it,
+    # so a stubbed gate goes red here), never a second reading of the rows
+    below = any("below the floor" in p for p in mp)
     same = mrows == rows
     print("  must-fire M_REAN_FLOOR_EARLY: %s" % (
         "RED (lands below the floor)" if below else

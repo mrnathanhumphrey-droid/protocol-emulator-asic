@@ -1,7 +1,7 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """run_poset_golden -- the gate for the order-and-bounds golden model (host/poset/golden.py).
 
-THE PEERS ARE INDEPENDENT (guiding doc §5): the buses below are generated here from the
+THE PEERS ARE INDEPENDENT (guiding doc Â§5): the buses below are generated here from the
 protocol definitions, and each generator RECORDS the truth as it draws it (the order, the
 instance count, every drawn lead / hold / span). The golden only ever sees the wire
 transitions. The answer key is the generator's own record, never the golden's output.
@@ -19,7 +19,7 @@ Arms
 Every ORDER statement must carry `observed n`, n = the generator's own count, and its
 `during` bounds must equal the generator's drawn min / max, converted at clock.hz().
 
-Must-fires: every golden.MUTANTS entry, run in a subprocess, must turn this gate red.
+Must-fires: every golden.MUTANTS entry, run IN-PROCESS through the same judge, must turn this gate red.
 
 POSITIVE TOKEN: `GATE poset_golden: PASSED`.
 """
@@ -34,6 +34,18 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import golden as G  # noqa: E402
 from golden import key  # noqa: E402
+
+#: gate_mutant_kills' scratch-mutant registry (ruling AC2): this gate is the killer
+SCRATCH_MUTANTS = {
+    "M_PG_SWAP": "killed in-process by this gate",
+    "M_PG_IMM_LOOSE": "killed in-process by this gate",
+    "M_PG_DUR_OFF1": "killed in-process by this gate",
+    "M_PG_NO_LABEL": "killed in-process by this gate",
+    "M_PG_ABSTAIN": "killed in-process by this gate",
+}
+#: the literal above must name exactly the module's MUTANTS (checked at start-up)
+if set(SCRATCH_MUTANTS) != set(G.MUTANTS):
+    raise SystemExit("GATE poset_golden: FAILED -- SCRATCH_MUTANTS differs from G.MUTANTS")
 
 HZ = G.clock.hz()
 
@@ -240,11 +252,18 @@ def main() -> int:
         print("  ***", p)
     killed = []
     for m in G.MUTANTS:
-        env = dict(os.environ, POSET_GOLDEN_MUTANT=m)
-        r = subprocess.run([sys.executable, os.path.abspath(__file__)], env=env,
-                           capture_output=True, text=True)
-        red = r.returncode != 0 and ("MUTANT %s: RED" % m) in r.stdout
-        print("  must-fire %-15s %s" % (m, "RED (killed)" if red else "*** SURVIVED"))
+        # IN-PROCESS, through the same `judge`: gate_meta's always-pass stub on `judge` then
+        # hides the mutants too, so the stubbed gate goes red (a subprocess would not see it)
+        G.MUT = m
+        try:
+            mp, _ = judge()
+        except Exception as e:                      # a mutant that crashes the judge is red
+            mp = ["crash: %r" % e]
+        finally:
+            G.MUT = ""
+        red = bool(mp)
+        print("  must-fire %-15s %s  %s" % (m, "RED (killed)" if red else "*** SURVIVED",
+                                            (mp[0] if mp else "")[:80]))
         if not red:
             probs.append("mutant %s survived" % m)
         else:

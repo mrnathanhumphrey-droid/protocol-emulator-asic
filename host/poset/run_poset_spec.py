@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """run_poset_spec -- the gate for the v2 spec parser (host/poset/spec.py) and emitter v2
 (host/poset/emit2.py).
 
@@ -12,7 +12,7 @@
      as patterns.
   S4 GRAMMAR: the accept list round-trips to the same AST; vol5's left associativity; the
      reject list (each with the reason it must fail) is refused.
-Must-fires: every spec.MUTANTS entry, in a subprocess, turns this gate red.
+Must-fires: every spec.MUTANTS entry, run IN-PROCESS through the same judge, turns this gate red.
 
 POSITIVE TOKEN: `GATE poset_spec: PASSED`.
 """
@@ -34,6 +34,18 @@ import run_pit_emit as V1T  # noqa: E402
 from golden import key  # noqa: E402
 
 pit_emit = S.pit_emit
+#: gate_mutant_kills' scratch-mutant registry (ruling AC2): this gate is the killer
+SCRATCH_MUTANTS = {
+    "M_PS_ACCEPT_LT": "killed in-process by this gate",
+    "M_PS_RIGHT_ASSOC": "killed in-process by this gate",
+    "M_PS_DROP_OBS": "killed in-process by this gate",
+    "M_PS_OPEN_KINDS": "killed in-process by this gate",
+    "M_PS_V1_BYPASS": "killed in-process by this gate",
+}
+#: the literal above must name exactly the module's MUTANTS (checked at start-up)
+if set(SCRATCH_MUTANTS) != set(S.MUTANTS):
+    raise SystemExit("GATE poset_spec: FAILED -- SCRATCH_MUTANTS differs from S.MUTANTS")
+
 HZ = G.clock.hz()
 
 ACCEPT = [
@@ -158,12 +170,17 @@ def main() -> int:
     for p in probs:
         print("  ***", p)
     for m in S.MUTANTS:
-        env = dict(os.environ, POSET_SPEC_MUTANT=m)
-        r = subprocess.run([sys.executable, os.path.abspath(__file__)], env=env,
-                           capture_output=True, text=True)
-        red = r.returncode != 0 and ("MUTANT %s: RED" % m) in r.stdout
-        why = next((ln.strip() for ln in r.stdout.splitlines()[1:2]), "")
-        print("  must-fire %-17s %s  %s" % (m, "RED (killed)" if red else "*** SURVIVED", why[:90]))
+        # IN-PROCESS, through the same `judge` (gate_meta's stub hides the mutants too)
+        S.MUT = m
+        try:
+            mp, _ = judge()
+        except Exception as e:
+            mp = ["crash: %r" % e]
+        finally:
+            S.MUT = ""
+        red = bool(mp)
+        print("  must-fire %-17s %s  %s" % (m, "RED (killed)" if red else "*** SURVIVED",
+                                            (mp[0] if mp else "")[:90]))
         if not red:
             probs.append("mutant %s survived" % m)
     if probs:
