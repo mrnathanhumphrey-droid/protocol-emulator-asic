@@ -38,7 +38,19 @@ Pre-submission, for the March 2027 `sg13cmos5l` shuttle.
 | **Instruction set** | 8 opcodes | 12 opcodes, 32-bit action word |
 | **Protocols** | UART, SPI master + target, I²C, 1-Wire | + USB low-speed device reflexes, + protocol inference (PIT) |
 | **Timing** | **closed**: harden of record, slow-corner setup +2.676 ns, hold +0.105 ns, 0 violations at every corner; precheck and gate-level cocotb green | **open**: last signed-off reading −1.882 ns slow-corner setup at 60 MHz, the worst path in PIT's GCD step; the fixes are in the RTL and the routed result is being measured; the bar is +2.4 ns; the v2 harden of record follows |
-| **Verification** | every gate green at the tag | the same suite, grown to 102 gates; records that depend on the final layout are declared stale until the v2 lock |
+| **Verification** | every gate green at the tag | the same suite, grown to 117 gates; records that depend on the final layout are declared stale until the v2 lock |
+
+**v2, by how far each piece is verified.** The evidence behind every line is in
+[`docs/V2_STATUS.md`](docs/V2_STATUS.md).
+
+1. **Built and verified:** the Protocol Inference Tile, from capture through
+   CRC recovery, the clocked-bus path included; the two-chip round trip, 16 / 16;
+   the spec emitter; the SRAM program store; clock-domain crossing, proved; the
+   Lean scheduler proofs; the v2 instruction set.
+2. **Built and simulated, hardware pending:** USB low-speed device reflexes,
+   never yet run against a real host; 60 MHz, with timing not yet closed.
+3. **In progress:** the poset language and its compiler, on-chip poset
+   primitives, the validator, the USB keyboard demo.
 
 v1 is the fallback and stays locked. v2 replaces it only when it closes to the
 same bar: a harden of record, the full gate suite, and bench witnesses.
@@ -180,9 +192,10 @@ that argument is checked rather than trusted: 24 of 31 pin-feasible subsets, 54
 (lane, subset) pairs, 0 disagreements with pyRTA.
 
 **Refill spacing.** `d_min ≥ D* = 20 → J = 1`: a lane whose actions are at least
-20 cycles apart never waits on the shared fetch port — measured (zero refill
-stalls at every port-feasible point of the d = 20–60 runs) and proved in Lean on
-a model of the engine ([`docs/J_LANE_PROOF.md`](docs/J_LANE_PROOF.md)).
+20 cycles apart never waits on the shared fetch port. D* = 20 is proven in Lean
+on a model of the engine ([`docs/J_LANE_PROOF.md`](docs/J_LANE_PROOF.md)). Zero
+refill stalls measured at d = 20–60 on v1, and at d = 20 on v2; the v2 sweep over
+d = 21–60 is pending.
 
 **Why one shared engine, not a barrel.** A barrel gives each lane a fixed time
 slice: isolation comes free, but every idle slot is wasted and the slice sets
@@ -257,8 +270,8 @@ the duplication removed as the must-fire.
 
 | | |
 |---|---|
-| `ci/run_gates.sh` — every push, 10 parallel shards | **102 gates** |
-| `model/gate_mutant_kills.py` — injected defects | **122** with a named killer; **5** declared survivors, each with the reason no check should see it |
+| `ci/run_gates.sh` — every push, 10 parallel shards | **117 gates** |
+| `model/gate_mutant_kills.py` — injected defects | **138** with a named killer; **5** declared survivors, each with the reason no check should see it |
 | `model/gate_meta.py` — every check stubbed to pass | the gate must still go red |
 | `model/gate_formal_miters.py` — SymbiYosys | **2** equivalence proofs; **4** mutants refuted |
 | `model/gate_cdc_qual.py` — yosys induction | no flop changes on a raw pin outside its strobe |

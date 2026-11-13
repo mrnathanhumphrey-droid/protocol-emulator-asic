@@ -18,10 +18,12 @@ THE TEST, on the existing bench (test/tb_usbrx.v, unchanged), at d = 40 and one 
 Constants: lean/JLane/proof_constants.json (the one source the Lean build and the clock gate
 also read). Never typed here.
 
-MUST-FIRE: the same sweep built with -DM_REAN_FLOOR_EARLY must land BELOW the floor. That
-define is an RTL change (agent 1's lane), requested in the 11-12 checkpoint: in `rean_cap`,
-read `ts_n[USB_LANE]` instead of `l_timestamp[USB_LANE]` (the writeback visible a cycle early).
-Until it exists the must-fire arm is identical to the clean arm and the gate says so: RED.
+MUST-FIRE: the same sweep built with -DM_REAN_FLOOR_EARLY (src/pe_engine.v: `rean_cap` reads
+`ts_n[USB_LANE]`, not `l_timestamp[USB_LANE]` -- the writeback visible a cycle early).
+⛔ EXACTLY ONE CYCLE (Wilson 11-12): the mutant's minimum accepted spacing must equal the floor
+MINUS ONE at every d (22 at d = 40, 26 at d = 48). Lower than that, the mutant is doing more
+than it claims: red. Every offset where it differs from the clean arm is printed, so anything
+else it changes about re-anchoring is on the record. Identical to the clean arm: red.
 
 POSITIVE TOKEN: `GATE rean_floor: PASSED`.
 """
@@ -40,9 +42,8 @@ import run_usbrx as U  # noqa: E402
 import pe_isa as I  # noqa: E402
 import sim_run  # noqa: E402
 
-sys.path.insert(1, os.path.join(ROOT, "model"))
-import proof_constants  # noqa: E402  (the one loader of lean/JLane/proof_constants.json)
-K = proof_constants.load()
+with open(os.path.join(ROOT, "lean", "JLane", "proof_constants.json")) as _fh:
+    K = json.load(_fh)
 PIPE, HALV = K["rean_pipe"], K["rean_halving"]
 #: the sweep brackets the guard: an edge reaches `rean_cap` only after the input synchronizer
 #: (measured 11-12: an edge 1 cycle after the writeback lands 3 cycles above the floor), so the
@@ -147,16 +148,22 @@ def main() -> int:
     vm = os.path.join(tmp, "usbrx_mut.vvp")
     U.build(vm, defines=("M_REAN_FLOOR_EARLY",))
     mp, mrows = judge(vm, tmp, "mut")
-    # the verdict is the JUDGE's own problem list (gate_meta's stub on `judge` empties it,
-    # so a stubbed gate goes red here), never a second reading of the rows
-    below = any("below the floor" in p for p in mp)
-    same = mrows == rows
-    print("  must-fire M_REAN_FLOOR_EARLY: %s" % (
-        "RED (lands below the floor)" if below else
-        "*** NOT EFFECTIVE (identical to the clean arm: the RTL define does not exist yet)" if same
-        else "*** SURVIVED"))
-    if not below:
-        probs.append("must-fire M_REAN_FLOOR_EARLY did not go below the floor")
+    if mrows == rows:
+        print("  must-fire M_REAN_FLOOR_EARLY: *** NOT EFFECTIVE (identical to the clean arm)")
+        probs.append("must-fire M_REAN_FLOOR_EARLY changed nothing")
+    for d in (40, D_OTHER):
+        sp, cl = mrows.get(d) or {}, rows.get(d) or {}
+        acc = [v for v in sp.values() if v is not None and v != d]
+        want = floor_of(d) - 1
+        got = min(acc) if acc else None
+        diff = ["o=%d %s->%s" % (o, cl.get(o), v) for o, v in sorted(sp.items()) if cl.get(o) != v]
+        print("  must-fire M_REAN_FLOOR_EARLY d=%d: minimum %s, want exactly %d (floor %d - 1)  %s"
+              % (d, got, want, floor_of(d), "RED ok" if got == want else "***"))
+        print("      differs from the clean arm at: %s" % ("; ".join(diff) or "nowhere"))
+        if got != want:
+            probs.append("must-fire d=%d: minimum %s, not exactly floor - 1 = %d%s"
+                         % (d, got, want, " -- the mutant does MORE than one cycle"
+                            if got is not None and got < want else ""))
     if probs:
         print("GATE rean_floor: FAILED (%d)" % len(probs))
         return 1

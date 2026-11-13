@@ -141,13 +141,17 @@ def blacklist(base):
     return sorted((wires - state - ports) | {"ui_in"})
 
 
+# ⭐ -purge_lib (11-13): the SRAM binding file (in info.yaml's source_files, so
+# in the Makefile list this gate reads) carries an unused (* blackbox *) module;
+# kept in base.il it is defined twice once gold and gate are read together, and
+# the proof never reached equiv_status.
 BASE_YS = """{reads}
 hierarchy -top {top}
 setattr -mod -unset keep_hierarchy *
 proc
 flatten
 setattr -set keep 1 w:push_rise
-hierarchy -top {top}
+hierarchy -top {top} -purge_lib
 write_rtlil base.il
 """
 EQUIV_YS = """read_rtlil gold.il

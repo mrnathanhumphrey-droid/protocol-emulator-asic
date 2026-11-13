@@ -124,10 +124,16 @@ CLOCKED_MUTANTS = [
     # byte-identical streams). The defect is still caught where it is a
     # 2-state fact: verilator_trace.sh with -DM_PFETCH_NOWAIT, MEASURED after
     # TF on corpus_i2c -- SEEDS DISAGREE on both pairs.
-    ("M_PFETCH_NOWAIT", "corpus_i2c", "i2c", "*** FAIL progress.vh",
+    # ⛔ 11-13, MOVED AGAIN, WITH THE STORE (Wilson 11-07, the SRAM is the
+    # store): the SRAM arm's dout HOLDS THE PREVIOUS READ'S WORD (pe_store.v),
+    # a real word, not an X -- so the stale capture no longer wedges the tree
+    # (progress.vh is clean: 283 writebacks) and the defect is caught where it
+    # was before TF2, by Layer M: the lane fetches the STORE FILLER. Measured on
+    # corpus_i2c, iverilog, after 82d3312.
+    ("M_PFETCH_NOWAIT", "corpus_i2c", "i2c", "*** FAIL clocked_conform[M]",
      "P_CAP samples the store before the read is registered, so it files the "
-     "PREVIOUS read's word -- on the first refill a never-written register, "
-     "X in iverilog, which the tree select propagates until nothing retires. "
+     "PREVIOUS read's word -- on the SRAM store a real but stale word, so the "
+     "lane's fetch path leaves its program and Layer M sees the filler fetched. "
      "(Under Verilator --x-initial unique the same defect shows as seeds "
      "disagreeing, which is verilator_trace.sh's arm.)"),
     # ⛔⛔ SILICON FIX #2 (ruling TX1/TX2): the pre-fix host load, on the HIGH

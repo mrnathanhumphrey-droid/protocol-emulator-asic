@@ -210,6 +210,9 @@ SEAMS = (
     # 11-12 the round trip: `compare` always (no problem) -> the emitter's
     # init ^ 1 and the flipped CPOL both pass the round trip
     ("test/run_pit_rt.py", "run_pit_rt.compare", "slow", "E0"),
+    # 11-12 the re-anchor floor: `judge` always clean -> the clean arm reads green
+    # whatever the RTL does, and the mutant arm equals it (red: changed nothing)
+    ("test/run_rean_floor.py", "run_rean_floor.judge", "slow", "E0"),
     # s12 note (11-11): `record_problems` always empty -> M_DECODE_STALE /
     # M_DIVMASK_LATE's record arms survive on the CI subset
     ("test/run_pit_gcd.py", "run_pit_gcd.record_problems", "slow", "E"),
@@ -270,6 +273,12 @@ NOT_STUBBABLE = {
                        "sigrok's decode); priced by its M_IGNORE_ORDER arm",
     "test/run_recert.py": "verdicts made inline by say() in main() against "
                           "sigrok's decode, per clocked image",
+    "test/run_pit_s12.py": "verdicts made inline in run_case()/main() against the "
+                           "golden records; priced by its six M_S12_* arms",
+    "test/run_pit_clk.py": "verdicts made inline in run_case()/main() against the "
+                           "golden; priced by its eight M_CK_* arms",
+    "test/run_pit_emit.py": "pure-Python checks inline in main() (spec text vs the "
+                            "results bytes, parser round trip); no simulation",
     "test/run_pit_s3.py": "verdicts made inline in main() (problems appended per "
                           "case: capture, stages, snapshot, record); priced by its "
                           "MUTANTS arms, each of which must turn a case red",
@@ -395,7 +404,7 @@ def judge(results, gaps):
 
 
 def select(tier, seam=None):
-    """[(gate, seam, policy)] for a tier, or the ONE row naming `seam`."""
+    """[(gate, seam, policy)] for a tier, or every row naming `seam` (one stub can feed two runners)."""
     if seam is not None:
         return [(g, s, p) for g, s, _t, p in SEAMS if s == seam]
     return [(g, s, p) for g, s, t, p in SEAMS if tier == "all" or t == tier]
@@ -409,14 +418,19 @@ def main() -> int:
         # ⭐ THE CI MATRIX IS READ FROM SEAMS, never typed into the workflow:
         # a seam added here is in CI, and none can drop out silently (3b)
         import json
-        print(json.dumps([s for _g, s, _p in
-                          select(sys.argv[sys.argv.index("--list") + 1])]))
+        # one CI job per SEAM, not per row: a stub shared by two runners
+        # (usbdev.judge: run_usbaddr + run_usbrst) is one job that runs both
+        seen = []
+        for _g, s, _p in select(sys.argv[sys.argv.index("--list") + 1]):
+            if s not in seen:
+                seen.append(s)
+        print(json.dumps(seen))
         return 0
     seam = sys.argv[sys.argv.index("--seam") + 1] if "--seam" in sys.argv else None
     jobs = int(sys.argv[sys.argv.index("--jobs") + 1]) if "--jobs" in sys.argv else 4
     todo = select(tier, seam)
-    if seam is not None and len(todo) != 1:
-        print("  *** --seam %s names %d SEAMS rows (want exactly 1)" % (seam, len(todo)))
+    if seam is not None and not todo:
+        print("  *** --seam %s names no SEAMS row (it would run nothing and pass)" % seam)
         print("  GATE meta: FAILED")
         return 1
     print()
@@ -482,7 +496,7 @@ def main() -> int:
         if not red:
             rc = 1
     # a --seam that names no row would run nothing and pass (the CI matrix job)
-    red = len(select("slow", "no_such.seam")) != 1
+    red = not select("slow", "no_such.seam")
     print("    %-46s %s" % ("a --seam naming no SEAMS row",
                             "red  ok" if red else "*** MISSED"))
     if not red:

@@ -460,6 +460,12 @@ CHANGE_SET = frozenset([
     "test/tb_rowmux.v",                    # latch-store row-read tree bench (11-01)
     "test/host_feed.vh",                   # FW-1 hold 5 (46c2662) + declare-before-use (7a70803)
     "test/tb_pair.v",                      # declare-before-use (7a70803)
+    # ---- AMENDMENT 17 (11-13, Wilson's 11-10 D step 1 ruling is the review;
+    # Nate go: the CI repair). The F1.5 commits ran the FPGA loader and I2C /
+    # 1-Wire scenarios in parallel (8c234bb, 28d244e): scheduling only, the
+    # verdicts bit-exact. gate_a2_record read them as moved OUTSIDE the set.
+    "fpga/sim/run_fpga_i2c.py",            # I2C / 1-Wire scenarios in parallel (28d244e)
+    "fpga/sim/run_fpga_loader.py",         # loader scenarios in parallel (8c234bb)
 ])
 
 

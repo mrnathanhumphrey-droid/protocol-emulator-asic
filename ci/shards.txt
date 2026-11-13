@@ -41,6 +41,8 @@ sim1 test/run_pit_s0.py
 gcd test/run_pit_gcd.py
 gcd test/run_pit_s3.py
 gcd test/run_pit_rt.py
+gcd test/run_pit_s12.py
+gcd test/run_pit_clk.py
 sim1 test/gate_store_latch.py
 
 # sim2 -- 201 (+ its kill audit) + 197 + 106 + 100 + 9
@@ -55,6 +57,7 @@ sim2 test/run_usbcrc.py
 sim2 test/run_usbbuf.py
 sim2 test/run_usbaddr.py
 sim2 test/run_usbrst.py
+sim2 test/run_rean_floor.py
 sim2 test/run_hold_rule.py
 sim2 test/run_ckack.py
 sim2 test/run_i2c.py
@@ -116,6 +119,7 @@ fast test/gate_fpga_synth.py
 fast model/gate_store_size_literals.py
 fast model/gate_host_contract.py
 fast model/area_line.py
+fast test/run_pit_emit.py
 
 # fpga -- F1.5 (11-09): the three board sims, measured locally (see below)
 fpga fpga/sim/run_fpga_loader.py

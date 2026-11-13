@@ -18,6 +18,7 @@ one. The CI gates (`ci/run_gates.sh`) are the current truth.
 
 | document | what it is |
 |---|---|
+| [V2_STATUS.md](V2_STATUS.md) | **v2**, by evidence: built and verified / built and simulated, hardware pending / in progress |
 | [SCOPE.md](SCOPE.md) | what v1 claims, each with its evidence, and what it does not claim |
 | [HOST_INTERFACE.md](HOST_INTERFACE.md) | pins, the program-load protocol, serial framing, the readback contract |
 | [PORT_SPEC.md](PORT_SPEC.md) | the fetch port and dispatch pipeline, read from the RTL |
