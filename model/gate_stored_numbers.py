@@ -123,16 +123,6 @@ SITES = [
          "needing a third-party clone -- price_gates.sh removes pyRTA to "
          "prove the pyRTA gates are real, and the verdict must survive that"),
 
-    # ---- synthesis measurements -----------------------------------------
-    Site("model/a2/gate_cj_bounds.py", "DOUBLE_BUFFER_COST", RECORD,
-         "flop and cell counts before/after double buffering",
-         "test/yosys_check.sh",
-         "Yosys 0.52, synth -flatten, both trees",
-         "⚠ `flops_before` was measured on the PRE-DOUBLE-BUFFER TREE, which "
-         "HEAD no longer is, and no commit ref is recorded -- so the recipe "
-         "reproduces `flops_after` only. The delta is not re-derivable from "
-         "HEAD alone"),
-
     # ---- immutable by design --------------------------------------------
     Site("model/a2/bursty.py", "DOUBLE_BUFFER_PREREG", LEDGER,
          "the pre-registered double-buffer prediction",
@@ -546,8 +536,6 @@ SPEC_SYMBOLS = {
     ("model/a2/gate_load_pin_safety.py", "SERIAL_BITS"),
     ("model/a2/gate_encoding_f1.py", "PIN_MAP"),
     ("model/a2/gate_encoding_f1.py", "TRANSACTIONS"),
-    ("model/a2/gate_cj_bounds.py", "OPNAMES"),
-    ("model/a2/gate_cj_bounds.py", "J_SOURCES"),
     ("model/a2/gate_admissibility_1_6.py", "CONDITIONS"),
     ("model/a2/gate_spec_freeze_s2.py", "CUT_FIELDS"),
     ("model/a2/grid_quantization.py", "EDGES"),
@@ -661,7 +649,6 @@ SPEC_SYMBOLS = {
     # "numbers" are ledger hashes and the claims it names (C = 2/3, J = 8/1,
     # D* = 20, 8/8 opcodes). Every figure is owned by the successor gate the
     # pointer names, each of which is checked to RUN.
-    ("model/gate_gates_complete.py", "RETIRED"),
     # ⭐ RULING MU's CLOCKED MUTANT FAMILY: stimulus (image, peer) and the
     # assertion each must die of. Its numbers are layer labels ([A1], [A2],
     # [R4a]) inside the expected messages -- inputs, re-judged every run.

@@ -53,20 +53,17 @@ EXCLUDED = {
 #: verdict as live, must not be in a run list, and every successor named here
 #: must itself be run -- a pointer to a gate nothing runs is no pointer.
 #: file -> ([successor gate files], the per-claim pointer)
-RETIRED = {
-    "model/a2/gate_cj_bounds.py": (
-        ["model/a2/gate_c3_requote.py", "model/a2/gate_j_program.py",
-         "model/a2/gate_dmin_clocked.py", "test/gate_coverage.py"],
-        "C_max = 2 is OCCUPANCY; RTA charges the SPACING C = 3 -> "
-        "gate_c3_requote + run_csat (ledger 65bc3c8114e5). Universal J_max = 8 "
-        "is WITHDRAWN -> the scoped d_min >= D* = 20 -> J = 1 in "
-        "gate_j_program / gate_dmin_clocked (ledger b4e51034e283). Opcode "
-        "coverage 8/8 (its census input was written by five_image, so it was "
-        "red) -> the coverage sweep, gate_coverage. The double-buffer "
-        "pre-registration (2, measured 7) -> bursty.DOUBLE_BUFFER_PREREG, a "
-        "LEDGER site in gate_stored_numbers. Its J = 0..10 margin table is "
-        "pre-C = 3 -> gate_c3_requote."),
-}
+#: ⛔ DELETED (Wilson 11-12, the triage ruling): model/a2/gate_cj_bounds.py,
+#: the one entry this table held. Its per-claim pointer, kept here as history:
+#: C_max = 2 is OCCUPANCY; RTA charges the SPACING C = 3 -> gate_c3_requote +
+#: run_csat (ledger 65bc3c8114e5). Universal J_max = 8 is WITHDRAWN -> the
+#: scoped d_min >= D* = 20 -> J = 1 in gate_j_program / gate_dmin_clocked
+#: (ledger b4e51034e283). Opcode coverage 8/8 -> the coverage sweep,
+#: gate_coverage. The double-buffer pre-registration (2, measured 7) ->
+#: bursty.DOUBLE_BUFFER_PREREG, a LEDGER site in gate_stored_numbers. Its
+#: J = 0..10 margin table is pre-C = 3 -> gate_c3_requote. Its file stays in
+#: git history (the last commit holding it is the parent of its deletion).
+RETIRED: dict = {}
 RETIRED_BANNER = "RETIRED (ruling CJ)"
 
 
@@ -216,17 +213,21 @@ def main() -> int:
     print("    a stale exclusion is reported                %s"
           % ("ok" if hit2 else "*** MISSED"))
     # ⛔ RULING CJ's retirement, priced three ways
-    f0 = next(iter(RETIRED))
-    _u, s4 = audit(files, ci, a2, EXCLUDED, read=lambda r: "no banner here")
+    # a PLANTED retirement (the live table is empty since gate_cj_bounds was
+    # deleted, 11-12): an existing file no gate runs, with a successor that runs
+    f0 = "model/a2/gate_retired_fixture.py"
+    pf = files | {f0}
+    rp = {f0: (["model/a2/gate_c3_requote.py"], "fixture")}
+    _u, s4 = audit(pf, ci, a2, EXCLUDED, read=lambda r: "no banner here", retired=rp)
     hit3 = any("lacks" in x for x in s4)
     print("    a retired gate without its banner            %s"
           % ("ok" if hit3 else "*** MISSED"))
-    _u, s5 = audit(files, ci | {f0}, a2, EXCLUDED)
+    _u, s5 = audit(pf, ci | {f0}, a2, EXCLUDED, retired=rp, read=lambda r: RETIRED_BANNER)
     hit4 = any("ALSO run" in x for x in s5)
     print("    a retired gate still in a run list           %s"
           % ("ok" if hit4 else "*** MISSED"))
     r6 = {f0: (["test/gate_nobody_runs.py"], "fixture")}
-    _u, s6 = audit(files, ci, a2, EXCLUDED, retired=r6)
+    _u, s6 = audit(pf, ci, a2, EXCLUDED, retired=r6, read=lambda r: RETIRED_BANNER)
     hit5 = any("which nothing runs" in x for x in s6)
     print("    a successor nothing runs                     %s"
           % ("ok" if hit5 else "*** MISSED"))

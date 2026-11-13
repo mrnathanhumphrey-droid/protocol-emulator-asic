@@ -42,9 +42,6 @@ DECLARED = {
                                 "the I2C peer-delay sweep (sigrok, local): its "
                                 "record model/phase_sweep_i2c.json is held "
                                 "fresh by the phase-coverage gate"),
-    "model/a2/gate_cj_bounds.py": ("retired", "model/a2/gate_c3_requote.py",
-                                   "ruling CJ: every claim moved to gates "
-                                   "that run"),
     "model/a2/price_j_sweep.sh": ("manual", "model/a2/gate_j_program.py",
                                   "the live J sweep the gate's record names"),
     "model/nonadmissible.py": ("helper", "model/a2/program_a2.py",
