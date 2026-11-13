@@ -99,8 +99,9 @@ pattern Fall(uio3) |> Rise(uio1) during (83.3 ns, 2083.3 ns) observed 37;
 -- I2C: START before the first SCL fall (t_HD;STA), and before the first data byte
 pattern Start(uio2, uio1) |> Fall(uio1) during (600.0 ns, 900.0 ns) observed 12;
 pattern Start(uio2, uio1) -> Byte(uio2) observed 12;
--- UART: the start bit's falling edge before the byte's last data bit
-pattern Fall(uio0) |> Byte(uio0) during (30000.0 ns, 31000.0 ns) observed 64;
+-- UART: the start bit before the byte's last data bit. Frame, not Fall: a raw Fall(uio0) also
+-- matches the data bits' falling edges inside the frame, so `Fall(uio0) |> Byte(uio0)` does not hold
+pattern Frame(uio0) |> Byte(uio0) during (30000.0 ns, 31000.0 ns) observed 64;
 ```
 These numbers are **placeholders that show the shape**. The golden model generates the real ones (operating rule: numbers are generated, never typed).
 
