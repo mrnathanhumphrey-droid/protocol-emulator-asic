@@ -286,7 +286,7 @@ def coverage_arms():
         write_store(os.path.join(ROOT, mp), mem)
         arms.append(("%s%d" % (sets[i][0], i),
                      ["+MEM=" + mp, "+OUT=%s/g%d.out" % (COV_DIR, i), "+END=%x" % end,
-                      "+NMSG=%d" % min(len(msgs), 255), "+NCYC=50000000"]))
+                      "+NMSG=%d" % min(len(msgs), 255), "+NCYC=50000000"]))  # clock-ok: tb_gcd's own cycle budget, not a frequency
     return arms
 
 
