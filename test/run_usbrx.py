@@ -480,6 +480,8 @@ def main() -> int:
                     if not any(n.startswith("e%+.3f" % e) for n, _p in red):
                         probs.append("M_NO_REANCHOR survived at e = %+.3f" % e)
 
+        probs += startup_section(tmp, pool)
+
     print()
     if probs:
         print("  GATE usbrx: FAILED (%d)" % len(probs))
@@ -488,6 +490,85 @@ def main() -> int:
         return 1
     print("  GATE usbrx: PASSED")
     return 0
+
+
+# ---- U7: the start-up stall (Wilson 11-13 per-pair ruling, D) ----------------
+#: ⭐ OUTSIDE THE PROOFS, BOUNDED BY THE SPEC'S ATTACH TIMING. The Lean theorems
+#: start from a run with every slot filled; before the USB lane's first words
+#: load, its winner stalls (agent 2 measured 76 cycles, 23-98). Settled by
+#: argument, not a brick: a host sends nothing until the attach debounce has
+#: passed, so the stall must END before that many cycles.
+#: TATTDB, the debounce interval after attach, >= 100 ms: USB 2.0 §7.1.7.3 /
+#: Table 7-14. ⚠ CITED FROM MEMORY -- not yet checked against usb_20.pdf
+#: (Wilson 11-13: the gate says so until it is).
+USB_TATTDB_MIN_NS = 100_000_000   # clock-ok: a spec duration, converted through clock
+TATTDB_CITED = "USB 2.0 §7.1.7.3 / Table 7-14, TATTDB >= 100 ms (FROM MEMORY, not yet checked against the spec PDF)"
+PROBE = "test/usb_startup_probe.v"
+#: the arms: the gate's own image, and agent 2's busy image with the other
+#: lanes at 42 and at 20
+STARTUP_ARMS = [("idle others", None), ("busy, others at 42", (30, 42)),
+                ("busy, others at 20", (30, 20))]
+
+
+def startup_judge(stalls, bound):
+    """[problem] for one arm's USB-lane stall cycles against the bound (cycles)."""
+    if not stalls:
+        return ["VACUOUS: the probe saw no USB-lane stall, so it measured nothing"]
+    if max(stalls) >= bound:
+        return ["the start-up stall ends at cycle %d, not before the attach debounce (%d cycles)"
+                % (max(stalls), bound)]
+    return []
+
+
+def startup_section(tmp, pool):
+    print("\n  U7 the start-up stall vs the attach debounce (outside the proofs)")
+    probs = []
+    bound = clock.cycles_nominal(USB_TATTDB_MIN_NS)
+    print("    bound: %s = %d cycles at %.3f MHz" % (TATTDB_CITED, bound, clock.mhz()))
+    vvp = os.path.join(tmp, "usbrx_startup.vvp")
+    r = run([tool("iverilog"), "-g2012", "-I", ROOT, "-o", vvp, "-s", "tb_usbrx",
+             "-s", "usb_startup_probe", BENCH, PROBE] + RTL)
+    if r.returncode != 0:
+        return ["U7 build failed: %s" % (r.stdout + r.stderr)[-300:]]
+    tr, t_end = line([packet(*PAYLOADS[0])], 0.0, 0, 5)
+    wave = os.path.join(tmp, "wave_startup.txt")
+    write_wave(wave, tr)
+    jobs = []
+    for name, busy in STARTUP_ARMS:
+        img = os.path.join(tmp, "usbrx_startup_%d.hex" % len(jobs))
+        I.write_image(img, image(busy=busy))
+        sim_run.scratch_image(GEN, img)
+        jobs.append((name, pool.submit(run, sim_run.vvp(
+            [vvp, "+IMG=%s" % img, "+WAVE=%s" % wave, "+NCYC=%d" % (t_end + 400)], images=[img]))))
+    ends = []
+    for name, fut in jobs:
+        out = fut.result().stdout
+        js = [(int(c), int(ln), int(p)) for c, ln, p
+              in re.findall(r"^JS (\d+) (\d+) (\d+)$", out, re.M)]
+        usb = [c for c, ln, _p in js if ln == I.USB_LANE]
+        unprimed = sum(1 for _c, ln, p in js if ln == I.USB_LANE and not p)
+        pr = startup_judge(usb, bound) if "END" in out else ["%s: the sim did not finish" % name]
+        print("    %-20s USB-lane stall cycles %3d (%d before primed), %s; other lanes' %d  %s"
+              % (name, len(usb), unprimed,
+                 ("cycles %d-%d" % (min(usb), max(usb))) if usb else "none",
+                 len(js) - len(usb), "ok" if not pr else "*** " + pr[0]))
+        probs += ["U7 %s: %s" % (name, p) for p in pr]
+        if usb:
+            ends.append(max(usb))
+    if ends:
+        e = max(ends)
+        print("    the stall ends at cycle %d = %.2f us; the bound is %d cycles (%.0fx)"
+              % (e, e * 1e6 / clock.hz(), bound, bound / max(e, 1)))
+    # must-fires: the judge goes red on a stall that reaches the bound, and on none
+    print("    must-fire: a stall ending at the bound          %s"
+          % ("red  ok" if startup_judge([1, bound], bound) else "*** STAYED GREEN"))
+    print("    must-fire: no stall seen (a blind probe)        %s"
+          % ("red  ok" if startup_judge([], bound) else "*** STAYED GREEN"))
+    if not startup_judge([1, bound], bound) or not startup_judge([], bound):
+        probs.append("U7 must-fire: startup_judge stayed green")
+    if not startup_judge([bound - 1], bound) == []:
+        probs.append("U7 control: a stall ending before the bound read red")
+    return probs
 
 
 MUTANTS = [

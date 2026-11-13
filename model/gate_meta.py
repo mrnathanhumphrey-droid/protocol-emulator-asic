@@ -194,6 +194,9 @@ SEAMS = (
     # bundle 3: `judge` always clean -> M_NO_REANCHOR / M_UNSTUFF_KEEP /
     # M_STUFF_NOFLAG / M_REAN_NOCOMP survive (its problems are element 0)
     ("test/run_usbrx.py", "run_usbrx.judge", "slow", "E0"),
+    # U7 (Wilson 11-13, D): `startup_judge` always clean -> a stall past the
+    # attach debounce, and a blind probe, would both pass
+    ("test/run_usbrx.py", "run_usbrx.startup_judge", "slow", "E"),
     # bundle 4: `judge` always empty -> M_CRC_ALWAYS_OK / M_CRC_NO_PRIME survive
     ("test/run_usbcrc.py", "run_usbcrc.judge", "slow", "E"),
     # bundle 5: `judge` always clean -> M_READY_* / M_BUF_NO_REFUSE /
