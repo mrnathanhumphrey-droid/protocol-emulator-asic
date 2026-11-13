@@ -207,12 +207,17 @@ def environment():
     if os.name == "nt":
         if not shutil.which("wsl.exe"):
             raise CouldNotRun("Windows without wsl.exe: no LibreLane to run")
-        r = subprocess.run(["wsl.exe", "--", "test", "-x", WSL_PY])
+        # PE_LL_WSL_* select another local flow, e.g. the ttihp27a mirror (dev4,
+        # Ciel PDK) -- c1_run_27a.sh's: /opt/c1/venv27a, /opt/c1/ciel27a
+        py = os.environ.get("PE_LL_WSL_PY", WSL_PY)
+        r = subprocess.run(["wsl.exe", "--", "test", "-x", py])
         if r.returncode:
-            raise CouldNotRun("no LibreLane python at %s in WSL" % WSL_PY)
-        return "wsl", {"py": WSL_PY, "pdk_root": WSL_PDK, "tt": WSL_TT,
-                       "pdk_args": "--manual-pdk", "tt_args": "--ihp",
-                       "label": "LOCAL WSL flow (development reading; CI is the record)"}
+            raise CouldNotRun("no LibreLane python at %s in WSL" % py)
+        return "wsl", {"py": py, "pdk_root": os.environ.get("PE_LL_WSL_PDK", WSL_PDK),
+                       "tt": os.environ.get("PE_LL_WSL_TT", WSL_TT),
+                       "pdk_args": os.environ.get("PE_LL_WSL_PDK_ARGS", "--manual-pdk"),
+                       "tt_args": os.environ.get("PE_LL_WSL_TT_ARGS", "--ihp"),
+                       "label": "LOCAL WSL flow %s (development reading; CI is the record)" % py}
     py = os.environ.get("PE_LL_PY", sys.executable)
     tt = os.environ.get("PE_TT_DIR", os.path.join(ROOT, "tt"))
     # PE_LL_PDK_ROOT first: CI does not export PDK_ROOT into the fast shard,
