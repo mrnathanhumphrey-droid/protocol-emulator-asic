@@ -35,6 +35,11 @@ for _p in (HERE, os.path.join(ROOT, "model")):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
+# ⭐ CI RUNS THIS ON VERILATOR (Wilson 11-12: GATE, "Verilator where the runtime
+# needs it"; iverilog took 186 s + 1,179 s for two of run_pit_s3's cases). An
+# explicit PE_SIM wins (iverilog nightly / at the lock). Set before run_pit_capture
+# is imported, which reads it.
+os.environ.setdefault("PE_SIM", "verilator")
 from toolchain import banner                # noqa: E402
 import run_pit_capture as RP                # noqa: E402
 import run_pit_s0 as R0                     # noqa: E402

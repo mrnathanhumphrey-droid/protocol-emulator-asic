@@ -68,6 +68,9 @@ KILLERS = {
     # killed on run_pit_gcd's CI subset (assertion arm + record arm) --------
     "M_DECODE_STALE": "test/run_pit_gcd.py", "M_DIVMASK_LATE": "test/run_pit_gcd.py",
     "M_LTTREE_NOEQ": "test/run_pit_gcd.py",   # s12 §4, the swap tree (Wilson 11-12)
+    # run_pit_s3 is a CI gate since 11-12 (Wilson: GATE); both die there, each
+    # red on its own case (Linux Verilator, 11-12)
+    "M_S3_LAST_KEEP": "test/run_pit_s3.py", "M_SRAM_WBUF_OVF": "test/run_pit_s3.py",
     "M_PIT_K_OFF1": "test/run_pit_capture.py", "M_PIT_MASK_DROP": "test/run_pit_capture.py",
     "M_PIT_NO_OVERRUN": "test/run_pit_capture.py", "M_PIT_WHY_DROP": "test/run_pit_capture.py",
     "M_PIT_NO_SAT": "test/run_pit_capture.py",

@@ -448,6 +448,14 @@ GATES=(
   # SUBSET on Verilator (the full 3,688 sets nightly, iverilog at the lock);
   # the s12 note's M_DECODE_STALE / M_DIVMASK_LATE killer, both must die on it.
   test/run_pit_gcd.py
+  # ⭐ v2 PIT stage 3 on the full chip (Wilson 11-12: GATE) -- the decode walk and
+  # the CRC recovery after a real capture, bit for bit vs pit_golden; on
+  # Verilator (156 s on Linux; iverilog nightly / at the lock).
+  test/run_pit_s3.py
+  # ⭐ v2 PIT item 2, THE ROUND TRIP (Wilson 11-12: GATE, a showcase claim):
+  # sniff -> spec -> assemble -> emulate -> sniff -> compare; must-fires: the
+  # emitter's init ^ 1 and a flipped CPOL. On Verilator (219 s on Linux).
+  test/run_pit_rt.py
   # ⭐ v2 LATCH STORE (Wilson 10-31, Track 2): the array powers up random (M_STORE_NO_FILL
   # and M_STORE_DROP_ROW0 must fail), and pe_store's read-after-write contract
   # stops a bench that reads a byte the cycle after it was written (both ports).
@@ -721,8 +729,9 @@ can_run() {
     model/gate_rtl_lint.py)
       { command -v "$VL" >/dev/null 2>&1 || command -v wsl.exe >/dev/null 2>&1; } \
         || { echo "no verilator and no wsl.exe to reach one"; return 1; } ;;
-    # the CI subset runs on Verilator (PE_SIM unset -> verilator)
-    test/run_pit_gcd.py)
+    # the CI subset runs on Verilator (PE_SIM unset -> verilator); so do the
+    # full-chip stage 3 and the round trip (Wilson 11-12)
+    test/run_pit_gcd.py|test/run_pit_s3.py|test/run_pit_rt.py)
       { command -v "$VL" >/dev/null 2>&1 || [ -n "${PE_VERILATOR:-}" ] \
         || command -v wsl.exe >/dev/null 2>&1; } \
         || { echo "no verilator and no wsl.exe to reach one"; return 1; } ;;

@@ -207,6 +207,9 @@ SEAMS = (
     ("test/run_pit_capture.py", "run_pit_capture.compare", "slow", "E0"),
     # v2 PIT chunk 2: `table_problems` always empty -> every M_S0_* survives
     ("test/run_pit_s0.py", "run_pit_s0.table_problems", "slow", "E"),
+    # 11-12 the round trip: `compare` always (no problem) -> the emitter's
+    # init ^ 1 and the flipped CPOL both pass the round trip
+    ("test/run_pit_rt.py", "run_pit_rt.compare", "slow", "E0"),
     # s12 note (11-11): `record_problems` always empty -> M_DECODE_STALE /
     # M_DIVMASK_LATE's record arms survive on the CI subset
     ("test/run_pit_gcd.py", "run_pit_gcd.record_problems", "slow", "E"),
@@ -263,6 +266,9 @@ NOT_STUBBABLE = {
     "test/gate_store_latch.py": "verdict made in main() from tb_store_latch.v's "
                                 "and tb_rowmux.v's output; priced by its six "
                                 "must-fire arms",
+    "test/run_pit_s3.py": "verdicts made inline in main() (problems appended per "
+                          "case: capture, stages, snapshot, record); priced by its "
+                          "MUTANTS arms, each of which must turn a case red",
     "test/run_ckack.py": "verdicts made inline by say() in main() against "
                          "sigrok's decode; priced by its mut_short / mut_long / "
                          "mut_under / noalt / oldtx / nack arms",
