@@ -101,6 +101,19 @@ def sigrok_i2c(binpath: str) -> dict:
     here, because Git Bash rewrites anything in the argv that looks like a path.
     """
     exe = os.environ.get("SIGROK_CLI", "sigrok-cli")
+    if os.name != "nt":
+        # ⭐ NATIVE ON LINUX (CI, Wilson 11-12: sigrok-cli pinned in CI's
+        # environment). A missing binary is rc 127 here, as from bash, so the
+        # caller's "decoder could not run" path sees the same thing either way.
+        argv = [exe, "-i", binpath, "-I", "binary:numchannels=2:samplerate=%d" % F_CLK,
+                "-P", "i2c:scl=0:sda=1", "-A", "i2c"]
+        try:
+            r = subprocess.run(argv, cwd=ROOT, capture_output=True, text=True,
+                               encoding="utf-8", errors="replace")
+            rc, out = r.returncode, (r.stdout or "") + (r.stderr or "")
+        except OSError as e:
+            rc, out = 127, "%s: %s" % (exe, e)
+        return {"rc": rc, "events": _i2c_events(out), "raw": out}
     wrap = os.path.join(ROOT, "probe_i2c_decode.sh")
     nl = chr(10)
     with open(wrap, "w", encoding="ascii", newline=nl) as fh:
@@ -113,6 +126,11 @@ def sigrok_i2c(binpath: str) -> dict:
                        capture_output=True, text=True, encoding="utf-8",
                        errors="replace", env=env)
     out = (r.stdout or "") + (r.stderr or "")
+    return {"rc": r.returncode, "events": _i2c_events(out), "raw": out}
+
+
+def _i2c_events(out):
+    """sigrok-cli's `-A i2c` annotation text -> [(event, byte or None)]."""
     ev = []
     for line in out.replace("\r", "").split(chr(10)):
         line = line.strip()
@@ -127,7 +145,7 @@ def sigrok_i2c(binpath: str) -> dict:
                          r":\s*([0-9A-Fa-f]{2})$", tok)
             if m:
                 ev.append((m.group(1), int(m.group(2), 16)))
-    return {"rc": r.returncode, "events": ev, "raw": out}
+    return ev
 
 
 def transactions(ev):

@@ -290,12 +290,33 @@ def chip_data_reads(arm):
     return [v for n, v in arm["rx"] if n == 8]
 
 
+def sigrok_present():
+    """(found, where): sigrok-cli natively (CI) or inside WSL (the dev box),
+    from $SIGROK_CLI like the decoder itself."""
+    import shutil
+    exe = os.environ.get("SIGROK_CLI", "sigrok-cli")
+    if os.name != "nt":
+        p = shutil.which(exe) or (exe if os.path.isfile(exe) else None)
+        return bool(p), p or exe
+    r = subprocess.run(["wsl.exe", "-e", "bash", "-lc", "command -v %s" % exe],
+                       capture_output=True, text=True)
+    return r.returncode == 0, (r.stdout.strip() or exe) + " (WSL)"
+
+
 def main() -> int:
     banner("iverilog", "vvp")
     print()
     print("=" * 78)
     print("ACK (b)-(c) -- the clocked I2C random read, adjudicated by sigrok")
     print("=" * 78)
+    # ⛔ NO SIGROK IS "NOT RUN", AND NOT RUN IS RED (Wilson 11-12): sigrok is the
+    # judge of every byte here; without it nothing this gate claims was checked
+    found, where = sigrok_present()
+    print("  sigrok-cli: %s" % (where if found else "NOT FOUND (%s)" % where))
+    if not found:
+        print("  *** NOT RUN: sigrok-cli is not installed -- the bytes have no judge")
+        print("  GATE ckack: NOT RUN")
+        return 1
     os.makedirs(SCRATCH, exist_ok=True)
     image(os.path.join(SCRATCH, "ckack.hex"))
     # ⛔ THE PROGRAM MUST BE ONE THE TOOLCHAIN ADMITS: `pe_asm`'s queue rule

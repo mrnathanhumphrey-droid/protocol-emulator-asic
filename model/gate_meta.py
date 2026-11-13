@@ -247,6 +247,9 @@ NOT_STUBBABLE = {
     "test/gate_store_latch.py": "verdict made in main() from tb_store_latch.v's "
                                 "and tb_rowmux.v's output; priced by its six "
                                 "must-fire arms",
+    "test/run_ckack.py": "verdicts made inline by say() in main() against "
+                         "sigrok's decode; priced by its mut_short / mut_long / "
+                         "mut_under / noalt / oldtx / nack arms",
     "model/gate_meta.py": "this gate",
 }
 

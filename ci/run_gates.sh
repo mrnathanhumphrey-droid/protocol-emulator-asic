@@ -356,6 +356,9 @@ GATES=(
   # survive LIBRELANE's own synthesis (the generic netlist cannot see the
   # merge); must-fire: the same synthesis with the five keeps stripped.
   model/gate_select_copies.py
+  # ckack (Wilson 11-12): the clocked I2C random read judged by sigrok's own
+  # i2c decoder (sigrok-cli pinned in CI); no sigrok is NOT RUN, which is red.
+  test/run_ckack.py
   # HOLD RULE (Wilson 11-11): FW-1's 5 cycles proven at the worst phase --
   # a 4-cycle host fails with a late synchroniser, a 5-cycle host does not.
   test/run_hold_rule.py

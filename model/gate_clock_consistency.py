@@ -446,6 +446,10 @@ def main(argv=None):
     fw_doc = read(FIRMWARE)
     rc |= report(fw_check(files[PROJECT], fw_doc, chip_hz))
     print("  --- 10. the stretch fault bound: the RTL's elaborated value == clock.py's, per target ---")
+    # ruling V: a gate that runs a tool names the tool and its version (banner)
+    sys.path.insert(0, os.path.join(ROOT, "test"))
+    from toolchain import banner                         # noqa: E402
+    banner("iverilog", "vvp")
     for t in sorted(clock.TARGETS):
         rc |= report(stretch_elab(clock.target_hz(t)))
     print("  --- 7. must-fires (a mutated copy must go red) ---")

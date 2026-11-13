@@ -286,6 +286,23 @@ jobs:
         shell: bash
         run: sudo apt-get update && sudo apt-get install -y iverilog verilator yosys
 
+      # ⭐ SIGROK, PINNED, FOR test/run_ckack.py (Wilson 11-12, decision 5): its
+      # bytes are judged by sigrok's own i2c decoder. Pinned by the UPSTREAM
+      # versions the dev box decodes with (sigrok-cli 0.7.2, libsigrokdecode
+      # 0.5.3); the Debian revision differs per Ubuntu release, so the step
+      # asserts the upstream numbers and is red on anything else. A missing
+      # sigrok makes run_ckack print NOT RUN, which is red.
+      - name: "sim2: sigrok-cli (pinned: 0.7.2 / libsigrokdecode 0.5.3)"
+        if: matrix.shard == 'sim2'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get install -y sigrok-cli
+          v=$(sigrok-cli --version)
+          echo "$v" | head -6
+          echo "$v" | grep -q '^sigrok-cli 0\.7\.2$' || { echo "*** sigrok-cli is not 0.7.2"; exit 1; }
+          echo "$v" | grep -q 'libsigrokdecode 0\.5\.3' || { echo "*** libsigrokdecode is not 0.5.3"; exit 1; }
+
       # ⛔⛔ A PINNED VERILATOR, BECAUSE THE DISTRO'S IS TOO OLD AND BECAUSE THE
       # TWO ENVIRONMENTS MUST AGREE. cocotb 2.0.1 refuses to run on anything
       # below Verilator 5.036 ("cocotb requires Verilator 5.036 or later, but
