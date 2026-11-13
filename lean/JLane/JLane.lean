@@ -23,3 +23,4 @@ import JLane.Refine
 import JLane.Hold
 import JLane.HoldRun
 import JLane.HoldGate
+import JLane.SelfTimed
