@@ -180,9 +180,10 @@ that argument is checked rather than trusted: 24 of 31 pin-feasible subsets, 54
 (lane, subset) pairs, 0 disagreements with pyRTA.
 
 **Refill spacing.** `d_min ≥ D* = 20 → J = 1`: a lane whose actions are at least
-20 cycles apart never waits on the shared fetch port — measured (zero refill
-stalls at every port-feasible point of the d = 20–60 runs) and proved in Lean on
-a model of the engine ([`docs/J_LANE_PROOF.md`](docs/J_LANE_PROOF.md)).
+20 cycles apart never waits on the shared fetch port. D* = 20 is proven in Lean
+on a model of the engine ([`docs/J_LANE_PROOF.md`](docs/J_LANE_PROOF.md)). Zero
+refill stalls measured at d = 20–60 on v1, and at d = 20 on v2; the v2 sweep over
+d = 21–60 is pending.
 
 **Why one shared engine, not a barrel.** A barrel gives each lane a fixed time
 slice: isolation comes free, but every idle slot is wasted and the slice sets

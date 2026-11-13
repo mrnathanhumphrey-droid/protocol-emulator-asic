@@ -71,6 +71,13 @@ function integer v3_tab;
       32'hed15ded8: case (field) 0: v3_tab = 0; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // run_ckack: ckack.hex
       32'h2c1c0396: case (field) 0: v3_tab = 0; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // run_ckack: ckack_half.hex
       32'hdb08ab91: case (field) 0: v3_tab = 0; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // run_cktx: cktx.hex
+      32'h11a1b7f8: case (field) 0: v3_tab = 0; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // run_dstar_check: --five d=21..25
+      32'h38f6809d: case (field) 0: v3_tab = 0; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // run_dstar_check: --five d=22..26
+      32'ha9649d9f: case (field) 0: v3_tab = 0; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // run_dstar_check: --five d=25..29
+      32'h791753b1: case (field) 0: v3_tab = 0; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // run_dstar_check: --five d=30..34
+      32'ha0716ff6: case (field) 0: v3_tab = 0; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // run_dstar_check: --five d=40..44
+      32'h8c5a05fd: case (field) 0: v3_tab = 0; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // run_dstar_check: --five d=60..64
+      32'hebb584a4: case (field) 0: v3_tab = 1; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // run_dstar_check: arm C (8, 100 x4)
       32'h688b4b33: case (field) 0: v3_tab = 0; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // run_rxbw: rxfast d=32
       32'h3c71ab1c: case (field) 0: v3_tab = 0; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // run_rxbw: rxfast d=40
       32'hb8b7ca03: case (field) 0: v3_tab = 0; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // run_rxbw: rxfast d=44
@@ -174,6 +181,13 @@ task v3_tab_name;
       32'hed15ded8: $display("  clocked_conform[V3] image: run_ckack: ckack.hex (by its loaded bytes)");
       32'h2c1c0396: $display("  clocked_conform[V3] image: run_ckack: ckack_half.hex (by its loaded bytes)");
       32'hdb08ab91: $display("  clocked_conform[V3] image: run_cktx: cktx.hex (by its loaded bytes)");
+      32'h11a1b7f8: $display("  clocked_conform[V3] image: run_dstar_check: --five d=21..25 (by its loaded bytes)");
+      32'h38f6809d: $display("  clocked_conform[V3] image: run_dstar_check: --five d=22..26 (by its loaded bytes)");
+      32'ha9649d9f: $display("  clocked_conform[V3] image: run_dstar_check: --five d=25..29 (by its loaded bytes)");
+      32'h791753b1: $display("  clocked_conform[V3] image: run_dstar_check: --five d=30..34 (by its loaded bytes)");
+      32'ha0716ff6: $display("  clocked_conform[V3] image: run_dstar_check: --five d=40..44 (by its loaded bytes)");
+      32'h8c5a05fd: $display("  clocked_conform[V3] image: run_dstar_check: --five d=60..64 (by its loaded bytes)");
+      32'hebb584a4: $display("  clocked_conform[V3] image: run_dstar_check: arm C (8, 100 x4) (by its loaded bytes)");
       32'h688b4b33: $display("  clocked_conform[V3] image: run_rxbw: rxfast d=32 (by its loaded bytes)");
       32'h3c71ab1c: $display("  clocked_conform[V3] image: run_rxbw: rxfast d=40 (by its loaded bytes)");
       32'hb8b7ca03: $display("  clocked_conform[V3] image: run_rxbw: rxfast d=44 (by its loaded bytes)");

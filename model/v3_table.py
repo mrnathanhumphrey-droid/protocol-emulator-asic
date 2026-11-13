@@ -126,6 +126,25 @@ def _gen_rxfast(d):
 RXBW_SWEEP_D = (32, 40, 44, 45, 46, 47, 48, 49, 50, 52, 64)
 
 
+def _gen_five(delays):
+    """run_dstar_check's sweep image (make_smoke_image --five d0..d4, written
+    through pe_isa.write_image -- the full store, as the bench loads it)."""
+    def f():
+        import make_smoke_image
+        import pe_isa
+        return bytes(pe_isa.full_store(bytes(make_smoke_image.build_five(list(delays)))))
+    return f
+
+
+#: ⛔ run_dstar_check's points (Wilson 11-12, the 11-12b ruling): only d = 20 ran
+#: on v2 (byte-identical to the tracked probe_cov_ds20); d = 21..60 and arm C
+#: stopped at V3-ID (unknown image, fatal), so the D* sweep the README called
+#: "measured" had never been measured on v2. Spelled out, not imported (the
+#: RXBW_SWEEP_D precedent); each is `--five d d+1 .. d+4`, the runner's recipe.
+DSTAR_D = (21, 22, 25, 30, 40, 60)
+DSTAR_ARM_C = (8, 100, 100, 100, 100)
+
+
 def _gen_store_falloff():
     """store_run.sh's M3 must-fire: a lane with no terminating REARM."""
     import pe_isa
@@ -251,6 +270,13 @@ GENERATED = (
     ("run_wirefeed_mf: old WS2812 (REARM d=0)", _gen_old_ws2812, 1,
      "the delay-0 build pe_asm REFUSES today; run only as the must-fire, "
      "with its V3 facts supplied by allowlisted override"),
+) + tuple(
+    ("run_dstar_check: --five d=%d..%d" % (d, d + 4), _gen_five([d + i for i in range(5)]), 0,
+     "the D* sweep's port-feasible point d = %d (Theorem 3 predicts RQ = 0)" % d)
+    for d in DSTAR_D) + (
+    ("run_dstar_check: arm C (8, 100 x4)", _gen_five(list(DSTAR_ARM_C)), 1,
+     "the D* control BELOW D* (lane 0 at d = 8): its RQ must be non-zero; "
+     "a sub-D* probe, never a published program"),
 )
 
 #: run_rxbw's sweep images, registered the same way (see RXBW_SWEEP_D)
