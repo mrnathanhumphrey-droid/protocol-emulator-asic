@@ -48,6 +48,7 @@ test/run_branch_check.py            ^\s*GATE branch-check: PASSED\s*$
 test/run_arm2.py                    ^\s*GATE arm2: PASSED\s*$
 test/run_pair.py                    ^\s*GATE pair: PASSED\s*$
 test/run_usbrx.py                   ^\s*GATE usbrx: PASSED\s*$
+model/gate_usb_sweep.py             ^\s*GATE usb_sweep: PASSED\s*$
 test/run_usbcrc.py                  ^\s*GATE usbcrc: PASSED\s*$
 test/run_usbbuf.py                  ^\s*GATE usbbuf: PASSED\s*$
 test/run_usbaddr.py                 ^\s*GATE usbaddr: PASSED\s*$

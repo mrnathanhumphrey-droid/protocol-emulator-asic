@@ -40,7 +40,7 @@ import proof_constants as PC          # noqa: E402
 import pe_isa as I                    # noqa: E402
 import run_usbrx as RX                # noqa: E402
 import sim_run                        # noqa: E402
-from toolchain import tool            # noqa: E402
+from toolchain import banner, tool    # noqa: E402
 
 GEN = "gate_usb_sweep"
 PROBE = "model/usb_sweep_probe.v"
@@ -146,6 +146,7 @@ def run_arm(vvp, tmp, pool, name, img, stim, tag):
 
 
 def main() -> int:
+    banner("iverilog", "vvp")          # ruling V2: the log names the binaries
     k = PC.load()
     clean, margin1 = arms(k)
     for name, img in clean:

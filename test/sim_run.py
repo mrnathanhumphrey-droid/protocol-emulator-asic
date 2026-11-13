@@ -191,6 +191,13 @@ SCRATCH_GENERATORS: dict = {
                " re-anchoring), judged byte for byte against run_usbrx's golden"
                " decode of the host line it drives on tb_usbrx, not by the A2 gap",
         "v3": {"no_v3_layer": "test/tb_usbrx.v"}},
+    "gate_usb_sweep": {
+        "script": "model/gate_usb_sweep.py", "pattern": "usbsweep_*.hex",
+        "clocked": True,
+        "why": "Wilson 11-13 condition 4: usb_nostall / usb_j2_nb / usb_br1_window measured"
+               " on the admissible sweep (bytes, J <= 2, no stall, the 31-cycle window bound),"
+               " judged by run_usbrx's golden on tb_usbrx, not by the A2 gap",
+        "v3": {"no_v3_layer": "test/tb_usbrx.v"}},
     "run_pit_capture": {
         "script": "test/run_pit_capture.py", "pattern": "pitcap_*.hex",
         "clocked": True,

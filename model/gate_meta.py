@@ -197,6 +197,8 @@ SEAMS = (
     # U7 (Wilson 11-13, D): `startup_judge` always clean -> a stall past the
     # attach debounce, and a blind probe, would both pass
     ("test/run_usbrx.py", "run_usbrx.startup_judge", "slow", "E"),
+    # the USB sweep (Wilson 11-13 cond. 4): `judge` always clean -> a stall passes
+    ("model/gate_usb_sweep.py", "gate_usb_sweep.judge", "slow", "E"),
     # bundle 4: `judge` always empty -> M_CRC_ALWAYS_OK / M_CRC_NO_PRIME survive
     ("test/run_usbcrc.py", "run_usbcrc.judge", "slow", "E"),
     # bundle 5: `judge` always clean -> M_READY_* / M_BUF_NO_REFUSE /

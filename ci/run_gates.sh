@@ -496,6 +496,9 @@ GATES=(
   # +-1.5 %, the deadline rule, the sub-cycle phase walk (IN_SUITE), and the
   # four re-anchor / unstuffing must-fires' killer.
   test/run_usbrx.py
+  # the USB no-stall sweep (Wilson 11-13 condition 4; agent 2, 02bf147): usb_nostall,
+  # usb_j2_nb and usb_br1_window measured on the admissible sweep
+  model/gate_usb_sweep.py
   # ⭐ bundle 4 (Wilson 11-08): the RX CRC16 + the flags as virtual pins --
   # ACK exactly the good packets, never a corrupted one; M_CRC_*'s killer.
   test/run_usbcrc.py
@@ -758,7 +761,7 @@ can_run() {
       { command -v "$VL" >/dev/null 2>&1 || [ -n "${PE_VERILATOR:-}" ] \
         || command -v wsl.exe >/dev/null 2>&1; } \
         || { echo "no verilator and no wsl.exe to reach one"; return 1; } ;;
-    model/gate_one_encoder.py|model/gate_v2_equiv.py|test/run_pit_capture.py|test/run_pit_s0.py|test/gate_store_latch.py|test/run_branch_check.py|test/run_arm2.py|test/run_pair.py|test/run_usbrx.py|test/run_usbcrc.py|test/run_usbbuf.py|test/run_usbaddr.py|test/run_usbrst.py|test/gl_harness_check.py|test/gate_tb_elaborates.py|test/run_mutants.py|model/gate_sda_hold.py|test/run_w_sweep.py|test/run_cktx.py|test/run_spidelay.py|test/run_spim_witness.py|test/run_spitgt.py|test/run_rxbw.py)
+    model/gate_one_encoder.py|model/gate_v2_equiv.py|test/run_pit_capture.py|test/run_pit_s0.py|test/gate_store_latch.py|test/run_branch_check.py|test/run_arm2.py|test/run_pair.py|test/run_usbrx.py|model/gate_usb_sweep.py|test/run_usbcrc.py|test/run_usbbuf.py|test/run_usbaddr.py|test/run_usbrst.py|test/gl_harness_check.py|test/gate_tb_elaborates.py|test/run_mutants.py|model/gate_sda_hold.py|test/run_w_sweep.py|test/run_cktx.py|test/run_spidelay.py|test/run_spim_witness.py|test/run_spitgt.py|test/run_rxbw.py)
       command -v "$IV" >/dev/null 2>&1 || { echo "iverilog not found (PE_IVERILOG unset and not on PATH)"; return 1; } ;;
     model/gate_reset_audit.py|model/gate_share_coupling.py)
       [ -n "${PE_NETLIST_JSON:-}" ] && [ -f "${PE_NETLIST_JSON:-}" ] \
