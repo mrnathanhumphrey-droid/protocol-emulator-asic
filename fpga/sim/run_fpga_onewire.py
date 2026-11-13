@@ -34,6 +34,7 @@ reported.
 POSITIVE TOKEN: `FPGA-ONEWIRE: PASSED` only on the success path.
 Usage: python fpga/sim/run_fpga_onewire.py [arm ...]   (default: all)
 """
+import concurrent.futures as cf
 import os
 import re
 import subprocess
@@ -49,6 +50,9 @@ import onewire                               # noqa: E402
 import pe_proto as P                         # noqa: E402
 import run_onewire as RO                     # noqa: E402
 import clock                                                      # noqa: E402  Wilson 11-03
+import pe_isa                                                     # noqa: E402  STORE_BYTES (F1.5)
+sys.path.insert(0, HERE)
+import fpga_engine                           # noqa: E402  iverilog only (Wilson 11-10)
 FPGA_HZ = clock.target_hz("fpga")   # the board this runs on, not the chip
 
 try:
@@ -258,9 +262,17 @@ def judge(txt, rxmap, nidle):
     d["loadcyc"] = int(m.group(1)) if m else 0
     chk("J11 silent during load/reset (DQ falls == 0)", d["iso"] == 0,
         "falls %s" % d["iso"])
-    # 256 bytes x 7 cycles each = 1792 cycles of load mode at the least
-    chk("a load was observed under the monitor (>= 1792 load-mode cycles)",
-        d["loadcyc"] >= 1792, "%d" % d["loadcyc"])
+    # ⛔ F1.5 (Wilson 11-09): EXACT, never a floor. ">= 1792 load-mode cycles"
+    # passed a load cut to v1's 256 bytes for 15 days: the bytes written must be
+    # the whole store, and the chip itself must have accepted them.
+    m = re.search(r"^OW-LOADBYTES (\d+)", txt, re.M)
+    d["ldbytes"] = int(m.group(1)) if m else None
+    chk("the load wrote exactly the store (== %d bytes, pe_isa.STORE_BYTES)" % pe_isa.STORE_BYTES,
+        d["ldbytes"] == pe_isa.STORE_BYTES, "%s" % d["ldbytes"])
+    m = re.search(r"^OW-CHIPLOAD full=(\d) bad_magic=(\d) short=(\d)", txt, re.M)
+    d["chipload"] = tuple(int(x) for x in m.groups()) if m else None
+    chk("the chip accepted the load (store full, MAGIC good, not short)",
+        d["chipload"] == (1, 0, 0), "full/bad_magic/short = %s" % (d["chipload"],))
     chk("no FAIL line", not d["fails"], d["fails"][0][:90] if d["fails"] else "")
     return d, ck
 
@@ -284,6 +296,12 @@ def show(name, ck):
 
 def main():
     print("FPGA 1-Wire build (OW = 1) -- simulation before Vivado")
+    # ⛔ NOT BIT-EXACT ON VERILATOR (11-10): the bus model's open-drain pull-up
+    # is `assign #(RISE_NS, 0)` -- an inertial rise, an instant fall -- which
+    # iverilog honours and Verilator does not; on Verilator the transaction
+    # stalls. Porting it is a bench change (Wilson's call), so: iverilog only.
+    fpga_engine.iverilog_only("tb_fpga_onewire", "the open-drain bus model's inertial "
+                              "rise delay (assign #(RISE_NS, 0)) is iverilog semantics")
     banner("iverilog", "vvp")
     os.makedirs(TMP, exist_ok=True)
     want = set(a for a in sys.argv[1:] if not a.startswith("--"))
@@ -301,8 +319,42 @@ def main():
     def go(name, **kw):
         return sim(name, e, len(lines), pidx, fpath, **kw)
 
-    if not want or "ok" in want or "late_edge" in want or "late_over" in want:
-        txt = go("ok")
+    def parallel(runs):
+        """{name: kw} -> {name: log text}, every sim at once (each its own
+        tb_<name>.vvp and <name>.log, so they share no file)"""
+        if not runs:
+            return {}
+        with cf.ThreadPoolExecutor(max_workers=len(runs)) as ex:
+            fut = {n: ex.submit(go, n, **kw) for n, kw in runs.items()}
+            return {n: f.result() for n, f in fut.items()}
+
+    mfs = [("iso", dict(ISO_MF=1), lambda d, ck: d["iso"] and d["iso"] > 0,
+            "load bytes copied onto J11"),
+           ("slow", dict(BAD_AT=BAD_AT, BAD_SHIFT=4 * e.P),
+            lambda d, ck: d["status"] is not None and d["status"] & 0x02,
+            "byte %d pushed 2 byte times late -> UNDERRUN" % BAD_AT),
+           ("fast", dict(BAD_AT=BAD_AT, BAD_SHIFT=-2 * e.P),
+            lambda d, ck: d["status"] is not None and d["status"] & 0x10,
+            "byte %d pushed 1 byte time early -> TX-FULL" % BAD_AT),
+           # ⛔ F1.5: the glue streaming v1's half-store -- the 10-25..11-09
+           # break. The CHIP must refuse it (short load); judged on the chip's
+           # verdict, so no END is needed (a refused load never reaches it)
+           ("v1load", dict(LOAD_N=pe_isa.STORE_BYTES // 2, NCYC_MAX=400000),
+            lambda d, ck: d["ldbytes"] == pe_isa.STORE_BYTES // 2 and d["chipload"] == (0, 0, 1),
+            "v1's half-store stream -> the chip refuses (short load)")]
+    # ⭐ THE ARMS RUN IN PARALLEL, AS THE LOADER'S DO (Wilson 11-10, D step 1).
+    # Wave 1: every sim that needs nothing measured -- ok and the four fixed
+    # must-fires. Wave 2: the two arms SET BY ok's measured slack (late_edge,
+    # late_over). Wall time = the slowest of wave 1 + the slower of wave 2.
+    # The verdicts are judged below in the old order, one at a time; the
+    # bench is untouched.
+    need_ok = not want or bool({"ok", "late_edge", "late_over"} & want)
+    wave1 = {"ok": {}} if need_ok else {}
+    wave1.update((n, kw) for n, kw, _r, _w in mfs if not want or n in want)
+    out = parallel(wave1)
+
+    if need_ok:
+        txt = out["ok"]
         d, ck = judge(txt, rxmap, nidle)
         show("ok (the real build)", ck)
         rc |= 0 if all(o for _c, o, _d in ck) else 1
@@ -316,33 +368,31 @@ def main():
         else:
             print("    *** no poll decision measured")
             rc = 1
+    if sl_min is not None:
+        mfs.append(("late_over", dict(LATE=sl_min + 2 * (PUSH_TO_LOW_EDGE + WINDOW) + 40),
+                    lambda d, ck: d["status"] is not None and d["status"] & 0x02,
+                    "poll decision past the slack -> UNDERRUN"))
+        wave2 = {}
+        if not want or "late_edge" in want:
+            wave2["late_edge"] = dict(LATE=sl_min)
+        if not want or "late_over" in want:
+            wave2["late_over"] = mfs[-1][1]
+        out.update(parallel(wave2))
     if sl_min is not None and (not want or "late_edge" in want):
-        txt = go("late_edge", LATE=sl_min)
+        txt = out["late_edge"]
         d, ck = judge(txt, rxmap, nidle)
         show("late_edge (decision delayed by the full slack, %d cycles)" % sl_min, ck)
         rc |= 0 if all(o for _c, o, _d in ck) else 1
 
     print()
     print("  --- must-fires ---")
-    mfs = [("iso", dict(ISO_MF=1), lambda d, ck: d["iso"] and d["iso"] > 0,
-            "load bytes copied onto J11"),
-           ("slow", dict(BAD_AT=BAD_AT, BAD_SHIFT=4 * e.P),
-            lambda d, ck: d["status"] is not None and d["status"] & 0x02,
-            "byte %d pushed 2 byte times late -> UNDERRUN" % BAD_AT),
-           ("fast", dict(BAD_AT=BAD_AT, BAD_SHIFT=-2 * e.P),
-            lambda d, ck: d["status"] is not None and d["status"] & 0x10,
-            "byte %d pushed 1 byte time early -> TX-FULL" % BAD_AT)]
-    if sl_min is not None:
-        mfs.append(("late_over", dict(LATE=sl_min + 2 * (PUSH_TO_LOW_EDGE + WINDOW) + 40),
-                    lambda d, ck: d["status"] is not None and d["status"] & 0x02,
-                    "poll decision past the slack -> UNDERRUN"))
     for name, kw, red, why in mfs:
         if want and name not in want:
             continue
-        txt = go(name, **kw)
+        txt = out[name]
         d, ck = judge(txt, rxmap, nidle)
         reds = [c for c, o, _d in ck if not o]
-        fired = bool(d["end"] and red(d, ck) and reds)
+        fired = bool((d["end"] or name == "v1load") and red(d, ck) and reds)
         print("  must-fire %-9s (%s): %s" % (
             name, why, ("red ok -- " + "; ".join(reds)[:160]) if fired
             else "*** MUST-FIRE FAILED (end=%s status=%s iso=%s reds=%s)"

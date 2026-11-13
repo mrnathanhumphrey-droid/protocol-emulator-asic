@@ -74,7 +74,7 @@ REGISTRY = {
     "uart_rx_image.hex": (WITNESS, {
         "runner": "test/run_uartrx.py",
         "how": "tb_uartrx compares every push with what the PEER sent "
-               "(`sent[]`), count exact, at T = 434 and T_MIN, +-3 %"}),
+               "(`sent[]`), count exact, at T = 521 and T_MIN, +-3 %"}),
     "uart_tx_image.hex": (WITNESS, {
         "runner": "test/run_uarttx.py",
         "how": "tb_uarttx's peer on its own clock at 115200: every frame "
@@ -88,14 +88,14 @@ REGISTRY = {
         "how": "the WS2812 3-sub-bit control (REARM d = 21) beside four "
                "d = 20 lanes: V3 content exact on the bus, count exact, and "
                "V3-T worst response within its pyRTA bound"}),
-    # ⛔ Wilson 11-04 (option b): the board runs 50 MHz, the bench 60, so the
+    # ⛔ Wilson 11-04 (option b): the board ran 50 MHz, the bench 60 (F2: both 60 now), so the
     # board image is held to the bench program REBUILT AT THE BOARD'S TARGET
     # (PE_TARGET=fpga) -- which also tests that retargeting reproduces the
     # board program exactly. A mismatch is a toolchain finding, never STALE.
-    "uart_rx_434.hex": (WITNESS, {
+    "uart_rx_board.hex": (WITNESS, {
         "same_as": "uart_rx_image.hex", "same_as_target": "fpga",
         "how": "the board's BRAM image is byte-identical to the bench "
-               "program rebuilt at the board's 50 MHz target"}),
+               "program rebuilt at the board's own target (fpga/board.yaml)"}),
     # ⚠ SIMULATION: the hardware witness is the FPGA with the real MB85RS64V
     "corpus_spim25.hex": (WITNESS, {
         "runner": "test/run_spim_witness.py",
@@ -162,7 +162,7 @@ REGISTRY = {
     # ⛔⛔ MECHANISM IS NOT "UNCHECKED" (Wilson): each names the CI runner that
     # checks EXACTLY what the image is for, held to the witness rules (in CI,
     # positive token, names the image).
-    "uart_rx_434_nostop.hex": (MECHANISM, {
+    "uart_rx_board_nostop.hex": (MECHANISM, {
         "why": "the PC loader's count-back demonstrator and run_uartrx's "
                "`nostop` must-fire: the stop sample is dropped ON PURPOSE, so "
                "the framing check is gone and the host stream is one byte per "
@@ -347,19 +347,6 @@ def universe():
     return ({n: dgf.load(p) for n, p in u.items()}, list(u.probs))
 
 
-#: ⭐ v2 (Nate + Wilson 10-25): the BOARD images stay v1-encoded; this gate
-#: reads them translated (image_universe.board_as_v2), so every check below
-#: (feed class, `same_as` the bench image) is about the SAME program in v2's
-#: word; a board image that does not translate to its bench image is red.
-def board_stale_inputs(names):
-    """The board images (must NOT move) and the bench images they are
-    `same_as` (moved by step 2, inside its change set)."""
-    ins = ["fpga/images/" + n for n in names]
-    for n in names:
-        src = (REGISTRY.get(n) or (None, {}))[1].get("same_as")
-        if src:
-            ins.append("test/" + src)
-    return ins
 
 
 def ci_runners():
@@ -558,8 +545,7 @@ def main() -> int:
     print("  WF1 -- EVERY ACCEPTED IMAGE NAMES ITS WIRE == FEED WITNESS")
     print("=" * 78)
     imgs, probs = universe()
-    import image_universe
-    imgs, board = image_universe.board_as_v2(imgs)
+    # F1.5 (Wilson 11-09): the board images are native v2 -- read as they are
     listed, tokens = ci_runners()
     exempt = exempt_set()
     built = target_builds(REGISTRY)
@@ -604,9 +590,9 @@ def main() -> int:
                 lst=listed - {"test/run_uartrx.py"},
                 needle="not in ci/run_gates.sh")
     ims = dict(imgs)
-    b = bytearray(ims["uart_rx_434.hex"])
+    b = bytearray(ims["uart_rx_board.hex"])
     b[-1] ^= 1
-    ims["uart_rx_434.hex"] = bytes(b)
+    ims["uart_rx_board.hex"] = bytes(b)
     ok &= fires("the board image no longer the bench image", REGISTRY,
                 ims=ims, needle="bytes differ")
     bl = dict(built)
@@ -614,9 +600,9 @@ def main() -> int:
         bb = bytearray(bl[k])
         bb[-1] ^= 1
         bl[k] = bytes(bb)
-    ok &= fires("the 50 MHz rebuild no longer the board image", REGISTRY,
+    ok &= fires("the board-target rebuild no longer the board image", REGISTRY,
                 blt=bl, needle="TOOLCHAIN finding")
-    ok &= fires("the 50 MHz rebuild missing", REGISTRY,
+    ok &= fires("the board-target rebuild missing", REGISTRY,
                 blt={}, needle="could not be rebuilt")
     r4 = dict(REGISTRY)
     r4["rxfast_image.hex"] = (MECHANISM, {"why": "drops by design"})
@@ -749,18 +735,6 @@ def main() -> int:
     print("  OWED published lanes: %d -- the lock requires 0 at the sub-v1 SHA. "
           "INTERNAL images (%d) are checked another way and are not published "
           "claims." % (owed_lanes, counts.get(INTERNAL, 0)))
-    # ⭐ v2: green only BECAUSE the board images were translated is the
-    # declared staleness (model/stale_records.py), not a PASS
-    if rc == 0 and board:
-        import stale_records as SR
-        v, why = SR.stale_verdict("model/gate_wire_feed.py",
-                                  SR.moved(board_stale_inputs(board)))
-        print("  stale_records: %s -- %s" % (v, why))
-        if v == "STALE":
-            print(SR.token("wire-feed", why))
-            return 0
-        if v == "FAIL":
-            rc = 1
     print("  GATE wire-feed: %s" % ("PASSED" if rc == 0 else "*** FAILED"))
     return rc
 

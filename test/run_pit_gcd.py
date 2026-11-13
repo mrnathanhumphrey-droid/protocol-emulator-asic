@@ -60,6 +60,7 @@ from toolchain import banner                # noqa: E402
 # (Read by run_pit_capture at import, so it is set before that import.)
 if "--full" not in sys.argv and "--find-kills" not in sys.argv:
     os.environ.setdefault("PE_SIM", "verilator")
+import pe_isa                               # noqa: E402  STORE_BYTES
 import run_pit_capture as RP                # noqa: E402
 import run_pit_s3 as R3                     # noqa: E402
 import pit_s0_golden as S0                  # noqa: E402
@@ -243,7 +244,7 @@ def directed_sets(n, seed):
 
 def run_one(args):
     vbin, tmp, i, msgs, ncyc = args
-    mem = [0] * 512
+    mem = [0] * pe_isa.STORE_BYTES                  # the store's size from the one encoder
     p = DEC_AT
     for m in msgs:
         mem[p] = len(m)

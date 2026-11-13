@@ -204,7 +204,8 @@ def main() -> int:
     rc = 0
     probs = filler_checks()
     import image_universe
-    imgs, board = image_universe.board_as_v2(images())   # v2: board images, translated
+    # F1.5 (Wilson 11-09): the board images are native v2 -- read as they are
+    imgs = images()
     print("  images  : %d on disk" % len(imgs))
     print()
     print("  %-24s %6s %8s %7s" % ("image", "bytes", "program", "filler"))
@@ -258,17 +259,6 @@ def main() -> int:
 
     print()
     print("=" * 78)
-    # ⭐ v2: green only because the board images were read translated is the
-    # declared staleness (model/stale_records.py), not a PASS
-    if rc == 0 and board:
-        v, why = image_universe.board_stale_verdict("model/gate_store_full.py", board)
-        print("  stale_records: %s -- %s" % (v, why))
-        if v == "STALE":
-            import stale_records as SR
-            print(SR.token("store-full", why))
-            return 0
-        if v == "FAIL":
-            rc = 1
     print("  GATE store-full: %s" % ("PASSED" if rc == 0 else "FAILED"))
     return rc
 

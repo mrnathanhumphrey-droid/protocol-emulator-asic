@@ -193,12 +193,21 @@ def main() -> int:
     e6 = copy.deepcopy(ev)
     e6["timing"]["fscl_khz"]["max"] = FM["fscl_max_khz"] + 0.1
     mf.append(("(iii) fSCL pushed past 400 kHz", audit(e6), "fSCL max"))
+    mf_bad = False
     for label, ps, needle in mf:
         hit = any(needle in p for p in ps)
         print("    %-38s %s" % (label, "red  ok" if hit else "*** NOT RED"))
         rc |= 0 if hit else 1
+        mf_bad = mf_bad or not hit
     print()
-    if rc == 0:
+    # ⭐ F1.5 (Wilson 11-09, option (a)): the board image was regenerated as v2,
+    # so the record's image hash no longer matches -- the bench has not re-run
+    # it yet, which is STALE, not broken. As gate_onewire_hw_witness: if the
+    # ONLY problems are recorded files not the repository's, and every
+    # must-fire is red, the declared staleness decides; a timing-window or
+    # wire problem stays FAIL.
+    hash_only = bool(probs) and all("is not the repository's" in p for p in probs)
+    if rc == 0 or (hash_only and not mf_bad):
         sys.path.insert(0, HERE)
         import stale_records as SR
         inputs = BITSTREAM_RTL + [os.path.relpath(v, ROOT).replace(os.sep, "/")

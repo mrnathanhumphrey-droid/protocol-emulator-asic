@@ -112,3 +112,10 @@ test/benchset.py                    ^\s*BENCH SET: ok\s*$
 test/gate_coverage.py               ^\s*GATE coverage: PASSED\s*$
 model/pe_asm.py                     ^\s*pe_asm: PASSED\s*$
 model/gate_meta.py                  ^\s*GATE meta: PASSED\s*$
+test/gate_fpga_synth.py             ^\s*GATE fpga-synth: PASSED\s*$
+fpga/sim/run_fpga_loader.py         ^\s*FPGA-LOADER: PASSED\s*$
+fpga/sim/run_fpga_onewire.py        ^\s*FPGA-ONEWIRE: PASSED\s*$
+fpga/sim/run_fpga_i2c.py            ^\s*FPGA-I2C: PASSED\s*$
+model/gate_store_size_literals.py   ^\s*GATE store-size-literals: PASSED\s*$
+model/gate_host_contract.py         ^\s*GATE host-contract: PASSED\s*$
+model/area_line.py                  ^\s*GATE area-line: PASSED\s*$

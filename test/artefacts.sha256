@@ -79,8 +79,10 @@ aecc9a43eaacb039981e317e8ed468f15e8b7deb80a3df7b9f5eca74c83e096c  corpus_spim25.
 9720215e9ea94f6f59bc9e2586ad0e9687b1f0f06012004baca3212d5ba0b6c2  corpus_sptgt.hex  # corpus.py
 59f30de3aac36ce96ed7144f9759c34e710904f68c9a9073001ed154d9d3a5cd  corpus_uartrx.hex  # corpus.py
 69dc9b4f63fc5365e39675261fc342e8cf0ac6ba786e6b5019628bb7c53dc3d6  onewire_image.hex  # onewire.py tt onewire_image.hex
-b1fdf8b5f9f4e5867fc138ed59fa7fe52aae86df8154f6b17f7e81566264feb4  onewire_fpga_image.hex  # onewire.py fpga onewire_fpga_image.hex
+4ad20a152a134cbdf61057d3acaf3dee8a3b14f6ad6b53e02abcd5fcffdc509f  onewire_fpga_image.hex  # onewire.py fpga onewire_fpga_image.hex
 17920ceb1e067b0fb4bd2ca3bba981c13a2e69c1d52e2322c90046f396ed2f8f  uart_rx_image.hex  # uart_rx.py uart_rx_image.hex
 428aee57a506bde8b816f20933fc199dfe18618995a9e3fce717ac2d116bf2d3  uart_tx_image.hex  # uart_tx.py uart_tx_image.hex
 833246eb5a7da1487296f43e635ad354d234bf078cf0d53ff55c42aa03c87bd6  uart_tx_busy_image.hex  # uart_tx.py uart_tx_busy_image.hex busy
 8cb3583f208e97b61d70420366360b38d043f9a8609c03f8cfafffe4a801c0d2  ws2812_sub3_rearm21.hex  # run_wirefeed_mf.py --write
+17920ceb1e067b0fb4bd2ca3bba981c13a2e69c1d52e2322c90046f396ed2f8f  ../fpga/images/uart_rx_board.hex  # uart_rx.py ../fpga/images/uart_rx_board.hex board
+bfca16ab869e475335dffb4db2a452eea1e0b48d8d1067a82941f5c4285f1631  ../fpga/images/uart_rx_board_nostop.hex  # uart_rx.py ../fpga/images/uart_rx_board_nostop.hex board - nostop

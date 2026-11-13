@@ -122,8 +122,8 @@ def main() -> int:
     U.report(u)
     say(not u.probs, "the universe builds (no generator failure / absent "
         "arm image)%s" % ("" if not u.probs else ": " + "; ".join(u.probs)))
-    # v2: board images, translated (image_universe.board_as_v2)
-    imgs, board = U.board_as_v2([(n, dgf.load(p)) for n, p in u.items()])
+    # F1.5 (Wilson 11-09): the board images are native v2 -- read as they are
+    imgs = [(n, dgf.load(p)) for n, p in u.items()]
     with open(CLOCKED_JSON, encoding="utf-8") as fh:
         clocked = json.load(fh)
     with open(RESP_JSON, encoding="utf-8") as fh:
@@ -230,15 +230,6 @@ def main() -> int:
         shutil.rmtree(tmp, ignore_errors=True)
 
     print()
-    if rc == 0 and board:
-        v, why = U.board_stale_verdict("model/gate_image_bounds.py", board)
-        print("  stale_records: %s -- %s" % (v, why))
-        if v == "STALE":
-            import stale_records as SR
-            print(SR.token("image-bounds", why))
-            return 0
-        if v == "FAIL":
-            rc = 1
     if rc == 0:
         print("GATE image-bounds: PASSED")
     else:

@@ -10,13 +10,15 @@ module tb_gcd;
   wire       walk_go, hold, re, we, done, found, fb_short;
   wire [2:0] w; wire [8:0] waddr, raddr; wire [7:0] wdata, nmsg;
   reg  [7:0] rdata = 0;
-  reg  [7:0] mem [0:511];
-  reg  [7:0] pre [0:511];                       // the store as the record's last write starts
+  // the store's size from the one encoder (F1.5, gate_store_size_literals)
+  `include "test/store_filler.vh"
+  reg  [7:0] mem [0:PE_STORE_BYTES-1];
+  reg  [7:0] pre [0:PE_STORE_BYTES-1];          // the store as the record's last write starts
   reg        snap = 1'b0;
   integer    fd, a, sa, cyc, ncyc, endm, nm;
   reg [8*256-1:0] memfile, outfile;
   always #5 clk = ~clk;
-  pe_pit_s12 #(.AW(9)) dut (
+  pe_pit_s12 #(.AW($clog2(PE_STORE_BYTES))) dut (
       .clk(clk), .rst_n(rst_n), .run(run), .go(go), .act(act), .roled(roled), .refused(refused),
       .cnt_flat(cnt_flat), .walk_go(walk_go), .hold(hold), .w(w),
       .p1_v(p1_v), .p1_rm(p1_rm), .p1_lv(p1_lv), .p1_civ(p1_civ), .wdone_p1(wdone_p1),
@@ -33,7 +35,7 @@ module tb_gcd;
     // messages are checked from the store as that write starts
     if (rst_n && dut.s3_rec_wr === 1'b1 && !snap) begin
       snap <= 1'b1;
-      for (sa = 0; sa < 512; sa = sa + 1) pre[sa] <= mem[sa];
+      for (sa = 0; sa < PE_STORE_BYTES; sa = sa + 1) pre[sa] <= mem[sa];
     end
   end
   initial begin
@@ -52,8 +54,8 @@ module tb_gcd;
     while (!done && cyc < ncyc) begin @(negedge clk); cyc = cyc + 1; end
     repeat (2) @(negedge clk);
     fd = $fopen(outfile, "w");
-    for (a = 0; a < 512; a = a + 1) $fdisplay(fd, "M %0d %h", a, mem[a]);
-    if (snap) for (a = 0; a < 512; a = a + 1) $fdisplay(fd, "P %0d %h", a, pre[a]);
+    for (a = 0; a < PE_STORE_BYTES; a = a + 1) $fdisplay(fd, "M %0d %h", a, mem[a]);
+    if (snap) for (a = 0; a < PE_STORE_BYTES; a = a + 1) $fdisplay(fd, "P %0d %h", a, pre[a]);
     $fdisplay(fd, "N done=%0d cyc=%0d snap=%0d", done, cyc, snap);
     $fclose(fd);
     $finish;

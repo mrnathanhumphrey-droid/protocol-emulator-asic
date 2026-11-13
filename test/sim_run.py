@@ -83,6 +83,14 @@ import tempfile as _tf
 #:   id -> {"script": the generating script, "pattern": output basename glob,
 #:          "clocked": True, "why": the reason it runs without a bound}
 SCRATCH_GENERATORS: dict = {
+    "run_fpga_loader": {
+        "script": "fpga/sim/run_fpga_loader.py", "pattern": "ldmf_*.hex",
+        "clocked": True,
+        "why": "F1.5 (Wilson 11-09): the board's UART image with its v2 MAGIC "
+               "corrupted, booted by the FPGA glue -- judged by the CHIP's "
+               "refusal (bad_magic, CONFIG_ERR, no frames back), not by the "
+               "A2 gap; it never runs",
+        "v3": {"no_v3_layer": "fpga/sim/tb_fpga_loader.v"}},
     "gate_clock_cross": {
         "script": "model/gate_clock_cross.py", "pattern": "probe_xclk_*.hex",
         "clocked": True,

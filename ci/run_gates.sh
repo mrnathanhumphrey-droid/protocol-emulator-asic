@@ -367,6 +367,27 @@ GATES=(
   # before declaration and Vivado refused one, so the FPGA could not build the
   # chip), warnings pinned per class, LW's inlined port widths text-anchored.
   model/gate_slang_lint.py
+  # ⛔⛔ F1 (Wilson 11-09) -- THE FPGA BUILD BUILDS: yosys synth_xilinx on all
+  # three board variants with build.tcl's own defines (-sv reads), and the
+  # store elaborated is the chip's own sram arm. The board build was broken two
+  # days (11-07 always_latch) and nothing saw it. Must-fails: PE_MEM_FLOPS ->
+  # store check; PE_SRAM_MACRO -> pe_sram_macro unresolved; no -sv -> always_latch.
+  test/gate_fpga_synth.py
+  # ⛔⛔ F1.5 (Wilson 11-09) -- THE BOARD SIMS RUN IN CI. They were red from
+  # 10-25 to 11-09 (the glue loaded v1's 256 bytes; the v2 chip refused every
+  # program) and ran nowhere, so the declared board-image debt had no test
+  # showing it. Each asserts the load EXACTLY (PE_STORE_BYTES, accepted by the
+  # chip) and an end-to-end result; must-fires include the chip's own refusals
+  # on the board path (bad MAGIC, a v1-sized stream).
+  fpga/sim/run_fpga_loader.py
+  fpga/sim/run_fpga_onewire.py
+  fpga/sim/run_fpga_i2c.py
+  # ⭐ F1.5 -- PREVENTION: no consumer of the store types its size (fpga/,
+  # test/), and docs/HOST_INTERFACE.md's load contract == pe_isa + the RTL.
+  model/gate_store_size_literals.py
+  model/gate_host_contract.py
+  # THE AREA LINE (Wilson 11-10): one definition, every report reads it.
+  model/area_line.py
   # ⛔⛔ HC1 -- W1's eligibility offset held to the RTL: the hold gate opens at
   # decision + HS + 2 on every load (ckdense, on RTL signals), and
   # program_a2.HOLD_PICK_LAG and PORT_SPEC §7E must say the same number.

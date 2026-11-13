@@ -204,9 +204,7 @@ def main() -> int:
         # ⛔ by NAME through program_a2's resolver: the bounds file holds
         # fpga/images/ entries too (10-18), and a test/-only path crashed here
         img = dgf.load(image_universe.resolve(name))
-        if name in image_universe.board_names():   # v2: a v1 board image
-            import v1_translate
-            img = v1_translate.translate(bytes(img))
+        # F1.5 (Wilson 11-09): board images are native v2 -- read as they are
         if ga.conditions(name, img)[0]:
             continue                      # non-admissible: declared in N1
         for ln, e in sorted(row["lanes"].items()):
@@ -433,9 +431,11 @@ def main() -> int:
     # ⭐ v2: green only because the board images were read translated is the
     # declared staleness (model/stale_records.py), not a PASS
     if rc == 0:
-        v, why = image_universe.board_stale_verdict(
-            "model/a2/gate_a2_program.py", image_universe.board_names(),
-            extra=["model/a2/program_a2.py"])
+        # F1.5: the board images no longer feed this verdict (native v2); the
+        # A2 re-certification debt's own inputs still do
+        import stale_records as SR
+        v, why = SR.stale_verdict("model/a2/gate_a2_program.py",
+                                  SR.moved(["test/pe_isa.py", "model/a2/program_a2.py"]))
         if tab_stale:
             # the stale tables' images: every one a declared move, or FAIL
             import stale_records as SR

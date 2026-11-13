@@ -32,6 +32,7 @@ MUST-FIRES (each must reach END and be red for its own reason)
 POSITIVE TOKEN: `FPGA-I2C: PASSED` only on the success path.
 Usage: python fpga/sim/run_fpga_i2c.py [arm ...] [--write]
 """
+import concurrent.futures as cf
 import os
 import re
 import subprocess
@@ -45,7 +46,9 @@ sys.path.insert(0, os.path.join(ROOT, "model"))
 from toolchain import banner, tool          # noqa: E402
 import sim_run                               # noqa: E402
 import i2c_fram as IF                        # noqa: E402
+import pe_isa                                # noqa: E402  STORE_BYTES (F1.5)
 import run_fpga_onewire as RF                # noqa: E402  status_names
+import fpga_engine                           # noqa: E402  iverilog only (Wilson 11-10)
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")
@@ -211,9 +214,16 @@ def judge(txt):
     d["iso"] = (int(m.group(1)) if m else None, int(s.group(1)) if s else None)
     chk("J11 silent during load/reset: no SCL/SDA fall, no START at the FRAM",
         d["iso"] == (0, 0), "falls %s, starts %s" % d["iso"])
-    m = re.search(r"^I2C-LOADCYC (\d+)", txt, re.M)
-    chk("a load was observed (>= 1792 load-mode cycles)",
-        m and int(m.group(1)) >= 1792, m.group(1) if m else "")
+    # ⛔ F1.5 (Wilson 11-09): EXACT, never a floor (">= 1792 load-mode cycles"
+    # passed a load cut to v1's 256 bytes): the whole store, accepted by the chip
+    m = re.search(r"^I2C-LOADBYTES (\d+)", txt, re.M)
+    d["ldbytes"] = int(m.group(1)) if m else None
+    chk("the load wrote exactly the store (== %d bytes, pe_isa.STORE_BYTES)" % pe_isa.STORE_BYTES,
+        d["ldbytes"] == pe_isa.STORE_BYTES, "%s" % d["ldbytes"])
+    m = re.search(r"^I2C-CHIPLOAD full=(\d) bad_magic=(\d) short=(\d)", txt, re.M)
+    d["chipload"] = tuple(int(x) for x in m.groups()) if m else None
+    chk("the chip accepted the load (store full, MAGIC good, not short)",
+        d["chipload"] == (1, 0, 0), "full/bad_magic/short = %s" % (d["chipload"],))
     m = re.search(r"^I2C-MEM ((?:[0-9a-fx]{2} ?){4})", txt, re.M)
     chk("the FRAM model holds the PC's bytes", m and m.group(1).split()
         == ["%02x" % b for b in DATA.to_bytes(4, "big")], m.group(1) if m else "")
@@ -243,6 +253,12 @@ def count_model_table():
 
 def main():
     print("FPGA I2C FRAM build (OW = 2) -- simulation before Vivado")
+    # ⛔ NOT BIT-EXACT ON VERILATOR (11-10): the bus model's open-drain pull-up
+    # is `assign #(RISE_NS, 0)` -- an inertial rise, an instant fall -- which
+    # iverilog honours and Verilator does not; on Verilator the transaction
+    # stalls. Porting it is a bench change (Wilson's call), so: iverilog only.
+    fpga_engine.iverilog_only("tb_fpga_i2c", "the open-drain bus model's inertial "
+                              "rise delay (assign #(RISE_NS, 0)) is iverilog semantics")
     banner("iverilog", "vvp")
     os.makedirs(TMP, exist_ok=True)
     rc = 0 if tracked() else 1
@@ -251,16 +267,7 @@ def main():
         return rc
     count_model_table()
 
-    for name, kw in (("ok", {}), ("glitch", {"GLITCH_AT": 50})):
-        if want and name not in want:
-            continue
-        d, ck = judge(sim(name, **kw))
-        show(name, ck)
-        print("    push margin before pop: min %s cycles" % d["margin"])
-        rc |= 0 if all(o for _c, o, _d in ck) else 1
-
-    print()
-    print("  --- must-fires ---")
+    arms = (("ok", {}), ("glitch", {"GLITCH_AT": 50}))
     mfs = [("glitch_raw", {"GLITCH_AT": 50, "DEGLITCH": 1},
             lambda d: d["ahead"], "bounce, no deglitch -> glue counts AHEAD of the bus"),
            ("iso", {"ISO_MF": 1}, lambda d: d["iso"][0] and d["iso"][0] > 0,
@@ -270,13 +277,40 @@ def main():
             "byte 12 pushed 30 falls late -> UNDERRUN"),
            ("fast", {"BAD_AT": 12, "BAD_SHIFT": -1000},
             lambda d: d["status"] is not None and d["status"] & 0x10,
-            "byte 12 pushed without waiting -> TX-FULL")]
+            "byte 12 pushed without waiting -> TX-FULL"),
+           # ⛔ F1.5: the glue streaming v1's half-store; the CHIP must refuse
+           # it (short load), judged on its verdict -- no END (none comes)
+           ("v1load", {"LOAD_N": pe_isa.STORE_BYTES // 2},
+            lambda d: d["ldbytes"] == pe_isa.STORE_BYTES // 2 and d["chipload"] == (0, 0, 1),
+            "v1's half-store stream -> the chip refuses (short load)")]
+    # ⭐ EVERY ARM RUNS IN PARALLEL, AS THE LOADER'S DO (Wilson 11-10, D step
+    # 1): all seven are independent, each its own tb_<name>.vvp and <name>.log,
+    # so the wall time is the slowest one's. The verdicts are judged below in
+    # the old order, one at a time; the bench is untouched.
+    runs = {n: kw for n, kw in arms if not want or n in want}
+    runs.update((n, kw) for n, kw, _r, _w in mfs if not want or n in want)
+    out = {}
+    if runs:
+        with cf.ThreadPoolExecutor(max_workers=len(runs)) as ex:
+            fut = {n: ex.submit(sim, n, **kw) for n, kw in runs.items()}
+            out = {n: f.result() for n, f in fut.items()}
+
+    for name, _kw in arms:
+        if want and name not in want:
+            continue
+        d, ck = judge(out[name])
+        show(name, ck)
+        print("    push margin before pop: min %s cycles" % d["margin"])
+        rc |= 0 if all(o for _c, o, _d in ck) else 1
+
+    print()
+    print("  --- must-fires ---")
     for name, kw, red, why in mfs:
         if want and name not in want:
             continue
-        d, ck = judge(sim(name, **kw))
+        d, ck = judge(out[name])
         reds = [c for c, o, _d in ck if not o]
-        fired = bool(d["end"] and red(d) and reds)
+        fired = bool((d["end"] or name == "v1load") and red(d) and reds)
         print("  must-fire %-10s (%s): %s" % (
             name, why, ("red ok -- trailer %s; %s" % (
                 RF.status_names(d["status"]), "; ".join(reds)[:140])) if fired

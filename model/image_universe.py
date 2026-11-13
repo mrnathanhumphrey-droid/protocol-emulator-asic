@@ -185,46 +185,11 @@ def items():
     return u.items()
 
 
-#: ⭐ v2 (Nate + Wilson 10-25): the BOARD images stay v1-encoded until a v2
-#: FPGA build exists -- no v2 image beside a v1 bitstream. A gate that reads
-#: them as programs reads them THROUGH test/v1_translate.py (the same program
-#: in v2's word), and a gate green only because of that reports the declared
-#: STALE (model/stale_records.py) -- `board_stale_verdict`.
-BOARD_DIR = os.path.join(ROOT, "fpga", "images")
-
-
-def board_names():
-    return sorted(n for n in os.listdir(BOARD_DIR) if n.endswith(".hex"))
-
-
-def board_as_v2(imgs):
-    """`imgs` ({name: bytes} or [(name, bytes)]) with every fpga/images/*.hex
-    translated -> (same shape, [the names translated])."""
-    import v1_translate
-    board = set(board_names())
-    pairs = list(imgs.items()) if isinstance(imgs, dict) else list(imgs)
-    out, names = [], []
-    for n, img in pairs:
-        if n in board:
-            img = v1_translate.translate(bytes(img))
-            names.append(n)
-        out.append((n, img))
-    return (dict(out) if isinstance(imgs, dict) else out), sorted(names)
-
-
-def board_stale_verdict(gate, names, extra=()):
-    """(verdict, why) for a gate green only through the translation: its
-    staleness inputs are the board images (which must NOT move) and the
-    encoder that moved under them (test/pe_isa.py), plus `extra`."""
-    import stale_records as SR
-    ins = ["fpga/images/" + n for n in names] + ["test/pe_isa.py"] + list(extra)
-    return SR.stale_verdict(gate, SR.moved(ins))
-
-
-def images_v2():
-    """`images()` with the board images read THROUGH v1_translate (see
-    board_as_v2) -> ([(name, bytes)], [the names translated])."""
-    return board_as_v2(images())
+#: F1.5 (Wilson 11-09): the board images (fpga/images/) are native v2 images,
+#: read like every other. The v1 route (board_as_v2 / images_v2 /
+#: board_stale_verdict, through test/v1_translate.py) is DELETED so it cannot
+#: come back quietly; test/v1_translate.py's one reader is gate_v2_equiv
+#: (v1-lock vs v2 RTL), never a board image.
 
 
 def images():

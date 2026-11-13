@@ -41,6 +41,7 @@ module tb_fpga_i2c;
   parameter [31:0]  DATA     = 32'h0;     // D0 in [31:24]
   parameter [31:0]  OLD      = 32'h0;
   parameter integer NCYC_MAX = 400000;
+  parameter integer LOAD_N   = 0;          // F1.5 must-fire: a short (v1-sized) load
 
   reg clk = 0, rst_n = 0, rx = 1;
   wire tx;
@@ -61,7 +62,7 @@ module tb_fpga_i2c;
 
   pe_fpga_core #(.IMG(IMG), .CLK_HZ(PE_FPGA_CLK_HZ), .BRK_CYC(20000), .OW(2), .FEED(FEED),
                  .FALLS(FALLS), .NFEED(NFEED), .NRX(NRX), .DEGLITCH(DEGLITCH),
-                 .BAD_AT(BAD_AT), .BAD_SHIFT(BAD_SHIFT), .ISO_MF(ISO_MF)) dut (
+                 .BAD_AT(BAD_AT), .BAD_SHIFT(BAD_SHIFT), .ISO_MF(ISO_MF), .LOAD_N(LOAD_N)) dut (
       .clk(clk), .rst_n(rst_n), .uart_rx(rx), .uart_tx(tx),
       .led(led), .running(running), .dq_in(sda), .dq_low(sda_low_raw),
       .p3_in(scl_fpga), .p3_low(scl_low_raw));
@@ -99,6 +100,12 @@ module tb_fpga_i2c;
     cyc = cyc + 1;
     if (dut.loading && !dut.hold && dut.chip_rst_n) load_cyc = load_cyc + 1;
   end
+  // ⛔ F1.5 (Wilson 11-09): THE LOAD IS COUNTED EXACTLY, never a floor -- the
+  // bytes the glue wrote (WR strobes under PROG since the pointer reset), and
+  // the chip's own verdict on them (store_full, bad_magic, short_load)
+  integer load_bytes = 0;
+  always @(posedge dut.ptr) load_bytes = 0;
+  always @(posedge dut.wr) if (dut.prog) load_bytes = load_bytes + 1;
   always @(negedge scl) if (isolating) iso_falls = iso_falls + 1;
                         else bus_falls = bus_falls + 1;
   // every SCL rise on the bus, in ns -- fSCL is measured from these exactly
@@ -144,6 +151,9 @@ module tb_fpga_i2c;
     #(BT * 30);
     $display("I2C-ISO falls=%0d", iso_falls);
     $display("I2C-LOADCYC %0d", load_cyc);
+    $display("I2C-LOADBYTES %0d", load_bytes);
+    $display("I2C-CHIPLOAD full=%0b bad_magic=%0b short=%0b", dut.chip.store_full,
+             dut.chip.bad_magic, dut.chip.short_load);
     $display("I2C-STATUS %02h", dut.st_or);
     $display("I2C-STICKY underrun=%0b rx_drop=%0b config_err=%0b tx_full=%0b",
              dut.chip.u_eng.lane_underrun[0], dut.chip.rx_drop_sticky,

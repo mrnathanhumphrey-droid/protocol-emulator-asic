@@ -31,7 +31,8 @@ link's payload slot (~48 cycles) or `rx_pend` (one deep) drops it.
 Variants (must-fires, Wilson): "edge" samples at the bit's START edge instead
 of mid-bit; "nostop" drops the stop sample (the framing check is gone).
 
-Usage:  python test/uart_rx.py <out.hex> [T] [offset] [variant]
+Usage:  python test/uart_rx.py <out.hex> [T | board] [offset] [variant]
+        (`board`: T = 115200 at the FPGA board's clock, fpga/board.yaml)
 """
 import os
 import sys
@@ -48,8 +49,9 @@ from make_smoke_image import (OP_ARM, OP_LEVEL, OP_REARM,         # noqa: E402
 P_RX = 3            # uio[3], test/pinmap.vh
 # ⭐ THE BENCH RUNS AT THE TARGET'S OWN RATE (Wilson's (a); retargetable,
 # Wilson 11-03): 115200 baud at the target's clock -- 521 cycles per bit on
-# the 60 MHz chip, 434 on the 50 MHz FPGA board (whose images are built at
-# the board's clock explicitly).
+# the 60 MHz chip, and 521 on the FPGA board too since F2 put it at 60 MHz
+# (434 when it ran 50). The board's images are built at the board's clock
+# explicitly, so the two only agree because the two clocks do.
 import clock                                                     # noqa: E402
 BAUD = 115200
 T_NOMINAL = clock.per_rate(BAUD)
@@ -114,7 +116,14 @@ def build(T=T_NOMINAL, offset=None, variant="ok"):
 
 def main():
     out = sys.argv[1]
-    T = int(sys.argv[2]) if len(sys.argv) > 2 else T_NOMINAL
+    if len(sys.argv) > 2 and sys.argv[2] == "board":
+        # F1.5: the FPGA board's image -- 115200 at the BOARD's clock
+        # (fpga/board.yaml through model/clock.py), never a typed T
+        sys.path.insert(0, os.path.join(os.path.dirname(HERE), "model"))
+        import clock
+        T = clock.per_rate(BAUD, clock.target_hz("fpga"))
+    else:
+        T = int(sys.argv[2]) if len(sys.argv) > 2 else T_NOMINAL
     off = int(sys.argv[3]) if len(sys.argv) > 3 and sys.argv[3] != "-" else None
     var = sys.argv[4] if len(sys.argv) > 4 else "ok"
     img = build(T, off, var)

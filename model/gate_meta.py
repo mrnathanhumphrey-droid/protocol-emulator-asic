@@ -221,6 +221,22 @@ SEAMS = (
     # 11-10: `problems` always empty -> the nine planted results (missing, 0
     # tests, one short, a failure, ...) all read green
     ("test/gate_gl_count.py", "gate_gl_count.problems", "fast", "E"),
+    # F1.5 (11-09): the host's load contract -> both planted v1 phrasings survive
+    ("model/gate_host_contract.py", "gate_host_contract.judge", "fast", "E"),
+    # 11-10: `problems` always empty -> a run missing its area keys, a zero
+    # die, a core larger than the die all read as a valid area line
+    ("model/area_line.py", "area_line.problems", "fast", "E"),
+    # F1.5: no consumer types the store size -> the `rom [0:255]` plant survives
+    ("model/gate_store_size_literals.py", "gate_store_size_literals.judge", "fast", "E"),
+    # F1 / F1.5 board benches: every check ok -> no must-fire has a red reason
+    ("fpga/sim/run_fpga_i2c.py", "run_fpga_i2c.judge", "slow", "ALLOK1"),
+    ("fpga/sim/run_fpga_onewire.py", "run_fpga_onewire.judge", "slow", "ALLOK1"),
+    # the loader: `verdict` always (ok, no FAIL) -> boot / magic / short survive.
+    # Back from META_DEBT (11-10): its four scenarios now run in parallel,
+    # 12m02s on iverilog (was 47m49s in series) -- under the 30-min seam limit
+    ("fpga/sim/run_fpga_loader.py", "run_fpga_loader.verdict", "slow", "OKNF"),
+    # F1: every yosys run rc 0 -> the three must-fails "pass"
+    ("test/gate_fpga_synth.py", "gate_fpga_synth.run_yosys", "slow", "Z0"),
 )
 
 #: Gates with NO stubbable check, each with why -- every gate in
@@ -252,6 +268,20 @@ NOT_STUBBABLE = {
                          "mut_under / noalt / oldtx / nack arms",
     "model/gate_meta.py": "this gate",
 }
+
+#: ⛔⛔ A GATE LEFT UNSTUBBED FOR A REASON THAT CAN BE FIXED IS A DEBT (Wilson
+#: 11-10): gate -> (the item that owns putting its row back in SEAMS, the
+#: point it must be back by). Each must be in NOT_STUBBABLE, have an owner and
+#: a date, and RUN IN CI (stale_records.ci_problems: the rule of 11-09 -- a
+#: debt nothing in CI shows is invisible). NOT stale_records.DEBT: that table
+#: owns STALE gates, and the loader PASSES. When the loader runs under the
+#: 30-min seam limit (the Verilator port, its four scenarios in parallel), its
+#: row goes back in SEAMS (policy: `verdict` -> (True, [])) and this entry is
+#: deleted. The seam and meta-slow job limits are NOT raised for it.
+#: ⇒ EMPTY since 11-10: the loader's debt is paid (its scenarios in parallel,
+#:   12m02s on iverilog) and its row is back in SEAMS. The check and its
+#:   must-fires stay, for the next gate that cannot be stubbed in time.
+META_DEBT: dict = {}
 
 #: (gate, seam) -> finding id: stubs that stay GREEN today. Each must go red
 #: when its finding is fixed, and is then STALE (red) until removed.
@@ -312,6 +342,20 @@ def coverage_problems(gates, seams=None, nots=None):
         if g != "model/gate_meta.py":
             probs.append("%s is in the meta registry but not in the suite" % g)
     return probs
+
+
+def meta_debt_problems(debt=None, nots=None, texts=None):
+    """[problem]: a META_DEBT entry not in NOT_STUBBABLE, without an owner or
+    a date, or for a gate that does not run in CI."""
+    import stale_records
+    debt = META_DEBT if debt is None else debt
+    nots = NOT_STUBBABLE if nots is None else nots
+    out = ["META_DEBT names %s, which is not in NOT_STUBBABLE" % g
+           for g in sorted(set(debt) - set(nots))]
+    out += ["META_DEBT for %s has an empty owner or due-by point" % g
+            for g, v in sorted(debt.items()) if not (v and v[0] and v[1])]
+    out += stale_records.ci_problems(declared=set(debt), shown_by={}, texts=texts)
+    return out
 
 
 def judge(results, gaps):
@@ -385,6 +429,7 @@ def main() -> int:
     probs = judge(results, {k: v for k, v in KNOWN_GAPS.items()
                             if any((g, s) == k for g, s, _p in todo)})
     probs += coverage_problems(gate_list())
+    probs += meta_debt_problems()
     for p in probs:
         print("  *** %s" % p)
         rc = 1
@@ -405,6 +450,24 @@ def main() -> int:
     for what, gl in (("a suite gate in neither table",
                       gate_list() + ["model/gate_new.py"]),):
         red = bool(coverage_problems(gl))
+        print("    %-46s %s" % (what, "red  ok" if red else "*** MISSED"))
+        if not red:
+            rc = 1
+    lo = "fpga/sim/run_fpga_loader.py"
+    for what, dbt, nts in (
+            ("a debt with an empty owner", {lo: ("", "the v2 lock")},
+             dict(NOT_STUBBABLE, **{lo: "x"})),
+            ("a debt for a gate not in NOT_STUBBABLE",
+             {"model/gate_new.py": ("x", "y")}, NOT_STUBBABLE),
+            ("a debt for a gate that does not run in CI", {lo: ("x", "y")},
+             dict(NOT_STUBBABLE, **{lo: "x"}))):
+        txt = None
+        if what.endswith("in CI"):
+            import stale_records
+            tok, gts, flows = stale_records._ci_text()
+            txt = (tok.replace(lo, "x/gone.py"), gts.replace(lo, "x/gone.py"),
+                   flows.replace(lo, "x/gone.py"))
+        red = bool(meta_debt_problems(dbt, nts, txt))
         print("    %-46s %s" % (what, "red  ok" if red else "*** MISSED"))
         if not red:
             rc = 1

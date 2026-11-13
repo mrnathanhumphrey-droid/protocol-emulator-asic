@@ -23,7 +23,7 @@ module tb_fpga_uart;
   `include "fpga/sim/fpga_clock.vh"
   always #(PE_CLK_HALF_NS) clk = ~clk;   // the target's clock, never typed
 
-  pe_fpga_core #(.IMG("fpga/images/uart_rx_434.hex"), .CLK_HZ(PE_FPGA_CLK_HZ)) dut (
+  pe_fpga_core #(.IMG("fpga/images/uart_rx_board.hex"), .CLK_HZ(PE_FPGA_CLK_HZ)) dut (
       .clk(clk), .rst_n(rst_n), .uart_rx(rx), .uart_tx(tx),
       .led(led), .running(running));
 

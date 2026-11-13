@@ -539,8 +539,7 @@ def response_images():
     # it must stop the writer, not drop silently out of the bound set.
     import image_universe
     out = []
-    # v2: board images translated (image_universe.images_v2)
-    for n, img in image_universe.images_v2()[0]:
+    for n, img in image_universe.images():        # F1.5: board images native v2
         if any(a["op"] == I.OP_SHIFT and not is_clocked(h, a)
                for _ln, h, acts in lanes_of(img) for a in acts):
             out.append((n, img))
@@ -719,8 +718,7 @@ def clocked_images():
     Readers that load an image BY NAME use `image_universe.resolve`."""
     import image_universe
     out = []
-    # v2: board images translated (image_universe.images_v2)
-    for name, img in image_universe.images_v2()[0]:
+    for name, img in image_universe.images():     # F1.5: board images native v2
         ls, _d, _k, _j = lane_set(img)
         if any(r["clocked_od"] for r in ls):
             out.append((name, img))

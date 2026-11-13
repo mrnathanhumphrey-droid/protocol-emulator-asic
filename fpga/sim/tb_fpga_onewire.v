@@ -25,13 +25,14 @@ module tb_fpga_onewire;
   parameter FEED             = "";
   parameter integer NFEED    = 0;
   parameter integer POLLIDX  = 0;
-  parameter integer PER2     = 12800;
-  parameter integer MARGIN   = 6400;
+  parameter integer PER2     = 0;      // F2: no 50 MHz default; run_fpga_onewire.py
+  parameter integer MARGIN   = 0;      // passes both (-P), derived at the board clock
   parameter integer BAD_AT   = -1;
   parameter integer BAD_SHIFT = 0;
   parameter integer LATE     = 0;
   parameter integer ISO_MF   = 0;
   parameter integer NCYC_MAX = 6000000;
+  parameter integer LOAD_N   = 0;          // F1.5 must-fire: a short (v1-sized) load
 
   reg clk = 0, rst_n = 0, rx = 1;
   wire tx;
@@ -49,7 +50,7 @@ module tb_fpga_onewire;
   pe_fpga_core #(.IMG("test/onewire_fpga_image.hex"), .CLK_HZ(PE_FPGA_CLK_HZ), .BRK_CYC(20000),
                  .OW(1), .FEED(FEED), .NFEED(NFEED), .POLLIDX(POLLIDX),
                  .PER2(PER2), .MARGIN(MARGIN), .BAD_AT(BAD_AT),
-                 .BAD_SHIFT(BAD_SHIFT), .LATE(LATE), .ISO_MF(ISO_MF)) dut (
+                 .BAD_SHIFT(BAD_SHIFT), .LATE(LATE), .ISO_MF(ISO_MF), .LOAD_N(LOAD_N)) dut (
       .clk(clk), .rst_n(rst_n), .uart_rx(rx), .uart_tx(tx),
       .led(led), .running(running), .dq_in(dq), .dq_low(dq_low_raw));
 
@@ -85,6 +86,12 @@ module tb_fpga_onewire;
     // LOAD MODE proper (not the idle hold before 'G'): the bytes are going in
     if (dut.loading && !dut.hold && dut.chip_rst_n) load_cyc = load_cyc + 1;
   end
+  // ⛔ F1.5 (Wilson 11-09): THE LOAD IS COUNTED EXACTLY, never a floor -- the
+  // bytes the glue wrote (WR strobes under PROG since the pointer reset), and
+  // the chip's own verdict on them (store_full, bad_magic, short_load)
+  integer load_bytes = 0;
+  always @(posedge dut.ptr) load_bytes = 0;
+  always @(posedge dut.wr) if (dut.prog) load_bytes = load_bytes + 1;
   always @(negedge dq) if (isolating) begin
     iso_falls = iso_falls + 1;
     if (iso_falls <= 3)
@@ -119,6 +126,9 @@ module tb_fpga_onewire;
     u_ds.report;
     $display("OW-ISO falls=%0d", iso_falls);
     $display("OW-LOADCYC %0d", load_cyc);
+    $display("OW-LOADBYTES %0d", load_bytes);
+    $display("OW-CHIPLOAD full=%0b bad_magic=%0b short=%0b", dut.chip.store_full,
+             dut.chip.bad_magic, dut.chip.short_load);
     $display("OW-STATUS %02h", dut.st_or);
     $display("OW-STICKY underrun=%0b rx_drop=%0b config_err=%0b tx_full=%0b",
              dut.chip.u_eng.lane_underrun[0], dut.chip.rx_drop_sticky,

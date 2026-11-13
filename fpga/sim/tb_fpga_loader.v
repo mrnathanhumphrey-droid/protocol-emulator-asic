@@ -2,12 +2,12 @@
  * FPGA stand-in for the Pico 2's role; every image passes its sim first).
  *
  * The whole FPGA core against a model of the PC on one 115200 8N1 port:
- *   1. boot from BRAM (uart_rx_434.hex): frames come back as 2 bytes each
+ *   1. boot from BRAM (uart_rx_board.hex): frames come back as 2 bytes each
  *   2. BREAK, then a frame with a CORRUPT checksum: the board says 'E' and
  *      the chip stays silent (in reset)
- *   3. a good frame carrying uart_rx_434_nostop.hex: 'K', and frames now come
+ *   3. a good frame carrying uart_rx_board_nostop.hex: 'K', and frames now come
  *      back as ONE byte each -- the loaded program is the one running
- *   4. BREAK, reload uart_rx_434.hex: 'K', 2 bytes per frame again
+ *   4. BREAK, reload uart_rx_board.hex: 'K', 2 bytes per frame again
  * Verdict: `FPGA-LOADER: ok -- ...` or `*** FAIL fpga_loader: ...`.
  */
 `default_nettype none
@@ -21,13 +21,15 @@ module tb_fpga_loader;
   always #(PE_CLK_HALF_NS) clk = ~clk;   // the target's clock, never typed
 
   localparam integer BRK = 20000;          // 0.4 ms in simulation
-  pe_fpga_core #(.IMG("fpga/images/uart_rx_434.hex"), .CLK_HZ(PE_FPGA_CLK_HZ), .BRK_CYC(BRK)) dut (
+  pe_fpga_core #(.IMG("fpga/images/uart_rx_board.hex"), .CLK_HZ(PE_FPGA_CLK_HZ), .BRK_CYC(BRK)) dut (
       .clk(clk), .rst_n(rst_n), .uart_rx(rx), .uart_tx(tx),
       .led(led), .running(running));
 
   localparam real BT = 1.0e9 / 115200.0;
-  reg [7:0] img_ok [0:255];
-  reg [7:0] img_ns [0:255];
+  // the store's size from the one encoder (F1.5): the PC frame carries a whole store
+  `include "test/store_filler.vh"
+  reg [7:0] img_ok [0:PE_STORE_BYTES-1];
+  reg [7:0] img_ns [0:PE_STORE_BYTES-1];
   reg [7:0] got [0:1023];
   integer   ngot = 0, fails = 0, i, k, base;
   reg [7:0] b, sum;
@@ -55,7 +57,7 @@ module tb_fpga_loader;
   task load(input integer which, input integer corrupt);
     begin
       send(8'hA5); send(8'h5A); sum = 0;
-      for (i = 0; i < 256; i = i + 1) begin
+      for (i = 0; i < PE_STORE_BYTES; i = i + 1) begin
         b = which ? img_ns[i] : img_ok[i];
         send(b); sum = sum + b;
       end
@@ -85,10 +87,17 @@ module tb_fpga_loader;
     end
   endtask
 
+  // ⛔ F1.5 (Wilson 11-09): the BOOT load counted exactly -- the bytes the glue
+  // wrote (WR strobes under PROG since the pointer reset) -- and the chip's own
+  // verdict on them, printed once the boot frames are judged
+  integer load_bytes = 0;
+  always @(posedge dut.ptr) load_bytes = 0;
+  always @(posedge dut.wr) if (dut.prog) load_bytes = load_bytes + 1;
+
   integer back;
   initial begin
-    $readmemh("fpga/images/uart_rx_434.hex", img_ok);
-    $readmemh("fpga/images/uart_rx_434_nostop.hex", img_ns);
+    $readmemh("fpga/images/uart_rx_board.hex", img_ok);
+    $readmemh("fpga/images/uart_rx_board_nostop.hex", img_ns);
     repeat (8) @(posedge clk); rst_n = 1;
     wait (running === 1'b1); #(50_000);
 
@@ -96,6 +105,8 @@ module tb_fpga_loader;
     if (back != 12) begin fails = fails + 1;
       $display("*** FAIL fpga_loader: boot image: %0d bytes for 6 frames, expected 12", back); end
     else $display("  boot (BRAM) image: 6 frames -> 12 bytes (data + stop)");
+    $display("LD-BOOT bytes=%0d full=%0b bad_magic=%0b short=%0b config_err=%0b", load_bytes,
+             dut.chip.store_full, dut.chip.bad_magic, dut.chip.short_load, dut.chip.cfg_err_any);
 
     brk; base = ngot; load(1, 1); expect_reply("E", "corrupt checksum");
     base = ngot; frames(4, back);

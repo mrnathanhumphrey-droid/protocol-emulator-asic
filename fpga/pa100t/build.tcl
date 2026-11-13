@@ -7,8 +7,20 @@
 #
 # ⛔ THE CHIP RTL IS READ FROM src/ UNCHANGED -- the same three files the TT
 # flow hardens (info.yaml). Nothing here may define an `M_*` mutant macro.
+# ⛔ F1 (Wilson 11-09): every source is read -sv (pe_store.v's latch store
+# uses always_latch; read as Verilog-2001 it broke this build on 11-07, two
+# days unseen).
+# ⭐ THE STORE IS THE CHIP'S OWN (Wilson 11-09): MEM_TYPE stays at its default,
+# "sram", and NO store define is set. pe_store's sram arm -- arbitration, write
+# buffer, forwarding, the buffer-read slot -- is the code that tapes out; only
+# the RAM core differs: the TT flow's PE_SRAM_MACRO binds the IHP macro, and
+# without it the inline core is that macro's behaviour (matched line for line
+# to the PDK's RM_IHPSG13_1P_core_behavioral_bm_bist.v). Never define
+# PE_SRAM_MACRO or PE_MEM_FLOPS / PE_MEM_LATCH here. test/gate_fpga_synth.py
+# builds all three variants in CI with this build's defines and asserts the
+# sram arm was built.
 # ⛔ A NEGATIVE WNS IS A FAILED BUILD: the script exits non-zero and writes no
-# bitstream, so a board never runs a design that does not meet 50 MHz.
+# bitstream, so a board never runs a design that does not meet the board clock (fpga/board.yaml).
 
 #
 # THE 1-WIRE BUILD (Wilson 10-17):  ... -source fpga/pa100t/build.tcl -tclargs ow
@@ -37,10 +49,10 @@ file mkdir $out
 set part xc7a100tfgg484-2
 
 foreach f {pe_engine.v pe_store.v project.v} {
-  read_verilog [file join $root src $f]
+  read_verilog -sv [file join $root src $f]
 }
-read_verilog [file join $root fpga rtl pe_fpga_core.v]
-read_verilog [file join $root fpga pa100t pa100t_top.v]
+read_verilog -sv [file join $root fpga rtl pe_fpga_core.v]
+read_verilog -sv [file join $root fpga pa100t pa100t_top.v]
 read_xdc     [file join $root fpga pa100t pa100t_uart.xdc]
 
 # ⛔ THE BOARD'S CLOCK, READ (Wilson 11-03): fpga/board.yaml's clock_hz is the
@@ -74,18 +86,18 @@ if {$ow} {
                "FALLS=\"i2c_fram_falls.hex\"" NFEED=$prm(NFEED) NRX=$prm(NRX)                CLK_HZ=$clk_hz]
   puts "PE_FPGA: I2C build, generics $gen"
 } else {
-  set img [file join $root fpga images uart_rx_434.hex]
-  file copy -force $img [file join $out uart_rx_434.hex]
+  set img [file join $root fpga images uart_rx_board.hex]
+  file copy -force $img [file join $out uart_rx_board.hex]
   set gen [list CLK_HZ=$clk_hz]
 }
 cd $out
 
 if {$ow} {
-  synth_design -top pa100t_top -part $part -verilog_define PE_OW -generic $gen
+  synth_design -top pa100t_top -part $part -include_dirs $root -verilog_define PE_OW -generic $gen
 } elseif {$i2c} {
-  synth_design -top pa100t_top -part $part -verilog_define PE_I2C -generic $gen
+  synth_design -top pa100t_top -part $part -include_dirs $root -verilog_define PE_I2C -generic $gen
 } else {
-  synth_design -top pa100t_top -part $part -generic $gen
+  synth_design -top pa100t_top -part $part -include_dirs $root -generic $gen
 }
 opt_design
 place_design

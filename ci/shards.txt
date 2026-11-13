@@ -106,6 +106,17 @@ cdcq model/gate_macro_inputs.py
 # setup + 2-4 min synthesis
 fast model/gate_select_copies.py
 fast model/gate_slang_lint.py
+# F1 (11-09): ~82 s locally (3 x synth_xilinx ~27 s + 2 must-fails < 1 s)
+fast test/gate_fpga_synth.py
+# F1.5 (11-09): two text lints, < 1 s each
+fast model/gate_store_size_literals.py
+fast model/gate_host_contract.py
+fast model/area_line.py
+
+# fpga -- F1.5 (11-09): the three board sims, measured locally (see below)
+fpga fpga/sim/run_fpga_loader.py
+fpga fpga/sim/run_fpga_onewire.py
+fpga fpga/sim/run_fpga_i2c.py
 fast model/gate_halt_reset.py
 fast model/gate_runner_registry.py
 fast model/gate_sp2_frontend.py

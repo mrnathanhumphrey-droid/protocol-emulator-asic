@@ -20,6 +20,7 @@ POSITIVE TOKEN: `GATE tracked-images: PASSED`.
 from __future__ import annotations
 
 import os
+import posixpath
 import re
 import subprocess
 import sys
@@ -37,18 +38,19 @@ PATTERNS = ("*.hex", "*.mem")
 
 _HW = ("the bytes the PA100T ran on the bench; pinned by SHA-256 in %s, red "
        "until the bench is re-run and re-recorded")
-_V1 = ("a v1-format (256-byte) board loader image, the bytes the PA100T "
-       "loader ran by hand; today's v2 generators do not make it (v2 images "
-       "are 512 bytes), so there is no recipe to pin; read by "
-       "fpga/sim/run_fpga_loader.py")
 #: repo path -> why it is not in the manifest, and what pins it instead
 EXEMPT = {
-    "fpga/images/i2c_fram_fpga.hex": _HW % "model/gate_i2c_hw_witness.py",
+    # F1.5 (11-09): regenerated as v2 (fpga/sim/i2c_fram.py image()); the
+    # tracked file == the generator is checked by fpga/sim/run_fpga_i2c.py,
+    # and its hardware witness reads STALE until the bench re-witness
+    "fpga/images/i2c_fram_fpga.hex":
+        "the v2 I2C FRAM board image; tracked == fpga/sim/i2c_fram.py's image() "
+        "checked by fpga/sim/run_fpga_i2c.py (CI, shard fpga); the PA100T ran "
+        "its v1 predecessor -- model/gate_i2c_hw_witness.py is STALE until the "
+        "bench re-witness on the v2 bitstream",
     "fpga/feeds/i2c_fram_feed.hex": _HW % "model/gate_i2c_hw_witness.py",
     "fpga/feeds/i2c_fram_falls.hex": _HW % "model/gate_i2c_hw_witness.py",
     "fpga/feeds/onewire_fpga_feed.hex": _HW % "model/gate_onewire_hw_witness.py",
-    "fpga/images/uart_rx_434.hex": _V1,
-    "fpga/images/uart_rx_434_nostop.hex": _V1,
 }
 
 
@@ -63,8 +65,9 @@ def tracked():
 def pinned():
     with open(MANIFEST, encoding="ascii", errors="replace") as fh:
         names = [m.group(2) for m in map(LINE.match, fh.read().splitlines()) if m]
-    # the manifest names files relative to test/
-    return {"test/" + n for n in names}
+    # the manifest names files relative to test/ (F1.5: the FPGA board's UART
+    # images are pinned as ../fpga/images/..., so the path is normalised)
+    return {posixpath.normpath("test/" + n) for n in names}
 
 
 def judge(files, pins, exempt):

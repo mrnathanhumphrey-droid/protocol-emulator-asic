@@ -6,7 +6,7 @@
 // `.CLK_HZ(PE_FPGA_CLK_HZ)` to pe_fpga_core, which sizes the chip for it.
 // Included INSIDE the bench module.
 `ifndef PE_FPGA_CLK_HZ
-`define PE_FPGA_CLK_HZ 50000000
+`define PE_FPGA_CLK_HZ 60000000
 `endif
 localparam integer PE_FPGA_CLK_HZ   = `PE_FPGA_CLK_HZ;
 localparam integer PE_CLK_PERIOD_PS = 1000000000 / (`PE_FPGA_CLK_HZ / 1000);
