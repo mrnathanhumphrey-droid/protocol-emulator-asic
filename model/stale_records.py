@@ -66,8 +66,10 @@ DECLARED = {
         "on purpose (60 MHz, the latch store, T1/T2 -- Wilson 11-03) and the "
         "v2 harden of record re-binds it",
     "model/gate_phase_coverage.py":
-        "the I2C and 1-Wire sweep records read v1's RTL and benches; both "
-        "sweeps re-run with --record at v2",
+        "PIT-only change (s12) since recording; re-record owed when the s12 "
+        "line's RTL settles (Wilson 11-12). The I2C and 1-Wire records were "
+        "made on ac041ca (work/cdc-b56); on the merged line their inputs moved "
+        "only in src/project.v's PIT and test/run_pit_capture.py",
     "model/a2/gate_j_program.py":
         "the W sweep record (model/a2/sweep_w.json) ran on v1's RTL and "
         "images; `run_w_sweep.py --full` re-run at v2",
@@ -122,7 +124,10 @@ DEBT = {
     "model/gate_ln1_record.py": ("the LN1 --record re-run on v2", "before step 2 merges"),
     "model/gate_a2_record.py": ("the A2 re-certification", "before the entry is final"),
     "model/gate_flow_config.py": ("the v2 harden of record", _V2_LOCK),
-    "model/gate_phase_coverage.py": ("the I2C + 1-Wire sweep --record re-runs", _V2_LOCK),
+    "model/gate_phase_coverage.py": ("the I2C + 1-Wire sweep --record re-runs on the "
+                                     "settled s12 line (one re-record, ~5 h)",
+                                     "after the s12 routed decision (due 11-13); "
+                                     "at the latest " + _V2_LOCK),
     "model/a2/gate_j_program.py": ("run_w_sweep.py --full at v2", _V2_LOCK),
     "model/gate_wire_feed.py": ("the v2 FPGA build", _V2_LOCK),
     "model/gate_admissible_images.py": ("the v2 FPGA build", _V2_LOCK),
@@ -399,6 +404,25 @@ CHANGE_SET = frozenset([
     ".github/workflows/docs.yaml",         # off the @ihp-cmos5l branch: e7a50f8 + tools-ref
     ".github/workflows/fpga.yaml",         # off the @ihp-cmos5l branch: e7a50f8 + tools-ref
     "model/timing_of_record.json",         # tools of record moved; measured_with keeps the old pins
+    # ---- AMENDMENT 16 (11-12, Wilson's "five decisions" ruling, item 2; Nate go).
+    # The CDC sweep records (made on ac041ca) read PENDING on the merged s12
+    # line; this verdict reads moved-since-v1-lock, so these v2 inputs of the
+    # I2C / 1-Wire sweeps had never been listed. Re-record owed (DEBT above).
+    "model/pit_capture_golden.py",         # PIT capture golden (v2 PIT, chunk 1)
+    "model/pit_golden.py",                 # PIT stage 3 golden (gcd / solver)
+    "model/pit_s0_golden.py",              # PIT stage 0 golden (role table)
+    "src/pe_sram_macro_ihp.v",             # NOT PIT: the IHP SRAM macro binding (Wilson 11-07)
+    "test/run_pit_s0.py",                  # PIT stage 0 runner
+    "test/tb_gcd.v",                       # PIT stage 3 gcd / solver bench
+    "test/tb_rt.v",                        # PIT round-trip bench
+    "test/tb_usbrx.v",                     # USB receive bench (primitive 3, bundles 3-4)
+    "test/tb_usbbuf.v",                    # USB response-buffer bench (bundle 5)
+    "test/tb_usbdev.v",                    # USB device bench (bundle 6)
+    "test/scratch_heads.py",               # scratch-image heads incl. the USB buffer (bundle 5)
+    "test/tb_arm2.v",                      # two-pin level ARM bench (bundle 1)
+    "test/tb_rowmux.v",                    # latch-store row-read tree bench (11-01)
+    "test/host_feed.vh",                   # FW-1 hold 5 (46c2662) + declare-before-use (7a70803)
+    "test/tb_pair.v",                      # declare-before-use (7a70803)
 ])
 
 
