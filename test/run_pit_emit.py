@@ -21,8 +21,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, os.path.join(ROOT, "model"))
 import pit_emit as E                                              # noqa: E402
+import clock                                                      # noqa: E402
 
-HZ = 60_000_000
+HZ = int(clock.hz())   # the board clock, through the one reader (gate_clock_literals)
 
 
 def img():
@@ -289,7 +290,7 @@ def main() -> int:
     for ln in E.emit(bytes(mixed()), HZ).splitlines():
         print("    " + ln)
     nbad = 0
-    for hz in (60_000_000, 50_000_000):
+    for hz in (HZ, 50_000_000):  # clock-ok: the round trip must also hold at the v1 clock
         for p16 in range(4 * 16, 16384 * 16 + 1):
             if round(hz * 16.0 / float(E._bd(p16, hz))) != p16 or \
                     round(float(E._ns(p16, hz)) * 1e-9 * hz * 16.0) != p16:

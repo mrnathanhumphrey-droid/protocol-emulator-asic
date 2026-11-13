@@ -50,6 +50,48 @@ ENGINE = ["src/pe_engine.v", "src/pe_store.v", "src/project.v"]
 # ⛔ An exclusion is a DECLARATION, checked below against what is on disk.
 # ---------------------------------------------------------------------------
 EXCLUDED = {
+    # ⭐ 11-13: the v2 feature benches, each with its OWN runner in
+    # ci/run_gates.sh, added 10-28 .. 11-12 without a row here (benchset and
+    # gate_xsim red on CI since). Unlike the entries below, these DO reach RTL
+    # the swept images do not (the USB lane, the PIT, ARM2, the TX pair):
+    # that is said, not hidden -- what the sweep leaves uncovered there is
+    # gate_coverage's to report and waive, line by line.
+    "tb_arm2.v": (
+        "THE TWO-PIN LEVEL ARM BENCH (v2 primitive 3, bundle 1). Scenario arms "
+        "with host-timed pin levels a fixed arm list does not express; judged "
+        "by `test/run_arm2.py` in `ci/run_gates.sh`. It reaches ARM2 RTL the "
+        "swept images do not (coverage: gate_coverage's waivers)."),
+    "tb_pair.v": (
+        "THE TX PAIR BENCH (v2 primitive 3, bundle 2). Differential-pair "
+        "transmit arms judged by `test/run_pair.py` in `ci/run_gates.sh`. It "
+        "reaches pair-TX RTL the swept images do not (coverage: gate_coverage's "
+        "waivers)."),
+    "tb_usbrx.v": (
+        "THE USB RECEIVE BENCH (v2 primitive 3, bundles 3-4). A host waveform "
+        "per arm (bit stuffing, re-anchor edges, CRC) computed by its runners: "
+        "`test/run_usbrx.py`, `test/run_usbcrc.py`, `test/run_rean_floor.py`, "
+        "all in `ci/run_gates.sh`. It reaches USB RTL the swept images do not "
+        "(coverage: gate_coverage's waivers)."),
+    "tb_usbbuf.v": (
+        "THE USB RESPONSE-BUFFER BENCH (bundle 5), judged by "
+        "`test/run_usbbuf.py` in `ci/run_gates.sh`. It reaches USB buffer RTL "
+        "the swept images do not (coverage: gate_coverage's waivers)."),
+    "tb_usbdev.v": (
+        "THE USB DEVICE BENCH (bundle 6): address and bus-reset scenarios "
+        "judged by `test/run_usbaddr.py` and `test/run_usbrst.py` in "
+        "`ci/run_gates.sh`. It reaches USB device RTL the swept images do not "
+        "(coverage: gate_coverage's waivers)."),
+    "tb_gcd.v": (
+        "THE PIT STAGE-3 BENCH: pe_pit_s12 ALONE on a store image, its "
+        "gcd / solver run to a cycle budget; judged bit for bit against "
+        "model/pit_golden.py by `test/run_pit_gcd.py` in `ci/run_gates.sh`. A "
+        "module bench, not a chip bench: the sweep's images reach the PIT only "
+        "through SNIFF (coverage: gate_coverage's waivers)."),
+    "tb_rt.v": (
+        "THE PIT ROUND-TRIP BENCH (11-12): capture -> stage 0..3 -> the emitted "
+        "spec, judged by `test/run_pit_rt.py` in `ci/run_gates.sh`. Its arms "
+        "are captured line traces a fixed arm list does not express "
+        "(coverage: gate_coverage's waivers)."),
     "tb_spitgt.v": (
         "THE SPI-TARGET WITNESS (build plan B3/B4). An SPI master on its own "
         "clock drives each arm with a mode, a rate and host timing (tCSS, "

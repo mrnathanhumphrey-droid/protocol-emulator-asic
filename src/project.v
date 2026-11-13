@@ -2240,7 +2240,7 @@ module pe_pit_s12 #(parameter integer AW = 9) (
   reg         cond, wh, f_span;
   reg  [3:0]  wb;
   wire [12:0] fb     = (cls != C_ASYNC) ? 13'd0 : f_span ? acc[34:22] + 13'd1 : {9'd0, a_L};
-  wire [7:0]  frames = (cls != C_ASYNC || !f_span) ? 8'd0 : (acc[43:35] > 9'd255) ? 8'd255 : acc[42:35];
+  wire [7:0]  frames = (cls != C_ASYNC || !f_span) ? 8'd0 : (acc[43:35] > 9'd255) ? 8'd255 : acc[42:35];   // v1-literal-ok: an 8-bit saturation clamp, not a store address
 
   wire [8:0]  cnt_w [0:7];
   genvar gi;
@@ -2255,8 +2255,8 @@ module pe_pit_s12 #(parameter integer AW = 9) (
     for (j = 0; j < 8; j = j + 1)
       if (j[2:0] != w && act[j] && cnt_w[j] >= cnt_w[w] - 9'd1) r2_hit = 1'b1;
   end
-  wire [7:0] sc8 = (bh > 9'd255) ? 8'd255 : bh[7:0];
-  wire [7:0] n8  = (n  > 9'd255) ? 8'd255 : n[7:0];
+  wire [7:0] sc8 = (bh > 9'd255) ? 8'd255 : bh[7:0];   // v1-literal-ok: an 8-bit saturation clamp, not a store address
+  wire [7:0] n8  = (n  > 9'd255) ? 8'd255 : n[7:0];   // v1-literal-ok: an 8-bit saturation clamp, not a store address
 
 
   // ===========================================================================

@@ -127,7 +127,11 @@ def chip_sizes(how, sby, work):
              for f in re.findall(r'"([^"]+)"', block.group(1))]
     with open(os.path.join(work, "chip_sw.ys"), "w", encoding="utf-8",
               newline="\n") as fh:
-        fh.write("read_verilog -sv %s\nhierarchy -top %s\n" % (
+        # ⭐ -DPE_MEM_LATCH (11-13): since Wilson 11-07 the default store is the
+        # SRAM macro and pe_rowmux exists only in the LATCH fallback, which stays
+        # selectable -- so the sizes are read from that build. With no define the
+        # elaboration has no pe_rowmux at all and this gate went red (CI, 11-07 on).
+        fh.write("read_verilog -sv -DPE_MEM_LATCH %s\nhierarchy -top %s\n" % (
             " ".join(files), top.group(1)))
     r = subprocess.run(yosys_argv(how, sby, work, "chip_sw.ys"), cwd=work,
                        capture_output=True, text=True, encoding="utf-8",

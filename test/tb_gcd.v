@@ -17,7 +17,7 @@ module tb_gcd;
   reg        snap = 1'b0;
   integer    fd, a, sa, cyc, ncyc, endm, nm;
   reg [8*256-1:0] memfile, outfile;
-  always #5 clk = ~clk;
+  always #5 clk = ~clk;   // clock-ok: a cycle-count bench; the period never enters a result
   pe_pit_s12 #(.AW($clog2(PE_STORE_BYTES))) dut (
       .clk(clk), .rst_n(rst_n), .run(run), .go(go), .act(act), .roled(roled), .refused(refused),
       .cnt_flat(cnt_flat), .walk_go(walk_go), .hold(hold), .w(w),
@@ -43,7 +43,7 @@ module tb_gcd;
         || !$value$plusargs("END=%h", endm) || !$value$plusargs("NMSG=%d", nm)) begin
       $display("tb_gcd: FATAL -- +MEM +OUT +END +NMSG required"); $finish;
     end
-    if (!$value$plusargs("NCYC=%d", ncyc)) ncyc = 50000000;
+    if (!$value$plusargs("NCYC=%d", ncyc)) ncyc = 50000000;   // clock-ok: a cycle budget, not a frequency
     $readmemh(memfile, mem);
     repeat (3) @(negedge clk); rst_n = 1; run = 1;
     @(negedge clk);

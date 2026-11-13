@@ -200,12 +200,36 @@ jobs:
             p = benchset.base_images(); [print('***', x) for x in p]; \
             print('generated images:', 'FAILED' if p else 'ok'); sys.exit(1 if p else 0)"
 
+      # the bound store's cell models, as the test job (11-13: run_pit_capture's
+      # seam stopped at COULD NOT RUN before its `compare` was ever called --
+      # "the stub was NEVER CALLED" -- because this job had no PDK models)
+      - name: Cache the PDK's stdcell Verilog (pinned)
+        id: pdkv
+        uses: actions/cache@v4
+        with:
+          path: /home/runner/pdk_stdcell
+          key: ihp-sg13cmos5l-stdcell-verilog-${{ hashFiles('ci/pdk.sha') }}
+      - name: Fetch the PDK's stdcell Verilog (sparse, pinned)
+        if: steps.pdkv.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha=$(tr -d '[:space:]' < ci/pdk.sha)
+          mkdir -p /home/runner/pdk_stdcell && cd /home/runner/pdk_stdcell
+          git init -q
+          git remote add origin https://github.com/IHP-GmbH/IHP-Open-PDK.git
+          git sparse-checkout set --no-cone /ihp-sg13cmos5l/libs.ref/sg13cmos5l_stdcell/verilog/
+          git fetch -q --depth 1 --filter=blob:none origin "$sha"
+          git checkout -q FETCH_HEAD
+          ls -l ihp-sg13cmos5l/libs.ref/sg13cmos5l_stdcell/verilog/
+
       - name: Meta-test seam ${{ matrix.seam }}
         shell: bash
         env:
           PE_VERILATOR: /opt/oss-cad-suite/bin/verilator
           PE_SBY: /opt/oss-cad-suite/bin/sby
           PE_OW_JOBS: "3"
+          PE_PDK_STDCELL_VERILOG: /home/runner/pdk_stdcell/ihp-sg13cmos5l/libs.ref/sg13cmos5l_stdcell/verilog
         run: python model/gate_meta.py --seam "${{ matrix.seam }}"
 
   # ⛔⛔ A MATRIX IS GREEN ONLY IF EVERY EXPECTED LEG RAN GREEN (Wilson 10-25,
