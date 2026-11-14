@@ -221,6 +221,44 @@ def certificate(g, preds, gaps, k, B, tail, iters=200):
     return None
 
 
+def br1_window_count(g, gaps, lat, W):
+    """The most branch-1 refills the USB lane can take in any window of W cycles under (b'):
+    one per late word (a refill goes only to a released lane with an empty head, and fills it),
+    during that word's lateness; two late words on a path are at least the gaps between their
+    releases apart, less the first one's lateness."""
+    late = {w for w in g if lat[w] > 0}
+    best = 0
+    for s in late:
+        budget = W - 1 + lat[s]
+        stack = [(s, 0, 1)]                      # (word, release distance from s, late words)
+        seen = set()
+        while stack:
+            w, dist, k = stack.pop()
+            best = max(best, k)
+            if (w, dist) in seen:
+                continue
+            seen.add((w, dist))
+            step = sum(gaps[w])                  # all of w's writebacks before its successor
+            for n in g[w][1]:
+                d2 = dist + step
+                if d2 > budget:
+                    continue
+                stack.append((n, d2, k + (1 if n in late else 0)))
+    return best
+
+
+def br1_budget_fixpoint(g, gaps, lat, k):
+    """B for the other lanes: l_refill per USB branch-1 refill in a 23 + B window, to a fixpoint."""
+    B = k["br1_budget"]
+    for _ in range(20):
+        n = br1_window_count(g, gaps, lat, 23 + B)
+        nb = k["l_refill"] * n
+        if nb == B:
+            return B, n
+        B = nb
+    return None, None
+
+
 def upper_gaps(x, I):
     """the release gaps' UPPER bound for a word on a deadline chain (exact for fixed delays);
     None where no upper bound holds (an ARM, a USB receive: their releases are the bus's)"""
@@ -376,6 +414,16 @@ def full_report(img, name="image"):
                   % (worst, prem["trspipd1"], "OK" if ok else "LATE"))
             if not ok:
                 fails.append((sched, "turnaround"))
+        # the branch-1 budget the USB lane's late words impose on the other lanes (b')
+        Bn = None
+        if sched == "b'":
+            Bn, nev = br1_budget_fixpoint(g, gaps, lat, k)
+            if Bn is None:
+                print("  branch-1 budget: no fixpoint")
+                fails.append((sched, "br1 budget"))
+            else:
+                print("  branch-1 budget: <= %d USB refill(s) per %d-cycle window -> B = %d "
+                      "(proof_constants br1_budget %d)" % (nev, 23 + Bn, Bn, k["br1_budget"]))
         # the other lanes (RespSpan.wb_close_span, S = 0 under (b'))
         if sched == "b'":
             ru = max(Rr.values())
@@ -385,6 +433,14 @@ def full_report(img, name="image"):
                 if G >= ry + 1 + ru:
                     print("  other lanes: R = %d (USB decided <= %d times per window; "
                           "G(%d) = %d >= R + 1 + R_u %d)" % (ry, m, m, G, ru))
+                    Bc = Bn if Bn is not None else k["br1_budget"]
+                    cs = ry + k["pending_slack"] + Bc
+                    print("  co-resident spacing for other lanes: R %d + %d + B %d = %d "
+                          "(proof_constants coresident_usb %d) %s"
+                          % (ry, k["pending_slack"], Bc, cs, k["coresident_usb"],
+                             "OK" if cs <= k["coresident_usb"] else "RULE TOO LOW"))
+                    if cs > k["coresident_usb"]:
+                        fails.append((sched, "coresident_usb"))
                     break
             else:
                 print("  other lanes: no m <= 8 meets the span rule")
