@@ -336,8 +336,28 @@ theorem j_interim_D :
       J_INTERIM_HEAD_LATE_OPTA = 1 + (BR_SUCC_LATE + BR1_BUDGET) := by
   decide
 
+/-- A2 export (agent 1, 11-14), under (b′): the word after a branch of wait `W` is at most
+`BRANCH_LD B W` late past its release (`head_late_optA`'s condition D at response `R_BASE`),
+so that lane's dispatch jitter is `BRANCH_J B W = 1 + BRANCH_LD B W`. Under (b′) the dispatcher
+never stalls (`stall_free_bprime`), so that lateness is the branch lane's own. -/
+def BRANCH_LD (B W : Nat) : Nat := R_BASE + HEAD_SLACK + B - W
+def BRANCH_J (B W : Nat) : Nat := 1 + BRANCH_LD B W
+/-- A2 export: a lane with no branch word has its head valid at release (J = 1,
+`head_valid_optA`) at per-action spacing `d ≥ NONBRANCH_DMIN B = D* + B`. -/
+def NONBRANCH_DMIN (B : Nat) : Nat := DSTAR + B
+
+/-- `BRANCH_LD` meets condition D of `head_late_optA` for every budget and wait. -/
+theorem branch_ld_D (B W : Nat) : R_BASE + HEAD_SLACK + B ≤ W + BRANCH_LD B W := by
+  have hHS : HEAD_SLACK = 26 := head_slack_val
+  unfold BRANCH_LD
+  omega
+
+/-- At the RTL's branch-wait floor and the USB lane's budget it is the interim constant. -/
+theorem branch_j_interim : BRANCH_J BR1_BUDGET BR_W_MIN = J_INTERIM_HEAD_LATE_OPTA := by decide
+
 end
 
+#print axioms branch_ld_D
 #print axioms j_interim_D
 #print axioms pending_bound_optA
 #print axioms head_late_optA

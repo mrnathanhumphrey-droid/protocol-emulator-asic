@@ -67,6 +67,8 @@ def load(path=PATH):
     # FlushLate.flush_head_late: a flushed lane's head is valid by release + this + B (the port's
     # l_refill - 1 cycles back to clean, restart_hit's one-pass window 23 + B, less flush -> release)
     k["flush_refill_late"] = (k["l_refill"] - 1) + 23 - 1
+    # the A2 export at the RTL floor and the USB budget (OptRun.branch_j_interim: = the interim J)
+    k["branch_j_wmin"] = 1 + max(k["R_base"] + k["head_slack"] + k["br1_budget"] - k["br_w_min"], 0)
     if k["coresident_usb"] < k["coresident_min_d"]:
         raise ValueError("proof_constants: coresident_usb %d no longer implies the co-resident "
                          "delay floor coresident_min_d %d (head_valid_ret's D* + B)"
@@ -107,6 +109,29 @@ def spacing_of(x, I=None):
         # (a_dly = cur_act[LOWX+BQW+BPW +: 8] for C_SHI, pe_engine.v l.1892; pe_isa.act_shifti)
         return x["delay"] & 0xFF
     return x["delay"]
+
+
+# ---- A2 exports (agent 1, 11-14), under (b'): functions, never typed numbers ------------------
+def branch_ld(B, W, k=None):
+    """OptRun.BRANCH_LD: the word after a branch of wait W is at most this late past its release
+    (head_late_optA, condition D at R_base; branch_ld_D). B is the branch-1 budget of the image:
+    it must be CERTIFIED for that image (head_late_optA's hB) -- no closed form exists from the
+    branch waits alone below W = 31 + 4k for k branch lanes (agent 2, 11-14)."""
+    k = k or load()
+    return max(k["R_base"] + k["head_slack"] + B - W, 0)
+
+
+def branch_j(B, W, k=None):
+    """OptRun.BRANCH_J: the dispatch jitter of a branch lane's post-branch word under (b'),
+    1 + branch_ld -- that lane's own (stall_free_bprime: no global stall)."""
+    return 1 + branch_ld(B, W, k)
+
+
+def nonbranch_dmin(B, k=None):
+    """OptRun.NONBRANCH_DMIN: a lane with no branch word has J = 1 (head valid at release,
+    head_valid_optA) at per-action spacing >= D* + B -- not D* alone when B > 0."""
+    k = k or load()
+    return k["dstar"] + B
 
 
 def lane_words(img, lane, I=None):

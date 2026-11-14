@@ -61,7 +61,8 @@ KEY = ("dstar", "dstar29", "dstar39", "dstar39_v2", "dstar39_st", "dstar39_hold"
        "hit_head", "head_of_hits", "flush_head_late",
        "invF_run3T", "wb_bound_T", "flush_head_late_T",
        "winq_step", "liveFl_noflush",
-       "winq2_eq", "winq3_view", "winqT_view", "relT_le_of_ready")
+       "winq2_eq", "winq3_view", "winqT_view", "relT_le_of_ready",
+       "branch_ld_D", "branch_j_interim")
 #: proof_constants.load() key -> the Lean expression that must evaluate to it (SPEC: the map)
 CONSTS = {
     "lemmaA_window": "LEMMA_A_WINDOW", "R_base": "R_BASE", "dispatch_cycles": "DISPATCH_CYCLES",
@@ -78,6 +79,7 @@ CONSTS = {
     "j_interim_head_late_optA": "J_INTERIM_HEAD_LATE_OPTA",
     "flush_refill_late": "FLUSH_REFILL_LATE",
     "usb_other_R": "USB_OTHER_R",
+    "branch_j_wmin": "BRANCH_J BR1_BUDGET BR_W_MIN",
 }
 PLANT_THM = "planted_by_gate"
 #: gate_mutant_kills' scratch-mutant registry (ruling AC2): this gate is the killer
