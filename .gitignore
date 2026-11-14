@@ -149,3 +149,5 @@ test/pit_mask00_b10_image.hex
 test/pit_midstream.stim
 test/pit_mask00_b13_image.hex
 test/pit_mask00_b33_image.hex
+# agent / Wilson comms and drafts (Nate 11-14: in the repo tree, never committed)
+/comms/
