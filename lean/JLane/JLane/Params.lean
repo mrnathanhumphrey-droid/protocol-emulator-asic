@@ -94,6 +94,14 @@ theorem dstar_retire_usb_val : DSTAR_RETIRE_USB = 42 := rfl
 theorem reanFloor_40 : reanFloor 40 = 23 := rfl
 theorem reanFloor_48 : reanFloor 48 = 27 := rfl
 
+/-- The head-valid slack: a pending refill is at most `R + PENDING_SLACK + B` past its release,
+so the head is valid when the next release is strictly later — `R + HEAD_SLACK + B` (the
+`26` of every head-valid condition; `HEAD_SLACK + DSTAR` is condition F's `46`). -/
+abbrev HEAD_SLACK : Nat := PENDING_SLACK + 1
+
+theorem head_slack_val : HEAD_SLACK = 26 := rfl
+theorem pending_slack_val : PENDING_SLACK = 25 := rfl
+
 /-- The RTL's branch-wait floor (`BR_W_MIN = N_LANES*4 + (N_LANES-1)*3 + 1`, `pe_engine.v`
 l.743): `K · L_REFILL + (K − 1) · DISPATCH_CYCLES + 1`. -/
 abbrev BR_W_MIN : Nat := K * L_REFILL + (K - 1) * DISPATCH_CYCLES + 1

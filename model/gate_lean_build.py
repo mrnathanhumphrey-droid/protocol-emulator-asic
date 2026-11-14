@@ -60,6 +60,7 @@ CONSTS = {
     "n_lanes": "K", "l_refill": "L_REFILL", "usb_br1_per_window": "USB_BR1_PER_WINDOW",
     "dstar": "DSTAR", "br1_budget": "BR1_BUDGET", "coresident_usb": "CORESIDENT_USB",
     "coresident_min_d": "CORESIDENT_MIN_D",
+    "head_slack": "HEAD_SLACK",
     "br_w_min": "BR_W_MIN", "br_succ_late": "BR_SUCC_LATE",
     "j_interim_head_late_optA": "J_INTERIM_HEAD_LATE_OPTA",
 }

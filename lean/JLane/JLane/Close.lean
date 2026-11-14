@@ -173,10 +173,11 @@ theorem dstar29 (P : Program) (win : Engine → Option Lane) (e0 : Engine) (B : 
     ∀ T, NoStall win (run P win T e0) :=
   dstar P win e0 (fun _ => 14) B hW hfull hfn hn0 hwin hBd
     (fun l hl => by
-      show 14 + 26 + B ≤ 2 * P.dly l
+      show 14 + HEAD_SLACK + B ≤ 2 * P.dly l
       have h1 := hd l hl
       have h2 := hBd l hl
       have h3 : DSTAR = 20 := dstar_val
+      have h4 : HEAD_SLACK = 26 := head_slack_val
       omega)
     (fun T hT y t hy ht hwb => wb_bound P win e0 T h0 h0ts hwin hws hd hT t ht y hy hwb)
     hB

@@ -18,6 +18,8 @@ theorem dstar39 (P : Program) (win : Engine → Option Lane) (e0 : Engine)
     (hws : ∀ y e, e.st = .idle → Ready P y e → win e ≠ none)
     (hd : ∀ l, P.live l = true → 39 ≤ P.dly l) :
     ∀ T, NoStall win (run P win T e0) ∧ NoBr1 P (run P win T e0) := by
+  have hHS : HEAD_SLACK = 26 := head_slack_val
+  have hPS : PENDING_SLACK = 25 := pending_slack_val
   have hnp := fun t => nonpf_run P win hfn t e0 hn0
   have hS : Struct e0 := by
     have hw := hW

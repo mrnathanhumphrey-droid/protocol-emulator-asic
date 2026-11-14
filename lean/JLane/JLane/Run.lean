@@ -206,7 +206,8 @@ theorem pb_fresh (P : Program) (win : Engine → Option Lane) (y : Lane) (e0 : E
     (hwt : w < t) (htT : t ≤ T)
     (hwb : IsRet P y (run P win w e0))
     (heq : cnt P win (Hit y) (w + 1) e0 = cnt P win (Hit y) t e0) :
-    e0.now + t ≤ (run P win w e0).ts y + R + 25 + B := by
+    e0.now + t ≤ (run P win w e0).ts y + R + PENDING_SLACK + B := by
+  have hPS : PENDING_SLACK = 25 := pending_slack_val
   have hRw := hR w (by omega) (isWB_of_ret P y _ hwb)
   have hnow := now_run P win w e0
   obtain ⟨hst, hcur, hret⟩ := hwb
@@ -236,7 +237,7 @@ theorem pending_bound (P : Program) (win : Engine → Option Lane) (y : Lane) (e
     (hB : ∀ a m, a + m ≤ T → m ≤ 23 + B → chargeSum P win y m (run P win a e0) ≤ B) :
     ∀ (k t w : Nat), t ≤ T → w < t → cnt P win (IsRet P y) w e0 = k →
       IsRet P y (run P win w e0) → cnt P win (Hit y) t e0 ≤ k →
-      e0.now + t ≤ (run P win w e0).ts y + R + 25 + B := by
+      e0.now + t ≤ (run P win w e0).ts y + R + PENDING_SLACK + B := by
   have hS : Struct e0 := by
     have hw := hW
     unfold Wf at hw
@@ -303,7 +304,7 @@ theorem head_valid_when_ready (P : Program) (win : Engine → Option Lane) (y : 
     (e0 : Engine) (d R B T : Nat) (hW : Wf e0) (hfull : ∀ l s, P.live l = true → e0.actv l s = true)
     (hy : P.live y = true) (hdly : P.dly y = d) (hd : DSTAR + B ≤ d)
     (hnp : ∀ t, (run P win t e0).NoNpf)
-    (hlat : R + 26 + B ≤ 2 * d)
+    (hlat : R + HEAD_SLACK + B ≤ 2 * d)
     (hR : ∀ t, t < T → IsWB y (run P win t e0) →
       (run P win t e0).now ≤ (run P win t e0).ts y + R + 2)
     (hB : ∀ a m, a + m ≤ T → m ≤ 23 + B → chargeSum P win y m (run P win a e0) ≤ B)
@@ -314,6 +315,7 @@ theorem head_valid_when_ready (P : Program) (win : Engine → Option Lane) (y : 
   by_cases hc : cnt P win (IsRet P y) t e0 ≤ cnt P win (Hit y) t e0 + 1
   · exact hc
   · exfalso
+    have hHS : HEAD_SLACK = PENDING_SLACK + 1 := rfl
     have hnow := now_run P win t e0
     -- retirement #(J − 2), where J is the number of retirements so far
     obtain ⟨w, hwt, hwk, hwb⟩ :=

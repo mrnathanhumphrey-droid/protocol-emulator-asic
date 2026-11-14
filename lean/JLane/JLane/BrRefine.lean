@@ -234,8 +234,8 @@ theorem head_late_br (P2 : Program2) (dly : Lane → Nat) (Wn : Nat) (fw : Engin
     (y : Lane) (R B T Rn d Y LD : Nat) (hW : Wf x0.e) (hfull : ∀ s, x0.e.actv y s = true)
     (hy : P2.live y = true) (hdly : dly y = d) (hd : DSTAR + B ≤ d)
     (hY : 40 + 2 * B ≤ Wn + Y) (hRR : Rn ≤ R)
-    (hDc : Rn + 26 + B ≤ Wn + LD) (hFc : Rn + 46 + 2 * B ≤ Wn + d)
-    (hNc : R + 26 + B + Y ≤ 2 * d)
+    (hDc : Rn + HEAD_SLACK + B ≤ Wn + LD) (hFc : Rn + HEAD_SLACK + DSTAR + 2 * B ≤ Wn + d)
+    (hNc : R + HEAD_SLACK + B + Y ≤ 2 * d)
     (hR : ∀ t, t < T → IsWB y (run2 P2 fw sched t x0).e →
       (run2 P2 fw sched t x0).e.now ≤ (run2 P2 fw sched t x0).e.ts y + R + 2)
     (hRn : ∀ t, t < T → IsRet (brP P2 dly fw sched x0) y (run2 P2 fw sched t x0).e →

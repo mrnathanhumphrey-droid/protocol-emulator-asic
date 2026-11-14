@@ -61,7 +61,10 @@ theorem pb_defer (s w2 t : Nat) (hy : P.live y = true) (hS0 : Struct e0)
     (hr2 : IsRet P y (run P win w2 e0))
     (hnr : cnt P win (IsRet P y) s e0 = cnt P win (IsRet P y) w2 e0)
     (hnh : cnt P win (Hit y) s e0 = cnt P win (Hit y) t e0) :
-    NpfAt y (run P win w2 e0) ∧ e0.now + t ≤ (run P win w2 e0).ts y + R + 25 + B := by
+    NpfAt y (run P win w2 e0) ∧ e0.now + t ≤ (run P win w2 e0).ts y + R + PENDING_SLACK + B := by
+  have hPS : PENDING_SLACK = 25 := pending_slack_val
+  have hHS : HEAD_SLACK = 26 := head_slack_val
+  have hDS : DSTAR = 20 := dstar_val
   have hold := npf_hold P win y e0 s ho hw (w2 - s) (fun i hi =>
     ⟨no_event_between P win (Hit y) e0 s t (s + i) (by omega) (by omega) hnh,
      not_ret_form P y _
@@ -102,8 +105,11 @@ theorem pb_fresh_optA (Rn k t w w2 : Nat) (hy : P.live y = true) (hS0 : Struct e
     (hwk : cnt P win (IsRet P y) w e0 = k) (hwb : IsRet P y (run P win w e0))
     (hw2k : cnt P win (IsRet P y) w2 e0 = k + 1) (hw2b : IsRet P y (run P win w2 e0))
     (hh : cnt P win (Hit y) t e0 ≤ k) (hfresh : k ≤ cnt P win (Hit y) (w + 1) e0) :
-    (NpfAt y (run P win w2 e0) ∧ e0.now + t ≤ (run P win w2 e0).ts y + Rn + 25 + B) ∨
-      e0.now + t ≤ (run P win w e0).ts y + R + 25 + B := by
+    (NpfAt y (run P win w2 e0) ∧ e0.now + t ≤ (run P win w2 e0).ts y + Rn + PENDING_SLACK + B) ∨
+      e0.now + t ≤ (run P win w e0).ts y + R + PENDING_SLACK + B := by
+  have hPS : PENDING_SLACK = 25 := pending_slack_val
+  have hHS : HEAD_SLACK = 26 := head_slack_val
+  have hDS : DSTAR = 20 := dstar_val
   have hm := cnt_mono P win (Hit y) e0 (w + 1) t (by omega)
   have hr1 : cnt P win (IsRet P y) (w + 1) e0 = k + 1 := by
     have := cnt_succ_back P win (IsRet P y) w e0
@@ -144,9 +150,12 @@ theorem pending_bound_optA (Rn d Wn Y : Nat) (hy : P.live y = true) (hS0 : Struc
       cnt P win (IsRet P y) w e0 = k → IsRet P y (run P win w e0) →
       cnt P win (IsRet P y) w2 e0 = k + 1 → IsRet P y (run P win w2 e0) →
       cnt P win (Hit y) t e0 ≤ k →
-      (NpfAt y (run P win w2 e0) ∧ e0.now + t ≤ (run P win w2 e0).ts y + Rn + 25 + B) ∨
-      (NpfAt y (run P win w e0) ∧ e0.now + t ≤ (run P win w e0).ts y + Rn + 45 + 2 * B) ∨
-      e0.now + t ≤ (run P win w e0).ts y + R + 25 + B + Y := by
+      (NpfAt y (run P win w2 e0) ∧ e0.now + t ≤ (run P win w2 e0).ts y + Rn + PENDING_SLACK + B) ∨
+      (NpfAt y (run P win w e0) ∧ e0.now + t ≤ (run P win w e0).ts y + Rn + PENDING_SLACK + DSTAR + 2 * B) ∨
+      e0.now + t ≤ (run P win w e0).ts y + R + PENDING_SLACK + B + Y := by
+  have hPS : PENDING_SLACK = 25 := pending_slack_val
+  have hHS : HEAD_SLACK = 26 := head_slack_val
+  have hDS : DSTAR = 20 := dstar_val
   have hD : DSTAR = 20 := dstar_val
   intro k
   induction k with
@@ -243,8 +252,8 @@ theorem head_late_optA (Rn d Wn Y LD : Nat) (hW : Wf e0)
     (hfull : ∀ s, e0.actv y s = true)
     (hy : P.live y = true) (hdly : P.dly y = d) (hd : DSTAR + B ≤ d)
     (hY : 40 + 2 * B ≤ Wn + Y) (hRR : Rn ≤ R)
-    (hDc : Rn + 26 + B ≤ Wn + LD) (hFc : Rn + 46 + 2 * B ≤ Wn + d)
-    (hNc : R + 26 + B + Y ≤ 2 * d)
+    (hDc : Rn + HEAD_SLACK + B ≤ Wn + LD) (hFc : Rn + HEAD_SLACK + DSTAR + 2 * B ≤ Wn + d)
+    (hNc : R + HEAD_SLACK + B + Y ≤ 2 * d)
     (hR : ∀ t, t < T → IsWB y (run P win t e0) →
       (run P win t e0).now ≤ (run P win t e0).ts y + R + 2)
     (hRn : ∀ t, t < T → IsRet P y (run P win t e0) → NpfAt y (run P win t e0) →
@@ -258,6 +267,9 @@ theorem head_late_optA (Rn d Wn Y LD : Nat) (hW : Wf e0)
       cnt P win (IsRet P y) (x + 1) e0 = cnt P win (IsRet P y) t e0 →
       (run P win t e0).ts y + LD ≤ (run P win t e0).now) :
     (run P win t e0).headValid y = true := by
+  have hPS : PENDING_SLACK = 25 := pending_slack_val
+  have hHS : HEAD_SLACK = 26 := head_slack_val
+  have hDS : DSTAR = 20 := dstar_val
   have hS : Struct e0 := by
     have hw := hW
     unfold Wf at hw
@@ -303,7 +315,7 @@ theorem head_valid_optA (d Wn Y : Nat) (hW : Wf e0)
     (hfull : ∀ s, e0.actv y s = true)
     (hy : P.live y = true) (hdly : P.dly y = d) (hd : DSTAR + B ≤ d)
     (hY : 40 + 2 * B ≤ Wn + Y)
-    (hDc : R + 26 + B ≤ Wn) (hFc : R + 46 + 2 * B ≤ Wn + d) (hNc : R + 26 + B + Y ≤ 2 * d)
+    (hDc : R + HEAD_SLACK + B ≤ Wn) (hFc : R + HEAD_SLACK + DSTAR + 2 * B ≤ Wn + d) (hNc : R + HEAD_SLACK + B + Y ≤ 2 * d)
     (hR : ∀ t, t < T → IsWB y (run P win t e0) →
       (run P win t e0).now ≤ (run P win t e0).ts y + R + 2)
     (hB : ∀ a m, a + m ≤ T → m ≤ 23 + B → chargeSum P win y m (run P win a e0) ≤ B)
@@ -320,7 +332,7 @@ branch-wait floor with response `R_BASE`, branch-1 budget `BR1_BUDGET` and laten
 `LD = BR_SUCC_LATE + BR1_BUDGET`; the dispatcher stall this lateness can cause under the
 shipped scheduler is `J_INTERIM_HEAD_LATE_OPTA = 1 + LD`. -/
 theorem j_interim_D :
-    R_BASE + 26 + BR1_BUDGET ≤ BR_W_MIN + (BR_SUCC_LATE + BR1_BUDGET) ∧
+    R_BASE + HEAD_SLACK + BR1_BUDGET ≤ BR_W_MIN + (BR_SUCC_LATE + BR1_BUDGET) ∧
       J_INTERIM_HEAD_LATE_OPTA = 1 + (BR_SUCC_LATE + BR1_BUDGET) := by
   decide
 

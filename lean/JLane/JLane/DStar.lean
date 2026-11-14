@@ -23,7 +23,7 @@ theorem dstar (P : Program) (win : Engine → Option Lane) (e0 : Engine)
     (hfn : ∀ e, P.fnpf e = false) (hn0 : e0.NoNpf)
     (hwin : ∀ e w, win e = some w → P.live w = true ∧ e.ts w ≤ e.now)
     (hthr : ∀ l, P.live l = true → DSTAR + B ≤ P.dly l)
-    (hlat : ∀ l, P.live l = true → R l + 26 + B ≤ 2 * P.dly l)
+    (hlat : ∀ l, P.live l = true → R l + HEAD_SLACK + B ≤ 2 * P.dly l)
     (hEDF : ∀ T, (∀ t, t < T → NoStall win (run P win t e0)) →
       ∀ y t, P.live y = true → t < T → IsWB y (run P win t e0) →
         (run P win t e0).now ≤ (run P win t e0).ts y + R y + 2)
@@ -56,7 +56,7 @@ theorem dstar (P : Program) (win : Engine → Option Lane) (e0 : Engine)
 
 /-- At `B = 0`: throughput `d ≥ 20`, latency `R ≤ 2d − 26`. -/
 theorem dstar_zero_budget_conditions (d R : Nat) (h1 : DSTAR + 0 ≤ d)
-    (h2 : R + 26 + 0 ≤ 2 * d) : 20 ≤ d ∧ R + 26 ≤ 2 * d := by
+    (h2 : R + HEAD_SLACK + 0 ≤ 2 * d) : 20 ≤ d ∧ R + HEAD_SLACK ≤ 2 * d := by
   have : DSTAR = 20 := dstar_val
   omega
 

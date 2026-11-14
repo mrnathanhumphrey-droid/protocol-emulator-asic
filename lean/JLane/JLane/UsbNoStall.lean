@@ -339,6 +339,7 @@ theorem hv_step (n : Nat) (hG : Good P win e0 u n) (hHV : ∀ s, s < n → HVat 
   have hNSp : ∀ t, t < n → NoStall win (run P win t e0) := fun t ht => (hG t ht).1
   intro y hy hrdy
   have hDv : DSTAR = 20 := rfl
+  have hPS : PENDING_SLACK = 25 := pending_slack_val
   have hRv : R_USB = 17 := rfl
   have hBv : BR1_BUDGET = 8 := rfl
   have hNv : NOWB_MIN = 20 := rfl
@@ -373,6 +374,7 @@ include hW hfull hfn hn0 h0 h0ts hwin hws hdu hd hedf hmargin in
 whose words have delay `≥ NOWB_MIN`, the deadline margin, and every other live lane at
 `≥ CORESIDENT_USB`. -/
 theorem usb_nostall : ∀ T, NoStall win (run P win T e0) ∧ Br1Only P u (run P win T e0) := by
+  have hPS : PENDING_SLACK = 25 := pending_slack_val
   have hS : Struct e0 := by
     have hw := hW
     unfold Wf at hw

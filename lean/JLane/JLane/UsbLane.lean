@@ -306,7 +306,7 @@ theorem head_valid_ret (P : Program) (win : Engine → Option Lane) (y : Lane)
     (hfull : ∀ l s, P.live l = true → e0.actv l s = true)
     (hy : P.live y = true) (hdly : P.dly y = d) (hd : DSTAR + B ≤ d)
     (hnp : ∀ t, (run P win t e0).NoNpf)
-    (hret : RetSpaced P win e0 y Dr) (hlat : R + 25 + B < Dr + d)
+    (hret : RetSpaced P win e0 y Dr) (hlat : R + PENDING_SLACK + B < Dr + d)
     (hR : ∀ t, t < T → IsWB y (run P win t e0) →
       (run P win t e0).now ≤ (run P win t e0).ts y + R + 2)
     (hB : ∀ a m, a + m ≤ T → m ≤ 23 + B → chargeSum P win y m (run P win a e0) ≤ B)
@@ -359,6 +359,7 @@ theorem dstar_usb (P : Program) (win : Engine → Option Lane) (e0 : Engine) (u 
   have hNv : NOWB_MIN = 20 := rfl
   have hXv : DSTAR_RETIRE_USB = 42 := rfl
   have hD : DSTAR = 20 := dstar_val
+  have hPS : PENDING_SLACK = 25 := pending_slack_val
   have hd20 : ∀ l, P.live l = true → 20 ≤ P.dly l := fun l hl => by
     by_cases h : l = u
     · rw [h]

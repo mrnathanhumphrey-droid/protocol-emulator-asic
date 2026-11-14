@@ -53,7 +53,10 @@ theorem pb_defer_g (s w2 t : Nat) (hy : P.live y = true) (hS0 : Struct e0)
     (hr2 : IsRet P y (run P win w2 e0))
     (hnr : cnt P win (IsRet P y) s e0 = cnt P win (IsRet P y) w2 e0)
     (hnh : cnt P win (Hit y) s e0 = cnt P win (Hit y) t e0) :
-    NpfAt y (run P win w2 e0) ∧ e0.now + t ≤ (run P win w2 e0).ts y + Rr w2 + 25 + B := by
+    NpfAt y (run P win w2 e0) ∧ e0.now + t ≤ (run P win w2 e0).ts y + Rr w2 + PENDING_SLACK + B := by
+  have hPS : PENDING_SLACK = 25 := pending_slack_val
+  have hHS : HEAD_SLACK = 26 := head_slack_val
+  have hDS : DSTAR = 20 := dstar_val
   have hold := npf_hold P win y e0 s ho hw (w2 - s) (fun i hi =>
     ⟨no_event_between P win (Hit y) e0 s t (s + i) (by omega) (by omega) hnh,
      not_ret_form P y _
@@ -96,16 +99,19 @@ theorem pending_bound_gap (hy : P.live y = true) (hS0 : Struct e0) (h0 : e0.owed
       cnt P win (IsRet P y) w e0 = k → IsRet P y (run P win w e0) →
       cnt P win (IsRet P y) w2 e0 = k + 1 → IsRet P y (run P win w2 e0) →
       cnt P win (Hit y) t e0 ≤ k →
-      (NpfAt y (run P win w2 e0) ∧ e0.now + t ≤ (run P win w2 e0).ts y + Rr w2 + 25 + B) ∨
-      e0.now + t ≤ (run P win w e0).ts y + Z w + 25 + B := by
+      (NpfAt y (run P win w2 e0) ∧ e0.now + t ≤ (run P win w2 e0).ts y + Rr w2 + PENDING_SLACK + B) ∨
+      e0.now + t ≤ (run P win w e0).ts y + Z w + PENDING_SLACK + B := by
+  have hPS : PENDING_SLACK = 25 := pending_slack_val
+  have hHS : HEAD_SLACK = 26 := head_slack_val
+  have hDS : DSTAR = 20 := dstar_val
   have hD : DSTAR = 20 := dstar_val
   -- the fresh case, shared by every k
   have fresh : ∀ (k t w w2 : Nat), t ≤ T → w < w2 → w2 < t →
       cnt P win (IsRet P y) w e0 = k → IsRet P y (run P win w e0) →
       cnt P win (IsRet P y) w2 e0 = k + 1 → IsRet P y (run P win w2 e0) →
       cnt P win (Hit y) t e0 ≤ k → k ≤ cnt P win (Hit y) (w + 1) e0 →
-      (NpfAt y (run P win w2 e0) ∧ e0.now + t ≤ (run P win w2 e0).ts y + Rr w2 + 25 + B) ∨
-      e0.now + t ≤ (run P win w e0).ts y + Z w + 25 + B := by
+      (NpfAt y (run P win w2 e0) ∧ e0.now + t ≤ (run P win w2 e0).ts y + Rr w2 + PENDING_SLACK + B) ∨
+      e0.now + t ≤ (run P win w e0).ts y + Z w + PENDING_SLACK + B := by
     intro k t w w2 htT hww2 hw2t hwk hwb hw2k hw2b hh hfresh
     have hm := cnt_mono P win (Hit y) e0 (w + 1) t (by omega)
     have hr1 : cnt P win (IsRet P y) (w + 1) e0 = k + 1 := by
@@ -217,14 +223,17 @@ theorem head_late_gap (L : Nat → Nat) (hW : Wf e0) (hfull : ∀ s, e0.actv y s
     (hZC : ∀ x x2, x2 < T → Consec P win y e0 x x2 →
       Z x + DSTAR + B ≤ gp P win y e0 x + Z x2)
     (hHD : ∀ x, x < T → IsRet P y (run P win x e0) → NpfAt y (run P win x e0) →
-      Rr x + 26 + B ≤ gp P win y e0 x + L x)
+      Rr x + HEAD_SLACK + B ≤ gp P win y e0 x + L x)
     (hHN : ∀ x x2, x2 < T → Consec P win y e0 x x2 →
-      Z x + 26 + B ≤ gp P win y e0 x + gp P win y e0 x2 + L x2)
+      Z x + HEAD_SLACK + B ≤ gp P win y e0 x + gp P win y e0 x2 + L x2)
     (t : Nat) (htT : t ≤ T)
     (hlate : ∀ x, x < t → IsRet P y (run P win x e0) →
       cnt P win (IsRet P y) (x + 1) e0 = cnt P win (IsRet P y) t e0 →
       (run P win t e0).ts y + L x ≤ (run P win t e0).now) :
     (run P win t e0).headValid y = true := by
+  have hPS : PENDING_SLACK = 25 := pending_slack_val
+  have hHS : HEAD_SLACK = 26 := head_slack_val
+  have hDS : DSTAR = 20 := dstar_val
   have hS : Struct e0 := by
     have hw := hW
     unfold Wf at hw
