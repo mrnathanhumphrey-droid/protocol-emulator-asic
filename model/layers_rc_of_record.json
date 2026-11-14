@@ -1,0 +1,56 @@
+{
+ "source": {
+  "run": "/opt/c1/kh27a_w027s",
+  "def": "/opt/c1/kh27a_w027s/runs/wokwi/final/def/tt_um_protocol_emulator.def",
+  "spef": "/opt/c1/kh27a_w027s/runs/wokwi/57-openroad-rcx/nom/tt_um_protocol_emulator.nom.spef",
+  "layers": {
+   "Metal2": {
+    "n": 887,
+    "cap": 0.00016070310981535472,
+    "res": 0.0005195819544299178,
+    "r_via": 20.004214292790586
+   },
+   "Metal3": {
+    "n": 1384,
+    "cap": 0.00019914533783315473,
+    "res": 0.0005169847205751105,
+    "r_via": 20.07518628597508
+   },
+   "Metal4": {
+    "n": 73,
+    "cap": 0.0001600881475454299,
+    "res": 0.0005097911721018386,
+    "r_via": 20.138417283246934
+   }
+  }
+ },
+ "check": {
+  "run": "/opt/c1/b6_27a_c027rc",
+  "def": "/opt/c1/b6_27a_c027rc/runs/wokwi/final/def/tt_um_protocol_emulator.def",
+  "spef": "/opt/c1/b6_27a_c027rc/runs/wokwi/57-openroad-rcx/nom/tt_um_protocol_emulator.nom.spef",
+  "layers": {
+   "Metal2": {
+    "n": 919,
+    "cap": 0.00016648601831229892,
+    "res": 0.0005266975238919846,
+    "r_via": 19.900707799547995
+   },
+   "Metal3": {
+    "n": 1362,
+    "cap": 0.00020064776979154814,
+    "res": 0.0005159753159315358,
+    "r_via": 20.07913644257022
+   },
+   "Metal4": {
+    "n": 113,
+    "cap": 0.00015718233407352577,
+    "res": 0.0005122903960655177,
+    "r_via": 20.072060536142274
+   }
+  }
+ },
+ "min_len_um": 20.0,
+ "share": 0.9,
+ "tol": 0.1,
+ "units": "res kOhm/um, cap pF/um, r_via ohm"
+}

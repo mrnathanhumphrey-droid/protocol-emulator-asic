@@ -86,7 +86,12 @@ DECLARED = {
         "(clocked_a2_bounds, lane_response_bounds) are stale for the images the "
         "60 MHz move re-derived, and program_a2 regenerates them with pyRTA "
         "working first (Wilson 11-04). (The board images are native v2 since "
-        "F1.5, 11-09; only the bound tables remain.)",
+        "F1.5, 11-09; only the bound tables remain.) UNCERTIFIED for every image "
+        "with a branch lane (Wilson 11-13, agent 2 729111f): the dispatcher stalls "
+        "ALL lanes when the EDF winner's head is empty, and a word after a branch "
+        "can arrive later than A2's dispatch-jitter budget, so no A2 certificate "
+        "may be issued or quoted for a branch-lane image until the dispatcher-stall "
+        "fix lands ((b') skip empty heads; fallback (c) the proved stall bound in J).",
     "test/run_cktx.py":
         "the pre-#8 silicon arm is v1-era RTL that reads only v1 images; set "
         "aside by name (fix #8 priced on v2 by M_TX_PRELOAD); the v2 lock "
@@ -99,7 +104,10 @@ DECLARED = {
         "needs bench re-witness on v2 bitstream -- the 1-Wire FPGA witness is a "
         "HARDWARE record of the v1 image on a v1 bitstream; v2's image is "
         "translate(v1). At the v2 lock: re-run at the bench, or SCOPE.md says "
-        "the board evidence is v1's (Wilson 10-25)",
+        "the board evidence is v1's (Wilson 10-25). The re-witness must use the "
+        "REGENERATED onewire_fpga_image.hex (the unused-field zero-fill, Wilson "
+        "11-14) -- its SHA-256 is the record's program identity -- on a bitstream "
+        "rebuilt with the regenerated uart_rx_board.hex",
     "model/gate_slang_lint.py":
         "pe_pit_s12 (11-04) brought WidthTruncate x66, ConstantConversion x3 and "
         "ArithOpMismatch over its pin; Wilson 11-13 W1: fixed in the RTL with "
@@ -110,7 +118,9 @@ DECLARED = {
     "model/gate_i2c_hw_witness.py":
         "needs bench re-witness on v2 bitstream -- the I2C FRAM witness ran a "
         "bitstream built from v1's RTL. At the v2 lock: re-run at the bench, or "
-        "SCOPE.md says the board evidence is v1's (Wilson 10-25)",
+        "SCOPE.md says the board evidence is v1's (Wilson 10-25). The v2 bitstream "
+        "it re-witnesses on must be built with the REGENERATED uart_rx_board.hex "
+        "(the unused-field zero-fill, Wilson 11-14)",
 }
 
 #: gate -> (the item that owns turning it green, the point it must be green
@@ -128,7 +138,13 @@ DEBT = {
                                      "after the s12 routed decision (due 11-13); "
                                      "at the latest " + _V2_LOCK),
     "model/a2/gate_j_program.py": ("run_w_sweep.py --full at v2", _V2_LOCK),
-    "model/a2/gate_a2_program.py": ("the A2 re-certification (pyRTA working first)",
+    "model/a2/gate_a2_program.py": ("the A2 re-certification (pyRTA working first); "
+                                    "for branch-lane images the dispatcher-stall fix "
+                                    "first (Wilson 11-13), then agent 2's k-lane bound "
+                                    "under (b') -- until it lands, run_branch_check's "
+                                    "multi-lane images inside the premises carry a "
+                                    "MEASURED-BRIDGE (uncertified) budget "
+                                    "(test/branch_bridge.json; Wilson 11-14)",
                                     "before the entry is final"),
     "test/run_cktx.py": ("the v2 lock's cktx rebuild or retirement", _V2_LOCK),
     "ci/ln1_replay.py": ("the Lean update for the first primitives", _V2_LOCK),

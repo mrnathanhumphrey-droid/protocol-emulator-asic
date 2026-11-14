@@ -29,6 +29,9 @@ MUST-FIRES (each must turn the gate red):
   M4 a DIFFERENT tx_image.hex in a scanned directory -> NameCollision
      (a temporary directory added to the scan; nothing in the tree is touched)
   M5 corpus_spim25's run_recert class deleted -> red naming it
+  M6 an A2 certificate asked for on branch_image.hex -> refused, "dispatcher-stall
+     fix pending" (Wilson 11-13: the code-level block; the DEBT entry records it)
+  M7 a generated (pygen) arm's image dropped from the universe -> G6 red
 and the controls that must stay GREEN: a byte-identical tx_image.hex copy is
 de-duplicated and listed; a non-clocked image with no record (tx_image) gets
 no bound and no refusal.
@@ -73,10 +76,17 @@ def needs(img):
     return ck, tx
 
 
-def audit(imgs, clocked, resp):
-    """Problems for G1 + G2 over `imgs` = [(name, image)]."""
+def audit(imgs, clocked, resp, refused=()):
+    """Problems for G1 + G2 over `imgs` = [(name, image)]. An image in
+    `refused` (a branch lane, the dispatcher-stall block) MUST NOT carry a
+    record, and its absence is the block working, not a gap."""
     probs = []
     for name, img in imgs:
+        if name in refused:
+            if name in clocked or name in resp:
+                probs.append("%s: has a branch lane and an A2 record -- refused "
+                             "until the dispatcher-stall fix lands" % name)
+            continue
         ck, tx = needs(img)
         if ck:
             rec = clocked.get(name)
@@ -92,6 +102,14 @@ def audit(imgs, clocked, resp):
             probs.append("%s: an unclocked SHIFT and NO response-bound record"
                          % name)
     return probs
+
+
+def generated_missing(universe_paths, generated):
+    """G6 (Wilson 11-13, 2e): every image a generated arm names is IN the
+    universe -- [path] of those that are not. Pure, so M7 can price it."""
+    have = {os.path.normcase(os.path.normpath(p)) for p in universe_paths}
+    return sorted(p for p in generated
+                  if os.path.normcase(os.path.normpath(p)) not in have)
 
 
 def class_problems(clocked, classes):
@@ -129,14 +147,31 @@ def main() -> int:
     with open(RESP_JSON, encoding="utf-8") as fh:
         resp = json.load(fh)
 
-    nck = sum(1 for _n, img in imgs if needs(img)[0])
-    ntx = sum(1 for _n, img in imgs if needs(img)[1])
+    # the dispatcher-stall block first: a refused image's lane needs are never
+    # asked (two of them -- the USB device / buffer images -- are edge-paced
+    # with no T_ext, so A2 cannot even form their lane set)
+    refused = ({n for n, img in imgs if P.branch_lanes(img)}
+               if P.STALL_FIX_PENDING else set())
+    nck = sum(1 for n, img in imgs if n not in refused and needs(img)[0])
+    ntx = sum(1 for n, img in imgs if n not in refused and needs(img)[1])
     print("  %d images: %d with a clocked open-drain lane, %d with an "
           "unclocked SHIFT" % (len(imgs), nck, ntx))
-    probs = audit(imgs, clocked, resp)
+    for n in sorted(refused):
+        print("    REFUSED (dispatcher-stall fix pending): %s" % n)
+    probs = audit(imgs, clocked, resp, refused)
     for p in probs:
         print("    *** %s" % p)
-    say(not probs, "G1/G2: every image has the bounds its lanes need")
+    say(not probs, "G1/G2: every image has the bounds its lanes need "
+        "(%d branch-lane image(s) refused by name)" % len(refused))
+    gen = sorted(U.GENERATED_ARM_IMAGES)
+    # SNIFF images (PIT captures, not programs) are in the universe but held
+    # out of the program set by design -- present, for G6
+    upaths = list(dict(u.items()).values()) + list(u.sniff.values())
+    gmiss = generated_missing(upaths, gen)
+    for p in gmiss:
+        print("    *** a generated arm's image is not in the universe: %s" % p)
+    say(bool(gen) and not gmiss, "G6: every generated arm's image (%d) is in the "
+        "universe" % len(gen))
 
     # G3: the bench runner, fail-closed
     ex = benchset.A2_UNBOUNDED_EXEMPT
@@ -146,7 +181,7 @@ def main() -> int:
     bad = []
     byname = dict(imgs)
     for name, path in u.items():
-        if needs(byname[name])[0] and name not in ex:
+        if name not in refused and needs(byname[name])[0] and name not in ex:
             rel = os.path.relpath(path, ROOT).replace(os.sep, "/")
             try:
                 arg = benchset.a2_slack_arg(rel)
@@ -181,13 +216,13 @@ def main() -> int:
     # M1
     c2 = copy.deepcopy(clocked)
     c2.pop("i2c_fram_fpga.hex", None)
-    m1 = audit(imgs, c2, resp)
+    m1 = audit(imgs, c2, resp, refused)
     say(any("i2c_fram_fpga.hex" in p for p in m1),
         "M1 i2c_fram_fpga record removed -> red")
     # M2
     victim = sorted(resp)[0]
     r2 = {k: v for k, v in resp.items() if k != victim}
-    m2 = audit(imgs, clocked, r2)
+    m2 = audit(imgs, clocked, r2, refused)
     say(any(victim in p for p in m2),
         "M2 response record %s removed -> red" % victim)
     # M3
@@ -208,6 +243,36 @@ def main() -> int:
         ctl = False
     say(ctl, "control: tx_image (no clocked lane, no record) -> no bound, "
         "no refusal")
+    # M6: an A2 certificate on branch_image.hex is refused, by name
+    bimg = byname.get("branch_image.hex")
+    m6 = []
+    for what, call in (("clocked budgets", lambda: P.budgets(None, [("branch_image.hex", bimg)])),
+                       ("response bounds", lambda: P.response_bounds(None, [("branch_image.hex", bimg)]))):
+        try:
+            call()
+            m6.append(False)
+        except P.StallFixPending as exc:
+            m6.append("dispatcher-stall fix pending" in str(exc)
+                      and "branch_image.hex" in str(exc))
+    say(bimg is not None and all(m6), "M6 an A2 certificate asked for on "
+        "branch_image.hex -> refused, 'dispatcher-stall fix pending'")
+    try:
+        P.refuse_branch(byname["tx_image.hex"], "tx_image.hex")
+        ctl6 = True
+    except P.StallFixPending:
+        ctl6 = False
+    say(ctl6, "control: tx_image (no branch lane) -> not refused")
+    # M7: a generated arm's image dropped from the universe -> G6 red
+    if gen:
+        u7 = [p for p in upaths
+              if os.path.normcase(os.path.normpath(p))
+              != os.path.normcase(os.path.normpath(gen[0]))]
+        say(generated_missing(u7, gen) == [gen[0]],
+            "M7 generated image %s dropped from the universe -> G6 red"
+            % os.path.basename(gen[0]))
+    else:
+        say(False, "M7 has no generated arm image to drop")
+
     # M4 + control, in a temporary directory added to the scan
     tmp = tempfile.mkdtemp(prefix="probe_imgu_")
     try:

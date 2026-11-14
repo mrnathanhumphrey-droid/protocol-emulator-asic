@@ -86,6 +86,52 @@ def lanes_of(img):
     return [(ln, h, acts) for ln, (h, acts) in sorted(by.items())]
 
 
+# ⛔⛔ THE DISPATCHER-STALL BLOCK (Wilson 11-13, the A2 audit; agent 2 729111f).
+# When the EDF winner's head is empty the dispatcher stalls EVERY lane, and a
+# word after a branch can arrive later than the dispatch-jitter budget this
+# model prices -- so "d_min >= D* gives J = 1" does NOT hold for a program with
+# a branch lane. Until the dispatcher-stall fix lands ((b') skip empty heads,
+# or (c) the proved stall bound in J), no A2 certificate is issued or quoted
+# for such an image: the per-image entry points RAISE `StallFixPending`, and
+# the set builders leave the image out BY NAME (`REFUSED`). The DEBT entry in
+# model/stale_records.py records the gap; this is what enforces it.
+# ⇒ When the fix lands, J comes from ITS result (0 extra under (b'), the proved
+# bound under (c)) and this flag goes False in the same commit.
+STALL_FIX_PENDING = True
+
+
+class StallFixPending(RuntimeError):
+    """An A2 certificate asked for on an image with a branch lane."""
+
+
+def branch_lanes(img):
+    """The lanes of `img` that carry a branch word (pe_isa.BRANCH_OPS)."""
+    return sorted({ln for ln, _h, a in dgf.walk(img) if a["op"] in I.BRANCH_OPS})
+
+
+def refuse_branch(img, name="image"):
+    """Raise StallFixPending if `img` has a branch lane and the fix is pending."""
+    bl = branch_lanes(img) if STALL_FIX_PENDING else []
+    if bl:
+        raise StallFixPending(
+            "%s: A2 refused -- dispatcher-stall fix pending (branch lane(s) %s; "
+            "Wilson 11-13, agent 2 729111f)" % (name, ",".join(map(str, bl))))
+
+
+#: {image name: reason} -- the images a set builder left out under the block
+REFUSED = {}
+
+
+def _admit(name, img):
+    """True if A2 may certify `img`; else record it in REFUSED, by name."""
+    try:
+        refuse_branch(img, name)
+        return True
+    except StallFixPending as exc:
+        REFUSED[name] = str(exc)
+        return False
+
+
 def is_clocked(h, a):
     return (h["clkpin"] < N_PINS and a["level"] == 1
             and a["op"] in (I.OP_SHIFT, I.OP_SHIFTIN))
@@ -131,22 +177,61 @@ EDGE_PACED_MIN_ARMS = 2
 #: target's clock (50 / 100 cycles at 50 MHz, 60 / 120 at 60); they were
 #: typed 50 / 100. Each sha is the image's own.
 T_EXT_HZ = {
-    "35d541098fe2474e63479dd6dd62f15602e54661017fa14f776c3723854827f4": {0: 1_000_000},   # sptgt_m0
-    "5797accf894e88be22c22a0909649d8ad7fa3e4fd584144c252e7d512479ba79": {0: 1_000_000},   # sptgt_m1
-    "fc2c05993ef4df5db918ffe32599032394650fe9396ce51f01580a010a71c3a7": {0: 1_000_000},   # sptgt_m2
-    "6f048838f5709d0c8f016047fa7faa9795500ffa954af4b1f656c7a5ec64214a": {0: 1_000_000},   # sptgt_m3
-    "f35804d5ebf9b4720911f39c2d8d983fb1a43e758cea99687723d5903998881b": {0: 500_000},  # sptgt_mosi
+    "802711cf77da7a48a3790327732d0531720ad0e2b2dd9061fa9cf59ef0c5c050": {0: 1_000_000},   # sptgt_m0
+    "0e5d330bc4e1f97c6bdee31a76d9b09eb8a4c3749d134bc1651e11535c5a2a7c": {0: 1_000_000},   # sptgt_m1
+    "0cb283c1cf4d562d8521f7ca166dd4134eddeca4d98d59b184028ff7ca29a629": {0: 1_000_000},   # sptgt_m2
+    "c1e41e8bec9162558dfd28d2ec7a4a9039dd4abe5537f0aed8844483477e8cf9": {0: 1_000_000},   # sptgt_m3
+    "c3a50d028537f8a3ca78c4be10b1235aef205bf2509d92eef7426b20f9389d8b": {0: 500_000},  # sptgt_mosi
     # B3b, the contention arm (make_smoke_image.py --b3b): lane 0 is the SPI
     # target at 1 MHz beside the four other shipped lanes
-    "49a8a17944c1103207d6ebb62355ce7930651f9ee548948aae0febedf067bdb7": {0: 1_000_000},   # b3b_a
-    "16af719c6ef12a6d09db7cced68bbc8e23da2516c57aa703712591cfdd3dd3ca": {0: 1_000_000},   # b3b_a3
-    "268de5fc714efbdf222daa8c6cb2133087168fc9ca9092c59f39938d9a91fec9": {0: 1_000_000},   # b3b_b
-    "e6d8a0c0b6feb3ccb6c6b3a6fd5fced00175bdeaaa072845f4429fdd88f2ffd2": {0: 1_000_000},   # b3b_bnoi2c
+    "6594891e083cfe06a888022c08ce5cc8cd54228400ebcae5652d9416b135980a": {0: 1_000_000},   # b3b_a
+    "80da023512c78c18d51e9e2248ec6f9b6464494bcdf1e3e7760ad040937665df": {0: 1_000_000},   # b3b_a3
+    "60df2086bdcac9cee7be6b2bbbe995a8841b257441498694cc0a48cea0a65971": {0: 1_000_000},   # b3b_b
+    "738df4dc5d0a7be590400e42d475dee5a98e72bd6c6727d8bc80dfecdf2da8eb": {0: 1_000_000},   # b3b_bnoi2c
 }
 
 
 class EdgePacedNoTExt(ValueError):
     pass
+
+
+def usb_tipd_cycles(f=None):
+    """TIPD in cycles at the target's clock: the host's minimum gap between
+    packets (USB 2.0 §7.1.18.1, `clock.USB_TIPD_BITS` LS bit times)."""
+    import clock
+    return clock.USB_TIPD_BITS * clock.usb_bit_cycles(f)
+
+
+def usb_edge_min_cycles(f=None):
+    """The SHORTEST spacing the bus guarantees between two edges that release
+    an edge-paced USB lane, in cycles -- the minimum over its release gaps:
+      * SOP -> the packet's SE0: a whole packet, >= SYNC + PID = 16 bits;
+      * SE0 -> J (arm_se0 -> arm_j): the EOP's SE0, which a receiver must
+        honour from TLEOPR = 670 ns (Table 7-10), counted at the band's SLOW
+        edge (fewest cycles: `clock.usb_se0q_bounds`' upper end);
+      * J -> the next SOP: TIPD (2 bit times, §7.1.18.1).
+    ⛔ CORRECTED 11-14 (agent 2): it was TIPD alone, the gap BETWEEN packets
+    -- LONGER than the EOP's SE0, so it overstated the period, the unsafe
+    side for a deadline, and contradicted the Lean edge premises."""
+    import clock
+    return min(16 * clock.usb_bit_cycles(f),
+               clock.usb_se0q_bounds(f)[1],
+               usb_tipd_cycles(f))
+
+
+def usb_t_ext(rows):
+    """{USB_LANE: T_ext} when the USB lane carries a USB receive and is
+    edge-paced, else {}. ⭐ GENERATED, NOT BY SHA (Wilson 11-13, 2e): an edge-
+    paced USB lane is released by the HOST's packet edges; its external bound
+    is the shortest spacing the bus guarantees between them
+    (`usb_edge_min_cycles`) -- so the rule is the program's shape, and a
+    regenerated USB image (new sha) keeps it."""
+    import proof_constants as pc
+    progs = {ln: (h, acts) for ln, h, acts in rows}
+    if (pc.usb_receive_live(progs, I) and I.USB_LANE in progs
+            and edge_paced(progs[I.USB_LANE][1])):
+        return {I.USB_LANE: usb_edge_min_cycles()}
+    return {}
 
 
 def edge_paced(acts):
@@ -195,12 +280,13 @@ class _TExt(dict):
 T_EXT = _TExt()
 
 
-def lane_set(img, t_ext=None):
+def lane_set(img, t_ext=None, j=None):
     """The program's own A2 lane set, plus which entries are clocked OD.
     `t_ext` ({lane: cycles}) overrides the registry for edge-paced lanes."""
     rows = lanes_of(img)
     if t_ext is None:
-        t_ext = T_EXT.get(image_sha(img), {})
+        t_ext = dict(T_EXT.get(image_sha(img), {}))
+        t_ext.update(usb_t_ext(rows))
     # ⛔⛔ DELAY-0 REARM RULING: the `delay > 0` filters below dropped a
     # delay-0 action's ZERO spacing, so 1.6a (`queue_slot`) certified the
     # WS2812 3-sub-bit build. A zero spacing has no lane set -- no T, no J --
@@ -212,7 +298,10 @@ def lane_set(img, t_ext=None):
               for g in gaps(h, a)]
     d_min = min(delays) if delays else None
     k = len(rows)
-    j_prog = jp.j_of(d_min, k) if d_min else 0
+    # `j` overrides the program's dispatch jitter: run_branch_check's INTERIM
+    # bound (Wilson 11-13: the proved dispatcher-stall J, not the J = 1 that
+    # a branch lane can exceed until the dispatcher-stall fix lands)
+    j_prog = j if j is not None else (jp.j_of(d_min, k) if d_min else 0)
     out = []
     for ln, h, acts in rows:
         T = min((g for a in acts if a["delay"] > 0 for g in gaps(h, a)),
@@ -541,7 +630,7 @@ def response_images():
     out = []
     for n, img in image_universe.images():        # F1.5: board images native v2
         if any(a["op"] == I.OP_SHIFT and not is_clocked(h, a)
-               for _ln, h, acts in lanes_of(img) for a in acts):
+               for _ln, h, acts in lanes_of(img) for a in acts) and _admit(n, img):
             out.append((n, img))
     return out
 
@@ -557,6 +646,7 @@ def response_bounds(src, images=None):
     pass."""
     blob = {}
     for name, img in (images if images is not None else response_images()):
+        refuse_branch(img, name)                  # the dispatcher-stall block
         lanes = {}
         try:
             q = queue_slot(img, src)
@@ -673,7 +763,7 @@ def derive(img, src=None, t_ext=None):
     return res
 
 
-def lane_responses(img, src=None):
+def lane_responses(img, src=None, j=None):
     """{lane: (r_floor, why)} for EVERY lane, W1 accounted (ruling W7).
 
     `derive` answers for clocked open-drain lanes only, because the bench's
@@ -682,7 +772,7 @@ def lane_responses(img, src=None):
     needs `r_i` for any lane. Same lane set, same W1 term, same max(ours,
     pyRTA) rule as `derive`.
     """
-    ls, _d, _k, _j = lane_set(img)
+    ls, _d, _k, _j = lane_set(img, j=j)
     u = utilisation(ls)
     if u > 1.0:
         why = ("lane set overloaded (U = %.3f > 1): no finite worst-case "
@@ -719,6 +809,8 @@ def clocked_images():
     import image_universe
     out = []
     for name, img in image_universe.images():     # F1.5: board images native v2
+        if not _admit(name, img):
+            continue
         ls, _d, _k, _j = lane_set(img)
         if any(r["clocked_od"] for r in ls):
             out.append((name, img))
@@ -770,6 +862,7 @@ def budgets(src, images=None):
     """
     blob = {}
     for name, img in (images if images is not None else clocked_images()):
+        refuse_branch(img, name)                  # the dispatcher-stall block
         res = derive(img, src)
         mark = NO_RTA_BUDGET.get(name)
         if mark is not None:
@@ -860,6 +953,8 @@ def main() -> int:
         json.dump(rb, fh, indent=1, sort_keys=True)
     print("  -> %s (%d image(s))" % (os.path.relpath(RESP_JSON, ROOT),
                                      len(rb)))
+    for name, why in sorted(REFUSED.items()):
+        print("  REFUSED, NO CERTIFICATE: %s" % why)
     return 0
 
 

@@ -245,6 +245,7 @@ def main() -> int:
     _classifier_mustfire(S, say)
     _hidden_load_crosscheck(S, say)
     _injection_mustfires(S, say)
+    _monitor_mustfires(S, say)
     _completion_mustfires(S, say)
     print()
     print("GATE sim-runs: %s" % ("PASSED" if rc == 0 else "FAILED"))
@@ -389,19 +390,77 @@ def _completion_mustfires(S, say):
         shutil.rmtree(d, ignore_errors=True)
 
 
+def _monitor_mustfires(S, say):
+    """Wilson 11-14 item 3: a monitor FAIL is red unless declared, and a
+    declared must-fire must PROVE it fired -- priced on the judge itself."""
+    print()
+    print("  --- the monitor judge (MONITOR_MUST_FIRE, mode %s)" % S.MONITOR_MODE)
+    hang = "*** FAIL progress.vh[A]: lane 0 has sat on the action at pc=116 for 113 dispatches"
+    other = "*** FAIL clocked_conform[A1]: planted"
+    saved = dict(S.MONITOR_MUST_FIRE)
+    S.MONITOR_MUST_FIRE["_mf_probe"] = (r"progress\.vh\[A\]", "the judge's own must-fire")
+    try:
+        p1 = S.judge_records([{"cmd": "usbbuf B2", "must_fire": None, "fails": [hang]}])
+        say(bool(p1) and "UNDECLARED" in p1[0], "J1 an undeclared monitor FAIL (a planted hang) -> red")
+        p2 = S.judge_records([{"cmd": "mf", "must_fire": "_mf_probe", "fails": []}])
+        say(bool(p2) and "did NOT produce" in p2[0],
+            "J2 a declared must-fire whose FAIL did not appear -> red")
+        p3 = S.judge_records([{"cmd": "mf", "must_fire": "_mf_probe", "fails": [hang]}])
+        say(not p3, "J3 a declared must-fire producing exactly its FAIL -> clean")
+        p4 = S.judge_records([{"cmd": "mf", "must_fire": "_mf_probe", "fails": [hang, other]}])
+        say(any("UNDECLARED" in q for q in p4),
+            "J4 a declared must-fire that ALSO trips another monitor -> red")
+        p5 = S.judge_records([{"cmd": "mf", "must_fire": "_nope", "fails": [hang]}])
+        say(bool(p5) and "not in MONITOR_MUST_FIRE" in p5[0], "J5 an unknown must-fire id -> red")
+        say(S.monitor_fails("*** FAIL tb_x: own verdict\n" + hang) == [hang],
+            "J6 a bench's own verdict line is not a monitor line; progress.vh[A] is")
+        # Wilson 11-14, the narrow-entry guard on the declaration list itself
+        say(not S.guard_problems(), "J7 the declaration list passes its own guard "
+            "(%d entries)" % len(S.MONITOR_MUST_FIRE))
+        broad = dict(S.MONITOR_MUST_FIRE)
+        broad["_over_broad"] = {"runner": "test/run_usbbuf.py", "define": "M_READY_ALWAYS",
+                                "expect": r"progress\.vh", "why": "planted: every run_usbbuf arm"}
+        g8 = S.guard_problems(broad)
+        say(any("_over_broad" in q and "OVER-BROAD" in q for q in g8),
+            "J8 an over-broad entry (every run_usbbuf arm) -> red")
+        clean = dict(S.MONITOR_MUST_FIRE)
+        clean["_clean_arm"] = {"runner": "test/run_usbbuf.py", "build": "usbbuf.vvp",
+                               "define": None, "image": "usb.hex", "expect": r"progress\.vh",
+                               "why": "planted: the CLEAN build of a shipped image"}
+        g9 = S.guard_problems(clean)
+        say(any("_clean_arm" in q and "CLEAN-BUILD" in q for q in g9),
+            "J9 a clean-build entry outside the four exceptions -> red")
+        rec = {"cmd": "usbbuf B2", "runner": "test/run_usbbuf.py", "caller": "",
+               "builds": ["usbbuf.vvp"], "plusargs": ["+IMG=usb.hex"], "image": "usb.hex",
+               "fails": [hang]}
+        S.MONITOR_MUST_FIRE["_clean_arm"] = clean["_clean_arm"]
+        try:
+            p10 = S.judge_records([], stale_for={"test/run_usbbuf.py"})
+            say(any("_clean_arm" in q and "STALE" in q for q in p10),
+                "J10 an entry no run matched in a full gate pass -> STALE, red")
+            p11 = S.judge_records([dict(rec, builds=["usbbuf_M_X.vvp"])])
+            say(any("UNDECLARED" in q for q in p11),
+                "J11 a FAIL on a run no entry names exactly -> red")
+        finally:
+            S.MONITOR_MUST_FIRE.pop("_clean_arm", None)
+    finally:
+        S.MONITOR_MUST_FIRE.clear()
+        S.MONITOR_MUST_FIRE.update(saved)
+
+
 def _injection_mustfires(S, say):
     """Queue 3b: a bound that exists is ENFORCED on the run."""
     import benchset
     print()
     print("  --- +A2SLACK injection (queue 3b)")
     want = benchset.a2_slack_arg("test/ckod_image.hex")
-    got = S.argv(["sim", "+IMG=test/ckod_image.hex"], ["test/ckod_image.hex"])
+    got = S.unwrap(S.argv(["sim", "+IMG=test/ckod_image.hex"], ["test/ckod_image.hex"]))
     say(got[-1] == want and got.count(want) == 1,
         "I1 one bounded image -> its +A2SLACK appended, exactly (%s)" % want)
     keep = ["sim", "+A2SLACK=1,2,3,4,5"]
-    got = S.argv(list(keep), ["test/ckod_image.hex"])
+    got = S.unwrap(S.argv(list(keep), ["test/ckod_image.hex"]))
     say(got == keep, "I2 a run already carrying +A2SLACK is untouched")
-    got = S.argv(["sim"], ["test/tx_image.hex"])
+    got = S.unwrap(S.argv(["sim"], ["test/tx_image.hex"]))
     say(got == ["sim"], "I3 a non-clocked image -> nothing appended")
     why = _refused(S, ["test/ckod_image.hex", "test/corpus_i2c.hex"])
     say(bool(why) and "ambiguous" in why,

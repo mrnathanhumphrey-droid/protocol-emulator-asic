@@ -168,9 +168,15 @@ def device_program(variant=None):
     rx = lambda crc=False: (lambda L: I.act_shiftin_usb(DP, D, 8, crc=crc))
     nop = lambda n: (lambda L: I.act(I.OP_LEVEL, I.PIN_NONE, 0, n))
     top = lambda L: I.act(I.OP_REARM, 0, 1, 20)
-    arm_sop = lambda L: I.act(I.OP_ARM, DP, 1, 0)           # D+ rising: a packet's first K
+    # ⭐ HALF (Wilson 11-14): the ARM rebases to the edge + D/2, so the first
+    # SHIFTIN follows it directly and is the ARM's prefetched spare. The
+    # nop(D/2) that used to supply the half bit (step 7a §4, corrected) put the
+    # first sample two fetches behind the edge -- gap 2's late first sample.
+    arm_sop = lambda L: I.act_arm(DP, 1, 0, half=True)      # D+ rising: a packet's first K
     arm_se0 = lambda L: I.act_arm2(DM, DP, 0, 0)            # the packet's EOP
-    arm_j = lambda L: I.act(I.OP_ARM, DM, 1, 0)             # ... and the J after it
+    # QUAL (11-14): the J rise counts only after an SE0 run >= USB_N_J, so a
+    # transition glitch inside a packet is not taken for its EOP
+    arm_j = lambda L: I.act_arm(DM, 1, 0, qual=True)        # ... and the J after it
     cmp_pid = lambda pid, tgt: (lambda L: I.act_cmp_branch(pid, L[tgt], W, pid=True))
     bit = lambda pin, lvl, tgt, w=W: (lambda L: I.act_branch_bit(pin, lvl, L[tgt], w))
     send = lambda b: (lambda L: I.act_shifti(b, DM, D, pinb=DP))
@@ -183,36 +189,101 @@ def device_program(variant=None):
         unx = [("UNX", nop(SPC)), (None, bit(I.UO0, 0, "SET")), (None, top)]
     else:
         unx = [("UNX", arm_se0), (None, arm_j), (None, top)]
+    # the token head: wait for a packet, read it as a token (4 bytes), decide on its PID
+    head = lambda: ([(None, arm_sop)] + [(None, rx())] * 4 +
+                    [(None, cmp_pid(PID_SETUP, "SET")), (None, nop(SPC)),
+                     (None, cmp_pid(PID_OUT, "OUT")), (None, nop(SPC)),
+                     (None, cmp_pid(PID_IN, "IN"))] + [(None, f) for _l, f in unx])
+    # ⛔⛔ AFTER OUR ACK / NAK, THE HOST'S NEXT PACKET MAY START 2 BIT TIMES AFTER OUR
+    # EOP (TIPD, §7.1.18.1; agent 2's deadline: the packet ARM retires <= 78 cycles
+    # after the SE0 -> J edge). Looping back through REARM to TOP's ARM cost
+    # J 40 + release 20 + REARM 20 = 80 (measured 80 / 81). Each handshake tail
+    # therefore carries its OWN copy of the token head, so the ARM follows the
+    # release directly (40 + 20 = 60), as the DATA tail's ACK wait already did.
+    # A branch into TOP would cost W >= BR_W_MIN (33) and move the first sample.
     spec = (
         # TOP: any packet, received as a token (4 bytes); decide after it
-        [("TOP", arm_sop), (None, nop(D // 2))] + [(None, rx())] * 4 +
+        [("TOP", arm_sop)] + [(None, rx())] * 4 +
         [(None, cmp_pid(PID_SETUP, "SET")), (None, nop(SPC)),
          (None, cmp_pid(PID_OUT, "OUT")), (None, nop(SPC)),
          (None, cmp_pid(PID_IN, "IN"))] + unx +
         # SETUP: its DATA0 (8 bytes + CRC16), then DATA0? ADDR_OK? CRC_OK? -> ACK
-        [("SET", arm_sop), (None, nop(D // 2)), (None, rx()), (None, rx())] +
+        [("SET", arm_sop), (None, rx()), (None, rx())] +
         [(None, rx(True))] * 10 +
         [(None, arm_se0), (None, arm_j), (None, cmp_pid(PID_DATA0, "DOK")), (None, top)] +
         # OUT: a zero-length DATA0/1 (step 7a; SET_REPORT data is step 7b)
-        [("OUT", arm_sop), (None, nop(D // 2)), (None, rx()), (None, rx()),
+        [("OUT", arm_sop), (None, rx()), (None, rx()),
          (None, rx(True)), (None, rx(True)),
          (None, arm_se0), (None, arm_j), (None, cmp_pid(PID_DATA1, "DOK")), (None, nop(SPC)),
          (None, cmp_pid(PID_DATA0, "DOK")), (None, top)] +
         # a DATA packet's verdict: the token's ADDR_OK, then CRC_OK -> ACK
         [("DOK", nop(SPC)), (None, bit(I.VPIN_ADDR_OK, 0, "RTOP")), (None, nop(SPC)),
          (None, bit(I.VPIN_CRC_OK, 1, "ACK")), (None, top)] +
-        [("ACK", send(ack_s)), (None, send(ack_p))] + eop + [(None, top)] +
+        [("ACK", send(ack_s)), (None, send(ack_p))] + eop + head() +
         # IN: ADDR_OK, READY -> the buffer, else NAK
         [("IN", nop(SPC)), (None, bit(I.VPIN_ADDR_OK, 0, "RTOP")), (None, nop(SPC)),
          (None, bit(I.VPIN_READY, 1, "DS", TA)),
-         (None, send(nak_s)), (None, send(nak_p))] + eop + [(None, top)] +
+         (None, send(nak_s)), (None, send(nak_p))] + eop + head() +
         [("DS", lambda L: I.act_send_buf(DM, DP, D))] + eop +
         # after our DATA: the host's handshake (2 bytes); ACK clears READY
-        [(None, arm_sop), (None, nop(D // 2)), (None, rx()), (None, rx()),
+        [(None, arm_sop), (None, rx()), (None, rx()),
          (None, cmp_pid(PID_ACK, "EAK")), (None, arm_se0), (None, arm_j), (None, top),
          ("EAK", arm_se0), (None, arm_j), (None, lambda L: I.act_ready_clear(20)), (None, top),
-         ("RTOP", top)])
+         # ⛔ A TOKEN, BUT NOT FOR US (Wilson 11-14, gap 1, option 2): skip the
+         # addressed device's reply ONLY if one starts within the response
+         # window -- a FALLTHROUGH ARM on its SOP. Timeout (no reply: a corrupted
+         # token, an absent device) -> PC+1, back to TOP at once; edge (a reply)
+         # -> PC+2, wait for that reply's EOP, then TOP. The old RTOP re-armed
+         # TOP at once and missed (or mis-armed on) a reply at T_IPD; a plain
+         # EOP wait skipped the host's next token when nobody answered.
+         ("RTOP", lambda L: I.act_arm(DP, 1, resp_window(), ft=True)), (None, top),
+         (None, arm_se0), (None, arm_j), (None, top)])
     return _assemble(spec)
+
+
+def resp_window():
+    """The FALLTHROUGH ARM's timeout: window_end, the latest a legal responder
+    may start after our token's SE0->J (clock.usb_resp_window_cycles: TRSPIPD2
+    at the slowest legal rate). Counted from the ARM's release, which is no
+    earlier than that SE0->J, so the ARM is still armed at window_end."""
+    return clock.usb_resp_window_cycles()
+
+
+#: the longest path from a token's last receive to the RTOP ARM's release: the
+#: IN path's miss -- cmp SETUP, nop, cmp OUT, nop, cmp IN (taken), the IN
+#: path's nop, the ADDR_OK branch (taken) -- each word's spacing (W or SPC)
+#: plus one service (C = 2) and the dispatch jitter (J = 2) per word. The last
+#: receive retires before the token's EOP ends, so this bounds the ARM's
+#: release after the SE0->J from above.
+RTOP_PATH = (W, SPC, W, SPC, W, SPC, W)
+
+
+def rtop_walk_max():
+    return sum(RTOP_PATH) + len(RTOP_PATH) * (2 + clock.USB_J_CYCLES)
+
+
+def rtop_to_top_max():
+    """The timeout path to TOP's arm_sop being armed: the timeout word's (top,
+    REARM) service, its delay, TOP's word re-fetched after the loop-back (at
+    most D* of port contention + one refill), and its own service."""
+    import proof_constants as PC
+    k = PC.load()
+    return (2 + clock.USB_J_CYCLES) + 20 + k["dstar"] + k["l_refill"] + (2 + clock.USB_J_CYCLES)
+
+
+def resp_window_problems(walk=None, window=None, to_top=None, host=None):
+    """Wilson 11-14 correction A, generated: the RTOP ARM's latest expiry plus
+    the timeout path to TOP's arm_sop must land no later than the host's
+    earliest next token after its own timeout (18 bit times at the fastest
+    host rate). [problem], empty when it holds."""
+    walk = rtop_walk_max() if walk is None else walk
+    window = resp_window() if window is None else window
+    to_top = rtop_to_top_max() if to_top is None else to_top
+    host = clock.usb_host_next_min_cycles() if host is None else host
+    if walk + window + to_top <= host:
+        return []
+    return ["the response window does not clear before the host's next token: walk %d + "
+            "window %d + to TOP %d = %d > %d" % (walk, window, to_top, walk + window + to_top, host)]
 
 
 def image(variant=None, prog=None):

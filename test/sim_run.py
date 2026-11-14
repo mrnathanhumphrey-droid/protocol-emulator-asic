@@ -191,6 +191,13 @@ SCRATCH_GENERATORS: dict = {
                " re-anchoring), judged byte for byte against run_usbrx's golden"
                " decode of the host line it drives on tb_usbrx, not by the A2 gap",
         "v3": {"no_v3_layer": "test/tb_usbrx.v"}},
+    "gate_usb_sweep": {
+        "script": "model/gate_usb_sweep.py", "pattern": "usbsweep_*.hex",
+        "clocked": True,
+        "why": "Wilson 11-13 condition 4: usb_nostall / usb_j2_nb / usb_br1_window measured"
+               " on the admissible sweep (bytes, J <= 2, no stall, the 31-cycle window bound),"
+               " judged by run_usbrx's golden on tb_usbrx, not by the A2 gap",
+        "v3": {"no_v3_layer": "test/tb_usbrx.v"}},
     "run_pit_capture": {
         "script": "test/run_pit_capture.py", "pattern": "pitcap_*.hex",
         "clocked": True,
@@ -471,10 +478,11 @@ def lookup(images):
     return stamp, (next(iter(args)) if args else None)
 
 
-def argv(cmd, images):
+def argv(cmd, images, must_fire=None, arm=None):
     """`cmd` after the lookup -- with the run's A2 bound APPENDED when exactly
-    one of its images has one and `cmd` carries no +A2SLACK yet (queue 3b).
-    THE function every run takes its command from."""
+    one of its images has one and `cmd` carries no +A2SLACK yet (queue 3b) --
+    wrapped in the monitor judge (`wrap`). THE function every run takes its
+    command from."""
     stamp, inject = lookup(images)
     cmd = list(cmd)
     if inject and not any(isinstance(c, str) and c.startswith("+A2SLACK=")
@@ -486,7 +494,7 @@ def argv(cmd, images):
     # log -- measured, 1 of 301 in the identity run; on a pass-token line that
     # would turn a gate red. Same stream = same order, whole lines.
     print(stamp, flush=True)
-    return cmd
+    return wrap(cmd, must_fire, arm)
 
 
 def images_in(args):
@@ -520,11 +528,404 @@ def hardcoded_images(bench):
     return lits + [d for d in dflt if d not in lits]
 
 
-def vvp(args, images):
+def vvp(args, images, must_fire=None):
     """`[vvp] + args`, after the lookup -- the ONLY place a `vvp` command is
-    built (gate_sim_runs: `tool("vvp")` anywhere else is red)."""
+    built (gate_sim_runs: `tool("vvp")` anywhere else is red). `must_fire`:
+    this arm's id in MONITOR_MUST_FIRE when it is red ON PURPOSE."""
     from toolchain import tool
-    return argv([tool("vvp")] + list(args), images)
+    return argv([tool("vvp")] + list(args), images, must_fire)
+
+
+# =============================================================================
+# THE MONITOR JUDGE (Wilson 11-14, coverage step 2 item 3). A monitor a bench
+# `include`s (progress.vh layer A, clocked_conform, rx_e2e, the s12
+# assertions, ...) prints `*** FAIL` / `*** ASSERT` into the run's output --
+# and NOTHING READ IT: run_usbbuf / run_usbaddr / run_usbrst printed
+# progress.vh[A] FAILs on every run and stayed green, because each runner
+# parses only its own result lines. A per-runner rule rots the way the
+# orphaned runners did, so the judging is HERE, on the one path every run takes:
+#   * every run's command is wrapped in `sim_run.py judge` -- the simulator's
+#     stdout / stderr pass through UNCHANGED and its exit code is kept, so no
+#     caller's parse or output moves -- and every monitor FAIL line is written
+#     to a LEDGER under the run's SCOPE (the top-level runner, or the gate
+#     ci/run_gates.sh is running);
+#   * a monitor FAIL is RED unless the arm is declared in MONITOR_MUST_FIRE
+#     (ONE list) AND the FAIL is exactly the declared one; a declared arm whose
+#     expected FAIL does NOT appear is red too (it must prove it fired);
+#   * the verdict: the top-level Python runner's exit (an `atexit` hook, so no
+#     runner is edited to get it) and ci/run_gates.sh per gate (`sim_run.py
+#     verdict`), which also covers the shell runners (`sim_exec` wraps too).
+# Runners keep parsing their own result lines on top of this.
+# =============================================================================
+import re as _re_m
+
+
+def _monitor_tags():
+    """Every `*** FAIL <tag>` a test/*.vh monitor prints -- read from the
+    files, so a new monitor joins by itself."""
+    import glob
+    tags = set()
+    for f in glob.glob(os.path.join(HERE, "*.vh")):
+        with open(f, encoding="utf-8", errors="replace") as fh:
+            tags |= set(_re_m.findall(r"\*\*\* FAIL ([A-Za-z0-9_.]+)", fh.read()))
+    return tags
+
+
+MONITOR_TAGS = _monitor_tags()
+#: a monitor line: `*** FAIL <a monitor's tag>` or the RTL's `*** ASSERT `
+_MON_RE = _re_m.compile(r"^\s*\*\*\* (?:ASSERT |FAIL (?:%s)(?![A-Za-z0-9_]))"
+                        % "|".join(sorted(_re_m.escape(x) for x in MONITOR_TAGS)))
+
+
+def monitor_fails(text):
+    """The monitor FAIL / ASSERT lines in a run's output."""
+    return [ln.strip() for ln in text.splitlines() if _MON_RE.match(ln)]
+
+
+#: THE ONE DECLARATION LIST (Wilson 11-14, option (b)): the must-fire arms,
+#: keyed on each arm's IDENTITY. `test/monitor_mustfire.py` holds the data
+#: (MUST_FIRE, CLEAN_BUILD_EXCEPTIONS); this module judges it. Each entry:
+#:   runner   repo-relative script the arm runs under (the gate, or the script
+#:            that built the command)
+#:   build    the EXACT compiled-bench basename -- a mutant / variant build is
+#:            named for what it was built with -- never a pattern
+#:   define   the define that build carries (checked to exist in the sources
+#:            and to be named by the runner); None ONLY for a
+#:            CLEAN_BUILD_EXCEPTIONS id
+#:   plusargs plusargs that must ALL be present (a plusarg-selected arm)
+#:   image    the exact image basename, optional
+#:   expect   a regex EVERY monitor line of the run must match (>= 1 must)
+#:   why      why the arm is red on purpose
+#: NARROW BY CONSTRUCTION: no build and no plusargs is red (over-broad), a
+#: clean-build entry outside the listed exceptions is red (the guard), and an
+#: entry no run matched in a full gate pass is STALE, red.
+import monitor_mustfire as _MMF                                   # noqa: E402
+MONITOR_MUST_FIRE = _MMF.MUST_FIRE
+CLEAN_BUILD_EXCEPTIONS = _MMF.CLEAN_BUILD_EXCEPTIONS
+RUNNER_ENV = "SIM_RUN_RUNNER"
+
+#: "record" writes the ledger and reports; "enforce" also turns the scope red.
+#: ENFORCE since the full inventory landed (Wilson 11-14); SIM_RUN_MONITORS=record for an inventory run.
+MONITOR_MODE = os.environ.get("SIM_RUN_MONITORS", "enforce")   # ENFORCE (Wilson 11-14): the full inventory landed
+SCOPE_ENV, LEDGER_ENV = "SIM_RUN_SCOPE", "SIM_RUN_LEDGER"
+
+
+def _ledger_path(scope):
+    """The scope's ledger DIRECTORY: one record file per run."""
+    import tempfile
+    return os.environ.get(LEDGER_ENV) or os.path.join(
+        tempfile.gettempdir(), "sim_run_ledger_%s" % scope)
+
+
+_OWN_SCOPE = []
+
+
+def _scope():
+    """This run's judging scope: inherited from a parent runner / gate, else
+    opened here -- and then THIS process judges it at exit."""
+    s = os.environ.get(SCOPE_ENV)
+    if not os.environ.get(RUNNER_ENV):
+        os.environ[RUNNER_ENV] = _caller()
+    if not s:
+        s = "py%d-%s" % (os.getpid(), _hl.sha256(os.urandom(8)).hexdigest()[:8])
+        os.environ[SCOPE_ENV] = s
+        _OWN_SCOPE.append(s)
+        import atexit
+        atexit.register(_judge_at_exit, s)
+    return s
+
+
+def _caller():
+    """This process's script, repo-relative (the runner that builds a command)."""
+    a = os.path.abspath(sys.argv[0]) if sys.argv and sys.argv[0] else ""
+    try:
+        return os.path.relpath(a, ROOT).replace(os.sep, "/")
+    except ValueError:
+        return a.replace(os.sep, "/")
+
+
+def entry_matches(e, r):
+    """True if ledger record `r` is the arm entry `e` names (exact identity)."""
+    if e.get("runner") not in (r.get("runner"), r.get("caller")):
+        return False
+    if e.get("build") and e["build"] not in r.get("builds", []):
+        return False
+    if e.get("image") and e["image"] != r.get("image"):
+        return False
+    pa = set(r.get("plusargs", []))
+    if any(x not in pa for x in e.get("plusargs") or ()):
+        return False
+    return bool(e.get("build") or e.get("plusargs"))
+
+
+def _src_text():
+    import glob
+    out = []
+    for pat in (os.path.join(ROOT, "src", "*.v"), os.path.join(HERE, "*.v"),
+                os.path.join(HERE, "*.vh"), os.path.join(ROOT, "model", "*.v")):
+        for f in glob.glob(pat):
+            with open(f, encoding="utf-8", errors="replace") as fh:
+                out.append(fh.read())
+    return "\n".join(out)
+
+
+def guard_problems(entries=None, clean_ok=None, src_text=None):
+    """[problem] for the declaration list itself (Wilson's guard): an entry with
+    no build and no plusargs is OVER-BROAD; a clean-build entry (no define) is
+    red unless its id is one of the listed exceptions; a declared define must
+    exist in the sources and be named by its runner."""
+    entries = MONITOR_MUST_FIRE if entries is None else entries
+    clean_ok = CLEAN_BUILD_EXCEPTIONS if clean_ok is None else clean_ok
+    src_text = _src_text() if src_text is None else src_text
+    out = []
+    for k, e in sorted(entries.items()):
+        if not isinstance(e, dict):
+            continue                     # a must_fire-id (legacy) entry
+        if not (e.get("build") or e.get("plusargs")):
+            out.append("%s: OVER-BROAD -- no build and no plusargs, it would cover every "
+                       "arm of %s" % (k, e.get("runner")))
+            continue
+        if not e.get("expect") or not e.get("why"):
+            out.append("%s: no expect / why" % k)
+        d = e.get("define")
+        if d is None:
+            if k not in clean_ok:
+                out.append("%s: a CLEAN-BUILD entry (no define) that is not one of the "
+                           "listed exceptions -- it could cover a shipped image's clean arm" % k)
+            continue
+        # what a build was built WITH: an `ifdef` / -D macro in the sources, a
+        # scratch source patch `S_*` (test/scratch_heads.py or the runner's own
+        # table), or `patch:<function>` -- a patching function the runner defines
+        name = d.split("=")[0]
+        rp = os.path.join(ROOT, e.get("runner", ""))
+        rtext = ""
+        if os.path.isfile(rp):
+            with open(rp, encoding="utf-8", errors="replace") as fh:
+                rtext = fh.read()
+        else:
+            out.append("%s: runner %s does not exist" % (k, e.get("runner")))
+        if name.startswith("patch:"):
+            if not _re_m.search(r"^def %s\(" % _re_m.escape(name[6:]), rtext, _re_m.M):
+                out.append("%s: %s -- the runner defines no such patch" % (k, d))
+            continue
+        known = _re_m.search(r"\b%s\b" % _re_m.escape(name), src_text)
+        if not known and name.startswith("S_"):
+            sh = os.path.join(HERE, "scratch_heads.py")
+            known = name in rtext or (os.path.isfile(sh) and name in open(sh, encoding="utf-8").read())
+        if not known:
+            out.append("%s: define %s is in no source file and no scratch patch" % (k, d))
+        if rtext and name not in rtext and not name.startswith("S_"):
+            out.append("%s: runner %s never names define %s" % (k, e["runner"], name))
+    for k in sorted(set(clean_ok) - set(entries)):
+        out.append("CLEAN_BUILD_EXCEPTIONS names %s, which is not an entry" % k)
+    return out
+
+
+def judge_records(records, stale_for=None):
+    """[problem] for ledger records (dicts) -- pure, so the must-fires price it.
+    `stale_for`: runners for which these records are a FULL gate pass, so an
+    entry of theirs that matched no run is STALE."""
+    probs = []
+    used, fired = set(), set()
+    for r in records:
+        mf, fails, what = r.get("must_fire"), r.get("fails", []), r.get("cmd", "")
+        if mf:
+            d = MONITOR_MUST_FIRE.get(mf)
+            if d is None:
+                probs.append("%s: must-fire id %r is not in MONITOR_MUST_FIRE" % (what, mf))
+                continue
+            rx = _re_m.compile(d["expect"] if isinstance(d, dict) else d[0])
+            used.add(mf)
+            if not any(rx.search(f) for f in fails):
+                probs.append("%s: declared must-fire %s did NOT produce its FAIL (%s)"
+                             % (what, mf, rx.pattern))
+            probs += ["%s: must-fire %s produced an UNDECLARED monitor FAIL: %s"
+                      % (what, mf, f) for f in fails if not rx.search(f)]
+            continue
+        hits = [k for k, e in MONITOR_MUST_FIRE.items()
+                if isinstance(e, dict) and entry_matches(e, r)]
+        if not hits:
+            probs += ["%s: UNDECLARED monitor FAIL: %s" % (what, f) for f in fails]
+            continue
+        used.update(hits)
+        rxs = [_re_m.compile(MONITOR_MUST_FIRE[k]["expect"]) for k in hits]
+        # one mutant build runs several scenarios and only some trip a monitor
+        # (the rest are judged by the runner's own lines): the entry must fire
+        # at least ONCE over the pass, and no run may carry another FAIL
+        if fails:
+            fired.update(k for k, x in zip(hits, rxs) if any(x.search(f) for f in fails))
+        probs += ["%s: must-fire %s produced an UNDECLARED monitor FAIL: %s"
+                  % (what, "/".join(hits), f) for f in fails
+                  if not any(x.search(f) for x in rxs)]
+    for k in sorted(used - fired):
+        if isinstance(MONITOR_MUST_FIRE.get(k), dict):
+            probs.append("%s: declared must-fire matched its arm but NEVER produced its FAIL "
+                         "(%s)" % (k, MONITOR_MUST_FIRE[k]["expect"]))
+    for k, e in sorted(MONITOR_MUST_FIRE.items()):
+        if (isinstance(e, dict) and stale_for and e.get("runner") in stale_for
+                and k not in used):
+            probs.append("%s: STALE -- no run of %s matched it in this gate pass"
+                         % (k, e["runner"]))
+    return probs
+
+
+def ledger(scope, path=None):
+    """The ledger records written under `scope`: one FILE per run in the
+    scope's directory. ⛔ Not one appended file: runners that simulate in a
+    POOL (run_pit_gcd) interleaved concurrent appends and corrupted a record
+    (measured, 11-14) -- and a record nobody can read is a run nobody judged,
+    so an unreadable record is itself reported as a monitor FAIL."""
+    import glob
+    import json
+    d = path or _ledger_path(scope)
+    out = []
+    for f in sorted(glob.glob(os.path.join(d, "*.json"))):
+        try:
+            with open(f, encoding="utf-8") as fh:
+                r = json.load(fh)
+        except (OSError, ValueError) as exc:
+            r = {"scope": scope, "must_fire": None, "cmd": os.path.basename(f),
+                 "fails": ["*** FAIL sim_run ledger: unreadable record (%s)" % exc]}
+        if r.get("scope") == scope:
+            out.append(r)
+    return out
+
+
+def _report(scope, stale_for=None):
+    probs = judge_records(ledger(scope), stale_for)
+    if probs:
+        print("*** sim_run monitors [%s]: %d monitor FAIL problem(s)%s:"
+              % (MONITOR_MODE, len(probs),
+                 "" if MONITOR_MODE == "enforce" else " (RECORD mode: not yet red)"),
+              flush=True)
+        for q in probs[:40]:
+            print("    " + q, flush=True)
+    return probs
+
+
+def _judge_at_exit(scope):
+    if scope not in _OWN_SCOPE:
+        return
+    probs = _report(scope)
+    if probs and MONITOR_MODE == "enforce":
+        sys.stdout.flush()
+        sys.stderr.flush()
+        os._exit(1)
+
+
+def wrap(cmd, must_fire=None, arm=None):
+    """`cmd` wrapped in the judge (the scope opened if this is the first run)."""
+    _scope()
+    return ([sys.executable, os.path.abspath(__file__), "judge", must_fire or "-",
+             "--caller=" + _caller()] + (["--arm=" + arm] if arm else []) + ["--"]
+            + list(cmd))
+
+
+def unwrap(cmd):
+    """The simulator command inside a `wrap` (for checks that compare it)."""
+    cmd = list(cmd)
+    if len(cmd) > 4 and cmd[2] == "judge" and "--" in cmd:
+        return cmd[cmd.index("--") + 1:]
+    return cmd
+
+
+def _judge_main(args):
+    """`judge <must_fire|-> -- cmd...`: run cmd, pass its output through
+    unchanged, keep its exit code, and ledger its monitor FAIL lines."""
+    import json
+    import subprocess
+    import threading
+    mf = None if args[0] == "-" else args[0]
+    caller = next((a.split("=", 1)[1] for a in args[1:args.index("--")]
+                   if a.startswith("--caller=")), "")
+    arm = next((a.split("=", 1)[1] for a in args[1:args.index("--")]
+                if a.startswith("--arm=")), None)
+    cmd = args[args.index("--") + 1:]
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    fails = []
+
+    def pump(src, dst):
+        for raw in iter(src.readline, b""):
+            dst.write(raw)
+            dst.flush()
+            if _MON_RE.match(raw.decode("utf-8", "replace")):
+                fails.append(raw.decode("utf-8", "replace").strip())
+
+    ts = [threading.Thread(target=pump, args=(proc.stdout, sys.stdout.buffer)),
+          threading.Thread(target=pump, args=(proc.stderr, sys.stderr.buffer))]
+    for th in ts:
+        th.start()
+    for th in ts:
+        th.join()
+    rc = proc.wait()
+    scope = os.environ.get(SCOPE_ENV, "unscoped")
+    # the arm's identity: the simulator, its compiled bench (a mutant build is
+    # named for its define), and the image / scenario plusargs
+    sims = [os.path.basename(str(c)) for c in cmd[1:3]
+            if str(c).endswith((".vvp", ".sim", ".exe")) or os.sep in str(c) or "/" in str(c)]
+    what = (os.path.basename(str(cmd[0])) + " " + " ".join(sims[:1]) + " " + " ".join(
+        str(c) for c in cmd[1:] if str(c).startswith(("+IMG", "+SCEN", "+CASE", "+HOST")))).strip()
+    # the arm's IDENTITY (Wilson 11-14): every plusarg, every file argument's
+    # basename (the compiled bench -- a mutant build is named for its define),
+    # the image, the gate (`runner`) and the script that built the command
+    plus = [str(c) for c in cmd[1:] if str(c).startswith("+")]
+    builds = [os.path.basename(str(c).replace("\\", "/")) for c in cmd[1:]
+              if not str(c).startswith(("+", "-"))
+              and ("/" in str(c) or "\\" in str(c) or "." in os.path.basename(str(c)))]
+    if arm:
+        builds.insert(0, arm)     # the runner's own name for this build
+    img = next((os.path.basename(x.split("=", 1)[1].replace("\\", "/"))
+                for x in plus if x.startswith("+IMG=")), None)
+    try:
+        d = _ledger_path(scope)
+        os.makedirs(d, exist_ok=True)
+        rec = os.path.join(d, "%d-%s.json" % (os.getpid(), _hl.sha256(os.urandom(8)).hexdigest()[:8]))
+        with open(rec + ".tmp", "w", encoding="utf-8") as fh:
+            json.dump({"scope": scope, "must_fire": mf, "fails": fails,
+                       "cmd": what, "rc": rc, "runner": os.environ.get(RUNNER_ENV, ""),
+                       "caller": caller, "builds": builds, "plusargs": plus,
+                       "image": img}, fh)
+        os.replace(rec + ".tmp", rec)       # the whole record or none
+    except OSError as exc:
+        print("*** sim_run judge: could not write the ledger (%s)" % exc,
+              file=sys.stderr, flush=True)
+        return rc or 98
+    return rc
+
+
+def _verdict_dry(args):
+    """Judge a ledger directory (one record per file) or an old appended .jsonl
+    (corrupt lines tolerated and counted) AS IF enforcing; `runner` fills the
+    records that lack one. Exit 1 on any problem."""
+    import glob
+    import json
+    src = args[0]
+    runner = args[1] if len(args) > 1 else None
+    recs, bad = [], 0
+    # a DIRECTORY is the per-run ledger (even when it carries a legacy
+    # `.jsonl` name, as the inventory drivers' ledgers do); a FILE is the old
+    # appended format
+    files = (sorted(glob.glob(os.path.join(src, "*.json"))) if os.path.isdir(src)
+             else [src])
+    for f in files:
+        with open(f, encoding="utf-8") as fh:
+            lines = fh.readlines() if f.endswith(".jsonl") else [fh.read()]
+        for ln in lines:
+            try:
+                r = json.loads(ln)
+            except ValueError:
+                bad += 1
+                continue
+            if runner and not r.get("runner"):
+                r["runner"] = runner
+            recs.append(r)
+    stale = {runner} if runner else {r.get("runner") for r in recs if r.get("runner")}
+    probs = guard_problems() + judge_records(recs, stale)
+    print("verdict-dry %s: %d run(s), %d unreadable, %d problem(s)"
+          % (os.path.basename(src.rstrip("/\\")), len(recs), bad, len(probs)))
+    for q in probs[:60]:
+        print("    " + q)
+    return 1 if probs or bad else 0
 
 
 def trace_incomplete(out, cmd):
@@ -570,6 +971,23 @@ def cli_images(items):
 
 
 def main(args):
+    if args and args[0] == "judge":
+        return _judge_main(args[1:])
+    if args and args[0] == "verdict":
+        # ci/run_gates.sh, per gate: judge the gate's scope -- a FULL gate pass,
+        # so the gate's own entries that matched nothing are STALE
+        g = os.environ.get(RUNNER_ENV)
+        probs = guard_problems() + judge_records(ledger(args[1]), {g} if g else None)
+        if probs:
+            print("*** sim_run monitors [%s]: %d problem(s)%s:" % (
+                MONITOR_MODE, len(probs),
+                "" if MONITOR_MODE == "enforce" else " (RECORD mode: not yet red)"))
+            for q in probs[:40]:
+                print("    " + q)
+        return 1 if (probs and MONITOR_MODE == "enforce") else 0
+    if args and args[0] == "verdict-dry":
+        # `verdict-dry <ledger dir | old .jsonl> [runner]`: judge AS IF enforcing
+        return _verdict_dry(args[1:])
     if not args or args[0] != "check":
         print("usage: sim_run.py check [--bench TOP] [+PLUSARG ...] [image ...]",
               file=sys.stderr)

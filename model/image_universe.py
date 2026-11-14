@@ -59,30 +59,49 @@ class Universe:
         return sorted(self.paths.items())
 
 
+#: the +IMG paths of the GENERATED (`pygen`) arms, filled by the last building
+#: scan -- gate_image_bounds G6 holds every one of them to the universe
+GENERATED_ARM_IMAGES = set()
+
+
 def _bench_arm_paths(generate=True):
     """(set of normalised paths every benchset `+IMG=` arm names, problems).
 
-    The generated images are BUILT first (`benchset.generate`) and the
-    long-path copy made (`ensure_longpath_image`), so a clean checkout and a
-    post-sweep tree see the same set. `generate=False` (test/sim_run.py's
-    per-run content index) lists the arms without building anything."""
+    ⛔ BUILDING, THE ARMS ARE `benchset.plan()`'s (Wilson 11-13, the A2 audit
+    2e): the same resolved records the coverage sweep runs -- static, corpus
+    and GENERATED (`pygen`) arms alike. Walking only CONFIG's static lists left
+    the USB / buffer / pair / ARM2 sweep images (branch-lane images among them)
+    outside the universe and every gate that reads it -- agent 1's own gap,
+    from ac3443d. The generated images are BUILT by plan() (and the long-path
+    copy made), so a clean checkout and a post-sweep tree see the same set.
+    `generate=False` (test/sim_run.py's per-run content index) lists the
+    STATIC arms without building anything."""
     sys.path.insert(0, os.path.join(ROOT, "test"))
     import benchset
     paths, probs = set(), []
     if generate:
-        benchset.ensure_longpath_image()
-    for top, cfg in sorted(benchset.CONFIG.items()):
-        err = benchset.generate(cfg, top) if generate else None
-        if err:
-            probs.append(err)
-        arms = cfg.get("arms")
-        if not isinstance(arms, list):
-            continue
-        for arm in arms:
-            for a in [a for f in arm[1:] if isinstance(f, list) for a in f]:
-                m = re.match(r"\+IMG=(.+\.hex)$", a)
-                if m:
-                    paths.add(os.path.normpath(os.path.join(ROOT, m.group(1))))
+        recs, probs = benchset.plan()
+        probs = list(probs)
+        arglists = [r["args"] for r in recs]
+        GENERATED_ARM_IMAGES.clear()
+        for r in recs:
+            if benchset.CONFIG.get(r["top"], {}).get("pygen"):
+                for a in r["args"]:
+                    m = re.match(r"\+IMG=(.+\.hex)$", a)
+                    if m:
+                        GENERATED_ARM_IMAGES.add(
+                            os.path.normpath(os.path.join(ROOT, m.group(1))))
+    else:
+        arglists = []
+        for _top, cfg in sorted(benchset.CONFIG.items()):
+            arms = cfg.get("arms")
+            if isinstance(arms, list):
+                arglists += [a for arm in arms for a in arm[1:] if isinstance(a, list)]
+    for args in arglists:
+        for a in args:
+            m = re.match(r"\+IMG=(.+\.hex)$", a)
+            if m:
+                paths.add(os.path.normpath(os.path.join(ROOT, m.group(1))))
     return paths, probs
 
 

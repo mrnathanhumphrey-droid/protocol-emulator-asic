@@ -710,7 +710,12 @@ def split_counts(lanes):
                 raise Reject("lane %d action %d has %d fields; an action is "
                              "(op, pin, level, delay, q[, count])"
                              % (ln, i, len(a)))
-            cnt = int(a[5]) if len(a) == 6 else 8
+            # ⛔ THE DEFAULT IS 8 ONLY WHERE THE OP READS A BIT COUNT (SHIFT /
+            # SHIFTIN): every other op gets 0 in a field it does not read (Wilson
+            # 11-14 -- the default 8 had filled ARM / LEVEL / REARM / START /
+            # STOP / READBIT words, colliding with ARM's HALF / QUAL bits). The
+            # reads are test/op_reads.json, generated from the engine's decode.
+            cnt = int(a[5]) if len(a) == 6 else (8 if int(a[0]) in (OP_SHIFT, OP_SHIFTIN) else 0)
             lo, hi = lo_hi.get(int(a[0]), other)
             if not lo <= cnt <= hi:
                 raise Reject("lane %d action %d: count %d is outside %d..%d "
@@ -942,7 +947,23 @@ def assemble(lanes, headers, park_pins=None, timing_checks=True,
             raise Reject(str(exc))
     check_i2c_order(img)
     check_branches(img)
+    # ⛔⛔ A2-UNCERTIFIED, NEVER REFUSED (Wilson 11-13, the 2d scope ruling).
+    # With a branch lane the dispatcher can stall every lane past A2's J = 1
+    # (agent 2, 729111f), so the timing verdicts above -- which price J = 1 --
+    # do not CERTIFY such an image. It is built and stamped, the same pattern
+    # as ADMISSIBLE-UNCERTIFIED: the assembler never refuses on these grounds,
+    # so the USB track keeps moving; the certificate writers are what refuse.
+    assemble.a2_status = a2_status(img)
     return img
+
+
+def a2_status(img):
+    """"A2" or "A2-UNCERTIFIED (...)" -- the stamp `assemble` leaves on the image."""
+    bl = program_a2.branch_lanes(img) if program_a2.STALL_FIX_PENDING else []
+    if not bl:
+        return "A2"
+    return ("A2-UNCERTIFIED (branch lane(s) %s: dispatcher-stall fix pending, "
+            "Wilson 11-13)" % ",".join(map(str, bl)))
 
 
 def check_branches(img):
@@ -1026,6 +1047,7 @@ def report(lanes, headers):
     print("    image            : %d bytes (program %d, store filler %d)"
           % (len(img), assemble.program_bytes,
              len(img) - assemble.program_bytes))
+    print("    A2               : %s" % assemble.a2_status)
     print("    SDA hold floor   : d > %d on a clocked open-drain lane "
           "(read from src/pe_engine.v)" % hold)
     for ln, (mode, lo, lag) in sorted(check_mode_floor(img).items()):
@@ -1046,7 +1068,7 @@ def report(lanes, headers):
 def _demo_ok():
     lanes = {0: [(OP_SHIFT, 8, 1, 25, 0), (OP_SHIFT, 8, 0, 25, 0),
                  (OP_REARM, 0, 1, 25, 0)],
-             2: [(OP_SHIFT, 2, 1, 45, 1), (OP_REARM, 0, 1, 45, 1)]}
+             2: [(OP_SHIFT, 2, 1, 45, 1), (OP_REARM, 0, 1, 45, 0)]}
     headers = {0: (8, 9, 1, 25, 50, 75), 2: (2, 1, 0, 45, 90, 135)}
     return lanes, headers
 
@@ -1060,7 +1082,7 @@ def _hold_demo(delay, mode=0, level=1):
     the same thing.
     """
     lanes, headers = _demo_ok()
-    lanes[2] = [(OP_SHIFT, 2, level, delay, 1), (OP_REARM, 0, 1, delay, 1)]
+    lanes[2] = [(OP_SHIFT, 2, level, delay, 1), (OP_REARM, 0, 1, delay, 0)]
     headers[2] = (2, 1, mode, delay, min(2 * delay, 255),
                   min(3 * delay, 255))
     return lanes, headers
@@ -1105,7 +1127,7 @@ def _floor_demo(d, heavy):
     `OP_LEVEL` lanes on `uo_out` pins with tight EDF keys -- real contention,
     and nothing a refusal elsewhere in this file would object to.
     """
-    lanes = {2: [(OP_SHIFT, 2, 1, d, 1), (OP_REARM, 0, 1, d, 1)]}
+    lanes = {2: [(OP_SHIFT, 2, 1, d, 1), (OP_REARM, 0, 1, d, 0)]}   # REARM reads no queue (Wilson 11-14)
     headers = {2: (2, 1, 0, d, min(2 * d, 255), min(3 * d, 255))}
     if heavy:
         for ln, pin in ((0, 8), (1, 9), (3, 10)):
@@ -1600,7 +1622,7 @@ def main() -> int:
     print()
     print("  --- must-fire: 1.6s -- an open-drain lane names uio pins only ---")
     ow = [(OP_SHIFT, 2, 0, 150, 0, 7), (OP_SHIFTIN, 3, 0, 900, 0, 8),
-          (OP_REARM, 0, 1, 900, 0, 8)]
+          (OP_REARM, 0, 1, 900, 0, 0)]
     for name, header, want_reject in (
             ("open-drain, clock PIN_NONE", (2, PIN_NONE, 0, 150, 255, 255),
              True),
@@ -1627,7 +1649,7 @@ def main() -> int:
     # open-drain overlap is refused (unproven is red).
     print()
     print("  --- must-fire: SP2/P3 -- a park overlap must be release-only ---")
-    pp_lane = {0: [(OP_SHIFT, 1, 1, 25, 0, 7), (OP_REARM, 0, 1, 25, 0, 8)]}
+    pp_lane = {0: [(OP_SHIFT, 1, 1, 25, 0, 7), (OP_REARM, 0, 1, 25, 0, 0)]}
     for name, lanes_b, headers_b, park, want_reject in (
             ("parked off the 1-Wire pins (0/5/6/7)", {0: ow},
              {0: (2, 4, 0, 150, 255, 255)}, {1: 0, 2: 5, 3: 6, 4: 7}, False),

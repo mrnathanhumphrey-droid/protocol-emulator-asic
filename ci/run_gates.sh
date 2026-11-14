@@ -268,6 +268,11 @@ GATES=(
   # A2 off. Clocked lane -> clocked A2 record, unclocked SHIFT -> response
   # record, the bench lookup fails closed, names are unique.
   model/gate_image_bounds.py
+  # ⛔ EVERY FIELD AN OPCODE DOES NOT READ IS ZERO (Wilson 11-14): the reads
+  # table is generated from src/pe_engine.v's decode (red on an uncovered read
+  # site or a stale test/op_reads.json); pe_isa refuses any unread nonzero
+  # field on every opcode, the store filler exempt by EXACT value only.
+  model/gen_op_reads.py
   # ⛔⛔ EVERY SIMULATION RUN GOES THROUGH test/sim_run.py (Wilson 10-19):
   # the bound lookup lives inside the one run path, so skipping it is not
   # possible; this is red on any run (vvp, a Verilator binary, cocotb's image
@@ -311,6 +316,11 @@ GATES=(
   # with: src/config.json's hardening keys hash to model/timing_of_record.json
   # (Wilson 10-17 -- the hold fix sat on the canary branch for three days).
   model/gate_flow_config.py
+  # the configuration of record's wire RC is the generated one (Wilson 11-13/14)
+  model/gate_layers_rc.py
+  # ⛔ progress.vh's per-action liveness bound is GENERATED from pe_isa's
+  # dispatch_max (Wilson 11-14): the tracked header must equal a fresh one.
+  test/gen_progress_bounds.py
   # ⛔⛔ PINS (Wilson 11-10): every TinyTapeout action and flow pin is a
   # 40-hex SHA or an exact version -- a branch or a TAG can be moved, and
   # precheck judges on TT's release. Must-fire: a line set to @ttihp27a.
@@ -487,6 +497,9 @@ GATES=(
   # fire and pin cycle against run_arm2's golden, pe_isa's refusals, and the
   # four M_ARM2_* must-fires' killer.
   test/run_arm2.py
+  # the ARM/dispatcher batch changes nothing it did not mean to (Wilson 11-14):
+  # pre-batch RTL (pinned by SHA) vs current, every shipped image, bit-exact
+  test/gate_batch_equiv.py
   # ⭐ bundle 2 (Wilson 11-08): the complementary pair, SHIFTI and the self-
   # timed byte -- the TX waveform bit-exact, the RX byte, pe_isa's refusals,
   # and the M_PAIR_* / M_ST_EARLY must-fires' killer.
@@ -496,6 +509,9 @@ GATES=(
   # +-1.5 %, the deadline rule, the sub-cycle phase walk (IN_SUITE), and the
   # four re-anchor / unstuffing must-fires' killer.
   test/run_usbrx.py
+  # the USB no-stall sweep (Wilson 11-13 condition 4; agent 2, 02bf147): usb_nostall,
+  # usb_j2_nb and usb_br1_window measured on the admissible sweep
+  model/gate_usb_sweep.py
   # ⭐ bundle 4 (Wilson 11-08): the RX CRC16 + the flags as virtual pins --
   # ACK exactly the good packets, never a corrupted one; M_CRC_*'s killer.
   test/run_usbcrc.py
@@ -758,7 +774,7 @@ can_run() {
       { command -v "$VL" >/dev/null 2>&1 || [ -n "${PE_VERILATOR:-}" ] \
         || command -v wsl.exe >/dev/null 2>&1; } \
         || { echo "no verilator and no wsl.exe to reach one"; return 1; } ;;
-    model/gate_one_encoder.py|model/gate_v2_equiv.py|test/run_pit_capture.py|test/run_pit_s0.py|test/gate_store_latch.py|test/run_branch_check.py|test/run_arm2.py|test/run_pair.py|test/run_usbrx.py|test/run_usbcrc.py|test/run_usbbuf.py|test/run_usbaddr.py|test/run_usbrst.py|test/gl_harness_check.py|test/gate_tb_elaborates.py|test/run_mutants.py|model/gate_sda_hold.py|test/run_w_sweep.py|test/run_cktx.py|test/run_spidelay.py|test/run_spim_witness.py|test/run_spitgt.py|test/run_rxbw.py)
+    model/gate_one_encoder.py|model/gate_v2_equiv.py|test/run_pit_capture.py|test/run_pit_s0.py|test/gate_store_latch.py|test/run_branch_check.py|test/run_arm2.py|test/gate_batch_equiv.py|test/run_pair.py|test/run_usbrx.py|model/gate_usb_sweep.py|test/run_usbcrc.py|test/run_usbbuf.py|test/run_usbaddr.py|test/run_usbrst.py|test/gl_harness_check.py|test/gate_tb_elaborates.py|test/run_mutants.py|model/gate_sda_hold.py|test/run_w_sweep.py|test/run_cktx.py|test/run_spidelay.py|test/run_spim_witness.py|test/run_spitgt.py|test/run_rxbw.py)
       command -v "$IV" >/dev/null 2>&1 || { echo "iverilog not found (PE_IVERILOG unset and not on PATH)"; return 1; } ;;
     model/gate_reset_audit.py|model/gate_share_coupling.py)
       [ -n "${PE_NETLIST_JSON:-}" ] && [ -f "${PE_NETLIST_JSON:-}" ] \
@@ -1278,10 +1294,20 @@ for g in "${GATES[@]}"; do
   echo "=== $g ==="
   # output to a file (no pipe: the exit code read is the GATE's own), then
   # shown, then judged for the gate's positive token
+  # the monitor judge (Wilson 11-14): every simulation this gate runs -- any
+  # runner, shell or Python -- ledgers its monitor FAIL lines under this scope,
+  # and the gate is judged on them below (test/sim_run.py, MONITOR_MUST_FIRE)
+  export SIM_RUN_SCOPE="gate$$-$(basename "$g" .py)-$RANDOM"
+  export SIM_RUN_RUNNER="$g"      # the gate: its must-fire entries, and STALE ones
   "$PY" "$g" > "$TOKLOG" 2>&1
   rc=$?
   cat "$TOKLOG"
-  if [ $rc -ne 0 ]; then
+  "$PY" test/sim_run.py verdict "$SIM_RUN_SCOPE"
+  mrc=$?
+  unset SIM_RUN_SCOPE SIM_RUN_RUNNER
+  if [ $rc -eq 0 ] && [ $mrc -ne 0 ]; then
+    FAILED+=("$g (an undeclared monitor FAIL in its simulations)")
+  elif [ $rc -ne 0 ]; then
     FAILED+=("$g (exit $rc)")
   else
     "$PY" ci/pass_token.py "$g" "$TOKLOG"

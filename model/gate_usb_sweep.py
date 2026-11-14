@@ -40,7 +40,7 @@ import proof_constants as PC          # noqa: E402
 import pe_isa as I                    # noqa: E402
 import run_usbrx as RX                # noqa: E402
 import sim_run                        # noqa: E402
-from toolchain import tool            # noqa: E402
+from toolchain import banner, tool    # noqa: E402
 
 GEN = "gate_usb_sweep"
 PROBE = "model/usb_sweep_probe.v"
@@ -57,7 +57,7 @@ def image(k, nbr, w_branch, ds_other):
     """lane 0: run_usbrx's receive program; lanes 1-4 at period coresident_usb, the last `nbr`
     of them looping LEVEL -> BRANCH_BIT (W = w_branch, on the host's D-, taken or not)."""
     D, DM, per = RX.D, RX.DM, k["coresident_usb"]
-    prog = [I.act(I.OP_ARM, DM, 0, 0), I.act(I.OP_LEVEL, I.PIN_NONE, 0, D // 2)]
+    prog = [I.act_arm(DM, 0, 0, half=True)]       # HALF (11-14): no nop(D/2)
     prog += [I.act_shiftin_usb(DM, D, 8) for _ in range(RX.NBYTES)]
     prog += [I.act(I.OP_LEVEL, I.PIN_NONE, 0, RX.POST), I.act(I.OP_REARM, 0, 1, D // 2)]
     hs = [I.hdr(DM, I.PIN_NONE, 1, D, 0, 2 * D, 3 * D, I.ACT_BASE)]
@@ -146,6 +146,7 @@ def run_arm(vvp, tmp, pool, name, img, stim, tag):
 
 
 def main() -> int:
+    banner("iverilog", "vvp")          # ruling V2: the log names the binaries
     k = PC.load()
     clean, margin1 = arms(k)
     for name, img in clean:

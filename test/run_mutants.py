@@ -176,6 +176,14 @@ CLOCKED_MUTANTS = [
      "the DUT's pull-down is dropped from the ONE bus model, so a released "
      "open-drain clock never resolves as the engine expects and the clocked "
      "lanes never retire; progress.vh reports it."),
+    # ⭐ (b') (Wilson 11-14): the dispatcher may not hold a lane with a valid
+    # head behind another lane's empty one. corpus_all5 (the scheduler stress
+    # image, declared non-admissible) empties heads; progress.vh layer S names
+    # the global stall (0 on the clean build, measured).
+    ("M_GLOBAL_STALL", "corpus_all5", "i2c", "*** FAIL progress.vh[S]",
+     "readiness without the head-valid term: the EDF winner may have an empty "
+     "head and every lane waits for it -- layer S sees a released lane with a "
+     "valid head wait while the engine idles."),
 ]
 CLOCKED_SURVIVORS = {
     "M_CK_NO_PHASE_RESET": "CHARACTERISED SURVIVOR (pe_engine.v records why): "

@@ -51,8 +51,10 @@ sim2 model/gate_v2_equiv.py
 sim2 test/run_pit_capture.py
 sim2 test/run_branch_check.py
 sim2 test/run_arm2.py
+sim2 test/gate_batch_equiv.py
 sim2 test/run_pair.py
 sim2 test/run_usbrx.py
+sim2 model/gate_usb_sweep.py
 sim2 test/run_usbcrc.py
 sim2 test/run_usbbuf.py
 sim2 test/run_usbaddr.py
@@ -87,6 +89,7 @@ fast model/gate_gates_complete.py
 fast model/gate_admissible_images.py
 fast model/gate_wire_feed.py
 fast model/gate_image_bounds.py
+fast model/gen_op_reads.py
 fast model/gate_sim_runs.py
 fast model/gate_formal_miters.py
 fast model/gate_rowmux_equiv.py
@@ -98,6 +101,8 @@ fast model/gate_predecode_netlist.py
 fast model/gate_i2c_hw_witness.py
 fast model/gate_onewire_hw_witness.py
 fast model/gate_flow_config.py
+fast model/gate_layers_rc.py
+fast test/gen_progress_bounds.py
 fast model/gate_action_pins.py
 fast test/gate_gl_count.py
 fast model/gate_shell_rc.py

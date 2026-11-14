@@ -960,10 +960,19 @@ always @(posedge dut.clk) begin
     // EVERY held dispatch -- the first cut counted that and read 347 "binds"
     // at d = 62, each of exactly 1 cycle. Every other cycle counts, busy or
     // not: the delay is release jitter, measured from the release.
+    // ⛔ (b') (Wilson 11-14): `ready` now also requires a VALID HEAD, so
+    // `rel_due & ~ready` began counting released-with-an-empty-head waits as
+    // W1 binds (tb_half lane 0: w1_max 3 -> 76). W1 is the HOLD gate (and the
+    // capture gate) only: `rdy_rel` is the old readiness, released and gated
+    // by hold and capture, without the head term.
     for (h_i = 0; h_i < h_nl && h_i < 8; h_i = h_i + 1) begin
       if (!(dut.u_eng.st !== 2'd0 && dut.u_eng.cur == h_i)
           && dut.u_eng.rel_due[h_i] === 1'b1
-          && dut.u_eng.ready[h_i] === 1'b0) begin
+`ifdef PE_EQUIV_PRE
+          && dut.u_eng.ready[h_i] === 1'b0) begin   // pre-batch: `ready` IS the released term
+`else
+          && dut.u_eng.rdy_rel[h_i] === 1'b0) begin
+`endif
         h_wb_cyc = h_wb_cyc + 1;
         if (h_wbp[h_i] == 0) begin
           h_wb_ev = h_wb_ev + 1;

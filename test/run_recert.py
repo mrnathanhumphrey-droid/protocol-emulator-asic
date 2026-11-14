@@ -320,6 +320,48 @@ def own_i2c(rows, scl, sda):
     return frames, data
 
 
+def sigrok_bytes(ev):
+    """[[value, is_address, complete]] from sigrok's i2c annotations, in order.
+    A byte is COMPLETE when its ACK/NACK follows it before the next byte; an
+    address byte is reported as 7 bits + R/W."""
+    out = []
+    for e in ev:
+        m = re.match(r"(Address|Data) (?:write|read):\s*([0-9A-Fa-f]{2})$", e)
+        if m:
+            out.append([int(m.group(2), 16), m.group(1) == "Address", False])
+        elif e in ("ACK", "NACK") and out and not out[-1][2]:
+            out[-1][2] = True
+    return out
+
+
+def i2c_byte_problems(sb, own):
+    """(problems, notes): sigrok's bytes `sb` (sigrok_bytes) against this
+    file's decode `own` (own_i2c's, every one complete: 9 bits).
+    ⛔⛔ WHERE THE DUMP WINDOW CUTS NEVER DECIDES WHETHER TWO DECODERS AGREE
+    (Wilson 11-14): the 11-14 corpus_all5 red was a final address byte cut
+    after its 8th bit -- sigrok reported it, this decode (which needs the 9th)
+    did not, and every one of the 27 complete bytes agreed. So only COMPLETE
+    bytes are compared; ONE truncated byte is allowed, only as the trace's
+    FINAL element, and it is REPORTED (a note), never silently dropped. A
+    truncated byte anywhere else is a real mid-trace decode disagreement: red."""
+    probs, notes = [], []
+    for i, b in enumerate(sb):
+        if not b[2] and i != len(sb) - 1:
+            probs.append("sigrok byte %d (%02X) has no ACK/NACK mid-trace -- a decode "
+                         "disagreement, not the window cut" % (i, b[0]))
+    if sb and not sb[-1][2]:
+        notes.append("final byte %02X truncated by the trace window (reported, not compared)"
+                     % sb[-1][0])
+    full = [b for b in sb if b[2]]
+    if len(own) != len(full):
+        probs.append("complete bytes: sigrok %d, this decode %d" % (len(full), len(own)))
+    for i, (b, o) in enumerate(zip(full, own)):
+        if b[0] != ((o >> 1) if b[1] else o):
+            probs.append("complete byte %d: sigrok %02X, this decode %02X" % (i, b[0], o))
+            break
+    return probs, notes
+
+
 def own_spi(rows, clk, mosi, lsb):
     """MOSI words, 8 rising clock edges each (sample on the rise), counted
     from the first edge -- the same framing sigrok uses without a CS."""
@@ -390,11 +432,15 @@ def main() -> int:
             say(len(frames) >= 2 and all(f[0] for f in frames[:-1]),
                 "every frame but the run-cut last one is closed by a STOP")
             say(stops >= 2, "sigrok sees the STOPs (%d)" % stops)
-            # an address byte is reported as 7 bits + R/W by sigrok
-            own_cmp = [(b >> 1) if i in addr_idx(ev) else b
-                       for i, b in enumerate(own[:len(sd)])]
-            say(sd == own_cmp, "sigrok's bytes == this file's decode of the "
-                "same dump (%d bytes)" % len(sd))
+            # complete bytes only; one truncated byte, final, reported (Wilson 11-14)
+            sb = sigrok_bytes(ev)
+            bprobs, bnotes = i2c_byte_problems(sb, own)
+            for q in bnotes:
+                print("      note: " + q)
+            for q in bprobs:
+                print("      *** " + q)
+            say(not bprobs, "sigrok's complete bytes == this file's decode of the "
+                "same dump (%d complete)" % sum(1 for b in sb if b[2]))
             say("[V2]: ok" in out, "Layer V2: the wire == the host-pushed "
                 "bytes (the intended ones)")
             # ⭐ PHASE COVERAGE (Wilson 10-20): the same image with the I2C
@@ -455,6 +501,19 @@ def main() -> int:
         % (sum(fall_differs), len(fall_differs)))
     for (img, ln), why in sorted(RX_ONLY.items()):
         print("  --- %s lane %d: not certified, by name -- %s" % (img, ln, why))
+    # ---- must-fires of the byte comparison (Wilson 11-14) -------------------
+    print()
+    print("  --- must-fires: the complete-bytes comparison ---")
+    base = [[0x2D, True, True], [0x00, False, True], [0x3D, False, True]]
+    own_ok = [0x5A, 0x00, 0x3D]                      # 0x2D address = 0x5A >> 1
+    say(not i2c_byte_problems(base, own_ok)[0]
+        and not i2c_byte_problems(base + [[0x63, True, False]], own_ok)[0],
+        "control: identical complete bytes (+ one final truncated) -> clean")
+    mf1 = i2c_byte_problems([[0x2D, True, True], [0x01, False, True], [0x3D, False, True]], own_ok)[0]
+    say(bool(mf1), "must-fire: a mismatch in a complete byte -> red")
+    mf2 = i2c_byte_problems([[0x2D, True, True], [0x00, False, False], [0x3D, False, True]], own_ok)[0]
+    say(any("mid-trace" in q for q in mf2),
+        "must-fire: a truncated byte anywhere but the end -> red")
     print()
     print("  GATE recert: %s" % ("PASSED" if rc == 0 else "FAILED"))
     return rc

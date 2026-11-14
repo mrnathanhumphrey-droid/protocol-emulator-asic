@@ -295,7 +295,9 @@ def simcmd(args, images):
         plus.append(k + eq + (wsl_path(v) if k in ("+IMG", "+STIM", "+OUT", "+MEM") else v))
     if XINIT:
         plus += ["+verilator+rand+reset+2", "+verilator+seed+%d" % int(XINIT)]
-    return sim_run.argv(WSL + [vbin] + plus, images)
+    # the arm's identity for the monitor judge: the marker file's name (the
+    # cached binary is hash-named, so it would not say which build this is)
+    return sim_run.argv(WSL + [vbin] + plus, images, arm=os.path.basename(args[0]))
 
 
 def sim(vvp, tmp, name, img, stim, vvp_bin=None):

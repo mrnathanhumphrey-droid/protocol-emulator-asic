@@ -227,7 +227,12 @@ always @(posedge `INV_DUT.clk) begin
         ex1_oth[e2e_k] = 1;
     // the timestamps the classes are read from (cycles ex1_cyc)
     for (e2e_k = 0; e2e_k < 5; e2e_k = e2e_k + 1)
+      // (b') 11-14: `ready` now includes the head term; this meant RELEASED and gated (`rdy_rel`)
+`ifdef PE_EQUIV_PRE
       if (ex1_rdy[e2e_k] < 0 && `INV_DUT.u_eng.ready[e2e_k] === 1'b1)
+`else
+      if (ex1_rdy[e2e_k] < 0 && `INV_DUT.u_eng.rdy_rel[e2e_k] === 1'b1)
+`endif
         ex1_rdy[e2e_k] = ex1_cyc;
     if (`INV_DUT.u_eng.st === 2'd1 && `INV_DUT.u_eng.cur < 5
         && ex1_drv[`INV_DUT.u_eng.cur] < 0)

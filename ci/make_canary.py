@@ -11,10 +11,10 @@ different chip. The armed canaries were made by hand and carried CLOCK_PERIOD
         builds branch v2-canary-<NAME>-d<density> as ONE commit on top of
         HEAD, changing ONLY src/config.json's PL_TARGET_DENSITY_PCT value and
         adding .github/workflows/test.yaml's canary ignore. HEAD must be clean
-        and on origin/work/latch-store. Nothing is pushed.
+        and on origin/work/s12-c. Nothing is pushed.
     python ci/make_canary.py --check
         (v2_canary.yaml, first step) red unless HEAD~1 is reachable from
-        origin/work/latch-store and `git diff HEAD~1 HEAD` is exactly that.
+        origin/work/s12-c and `git diff HEAD~1 HEAD` is exactly that.
     python ci/make_canary.py --self-test
         the check's must-fires on planted diffs.
 """
@@ -29,12 +29,12 @@ import sys
 import tempfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-WORK = "origin/work/latch-store"
+WORK = "origin/work/s12-c"
 CONFIG = "src/config.json"
 TEST_YAML = ".github/workflows/test.yaml"
 DENSITY = "PL_TARGET_DENSITY_PCT"
 DENSITY_LINE = re.compile(r'^(\s*"%s":\s*)(\d+)(,?\s*)$' % DENSITY)
-IGNORE = ["    # CANARY BRANCHES ONLY (Wilson 11-02): a canary differs from work/latch-store",
+IGNORE = ["    # CANARY BRANCHES ONLY (Wilson 11-02): a canary differs from work/s12-c",
           "    # in config alone and its source is tested there; the harden is dispatched",
           "    branches-ignore: ['v2-canary-*']"]
 PUSH = "  push:"
@@ -95,7 +95,7 @@ def judge(base_cfg, head_cfg, base_yaml, head_yaml, changed):
 
 def check():
     print("  --- B1: the canary is the work branch plus its density ---")
-    git("fetch", "-q", "origin", "work/latch-store:refs/remotes/" + WORK, check=False)
+    git("fetch", "-q", "origin", "work/s12-c:refs/remotes/" + WORK, check=False)
     base = git("rev-parse", "HEAD~1").stdout.strip()
     anc = git("merge-base", "--is-ancestor", base, WORK, check=False).returncode == 0
     print("    HEAD~1 %s on %s: %s" % (base[:12], WORK, "yes" if anc else "*** NO"))
@@ -104,7 +104,7 @@ def check():
     probs = judge(show("HEAD~1", CONFIG), show("HEAD", CONFIG),
                   show("HEAD~1", TEST_YAML), show("HEAD", TEST_YAML), changed)
     if not anc:
-        probs.insert(0, "HEAD~1 is not a work/latch-store commit")
+        probs.insert(0, "HEAD~1 is not a work/s12-c commit")
     d = json.loads(show("HEAD", CONFIG)).get(DENSITY)
     for p in probs:
         print("    *** " + p)

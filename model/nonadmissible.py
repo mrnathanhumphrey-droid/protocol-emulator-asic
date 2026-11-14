@@ -109,6 +109,24 @@ NON_ADMISSIBLE = {
     "tx_image.hex": ({PORT, QUEUE},
         "`tb_tx`'s TX-queue ownership image at d = 12-13, below D*: it tests "
         "routing of host bytes, not schedulability."),
+    # ⭐ THE ARM2 SWEEP IMAGES (Wilson 11-13, 2e): `run_arm2.coverage_arms`'s
+    # images, seen by this gate once the universe walked the generated arms.
+    # Each runs the two-pin level ARM beside lanes at d = 12, below D*.
+    "edge_to200.hex": ({PORT},
+        "deliberate stress image for ARM2: the edge ARM control with a "
+        "200-cycle timeout, beside lanes at d = 12 (below D*)."),
+    "guard_noto.hex": ({PORT},
+        "deliberate stress image for ARM2: the uo-bank guard arm, no timeout, "
+        "beside lanes at d = 12 (below D*)."),
+    "lvl0_noto.hex": ({PORT},
+        "deliberate stress image for ARM2: the both-low level ARM, no timeout, "
+        "beside lanes at d = 12 (below D*)."),
+    "lvl0_to200.hex": ({PORT},
+        "deliberate stress image for ARM2: the both-low level ARM with a "
+        "200-cycle timeout, beside lanes at d = 12 (below D*)."),
+    "lvl1_noto.hex": ({PORT},
+        "deliberate stress image for ARM2: the both-high level ARM, no timeout, "
+        "beside lanes at d = 12 (below D*)."),
 }
 
 #: the two exemption switches

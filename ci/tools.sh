@@ -71,10 +71,15 @@ sim_exec() {
   for x in "$@"; do
     case "$x" in +A2SLACK=*) has=1 ;; esac
   done
+  # the monitor judge (Wilson 11-14): the run's output passes through UNCHANGED
+  # and its exit code is kept; its monitor FAIL lines go to the scope's ledger
+  # (SIM_RUN_SCOPE, set per gate by ci/run_gates.sh). A must-fire arm names
+  # its id in SIM_RUN_MUST_FIRE (test/sim_run.py MONITOR_MUST_FIRE).
+  local judge=("$py" "$_PE_ROOT/test/sim_run.py" judge "${SIM_RUN_MUST_FIRE:--}"                "--caller=${SIM_RUN_CALLER:-$0}" --)
   if [ -n "$a2" ] && [ "$has" = 0 ]; then
-    "$@" "$a2"
+    "${judge[@]}" "$@" "$a2"
   else
-    "$@"
+    "${judge[@]}" "$@"
   fi
 }
 

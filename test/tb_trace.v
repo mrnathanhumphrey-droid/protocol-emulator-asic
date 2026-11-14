@@ -697,11 +697,14 @@ end
 initial begin
   if (!$value$plusargs("EXPECT_REFUSED=%d", m5_refused)) m5_refused = 0;
   if (!$value$plusargs("RESOP_AT=%d", resop_at)) resop_at = -1;
-  pg_quiescent_ok = (m5_refused != 0);
   // ⭐ v2 (runstart.vh): the two arms whose engine must NEVER start -- a
   // refused load, and STAYLOAD's load-mode readback trace -- say so
   if (!$value$plusargs("STAYLOAD=%d", rs_stayload)) rs_stayload = 0;
   rs_nostart_ok = (m5_refused == 1) || (m5_refused == 2) || (rs_stayload != 0);
+  // ⛔ and to progress.vh too (Wilson 11-14 monitor inventory): the STAYLOAD
+  // readback arm never dispatches BY DESIGN, so its vacuity line ("no writeback
+  // was ever observed") was a monitor FAIL nothing read -- declared, not exempted
+  pg_quiescent_ok = (m5_refused != 0) || (rs_stayload != 0);
 end
 
 final begin

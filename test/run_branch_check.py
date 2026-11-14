@@ -144,15 +144,103 @@ def run_problems(c, per, bound):
             _cn, cmx = per.get(("ctl", ln), (0, None))
             if cmx is None or mx > cmx:
                 out.append("succ_late=%d lane %d > its control max %s" % (mx, ln, cmx))
+        elif bound == NOT_JUDGED:
+            continue        # declared outside the admissible set: reported, not bounded
         elif bound is None or mx > bound:
             out.append("ctl_late=%d lane %d > A2's r - C = %s" % (mx, ln, bound))
     return out
 
 
-def a2_dispatch_bound(img):
-    """max over lanes of r - C, A2 pricing each branch as an action of delay W."""
+#: the control-lane lateness of an image DECLARED outside the admissible set is
+#: reported but judged against no bound (every other check still applies)
+NOT_JUDGED = "not-judged"
+#: the MEASURED-BRIDGE record (Wilson 11-14): written by `--record-bridge`
+BRIDGE_JSON = os.path.join(HERE, "branch_bridge.json")
+
+
+def branch_premises(img):
+    """[violated premise] for an image's branch lanes, against agent 2's
+    head_late_br premises at B = br1_budget (lean/JLane/JLane/BrRefine.lean;
+    every constant from model/proof_constants.py, never typed):
+      hd   D* + B <= d                        (throughput)
+      hFc  R + head_slack + D* + 2B <= W + d  (condition F: 46 + 2B at R = 14)
+    d = the lane's smallest action delay with each branch priced at its wait
+    W (program_a2.lanes_of), W = the lane's smallest branch wait. (hNc needs
+    agent 2's Y and is not checked here.)"""
+    import gate_degenerate_fields as dgf
     import program_a2 as P
-    r = P.lane_responses(img)
+    import proof_constants as PC
+    k = PC.load()
+    B, ds, R, hs = k["br1_budget"], k["dstar"], k["R_base"], k["head_slack"]
+    lanes = {ln: acts for ln, _h, acts in P.lanes_of(img)}
+    waits = {}
+    for ln, _h, a in dgf.walk(img):
+        if a["op"] in I.BRANCH_OPS:
+            waits[ln] = min(waits.get(ln, 1 << 30), I.branch_wait(a))
+    out = []
+    for ln, W in sorted(waits.items()):
+        d = min((a["delay"] for a in lanes.get(ln, []) if a["delay"] > 0), default=0)
+        if d < ds + B:
+            out.append("lane %d: hd d=%d < D*+B=%d" % (ln, d, ds + B))
+        if R + hs + ds + 2 * B > W + d:
+            out.append("lane %d: hFc W+d=%d < R+head_slack+D*+2B=%d" % (ln, W + d, R + hs + ds + 2 * B))
+    return out
+
+
+def _bridge():
+    import json
+    if not os.path.isfile(BRIDGE_JSON):
+        return {}
+    with open(BRIDGE_JSON, encoding="utf-8") as fh:
+        return json.load(fh)
+
+
+#: image -> how its control-lane bound was obtained (printed beside it)
+BOUND_KIND = {}
+
+
+def a2_dispatch_bound(img, name="image"):
+    """max over lanes of r - C, A2 pricing each branch as an action of delay W.
+
+    ⛔⛔ INTERIM, UNTIL THE DISPATCHER-STALL FIX LANDS (Wilson 11-13; agent 2,
+    0aed169). With a branch lane the shipped dispatcher can stall EVERY lane
+    past A2's J = 1, so that bound is known wrong and could pass falsely:
+      * ONE branch lane (and no branch->branch chain, which pe_isa refuses):
+        A2 re-run at the PROVED J = j_interim_head_late_optA
+        (= 1 + br_succ_late + br1_budget, model/proof_constants.py -- quoted,
+        never typed), labelled "interim";
+      * TWO OR MORE branch lanes: the stalls can feed each other and the proof
+        gives NO bound under the shipped scheduler -- so NO bound is quoted
+        (None), and the judge reads that as red: never a pass on a bound we
+        know is wrong. Back to the A2 value when STALL_FIX_PENDING goes False."""
+    import program_a2 as P
+    import proof_constants as PC
+    bl = P.branch_lanes(img) if P.STALL_FIX_PENDING else []
+    if len(bl) >= 2:
+        # ⛔ Wilson 11-14: FIRST the admissible set -- an image whose branch
+        # lanes break the theorem's premises is declared outside it, NOT budgeted
+        bad = branch_premises(img)
+        if bad:
+            BOUND_KIND[name] = "NON-ADMISSIBLE (%s)" % "; ".join(bad)
+            return NOT_JUDGED
+        # inside the premises, no k-lane bound proved yet: the MEASURED-BRIDGE
+        # budget (uncertified) -- measured worst + a stated margin, from the
+        # record `--record-bridge` writes; owner: agent 2's k-lane bound (DEBT)
+        rec = _bridge().get(name)
+        if rec is None or rec.get("sha") != P.image_sha(img):
+            BOUND_KIND[name] = ("NO PROVED BOUND and no current MEASURED-BRIDGE record "
+                                "(run --record-bridge)")
+            return None
+        BOUND_KIND[name] = ("MEASURED-BRIDGE (uncertified): measured %d + margin %d"
+                            % (rec["ctl_late_max"], rec["margin"]))
+        return rec["ctl_late_max"] + rec["margin"]
+    j = None
+    if bl:
+        j = PC.load()["j_interim_head_late_optA"]
+        BOUND_KIND[name] = "interim J=%d (dispatcher-stall fix pending)" % j
+    else:
+        BOUND_KIND[name] = "A2"
+    r = P.lane_responses(img, j=j)
     if any(v[0] is None for v in r.values()):
         return None
     return max(v[0] for v in r.values()) - P.C_SHIPPED
@@ -177,15 +265,15 @@ def main() -> int:
         if not c:
             probs.append("%s: no BRCHECK line (%s)" % (name, raw[-200:]))
             continue
-        bound = a2_dispatch_bound(img)
+        bound = a2_dispatch_bound(img, name)
         bad = run_problems(c, per, bound)
         if name.startswith("cmp_") and not c.get("cmp"):
             bad.append("cmp=0 -- no CMP_BRANCH ran, so nothing was compared")
         if name.startswith("loop_") and not c.get("loops"):
             bad.append("loops=0 -- no LOOP exited, so no count was checked")
-        print("    %-16s wb %4d  stall %d  pc_bad %d  head_bad %d  A2 r-C %s  %s"
+        print("    %-16s wb %4d  stall %d  pc_bad %d  head_bad %d  r-C %s [%s]  %s"
               % (name, c["wb"], c["stall_cycles"], c["pc_bad"], c["head_bad"], bound,
-                 "ok" if not bad else "*** " + "; ".join(bad)))
+                 BOUND_KIND.get(name, "?"), "ok" if not bad else "*** " + "; ".join(bad)))
         probs += ["%s: %s" % (name, b) for b in bad]
 
     print("\n  B2 chains refused (Wilson 10-27 Q2)")
@@ -264,5 +352,39 @@ def main() -> int:
     return 1 if probs else 0
 
 
+def record_bridge() -> int:
+    """`--record-bridge`: measure every image that takes the MEASURED-BRIDGE
+    budget (two or more branch lanes, inside the premises) and write its worst
+    control-lane lateness + the stated margin to BRIDGE_JSON. The margin is ONE
+    refill (proof_constants l_refill): the smallest unit the port can add to a
+    word's lateness, stated, never fitted to the data."""
+    import json
+    import program_a2 as P
+    import proof_constants as PC
+    margin = PC.load()["l_refill"]
+    tmp = tempfile.mkdtemp(prefix="pe_brbridge_")
+    vvp = os.path.join(tmp, "brchk.vvp")
+    build(vvp)
+    out = {}
+    for name in BASE:
+        img = IMAGES[name]()
+        if len(P.branch_lanes(img)) < 2 or branch_premises(img):
+            continue
+        p = write_hex(os.path.join(tmp, "brchk_%s.hex" % name), img)
+        c, per, raw = sim(vvp, p)
+        mx = max((m for (kind, _ln), (_n, m) in per.items() if kind == "ctl"), default=None)
+        if mx is None:
+            print("  *** %s: no control-lane lateness measured" % name)
+            return 1
+        out[name] = {"ctl_late_max": mx, "margin": margin, "sha": P.image_sha(img),
+                     "label": "MEASURED-BRIDGE (uncertified)",
+                     "owner": "agent 2's k-lane bound under (b') (Wilson 11-14)"}
+        print("  %-16s measured ctl_late max %d + margin %d" % (name, mx, margin))
+    with open(BRIDGE_JSON, "w", encoding="utf-8", newline="\n") as fh:
+        json.dump(out, fh, indent=1, sort_keys=True)
+    print("  -> %s (%d image(s))" % (os.path.relpath(BRIDGE_JSON, ROOT), len(out)))
+    return 0
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(record_bridge() if "--record-bridge" in sys.argv else main())

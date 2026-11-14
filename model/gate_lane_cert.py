@@ -10,9 +10,9 @@ every must-fire must turn its check red, or the gate is not testing what it says
   M_LC_SHIFTI_FULL  spacing_of reads SHIFTI's whole delay field   -> check 1 red
   M_LC_LAT_IGNORED  the certificate's lateness ignored on deadline chains -> check 2 green on a
                     known-late image (the gate must notice it lost its teeth)
-  check 3  FALLTHROUGH (ArmFT, F4): usbdev with one handshake copy's arm_sop made FALLTHROUGH
-           must be refused (its PC+2 is the first receive SHIFTIN), its first sample must be
-           late by the flush refill (flush_head_refill), and on a HALF lane refused again
+  check 3  FALLTHROUGH (ArmFT, F4): usbdev with one handshake copy's (HALF) arm_sop made
+           FALLTHROUGH (ARM_MOD_FT) must be refused twice (a SHIFTIN at PC+2; HALF with
+           FALLTHROUGH), and the certificate must put flush_refill_late on its PC+2
   M_LC_FT_UNSEEN    no ARM read as FALLTHROUGH                    -> check 3 red
   M_LC_FT_NOFLOOR   no lateness floor after the flush             -> check 3 red
 Static, < 2 s. Usage: python model/gate_lane_cert.py [dir holding usbdev.py]
@@ -65,7 +65,7 @@ def ft_program(LC, V, I):
         if w + 2 in g and g[w + 2][0]["op"] == I.OP_SHIFTIN:
             p = V.device_program()
             x = g[w][0]
-            bit = getattr(I, "ARM_MOD_FALLTHROUGH", 0)
+            bit = I.ARM_MOD_FT
             p[w - base] = I.act(x["op"], x["pin"], x["level"], 500, count=x["count"], q=x["q"],
                                 pinb=x["pinb"], mod=x["mod"] | bit)
             return p, w
@@ -73,28 +73,28 @@ def ft_program(LC, V, I):
 
 
 def check_ft(LC, V, I):
+    """the FALLTHROUGH paths on a handshake copy's arm_sop made FALLTHROUGH (it keeps its HALF bit):
+    the refusals fire (a SHIFTIN at PC+2; HALF with FALLTHROUGH) and the certificate puts the
+    flush refill's lateness (proof_constants flush_refill_late) on PC+2"""
     p, w = ft_program(LC, V, I)
     if p is None:
         return False, "no handshake arm_sop with a SHIFTIN at PC+2 to test on"
-    fails, _o = run_cert(LC, V.image(prog=p))
+    img = V.image(prog=p)
+    fails, _o = run_cert(LC, img)
     refused = any(f[0] == "FT" and f[1].startswith("w%d PC+2" % w) for f in fails)
-    floored = any(f[1] == "first sample after w%d" % w for f in fails)
-    orig_rh = I.read_header
-
-    def half_rh(img, ln):
-        h = orig_rh(img, ln)
-        if ln == I.USB_LANE:
-            h = dict(h, flags=h["flags"] | I.FLAG_HALF_HIGH)
-        return h
-    I.read_header = half_rh
-    try:
-        fh, _o = run_cert(LC, V.image(prog=p))
-    finally:
-        I.read_header = orig_rh
-    halfed = any(f[0] == "FT" and "HALF" in f[1] for f in fh)
+    halfed = any(f[0] == "FT" and f[1].startswith("w%d HALF" % w) for f in fails)
+    import proof_constants as PC
+    k = PC.load()
+    g, preds, gaps = LC.build(img, I.USB_LANE, LC.premises(k), I)
+    fts = LC.ft_paths(g, I)
+    floor = {c2: LC.ft_flush_late(0) for _c1, c2 in fts.values() if c2 in g}
+    xr = {c1: 1 for c1, _c2 in fts.values() if c1 in g}
+    cert = LC.certificate(g, preds, gaps, k, 0, 2, floor=floor, xr=xr)
+    floored = (w in fts and cert is not None and
+               cert[0].get(fts[w][1], 0) >= k["flush_refill_late"])
     ok = refused and floored and halfed
-    return ok, ("arm_sop w%d made FALLTHROUGH: PC+2 refused %s, first sample late by the flush %s, "
-                "HALF refused %s" % (w, refused, floored, halfed))
+    return ok, ("arm_sop w%d made FALLTHROUGH: PC+2 refused %s, PC+2 late by the flush refill %s, "
+                "HALF + FALLTHROUGH refused %s" % (w, refused, floored, halfed))
 
 
 def main():

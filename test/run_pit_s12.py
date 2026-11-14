@@ -298,6 +298,32 @@ MUTANTS = [
 ]
 
 
+#: ⭐ THE COVERAGE SWEEP'S STAGE 1-2 ARMS (Wilson 11-13: the v2 benches join the
+#: sweep). tb_pit's fixed arms stop at stage 0 (+S0WAIT=1), so pe_pit_s12's period /
+#: phase / score paths read uncovered; these are this gate's own cases (same image,
+#: stimulus and run length as run_case), run on to stages 1-2's end (+S0WAIT=2).
+#: The sweep measures REACH; the records are judged here.
+COV_DIR = "probe_cov_s12"
+
+
+def coverage_arms():
+    """[(label, plusargs)] for test/benchset.py's tb_pit; writes image + stimulus under COV_DIR."""
+    os.makedirs(os.path.join(ROOT, COV_DIR), exist_ok=True)
+    arms = []
+    for case in cases():
+        name, waves, mask, b, ncyc, _e = case
+        stim = RP.waves_to_stim(waves, **R0.STIM_OPTS.get(name, {}))
+        run_len = ncyc if (not b and name in RP.NCYC_FOR) else R0.NCYC_MAX * 40
+        ip, sp = "%s/%s.hex" % (COV_DIR, name), "%s/%s.stim" % (COV_DIR, name)
+        I.write_image(os.path.join(ROOT, ip), RP.sniff_image(mask, b))
+        with open(os.path.join(ROOT, sp), "w", encoding="ascii", newline="\n") as fh:
+            for t, v in stim:
+                fh.write("%d %02x\n" % (t, v))
+        arms.append((name, ["+IMG=" + ip, "+NBYTES=%d" % I.STORE_BYTES, "+STIM=" + sp,
+                            "+OUT=%s/%s.out" % (COV_DIR, name), "+NCYC=%d" % run_len, "+S0WAIT=2"]))
+    return arms
+
+
 def run_case(vvp, tmp, case, tag):
     name, waves, mask, b, ncyc, _e = case
     stim = RP.waves_to_stim(waves, **R0.STIM_OPTS.get(name, {}))

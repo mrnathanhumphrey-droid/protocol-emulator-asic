@@ -95,7 +95,22 @@ def main():
                                   for q in check(inv, reg3, RR.DECLARED))
     print("  must-fire  %s un-registered       %s"
           % (victim3, "red" if red3 else "*** NOT RED"))
-    ok = red1 and red2 and red3
+    # ⛔ RESOURCES (Wilson 11-14): every runner that uses WSL / Vivado declares
+    # it, so a scheduler reads a declaration instead of grepping file text
+    rp = RR.resource_problems(reg)
+    for q in rp:
+        print("  *** " + q)
+    probs += rp
+    print("  resources: %d runner(s) declare WSL / Vivado / mem, %d explain a "
+          "non-use" % (len(RR.RESOURCES), len(RR.RESOURCE_NOT_USED)))
+    # must-fire: run_pit_gcd -- the runner the text grep missed (WSL only
+    # through run_pit_capture) -- with its declaration removed -> red
+    res4 = {k: v for k, v in RR.RESOURCES.items() if k != "test/run_pit_gcd.py"}
+    red4 = any("test/run_pit_gcd.py" in q
+               for q in RR.resource_problems(reg, resources=res4))
+    print("  must-fire  run_pit_gcd's WSL declaration removed      %s"
+          % ("red" if red4 else "*** NOT RED"))
+    ok = red1 and red2 and red3 and red4
 
     if not probs and ok:
         print("RUNNER REGISTRY: PASSED")

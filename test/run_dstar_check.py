@@ -83,11 +83,11 @@ def run(cmd, cwd=ROOT):
                           encoding="utf-8", errors="replace", cwd=cwd)
 
 
-def build():
+def build(defines=()):
     os.makedirs(SCRATCH, exist_ok=True)
-    out = os.path.join(SCRATCH, "jlane.vvp")
+    out = os.path.join(SCRATCH, "jlane%s.vvp" % "".join("_" + d for d in defines))
     r = run([tool("iverilog"), "-g2012", "-o", out, "-s", "tb_jlane",
-             "-Ptb_jlane.SPL_CFG=2", "test/tb_jlane.v"] + SRCS)
+             "-Ptb_jlane.SPL_CFG=2"] + ["-D%s" % d for d in defines] + ["test/tb_jlane.v"] + SRCS)
     if r.returncode != 0:
         print("*** build failed")
         print((r.stdout + r.stderr)[-700:])
@@ -207,8 +207,21 @@ def main() -> int:
                                  for d in D_POINTS],
                        "PORT-FEASIBLE: the theorem predicts 0", True)
     print()
-    below, rc2 = sweep(vvp, [CONTROL],
-                       "CONTROL below D*: this MUST be non-zero", False,
+    # ⛔⛔ THE CONTROL IS NOW A MUTANT (Wilson 11-13, W6). Since TF1-TF6 (3b37967,
+    # bisected: arm C lane 4 RQ 29 at 372ca6e, 0 from 3b37967) the clean engine reads
+    # RQ = 0 on arm C, and on every sub-D* shape tried since ((12,12,..), (14,14,..),
+    # (16,16,..), (8,8,..), (8,12,..)) -- the prefetch serves the REGISTERED winner
+    # first (TF3), which removed the refill contention arm C relied on. So the clean
+    # engine cannot show the instrument seeing a refill wait, and D* = 20 is
+    # CONSERVATIVE after TF3 (proven, not tight; the README says "proven").
+    # The control: arm C under M_PF_LIVE_WINNER (the prefetch serves the LIVE winner
+    # first, as before TF3) -- it MUST read RQ > 0, which shows the instrument can
+    # still see the term it reports as zero above D*. Measured 11-13: lane 4 RQ = 4.
+    vvp_ctl = build(("M_PF_LIVE_WINNER",))
+    if vvp_ctl is None:
+        return 1
+    below, rc2 = sweep(vvp_ctl, [CONTROL],
+                       "CONTROL below D*, under M_PF_LIVE_WINNER: this MUST be non-zero", False,
                        CTRL_NCYC, CTRL_WARMUP)
 
     rc = rc1 | rc2
@@ -219,9 +232,11 @@ def main() -> int:
         print("  THEOREM 3 HOLDS on every point measured:")
         print("    %d port-feasible cells (%d points x %d lanes): RQ = 0"
               % (n, len(above), N_LANES))
-        print("    %d control cells below D* (arm C): RQ > 0, so the instrument"
+        print("    %d control cells below D* (arm C under M_PF_LIVE_WINNER): RQ > 0,"
               % sum(len(r) for _d, r in below))
-        print("    demonstrably able to see the term it reports as zero.")
+        print("    so the instrument is demonstrably able to see the term it")
+        print("    reports as zero. On the clean engine arm C reads 0 since TF3:")
+        print("    D* = 20 is CONSERVATIVE after TF3 (proven, not tight).")
         print("  ⇒ The published claim `d_min >= D* -> J = 1` rests on this,")
         print("    and the term it needed to be zero IS zero -- measured per")
         print("    lane, not inferred from an aggregate.")

@@ -89,6 +89,10 @@ EXPECT = {
     # the re-anchor floor's must-fire (Wilson 11-12): one substitution,
     # `l_timestamp[USB_LANE]` -> `ts_n[USB_LANE]` in rean_cap
     "M_REAN_FLOOR_EARLY": (2, None),
+    # W6's instrument control (Wilson 11-13): the prefetch serves the LIVE winner
+    # first, as before TF3 -- the condition and the three assignments that name the
+    # lane (pl / pslot / paddr), each winner_q -> winner
+    "M_PF_LIVE_WINNER":   (8, "the pre-TF3 prefetch priority, moved to (b')'s target 11-14: the condition and the three lane-naming assignments of one if-arm (pf_q -> pf_w, pf_v_q -> pf_v), one substitution each, 4 removed + 4 added"),
     # 11-13: comments moved OUT of these arms (they were counted as the delta)
     "M_ADDR_OK_EARLY":    (2, None),
     "M_BUF_NO_REFUSE":    (4, None),
@@ -141,6 +145,8 @@ EXPECT = {
     "M_S3_LAST_KEEP":     (4, None),
     "M_STUFF_NOFLAG":     (1, None),
     "M_ST_EARLY":         (2, None),
+    "M_ST_LATE8":         (2, None),
+    "M_ST_NEVER_LAST":    (2, None),
     "M_TAG3_ALWAYS_BUF":  (4, None),
     "M_UNSTUFF_KEEP":     (2, None),
     # silicon fix #2 (ruling TX1): the host load's LOW-phase gate removed --
@@ -272,6 +278,14 @@ EXPECT = {
         "pending term and the exact ppc boundary, ruling RX1) against the "
         "mutant's one-line constant."),
     # ruling EX1: the capture gate's boundary moved one cycle early / late
+    # the ARM/dispatcher batch (Wilson 11-14): each a one-line flag or term
+    "M_GLOBAL_STALL":     (2, None),   # readiness without the head-valid term
+    "M_HALF_NOW":         (2, None),   # the HALF request ignored at the rebase
+    "M_QUAL_IGNORED":     (2, None),   # arm_j's SE0 qualifier ignored
+    "M_FT_HALTS":         (2, None),   # FT's timeout halts the lane
+    "M_FT_SCAN_RACE":     (2, None),   # the scan may select a lane its FT edge flushes
+    "M_PRIME_NEWPRIO":    (2, None),   # the (b') prefetch target during priming too
+    "M_FT_NOSKIP":        (2, None),   # FT's edge does not move PC to PC+2
     "M_RX_CAPGATE_EARLY": (2, None),
     "M_RX_CAPGATE_LATE":  (2, None),
     # ruling CS1: silicon fix #6 undone -- the MISO enable's D unqualified

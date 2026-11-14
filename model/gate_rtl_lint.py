@@ -65,6 +65,13 @@ TEMPS = {
         "timeout halt, stretch fault, edge-capture disarm).",
     ("pe_engine.v", "notmo_n"):
         "RULING TF2-R3: as `live_n`, for `l_notmo` (WB arm, clocked park).",
+    ("pe_engine.v", "jmax_n"):
+        "(b') (Wilson 11-14): the per-lane `jitter_max` accumulator. Loaded from "
+        "`jitter_max` in the stall-counter section, raised by each lane's "
+        "released-with-an-empty-head run, and written to `jitter_max` at the end "
+        "of that same section -- all inside the one `always @(posedge clk)`; it "
+        "takes the maximum over the lanes in one cycle, which a nonblocking "
+        "write cannot.",
 }
 SCRATCH = os.path.join(ROOT, "probe_rl1")
 WARN = re.compile(r"^%(?:Warning|Error)-([A-Z0-9_]+): (\S+?):(\d+):")

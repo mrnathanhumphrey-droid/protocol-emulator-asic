@@ -168,8 +168,9 @@ def image(lane=I.USB_LANE, busy=None):
     """one USB packet receive per pass on `lane`; every other lane idle -- or,
     with `busy = (usb D_sched, other D_sched)`, the four other lanes toggling
     `uo_out` every D* = 20 cycles (the dispatcher as loaded as it gets)"""
-    prog = [I.act(I.OP_ARM, DM, 0, 0),                 # the SOP edge (J -> K), no timeout
-            I.act(I.OP_LEVEL, I.PIN_NONE, 0, D // 2)]  # half a bit: sample mid-bit
+    # the SOP edge (J -> K), no timeout; HALF (11-14) puts the first sample
+    # half a bit after it -- the nop(D/2) that used to do it is gone
+    prog = [I.act_arm(DM, 0, 0, half=True)]
     prog += [I.act_shiftin_usb(DM, D, 8) for _ in range(NBYTES)]
     prog += [I.act(I.OP_LEVEL, I.PIN_NONE, 0, POST),   # past the EOP
              I.act(I.OP_REARM, 0, 1, D // 2)]          # loop to the ARM
@@ -502,6 +503,31 @@ def main() -> int:
     return 0
 
 
+# ---- the coverage sweep's arms (Wilson 11-13: the v2 benches join the sweep) ----
+#: tb_usbrx was EXCLUDED, so the engine's USB receive (NRZI, unstuffing, CRC16,
+#: PID / address match, re-anchoring) read uncovered. These are the gate's own
+#: cases on the gate's own image, and the busy image (U5) obeyed. Reach only; the
+#: bytes are judged here.
+COV_DIR = "probe_cov_usbrx"
+
+
+def coverage_arms():
+    """[(label, plusargs)] for test/benchset.py's tb_usbrx; writes image + wave under COV_DIR."""
+    os.makedirs(os.path.join(ROOT, COV_DIR), exist_ok=True)
+    imgs = {"main": image(), "busy": image(busy=(30, 30 + I.usb_deadline_margin()))}
+    for k, im in imgs.items():
+        I.write_image(os.path.join(ROOT, COV_DIR, "%s.hex" % k), im)
+    arms = []
+    for n, (name, packets, e, E, seed, _exp) in enumerate(cases()):
+        tr, t_end = line(packets, e, E, seed)
+        for k in imgs:
+            wv = "%s/w%d.txt" % (COV_DIR, n)
+            write_wave(os.path.join(ROOT, wv), tr)
+            arms.append(("%s_%d" % (k, n), ["+IMG=%s/%s.hex" % (COV_DIR, k), "+WAVE=" + wv,
+                                            "+NCYC=%d" % (t_end + 400), "+DBG=0"]))
+    return arms
+
+
 # ---- U7: the start-up stall (Wilson 11-13 per-pair ruling, D) ----------------
 #: ⭐ OUTSIDE THE PROOFS, BOUNDED BY THE SPEC'S ATTACH TIMING. The Lean theorems
 #: start from a run with every slot filled; before the USB lane's first words
@@ -592,6 +618,9 @@ MUTANTS = [
     ("M_UNSTUFF_KEEP", "the stuffed bit kept as data"),
     ("M_STUFF_NOFLAG", "seven ones not flagged"),
     ("M_REAN_NOCOMP", "registered re-anchor, cycle not taken off"),
+    # HALF (Wilson 11-14): the SOP ARM's rebase stays at `now` -- with the
+    # nop(D/2) gone the first sample lands on the edge (gap 2, measured)
+    ("M_HALF_NOW", "the ARM's half-bit rebase ignored"),
 ]
 
 

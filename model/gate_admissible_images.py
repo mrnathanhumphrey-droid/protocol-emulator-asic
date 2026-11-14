@@ -96,11 +96,12 @@ def refill_dmin(img):
             continue
 
         def m(a):                         # dispatches the action needs
+            # ONE SOURCE with progress.vh's per-action bound (pe_isa.dispatch_max)
             if not pa.is_clocked(h, a):
-                return 1
+                return I.dispatch_max("other")
             if a["op"] == I.OP_SHIFT:
-                return 2 * ((a["count"] + 1) & 0xF)
-            return 2 * a["count"] + 1
+                return I.dispatch_max("ck_shift", a["count"])
+            return I.dispatch_max("ck_shiftin", a["count"])
 
         def gap(a):                       # release gap after `a` retires
             park = pa.is_clocked(h, a) and h["mode"] == 0
@@ -137,6 +138,10 @@ def conditions(name, img):
     return out, dm, pa.utilisation(ls)
 
 
+#: {image: reason} -- ADMISSIBLE-UNCERTIFIED (A2), filled by `audit`
+UNCERTIFIED = {}
+
+
 def audit(images, declared, pad_declared, deliberate):
     """Problems for this set of (name, img). Pure, so the must-fire can price it."""
     probs, rows = [], []
@@ -146,12 +151,29 @@ def audit(images, declared, pad_declared, deliberate):
         # ⛔ DELAY-0 REARM RULING: a zero release spacing is not a condition an
         # image may DECLARE (Wilson: the delay-0 build is retired, not
         # registered), so it is red here whatever the registry says.
+        # ⛔⛔ ADMISSIBLE-UNCERTIFIED (A2) (Wilson 11-13, the 2d scope ruling):
+        # with a branch lane the dispatcher can stall every lane past the J = 1
+        # these conditions price (agent 2, 729111f). A violation found here is
+        # still real (a larger J only makes it worse), so the conditions are
+        # still judged; a PASS no longer certifies, and the image is classed
+        # ADMISSIBLE-UNCERTIFIED with the reason -- never refused, never a crash.
+        unc = (pa.branch_lanes(img) if pa.STALL_FIX_PENDING else [])
         try:
             got, dm, u = conditions(name, img)
         except zs.ZeroSpacingError as exc:
             probs.append("%s has a ZERO release spacing and cannot be "
                          "declared: %s" % (name, exc))
             continue
+        except pa.EdgePacedNoTExt as exc:
+            if not unc:
+                raise
+            UNCERTIFIED[name] = ("branch lane(s) %s, dispatcher-stall fix pending; "
+                                 "A2 cannot form its lane set (%s)"
+                                 % (",".join(map(str, unc)), str(exc)[:60]))
+            continue
+        if unc:
+            UNCERTIFIED[name] = ("branch lane(s) %s, dispatcher-stall fix pending"
+                                 % ",".join(map(str, unc)))
         rows.append((name, got, dm, u))
         want = set(declared.get(name, (set(), ""))[0])
         if name in pad_declared:
@@ -205,6 +227,11 @@ def main() -> int:
         rc = 1
     if not probs:
         print("  every non-admissible image is declared, with its conditions")
+    print()
+    print("  ADMISSIBLE-UNCERTIFIED (A2) -- %d image(s); a pass above does not "
+          "certify them:" % len(UNCERTIFIED))
+    for name, why in sorted(UNCERTIFIED.items()):
+        print("    %-24s %s" % (name, why))
 
     # ---- must-fire ----------------------------------------------------------
     # ⛔ PRICED ON A REAL OVERLOADED IMAGE under a name nothing declares, and on

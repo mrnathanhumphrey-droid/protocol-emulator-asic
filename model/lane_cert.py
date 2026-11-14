@@ -39,16 +39,18 @@ USB_TLDRATE_MAX = 1_522_500
 SYNC_MIN, SYNC_MAX = 1, 2
 #: TRSPIPD1, §7.1.19.1: a device's response starts within 6.5 bit times of the host's EOP
 USB_TRSPIPD1_HALF_BITS = 13
-#: the host's response timeout, §7.1.19.1 / §8.7.2: it times out 16 to 18 bit times after the end of
-#: a packet that expected an answer, and its next token can start no sooner (16 at the fastest rate)
-USB_HOST_TIMEOUT_BITS_MIN = 16
+#: the host's next token after an unanswered packet: "the host will wait at least 18 bit times for
+#: a response to start before it will start a new transaction" (7.1.19.1; agent 1 11-14 -- the 16
+#: in that paragraph is the device's own timeout). Read from clock.usb_host_next_min_cycles.
 
 
 def premises(k=None):
     k = k or PC.load()
     f = clock.hz()
     bit = clock.usb_bit_cycles()
-    tleopr = math.floor(Fraction(USB_TLEOPR_NS) * f / 10 ** 9)
+    # TLEOPR in cycles at the clock band's SLOW edge (the fewest cycles; agent 1's
+    # clock.usb_se0q_bounds upper end), the conservative side for every use below
+    tleopr = clock.usb_se0q_bounds()[1]
     tipd_fast = math.floor(Fraction(clock.USB_TIPD_BITS * f, USB_TLDRATE_MAX))
     return {
         "bit": bit,
@@ -68,6 +70,10 @@ def premises(k=None):
         # a receive bit's timestamp drifts from the bus bit by at most 7 bits (bit stuffing:
         # an edge every <= 7 bits re-anchors it) at the host's rate tolerance (TLDRATE max)
         "rean_drift": math.ceil(Fraction(7 * bit) * (Fraction(USB_TLDRATE_MAX, 1_500_000) - 1)),
+        # the latest a legal responder's SOP starts after a token's EOP (TRSPIPD2, slowest rate)
+        "resp_window": clock.usb_resp_window_cycles(),
+        # the shortest packet a SOP starts: SYNC + PID = 16 bits, at the fastest host rate
+        "min_packet": math.floor(Fraction(16 * bit * 1_500_000, USB_TLDRATE_MAX)),
     }
 
 
@@ -78,7 +84,7 @@ def retry_fetch_deadline(B, nop_gap, k=None, prem=None):
     rate). Same GapRun HN rule as next_sop_fetch_deadline, anchored on that token."""
     k = k or PC.load()
     prem = prem or premises(k)
-    tok = math.floor(Fraction(USB_HOST_TIMEOUT_BITS_MIN * prem["bit"] * 1_500_000, USB_TLDRATE_MAX))
+    tok = clock.usb_host_next_min_cycles()          # 18 bit times at the fastest rate (7.1.19.1)
     release = tok + SYNC_MIN + 1 + nop_gap - (k["sop_fetch_slack"] + B)
     return release + k["usb_rr_on_time"] + k["dispatch_cycles"] - 1
 
@@ -109,6 +115,16 @@ def arm_kind(x, I):
     return "edge"
 
 
+def arm_half(x, I):
+    """HALF (ARM count[0]): the rebase is the edge + l_t/2 (pe_engine.v l.1630 ck_rebase)"""
+    return x["op"] == I.OP_ARM and bool(x["count"] & getattr(I, "ARM_CNT_HALF", 0))
+
+
+def arm_qual(x, I):
+    """QUAL (ARM count[1], USB lane): the edge fires only after an SE0 run >= USB_N_J"""
+    return x["op"] == I.OP_ARM and bool(x["count"] & getattr(I, "ARM_CNT_QUAL", 0))
+
+
 def lane_graph(img, lane, I=None):
     """{word: (action, [successors])} for every word reachable from `lane`'s base."""
     I = I or _isa()
@@ -128,13 +144,15 @@ def lane_graph(img, lane, I=None):
     return g
 
 
-def word_gaps(x, after_arm, after_se0, prem, I):
-    """the release gaps of the word's writebacks, in order (the last one is its retirement)"""
+def word_gaps(x, after_arm, after_se0, prem, I, half_t=0):
+    """the release gaps of the word's writebacks, in order (the last one is its retirement).
+    `half_t`: the lane's l_t // 2, added to a HALF ARM's release (rebase edge + l_t/2)."""
     op = x["op"]
     if op in I.BRANCH_OPS:
         return [I.branch_wait(x)]
     if op == I.OP_ARM:
         g = prem["arm_j"] if (arm_kind(x, I) == "edge" and after_se0) else prem["arm_floor"]
+        g += half_t if arm_half(x, I) else 0
         if PC.arm_is_ft(x, I):
             # ArmFT.arm_release_T: released at min(edge + 1, D), D = ts + a_dly (less the
             # rebase's cycle after an ARM): the gap is at least the smaller
@@ -155,6 +173,7 @@ def word_gaps(x, after_arm, after_se0, prem, I):
 def build(img, lane, prem, I=None):
     I = I or _isa()
     g = lane_graph(img, lane, I)
+    half_t = I.read_header(img, lane)["t"] // 2
     preds = {w: [] for w in g}
     for w, (_x, succ) in g.items():
         for s in succ:
@@ -164,7 +183,7 @@ def build(img, lane, prem, I=None):
         after_arm = any(g[p][0]["op"] == I.OP_ARM for p in preds[w])
         # arm_j: an edge ARM entered only from an SE0 (two-pin level) ARM -- its J edge ends that SE0
         after_se0 = bool(preds[w]) and all(arm_kind(g[p][0], I) == "se0" for p in preds[w])
-        gaps[w] = word_gaps(x, after_arm, after_se0, prem, I)
+        gaps[w] = word_gaps(x, after_arm, after_se0, prem, I, half_t)
     return g, preds, gaps
 
 
@@ -303,7 +322,7 @@ def is_our_j(x, I):
     return x["op"] == I.OP_LEVEL and x["level"] == 1 and x["pinb"] != 0
 
 
-def chains_into(g, preds, s, I, prem, depth=24):
+def chains_into(g, preds, s, I, prem, depth=24, half_t=0):
     """every chain back from word `s` to an EOP anchor, as (kind, offset): the release of `s`
     is at most `offset` after the bus EOP's end (ts_chain), or (None, None) when a chain meets
     a word with no upper gap before an anchor."""
@@ -312,9 +331,15 @@ def chains_into(g, preds, s, I, prem, depth=24):
     def walk(w, acc, d):
         for p in preds[w]:
             x = g[p][0]
+            if PC.arm_is_ft(x, I) and w == p + 1:
+                out.append(("FT timeout", acc + x["delay"]))   # correction A's path
+                continue
             if arm_kind(x, I) == "edge" and preds[p] and all(
                     arm_kind(g[q][0], I) == "se0" for q in preds[p]):
-                out.append(("host EOP", SYNC_MAX + 1 + acc))      # arm_j: J seen <= SYNC_MAX
+                data = all(any(g[r][0]["op"] == I.OP_SHIFTIN and g[r][0]["mod"] & I.MOD_PAIR
+                               for r in preds[q]) for q in preds[p])
+                out.append(("host EOP, DATA" if data else "host EOP",
+                            SYNC_MAX + 1 + (half_t if arm_half(x, I) else 0) + acc))
                 continue
             if is_our_j(x, I):
                 out.append(("our EOP", (upper_gaps(x, I) or 0) + acc - 1))  # J driven >= rel+1
@@ -349,17 +374,39 @@ def full_report(img, name="image"):
     floor = {c2: ft_flush_late(0) for _c1, c2 in fts.values() if c2 in g}
     xr = {c1: 1 for c1, _c2 in fts.values() if c1 in g}
     certs = {}
-    sops = [w for w in g if arm_kind(g[w][0], I) == "edge" and not (
+    half_t = I.read_header(img, u)["t"] // 2
+    sops = [w for w in g if arm_kind(g[w][0], I) == "edge" and w not in fts and not (
         preds[w] and all(arm_kind(g[q][0], I) == "se0" for q in preds[w]))]
-    off, unanch = {}, {}
+    off, offd, unanch = {}, {}, {}
     for s in sops:
-        ch = chains_into(g, preds, s, I, prem)
-        offs = [o for kd, o in ch if kd]
+        ch = chains_into(g, preds, s, I, prem, half_t=half_t)
+        offs = [o for kd, o in ch if kd and kd not in ("FT timeout", "host EOP, DATA")]
+        dat = [o for kd, o in ch if kd == "host EOP, DATA"]
         off[s] = max(offs) if offs else None
+        offd[s] = max(dat) if dat else None
         unanch[s] = sum(1 for kd, _o in ch if kd is None)
         # the SOP is seen >= tipd_fast + SYNC_MIN after the EOP; arm_sop's gap is to one past it
         if off[s] is not None and not unanch[s]:
-            gaps[s] = [max(prem["arm_floor"], prem["tipd_fast"] + SYNC_MIN + 1 - off[s])]
+            gs = max(prem["arm_floor"], prem["tipd_fast"] + SYNC_MIN + 1 - off[s])
+            if offd[s] is not None:      # after an unanswered DATA: the host's next >= 18 bits
+                gs = min(gs, max(prem["arm_floor"], clock.usb_host_next_min_cycles() + SYNC_MIN
+                                 + 1 - offd[s]))
+            gaps[s] = [gs + (half_t if arm_half(g[s][0], I) else 0)]
+    # a FALLTHROUGH ARM on a reply's SOP: its edge is >= TIPD after the anchoring EOP; its
+    # release is min(edge + 1, deadline) (arm_release_T)
+    egap, ftoff = {}, {}
+    for a in fts:
+        ch = chains_into(g, preds, a, I, prem, half_t=half_t)
+        offs = [o for kd, o in ch if kd]
+        if offs and not any(kd is None for kd, _o in ch):
+            ftoff[a] = max(offs)
+            egap[a] = max(prem["arm_floor"], prem["tipd_fast"] + SYNC_MIN + 1 - max(offs))
+            gaps[a] = [min(egap[a], g[a][0]["delay"])]
+        c2 = a + 2
+        if c2 in g and arm_kind(g[c2][0], I) == "se0":
+            # PREMISE (FT edge path): PC+2 is released at the reply's SOP edge + 1; the reply's
+            # EOP SE0 starts >= min_packet after that edge and is seen >= SYNC_MIN later
+            gaps[c2] = [max(gaps[c2][0], prem["min_packet"] + SYNC_MIN)]
     print("lane_cert: %s  (clock %d Hz, LS bit %d)" % (name, clock.hz(), prem["bit"]))
     print("  premises: arm floor %d, arm_j %d (TLEOPR %d ns - sync skew), TIPD fast %d, "
           "next-SOP deadline %d, TRSPIPD1 %d, rean floor %d, sync %d..%d"
@@ -389,7 +436,20 @@ def full_report(img, name="image"):
         for w in sorted(g):
             if arm_kind(g[w][0], I) != "edge":
                 continue
-            ok = lat[w] + 4 + xr.get(w, 0) < gaps[w][0] - 1
+            if w in fts:
+                # PREMISE (FT on a reply's SOP): it may be armed after the reply began -- it then
+                # fires on a later D+ rise inside the reply; it must be armed before the reply can
+                # end (TIPD + one minimum packet after the anchoring EOP)
+                if w in ftoff:
+                    armed = ftoff[w] + lat[w] + 4 + xr.get(w, 0)
+                    need = prem["tipd_fast"] + prem["min_packet"]
+                    okf = armed < need
+                    print("  FT ARM w%d: armed <= EOP + %d, the reply ends >= EOP + %d  %s"
+                          % (w, armed, need, "OK" if okf else "LATE"))
+                    if not okf:
+                        fails.append((sched, "ft arm w%d" % w))
+                continue
+            ok = lat[w] + 4 + xr.get(w, 0) < egap.get(w, gaps[w][0]) - 1
             if not ok:
                 fails.append((sched, "arm w%d" % w))
             if w not in off:
@@ -402,10 +462,22 @@ def full_report(img, name="image"):
                                              % unanch[s] if unanch[s] else "no anchored chain"))
                 continue
             wb = off[s] + lat[s] + 4 + xr.get(s, 0)
-            nop_gap = min(gaps[n][-1] for n in g[s][1])
+            if arm_half(g[s][0], I):
+                # HALF: the half bit is in the ARM's own release; the first sample is PC+1
+                nop_gap, f = half_t, list(g[s][1])
+            else:
+                nop_gap = min(gaps[n][-1] for n in g[s][1])
+                f = [n2 for n in g[s][1] for n2 in g[n][1]]
             fdl = next_sop_fetch_deadline(0, nop_gap, k, prem)
             ok = wb <= fdl
-            f = [n2 for n in g[s][1] for n2 in g[n][1]]
+            if offd[s] is not None:
+                wbd = offd[s] + lat[s] + 4 + xr.get(s, 0)
+                rdl = retry_fetch_deadline(0, nop_gap, k, prem)
+                okd = wbd <= rdl
+                print("  arm_sop w%d after an unanswered DATA: retired <= EOP + %d (host's next "
+                      "packet deadline %d) %s" % (s, wbd, rdl, "OK" if okd else "LATE"))
+                if not okd:
+                    fails.append((sched, "after-DATA w%d" % s))
             fl = max((lat[n2] for n2 in f), default=0)
             print("  arm_sop w%d: retired <= EOP + %d (fetch deadline %d; plain %d) %s; SOP gap %d; "
                   "first sample lateness %d %s" % (s, wb, fdl, prem["deadline_sop"],
@@ -422,7 +494,7 @@ def full_report(img, name="image"):
             if not (arm_kind(x, I) == "edge" and preds[j] and
                     all(arm_kind(g[q][0], I) == "se0" for q in preds[j])):
                 continue
-            stack = [(n, SYNC_MAX + 1) for n in g[j][1]]
+            stack = [(n, SYNC_MAX + 1 + (half_t if arm_half(x, I) else 0)) for n in g[j][1]]
             seen = set()
             while stack:
                 w, acc = stack.pop()
@@ -490,7 +562,6 @@ def full_report(img, name="image"):
                 fails.append((sched, "other lanes"))
     # the FALLTHROUGH ARMs (ArmFT; agent 1's pe_isa refusals, re-checked on the image)
     print("== FALLTHROUGH ARMs: %d (encoding %s)" % (len(fts), PC.ft_rule(I)))
-    half = bool(I.read_header(img, u)["flags"] & I.FLAG_HALF_HIGH)
     cb = certs.get("b'")
     for a in sorted(fts):
         c1, c2 = fts[a]
@@ -501,9 +572,19 @@ def full_report(img, name="image"):
             probs.append("no PC+2")
         elif g[c2][0]["op"] in (I.OP_SHIFT, I.OP_SHIFTIN):
             probs.append("PC+2 w%d is a SHIFT/SHIFTIN (refused: refilled after the flush)" % c2)
-        if half:
-            probs.append("on a HALF lane (HALF and FALLTHROUGH are never combined)")
+        if arm_half(g[a][0], I):
+            probs.append("HALF with FALLTHROUGH (never combined: PC+2 is not prefetched)")
         lt = cb[0].get(c2) if cb is not None and c2 in g else None
+        # the edge path: PC+2 is released at edge + 1 and written back by release + L + 4; if it
+        # is an ARM it must be armed before the replying packet can end: its SE0 starts at least
+        # one minimum packet after the SOP edge
+        if lt is not None and g[c2][0]["op"] == I.OP_ARM:
+            armed = 1 + lt + 4
+            okp = armed < prem["min_packet"]
+            print("  ARM w%d edge path: PC+2 w%d armed <= edge + %d, the reply's SE0 >= edge + %d %s"
+                  % (a, c2, armed, prem["min_packet"], "OK" if okp else "LATE"))
+            if not okp:
+                probs.append("PC+2 w%d armed late on the edge path" % c2)
         print("  ARM w%d: timeout -> w%d released <= ts + %d, + 1 disarm cycle; edge -> flush, "
               "w%d head valid <= release + %s %s" % (a, c1, g[a][0]["delay"], c2,
                                                     "-" if lt is None else lt,
@@ -518,14 +599,15 @@ def full_report(img, name="image"):
     if not tos:
         print("== correction A: no ARM with a timeout in this image (check inactive)")
     for a in sorted(tos):
-        offs = [o for kd, o in chains_into(g, preds, a, I, prem) if kd == "our EOP"]
-        if not offs:
-            print("== correction A: ARM w%d has a timeout but no chain from our EOP" % a)
+        ch = chains_into(g, preds, a, I, prem, half_t=half_t)
+        offs = [o for kd, o in ch if kd]
+        if not offs or any(kd is None for kd, _o in ch):
+            print("== correction A: ARM w%d has a timeout but an unanchored chain" % a)
             fails.append(("A", "w%d unanchored" % a))
             continue
         t_lo = min(offs) + g[a][0]["delay"]                 # earliest timeout after our EOP
         t_hi = max(offs) + g[a][0]["delay"]                 # latest
-        ok1 = t_lo >= prem["trspipd1"]
+        ok1 = t_lo >= prem["resp_window"]
         worst = None
         stack = [(n, t_hi) for n in g[a][1] if n == a + 1]  # PC+1: the timeout continuation
         seen = set()
@@ -547,9 +629,9 @@ def full_report(img, name="image"):
             for n in g[w][1]:
                 stack.append((n, acc + up))
         ok2 = worst is not None and worst[0] <= worst[1]
-        print("== correction A: ARM w%d times out at our EOP + %d..%d (window_end %d) %s; TOP arm_sop "
-              "retired <= EOP + %s (retry deadline %s) %s"
-              % (a, t_lo, t_hi, prem["trspipd1"], "OK" if ok1 else "EARLY",
+        print("== correction A: ARM w%d times out at EOP + %d..%d (window_end %d) %s; TOP arm_sop "
+              "retired <= EOP + %s (next-token deadline %s) %s"
+              % (a, t_lo, t_hi, prem["resp_window"], "OK" if ok1 else "EARLY",
                  worst[0] if worst else "-", worst[1] if worst else "-", "OK" if ok2 else "LATE"))
         if not ok1:
             fails.append(("A", "w%d early timeout" % a))

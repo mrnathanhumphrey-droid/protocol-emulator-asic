@@ -74,6 +74,9 @@ module tb_w;
                       && (dut.u_eng.st == 0) && dut.u_eng.winner_v
                       && !dut.u_eng.l_armed[dut.u_eng.winner];
   wire       stall  = decide && !dut.u_eng.l_actv[whead];
+  wire [NL-1:0] blk_now = (dut.u_eng.primed && !dut.u_eng.config_err)
+                          ? dut.u_eng.pf_rdy[NL-1:0] : {NL{1'b0}};
+  reg  [NL-1:0] prev_blk = {NL{1'b0}};
   wire       in_win = (warm_from > 0) && (cyc > warm_from);
 
   initial begin
@@ -185,7 +188,8 @@ module tb_w;
 
       // ---- R_i: eligibility re-arms at the lane's WB -----------------------
       for (L = 0; L < NL; L = L + 1)
-        if (elig_t[L] < 0 && dut.u_eng.ready[L]) elig_t[L] = cyc;
+        // (b') 11-14: `ready` now includes the head term; this meant RELEASED and gated (`rdy_rel`)
+        if (elig_t[L] < 0 && dut.u_eng.rdy_rel[L]) elig_t[L] = cyc;
       if (dut.u_eng.st == 2) begin
         elig_t[dut.u_eng.cur] = -1;
         wb_t[dut.u_eng.cur]   = cyc;
@@ -219,13 +223,18 @@ module tb_w;
       end
 
       // ---- W2: the conclusion's violation ----------------------------------
-      if (stall && in_win) begin
-        s = whead;
-        v_cyc[s / 2] = v_cyc[s / 2] + 1;
-        if (!prev_stall || prev_stall_slot != s) v_ev[s / 2] = v_ev[s / 2] + 1;
+      // ⛔ (b') (Wilson 11-14): the dispatcher no longer picks a lane with an
+      // empty head, so "the WINNER's head is empty" (`stall`) never happens
+      // and W2 read 0 HOLLOWLY (u18 / slow_u20 stopped counting). A lane is
+      // late for its own word exactly while it is RELEASED with an EMPTY head
+      // (`pf_rdy`), the predicate tb_jlane's `blocked` uses -- per lane.
+      for (L = 0; L < NL; L = L + 1) begin
+        if (blk_now[L] && in_win) begin
+          v_cyc[L] = v_cyc[L] + 1;
+          if (!prev_blk[L]) v_ev[L] = v_ev[L] + 1;
+        end
       end
-      if (stall) prev_stall_slot = whead;
-      prev_stall = stall;
+      prev_blk = blk_now;
     end
 
     for (L = 0; L < NL; L = L + 1)

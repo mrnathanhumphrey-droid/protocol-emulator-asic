@@ -75,10 +75,17 @@
 // iterates lanes -- it only touches the lane in `cur` -- so this sizes storage
 // and nothing else. A lane index beyond it is REPORTED, not silently dropped.
 localparam integer PG_MAXL  = 8;
-// LAYER A's generous bound: far above any legitimate clocked action (the
-// longest is a 17-dispatch 8-bit clocked receive), so layer A fires only on a
-// genuine hang and never merely because layer B's table changed.
-localparam integer PG_COARSE = 64;
+// ⛔⛔ LAYER A's BOUND IS PER ACTION AND GENERATED (Wilson 11-14). It was a
+// typed global 64 under a typed comment ("the longest is a 17-dispatch 8-bit
+// clocked receive"); the USB buffer send holds ONE action for up to 112 wire
+// bits, so five coverage arms read a false hang, and a stuck SHORT action (a
+// self-timed SHIFTIN 8 bits late) stayed far under 64 and was invisible.
+// ⇒ Each writeback is judged against the CURRENT action's own maximum,
+//   `pe_isa.dispatch_max` emitted by test/gen_progress_bounds.py (that gate
+//   holds this header fresh), picked from the engine's own decode below.
+`include "test/progress_bounds.vh"
+integer pg_bnd;                       // the current action's bound
+reg [8*10:1] pg_kind;                 // ... and its kind, for the message
 
 integer pg_n     [0:PG_MAXL-1];      // writebacks on the current action
 integer pg_pc    [0:PG_MAXL-1];      // the PC they were at
@@ -115,7 +122,12 @@ initial begin
 end
 
 always @(posedge dut.clk) begin
-  if (dut.rst_n !== 1'b1) begin
+  // the ENGINE's reset, not only the pin: a host RELOAD halts the engine through
+  // its own reset (power-on OR halt) and the lane restarts at the SAME pc -- with
+  // only `dut.rst_n` watched that restart counted as a second dispatch of one
+  // action, which the per-action bound (11-14) read as a hang (run_reload tx1,
+  // run_spitgt M3R; the old flat 64 had hidden it)
+  if (dut.rst_n !== 1'b1 || dut.u_eng.rst_n !== 1'b1) begin
     for (pg_k = 0; pg_k < PG_MAXL; pg_k = pg_k + 1) begin
       pg_n[pg_k] = 0;  pg_pc[pg_k] = -1;
     end
@@ -140,9 +152,42 @@ always @(posedge dut.clk) begin
       end else begin
         pg_n[dut.u_eng.cur] = pg_n[dut.u_eng.cur] + 1;
       end
-      // ---- LAYER A: coarse liveness, model-independent -------------------
-      if (pg_n[dut.u_eng.cur] == PG_COARSE + 1) begin
-        $display("*** FAIL progress.vh[A]: lane %0d has sat on the action at pc=%0d for %0d dispatches (coarse bound %0d) -- it is NOT RETIRING", dut.u_eng.cur, pg_pc[dut.u_eng.cur], pg_n[dut.u_eng.cur], PG_COARSE);
+      // ---- LAYER A: per-action liveness, model-independent ----------------
+      // The kind is read off the engine's OWN decode of the current action
+      // (wires, never localparams -- see the ST_WB trap above): the hold rule
+      // `ck_hold = (ck_act & ~ck_retire) | (st_act & ~(st_last & ~usb_stuff))`.
+`ifdef PE_V1_RTL
+      // v1-lock's engine (gate_v2_equiv's v1 side) has no self-timed / USB
+      // decode to read: the ruling's FALLBACK, the generated global maximum
+      // over every legitimate action (the USB send is the largest kind)
+      pg_bnd = PG_USB_SEND_MAX;                            pg_kind = "v1-global";
+      if (1'b0) begin
+`else
+      if (dut.u_eng.usb_send === 1'b1) begin
+        pg_bnd = PG_USB_SEND_MAX;                          pg_kind = "usb_send";
+`endif
+      end else if (dut.u_eng.ck_shift === 1'b1) begin
+        pg_bnd = pg_max_ck_shift(dut.u_eng.a_cnt);         pg_kind = "ck_shift";
+      end else if (dut.u_eng.ck_shiftin === 1'b1) begin
+        pg_bnd = pg_max_ck_shiftin(dut.u_eng.a_cnt);       pg_kind = "ck_shiftin";
+`ifndef PE_V1_RTL
+      end else if (dut.u_eng.usb_act === 1'b1) begin
+        pg_bnd = pg_max_usb_rx(dut.u_eng.a_cnt);           pg_kind = "usb_rx";
+      end else if (dut.u_eng.st_act === 1'b1) begin
+        // cur_cls[1] is C_SHIFT (a literal: see the ST_WB trap)
+        if (dut.u_eng.cur_cls[1] === 1'b1) begin
+          pg_bnd = pg_max_st_shift(dut.u_eng.a_cnt);       pg_kind = "st_shift";
+        end else begin
+          pg_bnd = pg_max_st_shiftin(dut.u_eng.a_cnt);     pg_kind = "st_shiftin";
+        end
+`endif
+      end else begin
+`ifndef PE_V1_RTL
+        pg_bnd = PG_OTHER_MAX;                             pg_kind = "other";
+`endif
+      end
+      if (pg_n[dut.u_eng.cur] == pg_bnd + 1) begin
+        $display("*** FAIL progress.vh[A]: lane %0d has sat on the action at pc=%0d for %0d dispatches (its own bound %0d, kind %0s) -- it is NOT RETIRING", dut.u_eng.cur, pg_pc[dut.u_eng.cur], pg_n[dut.u_eng.cur], pg_bnd, pg_kind);
         pg_fa = pg_fa + 1;
       end
     end
@@ -195,6 +240,32 @@ always @(posedge dut.clk) if (dut.rst_n === 1'b1) begin
   end
 end
 
+// ---- LAYER S: NO LANE WAITS FOR ANOTHER LANE'S WORD ((b'), Wilson 11-14) ----
+// ⛔⛔ THE DISPATCHER USED TO STALL EVERY LANE when the EDF winner's head was
+// empty (agent 2, 729111f): a word arriving late after a branch held up the
+// USB lane's samples too. (b') picks only lanes whose head is valid, so while
+// the schedule runs, an idle engine with no armed winner and SOME released
+// lane holding a valid head MUST dispatch that cycle. A cycle where it does
+// not is the global stall back -- `M_GLOBAL_STALL` is this layer's must-fire.
+integer pg_sblk;
+initial pg_sblk = 0;
+// ⚠ `PE_EQUIV_PRE` is set ONLY by test/gate_batch_equiv.py's PRE-batch build:
+// that RTL has no `rdy_rel` (the old `ready` IS the released term) and no (b'),
+// so this layer does not apply to it. It never drives a pin.
+`ifndef PE_EQUIV_PRE
+always @(posedge dut.clk) if (dut.rst_n === 1'b1) begin
+  if (dut.u_eng.now_inc === 1'b1 && dut.u_eng.st === 2'd0 && dut.u_eng.config_err !== 1'b1
+      && dut.u_eng.w_armed !== 1'b1 && (|(dut.u_eng.rdy_rel & dut.u_eng.hv))
+      && dut.u_eng.cur_ld !== 1'b1) begin
+    if (pg_sblk == 0) begin
+      $display("*** FAIL progress.vh[S]: a released lane with a VALID head waited while the engine idled -- another lane's empty head is holding the dispatcher (the global stall (b') removed)");
+      pg_fa = pg_fa + 1;
+    end
+    pg_sblk = pg_sblk + 1;
+  end
+end
+`endif
+
 // ⛔⛔ THE REPORT IS THE `final` BLOCK ITSELF, NOT A TASK IT CALLS.
 // It was `task pg_report` invoked from `final`, which Verilator accepts and
 // iverilog refuses ("final procedures cannot enable/call tasks").
@@ -214,7 +285,7 @@ final begin
     else if (pg_acts == 0)
       $display("*** FAIL progress.vh: no action was observed to retire, so the liveness check had nothing to check");
     else if (pg_fa == 0)
-      $display("  progress.vh[A]: ok -- coarse liveness clean");
+      $display("  progress.vh[A]: ok -- per-action liveness clean");
     else
       $display("*** FAIL progress.vh[A]: %0d liveness failure(s)", pg_fa);
   end

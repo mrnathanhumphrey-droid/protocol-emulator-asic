@@ -125,6 +125,7 @@
       st         <= ST_IDLE; \
       jitter_cnt <= {JW{1'b0}}; \
       jitter_max <= {JW{1'b0}}; \
+      for (i = 0; i < N_LANES; i = i + 1) l_hwait[i] <= {JW{1'b0}}; \
       cur        <= {LW{1'b0}}; \
       cur_act    <= {ACT_W{1'b0}}; \
       cur_cls    <= {CLS_W{1'b0}}; \
@@ -140,6 +141,7 @@
       pl         <= {LW{1'b0}}; \
       prr        <= {LW{1'b0}}; \
       pbr1       <= 1'b0; \
+      pkill      <= 1'b0; \
       hz_q       <= {N_LANES{1'b1}}; \
       hl_v       <= 1'b0; \
       hl_l       <= {LW{1'b0}}; \
@@ -214,6 +216,9 @@
         l_arm2[i]      <= 1'b0; \
         l_armpinb[i]   <= {PINB_W{1'b0}}; \
         l_notmo[i]     <= 1'b0; \
+        l_armhalf[i]   <= 1'b0; \
+        l_armqual[i]   <= 1'b0; \
+        l_armft[i]     <= 1'b0; \
       end \
       for (i = 0; i < NSLOT; i = i + 1) begin \
         l_act[i]  <= {ACT_W{1'b0}}; \
@@ -235,6 +240,8 @@
 `define PE_RST_SCHED \
       for (ti = 0; ti < N_LANES; ti = ti + 1) key_q[ti] <= {TS_W{1'b0}}; \
       winner_q   <= {LW{1'b0}}; \
+      pf_q       <= {LW{1'b0}}; \
+      pf_v_q     <= 1'b0; \
       winner_v_q <= 1'b0;
 `define PE_RST_PRIMED primed_q <= 1'b0;
 // v2 primitive 3 bundle 3: the registered re-anchor's capture and target
@@ -1140,6 +1147,33 @@ module pe_engine #(
   reg             l_arm2   [0:N_LANES-1];   // 1 = two-pin level mode
   reg [PINB_W-1:0] l_armpinb[0:N_LANES-1];  // the second pin
   reg             l_notmo  [0:N_LANES-1];   // "no timeout": wait indefinitely
+  // ⭐⭐ THE ARM/DISPATCHER BATCH (Wilson 11-14). Three ARM modifiers, each an
+  // EXPLICIT bit the program requests -- never inferred from the next word:
+  //   count[0] HALF        rebase to the edge + l_t/2 (the lane's own period),
+  //                        so a sample half a bit after the edge needs no nop
+  //   count[1] QUAL        (USB lane) an edge fires only after an SE0 run of
+  //                        >= USB_N_J cycles: a transition glitch is not an EOP
+  //   mod[1]   FALLTHROUGH a timeout RETIRES the ARM to PC+1 instead of halting
+  //                        the lane; an edge goes to PC+2 (`l_skip`)
+  // pe_isa refuses every illegal combination (HALF/QUAL with LEVEL2, QUAL off
+  // the USB lane, FT with no timeout, HALF with FT, a SHIFT/SHIFTIN as an FT
+  // edge path's first word).
+  reg             l_armhalf[0:N_LANES-1];
+  reg             l_armqual[0:N_LANES-1];
+  reg             l_armft  [0:N_LANES-1];
+  wire            usb_qual_ok;              // assigned beside the SE0 counter
+  // FT's timeout falls through; `M_FT_HALTS` halts the lane as a plain ARM does
+`ifdef M_FT_HALTS
+  wire            ft_fall_on = 1'b0;
+`else
+  wire            ft_fall_on = 1'b1;
+`endif
+  // FT's edge path (PC+2) taken at the edge; `M_FT_NOSKIP` leaves PC at PC+1
+`ifdef M_FT_NOSKIP
+  wire            ft_skip_on = 1'b0;
+`else
+  wire            ft_skip_on = 1'b1;
+`endif
   reg             l_timeout_m[0:N_LANES-1]; // STICKY: the peer went silent
 
   // ⭐⭐ CANARY (reset-network halt): THE KEEP-LIST TWINS. The `_m` flags live
@@ -1295,6 +1329,8 @@ module pe_engine #(
   //   reason.
   localparam integer JW = 8;
   reg [JW-1:0] jitter_cnt, jitter_max;
+  reg [JW-1:0] l_hwait [0:N_LANES-1];   // (b'): each lane's current wait for its head
+  reg [JW-1:0] jmax_n;                  // blocking temp: this cycle's new max
 
   always @(posedge clk or negedge rst_n) begin
     if (!rst_n)      `PE_RST_NOW         // CANARY: rst_n IS the halt now
@@ -1335,6 +1371,14 @@ module pe_engine #(
   // must not re-rebase the timestamp -- that would slide the grid forward on
   // every subsequent peer transition, which on a clocked bus is every bit.
   wire [N_LANES-1:0] arm_hit;
+  // ⛔ (FT scan race, found 11-14): the lanes whose FALLTHROUGH edge FLUSHES
+  // this cycle (PC -> PC+2, both slots emptied). P_SCAN must not select one:
+  // `fetch_addr` would latch the PRE-edge successor in the same cycle, and
+  // `pkill` (set only for P_REQ / P_WAIT) would not cover it -- the stale word
+  // would be filed at P_CAP into a slot the edge had just emptied. Only FT
+  // ARMs: an ordinary ARM's edge changes no PC, so its refills are untouched
+  // (and every pre-batch program stays bit-identical).
+  wire [N_LANES-1:0] ft_flush;
   // (`ck_parked` is declared ahead, beside its first use, `ck_any_park`)
   wire [N_LANES-1:0] ck_hit;    // a clocked SHIFTIN's rise, OBSERVED
   wire [N_LANES-1:0] ck_bit;    // ... and the data pin at that instant
@@ -1418,6 +1462,18 @@ module pe_engine #(
   // G1 and the UM10204 floor both stay green while the clock period is wrong --
   // which is precisely why a one-sided bound is half a check.
   wire [TS_W-1:0] ck_rebase [0:N_LANES-1];
+  // HALF's request, per lane. `M_HALF_NOW` ignores it (the rebase stays `now`).
+  wire [N_LANES-1:0] arm_half;
+  genvar gah;
+  generate
+    for (gah = 0; gah < N_LANES; gah = gah + 1) begin : g_armhalf
+`ifdef M_HALF_NOW
+      assign arm_half[gah] = 1'b0;
+`else
+      assign arm_half[gah] = l_armhalf[gah];
+`endif
+    end
+  endgenerate
   // ⛔⛔ RULING CE1 -- HALF_HIGH. A symmetric clock cannot reach I2C Fm's
   // nominal rate: t_LOW >= 1.3 us fixes d >= 69 and the HIGH phase then wastes
   // the 0.7 us beyond Fm's 0.6 us t_HIGH (336 kHz). A HALF_HIGH lane's HIGH
@@ -1498,10 +1554,15 @@ module pe_engine #(
 `else
       wire arm2_b = arm2_real ? (pin_in[l_armpinb[gi]] == arm2_pol) : 1'b0;
 `endif
+`ifdef M_QUAL_IGNORED
+      wire arm_q_ok = 1'b1;                 // the mutant: the SE0 qualifier ignored
+`else
+      wire arm_q_ok = ~l_armqual[gi] | ((gi == USB_LANE) & usb_qual_ok);
+`endif
       assign arm_hit[gi] = l_armed[gi] &
                            (l_arm2[gi] ? (arm2_a & arm2_b)
                                        : arm_real ? (l_armedge[gi] ? pin_rise[l_armpin[gi]]
-                                                                   : pin_fall[l_armpin[gi]])
+                                                                   : pin_fall[l_armpin[gi]]) & arm_q_ok
                                                   : 1'b0);
 
       // ⭐⭐ THE CLOCKED SHIFTIN'S SAMPLE, TAKEN ON THE OBSERVED CLOCK RISE.
@@ -1557,12 +1618,16 @@ module pe_engine #(
       // ⭐ CE1: the parked lane's HIGH length after the observed rise --
       // `d`, or `d/2` on a HALF_HIGH lane (the rebase below adds it)
       assign ck_hdly[gi] = half_v[gi] ? (ck_dly[gi] >> 1) : ck_dly[gi];
+      // ⭐ HALF (Wilson 11-14): an ARM that requested it rebases to the edge +
+      // l_t/2 -- the SAME adder, one more mux input (`arm_half`). The +1/2 bit
+      // the USB SOP and a UART start bit need came from a `nop(D/2)` until now,
+      // which put the first sample word two fetches behind the edge (gap 2).
 `ifdef M_CK_REBASE_2D
       assign ck_rebase[gi] = now + {{(TS_W-DLY_W-1){1'b0}}, ck_dly[gi], 1'b0};
 `elsif M_CK_RISE_ELIGIBLE
       assign ck_rebase[gi] = now;
 `else
-      assign ck_rebase[gi] = now + (l_ckpark[gi] ? {{(TS_W-DLY_W){1'b0}}, ck_hdly[gi]} : {TS_W{1'b0}});
+      assign ck_rebase[gi] = now + (l_ckpark[gi] ? {{(TS_W-DLY_W){1'b0}}, ck_hdly[gi]} : arm_half[gi] ? {{(TS_W-DLY_W+1){1'b0}}, l_t[gi][DLY_W-1:1]} : {TS_W{1'b0}});
 `endif
     end
   endgenerate
@@ -1571,6 +1636,7 @@ module pe_engine #(
   // READY + EDF SELECT. ⛔ Both comparisons are wrap-safe.
   // =====================================================================
   wire [N_LANES-1:0] ready;
+  wire [N_LANES-1:0] rdy_rel;   // released (the old `ready`): (b')'s prefetch input
   wire [N_LANES-1:0] rel_due;
   wire [TS_W-1:0]    edf_key_off [0:N_LANES-1];
 
@@ -1681,9 +1747,23 @@ module pe_engine #(
                     | (ppc_v & (ppc_l == gi) & (ppc_n <= cap_lead));
 `endif
 `ifdef M_NO_HOLD_GATE
-      assign ready[gi] = rel_due[gi] & cap_ok;
+      assign rdy_rel[gi] = rel_due[gi] & cap_ok;
 `else
-      assign ready[gi] = rel_due[gi] & hz_q[gi] & cap_ok;
+      assign rdy_rel[gi] = rel_due[gi] & hz_q[gi] & cap_ok;
+`endif
+      // ⛔⛔ (b') (Wilson 11-13/14, agent 2 729111f): THE DISPATCHER NEVER PICKS A
+      // LANE WHOSE HEAD IS EMPTY. It used to: the EDF winner was chosen over
+      // RELEASED lanes and an empty head stalled EVERY lane (`cur_ld & w_hv`),
+      // so a word arriving late after a branch (up to R + 26 + B - W) held up
+      // the USB lane's samples too. Now a late word delays only its own lane.
+      // `rdy_rel` (released) still drives the prefetch's first priority (the
+      // earliest-deadline released lane with an EMPTY head, `pf_q`), which is
+      // what bounds that lane's own lateness. `M_GLOBAL_STALL` restores the
+      // old readiness (the global stall's must-fire).
+`ifdef M_GLOBAL_STALL
+      assign ready[gi] = rdy_rel[gi];
+`else
+      assign ready[gi] = rdy_rel[gi] & l_actv[hix[gi]];
 `endif
       // ⭐ deadline as an OFFSET FROM NOW, so a wrapped key still orders
       //   correctly. 1.6b is what bounds the spread that makes this sound.
@@ -1782,6 +1862,66 @@ module pe_engine #(
         if (winner_v && winner == k[LW-1:0]) winner_oh[k] = 1'b1;
     end
   end endgenerate
+
+  // ⭐⭐ (b')'S PREFETCH TARGET: the earliest-deadline lane that is RELEASED
+  // with an EMPTY head -- the lane a late word is now delaying (only itself).
+  // The prefetch serves it first (registered, `pf_q`, as TF3 registers the
+  // winner), so its own lateness stays bounded. A serial argmin over the
+  // registered keys, off the dispatch path (it ends in a flop): 4 compares,
+  // fewer than sharing the tree's 10 would need muxed in.
+  wire [N_LANES-1:0] pf_rdy;
+  reg  [LW-1:0]      pf_w;
+  reg                pf_v;
+  reg  [TS_W-1:0]    pf_best;
+  integer            pk;
+  generate
+    for (gi = 0; gi < N_LANES; gi = gi + 1) begin : g_pfrdy
+      // only while the SCHEDULE RUNS (`now_inc`, = run & primed): before that
+      // every head is empty and "late" means nothing, and priming keeps the
+      // round robin it always had (measured: serving priming fetches in EDF
+      // order moved tb_half's first dispatches by 2 cycles and its phase-tight
+      // half-duplex grid by a bit). ⚠ `now_inc`, NOT `primed`: under M_NO_PRIME
+      // the schedule runs unprimed, and those late heads must still be seen.
+      assign pf_rdy[gi] = now_inc & rdy_rel[gi] & ~l_actv[hix[gi]];
+    end
+  endgenerate
+  // ⛔⛔ BIT-EXACT PRIMING (Wilson 11-14, option 2): WHILE PRIMING the target is
+  // the pre-batch one -- the EDF winner over the RELEASED lanes (`rdy_rel`, the
+  // old readiness), whatever its head -- and the P_SCAN branch's own "head
+  // empty" test then makes it exactly the old "registered winner with an empty
+  // head". Priming therefore fills in the pre-batch EDF order and the schedule
+  // starts on the pre-batch cycle (126, not 125): every shipped program's trace
+  // is bit-identical to the pre-batch build (test/gate_batch_equiv.py). After
+  // priming (`now_inc`) the (b') target `pf_rdy` applies. `M_PRIME_NEWPRIO` is
+  // the batch's first version (the new target during priming too): a one-cycle
+  // earlier start, which the equivalence gate must catch.
+  generate
+    for (gi = 0; gi < N_LANES; gi = gi + 1) begin : g_ftflush
+`ifdef M_FT_SCAN_RACE
+      assign ft_flush[gi] = 1'b0;                      // the mutant: the old scan
+`else
+      assign ft_flush[gi] = arm_hit[gi] & l_armft[gi] & ft_skip_on;
+`endif
+    end
+  endgenerate
+  wire [N_LANES-1:0] pf_cand;
+`ifdef M_PRIME_NEWPRIO
+  assign pf_cand = pf_rdy;
+`else
+  assign pf_cand = now_inc ? pf_rdy : rdy_rel;
+`endif
+  always @* begin
+    pf_w = {LW{1'b0}};
+    pf_v = 1'b0;
+    pf_best = {TS_W{1'b1}};
+    for (pk = 0; pk < N_LANES; pk = pk + 1) begin
+      if (pf_cand[pk] && (!pf_v || edf_key_off[pk] < pf_best)) begin
+        pf_w = pk[LW-1:0];
+        pf_v = 1'b1;
+        pf_best = edf_key_off[pk];
+      end
+    end
+  end
 
   // ⛔⛔ RULING TF2-R1/R2 -- THE WINNER'S ACTION, PICKED FROM PER-LANE HEADS.
   // The 50 MHz path after TF1/TF2 was mostly BUFFERS: one binary winner index
@@ -2034,10 +2174,18 @@ module pe_engine #(
   // bits (its byte completes at `rx_bitp == count - 1`).
   wire st_act  = cur_cls[C_ST] & ~clk_real;
   wire [BPW-1:0] st_lastix = cur_cls[C_SHIFT] ? a_cnt : (a_cnt - 4'd1);
-`ifdef M_ST_EARLY
-  wire st_last_b = (l_ckbit[cur] == st_lastix - 4'd1);   // the mutant: one bit short
+  // `M_ST_LATE8` (Wilson 11-14, progress.vh's per-action bound): a self-timed
+  // SHIFTIN holds 8 bits past its own last bit -- still far under the old
+  // global 64, so only a PER-ACTION liveness bound can see it.
+`ifdef M_ST_LATE8
+  wire [BPW-1:0] st_lastix_e = cur_cls[C_SHIFTIN] ? st_lastix + 4'd8 : st_lastix;  // the mutant
 `else
-  wire st_last_b = (l_ckbit[cur] == st_lastix);
+  wire [BPW-1:0] st_lastix_e = st_lastix;
+`endif
+`ifdef M_ST_EARLY
+  wire st_last_b = (l_ckbit[cur] == st_lastix_e - 4'd1);   // the mutant: one bit short
+`else
+  wire st_last_b = (l_ckbit[cur] == st_lastix_e);
 `endif
   // ⭐ v2 PRIMITIVE 3, BUNDLE 3 (Wilson 11-08): NRZI DECODE + UNSTUFFING on the
   // self-timed SHIFTIN, ONE lane only (Wilson: "one USB lane"). The state is
@@ -2090,7 +2238,13 @@ module pe_engine #(
   // without a USB receive) q = 3 is an ordinary TX queue, its SHIFT ordinary
   wire usb_send = st_act & cur_cls[C_SHIFT] & ~cur_cls[C_SHI] & (a_q == 2'd3) &
                   (cur == USB_LANE[LW-1:0]) & usb_on;
+  // `M_ST_NEVER_LAST` (Wilson 11-14): a self-timed SHIFT never asserts its
+  // last bit, so it holds for ever -- progress.vh's per-action bound must fire.
+`ifdef M_ST_NEVER_LAST
+  wire st_last  = usb_send ? (usb_bcnt == usb_blen - 7'd1) : (st_last_b & ~cur_cls[C_SHIFT]);  // the mutant
+`else
   wire st_last  = usb_send ? (usb_bcnt == usb_blen - 7'd1) : st_last_b;
+`endif
   // ⭐ BUNDLE 6 (Wilson 11-09, step 7a §1): THE BUS RESET. A saturating
   // counter of consecutive SE0 cycles (both pins of the USB pair low) fires
   // one `usb_brst` pulse at cycle N_RST of the SE0. N_RST is DERIVED from the
@@ -2116,6 +2270,13 @@ module pe_engine #(
   reg  [PINB_W-1:0] usb_sn;
   reg               usb_sv;
   reg  [7:0]        usb_se0c;
+  // ⭐ QUAL (Wilson 11-14, item 3): an SE0 run of >= USB_N_J cycles has just
+  // ended. In the cycle the J rise is seen, `usb_se0c` still holds the length
+  // of the run that ended (it clears at this edge), so the qualifier adds no
+  // latency. USB_N_J is clock.usb_se0q_n() -- the midpoint of (TLST, TLEOPR]
+  // across the band and every target -- held equal by gate_clock_consistency.
+  localparam integer USB_N_J = 26;
+  assign usb_qual_ok = (usb_se0c >= USB_N_J[7:0]);
   wire              usb_se0 = usb_sv & ~pin_in[usb_sp] & ~pin_in[usb_sn];
 `ifdef M_RST_ANY
   wire              usb_rst_en = usb_sv;       // the mutant: not gated on the USB lane being live
@@ -2670,6 +2831,8 @@ module pe_engine #(
   // Declared HERE, ahead of this block that writes them (declare-before-use).
   reg [LW-1:0]          winner_q;
   reg                   winner_v_q;
+  reg [LW-1:0]          pf_q;        // (b'): the registered prefetch target
+  reg                   pf_v_q;
   always @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
       // `now`, every `l_timestamp` and every `l_d` reset to 0. The release
@@ -2686,6 +2849,8 @@ module pe_engine #(
       end
       winner_q   <= winner;
       winner_v_q <= winner_v;
+      pf_q       <= pf_w;
+      pf_v_q     <= pf_v;
     end
   end
 
@@ -2711,6 +2876,7 @@ module pe_engine #(
   // path, so the winner-first branch borrows the port without moving it.
   reg [LW-1:0]          prr;
   reg                   pbr1;         // the in-flight refill came from branch 1
+  reg                   pkill;        // FT edge: drop the in-flight refill
   // (`winner_q` / `winner_v_q`, TF3's registered winner, are declared ahead,
   // before the block that writes them)
   reg                   pslot;        // which slot this refill is filling
@@ -3081,13 +3247,28 @@ module pe_engine #(
             // ⭐ TF3: the registered winner, re-checked live -- a lane can halt
             // (timeout, stretch fault) in the cycle after it won, and a refill
             // for a halted lane is four cycles of port time for nothing.
-            if (winner_v_q && l_live[winner_q] && !l_actv[hix[winner_q]]) begin
-              pl    <= winner_q;
+            // `M_PF_LIVE_WINNER` (Wilson 11-13, W6 fallback): the prefetch serves the
+            // LIVE winner first, as before TF3 (bisected: arm C lane 4 RQ 29 at
+            // 372ca6e, 0 from 3b37967 TF1-TF6) -- run_dstar_check's instrument control.
+            // (b'): the target is the earliest RELEASED lane with an EMPTY head
+            // (`pf_q`), not the dispatch winner -- which, under (b'), never has
+            // an empty head and would leave the late lane to the round robin.
+`ifdef M_PF_LIVE_WINNER
+            if (pf_v && l_live[pf_w] && !l_actv[hix[pf_w]] && !ft_flush[pf_w]) begin
+              pl    <= pf_w;
               pbr1  <= 1'b1;
-              pslot <= l_sel[winner_q];      // the head: it is what stalls
-              paddr <= l_pc[winner_q];
+              pslot <= l_sel[pf_w];
+              paddr <= l_pc[pf_w];
               pst   <= P_REQ;
-            end else if (l_live[prr] && want_fetch(prr)) begin
+`else
+            if (pf_v_q && l_live[pf_q] && !l_actv[hix[pf_q]] && !ft_flush[pf_q]) begin
+              pl    <= pf_q;
+              pbr1  <= 1'b1;
+              pslot <= l_sel[pf_q];      // the head: it is what is late
+              paddr <= l_pc[pf_q];
+              pst   <= P_REQ;
+`endif
+            end else if (l_live[prr] && want_fetch(prr) && !ft_flush[prr]) begin
               // fill the head if empty, otherwise the spare
               pl    <= prr;
               pbr1  <= 1'b0;
@@ -3116,6 +3297,9 @@ module pe_engine #(
 `endif
           P_WAIT: pst <= P_CAP;          // store read registered
           P_CAP:  begin
+            // (FT, 11-14) a refill whose lane jumped to PC+2 while it was in
+            // flight carries the OLD successor: it is dropped, not filed
+            if (!pkill) begin
             // MSB-aligned: byte0 = {opcode, pin, level}, 2 spare at the bottom
             l_act [fix] <= s_wrdata[ACT_BYTES*8-1 -: ACT_W];
             l_actv[fix] <= 1'b1;
@@ -3127,6 +3311,8 @@ module pe_engine #(
             // after a `l_base` fetch, `l_fpc` becomes `l_base + ACT_BYTES`,
             // exactly the successor of the action now resident.
             l_fpc[pl] <= paddr + ACT_BYTES[AW-1:0];
+            end
+            pkill     <= 1'b0;
             pst       <= P_SCAN;
             // ⛔ TF3: only a round-robin refill advances the pointer. A
             // winner-first refill leaves it where the scan had reached.
@@ -3169,6 +3355,15 @@ module pe_engine #(
                    // bound -- not a number that is too small, but a chip that
                    // reports data it never received.
                    // ⛔ M_TIMEOUT_PROCEED removes the halt and the bench fails.
+                   // ⭐ FALLTHROUGH (Wilson 11-14, the timed window): an ARM that
+                   // requested it RETIRES at its deadline -- disarmed, no halt, no
+                   // sticky -- and the lane's next word (PC+1, already its head)
+                   // dispatches as ordinary work. The program asked for "event
+                   // within the window, else go on": a timeout is an answer there,
+                   // not a fault. `M_FT_HALTS` keeps the halt (A7's must-fire).
+                   if (w_armed && ft_fall_on && l_armft[winner]) begin
+                     armed_n[winner]   = 1'b0;       // fall through to PC+1
+                   end else
 `ifndef M_TIMEOUT_PROCEED
                    if (w_armed) begin
                      live_n[winner]    = 1'b0;       // HALT this lane
@@ -3190,22 +3385,9 @@ module pe_engine #(
                      cur_ck  <= w_ck;          // PR2: == l_clkpin[winner]
                      cur_ckr <= w_ckr;
                      st      <= ST_DRIVE;
-                   end else begin
-                     // ⭐⭐ THIS STALL IS THE JITTER TERM J. The EDF winner is
-                     // chosen, its release has arrived, and dispatch waits only
-                     // because its action word is not in the register yet.
-                     // ⛔ A2 budgets J = 1. If this can exceed 1, the shipped
-                     // r_i do not hold -- so it is COUNTED, not assumed, and
-                     // the maximum is observable for the bench to assert on.
-                     // ⚠ ONE COUNTER FOR ALL LANES: `winner` may change while
-                     // this is counting, so the run it measures can span two
-                     // lanes' waits. That is why it is an AGGREGATE and why
-                     // `tb_jlane.v` exists.
-                     jitter_cnt <= jitter_cnt + 1'b1;
-                     if (jitter_cnt >= jitter_max) jitter_max <= jitter_cnt + 1'b1;
                    end
-                 end else begin
-                   jitter_cnt <= {JW{1'b0}};
+                   // (b'): no `else` stall -- an empty head is never the
+                   // winner's (`ready` includes it); see the counter below.
                  end
 
         ST_DRIVE: begin
@@ -3627,6 +3809,9 @@ module pe_engine #(
             l_armedge[cur] <= a_lvl;
             l_arm2[cur]    <= a_mod[0];          // bundle 1: two-pin level mode
             l_armpinb[cur] <= a_pinb;
+            l_armhalf[cur] <= a_cnt[0];          // HALF: count[0]
+            l_armqual[cur] <= a_cnt[1];          // QUAL: count[1]
+            l_armft[cur]   <= a_mod[1];          // FALLTHROUGH: mod[1]
             notmo_n[cur]   = (a_dly == {DLY_W{1'b0}});
           end
 
@@ -4093,11 +4278,37 @@ module pe_engine #(
           end
 
           st <= ST_IDLE;
-          jitter_cnt <= {JW{1'b0}};
         end
 
         default: st <= ST_IDLE;
       endcase
+
+      // ⭐⭐ THE STALL COUNTER, REDEFINED BY (b') (Wilson 11-14): the run of
+      // cycles in which SOME lane is RELEASED with an EMPTY head -- the only
+      // way a lane is now late for its own word. ⚠ AN AGGREGATE (any lane), as
+      // before; `tb_jlane.v` reconstructs it per lane. Under `M_GLOBAL_STALL`
+      // the old any-winner-blocked stall is a subset of it.
+      // counted only while the schedule runs (`now_inc`): before priming
+      // every lane reads released with an empty head, and that is not lateness
+      if (now_inc && |pf_rdy) begin
+        jitter_cnt <= jitter_cnt + 1'b1;
+      end else begin
+        jitter_cnt <= {JW{1'b0}};
+      end
+      // ⭐ `jitter_max` IS PER LANE NOW: the longest run of ONE lane released
+      // with an empty head -- its own lateness, which is what (b') bounds. The
+      // any-lane aggregate above saturates on an overloaded program (some lane
+      // is almost always waiting), so a maximum over it measures nothing there.
+      jmax_n = jitter_max;
+      for (i = 0; i < N_LANES; i = i + 1) begin
+        if (now_inc && pf_rdy[i]) begin
+          l_hwait[i] <= l_hwait[i] + 1'b1;
+          if (l_hwait[i] >= jmax_n) jmax_n = l_hwait[i] + 1'b1;
+        end else begin
+          l_hwait[i] <= {JW{1'b0}};
+        end
+      end
+      jitter_max <= jmax_n;
 
       // ---- ⛔⛔ THE SDA HOLD EXPIRY (ruling H) --------------------------
       // ⛔ IT RUNS EVERY CYCLE AND AT BLOCK LEVEL, not inside `case (st)`: the
@@ -4228,6 +4439,23 @@ module pe_engine #(
           l_ckpark[i] <= 1'b0;
         end
         if (arm_hit[i]) begin
+          // ⭐⭐ FALLTHROUGH'S EDGE PATH IS PC+2 (Wilson 11-14), TAKEN HERE, AT
+          // THE EDGE. The lane's PC already reads PC+1 (the ARM retired at its
+          // writeback); the edge moves it to PC+2 and EMPTIES BOTH SLOTS, and a
+          // refill already in flight for this lane is discarded (`pkill`).
+          // ⛔ NOT by retiring PC+1 as a no-op at dispatch -- measured wrong:
+          // PC+1 is the timeout path's word, typically a REARM, and the spare
+          // had already been filled with ITS successor (the loop base), so the
+          // lane ran TOP's ARM under PC+2's address. PC+2 is fetched fresh,
+          // which is why pe_isa keeps a SHIFT / SHIFTIN out of that slot
+          // (correction B). `M_FT_NOSKIP` leaves the PC at PC+1.
+          if (l_armft[i] && ft_skip_on) begin
+            l_pc[i]          <= l_pc[i] + ACT_BYTES[AW-1:0];
+            l_fpc[i]         <= l_pc[i] + ACT_BYTES[AW-1:0];
+            l_actv[hix[i]]   <= 1'b0;
+            l_actv[six[i]]   <= 1'b0;
+            if ((pst == P_REQ || pst == P_WAIT) && pl == i) pkill <= 1'b1;
+          end
           armed_n[i] = 1'b0;                    // capture DISARMS: a second
                                                 // edge must not re-rebase and
                                                 // slide the grid forward on

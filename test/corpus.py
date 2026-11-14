@@ -197,6 +197,15 @@ def _park(off):
 ASSEMBLED = []          # every program _assemble has built, for the audit
 
 
+#: the ops that read `q` (test/op_reads.json; pe_isa.reads_field is the one reader)
+def _reads_q():
+    import pe_isa as _I
+    return tuple(op for op in range(32) if _I.reads_field(op, "q"))
+
+
+_READS_Q = None
+
+
 def _assemble(seqs, headers_spec, park_at, queues=None):
     """seqs: list of (lane, [(op, pin, lvl, dly)]). Returns image bytes.
 
@@ -212,6 +221,9 @@ def _assemble(seqs, headers_spec, park_at, queues=None):
     lanes drew nothing from queue 0 and shifted zeros; the collision could not
     produce a wrong byte because there were no bytes.
     """
+    global _READS_Q
+    if _READS_Q is None:
+        _READS_Q = _reads_q()
     queues = queues or {}
     # ⭐ WHAT WAS ASSEMBLED IS RECORDED, so the programs can be AUDITED rather
     # than only built. `audit_programs()` below runs the loader's own rules
@@ -233,9 +245,15 @@ def _assemble(seqs, headers_spec, park_at, queues=None):
         # nine bits long and a clocked ACK eight.
         for entry in seq:
             op, pin, lvl, dly = entry[:4]
-            cnt = entry[4] if len(entry) > 4 else 8
+            # ⛔ ZERO IN EVERY FIELD THE OP DOES NOT READ (Wilson 11-14; the
+            # reads are test/op_reads.json, generated from the engine's decode):
+            # the default bit count 8 only on SHIFT / SHIFTIN, and the lane's TX
+            # queue only on an op that reads `q` (SHIFT, SHIFTI, CMP_BRANCH) --
+            # it had been stamped on every word of the lane (corpus_all5's
+            # LEVEL / REARM / SHIFTIN words carried it).
+            cnt = entry[4] if len(entry) > 4 else (8 if op in (OP_SHIFT, OP_SHIFTIN) else 0)
             prog.append(act(op, pin, lvl, dly, count=cnt,
-                            q=queues.get(lane, 0)))
+                            q=queues.get(lane, 0) if op in _READS_Q else 0))
             off += ACT_BYTES
     lp = off
     prog.append(act(OP_REARM, 0, 0, 500))

@@ -761,6 +761,9 @@ SPEC_SYMBOLS = {
     ("test/run_arm2.py", "SCEN"),
     # BAD: the encodings pe_isa must refuse -- chosen field values, not readings
     ("test/run_arm2.py", "BAD"),
+    # LANE_CASES (Wilson 11-14, the ARM batch): the lane-dependent refusals and
+    # their controls -- chosen programs (lane, words, refused?), not readings
+    ("test/run_arm2.py", "LANE_CASES"),
     # ⭐ v2 primitive 3 bundle 2 (pair / SHIFTI / self-timed byte): FEED is the
     # TX payload STIMULUS (the four bytes tb_pair feeds queue 0, host_feed.vh);
     # BAD the encodings pe_isa must refuse -- chosen field values. The results
@@ -874,6 +877,13 @@ SPEC_SYMBOLS = {
     ("model/pit_golden.py", "WIDTHS"),
     # the CMP mask modes: the ISA's own definition (the RTL's mux), not a reading
     ("test/pe_isa.py", "CMP_MASKS"),
+    # gen_op_reads (Wilson 11-14): FULL is each field's width mask (the ISA's
+    # encoding), SITES / IGNORE the engine decode's read-site anchors with their
+    # opcode attributions -- SPECIFICATIONS of what is read, judged live against
+    # src/pe_engine.v on every run (red on an uncovered or ambiguous site).
+    ("model/gen_op_reads.py", "FULL"),
+    ("model/gen_op_reads.py", "SITES"),
+    ("model/gen_op_reads.py", "IGNORE"),
     # ⭐ A TEST PAYLOAD IS STIMULUS, NOT A MEASUREMENT. The four bytes the
     # cocotb host feeder pushes are chosen to be distinguishable on a wire;
     # nothing is concluded from their values. `host_feed.vh` carries the same
