@@ -11,7 +11,14 @@
  *           loader must REFUSE the program -- sticky `config_err`, nothing
  *           emitted.                        pe_engine.v:1143 and :1145
  *
- *   MODE=1  a lane on the RESERVED NON-DRIVING INDEX (`PIN_NONE = 15`). This is
+ *   MODE=1  ⛔ ROBUSTNESS PROBE (Wilson 11-14): its image (`pinnone_image.hex`)
+ *           is LOADED PAST pe_isa ON PURPOSE, TESTING HARDWARE ROBUSTNESS
+ *           AGAINST REFUSED WORDS -- pe_isa refuses SHIFT / SHIFTIN / READBIT
+ *           on PIN_NONE (policy: no tool-built program contains them); this
+ *           arm proves the silicon stays harmless if such a word reaches it
+ *           anyway (a corrupted store, a load that bypasses the tools). It is
+ *           NOT an admissible program (gate_degenerate_fields.ROBUSTNESS_PROBES).
+ *           a lane on the RESERVED NON-DRIVING INDEX (`PIN_NONE = 15`). This is
  *           LEGAL: the lane runs, and every pin write is simply suppressed.
  *           ⛔ It must NOT be refused -- a refusal here would break the no-op
  *           half-bit idiom, which names the reserved index on purpose.
@@ -197,6 +204,9 @@ module tb_pinrange ();
     // then halts, so falling through reported a passing run as a failure.
     end else if (mode == 1) begin
       $display("===== tb_pinrange: THE RESERVED INDEX IS LEGAL, DRIVES NONE ==");
+      $display("  image: %0s -- loaded past pe_isa on purpose, testing hardware",
+               imgfile);
+      $display("  robustness against refused words (a probe, not a program)");
       $display("  PIN_NONE = 15 names no pin. The lane must RUN -- the no-op");
       $display("  half-bit idiom depends on it -- and every pin write must be");
       $display("  suppressed, including OP_SHIFT's CLOCK write.");

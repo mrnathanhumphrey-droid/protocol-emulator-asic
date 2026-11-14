@@ -1013,7 +1013,7 @@ def branch_problems(img):
                     out.append("word %d: LOOP field %s = %d must be zero" % (w, f, x[f]))
     return (out + cmp_byte_problems(img) + loop_problems(img) + arm_problems(img)
             + arm_lane_problems(img) + pair_problems(img) + usb_problems(img)
-            + unread_problems(img))
+            + unread_problems(img) + pin_none_problems(img))
 
 
 # ---------------------------------------------------------------------------
@@ -1078,6 +1078,59 @@ def unread_problems(img):
                 out.append("word %d: %s field %s = %d has bit(s) %#x the engine "
                            "does not read -- must be zero (test/op_reads.json)"
                            % (w, nm, f, x[f], extra))
+    return out
+
+
+_PIN_NONE_TAB = None
+
+
+def _pin_none_table():
+    global _PIN_NONE_TAB
+    if _PIN_NONE_TAB is None:
+        import json as _json
+        import os as _os
+        with open(_os.path.join(_os.path.dirname(_os.path.abspath(__file__)),
+                                "op_reads.json"), encoding="utf-8") as fh:
+            _PIN_NONE_TAB = _json.load(fh)["pin_none"]
+    return _PIN_NONE_TAB
+
+
+def pin_none_problems(img):
+    """⛔⛔ PIN_NONE IS REFUSED WHEREVER IT HAS NO DEFINED MEANING (Wilson 11-14,
+    ruling (a)). The table is GENERATED from the engine's decode
+    (model/gen_op_reads.py -> test/op_reads.json `pin_none`):
+      LEVEL       defined: the no-op idiom (level 0, mod 0, pinb 0) -- drives nothing;
+      REARM       defined: the store filler, by EXACT value (unread_problems);
+      BRANCH_BIT  defined: on the live USB lane pin 15 reads ADDR_OK (off it,
+                  usb_problems refuses it);
+      the immediate ops (CMP_BRANCH, LOOP): `pin` is a number, not a pin;
+      every other op -- ARM, STOP, READBIT, START, SHIFT, SHIFTI, SHIFTIN, and any
+      op the table does not list -- is REFUSED on PIN_NONE."""
+    tab = _pin_none_table()
+    reads, name = _op_reads()
+    pn = tab["value"]
+    out = []
+    nwords = (min(len(img), STORE_BYTES) - ACT_BASE) // ACT_BYTES
+    for w in range(nwords):
+        a = ACT_BASE + w * ACT_BYTES
+        raw = bytes(img[a:a + ACT_BYTES])
+        if raw == STORE_FILLER:
+            continue
+        x = _unpack(ACT_FIELDS, raw, ACT_BYTES)
+        nm = name.get(x["op"])
+        if x["pin"] != pn or nm is None or nm in tab["immediate_ops"]:
+            continue        # undecoded ops: unread_problems refuses them outright
+        d = tab["defined"].get(nm)
+        if nm == "REARM":
+            continue        # REARM reads no pin: unread_problems refuses all but the filler
+        if d is None:
+            out.append("word %d: %s on PIN_NONE (%d) has no defined meaning -- refused "
+                       "(the PIN_NONE table, test/op_reads.json; Wilson 11-14)" % (w, nm, pn))
+            continue
+        bad = {f: x[f] for f, v in d.get("form", {}).items() if x[f] != v}
+        if bad:
+            out.append("word %d: %s on PIN_NONE outside its defined form %s (%s)"
+                       % (w, nm, d["form"], ", ".join("%s = %d" % kv for kv in sorted(bad.items()))))
     return out
 
 

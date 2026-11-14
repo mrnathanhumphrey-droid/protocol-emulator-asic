@@ -362,11 +362,16 @@ module tb_onewire;
   always @(posedge dev_pull) if (!loading && !m_low)
     ph_pfall[$rtoi(($realtime - PE_CLK_HALF_NS) - PE_CLK_NS * $floor(($realtime - PE_CLK_HALF_NS) / PE_CLK_NS))] = 1'b1;
 
+  // ⛔ the heartbeat's frame count, SAMPLED ON THE NEGEDGE: `n_rx` is written
+  // with `=` in the posedge frame decoder, so a posedge read would race it
+  integer     n_rx_hb = 0;
+  always @(negedge clk) n_rx_hb = n_rx;
+
   always @(posedge clk) if (rst_n === 1'b1 && !loading) begin
     cyc = cyc + 1;
     if (cyc % 250000 == 0) begin
       $display("# cyc %0d: fed %0d/%0d, rx %0d, model state %0d, config_err %0b, pops %0d",
-               cyc, fi, nfeed, n_rx, u_ds.state, dut.u_eng.config_err, hf_pops);
+               cyc, fi, nfeed, n_rx_hb, u_ds.state, dut.u_eng.config_err, hf_pops);
       $fflush;
     end
   end

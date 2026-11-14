@@ -71,6 +71,26 @@ REFUSED, DEFINED, UNREACHABLE = "REFUSED", "DEFINED", "UNREACHABLE"
 #: already split into two images for exactly this reason.
 R_CKDEGEN = "ck_degen: a clocked action with a zero bit count"
 R_PINRANGE = "pin_real: a receive or arm on an index >= N_PINS"
+#: ⛔⛔ Wilson 11-14, ruling (a): PIN_NONE is refused WHEREVER IT HAS NO DEFINED
+#: MEANING -- STATICALLY, by pe_isa (`pin_none_problems`, from the table
+#: model/gen_op_reads.py generates off the engine's decode). The silicon still
+#: guards the index (`pin_real` / `arm_real`: no drive, no fire) for a store
+#: that reaches the engine anyway; the EXPECTED OUTCOME of a PIN_NONE image is
+#: now this static refusal, not a runtime one.
+R_PINNONE = ("pe_isa PIN_NONE table: an op on PIN_NONE (15) with no defined "
+             "meaning -- refused statically")
+#: ⛔ ROBUSTNESS PROBES (Wilson 11-14): an image pe_isa REFUSES (so no program
+#: built through the tools can contain it) that a bench loads PAST pe_isa ON
+#: PURPOSE, to test that the hardware stays harmless if such a word reaches it
+#: anyway (a corrupted store, a load that bypasses the tools). Two layers: the
+#: refusal is POLICY, the bench is ROBUSTNESS. Such an image is a probe, NEVER
+#: an admissible program. {image: the bench arm that loads it}; each must be a
+#: DELIBERATE refusal image (gate_admissible_images checks both).
+PROBE_LABEL = ("loaded past pe_isa on purpose, testing hardware robustness "
+               "against refused words")
+ROBUSTNESS_PROBES = {
+    "pinnone_image.hex": "tb_pinrange +MODE=1",
+}
 R_CLKALIAS = "1.6x: an OP_SHIFT whose clock pin IS its data pin"
 R_HOLDVIOL = ("D1/U: an open-drain data drive the hold applies to (clocked, or "
               "an unclocked SHIFT taking its own clock low) with d <= SDA_HOLD")
@@ -130,18 +150,24 @@ TABLE = {
         REFUSED,
         "An edge on a pin that does not exist can never fire, so the lane can "
         "only ever time out. `pin_rise`/`pin_fall` are [N_PINS-1:0]; measured "
-        "`arm_hit` X for all 198 armed cycles before `arm_real` existed."),
+        "`arm_hit` X for all 198 armed cycles before `arm_real` existed. "
+        "⛔ Wilson 11-14: on PIN_NONE it is refused STATICALLY by pe_isa's "
+        "PIN_NONE table (R_PINNONE); 12..14 stay the silicon class."),
     ("LEVEL", "pin", "PIN_NONE or >= N_PINS"): (
         DEFINED,
         "A NO-OP, and a shipped mechanism: the half-bit offset idiom is built "
         "on `OP_LEVEL` naming a non-real pin (`build_noop`), which is precisely "
-        "how a no-op moves nothing. Guarded by `pin_real` so it writes no pin."),
+        "how a no-op moves nothing. Guarded by `pin_real` so it writes no pin. "
+        "⛔ Wilson 11-14: on PIN_NONE only the idiom's exact form (level 0, "
+        "mod 0, pinb 0) is the defined meaning; pe_isa refuses any other."),
     ("REARM", "pin", "PIN_NONE or >= N_PINS"): (
         DEFINED,
         "`OP_REARM` does not use its pin field as an arm pin -- it reuses the "
         "lane's existing `l_armpin` -- and every program in the suite ends its "
         "loop with `act(OP_REARM, 0, 1, d)`. Refusing on this field would "
-        "reject every shipped program."),
+        "reject every shipped program. ⛔ Wilson 11-14 (unread fields): REARM "
+        "does not read `pin`, so a NONZERO pin is refused by pe_isa -- except "
+        "the store filler (pin PIN_NONE) by its exact value."),
     # ---- the lane's CLOCK pin, which is a header field but belongs here --
     ("SHIFT", "clkpin", "PIN_NONE"): (
         DEFINED,
@@ -206,10 +232,13 @@ DELIBERATE = {
         "the 1.6x alias: a SHIFT lane whose clock pin IS its data pin. Built "
         "for `tb_tx +BADCLK=1`, which asserts the lane HALTS with `config_err` "
         "set -- the silicon backstop for the silent-corruption class."),
-    "pinnone_image.hex": (R_PINRANGE,
-        "a receive on PIN_NONE. Built to prove the out-of-range read is "
-        "guarded; before `pin_real` it put X into `l_rx`, `rx_data` and the "
-        "serial readback, which is what `tb_pinrange +MODE=1` now refuses."),
+    "pinnone_image.hex": (R_PINNONE,
+        "a SHIFT / SHIFTIN / READBIT on PIN_NONE. Built to prove the "
+        "out-of-range read is guarded; before `pin_real` it put X into `l_rx`, "
+        "`rx_data` and the serial readback. ⛔ Wilson 11-14: none of these ops "
+        "has a defined meaning on PIN_NONE, so the image is now refused "
+        "STATICALLY by pe_isa; `tb_pinrange +MODE=1` stays the silicon "
+        "backstop (the lane runs, every pin write suppressed)."),
     "ckdegen_image.hex": (R_CKDEGEN,
         "a clocked action with a ZERO bit count, by BOTH routes: lane 0 is a "
         "clocked SHIFTIN at count 0, lane 1 a clocked SHIFT at count 15 where "
@@ -222,10 +251,12 @@ DELIBERATE = {
         "`config_err` gates dispatch ENGINE-WIDE, so the first refusal would "
         "stop the second route from ever being reached -- measured as one "
         "writeback in the whole run when both shared a program."),
-    "armnone_image.hex": (R_PINRANGE,
-        "an ARM on a reserved pin index. Built for `tb_pinrange +MODE=2`, "
-        "which counts the armed window and asserts `arm_hit` is never X -- the "
-        "third instance of the out-of-range family."),
+    "armnone_image.hex": (R_PINNONE,
+        "an ARM on PIN_NONE. ⛔ Wilson 11-14: its EXPECTED OUTCOME moved from "
+        "a runtime refusal to a STATIC pe_isa refusal (ARM has no defined "
+        "meaning on PIN_NONE). `tb_pinrange +MODE=2` stays the silicon "
+        "backstop: it counts the armed window and asserts `arm_hit` is never X "
+        "-- the third instance of the out-of-range family."),
     # ⭐⭐ FOUND BY WRITING D6, NOT BY REVIEW. This image has existed and been
     # run (`tb_pinrange +MODE=0`, and the cocotb suite before that) the whole
     # time, and it was UNDECLARED here for a boring reason: until D6 added the
@@ -311,6 +342,23 @@ def walk(img):
 OPNAME = {v: k for k, v in I.OPCODES.items()}
 
 
+def pin_none_refused(a):
+    """the PIN_NONE table's verdict on one action (pe_isa's rule, one word):
+    a reason string when it is refused there, else ''"""
+    tab = I._pin_none_table()
+    _reads, name = I._op_reads()
+    nm = name.get(a["op"])
+    if a["pin"] != tab["value"] or nm is None or nm in tab["immediate_ops"] \
+            or nm == "REARM":
+        return ""
+    d = tab["defined"].get(nm)
+    if d is None:
+        return "%s on PIN_NONE: no defined meaning" % nm
+    if any(a[f] != v for f, v in d.get("form", {}).items()):
+        return "%s on PIN_NONE outside its defined form" % nm
+    return ""
+
+
 def violations(img, sda_hold=None):
     """Every REFUSED row a program actually contains, each with its CLASS.
 
@@ -336,10 +384,15 @@ def violations(img, sda_hold=None):
         if clocked and nbits == 0:
             out.append((R_CKDEGEN, ln, op, "count",
                         "clocked and nbits == 0", a["count"]))
-        if a["op"] in (I.OP_SHIFTIN, I.OP_READBIT, I.OP_ARM) \
+        # ⛔ Wilson 11-14: PIN_NONE where the generated table gives no meaning
+        # is the STATIC class; the other out-of-range indices stay silicon's
+        pn = pin_none_refused(a)
+        if pn:
+            out.append((R_PINNONE, ln, op, "pin", pn, a["pin"]))
+        elif a["op"] in (I.OP_SHIFTIN, I.OP_READBIT, I.OP_ARM) \
                 and a["pin"] >= N_PINS:
             out.append((R_PINRANGE, ln, op, "pin",
-                        "PIN_NONE or >= N_PINS", a["pin"]))
+                        ">= N_PINS", a["pin"]))
         if a["op"] == I.OP_SHIFT and clk_real and h["clkpin"] == a["pin"]:
             out.append((R_CLKALIAS, ln, op, "clkpin",
                         "== the data pin", a["pin"]))

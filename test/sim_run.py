@@ -163,7 +163,9 @@ SCRATCH_GENERATORS: dict = {
                " run_usbbuf's golden on tb_usbbuf, not by the A2 gap",
         "v3": {"no_v3_layer": "test/tb_usbbuf.v"}},
     "run_usbaddr": {
-        "script": "test/run_usbaddr.py", "pattern": "usbaddr_*.hex",
+        # ⭐ Wilson 11-14: the device image is written as usbdev_dev.hex (the
+        # wire-feed row's name), in the gate path and the coverage arms alike
+        "script": "test/run_usbaddr.py", "pattern": ("usbaddr_*.hex", "usbdev_dev.hex"),
         "clocked": True,
         "why": "v2 primitive 3 bundle 6: the USB device program (address, token"
                " check, decisions after the packet), judged by the device's"
@@ -171,7 +173,7 @@ SCRATCH_GENERATORS: dict = {
                " usbdev's golden on tb_usbdev, not by the A2 gap",
         "v3": {"no_v3_layer": "test/tb_usbdev.v"}},
     "run_usbrst": {
-        "script": "test/run_usbrst.py", "pattern": "usbrst_*.hex",
+        "script": "test/run_usbrst.py", "pattern": ("usbrst_*.hex", "usbdev_dev.hex"),
         "clocked": True,
         "why": "v2 primitive 3 bundle 6: the bus reset / fence / reset notice"
                " images, judged against usbdev's golden on tb_usbdev, not by"
@@ -342,6 +344,12 @@ def _universe_index():
     return _UIDX[0]
 
 
+def _pattern_ok(name, g):
+    """a generator's `pattern` is one basename glob, or a tuple of them"""
+    pats = g["pattern"] if isinstance(g["pattern"], tuple) else (g["pattern"],)
+    return any(_fn.fnmatch(name, p) for p in pats)
+
+
 def scratch_image(generator, path):
     """Record that registered `generator` created scratch image `path` THIS
     RUN. Called by the generator right after it writes the file. Raises if the
@@ -352,7 +360,7 @@ def scratch_image(generator, path):
         raise SimRefused("sim_run: %s is not a registered scratch-image "
                          "generator (SCRATCH_GENERATORS)" % generator)
     name = os.path.basename(path)
-    if not _fn.fnmatch(name, g["pattern"]):
+    if not _pattern_ok(name, g):
         raise SimRefused("sim_run: %s does not match generator %s's pattern "
                          "%s" % (name, generator, g["pattern"]))
     if not is_scratch(path):
@@ -388,7 +396,7 @@ def provenance(path):
     if not e or e.get("token") != os.environ.get(TOKEN_ENV):
         return None
     g = SCRATCH_GENERATORS.get(e.get("generator"))
-    if g is None or not _fn.fnmatch(os.path.basename(a), g["pattern"]):
+    if g is None or not _pattern_ok(os.path.basename(a), g):
         return None
     if e.get("sha") != _sha(a):
         return None

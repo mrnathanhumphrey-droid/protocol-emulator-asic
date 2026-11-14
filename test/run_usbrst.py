@@ -145,7 +145,8 @@ def run_all(vvp, tmp, tag, pool, imgs, names):
 
 
 def write_img(tmp, nm, im):
-    path = os.path.join(tmp, "usbrst_%s.hex" % nm)
+    # the device image under its one name (run_usbaddr.IMAGE_FILES: usbdev_dev.hex)
+    path = os.path.join(tmp, "usbdev_dev.hex" if nm == "dev" else "usbrst_%s.hex" % nm)
     I.write_image(path, im)
     sim_run.scratch_image(GEN, path)
     return path

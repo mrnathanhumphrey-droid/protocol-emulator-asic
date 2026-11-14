@@ -661,6 +661,14 @@ def build_cfgerr(d: int = 20):
 def build_armnone(d: int = 20):
     """A lane that ARMS on the RESERVED INDEX -- the third out-of-range read.
 
+    ⛔⛔ A DELIBERATE REFUSAL IMAGE, STATICALLY (Wilson 11-14, PIN_NONE ruling
+    (a)): ARM has no defined meaning on PIN_NONE, so pe_isa REFUSES this image
+    (`pin_none_problems`, the table model/gen_op_reads.py generates). Its
+    expected outcome moved from the runtime guard to that static refusal; the
+    `--armnone` writer asserts it. The silicon guard (`arm_real`) stays, and
+    `tb_pinrange +MODE=2` remains its backstop for a store that reaches the
+    engine anyway.
+
     ⛔⛔ THE DEFECT THIS IS FOR. `l_armpin[cur] <= a_pin` is written straight
     from the action's 4-bit pin field with nothing refusing it, and
     `pin_rise[l_armpin[gi]]` / `pin_fall[...]` index a `[N_PINS-1:0]` = [11:0]
@@ -1778,6 +1786,14 @@ def main() -> int:
         return 0
     if "--armnone" in sys.argv:
         img = build_armnone()
+        # ⛔ Wilson 11-14: a STATIC refusal image -- pe_isa must refuse it, by
+        # the PIN_NONE table and by nothing else (one image, one refusal)
+        import pe_isa as _I
+        why = _I.branch_problems(img)
+        if why != _I.pin_none_problems(img) or not why:
+            print("*** armnone: expected exactly pe_isa's PIN_NONE refusal, got %s" % why)
+            return 1
+        print("armnone: statically refused by pe_isa -- %s" % why[0])
         out = os.path.join(here, "armnone_image.hex")
         write_image(out, img)
         print("armnone image (OP_ARM on the reserved index), %d bytes -> %s"
@@ -1785,6 +1801,12 @@ def main() -> int:
         return 0
     if "--pinnone" in sys.argv:
         img = build_pinnone()
+        # ⛔ Wilson 11-14: SHIFT / SHIFTIN / READBIT have no defined meaning on
+        # PIN_NONE, so this too is a STATIC pe_isa refusal image now
+        import pe_isa as _I
+        if not _I.pin_none_problems(img):
+            print("*** pinnone: pe_isa's PIN_NONE table no longer refuses it")
+            return 1
         out = os.path.join(here, "pinnone_image.hex")
         write_image(out, img)
         print("pinnone image (lane on the reserved index, shifting), "

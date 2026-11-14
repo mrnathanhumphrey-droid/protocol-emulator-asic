@@ -390,24 +390,28 @@ def text():
         "    v3_tab = -2;",
         "    case (h)",
     ]
+    import gate_wire_feed as wf
+    # ⭐ Wilson 11-14: the table shows each image's wire-feed LABEL
+    # (WITNESS (sim) / WITNESS (hw) / ... ), never a bare WITNESS
+    tag = lambda n: (" [%s]" % wf.label(n)) if wf.label(n) else ""
     names = []
     for name, h, ex, rb, dt in rows():
         vals = [ex] + rb + dt
         body = " ".join("%d: v3_tab = %d;" % (i, v) for i, v in enumerate(vals))
         lines.append("      32'h%08x: case (field) %s endcase  // %s"
-                     % (h, body, name))
-        names.append((h, name))
+                     % (h, body, name + tag(name)))
+        names.append((h, name, tag(name)))
     lines += ["      default: v3_tab = -2;", "    endcase", "  end",
               "endfunction", "", "task v3_tab_name;", "  input [31:0] h;",
               "  begin", "    case (h)"]
-    for h, name in names:
+    for h, name, tg in names:
         lines.append("      32'h%08x: $display(\"  clocked_conform[V3] image: "
-                     "%s (by its loaded bytes)\");" % (h, name))
+                     "%s%s (by its loaded bytes)\");" % (h, name, tg))
     lines += ["      default: $display(\"  clocked_conform[V3] image: not in "
               "test/v3_table.vh (hash %h) -- no bound, not exempt\", h);",
               "    endcase", "  end", "endtask", ""]
     # the override allowlist, keyed by the same hash
-    byname = {n: h for h, n in names}
+    byname = {n: h for h, n, _t in names}
     lines += ["/* the LOOSENING-override allowlist (model/v3_table.py ALLOW):",
               " * field 1 bound, 2 dtol, 3 exempt, 4 underrun; value -1 = any.",
               " * Returns 1 iff (image, field, value) is allowlisted. */",

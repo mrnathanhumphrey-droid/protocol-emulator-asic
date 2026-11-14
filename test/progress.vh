@@ -86,6 +86,12 @@ localparam integer PG_MAXL  = 8;
 `include "test/progress_bounds.vh"
 integer pg_bnd;                       // the current action's bound
 reg [8*10:1] pg_kind;                 // ... and its kind, for the message
+// the USB-send decode, a constant 0 on v1-lock's engine (it has none)
+`ifdef PE_V1_RTL
+`define PG_USB_SEND 1'b0
+`else
+`define PG_USB_SEND dut.u_eng.usb_send
+`endif
 
 integer pg_n     [0:PG_MAXL-1];      // writebacks on the current action
 integer pg_pc    [0:PG_MAXL-1];      // the PC they were at
@@ -156,16 +162,20 @@ always @(posedge dut.clk) begin
       // The kind is read off the engine's OWN decode of the current action
       // (wires, never localparams -- see the ST_WB trap above): the hold rule
       // `ck_hold = (ck_act & ~ck_retire) | (st_act & ~(st_last & ~usb_stuff))`.
+      // ⚠ every `ifdef branch below is begin/end BALANCED in the raw text:
+      // gate_bench_races segments blocks by counting begin/end with both
+      // branches present, and an unbalanced pair swallowed the next blocks
+      // (11-14). The default is set first; the chain only overrides it.
 `ifdef PE_V1_RTL
       // v1-lock's engine (gate_v2_equiv's v1 side) has no self-timed / USB
       // decode to read: the ruling's FALLBACK, the generated global maximum
       // over every legitimate action (the USB send is the largest kind)
       pg_bnd = PG_USB_SEND_MAX;                            pg_kind = "v1-global";
-      if (1'b0) begin
 `else
-      if (dut.u_eng.usb_send === 1'b1) begin
-        pg_bnd = PG_USB_SEND_MAX;                          pg_kind = "usb_send";
+      pg_bnd = PG_OTHER_MAX;                               pg_kind = "other";
 `endif
+      if (`PG_USB_SEND === 1'b1) begin
+        pg_bnd = PG_USB_SEND_MAX;                          pg_kind = "usb_send";
       end else if (dut.u_eng.ck_shift === 1'b1) begin
         pg_bnd = pg_max_ck_shift(dut.u_eng.a_cnt);         pg_kind = "ck_shift";
       end else if (dut.u_eng.ck_shiftin === 1'b1) begin
@@ -180,10 +190,6 @@ always @(posedge dut.clk) begin
         end else begin
           pg_bnd = pg_max_st_shiftin(dut.u_eng.a_cnt);     pg_kind = "st_shiftin";
         end
-`endif
-      end else begin
-`ifndef PE_V1_RTL
-        pg_bnd = PG_OTHER_MAX;                             pg_kind = "other";
 `endif
       end
       if (pg_n[dut.u_eng.cur] == pg_bnd + 1) begin

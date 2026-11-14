@@ -65,25 +65,100 @@ import gate_degenerate_fields as dgf                              # noqa: E402
 import nonadmissible as NA                                        # noqa: E402
 import pe_isa as I                                                # noqa: E402
 
-WITNESS, OWED, MECHANISM = "WITNESS", "OWED", "MECHANISM"
+# ⛔⛔ TWO WITNESS LABELS, NEVER ONE FOR THE OTHER (Wilson 11-14): a row is
+# WITNESS (sim) -- wire == feed against a SIMULATED peer -- or WITNESS (hw) -- a
+# RECORDED bench / FPGA hardware capture, re-checked in CI. There is no bare
+# "WITNESS": a simulation is never shown as hardware, nor hardware as a
+# simulation. The label is held MECHANICALLY to its runner (`basis_problems`).
+WITNESS_SIM, WITNESS_HW = "WITNESS (sim)", "WITNESS (hw)"
+WITNESSES = (WITNESS_SIM, WITNESS_HW)
+OWED, MECHANISM = "OWED", "MECHANISM"
 INTERNAL = "INTERNAL"
+#: a WITNESS (sim) row may also carry an OWED hardware witness: `owed_hw` =
+#: {"owner": ...}; its label is then "WITNESS (sim) + OWED (hw)"
+OWED_HW = "OWED (hw)"
+
+#: ⛔ THE MECHANICAL CRITERION. A runner RUNS A SIMULATION when its text names
+#: a simulator or a test bench (iverilog, vvp, verilator, test/sim_run, a
+#: tb_*.v); it READS A HARDWARE RECORD when it names a recorded capture under
+#: fpga/witness/. WITNESS (hw): reads a record AND runs no simulation.
+#: WITNESS (sim): runs a simulation.
+SIM_MARK = re.compile(r"\b(iverilog|vvp|verilator|sim_run)\b|\btb_\w+\.v\b")
+HW_RECORD = re.compile(r"fpga/witness/\w+\.json|[\"']fpga[\"'],\s*[\"']witness[\"']")
+
+
+def basis_problems(n, kind, runner, body):
+    """[problem] when a WITNESS row's label is not its runner's basis."""
+    sim = SIM_MARK.search(body)
+    hw = HW_RECORD.search(body)
+    out = []
+    if kind == WITNESS_HW:
+        if sim:
+            out.append("%s is labelled WITNESS (hw) but its runner %s runs a "
+                       "SIMULATION (names %r) -- a simulation never stands for "
+                       "hardware" % (n, runner, sim.group(0)))
+        if not hw:
+            out.append("%s is labelled WITNESS (hw) but its runner %s reads no "
+                       "recorded hardware witness (fpga/witness/*.json)"
+                       % (n, runner))
+    elif kind == WITNESS_SIM and not sim:
+        out.append("%s is labelled WITNESS (sim) but its runner %s runs no "
+                   "simulation%s" % (n, runner, " (it reads a hardware record: "
+                                     "label it WITNESS (hw))" if hw else ""))
+    return out
+
+
+#: ⭐ a WITNESS (sim) row whose runner ALSO decodes the chip's wire with an
+#: INDEPENDENT decoder (Wilson 11-14, row 3): `decoder` names it, the label
+#: shows it, and the runner's text must name that decoder's tool
+DECODER_TOOL = {"sigrok usb_packet": re.compile(r"\bsigrok_(usb|cross)\b")}
+
+
+def label_of(kind, d):
+    """the row's displayed label (the V3 table and every report)"""
+    base = kind
+    if d.get("decoder") and kind == WITNESS_SIM:
+        base = "WITNESS (sim, independent decoder: %s)" % d["decoder"]
+    return base + (" + " + OWED_HW if d.get("owed_hw") else "")
+
+
+def decoder_problems(n, kind, d, runner, body):
+    """[problem] when a row claims an independent decoder its runner does not run"""
+    dec = d.get("decoder")
+    if not dec:
+        return []
+    if kind != WITNESS_SIM:
+        return ["%s: an independent decoder is claimed on a %s row" % (n, kind)]
+    pat = DECODER_TOOL.get(dec)
+    if pat is None:
+        return ["%s: decoder %r is not a known independent decoder" % (n, dec)]
+    if not pat.search(body):
+        return ["%s claims the independent decoder %r but its runner %s does not "
+                "run it" % (n, dec, runner)]
+    return []
+
+
+def label(name, registry=None):
+    """the registry label of an image, or '' if it has no row"""
+    ent = (REGISTRY if registry is None else registry).get(name)
+    return label_of(*ent) if ent else ""
 
 #: ⛔⛔ THE REGISTRY. One entry per accepted image with a feed.
 REGISTRY = {
     # ---- witnessed ---------------------------------------------------------
-    "uart_rx_image.hex": (WITNESS, {
+    "uart_rx_image.hex": (WITNESS_SIM, {
         "runner": "test/run_uartrx.py",
         "how": "tb_uartrx compares every push with what the PEER sent "
                "(`sent[]`), count exact, at T = 521 and T_MIN, +-3 %"}),
-    "uart_tx_image.hex": (WITNESS, {
+    "uart_tx_image.hex": (WITNESS_SIM, {
         "runner": "test/run_uarttx.py",
         "how": "tb_uarttx's peer on its own clock at 115200: every frame "
                "from the first the host's byte in order, stop "
                "bits 1, middle-80 % timing window; V3 exact; V3-T in bound"}),
-    "uart_tx_busy_image.hex": (WITNESS, {
+    "uart_tx_busy_image.hex": (WITNESS_SIM, {
         "runner": "test/run_uarttx.py",
         "how": "the same, beside four push-pull lanes at d = D*"}),
-    "ws2812_sub3_rearm21.hex": (WITNESS, {
+    "ws2812_sub3_rearm21.hex": (WITNESS_SIM, {
         "runner": "test/run_wirefeed_mf.py",
         "how": "the WS2812 3-sub-bit control (REARM d = 21) beside four "
                "d = 20 lanes: V3 content exact on the bus, count exact, and "
@@ -92,12 +167,12 @@ REGISTRY = {
     # board image is held to the bench program REBUILT AT THE BOARD'S TARGET
     # (PE_TARGET=fpga) -- which also tests that retargeting reproduces the
     # board program exactly. A mismatch is a toolchain finding, never STALE.
-    "uart_rx_board.hex": (WITNESS, {
+    "uart_rx_board.hex": (WITNESS_SIM, {
         "same_as": "uart_rx_image.hex", "same_as_target": "fpga",
         "how": "the board's BRAM image is byte-identical to the bench "
                "program rebuilt at the board's own target (fpga/board.yaml)"}),
     # ⚠ SIMULATION: the hardware witness is the FPGA with the real MB85RS64V
-    "corpus_spim25.hex": (WITNESS, {
+    "corpus_spim25.hex": (WITNESS_SIM, {
         "runner": "test/run_spim_witness.py",
         "how": "SIMULATION, tb_trace + fram_spi model: every CS frame's MOSI "
                "decoded at the pins is the feed's frame in order (count "
@@ -107,49 +182,49 @@ REGISTRY = {
     # ⭐ THE SPI TARGET (Wilson 10-18 ruling; build plan B3/B4). SIMULATION:
     # tb_spitgt, an SPI master on its own clock; the hardware witness (Pico 2
     # as controller, microSD-slot pins) is later.
-    "sptgt_m0_image.hex": (WITNESS, {
+    "sptgt_m0_image.hex": (WITNESS_SIM, {
         "runner": "test/run_spitgt.py",
         "how": "SIMULATION, tb_spitgt: an SPI master (mode 0, 1 MHz, own "
                "clock) reads MISO at its sampling edges -- every byte is the "
                "host's next pushed byte, count exact; every sample sees MISO "
                "driven; edge -> MISO <= D_tol 17; V3 agrees; seven must-fires "
                "each red for its own reason, recovery by host reload"}),
-    "sptgt_m1_image.hex": (WITNESS, {
+    "sptgt_m1_image.hex": (WITNESS_SIM, {
         "runner": "test/run_spitgt.py",
         "how": "as sptgt_m0, SPI mode 1 (change on SCK rise, CPOL 0)"}),
-    "sptgt_m2_image.hex": (WITNESS, {
+    "sptgt_m2_image.hex": (WITNESS_SIM, {
         "runner": "test/run_spitgt.py",
         "how": "as sptgt_m0, SPI mode 2 (change on SCK rise, CPOL 1)"}),
-    "sptgt_m3_image.hex": (WITNESS, {
+    "sptgt_m3_image.hex": (WITNESS_SIM, {
         "runner": "test/run_spitgt.py",
         "how": "as sptgt_m0, SPI mode 3 (change on SCK fall, CPOL 1)"}),
-    "sptgt_mosi_image.hex": (WITNESS, {
+    "sptgt_mosi_image.hex": (WITNESS_SIM, {
         "runner": "test/run_spitgt.py",
         "how": "as sptgt_m0 at 500 kHz, plus MOSI captured: the chip's "
                "received bytes == the master's, count exact"}),
     # ⭐ B3b, five-lane contention (Wilson 10-20): the SPI target beside the
     # four other shipped lanes, every lane busy and checked on its own wire
-    "b3b_a_image.hex": (WITNESS, {
+    "b3b_a_image.hex": (WITNESS_SIM, {
         "runner": "test/run_spitgt.py",
         "how": "SIMULATION, tb_spitgt +FIVE: the SPI target (mode 0, master "
                "detuned to 500.3 ns, 200 transactions, every clock phase) "
                "beside SPI master, I2C, UART-tx and UART-rx at shipped rates; "
                "MISO == feed, edge -> pad <= A2's r + 4 derived from the image; "
                "each other lane's wire == its own reference; V3 agrees"}),
-    "b3b_a3_image.hex": (WITNESS, {
+    "b3b_a3_image.hex": (WITNESS_SIM, {
         "runner": "test/run_spitgt.py",
         "how": "as b3b_a, the SPI target in mode 3"}),
-    "b3b_b_image.hex": (WITNESS, {
+    "b3b_b_image.hex": (WITNESS_SIM, {
         "runner": "test/run_spitgt.py",
         "how": "as b3b_a with I2C at the A2 envelope deadline (d 45, D 15): "
                "the worst case A2 certifies"}),
-    "b3b_bnoi2c_image.hex": (WITNESS, {
+    "b3b_bnoi2c_image.hex": (WITNESS_SIM, {
         "runner": "test/run_spitgt.py",
         "how": "as b3b_b without the I2C lane: the interferer must-fire (the "
                "measured worst bit must DROP, as A2 predicts)"}),
     # ⭐ HARDWARE, RECORDED: a bench witness re-checked in CI (Wilson 10-17) --
     # not a hardware run in CI. The board ran it; the record is checked here.
-    "i2c_fram_fpga.hex": (WITNESS, {
+    "i2c_fram_fpga.hex": (WITNESS_HW, {
         "runner": "model/gate_i2c_hw_witness.py",
         "how": "RECORDED BENCH WITNESS (PA100T-EDU, MB85RC256V, ~3.2 kOhm "
                "pull-ups, breadboard; DSLogic captures): sigrok's decoded "
@@ -159,6 +234,70 @@ REGISTRY = {
                "measured); the record's image / feed SHA-256 must equal the "
                "repository's"}),
     # ---- mechanism images: wire != feed by design ---------------------------
+    # ⭐ THE v2 USB AND PAIR BENCHES (Wilson 11-14: approved as WITNESS (sim)).
+    # Each runner writes its image under this name, in its coverage arms and
+    # its gate path alike (IMAGE_FILES), and judges the wire against its peer.
+    "usbrx_main.hex": (WITNESS_SIM, {
+        "runner": "test/run_usbrx.py",
+        "how": "SIMULATION, tb_usbrx: a host line (NRZI, stuffing, CRC16 from "
+               "USB 2.0 §7.1 / §8.3.5) at drift and edge jitter; every pushed "
+               "byte == the packet's, count exact, CRC / PID verdicts exact"}),
+    "usbrx_busy.hex": (WITNESS_SIM, {
+        "runner": "test/run_usbrx.py",
+        "how": "as usbrx_main, four lanes busy at the deadline rule's margin "
+               "(U5 obeyed): every byte exact beside the busy lanes"}),
+    "usbbuf_usb.hex": (WITNESS_SIM, {
+        "runner": "test/run_usbbuf.py",
+        "how": "SIMULATION, tb_usbbuf: the response buffer's packet on the "
+               "wire bit-exact against the loaded line bits (NRZI, stuffing), "
+               "EOP and turnaround in the spec window, READY / TX-full exact"}),
+    "usbbuf_queue.hex": (WITNESS_SIM, {
+        "runner": "test/run_usbbuf.py",
+        "how": "as usbbuf_usb, B5's queue image: the queue's loaded bytes on "
+               "the wire in order, count exact"}),
+    "pair_tx.hex": (WITNESS_SIM, {
+        "runner": "test/run_pair.py",
+        "how": "SIMULATION, tb_pair: the complementary pair (pinb) sends the "
+               "feed's bytes, both pins sampled mid-bit == the golden, count "
+               "exact, edge jitter within bound"}),
+    "pair_rx.hex": (WITNESS_SIM, {
+        "runner": "test/run_pair.py",
+        "how": "as pair_tx, receive: the pair's captured bytes == the peer's"}),
+    "pair_busy.hex": (WITNESS_SIM, {
+        "runner": "test/run_pair.py",
+        "how": "as pair_tx beside busy lanes"}),
+    # ⭐ Wilson 11-14, row 3: WITNESS (sim) now, PLUS an OWED hardware witness.
+    "usbdev_dev.hex": (WITNESS_SIM, {
+        "runner": "test/run_usbaddr.py",
+        "how": "SIMULATION, tb_usbdev: run_usbaddr's 13 + run_usbrst's "
+               "scenarios; every device packet bit-exact against test/usbdev.py's "
+               "golden, SOP in the turnaround window, ADDR / READY / fence / "
+               "reset notice exact; AND the chip's D- / D+ drive in every "
+               "scenario (+ S1, worst-case stuffing) decoded by sigrok "
+               "(usb_signalling -> usb_packet) and compared packet by packet "
+               "(PID, payload) with what each reply must carry",
+        # ⭐ Wilson 11-14: the independent decoder (run_usbaddr.sigrok_cross)
+        "decoder": "sigrok usb_packet",
+        # ⛔ the row-3 independence read (11-14): the shared encoder, now
+        # COVERED by the sigrok cross-check (kept as the record of why)
+        "covered_limit": "COVERED by the sigrok cross-check (run_usbaddr "
+                       "sigrok_cross: a flipped stuffed bit and a planted "
+                       "DATA byte each turn it red). The limit it closes: "
+                       "the device's ACK / NAK line bits are packed INTO the "
+                       "program (usbdev.device_program: B.pack(NAK_LINE / "
+                       "ACK_LINE)) and the DATA / ZLP responses are loaded "
+                       "from the same LINES, while the golden (usbdev."
+                       "expect_bits / classify) reads those same LINES -- one "
+                       "encoder, run_usbbuf.line_bits (run_usbrx.stuff / "
+                       "bits_lsb, run_usbbuf.nrzi; §7.1.8-9), serves both, so "
+                       "an encoding error there is invisible to this witness. "
+                       "The host packets (usbdev.token / data: CRC5 §8.3.5.1, "
+                       "checked against the spec's 2D 00 10 and the 01100 "
+                       "residual; run_usbrx.crc16) do not touch "
+                       "device_program; the PID constants (Table 8-1) are "
+                       "shared by both sides.",
+        "owed_hw": {"owner": "FPGA USB bring-up: enumeration on a real host, "
+                             "captured on the DSLogic"}}),
     # ⛔⛔ MECHANISM IS NOT "UNCHECKED" (Wilson): each names the CI runner that
     # checks EXACTLY what the image is for, held to the witness rules (in CI,
     # positive token, names the image).
@@ -226,7 +365,7 @@ REGISTRY = {
                "every slot inside the DS18B20 windows, five must-fires"}),
     # ⭐ HARDWARE, RECORDED (Wilson lock order, the I2C pattern): capture 182359
     # of the OW = 1 build, re-checked in CI -- not a hardware run in CI.
-    "onewire_fpga_image.hex": (WITNESS, {
+    "onewire_fpga_image.hex": (WITNESS_HW, {
         "runner": "model/gate_onewire_hw_witness.py",
         "how": "RECORDED BENCH WITNESS (PA100T-EDU, DS18B20 probe, 4.7 kOhm, "
                "breadboard; DSLogic capture 182359): sigrok's decoded events "
@@ -271,16 +410,16 @@ REGISTRY = {
 #: to its ledger lane through `ledger_id` -- so a rating change is an edit
 #: here, never ledger churn.
 PUBLISHED = {
-    "UART-rx 115200": (WITNESS, {"image": "uart_rx_image.hex",
+    "UART-rx 115200": (WITNESS_SIM, {"image": "uart_rx_image.hex",
                                  "rate_hz": 115200,
                                  "ledger_id": "UART-rx 115200"}),
-    "UART-tx 115200": (WITNESS, {"image": "uart_tx_image.hex",
+    "UART-tx 115200": (WITNESS_SIM, {"image": "uart_tx_image.hex",
                                  "rate_hz": 115200,
                                  "ledger_id": "UART-tx 115200"}),
     # ⭐ CLOSED (was OWED: corpus_spim.hex is NON_ADMISSIBLE at d = 7 and the
     # d = 25 transaction existed only as run_spifram's local-only variants).
     # In SIMULATION; the hardware witness is the FPGA bring-up's.
-    "SPI-master 1 MHz": (WITNESS, {"image": "corpus_spim25.hex",
+    "SPI-master 1 MHz": (WITNESS_SIM, {"image": "corpus_spim25.hex",
                                    "rate_hz": 1000000,
                                    "ledger_id": "SPI-tx 1 MHz"}),
     # ⭐ Wilson: the ACHIEVED rate (CE1 HALF_HIGH), not the mode's nominal
@@ -295,7 +434,7 @@ PUBLISHED = {
     # cycles, run_ckack + sigrok; the formula is a cycle short), and the
     # board's 370.4 kHz. rate_hz stays the formula rate the program is built
     # for; the label names all three.
-    "I²C Fast-mode 397 kHz formula, 393.7 kHz sim, 370.4 kHz board": (WITNESS, {
+    "I²C Fast-mode 397 kHz formula, 393.7 kHz sim, 370.4 kHz board": (WITNESS_HW, {
         "image": "i2c_fram_fpga.hex",
         "rate_hz": 397000,
         "measured_hz": 370400,
@@ -303,7 +442,7 @@ PUBLISHED = {
     # ⭐⭐ CLOSED (was OWED: "NO functional SPI-target program exists"). The
     # label is the ruled scope, exactly (Wilson 10-18): MISO out witnessed at
     # 1 MHz in all four modes; MOSI capture witnessed at 500 kHz.
-    "SPI-target: MISO 1 MHz; MOSI capture 500 kHz": (WITNESS, {
+    "SPI-target: MISO 1 MHz; MOSI capture 500 kHz": (WITNESS_SIM, {
         "image": "sptgt_m0_image.hex",
         "rate_hz": 1000000,
         "ledger_id": "SPI-target 1 MHz"}),
@@ -317,11 +456,16 @@ def published_problems(registry, published):
         if not isinstance(d.get("rate_hz"), int) or d["rate_hz"] <= 0:
             probs.append("published lane %s has no numeric rated speed "
                          "(rate_hz)" % lane)
-        if kind == WITNESS:
+        if kind in WITNESSES:
             img = d.get("image")
-            if registry.get(img, ("",))[0] != WITNESS:
-                probs.append("published lane %s claims WITNESS via %s, which "
-                             "is not WITNESSED in the registry" % (lane, img))
+            have = registry.get(img, ("",))[0]
+            if have not in WITNESSES:
+                probs.append("published lane %s claims %s via %s, which "
+                             "is not WITNESSED in the registry" % (lane, kind, img))
+            elif have != kind:
+                probs.append("published lane %s claims %s via %s, which the "
+                             "registry labels %s -- one never stands for the "
+                             "other" % (lane, kind, img, have))
         elif kind != OWED:
             probs.append("published lane %s: unknown kind %r" % (lane, kind))
     return probs
@@ -409,17 +553,21 @@ def audit(imgs, registry, exempt, listed, tokens, built=None):
             continue
         if ent is None:
             probs.append("%s carries a %s feed and has NO wire-feed entry "
-                         "(WITNESS, OWED or MECHANISM)" % (n, "+".join(sorted(fd))))
+                         "(WITNESS (sim) / (hw), OWED, INTERNAL or MECHANISM)" % (n, "+".join(sorted(fd))))
             rows.append((n, fd, "UNDECLARED", ""))
             continue
         kind, d = ent
-        rows.append((n, fd, kind, d.get("gap") or d.get("why")
+        rows.append((n, fd, label_of(kind, d), d.get("gap") or d.get("why")
                      or (("by %s: " % d["checked_by"]) if "checked_by" in d else "")
                      + d.get("how", "")))
         if kind == MECHANISM and not d.get("check"):
             probs.append("%s is MECHANISM with no `check`: a mechanism image "
                          "is still checked exactly for what it is for" % n)
-        if kind in (WITNESS, MECHANISM):
+        if d.get("owed_hw") is not None and (
+                kind != WITNESS_SIM or not str(d["owed_hw"].get("owner", "")).strip()):
+            probs.append("%s: an OWED (hw) part needs a WITNESS (sim) row and a "
+                         "named owner" % n)
+        if kind in WITNESSES + (MECHANISM,):
             if "same_as" in d:
                 src = d["same_as"]
                 if d.get("same_as_target"):
@@ -434,16 +582,14 @@ def audit(imgs, registry, exempt, listed, tokens, built=None):
                                      "finding: retargeting does not reproduce "
                                      "the board program" % (n, src,
                                                              d["same_as_target"]))
-                    elif registry.get(src, ("",))[0] != WITNESS:
-                        probs.append("%s is same_as %s, which is not itself "
-                                     "WITNESSED" % (n, src))
+                    else:
+                        probs += same_as_label(n, kind, src, registry)
                     continue
                 if src not in imgs or imgs[src] != img:
                     probs.append("%s claims same_as %s but the bytes differ (or "
                                  "%s is absent)" % (n, src, src))
-                elif registry.get(src, ("",))[0] != WITNESS:
-                    probs.append("%s is same_as %s, which is not itself "
-                                 "WITNESSED" % (n, src))
+                else:
+                    probs += same_as_label(n, kind, src, registry)
                 continue
             r = d.get("runner", "")
             if r not in listed:
@@ -457,6 +603,8 @@ def audit(imgs, registry, exempt, listed, tokens, built=None):
             if n not in body:
                 probs.append("%s: witness runner %s does not name the image"
                              % (n, r))
+            probs += basis_problems(n, kind, r, body)
+            probs += decoder_problems(n, kind, d, r, body)
         elif kind == INTERNAL:
             r = d.get("checked_by", "")
             if r not in listed:
@@ -471,6 +619,17 @@ def audit(imgs, registry, exempt, listed, tokens, built=None):
         probs.append("%s has a wire-feed entry but no such image exists -- "
                      "stale" % n)
     return probs, rows
+
+
+def same_as_label(n, kind, src, registry):
+    """a same_as row borrows its source's witness, so it borrows its LABEL"""
+    have = registry.get(src, ("",))[0]
+    if have not in WITNESSES:
+        return ["%s is same_as %s, which is not itself WITNESSED" % (n, src)]
+    if kind in WITNESSES and have != kind:
+        return ["%s is labelled %s but is same_as %s, labelled %s -- one never "
+                "stands for the other" % (n, kind, src, have)]
+    return []
 
 
 def exempt_set():
@@ -554,14 +713,21 @@ def main() -> int:
     p2, rows = audit(imgs, REGISTRY, exempt, listed, tokens, built)
     probs += p2
     counts = {}
-    print("  %-28s %-6s %-11s %s" % ("image", "feed", "status", "detail"))
+    print("  %-28s %-6s %-25s %s" % ("image", "feed", "status", "detail"))
     for n, fd, st, det in rows:
         counts[st] = counts.get(st, 0) + 1
-        print("  %-28s %-6s %-11s %s" % (n, "+".join(sorted(fd)) or "-", st,
-                                         det[:60]))
+        print("  %-28s %-6s %-25s %s" % (n, "+".join(sorted(fd)) or "-", st,
+                                         det[:50]))
     print()
     print("  %d image(s): %s" % (len(rows), ", ".join(
         "%d %s" % (v, k) for k, v in sorted(counts.items()))))
+    for n, (k, d) in sorted(REGISTRY.items()):
+        if d.get("owed_hw"):
+            print("  %s: %s -- owner: %s" % (n, OWED_HW, d["owed_hw"]["owner"]))
+        if d.get("known_limit"):
+            print("  %s: KNOWN LIMIT -- %s" % (n, d["known_limit"]))
+        if d.get("covered_limit"):
+            print("  %s: %s" % (n, d["covered_limit"]))
     rc = 0
     for p in probs:
         print("  *** %s" % p)
@@ -618,6 +784,43 @@ def main() -> int:
     r3["corpus_all5.hex"] = (OWED, {"gap": "x", "closes": "x"})
     ok &= fires("an entry on an exempt (NON_ADMISSIBLE) image", r3,
                 needle="corpus_all5.hex is exempt")
+    # ⛔ Wilson 11-14: a row labelled hw whose runner is a simulation goes red
+    r5 = dict(REGISTRY)
+    r5["usbrx_main.hex"] = (WITNESS_HW, dict(REGISTRY["usbrx_main.hex"][1]))
+    ok &= fires("WITNESS (hw) on a simulation runner (usbrx_main)", r5,
+                needle="usbrx_main.hex is labelled WITNESS (hw) but its runner")
+    r6 = dict(REGISTRY)
+    r6["i2c_fram_fpga.hex"] = (WITNESS_HW, dict(REGISTRY["i2c_fram_fpga.hex"][1],
+                                                runner="test/run_uartrx.py"))
+    ok &= fires("WITNESS (hw) pointed at a simulation (i2c_fram_fpga)", r6,
+                needle="i2c_fram_fpga.hex is labelled WITNESS (hw) but its "
+                       "runner test/run_uartrx.py runs a SIMULATION")
+    r7 = dict(REGISTRY)
+    r7["onewire_fpga_image.hex"] = (WITNESS_SIM, REGISTRY["onewire_fpga_image.hex"][1])
+    ok &= fires("WITNESS (sim) on a hardware record (onewire_fpga)", r7,
+                needle="onewire_fpga_image.hex is labelled WITNESS (sim)")
+    r8 = dict(REGISTRY)
+    r8["uart_rx_board.hex"] = (WITNESS_HW, REGISTRY["uart_rx_board.hex"][1])
+    ok &= fires("a same_as row relabelled hw (uart_rx_board)", r8,
+                needle="uart_rx_board.hex is labelled WITNESS (hw) but is same_as")
+    r9 = dict(REGISTRY)
+    d9 = dict(REGISTRY["usbdev_dev.hex"][1])
+    d9["owed_hw"] = {"owner": ""}
+    r9["usbdev_dev.hex"] = (WITNESS_SIM, d9)
+    ok &= fires("usbdev_dev's OWED (hw) part with no owner", r9,
+                needle="usbdev_dev.hex: an OWED (hw) part")
+    # the independent-decoder claim held to its runner: moved onto a runner
+    # that never runs sigrok (usbbuf_usb's run_usbbuf), it must turn red
+    r10 = dict(REGISTRY)
+    k10, d10 = REGISTRY["usbbuf_usb.hex"] if "usbbuf_usb.hex" in REGISTRY else (None, None)
+    if d10 is not None:
+        d10 = dict(d10, decoder="sigrok usb_packet")
+        r10["usbbuf_usb.hex"] = (k10, d10)
+        ok &= fires("a sigrok decoder claimed on a runner without it", r10,
+                    needle="usbbuf_usb.hex claims the independent decoder")
+    else:
+        print("    *** must-fire: usbbuf_usb.hex has no row to plant the decoder claim on")
+        ok = False
     rc |= 0 if ok else 1
 
     # ---- V3's per-image table is current (WF2) ------------------------------
@@ -715,9 +918,17 @@ def main() -> int:
         print("  *** %s" % p)
         rc = 1
     bent = dict(PUBLISHED)
-    bent["UART-tx 115200"] = (WITNESS, {"image": "census_image.hex"})
+    bent["UART-tx 115200"] = (WITNESS_SIM, {"image": "census_image.hex",
+                                            "rate_hz": 115200})
     hit = bool(published_problems(REGISTRY, bent))
     print("    must-fire: a lane claiming an OWED image as witness   %s"
+          % ("red  ok" if hit else "*** MISSED"))
+    rc |= 0 if hit else 1
+    swap = dict(PUBLISHED)
+    i2c = next(k for k in swap if k.startswith("I²C"))
+    swap[i2c] = (WITNESS_SIM, swap[i2c][1])
+    hit = any("one never stands" in p for p in published_problems(REGISTRY, swap))
+    print("    must-fire: the I²C lane's hardware witness shown as sim %s"
           % ("red  ok" if hit else "*** MISSED"))
     rc |= 0 if hit else 1
     norate = dict(PUBLISHED)

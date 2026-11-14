@@ -211,6 +211,10 @@ MUTANTS = [
 #: window, so the device side (address, token check, bus reset, handshakes) is
 #: reached. Reach only; each scenario is judged by its own gate.
 COV_DIR = "probe_cov_usbdev"
+#: ⛔ THE IMAGE FILES, NAMED (Wilson 11-14): the device image is usbdev_dev.hex
+#: in the coverage arms and the gate path alike (the wire-feed row: WITNESS (sim)
+#: + OWED (hw)); the no-USB image keeps its name (it carries no feed)
+IMAGE_FILES = {"dev": "usbdev_dev.hex", "nousb": "nousb.hex"}
 
 
 def coverage_arms():
@@ -220,7 +224,7 @@ def coverage_arms():
     os.makedirs(d, exist_ok=True)
     imgs = {"dev": V.image(), "nousb": V.image_nousb()}
     for k, im in imgs.items():
-        I.write_image(os.path.join(d, "%s.hex" % k), im)
+        I.write_image(os.path.join(d, IMAGE_FILES[k]), im)
     rows = [("addr_" + n.split()[0], h, l, nc, (0, 0), "dev") for n, (h, l, _e, nc) in SCEN.items()]
     rows += [("rst_" + n.split()[0], h, l, nc, win or (0, 0), RS.IMAGE_OF.get(n, "dev"))
              for n, (h, l, _e, nc, win, _lng) in RS.SCEN.items()]
@@ -228,7 +232,7 @@ def coverage_arms():
     for tag, host, loads, ncyc, (w0, w1), im in rows:
         hf, lf = V.write_scripts(d, tag, host, loads)
         rel = lambda p: COV_DIR + "/" + os.path.basename(p)
-        arms.append((tag, ["+IMG=%s/%s.hex" % (COV_DIR, im), "+HOST=" + rel(hf), "+LOAD=" + rel(lf),
+        arms.append((tag, ["+IMG=%s/%s" % (COV_DIR, IMAGE_FILES[im]), "+HOST=" + rel(hf), "+LOAD=" + rel(lf),
                            "+NCYC=%d" % ncyc, "+W0=%d" % w0, "+W1=%d" % w1]))
     return arms
 
@@ -249,8 +253,110 @@ def run_all(vvp, tmp, tag, pool, img, names=None):
     return res, sops, jits
 
 
+#: ⭐ S1 (Wilson 11-14, row 3's independent decoder): the longest buffer packet
+#: with WORST-CASE stuffing (run_usbbuf's B7 payload, 8 x 0xFF) loaded on EP0
+#: and taken by an IN -- the replies above carry no stuffed bit, and the
+#: stuff-bit must-fire needs one on the chip's wire. As A11, the first IN
+#: (NAKed) makes the USB lane live, so tag 3 lands in the buffer.
+SIG_EXTRA = {
+    "S1 stuffed": ([("A", 800, IN0), ("A", 7000, IN0), ("R", 120, ACKP)],
+                   at(3000, V.load(V.B.MAX_LINE, 0)),
+                   [(V.PID_NAME[V.PID_NAK], []),
+                    (V.PID_NAME[V.PID_DATA1], list(V.B.MAX_PAYLOAD))], 14000),
+}
+
+
+def sigrok_scenarios():
+    """[(name, host, loads, [(PID name, bytes)], ncyc)]: every scenario of this
+    gate and run_usbrst's on the device image (the multi-millisecond idle
+    ones excepted: no reply, nothing to decode), plus S1"""
+    import run_usbrst as RS
+    out = [(n, h, l, [V.carried(k) for k, _i in e["pk"]], nc) for n, (h, l, e, nc) in SCEN.items()]
+    out += [(n, h, l, [V.carried(k) for k, _i in e["pk"]], nc)
+            for n, (h, l, e, nc, _w, lng) in RS.SCEN.items()
+            if not lng and RS.IMAGE_OF.get(n, "dev") == "dev"]
+    out += [(n, h, l, x, nc) for n, (h, l, x, nc) in SIG_EXTRA.items()]
+    return out
+
+
+def sigrok_cross(vvp, tmp, img, pool):
+    """Row 3's INDEPENDENT DECODER: every scenario's device drive, captured
+    from the simulation and concatenated into ONE wire capture, decoded by
+    sigrok (usb_signalling -> usb_packet) and compared packet by packet with
+    what each reply must carry. Must-fires: a stuffed bit flipped on the wire
+    (S1) and a payload byte planted wrong in the expectation, each red.
+    -> (problems, packets compared)"""
+    probs = []
+    jobs = []
+    for name, host, loads, exp, ncyc in sigrok_scenarios():
+        hf, lf = V.write_scripts(tmp, "sig_%s" % name.split()[0], host, loads)
+        jobs.append((name, exp, ncyc, pool.submit(V.sim, vvp, img, hf, lf, ncyc)))
+    cap, segs, wins = bytearray(), [], {}
+    for name, exp, ncyc, fut in jobs:
+        r = fut.result()
+        if not r["end"]:
+            probs.append("sigrok cross-check: %s: no END (%s)" % (name, r["tail"]))
+            continue
+        base = len(cap)
+        cap += V.wire_capture(r["tx"], ncyc)
+        segs.append((name, base, len(cap), exp))
+        wins[name] = V.drive_windows(r["tx"], base)
+    path = os.path.join(tmp, "usbdev_wire.bin")
+    with open(path, "wb") as fh:
+        fh.write(bytes(cap))
+    rc, ev = V.sigrok_usb(path)
+    pk = V.decoded_packets(ev)
+    n_exp = sum(len(e) for _n, _a, _b, e in segs)
+    print("  S   sigrok (usb_signalling %s -> usb_packet) on the chip's wire: rc %d, "
+          "%d packet(s) decoded, %d expected over %d scenario(s)"
+          % (V.SIGROK_SPEED[clock.USB_LS_RATE], rc, len(pk), n_exp, len(segs)))
+    if rc != 0:
+        probs.append("sigrok cross-check: sigrok-cli rc %d: %s" % (rc, [t for _s, _c, t in ev][-3:]))
+        return probs, 0
+    sp = V.sigrok_judge(segs, pk)
+    print("      every reply == what it must carry (PID, payload), no sigrok error: %s"
+          % ("exact" if not sp else "*** " + sp[0]))
+    probs += sp
+    if not any(p["pid"] for p in pk):
+        probs.append("sigrok cross-check: no packet decoded at all")
+    # must-fire 1: the FIRST stuffed bit of S1's reply inverted on the wire
+    s1 = [s for s in segs if s[0] == "S1 stuffed"]
+    if not s1:
+        probs.append("sigrok cross-check: S1 did not run")
+    else:
+        name, a, b, exp = s1[0]
+        bad, at_ = V.stuff_bit_flip(cap, wins[name])
+        if at_ is None:
+            probs.append("must-fire: S1's reply carries no stuffed bit to flip")
+        else:
+            mpath = os.path.join(tmp, "usbdev_wire_stuffflip.bin")
+            with open(mpath, "wb") as fh:
+                fh.write(bytes(bad[a:b]))
+            mrc, mev = V.sigrok_usb(mpath)
+            mp = V.sigrok_judge([(name, 0, b - a, exp)], V.decoded_packets(mev))
+            print("  Sm1 a stuffed bit flipped on S1's wire (sample %d) -> %s"
+                  % (at_ - a, ("red  ok: " + mp[0][:70]) if mp else "*** STAYED GREEN"))
+            if mrc != 0 or not mp:
+                probs.append("must-fire: the flipped stuffed bit stayed green (rc %d)" % mrc)
+    # must-fire 2: one payload byte planted wrong in the expectation
+    dseg = [s for s in segs if any(d for _p, d in s[3])]
+    if not dseg:
+        probs.append("must-fire: no scenario carries a payload to plant")
+    else:
+        name, a, b, exp = dseg[0]
+        k = next(i for i, (_p, d) in enumerate(exp) if d)
+        wrong = list(exp)
+        wrong[k] = (exp[k][0], [exp[k][1][0] ^ 0x01] + list(exp[k][1][1:]))
+        mp = V.sigrok_judge([(name, a, b, wrong)], pk)
+        print("  Sm2 %s's first DATA byte planted wrong in the golden -> %s"
+              % (name, ("red  ok") if mp else "*** STAYED GREEN"))
+        if not mp:
+            probs.append("must-fire: the planted DATA byte stayed green")
+    return probs, sum(1 for p in pk if p["pid"])
+
+
 def write_img(tmp, nm, im):
-    path = os.path.join(tmp, "usbaddr_%s.hex" % nm)
+    path = os.path.join(tmp, IMAGE_FILES.get(nm, "usbaddr_%s.hex" % nm))
     I.write_image(path, im)
     sim_run.scratch_image(GEN, path)
     return path
@@ -327,6 +433,10 @@ def main() -> int:
                 "*** target %s GREEN (red: %s)" % (target, [n for n, _ in red])))
             if not hit:
                 probs.append("%s did not turn its target %s red" % (d, target))
+        print("\n  row 3's independent decoder (sigrok, Wilson 11-14)")
+        sg, n_sig = sigrok_cross(vvp, tmp, img, pool)
+        probs += sg
+        print("    MEASURED: %d device packet(s) compared against sigrok's decode" % n_sig)
     print()
     if probs:
         print("  GATE usbaddr: FAILED (%d)" % len(probs))

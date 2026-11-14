@@ -226,8 +226,12 @@ def main() -> int:
     mf_ok = mf_ok and red
     # (3) the flow config changed -> freeze GREEN, gate_flow_config RED
     ctext = blobhash.blobs(["src/config.json"])["src/config.json"].decode("utf-8")
-    mut = ctext.replace('"GRT_RESIZER_HOLD_SLACK_MARGIN": 0.10',
-                        '"GRT_RESIZER_HOLD_SLACK_MARGIN": 0.05', 1)
+    # the landmark is the key, whatever its value of record (0.10 until the
+    # configuration of record moved it to 0.20, 11-14): plant a DIFFERENT value
+    import re
+    mut = re.sub(r'("GRT_RESIZER_HOLD_SLACK_MARGIN":\s*)([0-9.]+)',
+                 lambda m: m.group(1) + ("0.05" if m.group(2) != "0.05" else "0.07"),
+                 ctext, count=1)
     import json
     import gate_flow_config as GFC
     with open(GFC.RECORD, encoding="utf-8") as fh:
@@ -255,7 +259,13 @@ def main() -> int:
     # not the declared staleness
     if record_bad and mf_ok and eq:
         import stale_records as SR
-        v, why = SR.stale_verdict("model/gate_ce5_freeze.py", SR.moved(fs))
+        # Wilson 11-14: the moved inputs, GENERATED (git, against the baseline)
+        # and printed in full -- the debt text carries reason + owner only
+        mv = SR.moved(fs)
+        print("  moved since %s (%d, generated):" % (SR.BASELINE, len(mv)))
+        for i in range(0, len(mv), 3):
+            print("      " + "  ".join(mv[i:i + 3]))
+        v, why = SR.stale_verdict("model/gate_ce5_freeze.py", mv)
         print("  stale_records: %s -- %s" % (v, why))
         if v == "STALE":
             print("  CE5-FREEZE: STALE (declared: %s)" % why)

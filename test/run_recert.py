@@ -135,9 +135,9 @@ def derived_not_certifiable():
         if name not in ck:
             continue
         r = d.get("runner", "")
-        if kind == W.WITNESS and re.fullmatch(r"model/gate_\w+_hw_witness\.py", r):
+        if kind == W.WITNESS_HW and re.fullmatch(r"model/gate_\w+_hw_witness\.py", r):
             out[name] = ("certified ON HARDWARE by %s (derived from its "
-                         "wire-feed WITNESS entry), not by this simulation" % r)
+                         "wire-feed WITNESS (hw) entry), not by this simulation" % r)
         elif kind == W.INTERNAL and d.get("checked_by") == COVERAGE_CHECK:
             out[name] = ("coverage image, checked by %s (derived from its "
                          "wire-feed INTERNAL entry), not a protocol "

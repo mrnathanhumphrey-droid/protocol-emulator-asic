@@ -969,10 +969,11 @@ always @(posedge dut.clk) begin
       if (!(dut.u_eng.st !== 2'd0 && dut.u_eng.cur == h_i)
           && dut.u_eng.rel_due[h_i] === 1'b1
 `ifdef PE_EQUIV_PRE
-          && dut.u_eng.ready[h_i] === 1'b0) begin   // pre-batch: `ready` IS the released term
+          && dut.u_eng.ready[h_i] === 1'b0     // pre-batch: `ready` IS the released term
 `else
-          && dut.u_eng.rdy_rel[h_i] === 1'b0) begin
+          && dut.u_eng.rdy_rel[h_i] === 1'b0
 `endif
+          ) begin   // ONE `begin` outside the `ifdef: gate_bench_races counts both branches
         h_wb_cyc = h_wb_cyc + 1;
         if (h_wbp[h_i] == 0) begin
           h_wb_ev = h_wb_ev + 1;

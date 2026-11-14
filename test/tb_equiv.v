@@ -76,6 +76,13 @@ module tb_equiv;
 `include "test/host_feed.vh"
 `include "test/branch_check.vh"   // v2 primitive 1: ON only with +BRCHECK=1
 
+// ⛔ QUIESCENT BY DECLARATION (Wilson 11-14): an EDGE-PACED image run here has
+// no peer to pace it, so it retires nothing BY DESIGN. gate_v2_equiv passes
+// +QUIESCENT for exactly those images (its QUIESCENT table, each by name, each
+// required to run WITH a peer in another registered gate) -- the run_arm2 /
+// tb_reload pattern.
+initial if ($test$plusargs("QUIESCENT")) pg_quiescent_ok = 1'b1;
+
   // ⚠ ONE BLOCK for the count and every record, so nothing reads another
   // block's same-edge write (ruling RA3)
   always @(posedge clk) if (rst_n === 1'b1 && !done) begin
