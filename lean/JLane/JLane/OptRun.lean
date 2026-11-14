@@ -315,8 +315,18 @@ theorem head_valid_optA (d Wn Y : Nat) (hW : Wf e0)
   head_late_optA P win y e0 R B T R d Wn Y 0 hW hfull hy hdly hd hY (Nat.le_refl R)
     (by omega) hFc hNc hR (fun t ht hr _ => hR t ht (isWB_of_ret P y _ hr)) hB hWn t htT hrdy
     (fun _ _ _ _ _ => by omega)
+/-- **The interim stall bound's premise.** Condition D of `head_late_optA` holds at the RTL's
+branch-wait floor with response `R_BASE`, branch-1 budget `BR1_BUDGET` and lateness
+`LD = BR_SUCC_LATE + BR1_BUDGET`; the dispatcher stall this lateness can cause under the
+shipped scheduler is `J_INTERIM_HEAD_LATE_OPTA = 1 + LD`. -/
+theorem j_interim_D :
+    R_BASE + 26 + BR1_BUDGET ≤ BR_W_MIN + (BR_SUCC_LATE + BR1_BUDGET) ∧
+      J_INTERIM_HEAD_LATE_OPTA = 1 + (BR_SUCC_LATE + BR1_BUDGET) := by
+  decide
+
 end
 
+#print axioms j_interim_D
 #print axioms pending_bound_optA
 #print axioms head_late_optA
 #print axioms head_valid_optA

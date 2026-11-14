@@ -94,4 +94,18 @@ theorem dstar_retire_usb_val : DSTAR_RETIRE_USB = 42 := rfl
 theorem reanFloor_40 : reanFloor 40 = 23 := rfl
 theorem reanFloor_48 : reanFloor 48 = 27 := rfl
 
+/-- The RTL's branch-wait floor (`BR_W_MIN = N_LANES*4 + (N_LANES-1)*3 + 1`, `pe_engine.v`
+l.743): `K · L_REFILL + (K − 1) · DISPATCH_CYCLES + 1`. -/
+abbrev BR_W_MIN : Nat := K * L_REFILL + (K - 1) * DISPATCH_CYCLES + 1
+/-- The lateness of the word after a branch at the floor wait, base part (`OptRun.head_late_optA`,
+condition D with `Rn = R_BASE`, `Wn = BR_W_MIN`): `LD = BR_SUCC_LATE + B`. -/
+abbrev BR_SUCC_LATE : Nat := R_BASE + PENDING_SLACK + 1 - BR_W_MIN
+/-- Wilson 11-13, interim (until the dispatcher fix (b′)): the dispatcher-wide stall bound
+`J = 1 + LD` at `B = BR1_BUDGET`, quoted by `run_branch_check`. -/
+abbrev J_INTERIM_HEAD_LATE_OPTA : Nat := 1 + BR_SUCC_LATE + BR1_BUDGET
+
+theorem br_w_min_val : BR_W_MIN = 33 := rfl
+theorem br_succ_late_val : BR_SUCC_LATE = 7 := rfl
+theorem j_interim_val : J_INTERIM_HEAD_LATE_OPTA = 16 := rfl
+
 end JLane

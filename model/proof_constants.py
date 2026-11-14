@@ -37,6 +37,17 @@ def load(path=PATH):
     k["br1_budget"] = k["usb_br1_per_window"] * k["l_refill"]
     k["coresident_usb"] = k["R_usb"] + k["pending_slack"] + k["br1_budget"]
     k["coresident_min_d"] = k["dstar"] + k["br1_budget"]
+    # The RTL's branch-wait floor, BR_W_MIN = N_LANES*4 + (N_LANES-1)*3 + 1 (pe_engine.v l.743,
+    # read; pe_isa.BR_W_MIN mirrors it), from the primitives.
+    k["br_w_min"] = (k["n_lanes"] * k["l_refill"] + (k["n_lanes"] - 1) * k["dispatch_cycles"]
+                     + 1)
+    # OptRun.lean head_late_optA, condition D (Rn + 26 + B <= Wn + LD) at Rn = R_base,
+    # Wn = br_w_min: the word after a branch may be LD = br_succ_late + B late.
+    k["br_succ_late"] = k["R_base"] + k["pending_slack"] + 1 - k["br_w_min"]
+    # Wilson 11-13, INTERIM until the dispatcher fix (b'): under the shipped scheduler that
+    # lateness is a dispatcher-wide stall, J = 1 + LD at B = br1_budget (OptRun.lean
+    # j_interim_D). Quoted by agent 1's run_branch_check.
+    k["j_interim_head_late_optA"] = 1 + k["br_succ_late"] + k["br1_budget"]
     if k["coresident_usb"] < k["coresident_min_d"]:
         raise ValueError("proof_constants: coresident_usb %d no longer implies the co-resident "
                          "delay floor coresident_min_d %d (head_valid_ret's D* + B)"
