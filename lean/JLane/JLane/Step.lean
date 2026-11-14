@@ -35,7 +35,8 @@ structure Port where
 
 /-- §1–§2: the prefetch FSM's next registers.
 * scan, branch 1: serve the winner's head; `prr` untouched.
-* scan, branch 2: anchor `end else if (l_live[prr] && want_fetch(prr)) begin`.
+* scan, branch 2: anchor `end else if (l_live[prr] && want_fetch(prr) && !ft_flush[prr]) begin`
+  (batch 9c0df0c: `ft_flush` is `FlushStep.liveFl`'s mask, all-zero off a FALLTHROUGH flush).
 * scan, branch 3: anchor `prr <= (prr == LANE_LAST) ? {LW{1'b0}} : prr + 1'b1;`.
 * req/wait: anchors `P_REQ:  pst <= P_WAIT;`, `P_WAIT: pst <= P_CAP;`.
 * cap: anchor `if (!pbr1) prr <= (pl == LANE_LAST) ? {LW{1'b0}} : pl + 1'b1;`. -/

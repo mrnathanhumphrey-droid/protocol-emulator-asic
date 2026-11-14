@@ -146,7 +146,7 @@ def lane_graph(img, lane, I=None):
 
 def word_gaps(x, after_arm, after_se0, prem, I, half_t=0):
     """the release gaps of the word's writebacks, in order (the last one is its retirement).
-    `half_t`: the lane's l_t // 2, added to a HALF ARM's release (rebase edge + l_t/2)."""
+    `half_t`: HALF's extra release beyond a plain ARM, max(1, l_t // 2) - 1 (ArmHalf)."""
     op = x["op"]
     if op in I.BRANCH_OPS:
         return [I.branch_wait(x)]
@@ -173,7 +173,10 @@ def word_gaps(x, after_arm, after_se0, prem, I, half_t=0):
 def build(img, lane, prem, I=None):
     I = I or _isa()
     g = lane_graph(img, lane, I)
-    half_t = I.read_header(img, lane)["t"] // 2
+    # HALF's EXTRA release beyond a plain ARM: the RTL rebases to edge + l_t/2 (released then);
+    # a plain ARM is released at edge + 1 (the armed flag holds it that cycle). So h - 1 with
+    # h = max(1, l_t // 2) (ArmHalf.halfEdge: edge + h - 1).
+    half_t = max(I.read_header(img, lane)["t"] // 2, 1) - 1
     preds = {w: [] for w in g}
     for w, (_x, succ) in g.items():
         for s in succ:
@@ -374,7 +377,7 @@ def full_report(img, name="image"):
     floor = {c2: ft_flush_late(0) for _c1, c2 in fts.values() if c2 in g}
     xr = {c1: 1 for c1, _c2 in fts.values() if c1 in g}
     certs = {}
-    half_t = I.read_header(img, u)["t"] // 2
+    half_t = max(I.read_header(img, u)["t"] // 2, 1) - 1    # HALF's extra (see build)
     sops = [w for w in g if arm_kind(g[w][0], I) == "edge" and w not in fts and not (
         preds[w] and all(arm_kind(g[q][0], I) == "se0" for q in preds[w]))]
     off, offd, unanch = {}, {}, {}

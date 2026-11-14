@@ -4,9 +4,12 @@ import JLane.Armed
 # Brick F3b — the FALLTHROUGH ARM (agent 1's batch, 11-14)
 
 RTL, as built (agent 1, 11-14), on top of `Armed.lean`'s ARM:
-* an ARM whose word has a delay (`a_dly > 0`) is a **FALLTHROUGH** ARM: its writeback arms the
-  lane and moves the timestamp to the **deadline** `D = ts + a_dly` (the one writeback rule), and
-  retires at its own writeback;
+* an ARM with `mod[1]` (`pe_isa.ARM_MOD_FT`, read at arming l.3814) is a **FALLTHROUGH** ARM; it
+  always has a timeout (pe_isa refuses one without). Its writeback arms the lane and moves the
+  timestamp to the **deadline** `D = ts + a_dly` (the one writeback rule), and it retires at its
+  own writeback. A timed ARM *without* `mod[1]` halts the lane at its deadline (the error path,
+  l.3367): outside the fragment, which therefore reads every timed ARM word as FALLTHROUGH
+  (`ArmFragT`, `armT := 0 < dly`);
 * an armed FALLTHROUGH lane is ready once `ts ≤ now` (`rel_q` with `armed & ~notmo`);
   the decision that picks it **only disarms**: nothing is dispatched that cycle, and the lane
   continues at PC+1 with the timestamp `D`;
@@ -22,8 +25,11 @@ is one `stepF` cycle of the view, whose flushes are this cycle's FALLTHROUGH edg
 scheduler is the dispatched winner (`none` in a disarm cycle) — a disarm is a V4b cycle with no
 decision, which `LemmaAN.lemmaA_n` counts.
 
-Modelling choice: a disarm cycle registers no winner (`winq := none`). Under (b′) the disarmed
-lane's head is valid, so branch 1 would not serve it either way.
+Diffed against agent 1's RTL 9c0df0c (11-14): the edge's flush and kill (l.4452–4458), CAP's
+`!pkill` filing (l.3302), the disarm that dispatches nothing (l.3364), the rebase `ts := now`
+(`ck_rebase`, HALF + FALLTHROUGH refused) all as modelled. One difference, immaterial: the RTL
+registers the disarmed lane as `winner_q` (l.2850) where this model registers none; under the
+batch the port reads `pf_q`, never `winner_q`, for branch 1 (l.3264).
 -/
 namespace JLane
 

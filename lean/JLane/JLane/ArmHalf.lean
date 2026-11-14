@@ -2,11 +2,12 @@ import JLane.Br1Sep
 /-!
 # Brick O — HALF: the ARM that rebases to the edge plus half a period (agent 1's batch, 11-14)
 
-RTL (agent 1's batch, described 11-14; to be diffed against the pushed RTL): a HALF ARM rebases
-the lane's timestamp to `E + l_t/2` at its edge `E` (the existing rebase adder), where `l_t` is
-the lane header's period; `rel_q` reads `now ≥ ts`, so the lane is released at `E + h` with
-`h = l_t/2 ≥ 1`. A plain ARM rebases to `E` and, `rel_q` being registered past the armed flag,
-is released at `E + 1`: the case `h = 1`.
+RTL (agent 1's batch 9c0df0c, diffed 11-14): HALF is the ARM's `count[0]` (latched per ARM,
+l.3812); at its edge `E` the lane's timestamp is rebased to `E + l_t[DLY_W-1:1]` (`ck_rebase`,
+l.1630), `l_t` the lane header's period; `rel_q` reads `now ≥ ts`, so the lane is released at
+`E + h` with `h = max(1, ⌊l_t/2⌋)` (`⌊l_t/2⌋ = 0` rebases to `E`, released at `E + 1` past the
+armed flag). A plain ARM rebases to `E` and is released at `E + 1`: the case `h = 1`. `h` is a
+function of the ARM's writeback time and lane, so a per-ARM bit is covered.
 
 **So HALF needs no new engine.** `Armed.lean`'s model releases an ARM's lane one past its edge
 input (`arm_release`); fed the edge input shifted by `h − 1` (`halfEdge`), it releases at
