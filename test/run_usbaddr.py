@@ -147,6 +147,33 @@ MUTANTS = [
 ]
 
 
+#: ⭐ THE COVERAGE SWEEP'S tb_usbdev ARMS (Wilson 11-13: the v2 benches join the
+#: sweep): this gate's 13 scenarios and run_usbrst's, each on its own image and
+#: window, so the device side (address, token check, bus reset, handshakes) is
+#: reached. Reach only; each scenario is judged by its own gate.
+COV_DIR = "probe_cov_usbdev"
+
+
+def coverage_arms():
+    """[(label, plusargs)] for test/benchset.py's tb_usbdev; scripts + images under COV_DIR."""
+    import run_usbrst as RS
+    d = os.path.join(os.path.dirname(HERE), COV_DIR)
+    os.makedirs(d, exist_ok=True)
+    imgs = {"dev": V.image(), "nousb": V.image_nousb()}
+    for k, im in imgs.items():
+        I.write_image(os.path.join(d, "%s.hex" % k), im)
+    rows = [("addr_" + n.split()[0], h, l, nc, (0, 0), "dev") for n, (h, l, _e, nc) in SCEN.items()]
+    rows += [("rst_" + n.split()[0], h, l, nc, win or (0, 0), RS.IMAGE_OF.get(n, "dev"))
+             for n, (h, l, _e, nc, win, _lng) in RS.SCEN.items()]
+    arms = []
+    for tag, host, loads, ncyc, (w0, w1), im in rows:
+        hf, lf = V.write_scripts(d, tag, host, loads)
+        rel = lambda p: COV_DIR + "/" + os.path.basename(p)
+        arms.append((tag, ["+IMG=%s/%s.hex" % (COV_DIR, im), "+HOST=" + rel(hf), "+LOAD=" + rel(lf),
+                           "+NCYC=%d" % ncyc, "+W0=%d" % w0, "+W1=%d" % w1]))
+    return arms
+
+
 def run_all(vvp, tmp, tag, pool, img, names=None):
     jobs = {}
     for name, (host, loads, exp, ncyc) in SCEN.items():

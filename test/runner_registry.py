@@ -40,7 +40,7 @@ DECLARED = {
                          "the LN1 Lean replay job (JLane.step vs the RTL)"),
     "model/stale_records.py": ("helper", "model/gate_phase_coverage.py",
                                "the STALE / DEBT declarations: it NAMES benches "
-                               "(a record's moved inputs, 11-13) and invokes none"),
+                               "(a record's moved inputs) and invokes none"),
     "test/sweep_i2c_delay.py": ("manual", "model/gate_phase_coverage.py",
                                 "the I2C peer-delay sweep (sigrok, local): its "
                                 "record model/phase_sweep_i2c.json is held "

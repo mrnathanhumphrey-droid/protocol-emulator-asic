@@ -205,6 +205,22 @@ def rx_problems(cb, rx):
     return out
 
 
+#: ⭐ THE COVERAGE SWEEP'S tb_pair ARMS (Wilson 11-13): the gate's three runs (TX,
+#: RX, busy) on its own images, so the complementary pair (pinb) is reached.
+COV_DIR = "probe_cov_pair"
+
+
+def coverage_arms():
+    """[(label, plusargs)] for test/benchset.py's tb_pair; images under COV_DIR."""
+    os.makedirs(os.path.join(ROOT, COV_DIR), exist_ok=True)
+    for k in ("tx", "rx", "busy"):
+        I.write_image(os.path.join(ROOT, COV_DIR, "%s.hex" % k), image(k))
+    return [("tx", ["+IMG=%s/tx.hex" % COV_DIR, "+NCYC=2600", "+FEED=1"]),
+            ("rx", ["+IMG=%s/rx.hex" % COV_DIR, "+NCYC=900", "+RXB=%d" % RX_BYTE,
+                    "+RXT=%d" % RX_T, "+RXD=%d" % D]),
+            ("busy", ["+IMG=%s/busy.hex" % COV_DIR, "+NCYC=2600", "+FEED=1"])]
+
+
 def run_all(vvp, tmp):
     hexes = {}
     for k in ("tx", "rx", "busy"):

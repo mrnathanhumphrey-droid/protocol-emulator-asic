@@ -100,6 +100,21 @@ SCEN = [
 ]
 
 
+#: ⭐ THE COVERAGE SWEEP'S tb_arm2 ARMS (Wilson 11-13): the gate's ten scenarios on
+#: its own five images, so the two-pin level ARM is reached. Reach only.
+COV_DIR = "probe_cov_arm2"
+
+
+def coverage_arms():
+    """[(label, plusargs)] for test/benchset.py's tb_arm2; images under COV_DIR."""
+    os.makedirs(os.path.join(ROOT, COV_DIR), exist_ok=True)
+    for k, f in IMAGES.items():
+        I.write_image(os.path.join(ROOT, COV_DIR, "%s.hex" % k), f())
+    return [(name, ["+IMG=%s/%s.hex" % (COV_DIR, im), "+IDLE=%d" % idle, "+PHA=%d" % pha,
+                    "+PHB=%d" % phb, "+NCYC=%d" % ncyc])
+            for name, im, idle, pha, phb, ncyc, _kind in SCEN]
+
+
 def run(cmd):
     return subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True,
                           encoding="utf-8", errors="replace")

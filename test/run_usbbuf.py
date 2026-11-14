@@ -214,6 +214,30 @@ def write_scripts(tmp, tag, host, loads):
     return hf, lf
 
 
+#: ⭐ THE COVERAGE SWEEP'S tb_usbbuf ARMS (Wilson 11-13): the gate's own four buffer
+#: scenarios (30,000 cycles each, as run_all) and B5's queue image, so the response
+#: buffer's send path is reached. Reach only; judged here.
+COV_DIR = "probe_cov_usbbuf"
+
+
+def coverage_arms():
+    """[(label, plusargs)] for test/benchset.py's tb_usbbuf; scripts + images under COV_DIR."""
+    d = os.path.join(ROOT, COV_DIR)
+    os.makedirs(d, exist_ok=True)
+    I.write_image(os.path.join(d, "usb.hex"), image_usb())
+    I.write_image(os.path.join(d, "queue.hex"), image_queue())
+    rel = lambda p: COV_DIR + "/" + os.path.basename(p)
+    arms = []
+    for name, (host, loads, _pk, _rd, _tf) in SCEN.items():
+        tag = name.split()[0]
+        hf, lf = write_scripts(d, tag, host, loads)
+        arms.append((tag, ["+IMG=%s/usb.hex" % COV_DIR, "+HOST=" + rel(hf), "+LOAD=" + rel(lf), "+NCYC=30000"]))
+    qf, ql = write_scripts(d, "B5", [], [("A", Q_FIRST + k * Q_STEP, b) for k, b in enumerate(Q_BYTES)])
+    arms.append(("B5", ["+IMG=%s/queue.hex" % COV_DIR, "+HOST=" + rel(qf), "+LOAD=" + rel(ql),
+                        "+NCYC=%d" % (Q_FIRST + len(Q_BYTES) * Q_STEP + 400)]))
+    return arms
+
+
 def sim(vvp, img, hf, lf, ncyc):
     r = run(sim_run.vvp([vvp, "+IMG=%s" % img, "+HOST=%s" % hf, "+LOAD=%s" % lf,
                          "+NCYC=%d" % ncyc], images=[img]))

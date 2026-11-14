@@ -502,6 +502,31 @@ def main() -> int:
     return 0
 
 
+# ---- the coverage sweep's arms (Wilson 11-13: the v2 benches join the sweep) ----
+#: tb_usbrx was EXCLUDED, so the engine's USB receive (NRZI, unstuffing, CRC16,
+#: PID / address match, re-anchoring) read uncovered. These are the gate's own
+#: cases on the gate's own image, and the busy image (U5) obeyed. Reach only; the
+#: bytes are judged here.
+COV_DIR = "probe_cov_usbrx"
+
+
+def coverage_arms():
+    """[(label, plusargs)] for test/benchset.py's tb_usbrx; writes image + wave under COV_DIR."""
+    os.makedirs(os.path.join(ROOT, COV_DIR), exist_ok=True)
+    imgs = {"main": image(), "busy": image(busy=(30, 30 + I.usb_deadline_margin()))}
+    for k, im in imgs.items():
+        I.write_image(os.path.join(ROOT, COV_DIR, "%s.hex" % k), im)
+    arms = []
+    for n, (name, packets, e, E, seed, _exp) in enumerate(cases()):
+        tr, t_end = line(packets, e, E, seed)
+        for k in imgs:
+            wv = "%s/w%d.txt" % (COV_DIR, n)
+            write_wave(os.path.join(ROOT, wv), tr)
+            arms.append(("%s_%d" % (k, n), ["+IMG=%s/%s.hex" % (COV_DIR, k), "+WAVE=" + wv,
+                                            "+NCYC=%d" % (t_end + 400), "+DBG=0"]))
+    return arms
+
+
 # ---- U7: the start-up stall (Wilson 11-13 per-pair ruling, D) ----------------
 #: ⭐ OUTSIDE THE PROOFS, BOUNDED BY THE SPEC'S ATTACH TIMING. The Lean theorems
 #: start from a run with every slot filled; before the USB lane's first words
