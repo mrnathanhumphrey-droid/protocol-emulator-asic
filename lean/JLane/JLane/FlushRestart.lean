@@ -310,10 +310,192 @@ theorem restart_hit (P : Program) (win : Engine → Option Lane) (y : Lane) (e :
     omega
   · exact h
 
+/-! ### F2c — the head refill after a flush -/
+
+theorem runF_succ' (P : Program) (win : Engine → Option Lane) (fl : Nat → Lane → Bool) :
+    ∀ (n : Nat) (X : EngineF),
+      runF P win fl (n + 1) X = stepF P win (fl (runF P win fl n X).e.now) (runF P win fl n X)
+  | 0, _ => rfl
+  | n + 1, X => runF_succ' P win fl n (stepF P win (fl X.e.now) X)
+
+theorem now_runF (P : Program) (win : Engine → Option Lane) (fl : Nat → Lane → Bool) :
+    ∀ (n : Nat) (X : EngineF), (runF P win fl n X).e.now = X.e.now + n
+  | 0, _ => rfl
+  | n + 1, X => by
+    rw [runF_succ']
+    show (runF P win fl n X).e.now + 1 = X.e.now + (n + 1)
+    rw [now_runF P win fl n X]
+    omega
+
+theorem runF_add (P : Program) (win : Engine → Option Lane) (fl : Nat → Lane → Bool) :
+    ∀ (a b : Nat) (X : EngineF), runF P win fl (a + b) X = runF P win fl b (runF P win fl a X)
+  | a, 0, _ => rfl
+  | a, b + 1, X => by
+    rw [← Nat.add_assoc, runF_succ', runF_succ', runF_add P win fl a b X]
+
+/-- The port FSM, backwards: CAP comes from WAIT, WAIT from REQ, and the lane is kept. -/
+theorem portNext_from_cap (Q : Program) (e : Engine) (h : (portNext Q e).pst = .cap) :
+    e.pst = .wait ∧ (portNext Q e).pl = e.pl := by
+  revert h
+  show (portNextW Q e.wantFetch e).pst = .cap → e.pst = .wait ∧ (portNextW Q e.wantFetch e).pl = e.pl
+  cases hp : e.pst with
+  | scan =>
+    simp only [portNextW, hp]
+    cases br1 Q e <;> simp
+    split <;> simp
+  | req => simp [portNextW, hp]
+  | wait => simp [portNextW, hp]
+  | cap => simp [portNextW, hp]
+
+theorem portNext_from_wait (Q : Program) (e : Engine) (h : (portNext Q e).pst = .wait) :
+    e.pst = .req ∧ (portNext Q e).pl = e.pl := by
+  revert h
+  show (portNextW Q e.wantFetch e).pst = .wait → e.pst = .req ∧ (portNextW Q e.wantFetch e).pl = e.pl
+  cases hp : e.pst with
+  | scan =>
+    simp only [portNextW, hp]
+    cases br1 Q e <;> simp
+    split <;> simp
+  | req => simp [portNextW, hp]
+  | wait => simp [portNextW, hp]
+  | cap => simp [portNextW, hp]
+
+theorem portNext_wait_cap (Q : Program) (e : Engine) (h : e.pst = .wait) :
+    (portNext Q e).pst = .cap := by
+  show (portNextW Q e.wantFetch e).pst = .cap
+  simp [portNextW, h]
+
+/-- With no flush this cycle, the kill only clears (at CAP) or carries. -/
+theorem stepF_pkill_noflush (P : Program) (win : Engine → Option Lane) (fl : Lane → Bool)
+    (X : EngineF) (hfl : ∀ l, fl l = false) :
+    (stepF P win fl X).pkill = if X.e.pst = .cap then false else X.pkill := by
+  show (if X.e.pst = .cap then false
+    else X.pkill || (fl X.e.pl && (decide (X.e.pst = .req) || decide (X.e.pst = .wait)))) = _
+  rw [hfl X.e.pl]
+  simp
+
+/-- **The head refill after a flush.** Lane `y` flushed at cycle `f` (and the invariant holding
+there, no flushed lane dispatched next, no flush in the following `3 + 23 + B` cycles): three
+cycles later nothing has been filed into `y`, no kill is pending, the invariant is `Wf`, and on
+the plain run that follows `y`'s head is captured within `23 + B` cycles. -/
+theorem flush_head_refill (P : Program) (win : Engine → Option Lane) (fl : Nat → Lane → Bool)
+    (X : EngineF) (y : Lane) (B f : Nat) (hy : P.live y = true)
+    (hI : InvF (runF P win fl f X))
+    (hmid : ∀ l, fl (runF P win fl f X).e.now l = true →
+      ¬((dispNext win (runF P win fl f X).e).st ≠ .idle ∧
+        (dispNext win (runF P win fl f X).e).cur = l))
+    (hfy : fl (runF P win fl f X).e.now y = true)
+    (hnof : ∀ i, 1 ≤ i → i ≤ 3 + (23 + B) → ∀ l, fl ((runF P win fl f X).e.now + i) l = false)
+    (hB : ∀ m, m ≤ 23 + B → chargeSum P win y m (runF P win fl (f + 3) X).e ≤ B) :
+    Wf (runF P win fl (f + 3) X).e ∧
+      (∀ n, n ≤ 23 + B →
+        (runF P win fl (f + 3 + n) X).e = run P win n (runF P win fl (f + 3) X).e) ∧
+      1 ≤ cnt P win (Hit y) (23 + B) (runF P win fl (f + 3) X).e := by
+  -- the three states after the flush
+  generalize hXf : runF P win fl f X = Xf at hI hmid hfy hnof
+  have hn0 := now_runF P win fl f X
+  rw [hXf] at hn0
+  have h1 : runF P win fl (f + 1) X = stepF P win (fl Xf.e.now) Xf := by
+    rw [runF_succ', hXf]
+  have hnow1 : (runF P win fl (f + 1) X).e.now = Xf.e.now + 1 := by
+    rw [h1]; rfl
+  have h2 : runF P win fl (f + 2) X =
+      stepF P win (fl (Xf.e.now + 1)) (runF P win fl (f + 1) X) := by
+    rw [show f + 2 = (f + 1) + 1 by omega, runF_succ', hnow1]
+  have hnow2 : (runF P win fl (f + 2) X).e.now = Xf.e.now + 2 := by
+    rw [h2]; show (runF P win fl (f + 1) X).e.now + 1 = _; rw [hnow1]
+  have h3 : runF P win fl (f + 3) X =
+      stepF P win (fl (Xf.e.now + 2)) (runF P win fl (f + 2) X) := by
+    rw [show f + 3 = (f + 2) + 1 by omega, runF_succ', hnow2]
+  generalize hY1 : runF P win fl (f + 1) X = Y1 at h1 h2 hnow1
+  generalize hY2 : runF P win fl (f + 2) X = Y2 at h2 h3 hnow2
+  have hfl1 : ∀ l, fl (Xf.e.now + 1) l = false := hnof 1 (by omega) (by omega)
+  have hfl2 : ∀ l, fl (Xf.e.now + 2) l = false := hnof 2 (by omega) (by omega)
+  -- the invariant along the three cycles
+  have hI1 : InvF Y1 := by rw [h1]; exact invF_step P win _ Xf hI hmid
+  have hI2 : InvF Y2 := by
+    rw [h2]; exact invF_step P win _ Y1 hI1 (fun l hl => by rw [hfl1 l] at hl; cases hl)
+  have hI3 : InvF (runF P win fl (f + 3) X) := by
+    rw [h3]; exact invF_step P win _ Y2 hI2 (fun l hl => by rw [hfl2 l] at hl; cases hl)
+  -- no kill pending three cycles on
+  have hk2 : Y2.pkill = true → Y2.e.pst = .cap := by
+    intro hk
+    rw [h2, stepF_pkill_noflush P win _ Y1 hfl1] at hk
+    by_cases hc : Y1.e.pst = .cap
+    · rw [if_pos hc] at hk; cases hk
+    · rw [if_neg hc] at hk
+      rcases hI1.2.2.2.1 hk with hw | hw
+      · rw [h2]; exact portNext_wait_cap _ _ hw
+      · exact absurd hw hc
+  have hk3 : (runF P win fl (f + 3) X).pkill = false := by
+    rw [h3, stepF_pkill_noflush P win _ Y2 hfl2]
+    by_cases hc : Y2.e.pst = .cap
+    · rw [if_pos hc]
+    · rw [if_neg hc]
+      cases hq : Y2.pkill
+      · rfl
+      · exact absurd (hk2 hq) hc
+  -- nothing filed into y
+  have he1 : ∀ s, Y1.e.actv y s = false := fun s => by
+    rw [h1]; exact stepF_flush_empty P win _ Xf y hfy s
+  have he2 : ∀ s, Y2.e.actv y s = false := fun s => by
+    cases hv : Y2.e.actv y s
+    · rfl
+    · exfalso
+      rw [h2] at hv
+      obtain ⟨hc, hpl, -, hk, -⟩ := stepF_fill P win _ Y1 y s (he1 s) hv
+      have hc' : (portNext (liveFl P (fl Xf.e.now)) Xf.e).pst = .cap := by
+        rw [h1] at hc; exact hc
+      obtain ⟨hw, hplk⟩ := portNext_from_cap _ _ hc'
+      have hpl' : Xf.e.pl = y := by
+        have : Y1.e.pl = (portNext (liveFl P (fl Xf.e.now)) Xf.e).pl := by rw [h1]; rfl
+        rw [this, hplk] at hpl
+        exact hpl.symm
+      have hks := stepF_kill_set P win (fl Xf.e.now) Xf (Or.inr hw) (by rw [hpl']; exact hfy)
+      rw [← h1, hk] at hks
+      cases hks
+  have he3 : ∀ s, (runF P win fl (f + 3) X).e.actv y s = false := fun s => by
+    cases hv : (runF P win fl (f + 3) X).e.actv y s
+    · rfl
+    · exfalso
+      rw [h3] at hv
+      obtain ⟨hc, hpl, -, hk, -⟩ := stepF_fill P win _ Y2 y s (he2 s) hv
+      -- Y2 at CAP for y: Y1 at WAIT for y, Xf at REQ for y: the flush killed it
+      have hc2 : (portNext (liveFl P (fl (Xf.e.now + 1))) Y1.e).pst = .cap := by
+        rw [h2] at hc; exact hc
+      obtain ⟨hw1, hpl1⟩ := portNext_from_cap _ _ hc2
+      have hw1' : (portNext (liveFl P (fl Xf.e.now)) Xf.e).pst = .wait := by
+        rw [h1] at hw1; exact hw1
+      obtain ⟨hr0, hpl0⟩ := portNext_from_wait _ _ hw1'
+      have hY1pl : Y1.e.pl = Xf.e.pl := by
+        have : Y1.e.pl = (portNext (liveFl P (fl Xf.e.now)) Xf.e).pl := by rw [h1]; rfl
+        rw [this, hpl0]
+      have hY2pl : Y2.e.pl = Y1.e.pl := by
+        have : Y2.e.pl = (portNext (liveFl P (fl (Xf.e.now + 1))) Y1.e).pl := by rw [h2]; rfl
+        rw [this, hpl1]
+      have hpx : Xf.e.pl = y := by rw [← hY1pl, ← hY2pl]; exact hpl.symm
+      have hks1 := stepF_kill_set P win (fl Xf.e.now) Xf (Or.inl hr0) (by rw [hpx]; exact hfy)
+      rw [← h1] at hks1
+      have hks2 := stepF_kill_keep P win (fl (Xf.e.now + 1)) Y1 hks1 (by rw [hw1]; decide)
+      rw [← h2, hk] at hks2
+      cases hks2
+  -- the plain run from f + 3
+  have hW3 := invF_wf _ hI3 hk3
+  have hv3 : (runF P win fl (f + 3) X).e.headValid y = false := he3 _
+  refine ⟨hW3, fun n hn => ?_, restart_hit P win y _ B hW3 hy hv3 hB⟩
+  have hnow3 : (runF P win fl (f + 3) X).e.now = Xf.e.now + 3 := by
+    rw [h3]; show Y2.e.now + 1 = _; rw [hnow2]
+  have hseg := runF_seg P win fl n (runF P win fl (f + 3) X) hk3 (fun i hi l => by
+    rw [hnow3, Nat.add_assoc]
+    exact hnof (3 + i) (by omega) (by omega) l)
+  rw [runF_add]
+  exact hseg.1
+
 #print axioms killEmpty_step
 #print axioms spareFillF_step
 #print axioms headFirst_stepF
 #print axioms invF_step
 #print axioms restart_hit
+#print axioms flush_head_refill
 
 end JLane
