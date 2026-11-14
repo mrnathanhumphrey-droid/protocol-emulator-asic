@@ -53,7 +53,7 @@ variable (P : Program) (win : Engine → Option Lane) (y : Lane) (e0 : Engine) (
 until `t` and no retirement until `w2`: the word retiring at `w2` is no-prefetch, and `t` is
 within one port wait of that retirement. -/
 theorem pb_defer (s w2 t : Nat) (hy : P.live y = true) (hS0 : Struct e0)
-    (hR : ∀ t, t < T → IsWB y (run P win t e0) →
+    (hRn : ∀ t, t < T → IsRet P y (run P win t e0) → NpfAt y (run P win t e0) →
       (run P win t e0).now ≤ (run P win t e0).ts y + R + 2)
     (hB : ∀ a m, a + m ≤ T → m ≤ 23 + B → chargeSum P win y m (run P win a e0) ≤ B)
     (hs : s ≤ w2) (hw2t : w2 < t) (htT : t ≤ T)
@@ -85,22 +85,24 @@ theorem pb_defer (s w2 t : Nat) (hy : P.live y = true) (hS0 : Struct e0)
       rw [← run_add]
       exact no_event_between P win (Hit y) e0 (w2 + 1) t (w2 + 1 + i) (by omega) (by omega)
         (by omega))
-  have hRw := hR w2 (by omega) (isWB_of_ret P y _ hr2)
+  have hRw := hRn w2 (by omega) hr2 hnpf
   have hnow := now_run P win w2 e0
   omega
 
 /-- **Fresh case.** Every earlier refill was served by `w + 1`: either the lane wants there
 (the old bound, against `ts(w)`) or the refill is deferred to retirement `w2` (bound D). -/
-theorem pb_fresh_optA (k t w w2 : Nat) (hy : P.live y = true) (hS0 : Struct e0)
+theorem pb_fresh_optA (Rn k t w w2 : Nat) (hy : P.live y = true) (hS0 : Struct e0)
     (h0 : e0.owed y = 0)
     (hR : ∀ t, t < T → IsWB y (run P win t e0) →
       (run P win t e0).now ≤ (run P win t e0).ts y + R + 2)
+    (hRn : ∀ t, t < T → IsRet P y (run P win t e0) → NpfAt y (run P win t e0) →
+      (run P win t e0).now ≤ (run P win t e0).ts y + Rn + 2)
     (hB : ∀ a m, a + m ≤ T → m ≤ 23 + B → chargeSum P win y m (run P win a e0) ≤ B)
     (htT : t ≤ T) (hww2 : w < w2) (hw2t : w2 < t)
     (hwk : cnt P win (IsRet P y) w e0 = k) (hwb : IsRet P y (run P win w e0))
     (hw2k : cnt P win (IsRet P y) w2 e0 = k + 1) (hw2b : IsRet P y (run P win w2 e0))
     (hh : cnt P win (Hit y) t e0 ≤ k) (hfresh : k ≤ cnt P win (Hit y) (w + 1) e0) :
-    (NpfAt y (run P win w2 e0) ∧ e0.now + t ≤ (run P win w2 e0).ts y + R + 25 + B) ∨
+    (NpfAt y (run P win w2 e0) ∧ e0.now + t ≤ (run P win w2 e0).ts y + Rn + 25 + B) ∨
       e0.now + t ≤ (run P win w e0).ts y + R + 25 + B := by
   have hm := cnt_mono P win (Hit y) e0 (w + 1) t (by omega)
   have hr1 : cnt P win (IsRet P y) (w + 1) e0 = k + 1 := by
@@ -123,16 +125,18 @@ theorem pb_fresh_optA (k t w w2 : Nat) (hy : P.live y = true) (hS0 : Struct e0)
     omega
   | false =>
     left
-    exact pb_defer P win y e0 R B T (w + 1) w2 t hy hS0 hR hB (by omega) hw2t htT
+    exact pb_defer P win y e0 Rn B T (w + 1) w2 t hy hS0 hRn hB (by omega) hw2t htT
       (by omega) hwant hw2b (by omega) (by omega)
 
 /-- **The pending bound under option A.** Refill `#k` of lane `y`, owed from retirement `#k` at
 `w`, still pending at `t` after retirement `#(k+1)` at `w2`, meets bound D, F or N. -/
-theorem pending_bound_optA (d Wn Y : Nat) (hy : P.live y = true) (hS0 : Struct e0)
+theorem pending_bound_optA (Rn d Wn Y : Nat) (hy : P.live y = true) (hS0 : Struct e0)
     (h0 : e0.owed y = 0) (hdly : P.dly y = d) (hd : DSTAR + B ≤ d)
     (hY : 40 + 2 * B ≤ Wn + Y)
     (hR : ∀ t, t < T → IsWB y (run P win t e0) →
       (run P win t e0).now ≤ (run P win t e0).ts y + R + 2)
+    (hRn : ∀ t, t < T → IsRet P y (run P win t e0) → NpfAt y (run P win t e0) →
+      (run P win t e0).now ≤ (run P win t e0).ts y + Rn + 2) (hRR : Rn ≤ R)
     (hB : ∀ a m, a + m ≤ T → m ≤ 23 + B → chargeSum P win y m (run P win a e0) ≤ B)
     (hWn : ∀ x, x < T → IsRet P y (run P win x e0) → NpfAt y (run P win x e0) →
       (run P win x e0).ts y + Wn ≤ (run P win (x + 1) e0).ts y) :
@@ -140,22 +144,22 @@ theorem pending_bound_optA (d Wn Y : Nat) (hy : P.live y = true) (hS0 : Struct e
       cnt P win (IsRet P y) w e0 = k → IsRet P y (run P win w e0) →
       cnt P win (IsRet P y) w2 e0 = k + 1 → IsRet P y (run P win w2 e0) →
       cnt P win (Hit y) t e0 ≤ k →
-      (NpfAt y (run P win w2 e0) ∧ e0.now + t ≤ (run P win w2 e0).ts y + R + 25 + B) ∨
-      (NpfAt y (run P win w e0) ∧ e0.now + t ≤ (run P win w e0).ts y + R + 45 + 2 * B) ∨
+      (NpfAt y (run P win w2 e0) ∧ e0.now + t ≤ (run P win w2 e0).ts y + Rn + 25 + B) ∨
+      (NpfAt y (run P win w e0) ∧ e0.now + t ≤ (run P win w e0).ts y + Rn + 45 + 2 * B) ∨
       e0.now + t ≤ (run P win w e0).ts y + R + 25 + B + Y := by
   have hD : DSTAR = 20 := dstar_val
   intro k
   induction k with
   | zero =>
     intro t w w2 htT hww2 hw2t hwk hwb hw2k hw2b hh
-    rcases pb_fresh_optA P win y e0 R B T 0 t w w2 hy hS0 h0 hR hB htT hww2 hw2t hwk hwb
+    rcases pb_fresh_optA P win y e0 R B T Rn 0 t w w2 hy hS0 h0 hR hRn hB htT hww2 hw2t hwk hwb
       hw2k hw2b hh (Nat.zero_le _) with h | h
     · exact Or.inl h
     · exact Or.inr (Or.inr (by omega))
   | succ k ih =>
     intro t w w2 htT hww2 hw2t hwk hwb hw2k hw2b hh
     by_cases hfresh : k + 1 ≤ cnt P win (Hit y) (w + 1) e0
-    · rcases pb_fresh_optA P win y e0 R B T (k + 1) t w w2 hy hS0 h0 hR hB htT hww2 hw2t hwk
+    · rcases pb_fresh_optA P win y e0 R B T Rn (k + 1) t w w2 hy hS0 h0 hR hRn hB htT hww2 hw2t hwk
         hwb hw2k hw2b hh hfresh with h | h
       · exact Or.inl h
       · exact Or.inr (Or.inr (by omega))
@@ -227,24 +231,32 @@ theorem pending_bound_optA (d Wn Y : Nat) (hy : P.live y = true) (hS0 : Struct e
               omega
             · exact hge
           have hrw2 := cnt_mono P win (IsRet P y) e0 (c + 1) w2 hcw2
-          exact Or.inl (pb_defer P win y e0 R B T (c + 1) w2 t hy hS0 hR hB hcw2 hw2t htT h1
+          exact Or.inl (pb_defer P win y e0 Rn B T (c + 1) w2 t hy hS0 hRn hB hcw2 hw2t htT h1
             hwant hw2b (by omega) (by omega))
 
-/-- **Head valid when ready, under option A.** Three conditions, one per bound:
-D `R + 26 + B ≤ Wn`, F `R + 46 + 2B ≤ Wn + d`, N `R + 26 + B + Y ≤ 2d`, with `D* + B ≤ d`
-and `40 + 2B ≤ Wn + Y`. -/
-theorem head_valid_optA (d Wn Y : Nat) (hW : Wf e0)
+/-- **Head valid when ready, with bounded lateness after a no-prefetch word (option A).**
+Lane `y` has a valid head at every `t` where it is ready, except that the word right after a
+no-prefetch retirement may wait up to `LD` more cycles. Conditions, one per bound:
+D `Rn + 26 + B ≤ Wn + LD`, F `Rn + 46 + 2B ≤ Wn + d`, N `R + 26 + B + Y ≤ 2d`, with
+`D* + B ≤ d`, `40 + 2B ≤ Wn + Y`, `Rn ≤ R` (`Rn` = response at no-prefetch retirements). -/
+theorem head_late_optA (Rn d Wn Y LD : Nat) (hW : Wf e0)
     (hfull : ∀ s, e0.actv y s = true)
     (hy : P.live y = true) (hdly : P.dly y = d) (hd : DSTAR + B ≤ d)
-    (hY : 40 + 2 * B ≤ Wn + Y)
-    (hDc : R + 26 + B ≤ Wn) (hFc : R + 46 + 2 * B ≤ Wn + d) (hNc : R + 26 + B + Y ≤ 2 * d)
+    (hY : 40 + 2 * B ≤ Wn + Y) (hRR : Rn ≤ R)
+    (hDc : Rn + 26 + B ≤ Wn + LD) (hFc : Rn + 46 + 2 * B ≤ Wn + d)
+    (hNc : R + 26 + B + Y ≤ 2 * d)
     (hR : ∀ t, t < T → IsWB y (run P win t e0) →
       (run P win t e0).now ≤ (run P win t e0).ts y + R + 2)
+    (hRn : ∀ t, t < T → IsRet P y (run P win t e0) → NpfAt y (run P win t e0) →
+      (run P win t e0).now ≤ (run P win t e0).ts y + Rn + 2)
     (hB : ∀ a m, a + m ≤ T → m ≤ 23 + B → chargeSum P win y m (run P win a e0) ≤ B)
     (hWn : ∀ x, x < T → IsRet P y (run P win x e0) → NpfAt y (run P win x e0) →
       (run P win x e0).ts y + Wn ≤ (run P win (x + 1) e0).ts y)
     (t : Nat) (htT : t ≤ T)
-    (hrdy : (run P win t e0).ts y ≤ (run P win t e0).now) :
+    (hrdy : (run P win t e0).ts y ≤ (run P win t e0).now)
+    (hlate : ∀ x, x < t → IsRet P y (run P win x e0) → NpfAt y (run P win x e0) →
+      cnt P win (IsRet P y) (x + 1) e0 = cnt P win (IsRet P y) t e0 →
+      (run P win t e0).ts y + LD ≤ (run P win t e0).now) :
     (run P win t e0).headValid y = true := by
   have hS : Struct e0 := by
     have hw := hW
@@ -267,12 +279,17 @@ theorem head_valid_optA (d Wn Y : Nat) (hW : Wf e0)
         omega
     have hs1 := ts_ge_after_wb P win y e0 w w2 hww2 (isWB_of_ret P y _ hwb)
     have hs2 := ts_ge_after_wb P win y e0 w2 t hw2t (isWB_of_ret P y _ hw2b)
-    rcases pending_bound_optA P win y e0 R B T d Wn Y hy hS h0 hdly hd hY hR hB hWn
+    rcases pending_bound_optA P win y e0 R B T Rn d Wn Y hy hS h0 hdly hd hY hR hRn hRR hB hWn
       (cnt P win (IsRet P y) t e0 - 2) t w w2 htT hww2 hw2t hwk hwb (by omega) hw2b
       (by omega) with ⟨hn, h⟩ | ⟨hn, h⟩ | h
-    · -- D: the no-prefetch word retired at w2 pushed the release by Wn
+    · -- D: w2 is the latest retirement and was no-prefetch: the lateness allowance applies
       have h1 := hWn w2 (by omega) hw2b hn
       have h2 := ts_mono P win y e0 (w2 + 1) t (by omega)
+      have h3 : cnt P win (IsRet P y) (w2 + 1) e0 = cnt P win (IsRet P y) t e0 := by
+        have := cnt_succ_back P win (IsRet P y) w2 e0
+        rw [if_pos hw2b] at this
+        omega
+      have h4 := hlate w2 hw2t hw2b hn h3
       omega
     · -- F: the no-prefetch word retired at w, then a normal one at w2
       have h1 := hWn w (by omega) hwb hn
@@ -280,9 +297,28 @@ theorem head_valid_optA (d Wn Y : Nat) (hW : Wf e0)
       omega
     · omega
 
+/-- **Head valid when ready, under option A** (`head_late_optA` with no lateness and one
+response bound): D `R + 26 + B ≤ Wn`, F `R + 46 + 2B ≤ Wn + d`, N `R + 26 + B + Y ≤ 2d`. -/
+theorem head_valid_optA (d Wn Y : Nat) (hW : Wf e0)
+    (hfull : ∀ s, e0.actv y s = true)
+    (hy : P.live y = true) (hdly : P.dly y = d) (hd : DSTAR + B ≤ d)
+    (hY : 40 + 2 * B ≤ Wn + Y)
+    (hDc : R + 26 + B ≤ Wn) (hFc : R + 46 + 2 * B ≤ Wn + d) (hNc : R + 26 + B + Y ≤ 2 * d)
+    (hR : ∀ t, t < T → IsWB y (run P win t e0) →
+      (run P win t e0).now ≤ (run P win t e0).ts y + R + 2)
+    (hB : ∀ a m, a + m ≤ T → m ≤ 23 + B → chargeSum P win y m (run P win a e0) ≤ B)
+    (hWn : ∀ x, x < T → IsRet P y (run P win x e0) → NpfAt y (run P win x e0) →
+      (run P win x e0).ts y + Wn ≤ (run P win (x + 1) e0).ts y)
+    (t : Nat) (htT : t ≤ T)
+    (hrdy : (run P win t e0).ts y ≤ (run P win t e0).now) :
+    (run P win t e0).headValid y = true :=
+  head_late_optA P win y e0 R B T R d Wn Y 0 hW hfull hy hdly hd hY (Nat.le_refl R)
+    (by omega) hFc hNc hR (fun t ht hr _ => hR t ht (isWB_of_ret P y _ hr)) hB hWn t htT hrdy
+    (fun _ _ _ _ _ => by omega)
 end
 
 #print axioms pending_bound_optA
+#print axioms head_late_optA
 #print axioms head_valid_optA
 
 end JLane

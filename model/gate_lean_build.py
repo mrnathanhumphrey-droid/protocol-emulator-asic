@@ -43,7 +43,7 @@ KEY = ("dstar", "dstar29", "dstar39", "dstar39_v2", "dstar39_st", "dstar39_hold"
        "lemmaA_usb", "wb_bound_usb", "dstar_usb", "dstar_usb_rean", "dstar_usb_st",
        "retSpaced2", "retSpaced_of_pairs", "dstar_usb_pairs", "usb_wins", "usb_j2",
        "usb_nostall", "usb_j2_nb", "usb_br1_window",
-       "npf_unlock", "pending_bound_optA", "head_valid_optA")
+       "npf_unlock", "pending_bound_optA", "head_valid_optA", "head_late_optA")
 #: proof_constants.load() key -> the Lean expression that must evaluate to it (SPEC: the map)
 CONSTS = {
     "lemmaA_window": "LEMMA_A_WINDOW", "R_base": "R_BASE", "dispatch_cycles": "DISPATCH_CYCLES",
