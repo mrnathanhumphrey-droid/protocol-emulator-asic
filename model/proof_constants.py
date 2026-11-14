@@ -134,6 +134,15 @@ def nonbranch_dmin(B, k=None):
     return k["dstar"] + B
 
 
+def branch_w_diag(nbranch, k=None):
+    """Wilson 11-14: a DIAGNOSTIC, not a rule -- the branch wait at or above which k branch lanes'
+    branch-1 budget converges from the waits alone (one refill per lane per 23 + B window, then
+    B = l_refill x k): 2W >= R_base + head_slack + 22 + 2 l_refill k, i.e. W >= 31 + 4k today.
+    Named in the compiler's message when an image's per-image certificate finds no finite B."""
+    k = k or load()
+    return (k["R_base"] + k["head_slack"] + 22 + 2 * k["l_refill"] * nbranch + 1) // 2
+
+
 def lane_words(img, lane, I=None):
     """[(word index, action dict)] for EVERY word reachable from `lane`'s base: the next word,
     a branch's target, a looping REARM back to the base (a chaining REARM ends the walk).
