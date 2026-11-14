@@ -183,6 +183,18 @@ def device_program(variant=None):
         unx = [("UNX", nop(SPC)), (None, bit(I.UO0, 0, "SET")), (None, top)]
     else:
         unx = [("UNX", arm_se0), (None, arm_j), (None, top)]
+    # the token head: wait for a packet, read it as a token (4 bytes), decide on its PID
+    head = lambda: ([(None, arm_sop), (None, nop(D // 2))] + [(None, rx())] * 4 +
+                    [(None, cmp_pid(PID_SETUP, "SET")), (None, nop(SPC)),
+                     (None, cmp_pid(PID_OUT, "OUT")), (None, nop(SPC)),
+                     (None, cmp_pid(PID_IN, "IN"))] + [(None, f) for _l, f in unx])
+    # ⛔⛔ AFTER OUR ACK / NAK, THE HOST'S NEXT PACKET MAY START 2 BIT TIMES AFTER OUR
+    # EOP (TIPD, §7.1.18.1; agent 2's deadline: the packet ARM retires <= 78 cycles
+    # after the SE0 -> J edge). Looping back through REARM to TOP's ARM cost
+    # J 40 + release 20 + REARM 20 = 80 (measured 80 / 81). Each handshake tail
+    # therefore carries its OWN copy of the token head, so the ARM follows the
+    # release directly (40 + 20 = 60), as the DATA tail's ACK wait already did.
+    # A branch into TOP would cost W >= BR_W_MIN (33) and move the first sample.
     spec = (
         # TOP: any packet, received as a token (4 bytes); decide after it
         [("TOP", arm_sop), (None, nop(D // 2))] + [(None, rx())] * 4 +
@@ -201,11 +213,11 @@ def device_program(variant=None):
         # a DATA packet's verdict: the token's ADDR_OK, then CRC_OK -> ACK
         [("DOK", nop(SPC)), (None, bit(I.VPIN_ADDR_OK, 0, "RTOP")), (None, nop(SPC)),
          (None, bit(I.VPIN_CRC_OK, 1, "ACK")), (None, top)] +
-        [("ACK", send(ack_s)), (None, send(ack_p))] + eop + [(None, top)] +
+        [("ACK", send(ack_s)), (None, send(ack_p))] + eop + head() +
         # IN: ADDR_OK, READY -> the buffer, else NAK
         [("IN", nop(SPC)), (None, bit(I.VPIN_ADDR_OK, 0, "RTOP")), (None, nop(SPC)),
          (None, bit(I.VPIN_READY, 1, "DS", TA)),
-         (None, send(nak_s)), (None, send(nak_p))] + eop + [(None, top)] +
+         (None, send(nak_s)), (None, send(nak_p))] + eop + head() +
         [("DS", lambda L: I.act_send_buf(DM, DP, D))] + eop +
         # after our DATA: the host's handshake (2 bytes); ACK clears READY
         [(None, arm_sop), (None, nop(D // 2)), (None, rx()), (None, rx()),
