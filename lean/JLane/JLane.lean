@@ -38,3 +38,4 @@ import JLane.RespWin
 import JLane.RespClose
 import JLane.ArmClose
 import JLane.RespSpan
+import JLane.PrioResp
