@@ -87,6 +87,11 @@ Anchor `l_timestamp[cur] <= l_timestamp[cur] + {{(TS_W-DLY_W){1'b0}}, wb_dly};`.
 def tsNext (P : Program) (e : Engine) (l : Lane) : Nat :=
   if e.st = .wb ∧ l = e.cur then e.ts l + P.dly l + P.ext e.now l else e.ts l
 
+/-- The capture writes the fetched word's no-prefetch flag with it (`l_cls` is written at the
+capture with the word, l.1218–1222 `pre_cls`). -/
+def npfNext (P : Program) (e : Engine) (l : Lane) (s : Slot) : Bool :=
+  if e.pst = .cap ∧ l = e.pl ∧ s = e.pslot then P.fnpf e else e.npf l s
+
 /-- One clock cycle. `winq` registers this cycle's winner (anchor `winner_q   <= winner;`).
 `now` advances every cycle (primed, running). -/
 def step (P : Program) (win : Engine → Option Lane) (e : Engine) : Engine :=
@@ -98,7 +103,8 @@ def step (P : Program) (win : Engine → Option Lane) (e : Engine) : Engine :=
     ts := tsNext P e
     pst := p.pst, pl := p.pl, prr := p.prr, pbr1 := p.pbr1, pslot := p.pslot
     winq := win e
-    st := d.st, cur := d.cur }
+    st := d.st, cur := d.cur
+    npf := npfNext P e }
 
 /-! ### Sanity: each clause does what its anchor says -/
 

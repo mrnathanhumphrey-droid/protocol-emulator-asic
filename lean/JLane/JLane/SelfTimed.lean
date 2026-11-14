@@ -30,7 +30,8 @@ def StFragW (dly : Lane → Nat) (l : Lane) (w : Word) : Prop :=
   (w.op = .ord ∨ w.op = .loopRe ∨ w.op = .st) ∧ dly l ≤ w.dly
 
 /-- Every slot holds a fragment word. -/
-def StFrag (dly : Lane → Nat) (x : Engine2) : Prop := ∀ l s, StFragW dly l (x.word l s)
+def StFrag (dly : Lane → Nat) (x : Engine2) : Prop :=
+  (∀ l s, StFragW dly l (x.word l s)) ∧ x.e.NoNpf
 
 /-- Plain words are in the fragment. -/
 theorem stFragW_of_plain {dly : Lane → Nat} {l : Lane} {w : Word} (h : PlainW dly l w) :
@@ -48,7 +49,7 @@ theorem op_not_chain_st {dly : Lane → Nat} {l : Lane} {w : Word} (h : StFragW 
 
 theorem isClk_frag (dly : Lane → Nat) (x : Engine2) (h : StFrag dly x) : x.isClk = false := by
   unfold isClk head
-  rcases (h x.e.cur (x.e.sel x.e.cur)).1 with h1 | h1 | h1 <;> rw [h1]
+  rcases (h.1 x.e.cur (x.e.sel x.e.cur)).1 with h1 | h1 | h1 <;> rw [h1]
 
 /-- In the fragment the writeback adds the head word's whole delay. -/
 theorem wbDly_frag (P : Program2) (dly : Lane → Nat) (x : Engine2) (h : StFrag dly x) :
@@ -59,7 +60,8 @@ theorem wbDly_frag (P : Program2) (dly : Lane → Nat) (x : Engine2) (h : StFrag
 theorem wantFetch_frag (dly : Lane → Nat) (x : Engine2) (h : StFrag dly x) (l : Lane) :
     x.wantFetch l = x.e.wantFetch l := by
   unfold wantFetch Engine.wantFetch
-  have hc : (x.head l).op ≠ .chainRe := op_not_chain_st (h l (x.e.sel l))
+  have hc : (x.head l).op ≠ .chainRe := op_not_chain_st (h.1 l (x.e.sel l))
+  rw [h.2 l (x.e.sel l)]
   cases hv : x.e.headValid l
   · simp
   · rw [if_neg (by simp), if_neg hc]
@@ -82,8 +84,15 @@ theorem step2_proj_st (P : Program2) (Q : Program) (dly : Lane → Nat) (fw : En
     (w : Option Lane) (x : Engine2) (h : StFrag dly x)
     (hl : Q.live = P.live) (hd : Q.dly = dly)
     (hr : Q.ret x.e.now x.e.cur = x.retire P)
-    (he : Q.ext x.e.now x.e.cur = (x.head x.e.cur).dly - dly x.e.cur) :
+    (he : Q.ext x.e.now x.e.cur = (x.head x.e.cur).dly - dly x.e.cur)
+    (hq : Q.fnpf x.e = false) :
     proj (step2 P fw w x) = step Q (fun _ => w) (proj x) := by
+  have hn : npfNext (P.toP (fun _ => 0)) x.e = npfNext Q x.e := by
+    funext l s
+    unfold npfNext
+    split
+    · exact hq.symm
+    · rfl
   have hp : portNextW (P.toP (fun _ => 0)) x.wantFetch x.e = portNext Q x.e := by
     rw [portNextW_congr _ _ _ _ (Engine2.wantFetch_frag dly x h), ← portNextW_v1]
     exact portNextW_live _ _ (by rw [hl]; rfl) _ _
@@ -104,7 +113,7 @@ theorem step2_proj_st (P : Program2) (Q : Program) (dly : Lane → Nat) (fw : En
     unfold Engine2.tsNext tsNext
     by_cases hc : x.e.st = .wb ∧ l = x.e.cur
     · rw [if_pos hc, if_pos hc, hc.2, Engine2.wbDly_frag P dly x h, hd, he]
-      have hle := (h x.e.cur (x.e.sel x.e.cur)).2
+      have hle := (h.1 x.e.cur (x.e.sel x.e.cur)).2
       unfold Engine2.head
       omega
     · rw [if_neg hc, if_neg hc]
@@ -115,8 +124,9 @@ theorem step2_proj_st (P : Program2) (Q : Program) (dly : Lane → Nat) (fw : En
           pbr1 := (portNextW (P.toP (fun _ => 0)) x.wantFetch x.e).pbr1,
           pslot := (portNextW (P.toP (fun _ => 0)) x.wantFetch x.e).pslot,
           winq := w, st := (dispNext (fun _ => w) x.e).st,
-          cur := (dispNext (fun _ => w) x.e).cur } : Engine) = step Q (fun _ => w) x.e
-  rw [hp, ha, hs, ht]
+          cur := (dispNext (fun _ => w) x.e).cur,
+          npf := npfNext (P.toP (fun _ => 0)) x.e } : Engine) = step Q (fun _ => w) x.e
+  rw [hp, ha, hs, ht, hn]
   rfl
 
 /-- The fragment is preserved when every fetched word is in it. -/
@@ -124,14 +134,19 @@ theorem frag_step (P : Program2) (dly : Lane → Nat) (fw : Engine2 → Word)
     (w : Option Lane) (x : Engine2) (h : StFrag dly x)
     (hf : ∀ y, StFragW dly y.e.pl (fw y)) :
     StFrag dly (step2 P fw w x) := by
-  intro l s
-  show StFragW dly l (x.wordNext fw l s)
-  unfold Engine2.wordNext
-  by_cases hc : x.e.pst = .cap ∧ l = x.e.pl ∧ s = x.e.pslot
-  · rw [if_pos hc, hc.2.1]
-    exact hf x
-  · rw [if_neg hc]
-    exact h l s
+  refine ⟨fun l s => ?_, fun l s => ?_⟩
+  · show StFragW dly l (x.wordNext fw l s)
+    unfold Engine2.wordNext
+    by_cases hc : x.e.pst = .cap ∧ l = x.e.pl ∧ s = x.e.pslot
+    · rw [if_pos hc, hc.2.1]
+      exact hf x
+    · rw [if_neg hc]
+      exact h.1 l s
+  · show npfNext (P.toP (fun _ => 0)) x.e l s = false
+    unfold npfNext
+    split
+    · rfl
+    · exact h.2 l s
 
 theorem frag_run2 (P : Program2) (dly : Lane → Nat) (fw : Engine2 → Word)
     (sched : Engine2 → Option Lane) (hf : ∀ y, StFragW dly y.e.pl (fw y)) :
@@ -172,7 +187,7 @@ theorem run2_proj_st (P2 : Program2) (dly : Lane → Nat) (fw : Engine2 → Word
     rw [step_win_congr (stP P2 dly fw sched x0) (win1 (stP P2 dly fw sched x0) P2 fw sched x0),
       win1_on (stP P2 dly fw sched x0) P2 fw sched x0 hsw hss n]
     refine step2_proj_st P2 (stP P2 dly fw sched x0) dly fw _ _
-      (frag_run2 P2 dly fw sched hf n x0 hx0) rfl rfl ?_ ?_
+      (frag_run2 P2 dly fw sched hf n x0 hx0) rfl rfl ?_ ?_ rfl
     · show (run2 P2 fw sched ((run2 P2 fw sched n x0).e.now - x0.e.now) x0).retire P2 = _
       rw [hk]
     · show ((run2 P2 fw sched ((run2 P2 fw sched n x0).e.now - x0.e.now) x0).head
@@ -204,7 +219,7 @@ theorem dstar39_st (P2 : Program2) (dly : Lane → Nat) (fw : Engine2 → Word)
   have hss' : ∀ y x, Ready (stP P2 dly fw sched x0) y x.e → sched x ≠ none :=
     fun y x h => hss y x h
   have key := dstar39 (stP P2 dly fw sched x0) (win1 (stP P2 dly fw sched x0) P2 fw sched x0)
-    x0.e hW hfull h0 h0ts (win1_ready _ P2 fw sched x0)
+    x0.e hW hfull (fun _ => rfl) hx0.2 h0 h0ts (win1_ready _ P2 fw sched x0)
     (fun y e _ hy => win1_wc _ P2 fw sched x0 y e hy) hd T
   have hr := run2_proj_st P2 dly fw sched x0 hx0 hf hsw' hss' T
   rw [← hr] at key

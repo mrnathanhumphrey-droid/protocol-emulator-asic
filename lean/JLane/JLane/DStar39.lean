@@ -12,11 +12,13 @@ namespace JLane
 
 theorem dstar39 (P : Program) (win : Engine → Option Lane) (e0 : Engine)
     (hW : Wf e0) (hfull : ∀ l s, P.live l = true → e0.actv l s = true)
+    (hfn : ∀ e, P.fnpf e = false) (hn0 : e0.NoNpf)
     (h0 : e0.st = .idle) (h0ts : ∀ l, e0.now ≤ e0.ts l)
     (hwin : ∀ e w, win e = some w → P.live w = true ∧ e.ts w ≤ e.now)
     (hws : ∀ y e, e.st = .idle → Ready P y e → win e ≠ none)
     (hd : ∀ l, P.live l = true → 39 ≤ P.dly l) :
     ∀ T, NoStall win (run P win T e0) ∧ NoBr1 P (run P win T e0) := by
+  have hnp := fun t => nonpf_run P win hfn t e0 hn0
   have hS : Struct e0 := by
     have hw := hW
     unfold Wf at hw
@@ -45,7 +47,7 @@ theorem dstar39 (P : Program) (win : Engine → Option Lane) (e0 : Engine)
     intro n hn y hy hrdy
     have hdy := hd y hy
     exact head_valid_when_ready P win y e0 (P.dly y) 14 0 n hW hfull hy rfl
-      (by omega) (by omega)
+      (by omega) hnp (by omega)
       (fun t ht hwb => hRof n (fun t ht => (hn t ht).1) y hy t ht hwb)
       (fun a m ham hm => hBof n (fun t ht => (hn t ht).2) y a m ham hm)
       n (Nat.le_refl n) hrdy
@@ -109,7 +111,7 @@ theorem dstar39 (P : Program) (win : Engine → Option Lane) (e0 : Engine)
               obtain ⟨w', hw'm, hw'k, hw'b⟩ :=
                 cnt_reach P win (IsRet P w) m e0 (cnt P win (IsRet P w) m e0 - 1) (by omega)
               have hpb := pending_bound P win w e0 (P.dly w) 14 0 (m + 1) hW hfull hlive rfl
-                (by omega)
+                (by omega) hnp
                 (fun t ht hwb' => hRof (m + 1) (fun t ht => (ih t ht).1) w hlive t ht hwb')
                 (fun a k hak hk => hBof (m + 1) (fun t ht => (ih t ht).2) w a k hak hk)
                 (cnt P win (IsRet P w) m e0 - 1) (m + 1) w' (Nat.le_refl _) (by omega) hw'k hw'b

@@ -1,7 +1,8 @@
 import JLane.Run
 /-!
 # Brick 9 — the D* theorem
-From a primed start, no dispatch decision ever stalls, provided:
+From a primed start, no dispatch decision ever stalls, provided (for programs with no
+no-prefetch word, hfn / hn0: the branch brick generalises this):
 * the EDF winner is always a ready lane;
 * every live lane has `d ≥ D* + B` (throughput) and `R + 26 + B ≤ 2d` (latency);
 * `hEDF`: on any stall-free prefix, every writeback lands within `R + 2` of its release;
@@ -19,6 +20,7 @@ def NoStall (win : Engine → Option Lane) (e : Engine) : Prop :=
 theorem dstar (P : Program) (win : Engine → Option Lane) (e0 : Engine)
     (R : Lane → Nat) (B : Nat)
     (hW : Wf e0) (hfull : ∀ l s, P.live l = true → e0.actv l s = true)
+    (hfn : ∀ e, P.fnpf e = false) (hn0 : e0.NoNpf)
     (hwin : ∀ e w, win e = some w → P.live w = true ∧ e.ts w ≤ e.now)
     (hthr : ∀ l, P.live l = true → DSTAR + B ≤ P.dly l)
     (hlat : ∀ l, P.live l = true → R l + 26 + B ≤ 2 * P.dly l)
@@ -45,7 +47,7 @@ theorem dstar (P : Program) (win : Engine → Option Lane) (e0 : Engine)
         intro _hidle w hw
         obtain ⟨hlive, hrdy⟩ := hwin _ w hw
         exact head_valid_when_ready P win w e0 (P.dly w) (R w) B T hW hfull hlive rfl
-          (hthr w hlive) (hlat w hlive)
+          (hthr w hlive) (fun t => nonpf_run P win hfn t e0 hn0) (hlat w hlive)
           (fun s hs hwb => hEDF T ih w s hlive hs hwb)
           (fun a m h1 h2 => hB T ih w a m hlive h1 h2)
           T (Nat.le_refl T) hrdy

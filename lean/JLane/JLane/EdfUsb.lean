@@ -47,6 +47,7 @@ theorem step_wb_idle (P : Program) (win : Engine → Option Lane) (e : Engine) (
 section
 variable (P : Program) (win : Engine → Option Lane) (e0 : Engine) (u : Lane) (ds : Lane → Nat)
   (hW : Wf e0) (hfull : ∀ l s, P.live l = true → e0.actv l s = true)
+  (hfn : ∀ e, P.fnpf e = false) (hn0 : e0.NoNpf)
   (h0 : e0.st = .idle) (h0ts : ∀ l, e0.now ≤ e0.ts l)
   (hwin : ∀ e w, win e = some w → P.live w = true ∧ e.ts w ≤ e.now)
   (hws : ∀ y e, e.st = .idle → Ready P y e → win e ≠ none)
@@ -56,13 +57,13 @@ variable (P : Program) (win : Engine → Option Lane) (e0 : Engine) (u : Lane) (
   (hedf : EdfBeats P ds win u)
   (hmargin : ∀ z, P.live z = true → z ≠ u → ds u + USB_DEADLINE_MARGIN ≤ ds z)
 
-include hW hfull h0 h0ts hwin hws hdu hretu hd hedf hmargin in
+include hW hfull hfn hn0 h0 h0ts hwin hws hdu hretu hd hedf hmargin in
 /-- **The USB lane wins every idle cycle it is ready in**, given the margin. -/
 theorem usb_wins :
     ∀ t, (run P win t e0).st = .idle → Ready P u (run P win t e0) →
       win (run P win t e0) = some u := by
   intro t hid hr
-  have hNS := fun T => (dstar_usb P win e0 u hW hfull h0 h0ts hwin hws hdu hretu hd T).1
+  have hNS := fun T => (dstar_usb P win e0 u hW hfull hfn hn0 h0 h0ts hwin hws hdu hretu hd T).1
   cases hw : win (run P win t e0) with
   | none => exact absurd hw (hws u _ hid hr)
   | some w =>
@@ -85,15 +86,15 @@ theorem usb_wins :
       have hMv : USB_DEADLINE_MARGIN = 17 := rfl
       omega
 
-include hW hfull h0 h0ts hwin hws hdu hretu hd hedf hmargin in
+include hW hfull hfn hn0 h0 h0ts hwin hws hdu hretu hd hedf hmargin in
 /-- **`J ≤ 2` for the USB lane**: ready and not in its own dispatch at `t`, it is decided at
 `t`, `t + 1` or `t + 2`. -/
 theorem usb_j2 :
     ∀ t, Ready P u (run P win t e0) → NotMid u (run P win t e0) →
       ∃ j, j ≤ 2 ∧ Dec win u (run P win (t + j) e0) := by
   intro t hr hm
-  have hNS := fun T => (dstar_usb P win e0 u hW hfull h0 h0ts hwin hws hdu hretu hd T).1
-  have hwins := usb_wins P win e0 u ds hW hfull h0 h0ts hwin hws hdu hretu hd hedf hmargin
+  have hNS := fun T => (dstar_usb P win e0 u hW hfull hfn hn0 h0 h0ts hwin hws hdu hretu hd T).1
+  have hwins := usb_wins P win e0 u ds hW hfull hfn hn0 h0 h0ts hwin hws hdu hretu hd hedf hmargin
   have decAt : ∀ n, (run P win n e0).st = .idle → Ready P u (run P win n e0) →
       Dec win u (run P win n e0) := fun n hi hrn => by
     have hwn := hwins n hi hrn

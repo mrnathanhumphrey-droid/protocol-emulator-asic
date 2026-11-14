@@ -38,19 +38,21 @@ theorem phi_le_19 (y : Lane) (p : Port) (h : p.pst = .scan ∨ p.pbr1 = false) :
 
 /-- The wait bound when no branch-1 refill is in flight at the start. -/
 theorem port_wait_bound_19 (P : Program) (win : Engine → Option Lane) (y : Lane)
-    (hy : P.live y = true) (n : Nat) (e : Engine) (hw : e.wantFetch y = true)
+    (hy : P.live y = true) (n : Nat) (e : Engine) (hS : Struct e) (hw : e.wantFetch y = true)
     (hq : e.pst = .scan ∨ e.pbr1 = false)
     (hnh : ∀ i, i < n → ¬Hit y (run P win i e)) :
     n ≤ 19 + chargeSum P win y n e := by
-  have h := port_wait P win y hy n e hw hnh
+  have h := port_wait P win y hy n e hS hw hnh
   have h2 := phi_le_19 y (portOf e) hq
   omega
 
-/-- A retiring writeback leaves the dispatched lane owing a slot. -/
+/-- A retiring writeback leaves the dispatched lane owing a slot -- and wanting it, unless its
+new head is a no-prefetch word (option A: the refill waits for that word to write back). -/
 theorem wb_owes (P : Program) (win : Engine → Option Lane) (e : Engine) (hw : e.st = .wb)
-    (hr : P.ret e.now e.cur = true) :
+    (hr : P.ret e.now e.cur = true)
+    (hn : (step P win e).npf e.cur ((step P win e).sel e.cur) = false) :
     (step P win e).wantFetch e.cur = true := by
-  rw [Engine.wantFetch_iff]
+  rw [Engine.wantFetch_iff _ _ hn]
   apply owed_pos_of (step P win e) e.cur (e.sel e.cur)
   show actvNext P e e.cur (e.sel e.cur) = false
   unfold actvNext
@@ -74,11 +76,11 @@ theorem hit_then_scan (P : Program) (win : Engine → Option Lane) (y : Lane) (e
 /-- **The pass bound.** After a hit for `y`, if `y` still owes, its next hit comes within
 `D*` cycles of this one, plus `L_REFILL` per branch-1 refill for another lane. -/
 theorem next_pass (P : Program) (win : Engine → Option Lane) (y : Lane)
-    (hy : P.live y = true) (e : Engine) (hh : Hit y e) (n : Nat)
+    (hy : P.live y = true) (e : Engine) (hS : Struct e) (hh : Hit y e) (n : Nat)
     (hw : (step P win e).wantFetch y = true)
     (hnh : ∀ i, i < n → ¬Hit y (run P win i (step P win e))) :
     n + 1 ≤ DSTAR + chargeSum P win y n (step P win e) := by
-  have h := port_wait_bound_19 P win y hy n (step P win e) hw
+  have h := port_wait_bound_19 P win y hy n (step P win e) (struct_step P win e hS) hw
     (Or.inl (hit_then_scan P win y e hh)) hnh
   have hd : DSTAR = 20 := dstar_val
   omega

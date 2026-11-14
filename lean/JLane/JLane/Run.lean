@@ -169,27 +169,27 @@ theorem ts_ge_after_wb (P : Program) (win : Engine → Option Lane) (y : Lane) (
 /-! ### Waits under a branch-1 budget -/
 
 theorem window_le (P : Program) (win : Engine → Option Lane) (y : Lane)
-    (hy : P.live y = true) (e : Engine) (B n : Nat) (hw : e.wantFetch y = true)
+    (hy : P.live y = true) (e : Engine) (B n : Nat) (hS : Struct e) (hw : e.wantFetch y = true)
     (hB : ∀ m, m ≤ n → m ≤ 23 + B → chargeSum P win y m e ≤ B)
     (hnh : ∀ i, i < n → ¬Hit y (run P win i e)) : n ≤ 22 + B := by
   by_cases hn : n ≤ 23 + B
-  · have h := port_wait_bound P win y hy n e hw hnh
+  · have h := port_wait_bound P win y hy n e hS hw hnh
     have := hB n (Nat.le_refl n) hn
     omega
-  · have h := port_wait_bound P win y hy (23 + B) e hw (fun i hi => hnh i (by omega))
+  · have h := port_wait_bound P win y hy (23 + B) e hS hw (fun i hi => hnh i (by omega))
     have := hB (23 + B) (by omega) (Nat.le_refl _)
     omega
 
 theorem window_le_19 (P : Program) (win : Engine → Option Lane) (y : Lane)
-    (hy : P.live y = true) (e : Engine) (B n : Nat) (hw : e.wantFetch y = true)
+    (hy : P.live y = true) (e : Engine) (B n : Nat) (hS : Struct e) (hw : e.wantFetch y = true)
     (hq : e.pst = .scan ∨ e.pbr1 = false)
     (hB : ∀ m, m ≤ n → m ≤ 23 + B → chargeSum P win y m e ≤ B)
     (hnh : ∀ i, i < n → ¬Hit y (run P win i e)) : n ≤ 19 + B := by
   by_cases hn : n ≤ 23 + B
-  · have h := port_wait_bound_19 P win y hy n e hw hq hnh
+  · have h := port_wait_bound_19 P win y hy n e hS hw hq hnh
     have := hB n (Nat.le_refl n) hn
     omega
-  · have h := port_wait_bound_19 P win y hy (23 + B) e hw hq (fun i hi => hnh i (by omega))
+  · have h := port_wait_bound_19 P win y hy (23 + B) e hS hw hq (fun i hi => hnh i (by omega))
     have := hB (23 + B) (by omega) (Nat.le_refl _)
     omega
 
@@ -198,7 +198,8 @@ theorem window_le_19 (P : Program) (win : Engine → Option Lane) (y : Lane)
 /-- Fresh case: every earlier refill of `y` was served by retirement `w` (#k). The bound is
 against the actual release `ts(w)`, whatever the earlier writebacks added. -/
 theorem pb_fresh (P : Program) (win : Engine → Option Lane) (y : Lane) (e0 : Engine)
-    (R B T w t : Nat) (hy : P.live y = true)
+    (R B T w t : Nat) (hy : P.live y = true) (hS0 : Struct e0)
+    (hnp : ∀ t, (run P win t e0).NoNpf)
     (hR : ∀ t, t < T → IsWB y (run P win t e0) →
       (run P win t e0).now ≤ (run P win t e0).ts y + R + 2)
     (hB : ∀ a m, a + m ≤ T → m ≤ 23 + B → chargeSum P win y m (run P win a e0) ≤ B)
@@ -210,9 +211,12 @@ theorem pb_fresh (P : Program) (win : Engine → Option Lane) (y : Lane) (e0 : E
   have hnow := now_run P win w e0
   obtain ⟨hst, hcur, hret⟩ := hwb
   have hwant : (run P win (w + 1) e0).wantFetch y = true := by
+    have hn1 := hnp (w + 1)
+    rw [run_succ'] at hn1
     rw [run_succ', ← hcur]
-    exact wb_owes P win (run P win w e0) hst (by rw [hcur]; exact hret)
-  have hn := window_le P win y hy (run P win (w + 1) e0) B (t - (w + 1)) hwant
+    exact wb_owes P win (run P win w e0) hst (by rw [hcur]; exact hret) (hn1 _ _)
+  have hn := window_le P win y hy (run P win (w + 1) e0) B (t - (w + 1))
+    (struct_run P win (w + 1) e0 hS0) hwant
     (fun m hm hm' => hB (w + 1) m (by omega) hm')
     (fun i hi => by
       rw [← run_add]
@@ -226,6 +230,7 @@ Needs only that every writeback adds at least `d = P.dly y` (`ts_ge_after_wb`). 
 theorem pending_bound (P : Program) (win : Engine → Option Lane) (y : Lane) (e0 : Engine)
     (d R B T : Nat) (hW : Wf e0) (hfull : ∀ l s, P.live l = true → e0.actv l s = true)
     (hy : P.live y = true) (hdly : P.dly y = d) (hd : DSTAR + B ≤ d)
+    (hnp : ∀ t, (run P win t e0).NoNpf)
     (hR : ∀ t, t < T → IsWB y (run P win t e0) →
       (run P win t e0).now ≤ (run P win t e0).ts y + R + 2)
     (hB : ∀ a m, a + m ≤ T → m ≤ 23 + B → chargeSum P win y m (run P win a e0) ≤ B) :
@@ -242,12 +247,12 @@ theorem pending_bound (P : Program) (win : Engine → Option Lane) (y : Lane) (e
   | zero =>
     intro t w htT hwt hwk hwb hh
     have hm := cnt_mono P win (Hit y) e0 (w + 1) t (by omega)
-    exact pb_fresh P win y e0 R B T w t hy hR hB hwt htT hwb (by omega)
+    exact pb_fresh P win y e0 R B T w t hy hS hnp hR hB hwt htT hwb (by omega)
   | succ k ih =>
     intro t w htT hwt hwk hwb hh
     have hm := cnt_mono P win (Hit y) e0 (w + 1) t (by omega)
     by_cases hfresh : k + 1 ≤ cnt P win (Hit y) (w + 1) e0
-    · exact pb_fresh P win y e0 R B T w t hy hR hB hwt htT hwb (by omega)
+    · exact pb_fresh P win y e0 R B T w t hy hS hnp hR hB hwt htT hwb (by omega)
     · -- the previous retirement, #k, at w' < w: a writeback, so its release is ≥ d earlier
       obtain ⟨w', hw'w, hw'k, hw'b⟩ := cnt_reach P win (IsRet P y) w e0 k (by omega)
       have hsp := ts_ge_after_wb P win y e0 w' w hw'w (isWB_of_ret P y _ hw'b)
@@ -274,14 +279,15 @@ theorem pending_bound (P : Program) (win : Engine → Option Lane) (y : Lane) (e
         have hwbc1 := cnt_mono P win (IsRet P y) e0 (w + 1) (c + 1) (by omega)
         have hic := ih c w' (by omega) (by omega) hw'k hw'b (by omega)
         have hwant : (run P win (c + 1) e0).wantFetch y = true := by
-          rw [Engine.wantFetch_iff]
+          rw [Engine.wantFetch_iff _ _ (hnp (c + 1) _ _)]
           have := owed_run P win y (c + 1) e0 hS
           omega
         have hscan : (run P win (c + 1) e0).pst = .scan := by
           rw [run_succ']
           exact hit_then_scan P win y (run P win c e0) hhit
         have heq : cnt P win (Hit y) (c + 1) e0 = cnt P win (Hit y) t e0 := by omega
-        have hn := window_le_19 P win y hy (run P win (c + 1) e0) B (t - (c + 1)) hwant
+        have hn := window_le_19 P win y hy (run P win (c + 1) e0) B (t - (c + 1))
+          (struct_run P win (c + 1) e0 hS) hwant
           (Or.inl hscan)
           (fun m hm hm' => hB (c + 1) m (by omega) hm')
           (fun i hi => by
@@ -296,6 +302,7 @@ lane `y`'s head is valid at every cycle `t ≤ T` where `y` is ready. -/
 theorem head_valid_when_ready (P : Program) (win : Engine → Option Lane) (y : Lane)
     (e0 : Engine) (d R B T : Nat) (hW : Wf e0) (hfull : ∀ l s, P.live l = true → e0.actv l s = true)
     (hy : P.live y = true) (hdly : P.dly y = d) (hd : DSTAR + B ≤ d)
+    (hnp : ∀ t, (run P win t e0).NoNpf)
     (hlat : R + 26 + B ≤ 2 * d)
     (hR : ∀ t, t < T → IsWB y (run P win t e0) →
       (run P win t e0).now ≤ (run P win t e0).ts y + R + 2)
@@ -311,7 +318,7 @@ theorem head_valid_when_ready (P : Program) (win : Engine → Option Lane) (y : 
     -- retirement #(J − 2), where J is the number of retirements so far
     obtain ⟨w, hwt, hwk, hwb⟩ :=
       cnt_reach P win (IsRet P y) t e0 (cnt P win (IsRet P y) t e0 - 2) (by omega)
-    have hpb := pending_bound P win y e0 d R B T hW hfull hy hdly hd hR hB
+    have hpb := pending_bound P win y e0 d R B T hW hfull hy hdly hd hnp hR hB
       (cnt P win (IsRet P y) t e0 - 2) t w htT hwt hwk hwb (by omega)
     -- retirement #(J − 1), at some w2 strictly between w and t
     obtain ⟨w2, hw2t, hw2k, hw2b⟩ :=

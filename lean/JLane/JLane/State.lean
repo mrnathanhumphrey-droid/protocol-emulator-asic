@@ -43,17 +43,6 @@ inductive DState where
 
 abbrev Slot := Bool
 
-/-- A program. A writeback of lane `l` at cycle `t` advances its timestamp by
-`dly l + ext t l`: `dly` is the lane's minimum delay, `ext` the extra on that writeback.
-It **retires** its action (invalidates the head, flips the select, owes a refill) iff
-`ret t l`: a held clocked phase (7C) or a chaining re-arm (7A) does not.
-Defaults `ext = 0`, `ret = true`: `{ live, dly }` is the program of v1. -/
-structure Program where
-  live : Lane → Bool
-  dly  : Lane → Nat
-  ext  : Nat → Lane → Nat := fun _ _ => 0
-  ret  : Nat → Lane → Bool := fun _ _ => true
-
 structure Engine where
   now   : Nat
   actv  : Lane → Slot → Bool
@@ -71,12 +60,34 @@ structure Engine where
   winq  : Option Lane
   st    : DState
   cur   : Lane
+  /-- Per slot: the word held there allows **no prefetch past it** — a branch (option A,
+  `want_fetch` l.2798–2801: its successor is unknown until it writes back) or a chaining
+  re-arm (l.2795: its successor is the head itself). Set at the capture (Wilson 11-13, the
+  branch brick); all-false reproduces the v1 port exactly. -/
+  npf   : Lane → Slot → Bool
+
+/-- A program. A writeback of lane `l` at cycle `t` advances its timestamp by
+`dly l + ext t l`: `dly` is the lane's minimum delay, `ext` the extra on that writeback.
+It **retires** its action (invalidates the head, flips the select, owes a refill) iff
+`ret t l`: a held clocked phase (7C) or a chaining re-arm (7A) does not.
+`fnpf e`: the word captured at `e` allows no prefetch past it (a free input, like the word
+itself). Defaults `ext = 0`, `ret = true`, `fnpf = false`: `{ live, dly }` is the program of v1. -/
+structure Program where
+  live : Lane → Bool
+  dly  : Lane → Nat
+  ext  : Nat → Lane → Nat := fun _ _ => 0
+  ret  : Nat → Lane → Bool := fun _ _ => true
+  fnpf : Engine → Bool := fun _ => false
 
 namespace Engine
 def headValid (e : Engine) (l : Lane) : Bool := e.actv l (e.sel l)
 def spareValid (e : Engine) (l : Lane) : Bool := e.actv l (!e.sel l)
-/-- §1 `want_fetch`, chaining re-arm excluded in v1. -/
-def wantFetch (e : Engine) (l : Lane) : Bool := !e.headValid l || !e.spareValid l
+/-- §1 `want_fetch` (l.2778–2806): the head is empty, or the spare is empty **and the head
+allows a prefetch past it**. -/
+def wantFetch (e : Engine) (l : Lane) : Bool :=
+  !e.headValid l || (!e.spareValid l && !e.npf l (e.sel l))
+/-- No slot holds a no-prefetch word: the v1 port. -/
+def NoNpf (e : Engine) : Prop := ∀ l s, e.npf l s = false
 /-- §1 branch 2: head if the head is empty, else the spare. -/
 def fetchSlot (e : Engine) (l : Lane) : Slot := if e.headValid l then !e.sel l else e.sel l
 /-- §3 release: `now == l_timestamp`, held thereafter. -/
@@ -90,10 +101,25 @@ def owed (e : Engine) (l : Lane) : Nat :=
 theorem owed_le_two (e : Engine) (l : Lane) : e.owed l ≤ 2 := by
   unfold owed; split <;> split <;> omega
 
-theorem wantFetch_iff (e : Engine) (l : Lane) : e.wantFetch l = true ↔ 1 ≤ e.owed l := by
+/-- With no no-prefetch word at the head, the port wants a lane exactly when it owes a slot. -/
+theorem wantFetch_iff (e : Engine) (l : Lane) (h : e.npf l (e.sel l) = false) :
+    e.wantFetch l = true ↔ 1 ≤ e.owed l := by
   unfold wantFetch headValid spareValid owed
+  rw [h]
   cases hs : e.sel l <;> cases h0 : e.actv l false <;> cases h1 : e.actv l true <;>
     simp [h0, h1]
+
+/-- Wanting implies owing, always. -/
+theorem owed_of_want (e : Engine) (l : Lane) (h : e.wantFetch l = true) : 1 ≤ e.owed l := by
+  unfold wantFetch headValid spareValid owed at *
+  cases hs : e.sel l <;> cases h0 : e.actv l false <;> cases h1 : e.actv l true <;>
+    simp_all
+
+/-- An empty head is always wanted. -/
+theorem want_of_head (e : Engine) (l : Lane) (h : e.headValid l = false) : e.wantFetch l = true := by
+  unfold wantFetch
+  rw [h]
+  rfl
 end Engine
 
 /-- Sanity: the port never fetches into an already-valid slot. -/

@@ -141,6 +141,7 @@ theorem idle3 (P : Program) (win : Engine → Option Lane) (e0 : Engine) (c : Na
 section
 variable (P : Program) (win : Engine → Option Lane) (e0 : Engine) (u : Lane) (ds : Lane → Nat)
   (hW : Wf e0) (hfull : ∀ l s, P.live l = true → e0.actv l s = true)
+  (hfn : ∀ e, P.fnpf e = false) (hn0 : e0.NoNpf)
   (h0 : e0.st = .idle) (h0ts : ∀ l, e0.now ≤ e0.ts l)
   (hwin : ∀ e w, win e = some w → P.live w = true ∧ e.ts w ≤ e.now)
   (hws : ∀ y e, e.st = .idle → Ready P y e → win e ≠ none)
@@ -331,7 +332,7 @@ theorem budget_usb (n : Nat) (hG : Good P win e0 u n) (a m : Nat) (ham : a + m �
   rw [hz, Nat.mul_zero] at hs
   omega
 
-include hW hfull h0 h0ts hwin hws hdu hd hedf hmargin in
+include hW hfull hfn hn0 h0 h0ts hwin hws hdu hd hedf hmargin in
 /-- Valid heads at `n`, from the good prefix and valid heads before `n`. -/
 theorem hv_step (n : Nat) (hG : Good P win e0 u n) (hHV : ∀ s, s < n → HVat P win e0 s) :
     HVat P win e0 n := by
@@ -344,7 +345,7 @@ theorem hv_step (n : Nat) (hG : Good P win e0 u n) (hHV : ∀ s, s < n → HVat 
   have hCv : CORESIDENT_USB = 50 := rfl
   by_cases hyu : y = u
   · subst hyu
-    apply head_valid_ret P win y e0 (P.dly y) 2 0 n (P.dly y) hW hfull hy rfl (by omega)
+    apply head_valid_ret P win y e0 (P.dly y) 2 0 n (P.dly y) hW hfull hy rfl (by omega) (fun t => nonpf_run P win hfn t e0 hn0)
       (retSpaced_of_dly P win e0 y _ (Nat.le_refl _)) (by omega)
     · intro t ht hwb
       obtain ⟨D, rfl, hdec⟩ := wb_back P win e0 h0 t y hwb
@@ -359,7 +360,7 @@ theorem hv_step (n : Nat) (hG : Good P win e0 u n) (hHV : ∀ s, s < n → HVat 
     · exact hrdy
   · have hdy := hd y hy hyu
     apply head_valid_ret P win y e0 (P.dly y) R_USB BR1_BUDGET n (P.dly y) hW hfull hy rfl
-      (by omega) (retSpaced_of_dly P win e0 y _ (Nat.le_refl _)) (by omega)
+      (by omega) (fun t => nonpf_run P win hfn t e0 hn0) (retSpaced_of_dly P win e0 y _ (Nat.le_refl _)) (by omega)
     · intro t ht hwb
       exact wb_bound_usb P win e0 n u h0 h0ts hwin hws hdu (hd42 P u hd) hNSp t ht y hy hwb
     · intro a m ham hm
@@ -367,7 +368,7 @@ theorem hv_step (n : Nat) (hG : Good P win e0 u n) (hHV : ∀ s, s < n → HVat 
     · exact Nat.le_refl n
     · exact hrdy
 
-include hW hfull h0 h0ts hwin hws hdu hd hedf hmargin in
+include hW hfull hfn hn0 h0 h0ts hwin hws hdu hd hedf hmargin in
 /-- **The USB lane never stalls, and branch 1 only ever issues for it.** For any USB program
 whose words have delay `≥ NOWB_MIN`, the deadline margin, and every other live lane at
 `≥ CORESIDENT_USB`. -/
@@ -382,7 +383,7 @@ theorem usb_nostall : ∀ T, NoStall win (run P win T e0) ∧ Br1Only P u (run P
     | zero => exact ⟨fun t ht => absurd ht (Nat.not_lt_zero t), fun s hs => absurd hs (Nat.not_lt_zero s)⟩
     | succ n ih =>
       obtain ⟨hG, hHV⟩ := ih
-      have hvn := hv_step P win e0 u ds hW hfull h0 h0ts hwin hws hdu hd hedf hmargin n hG hHV
+      have hvn := hv_step P win e0 u ds hW hfull hfn hn0 h0 h0ts hwin hws hdu hd hedf hmargin n hG hHV
       have hHV' : ∀ s, s < n + 1 → HVat P win e0 s := fun s hs => by
         rcases Nat.lt_or_ge s n with h | h
         · exact hHV s h
@@ -438,7 +439,7 @@ theorem usb_nostall : ∀ T, NoStall win (run P win T e0) ∧ Br1Only P u (run P
               obtain ⟨w', hw'm, hw'k, hw'b⟩ :=
                 cnt_reach P win (IsRet P w) m e0 (cnt P win (IsRet P w) m e0 - 1) (by omega)
               have hpb := pending_bound P win w e0 (P.dly w) R_USB BR1_BUDGET (m + 1) hW hfull
-                hlive rfl (by omega)
+                hlive rfl (by omega) (fun t => nonpf_run P win hfn t e0 hn0)
                 (fun t ht hwb' => wb_bound_usb P win e0 (m + 1) u h0 h0ts hwin hws hdu
                   (hd42 P u hd) hNSp t ht w hlive hwb')
                 (fun a k hak hk => budget P win e0 u ds hfull h0 h0ts hwin hws hdu hd hedf hmargin
@@ -451,12 +452,12 @@ theorem usb_nostall : ∀ T, NoStall win (run P win T e0) ∧ Br1Only P u (run P
   intro T
   exact (key (T + 1)).1 T (Nat.lt_succ_self T)
 
-include hW hfull h0 h0ts hwin hws hdu hd hedf hmargin in
+include hW hfull hfn hn0 h0 h0ts hwin hws hdu hd hedf hmargin in
 /-- **`J ≤ 2` for the USB lane's samples, branch-1 allowed** (Wilson 11-13 condition 1). -/
 theorem usb_j2_nb :
     ∀ t, Ready P u (run P win t e0) → NotMid u (run P win t e0) →
       ∃ j, j ≤ 2 ∧ Dec win u (run P win (t + j) e0) := by
-  have hNS := fun T => (usb_nostall P win e0 u ds hW hfull h0 h0ts hwin hws hdu hd hedf hmargin T).1
+  have hNS := fun T => (usb_nostall P win e0 u ds hW hfull hfn hn0 h0 h0ts hwin hws hdu hd hedf hmargin T).1
   have hwins : ∀ s, (run P win s e0).st = .idle → Ready P u (run P win s e0) →
       win (run P win s e0) = some u := fun s hi hr =>
     usb_wins_pre P win e0 u ds h0 h0ts hwin hws hdu hd hedf hmargin (s + 1)
@@ -500,17 +501,17 @@ theorem usb_j2_nb :
       exact step_wb_idle P win _ hs1
     exact ⟨2, by omega, decAt (t + 2) hi2 (keep (t + 1) (Or.inl hc1) hr1)⟩
 
-include hW hfull h0 h0ts hwin hws hdu hd hedf hmargin in
+include hW hfull hfn hn0 h0 h0ts hwin hws hdu hd hedf hmargin in
 /-- **At most `USB_BR1_PER_WINDOW` USB branch-1 refills in any `23 + BR1_BUDGET`-cycle window**
 (Wilson 11-13 condition 2), proved. -/
 theorem usb_br1_window (a m : Nat) (hm : m ≤ 23 + BR1_BUDGET) :
     cnt P win (UBr1 P u) m (run P win a e0) ≤ USB_BR1_PER_WINDOW := by
-  have hall := usb_nostall P win e0 u ds hW hfull h0 h0ts hwin hws hdu hd hedf hmargin
+  have hall := usb_nostall P win e0 u ds hW hfull hfn hn0 h0 h0ts hwin hws hdu hd hedf hmargin
   have hG : ∀ n, Good P win e0 u n := fun n t _ => hall t
   have hHV : ∀ s, HVat P win e0 s := by
     intro s
     induction s using Nat.strongRecOn with
-    | _ s ih => exact hv_step P win e0 u ds hW hfull h0 h0ts hwin hws hdu hd hedf hmargin s (hG s) ih
+    | _ s ih => exact hv_step P win e0 u ds hW hfull hfn hn0 h0 h0ts hwin hws hdu hd hedf hmargin s (hG s) ih
   have hNSp : ∀ t, NoStall win (run P win t e0) := fun t => (hall t).1
   have hdec_of : ∀ i, UBr1 P u (run P win i (run P win a e0)) →
       ∃ D, a + i = D + 3 ∧ Dec win u (run P win D e0) := by

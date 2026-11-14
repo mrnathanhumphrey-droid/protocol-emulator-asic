@@ -173,6 +173,18 @@ theorem struct_run (P : Program) (win : Engine → Option Lane) :
   | 0, _, h => h
   | n + 1, e, h => struct_run P win n (step P win e) (struct_step P win e h)
 
+/-- A program that never captures a no-prefetch word keeps the flags clear: the v1 port, along
+the whole run (Wilson 11-13, the branch brick: every theorem stated before option A runs here). -/
+theorem nonpf_run (P : Program) (win : Engine → Option Lane) (hfn : ∀ e, P.fnpf e = false) :
+    ∀ (n : Nat) (e : Engine), e.NoNpf → (run P win n e).NoNpf
+  | 0, _, h => h
+  | n + 1, e, h => nonpf_run P win hfn n (step P win e) (fun l s => by
+      show npfNext P e l s = false
+      unfold npfNext
+      split
+      · exact hfn e
+      · exact h l s)
+
 /-- A capture and a WB invalidation never hit the same slot. -/
 theorem no_collision (P : Program) (e : Engine) (h1 : InFlightEmpty e) (h2 : DispHeadValid e)
     (hw : e.st = .wb) (hc : e.pst = .cap) :

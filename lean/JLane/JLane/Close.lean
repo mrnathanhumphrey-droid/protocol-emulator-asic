@@ -161,6 +161,7 @@ scheduler that picks a ready lane never stalls when every live lane has `d ≥ 2
 `d ≥ D* + B`, given the branch-1 budget `B` on stall-free prefixes. -/
 theorem dstar29 (P : Program) (win : Engine → Option Lane) (e0 : Engine) (B : Nat)
     (hW : Wf e0) (hfull : ∀ l s, P.live l = true → e0.actv l s = true)
+    (hfn : ∀ e, P.fnpf e = false) (hn0 : e0.NoNpf)
     (h0 : e0.st = .idle) (h0ts : ∀ l, e0.now ≤ e0.ts l)
     (hwin : ∀ e w, win e = some w → P.live w = true ∧ e.ts w ≤ e.now)
     (hws : ∀ y e, e.st = .idle → Ready P y e → win e ≠ none)
@@ -170,7 +171,7 @@ theorem dstar29 (P : Program) (win : Engine → Option Lane) (e0 : Engine) (B : 
       ∀ y a m, P.live y = true → a + m ≤ T → m ≤ 23 + B →
         chargeSum P win y m (run P win a e0) ≤ B) :
     ∀ T, NoStall win (run P win T e0) :=
-  dstar P win e0 (fun _ => 14) B hW hfull hwin hBd
+  dstar P win e0 (fun _ => 14) B hW hfull hfn hn0 hwin hBd
     (fun l hl => by
       show 14 + 26 + B ≤ 2 * P.dly l
       have h1 := hd l hl

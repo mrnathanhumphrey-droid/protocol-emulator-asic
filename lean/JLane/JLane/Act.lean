@@ -204,7 +204,8 @@ def step2 (P : Program2) (fw : Engine2 → Word) (w : Option Lane) (x : Engine2)
            ts := x.tsNext P
            pst := p.pst, pl := p.pl, prr := p.prr, pbr1 := p.pbr1, pslot := p.pslot
            winq := w
-           st := d.st, cur := d.cur }
+           st := d.st, cur := d.cur
+           npf := npfNext (P.toP (fun _ => 0)) e }
     word := x.wordNext fw
     ckph := x.ckphNext P
     ckbit := x.ckbitNext P }
@@ -219,8 +220,10 @@ theorem step_win_congr (P : Program) (win : Engine → Option Lane) (e : Engine)
 def PlainW (dly : Lane → Nat) (l : Lane) (w : Word) : Prop :=
   (w.op = .ord ∨ w.op = .loopRe) ∧ w.dly = dly l
 
-/-- Every slot holds a plain word. -/
-def Plain (dly : Lane → Nat) (x : Engine2) : Prop := ∀ l s, PlainW dly l (x.word l s)
+/-- Every slot holds a plain word, and the model's no-prefetch flags are clear (plain words
+allow a prefetch past them). -/
+def Plain (dly : Lane → Nat) (x : Engine2) : Prop :=
+  (∀ l s, PlainW dly l (x.word l s)) ∧ x.e.NoNpf
 
 namespace Engine2
 
@@ -231,7 +234,7 @@ theorem op_not_chain {dly : Lane → Nat} {l : Lane} {w : Word} (h : PlainW dly 
 theorem hold_plain (P : Program2) (dly : Lane → Nat) (x : Engine2) (h : Plain dly x) :
     x.hold P = false := by
   unfold hold
-  rcases (h x.e.cur (x.e.sel x.e.cur)).1 with h1 | h1 <;>
+  rcases (h.1 x.e.cur (x.e.sel x.e.cur)).1 with h1 | h1 <;>
     · show (match (x.head x.e.cur).op with
             | .clk false n => !(decide (x.ckph x.e.cur = .high) && decide (x.ckbit x.e.cur = n))
             | .clk true _  => !decide (x.ckph x.e.cur = .coll)
@@ -242,25 +245,26 @@ theorem hold_plain (P : Program2) (dly : Lane → Nat) (x : Engine2) (h : Plain 
 
 theorem isClk_plain (dly : Lane → Nat) (x : Engine2) (h : Plain dly x) : x.isClk = false := by
   unfold isClk head
-  rcases (h x.e.cur (x.e.sel x.e.cur)).1 with h1 | h1 <;> rw [h1]
+  rcases (h.1 x.e.cur (x.e.sel x.e.cur)).1 with h1 | h1 <;> rw [h1]
 
 theorem retire_plain (P : Program2) (dly : Lane → Nat) (x : Engine2) (h : Plain dly x) :
     x.retire P = true := by
   unfold retire
   rw [hold_plain P dly x h]
   unfold head
-  rcases (h x.e.cur (x.e.sel x.e.cur)).1 with h1 | h1 <;> rw [h1] <;> rfl
+  rcases (h.1 x.e.cur (x.e.sel x.e.cur)).1 with h1 | h1 <;> rw [h1] <;> rfl
 
 theorem wbDly_plain (P : Program2) (dly : Lane → Nat) (x : Engine2) (h : Plain dly x) :
     x.wbDly P = dly x.e.cur := by
   unfold wbDly
   rw [if_neg (fun h' => by rw [isClk_plain dly x h] at h'; exact Bool.noConfusion h'.1)]
-  exact (h x.e.cur (x.e.sel x.e.cur)).2
+  exact (h.1 x.e.cur (x.e.sel x.e.cur)).2
 
 theorem wantFetch_plain (dly : Lane → Nat) (x : Engine2) (h : Plain dly x) (l : Lane) :
     x.wantFetch l = x.e.wantFetch l := by
   unfold wantFetch Engine.wantFetch
-  have hc : (x.head l).op ≠ .chainRe := op_not_chain (h l (x.e.sel l))
+  have hc : (x.head l).op ≠ .chainRe := op_not_chain (h.1 l (x.e.sel l))
+  rw [h.2 l (x.e.sel l)]
   cases hv : x.e.headValid l
   · simp
   · rw [if_neg (by simp), if_neg hc]
@@ -302,7 +306,8 @@ theorem step2_proj (P : Program2) (dly : Lane → Nat) (fw : Engine2 → Word)
           pbr1 := (portNextW (P.toP (fun _ => 0)) x.wantFetch x.e).pbr1,
           pslot := (portNextW (P.toP (fun _ => 0)) x.wantFetch x.e).pslot,
           winq := w, st := (dispNext (fun _ => w) x.e).st,
-          cur := (dispNext (fun _ => w) x.e).cur } : Engine) = step (P.toP dly) (fun _ => w) x.e
+          cur := (dispNext (fun _ => w) x.e).cur,
+          npf := npfNext (P.toP (fun _ => 0)) x.e } : Engine) = step (P.toP dly) (fun _ => w) x.e
   rw [hp, ha, hs, ht]
   rfl
 
@@ -311,14 +316,19 @@ theorem plain_step (P : Program2) (dly : Lane → Nat) (fw : Engine2 → Word)
     (w : Option Lane) (x : Engine2) (h : Plain dly x)
     (hf : ∀ y, PlainW dly y.e.pl (fw y)) :
     Plain dly (step2 P fw w x) := by
-  intro l s
-  show PlainW dly l (x.wordNext fw l s)
-  unfold Engine2.wordNext
-  by_cases hc : x.e.pst = .cap ∧ l = x.e.pl ∧ s = x.e.pslot
-  · rw [if_pos hc, hc.2.1]
-    exact hf x
-  · rw [if_neg hc]
-    exact h l s
+  refine ⟨fun l s => ?_, fun l s => ?_⟩
+  · show PlainW dly l (x.wordNext fw l s)
+    unfold Engine2.wordNext
+    by_cases hc : x.e.pst = .cap ∧ l = x.e.pl ∧ s = x.e.pslot
+    · rw [if_pos hc, hc.2.1]
+      exact hf x
+    · rw [if_neg hc]
+      exact h.1 l s
+  · show npfNext (P.toP (fun _ => 0)) x.e l s = false
+    unfold npfNext
+    split
+    · rfl
+    · exact h.2 l s
 
 /-! ### Amendment A1 in the model -/
 
