@@ -273,7 +273,7 @@ def ft_flush_late(B):
     state within the 3 cycles to Wf plus the 23 + B window (the last such state f + 3 + (23 + B)
     - 1), valid the cycle after; the view releases the lane at f + 1 (FlushStep.tsF). So the
     PC+2 word's head is valid by its release + this."""
-    return 3 + (23 + B) - 1
+    return PC.load()["flush_refill_late"] + B         # FlushLate.flush_head_late
 
 
 def ft_paths(g, I):

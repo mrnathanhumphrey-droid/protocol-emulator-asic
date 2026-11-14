@@ -60,6 +60,9 @@ def load(path=PATH):
     # lateness is a dispatcher-wide stall, J = 1 + LD at B = br1_budget (OptRun.lean
     # j_interim_D). Quoted by agent 1's run_branch_check.
     k["j_interim_head_late_optA"] = 1 + k["br_succ_late"] + k["br1_budget"]
+    # FlushLate.flush_head_late: a flushed lane's head is valid by release + this + B (the port's
+    # l_refill - 1 cycles back to clean, restart_hit's one-pass window 23 + B, less flush -> release)
+    k["flush_refill_late"] = (k["l_refill"] - 1) + 23 - 1
     if k["coresident_usb"] < k["coresident_min_d"]:
         raise ValueError("proof_constants: coresident_usb %d no longer implies the co-resident "
                          "delay floor coresident_min_d %d (head_valid_ret's D* + B)"

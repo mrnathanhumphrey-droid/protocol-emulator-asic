@@ -127,4 +127,11 @@ theorem br_w_min_val : BR_W_MIN = 33 := rfl
 theorem br_succ_late_val : BR_SUCC_LATE = 7 := rfl
 theorem j_interim_val : J_INTERIM_HEAD_LATE_OPTA = 16 := rfl
 
+/-- FALLTHROUGH (F5, `FlushLate.flush_head_late`): a flushed lane's head is valid by its release
+plus this plus `B` -- the port's `L_REFILL - 1` cycles back to a clean state, the one-pass window
+`23 + B` of `restart_hit`, less the cycle from the flush to the release. -/
+abbrev FLUSH_REFILL_LATE : Nat := (L_REFILL - 1) + 23 - 1
+
+theorem flush_refill_late_val : FLUSH_REFILL_LATE = 25 := rfl
+
 end JLane
