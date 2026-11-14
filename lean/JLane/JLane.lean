@@ -36,3 +36,4 @@ import JLane.Armed
 import JLane.LemmaAS
 import JLane.RespWin
 import JLane.RespClose
+import JLane.ArmClose
