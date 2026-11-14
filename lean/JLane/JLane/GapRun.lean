@@ -34,6 +34,17 @@ theorem ts_gap (P : Program) (win : Engine → Option Lane) (y : Lane) (e0 : Eng
   unfold gp
   omega
 
+/-- The release distance between two cycles: how far `y`'s release moved from `x` to `x2`
+(at least the gap of a writeback at `x`, `ts_gap`, plus any held writebacks before `x2`). -/
+def rd (P : Program) (win : Engine → Option Lane) (y : Lane) (e0 : Engine) (x x2 : Nat) : Nat :=
+  (run P win x2 e0).ts y - (run P win x e0).ts y
+
+theorem rd_eq (P : Program) (win : Engine → Option Lane) (y : Lane) (e0 : Engine) (x x2 : Nat)
+    (h : x ≤ x2) : (run P win x e0).ts y + rd P win y e0 x x2 = (run P win x2 e0).ts y := by
+  have := ts_mono P win y e0 x x2 h
+  unfold rd
+  omega
+
 /-- Consecutive retirements of `y`. -/
 def Consec (P : Program) (win : Engine → Option Lane) (y : Lane) (e0 : Engine) (x x2 : Nat) :
     Prop :=
@@ -94,7 +105,7 @@ theorem pending_bound_gap (hy : P.live y = true) (hS0 : Struct e0) (h0 : e0.owed
     (hZF : ∀ x, x < T → IsRet P y (run P win x e0) → NpfAt y (run P win x e0) →
       Rr x + DSTAR + B ≤ Z x)
     (hZC : ∀ x x2, x2 < T → Consec P win y e0 x x2 →
-      Z x + DSTAR + B ≤ gp P win y e0 x + Z x2) :
+      Z x + DSTAR + B ≤ rd P win y e0 x x2 + Z x2) :
     ∀ (k t w w2 : Nat), t ≤ T → w < w2 → w2 < t →
       cnt P win (IsRet P y) w e0 = k → IsRet P y (run P win w e0) →
       cnt P win (IsRet P y) w2 e0 = k + 1 → IsRet P y (run P win w2 e0) →
@@ -147,7 +158,7 @@ theorem pending_bound_gap (hy : P.live y = true) (hS0 : Struct e0) (h0 : e0.owed
     by_cases hfresh : k + 1 ≤ cnt P win (Hit y) (w + 1) e0
     · exact fresh (k + 1) t w w2 htT hww2 hw2t hwk hwb hw2k hw2b hh hfresh
     · obtain ⟨w', hw'w, hw'k, hw'b⟩ := cnt_reach P win (IsRet P y) w e0 k (by omega)
-      have hgap := ts_gap P win y e0 w' w (isWB_of_ret P y _ hw'b) hw'w
+      have hgap := rd_eq P win y e0 w' w (Nat.le_of_lt hw'w)
       have hzc := hZC w' w (by omega) ⟨hw'w, hw'b, hwb, by omega⟩
       have hz0 := hZ0 w (by omega) hwb
       have hzf : NpfAt y (run P win w e0) → Rr w + DSTAR + B ≤ Z w :=
@@ -221,11 +232,11 @@ theorem head_late_gap (L : Nat → Nat) (hW : Wf e0) (hfull : ∀ s, e0.actv y s
     (hZF : ∀ x, x < T → IsRet P y (run P win x e0) → NpfAt y (run P win x e0) →
       Rr x + DSTAR + B ≤ Z x)
     (hZC : ∀ x x2, x2 < T → Consec P win y e0 x x2 →
-      Z x + DSTAR + B ≤ gp P win y e0 x + Z x2)
+      Z x + DSTAR + B ≤ rd P win y e0 x x2 + Z x2)
     (hHD : ∀ x, x < T → IsRet P y (run P win x e0) → NpfAt y (run P win x e0) →
       Rr x + HEAD_SLACK + B ≤ gp P win y e0 x + L x)
     (hHN : ∀ x x2, x2 < T → Consec P win y e0 x x2 →
-      Z x + HEAD_SLACK + B ≤ gp P win y e0 x + gp P win y e0 x2 + L x2)
+      Z x + HEAD_SLACK + B ≤ rd P win y e0 x x2 + gp P win y e0 x2 + L x2)
     (t : Nat) (htT : t ≤ T)
     (hlate : ∀ x, x < t → IsRet P y (run P win x e0) →
       cnt P win (IsRet P y) (x + 1) e0 = cnt P win (IsRet P y) t e0 →
@@ -258,7 +269,7 @@ theorem head_late_gap (L : Nat → Nat) (hW : Wf e0) (hfull : ∀ s, e0.actv y s
       rw [if_pos hw2b] at this
       omega
     have hl := hlate w2 hw2t hw2b h3
-    have hs1 := ts_gap P win y e0 w w2 (isWB_of_ret P y _ hwb) hww2
+    have hs1 := rd_eq P win y e0 w w2 (Nat.le_of_lt hww2)
     have hs2 := ts_gap P win y e0 w2 t (isWB_of_ret P y _ hw2b) hw2t
     rcases pending_bound_gap P win y e0 B T Rr Z hy hS h0 hR hB hZ0 hZF hZC
       (cnt P win (IsRet P y) t e0 - 2) t w w2 htT hww2 hw2t hwk hwb (by omega) hw2b

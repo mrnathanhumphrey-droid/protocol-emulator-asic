@@ -85,7 +85,13 @@ def usb_receive_live(progs, I=None):
 def spacing_of(x, I=None):
     """an action's dispatch spacing: a branch's wait W, else its delay (0 = none, skipped)"""
     I = I or _isa()
-    return I.branch_wait(x) if x["op"] in I.BRANCH_OPS else x["delay"]
+    if x["op"] in I.BRANCH_OPS:
+        return I.branch_wait(x)
+    if x["op"] == I.OP_SHIFTI:
+        # SHIFTI's delay field carries immediate bits above its low 8: the RTL reads only those
+        # (a_dly = cur_act[LOWX+BQW+BPW +: 8] for C_SHI, pe_engine.v l.1892; pe_isa.act_shifti)
+        return x["delay"] & 0xFF
+    return x["delay"]
 
 
 def lane_words(img, lane, I=None):

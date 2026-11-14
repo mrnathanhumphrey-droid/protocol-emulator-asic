@@ -670,16 +670,16 @@ theorem head_late_arm (P2 : Program2) (Wn : Nat) (fw : Engine2 → Word)
       NpfAt y (πE (run3 P2 fw edge sched x X0)) → Rr x + DSTAR + B ≤ Z x)
     (hZC : ∀ x x2, x2 < T → Consec (armP P2 fw edge sched X0)
         (win3 (armP P2 fw edge sched X0) P2 fw edge sched X0) y (πE X0) x x2 →
-      Z x + DSTAR + B ≤ gp (armP P2 fw edge sched X0)
-        (win3 (armP P2 fw edge sched X0) P2 fw edge sched X0) y (πE X0) x + Z x2)
+      Z x + DSTAR + B ≤ rd (armP P2 fw edge sched X0)
+        (win3 (armP P2 fw edge sched X0) P2 fw edge sched X0) y (πE X0) x x2 + Z x2)
     (hHD : ∀ x, x < T → IsRet (armP P2 fw edge sched X0) y (πE (run3 P2 fw edge sched x X0)) →
       NpfAt y (πE (run3 P2 fw edge sched x X0)) →
       Rr x + HEAD_SLACK + B ≤ gp (armP P2 fw edge sched X0)
         (win3 (armP P2 fw edge sched X0) P2 fw edge sched X0) y (πE X0) x + L x)
     (hHN : ∀ x x2, x2 < T → Consec (armP P2 fw edge sched X0)
         (win3 (armP P2 fw edge sched X0) P2 fw edge sched X0) y (πE X0) x x2 →
-      Z x + HEAD_SLACK + B ≤ gp (armP P2 fw edge sched X0)
-          (win3 (armP P2 fw edge sched X0) P2 fw edge sched X0) y (πE X0) x +
+      Z x + HEAD_SLACK + B ≤ rd (armP P2 fw edge sched X0)
+          (win3 (armP P2 fw edge sched X0) P2 fw edge sched X0) y (πE X0) x x2 +
         gp (armP P2 fw edge sched X0)
           (win3 (armP P2 fw edge sched X0) P2 fw edge sched X0) y (πE X0) x2 + L x2)
     (t : Nat) (htT : t ≤ T)
