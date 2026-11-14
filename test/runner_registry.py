@@ -38,6 +38,10 @@ BENCH_NAME = re.compile(r"\btb_[a-z0-9_]+")
 DECLARED = {
     "ci/ln1_replay.py": ("workflow", ".github/workflows/test.yaml",
                          "the LN1 Lean replay job (JLane.step vs the RTL)"),
+    "test/monitor_mustfire.py": ("helper", "test/sim_run.py",
+                                 "the monitor judge's must-fire declarations "
+                                 "(Wilson's must-fire ruling): it NAMES arms (compiled benches, "
+                                 "images, plusargs) and invokes none"),
     "model/stale_records.py": ("helper", "model/gate_phase_coverage.py",
                                "the STALE / DEBT declarations: it NAMES benches "
                                "(a record's moved inputs) and invokes none"),
@@ -109,6 +113,135 @@ DECLARED = {
     "test/run_spl_compare.py": ("manual", "model/gate_stored_numbers.py",
                                 "T3, single vs double action buffer"),
 }
+
+#: ⛔⛔ THE RESOURCES EACH RUNNER USES, DECLARED (Wilson 11-14). The inventory's
+#: scheduler skipped gates by grepping their own text for `wsl.exe`, and missed
+#: every runner that reaches WSL through a module it imports (run_pit_gcd, and --
+#: measured from the inventory ledgers -- run_pit_clk / _rt / _s12 / _s3 too, all
+#: through run_pit_capture). A scheduler reads THIS, never the file text.
+#:   "wsl"     runs anything in WSL (Verilator, yosys, sby, the netlist, docker)
+#:   "vivado"  runs Vivado
+#:   "mem4g"   needs more than 4 GB (declared only: it cannot be detected)
+#: `model/gate_runner_registry.py` is red on a runner whose own code, or a local
+#: module it imports (one level), uses WSL / Vivado and that declares neither
+#: the resource here nor, in RESOURCE_NOT_USED, why the hit is not a use.
+_W = frozenset({"wsl"})
+RESOURCES = {
+    "ci/ln1_replay.py": _W,
+    "fpga/sim/run_fpga_i2c.py": _W,
+    "fpga/sim/run_fpga_loader.py": _W,
+    "fpga/sim/run_fpga_onewire.py": _W,
+    "model/gate_cdc_qual.py": _W,
+    "model/gate_formal_miters.py": _W,
+    "model/gate_halt_reset.py": _W,
+    "model/gate_macro_inputs.py": _W,
+    "model/gate_one_encoder.py": _W,
+    "model/gate_predecode_netlist.py": _W,
+    "model/gate_reset_audit.py": _W,
+    "model/gate_rowmux_equiv.py": _W,
+    "model/gate_rtl_lint.py": _W,
+    "model/gate_select_copies.py": _W,
+    "model/ta02/run_ta02.py": _W,
+    "test/gate_corpus_trace.py": _W,
+    "test/gate_fpga_synth.py": _W,
+    "test/gate_xsim.py": _W,
+    "test/race_remeasure.py": _W,
+    "test/run_ckack.py": _W,
+    "test/run_i2c.py": _W,
+    "test/run_pit_capture.py": _W,
+    "test/run_pit_clk.py": _W,
+    "test/run_pit_gcd.py": _W,
+    "test/run_pit_rt.py": _W,
+    "test/run_pit_s12.py": _W,
+    "test/run_pit_s3.py": _W,
+    "test/run_recert.py": _W,
+    "test/toolchain.py": _W,
+}
+#: a detected hit that is NOT a use, each with why (measured: the 11-14
+#: inventory ledger shows every one of these runs on the Windows side)
+RESOURCE_NOT_USED = {
+    "test/gate_batch_equiv.py": "imports gate_corpus_trace only for feed_args(), "
+                                "each image's host-feed plusargs; both builds run "
+                                "on Windows iverilog",
+    "model/gate_bench_indices.py": "imports gate_one_encoder only for "
+                                   "dump_iverilog(), an iverilog dump",
+    "model/gate_image_bounds.py": "imports run_recert only for its class tables",
+    "model/gate_sp2_frontend.py": "imports run_ckack only for its image builder",
+    "test/run_mutants.py": "imports gate_corpus_trace only for od_violations(), "
+                           "pure Python (the record-mode inventory ledger: none through WSL)",
+    "test/run_pit_s0.py": "its arms build and run on iverilog (the 11-14 inventory "
+                          "ledger: none through WSL)",
+    "test/run_spidelay.py": "imports run_recert's helpers; runs on iverilog "
+                            "(the record-mode inventory ledger: none through WSL)",
+    "test/run_spifram.py": "imports run_recert's helpers; runs on iverilog",
+    "test/run_spim_witness.py": "imports run_recert's helpers; runs on iverilog "
+                                "(the record-mode inventory ledger: none through WSL)",
+}
+
+#: what counts as a use, on comment-stripped code: a WSL call or a `wsl` /
+#: `docker` argv word, or a toolchain lookup that resolves into WSL
+#: (`tool("verilator")` / `tool("yosys")`); Vivado by its argv word or batch flag
+_RES_PATS = {
+    "wsl": re.compile(r"""wsl\.exe|["']wsl["']|["']docker["']|tool\(\s*["'](?:verilator|yosys)["']"""),
+    "vivado": re.compile(r"""["']vivado["']|\bvivado\s+-mode\b"""),
+}
+#: shared infrastructure every runner imports: their hits are judged at the
+#: CALL SITE (`tool("verilator")`), not on import
+_RES_INFRA = ("test/toolchain.py", "test/sim_run.py", "test/runner_registry.py")
+_RES_DIRS = ("test", "model", os.path.join("model", "a2"), "ci", os.path.join("fpga", "sim"))
+
+
+def _code(path):
+    return "\n".join(l.split("#", 1)[0] for l in _read(path).splitlines())
+
+
+def detect_resources(rel, root=ROOT):
+    """({resource}, [why]) for a runner: its own code plus every LOCAL module
+    it imports, one level (never the shared infrastructure)."""
+    p = os.path.join(root, rel)
+    if not os.path.isfile(p):
+        return set(), []
+    own = _code(p)
+    found, why = set(), []
+    for k, rx in _RES_PATS.items():
+        if rx.search(own):
+            found.add(k)
+            why.append("%s (own code)" % k)
+    if rel.endswith(".py"):
+        names = set(re.findall(r"^\s*import\s+([A-Za-z_]\w*)", own, re.M))
+        names |= set(re.findall(r"^\s*from\s+([A-Za-z_]\w*)\s+import", own, re.M))
+        for n in sorted(names):
+            for d in _RES_DIRS:
+                m = os.path.join(d, n + ".py").replace(os.sep, "/")
+                if os.path.isfile(os.path.join(root, m)):
+                    if m not in _RES_INFRA:
+                        t = _code(os.path.join(root, m))
+                        for k, rx in _RES_PATS.items():
+                            if rx.search(t):
+                                found.add(k)
+                                why.append("%s (via %s)" % (k, m))
+                    break
+    return found, why
+
+
+def resource_problems(reg=None, resources=None, not_used=None, root=ROOT):
+    """[problem]: a detected resource neither declared nor explained; a
+    declaration for a runner not in the registry."""
+    reg = registry() if reg is None else reg
+    resources = RESOURCES if resources is None else resources
+    not_used = RESOURCE_NOT_USED if not_used is None else not_used
+    out = []
+    for rel in sorted(reg):
+        found, why = detect_resources(rel, root)
+        missing = found - set(resources.get(rel, ()))
+        if missing and rel not in not_used:
+            out.append("%s uses %s (%s) and declares neither the resource in "
+                       "RESOURCES nor why it is not a use in RESOURCE_NOT_USED"
+                       % (rel, ",".join(sorted(missing)), "; ".join(why[:3])))
+    for rel in sorted((set(resources) | set(not_used)) - set(reg)):
+        out.append("%s has a resource declaration but is not a registered runner" % rel)
+    return out
+
 
 GATES_SH = os.path.join(ROOT, "ci", "run_gates.sh")
 RUN_A2 = os.path.join(ROOT, "model", "a2", "run_a2.py")

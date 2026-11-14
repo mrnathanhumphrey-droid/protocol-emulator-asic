@@ -121,6 +121,8 @@ module tb_smoke;
   // contended with the other lanes' first refills. It is confined to a few
   // hundred cycles after the header load and never recurs.
   integer   cyc, stall, jcold, jwarm, jwarm_at, warm_from, hdr_cyc, n_warm_ev;
+  integer   lstall [0:4];   // (b'): per-lane wait runs
+  integer   sl;
   integer   warmup, ncyc_run;
   integer   win_slot, lk, inv_viol, inv_checks, nflip;
   reg       now_running;
@@ -150,6 +152,7 @@ module tb_smoke;
     errors = 0; edges0 = 0; edges1 = 0;
     load_drive_viol = 0; load_oe_viol = 0;
     cyc = 0; stall = 0; jcold = 0; jwarm = 0; jwarm_at = 0;
+    for (sl = 0; sl < 5; sl = sl + 1) lstall[sl] = 0;
     warm_from = 0; hdr_cyc = -1; n_warm_ev = 0;
     inv_viol = 0; inv_checks = 0; nflip = 0; prev_sel = 5'b0;
     now_running = 0; prev_now = 32'hFFFFFFFF;
@@ -369,18 +372,25 @@ module tb_smoke;
       // and under the mutant alike.
       now_running = (dut.u_eng.now !== prev_now);
       prev_now = dut.u_eng.now;
-      if (dut.u_eng.st == 0 && now_running && dut.u_eng.winner_v
-          && !dut.u_eng.l_actv[win_slot]) begin
-        stall = stall + 1;
-        if (stall > jcold) jcold = stall;
-        if (warm_from > 0 && cyc > warm_from && stall > jwarm) begin
-          jwarm    = stall;
-          jwarm_at = cyc;
+      // ⛔ (b') (Wilson 11-14): the winner never has an empty head now, so
+      // the stall is SOME lane RELEASED with an EMPTY head while the schedule
+      // runs -- the engine's own counter condition (`now_inc && |pf_rdy`),
+      // read from the same signals so the two reconstructions stay comparable
+      // PER LANE (the engine's `jitter_max` is per lane): each lane's run of
+      // cycles released with an empty head; an EVENT is one such run ending
+      for (sl = 0; sl < 5; sl = sl + 1) begin
+        if (dut.u_eng.now_inc && dut.u_eng.pf_rdy[sl]) begin
+          lstall[sl] = lstall[sl] + 1;
+          if (lstall[sl] > jcold) jcold = lstall[sl];
+          if (warm_from > 0 && cyc > warm_from && lstall[sl] > jwarm) begin
+            jwarm    = lstall[sl];
+            jwarm_at = cyc;
+          end
+        end else begin
+          if (lstall[sl] > 0 && warm_from > 0 && cyc > warm_from)
+            n_warm_ev = n_warm_ev + 1;
+          lstall[sl] = 0;
         end
-      end else begin
-        if (stall > 0 && warm_from > 0 && cyc > warm_from)
-          n_warm_ev = n_warm_ev + 1;
-        stall = 0;
       end
     end
 

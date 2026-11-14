@@ -168,8 +168,9 @@ def image(lane=I.USB_LANE, busy=None):
     """one USB packet receive per pass on `lane`; every other lane idle -- or,
     with `busy = (usb D_sched, other D_sched)`, the four other lanes toggling
     `uo_out` every D* = 20 cycles (the dispatcher as loaded as it gets)"""
-    prog = [I.act(I.OP_ARM, DM, 0, 0),                 # the SOP edge (J -> K), no timeout
-            I.act(I.OP_LEVEL, I.PIN_NONE, 0, D // 2)]  # half a bit: sample mid-bit
+    # the SOP edge (J -> K), no timeout; HALF (11-14) puts the first sample
+    # half a bit after it -- the nop(D/2) that used to do it is gone
+    prog = [I.act_arm(DM, 0, 0, half=True)]
     prog += [I.act_shiftin_usb(DM, D, 8) for _ in range(NBYTES)]
     prog += [I.act(I.OP_LEVEL, I.PIN_NONE, 0, POST),   # past the EOP
              I.act(I.OP_REARM, 0, 1, D // 2)]          # loop to the ARM
@@ -617,6 +618,9 @@ MUTANTS = [
     ("M_UNSTUFF_KEEP", "the stuffed bit kept as data"),
     ("M_STUFF_NOFLAG", "seven ones not flagged"),
     ("M_REAN_NOCOMP", "registered re-anchor, cycle not taken off"),
+    # HALF (Wilson 11-14): the SOP ARM's rebase stays at `now` -- with the
+    # nop(D/2) gone the first sample lands on the edge (gap 2, measured)
+    ("M_HALF_NOW", "the ARM's half-bit rebase ignored"),
 ]
 
 

@@ -126,7 +126,7 @@ CLASSIFIED = {
     # formal/argmin_equiv.sby); the loop survives only in the generate branch
     # for other lane counts, which is not elaborated, so the point no longer
     # exists to classify.
-    ("src/pe_engine.v", 2456, "v_branch", "if"): (
+    ("src/pe_engine.v", 2886, "v_branch", "if"): (
         TOOL_DIVERGENT,
         "`if (hdr_done && !prime_unp) primed_q <= 1'b1;` -- the prime scan's "
         "COMPLETION test, which sits AFTER the `for` over lanes, not inside "
@@ -146,7 +146,7 @@ CLASSIFIED = {
         "number out of the artefact; do not reconstruct it from memory."),
 
     # ---- src/pe_engine.v --------------------------------------------------
-    ("src/pe_engine.v", 2541, "v_branch", "else"): (
+    ("src/pe_engine.v", 2980, "v_branch", "else"): (
         UNREACHABLE,
         "H_IDLE (line 1134) with `hdr_done` ALREADY SET. Every assignment that puts the "
         "header FSM into H_IDLE clears `hdr_done` in the same non-blocking "
@@ -156,7 +156,7 @@ CLASSIFIED = {
         "the arm of a condition that is true on every entry. ⭐ Checked "
         "structurally by `check_h_idle_clears` below rather than asserted, "
         "because the claim is about two specific lines and would rot."),
-    ("src/pe_engine.v", 2710, "v_line", "case"): (
+    ("src/pe_engine.v", 3161, "v_line", "case"): (
         UNREACHABLE,
         "The prefetch FSM's defensive `default`. `pst` is declared `[2:0]` and "
         "its four encodings P_SCAN/P_REQ/P_WAIT/P_CAP are 3'd0..3'd3, all "
@@ -164,7 +164,7 @@ CLASSIFIED = {
         "⭐ Verified mechanically by `check_full_case` below, which reads the "
         "encodings out of the source -- a hand-counted enumeration is the sort "
         "of claim that survives the addition of a fifth state."),
-    ("src/pe_engine.v", 3160, "v_line", "case"): (
+    ("src/pe_engine.v", 3628, "v_line", "case"): (
         UNREACHABLE,
         "The opcode `case`'s `default`. ⭐ v2 (Wilson 10-26): the opcode is 5 "
         "bits and the EIGHT BUILT opcodes are named in arms (OP_LEVEL .. "
@@ -183,7 +183,7 @@ CLASSIFIED = {
     # other lane, with the lane still LIVE -- the flag must report, never
     # stall. The entry is removed rather than kept, because a stale OWED claim
     # says something is untested when it is tested.
-    ("src/pe_engine.v", 3583, "v_line", "case"): (
+    ("src/pe_engine.v", 4125, "v_line", "case"): (
         UNREACHABLE,
         "The dispatch FSM's defensive `default`. `st` is declared `[1:0]` with "
         "three encodings ST_IDLE/ST_DRIVE/ST_WB = 2'd0..2'd2 at line 666; "
@@ -194,7 +194,7 @@ CLASSIFIED = {
 
     # ---- src/project.v ----------------------------------------------------
     # ⭐ PIT chunk 2, stage 0 (Wilson 10-29, both proofs accepted)
-    ("src/project.v", 1483, "v_branch", "if"): (
+    ("src/project.v", 1908, "v_branch", "if"): (
         UNREACHABLE,
         "stage 0's clock_like guard: each level needs >= 4 intervals. P_CLVL "
         "is entered only from P_CNEXT, which requires cnt[ci] >= "
@@ -202,7 +202,7 @@ CLASSIFIED = {
         "ALTERNATE level (each edge toggles it), so 16 edges give 15 "
         "intervals split 8 / 7 between the two levels: nlv0, nlv1 >= 7 > 4. "
         "The guard mirrors the frozen model's own check and stays."),
-    ("src/project.v", 1606, "v_line", "case"): (
+    ("src/project.v", 2091, "v_line", "case"): (
         UNREACHABLE,
         "stage 0's sequencer `default`. `ph` is [4:0] with 19 named states "
         "P_IDLE .. P_DONE = 5'd0 .. 5'd18; every `ph <=` writes a named P_* "
@@ -268,7 +268,7 @@ CLASSIFIED = {
     # `case (st)`, so none of the dispatch arm's own guards dominate it --
     # which is why it carries its own, and why `gate_program_index` classifies
     # both writes as members of the program-indexed family.
-    ("src/pe_engine.v", 3629, "v_branch", "else"): (
+    ("src/pe_engine.v", 4171, "v_branch", "else"): (
         OWED,
         "The `l_pin[i] < N_PINS` guard on the hold expiry. Its `else` is "
         "REACHABLE, not unreachable: a lane may legally name the RESERVED data "
@@ -288,7 +288,7 @@ CLASSIFIED = {
     # no input path, so the observed rise never came), and THAT is what covered
     # this branch on every sweep. With the fix it went dark -- which is the fix
     # working, and also a branch nothing legitimate is known to reach.
-    ("src/pe_engine.v", 3335, "v_branch", "if"): (
+    ("src/pe_engine.v", 3871, "v_branch", "if"): (
         OWED,
         "`ck_consume & ~l_ckgot`: a clocked SHIFTIN consumes a bit that was "
         "never captured, and reports it (`clk_stretch_err`). Covered before "
@@ -306,7 +306,7 @@ CLASSIFIED = {
     # clocked twin IS covered -- every clocked open-drain image runs at d = 9,
     # so the clamp sends them all down the direct path -- and the asymmetry is
     # the whole reason this one is debt rather than a waiver.
-    ("src/pe_engine.v", 3005, "v_branch", "else"): (
+    ("src/pe_engine.v", 3461, "v_branch", "else"): (
         OWED,
         "The `if (l_mode[cur])` inside the UNCLOCKED SHIFT's direct-drive arm, "
         "open-drain side. Reaching it needs an unclocked open-drain SHIFT whose "
@@ -320,7 +320,7 @@ CLASSIFIED = {
         "⚠ NOT waived as unreachable: it is reachable, by exactly the class "
         "of program the clamp was written for, and leaving the clamp's own "
         "fallback untested is how a safety path rots."),
-    ("src/pe_engine.v", 2876, "v_branch", "else"): (
+    ("src/pe_engine.v", 3332, "v_branch", "else"): (
         UNREACHABLE,
         "The local `if (pin_real)` inside the SELF-CLOCKED SHIFT's LOW phase. "
         "Its `else` cannot be taken: the enclosing case label is "
@@ -330,7 +330,7 @@ CLASSIFIED = {
         "at the enclosing arm -- and widening that window is refused, since the "
         "gate's own docstring records a `clk_real` 30 lines away falsely "
         "guarding a deliberately unguarded mutant arm."),
-    ("src/pe_engine.v", 2909, "v_branch", "else"): (
+    ("src/pe_engine.v", 3365, "v_branch", "else"): (
         UNREACHABLE,
         "The `if (clk_real)` around the LOW phase's CLOCK write. Unreachable "
         "`else`: this block runs only under `ck_shift`, which is DEFINED as "
@@ -338,14 +338,14 @@ CLASSIFIED = {
         "conjunct of the condition that got us here. ⚠ It is still written, "
         "because the guard must be visible at the indexed write rather than "
         "inferred through a wire's definition."),
-    ("src/pe_engine.v", 2929, "v_branch", "else"): (
+    ("src/pe_engine.v", 3385, "v_branch", "else"): (
         UNREACHABLE,
         "The same `if (clk_real)` around the HIGH phase's clock write, "
         "unreachable for the identical reason -- `ck_shift` carries "
         "`clk_real`. Both phases guard separately because a guard shared "
         "across two write groups is how the 1.6x refusal first failed: it "
         "suppressed the data write and let the clock write run anyway."),
-    ("src/pe_engine.v", 2999, "v_branch", "else"): (
+    ("src/pe_engine.v", 3455, "v_branch", "else"): (
         UNREACHABLE,
         "The local `if (pin_real)` inside the UNCLOCKED SHIFT body. Same "
         "structure as the clocked one at 1621 and unreachable for the same "
@@ -353,7 +353,7 @@ CLASSIFIED = {
         "CODE: inserting the clocked arm pushed the case label's own guard "
         "more than 60 lines away from five writes that were fine the day "
         "before, which is exactly the drift that window exists to detect."),
-    ("src/pe_engine.v", 3129, "v_branch", "if"): (
+    ("src/pe_engine.v", 3595, "v_branch", "if"): (
         UNREACHABLE,
         "`if (ck_shiftin & ack_drv[1]) pin_out[a_pin] <= ack_drv[0];` -- the "
         "TRUE arm cannot be taken in a clean build, because `ack_drv` is "
@@ -461,26 +461,210 @@ CLASSIFIED[("test/fram_spi.v", 217, "v_line", "case")] = (
     "the phase case's `default`: `phase` is 2 bits and P_OP, P_AHI, P_ALO, "
     "P_DATA enumerate all four values, so no phase reaches it. Defensive.")
 
-CLASSIFIED[("src/pe_store.v", 244, "v_branch", "if")] = (
-    UNREACHABLE,
-    "the latch store's READ-AFTER-WRITE contract check, wide port (simulation "
-    "only): it fires only if a wide read samples the row whose latch closes on "
-    "the same edge -- a row written the cycle before. The modes keep reads and "
-    "writes apart (RUN only reads; LOAD and SNIFF read later), so a passing run "
-    "never reaches it. A tripwire, not a path; its must-fire is gate "
-    "store-latch's ARM_RAW_WIDE.")
-CLASSIFIED[("src/pe_store.v", 259, "v_branch", "if")] = (
-    UNREACHABLE,
-    "the same contract check, narrow port: a read of the byte written the "
-    "cycle before. Unreachable in a passing run for the same reason; its "
-    "must-fire is gate store-latch's ARM_RAW.")
-CLASSIFIED[("src/pe_store.v", 254, "v_branch", "if")] = (
-    UNREACHABLE,
-    "the shared read tree's precondition check (simulation only): it fires "
-    "only if `re` and `wre` are high in the same cycle. `re` comes only from "
-    "H_REQ (before hdr_done), `wre` only from P_REQ (after it), and SNIFF "
-    "holds the engine in reset, so a passing run never reaches it. A "
-    "tripwire, not a path; its must-fire is gate store-latch's ARM_SHARED.")
+
+# RETIRED 11-14: the three LATCH-store tripwires (read-after-write wide / narrow, shared read)
+# are no longer elaborated by the sweep -- the swept benches build the shipped MEM_TYPE "sram" --
+# so they are not in the data; their must-fires (ARM_RAW_WIDE, ARM_RAW, ARM_SHARED) stay in gate
+# store-latch, which builds the latch arm alone. The SRAM arm's own tripwires are below.
+
+# ---- coverage step 2 (Wilson 11-14, item 4): the 97 points left after the v2 benches joined
+# the sweep (ac3443d) and the anchors were re-measured (model/reanchor.py, +442 on pe_engine.v).
+# Measured on the LOCAL sweep (Verilator 5.053, rand-reset +0); CI's three-mode union is the
+# list of record, and any entry it covers turns PAID and leaves.
+CLASSIFIED[('src/pe_store.v', 455, 'v_branch', 'cond_then')] = (
+    OWED, "the SRAM store's write-buffer FORWARDING (fw_q): a narrow read of a row whose write still sits in the one-entry buffer, answered from the buffer. No swept arm reads a row in the cycles its own write is buffered (the loader writes, the engine reads much later; the PIT reads records it wrote earlier). Owed to a store arm that writes a row and reads it back at once -- the SRAM analogue of tb_store_latch's read-after-write arms.")
+CLASSIFIED[('src/pe_store.v', 477, 'v_branch', 'if')] = (
+    UNREACHABLE, "the SRAM store's one-port contract check (simulation only): a wide read with a write, a narrow read or a buffered non-buffer-row write in the same cycle. The modes are exclusive, so a passing run never reaches it; it $finishes the run. A tripwire, not a path.")
+CLASSIFIED[('src/pe_store.v', 484, 'v_branch', 'if')] = (
+    UNREACHABLE, 'the SRAM write-buffer overflow check (simulation only): a write while the one-entry buffer is full and the port is reading. A passing run never reaches it ($finish); its must-fire is M_SRAM_WBUF_OVF, killed by test/run_pit_s3.py (s3_crc32_full).')
+CLASSIFIED[('src/pe_store.v', 498, 'v_branch', 'if')] = (
+    OWED, "the bench-visible `peek` of a byte whose row's write is still in the write buffer (merged from pd / pbm). Benches peek after the run, when the buffer has drained; owed to a peek taken mid-run during a write burst (e.g. a tb_pit snapshot while the PIT is still writing).")
+CLASSIFIED[('src/project.v', 1725, 'v_branch', 'if')] = (
+    OWED, "OWED to the sweep: the stage-3 CLOCKED-bus path is driven only by test/run_pit_clk.py (gate pit-clk, CI on Verilator: spi_m0..m3, spi_mid, spi_ragged, spi_quiet, i2c_pec, i2c_sr, no_cs, no_clean_edge, both_levels), and tb_pit's swept arms never hand stage 3 a clocked bus. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN, as ac3443d did for tb_usbrx); a point still uncovered then gets its own entry. This point: the pass-1 fold `ck_pass`, run on every W_PAIR record of the second walk once P_KC1 accepts a bus (every ok case).")
+CLASSIFIED[('src/project.v', 1726, 'v_branch', 'else')] = (
+    OWED, "OWED to the sweep: the stage-3 CLOCKED-bus path is driven only by test/run_pit_clk.py (gate pit-clk, CI on Verilator: spi_m0..m3, spi_mid, spi_ragged, spi_quiet, i2c_pec, i2c_sr, no_cs, no_clean_edge, both_levels), and tb_pit's swept arms never hand stage 3 a clocked bus. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN, as ac3443d did for tb_usbrx); a point still uncovered then gets its own entry. This point: a COUNTED data edge within one cycle of a clock rise marks the rise dirty (if: no_clean_edge / both_levels; else: the clean cases).")
+CLASSIFIED[('src/project.v', 1726, 'v_branch', 'if')] = (
+    OWED, "OWED to the sweep: the stage-3 CLOCKED-bus path is driven only by test/run_pit_clk.py (gate pit-clk, CI on Verilator: spi_m0..m3, spi_mid, spi_ragged, spi_quiet, i2c_pec, i2c_sr, no_cs, no_clean_edge, both_levels), and tb_pit's swept arms never hand stage 3 a clocked bus. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN, as ac3443d did for tb_usbrx); a point still uncovered then gets its own entry. This point: a COUNTED data edge within one cycle of a clock rise marks the rise dirty (if: no_clean_edge / both_levels; else: the clean cases).")
+CLASSIFIED[('src/project.v', 1727, 'v_branch', 'else')] = (
+    OWED, "OWED to the sweep: the stage-3 CLOCKED-bus path is driven only by test/run_pit_clk.py (gate pit-clk, CI on Verilator: spi_m0..m3, spi_mid, spi_ragged, spi_quiet, i2c_pec, i2c_sr, no_cs, no_clean_edge, both_levels), and tb_pit's swept arms never hand stage 3 a clocked bus. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN, as ac3443d did for tb_usbrx); a point still uncovered then gets its own entry. This point: a counted data edge within one cycle of a clock fall marks the fall dirty (if: no_clean_edge / both_levels; else: the clean cases).")
+CLASSIFIED[('src/project.v', 1727, 'v_branch', 'if')] = (
+    OWED, "OWED to the sweep: the stage-3 CLOCKED-bus path is driven only by test/run_pit_clk.py (gate pit-clk, CI on Verilator: spi_m0..m3, spi_mid, spi_ragged, spi_quiet, i2c_pec, i2c_sr, no_cs, no_clean_edge, both_levels), and tb_pit's swept arms never hand stage 3 a clocked bus. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN, as ac3443d did for tb_usbrx); a point still uncovered then gets its own entry. This point: a counted data edge within one cycle of a clock fall marks the fall dirty (if: no_clean_edge / both_levels; else: the clean cases).")
+CLASSIFIED[('src/project.v', 1728, 'v_branch', 'else')] = (
+    OWED, "OWED to the sweep: the stage-3 CLOCKED-bus path is driven only by test/run_pit_clk.py (gate pit-clk, CI on Verilator: spi_m0..m3, spi_mid, spi_ragged, spi_quiet, i2c_pec, i2c_sr, no_cs, no_clean_edge, both_levels), and tb_pit's swept arms never hand stage 3 a clocked bus. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN, as ac3443d did for tb_usbrx); a point still uncovered then gets its own entry. This point: a clock rise within one cycle of a counted data edge marks the rise dirty -- the mirror of 1726 (if: data just before the rise; else: clean).")
+CLASSIFIED[('src/project.v', 1728, 'v_branch', 'if')] = (
+    OWED, "OWED to the sweep: the stage-3 CLOCKED-bus path is driven only by test/run_pit_clk.py (gate pit-clk, CI on Verilator: spi_m0..m3, spi_mid, spi_ragged, spi_quiet, i2c_pec, i2c_sr, no_cs, no_clean_edge, both_levels), and tb_pit's swept arms never hand stage 3 a clocked bus. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN, as ac3443d did for tb_usbrx); a point still uncovered then gets its own entry. This point: a clock rise within one cycle of a counted data edge marks the rise dirty -- the mirror of 1726 (if: data just before the rise; else: clean).")
+CLASSIFIED[('src/project.v', 1729, 'v_branch', 'else')] = (
+    OWED, "OWED to the sweep: the stage-3 CLOCKED-bus path is driven only by test/run_pit_clk.py (gate pit-clk, CI on Verilator: spi_m0..m3, spi_mid, spi_ragged, spi_quiet, i2c_pec, i2c_sr, no_cs, no_clean_edge, both_levels), and tb_pit's swept arms never hand stage 3 a clocked bus. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN, as ac3443d did for tb_usbrx); a point still uncovered then gets its own entry. This point: a clock fall within one cycle of a counted data edge marks the fall dirty -- the mirror of 1727 (if: data just before the fall; else: clean).")
+CLASSIFIED[('src/project.v', 1729, 'v_branch', 'if')] = (
+    OWED, "OWED to the sweep: the stage-3 CLOCKED-bus path is driven only by test/run_pit_clk.py (gate pit-clk, CI on Verilator: spi_m0..m3, spi_mid, spi_ragged, spi_quiet, i2c_pec, i2c_sr, no_cs, no_clean_edge, both_levels), and tb_pit's swept arms never hand stage 3 a clocked bus. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN, as ac3443d did for tb_usbrx); a point still uncovered then gets its own entry. This point: a clock fall within one cycle of a counted data edge marks the fall dirty -- the mirror of 1727 (if: data just before the fall; else: clean).")
+CLASSIFIED[('src/project.v', 1730, 'v_branch', 'else')] = (
+    OWED, "OWED to the sweep: the stage-3 CLOCKED-bus path is driven only by test/run_pit_clk.py (gate pit-clk, CI on Verilator: spi_m0..m3, spi_mid, spi_ragged, spi_quiet, i2c_pec, i2c_sr, no_cs, no_clean_edge, both_levels), and tb_pit's swept arms never hand stage 3 a clocked bus. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN, as ac3443d did for tb_usbrx); a point still uncovered then gets its own entry. This point: a counted data edge, recorded by the clock level it lands in (ck_sn1 / ck_sn0); else: the uncounted records (I2C START / STOP, SPI with CS inactive).")
+CLASSIFIED[('src/project.v', 1730, 'v_branch', 'if')] = (
+    OWED, "OWED to the sweep: the stage-3 CLOCKED-bus path is driven only by test/run_pit_clk.py (gate pit-clk, CI on Verilator: spi_m0..m3, spi_mid, spi_ragged, spi_quiet, i2c_pec, i2c_sr, no_cs, no_clean_edge, both_levels), and tb_pit's swept arms never hand stage 3 a clocked bus. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN, as ac3443d did for tb_usbrx); a point still uncovered then gets its own entry. This point: a counted data edge, recorded by the clock level it lands in (ck_sn1 / ck_sn0); else: the uncounted records (I2C START / STOP, SPI with CS inactive).")
+CLASSIFIED[('src/project.v', 1731, 'v_branch', 'else')] = (
+    OWED, "OWED to the sweep: the stage-3 CLOCKED-bus path is driven only by test/run_pit_clk.py (gate pit-clk, CI on Verilator: spi_m0..m3, spi_mid, spi_ragged, spi_quiet, i2c_pec, i2c_sr, no_cs, no_clean_edge, both_levels), and tb_pit's swept arms never hand stage 3 a clocked bus. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN, as ac3443d did for tb_usbrx); a point still uncovered then gets its own entry. This point: a frame wire entering its active level counts a CS-active record (ck_cn), the descriptor's CPOL input (SPI cases); else: I2C and inactive edges.")
+CLASSIFIED[('src/project.v', 1731, 'v_branch', 'if')] = (
+    OWED, "OWED to the sweep: the stage-3 CLOCKED-bus path is driven only by test/run_pit_clk.py (gate pit-clk, CI on Verilator: spi_m0..m3, spi_mid, spi_ragged, spi_quiet, i2c_pec, i2c_sr, no_cs, no_clean_edge, both_levels), and tb_pit's swept arms never hand stage 3 a clocked bus. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN, as ac3443d did for tb_usbrx); a point still uncovered then gets its own entry. This point: a frame wire entering its active level counts a CS-active record (ck_cn), the descriptor's CPOL input (SPI cases); else: I2C and inactive edges.")
+CLASSIFIED[('src/project.v', 1733, 'v_branch', 'else')] = (
+    OWED, "OWED to the sweep: the stage-3 CLOCKED-bus path is driven only by test/run_pit_clk.py (gate pit-clk, CI on Verilator: spi_m0..m3, spi_mid, spi_ragged, spi_quiet, i2c_pec, i2c_sr, no_cs, no_clean_edge, both_levels), and tb_pit's swept arms never hand stage 3 a clocked bus. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN, as ac3443d did for tb_usbrx); a point still uncovered then gets its own entry. This point: of those CS-active records, the ones with the clock HIGH before the record (ck_ch: CPOL 1, spi_m2 / spi_m3; else CPOL 0, spi_m0 / spi_m1).")
+CLASSIFIED[('src/project.v', 1733, 'v_branch', 'if')] = (
+    OWED, "OWED to the sweep: the stage-3 CLOCKED-bus path is driven only by test/run_pit_clk.py (gate pit-clk, CI on Verilator: spi_m0..m3, spi_mid, spi_ragged, spi_quiet, i2c_pec, i2c_sr, no_cs, no_clean_edge, both_levels), and tb_pit's swept arms never hand stage 3 a clocked bus. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN, as ac3443d did for tb_usbrx); a point still uncovered then gets its own entry. This point: of those CS-active records, the ones with the clock HIGH before the record (ck_ch: CPOL 1, spi_m2 / spi_m3; else CPOL 0, spi_m0 / spi_m1).")
+CLASSIFIED[('src/project.v', 2046, 'v_branch', 'cond_then')] = (
+    OWED, "OWED to the sweep: the stage-3 CLOCKED-bus path is driven only by test/run_pit_clk.py (gate pit-clk, CI on Verilator: spi_m0..m3, spi_mid, spi_ragged, spi_quiet, i2c_pec, i2c_sr, no_cs, no_clean_edge, both_levels), and tb_pit's swept arms never hand stage 3 a clocked bus. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN, as ac3443d did for tb_usbrx); a point still uncovered then gets its own entry. This point: P_KSEL exhausting the 8 wires having SEEN a data wire but no frame markers -> ck_why 7 (case no_cs).")
+CLASSIFIED[('src/project.v', 2050, 'v_line', 'else')] = (
+    OWED, "OWED to the sweep: the stage-3 CLOCKED-bus path is driven only by test/run_pit_clk.py (gate pit-clk, CI on Verilator: spi_m0..m3, spi_mid, spi_ragged, spi_quiet, i2c_pec, i2c_sr, no_cs, no_clean_edge, both_levels), and tb_pit's swept arms never hand stage 3 a clocked bus. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN, as ac3443d did for tb_usbrx); a point still uncovered then gets its own entry. This point: P_KSEL stepping past a wire that is not SYNC_DATA (di + 1) -- any clocked case whose data wire is not the first scanned.")
+CLASSIFIED[('src/project.v', 2059, 'v_branch', 'else')] = (
+    OWED, "OWED to the sweep: the stage-3 CLOCKED-bus path is driven only by test/run_pit_clk.py (gate pit-clk, CI on Verilator: spi_m0..m3, spi_mid, spi_ragged, spi_quiet, i2c_pec, i2c_sr, no_cs, no_clean_edge, both_levels), and tb_pit's swept arms never hand stage 3 a clocked bus. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN, as ac3443d did for tb_usbrx); a point still uncovered then gets its own entry. This point: P_KC1 itself, and its branch: a data wire with neither the I2C tag nor a CS that FAILS the I2C signature -> next wire (if: no_cs) vs accepted (else: every ok case).")
+CLASSIFIED[('src/project.v', 2059, 'v_branch', 'if')] = (
+    OWED, "OWED to the sweep: the stage-3 CLOCKED-bus path is driven only by test/run_pit_clk.py (gate pit-clk, CI on Verilator: spi_m0..m3, spi_mid, spi_ragged, spi_quiet, i2c_pec, i2c_sr, no_cs, no_clean_edge, both_levels), and tb_pit's swept arms never hand stage 3 a clocked bus. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN, as ac3443d did for tb_usbrx); a point still uncovered then gets its own entry. This point: P_KC1 itself, and its branch: a data wire with neither the I2C tag nor a CS that FAILS the I2C signature -> next wire (if: no_cs) vs accepted (else: every ok case).")
+CLASSIFIED[('src/project.v', 2059, 'v_line', 'case')] = (
+    OWED, "OWED to the sweep: the stage-3 CLOCKED-bus path is driven only by test/run_pit_clk.py (gate pit-clk, CI on Verilator: spi_m0..m3, spi_mid, spi_ragged, spi_quiet, i2c_pec, i2c_sr, no_cs, no_clean_edge, both_levels), and tb_pit's swept arms never hand stage 3 a clocked bus. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN, as ac3443d did for tb_usbrx); a point still uncovered then gets its own entry. This point: P_KC1 itself, and its branch: a data wire with neither the I2C tag nor a CS that FAILS the I2C signature -> next wire (if: no_cs) vs accepted (else: every ok case).")
+CLASSIFIED[('src/project.v', 2062, 'v_line', 'elsif')] = (
+    OWED, "OWED to the sweep: the stage-3 CLOCKED-bus path is driven only by test/run_pit_clk.py (gate pit-clk, CI on Verilator: spi_m0..m3, spi_mid, spi_ragged, spi_quiet, i2c_pec, i2c_sr, no_cs, no_clean_edge, both_levels), and tb_pit's swept arms never hand stage 3 a clocked bus. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN, as ac3443d did for tb_usbrx); a point still uncovered then gets its own entry. This point: the CS active level decided HIGH: CS high at >= 7/8 of the clock's edges (ck_act 1) on an SPI bus.")
+CLASSIFIED[('src/project.v', 2063, 'v_branch', 'else')] = (
+    OWED, "OWED to the sweep: the stage-3 CLOCKED-bus path is driven only by test/run_pit_clk.py (gate pit-clk, CI on Verilator: spi_m0..m3, spi_mid, spi_ragged, spi_quiet, i2c_pec, i2c_sr, no_cs, no_clean_edge, both_levels), and tb_pit's swept arms never hand stage 3 a clocked bus. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN, as ac3443d did for tb_usbrx); a point still uncovered then gets its own entry. This point: the CS active level decided LOW: CS low at >= 7/8 of the clock's edges (ck_act 0); else: neither (the 2064 refusal).")
+CLASSIFIED[('src/project.v', 2063, 'v_branch', 'if')] = (
+    OWED, "OWED to the sweep: the stage-3 CLOCKED-bus path is driven only by test/run_pit_clk.py (gate pit-clk, CI on Verilator: spi_m0..m3, spi_mid, spi_ragged, spi_quiet, i2c_pec, i2c_sr, no_cs, no_clean_edge, both_levels), and tb_pit's swept arms never hand stage 3 a clocked bus. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN, as ac3443d did for tb_usbrx); a point still uncovered then gets its own entry. This point: the CS active level decided LOW: CS low at >= 7/8 of the clock's edges (ck_act 0); else: neither (the 2064 refusal).")
+CLASSIFIED[('src/project.v', 2064, 'v_branch', 'else')] = (
+    OWED, "OWED -- AND NOT ONLY TO THE SWEEP: `CS level unclear` (neither CS level holds at 7/8 of the clock edges) -> ck_why 8. test/run_pit_clk.py's docstring names this refusal but its case list has NO case for it (no_cs, no_clean_edge, both_levels are the three refusals it runs). Owed to a new run_pit_clk case: an SPI bus whose CS changes level inside frames so neither level reaches 7/8; the else arm is every accepted SPI case.")
+CLASSIFIED[('src/project.v', 2064, 'v_branch', 'if')] = (
+    OWED, "OWED -- AND NOT ONLY TO THE SWEEP: `CS level unclear` (neither CS level holds at 7/8 of the clock edges) -> ck_why 8. test/run_pit_clk.py's docstring names this refusal but its case list has NO case for it (no_cs, no_clean_edge, both_levels are the three refusals it runs). Owed to a new run_pit_clk case: an SPI bus whose CS changes level inside frames so neither level reaches 7/8; the else arm is every accepted SPI case.")
+CLASSIFIED[('src/project.v', 2070, 'v_line', 'case')] = (
+    OWED, "OWED to the sweep: the stage-3 CLOCKED-bus path is driven only by test/run_pit_clk.py (gate pit-clk, CI on Verilator: spi_m0..m3, spi_mid, spi_ragged, spi_quiet, i2c_pec, i2c_sr, no_cs, no_clean_edge, both_levels), and tb_pit's swept arms never hand stage 3 a clocked bus. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN, as ac3443d did for tb_usbrx); a point still uncovered then gets its own entry. This point: P_KC2, the sample-edge choice, entered by every case P_KC1 accepts.")
+CLASSIFIED[('src/project.v', 2072, 'v_line', 'elsif')] = (
+    OWED, "OWED to the sweep: the stage-3 CLOCKED-bus path is driven only by test/run_pit_clk.py (gate pit-clk, CI on Verilator: spi_m0..m3, spi_mid, spi_ragged, spi_quiet, i2c_pec, i2c_sr, no_cs, no_clean_edge, both_levels), and tb_pit's swept arms never hand stage 3 a clocked bus. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN, as ac3443d did for tb_usbrx); a point still uncovered then gets its own entry. This point: only the RISE clean -> sample on the rise (the modes whose data changes on the fall).")
+CLASSIFIED[('src/project.v', 2073, 'v_line', 'elsif')] = (
+    OWED, "OWED to the sweep: the stage-3 CLOCKED-bus path is driven only by test/run_pit_clk.py (gate pit-clk, CI on Verilator: spi_m0..m3, spi_mid, spi_ragged, spi_quiet, i2c_pec, i2c_sr, no_cs, no_clean_edge, both_levels), and tb_pit's swept arms never hand stage 3 a clocked bus. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN, as ac3443d did for tb_usbrx); a point still uncovered then gets its own entry. This point: only the FALL clean -> sample on the fall (the modes whose data changes on the rise).")
+CLASSIFIED[('src/project.v', 2077, 'v_line', 'else')] = (
+    OWED, "OWED to the sweep: the stage-3 CLOCKED-bus path is driven only by test/run_pit_clk.py (gate pit-clk, CI on Verilator: spi_m0..m3, spi_mid, spi_ragged, spi_quiet, i2c_pec, i2c_sr, no_cs, no_clean_edge, both_levels), and tb_pit's swept arms never hand stage 3 a clocked bus. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN, as ac3443d did for tb_usbrx); a point still uncovered then gets its own entry. This point: both edges clean and counted data seen in ONE clock level only -> the edge ending the data's level (if); else the no-clean-edge refusal (no_clean_edge, both_levels).")
+CLASSIFIED[('src/project.v', 2077, 'v_line', 'if')] = (
+    OWED, "OWED to the sweep: the stage-3 CLOCKED-bus path is driven only by test/run_pit_clk.py (gate pit-clk, CI on Verilator: spi_m0..m3, spi_mid, spi_ragged, spi_quiet, i2c_pec, i2c_sr, no_cs, no_clean_edge, both_levels), and tb_pit's swept arms never hand stage 3 a clocked bus. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN, as ac3443d did for tb_usbrx); a point still uncovered then gets its own entry. This point: both edges clean and counted data seen in ONE clock level only -> the edge ending the data's level (if); else the no-clean-edge refusal (no_clean_edge, both_levels).")
+CLASSIFIED[('src/project.v', 2080, 'v_branch', 'cond_else')] = (
+    OWED, "OWED to the sweep: the stage-3 CLOCKED-bus path is driven only by test/run_pit_clk.py (gate pit-clk, CI on Verilator: spi_m0..m3, spi_mid, spi_ragged, spi_quiet, i2c_pec, i2c_sr, no_cs, no_clean_edge, both_levels), and tb_pit's swept arms never hand stage 3 a clocked bus. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN, as ac3443d did for tb_usbrx); a point still uncovered then gets its own entry. This point: the refusal code: both edges clean but data in both levels -> 10 (both_levels) vs an edge dirty -> 9 (no_clean_edge).")
+CLASSIFIED[('src/project.v', 2080, 'v_branch', 'cond_then')] = (
+    OWED, "OWED to the sweep: the stage-3 CLOCKED-bus path is driven only by test/run_pit_clk.py (gate pit-clk, CI on Verilator: spi_m0..m3, spi_mid, spi_ragged, spi_quiet, i2c_pec, i2c_sr, no_cs, no_clean_edge, both_levels), and tb_pit's swept arms never hand stage 3 a clocked bus. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN, as ac3443d did for tb_usbrx); a point still uncovered then gets its own entry. This point: the refusal code: both edges clean but data in both levels -> 10 (both_levels) vs an edge dirty -> 9 (no_clean_edge).")
+CLASSIFIED[('src/project.v', 2084, 'v_branch', 'else')] = (
+    OWED, "OWED to the sweep: the stage-3 CLOCKED-bus path is driven only by test/run_pit_clk.py (gate pit-clk, CI on Verilator: spi_m0..m3, spi_mid, spi_ragged, spi_quiet, i2c_pec, i2c_sr, no_cs, no_clean_edge, both_levels), and tb_pit's swept arms never hand stage 3 a clocked bus. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN, as ac3443d did for tb_usbrx); a point still uncovered then gets its own entry. This point: P_KCAP waiting on the second capture: if = it finished (ck_done, every ok case); else = still capturing; the case arm itself.")
+CLASSIFIED[('src/project.v', 2084, 'v_branch', 'if')] = (
+    OWED, "OWED to the sweep: the stage-3 CLOCKED-bus path is driven only by test/run_pit_clk.py (gate pit-clk, CI on Verilator: spi_m0..m3, spi_mid, spi_ragged, spi_quiet, i2c_pec, i2c_sr, no_cs, no_clean_edge, both_levels), and tb_pit's swept arms never hand stage 3 a clocked bus. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN, as ac3443d did for tb_usbrx); a point still uncovered then gets its own entry. This point: P_KCAP waiting on the second capture: if = it finished (ck_done, every ok case); else = still capturing; the case arm itself.")
+CLASSIFIED[('src/project.v', 2084, 'v_line', 'case')] = (
+    OWED, "OWED to the sweep: the stage-3 CLOCKED-bus path is driven only by test/run_pit_clk.py (gate pit-clk, CI on Verilator: spi_m0..m3, spi_mid, spi_ragged, spi_quiet, i2c_pec, i2c_sr, no_cs, no_clean_edge, both_levels), and tb_pit's swept arms never hand stage 3 a clocked bus. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN, as ac3443d did for tb_usbrx); a point still uncovered then gets its own entry. This point: P_KCAP waiting on the second capture: if = it finished (ck_done, every ok case); else = still capturing; the case arm itself.")
+CLASSIFIED[('src/project.v', 2088, 'v_branch', 'if')] = (
+    OWED, "OWED to the sweep: the stage-3 CLOCKED-bus path is driven only by test/run_pit_clk.py (gate pit-clk, CI on Verilator: spi_m0..m3, spi_mid, spi_ragged, spi_quiet, i2c_pec, i2c_sr, no_cs, no_clean_edge, both_levels), and tb_pit's swept arms never hand stage 3 a clocked bus. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN, as ac3443d did for tb_usbrx); a point still uncovered then gets its own entry. This point: the clocked-bus descriptor write to byte 3 once the capture is in (ck_ok, every ok case).")
+CLASSIFIED[('src/project.v', 2794, 'v_branch', 'else')] = (
+    OWED, "OWED: a stage 1-2 corner that none of run_pit_s12's 17 cases (swept since ac3443d, +S0WAIT=2) drives at reset +0. Owed to a run_pit_s12 case whose capture makes this true: an OVF interval (an edge gap longer than the interval counter) in the PRE pass, which skips it for n / n1 / IVMAX.")
+CLASSIFIED[('src/project.v', 2801, 'v_line', 'elsif')] = (
+    OWED, "OWED: a stage 1-2 corner that none of run_pit_s12's 17 cases (swept since ac3443d, +S0WAIT=2) drives at reset +0. Owed to a run_pit_s12 case whose capture makes this true: an OVF interval reaching the stage-1 division pass (div_ip), which drops it -- a long idle gap inside the capture.")
+CLASSIFIED[('src/project.v', 2802, 'v_line', 'elsif')] = (
+    OWED, "OWED: a stage 1-2 corner that none of run_pit_s12's 17 cases (swept since ac3443d, +S0WAIT=2) drives at reset +0. Owed to a run_pit_s12 case whose capture makes this true: an OVF interval reaching refine 2 (S_REF2), which drops it -- a long idle gap inside the capture.")
+CLASSIFIED[('src/project.v', 2805, 'v_line', 'if')] = (
+    OWED, "OWED: a stage 1-2 corner that none of run_pit_s12's 17 cases (swept since ac3443d, +S0WAIT=2) drives at reset +0. Owed to a run_pit_s12 case whose capture makes this true: an OVF interval in stage 2 outside the phase walk: an idle run, which takes no divide.")
+CLASSIFIED[('src/project.v', 2845, 'v_branch', 'cond_then')] = (
+    OWED, "OWED: a stage 1-2 corner that none of run_pit_s12's 17 cases (swept since ac3443d, +S0WAIT=2) drives at reset +0. Owed to a run_pit_s12 case whose capture makes this true: S_ASYNC's run length of an OVF interval (saturated at 16) -- a long idle gap in an async capture.")
+CLASSIFIED[('src/project.v', 2919, 'v_line', 'if')] = (
+    OWED, "OWED: a stage 1-2 corner that none of run_pit_s12's 17 cases (swept since ac3443d, +S0WAIT=2) drives at reset +0. Owed to a run_pit_s12 case whose capture makes this true: S_HARM reaching the end of the period walk with every rival harmonic (p_end): the best period accepted after the harmonic check.")
+CLASSIFIED[('src/project.v', 2933, 'v_branch', 'else')] = (
+    OWED, "OWED: a stage 1-2 corner that none of run_pit_s12's 17 cases (swept since ac3443d, +S0WAIT=2) drives at reset +0. Owed to a run_pit_s12 case whose capture makes this true: refine 2 with NO hit at refine 1's P_hat (acc[74:52] == 0): no divide is started.")
+CLASSIFIED[('src/project.v', 2941, 'v_branch', 'else')] = (
+    OWED, "OWED: a stage 1-2 corner that none of run_pit_s12's 17 cases (swept since ac3443d, +S0WAIT=2) drives at reset +0. Owed to a run_pit_s12 case whose capture makes this true: refine 2's result not taken because it had no hit (acc[74:52] == 0) -- the same capture as 2933.")
+CLASSIFIED[('src/project.v', 2973, 'v_branch', 'else')] = (
+    OWED, "OWED: a stage 1-2 corner that none of run_pit_s12's 17 cases (swept since ac3443d, +S0WAIT=2) drives at reset +0. Owed to a run_pit_s12 case whose capture makes this true: S_SPAN with the walk ending on a span close (no open span to count, acc[21:9] == 0).")
+CLASSIFIED[('src/project.v', 2975, 'v_branch', 'if')] = (
+    OWED, "OWED: a stage 1-2 corner that none of run_pit_s12's 17 cases (swept since ac3443d, +S0WAIT=2) drives at reset +0. Owed to a run_pit_s12 case whose capture makes this true: S_SPAN's final OPEN span being the longest span of the walk (acc[21:9] > acc[34:22]).")
+CLASSIFIED[('src/project.v', 3059, 'v_branch', 'if')] = (
+    OWED, "OWED to the sweep: stage 3's ASYNC decode / GCD record path past what tb_pit's swept arms reach; test/run_pit_s3.py (gate pit-s3) runs stage 3 but is not in the sweep. Retired by a run_pit_s3.coverage_arms(), or -- if no pit-s3 case reaches it -- a case that drives: a frame bound below S3_MIN_FB: the refusal s3_why 1, straight to the GCD init.")
+CLASSIFIED[('src/project.v', 3070, 'v_branch', 'if')] = (
+    OWED, "OWED to the sweep: stage 3's ASYNC decode / GCD record path past what tb_pit's swept arms reach; test/run_pit_s3.py (gate pit-s3) runs stage 3 but is not in the sweep. Retired by a run_pit_s3.coverage_arms(), or -- if no pit-s3 case reaches it -- a case that drives: the fl = fb * p16 shift-add overflowing (acc[29] or hi5[4]): the sticky high flag S3_HLE.")
+CLASSIFIED[('src/project.v', 3073, 'v_branch', 'cond_then')] = (
+    OWED, "OWED to the sweep: stage 3's ASYNC decode / GCD record path past what tb_pit's swept arms reach; test/run_pit_s3.py (gate pit-s3) runs stage 3 but is not in the sweep. Retired by a run_pit_s3.coverage_arms(), or -- if no pit-s3 case reaches it -- a case that drives: fl saturated (all ones) after an overflow -- the same capture as 3070.")
+CLASSIFIED[('src/project.v', 3092, 'v_branch', 'if')] = (
+    OWED, "OWED to the sweep: stage 3's ASYNC decode / GCD record path past what tb_pit's swept arms reach; test/run_pit_s3.py (gate pit-s3) runs stage 3 but is not in the sweep. Retired by a run_pit_s3.coverage_arms(), or -- if no pit-s3 case reaches it -- a case that drives: T_LOC outside a message advancing on a valid interval (x_v) before the scan is exhausted.")
+CLASSIFIED[('src/project.v', 3104, 'v_branch', 'else')] = (
+    OWED, "OWED to the sweep: stage 3's ASYNC decode / GCD record path past what tb_pit's swept arms reach; test/run_pit_s3.py (gate pit-s3) runs stage 3 but is not in the sweep. Retired by a run_pit_s3.coverage_arms(), or -- if no pit-s3 case reaches it -- a case that drives: T_SPL closing a message with the message count already saturated at 255.")
+CLASSIFIED[('src/project.v', 3123, 'v_branch', 'cond_then')] = (
+    OWED, "OWED to the sweep: stage 3's ASYNC decode / GCD record path past what tb_pit's swept arms reach; test/run_pit_s3.py (gate pit-s3) runs stage 3 but is not in the sweep. Retired by a run_pit_s3.coverage_arms(), or -- if no pit-s3 case reaches it -- a case that drives: T_XE's position saturating (al[25]) -- a sum past 2^25.")
+CLASSIFIED[('src/project.v', 3127, 'v_branch', 'else')] = (
+    OWED, "OWED to the sweep: stage 3's ASYNC decode / GCD record path past what tb_pit's swept arms reach; test/run_pit_s3.py (gate pit-s3) runs stage 3 but is not in the sweep. Retired by a run_pit_s3.coverage_arms(), or -- if no pit-s3 case reaches it -- a case that drives: T_END with no message open: the decode ends between messages.")
+CLASSIFIED[('src/project.v', 3129, 'v_branch', 'else')] = (
+    OWED, "OWED to the sweep: stage 3's ASYNC decode / GCD record path past what tb_pit's swept arms reach; test/run_pit_s3.py (gate pit-s3) runs stage 3 but is not in the sweep. Retired by a run_pit_s3.coverage_arms(), or -- if no pit-s3 case reaches it -- a case that drives: T_END closing a message with the count saturated at 255.")
+CLASSIFIED[('src/project.v', 3138, 'v_branch', 'if')] = (
+    OWED, "OWED to the sweep: the stage-3 CLOCKED-bus path is driven only by test/run_pit_clk.py (gate pit-clk, CI on Verilator: spi_m0..m3, spi_mid, spi_ragged, spi_quiet, i2c_pec, i2c_sr, no_cs, no_clean_edge, both_levels), and tb_pit's swept arms never hand stage 3 a clocked bus. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN, as ac3443d did for tb_usbrx); a point still uncovered then gets its own entry. This point: T_CK taking the clocked capture's messages into stage 3 (ck_ok: s3_found, w, write pointer, message count).")
+CLASSIFIED[('src/project.v', 3294, 'v_branch', 'cond_then')] = (
+    OWED, "OWED to the sweep: stage 3's ASYNC decode / GCD record path past what tb_pit's swept arms reach; test/run_pit_s3.py (gate pit-s3) runs stage 3 but is not in the sweep. Retired by a run_pit_s3.coverage_arms(), or -- if no pit-s3 case reaches it -- a case that drives: the GCD record says no polynomial and stage 3 found frames, with the GCD skipped and not tried -> s3_why 2 (else 3).")
+CLASSIFIED[('src/project.v', 3314, 'v_branch', 'if')] = (
+    OWED, "OWED to the sweep: stage 3's ASYNC decode / GCD record path past what tb_pit's swept arms reach; test/run_pit_s3.py (gate pit-s3) runs stage 3 but is not in the sweep. Retired by a run_pit_s3.coverage_arms(), or -- if no pit-s3 case reaches it -- a case that drives: P_E3: the length count no greater than the data-bit count -- `no data bits: not a length`.")
+CLASSIFIED[('src/project.v', 3381, 'v_branch', 'if')] = (
+    OWED, "OWED to the sweep: stage 3's ASYNC decode / GCD record path past what tb_pit's swept arms reach; test/run_pit_s3.py (gate pit-s3) runs stage 3 but is not in the sweep. Retired by a run_pit_s3.coverage_arms(), or -- if no pit-s3 case reaches it -- a case that drives: P_V2: the verification remainder non-zero (P_A != 0) -> the refusal s3_why 5.")
+CLASSIFIED[('src/project.v', 3433, 'v_line', 'case')] = (
+    UNREACHABLE, "pe_pit_s12's sequencer `default`. `st` is [4:0] with 18 named states S_IDLE .. S_S3 = 5'd0 .. 5'd17, every one with its own case arm, and every `st <=` in the module writes a named S_* state, so 5'd18 .. 5'd31 is reachable only by corruption of a reset-bearing flop. A defensive return to S_IDLE.")
+CLASSIFIED[('src/project.v', 3455, 'v_branch', 'if')] = (
+    UNREACHABLE, "the s12 note's proof s12-1 as an every-cycle simulation assertion: the flags f3 are the decode of the CURRENT t3 by construction, so a passing run never reaches it -- it $finishes the run. run_pit_gcd builds with PE_S12_NOASSERT only for its record mutant.")
+CLASSIFIED[('src/project.v', 3460, 'v_branch', 'if')] = (
+    UNREACHABLE, 'proof s12-2 as a simulation assertion: on a division step the mask test equals the (r ^ d) < r compare it replaced. A failure $finishes the run, so a passing run never reaches it; a tripwire, not a path.')
+CLASSIFIED[('src/project.v', 3466, 'v_branch', 'if')] = (
+    UNREACHABLE, 'proof s12-4 as a simulation assertion: the tree compare lt33 equals P_A < P_B in stage 3. A failure $finishes the run, so a passing run never reaches it; a tripwire, not a path.')
+CLASSIFIED[('src/project.v', 3471, 'v_branch', 'if')] = (
+    UNREACHABLE, "the initial check that pe_s3_opsel's operation codes equal this module's (proof section 3): both sides are localparams of the same values, so it is false at elaboration unless one copy is edited -- a tripwire on the copies, not a path.")
+CLASSIFIED[('src/project.v', 3835, 'v_branch', 'cond_then')] = (
+    OWED, "OWED to the sweep: pe_pit's SECOND (clocked) capture -- armed by stage 0's clocked-bus descriptor -- runs only under test/run_pit_clk.py (gate pit-clk), which is not in the sweep; tb_pit's swept arms never arm it. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN); a point still uncovered then gets its own entry. This point: s_close for I2C (a START / STOP event closes the message; i2c_pec, i2c_sr).")
+CLASSIFIED[('src/project.v', 3836, 'v_branch', 'cond_then')] = (
+    OWED, "OWED to the sweep: pe_pit's SECOND (clocked) capture -- armed by stage 0's clocked-bus descriptor -- runs only under test/run_pit_clk.py (gate pit-clk), which is not in the sweep; tb_pit's swept arms never arm it. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN); a point still uncovered then gets its own entry. This point: s_openv for I2C (a START: SDA falls with SCL high).")
+CLASSIFIED[('src/project.v', 3843, 'v_branch', 'cond_then')] = (
+    OWED, "OWED to the sweep: pe_pit's SECOND (clocked) capture -- armed by stage 0's clocked-bus descriptor -- runs only under test/run_pit_clk.py (gate pit-clk), which is not in the sweep; tb_pit's swept arms never arm it. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN); a point still uncovered then gets its own entry. This point: s_bit for I2C (a clock change that is not START / STOP, with a pending sample).")
+CLASSIFIED[('src/project.v', 3845, 'v_branch', 'cond_then')] = (
+    OWED, "OWED to the sweep: pe_pit's SECOND (clocked) capture -- armed by stage 0's clocked-bus descriptor -- runs only under test/run_pit_clk.py (gate pit-clk), which is not in the sweep; tb_pit's swept arms never arm it. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN); a point still uncovered then gets its own entry. This point: s_bv for I2C (the pending SDA sample is the bit).")
+CLASSIFIED[('src/project.v', 3850, 'v_branch', 'cond_then')] = (
+    OWED, "OWED to the sweep: pe_pit's SECOND (clocked) capture -- armed by stage 0's clocked-bus descriptor -- runs only under test/run_pit_clk.py (gate pit-clk), which is not in the sweep; tb_pit's swept arms never arm it. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN); a point still uncovered then gets its own entry. This point: s_unit 9 for I2C (8 data bits + the ACK slot per byte).")
+CLASSIFIED[('src/project.v', 3855, 'v_branch', 'cond_else')] = (
+    OWED, "OWED to the sweep: pe_pit's SECOND (clocked) capture -- armed by stage 0's clocked-bus descriptor -- runs only under test/run_pit_clk.py (gate pit-clk), which is not in the sweep; tb_pit's swept arms never arm it. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN); a point still uncovered then gets its own entry. This point: a bit past the eighth (I2C's ACK slot) not shifted into the byte.")
+CLASSIFIED[('src/project.v', 3953, 'v_line', 'elsif')] = (
+    OWED, "OWED to the sweep: pe_pit's SECOND (clocked) capture -- armed by stage 0's clocked-bus descriptor -- runs only under test/run_pit_clk.py (gate pit-clk), which is not in the sweep; tb_pit's swept arms never arm it. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN); a point still uncovered then gets its own entry. This point: ck_arm, the capture's cycle 0 (every accepted case).")
+CLASSIFIED[('src/project.v', 3957, 'v_branch', 'if')] = (
+    OWED, "OWED to the sweep: pe_pit's SECOND (clocked) capture -- armed by stage 0's clocked-bus descriptor -- runs only under test/run_pit_clk.py (gate pit-clk), which is not in the sweep; tb_pit's swept arms never arm it. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN); a point still uncovered then gets its own entry. This point: s_on, the capture running.")
+CLASSIFIED[('src/project.v', 3958, 'v_branch', 'else')] = (
+    OWED, "OWED to the sweep: pe_pit's SECOND (clocked) capture -- armed by stage 0's clocked-bus descriptor -- runs only under test/run_pit_clk.py (gate pit-clk), which is not in the sweep; tb_pit's swept arms never arm it. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN); a point still uncovered then gets its own entry. This point: the capture ending on the budget (edges at 2^b unseen: spi_quiet) or a full slot store (if) vs running on (else).")
+CLASSIFIED[('src/project.v', 3958, 'v_branch', 'if')] = (
+    OWED, "OWED to the sweep: pe_pit's SECOND (clocked) capture -- armed by stage 0's clocked-bus descriptor -- runs only under test/run_pit_clk.py (gate pit-clk), which is not in the sweep; tb_pit's swept arms never arm it. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN); a point still uncovered then gets its own entry. This point: the capture ending on the budget (edges at 2^b unseen: spi_quiet) or a full slot store (if) vs running on (else).")
+CLASSIFIED[('src/project.v', 3961, 'v_branch', 'else')] = (
+    OWED, "OWED to the sweep: pe_pit's SECOND (clocked) capture -- armed by stage 0's clocked-bus descriptor -- runs only under test/run_pit_clk.py (gate pit-clk), which is not in the sweep; tb_pit's swept arms never arm it. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN); a point still uncovered then gets its own entry. This point: the I2C sampler (if) vs the SPI sampler (else).")
+CLASSIFIED[('src/project.v', 3961, 'v_branch', 'if')] = (
+    OWED, "OWED to the sweep: pe_pit's SECOND (clocked) capture -- armed by stage 0's clocked-bus descriptor -- runs only under test/run_pit_clk.py (gate pit-clk), which is not in the sweep; tb_pit's swept arms never arm it. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN); a point still uncovered then gets its own entry. This point: the I2C sampler (if) vs the SPI sampler (else).")
+CLASSIFIED[('src/project.v', 3962, 'v_line', 'elsif')] = (
+    OWED, "OWED to the sweep: pe_pit's SECOND (clocked) capture -- armed by stage 0's clocked-bus descriptor -- runs only under test/run_pit_clk.py (gate pit-clk), which is not in the sweep; tb_pit's swept arms never arm it. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN); a point still uncovered then gets its own entry. This point: an I2C START / STOP clearing the pending bit.")
+CLASSIFIED[('src/project.v', 3963, 'v_line', 'elsif')] = (
+    OWED, "OWED to the sweep: pe_pit's SECOND (clocked) capture -- armed by stage 0's clocked-bus descriptor -- runs only under test/run_pit_clk.py (gate pit-clk), which is not in the sweep; tb_pit's swept arms never arm it. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN); a point still uncovered then gets its own entry. This point: an I2C clock change with the message open latching SDA as the pending bit.")
+CLASSIFIED[('src/project.v', 3964, 'v_branch', 'else')] = (
+    OWED, "OWED to the sweep: pe_pit's SECOND (clocked) capture -- armed by stage 0's clocked-bus descriptor -- runs only under test/run_pit_clk.py (gate pit-clk), which is not in the sweep; tb_pit's swept arms never arm it. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN); a point still uncovered then gets its own entry. This point: a consumed I2C bit clearing the pending flag (if) vs no bit this cycle (else).")
+CLASSIFIED[('src/project.v', 3964, 'v_branch', 'if')] = (
+    OWED, "OWED to the sweep: pe_pit's SECOND (clocked) capture -- armed by stage 0's clocked-bus descriptor -- runs only under test/run_pit_clk.py (gate pit-clk), which is not in the sweep; tb_pit's swept arms never arm it. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN); a point still uncovered then gets its own entry. This point: a consumed I2C bit clearing the pending flag (if) vs no bit this cycle (else).")
+CLASSIFIED[('src/project.v', 3966, 'v_branch', 'else')] = (
+    OWED, "OWED to the sweep: pe_pit's SECOND (clocked) capture -- armed by stage 0's clocked-bus descriptor -- runs only under test/run_pit_clk.py (gate pit-clk), which is not in the sweep; tb_pit's swept arms never arm it. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN); a point still uncovered then gets its own entry. This point: a sampled bit shifting into the byte (if) vs no bit (else).")
+CLASSIFIED[('src/project.v', 3966, 'v_branch', 'if')] = (
+    OWED, "OWED to the sweep: pe_pit's SECOND (clocked) capture -- armed by stage 0's clocked-bus descriptor -- runs only under test/run_pit_clk.py (gate pit-clk), which is not in the sweep; tb_pit's swept arms never arm it. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN); a point still uncovered then gets its own entry. This point: a sampled bit shifting into the byte (if) vs no bit (else).")
+CLASSIFIED[('src/project.v', 3967, 'v_branch', 'else')] = (
+    OWED, "OWED to the sweep: pe_pit's SECOND (clocked) capture -- armed by stage 0's clocked-bus descriptor -- runs only under test/run_pit_clk.py (gate pit-clk), which is not in the sweep; tb_pit's swept arms never arm it. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN); a point still uncovered then gets its own entry. This point: a whole byte (8 bits SPI, 9 I2C) going to its slot (if) vs a partial byte (else).")
+CLASSIFIED[('src/project.v', 3967, 'v_branch', 'if')] = (
+    OWED, "OWED to the sweep: pe_pit's SECOND (clocked) capture -- armed by stage 0's clocked-bus descriptor -- runs only under test/run_pit_clk.py (gate pit-clk), which is not in the sweep; tb_pit's swept arms never arm it. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN); a point still uncovered then gets its own entry. This point: a whole byte (8 bits SPI, 9 I2C) going to its slot (if) vs a partial byte (else).")
+CLASSIFIED[('src/project.v', 3971, 'v_branch', 'else')] = (
+    OWED, "OWED to the sweep: pe_pit's SECOND (clocked) capture -- armed by stage 0's clocked-bus descriptor -- runs only under test/run_pit_clk.py (gate pit-clk), which is not in the sweep; tb_pit's swept arms never arm it. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN); a point still uncovered then gets its own entry. This point: a frame closing (CS inactive / STOP) (if) vs no close (else).")
+CLASSIFIED[('src/project.v', 3971, 'v_branch', 'if')] = (
+    OWED, "OWED to the sweep: pe_pit's SECOND (clocked) capture -- armed by stage 0's clocked-bus descriptor -- runs only under test/run_pit_clk.py (gate pit-clk), which is not in the sweep; tb_pit's swept arms never arm it. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN); a point still uncovered then gets its own entry. This point: a frame closing (CS inactive / STOP) (if) vs no close (else).")
+CLASSIFIED[('src/project.v', 3973, 'v_branch', 'else')] = (
+    OWED, "OWED to the sweep: pe_pit's SECOND (clocked) capture -- armed by stage 0's clocked-bus descriptor -- runs only under test/run_pit_clk.py (gate pit-clk), which is not in the sweep; tb_pit's swept arms never arm it. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN); a point still uncovered then gets its own entry. This point: a kept message's length written into its frame slot (if) vs a dropped empty one (else).")
+CLASSIFIED[('src/project.v', 3973, 'v_branch', 'if')] = (
+    OWED, "OWED to the sweep: pe_pit's SECOND (clocked) capture -- armed by stage 0's clocked-bus descriptor -- runs only under test/run_pit_clk.py (gate pit-clk), which is not in the sweep; tb_pit's swept arms never arm it. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN); a point still uncovered then gets its own entry. This point: a kept message's length written into its frame slot (if) vs a dropped empty one (else).")
+CLASSIFIED[('src/project.v', 3976, 'v_branch', 'else')] = (
+    OWED, "OWED to the sweep: pe_pit's SECOND (clocked) capture -- armed by stage 0's clocked-bus descriptor -- runs only under test/run_pit_clk.py (gate pit-clk), which is not in the sweep; tb_pit's swept arms never arm it. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN); a point still uncovered then gets its own entry. This point: the message count incrementing (if) vs saturated at 255 (else: more than 255 messages before the store fills -- if the NFR = 400 cases do not reach it, it is owed a longer-bus case).")
+CLASSIFIED[('src/project.v', 3976, 'v_branch', 'if')] = (
+    OWED, "OWED to the sweep: pe_pit's SECOND (clocked) capture -- armed by stage 0's clocked-bus descriptor -- runs only under test/run_pit_clk.py (gate pit-clk), which is not in the sweep; tb_pit's swept arms never arm it. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN); a point still uncovered then gets its own entry. This point: the message count incrementing (if) vs saturated at 255 (else: more than 255 messages before the store fills -- if the NFR = 400 cases do not reach it, it is owed a longer-bus case).")
+CLASSIFIED[('src/project.v', 3979, 'v_branch', 'else')] = (
+    OWED, "OWED to the sweep: pe_pit's SECOND (clocked) capture -- armed by stage 0's clocked-bus descriptor -- runs only under test/run_pit_clk.py (gate pit-clk), which is not in the sweep; tb_pit's swept arms never arm it. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN); a point still uncovered then gets its own entry. This point: a frame opening (CS active / START) (if) vs none (else).")
+CLASSIFIED[('src/project.v', 3979, 'v_branch', 'if')] = (
+    OWED, "OWED to the sweep: pe_pit's SECOND (clocked) capture -- armed by stage 0's clocked-bus descriptor -- runs only under test/run_pit_clk.py (gate pit-clk), which is not in the sweep; tb_pit's swept arms never arm it. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN); a point still uncovered then gets its own entry. This point: a frame opening (CS active / START) (if) vs none (else).")
+CLASSIFIED[('src/project.v', 3980, 'v_branch', 'cond_else')] = (
+    OWED, "OWED to the sweep: pe_pit's SECOND (clocked) capture -- armed by stage 0's clocked-bus descriptor -- runs only under test/run_pit_clk.py (gate pit-clk), which is not in the sweep; tb_pit's swept arms never arm it. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN); a point still uncovered then gets its own entry. This point: the new message's length-slot address: after a kept message (s_end) vs the first (ck_wp).")
+CLASSIFIED[('src/project.v', 3980, 'v_branch', 'cond_then')] = (
+    OWED, "OWED to the sweep: pe_pit's SECOND (clocked) capture -- armed by stage 0's clocked-bus descriptor -- runs only under test/run_pit_clk.py (gate pit-clk), which is not in the sweep; tb_pit's swept arms never arm it. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN); a point still uncovered then gets its own entry. This point: the new message's length-slot address: after a kept message (s_end) vs the first (ck_wp).")
 
 #: ⚠ TOGGLE CEILINGS -- uncovered toggle points per file, which may only FALL.
 #: ⛔ Measured, not chosen: these are the values of the sweep that shipped with
@@ -666,49 +850,49 @@ ANCHOR_TEXT = {
     # `if (clk_real) begin` in their original order. The serial-select entry
     # (old 1021) is RETIRED: TF2 replaced that loop with a tree for
     # N_LANES = 5, so the branch is no longer elaborated (see CLASSIFIED).
-    ("src/pe_engine.v", 2456):
+    ("src/pe_engine.v", 2886):
         "if (hdr_done && !prime_unp) primed_q <= 1'b1;",
     # the self-clocked arms' redundant-by-construction guards. ⭐ TWO PAIRS
     # SHARE THEIR TEXT (`if (pin_real) begin` at 1621/1694, `if (clk_real)
     # begin` at 1630/1641), which is exactly why the anchor is keyed on the
     # LINE and the text is the drift check rather than the identifier.
-    ("src/pe_engine.v", 2876):
+    ("src/pe_engine.v", 3332):
         "if (pin_real) begin",
     # ⛔ THE TWO RULING-H ENTRIES NEED ANCHORS LIKE EVERY OTHER, and the
     # first version of them did not have any -- so `reanchor.py` could not move
     # them when the hold's own edits shifted the file, and the gate failed on a
     # classification that had slid off its line. The gate already demands this
     # ("Add it to ANCHOR_TEXT"); I had simply not met it.
-    ("src/pe_engine.v", 3005):
+    ("src/pe_engine.v", 3461):
         "if (l_mode[cur]) begin",
-    ("src/pe_engine.v", 3629):
+    ("src/pe_engine.v", 4171):
         "if (l_pin[i] < N_PINS[PINW-1:0]) begin",
-    ("src/pe_engine.v", 2909):
+    ("src/pe_engine.v", 3365):
         "if (clk_real) begin",
-    ("src/pe_engine.v", 2929):
+    ("src/pe_engine.v", 3385):
         "if (clk_real) begin",
-    ("src/pe_engine.v", 2999):
+    ("src/pe_engine.v", 3455):
         "if (pin_real) begin",
-    ("src/pe_engine.v", 3129):
+    ("src/pe_engine.v", 3595):
         "if (ck_shiftin & ack_drv[1]) pin_out[a_pin] <= ack_drv[0];",
-    ("src/pe_engine.v", 2541):
+    ("src/pe_engine.v", 2980):
         "H_IDLE: if (!hdr_done) begin",
-    ("src/pe_engine.v", 3335):
+    ("src/pe_engine.v", 3871):
         "if (ck_consume & ~l_ckgot[cur]) begin",
-    ("src/pe_engine.v", 2710):
+    ("src/pe_engine.v", 3161):
         "default: pst <= P_SCAN;",
-    ("src/pe_engine.v", 3160):
+    ("src/pe_engine.v", 3628):
         "default: ;",
-    ("src/pe_engine.v", 3583):
+    ("src/pe_engine.v", 4125):
         "default: st <= ST_IDLE;",
     # `src/project.v` 557 -- `if (RX_SERIAL != 0) begin` -- is gone with the
     # parameter. ⭐ THE ANCHOR IS WHAT MADE THAT SAFE TO DO: the source text
     # was recorded beside the line number, so the deletion had to account for
     # the anchor instead of leaving a live number pointing at whatever moved
     # into line 557.
-    ("src/project.v", 1483):
+    ("src/project.v", 1908):
         "P_CLVL: if (nlv0 < 9'd4 || nlv1 < 9'd4) begin regular <= 1'b0; ph <= P_CHALF; end",
-    ("src/project.v", 1606):
+    ("src/project.v", 2091):
         "default: ph <= P_IDLE;",
     ("test/fram_i2c.v", 281):
         "P_WDATA: begin",
@@ -729,13 +913,81 @@ ANCHOR_TEXT = {
     # (78f647e). Then +8 (199 -> 207, 209 -> 217, 214 -> 222) and the text
     # gained `chk_armed && rst_n === 1'b1 &&`: the checks are armed only after
     # the store has seen its reset (the Verilator seed sweep, 11-02).
-    ("src/pe_store.v", 244):
-        "always @(posedge clk) if (chk_armed && rst_n === 1'b1 && wv_q === 1'b1 && bank_hit && wre === 1'b1 && xrow == wrow_q) begin",
-    ("src/pe_store.v", 254):
-        "always @(posedge clk) if (chk_armed && rst_n === 1'b1 && re === 1'b1 && wre === 1'b1) begin",
-    ("src/pe_store.v", 259):
-        "always @(posedge clk) if (chk_armed && rst_n === 1'b1 && wv_q === 1'b1 && re === 1'b1 && raddr == {wrow_q, wsel_q}) begin",
 }
+ANCHOR_TEXT.update({
+    ('src/pe_store.v', 455): 'wire [WIDE_B*8-1:0] rword = fw_q ? ((dout & ~fbm_q) | (fd_q & fbm_q)) : dout;',
+    ('src/pe_store.v', 477): "always @(posedge clk) if (rst_seen && rst_n === 1'b1 && wre === 1'b1 && (wr === 1'b1 || re === 1'b1 || (pw === 1'b1 && pa[AWW-1] !== 1'b1))) begin",
+    ('src/pe_store.v', 484): "always @(posedge clk) if (rst_seen && rst_n === 1'b1 && (wr === 1'b1 || bwe === 1'b1) && pw === 1'b1 && rd_now === 1'b1) begin",
+    ('src/pe_store.v', 498): "if (pw && pa == {{(AWW-(AW-WB_W)){1'b0}}, a[AW-1:WB_W]}) wd = (wd & ~pbm) | (pd & pbm);",
+    ('src/project.v', 1725): 'if (ck_pass) begin',
+    ('src/project.v', 1726): "if (k_cnt && (k_nr || k_rise)) ck_dr <= 1'b1;",
+    ('src/project.v', 1727): "if (k_cnt && (k_nf || k_fall)) ck_df <= 1'b1;",
+    ('src/project.v', 1728): "if (k_rise && k_nd) ck_dr <= 1'b1;",
+    ('src/project.v', 1729): "if (k_fall && k_nd) ck_df <= 1'b1;",
+    ('src/project.v', 1730): "if (k_cnt) begin if (cl) ck_sn1 <= 1'b1; else ck_sn0 <= 1'b1; end",
+    ('src/project.v', 1731): 'if (k_fe && k_fl == ck_act) begin',
+    ('src/project.v', 1733): 'if (cl ^ ce) ck_ch <= ck_ch + ONE;',
+    ('src/project.v', 2046): "ck_why <= k_seen ? 4'd7 : 4'd6;                   // no frame markers / no data wire",
+    ('src/project.v', 2050): "else if (!k_dsync) di <= di + 4'd1;",
+    ('src/project.v', 2059): "P_KC1:  if (k_maybe && !sig_ok) begin di <= di + 4'd1; ph <= P_KSEL; end",
+    ('src/project.v', 2062): "if (!ck_i2c && k_hi8 >= k_nc7) ck_act <= 1'b1;",
+    ('src/project.v', 2063): "else if (!ck_i2c && k_lo8 >= k_nc7) ck_act <= 1'b0;",
+    ('src/project.v', 2064): 'if (!ck_i2c && k_hi8 < k_nc7 && k_lo8 < k_nc7) begin    // CS level unclear',
+    ('src/project.v', 2070): 'P_KC2:  begin',
+    ('src/project.v', 2072): "if (k_cr && !k_cf) ck_edge <= 1'b1;",
+    ('src/project.v', 2073): "else if (k_cf && !k_cr) ck_edge <= 1'b0;",
+    ('src/project.v', 2077): 'else if (k_cr && k_cf && (ck_sn0 ^ ck_sn1)) ck_edge <= ck_sn0;',
+    ('src/project.v', 2080): "ck_why <= (k_cr && k_cf) ? 4'd10 : 4'd9;",
+    ('src/project.v', 2084): "P_KCAP: if (ck_done) begin ck_ok <= 1'b1; ph <= P_KFIN; end",
+    ('src/project.v', 2088): "if (ck_ok) begin we0 <= 1'b1; waddr0 <= 9'd3; wdata0 <= k_desc; end",
+    ('src/project.v', 2794): 'if (x_iv != OVF) begin',
+    ('src/project.v', 2801): "if (x_iv == OVF && div_ip) begin x_v <= 1'b0; hold <= 1'b0; end     // stage 1: data excludes OVF",
+    ('src/project.v', 2802): "else if (x_iv == OVF && st == S_REF2) begin x_v <= 1'b0; hold <= 1'b0; end",
+    ('src/project.v', 2805): 'else if (x_iv == OVF) begin                                         // stage 2: an idle run',
+    ('src/project.v', 2845): "acc[19:15] <= (x_iv == OVF) ? 5'd16 : m16;                       // RUN",
+    ('src/project.v', 2919): "end else if (p_end) begin p <= bp; s1ok <= 1'b1; walk_go <= 1'b1; st <= S_RB; end",
+    ('src/project.v', 2933): "if (acc[74:52] != 23'd0) begin",
+    ('src/project.v', 2941): "if (acc[74:52] != 23'd0) p16 <= dv_q[18:0];",
+    ('src/project.v', 2973): "if (acc[21:9] != 13'd0) begin",
+    ('src/project.v', 2975): 'if (acc[21:9] > acc[34:22]) acc[34:22] <= acc[21:9];',
+    ('src/project.v', 3059): 'if ({acc[62:58], rdata} < S3_MIN_FB) begin',
+    ('src/project.v', 3070): "if (acc[29] | hi5[4]) `S3_HLE <= 1'b1;",
+    ('src/project.v', 3073): "`S3_FL <= (`S3_HLE | acc[29] | hi5[4] | hi5[3]) ? {25{1'b1}} : {hi5[2:0], al[25:4]};",
+    ('src/project.v', 3092): 'if (x_v) `T3((T_ADV)); else if (exh) `T3((T_END));',
+    ('src/project.v', 3104): "if (s3_nmsg != 8'hFF) s3_nmsg <= s3_nmsg + 8'd1;",
+    ('src/project.v', 3123): "T_XE:  begin `S3_X <= al[25] ? {25{1'b1}} : al[24:0]; `S3_MBYTE <= 1'b0; `T3((T_LQ1)); end",
+    ('src/project.v', 3127): 'if (`S3_OPEN) begin',
+    ('src/project.v', 3129): "if (s3_nmsg != 8'hFF) s3_nmsg <= s3_nmsg + 8'd1;",
+    ('src/project.v', 3138): "if (ck_ok) begin s3_found <= 1'b1; w <= ck_w; `S3_WP <= ck_wp; s3_nmsg <= ck_nmsg; end",
+    ('src/project.v', 3294): "if (s3_found && !s3_fbs) s3_why <= (g_skip && !g_try) ? 4'd2 : 4'd3;",
+    ('src/project.v', 3314): 'if (`P_LC <= p_nb) `T3((P_E0));                       // no data bits: not a length',
+    ('src/project.v', 3381): "P_V2:   if (`P_A != 33'd0) begin `T3((P_F)); s3_why <= 4'd5; end",
+    ('src/project.v', 3433): 'default: st <= S_IDLE;',
+    ('src/project.v', 3455): "if (s12_rst_seen && rst_n === 1'b1 && f3 !== t3fl(t3)) begin",
+    ('src/project.v', 3460): "if (s12_rst_seen && rst_n === 1'b1 && run && st == S_S3 && f3[F_DV] && p_lt_div !== ((p_ri ^ p_d) < p_ri)) begin",
+    ('src/project.v', 3466): "if (s12_rst_seen && rst_n === 1'b1 && run && st == S_S3 && p_lt_s0 !== (`P_A < `P_B)) begin",
+    ('src/project.v', 3471): 'if (u_ops_a.PA_SHX != PA_SHX || u_ops_a.PA_SH != PA_SH || u_ops_a.PA_XB != PA_XB ||',
+    ('src/project.v', 3835): 'wire        s_close = ck_i2c ? s_ev : (s_fch & (uio[ck_f] != s_actv));',
+    ('src/project.v', 3836): 'wire        s_openv = ck_i2c ? (s_ev & ~uio[ck_d]) : (s_fch & (uio[ck_f] == s_actv));',
+    ('src/project.v', 3843): 'wire        s_bit  = ck_i2c ? (~s_ev & s_cch & ~s_cn & s_pv)',
+    ('src/project.v', 3845): 'wire        s_bv   = ck_i2c ? s_pend : prev[ck_d];',
+    ('src/project.v', 3850): "wire [3:0]  s_unit = ck_i2c ? 4'd9 : 4'd8;",
+    ('src/project.v', 3855): "wire [7:0]  s_by_n = (s_nbit < 4'd8) ? {s_byte[6:0], s_bv} : s_byte;",
+    ('src/project.v', 3953): 'if (ck_arm) begin                                  // its cycle 0: prev <= uio above',
+    ('src/project.v', 3957): 'end else if (s_on) begin',
+    ('src/project.v', 3958): 'if (bud_hit || s_full) begin                     // the budget (edges at 2^b unseen) or full',
+    ('src/project.v', 3961): 'if (ck_i2c) begin',
+    ('src/project.v', 3962): "if (s_ev) s_pv <= 1'b0;",
+    ('src/project.v', 3963): "else if (s_cch && s_cn && s_open) begin s_pv <= 1'b1; s_pend <= prev[ck_d]; end",
+    ('src/project.v', 3964): "else if (s_bit) s_pv <= 1'b0;",
+    ('src/project.v', 3966): 'if (s_bit) begin s_nbit <= s_nb_n; s_byte <= s_by_n; end',
+    ('src/project.v', 3967): 'if (s_whole) begin                             // a whole byte -> its slot',
+    ('src/project.v', 3971): 'if (s_close) begin',
+    ('src/project.v', 3973): "if (s_keep) begin                            // the length, into the frame's slot",
+    ('src/project.v', 3976): "if (ck_nmsg != 8'hFF) ck_nmsg <= ck_nmsg + 8'd1;",
+    ('src/project.v', 3979): 'if (s_openv) begin',
+    ('src/project.v', 3980): "s_open <= 1'b1; s_la <= s_keep ? s_end : ck_wp;",
+})
 
 #: ⛔⛔ EVERY COVERAGE FIGURE IS LABELLED WITH THE TOOL THAT MEASURED IT
 #: (Wilson's provenance ruling). A release bump is not neutral here: 5.053
@@ -1400,7 +1652,7 @@ def check_full_case() -> int:
     # TF2-R again: 1971 -> 2033, 2410 -> 2475, 2793 -> 2858.
     # v2 step 2 (10-26): 2452 -> 2481, 2896 -> 2925, 3311 -> 3340 -- the same
     # +29 text match as ANCHOR_TEXT (each line read back: the `default:` arm)
-    for line in (2710, 3160, 3583):
+    for line in (3161, 3628, 4125):
         sel, arms = _case_arms(lines, line)
         if sel is None:
             print("    line %-5d *** no enclosing `case` found -- the waiver's"

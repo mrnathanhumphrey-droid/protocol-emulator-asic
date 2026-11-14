@@ -46,6 +46,7 @@ test/run_rean_floor.py              ^\s*GATE rean_floor: PASSED\s*$
 test/gate_store_latch.py            ^\s*GATE store-latch: PASSED\s*$
 test/run_branch_check.py            ^\s*GATE branch-check: PASSED\s*$
 test/run_arm2.py                    ^\s*GATE arm2: PASSED\s*$
+test/gate_batch_equiv.py            ^\s*GATE batch-equiv: PASSED\s*$
 test/run_pair.py                    ^\s*GATE pair: PASSED\s*$
 test/run_usbrx.py                   ^\s*GATE usbrx: PASSED\s*$
 model/gate_usb_sweep.py             ^\s*GATE usb_sweep: PASSED\s*$
@@ -57,12 +58,15 @@ model/gate_gates_complete.py        ^\s*GATE gates-complete: PASSED\s*$
 model/gate_admissible_images.py     ^\s*GATE admissible-images: PASSED\s*$
 model/gate_wire_feed.py             ^\s*GATE wire-feed: PASSED\s*$
 model/gate_image_bounds.py          ^\s*GATE image-bounds: PASSED\s*$
+model/gen_op_reads.py               ^\s*GATE op-reads: PASSED\s*$
 model/gate_sim_runs.py              ^\s*GATE sim-runs: PASSED\s*$
 model/gate_formal_miters.py         ^\s*GATE formal-miters: PASSED\s*$
 model/gate_rowmux_equiv.py          ^\s*GATE rowmux-equiv: PASSED\s*$
 model/gate_i2c_hw_witness.py        ^\s*GATE i2c-hw-witness: PASSED\s*$
 model/gate_onewire_hw_witness.py    ^\s*GATE onewire-hw-witness: PASSED\s*$
 model/gate_flow_config.py           ^\s*GATE flow-config: PASSED\s*$
+model/gate_layers_rc.py             ^\s*GATE layers-rc: PASSED\s*$
+test/gen_progress_bounds.py         ^\s*GATE progress-bounds: PASSED\s*$
 model/gate_action_pins.py           ^\s*GATE action-pins: PASSED\s*$
 test/gate_gl_count.py               ^\s*GATE gl-count: PASSED\s*$
 model/gate_shell_rc.py              ^\s*GATE shell-rc: PASSED\s*$

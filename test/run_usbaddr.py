@@ -58,6 +58,7 @@ from toolchain import banner             # noqa: E402
 import pe_isa as I                       # noqa: E402
 import sim_run                           # noqa: E402
 import usbdev as V                       # noqa: E402
+import clock                             # noqa: E402
 
 GEN = "run_usbaddr"
 T = V.token
@@ -78,6 +79,32 @@ def at(t0, items, step=60):
 # the SET_ADDRESS(5) exchange up to the ZLP: SETUP + DATA0 (ACKed); the RP2040
 # writes the pending address, then loads the ZLP; an IN to 0 takes it
 SA_HOST = [("A", 800, P(T(S, 0))), ("H", 0, D0(SETADDR5))]
+
+
+def glitch(pk, before_eop, n):
+    """`pk` with an n-cycle SE0 planted on a quiet stretch of its data, about
+    `before_eop` cycles before its EOP: a transition-SE0 glitch (TLST-class)."""
+    tr, end = pk
+    eop = tr[-3][0]
+    lev = None
+    for k in range(len(tr) - 3):
+        t0 = tr[k][0]
+        nxt = tr[k + 1][0]
+        if t0 >= eop - before_eop and nxt - t0 > n + 10:
+            lev = tr[k]
+            break
+    assert lev is not None, "no quiet stretch for the glitch"
+    at = lev[0] + 5
+    k = tr.index(lev)
+    return tr[:k + 1] + [(at, 0, 0), (at + n, lev[1], lev[2])] + tr[k + 1:], end
+
+
+def short_eop(pk, n):
+    """`pk` with its EOP's SE0 cut to n cycles (the shortest a receiver must
+    honour is TLEOPR, 670 ns: 39 cycles at the slow band edge)."""
+    tr, _end = pk
+    eop = tr[-3][0]
+    return tr[:-3] + [(eop, 0, 0), (eop + n, 1, 0), (eop + n + V.D, 2, 2)], eop + n
 SA_LOAD = at(7000, V.ctl(I.ctl_pending_addr(5)) + V.load(V.ZLP_LINE))
 IN0 = P(T(IN, 0))
 PEND5 = [(1, 5)]
@@ -122,9 +149,35 @@ SCEN = {
                        dict(pk=[("NAK", 1)]), 9000),
     "A13 bad SYNC": ([("A", 800, P(V.data(V.PID_DATA0, GETDESC, sync=0x84))), ("H", 200, IN0)], [],
                      dict(pk=[("NAK", 1)]), 12000),
-    "A13b OUT to 7": ([("A", 800, P(T(OUT, 7))), ("H", 0, D0(GETDESC)),
+    # gap 1 (Wilson 11-14): the addressed device's handshake follows its DATA at
+    # T_IPD ("H", 0); we skip it (never transmit) and catch the host's next
+    # SETUP. Red under the old RTOP (back to TOP at once: armed mid-reply).
+    "A13b OUT to 7": ([("A", 800, P(T(OUT, 7))), ("H", 0, D0(GETDESC)), ("H", 0, ACKP),
                        ("H", 300, P(T(S, 0))), ("H", 0, D0(GETDESC))], [],
-                      dict(pk=[("ACK", 3)]), 20000),
+                      dict(pk=[("ACK", 4)]), 22000),
+    # a FOREIGN IN, the addressed device's DATA at T_IPD, then an IN to us
+    "A13e foreign IN": ([("A", 800, P(T(IN, 7))), ("H", 0, D0(GETDESC)),
+                         ("H", 300, IN0)], [],
+                        dict(pk=[("NAK", 2)]), 16000),
+    # correction A's must-fires (Wilson 11-14): a responder starting JUST INSIDE
+    # the window (window_end - 1 bit) is skipped; and with NO responder, an IN to
+    # us arriving at the host's EARLIEST next token (18 bit times, fastest host)
+    # is caught -- the FALLTHROUGH ARM timed out and TOP is armed in time.
+    "A13f inside window": ([("A", 800, P(T(IN, 7))), ("H", V.resp_window() - V.D, D0(GETDESC)),
+                            ("H", 300, IN0)], [],
+                           dict(pk=[("NAK", 2)]), 16000),
+    "A13g host timeout": ([("A", 800, P(T(IN, 7))), ("H", clock.usb_host_next_min_cycles(), IN0)], [],
+                          dict(pk=[("NAK", 1)]), 12000),
+    # QUAL's must-fires (Wilson 11-13/14, item 3): the reply we skip carries a
+    # 12-cycle SE0 glitch near its end -- arm_j must NOT take it for the EOP
+    # (M_QUAL_IGNORED re-arms TOP mid-reply and loses the IN that follows at
+    # T_IPD); and a reply whose EOP is only 39 cycles -- arm_j MUST fire on it
+    "Q1 glitch": ([("A", 800, P(T(IN, 7))), ("H", 0, glitch(D0(GETDESC), 400, 12)),
+                   ("H", 0, IN0)], [],
+                  dict(pk=[("NAK", 2)]), 16000),
+    "Q2 short EOP": ([("A", 800, P(T(IN, 7))), ("H", 0, short_eop(D0(GETDESC), 39)),
+                      ("H", 0, IN0)], [],
+                     dict(pk=[("NAK", 2)]), 16000),
     "A13c stray DATA": ([("A", 800, D0(GETDESC)), ("H", 300, P(T(S, 0))), ("H", 0, D0(GETDESC))], [],
                         dict(pk=[("ACK", 2)]), 18000),
     "A13d data commit": ([("A", 800, IN0), ("A", 4000, D0(T(S, 5)[2:] + [0] * 6)), ("H", 1500, IN0)],
@@ -144,6 +197,12 @@ MUTANTS = [
     ("M_CTL_AS_QUEUE", "tag 2 lands in queue 2", "A9 new addr", False),
     ("M_SYNC_ABORT_REARM", "the abort re-arms without the SE0 wait", "A13 bad SYNC", True),
     ("M_PID_ANY", "an unexpected PID taken as SETUP", "A13c stray DATA", True),
+    # the FALLTHROUGH window (Wilson 11-14): a timeout that HALTS loses the lane
+    # (A7: nobody answers the foreign token); an edge that does NOT skip PC+1
+    # takes the timeout path on a reply and re-arms TOP mid-packet (A13b)
+    ("M_FT_HALTS", "the window's timeout halts the lane", "A7 pending", False),
+    ("M_FT_NOSKIP", "the window's edge does not skip PC+1", "A13b OUT to 7", False),
+    ("M_QUAL_IGNORED", "arm_j's SE0 qualifier ignored", "Q1 glitch", False),
 ]
 
 
@@ -213,6 +272,19 @@ def main() -> int:
     print("  device program: %d words" % len(V.device_program()))
     q2 = I.branch_problems(V.image_q2())
     print("  Q2  pe_isa on a USB image drawing queue 2: %s" % ("refused" if q2 else "*** ACCEPTED"))
+    # correction A (Wilson 11-14), GENERATED: the FALLTHROUGH window's latest
+    # expiry + the timeout path to TOP's arm_sop <= the host's earliest next token
+    wp = V.resp_window_problems()
+    print("  W1  response window: walk %d + window %d + to TOP %d <= host %d: %s"
+          % (V.rtop_walk_max(), V.resp_window(), V.rtop_to_top_max(),
+             clock.usb_host_next_min_cycles(), "ok" if not wp else "*** " + wp[0]))
+    probs += wp
+    # must-fire: the host's TIMEOUT taken as the window (the error correction A
+    # names) must be red
+    wm = V.resp_window_problems(window=clock.USB_HOST_RESP_WAIT_BITS * V.D)
+    print("  W1m the host's 18-bit timeout as the window -> %s" % ("red  ok" if wm else "*** STAYED GREEN"))
+    if not wm:
+        probs.append("must-fire: the host-timeout window stayed green")
     if not any("queue 2" in x for x in q2):
         probs.append("pe_isa accepted a USB image drawing queue 2")
     for v in ("M_SYNC_ABORT_REARM", "M_PID_ANY"):

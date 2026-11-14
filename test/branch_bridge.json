@@ -1,0 +1,9 @@
+{
+ "braw40_contend4": {
+  "ctl_late_max": 13,
+  "label": "MEASURED-BRIDGE (uncertified)",
+  "margin": 4,
+  "owner": "agent 2's k-lane bound under (b') (Wilson 11-14)",
+  "sha": "1c7645889399537618f48d957962ebfdc289c48173e11495354a66eed66442c7"
+ }
+}

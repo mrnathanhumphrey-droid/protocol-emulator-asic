@@ -13,11 +13,16 @@
 // Sampled at the negedge (every posedge update settled; `winner`, `w_hv`,
 // `w_armed` are the combinational picks of the state the next posedge acts on).
 //   JS <cyc> <lane> <primed>   one stall cycle, charged to the winning lane
+// ⛔⛔ REDEFINED BY (b') (Wilson 11-14): the dispatcher no longer picks a lane
+// with an empty head, so "a winner with an empty head" never occurs and the old
+// predicate would read 0 HOLLOWLY. A lane is now late for its own word exactly
+// while it is RELEASED with an EMPTY head (`rdy_rel & ~hv`, pe_engine.v -- NOT `pf_rdy`, which counts only once the schedule runs, and this probe measures the start-up) -- one line
+// per such lane per cycle, charged to that lane.
 module usb_startup_probe;
+  integer k;
   always @(negedge tb_usbrx.clk) if (tb_usbrx.run_go === 1'b1) begin
-    if (tb_usbrx.dut.u_eng.st === 2'd0 && tb_usbrx.dut.u_eng.winner_v === 1'b1
-        && tb_usbrx.dut.u_eng.w_armed === 1'b0 && tb_usbrx.dut.u_eng.w_hv === 1'b0)
-      $display("JS %0d %0d %0d", tb_usbrx.cyc, tb_usbrx.dut.u_eng.winner,
-               tb_usbrx.dut.u_eng.primed);
+    for (k = 0; k < 5; k = k + 1)
+      if (tb_usbrx.dut.u_eng.rdy_rel[k] === 1'b1 && tb_usbrx.dut.u_eng.hv[k] === 1'b0)
+        $display("JS %0d %0d %0d", tb_usbrx.cyc, k, tb_usbrx.dut.u_eng.primed);
   end
 endmodule

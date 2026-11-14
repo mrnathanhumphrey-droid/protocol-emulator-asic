@@ -871,7 +871,10 @@ def build_census(d: int = 25):
     for seq in (seq0, seq1):
         base.append(off)
         for op, pin, lvl in seq:
-            prog.append(act(op, pin, lvl, d, count=8))
+            # count 8 only where the op reads a bit count (Wilson 11-14: zero in
+            # every field the op does not read -- test/op_reads.json)
+            prog.append(act(op, pin, lvl, d,
+                            count=8 if op in (OP_SHIFT, OP_SHIFTIN) else 0))
             off += ACT_BYTES
     lp = off
     prog.append(act(OP_REARM, 0, 0, 500))

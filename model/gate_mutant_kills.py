@@ -124,6 +124,16 @@ KILLERS = {
     # -- v2 primitive 3 bundle 2: the pair, SHIFTI, the self-timed byte (tb_pair)
     "M_PAIR_COPY": "test/run_pair.py", "M_PAIR_SE0_SHIFT": "test/run_pair.py",
     "M_ST_EARLY": "test/run_pair.py",
+    # progress.vh's per-action liveness bound (Wilson 11-14): run_pair P6
+    "M_ST_NEVER_LAST": "test/run_pair.py", "M_ST_LATE8": "test/run_pair.py",
+    # the ARM/dispatcher batch (Wilson 11-14)
+    "M_GLOBAL_STALL": "test/run_mutants.py",     # progress.vh layer S, corpus_all5
+    "M_HALF_NOW": "test/run_usbrx.py",           # M14's phase walk without the nop
+    "M_QUAL_IGNORED": "test/run_usbaddr.py",     # Q1 glitch
+    "M_FT_HALTS": "test/run_usbaddr.py",         # A7 pending
+    "M_FT_NOSKIP": "test/run_usbaddr.py",        # A13b OUT to 7
+    "M_FT_SCAN_RACE": "test/run_arm2.py",        # A4 the FT edge on the selecting cycle
+    "M_PRIME_NEWPRIO": "test/gate_batch_equiv.py",  # the one-cycle earlier start
     # -- bundle 3: the USB receive -- NRZI, unstuffing, re-anchoring (tb_usbrx)
     "M_NO_REANCHOR": "test/run_usbrx.py", "M_UNSTUFF_KEEP": "test/run_usbrx.py",
     "M_STUFF_NOFLAG": "test/run_usbrx.py", "M_REAN_NOCOMP": "test/run_usbrx.py",

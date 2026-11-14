@@ -396,14 +396,35 @@ def loop_count(x):
 
 #: ARM's `mod[0]` (v2 primitive 3 bundle 1): two-pin LEVEL mode
 ARM_MOD_LEVEL2 = 1
+#: ⭐ THE ARM/DISPATCHER BATCH (Wilson 11-14) -- three explicit modifiers:
+#:   mod[1]   FALLTHROUGH: a timeout retires to PC+1, an edge goes to PC+2
+#:   count[0] HALF: rebase to the edge + l_t/2 (the lane's period, its header t)
+#:   count[1] QUAL: (USB lane) an edge fires only after an SE0 run >= USB_N_J
+#: count[2] and q[1:0] are RESERVED and refused. ⚠ count[3] is NOT refused yet:
+#: pe_asm.split_counts writes count = 8 on every action it assembles, ARM
+#: included (157 ARM words in 15 universe images, 11-14 scan); whether that bit
+#: is a legacy don't-care or the images are regenerated is Wilson's call.
+#: TODO(count[3]): refuse once ruled.
+ARM_MOD_FT = 2
+ARM_CNT_HALF, ARM_CNT_QUAL, ARM_CNT_RESERVED = 1, 2, 4
 
 
-def act_arm2(pin, pinb, level, timeout) -> bytes:
+def act_arm(pin, edge, timeout, half=False, qual=False, ft=False):
+    """An EDGE ARM with the 11-14 modifiers: `half` (rebase to edge + l_t/2),
+    `qual` (USB lane: only after an SE0 run >= USB_N_J), `ft` (timeout falls
+    through to PC+1; the edge goes to PC+2)."""
+    return act(OP_ARM, pin, edge, timeout,
+               count=(ARM_CNT_HALF if half else 0) | (ARM_CNT_QUAL if qual else 0),
+               mod=ARM_MOD_FT if ft else 0)
+
+
+def act_arm2(pin, pinb, level, timeout, ft=False) -> bytes:
     """The TWO-PIN LEVEL ARM (primitive 3 bundle 1, Wilson 11-08): release when
     BOTH `pin` and `pinb` sit at `level` (0 = both low, USB's SE0; 1 = both
     high). A level, not an edge, so it fires at once if the condition already
     holds. `timeout` is ARM's (0 = none). Both pins must be `uio` inputs."""
-    return act(OP_ARM, pin, level, timeout, pinb=pinb, mod=ARM_MOD_LEVEL2)
+    return act(OP_ARM, pin, level, timeout, pinb=pinb,
+               mod=ARM_MOD_LEVEL2 | (ARM_MOD_FT if ft else 0))
 
 
 def arm_problems(img):
@@ -422,8 +443,23 @@ def arm_problems(img):
         x = _unpack(ACT_FIELDS, img[a:a + ACT_BYTES], ACT_BYTES)
         if x["op"] != OP_ARM:
             continue
-        if x["mod"] >> 1:
-            out.append("word %d: ARM mod[1] must be zero (reserved)" % w)
+        # the 11-14 modifiers (Wilson): each combination the chip cannot honour
+        ft, half = x["mod"] & ARM_MOD_FT, x["count"] & ARM_CNT_HALF
+        qual = x["count"] & ARM_CNT_QUAL
+        if ft and x["delay"] == 0:
+            out.append("word %d: ARM FALLTHROUGH with no timeout -- nothing to fall "
+                       "through on" % w)
+        if half and ft:
+            out.append("word %d: ARM HALF with FALLTHROUGH -- the edge path (PC+2) is "
+                       "not prefetched, so a half-bit sample after it would be late "
+                       "(Wilson 11-14 correction B)" % w)
+        if x["q"]:
+            out.append("word %d: ARM q = %d must be zero (reserved)" % (w, x["q"]))
+        if x["count"] & ARM_CNT_RESERVED:
+            out.append("word %d: ARM count[2] must be zero (reserved)" % w)
+        if (half or qual) and x["mod"] & ARM_MOD_LEVEL2:
+            out.append("word %d: ARM HALF / QUAL are EDGE modifiers; a two-pin LEVEL "
+                       "ARM cannot take them" % w)
         if not x["mod"] & ARM_MOD_LEVEL2:
             if x["pinb"]:
                 out.append("word %d: edge ARM pinb = %d must be zero" % (w, x["pinb"]))
@@ -511,6 +547,53 @@ VPINS_BUILT = (VPIN_READY, VPIN_CRC_OK, VPIN_STUFF_ERR, VPIN_ADDR_OK)
 #: bundle 5: the TX tag / queue that IS the response buffer while the USB lane
 #: is live, and the buffer's packet limit in bits
 USB_BUF_Q, USB_BUF_MAX_BITS = 3, 112
+
+#: ⭐ HOW MANY DISPATCHES AN ACTION MAY TAKE BEFORE IT RETIRES (Wilson 11-14):
+#: the ONE source for progress.vh's per-action liveness bound (generated into
+#: test/progress_bounds.vh by test/gen_progress_bounds.py) and for the
+#: admissibility gate's retire spacing. Read off the engine's hold rule,
+#: `ck_hold = (ck_act & ~ck_retire) | (st_act & ~(st_last & ~usb_stuff))`
+#: (pe_engine.v): an action is re-dispatched on the same PC only while it holds.
+#:   ck_shift    clocked SHIFT: LOW + HIGH per bit, bits = count + 1 (4-bit)
+#:   ck_shiftin  clocked SHIFTIN: LOW + HIGH per bit plus the trailing COLL
+#:   st_shift    self-timed SHIFT / SHIFTI: one per bit, last index = count
+#:   st_shiftin  self-timed SHIFTIN: one per bit, last index = count - 1
+#:   usb_rx      the USB receive (a self-timed SHIFTIN): its bits plus one
+#:               dispatch per stuffed bit -- n + floor((5 + n) / 6), the
+#:               worst-case stuffing A2's certificate uses
+#:   usb_send    the buffer send: held for the packet's wire length, at most
+#:               USB_BUF_MAX_BITS (the host loads it already stuffed)
+#:   other       one dispatch
+DISPATCH_KINDS = ("ck_shift", "ck_shiftin", "st_shift", "st_shiftin", "usb_rx",
+                  "usb_send", "other")
+
+
+def usb_stuffed_bits(n):
+    """n data bits plus worst-case stuffing: n + floor((5 + n) / 6)."""
+    return n + (5 + n) // 6
+
+
+def dispatch_max(kind, count=0):
+    """The most dispatches an action of `kind` with this 4-bit `count` takes
+    before it retires (see DISPATCH_KINDS). Count arithmetic is the engine's
+    own 4-bit wrap."""
+    m = (1 << CNT_W) - 1
+    if kind == "ck_shift":
+        # count 15 wraps to 0 bits: degenerate, refused (ck_degen) -- one dispatch
+        return max(1, 2 * ((count + 1) & m))
+    if kind == "ck_shiftin":
+        return 2 * (count & m) + 1
+    if kind == "st_shift":
+        return (count & m) + 1
+    if kind == "st_shiftin":
+        return ((count - 1) & m) + 1
+    if kind == "usb_rx":
+        return usb_stuffed_bits(((count - 1) & m) + 1)
+    if kind == "usb_send":
+        return USB_BUF_MAX_BITS
+    if kind == "other":
+        return 1
+    raise ValueError("unknown dispatch kind %r" % (kind,))
 #: bundle 6 (Wilson 11-09, step 7a §3a, E2): the TX tag that is the USB CONTROL
 #: CHANNEL while the USB lane is live -- one-byte records, never queued. A USB
 #: image may not draw queue 2. The buffer's length byte carries the endpoint
@@ -929,7 +1012,119 @@ def branch_problems(img):
                 if x[f]:
                     out.append("word %d: LOOP field %s = %d must be zero" % (w, f, x[f]))
     return (out + cmp_byte_problems(img) + loop_problems(img) + arm_problems(img)
-            + pair_problems(img) + usb_problems(img))
+            + arm_lane_problems(img) + pair_problems(img) + usb_problems(img)
+            + unread_problems(img))
+
+
+# ---------------------------------------------------------------------------
+# ⛔⛔ ZERO IN EVERY FIELD AN OP DOES NOT READ (Wilson 11-14). The table of which
+# bits of which field each opcode reads is GENERATED from the engine's decode
+# (model/gen_op_reads.py -> test/op_reads.json, held fresh by its --check gate);
+# a nonzero value in a field the op does not read is REFUSED, on every opcode --
+# an assembler default there (pe_asm's count 8, corpus's lane queue tag) would
+# collide with any future bit assignment, as it did with ARM's HALF / QUAL.
+# THE ONE EXEMPTION, BY EXACT VALUE (Wilson 11-14, option 1): STORE_FILLER, the
+# defined non-driving word (ruling M1) -- REARM with pin = PIN_NONE, and REARM
+# does not read `pin`. Exactly that word, byte-identical; this module is also
+# what writes it into the RTL (PE_STORE_FILLER), so there is one source.
+# ---------------------------------------------------------------------------
+_OP_NAME = None
+_READS = None
+
+
+def _op_reads():
+    global _READS, _OP_NAME
+    if _READS is None:
+        import json as _json
+        import os as _os
+        with open(_os.path.join(_os.path.dirname(_os.path.abspath(__file__)),
+                                "op_reads.json"), encoding="utf-8") as fh:
+            _READS = _json.load(fh)["reads"]
+        _OP_NAME = {v: k[3:] for k, v in globals().items()
+                    if k.startswith("OP_") and isinstance(v, int) and k[3:] in _READS}
+    return _READS, _OP_NAME
+
+
+def reads_field(op, field):
+    """The bit mask of `field` that opcode `op` reads (0 = not read)."""
+    reads, name = _op_reads()
+    nm = name.get(op)
+    return reads[nm][field] if nm else 0
+
+
+def unread_problems(img):
+    """[problem] for every action word holding a nonzero value in a field (or
+    field bit) its opcode does not read -- STORE_FILLER exempt by exact value."""
+    reads, name = _op_reads()
+    out = []
+    nwords = (min(len(img), STORE_BYTES) - ACT_BASE) // ACT_BYTES
+    for w in range(nwords):
+        a = ACT_BASE + w * ACT_BYTES
+        raw = bytes(img[a:a + ACT_BYTES])
+        if raw == STORE_FILLER:
+            continue
+        x = _unpack(ACT_FIELDS, raw, ACT_BYTES)
+        nm = name.get(x["op"])
+        if nm is None:
+            # an opcode the engine does not DECODE (its `case (a_op)` has no arm
+            # for it): every field is unread, so the word is refused outright --
+            # a one-bit flip of the filler's opcode lands here (Wilson 11-14)
+            out.append("word %d: opcode %d is not decoded by the engine (no arm in "
+                       "src/pe_engine.v's `case (a_op)`, test/op_reads.json)" % (w, x["op"]))
+            continue
+        for f in ("pin", "level", "delay", "count", "q", "pinb", "mod"):
+            extra = x[f] & ~reads[nm][f]
+            if extra:
+                out.append("word %d: %s field %s = %d has bit(s) %#x the engine "
+                           "does not read -- must be zero (test/op_reads.json)"
+                           % (w, nm, f, x[f], extra))
+    return out
+
+
+def arm_lane_problems(img):
+    """[problem] for the 11-14 ARM modifiers that need the LANE: QUAL off the
+    USB lane (the SE0 counter watches the USB pair only), and a FALLTHROUGH
+    ARM whose edge path's first word (PC+2) is a SHIFT / SHIFTIN / SHIFTI --
+    PC+2 is fetched only after the edge, so a timing-critical first word would
+    start late (Wilson 11-14 correction B; "prefetch PC+2 for a FALLTHROUGH
+    ARM" is a poset-fabric requirement), or that has no PC+2 at all."""
+    out = []
+    # ⚠ EVERY word of a lane's REGION, base to the next lane's base -- not
+    # `lane_programs`' walk, which stops at the first REARM: an FT ARM's timeout
+    # word IS typically a REARM, and the USB program's RTOP and arm_j sit past
+    # its first one, where that walk never looked.
+    hs = {ln: read_header(img, ln) for ln in range(N_LANES)}
+    bases = sorted({h["base"] for h in hs.values()})
+    end = min(len(img), STORE_BYTES)
+    words = []
+    a = ACT_BASE
+    while a + ACT_BYTES <= end:
+        words.append(_unpack(ACT_FIELDS, img[a:a + ACT_BYTES], ACT_BYTES))
+        a += ACT_BYTES
+    for ln, h in hs.items():
+        lo = h["base"]
+        hi = min([b for b in bases if b > lo] + [end])
+        if ln != min(l for l, hh in hs.items() if hh["base"] == lo):
+            continue                       # parked lanes share one region: scan it once
+        for a in range(lo, hi, ACT_BYTES):
+            i = (a - ACT_BASE) // ACT_BYTES
+            if i >= len(words):
+                break
+            x = words[i]
+            if x["op"] != OP_ARM:
+                continue
+            owners = [l for l, hh in hs.items() if hh["base"] == lo]
+            if x["count"] & ARM_CNT_QUAL and USB_LANE not in owners:
+                out.append("word %d (lane %d): ARM QUAL off the USB lane (%d) -- the "
+                           "SE0 counter watches the USB pair only" % (i, ln, USB_LANE))
+            if x["mod"] & ARM_MOD_FT:
+                if a + 2 * ACT_BYTES >= hi or i + 2 >= len(words):
+                    out.append("word %d (lane %d): FALLTHROUGH ARM with no edge path "
+                               "(PC+2)" % (i, ln))
+                elif words[i + 2]["op"] in (OP_SHIFT, OP_SHIFTIN, OP_SHIFTI):
+                    out.append("word %d (lane %d): FALLTHROUGH ARM's edge path starts "
+                               "with a SHIFT/SHIFTIN -- PC+2 is not prefetched" % (i, ln))
+    return out
 
 
 def loop_problems(img):

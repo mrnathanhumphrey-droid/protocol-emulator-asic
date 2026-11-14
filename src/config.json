@@ -25,9 +25,15 @@
 
   "//": "Hold slack margin - Increase them in case you are getting hold violations.",
   "PL_RESIZER_HOLD_SLACK_MARGIN": 0.1,
-  "GRT_RESIZER_HOLD_SLACK_MARGIN": 0.10,
+  "//": "0.20 after global routing (Wilson 11-13, the configuration of record 11-14): with the calibrated wire RC below, 0.10 left fast-corner hold at +0.021 (under the +0.05 bar); 0.20 gives +0.104 / +0.112 / +0.118 at coef 0.26 / 0.27 / 0.25 (AREA 0), every corner clean.",
+  "GRT_RESIZER_HOLD_SLACK_MARGIN": 0.20,
   "//": "HOLD REPAIR AFTER GLOBAL ROUTE (Wilson, hold bar +0.05 ns at every corner): without it the margin above is inert (the post-GRT resizer step does not run) and hold is repaired only after CTS, on placement parasitics; routing then left 3 short tx_bitp paths at -0.020 ns (fast corner) on the reset-network halt.",
   "RUN_POST_GRT_RESIZER_TIMING": 1,
+
+  "//": "PER-LAYER WIRE RC (Wilson 11-13, generated never typed): model/gen_layers_rc.py from the RCX extraction of a routed run (kh27a_w027s), cross-checked on a second netlist (b6_27a_c027rc, every layer within +-10 %); model/layers_rc_of_record.json holds the derivation and model/gate_layers_rc.py holds these keys to it. Without it the estimate used the LEF's ~0.093 fF/um and read +4.03 where extraction read -0.385. Signal and clock routing stop at Metal4, so TopMetal1 leaves the averaging.",
+  "LAYERS_RC": {"*": {"Metal2": {"res": 0.00051958, "cap": 0.0001607}, "Metal3": {"res": 0.00051698, "cap": 0.00019915}, "Metal4": {"res": 0.00050979, "cap": 0.00016009}}},
+  "SIGNAL_WIRE_RC_LAYERS": ["Metal2", "Metal3", "Metal4"],
+  "CLOCK_WIRE_RC_LAYERS": ["Metal2", "Metal3", "Metal4"],
 
   "//": "v2 timing closure at 60 MHz (Wilson 10-25, T1/T2): 2.5 ns of setup slack asked of the resizer, timing-driven placement, post-GRT design repair.",
   "PL_RESIZER_SETUP_SLACK_MARGIN": 2.5,
@@ -37,7 +43,8 @@
   "RUN_POST_GRT_DESIGN_REPAIR": 1,
 
   "//": "Stage 3 closure (Wilson 11-07/08, option C + one window): the ORFS delay synthesis script (default AREA 0; DELAY 4 closed where AREA 0 left -2.79), slew held to 1.5 ns (the library allows 2.507), repair margins 40 % at placement and 30 % after global routing (defaults 20 / 10).",
-  "SYNTH_STRATEGY": "DELAY 4",
+  "//": "AREA 0, the configuration of record (Wilson 11-14): DELAY 4 was needed only while the wire estimate was wrong. With the calibrated LAYERS_RC above and hold margin 0.20, AREA 0 passes every bar at coef 0.25 / 0.26 / 0.27 (slow setup +4.437 / +3.694 / +3.921, fast hold >= +0.104, DRC 0) and places at 83 % of the area line against DELAY 4's 88.5 % -- about 41k um^2 of placed headroom recovered.",
+  "SYNTH_STRATEGY": "AREA 0",
   "MAX_TRANSITION_CONSTRAINT": 1.5,
   "DESIGN_REPAIR_MAX_SLEW_PCT": 40,
   "DESIGN_REPAIR_MAX_CAP_PCT": 40,

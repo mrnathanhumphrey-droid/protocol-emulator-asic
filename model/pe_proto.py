@@ -28,11 +28,11 @@ Context rules (the whole of the "front-end" contract):
   * the transaction ends with STOP, then the loop REARM.
 
 ⚠ THE COUNT FIELD OF OPCODES THAT IGNORE IT. START/STOP/LEVEL/READBIT/REARM
-never read `count`, and the shipped builders disagree on what they write
-there: `corpus._assemble` writes 8, `run_ckack.image` writes 0. That is a
-don't-care in silicon and a byte difference in the image, so the front-end
-takes it as a parameter (`nc_count`) and the SP2 gate reports which value
-each reference used -- it is not hidden.
+never read `count` (ARM reads only count[0..1]) -- test/op_reads.json, generated
+from the engine's decode. ⛔ Since Wilson 11-14 every builder writes 0 there and
+pe_isa REFUSES anything else (`corpus._assemble` used to write 8 and the front-end
+reproduced it), so `nc_count` defaults to 0; the parameter stays so the SP2 gate
+still states which value each reference used.
 
 Every image still goes through `pe_asm.assemble`, so every admissibility
 check applies to front-end programs exactly as to hand-written ones.
@@ -72,7 +72,7 @@ class I2C:
     check must go red. Callers never pass it.
     """
 
-    def __init__(self, sda, scl, d, nc_count=8, rules=None):
+    def __init__(self, sda, scl, d, nc_count=0, rules=None):
         self.sda, self.scl, self.d, self.nc = sda, scl, d, nc_count
         self.rules = dict(DEFAULT_I2C_RULES)
         self.rules.update(rules or {})
@@ -194,7 +194,7 @@ class SPI:
     bit-reversed with nothing flagging it. In the front-end the order is
     stated or the lane is refused (`image` checks the header too)."""
 
-    def __init__(self, mosi, sclk, cs, miso, d, order, nc_count=8,
+    def __init__(self, mosi, sclk, cs, miso, d, order, nc_count=0,
                  mode0=False):
         if order not in (ORDER_LSB, ORDER_MSB):
             raise ProtoError("SPI order must be ORDER_MSB or ORDER_LSB, "
@@ -379,9 +379,9 @@ def i2c_fram_write(d=None, sda=2, scl=1):
     """`corpus_i2c`: one address byte + ACK slot, the corpus's coverage
     READBIT on SDA (raw; it does not move SCL), then STOP."""
     d = _d_fm() if d is None else d
-    m = I2C(sda, scl, d, nc_count=8)
+    m = I2C(sda, scl, d, nc_count=0)
     lanes = {0: m.transaction([("write", 1),
-                               ("raw", (OP_READBIT, sda, 0, d, 0, 8))])}
+                               ("raw", (OP_READBIT, sda, 0, d, 0, 0))])}   # READBIT reads no count (op_reads)
     return lanes, {0: m.header()}, None
 
 
@@ -457,7 +457,7 @@ class OneWire:
     SYM = {"W1": 0xE, "W0": 0xC, "RST": 0x0, "RSTEND": 0x8, "IDLE": 0xF}
 
     def __init__(self, q=2, s=3, c=4, f_mhz=None, A_us=3.0, B_us=9.0,
-                 TW0_us=70.0, D_us=2.0, TAIL_us=56.0, nc_count=8):
+                 TW0_us=70.0, D_us=2.0, TAIL_us=56.0, nc_count=0):
         # ⭐ the slot is written in microseconds; the target's clock makes it
         # cycles (Wilson 11-03). `f_mhz` stays for a caller holding a board.
         f_mhz = clock.mhz() if f_mhz is None else f_mhz
@@ -607,6 +607,6 @@ def spi_fram(d=7, mode0=False, clkinv=False):
     import corpus
     from pe_isa import FLAG_CLK_INV
     m = SPI(corpus.P_M_MOSI, corpus.P_M_SCLK, corpus.P_M_CS, corpus.P_M_MISO,
-            d, ORDER_MSB, nc_count=8, mode0=mode0)
+            d, ORDER_MSB, nc_count=0, mode0=mode0)
     lanes = {0: m.transactions([(1, 0), (6, 0), (3, 2)])}
     return lanes, {0: m.header(FLAG_CLK_INV if clkinv else 0)}, None

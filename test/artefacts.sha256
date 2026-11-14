@@ -7,7 +7,7 @@
 # tool verilator = Verilator 5.053 devel rev v5.052-258-ga419e9157 (mod)
 # tool yosys = Yosys 0.52 (git sha1 fee39a3284c90249e1d9684cf6944ffbbcbb8f90)
 075aaacd2a58d176ddb4cf0fec5aa66d20cdda156601d5d98ec42268b6abdcb7  smoke_image.hex  # make_smoke_image.py (default)
-28d2d9360a326b708854dc0394da00273f42307545dc422a915a8cd3ae566ce2  census_image.hex  # make_smoke_image.py --census
+7c6002619ac3aa43569cb15371fe03787c77352046f551566129d4c54c94fd2b  census_image.hex  # make_smoke_image.py --census
 bfd9206db7ad62d0e7c3c3c28fc88596aff4cd82f3775703915d3cfe7c867cd4  cfgerr_image.hex  # make_smoke_image.py --cfgerr
 dd23dab52c11fdcbbd5a9c414edb1e3b01910a82247a8caaa0a31f011230306d  pinnone_image.hex  # make_smoke_image.py --pinnone
 8671c4f82fb5faa6692c1c08cddf537271278df6d14131c6afdc35d31fe1588e  armnone_image.hex  # make_smoke_image.py --armnone
@@ -63,26 +63,26 @@ dc14ba7798a7cf6c2b34938ec4abd2b68470c4d0076d16b7583f9ed0f8205a6e  pit_midstream.
 a0db75d9a1dbbc92aa2ef56e00aa4b317205643505a43d9fa68a1be8d6814964  half_image.hex  # make_smoke_image.py --half 24
 120dcd8c4cbc787f4deee0631597bee2975297aab7f24acd0545711025ab8427  rxfast_image.hex  # make_smoke_image.py --rxfast 24
 78d713c8cde6e73475e8ccca6673aafecd52a1f054297194672c60d56741f589  i2cframe_image.hex  # make_smoke_image.py --i2cframe 62
-f5e311a53f4612d9bf975040902c4eac4ed8b800171cd3fb369edd8012aca381  sptgt_m0_image.hex  # make_smoke_image.py --sptgt 0
-9eb32ffd978071788a5a80489483dbc502ea40d76a0a8f750937a57bf448ab95  sptgt_m1_image.hex  # make_smoke_image.py --sptgt 1
-26f43aedcd94369602af5f58ac780184191e245e935e2e93df3b1b03cd7e28c5  sptgt_m2_image.hex  # make_smoke_image.py --sptgt 2
-715fa36beec71302915bedcde1370ec16a555a02a11dba555543aac819027495  sptgt_m3_image.hex  # make_smoke_image.py --sptgt 3
-a096f0b55d53d4bf7479769197351d10188d2e4b935eb4242696f8a081252ef7  sptgt_mosi_image.hex  # make_smoke_image.py --sptgt 0 mosi
-c98c8c22acd5f0615aee5f1ea2814fca2e618c3988689ec9217b45f474e04308  b3b_a_image.hex  # make_smoke_image.py --b3b a
-c672793b80fa0b4359133ea8abe3de787556321b2170e41933c7889e1ef9fce1  b3b_a3_image.hex  # make_smoke_image.py --b3b a3
-be8c012d294b48f1cf6f91e9ec3472a704c9505cb3af89638a5b690f2313d2f6  b3b_b_image.hex  # make_smoke_image.py --b3b b
-147dfb5f0456b9af1c3b5792a45ce407d4f3d9cea080d7f52dc9c5da62760696  b3b_bnoi2c_image.hex  # make_smoke_image.py --b3b bnoi2c
-9c9074e6506f656198a21ff60cd0849095cb4ea5ac7eb60566638b0c56086242  corpus_all5.hex  # corpus.py
-92903b340b6f79d3034d5d032e79524fdf00c58562641a50a3aa12c1963d2797  corpus_i2c.hex  # corpus.py
-fd4de93a93799112e8b01e0392ce3d12e83da554dad090a38cf5803030e6966c  corpus_spim.hex  # corpus.py
-aecc9a43eaacb039981e317e8ed468f15e8b7deb80a3df7b9f5eca74c83e096c  corpus_spim25.hex  # corpus.py
-9720215e9ea94f6f59bc9e2586ad0e9687b1f0f06012004baca3212d5ba0b6c2  corpus_sptgt.hex  # corpus.py
-59f30de3aac36ce96ed7144f9759c34e710904f68c9a9073001ed154d9d3a5cd  corpus_uartrx.hex  # corpus.py
-69dc9b4f63fc5365e39675261fc342e8cf0ac6ba786e6b5019628bb7c53dc3d6  onewire_image.hex  # onewire.py tt onewire_image.hex
-4ad20a152a134cbdf61057d3acaf3dee8a3b14f6ad6b53e02abcd5fcffdc509f  onewire_fpga_image.hex  # onewire.py fpga onewire_fpga_image.hex
-17920ceb1e067b0fb4bd2ca3bba981c13a2e69c1d52e2322c90046f396ed2f8f  uart_rx_image.hex  # uart_rx.py uart_rx_image.hex
-428aee57a506bde8b816f20933fc199dfe18618995a9e3fce717ac2d116bf2d3  uart_tx_image.hex  # uart_tx.py uart_tx_image.hex
-833246eb5a7da1487296f43e635ad354d234bf078cf0d53ff55c42aa03c87bd6  uart_tx_busy_image.hex  # uart_tx.py uart_tx_busy_image.hex busy
-8cb3583f208e97b61d70420366360b38d043f9a8609c03f8cfafffe4a801c0d2  ws2812_sub3_rearm21.hex  # run_wirefeed_mf.py --write
-17920ceb1e067b0fb4bd2ca3bba981c13a2e69c1d52e2322c90046f396ed2f8f  ../fpga/images/uart_rx_board.hex  # uart_rx.py ../fpga/images/uart_rx_board.hex board
-bfca16ab869e475335dffb4db2a452eea1e0b48d8d1067a82941f5c4285f1631  ../fpga/images/uart_rx_board_nostop.hex  # uart_rx.py ../fpga/images/uart_rx_board_nostop.hex board - nostop
+336eb2e58580443d978c76bd1a71b59b7361796695bfb62f014cfb8282e600ce  sptgt_m0_image.hex  # make_smoke_image.py --sptgt 0
+8a168ee39a5398b0ca50686c215f82e2334fd874ef34c1bc1893b6f70204393f  sptgt_m1_image.hex  # make_smoke_image.py --sptgt 1
+fa8357fa096bb256495f2c591d20bd348fc15d856c5e924b324caa7db0825a69  sptgt_m2_image.hex  # make_smoke_image.py --sptgt 2
+7cd2a21a59a5ce81bc1e48df8c6325dfa1a0673cf49f4c4ccef6bac6a4d624dd  sptgt_m3_image.hex  # make_smoke_image.py --sptgt 3
+b81624f9bf50204abf2ba37e4f887ac4cc9bc2640acfcc885e7974429ea5941f  sptgt_mosi_image.hex  # make_smoke_image.py --sptgt 0 mosi
+5c6abc72e6645d2b825956c2ae14f29f385ec7434399b4831c39ec99a1c1e938  b3b_a_image.hex  # make_smoke_image.py --b3b a
+e590e8b1f2e42e40688128760e28310a756b29302d3956a82175f987f6ce7030  b3b_a3_image.hex  # make_smoke_image.py --b3b a3
+0bb3cccf11159fd1d0fcf239445d3dfaf295c1131fbfce2f72fda0420430dda5  b3b_b_image.hex  # make_smoke_image.py --b3b b
+c5c77586647f96afa25d979466731e167e5f955ad89603eb72f62b5756e3f1d3  b3b_bnoi2c_image.hex  # make_smoke_image.py --b3b bnoi2c
+e4d6a0bb209749640d5ab54b3f27958cec6bec0370514b46b5fbe3797ece9fe3  corpus_all5.hex  # corpus.py
+8441126ed799d96b632317f2b5a418cb1486c6d337996316e6dc921334dd0921  corpus_i2c.hex  # corpus.py
+c4df7e92132f5d75d975d43313089eaa199bb93a5fe3a618dd05d0f7f2de5de9  corpus_spim.hex  # corpus.py
+c156c636d73b81262eb7f12699f148b675b05c790821bcfbfdd81fe818c1a559  corpus_spim25.hex  # corpus.py
+f9920aaa65abee016b425a4643dff576bdf00f2a64f12763c3fe4a6ff60f3197  corpus_sptgt.hex  # corpus.py
+3bdecf43c54b6e4fe4815d5723b44e514e8c2990ebcb970809ebd2c4f673273e  corpus_uartrx.hex  # corpus.py
+832d3d88028069634785added965f993b98dc39fb2e19ea3f11b022244986966  onewire_image.hex  # onewire.py tt onewire_image.hex
+f6d6d60aaa156978e41fe39c16f935e9a11ddf96228986805bc7de74f31d6c86  onewire_fpga_image.hex  # onewire.py fpga onewire_fpga_image.hex
+1b229bfa46040d8a9f1cdcba7465328544f570501af4bf473aa3f6509e48ea8d  uart_rx_image.hex  # uart_rx.py uart_rx_image.hex
+eb43693b3d540c3163150057f816a9cfa9f47eb0dbdebd42b3dc9d6eb77356cd  uart_tx_image.hex  # uart_tx.py uart_tx_image.hex
+5e36a6c95c14d55d72dbabc6ade1e17576e7ef8f1f5c32d5add346de223dc953  uart_tx_busy_image.hex  # uart_tx.py uart_tx_busy_image.hex busy
+17359b05bec6c386d16e07caa54d8ee96a859d99f2ceadc735c76cd95c4b3eb6  ws2812_sub3_rearm21.hex  # run_wirefeed_mf.py --write
+1b229bfa46040d8a9f1cdcba7465328544f570501af4bf473aa3f6509e48ea8d  ../fpga/images/uart_rx_board.hex  # uart_rx.py ../fpga/images/uart_rx_board.hex board
+62743d0b8ca36002d25c97491e25016dd3ab0f2cdd91fa65167fa5634bd588b6  ../fpga/images/uart_rx_board_nostop.hex  # uart_rx.py ../fpga/images/uart_rx_board_nostop.hex board - nostop

@@ -61,23 +61,24 @@ ACK_PIN, NAK_PIN = I.UO0, I.UO1
 def image():
     """lane 0: receive one DATA packet, decide, mark ACK or NAK, loop"""
     D = U.D
-    p = [I.act(I.OP_ARM, U.DM, 0, 0),                         # 0  SOP
-         I.act(I.OP_LEVEL, I.PIN_NONE, 0, D // 2),            # 1  mid-bit
-         I.act_shiftin_usb(U.DM, D, 8),                       # 2  SYNC
-         I.act_shiftin_usb(U.DM, D, 8)]                       # 3  PID
-    p += [I.act_shiftin_usb(U.DM, D, 8, crc=True) for _ in range(10)]   # 4..13 data + CRC16
-    nak, ack = 17, 21
-    p += [I.act_branch_bit(I.VPIN_STUFF_ERR, 1, nak, W),      # 14 stuffing error -> NAK
-          I.act(I.OP_LEVEL, I.PIN_NONE, 0, 20),               # 15 (no branch->branch chain)
-          I.act_branch_bit(I.VPIN_CRC_OK, 1, ack, W),         # 16 CRC_OK -> ACK
-          I.act(I.OP_LEVEL, NAK_PIN, 0, 20),                  # 17 NAK marker (active LOW:
+    # HALF (11-14): the SOP ARM rebases to the edge + D/2; the nop(D/2) that
+    # was word 1 is gone, so every index below moved down by one
+    p = [I.act_arm(U.DM, 0, 0, half=True),                    # 0  SOP
+         I.act_shiftin_usb(U.DM, D, 8),                       # 1  SYNC
+         I.act_shiftin_usb(U.DM, D, 8)]                       # 2  PID
+    p += [I.act_shiftin_usb(U.DM, D, 8, crc=True) for _ in range(10)]   # 3..12 data + CRC16
+    nak, ack = 16, 20
+    p += [I.act_branch_bit(I.VPIN_STUFF_ERR, 1, nak, W),      # 13 stuffing error -> NAK
+          I.act(I.OP_LEVEL, I.PIN_NONE, 0, 20),               # 14 (no branch->branch chain)
+          I.act_branch_bit(I.VPIN_CRC_OK, 1, ack, W),         # 15 CRC_OK -> ACK
+          I.act(I.OP_LEVEL, NAK_PIN, 0, 20),                  # 16 NAK marker (active LOW:
           I.act(I.OP_LEVEL, NAK_PIN, 1, 20),                  #    pin_out resets HIGH)
           I.act(I.OP_LEVEL, I.PIN_NONE, 0, U.POST),
-          I.act(I.OP_REARM, 0, 1, 20),                        # 20 loop
-          I.act(I.OP_LEVEL, ACK_PIN, 0, 20),                  # 21 ACK marker (active LOW)
+          I.act(I.OP_REARM, 0, 1, 20),                        # 19 loop
+          I.act(I.OP_LEVEL, ACK_PIN, 0, 20),                  # 20 ACK marker (active LOW)
           I.act(I.OP_LEVEL, ACK_PIN, 1, 20),
           I.act(I.OP_LEVEL, I.PIN_NONE, 0, U.POST),
-          I.act(I.OP_REARM, 0, 1, 20)]                        # 24 loop
+          I.act(I.OP_REARM, 0, 1, 20)]                        # 23 loop
     l0 = I.ACT_BASE
     lp = l0 + len(p) * I.ACT_BYTES
     p.append(I.act(I.OP_REARM, 0, 0, 500))

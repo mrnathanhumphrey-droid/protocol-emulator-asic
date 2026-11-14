@@ -30,6 +30,9 @@ Bench: test/tb_usbbuf.v. Images built here from pe_isa.
   B6  must-fires: M_READY_ALWAYS (B1 sends), M_READY_CLR_ON_SEND (B3's retry
       NAKed), M_BUF_NO_REFUSE (B4's packet overwritten), M_TAG3_ALWAYS_BUF
       (B5's queue starved) each turn the gate red
+  B7  the LONGEST buffer packet with worst-case stuffing (8 x 0xFF, 107 wire
+      bits, one held send): bit-exact, progress.vh's per-action bound clean
+      (Wilson 11-14; its FAIL lines are judged by sim_run's central monitor judge)
 
 POSITIVE TOKEN: `GATE usbbuf: PASSED`.
 """
@@ -96,6 +99,13 @@ def pack(levels):
 DATA_LINE = line_bits([0x80, PID_DATA1] + PAYLOAD + U.crc16(PAYLOAD))
 NAK_LINE = line_bits([0x80, PID_NAK])
 LOAD = [len(DATA_LINE)] + pack(DATA_LINE)
+#: ⭐ B7 (Wilson 11-14, progress.vh's per-action bound): the LONGEST packet the
+#: buffer takes with WORST-CASE stuffing -- a full low-speed payload of eight
+#: 0xFF bytes stuffs to 107 wire bits (nine would be 117 > USB_BUF_MAX_BITS),
+#: one held send action; it must run bit-exact with layer A clean.
+MAX_PAYLOAD = [0xFF] * 8
+MAX_LINE = line_bits([0x80, PID_DATA1] + MAX_PAYLOAD + U.crc16(MAX_PAYLOAD))
+MAX_LOAD = [len(MAX_LINE)] + pack(MAX_LINE)
 
 
 def host_packet(byts):
@@ -119,32 +129,33 @@ ACK_PKT = host_packet([0x80, PID_ACK])
 def image_usb():
     """the USB lane's whole program (word indices are branch targets)"""
     nak_sync, nak_pid = pack(NAK_LINE)
-    p = [I.act(I.OP_ARM, DM, 0, 0),                              # 0  any packet's SOP
-         I.act(I.OP_LEVEL, I.PIN_NONE, 0, D // 2),               # 1
-         I.act_shiftin_usb(DM, D, 8),                            # 2  SYNC
-         I.act_shiftin_usb(DM, D, 8),                            # 3  PID
-         I.act_cmp_branch(PID_IN, 12, W),                        # 4  IN  -> 12
-         I.act(I.OP_LEVEL, I.PIN_NONE, 0, 20),                   # 5
-         I.act_cmp_branch(PID_ACK, 9, W),                        # 6  ACK -> 9
-         I.act(I.OP_LEVEL, I.PIN_NONE, 0, U.POST),               # 7  anything else: ignore
-         I.act(I.OP_REARM, 0, 1, 20),                            # 8
-         I.act_ready_clear(20),                                  # 9  ACK: clear READY
-         I.act(I.OP_LEVEL, I.PIN_NONE, 0, U.POST),               # 10
-         I.act(I.OP_REARM, 0, 1, 20),                            # 11
-         I.act(I.OP_ARM, DM, 0, 0, pinb=DP, mod=1),              # 12 IN: the token's SE0
-         I.act(I.OP_ARM, DM, 1, 0),                              # 13 ... then J
-         I.act_branch_bit(I.VPIN_READY, 1, 21, TA),              # 14 READY -> DATA
-         I.act_shifti(nak_sync, DM, D, pinb=DP),                 # 15 NAK
-         I.act_shifti(nak_pid, DM, D, pinb=DP),                  # 16
-         I.act_se0(DM, DP, 2 * D),                               # 17 EOP
-         I.act_level_pair(DM, DP, 1, D),                         # 18 J
-         I.act(I.OP_READBIT, DM, 0, 20, pinb=DP, mod=I.MOD_PAIR),  # 19 release
-         I.act(I.OP_REARM, 0, 1, 20),                            # 20
-         I.act_send_buf(DM, DP, D),                              # 21 DATA: the buffer
-         I.act_se0(DM, DP, 2 * D),                               # 22 EOP
-         I.act_level_pair(DM, DP, 1, D),                         # 23 J
-         I.act(I.OP_READBIT, DM, 0, 20, pinb=DP, mod=I.MOD_PAIR),  # 24 release
-         I.act(I.OP_REARM, 0, 1, 20)]                            # 25
+    # HALF (11-14): the SOP ARM rebases to the edge + D/2 -- the nop(D/2) that
+    # was word 1 is gone, so every target below moved down by one
+    p = [I.act_arm(DM, 0, 0, half=True),                         # 0  any packet's SOP
+         I.act_shiftin_usb(DM, D, 8),                            # 1  SYNC
+         I.act_shiftin_usb(DM, D, 8),                            # 2  PID
+         I.act_cmp_branch(PID_IN, 11, W),                        # 3  IN  -> 11
+         I.act(I.OP_LEVEL, I.PIN_NONE, 0, 20),                   # 4
+         I.act_cmp_branch(PID_ACK, 8, W),                        # 5  ACK -> 8
+         I.act(I.OP_LEVEL, I.PIN_NONE, 0, U.POST),               # 6  anything else: ignore
+         I.act(I.OP_REARM, 0, 1, 20),                            # 7
+         I.act_ready_clear(20),                                  # 8  ACK: clear READY
+         I.act(I.OP_LEVEL, I.PIN_NONE, 0, U.POST),               # 9
+         I.act(I.OP_REARM, 0, 1, 20),                            # 10
+         I.act(I.OP_ARM, DM, 0, 0, pinb=DP, mod=1),              # 11 IN: the token's SE0
+         I.act_arm(DM, 1, 0, qual=True),                         # 12 ... then J (QUAL)
+         I.act_branch_bit(I.VPIN_READY, 1, 20, TA),              # 13 READY -> DATA
+         I.act_shifti(nak_sync, DM, D, pinb=DP),                 # 14 NAK
+         I.act_shifti(nak_pid, DM, D, pinb=DP),                  # 15
+         I.act_se0(DM, DP, 2 * D),                               # 16 EOP
+         I.act_level_pair(DM, DP, 1, D),                         # 17 J
+         I.act(I.OP_READBIT, DM, 0, 20, pinb=DP, mod=I.MOD_PAIR),  # 18 release
+         I.act(I.OP_REARM, 0, 1, 20),                            # 19
+         I.act_send_buf(DM, DP, D),                              # 20 DATA: the buffer
+         I.act_se0(DM, DP, 2 * D),                               # 21 EOP
+         I.act_level_pair(DM, DP, 1, D),                         # 22 J
+         I.act(I.OP_READBIT, DM, 0, 20, pinb=DP, mod=I.MOD_PAIR),  # 23 release
+         I.act(I.OP_REARM, 0, 1, 20)]                            # 24
     l0 = I.ACT_BASE
     lp = l0 + len(p) * I.ACT_BYTES
     p.append(I.act(I.OP_REARM, 0, 0, 500))
@@ -187,6 +198,9 @@ SCEN = {
     "B4 mid-send": ([("A", 800, IN_PKT), ("A", 6000, IN_PKT), ("R", 120, ACK_PKT), ("H", 1500, IN_PKT)],
                     loads_at(4000, LOAD) + [("S", 400, 24)],   # a new packet's length byte, mid-send
                     ["NAK", "DATA", "NAK"], [1, 0], True),
+    # (optional 6th field: the scenario's own DATA line, default DATA_LINE)
+    "B7 max-stuffed": ([("A", 800, IN_PKT), ("A", 6000, IN_PKT), ("R", 120, ACK_PKT), ("H", 1500, IN_PKT)],
+                       loads_at(4000, MAX_LOAD), ["NAK", "DATA", "NAK"], [1, 0], False, MAX_LINE),
 }
 
 
@@ -228,7 +242,8 @@ def coverage_arms():
     I.write_image(os.path.join(d, "queue.hex"), image_queue())
     rel = lambda p: COV_DIR + "/" + os.path.basename(p)
     arms = []
-    for name, (host, loads, _pk, _rd, _tf) in SCEN.items():
+    for name, sc in SCEN.items():
+        host, loads = sc[0], sc[1]
         tag = name.split()[0]
         hf, lf = write_scripts(d, tag, host, loads)
         arms.append((tag, ["+IMG=%s/usb.hex" % COV_DIR, "+HOST=" + rel(hf), "+LOAD=" + rel(lf), "+NCYC=30000"]))
@@ -279,24 +294,28 @@ def device_packets(tx):
     return out
 
 
-def expect_bits(kind):
-    lv = DATA_LINE if kind == "DATA" else NAK_LINE
+def expect_bits(kind, line=None):
+    lv = (line or DATA_LINE) if kind == "DATA" else NAK_LINE
     return [(l, 1 - l) for l in lv] + [(0, 0), (0, 0), (1, 0)]
 
 
-def judge(name, res, host, exp_pk, exp_rd, exp_tf):
+def judge(name, res, host, exp_pk, exp_rd, exp_tf, line=None):
+    line = line or DATA_LINE
     if not res["end"]:
         return ["%s: no END (%s)" % (name, res["tail"])], []
     probs, turns, jits = [], [], []
+    # (progress.vh's FAIL lines are judged CENTRALLY by test/sim_run.py's monitor
+    # judge, Wilson 11-14 -- this runner's own stopgap check was removed with
+    # the switch to enforce, so there is ONE judge)
     pk = device_packets(res["tx"])
     kinds = []
     for t0, bits, offs in pk:
-        k = "DATA" if bits[:len(DATA_LINE)] == expect_bits("DATA")[:len(DATA_LINE)] else (
+        k = "DATA" if bits[:len(line)] == expect_bits("DATA", line)[:len(line)] else (
             "NAK" if bits[:len(NAK_LINE)] == expect_bits("NAK")[:len(NAK_LINE)] else "?")
         kinds.append(k)
-        if k != "?" and bits != expect_bits(k):
+        if k != "?" and bits != expect_bits(k, line):
             probs.append("%s: the %s packet at %d is not bit-exact (%d bits, golden %d)"
-                         % (name, k, t0, len(bits), len(expect_bits(k))))
+                         % (name, k, t0, len(bits), len(expect_bits(k, line))))
         # every edge ON the bit grid or up to J = 2 cycles LATE (a dispatch waits
         # behind at most one other lane's service under the deadline rule), never early
         late = [o % D for o in offs]
@@ -333,14 +352,16 @@ def run_all(vvp, tmp, tag, pool):
         I.write_image(qimg, image_queue())
         sim_run.scratch_image(GEN, qimg)
     jobs = {}
-    for name, (host, loads, pk, rd, tf) in SCEN.items():
+    for name, sc in SCEN.items():
+        host, loads, pk, rd, tf = sc[:5]
+        line = sc[5] if len(sc) > 5 else DATA_LINE
         hf, lf = write_scripts(tmp, "%s_%s" % (tag, name.split()[0]), host, loads)
-        jobs[name] = (host, pk, rd, tf, pool.submit(sim, vvp, img, hf, lf, 30000))
+        jobs[name] = (host, pk, rd, tf, line, pool.submit(sim, vvp, img, hf, lf, 30000))
     qf, ql = write_scripts(tmp, "%s_B5" % tag, [], [("A", Q_FIRST + k * Q_STEP, b) for k, b in enumerate(Q_BYTES)])
     qjob = pool.submit(sim, vvp, qimg, qf, ql, Q_FIRST + len(Q_BYTES) * Q_STEP + 400)
     res, turns = {}, []
-    for name, (host, pk, rd, tf, fut) in jobs.items():
-        res[name], t = judge(name, fut.result(), host, pk, rd, tf)
+    for name, (host, pk, rd, tf, line, fut) in jobs.items():
+        res[name], t = judge(name, fut.result(), host, pk, rd, tf, line)
         turns += t
     q = qjob.result()
     want = [(b >> i) & 1 for b in Q_BYTES for i in range(8)]
@@ -373,6 +394,10 @@ def main() -> int:
     print("  the loaded DATA packet: %d line bits (%d bytes + the length byte)" % (len(DATA_LINE), len(LOAD) - 1))
     if len(DATA_LINE) > I.USB_BUF_MAX_BITS:
         probs.append("the DATA packet is %d bits > %d" % (len(DATA_LINE), I.USB_BUF_MAX_BITS))
+    print("  B7 max-stuffed packet: %d line bits (8 x 0xFF, worst-case stuffing; limit %d)"
+          % (len(MAX_LINE), I.USB_BUF_MAX_BITS))
+    if not (len(DATA_LINE) < len(MAX_LINE) <= I.USB_BUF_MAX_BITS):
+        probs.append("B7 is not the longest buffer packet (%d bits)" % len(MAX_LINE))
     for nm, im in (("usb", image_usb()), ("queue", image_queue())):
         pr = I.branch_problems(im)
         if pr:

@@ -46,10 +46,15 @@ PREMISES = [
     # reads the REGISTERED winner (`winner_q`, the previous cycle's), re-
     # checked live, and borrows the port WITHOUT moving the round-robin
     # pointer, which is its own register `prr` (docs/PORT_SPEC.md §1).
-    ("P3", "WINNER-FIRST: the port serves the (registered) winner's invalid head first",
-     "if (winner_v_q && l_live[winner_q] && !l_actv[hix[winner_q]]) begin"),
+    # ⛔ (b') (Wilson 11-14): the dispatch winner never has an empty head, so
+    # the port's first priority is the earliest RELEASED lane WITH an empty head
+    # (`pf_q`, registered like TF3's winner). Agent 2's Lean premise follows it.
+    # (11-14) both selection lines carry `!ft_flush[..]`: the scan never selects
+    # a lane whose FALLTHROUGH edge flushes it that cycle (the scan-race fix)
+    ("P3", "LATE-HEAD-FIRST: the port serves the earliest released lane's empty head first",
+     "if (pf_v_q && l_live[pf_q] && !l_actv[hix[pf_q]] && !ft_flush[pf_q]) begin"),
     ("P4", "spare fills are strictly lower priority (the else-if), at the pointer",
-     "end else if (l_live[prr] && want_fetch(prr)) begin"),
+     "end else if (l_live[prr] && want_fetch(prr) && !ft_flush[prr]) begin"),
     ("P4r", "only a round-robin refill advances the pointer (TF3)",
      "if (!pbr1) prr <= (pl == LANE_LAST) ? {LW{1'b0}} : pl + 1'b1;"),
     # ⛔ TF2-R1/R2: the winner's head-valid bit is now picked from per-lane
@@ -66,8 +71,12 @@ PREMISES = [
      "reg [LW-1:0]   winner;"),
     # ⭐ The stall counter is what `sum_L` reconstructs, so it is part of the
     # proof's subject matter, not just of the measurement.
-    ("S", "the stall branch the winner-blocked bound is about",
+    # (b'): the counter now counts cycles in which SOME lane is released with
+    # an empty head -- the only way a lane is late for its own word
+    ("S", "the stall counter: a lane released with an empty head ((b'))",
      "jitter_cnt <= jitter_cnt + 1'b1;"),
+    ("Sb", "(b'): dispatch readiness includes the lane's own head-valid",
+     "assign ready[gi] = rdy_rel[gi] & l_actv[hix[gi]];"),
     # ---- Theorem 3 (D*), now the load-bearing claim --------------------
     # ⛔⛔ P8 IS THE ONE THAT CARRIES THE PUBLISHED GUARANTEE. If the
     # timestamp advance ever became RELATIVE (from completion rather than
@@ -116,7 +125,7 @@ PREMISES = [
     # ⛔ RX1 extended the line with the capture gate (`& cap_ok`), so the
     # anchor is the prefix plus the new term -- both gates are premises now
     ("P9w", "W1: ready also waits for the lane's own hold + setup (and RX1)",
-     "assign ready[gi] = rel_due[gi] & hz_q[gi] & cap_ok;"),
+     "assign rdy_rel[gi] = rel_due[gi] & hz_q[gi] & cap_ok;"),
     ("P9h", "the hold-zero term is written beside the counter",
      "hz_q[i] <= (l_hcnt[i] == {{(HOLDW-1){1'b0}}, 1'b1});"),
 ]

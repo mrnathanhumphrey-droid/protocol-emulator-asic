@@ -25,6 +25,8 @@ Bench: test/tb_pair.v. Images built here from pe_isa.
       term) -- a measurement, not a verdict.
   P4  pe_isa refuses the bad encodings.
   P5  must-fires: M_PAIR_COPY, M_PAIR_SE0_SHIFT, M_ST_EARLY each turn P1 red.
+  P6  progress.vh's per-action bound (Wilson 11-14): M_ST_NEVER_LAST and
+      M_ST_LATE8 each trip layer A for their own kind; the clean runs do not.
 
 POSITIVE TOKEN: `GATE pair: PASSED`.
 """
@@ -213,12 +215,15 @@ COV_DIR = "probe_cov_pair"
 def coverage_arms():
     """[(label, plusargs)] for test/benchset.py's tb_pair; images under COV_DIR."""
     os.makedirs(os.path.join(ROOT, COV_DIR), exist_ok=True)
+    # ⛔ "pair_"-PREFIXED: the image universe keys every image by NAME, and a
+    # bare busy.hex collided with tb_usbrx's (found when the universe began
+    # walking the generated arms, Wilson 11-13 2e)
     for k in ("tx", "rx", "busy"):
-        I.write_image(os.path.join(ROOT, COV_DIR, "%s.hex" % k), image(k))
-    return [("tx", ["+IMG=%s/tx.hex" % COV_DIR, "+NCYC=2600", "+FEED=1"]),
-            ("rx", ["+IMG=%s/rx.hex" % COV_DIR, "+NCYC=900", "+RXB=%d" % RX_BYTE,
+        I.write_image(os.path.join(ROOT, COV_DIR, "pair_%s.hex" % k), image(k))
+    return [("tx", ["+IMG=%s/pair_tx.hex" % COV_DIR, "+NCYC=2600", "+FEED=1"]),
+            ("rx", ["+IMG=%s/pair_rx.hex" % COV_DIR, "+NCYC=900", "+RXB=%d" % RX_BYTE,
                     "+RXT=%d" % RX_T, "+RXD=%d" % D]),
-            ("busy", ["+IMG=%s/busy.hex" % COV_DIR, "+NCYC=2600", "+FEED=1"])]
+            ("busy", ["+IMG=%s/pair_busy.hex" % COV_DIR, "+NCYC=2600", "+FEED=1"])]
 
 
 def run_all(vvp, tmp):
@@ -271,6 +276,22 @@ MUTANTS = [
     ("M_PAIR_SE0_SHIFT", "SHIFT's mod 11 drives SE0"),
     ("M_ST_EARLY", "a self-timed byte retires one bit early"),
 ]
+
+#: ⭐ PROGRESS.VH'S PER-ACTION BOUND (Wilson 11-14): each mutant must trip layer
+#: A FOR ITS OWN KIND -- (define, image, the kind its message must name, what).
+#: M_ST_LATE8 holds a self-timed SHIFTIN 8 bits late: 16 dispatches, far under
+#: the old global 64, so only the per-action bound sees it.
+PROGRESS_MUTANTS = [
+    ("M_ST_NEVER_LAST", "tx", "st_shift", "a self-timed SHIFT never asserts its last bit"),
+    ("M_ST_LATE8", "rx", "st_shiftin", "a self-timed SHIFTIN holds 8 bits past its own bound"),
+]
+PG_FAIL = "*** FAIL progress.vh[A]"
+
+
+def sim_out(vvp, img, plus):
+    """the full bench output (progress.vh's lines print mid-run and at `final`)"""
+    r = run(sim_run.vvp([vvp, "+IMG=%s" % img] + plus, images=[img]))
+    return r.stdout + r.stderr
 
 
 def main() -> int:
@@ -330,6 +351,32 @@ def main() -> int:
         print("    %-18s %-42s %s" % (d, what, ("RED: " + red[0][:60]) if red else "*** SURVIVED"))
         if not red:
             probs.append("%s survived" % d)
+
+    print("\n  P6 progress.vh per-action bound: clean runs clean, each mutant red for its own kind")
+    plus = {"tx": ["+NCYC=2600", "+FEED=1"],
+            "rx": ["+NCYC=900", "+RXB=%d" % RX_BYTE, "+RXT=%d" % RX_T, "+RXD=%d" % D]}
+    hexes = {k: os.path.join(tmp, "pair_%s.hex" % k) for k in ("tx", "rx")}
+    for k in ("tx", "rx"):
+        o = sim_out(vvp, hexes[k], plus[k])
+        bad = PG_FAIL in o
+        print("    control %-10s %s" % (k, "*** layer A fired on the clean design" if bad else "clean"))
+        if bad:
+            probs.append("clean %s: progress.vh layer A fired" % k)
+    for d, img, kind, what in PROGRESS_MUTANTS:
+        mv = os.path.join(tmp, "pair_%s.vvp" % d)
+        try:
+            build(mv, [d])
+        except RuntimeError as exc:
+            probs.append("%s: %s" % (d, exc))
+            continue
+        o = sim_out(mv, hexes[img], plus[img])
+        line = next((l for l in o.splitlines() if PG_FAIL in l), "")
+        red = ("kind %s" % kind) in line
+        print("    %-18s %-52s %s" % (d, what, ("RED (%s)" % kind) if red
+                                      else ("*** WRONG REASON: " + line[:60]) if line
+                                      else "*** SURVIVED"))
+        if not red:
+            probs.append("%s: progress.vh layer A did not fire for kind %s" % (d, kind))
 
     print()
     if probs:

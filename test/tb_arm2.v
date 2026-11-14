@@ -52,7 +52,7 @@ module tb_arm2;
   localparam integer PIN_WR   = 6;
 
   integer i, cyc, idle, pha, phb, ncyc;
-  integer t_armed, t_a, t_b, t_fire, t_out, oe_viol, x_viol;
+  integer t_armed, t_a, t_b, t_fire, t_out, oe_viol, x_viol, pha_abs;
   reg     prev_uo0;
 
   // the load sequence is tb_edge's, every input write on a falling edge
@@ -88,6 +88,11 @@ module tb_arm2;
     if (!$value$plusargs("IDLE=%d", idle)) idle = 1;
     if (!$value$plusargs("PHA=%d", pha)) pha = -1;
     if (!$value$plusargs("PHB=%d", phb)) phb = -1;
+    // +PHA_ABS: flip uio[0] at an ABSOLUTE run cycle, also while still waiting for
+    // the lane to arm -- the FT scan-race must-fire (run_arm2 A4) needs the edge on
+    // the cycle the prefetch scan selects the lane, which is the cycle AFTER arming,
+    // so the pin must move before the bench has seen l_armed (2-flop synchroniser)
+    if (!$value$plusargs("PHA_ABS=%d", pha_abs)) pha_abs = -1;
     if (!$value$plusargs("NCYC=%d", ncyc)) ncyc = 400;
     $readmemh(imgfile, img);
     `PE_REQUIRE_IMG_LOADED(imgfile)
@@ -105,6 +110,7 @@ module tb_arm2;
     for (i = 0; i < 2000 && t_armed < 0; i = i + 1) begin
       @(posedge clk); cyc = cyc + 1;
       @(negedge clk);
+      if (pha_abs >= 0 && cyc == pha_abs) begin uio_drv[0] = ~uio_drv[0]; t_a = cyc; end
       if (dut.u_eng.l_armed[0] === 1'b1) t_armed = cyc;
       if (dut.u_eng.arm_hit[0] === 1'b1 && t_fire < 0) t_fire = cyc;
     end
@@ -117,6 +123,9 @@ module tb_arm2;
       if (^uio_in === 1'bx) x_viol = x_viol + 1;
       @(negedge clk);
       if (dut.u_eng.arm_hit[0] === 1'b1 && t_fire < 0) t_fire = cyc;
+      if (pha_abs >= 0 && cyc == pha_abs) begin
+        uio_drv[0] = ~uio_drv[0]; t_a = cyc;
+      end
       if (t_armed >= 0 && pha >= 0 && cyc == t_armed + pha) begin
         uio_drv[0] = ~uio_drv[0]; t_a = cyc;
       end
@@ -139,6 +148,13 @@ module tb_arm2;
   );
 
 `include "test/progress.vh"
+
+  // ⛔ QUIESCENT BY DECLARATION (the coverage sweep, 11-13): the `none` (uo-bank
+  // guard) and `timeout` scenarios retire no action BY DESIGN -- the guard never
+  // fires and the timeout halts the lane -- so progress.vh's vacuity rule would
+  // read them as "nothing to check". The runner declares it with +QUIESCENT,
+  // the same pattern as tb_equiv / tb_status / tb_reload.
+  initial if ($test$plusargs("QUIESCENT")) pg_quiescent_ok = 1'b1;
 
 endmodule
 

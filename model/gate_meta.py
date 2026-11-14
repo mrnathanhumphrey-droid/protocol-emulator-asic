@@ -77,6 +77,8 @@ SEAMS = (
     ("model/gate_wire_feed.py", "gate_wire_feed.published_problems", "fast", "E"),
     ("model/gate_image_bounds.py", "gate_image_bounds.audit", "fast", "E"),
     ("model/gate_image_bounds.py", "gate_image_bounds.class_problems", "fast", "E"),
+    ("model/gen_op_reads.py", "gen_op_reads.extract", "fast", "E1"),
+    ("model/gen_op_reads.py", "pe_isa.unread_problems", "fast", "E"),
     ("model/gate_sim_runs.py", "gate_sim_runs.scan", "fast", "E"),
     ("model/gate_sim_runs.py", "gate_sim_runs.cocotb_ok", "fast", "T"),
     ("model/gate_sim_runs.py", "gate_sim_runs.hidden_problems", "fast", "E0"),
@@ -90,7 +92,9 @@ SEAMS = (
     ("model/gate_onewire_hw_witness.py", "gate_onewire_hw_witness.audit", "fast", "E"),
     ("model/gate_onewire_hw_witness.py", "gate_onewire_hw_witness.feed_matches", "fast", "T"),
     ("model/gate_flow_config.py", "gate_flow_config.audit", "fast", "E0"),
+    ("model/gate_layers_rc.py", "gate_layers_rc.judge", "fast", "E"),
     ("model/gate_flow_config.py", "gate_flow_config.env_audit", "fast", "E"),
+    ("test/gen_progress_bounds.py", "gen_progress_bounds.problems", "fast", "E"),
     ("model/gate_shell_rc.py", "gate_shell_rc.audit_text", "fast", "E"),
     ("model/gate_except.py", "gate_except.audit", "fast", "E"),
     ("model/gate_tool_pinning.py", "gate_tool_pinning.audit", "fast", "E"),
@@ -255,6 +259,9 @@ SEAMS = (
 #: Gates with NO stubbable check, each with why -- every gate in
 #: ci/run_gates.sh is in SEAMS or here (checked), so none is silently unaudited.
 NOT_STUBBABLE = {
+    "test/gate_batch_equiv.py": "verdict made inline in main() from the two builds' traces "
+                                "(pins, host stream, monitors, primed cycle); priced by its "
+                                "M_PRIME_NEWPRIO build and its SHA-pin must-fire",
     "test/run_v2window.py": "F4: no must-fire at all; its inside-window arm "
                             "prints and never feeds the verdict",
     "model/gate_spuri_candidates.py": "INLINE: both must-fires compare counts "

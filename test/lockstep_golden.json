@@ -1,12 +1,13 @@
 {
  "_ncyc_after_priming": 60000,
+ "_rebound_wilson_11_14": "census_image.hex + corpus_i2c.hex re-keyed to their zero-filled bytes (reserved fields, Wilson 11-14): on this RTL the OLD bytes reproduce the old digests exactly; the new streams differ only in the dispatched words' unread count bits (0x800), with every P (pin) line, dispatch count and primed_at identical. Nothing else re-recorded.",
  "_recorded_from": "R:/claude_scratch/latch/src_90ec788",
  "census_image.hex": {
-  "dispatch_sha256": "2288ba463a3c1694d4971eb4aeda52fda063dbac13b11490a588843022046db7",
+  "dispatch_sha256": "56b7ab30bc345de016571edf56f780fe6e72bc57395586df1b17ccd254498391",
   "dispatches": 2763,
   "lines": 62711,
   "primed_at": 124,
-  "sha256": "2de3fd2a149bf6b4410ef24ecfca4e36977d0b5f110fc8d641446d77d0b1f92b"
+  "sha256": "e8c63a05bf78c1bd0aadc81cb43b097f978dd0cb8f1bacf0cf2c86eb466fc3f1"
  },
  "ckfive_image.hex": {
   "dispatch_sha256": "948987dbde25e062a1c5cabaf035dfac29af202b226ec361801488e2a6b94a3c",
@@ -37,11 +38,11 @@
   "sha256": "089a852606a522a689bf77bf5cad8626078bedf578b92121a4ea3449de7f1c90"
  },
  "corpus_i2c.hex": {
-  "dispatch_sha256": "ade7623bc2fd26f1ccca72c214d906ab3b7068d74fb317e52290546741f6ac6a",
+  "dispatch_sha256": "5e8d0196b05dc18e26d7fc17a1a3f3fcf5ce77bf77e234ed34cc8c4556e5dd90",
   "dispatches": 1159,
   "lines": 61069,
   "primed_at": 119,
-  "sha256": "2099efa6908da25c0f41b0067ffe7faf85d2c17b096c2d744e8c7f6b5fe33207"
+  "sha256": "b911c6d9973e0090af7ad48bfc04884469b5bf2e00513490bcde5f0065ae2deb"
  },
  "half_image.hex": {
   "dispatch_sha256": "b96e180a0673563e43b77cf7bab57d3bb51ac8ca047a3c1d61446f4cc489d1b9",

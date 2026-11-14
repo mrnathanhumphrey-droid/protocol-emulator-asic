@@ -214,7 +214,9 @@ def main() -> int:
                 fh.write(git("show", "%s:%s" % (V1REV, f)))
             v1src.append(p)
         vv1, vv2, vvm = (os.path.join(tmp, n) for n in ("v1.vvp", "v2.vvp", "nomagic.vvp"))
-        build(vv1, v1src, ps=ps)
+        # the v1-lock engine predates rdy_rel / layer S (PE_EQUIV_PRE) and the
+        # self-timed / USB decode the per-action progress bound reads (PE_V1_RTL)
+        build(vv1, v1src, defines=["PE_EQUIV_PRE", "PE_V1_RTL"], ps=ps)
         build(vv2, RTL, defines=[V2_PERIOD_DEFINE], ps=ps)
         build(vvm, RTL, defines=[V2_PERIOD_DEFINE, "M_NO_MAGIC"], ps=ps)
 

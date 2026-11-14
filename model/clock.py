@@ -222,6 +222,24 @@ USB_J_CYCLES = 2
 #: (The device's own rule, just above it: at least two bit times too; its
 #: response delay max is TRSPIPD1 = 6.5 bit times, detachable cable.)
 USB_TIPD_BITS = 2
+#: TLST and TLEOPR, Table 7-10 (continued), "Low-speed Source Electrical
+#: Characteristics" (PDF page 210, printed p. 182): the width of an SE0 interval
+#: during a differential transition is at most TLST = 210 ns (§7.1.4), and a
+#: receiver must accept an SE0 of at least TLEOPR = 670 ns as an EOP (Note 13,
+#: §7.1.13.2, Figure 7-50). The arm_j SE0 qualifier (Wilson 11-13, item 3)
+#: sits between them: a run longer than any transition SE0, no longer than the
+#: shortest EOP a receiver must honour.
+USB_TLST_MAX_NS = 210
+USB_TLEOPR_MIN_NS = 670
+#: THE RESPONSE WINDOW (Wilson 11-14, correction A), §7.1.18.1 and §7.1.19.1
+#: (PDF page 196, printed p. 168): a responding function's inter-packet delay is
+#: at most TRSPIPD1 = 6.5 bit times (detachable cable) and less than TRSPIPD2 =
+#: 7.5 (captive), "referenced to the data rate of the packet"; the host "will
+#: wait at least 18 bit times for a response to start before it will start a new
+#: transaction". The LS data rate's tolerance is +-1.5 % (TLDRATE, Table 7-10).
+USB_TRSPIPD1_BITS, USB_TRSPIPD2_BITS = Fraction(13, 2), Fraction(15, 2)
+USB_HOST_RESP_WAIT_BITS = 18
+USB_LS_RATE_TOL = Fraction(15, 1000)
 
 #: ⭐ THE CLOCK SOURCE'S ACCURACY, DECLARED PER TARGET (Wilson 11-09 Q7): the
 #: rate requirement is TWO-SIDED, which BAND (a one-sided guard on minima)
@@ -236,6 +254,53 @@ def usb_n_rst(f=None, t_rst_ns=USB_T_RST_NS):
     """The RTL's N_RST at clock `f`: its own banded integer formula."""
     f = hz() if f is None else int(f)
     return rtl_hold_cycles(t_rst_ns, period_ps(f))
+
+
+def usb_se0q_bounds(f=None):
+    """(lo, hi): the SE0-qualifier run length N must satisfy lo <= N <= hi at
+    clock `f`, across the band. N cycles must EXCEED TLST at the band's FAST
+    edge (f x BAND: the most cycles a transition SE0 can span) and must NOT
+    EXCEED TLEOPR at its SLOW edge (f / BAND: the fewest cycles the shortest
+    honoured EOP spans)."""
+    f = hz() if f is None else int(f)
+    fast, slow = Fraction(f) * BAND, Fraction(f) / BAND
+    lo = int(USB_TLST_MAX_NS * fast // 10 ** 9) + 1
+    hi = int(USB_TLEOPR_MIN_NS * slow // 10 ** 9)
+    return lo, hi
+
+
+def usb_se0q_interval():
+    """The interval that holds at EVERY target: (max lo, min hi)."""
+    b = [usb_se0q_bounds(target_hz(t)) for t in sorted(TARGETS)]
+    return max(x[0] for x in b), min(x[1] for x in b)
+
+
+def usb_se0q_n():
+    """N, the arm_j SE0 qualifier's run length (Wilson 11-13): the rounded
+    midpoint of the robust interval -- GENERATED, never typed."""
+    lo, hi = usb_se0q_interval()
+    if lo > hi:
+        raise ClockError("no SE0-qualifier N holds at every target: [%d, %d]" % (lo, hi))
+    return (lo + hi + 1) // 2
+
+
+def usb_resp_window_cycles(f=None):
+    """window_end: the LATEST a legal responder's SOP can start after the
+    SE0->J that ends our token -- TRSPIPD2 (the larger) at the SLOWEST legal
+    responder rate, in cycles at clock `f`, rounded UP (a FALLTHROUGH ARM that
+    must still be armed then)."""
+    f = hz() if f is None else int(f)
+    c = USB_TRSPIPD2_BITS * Fraction(f, USB_LS_RATE) * (1 + USB_LS_RATE_TOL)
+    return -((-c.numerator) // c.denominator)
+
+
+def usb_host_next_min_cycles(f=None):
+    """The EARLIEST the host may start its next token after a transaction no
+    one answered: 18 bit times after the SE0->J, at the FASTEST legal host
+    rate, in cycles at `f`, rounded DOWN."""
+    f = hz() if f is None else int(f)
+    c = USB_HOST_RESP_WAIT_BITS * Fraction(f, USB_LS_RATE) / (1 + USB_LS_RATE_TOL)
+    return c.numerator // c.denominator
 
 
 def usb_bit_cycles(f=None):

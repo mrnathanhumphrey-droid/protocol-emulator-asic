@@ -42,7 +42,12 @@ module hold_mon;
         else if (t_load[l] >= 0) begin
           if (t_zero[l] < 0 && `HM_E.l_hcnt[l] == 0) t_zero[l] = cyc;
           if (t_hz[l]   < 0 && `HM_E.hz_q[l] === 1'b1) t_hz[l] = cyc;
+          // (b') 11-14: `ready` now includes the head term; this meant RELEASED and gated (`rdy_rel`)
+`ifdef PE_EQUIV_PRE
           if (t_rdy[l]  < 0 && `HM_E.ready[l] === 1'b1) t_rdy[l] = cyc;
+`else
+          if (t_rdy[l]  < 0 && `HM_E.rdy_rel[l] === 1'b1) t_rdy[l] = cyc;
+`endif
           if (t_rdue[l] < 0 && `HM_E.rel_due[l] === 1'b1) t_rdue[l] = cyc;
         end
       end

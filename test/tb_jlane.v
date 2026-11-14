@@ -176,9 +176,15 @@ module tb_jlane;
                        && (dut.u_eng.st == 0) && dut.u_eng.winner_v
                        && (dut.u_eng.winner == lane[2:0])
                        && !dut.u_eng.l_armed[lane];
-  wire       blocked  = at_idle && !dut.u_eng.l_actv[l_head];
+  // ⛔ (b') (Wilson 11-14): the dispatcher no longer picks a lane with an
+  // empty head, so "the winner is this lane and its head is empty" never
+  // happens and would read 0 HOLLOWLY. This lane is late for its own word
+  // exactly while it is RELEASED with an EMPTY head (`pf_rdy`).
+  wire       blocked  = dut.u_eng.primed && !dut.u_eng.config_err
+                        && dut.u_eng.pf_rdy[lane];
   wire       dispatch = at_idle &&  dut.u_eng.l_actv[l_head];
-  wire       rdy      = dut.u_eng.ready[lane];
+  // (b') 11-14: `ready` now includes the head term; this meant RELEASED and gated (`rdy_rel`)
+  wire       rdy      = dut.u_eng.rdy_rel[lane];
 
   task dump_chain;
     begin
@@ -337,8 +343,8 @@ module tb_jlane;
                    && dut.u_eng.winner == lane[2:0])) begin
           iv_gap = iv_gap + 1;
           // ⭐ which kind of idle: refill queueing, or someone else's turn
-          if (dut.u_eng.winner_v
-              && !dut.u_eng.l_actv[dut.u_eng.hix[dut.u_eng.winner]])
+          // (b'): refill queueing is this lane released with an empty head
+          if (dut.u_eng.pf_rdy[lane])
             iv_rq = iv_rq + 1;
           else
             iv_dd = iv_dd + 1;

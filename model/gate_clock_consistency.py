@@ -183,6 +183,36 @@ def spec(hz, engine_text=None, band=None, rtl_ps=None):
     return out
 
 
+def usb_n_j_rtl(engine_text=None):
+    """[(what, ok, detail)]: the RTL's QUAL threshold USB_N_J (pe_engine.v) IS
+    clock.usb_se0q_n() -- the generated N, held equal like T_RST_NS."""
+    eng = engine_text if engine_text is not None else read(ENGINE)
+    m = re.search(r"localparam\s+integer\s+USB_N_J\s*=\s*(\d+)", eng)
+    if not m:
+        return [("RTL USB_N_J == clock.usb_se0q_n()", False, "pe_engine.v declares no USB_N_J")]
+    rtl = int(m.group(1))
+    return [("RTL USB_N_J == clock.usb_se0q_n()", rtl == clock.usb_se0q_n(),
+             "RTL %d, generated %d" % (rtl, clock.usb_se0q_n()))]
+
+
+def usb_se0q(hz, n=None):
+    """[(what, ok, detail)]: the arm_j SE0 qualifier's run length N (Wilson
+    11-13, item 3; clock.usb_se0q_n, generated) at clock `hz`, across the band:
+    N cycles EXCEED TLST at the fast edge (no transition SE0 reaches it) and do
+    NOT EXCEED TLEOPR at the slow edge (every honoured EOP reaches it). `n`
+    overrides the generated value (the must-fires)."""
+    n = clock.usb_se0q_n() if n is None else n
+    band, mhz = clock.BAND, hz / 1e6
+    fast_ns = Fraction(n * 10 ** 9) / (Fraction(hz) * band)
+    slow_ns = Fraction(n * 10 ** 9) / (Fraction(hz) / band)
+    return [("USB SE0 qualifier N=%d > TLST %d ns, clock fast by the band @ %g MHz"
+             % (n, clock.USB_TLST_MAX_NS, mhz), fast_ns > clock.USB_TLST_MAX_NS,
+             "%.1f ns > %d" % (float(fast_ns), clock.USB_TLST_MAX_NS)),
+            ("USB SE0 qualifier N=%d <= TLEOPR %d ns, clock slow by the band @ %g MHz"
+             % (n, clock.USB_TLEOPR_MIN_NS, mhz), slow_ns <= clock.USB_TLEOPR_MIN_NS,
+             "%.1f ns <= %d" % (float(slow_ns), clock.USB_TLEOPR_MIN_NS))]
+
+
 def usb_spec(hz, engine_text=None, ppm=None, t_rst_ns=None):
     """[(what, ok, detail)] for check 8 (step 7a, Wilson 11-09 Q1 + Q7) at
     clock `hz`: the RTL's bus-reset count N_RST (its own T_RST_NS, its own
@@ -435,6 +465,8 @@ def main(argv=None):
     print("  --- 8. USB low speed: the bus-reset count and the TX rate, per target ---")
     for t in sorted(clock.TARGETS):
         rc |= report(usb_spec(clock.target_hz(t)))
+        rc |= report(usb_se0q(clock.target_hz(t)))
+    rc |= report(usb_n_j_rtl())
     print("  --- 5. bench-only clock defines never reach synthesis ---")
     src = src_files()
     rc |= report(bench_only(src, files[CONFIG]))
@@ -529,6 +561,20 @@ def main(argv=None):
     rc |= 0 if red else 1
     red = any(not ok for _w, ok, _d in usb_spec(chip, t_rst_ns=2600))
     print("    must-fire: %-40s %s" % ("USB: T_RST 2.6 us (< 2 x EOP, band)", "red  ok" if red else "*** MISSED"))
+    rc |= 0 if red else 1
+    # the SE0 qualifier's N one past each end of the robust interval
+    lo, hi = clock.usb_se0q_interval()
+    for what, nn in (("USB: SE0 qualifier N below TLST (fast edge)", lo - 1),
+                     ("USB: SE0 qualifier N above TLEOPR (slow edge)", hi + 1)):
+        red = any(not ok for t in sorted(clock.TARGETS)
+                  for _w, ok, _d in usb_se0q(clock.target_hz(t), nn))
+        print("    must-fire: %-40s %s" % (what, "red  ok" if red else "*** MISSED"))
+        rc |= 0 if red else 1
+    # the RTL's USB_N_J moved off the generated N (the QUAL threshold, 11-14)
+    eng = read(ENGINE)
+    red = any(not ok for _w, ok, _d in usb_n_j_rtl(
+        re.sub(r"(localparam\s+integer\s+USB_N_J\s*=\s*)\d+", r"\g<1>13", eng)))
+    print("    must-fire: %-40s %s" % ("USB: RTL USB_N_J off the generated N", "red  ok" if red else "*** MISSED"))
     rc |= 0 if red else 1
     # check 5's two halves: the bench define planted in src/, and in the flow
     s2 = dict(src)
