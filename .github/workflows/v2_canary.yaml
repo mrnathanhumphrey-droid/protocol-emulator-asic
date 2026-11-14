@@ -47,7 +47,7 @@ jobs:
 
       # ⛔⛔ A CANARY IS ONE COMMIT ON A WORK COMMIT (Wilson 11-03, B1). It is
       # built by ci/make_canary.py <density>, and this refuses anything else:
-      # HEAD~1 must be on origin/work/latch-store, and HEAD may change only
+      # HEAD~1 must be on origin/work/s12-c, and HEAD may change only
       # src/config.json's PL_TARGET_DENSITY_PCT value and test.yaml's ignore
       # line -- so a canary hardens EXACTLY the work branch's design and config.
       - name: The canary is the work branch plus its density (B1)
