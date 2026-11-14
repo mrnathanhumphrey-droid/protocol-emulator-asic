@@ -17,7 +17,7 @@ namespace JLane
 
 theorem wb_bound_win (P : Program) (win : Engine → Option Lane) (e0 : Engine)
     (h0 : e0.st = .idle) (h0ts : ∀ l, e0.now ≤ e0.ts l) (y : Lane) (hy : P.live y = true)
-    (M S K : Nat) (hK : K = 3 * M + S + 3)
+    (M S K : Nat) (hK : 3 * M + S + 3 ≤ K)
     (hws : ∀ e, e.st = .idle → Ready P y e → win e ≠ none)
     (t : Nat) (hwb : IsWB y (run P win t e0))
     (hfree : ∀ w, w + 2 < t → IsWB y (run P win w e0) →
