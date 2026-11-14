@@ -44,10 +44,16 @@ def actvF (P : Program) (fl : Lane → Bool) (X : EngineF) (l : Lane) (s : Slot)
   else if X.e.pst = .cap ∧ l = X.e.pl ∧ s = X.e.pslot ∧ X.pkill = true then X.e.actv l s
   else actvNext P X.e l s
 
+/-- The release update with flushes: a flushed lane is released one past the edge (agent 1,
+11-14: an edge after the deadline, before the disarm decision, still flushes and rebases, so
+the release can only move later). -/
+def tsF (P : Program) (fl : Lane → Bool) (e : Engine) (l : Lane) : Nat :=
+  if fl l = true then e.now + 1 else tsNext P e l
+
 /-- One cycle with flushes `fl`. -/
 def stepF (P : Program) (win : Engine → Option Lane) (fl : Lane → Bool) (X : EngineF) :
     EngineF :=
-  { e := { step (liveFl P fl) win X.e with actv := actvF P fl X }
+  { e := { step (liveFl P fl) win X.e with actv := actvF P fl X, ts := tsF P fl X.e }
     pkill := if X.e.pst = .cap then false
              else X.pkill || (fl X.e.pl && (decide (X.e.pst = .req) || decide (X.e.pst = .wait))) }
 
@@ -82,8 +88,14 @@ theorem stepF_noflush (P : Program) (win : Engine → Option Lane) (fl : Lane �
       unfold actvF
       rw [hfl l, hk]
       simp
-    show { step (liveFl P fl) win X.e with actv := actvF P fl X } = step P win X.e
-    rw [ha, step_liveFl P win fl X.e hfl]
+    have ht : tsF P fl X.e = tsNext P X.e := by
+      funext l
+      unfold tsF
+      rw [hfl l]
+      rfl
+    show { step (liveFl P fl) win X.e with actv := actvF P fl X, ts := tsF P fl X.e } =
+      step P win X.e
+    rw [ha, ht, step_liveFl P win fl X.e hfl]
     rfl
   · show (if X.e.pst = .cap then false
           else X.pkill || (fl X.e.pl && (decide (X.e.pst = .req) || decide (X.e.pst = .wait))))
