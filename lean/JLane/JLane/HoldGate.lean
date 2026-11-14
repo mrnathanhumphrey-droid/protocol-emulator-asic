@@ -80,7 +80,7 @@ theorem gate_open_at (P2 : Program2) (dly : Lane → Nat) (fw : Engine2 → Word
   have hws := win1H_wc (P2.toP dly) P2 fw hl sched y0
   have hNS : ∀ t, NoStall (win1H (P2.toP dly) P2 fw hl sched y0)
       (run (P2.toP dly) (win1H (P2.toP dly) P2 fw hl sched y0) t y0.x.e) := fun t =>
-    (dstar39 (P2.toP dly) (win1H (P2.toP dly) P2 fw hl sched y0) y0.x.e hW hfull h0 h0ts
+    (dstar39 (P2.toP dly) (win1H (P2.toP dly) P2 fw hl sched y0) y0.x.e hW hfull (fun _ => rfl) hx0.2 h0 h0ts
       hwin hws hd t).1
   have hd29 : ∀ l, (P2.toP dly).live l = true → 29 ≤ (P2.toP dly).dly l := fun l hl' => by
     have := hd l hl'
@@ -201,7 +201,7 @@ theorem dstar39_hold (P2 : Program2) (dly : Lane → Nat) (fw : Engine2 → Word
   intro T
   have hG := gate_open_all P2 dly fw hl sched y0 hx0 hf hW hfull h0 h0ts hh0 hsw hss hd (T + 1)
   have hC := runH_coinc P2 dly fw hl sched y0 hx0 hf hsw hss T (fun m hm => hG m (by omega))
-  have key := dstar39 (P2.toP dly) (win1H (P2.toP dly) P2 fw hl sched y0) y0.x.e hW hfull h0
+  have key := dstar39 (P2.toP dly) (win1H (P2.toP dly) P2 fw hl sched y0) y0.x.e hW hfull (fun _ => rfl) hx0.2 h0
     h0ts (win1H_ready _ P2 fw hl sched y0) (win1H_wc _ P2 fw hl sched y0) hd T
   rw [← hC] at key
   refine ⟨fun hi w hw => key.1 hi w ?_, key.2⟩

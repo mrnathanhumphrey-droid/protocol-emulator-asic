@@ -179,33 +179,68 @@ theorem actvNext_false_of (P : Program) (e : Engine) (l : Lane) (s : Slot)
   · rw [if_pos hw]
   · rw [if_neg hw, if_neg (fun h' => hn ⟨h'.1, h'.2.1⟩), h]
 
+/-- **A wanted lane stays wanted until it is served** (option A included): a capture for
+another lane touches none of `y`'s slots or flags; a retirement of `y` empties its head
+(`DispHeadValid`: it was valid, so the wanted slot was the spare, which becomes the head). -/
 theorem want_step (P : Program) (win : Engine → Option Lane) (y : Lane) (e : Engine)
-    (hw : e.wantFetch y = true) (hn : ¬Hit y e) : (step P win e).wantFetch y = true := by
+    (hS : Struct e) (hw : e.wantFetch y = true) (hn : ¬Hit y e) :
+    (step P win e).wantFetch y = true := by
   unfold Hit at hn
-  rw [Engine.wantFetch_iff] at hw ⊢
   have hn' : ¬(e.pst = .cap ∧ y = e.pl) := fun h => hn ⟨h.1, h.2.symm⟩
-  obtain ⟨s, hs⟩ : ∃ s, e.actv y s = false := by
-    unfold Engine.owed at hw
-    cases h0 : e.actv y false
-    · exact ⟨false, h0⟩
-    · cases h1 : e.actv y true
-      · exact ⟨true, h1⟩
-      · rw [h0, h1] at hw
-        exact absurd hw (by decide)
-  exact owed_pos_of (step P win e) y s (actvNext_false_of P e y s hn' hs)
+  have hnpf : ∀ s, npfNext P e y s = e.npf y s := fun s => by
+    unfold npfNext
+    rw [if_neg (fun h' => hn' ⟨h'.1, h'.2.1⟩)]
+  have hcap : ∀ s, ¬(e.pst = .cap ∧ y = e.pl ∧ s = e.pslot) := fun s h' => hn' ⟨h'.1, h'.2.1⟩
+  show (!actvNext P e y (selNext P e y) ||
+        (!actvNext P e y (!selNext P e y) && !npfNext P e y (selNext P e y))) = true
+  by_cases hr : e.st = .wb ∧ y = e.cur ∧ P.ret e.now e.cur = true
+  · -- y retires: its head was valid, so the spare was the empty slot; it becomes the head
+    have hv : e.headValid y = true := by
+      have := hS.2 (by rw [hr.1]; decide)
+      rw [← hr.2.1] at this
+      exact this
+    have hsel : selNext P e y = !e.sel y := by
+      unfold selNext
+      rw [if_pos hr]
+    have hsp : e.actv y (!e.sel y) = false := by
+      unfold Engine.wantFetch Engine.headValid Engine.spareValid at hw
+      unfold Engine.headValid at hv
+      rw [hv] at hw
+      cases h1 : e.actv y (!e.sel y)
+      · rfl
+      · rw [h1] at hw
+        simp at hw
+    have hnew : actvNext P e y (!e.sel y) = false := by
+      unfold actvNext
+      rw [if_neg (fun h' => by
+        have := h'.2.2.1
+        rw [← hr.2.1] at this
+        cases hs : e.sel y <;> rw [hs] at this <;> cases this),
+        if_neg (hcap _), hsp]
+    rw [hsel, hnew]
+    rfl
+  · have hsel : selNext P e y = e.sel y := by
+      unfold selNext
+      rw [if_neg hr]
+    have hact : ∀ s, actvNext P e y s = e.actv y s := fun s => by
+      unfold actvNext
+      rw [if_neg (fun h' => hr ⟨h'.1, h'.2.1, h'.2.2.2⟩), if_neg (hcap s)]
+    rw [hsel, hact, hact, hnpf]
+    exact hw
 
 /-! ### The bound -/
 
 theorem port_wait (P : Program) (win : Engine → Option Lane) (y : Lane)
     (hy : P.live y = true) :
-    ∀ (n : Nat) (e : Engine), e.wantFetch y = true →
+    ∀ (n : Nat) (e : Engine), Struct e → e.wantFetch y = true →
       (∀ i, i < n → ¬Hit y (run P win i e)) →
       phi y (portOf (run P win n e)) + n ≤ phi y (portOf e) + chargeSum P win y n e
-  | 0, e, _, _ => by simp [run, chargeSum]
-  | n + 1, e, hw, hnh => by
+  | 0, e, _, _, _ => by simp [run, chargeSum]
+  | n + 1, e, hS, hw, hnh => by
     have h0 : ¬Hit y e := hnh 0 (Nat.succ_pos n)
     have hstep := phi_step P win y e hy hw h0
-    have ih := port_wait P win y hy n (step P win e) (want_step P win y e hw h0)
+    have ih := port_wait P win y hy n (step P win e) (struct_step P win e hS)
+      (want_step P win y e hS hw h0)
       (fun i hi => hnh (i + 1) (Nat.succ_lt_succ hi))
     show phi y (portOf (run P win n (step P win e))) + (n + 1)
       ≤ phi y (portOf e) + (charge P y e + chargeSum P win y n (step P win e))
@@ -215,10 +250,10 @@ theorem port_wait (P : Program) (win : Engine → Option Lane) (y : Lane)
 `(K+1)·L_REFILL − 2 = 22` cycles plus `L_REFILL` per branch-1 refill issued for
 another lane in the window. -/
 theorem port_wait_bound (P : Program) (win : Engine → Option Lane) (y : Lane)
-    (hy : P.live y = true) (n : Nat) (e : Engine) (hw : e.wantFetch y = true)
+    (hy : P.live y = true) (n : Nat) (e : Engine) (hS : Struct e) (hw : e.wantFetch y = true)
     (hnh : ∀ i, i < n → ¬Hit y (run P win i e)) :
     n ≤ 22 + chargeSum P win y n e := by
-  have h := port_wait P win y hy n e hw hnh
+  have h := port_wait P win y hy n e hS hw hnh
   have h2 := phi_le y (portOf e)
   omega
 

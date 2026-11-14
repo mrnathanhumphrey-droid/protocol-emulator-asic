@@ -35,6 +35,11 @@ inductive Op where
   clockless lane. Held on every dispatch until its last bit; which dispatch is the last is
   the program input `Program2.stl` (Wilson 11-12: free inputs, every pattern). -/
   | st
+  /-- Branch brick (stage 3): a timed branch, BRANCH_BIT / CMP_BRANCH / LOOP (`pre_cls[C_BR]`,
+  `pe_engine.v` l.1218). Its writeback adds its wait `W` (`a_dly_wb = br_wait`, l.1997), so
+  the word's `dly` is `W`; it always retires (l.3982–3988); and nothing is prefetched past it
+  (option A, `want_fetch` l.2800). Which way it goes is in the fetched stream `fw`. -/
+  | br
   deriving DecidableEq, Repr
 
 /-- `l_ckph`: `CK_LOW`, `CK_HIGH`, `CK_COLL`. -/
@@ -65,6 +70,9 @@ structure Program2 where
   /-- `usb_stuff` (l.2081): this dispatch is a USB stuff slot (held, counts no bit). Free input.
   Default: never. -/
   stuff : Nat → Lane → Bool := fun _ _ => false
+  /-- The prefetch priority pick, as `Program.pick` (`none`: the shipped `winner_q`; `some f`:
+  the batch's `pf_q`, `f` the EDF choice read on the RTL engine). -/
+  pick : Option (Engine → Option Lane) := none
 
 /-- The v2 engine: v1 registers plus slot words and the clocked-phase registers. -/
 structure Engine2 where
@@ -83,6 +91,7 @@ else `!spare_valid`. (`SPL = 2`.) -/
 def wantFetch (x : Engine2) (l : Lane) : Bool :=
   if x.e.headValid l = false then true
   else if (x.head l).op = .chainRe then false
+  else if (x.head l).op = .br then false
   else !x.e.spareValid l
 
 /-- `ck_hold` (l.2200): a clocked action that does not retire on this dispatch, or a
@@ -151,7 +160,8 @@ theorem portNextW_congr (P : Program) (e : Engine) (w1 w2 : Lane → Bool)
   rw [this]
 
 /-- v1 view of a v2 program (`dly` is only read through words in v2). -/
-def Program2.toP (P : Program2) (dly : Lane → Nat) : Program := { live := P.live, dly := dly }
+def Program2.toP (P : Program2) (dly : Lane → Nat) : Program :=
+  { live := P.live, dly := dly, pick := P.pick }
 
 namespace Engine2
 
@@ -192,6 +202,42 @@ def ckbitNext (x : Engine2) (P : Program2) (l : Lane) : Nat :=
 
 end Engine2
 
+/-- The no-prefetch flag at a capture: the fetched word is a branch (option A,
+`l_cls[..][C_BR]`, l.2800). -/
+def npf2 (fw : Engine2 → Word) (x : Engine2) (l : Lane) (s : Slot) : Bool :=
+  if x.e.pst = .cap ∧ l = x.e.pl ∧ s = x.e.pslot then decide ((fw x).op = .br) else x.e.npf l s
+
+/-- `npf2` is the V4b flag update of any program whose `fnpf` reads the fetched word. -/
+theorem npf2_eq (fw : Engine2 → Word) (x : Engine2) (Q : Program)
+    (hq : Q.fnpf x.e = decide ((fw x).op = .br)) : npf2 fw x = npfNext Q x.e := by
+  funext l s
+  unfold npf2 npfNext
+  split
+  · exact hq.symm
+  · rfl
+
+/-- The v2 branch-1 target register's next value: the winner (shipped), or the batch's pick
+filtered by its candidate test on the v2 engine (no ARMs here: released = `ts ≤ now`). -/
+def winq2 (P : Program2) (w : Option Lane) (x : Engine2) : Option Lane :=
+  match P.pick with
+  | none   => w
+  | some f => pfPick (P.toP (fun _ => 0)) f x.e
+
+/-- The filtered pick reads its program only through `live`. -/
+theorem pfPick_live (Q Q' : Program) (h : Q.live = Q'.live) (f : Engine → Option Lane)
+    (e : Engine) : pfPick Q f e = pfPick Q' f e := by
+  unfold pfPick
+  rw [h]
+
+/-- A V4b program with the same liveness and pick registers what the v2 engine does. -/
+theorem winq2_eq (P : Program2) (Q : Program) (hl : Q.live = P.live) (hpk : Q.pick = P.pick)
+    (w : Option Lane) (x : Engine2) : winqNext Q (fun _ => w) x.e = winq2 P w x := by
+  unfold winqNext winq2
+  rw [hpk]
+  cases P.pick with
+  | none => rfl
+  | some f => exact pfPick_live Q (P.toP (fun _ => 0)) hl f x.e
+
 /-- One v2 clock cycle. `w` is this cycle's EDF winner (the v1 step reads its
 scheduler only at the current state, see `step_win_congr`). -/
 def step2 (P : Program2) (fw : Engine2 → Word) (w : Option Lane) (x : Engine2) : Engine2 :=
@@ -203,8 +249,9 @@ def step2 (P : Program2) (fw : Engine2 → Word) (w : Option Lane) (x : Engine2)
            sel := x.selNext P
            ts := x.tsNext P
            pst := p.pst, pl := p.pl, prr := p.prr, pbr1 := p.pbr1, pslot := p.pslot
-           winq := w
-           st := d.st, cur := d.cur }
+           winq := winq2 P w x
+           st := d.st, cur := d.cur
+           npf := npf2 fw x }
     word := x.wordNext fw
     ckph := x.ckphNext P
     ckbit := x.ckbitNext P }
@@ -219,8 +266,10 @@ theorem step_win_congr (P : Program) (win : Engine → Option Lane) (e : Engine)
 def PlainW (dly : Lane → Nat) (l : Lane) (w : Word) : Prop :=
   (w.op = .ord ∨ w.op = .loopRe) ∧ w.dly = dly l
 
-/-- Every slot holds a plain word. -/
-def Plain (dly : Lane → Nat) (x : Engine2) : Prop := ∀ l s, PlainW dly l (x.word l s)
+/-- Every slot holds a plain word, and the model's no-prefetch flags are clear (plain words
+allow a prefetch past them). -/
+def Plain (dly : Lane → Nat) (x : Engine2) : Prop :=
+  (∀ l s, PlainW dly l (x.word l s)) ∧ x.e.NoNpf
 
 namespace Engine2
 
@@ -228,10 +277,14 @@ theorem op_not_chain {dly : Lane → Nat} {l : Lane} {w : Word} (h : PlainW dly 
     w.op ≠ .chainRe := by
   rcases h.1 with h1 | h1 <;> rw [h1] <;> decide
 
+theorem op_not_br {dly : Lane → Nat} {l : Lane} {w : Word} (h : PlainW dly l w) :
+    w.op ≠ .br := by
+  rcases h.1 with h1 | h1 <;> rw [h1] <;> decide
+
 theorem hold_plain (P : Program2) (dly : Lane → Nat) (x : Engine2) (h : Plain dly x) :
     x.hold P = false := by
   unfold hold
-  rcases (h x.e.cur (x.e.sel x.e.cur)).1 with h1 | h1 <;>
+  rcases (h.1 x.e.cur (x.e.sel x.e.cur)).1 with h1 | h1 <;>
     · show (match (x.head x.e.cur).op with
             | .clk false n => !(decide (x.ckph x.e.cur = .high) && decide (x.ckbit x.e.cur = n))
             | .clk true _  => !decide (x.ckph x.e.cur = .coll)
@@ -242,28 +295,30 @@ theorem hold_plain (P : Program2) (dly : Lane → Nat) (x : Engine2) (h : Plain 
 
 theorem isClk_plain (dly : Lane → Nat) (x : Engine2) (h : Plain dly x) : x.isClk = false := by
   unfold isClk head
-  rcases (h x.e.cur (x.e.sel x.e.cur)).1 with h1 | h1 <;> rw [h1]
+  rcases (h.1 x.e.cur (x.e.sel x.e.cur)).1 with h1 | h1 <;> rw [h1]
 
 theorem retire_plain (P : Program2) (dly : Lane → Nat) (x : Engine2) (h : Plain dly x) :
     x.retire P = true := by
   unfold retire
   rw [hold_plain P dly x h]
   unfold head
-  rcases (h x.e.cur (x.e.sel x.e.cur)).1 with h1 | h1 <;> rw [h1] <;> rfl
+  rcases (h.1 x.e.cur (x.e.sel x.e.cur)).1 with h1 | h1 <;> rw [h1] <;> rfl
 
 theorem wbDly_plain (P : Program2) (dly : Lane → Nat) (x : Engine2) (h : Plain dly x) :
     x.wbDly P = dly x.e.cur := by
   unfold wbDly
   rw [if_neg (fun h' => by rw [isClk_plain dly x h] at h'; exact Bool.noConfusion h'.1)]
-  exact (h x.e.cur (x.e.sel x.e.cur)).2
+  exact (h.1 x.e.cur (x.e.sel x.e.cur)).2
 
 theorem wantFetch_plain (dly : Lane → Nat) (x : Engine2) (h : Plain dly x) (l : Lane) :
     x.wantFetch l = x.e.wantFetch l := by
   unfold wantFetch Engine.wantFetch
-  have hc : (x.head l).op ≠ .chainRe := op_not_chain (h l (x.e.sel l))
+  have hc : (x.head l).op ≠ .chainRe := op_not_chain (h.1 l (x.e.sel l))
+  have hb : (x.head l).op ≠ .br := op_not_br (h.1 l (x.e.sel l))
+  rw [h.2 l (x.e.sel l)]
   cases hv : x.e.headValid l
   · simp
-  · rw [if_neg (by simp), if_neg hc]
+  · rw [if_neg (by simp), if_neg hc, if_neg hb]
     simp
 
 end Engine2
@@ -274,9 +329,11 @@ abbrev proj (x : Engine2) : Engine := x.e
 /-- **Refinement.** On plain words, one v2 cycle is exactly one v1 cycle with the
 lane delays `dly` and the same winner. -/
 theorem step2_proj (P : Program2) (dly : Lane → Nat) (fw : Engine2 → Word)
-    (w : Option Lane) (x : Engine2) (h : Plain dly x) :
+    (w : Option Lane) (x : Engine2) (h : Plain dly x) (hb : (fw x).op ≠ .br) :
     proj (step2 P fw w x) = step (P.toP dly) (fun _ => w) (proj x) := by
   have hr := Engine2.retire_plain P dly x h
+  have hn : npf2 fw x = npfNext (P.toP dly) x.e :=
+    npf2_eq fw x _ (by simp [Program2.toP, hb])
   have hp : portNextW (P.toP (fun _ => 0)) x.wantFetch x.e = portNext (P.toP dly) x.e := by
     rw [portNextW_congr _ _ _ _ (Engine2.wantFetch_plain dly x h)]
     rfl
@@ -301,9 +358,10 @@ theorem step2_proj (P : Program2) (dly : Lane → Nat) (fw : Engine2 → Word)
           prr := (portNextW (P.toP (fun _ => 0)) x.wantFetch x.e).prr,
           pbr1 := (portNextW (P.toP (fun _ => 0)) x.wantFetch x.e).pbr1,
           pslot := (portNextW (P.toP (fun _ => 0)) x.wantFetch x.e).pslot,
-          winq := w, st := (dispNext (fun _ => w) x.e).st,
-          cur := (dispNext (fun _ => w) x.e).cur } : Engine) = step (P.toP dly) (fun _ => w) x.e
-  rw [hp, ha, hs, ht]
+          winq := winq2 P w x, st := (dispNext (fun _ => w) x.e).st,
+          cur := (dispNext (fun _ => w) x.e).cur,
+          npf := npf2 fw x } : Engine) = step (P.toP dly) (fun _ => w) x.e
+  rw [hp, ha, hs, ht, hn]
   rfl
 
 /-- Plainness is preserved when every fetched word is plain. -/
@@ -311,14 +369,19 @@ theorem plain_step (P : Program2) (dly : Lane → Nat) (fw : Engine2 → Word)
     (w : Option Lane) (x : Engine2) (h : Plain dly x)
     (hf : ∀ y, PlainW dly y.e.pl (fw y)) :
     Plain dly (step2 P fw w x) := by
-  intro l s
-  show PlainW dly l (x.wordNext fw l s)
-  unfold Engine2.wordNext
-  by_cases hc : x.e.pst = .cap ∧ l = x.e.pl ∧ s = x.e.pslot
-  · rw [if_pos hc, hc.2.1]
-    exact hf x
-  · rw [if_neg hc]
-    exact h l s
+  refine ⟨fun l s => ?_, fun l s => ?_⟩
+  · show PlainW dly l (x.wordNext fw l s)
+    unfold Engine2.wordNext
+    by_cases hc : x.e.pst = .cap ∧ l = x.e.pl ∧ s = x.e.pslot
+    · rw [if_pos hc, hc.2.1]
+      exact hf x
+    · rw [if_neg hc]
+      exact h.1 l s
+  · show npf2 fw x l s = false
+    unfold npf2
+    split
+    · simp [Engine2.op_not_br (hf x)]
+    · exact h.2 l s
 
 /-! ### Amendment A1 in the model -/
 

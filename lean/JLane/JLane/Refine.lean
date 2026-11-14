@@ -136,6 +136,7 @@ theorem run2_proj (P2 : Program2) (dly : Lane → Nat) (fw : Engine2 → Word)
     rw [step_win_congr (P2.toP dly) (win1 (P2.toP dly) P2 fw sched x0),
       win1_on (P2.toP dly) P2 fw sched x0 hsw hss n]
     exact step2_proj P2 dly fw _ _ (plain_run2 P2 dly fw sched hf n x0 hx0)
+      (Engine2.op_not_br (hf _))
 
 /-- **D\* for the v2 engine on plain programs, d ≥ 39, no external hypotheses.**
 For every plain program stream `fw` and every work-conserving v2 scheduler that picks a
@@ -155,7 +156,7 @@ theorem dstar39_v2 (P2 : Program2) (dly : Lane → Nat) (fw : Engine2 → Word)
   intro T
   have hsw' : ∀ x w, sched x = some w → (P2.toP dly).live w = true ∧ x.e.ts w ≤ x.e.now :=
     hsw
-  have key := dstar39 (P2.toP dly) (win1 (P2.toP dly) P2 fw sched x0) x0.e hW hfull h0 h0ts
+  have key := dstar39 (P2.toP dly) (win1 (P2.toP dly) P2 fw sched x0) x0.e hW hfull (fun _ => rfl) hx0.2 h0 h0ts
     (win1_ready _ P2 fw sched x0) (fun y e _ hy => win1_wc _ P2 fw sched x0 y e hy) hd T
   have hr := run2_proj P2 dly fw sched x0 hx0 hf hsw' hss T
   rw [← hr] at key

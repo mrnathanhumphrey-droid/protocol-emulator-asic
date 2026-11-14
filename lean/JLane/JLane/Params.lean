@@ -72,14 +72,22 @@ abbrev USB_BR1_PER_WINDOW : Nat := 2
 /-- Port cycles the USB lane's branch-1 refills can take from another lane's refill in such a
 window: one `L_REFILL` each (SCAN → REQ → WAIT → CAP, `pe_engine.v` l.2703, read). -/
 abbrev BR1_BUDGET : Nat := USB_BR1_PER_WINDOW * L_REFILL
-/-- Per-action spacing every other lane needs in an image with the USB receive (replaces 42). -/
-abbrev CORESIDENT_USB : Nat := R_USB + PENDING_SLACK + BR1_BUDGET
+/-- CERTIFIED (Wilson 11-14, ruling 2): the response bound the other lanes get with the USB
+program co-resident -- `lane_cert`'s `RespSpan.wb_close_span` evaluation on `test/usbdev.py`,
+written to `proof_constants.json` by `model/gen_cert_constants.py` (never typed there; this pin
+is compared by `gate_lean_build`, its currency by `gate_lane_cert`). It exceeds `R_USB` (17)
+because the FALLTHROUGH flush path raises the USB lane's worst response to 29. -/
+abbrev USB_OTHER_R : Nat := 24
+/-- Per-action spacing every other lane needs in an image with the USB receive:
+`d ≥ R + 25 + B` (`usb_nostall`) at the certified `R`. -/
+abbrev CORESIDENT_USB : Nat := USB_OTHER_R + PENDING_SLACK + BR1_BUDGET
 /-- The co-resident lanes' delay floor from `head_valid_ret` (`D* + B`); implied by
 `CORESIDENT_USB` (`coresident_implies_min_d`). -/
 abbrev CORESIDENT_MIN_D : Nat := DSTAR + BR1_BUDGET
 
 theorem br1_budget_val : BR1_BUDGET = 8 := rfl
-theorem coresident_usb_val : CORESIDENT_USB = 50 := rfl
+theorem usb_other_r_val : USB_OTHER_R = 24 := rfl
+theorem coresident_usb_val : CORESIDENT_USB = 57 := rfl
 theorem coresident_min_d_val : CORESIDENT_MIN_D = 28 := rfl
 theorem coresident_implies_min_d : CORESIDENT_MIN_D ≤ CORESIDENT_USB := by decide
 
@@ -93,5 +101,45 @@ theorem dstar_retire_val : DSTAR_RETIRE = 39 := rfl
 theorem dstar_retire_usb_val : DSTAR_RETIRE_USB = 42 := rfl
 theorem reanFloor_40 : reanFloor 40 = 23 := rfl
 theorem reanFloor_48 : reanFloor 48 = 27 := rfl
+
+/-- The head-valid slack: a pending refill is at most `R + PENDING_SLACK + B` past its release,
+so the head is valid when the next release is strictly later — `R + HEAD_SLACK + B` (the
+`26` of every head-valid condition; `HEAD_SLACK + DSTAR` is condition F's `46`). -/
+abbrev HEAD_SLACK : Nat := PENDING_SLACK + 1
+
+theorem head_slack_val : HEAD_SLACK = 26 := rfl
+
+/-- The priority lane's response with an on-time head (`PrioResp.prio_resp`, `L = 0`): it is
+decided at the first idle cycle, within `DISPATCH_CYCLES − 1` (`idle3`), so `Rr = 2`. -/
+abbrev USB_RR_ON_TIME : Nat := DISPATCH_CYCLES - 1
+/-- Wilson 11-14, the corrected next-SOP requirement: `GapRun`'s head-valid condition for the
+first receive word after `arm_sop` (`Z = Rr` on time, `L = 0`) asks `arm_sop`'s gap before the
+SOP plus the half-bit nop's gap to cover `SOP_FETCH_SLACK + B`. -/
+abbrev SOP_FETCH_SLACK : Nat := USB_RR_ON_TIME + HEAD_SLACK
+
+theorem usb_rr_on_time_val : USB_RR_ON_TIME = 2 := rfl
+theorem sop_fetch_slack_val : SOP_FETCH_SLACK = 28 := rfl
+theorem pending_slack_val : PENDING_SLACK = 25 := rfl
+
+/-- The RTL's branch-wait floor (`BR_W_MIN = N_LANES*4 + (N_LANES-1)*3 + 1`, `pe_engine.v`
+l.743): `K · L_REFILL + (K − 1) · DISPATCH_CYCLES + 1`. -/
+abbrev BR_W_MIN : Nat := K * L_REFILL + (K - 1) * DISPATCH_CYCLES + 1
+/-- The lateness of the word after a branch at the floor wait, base part (`OptRun.head_late_optA`,
+condition D with `Rn = R_BASE`, `Wn = BR_W_MIN`): `LD = BR_SUCC_LATE + B`. -/
+abbrev BR_SUCC_LATE : Nat := R_BASE + PENDING_SLACK + 1 - BR_W_MIN
+/-- Wilson 11-13, interim (until the dispatcher fix (b′)): the dispatcher-wide stall bound
+`J = 1 + LD` at `B = BR1_BUDGET`, quoted by `run_branch_check`. -/
+abbrev J_INTERIM_HEAD_LATE_OPTA : Nat := 1 + BR_SUCC_LATE + BR1_BUDGET
+
+theorem br_w_min_val : BR_W_MIN = 33 := rfl
+theorem br_succ_late_val : BR_SUCC_LATE = 7 := rfl
+theorem j_interim_val : J_INTERIM_HEAD_LATE_OPTA = 16 := rfl
+
+/-- FALLTHROUGH (F5, `FlushLate.flush_head_late`): a flushed lane's head is valid by its release
+plus this plus `B` -- the port's `L_REFILL - 1` cycles back to a clean state, the one-pass window
+`23 + B` of `restart_hit`, less the cycle from the flush to the release. -/
+abbrev FLUSH_REFILL_LATE : Nat := (L_REFILL - 1) + 23 - 1
+
+theorem flush_refill_late_val : FLUSH_REFILL_LATE = 25 := rfl
 
 end JLane

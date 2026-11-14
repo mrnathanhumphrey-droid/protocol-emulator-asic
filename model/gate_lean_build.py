@@ -42,7 +42,28 @@ KEY = ("dstar", "dstar29", "dstar39", "dstar39_v2", "dstar39_st", "dstar39_hold"
        "run2_proj_st", "holdCycles_meets",
        "lemmaA_usb", "wb_bound_usb", "dstar_usb", "dstar_usb_rean", "dstar_usb_st",
        "retSpaced2", "retSpaced_of_pairs", "dstar_usb_pairs", "usb_wins", "usb_j2",
-       "usb_nostall", "usb_j2_nb", "usb_br1_window")
+       "usb_nostall", "usb_j2_nb", "usb_br1_window",
+       "npf_unlock", "pending_bound_optA", "head_valid_optA", "head_late_optA",
+       "step2_proj_br", "run2_proj_br", "brP_wn", "head_late_br",
+       "pending_bound_gap", "head_late_gap",
+       "step3_proj", "arm_step", "run3_proj", "arm_release", "head_late_arm",
+       "lemmaA_s", "wb_bound_win", "cnt_sparse_g", "wb_close", "j_interim_D",
+       "hsep_words", "hrel_words", "wb_close_arm", "cnt_wb_shift", "wb_close_span",
+       "prio_resp", "ts_chain", "rd_eq", "stall_free_bprime", "lemmaA_b",
+       "hpri_b", "prio_resp_edf", "br1_empty", "head_valid_no_ret",
+       "halfEdge_ok", "arm_release_half",
+       "runH_coinc_st", "dstar39_hold_st",
+       "stepF_noflush", "stepF_fill", "stepF_kill_set",
+       "struct_stepF", "killInv_step", "runF_seg",
+       "invF_step", "headFirst_stepF", "restart_hit", "flush_head_refill", "lemmaA_n",
+       "relT_step", "step3T_proj", "invT_step", "run3T_proj", "arm_release_T", "disarm_noDec",
+       "wb_bound_win_n", "lemmaA_nF", "wb_bound_winF",
+       "hit_head", "head_of_hits", "flush_head_late",
+       "invF_run3T", "wb_bound_T", "flush_head_late_T",
+       "winq_step", "liveFl_noflush",
+       "winq2_eq", "winq3_view", "winqT_view", "relT_le_of_ready",
+       "branch_ld_D", "branch_j_interim",
+       "br1_once", "br1_count")
 #: proof_constants.load() key -> the Lean expression that must evaluate to it (SPEC: the map)
 CONSTS = {
     "lemmaA_window": "LEMMA_A_WINDOW", "R_base": "R_BASE", "dispatch_cycles": "DISPATCH_CYCLES",
@@ -53,6 +74,13 @@ CONSTS = {
     "n_lanes": "K", "l_refill": "L_REFILL", "usb_br1_per_window": "USB_BR1_PER_WINDOW",
     "dstar": "DSTAR", "br1_budget": "BR1_BUDGET", "coresident_usb": "CORESIDENT_USB",
     "coresident_min_d": "CORESIDENT_MIN_D",
+    "head_slack": "HEAD_SLACK", "usb_rr_on_time": "USB_RR_ON_TIME",
+    "sop_fetch_slack": "SOP_FETCH_SLACK",
+    "br_w_min": "BR_W_MIN", "br_succ_late": "BR_SUCC_LATE",
+    "j_interim_head_late_optA": "J_INTERIM_HEAD_LATE_OPTA",
+    "flush_refill_late": "FLUSH_REFILL_LATE",
+    "usb_other_R": "USB_OTHER_R",
+    "branch_j_wmin": "BRANCH_J_WMIN",
 }
 PLANT_THM = "planted_by_gate"
 #: gate_mutant_kills' scratch-mutant registry (ruling AC2): this gate is the killer

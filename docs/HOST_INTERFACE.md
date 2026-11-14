@@ -355,10 +355,12 @@ The engine starts only on a program load: there is no start path at power-on.
       `usb_wins` / `usb_j2`). Otherwise the USB receive sample can wait more
       than 2 cycles and bytes decode wrongly.
     - **The co-resident spacing:** every other lane's per-action spacing must
-      be **≥ 50 cycles**, on every word reachable from it (`coresident_usb`;
-      theorem `usb_nostall`). So a protocol lane that needs actions faster than
-      50 cycles (fast SPI, for instance) **cannot share an image with the USB
-      receive**. The derivation is `host/poset/POSET_SPEC.md`'s generated
+      be **≥ 57 cycles**, on every word reachable from it (`coresident_usb`;
+      theorem `usb_nostall`, at the response bound the certificate gives the
+      other lanes with the USB program co-resident -- generated, Wilson 11-14;
+      it was 50 before the FALLTHROUGH flush path). So a protocol lane that needs
+      actions faster than 57 cycles (fast SPI, for instance) **cannot share an
+      image with the USB receive**. The derivation is `host/poset/POSET_SPEC.md`'s generated
       "Target rule" block.
     - Both numbers come from `lean/JLane/proof_constants.json`, never typed
       into a checker. A raw-loaded image bypasses the checks, and one that

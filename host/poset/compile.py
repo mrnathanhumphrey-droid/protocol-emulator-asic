@@ -219,9 +219,31 @@ def target_check(img):
     bad += [] if MUT == "M_PC_USB_NOCHECK" else I.usb_problems(img)
     if bad:
         raise Refused("P5 target: %s" % "; ".join(bad))
-    return used, ("checked: every co-resident lane >= %d (R_usb %d + pending_slack %d + "
-                  "br1_budget %d; usb_nostall)" % (k["coresident_usb"], k["R_usb"],
+    return used, ("checked: every co-resident lane >= %d (R %d certified + pending_slack %d + "
+                  "br1_budget %d; usb_nostall)" % (k["coresident_usb"], k["usb_other_R"],
                                                    k["pending_slack"], k["br1_budget"]))
+
+
+def branch_budget_line(img):
+    """The branch-1 budget B, certified per image (Wilson 11-14, option 1: model/branch_budget).
+    No finite B is NOT a refusal: the image is A2-UNCERTIFIED, and the message names the
+    diagnostic (branch waits below proof_constants.branch_w_diag) when that is the cause."""
+    import branch_budget as BB
+    blanes = sorted({ln for ln in I.lane_programs(img)
+                     for _w, x in PC.lane_words(img, ln, I) if x["op"] in I.BRANCH_OPS})
+    if not blanes:
+        return "not applicable (no branch lane)"
+    r = BB.image_budget(img)
+    if r["B"] is not None:
+        return "certified B = %d (branch lanes %s)" % (r["B"], ",".join(map(str, blanes)))
+    need = PC.branch_w_diag(len(blanes))
+    short = sorted((I.branch_wait(x), ln) for ln in blanes for _w, x in PC.lane_words(img, ln, I)
+                   if x["op"] in I.BRANCH_OPS and I.branch_wait(x) < need)
+    diag = ("branch waits below %d (proof_constants.branch_w_diag, k = %d branch lanes): %s"
+            % (need, len(blanes), ", ".join("lane %d W %d" % (ln, w) for w, ln in short[:6]))
+            if short else ("branch waits all >= %d (k = %d): the late words that feed B are on "
+                           "other lanes -- see the reason" % (need, len(blanes))))
+    return "A2-UNCERTIFIED: no finite branch-1 budget (%s); diagnostic: %s" % (r["reason"], diag)
 
 
 def compile_spec(text, seed=1, hz=None):
@@ -249,6 +271,7 @@ def compile_spec(text, seed=1, hz=None):
                % (used, N_WORDS, usb))
     return {"image": img, "words": used, "width": width, "checkset": cs, "log": log,
             "cert": {"usb_coresident": usb,
+                     "branch_budget": branch_budget_line(img),
                      "A2": "OWED (lanes not exposed by the delegated lowering)",
                      "bounds": "UNCERTIFIED (emulate, sniff, re-run the golden: not wired)",
                      "J_floor": "OWED (needs pe_asm.compute_j on the lowered lanes)"}}

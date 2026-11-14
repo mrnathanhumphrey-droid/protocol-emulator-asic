@@ -35,12 +35,24 @@ def load(path=PATH):
     # SCAN -> REQ -> WAIT -> CAP, pe_engine.v l.2703).
     k["dstar"] = k["n_lanes"] * k["l_refill"]
     k["br1_budget"] = k["usb_br1_per_window"] * k["l_refill"]
-    k["coresident_usb"] = k["R_usb"] + k["pending_slack"] + k["br1_budget"]
+    # Wilson 11-14: the co-resident spacing is what the certificate requires -- the response
+    # bound the other lanes get with the USB program co-resident (usb_other_R, CERTIFIED: written
+    # by model/gen_cert_constants.py from lane_cert on test/usbdev.py, checked current by
+    # gate_lane_cert) + the pending slack + the branch-1 budget (usb_nostall's d >= R + 25 + B)
+    k["coresident_usb"] = k["usb_other_R"] + k["pending_slack"] + k["br1_budget"]
     k["coresident_min_d"] = k["dstar"] + k["br1_budget"]
     # The head-valid slack (Params.HEAD_SLACK): a pending refill is at most R + pending_slack + B
     # past its release, so a head is valid when the next release is strictly later -- the 26 of
     # every head-valid condition (R + 26 + B); head_slack + dstar is condition F's 46.
     k["head_slack"] = k["pending_slack"] + 1
+    # PrioResp.prio_resp with an on-time head: decided at the first idle cycle, within
+    # dispatch_cycles - 1 (idle3) -- the USB lane's response Rr = 2 (Params.USB_RR_ON_TIME)
+    k["usb_rr_on_time"] = k["dispatch_cycles"] - 1
+    # Wilson 11-14, the corrected next-SOP requirement (Params.SOP_FETCH_SLACK): the first receive
+    # word after arm_sop is on time iff arm_sop's gap before the SOP + the half-bit nop's gap
+    # >= sop_fetch_slack + B (GapRun HN with Z = Rr). lane_cert.next_sop_fetch_deadline turns it
+    # into the arm_sop retirement deadline after the EOP.
+    k["sop_fetch_slack"] = k["usb_rr_on_time"] + k["head_slack"]
     # The RTL's branch-wait floor, BR_W_MIN = N_LANES*4 + (N_LANES-1)*3 + 1 (pe_engine.v l.743,
     # read; pe_isa.BR_W_MIN mirrors it), from the primitives.
     k["br_w_min"] = (k["n_lanes"] * k["l_refill"] + (k["n_lanes"] - 1) * k["dispatch_cycles"]
@@ -52,6 +64,11 @@ def load(path=PATH):
     # lateness is a dispatcher-wide stall, J = 1 + LD at B = br1_budget (OptRun.lean
     # j_interim_D). Quoted by agent 1's run_branch_check.
     k["j_interim_head_late_optA"] = 1 + k["br_succ_late"] + k["br1_budget"]
+    # FlushLate.flush_head_late: a flushed lane's head is valid by release + this + B (the port's
+    # l_refill - 1 cycles back to clean, restart_hit's one-pass window 23 + B, less flush -> release)
+    k["flush_refill_late"] = (k["l_refill"] - 1) + 23 - 1
+    # the A2 export at the RTL floor and the USB budget (OptRun.branch_j_interim: = the interim J)
+    k["branch_j_wmin"] = 1 + max(k["R_base"] + k["head_slack"] + k["br1_budget"] - k["br_w_min"], 0)
     if k["coresident_usb"] < k["coresident_min_d"]:
         raise ValueError("proof_constants: coresident_usb %d no longer implies the co-resident "
                          "delay floor coresident_min_d %d (head_valid_ret's D* + B)"
@@ -85,7 +102,45 @@ def usb_receive_live(progs, I=None):
 def spacing_of(x, I=None):
     """an action's dispatch spacing: a branch's wait W, else its delay (0 = none, skipped)"""
     I = I or _isa()
-    return I.branch_wait(x) if x["op"] in I.BRANCH_OPS else x["delay"]
+    if x["op"] in I.BRANCH_OPS:
+        return I.branch_wait(x)
+    if x["op"] == I.OP_SHIFTI:
+        # SHIFTI's delay field carries immediate bits above its low 8: the RTL reads only those
+        # (a_dly = cur_act[LOWX+BQW+BPW +: 8] for C_SHI, pe_engine.v l.1892; pe_isa.act_shifti)
+        return x["delay"] & 0xFF
+    return x["delay"]
+
+
+# ---- A2 exports (agent 1, 11-14), under (b'): functions, never typed numbers ------------------
+def branch_ld(B, W, k=None):
+    """OptRun.BRANCH_LD: the word after a branch of wait W is at most this late past its release
+    (head_late_optA, condition D at R_base; branch_ld_D). B is the branch-1 budget of the image:
+    it must be CERTIFIED for that image (head_late_optA's hB) -- no closed form exists from the
+    branch waits alone below W = 31 + 4k for k branch lanes (agent 2, 11-14)."""
+    k = k or load()
+    return max(k["R_base"] + k["head_slack"] + B - W, 0)
+
+
+def branch_j(B, W, k=None):
+    """OptRun.BRANCH_J: the dispatch jitter of a branch lane's post-branch word under (b'),
+    1 + branch_ld -- that lane's own (stall_free_bprime: no global stall)."""
+    return 1 + branch_ld(B, W, k)
+
+
+def nonbranch_dmin(B, k=None):
+    """OptRun.NONBRANCH_DMIN: a lane with no branch word has J = 1 (head valid at release,
+    head_valid_optA) at per-action spacing >= D* + B -- not D* alone when B > 0."""
+    k = k or load()
+    return k["dstar"] + B
+
+
+def branch_w_diag(nbranch, k=None):
+    """Wilson 11-14: a DIAGNOSTIC, not a rule -- the branch wait at or above which k branch lanes'
+    branch-1 budget converges from the waits alone (one refill per lane per 23 + B window, then
+    B = l_refill x k): 2W >= R_base + head_slack + 22 + 2 l_refill k, i.e. W >= 31 + 4k today.
+    Named in the compiler's message when an image's per-image certificate finds no finite B."""
+    k = k or load()
+    return (k["R_base"] + k["head_slack"] + 22 + 2 * k["l_refill"] * nbranch + 1) // 2
 
 
 def lane_words(img, lane, I=None):
@@ -108,16 +163,34 @@ def lane_words(img, lane, I=None):
         if x["op"] == I.OP_REARM:
             continue                      # looping: back to the base (seen); chaining: parks
         todo.append(w + 1)
+        if arm_is_ft(x, I):
+            todo.append(w + 2)            # a FALLTHROUGH ARM's edge takes PC+2
         if x["op"] in I.BRANCH_OPS:
             todo.append(I.branch_target(x))
     return sorted(out, key=lambda p: p[0])
+
+
+def arm_is_ft(x, I=None):
+    """agent 1's FALLTHROUGH ARM (batch 9c0df0c; ArmFT.lean): ARM `mod[1]` (pe_isa.ARM_MOD_FT).
+    Its timeout continues at PC+1, its edge flushes the lane and continues at PC+2. A timed ARM
+    WITHOUT the bit still halts the lane (agent 1, 11-14). An ISA with no ARM_MOD_FT has none."""
+    I = I or _isa()
+    bit = getattr(I, "ARM_MOD_FT", None)
+    return x["op"] == I.OP_ARM and bit is not None and bool(x["mod"] & bit)
+
+
+def ft_rule(I=None):
+    I = I or _isa()
+    if getattr(I, "ARM_MOD_FT", None) is not None:
+        return "read: ARM mod[1] (pe_isa.ARM_MOD_FT)"
+    return "none: this ISA has no FALLTHROUGH bit"
 
 
 def usb_coresident_problems(img, k=None):
     """[problem] for an image that turns on the USB receive and has another lane with a
     positive per-action spacing below coresident_usb (Wilson 11-13, revised no-stall ruling:
     UsbNoStall.lean usb_nostall, hypothesis `CORESIDENT_USB <= P.dly l` for every other live
-    lane; coresident_usb = R_usb + pending_slack + br1_budget, which also implies the delay
+    lane; coresident_usb = usb_other_R + pending_slack + br1_budget, which also implies the delay
     floor coresident_min_d). Every word reachable from each lane is checked (lane_words).
     THE ONE CHECK: the compiler and gate_admissible_images both call this."""
     I = _isa()
@@ -133,11 +206,12 @@ def usb_coresident_problems(img, k=None):
             s = spacing_of(x, I)
             if 0 < s < lim:
                 out.append("lane %d word %d: spacing %d < %d -- in an image using the USB "
-                           "receive, every other lane's per-action spacing must be >= R_usb + "
-                           "pending_slack + br1_budget = %d + %d + %d (usb_nostall). A lane that "
-                           "needs actions faster than %d cycles (fast SPI, for instance) cannot "
-                           "share an image with the USB receive"
-                           % (ln, w, s, lim, k["R_usb"], k["pending_slack"], k["br1_budget"], lim))
+                           "receive, every other lane's per-action spacing must be >= R + "
+                           "pending_slack + br1_budget = %d + %d + %d (usb_nostall; R certified by "
+                           "lane_cert on the USB program). A lane that needs actions faster than "
+                           "%d cycles (fast SPI, for instance) cannot share an image with the USB "
+                           "receive" % (ln, w, s, lim, k["usb_other_R"], k["pending_slack"],
+                                        k["br1_budget"], lim))
     return out
 
 

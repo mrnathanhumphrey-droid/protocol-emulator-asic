@@ -88,11 +88,16 @@ see.
 - *Depends on it:* the pending-address compare and the hardware commit
   (`src/project.v`), `test/run_usbaddr.py` (M7, M10, M10b: lost ZLP, lost ACK).
 
-**FW-7 — Descriptor `bmAttributes` = `0x80`.** Bus-powered, **no remote
-wakeup**: the chip has no remote-wakeup signalling, so it must not advertise
-it (`0xA0` would).
+**FW-7 — Descriptor `bmAttributes` = `0xC0`.** **Self-powered**, **no remote
+wakeup** (Wilson 11-14): the device draws no power from VBUS (the board powers
+itself; VBUS is left unconnected), and the chip has no remote-wakeup signalling,
+so it must not advertise it (`0xE0` would). Was `0x80` (bus-powered) per step 7a
+ruling Q8 (11-09), which removed remote wakeup from `0xA0`.
 - *Depends on it:* nothing on chip; the host-side model `usb_model.py` carries
-  the same value (step 7a ruling Q8).
+  the same value.
+- ⚠ Known gap (Wilson 11-14): with no VBUS sense, a powered board pulls D− up
+  through 1.5 kΩ into an unpowered host; harmless for bring-up, but unplug when
+  the computer is off.
 
 **FW-8 — The chip's clock for USB.** USB low speed needs the chip clock within
 <!--gen:fw_usb_osc-->**±1.25 %** of nominal (at 60 MHz)<!--/gen-->,

@@ -68,7 +68,7 @@ def PairCond (P2 : Program2) (fw : Engine2 → Word) (sched : Engine2 → Option
 theorem retire_frag (P2 : Program2) (dly : Lane → Nat) (x : Engine2) (h : StFrag dly x)
     (hne : (x.head x.e.cur).op ≠ .st) : x.retire P2 = true := by
   have hw : (x.head x.e.cur).op = .ord ∨ (x.head x.e.cur).op = .loopRe ∨
-      (x.head x.e.cur).op = .st := (h x.e.cur (x.e.sel x.e.cur)).1
+      (x.head x.e.cur).op = .st := (h.1 x.e.cur (x.e.sel x.e.cur)).1
   unfold Engine2.retire Engine2.hold
   rcases hw with h1 | h1 | h1
   · rw [h1]

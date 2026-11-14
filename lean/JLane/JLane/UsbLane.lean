@@ -305,7 +305,8 @@ theorem head_valid_ret (P : Program) (win : Engine → Option Lane) (y : Lane)
     (e0 : Engine) (d R B T Dr : Nat) (hW : Wf e0)
     (hfull : ∀ l s, P.live l = true → e0.actv l s = true)
     (hy : P.live y = true) (hdly : P.dly y = d) (hd : DSTAR + B ≤ d)
-    (hret : RetSpaced P win e0 y Dr) (hlat : R + 25 + B < Dr + d)
+    (hnp : ∀ t, (run P win t e0).NoNpf)
+    (hret : RetSpaced P win e0 y Dr) (hlat : R + PENDING_SLACK + B < Dr + d)
     (hR : ∀ t, t < T → IsWB y (run P win t e0) →
       (run P win t e0).now ≤ (run P win t e0).ts y + R + 2)
     (hB : ∀ a m, a + m ≤ T → m ≤ 23 + B → chargeSum P win y m (run P win a e0) ≤ B)
@@ -319,7 +320,7 @@ theorem head_valid_ret (P : Program) (win : Engine → Option Lane) (y : Lane)
     have hnow := now_run P win t e0
     obtain ⟨w, hwt, hwk, hwb⟩ :=
       cnt_reach P win (IsRet P y) t e0 (cnt P win (IsRet P y) t e0 - 2) (by omega)
-    have hpb := pending_bound P win y e0 d R B T hW hfull hy hdly hd hR hB
+    have hpb := pending_bound P win y e0 d R B T hW hfull hy hdly hd hnp hR hB
       (cnt P win (IsRet P y) t e0 - 2) t w htT hwt hwk hwb (by omega)
     obtain ⟨w2, hw2t, hw2k, hw2b⟩ :=
       cnt_reach P win (IsRet P y) t e0 (cnt P win (IsRet P y) t e0 - 1) (by omega)
@@ -342,6 +343,7 @@ never stalls and never issues a branch-1 refill, when
 * every other live lane has `dly ≥ DSTAR_RETIRE_USB` (42). -/
 theorem dstar_usb (P : Program) (win : Engine → Option Lane) (e0 : Engine) (u : Lane)
     (hW : Wf e0) (hfull : ∀ l s, P.live l = true → e0.actv l s = true)
+    (hfn : ∀ e, P.fnpf e = false) (hn0 : e0.NoNpf)
     (h0 : e0.st = .idle) (h0ts : ∀ l, e0.now ≤ e0.ts l)
     (hwin : ∀ e w, win e = some w → P.live w = true ∧ e.ts w ≤ e.now)
     (hws : ∀ y e, e.st = .idle → Ready P y e → win e ≠ none)
@@ -357,6 +359,7 @@ theorem dstar_usb (P : Program) (win : Engine → Option Lane) (e0 : Engine) (u 
   have hNv : NOWB_MIN = 20 := rfl
   have hXv : DSTAR_RETIRE_USB = 42 := rfl
   have hD : DSTAR = 20 := dstar_val
+  have hPS : PENDING_SLACK = 25 := pending_slack_val
   have hd20 : ∀ l, P.live l = true → 20 ≤ P.dly l := fun l hl => by
     by_cases h : l = u
     · rw [h]
@@ -388,7 +391,7 @@ theorem dstar_usb (P : Program) (win : Engine → Option Lane) (e0 : Engine) (u 
     intro n hn y hy hrdy
     have hdy := hd20 y hy
     exact head_valid_ret P win y e0 (P.dly y) R_USB 0 n DSTAR_RETIRE_USB hW hfull hy rfl
-      (by omega) (hret y hy) (by omega)
+      (by omega) (fun t => nonpf_run P win hfn t e0 hn0) (hret y hy) (by omega)
       (fun t ht hwb => hRof n (fun t ht => (hn t ht).1) y hy t ht hwb)
       (fun a m ham hm => hBof n (fun t ht => (hn t ht).2) y a m ham hm)
       n (Nat.le_refl n) hrdy
@@ -425,11 +428,15 @@ theorem dstar_usb (P : Program) (win : Engine → Option Lane) (e0 : Engine) (u 
               rw [hv] at hinv
               cases hinv
             | succ m =>
-              have hwq : win (run P win m e0) = some w := by
-                have := br1_winq P _ w hb
-                rw [run_succ'] at this
-                exact this
-              have hrdy := (hwin _ w hwq).2
+              -- the branch-1 target was released at m: the winner (shipped rule, `hwin`) or the
+              -- batch's pick (released with an empty head, `winq_step`)
+              have hrel1 : (run P win m e0).ts w ≤ (run P win m e0).now := by
+                have hq := br1_winq P _ w hb
+                rw [run_succ'] at hq
+                rcases winq_step P win (run P win m e0) w hq with ⟨-, hwq⟩ | ⟨-, hts, -⟩
+                · exact (hwin _ w hwq).2
+                · exact hts
+              have hrdy := hrel1
               have hvalid := hHV m (fun t ht => ih t (by omega)) w hlive hrdy
               have hinv' : (step P win (run P win m e0)).headValid w = false := by
                 rw [← run_succ']
@@ -451,7 +458,7 @@ theorem dstar_usb (P : Program) (win : Engine → Option Lane) (e0 : Engine) (u 
               obtain ⟨w', hw'm, hw'k, hw'b⟩ :=
                 cnt_reach P win (IsRet P w) m e0 (cnt P win (IsRet P w) m e0 - 1) (by omega)
               have hpb := pending_bound P win w e0 (P.dly w) R_USB 0 (m + 1) hW hfull hlive rfl
-                (by omega)
+                (by omega) (fun t => nonpf_run P win hfn t e0 hn0)
                 (fun t ht hwb' => hRof (m + 1) (fun t ht => (ih t ht).1) w hlive t ht hwb')
                 (fun a k hak hk => hBof (m + 1) (fun t ht => (ih t ht).2) w a k hak hk)
                 (cnt P win (IsRet P w) m e0 - 1) (m + 1) w' (Nat.le_refl _) (by omega) hw'k hw'b
@@ -480,6 +487,7 @@ taken from the named hypothesis and clock row 1. -/
 theorem dstar_usb_rean (P : Program) (win : Engine → Option Lane) (e0 : Engine) (u : Lane)
     (dbit : Nat)
     (hW : Wf e0) (hfull : ∀ l s, P.live l = true → e0.actv l s = true)
+    (hfn : ∀ e, P.fnpf e = false) (hn0 : e0.NoNpf)
     (h0 : e0.st = .idle) (h0ts : ∀ l, e0.now ≤ e0.ts l)
     (hwin : ∀ e w, win e = some w → P.live w = true ∧ e.ts w ≤ e.now)
     (hws : ∀ y e, e.st = .idle → Ready P y e → win e ≠ none)
@@ -487,7 +495,7 @@ theorem dstar_usb_rean (P : Program) (win : Engine → Option Lane) (e0 : Engine
     (hretu : RetSpaced P win e0 u DSTAR_RETIRE_USB)
     (hd : ∀ l, P.live l = true → l ≠ u → DSTAR_RETIRE_USB ≤ P.dly l) :
     ∀ T, NoStall win (run P win T e0) ∧ NoBr1 P (run P win T e0) :=
-  dstar_usb P win e0 u hW hfull h0 h0ts hwin hws (Nat.le_trans hrow1 hfl) hretu hd
+  dstar_usb P win e0 u hW hfull hfn hn0 h0 h0ts hwin hws (Nat.le_trans hrow1 hfl) hretu hd
 
 /-! ### The v2 engine with self-timed bytes -/
 
@@ -518,7 +526,7 @@ theorem dstar_usb_st (P2 : Program2) (dly : Lane → Nat) (fw : Engine2 → Word
   have hss' : ∀ y x, Ready (stP P2 dly fw sched x0) y x.e → sched x ≠ none :=
     fun y x h => hss y x h
   have key := dstar_usb_rean (stP P2 dly fw sched x0)
-    (win1 (stP P2 dly fw sched x0) P2 fw sched x0) x0.e u dbit hW hfull h0 h0ts
+    (win1 (stP P2 dly fw sched x0) P2 fw sched x0) x0.e u dbit hW hfull (fun _ => rfl) hx0.2 h0 h0ts
     (win1_ready _ P2 fw sched x0) (fun y e _ hy => win1_wc _ P2 fw sched x0 y e hy)
     hfl hrow1 hretu hd T
   have hr := run2_proj_st P2 dly fw sched x0 hx0 hf hsw' hss' T
