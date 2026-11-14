@@ -78,6 +78,13 @@ structure Program where
   ext  : Nat → Lane → Nat := fun _ _ => 0
   ret  : Nat → Lane → Bool := fun _ _ => true
   fnpf : Engine → Bool := fun _ => false
+  /-- The prefetch priority pick (Wilson 11-14 (b′), agent 1's batch 9c0df0c): `none` is the
+  shipped rule -- branch 1 serves the registered dispatch winner (`winner_q`); `some f` is the
+  batch's -- branch 1 serves the registered pick `pf_q`, the EDF-earliest **released lane with
+  an empty head** (`pf_w`, l.1913–1924; `pf_rdy = now_inc & rdy_rel & ~l_actv[hix]`, l.1885).
+  `f` is that choice, abstract (any order); `Step.pfPick` filters it by the candidate test, so
+  the register holds exactly what the RTL's can. -/
+  pick : Option (Engine → Option Lane) := none
 
 namespace Engine
 def headValid (e : Engine) (l : Lane) : Bool := e.actv l (e.sel l)

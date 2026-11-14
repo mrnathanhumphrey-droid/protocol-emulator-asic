@@ -27,9 +27,7 @@ LEAN = os.path.join(ROOT, "lean", "JLane", "JLane")
 
 #: anchor text -> why it is stale and what retires it
 PENDING = {
-    "if (winner_v_q && l_live[winner_q] && !l_actv[hix[winner_q]]) begin":
-        "Step.br1 models the pre-batch branch 1 (winner_q); the batch reads pf_q (l.3264). "
-        "Retired by the pf_q port model (agent 2 item 3, Nate 11-14).",
+    # (retired 11-14: Step.br1's branch-1 anchor now quotes the batch's pf_q line -- item 3)
 }
 
 

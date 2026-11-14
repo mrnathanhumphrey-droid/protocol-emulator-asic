@@ -87,7 +87,7 @@ program `Q` with the same liveness and minimum delays whose retire flag is the v
 and whose extra is the word's delay above the minimum, at this cycle. -/
 theorem step2_proj_st (P : Program2) (Q : Program) (dly : Lane → Nat) (fw : Engine2 → Word)
     (w : Option Lane) (x : Engine2) (h : StFrag dly x)
-    (hl : Q.live = P.live) (hd : Q.dly = dly)
+    (hl : Q.live = P.live) (hpk : Q.pick = none) (hd : Q.dly = dly)
     (hr : Q.ret x.e.now x.e.cur = x.retire P)
     (he : Q.ext x.e.now x.e.cur = (x.head x.e.cur).dly - dly x.e.cur)
     (hq : Q.fnpf x.e = decide ((fw x).op = .br)) :
@@ -126,7 +126,7 @@ theorem step2_proj_st (P : Program2) (Q : Program) (dly : Lane → Nat) (fw : En
           winq := w, st := (dispNext (fun _ => w) x.e).st,
           cur := (dispNext (fun _ => w) x.e).cur,
           npf := npf2 fw x } : Engine) = step Q (fun _ => w) x.e
-  rw [hp, ha, hs, ht, hn]
+  rw [hp, ha, hs, ht, hn, step_pick_none Q _ _ hpk]
   rfl
 
 /-- The fragment is preserved when every fetched word is in it. -/
@@ -187,7 +187,7 @@ theorem run2_proj_st (P2 : Program2) (dly : Lane → Nat) (fw : Engine2 → Word
     rw [step_win_congr (stP P2 dly fw sched x0) (win1 (stP P2 dly fw sched x0) P2 fw sched x0),
       win1_on (stP P2 dly fw sched x0) P2 fw sched x0 hsw hss n]
     refine step2_proj_st P2 (stP P2 dly fw sched x0) dly fw _ _
-      (frag_run2 P2 dly fw sched hf n x0 hx0) rfl rfl ?_ ?_
+      (frag_run2 P2 dly fw sched hf n x0 hx0) rfl rfl rfl ?_ ?_
       (by simp [stP, Engine2.op_not_br_st (hf (run2 P2 fw sched n x0))])
     · show (run2 P2 fw sched ((run2 P2 fw sched n x0).e.now - x0.e.now) x0).retire P2 = _
       rw [hk]

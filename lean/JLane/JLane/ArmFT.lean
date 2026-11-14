@@ -427,7 +427,7 @@ theorem step3T_proj (P : Program2) (Q : Program) (Wn : Nat) (fw : Engine2 → Wo
     (w : Option Lane) (X : EngineT) (h : InvT Wn X)
     (hwv : ∀ v, X.x.e.st = .idle → w = some v →
       X.x.e.ts v ≤ X.x.e.now ∧ (X.armed v = true → X.armT v = true))
-    (hl : Q.live = P.live) (hd : Q.dly = fun _ => 0)
+    (hl : Q.live = P.live) (hpk : Q.pick = none) (hd : Q.dly = fun _ => 0)
     (hr : Q.ret X.x.e.now X.x.e.cur = X.x.retire P)
     (he : Q.ext X.x.e.now X.x.e.cur = ext3T P edge X)
     (hq : Q.fnpf (πT X) = decide ((fw X.x).op = .br)) :
@@ -491,7 +491,11 @@ theorem step3T_proj (P : Program2) (Q : Program) (Wn : Nat) (fw : Engine2 → Wo
            cur := (dispNext (fun _ => X.wd w) X.x.e).cur
            npf := npf2 fw X.x }, (step3T P fw edge w X).pkill⟩ : EngineF) =
     stepF Q (fun _ => X.wd w) X.fl (πF X)
-  rw [hp, ha, hs, ht, hn]
+  have hwq : winqNext Q (fun _ => X.wd w) (πF X).e = X.wd w := by
+    unfold winqNext
+    rw [hpk]
+  unfold stepF
+  rw [hp, ha, hs, ht, hn, hwq]
   rfl
 
 /-- **The invariant is preserved** when every fetched word is in the fragment and a decision
@@ -768,7 +772,7 @@ theorem run3T_proj (P2 : Program2) (Wn : Nat) (fw : Engine2 → Word) (edge : Na
     rw [hw, hfl]
     have hI := invT_run P2 Wn fw edge hedge sched hf hsw n X0 hX0
     refine step3T_proj P2 (armPT P2 fw edge sched X0) Wn fw edge hedge _ _ hI
-      (fun v hi hv => hsw _ v hi hv) rfl rfl ?_ ?_ ?_
+      (fun v hi hv => hsw _ v hi hv) rfl rfl rfl ?_ ?_ ?_
     · show (run3T P2 fw edge sched ((run3T P2 fw edge sched n X0).x.e.now - X0.x.e.now) X0).x.retire
         P2 = _
       rw [hk]

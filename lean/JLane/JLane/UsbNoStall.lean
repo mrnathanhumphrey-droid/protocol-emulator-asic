@@ -278,12 +278,16 @@ theorem ubr1_after_ret (t : Nat) (hHV : ∀ s, s < t → HVat P win e0 s)
     cases hinv
   | succ m =>
     refine ⟨m, rfl, ?_⟩
-    have hwq : win (run P win m e0) = some u := by
-      have := br1_winq P _ u hb
-      rw [run_succ'] at this
-      exact this
+    -- the branch-1 target was released at m: the winner (shipped rule, `hwin`) or the
+    -- batch's pick (released with an empty head, `winq_step`)
+    have hrel1 : (run P win m e0).ts u ≤ (run P win m e0).now := by
+      have hq := br1_winq P _ u hb
+      rw [run_succ'] at hq
+      rcases winq_step P win (run P win m e0) u hq with ⟨-, hwq⟩ | ⟨-, hts, -⟩
+      · exact (hwin _ u hwq).2
+      · exact hts
     exact head_drop_wb P win (run P win m e0) u
-      (hHV m (Nat.lt_succ_self m) u hlive ((hwin _ u hwq).2))
+      (hHV m (Nat.lt_succ_self m) u hlive hrel1)
       (by rw [← run_succ']; exact hinv)
 
 include hfull h0 h0ts hwin hws hdu hd hedf hmargin in
@@ -414,11 +418,15 @@ theorem usb_nostall : ∀ T, NoStall win (run P win T e0) ∧ Br1Only P u (run P
               rw [hv] at hinv
               cases hinv
             | succ m =>
-              have hwq : win (run P win m e0) = some w := by
-                have := br1_winq P _ w hb
-                rw [run_succ'] at this
-                exact this
-              have hrdy := (hwin _ w hwq).2
+              -- the branch-1 target was released at m: the winner (shipped rule, `hwin`) or the
+              -- batch's pick (released with an empty head, `winq_step`)
+              have hrel2 : (run P win m e0).ts w ≤ (run P win m e0).now := by
+                have hq := br1_winq P _ w hb
+                rw [run_succ'] at hq
+                rcases winq_step P win (run P win m e0) w hq with ⟨-, hwq⟩ | ⟨-, hts, -⟩
+                · exact (hwin _ w hwq).2
+                · exact hts
+              have hrdy := hrel2
               have hvalid := hHV m (Nat.lt_succ_self m) w hlive hrdy
               have hinv' : (step P win (run P win m e0)).headValid w = false := by
                 rw [← run_succ']

@@ -127,7 +127,7 @@ extra `ext3` and the branch decode, read through `πE`. -/
 theorem step3_proj (P : Program2) (Q : Program) (Wn : Nat) (fw : Engine2 → Word)
     (edge : Nat → Lane → Nat) (hedge : ∀ t l, t + 1 ≤ edge t l)
     (w : Option Lane) (X : Engine3) (h : ArmInv Wn X)
-    (hl : Q.live = P.live) (hd : Q.dly = fun _ => 0)
+    (hl : Q.live = P.live) (hpk : Q.pick = none) (hd : Q.dly = fun _ => 0)
     (hr : Q.ret X.x.e.now X.x.e.cur = X.x.retire P)
     (he : Q.ext X.x.e.now X.x.e.cur = ext3 P edge X)
     (hq : Q.fnpf (πE X) = decide ((fw X.x).op = .br)) :
@@ -249,7 +249,7 @@ theorem step3_proj (P : Program2) (Q : Program) (Wn : Nat) (fw : Engine2 → Wor
           winq := w, st := (dispNext (fun _ => w) X.x.e).st,
           cur := (dispNext (fun _ => w) X.x.e).cur,
           npf := npf2 fw X.x } : Engine) = step Q (fun _ => w) (πE X)
-  rw [hp, ha, hs, ht, hn]
+  rw [hp, ha, hs, ht, hn, step_pick_none Q _ _ hpk]
   rfl
 
 /-- A lane that neither sees its edge nor writes back this cycle keeps its ARM registers,
@@ -611,7 +611,7 @@ theorem run3_proj (P2 : Program2) (Wn : Nat) (fw : Engine2 → Word) (edge : Nat
       (win3 (armP P2 fw edge sched X0) P2 fw edge sched X0),
       win3_on P2 Wn fw edge hedge sched X0 hX0 hf hsw hss n]
     refine step3_proj P2 (armP P2 fw edge sched X0) Wn fw edge hedge _ _
-      (arm_run3 P2 Wn fw edge hedge sched hf hsw n X0 hX0) rfl rfl ?_ ?_ ?_
+      (arm_run3 P2 Wn fw edge hedge sched hf hsw n X0 hX0) rfl rfl rfl ?_ ?_ ?_
     · show (run3 P2 fw edge sched ((run3 P2 fw edge sched n X0).x.e.now - X0.x.e.now) X0).x.retire
         P2 = _
       rw [hk]

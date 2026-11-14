@@ -60,7 +60,7 @@ theorem runH_coinc_st (P2 : Program2) (dly : Lane → Nat) (fw : Engine2 → Wor
       win1H_on (stH P2 dly fw hl sched y0) P2 fw hl sched y0 hsw hss n (hI n (by omega))]
     show (step2 P2 fw (sched (runH P2 fw hl sched n y0)) (runH P2 fw hl sched n y0).x).e = _
     refine step2_proj_st P2 (stH P2 dly fw hl sched y0) dly fw _ _
-      (frag_runH P2 dly fw hl sched hf n y0 hx0) rfl rfl ?_ ?_
+      (frag_runH P2 dly fw hl sched hf n y0 hx0) rfl rfl rfl ?_ ?_
       (by simp [stH, Engine2.op_not_br_st (hf (runH P2 fw hl sched n y0).x)])
     · show (runH P2 fw hl sched ((runH P2 fw hl sched n y0).x.e.now - y0.x.e.now) y0).x.retire
         P2 = _

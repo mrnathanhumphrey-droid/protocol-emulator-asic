@@ -50,33 +50,30 @@ the release can only move later). -/
 def tsF (P : Program) (fl : Lane → Bool) (e : Engine) (l : Lane) : Nat :=
   if fl l = true then e.now + 1 else tsNext P e l
 
-/-- One cycle with flushes `fl`. -/
+/-- One cycle with flushes `fl`. The branch-1 target register is computed from the UNMASKED
+program: the batch's pick reads `l_live` (`pf_w`, l.1913); a flushed lane is masked only at the
+scan (`!ft_flush[pf_q]`, l.3264), which is `br1` on `liveFl`. -/
 def stepF (P : Program) (win : Engine → Option Lane) (fl : Lane → Bool) (X : EngineF) :
     EngineF :=
-  { e := { step (liveFl P fl) win X.e with actv := actvF P fl X, ts := tsF P fl X.e }
+  { e := { step (liveFl P fl) win X.e with
+           actv := actvF P fl X, ts := tsF P fl X.e, winq := winqNext P win X.e }
     pkill := if X.e.pst = .cap then false
              else X.pkill || (fl X.e.pl && (decide (X.e.pst = .req) || decide (X.e.pst = .wait))) }
+
+/-- With no flush, the masked program is the program. -/
+theorem liveFl_noflush (P : Program) (fl : Lane → Bool) (hfl : ∀ l, fl l = false) :
+    liveFl P fl = P := by
+  have hl : (fun l => P.live l && !fl l) = P.live := by
+    funext l
+    rw [hfl l]
+    simp
+  show { P with live := fun l => P.live l && !fl l } = P
+  rw [hl]
 
 /-- The V4b step reads `live` only in the port. -/
 theorem step_liveFl (P : Program) (win : Engine → Option Lane) (fl : Lane → Bool) (e : Engine)
     (hfl : ∀ l, fl l = false) : step (liveFl P fl) win e = step P win e := by
-  have hl : (liveFl P fl).live = P.live := by
-    funext l
-    show (P.live l && !fl l) = P.live l
-    rw [hfl l]
-    simp
-  have hp : portNext (liveFl P fl) e = portNext P e := by
-    show portNextW (liveFl P fl) e.wantFetch e = portNextW P e.wantFetch e
-    exact portNextW_live _ _ hl _ _
-  show ({ now := e.now + 1, actv := actvNext (liveFl P fl) e, sel := selNext (liveFl P fl) e,
-          ts := tsNext (liveFl P fl) e,
-          pst := (portNext (liveFl P fl) e).pst, pl := (portNext (liveFl P fl) e).pl,
-          prr := (portNext (liveFl P fl) e).prr, pbr1 := (portNext (liveFl P fl) e).pbr1,
-          pslot := (portNext (liveFl P fl) e).pslot, winq := win e,
-          st := (dispNext win e).st, cur := (dispNext win e).cur,
-          npf := npfNext (liveFl P fl) e } : Engine) = step P win e
-  rw [hp]
-  rfl
+  rw [liveFl_noflush P fl hfl]
 
 /-- **No flush, no kill: the V4b step.** -/
 theorem stepF_noflush (P : Program) (win : Engine → Option Lane) (fl : Lane → Bool)
@@ -93,8 +90,8 @@ theorem stepF_noflush (P : Program) (win : Engine → Option Lane) (fl : Lane �
       unfold tsF
       rw [hfl l]
       rfl
-    show { step (liveFl P fl) win X.e with actv := actvF P fl X, ts := tsF P fl X.e } =
-      step P win X.e
+    show { step (liveFl P fl) win X.e with
+             actv := actvF P fl X, ts := tsF P fl X.e, winq := winqNext P win X.e } = step P win X.e
     rw [ha, ht, step_liveFl P win fl X.e hfl]
     rfl
   · show (if X.e.pst = .cap then false

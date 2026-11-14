@@ -87,11 +87,15 @@ theorem dstar39 (P : Program) (win : Engine → Option Lane) (e0 : Engine)
               cases hinv
             | succ m =>
               -- last cycle's winner was w: ready, with a valid head
-              have hwq : win (run P win m e0) = some w := by
-                have := br1_winq P _ w hb
-                rw [run_succ'] at this
-                exact this
-              have hrdy := (hwin _ w hwq).2
+              -- the branch-1 target was released at m: the winner (shipped rule, `hwin`) or the
+              -- batch's pick (released with an empty head, `winq_step`)
+              have hrel1 : (run P win m e0).ts w ≤ (run P win m e0).now := by
+                have hq := br1_winq P _ w hb
+                rw [run_succ'] at hq
+                rcases winq_step P win (run P win m e0) w hq with ⟨-, hwq⟩ | ⟨-, hts, -⟩
+                · exact (hwin _ w hwq).2
+                · exact hts
+              have hrdy := hrel1
               have hvalid := hHV m (fun t ht => ih t (by omega)) w hlive hrdy
               -- so it wrote back at m, and now owes both slots
               have hinv' : (step P win (run P win m e0)).headValid w = false := by
