@@ -1,0 +1,81 @@
+{
+  "_doc": "CERTIFIED branch-1 budget B per branch image (Wilson 11-14, option 1): written by model/gen_branch_budget.py from model/branch_budget.py; gate_lane_cert checks it is current. B null = no finite B: A2-UNCERTIFIED with the reason, not refused.",
+  "images": {
+    "branch_cmp_lo_image.hex": {
+      "sha": "e7787588f44b9a86f25f801d6f69fcbdd0d0760f6bc5bba300e8dd0c51e96eb5",
+      "branch_lanes": [
+        1
+      ],
+      "B": 16,
+      "reason": "certified"
+    },
+    "branch_cmp_mask_image.hex": {
+      "sha": "008a51b5fda36d41ab645adf8456eb7f2d76ae1b9f2e6846468b20744adaf464",
+      "branch_lanes": [
+        2,
+        3
+      ],
+      "B": null,
+      "reason": "lane 0: no lateness certificate at B = 32"
+    },
+    "branch_cmp_order_image.hex": {
+      "sha": "2feb7bb43939dc6a7fc8a68c524a552633e77ea25a7762ae107573b910dd0c6c",
+      "branch_lanes": [
+        2,
+        3
+      ],
+      "B": null,
+      "reason": "lane 0: no lateness certificate at B = 32"
+    },
+    "branch_image.hex": {
+      "sha": "17655390676135b5a736f9e9d703ad534efe0ac73a77db2ac4233677a6e739d1",
+      "branch_lanes": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "B": null,
+      "reason": "lane 1: no lateness certificate at B = 16"
+    },
+    "branch_loop_image.hex": {
+      "sha": "9c7e9a258de2136ecd044a8c9ea0fa38afc1e28ebe620e117f711c2ea096c6b0",
+      "branch_lanes": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "B": null,
+      "reason": "lane 0: no lateness certificate at B = 20"
+    },
+    "branch_wbad_image.hex": {
+      "sha": "a2a6db4283f3338eaa91ee631b2857f03ae11e9473a8d76d942ac35586cbd8fe",
+      "branch_lanes": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "B": null,
+      "reason": "lane 1: no lateness certificate at B = 16"
+    },
+    "dev.hex": {
+      "sha": "a5d54e4e4fd0f42a6af8fff17f5cff80d48fea1b5c4c5bd0335739383247ac55",
+      "branch_lanes": [
+        0
+      ],
+      "B": 8,
+      "reason": "certified"
+    },
+    "usb.hex": {
+      "sha": "2039287a8ddfe631c5222e4ee5937dbce113b53f3314f1fe82c314b6f61ed61f",
+      "branch_lanes": [
+        0
+      ],
+      "B": 4,
+      "reason": "certified"
+    }
+  }
+}

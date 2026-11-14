@@ -211,11 +211,13 @@ def span_min(g, gaps, m):
     return min(best(w, i, m) for w in g for i in range(len(gaps[w])))
 
 
-def certificate(g, preds, gaps, k, B, tail, iters=200, floor=None, xr=None):
+def certificate(g, preds, gaps, k, B, tail, iters=200, floor=None, xr=None, rbase=2):
     """GapRun's certificate on the word graph with Rr = L + 2 (+ tail): returns (lat, Z, Rr) or
     None when the values keep growing (no fixpoint: no certificate exists for this image).
     `floor`: a lateness floor per word (a FALLTHROUGH ARM's PC+2, refilled after its flush);
-    `xr`: extra response cycles per word (a FALLTHROUGH timeout's PC+1: the disarm cycle)."""
+    `xr`: extra response cycles per word (a FALLTHROUGH timeout's PC+1: the disarm cycle).
+    `rbase`: the response past the head's lateness -- 2 for the USB lane (prio_resp: it wins its
+    decisions); a lane's window bound R for any other lane (RespWinN.wb_bound_win_n)."""
     floor = floor or {}
     xr = xr or {}
     I = _isa()
@@ -228,7 +230,7 @@ def certificate(g, preds, gaps, k, B, tail, iters=200, floor=None, xr=None):
     lat = {w: 0 for w in g}
     Z = {w: 0 for w in g}
     for _ in range(iters):
-        Rr = {w: lat[w] + 2 + (tail if lat[w] > 0 else 0) + xr.get(w, 0) for w in g}
+        Rr = {w: lat[w] + rbase + (tail if lat[w] > 0 else 0) + xr.get(w, 0) for w in g}
         Zn = {}
         for w in g:
             z = Rr[w] + (D + B if npf[w] else 0)
@@ -539,6 +541,8 @@ def full_report(img, name="image"):
         Bn = None
         if sched == "b'":
             Bn, nev = br1_budget_fixpoint(g, gaps, lat, k)
+            full_report.last.update({"br1_B": Bn, "usb_refills": nev,
+                                     "usb_maxRr": max(Rr.values()), "usb_graph": (g, gaps, lat)})
             if Bn is None:
                 print("  branch-1 budget: no fixpoint")
                 fails.append((sched, "br1 budget"))

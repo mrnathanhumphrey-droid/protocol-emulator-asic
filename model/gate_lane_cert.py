@@ -19,6 +19,9 @@ every must-fire must turn its check red, or the gate is not testing what it says
            image whose other lanes act every coresident_usb - 1 cycles and accepts one at
            coresident_usb (56 refused, 57 accepted today)
   M_LC_CERT_STALE   a stored usb_other_R one below the certificate -> check 4 red
+  check 5  the branch-1 budget B per branch image (Wilson 11-14, option 1): model/branch_budget.json
+           is today's certificate (gen_branch_budget) for every branch image of the universe
+  M_LC_BUDGET_STALE a recorded B four above its certificate      -> check 5 red
   M_LC_FT_UNSEEN    no ARM read as FALLTHROUGH                    -> check 3 red
   M_LC_FT_NOFLOOR   no lateness floor after the flush             -> check 3 red
 Static, < 2 s. Usage: python model/gate_lane_cert.py [dir holding usbdev.py]
@@ -131,6 +134,16 @@ def check_coresident(PC, V, I):
                                     accepted))
 
 
+def check_budget():
+    import gen_branch_budget as GB
+    cur = GB.current()
+    probs = GB.stale(GB.load(), cur)
+    cert = sum(1 for v in cur.values() if v["B"] is not None)
+    return not probs, ("%d branch image(s): %d certified, %d no finite B; record %s%s"
+                       % (len(cur), cert, len(cur) - cert, "current" if not probs else "STALE",
+                          "" if not probs else " (" + "; ".join(probs[:3]) + ")")), cur
+
+
 def main():
     img_dir = sys.argv[1] if len(sys.argv) > 1 else None
     LC, PC, V = _setup(img_dir)
@@ -146,6 +159,8 @@ def main():
     print("  check 3 %s  %s" % ("GREEN" if ok3 else "RED", msg3))
     ok4, msg4 = check_coresident(PC, V, I)
     print("  check 4 %s  %s" % ("GREEN" if ok4 else "RED", msg4))
+    ok5, msg5, cur5 = check_budget()
+    print("  check 5 %s  %s" % ("GREEN" if ok5 else "RED", msg5))
     kills = []
     # M_LC_CERT_STALE: a stored usb_other_R one below the certificate
     orig_load = PC.load
@@ -155,6 +170,23 @@ def main():
     finally:
         PC.load = orig_load
     kills.append(("M_LC_CERT_STALE", not k4, "a stale certified usb_other_R"))
+    # M_LC_BUDGET_STALE: one certified image's recorded B four above its certificate
+    import gen_branch_budget as GB
+    orig_gl = GB.load
+    victim = next((n for n, v in sorted(cur5.items()) if v["B"] is not None), None)
+
+    def bad_load():
+        r = orig_gl()
+        r = dict(r, images=dict(r["images"]))
+        if victim:
+            r["images"][victim] = dict(r["images"][victim], B=r["images"][victim]["B"] + 4)
+        return r
+    GB.load = bad_load
+    try:
+        k5 = GB.stale(GB.load(), cur5)
+    finally:
+        GB.load = orig_gl
+    kills.append(("M_LC_BUDGET_STALE", bool(victim) and bool(k5), "a stale certified branch budget"))
     # M_LC_FT_UNSEEN / M_LC_FT_NOFLOOR
     orig_ft = PC.arm_is_ft
     PC.arm_is_ft = lambda x, I=None: False
@@ -223,7 +255,7 @@ def main():
     for name, killed, what in kills:
         print("  must-fire %-18s %s  %s" % (name, "RED (killed)" if killed else "SURVIVED", what))
     teeth = all(k for _n, k, _w in kills)
-    green = ok1 and not fails and ok3 and ok4
+    green = ok1 and not fails and ok3 and ok4 and ok5
     verdict = "PASSED" if (green and teeth) else ("FAILED (must-fire survived)" if not teeth
                                                    else "FAILED")
     print("GATE lane-cert: %s" % verdict)
