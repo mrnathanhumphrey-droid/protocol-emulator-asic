@@ -68,6 +68,19 @@ def premises(k=None):
     }
 
 
+def next_sop_fetch_deadline(B, nop_gap, k=None, prem=None):
+    """Wilson 11-14, the corrected next-SOP deadline: the latest arm_sop retirement after the bus
+    EOP at which the first receive word after it (behind a nop of release gap `nop_gap`) is still
+    fetched on time. GapRun HN with Z = Rr = usb_rr_on_time, L = 0: arm_sop's gap before the
+    SOP (seen >= EOP + tipd_fast + SYNC_MIN, released one past it) + nop_gap >= sop_fetch_slack
+    + B; arm_sop retires within usb_rr_on_time + (dispatch_cycles - 1) of its release
+    (prio_resp). Assumes arm_sop itself on time; the per-path first-sample test is exact."""
+    k = k or PC.load()
+    prem = prem or premises(k)
+    release = prem["tipd_fast"] + SYNC_MIN + 1 + nop_gap - (k["sop_fetch_slack"] + B)
+    return release + k["usb_rr_on_time"] + k["dispatch_cycles"] - 1
+
+
 # ---- the word graph ----------------------------------------------------------------------------
 def _isa():
     return PC._isa()
@@ -304,12 +317,15 @@ def full_report(img, name="image"):
                                              % unanch[s] if unanch[s] else "no anchored chain"))
                 continue
             wb = off[s] + lat[s] + 4
-            ok = wb <= prem["deadline_sop"]
+            nop_gap = min(gaps[n][-1] for n in g[s][1])
+            fdl = next_sop_fetch_deadline(0, nop_gap, k, prem)
+            ok = wb <= fdl
             f = [n2 for n in g[s][1] for n2 in g[n][1]]
             fl = max((lat[n2] for n2 in f), default=0)
-            print("  arm_sop w%d: retired <= EOP + %d (deadline %d) %s; SOP gap %d; first sample "
-                  "lateness %d %s" % (s, wb, prem["deadline_sop"], "OK" if ok else "LATE",
-                                      gaps[s][0], fl, "OK" if fl == 0 else "LATE"))
+            print("  arm_sop w%d: retired <= EOP + %d (fetch deadline %d; plain %d) %s; SOP gap %d; "
+                  "first sample lateness %d %s" % (s, wb, fdl, prem["deadline_sop"],
+                                                   "OK" if ok else "LATE", gaps[s][0], fl,
+                                                   "OK" if fl == 0 else "LATE"))
             if not ok:
                 fails.append((sched, "next-SOP w%d" % s))
             if fl:

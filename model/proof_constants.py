@@ -41,6 +41,14 @@ def load(path=PATH):
     # past its release, so a head is valid when the next release is strictly later -- the 26 of
     # every head-valid condition (R + 26 + B); head_slack + dstar is condition F's 46.
     k["head_slack"] = k["pending_slack"] + 1
+    # PrioResp.prio_resp with an on-time head: decided at the first idle cycle, within
+    # dispatch_cycles - 1 (idle3) -- the USB lane's response Rr = 2 (Params.USB_RR_ON_TIME)
+    k["usb_rr_on_time"] = k["dispatch_cycles"] - 1
+    # Wilson 11-14, the corrected next-SOP requirement (Params.SOP_FETCH_SLACK): the first receive
+    # word after arm_sop is on time iff arm_sop's gap before the SOP + the half-bit nop's gap
+    # >= sop_fetch_slack + B (GapRun HN with Z = Rr). lane_cert.next_sop_fetch_deadline turns it
+    # into the arm_sop retirement deadline after the EOP.
+    k["sop_fetch_slack"] = k["usb_rr_on_time"] + k["head_slack"]
     # The RTL's branch-wait floor, BR_W_MIN = N_LANES*4 + (N_LANES-1)*3 + 1 (pe_engine.v l.743,
     # read; pe_isa.BR_W_MIN mirrors it), from the primitives.
     k["br_w_min"] = (k["n_lanes"] * k["l_refill"] + (k["n_lanes"] - 1) * k["dispatch_cycles"]

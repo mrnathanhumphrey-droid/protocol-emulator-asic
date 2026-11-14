@@ -100,6 +100,17 @@ so the head is valid when the next release is strictly later — `R + HEAD_SLACK
 abbrev HEAD_SLACK : Nat := PENDING_SLACK + 1
 
 theorem head_slack_val : HEAD_SLACK = 26 := rfl
+
+/-- The priority lane's response with an on-time head (`PrioResp.prio_resp`, `L = 0`): it is
+decided at the first idle cycle, within `DISPATCH_CYCLES − 1` (`idle3`), so `Rr = 2`. -/
+abbrev USB_RR_ON_TIME : Nat := DISPATCH_CYCLES - 1
+/-- Wilson 11-14, the corrected next-SOP requirement: `GapRun`'s head-valid condition for the
+first receive word after `arm_sop` (`Z = Rr` on time, `L = 0`) asks `arm_sop`'s gap before the
+SOP plus the half-bit nop's gap to cover `SOP_FETCH_SLACK + B`. -/
+abbrev SOP_FETCH_SLACK : Nat := USB_RR_ON_TIME + HEAD_SLACK
+
+theorem usb_rr_on_time_val : USB_RR_ON_TIME = 2 := rfl
+theorem sop_fetch_slack_val : SOP_FETCH_SLACK = 28 := rfl
 theorem pending_slack_val : PENDING_SLACK = 25 := rfl
 
 /-- The RTL's branch-wait floor (`BR_W_MIN = N_LANES*4 + (N_LANES-1)*3 + 1`, `pe_engine.v`
