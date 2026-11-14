@@ -133,6 +133,7 @@ theorem runH_coinc (P2 : Program2) (dly : Lane → Nat) (fw : Engine2 → Word)
     rw [step_win_congr (P2.toP dly) (win1H (P2.toP dly) P2 fw hl sched y0),
       win1H_on (P2.toP dly) P2 fw hl sched y0 hsw hss n (hI n (by omega))]
     exact step2_proj P2 dly fw _ _ (plain_runH P2 dly fw hl sched hf n y0 hx0)
+      (Engine2.op_not_br (hf _))
 
 #print axioms runH_coinc
 

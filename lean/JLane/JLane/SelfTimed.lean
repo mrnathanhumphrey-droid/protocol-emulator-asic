@@ -47,6 +47,10 @@ theorem op_not_chain_st {dly : Lane → Nat} {l : Lane} {w : Word} (h : StFragW 
     w.op ≠ .chainRe := by
   rcases h.1 with h1 | h1 | h1 <;> rw [h1] <;> decide
 
+theorem op_not_br_st {dly : Lane → Nat} {l : Lane} {w : Word} (h : StFragW dly l w) :
+    w.op ≠ .br := by
+  rcases h.1 with h1 | h1 | h1 <;> rw [h1] <;> decide
+
 theorem isClk_frag (dly : Lane → Nat) (x : Engine2) (h : StFrag dly x) : x.isClk = false := by
   unfold isClk head
   rcases (h.1 x.e.cur (x.e.sel x.e.cur)).1 with h1 | h1 | h1 <;> rw [h1]
@@ -61,10 +65,11 @@ theorem wantFetch_frag (dly : Lane → Nat) (x : Engine2) (h : StFrag dly x) (l 
     x.wantFetch l = x.e.wantFetch l := by
   unfold wantFetch Engine.wantFetch
   have hc : (x.head l).op ≠ .chainRe := op_not_chain_st (h.1 l (x.e.sel l))
+  have hb : (x.head l).op ≠ .br := op_not_br_st (h.1 l (x.e.sel l))
   rw [h.2 l (x.e.sel l)]
   cases hv : x.e.headValid l
   · simp
-  · rw [if_neg (by simp), if_neg hc]
+  · rw [if_neg (by simp), if_neg hc, if_neg hb]
     simp
 
 end Engine2
@@ -85,14 +90,9 @@ theorem step2_proj_st (P : Program2) (Q : Program) (dly : Lane → Nat) (fw : En
     (hl : Q.live = P.live) (hd : Q.dly = dly)
     (hr : Q.ret x.e.now x.e.cur = x.retire P)
     (he : Q.ext x.e.now x.e.cur = (x.head x.e.cur).dly - dly x.e.cur)
-    (hq : Q.fnpf x.e = false) :
+    (hq : Q.fnpf x.e = decide ((fw x).op = .br)) :
     proj (step2 P fw w x) = step Q (fun _ => w) (proj x) := by
-  have hn : npfNext (P.toP (fun _ => 0)) x.e = npfNext Q x.e := by
-    funext l s
-    unfold npfNext
-    split
-    · exact hq.symm
-    · rfl
+  have hn : npf2 fw x = npfNext Q x.e := npf2_eq fw x Q hq
   have hp : portNextW (P.toP (fun _ => 0)) x.wantFetch x.e = portNext Q x.e := by
     rw [portNextW_congr _ _ _ _ (Engine2.wantFetch_frag dly x h), ← portNextW_v1]
     exact portNextW_live _ _ (by rw [hl]; rfl) _ _
@@ -125,7 +125,7 @@ theorem step2_proj_st (P : Program2) (Q : Program) (dly : Lane → Nat) (fw : En
           pslot := (portNextW (P.toP (fun _ => 0)) x.wantFetch x.e).pslot,
           winq := w, st := (dispNext (fun _ => w) x.e).st,
           cur := (dispNext (fun _ => w) x.e).cur,
-          npf := npfNext (P.toP (fun _ => 0)) x.e } : Engine) = step Q (fun _ => w) x.e
+          npf := npf2 fw x } : Engine) = step Q (fun _ => w) x.e
   rw [hp, ha, hs, ht, hn]
   rfl
 
@@ -142,10 +142,10 @@ theorem frag_step (P : Program2) (dly : Lane → Nat) (fw : Engine2 → Word)
       exact hf x
     · rw [if_neg hc]
       exact h.1 l s
-  · show npfNext (P.toP (fun _ => 0)) x.e l s = false
-    unfold npfNext
+  · show npf2 fw x l s = false
+    unfold npf2
     split
-    · rfl
+    · simp [Engine2.op_not_br_st (hf x)]
     · exact h.2 l s
 
 theorem frag_run2 (P : Program2) (dly : Lane → Nat) (fw : Engine2 → Word)
@@ -187,7 +187,8 @@ theorem run2_proj_st (P2 : Program2) (dly : Lane → Nat) (fw : Engine2 → Word
     rw [step_win_congr (stP P2 dly fw sched x0) (win1 (stP P2 dly fw sched x0) P2 fw sched x0),
       win1_on (stP P2 dly fw sched x0) P2 fw sched x0 hsw hss n]
     refine step2_proj_st P2 (stP P2 dly fw sched x0) dly fw _ _
-      (frag_run2 P2 dly fw sched hf n x0 hx0) rfl rfl ?_ ?_ rfl
+      (frag_run2 P2 dly fw sched hf n x0 hx0) rfl rfl ?_ ?_
+      (by simp [stP, Engine2.op_not_br_st (hf (run2 P2 fw sched n x0))])
     · show (run2 P2 fw sched ((run2 P2 fw sched n x0).e.now - x0.e.now) x0).retire P2 = _
       rw [hk]
     · show ((run2 P2 fw sched ((run2 P2 fw sched n x0).e.now - x0.e.now) x0).head
