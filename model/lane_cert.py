@@ -39,6 +39,9 @@ USB_TLDRATE_MAX = 1_522_500
 SYNC_MIN, SYNC_MAX = 1, 2
 #: TRSPIPD1, §7.1.19.1: a device's response starts within 6.5 bit times of the host's EOP
 USB_TRSPIPD1_HALF_BITS = 13
+#: the host's response timeout, §7.1.19.1 / §8.7.2: it times out 16 to 18 bit times after the end of
+#: a packet that expected an answer, and its next token can start no sooner (16 at the fastest rate)
+USB_HOST_TIMEOUT_BITS_MIN = 16
 
 
 def premises(k=None):
@@ -66,6 +69,18 @@ def premises(k=None):
         # an edge every <= 7 bits re-anchors it) at the host's rate tolerance (TLDRATE max)
         "rean_drift": math.ceil(Fraction(7 * bit) * (Fraction(USB_TLDRATE_MAX, 1_500_000) - 1)),
     }
+
+
+def retry_fetch_deadline(B, nop_gap, k=None, prem=None):
+    """Wilson 11-14, correction A's window inequality: the latest TOP arm_sop retirement after
+    OUR EOP (a packet that expects the host's handshake) at which the first receive word is
+    fetched before the host's earliest retry token (its timeout, 16 bit times at the fastest
+    rate). Same GapRun HN rule as next_sop_fetch_deadline, anchored on that token."""
+    k = k or PC.load()
+    prem = prem or premises(k)
+    tok = math.floor(Fraction(USB_HOST_TIMEOUT_BITS_MIN * prem["bit"] * 1_500_000, USB_TLDRATE_MAX))
+    release = tok + SYNC_MIN + 1 + nop_gap - (k["sop_fetch_slack"] + B)
+    return release + k["usb_rr_on_time"] + k["dispatch_cycles"] - 1
 
 
 def next_sop_fetch_deadline(B, nop_gap, k=None, prem=None):
@@ -374,6 +389,50 @@ def full_report(img, name="image"):
             else:
                 print("  other lanes: no m <= 8 meets the span rule")
                 fails.append((sched, "other lanes"))
+    # correction A (Wilson 11-14): an ARM with a timeout (the FALLTHROUGH handshake wait) must not
+    # time out before the host's latest legal handshake start (window_end = TRSPIPD1 after our
+    # EOP), and its timeout path to TOP's arm_sop must meet the retry-token deadline
+    tos = [w for w in g if g[w][0]["op"] == I.OP_ARM and g[w][0]["delay"] > 0]
+    if not tos:
+        print("== correction A: no ARM with a timeout in this image (check inactive)")
+    for a in sorted(tos):
+        offs = [o for kd, o in chains_into(g, preds, a, I, prem) if kd == "our EOP"]
+        if not offs:
+            print("== correction A: ARM w%d has a timeout but no chain from our EOP" % a)
+            fails.append(("A", "w%d unanchored" % a))
+            continue
+        t_lo = min(offs) + g[a][0]["delay"]                 # earliest timeout after our EOP
+        t_hi = max(offs) + g[a][0]["delay"]                 # latest
+        ok1 = t_lo >= prem["trspipd1"]
+        worst = None
+        stack = [(n, t_hi) for n in g[a][1]]                # PC+1: the timeout continuation
+        seen = set()
+        while stack:
+            w, acc = stack.pop()
+            if (w, acc) in seen:
+                continue
+            seen.add((w, acc))
+            xw = g[w][0]
+            if arm_kind(xw, I) == "edge" and w in off:      # TOP's (or a copy's) arm_sop
+                nop_gap = min(gaps[n][-1] for n in g[w][1])
+                dl = retry_fetch_deadline(0, nop_gap, k, prem)
+                t = acc + 4                                 # released at acc, on time: + Rr + 2
+                worst = (t, dl) if worst is None or t - dl > worst[0] - worst[1] else worst
+                continue
+            up = upper_gaps(xw, I)
+            if up is None:
+                continue
+            for n in g[w][1]:
+                stack.append((n, acc + up))
+        ok2 = worst is not None and worst[0] <= worst[1]
+        print("== correction A: ARM w%d times out at our EOP + %d..%d (window_end %d) %s; TOP arm_sop "
+              "retired <= EOP + %s (retry deadline %s) %s"
+              % (a, t_lo, t_hi, prem["trspipd1"], "OK" if ok1 else "EARLY",
+                 worst[0] if worst else "-", worst[1] if worst else "-", "OK" if ok2 else "LATE"))
+        if not ok1:
+            fails.append(("A", "w%d early timeout" % a))
+        if not ok2:
+            fails.append(("A", "w%d retry path" % a))
     print("lane_cert: %s" % ("PASS" if not fails else "FAIL: %s" % fails))
     return fails
 
