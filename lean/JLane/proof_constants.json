@@ -9,5 +9,7 @@
   "rean_halving": 2,
   "n_lanes": 5,
   "l_refill": 4,
-  "usb_br1_per_window": 2
+  "usb_br1_per_window": 2,
+  "usb_other_R": 24,
+  "_certified": "usb_other_R is CERTIFIED, not a primitive: written by model/gen_cert_constants.py from lane_cert's certificate on test/usbdev.py (RespSpan.wb_close_span, b'); gate_lane_cert checks it is current. Wilson 11-14."
 }

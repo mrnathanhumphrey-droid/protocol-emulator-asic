@@ -365,6 +365,10 @@ def chains_into(g, preds, s, I, prem, depth=24, half_t=0):
 
 
 def full_report(img, name="image"):
+    """Prints the report; returns the failures. `full_report.last` keeps the certified numbers
+    a generator reads (gen_cert_constants.py): usb_other_R, the response bound the other lanes
+    get with this USB program co-resident (RespSpan.wb_close_span, b')."""
+    full_report.last = {}
     I = _isa()
     k = PC.load()
     prem = premises(k)
@@ -476,18 +480,28 @@ def full_report(img, name="image"):
             if offd[s] is not None:
                 wbd = offd[s] + lat[s] + 4 + xr.get(s, 0)
                 rdl = retry_fetch_deadline(0, nop_gap, k, prem)
-                okd = wbd <= rdl
-                print("  arm_sop w%d after an unanswered DATA: retired <= EOP + %d (host's next "
-                      "packet deadline %d) %s" % (s, wbd, rdl, "OK" if okd else "LATE"))
-                if not okd:
-                    fails.append((sched, "after-DATA w%d" % s))
+                # the certificate's own PREMISE (Armed: the edge comes after the ARM's writeback):
+                # armed before the host's next SOP can be seen
+                armd = clock.usb_host_next_min_cycles() + SYNC_MIN - 1
+                print("  arm_sop w%d after an unanswered DATA: armed by EOP + %d (premise: before "
+                      "the host's next SOP, %d) %s; fetch-deadline margin %+d (proxy %d; reported)"
+                      % (s, wbd, armd, "OK" if wbd <= armd else "LATE", rdl - wbd, rdl))
+                if wbd > armd:
+                    fails.append((sched, "armed late w%d (after DATA)" % s))
             fl = max((lat[n2] for n2 in f), default=0)
-            print("  arm_sop w%d: retired <= EOP + %d (fetch deadline %d; plain %d) %s; SOP gap %d; "
-                  "first sample lateness %d %s" % (s, wb, fdl, prem["deadline_sop"],
-                                                   "OK" if ok else "LATE", gaps[s][0], fl,
-                                                   "OK" if fl == 0 else "LATE"))
-            if not ok:
-                fails.append((sched, "next-SOP w%d" % s))
+            # Wilson 11-14: the GATE is the first sample's lateness, computed by the certificate
+            # (GapRun's fixpoint over the proved bounds); the fetch deadline is a coarser
+            # sufficient condition, kept as a reported margin (an early warning), not a gate
+            # the certificate's own PREMISE (Armed: the edge comes after the ARM's writeback): the
+            # arm_sop is armed before the earliest SOP it waits for is seen (TIPD at the fastest
+            # host + SYNC_MIN); the certificate's first-sample lateness then holds
+            arm_dl = prem["tipd_fast"] + SYNC_MIN - 1
+            print("  arm_sop w%d: armed by EOP + %d (premise: before the SOP, %d) %s; first sample "
+                  "lateness %d %s (certificate); SOP gap %d; fetch-deadline margin %+d (proxy %d; "
+                  "reported)" % (s, wb, arm_dl, "OK" if wb <= arm_dl else "LATE", fl,
+                                 "OK" if fl == 0 else "LATE", gaps[s][0], fdl - wb, fdl))
+            if wb > arm_dl:
+                fails.append((sched, "armed late w%d" % s))
             if fl:
                 fails.append((sched, "first sample after w%d" % s))
         # turnaround: from a host EOP (arm_j) to our first transmitted edge
@@ -548,11 +562,13 @@ def full_report(img, name="image"):
                         break
                     S = Sn
                 if G >= ry + 1 + ru:
+                    full_report.last["usb_other_R"] = ry
                     print("  other lanes: R = %d (USB decided <= %d times per window, S = %d "
                           "disarm cycle(s); G(%d) = %d >= R + 1 + R_u %d)"
                           % (ry, m, S, m, G, ru))
                     Bc = Bn if Bn is not None else k["br1_budget"]
                     cs = ry + k["pending_slack"] + Bc
+                    full_report.last["coresident_required"] = cs
                     print("  co-resident spacing for other lanes: R %d + %d + B %d = %d "
                           "(proof_constants coresident_usb %d) %s"
                           % (ry, k["pending_slack"], Bc, cs, k["coresident_usb"],

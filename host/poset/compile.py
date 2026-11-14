@@ -219,8 +219,8 @@ def target_check(img):
     bad += [] if MUT == "M_PC_USB_NOCHECK" else I.usb_problems(img)
     if bad:
         raise Refused("P5 target: %s" % "; ".join(bad))
-    return used, ("checked: every co-resident lane >= %d (R_usb %d + pending_slack %d + "
-                  "br1_budget %d; usb_nostall)" % (k["coresident_usb"], k["R_usb"],
+    return used, ("checked: every co-resident lane >= %d (R %d certified + pending_slack %d + "
+                  "br1_budget %d; usb_nostall)" % (k["coresident_usb"], k["usb_other_R"],
                                                    k["pending_slack"], k["br1_budget"]))
 
 

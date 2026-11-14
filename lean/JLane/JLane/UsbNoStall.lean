@@ -9,7 +9,9 @@ is not the property that matters. This brick proves what does:
 * `usb_nostall`: from a primed start, no dispatch ever stalls, and **branch 1 only ever issues
   for the USB lane** — for any USB program whose words all have delay `≥ NOWB_MIN` (20), with the
   deadline margin `USB_DEADLINE_MARGIN` (17) and every other live lane at
-  `≥ CORESIDENT_USB = R_USB + 25 + BR1_BUDGET = 50`;
+  `≥ CORESIDENT_USB = USB_OTHER_R + 25 + BR1_BUDGET = 57` (certified `R`, Wilson 11-14; the
+  proof below needs only `≥ R_USB + 25 + BR1_BUDGET = 50`, so the raised rule only strengthens
+  the hypothesis);
 * `usb_j2_nb`: under the same hypotheses the USB lane's samples keep `J ≤ 2`;
 * `usb_br1_window`: in any window of `23 + BR1_BUDGET = 31` cycles, at most
   `USB_BR1_PER_WINDOW = 2` USB-lane branch-1 refills — **proved**, from the USB lane's decision
@@ -153,7 +155,7 @@ variable (P : Program) (win : Engine → Option Lane) (e0 : Engine) (u : Lane) (
 include hd in
 theorem hd42 : ∀ l, P.live l = true → l ≠ u → DSTAR_RETIRE_USB ≤ P.dly l := fun l hl hlu => by
   have := hd l hl hlu
-  have h1 : CORESIDENT_USB = 50 := rfl
+  have h1 : CORESIDENT_USB = 57 := rfl
   have h2 : DSTAR_RETIRE_USB = 42 := rfl
   omega
 
@@ -343,7 +345,7 @@ theorem hv_step (n : Nat) (hG : Good P win e0 u n) (hHV : ∀ s, s < n → HVat 
   have hRv : R_USB = 17 := rfl
   have hBv : BR1_BUDGET = 8 := rfl
   have hNv : NOWB_MIN = 20 := rfl
-  have hCv : CORESIDENT_USB = 50 := rfl
+  have hCv : CORESIDENT_USB = 57 := rfl
   by_cases hyu : y = u
   · subst hyu
     apply head_valid_ret P win y e0 (P.dly y) 2 0 n (P.dly y) hW hfull hy rfl (by omega) (fun t => nonpf_run P win hfn t e0 hn0)
@@ -436,7 +438,7 @@ theorem usb_nostall : ∀ T, NoStall win (run P win T e0) ∧ Br1Only P u (run P
               have hDv : DSTAR = 20 := rfl
               have hRv : R_USB = 17 := rfl
               have hBv : BR1_BUDGET = 8 := rfl
-              have hCv : CORESIDENT_USB = 50 := rfl
+              have hCv : CORESIDENT_USB = 57 := rfl
               have hNSp : ∀ t, t < m + 1 → NoStall win (run P win t e0) := fun t ht => (hG t ht).1
               obtain ⟨w', hw'm, hw'k, hw'b⟩ :=
                 cnt_reach P win (IsRet P w) m e0 (cnt P win (IsRet P w) m e0 - 1) (by omega)

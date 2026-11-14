@@ -35,7 +35,11 @@ def load(path=PATH):
     # SCAN -> REQ -> WAIT -> CAP, pe_engine.v l.2703).
     k["dstar"] = k["n_lanes"] * k["l_refill"]
     k["br1_budget"] = k["usb_br1_per_window"] * k["l_refill"]
-    k["coresident_usb"] = k["R_usb"] + k["pending_slack"] + k["br1_budget"]
+    # Wilson 11-14: the co-resident spacing is what the certificate requires -- the response
+    # bound the other lanes get with the USB program co-resident (usb_other_R, CERTIFIED: written
+    # by model/gen_cert_constants.py from lane_cert on test/usbdev.py, checked current by
+    # gate_lane_cert) + the pending slack + the branch-1 budget (usb_nostall's d >= R + 25 + B)
+    k["coresident_usb"] = k["usb_other_R"] + k["pending_slack"] + k["br1_budget"]
     k["coresident_min_d"] = k["dstar"] + k["br1_budget"]
     # The head-valid slack (Params.HEAD_SLACK): a pending refill is at most R + pending_slack + B
     # past its release, so a head is valid when the next release is strictly later -- the 26 of
@@ -152,7 +156,7 @@ def usb_coresident_problems(img, k=None):
     """[problem] for an image that turns on the USB receive and has another lane with a
     positive per-action spacing below coresident_usb (Wilson 11-13, revised no-stall ruling:
     UsbNoStall.lean usb_nostall, hypothesis `CORESIDENT_USB <= P.dly l` for every other live
-    lane; coresident_usb = R_usb + pending_slack + br1_budget, which also implies the delay
+    lane; coresident_usb = usb_other_R + pending_slack + br1_budget, which also implies the delay
     floor coresident_min_d). Every word reachable from each lane is checked (lane_words).
     THE ONE CHECK: the compiler and gate_admissible_images both call this."""
     I = _isa()
@@ -168,11 +172,12 @@ def usb_coresident_problems(img, k=None):
             s = spacing_of(x, I)
             if 0 < s < lim:
                 out.append("lane %d word %d: spacing %d < %d -- in an image using the USB "
-                           "receive, every other lane's per-action spacing must be >= R_usb + "
-                           "pending_slack + br1_budget = %d + %d + %d (usb_nostall). A lane that "
-                           "needs actions faster than %d cycles (fast SPI, for instance) cannot "
-                           "share an image with the USB receive"
-                           % (ln, w, s, lim, k["R_usb"], k["pending_slack"], k["br1_budget"], lim))
+                           "receive, every other lane's per-action spacing must be >= R + "
+                           "pending_slack + br1_budget = %d + %d + %d (usb_nostall; R certified by "
+                           "lane_cert on the USB program). A lane that needs actions faster than "
+                           "%d cycles (fast SPI, for instance) cannot share an image with the USB "
+                           "receive" % (ln, w, s, lim, k["usb_other_R"], k["pending_slack"],
+                                        k["br1_budget"], lim))
     return out
 
 

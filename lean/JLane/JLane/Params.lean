@@ -72,14 +72,22 @@ abbrev USB_BR1_PER_WINDOW : Nat := 2
 /-- Port cycles the USB lane's branch-1 refills can take from another lane's refill in such a
 window: one `L_REFILL` each (SCAN → REQ → WAIT → CAP, `pe_engine.v` l.2703, read). -/
 abbrev BR1_BUDGET : Nat := USB_BR1_PER_WINDOW * L_REFILL
-/-- Per-action spacing every other lane needs in an image with the USB receive (replaces 42). -/
-abbrev CORESIDENT_USB : Nat := R_USB + PENDING_SLACK + BR1_BUDGET
+/-- CERTIFIED (Wilson 11-14, ruling 2): the response bound the other lanes get with the USB
+program co-resident -- `lane_cert`'s `RespSpan.wb_close_span` evaluation on `test/usbdev.py`,
+written to `proof_constants.json` by `model/gen_cert_constants.py` (never typed there; this pin
+is compared by `gate_lean_build`, its currency by `gate_lane_cert`). It exceeds `R_USB` (17)
+because the FALLTHROUGH flush path raises the USB lane's worst response to 29. -/
+abbrev USB_OTHER_R : Nat := 24
+/-- Per-action spacing every other lane needs in an image with the USB receive:
+`d ≥ R + 25 + B` (`usb_nostall`) at the certified `R`. -/
+abbrev CORESIDENT_USB : Nat := USB_OTHER_R + PENDING_SLACK + BR1_BUDGET
 /-- The co-resident lanes' delay floor from `head_valid_ret` (`D* + B`); implied by
 `CORESIDENT_USB` (`coresident_implies_min_d`). -/
 abbrev CORESIDENT_MIN_D : Nat := DSTAR + BR1_BUDGET
 
 theorem br1_budget_val : BR1_BUDGET = 8 := rfl
-theorem coresident_usb_val : CORESIDENT_USB = 50 := rfl
+theorem usb_other_r_val : USB_OTHER_R = 24 := rfl
+theorem coresident_usb_val : CORESIDENT_USB = 57 := rfl
 theorem coresident_min_d_val : CORESIDENT_MIN_D = 28 := rfl
 theorem coresident_implies_min_d : CORESIDENT_MIN_D ≤ CORESIDENT_USB := by decide
 

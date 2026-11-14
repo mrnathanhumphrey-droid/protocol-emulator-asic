@@ -6,13 +6,19 @@ every must-fire must turn its check red, or the gate is not testing what it says
   check 2  lane_cert on usbdev: certificate, release-after-writeback, arming, next-SOP fetch
            deadline, first sample, turnaround, other lanes, correction A -- all green
   M_LC_ARMJ_FLOOR   arm_j's premise weakened to the ARM floor     -> check 2 red at an arm_j
-  M_LC_LATE_SOP     an extra 40-cycle nop before a handshake copy's arm_sop -> next-SOP red
+  M_LC_LATE_SOP     an extra 40-cycle nop before a handshake copy's arm_sop -> red (armed after
+                    the earliest SOP: the certificate's own premise fails)
   M_LC_SHIFTI_FULL  spacing_of reads SHIFTI's whole delay field   -> check 1 red
-  M_LC_LAT_IGNORED  the certificate's lateness ignored on deadline chains -> check 2 green on a
-                    known-late image (the gate must notice it lost its teeth)
+  M_LC_LAT_IGNORED  the certificate's lateness zeroed -> check 3 red (the flush refill's
+                    lateness on PC+2 vanishes: the gate notices it lost its teeth)
   check 3  FALLTHROUGH (ArmFT, F4): usbdev with one handshake copy's (HALF) arm_sop made
            FALLTHROUGH (ARM_MOD_FT) must be refused twice (a SHIFTIN at PC+2; HALF with
            FALLTHROUGH), and the certificate must put flush_refill_late on its PC+2
+  check 4  CORESIDENT_USB (Wilson 11-14 ruling 2): proof_constants' certified usb_other_R is
+           the current certificate's (gen_cert_constants), and the rule it derives refuses an
+           image whose other lanes act every coresident_usb - 1 cycles and accepts one at
+           coresident_usb (56 refused, 57 accepted today)
+  M_LC_CERT_STALE   a stored usb_other_R one below the certificate -> check 4 red
   M_LC_FT_UNSEEN    no ARM read as FALLTHROUGH                    -> check 3 red
   M_LC_FT_NOFLOOR   no lateness floor after the flush             -> check 3 red
 Static, < 2 s. Usage: python model/gate_lane_cert.py [dir holding usbdev.py]
@@ -97,6 +103,34 @@ def check_ft(LC, V, I):
                 "HALF + FALLTHROUGH refused %s" % (w, refused, floored, halfed))
 
 
+def image_others_at(V, I, d):
+    """usbdev's image with every other lane's word acting every `d` cycles (usbdev.image's own
+    layout; its other lanes act every 500)"""
+    p = V.device_program()
+    l0 = I.ACT_BASE
+    lp = l0 + len(p) * I.ACT_BYTES
+    p = p + [I.act(I.OP_REARM, 0, 0, d)]
+    hs = [I.hdr(V.DM, I.PIN_NONE, 1, V.D, 0, 2 * V.D, 3 * V.D, l0)]
+    hs += [I.hdr(I.UO0 + n - 1, I.UO0 + n - 1, 1, 500, 0, 200, 240, lp)
+           for n in range(1, I.N_LANES)]
+    return I.join_image(hs, p)
+
+
+def check_coresident(PC, V, I):
+    import gen_cert_constants as G
+    k = PC.load()
+    cur = G.certified()
+    fresh = all(k.get(c) == v for c, v in cur.items())
+    lim = k["coresident_usb"]
+    refused = bool(PC.usb_coresident_problems(image_others_at(V, I, lim - 1), k))
+    accepted = not PC.usb_coresident_problems(image_others_at(V, I, lim), k)
+    ok = fresh and refused and accepted
+    return ok, ("usb_other_R stored %s, certificate %s (%s); coresident_usb %d: %d refused %s, "
+                "%d accepted %s" % (k.get("usb_other_R"), cur.get("usb_other_R"),
+                                    "current" if fresh else "STALE", lim, lim - 1, refused, lim,
+                                    accepted))
+
+
 def main():
     img_dir = sys.argv[1] if len(sys.argv) > 1 else None
     LC, PC, V = _setup(img_dir)
@@ -110,7 +144,17 @@ def main():
                                % (len(fails), sorted({f[1] for f in fails}))))
     ok3, msg3 = check_ft(LC, V, I)
     print("  check 3 %s  %s" % ("GREEN" if ok3 else "RED", msg3))
+    ok4, msg4 = check_coresident(PC, V, I)
+    print("  check 4 %s  %s" % ("GREEN" if ok4 else "RED", msg4))
     kills = []
+    # M_LC_CERT_STALE: a stored usb_other_R one below the certificate
+    orig_load = PC.load
+    PC.load = lambda path=PC.PATH: dict(orig_load(path), usb_other_R=orig_load(path)["usb_other_R"] - 1)
+    try:
+        k4, _m = check_coresident(PC, V, I)
+    finally:
+        PC.load = orig_load
+    kills.append(("M_LC_CERT_STALE", not k4, "a stale certified usb_other_R"))
     # M_LC_FT_UNSEEN / M_LC_FT_NOFLOOR
     orig_ft = PC.arm_is_ft
     PC.arm_is_ft = lambda x, I=None: False
@@ -148,7 +192,7 @@ def main():
         p2 = p[:target + 1] + [I.act(I.OP_LEVEL, I.PIN_NONE, 0, 40)] + p[target + 1:]
         try:
             f, _o = run_cert(LC, V.image(prog=p2))
-            hit = any(x[1].startswith("next-SOP") and x[1] not in {y[1] for y in fails}
+            hit = any(x[1].startswith("armed late") and x[1] not in {y[1] for y in fails}
                       for x in f)
         except Exception as ex:                      # a shifted branch target may not assemble
             hit, _o = False, str(ex)
@@ -171,15 +215,15 @@ def main():
         lat, Z, Rr = r
         return {w: 0 for w in lat}, Z, Rr
     LC.certificate = no_lat
-    f, _o = run_cert(LC, V.image())
-    LC.certificate = orig_cert
-    lost = len(f) < len(fails)
-    kills.append(("M_LC_LAT_IGNORED", lost or not fails,
-                  "lateness ignored: failures %d -> %d" % (len(fails), len(f))))
+    try:
+        k3, _m = check_ft(LC, V, I)
+    finally:
+        LC.certificate = orig_cert
+    kills.append(("M_LC_LAT_IGNORED", not k3, "lateness zeroed: check 3 loses the flush floor"))
     for name, killed, what in kills:
         print("  must-fire %-18s %s  %s" % (name, "RED (killed)" if killed else "SURVIVED", what))
     teeth = all(k for _n, k, _w in kills)
-    green = ok1 and not fails and ok3
+    green = ok1 and not fails and ok3 and ok4
     verdict = "PASSED" if (green and teeth) else ("FAILED (must-fire survived)" if not teeth
                                                    else "FAILED")
     print("GATE lane-cert: %s" % verdict)
