@@ -25,8 +25,10 @@ theorem ts_const (P : Program) (win : Engine → Option Lane) (e0 : Engine) (u :
 theorem prio_resp (P : Program) (win : Engine → Option Lane) (e0 : Engine)
     (h0 : e0.st = .idle) (h0ts : ∀ l, e0.now ≤ e0.ts l) (u : Lane) (hu : P.live u = true)
     (L : Nat)
-    (hpri : ∀ e, e.st = .idle → Ready P u e → e.headValid u = true → win e = some u)
-    (t : Nat) (hwb : IsWB u (run P win t e0))
+    (t : Nat)
+    (hpri : ∀ s, s < t → (run P win s e0).st = .idle → Ready P u (run P win s e0) →
+      (run P win s e0).headValid u = true → win (run P win s e0) = some u)
+    (hwb : IsWB u (run P win t e0))
     (hfree : ∀ w, w + 2 < t → IsWB u (run P win w e0) →
       (run P win w e0).now < (run P win t e0).ts u)
     (hhv : ∀ c, c < t → (run P win c e0).ts u = (run P win t e0).ts u →
@@ -59,7 +61,7 @@ theorem prio_resp (P : Program) (win : Engine → Option Lane) (e0 : Engine)
     rw [show s + (D - s) = D by omega] at hconst
     have hrdy : Ready P u (run P win s e0) := ⟨hu, by omega⟩
     have hv := hhv s (by omega) hconst.symm (by omega)
-    have hdec' : Dec win u (run P win s e0) := ⟨hidle, hpri _ hidle hrdy hv, hv⟩
+    have hdec' : Dec win u (run P win s e0) := ⟨hidle, hpri s (by omega) hidle hrdy hv, hv⟩
     have hw2 := dec_wb P win e0 s u hdec'
     rcases Nat.lt_or_ge (s + 2) D with hlt | hge
     · exact noWB (s + 2) (by omega) hlt hw2

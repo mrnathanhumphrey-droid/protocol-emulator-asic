@@ -40,3 +40,4 @@ import JLane.ArmClose
 import JLane.RespSpan
 import JLane.PrioResp
 import JLane.BPrime
+import JLane.EdfB
