@@ -38,6 +38,9 @@ BENCH_NAME = re.compile(r"\btb_[a-z0-9_]+")
 DECLARED = {
     "ci/ln1_replay.py": ("workflow", ".github/workflows/test.yaml",
                          "the LN1 Lean replay job (JLane.step vs the RTL)"),
+    "model/stale_records.py": ("helper", "model/gate_phase_coverage.py",
+                               "the STALE / DEBT declarations: it NAMES benches "
+                               "(a record's moved inputs, 11-13) and invokes none"),
     "test/sweep_i2c_delay.py": ("manual", "model/gate_phase_coverage.py",
                                 "the I2C peer-delay sweep (sigrok, local): its "
                                 "record model/phase_sweep_i2c.json is held "

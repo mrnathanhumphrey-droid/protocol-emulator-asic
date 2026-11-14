@@ -89,6 +89,10 @@ ALLOW = {
     ("test/benchset.py", "corpus_arms",
      "return (None, 'corpus.py did not import: %s' % exc)"):
         "returns (None, err); the sweep fails on it.",
+    ("test/benchset.py", "plan",
+     "probs.append('%s: %s.%s() failed: %s' % (top, mod, fn, exc))"):
+        "the FROM_PYGEN hook (a bench's own arm generator, 11-13): the failure "
+        "is appended to `probs`, and a non-empty `probs` fails the plan.",
     ("test/benchset.py", "base_images",
      "return ['clean_room.GENERATORS did not import (%s) -- the sweep has no image recipes and must not improvise a copy' % exc]"):
         "returns the import failure AS a problem; a non-empty list fails.",
