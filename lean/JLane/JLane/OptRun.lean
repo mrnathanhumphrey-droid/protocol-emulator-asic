@@ -352,8 +352,12 @@ theorem branch_ld_D (B W : Nat) : R_BASE + HEAD_SLACK + B ≤ W + BRANCH_LD B W 
   unfold BRANCH_LD
   omega
 
+/-- The export at the RTL's branch-wait floor and the USB lane's budget (compared with
+`proof_constants`' `branch_j_wmin` by `gate_lean_build`). -/
+abbrev BRANCH_J_WMIN : Nat := BRANCH_J BR1_BUDGET BR_W_MIN
+
 /-- At the RTL's branch-wait floor and the USB lane's budget it is the interim constant. -/
-theorem branch_j_interim : BRANCH_J BR1_BUDGET BR_W_MIN = J_INTERIM_HEAD_LATE_OPTA := by decide
+theorem branch_j_interim : BRANCH_J_WMIN = J_INTERIM_HEAD_LATE_OPTA := by decide
 
 end
 

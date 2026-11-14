@@ -79,7 +79,7 @@ CONSTS = {
     "j_interim_head_late_optA": "J_INTERIM_HEAD_LATE_OPTA",
     "flush_refill_late": "FLUSH_REFILL_LATE",
     "usb_other_R": "USB_OTHER_R",
-    "branch_j_wmin": "BRANCH_J BR1_BUDGET BR_W_MIN",
+    "branch_j_wmin": "BRANCH_J_WMIN",
 }
 PLANT_THM = "planted_by_gate"
 #: gate_mutant_kills' scratch-mutant registry (ruling AC2): this gate is the killer
