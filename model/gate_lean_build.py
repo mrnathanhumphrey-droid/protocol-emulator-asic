@@ -52,7 +52,8 @@ KEY = ("dstar", "dstar29", "dstar39", "dstar39_v2", "dstar39_st", "dstar39_hold"
        "prio_resp", "ts_chain", "rd_eq", "stall_free_bprime", "lemmaA_b",
        "hpri_b", "prio_resp_edf", "br1_empty", "head_valid_no_ret",
        "halfEdge_ok", "arm_release_half",
-       "runH_coinc_st", "dstar39_hold_st")
+       "runH_coinc_st", "dstar39_hold_st",
+       "stepF_noflush", "stepF_fill", "stepF_kill_set")
 #: proof_constants.load() key -> the Lean expression that must evaluate to it (SPEC: the map)
 CONSTS = {
     "lemmaA_window": "LEMMA_A_WINDOW", "R_base": "R_BASE", "dispatch_cycles": "DISPATCH_CYCLES",
