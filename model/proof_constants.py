@@ -122,9 +122,32 @@ def lane_words(img, lane, I=None):
         if x["op"] == I.OP_REARM:
             continue                      # looping: back to the base (seen); chaining: parks
         todo.append(w + 1)
+        if arm_is_ft(x, I):
+            todo.append(w + 2)            # a FALLTHROUGH ARM's edge takes PC+2
         if x["op"] in I.BRANCH_OPS:
             todo.append(I.branch_target(x))
     return sorted(out, key=lambda p: p[0])
+
+
+def arm_is_ft(x, I=None):
+    """agent 1's FALLTHROUGH ARM (batch 11-14; ArmFT.lean): its timeout continues at PC+1, its
+    edge flushes the lane and continues at PC+2. Encoding: the ISA's ARM_MOD_FALLTHROUGH bit once
+    it defines one; until then (ac3443d: ARM mod[1] reserved) an ARM with a timeout, ArmFT's
+    fragment reading (ArmFragT: an ARM word with a delay is FALLTHROUGH) -- see ft_rule()."""
+    I = I or _isa()
+    if x["op"] != I.OP_ARM:
+        return False
+    bit = getattr(I, "ARM_MOD_FALLTHROUGH", None)
+    if bit is not None:
+        return bool(x["mod"] & bit)
+    return x["delay"] > 0
+
+
+def ft_rule(I=None):
+    I = I or _isa()
+    if getattr(I, "ARM_MOD_FALLTHROUGH", None) is not None:
+        return "read: ARM mod bit ARM_MOD_FALLTHROUGH"
+    return "ASSUMED: an ARM with a timeout (the ISA has no FALLTHROUGH bit yet)"
 
 
 def usb_coresident_problems(img, k=None):

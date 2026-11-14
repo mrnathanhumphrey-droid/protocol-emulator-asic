@@ -120,6 +120,8 @@ def lane_graph(img, lane, I=None):
             succ = [base] if x["level"] else [w]       # looping: the base; chaining: itself
         elif x["op"] in I.BRANCH_OPS:
             succ = [w + 1, I.branch_target(x)]
+        elif PC.arm_is_ft(x, I):
+            succ = [w + 1, w + 2]                       # timeout: PC+1; edge (flush): PC+2
         else:
             succ = [w + 1]
         g[w] = (x, [s for s in succ if s in ws])
@@ -132,9 +134,12 @@ def word_gaps(x, after_arm, after_se0, prem, I):
     if op in I.BRANCH_OPS:
         return [I.branch_wait(x)]
     if op == I.OP_ARM:
-        if arm_kind(x, I) == "edge" and after_se0:
-            return [prem["arm_j"]]
-        return [prem["arm_floor"]]
+        g = prem["arm_j"] if (arm_kind(x, I) == "edge" and after_se0) else prem["arm_floor"]
+        if PC.arm_is_ft(x, I):
+            # ArmFT.arm_release_T: released at min(edge + 1, D), D = ts + a_dly (less the
+            # rebase's cycle after an ARM): the gap is at least the smaller
+            g = min(g, x["delay"] - (1 if after_arm else 0))
+        return [g]
     st = (op in (I.OP_SHIFT, I.OP_SHIFTIN) and x["mod"] & I.MOD_SELF_TIMED) or op == I.OP_SHIFTI
     if op == I.OP_SHIFTI:
         d = x["delay"] & 0xFF
@@ -184,9 +189,13 @@ def span_min(g, gaps, m):
     return min(best(w, i, m) for w in g for i in range(len(gaps[w])))
 
 
-def certificate(g, preds, gaps, k, B, tail, iters=200):
+def certificate(g, preds, gaps, k, B, tail, iters=200, floor=None, xr=None):
     """GapRun's certificate on the word graph with Rr = L + 2 (+ tail): returns (lat, Z, Rr) or
-    None when the values keep growing (no fixpoint: no certificate exists for this image)."""
+    None when the values keep growing (no fixpoint: no certificate exists for this image).
+    `floor`: a lateness floor per word (a FALLTHROUGH ARM's PC+2, refilled after its flush);
+    `xr`: extra response cycles per word (a FALLTHROUGH timeout's PC+1: the disarm cycle)."""
+    floor = floor or {}
+    xr = xr or {}
     I = _isa()
     D, HS = k["dstar"], k["head_slack"]
     npf = {w: g[w][0]["op"] in I.BRANCH_OPS for w in g}
@@ -197,7 +206,7 @@ def certificate(g, preds, gaps, k, B, tail, iters=200):
     lat = {w: 0 for w in g}
     Z = {w: 0 for w in g}
     for _ in range(iters):
-        Rr = {w: lat[w] + 2 + (tail if lat[w] > 0 else 0) for w in g}
+        Rr = {w: lat[w] + 2 + (tail if lat[w] > 0 else 0) + xr.get(w, 0) for w in g}
         Zn = {}
         for w in g:
             z = Rr[w] + (D + B if npf[w] else 0)
@@ -206,7 +215,7 @@ def certificate(g, preds, gaps, k, B, tail, iters=200):
             Zn[w] = z
         ln = {}
         for c in g:
-            v = 0
+            v = floor.get(c, 0)
             for b in preds[c]:
                 if npf[b]:
                     v = max(v, Rr[b] + HS + B - gp[b])
@@ -259,12 +268,27 @@ def br1_budget_fixpoint(g, gaps, lat, k):
     return None, None
 
 
+def ft_flush_late(B):
+    """FlushRestart.flush_head_refill: after a flush at f the lane's head is captured from a CAP
+    state within the 3 cycles to Wf plus the 23 + B window (the last such state f + 3 + (23 + B)
+    - 1), valid the cycle after; the view releases the lane at f + 1 (FlushStep.tsF). So the
+    PC+2 word's head is valid by its release + this."""
+    return 3 + (23 + B) - 1
+
+
+def ft_paths(g, I):
+    """{FALLTHROUGH ARM: (PC+1, PC+2)} -- the timeout and the edge continuations"""
+    return {a: (a + 1, a + 2) for a in g if PC.arm_is_ft(g[a][0], I)}
+
+
 def upper_gaps(x, I):
     """the release gaps' UPPER bound for a word on a deadline chain (exact for fixed delays);
     None where no upper bound holds (an ARM, a USB receive: their releases are the bus's)"""
     op = x["op"]
     if op in I.BRANCH_OPS:
         return I.branch_wait(x)
+    if PC.arm_is_ft(x, I):
+        return x["delay"]                             # min(edge + 1, D) <= D (arm_release_T)
     if op == I.OP_ARM or (op == I.OP_SHIFTIN and x["mod"] & I.MOD_SELF_TIMED):
         return None
     if op == I.OP_SHIFTI:
@@ -318,6 +342,13 @@ def full_report(img, name="image"):
     prem = premises(k)
     u = I.USB_LANE
     g, preds, gaps = build(img, u, prem, I)
+    fts = ft_paths(g, I)
+    # ArmFT: the edge flushes, so PC+2 is refilled from empty (flush_head_refill, B = 0 on the
+    # USB lane's own certificate); the timeout's decision only disarms, so PC+1 waits one more
+    # decision (disarm_noDec)
+    floor = {c2: ft_flush_late(0) for _c1, c2 in fts.values() if c2 in g}
+    xr = {c1: 1 for c1, _c2 in fts.values() if c1 in g}
+    certs = {}
     sops = [w for w in g if arm_kind(g[w][0], I) == "edge" and not (
         preds[w] and all(arm_kind(g[q][0], I) == "se0" for q in preds[w]))]
     off, unanch = {}, {}
@@ -336,7 +367,8 @@ def full_report(img, name="image"):
              prem["deadline_sop"], prem["trspipd1"], prem["rean_floor"], SYNC_MIN, SYNC_MAX))
     fails = []
     for sched, tail in (("b'", 2), ("shipped", 0)):
-        cert = certificate(g, preds, gaps, k, 0, tail)
+        cert = certificate(g, preds, gaps, k, 0, tail, floor=floor, xr=xr)
+        certs[sched] = cert
         print("== scheduler %s" % sched)
         if cert is None:
             print("  USB certificate: DIVERGENT (no fixpoint)")
@@ -357,7 +389,7 @@ def full_report(img, name="image"):
         for w in sorted(g):
             if arm_kind(g[w][0], I) != "edge":
                 continue
-            ok = lat[w] + 4 < gaps[w][0] - 1
+            ok = lat[w] + 4 + xr.get(w, 0) < gaps[w][0] - 1
             if not ok:
                 fails.append((sched, "arm w%d" % w))
             if w not in off:
@@ -369,7 +401,7 @@ def full_report(img, name="image"):
                 print("  arm_sop w%d: %s" % (s, "no EOP anchor on %d chain(s): boot / untimed entry"
                                              % unanch[s] if unanch[s] else "no anchored chain"))
                 continue
-            wb = off[s] + lat[s] + 4
+            wb = off[s] + lat[s] + 4 + xr.get(s, 0)
             nop_gap = min(gaps[n][-1] for n in g[s][1])
             fdl = next_sop_fetch_deadline(0, nop_gap, k, prem)
             ok = wb <= fdl
@@ -400,7 +432,7 @@ def full_report(img, name="image"):
                 xw = g[w][0]
                 if xw["op"] == I.OP_SHIFTI or (xw["op"] == I.OP_SHIFT and
                                                 xw["mod"] & I.MOD_SELF_TIMED):
-                    t = acc + lat[w] + 3
+                    t = acc + lat[w] + 3 + xr.get(w, 0)
                     worst = t if worst is None else max(worst, t)
                     continue
                 up = upper_gaps(xw, I)
@@ -427,12 +459,23 @@ def full_report(img, name="image"):
         # the other lanes (RespSpan.wb_close_span, S = 0 under (b'))
         if sched == "b'":
             ru = max(Rr.values())
+            # S: the no-decision cycles a window can hold -- here the FALLTHROUGH disarms
+            # (LemmaAN.lemmaA_n counts them; disarm_noDec), at most one per FALLTHROUGH ARM on
+            # a path within the window
+            ftlat = {w: (1 if w in fts else 0) for w in g}
             for m in range(1, 9):
                 G = span_min(g, gaps, m)
-                ry = 3 * (m + 3) + 0 + 3 - 1
+                S = 0
+                for _ in range(20):
+                    ry = 3 * (m + 3) + S + 3 - 1
+                    Sn = br1_window_count(g, gaps, ftlat, ry + 1) if fts else 0
+                    if Sn == S:
+                        break
+                    S = Sn
                 if G >= ry + 1 + ru:
-                    print("  other lanes: R = %d (USB decided <= %d times per window; "
-                          "G(%d) = %d >= R + 1 + R_u %d)" % (ry, m, m, G, ru))
+                    print("  other lanes: R = %d (USB decided <= %d times per window, S = %d "
+                          "disarm cycle(s); G(%d) = %d >= R + 1 + R_u %d)"
+                          % (ry, m, S, m, G, ru))
                     Bc = Bn if Bn is not None else k["br1_budget"]
                     cs = ry + k["pending_slack"] + Bc
                     print("  co-resident spacing for other lanes: R %d + %d + B %d = %d "
@@ -445,10 +488,33 @@ def full_report(img, name="image"):
             else:
                 print("  other lanes: no m <= 8 meets the span rule")
                 fails.append((sched, "other lanes"))
+    # the FALLTHROUGH ARMs (ArmFT; agent 1's pe_isa refusals, re-checked on the image)
+    print("== FALLTHROUGH ARMs: %d (encoding %s)" % (len(fts), PC.ft_rule(I)))
+    half = bool(I.read_header(img, u)["flags"] & I.FLAG_HALF_HIGH)
+    cb = certs.get("b'")
+    for a in sorted(fts):
+        c1, c2 = fts[a]
+        probs = []
+        if c1 not in g:
+            probs.append("no PC+1")
+        if c2 not in g:
+            probs.append("no PC+2")
+        elif g[c2][0]["op"] in (I.OP_SHIFT, I.OP_SHIFTIN):
+            probs.append("PC+2 w%d is a SHIFT/SHIFTIN (refused: refilled after the flush)" % c2)
+        if half:
+            probs.append("on a HALF lane (HALF and FALLTHROUGH are never combined)")
+        lt = cb[0].get(c2) if cb is not None and c2 in g else None
+        print("  ARM w%d: timeout -> w%d released <= ts + %d, + 1 disarm cycle; edge -> flush, "
+              "w%d head valid <= release + %s %s" % (a, c1, g[a][0]["delay"], c2,
+                                                    "-" if lt is None else lt,
+                                                    "OK" if not probs else "REFUSED: " +
+                                                    "; ".join(probs)))
+        for pr in probs:
+            fails.append(("FT", "w%d %s" % (a, pr)))
     # correction A (Wilson 11-14): an ARM with a timeout (the FALLTHROUGH handshake wait) must not
     # time out before the host's latest legal handshake start (window_end = TRSPIPD1 after our
     # EOP), and its timeout path to TOP's arm_sop must meet the retry-token deadline
-    tos = [w for w in g if g[w][0]["op"] == I.OP_ARM and g[w][0]["delay"] > 0]
+    tos = sorted(fts)
     if not tos:
         print("== correction A: no ARM with a timeout in this image (check inactive)")
     for a in sorted(tos):
@@ -461,7 +527,7 @@ def full_report(img, name="image"):
         t_hi = max(offs) + g[a][0]["delay"]                 # latest
         ok1 = t_lo >= prem["trspipd1"]
         worst = None
-        stack = [(n, t_hi) for n in g[a][1]]                # PC+1: the timeout continuation
+        stack = [(n, t_hi) for n in g[a][1] if n == a + 1]  # PC+1: the timeout continuation
         seen = set()
         while stack:
             w, acc = stack.pop()
@@ -472,7 +538,7 @@ def full_report(img, name="image"):
             if arm_kind(xw, I) == "edge" and w in off:      # TOP's (or a copy's) arm_sop
                 nop_gap = min(gaps[n][-1] for n in g[w][1])
                 dl = retry_fetch_deadline(0, nop_gap, k, prem)
-                t = acc + 4                                 # released at acc, on time: + Rr + 2
+                t = acc + 4 + xr.get(w, 0)                  # released at acc, on time: + Rr + 2
                 worst = (t, dl) if worst is None or t - dl > worst[0] - worst[1] else worst
                 continue
             up = upper_gaps(xw, I)
