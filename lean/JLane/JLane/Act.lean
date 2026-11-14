@@ -70,6 +70,9 @@ structure Program2 where
   /-- `usb_stuff` (l.2081): this dispatch is a USB stuff slot (held, counts no bit). Free input.
   Default: never. -/
   stuff : Nat → Lane → Bool := fun _ _ => false
+  /-- The prefetch priority pick, as `Program.pick` (`none`: the shipped `winner_q`; `some f`:
+  the batch's `pf_q`, `f` the EDF choice read on the RTL engine). -/
+  pick : Option (Engine → Option Lane) := none
 
 /-- The v2 engine: v1 registers plus slot words and the clocked-phase registers. -/
 structure Engine2 where
@@ -157,7 +160,8 @@ theorem portNextW_congr (P : Program) (e : Engine) (w1 w2 : Lane → Bool)
   rw [this]
 
 /-- v1 view of a v2 program (`dly` is only read through words in v2). -/
-def Program2.toP (P : Program2) (dly : Lane → Nat) : Program := { live := P.live, dly := dly }
+def Program2.toP (P : Program2) (dly : Lane → Nat) : Program :=
+  { live := P.live, dly := dly, pick := P.pick }
 
 namespace Engine2
 
@@ -212,6 +216,28 @@ theorem npf2_eq (fw : Engine2 → Word) (x : Engine2) (Q : Program)
   · exact hq.symm
   · rfl
 
+/-- The v2 branch-1 target register's next value: the winner (shipped), or the batch's pick
+filtered by its candidate test on the v2 engine (no ARMs here: released = `ts ≤ now`). -/
+def winq2 (P : Program2) (w : Option Lane) (x : Engine2) : Option Lane :=
+  match P.pick with
+  | none   => w
+  | some f => pfPick (P.toP (fun _ => 0)) f x.e
+
+/-- The filtered pick reads its program only through `live`. -/
+theorem pfPick_live (Q Q' : Program) (h : Q.live = Q'.live) (f : Engine → Option Lane)
+    (e : Engine) : pfPick Q f e = pfPick Q' f e := by
+  unfold pfPick
+  rw [h]
+
+/-- A V4b program with the same liveness and pick registers what the v2 engine does. -/
+theorem winq2_eq (P : Program2) (Q : Program) (hl : Q.live = P.live) (hpk : Q.pick = P.pick)
+    (w : Option Lane) (x : Engine2) : winqNext Q (fun _ => w) x.e = winq2 P w x := by
+  unfold winqNext winq2
+  rw [hpk]
+  cases P.pick with
+  | none => rfl
+  | some f => exact pfPick_live Q (P.toP (fun _ => 0)) hl f x.e
+
 /-- One v2 clock cycle. `w` is this cycle's EDF winner (the v1 step reads its
 scheduler only at the current state, see `step_win_congr`). -/
 def step2 (P : Program2) (fw : Engine2 → Word) (w : Option Lane) (x : Engine2) : Engine2 :=
@@ -223,7 +249,7 @@ def step2 (P : Program2) (fw : Engine2 → Word) (w : Option Lane) (x : Engine2)
            sel := x.selNext P
            ts := x.tsNext P
            pst := p.pst, pl := p.pl, prr := p.prr, pbr1 := p.pbr1, pslot := p.pslot
-           winq := w
+           winq := winq2 P w x
            st := d.st, cur := d.cur
            npf := npf2 fw x }
     word := x.wordNext fw
@@ -332,7 +358,7 @@ theorem step2_proj (P : Program2) (dly : Lane → Nat) (fw : Engine2 → Word)
           prr := (portNextW (P.toP (fun _ => 0)) x.wantFetch x.e).prr,
           pbr1 := (portNextW (P.toP (fun _ => 0)) x.wantFetch x.e).pbr1,
           pslot := (portNextW (P.toP (fun _ => 0)) x.wantFetch x.e).pslot,
-          winq := w, st := (dispNext (fun _ => w) x.e).st,
+          winq := winq2 P w x, st := (dispNext (fun _ => w) x.e).st,
           cur := (dispNext (fun _ => w) x.e).cur,
           npf := npf2 fw x } : Engine) = step (P.toP dly) (fun _ => w) x.e
   rw [hp, ha, hs, ht, hn]

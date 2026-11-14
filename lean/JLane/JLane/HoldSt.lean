@@ -32,7 +32,8 @@ def stH (P2 : Program2) (dly : Lane → Nat) (fw : Engine2 → Word) (hl : Engin
     ext := fun t l =>
       ((runH P2 fw hl sched (t - y0.x.e.now) y0).x.head
         (runH P2 fw hl sched (t - y0.x.e.now) y0).x.e.cur).dly - dly l
-    ret := fun t _ => (runH P2 fw hl sched (t - y0.x.e.now) y0).x.retire P2 }
+    ret := fun t _ => (runH P2 fw hl sched (t - y0.x.e.now) y0).x.retire P2
+    pick := P2.pick }
 
 /-- **Coincidence, self-timed.** While the gate has been open at every decision so far, the hold
 run's engine is the V4b run of `stH` under `win1H`. -/

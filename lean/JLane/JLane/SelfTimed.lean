@@ -87,7 +87,7 @@ program `Q` with the same liveness and minimum delays whose retire flag is the v
 and whose extra is the word's delay above the minimum, at this cycle. -/
 theorem step2_proj_st (P : Program2) (Q : Program) (dly : Lane → Nat) (fw : Engine2 → Word)
     (w : Option Lane) (x : Engine2) (h : StFrag dly x)
-    (hl : Q.live = P.live) (hpk : Q.pick = none) (hd : Q.dly = dly)
+    (hl : Q.live = P.live) (hpk : Q.pick = P.pick) (hd : Q.dly = dly)
     (hr : Q.ret x.e.now x.e.cur = x.retire P)
     (he : Q.ext x.e.now x.e.cur = (x.head x.e.cur).dly - dly x.e.cur)
     (hq : Q.fnpf x.e = decide ((fw x).op = .br)) :
@@ -123,10 +123,10 @@ theorem step2_proj_st (P : Program2) (Q : Program) (dly : Lane → Nat) (fw : En
           prr := (portNextW (P.toP (fun _ => 0)) x.wantFetch x.e).prr,
           pbr1 := (portNextW (P.toP (fun _ => 0)) x.wantFetch x.e).pbr1,
           pslot := (portNextW (P.toP (fun _ => 0)) x.wantFetch x.e).pslot,
-          winq := w, st := (dispNext (fun _ => w) x.e).st,
+          winq := winq2 P w x, st := (dispNext (fun _ => w) x.e).st,
           cur := (dispNext (fun _ => w) x.e).cur,
           npf := npf2 fw x } : Engine) = step Q (fun _ => w) x.e
-  rw [hp, ha, hs, ht, hn, step_pick_none Q _ _ hpk]
+  rw [hp, ha, hs, ht, hn, step_winq_eq Q _ _ _ (winq2_eq P Q hl hpk w x)]
   rfl
 
 /-- The fragment is preserved when every fetched word is in it. -/
@@ -166,7 +166,8 @@ def stP (P2 : Program2) (dly : Lane → Nat) (fw : Engine2 → Word)
     ext := fun t l =>
       ((run2 P2 fw sched (t - x0.e.now) x0).head (run2 P2 fw sched (t - x0.e.now) x0).e.cur).dly
         - dly l
-    ret := fun t _ => (run2 P2 fw sched (t - x0.e.now) x0).retire P2 }
+    ret := fun t _ => (run2 P2 fw sched (t - x0.e.now) x0).retire P2
+    pick := P2.pick }
 
 /-- **Run refinement, self-timed.** On fragment programs the projected v2 run is a V4b run
 of `stP`. -/

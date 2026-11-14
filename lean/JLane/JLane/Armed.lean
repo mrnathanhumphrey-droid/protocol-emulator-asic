@@ -44,12 +44,26 @@ def armWB (X : Engine3) (P : Program2) : Bool :=
 
 end Engine3
 
+/-- The branch-1 target register on the ARM engine: the winner (shipped), or the batch's pick
+filtered by the RTL's candidate test `pf_rdy = rdy_rel & ~l_actv[hix]` with
+`rdy_rel = live & now ≥ ts & ~(armed & notmo)` (l.1885, TF2-R3) -- every ARM of this fragment
+has no timeout, so `~armed`. -/
+def winq3 (P : Program2) (w : Option Lane) (X : Engine3) : Option Lane :=
+  match P.pick with
+  | none   => w
+  | some f =>
+    match f X.x.e with
+    | some v => if P.live v && decide (X.x.e.ts v ≤ X.x.e.now) && !X.armed v &&
+        !X.x.e.headValid v then some v else none
+    | none   => none
+
 /-- One cycle with the ARM registers: the v2 step, then the rebase (`ts_n` gives `arm_hit`
 priority, l.2577), arming at an ARM's writeback, disarming at the edge. -/
 def step3 (P : Program2) (fw : Engine2 → Word) (edge : Nat → Lane → Nat) (w : Option Lane)
     (X : Engine3) : Engine3 :=
   let x' := step2 P fw w X.x
-  { x := { x' with e := { x'.e with ts := fun l => if X.hit l then X.x.e.now else x'.e.ts l } }
+  { x := { x' with e := { x'.e with ts := fun l => if X.hit l then X.x.e.now else x'.e.ts l,
+                                     winq := winq3 P w X } }
     armed := fun l => if X.hit l then false
       else if X.armWB P && decide (l = X.x.e.cur) then true else X.armed l
     armE := fun l => if X.armWB P && decide (l = X.x.e.cur) then edge X.x.e.now l else X.armE l
@@ -127,7 +141,7 @@ extra `ext3` and the branch decode, read through `πE`. -/
 theorem step3_proj (P : Program2) (Q : Program) (Wn : Nat) (fw : Engine2 → Word)
     (edge : Nat → Lane → Nat) (hedge : ∀ t l, t + 1 ≤ edge t l)
     (w : Option Lane) (X : Engine3) (h : ArmInv Wn X)
-    (hl : Q.live = P.live) (hpk : Q.pick = none) (hd : Q.dly = fun _ => 0)
+    (hl : Q.live = P.live) (hwq : winqNext Q (fun _ => w) (πE X) = winq3 P w X) (hd : Q.dly = fun _ => 0)
     (hr : Q.ret X.x.e.now X.x.e.cur = X.x.retire P)
     (he : Q.ext X.x.e.now X.x.e.cur = ext3 P edge X)
     (hq : Q.fnpf (πE X) = decide ((fw X.x).op = .br)) :
@@ -246,10 +260,10 @@ theorem step3_proj (P : Program2) (Q : Program) (Wn : Nat) (fw : Engine2 → Wor
           prr := (portNextW (P.toP (fun _ => 0)) X.x.wantFetch X.x.e).prr,
           pbr1 := (portNextW (P.toP (fun _ => 0)) X.x.wantFetch X.x.e).pbr1,
           pslot := (portNextW (P.toP (fun _ => 0)) X.x.wantFetch X.x.e).pslot,
-          winq := w, st := (dispNext (fun _ => w) X.x.e).st,
+          winq := winq3 P w X, st := (dispNext (fun _ => w) X.x.e).st,
           cur := (dispNext (fun _ => w) X.x.e).cur,
           npf := npf2 fw X.x } : Engine) = step Q (fun _ => w) (πE X)
-  rw [hp, ha, hs, ht, hn, step_pick_none Q _ _ hpk]
+  rw [hp, ha, hs, ht, hn, step_winq_eq Q _ _ _ hwq]
   rfl
 
 /-- A lane that neither sees its edge nor writes back this cycle keeps its ARM registers,
@@ -502,6 +516,68 @@ theorem ready_iff (Wn : Nat) (X : Engine3) (h : ArmInv Wn X) (v : Lane) :
       have := harm v hav
       omega
 
+/-- What the ARM engine's pick register can hold: a live, released, unarmed lane with an empty
+head. -/
+theorem winq3_some (P : Program2) (X : Engine3) (f : Engine → Option Lane) (hp : P.pick = some f)
+    (v : Lane) (h : winq3 P none X = some v) :
+    P.live v = true ∧ X.x.e.ts v ≤ X.x.e.now ∧ X.armed v = false ∧ X.x.e.headValid v = false := by
+  unfold winq3 at h
+  rw [hp] at h
+  have h1 : (match f X.x.e with
+      | some v => if P.live v && decide (X.x.e.ts v ≤ X.x.e.now) && !X.armed v &&
+          !X.x.e.headValid v then some v else none
+      | none => none) = some v := h
+  cases hf : f X.x.e with
+  | none => rw [hf] at h1; cases h1
+  | some u =>
+    have h2 : (if P.live u && decide (X.x.e.ts u ≤ X.x.e.now) && !X.armed u &&
+        !X.x.e.headValid u then some u else none) = some v := by
+      rw [hf] at h1
+      exact h1
+    by_cases c : (P.live u && decide (X.x.e.ts u ≤ X.x.e.now) && !X.armed u &&
+        !X.x.e.headValid u) = true
+    · rw [if_pos c] at h2
+      cases h2
+      simp only [Bool.and_eq_true, decide_eq_true_eq, Bool.not_eq_true'] at c
+      exact ⟨c.1.1.1, c.1.1.2, c.1.2, c.2⟩
+    · rw [if_neg c] at h2
+      cases h2
+
+/-- **The view registers what the engine does**, for a V4b program whose pick reads the
+engine's register along the run (`g`): RTL-released ⇒ view-released (`ready_iff`). -/
+theorem winq3_view (P2 : Program2) (Q : Program) (Wn : Nat) (X : Engine3) (h : ArmInv Wn X)
+    (hl : Q.live = P2.live) (w : Option Lane) (g : Engine → Option Lane)
+    (hg : Q.pick = P2.pick.map (fun _ => g)) (hgX : g (πE X) = winq3 P2 none X) :
+    winqNext Q (fun _ => w) (πE X) = winq3 P2 w X := by
+  unfold winqNext
+  rw [hg]
+  cases hp : P2.pick with
+  | none =>
+    show w = winq3 P2 w X
+    unfold winq3
+    rw [hp]
+  | some f =>
+    have hw : winq3 P2 w X = winq3 P2 none X := by
+      unfold winq3
+      rw [hp]
+    show pfPick Q g (πE X) = winq3 P2 w X
+    rw [hw]
+    unfold pfPick
+    rw [hgX]
+    cases hr : winq3 P2 none X with
+    | none => rfl
+    | some v =>
+      obtain ⟨hlv, hts, hav, hhv⟩ := winq3_some P2 X f hp v hr
+      have hrel := (ready_iff Wn X h v).mp ⟨hts, hav⟩
+      have hc : (Q.live v && decide ((πE X).ts v ≤ (πE X).now) && !(πE X).headValid v) = true := by
+        have hhv' : (πE X).headValid v = false := hhv
+        rw [hl, hlv, hhv']
+        simp only [Bool.true_and, Bool.not_false, Bool.and_true, decide_eq_true_eq]
+        exact hrel
+      show (if (Q.live v && decide ((πE X).ts v ≤ (πE X).now) && !(πE X).headValid v) = true
+        then some v else none) = some v
+      rw [if_pos hc]
+
 theorem arm_run3 (P : Program2) (Wn : Nat) (fw : Engine2 → Word) (edge : Nat → Lane → Nat)
     (hedge : ∀ t l, t + 1 ≤ edge t l) (sched : Engine3 → Option Lane)
     (hf : ∀ y, ArmFragW Wn (fw y))
@@ -519,7 +595,9 @@ def armP (P2 : Program2) (fw : Engine2 → Word) (edge : Nat → Lane → Nat)
     dly := fun _ => 0
     ext := fun t _ => ext3 P2 edge (run3 P2 fw edge sched (t - X0.x.e.now) X0)
     ret := fun t _ => (run3 P2 fw edge sched (t - X0.x.e.now) X0).x.retire P2
-    fnpf := fun e => decide ((fw (run3 P2 fw edge sched (e.now - X0.x.e.now) X0).x).op = .br) }
+    fnpf := fun e => decide ((fw (run3 P2 fw edge sched (e.now - X0.x.e.now) X0).x).op = .br)
+    pick := P2.pick.map (fun _ => fun e =>
+      winq3 P2 none (run3 P2 fw edge sched (e.now - X0.x.e.now) X0)) }
 
 /-- The V4b scheduler induced by `sched` along the trajectory from `X0`. -/
 def win3 (Q : Program) (P2 : Program2) (fw : Engine2 → Word) (edge : Nat → Lane → Nat)
@@ -611,7 +689,12 @@ theorem run3_proj (P2 : Program2) (Wn : Nat) (fw : Engine2 → Word) (edge : Nat
       (win3 (armP P2 fw edge sched X0) P2 fw edge sched X0),
       win3_on P2 Wn fw edge hedge sched X0 hX0 hf hsw hss n]
     refine step3_proj P2 (armP P2 fw edge sched X0) Wn fw edge hedge _ _
-      (arm_run3 P2 Wn fw edge hedge sched hf hsw n X0 hX0) rfl rfl rfl ?_ ?_ ?_
+      (arm_run3 P2 Wn fw edge hedge sched hf hsw n X0 hX0) rfl ?_ rfl ?_ ?_ ?_
+    · refine winq3_view P2 (armP P2 fw edge sched X0) Wn _
+        (arm_run3 P2 Wn fw edge hedge sched hf hsw n X0 hX0) rfl _ _ rfl ?_
+      show winq3 P2 none (run3 P2 fw edge sched
+        ((run3 P2 fw edge sched n X0).x.e.now - X0.x.e.now) X0) = _
+      rw [hk]
     · show (run3 P2 fw edge sched ((run3 P2 fw edge sched n X0).x.e.now - X0.x.e.now) X0).x.retire
         P2 = _
       rw [hk]

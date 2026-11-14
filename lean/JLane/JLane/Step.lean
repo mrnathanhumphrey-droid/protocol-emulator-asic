@@ -155,6 +155,13 @@ theorem winq_step (P : Program) (win : Engine → Option Lane) (e : Engine) (w :
       · rw [if_neg hc] at h2
         cases h2
 
+/-- A step whose register value is known: rewrite it in place. -/
+theorem step_winq_eq (P : Program) (win : Engine → Option Lane) (e : Engine) (r : Option Lane)
+    (h : winqNext P win e = r) : step P win e = { step P win e with winq := r } := by
+  show step P win e = { step P win e with winq := r }
+  rw [← h]
+  rfl
+
 /-- Under the shipped rule (`pick = none`) the register is the dispatch winner. -/
 theorem step_pick_none (P : Program) (win : Engine → Option Lane) (e : Engine)
     (h : P.pick = none) : step P win e = { step P win e with winq := win e } := by

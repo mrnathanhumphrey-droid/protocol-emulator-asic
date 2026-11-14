@@ -66,6 +66,19 @@ def disarm (X : EngineT) (w : Option Lane) (l : Lane) : Bool :=
 
 end EngineT
 
+/-- The branch-1 target register on the FALLTHROUGH engine: the dispatched winner (shipped), or
+the batch's pick filtered by the RTL candidate test `rdy_rel & ~l_actv[hix]` with
+`rdy_rel = live & now ≥ ts & ~(armed & notmo)` -- a FALLTHROUGH ARM always has a timeout, a plain
+one never, so an armed lane is a candidate only if it is a FALLTHROUGH lane. -/
+def winqT (P : Program2) (w : Option Lane) (X : EngineT) : Option Lane :=
+  match P.pick with
+  | none   => X.wd w
+  | some f =>
+    match f X.x.e with
+    | some v => if P.live v && decide (X.x.e.ts v ≤ X.x.e.now) && (!X.armed v || X.armT v) &&
+        !X.x.e.headValid v then some v else none
+    | none   => none
+
 /-- One cycle. The v2 step, with: the port masking this cycle's flushed lanes (agent 1's scan
 fix), the slots of a flushed lane emptied and a killed capture filing nothing, the rebase at an
 edge, arming (and the FALLTHROUGH flag) at an ARM's writeback, disarming at the edge or at a
@@ -82,7 +95,7 @@ def step3T (P : Program2) (fw : Engine2 → Word) (edge : Nat → Lane → Nat) 
                   sel := X.x.selNext P
                   ts := fun l => if X.hit l = true then X.x.e.now else X.x.tsNext P l
                   pst := p.pst, pl := p.pl, prr := p.prr, pbr1 := p.pbr1, pslot := p.pslot
-                  winq := X.wd w
+                  winq := winqT P w X
                   st := d.st, cur := d.cur
                   npf := npf2 fw X.x }
            word := X.x.wordNext fw
@@ -427,7 +440,7 @@ theorem step3T_proj (P : Program2) (Q : Program) (Wn : Nat) (fw : Engine2 → Wo
     (w : Option Lane) (X : EngineT) (h : InvT Wn X)
     (hwv : ∀ v, X.x.e.st = .idle → w = some v →
       X.x.e.ts v ≤ X.x.e.now ∧ (X.armed v = true → X.armT v = true))
-    (hl : Q.live = P.live) (hpk : Q.pick = none) (hd : Q.dly = fun _ => 0)
+    (hl : Q.live = P.live) (hwq : winqNext Q (fun _ => X.wd w) (πT X) = winqT P w X) (hd : Q.dly = fun _ => 0)
     (hr : Q.ret X.x.e.now X.x.e.cur = X.x.retire P)
     (he : Q.ext X.x.e.now X.x.e.cur = ext3T P edge X)
     (hq : Q.fnpf (πT X) = decide ((fw X.x).op = .br)) :
@@ -486,17 +499,99 @@ theorem step3T_proj (P : Program2) (Q : Program) (Wn : Nat) (fw : Engine2 → Wo
            prr := (portNextW (liveFl (P.toP (fun _ => 0)) X.fl) X.x.wantFetch X.x.e).prr
            pbr1 := (portNextW (liveFl (P.toP (fun _ => 0)) X.fl) X.x.wantFetch X.x.e).pbr1
            pslot := (portNextW (liveFl (P.toP (fun _ => 0)) X.fl) X.x.wantFetch X.x.e).pslot
-           winq := X.wd w
+           winq := winqT P w X
            st := (dispNext (fun _ => X.wd w) X.x.e).st
            cur := (dispNext (fun _ => X.wd w) X.x.e).cur
            npf := npf2 fw X.x }, (step3T P fw edge w X).pkill⟩ : EngineF) =
     stepF Q (fun _ => X.wd w) X.fl (πF X)
-  have hwq : winqNext Q (fun _ => X.wd w) (πF X).e = X.wd w := by
-    unfold winqNext
-    rw [hpk]
+  have hwq' : winqNext Q (fun _ => X.wd w) (πF X).e = winqT P w X := hwq
   unfold stepF
-  rw [hp, ha, hs, ht, hn, hwq]
+  rw [hp, ha, hs, ht, hn, hwq']
   rfl
+
+/-- What the FALLTHROUGH engine's pick register can hold. -/
+theorem winqT_some (P : Program2) (X : EngineT) (f : Engine → Option Lane) (hp : P.pick = some f)
+    (v : Lane) (h : winqT P none X = some v) :
+    P.live v = true ∧ X.x.e.ts v ≤ X.x.e.now ∧ (X.armed v = true → X.armT v = true) ∧
+      X.x.e.headValid v = false := by
+  unfold winqT at h
+  rw [hp] at h
+  have h1 : (match f X.x.e with
+      | some v => if P.live v && decide (X.x.e.ts v ≤ X.x.e.now) && (!X.armed v || X.armT v) &&
+          !X.x.e.headValid v then some v else none
+      | none => none) = some v := h
+  cases hf : f X.x.e with
+  | none => rw [hf] at h1; cases h1
+  | some u =>
+    have h2 : (if P.live u && decide (X.x.e.ts u ≤ X.x.e.now) && (!X.armed u || X.armT u) &&
+        !X.x.e.headValid u then some u else none) = some v := by
+      rw [hf] at h1
+      exact h1
+    by_cases c : (P.live u && decide (X.x.e.ts u ≤ X.x.e.now) && (!X.armed u || X.armT u) &&
+        !X.x.e.headValid u) = true
+    · rw [if_pos c] at h2
+      cases h2
+      simp only [Bool.and_eq_true, decide_eq_true_eq, Bool.not_eq_true', Bool.or_eq_true] at c
+      refine ⟨c.1.1.1, c.1.1.2, fun ha => ?_, c.2⟩
+      rcases c.1.2 with h' | h'
+      · rw [ha] at h'; cases h'
+      · exact h'
+    · rw [if_neg c] at h2
+      cases h2
+
+/-- RTL-released ⇒ released in the view: a candidate lane's `relT` has passed. -/
+theorem relT_le_of_ready (Wn : Nat) (X : EngineT) (h : InvT Wn X) (v : Lane)
+    (hts : X.x.e.ts v ≤ X.x.e.now) (hT : X.armed v = true → X.armT v = true) :
+    relT X v ≤ X.x.e.now := by
+  obtain ⟨-, -, harm, -, hreb, -, -⟩ := h
+  unfold relT
+  cases ha : X.armed v
+  · simp only [Bool.false_eq_true, ↓reduceIte]
+    cases hr : X.reb v
+    · simp only [Bool.false_eq_true, ↓reduceIte]
+      exact hts
+    · have := hreb v hr
+      simp only [↓reduceIte]
+      omega
+  · have hT' := hT ha
+    have hle := harm v ha
+    simp only [↓reduceIte]
+    rw [if_pos ⟨hT', by omega⟩]
+    exact hts
+
+/-- **The view registers what the engine does** (FALLTHROUGH). -/
+theorem winqT_view (P2 : Program2) (Q : Program) (Wn : Nat) (X : EngineT) (h : InvT Wn X)
+    (hl : Q.live = P2.live) (w : Option Lane) (g : Engine → Option Lane)
+    (hg : Q.pick = P2.pick.map (fun _ => g)) (hgX : g (πT X) = winqT P2 none X) :
+    winqNext Q (fun _ => X.wd w) (πT X) = winqT P2 w X := by
+  unfold winqNext
+  rw [hg]
+  cases hp : P2.pick with
+  | none =>
+    show X.wd w = winqT P2 w X
+    unfold winqT
+    rw [hp]
+  | some f =>
+    have hw : winqT P2 w X = winqT P2 none X := by
+      unfold winqT
+      rw [hp]
+    show pfPick Q g (πT X) = winqT P2 w X
+    rw [hw]
+    unfold pfPick
+    rw [hgX]
+    cases hr : winqT P2 none X with
+    | none => rfl
+    | some v =>
+      obtain ⟨hlv, hts, hT, hhv⟩ := winqT_some P2 X f hp v hr
+      have hrel := relT_le_of_ready Wn X h v hts hT
+      have hc : (Q.live v && decide ((πT X).ts v ≤ (πT X).now) && !(πT X).headValid v) = true := by
+        have hhv' : (πT X).headValid v = false := hhv
+        rw [hl, hlv, hhv']
+        simp only [Bool.true_and, Bool.not_false, Bool.and_true, decide_eq_true_eq]
+        exact hrel
+      show (if (Q.live v && decide ((πT X).ts v ≤ (πT X).now) && !(πT X).headValid v) = true
+        then some v else none) = some v
+      rw [if_pos hc]
 
 /-- **The invariant is preserved** when every fetched word is in the fragment and a decision
 names a lane whose timestamp has passed and which, if armed, is a FALLTHROUGH lane. -/
@@ -725,7 +820,9 @@ def armPT (P2 : Program2) (fw : Engine2 → Word) (edge : Nat → Lane → Nat)
     dly := fun _ => 0
     ext := fun t _ => ext3T P2 edge (run3T P2 fw edge sched (t - X0.x.e.now) X0)
     ret := fun t _ => (run3T P2 fw edge sched (t - X0.x.e.now) X0).x.retire P2
-    fnpf := fun e => decide ((fw (run3T P2 fw edge sched (e.now - X0.x.e.now) X0).x).op = .br) }
+    fnpf := fun e => decide ((fw (run3T P2 fw edge sched (e.now - X0.x.e.now) X0).x).op = .br)
+    pick := P2.pick.map (fun _ => fun e =>
+      winqT P2 none (run3T P2 fw edge sched (e.now - X0.x.e.now) X0)) }
 
 /-- The dispatched winners along the trajectory (none in a disarm cycle). -/
 def winT (P2 : Program2) (fw : Engine2 → Word) (edge : Nat → Lane → Nat)
@@ -772,7 +869,11 @@ theorem run3T_proj (P2 : Program2) (Wn : Nat) (fw : Engine2 → Word) (edge : Na
     rw [hw, hfl]
     have hI := invT_run P2 Wn fw edge hedge sched hf hsw n X0 hX0
     refine step3T_proj P2 (armPT P2 fw edge sched X0) Wn fw edge hedge _ _ hI
-      (fun v hi hv => hsw _ v hi hv) rfl rfl rfl ?_ ?_ ?_
+      (fun v hi hv => hsw _ v hi hv) rfl ?_ rfl ?_ ?_ ?_
+    · refine winqT_view P2 (armPT P2 fw edge sched X0) Wn _ hI rfl _ _ rfl ?_
+      show winqT P2 none (run3T P2 fw edge sched
+        ((run3T P2 fw edge sched n X0).x.e.now - X0.x.e.now) X0) = _
+      rw [hk]
     · show (run3T P2 fw edge sched ((run3T P2 fw edge sched n X0).x.e.now - X0.x.e.now) X0).x.retire
         P2 = _
       rw [hk]
