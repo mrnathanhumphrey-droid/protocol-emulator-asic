@@ -28,3 +28,4 @@ import JLane.UsbLane
 import JLane.StRetire
 import JLane.EdfUsb
 import JLane.UsbNoStall
+import JLane.OptA
