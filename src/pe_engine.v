@@ -3081,12 +3081,24 @@ module pe_engine #(
             // ⭐ TF3: the registered winner, re-checked live -- a lane can halt
             // (timeout, stretch fault) in the cycle after it won, and a refill
             // for a halted lane is four cycles of port time for nothing.
+            // `M_PF_LIVE_WINNER` (Wilson 11-13, W6 fallback): the prefetch serves the
+            // LIVE winner first, as before TF3 (bisected: arm C lane 4 RQ 29 at
+            // 372ca6e, 0 from 3b37967 TF1-TF6) -- run_dstar_check's instrument control.
+`ifdef M_PF_LIVE_WINNER
+            if (winner_v && l_live[winner] && !l_actv[hix[winner]]) begin
+              pl    <= winner;
+              pbr1  <= 1'b1;
+              pslot <= l_sel[winner];
+              paddr <= l_pc[winner];
+              pst   <= P_REQ;
+`else
             if (winner_v_q && l_live[winner_q] && !l_actv[hix[winner_q]]) begin
               pl    <= winner_q;
               pbr1  <= 1'b1;
               pslot <= l_sel[winner_q];      // the head: it is what stalls
               paddr <= l_pc[winner_q];
               pst   <= P_REQ;
+`endif
             end else if (l_live[prr] && want_fetch(prr)) begin
               // fill the head if empty, otherwise the spare
               pl    <= prr;

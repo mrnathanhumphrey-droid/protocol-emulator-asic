@@ -240,6 +240,12 @@ SURVIVORS = {
                    "value as `cur_ck` at dispatch and on a header write to "
                    "the current lane, so every clock-pin access reads the "
                    "same pin in the same cycle -- equivalent by requirement.",
+    # ⭐ W6 (Wilson 11-13): TF3's old form, kept as an INSTRUMENT CONTROL, not a
+    # defect -- run_dstar_check builds it and REQUIRES arm C RQ > 0 under it.
+    "M_PF_LIVE_WINNER": "the pre-TF3 prefetch priority (the LIVE winner served "
+                        "first); functionally a valid engine, so no bench kills "
+                        "it -- its role is test/run_dstar_check.py's control, "
+                        "which goes red if it stops showing a refill wait.",
 }
 
 
@@ -272,6 +278,14 @@ SCRATCH = {
     # Wilson 11-03: the bound store's clock-gate enable inverted -- the bound
     # arm of gate store-latch, on the PDK's own models, must fail (CI)
     "S_ICG_POLARITY": "test/gate_store_latch.py",
+    # the Lean proofs (Wilson 11-12; a2 f0a3454): a sorry, an axiom, a moved
+    # constant -- each planted in a temp copy; gate lean-build reds on each (CI, lean shard)
+    "M_LEAN_SORRY": "model/gate_lean_build.py",
+    "M_LEAN_AXIOM": "model/gate_lean_build.py",
+    "M_LEAN_CONST": "model/gate_lean_build.py",
+    # the USB sweep (Wilson 11-13 condition 4; a2 02bf147): the deadline margin at 1
+    # -- gate usb_sweep's J <= 2 reds (CI, sim2)
+    "M_USB_MARGIN1": "model/gate_usb_sweep.py",
 }
 
 

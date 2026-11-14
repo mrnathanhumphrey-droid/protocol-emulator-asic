@@ -89,6 +89,10 @@ EXPECT = {
     # the re-anchor floor's must-fire (Wilson 11-12): one substitution,
     # `l_timestamp[USB_LANE]` -> `ts_n[USB_LANE]` in rean_cap
     "M_REAN_FLOOR_EARLY": (2, None),
+    # W6's instrument control (Wilson 11-13): the prefetch serves the LIVE winner
+    # first, as before TF3 -- the condition and the three assignments that name the
+    # lane (pl / pslot / paddr), each winner_q -> winner
+    "M_PF_LIVE_WINNER":   (8, "the pre-TF3 prefetch priority: the condition and the three lane-naming assignments of one if-arm (winner_q -> winner, winner_v_q -> winner_v), one substitution each, 4 removed + 4 added"),
     # 11-13: comments moved OUT of these arms (they were counted as the delta)
     "M_ADDR_OK_EARLY":    (2, None),
     "M_BUF_NO_REFUSE":    (4, None),

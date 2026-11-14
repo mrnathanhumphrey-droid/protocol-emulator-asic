@@ -92,6 +92,11 @@ SCEN = {
     "A9 new addr": (SA_HOST + [("A", 11000, IN0), ("R", 120, ACKP),
                                ("H", 1500, P(T(S, 5))), ("H", 0, D0(GETDESC))], SA_LOAD,
                     dict(pk=[("ACK", 1), ("ZLP", 2), ("ACK", 5)], ad=[5], rd=[1, 0], pv=COMMIT5), 28000),
+    # ⚠ A DELIBERATE STRESS CASE, NOT HOST TIMING (11-13, agents 1 + 2): the retry IN is
+    # timed H 1500 from the host's own last packet, so it starts while our ZLP is still
+    # on the line (its SOP before our release). A real host retries only after its
+    # 16-18-bit timeout after our EOP; kept because it re-arms under a host SOP that
+    # lands before our release -- harder than the spec asks, and it passes (+60).
     "A10 lost ZLP": (SA_HOST + [("A", 11000, IN0), ("H", 1500, IN0), ("H", 1500, IN0),
                                 ("R", 120, ACKP)], SA_LOAD,
                      dict(pk=[("ACK", 1), ("ZLP", 2), ("ZLP", 4)], ad=[5], rd=[1, 0], pv=COMMIT5), 26000),
@@ -99,6 +104,11 @@ SCEN = {
                                  ("H", 300, P(T(S, 5))), ("H", 0, D0(GETDESC)), ("H", 1500, IN0)],
                       SA_LOAD, dict(pk=[("ACK", 1), ("ZLP", 2), ("ACK", 5)], ad=[5], rd=[1, 0],
                                     pv=COMMIT5), 30000),
+    # ⚠ A DELIBERATE STRESS CASE, NOT HOST TIMING (11-13, agents 1 + 2): the retry IN is
+    # timed H 1500 from the host's own last packet, so it starts while our ZLP is still
+    # on the line (its SOP before our release). A real host retries only after its
+    # 16-18-bit timeout after our EOP; kept because it re-arms under a host SOP that
+    # lands before our release -- harder than the spec asks, and it passes (+60).
     "A10c ACK absent": (SA_HOST + [("A", 11000, IN0), ("H", 1500, P(T(S, 5))), ("H", 0, D0(GETDESC)),
                                    ("H", 1500, P(T(S, 5))), ("H", 0, D0(GETDESC))],
                         SA_LOAD, dict(pk=[("ACK", 1), ("ZLP", 2), ("ACK", 6)], ad=[5], rd=[1, 0],
