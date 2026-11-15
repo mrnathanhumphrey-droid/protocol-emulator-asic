@@ -71,32 +71,23 @@ def _tuple(x):
 
 
 def image_lanes(img):
-    """{lane: [(op, pin, level, delay, q)]} decoded from the image, as compute_j reads them"""
+    """{lane: [(op, pin, level, delay, q)]} decoded from the image, as compute_j reads them:
+    EVERY word reachable from the lane's base (proof_constants.lane_words: the next word, a
+    branch's target, a FALLTHROUGH ARM's PC+2, sections after a mid-program REARM), in word
+    order. ⛔ 57e96cf walked base -> first REARM and saw 13 of usbdev lane 0's 106 words; a
+    straight-line pe_asm lane is the same walk either way (gate S2 round-trips them)."""
+    import proof_constants as PC
     img = bytes(img)
     heads = {ln: I.read_header(img, ln)["base"] for ln in range(I.N_LANES)}
-    bases = sorted(set(heads.values()))
     # the shared park word: a base several lanes share whose word is a lone REARM
     parked = set()
-    for b in bases:
+    for b in set(heads.values()):
         sharers = [ln for ln, v in heads.items() if v == b]
         first = next(_words(img, b), (None, None))[1]
         if len(sharers) > 1 and first is not None and first["op"] == I.OP_REARM:
             parked.add(b)
-    out = {}
-    for ln in range(I.N_LANES):
-        b = heads[ln]
-        if b in parked:
-            continue
-        nxt = min([x for x in bases if x > b] or [I.STORE_BYTES])
-        acts = []
-        for a, x in _words(img, b):
-            if a >= nxt:
-                break
-            acts.append(_tuple(x))
-            if x["op"] in (I.OP_REARM, I.OP_LOOP):
-                break
-        out[ln] = acts
-    return out
+    return {ln: [_tuple(x) for _w, x in PC.lane_words(img, ln, I)]
+            for ln in range(I.N_LANES) if heads[ln] not in parked}
 
 
 def stamp_lanes(lanes):
@@ -111,15 +102,65 @@ def stamp_lanes(lanes):
     return {"status": "certified", "reason": "pe_asm.compute_j", "d_min": d_min, "J": j}
 
 
-def stamp(img):
-    """THE FIELD: {'status': 'certified' | 'uncertified', 'reason', 'd_min', 'J'}"""
-    return stamp_lanes(image_lanes(img))
+def unclocked_shift_lanes(img):
+    """lanes with an UNCLOCKED SHIFT among their reachable words (program_a2.is_clocked's
+    complement: a SHIFT that is not level-1 on a lane with a real clock pin)"""
+    import proof_constants as PC
+    out = []
+    for ln, acts in image_lanes(img).items():
+        h = I.read_header(bytes(img), ln)
+        if any(a[0] == I.OP_SHIFT and not (h["clkpin"] < I.N_PINS and a[2] == 1) for a in acts):
+            out.append(ln)
+    return out
+
+
+BUDGET = os.path.join(HERE, "branch_budget.json")
+
+
+def budget_entry(img):
+    """the image's entry in model/branch_budget.json (by sha), or None"""
+    import program_a2 as P
+    try:
+        with open(BUDGET, encoding="utf-8") as fh:
+            rec = json.load(fh).get("images", {})
+    except OSError:
+        return None
+    sha = P.image_sha(I.full_store(bytes(img)))       # the record keys the full store
+    return next((v for v in rec.values() if v.get("sha") == sha), None)
+
+
+def stamp(img, budget=None):
+    """THE FIELD: {'status': 'certified' | 'uncertified', 'reason', 'd_min', 'J'}.
+    Certified needs BOTH:
+      * pe_asm.compute_j accepts the image's lanes (the J floor);
+      * every lane with an unclocked SHIFT has a CERTIFIED response bound R (Wilson 11-15:
+        j1_ok needs R, so the bounds are owed before an image of record) -- read from the
+        generated record model/branch_budget.json (`budget`: that entry, as the generator
+        passes it while writing). An image with no record has no certified R."""
+    st = stamp_lanes(image_lanes(img))
+    if st["status"] != "certified":
+        return st
+    sl = unclocked_shift_lanes(img)
+    if not sl:
+        return st
+    e = budget if budget is not None else budget_entry(img)
+    lanes = (e or {}).get("lanes") or {}
+    miss = [ln for ln in sl
+            if (lanes.get(str(ln)) or lanes.get(ln) or {}).get("R") is None]
+    if miss:
+        why = ("no budget record for this image (model/gen_branch_budget.py)" if e is None
+               else "the record has no R for it (%s)" % e.get("reason", "?"))
+        return dict(st, status="uncertified",
+                    reason="unclocked SHIFT lane(s) %s: no certified response bound R -- %s"
+                    % (",".join(map(str, miss)), why))
+    return st
 
 
 def line(st):
     """the field as one line (the compiler's cert J_floor, pe_asm's report)"""
     if st["status"] == "certified":
-        return "certified: J %d at d_min %d (pe_asm.compute_j)" % (st["J"], st["d_min"])
+        return "certified: J %d at d_min %d (pe_asm.compute_j; R certified where owed)" % (
+            st["J"], st["d_min"])
     return "UNCERTIFIED: %s" % st["reason"]
 
 

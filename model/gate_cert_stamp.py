@@ -18,6 +18,9 @@ Checks (static, seconds):
   S3 every `.cert.json` beside a universe image is that image's current stamp.
   S4 every IMAGE OF RECORD has a sidecar, written --require-cert, saying certified; the
      ones another agent's builder writes are LISTED as pending, not skipped silently.
+  S5 the response bounds (Wilson 11-15): every image of record's unclocked SHIFT lanes have a
+     certified R in model/branch_budget.json, and the stamp needs it -- with that R removed
+     the stamp is uncertified, so a --require-cert build fails (must-fire M_CS_R_MISSING).
 Must-fires (in-process, on scratch copies): a stale sidecar (S3), an image of record with no
 sidecar (S4), and require() passing an uncertified stamp (S1b) each turn the gate red.
 """
@@ -40,6 +43,11 @@ import cert_stamp as CS  # noqa: E402
 import pe_asm  # noqa: E402
 
 S = pe_asm
+
+#: a certified program for S1c: clocked SHIFTs only (an unclocked SHIFT owes a certified R,
+#: which a program outside the budget record does not have)
+OK25 = ({0: [(S.OP_SHIFT, 8, 1, 25, 0), (S.OP_SHIFT, 8, 1, 25, 0), (S.OP_REARM, 0, 1, 25, 0)]},
+        {0: (8, 9, 1, 25, 50, 75)})
 
 D12 = ({0: [(S.OP_SHIFT, 8, 1, 12, 0), (S.OP_SHIFT, 8, 0, 12, 0), (S.OP_REARM, 0, 1, 12, 0)]},
        {0: (8, 9, 1, 12, 24, 36)})
@@ -77,7 +85,7 @@ def _compiler(img, require):
 
 def s1(tmp, require_fn=None):
     probs = []
-    progs = {"d12": D12, "ok": S._demo_ok()}
+    progs = {"d12": D12, "ok": OK25}
     for name, prog in progs.items():
         img = S.assemble(*prog)
         for flag in (False, True):
@@ -113,7 +121,7 @@ def s1(tmp, require_fn=None):
 
 def s2():
     probs, n = [], 0
-    progs = [("D12", D12)] + [(f, getattr(S, f)()) for f in dir(S) if f.startswith("_demo_")]
+    progs = [("D12", D12), ("OK25", OK25)] + [(f, getattr(S, f)()) for f in dir(S) if f.startswith("_demo_")]
     for name, prog in progs:
         lanes, headers = prog[:2]
         try:
@@ -121,9 +129,10 @@ def s2():
         except S.Reject:
             continue                                      # a refusal demo: never an image
         n += 1
-        if CS.stamp(img) != CS.stamp_lanes(lanes):
-            probs.append("S2 %s: image stamp %s, lanes %s" % (name, CS.stamp(img),
-                                                              CS.stamp_lanes(lanes)))
+        got = CS.stamp_lanes(CS.image_lanes(img))       # the compute_j part of the stamp
+        if got != CS.stamp_lanes(lanes):
+            probs.append("S2 %s: image's compute_j %s, lanes %s" % (name, got,
+                                                                   CS.stamp_lanes(lanes)))
     if n < 3:
         probs.append("S2 only %d programs assembled" % n)
     return probs, n
@@ -153,6 +162,29 @@ def s4(read=CS.read):
     return probs
 
 
+def s5(drop_r=False):
+    """[problem]; drop_r: the must-fire -- the record's R removed must uncertify the image"""
+    probs = []
+    for rel in CS.IMAGES_OF_RECORD:
+        img = CS.read_hex(os.path.join(ROOT, rel))
+        e = CS.budget_entry(img)
+        sl = CS.unclocked_shift_lanes(img)
+        if e is None:
+            probs.append("S5 %s: no budget record" % rel)
+            continue
+        if drop_r:
+            e = copy.deepcopy(e)
+            for ln in sl:
+                e["lanes"][str(ln)]["R"] = None
+        miss = [ln for ln in sl if e["lanes"].get(str(ln), {}).get("R") is None]
+        st = CS.stamp(img, budget=e)
+        if miss and st["status"] == "certified":
+            probs.append("S5 %s: lane(s) %s have no certified R, stamp still certified" % (rel, miss))
+        if miss:
+            probs.append("S5 %s: unclocked SHIFT lane(s) %s owe a certified R" % (rel, miss))
+    return probs
+
+
 def main():
     import image_universe as U
     paths = U.default().paths
@@ -162,12 +194,15 @@ def main():
     p2, n2 = s2()
     p3, n3 = s3(paths)
     p4 = s4()
-    probs = p1 + p2 + p3 + p4
+    p5 = s5()
+    probs = p1 + p2 + p3 + p4 + p5
     print("S1 must-fire entries a-d (command line vs compiler): %s" % ("ok" if not p1 else "FAIL"))
     print("S2 decode round-trip on %d assembled programs: %s" % (n2, "ok" if not p2 else "FAIL"))
     print("S3 %d sidecars current: %s" % (n3, "ok" if not p3 else "FAIL"))
     print("S4 %d image(s) of record certified: %s" % (len(CS.IMAGES_OF_RECORD),
                                                    "ok" if not p4 else "FAIL"))
+    print("S5 response bounds R on the images of record's unclocked SHIFT lanes: %s"
+          % ("ok" if not p5 else "FAIL"))
     for name, why in CS.IMAGES_OF_RECORD_PENDING:
         print("   pending: %s -- %s" % (name, why))
     for p in probs:
@@ -185,6 +220,7 @@ def main():
     else:
         mf.append(("M_CS_STALE_SIDECAR", False))
     mf.append(("M_CS_RECORD_NO_SIDECAR", bool(s4(lambda path: None))))
+    mf.append(("M_CS_R_MISSING", bool(s5(drop_r=True))))
     with tempfile.TemporaryDirectory() as tmp:
         mf.append(("M_CS_REQUIRE_PASSES", bool(s1(tmp, require_fn=lambda st: st))))
     for name, red in mf:
