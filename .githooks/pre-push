@@ -1,0 +1,9 @@
+#!/bin/sh
+# THE PRE-PUSH GATE SET (Wilson 11-15, item 5): ci/prepush.py checks that ci/prepush.txt
+# names every registered gate (pre-push or CI-only with a reason), then runs every
+# pre-push gate; any red gate exits non-zero and git refuses the push.
+# Installed per checkout:  git config extensions.worktreeConfig true
+#                          git config --worktree core.hooksPath .githooks
+cd "$(git rev-parse --show-toplevel)" || exit 1
+PY=${PE_PYTHON:-python}
+exec "$PY" ci/prepush.py run

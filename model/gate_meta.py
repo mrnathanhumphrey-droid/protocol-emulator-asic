@@ -347,7 +347,38 @@ KNOWN_GAPS: dict = {
 LINE = re.compile(r"^META-STUB \S+ \S+ calls=(\d+) rc=(\S+)", re.M)
 
 
+#: ⛔ WILSON 11-15 (item 6): the gates whose seams need a CI-BUILT MEASUREMENT (the same
+#: inputs ci/run_gates.sh's can_run names). Off CI with the input absent, their seams report
+#: SKIPPED-CI -- NOT a pass: listed in the verdict line and in the push message. IN CI
+#: (GITHUB_ACTIONS=true) a missing input is never skipped: the seam runs and is red.
+CI_INPUTS = {
+    "test/gate_coverage.py": "PE_COVERAGE_DAT",
+    "model/a2/gate_um10204.py": "PE_PHASES_JSON",
+    "model/gate_port_demand.py": "PE_REFILL_JSON",
+    "model/gate_f2_local.py": "PE_NETLIST_COMB_JSON",
+    "model/gate_cdc.py": "PE_NETLIST_CDCRAW_JSON",
+    "model/gate_halt_reset.py": "PE_NETLIST_JSON",
+}
+#: seams of a CI_INPUTS gate that do NOT need its input (they run, and must go red, locally)
+CI_INPUTS_NOT_NEEDED = {("model/gate_halt_reset.py", "gate_halt_reset.check_text")}
+
+
+def skipped_ci(gate, env=None, seam=None):
+    """the SKIPPED-CI reason for `gate` here, or None (run it). Never skips in CI."""
+    env = os.environ if env is None else env
+    var = CI_INPUTS.get(gate)
+    if var is None or env.get("GITHUB_ACTIONS") == "true" or             (gate, seam) in CI_INPUTS_NOT_NEEDED:
+        return None
+    path = env.get(var, "")
+    if path and os.path.isfile(path):
+        return None
+    return "%s unset or missing off CI (a CI-built measurement)" % var
+
+
 def one(gate, seam, policy, timeout):
+    why = skipped_ci(gate, seam=seam)
+    if why is not None:
+        return gate, seam, "SKIPPED-CI", None, why
     if policy == "OWED":
         return gate, seam, None, None, "its always-pass policy is OWED"
     try:
@@ -417,6 +448,8 @@ def judge(results, gaps):
     probs = []
     for gate, seam, rc, calls, first in results:
         key = (gate, seam)
+        if rc == "SKIPPED-CI":
+            continue        # reported in the verdict line, never counted as a pass
         if rc is None:
             probs.append("%s %s: %s" % (gate, seam, first))
         elif calls == 0:
@@ -480,7 +513,8 @@ def main() -> int:
                               todo))
     for gate, seam, rc, calls, first in sorted(results):
         gap = (gate, seam) in KNOWN_GAPS
-        verdict = ("red  ok" if rc not in (0, None) and calls
+        verdict = ("SKIPPED-CI  (%s)" % first if rc == "SKIPPED-CI" else
+                   "red  ok" if rc not in (0, None) and calls
                    else "green  (KNOWN GAP %s)" % KNOWN_GAPS[(gate, seam)][:3]
                    if gap and rc == 0 else "*** rc=%s calls=%s" % (rc, calls))
         print("    %-34s %-44s %s" % (os.path.basename(gate), seam, verdict))
@@ -530,6 +564,19 @@ def main() -> int:
         print("    %-46s %s" % (what, "red  ok" if red else "*** MISSED"))
         if not red:
             rc = 1
+    # SKIPPED-CI never in CI, and never off CI when the input is present (item 6)
+    gc = "model/gate_cdc.py"
+    for what, env, want in (
+            ("a CI-only seam missing its input IN CI runs (red)",
+             {"GITHUB_ACTIONS": "true"}, None),
+            ("a CI-only seam with its input present runs",
+             {"PE_NETLIST_CDCRAW_JSON": os.path.abspath(__file__)}, None),
+            ("a CI-only seam missing its input off CI is SKIPPED-CI", {}, "skip")):
+        got = skipped_ci(gc, env)
+        ok = (got is None) if want is None else (got is not None)
+        print("    %-46s %s" % (what, "ok" if ok else "*** MISSED"))
+        if not ok:
+            rc = 1
     # a --seam that names no row would run nothing and pass (the CI matrix job)
     red = not select("slow", "no_such.seam")
     print("    %-46s %s" % ("a --seam naming no SEAMS row",
@@ -537,7 +584,12 @@ def main() -> int:
     if not red:
         rc = 1
     print()
-    print("  GATE meta: %s" % ("PASSED" if rc == 0 else "FAILED"))
+    skipped = sorted({(g, s) for g, s, r, _c, _f in results if r == "SKIPPED-CI"})
+    if skipped:
+        print("  SKIPPED-CI (not run here, NOT passed -- CI runs them): %d seam(s): %s"
+              % (len(skipped), ", ".join(s for _g, s in skipped)))
+    print("  GATE meta: %s" % ("FAILED" if rc else "PASSED" if not skipped else
+                               "PASSED with %d seam(s) SKIPPED-CI" % len(skipped)))
     return rc
 
 

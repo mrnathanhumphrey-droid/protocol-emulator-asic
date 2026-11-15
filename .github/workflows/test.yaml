@@ -301,6 +301,8 @@ jobs:
         run: |
           set -euo pipefail
           python ci/shards.py check
+          # Wilson 11-15 item 5: the pre-push list names every gate (judge only; the hook runs it)
+          python ci/prepush.py check
           s="$(python ci/shards.py list)"
           echo "shards: $s"
           echo "shards=$s" >> "$GITHUB_OUTPUT"

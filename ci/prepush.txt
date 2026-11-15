@@ -1,0 +1,134 @@
+# THE PRE-PUSH SET (Wilson 11-15, item 5) -- judged by ci/prepush.py; run by .githooks/pre-push.
+# `prepush <gate>`: run before every push from this checkout (the fast shard's gates that run
+# locally: 69 measured, 319 s total on 11-15).  `ci-only <gate> <reason>`: CI's shards only.
+# RED-AT-ORIGIN rows are red at origin 1eee995 too: they move to `prepush` when fixed (a red
+# pre-push gate would block every push, the fix included). Regenerate by hand; the judge checks.
+
+prepush model/gate_bench_lint.py
+prepush model/gate_bench_race.py
+ci-only test/gate_xsim.py shard trace: two-simulator corpus traces, ~830 s in CI
+prepush model/gate_degenerate_fields.py
+prepush test/gate_tb_elaborates.py
+prepush model/gate_ruling_audit.py
+prepush model/gate_one_encoder.py
+prepush model/gate_mutant_arms.py
+ci-only model/gate_reset_audit.py RED-AT-ORIGIN (1eee995, before 11-14): allowlist/names stale after 9c0df0c (pslot/fix); owner agent 1
+ci-only model/gate_share_coupling.py RED-AT-ORIGIN (1eee995): u_pit.bud_cnt matches no flop in the netlist; owner agent 1
+prepush model/gate_stored_numbers.py
+prepush model/gate_bench_indices.py
+prepush model/gate_j_proof_anchors.py
+prepush model/a2/gate_j_program.py
+prepush model/a2/gate_dmin_clocked.py
+ci-only model/a2/gate_um10204.py shard cov: the coverage sweep + CI-built measurements (coverage/phases/refill/a2/store), ~1790 s in CI
+ci-only model/gate_port_demand.py shard cov: the coverage sweep + CI-built measurements (coverage/phases/refill/a2/store), ~1790 s in CI
+ci-only model/a2/gate_a2_program.py shard cov: the coverage sweep + CI-built measurements (coverage/phases/refill/a2/store), ~1790 s in CI
+ci-only test/gate_corpus_trace.py shard trace: two-simulator corpus traces, ~830 s in CI
+prepush model/gate_gates_complete.py
+prepush model/gate_admissible_images.py
+prepush model/gate_wire_feed.py
+prepush model/gate_image_bounds.py
+prepush model/gate_cert_stamp.py
+prepush host/poset/run_poset_compile.py
+prepush model/gate_lane_cert.py
+prepush model/gate_lean_anchors.py
+prepush model/gen_op_reads.py
+prepush model/gate_sim_runs.py
+prepush model/gate_formal_miters.py
+prepush model/gate_rowmux_equiv.py
+prepush model/gate_clock_consistency.py
+prepush model/gate_clock_literals.py
+ci-only model/gate_clock_cross.py shard sim2: simulations + kill audit, ~610 s in CI
+prepush model/gate_canary_check.py
+prepush model/gate_predecode_netlist.py
+prepush model/gate_i2c_hw_witness.py
+prepush model/gate_onewire_hw_witness.py
+prepush model/gate_flow_config.py
+prepush model/gate_layers_rc.py
+prepush test/gen_progress_bounds.py
+prepush model/gate_action_pins.py
+prepush test/gate_gl_count.py
+prepush model/gate_shell_rc.py
+ci-only model/gate_except.py RED-AT-ORIGIN (1eee995): gate_lane_cert main swallows an exception; owner agent 2
+prepush model/gate_tool_pinning.py
+ci-only model/gate_f2_local.py needs the M_COMB_OUT netlist (PE_NETLIST_COMB_JSON), built by CI's netlist step
+ci-only model/gate_cdc.py needs the M_CDC_RAW netlist (PE_NETLIST_CDCRAW_JSON), built by CI's netlist step
+ci-only model/gate_cdc_qual.py shard cdcq: CDC simulations
+ci-only model/gate_macro_inputs.py shard cdcq: CDC simulations
+ci-only model/gate_select_copies.py LibreLane synthesis twice in its container (CI sets up the image + PDK)
+ci-only test/run_ckack.py shard sim2: simulations + kill audit, ~610 s in CI
+ci-only test/run_i2c.py shard sim2: simulations + kill audit, ~610 s in CI
+ci-only test/run_recert.py shard sim2: simulations + kill audit, ~610 s in CI
+ci-only test/run_hold_rule.py shard sim2: simulations + kill audit, ~610 s in CI
+ci-only model/gate_slang_lint.py RED-AT-ORIGIN (1eee995): ArithOpMismatch x4, pinned at 2; owner agent 1
+ci-only test/gate_fpga_synth.py three yosys synth_xilinx runs (CI's FPGA toolchain)
+ci-only fpga/sim/run_fpga_loader.py shard fpga: the three FPGA board simulations
+ci-only fpga/sim/run_fpga_onewire.py shard fpga: the three FPGA board simulations
+ci-only fpga/sim/run_fpga_i2c.py shard fpga: the three FPGA board simulations
+prepush model/gate_store_size_literals.py
+prepush model/gate_host_contract.py
+prepush model/area_line.py
+ci-only model/gate_hold_offset.py shard sim2: simulations + kill audit, ~610 s in CI
+ci-only test/run_uartrx.py shard uart: UART simulations, ~1060 s in CI
+ci-only test/run_rxfast.py shard rxbw: rx-bandwidth simulations, ~1400 s in CI
+ci-only test/run_wirefeed_mf.py shard uart: UART simulations, ~1060 s in CI
+ci-only test/run_uarttx.py shard uart: UART simulations, ~1060 s in CI
+ci-only test/run_reload.py shard uart: UART simulations, ~1060 s in CI
+ci-only model/gate_halt_reset.py needs the yosys netlist (PE_NETLIST_JSON), built by CI's netlist step
+ci-only model/gate_runner_registry.py RED-AT-ORIGIN (1eee995): bench runners with undeclared resources/registry (run_usbaddr wsl; now run_fpga_usb); owner agent 1
+ci-only test/run_v2window.py shard uart: UART simulations, ~1060 s in CI
+ci-only model/gate_v2_equiv.py shard sim2: simulations + kill audit, ~610 s in CI
+ci-only test/run_pit_capture.py shard sim2: simulations + kill audit, ~610 s in CI
+ci-only test/run_pit_s0.py shard sim1: simulations, ~820 s in CI
+ci-only test/run_pit_gcd.py shard gcd: the PIT GCD/solver subset on Verilator
+ci-only test/run_pit_s3.py shard gcd: the PIT GCD/solver subset on Verilator
+ci-only test/run_pit_rt.py shard gcd: the PIT GCD/solver subset on Verilator
+ci-only test/run_pit_s12.py shard gcd: the PIT GCD/solver subset on Verilator
+ci-only test/run_pit_clk.py shard gcd: the PIT GCD/solver subset on Verilator
+prepush test/run_pit_emit.py
+ci-only test/run_rean_floor.py shard sim2: simulations + kill audit, ~610 s in CI
+ci-only test/gate_store_latch.py shard sim1: simulations, ~820 s in CI
+ci-only test/run_branch_check.py shard sim2: simulations + kill audit, ~610 s in CI
+ci-only test/run_arm2.py shard sim2: simulations + kill audit, ~610 s in CI
+ci-only test/gate_batch_equiv.py shard sim2: simulations + kill audit, ~610 s in CI
+ci-only test/run_pair.py shard sim2: simulations + kill audit, ~610 s in CI
+ci-only test/run_usbrx.py shard sim2: simulations + kill audit, ~610 s in CI
+ci-only model/gate_usb_sweep.py shard sim2: simulations + kill audit, ~610 s in CI
+ci-only test/run_usbcrc.py shard sim2: simulations + kill audit, ~610 s in CI
+ci-only test/run_usbbuf.py shard sim2: simulations + kill audit, ~610 s in CI
+ci-only test/run_usbaddr.py shard sim2: simulations + kill audit, ~610 s in CI
+ci-only test/run_usbrst.py shard sim2: simulations + kill audit, ~610 s in CI
+prepush model/gate_sp2_frontend.py
+prepush model/gate_count_ranges.py
+prepush model/gate_ce5_freeze.py
+prepush model/gate_harden_record.py
+prepush model/gate_phase_coverage.py
+ci-only model/gate_ln1_record.py RED-AT-ORIGIN (1eee995): LN1 record inputs changed -- re-dispatch the 200k run (CI workflow_dispatch); owner agent 1
+prepush model/gate_a2_record.py
+ci-only test/run_onewire.py shard sim1: simulations, ~820 s in CI
+ci-only test/run_mutants.py shard sim2: simulations + kill audit, ~610 s in CI
+ci-only model/gate_mutant_kills.py shard sim2: simulations + kill audit, ~610 s in CI
+prepush model/gate_bench_races.py
+prepush test/gate_manifest.py
+prepush test/gate_tracked_images.py
+ci-only model/gate_rtl_lint.py needs the PDK stdcell Verilog models (PE_PDK_STDCELL_VERILOG / PDK_ROOT), set up by CI
+ci-only model/gate_sda_hold.py shard sim2: simulations + kill audit, ~610 s in CI
+prepush model/gate_spuri_candidates.py
+ci-only test/run_lockstep.py shard sim1: simulations, ~820 s in CI
+ci-only test/run_w_sweep.py shard sim2: simulations + kill audit, ~610 s in CI
+ci-only test/run_cktx.py shard sim2: simulations + kill audit, ~610 s in CI
+ci-only test/run_spidelay.py shard trace: two-simulator corpus traces, ~830 s in CI
+ci-only test/run_spim_witness.py shard trace: two-simulator corpus traces, ~830 s in CI
+ci-only test/run_spitgt.py shard sim1: simulations, ~820 s in CI
+ci-only test/run_rxbw.py shard rxbw: rx-bandwidth simulations, ~1400 s in CI
+prepush model/gate_pin_matrix.py
+prepush model/gate_i2c_order.py
+ci-only model/gate_store_full.py shard cov: the coverage sweep + CI-built measurements (coverage/phases/refill/a2/store), ~1790 s in CI
+prepush model/gate_program_index.py
+ci-only model/part1_param_contract.py RED-AT-ORIGIN (1eee995): protocol constants in the RTL -- the part1-params item; owner agent 1
+prepush test/gl_harness_check.py
+prepush test/check_vectors.py
+prepush test/benchset.py
+ci-only test/gate_coverage.py shard cov: the coverage sweep + CI-built measurements (coverage/phases/refill/a2/store), ~1790 s in CI
+prepush model/pe_asm.py
+ci-only model/gate_lean_build.py shard lean: the Lean proofs (lake build, elan in CI's leg)
+ci-only model/gate_meta.py shard cov: the coverage sweep + CI-built measurements (coverage/phases/refill/a2/store), ~1790 s in CI
