@@ -15,7 +15,7 @@ behaviour (matched to the PDK's RM_IHPSG13_1P_core_behavioral_bm_bist.v).
 macro is never referenced without PE_SRAM_MACRO, so it could not fire.)
 
 THE CHECK. Each FPGA variant -- UART (default), 1-Wire (`PE_OW`), I2C
-(`PE_I2C`) -- through yosys `synth_xilinx -family xc7`, with the build's OWN
+(`PE_I2C`), USB (`PE_USB`, Wilson 11-14) -- through yosys `synth_xilinx -family xc7`, with the build's OWN
 inputs, read from the files `build.tcl` reads:
   * the same five sources, read `-sv`, with the exact `-verilog_define` set of
     the variant's `synth_design` line, parsed out of `build.tcl` itself, so this
@@ -91,10 +91,11 @@ def build_defines():
     for line in txt.splitlines():
         if line.strip().startswith("synth_design"):
             d = re.findall(r"-verilog_define\s+(\w+)", line)
-            key = "PE_OW" if "PE_OW" in d else "PE_I2C" if "PE_I2C" in d else ""
+            key = ("PE_OW" if "PE_OW" in d else "PE_I2C" if "PE_I2C" in d
+                   else "PE_USB" if "PE_USB" in d else "")
             out[key] = d
-    if set(out) != {"", "PE_OW", "PE_I2C"}:
-        raise SystemExit("*** build.tcl: expected three synth_design lines, found %r" % sorted(out))
+    if set(out) != {"", "PE_OW", "PE_I2C", "PE_USB"}:
+        raise SystemExit("*** build.tcl: expected four synth_design lines, found %r" % sorted(out))
     reads = re.findall(r"read_verilog(\s+-sv)?\s", txt)
     return out, all(r for r in reads) and len(reads) == 3
 
@@ -114,6 +115,8 @@ def variants():
          [("IMG", '"i2c_fram_fpga.hex"'), ("FEED", '"i2c_fram_feed.hex"'),
           ("FALLS", '"i2c_fram_falls.hex"'), ("NFEED", i2c["NFEED"]), ("NRX", i2c["NRX"]),
           ("CLK_HZ", hz)]),
+        ("usb", "PE_USB", ["fpga/images/usbdev_fpga.hex"],
+         [("IMG", '"usbdev_fpga.hex"'), ("CLK_HZ", hz)]),
     ]
 
 
@@ -169,7 +172,7 @@ def main():
     bad = []
     if not sv_ok:
         bad.append("build.tcl does not read every source -sv")
-    for key in ("", "PE_OW", "PE_I2C"):
+    for key in ("", "PE_OW", "PE_I2C", "PE_USB"):
         for d in ("PE_MEM_FLOPS", "PE_MEM_LATCH", "PE_SRAM_MACRO"):
             if d in defs[key]:
                 bad.append("build.tcl's %s synth_design defines %s (the FPGA builds the chip's sram arm, "

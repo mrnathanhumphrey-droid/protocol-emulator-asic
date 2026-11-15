@@ -62,6 +62,21 @@
 //            * The program PARKS after one pass (a level-0 REARM): no second
 //              pass, so the feed simply ends. NRX bytes are forwarded.
 //
+//   USB = 1  (the USB keyboard bring-up, Wilson 11-14; OW must be 0) -- D+ = uio[3] on J11
+//            pin 3 (B20), D- = uio[2] on J11 pin 4 (A20), PUSH-PULL (the chip drives J, K
+//            and SE0 through uio_oe), plus a soft-attach pin (SD DAT0, AB18) that drives
+//            the breadboard's 1.5k D- pull-up high: comms/USB_PIN_DELTA.md.
+//            * ALL THREE ARE RELEASED (high-Z) UNLESS THE PROGRAM IS RUNNING (`run_ok`),
+//              so the host sees no device while the FPGA configures (pins float, PUDC_B
+//              high) or while the chip's program loads (the load byte rides uio).
+//            * THE PADS GO RAW INTO uio_in (agent 1, 11-14): the chip's own input
+//              synchroniser does the work, as on silicon, so a board trace is
+//              cycle-comparable with the chip sims. The outputs are registered, as
+//              every J11 output here is: they reach the pins USB_OUT_LAT cycle(s) after
+//              the chip's uio_out.
+//            * Boot-load and run, as the default build (no 'G', no feeder); no PC UART
+//              on uio (uio[3] is D+). The host stream still goes out of the board UART.
+//
 // ⛔ THE GLUE CHECKS NOTHING. The judge is the PC: it knows what it sent.
 `default_nettype none
 module pe_fpga_core #(
@@ -89,6 +104,8 @@ module pe_fpga_core #(
     // not elaborate (g_need_ow_timing below).
     parameter integer PER2     = 0,           // byte time = 2 symbols (2P)
     parameter integer MARGIN   = 0,           // push offset after the pop it follows (P)
+    // ---- USB = 1 only (OW must be 0) ----
+    parameter integer USB      = 0,
     // ---- OW = 2 only ----
     parameter FALLS            = "",          // per fed byte: SCL falls before its pop
     parameter integer NRX      = 0,           // bytes the chip receives in the pass
@@ -112,9 +129,18 @@ module pe_fpga_core #(
     output wire       running,      // program loaded, chip running
     input  wire       dq_in,        // J11 pin 4 pad, raw: OW 1 DQ, OW 2 SDA
     output wire       dq_low,       // 1 = pull J11 pin 4 low
-    input  wire       p3_in,        // J11 pin 3 pad, raw: OW 2 SCL
-    output wire       p3_low        // 1 = pull J11 pin 3 low
+    input  wire       p3_in,        // J11 pin 3 pad, raw: OW 2 SCL, USB D+
+    output wire       p3_low,       // 1 = pull J11 pin 3 low
+    // USB = 1: D+ on J11 pin 3, D- on J11 pin 4 (inputs: p3_in, dq_in), push-pull
+    output wire       usb_dp_oe,    // 1 = drive J11 pin 3 with usb_dp_o
+    output wire       usb_dp_o,
+    output wire       usb_dm_oe,    // 1 = drive J11 pin 4 with usb_dm_o
+    output wire       usb_dm_o,
+    output wire       usb_pu        // 1 = drive the soft-attach pin high (else high-Z)
 );
+  //: the J11 USB outputs reach the pins this many cycles after uio_out (registered)
+  localparam integer USB_OUT_LAT = 1;
+  localparam integer P_DP = 3, P_DM = 2;
   localparam integer P_RX = 3;
   localparam integer P_DQ = 2, P_DQS = 3;
   localparam integer P_SCL = 1, P_SDA = 2;
@@ -224,6 +250,8 @@ module pe_fpga_core #(
   // a pull-up. OW 1: DQ (and its sense pin) read J11 instead, and no UART.
   // OW 2: SCL and SDA read J11 pins 3 and 4, and no UART.
   wire [7:0] ext   = loading ? ldata
+                   : (USB != 0) ? (8'hFF & ~((8'h01 << P_DP) | (8'h01 << P_DM)))
+                                  | ({7'd0, p3_in} << P_DP) | ({7'd0, dq_in} << P_DM)
                    : (OW == 2) ? (8'hFF & ~((8'h01 << P_SCL) | (8'h01 << P_SDA)))
                                  | ({7'd0, p3_s} << P_SCL) | ({7'd0, dq_s} << P_SDA)
                    : (OW != 0) ? (8'hFF & ~((8'h01 << P_DQ) | (8'h01 << P_DQS)))
@@ -248,6 +276,22 @@ module pe_fpga_core #(
   end
   assign dq_low = dq_low_q;
   assign p3_low = p3_low_q;
+  // USB = 1: push-pull D+ / D-, and the soft-attach pull-up, all released unless running
+  // power-up 0 (the FPGA's INIT after configuration): released from the first cycle
+  reg usb_dp_oe_q = 1'b0, usb_dp_o_q = 1'b0, usb_dm_oe_q = 1'b0, usb_dm_o_q = 1'b0,
+      usb_pu_q = 1'b0;
+  always @(posedge clk) begin
+    usb_dp_oe_q <= (USB != 0) && run_ok && uio_oe[P_DP];
+    usb_dp_o_q  <= uio_out[P_DP];
+    usb_dm_oe_q <= (USB != 0) && run_ok && uio_oe[P_DM];
+    usb_dm_o_q  <= uio_out[P_DM];
+    usb_pu_q    <= (USB != 0) && run_ok;
+  end
+  assign usb_dp_oe = usb_dp_oe_q;
+  assign usb_dp_o  = usb_dp_o_q;
+  assign usb_dm_oe = usb_dm_oe_q;
+  assign usb_dm_o  = usb_dm_o_q;
+  assign usb_pu    = usb_pu_q;
 
   // ---- OW 2: SCL, deglitched, and its falls counted (Wilson 1b) ----------
   // A level is accepted only after DEGLITCH cycles stable at the 2-flop
@@ -275,6 +319,9 @@ module pe_fpga_core #(
   // every tool this core meets (iverilog, yosys, Vivado).
   generate if (CLK_HZ <= 0) begin : g_need_clk_hz
     CLK_HZ_must_come_from_fpga_board_yaml u_missing ();
+  end endgenerate
+  generate if (USB != 0 && OW != 0) begin : g_usb_needs_ow0
+    USB_build_must_have_OW_0 u_missing ();
   end endgenerate
   generate if (OW == 1 && (PER2 <= 0 || MARGIN <= 0)) begin : g_need_ow_timing
     PER2_MARGIN_must_come_from_onewire_fpga_feed_params u_missing ();

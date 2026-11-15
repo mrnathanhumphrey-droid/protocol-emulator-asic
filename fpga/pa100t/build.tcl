@@ -42,9 +42,10 @@
 set root [file normalize [file join [file dirname [info script]] .. ..]]
 set ow   [expr {[lsearch -exact $argv ow] >= 0}]
 set i2c  [expr {[lsearch -exact $argv i2c] >= 0}]
-if {$ow && $i2c} { puts "PE_FPGA: *** ow and i2c are separate builds"; exit 1 }
-set out  [file join $root fpga build [expr {$ow ? "pa100t_ow" : $i2c ? "pa100t_i2c" : "pa100t"}]]
-set bitname [expr {$ow ? "pa100t_ow1wire.bit" : $i2c ? "pa100t_i2cfram.bit" : "pa100t_top.bit"}]
+set usb  [expr {[lsearch -exact $argv usb] >= 0}]
+if {$ow + $i2c + $usb > 1} { puts "PE_FPGA: *** ow, i2c and usb are separate builds"; exit 1 }
+set out  [file join $root fpga build [expr {$ow ? "pa100t_ow" : $i2c ? "pa100t_i2c" : $usb ? "pa100t_usb" : "pa100t"}]]
+set bitname [expr {$ow ? "pa100t_ow1wire.bit" : $i2c ? "pa100t_i2cfram.bit" : $usb ? "pa100t_usbdev.bit" : "pa100t_top.bit"}]
 file mkdir $out
 set part xc7a100tfgg484-2
 
@@ -85,6 +86,13 @@ if {$ow} {
   set gen [list "IMG=\"i2c_fram_fpga.hex\"" "FEED=\"i2c_fram_feed.hex\"" \
                "FALLS=\"i2c_fram_falls.hex\"" NFEED=$prm(NFEED) NRX=$prm(NRX)                CLK_HZ=$clk_hz]
   puts "PE_FPGA: I2C build, generics $gen"
+} elseif {$usb} {
+  # THE USB BUILD (Wilson 11-14, comms/USB_PIN_DELTA.md): the device program usbdev.py writes,
+  # byte-identical to the certified usbdev_dev.hex (fpga/sim/gen_usbdev_fpga.py)
+  read_xdc [file join $root fpga pa100t pa100t_j11_usb.xdc]
+  file copy -force [file join $root fpga images usbdev_fpga.hex] [file join $out usbdev_fpga.hex]
+  set gen [list "IMG=\"usbdev_fpga.hex\"" CLK_HZ=$clk_hz]
+  puts "PE_FPGA: USB build, generics $gen"
 } else {
   set img [file join $root fpga images uart_rx_board.hex]
   file copy -force $img [file join $out uart_rx_board.hex]
@@ -96,6 +104,8 @@ if {$ow} {
   synth_design -top pa100t_top -part $part -include_dirs $root -verilog_define PE_OW -generic $gen
 } elseif {$i2c} {
   synth_design -top pa100t_top -part $part -include_dirs $root -verilog_define PE_I2C -generic $gen
+} elseif {$usb} {
+  synth_design -top pa100t_top -part $part -include_dirs $root -verilog_define PE_USB -generic $gen
 } else {
   synth_design -top pa100t_top -part $part -include_dirs $root -generic $gen
 }
