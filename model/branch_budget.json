@@ -74,30 +74,35 @@
       "B": 16,
       "reason": "certified",
       "cert": {
-        "status": "certified",
-        "reason": "pe_asm.compute_j",
+        "status": "uncertified",
+        "reason": "1.6a queue check fails with the record's certified lane lateness in J: lane 0 r 41 > T 20; lane 1 r 41 > T 20 (J from the lane's certificate, program_a2.lane_j_obs; a split theorem for the late word would drop it -- Wilson 11-15)",
         "d_min": 20,
         "J": 1
       },
       "lanes": {
         "0": {
           "max_late": 22,
+          "max_late_pin": 22,
           "R": 20
         },
         "1": {
           "max_late": 22,
+          "max_late_pin": 22,
           "R": 20
         },
         "2": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 26
         },
         "3": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 26
         },
         "4": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 26
         }
       }
@@ -216,22 +221,27 @@
       "lanes": {
         "0": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 14
         },
         "1": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 17
         },
         "2": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 17
         },
         "3": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 17
         },
         "4": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 17
         }
       }
@@ -263,22 +273,27 @@
       "lanes": {
         "0": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 14
         },
         "1": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 17
         },
         "2": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 17
         },
         "3": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 17
         },
         "4": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 17
         }
       }
@@ -297,22 +312,27 @@
       "lanes": {
         "0": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 14
         },
         "1": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 17
         },
         "2": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 17
         },
         "3": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 17
         },
         "4": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 17
         }
       }
@@ -344,22 +364,27 @@
       "lanes": {
         "0": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 14
         },
         "1": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 17
         },
         "2": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 17
         },
         "3": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 17
         },
         "4": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 17
         }
       }
@@ -404,22 +429,27 @@
       "lanes": {
         "0": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 14
         },
         "1": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 17
         },
         "2": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 17
         },
         "3": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 17
         },
         "4": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 17
         }
       }
@@ -451,22 +481,27 @@
       "lanes": {
         "0": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 14
         },
         "1": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 14
         },
         "2": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 14
         },
         "3": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 14
         },
         "4": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 14
         }
       }
@@ -485,22 +520,27 @@
       "lanes": {
         "0": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 14
         },
         "1": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 14
         },
         "2": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 14
         },
         "3": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 14
         },
         "4": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 14
         }
       }
@@ -532,22 +572,27 @@
       "lanes": {
         "0": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 14
         },
         "1": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 14
         },
         "2": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 14
         },
         "3": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 14
         },
         "4": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 14
         }
       }
@@ -579,22 +624,27 @@
       "lanes": {
         "0": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 14
         },
         "1": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 14
         },
         "2": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 14
         },
         "3": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 14
         },
         "4": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 14
         }
       }
@@ -717,22 +767,27 @@
       "lanes": {
         "0": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 17
         },
         "1": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 17
         },
         "2": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 20
         },
         "3": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 20
         },
         "4": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 20
         }
       }
@@ -751,22 +806,27 @@
       "lanes": {
         "0": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 14
         },
         "1": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 14
         },
         "2": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 14
         },
         "3": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 14
         },
         "4": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 14
         }
       }
@@ -785,22 +845,27 @@
       "lanes": {
         "0": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 14
         },
         "1": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 14
         },
         "2": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 14
         },
         "3": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 14
         },
         "4": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 14
         }
       }
@@ -819,22 +884,27 @@
       "lanes": {
         "0": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 14
         },
         "1": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 14
         },
         "2": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 14
         },
         "3": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 14
         },
         "4": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 14
         }
       }
@@ -931,22 +1001,27 @@
       "lanes": {
         "0": {
           "max_late": 20,
+          "max_late_pin": 0,
           "R": 14
         },
         "1": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 20
         },
         "2": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 20
         },
         "3": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 20
         },
         "4": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 20
         }
       }
@@ -965,22 +1040,27 @@
       "lanes": {
         "0": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 14
         },
         "1": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 14
         },
         "2": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 14
         },
         "3": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 14
         },
         "4": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 14
         }
       }
@@ -999,22 +1079,27 @@
       "lanes": {
         "0": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 14
         },
         "1": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 14
         },
         "2": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 14
         },
         "3": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 14
         },
         "4": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 14
         }
       }
@@ -1046,22 +1131,27 @@
       "lanes": {
         "0": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 14
         },
         "1": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 17
         },
         "2": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 17
         },
         "3": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 17
         },
         "4": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 17
         }
       }
@@ -1080,22 +1170,27 @@
       "lanes": {
         "0": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 14
         },
         "1": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 14
         },
         "2": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 14
         },
         "3": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 14
         },
         "4": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 14
         }
       }
@@ -1114,22 +1209,27 @@
       "lanes": {
         "0": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 14
         },
         "1": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 17
         },
         "2": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 17
         },
         "3": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 17
         },
         "4": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 17
         }
       }
@@ -1148,22 +1248,27 @@
       "lanes": {
         "0": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 17
         },
         "1": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 17
         },
         "2": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 17
         },
         "3": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 14
         },
         "4": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 17
         }
       }
@@ -1208,22 +1313,27 @@
       "lanes": {
         "0": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 14
         },
         "1": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 14
         },
         "2": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 14
         },
         "3": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 14
         },
         "4": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 14
         }
       }
@@ -1242,22 +1352,27 @@
       "lanes": {
         "0": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 14
         },
         "1": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 17
         },
         "2": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 17
         },
         "3": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 17
         },
         "4": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 17
         }
       }
@@ -1354,22 +1469,27 @@
       "lanes": {
         "0": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 17
         },
         "1": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 17
         },
         "2": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 20
         },
         "3": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 20
         },
         "4": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 20
         }
       }
@@ -1414,22 +1534,28 @@
       "lanes": {
         "0": {
           "max_late": 32,
-          "R": 14
+          "max_late_pin": 0,
+          "R": 14,
+          "arm_margin": 59
         },
         "1": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 23
         },
         "2": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 23
         },
         "3": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 23
         },
         "4": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 23
         }
       }
@@ -1448,22 +1574,28 @@
       "lanes": {
         "0": {
           "max_late": 20,
-          "R": 14
+          "max_late_pin": 0,
+          "R": 14,
+          "arm_margin": 87
         },
         "1": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 20
         },
         "2": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 20
         },
         "3": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 20
         },
         "4": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 20
         }
       }
@@ -1482,22 +1614,28 @@
       "lanes": {
         "0": {
           "max_late": 32,
-          "R": 14
+          "max_late_pin": 0,
+          "R": 14,
+          "arm_margin": 59
         },
         "1": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 23
         },
         "2": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 23
         },
         "3": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 23
         },
         "4": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 23
         }
       }
@@ -1529,22 +1667,27 @@
       "lanes": {
         "0": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 14
         },
         "1": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 17
         },
         "2": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 17
         },
         "3": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 17
         },
         "4": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 17
         }
       }
@@ -1563,22 +1706,27 @@
       "lanes": {
         "0": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 14
         },
         "1": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 17
         },
         "2": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 17
         },
         "3": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 17
         },
         "4": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 17
         }
       }
@@ -1599,18 +1747,22 @@
       "lanes": {
         "1": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 17
         },
         "2": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 17
         },
         "3": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 17
         },
         "4": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 17
         },
         "0": {
@@ -1637,18 +1789,22 @@
       "lanes": {
         "1": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 23
         },
         "2": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 23
         },
         "3": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 23
         },
         "4": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 23
         },
         "0": {
@@ -1675,18 +1831,22 @@
       "lanes": {
         "1": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 23
         },
         "2": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 23
         },
         "3": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 23
         },
         "4": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 23
         },
         "0": {
@@ -1724,18 +1884,22 @@
       "lanes": {
         "1": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 14
         },
         "2": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 14
         },
         "3": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 14
         },
         "4": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 14
         },
         "0": {
@@ -1775,22 +1939,27 @@
       "lanes": {
         "0": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 17
         },
         "1": {
           "max_late": 11,
+          "max_late_pin": 11,
           "R": 14
         },
         "2": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 17
         },
         "3": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 17
         },
         "4": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 17
         }
       }
@@ -1829,22 +1998,27 @@
       "lanes": {
         "0": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 14
         },
         "1": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 14
         },
         "2": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 14
         },
         "3": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 14
         },
         "4": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 14
         }
       }
@@ -1868,22 +2042,27 @@
       "lanes": {
         "0": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 14
         },
         "1": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 14
         },
         "2": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 14
         },
         "3": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 14
         },
         "4": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 14
         }
       }
@@ -1928,30 +2107,35 @@
       "B": 16,
       "reason": "certified",
       "cert": {
-        "status": "certified",
-        "reason": "pe_asm.compute_j",
+        "status": "uncertified",
+        "reason": "1.6a queue check fails with the record's certified lane lateness in J: lane 0 r 41 > T 20; lane 1 r 41 > T 20 (J from the lane's certificate, program_a2.lane_j_obs; a split theorem for the late word would drop it -- Wilson 11-15)",
         "d_min": 20,
         "J": 1
       },
       "lanes": {
         "0": {
           "max_late": 22,
+          "max_late_pin": 22,
           "R": 20
         },
         "1": {
           "max_late": 22,
+          "max_late_pin": 22,
           "R": 20
         },
         "2": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 26
         },
         "3": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 26
         },
         "4": {
           "max_late": 0,
+          "max_late_pin": 0,
           "R": 26
         }
       }

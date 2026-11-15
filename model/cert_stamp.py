@@ -50,6 +50,8 @@ IMAGES_OF_RECORD = (
 #: when that agent wires it (listed so the gate names them, not silently skipped).
 IMAGES_OF_RECORD_PENDING = (
     ("usbdev_dev.hex", "test/run_usbaddr.py (agent 1): pass --require-cert to its writer"),
+    ("fpga/images/uart_rx_board.hex", "the F2 board image of record (agent 1, 11-15): its "
+     "builder `uart_rx.py ... board` writes it with cert_stamp.write(..., require_cert=True)"),
 )
 
 
@@ -153,8 +155,8 @@ def stamp(img, budget=None):
         if bad:
             return dict(st, status="uncertified", reason=(
                 "1.6a queue check fails with the record's certified lane lateness in J: %s "
-                "(J = 1 + max_late, branch_budget.lane_j; a split theorem for the late "
-                "word would drop it -- Wilson 11-15)" % "; ".join(
+                "(J from the lane's certificate, program_a2.lane_j_obs; a split theorem for "
+                "the late word would drop it -- Wilson 11-15)" % "; ".join(
                     "lane %s r %s > T %s" % (ln, v["r"], v["T"]) for ln, v in bad)))
     sl = unclocked_shift_lanes(img)
     if not sl:

@@ -82,14 +82,8 @@ NON_ADMISSIBLE = {
     "branch_cmp_lo_image.hex": ({QUEUE},
         "the honest branch J (at least branch_j(16, 40) = 17) exceeds the 1.6a "
         "queue check; J = 1 used to hide this."),
-    # Wilson 11-15: no branch lane, but the per-image certificate (agent 2's
-    # branch_budget.json) puts lane 0 late; QUEUE comes off only if agent 2
-    # proves those words' lateness never reaches a sample (an ArmSplit shape).
-    # (The three uart_rx images are NOT declared: they are images of record --
-    # wire-feed entries -- and carry SPLIT_DEBT below, Wilson 11-15 UART ruling.)
-    "nousb.hex": ({QUEUE},
-        "certified lane 0 lateness 20 (B = 4), J = 21 from lane_j, fails the 1.6a "
-        "queue check (Wilson 11-15: lateness feeds J until a split theorem drops it). Test image (usbdev.image_nousb), not of record."),
+    # nousb.hex: QUEUE withdrawn (11-15) -- certified lane-0 lateness was on no-pin words only;
+    # with J from lane_j_pin (agent 2's NopSplit, 6d24aa9) 1.6a passes.
     "chain_image.hex": ({PORT, QUEUE},
         "`build_chain`, the chaining re-arm mechanism at d = 12: a mechanism "
         "test, not a schedulable program."),
@@ -157,11 +151,10 @@ SPLIT_THEOREM = ("agent 2's split theorem for the late word w1 (OP_LEVEL on PIN_
                  "after the ARM), ArmSplit shape: its lateness is absorbed before any sample; "
                  "if it proves, lane_j_rx comes from receive-word lateness and 1.6a is rerun")
 SPLIT_DEBT = {
-    # reasons carry no numbers: the lateness is the record's (branch_budget.json), r and T are
-    # in the image's stamp reason (cert_stamp.stamp), both computed, never stored here
-    "uart_rx_image.hex": (SPLIT_THEOREM, "lane 0: the record's certified lateness in J fails 1.6a."),
-    "uart_rx_board.hex": (SPLIT_THEOREM, "the F2 board image (byte-identical to uart_rx_image)."),
-    "uart_rx_board_nostop.hex": (SPLIT_THEOREM, "lane 0: the record's certified lateness in J fails 1.6a."),
+    # CLEARED 11-15: uart_rx_image / uart_rx_board / uart_rx_board_nostop -- agent 2's arming
+    # premise (ArmSplit, branch_budget.arm_gate, 1300a1b) drops the UART-receive ARM's
+    # lateness from max_late_pin; with J = lane_j_pin (program_a2.lane_j_obs) 1.6a passes
+    # and the guard read the three debts stale. The guard stays for the next one.
 }
 
 #: the two exemption switches

@@ -30,6 +30,80 @@ import proof_constants as PC  # noqa: E402
 
 LIMIT = 400          # B or a response this large: no fixpoint
 
+#: must-fire switch (gate_lane_cert M_LC_NOPIN_ALL): count every word as touching a pin
+NOPIN_MUT = False
+#: must-fire switches (gate_lane_cert): M_LC_ARMGATE_OFF -- no generic-lane ARM gated;
+#: M_LC_UART_FRAME_SHORT -- the frame premise this many bits short
+ARMGATE_MUT = False
+UART_FRAME_MUT = 0
+
+
+def uart_peer_err():
+    """the peer's bit error band, per mille -- READ: the band the receiver is verified to
+    decode back-to-back (test/run_uartrx.ERRS; gate_admissibility_1_6.UART_BAND)"""
+    import run_uartrx
+    return max(abs(e) for e in run_uartrx.ERRS)
+
+
+def arm_gate(img, lane, graph, lat, I):
+    """{ARM word: margin} for a generic lane's UART-receive ARMs (Wilson 11-15: the arming
+    premise gated beyond the USB lane). ArmSplit.arm_release_bus is lane-generic: an ARM's
+    successor is released at E + 1, E the first edge after the ARM's release, whatever the
+    ARM's writeback time before E. So an ARM's lateness reaches no sample iff, on every frame,
+      lower: it is armed no earlier than the line goes idle (the stop bit's start, slowest
+             peer, seen), so the first edge after arming is the next start edge; and
+      upper: it is armed (release + L + 4, the USB lane's armed-by bound) before that next
+             start edge can be seen (fastest peer: frame bits after the previous start).
+    The shape (one straight loop from the ARM back to itself, no other ARM, every word with an
+    upper gap, >= 1 SHIFTIN sampling the ARM's pin at the header's bit t) is read from the
+    image; the frame = start + those data bits + one stop is the ASSUMED peer framing (8N1 on
+    today's images); the peer's bit is t * (1 +- uart_peer_err / 1000) (read). Margin = the
+    smaller of the two slacks; gated iff >= 0. A lane of any other shape: nothing gated."""
+    from fractions import Fraction
+    import math
+    g, _preds, gaps = graph
+    bit = I.read_header(img, lane)["t"]
+    skew = LC.SYNC_MAX - LC.SYNC_MIN
+    out = {}
+    for a, (x, succ) in g.items():
+        if LC.arm_kind(x, I) != "edge" or PC.arm_is_ft(x, I) or LC.arm_half(x, I):
+            continue
+        path, w = [], (succ[0] if len(succ) == 1 else None)
+        while w is not None and w != a and len(path) <= len(g):
+            path.append(w)
+            s = g[w][1]
+            w = s[0] if len(s) == 1 else None
+        if w != a or any(g[p][0]["op"] == I.OP_ARM for p in path):
+            continue
+        data = [p for p in path if g[p][0]["op"] == I.OP_SHIFTIN and g[p][0]["pin"] == x["pin"]
+                and g[p][0]["delay"] == bit and not g[p][0]["mod"] & I.MOD_SELF_TIMED]
+        ups = [LC.upper_gaps(g[p][0], I) for p in path]
+        if not data or any(u is None for u in ups):
+            continue
+        frame = len(data) + 2 - UART_FRAME_MUT
+        err = Fraction(uart_peer_err(), 1000)
+        # releases from the previous start edge as seen (E_seen): the successor at E_seen + 1
+        # (arm_release), then the path's release gaps -- lower (word_gaps) and upper bounds
+        lo = 1 + sum(sum(gaps[p]) for p in path)
+        hi = 1 + sum(ups)
+        armed_hi = hi + lat[a] + 4
+        # E_seen - E_true in [SYNC_MIN, SYNC_MAX]: the next start seen >= E_seen + frame bits
+        # (fastest) - skew; the stop bit's start seen <= E_seen + (frame - 1) bits (slowest) + skew
+        edge_min = math.floor(frame * bit * (1 - err)) - skew
+        idle_max = math.ceil((frame - 1) * bit * (1 + err)) + skew
+        out[a] = min(edge_min - 1 - armed_hi, lo - idle_max)
+    return {} if ARMGATE_MUT else out
+
+
+def no_pin(x, I):
+    """a word whose dispatch touches no pin (NopSplit.lean, Wilson 11-15): a LEVEL on a pin
+    outside N_PINS (`pin_real` false: PIN_NONE) with mod = 0 (no complementary pinb, no SE0).
+    Its lateness does not move its successor's release (`ord_late_free`) and is invisible on
+    the wire, so the lane's observable J is taken over the other words (`lane_j_pin`)."""
+    if NOPIN_MUT:
+        return False
+    return x["op"] == I.OP_LEVEL and x["pin"] >= I.N_PINS and x["mod"] == 0
+
 
 def _decisions(g, gaps, K, rmax, mmax=40):
     """at most this many decisions of a lane in a K-window (lane_cert's other-lanes rule)"""
@@ -102,8 +176,20 @@ def image_budget(img, iters=80):
                     "would charge the USB lane: not covered)", "lanes": {}}
         Bn = k["l_refill"] * (late + usb_n)
         if Bn == B and Rn == R:
-            out = {l: {"R": R[l], "late_words": sorted(w for w, v in lat[l].items() if v),
-                       "max_late": max(lat[l].values())} for l in generic}
+            out = {}
+            for l in generic:
+                ag = arm_gate(img, l, graphs[l], lat[l], I)
+                gated = {w for w, m in ag.items() if m >= 0}
+                out[l] = {"R": R[l], "late_words": sorted(w for w, v in lat[l].items() if v),
+                          "max_late": max(lat[l].values()),
+                          # the plain-lane split (NopSplit.ord_late_free) and the arming
+                          # premise (ArmSplit, arm_gate): lateness over the words that touch a
+                          # pin, less the ARMs whose arming check holds
+                          "max_late_pin": max([v for w, v in lat[l].items()
+                                               if not no_pin(graphs[l][0][w][0], I)
+                                               and w not in gated] or [0])}
+                if ag:
+                    out[l]["arm_margin"] = min(ag.values())
             if usb:
                 # the word-class split (ArmSplit.arm_release_bus): receive words carry their own
                 # lateness; an ARM word's lateness shows only in its arming check's margin
@@ -127,6 +213,16 @@ def lane_j(entry, lane):
         return None
     ln = entry.get("lanes", {}).get(str(lane), entry.get("lanes", {}).get(lane))
     return None if ln is None else 1 + ln["max_late"]
+
+
+def lane_j_pin(entry, lane):
+    """A lane's OBSERVABLE dispatch jitter (Wilson 11-15, the plain-lane split, NopSplit): 1 +
+    its largest certified lateness over the words that touch a pin -- a no-pin word's
+    lateness reaches no sample and no later release. None if not recorded / no finite B."""
+    if entry.get("B") is None:
+        return None
+    ln = entry.get("lanes", {}).get(str(lane), entry.get("lanes", {}).get(lane))
+    return None if ln is None or ln.get("max_late_pin") is None else 1 + ln["max_late_pin"]
 
 
 def lane_j_rx(entry, lane):

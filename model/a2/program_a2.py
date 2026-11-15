@@ -102,7 +102,7 @@ def lanes_of(img):
 # model/branch_budget.json (model/gen_branch_budget.py; gate_lane_cert check 5
 # holds it current). A branch image is certified only when ALL of:
 #   * its budget entry matches its bytes (sha == image_sha) and B is finite;
-#   * every lane's J is ITS certificate's, branch_budget.lane_j(entry, lane)
+#   * every lane's J is ITS certificate's, lane_j_obs (branch_budget.lane_j_pin; lane_j where unrecorded)
 #     = 1 + its max certified lateness (no hand formula, Wilson 11-14); a lane
 #     quoted at J = 1 must ALSO pass proof_constants.j1_ok(d, R, B) on its own
 #     spacing d and response R (OptRun.head_valid_nonbranch);
@@ -181,7 +181,7 @@ def uncertified_reason(img, path=None):
         ln = r["lane"]
         if ln == I.USB_LANE and any(ln == u for u in bl) and                 lrec.get(str(ln), {}).get("R", 0) is None:
             continue    # the USB lane: whole-lane J = 1 + max_late (ArmSplit), no j1_ok
-        jl = BB.lane_j(e, ln)
+        jl = lane_j_obs(e, ln)
         if jl is None:
             bad.append("lane %d: not in the record" % ln)
         elif jl == 1 and not PC.j1_ok(r["T"], lrec[str(ln)]["R"], B):
@@ -376,6 +376,17 @@ class _TExt(dict):
 T_EXT = _TExt()
 
 
+def lane_j_obs(entry, lane):
+    """The lane's J from its certificate: the OBSERVABLE jitter (Wilson 11-15, the plain-lane
+    split NopSplit + the arming premise ArmSplit, agent 2 6d24aa9/1300a1b) --
+    branch_budget.lane_j_pin, 1 + the largest certified lateness over pin-touching words.
+    A record entry with no max_late_pin falls back to lane_j (1 + max_late over every word),
+    which is >= it, so the fallback can only refuse more."""
+    import branch_budget as BB
+    jp_ = BB.lane_j_pin(entry, lane)
+    return jp_ if jp_ is not None else BB.lane_j(entry, lane)
+
+
 def lane_set(img, t_ext=None, j=None, budget_path=None, lateness=True):
     """The program's own A2 lane set, plus which entries are clocked OD.
     `t_ext` ({lane: cycles}) overrides the registry for edge-paced lanes.
@@ -430,7 +441,7 @@ def lane_set(img, t_ext=None, j=None, budget_path=None, lateness=True):
             # from the image's own certificate, no hand-shifted formula)
             import branch_budget as BB
             for ln2 in {r[0] for r in rows}:
-                jl = BB.lane_j(rec, ln2)
+                jl = lane_j_obs(rec, ln2)
                 if jl is not None:
                     br_j[ln2] = jl
     out = []
