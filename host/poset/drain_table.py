@@ -33,7 +33,13 @@ for _p in (HERE, os.path.join(ROOT, "model"), os.path.join(ROOT, "model", "a2"),
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-DRAINS = tuple(range(0, 26)) + (30, 40)    # every value: the grid hid the least drain once (17, read as 20)
+def _drains():
+    import compile as C
+    return tuple(range(0, C.drain_max() + 1))     # EVERY value up to the generated limit (a sparse
+    # grid reported 17 as 20, then m1 33 as 40 and b3b 34 as none)
+
+
+DRAINS = _drains()
 
 
 def _j(bb, lane):
