@@ -959,11 +959,8 @@ def assemble(lanes, headers, park_pins=None, timing_checks=True,
 
 def a2_status(img):
     """"A2" or "A2-UNCERTIFIED (...)" -- the stamp `assemble` leaves on the image."""
-    bl = program_a2.branch_lanes(img) if program_a2.STALL_FIX_PENDING else []
-    if not bl:
-        return "A2"
-    return ("A2-UNCERTIFIED (branch lane(s) %s: dispatcher-stall fix pending, "
-            "Wilson 11-13)" % ",".join(map(str, bl)))
+    why = program_a2.uncertified_reason(img)
+    return "A2" if why is None else "A2-UNCERTIFIED (%s)" % why
 
 
 def check_branches(img):

@@ -97,7 +97,21 @@ def lanes_of(img):
 # model/stale_records.py records the gap; this is what enforces it.
 # ⇒ When the fix lands, J comes from ITS result (0 extra under (b'), the proved
 # bound under (c)) and this flag goes False in the same commit.
-STALL_FIX_PENDING = True
+# ⭐ LIFTED 11-14 (agent 2, Wilson 11-14 option 1): (b') landed (no global
+# stall), and the branch-1 budget B is CERTIFIED PER IMAGE in
+# model/branch_budget.json (model/gen_branch_budget.py; gate_lane_cert check 5
+# holds it current). A branch image is certified only when ALL of:
+#   * its budget entry matches its bytes (sha == image_sha) and B is finite;
+#   * the J = 1 premise holds at D* + B: d_min >= proof_constants.nonbranch_dmin(B)
+#     (head_valid_optA; not D* alone when B > 0);
+#   * its lane set forms (an edge-paced lane needs a T_ext).
+# The word after a branch of wait W then carries J = proof_constants.branch_j(B, W),
+# that lane's own (stall_free_bprime). Anything else is A2-UNCERTIFIED with the
+# reason (`uncertified_reason`) -- never certified, never silently priced at J = 1.
+STALL_FIX_PENDING = False
+
+#: the certified branch-1 budget per image (agent 2's generator writes it)
+BRANCH_BUDGET_JSON = os.path.join(ROOT, "model", "branch_budget.json")
 
 
 class StallFixPending(RuntimeError):
@@ -109,13 +123,77 @@ def branch_lanes(img):
     return sorted({ln for ln, _h, a in dgf.walk(img) if a["op"] in I.BRANCH_OPS})
 
 
-def refuse_branch(img, name="image"):
-    """Raise StallFixPending if `img` has a branch lane and the fix is pending."""
-    bl = branch_lanes(img) if STALL_FIX_PENDING else []
-    if bl:
-        raise StallFixPending(
-            "%s: A2 refused -- dispatcher-stall fix pending (branch lane(s) %s; "
-            "Wilson 11-13, agent 2 729111f)" % (name, ",".join(map(str, bl))))
+def branch_budget(img, path=None):
+    """(name, entry) of `img`'s certified branch-1 budget, matched BY SHA (the
+    record names the image as the generator saw it; the bytes are what bind),
+    or (None, None) when no entry carries this image's sha."""
+    path = path or BRANCH_BUDGET_JSON
+    if not os.path.isfile(path):
+        return None, None
+    with open(path, encoding="utf-8") as fh:
+        recs = json.load(fh).get("images", {})
+    sha = image_sha(img)
+    for name, e in sorted(recs.items()):
+        if e.get("sha") == sha:
+            return name, e
+    return None, None
+
+
+def certified_B(img, path=None):
+    """The image's certified B (an int), or None (no record / no finite B)."""
+    _n, e = branch_budget(img, path)
+    return None if e is None else e.get("B")
+
+
+def uncertified_reason(img, path=None):
+    """None if A2 may certify `img`; else WHY it is A2-UNCERTIFIED. An image
+    with no branch lane is never held here."""
+    import proof_constants as PC
+    bl = branch_lanes(img)
+    if not bl:
+        return None
+    lanes = ",".join(map(str, bl))
+    if STALL_FIX_PENDING:
+        return ("branch lane(s) %s: dispatcher-stall fix pending (Wilson 11-13, "
+                "agent 2 729111f)" % lanes)
+    name, e = branch_budget(img, path)
+    if e is None:
+        return ("branch lane(s) %s: no certified branch-1 budget B for this image "
+                "(sha %s... not in model/branch_budget.json; run "
+                "model/gen_branch_budget.py)" % (lanes, image_sha(img)[:12]))
+    if e.get("B") is None:
+        return "branch lane(s) %s: no finite B (%s)" % (lanes, e.get("reason", "?"))
+    B = e["B"]
+    try:
+        lset, _d_min, _k, _j = lane_set(img, budget_path=path)
+    except (EdgePacedNoTExt, zs.ZeroSpacingError) as exc:
+        return "branch lane(s) %s, B = %d: lane set does not form (%s)" % (lanes, B, exc)
+    # ⛔ PER LANE, THAT LANE'S OWN SPACING (agent 2 11-14, from the Lean:
+    # head_valid_optA's `hd : DSTAR + B <= d` with `hdly : P.dly y = d` is lane
+    # y's own spacing; an image-wide minimum is never used). Condition 1 is
+    # checked here; condition 2 (`hNc : 2d >= R_y + 26 + B`) and each branch
+    # lane's J (1 + its max CERTIFIED lateness, not branch_j alone) come from
+    # agent 2's generated per-lane predicate (a) and max-lateness export (b) --
+    # until both exist the image stays A2-UNCERTIFIED, by name.
+    need = PC.nonbranch_dmin(B)
+    short = ["lane %d d=%s" % (r["lane"], r["T"]) for r in lset
+             if r["lane"] not in bl and r["T"] < need]
+    if short:
+        return ("branch lane(s) %s, B = %d: J = 1 premise fails on plain lane(s) "
+                "%s < D* + B = %d (head_valid_optA, per lane)"
+                % (lanes, B, ", ".join(short), need))
+    if not hasattr(PC, "lane_j1_premise") or "max_late" not in e:
+        return ("branch lane(s) %s, B = %d: plain lanes meet D* + B; awaiting agent "
+                "2's per-lane premise (2d >= R + 26 + B) and per-branch-lane max "
+                "certified lateness export" % (lanes, B))
+    return "branch lane(s) %s: per-lane predicate present but not yet wired" % lanes
+
+
+def refuse_branch(img, name="image", path=None):
+    """Raise StallFixPending (A2-UNCERTIFIED) unless A2 may certify `img`."""
+    why = uncertified_reason(img, path)
+    if why:
+        raise StallFixPending("%s: A2-UNCERTIFIED -- %s" % (name, why))
 
 
 #: {image name: reason} -- the images a set builder left out under the block
@@ -280,9 +358,13 @@ class _TExt(dict):
 T_EXT = _TExt()
 
 
-def lane_set(img, t_ext=None, j=None):
+def lane_set(img, t_ext=None, j=None, budget_path=None):
     """The program's own A2 lane set, plus which entries are clocked OD.
-    `t_ext` ({lane: cycles}) overrides the registry for edge-paced lanes."""
+    `t_ext` ({lane: cycles}) overrides the registry for edge-paced lanes.
+    A branch lane of an image with a CERTIFIED B carries
+    J = max(program J, proof_constants.branch_j(B, W_min)) -- W_min that lane's
+    smallest branch wait (branch_j falls as W grows); certification itself
+    (premise, record) is `uncertified_reason`'s, not this function's."""
     rows = lanes_of(img)
     if t_ext is None:
         t_ext = dict(T_EXT.get(image_sha(img), {}))
@@ -302,6 +384,25 @@ def lane_set(img, t_ext=None, j=None):
     # bound (Wilson 11-13: the proved dispatcher-stall J, not the J = 1 that
     # a branch lane can exceed until the dispatcher-stall fix lands)
     j_prog = j if j is not None else (jp.j_of(d_min, k) if d_min else 0)
+    # the per-lane post-branch jitter, from the image's certified B (none when
+    # `j` overrides, or when B is not certified -- such an image is uncertified)
+    br_j = {}
+    if j is None and not STALL_FIX_PENDING:
+        import proof_constants as PC
+        _name, rec = branch_budget(img, budget_path)
+        for ln2, _h2, a2 in dgf.walk(img):
+            if a2["op"] in I.BRANCH_OPS and rec is not None:
+                # certified B: branch_j(B, W) (a floor until agent 2 exports the
+                # lane's max certified lateness); a RECORD saying no finite B: no
+                # proved J, so the INTERIM J prices the lane (Wilson 11-14).
+                # ⚠ NO RECORD AT ALL (a program assembled at run time, e.g. the PIT
+                # round trip's UART loop): priced as at 9c0df0c and labelled
+                # A2-UNCERTIFIED by `uncertified_reason` -- the live per-program B
+                # (agent 2's branch_budget.image_budget) is Wilson's call, pending.
+                B = rec.get("B")
+                jb = (PC.branch_j(B, I.branch_wait(a2)) if B is not None
+                      else PC.load()["j_interim_head_late_optA"])
+                br_j[ln2] = max(br_j.get(ln2, 0), jb)
     out = []
     for ln, h, acts in rows:
         T = min((g for a in acts if a["delay"] > 0 for g in gaps(h, a)),
@@ -327,7 +428,7 @@ def lane_set(img, t_ext=None, j=None):
             dt = min(dt, abs_tolerance(T // 2, c9_at_completion=True,
                                        C=C_SHIPPED))
             ds = min(ds, dt)
-        J = j_prog + (L_JIT if ck_od else 0)
+        J = max(j_prog, br_j.get(ln, 0)) + (L_JIT if ck_od else 0)
         bl = BLane("lane%d%s" % (ln, " ckOD" if ck_od else ""), T=T,
                    C=C_SHIPPED, D_tol=dt, D_sched=ds, J=J)
         loads, chains = hold_profile(h, acts)

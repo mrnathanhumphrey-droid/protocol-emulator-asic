@@ -61,20 +61,20 @@
       "B": null,
       "reason": "lane 1: no lateness certificate at B = 16"
     },
-    "dev.hex": {
-      "sha": "a5d54e4e4fd0f42a6af8fff17f5cff80d48fea1b5c4c5bd0335739383247ac55",
-      "branch_lanes": [
-        0
-      ],
-      "B": 8,
-      "reason": "certified"
-    },
-    "usb.hex": {
+    "usbbuf_usb.hex": {
       "sha": "2039287a8ddfe631c5222e4ee5937dbce113b53f3314f1fe82c314b6f61ed61f",
       "branch_lanes": [
         0
       ],
       "B": 4,
+      "reason": "certified"
+    },
+    "usbdev_dev.hex": {
+      "sha": "a5d54e4e4fd0f42a6af8fff17f5cff80d48fea1b5c4c5bd0335739383247ac55",
+      "branch_lanes": [
+        0
+      ],
+      "B": 8,
       "reason": "certified"
     }
   }

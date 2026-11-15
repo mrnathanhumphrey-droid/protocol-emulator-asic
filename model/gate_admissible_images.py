@@ -157,7 +157,8 @@ def audit(images, declared, pad_declared, deliberate):
         # still real (a larger J only makes it worse), so the conditions are
         # still judged; a PASS no longer certifies, and the image is classed
         # ADMISSIBLE-UNCERTIFIED with the reason -- never refused, never a crash.
-        unc = (pa.branch_lanes(img) if pa.STALL_FIX_PENDING else [])
+        # ⭐ 11-14: the reason comes from program_a2 (certified B per image)
+        unc = pa.uncertified_reason(img) if pa.branch_lanes(img) else None
         try:
             got, dm, u = conditions(name, img)
         except zs.ZeroSpacingError as exc:
@@ -167,13 +168,10 @@ def audit(images, declared, pad_declared, deliberate):
         except pa.EdgePacedNoTExt as exc:
             if not unc:
                 raise
-            UNCERTIFIED[name] = ("branch lane(s) %s, dispatcher-stall fix pending; "
-                                 "A2 cannot form its lane set (%s)"
-                                 % (",".join(map(str, unc)), str(exc)[:60]))
+            UNCERTIFIED[name] = unc
             continue
         if unc:
-            UNCERTIFIED[name] = ("branch lane(s) %s, dispatcher-stall fix pending"
-                                 % ",".join(map(str, unc)))
+            UNCERTIFIED[name] = unc
         rows.append((name, got, dm, u))
         want = set(declared.get(name, (set(), ""))[0])
         if name in pad_declared:

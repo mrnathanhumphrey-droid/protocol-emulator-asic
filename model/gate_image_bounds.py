@@ -150,14 +150,13 @@ def main() -> int:
     # the dispatcher-stall block first: a refused image's lane needs are never
     # asked (two of them -- the USB device / buffer images -- are edge-paced
     # with no T_ext, so A2 cannot even form their lane set)
-    refused = ({n for n, img in imgs if P.branch_lanes(img)}
-               if P.STALL_FIX_PENDING else set())
+    refused = {n for n, img in imgs if P.uncertified_reason(img)}
     nck = sum(1 for n, img in imgs if n not in refused and needs(img)[0])
     ntx = sum(1 for n, img in imgs if n not in refused and needs(img)[1])
     print("  %d images: %d with a clocked open-drain lane, %d with an "
           "unclocked SHIFT" % (len(imgs), nck, ntx))
     for n in sorted(refused):
-        print("    REFUSED (dispatcher-stall fix pending): %s" % n)
+        print("    A2-UNCERTIFIED: %s -- %s" % (n, P.uncertified_reason(dict(imgs)[n])))
     probs = audit(imgs, clocked, resp, refused)
     for p in probs:
         print("    *** %s" % p)
@@ -252,10 +251,10 @@ def main() -> int:
             call()
             m6.append(False)
         except P.StallFixPending as exc:
-            m6.append("dispatcher-stall fix pending" in str(exc)
+            m6.append("A2-UNCERTIFIED" in str(exc)
                       and "branch_image.hex" in str(exc))
     say(bimg is not None and all(m6), "M6 an A2 certificate asked for on "
-        "branch_image.hex -> refused, 'dispatcher-stall fix pending'")
+        "branch_image.hex (no finite B) -> refused, 'A2-UNCERTIFIED'")
     try:
         P.refuse_branch(byname["tx_image.hex"], "tx_image.hex")
         ctl6 = True
@@ -272,6 +271,38 @@ def main() -> int:
             % os.path.basename(gen[0]))
     else:
         say(False, "M7 has no generated arm image to drop")
+
+    # M8 (11-14, the A2 lift): certification reads the per-image B record BY
+    # SHA. A synthetic record (temp file, never the real one) on a one-branch-
+    # lane image whose spacing meets D* + B at B = 0 certifies (the control);
+    # each corruption must make it A2-UNCERTIFIED.
+    uimg = byname.get("usbbuf_usb.hex")
+    if uimg is None:
+        say(False, "M8 has no usbbuf_usb.hex to plant on")
+    else:
+        tdir = tempfile.mkdtemp(prefix="pe_m8_")
+        try:
+            def rec(entry):
+                p = os.path.join(tdir, "bb_%d.json" % len(os.listdir(tdir)))
+                with open(p, "w", encoding="utf-8") as fh:
+                    json.dump({"images": {} if entry is None else {"x.hex": entry}}, fh)
+                return p
+            good = {"sha": P.image_sha(uimg), "B": 0, "reason": "certified"}
+            ok_why = P.uncertified_reason(uimg, rec(good)) or ""
+            say("plain lanes meet D* + B" in ok_why,
+                "control: a current B record meeting D* + B on every plain lane -> "
+                "past the per-lane premise (held only on agent 2's pending exports)")
+            say(P.uncertified_reason(uimg, rec(dict(good, sha="0" * 64))) is not None,
+                "M8a record sha does not match the image -> A2-UNCERTIFIED")
+            say(P.uncertified_reason(uimg, rec(dict(good, B=None, reason="planted"))) is not None,
+                "M8b B = null -> A2-UNCERTIFIED, never certified")
+            say(P.uncertified_reason(uimg, rec(None)) is not None,
+                "M8c the image's B record removed -> A2-UNCERTIFIED")
+            big = max(r["T"] for r in P.lane_set(uimg)[0])   # D* + B past every plain lane
+            say("premise fails on plain lane" in (P.uncertified_reason(uimg, rec(dict(good, B=big))) or ""),
+                "M8d B large enough to break a plain lane's J = 1 premise -> A2-UNCERTIFIED")
+        finally:
+            shutil.rmtree(tdir, ignore_errors=True)
 
     # M4 + control, in a temporary directory added to the scan
     tmp = tempfile.mkdtemp(prefix="probe_imgu_")

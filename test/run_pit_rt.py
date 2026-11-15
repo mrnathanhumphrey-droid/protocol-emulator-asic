@@ -210,7 +210,7 @@ def clocked_emulation(cl, rng, nbytes=3000):
         # flips the pin: 0 = park, 1 = idle-high program + inv, 2 = park + inv, 3 = idle high
         park, inv = mode in (0, 2), mode in (1, 2)
         m = pe_proto.SPI(corpus.P_M_MOSI, corpus.P_M_SCLK, corpus.P_M_CS, corpus.P_M_MISO,
-                         SPI_D, pe_proto.ORDER_MSB, nc_count=8, mode0=park)
+                         SPI_D, pe_proto.ORDER_MSB, nc_count=0, mode0=park)
         acts = m.transactions([(n, 0) for n in lens])
         # CS high for SPI_GAP between frames (the original benches' gap: stage
         # 0 needs two WHOLE CS frames in the first capture), and a long idle
@@ -225,10 +225,10 @@ def clocked_emulation(cl, rng, nbytes=3000):
             out = []
             for a in acts:
                 if a[0] == OP_LEVEL and a[1] == corpus.P_M_CS and a[2] == 1:
-                    out.append((OP_LEVEL, corpus.P_M_SCLK, 0, SPI_D, 0, 8))
+                    out.append((OP_LEVEL, corpus.P_M_SCLK, 0, SPI_D, 0, 0))
                 out.append(a)
             acts = out
-        acts = [(OP_LEVEL, corpus.P_M_CS, 1, SPI_IDLE, 0, 8)] + acts
+        acts = [(OP_LEVEL, corpus.P_M_CS, 1, SPI_IDLE, 0, 0)] + acts
         if cs_hi:                           # CS active HIGH: every CS level inverted
             acts = [a[:2] + (1 - a[2],) + a[3:] if a[0] == OP_LEVEL and a[1] == corpus.P_M_CS else a
                     for a in acts]
@@ -242,7 +242,9 @@ def clocked_emulation(cl, rng, nbytes=3000):
     else:
         if chg != 0:
             raise NotEmulable("I2C data changing with SCL high is not I2C")
-        m = pe_proto.I2C(corpus.P_SDA, corpus.P_SCL, I2C_D, nc_count=8)
+        # ⛔ count 0 on every word that does not read it (LEVEL / REARM / START /
+        # STOP: test/op_reads.json; Wilson 11-14 reserved-bit option 1)
+        m = pe_proto.I2C(corpus.P_SDA, corpus.P_SCL, I2C_D, nc_count=0)
         # the role's I2C TAG says stage 0 typed the pair by its START / STOP
         # structure (the plain clocked test failed on them): one transaction a
         # frame, START .. STOP. Untagged: one transaction, START, L, Sr, L+1,
@@ -252,7 +254,7 @@ def clocked_emulation(cl, rng, nbytes=3000):
             acts = []
             for n in lens:
                 acts += m.transaction([("write", n)], loop=False)
-            acts.append((OP_REARM, 0, 1, I2C_D, 0, 8))
+            acts.append((OP_REARM, 0, 1, I2C_D, 0, 0))
         else:
             acts = m.transaction([("write", n) for n in lens])
         lanes = {0: acts}

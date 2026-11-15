@@ -144,7 +144,9 @@ def judge():
         if len(win) != 1 or (win[0]["lo_cycles"], win[0]["hi_cycles"]) != (min(leads), max(leads)):
             probs.append("C1 window %s, the golden bus drew %d..%d cycles"
                          % ([(p["lo_cycles"], p["hi_cycles"]) for p in win], min(leads), max(leads)))
-        rest = {a: v for a, v in r["cert"].items() if a != "usb_coresident"}
+        # a "not applicable (...)" entry (usb_coresident, branch_budget on a
+        # program with no USB receive / no branch lane) claims nothing
+        rest = {a: v for a, v in r["cert"].items() if not v.startswith("not applicable")}
         if not all(v.startswith(("OWED", "UNCERTIFIED")) for v in rest.values()):
             probs.append("C1 cert claims more than the skeleton does: %s" % r["cert"])
         if r["cert"].get("usb_coresident") != "not applicable (no USB receive)":

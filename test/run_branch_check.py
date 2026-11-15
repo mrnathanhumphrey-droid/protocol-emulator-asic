@@ -215,7 +215,9 @@ def a2_dispatch_bound(img, name="image"):
         know is wrong. Back to the A2 value when STALL_FIX_PENDING goes False."""
     import program_a2 as P
     import proof_constants as PC
-    bl = P.branch_lanes(img) if P.STALL_FIX_PENDING else []
+    # ⭐ 11-14: an image whose B certifies takes the A2 bound (branch lanes at
+    # proof_constants.branch_j(B, W)); an uncertified one keeps the interim path
+    bl = P.branch_lanes(img) if P.uncertified_reason(img) else []
     if len(bl) >= 2:
         # ⛔ Wilson 11-14: FIRST the admissible set -- an image whose branch
         # lanes break the theorem's premises is declared outside it, NOT budgeted
@@ -237,9 +239,10 @@ def a2_dispatch_bound(img, name="image"):
     j = None
     if bl:
         j = PC.load()["j_interim_head_late_optA"]
-        BOUND_KIND[name] = "interim J=%d (dispatcher-stall fix pending)" % j
+        BOUND_KIND[name] = "interim J=%d (A2-UNCERTIFIED: %s)" % (j, P.uncertified_reason(img))
     else:
-        BOUND_KIND[name] = "A2"
+        BOUND_KIND[name] = ("A2 (certified B = %d)" % P.certified_B(img)
+                            if P.branch_lanes(img) else "A2")
     r = P.lane_responses(img, j=j)
     if any(v[0] is None for v in r.values()):
         return None
