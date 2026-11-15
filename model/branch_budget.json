@@ -7,7 +7,29 @@
         1
       ],
       "B": 16,
-      "reason": "certified"
+      "reason": "certified",
+      "lanes": {
+        "0": {
+          "max_late": 22,
+          "R": 20
+        },
+        "1": {
+          "max_late": 22,
+          "R": 20
+        },
+        "2": {
+          "max_late": 0,
+          "R": 26
+        },
+        "3": {
+          "max_late": 0,
+          "R": 26
+        },
+        "4": {
+          "max_late": 0,
+          "R": 26
+        }
+      }
     },
     "branch_cmp_mask_image.hex": {
       "sha": "008a51b5fda36d41ab645adf8456eb7f2d76ae1b9f2e6846468b20744adaf464",
@@ -16,7 +38,8 @@
         3
       ],
       "B": null,
-      "reason": "lane 0: no lateness certificate at B = 32"
+      "reason": "lane 0: no lateness certificate at B = 32",
+      "lanes": {}
     },
     "branch_cmp_order_image.hex": {
       "sha": "2feb7bb43939dc6a7fc8a68c524a552633e77ea25a7762ae107573b910dd0c6c",
@@ -25,7 +48,8 @@
         3
       ],
       "B": null,
-      "reason": "lane 0: no lateness certificate at B = 32"
+      "reason": "lane 0: no lateness certificate at B = 32",
+      "lanes": {}
     },
     "branch_image.hex": {
       "sha": "17655390676135b5a736f9e9d703ad534efe0ac73a77db2ac4233677a6e739d1",
@@ -36,7 +60,8 @@
         4
       ],
       "B": null,
-      "reason": "lane 1: no lateness certificate at B = 16"
+      "reason": "lane 1: no lateness certificate at B = 16",
+      "lanes": {}
     },
     "branch_loop_image.hex": {
       "sha": "9c7e9a258de2136ecd044a8c9ea0fa38afc1e28ebe620e117f711c2ea096c6b0",
@@ -48,7 +73,8 @@
         4
       ],
       "B": null,
-      "reason": "lane 0: no lateness certificate at B = 20"
+      "reason": "lane 0: no lateness certificate at B = 20",
+      "lanes": {}
     },
     "branch_wbad_image.hex": {
       "sha": "a2a6db4283f3338eaa91ee631b2857f03ae11e9473a8d76d942ac35586cbd8fe",
@@ -59,23 +85,275 @@
         4
       ],
       "B": null,
-      "reason": "lane 1: no lateness certificate at B = 16"
+      "reason": "lane 1: no lateness certificate at B = 16",
+      "lanes": {}
     },
-    "dev.hex": {
-      "sha": "a5d54e4e4fd0f42a6af8fff17f5cff80d48fea1b5c4c5bd0335739383247ac55",
-      "branch_lanes": [
-        0
-      ],
-      "B": 8,
-      "reason": "certified"
-    },
-    "usb.hex": {
+    "usbbuf_usb.hex": {
       "sha": "2039287a8ddfe631c5222e4ee5937dbce113b53f3314f1fe82c314b6f61ed61f",
       "branch_lanes": [
         0
       ],
       "B": 4,
-      "reason": "certified"
+      "reason": "certified",
+      "lanes": {
+        "1": {
+          "max_late": 0,
+          "R": 17
+        },
+        "2": {
+          "max_late": 0,
+          "R": 17
+        },
+        "3": {
+          "max_late": 0,
+          "R": 17
+        },
+        "4": {
+          "max_late": 0,
+          "R": 17
+        },
+        "0": {
+          "max_late": 11,
+          "R": null
+        }
+      }
+    },
+    "usbdev_dev.hex": {
+      "sha": "a5d54e4e4fd0f42a6af8fff17f5cff80d48fea1b5c4c5bd0335739383247ac55",
+      "branch_lanes": [
+        0
+      ],
+      "B": 8,
+      "reason": "certified",
+      "lanes": {
+        "1": {
+          "max_late": 0,
+          "R": 23
+        },
+        "2": {
+          "max_late": 0,
+          "R": 23
+        },
+        "3": {
+          "max_late": 0,
+          "R": 23
+        },
+        "4": {
+          "max_late": 0,
+          "R": 23
+        },
+        "0": {
+          "max_late": 25,
+          "R": null
+        }
+      }
+    },
+    "usbdev_fpga.hex": {
+      "sha": "a5d54e4e4fd0f42a6af8fff17f5cff80d48fea1b5c4c5bd0335739383247ac55",
+      "branch_lanes": [
+        0
+      ],
+      "B": 8,
+      "reason": "certified",
+      "lanes": {
+        "1": {
+          "max_late": 0,
+          "R": 23
+        },
+        "2": {
+          "max_late": 0,
+          "R": 23
+        },
+        "3": {
+          "max_late": 0,
+          "R": 23
+        },
+        "4": {
+          "max_late": 0,
+          "R": 23
+        },
+        "0": {
+          "max_late": 25,
+          "R": null
+        }
+      }
+    },
+    "run_branch_check:braw33_alone": {
+      "sha": "fcf274c0c13629f424e112a19032fc19fa57be41a74f56eb6ba0318a41f21180",
+      "branch_lanes": [
+        1
+      ],
+      "B": 4,
+      "reason": "certified",
+      "lanes": {
+        "0": {
+          "max_late": 0,
+          "R": 17
+        },
+        "1": {
+          "max_late": 11,
+          "R": 14
+        },
+        "2": {
+          "max_late": 0,
+          "R": 17
+        },
+        "3": {
+          "max_late": 0,
+          "R": 17
+        },
+        "4": {
+          "max_late": 0,
+          "R": 17
+        }
+      }
+    },
+    "run_branch_check:braw33_contend4": {
+      "sha": "17655390676135b5a736f9e9d703ad534efe0ac73a77db2ac4233677a6e739d1",
+      "branch_lanes": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "B": null,
+      "reason": "lane 1: no lateness certificate at B = 16",
+      "lanes": {}
+    },
+    "run_branch_check:braw40_alone": {
+      "sha": "bc8306ce59c715e4b5c8ad04b116d13022236db4ce09744ca515483b7c631b42",
+      "branch_lanes": [
+        1
+      ],
+      "B": 0,
+      "reason": "certified",
+      "lanes": {
+        "0": {
+          "max_late": 0,
+          "R": 14
+        },
+        "1": {
+          "max_late": 0,
+          "R": 14
+        },
+        "2": {
+          "max_late": 0,
+          "R": 14
+        },
+        "3": {
+          "max_late": 0,
+          "R": 14
+        },
+        "4": {
+          "max_late": 0,
+          "R": 14
+        }
+      }
+    },
+    "run_branch_check:braw40_contend4": {
+      "sha": "1c7645889399537618f48d957962ebfdc289c48173e11495354a66eed66442c7",
+      "branch_lanes": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "B": 0,
+      "reason": "certified",
+      "lanes": {
+        "0": {
+          "max_late": 0,
+          "R": 14
+        },
+        "1": {
+          "max_late": 0,
+          "R": 14
+        },
+        "2": {
+          "max_late": 0,
+          "R": 14
+        },
+        "3": {
+          "max_late": 0,
+          "R": 14
+        },
+        "4": {
+          "max_late": 0,
+          "R": 14
+        }
+      }
+    },
+    "run_branch_check:cmp_order": {
+      "sha": "2feb7bb43939dc6a7fc8a68c524a552633e77ea25a7762ae107573b910dd0c6c",
+      "branch_lanes": [
+        2,
+        3
+      ],
+      "B": null,
+      "reason": "lane 0: no lateness certificate at B = 32",
+      "lanes": {}
+    },
+    "run_branch_check:cmp_mask": {
+      "sha": "008a51b5fda36d41ab645adf8456eb7f2d76ae1b9f2e6846468b20744adaf464",
+      "branch_lanes": [
+        2,
+        3
+      ],
+      "B": null,
+      "reason": "lane 0: no lateness certificate at B = 32",
+      "lanes": {}
+    },
+    "run_branch_check:cmp_lo": {
+      "sha": "e7787588f44b9a86f25f801d6f69fcbdd0d0760f6bc5bba300e8dd0c51e96eb5",
+      "branch_lanes": [
+        1
+      ],
+      "B": 16,
+      "reason": "certified",
+      "lanes": {
+        "0": {
+          "max_late": 22,
+          "R": 20
+        },
+        "1": {
+          "max_late": 22,
+          "R": 20
+        },
+        "2": {
+          "max_late": 0,
+          "R": 26
+        },
+        "3": {
+          "max_late": 0,
+          "R": 26
+        },
+        "4": {
+          "max_late": 0,
+          "R": 26
+        }
+      }
+    },
+    "run_branch_check:loop_alone": {
+      "sha": "8c9795be894772a76be105b298e520138c558b603a45a74b23741aa3525d7b84",
+      "branch_lanes": [
+        0
+      ],
+      "B": null,
+      "reason": "lane 0: no lateness certificate at B = 8",
+      "lanes": {}
+    },
+    "run_branch_check:loop_mix": {
+      "sha": "9c7e9a258de2136ecd044a8c9ea0fa38afc1e28ebe620e117f711c2ea096c6b0",
+      "branch_lanes": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "B": null,
+      "reason": "lane 0: no lateness certificate at B = 20",
+      "lanes": {}
     }
   }
 }

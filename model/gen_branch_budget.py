@@ -22,18 +22,29 @@ import branch_budget as BB  # noqa: E402
 RECORD = os.path.join(HERE, "branch_budget.json")
 
 
-def current():
-    """{image name: {sha, branch_lanes, B, reason}} for every branch image, now"""
+def corpus():
+    """[(name, image)]: the image universe, plus run_branch_check's own corpus (built in code,
+    named run_branch_check:<name>; Wilson 11-14) -- every image a branch J is quoted for"""
     import image_universe as U
+    out = list(U.images())
+    import run_branch_check as RB
+    out += [("run_branch_check:%s" % n, bytes(f())) for n, f in RB.IMAGES.items()]
+    return out
+
+
+def current():
+    """{image name: {sha, branch_lanes, B, reason, lanes}} for every branch image, now"""
     import program_a2 as P
     out = {}
-    for name, img in U.images():
+    for name, img in corpus():
         bl = P.branch_lanes(img)
         if not bl:
             continue
         r = BB.image_budget(img)
         out[name] = {"sha": P.image_sha(img), "branch_lanes": bl, "B": r["B"],
-                     "reason": r["reason"]}
+                     "reason": r["reason"],
+                     "lanes": {str(l): {"max_late": v["max_late"], "R": v["R"]}
+                               for l, v in r["lanes"].items()}}
     return out
 
 
@@ -49,7 +60,8 @@ def stale(rec, cur):
         r = rec.get("images", {}).get(name)
         if r is None:
             out.append("%s: no record" % name)
-        elif (r.get("sha"), r.get("B"), r.get("reason")) != (v["sha"], v["B"], v["reason"]):
+        elif (r.get("sha"), r.get("B"), r.get("reason"), r.get("lanes")) != (
+                v["sha"], v["B"], v["reason"], v["lanes"]):
             out.append("%s: recorded B %s (%s), certificate now B %s (%s)"
                        % (name, r.get("B"), r.get("reason"), v["B"], v["reason"]))
     for name in sorted(set(rec.get("images", {})) - set(cur)):

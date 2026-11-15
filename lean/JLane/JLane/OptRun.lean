@@ -327,6 +327,28 @@ theorem head_valid_optA (d Wn Y : Nat) (hW : Wf e0)
   head_late_optA P win y e0 R B T R d Wn Y 0 hW hfull hy hdly hd hY (Nat.le_refl R)
     (by omega) hFc hNc hR (fun t ht hr _ => hR t ht (isWB_of_ret P y _ hr)) hB hWn t htT hrdy
     (fun _ _ _ _ _ => by omega)
+/-- **J = 1 for a lane with no branch word** (A2 export, agent 1 / Wilson 11-14): `head_valid_optA`
+for a lane `y` none of whose retirements is a no-prefetch (branch) word, in exactly the form the
+tools take (`proof_constants.j1_ok`): **its own** spacing `d` with `DSTAR + B ≤ d` and
+`R + HEAD_SLACK + B ≤ 2 * d` (`R` its own response bound, `B` the image's branch-1 budget) -- then
+its head is valid whenever it is released. Other lanes enter only through `R` and `B`. -/
+theorem head_valid_nonbranch (d : Nat) (hW : Wf e0)
+    (hfull : ∀ s, e0.actv y s = true)
+    (hy : P.live y = true) (hdly : P.dly y = d) (hd : DSTAR + B ≤ d)
+    (hNc : R + HEAD_SLACK + B ≤ 2 * d)
+    (hR : ∀ t, t < T → IsWB y (run P win t e0) →
+      (run P win t e0).now ≤ (run P win t e0).ts y + R + 2)
+    (hB : ∀ a m, a + m ≤ T → m ≤ 23 + B → chargeSum P win y m (run P win a e0) ≤ B)
+    (hnob : ∀ x, x < T → IsRet P y (run P win x e0) → ¬NpfAt y (run P win x e0))
+    (t : Nat) (htT : t ≤ T)
+    (hrdy : (run P win t e0).ts y ≤ (run P win t e0).now) :
+    (run P win t e0).headValid y = true := by
+  have hHS : HEAD_SLACK = 26 := head_slack_val
+  have hDS : DSTAR = 20 := dstar_val
+  exact head_valid_optA P win y e0 R B T d (R + HEAD_SLACK + DSTAR + 2 * B + 40) 0 hW hfull hy hdly
+    hd (by omega) (by omega) (by omega) (by omega) hR hB
+    (fun x hx hr hn => absurd hn (hnob x hx hr)) t htT hrdy
+
 /-- **The interim stall bound's premise.** Condition D of `head_late_optA` holds at the RTL's
 branch-wait floor with response `R_BASE`, branch-1 budget `BR1_BUDGET` and lateness
 `LD = BR_SUCC_LATE + BR1_BUDGET`; the dispatcher stall this lateness can cause under the
@@ -362,6 +384,7 @@ theorem branch_j_interim : BRANCH_J_WMIN = J_INTERIM_HEAD_LATE_OPTA := by decide
 end
 
 #print axioms branch_ld_D
+#print axioms head_valid_nonbranch
 #print axioms j_interim_D
 #print axioms pending_bound_optA
 #print axioms head_late_optA
