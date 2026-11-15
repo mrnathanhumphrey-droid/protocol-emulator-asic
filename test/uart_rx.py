@@ -116,7 +116,8 @@ def build(T=T_NOMINAL, offset=None, variant="ok"):
 
 def main():
     out = sys.argv[1]
-    if len(sys.argv) > 2 and sys.argv[2] == "board":
+    board = len(sys.argv) > 2 and sys.argv[2] == "board"
+    if board:
         # F1.5: the FPGA board's image -- 115200 at the BOARD's clock
         # (fpga/board.yaml through model/clock.py), never a typed T
         sys.path.insert(0, os.path.join(os.path.dirname(HERE), "model"))
@@ -127,8 +128,15 @@ def main():
     off = int(sys.argv[3]) if len(sys.argv) > 3 and sys.argv[3] != "-" else None
     var = sys.argv[4] if len(sys.argv) > 4 else "ok"
     img = build(T, off, var)
-    with open(out, "w", encoding="ascii", newline="\n") as fh:
-        fh.write("\n".join("%02x" % b for b in img) + "\n")
+    if board:
+        # ⛔ WILSON 11-15 (item 7): the board image is an image of record -- written
+        # through cert_stamp.write with require_cert=True (stamp sidecar beside it); an
+        # UNCERTIFIED build raises cert_stamp.Uncertified and NOTHING is written.
+        import cert_stamp
+        cert_stamp.write(out, img, require_cert=True)
+    else:
+        with open(out, "w", encoding="ascii", newline="\n") as fh:
+            fh.write("\n".join("%02x" % b for b in img) + "\n")
     print("uart_rx: T=%d offset=%s variant=%s -> %s (%d bytes)"
           % (T, off if off is not None else default_offset(T), var, out, len(img)))
 

@@ -955,9 +955,8 @@ SPEC_SYMBOLS = {
     # build, like D_POINTS above -- nothing is concluded from a stored value.
     ("model/gate_cert_stamp.py", "D12"),
     ("model/gate_cert_stamp.py", "OK25"),
-    # paths and the owning builder's text; the digits are dates inside the reason strings
-    # ("11-15"), not numbers. gate_cert_stamp prints each entry as pending.
-    ("model/cert_stamp.py", "IMAGES_OF_RECORD_PENDING"),
+    # (cert_stamp.IMAGES_OF_RECORD_PENDING's exclusion retired 11-15: its dated
+    # uart_rx_board entry moved to IMAGES_OF_RECORD, the rest carries no digits)
 }
 
 
