@@ -38,9 +38,15 @@ def within_block(k):
         "So the ARM's lead after A is pre = lo − %d − L cycles, and pre must be at least D* = %d: "
         "**lo ≥ %d cycles (%.1f ns) at L = 0**, or the window is refused as too tight. The "
         "deadline covers a B at hi seen late: T = hi + L_A + %d + %d − pre (L_A, A's certified "
-        "lateness). Every number here is the compiler's own constant or `proof_constants.json`'s."
+        "lateness). **The drain after an `else abort` window** has the closed form head_slack %d "
+        "- %d (ArmRetire: the next word is released at least that long after the ARM's writeback) "
+        "- (the next word's delay - %d, the rebase cycle) = %d cycles for a next word at D* = %d; the "
+        "compiler's search (0..%d cycles: the ARM's own response %d + head_slack) must agree with it. "
+        "Every number here is the compiler's own constant or `proof_constants.json`'s."
         % (hz, C.T_MAX, C.T_MAX * 1e6 / hz, C.NEEDS_COUNTER, C.WB_MIN, LC.SYNC_MIN, C.ARMED_BY,
-           -lead, k["dstar"], lo_min, lo_min * 1e9 / hz, C.ARMED_BY, LC.SYNC_MAX))
+           -lead, k["dstar"], lo_min, lo_min * 1e9 / hz, C.ARMED_BY, LC.SYNC_MAX,
+           k["head_slack"], LC.ARM_RETIRE_GAP, LC.REBASE, C.drain_closed_form(k["dstar"], k),
+           k["dstar"], C.drain_max(k), k["R_base"]))
 
 
 def blocks():

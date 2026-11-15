@@ -182,7 +182,7 @@ def word_gaps(x, after_arm, after_se0, prem, I, half_t=0):
         return [min(x["delay"], prem["rean_floor"])] * max(1, x["count"])
     if st:
         return [x["delay"]] * 8
-    d = x["delay"] - (1 if after_arm else 0)
+    d = x["delay"] - (REBASE if after_arm else 0)
     return [max(d, 0)]
 
 
@@ -233,6 +233,12 @@ def span_min(g, gaps, m):
 #: (`arm_rd`); the part of Z propagated from earlier retirements (refill backlog) is NOT capped.
 #: Must-fire switch: gate_lane_cert M_LC_ARMRETIRE_OFF sets it False.
 ARM_RETIRE = True
+#: the cap: the ARM's successor is released at least this long after the ARM's writeback
+#: (ArmRetire.arm_release_ge: now + 2)
+ARM_RETIRE_GAP = 2
+#: the rebase cycle: the word after an ARM opens a release gap one short of its delay
+#: (word_gaps' after_arm)
+REBASE = 1
 
 
 def certificate(g, preds, gaps, k, B, tail, iters=200, floor=None, xr=None, rbase=2, ready=None):
@@ -263,7 +269,7 @@ def certificate(g, preds, gaps, k, B, tail, iters=200, floor=None, xr=None, rbas
             return Zv[a] - rd[(a, b)]
         # Z[a] = max(own response Rr[a], the propagated part); only the own part is capped
         prop = max([Zv[p] + D + B - rd[(p, a)] for p in preds[a]] or [-10 ** 9])
-        return max(min(Rr[a] - rd[(a, b)], -2), prop - rd[(a, b)])
+        return max(min(Rr[a] - rd[(a, b)], -ARM_RETIRE_GAP), prop - rd[(a, b)])
     lat = {w: 0 for w in g}
     Z = {w: 0 for w in g}
     for _ in range(iters):

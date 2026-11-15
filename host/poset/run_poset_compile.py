@@ -30,6 +30,10 @@
      certified lateness drops); a SHA mismatch or an unregistered part: image-only
   C12 ArmRetire (JLane/ArmRetire.lean): the SPI-master `else abort` window at 5 cycles of
      spacing certifies at J 1 (must-fire M_PC_ARMRETIRE_OFF: the cap off -> red)
+  C13 the drain (Wilson 11-15): generated per window (the least drain certifying J 1), equal to
+     the closed form on every window; the default certifies; `nodrain` stamps UNCERTIFIED; a
+     next action bounded tighter than the drain is refused; no `within` -> byte-identical
+     (must-fire M_PC_DRAIN_OFFBY1: the drain one past the search -> the closed form disagrees)
 Must-fires added 11-15: M_PC_WITHIN_LO_PASS (lo > 0 without a datasheet compiles), and pe_asm's
 M_ASM_MOD_ANY_OP / M_ASM_MOD_ANY_VALUE (the mod field's two refusals), each killed by C10
 Must-fires: every compile.MUTANTS entry, run IN-PROCESS through the same judge, turns this gate red.
@@ -66,6 +70,7 @@ SCRATCH_MUTANTS = {
     "M_PC_WITHIN_NOARM": "killed in-process by this gate",
     "M_PC_WITHIN_LO_PASS": "killed in-process by this gate",
     "M_PC_ARMRETIRE_OFF": "killed in-process by this gate (C12)",
+    "M_PC_DRAIN_OFFBY1": "killed in-process by this gate (C13)",
     "M_ASM_MOD_ANY_OP": "pe_asm.MODS_MUT, killed in-process by this gate (C10)",
     "M_ASM_MOD_ANY_VALUE": "pe_asm.MODS_MUT, killed in-process by this gate (C10)",
 }
@@ -333,6 +338,44 @@ def c12():
     return [] if j == 1 else ["C12 SPI-master else abort, drain 5: lane 0 J %s (ArmRetire gives 1)" % j]
 
 
+def c13():
+    """the drain (Wilson 11-15, "build the drain to your design"): generated per window, the
+    least drain at which the certificate gives J 1; the closed form agrees on every window; the
+    default certifies; `nodrain` stamps UNCERTIFIED; a next action bounded tighter than the
+    drain is refused; an image with no `within` is byte-identical to the plain lowering"""
+    probs = []
+    r = C.compile_spec(body(WIN % "abort"), seed=7)
+    ws = r["windows"]
+    if not ws:
+        return ["C13 the default compiled no window"]
+    for x in ws:
+        if x.get("drain") is None or x["drain"] != x.get("drain_cf"):
+            probs.append("C13 lane %d window at word %s: generated drain %s, closed form %s"
+                         % (x["lane"], x["ARM_word"], x.get("drain"), x.get("drain_cf")))
+    parsed = C.S.parse(body(WIN % "abort"))
+    _i, low, route = C.lower(parsed["v1"], 7)
+    _l, _r, w = C.windows(parsed["poset"], low, route, HZ)
+    lanes = {x["lane"] for x in w["windows"]}
+    if w["budget"]["B"] is None or any(w["budget"]["lanes"][ln]["max_late"] for ln in lanes):
+        probs.append("C13 the default drain does not certify J 1: %s" % w["budget"]["reason"])
+    if r["stamp"]["status"] != "certified":
+        probs.append("C13 the default's stamp: %s" % r["stamp"])
+    nd = C.compile_spec(body(WIN % "abort nodrain"), seed=7)
+    if nd["stamp"]["status"] != "uncertified" or "nodrain" not in nd["stamp"]["reason"]:
+        probs.append("C13 nodrain: stamp %s" % nd["stamp"])
+    if any(x.get("drain") for x in nd["windows"]):
+        probs.append("C13 nodrain: a drain was added")
+    tight = body(WIN % "abort", "pattern Fall(uio5) -> Rise(uio1) during (0 ns, 50 ns) observed 3;")
+    ok, msg = refused_with(tight, "would push the next action past")
+    if not ok:
+        probs.append("C13 a next action bounded tighter than the drain: %s" % msg[:120])
+    plain = C.compile_spec(body(), seed=7)
+    p0 = C.S.parse(body())
+    if plain["image"] != C.lower(p0["v1"], 7)[0]:
+        probs.append("C13 an image with no `within` is not byte-identical to the plain lowering")
+    return probs
+
+
 def judge():
     probs = []
     # C1
@@ -390,6 +433,7 @@ def judge():
     probs += c10()
     probs += c11()
     probs += c12()
+    probs += c13()
     # C8: POSET_SPEC.md's generated passages match the constants file
     import gen_spec_doc
     probs += ["C8 %s" % p for p in gen_spec_doc.stale()]
@@ -501,7 +545,7 @@ def main() -> int:
     if probs:
         print("GATE poset_compile: FAILED (%d)" % len(probs))
         return 1
-    print("GATE poset_compile: PASSED (C1-C12; %d / %d mutants killed)" % (len(C.MUTANTS) + len(ASM_MUTANTS), len(C.MUTANTS) + len(ASM_MUTANTS)))
+    print("GATE poset_compile: PASSED (C1-C13; %d / %d mutants killed)" % (len(C.MUTANTS) + len(ASM_MUTANTS), len(C.MUTANTS) + len(ASM_MUTANTS)))
     return 0
 
 

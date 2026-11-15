@@ -59,6 +59,7 @@ ACCEPT = [
     # `within` / `else` (Wilson 11-15): its own keyword, the closed else set
     'pattern Fall(uio3) -> Fall(uio5) within (2000 ns, 10000 ns) else abort source datasheet "X";',
     "pattern Fall(uio3) |> Rise(uio5) within (0 ns, 900.5 ns) else continue observed 4;",
+    'pattern Fall(uio3) -> Fall(uio5) within (2000 ns, 10000 ns) else abort nodrain source datasheet "X";',
 ]
 REJECT = {
     "v1's stray `<`": "pattern Frame(uio0) < Frame(uio0);",
@@ -81,6 +82,7 @@ REJECT = {
     "during and within": "pattern Fall(uio3) -> Fall(uio5) during (1 ns, 2 ns) within (1 ns, 2 ns) else abort;",
     "else without within": "pattern Fall(uio3) -> Fall(uio5) else abort;",
     "within bounds reversed": "pattern Fall(uio3) -> Fall(uio5) within (5 ns, 2 ns) else abort;",
+    "nodrain after continue": "pattern Fall(uio3) -> Fall(uio5) within (1 ns, 2 ns) else continue nodrain;",
 }
 
 
