@@ -221,6 +221,22 @@ def main():
         mf.append(("M_CS_STALE_SIDECAR", False))
     mf.append(("M_CS_RECORD_NO_SIDECAR", bool(s4(lambda path: None))))
     mf.append(("M_CS_R_MISSING", bool(s5(drop_r=True))))
+    # Wilson 11-15 item 8: an arm_margin below 0 uncertifies (planted on the real usbdev_fpga
+    # record); the control at margin 0 -- writeback AT the deadline, legal by Armed.lean's
+    # hedge -- must stay certified, or the planted red proves nothing
+    uimg = CS.read_hex(os.path.join(ROOT, "fpga/images/usbdev_fpga.hex"))
+    ue = CS.budget_entry(uimg)
+    def arm_stamp(m):
+        e2 = copy.deepcopy(ue)
+        for v in e2["lanes"].values():
+            if v.get("arm_margin") is not None:
+                v["arm_margin"] = m
+        return CS.stamp(uimg, budget=e2)["status"]
+    ctl = ue is not None and arm_stamp(0) == "certified"
+    if not ctl:
+        print("  *** control: usbdev_fpga at arm_margin 0 is not certified")
+        probs.append("M_CS_ARM_LATE control")
+    mf.append(("M_CS_ARM_LATE", ctl and arm_stamp(-1) == "uncertified"))
     with tempfile.TemporaryDirectory() as tmp:
         mf.append(("M_CS_REQUIRE_PASSES", bool(s1(tmp, require_fn=lambda st: st))))
     for name, red in mf:

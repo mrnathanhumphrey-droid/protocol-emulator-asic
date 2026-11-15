@@ -143,6 +143,19 @@ def stamp(img, budget=None):
     if st["status"] != "certified":
         return st
     e = budget if budget is not None else budget_entry(img)
+    # ⛔ WILSON 11-15 (combined ruling, item 8): a lane that ARMS LATE -- the record's
+    # arming premise margin (branch_budget arm_margin, deadline minus armed-by) below 0 --
+    # cannot be certified: the edge can arrive before the ARM. An image of record that arms
+    # late is fixed, not stamped (its builder writes --require-cert and is refused here).
+    late_arm = sorted(((ln, (v or {}).get("arm_margin")) for ln, v in
+                       ((e or {}).get("lanes") or {}).items()
+                       if isinstance((v or {}).get("arm_margin"), int)
+                       and v["arm_margin"] < 0), key=lambda kv: int(kv[0]))
+    if late_arm:
+        return dict(st, status="uncertified", reason=(
+            "arms late: %s (the arming premise: armed by EOP + k must not pass the "
+            "deadline; branch_budget arm_margin < 0 -- Wilson 11-15 item 8)"
+            % "; ".join("lane %s arm_margin %d" % (ln, m) for ln, m in late_arm)))
     # ⛔ WILSON 11-15 (UART blocker ruling, item 1): 1.6a with the record's certified
     # lane lateness in J. pe_asm assembles at the proved J; a lane that fails only
     # with its lateness in is UNCERTIFIED here (a split theorem may take it off).

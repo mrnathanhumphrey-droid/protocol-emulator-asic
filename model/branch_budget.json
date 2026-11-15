@@ -1739,8 +1739,8 @@
       "B": 4,
       "reason": "certified",
       "cert": {
-        "status": "certified",
-        "reason": "pe_asm.compute_j",
+        "status": "uncertified",
+        "reason": "arms late: lane 0 arm_margin -339 (the arming premise: armed by EOP + k must not pass the deadline; branch_budget arm_margin < 0 -- Wilson 11-15 item 8)",
         "d_min": 20,
         "J": 1
       },
@@ -1876,8 +1876,8 @@
       "B": 0,
       "reason": "certified",
       "cert": {
-        "status": "certified",
-        "reason": "pe_asm.compute_j",
+        "status": "uncertified",
+        "reason": "arms late: lane 0 arm_margin -233 (the arming premise: armed by EOP + k must not pass the deadline; branch_budget arm_margin < 0 -- Wilson 11-15 item 8)",
         "d_min": 20,
         "J": 1
       },
