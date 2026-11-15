@@ -389,7 +389,9 @@ def windows(stmts, lowered, route, hz):
         lanes, where = {}, {}
         for ln, acts in sorted(lanes0.items()):
             out = []
+            new_of = {}                     # old action index -> its index after the insertions
             for i, a in enumerate(acts):
+                new_of[i] = len(out)
                 p = site_plan.get((ln, i))
                 if p is None:
                     out.append(a)
@@ -411,6 +413,10 @@ def windows(stmts, lowered, route, hz):
                 new, iarm = _block(a, acts[i + 1] if i + 1 < len(acts) else None, p, pre, T, dstar)
                 where[(ln, i)] = (len(out), len(out) + iarm, pre, T, p)
                 out += new
+            # ⛔ a LOOP names its head by the lane's ACTION INDEX (pe_asm: `(OP_LOOP, n, head,
+            # wait, 0)`); the inserted words shift it, so every head is remapped (found by the
+            # drain table: the UART-TX lowering's LOOP head went stale)
+            out = [a[:2] + (new_of[a[2]],) + a[3:] if a[0] == I.OP_LOOP else a for a in out]
             lanes[ln] = out
         try:
             img = bytes(pe_asm.assemble(lanes, hdr, *a_, **kw))
