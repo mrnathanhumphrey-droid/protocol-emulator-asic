@@ -60,7 +60,8 @@ MUTANTS = ("M_PC_NO_CYCLE",      # cycles not refused
            "M_PC_USB_NOCHECK",   # the USB co-resident threshold not checked
            "M_PC_JFLOOR_HEAD",   # J floor from each lane's head action only, not every lowered action
            "M_PC_WITHIN_NOARM",  # `within`: the arming check skipped (a window too tight compiles)
-           "M_PC_WITHIN_LO_PASS")  # `within`: lo > 0 without `source datasheet` compiles
+           "M_PC_WITHIN_LO_PASS",  # `within`: lo > 0 without `source datasheet` compiles
+           "M_PC_ARMRETIRE_OFF")   # lane_cert.ARM_RETIRE off (ArmRetire's cap not applied)
 MUT = os.environ.get("POSET_COMPILE_MUTANT", "")
 if MUT and MUT not in MUTANTS:
     raise SystemExit("poset compile: unknown mutant %r" % MUT)
@@ -467,7 +468,9 @@ def windows(stmts, lowered, route, hz, arm="late", drain=0, premise="datasheet",
             if ready:
                 g_ = LC.lane_graph(img, s_[0], I)
                 rd.setdefault(s_[0], set()).update(g_[w0 + iarm][1])
+        LC.ARM_RETIRE = MUT != "M_PC_ARMRETIRE_OFF"
         bb = BB.image_budget(img, premise_gaps=pg, ready=rd)
+        LC.ARM_RETIRE = True
         info = _win(where)
         info["premises"] = sorted(used)
         info["budget"] = bb

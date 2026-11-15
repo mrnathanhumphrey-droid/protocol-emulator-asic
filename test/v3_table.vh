@@ -48,6 +48,7 @@ function integer v3_tab;
       32'hf2527155: case (field) 0: v3_tab = 1; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // edge_image_rise.hex
       32'hdff3620d: case (field) 0: v3_tab = 1; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // edge_to200.hex
       32'h221e5476: case (field) 0: v3_tab = 1; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // five_image.hex
+      32'hec1e6fed: case (field) 0: v3_tab = 1; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // ft_race.hex
       32'hdbbe38fa: case (field) 0: v3_tab = 1; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // gate_corpus_trace: spim_d4
       32'hf028d521: case (field) 0: v3_tab = 1; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // gate_sda_hold: i2cframe d = hold
       32'hcddf2a23: case (field) 0: v3_tab = 1; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // gate_sda_hold: i2cframe d = hold + 1
@@ -172,6 +173,7 @@ task v3_tab_name;
       32'hf2527155: $display("  clocked_conform[V3] image: edge_image_rise.hex (by its loaded bytes)");
       32'hdff3620d: $display("  clocked_conform[V3] image: edge_to200.hex (by its loaded bytes)");
       32'h221e5476: $display("  clocked_conform[V3] image: five_image.hex (by its loaded bytes)");
+      32'hec1e6fed: $display("  clocked_conform[V3] image: ft_race.hex (by its loaded bytes)");
       32'hdbbe38fa: $display("  clocked_conform[V3] image: gate_corpus_trace: spim_d4 (by its loaded bytes)");
       32'hf028d521: $display("  clocked_conform[V3] image: gate_sda_hold: i2cframe d = hold (by its loaded bytes)");
       32'hcddf2a23: $display("  clocked_conform[V3] image: gate_sda_hold: i2cframe d = hold + 1 (by its loaded bytes)");

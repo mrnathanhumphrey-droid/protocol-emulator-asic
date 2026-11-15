@@ -227,6 +227,14 @@ def span_min(g, gaps, m):
     return min(best(w, i, m) for w in g for i in range(len(gaps[w])))
 
 
+#: ArmRetire (Wilson 11-15; JLane/ArmRetire.lean): a plain edge ARM's successor is released at
+#: least 2 cycles after the ARM's writeback (Armed.arm_release + hedge). In GapRun's terms the
+#: ARM's OWN response part of Z, less the release distance to its successor, is at most -2
+#: (`arm_rd`); the part of Z propagated from earlier retirements (refill backlog) is NOT capped.
+#: Must-fire switch: gate_lane_cert M_LC_ARMRETIRE_OFF sets it False.
+ARM_RETIRE = True
+
+
 def certificate(g, preds, gaps, k, B, tail, iters=200, floor=None, xr=None, rbase=2, ready=None):
     """GapRun's certificate on the word graph with Rr = L + 2 (+ tail): returns (lat, Z, Rr) or
     None when the values keep growing (no fixpoint: no certificate exists for this image).
@@ -246,6 +254,16 @@ def certificate(g, preds, gaps, k, B, tail, iters=200, floor=None, xr=None, rbas
     # the release distance between consecutive retirements a -> b: a's retiring gap plus b's
     # held writebacks (GapRun.rd)
     rd = {(a, b): gp[a] + sum(gaps[b][:-1]) for a in g for b in g[a][1]}
+    # plain (not FALLTHROUGH) edge ARMs: their successor is released after their writeback
+    ret = {a for a in g if ARM_RETIRE and g[a][0]["op"] == I.OP_ARM
+           and not g[a][0]["mod"] & I.ARM_MOD_LEVEL2 and not g[a][0]["mod"] & I.ARM_MOD_FT}
+
+    def zr(Zv, a, b):
+        if a not in ret:
+            return Zv[a] - rd[(a, b)]
+        # Z[a] = max(own response Rr[a], the propagated part); only the own part is capped
+        prop = max([Zv[p] + D + B - rd[(p, a)] for p in preds[a]] or [-10 ** 9])
+        return max(min(Rr[a] - rd[(a, b)], -2), prop - rd[(a, b)])
     lat = {w: 0 for w in g}
     Z = {w: 0 for w in g}
     for _ in range(iters):
@@ -254,7 +272,7 @@ def certificate(g, preds, gaps, k, B, tail, iters=200, floor=None, xr=None, rbas
         for w in g:
             z = Rr[w] + (D + B if npf[w] else 0)
             for p in preds[w]:
-                z = max(z, Z[p] + D + B - rd[(p, w)])
+                z = max(z, zr(Z, p, w) + D + B)
             Zn[w] = z
         ln = {}
         for c in g:
@@ -263,7 +281,7 @@ def certificate(g, preds, gaps, k, B, tail, iters=200, floor=None, xr=None, rbas
                 if npf[b]:
                     v = max(v, Rr[b] + HS + B - gp[b])
                 for a in preds[b]:
-                    v = max(v, Zn[a] + HS + B - rd[(a, b)] - gp[b])
+                    v = max(v, zr(Zn, a, b) + HS + B - gp[b])
             ln[c] = 0 if c in ready else v
         if ln == lat and Zn == Z:
             return lat, Z, Rr

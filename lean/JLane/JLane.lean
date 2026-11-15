@@ -57,3 +57,4 @@ import JLane.ArmSplit
 import JLane.NopSplit
 import JLane.RespEdf
 import JLane.RespEdfClose
+import JLane.ArmRetire

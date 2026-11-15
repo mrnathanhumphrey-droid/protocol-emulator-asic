@@ -278,6 +278,8 @@ GATES=(
   # ⭐ agent 2's lane certificate (gate_lane_cert: spacing, FT, co-resident USB,
   # the budget record current) and the Lean library's RTL anchors (static, < 1 s).
   model/gate_lane_cert.py
+  # agent 2 (1953127, Wilson 11-15 item 5): programs assembled at run time priced live
+  model/gate_live_price.py
   model/gate_lean_anchors.py
   # ⛔ EVERY FIELD AN OPCODE DOES NOT READ IS ZERO (Wilson 11-14): the reads
   # table is generated from src/pe_engine.v's decode (red on an uncovered read

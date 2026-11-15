@@ -28,6 +28,8 @@
   C11 the premise mechanism (Wilson 11-15 call 1, model/premises.py): a registered datasheet
      whose SHA-256 matches puts its ID in the stamp and its gap in the certificate (the
      certified lateness drops); a SHA mismatch or an unregistered part: image-only
+  C12 ArmRetire (JLane/ArmRetire.lean): the SPI-master `else abort` window at 5 cycles of
+     spacing certifies at J 1 (must-fire M_PC_ARMRETIRE_OFF: the cap off -> red)
 Must-fires added 11-15: M_PC_WITHIN_LO_PASS (lo > 0 without a datasheet compiles), and pe_asm's
 M_ASM_MOD_ANY_OP / M_ASM_MOD_ANY_VALUE (the mod field's two refusals), each killed by C10
 Must-fires: every compile.MUTANTS entry, run IN-PROCESS through the same judge, turns this gate red.
@@ -63,6 +65,7 @@ SCRATCH_MUTANTS = {
     "M_PC_JFLOOR_HEAD": "killed in-process by this gate",
     "M_PC_WITHIN_NOARM": "killed in-process by this gate",
     "M_PC_WITHIN_LO_PASS": "killed in-process by this gate",
+    "M_PC_ARMRETIRE_OFF": "killed in-process by this gate (C12)",
     "M_ASM_MOD_ANY_OP": "pe_asm.MODS_MUT, killed in-process by this gate (C10)",
     "M_ASM_MOD_ANY_VALUE": "pe_asm.MODS_MUT, killed in-process by this gate (C10)",
 }
@@ -317,6 +320,19 @@ def c11():
     return probs
 
 
+def c12():
+    """ArmRetire (Wilson 11-15): with the plain ARM's retire-before-release cap
+    (JLane/ArmRetire.lean), the SPI-master `else abort` window certifies at J 1 with 5 cycles of
+    spacing after it (20 without the cap)"""
+    st = WIN % "abort"
+    parsed = C.S.parse(body(st))
+    _i, low, route = C.lower(parsed["v1"], 7)
+    _l, _r, w = C.windows(parsed["poset"], low, route, HZ, drain=5)
+    b = w["budget"]
+    j = None if b["B"] is None else 1 + b["lanes"][0]["max_late"]
+    return [] if j == 1 else ["C12 SPI-master else abort, drain 5: lane 0 J %s (ArmRetire gives 1)" % j]
+
+
 def judge():
     probs = []
     # C1
@@ -373,6 +389,7 @@ def judge():
             probs.append("C1 SPI image: usb_coresident %r" % r["cert"].get("usb_coresident"))
     probs += c10()
     probs += c11()
+    probs += c12()
     # C8: POSET_SPEC.md's generated passages match the constants file
     import gen_spec_doc
     probs += ["C8 %s" % p for p in gen_spec_doc.stale()]
@@ -484,7 +501,7 @@ def main() -> int:
     if probs:
         print("GATE poset_compile: FAILED (%d)" % len(probs))
         return 1
-    print("GATE poset_compile: PASSED (C1-C11; %d / %d mutants killed)" % (len(C.MUTANTS) + len(ASM_MUTANTS), len(C.MUTANTS) + len(ASM_MUTANTS)))
+    print("GATE poset_compile: PASSED (C1-C12; %d / %d mutants killed)" % (len(C.MUTANTS) + len(ASM_MUTANTS), len(C.MUTANTS) + len(ASM_MUTANTS)))
     return 0
 
 

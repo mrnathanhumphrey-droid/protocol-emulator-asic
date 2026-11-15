@@ -83,6 +83,10 @@ NON_ADMISSIBLE = {
         "queue check; J = 1 used to hide this."),
     # nousb.hex: QUEUE withdrawn (11-15) -- certified lane-0 lateness was on no-pin words only;
     # with J from lane_j_pin (agent 2's NopSplit, 6d24aa9) 1.6a passes.
+    "ft_race.hex": ({PORT},
+        "run_arm2 A4's FT edge race image (probe_cov_arm2, the 11-15 pkill coverage arms): "
+        "lanes 1-4 parked at d = 12 to leave the port to lane 0's race -- deliberately below "
+        "D*. Reach-only; A4 is the judge."),
     "chain_image.hex": ({PORT, QUEUE},
         "`build_chain`, the chaining re-arm mechanism at d = 12: a mechanism "
         "test, not a schedulable program."),

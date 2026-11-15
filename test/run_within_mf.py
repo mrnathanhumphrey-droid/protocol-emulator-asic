@@ -84,9 +84,10 @@ def sim(vvp, tmp, tag, img, cs, sck, b, dly):
     with open(fp, "w", encoding="ascii", newline="\n") as fh:
         fh.write("5a\n" * 256)
     op = os.path.join(tmp, "%s.log" % tag)
-    rc, out = run([tool("vvp"), "-n", vvp, "+IMG=%s" % ip, "+NBYTES=%d" % I.STORE_BYTES,
-                   "+OUT=%s" % op, "+FEED=%s" % fp, "+CS=%d" % cs, "+SCK=%d" % sck,
-                   "+B=%d" % b, "+DLY=%d" % dly, "+NCYC=%d" % NCYC])
+    import sim_run      # gate_sim_runs: no raw vvp outside the helper (agent 1, 11-15)
+    rc, out = run(sim_run.vvp(["-n", vvp, "+IMG=%s" % ip, "+NBYTES=%d" % I.STORE_BYTES,
+                               "+OUT=%s" % op, "+FEED=%s" % fp, "+CS=%d" % cs, "+SCK=%d" % sck,
+                               "+B=%d" % b, "+DLY=%d" % dly, "+NCYC=%d" % NCYC], images=[ip]))
     if not os.path.isfile(op):
         raise RuntimeError("tb_within wrote no log: %s" % out[-600:])
     ev = {"A": [], "B": [], "K": [], "T": []}

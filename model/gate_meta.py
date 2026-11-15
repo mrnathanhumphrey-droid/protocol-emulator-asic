@@ -85,6 +85,8 @@ SEAMS = (
     ("model/gate_cert_stamp.py", "gate_cert_stamp.s5", "fast", "E"),
     ("host/poset/run_poset_compile.py", "run_poset_compile.judge", "fast", "E0"),
     ("model/gate_lean_anchors.py", "gate_lean_anchors.check", "fast", "E"),
+    ("model/gate_live_price.py", "gate_live_price.l1", "fast", "E0"),
+    ("model/gate_live_price.py", "gate_live_price.l2", "fast", "E0"),
     ("model/gate_lane_cert.py", "gate_lane_cert.check_spacing", "fast", "PRE"),
     ("model/gate_lane_cert.py", "gate_lane_cert.check_ft", "fast", "PRE"),
     ("model/gate_lane_cert.py", "gate_lane_cert.check_coresident", "fast", "PRE"),

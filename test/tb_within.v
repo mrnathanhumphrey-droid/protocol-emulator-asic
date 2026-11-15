@@ -46,6 +46,24 @@ module tb_within;
 
   wire to0 = dut.u_eng.l_timeout_k[0] | dut.u_eng.l_timeout_m[0];
 
+  // +TRACE (agent 1's fabric note §5, the slot trace): lane 0's word by word --
+  //   R <cyc> <pc> <hv>  released (rdy_rel rises), with its head slot valid (1) or empty (0)
+  //   V <cyc> <pc>       the head becomes valid while released (a fetch completed late)
+  //   D <cyc> <pc>       lane 0 dispatched (the dispatcher leaves idle for lane 0)
+  reg        trace = 1'b0, rel_q = 1'b0, hv_q = 1'b0;
+  reg [1:0]  st_q = 2'd0;
+  always @(posedge clk) if (running && trace) begin
+    if (dut.u_eng.rdy_rel[0] && !rel_q)
+      $fdisplay(fd, "R %0d %0d %0d", cyc, dut.u_eng.l_pc[0], dut.u_eng.hv[0]);
+    if (dut.u_eng.rdy_rel[0] && dut.u_eng.hv[0] && rel_q && !hv_q)
+      $fdisplay(fd, "V %0d %0d", cyc, dut.u_eng.l_pc[0]);
+    if (st_q == 2'd0 && dut.u_eng.st == 2'd1 && dut.u_eng.cur == 0)
+      $fdisplay(fd, "D %0d %0d", cyc, dut.u_eng.l_pc[0]);
+    rel_q <= dut.u_eng.rdy_rel[0];
+    hv_q  <= dut.u_eng.hv[0];
+    st_q  <= dut.u_eng.st;
+  end
+
   // the PEER and the log, from the cycle the program starts
   always @(posedge clk) if (running) begin
     cyc <= cyc + 1;
@@ -77,6 +95,7 @@ module tb_within;
     if (!$value$plusargs("B=%d", b_k)) begin $display("tb_within: FATAL -- +B required"); $finish; end
     if (!$value$plusargs("DLY=%d", dly)) dly = 0;
     if (!$value$plusargs("NCYC=%d", ncyc)) ncyc = 20000;
+    if ($test$plusargs("TRACE")) trace = 1'b1;
     $readmemh(imgfile, img);
     begin : chk_img
       `PE_REQUIRE_IMG_LOADED(imgfile)
