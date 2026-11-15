@@ -75,6 +75,15 @@ def arm_gate(img, lane, graph, lat, I):
             w = s[0] if len(s) == 1 else None
         if w != a or any(g[p][0]["op"] == I.OP_ARM for p in path):
             continue
+        # ⛔ THE UART RECEIVE SHAPE EXACTLY (found by the drain table: probe_cov_pindiv's lane
+        # 3 -- a RISING ARM, a READBIT, SHIFTINs at the bit -- passed the looser test): the ARM
+        # waits for the start bit's FALL (idle high, l_armedge 0), and the loop holds only
+        # timed no-ops (LEVEL on a pin outside N_PINS), SHIFTINs on the ARM's pin and the REARM
+        if x["level"] != 0 or not all(
+                (g[p][0]["op"] == I.OP_LEVEL and g[p][0]["pin"] >= I.N_PINS)
+                or (g[p][0]["op"] == I.OP_SHIFTIN and g[p][0]["pin"] == x["pin"])
+                or g[p][0]["op"] == I.OP_REARM for p in path):
+            continue
         data = [p for p in path if g[p][0]["op"] == I.OP_SHIFTIN and g[p][0]["pin"] == x["pin"]
                 and g[p][0]["delay"] == bit and not g[p][0]["mod"] & I.MOD_SELF_TIMED]
         ups = [LC.upper_gaps(g[p][0], I) for p in path]
