@@ -235,7 +235,8 @@ def main() -> int:
     print("  --- images outside the universe (Wilson 10-19: provenance, content)")
     import sim_run as S
     for gid, g in sorted(S.SCRATCH_GENERATORS.items()):
-        print("    generator %-26s %-14s %s" % (gid, g["pattern"], g["why"][:60]))
+        print("    generator %-26s %-14s %s" % (gid, "/".join(g["pattern"]) if isinstance(
+            g["pattern"], tuple) else g["pattern"], g["why"][:60]))
     say(all(g.get("why") and g.get("pattern") and g.get("script")
             and os.path.isfile(os.path.join(ROOT, g["script"]))
             for g in S.SCRATCH_GENERATORS.values()),
@@ -425,13 +426,13 @@ def _monitor_mustfires(S, say):
             "J8 an over-broad entry (every run_usbbuf arm) -> red")
         clean = dict(S.MONITOR_MUST_FIRE)
         clean["_clean_arm"] = {"runner": "test/run_usbbuf.py", "build": "usbbuf.vvp",
-                               "define": None, "image": "usb.hex", "expect": r"progress\.vh",
+                               "define": None, "image": "usbbuf_usb.hex", "expect": r"progress\.vh",
                                "why": "planted: the CLEAN build of a shipped image"}
         g9 = S.guard_problems(clean)
         say(any("_clean_arm" in q and "CLEAN-BUILD" in q for q in g9),
             "J9 a clean-build entry outside the four exceptions -> red")
         rec = {"cmd": "usbbuf B2", "runner": "test/run_usbbuf.py", "caller": "",
-               "builds": ["usbbuf.vvp"], "plusargs": ["+IMG=usb.hex"], "image": "usb.hex",
+               "builds": ["usbbuf.vvp"], "plusargs": ["+IMG=usbbuf_usb.hex"], "image": "usbbuf_usb.hex",
                "fails": [hang]}
         S.MONITOR_MUST_FIRE["_clean_arm"] = clean["_clean_arm"]
         try:

@@ -515,10 +515,18 @@ CONFIG = {
         "srcs": [],
         "arms": [("refuse", ["+IMG=test/cfgerr_image.hex", "+NCYC=8000",
                              "+MODE=0"]),
+                 # ⛔ ROBUSTNESS PROBE (Wilson 11-14): pinnone_image.hex is
+                 # loaded past pe_isa on purpose, testing hardware robustness
+                 # against refused words -- a probe, not a program
                  ("reserved", ["+IMG=test/pinnone_image.hex", "+NCYC=8000",
                                "+MODE=1"]),
                  # ⭐ THE THIRD SITE IN THE FAMILY: an `OP_ARM` on the reserved
-                 # index put X into `arm_hit` for every armed cycle. The arm
+                 # index put X into `arm_hit` for every armed cycle.
+                 # ⛔ Wilson 11-14: armnone (and pinnone above) are now STATIC
+                 # pe_isa refusal images (the PIN_NONE table: ARM / SHIFT /
+                 # SHIFTIN / READBIT on 15 have no defined meaning). These arms
+                 # stay as the SILICON backstop for a store that reaches the
+                 # engine anyway -- the static refusal is the expected outcome. The arm
                  # counts the armed WINDOW and asserts it non-empty, because
                  # `arm_hit` is masked to 0 whenever no lane is armed -- so
                  # "no X" would otherwise be vacuous.

@@ -308,7 +308,7 @@ def judge(name, packets, rx, se, ce, sa, tr, end, tail, expect_se):
 
 def run_suite(vvp, tmp, tag, pool):
     """-> {case name: [problem]}"""
-    img = os.path.join(tmp, "usbrx_main.hex")
+    img = os.path.join(tmp, IMAGE_FILES["main"])
     if not os.path.exists(img):
         I.write_image(img, image())
         sim_run.scratch_image(GEN, img)
@@ -404,7 +404,9 @@ def main() -> int:
             if acc != want:
                 probs.append("MUST-FIRE: margin %d %s by pe_isa" % (gap, "accepted" if acc else "refused"))
         for tag, cfg, want_ok in (("obeyed", (30, 30 + mg), True), ("broken", (80, 40), False)):
-            bimg = os.path.join(tmp, "usbrx_busy_%s.hex" % tag)
+            # the obeyed image IS usbrx_busy.hex (the coverage arms' busy image)
+            bimg = os.path.join(tmp, IMAGE_FILES["busy"] if tag == "obeyed"
+                                else "usbrx_busy_%s.hex" % tag)
             I.write_image(bimg, image(busy=cfg))
             sim_run.scratch_image(GEN, bimg)
             st = I.usb_problems(image(busy=cfg))
@@ -449,8 +451,8 @@ def main() -> int:
             wv = os.path.join(tmp, "wave_walk_%s.txt" % ("m" if e < 0 else ("p" if e > 0 else "0")))
             write_wave(wv, tr)
             wjobs.append((e, pk, pool.submit(run, sim_run.vvp(
-                [vvp, "+IMG=%s" % os.path.join(tmp, "usbrx_main.hex"), "+WAVE=%s" % wv,
-                 "+NCYC=%d" % (t_end + 400)], images=[os.path.join(tmp, "usbrx_main.hex")]))))
+                [vvp, "+IMG=%s" % os.path.join(tmp, IMAGE_FILES["main"]), "+WAVE=%s" % wv,
+                 "+NCYC=%d" % (t_end + 400)], images=[os.path.join(tmp, IMAGE_FILES["main"])]))))
         for e, pk, fut in wjobs:
             out = fut.result().stdout
             got = [int(v) for _c, v, _l in re.findall(r"^RX (\d+) (\d+) (\d+)$", out, re.M)]
@@ -509,6 +511,10 @@ def main() -> int:
 #: cases on the gate's own image, and the busy image (U5) obeyed. Reach only; the
 #: bytes are judged here.
 COV_DIR = "probe_cov_usbrx"
+#: ⛔ THE IMAGE FILES, NAMED (Wilson 11-14): the image universe keys images by
+#: name, so each is prefixed by its bench; the coverage arms and the gate path
+#: write the same two names (the wire-feed registry's WITNESS (sim) rows)
+IMAGE_FILES = {"main": "usbrx_main.hex", "busy": "usbrx_busy.hex"}
 
 
 def coverage_arms():
@@ -516,14 +522,14 @@ def coverage_arms():
     os.makedirs(os.path.join(ROOT, COV_DIR), exist_ok=True)
     imgs = {"main": image(), "busy": image(busy=(30, 30 + I.usb_deadline_margin()))}
     for k, im in imgs.items():
-        I.write_image(os.path.join(ROOT, COV_DIR, "%s.hex" % k), im)
+        I.write_image(os.path.join(ROOT, COV_DIR, IMAGE_FILES[k]), im)
     arms = []
     for n, (name, packets, e, E, seed, _exp) in enumerate(cases()):
         tr, t_end = line(packets, e, E, seed)
         for k in imgs:
             wv = "%s/w%d.txt" % (COV_DIR, n)
             write_wave(os.path.join(ROOT, wv), tr)
-            arms.append(("%s_%d" % (k, n), ["+IMG=%s/%s.hex" % (COV_DIR, k), "+WAVE=" + wv,
+            arms.append(("%s_%d" % (k, n), ["+IMG=%s/%s" % (COV_DIR, IMAGE_FILES[k]), "+WAVE=" + wv,
                                             "+NCYC=%d" % (t_end + 400), "+DBG=0"]))
     return arms
 

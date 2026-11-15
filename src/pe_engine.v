@@ -1161,6 +1161,7 @@ module pe_engine #(
   reg             l_armhalf[0:N_LANES-1];
   reg             l_armqual[0:N_LANES-1];
   reg             l_armft  [0:N_LANES-1];
+  localparam integer USB_LANE = 0;          // the USB lane (declared before its first use)
   wire            usb_qual_ok;              // assigned beside the SE0 counter
   // FT's timeout falls through; `M_FT_HALTS` halts the lane as a plain ARM does
 `ifdef M_FT_HALTS
@@ -2201,7 +2202,7 @@ module pe_engine #(
   //     per six ones; the A2 term owed at the lock). A 1 in the stuff slot is
   //     seven ones: `usb_serr`, sticky until the next packet starts, read by
   //     programs as the STUFF_ERR virtual pin in bundle 4 (piece 7).
-  localparam integer USB_LANE = 0;
+  // (USB_LANE is declared with the ARM qualifier, ahead of its first use)
   reg        usb_prev;
   reg  [2:0] usb_ones;
   reg        usb_serr;
@@ -4454,7 +4455,7 @@ module pe_engine #(
             l_fpc[i]         <= l_pc[i] + ACT_BYTES[AW-1:0];
             l_actv[hix[i]]   <= 1'b0;
             l_actv[six[i]]   <= 1'b0;
-            if ((pst == P_REQ || pst == P_WAIT) && pl == i) pkill <= 1'b1;
+            if ((pst == P_REQ || pst == P_WAIT) && pl == i[LW-1:0]) pkill <= 1'b1;
           end
           armed_n[i] = 1'b0;                    // capture DISARMS: a second
                                                 // edge must not re-rebase and

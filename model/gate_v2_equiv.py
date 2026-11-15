@@ -52,6 +52,16 @@ differ): a field shifted one bit (delay << 1), two opcodes swapped (LEVEL and
 SHIFT), every header base one word off. And `falloff.hex` (store_probe: a lane
 with no terminating REARM, which reaches the filler) is in the set.
 
+⛔⛔ THE SCOPE IS THE ADMISSIBLE SET (Wilson 11-14). An ADMISSIBLE image (every
+image not in model/nonadmissible.NON_ADMISSIBLE) is JUDGED and must be
+bit-exact. A NON-ADMISSIBLE image is still RUN, and reported with its first
+differing record, labelled "outside the admissible set; v2's guarantees don't
+apply" -- never judged. MUST-FIRE: smoke_image (PINNED, Wilson 11-14) with a
+planted difference -- the level of lane 0's first-writeback LEVEL word flipped
+in its v2 translation -- turns the gate red; a reach check proves the clean run
+dispatches that word and writes back after it, and that the judged difference
+lands at or before that writeback, else "difference outside the run" is red.
+
 POSITIVE TOKEN: `GATE v2-equiv: PASSED`.
 """
 from __future__ import annotations
@@ -70,6 +80,7 @@ for _p in (HERE, os.path.join(ROOT, "test")):
         sys.path.insert(0, _p)
 
 from toolchain import banner, tool      # noqa: E402
+import nonadmissible as NA              # noqa: E402
 import pe_isa as I                      # noqa: E402
 import sim_run                          # noqa: E402
 import v1_translate as T                # noqa: E402
@@ -128,12 +139,13 @@ def write_hex(path, img, register=False):
     return path
 
 
-def sim(vvp, img, nbytes, progdly=0, ncyc=NCYC, lookup=None):
+def sim(vvp, img, nbytes, progdly=0, ncyc=NCYC, lookup=None, quiescent=False):
     """-> {start, cfg_err, started, recs [(kind, cyc, rest)], fails, cpb}.
     `lookup`: the images the A2 lookup is asked about (a v1 run names its v2
-    twin: the same program, so the same bound)."""
+    twin: the same program, so the same bound). `quiescent`: the image is on
+    QUIESCENT (declared by name) -- the bench gets +QUIESCENT."""
     args = [vvp, "+IMG=%s" % img, "+NBYTES=%d" % nbytes, "+PROGDLY=%d" % progdly,
-            "+NCYC=%d" % ncyc]
+            "+NCYC=%d" % ncyc] + (["+QUIESCENT"] if quiescent else [])
     r = run(sim_run.vvp(args, images=lookup if lookup is not None else [img]))
     out = r.stdout + r.stderr
     d = {"start": None, "cfg_err": None, "started": None, "recs": [],
@@ -166,6 +178,144 @@ def same(a, b):
     if a["start"] is None or b["start"] is None:
         return a["started"] == b["started"] and a["cfg_err"] == b["cfg_err"]
     return a["start"] == b["start"] and after(a, b["start"]) == after(b, b["start"])
+
+
+#: the label a non-admissible image's report carries (Wilson 11-14, verbatim)
+OUTSIDE = "outside the admissible set; v2's guarantees don't apply"
+
+
+def first_diff(a, b):
+    """the first point where v1 run `a` and v2 run `b` part, as text"""
+    if a["start"] != b["start"]:
+        return "start cycle v1 %s, v2 %s" % (a["start"], b["start"])
+    if a["start"] is None:
+        return "cfg_err/started v1 %s/%s, v2 %s/%s" % (a["cfg_err"], a["started"],
+                                                       b["cfg_err"], b["started"])
+    ra, rb = after(a, b["start"]), after(b, b["start"])
+    for k in range(max(len(ra), len(rb))):
+        x = ra[k] if k < len(ra) else None
+        y = rb[k] if k < len(rb) else None
+        if x != y:
+            return "record %d: v1 %s | v2 %s" % (k, " ".join(map(str, x)) if x else "(none)",
+                                                 " ".join(map(str, y)) if y else "(none)")
+    if a["fails"] != b["fails"]:
+        fa = next((f for f in a["fails"] if f not in b["fails"]), None)
+        fb = next((f for f in b["fails"] if f not in a["fails"]), None)
+        return "monitor lines: v1 %s | v2 %s" % (fa or "(none)", fb or "(none)")
+    return ""
+
+
+def judge(n, a, b):
+    """(verdict, detail, problem or None) for one image's pair of runs. THE ONE
+    JUDGE: section 1 and its must-fire both call it."""
+    ok = same(a, b) and a["fails"] == b["fails"]
+    base = n.split()[0]
+    if base in NA.NON_ADMISSIBLE:
+        return (("IDENTICAL (non-admissible, not judged)" if ok else
+                 "DIFFER -- " + OUTSIDE), "" if ok else first_diff(a, b), None)
+    if ok:
+        return "IDENTICAL", "", None
+    return ("*** DIFFER", first_diff(a, b),
+            "%s: v1 and v2 differ at the derived offset (ADMISSIBLE: must be "
+            "bit-exact) -- %s" % (n, first_diff(a, b)))
+
+
+#: the planted-difference must-fire's image (Wilson 11-14: pinned)
+PLANT_IMAGE = "smoke_image.hex"
+
+#: ⛔ QUIESCENT BY DECLARATION (Wilson 11-14), each by EXACT name: an
+#: edge-paced image whose lanes wait on a peer edge -- this bench has no peer,
+#: so it retires nothing by design. Run with +QUIESCENT (the run_arm2 /
+#: tb_reload pattern), never a monitor exception. Each must run WITH A PEER in
+#: another registered gate (`peer_coverage`), so declaring it quiescent here
+#: never leaves it untested everywhere.
+QUIESCENT = {
+    "corpus_uartrx.hex": "edge-paced, no peer in this bench",
+    "sptgt_m0_image.hex": "edge-paced, no peer in this bench",
+    "sptgt_m1_image.hex": "edge-paced, no peer in this bench",
+    "sptgt_m2_image.hex": "edge-paced, no peer in this bench",
+    "sptgt_m3_image.hex": "edge-paced, no peer in this bench",
+    "sptgt_mosi_image.hex": "edge-paced, no peer in this bench",
+    "uart_rx_image.hex": "edge-paced, no peer in this bench",
+}
+
+
+def _shards():
+    with open(os.path.join(ROOT, "ci", "shards.txt"), encoding="utf-8") as fh:
+        return {ln.split()[1] for ln in fh if len(ln.split()) >= 2
+                and not ln.lstrip().startswith("#")}
+
+
+def _text(rel):
+    try:
+        with open(os.path.join(ROOT, rel), encoding="utf-8", errors="replace") as fh:
+            return fh.read()
+    except OSError:
+        return ""
+
+
+def peer_coverage(name, registry=None, corpus_map=None, shards=None, read=None):
+    """[(gate, how)]: the registered gates that run image `name` WITH A PEER,
+    read from the repo's own declarations, never a typed map:
+      * its gate_wire_feed row is WITNESS (sim) -- the row's runner compares
+        the wire against a peer -- and that runner is in ci/shards.txt and
+        names the image file;
+      * it is a corpus program (test/corpus.py CORPUS) with its PEER wiring,
+        run by test/gate_corpus_trace.py (in ci/shards.txt), which passes
+        +PEER to its bench."""
+    import gate_wire_feed as WF
+    import corpus
+    registry = WF.REGISTRY if registry is None else registry
+    corpus_map = corpus.CORPUS if corpus_map is None else corpus_map
+    shards = _shards() if shards is None else shards
+    read = _text if read is None else read
+    out = []
+    ent = registry.get(name)
+    if ent and WF.label_of(*ent).startswith(WF.WITNESS_SIM):
+        r = ent[1].get("runner")
+        if r and r in shards and name in read(r):
+            out.append((r, "wire-feed %s" % WF.label_of(*ent)))
+    stem = name[:-4] if name.endswith(".hex") else name
+    ct = "test/gate_corpus_trace.py"
+    if (stem in corpus_map and corpus_map[stem][1] and ct in shards
+            and "+PEER=" in read(ct)):
+        out.append((ct, "corpus peer %r" % corpus_map[stem][1]))
+    return out
+
+
+def plant_first_writeback(img):
+    """(planted bytes, byte address, original word fields): lane 0's first
+    LEVEL word with level 1 -- the dispatch that makes the first writeback --
+    with its level flipped to 0."""
+    pc = I.read_header(img, 0)["base"]
+    while pc + I.ACT_BYTES <= len(img):
+        a = I._unpack(I.ACT_FIELDS, img[pc:pc + I.ACT_BYTES], I.ACT_BYTES)
+        if a["op"] == I.OP_LEVEL and a["level"] == 1:
+            out = bytearray(img)
+            out[pc:pc + I.ACT_BYTES] = I.act(a["op"], a["pin"], 0, a["delay"],
+                                             a["count"], a["q"], a["pinb"], a["mod"])
+            return bytes(out), pc, a
+        if a["op"] == I.OP_REARM:
+            break
+        pc += I.ACT_BYTES
+    raise RuntimeError("plant: lane 0 has no level-1 LEVEL word before its REARM")
+
+
+def reached(run, word):
+    """(dispatch cycle, its record index, writeback cycle, its record index)
+    if the clean run, after its start, dispatches `word` on lane 0 and then
+    writes back; else None. Indices count from the start, as first_diff's."""
+    if run["start"] is None:
+        return None
+    recs = after(run, run["start"])
+    key = "0 %d %d %d %d " % (word["op"], word["pin"], word["level"], word["delay"])
+    for k, (kind, cyc, rest) in enumerate(recs):
+        if kind == "D" and (rest + " ").startswith(key):
+            for j in range(k + 1, len(recs)):
+                if recs[j][0] == "P":
+                    return cyc, k, recs[j][1], j
+            return None
+    return None
 
 
 def v1_falloff(tmp):
@@ -205,6 +355,13 @@ def main() -> int:
     print("  offset D = (%d - %d) x %d (tb_equiv's LOAD_CYC_PER_BYTE) = %d -- DERIVED"
           % (I.STORE_BYTES, V1.STORE_BYTES, cpb, D))
     probs = []
+    # ⛔ ONE JUDGE, ONE LIST (Wilson 11-14): this bench runs every image with NO
+    # PEER, so refusal images print progress.vh's vacuity line on v1 AND v2
+    # alike, and the encoding must-fires (v2eq_mf*) are broken on purpose.
+    # Every such arm is declared by exact identity in test/monitor_mustfire.py
+    # (the `gate_v2_equiv:*` entries + their CLEAN_BUILD_EXCEPTIONS); the
+    # central judge (sim_run) rules on them like every other run. Section 1
+    # still requires v1's and v2's FAIL lines to be EQUAL on top of that.
     tmp = tempfile.mkdtemp(prefix="pe_v2equiv_")
     try:
         v1src = []
@@ -254,24 +411,110 @@ def main() -> int:
         print("  --- 1. v1 (PROG + %d) vs v2, from the engine start ---" % D)
         runs = {}
         for n, img1, p1, p2, lk in cases:
-            a = sim(vv1, p1, V1.STORE_BYTES, D, lookup=[p1, lk])
-            b = sim(vv2, p2, I.STORE_BYTES)
+            q = n in QUIESCENT
+            a = sim(vv1, p1, V1.STORE_BYTES, D, lookup=[p1, lk], quiescent=q)
+            b = sim(vv2, p2, I.STORE_BYTES, quiescent=q)
             runs[n] = (a, b)
-            ok = same(a, b) and a["fails"] == b["fails"]
+            verdict, detail, prob = judge(n, a, b)
             nrec = len(after(b, b["start"])) if b["start"] is not None else 0
             print("    %-28s start v1 %-5s v2 %-5s  %5d records  %s"
-                  % (n, a["start"], b["start"], nrec,
-                     "IDENTICAL" if ok else "*** DIFFER"))
-            if not ok:
-                probs.append("%s: v1 and v2 differ at the derived offset" % n)
+                  % (n, a["start"], b["start"], nrec, verdict))
+            if detail:
+                print("        first difference: %s" % detail[:150])
+            if prob:
+                probs.append(prob)
             if b["cpb"] != cpb:
                 probs.append("%s: the bench ran LOAD_CYC_PER_BYTE %s, the gate "
                              "derived with %d" % (n, b["cpb"], cpb))
         live = [n for n, (a, b) in runs.items()
                 if b["start"] is not None and after(b, b["start"])]
-        print("    %d of %d images identical; %d started and recorded"
-              % (sum(1 for n in runs if same(*runs[n]) and runs[n][0]["fails"]
-                     == runs[n][1]["fails"]), len(runs), len(live)))
+        adm = [n for n in runs if n.split()[0] not in NA.NON_ADMISSIBLE]
+        print("    %d of %d ADMISSIBLE images identical (judged); %d non-admissible "
+              "run and reported, %d of them differing (%s); %d started and recorded"
+              % (sum(1 for n in adm if judge(n, *runs[n])[0] == "IDENTICAL"), len(adm),
+                 len(runs) - len(adm),
+                 sum(1 for n in runs if n not in adm and judge(n, *runs[n])[0] !=
+                     "IDENTICAL (non-admissible, not judged)"), OUTSIDE, len(live)))
+
+        # ---- 1b. must-fire: a planted difference on an ADMISSIBLE image ----
+        # (Wilson 11-14) PINNED to smoke_image (stable, admissible, so the
+        # check is deterministic). The plant flips the LEVEL of lane 0's first
+        # level-1 LEVEL word in smoke_image's v2 translation: that dispatch
+        # makes the run's FIRST WRITEBACK (the first P record after it: lane
+        # 0's pin rising), and the plant takes it away. REACH CHECK: the clean
+        # v2 run must dispatch that exact word after the start AND write back
+        # after it -- else the must-fire proves only that the bench stopped
+        # early ("difference outside the run"), and is red.
+        pn = PLANT_IMAGE
+        if pn not in adm or pn not in live:
+            probs.append("must-fire: the planted-difference image %s is not an "
+                         "admissible image that runs" % pn)
+        else:
+            pc = next(c for c in cases if c[0] == pn)
+            planted, at, word = plant_first_writeback(T.translate(pc[1]))
+            reach = reached(runs[pn][1], word)
+            print("    must-fire plant: %s lane 0 word at byte %d (op %d pin %d level "
+                  "%d delay %d) -> level %d" % (pn, at, word["op"], word["pin"],
+                                               word["level"], word["delay"],
+                                               word["level"] ^ 1))
+            if reach is None:
+                probs.append("must-fire: difference outside the run -- the clean "
+                             "%s run never dispatched the planted word (lane 0, "
+                             "%s) and wrote back after it" % (pn, word))
+            else:
+                print("    reach: the clean run dispatches it at cycle %d (record %d); "
+                      "its writeback at cycle %d (record %d)" % reach)
+            pp = write_hex(os.path.join(tmp, "v2eq_plant_%s" % pn), planted,
+                           register=True)
+            bp = sim(vv2, pp, I.STORE_BYTES)
+            _v, pd, pprob = judge(pn, runs[pn][0], bp)
+            print("    must-fire: %s with a planted difference (first writeback) -> %s"
+                  % (pn, "red  ok" if pprob else "*** MISSED"))
+            if pd:
+                print("        judged at: %s" % pd[:150])
+            if not pprob:
+                probs.append("must-fire: a planted difference on admissible %s "
+                             "stayed green" % pn)
+            elif reach is not None:
+                # the difference must land INSIDE the run: the first differing
+                # record is at or before the clean run's planted writeback
+                m = re.match(r"record (\d+):", pd)
+                if not m or int(m.group(1)) > reach[3]:
+                    probs.append("must-fire: difference outside the run -- judged "
+                                 "at %r, not at or before the planted writeback "
+                                 "(record %d)" % (pd[:80], reach[3]))
+            # and the label cannot launder an admissible image: judged as if
+            # it were declared non-admissible, the same pair is NOT a problem --
+            # so the redness above comes from the admissible scope, not the runs
+            _v, _d, nprob = judge(sorted(NA.NON_ADMISSIBLE)[0], runs[pn][0], bp)
+            if nprob:
+                probs.append("must-fire control: the non-admissible label still judged")
+
+        # ---- 1c. QUIESCENT BY DECLARATION (Wilson 11-14) -------------------
+        print()
+        print("  --- 1c. quiescent by declaration: each image covered WITH A PEER elsewhere ---")
+        for qn in sorted(QUIESCENT):
+            if qn not in runs:
+                probs.append("QUIESCENT names %s, which this gate does not run" % qn)
+                continue
+            cov = peer_coverage(qn)
+            print("    %-24s %s -> %s" % (qn, QUIESCENT[qn],
+                                          "; ".join("%s (%s)" % c for c in cov)
+                                          or "*** NO PEER COVERAGE"))
+            if not cov:
+                probs.append("%s is declared quiescent here and runs with a peer in "
+                             "no registered gate -- untested everywhere" % qn)
+        # must-fire: a quiescent image with no peer-bench coverage is red
+        mf = peer_coverage("armnone_image.hex")
+        print("    must-fire: a quiescent image no peer bench runs (armnone) -> %s"
+              % ("red  ok" if not mf else "*** COVERED %s" % mf))
+        if mf:
+            probs.append("must-fire: peer_coverage found a peer for armnone_image")
+        mf2 = peer_coverage("uart_rx_image.hex", shards=_shards() - {"test/run_uartrx.py"})
+        print("    must-fire: the same image with its runner out of CI    -> %s"
+              % ("red  ok" if not mf2 else "*** COVERED %s" % mf2))
+        if mf2:
+            probs.append("must-fire: peer_coverage counted a runner not in CI")
 
         # ---- 2. the offset must-fire: D - 1 and D + 1 ----------------------
         print()
@@ -281,7 +524,8 @@ def main() -> int:
             for n, img1, p1, p2, lk in cases:
                 if n not in live:
                     continue
-                a = sim(vv1, p1, V1.STORE_BYTES, dd, ncyc=NCYC_MF, lookup=[p1, lk])
+                a = sim(vv1, p1, V1.STORE_BYTES, dd, ncyc=NCYC_MF, lookup=[p1, lk],
+                        quiescent=n in QUIESCENT)
                 red += not same(a, runs[n][1])
             ok = red == len(live)
             print("    offset %d: %d of %d images RED  %s"

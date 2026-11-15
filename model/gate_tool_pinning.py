@@ -113,7 +113,10 @@ def audit_py(path, text):
             if rx.search(s):
                 probs.append("%s:%d: %s (V1) -- use toolchain.tool()"
                              % (path, n, why))
-    if re.search(r"(?<![\w.])tool\(", text) and "banner(" not in text:
+    # a CALL is code: a `tool("verilator")` named in a comment calls nothing
+    # (runner_registry.py documents the resolver; 11-14)
+    code = "\n".join(s for _n, s in py_code_lines(text))
+    if re.search(r"(?<![\w.])tool\(", code) and "banner(" not in text:
         probs.append("%s: calls tool() but never banner() (V2)" % path)
     return probs
 
@@ -202,6 +205,12 @@ def main() -> int:
     cases.append(("tool() without banner()",
                   any("V2" in x for x in audit(
                       "x.py", 'cmd = [tool("vvp"), out]\n'))))
+    cases.append(("tool() named only in a comment is accepted",
+                  not audit("x.py", '# toolchain.tool("verilator") resolves it\n'
+                                    'X = 1\n')))
+    cases.append(("tool() called beside a comment naming it",
+                  any("V2" in x for x in audit(
+                      "x.py", '# see tool("vvp")\ncmd = [tool("vvp"), out]\n'))))
     cases.append(("a clean resolved script is accepted",
                   not audit("x.sh", 'set -o pipefail\n. ci/tools.sh\n'
                                        'tool_banner verilator\n"$VL" --cc x.v\n')))

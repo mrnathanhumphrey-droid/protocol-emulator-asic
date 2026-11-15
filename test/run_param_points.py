@@ -165,6 +165,9 @@ BENCHES = [
      ["+IMG=test/tx_image.hex", "+NBYTES=%d" % STORE_BYTES, "+NCYC=20000", "+MODE=0"],
      "tb_status: PASS", {2: "ok", 1: "ok"}),
 
+    # ⛔ ROBUSTNESS PROBE (Wilson 11-14): pinnone_image.hex is loaded past
+    # pe_isa on purpose, testing hardware robustness against refused words --
+    # a probe, not a program (gate_degenerate_fields.ROBUSTNESS_PROBES).
     # ⭐ THE OUT-OF-RANGE PIN BENCH, swept on the RESERVED-INDEX arm. That is
     # the arm that DISPATCHES -- the refusal arm never gets past the loader --
     # so it is the one where an action-slot depth could reach the pin-write

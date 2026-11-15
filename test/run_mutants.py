@@ -234,6 +234,9 @@ HALF_MUTANTS = [
      "assertion."),
 ]
 TX_IMG = "test/tx_image.hex"
+#: ⛔ Wilson 11-14: both are STATIC pe_isa refusal images now (the PIN_NONE
+#: table); the mutants below remove the SILICON guard (`pin_real` / `arm_real`),
+#: the backstop for a store that reaches the engine whatever the toolchain refuses
 PINNONE_IMG = "test/pinnone_image.hex"
 ARMNONE_IMG = "test/armnone_image.hex"
 

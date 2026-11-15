@@ -32,6 +32,25 @@ THE ONE EXEMPTION (Wilson 11-14, option 1): the store filler, `pe_isa.STORE_FILL
 RTL as PE_STORE_FILLER). REARM does not read `pin`, so the filler is exempt BY EXACT
 VALUE ONLY -- that one word, byte-identical; any other REARM with a nonzero pin is
 refused. pe_isa reads the filler from the same generator that writes it.
+
+⛔⛔ THE PIN_NONE TABLE (Wilson 11-14, ruling (a): "refuse it wherever it has no
+defined meaning"), generated here into test/op_reads.json's `pin_none`:
+  * WHICH OPS READ `pin` AS A PIN INDEX is read off the decode: an op whose pin
+    reaches a pin-index use (`pin_in[a_pin]`, `pin_out[a_pin]`, `pin_real`,
+    `rx_vpin`, `l_armpin`, the head's capture pin, ...) -- as opposed to the
+    IMMEDIATE ops (CMP_BRANCH, LOOP), whose `pin` is only the high nibble of
+    `cmp_imm` / `lp_n` and never names a pin;
+  * PIN_NONE itself (`{PINW{1'b1}}`, 15) and VPIN_ADDR_OK (15) are read off the RTL;
+  * THE THREE DEFINED MEANINGS, each verified against its RTL (an anchor that
+    must be present, or the gate is red):
+      LEVEL       the no-op idiom (level 0, mod 0, pinb 0): the OP_LEVEL arm is
+                  guarded by `pin_real`, so nothing is driven;
+      REARM       the store filler, BY EXACT VALUE (REARM reads no pin);
+      BRANCH_BIT  on the USB lane with USB live, pin 15 reads ADDR_OK
+                  (`rx_bit = pin_real ? pin_in[a_pin] : rx_vpin`, `rx_vpin`'s
+                  ADDR_OK term, `usb_aok_v` gated by `usb_l0`);
+  * every other index op on PIN_NONE (ARM, STOP, READBIT, START, SHIFT, SHIFTI,
+    SHIFTIN) has NO defined meaning and pe_isa refuses it (`pin_none_problems`).
 """
 from __future__ import annotations
 
@@ -79,6 +98,31 @@ DERIVED = {
     "lp_n": {"pin": ("LOOP",), "delay": ("LOOP",), "level": ("LOOP",)},
     "usb_send": {"q": ("SHIFT",)}, "uc_hold": {"level": ("SHIFT", "SHIFTI")},
     "tx_bit": {"count": ("SHIFTI",), "q": ("SHIFT", "SHIFTI"), "delay": ("SHIFTI",)},
+}
+
+#: derived wires through which `pin` is an IMMEDIATE (a number), never a pin index
+IMMEDIATE_WIRES = ("cmp_imm", "lp_n", "br_cmp_take")
+
+#: ⛔⛔ THE DEFINED MEANINGS OF PIN_NONE (Wilson 11-14), each with the RTL it rests
+#: on: every anchor must match exactly one engine line, or the table is not
+#: generated (a refactor that drops the guard drops the meaning).
+PIN_NONE_DEFINED = {
+    "LEVEL": {
+        "meaning": "the no-op idiom: drives nothing",
+        "form": {"level": 0, "mod": 0, "pinb": 0},
+        "rtl": ["OP_LEVEL, OP_START, OP_STOP: if (pin_real) begin",
+                "wire pin_real = (a_pin < N_PINS"]},
+    "REARM": {
+        "meaning": "the store filler, by exact value (REARM reads no pin)",
+        "exact": "STORE_FILLER",
+        "rtl": ["localparam [PINW-1:0] PIN_NONE = {PINW{1'b1}};"]},
+    "BRANCH_BIT": {
+        "meaning": "on the USB lane with USB live, pin 15 reads ADDR_OK",
+        "lane": "USB_LANE", "usb_live": True,
+        "rtl": ["wire       rx_bit     = pin_real ? pin_in[a_pin] : rx_vpin;",
+                "(a_pin == VPIN_ADDR_OK)   ? usb_aok_v  : 1'b0;",
+                "wire       usb_aok_v   = usb_l0 & usb_tok;",
+                "wire       usb_l0      = usb_on & (cur == USB_LANE[LW-1:0]);"]},
 }
 
 C_SHIFT = ("SHIFT", "SHIFTI")            # pre_cls C_SHIFT is SHIFT or SHIFTI
@@ -248,8 +292,25 @@ def regions(lines):
     return out
 
 
-def extract(lines=None):
-    """(table {op: {field: mask}}, [problem])."""
+def _pin_index(line, op=None):
+    """True when the line reaches `pin` (for `op`) through a PIN-INDEX use --
+    anything but an IMMEDIATE wire."""
+    for m in TOKEN.finditer(line):
+        tok = m.group(1)
+        if tok == "a_pin":
+            if not any(w in line for w in IMMEDIATE_WIRES):
+                return True
+        elif tok in DERIVED and tok not in IMMEDIATE_WIRES and "pin" in DERIVED[tok]:
+            ops = DERIVED[tok]["pin"]
+            if op is None or ops is None or op in ops:
+                return True
+    return False
+
+
+def extract(lines=None, idx=None):
+    """(table {op: {field: mask}}, [problem]). `idx`, a set, collects the ops
+    that read `pin` as a PIN INDEX (the PIN_NONE table)."""
+    idx = set() if idx is None else idx
     lines = _read(ENGINE) if lines is None else lines
     regs = regions(lines)
     table = {op: {f: 0 for f in FIELDS} for op in OPS}
@@ -282,6 +343,8 @@ def extract(lines=None):
             for op in reg[0][2]:
                 for f, mk in fields_of(line, op).items():
                     table[op][f] |= mk
+                if _pin_index(line, op):
+                    idx.add(op)
             continue
         if any(ig in raw for ig in IGNORE):
             continue
@@ -297,6 +360,8 @@ def extract(lines=None):
         for op in ops:
             for f, mk in (fields_of(line, op) if fl else _head_fields(raw)).items():
                 table[op][f] |= mk
+            if (_pin_index(line, op) if fl else "pin" in _head_fields(raw)):
+                idx.add(op)
     for a, _o, _w in SITES:
         c = sum(1 for l in lines if a in l)
         if c != 1 and a not in ("& (a_dly <= SDA_HOLD[DLY_W-1:0]);",):
@@ -319,11 +384,56 @@ def _head_fields(raw):
     return out
 
 
-def write(table):
+def pin_none_table(lines=None, table=None, idx=None):
+    """(the `pin_none` section, [problem]) -- generated from the decode: the
+    PIN_NONE value, the ops reading `pin` as an index, the immediate ops, and
+    the three defined meanings, each held to its RTL anchors."""
+    lines = _read(ENGINE) if lines is None else lines
+    probs = []
+    if table is None or idx is None:
+        idx = set()
+        table, p = extract(lines, idx)
+        probs += p
+    src = "\n".join(lines)
+    m = re.search(r"localparam \[PINW-1:0\] PIN_NONE = \{PINW\{1'b1\}\};", src)
+    n_pins = re.search(r"parameter integer N_PINS\s*=\s*(\d+)", src)
+    pinw = None
+    if n_pins:
+        n = int(n_pins.group(1))
+        pinw = 1 if n <= 2 else 2 if n <= 4 else 3 if n <= 8 else 4 if n <= 16 else 5
+    if not m or pinw is None:
+        probs.append("PIN_NONE: `localparam [PINW-1:0] PIN_NONE = {PINW{1'b1}}` or N_PINS not found")
+        return None, probs
+    pin_none = (1 << pinw) - 1
+    va = re.search(r"VPIN_ADDR_OK = (\d+)'d(\d+);", src)
+    if not va or int(va.group(2)) != pin_none:
+        probs.append("PIN_NONE: VPIN_ADDR_OK is not %d in the RTL -- BRANCH_BIT's meaning moved" % pin_none)
+    for op, d in PIN_NONE_DEFINED.items():
+        for a in d["rtl"]:
+            c = sum(1 for ln in lines if a in ln)
+            if c != 1:
+                probs.append("PIN_NONE %s (%s): RTL anchor matches %d line(s), want 1: %s"
+                             % (op, d["meaning"], c, a))
+    if table["REARM"]["pin"]:
+        probs.append("PIN_NONE REARM: REARM now reads `pin` -- the filler's exemption has no basis")
+    if "LEVEL" not in idx or "BRANCH_BIT" not in idx:
+        probs.append("PIN_NONE: LEVEL / BRANCH_BIT no longer read `pin` as an index")
+    imm = sorted(op for op in OPS if table[op]["pin"] and op not in idx)
+    sec = {"value": pin_none,
+           "index_ops": sorted(idx),
+           "immediate_ops": imm,
+           "defined": {op: {k: v for k, v in d.items() if k != "rtl"}
+                       for op, d in PIN_NONE_DEFINED.items()},
+           "refused": sorted(op for op in idx if op not in PIN_NONE_DEFINED)}
+    return sec, probs
+
+
+def write(table, pin_none):
     with open(OUT, "w", encoding="utf-8", newline="\n") as fh:
         json.dump({"_doc": "GENERATED by model/gen_op_reads.py from src/pe_engine.v -- "
-                           "the bits of each field each opcode reads; never edit by hand",
-                   "reads": table}, fh, indent=1, sort_keys=True)
+                           "the bits of each field each opcode reads, and the PIN_NONE "
+                           "table (Wilson 11-14); never edit by hand",
+                   "reads": table, "pin_none": pin_none}, fh, indent=1, sort_keys=True)
         fh.write("\n")
 
 
@@ -332,15 +442,38 @@ def load():
         return json.load(fh)["reads"]
 
 
+def load_pin_none():
+    with open(OUT, encoding="utf-8") as fh:
+        return json.load(fh).get("pin_none")
+
+
 def check():
-    table, probs = extract()
+    idx = set()
+    table, probs = extract(idx=idx)
+    pn, p2 = pin_none_table(table=table, idx=idx)
+    probs += p2
     try:
-        tracked = load()
+        tracked, tracked_pn = load(), load_pin_none()
     except (OSError, ValueError) as exc:
-        tracked, _ = None, probs.append("test/op_reads.json unreadable: %s" % exc)
+        tracked, tracked_pn = None, None
+        probs.append("test/op_reads.json unreadable: %s" % exc)
     if tracked is not None and tracked != table:
         probs.append("test/op_reads.json is STALE against the engine -- run model/gen_op_reads.py")
+    if tracked is not None and tracked_pn != pn:
+        probs.append("test/op_reads.json's PIN_NONE table is STALE against the engine -- "
+                     "run model/gen_op_reads.py --write")
     return table, probs
+
+
+def refused_pn(I, word, whole=False):
+    """True when pe_isa's PIN_NONE rule (or, `whole`, the whole aggregate)
+    refuses `word` on lane 1 (no USB)"""
+    img = I.full_store(I.join_image(
+        [I.hdr(0, 0, 1, 500, 0, 200, 240, I.ACT_BASE + I.ACT_BYTES)]
+        + [I.hdr(1, 1, 1, 40, 0, 40, 60, I.ACT_BASE)]
+        + [I.hdr(n, n, 1, 500, 0, 200, 240, I.ACT_BASE + I.ACT_BYTES) for n in range(2, I.N_LANES)],
+        [word, I.act(I.OP_REARM, 0, 0, 500)]))
+    return bool(I.branch_problems(img) if whole else I.pin_none_problems(img))
 
 
 def must_fires(table):
@@ -369,14 +502,10 @@ def must_fires(table):
     # the store filler: exempt by EXACT value only
     fill = bytes(I.STORE_FILLER)
     rows.append(("control: the exact filler is ACCEPTED", not refused(fill)))
-    # EVERY one-bit flip of the filler must be refused (Wilson 11-14) -- by the
-    # whole refusal aggregate (pe_isa.branch_problems), not only the unread rule.
-    # ⚠ OPEN, PENDING WILSON (reported, never silent): three opcode-bit flips turn
-    # the filler into a REAL op whose (read) pin field holds PIN_NONE -- ARM,
-    # STOP, READBIT with pin 15, delay 1023. Whether PIN_NONE is refused on those
-    # ops is a pin-semantics ruling (LEVEL's no-op idiom uses PIN_NONE
-    # legitimately; an ARM on PIN_NONE is a deliberate runtime-refusal image), not
-    # an unread-field one. Any OTHER accepted flip is red.
+    # ⛔ EVERY one-bit flip of the filler must be refused (Wilson 11-14), NONE
+    # OPEN -- by the whole refusal aggregate (pe_isa.branch_problems). The three
+    # opcode-bit flips that were OPEN (ARM, STOP, READBIT on PIN_NONE) are now
+    # refused by the PIN_NONE table (pe_isa.pin_none_problems).
     accepted = []
     for byte in range(len(fill)):
         for bit in range(8):
@@ -387,12 +516,29 @@ def must_fires(table):
                 + [I.hdr(1, I.PIN_NONE, 1, 500, 0, 200, 240, I.ACT_BASE)] * (I.N_LANES - 1),
                 [bytes(w)]))
             if not I.branch_problems(img):
-                accepted.append(I._unpack(I.ACT_FIELDS, bytes(w), I.ACT_BYTES)["op"])
-    open_pending = sorted(op for op in accepted if op in (I.OP_ARM, I.OP_STOP, I.OP_READBIT))
-    for op in open_pending:
-        print("  OPEN (pending Wilson): a filler flip -> opcode %d with pin PIN_NONE is accepted" % op)
-    rows.append(("every filler bit flip refused (but the 3 OPEN)",
-                 len(accepted) == len(open_pending) and len(fill) * 8 > 0))
+                accepted.append((byte, bit, I._unpack(I.ACT_FIELDS, bytes(w), I.ACT_BYTES)))
+    for byte, bit, x in accepted:
+        print("  *** filler flip byte %d bit %d ACCEPTED: %s" % (byte, bit, x))
+    print("  filler flips: %d of %d refused, %d OPEN" % (len(fill) * 8 - len(accepted),
+                                                      len(fill) * 8, len(accepted)))
+    rows.append(("all %d filler bit flips refused, none OPEN" % (len(fill) * 8),
+                 not accepted and len(fill) * 8 == 32))
+    # ⛔ the PIN_NONE table's own must-fires (Wilson 11-14)
+    for nm, word in (("ARM", I.act(I.OP_ARM, I.PIN_NONE, 0, 200)),
+                     ("STOP", I.act(I.OP_STOP, I.PIN_NONE, 0, 40)),
+                     ("READBIT", I.act(I.OP_READBIT, I.PIN_NONE, 0, 40)),
+                     ("LEVEL level 1", I.act(I.OP_LEVEL, I.PIN_NONE, 1, 40))):
+        rows.append(("%s on PIN_NONE is refused" % nm, refused_pn(I, word)))
+    rows.append(("control: the LEVEL no-op idiom is ACCEPTED",
+                 not refused_pn(I, I.act(I.OP_LEVEL, I.PIN_NONE, 0, 40), whole=True)))
+    # the table: a dropped RTL guard, or a defined meaning lost, is red
+    lines = [l.replace("OP_LEVEL, OP_START, OP_STOP: if (pin_real) begin",
+                       "OP_LEVEL, OP_START, OP_STOP: begin") for l in _read(ENGINE)]
+    rows.append(("the LEVEL arm's pin_real guard dropped -> table red",
+                 any("PIN_NONE LEVEL" in q for q in pin_none_table(lines)[1])))
+    lines = [l.replace("VPIN_ADDR_OK = 4'd15;", "VPIN_ADDR_OK = 4'd11;") for l in _read(ENGINE)]
+    rows.append(("ADDR_OK moved off 15 -> table red",
+                 any("VPIN_ADDR_OK" in q for q in pin_none_table(lines)[1])))
     rows.append(("a REARM with pin 15 not byte-identical to the filler is refused",
                  refused(I.act(I.OP_REARM, I.PIN_NONE, 0, 500))))
     return rows
@@ -401,18 +547,27 @@ def must_fires(table):
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
     if "--write" in argv:      # a gate runs with no arguments: the default is the check
-        table, probs = extract()
+        idx = set()
+        table, probs = extract(idx=idx)
+        pn, p2 = pin_none_table(table=table, idx=idx)
+        probs += p2
         for p in probs:
             print("  *** " + p)
         if probs:
             return 1
-        write(table)
+        write(table, pn)
         print("  -> %s" % os.path.relpath(OUT, ROOT))
         return 0
     print("GATE op-reads -- the fields each opcode reads, generated from the engine's decode")
     table, probs = check()
     for op in OPS:
         print("  %-11s %s" % (op, " ".join("%s=%#x" % (f, table[op][f]) for f in FIELDS if table[op][f])))
+    pn = load_pin_none() or {}
+    print("  PIN_NONE = %s: index ops %s; immediate (pin is a number) %s"
+          % (pn.get("value"), pn.get("index_ops"), pn.get("immediate_ops")))
+    for op, d in sorted((pn.get("defined") or {}).items()):
+        print("    DEFINED  %-10s %s" % (op, d["meaning"]))
+    print("    REFUSED  %s, and any op not listed" % ", ".join(pn.get("refused") or []))
     for label, red in must_fires(table):
         print("  must-fire: %-46s %s" % (label[:46], "ok" if red else "*** FAILED"))
         if not red:

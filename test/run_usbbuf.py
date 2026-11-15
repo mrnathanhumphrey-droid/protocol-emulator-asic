@@ -232,23 +232,26 @@ def write_scripts(tmp, tag, host, loads):
 #: scenarios (30,000 cycles each, as run_all) and B5's queue image, so the response
 #: buffer's send path is reached. Reach only; judged here.
 COV_DIR = "probe_cov_usbbuf"
+#: ⛔ THE IMAGE FILES, NAMED (Wilson 11-14): bench-prefixed, written by the
+#: coverage arms and the gate path alike (the wire-feed WITNESS (sim) rows)
+IMAGE_FILES = {"usb": "usbbuf_usb.hex", "queue": "usbbuf_queue.hex"}
 
 
 def coverage_arms():
     """[(label, plusargs)] for test/benchset.py's tb_usbbuf; scripts + images under COV_DIR."""
     d = os.path.join(ROOT, COV_DIR)
     os.makedirs(d, exist_ok=True)
-    I.write_image(os.path.join(d, "usb.hex"), image_usb())
-    I.write_image(os.path.join(d, "queue.hex"), image_queue())
+    I.write_image(os.path.join(d, IMAGE_FILES["usb"]), image_usb())
+    I.write_image(os.path.join(d, IMAGE_FILES["queue"]), image_queue())
     rel = lambda p: COV_DIR + "/" + os.path.basename(p)
     arms = []
     for name, sc in SCEN.items():
         host, loads = sc[0], sc[1]
         tag = name.split()[0]
         hf, lf = write_scripts(d, tag, host, loads)
-        arms.append((tag, ["+IMG=%s/usb.hex" % COV_DIR, "+HOST=" + rel(hf), "+LOAD=" + rel(lf), "+NCYC=30000"]))
+        arms.append((tag, ["+IMG=%s/%s" % (COV_DIR, IMAGE_FILES["usb"]), "+HOST=" + rel(hf), "+LOAD=" + rel(lf), "+NCYC=30000"]))
     qf, ql = write_scripts(d, "B5", [], [("A", Q_FIRST + k * Q_STEP, b) for k, b in enumerate(Q_BYTES)])
-    arms.append(("B5", ["+IMG=%s/queue.hex" % COV_DIR, "+HOST=" + rel(qf), "+LOAD=" + rel(ql),
+    arms.append(("B5", ["+IMG=%s/%s" % (COV_DIR, IMAGE_FILES["queue"]), "+HOST=" + rel(qf), "+LOAD=" + rel(ql),
                         "+NCYC=%d" % (Q_FIRST + len(Q_BYTES) * Q_STEP + 400)]))
     return arms
 
@@ -343,11 +346,11 @@ def judge(name, res, host, exp_pk, exp_rd, exp_tf, line=None):
 
 
 def run_all(vvp, tmp, tag, pool):
-    img = os.path.join(tmp, "usbbuf_usb.hex")
+    img = os.path.join(tmp, IMAGE_FILES["usb"])
     if not os.path.exists(img):
         I.write_image(img, image_usb())
         sim_run.scratch_image(GEN, img)
-    qimg = os.path.join(tmp, "usbbuf_queue.hex")
+    qimg = os.path.join(tmp, IMAGE_FILES["queue"])
     if not os.path.exists(qimg):
         I.write_image(qimg, image_queue())
         sim_run.scratch_image(GEN, qimg)

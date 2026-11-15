@@ -108,7 +108,13 @@ def main() -> int:
     # only if every must-fire above still went red
     if probs and mf_ok:
         import stale_records as SR
-        v, why = SR.stale_verdict("model/gate_a2_record.py", SR.moved(INPUTS))
+        # Wilson 11-14: the moved inputs, GENERATED (git, against the baseline)
+        # and printed in full -- the debt text carries reason + owner only
+        mv = SR.moved(INPUTS)
+        print("  moved since %s (%d, generated):" % (SR.BASELINE, len(mv)))
+        for i in range(0, len(mv), 3):
+            print("      " + "  ".join(mv[i:i + 3]))
+        v, why = SR.stale_verdict("model/gate_a2_record.py", mv)
         print("  stale_records: %s -- %s" % (v, why))
         if v == "STALE":
             print(SR.token("a2_record", why))

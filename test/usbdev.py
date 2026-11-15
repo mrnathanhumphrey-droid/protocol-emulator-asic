@@ -455,3 +455,163 @@ def judge(name, res, host, exp):
                                                    {"br": "bus resets", "rn": "reset notices"}[key],
                                                    exp.get(key, 0)))
     return probs, sops, jits
+
+
+# ---- the independent decoder (Wilson 11-14, wire-feed row 3) ---------------
+# ⛔⛔ WHY: the device's ACK / NAK bits and its loaded DATA / ZLP lines are
+# built by run_usbbuf.line_bits, and the golden above (expect_bits / classify)
+# reads the SAME lines -- one encoder serves both sides, so a misreading of
+# §7.1 (stuffing, NRZI, bit order) shared by the two is invisible to judge().
+# The cross-check: the chip's OWN D- / D+ drive, captured from the simulation,
+# is decoded by sigrok's usb_signalling -> usb_packet stack (written from the
+# spec by other people, CRC5 / CRC16 / SYNC / stuffing checked by sigrok) and
+# compared PACKET BY PACKET -- PID name and payload bytes -- against what each
+# reply must CARRY, taken from the stimulus constants, never from a line.
+
+#: sigrok's signalling option, by the bit rate model/clock.py names
+SIGROK_SPEED = {1_500_000: "low-speed", 12_000_000: "full-speed"}
+#: the PID names of USB 2.0 Table 8-1, as sigrok prints them
+PID_NAME = {PID_OUT: "OUT", PID_IN: "IN", PID_SETUP: "SETUP", PID_DATA0: "DATA0",
+            PID_DATA1: "DATA1", PID_ACK: "ACK", PID_NAK: "NAK"}
+
+
+def carried(kind):
+    """(PID name, [payload bytes]) a device reply of `kind` must carry on the
+    wire: the handshakes carry no data; the ZLP is a DATA1 with none; the
+    DATA reply is DATA1 + bundle 5's PAYLOAD (STIMULUS, run_usbbuf)."""
+    return {"NAK": (PID_NAME[PID_NAK], []), "ACK": (PID_NAME[PID_ACK], []),
+            "ZLP": (PID_NAME[PID_DATA1], []),
+            "DATA": (PID_NAME[PID_DATA1], list(B.PAYLOAD))}[kind]
+
+
+def wire_capture(tx, ncyc):
+    """The chip's side of the bus, one sample per clock cycle (bit 0 = D-,
+    bit 1 = D+), from the bench's TX lines: a driven line reads the device's
+    output, a released one the bus's idle level (low speed: D- pulled up,
+    D+ pulled down -- J)."""
+    ev = {c: (oe, o) for c, oe, o in tx}
+    oe, o = "00", "11"
+    out = bytearray()
+    for c in range(ncyc):
+        if c in ev:
+            oe, o = ev[c]
+        dm = int(o[1]) if oe[1] == "1" else 1
+        dp = int(o[0]) if oe[0] == "1" else 0
+        out.append(dm | (dp << 1))
+    return out
+
+
+def sigrok_usb(path):
+    """sigrok-cli's usb_signalling -> usb_packet decode of a wire capture.
+    -> (rc, [(sample, text)]). The binary comes from $SIGROK_CLI (native on
+    Linux / CI; through WSL on Windows, as run_recert's); a missing binary is
+    rc 127, never a quiet "no packets"."""
+    exe = os.environ.get("SIGROK_CLI", "sigrok-cli")
+    spd = SIGROK_SPEED[clock.USB_LS_RATE]
+    args = ["-i", None, "-I", "binary:numchannels=2:samplerate=%d" % clock.hz(),
+            "-P", "usb_signalling:dm=0:dp=1:signalling=%s,usb_packet" % spd,
+            "-A", "usb_packet,usb_signalling=error", "--protocol-decoder-samplenum"]
+    if os.name != "nt":
+        args[1] = path
+        try:
+            r = subprocess.run([exe] + args, cwd=ROOT, capture_output=True, text=True,
+                               encoding="utf-8", errors="replace")
+            rc, out = r.returncode, (r.stdout or "") + (r.stderr or "")
+        except OSError as e:
+            rc, out = 127, "%s: %s" % (exe, e)
+    else:
+        from run_i2c import wsl_path
+        args[1] = wsl_path(path)
+        wrap = path + ".sh"
+        with open(wrap, "w", encoding="ascii", newline="\n") as fh:
+            fh.write("#!/bin/bash\n%s %s\n" % (exe, " ".join(args)))
+        r = subprocess.run(["wsl.exe", "-e", "bash", wsl_path(wrap)], capture_output=True,
+                           text=True, encoding="utf-8", errors="replace",
+                           env=dict(os.environ, MSYS_NO_PATHCONV="1"))
+        rc, out = r.returncode, (r.stdout or "") + (r.stderr or "")
+    ev = []
+    for ln in out.replace("\r", "").split("\n"):
+        m = re.match(r"\s*(\d+)-\d+\s+(usb_\w+)-\d+:\s*(.*)$", ln)
+        if m:
+            ev.append((int(m.group(1)), m.group(2), m.group(3).strip()))
+        elif ln.strip():
+            ev.append((-1, "sigrok", ln.strip()))
+    return rc, ev
+
+
+def decoded_packets(ev):
+    """[{"at", "pid", "data", "errors"}] in wire order from sigrok's
+    annotations; an error outside any packet becomes a packet of its own
+    (pid None) so it can never be dropped."""
+    pk, cur = [], None
+    for s, src, t in ev:
+        if src == "usb_signalling" or src == "sigrok":
+            (cur["errors"] if cur is not None else
+             pk.append({"at": s, "pid": None, "data": [], "errors": []}) or pk[-1]["errors"]
+             ).append("%s: %s" % (src, t))
+            continue
+        if t.startswith("SYNC"):
+            cur = {"at": s, "pid": None, "data": [], "errors": []}
+            pk.append(cur)
+            if t.startswith("SYNC ERROR"):
+                cur["errors"].append(t)
+            continue
+        if cur is None:
+            if t.startswith("Invalid"):
+                pk.append({"at": s, "pid": None, "data": [], "errors": [t]})
+            continue
+        if t.startswith("PID: "):
+            cur["pid"] = t[5:]
+        elif t.startswith("Databyte: "):
+            cur["data"].append(int(t[10:], 16))
+        elif "ERROR" in t or t.startswith("Invalid"):
+            cur["errors"].append(t)
+    return pk
+
+
+def sigrok_judge(segments, packets):
+    """segments: [(name, first sample, end sample, [(PID name, [bytes])])];
+    packets: decoded_packets(). -> [problem]. Each segment's decoded packets,
+    in order, must be exactly its expected ones, every one error-free."""
+    probs = []
+    for name, s0, s1, exp in segments:
+        got = [p for p in packets if s0 <= p["at"] < s1]
+        for p in got:
+            if p["errors"]:
+                probs.append("%s: sigrok reports %s at sample %d" % (name, p["errors"], p["at"] - s0))
+        seen = [(p["pid"], p["data"]) for p in got]
+        if seen != [(n, list(b)) for n, b in exp]:
+            probs.append("%s: sigrok decodes %s, expected %s" % (name, seen, exp))
+    return probs
+
+
+def drive_windows(tx, base=0):
+    """[(start, end)] cycles (+ `base`) while the device drives D-"""
+    out, st = [], None
+    for c, oe, _o in tx:
+        if oe[1] == "1" and st is None:
+            st = c
+        elif oe[1] != "1" and st is not None:
+            out.append((base + st, base + c))
+            st = None
+    return out
+
+
+def stuff_bit_flip(cap, windows):
+    """`cap` with the FIRST stuffed bit of a device drive inverted: inside a
+    drive window, the bit after a run of six 1s (seven bit periods at one
+    J / K level, on the bit grid D) is held at the run's level instead.
+    -> (capture, sample), or (cap, None) when no drive has a stuffed bit."""
+    for w0, w1 in windows:
+        run_lvl, run_start = cap[w0], w0
+        for c in range(w0 + 1, w1):
+            lv = cap[c]
+            if lv == run_lvl:
+                continue
+            if run_lvl in (1, 2) and lv in (1, 2) and c - run_start >= 7 * D - J_MAX - 1:
+                out = bytearray(cap)
+                for k in range(c, min(c + D, w1)):
+                    out[k] = run_lvl
+                return out, c
+            run_lvl, run_start = lv, c
+    return cap, None

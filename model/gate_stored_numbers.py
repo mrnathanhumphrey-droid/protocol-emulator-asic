@@ -801,6 +801,10 @@ SPEC_SYMBOLS = {
     ("test/run_usbaddr.py", "COMMIT5"),
     ("test/run_usbaddr.py", "SCEN"),
     ("test/run_usbaddr.py", "MUTANTS"),
+    # SIG_EXTRA (Wilson 11-14, row 3's sigrok cross-check): the S1 scenario's
+    # host packet times and run length -- stimulus, like SCEN; the expected
+    # packets are judged live by sigrok's usb_packet decode on every run.
+    ("test/run_usbaddr.py", "SIG_EXTRA"),
     ("test/run_usbrst.py", "GETDESC"),
     ("test/run_usbrst.py", "SCEN"),
     # ⭐ GATE CONFIGURATION (Wilson 11-12 ruling D: RULES is configuration, not a
@@ -884,6 +888,11 @@ SPEC_SYMBOLS = {
     ("model/gen_op_reads.py", "FULL"),
     ("model/gen_op_reads.py", "SITES"),
     ("model/gen_op_reads.py", "IGNORE"),
+    # ... and PIN_NONE_DEFINED (Wilson 11-14, ruling (a)): the three DEFINED
+    # meanings of PIN_NONE -- the LEVEL idiom's form (level / mod / pinb 0) and
+    # each meaning's RTL anchor text -- a SPECIFICATION, judged live: every
+    # anchor must match exactly one src/pe_engine.v line or the table is red.
+    ("model/gen_op_reads.py", "PIN_NONE_DEFINED"),
     # ⭐ A TEST PAYLOAD IS STIMULUS, NOT A MEASUREMENT. The four bytes the
     # cocotb host feeder pushes are chosen to be distinguishable on a wire;
     # nothing is concluded from their values. `host_feed.vh` carries the same

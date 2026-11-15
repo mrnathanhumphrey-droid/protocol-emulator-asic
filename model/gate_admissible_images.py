@@ -228,6 +228,32 @@ def main() -> int:
     if not probs:
         print("  every non-admissible image is declared, with its conditions")
     print()
+    # ⛔ ROBUSTNESS PROBES (Wilson 11-14): refused by pe_isa, loaded past it by
+    # a bench on purpose -- reported as probes, never as programs
+    print()
+    print("  ROBUSTNESS PROBES -- %d image(s), NOT programs (%s):"
+          % (len(dgf.ROBUSTNESS_PROBES), dgf.PROBE_LABEL))
+    names = {n for n, _ in imgs}
+    for name, bench in sorted(dgf.ROBUSTNESS_PROBES.items()):
+        img = next((b for n, b in imgs if n == name), None)
+        refused = img is not None and bool(I.pin_none_problems(img) or
+                                           I.unread_problems(img))
+        print("    %-24s %-22s %s" % (name, bench,
+                                       "probe (pe_isa refuses it)" if refused
+                                       else "*** NOT REFUSED"))
+        if name not in names:
+            probs_p = "%s is listed as a robustness probe but no such image exists" % name
+        elif name not in dgf.DELIBERATE:
+            probs_p = ("%s is a robustness probe but not a DELIBERATE refusal image "
+                       "-- it would be judged as a program" % name)
+        elif not refused:
+            probs_p = ("%s is a robustness probe but pe_isa no longer refuses it -- "
+                       "a probe must be a refused word" % name)
+        else:
+            continue
+        print("  *** " + probs_p)
+        rc = 1
+    print()
     print("  ADMISSIBLE-UNCERTIFIED (A2) -- %d image(s); a pass above does not "
           "certify them:" % len(UNCERTIFIED))
     for name, why in sorted(UNCERTIFIED.items()):

@@ -232,6 +232,12 @@ def report(u, out=print):
     if u.sniff:
         out("  image universe: %d SNIFF image(s) held out of the program set "
             "(not programs): %s" % (len(u.sniff), ", ".join(sorted(u.sniff))))
+    import gate_degenerate_fields as dgf
+    probes = sorted(n for n in dgf.ROBUSTNESS_PROBES if n in u.paths)
+    if probes:
+        out("  image universe: %d ROBUSTNESS PROBE(s), not programs (%s): %s"
+            % (len(probes), dgf.PROBE_LABEL,
+               ", ".join("%s [%s]" % (n, dgf.ROBUSTNESS_PROBES[n]) for n in probes)))
     if not u.dups:
         out("  image universe: %d images, no duplicate names" % len(u.paths))
         return

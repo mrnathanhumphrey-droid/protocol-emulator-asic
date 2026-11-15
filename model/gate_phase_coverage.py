@@ -127,6 +127,37 @@ def sweep_state(bench, spec, rec, head_hash, dirty):
     return probs, pending
 
 
+def record_moved(rec, blobs=None, head=None, dirty=None):
+    """-> ([moved input], [problem]) GENERATED from the record itself (Wilson
+    11-14): the record names its commit (`sha`) and its inputs' set hash; the
+    blobs at that commit must reproduce the hash (else the record cannot say
+    what it ran on -- red), and every input whose blob differs from HEAD, or
+    that is uncommitted, has moved. No hand-written list anywhere."""
+    blobs = blobhash.blobs if blobs is None else blobs
+    dirty = blobhash.dirty if dirty is None else dirty
+    ins = sorted(((rec or {}).get("inputs") or {}).get("files") or [])
+    if not ins or not (rec or {}).get("sha"):
+        return [], ["the record names no commit or no inputs -- its moved inputs "
+                    "cannot be generated"]
+    try:
+        then = blobs(ins, rec["sha"])
+    except (KeyError, RuntimeError) as e:
+        return [], ["the record's commit %s cannot be read: %s" % (rec["sha"][:9], e)]
+    if blobhash.hash_contents(then) != rec["inputs"].get("sha256"):
+        return [], ["the record's inputs at its commit %s do not reproduce its set "
+                    "hash -- the record cannot say what it ran on" % rec["sha"][:9]]
+    try:
+        now = blobs(ins, "HEAD") if head is None else head
+    except KeyError as e:
+        now = {}
+        missing = str(e)
+    else:
+        missing = None
+    out = {p for p in ins if now.get(p) != then[p]} | set(dirty(ins))
+    probs = ["an input is gone from HEAD: %s" % missing] if missing else []
+    return sorted(out), probs
+
+
 def arms_rec(ok_s1):
     """a per-arm sweep result (the 11-03 shape): the chip arm `ok` claims
     17 / 17 / 12, the FPGA arm 20 / 20 / 15; `ok` covers `ok_s1` on S1."""
@@ -182,6 +213,18 @@ def main() -> int:
         import stale_records as SR
         ins = sorted({f for r in recs.values() if r
                       for f in (r.get("inputs") or {}).get("files") or []})
+        # Wilson 11-14: the moved inputs, GENERATED per record and printed in
+        # full -- the debt text carries only the reason and the owner
+        for rp in sorted(recs):
+            if recs[rp] is None:
+                continue
+            mv, mp = record_moved(recs[rp])
+            probs += ["%s: %s" % (rp, m) for m in mp]
+            print("  %s (recorded on %s): %d of %d inputs moved since:"
+                  % (rp, recs[rp]["sha"][:9], len(mv),
+                     len(recs[rp]["inputs"]["files"])))
+            for i in range(0, len(mv), 3):
+                print("      " + "  ".join(mv[i:i + 3]))
         v, why = SR.stale_verdict("model/gate_phase_coverage.py", SR.moved(ins))
         print("  stale_records: %s -- %s" % (v, why))
         if v == "STALE":
@@ -244,6 +287,30 @@ def main() -> int:
     print("    %-46s %s" % ("each arm at its own claim (control)",
                             "ok" if not ctl2 else "*** WRONG %s" % ctl2))
     ok = ok and not ctl2
+    # Wilson 11-14: the moved list is generated, never typed
+    fake = {"sha": "c0ffee", "inputs": {"files": ["a.v", "b.v"]}}
+    blob0 = {"a.v": b"1", "b.v": b"2"}
+    fake["inputs"]["sha256"] = blobhash.hash_contents(blob0)
+    mv, mp = record_moved(fake, blobs=lambda ins, rev: dict(blob0),
+                          head={"a.v": b"1", "b.v": b"X"}, dirty=lambda ins: [])
+    print("    %-46s %s" % ("a moved blob is listed (generated)",
+                            "ok %s" % mv if mv == ["b.v"] and not mp else "*** %s %s" % (mv, mp)))
+    ok = ok and mv == ["b.v"] and not mp
+    _, mp2 = record_moved(dict(fake, inputs=dict(fake["inputs"], sha256="0" * 64)),
+                          blobs=lambda ins, rev: dict(blob0), head=blob0,
+                          dirty=lambda ins: [])
+    print("    %-46s %s" % ("a record whose commit misses its hash",
+                            "red  ok" if mp2 else "*** MISSED"))
+    ok = ok and bool(mp2)
+    import stale_records as SR2
+    g = "model/gate_phase_coverage.py"
+    red = SR2.listed_problems({g: SR2.DECLARED[g] + " (moved: src/pe_engine.v)"},
+                              SR2.DEBT, frozenset([g]))
+    print("    %-46s %s" % ("a hand-written file list in the debt text",
+                            "red  ok" if red else "*** MISSED"))
+    ok = ok and bool(red)
+    lp = SR2.listed_problems()
+    probs += lp
     print()
     print("  %d rows: %d PENDING" % (len(rows), len(pending)))
     ok = ok and not probs

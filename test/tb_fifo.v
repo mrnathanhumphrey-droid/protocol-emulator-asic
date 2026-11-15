@@ -230,8 +230,10 @@ module tb_fifo ();
     // ⭐ `do_popq` IS PER QUEUE (every TX variant pops through it), so the
     // corner is a push and a pop on the SAME queue in the same cycle
     if (dut.do_push && dut.do_popq[dut.tx_tag] && hits == 0) begin
-      hits      = 1;
-      hit_cycle = cyc;
+      // ⛔ NONBLOCKING: the after-state sampler below reads `hits`/`hit_cycle`
+      // on the same posedge -- with `<=` it sees the pre-edge values, never a race
+      hits      <= 1;
+      hit_cycle <= cyc;
       hit_phase = phase;
       cnt_before = dut.tx_cnt[dut.tx_tag];
       wp_before  = dut.tx_wp[dut.tx_tag];
@@ -244,7 +246,7 @@ module tb_fifo ();
     cnt_after = dut.tx_cnt[dut.tx_tag];
     wp_after  = dut.tx_wp[dut.tx_tag];
     rp_after  = dut.tx_rp[dut.tx_tag];
-    hits      = 2;
+    hits      <= 2;
   end
 
   // ---- the stimulus: push bytes, slipping the phase by one each time ---
