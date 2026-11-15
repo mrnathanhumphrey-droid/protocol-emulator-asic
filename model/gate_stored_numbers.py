@@ -945,6 +945,16 @@ SPEC_SYMBOLS = {
     ("model/a2/_price_stale_lane_table.py", "STALE"),
     # this audit's own table
     ("model/gate_stored_numbers.py", "SITES"),
+    # ⭐ THE CERT-STAMP GATE'S TWO TEST PROGRAMS ARE STIMULUS, NOT READINGS (Wilson 11-15,
+    # "UNCERTIFIED is a stamp"): `(op, pin, level, delay, q)` actions and a header that the
+    # gate assembles through pe_asm's real command line and stamps LIVE every run (d = 12
+    # must stamp uncertified, the clocked d = 25 program certified). Which programs to
+    # build, like D_POINTS above -- nothing is concluded from a stored value.
+    ("model/gate_cert_stamp.py", "D12"),
+    ("model/gate_cert_stamp.py", "OK25"),
+    # paths and the owning builder's text; the digits are dates inside the reason strings
+    # ("11-15"), not numbers. gate_cert_stamp prints each entry as pending.
+    ("model/cert_stamp.py", "IMAGES_OF_RECORD_PENDING"),
 }
 
 
