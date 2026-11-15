@@ -47,6 +47,7 @@ SCRATCH_MUTANTS = {
     "M_PC_WINDOW_SWAP": "killed in-process by this gate",
     "M_PC_COMPOUND_PASS": "killed in-process by this gate",
     "M_PC_USB_NOCHECK": "killed in-process by this gate",
+    "M_PC_JFLOOR_HEAD": "killed in-process by this gate",
 }
 #: the literal above must name exactly the module's MUTANTS (checked at start-up)
 if set(SCRATCH_MUTANTS) != set(C.MUTANTS):
@@ -152,8 +153,22 @@ def judge():
         if r["cert"].get("branch_budget") != CC.branch_budget_line(r["image"]):
             probs.append("C1 cert branch_budget is not the certificate's: %r"
                          % r["cert"].get("branch_budget"))
+        # J floor: the recorded lanes must re-assemble to the image, and J_floor must be
+        # compute_j on ALL of them (recomputed here, unmutated)
+        import pe_asm
+        lanes, hdr, a, kw = r["lowered"]
+        if bytes(pe_asm.assemble(lanes, hdr, *a, **kw)) != r["image"]:
+            probs.append("C1 the recorded lowered lanes do not re-assemble to the image")
+        mut, C.MUT = C.MUT, ""
+        try:
+            jf = CC.j_floor_line(lanes)
+        finally:
+            C.MUT = mut
+        if r["cert"].get("J_floor") != jf:
+            probs.append("C1 cert J_floor %r, compute_j on the lowered lanes gives %r"
+                         % (r["cert"].get("J_floor"), jf))
         rest = {a: v for a, v in r["cert"].items()
-                if a not in ("usb_coresident", "A2", "branch_budget")}
+                if a not in ("usb_coresident", "A2", "branch_budget", "J_floor")}
         if not all(v.startswith(("OWED", "UNCERTIFIED", "not applicable")) for v in rest.values()):
             probs.append("C1 cert claims more than the skeleton does: %s" % r["cert"])
         if r["cert"].get("usb_coresident") != "not applicable (no USB receive)":

@@ -8,8 +8,10 @@ skeleton reaches, plus a refusal that NAMES the failing constraint when the spec
   checkset   the validator's predicates, derived from the SPEC ALONE, independently of
              the image (guiding doc §5: a check-set compiled from the same source as the
              program and run against its own output is circular)
-  cert       the A2 certificate. OWED in the skeleton: the delegated lowering returns an
-             image, not lanes, so pe_asm.compute_j and the A2 terms cannot run on it yet.
+  cert       the A2 certificate: per image (model/branch_budget, `A2`, `branch_budget`) and
+             the J floor (pe_asm.compute_j on the LOWERED lanes, `J_floor`: the lanes are
+             recorded from the lowering's own pe_asm.assemble call and must re-assemble to
+             the image byte for byte).
 
 Passes
   P1 parse      host/poset/spec.parse (v1 lines through pit_emit, unchanged)
@@ -51,7 +53,8 @@ MUTANTS = ("M_PC_NO_CYCLE",      # cycles not refused
            "M_PC_NO_CLOSURE",    # width from direct edges only (path cover, not chain cover)
            "M_PC_WINDOW_SWAP",   # window bounds swapped
            "M_PC_COMPOUND_PASS", # compound patterns silently dropped instead of refused
-           "M_PC_USB_NOCHECK")   # the USB co-resident threshold not checked
+           "M_PC_USB_NOCHECK",   # the USB co-resident threshold not checked
+           "M_PC_JFLOOR_HEAD")   # J floor from each lane's head action only, not every lowered action
 MUT = os.environ.get("POSET_COMPILE_MUTANT", "")
 if MUT and MUT not in MUTANTS:
     raise SystemExit("poset compile: unknown mutant %r" % MUT)
@@ -194,12 +197,45 @@ def words_used(img):
 
 
 def lower(v1_claims, seed):
+    """-> (image, the pe_asm.assemble call that produced it: (lanes, headers, kwargs)).
+    The lowering is CALLED (one source); its pe_asm.assemble is wrapped for the call only,
+    so the lanes it was handed are recorded, not decoded back out of the image."""
     import run_pit_rt as RT                     # the existing lowering, called (one source)
+    import pe_asm
+    calls, orig = [], pe_asm.assemble
+
+    def rec(lanes, headers, *a, **kw):
+        out = orig(lanes, headers, *a, **kw)
+        calls.append((bytes(out), (lanes, headers, a, kw)))
+        return out
+    rec.__dict__ = orig.__dict__                # assemble.a2_status / program_bytes stay visible
+    pe_asm.assemble = rec
     try:
-        img = RT.emulation(v1_claims, random.Random(seed))[0]
+        img = bytes(RT.emulation(v1_claims, random.Random(seed))[0])
     except (RT.NotEmulable, RT.Refused) as e:
         raise Refused("lowering (run_pit_rt.emulation): %s" % e)
-    return bytes(img)
+    finally:
+        pe_asm.assemble = orig
+    src = [c for out, c in calls if out == img]
+    if not src:
+        raise Refused("lowering: the image did not come from a pe_asm.assemble call "
+                      "(%d calls recorded), so its lanes are unknown" % len(calls))
+    return img, src[-1]
+
+
+def j_floor_line(lanes):
+    """`J_floor` from the lowered lanes: pe_asm.compute_j (port feasibility d_min >= D*,
+    admissibility, J = j_of(d_min)). A refusal there is reported, UNCERTIFIED, with its
+    reason -- as A2 reports an uncertified image -- not turned into a compile refusal."""
+    import pe_asm
+    ln, _counts = pe_asm.split_counts(lanes)
+    if MUT == "M_PC_JFLOOR_HEAD":
+        ln = {k: v[:1] for k, v in ln.items()}
+    try:
+        d_min, j = pe_asm.compute_j(ln)
+    except pe_asm.Reject as e:
+        return "UNCERTIFIED: pe_asm.compute_j refuses: %s" % e
+    return "J %d at d_min %d (pe_asm.compute_j, lowered lanes)" % (j, d_min)
 
 
 def target_check(img):
@@ -278,13 +314,14 @@ def compile_spec(text, seed=1, hz=None):
     log.append("P2 order: %d event kinds, %d order edges, width %d <= %d" % (len(nodes), len(edges), width, I.N_LANES))
     cs = checkset(stmts, hz)
     log.append("P3 checkset: %d predicates (from the spec alone)" % len(cs))
-    img = lower(parsed["v1"], seed)
+    img, (lanes, _hdr, _a, _kw) = lower(parsed["v1"], seed)
     used, usb = target_check(img)
     log.append("P4 lower: run_pit_rt.emulation, pe_asm accepted; P5 target: %d / %d words; USB: %s"
                % (used, N_WORDS, usb))
-    return {"image": img, "words": used, "width": width, "checkset": cs, "log": log,
+    return {"image": img, "lowered": (lanes, _hdr, _a, _kw), "words": used, "width": width,
+            "checkset": cs, "log": log,
             "cert": {"usb_coresident": usb,
                      "branch_budget": branch_budget_line(img),
                      "A2": a2_line(img),
                      "bounds": "UNCERTIFIED (emulate, sniff, re-run the golden: not wired)",
-                     "J_floor": "OWED (needs pe_asm.compute_j on the lowered lanes)"}}
+                     "J_floor": j_floor_line(lanes)}}
