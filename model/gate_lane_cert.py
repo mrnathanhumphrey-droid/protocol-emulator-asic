@@ -22,6 +22,12 @@ every must-fire must turn its check red, or the gate is not testing what it says
   check 5  the branch-1 budget B per branch image (Wilson 11-14, option 1): model/branch_budget.json
            is today's certificate (gen_branch_budget) for every branch image of the universe
   M_LC_BUDGET_STALE a recorded B four above its certificate      -> check 5 red
+  THE ARMING PREMISE (Wilson 11-14 ruling 1): a handshake copy's arm_sop moved late by raising
+  the READBIT before it by n (the chain grows by exactly n; no word shifts), n0 = the generated
+  deadline (lane_cert.arm_premise_bounds) - its armed-by bound on the real program:
+  M_LC_ARM_EDGE_PASS  n0: armed exactly at the deadline           -> must PASS
+  M_LC_ARM_EDGE_FAIL  n0 + 1: one past it                          -> must be red
+  M_LC_ARM_100        n = 100 (armed at EOP + 163 on today's program) -> must be red
   M_LC_FT_UNSEEN    no ARM read as FALLTHROUGH                    -> check 3 red
   M_LC_FT_NOFLOOR   no lateness floor after the flush             -> check 3 red
 Static, < 2 s. Usage: python model/gate_lane_cert.py [dir holding usbdev.py]
@@ -119,6 +125,24 @@ def image_others_at(V, I, d):
     return I.join_image(hs, p)
 
 
+def arming_case(LC, V, I, n):
+    """(armed late?, armed-by, deadline, word) with the READBIT before the first handshake copy's
+    arm_sop raised by n"""
+    g = LC.lane_graph(V.image(), I.USB_LANE, I)
+    base = min(g)
+    for w in sorted(g):
+        x = g[w][0]
+        if x["op"] == I.OP_READBIT and any(LC.arm_kind(g[t][0], I) == "edge" for t in g[w][1]):
+            sop = next(t for t in g[w][1] if LC.arm_kind(g[t][0], I) == "edge")
+            p = V.device_program()
+            p[w - base] = I.act(x["op"], x["pin"], x["level"], x["delay"] + n, count=x["count"],
+                                q=x["q"], pinb=x["pinb"], mod=x["mod"])
+            f, _o = run_cert(LC, V.image(prog=p))
+            wb, dl = LC.full_report.last.get("arm_wb", {}).get(sop, (None, None))
+            return any(e[1] == "armed late w%d" % sop for e in f), wb, dl, sop
+    return None, None, None, None
+
+
 def check_coresident(PC, V, I):
     import gen_cert_constants as G
     k = PC.load()
@@ -162,6 +186,22 @@ def main():
     ok5, msg5, cur5 = check_budget()
     print("  check 5 %s  %s" % ("GREEN" if ok5 else "RED", msg5))
     kills = []
+    # THE ARMING PREMISE at its boundary (Wilson 11-14 ruling 1)
+    _l0, wb0, dl0, sop0 = arming_case(LC, V, I, 0)
+    if wb0 is None:
+        kills.append(("M_LC_ARM_EDGE_PASS", False, "no handshake arm_sop found"))
+    else:
+        n0 = dl0 - wb0
+        lp, wbp, _d, _s = arming_case(LC, V, I, n0)
+        lf, wbf, _d, _s = arming_case(LC, V, I, n0 + 1)
+        lh, wbh, _d, _s = arming_case(LC, V, I, 100)
+        print("  arming premise at w%d: armed by EOP + %d, deadline %d (generated); +%d -> %d %s; "
+              "+%d -> %d %s; +100 -> %d %s" % (sop0, wb0, dl0, n0, wbp, "late" if lp else "ok",
+                                              n0 + 1, wbf, "late" if lf else "ok", wbh,
+                                              "late" if lh else "ok"))
+        kills.append(("M_LC_ARM_EDGE_PASS", (not lp) and wbp == dl0, "armed exactly at the deadline passes"))
+        kills.append(("M_LC_ARM_EDGE_FAIL", lf and wbf == dl0 + 1, "one past the deadline is red"))
+        kills.append(("M_LC_ARM_100", lh and wbh == wb0 + 100, "armed at EOP + %d is red" % (wb0 + 100)))
     # M_LC_CERT_STALE: a stored usb_other_R one below the certificate
     orig_load = PC.load
     PC.load = lambda path=PC.PATH: dict(orig_load(path), usb_other_R=orig_load(path)["usb_other_R"] - 1)
@@ -253,7 +293,8 @@ def main():
         LC.certificate = orig_cert
     kills.append(("M_LC_LAT_IGNORED", not k3, "lateness zeroed: check 3 loses the flush floor"))
     for name, killed, what in kills:
-        print("  must-fire %-18s %s  %s" % (name, "RED (killed)" if killed else "SURVIVED", what))
+        ok_txt = ("PASS (as required)" if name.endswith("_PASS") else "RED (killed)")
+        print("  must-fire %-18s %s  %s" % (name, ok_txt if killed else "SURVIVED", what))
     teeth = all(k for _n, k, _w in kills)
     green = ok1 and not fails and ok3 and ok4 and ok5
     verdict = "PASSED" if (green and teeth) else ("FAILED (must-fire survived)" if not teeth

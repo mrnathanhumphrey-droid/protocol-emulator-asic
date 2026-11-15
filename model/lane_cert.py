@@ -52,7 +52,7 @@ def premises(k=None):
     # clock.usb_se0q_bounds upper end), the conservative side for every use below
     tleopr = clock.usb_se0q_bounds()[1]
     tipd_fast = math.floor(Fraction(clock.USB_TIPD_BITS * f, USB_TLDRATE_MAX))
-    return {
+    _p = {
         "bit": bit,
         # an ARM's release gap floor: release >= writeback + 2 (arm_release, edge >= wb + 1),
         # writeback >= release + 2 (a dispatch) -- every ARM kind
@@ -75,6 +75,22 @@ def premises(k=None):
         # the shortest packet a SOP starts: SYNC + PID = 16 bits, at the fastest host rate
         "min_packet": math.floor(Fraction(16 * bit * 1_500_000, USB_TLDRATE_MAX)),
     }
+    out = {**_p, **arm_premise_bounds(_p["tipd_fast"])}
+    return out
+
+
+def arm_premise_bounds(tipd_fast):
+    """THE CERTIFICATE'S ARMING PREMISE, as generated bounds (Wilson 11-14 ruling 1, confirmed):
+    READ from Armed.lean -- `hedge : forall t l, t + 1 <= edge t l` (run3_proj, head_late_arm):
+    the edge an ARM waits for comes at least one cycle after its writeback. For an arm_sop the
+    earliest edge is the next SOP as seen at our pins, so the ARM's writeback (its arming) must be
+    <= (earliest SOP seen) - 1, counted from the bus EOP:
+      * after a packet the host may follow at TIPD: SOP seen >= tipd_fast + SYNC_MIN
+        -> arm_sop_deadline_tipd = tipd_fast + SYNC_MIN - 1;
+      * after an unanswered DATA (the host waits >= 18 bit times, 7.1.19.1): SOP seen >=
+        clock.usb_host_next_min_cycles + SYNC_MIN -> arm_sop_deadline_host_next."""
+    return {"arm_sop_deadline_tipd": tipd_fast + SYNC_MIN - 1,
+            "arm_sop_deadline_host_next": clock.usb_host_next_min_cycles() + SYNC_MIN - 1}
 
 
 def retry_fetch_deadline(B, nop_gap, k=None, prem=None):
@@ -484,7 +500,7 @@ def full_report(img, name="image"):
                 rdl = retry_fetch_deadline(0, nop_gap, k, prem)
                 # the certificate's own PREMISE (Armed: the edge comes after the ARM's writeback):
                 # armed before the host's next SOP can be seen
-                armd = clock.usb_host_next_min_cycles() + SYNC_MIN - 1
+                armd = prem["arm_sop_deadline_host_next"]
                 print("  arm_sop w%d after an unanswered DATA: armed by EOP + %d (premise: before "
                       "the host's next SOP, %d) %s; fetch-deadline margin %+d (proxy %d; reported)"
                       % (s, wbd, armd, "OK" if wbd <= armd else "LATE", rdl - wbd, rdl))
@@ -497,7 +513,8 @@ def full_report(img, name="image"):
             # the certificate's own PREMISE (Armed: the edge comes after the ARM's writeback): the
             # arm_sop is armed before the earliest SOP it waits for is seen (TIPD at the fastest
             # host + SYNC_MIN); the certificate's first-sample lateness then holds
-            arm_dl = prem["tipd_fast"] + SYNC_MIN - 1
+            arm_dl = prem["arm_sop_deadline_tipd"]
+            full_report.last.setdefault("arm_wb", {})[s] = (wb, arm_dl)
             print("  arm_sop w%d: armed by EOP + %d (premise: before the SOP, %d) %s; first sample "
                   "lateness %d %s (certificate); SOP gap %d; fetch-deadline margin %+d (proxy %d; "
                   "reported)" % (s, wb, arm_dl, "OK" if wb <= arm_dl else "LATE", fl,
