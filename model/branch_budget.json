@@ -1534,8 +1534,9 @@
       "lanes": {
         "0": {
           "max_late": 32,
-          "max_late_pin": 8,
-          "R": 14
+          "max_late_pin": 0,
+          "R": 14,
+          "arm_margin": 59
         },
         "1": {
           "max_late": 0,
@@ -1574,7 +1575,8 @@
         "0": {
           "max_late": 20,
           "max_late_pin": 0,
-          "R": 14
+          "R": 14,
+          "arm_margin": 87
         },
         "1": {
           "max_late": 0,
@@ -1612,8 +1614,9 @@
       "lanes": {
         "0": {
           "max_late": 32,
-          "max_late_pin": 8,
-          "R": 14
+          "max_late_pin": 0,
+          "R": 14,
+          "arm_margin": 59
         },
         "1": {
           "max_late": 0,

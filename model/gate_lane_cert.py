@@ -24,6 +24,10 @@ every must-fire must turn its check red, or the gate is not testing what it says
   M_LC_BUDGET_STALE a recorded B four above its certificate      -> check 5 red
   M_LC_NOPIN_ALL    every word counted as touching a pin (the NopSplit classifier off) -> the
                     record's max_late_pin is stale on every image the split moves (check 5 red)
+  M_LC_ARMGATE_OFF  no generic-lane ARM gated (branch_budget.arm_gate off) -> the UART-receive
+                    images' max_late_pin is stale (check 5 red)
+  M_LC_UART_FRAME_SHORT the arming premise's frame one bit short (the next start edge a bit
+                    earlier: the arming margin negative, the ARM stays in J) -> stale (red)
   THE ARMING PREMISE (Wilson 11-14 ruling 1): a handshake copy's arm_sop moved late by raising
   the READBIT before it by n (the chain grows by exactly n; no word shifts), n0 = the generated
   deadline (lane_cert.arm_premise_bounds) - its armed-by bound on the real program:
@@ -248,6 +252,27 @@ def main():
           "whole-lane J: %s" % (len(moved), ", ".join(moved)))
     kills.append(("M_LC_NOPIN_ALL", bool(moved) and stale == moved,
                   "no-pin words counted: %d / %d moved images stale" % (len(stale), len(moved))))
+    # M_LC_ARMGATE_OFF / M_LC_UART_FRAME_SHORT: the arming premise on generic lanes (ArmSplit,
+    # branch_budget.arm_gate) -- off, or its frame one bit short (the next start edge one bit
+    # earlier: the margin goes negative) -> every image whose pin-word J it lowers goes stale
+    # images with a generic lane carrying an arming margin (the USB lane has no max_late_pin)
+    gated = sorted(n for n, v in rec.items() if v.get("B") is not None and any(
+        "arm_margin" in ln and ln.get("max_late_pin") is not None for ln in v["lanes"].values()))
+    pinj = lambda n: [ln.get("max_late_pin") for _k, ln in sorted(rec[n]["lanes"].items())]
+    nowj = lambda n: [v.get("max_late_pin") for _k, v in sorted(
+        (str(l), x) for l, x in BB.image_budget(corpus[n])["lanes"].items())]
+    off = [n for n in gated if pinj(n) != nowj(n)]       # unmutated: the record is current
+    for mname, attr, val in (("M_LC_ARMGATE_OFF", "ARMGATE_MUT", True),
+                             ("M_LC_UART_FRAME_SHORT", "UART_FRAME_MUT", 1)):
+        old = getattr(BB, attr)
+        setattr(BB, attr, val)
+        try:
+            st = [n for n in gated if pinj(n) != nowj(n)]
+        finally:
+            setattr(BB, attr, old)
+        print("  arming premise (ArmSplit, generic lanes): %s -> %d image(s) stale: %s"
+              % (mname, len(st), ", ".join(st)))
+        kills.append((mname, bool(st) and not off, "%s: %d image(s) stale" % (attr, len(st))))
     # M_LC_FT_UNSEEN / M_LC_FT_NOFLOOR
     orig_ft = PC.arm_is_ft
     PC.arm_is_ft = lambda x, I=None: False
