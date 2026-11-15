@@ -132,6 +132,11 @@ def within_rows():
 def _patch(img, word, extra, I):
     a = I.ACT_BASE + word * I.ACT_BYTES
     x = I._unpack(I.ACT_FIELDS, img[a:a + I.ACT_BYTES], I.ACT_BYTES)
+    if x["op"] == I.OP_ARM:
+        # ⛔ an ARM's delay field is its TIMEOUT, not a spacing: a word after an ARM that is
+        # itself an ARM (SPI modes 1 / 3: the CS ARM then the first SCK ARM) is left alone
+        # (found 11-15: m1 / m3's "+40" came from timing an untimed ARM)
+        return img
     if x["delay"] + extra > (1 << I.DLY_W) - 1:
         return None
     new = I.act(x["op"], x["pin"], x["level"], x["delay"] + extra, count=x["count"], q=x["q"],
