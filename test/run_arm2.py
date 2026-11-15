@@ -112,10 +112,23 @@ def coverage_arms():
         I.write_image(os.path.join(ROOT, COV_DIR, "%s.hex" % k), f())
     # the `none` / `timeout` scenarios retire nothing by design: declared quiescent
     # +PHA_ABS=-1: the absolute flip (run_arm2 A4's race sweep) is OFF here, stated
-    return [(name, ["+IMG=%s/%s.hex" % (COV_DIR, im), "+IDLE=%d" % idle, "+PHA=%d" % pha,
+    arms = [(name, ["+IMG=%s/%s.hex" % (COV_DIR, im), "+IDLE=%d" % idle, "+PHA=%d" % pha,
                     "+PHB=%d" % phb, "+NCYC=%d" % ncyc, "+PHA_ABS=-1"]
              + (["+QUIESCENT"] if kind in ("none", "timeout") else []))
             for name, im, idle, pha, phb, ncyc, kind in SCEN]
+    # ⭐ (11-15) THE FT EDGE AGAINST THE LANE'S OWN IN-FLIGHT REFILL (pe_engine `pkill`:
+    # set at the edge when this lane's refill is in P_REQ / P_WAIT, the refill then
+    # DROPPED at P_CAP). A4 judges this race (ft_race) but only on absolute flips, which
+    # coverage never ran, so both points read uncovered after 9c0df0c. The edge is
+    # placed RELATIVE to the arming cycle (+PHA), no stored run cycle: PHA 1 measured to
+    # set pkill and drop at P_CAP (iverilog probe, 11-15); 2-3 keep the window if a
+    # cycle moves. Reach only -- A4 is the judge.
+    I.write_image(os.path.join(ROOT, COV_DIR, "ft_race.hex"), ft_race_image())
+    arms += [("ft_pkill_pha%d" % pha, ["+IMG=%s/ft_race.hex" % COV_DIR, "+IDLE=1",
+                                       "+PHA=%d" % pha, "+PHB=-1", "+NCYC=300",
+                                       "+PHA_ABS=-1"])
+             for pha in (1, 2, 3)]
+    return arms
 
 
 def run(cmd):
