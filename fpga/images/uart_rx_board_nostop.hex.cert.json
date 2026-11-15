@@ -1,0 +1,8 @@
+{
+ "J": 1,
+ "d_min": 20,
+ "image": "uart_rx_board_nostop.hex",
+ "reason": "pe_asm.compute_j",
+ "require_cert": true,
+ "status": "certified"
+}

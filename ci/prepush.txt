@@ -12,8 +12,8 @@ prepush test/gate_tb_elaborates.py
 prepush model/gate_ruling_audit.py
 prepush model/gate_one_encoder.py
 prepush model/gate_mutant_arms.py
-ci-only model/gate_reset_audit.py RED-AT-ORIGIN (1eee995, before 11-14): allowlist/names stale after 9c0df0c (pslot/fix); owner agent 1
-ci-only model/gate_share_coupling.py RED-AT-ORIGIN (1eee995): u_pit.bud_cnt matches no flop in the netlist; owner agent 1
+ci-only model/gate_reset_audit.py needs the yosys netlist (PE_NETLIST_JSON) built by CI's netlist step; green at f90b4b7 on a fresh netlist (11-15) -- off CI it falls back to the stale C:/tmp/local_netlist.json
+ci-only model/gate_share_coupling.py needs the yosys netlist (PE_NETLIST_JSON) built by CI's netlist step; green at f90b4b7 on a fresh netlist (11-15) -- off CI it falls back to the stale C:/tmp/local_netlist.json
 prepush model/gate_stored_numbers.py
 prepush model/gate_bench_indices.py
 prepush model/gate_j_proof_anchors.py

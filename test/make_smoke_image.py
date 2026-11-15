@@ -1572,6 +1572,14 @@ def main() -> int:
              "../fpga/images/uart_rx_board.hex"),
             (["uart_rx.py", "../fpga/images/uart_rx_board_nostop.hex", "board", "-",
               "nostop"], "../fpga/images/uart_rx_board_nostop.hex"),
+            # 11-15: the USB device board image of record (agent 2, 53b37db/57e96cf),
+            # written --require-cert with its stamp sidecar. Its two manifest lines were
+            # added by hand, so CI's regeneration dropped them (gate_tracked_images red on
+            # f90b4b7); the recipe now lives here, and both outputs are pinned.
+            (["../fpga/sim/gen_usbdev_fpga.py", "../fpga/images/usbdev_fpga.hex"],
+             "../fpga/images/usbdev_fpga.hex"),
+            (["../fpga/sim/gen_usbdev_fpga.py", "../fpga/images/usbdev_fpga.hex"],
+             "../fpga/images/usbdev_fpga.hex.cert.json"),
         ]
         for argv, _outfn in external:
             a = list(argv)
