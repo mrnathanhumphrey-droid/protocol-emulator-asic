@@ -942,7 +942,14 @@ def assemble(lanes, headers, park_pins=None, timing_checks=True,
         # check that derives it, not one call site at a time.
         try:
             check_mode_floor(img, t_ext)
-            check_queue_slot(img, t_ext)
+            # ⛔⛔ WILSON 11-15 (the UART blocker ruling, item 1): the record's
+            # certified lane lateness in J is CERTIFICATION, not legality. A program
+            # that clears 1.6a at its proved J and fails only with the lateness in
+            # (uart_rx: r 48 > 20 at J = 1 + 32, w1's lateness, split theorem owed)
+            # assembles; `cert_stamp.stamp` marks it UNCERTIFIED with the reason and
+            # --require-cert fails on it. A 1.6a failure WITHOUT the lateness is
+            # still refused here: that program is invalid.
+            check_queue_slot(img, t_ext, lateness=False)
         except program_a2.EdgePacedNoTExt as exc:
             raise Reject(str(exc))
     check_i2c_order(img)
@@ -983,7 +990,7 @@ def check_i2c_order(img):
                      "way and sent every byte reversed until sigrok read them.")
 
 
-def check_queue_slot(img, t_ext=None):
+def check_queue_slot(img, t_ext=None, lateness=True):
     """RULING DT-A: condition 1.6a per program -- `r_i <= t_i` on every lane.
 
     A lane whose worst-case response (from its nominal release, W1's jitter
@@ -996,7 +1003,7 @@ def check_queue_slot(img, t_ext=None):
     form can only refuse MORE, never accept what pyRTA would refuse.
     """
     src = pinned_pyrta(quiet=True)
-    for ln, v in sorted(program_a2.queue_slot(img, src, t_ext).items(),
+    for ln, v in sorted(program_a2.queue_slot(img, src, t_ext, lateness).items(),
                         key=lambda kv: int(kv[0])):
         # ⛔⛔ NO SKIP PATH (Wilson, WF2 round 2, finding 1). This line used to
         # `continue` with the comment "overload: refused by compute_j" -- but

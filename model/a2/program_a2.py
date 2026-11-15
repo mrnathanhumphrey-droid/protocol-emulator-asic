@@ -376,12 +376,15 @@ class _TExt(dict):
 T_EXT = _TExt()
 
 
-def lane_set(img, t_ext=None, j=None, budget_path=None):
+def lane_set(img, t_ext=None, j=None, budget_path=None, lateness=True):
     """The program's own A2 lane set, plus which entries are clocked OD.
     `t_ext` ({lane: cycles}) overrides the registry for edge-paced lanes.
     A lane of an image with a CERTIFIED B carries J = max(program J,
     branch_budget.lane_j(record, lane)) -- its own certificate; certification itself
-    (premise, record) is `uncertified_reason`'s, not this function's."""
+    (premise, record) is `uncertified_reason`'s, not this function's.
+    `lateness=False` leaves the record's certified lateness OUT of J (the program at
+    its proved J only): Wilson 11-15, a failure that exists only with the lateness in
+    J is a CERTIFICATION question (cert_stamp), not a legality refusal (pe_asm)."""
     rows = lanes_of(img)
     if t_ext is None:
         t_ext = dict(T_EXT.get(image_sha(img), {}))
@@ -420,7 +423,7 @@ def lane_set(img, t_ext=None, j=None, budget_path=None):
                 jb = (PC.branch_j(B, I.branch_wait(a2)) if B is not None
                       else PC.load()["j_interim_head_late_optA"])
                 br_j[ln2] = max(br_j.get(ln2, 0), jb)
-        if rec is not None and rec.get("B") is not None:
+        if lateness and rec is not None and rec.get("B") is not None:
             # certified B: EVERY lane's J is its own certificate's, 1 + its max
             # certified lateness (branch_budget.lane_j) -- replaces the branch_j
             # floor wherever the record carries the lane (Wilson 11-14: j_lane
@@ -683,7 +686,7 @@ def with_w1(ls, w1, i):
             for k in range(len(ls))]
 
 
-def queue_slot(img, src=None, t_ext=None):
+def queue_slot(img, src=None, t_ext=None, lateness=True):
     """RULING DT-A -- condition 1.6a PER PROGRAM: r_i <= t_i on every lane.
 
     ⛔⛔ THE EXACT FORM, MEASURED AGAINST TCHECKER, NOT CHOSEN. `ovr` in the
@@ -703,7 +706,7 @@ def queue_slot(img, src=None, t_ext=None):
     Returns {lane: {"r": r or None, "T": t, "ok": bool, "why": str or None}}.
     `t_ext`: the edge-paced lanes' T_ext, declared at build time (lane_set).
     """
-    ls, _d, _k, _j = lane_set(img, t_ext)
+    ls, _d, _k, _j = lane_set(img, t_ext, lateness=lateness)
     u = utilisation(ls)
     out = {}
     if u > 1.0:

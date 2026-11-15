@@ -140,11 +140,17 @@ def conditions(name, img):
 
 #: {image: reason} -- ADMISSIBLE-UNCERTIFIED (A2), filled by `audit`
 UNCERTIFIED = {}
+#: {image: (gate, reason)} -- lateness debts that matched (Wilson 11-15), filled by `audit`
+DEBT = {}
 
 
-def audit(images, declared, pad_declared, deliberate):
-    """Problems for this set of (name, img). Pure, so the must-fire can price it."""
+def audit(images, declared, pad_declared, deliberate, debt=None):
+    """Problems for this set of (name, img). Pure, so the must-fire can price it.
+    `debt` ({name: (gate, reason)}, nonadmissible.SPLIT_DEBT): tracked lateness debt
+    (Wilson 11-15) -- the failing set must equal it exactly, see SPLIT_DEBT."""
+    debt = debt or {}
     probs, rows = [], []
+    judged = set()
     for name, img in images:
         if name in deliberate:
             continue
@@ -172,6 +178,18 @@ def audit(images, declared, pad_declared, deliberate):
             continue
         if unc:
             UNCERTIFIED[name] = unc
+        if name in debt:
+            judged.add(name)
+            if QUEUE not in got:
+                probs.append("%s carries a lateness debt (%s) but no longer fails 1.6a "
+                             "-- stale debt" % (name, debt[name][0][:40] + "..."))
+            elif any(not v["ok"] for v in pa.queue_slot(img, lateness=False).values()):
+                probs.append("%s fails 1.6a ALSO without the record's lateness in J -- "
+                             "the program is wrong, a lateness debt cannot cover it"
+                             % name)
+            else:
+                got = got - {QUEUE}
+                DEBT[name] = debt[name]
         rows.append((name, got, dm, u))
         want = set(declared.get(name, (set(), ""))[0])
         if name in pad_declared:
@@ -183,6 +201,10 @@ def audit(images, declared, pad_declared, deliberate):
                          % (name, c))
     for name in sorted(set(declared) - {n for n, _ in images}):
         probs.append("%s is declared but no such image exists" % name)
+    for name in sorted(set(debt) - judged):
+        probs.append("%s carries a lateness debt but was never judged (zero runs)" % name)
+    for name in sorted(set(debt) & set(declared)):
+        probs.append("%s is both declared and carries a lateness debt" % name)
     return probs, rows
 
 
@@ -201,8 +223,9 @@ def main() -> int:
     import image_universe
     # F1.5 (Wilson 11-09): the board images are native v2 -- read as they are
     imgs = images()
+    import nonadmissible as _NA
     probs, rows = audit(imgs, NON_ADMISSIBLE, corpus.PAD_COLLISION,
-                        dgf.DELIBERATE)
+                        dgf.DELIBERATE, _NA.SPLIT_DEBT)
     print("  QUEUE (1.6a) reads OUR recurrence here (no pyRTA in CI) -- intended "
           "for a refusal threshold:")
     print("  ours >= pyRTA on every admissible lane (gate_a2_program §1b), so "
@@ -252,6 +275,11 @@ def main() -> int:
         print("  *** " + probs_p)
         rc = 1
     print()
+    print("  LATENESS DEBT (Wilson 11-15) -- %d of %d image(s) fail 1.6a only with the "
+          "record's lateness in J:" % (len(DEBT), len(_NA.SPLIT_DEBT)))
+    for name, (gate, why) in sorted(DEBT.items()):
+        print("    %-24s %s waits on: %s" % (name, why, gate))
+    print()
     print("  ADMISSIBLE-UNCERTIFIED (A2) -- %d image(s); a pass above does not "
           "certify them:" % len(UNCERTIFIED))
     for name, why in sorted(UNCERTIFIED.items()):
@@ -273,6 +301,23 @@ def main() -> int:
     hit2 = any("stale" in x for x in p2)
     print("    a stale declaration is reported              %s"
           % ("ok" if hit2 else "*** MISSED"))
+    # the debt guard (Wilson 11-15): a debt on a passing image is stale; a debt on a
+    # missing image is zero runs; an image failing WITHOUT the lateness is not covered
+    pd3, _ = audit([("corpus_i2c.hex", i2c)], {}, {}, {},
+                  {"corpus_i2c.hex": ("fixture", "fixture")})
+    hd3 = any("stale debt" in x for x in pd3)
+    print("    a debt on an image that passes is stale       %s"
+          % ("ok" if hd3 else "*** MISSED"))
+    pd4, _ = audit([], {}, {}, {}, {"no_such_image.hex": ("fixture", "fixture")})
+    hd4 = any("zero runs" in x for x in pd4)
+    print("    a debt never judged is zero runs              %s"
+          % ("ok" if hd4 else "*** MISSED"))
+    ck = next(img for n, img in imgs if n == "ckdense_image.hex")
+    pd5, _ = audit([("ckdense_image.hex", ck)], {}, {}, {},
+                  {"ckdense_image.hex": ("fixture", "fixture")})
+    hd5 = any("ALSO without" in x for x in pd5)
+    print("    a debt on a failure without lateness is red   %s"
+          % ("ok" if hd5 else "*** MISSED"))
     # ---- DT-D: D_sched <= D_tol on every image ----------------------------
     # ⛔ `program_a2.lane_set` PATCHES a header whose EDF key is looser than
     # its tolerance (`if ds > dt: dt = ds`) so the model can run at all; that
@@ -336,7 +381,7 @@ def main() -> int:
     hit3 = any("QUEUE" in x for x in p3)
     print("    an undeclared 1.6a (QUEUE) image is reported  %s"
           % ("ok" if hit3 else "*** MISSED"))
-    if not (hit and hit2 and hit3):
+    if not (hit and hit2 and hit3 and hd3 and hd4 and hd5):
         rc = 1
 
     # ---- SP2/P4: THE TIMING-EXEMPTION REGISTRY (Wilson) ------------------

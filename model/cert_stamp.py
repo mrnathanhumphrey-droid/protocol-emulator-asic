@@ -140,10 +140,25 @@ def stamp(img, budget=None):
     st = stamp_lanes(image_lanes(img))
     if st["status"] != "certified":
         return st
+    e = budget if budget is not None else budget_entry(img)
+    # ⛔ WILSON 11-15 (UART blocker ruling, item 1): 1.6a with the record's certified
+    # lane lateness in J. pe_asm assembles at the proved J; a lane that fails only
+    # with its lateness in is UNCERTIFIED here (a split theorem may take it off).
+    late = [ln for ln, v in ((e or {}).get("lanes") or {}).items()
+            if (v or {}).get("max_late")]
+    if late:
+        import program_a2 as P
+        bad = sorted(((ln, v) for ln, v in P.queue_slot(img).items()
+                      if not v["ok"]), key=lambda kv: int(kv[0]))
+        if bad:
+            return dict(st, status="uncertified", reason=(
+                "1.6a queue check fails with the record's certified lane lateness in J: %s "
+                "(J = 1 + max_late, branch_budget.lane_j; a split theorem for the late "
+                "word would drop it -- Wilson 11-15)" % "; ".join(
+                    "lane %s r %s > T %s" % (ln, v["r"], v["T"]) for ln, v in bad)))
     sl = unclocked_shift_lanes(img)
     if not sl:
         return st
-    e = budget if budget is not None else budget_entry(img)
     lanes = (e or {}).get("lanes") or {}
     miss = [ln for ln in sl
             if (lanes.get(str(ln)) or lanes.get(ln) or {}).get("R") is None]

@@ -85,18 +85,11 @@ NON_ADMISSIBLE = {
     # Wilson 11-15: no branch lane, but the per-image certificate (agent 2's
     # branch_budget.json) puts lane 0 late; QUEUE comes off only if agent 2
     # proves those words' lateness never reaches a sample (an ArmSplit shape).
+    # (The three uart_rx images are NOT declared: they are images of record --
+    # wire-feed entries -- and carry SPLIT_DEBT below, Wilson 11-15 UART ruling.)
     "nousb.hex": ({QUEUE},
         "certified lane 0 lateness 20 (B = 4), J = 21 from lane_j, fails the 1.6a "
         "queue check (Wilson 11-15: lateness feeds J until a split theorem drops it). Test image (usbdev.image_nousb), not of record."),
-    "uart_rx_image.hex": ({QUEUE},
-        "certified lane 0 lateness 32 (B = 8), J = 33 from lane_j, fails the 1.6a "
-        "queue check (Wilson 11-15: lateness feeds J until a split theorem drops it)."),
-    "uart_rx_board.hex": ({QUEUE},
-        "certified lane 0 lateness 32 (B = 8), J = 33 from lane_j, fails the 1.6a "
-        "queue check (Wilson 11-15: lateness feeds J until a split theorem drops it). The F2 board image (byte-identical to uart_rx_image)."),
-    "uart_rx_board_nostop.hex": ({QUEUE},
-        "certified lane 0 lateness 20 (B = 4), J = 21 from lane_j, fails the 1.6a "
-        "queue check (Wilson 11-15: lateness feeds J until a split theorem drops it)."),
     "chain_image.hex": ({PORT, QUEUE},
         "`build_chain`, the chaining re-arm mechanism at d = 12: a mechanism "
         "test, not a schedulable program."),
@@ -149,6 +142,26 @@ NON_ADMISSIBLE = {
     "lvl1_noto.hex": ({PORT},
         "deliberate stress image for ARM2: the both-high level ARM, no timeout, "
         "beside lanes at d = 12 (below D*)."),
+}
+
+#: ⛔⛔ TRACKED DEBT, NOT A DECLARATION (Wilson 11-15, the UART blocker ruling, item 2).
+#: Images of record (wire-feed entries) on which 1.6a fails ONLY with the record's
+#: certified lane lateness in J. QUEUE is not an acceptable final state for an image of
+#: record, and an exemption would be the same thing under another name; so each image
+#: builds (stamped UNCERTIFIED), the queue check runs and reports, and the entry names
+#: the gate it waits on. gate_admissible_images passes only when the failing set equals
+#: this set exactly: a failure not listed is red, a listed image that no longer fails is
+#: red (stale), a listed image that fails ALSO without the lateness is red (the program
+#: is wrong, not uncertified), and a listed image never judged is red.
+SPLIT_THEOREM = ("agent 2's split theorem for the late word w1 (OP_LEVEL on PIN_NONE right "
+                 "after the ARM), ArmSplit shape: its lateness is absorbed before any sample; "
+                 "if it proves, lane_j_rx comes from receive-word lateness and 1.6a is rerun")
+SPLIT_DEBT = {
+    # reasons carry no numbers: the lateness is the record's (branch_budget.json), r and T are
+    # in the image's stamp reason (cert_stamp.stamp), both computed, never stored here
+    "uart_rx_image.hex": (SPLIT_THEOREM, "lane 0: the record's certified lateness in J fails 1.6a."),
+    "uart_rx_board.hex": (SPLIT_THEOREM, "the F2 board image (byte-identical to uart_rx_image)."),
+    "uart_rx_board_nostop.hex": (SPLIT_THEOREM, "lane 0: the record's certified lateness in J fails 1.6a."),
 }
 
 #: the two exemption switches
