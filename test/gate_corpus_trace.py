@@ -752,7 +752,12 @@ def main() -> int:
     # program in the 32-bit word -- v1 digest 726383c7533dfe41 -> v2
     # 7f79e56462382793. Measured on v2 before the re-key: 1184 = 1111 + 73,
     # 0 unexplained -- equal to the pin, so no value was re-derived.
-    EX1_PIN = {"7f79e56462382793": dict(n=1184, boundary=1111, b_unexp=0,
+    # ⛔ RE-KEYED (11-15), VALUES UNCHANGED: 9c0df0c's reserved-field zero-fill
+    # changed the d = 4 image's bytes -- 7f79e56462382793 -> 46500517f5172001
+    # (recomputed locally 11-15). MEASURED at the new digest by CI (run
+    # 43680207977, 1eee995): 1184 = 1111 + 73, 0 unexplained, late 0 -- equal
+    # to the pin, so no value was re-derived (the 10-25 precedent above).
+    EX1_PIN = {"46500517f5172001": dict(n=1184, boundary=1111, b_unexp=0,
                                         contention=73, late=0, o_unexp=0)}
     d4 = os.path.join(TMP, "spim_d4.hex")
     img4, _ = corpus.build_spi_master(d=4)
