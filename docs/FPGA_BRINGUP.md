@@ -50,6 +50,15 @@ Select-String fpga\build\pa100t\timing_summary.rpt -Pattern 'WNS\(ns\)' -Context
 
 The output folder is `fpga/build/pa100t`, `pa100t_ow`, `pa100t_i2c` or `pa100t_usb`.
 
+## The USB build against the chip (Wilson 11-14)
+
+**On the board the USB outputs are 1 cycle later than the chip's, and the inputs 0** —
+`model/fpga_consts.usb_out_lat()` / `usb_in_lat()`, read from the glue's `USB_OUT_LAT` and checked
+by `fpga/sim/run_fpga_usb.py`. Every WITNESS (hw) comparison subtracts them. The board's handshake
+response is the chip's +60/61 plus 1, i.e. **+61/62 against the 78-cycle arming deadline**
+(`lane_cert.arm_premise_bounds`), still inside. D+, D− and their output enables register on the
+same edge in the glue; the routed-netlist check of that is owed with the VBUS rebuild.
+
 ## The record
 
 | date | commit | variant | clock | WNS (ns) | WHS (ns) | LUT / FF | bitstream | note |

@@ -60,7 +60,7 @@ module tb_fpga_usb;
     end
   endtask
 
-  integer i;
+  integer i, k;
   initial begin
     repeat (20) @(posedge clk);
     rst_n = 1;
@@ -79,6 +79,15 @@ module tb_fpga_usb;
     @(negedge clk);
     force dut.uio_oe = 8'b0000_1100;
     force dut.uio_out = 8'b0000_1000;          // D+ high, D- low
+    // THE OUTPUT LATENCY IS USB_OUT_LAT EXACTLY (model/fpga_consts reads the same localparam):
+    // not yet at USB_OUT_LAT - 1 clock edges, there at USB_OUT_LAT
+    for (k = 0; k < dut.USB_OUT_LAT - 1; k = k + 1) @(posedge clk);
+    #1;
+    if (dp_oe === 1'b1 && dp_o === 1'b1 && dm_oe === 1'b1)
+      fail("the pads changed before USB_OUT_LAT clock edges");
+    @(posedge clk); #1;
+    if (!(dp_oe === 1'b1 && dp_o === 1'b1 && dm_oe === 1'b1 && dm_o === 1'b0))
+      fail("the pads had not changed after USB_OUT_LAT clock edges");
     repeat (2) @(posedge clk); #1;
     if (dp !== 1'b1 || dm !== 1'b0) fail("uio_out -> pads (D+ = 1, D- = 0) wrong");
     force dut.uio_out = 8'b0000_0100;
@@ -93,7 +102,7 @@ module tb_fpga_usb;
     if (drove_off) fail("a pad or the pull-up was driven while run_ok was low");
     if (pu_bad) fail("the pull-up did not follow run_ok (one register late)");
     if (fails == 0)
-      $display("FPGA-USB: ok -- released for the %0d cycles before the program ran, pull-up = run_ok, D+/D- mapped both ways", t_run);
+      $display("FPGA-USB: ok -- released for the %0d cycles before the program ran, pull-up = run_ok, D+/D- mapped both ways, outputs %0d cycle(s) after uio_out, inputs same cycle", t_run, dut.USB_OUT_LAT);
     $finish;
   end
 endmodule
