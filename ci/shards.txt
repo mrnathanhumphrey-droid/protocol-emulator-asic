@@ -152,6 +152,12 @@ fast test/gl_harness_check.py
 fast test/check_vectors.py
 fast test/benchset.py
 fast model/pe_asm.py
+# 11-15 (agent 1, a572c42): the cert stamp, the poset compiler, lane certificates, Lean
+# anchors -- short Python gates, measured locally 4-13 s / 1-13 s / 2-5 s / <1 s
+fast model/gate_cert_stamp.py
+fast host/poset/run_poset_compile.py
+fast model/gate_lane_cert.py
+fast model/gate_lean_anchors.py
 
 # lean -- the Lean proofs (lake build + #print axioms); its leg installs elan
 lean model/gate_lean_build.py
