@@ -154,5 +154,31 @@ if {$i2c} {
   od_check j11_scl B20 $out
   od_check j11_sda A20 $out
 }
+# ⭐ THE USB PINS AS RULED (Wilson 11-14, comms/USB_PIN_DELTA.md): each on its schematic site,
+# LVCMOS33, SLEW SLOW, DRIVE 4, NO PULLUP (a partial attach against the host's 15k), and a
+# tri-state buffer -- D+ / D- / the pull-up must be able to RELEASE. Printed, and a hard stop.
+proc usb_check {port site} {
+  set pin [get_ports $port]
+  set buf [get_cells -of_objects [get_nets -of_objects $pin]]
+  set pu [get_property PULLUP $pin]
+  puts "PE_FPGA: $port -> [get_property PACKAGE_PIN $pin] [get_property IOSTANDARD $pin] SLEW=[get_property SLEW $pin] DRIVE=[get_property DRIVE $pin] PULLUP=$pu, buffer(s): [get_property REF_NAME $buf]"
+  if {[get_property PACKAGE_PIN $pin] ne $site} {
+    puts "PE_FPGA: *** $port is not on $site -- no bitstream written"; exit 1
+  }
+  if {[get_property IOSTANDARD $pin] ne "LVCMOS33" || [get_property SLEW $pin] ne "SLOW" ||
+      [get_property DRIVE $pin] != 4 || ($pu ne "" && $pu ne "FALSE" && $pu ne "0")} {
+    puts "PE_FPGA: *** $port IO settings are not the ruled ones -- no bitstream written"; exit 1
+  }
+  if {[llength [get_cells -quiet $buf -filter {REF_NAME == IOBUF || REF_NAME == OBUFT}]] != 1} {
+    puts "PE_FPGA: *** $port has no tri-state buffer: it could not release -- no bitstream written"; exit 1
+  }
+  puts "PE_FPGA: $port as ruled: tri-state, no pull-up"
+}
+if {$usb} {
+  report_io -file [file join $out io.rpt]
+  usb_check j11_dp B20
+  usb_check j11_dm A20
+  usb_check usb_pu AB18
+}
 write_bitstream -force [file join $out $bitname]
 puts "PE_FPGA: bitstream [file join $out $bitname]"
