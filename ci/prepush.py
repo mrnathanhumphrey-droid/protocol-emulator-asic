@@ -28,6 +28,11 @@ import sys
 import tempfile
 import time
 
+try:        # under git's hook runner stdout is the console code page (cp1252 here); gate
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")   # lines carry non-ASCII
+except Exception:
+    pass
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "ci"))
 import shards  # noqa: E402  -- the one GATES parser
