@@ -28,6 +28,8 @@ every must-fire must turn its check red, or the gate is not testing what it says
                     images' max_late_pin is stale (check 5 red)
   M_LC_UART_FRAME_SHORT the arming premise's frame one bit short (the next start edge a bit
                     earlier: the arming margin negative, the ARM stays in J) -> stale (red)
+  M_LC_EDF_OFF      the EDF response scheme (RespEdfClose.wb_close_edf) never tried -> every
+                    image it certifies loses its B (check 5 red)
   THE ARMING PREMISE (Wilson 11-14 ruling 1): a handshake copy's arm_sop moved late by raising
   the READBIT before it by n (the chain grows by exactly n; no word shifts), n0 = the generated
   deadline (lane_cert.arm_premise_bounds) - its armed-by bound on the real program:
@@ -273,6 +275,18 @@ def main():
         print("  arming premise (ArmSplit, generic lanes): %s -> %d image(s) stale: %s"
               % (mname, len(st), ", ".join(st)))
         kills.append((mname, bool(st) and not off, "%s: %d image(s) stale" % (attr, len(st))))
+    # M_LC_EDF_OFF: the EDF response scheme (RespEdfClose.wb_close_edf, Wilson 11-15) never
+    # tried -> every image it certifies goes stale (B back to none)
+    edf = sorted(n for n, v in rec.items() if "RespEdfClose" in (v.get("reason") or ""))
+    BB.EDF_MUT = True
+    try:
+        st = [n for n in edf if BB.image_budget(corpus[n])["B"] != rec[n]["B"]]
+    finally:
+        BB.EDF_MUT = False
+    print("  EDF response bounds (RespEdfClose.wb_close_edf): %d image(s): %s"
+          % (len(edf), ", ".join(edf)))
+    kills.append(("M_LC_EDF_OFF", bool(edf) and st == edf,
+                  "EDF scheme off: %d / %d EDF-certified images stale" % (len(st), len(edf))))
     # M_LC_FT_UNSEEN / M_LC_FT_NOFLOOR
     orig_ft = PC.arm_is_ft
     PC.arm_is_ft = lambda x, I=None: False

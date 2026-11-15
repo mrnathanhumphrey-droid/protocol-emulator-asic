@@ -59,7 +59,8 @@ MUTANTS = ("M_PC_NO_CYCLE",      # cycles not refused
            "M_PC_COMPOUND_PASS", # compound patterns silently dropped instead of refused
            "M_PC_USB_NOCHECK",   # the USB co-resident threshold not checked
            "M_PC_JFLOOR_HEAD",   # J floor from each lane's head action only, not every lowered action
-           "M_PC_WITHIN_NOARM")  # `within`: the arming check skipped (a window too tight compiles)
+           "M_PC_WITHIN_NOARM",  # `within`: the arming check skipped (a window too tight compiles)
+           "M_PC_WITHIN_LO_PASS")  # `within`: lo > 0 without `source datasheet` compiles
 MUT = os.environ.get("POSET_COMPILE_MUTANT", "")
 if MUT and MUT not in MUTANTS:
     raise SystemExit("poset compile: unknown mutant %r" % MUT)
@@ -297,7 +298,7 @@ def _block(a, nxt, p, pre, T, dstar):
     return new, iarm
 
 
-def windows(stmts, lowered, route, hz):
+def windows(stmts, lowered, route, hz, arm="late", drain=0, premise="datasheet", ready=False):
     """-> (lanes, route, {"windows": [...], "cert": str}) with every `within` lowered, or
     Refused by name.
 
@@ -321,7 +322,19 @@ def windows(stmts, lowered, route, hz):
         refused by name. L comes from the certificate of the windowed image (iterated).
       * lo > 0 rests on the PEER not answering before lo: only a `source datasheet` bound
         says so. Without one, an early B is the program's to catch -> NEEDS_COUNTER.
-      * T > the 10-bit timeout field -> NEEDS_COUNTER."""
+      * T > the 10-bit timeout field -> NEEDS_COUNTER.
+    Options (Wilson 11-15 call 1; the defaults are the c23c6de lowering):
+      arm      "late": the ARM as close to lo as the arming check allows; "early": at A + D*
+               (with a peer premise the ARM's successor then has lo - D* of guaranteed gap)
+      drain    (a): cycles added to the word after the window -- its delay, so lateness drains
+      premise  "datasheet": the window's `source datasheet "<part>"` premise, if that part is
+               registered and stamp-usable (model/premises.DATASHEETS) -- its ID goes in the
+               stamp; "spec": the spec's lo taken as the premise WITHOUT a source (the
+               drain table's counterfactual, never stamped); None: image-only
+      ready    the prefetch counterfactual: the ARM's successors ready at release
+    The premise: B is not seen before A + lo + 2 + SYNC_MIN, so the ARM's successor (released
+    at B's edge + 1, ArmSplit.arm_release_bus) is at least lo + 3 + SYNC_MIN - pre after the
+    ARM's release -- its release gap in the certificate (branch_budget premise_gaps)."""
     import lane_cert as LC
     import branch_budget as BB
     import pe_asm
@@ -342,7 +355,8 @@ def windows(stmts, lowered, route, hz):
                 raise Refused("within: %s is %s; a window's events are Rise / Fall (one pin, "
                               "one direction: an ARM's edge)" % (nm, kd))
         lo_ns, hi_ns = (float(x) for x in st["within"])
-        if lo_ns > 0 and not (isinstance(st["source"], tuple) and st["source"][0] == "datasheet"):
+        if (lo_ns > 0 and MUT != "M_PC_WITHIN_LO_PASS"
+                and not (isinstance(st["source"], tuple) and st["source"][0] == "datasheet")):
             raise Refused("within (%s ns, %s ns): an arrival before lo would be the program's "
                           "to catch -- %s; a lower bound the peer guarantees is written with "
                           "`source datasheet`" % (st["within"] + (NEEDS_COUNTER,)))
@@ -374,7 +388,15 @@ def windows(stmts, lowered, route, hz):
                  for i in _transitions(acts, pa, 1 if ka == "Rise" else 0)]
         if not sites:
             raise Refused("within: no LEVEL word of the lowering makes A = %s(uio%d)" % (ka, wa))
+        pid = None
+        if isinstance(st["source"], tuple) and st["source"][0] == "datasheet":
+            import premises as PM
+            pid = PM.datasheet_part(st["source"][1])
+            if pid is not None and not PM.stamp_usable(pid)[0]:
+                pid = None
         plan.append({"stmt": S.render_statement(st), "A_pin": pa, "B_pin": pb, "B_wire": wb,
+                     "premise": pid, "part": (st["source"][1] if isinstance(st["source"], tuple)
+                                              else None),
                      "B_level": 1 if kb == "Rise" else 0, "else": st["else"],
                      "lo": math.floor(lo_ns * hz / 1e9), "hi": math.ceil(hi_ns * hz / 1e9),
                      "sites": sites})
@@ -389,13 +411,17 @@ def windows(stmts, lowered, route, hz):
         lanes, where = {}, {}
         for ln, acts in sorted(lanes0.items()):
             out = []
+            new_of = {}                     # old action index -> its index after the insertions
             for i, a in enumerate(acts):
+                new_of[i] = len(out)
                 p = site_plan.get((ln, i))
                 if p is None:
                     out.append(a)
                     continue
                 la, larm = late[(ln, i)]
                 pre = p["lo"] + WB_MIN + LC.SYNC_MIN - (ARMED_BY + 1) - larm
+                if arm == "early" and pre >= dstar:
+                    pre = dstar
                 if MUT == "M_PC_WITHIN_NOARM":
                     pre = max(pre, dstar)
                 if pre < dstar:
@@ -411,13 +437,40 @@ def windows(stmts, lowered, route, hz):
                 new, iarm = _block(a, acts[i + 1] if i + 1 < len(acts) else None, p, pre, T, dstar)
                 where[(ln, i)] = (len(out), len(out) + iarm, pre, T, p)
                 out += new
+            # ⛔ a LOOP names its head by the lane's ACTION INDEX (pe_asm: `(OP_LOOP, n, head,
+            # wait, 0)`); the inserted words shift it, so every head is remapped (found by the
+            # drain table: the UART-TX lowering's LOOP head went stale)
+            out = [a[:2] + (new_of[a[2]],) + a[3:] if a[0] == I.OP_LOOP else a for a in out]
+            # (a): the word after each window (the original next word) drains the lateness
+            if drain:
+                ends = sorted(v[1] for s_, v in where.items() if s_[0] == ln)
+                for iarm_ in ends:
+                    # the first word on the edge path: PC+1 (abort), PC+2 (continue)
+                    j = iarm_ + (2 if out[iarm_][6:7] == (I.ARM_MOD_FT,) else 1)
+                    if j < len(out):
+                        w_ = out[j]
+                        if w_[3] + drain > T_MAX:
+                            raise Refused("within: drain %d makes lane %d word %d's delay %d > %d"
+                                          % (drain, ln, j, w_[3] + drain, T_MAX))
+                        out[j] = w_[:3] + (w_[3] + drain,) + w_[4:]
             lanes[ln] = out
         try:
             img = bytes(pe_asm.assemble(lanes, hdr, *a_, **kw))
         except pe_asm.Reject as e:
             raise Refused("within: pe_asm refused the windowed program: %s" % e)
-        bb = BB.image_budget(img)
+        pg, used, rd = {}, set(), {}
+        for s_, (ia, iarm, pre_, _T, p_) in where.items():
+            w0 = (I.read_header(img, s_[0])["base"] - I.ACT_BASE) // I.ACT_BYTES
+            if (premise == "datasheet" and p_["premise"]) or premise == "spec":
+                pg.setdefault(s_[0], {})[w0 + iarm] = (p_["lo"] + WB_MIN + LC.SYNC_MIN + 1 - pre_)
+                used.add(p_["premise"] or "SPEC_LO(%s)" % p_["part"])
+            if ready:
+                g_ = LC.lane_graph(img, s_[0], I)
+                rd.setdefault(s_[0], set()).update(g_[w0 + iarm][1])
+        bb = BB.image_budget(img, premise_gaps=pg, ready=rd)
         info = _win(where)
+        info["premises"] = sorted(used)
+        info["budget"] = bb
         if bb["B"] is None:
             return lanes, route, dict(info, cert="UNCERTIFIED: the arming check needs the "
                                       "lateness certificate (%s)" % bb["reason"])
@@ -427,9 +480,17 @@ def windows(stmts, lowered, route, hz):
             lat = bb["lanes"][s[0]]["lat"]
             now[s] = (lat.get(w0 + ia, 0), lat.get(w0 + iarm, 0))
         if all(now[s][0] <= late[s][0] and now[s][1] <= late[s][1] for s in now):
+            nopid = sorted({p_["part"] for *_x, p_ in where.values()
+                            if p_["part"] and not p_["premise"]})
             return lanes, route, dict(info, cert="certified: every ARM armed before its B can "
-                                      "be seen (lateness from the certificate, B = %d): %s"
-                                      % (bb["B"], "; ".join(
+                                      "be seen (lateness from the certificate, B = %d%s%s): %s"
+                                      % (bb["B"],
+                                         "; premises %s" % ",".join(info["premises"])
+                                         if info["premises"] else "",
+                                         "; no registered source for datasheet %s: image-only"
+                                         % ", ".join(repr(x) for x in nopid)
+                                         if nopid and premise == "datasheet" else "",
+                                         "; ".join(
                                           "lane %d word %d L %d, A L %d" % (s[0], where[s][1],
                                                                             now[s][1], now[s][0])
                                           for s in sorted(now))))
@@ -443,7 +504,7 @@ def _win(where):
                         for (ln, _i), (ia, iarm, pre, T, p) in sorted(where.items())]}
 
 
-def finish(img, require_cert=False):
+def finish(img, require_cert=False, premises=()):
     """the image's certification stamp (model/cert_stamp.stamp: compute_j on the image's
     lanes) -- the SAME field pe_asm's command line prints. require_cert: an uncertified
     stamp is Refused with the stamp's reason (cert_stamp.Uncertified's text)."""
@@ -452,6 +513,9 @@ def finish(img, require_cert=False):
         st = CS.stamp_lanes({k: v[:1] for k, v in CS.image_lanes(img).items()})
     else:
         st = CS.stamp(img)
+    if premises:
+        # Wilson 11-15: a certificate resting on a peer premise names it in the stamp
+        st = dict(st, premises=sorted(premises))
     if require_cert:
         try:
             CS.require(st, "program")
@@ -517,7 +581,7 @@ def a2_line(img):
     return "certified: B = %d; %s (model/branch_budget, lane_j)" % (r["B"], lanes)
 
 
-def compile_spec(text, seed=1, hz=None, require_cert=False):
+def compile_spec(text, seed=1, hz=None, require_cert=False, **win_opts):
     hz = hz or clock.hz()
     log = []
     try:
@@ -537,7 +601,7 @@ def compile_spec(text, seed=1, hz=None, require_cert=False):
     cs = checkset(stmts, hz)
     log.append("P3 checkset: %d predicates (from the spec alone)" % len(cs))
     img, (lanes, _hdr, _a, _kw), route = lower(parsed["v1"], seed)
-    lanes, route, win = windows(stmts, (lanes, _hdr, _a, _kw), route, hz)
+    lanes, route, win = windows(stmts, (lanes, _hdr, _a, _kw), route, hz, **win_opts)
     if win is not None:
         import pe_asm
         img = bytes(pe_asm.assemble(lanes, _hdr, *_a, **_kw))
@@ -546,7 +610,8 @@ def compile_spec(text, seed=1, hz=None, require_cert=False):
         if require_cert and not win["cert"].startswith("certified"):
             raise Refused("within: %s" % win["cert"])
     used, usb = target_check(img)
-    st = finish(img, require_cert)
+    st = finish(img, require_cert, [x for x in (win or {}).get("premises", ())
+                                    if not x.startswith("SPEC_LO")])
     log.append("P4 lower: run_pit_rt.emulation, pe_asm accepted; P5 target: %d / %d words; USB: %s"
                % (used, N_WORDS, usb))
     import cert_stamp as CS

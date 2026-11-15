@@ -227,15 +227,18 @@ def span_min(g, gaps, m):
     return min(best(w, i, m) for w in g for i in range(len(gaps[w])))
 
 
-def certificate(g, preds, gaps, k, B, tail, iters=200, floor=None, xr=None, rbase=2):
+def certificate(g, preds, gaps, k, B, tail, iters=200, floor=None, xr=None, rbase=2, ready=None):
     """GapRun's certificate on the word graph with Rr = L + 2 (+ tail): returns (lat, Z, Rr) or
     None when the values keep growing (no fixpoint: no certificate exists for this image).
     `floor`: a lateness floor per word (a FALLTHROUGH ARM's PC+2, refilled after its flush);
     `xr`: extra response cycles per word (a FALLTHROUGH timeout's PC+1: the disarm cycle).
     `rbase`: the response past the head's lateness -- 2 for the USB lane (prio_resp: it wins its
-    decisions); a lane's window bound R for any other lane (RespWinN.wb_bound_win_n)."""
+    decisions); a lane's window bound R for any other lane (RespWinN.wb_bound_win_n).
+    `ready`: words whose head is valid AT their release -- the COUNTERFACTUAL of an RTL that
+    prefetches them (Wilson 11-15, agent 1's prefetch note); never used for a record."""
     floor = floor or {}
     xr = xr or {}
+    ready = ready or ()
     I = _isa()
     D, HS = k["dstar"], k["head_slack"]
     npf = {w: g[w][0]["op"] in I.BRANCH_OPS for w in g}
@@ -261,7 +264,7 @@ def certificate(g, preds, gaps, k, B, tail, iters=200, floor=None, xr=None, rbas
                     v = max(v, Rr[b] + HS + B - gp[b])
                 for a in preds[b]:
                     v = max(v, Zn[a] + HS + B - rd[(a, b)] - gp[b])
-            ln[c] = v
+            ln[c] = 0 if c in ready else v
         if ln == lat and Zn == Z:
             return lat, Z, Rr
         if max(ln.values()) > 10 ** 4:

@@ -75,6 +75,15 @@ def arm_gate(img, lane, graph, lat, I):
             w = s[0] if len(s) == 1 else None
         if w != a or any(g[p][0]["op"] == I.OP_ARM for p in path):
             continue
+        # ⛔ THE UART RECEIVE SHAPE EXACTLY (found by the drain table: probe_cov_pindiv's lane
+        # 3 -- a RISING ARM, a READBIT, SHIFTINs at the bit -- passed the looser test): the ARM
+        # waits for the start bit's FALL (idle high, l_armedge 0), and the loop holds only
+        # timed no-ops (LEVEL on a pin outside N_PINS), SHIFTINs on the ARM's pin and the REARM
+        if x["level"] != 0 or not all(
+                (g[p][0]["op"] == I.OP_LEVEL and g[p][0]["pin"] >= I.N_PINS)
+                or (g[p][0]["op"] == I.OP_SHIFTIN and g[p][0]["pin"] == x["pin"])
+                or g[p][0]["op"] == I.OP_REARM for p in path):
+            continue
         data = [p for p in path if g[p][0]["op"] == I.OP_SHIFTIN and g[p][0]["pin"] == x["pin"]
                 and g[p][0]["delay"] == bit and not g[p][0]["mod"] & I.MOD_SELF_TIMED]
         ups = [LC.upper_gaps(g[p][0], I) for p in path]
@@ -113,15 +122,72 @@ def _decisions(g, gaps, K, rmax, mmax=40):
     return None
 
 
-def image_budget(img, iters=80):
-    """{'B': int or None, 'reason': str, 'lanes': {lane: {...}}} for `img`"""
+#: must-fire switch (gate_lane_cert M_LC_EDF_OFF): the EDF response scheme never tried
+EDF_MUT = False
+
+
+def _edf_R(y, lanes, graphs, rmax, lmax, ds, mmax=40):
+    """RespEdfClose.wb_close_edf's per-lane bound: R y = 3 * sum_{z != y} m(y, z) + S + 2 with
+    S = 0 under (b'), m(y, z) the least m >= 1 whose span G_z(m) (lane_cert.span_min: the least
+    release advance over m consecutive writebacks, `hspan`) meets
+        G_z(m) >= ds y - ds z + Q z - L y          (`hG`)
+    Q z = z's response including its lateness (rmax), L y = y's largest lateness. None if no
+    m <= mmax meets it."""
+    M = 0
+    for z in lanes:
+        if z == y:
+            continue
+        g, _p, gaps = graphs[z]
+        need = ds[y] - ds[z] + rmax[z] - lmax.get(y, 0)
+        m = 1
+        while LC.span_min(g, gaps, m) < need:
+            m += 1
+            if m > mmax:
+                return None
+        M += m
+    return 3 * M + 0 + 3 - 1
+
+
+def image_budget(img, iters=80, premise_gaps=None, ready=None):
+    """The certificate with the window response bound (RespWinN.wb_bound_win_n), and, when that
+    finds none, with the EDF response bounds (RespEdfClose.wb_close_edf, Wilson 11-15): one
+    scheme per image, so each certificate rests on one closure theorem. The record's images
+    certified by the window scheme keep their numbers."""
+    r = _image_budget(img, iters, premise_gaps, ready, "window")
+    if r["B"] is not None or EDF_MUT:
+        return r
+    r2 = _image_budget(img, iters, premise_gaps, ready, "edf")
+    if r2["B"] is None:
+        return dict(r, reason="%s; EDF response bounds: %s" % (r["reason"], r2["reason"]))
+    return r2
+
+
+def _image_budget(img, iters=80, premise_gaps=None, ready=None, scheme="window"):
+    """{'B': int or None, 'reason': str, 'lanes': {lane: {...}}} for `img`.
+    `premise_gaps` {lane: {ARM word: cycles}}: a NAMED peer premise (model/premises.py,
+    Wilson 11-15 call 1) -- the earliest the ARM's edge can come after its release, so its
+    successor's release gap is at least that (ArmSplit.arm_release_bus: released at E + 1).
+    `ready` {lane: {word}}: the prefetch counterfactual (lane_cert.certificate). Both default
+    to none: the record (gen_branch_budget) never passes them."""
+    premise_gaps = premise_gaps or {}
+    ready = ready or {}
     I = LC._isa()
     k = PC.load()
     prem = LC.premises(k)
     progs = I.lane_programs(img)
     lanes = sorted(progs)
     usb = PC.usb_receive_live(progs, I)
+    if scheme == "edf" and usb:
+        # one closure theorem per image: wb_close_edf needs EVERY lane, the USB lane included,
+        # to meet its conditions; the USB lane's bound is PrioResp's, so a USB image is not
+        # certified by the EDF scheme
+        return {"B": None, "reason": "not applied to a USB image (the USB lane's response is "
+                "PrioResp's; one closure theorem per image)", "lanes": {}}
     graphs = {l: LC.build(img, l, prem, I) for l in lanes}
+    for l, pg in premise_gaps.items():
+        for w, gp in pg.items():
+            if l in graphs and w in graphs[l][2]:
+                graphs[l][2][w] = [max(graphs[l][2][w][0], gp)] + graphs[l][2][w][1:]
     usb_n, usb_rmax = 0, None
     if usb:
         with contextlib.redirect_stdout(io.StringIO()):
@@ -150,7 +216,8 @@ def image_budget(img, iters=80):
             fts = LC.ft_paths(g, I)
             floor = {c2: LC.ft_flush_late(B) for _c1, c2 in fts.values() if c2 in g}
             xr = {c1: 1 for c1, _c2 in fts.values() if c1 in g}
-            cert = LC.certificate(g, preds, gaps, k, B, 0, floor=floor, xr=xr, rbase=R[l])
+            cert = LC.certificate(g, preds, gaps, k, B, 0, floor=floor, xr=xr, rbase=R[l],
+                                  ready=ready.get(l))
             if cert is None:
                 return {"B": None, "reason": "lane %d: no lateness certificate at B = %d" % (l, B),
                         "lanes": {}}
@@ -160,6 +227,15 @@ def image_budget(img, iters=80):
             rmax[I.USB_LANE] = usb_rmax
         Rn = {}
         for y in generic:
+            if scheme == "edf":
+                ds = {l: I.read_header(img, l)["dsched"] for l in lanes}
+                lmax = {l: max(lat[l].values()) for l in generic}
+                Re = _edf_R(y, lanes, graphs, rmax, lmax, ds)
+                if Re is None:
+                    return {"B": None, "reason": "lane %d: no EDF span meets ds + Q - L" % y,
+                            "lanes": {}}
+                Rn[y] = Re
+                continue
             K = k["lemmaA_window"]
             for _ in range(60):
                 M = 0
@@ -206,7 +282,8 @@ def image_budget(img, iters=80):
                 # lane_cert: max over words of Rr - L, Rr from PrioResp.prio_resp)
                 out[I.USB_LANE] = {"R": usb_R, "late_words": None, "max_late": usb_late,
                                    "max_late_rx": usb_rx_late, "arm_margin": usb_arm_margin}
-            return {"B": B, "reason": "certified", "lanes": out}
+            return {"B": B, "reason": "certified" if scheme == "window" else
+                    "certified (EDF response bounds, RespEdfClose.wb_close_edf)", "lanes": out}
         if Bn > LIMIT or any(v > LIMIT for v in Rn.values()):
             return {"B": None, "reason": "no finite B (B %d -> %d, max R %d)"
                     % (B, Bn, max(Rn.values())), "lanes": {}}

@@ -5,7 +5,7 @@
       "sha": "a082f53f13b1e98496504393da7bbc2ffe0df7c70492cd24c2a55edea1ed7759",
       "branch_lanes": [],
       "B": null,
-      "reason": "lane 0: no lateness certificate at B = 0",
+      "reason": "lane 0: no lateness certificate at B = 0; EDF response bounds: lane 0: no lateness certificate at B = 0",
       "cert": {
         "status": "certified",
         "reason": "pe_asm.compute_j",
@@ -18,10 +18,10 @@
       "sha": "80da023512c78c18d51e9e2248ec6f9b6464494bcdf1e3e7760ad040937665df",
       "branch_lanes": [],
       "B": null,
-      "reason": "lane 0: no lateness certificate at B = 0",
+      "reason": "lane 0: no lateness certificate at B = 0; EDF response bounds: lane 0: no lateness certificate at B = 0",
       "cert": {
         "status": "uncertified",
-        "reason": "unclocked SHIFT lane(s) 0,3: no certified response bound R -- the record has no R for it (lane 0: no lateness certificate at B = 0)",
+        "reason": "unclocked SHIFT lane(s) 0,3: no certified response bound R -- the record has no R for it (lane 0: no lateness certificate at B = 0; EDF response bounds: lane 0: no lateness certificate at B = 0)",
         "d_min": 20,
         "J": 1
       },
@@ -31,10 +31,10 @@
       "sha": "6594891e083cfe06a888022c08ce5cc8cd54228400ebcae5652d9416b135980a",
       "branch_lanes": [],
       "B": null,
-      "reason": "lane 0: no lateness certificate at B = 0",
+      "reason": "lane 0: no lateness certificate at B = 0; EDF response bounds: lane 0: no lateness certificate at B = 0",
       "cert": {
         "status": "uncertified",
-        "reason": "unclocked SHIFT lane(s) 0,3: no certified response bound R -- the record has no R for it (lane 0: no lateness certificate at B = 0)",
+        "reason": "unclocked SHIFT lane(s) 0,3: no certified response bound R -- the record has no R for it (lane 0: no lateness certificate at B = 0; EDF response bounds: lane 0: no lateness certificate at B = 0)",
         "d_min": 20,
         "J": 1
       },
@@ -44,10 +44,10 @@
       "sha": "60df2086bdcac9cee7be6b2bbbe995a8841b257441498694cc0a48cea0a65971",
       "branch_lanes": [],
       "B": null,
-      "reason": "lane 0: no lateness certificate at B = 0",
+      "reason": "lane 0: no lateness certificate at B = 0; EDF response bounds: lane 0: no lateness certificate at B = 0",
       "cert": {
         "status": "uncertified",
-        "reason": "unclocked SHIFT lane(s) 0,3: no certified response bound R -- the record has no R for it (lane 0: no lateness certificate at B = 0)",
+        "reason": "unclocked SHIFT lane(s) 0,3: no certified response bound R -- the record has no R for it (lane 0: no lateness certificate at B = 0; EDF response bounds: lane 0: no lateness certificate at B = 0)",
         "d_min": 20,
         "J": 1
       },
@@ -57,10 +57,10 @@
       "sha": "738df4dc5d0a7be590400e42d475dee5a98e72bd6c6727d8bc80dfecdf2da8eb",
       "branch_lanes": [],
       "B": null,
-      "reason": "lane 0: no lateness certificate at B = 0",
+      "reason": "lane 0: no lateness certificate at B = 0; EDF response bounds: lane 0: no lateness certificate at B = 0",
       "cert": {
         "status": "uncertified",
-        "reason": "unclocked SHIFT lane(s) 0,3: no certified response bound R -- the record has no R for it (lane 0: no lateness certificate at B = 0)",
+        "reason": "unclocked SHIFT lane(s) 0,3: no certified response bound R -- the record has no R for it (lane 0: no lateness certificate at B = 0; EDF response bounds: lane 0: no lateness certificate at B = 0)",
         "d_min": 20,
         "J": 1
       },
@@ -113,15 +113,41 @@
         2,
         3
       ],
-      "B": null,
-      "reason": "lane 0: no lateness certificate at B = 32",
+      "B": 0,
+      "reason": "certified (EDF response bounds, RespEdfClose.wb_close_edf)",
       "cert": {
         "status": "certified",
         "reason": "pe_asm.compute_j",
         "d_min": 20,
         "J": 1
       },
-      "lanes": {}
+      "lanes": {
+        "0": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 14
+        },
+        "1": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 14
+        },
+        "2": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 14
+        },
+        "3": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 14
+        },
+        "4": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 14
+        }
+      }
     },
     "branch_cmp_order_image.hex": {
       "sha": "2feb7bb43939dc6a7fc8a68c524a552633e77ea25a7762ae107573b910dd0c6c",
@@ -129,15 +155,41 @@
         2,
         3
       ],
-      "B": null,
-      "reason": "lane 0: no lateness certificate at B = 32",
+      "B": 0,
+      "reason": "certified (EDF response bounds, RespEdfClose.wb_close_edf)",
       "cert": {
         "status": "certified",
         "reason": "pe_asm.compute_j",
         "d_min": 20,
         "J": 1
       },
-      "lanes": {}
+      "lanes": {
+        "0": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 14
+        },
+        "1": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 14
+        },
+        "2": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 14
+        },
+        "3": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 14
+        },
+        "4": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 14
+        }
+      }
     },
     "branch_image.hex": {
       "sha": "17655390676135b5a736f9e9d703ad534efe0ac73a77db2ac4233677a6e739d1",
@@ -148,7 +200,7 @@
         4
       ],
       "B": null,
-      "reason": "lane 1: no lateness certificate at B = 16",
+      "reason": "lane 1: no lateness certificate at B = 16; EDF response bounds: lane 1: no lateness certificate at B = 16",
       "cert": {
         "status": "uncertified",
         "reason": "compute_j refuses: d_min = 6 is below D* = 20: with 5 lanes a refill occupies the single fetch port for 4 cycles, so 5 lanes consuming one action every 6 cycles saturate it. LANE 1 carries the tightest spacing. The timing guarantee is SCOPED to d_min >= D*; below it the steady-state jitter is measured at 8..12 and no bound is published.",
@@ -167,7 +219,7 @@
         4
       ],
       "B": null,
-      "reason": "lane 0: no lateness certificate at B = 20",
+      "reason": "lane 0: no lateness certificate at B = 20; EDF response bounds: lane 0: no lateness certificate at B = 20",
       "cert": {
         "status": "certified",
         "reason": "pe_asm.compute_j",
@@ -185,7 +237,7 @@
         4
       ],
       "B": null,
-      "reason": "lane 1: no lateness certificate at B = 16",
+      "reason": "lane 1: no lateness certificate at B = 16; EDF response bounds: lane 1: no lateness certificate at B = 16",
       "cert": {
         "status": "uncertified",
         "reason": "compute_j refuses: d_min = 6 is below D* = 20: with 5 lanes a refill occupies the single fetch port for 4 cycles, so 5 lanes consuming one action every 6 cycles saturate it. LANE 1 carries the tightest spacing. The timing guarantee is SCOPED to d_min >= D*; below it the steady-state jitter is measured at 8..12 and no bound is published.",
@@ -198,10 +250,10 @@
       "sha": "b31f469acf4f67c989e8270191882a6c846ec3504052955df8dd9ac7bbb9f371",
       "branch_lanes": [],
       "B": null,
-      "reason": "lane 1: no lateness certificate at B = 0",
+      "reason": "lane 1: no lateness certificate at B = 0; EDF response bounds: lane 1: no lateness certificate at B = 0",
       "cert": {
         "status": "uncertified",
-        "reason": "unclocked SHIFT lane(s) 0: no certified response bound R -- the record has no R for it (lane 1: no lateness certificate at B = 0)",
+        "reason": "unclocked SHIFT lane(s) 0: no certified response bound R -- the record has no R for it (lane 1: no lateness certificate at B = 0; EDF response bounds: lane 1: no lateness certificate at B = 0)",
         "d_min": 25,
         "J": 1
       },
@@ -250,7 +302,7 @@
       "sha": "ef8c873723e29ae8ea570f099415d68cf1779bd4ec3683247fb7855ad7f5b51d",
       "branch_lanes": [],
       "B": null,
-      "reason": "lane 0: no lateness certificate at B = 0",
+      "reason": "lane 0: no lateness certificate at B = 0; EDF response bounds: lane 0: no lateness certificate at B = 0",
       "cert": {
         "status": "uncertified",
         "reason": "compute_j refuses: d_min = 12 is below D* = 20: with 5 lanes a refill occupies the single fetch port for 4 cycles, so 5 lanes consuming one action every 12 cycles saturate it. LANE 0 carries the tightest spacing. The timing guarantee is SCOPED to d_min >= D*; below it the steady-state jitter is measured at 8..12 and no bound is published.",
@@ -340,15 +392,41 @@
     "ckdense_image.hex": {
       "sha": "72384368cf1e0c280108544d062d43307ab985317d466d5bd2799b44787e0c20",
       "branch_lanes": [],
-      "B": null,
-      "reason": "lane 0: no lateness certificate at B = 0",
+      "B": 0,
+      "reason": "certified (EDF response bounds, RespEdfClose.wb_close_edf)",
       "cert": {
         "status": "certified",
         "reason": "pe_asm.compute_j",
         "d_min": 20,
         "J": 1
       },
-      "lanes": {}
+      "lanes": {
+        "0": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 14
+        },
+        "1": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 14
+        },
+        "2": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 14
+        },
+        "3": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 14
+        },
+        "4": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 104
+        }
+      }
     },
     "ckfive_image.hex": {
       "sha": "afa3d93c75b3841a2ea63de27b6a29d53dd77eb5552a6c0d97433a276bdfa265",
@@ -393,7 +471,7 @@
       "sha": "c191a7112c19eb343367b0858cf18b35793d91bfac01b71ceb022fab1016ba61",
       "branch_lanes": [],
       "B": null,
-      "reason": "lane 3: no lateness certificate at B = 0",
+      "reason": "lane 3: no lateness certificate at B = 0; EDF response bounds: lane 0: no lateness certificate at B = 0",
       "cert": {
         "status": "certified",
         "reason": "pe_asm.compute_j",
@@ -406,7 +484,7 @@
       "sha": "d2ea54cde0b637958b7ca6720212d8ffd3f144486e9cde8dac8cae910f8ea1bb",
       "branch_lanes": [],
       "B": null,
-      "reason": "lane 0: no lateness certificate at B = 0",
+      "reason": "lane 0: no lateness certificate at B = 0; EDF response bounds: lane 0: no lateness certificate at B = 0",
       "cert": {
         "status": "uncertified",
         "reason": "compute_j refuses: d_min = 19 is below D* = 20: with 5 lanes a refill occupies the single fetch port for 4 cycles, so 5 lanes consuming one action every 19 cycles saturate it. LANE 0 carries the tightest spacing. The timing guarantee is SCOPED to d_min >= D*; below it the steady-state jitter is measured at 8..12 and no bound is published.",
@@ -458,7 +536,7 @@
       "sha": "3ef7a9b3567a2a8cd583a4cc4de7d20db0fe33d790a88a44b4c75ebd9c170941",
       "branch_lanes": [],
       "B": null,
-      "reason": "lane 0: no lateness certificate at B = 0",
+      "reason": "lane 0: no lateness certificate at B = 0; EDF response bounds: lane 0: no lateness certificate at B = 0",
       "cert": {
         "status": "uncertified",
         "reason": "compute_j refuses: d_min = 18 is below D* = 20: with 5 lanes a refill occupies the single fetch port for 4 cycles, so 5 lanes consuming one action every 18 cycles saturate it. LANE 0 carries the tightest spacing. The timing guarantee is SCOPED to d_min >= D*; below it the steady-state jitter is measured at 8..12 and no bound is published.",
@@ -549,7 +627,7 @@
       "sha": "b17e8f7376b3bca9254a025960303fd9c3f69849f77c65292e80e8a4e60721ae",
       "branch_lanes": [],
       "B": null,
-      "reason": "lane 1: no lateness certificate at B = 0",
+      "reason": "lane 1: no lateness certificate at B = 0; EDF response bounds: lane 1: no lateness certificate at B = 0",
       "cert": {
         "status": "uncertified",
         "reason": "compute_j refuses: d_min = 10 is below D* = 20: with 5 lanes a refill occupies the single fetch port for 4 cycles, so 5 lanes consuming one action every 10 cycles saturate it. LANE 1 carries the tightest spacing. The timing guarantee is SCOPED to d_min >= D*; below it the steady-state jitter is measured at 8..12 and no bound is published.",
@@ -601,7 +679,7 @@
       "sha": "26583e8b9d59da136030610e5ce16984fd46f5163a060f9aaed2e888266387bd",
       "branch_lanes": [],
       "B": null,
-      "reason": "lane 0: no lateness certificate at B = 0",
+      "reason": "lane 0: no lateness certificate at B = 0; EDF response bounds: lane 0: no lateness certificate at B = 0",
       "cert": {
         "status": "uncertified",
         "reason": "compute_j refuses: d_min = 7 is below D* = 20: with 5 lanes a refill occupies the single fetch port for 4 cycles, so 5 lanes consuming one action every 7 cycles saturate it. LANE 0 carries the tightest spacing. The timing guarantee is SCOPED to d_min >= D*; below it the steady-state jitter is measured at 8..12 and no bound is published.",
@@ -653,7 +731,7 @@
       "sha": "9026d9adb2eb0d02a34cccc18a3902bbf7bb0f65cf36811a2e0e3412fbd0cbc1",
       "branch_lanes": [],
       "B": null,
-      "reason": "lane 0: no lateness certificate at B = 0",
+      "reason": "lane 0: no lateness certificate at B = 0; EDF response bounds: lane 0: no lateness certificate at B = 0",
       "cert": {
         "status": "uncertified",
         "reason": "compute_j refuses: d_min = 6 is below D* = 20: with 5 lanes a refill occupies the single fetch port for 4 cycles, so 5 lanes consuming one action every 6 cycles saturate it. LANE 0 carries the tightest spacing. The timing guarantee is SCOPED to d_min >= D*; below it the steady-state jitter is measured at 8..12 and no bound is published.",
@@ -666,7 +744,7 @@
       "sha": "e6d69cc39c7a12c19d6893e754980650ba660be8a7482f3cdbf0e346cc1beb33",
       "branch_lanes": [],
       "B": null,
-      "reason": "lane 0: no lateness certificate at B = 0",
+      "reason": "lane 0: no lateness certificate at B = 0; EDF response bounds: lane 0: no lateness certificate at B = 0",
       "cert": {
         "status": "uncertified",
         "reason": "compute_j refuses: d_min = 11 is below D* = 20: with 5 lanes a refill occupies the single fetch port for 4 cycles, so 5 lanes consuming one action every 11 cycles saturate it. LANE 0 carries the tightest spacing. The timing guarantee is SCOPED to d_min >= D*; below it the steady-state jitter is measured at 8..12 and no bound is published.",
@@ -679,7 +757,7 @@
       "sha": "994332a729ae6bbf20e12d02126441d26b6d235d30ccb5dbbd754ae5f36c9185",
       "branch_lanes": [],
       "B": null,
-      "reason": "lane 0: no lateness certificate at B = 0",
+      "reason": "lane 0: no lateness certificate at B = 0; EDF response bounds: lane 0: no lateness certificate at B = 0",
       "cert": {
         "status": "uncertified",
         "reason": "compute_j refuses: d_min = 12 is below D* = 20: with 5 lanes a refill occupies the single fetch port for 4 cycles, so 5 lanes consuming one action every 12 cycles saturate it. LANE 0 carries the tightest spacing. The timing guarantee is SCOPED to d_min >= D*; below it the steady-state jitter is measured at 8..12 and no bound is published.",
@@ -692,7 +770,7 @@
       "sha": "eea626c7b2a3f552196bf71441a5a5dad516a0559c9da4174084546537e863c3",
       "branch_lanes": [],
       "B": null,
-      "reason": "lane 0: no lateness certificate at B = 0",
+      "reason": "lane 0: no lateness certificate at B = 0; EDF response bounds: lane 0: no lateness certificate at B = 0",
       "cert": {
         "status": "uncertified",
         "reason": "compute_j refuses: d_min = 12 is below D* = 20: with 5 lanes a refill occupies the single fetch port for 4 cycles, so 5 lanes consuming one action every 12 cycles saturate it. LANE 0 carries the tightest spacing. The timing guarantee is SCOPED to d_min >= D*; below it the steady-state jitter is measured at 8..12 and no bound is published.",
@@ -705,7 +783,7 @@
       "sha": "aca9630ad51e2cf4c835e8b12125c98fa15fae73757f058c583663d536fc4609",
       "branch_lanes": [],
       "B": null,
-      "reason": "lane 0: no lateness certificate at B = 0",
+      "reason": "lane 0: no lateness certificate at B = 0; EDF response bounds: lane 0: no lateness certificate at B = 0",
       "cert": {
         "status": "uncertified",
         "reason": "compute_j refuses: d_min = 12 is below D* = 20: with 5 lanes a refill occupies the single fetch port for 4 cycles, so 5 lanes consuming one action every 12 cycles saturate it. LANE 0 carries the tightest spacing. The timing guarantee is SCOPED to d_min >= D*; below it the steady-state jitter is measured at 8..12 and no bound is published.",
@@ -718,7 +796,7 @@
       "sha": "8fba4cc846da7471dc79b26be128c57220ad13e8479322d0f820a5b9432c6fc4",
       "branch_lanes": [],
       "B": null,
-      "reason": "lane 0: no lateness certificate at B = 0",
+      "reason": "lane 0: no lateness certificate at B = 0; EDF response bounds: lane 0: no lateness certificate at B = 0",
       "cert": {
         "status": "uncertified",
         "reason": "compute_j refuses: d_min = 12 is below D* = 20: with 5 lanes a refill occupies the single fetch port for 4 cycles, so 5 lanes consuming one action every 12 cycles saturate it. LANE 0 carries the tightest spacing. The timing guarantee is SCOPED to d_min >= D*; below it the steady-state jitter is measured at 8..12 and no bound is published.",
@@ -731,7 +809,7 @@
       "sha": "979e544d17617b251d7385838cc13c6c2da656a0e7db45e55696e6aa1e100331",
       "branch_lanes": [],
       "B": null,
-      "reason": "lane 0: no lateness certificate at B = 0",
+      "reason": "lane 0: no lateness certificate at B = 0; EDF response bounds: lane 0: no lateness certificate at B = 0",
       "cert": {
         "status": "uncertified",
         "reason": "compute_j refuses: d_min = 12 is below D* = 20: with 5 lanes a refill occupies the single fetch port for 4 cycles, so 5 lanes consuming one action every 12 cycles saturate it. LANE 0 carries the tightest spacing. The timing guarantee is SCOPED to d_min >= D*; below it the steady-state jitter is measured at 8..12 and no bound is published.",
@@ -744,7 +822,7 @@
       "sha": "0b25edf8ff25431ec0ec7c7836a0439007f62a8719e280079ee9c672ccf50ff1",
       "branch_lanes": [],
       "B": null,
-      "reason": "lane 0: no lateness certificate at B = 0",
+      "reason": "lane 0: no lateness certificate at B = 0; EDF response bounds: lane 0: no lateness certificate at B = 0",
       "cert": {
         "status": "uncertified",
         "reason": "compute_j refuses: d_min = 12 is below D* = 20: with 5 lanes a refill occupies the single fetch port for 4 cycles, so 5 lanes consuming one action every 12 cycles saturate it. LANE 0 carries the tightest spacing. The timing guarantee is SCOPED to d_min >= D*; below it the steady-state jitter is measured at 8..12 and no bound is published.",
@@ -913,7 +991,7 @@
       "sha": "aa65ad9fac379e40cc5fd2149a0e5148ea58a64b30981a610f13ca7a1c5b9e5c",
       "branch_lanes": [],
       "B": null,
-      "reason": "lane 0: no lateness certificate at B = 0",
+      "reason": "lane 0: no lateness certificate at B = 0; EDF response bounds: lane 0: no lateness certificate at B = 0",
       "cert": {
         "status": "uncertified",
         "reason": "compute_j refuses: d_min = 12 is below D* = 20: with 5 lanes a refill occupies the single fetch port for 4 cycles, so 5 lanes consuming one action every 12 cycles saturate it. LANE 0 carries the tightest spacing. The timing guarantee is SCOPED to d_min >= D*; below it the steady-state jitter is measured at 8..12 and no bound is published.",
@@ -926,7 +1004,7 @@
       "sha": "379906c6f6c9c3bb5d241f897d7b80239f9926a29f2febde6bf14f5f7d82cb99",
       "branch_lanes": [],
       "B": null,
-      "reason": "lane 0: no lateness certificate at B = 0",
+      "reason": "lane 0: no lateness certificate at B = 0; EDF response bounds: lane 0: no lateness certificate at B = 0",
       "cert": {
         "status": "uncertified",
         "reason": "compute_j refuses: d_min = 12 is below D* = 20: with 5 lanes a refill occupies the single fetch port for 4 cycles, so 5 lanes consuming one action every 12 cycles saturate it. LANE 0 carries the tightest spacing. The timing guarantee is SCOPED to d_min >= D*; below it the steady-state jitter is measured at 8..12 and no bound is published.",
@@ -939,7 +1017,7 @@
       "sha": "43e1a129b727f5d631df8e0996d88ff4e9b071376efec609295beb86401ab3ac",
       "branch_lanes": [],
       "B": null,
-      "reason": "lane 0: no lateness certificate at B = 0",
+      "reason": "lane 0: no lateness certificate at B = 0; EDF response bounds: lane 0: no lateness certificate at B = 0",
       "cert": {
         "status": "uncertified",
         "reason": "compute_j refuses: d_min = 12 is below D* = 20: with 5 lanes a refill occupies the single fetch port for 4 cycles, so 5 lanes consuming one action every 12 cycles saturate it. LANE 0 carries the tightest spacing. The timing guarantee is SCOPED to d_min >= D*; below it the steady-state jitter is measured at 8..12 and no bound is published.",
@@ -952,7 +1030,7 @@
       "sha": "264e2253b76fcd32eb8cd0ffcfa80eb76913ca7d5e94d1e9dd65f540cbe719a8",
       "branch_lanes": [],
       "B": null,
-      "reason": "lane 0: no lateness certificate at B = 0",
+      "reason": "lane 0: no lateness certificate at B = 0; EDF response bounds: lane 0: no lateness certificate at B = 0",
       "cert": {
         "status": "uncertified",
         "reason": "compute_j refuses: d_min = 7 is below D* = 20: with 5 lanes a refill occupies the single fetch port for 4 cycles, so 5 lanes consuming one action every 7 cycles saturate it. LANE 0 carries the tightest spacing. The timing guarantee is SCOPED to d_min >= D*; below it the steady-state jitter is measured at 8..12 and no bound is published.",
@@ -965,7 +1043,7 @@
       "sha": "e7defdf2493cf4bcf5bf5368c169a0228d28178d70bd009987674064181df8df",
       "branch_lanes": [],
       "B": null,
-      "reason": "lane 0: no lateness certificate at B = 0",
+      "reason": "lane 0: no lateness certificate at B = 0; EDF response bounds: lane 0: no lateness certificate at B = 0",
       "cert": {
         "status": "uncertified",
         "reason": "compute_j refuses: d_min = 7 is below D* = 20: with 5 lanes a refill occupies the single fetch port for 4 cycles, so 5 lanes consuming one action every 7 cycles saturate it. LANE 0 carries the tightest spacing. The timing guarantee is SCOPED to d_min >= D*; below it the steady-state jitter is measured at 8..12 and no bound is published.",
@@ -978,7 +1056,7 @@
       "sha": "799884cf1f754f415034ea18997e5d4f196b362c7a71a9b19b70e33eb2664653",
       "branch_lanes": [],
       "B": null,
-      "reason": "lane 0: no lateness certificate at B = 0",
+      "reason": "lane 0: no lateness certificate at B = 0; EDF response bounds: lane 0: no lateness certificate at B = 0",
       "cert": {
         "status": "uncertified",
         "reason": "compute_j refuses: d_min = 12 is below D* = 20: with 5 lanes a refill occupies the single fetch port for 4 cycles, so 5 lanes consuming one action every 12 cycles saturate it. LANE 0 carries the tightest spacing. The timing guarantee is SCOPED to d_min >= D*; below it the steady-state jitter is measured at 8..12 and no bound is published.",
@@ -1107,15 +1185,41 @@
     "pair_busy.hex": {
       "sha": "b775ee0653e4b7be3d11d069581bb3fcb6fd8592e4b81aca69de73d3b5fa9169",
       "branch_lanes": [],
-      "B": null,
-      "reason": "lane 1: no lateness certificate at B = 0",
+      "B": 0,
+      "reason": "certified (EDF response bounds, RespEdfClose.wb_close_edf)",
       "cert": {
-        "status": "uncertified",
-        "reason": "unclocked SHIFT lane(s) 0: no certified response bound R -- the record has no R for it (lane 1: no lateness certificate at B = 0)",
+        "status": "certified",
+        "reason": "pe_asm.compute_j",
         "d_min": 20,
         "J": 1
       },
-      "lanes": {}
+      "lanes": {
+        "0": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 38
+        },
+        "1": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 14
+        },
+        "2": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 14
+        },
+        "3": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 14
+        },
+        "4": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 14
+        }
+      }
     },
     "pair_rx.hex": {
       "sha": "4823af254fb8d156546610411dcbfa2954eeb205941f3fdb2e153f7ae61ec6bd",
@@ -1276,28 +1380,80 @@
     "probe_cov_ds20.hex": {
       "sha": "3781b4f76053f6b41983f2da9224ce8c220a24eb4c41b1081ee380496bb8b800",
       "branch_lanes": [],
-      "B": null,
-      "reason": "lane 0: no lateness certificate at B = 0",
+      "B": 0,
+      "reason": "certified (EDF response bounds, RespEdfClose.wb_close_edf)",
       "cert": {
         "status": "certified",
         "reason": "pe_asm.compute_j",
         "d_min": 20,
         "J": 1
       },
-      "lanes": {}
+      "lanes": {
+        "0": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 14
+        },
+        "1": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 14
+        },
+        "2": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 14
+        },
+        "3": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 14
+        },
+        "4": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 17
+        }
+      }
     },
     "probe_cov_pindiv.hex": {
       "sha": "2cb9a4cb28222bdf28493e79255775c0139afc661da8142573f0ce61f693f4b9",
       "branch_lanes": [],
-      "B": null,
-      "reason": "lane 2: no lateness certificate at B = 0",
+      "B": 0,
+      "reason": "certified (EDF response bounds, RespEdfClose.wb_close_edf)",
       "cert": {
-        "status": "uncertified",
-        "reason": "unclocked SHIFT lane(s) 0: no certified response bound R -- the record has no R for it (lane 2: no lateness certificate at B = 0)",
+        "status": "certified",
+        "reason": "pe_asm.compute_j",
         "d_min": 23,
         "J": 1
       },
-      "lanes": {}
+      "lanes": {
+        "0": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 17
+        },
+        "1": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 23
+        },
+        "2": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 14
+        },
+        "3": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 44
+        },
+        "4": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 26
+        }
+      }
     },
     "probe_cov_sim40.hex": {
       "sha": "490c53848f1d5f6fdbe705571548f1964e2cd3ab69af8841526d9e4fa0490cb7",
@@ -1380,24 +1536,50 @@
     "smoke_image.hex": {
       "sha": "165a307dff0df12df9b721415c2490165d8d61669dc883cb0c8e7392334ad6d9",
       "branch_lanes": [],
-      "B": null,
-      "reason": "lane 0: no lateness certificate at B = 0",
+      "B": 0,
+      "reason": "certified (EDF response bounds, RespEdfClose.wb_close_edf)",
       "cert": {
         "status": "certified",
         "reason": "pe_asm.compute_j",
         "d_min": 20,
         "J": 1
       },
-      "lanes": {}
+      "lanes": {
+        "0": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 14
+        },
+        "1": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 17
+        },
+        "2": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 53
+        },
+        "3": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 53
+        },
+        "4": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 53
+        }
+      }
     },
     "sptgt_m0_image.hex": {
       "sha": "802711cf77da7a48a3790327732d0531720ad0e2b2dd9061fa9cf59ef0c5c050",
       "branch_lanes": [],
       "B": null,
-      "reason": "lane 0: no lateness certificate at B = 0",
+      "reason": "lane 0: no lateness certificate at B = 0; EDF response bounds: lane 0: no lateness certificate at B = 0",
       "cert": {
         "status": "uncertified",
-        "reason": "unclocked SHIFT lane(s) 0: no certified response bound R -- the record has no R for it (lane 0: no lateness certificate at B = 0)",
+        "reason": "unclocked SHIFT lane(s) 0: no certified response bound R -- the record has no R for it (lane 0: no lateness certificate at B = 0; EDF response bounds: lane 0: no lateness certificate at B = 0)",
         "d_min": 20,
         "J": 1
       },
@@ -1407,10 +1589,10 @@
       "sha": "0e5d330bc4e1f97c6bdee31a76d9b09eb8a4c3749d134bc1651e11535c5a2a7c",
       "branch_lanes": [],
       "B": null,
-      "reason": "lane 0: no lateness certificate at B = 0",
+      "reason": "lane 0: no lateness certificate at B = 0; EDF response bounds: lane 0: no lateness certificate at B = 0",
       "cert": {
         "status": "uncertified",
-        "reason": "unclocked SHIFT lane(s) 0: no certified response bound R -- the record has no R for it (lane 0: no lateness certificate at B = 0)",
+        "reason": "unclocked SHIFT lane(s) 0: no certified response bound R -- the record has no R for it (lane 0: no lateness certificate at B = 0; EDF response bounds: lane 0: no lateness certificate at B = 0)",
         "d_min": 20,
         "J": 1
       },
@@ -1420,10 +1602,10 @@
       "sha": "0cb283c1cf4d562d8521f7ca166dd4134eddeca4d98d59b184028ff7ca29a629",
       "branch_lanes": [],
       "B": null,
-      "reason": "lane 0: no lateness certificate at B = 0",
+      "reason": "lane 0: no lateness certificate at B = 0; EDF response bounds: lane 0: no lateness certificate at B = 0",
       "cert": {
         "status": "uncertified",
-        "reason": "unclocked SHIFT lane(s) 0: no certified response bound R -- the record has no R for it (lane 0: no lateness certificate at B = 0)",
+        "reason": "unclocked SHIFT lane(s) 0: no certified response bound R -- the record has no R for it (lane 0: no lateness certificate at B = 0; EDF response bounds: lane 0: no lateness certificate at B = 0)",
         "d_min": 20,
         "J": 1
       },
@@ -1433,10 +1615,10 @@
       "sha": "c1e41e8bec9162558dfd28d2ec7a4a9039dd4abe5537f0aed8844483477e8cf9",
       "branch_lanes": [],
       "B": null,
-      "reason": "lane 0: no lateness certificate at B = 0",
+      "reason": "lane 0: no lateness certificate at B = 0; EDF response bounds: lane 0: no lateness certificate at B = 0",
       "cert": {
         "status": "uncertified",
-        "reason": "unclocked SHIFT lane(s) 0: no certified response bound R -- the record has no R for it (lane 0: no lateness certificate at B = 0)",
+        "reason": "unclocked SHIFT lane(s) 0: no certified response bound R -- the record has no R for it (lane 0: no lateness certificate at B = 0; EDF response bounds: lane 0: no lateness certificate at B = 0)",
         "d_min": 20,
         "J": 1
       },
@@ -1446,10 +1628,10 @@
       "sha": "c3a50d028537f8a3ca78c4be10b1235aef205bf2509d92eef7426b20f9389d8b",
       "branch_lanes": [],
       "B": null,
-      "reason": "lane 0: no lateness certificate at B = 0",
+      "reason": "lane 0: no lateness certificate at B = 0; EDF response bounds: lane 0: no lateness certificate at B = 0",
       "cert": {
         "status": "uncertified",
-        "reason": "unclocked SHIFT lane(s) 0: no certified response bound R -- the record has no R for it (lane 0: no lateness certificate at B = 0)",
+        "reason": "unclocked SHIFT lane(s) 0: no certified response bound R -- the record has no R for it (lane 0: no lateness certificate at B = 0; EDF response bounds: lane 0: no lateness certificate at B = 0)",
         "d_min": 20,
         "J": 1
       },
@@ -1498,7 +1680,7 @@
       "sha": "f08d579210ac3acc3bd24b1c96686e610b7e10777fc14fecf243e9b9de0eca1e",
       "branch_lanes": [],
       "B": null,
-      "reason": "lane 0: no lateness certificate at B = 0",
+      "reason": "lane 0: no lateness certificate at B = 0; EDF response bounds: lane 0: no lateness certificate at B = 0",
       "cert": {
         "status": "uncertified",
         "reason": "compute_j refuses: d_min = 12 is below D* = 20: with 5 lanes a refill occupies the single fetch port for 4 cycles, so 5 lanes consuming one action every 12 cycles saturate it. LANE 0 carries the tightest spacing. The timing guarantee is SCOPED to d_min >= D*; below it the steady-state jitter is measured at 8..12 and no bound is published.",
@@ -1511,7 +1693,7 @@
       "sha": "fe13a293e1e888c58dd3b2dd2c340de02dde25f4c233dcd3be1676d9beb3585f",
       "branch_lanes": [],
       "B": null,
-      "reason": "lane 0: no lateness certificate at B = 0",
+      "reason": "lane 0: no lateness certificate at B = 0; EDF response bounds: lane 0: no lateness certificate at B = 0",
       "cert": {
         "status": "uncertified",
         "reason": "compute_j refuses: d_min = 12 is below D* = 20: with 5 lanes a refill occupies the single fetch port for 4 cycles, so 5 lanes consuming one action every 12 cycles saturate it. LANE 0 carries the tightest spacing. The timing guarantee is SCOPED to d_min >= D*; below it the steady-state jitter is measured at 8..12 and no bound is published.",
@@ -1643,15 +1825,41 @@
     "uart_tx_busy_image.hex": {
       "sha": "ba1c77d69dadd9739e62d00f6d6add5fd6b28eac1d5f992a6a63bc0ed7f47677",
       "branch_lanes": [],
-      "B": null,
-      "reason": "lane 1: no lateness certificate at B = 0",
+      "B": 0,
+      "reason": "certified (EDF response bounds, RespEdfClose.wb_close_edf)",
       "cert": {
-        "status": "uncertified",
-        "reason": "unclocked SHIFT lane(s) 0: no certified response bound R -- the record has no R for it (lane 1: no lateness certificate at B = 0)",
+        "status": "certified",
+        "reason": "pe_asm.compute_j",
         "d_min": 20,
         "J": 1
       },
-      "lanes": {}
+      "lanes": {
+        "0": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 158
+        },
+        "1": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 14
+        },
+        "2": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 14
+        },
+        "3": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 14
+        },
+        "4": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 14
+        }
+      }
     },
     "uart_tx_image.hex": {
       "sha": "01e6bee83964c697b6b8d70192503a8f3906fe49e2d66c0bdc8ae5f1098390cb",
@@ -1861,7 +2069,7 @@
       "sha": "ac775cea11481b5c3fc92c8b865ce7f3e64298b5045ca38196645265101bc4de",
       "branch_lanes": [],
       "B": null,
-      "reason": "lane 1: no lateness certificate at B = 0",
+      "reason": "lane 1: no lateness certificate at B = 0; EDF response bounds: not applied to a USB image (the USB lane's response is PrioResp's; one closure theorem per image)",
       "cert": {
         "status": "certified",
         "reason": "pe_asm.compute_j",
@@ -1913,15 +2121,41 @@
     "ws2812_sub3_rearm21.hex": {
       "sha": "8848126958586fec40ca0377257c706cc353050640491b29daa93848d56087fc",
       "branch_lanes": [],
-      "B": null,
-      "reason": "lane 0: no lateness certificate at B = 0",
+      "B": 0,
+      "reason": "certified (EDF response bounds, RespEdfClose.wb_close_edf)",
       "cert": {
-        "status": "uncertified",
-        "reason": "unclocked SHIFT lane(s) 0: no certified response bound R -- the record has no R for it (lane 0: no lateness certificate at B = 0)",
+        "status": "certified",
+        "reason": "pe_asm.compute_j",
         "d_min": 20,
         "J": 1
       },
-      "lanes": {}
+      "lanes": {
+        "0": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 14
+        },
+        "1": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 14
+        },
+        "2": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 14
+        },
+        "3": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 14
+        },
+        "4": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 14
+        }
+      }
     },
     "run_branch_check:braw33_alone": {
       "sha": "fcf274c0c13629f424e112a19032fc19fa57be41a74f56eb6ba0318a41f21180",
@@ -1973,7 +2207,7 @@
         4
       ],
       "B": null,
-      "reason": "lane 1: no lateness certificate at B = 16",
+      "reason": "lane 1: no lateness certificate at B = 16; EDF response bounds: lane 1: no lateness certificate at B = 16",
       "cert": {
         "status": "uncertified",
         "reason": "compute_j refuses: d_min = 6 is below D* = 20: with 5 lanes a refill occupies the single fetch port for 4 cycles, so 5 lanes consuming one action every 6 cycles saturate it. LANE 1 carries the tightest spacing. The timing guarantee is SCOPED to d_min >= D*; below it the steady-state jitter is measured at 8..12 and no bound is published.",
@@ -2073,15 +2307,41 @@
         2,
         3
       ],
-      "B": null,
-      "reason": "lane 0: no lateness certificate at B = 32",
+      "B": 0,
+      "reason": "certified (EDF response bounds, RespEdfClose.wb_close_edf)",
       "cert": {
         "status": "certified",
         "reason": "pe_asm.compute_j",
         "d_min": 20,
         "J": 1
       },
-      "lanes": {}
+      "lanes": {
+        "0": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 14
+        },
+        "1": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 14
+        },
+        "2": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 14
+        },
+        "3": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 14
+        },
+        "4": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 14
+        }
+      }
     },
     "run_branch_check:cmp_mask": {
       "sha": "008a51b5fda36d41ab645adf8456eb7f2d76ae1b9f2e6846468b20744adaf464",
@@ -2089,15 +2349,41 @@
         2,
         3
       ],
-      "B": null,
-      "reason": "lane 0: no lateness certificate at B = 32",
+      "B": 0,
+      "reason": "certified (EDF response bounds, RespEdfClose.wb_close_edf)",
       "cert": {
         "status": "certified",
         "reason": "pe_asm.compute_j",
         "d_min": 20,
         "J": 1
       },
-      "lanes": {}
+      "lanes": {
+        "0": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 14
+        },
+        "1": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 14
+        },
+        "2": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 14
+        },
+        "3": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 14
+        },
+        "4": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 14
+        }
+      }
     },
     "run_branch_check:cmp_lo": {
       "sha": "e7787588f44b9a86f25f801d6f69fcbdd0d0760f6bc5bba300e8dd0c51e96eb5",
@@ -2146,7 +2432,7 @@
         0
       ],
       "B": null,
-      "reason": "lane 0: no lateness certificate at B = 8",
+      "reason": "lane 0: no lateness certificate at B = 8; EDF response bounds: lane 0: no lateness certificate at B = 8",
       "cert": {
         "status": "certified",
         "reason": "pe_asm.compute_j",
@@ -2165,7 +2451,7 @@
         4
       ],
       "B": null,
-      "reason": "lane 0: no lateness certificate at B = 20",
+      "reason": "lane 0: no lateness certificate at B = 20; EDF response bounds: lane 0: no lateness certificate at B = 20",
       "cert": {
         "status": "certified",
         "reason": "pe_asm.compute_j",

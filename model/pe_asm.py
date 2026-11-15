@@ -729,6 +729,11 @@ def split_counts(lanes):
     return five, counts
 
 
+#: must-fire switches (host/poset/run_poset_compile, Wilson 11-15 condition on the mod field):
+#: "M_ASM_MOD_ANY_OP" accepts a mod on any op, "M_ASM_MOD_ANY_VALUE" any mod value on an ARM
+MODS_MUT = ""
+
+
 def split_mods(lanes):
     """The optional 7th field `mod` (poset compiler, `within ... else continue`, 11-15): the
     FALLTHROUGH ARM (pe_isa.ARM_MOD_FT: a timeout retires to PC+1, the edge goes to PC+2).
@@ -741,7 +746,9 @@ def split_mods(lanes):
             if len(a) < 7:
                 continue
             m = int(a[6])
-            if m and (int(a[0]) != pe_isa.OP_ARM or m != pe_isa.ARM_MOD_FT):
+            bad_op = int(a[0]) != pe_isa.OP_ARM and MODS_MUT != "M_ASM_MOD_ANY_OP"
+            bad_val = m != pe_isa.ARM_MOD_FT and MODS_MUT != "M_ASM_MOD_ANY_VALUE"
+            if m and (bad_op or bad_val):
                 raise Reject("lane %d action %d: mod %d -- a pe_asm action's mod is "
                              "the FALLTHROUGH ARM's (ARM, mod %d) or 0"
                              % (ln, i, m, pe_isa.ARM_MOD_FT))

@@ -75,10 +75,9 @@ NON_ADMISSIBLE = {
     "corpus_uartrx.hex": ({PORT, QUEUE},
         "the UART-rx trace image at d = 11, below D*: it exercises the ARM "
         "and edge-capture path at a seeded phase."),
-    "branch_cmp_mask_image.hex": ({QUEUE},
-        "no finite B, so no proved J; at the interim J = 16 the image also fails the 1.6a queue check. J = 1 used to hide this."),
-    "branch_cmp_order_image.hex": ({QUEUE},
-        "no finite B, so no proved J; at the interim J = 16 the image also fails the 1.6a queue check. J = 1 used to hide this."),
+    # branch_cmp_mask / branch_cmp_order: QUEUE withdrawn 11-15 -- agent 2's RespEdf
+    # (9180440) gives them a finite B and EDF response bounds; 1.6a passes, and the gate read
+    # the declarations stale. Their wire-feed entries (retired a875e02) are restored.
     "branch_cmp_lo_image.hex": ({QUEUE},
         "the honest branch J (at least branch_j(16, 40) = 17) exceeds the 1.6a "
         "queue check; J = 1 used to hide this."),

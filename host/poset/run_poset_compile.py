@@ -24,7 +24,12 @@
      the recorded lanes re-assemble to the image; a WINDOW predicate for the bound. Static
      must-fires, each refused BY NAME: too tight, a timeout over the 10-bit field and lo > 0
      without a datasheet bound ("needs window counter"), B on a wire we drive, A not ours, B
-     not one edge
+     not one edge; a window inside a LOOP body keeps every LOOP head on its action (UART TX)
+  C11 the premise mechanism (Wilson 11-15 call 1, model/premises.py): a registered datasheet
+     whose SHA-256 matches puts its ID in the stamp and its gap in the certificate (the
+     certified lateness drops); a SHA mismatch or an unregistered part: image-only
+Must-fires added 11-15: M_PC_WITHIN_LO_PASS (lo > 0 without a datasheet compiles), and pe_asm's
+M_ASM_MOD_ANY_OP / M_ASM_MOD_ANY_VALUE (the mod field's two refusals), each killed by C10
 Must-fires: every compile.MUTANTS entry, run IN-PROCESS through the same judge, turns this gate red.
 
 POSITIVE TOKEN: `GATE poset_compile: PASSED`.
@@ -57,9 +62,14 @@ SCRATCH_MUTANTS = {
     "M_PC_USB_NOCHECK": "killed in-process by this gate",
     "M_PC_JFLOOR_HEAD": "killed in-process by this gate",
     "M_PC_WITHIN_NOARM": "killed in-process by this gate",
+    "M_PC_WITHIN_LO_PASS": "killed in-process by this gate",
+    "M_ASM_MOD_ANY_OP": "pe_asm.MODS_MUT, killed in-process by this gate (C10)",
+    "M_ASM_MOD_ANY_VALUE": "pe_asm.MODS_MUT, killed in-process by this gate (C10)",
 }
 #: the literal above must name exactly the module's MUTANTS (checked at start-up)
-if set(SCRATCH_MUTANTS) != set(C.MUTANTS):
+#: pe_asm's mod-field must-fires (Wilson 11-15: one per refusal), run in-process like C.MUTANTS
+ASM_MUTANTS = ("M_ASM_MOD_ANY_OP", "M_ASM_MOD_ANY_VALUE")
+if set(SCRATCH_MUTANTS) != set(C.MUTANTS) | set(ASM_MUTANTS):
     raise SystemExit("GATE poset_compile: FAILED -- SCRATCH_MUTANTS differs from C.MUTANTS")
 
 HZ = G.clock.hz()
@@ -223,6 +233,7 @@ def c10():
         ok, msg = refused_with(body(st), needle)
         if not ok:
             probs.append("C10 %s: not refused by name (%s)" % (why, msg[:120]))
+    probs += c10_loops()
     # pe_asm's 7th field: the FALLTHROUGH ARM's mod only
     for bad in ((I.OP_LEVEL, I.UO0, 1, 20, 0, 0, I.ARM_MOD_FT), (I.OP_ARM, 0, 0, 40, 0, 0, I.ARM_MOD_LEVEL2)):
         try:
@@ -232,6 +243,77 @@ def c10():
             pass
     if plain["cert"].get("within") != "not applicable (no within)":
         probs.append("C10 a spec without `within`: %r" % plain["cert"].get("within"))
+    return probs
+
+
+def c10_loops():
+    """a window inserted into a LOOP body keeps every LOOP's head on the SAME action (the
+    drain table found the UART-TX lowering's head going stale): checked on the UART lowering"""
+    import pit_emit as PE
+    import run_pit_emit as V1
+    probs = []
+    base = PE.emit(bytes(V1.IMAGES["uart_crc"]()), HZ).rstrip("\n").splitlines()
+    parsed0 = C.S.parse("\n".join(base) + "\n")
+    _i, low0, route = C.lower(parsed0["v1"], 7)
+    acts0 = low0[0][0]
+    tx = [w for w in range(8) if C._route_pin(route, w) is not None][0]
+    free = [w for w in range(8) if C._route_pin(route, w) is None][0]
+    st = ("pattern Fall(uio%d) -> Fall(uio%d) within (2000 ns, 10000 ns) else continue "
+          "source datasheet \"X\";" % (tx, free))
+    text = "\n".join(base[:-1] + ["  " + st] + [base[-1]]) + "\n"
+    try:
+        lanes, _r, _w = C.windows(C.S.parse(text)["poset"], low0, route, HZ)
+    except C.Refused as e:
+        return ["C10 UART-TX window refused: %s" % e]
+    heads0 = [acts0[a[2]][:3] for a in acts0 if a[0] == C.I.OP_LOOP]
+    heads1 = [lanes[0][a[2]][:3] for a in lanes[0] if a[0] == C.I.OP_LOOP]
+    if not heads0 or heads0 != heads1:
+        probs.append("C10 LOOP heads moved off their actions: %s -> %s" % (heads0, heads1))
+    return probs
+
+
+def c11():
+    """the premise mechanism (Wilson 11-15 call 1): a registered, SHA-matching datasheet puts
+    its ID in the stamp and its gap in the certificate; a SHA mismatch or an unregistered part
+    gives the image-only certificate. In-process, on a scratch registry entry."""
+    import premises as PM
+    import hashlib
+    probs = list("C11 premises: %s" % p for p in PM.problems())
+    src = os.path.join("host", "poset", "POSET_SPEC.md")
+    sha = hashlib.sha256(open(os.path.join(ROOT, src), "rb").read()).hexdigest()
+    st = WIN.replace('"X"', '"C11PART"') % "abort"
+    saved = (dict(PM.REGISTRY), dict(PM.DATASHEETS))
+    try:
+        PM.REGISTRY["C11_DOC"] = {"kind": "document", "what": "gate scratch", "source": src,
+                                  "sha256": sha, "label": "read"}
+        PM.DATASHEETS["C11PART"] = "C11_DOC"
+        with_p = C.compile_spec(body(st), seed=7, arm="early")
+        PM.REGISTRY["C11_DOC"] = dict(PM.REGISTRY["C11_DOC"], sha256="0" * 64)
+        bad_sha = C.compile_spec(body(st), seed=7, arm="early")
+        del PM.DATASHEETS["C11PART"]
+        unreg = C.compile_spec(body(st), seed=7, arm="early")
+    finally:
+        PM.REGISTRY.clear(); PM.REGISTRY.update(saved[0])
+        PM.DATASHEETS.clear(); PM.DATASHEETS.update(saved[1])
+    if with_p["stamp"].get("premises") != ["C11_DOC"] or "premises C11_DOC" not in with_p["cert"]["within"]:
+        probs.append("C11 a registered datasheet: stamp %s, within %r"
+                     % (with_p["stamp"].get("premises"), with_p["cert"]["within"][:90]))
+    for tag, r in (("SHA mismatch", bad_sha), ("unregistered part", unreg)):
+        if "premises" in r["stamp"] or "image-only" not in r["cert"]["within"]:
+            probs.append("C11 %s: stamp %s, within %r" % (tag, r["stamp"].get("premises"),
+                                                          r["cert"]["within"][:90]))
+    # the premise must CHANGE the certificate (the early-armed SPI window: 62 vs 210 today)
+    import branch_budget as BB
+    def lane0_j(r):
+        _l, _r2, w = C.windows(C.S.parse(body(st))["poset"],
+                               C.lower(C.S.parse(body(st))["v1"], 7)[1],
+                               C.lower(C.S.parse(body(st))["v1"], 7)[2], HZ, arm="early",
+                               premise=r)
+        b = w["budget"]
+        return None if b["B"] is None else b["lanes"][0]["max_late"]
+    jp, j0 = lane0_j("spec"), lane0_j(None)
+    if jp is None or j0 is None or not jp < j0:
+        probs.append("C11 the premise gap did not lower the certified lateness (%s vs %s)" % (jp, j0))
     return probs
 
 
@@ -290,6 +372,7 @@ def judge():
         if r["cert"].get("usb_coresident") != "not applicable (no USB receive)":
             probs.append("C1 SPI image: usb_coresident %r" % r["cert"].get("usb_coresident"))
     probs += c10()
+    probs += c11()
     # C8: POSET_SPEC.md's generated passages match the constants file
     import gen_spec_doc
     probs += ["C8 %s" % p for p in gen_spec_doc.stale()]
@@ -385,10 +468,23 @@ def main() -> int:
                                             (mp[0] if mp else "")[:80]))
         if not red:
             probs.append("mutant %s survived" % m)
+    import pe_asm
+    for m in ASM_MUTANTS:
+        pe_asm.MODS_MUT = m
+        try:
+            mp = c10()
+        except Exception as e:
+            mp = ["crash: %r" % e]
+        finally:
+            pe_asm.MODS_MUT = ""
+        print("  must-fire %-19s %s  %s" % (m, "RED (killed)" if mp else "*** SURVIVED",
+                                            (mp[0] if mp else "")[:80]))
+        if not mp:
+            probs.append("mutant %s survived" % m)
     if probs:
         print("GATE poset_compile: FAILED (%d)" % len(probs))
         return 1
-    print("GATE poset_compile: PASSED (C1-C10; %d / %d mutants killed)" % (len(C.MUTANTS), len(C.MUTANTS)))
+    print("GATE poset_compile: PASSED (C1-C11; %d / %d mutants killed)" % (len(C.MUTANTS) + len(ASM_MUTANTS), len(C.MUTANTS) + len(ASM_MUTANTS)))
     return 0
 
 
