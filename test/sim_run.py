@@ -652,16 +652,39 @@ def _caller():
         return a.replace(os.sep, "/")
 
 
+def _rel_plusarg(x):
+    """A plusarg whose value is a path INSIDE THE REPO, as its repo-relative form with '/'.
+    ⛔ 11-15: an arm keyed on `+OUT=D:\\...\\wt_s12c\\test\\...` can never match the same
+    arm on CI (`+OUT=/home/runner/...`), so every declared run read UNDECLARED there (the
+    `uart` shard red since 9c0df0c). Where a run writes is not what the run IS; the
+    repo-relative path is the same on every machine. Values outside the repo are kept."""
+    if not (isinstance(x, str) and x.startswith("+") and "=" in x):
+        return x
+    k, v = x.split("=", 1)
+    p = v.replace("\\", "/")
+    root = ROOT.replace("\\", "/").rstrip("/") + "/"
+    if p.lower().startswith(root.lower()):
+        return "%s=%s" % (k, p[len(root):])
+    # an absolute path recorded on ANOTHER checkout (a Windows drive path read on Linux,
+    # or the reverse): repo-relative from the first repo top-level dir it passes through
+    for top in ("/test/", "/model/", "/fpga/", "/src/", "/host/"):
+        i = p.find(top)
+        if i >= 0 and (_re_m.match(r"^[A-Za-z]:/", p) or p.startswith("/")):
+            return "%s=%s" % (k, p[i + 1:])
+    return x
+
+
 def entry_matches(e, r):
-    """True if ledger record `r` is the arm entry `e` names (exact identity)."""
+    """True if ledger record `r` is the arm entry `e` names (exact identity; plusarg
+    paths inside the repo compare repo-relative, `_rel_plusarg`)."""
     if e.get("runner") not in (r.get("runner"), r.get("caller")):
         return False
     if e.get("build") and e["build"] not in r.get("builds", []):
         return False
     if e.get("image") and e["image"] != r.get("image"):
         return False
-    pa = set(r.get("plusargs", []))
-    if any(x not in pa for x in e.get("plusargs") or ()):
+    pa = {_rel_plusarg(x) for x in r.get("plusargs", [])}
+    if any(_rel_plusarg(x) not in pa for x in e.get("plusargs") or ()):
         return False
     return bool(e.get("build") or e.get("plusargs"))
 
