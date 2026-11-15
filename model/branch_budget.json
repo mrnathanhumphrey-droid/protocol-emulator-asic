@@ -114,7 +114,9 @@
         },
         "0": {
           "max_late": 11,
-          "R": null
+          "R": null,
+          "max_late_rx": 0,
+          "arm_margin": -339
         }
       }
     },
@@ -144,7 +146,9 @@
         },
         "0": {
           "max_late": 25,
-          "R": null
+          "R": null,
+          "max_late_rx": 0,
+          "arm_margin": 1
         }
       }
     },
@@ -174,7 +178,9 @@
         },
         "0": {
           "max_late": 25,
-          "R": null
+          "R": null,
+          "max_late_rx": 0,
+          "arm_margin": 1
         }
       }
     },

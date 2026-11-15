@@ -469,12 +469,17 @@ def full_report(img, name="image"):
                     armed = ftoff[w] + lat[w] + 4 + xr.get(w, 0)
                     need = prem["tipd_fast"] + prem["min_packet"]
                     okf = armed < need
+                    if sched == "b'":
+                        full_report.last.setdefault("arm_margins", []).append(need - 1 - armed)
                     print("  FT ARM w%d: armed <= EOP + %d, the reply ends >= EOP + %d  %s"
                           % (w, armed, need, "OK" if okf else "LATE"))
                     if not okf:
                         fails.append((sched, "ft arm w%d" % w))
                 continue
             ok = lat[w] + 4 + xr.get(w, 0) < egap.get(w, gaps[w][0]) - 1
+            if sched == "b'":
+                full_report.last.setdefault("arm_margins", []).append(
+                    egap.get(w, gaps[w][0]) - 2 - (lat[w] + 4 + xr.get(w, 0)))
             if not ok:
                 fails.append((sched, "arm w%d" % w))
             if w not in off:
@@ -504,6 +509,8 @@ def full_report(img, name="image"):
                 print("  arm_sop w%d after an unanswered DATA: armed by EOP + %d (premise: before "
                       "the host's next SOP, %d) %s; fetch-deadline margin %+d (proxy %d; reported)"
                       % (s, wbd, armd, "OK" if wbd <= armd else "LATE", rdl - wbd, rdl))
+                if sched == "b'":
+                    full_report.last.setdefault("arm_margins", []).append(armd - wbd)
                 if wbd > armd:
                     fails.append((sched, "armed late w%d (after DATA)" % s))
             fl = max((lat[n2] for n2 in f), default=0)
@@ -519,6 +526,8 @@ def full_report(img, name="image"):
                   "lateness %d %s (certificate); SOP gap %d; fetch-deadline margin %+d (proxy %d; "
                   "reported)" % (s, wb, arm_dl, "OK" if wb <= arm_dl else "LATE", fl,
                                  "OK" if fl == 0 else "LATE", gaps[s][0], fdl - wb, fdl))
+            if sched == "b'":
+                full_report.last.setdefault("arm_margins", []).append(arm_dl - wb)
             if wb > arm_dl:
                 fails.append((sched, "armed late w%d" % s))
             if fl:
@@ -558,6 +567,8 @@ def full_report(img, name="image"):
         Bn = None
         if sched == "b'":
             Bn, nev = br1_budget_fixpoint(g, gaps, lat, k)
+            rx = [lat[w] for w in g if g[w][0]["op"] == I.OP_SHIFTIN and g[w][0]["mod"] & I.MOD_SELF_TIMED]
+            full_report.last["usb_rx_late"] = max(rx) if rx else 0
             full_report.last.update({"br1_B": Bn, "usb_refills": nev,
                                      "usb_maxRr": max(Rr.values()), "usb_graph": (g, gaps, lat)})
             if Bn is None:
@@ -621,6 +632,7 @@ def full_report(img, name="image"):
         if lt is not None and g[c2][0]["op"] == I.OP_ARM:
             armed = 1 + lt + 4
             okp = armed < prem["min_packet"]
+            full_report.last.setdefault("arm_margins", []).append(prem["min_packet"] - 1 - armed)
             print("  ARM w%d edge path: PC+2 w%d armed <= edge + %d, the reply's SE0 >= edge + %d %s"
                   % (a, c2, armed, prem["min_packet"], "OK" if okp else "LATE"))
             if not okp:

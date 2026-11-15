@@ -43,7 +43,8 @@ def current():
         r = BB.image_budget(img)
         out[name] = {"sha": P.image_sha(img), "branch_lanes": bl, "B": r["B"],
                      "reason": r["reason"],
-                     "lanes": {str(l): {"max_late": v["max_late"], "R": v["R"]}
+                     "lanes": {str(l): {k2: v[k2] for k2 in ("max_late", "R", "max_late_rx",
+                                                              "arm_margin") if k2 in v}
                                for l, v in r["lanes"].items()}}
     return out
 
