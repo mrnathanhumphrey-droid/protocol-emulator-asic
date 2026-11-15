@@ -30,6 +30,19 @@ import proof_constants as PC  # noqa: E402
 
 LIMIT = 400          # B or a response this large: no fixpoint
 
+#: must-fire switch (gate_lane_cert M_LC_NOPIN_ALL): count every word as touching a pin
+NOPIN_MUT = False
+
+
+def no_pin(x, I):
+    """a word whose dispatch touches no pin (NopSplit.lean, Wilson 11-15): a LEVEL on a pin
+    outside N_PINS (`pin_real` false: PIN_NONE) with mod = 0 (no complementary pinb, no SE0).
+    Its lateness does not move its successor's release (`ord_late_free`) and is invisible on
+    the wire, so the lane's observable J is taken over the other words (`lane_j_pin`)."""
+    if NOPIN_MUT:
+        return False
+    return x["op"] == I.OP_LEVEL and x["pin"] >= I.N_PINS and x["mod"] == 0
+
 
 def _decisions(g, gaps, K, rmax, mmax=40):
     """at most this many decisions of a lane in a K-window (lane_cert's other-lanes rule)"""
@@ -103,7 +116,12 @@ def image_budget(img, iters=80):
         Bn = k["l_refill"] * (late + usb_n)
         if Bn == B and Rn == R:
             out = {l: {"R": R[l], "late_words": sorted(w for w, v in lat[l].items() if v),
-                       "max_late": max(lat[l].values())} for l in generic}
+                       "max_late": max(lat[l].values()),
+                       # the plain-lane split (NopSplit.ord_late_free): lateness over the
+                       # words that touch a pin
+                       "max_late_pin": max([v for w, v in lat[l].items()
+                                            if not no_pin(graphs[l][0][w][0], I)] or [0])}
+                   for l in generic}
             if usb:
                 # the word-class split (ArmSplit.arm_release_bus): receive words carry their own
                 # lateness; an ARM word's lateness shows only in its arming check's margin
@@ -127,6 +145,16 @@ def lane_j(entry, lane):
         return None
     ln = entry.get("lanes", {}).get(str(lane), entry.get("lanes", {}).get(lane))
     return None if ln is None else 1 + ln["max_late"]
+
+
+def lane_j_pin(entry, lane):
+    """A lane's OBSERVABLE dispatch jitter (Wilson 11-15, the plain-lane split, NopSplit): 1 +
+    its largest certified lateness over the words that touch a pin -- a no-pin word's
+    lateness reaches no sample and no later release. None if not recorded / no finite B."""
+    if entry.get("B") is None:
+        return None
+    ln = entry.get("lanes", {}).get(str(lane), entry.get("lanes", {}).get(lane))
+    return None if ln is None or ln.get("max_late_pin") is None else 1 + ln["max_late_pin"]
 
 
 def lane_j_rx(entry, lane):

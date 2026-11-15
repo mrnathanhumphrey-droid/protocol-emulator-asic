@@ -22,6 +22,8 @@ every must-fire must turn its check red, or the gate is not testing what it says
   check 5  the branch-1 budget B and per-lane lateness per image (Wilson 11-14): model/branch_budget.json
            is today's certificate (gen_branch_budget) for every image (universe + run_branch_check)
   M_LC_BUDGET_STALE a recorded B four above its certificate      -> check 5 red
+  M_LC_NOPIN_ALL    every word counted as touching a pin (the NopSplit classifier off) -> the
+                    record's max_late_pin is stale on every image the split moves (check 5 red)
   THE ARMING PREMISE (Wilson 11-14 ruling 1): a handshake copy's arm_sop moved late by raising
   the READBIT before it by n (the chain grows by exactly n; no word shifts), n0 = the generated
   deadline (lane_cert.arm_premise_bounds) - its armed-by bound on the real program:
@@ -227,6 +229,25 @@ def main():
     finally:
         GB.load = orig_gl
     kills.append(("M_LC_BUDGET_STALE", bool(victim) and bool(k5), "a stale certified branch budget"))
+    # M_LC_NOPIN_ALL: the plain-lane split's classifier off -> every image it moves goes stale
+    import branch_budget as BB
+    import gen_branch_budget as GB
+    rec = GB.load()["images"]
+    moved = sorted(n for n, v in rec.items() if v.get("B") is not None and any(
+        ln.get("max_late_pin") is not None and ln["max_late_pin"] < ln["max_late"]
+        for ln in v["lanes"].values()))
+    corpus = dict(GB.corpus())
+    BB.NOPIN_MUT = True
+    try:
+        stale = [n for n in moved if [ln.get("max_late_pin") for _k, ln in sorted(rec[n]["lanes"].items())]
+                 != [v.get("max_late_pin") for _k, v in sorted(
+                     ((str(l), x) for l, x in BB.image_budget(corpus[n])["lanes"].items()))]]
+    finally:
+        BB.NOPIN_MUT = False
+    print("  plain-lane split (NopSplit): %d image(s) with a lane whose pin-word J is below its "
+          "whole-lane J: %s" % (len(moved), ", ".join(moved)))
+    kills.append(("M_LC_NOPIN_ALL", bool(moved) and stale == moved,
+                  "no-pin words counted: %d / %d moved images stale" % (len(stale), len(moved))))
     # M_LC_FT_UNSEEN / M_LC_FT_NOFLOOR
     orig_ft = PC.arm_is_ft
     PC.arm_is_ft = lambda x, I=None: False

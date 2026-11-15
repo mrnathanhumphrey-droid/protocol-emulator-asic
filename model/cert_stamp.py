@@ -50,6 +50,8 @@ IMAGES_OF_RECORD = (
 #: when that agent wires it (listed so the gate names them, not silently skipped).
 IMAGES_OF_RECORD_PENDING = (
     ("usbdev_dev.hex", "test/run_usbaddr.py (agent 1): pass --require-cert to its writer"),
+    ("fpga/images/uart_rx_board.hex", "the F2 board image of record (agent 1, 11-15): its "
+     "builder `uart_rx.py ... board` writes it with cert_stamp.write(..., require_cert=True)"),
 )
 
 

@@ -46,7 +46,7 @@ def current():
                      "reason": r["reason"],
                      # the image's certification stamp (Wilson 11-15): the field A2 reads
                      "cert": CS.stamp(img, budget=r),
-                     "lanes": {str(l): {k2: v[k2] for k2 in ("max_late", "R", "max_late_rx",
+                     "lanes": {str(l): {k2: v[k2] for k2 in ("max_late", "max_late_pin", "R", "max_late_rx",
                                                               "arm_margin") if k2 in v}
                                for l, v in r["lanes"].items()}}
     return out
