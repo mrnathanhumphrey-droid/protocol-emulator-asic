@@ -38,6 +38,8 @@ ARMGATE_MUT = False
 UART_FRAME_MUT = 0
 #: must-fire switch (gate_lane_cert M_LC_ARMMARGIN_PASS): a negative UART arming margin not refused
 ARMMARGIN_MUT = False
+#: must-fire switch (gate_lane_cert M_LC_USBFAIL_OFF): the USB lane report's failures ignored
+USBFAIL_MUT = False
 
 
 def uart_peer_err():
@@ -193,8 +195,16 @@ def _image_budget(img, iters=80, premise_gaps=None, ready=None, scheme="window")
     usb_n, usb_rmax = 0, None
     if usb:
         with contextlib.redirect_stdout(io.StringIO()):
-            LC.full_report(img, "image")
+            ufails = LC.full_report(img, "image")
         last = LC.full_report.last
+        # the USB lane's own report lists its failures (an arm_sop armed after the host's
+        # earliest SOP, a late first sample, the turnaround, ...): any one of them means its
+        # certificate's premises fail, so the image is not certified (found 11-15: usbbuf_usb and
+        # usbrx_main armed their SOP ARM at EOP + 417 / 311 against TIPD 78 and stayed certified)
+        if ufails and not USBFAIL_MUT:
+            return {"B": None, "reason": "USB lane: lane_cert report fails: %s"
+                    % "; ".join(sorted({"%s (%s)" % (w, sch) for sch, w in ufails}))[:200],
+                    "lanes": {}}
         if last.get("br1_B") is None:
             return {"B": None, "reason": "USB lane: no certificate", "lanes": {}}
         usb_n, usb_rmax = last["usb_refills"], last["usb_maxRr"]

@@ -1944,42 +1944,15 @@
       "branch_lanes": [
         0
       ],
-      "B": 4,
-      "reason": "certified",
+      "B": null,
+      "reason": "USB lane: lane_cert report fails: armed late w0 (b'); armed late w0 (shipped); EDF response bounds: not applied to a USB image (the USB lane's response is PrioResp's; one closure theorem per image)",
       "cert": {
-        "status": "certified",
-        "reason": "pe_asm.compute_j",
+        "status": "uncertified",
+        "reason": "unclocked SHIFT lane(s) 0: no certified response bound R -- the record has no R for it (USB lane: lane_cert report fails: armed late w0 (b'); armed late w0 (shipped); EDF response bounds: not applied to a USB image (the USB lane's response is PrioResp's; one closure theorem per image))",
         "d_min": 20,
         "J": 1
       },
-      "lanes": {
-        "1": {
-          "max_late": 0,
-          "max_late_pin": 0,
-          "R": 17
-        },
-        "2": {
-          "max_late": 0,
-          "max_late_pin": 0,
-          "R": 17
-        },
-        "3": {
-          "max_late": 0,
-          "max_late_pin": 0,
-          "R": 17
-        },
-        "4": {
-          "max_late": 0,
-          "max_late_pin": 0,
-          "R": 17
-        },
-        "0": {
-          "max_late": 11,
-          "R": 4,
-          "max_late_rx": 0,
-          "arm_margin": -339
-        }
-      }
+      "lanes": {}
     },
     "usbdev_dev.hex": {
       "sha": "a5d54e4e4fd0f42a6af8fff17f5cff80d48fea1b5c4c5bd0335739383247ac55",
@@ -2069,7 +2042,7 @@
       "sha": "ac775cea11481b5c3fc92c8b865ce7f3e64298b5045ca38196645265101bc4de",
       "branch_lanes": [],
       "B": null,
-      "reason": "lane 1: no lateness certificate at B = 0; EDF response bounds: not applied to a USB image (the USB lane's response is PrioResp's; one closure theorem per image)",
+      "reason": "USB lane: lane_cert report fails: armed late w0 (b'); armed late w0 (shipped); EDF response bounds: not applied to a USB image (the USB lane's response is PrioResp's; one closure theorem per image)",
       "cert": {
         "status": "certified",
         "reason": "pe_asm.compute_j",
@@ -2081,42 +2054,15 @@
     "usbrx_main.hex": {
       "sha": "27703c14d9180c53684f22cddd3d6c3cb871ee960e1bce20eceb7791a41a87df",
       "branch_lanes": [],
-      "B": 0,
-      "reason": "certified",
+      "B": null,
+      "reason": "USB lane: lane_cert report fails: armed late w0 (b'); armed late w0 (shipped); EDF response bounds: not applied to a USB image (the USB lane's response is PrioResp's; one closure theorem per image)",
       "cert": {
         "status": "certified",
         "reason": "pe_asm.compute_j",
         "d_min": 20,
         "J": 1
       },
-      "lanes": {
-        "1": {
-          "max_late": 0,
-          "max_late_pin": 0,
-          "R": 14
-        },
-        "2": {
-          "max_late": 0,
-          "max_late_pin": 0,
-          "R": 14
-        },
-        "3": {
-          "max_late": 0,
-          "max_late_pin": 0,
-          "R": 14
-        },
-        "4": {
-          "max_late": 0,
-          "max_late_pin": 0,
-          "R": 14
-        },
-        "0": {
-          "max_late": 0,
-          "R": 2,
-          "max_late_rx": 0,
-          "arm_margin": -233
-        }
-      }
+      "lanes": {}
     },
     "ws2812_sub3_rearm21.hex": {
       "sha": "8848126958586fec40ca0377257c706cc353050640491b29daa93848d56087fc",
