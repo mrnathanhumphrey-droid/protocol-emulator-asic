@@ -55,6 +55,8 @@ ROOT = os.path.dirname(HERE)
 
 START = "u_s0.u_s12.acc[13]"
 DEPTH = 6
+#: the configuration merged = 0 was ESTABLISHED under (model/config_tie.py; Wilson 11-15)
+ESTABLISHED_UNDER = {"SYNTH_STRATEGY": "DELAY 4"}
 GROUPS = (("A", r"u_s0\.u_s12\.acc\["), ("B", r"u_s0\.u_s12\.dv_[rq]\["), ("D", r"u_s0\.u_s12\.dv_d\["))
 #: group flops found 11-12: A 75, B 53, D 23. Floors well under, so an RTL
 #: change that renames or drops a group reads red rather than vacuously green.
@@ -369,6 +371,17 @@ def main():
         rc |= 0 if red else 1
     print("  control:   %-40s %s" % ("one select net per group", "green ok" if control else "*** RED"))
     rc |= 0 if control else 1
+    # ⛔ THE CONFIG TIE (Wilson 11-15, model/config_tie.py): merged = 0 was ESTABLISHED on
+    # SYNTH_STRATEGY "DELAY 4"; the configuration of record is "AREA 0" since 9c0df0c, where
+    # CI measures merged = 2. STALE (red) until the expectation is re-established on the
+    # configuration of record -- the ruling re-bases it on b6's measured slack (item 1).
+    import config_tie as CT
+    for label, ok_ in CT.self_test():
+        print("  must-fire: config tie -- %-27s %s" % (label, "ok" if ok_ else "*** MISSED"))
+        rc |= 0 if ok_ else 1
+    for p in CT.tie_problems(ESTABLISHED_UNDER):
+        print("  *** %s" % p)
+        rc = 1
     text = open(os.path.join(ROOT, "src", "project.v"), encoding="utf-8").read()
     n = strip_keep(text)[1]
     ok = n == len(KEPT)
