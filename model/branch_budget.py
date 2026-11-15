@@ -56,6 +56,7 @@ def image_budget(img, iters=80):
         if last.get("br1_B") is None:
             return {"B": None, "reason": "USB lane: no certificate", "lanes": {}}
         usb_n, usb_rmax = last["usb_refills"], last["usb_maxRr"]
+        usb_R = last["usb_R"]
         ug, ugaps, ulat = last["usb_graph"]
         graphs[I.USB_LANE] = (ug, None, ugaps)
         usb_late = max(ulat.values()) if ulat else 0
@@ -106,7 +107,9 @@ def image_budget(img, iters=80):
             if usb:
                 # the word-class split (ArmSplit.arm_release_bus): receive words carry their own
                 # lateness; an ARM word's lateness shows only in its arming check's margin
-                out[I.USB_LANE] = {"R": None, "late_words": None, "max_late": usb_late,
+                # R: the USB lane's certified response past its lateness (Wilson 11-15, R_usb;
+                # lane_cert: max over words of Rr - L, Rr from PrioResp.prio_resp)
+                out[I.USB_LANE] = {"R": usb_R, "late_words": None, "max_late": usb_late,
                                    "max_late_rx": usb_rx_late, "arm_margin": usb_arm_margin}
             return {"B": B, "reason": "certified", "lanes": out}
         if Bn > LIMIT or any(v > LIMIT for v in Rn.values()):

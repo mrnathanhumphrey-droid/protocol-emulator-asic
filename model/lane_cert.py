@@ -570,7 +570,10 @@ def full_report(img, name="image"):
             rx = [lat[w] for w in g if g[w][0]["op"] == I.OP_SHIFTIN and g[w][0]["mod"] & I.MOD_SELF_TIMED]
             full_report.last["usb_rx_late"] = max(rx) if rx else 0
             full_report.last.update({"br1_B": Bn, "usb_refills": nev,
-                                     "usb_maxRr": max(Rr.values()), "usb_graph": (g, gaps, lat)})
+                                     "usb_maxRr": max(Rr.values()), "usb_graph": (g, gaps, lat),
+                                     # the USB lane's response past its lateness (Wilson
+                                     # 11-15, R_usb): max over words of Rr - L
+                                     "usb_R": max(Rr[w] - lat[w] for w in Rr)})
             if Bn is None:
                 print("  branch-1 budget: no fixpoint")
                 fails.append((sched, "br1 budget"))
