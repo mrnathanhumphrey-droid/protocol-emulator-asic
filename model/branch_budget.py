@@ -122,8 +122,15 @@ def _decisions(g, gaps, K, rmax, mmax=40):
     return None
 
 
-def image_budget(img, iters=80):
-    """{'B': int or None, 'reason': str, 'lanes': {lane: {...}}} for `img`"""
+def image_budget(img, iters=80, premise_gaps=None, ready=None):
+    """{'B': int or None, 'reason': str, 'lanes': {lane: {...}}} for `img`.
+    `premise_gaps` {lane: {ARM word: cycles}}: a NAMED peer premise (model/premises.py,
+    Wilson 11-15 call 1) -- the earliest the ARM's edge can come after its release, so its
+    successor's release gap is at least that (ArmSplit.arm_release_bus: released at E + 1).
+    `ready` {lane: {word}}: the prefetch counterfactual (lane_cert.certificate). Both default
+    to none: the record (gen_branch_budget) never passes them."""
+    premise_gaps = premise_gaps or {}
+    ready = ready or {}
     I = LC._isa()
     k = PC.load()
     prem = LC.premises(k)
@@ -131,6 +138,10 @@ def image_budget(img, iters=80):
     lanes = sorted(progs)
     usb = PC.usb_receive_live(progs, I)
     graphs = {l: LC.build(img, l, prem, I) for l in lanes}
+    for l, pg in premise_gaps.items():
+        for w, gp in pg.items():
+            if l in graphs and w in graphs[l][2]:
+                graphs[l][2][w] = [max(graphs[l][2][w][0], gp)] + graphs[l][2][w][1:]
     usb_n, usb_rmax = 0, None
     if usb:
         with contextlib.redirect_stdout(io.StringIO()):
@@ -159,7 +170,8 @@ def image_budget(img, iters=80):
             fts = LC.ft_paths(g, I)
             floor = {c2: LC.ft_flush_late(B) for _c1, c2 in fts.values() if c2 in g}
             xr = {c1: 1 for c1, _c2 in fts.values() if c1 in g}
-            cert = LC.certificate(g, preds, gaps, k, B, 0, floor=floor, xr=xr, rbase=R[l])
+            cert = LC.certificate(g, preds, gaps, k, B, 0, floor=floor, xr=xr, rbase=R[l],
+                                  ready=ready.get(l))
             if cert is None:
                 return {"B": None, "reason": "lane %d: no lateness certificate at B = %d" % (l, B),
                         "lanes": {}}
