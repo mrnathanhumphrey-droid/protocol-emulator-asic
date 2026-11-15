@@ -88,11 +88,13 @@ see.
 - *Depends on it:* the pending-address compare and the hardware commit
   (`src/project.v`), `test/run_usbaddr.py` (M7, M10, M10b: lost ZLP, lost ACK).
 
-**FW-7 — Descriptor `bmAttributes` = `0xC0`.** **Self-powered**, **no remote
-wakeup** (Wilson 11-14): the device draws no power from VBUS (the board powers
-itself; VBUS is left unconnected), and the chip has no remote-wakeup signalling,
-so it must not advertise it (`0xE0` would). Was `0x80` (bus-powered) per step 7a
-ruling Q8 (11-09), which removed remote wakeup from `0xA0`.
+**FW-7 — Descriptor `bmAttributes` = `0xC0`, `bMaxPower` = `0`.** **Self-powered**,
+**no remote wakeup** (Wilson 11-14): the device draws no power from VBUS (the board
+powers itself; VBUS is left unconnected), so it reports 0 mA, and the chip has no
+remote-wakeup signalling, so it must not advertise it (`0xE0` would). Was `0x80`
+(bus-powered) per step 7a ruling Q8 (11-09), which removed remote wakeup from `0xA0`;
+`bMaxPower` was 50 (100 mA). The descriptors are served by the host side, not the chip
+image: changing them moves no chip image.
 - *Depends on it:* nothing on chip; the host-side model `usb_model.py` carries
   the same value.
 - ⚠ Known gap (Wilson 11-14): with no VBUS sense, a powered board pulls D− up
