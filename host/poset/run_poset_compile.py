@@ -144,8 +144,17 @@ def judge():
         if len(win) != 1 or (win[0]["lo_cycles"], win[0]["hi_cycles"]) != (min(leads), max(leads)):
             probs.append("C1 window %s, the golden bus drew %d..%d cycles"
                          % ([(p["lo_cycles"], p["hi_cycles"]) for p in win], min(leads), max(leads)))
-        rest = {a: v for a, v in r["cert"].items() if a != "usb_coresident"}
-        if not all(v.startswith(("OWED", "UNCERTIFIED")) for v in rest.values()):
+        # the certified fields must BE the certificate (recomputed here from model/branch_budget);
+        # every other field claims nothing (OWED / UNCERTIFIED / not applicable)
+        import compile as CC
+        if r["cert"].get("A2") != CC.a2_line(r["image"]):
+            probs.append("C1 cert A2 is not the certificate's: %r" % r["cert"].get("A2"))
+        if r["cert"].get("branch_budget") != CC.branch_budget_line(r["image"]):
+            probs.append("C1 cert branch_budget is not the certificate's: %r"
+                         % r["cert"].get("branch_budget"))
+        rest = {a: v for a, v in r["cert"].items()
+                if a not in ("usb_coresident", "A2", "branch_budget")}
+        if not all(v.startswith(("OWED", "UNCERTIFIED", "not applicable")) for v in rest.values()):
             probs.append("C1 cert claims more than the skeleton does: %s" % r["cert"])
         if r["cert"].get("usb_coresident") != "not applicable (no USB receive)":
             probs.append("C1 SPI image: usb_coresident %r" % r["cert"].get("usb_coresident"))

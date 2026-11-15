@@ -246,6 +246,19 @@ def branch_budget_line(img):
     return "A2-UNCERTIFIED: no finite branch-1 budget (%s); diagnostic: %s" % (r["reason"], diag)
 
 
+def a2_line(img):
+    """A2's per-lane dispatch jitter from the certificate (Wilson / agent 1 11-14; model/branch_budget):
+    each lane's J = 1 + its certified lateness (GapRun.head_late_gap; J = 1 exactly when no word of
+    the lane is late, which j1_ok / OptRun.head_valid_nonbranch gives for a non-branch lane), with the
+    image's certified branch-1 budget B -- or A2-UNCERTIFIED with the certificate's reason."""
+    import branch_budget as BB
+    r = BB.image_budget(img)
+    if r["B"] is None:
+        return "A2-UNCERTIFIED: %s" % r["reason"]
+    lanes = ", ".join("lane %d J %d" % (l, 1 + v["max_late"]) for l, v in sorted(r["lanes"].items()))
+    return "certified: B = %d; %s (model/branch_budget, lane_j)" % (r["B"], lanes)
+
+
 def compile_spec(text, seed=1, hz=None):
     hz = hz or clock.hz()
     log = []
@@ -272,6 +285,6 @@ def compile_spec(text, seed=1, hz=None):
     return {"image": img, "words": used, "width": width, "checkset": cs, "log": log,
             "cert": {"usb_coresident": usb,
                      "branch_budget": branch_budget_line(img),
-                     "A2": "OWED (lanes not exposed by the delegated lowering)",
+                     "A2": a2_line(img),
                      "bounds": "UNCERTIFIED (emulate, sniff, re-run the golden: not wired)",
                      "J_floor": "OWED (needs pe_asm.compute_j on the lowered lanes)"}}
