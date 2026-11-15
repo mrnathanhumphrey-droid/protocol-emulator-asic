@@ -268,6 +268,17 @@ GATES=(
   # A2 off. Clocked lane -> clocked A2 record, unclocked SHIFT -> response
   # record, the bench lookup fails closed, names are unique.
   model/gate_image_bounds.py
+  # ⭐ THE CERTIFICATION STAMP (Wilson 11-15): every image's certified / UNCERTIFIED
+  # field is pe_asm.compute_j's verdict plus a certified R on every unclocked SHIFT
+  # lane; sidecars current; every image of record written --require-cert.
+  model/gate_cert_stamp.py
+  # ⭐ THE POSET COMPILER (agent 2, C1-C9): A2, branch_budget and J_floor recomputed
+  # per compiled image and matched exactly; refusals by name; 6 mutants killed.
+  host/poset/run_poset_compile.py
+  # ⭐ agent 2's lane certificate (gate_lane_cert: spacing, FT, co-resident USB,
+  # the budget record current) and the Lean library's RTL anchors (static, < 1 s).
+  model/gate_lane_cert.py
+  model/gate_lean_anchors.py
   # ⛔ EVERY FIELD AN OPCODE DOES NOT READ IS ZERO (Wilson 11-14): the reads
   # table is generated from src/pe_engine.v's decode (red on an uncovered read
   # site or a stale test/op_reads.json); pe_isa refuses any unread nonzero

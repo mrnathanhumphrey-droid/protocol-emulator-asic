@@ -224,7 +224,7 @@ def coverage_arms():
     os.makedirs(d, exist_ok=True)
     imgs = {"dev": V.image(), "nousb": V.image_nousb()}
     for k, im in imgs.items():
-        I.write_image(os.path.join(d, IMAGE_FILES[k]), im)
+        write_dev(os.path.join(d, IMAGE_FILES[k]), k, im)
     rows = [("addr_" + n.split()[0], h, l, nc, (0, 0), "dev") for n, (h, l, _e, nc) in SCEN.items()]
     rows += [("rst_" + n.split()[0], h, l, nc, win or (0, 0), RS.IMAGE_OF.get(n, "dev"))
              for n, (h, l, _e, nc, win, _lng) in RS.SCEN.items()]
@@ -355,9 +355,20 @@ def sigrok_cross(vvp, tmp, img, pool):
     return probs, sum(1 for p in pk if p["pid"])
 
 
+def write_dev(path, nm, im):
+    """the device image is an IMAGE OF RECORD (Wilson 11-15 stamp ruling): written
+    --require-cert with its stamp sidecar (an uncertified device image raises, nothing
+    written); every other image as before"""
+    if nm == "dev":
+        import cert_stamp as CS
+        CS.write(path, im, require_cert=True)
+    else:
+        I.write_image(path, im)
+
+
 def write_img(tmp, nm, im):
     path = os.path.join(tmp, IMAGE_FILES.get(nm, "usbaddr_%s.hex" % nm))
-    I.write_image(path, im)
+    write_dev(path, nm, im)
     sim_run.scratch_image(GEN, path)
     return path
 

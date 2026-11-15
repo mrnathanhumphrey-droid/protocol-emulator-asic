@@ -77,6 +77,18 @@ SEAMS = (
     ("model/gate_wire_feed.py", "gate_wire_feed.published_problems", "fast", "E"),
     ("model/gate_image_bounds.py", "gate_image_bounds.audit", "fast", "E"),
     ("model/gate_image_bounds.py", "gate_image_bounds.class_problems", "fast", "E"),
+    # the certification stamp + the poset compiler (Wilson 11-15 stamp ruling; agent 2's gates)
+    ("model/gate_cert_stamp.py", "gate_cert_stamp.s1", "fast", "E"),
+    ("model/gate_cert_stamp.py", "gate_cert_stamp.s2", "fast", "E0"),
+    ("model/gate_cert_stamp.py", "gate_cert_stamp.s3", "fast", "E0"),
+    ("model/gate_cert_stamp.py", "gate_cert_stamp.s4", "fast", "E"),
+    ("model/gate_cert_stamp.py", "gate_cert_stamp.s5", "fast", "E"),
+    ("host/poset/run_poset_compile.py", "run_poset_compile.judge", "fast", "E0"),
+    ("model/gate_lean_anchors.py", "gate_lean_anchors.check", "fast", "E"),
+    ("model/gate_lane_cert.py", "gate_lane_cert.check_spacing", "fast", "PRE"),
+    ("model/gate_lane_cert.py", "gate_lane_cert.check_ft", "fast", "PRE"),
+    ("model/gate_lane_cert.py", "gate_lane_cert.check_coresident", "fast", "PRE"),
+    ("model/gate_lane_cert.py", "gate_lane_cert.check_budget", "fast", "PRE"),
     ("model/gen_op_reads.py", "gen_op_reads.extract", "fast", "E1"),
     ("model/gen_op_reads.py", "pe_isa.unread_problems", "fast", "E"),
     ("model/gate_sim_runs.py", "gate_sim_runs.scan", "fast", "E"),
@@ -321,6 +333,15 @@ META_DEBT: dict = {}
 KNOWN_GAPS: dict = {
     # F2 (gate_tool_pinning.audit) CLOSED 10-24: its must-fires now go
     # through audit(), the dispatcher main() uses.
+    # S2 (registered 11-15, agent 2's gate): no must-fire plants a decoder
+    # defect -- e.g. 57e96cf's walk that stopped at the first REARM (13 of
+    # usbdev's 106 words). Owner: agent 2 (an M_CS_DECODE_SHORT must-fire).
+    ("model/gate_cert_stamp.py", "gate_cert_stamp.s2"):
+        "S2 has no must-fire: stubbing the image-vs-lanes decode check stays green",
+    # check 5 (registered 11-15, agent 2's gate): no must-fire plants a stale
+    # or wrong budget record. Owner: agent 2.
+    ("model/gate_lane_cert.py", "gate_lane_cert.check_budget"):
+        "check 5 has no must-fire: stubbing the budget-record currency check stays green",
 }
 
 LINE = re.compile(r"^META-STUB \S+ \S+ calls=(\d+) rc=(\S+)", re.M)

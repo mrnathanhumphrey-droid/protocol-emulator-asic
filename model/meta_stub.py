@@ -38,7 +38,7 @@ ROOT = os.path.dirname(HERE)
 
 def _paths():
     for d in ("model", os.path.join("model", "a2"), "test", "ci",
-              os.path.join("fpga", "sim")):
+              os.path.join("fpga", "sim"), os.path.join("host", "poset")):
         p = os.path.join(ROOT, d)
         if p not in sys.path:
             sys.path.insert(0, p)
