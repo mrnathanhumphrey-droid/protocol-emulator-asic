@@ -706,16 +706,16 @@ def split_counts(lanes):
     for ln in lanes:
         five[ln] = []
         for i, a in enumerate(lanes[ln]):
-            if len(a) not in (5, 6):
+            if len(a) not in (5, 6, 7):
                 raise Reject("lane %d action %d has %d fields; an action is "
-                             "(op, pin, level, delay, q[, count])"
+                             "(op, pin, level, delay, q[, count[, mod]])"
                              % (ln, i, len(a)))
             # ⛔ THE DEFAULT IS 8 ONLY WHERE THE OP READS A BIT COUNT (SHIFT /
             # SHIFTIN): every other op gets 0 in a field it does not read (Wilson
             # 11-14 -- the default 8 had filled ARM / LEVEL / REARM / START /
             # STOP / READBIT words, colliding with ARM's HALF / QUAL bits). The
             # reads are test/op_reads.json, generated from the engine's decode.
-            cnt = int(a[5]) if len(a) == 6 else (8 if int(a[0]) in (OP_SHIFT, OP_SHIFTIN) else 0)
+            cnt = int(a[5]) if len(a) >= 6 else (8 if int(a[0]) in (OP_SHIFT, OP_SHIFTIN) else 0)
             lo, hi = lo_hi.get(int(a[0]), other)
             if not lo <= cnt <= hi:
                 raise Reject("lane %d action %d: count %d is outside %d..%d "
@@ -727,6 +727,26 @@ def split_counts(lanes):
             counts[(ln, i)] = cnt
             five[ln].append(tuple(a[:5]))
     return five, counts
+
+
+def split_mods(lanes):
+    """The optional 7th field `mod` (poset compiler, `within ... else continue`, 11-15): the
+    FALLTHROUGH ARM (pe_isa.ARM_MOD_FT: a timeout retires to PC+1, the edge goes to PC+2).
+    Accepted on an ARM only and only as 0 or ARM_MOD_FT -- every other modifier keeps its
+    own builder (the two-pin LEVEL ARM needs pinb, which a pe_asm action has no field for).
+    Returns ({(lane, index): mod}); the 5- / 6-field actions are unchanged (mod 0)."""
+    mods = {}
+    for ln in lanes:
+        for i, a in enumerate(lanes[ln]):
+            if len(a) < 7:
+                continue
+            m = int(a[6])
+            if m and (int(a[0]) != pe_isa.OP_ARM or m != pe_isa.ARM_MOD_FT):
+                raise Reject("lane %d action %d: mod %d -- a pe_asm action's mod is "
+                             "the FALLTHROUGH ARM's (ARM, mod %d) or 0"
+                             % (ln, i, m, pe_isa.ARM_MOD_FT))
+            mods[(ln, i)] = m
+    return mods
 
 
 def check_open_drain_bank(headers, park_pins=None):
@@ -851,6 +871,7 @@ def assemble(lanes, headers, park_pins=None, timing_checks=True,
         except nonadmissible.ExemptionError as exc:
             raise Reject(str(exc))
     park_pins = park_pins or {}
+    mods = split_mods(lanes)
     lanes, counts = split_counts(lanes)
     # ⛔⛔ DELAY-0 REARM RULING: `assemble` never called `compute_j`, and its
     # 1.6a verdict (`check_queue_slot`) read the same positive-delays-only
@@ -886,7 +907,7 @@ def assemble(lanes, headers, park_pins=None, timing_checks=True,
                         pin, (base[ln] - ACT_BASE) // ACT_BYTES + lvl, dly))
                 else:
                     prog.append(act(op, pin, lvl, dly, count=counts[(ln, i)],
-                                    q=q))
+                                    q=q, mod=mods.get((ln, i), 0)))
                 off += ACT_BYTES
         lp = off
         prog.append(act(OP_REARM, 0, 0, 500))

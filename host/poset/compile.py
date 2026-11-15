@@ -51,13 +51,15 @@ import spec as S  # noqa: E402
 import pe_isa as I  # noqa: E402
 import clock  # noqa: E402
 import proof_constants as PC  # noqa: E402  (the proof's thresholds, derived; the one USB check)
+import math  # noqa: E402
 
 MUTANTS = ("M_PC_NO_CYCLE",      # cycles not refused
            "M_PC_NO_CLOSURE",    # width from direct edges only (path cover, not chain cover)
            "M_PC_WINDOW_SWAP",   # window bounds swapped
            "M_PC_COMPOUND_PASS", # compound patterns silently dropped instead of refused
            "M_PC_USB_NOCHECK",   # the USB co-resident threshold not checked
-           "M_PC_JFLOOR_HEAD")   # J floor from each lane's head action only, not every lowered action
+           "M_PC_JFLOOR_HEAD",   # J floor from each lane's head action only, not every lowered action
+           "M_PC_WITHIN_NOARM")  # `within`: the arming check skipped (a window too tight compiles)
 MUT = os.environ.get("POSET_COMPILE_MUTANT", "")
 if MUT and MUT not in MUTANTS:
     raise SystemExit("poset compile: unknown mutant %r" % MUT)
@@ -176,6 +178,13 @@ def checkset(stmts, hz):
         p = {"pred": "ORDER", "a": _ev_name(a[2]), "op": a[1], "b": _ev_name(a[3]),
              "observed": st["observed"]}
         out.append(p)
+        if st.get("within"):
+            # the obligation's bound is checked on the bus too (an early arrival is the
+            # validator's: the program cannot see it without a window counter)
+            out.append({"pred": "WINDOW", "a": p["a"], "op": a[1], "b": p["b"],
+                        "lo_cycles": round(float(st["within"][0]) * hz / 1e9),
+                        "hi_cycles": round(float(st["within"][1]) * hz / 1e9),
+                        "provenance": "within (program obligation), else %s" % st["else"]})
         if st["during"]:
             lo = round(float(st["during"][0]) * hz / 1e9)
             hi = round(float(st["during"][1]) * hz / 1e9)
@@ -200,7 +209,7 @@ def words_used(img):
 
 
 def lower(v1_claims, seed):
-    """-> (image, the pe_asm.assemble call that produced it: (lanes, headers, kwargs)).
+    """-> (image, the pe_asm.assemble call that produced it: (lanes, headers, kwargs), ROUTE).
     The lowering is CALLED (one source); its pe_asm.assemble is wrapped for the call only,
     so the lanes it was handed are recorded, not decoded back out of the image."""
     import run_pit_rt as RT                     # the existing lowering, called (one source)
@@ -214,7 +223,8 @@ def lower(v1_claims, seed):
     rec.__dict__ = orig.__dict__                # assemble.a2_status / program_bytes stay visible
     pe_asm.assemble = rec
     try:
-        img = bytes(RT.emulation(v1_claims, random.Random(seed))[0])
+        em = RT.emulation(v1_claims, random.Random(seed))
+        img, route = bytes(em[0]), em[2]
     except (RT.NotEmulable, RT.Refused) as e:
         raise Refused("lowering (run_pit_rt.emulation): %s" % e)
     finally:
@@ -223,7 +233,214 @@ def lower(v1_claims, seed):
     if not src:
         raise Refused("lowering: the image did not come from a pe_asm.assemble call "
                       "(%d calls recorded), so its lanes are unknown" % len(calls))
-    return img, src[-1]
+    return img, src[-1], route
+
+
+# ---------------------------------------------------------------------------
+# P4b: `within (lo, hi) else abort | continue` (Wilson 11-15) -- onto the recorded lanes
+# ---------------------------------------------------------------------------
+
+#: the ARM's armed-by bound past its release, beyond its lateness: release + L + 4
+#: (lane_cert: "writeback <= release + L + 4", the USB lane's arming check)
+ARMED_BY = 4
+#: a LEVEL's pin moves at its writeback, >= its release + 2 (lane_cert: a dispatch)
+WB_MIN = 2
+#: the ARM's timeout is the 10-bit delay field (pe_isa.DLY_W)
+T_MAX = (1 << I.DLY_W) - 1
+NEEDS_COUNTER = "unsupported: needs window counter (V2_MASTER_LIST)"
+
+
+def _route_pin(route, w):
+    """the chip pin a sniffed wire is connected to (tb_rt.v ROUTE: 1 = uo_out[k], 2 = uio_in[k])"""
+    code = (route >> (8 * w)) & 0xFF
+    return {1: I.UO0 + (code & 7), 2: code & 7}.get(code >> 4)
+
+
+def _touched(lanes, headers):
+    """every pin a word of the lowering names, plus each programmed lane's header pins"""
+    pins = {a[1] for acts in lanes.values() for a in acts
+            if a[0] != I.OP_LOOP and a[1] < I.N_PINS}
+    for ln in lanes:
+        pins |= {p for p in headers[ln][:2] if p < I.N_PINS}
+    return pins
+
+
+def _transitions(acts, pin, level):
+    """indices of the LEVEL words driving `pin` to `level` from the other level (the lane's
+    previous LEVEL on that pin, cyclically: the lane loops)"""
+    lv = [(i, a[2]) for i, a in enumerate(acts) if a[0] == I.OP_LEVEL and a[1] == pin]
+    return [i for n, (i, l) in enumerate(lv) if l == level and lv[n - 1][1] != level]
+
+
+def _noops(d, dstar):
+    """timed no-ops (LEVEL on PIN_NONE, NopSplit) for `d` cycles, each in [D*, T_MAX]"""
+    out = []
+    while d > T_MAX:
+        step = min(T_MAX, d - dstar)
+        out.append((I.OP_LEVEL, I.PIN_NONE, 0, step, 0, 0))
+        d -= step
+    return out + [(I.OP_LEVEL, I.PIN_NONE, 0, d, 0, 0)]
+
+
+def _block(a, nxt, p, pre, T, dstar):
+    """the words that replace A's word -> (words, the ARM's offset in them)"""
+    d1 = pre if pre < 2 * dstar else dstar
+    new = [a[:3] + (d1,) + a[4:]] + (_noops(pre - d1, dstar) if pre > d1 else [])
+    iarm = len(new)
+    arm = (I.OP_ARM, p["B_pin"], p["B_level"], T, 0, 0)
+    if p["else"] == "abort":
+        new.append(arm)
+    else:
+        new += [arm + (I.ARM_MOD_FT,), (I.OP_LEVEL, I.PIN_NONE, 0, dstar, 0, 0)]
+        if nxt is not None and nxt[0] in (I.OP_SHIFT, I.OP_SHIFTIN, I.OP_SHIFTI):
+            new.append((I.OP_LEVEL, I.PIN_NONE, 0, dstar, 0, 0))     # the join (PC+2)
+    return new, iarm
+
+
+def windows(stmts, lowered, route, hz):
+    """-> (lanes, route, {"windows": [...], "cert": str}) with every `within` lowered, or
+    Refused by name.
+
+    Per statement `A -> B within (lo, hi) else X` (A, B single Rise / Fall events):
+      * A is a transition the lowering MAKES: a LEVEL word on A's routed pin; B is on a wire
+        we do NOT drive (an unconnected wire is routed to the lowest `uio` input no word
+        names). B on a pin our program names is refused by name.
+      * after each A word: A's spacing becomes the arming lead `pre` (no-ops past D*), then
+        the ARM on B's pin and edge (level 1 rise, 0 fall: pe_engine.v l_armedge), timeout
+        T = hi + tol - pre, tol = A's lateness + 4 + SYNC_MAX (A's pin moves by its
+        writeback; B is seen up to SYNC_MAX later):
+          abort    a plain timed ARM: the edge releases the next word (PC+1); a timeout
+                   halts the lane (live / armed cleared, l_timeout set, host status ovr)
+          continue a FALLTHROUGH ARM: the timeout retires to PC+1, a no-op that runs into
+                   PC+2; the edge goes to PC+2 -- the original next word, behind a join
+                   no-op when that word is a SHIFT (a FALLTHROUGH edge path cannot start
+                   with one: refilled after the flush, pe_isa / lane_cert)
+      * the ARMING CHECK (ArmSplit's premise; L = the certificate's lateness of the ARM):
+        armed by A + pre + L + 4, before B can be seen (A's writeback >= A + 2, + lo,
+        + SYNC_MIN): pre <= lo + 2 + SYNC_MIN - 5 - L. pre < D* is a window too tight,
+        refused by name. L comes from the certificate of the windowed image (iterated).
+      * lo > 0 rests on the PEER not answering before lo: only a `source datasheet` bound
+        says so. Without one, an early B is the program's to catch -> NEEDS_COUNTER.
+      * T > the 10-bit timeout field -> NEEDS_COUNTER."""
+    import lane_cert as LC
+    import branch_budget as BB
+    import pe_asm
+    k = PC.load()
+    dstar = k["dstar"]
+    lanes0, hdr, a_, kw = lowered
+    want = []
+    for st in stmts:
+        if not st.get("within"):
+            continue
+        a = st["ast"]
+        if a[0] != "bin" or a[1] not in ("->", "|>") or a[2][0] != "ev" or a[3][0] != "ev":
+            raise Refused("within: `A -> B within ...` takes two single events, got %s"
+                          % S.render_ast(a))
+        (_e, ka, wa), (_f, kb, wb) = a[2], a[3]
+        for kd, nm in ((ka, "A"), (kb, "B")):
+            if kd not in ("Rise", "Fall"):
+                raise Refused("within: %s is %s; a window's events are Rise / Fall (one pin, "
+                              "one direction: an ARM's edge)" % (nm, kd))
+        lo_ns, hi_ns = (float(x) for x in st["within"])
+        if lo_ns > 0 and not (isinstance(st["source"], tuple) and st["source"][0] == "datasheet"):
+            raise Refused("within (%s ns, %s ns): an arrival before lo would be the program's "
+                          "to catch -- %s; a lower bound the peer guarantees is written with "
+                          "`source datasheet`" % (st["within"] + (NEEDS_COUNTER,)))
+        want.append((st, ka, wa[0], kb, wb[0], lo_ns, hi_ns))
+    if not want:
+        return lanes0, route, None
+    touched = _touched(lanes0, hdr)
+    # a parked lane's header pin loads too (pe_asm.check_park_overlap): never B's input
+    pk = dict(kw.get("park_pins") or (a_[0] if a_ else None) or {})
+    touched |= {pk.get(ln, pe_asm.PARK_PIN) for ln in range(I.N_LANES) if ln not in lanes0}
+    plan = []
+    for st, ka, wa, kb, wb, lo_ns, hi_ns in want:
+        pa = _route_pin(route, wa)
+        if pa is None or pa not in touched:
+            raise Refused("within: A = %s(uio%d) is not a wire the lowering drives" % (ka, wa))
+        pb = _route_pin(route, wb)
+        if pb is not None and (pb in touched or pb >= I.N_UIO):
+            raise Refused("within: B = %s(uio%d) is on a wire we drive (pin %d) -- for our own "
+                          "outputs `within` would constrain the delay, not wait" % (kb, wb, pb))
+        if pb is None:
+            used = touched | {_route_pin(route, w) for w in range(I.N_UIO)}
+            free = [q for q in range(I.N_UIO) if q not in used]
+            if not free:
+                raise Refused("within: no free uio input for B = %s(uio%d)" % (kb, wb))
+            pb = free[0]
+            route |= (0x20 | pb) << (8 * wb)
+            touched.add(pb)
+        sites = [(ln, i) for ln, acts in sorted(lanes0.items())
+                 for i in _transitions(acts, pa, 1 if ka == "Rise" else 0)]
+        if not sites:
+            raise Refused("within: no LEVEL word of the lowering makes A = %s(uio%d)" % (ka, wa))
+        plan.append({"stmt": S.render_statement(st), "A_pin": pa, "B_pin": pb, "B_wire": wb,
+                     "B_level": 1 if kb == "Rise" else 0, "else": st["else"],
+                     "lo": math.floor(lo_ns * hz / 1e9), "hi": math.ceil(hi_ns * hz / 1e9),
+                     "sites": sites})
+    site_plan = {}
+    for p in plan:
+        for s in p["sites"]:
+            if s in site_plan:
+                raise Refused("within: two windows after lane %d word %d" % s)
+            site_plan[s] = p
+    late = {s: (0, 0) for s in site_plan}       # site -> (L of A's word, L of the ARM)
+    for _round in range(8):
+        lanes, where = {}, {}
+        for ln, acts in sorted(lanes0.items()):
+            out = []
+            for i, a in enumerate(acts):
+                p = site_plan.get((ln, i))
+                if p is None:
+                    out.append(a)
+                    continue
+                la, larm = late[(ln, i)]
+                pre = p["lo"] + WB_MIN + LC.SYNC_MIN - (ARMED_BY + 1) - larm
+                if MUT == "M_PC_WITHIN_NOARM":
+                    pre = max(pre, dstar)
+                if pre < dstar:
+                    raise Refused("within: window too tight -- after lane %d word %d the ARM "
+                                  "would be armed by A + %d + L %d + %d, but B can be seen from "
+                                  "A + %d (lo %d cycles): lo must leave D* = %d"
+                                  % (ln, i, dstar, larm, ARMED_BY,
+                                     p["lo"] + WB_MIN + LC.SYNC_MIN, p["lo"], dstar))
+                T = p["hi"] + la + ARMED_BY + LC.SYNC_MAX - pre
+                if T > T_MAX:
+                    raise Refused("within: timeout %d cycles > %d (the ARM's 10-bit field) -- %s"
+                                  % (T, T_MAX, NEEDS_COUNTER))
+                new, iarm = _block(a, acts[i + 1] if i + 1 < len(acts) else None, p, pre, T, dstar)
+                where[(ln, i)] = (len(out), len(out) + iarm, pre, T, p)
+                out += new
+            lanes[ln] = out
+        try:
+            img = bytes(pe_asm.assemble(lanes, hdr, *a_, **kw))
+        except pe_asm.Reject as e:
+            raise Refused("within: pe_asm refused the windowed program: %s" % e)
+        bb = BB.image_budget(img)
+        info = _win(where)
+        if bb["B"] is None:
+            return lanes, route, dict(info, cert="UNCERTIFIED: the arming check needs the "
+                                      "lateness certificate (%s)" % bb["reason"])
+        now = {}
+        for s, (ia, iarm, _pre, _T, _p) in where.items():
+            w0 = (I.read_header(img, s[0])["base"] - I.ACT_BASE) // I.ACT_BYTES
+            lat = bb["lanes"][s[0]]["lat"]
+            now[s] = (lat.get(w0 + ia, 0), lat.get(w0 + iarm, 0))
+        if all(now[s][0] <= late[s][0] and now[s][1] <= late[s][1] for s in now):
+            return lanes, route, dict(info, cert="certified: every ARM armed before its B can "
+                                      "be seen (lateness from the certificate, B = %d): %s"
+                                      % (bb["B"], "; ".join(
+                                          "lane %d word %d L %d, A L %d" % (s[0], where[s][1],
+                                                                            now[s][1], now[s][0])
+                                          for s in sorted(now))))
+        late = {s: (max(now[s][0], late[s][0]), max(now[s][1], late[s][1])) for s in now}
+    return lanes, route, dict(info, cert="UNCERTIFIED: the arming lead did not settle in 8 rounds")
+
+
+def _win(where):
+    return {"windows": [{"lane": ln, "A_word": ia, "ARM_word": iarm, "pre": pre, "T": T,
+                         "B_pin": p["B_pin"], "else": p["else"], "stmt": p["stmt"]}
+                        for (ln, _i), (ia, iarm, pre, T, p) in sorted(where.items())]}
 
 
 def finish(img, require_cert=False):
@@ -319,19 +536,29 @@ def compile_spec(text, seed=1, hz=None, require_cert=False):
     log.append("P2 order: %d event kinds, %d order edges, width %d <= %d" % (len(nodes), len(edges), width, I.N_LANES))
     cs = checkset(stmts, hz)
     log.append("P3 checkset: %d predicates (from the spec alone)" % len(cs))
-    img, (lanes, _hdr, _a, _kw) = lower(parsed["v1"], seed)
+    img, (lanes, _hdr, _a, _kw), route = lower(parsed["v1"], seed)
+    lanes, route, win = windows(stmts, (lanes, _hdr, _a, _kw), route, hz)
+    if win is not None:
+        import pe_asm
+        img = bytes(pe_asm.assemble(lanes, _hdr, *_a, **_kw))
+        log.append("P4b within: %d window(s) lowered onto the recorded lanes; %s"
+                   % (len(win["windows"]), win["cert"]))
+        if require_cert and not win["cert"].startswith("certified"):
+            raise Refused("within: %s" % win["cert"])
     used, usb = target_check(img)
     st = finish(img, require_cert)
     log.append("P4 lower: run_pit_rt.emulation, pe_asm accepted; P5 target: %d / %d words; USB: %s"
                % (used, N_WORDS, usb))
     import cert_stamp as CS
     return {"image": img, "lowered": (lanes, _hdr, _a, _kw), "words": used, "width": width,
-            "checkset": cs, "log": log, "stamp": st,
+            "checkset": cs, "log": log, "stamp": st, "route": route,
+            "windows": win["windows"] if win else [],
             "cert": {"usb_coresident": usb,
                      "branch_budget": branch_budget_line(img),
                      "A2": a2_line(img),
                      "bounds": "UNCERTIFIED (emulate, sniff, re-run the golden: not wired)",
-                     "J_floor": CS.line(st)}}
+                     "J_floor": CS.line(st),
+                     "within": win["cert"] if win else "not applicable (no within)"}}
 
 
 def cli(argv):

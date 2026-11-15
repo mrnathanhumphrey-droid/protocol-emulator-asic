@@ -143,7 +143,14 @@ def image_budget(img, iters=80):
         lat, rmax = {}, {}
         for l in generic:
             g, preds, gaps = graphs[l]
-            cert = LC.certificate(g, preds, gaps, k, B, 0, rbase=R[l])
+            # a FALLTHROUGH ARM on a generic lane (the poset compiler's `else continue`):
+            # as on the USB lane (lane_cert.full_report) -- the edge flushes, so PC+2's head is
+            # valid by its release + flush_refill_late + B (FlushLate.flush_head_late); the
+            # timeout's decision only disarms, so PC+1 waits one more decision (disarm_noDec)
+            fts = LC.ft_paths(g, I)
+            floor = {c2: LC.ft_flush_late(B) for _c1, c2 in fts.values() if c2 in g}
+            xr = {c1: 1 for c1, _c2 in fts.values() if c1 in g}
+            cert = LC.certificate(g, preds, gaps, k, B, 0, floor=floor, xr=xr, rbase=R[l])
             if cert is None:
                 return {"B": None, "reason": "lane %d: no lateness certificate at B = %d" % (l, B),
                         "lanes": {}}
@@ -190,6 +197,8 @@ def image_budget(img, iters=80):
                                                and w not in gated] or [0])}
                 if ag:
                     out[l]["arm_margin"] = min(ag.values())
+                # per word (the poset compiler's arming check reads it; not in the record)
+                out[l]["lat"] = dict(lat[l])
             if usb:
                 # the word-class split (ArmSplit.arm_release_bus): receive words carry their own
                 # lateness; an ARM word's lateness shows only in its arming check's margin

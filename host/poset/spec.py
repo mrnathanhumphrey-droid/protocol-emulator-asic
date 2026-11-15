@@ -9,7 +9,10 @@ grammar (vol5 operators, bounded repeat, `during`, clauses) applies to `pattern`
 `never` lines only.
 
 A statement is a dict: {"kind": "pattern"|"never", "ast", "during": (lo_str, hi_str) | None,
+"within": (lo_str, hi_str) | None, "else": None | "abort" | "continue",
 "observed": int | None, "given": str | None, "source": None | "data" | ("datasheet", str)}.
+`within (lo, hi) else ACTION` (Wilson 11-15): a PROGRAM OBLIGATION, its own keyword -- `during`
+is never overloaded (it keeps its Rapide meaning, an observation); one timing per statement.
 An AST node is ("ev", KIND, (wire, ...)) | ("bin", op, left, right) | ("rep", n, node).
 `during` keeps the numbers as written, so render(parse(t)) reproduces them exactly.
 
@@ -44,6 +47,8 @@ KINDS = {"Rise": (1, 1), "Fall": (1, 1), "Edge": (1, 1),
          "Start": (1, 2), "Stop": (1, 2),           # (sda) as v1 writes it, or (sda, scl)
          "Frame": (1, 1), "Byte": (1, 1)}
 BINOPS = ("->", "|>", "||", "~", "or", "and")
+#: the closed `else` set (Wilson 11-15: accepted, closed; a general handler is V2_MASTER_LIST)
+ELSE_ACTIONS = ("abort", "continue")
 #: names may carry inner hyphens (v1's condition `all-wires-sniffed`); a hyphen must be
 #: followed by a letter, so `x->y` still tokenizes as x, ->, y
 _TOK = re.compile(r'\s*(->|\|>|\|\||~|<|\(|\)|\[|\]|,|"[^"]*"|\d+(?:\.\d+)?'
@@ -145,10 +150,10 @@ def parse_statement(s):
     """`pattern ...` / `never ...` without the `;` -> statement dict."""
     kind, _, rest = s.partition(" ")
     p = _P(_tokens(rest))
-    st = {"kind": kind, "ast": p.pattern(), "during": None, "observed": None,
-          "given": None, "source": None}
-    if p.peek() == "during":
-        p.take()
+    st = {"kind": kind, "ast": p.pattern(), "during": None, "within": None, "else": None,
+          "observed": None, "given": None, "source": None}
+    if p.peek() in ("during", "within"):
+        word = p.take()
         p.take("(")
         lo = p.take(); p.take("ns"); p.take(",")
         hi = p.take(); p.take("ns"); p.take(")")
@@ -156,10 +161,28 @@ def parse_statement(s):
             if not re.fullmatch(r"\d+(?:\.\d+)?", v):
                 raise SpecError("not a time: %r" % v)
         if float(lo) > float(hi):
-            raise SpecError("during (%s ns, %s ns): lower bound above upper" % (lo, hi))
-        st["during"] = (lo, hi)
+            raise SpecError("%s (%s ns, %s ns): lower bound above upper" % (word, lo, hi))
+        st[word] = (lo, hi)
+        if word == "within":
+            if kind != "pattern":
+                raise SpecError("`within` is a program obligation on a `pattern`; a `never` "
+                                "statement has no event to wait for")
+            if p.peek() != "else":
+                raise SpecError("`within (lo, hi)` takes `else %s`: the action when B has not "
+                                "come by hi" % " | ".join(ELSE_ACTIONS))
+            p.take()
+            act = p.peek()
+            if act not in ELSE_ACTIONS:
+                raise SpecError("else takes %s (the closed set, Wilson 11-15), got %r -- a "
+                                "general handler is not in v2" % (" or ".join(ELSE_ACTIONS), act))
+            st["else"] = p.take()
     while p.peek() is not None:
         c = p.take()
+        if c in ("during", "within"):
+            raise SpecError("one timing per statement: `during` (observed) or `within` "
+                            "(a program obligation), not %r after it" % c)
+        if c == "else":
+            raise SpecError("`else` needs `within (lo, hi)` before it")
         if c == "observed":
             n = p.take()
             if not n.isdigit():
@@ -228,6 +251,8 @@ def render_statement(st):
     s = "%s %s" % (st["kind"], render_ast(st["ast"]))
     if st["during"]:
         s += " during (%s ns, %s ns)" % st["during"]
+    if st.get("within"):
+        s += " within (%s ns, %s ns) else %s" % (st["within"] + (st["else"],))
     if st["observed"] is not None:
         s += " observed %d" % st["observed"]
     if st["given"]:

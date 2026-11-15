@@ -17,6 +17,14 @@
      image WITHOUT USB accepted; coresident_usb implies coresident_min_d
   C9 every reachable word is checked: a co-resident lane whose fast section (coresident_usb - 1)
      sits past its first REARM, reached only by a branch, is refused naming that word
+  C10 `within (lo, hi) else abort | continue` (Wilson 11-15), on the SPI slice with B on an
+     unconnected wire: one window per CS fall; READ BACK FROM THE IMAGE -- the ARM on the routed
+     uio input, plain (abort) or FALLTHROUGH with a no-op PC+1 and a non-SHIFT PC+2 (continue);
+     on the certified lateness, armed before B can be seen and a deadline covering a B at hi;
+     the recorded lanes re-assemble to the image; a WINDOW predicate for the bound. Static
+     must-fires, each refused BY NAME: too tight, a timeout over the 10-bit field and lo > 0
+     without a datasheet bound ("needs window counter"), B on a wire we drive, A not ours, B
+     not one edge
 Must-fires: every compile.MUTANTS entry, run IN-PROCESS through the same judge, turns this gate red.
 
 POSITIVE TOKEN: `GATE poset_compile: PASSED`.
@@ -48,6 +56,7 @@ SCRATCH_MUTANTS = {
     "M_PC_COMPOUND_PASS": "killed in-process by this gate",
     "M_PC_USB_NOCHECK": "killed in-process by this gate",
     "M_PC_JFLOOR_HEAD": "killed in-process by this gate",
+    "M_PC_WITHIN_NOARM": "killed in-process by this gate",
 }
 #: the literal above must name exactly the module's MUTANTS (checked at start-up)
 if set(SCRATCH_MUTANTS) != set(C.MUTANTS):
@@ -119,6 +128,113 @@ def refused_with(text, needle):
     return False, "compiled"
 
 
+WIN = "pattern Fall(uio3) -> Fall(uio5) within (2000 ns, 10000 ns) else %s source datasheet \"X\";"
+#: the static must-fires (Wilson 11-15 item (b)/(c), the proposal's three, and the shape rules)
+WIN_REFUSE = {
+    "window too tight": ("pattern Fall(uio3) -> Fall(uio5) within (300 ns, 10000 ns) else abort "
+                         "source datasheet \"X\";", "window too tight"),
+    "timeout over the 10-bit field": ("pattern Fall(uio3) -> Fall(uio5) within (2000 ns, 30000 ns) "
+                                      "else abort source datasheet \"X\";", "needs window counter"),
+    "lo > 0 the program would have to catch": ("pattern Fall(uio3) -> Fall(uio5) within "
+                                               "(2000 ns, 10000 ns) else abort observed 3;",
+                                               "needs window counter"),
+    "B on a wire we drive": ("pattern Fall(uio3) -> Fall(uio1) within (2000 ns, 10000 ns) else abort "
+                             "source datasheet \"X\";", "on a wire we drive"),
+    "A not a wire we drive": ("pattern Fall(uio5) -> Fall(uio6) within (2000 ns, 10000 ns) else abort "
+                              "source datasheet \"X\";", "not a wire the lowering drives"),
+    "B not one edge": ("pattern Fall(uio3) -> Edge(uio5) within (2000 ns, 10000 ns) else abort "
+                       "source datasheet \"X\";", "Rise / Fall"),
+}
+
+
+def c10():
+    """`within` / `else` (Wilson 11-15): both lowerings read back FROM THE IMAGE, the arming
+    and deadline inequalities on the certified lateness, and the static refusals."""
+    import pe_asm
+    import branch_budget as BB
+    import lane_cert as LC
+    import proof_constants as PC
+    I, probs = C.I, []
+    lo_c, hi_c = 2000 * HZ // 10 ** 9, -(-10000 * HZ // 10 ** 9)
+    plain = C.compile_spec(body(), seed=7)
+    cs_pin = C._route_pin(plain["route"], 3)
+    falls = [i for i, a in enumerate(plain["lowered"][0][0])
+             if a[0] == I.OP_LEVEL and a[1] == cs_pin and a[2] == 0]
+    for kind in ("abort", "continue"):
+        tag = "C10 else %s" % kind
+        try:
+            r = C.compile_spec(body(WIN % kind), seed=7)
+        except C.Refused as e:
+            probs.append("%s refused: %s" % (tag, e))
+            continue
+        lanes, hdr, a_, kw = r["lowered"]
+        if bytes(pe_asm.assemble(lanes, hdr, *a_, **kw)) != r["image"]:
+            probs.append("%s: the recorded lanes do not re-assemble to the image" % tag)
+        if not r["cert"]["within"].startswith("certified"):
+            probs.append("%s: within %r" % (tag, r["cert"]["within"]))
+        if len(r["windows"]) != len(falls):
+            probs.append("%s: %d windows, the lowering makes %d CS falls"
+                         % (tag, len(r["windows"]), len(falls)))
+        if not [p for p in r["checkset"] if p["pred"] == "WINDOW"
+                and (p["lo_cycles"], p["hi_cycles"]) == (round(2000 * HZ / 1e9), round(10000 * HZ / 1e9))]:
+            probs.append("%s: no WINDOW predicate for the obligation" % tag)
+        pb = C._route_pin(r["route"], 5)
+        img = r["image"]
+        words = {ln: dict(PC.lane_words(img, ln, I)) for ln in lanes}
+        named = {x["pin"] for ln in words for x in words[ln].values()
+                 if x["op"] != I.OP_ARM and x["pin"] < I.N_PINS}
+        if pb is None or pb >= I.N_UIO or pb in named:
+            probs.append("%s: B routed to pin %s (want a uio input no other word names)" % (tag, pb))
+        bb = BB.image_budget(img)
+        for w in r["windows"]:
+            w0 = (I.read_header(img, w["lane"])["base"] - I.ACT_BASE) // I.ACT_BYTES
+            ws = words[w["lane"]]
+            arm = ws.get(w0 + w["ARM_word"])
+            if not arm or arm["op"] != I.OP_ARM or arm["pin"] != pb or arm["level"] != 0:
+                probs.append("%s: lane %d word %d is %s, want an ARM on pin %s for a fall"
+                             % (tag, w["lane"], w["ARM_word"], arm, pb))
+                continue
+            ft = bool(arm["mod"] & I.ARM_MOD_FT)
+            if ft != (kind == "continue"):
+                probs.append("%s: ARM FALLTHROUGH %s" % (tag, ft))
+            if kind == "continue":
+                p1, p2 = ws.get(w0 + w["ARM_word"] + 1), ws.get(w0 + w["ARM_word"] + 2)
+                if not p1 or p1["op"] != I.OP_LEVEL or p1["pin"] < I.N_PINS:
+                    probs.append("%s: PC+1 is %s, want a no-op" % (tag, p1))
+                if not p2 or p2["op"] in (I.OP_SHIFT, I.OP_SHIFTIN, I.OP_SHIFTI):
+                    probs.append("%s: PC+2 is %s (a FALLTHROUGH edge path cannot start a SHIFT)"
+                                 % (tag, p2))
+            # the image's own numbers: the lead = A's delay + the no-ops before the ARM
+            pre = sum(ws[w0 + j]["delay"] for j in range(w["A_word"], w["ARM_word"]))
+            lat = bb["lanes"][w["lane"]]["lat"] if bb["B"] is not None else {}
+            la, larm = lat.get(w0 + w["A_word"]), lat.get(w0 + w["ARM_word"])
+            if la is None or larm is None:
+                probs.append("%s: no certified lateness for the window's words" % tag)
+                continue
+            if not pre + larm + C.ARMED_BY + 1 <= lo_c + C.WB_MIN + LC.SYNC_MIN:
+                probs.append("%s: armed by A + %d, B seen from A + %d" % (
+                    tag, pre + larm + C.ARMED_BY, lo_c + C.WB_MIN + LC.SYNC_MIN))
+            if not pre + arm["delay"] >= hi_c + la + C.ARMED_BY + LC.SYNC_MAX:
+                probs.append("%s: deadline A + %d before a B at hi seen late (A + %d)" % (
+                    tag, pre + arm["delay"], hi_c + la + C.ARMED_BY + LC.SYNC_MAX))
+            if arm["delay"] > C.T_MAX:
+                probs.append("%s: timeout %d > %d" % (tag, arm["delay"], C.T_MAX))
+    for why, (st, needle) in WIN_REFUSE.items():
+        ok, msg = refused_with(body(st), needle)
+        if not ok:
+            probs.append("C10 %s: not refused by name (%s)" % (why, msg[:120]))
+    # pe_asm's 7th field: the FALLTHROUGH ARM's mod only
+    for bad in ((I.OP_LEVEL, I.UO0, 1, 20, 0, 0, I.ARM_MOD_FT), (I.OP_ARM, 0, 0, 40, 0, 0, I.ARM_MOD_LEVEL2)):
+        try:
+            pe_asm.split_mods({0: [bad]})
+            probs.append("C10 pe_asm accepted mod on %s" % (bad,))
+        except pe_asm.Reject:
+            pass
+    if plain["cert"].get("within") != "not applicable (no within)":
+        probs.append("C10 a spec without `within`: %r" % plain["cert"].get("within"))
+    return probs
+
+
 def judge():
     probs = []
     # C1
@@ -173,6 +289,7 @@ def judge():
             probs.append("C1 cert claims more than the skeleton does: %s" % r["cert"])
         if r["cert"].get("usb_coresident") != "not applicable (no USB receive)":
             probs.append("C1 SPI image: usb_coresident %r" % r["cert"].get("usb_coresident"))
+    probs += c10()
     # C8: POSET_SPEC.md's generated passages match the constants file
     import gen_spec_doc
     probs += ["C8 %s" % p for p in gen_spec_doc.stale()]
@@ -271,7 +388,7 @@ def main() -> int:
     if probs:
         print("GATE poset_compile: FAILED (%d)" % len(probs))
         return 1
-    print("GATE poset_compile: PASSED (C1-C9; %d / %d mutants killed)" % (len(C.MUTANTS), len(C.MUTANTS)))
+    print("GATE poset_compile: PASSED (C1-C10; %d / %d mutants killed)" % (len(C.MUTANTS), len(C.MUTANTS)))
     return 0
 
 
