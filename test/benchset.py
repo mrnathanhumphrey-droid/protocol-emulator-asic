@@ -61,6 +61,14 @@ EXCLUDED = {
         "spec, judged by `test/run_pit_rt.py` in `ci/run_gates.sh`. Its arms "
         "are captured line traces a fixed arm list does not express "
         "(coverage: gate_coverage's waivers)."),
+    "tb_within.v": (
+        "THE `within` / `else` SIMULATION MUST-FIRES (Wilson 11-15, agent 2). "
+        "One chip runs an image the poset compiler lowered with a window; a "
+        "peer pulls B low a set delay after each CS fall. Its arms are "
+        "compiled specs plus a peer delay (B inside the window / late, for "
+        "`else abort` and `else continue`), which a fixed arm list does not "
+        "express. Judged by `test/run_within_mf.py` (token "
+        "`GATE within_mf: PASSED`); CI registration owed (agent 1)."),
     "tb_spitgt.v": (
         "THE SPI-TARGET WITNESS (build plan B3/B4). An SPI master on its own "
         "clock drives each arm with a mode, a rate and host timing (tCSS, "
