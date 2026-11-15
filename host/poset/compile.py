@@ -9,9 +9,12 @@ skeleton reaches, plus a refusal that NAMES the failing constraint when the spec
              the image (guiding doc §5: a check-set compiled from the same source as the
              program and run against its own output is circular)
   cert       the A2 certificate: per image (model/branch_budget, `A2`, `branch_budget`) and
-             the J floor (pe_asm.compute_j on the LOWERED lanes, `J_floor`: the lanes are
-             recorded from the lowering's own pe_asm.assemble call and must re-assemble to
-             the image byte for byte).
+             the J floor (`J_floor`, the image's certification STAMP, model/cert_stamp:
+             pe_asm.compute_j on the image's lanes; the gate cross-checks it against the
+             lanes the lowering handed pe_asm.assemble, which must re-assemble to the image
+             byte for byte). Wilson 11-15: UNCERTIFIED is a stamp, refusal is opt-in --
+             the image is built and stamped; `require_cert` (--require-cert) refuses an
+             uncertified one with the same reason, as pe_asm's command line does.
 
 Passes
   P1 parse      host/poset/spec.parse (v1 lines through pit_emit, unchanged)
@@ -223,19 +226,21 @@ def lower(v1_claims, seed):
     return img, src[-1]
 
 
-def j_floor_line(lanes):
-    """`J_floor` from the lowered lanes: pe_asm.compute_j (port feasibility d_min >= D*,
-    admissibility, J = j_of(d_min)). A refusal there is reported, UNCERTIFIED, with its
-    reason -- as A2 reports an uncertified image -- not turned into a compile refusal."""
-    import pe_asm
-    ln, _counts = pe_asm.split_counts(lanes)
+def finish(img, require_cert=False):
+    """the image's certification stamp (model/cert_stamp.stamp: compute_j on the image's
+    lanes) -- the SAME field pe_asm's command line prints. require_cert: an uncertified
+    stamp is Refused with the stamp's reason (cert_stamp.Uncertified's text)."""
+    import cert_stamp as CS
     if MUT == "M_PC_JFLOOR_HEAD":
-        ln = {k: v[:1] for k, v in ln.items()}
-    try:
-        d_min, j = pe_asm.compute_j(ln)
-    except pe_asm.Reject as e:
-        return "UNCERTIFIED: pe_asm.compute_j refuses: %s" % e
-    return "J %d at d_min %d (pe_asm.compute_j, lowered lanes)" % (j, d_min)
+        st = CS.stamp_lanes({k: v[:1] for k, v in CS.image_lanes(img).items()})
+    else:
+        st = CS.stamp(img)
+    if require_cert:
+        try:
+            CS.require(st, "program")
+        except CS.Uncertified as e:
+            raise Refused(str(e))
+    return st
 
 
 def target_check(img):
@@ -295,7 +300,7 @@ def a2_line(img):
     return "certified: B = %d; %s (model/branch_budget, lane_j)" % (r["B"], lanes)
 
 
-def compile_spec(text, seed=1, hz=None):
+def compile_spec(text, seed=1, hz=None, require_cert=False):
     hz = hz or clock.hz()
     log = []
     try:
@@ -316,12 +321,44 @@ def compile_spec(text, seed=1, hz=None):
     log.append("P3 checkset: %d predicates (from the spec alone)" % len(cs))
     img, (lanes, _hdr, _a, _kw) = lower(parsed["v1"], seed)
     used, usb = target_check(img)
+    st = finish(img, require_cert)
     log.append("P4 lower: run_pit_rt.emulation, pe_asm accepted; P5 target: %d / %d words; USB: %s"
                % (used, N_WORDS, usb))
+    import cert_stamp as CS
     return {"image": img, "lowered": (lanes, _hdr, _a, _kw), "words": used, "width": width,
-            "checkset": cs, "log": log,
+            "checkset": cs, "log": log, "stamp": st,
             "cert": {"usb_coresident": usb,
                      "branch_budget": branch_budget_line(img),
                      "A2": a2_line(img),
                      "bounds": "UNCERTIFIED (emulate, sniff, re-run the golden: not wired)",
-                     "J_floor": j_floor_line(lanes)}}
+                     "J_floor": CS.line(st)}}
+
+
+def cli(argv):
+    """`python host/poset/compile.py SPEC [--out X.hex] [--require-cert] [--seed N]`: the
+    same stamp output and exit rule as pe_asm's command line (`CERT <field JSON>`)."""
+    import argparse
+    import json
+    import cert_stamp as CS
+    ap = argparse.ArgumentParser(prog="poset compile")
+    ap.add_argument("spec")
+    ap.add_argument("--out")
+    ap.add_argument("--require-cert", action="store_true")
+    ap.add_argument("--seed", type=int, default=1)
+    a = ap.parse_args(argv)
+    with open(a.spec, encoding="utf-8") as fh:
+        text = fh.read()
+    try:
+        r = compile_spec(text, a.seed, require_cert=a.require_cert)
+    except Refused as e:
+        print("REFUSED: %s" % e)
+        return 1
+    if a.out:
+        CS.write(a.out, r["image"], a.require_cert)
+    print("CERT %s" % json.dumps(r["stamp"], sort_keys=True))
+    print(CS.line(r["stamp"]))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(cli(sys.argv[1:]))

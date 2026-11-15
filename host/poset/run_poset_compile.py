@@ -159,14 +159,14 @@ def judge():
         lanes, hdr, a, kw = r["lowered"]
         if bytes(pe_asm.assemble(lanes, hdr, *a, **kw)) != r["image"]:
             probs.append("C1 the recorded lowered lanes do not re-assemble to the image")
-        mut, C.MUT = C.MUT, ""
-        try:
-            jf = CC.j_floor_line(lanes)
-        finally:
-            C.MUT = mut
-        if r["cert"].get("J_floor") != jf:
-            probs.append("C1 cert J_floor %r, compute_j on the lowered lanes gives %r"
-                         % (r["cert"].get("J_floor"), jf))
+        import cert_stamp as CS
+        st_img, st_lanes = CS.stamp(r["image"]), CS.stamp_lanes(lanes)
+        if st_img != st_lanes:
+            probs.append("C1 the image's stamp %s differs from compute_j on the lowered lanes %s"
+                         % (st_img, st_lanes))
+        if r["stamp"] != st_img or r["cert"].get("J_floor") != CS.line(st_img):
+            probs.append("C1 cert J_floor %r / stamp %s, the image's stamp is %s"
+                         % (r["cert"].get("J_floor"), r["stamp"], st_img))
         rest = {a: v for a, v in r["cert"].items()
                 if a not in ("usb_coresident", "A2", "branch_budget", "J_floor")}
         if not all(v.startswith(("OWED", "UNCERTIFIED", "not applicable")) for v in rest.values()):

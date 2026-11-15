@@ -1026,7 +1026,24 @@ def check_queue_slot(img, t_ext=None):
                 % (ln, v["r"], v["T"], v["r"]))
 
 
-def report(lanes, headers):
+def build(lanes, headers, require_cert=False):
+    """-> (image, stamp). ⛔⛔ WILSON 11-15, "UNCERTIFIED IS A STAMP, REFUSAL IS OPT-IN":
+    compute_j's verdict no longer refuses the BUILD. The image is assembled and stamped
+    (`model/cert_stamp.stamp`, one function of the image, the field the compiler and every
+    gate read); only `require_cert` (--require-cert) turns an uncertified stamp into a
+    failure, `cert_stamp.Uncertified`, with the same reason. The program-legality checks
+    (queue ownership, pins, holds, zero spacing, encodings) still refuse: they are not
+    certification."""
+    import cert_stamp
+    img = assemble(lanes, headers)
+    st = cert_stamp.stamp(img)
+    if require_cert:
+        cert_stamp.require(st, "program")
+    return img, st
+
+
+def report(lanes, headers, require_cert=False):
+    import cert_stamp
     print()
     print("=" * 78)
     print("pe_asm -- assemble and judge a program")
@@ -1038,12 +1055,15 @@ def report(lanes, headers):
         check_shift_clock_alias(lanes, headers)
         check_receive_pin(lanes, headers)
         hold = check_clocked_hold_delay(lanes, headers)
-        d_min, j = compute_j(lanes)
-        img = assemble(full, headers)
+        img, st = build(full, headers, require_cert)
     except Reject as e:
         print("  REJECTED: %s" % e)
         return 1
+    except cert_stamp.Uncertified as e:
+        print("  REFUSED (--require-cert): %s" % e)
+        return 1
     print("  ACCEPTED")
+    print("    cert             : %s" % cert_stamp.line(st))
     print("    image            : %d bytes (program %d, store filler %d)"
           % (len(img), assemble.program_bytes,
              len(img) - assemble.program_bytes))
@@ -1058,8 +1078,9 @@ def report(lanes, headers):
     print("    queue ownership  : %s"
           % (", ".join("q%d -> lane %d" % (q, l)
                        for q, l in sorted(owner.items())) or "no TX consumers"))
-    print("    d_min            : %d" % d_min)
-    print("    J (computed here, NOT on the chip) : %d" % j)
+    if st["status"] == "certified":
+        print("    d_min            : %d" % st["d_min"])
+        print("    J (computed here, NOT on the chip) : %d" % st["J"])
     print("    ⚠ pyRTA margins are not wired into this cut -- see the")
     print("      module docstring for what the first cut does and does not do.")
     return 0
@@ -1231,7 +1252,50 @@ def _demo_noop_pin_none():
     return lanes, headers
 
 
-def main() -> int:
+def load_program(path):
+    """a program file: {"lanes": {lane: [[op, pin, level, delay, q(, count)], ...]},
+    "headers": {lane: [pin, clkpin, mode, t, dsched, dtol(, flags(, order))]}}"""
+    import json
+    with open(path, encoding="utf-8") as fh:
+        doc = json.load(fh)
+    lanes = {int(k): [tuple(a) for a in v] for k, v in doc["lanes"].items()}
+    headers = {int(k): tuple(v) for k, v in doc["headers"].items()}
+    return lanes, headers
+
+
+def cli(argv):
+    """`python model/pe_asm.py --program P.json [--out X.hex] [--require-cert]`.
+    Prints `CERT <the stamp field as JSON>`; with --out writes the image and its
+    `.cert.json` sidecar (cert_stamp.write). Exit 0 unless the program is illegal
+    (REJECTED) or --require-cert meets an uncertified stamp (nothing is written)."""
+    import argparse
+    import json
+    import cert_stamp
+    ap = argparse.ArgumentParser(prog="pe_asm")
+    ap.add_argument("--program", required=True)
+    ap.add_argument("--out")
+    ap.add_argument("--require-cert", action="store_true")
+    a = ap.parse_args(argv)
+    lanes, headers = load_program(a.program)
+    try:
+        img, st = build(lanes, headers, a.require_cert)
+    except Reject as e:
+        print("REJECTED: %s" % e)
+        return 1
+    except cert_stamp.Uncertified as e:
+        print("REFUSED (--require-cert): %s" % e)
+        return 1
+    if a.out:
+        cert_stamp.write(a.out, img, a.require_cert)
+    print("CERT %s" % json.dumps(st, sort_keys=True))
+    print(cert_stamp.line(st))
+    return 0
+
+
+def main(argv=None) -> int:
+    argv = sys.argv[1:] if argv is None else argv
+    if argv:
+        return cli(argv)
     rc = report(*_demo_ok())
 
     # ---- MUST-FIRES: the rejections have to fire, and NAME the lanes -----

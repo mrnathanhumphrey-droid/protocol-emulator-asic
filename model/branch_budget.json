@@ -1,11 +1,17 @@
 {
-  "_doc": "CERTIFIED branch-1 budget B per branch image (Wilson 11-14, option 1): written by model/gen_branch_budget.py from model/branch_budget.py; gate_lane_cert checks it is current. B null = no finite B: A2-UNCERTIFIED with the reason, not refused.",
+  "_doc": "CERTIFIED branch-1 budget B per branch image (Wilson 11-14, option 1): written by model/gen_branch_budget.py from model/branch_budget.py; gate_lane_cert checks it is current. B null = no finite B: A2-UNCERTIFIED with the reason, not refused. `cert` = the image's certification stamp (model/cert_stamp, Wilson 11-15: certified, or uncertified + reason).",
   "images": {
     "armnone_image.hex": {
       "sha": "a082f53f13b1e98496504393da7bbc2ffe0df7c70492cd24c2a55edea1ed7759",
       "branch_lanes": [],
       "B": null,
       "reason": "lane 0: no lateness certificate at B = 0",
+      "cert": {
+        "status": "certified",
+        "reason": "pe_asm.compute_j",
+        "d_min": 20,
+        "J": 1
+      },
       "lanes": {}
     },
     "b3b_a3_image.hex": {
@@ -13,6 +19,12 @@
       "branch_lanes": [],
       "B": null,
       "reason": "lane 0: no lateness certificate at B = 0",
+      "cert": {
+        "status": "certified",
+        "reason": "pe_asm.compute_j",
+        "d_min": 20,
+        "J": 1
+      },
       "lanes": {}
     },
     "b3b_a_image.hex": {
@@ -20,6 +32,12 @@
       "branch_lanes": [],
       "B": null,
       "reason": "lane 0: no lateness certificate at B = 0",
+      "cert": {
+        "status": "certified",
+        "reason": "pe_asm.compute_j",
+        "d_min": 20,
+        "J": 1
+      },
       "lanes": {}
     },
     "b3b_b_image.hex": {
@@ -27,6 +45,12 @@
       "branch_lanes": [],
       "B": null,
       "reason": "lane 0: no lateness certificate at B = 0",
+      "cert": {
+        "status": "certified",
+        "reason": "pe_asm.compute_j",
+        "d_min": 20,
+        "J": 1
+      },
       "lanes": {}
     },
     "b3b_bnoi2c_image.hex": {
@@ -34,6 +58,12 @@
       "branch_lanes": [],
       "B": null,
       "reason": "lane 0: no lateness certificate at B = 0",
+      "cert": {
+        "status": "certified",
+        "reason": "pe_asm.compute_j",
+        "d_min": 20,
+        "J": 1
+      },
       "lanes": {}
     },
     "branch_cmp_lo_image.hex": {
@@ -43,6 +73,12 @@
       ],
       "B": 16,
       "reason": "certified",
+      "cert": {
+        "status": "certified",
+        "reason": "pe_asm.compute_j",
+        "d_min": 20,
+        "J": 1
+      },
       "lanes": {
         "0": {
           "max_late": 22,
@@ -74,6 +110,12 @@
       ],
       "B": null,
       "reason": "lane 0: no lateness certificate at B = 32",
+      "cert": {
+        "status": "certified",
+        "reason": "pe_asm.compute_j",
+        "d_min": 20,
+        "J": 1
+      },
       "lanes": {}
     },
     "branch_cmp_order_image.hex": {
@@ -84,6 +126,12 @@
       ],
       "B": null,
       "reason": "lane 0: no lateness certificate at B = 32",
+      "cert": {
+        "status": "certified",
+        "reason": "pe_asm.compute_j",
+        "d_min": 20,
+        "J": 1
+      },
       "lanes": {}
     },
     "branch_image.hex": {
@@ -96,6 +144,12 @@
       ],
       "B": null,
       "reason": "lane 1: no lateness certificate at B = 16",
+      "cert": {
+        "status": "uncertified",
+        "reason": "compute_j refuses: d_min = 6 is below D* = 20: with 5 lanes a refill occupies the single fetch port for 4 cycles, so 5 lanes consuming one action every 6 cycles saturate it. LANE 1 carries the tightest spacing. The timing guarantee is SCOPED to d_min >= D*; below it the steady-state jitter is measured at 8..12 and no bound is published.",
+        "d_min": null,
+        "J": null
+      },
       "lanes": {}
     },
     "branch_loop_image.hex": {
@@ -109,6 +163,12 @@
       ],
       "B": null,
       "reason": "lane 0: no lateness certificate at B = 20",
+      "cert": {
+        "status": "certified",
+        "reason": "pe_asm.compute_j",
+        "d_min": 33,
+        "J": 1
+      },
       "lanes": {}
     },
     "branch_wbad_image.hex": {
@@ -121,6 +181,12 @@
       ],
       "B": null,
       "reason": "lane 1: no lateness certificate at B = 16",
+      "cert": {
+        "status": "uncertified",
+        "reason": "compute_j refuses: d_min = 6 is below D* = 20: with 5 lanes a refill occupies the single fetch port for 4 cycles, so 5 lanes consuming one action every 6 cycles saturate it. LANE 1 carries the tightest spacing. The timing guarantee is SCOPED to d_min >= D*; below it the steady-state jitter is measured at 8..12 and no bound is published.",
+        "d_min": null,
+        "J": null
+      },
       "lanes": {}
     },
     "census_image.hex": {
@@ -128,6 +194,12 @@
       "branch_lanes": [],
       "B": null,
       "reason": "lane 1: no lateness certificate at B = 0",
+      "cert": {
+        "status": "certified",
+        "reason": "pe_asm.compute_j",
+        "d_min": 25,
+        "J": 1
+      },
       "lanes": {}
     },
     "cfgerr_image.hex": {
@@ -135,6 +207,12 @@
       "branch_lanes": [],
       "B": 0,
       "reason": "certified",
+      "cert": {
+        "status": "certified",
+        "reason": "pe_asm.compute_j",
+        "d_min": 20,
+        "J": 1
+      },
       "lanes": {
         "0": {
           "max_late": 0,
@@ -163,6 +241,12 @@
       "branch_lanes": [],
       "B": null,
       "reason": "lane 0: no lateness certificate at B = 0",
+      "cert": {
+        "status": "uncertified",
+        "reason": "compute_j refuses: d_min = 12 is below D* = 20: with 5 lanes a refill occupies the single fetch port for 4 cycles, so 5 lanes consuming one action every 12 cycles saturate it. LANE 0 carries the tightest spacing. The timing guarantee is SCOPED to d_min >= D*; below it the steady-state jitter is measured at 8..12 and no bound is published.",
+        "d_min": null,
+        "J": null
+      },
       "lanes": {}
     },
     "ckdegen2_image.hex": {
@@ -170,6 +254,12 @@
       "branch_lanes": [],
       "B": 0,
       "reason": "certified",
+      "cert": {
+        "status": "certified",
+        "reason": "pe_asm.compute_j",
+        "d_min": 20,
+        "J": 1
+      },
       "lanes": {
         "0": {
           "max_late": 0,
@@ -198,6 +288,12 @@
       "branch_lanes": [],
       "B": 0,
       "reason": "certified",
+      "cert": {
+        "status": "certified",
+        "reason": "pe_asm.compute_j",
+        "d_min": 20,
+        "J": 1
+      },
       "lanes": {
         "0": {
           "max_late": 0,
@@ -226,6 +322,12 @@
       "branch_lanes": [],
       "B": null,
       "reason": "lane 0: no lateness certificate at B = 0",
+      "cert": {
+        "status": "certified",
+        "reason": "pe_asm.compute_j",
+        "d_min": 20,
+        "J": 1
+      },
       "lanes": {}
     },
     "ckfive_image.hex": {
@@ -233,6 +335,12 @@
       "branch_lanes": [],
       "B": 0,
       "reason": "certified",
+      "cert": {
+        "status": "certified",
+        "reason": "pe_asm.compute_j",
+        "d_min": 25,
+        "J": 1
+      },
       "lanes": {
         "0": {
           "max_late": 0,
@@ -261,6 +369,12 @@
       "branch_lanes": [],
       "B": null,
       "reason": "lane 3: no lateness certificate at B = 0",
+      "cert": {
+        "status": "certified",
+        "reason": "pe_asm.compute_j",
+        "d_min": 20,
+        "J": 1
+      },
       "lanes": {}
     },
     "ckhold_at_image.hex": {
@@ -268,6 +382,12 @@
       "branch_lanes": [],
       "B": null,
       "reason": "lane 0: no lateness certificate at B = 0",
+      "cert": {
+        "status": "uncertified",
+        "reason": "compute_j refuses: d_min = 19 is below D* = 20: with 5 lanes a refill occupies the single fetch port for 4 cycles, so 5 lanes consuming one action every 19 cycles saturate it. LANE 0 carries the tightest spacing. The timing guarantee is SCOPED to d_min >= D*; below it the steady-state jitter is measured at 8..12 and no bound is published.",
+        "d_min": null,
+        "J": null
+      },
       "lanes": {}
     },
     "ckhold_over_image.hex": {
@@ -275,6 +395,12 @@
       "branch_lanes": [],
       "B": 0,
       "reason": "certified",
+      "cert": {
+        "status": "certified",
+        "reason": "pe_asm.compute_j",
+        "d_min": 20,
+        "J": 1
+      },
       "lanes": {
         "0": {
           "max_late": 0,
@@ -303,6 +429,12 @@
       "branch_lanes": [],
       "B": null,
       "reason": "lane 0: no lateness certificate at B = 0",
+      "cert": {
+        "status": "uncertified",
+        "reason": "compute_j refuses: d_min = 18 is below D* = 20: with 5 lanes a refill occupies the single fetch port for 4 cycles, so 5 lanes consuming one action every 18 cycles saturate it. LANE 0 carries the tightest spacing. The timing guarantee is SCOPED to d_min >= D*; below it the steady-state jitter is measured at 8..12 and no bound is published.",
+        "d_min": null,
+        "J": null
+      },
       "lanes": {}
     },
     "ckod_image.hex": {
@@ -310,6 +442,12 @@
       "branch_lanes": [],
       "B": 0,
       "reason": "certified",
+      "cert": {
+        "status": "certified",
+        "reason": "pe_asm.compute_j",
+        "d_min": 40,
+        "J": 1
+      },
       "lanes": {
         "0": {
           "max_late": 0,
@@ -338,6 +476,12 @@
       "branch_lanes": [],
       "B": 0,
       "reason": "certified",
+      "cert": {
+        "status": "certified",
+        "reason": "pe_asm.compute_j",
+        "d_min": 87,
+        "J": 1
+      },
       "lanes": {
         "0": {
           "max_late": 0,
@@ -366,6 +510,12 @@
       "branch_lanes": [],
       "B": null,
       "reason": "lane 1: no lateness certificate at B = 0",
+      "cert": {
+        "status": "uncertified",
+        "reason": "compute_j refuses: d_min = 10 is below D* = 20: with 5 lanes a refill occupies the single fetch port for 4 cycles, so 5 lanes consuming one action every 10 cycles saturate it. LANE 1 carries the tightest spacing. The timing guarantee is SCOPED to d_min >= D*; below it the steady-state jitter is measured at 8..12 and no bound is published.",
+        "d_min": null,
+        "J": null
+      },
       "lanes": {}
     },
     "corpus_i2c.hex": {
@@ -373,6 +523,12 @@
       "branch_lanes": [],
       "B": 0,
       "reason": "certified",
+      "cert": {
+        "status": "certified",
+        "reason": "pe_asm.compute_j",
+        "d_min": 87,
+        "J": 1
+      },
       "lanes": {
         "0": {
           "max_late": 0,
@@ -401,6 +557,12 @@
       "branch_lanes": [],
       "B": null,
       "reason": "lane 0: no lateness certificate at B = 0",
+      "cert": {
+        "status": "uncertified",
+        "reason": "compute_j refuses: d_min = 7 is below D* = 20: with 5 lanes a refill occupies the single fetch port for 4 cycles, so 5 lanes consuming one action every 7 cycles saturate it. LANE 0 carries the tightest spacing. The timing guarantee is SCOPED to d_min >= D*; below it the steady-state jitter is measured at 8..12 and no bound is published.",
+        "d_min": null,
+        "J": null
+      },
       "lanes": {}
     },
     "corpus_spim25.hex": {
@@ -408,6 +570,12 @@
       "branch_lanes": [],
       "B": 0,
       "reason": "certified",
+      "cert": {
+        "status": "certified",
+        "reason": "pe_asm.compute_j",
+        "d_min": 30,
+        "J": 1
+      },
       "lanes": {
         "0": {
           "max_late": 0,
@@ -436,6 +604,12 @@
       "branch_lanes": [],
       "B": null,
       "reason": "lane 0: no lateness certificate at B = 0",
+      "cert": {
+        "status": "uncertified",
+        "reason": "compute_j refuses: d_min = 6 is below D* = 20: with 5 lanes a refill occupies the single fetch port for 4 cycles, so 5 lanes consuming one action every 6 cycles saturate it. LANE 0 carries the tightest spacing. The timing guarantee is SCOPED to d_min >= D*; below it the steady-state jitter is measured at 8..12 and no bound is published.",
+        "d_min": null,
+        "J": null
+      },
       "lanes": {}
     },
     "corpus_uartrx.hex": {
@@ -443,6 +617,12 @@
       "branch_lanes": [],
       "B": null,
       "reason": "lane 0: no lateness certificate at B = 0",
+      "cert": {
+        "status": "uncertified",
+        "reason": "compute_j refuses: d_min = 11 is below D* = 20: with 5 lanes a refill occupies the single fetch port for 4 cycles, so 5 lanes consuming one action every 11 cycles saturate it. LANE 0 carries the tightest spacing. The timing guarantee is SCOPED to d_min >= D*; below it the steady-state jitter is measured at 8..12 and no bound is published.",
+        "d_min": null,
+        "J": null
+      },
       "lanes": {}
     },
     "edge_image.hex": {
@@ -450,6 +630,12 @@
       "branch_lanes": [],
       "B": null,
       "reason": "lane 0: no lateness certificate at B = 0",
+      "cert": {
+        "status": "uncertified",
+        "reason": "compute_j refuses: d_min = 12 is below D* = 20: with 5 lanes a refill occupies the single fetch port for 4 cycles, so 5 lanes consuming one action every 12 cycles saturate it. LANE 0 carries the tightest spacing. The timing guarantee is SCOPED to d_min >= D*; below it the steady-state jitter is measured at 8..12 and no bound is published.",
+        "d_min": null,
+        "J": null
+      },
       "lanes": {}
     },
     "edge_image_noto.hex": {
@@ -457,6 +643,12 @@
       "branch_lanes": [],
       "B": null,
       "reason": "lane 0: no lateness certificate at B = 0",
+      "cert": {
+        "status": "uncertified",
+        "reason": "compute_j refuses: d_min = 12 is below D* = 20: with 5 lanes a refill occupies the single fetch port for 4 cycles, so 5 lanes consuming one action every 12 cycles saturate it. LANE 0 carries the tightest spacing. The timing guarantee is SCOPED to d_min >= D*; below it the steady-state jitter is measured at 8..12 and no bound is published.",
+        "d_min": null,
+        "J": null
+      },
       "lanes": {}
     },
     "edge_image_rise.hex": {
@@ -464,6 +656,12 @@
       "branch_lanes": [],
       "B": null,
       "reason": "lane 0: no lateness certificate at B = 0",
+      "cert": {
+        "status": "uncertified",
+        "reason": "compute_j refuses: d_min = 12 is below D* = 20: with 5 lanes a refill occupies the single fetch port for 4 cycles, so 5 lanes consuming one action every 12 cycles saturate it. LANE 0 carries the tightest spacing. The timing guarantee is SCOPED to d_min >= D*; below it the steady-state jitter is measured at 8..12 and no bound is published.",
+        "d_min": null,
+        "J": null
+      },
       "lanes": {}
     },
     "edge_to200.hex": {
@@ -471,6 +669,12 @@
       "branch_lanes": [],
       "B": null,
       "reason": "lane 0: no lateness certificate at B = 0",
+      "cert": {
+        "status": "uncertified",
+        "reason": "compute_j refuses: d_min = 12 is below D* = 20: with 5 lanes a refill occupies the single fetch port for 4 cycles, so 5 lanes consuming one action every 12 cycles saturate it. LANE 0 carries the tightest spacing. The timing guarantee is SCOPED to d_min >= D*; below it the steady-state jitter is measured at 8..12 and no bound is published.",
+        "d_min": null,
+        "J": null
+      },
       "lanes": {}
     },
     "five_image.hex": {
@@ -478,6 +682,12 @@
       "branch_lanes": [],
       "B": null,
       "reason": "lane 0: no lateness certificate at B = 0",
+      "cert": {
+        "status": "uncertified",
+        "reason": "compute_j refuses: d_min = 12 is below D* = 20: with 5 lanes a refill occupies the single fetch port for 4 cycles, so 5 lanes consuming one action every 12 cycles saturate it. LANE 0 carries the tightest spacing. The timing guarantee is SCOPED to d_min >= D*; below it the steady-state jitter is measured at 8..12 and no bound is published.",
+        "d_min": null,
+        "J": null
+      },
       "lanes": {}
     },
     "guard_noto.hex": {
@@ -485,6 +695,12 @@
       "branch_lanes": [],
       "B": null,
       "reason": "lane 0: no lateness certificate at B = 0",
+      "cert": {
+        "status": "uncertified",
+        "reason": "compute_j refuses: d_min = 12 is below D* = 20: with 5 lanes a refill occupies the single fetch port for 4 cycles, so 5 lanes consuming one action every 12 cycles saturate it. LANE 0 carries the tightest spacing. The timing guarantee is SCOPED to d_min >= D*; below it the steady-state jitter is measured at 8..12 and no bound is published.",
+        "d_min": null,
+        "J": null
+      },
       "lanes": {}
     },
     "half_image.hex": {
@@ -492,6 +708,12 @@
       "branch_lanes": [],
       "B": 0,
       "reason": "certified",
+      "cert": {
+        "status": "certified",
+        "reason": "pe_asm.compute_j",
+        "d_min": 24,
+        "J": 1
+      },
       "lanes": {
         "0": {
           "max_late": 0,
@@ -520,6 +742,12 @@
       "branch_lanes": [],
       "B": 0,
       "reason": "certified",
+      "cert": {
+        "status": "certified",
+        "reason": "pe_asm.compute_j",
+        "d_min": 98,
+        "J": 1
+      },
       "lanes": {
         "0": {
           "max_late": 0,
@@ -548,6 +776,12 @@
       "branch_lanes": [],
       "B": 0,
       "reason": "certified",
+      "cert": {
+        "status": "certified",
+        "reason": "pe_asm.compute_j",
+        "d_min": 62,
+        "J": 1
+      },
       "lanes": {
         "0": {
           "max_late": 0,
@@ -576,6 +810,12 @@
       "branch_lanes": [],
       "B": 0,
       "reason": "certified",
+      "cert": {
+        "status": "certified",
+        "reason": "pe_asm.compute_j",
+        "d_min": 62,
+        "J": 1
+      },
       "lanes": {
         "0": {
           "max_late": 0,
@@ -604,6 +844,12 @@
       "branch_lanes": [],
       "B": null,
       "reason": "lane 0: no lateness certificate at B = 0",
+      "cert": {
+        "status": "uncertified",
+        "reason": "compute_j refuses: d_min = 12 is below D* = 20: with 5 lanes a refill occupies the single fetch port for 4 cycles, so 5 lanes consuming one action every 12 cycles saturate it. LANE 0 carries the tightest spacing. The timing guarantee is SCOPED to d_min >= D*; below it the steady-state jitter is measured at 8..12 and no bound is published.",
+        "d_min": null,
+        "J": null
+      },
       "lanes": {}
     },
     "lvl0_to200.hex": {
@@ -611,6 +857,12 @@
       "branch_lanes": [],
       "B": null,
       "reason": "lane 0: no lateness certificate at B = 0",
+      "cert": {
+        "status": "uncertified",
+        "reason": "compute_j refuses: d_min = 12 is below D* = 20: with 5 lanes a refill occupies the single fetch port for 4 cycles, so 5 lanes consuming one action every 12 cycles saturate it. LANE 0 carries the tightest spacing. The timing guarantee is SCOPED to d_min >= D*; below it the steady-state jitter is measured at 8..12 and no bound is published.",
+        "d_min": null,
+        "J": null
+      },
       "lanes": {}
     },
     "lvl1_noto.hex": {
@@ -618,6 +870,12 @@
       "branch_lanes": [],
       "B": null,
       "reason": "lane 0: no lateness certificate at B = 0",
+      "cert": {
+        "status": "uncertified",
+        "reason": "compute_j refuses: d_min = 12 is below D* = 20: with 5 lanes a refill occupies the single fetch port for 4 cycles, so 5 lanes consuming one action every 12 cycles saturate it. LANE 0 carries the tightest spacing. The timing guarantee is SCOPED to d_min >= D*; below it the steady-state jitter is measured at 8..12 and no bound is published.",
+        "d_min": null,
+        "J": null
+      },
       "lanes": {}
     },
     "noop_image.hex": {
@@ -625,6 +883,12 @@
       "branch_lanes": [],
       "B": null,
       "reason": "lane 0: no lateness certificate at B = 0",
+      "cert": {
+        "status": "uncertified",
+        "reason": "compute_j refuses: d_min = 7 is below D* = 20: with 5 lanes a refill occupies the single fetch port for 4 cycles, so 5 lanes consuming one action every 7 cycles saturate it. LANE 0 carries the tightest spacing. The timing guarantee is SCOPED to d_min >= D*; below it the steady-state jitter is measured at 8..12 and no bound is published.",
+        "d_min": null,
+        "J": null
+      },
       "lanes": {}
     },
     "noop_image_bad.hex": {
@@ -632,6 +896,12 @@
       "branch_lanes": [],
       "B": null,
       "reason": "lane 0: no lateness certificate at B = 0",
+      "cert": {
+        "status": "uncertified",
+        "reason": "compute_j refuses: d_min = 7 is below D* = 20: with 5 lanes a refill occupies the single fetch port for 4 cycles, so 5 lanes consuming one action every 7 cycles saturate it. LANE 0 carries the tightest spacing. The timing guarantee is SCOPED to d_min >= D*; below it the steady-state jitter is measured at 8..12 and no bound is published.",
+        "d_min": null,
+        "J": null
+      },
       "lanes": {}
     },
     "noop_image_h19.hex": {
@@ -639,6 +909,12 @@
       "branch_lanes": [],
       "B": null,
       "reason": "lane 0: no lateness certificate at B = 0",
+      "cert": {
+        "status": "uncertified",
+        "reason": "compute_j refuses: d_min = 12 is below D* = 20: with 5 lanes a refill occupies the single fetch port for 4 cycles, so 5 lanes consuming one action every 12 cycles saturate it. LANE 0 carries the tightest spacing. The timing guarantee is SCOPED to d_min >= D*; below it the steady-state jitter is measured at 8..12 and no bound is published.",
+        "d_min": null,
+        "J": null
+      },
       "lanes": {}
     },
     "nousb.hex": {
@@ -646,6 +922,12 @@
       "branch_lanes": [],
       "B": 4,
       "reason": "certified",
+      "cert": {
+        "status": "certified",
+        "reason": "pe_asm.compute_j",
+        "d_min": 20,
+        "J": 1
+      },
       "lanes": {
         "0": {
           "max_late": 20,
@@ -674,6 +956,12 @@
       "branch_lanes": [],
       "B": 0,
       "reason": "certified",
+      "cert": {
+        "status": "certified",
+        "reason": "pe_asm.compute_j",
+        "d_min": 120,
+        "J": 1
+      },
       "lanes": {
         "0": {
           "max_late": 0,
@@ -702,6 +990,12 @@
       "branch_lanes": [],
       "B": 0,
       "reason": "certified",
+      "cert": {
+        "status": "certified",
+        "reason": "pe_asm.compute_j",
+        "d_min": 120,
+        "J": 1
+      },
       "lanes": {
         "0": {
           "max_late": 0,
@@ -730,6 +1024,12 @@
       "branch_lanes": [],
       "B": null,
       "reason": "lane 1: no lateness certificate at B = 0",
+      "cert": {
+        "status": "certified",
+        "reason": "pe_asm.compute_j",
+        "d_min": 20,
+        "J": 1
+      },
       "lanes": {}
     },
     "pair_rx.hex": {
@@ -737,6 +1037,12 @@
       "branch_lanes": [],
       "B": 0,
       "reason": "certified",
+      "cert": {
+        "status": "certified",
+        "reason": "pe_asm.compute_j",
+        "d_min": 40,
+        "J": 1
+      },
       "lanes": {
         "0": {
           "max_late": 0,
@@ -765,6 +1071,12 @@
       "branch_lanes": [],
       "B": 0,
       "reason": "certified",
+      "cert": {
+        "status": "certified",
+        "reason": "pe_asm.compute_j",
+        "d_min": 40,
+        "J": 1
+      },
       "lanes": {
         "0": {
           "max_late": 0,
@@ -793,6 +1105,12 @@
       "branch_lanes": [],
       "B": 0,
       "reason": "certified",
+      "cert": {
+        "status": "certified",
+        "reason": "pe_asm.compute_j",
+        "d_min": 20,
+        "J": 1
+      },
       "lanes": {
         "0": {
           "max_late": 0,
@@ -821,6 +1139,12 @@
       "branch_lanes": [],
       "B": 0,
       "reason": "certified",
+      "cert": {
+        "status": "certified",
+        "reason": "pe_asm.compute_j",
+        "d_min": 23,
+        "J": 1
+      },
       "lanes": {
         "0": {
           "max_late": 0,
@@ -849,6 +1173,12 @@
       "branch_lanes": [],
       "B": null,
       "reason": "lane 0: no lateness certificate at B = 0",
+      "cert": {
+        "status": "certified",
+        "reason": "pe_asm.compute_j",
+        "d_min": 20,
+        "J": 1
+      },
       "lanes": {}
     },
     "probe_cov_pindiv.hex": {
@@ -856,6 +1186,12 @@
       "branch_lanes": [],
       "B": null,
       "reason": "lane 2: no lateness certificate at B = 0",
+      "cert": {
+        "status": "certified",
+        "reason": "pe_asm.compute_j",
+        "d_min": 23,
+        "J": 1
+      },
       "lanes": {}
     },
     "probe_cov_sim40.hex": {
@@ -863,6 +1199,12 @@
       "branch_lanes": [],
       "B": 0,
       "reason": "certified",
+      "cert": {
+        "status": "certified",
+        "reason": "pe_asm.compute_j",
+        "d_min": 40,
+        "J": 1
+      },
       "lanes": {
         "0": {
           "max_late": 0,
@@ -891,6 +1233,12 @@
       "branch_lanes": [],
       "B": 0,
       "reason": "certified",
+      "cert": {
+        "status": "certified",
+        "reason": "pe_asm.compute_j",
+        "d_min": 24,
+        "J": 1
+      },
       "lanes": {
         "0": {
           "max_late": 0,
@@ -919,6 +1267,12 @@
       "branch_lanes": [],
       "B": null,
       "reason": "lane 0: no lateness certificate at B = 0",
+      "cert": {
+        "status": "certified",
+        "reason": "pe_asm.compute_j",
+        "d_min": 20,
+        "J": 1
+      },
       "lanes": {}
     },
     "sptgt_m0_image.hex": {
@@ -926,6 +1280,12 @@
       "branch_lanes": [],
       "B": null,
       "reason": "lane 0: no lateness certificate at B = 0",
+      "cert": {
+        "status": "certified",
+        "reason": "pe_asm.compute_j",
+        "d_min": 20,
+        "J": 1
+      },
       "lanes": {}
     },
     "sptgt_m1_image.hex": {
@@ -933,6 +1293,12 @@
       "branch_lanes": [],
       "B": null,
       "reason": "lane 0: no lateness certificate at B = 0",
+      "cert": {
+        "status": "certified",
+        "reason": "pe_asm.compute_j",
+        "d_min": 20,
+        "J": 1
+      },
       "lanes": {}
     },
     "sptgt_m2_image.hex": {
@@ -940,6 +1306,12 @@
       "branch_lanes": [],
       "B": null,
       "reason": "lane 0: no lateness certificate at B = 0",
+      "cert": {
+        "status": "certified",
+        "reason": "pe_asm.compute_j",
+        "d_min": 20,
+        "J": 1
+      },
       "lanes": {}
     },
     "sptgt_m3_image.hex": {
@@ -947,6 +1319,12 @@
       "branch_lanes": [],
       "B": null,
       "reason": "lane 0: no lateness certificate at B = 0",
+      "cert": {
+        "status": "certified",
+        "reason": "pe_asm.compute_j",
+        "d_min": 20,
+        "J": 1
+      },
       "lanes": {}
     },
     "sptgt_mosi_image.hex": {
@@ -954,6 +1332,12 @@
       "branch_lanes": [],
       "B": null,
       "reason": "lane 0: no lateness certificate at B = 0",
+      "cert": {
+        "status": "certified",
+        "reason": "pe_asm.compute_j",
+        "d_min": 20,
+        "J": 1
+      },
       "lanes": {}
     },
     "stress_image.hex": {
@@ -961,6 +1345,12 @@
       "branch_lanes": [],
       "B": 0,
       "reason": "certified",
+      "cert": {
+        "status": "certified",
+        "reason": "pe_asm.compute_j",
+        "d_min": 25,
+        "J": 1
+      },
       "lanes": {
         "0": {
           "max_late": 0,
@@ -989,6 +1379,12 @@
       "branch_lanes": [],
       "B": null,
       "reason": "lane 0: no lateness certificate at B = 0",
+      "cert": {
+        "status": "uncertified",
+        "reason": "compute_j refuses: d_min = 12 is below D* = 20: with 5 lanes a refill occupies the single fetch port for 4 cycles, so 5 lanes consuming one action every 12 cycles saturate it. LANE 0 carries the tightest spacing. The timing guarantee is SCOPED to d_min >= D*; below it the steady-state jitter is measured at 8..12 and no bound is published.",
+        "d_min": null,
+        "J": null
+      },
       "lanes": {}
     },
     "tx_image.hex": {
@@ -996,6 +1392,12 @@
       "branch_lanes": [],
       "B": null,
       "reason": "lane 0: no lateness certificate at B = 0",
+      "cert": {
+        "status": "uncertified",
+        "reason": "compute_j refuses: d_min = 12 is below D* = 20: with 5 lanes a refill occupies the single fetch port for 4 cycles, so 5 lanes consuming one action every 12 cycles saturate it. LANE 0 carries the tightest spacing. The timing guarantee is SCOPED to d_min >= D*; below it the steady-state jitter is measured at 8..12 and no bound is published.",
+        "d_min": null,
+        "J": null
+      },
       "lanes": {}
     },
     "uart_rx_board.hex": {
@@ -1003,6 +1405,12 @@
       "branch_lanes": [],
       "B": 8,
       "reason": "certified",
+      "cert": {
+        "status": "certified",
+        "reason": "pe_asm.compute_j",
+        "d_min": 20,
+        "J": 1
+      },
       "lanes": {
         "0": {
           "max_late": 32,
@@ -1031,6 +1439,12 @@
       "branch_lanes": [],
       "B": 4,
       "reason": "certified",
+      "cert": {
+        "status": "certified",
+        "reason": "pe_asm.compute_j",
+        "d_min": 20,
+        "J": 1
+      },
       "lanes": {
         "0": {
           "max_late": 20,
@@ -1059,6 +1473,12 @@
       "branch_lanes": [],
       "B": 8,
       "reason": "certified",
+      "cert": {
+        "status": "certified",
+        "reason": "pe_asm.compute_j",
+        "d_min": 20,
+        "J": 1
+      },
       "lanes": {
         "0": {
           "max_late": 32,
@@ -1087,6 +1507,12 @@
       "branch_lanes": [],
       "B": null,
       "reason": "lane 1: no lateness certificate at B = 0",
+      "cert": {
+        "status": "certified",
+        "reason": "pe_asm.compute_j",
+        "d_min": 20,
+        "J": 1
+      },
       "lanes": {}
     },
     "uart_tx_image.hex": {
@@ -1094,6 +1520,12 @@
       "branch_lanes": [],
       "B": 0,
       "reason": "certified",
+      "cert": {
+        "status": "certified",
+        "reason": "pe_asm.compute_j",
+        "d_min": 20,
+        "J": 1
+      },
       "lanes": {
         "0": {
           "max_late": 0,
@@ -1122,6 +1554,12 @@
       "branch_lanes": [],
       "B": 0,
       "reason": "certified",
+      "cert": {
+        "status": "certified",
+        "reason": "pe_asm.compute_j",
+        "d_min": 20,
+        "J": 1
+      },
       "lanes": {
         "0": {
           "max_late": 0,
@@ -1152,6 +1590,12 @@
       ],
       "B": 4,
       "reason": "certified",
+      "cert": {
+        "status": "certified",
+        "reason": "pe_asm.compute_j",
+        "d_min": 20,
+        "J": 1
+      },
       "lanes": {
         "1": {
           "max_late": 0,
@@ -1184,6 +1628,12 @@
       ],
       "B": 8,
       "reason": "certified",
+      "cert": {
+        "status": "certified",
+        "reason": "pe_asm.compute_j",
+        "d_min": 20,
+        "J": 1
+      },
       "lanes": {
         "1": {
           "max_late": 0,
@@ -1216,6 +1666,12 @@
       ],
       "B": 8,
       "reason": "certified",
+      "cert": {
+        "status": "certified",
+        "reason": "pe_asm.compute_j",
+        "d_min": 20,
+        "J": 1
+      },
       "lanes": {
         "1": {
           "max_late": 0,
@@ -1246,6 +1702,12 @@
       "branch_lanes": [],
       "B": null,
       "reason": "lane 1: no lateness certificate at B = 0",
+      "cert": {
+        "status": "certified",
+        "reason": "pe_asm.compute_j",
+        "d_min": 20,
+        "J": 1
+      },
       "lanes": {}
     },
     "usbrx_main.hex": {
@@ -1253,6 +1715,12 @@
       "branch_lanes": [],
       "B": 0,
       "reason": "certified",
+      "cert": {
+        "status": "certified",
+        "reason": "pe_asm.compute_j",
+        "d_min": 20,
+        "J": 1
+      },
       "lanes": {
         "1": {
           "max_late": 0,
@@ -1283,6 +1751,12 @@
       "branch_lanes": [],
       "B": null,
       "reason": "lane 0: no lateness certificate at B = 0",
+      "cert": {
+        "status": "certified",
+        "reason": "pe_asm.compute_j",
+        "d_min": 20,
+        "J": 1
+      },
       "lanes": {}
     },
     "run_branch_check:braw33_alone": {
@@ -1292,6 +1766,12 @@
       ],
       "B": 4,
       "reason": "certified",
+      "cert": {
+        "status": "uncertified",
+        "reason": "compute_j refuses: d_min = 6 is below D* = 20: with 5 lanes a refill occupies the single fetch port for 4 cycles, so 5 lanes consuming one action every 6 cycles saturate it. LANE 1 carries the tightest spacing. The timing guarantee is SCOPED to d_min >= D*; below it the steady-state jitter is measured at 8..12 and no bound is published.",
+        "d_min": null,
+        "J": null
+      },
       "lanes": {
         "0": {
           "max_late": 0,
@@ -1325,6 +1805,12 @@
       ],
       "B": null,
       "reason": "lane 1: no lateness certificate at B = 16",
+      "cert": {
+        "status": "uncertified",
+        "reason": "compute_j refuses: d_min = 6 is below D* = 20: with 5 lanes a refill occupies the single fetch port for 4 cycles, so 5 lanes consuming one action every 6 cycles saturate it. LANE 1 carries the tightest spacing. The timing guarantee is SCOPED to d_min >= D*; below it the steady-state jitter is measured at 8..12 and no bound is published.",
+        "d_min": null,
+        "J": null
+      },
       "lanes": {}
     },
     "run_branch_check:braw40_alone": {
@@ -1334,6 +1820,12 @@
       ],
       "B": 0,
       "reason": "certified",
+      "cert": {
+        "status": "uncertified",
+        "reason": "compute_j refuses: d_min = 6 is below D* = 20: with 5 lanes a refill occupies the single fetch port for 4 cycles, so 5 lanes consuming one action every 6 cycles saturate it. LANE 1 carries the tightest spacing. The timing guarantee is SCOPED to d_min >= D*; below it the steady-state jitter is measured at 8..12 and no bound is published.",
+        "d_min": null,
+        "J": null
+      },
       "lanes": {
         "0": {
           "max_late": 0,
@@ -1367,6 +1859,12 @@
       ],
       "B": 0,
       "reason": "certified",
+      "cert": {
+        "status": "uncertified",
+        "reason": "compute_j refuses: d_min = 6 is below D* = 20: with 5 lanes a refill occupies the single fetch port for 4 cycles, so 5 lanes consuming one action every 6 cycles saturate it. LANE 1 carries the tightest spacing. The timing guarantee is SCOPED to d_min >= D*; below it the steady-state jitter is measured at 8..12 and no bound is published.",
+        "d_min": null,
+        "J": null
+      },
       "lanes": {
         "0": {
           "max_late": 0,
@@ -1398,6 +1896,12 @@
       ],
       "B": null,
       "reason": "lane 0: no lateness certificate at B = 32",
+      "cert": {
+        "status": "certified",
+        "reason": "pe_asm.compute_j",
+        "d_min": 20,
+        "J": 1
+      },
       "lanes": {}
     },
     "run_branch_check:cmp_mask": {
@@ -1408,6 +1912,12 @@
       ],
       "B": null,
       "reason": "lane 0: no lateness certificate at B = 32",
+      "cert": {
+        "status": "certified",
+        "reason": "pe_asm.compute_j",
+        "d_min": 20,
+        "J": 1
+      },
       "lanes": {}
     },
     "run_branch_check:cmp_lo": {
@@ -1417,6 +1927,12 @@
       ],
       "B": 16,
       "reason": "certified",
+      "cert": {
+        "status": "certified",
+        "reason": "pe_asm.compute_j",
+        "d_min": 20,
+        "J": 1
+      },
       "lanes": {
         "0": {
           "max_late": 22,
@@ -1447,6 +1963,12 @@
       ],
       "B": null,
       "reason": "lane 0: no lateness certificate at B = 8",
+      "cert": {
+        "status": "certified",
+        "reason": "pe_asm.compute_j",
+        "d_min": 33,
+        "J": 1
+      },
       "lanes": {}
     },
     "run_branch_check:loop_mix": {
@@ -1460,6 +1982,12 @@
       ],
       "B": null,
       "reason": "lane 0: no lateness certificate at B = 20",
+      "cert": {
+        "status": "certified",
+        "reason": "pe_asm.compute_j",
+        "d_min": 33,
+        "J": 1
+      },
       "lanes": {}
     }
   }
