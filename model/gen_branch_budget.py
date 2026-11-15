@@ -1,4 +1,4 @@
-"""gen_branch_budget -- the CERTIFIED branch-1 budget B of every branch image, generated.
+"""gen_branch_budget -- the CERTIFIED branch-1 budget B and per-lane lateness of every image, generated.
 
 Wilson 11-14 (option 1): B per image, written by a generator, compared by the gate, checked for
 staleness -- like usb_other_R. For every image in the image universe that has a branch lane,
@@ -33,13 +33,13 @@ def corpus():
 
 
 def current():
-    """{image name: {sha, branch_lanes, B, reason, lanes}} for every branch image, now"""
+    """{image name: {sha, branch_lanes, B, reason, lanes}} for EVERY image, now (agent 1 / Wilson
+    11-14: A2 reads one source -- a lane's J is 1 + its certified lateness, or A2-UNCERTIFIED with
+    the recorded reason, branch lanes or not)"""
     import program_a2 as P
     out = {}
     for name, img in corpus():
         bl = P.branch_lanes(img)
-        if not bl:
-            continue
         r = BB.image_budget(img)
         out[name] = {"sha": P.image_sha(img), "branch_lanes": bl, "B": r["B"],
                      "reason": r["reason"],
@@ -66,7 +66,7 @@ def stale(rec, cur):
             out.append("%s: recorded B %s (%s), certificate now B %s (%s)"
                        % (name, r.get("B"), r.get("reason"), v["B"], v["reason"]))
     for name in sorted(set(rec.get("images", {})) - set(cur)):
-        out.append("%s: recorded but no longer a branch image in the universe" % name)
+        out.append("%s: recorded but no longer in the universe" % name)
     return out
 
 

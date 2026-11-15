@@ -19,8 +19,8 @@ every must-fire must turn its check red, or the gate is not testing what it says
            image whose other lanes act every coresident_usb - 1 cycles and accepts one at
            coresident_usb (56 refused, 57 accepted today)
   M_LC_CERT_STALE   a stored usb_other_R one below the certificate -> check 4 red
-  check 5  the branch-1 budget B per branch image (Wilson 11-14, option 1): model/branch_budget.json
-           is today's certificate (gen_branch_budget) for every branch image of the universe
+  check 5  the branch-1 budget B and per-lane lateness per image (Wilson 11-14): model/branch_budget.json
+           is today's certificate (gen_branch_budget) for every image (universe + run_branch_check)
   M_LC_BUDGET_STALE a recorded B four above its certificate      -> check 5 red
   THE ARMING PREMISE (Wilson 11-14 ruling 1): a handshake copy's arm_sop moved late by raising
   the READBIT before it by n (the chain grows by exactly n; no word shifts), n0 = the generated
@@ -163,7 +163,7 @@ def check_budget():
     cur = GB.current()
     probs = GB.stale(GB.load(), cur)
     cert = sum(1 for v in cur.values() if v["B"] is not None)
-    return not probs, ("%d branch image(s): %d certified, %d no finite B; record %s%s"
+    return not probs, ("%d image(s): %d certified, %d A2-UNCERTIFIED; record %s%s"
                        % (len(cur), cert, len(cur) - cert, "current" if not probs else "STALE",
                           "" if not probs else " (" + "; ".join(probs[:3]) + ")")), cur
 
