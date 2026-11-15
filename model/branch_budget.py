@@ -122,7 +122,47 @@ def _decisions(g, gaps, K, rmax, mmax=40):
     return None
 
 
+#: must-fire switch (gate_lane_cert M_LC_EDF_OFF): the EDF response scheme never tried
+EDF_MUT = False
+
+
+def _edf_R(y, lanes, graphs, rmax, lmax, ds, mmax=40):
+    """RespEdfClose.wb_close_edf's per-lane bound: R y = 3 * sum_{z != y} m(y, z) + S + 2 with
+    S = 0 under (b'), m(y, z) the least m >= 1 whose span G_z(m) (lane_cert.span_min: the least
+    release advance over m consecutive writebacks, `hspan`) meets
+        G_z(m) >= ds y - ds z + Q z - L y          (`hG`)
+    Q z = z's response including its lateness (rmax), L y = y's largest lateness. None if no
+    m <= mmax meets it."""
+    M = 0
+    for z in lanes:
+        if z == y:
+            continue
+        g, _p, gaps = graphs[z]
+        need = ds[y] - ds[z] + rmax[z] - lmax.get(y, 0)
+        m = 1
+        while LC.span_min(g, gaps, m) < need:
+            m += 1
+            if m > mmax:
+                return None
+        M += m
+    return 3 * M + 0 + 3 - 1
+
+
 def image_budget(img, iters=80, premise_gaps=None, ready=None):
+    """The certificate with the window response bound (RespWinN.wb_bound_win_n), and, when that
+    finds none, with the EDF response bounds (RespEdfClose.wb_close_edf, Wilson 11-15): one
+    scheme per image, so each certificate rests on one closure theorem. The record's images
+    certified by the window scheme keep their numbers."""
+    r = _image_budget(img, iters, premise_gaps, ready, "window")
+    if r["B"] is not None or EDF_MUT:
+        return r
+    r2 = _image_budget(img, iters, premise_gaps, ready, "edf")
+    if r2["B"] is None:
+        return dict(r, reason="%s; EDF response bounds: %s" % (r["reason"], r2["reason"]))
+    return r2
+
+
+def _image_budget(img, iters=80, premise_gaps=None, ready=None, scheme="window"):
     """{'B': int or None, 'reason': str, 'lanes': {lane: {...}}} for `img`.
     `premise_gaps` {lane: {ARM word: cycles}}: a NAMED peer premise (model/premises.py,
     Wilson 11-15 call 1) -- the earliest the ARM's edge can come after its release, so its
@@ -137,6 +177,12 @@ def image_budget(img, iters=80, premise_gaps=None, ready=None):
     progs = I.lane_programs(img)
     lanes = sorted(progs)
     usb = PC.usb_receive_live(progs, I)
+    if scheme == "edf" and usb:
+        # one closure theorem per image: wb_close_edf needs EVERY lane, the USB lane included,
+        # to meet its conditions; the USB lane's bound is PrioResp's, so a USB image is not
+        # certified by the EDF scheme
+        return {"B": None, "reason": "not applied to a USB image (the USB lane's response is "
+                "PrioResp's; one closure theorem per image)", "lanes": {}}
     graphs = {l: LC.build(img, l, prem, I) for l in lanes}
     for l, pg in premise_gaps.items():
         for w, gp in pg.items():
@@ -181,6 +227,15 @@ def image_budget(img, iters=80, premise_gaps=None, ready=None):
             rmax[I.USB_LANE] = usb_rmax
         Rn = {}
         for y in generic:
+            if scheme == "edf":
+                ds = {l: I.read_header(img, l)["dsched"] for l in lanes}
+                lmax = {l: max(lat[l].values()) for l in generic}
+                Re = _edf_R(y, lanes, graphs, rmax, lmax, ds)
+                if Re is None:
+                    return {"B": None, "reason": "lane %d: no EDF span meets ds + Q - L" % y,
+                            "lanes": {}}
+                Rn[y] = Re
+                continue
             K = k["lemmaA_window"]
             for _ in range(60):
                 M = 0
@@ -227,7 +282,8 @@ def image_budget(img, iters=80, premise_gaps=None, ready=None):
                 # lane_cert: max over words of Rr - L, Rr from PrioResp.prio_resp)
                 out[I.USB_LANE] = {"R": usb_R, "late_words": None, "max_late": usb_late,
                                    "max_late_rx": usb_rx_late, "arm_margin": usb_arm_margin}
-            return {"B": B, "reason": "certified", "lanes": out}
+            return {"B": B, "reason": "certified" if scheme == "window" else
+                    "certified (EDF response bounds, RespEdfClose.wb_close_edf)", "lanes": out}
         if Bn > LIMIT or any(v > LIMIT for v in Rn.values()):
             return {"B": None, "reason": "no finite B (B %d -> %d, max R %d)"
                     % (B, Bn, max(Rn.values())), "lanes": {}}
