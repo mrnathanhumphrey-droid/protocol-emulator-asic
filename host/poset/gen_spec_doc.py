@@ -20,9 +20,33 @@ import proof_constants as PC  # noqa: E402
 DOC = os.path.join(HERE, "POSET_SPEC.md")
 
 
+def within_block(k):
+    """the `within` lowering's limits, from the compiler's own constants (host/poset/compile.py)"""
+    import clock
+    import lane_cert as LC
+    sys.path.insert(0, HERE)
+    import compile as C
+    hz = clock.hz()
+    lead = C.WB_MIN + LC.SYNC_MIN - (C.ARMED_BY + 1)
+    lo_min = k["dstar"] - lead
+    return (
+        "**Limits of `within` on this target (%d Hz).** The ARM's timeout is its 10-bit delay "
+        "field: at most %d cycles (%.2f µs) from the ARM's release, so a window whose `hi` needs "
+        "more is refused with \"%s\". The ARM must be armed before B can be seen: A's pin moves at "
+        "its writeback, at least %d cycles after A's release; B is seen at least %d cycle(s) "
+        "after it moves; the ARM is armed by its release + L + %d (L its certified lateness). "
+        "So the ARM's lead after A is pre = lo − %d − L cycles, and pre must be at least D* = %d: "
+        "**lo ≥ %d cycles (%.1f ns) at L = 0**, or the window is refused as too tight. The "
+        "deadline covers a B at hi seen late: T = hi + L_A + %d + %d − pre (L_A, A's certified "
+        "lateness). Every number here is the compiler's own constant or `proof_constants.json`'s."
+        % (hz, C.T_MAX, C.T_MAX * 1e6 / hz, C.NEEDS_COUNTER, C.WB_MIN, LC.SYNC_MIN, C.ARMED_BY,
+           -lead, k["dstar"], lo_min, lo_min * 1e9 / hz, C.ARMED_BY, LC.SYNC_MAX))
+
+
 def blocks():
     k = PC.load()
     return {
+        "within_limits": within_block(k),
         "usb_coresident": (
             "**In an image using the USB receive, every other lane's per-action spacing is "
             "≥ %d cycles** (a branch's wait W counts as its spacing; every word reachable from "

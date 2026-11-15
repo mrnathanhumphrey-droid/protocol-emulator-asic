@@ -298,6 +298,14 @@ REGISTRY = {
                        "shared by both sides.",
         "owed_hw": {"owner": "FPGA USB bring-up: enumeration on a real host, "
                              "captured on the DSLogic"}}),
+    # the FPGA build's image of record (fpga/sim/gen_usbdev_fpga.py, written --require-cert):
+    # the SAME PROGRAM, byte for byte -- the board's wiring delta (53b37db) lives in the board
+    # top, not the image. It borrows usbdev_dev's simulation witness; the hardware witness
+    # stays OWED on usbdev_dev (FPGA USB bring-up).
+    "usbdev_fpga.hex": (WITNESS_SIM, {
+        "same_as": "usbdev_dev.hex",
+        "how": "byte-identical to usbdev_dev.hex, the program run_usbaddr / run_usbrst "
+               "witness in simulation"}),
     # ⛔⛔ MECHANISM IS NOT "UNCHECKED" (Wilson): each names the CI runner that
     # checks EXACTLY what the image is for, held to the witness rules (in CI,
     # positive token, names the image).

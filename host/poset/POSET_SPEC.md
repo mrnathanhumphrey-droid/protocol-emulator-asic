@@ -24,7 +24,7 @@ everywhere: bounds are in ns, and the target clock is applied by the compiler (v
 ```
 spec        ::= 'spec' NAME 'is' { statement ';' } 'end' NAME ';'
 statement   ::= v1_statement                       -- captured, partial, wire, crc, bus, '? unknown'
-              | 'pattern' pattern [ timing ] { clause }
+              | 'pattern' pattern [ timing | obligation ] { clause }
               | 'never'   pattern [ timing ] { clause }
 
 pattern     ::= term { binop term }                -- one precedence level, left-associative (vol5 §2.1)
@@ -44,6 +44,9 @@ KIND        ::= 'Rise' | 'Fall' | 'Edge'           -- raw pin events
 WIRE        ::= 'uio' DIGIT                        -- v1's wire names
 
 timing      ::= 'during' '(' TIME ',' TIME ')'     -- vol5 Timing macro, as v1 already parses
+obligation  ::= 'within' '(' TIME ',' TIME ')' 'else' ( 'abort' | 'continue' )
+                                                   -- a PROGRAM obligation (Wilson 11-15): its own
+                                                   -- keyword, never `during` + else; one timing per statement
 TIME        ::= NUMBER 'ns'
 clause      ::= 'observed' INT                     -- the bound and the order were seen in INT instances
               | 'given' NAME                       -- the order holds only under a stated condition (v1 style)
@@ -85,6 +88,26 @@ Instances of one kind are numbered in time order: the 1st, 2nd, … instance.
 
 **Timing.** `P during (lo, hi)` means: for every match of `P`, (last instant − first instant) ∈ [lo, hi]. Comparison uses the tolerance in guiding doc §7 step 6: ±J (J = 2 cycles), plus 1 sync cycle, plus the capture resolution, converted at the target clock. A bound tighter than ±J is refused by the compiler.
 
+**Obligation: `A -> B within (lo, hi) else X`** (Wilson 11-15). `during` says what was *seen*; `within` says what the *program does*. The program waits for B after each A. If B comes by `hi`, the program continues on its success path; if not, it takes `else X`. A and B are single `Rise` / `Fall` events. A must be a transition our program makes (a LEVEL word on a wire the lowering drives). B must be on a wire the peer drives: B on a wire we drive is refused by name, since for our own outputs a window would constrain the delay we choose, not a wait. The `else` set is closed: `abort` and `continue`. A general handler (`else` jumping to user code) is not in v2; it is recorded on `V2_MASTER_LIST`.
+
+**The lower bound.** The chip has no window counter, so an ARM armed after A cannot tell a B that came before `lo` from one that never came. The program therefore does **not** detect an early B. `lo > 0` is accepted only as the **peer's** guarantee, written with `source datasheet "<part>"`. Without that clause, catching an early B would be the program's job, and the compiler refuses the statement with "unsupported: needs window counter". The window counter is on `V2_MASTER_LIST`, to be built when a target protocol needs early arrival detected. Either way, the bound `[lo, hi]` is also a WINDOW predicate in the check-set, so the validator checks an early B on the bus.
+
+**How it lowers, onto the existing ISA (no new hardware).** After each A word, A's spacing becomes the ARM's lead `pre`, with timed no-ops (LEVEL on `PIN_NONE`) past D*. Then comes an ARM on B's pin and edge, with timeout T:
+- **`else continue`**: a FALLTHROUGH ARM (`mod[1]`). An edge goes to PC+2; a timeout goes to PC+1, a no-op that runs into PC+2. PC+2 is the original next word, behind a join no-op when that word is a SHIFT, because a FALLTHROUGH edge path cannot start with one: it is refilled after the flush.
+- **`else abort`**: a plain timed ARM. An edge releases the next word. A timeout **halts the lane**, and the hardware state afterwards is:
+  - that lane's `live` and `armed` are cleared; the other lanes keep running;
+  - the per-lane `l_timeout` sticky is set; the host has no readout for it;
+  - the host sees status bit 3 (`ovr`) with bits 5 and 7 clear. It cannot tell which lane timed out, nor a timeout from another engine fault once one has also set `ovr`;
+  - the lane's pins keep their last driven level. This is inferred from pin writes happening only on dispatch, and is still to be confirmed in simulation.
+
+An unconnected B wire is routed to the lowest `uio` input that no word or parked header names. The compiler reports that route.
+
+**Certification.** The lowered image goes through the same certificate as every image, and the compiler's `within` field says whether every ARM is armed before its B can be seen, using the certified lateness of the windowed image. A FALLTHROUGH ARM on any lane gets the USB lane's terms (the post-flush lateness floor on PC+2, the disarm cycle on PC+1). An uncertified window is a stamp; `--require-cert` refuses it.
+
+<!-- gen:within_limits -->
+**Limits of `within` on this target (60000000 Hz).** The ARM's timeout is its 10-bit delay field: at most 1023 cycles (17.05 µs) from the ARM's release, so a window whose `hi` needs more is refused with "unsupported: needs window counter (V2_MASTER_LIST)". The ARM must be armed before B can be seen: A's pin moves at its writeback, at least 2 cycles after A's release; B is seen at least 1 cycle(s) after it moves; the ARM is armed by its release + L + 4 (L its certified lateness). So the ARM's lead after A is pre = lo − 2 − L cycles, and pre must be at least D* = 20: **lo ≥ 22 cycles (366.7 ns) at L = 0**, or the window is refused as too tight. The deadline covers a B at hi seen late: T = hi + L_A + 4 + 2 − pre (L_A, A's certified lateness). Every number here is the compiler's own constant or `proof_constants.json`'s.
+<!-- /gen -->
+
 **`never P`**: no match of `P` occurs. Validator verdicts are VIOLATION or ABSTAIN. "Conforms" means every armed check passed **on positive evidence** (guiding doc §5).
 
 **Target rule: lanes sharing an image with the USB receive** (generated from `lean/JLane/proof_constants.json` by `gen_spec_doc.py`; never edit inside the markers):
@@ -98,6 +121,7 @@ Instances of one kind are numbered in time order: the 1st, 2nd, … instance.
 - `||` only when **both** orders were observed. Otherwise the order stays `->` with `observed n` ("ordered-as-observed").
 - **Every bound the PIT emits is `observed`**: `during (min seen, max seen)`. A datasheet bound is `source datasheet "<part>"`, written by a person, never by the PIT.
 - Unknowns stay v1's `? unknown <field> -- <reason>;` lines. Nothing is inferred on the host.
+- **Never `within` or `else`.** A fail path is never observed, so these are written by a person, as `source datasheet` is.
 
 ## 5. Examples (the golden model's three known buses)
 

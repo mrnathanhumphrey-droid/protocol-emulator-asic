@@ -56,6 +56,9 @@ ACCEPT = [
     "pattern Start(uio1) || Start(uio2);",
     "pattern Rise(uio1) ~ Rise(uio2) and Fall(uio1) or Fall(uio2) source data;",
     "pattern Start(uio2, uio1) -> (Byte(uio2) -> Stop(uio2, uio1));",
+    # `within` / `else` (Wilson 11-15): its own keyword, the closed else set
+    'pattern Fall(uio3) -> Fall(uio5) within (2000 ns, 10000 ns) else abort source datasheet "X";',
+    "pattern Fall(uio3) |> Rise(uio5) within (0 ns, 900.5 ns) else continue observed 4;",
 ]
 REJECT = {
     "v1's stray `<`": "pattern Frame(uio0) < Frame(uio0);",
@@ -72,6 +75,12 @@ REJECT = {
     "no `;`": "pattern Rise(uio1) -> Rise(uio2)",
     "observed without a count": "pattern Rise(uio1) observed many;",
     "time without ns": "pattern Rise(uio1) during (5, 9);",
+    "within without else": "pattern Fall(uio3) -> Fall(uio5) within (1 ns, 2 ns);",
+    "else outside the closed set": "pattern Fall(uio3) -> Fall(uio5) within (1 ns, 2 ns) else retry;",
+    "within on never": "never Fall(uio3) within (1 ns, 2 ns) else abort;",
+    "during and within": "pattern Fall(uio3) -> Fall(uio5) during (1 ns, 2 ns) within (1 ns, 2 ns) else abort;",
+    "else without within": "pattern Fall(uio3) -> Fall(uio5) else abort;",
+    "within bounds reversed": "pattern Fall(uio3) -> Fall(uio5) within (5 ns, 2 ns) else abort;",
 }
 
 
