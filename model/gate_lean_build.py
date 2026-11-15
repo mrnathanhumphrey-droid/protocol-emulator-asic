@@ -63,7 +63,8 @@ KEY = ("dstar", "dstar29", "dstar39", "dstar39_v2", "dstar39_st", "dstar39_hold"
        "winq_step", "liveFl_noflush",
        "winq2_eq", "winq3_view", "winqT_view", "relT_le_of_ready",
        "branch_ld_D", "branch_j_interim",
-       "br1_once", "br1_count")
+       "br1_once", "br1_count", "head_valid_nonbranch",
+       "first_stable", "arm_release_bus", "arm_release_T_bus")
 #: proof_constants.load() key -> the Lean expression that must evaluate to it (SPEC: the map)
 CONSTS = {
     "lemmaA_window": "LEMMA_A_WINDOW", "R_base": "R_BASE", "dispatch_cycles": "DISPATCH_CYCLES",

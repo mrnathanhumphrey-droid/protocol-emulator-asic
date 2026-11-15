@@ -805,6 +805,9 @@ SPEC_SYMBOLS = {
     # host packet times and run length -- stimulus, like SCEN; the expected
     # packets are judged live by sigrok's usb_packet decode on every run.
     ("test/run_usbaddr.py", "SIG_EXTRA"),
+    # D12 (agent 2's cert_stamp gate): a planted d = 12 program, below D*, that
+    # the stamp must call UNCERTIFIED -- a must-fire fixture, not a result.
+    ("model/gate_cert_stamp.py", "D12"),
     ("test/run_usbrst.py", "GETDESC"),
     ("test/run_usbrst.py", "SCEN"),
     # ⭐ GATE CONFIGURATION (Wilson 11-12 ruling D: RULES is configuration, not a

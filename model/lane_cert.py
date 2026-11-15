@@ -52,7 +52,7 @@ def premises(k=None):
     # clock.usb_se0q_bounds upper end), the conservative side for every use below
     tleopr = clock.usb_se0q_bounds()[1]
     tipd_fast = math.floor(Fraction(clock.USB_TIPD_BITS * f, USB_TLDRATE_MAX))
-    return {
+    _p = {
         "bit": bit,
         # an ARM's release gap floor: release >= writeback + 2 (arm_release, edge >= wb + 1),
         # writeback >= release + 2 (a dispatch) -- every ARM kind
@@ -75,6 +75,22 @@ def premises(k=None):
         # the shortest packet a SOP starts: SYNC + PID = 16 bits, at the fastest host rate
         "min_packet": math.floor(Fraction(16 * bit * 1_500_000, USB_TLDRATE_MAX)),
     }
+    out = {**_p, **arm_premise_bounds(_p["tipd_fast"])}
+    return out
+
+
+def arm_premise_bounds(tipd_fast):
+    """THE CERTIFICATE'S ARMING PREMISE, as generated bounds (Wilson 11-14 ruling 1, confirmed):
+    READ from Armed.lean -- `hedge : forall t l, t + 1 <= edge t l` (run3_proj, head_late_arm):
+    the edge an ARM waits for comes at least one cycle after its writeback. For an arm_sop the
+    earliest edge is the next SOP as seen at our pins, so the ARM's writeback (its arming) must be
+    <= (earliest SOP seen) - 1, counted from the bus EOP:
+      * after a packet the host may follow at TIPD: SOP seen >= tipd_fast + SYNC_MIN
+        -> arm_sop_deadline_tipd = tipd_fast + SYNC_MIN - 1;
+      * after an unanswered DATA (the host waits >= 18 bit times, 7.1.19.1): SOP seen >=
+        clock.usb_host_next_min_cycles + SYNC_MIN -> arm_sop_deadline_host_next."""
+    return {"arm_sop_deadline_tipd": tipd_fast + SYNC_MIN - 1,
+            "arm_sop_deadline_host_next": clock.usb_host_next_min_cycles() + SYNC_MIN - 1}
 
 
 def retry_fetch_deadline(B, nop_gap, k=None, prem=None):
@@ -453,12 +469,17 @@ def full_report(img, name="image"):
                     armed = ftoff[w] + lat[w] + 4 + xr.get(w, 0)
                     need = prem["tipd_fast"] + prem["min_packet"]
                     okf = armed < need
+                    if sched == "b'":
+                        full_report.last.setdefault("arm_margins", []).append(need - 1 - armed)
                     print("  FT ARM w%d: armed <= EOP + %d, the reply ends >= EOP + %d  %s"
                           % (w, armed, need, "OK" if okf else "LATE"))
                     if not okf:
                         fails.append((sched, "ft arm w%d" % w))
                 continue
             ok = lat[w] + 4 + xr.get(w, 0) < egap.get(w, gaps[w][0]) - 1
+            if sched == "b'":
+                full_report.last.setdefault("arm_margins", []).append(
+                    egap.get(w, gaps[w][0]) - 2 - (lat[w] + 4 + xr.get(w, 0)))
             if not ok:
                 fails.append((sched, "arm w%d" % w))
             if w not in off:
@@ -484,10 +505,12 @@ def full_report(img, name="image"):
                 rdl = retry_fetch_deadline(0, nop_gap, k, prem)
                 # the certificate's own PREMISE (Armed: the edge comes after the ARM's writeback):
                 # armed before the host's next SOP can be seen
-                armd = clock.usb_host_next_min_cycles() + SYNC_MIN - 1
+                armd = prem["arm_sop_deadline_host_next"]
                 print("  arm_sop w%d after an unanswered DATA: armed by EOP + %d (premise: before "
                       "the host's next SOP, %d) %s; fetch-deadline margin %+d (proxy %d; reported)"
                       % (s, wbd, armd, "OK" if wbd <= armd else "LATE", rdl - wbd, rdl))
+                if sched == "b'":
+                    full_report.last.setdefault("arm_margins", []).append(armd - wbd)
                 if wbd > armd:
                     fails.append((sched, "armed late w%d (after DATA)" % s))
             fl = max((lat[n2] for n2 in f), default=0)
@@ -497,11 +520,14 @@ def full_report(img, name="image"):
             # the certificate's own PREMISE (Armed: the edge comes after the ARM's writeback): the
             # arm_sop is armed before the earliest SOP it waits for is seen (TIPD at the fastest
             # host + SYNC_MIN); the certificate's first-sample lateness then holds
-            arm_dl = prem["tipd_fast"] + SYNC_MIN - 1
+            arm_dl = prem["arm_sop_deadline_tipd"]
+            full_report.last.setdefault("arm_wb", {})[s] = (wb, arm_dl)
             print("  arm_sop w%d: armed by EOP + %d (premise: before the SOP, %d) %s; first sample "
                   "lateness %d %s (certificate); SOP gap %d; fetch-deadline margin %+d (proxy %d; "
                   "reported)" % (s, wb, arm_dl, "OK" if wb <= arm_dl else "LATE", fl,
                                  "OK" if fl == 0 else "LATE", gaps[s][0], fdl - wb, fdl))
+            if sched == "b'":
+                full_report.last.setdefault("arm_margins", []).append(arm_dl - wb)
             if wb > arm_dl:
                 fails.append((sched, "armed late w%d" % s))
             if fl:
@@ -541,6 +567,8 @@ def full_report(img, name="image"):
         Bn = None
         if sched == "b'":
             Bn, nev = br1_budget_fixpoint(g, gaps, lat, k)
+            rx = [lat[w] for w in g if g[w][0]["op"] == I.OP_SHIFTIN and g[w][0]["mod"] & I.MOD_SELF_TIMED]
+            full_report.last["usb_rx_late"] = max(rx) if rx else 0
             full_report.last.update({"br1_B": Bn, "usb_refills": nev,
                                      "usb_maxRr": max(Rr.values()), "usb_graph": (g, gaps, lat)})
             if Bn is None:
@@ -604,6 +632,7 @@ def full_report(img, name="image"):
         if lt is not None and g[c2][0]["op"] == I.OP_ARM:
             armed = 1 + lt + 4
             okp = armed < prem["min_packet"]
+            full_report.last.setdefault("arm_margins", []).append(prem["min_packet"] - 1 - armed)
             print("  ARM w%d edge path: PC+2 w%d armed <= edge + %d, the reply's SE0 >= edge + %d %s"
                   % (a, c2, armed, prem["min_packet"], "OK" if okp else "LATE"))
             if not okp:

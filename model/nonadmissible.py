@@ -82,6 +82,21 @@ NON_ADMISSIBLE = {
     "branch_cmp_lo_image.hex": ({QUEUE},
         "the honest branch J (at least branch_j(16, 40) = 17) exceeds the 1.6a "
         "queue check; J = 1 used to hide this."),
+    # Wilson 11-15: no branch lane, but the per-image certificate (agent 2's
+    # branch_budget.json) puts lane 0 late; QUEUE comes off only if agent 2
+    # proves those words' lateness never reaches a sample (an ArmSplit shape).
+    "nousb.hex": ({QUEUE},
+        "certified lane 0 lateness 20 (B = 4), J = 21 from lane_j, fails the 1.6a "
+        "queue check (Wilson 11-15: lateness feeds J until a split theorem drops it). Test image (usbdev.image_nousb), not of record."),
+    "uart_rx_image.hex": ({QUEUE},
+        "certified lane 0 lateness 32 (B = 8), J = 33 from lane_j, fails the 1.6a "
+        "queue check (Wilson 11-15: lateness feeds J until a split theorem drops it)."),
+    "uart_rx_board.hex": ({QUEUE},
+        "certified lane 0 lateness 32 (B = 8), J = 33 from lane_j, fails the 1.6a "
+        "queue check (Wilson 11-15: lateness feeds J until a split theorem drops it). The F2 board image (byte-identical to uart_rx_image)."),
+    "uart_rx_board_nostop.hex": ({QUEUE},
+        "certified lane 0 lateness 20 (B = 4), J = 21 from lane_j, fails the 1.6a "
+        "queue check (Wilson 11-15: lateness feeds J until a split theorem drops it)."),
     "chain_image.hex": ({PORT, QUEUE},
         "`build_chain`, the chaining re-arm mechanism at d = 12: a mechanism "
         "test, not a schedulable program."),

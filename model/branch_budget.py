@@ -56,8 +56,11 @@ def image_budget(img, iters=80):
         if last.get("br1_B") is None:
             return {"B": None, "reason": "USB lane: no certificate", "lanes": {}}
         usb_n, usb_rmax = last["usb_refills"], last["usb_maxRr"]
-        ug, ugaps, _ul = last["usb_graph"]
+        ug, ugaps, ulat = last["usb_graph"]
         graphs[I.USB_LANE] = (ug, None, ugaps)
+        usb_late = max(ulat.values()) if ulat else 0
+        usb_rx_late = last.get("usb_rx_late", 0)
+        usb_arm_margin = min(last.get("arm_margins") or [0])
     generic = [l for l in lanes if not (usb and l == I.USB_LANE)]
     B = k["l_refill"] * usb_n
     R = {l: k["R_base"] for l in generic}
@@ -100,12 +103,36 @@ def image_budget(img, iters=80):
         if Bn == B and Rn == R:
             out = {l: {"R": R[l], "late_words": sorted(w for w, v in lat[l].items() if v),
                        "max_late": max(lat[l].values())} for l in generic}
+            if usb:
+                # the word-class split (ArmSplit.arm_release_bus): receive words carry their own
+                # lateness; an ARM word's lateness shows only in its arming check's margin
+                out[I.USB_LANE] = {"R": None, "late_words": None, "max_late": usb_late,
+                                   "max_late_rx": usb_rx_late, "arm_margin": usb_arm_margin}
             return {"B": B, "reason": "certified", "lanes": out}
         if Bn > LIMIT or any(v > LIMIT for v in Rn.values()):
             return {"B": None, "reason": "no finite B (B %d -> %d, max R %d)"
                     % (B, Bn, max(Rn.values())), "lanes": {}}
         B, R = Bn, Rn
     return {"B": None, "reason": "no fixpoint in %d rounds (B %d)" % (iters, B), "lanes": {}}
+
+
+def lane_j(entry, lane):
+    """A lane's dispatch jitter from a certified record entry (gen_branch_budget): 1 + its
+    largest certified per-word lateness (GapRun.head_late_gap; J = 1 exactly when no word of the
+    lane is late). None when the image has no finite B (A2-UNCERTIFIED)."""
+    if entry.get("B") is None:
+        return None
+    ln = entry.get("lanes", {}).get(str(lane), entry.get("lanes", {}).get(lane))
+    return None if ln is None else 1 + ln["max_late"]
+
+
+def lane_j_rx(entry, lane):
+    """The USB lane's receive-word jitter (Wilson 11-14, the word-class split, ArmSplit): 1 + the
+    largest certified lateness over its receive words; None if not recorded / no finite B."""
+    if entry.get("B") is None:
+        return None
+    ln = entry.get("lanes", {}).get(str(lane), entry.get("lanes", {}).get(lane))
+    return None if ln is None or ln.get("max_late_rx") is None else 1 + ln["max_late_rx"]
 
 
 if __name__ == "__main__":

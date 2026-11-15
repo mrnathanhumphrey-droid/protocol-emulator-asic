@@ -47,6 +47,7 @@ SCRATCH_MUTANTS = {
     "M_PC_WINDOW_SWAP": "killed in-process by this gate",
     "M_PC_COMPOUND_PASS": "killed in-process by this gate",
     "M_PC_USB_NOCHECK": "killed in-process by this gate",
+    "M_PC_JFLOOR_HEAD": "killed in-process by this gate",
 }
 #: the literal above must name exactly the module's MUTANTS (checked at start-up)
 if set(SCRATCH_MUTANTS) != set(C.MUTANTS):
@@ -144,10 +145,31 @@ def judge():
         if len(win) != 1 or (win[0]["lo_cycles"], win[0]["hi_cycles"]) != (min(leads), max(leads)):
             probs.append("C1 window %s, the golden bus drew %d..%d cycles"
                          % ([(p["lo_cycles"], p["hi_cycles"]) for p in win], min(leads), max(leads)))
-        # a "not applicable (...)" entry (usb_coresident, branch_budget on a
-        # program with no USB receive / no branch lane) claims nothing
-        rest = {a: v for a, v in r["cert"].items() if not v.startswith("not applicable")}
-        if not all(v.startswith(("OWED", "UNCERTIFIED")) for v in rest.values()):
+        # the certified fields must BE the certificate (recomputed here from model/branch_budget);
+        # every other field claims nothing (OWED / UNCERTIFIED / not applicable)
+        import compile as CC
+        if r["cert"].get("A2") != CC.a2_line(r["image"]):
+            probs.append("C1 cert A2 is not the certificate's: %r" % r["cert"].get("A2"))
+        if r["cert"].get("branch_budget") != CC.branch_budget_line(r["image"]):
+            probs.append("C1 cert branch_budget is not the certificate's: %r"
+                         % r["cert"].get("branch_budget"))
+        # J floor: the recorded lanes must re-assemble to the image, and J_floor must be
+        # compute_j on ALL of them (recomputed here, unmutated)
+        import pe_asm
+        lanes, hdr, a, kw = r["lowered"]
+        if bytes(pe_asm.assemble(lanes, hdr, *a, **kw)) != r["image"]:
+            probs.append("C1 the recorded lowered lanes do not re-assemble to the image")
+        import cert_stamp as CS
+        st_img, st_lanes = CS.stamp(r["image"]), CS.stamp_lanes(lanes)
+        if st_img != st_lanes:
+            probs.append("C1 the image's stamp %s differs from compute_j on the lowered lanes %s"
+                         % (st_img, st_lanes))
+        if r["stamp"] != st_img or r["cert"].get("J_floor") != CS.line(st_img):
+            probs.append("C1 cert J_floor %r / stamp %s, the image's stamp is %s"
+                         % (r["cert"].get("J_floor"), r["stamp"], st_img))
+        rest = {a: v for a, v in r["cert"].items()
+                if a not in ("usb_coresident", "A2", "branch_budget", "J_floor")}
+        if not all(v.startswith(("OWED", "UNCERTIFIED", "not applicable")) for v in rest.values()):
             probs.append("C1 cert claims more than the skeleton does: %s" % r["cert"])
         if r["cert"].get("usb_coresident") != "not applicable (no USB receive)":
             probs.append("C1 SPI image: usb_coresident %r" % r["cert"].get("usb_coresident"))

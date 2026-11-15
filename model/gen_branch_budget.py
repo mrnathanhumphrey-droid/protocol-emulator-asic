@@ -1,4 +1,4 @@
-"""gen_branch_budget -- the CERTIFIED branch-1 budget B of every branch image, generated.
+"""gen_branch_budget -- the CERTIFIED branch-1 budget B and per-lane lateness of every image, generated.
 
 Wilson 11-14 (option 1): B per image, written by a generator, compared by the gate, checked for
 staleness -- like usb_other_R. For every image in the image universe that has a branch lane,
@@ -22,18 +22,33 @@ import branch_budget as BB  # noqa: E402
 RECORD = os.path.join(HERE, "branch_budget.json")
 
 
-def current():
-    """{image name: {sha, branch_lanes, B, reason}} for every branch image, now"""
+def corpus():
+    """[(name, image)]: the image universe, plus run_branch_check's own corpus (built in code,
+    named run_branch_check:<name>; Wilson 11-14) -- every image a branch J is quoted for"""
     import image_universe as U
+    out = list(U.images())
+    import run_branch_check as RB
+    out += [("run_branch_check:%s" % n, bytes(f())) for n, f in RB.IMAGES.items()]
+    return out
+
+
+def current():
+    """{image name: {sha, branch_lanes, B, reason, lanes}} for EVERY image, now (agent 1 / Wilson
+    11-14: A2 reads one source -- a lane's J is 1 + its certified lateness, or A2-UNCERTIFIED with
+    the recorded reason, branch lanes or not)"""
     import program_a2 as P
+    import cert_stamp as CS
     out = {}
-    for name, img in U.images():
+    for name, img in corpus():
         bl = P.branch_lanes(img)
-        if not bl:
-            continue
         r = BB.image_budget(img)
         out[name] = {"sha": P.image_sha(img), "branch_lanes": bl, "B": r["B"],
-                     "reason": r["reason"]}
+                     "reason": r["reason"],
+                     # the image's certification stamp (Wilson 11-15): the field A2 reads
+                     "cert": CS.stamp(img),
+                     "lanes": {str(l): {k2: v[k2] for k2 in ("max_late", "R", "max_late_rx",
+                                                              "arm_margin") if k2 in v}
+                               for l, v in r["lanes"].items()}}
     return out
 
 
@@ -49,11 +64,13 @@ def stale(rec, cur):
         r = rec.get("images", {}).get(name)
         if r is None:
             out.append("%s: no record" % name)
-        elif (r.get("sha"), r.get("B"), r.get("reason")) != (v["sha"], v["B"], v["reason"]):
-            out.append("%s: recorded B %s (%s), certificate now B %s (%s)"
-                       % (name, r.get("B"), r.get("reason"), v["B"], v["reason"]))
+        elif (r.get("sha"), r.get("B"), r.get("reason"), r.get("lanes"), r.get("cert")) != (
+                v["sha"], v["B"], v["reason"], v["lanes"], v["cert"]):
+            out.append("%s: recorded B %s (%s) stamp %s, certificate now B %s (%s) stamp %s"
+                       % (name, r.get("B"), r.get("reason"), (r.get("cert") or {}).get("status"),
+                          v["B"], v["reason"], v["cert"]["status"]))
     for name in sorted(set(rec.get("images", {})) - set(cur)):
-        out.append("%s: recorded but no longer a branch image in the universe" % name)
+        out.append("%s: recorded but no longer in the universe" % name)
     return out
 
 
@@ -68,7 +85,8 @@ def main():
     rec = {"_doc": "CERTIFIED branch-1 budget B per branch image (Wilson 11-14, option 1): "
                    "written by model/gen_branch_budget.py from model/branch_budget.py; "
                    "gate_lane_cert checks it is current. B null = no finite B: A2-UNCERTIFIED "
-                   "with the reason, not refused.",
+                   "with the reason, not refused. `cert` = the image's certification stamp "
+                   "(model/cert_stamp, Wilson 11-15: certified, or uncertified + reason).",
            "images": cur}
     with open(RECORD, "w", encoding="utf-8", newline="\n") as fh:
         json.dump(rec, fh, indent=2, ensure_ascii=False)

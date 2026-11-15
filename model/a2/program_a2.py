@@ -102,8 +102,10 @@ def lanes_of(img):
 # model/branch_budget.json (model/gen_branch_budget.py; gate_lane_cert check 5
 # holds it current). A branch image is certified only when ALL of:
 #   * its budget entry matches its bytes (sha == image_sha) and B is finite;
-#   * the J = 1 premise holds at D* + B: d_min >= proof_constants.nonbranch_dmin(B)
-#     (head_valid_optA; not D* alone when B > 0);
+#   * every lane's J is ITS certificate's, branch_budget.lane_j(entry, lane)
+#     = 1 + its max certified lateness (no hand formula, Wilson 11-14); a lane
+#     quoted at J = 1 must ALSO pass proof_constants.j1_ok(d, R, B) on its own
+#     spacing d and response R (OptRun.head_valid_nonbranch);
 #   * its lane set forms (an edge-paced lane needs a T_ext).
 # The word after a branch of wait W then carries J = proof_constants.branch_j(B, W),
 # that lane's own (stall_free_bprime). Anything else is A2-UNCERTIFIED with the
@@ -168,25 +170,41 @@ def uncertified_reason(img, path=None):
         lset, _d_min, _k, _j = lane_set(img, budget_path=path)
     except (EdgePacedNoTExt, zs.ZeroSpacingError) as exc:
         return "branch lane(s) %s, B = %d: lane set does not form (%s)" % (lanes, B, exc)
-    # ⛔ PER LANE, THAT LANE'S OWN SPACING (agent 2 11-14, from the Lean:
-    # head_valid_optA's `hd : DSTAR + B <= d` with `hdly : P.dly y = d` is lane
-    # y's own spacing; an image-wide minimum is never used). Condition 1 is
-    # checked here; condition 2 (`hNc : 2d >= R_y + 26 + B`) and each branch
-    # lane's J (1 + its max CERTIFIED lateness, not branch_j alone) come from
-    # agent 2's generated per-lane predicate (a) and max-lateness export (b) --
-    # until both exist the image stays A2-UNCERTIFIED, by name.
-    need = PC.nonbranch_dmin(B)
-    short = ["lane %d d=%s" % (r["lane"], r["T"]) for r in lset
-             if r["lane"] not in bl and r["T"] < need]
-    if short:
-        return ("branch lane(s) %s, B = %d: J = 1 premise fails on plain lane(s) "
-                "%s < D* + B = %d (head_valid_optA, per lane)"
-                % (lanes, B, ", ".join(short), need))
-    if not hasattr(PC, "lane_j1_premise") or "max_late" not in e:
-        return ("branch lane(s) %s, B = %d: plain lanes meet D* + B; awaiting agent "
-                "2's per-lane premise (2d >= R + 26 + B) and per-branch-lane max "
-                "certified lateness export" % (lanes, B))
-    return "branch lane(s) %s: per-lane predicate present but not yet wired" % lanes
+    # ⛔ PER LANE, THAT LANE'S OWN SPACING AND RESPONSE (agent 2 11-14, the
+    # Lean: head_valid_nonbranch's d and R are lane y's own; an image-wide
+    # minimum is never used). Each lane's J is its certificate's (lane_j); a
+    # lane certified at J = 1 must also meet j1_ok -- J = 1 only under j1_ok.
+    import branch_budget as BB
+    lrec = e.get("lanes", {})
+    bad = []
+    for r in lset:
+        ln = r["lane"]
+        if ln == I.USB_LANE and any(ln == u for u in bl) and                 lrec.get(str(ln), {}).get("R", 0) is None:
+            continue    # the USB lane: whole-lane J = 1 + max_late (ArmSplit), no j1_ok
+        jl = BB.lane_j(e, ln)
+        if jl is None:
+            bad.append("lane %d: not in the record" % ln)
+        elif jl == 1 and not PC.j1_ok(r["T"], lrec[str(ln)]["R"], B):
+            bad.append("lane %d: J = 1 needs j1_ok, fails at d=%s R=%s (floor %d)"
+                       % (ln, r["T"], lrec[str(ln)]["R"],
+                          PC.j1_dmin(lrec[str(ln)]["R"], B)))
+    if bad:
+        return ("branch lane(s) %s, B = %d: %s (head_valid_nonbranch, per lane)"
+                % (lanes, B, "; ".join(bad)))
+    # Wilson 11-15 item 2: an unclocked SHIFT lane's response bound R is OWED
+    # before the image can be quoted (j1_ok needs R) -- agent 2, with R_usb
+    tx = sorted({ln for ln, h, acts in lanes_of(img) for a in acts
+                 if a["op"] == I.OP_SHIFT and not is_clocked(h, a)})
+    if tx:
+        resp = {}
+        if os.path.isfile(RESP_JSON):
+            with open(RESP_JSON, encoding="utf-8") as fh:
+                resp = json.load(fh)
+        if name not in resp:
+            return ("branch lane(s) %s, B = %d: unclocked SHIFT lane(s) %s -- response "
+                    "bound R owed (agent 2, with R_usb; Wilson 11-15)"
+                    % (lanes, B, ",".join(map(str, tx))))
+    return None
 
 
 def refuse_branch(img, name="image", path=None):
@@ -361,9 +379,8 @@ T_EXT = _TExt()
 def lane_set(img, t_ext=None, j=None, budget_path=None):
     """The program's own A2 lane set, plus which entries are clocked OD.
     `t_ext` ({lane: cycles}) overrides the registry for edge-paced lanes.
-    A branch lane of an image with a CERTIFIED B carries
-    J = max(program J, proof_constants.branch_j(B, W_min)) -- W_min that lane's
-    smallest branch wait (branch_j falls as W grows); certification itself
+    A lane of an image with a CERTIFIED B carries J = max(program J,
+    branch_budget.lane_j(record, lane)) -- its own certificate; certification itself
     (premise, record) is `uncertified_reason`'s, not this function's."""
     rows = lanes_of(img)
     if t_ext is None:
@@ -403,6 +420,16 @@ def lane_set(img, t_ext=None, j=None, budget_path=None):
                 jb = (PC.branch_j(B, I.branch_wait(a2)) if B is not None
                       else PC.load()["j_interim_head_late_optA"])
                 br_j[ln2] = max(br_j.get(ln2, 0), jb)
+        if rec is not None and rec.get("B") is not None:
+            # certified B: EVERY lane's J is its own certificate's, 1 + its max
+            # certified lateness (branch_budget.lane_j) -- replaces the branch_j
+            # floor wherever the record carries the lane (Wilson 11-14: j_lane
+            # from the image's own certificate, no hand-shifted formula)
+            import branch_budget as BB
+            for ln2 in {r[0] for r in rows}:
+                jl = BB.lane_j(rec, ln2)
+                if jl is not None:
+                    br_j[ln2] = jl
     out = []
     for ln, h, acts in rows:
         T = min((g for a in acts if a["delay"] > 0 for g in gaps(h, a)),

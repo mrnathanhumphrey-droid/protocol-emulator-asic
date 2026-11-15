@@ -273,9 +273,8 @@ def main() -> int:
         say(False, "M7 has no generated arm image to drop")
 
     # M8 (11-14, the A2 lift): certification reads the per-image B record BY
-    # SHA. A synthetic record (temp file, never the real one) on a one-branch-
-    # lane image whose spacing meets D* + B at B = 0 certifies (the control);
-    # each corruption must make it A2-UNCERTIFIED.
+    # SHA. A temp copy of usbbuf_usb's real record certifies (the control);
+    # each planted corruption must make it A2-UNCERTIFIED.
     uimg = byname.get("usbbuf_usb.hex")
     if uimg is None:
         say(False, "M8 has no usbbuf_usb.hex to plant on")
@@ -287,11 +286,16 @@ def main() -> int:
                 with open(p, "w", encoding="utf-8") as fh:
                     json.dump({"images": {} if entry is None else {"x.hex": entry}}, fh)
                 return p
-            good = {"sha": P.image_sha(uimg), "B": 0, "reason": "certified"}
-            ok_why = P.uncertified_reason(uimg, rec(good)) or ""
-            say("plain lanes meet D* + B" in ok_why,
-                "control: a current B record meeting D* + B on every plain lane -> "
-                "past the per-lane premise (held only on agent 2's pending exports)")
+            # the image's REAL record (agent 2's per-lane R / max_late), copied
+            _n, real = P.branch_budget(uimg)
+            good = json.loads(json.dumps(real))
+            ok_why = P.uncertified_reason(uimg, rec(good))
+            # past every per-lane check; the one hold left may be the OWED SHIFT
+            # response bound (Wilson 11-15 item 2) -- nothing else
+            say(ok_why is None or "response bound R owed" in ok_why,
+                "control: its current record (per-lane lane_j, j1_ok on every J = 1 "
+                "lane) -> past the per-lane checks%s" % ("" if ok_why is None or
+                "response bound R owed" in ok_why else " -- got: " + ok_why))
             say(P.uncertified_reason(uimg, rec(dict(good, sha="0" * 64))) is not None,
                 "M8a record sha does not match the image -> A2-UNCERTIFIED")
             say(P.uncertified_reason(uimg, rec(dict(good, B=None, reason="planted"))) is not None,
@@ -299,8 +303,12 @@ def main() -> int:
             say(P.uncertified_reason(uimg, rec(None)) is not None,
                 "M8c the image's B record removed -> A2-UNCERTIFIED")
             big = max(r["T"] for r in P.lane_set(uimg)[0])   # D* + B past every plain lane
-            say("premise fails on plain lane" in (P.uncertified_reason(uimg, rec(dict(good, B=big))) or ""),
-                "M8d B large enough to break a plain lane's J = 1 premise -> A2-UNCERTIFIED")
+            say("J = 1 needs j1_ok" in (P.uncertified_reason(uimg, rec(dict(good, B=big))) or ""),
+                "M8d B large enough to break a J = 1 lane's j1_ok -> A2-UNCERTIFIED")
+            plain = next(l for l, v in good["lanes"].items() if v.get("R") is not None)
+            nol = dict(good, lanes={l: v for l, v in good["lanes"].items() if l != plain})
+            say("not in the record" in (P.uncertified_reason(uimg, rec(nol)) or ""),
+                "M8e a lane missing from the record -> A2-UNCERTIFIED")
         finally:
             shutil.rmtree(tdir, ignore_errors=True)
 

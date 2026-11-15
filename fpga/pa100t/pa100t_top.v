@@ -13,6 +13,9 @@
 // PE_I2C (`build.tcl i2c` only): the I2C build -- J11 pin 3 (B20) = SCL and
 // J11 pin 4 (A20) = SDA, BOTH open drain (pa100t_j11_i2c.xdc; the pull-ups
 // are on the breadboard).
+// PE_USB (`build.tcl usb` only): the USB keyboard bring-up -- J11 pin 3 (B20) = D+,
+// J11 pin 4 (A20) = D-, PUSH-PULL, and the soft-attach pull-up on SD DAT0 (AB18), all
+// high-Z unless the program runs (pa100t_j11_usb.xdc; comms/USB_PIN_DELTA.md).
 `default_nettype none
 module pa100t_top #(
     parameter IMG = "uart_rx_board.hex",
@@ -39,6 +42,11 @@ module pa100t_top #(
 `ifdef PE_I2C
     inout  wire       j11_scl,
     inout  wire       j11_sda,
+`endif
+`ifdef PE_USB
+    inout  wire       j11_dp,
+    inout  wire       j11_dm,
+    output wire       usb_pu,
 `endif
     output wire [5:0] led
 );
@@ -91,6 +99,17 @@ module pa100t_top #(
       .clk(clkcore), .rst_n(rst_n), .uart_rx(rxs[1]), .uart_tx(uart_tx),
       .led(core_led), .running(running), .dq_in(j11_sda), .dq_low(sda_low),
       .p3_in(j11_scl), .p3_low(scl_low)
+  );
+`elsif PE_USB
+  wire dp_oe, dp_o, dm_oe, dm_o, pu;
+  assign j11_dp = dp_oe ? dp_o : 1'bz;           // push-pull, released unless running
+  assign j11_dm = dm_oe ? dm_o : 1'bz;
+  assign usb_pu = pu ? 1'b1 : 1'bz;              // soft attach: 1.5k to D- on the breadboard
+  pe_fpga_core #(.IMG(IMG), .CLK_HZ(CLK_HZ), .USB(1)) u_core (
+      .clk(clkcore), .rst_n(rst_n), .uart_rx(rxs[1]), .uart_tx(uart_tx),
+      .led(core_led), .running(running), .dq_in(j11_dm), .dq_low(),
+      .p3_in(j11_dp), .p3_low(),
+      .usb_dp_oe(dp_oe), .usb_dp_o(dp_o), .usb_dm_oe(dm_oe), .usb_dm_o(dm_o), .usb_pu(pu)
   );
 `else
   pe_fpga_core #(.IMG(IMG), .CLK_HZ(CLK_HZ)) u_core (

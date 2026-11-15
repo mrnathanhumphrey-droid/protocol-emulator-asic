@@ -127,11 +127,24 @@ def branch_j(B, W, k=None):
     return 1 + branch_ld(B, W, k)
 
 
-def nonbranch_dmin(B, k=None):
-    """OptRun.NONBRANCH_DMIN: a lane with no branch word has J = 1 (head valid at release,
-    head_valid_optA) at per-action spacing >= D* + B -- not D* alone when B > 0."""
+def j1_ok(d, R, B, k=None):
+    """THE J = 1 PREMISE, the one generated form (OptRun.head_valid_nonbranch, Wilson / agent 1
+    11-14): a lane with NO branch word has its head valid whenever released iff (sufficient)
+      * d >= D* + B           (hd), and
+      * 2d >= R + head_slack + B   (hNc),
+    with d THAT LANE'S OWN per-action (release-to-release) spacing, R ITS OWN response bound and B
+    the image's certified branch-1 budget -- never the image-wide minimum spacing, and no C_SVC
+    term. Below it no closed form is proved: a lane's J is 1 + its certified lateness
+    (branch_budget.lane_j). A branch lane never gets J = 1 from this; its words are covered by the
+    per-retirement certificate (head_late_gap)."""
     k = k or load()
-    return k["dstar"] + B
+    return d >= k["dstar"] + B and 2 * d >= R + k["head_slack"] + B
+
+
+def j1_dmin(R, B, k=None):
+    """the least own spacing j1_ok accepts at response R and budget B"""
+    k = k or load()
+    return max(k["dstar"] + B, -(-(R + k["head_slack"] + B) // 2))
 
 
 def branch_w_diag(nbranch, k=None):

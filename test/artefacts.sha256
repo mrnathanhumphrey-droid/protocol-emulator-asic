@@ -86,3 +86,5 @@ eb43693b3d540c3163150057f816a9cfa9f47eb0dbdebd42b3dc9d6eb77356cd  uart_tx_image.
 17359b05bec6c386d16e07caa54d8ee96a859d99f2ceadc735c76cd95c4b3eb6  ws2812_sub3_rearm21.hex  # run_wirefeed_mf.py --write
 1b229bfa46040d8a9f1cdcba7465328544f570501af4bf473aa3f6509e48ea8d  ../fpga/images/uart_rx_board.hex  # uart_rx.py ../fpga/images/uart_rx_board.hex board
 62743d0b8ca36002d25c97491e25016dd3ab0f2cdd91fa65167fa5634bd588b6  ../fpga/images/uart_rx_board_nostop.hex  # uart_rx.py ../fpga/images/uart_rx_board_nostop.hex board - nostop
+03d6db6cdcf478765ebdf1c921d00dc20bce750212f8a87ce13dfbf7151326f1  ../fpga/images/usbdev_fpga.hex  # ../fpga/sim/gen_usbdev_fpga.py ../fpga/images/usbdev_fpga.hex
+299b3ef9887bc98e72c53be3216bd9c95f4d401df57cdd2d477954d086045031  ../fpga/images/usbdev_fpga.hex.cert.json  # ../fpga/sim/gen_usbdev_fpga.py ../fpga/images/usbdev_fpga.hex

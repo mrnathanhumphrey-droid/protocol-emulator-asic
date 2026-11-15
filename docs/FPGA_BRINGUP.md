@@ -37,6 +37,8 @@ Every bitstream built before F1.5 has the board glue loading **v1's 256 bytes wi
 & C:\AMDDesignTools\2026.1\Vivado\bin\vivado.bat -mode batch -nojournal -source fpga/pa100t/build.tcl -tclargs ow
 # I2C FRAM on J11
 & C:\AMDDesignTools\2026.1\Vivado\bin\vivado.bat -mode batch -nojournal -source fpga/pa100t/build.tcl -tclargs i2c
+# USB device on J11 (+ the soft-attach pin on SD DAT0)
+& C:\AMDDesignTools\2026.1\Vivado\bin\vivado.bat -mode batch -nojournal -source fpga/pa100t/build.tcl -tclargs usb
 ```
 
 To read the result:
@@ -46,12 +48,22 @@ Select-String vivado.log -Pattern 'PE_FPGA: setup WNS'      # vivado.log lands w
 Select-String fpga\build\pa100t\timing_summary.rpt -Pattern 'WNS\(ns\)' -Context 0,2
 ```
 
-The output folder is `fpga/build/pa100t`, `pa100t_ow` or `pa100t_i2c`.
+The output folder is `fpga/build/pa100t`, `pa100t_ow`, `pa100t_i2c` or `pa100t_usb`.
+
+## The USB build against the chip (Wilson 11-14)
+
+**On the board the USB outputs are 1 cycle later than the chip's, and the inputs 0** —
+`model/fpga_consts.usb_out_lat()` / `usb_in_lat()`, read from the glue's `USB_OUT_LAT` and checked
+by `fpga/sim/run_fpga_usb.py`. Every WITNESS (hw) comparison subtracts them. The board's handshake
+response is the chip's +60/61 plus 1, i.e. **+61/62 against the 78-cycle arming deadline**
+(`lane_cert.arm_premise_bounds`), still inside. D+, D− and their output enables register on the
+same edge in the glue; the routed-netlist check of that is owed with the VBUS rebuild.
 
 ## The record
 
 | date | commit | variant | clock | WNS (ns) | WHS (ns) | LUT / FF | bitstream | note |
 |---|---|---|---|---|---|---|---|---|
+| 2026-11-14 | **USB (fd30263)** | USB | **60 MHz** | +1.664 | +0.078 | 9,619 / 3,504 | `fpga/build/pa100t_usb/pa100t_usbdev.bit` (sha256 e3770925d8191638…) | **The USB keyboard bring-up build** (Wilson 11-14, comms/USB_PIN_DELTA.md): `build.tcl usb`, image `usbdev_fpga.hex` = the certified `usbdev_dev.hex` (B = 8). `usb_check` in the routed netlist: D+ B20, D- A20 (IOBUF), pull-up AB18 (OBUFT), all LVCMOS33 SLEW SLOW DRIVE 4, no PULLUP. Glue sim `fpga/sim/run_fpga_usb.py` and the 4-variant `gate_fpga_synth` green. Bench steps: the delta's §6. |
 | 2026-11-10 | **F2 (48f512f)** | UART | **60 MHz** | +4.639 | +0.092 | 9,414 / 3,395 | `fpga/build/pa100t/pa100t_top.bit` (sha256 0b79eba89afac536…) | **The board at the chip's own clock** (MMCM ×6, VCO 1200, /20). Image `uart_rx_board.hex`, rebuilt from CLK_HZ (T 521), byte-identical to the chip bench's `test/uart_rx_image.hex`. Loader, 1-Wire, I2C and UART-rx sims green at 60 MHz; fpga-synth green. Supersedes F1.5 for the bench. |
 | 2026-11-09 | **F1.5 (485fb29)** | UART | 50 MHz | +7.466 | +0.079 | 9,391 / 3,390 | `fpga/build/pa100t/pa100t_top.bit` (sha256 e6678fce27aa02fe…) | **First bitstream fit for the bench**: the glue loads the whole v2 store (512 bytes, MAGIC); sims green with exact load checks. 224 LUTs as memory (the RAM core plus the 512-byte boot ROM / PC buffer). |
 | 2026-11-09 | F1 (work/fpga-f1, on 73a387a) | UART | 50 MHz | +6.970 | +0.078 | 9,335 / 3,388 | `fpga/build/pa100t/pa100t_top.bit` | **F1 as ruled: the chip's own "sram" store** (no store define). The RAM core maps to 176 LUTs of distributed RAM, not block RAM (its byte-mask merge reads the array asynchronously). |
