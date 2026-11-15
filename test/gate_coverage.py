@@ -156,6 +156,18 @@ CLASSIFIED = {
         "the arm of a condition that is true on every entry. ⭐ Checked "
         "structurally by `check_h_idle_clears` below rather than asserted, "
         "because the claim is about two specific lines and would rot."),
+    ("src/pe_engine.v", 3382, "v_branch", "else"): (
+        UNREACHABLE,
+        "ST_IDLE's `if (w_hv)` with no else: a dispatch winner whose HEAD is EMPTY. Since "
+        "(b') (9c0df0c; agent 2 729111f) `ready[g] = rdy_rel[g] & l_actv[hix[g]]` -- the "
+        "dispatcher never picks a lane with an empty head -- and `hv[g]` is that same "
+        "`l_actv[hix[g]]`. `winner` / `winner_oh` are COMBINATIONAL from this cycle's `ready` "
+        "(both the argmin tree and the serial scan), and `w_hv = OR(winner_oh[k] & hv[k])`, "
+        "so in ST_IDLE with `winner_v` the one-hot names a ready lane and `w_hv` is 1. "
+        "Reachable ONLY under `M_GLOBAL_STALL` (`ready = rdy_rel`, the old global stall -- "
+        "its must-fire build), which the coverage sweep does not build. ⭐ Checked "
+        "structurally by `check_whv_ready` below, because the claim rests on three lines "
+        "that a refactor could separate."),
     ("src/pe_engine.v", 3322, "v_line", "case"): (
         UNREACHABLE,
         "The prefetch FSM's defensive `default`. `pst` is declared `[2:0]` and "
@@ -877,6 +889,8 @@ ANCHOR_TEXT = {
         "if (ck_shiftin & ack_drv[1]) pin_out[a_pin] <= ack_drv[0];",
     ("src/pe_engine.v", 3133):
         "H_IDLE: if (!hdr_done) begin",
+    ("src/pe_engine.v", 3382):
+        "if (w_hv) begin",
     ("src/pe_engine.v", 4031):
         "if (ck_consume & ~l_ckgot[cur]) begin",
     ("src/pe_engine.v", 3322):
@@ -1758,6 +1772,37 @@ def check_h_idle_clears() -> int:
     return rc
 
 
+def check_whv_ready(text=None) -> int:
+    """The 3382 waiver's mechanism (11-15): a dispatch winner always has a valid head.
+    Three facts, read from the source: `ready` carries the head-valid term, `hv` is the same
+    term, and `w_hv` is the winner's one-hot AND `hv`. `text`: a planted source (must-fire)."""
+    print()
+    print("  --- the 3382 waiver's mechanism (a winner's head is valid) ---")
+    if text is None:
+        with open(os.path.join(ROOT, "src", "pe_engine.v"), encoding="utf-8",
+                  errors="replace") as fh:
+            text = fh.read()
+    # the shipped (non-mutant) branch of the `ready` assign: after the M_GLOBAL_STALL `else
+    m = re.search(r"`ifdef\s+M_GLOBAL_STALL\s+assign ready\[gi\]\s*=\s*rdy_rel\[gi\];\s*"
+                  r"`else\s+assign ready\[gi\]\s*=\s*(.+?);\s*`endif", text, re.S)
+    facts = [
+        ("ready = rdy_rel & l_actv[hix] (shipped build)",
+         m is not None and re.fullmatch(r"rdy_rel\[gi\]\s*&\s*l_actv\[hix\[gi\]\]",
+                                         m.group(1).strip()) is not None),
+        ("hv = l_actv[hix]",
+         re.search(r"assign hv\[gi\]\s*=\s*l_actv\[hix\[gi\]\];", text) is not None),
+        ("w_hv = OR(winner_oh & hv)",
+         re.search(r"w_hv\s*=\s*w_hv\s*\|\s*\(winner_oh\[wk\]\s*&\s*hv\[wk\]\);", text)
+         is not None),
+    ]
+    rc = 0
+    for label, ok in facts:
+        print("    %-48s %s" % (label, "ok" if ok else "*** NOT FOUND -- the waiver no "
+                                 "longer describes the code"))
+        rc |= 0 if ok else 1
+    return rc
+
+
 def selftest(agg) -> int:
     """⛔ PRICE THE GATE. Each arm is the failure it is meant to catch."""
     rc = 0
@@ -1950,6 +1995,16 @@ def main() -> int:
     rc |= check_reasons()
     rc |= check_full_case()
     rc |= check_h_idle_clears()
+    rc |= check_whv_ready()
+    # must-fire: a planted `ready` without the head-valid term is caught
+    with open(os.path.join(ROOT, "src", "pe_engine.v"), encoding="utf-8", errors="replace") as fh:
+        _src = fh.read()
+    _bad = _src.replace("assign ready[gi] = rdy_rel[gi] & l_actv[hix[gi]];",
+                        "assign ready[gi] = rdy_rel[gi];")
+    _red = _bad != _src and check_whv_ready(_bad) != 0
+    print("    must-fire: `ready` without the head-valid term is caught   %s"
+          % ("red  ok" if _red else "*** MISSED"))
+    rc |= 0 if _red else 1
     rc |= check_toggle(agg)
     rc |= selftest(agg)
     print()
