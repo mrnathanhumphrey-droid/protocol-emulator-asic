@@ -30,6 +30,62 @@ import proof_constants as PC  # noqa: E402
 
 LIMIT = 400          # B or a response this large: no fixpoint
 
+#: THE GUARANTEED SLOT (Wilson 11-16: one requester, one buffer, 1b at depth 2 and F1's PC+2).
+#: None = off (the record; nothing moves). An int = the buffer depth: every ARM's next words are
+#: fetched while the ARM is the head, through a reserved slot, so they are READY at release
+#: (lane_cert.certificate's `ready`) -- a plain ARM's successors to that depth (not the two-pin
+#: LEVEL ARM, which P1b excludes), a FALLTHROUGH ARM's PC+1 and PC+2. The cost: each ARM's
+#: fetch takes the port from the other lanes' refills, charged in B (l_refill per fetch, per
+#: 23 + B window, summed over lanes) -- the term both schemes read. [assumed: the bound's Lean
+#: brick is owed; this is the certificate side, labelled]
+SLOT = None
+#: fetches charged per ARM (Wilson's term: one)
+SLOT_PER_ARM = 1
+#: counterfactual switch: charge a lane's own ARM fetches to its own B too (the image-wide B).
+#: Off = the proofs' shape: Port.charge counts only refills for lanes OTHER than y, and every hB
+#: is per y, so the slot's term is per victim lane
+SLOT_SELF = False
+
+
+def slot_ready(g, I, depth):
+    """{word}: the words the guaranteed slot makes ready at release on one lane"""
+    out = set()
+    for a in g:
+        x = g[a][0]
+        if x["op"] != I.OP_ARM or x["mod"] & I.ARM_MOD_LEVEL2:
+            continue
+        if x["mod"] & I.ARM_MOD_FT:
+            out |= {w for w in g[a][1] if w in g}         # PC+1 (timeout), PC+2 (edge)
+            continue
+        front = set(g[a][1])
+        for _ in range(depth):
+            out |= {w for w in front if w in g}
+            front = {s for w in front if w in g for s in g[w][1]}
+    return out
+
+
+def arm_window_count(g, gaps, lat, W, I):
+    """The most ARM words on one path whose releases fit a W-cycle window (each ARM's slot fetch
+    happens while it is the head: by its release plus its lateness) -- lane_cert.br1_window_count's
+    walk, counting ARMs."""
+    arms = {w for w in g if g[w][0]["op"] == I.OP_ARM}
+    best = 0
+    for s in arms:
+        budget = W - 1 + lat[s]
+        stack, seen = [(s, 0, 1)], set()
+        while stack:
+            w, dist, n = stack.pop()
+            best = max(best, n)
+            if (w, dist) in seen:
+                continue
+            seen.add((w, dist))
+            step = sum(gaps[w])
+            for nx in g[w][1]:
+                d2 = dist + step
+                if d2 <= budget:
+                    stack.append((nx, d2, n + (1 if nx in arms else 0)))
+    return best
+
 #: must-fire switch (gate_lane_cert M_LC_NOPIN_ALL): count every word as touching a pin
 NOPIN_MUT = False
 #: must-fire switches (gate_lane_cert): M_LC_ARMGATE_OFF -- no generic-lane ARM gated;
@@ -227,6 +283,8 @@ def _image_budget(img, iters=80, premise_gaps=None, ready=None, scheme="window")
         return {"B": None, "reason": "not applied to a USB image (the USB lane's response is "
                 "PrioResp's; one closure theorem per image)", "lanes": {}}
     graphs = {l: LC.build(img, l, prem, I) for l in lanes}
+    if SLOT:
+        ready = {l: set(ready.get(l, ())) | slot_ready(graphs[l][0], I, SLOT) for l in lanes}
     for l, pg in premise_gaps.items():
         for w, gp in pg.items():
             if l in graphs and w in graphs[l][2]:
@@ -256,6 +314,7 @@ def _image_budget(img, iters=80, premise_gaps=None, ready=None, scheme="window")
     generic = [l for l in lanes if not (usb and l == I.USB_LANE)]
     B = k["l_refill"] * usb_n
     R = {l: k["R_base"] for l in generic}
+    SB = {l: 0 for l in generic}          # the guaranteed slot's charge on lane l (per victim)
     for _ in range(iters):
         lat, rmax = {}, {}
         for l in generic:
@@ -265,13 +324,14 @@ def _image_budget(img, iters=80, premise_gaps=None, ready=None, scheme="window")
             # valid by its release + flush_refill_late + B (FlushLate.flush_head_late); the
             # timeout's decision only disarms, so PC+1 waits one more decision (disarm_noDec)
             fts = LC.ft_paths(g, I)
-            floor = {c2: LC.ft_flush_late(B) for _c1, c2 in fts.values() if c2 in g}
+            Bl = B + SB[l]
+            floor = {c2: LC.ft_flush_late(Bl) for _c1, c2 in fts.values() if c2 in g}
             xr = {c1: 1 for c1, _c2 in fts.values() if c1 in g}
-            cert = LC.certificate(g, preds, gaps, k, B, 0, floor=floor, xr=xr, rbase=R[l],
+            cert = LC.certificate(g, preds, gaps, k, Bl, 0, floor=floor, xr=xr, rbase=R[l],
                                   ready=ready.get(l))
             if cert is None:
-                return {"B": None, "reason": "lane %d: no lateness certificate at B = %d" % (l, B),
-                        "lanes": {}}
+                return {"B": None, "reason": "lane %d: no lateness certificate at B = %d%s"
+                        % (l, Bl, " (slot charge %d)" % SB[l] if SB[l] else ""), "lanes": {}}
             lat[l] = cert[0]
             rmax[l] = max(cert[2].values())
         if usb:
@@ -308,8 +368,22 @@ def _image_budget(img, iters=80, premise_gaps=None, ready=None, scheme="window")
         if usb and late:
             return {"B": None, "reason": "a non-USB lane is late beside the USB receive (its refills "
                     "would charge the USB lane: not covered)", "lanes": {}}
+        SBn = {l: 0 for l in generic}
+        if SLOT:
+            per = {l: SLOT_PER_ARM * arm_window_count(graphs[l][0], graphs[l][2], lat[l],
+                                                      23 + B + SB[l], I) for l in generic}
+            if usb and any(per.values()):
+                return {"B": None, "reason": "guaranteed slot: a non-USB lane's ARM fetches "
+                        "beside the USB receive (they would charge the USB lane: not covered)",
+                        "lanes": {}}
+            if usb:
+                # the USB lane's ARMs fetch through the slot too (their cost is charged; no
+                # readiness is claimed for them: the USB lane's figures are full_report's)
+                per[I.USB_LANE] = SLOT_PER_ARM * arm_window_count(ug, ugaps, ulat, 23 + B, I)
+            SBn = {l: k["l_refill"] * sum(n for z, n in per.items() if z != l or SLOT_SELF)
+                   for l in generic}
         Bn = k["l_refill"] * (late + usb_n)
-        if Bn == B and Rn == R:
+        if Bn == B and Rn == R and SBn == SB:
             out = {}
             for l in generic:
                 ag = arm_gate(img, l, graphs[l], lat[l], I)
@@ -322,6 +396,8 @@ def _image_budget(img, iters=80, premise_gaps=None, ready=None, scheme="window")
                           "max_late_pin": max([v for w, v in lat[l].items()
                                                if not no_pin(graphs[l][0][w][0], I)
                                                and w not in gated] or [0])}
+                if SLOT:
+                    out[l]["slot_B"] = SB[l]
                 if ag:
                     out[l]["arm_margin"] = min(ag.values())
                 # per word (the poset compiler's arming check reads it; not in the record)
@@ -351,7 +427,7 @@ def _image_budget(img, iters=80, premise_gaps=None, ready=None, scheme="window")
         if Bn > LIMIT or any(v > LIMIT for v in Rn.values()):
             return {"B": None, "reason": "no finite B (B %d -> %d, max R %d)"
                     % (B, Bn, max(Rn.values())), "lanes": {}}
-        B, R = Bn, Rn
+        B, R, SB = Bn, Rn, SBn
     return {"B": None, "reason": "no fixpoint in %d rounds (B %d)" % (iters, B), "lanes": {}}
 
 

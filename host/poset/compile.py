@@ -320,7 +320,8 @@ def _budget(img, pg, rd):
     import lane_cert as LC
     key = (img, repr(sorted((l, sorted(v.items())) for l, v in pg.items())),
            repr(sorted((l, sorted(v)) for l, v in rd.items())), LC.ARM_RETIRE, BB.EDF_MUT,
-           BB.ARMGATE_MUT, BB.NOPIN_MUT, BB.UART_FRAME_MUT, BB.QUEUE_MUT)
+           BB.ARMGATE_MUT, BB.NOPIN_MUT, BB.UART_FRAME_MUT, BB.QUEUE_MUT, BB.SLOT,
+           BB.SLOT_PER_ARM)
     if key not in _BB_CACHE:
         _BB_CACHE[key] = BB.image_budget(img, premise_gaps=pg, ready=rd)
     return _BB_CACHE[key]
