@@ -27,7 +27,8 @@
      not one edge; a window inside a LOOP body keeps every LOOP head on its action (UART TX)
      `else continue` is UNCERTIFIED by name (Wilson 11-16): the 1.6a queue check with the
      lateness in J -- FlushLate's PC+2 floor plus B accumulating on D*-spaced bit words; needs
-     1b -- each part generated from the certificate with the check off
+     the FALLTHROUGH PC+2 prefetch (F1; Wilson 11-16, was "1b") -- each part generated from the
+     certificate with the check off
   C11 the premise mechanism (Wilson 11-15 call 1, model/premises.py): a registered datasheet
      whose SHA-256 matches puts its ID in the stamp, the window certificate and A2's line, its
      gap in the certificate: certified at lane 0 lateness 0; a SHA mismatch or an unregistered
@@ -218,8 +219,10 @@ def counterfactual_budget(r):
 
 def c10_continue(tag, r):
     """`else continue` (Wilson 11-16): UNCERTIFIED, named -- lateness past the proved release:
-    FlushLate's PC+2 floor plus B accumulating on D*-spaced bit words; needs 1b. Every part of
-    the reason is generated from the certificate with the 1.6a check off."""
+    FlushLate's PC+2 floor plus B on D*-spaced bit words; needs the FALLTHROUGH PC+2 prefetch
+    (F1: the seed is the head after the FALLTHROUGH flush -- Wilson 11-16, correcting "1b", which
+    covers a plain ARM's successor). Every part of the reason is generated from the certificate
+    with the 1.6a check off."""
     import branch_budget as BB
     import lane_cert as LC
     probs = []
@@ -245,8 +248,8 @@ def c10_continue(tag, r):
         if BB.queue_refusal(r["image"], cf["B"], cf["lanes"]) is None:
             probs.append("%s: the counterfactual certificate passes 1.6a" % tag)
         say("  %s lane %d: UNCERTIFIED (expected) -- lateness past the proved release: "
-              "FlushLate's PC+2 floor (%d) plus B = %d accumulating on D*-spaced bit words "
-              "(lane J %d); needs 1b" % (tag, ln, seed, cf["B"], 1 + top))
+              "FlushLate's PC+2 floor (%d) plus B = %d on D*-spaced bit words (lane J %d); "
+              "needs the FALLTHROUGH PC+2 prefetch (F1)" % (tag, ln, seed, cf["B"], 1 + top))
     return probs
 
 
