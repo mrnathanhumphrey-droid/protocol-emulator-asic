@@ -28,6 +28,12 @@ every must-fire must turn its check red, or the gate is not testing what it says
                     images' max_late_pin is stale (check 5 red)
   M_LC_UART_FRAME_SHORT the arming premise's frame one bit short (the next start edge a bit
                     earlier: the arming margin negative, the ARM stays in J) -> stale (red)
+  check 6  a negative UART arming margin (arm_gate) is refused: uart_rx_board with its REARM
+           70 cycles longer is uncertified, by name
+  M_LC_ARMMARGIN_OFF  the refusal off -> check 6 fails (its image certifies)
+  check 7  the USB lane report's failures (lane_cert.full_report) are a refusal: usbrx_main
+           (arm_sop at EOP + 311 against TIPD 78) is uncertified, by name
+  M_LC_USBFAIL_OFF  the report's failures ignored -> check 7 fails
   M_LC_EDF_OFF      the EDF response scheme (RespEdfClose.wb_close_edf) never tried -> every
                     image it certifies loses its B (check 5 red)
   THE ARMING PREMISE (Wilson 11-14 ruling 1): a handshake copy's arm_sop moved late by raising
@@ -275,6 +281,44 @@ def main():
         print("  arming premise (ArmSplit, generic lanes): %s -> %d image(s) stale: %s"
               % (mname, len(st), ", ".join(st)))
         kills.append((mname, bool(st) and not off, "%s: %d image(s) stale" % (attr, len(st))))
+    # the UART arming margin is a REFUSAL (11-15): uart_rx_board with its REARM before the ARM
+    # 70 cycles longer -- the ARM armed after the next start edge can be seen -- is uncertified,
+    # by name; M_LC_ARMMARGIN_OFF lets it through
+    def neg_margin_case():
+        img = corpus["uart_rx_board.hex"]
+        g, p, _gp = LC.build(img, 0, LC.premises(PC.load()), I)
+        arm = next(w for w in g if g[w][0]["op"] == I.OP_ARM)
+        out = bytearray(img)
+        for q in p[arm]:
+            a = I.ACT_BASE + q * I.ACT_BYTES
+            x = I._unpack(I.ACT_FIELDS, bytes(out[a:a + I.ACT_BYTES]), I.ACT_BYTES)
+            out[a:a + I.ACT_BYTES] = I.act(x["op"], x["pin"], x["level"], x["delay"] + 70,
+                                           count=x["count"], q=x["q"], pinb=x["pinb"], mod=x["mod"])
+        return BB.image_budget(bytes(out))
+    r = neg_margin_case()
+    ok6 = r["B"] is None and "arming margin" in r["reason"]
+    print("  check 6 %s  UART arming margin refused: uart_rx_board, REARM + 70 -> %s"
+          % ("GREEN" if ok6 else "RED  ", r["reason"][:80]))
+    BB.ARMMARGIN_MUT = True
+    try:
+        rm = neg_margin_case()
+    finally:
+        BB.ARMMARGIN_MUT = False
+    kills.append(("M_LC_ARMMARGIN_OFF", not (rm["B"] is None and "arming margin" in rm["reason"]),
+                  "refusal off: check 6 fails (B %s)" % rm["B"]))
+    # check 7: the USB lane report's failures are a refusal (11-15): usbrx_main arms its SOP ARM
+    # at EOP + 311 against TIPD 78 -> uncertified by name; M_LC_USBFAIL_OFF ignores the report
+    r7 = BB.image_budget(corpus["usbrx_main.hex"])
+    ok7 = r7["B"] is None and "USB lane: lane_cert report fails" in r7["reason"]
+    print("  check 7 %s  USB report failures refused: usbrx_main -> %s"
+          % ("GREEN" if ok7 else "RED  ", r7["reason"][:80]))
+    BB.USBFAIL_MUT = True
+    try:
+        r7m = BB.image_budget(corpus["usbrx_main.hex"])
+    finally:
+        BB.USBFAIL_MUT = False
+    kills.append(("M_LC_USBFAIL_OFF", r7m["B"] is not None,
+                  "report failures ignored: check 7 fails (B %s)" % r7m["B"]))
     # M_LC_EDF_OFF: the EDF response scheme (RespEdfClose.wb_close_edf, Wilson 11-15) never
     # tried -> every image it certifies goes stale (B back to none)
     edf = sorted(n for n, v in rec.items() if "RespEdfClose" in (v.get("reason") or ""))
@@ -356,7 +400,7 @@ def main():
         ok_txt = ("PASS (as required)" if name.endswith("_PASS") else "RED (killed)")
         print("  must-fire %-18s %s  %s" % (name, ok_txt if killed else "SURVIVED", what))
     teeth = all(k for _n, k, _w in kills)
-    green = ok1 and not fails and ok3 and ok4 and ok5
+    green = ok1 and not fails and ok3 and ok4 and ok5 and ok6 and ok7
     verdict = "PASSED" if (green and teeth) else ("FAILED (must-fire survived)" if not teeth
                                                    else "FAILED")
     print("GATE lane-cert: %s" % verdict)

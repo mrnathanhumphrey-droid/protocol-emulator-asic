@@ -280,6 +280,10 @@ GATES=(
   model/gate_lane_cert.py
   # agent 2 (1953127, Wilson 11-15 item 5): programs assembled at run time priced live
   model/gate_live_price.py
+  # agent 2 (8994ced / ac9547d, Wilson 11-15 calls 1 and 4): the UART pre-ARM spacing, least and
+  # certifying, with opt-out stamped; the SPI-target arming margins against the master's premise
+  model/gate_uart_spacing.py
+  model/gate_spi_premise.py
   model/gate_lean_anchors.py
   # ⛔ EVERY FIELD AN OPCODE DOES NOT READ IS ZERO (Wilson 11-14): the reads
   # table is generated from src/pe_engine.v's decode (red on an uncovered read

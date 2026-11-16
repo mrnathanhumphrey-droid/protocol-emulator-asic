@@ -697,7 +697,7 @@ def with_w1(ls, w1, i):
             for k in range(len(ls))]
 
 
-def queue_slot(img, src=None, t_ext=None, lateness=True):
+def queue_slot(img, src=None, t_ext=None, lateness=True, budget_path=None):
     """RULING DT-A -- condition 1.6a PER PROGRAM: r_i <= t_i on every lane.
 
     ⛔⛔ THE EXACT FORM, MEASURED AGAINST TCHECKER, NOT CHOSEN. `ovr` in the
@@ -717,7 +717,7 @@ def queue_slot(img, src=None, t_ext=None, lateness=True):
     Returns {lane: {"r": r or None, "T": t, "ok": bool, "why": str or None}}.
     `t_ext`: the edge-paced lanes' T_ext, declared at build time (lane_set).
     """
-    ls, _d, _k, _j = lane_set(img, t_ext, lateness=lateness)
+    ls, _d, _k, _j = lane_set(img, t_ext, budget_path=budget_path, lateness=lateness)
     u = utilisation(ls)
     out = {}
     if u > 1.0:

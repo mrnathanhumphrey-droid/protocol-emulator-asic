@@ -35,7 +35,10 @@ def price(img):
     import cert_stamp as CS
     img = bytes(img)
     if RECORD_ONLY_MUT:
-        st = CS.stamp(img)
+        # the record lookup alone, the live certificate withheld (cert_stamp.stamp would otherwise
+        # compute it for an image with no record entry, 11-15)
+        e = CS.budget_entry(img) or {"B": None, "reason": "no budget record", "lanes": {}}
+        st = CS.stamp(img, budget=e)
         return {"source": "record lookup", "stamp": st, "B": None, "reason": st["reason"],
                 "J": {}, "J_pin": {}}
     r = BB.image_budget(img)

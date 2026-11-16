@@ -151,7 +151,7 @@ def parse_statement(s):
     kind, _, rest = s.partition(" ")
     p = _P(_tokens(rest))
     st = {"kind": kind, "ast": p.pattern(), "during": None, "within": None, "else": None,
-          "observed": None, "given": None, "source": None}
+          "nodrain": False, "observed": None, "given": None, "source": None}
     if p.peek() in ("during", "within"):
         word = p.take()
         p.take("(")
@@ -176,6 +176,14 @@ def parse_statement(s):
                 raise SpecError("else takes %s (the closed set, Wilson 11-15), got %r -- a "
                                 "general handler is not in v2" % (" or ".join(ELSE_ACTIONS), act))
             st["else"] = p.take()
+            # Wilson 11-15: `else abort nodrain` -- no generated drain after the window; the
+            # image is stamped UNCERTIFIED with the reason
+            if p.peek() == "nodrain":
+                if st["else"] != "abort":
+                    raise SpecError("nodrain applies to `else abort` (the drain is added after "
+                                    "an abort window only)")
+                p.take()
+                st["nodrain"] = True
     while p.peek() is not None:
         c = p.take()
         if c in ("during", "within"):
@@ -183,6 +191,8 @@ def parse_statement(s):
                             "(a program obligation), not %r after it" % c)
         if c == "else":
             raise SpecError("`else` needs `within (lo, hi)` before it")
+        if c == "nodrain":
+            raise SpecError("`nodrain` follows `else abort`")
         if c == "observed":
             n = p.take()
             if not n.isdigit():
@@ -253,6 +263,8 @@ def render_statement(st):
         s += " during (%s ns, %s ns)" % st["during"]
     if st.get("within"):
         s += " within (%s ns, %s ns) else %s" % (st["within"] + (st["else"],))
+        if st.get("nodrain"):
+            s += " nodrain"
     if st["observed"] is not None:
         s += " observed %d" % st["observed"]
     if st["given"]:

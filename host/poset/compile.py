@@ -61,7 +61,9 @@ MUTANTS = ("M_PC_NO_CYCLE",      # cycles not refused
            "M_PC_JFLOOR_HEAD",   # J floor from each lane's head action only, not every lowered action
            "M_PC_WITHIN_NOARM",  # `within`: the arming check skipped (a window too tight compiles)
            "M_PC_WITHIN_LO_PASS",  # `within`: lo > 0 without `source datasheet` compiles
-           "M_PC_ARMRETIRE_OFF")   # lane_cert.ARM_RETIRE off (ArmRetire's cap not applied)
+           "M_PC_ARMRETIRE_OFF",   # lane_cert.ARM_RETIRE off (ArmRetire's cap not applied)
+           "M_PC_DRAIN_OFFBY1",    # the generated drain one past the search (the closed form disagrees)
+           "M_PC_ARM3_PASS")       # three plain edge ARMs in a row not refused
 MUT = os.environ.get("POSET_COMPILE_MUTANT", "")
 if MUT and MUT not in MUTANTS:
     raise SystemExit("poset compile: unknown mutant %r" % MUT)
@@ -299,7 +301,146 @@ def _block(a, nxt, p, pre, T, dstar):
     return new, iarm
 
 
-def windows(stmts, lowered, route, hz, arm="late", drain=0, premise="datasheet", ready=False):
+def drain_max(k=None):
+    """the drain search's ceiling, GENERATED: the post-ARM term the drain pays for is at most
+    the ARM's own response (R_base) plus the refill bound (head_slack) for any next word, cap
+    or no cap -- a larger drain cannot be what certifies a window"""
+    k = k or PC.load()
+    return k["R_base"] + k["head_slack"]
+
+
+#: the certificate per (image, knobs, module switches): the drain search and the gate's mutant
+#: passes compile the same images many times
+_BB_CACHE = {}
+
+
+def _budget(img, pg, rd):
+    import branch_budget as BB
+    import lane_cert as LC
+    key = (img, repr(sorted((l, sorted(v.items())) for l, v in pg.items())),
+           repr(sorted((l, sorted(v)) for l, v in rd.items())), LC.ARM_RETIRE, BB.EDF_MUT,
+           BB.ARMGATE_MUT, BB.NOPIN_MUT, BB.UART_FRAME_MUT)
+    if key not in _BB_CACHE:
+        _BB_CACHE[key] = BB.image_budget(img, premise_gaps=pg, ready=rd)
+    return _BB_CACHE[key]
+
+
+def drain_closed_form(next_delay, k=None):
+    """the drain the post-ARM term alone needs (ArmRetire): the word two after a plain ARM is
+    late by at most head_slack - ARM_RETIRE_GAP - (the next word's gap: its delay less the
+    rebase cycle), so the drain is that, or 0 -- every term read, none typed"""
+    import lane_cert as LC
+    k = k or PC.load()
+    return max(0, k["head_slack"] - LC.ARM_RETIRE_GAP - (next_delay - LC.REBASE))
+
+
+#: item 1b (Wilson 11-15): the plain-ARM successor prefetch is TWO words deep; the universe's
+#: longest run of plain edge ARMs is 2 (sptgt m1 / m3, b3b_a3); the USB lane's 3-run is an FT /
+#: SE0 / QUAL chain, outside 1b. A lowering may not make a longer run.
+MAX_PLAIN_ARM_RUN = 2
+
+
+def plain_arm_run_problems(lanes):
+    """[problem] for every run of more than MAX_PLAIN_ARM_RUN consecutive plain edge ARMs
+    (not FALLTHROUGH, not the two-pin LEVEL ARM) in a lowered lane"""
+    out = []
+    for ln, acts in sorted(lanes.items()):
+        run = 0
+        for i, a in enumerate(acts):
+            mod = a[6] if len(a) > 6 else 0
+            plain = a[0] == I.OP_ARM and not mod & I.ARM_MOD_FT and not mod & I.ARM_MOD_LEVEL2
+            run = run + 1 if plain else 0
+            if run == MAX_PLAIN_ARM_RUN + 1:
+                out.append("lane %d action %d: %d plain ARMs in a row -- item 1b's prefetch is %d "
+                           "words deep" % (ln, i, run, MAX_PLAIN_ARM_RUN))
+    return [] if MUT == "M_PC_ARM3_PASS" else out
+
+
+def windows(stmts, lowered, route, hz, arm="late", drain="auto", premise="datasheet", ready=False,
+            counterfactual=False):
+    """`within` lowered, with the DRAIN after every `else abort` window (Wilson 11-15):
+      drain="auto"  the default: per statement, the least drain (0..drain_max()) at which the
+                    certificate gives the windowed lanes J 1 -- generated, never typed. A
+                    statement with `nodrain` gets 0 and the result says so (the stamp is
+                    UNCERTIFIED with the reason, compile_spec). `else continue`: 0.
+      drain=int     that drain on every window (the drain table's sweep)
+    Every window also carries the closed form (drain_closed_form); the gate checks the search
+    and the closed form agree. The protocol check: a `during` / `within` bound on the event
+    after B shorter than the drain is refused by name."""
+    # Wilson 11-15: early arming is WITHDRAWN from the compiler (its search and closed form
+    # disagree: 5 vs none up to drain_max); the drain table keeps it as a labelled counterfactual
+    if arm != "late" and not counterfactual:
+        raise Refused("within: arm=%r is withdrawn -- the drain's search and closed form disagree "
+                      "there; only the drain table uses it (counterfactual=True)" % arm)
+    if drain != "auto":
+        return _windows(stmts, lowered, route, hz, arm, drain, premise, ready)
+    sids = [i for i, st in enumerate(s_ for s_ in stmts if s_.get("within"))]
+    ws = [s_ for s_ in stmts if s_.get("within")]
+    chosen = {i: 0 for i in sids}
+    found = {}
+    for i in sids:
+        if ws[i]["else"] != "abort" or ws[i].get("nodrain"):
+            continue
+        for d in range(drain_max() + 1):
+            trial = {**chosen, i: d}
+            _l, _r, w = _windows(stmts, lowered, route, hz, arm, trial, premise, ready)
+            if _j1(w, i):
+                found[i] = d
+                break
+        chosen[i] = found.get(i, 0)
+        if MUT == "M_PC_DRAIN_OFFBY1" and i in found:
+            chosen[i] += 1
+    lanes, route2, w = _windows(stmts, lowered, route, hz, arm, chosen, premise, ready)
+    if w is None:
+        return lanes, route2, w
+    runs = plain_arm_run_problems(lanes)
+    if runs:
+        raise Refused("within: %s" % "; ".join(runs))
+    # the protocol check: the next event after B, bounded by the spec, must not be pushed past
+    for i in sids:
+        d = chosen[i]
+        if not d:
+            continue
+        b_ev = ws[i]["ast"][3]
+        for st2 in stmts:
+            a2 = st2["ast"]
+            bound = st2.get("within") or st2.get("during")
+            if (bound and a2[0] == "bin" and a2[1] in ("->", "|>") and a2[2] == b_ev):
+                hi_c = math.ceil(float(bound[1]) * hz / 1e9)
+                if hi_c < d:
+                    raise Refused("within: the drain (%d cycles) would push the next action past %s"
+                                  % (d, S.render_statement(st2)))
+    for x in w["windows"]:
+        x["drain"] = chosen[x["sid"]]
+        x["drain_found"] = found.get(x["sid"])
+        x["nodrain"] = bool(ws[x["sid"]].get("nodrain"))
+    w["nodrain"] = [S.render_statement(ws[i]) for i in sids if ws[i].get("nodrain")]
+    if w["nodrain"]:
+        # what the default would have been (for the stamp's reason)
+        trial = {i: (0 if not ws[i].get("nodrain") else None) for i in sids}
+        need = {}
+        for i in sids:
+            if not ws[i].get("nodrain"):
+                continue
+            for d in range(drain_max() + 1):
+                _l, _r, w2 = _windows(stmts, lowered, route, hz, arm, {**chosen, i: d},
+                                      premise, ready)
+                if _j1(w2, i):
+                    need[i] = d
+                    break
+        w["nodrain_need"] = need
+    return lanes, route2, w
+
+
+def _j1(w, sid):
+    """every lane holding a window of statement `sid` certifies at J 1"""
+    if not w or w["budget"]["B"] is None:
+        return False
+    lanes = {x["lane"] for x in w["windows"] if x["sid"] == sid}
+    return all(w["budget"]["lanes"][ln]["max_late"] == 0 for ln in lanes)
+
+
+def _windows(stmts, lowered, route, hz, arm="late", drain=0, premise="datasheet", ready=False):
     """-> (lanes, route, {"windows": [...], "cert": str}) with every `within` lowered, or
     Refused by name.
 
@@ -396,6 +537,7 @@ def windows(stmts, lowered, route, hz, arm="late", drain=0, premise="datasheet",
             if pid is not None and not PM.stamp_usable(pid)[0]:
                 pid = None
         plan.append({"stmt": S.render_statement(st), "A_pin": pa, "B_pin": pb, "B_wire": wb,
+                     "sid": len(plan),
                      "premise": pid, "part": (st["source"][1] if isinstance(st["source"], tuple)
                                               else None),
                      "B_level": 1 if kb == "Rise" else 0, "else": st["else"],
@@ -442,18 +584,23 @@ def windows(stmts, lowered, route, hz, arm="late", drain=0, premise="datasheet",
             # wait, 0)`); the inserted words shift it, so every head is remapped (found by the
             # drain table: the UART-TX lowering's LOOP head went stale)
             out = [a[:2] + (new_of[a[2]],) + a[3:] if a[0] == I.OP_LOOP else a for a in out]
-            # (a): the word after each window (the original next word) drains the lateness
-            if drain:
-                ends = sorted(v[1] for s_, v in where.items() if s_[0] == ln)
-                for iarm_ in ends:
-                    # the first word on the edge path: PC+1 (abort), PC+2 (continue)
-                    j = iarm_ + (2 if out[iarm_][6:7] == (I.ARM_MOD_FT,) else 1)
-                    if j < len(out):
-                        w_ = out[j]
-                        if w_[3] + drain > T_MAX:
+            # (a): the word after each window (the original next word) drains the lateness;
+            # `drain` is one value, or one per statement ({sid: cycles})
+            for s_, v in sorted(where.items()):
+                if s_[0] != ln:
+                    continue
+                iarm_, p_ = v[1], v[4]
+                dp = drain if isinstance(drain, int) else drain.get(p_["sid"], 0)
+                # the first word on the edge path: PC+1 (abort), PC+2 (continue)
+                j = iarm_ + (2 if out[iarm_][6:7] == (I.ARM_MOD_FT,) else 1)
+                if j < len(out):
+                    w_ = out[j]
+                    p_.setdefault("next_delay", {})[s_] = w_[3]      # before the drain
+                    if dp:
+                        if w_[3] + dp > T_MAX:
                             raise Refused("within: drain %d makes lane %d word %d's delay %d > %d"
-                                          % (drain, ln, j, w_[3] + drain, T_MAX))
-                        out[j] = w_[:3] + (w_[3] + drain,) + w_[4:]
+                                          % (dp, ln, j, w_[3] + dp, T_MAX))
+                        out[j] = w_[:3] + (w_[3] + dp,) + w_[4:]
             lanes[ln] = out
         try:
             img = bytes(pe_asm.assemble(lanes, hdr, *a_, **kw))
@@ -469,7 +616,7 @@ def windows(stmts, lowered, route, hz, arm="late", drain=0, premise="datasheet",
                 g_ = LC.lane_graph(img, s_[0], I)
                 rd.setdefault(s_[0], set()).update(g_[w0 + iarm][1])
         LC.ARM_RETIRE = MUT != "M_PC_ARMRETIRE_OFF"
-        bb = BB.image_budget(img, premise_gaps=pg, ready=rd)
+        bb = _budget(img, pg, rd)
         LC.ARM_RETIRE = True
         info = _win(where)
         info["premises"] = sorted(used)
@@ -502,9 +649,15 @@ def windows(stmts, lowered, route, hz, arm="late", drain=0, premise="datasheet",
 
 
 def _win(where):
-    return {"windows": [{"lane": ln, "A_word": ia, "ARM_word": iarm, "pre": pre, "T": T,
-                         "B_pin": p["B_pin"], "else": p["else"], "stmt": p["stmt"]}
-                        for (ln, _i), (ia, iarm, pre, T, p) in sorted(where.items())]}
+    out = []
+    for (ln, i), (ia, iarm, pre, T, p) in sorted(where.items()):
+        nd = p.get("next_delay", {}).get((ln, i))
+        out.append({"lane": ln, "A_word": ia, "ARM_word": iarm, "pre": pre, "T": T,
+                    "B_pin": p["B_pin"], "else": p["else"], "stmt": p["stmt"], "sid": p["sid"],
+                    "next_delay": nd,
+                    "drain_cf": drain_closed_form(nd) if nd is not None and p["else"] == "abort"
+                    else None})
+    return {"windows": out}
 
 
 def finish(img, require_cert=False, premises=()):
@@ -613,8 +766,17 @@ def compile_spec(text, seed=1, hz=None, require_cert=False, **win_opts):
         if require_cert and not win["cert"].startswith("certified"):
             raise Refused("within: %s" % win["cert"])
     used, usb = target_check(img)
-    st = finish(img, require_cert, [x for x in (win or {}).get("premises", ())
-                                    if not x.startswith("SPEC_LO")])
+    st = finish(img, False, [x for x in (win or {}).get("premises", ())
+                             if not x.startswith("SPEC_LO")])
+    if win and win.get("nodrain"):
+        need = win.get("nodrain_need") or {}
+        st = dict(st, status="uncertified",
+                  reason="within ... else abort nodrain: no drain after the window (%s); the "
+                         "generated drain would be %s cycles"
+                  % ("; ".join(win["nodrain"]),
+                     ", ".join(str(v) for _k, v in sorted(need.items())) or "none found"))
+    if require_cert and st["status"] != "certified":
+        raise Refused("program: UNCERTIFIED: %s" % st["reason"])
     log.append("P4 lower: run_pit_rt.emulation, pe_asm accepted; P5 target: %d / %d words; USB: %s"
                % (used, N_WORDS, usb))
     import cert_stamp as CS

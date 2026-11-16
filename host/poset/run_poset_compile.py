@@ -30,6 +30,14 @@
      certified lateness drops); a SHA mismatch or an unregistered part: image-only
   C12 ArmRetire (JLane/ArmRetire.lean): the SPI-master `else abort` window at 5 cycles of
      spacing certifies at J 1 (must-fire M_PC_ARMRETIRE_OFF: the cap off -> red)
+  C13 the drain (Wilson 11-15): generated per window (the least drain certifying J 1), equal to
+     the closed form on every window; the default certifies; `nodrain` stamps UNCERTIFIED; a
+     next action bounded tighter than the drain is refused; no `within` -> byte-identical
+     (must-fire M_PC_DRAIN_OFFBY1: the drain one past the search -> the closed form disagrees).
+     The agreement is checked on the DEFAULT path (arm late) only: early arming is withdrawn
+  C14 arm='early' refused as withdrawn (the drain table alone uses it, counterfactual=True); more
+     than MAX_PLAIN_ARM_RUN = 2 plain edge ARMs in a row refused (item 1b two deep; an FT ARM
+     is outside the run) (must-fire M_PC_ARM3_PASS)
 Must-fires added 11-15: M_PC_WITHIN_LO_PASS (lo > 0 without a datasheet compiles), and pe_asm's
 M_ASM_MOD_ANY_OP / M_ASM_MOD_ANY_VALUE (the mod field's two refusals), each killed by C10
 Must-fires: every compile.MUTANTS entry, run IN-PROCESS through the same judge, turns this gate red.
@@ -66,6 +74,8 @@ SCRATCH_MUTANTS = {
     "M_PC_WITHIN_NOARM": "killed in-process by this gate",
     "M_PC_WITHIN_LO_PASS": "killed in-process by this gate",
     "M_PC_ARMRETIRE_OFF": "killed in-process by this gate (C12)",
+    "M_PC_DRAIN_OFFBY1": "killed in-process by this gate (C13)",
+    "M_PC_ARM3_PASS": "killed in-process by this gate (C14)",
     "M_ASM_MOD_ANY_OP": "pe_asm.MODS_MUT, killed in-process by this gate (C10)",
     "M_ASM_MOD_ANY_VALUE": "pe_asm.MODS_MUT, killed in-process by this gate (C10)",
 }
@@ -290,11 +300,11 @@ def c11():
         PM.REGISTRY["C11_DOC"] = {"kind": "document", "what": "gate scratch", "source": src,
                                   "sha256": sha, "label": "read"}
         PM.DATASHEETS["C11PART"] = "C11_DOC"
-        with_p = C.compile_spec(body(st), seed=7, arm="early")
+        with_p = C.compile_spec(body(st), seed=7, arm="early", counterfactual=True)
         PM.REGISTRY["C11_DOC"] = dict(PM.REGISTRY["C11_DOC"], sha256="0" * 64)
-        bad_sha = C.compile_spec(body(st), seed=7, arm="early")
+        bad_sha = C.compile_spec(body(st), seed=7, arm="early", counterfactual=True)
         del PM.DATASHEETS["C11PART"]
-        unreg = C.compile_spec(body(st), seed=7, arm="early")
+        unreg = C.compile_spec(body(st), seed=7, arm="early", counterfactual=True)
     finally:
         PM.REGISTRY.clear(); PM.REGISTRY.update(saved[0])
         PM.DATASHEETS.clear(); PM.DATASHEETS.update(saved[1])
@@ -310,7 +320,7 @@ def c11():
     def lane0_j(r):
         _l, _r2, w = C.windows(C.S.parse(body(st))["poset"],
                                C.lower(C.S.parse(body(st))["v1"], 7)[1],
-                               C.lower(C.S.parse(body(st))["v1"], 7)[2], HZ, arm="early",
+                               C.lower(C.S.parse(body(st))["v1"], 7)[2], HZ, arm="early", counterfactual=True,
                                premise=r)
         b = w["budget"]
         return None if b["B"] is None else b["lanes"][0]["max_late"]
@@ -331,6 +341,71 @@ def c12():
     b = w["budget"]
     j = None if b["B"] is None else 1 + b["lanes"][0]["max_late"]
     return [] if j == 1 else ["C12 SPI-master else abort, drain 5: lane 0 J %s (ArmRetire gives 1)" % j]
+
+
+def c13():
+    """the drain (Wilson 11-15, "build the drain to your design"): generated per window, the
+    least drain at which the certificate gives J 1; the closed form agrees on every window; the
+    default certifies; `nodrain` stamps UNCERTIFIED; a next action bounded tighter than the
+    drain is refused; an image with no `within` is byte-identical to the plain lowering"""
+    probs = []
+    r = C.compile_spec(body(WIN % "abort"), seed=7)
+    ws = r["windows"]
+    if not ws:
+        return ["C13 the default compiled no window"]
+    for x in ws:
+        if x.get("drain") is None or x["drain"] != x.get("drain_cf"):
+            probs.append("C13 lane %d window at word %s: generated drain %s, closed form %s"
+                         % (x["lane"], x["ARM_word"], x.get("drain"), x.get("drain_cf")))
+    parsed = C.S.parse(body(WIN % "abort"))
+    _i, low, route = C.lower(parsed["v1"], 7)
+    _l, _r, w = C.windows(parsed["poset"], low, route, HZ)
+    lanes = {x["lane"] for x in w["windows"]}
+    if w["budget"]["B"] is None or any(w["budget"]["lanes"][ln]["max_late"] for ln in lanes):
+        probs.append("C13 the default drain does not certify J 1: %s" % w["budget"]["reason"])
+    if r["stamp"]["status"] != "certified":
+        probs.append("C13 the default's stamp: %s" % r["stamp"])
+    nd = C.compile_spec(body(WIN % "abort nodrain"), seed=7)
+    if nd["stamp"]["status"] != "uncertified" or "nodrain" not in nd["stamp"]["reason"]:
+        probs.append("C13 nodrain: stamp %s" % nd["stamp"])
+    if any(x.get("drain") for x in nd["windows"]):
+        probs.append("C13 nodrain: a drain was added")
+    tight = body(WIN % "abort", "pattern Fall(uio5) -> Rise(uio1) during (0 ns, 50 ns) observed 3;")
+    ok, msg = refused_with(tight, "would push the next action past")
+    if not ok:
+        probs.append("C13 a next action bounded tighter than the drain: %s" % msg[:120])
+    plain = C.compile_spec(body(), seed=7)
+    p0 = C.S.parse(body())
+    if plain["image"] != C.lower(p0["v1"], 7)[0]:
+        probs.append("C13 an image with no `within` is not byte-identical to the plain lowering")
+    return probs
+
+
+def c14():
+    """Wilson 11-15: early arming withdrawn from the compiler (refused by name; only the drain
+    table's counterfactual uses it), and no lowering may make more than MAX_PLAIN_ARM_RUN plain
+    edge ARMs in a row (item 1b is two words deep)"""
+    probs = []
+
+    try:
+        parsed = C.S.parse(body(WIN % "abort"))
+        _i, low, route = C.lower(parsed["v1"], 7)
+        C.windows(parsed["poset"], low, route, HZ, arm="early")
+        probs.append("C14 arm='early' compiled without counterfactual=True")
+    except C.Refused as e:
+        if "withdrawn" not in str(e):
+            probs.append("C14 arm='early' refused, but not as withdrawn: %s" % e)
+    I = C.I
+    arm = (I.OP_ARM, 4, 0, 0, 0, 0)
+    sh = (I.OP_SHIFT, 7, 0, 20, 0, 7)
+    two = {0: [arm, arm, sh, (I.OP_REARM, 0, 1, 20, 0)]}
+    three = {0: [arm, arm, arm, sh, (I.OP_REARM, 0, 1, 20, 0)]}
+    ft3 = {0: [arm + (I.ARM_MOD_FT,), arm, arm, sh]}     # an FT ARM is outside 1b's run
+    if C.plain_arm_run_problems(two) or C.plain_arm_run_problems(ft3):
+        probs.append("C14 a run of %d plain ARMs refused" % C.MAX_PLAIN_ARM_RUN)
+    if not C.plain_arm_run_problems(three):
+        probs.append("C14 three plain ARMs in a row not refused")
+    return probs
 
 
 def judge():
@@ -390,6 +465,8 @@ def judge():
     probs += c10()
     probs += c11()
     probs += c12()
+    probs += c13()
+    probs += c14()
     # C8: POSET_SPEC.md's generated passages match the constants file
     import gen_spec_doc
     probs += ["C8 %s" % p for p in gen_spec_doc.stale()]
@@ -501,7 +578,7 @@ def main() -> int:
     if probs:
         print("GATE poset_compile: FAILED (%d)" % len(probs))
         return 1
-    print("GATE poset_compile: PASSED (C1-C12; %d / %d mutants killed)" % (len(C.MUTANTS) + len(ASM_MUTANTS), len(C.MUTANTS) + len(ASM_MUTANTS)))
+    print("GATE poset_compile: PASSED (C1-C14; %d / %d mutants killed)" % (len(C.MUTANTS) + len(ASM_MUTANTS), len(C.MUTANTS) + len(ASM_MUTANTS)))
     return 0
 
 

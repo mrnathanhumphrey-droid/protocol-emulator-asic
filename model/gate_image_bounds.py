@@ -273,11 +273,13 @@ def main() -> int:
         say(False, "M7 has no generated arm image to drop")
 
     # M8 (11-14, the A2 lift): certification reads the per-image B record BY
-    # SHA. A temp copy of usbbuf_usb's real record certifies (the control);
-    # each planted corruption must make it A2-UNCERTIFIED.
-    uimg = byname.get("usbbuf_usb.hex")
+    # SHA. A temp copy of usbdev_fpga's real record certifies (the control);
+    # each planted corruption must make it A2-UNCERTIFIED. (Moved off usbbuf_usb
+    # on the ac9547d merge: agent 2's 9217781 makes usbbuf_usb A2-UNCERTIFIED, so
+    # it has no certified record to copy; usbdev_fpga is the board's image of record.)
+    uimg = byname.get("usbdev_fpga.hex")
     if uimg is None:
-        say(False, "M8 has no usbbuf_usb.hex to plant on")
+        say(False, "M8 has no usbdev_fpga.hex to plant on")
     else:
         tdir = tempfile.mkdtemp(prefix="pe_m8_")
         try:

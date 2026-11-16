@@ -159,6 +159,8 @@ fast host/poset/run_poset_compile.py
 fast model/gate_lane_cert.py
 fast model/gate_lean_anchors.py
 fast model/gate_live_price.py
+fast model/gate_uart_spacing.py
+fast model/gate_spi_premise.py
 
 # lean -- the Lean proofs (lake build + #print axioms); its leg installs elan
 lean model/gate_lean_build.py

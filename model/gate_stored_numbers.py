@@ -955,6 +955,9 @@ SPEC_SYMBOLS = {
     # build, like D_POINTS above -- nothing is concluded from a stored value.
     ("model/gate_cert_stamp.py", "D12"),
     ("model/gate_cert_stamp.py", "OK25"),
+    # the UART-spacing gate's busy neighbours: which program to BUILD (b3b's lane spacings),
+    # assembled and certified live every run -- stimulus, like D12 / OK25
+    ("model/gate_uart_spacing.py", "BUSY"),
     # (cert_stamp.IMAGES_OF_RECORD_PENDING's exclusion retired 11-15: its dated
     # uart_rx_board entry moved to IMAGES_OF_RECORD, the rest carries no digits)
 }

@@ -43,12 +43,21 @@ REGISTRY = {
         "source": "test/run_uartrx.py", "symbol": "ERRS",
         "label": "read (the band) + assumed (8N1 framing)",
     },
-    "SPI_MASTER_SCK": {
+    # Wilson 11-15 (call 4): the bench SPI master is the Pico. The RP2040 / RP2350 datasheet
+    # bounds its SPI clock only from ABOVE (clk_peri / 2); the 1 MHz (MISO) / 500 kHz (MOSI) the
+    # SPI-target arming check needs is what OUR FIRMWARE programs -- a firmware premise. It stays
+    # `assumed` (out of every certificate) until a hardware witness -- a logic-analyser capture
+    # of CS and SCK on the bench -- makes it `measured`. Which part (Pico = RP2040, or Pico 2 =
+    # RP2350: docs/HOST_FIRMWARE.md and fpga/host/load.py disagree) is Nathan's to confirm.
+    "PICO_SPI_SCK": {
         "kind": "repo",
-        "what": "the SPI master's SCK rate is at most its claimed maximum, so two SCK edges of "
-                "one polarity are at least one period apart",
+        "what": "the bench SPI master (the Pico) drives SCK no faster than its firmware's setting "
+                "(the declared T_EXT_HZ), so two SCK edges of one polarity are at least one period "
+                "apart",
         "source": "model/a2/program_a2.py", "symbol": "T_EXT_HZ",
-        "label": "assumed (the bench master's declared rate; no master datasheet on disk)",
+        "label": "assumed (firmware-set; no Pico SPI firmware in the repo yet)",
+        "owed": "hw: a logic-analyser capture of CS and SCK on the Pico bench (then `measured`)",
+        "part": "RP2040 or RP2350 -- to confirm",
     },
 }
 
@@ -79,8 +88,10 @@ def cite(pid):
 
 
 def stamp_usable(pid):
+    """a premise may enter a certificate when its source checks out and it is `read` (a
+    datasheet) or `measured` (a recorded hardware witness, Wilson 11-15)"""
     c = cite(pid)
-    return c["ok"] and REGISTRY[pid]["label"] == "read", c
+    return c["ok"] and REGISTRY[pid]["label"].split(" ")[0] in ("read", "measured"), c
 
 
 def datasheet_part(part):

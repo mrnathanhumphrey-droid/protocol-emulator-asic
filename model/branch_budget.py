@@ -36,6 +36,10 @@ NOPIN_MUT = False
 #: M_LC_UART_FRAME_SHORT -- the frame premise this many bits short
 ARMGATE_MUT = False
 UART_FRAME_MUT = 0
+#: must-fire switch (gate_lane_cert M_LC_ARMMARGIN_PASS): a negative UART arming margin not refused
+ARMMARGIN_MUT = False
+#: must-fire switch (gate_lane_cert M_LC_USBFAIL_OFF): the USB lane report's failures ignored
+USBFAIL_MUT = False
 
 
 def uart_peer_err():
@@ -191,8 +195,16 @@ def _image_budget(img, iters=80, premise_gaps=None, ready=None, scheme="window")
     usb_n, usb_rmax = 0, None
     if usb:
         with contextlib.redirect_stdout(io.StringIO()):
-            LC.full_report(img, "image")
+            ufails = LC.full_report(img, "image")
         last = LC.full_report.last
+        # the USB lane's own report lists its failures (an arm_sop armed after the host's
+        # earliest SOP, a late first sample, the turnaround, ...): any one of them means its
+        # certificate's premises fail, so the image is not certified (found 11-15: usbbuf_usb and
+        # usbrx_main armed their SOP ARM at EOP + 417 / 311 against TIPD 78 and stayed certified)
+        if ufails and not USBFAIL_MUT:
+            return {"B": None, "reason": "USB lane: lane_cert report fails: %s"
+                    % "; ".join(sorted({"%s (%s)" % (w, sch) for sch, w in ufails}))[:200],
+                    "lanes": {}}
         if last.get("br1_B") is None:
             return {"B": None, "reason": "USB lane: no certificate", "lanes": {}}
         usb_n, usb_rmax = last["usb_refills"], last["usb_maxRr"]
@@ -275,6 +287,15 @@ def _image_budget(img, iters=80, premise_gaps=None, ready=None, scheme="window")
                     out[l]["arm_margin"] = min(ag.values())
                 # per word (the poset compiler's arming check reads it; not in the record)
                 out[l]["lat"] = dict(lat[l])
+            # a UART-shaped lane whose ARM may be armed AFTER the next start edge can be seen
+            # misses that frame: its certificate's premise (ArmSplit's hedge) fails, so the image
+            # is not certified (found 11-15: a pre-ARM pad of 70 gave margin -3 and still J 1)
+            neg = sorted((v["arm_margin"], l) for l, v in out.items() if v.get("arm_margin", 0) < 0)
+            if neg and not ARMMARGIN_MUT:
+                m, l = neg[0]
+                return {"B": None, "reason": "lane %d: UART arming margin %d < 0 -- the ARM may be "
+                        "armed after the next start edge can be seen (branch_budget.arm_gate)"
+                        % (l, m), "lanes": {}}
             if usb:
                 # the word-class split (ArmSplit.arm_release_bus): receive words carry their own
                 # lateness; an ARM word's lateness shows only in its arming check's margin

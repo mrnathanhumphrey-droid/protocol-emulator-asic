@@ -55,6 +55,10 @@ IMAGES_OF_RECORD_PENDING = (
 )
 
 
+#: must-fire switch (gate_cert_stamp M_CS_A2_IGNORED): the stamp ignores A2's verdict
+A2_MUT = False
+
+
 class Uncertified(Exception):
     """--require-cert on an uncertified image; str() is the stamp's reason."""
 
@@ -69,6 +73,11 @@ def _words(img, base):
 def _tuple(x):
     if x["op"] == I.OP_LOOP:
         return (x["op"], 0, 0, (x["count"] << I.PINB_W) | x["pinb"], x["q"])
+    if x["op"] in I.BRANCH_OPS:
+        # ⛔ a BRANCH's delay field is its TARGET (delay[6:0]); its spacing is the wait W
+        # (count:pinb, pe_isa.branch_wait) -- found 11-15: run_branch_check's braw images read
+        # "d_min = 6" (a target) and were stamped uncertified while A2 certified them
+        return (x["op"], x["pin"], x["level"], I.branch_wait(x), x["q"])
     return (x["op"], x["pin"], x["level"], x["delay"], x["q"])
 
 
@@ -135,6 +144,8 @@ def stamp(img, budget=None):
     """THE FIELD: {'status': 'certified' | 'uncertified', 'reason', 'd_min', 'J'}.
     Certified needs BOTH:
       * pe_asm.compute_j accepts the image's lanes (the J floor);
+      * A2's certificate exists (a finite B; Wilson 11-15: the stamp and A2 read ONE verdict) --
+        the record's entry, or the same certificate live when the image has none;
       * every lane with an unclocked SHIFT has a CERTIFIED response bound R (Wilson 11-15:
         j1_ok needs R, so the bounds are owed before an image of record) -- read from the
         generated record model/branch_budget.json (`budget`: that entry, as the generator
@@ -143,6 +154,16 @@ def stamp(img, budget=None):
     if st["status"] != "certified":
         return st
     e = budget if budget is not None else budget_entry(img)
+    if e is None:
+        # no record entry: A2's certificate, live -- the record's own function (live_price)
+        import branch_budget as BB
+        e = BB.image_budget(bytes(img))
+    # Wilson 11-15: ONE certificate, one verdict -- the stamp reads A2's (no finite B: uncertified)
+    if e.get("B") is None and not A2_MUT:
+        return dict(st, status="uncertified", reason="A2: %s" % e.get("reason"))
+    # (kept on merge of ac9547d: A2's verdict above refuses a negative UART arming margin
+    # since 7b4a6f1; this stays as the stamp's own check, as gate_cert_stamp M_CS_ARM_LATE
+    # plants it on a record entry, not on A2)
     # ⛔ WILSON 11-15 (combined ruling, item 8): a lane that ARMS LATE -- the record's
     # arming premise margin (branch_budget arm_margin, deadline minus armed-by) below 0 --
     # cannot be certified: the edge can arrive before the ARM. An image of record that arms
@@ -178,8 +199,7 @@ def stamp(img, budget=None):
     miss = [ln for ln in sl
             if (lanes.get(str(ln)) or lanes.get(ln) or {}).get("R") is None]
     if miss:
-        why = ("no budget record for this image (model/gen_branch_budget.py)" if e is None
-               else "the record has no R for it (%s)" % e.get("reason", "?"))
+        why = "the certificate has no R for it (%s)" % e.get("reason", "?")
         return dict(st, status="uncertified",
                     reason="unclocked SHIFT lane(s) %s: no certified response bound R -- %s"
                     % (",".join(map(str, miss)), why))

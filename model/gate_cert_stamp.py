@@ -18,6 +18,8 @@ Checks (static, seconds):
   S3 every `.cert.json` beside a universe image is that image's current stamp.
   S4 every IMAGE OF RECORD has a sidecar, written --require-cert, saying certified; the
      ones another agent's builder writes are LISTED as pending, not skipped silently.
+  S6 the stamp and A2 read ONE verdict (Wilson 11-15): every record image's stamp is certified
+     exactly when its A2 entry is (must-fire M_CS_A2_IGNORED: the stamp ignores A2 -> red)
   S5 the response bounds (Wilson 11-15): every image of record's unclocked SHIFT lanes have a
      certified R in model/branch_budget.json, and the stamp needs it -- with that R removed
      the stamp is uncertified, so a --require-cert build fails (must-fire M_CS_R_MISSING).
@@ -185,6 +187,25 @@ def s5(drop_r=False):
     return probs
 
 
+def s6():
+    """Wilson 11-15: ONE certificate, one verdict -- every record image's stamp is certified
+    exactly when A2 (its branch-budget entry) is"""
+    import gen_branch_budget as GB
+    rec = GB.load()["images"]
+    probs, n = [], 0
+    for name, img in GB.corpus():
+        e = rec.get(name)
+        if e is None:
+            continue
+        n += 1
+        st = CS.stamp(img, budget=e)
+        if (st["status"] == "certified") != (e.get("B") is not None):
+            probs.append("S6 %s: stamp %s, A2 %s" % (name, st["status"],
+                                                    "B %s" % e["B"] if e.get("B") is not None
+                                                    else "uncertified"))
+    return probs, n
+
+
 def main():
     import image_universe as U
     paths = U.default().paths
@@ -195,7 +216,8 @@ def main():
     p3, n3 = s3(paths)
     p4 = s4()
     p5 = s5()
-    probs = p1 + p2 + p3 + p4 + p5
+    p6, n6 = s6()
+    probs = p1 + p2 + p3 + p4 + p5 + p6
     print("S1 must-fire entries a-d (command line vs compiler): %s" % ("ok" if not p1 else "FAIL"))
     print("S2 decode round-trip on %d assembled programs: %s" % (n2, "ok" if not p2 else "FAIL"))
     print("S3 %d sidecars current: %s" % (n3, "ok" if not p3 else "FAIL"))
@@ -203,6 +225,7 @@ def main():
                                                    "ok" if not p4 else "FAIL"))
     print("S5 response bounds R on the images of record's unclocked SHIFT lanes: %s"
           % ("ok" if not p5 else "FAIL"))
+    print("S6 stamp and A2 agree on %d record images: %s" % (n6, "ok" if not p6 else "FAIL"))
     for name, why in CS.IMAGES_OF_RECORD_PENDING:
         print("   pending: %s -- %s" % (name, why))
     for p in probs:
@@ -239,6 +262,11 @@ def main():
     mf.append(("M_CS_ARM_LATE", ctl and arm_stamp(-1) == "uncertified"))
     with tempfile.TemporaryDirectory() as tmp:
         mf.append(("M_CS_REQUIRE_PASSES", bool(s1(tmp, require_fn=lambda st: st))))
+    CS.A2_MUT = True
+    try:
+        mf.append(("M_CS_A2_IGNORED", bool(s6()[0])))
+    finally:
+        CS.A2_MUT = False
     for name, red in mf:
         print("  must-fire %-24s %s" % (name, "RED (killed)" if red else "*** SURVIVED"))
     probs += [n for n, red in mf if not red]
