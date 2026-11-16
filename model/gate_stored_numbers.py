@@ -952,6 +952,9 @@ SPEC_SYMBOLS = {
     # build, like D_POINTS above -- nothing is concluded from a stored value.
     ("model/gate_cert_stamp.py", "D12"),
     ("model/gate_cert_stamp.py", "OK25"),
+    # the UART-spacing gate's busy neighbours: which program to BUILD (b3b's lane spacings),
+    # assembled and certified live every run -- stimulus, like D12 / OK25
+    ("model/gate_uart_spacing.py", "BUSY"),
     # paths and the owning builder's text; the digits are dates inside the reason strings
     # ("11-15"), not numbers. gate_cert_stamp prints each entry as pending.
     ("model/cert_stamp.py", "IMAGES_OF_RECORD_PENDING"),
