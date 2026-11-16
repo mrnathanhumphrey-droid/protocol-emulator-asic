@@ -89,6 +89,7 @@ SEAMS = (
     ("model/gate_live_price.py", "gate_live_price.l2", "fast", "E0"),
     ("model/gate_uart_spacing.py", "gate_uart_spacing.judge", "fast", "E0"),
     ("model/gate_spi_premise.py", "gate_spi_premise.judge", "fast", "E0"),
+    ("model/b6_slack.py", "b6_slack.problems", "fast", "E"),
     ("model/gate_lane_cert.py", "gate_lane_cert.check_spacing", "fast", "PRE"),
     ("model/gate_lane_cert.py", "gate_lane_cert.check_ft", "fast", "PRE"),
     ("model/gate_lane_cert.py", "gate_lane_cert.check_coresident", "fast", "PRE"),

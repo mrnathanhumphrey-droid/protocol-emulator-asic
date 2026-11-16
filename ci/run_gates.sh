@@ -284,6 +284,8 @@ GATES=(
   # certifying, with opt-out stamped; the SPI-target arming margins against the master's premise
   model/gate_uart_spacing.py
   model/gate_spi_premise.py
+  # Wilson 11-16 (select-copies option b): b6's measured slack record, tied to the configuration
+  model/b6_slack.py
   model/gate_lean_anchors.py
   # ⛔ EVERY FIELD AN OPCODE DOES NOT READ IS ZERO (Wilson 11-14): the reads
   # table is generated from src/pe_engine.v's decode (red on an uncovered read

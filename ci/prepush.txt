@@ -33,6 +33,7 @@ prepush model/gate_lane_cert.py
 prepush model/gate_live_price.py
 prepush model/gate_uart_spacing.py
 prepush model/gate_spi_premise.py
+prepush model/b6_slack.py
 prepush model/gate_lean_anchors.py
 prepush model/gen_op_reads.py
 prepush model/gate_sim_runs.py
