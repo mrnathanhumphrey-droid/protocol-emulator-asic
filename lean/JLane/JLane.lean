@@ -58,3 +58,4 @@ import JLane.NopSplit
 import JLane.RespEdf
 import JLane.RespEdfClose
 import JLane.ArmRetire
+import JLane.Slot
