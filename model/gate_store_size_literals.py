@@ -64,6 +64,9 @@ ALLOWED = {
     ("test/clocked_conform.vh", "* 256 + ("):
         "the conformance monitor's per-queue ring of 256 pushes (q * 256 + "
         "write index mod 256): a monitor buffer, not the store",
+    ("test/run_within_mf.py", 'fh.write("5a\\n" * 256)'):
+        "the host feed's byte count for tb_within (its pattern capacity HF_PAT_N is 4096): "
+        "bytes fed to queue 0, not the store",
     ("test/pe_isa.py", "if not 1 <= n <= 255:"): _BYTE,
     ("test/pe_isa.py", "bit (<= 255), 8 bits in ONE action"): _BYTE,
     ("test/pe_isa.py", "if not 0 <= b <= 255 or not 0 < d <= 255:"): _BYTE,
