@@ -198,7 +198,7 @@ def shape_premise(img, lane, I, g, gaps):
                 spacing = t_ext if same else t_ext // 2
                 out[a] = min(out.get(a, 10 ** 9),
                              spacing - (LC.SYNC_MAX - LC.SYNC_MIN) + 1 - (1 + sum(ups)))
-        return out, "SPI_MASTER_SCK", PM.REGISTRY["SPI_MASTER_SCK"]["label"]
+        return out, "PICO_SPI_SCK", PM.REGISTRY["PICO_SPI_SCK"]["label"]
     return {}, None, "no premise registered for this shape"
 
 
