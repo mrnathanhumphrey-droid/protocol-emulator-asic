@@ -7,8 +7,8 @@
       "B": null,
       "reason": "lane 0: no lateness certificate at B = 0; EDF response bounds: lane 0: no lateness certificate at B = 0",
       "cert": {
-        "status": "certified",
-        "reason": "pe_asm.compute_j",
+        "status": "uncertified",
+        "reason": "A2: lane 0: no lateness certificate at B = 0; EDF response bounds: lane 0: no lateness certificate at B = 0",
         "d_min": 20,
         "J": 1
       },
@@ -21,7 +21,7 @@
       "reason": "lane 0: no lateness certificate at B = 0; EDF response bounds: lane 0: no lateness certificate at B = 0",
       "cert": {
         "status": "uncertified",
-        "reason": "unclocked SHIFT lane(s) 0,3: no certified response bound R -- the certificate has no R for it (lane 0: no lateness certificate at B = 0; EDF response bounds: lane 0: no lateness certificate at B = 0)",
+        "reason": "A2: lane 0: no lateness certificate at B = 0; EDF response bounds: lane 0: no lateness certificate at B = 0",
         "d_min": 20,
         "J": 1
       },
@@ -34,7 +34,7 @@
       "reason": "lane 0: no lateness certificate at B = 0; EDF response bounds: lane 0: no lateness certificate at B = 0",
       "cert": {
         "status": "uncertified",
-        "reason": "unclocked SHIFT lane(s) 0,3: no certified response bound R -- the certificate has no R for it (lane 0: no lateness certificate at B = 0; EDF response bounds: lane 0: no lateness certificate at B = 0)",
+        "reason": "A2: lane 0: no lateness certificate at B = 0; EDF response bounds: lane 0: no lateness certificate at B = 0",
         "d_min": 20,
         "J": 1
       },
@@ -47,7 +47,7 @@
       "reason": "lane 0: no lateness certificate at B = 0; EDF response bounds: lane 0: no lateness certificate at B = 0",
       "cert": {
         "status": "uncertified",
-        "reason": "unclocked SHIFT lane(s) 0,3: no certified response bound R -- the certificate has no R for it (lane 0: no lateness certificate at B = 0; EDF response bounds: lane 0: no lateness certificate at B = 0)",
+        "reason": "A2: lane 0: no lateness certificate at B = 0; EDF response bounds: lane 0: no lateness certificate at B = 0",
         "d_min": 20,
         "J": 1
       },
@@ -60,7 +60,7 @@
       "reason": "lane 0: no lateness certificate at B = 0; EDF response bounds: lane 0: no lateness certificate at B = 0",
       "cert": {
         "status": "uncertified",
-        "reason": "unclocked SHIFT lane(s) 0,3: no certified response bound R -- the certificate has no R for it (lane 0: no lateness certificate at B = 0; EDF response bounds: lane 0: no lateness certificate at B = 0)",
+        "reason": "A2: lane 0: no lateness certificate at B = 0; EDF response bounds: lane 0: no lateness certificate at B = 0",
         "d_min": 20,
         "J": 1
       },
@@ -202,8 +202,8 @@
       "B": null,
       "reason": "lane 1: no lateness certificate at B = 16; EDF response bounds: lane 1: no lateness certificate at B = 16",
       "cert": {
-        "status": "certified",
-        "reason": "pe_asm.compute_j",
+        "status": "uncertified",
+        "reason": "A2: lane 1: no lateness certificate at B = 16; EDF response bounds: lane 1: no lateness certificate at B = 16",
         "d_min": 33,
         "J": 1
       },
@@ -221,8 +221,8 @@
       "B": null,
       "reason": "lane 0: no lateness certificate at B = 20; EDF response bounds: lane 0: no lateness certificate at B = 20",
       "cert": {
-        "status": "certified",
-        "reason": "pe_asm.compute_j",
+        "status": "uncertified",
+        "reason": "A2: lane 0: no lateness certificate at B = 20; EDF response bounds: lane 0: no lateness certificate at B = 20",
         "d_min": 33,
         "J": 1
       },
@@ -239,8 +239,8 @@
       "B": null,
       "reason": "lane 1: no lateness certificate at B = 16; EDF response bounds: lane 1: no lateness certificate at B = 16",
       "cert": {
-        "status": "certified",
-        "reason": "pe_asm.compute_j",
+        "status": "uncertified",
+        "reason": "A2: lane 1: no lateness certificate at B = 16; EDF response bounds: lane 1: no lateness certificate at B = 16",
         "d_min": 31,
         "J": 1
       },
@@ -253,7 +253,7 @@
       "reason": "lane 1: no lateness certificate at B = 0; EDF response bounds: lane 1: no lateness certificate at B = 0",
       "cert": {
         "status": "uncertified",
-        "reason": "unclocked SHIFT lane(s) 0: no certified response bound R -- the certificate has no R for it (lane 1: no lateness certificate at B = 0; EDF response bounds: lane 1: no lateness certificate at B = 0)",
+        "reason": "A2: lane 1: no lateness certificate at B = 0; EDF response bounds: lane 1: no lateness certificate at B = 0",
         "d_min": 25,
         "J": 1
       },
@@ -473,8 +473,8 @@
       "B": null,
       "reason": "lane 3: no lateness certificate at B = 0; EDF response bounds: lane 0: no lateness certificate at B = 0",
       "cert": {
-        "status": "certified",
-        "reason": "pe_asm.compute_j",
+        "status": "uncertified",
+        "reason": "A2: lane 3: no lateness certificate at B = 0; EDF response bounds: lane 0: no lateness certificate at B = 0",
         "d_min": 20,
         "J": 1
       },
@@ -1579,7 +1579,7 @@
       "reason": "lane 0: no lateness certificate at B = 0; EDF response bounds: lane 0: no lateness certificate at B = 0",
       "cert": {
         "status": "uncertified",
-        "reason": "unclocked SHIFT lane(s) 0: no certified response bound R -- the certificate has no R for it (lane 0: no lateness certificate at B = 0; EDF response bounds: lane 0: no lateness certificate at B = 0)",
+        "reason": "A2: lane 0: no lateness certificate at B = 0; EDF response bounds: lane 0: no lateness certificate at B = 0",
         "d_min": 20,
         "J": 1
       },
@@ -1592,7 +1592,7 @@
       "reason": "lane 0: no lateness certificate at B = 0; EDF response bounds: lane 0: no lateness certificate at B = 0",
       "cert": {
         "status": "uncertified",
-        "reason": "unclocked SHIFT lane(s) 0: no certified response bound R -- the certificate has no R for it (lane 0: no lateness certificate at B = 0; EDF response bounds: lane 0: no lateness certificate at B = 0)",
+        "reason": "A2: lane 0: no lateness certificate at B = 0; EDF response bounds: lane 0: no lateness certificate at B = 0",
         "d_min": 20,
         "J": 1
       },
@@ -1605,7 +1605,7 @@
       "reason": "lane 0: no lateness certificate at B = 0; EDF response bounds: lane 0: no lateness certificate at B = 0",
       "cert": {
         "status": "uncertified",
-        "reason": "unclocked SHIFT lane(s) 0: no certified response bound R -- the certificate has no R for it (lane 0: no lateness certificate at B = 0; EDF response bounds: lane 0: no lateness certificate at B = 0)",
+        "reason": "A2: lane 0: no lateness certificate at B = 0; EDF response bounds: lane 0: no lateness certificate at B = 0",
         "d_min": 20,
         "J": 1
       },
@@ -1618,7 +1618,7 @@
       "reason": "lane 0: no lateness certificate at B = 0; EDF response bounds: lane 0: no lateness certificate at B = 0",
       "cert": {
         "status": "uncertified",
-        "reason": "unclocked SHIFT lane(s) 0: no certified response bound R -- the certificate has no R for it (lane 0: no lateness certificate at B = 0; EDF response bounds: lane 0: no lateness certificate at B = 0)",
+        "reason": "A2: lane 0: no lateness certificate at B = 0; EDF response bounds: lane 0: no lateness certificate at B = 0",
         "d_min": 20,
         "J": 1
       },
@@ -1631,7 +1631,7 @@
       "reason": "lane 0: no lateness certificate at B = 0; EDF response bounds: lane 0: no lateness certificate at B = 0",
       "cert": {
         "status": "uncertified",
-        "reason": "unclocked SHIFT lane(s) 0: no certified response bound R -- the certificate has no R for it (lane 0: no lateness certificate at B = 0; EDF response bounds: lane 0: no lateness certificate at B = 0)",
+        "reason": "A2: lane 0: no lateness certificate at B = 0; EDF response bounds: lane 0: no lateness certificate at B = 0",
         "d_min": 20,
         "J": 1
       },
@@ -1948,7 +1948,7 @@
       "reason": "USB lane: lane_cert report fails: armed late w0 (b'); armed late w0 (shipped); EDF response bounds: not applied to a USB image (the USB lane's response is PrioResp's; one closure theorem per image)",
       "cert": {
         "status": "uncertified",
-        "reason": "unclocked SHIFT lane(s) 0: no certified response bound R -- the certificate has no R for it (USB lane: lane_cert report fails: armed late w0 (b'); armed late w0 (shipped); EDF response bounds: not applied to a USB image (the USB lane's response is PrioResp's; one closure theorem per image))",
+        "reason": "A2: USB lane: lane_cert report fails: armed late w0 (b'); armed late w0 (shipped); EDF response bounds: not applied to a USB image (the USB lane's response is PrioResp's; one closure theorem per image)",
         "d_min": 20,
         "J": 1
       },
@@ -2044,8 +2044,8 @@
       "B": null,
       "reason": "USB lane: lane_cert report fails: armed late w0 (b'); armed late w0 (shipped); EDF response bounds: not applied to a USB image (the USB lane's response is PrioResp's; one closure theorem per image)",
       "cert": {
-        "status": "certified",
-        "reason": "pe_asm.compute_j",
+        "status": "uncertified",
+        "reason": "A2: USB lane: lane_cert report fails: armed late w0 (b'); armed late w0 (shipped); EDF response bounds: not applied to a USB image (the USB lane's response is PrioResp's; one closure theorem per image)",
         "d_min": 20,
         "J": 1
       },
@@ -2057,8 +2057,8 @@
       "B": null,
       "reason": "USB lane: lane_cert report fails: armed late w0 (b'); armed late w0 (shipped); EDF response bounds: not applied to a USB image (the USB lane's response is PrioResp's; one closure theorem per image)",
       "cert": {
-        "status": "certified",
-        "reason": "pe_asm.compute_j",
+        "status": "uncertified",
+        "reason": "A2: USB lane: lane_cert report fails: armed late w0 (b'); armed late w0 (shipped); EDF response bounds: not applied to a USB image (the USB lane's response is PrioResp's; one closure theorem per image)",
         "d_min": 20,
         "J": 1
       },
@@ -2155,8 +2155,8 @@
       "B": null,
       "reason": "lane 1: no lateness certificate at B = 16; EDF response bounds: lane 1: no lateness certificate at B = 16",
       "cert": {
-        "status": "certified",
-        "reason": "pe_asm.compute_j",
+        "status": "uncertified",
+        "reason": "A2: lane 1: no lateness certificate at B = 16; EDF response bounds: lane 1: no lateness certificate at B = 16",
         "d_min": 33,
         "J": 1
       },
@@ -2380,8 +2380,8 @@
       "B": null,
       "reason": "lane 0: no lateness certificate at B = 8; EDF response bounds: lane 0: no lateness certificate at B = 8",
       "cert": {
-        "status": "certified",
-        "reason": "pe_asm.compute_j",
+        "status": "uncertified",
+        "reason": "A2: lane 0: no lateness certificate at B = 8; EDF response bounds: lane 0: no lateness certificate at B = 8",
         "d_min": 33,
         "J": 1
       },
@@ -2399,8 +2399,8 @@
       "B": null,
       "reason": "lane 0: no lateness certificate at B = 20; EDF response bounds: lane 0: no lateness certificate at B = 20",
       "cert": {
-        "status": "certified",
-        "reason": "pe_asm.compute_j",
+        "status": "uncertified",
+        "reason": "A2: lane 0: no lateness certificate at B = 20; EDF response bounds: lane 0: no lateness certificate at B = 20",
         "d_min": 33,
         "J": 1
       },

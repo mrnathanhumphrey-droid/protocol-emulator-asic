@@ -55,6 +55,10 @@ IMAGES_OF_RECORD_PENDING = (
 )
 
 
+#: must-fire switch (gate_cert_stamp M_CS_A2_IGNORED): the stamp ignores A2's verdict
+A2_MUT = False
+
+
 class Uncertified(Exception):
     """--require-cert on an uncertified image; str() is the stamp's reason."""
 
@@ -140,6 +144,8 @@ def stamp(img, budget=None):
     """THE FIELD: {'status': 'certified' | 'uncertified', 'reason', 'd_min', 'J'}.
     Certified needs BOTH:
       * pe_asm.compute_j accepts the image's lanes (the J floor);
+      * A2's certificate exists (a finite B; Wilson 11-15: the stamp and A2 read ONE verdict) --
+        the record's entry, or the same certificate live when the image has none;
       * every lane with an unclocked SHIFT has a CERTIFIED response bound R (Wilson 11-15:
         j1_ok needs R, so the bounds are owed before an image of record) -- read from the
         generated record model/branch_budget.json (`budget`: that entry, as the generator
@@ -147,16 +153,22 @@ def stamp(img, budget=None):
     st = stamp_lanes(image_lanes(img))
     if st["status"] != "certified":
         return st
+    e = budget if budget is not None else budget_entry(img)
+    if e is None:
+        # no record entry: A2's certificate, live -- the record's own function (live_price)
+        import branch_budget as BB
+        e = BB.image_budget(bytes(img))
+    # Wilson 11-15: ONE certificate, one verdict -- the stamp reads A2's (no finite B: uncertified)
+    if e.get("B") is None and not A2_MUT:
+        return dict(st, status="uncertified", reason="A2: %s" % e.get("reason"))
     sl = unclocked_shift_lanes(img)
     if not sl:
         return st
-    e = budget if budget is not None else budget_entry(img)
     lanes = (e or {}).get("lanes") or {}
     miss = [ln for ln in sl
             if (lanes.get(str(ln)) or lanes.get(ln) or {}).get("R") is None]
     if miss:
-        why = ("no budget record for this image (model/gen_branch_budget.py)" if e is None
-               else "the record has no R for it (%s)" % e.get("reason", "?"))
+        why = "the certificate has no R for it (%s)" % e.get("reason", "?")
         return dict(st, status="uncertified",
                     reason="unclocked SHIFT lane(s) %s: no certified response bound R -- %s"
                     % (",".join(map(str, miss)), why))
