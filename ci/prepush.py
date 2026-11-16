@@ -12,6 +12,17 @@ before a push were a hand-picked set. Every registered gate is now named here, a
 
     prepush <gate>                 -- run by the hook before every push from this checkout;
     ci-only <gate> <reason ...>    -- run by CI's shards only; the reason is REQUIRED.
+    debt <gate> <reason ...>       -- a KNOWN red the hook runs and HOLDS (Wilson 11-16):
+                                      ci/prepush_debts.json names its owner, the gate that
+                                      clears it (a GATES entry, so it actually runs) and the
+                                      exact `***` lines it fails with. Held only while the gate
+                                      fails with EXACTLY those lines: a different failure is
+                                      red (a new red hiding behind the debt), and a debt that
+                                      no longer fails reads STALE and is red (move it to
+                                      `prepush` and delete the entry).
+
+RED-AT-ORIGIN (Wilson 11-16): a ci-only row whose reason starts RED-AT-ORIGIN must name what
+clears it (`clears: <commit or item>`); without it the row is red.
 
 and `check` is red on: a GATES entry not listed (it would be silently dropped from the
 hook), a gate listed twice, a row naming no GATES entry, a listed file that does not
@@ -38,7 +49,16 @@ sys.path.insert(0, os.path.join(ROOT, "ci"))
 import shards  # noqa: E402  -- the one GATES parser
 
 LIST = os.path.join(ROOT, "ci", "prepush.txt")
-KINDS = ("prepush", "ci-only")
+DEBTS = os.path.join(ROOT, "ci", "prepush_debts.json")
+KINDS = ("prepush", "ci-only", "debt")
+
+
+def debts():
+    if not os.path.exists(DEBTS):
+        return {}
+    import json
+    with open(DEBTS, encoding="utf-8") as fh:
+        return json.load(fh)
 
 
 def rows(text=None):
@@ -53,15 +73,20 @@ def rows(text=None):
     return out
 
 
-def problems(gl, rs, exists=lambda g: os.path.isfile(os.path.join(ROOT, g))):
-    """[problem] for list rows `rs` against the gate list `gl`."""
+def problems(gl, rs, exists=lambda g: os.path.isfile(os.path.join(ROOT, g)), db=None):
+    """[problem] for list rows `rs` against the gate list `gl` (and the debt entries `db`)."""
+    db = debts() if db is None else db
     probs, good = [], []
     for r in rs:
         if len(r) < 2 or r[0] not in KINDS:
-            probs.append("malformed row %r (want `prepush <gate>` or "
-                         "`ci-only <gate> <reason>`)" % (r,))
-        elif r[0] == "ci-only" and (len(r) < 3 or not r[2].strip()):
-            probs.append("%s is ci-only with NO reason" % r[1])
+            probs.append("malformed row %r (want `prepush <gate>`, "
+                         "`ci-only <gate> <reason>` or `debt <gate> <reason>`)" % (r,))
+        elif r[0] in ("ci-only", "debt") and (len(r) < 3 or not r[2].strip()):
+            probs.append("%s is %s with NO reason" % (r[1], r[0]))
+        elif (r[0] == "ci-only" and r[2].startswith("RED-AT-ORIGIN")
+              and "clears:" not in r[2]):
+            probs.append("%s is RED-AT-ORIGIN but names nothing that clears it "
+                         "(`clears: <commit or item>`)" % r[1])
         elif r[0] == "prepush" and len(r) > 2:
             probs.append("malformed row %r (a prepush row takes no reason)" % (r,))
         else:
@@ -77,11 +102,48 @@ def problems(gl, rs, exists=lambda g: os.path.isfile(os.path.join(ROOT, g))):
     for r in good:
         if not exists(r[1]):
             probs.append("row names %s, which does not exist" % r[1])
+    rowd = {r[1] for r in rs if len(r) >= 2 and r[0] == "debt"}
+    for g in sorted(rowd):
+        e = db.get(g)
+        if not e:
+            probs.append("debt %s has no entry in ci/prepush_debts.json" % g)
+            continue
+        if not str(e.get("owner") or "").strip():
+            probs.append("debt %s names no owner" % g)
+        if e.get("clears") not in gl:
+            probs.append("debt %s: the gate that clears it (%r) is not in GATES -- it must "
+                         "be a gate that actually runs" % (g, e.get("clears")))
+        if not e.get("expect"):
+            probs.append("debt %s holds no exact failure lines (`expect`)" % g)
+    for g in sorted(set(db) - rowd):
+        probs.append("ci/prepush_debts.json holds %s, which no `debt` row names" % g)
     return probs
+
+
+def failure_lines(out):
+    """the `***` lines of a gate's output, stripped (what a debt's exact-match guard compares)"""
+    return sorted({ln.strip() for ln in out.splitlines() if ln.strip().startswith("***")})
+
+
+def debt_verdict(rc, out, entry):
+    """("held" | "STALE" | "RED", why) for a debt gate's run."""
+    if rc == 0:
+        return "STALE", "the debt no longer fails: move the row to `prepush` and delete its entry"
+    got, want = failure_lines(out), sorted(x.strip() for x in entry.get("expect") or [])
+    if got == want:
+        return "held", "fails exactly as recorded (owner %s; clears: %s)" % (
+            entry.get("owner"), entry.get("clears"))
+    return "RED", "fails DIFFERENTLY from the debt: new %s; gone %s" % (
+        sorted(set(got) - set(want))[:3], sorted(set(want) - set(got))[:3])
 
 
 def prepush_gates(gl, rs):
     want = {r[1] for r in rs if len(r) >= 2 and r[0] == "prepush"}
+    return [g for g in gl if g in want]
+
+
+def debt_gates(gl, rs):
+    want = {r[1] for r in rs if len(r) >= 2 and r[0] == "debt"}
     return [g for g in gl if g in want]
 
 
@@ -97,20 +159,42 @@ def self_test(gl):
             ("a row naming no GATES entry", good + [("prepush", "model/nope.py")], None),
             ("a listed gate that does not exist", good, lambda g: g != gl[0]),
             ("a ci-only row with no reason", [("ci-only", gl[0])] + good[1:], None),
-            ("a malformed row", good + [("maybe", gl[0])], None)):
-        red = bool(problems(gl, plant, ex) if ex else problems(gl, plant))
+            ("a malformed row", good + [("maybe", gl[0])], None),
+            ("RED-AT-ORIGIN naming no clearer",
+             [("ci-only", gl[0], "RED-AT-ORIGIN (x): y; owner z")] + good[1:], None)):
+        red = bool(problems(gl, plant, ex, db={}) if ex else problems(gl, plant, db={}))
         print("    must-fire %-34s %s" % (what, "red  ok" if red else "*** MISSED"))
         ok = ok and red
-    return ok
+    # the debt kind (Wilson 11-16): entries, then the exact-match guard
+    drow = [("debt", gl[0], "planted")] + good[1:]
+    ent = {"owner": "agent 1", "clears": gl[1], "expect": ["*** planted failure"]}
+    for what, db in (("a debt with no entry", {}),
+                     ("a debt with no owner", {gl[0]: dict(ent, owner="")}),
+                     ("a debt cleared by no running gate", {gl[0]: dict(ent, clears="model/nope.py")}),
+                     ("a debt holding no failure lines", {gl[0]: dict(ent, expect=[])})):
+        red = bool(problems(gl, drow, db=db))
+        print("    must-fire %-34s %s" % (what, "red  ok" if red else "*** MISSED"))
+        ok = ok and red
+    ctl = not problems(gl, drow, db={gl[0]: ent})
+    for what, rc, out, want in (("a debt that no longer fails", 0, "", "STALE"),
+                                ("a debt failing differently", 1, "*** another failure", "RED"),
+                                ("a debt failing as recorded", 1, "x\n  *** planted failure\n", "held")):
+        v = debt_verdict(rc, out, ent)[0]
+        good_v = v == want
+        print("    must-fire %-34s %s" % (what, ("%s  ok" % v) if good_v else "*** got " + v))
+        ok = ok and good_v
+    print("    control   %-34s %s" % ("a complete debt entry", "green ok" if ctl else "*** RED"))
+    return ok and ctl
 
 
-def run_gate(g):
-    """(rc, seconds, last line) for one gate, from the repo root."""
+def run_gate(g, full=False):
+    """(rc, seconds, last line) for one gate, from the repo root (full: the whole output)."""
     cmd = (["bash", g] if g.endswith(".sh") else [sys.executable, g])
     t0 = time.time()
     p = subprocess.run(cmd, cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-    out = p.stdout.decode("utf-8", "replace").strip().splitlines()
-    return p.returncode, time.time() - t0, (out[-1] if out else "")
+    text = p.stdout.decode("utf-8", "replace").strip()
+    out = text.splitlines()
+    return p.returncode, time.time() - t0, (text if full else (out[-1] if out else ""))
 
 
 def run_all(gates, runner=run_gate):
@@ -150,7 +234,9 @@ def main(argv) -> int:
     for p in probs:
         print("    *** %s" % p)
     pp = prepush_gates(gl, rs)
-    print("    %d gates: %d prepush, %d ci-only" % (len(gl), len(pp), len(gl) - len(pp)))
+    dg = debt_gates(gl, rs)
+    print("    %d gates: %d prepush, %d debt, %d ci-only"
+          % (len(gl), len(pp), len(dg), len(gl) - len(pp) - len(dg)))
     if not ok or probs:
         print("  pre-push list: RED")
         return 1
@@ -165,6 +251,14 @@ def main(argv) -> int:
     print("  --- running %d pre-push gate(s) ---" % len(pp))
     rc, res = run_all(pp)
     bad = [r[0] for r in res if r[1] != 0]
+    db = debts()
+    for g in dg:
+        drc, s, out = run_gate(g, full=True)
+        v, why = debt_verdict(drc, out, db[g])
+        print("  %-40s debt %-5s %5.0fs  %s" % (g, v, s, why[:90]))
+        if v != "held":
+            rc = 1
+            bad.append(g)
     print("  PRE-PUSH: %s" % ("PASSED" if rc == 0 else
                               "*** RED -- push blocked: " + ", ".join(bad)))
     return rc
