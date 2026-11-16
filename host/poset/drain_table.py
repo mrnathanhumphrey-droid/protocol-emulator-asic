@@ -112,7 +112,7 @@ def within_rows():
                     res = []
                     for d in drains:
                         try:
-                            _l, _r, w = C.windows(parsed["poset"], low, route, hz, arm=arm,
+                            _l, _r, w = C.windows(parsed["poset"], low, route, hz, arm=arm, counterfactual=True,
                                                   drain=d, premise=prem, ready=ready)
                         except C.Refused as e:
                             res.append((d, (None, None)))

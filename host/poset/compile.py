@@ -62,7 +62,8 @@ MUTANTS = ("M_PC_NO_CYCLE",      # cycles not refused
            "M_PC_WITHIN_NOARM",  # `within`: the arming check skipped (a window too tight compiles)
            "M_PC_WITHIN_LO_PASS",  # `within`: lo > 0 without `source datasheet` compiles
            "M_PC_ARMRETIRE_OFF",   # lane_cert.ARM_RETIRE off (ArmRetire's cap not applied)
-           "M_PC_DRAIN_OFFBY1")    # the generated drain one past the search (the closed form disagrees)
+           "M_PC_DRAIN_OFFBY1",    # the generated drain one past the search (the closed form disagrees)
+           "M_PC_ARM3_PASS")       # three plain edge ARMs in a row not refused
 MUT = os.environ.get("POSET_COMPILE_MUTANT", "")
 if MUT and MUT not in MUTANTS:
     raise SystemExit("poset compile: unknown mutant %r" % MUT)
@@ -333,7 +334,30 @@ def drain_closed_form(next_delay, k=None):
     return max(0, k["head_slack"] - LC.ARM_RETIRE_GAP - (next_delay - LC.REBASE))
 
 
-def windows(stmts, lowered, route, hz, arm="late", drain="auto", premise="datasheet", ready=False):
+#: item 1b (Wilson 11-15): the plain-ARM successor prefetch is TWO words deep; the universe's
+#: longest run of plain edge ARMs is 2 (sptgt m1 / m3, b3b_a3); the USB lane's 3-run is an FT /
+#: SE0 / QUAL chain, outside 1b. A lowering may not make a longer run.
+MAX_PLAIN_ARM_RUN = 2
+
+
+def plain_arm_run_problems(lanes):
+    """[problem] for every run of more than MAX_PLAIN_ARM_RUN consecutive plain edge ARMs
+    (not FALLTHROUGH, not the two-pin LEVEL ARM) in a lowered lane"""
+    out = []
+    for ln, acts in sorted(lanes.items()):
+        run = 0
+        for i, a in enumerate(acts):
+            mod = a[6] if len(a) > 6 else 0
+            plain = a[0] == I.OP_ARM and not mod & I.ARM_MOD_FT and not mod & I.ARM_MOD_LEVEL2
+            run = run + 1 if plain else 0
+            if run == MAX_PLAIN_ARM_RUN + 1:
+                out.append("lane %d action %d: %d plain ARMs in a row -- item 1b's prefetch is %d "
+                           "words deep" % (ln, i, run, MAX_PLAIN_ARM_RUN))
+    return [] if MUT == "M_PC_ARM3_PASS" else out
+
+
+def windows(stmts, lowered, route, hz, arm="late", drain="auto", premise="datasheet", ready=False,
+            counterfactual=False):
     """`within` lowered, with the DRAIN after every `else abort` window (Wilson 11-15):
       drain="auto"  the default: per statement, the least drain (0..drain_max()) at which the
                     certificate gives the windowed lanes J 1 -- generated, never typed. A
@@ -343,6 +367,11 @@ def windows(stmts, lowered, route, hz, arm="late", drain="auto", premise="datash
     Every window also carries the closed form (drain_closed_form); the gate checks the search
     and the closed form agree. The protocol check: a `during` / `within` bound on the event
     after B shorter than the drain is refused by name."""
+    # Wilson 11-15: early arming is WITHDRAWN from the compiler (its search and closed form
+    # disagree: 5 vs none up to drain_max); the drain table keeps it as a labelled counterfactual
+    if arm != "late" and not counterfactual:
+        raise Refused("within: arm=%r is withdrawn -- the drain's search and closed form disagree "
+                      "there; only the drain table uses it (counterfactual=True)" % arm)
     if drain != "auto":
         return _windows(stmts, lowered, route, hz, arm, drain, premise, ready)
     sids = [i for i, st in enumerate(s_ for s_ in stmts if s_.get("within"))]
@@ -364,6 +393,9 @@ def windows(stmts, lowered, route, hz, arm="late", drain="auto", premise="datash
     lanes, route2, w = _windows(stmts, lowered, route, hz, arm, chosen, premise, ready)
     if w is None:
         return lanes, route2, w
+    runs = plain_arm_run_problems(lanes)
+    if runs:
+        raise Refused("within: %s" % "; ".join(runs))
     # the protocol check: the next event after B, bounded by the spec, must not be pushed past
     for i in sids:
         d = chosen[i]
