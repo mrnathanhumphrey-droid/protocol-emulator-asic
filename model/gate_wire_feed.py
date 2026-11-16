@@ -333,9 +333,9 @@ REGISTRY = {
     # feed). The label stays true; no further work is owed on these.
     # v2 primitive 2: the CMP_BRANCH sweep images. Their READBIT lanes receive a
     # sender lane's byte to COMPARE it, not to feed the host.
-    # ⛔ branch_cmp_lo stays RETIRED from the wire feed (Wilson 11-15, UART ruling item
-    # 3): declared QUEUE, 1eee995. _order and _mask came back 11-15: RespEdf (9180440)
-    # made them admissible, so they are fed on the wire again, as before.
+    # All three came back once certified: _order and _mask 11-15 (RespEdf, 9180440),
+    # _lo 11-16 (A2's 1.6a with the lateness in J, 5c65b11: EDF B 0). Each had been
+    # retired while declared QUEUE (Wilson 11-15, UART ruling item 3).
     "branch_cmp_order_image.hex": (INTERNAL, {
         "checked_by": "test/run_branch_check.py",
         "how": "branch_check.vh recomputes every CMP's decision from the received "
@@ -343,6 +343,9 @@ REGISTRY = {
     "branch_cmp_mask_image.hex": (INTERNAL, {
         "checked_by": "test/run_branch_check.py",
         "how": "as branch_cmp_order: the mask/inv pair, decision recomputed per CMP"}),
+    "branch_cmp_lo_image.hex": (INTERNAL, {
+        "checked_by": "test/run_branch_check.py",
+        "how": "as branch_cmp_order: the low-byte compare, decision recomputed per CMP"}),
     # ⭐ admissible since the 60 MHz move (model/nonadmissible: r 16 <= t 20),
     # so it needs a class here; it was exempt as NON_ADMISSIBLE before
     "ckhold_over_image.hex": (INTERNAL, {
