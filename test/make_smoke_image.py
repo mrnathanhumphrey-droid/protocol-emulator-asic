@@ -1845,6 +1845,12 @@ def main() -> int:
     if "--b3b" in sys.argv:
         arm = sys.argv[sys.argv.index("--b3b") + 1]
         img = build_b3b(arm)
+        # ⭐ WILSON 11-15 CALL 1: the UART pre-ARM spacing, generated (agent 2's
+        # uart_spacing). ready=None until item 1b exists: b3b does not certify under any
+        # spacing today, so the plan applies 0 (bytes unchanged). Once 1b lands, pass
+        # ready = {0: the SPI ARMs' successors} (agent 2, 11-15).
+        import uart_spacing
+        img, _plan = uart_spacing.space(img, ready=None)
         out = os.path.join(here, "b3b_%s_image.hex" % arm)
         write_image(out, img)
         print("B3b image, arm %s, %d bytes -> %s" % (arm, len(img), out))
