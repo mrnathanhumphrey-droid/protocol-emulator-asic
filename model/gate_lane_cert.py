@@ -34,6 +34,10 @@ every must-fire must turn its check red, or the gate is not testing what it says
   check 7  the USB lane report's failures (lane_cert.full_report) are a refusal: usbrx_main
            (arm_sop at EOP + 311 against TIPD 78) is uncertified, by name
   M_LC_USBFAIL_OFF  the report's failures ignored -> check 7 fails
+  check 8  the 1.6a queue check with the certified lateness in J (program_a2.queue_slot,
+           lateness=True) is part of A2's verdict: branch_cmp_lo's window certificate fails it
+           and is refused; what image_budget returns passes it
+  M_LC_QUEUE_OFF  the 1.6a check skipped -> the returned certificate fails 1.6a
   M_LC_EDF_OFF      the EDF response scheme (RespEdfClose.wb_close_edf) never tried -> every
                     image it certifies loses its B (check 5 red)
   THE ARMING PREMISE (Wilson 11-14 ruling 1): a handshake copy's arm_sop moved late by raising
@@ -319,6 +323,24 @@ def main():
         BB.USBFAIL_MUT = False
     kills.append(("M_LC_USBFAIL_OFF", r7m["B"] is not None,
                   "report failures ignored: check 7 fails (B %s)" % r7m["B"]))
+    # check 8: the 1.6a queue check with the certified lateness in J is part of A2's verdict
+    # (Nate 11-16, option 1): branch_cmp_lo's window certificate fails it, so that certificate is
+    # refused and the next proved scheme is tried; whatever A2 returns passes 1.6a.
+    # M_LC_QUEUE_OFF skips the check -> the window certificate comes back and fails 1.6a.
+    q_img = corpus["branch_cmp_lo_image.hex"]
+    r8 = BB.image_budget(q_img)
+    why8 = None if r8["B"] is None else BB.queue_refusal(q_img, r8["B"], r8["lanes"])
+    BB.QUEUE_MUT = True
+    try:
+        r8m = BB.image_budget(q_img)
+    finally:
+        BB.QUEUE_MUT = False
+    why8m = None if r8m["B"] is None else BB.queue_refusal(q_img, r8m["B"], r8m["lanes"])
+    ok8 = why8 is None and why8m is not None
+    print("  check 8 %s  1.6a (lateness in J) in A2's verdict: branch_cmp_lo -> B %s, %s"
+          % ("GREEN" if ok8 else "RED  ", r8["B"], (r8["reason"] or "")[:60]))
+    kills.append(("M_LC_QUEUE_OFF", why8m is not None,
+                  "1.6a check off: B %s fails it: %s" % (r8m["B"], (why8m or "")[:60])))
     # M_LC_EDF_OFF: the EDF response scheme (RespEdfClose.wb_close_edf, Wilson 11-15) never
     # tried -> every image it certifies goes stale (B back to none)
     edf = sorted(n for n, v in rec.items() if "RespEdfClose" in (v.get("reason") or ""))
@@ -400,7 +422,7 @@ def main():
         ok_txt = ("PASS (as required)" if name.endswith("_PASS") else "RED (killed)")
         print("  must-fire %-18s %s  %s" % (name, ok_txt if killed else "SURVIVED", what))
     teeth = all(k for _n, k, _w in kills)
-    green = ok1 and not fails and ok3 and ok4 and ok5 and ok6 and ok7
+    green = ok1 and not fails and ok3 and ok4 and ok5 and ok6 and ok7 and ok8
     verdict = "PASSED" if (green and teeth) else ("FAILED (must-fire survived)" if not teeth
                                                    else "FAILED")
     print("GATE lane-cert: %s" % verdict)

@@ -40,6 +40,45 @@ UART_FRAME_MUT = 0
 ARMMARGIN_MUT = False
 #: must-fire switch (gate_lane_cert M_LC_USBFAIL_OFF): the USB lane report's failures ignored
 USBFAIL_MUT = False
+#: must-fire switch (gate_lane_cert M_LC_QUEUE_OFF): 1.6a with the lateness in J not applied
+QUEUE_MUT = False
+
+#: the record fields 1.6a's J reads (program_a2.lane_set -> lane_j); gen_branch_budget writes
+#: the same ones
+RECORD_LANE_KEYS = ("max_late", "max_late_pin", "R", "max_late_rx", "arm_margin")
+
+
+def queue_refusal(img, B, lanes):
+    """None, or the reason A2 refuses: condition 1.6a (program_a2.queue_slot, r <= T on every
+    lane) with each lane's certified lateness in J (J = 1 + max_late, lane_j) -- Wilson 11-15,
+    the UART blocker ruling item 1: a failure that exists only with the lateness in J is a
+    certification question. The entry is not in the record yet (this IS the record's source),
+    so it is written to a one-image record that queue_slot reads (budget_path). Only when some
+    lane is late: at J = 1 the check is pe_asm's, at the proved J."""
+    if QUEUE_MUT or not any((v or {}).get("max_late") for v in lanes.values()):
+        return None
+    import json
+    import tempfile
+    if os.path.join(HERE, "a2") not in sys.path:
+        sys.path.append(os.path.join(HERE, "a2"))
+    import program_a2 as P
+    ent = {"sha": P.image_sha(img), "B": B,
+           "lanes": {str(l): {k: v[k] for k in RECORD_LANE_KEYS if k in v}
+                     for l, v in lanes.items()}}
+    fd, tmp = tempfile.mkstemp(suffix=".json", prefix="a2_q16a_")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            json.dump({"images": {"live": ent}}, fh)
+        q = P.queue_slot(img, lateness=True, budget_path=tmp)
+    finally:
+        os.remove(tmp)
+    bad = sorted(((int(ln), v) for ln, v in q.items() if not v["ok"]), key=lambda kv: kv[0])
+    if not bad:
+        return None
+    return ("1.6a queue check fails with the certified lane lateness in J: %s (J = 1 + max_late, "
+            "lane_j; Wilson 11-15 UART ruling item 1)"
+            % "; ".join("lane %d r %s > T %s (J %d)" % (ln, v["r"], v["T"], 1 + lanes[ln]["max_late"])
+                      for ln, v in bad))
 
 
 def uart_peer_err():
@@ -303,6 +342,10 @@ def _image_budget(img, iters=80, premise_gaps=None, ready=None, scheme="window")
                 # lane_cert: max over words of Rr - L, Rr from PrioResp.prio_resp)
                 out[I.USB_LANE] = {"R": usb_R, "late_words": None, "max_late": usb_late,
                                    "max_late_rx": usb_rx_late, "arm_margin": usb_arm_margin}
+            # 1.6a with the certified lateness in J (Wilson 11-15): one verdict with the stamp
+            why = queue_refusal(img, B, out)
+            if why:
+                return {"B": None, "reason": why, "lanes": {}}
             return {"B": B, "reason": "certified" if scheme == "window" else
                     "certified (EDF response bounds, RespEdfClose.wb_close_edf)", "lanes": out}
         if Bn > LIMIT or any(v > LIMIT for v in Rn.values()):

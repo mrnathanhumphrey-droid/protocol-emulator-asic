@@ -63,7 +63,8 @@ MUTANTS = ("M_PC_NO_CYCLE",      # cycles not refused
            "M_PC_WITHIN_LO_PASS",  # `within`: lo > 0 without `source datasheet` compiles
            "M_PC_ARMRETIRE_OFF",   # lane_cert.ARM_RETIRE off (ArmRetire's cap not applied)
            "M_PC_DRAIN_OFFBY1",    # the generated drain one past the search (the closed form disagrees)
-           "M_PC_ARM3_PASS")       # three plain edge ARMs in a row not refused
+           "M_PC_ARM3_PASS",       # three plain edge ARMs in a row not refused
+           "M_PC_A2_NOPREM")       # A2's line ignores the window's premise gaps (two verdicts)
 MUT = os.environ.get("POSET_COMPILE_MUTANT", "")
 if MUT and MUT not in MUTANTS:
     raise SystemExit("poset compile: unknown mutant %r" % MUT)
@@ -319,7 +320,7 @@ def _budget(img, pg, rd):
     import lane_cert as LC
     key = (img, repr(sorted((l, sorted(v.items())) for l, v in pg.items())),
            repr(sorted((l, sorted(v)) for l, v in rd.items())), LC.ARM_RETIRE, BB.EDF_MUT,
-           BB.ARMGATE_MUT, BB.NOPIN_MUT, BB.UART_FRAME_MUT)
+           BB.ARMGATE_MUT, BB.NOPIN_MUT, BB.UART_FRAME_MUT, BB.QUEUE_MUT)
     if key not in _BB_CACHE:
         _BB_CACHE[key] = BB.image_budget(img, premise_gaps=pg, ready=rd)
     return _BB_CACHE[key]
@@ -621,6 +622,8 @@ def _windows(stmts, lowered, route, hz, arm="late", drain=0, premise="datasheet"
         info = _win(where)
         info["premises"] = sorted(used)
         info["budget"] = bb
+        # the certificate's inputs: A2's line reads the same (Wilson 11-16: one input, one verdict)
+        info["premise_gaps"], info["ready"] = pg, rd
         if bb["B"] is None:
             return lanes, route, dict(info, cert="UNCERTIFIED: the arming check needs the "
                                       "lateness certificate (%s)" % bb["reason"])
@@ -702,18 +705,34 @@ def target_check(img):
                                                    k["pending_slack"], k["br1_budget"]))
 
 
-def branch_budget_line(img):
+def a2_budget(img, win=None):
+    """(certificate, premise IDs) for A2's lines: with a `within`, the SAME inputs as the window
+    certificate (its premise gaps and prefetch set, Wilson 11-16: one input, one verdict); no
+    premise -> the image-only certificate. Without a `within`: image-only."""
+    import branch_budget as BB
+    if win is None or MUT == "M_PC_A2_NOPREM":
+        return BB.image_budget(img), []
+    return _budget(img, win["premise_gaps"], win["ready"]), list(win["premises"])
+
+
+def _prem_note(win, prem):
+    if win is None:
+        return ""
+    return "; premises %s" % ",".join(prem) if prem else "; image-only"
+
+
+def branch_budget_line(img, win=None):
     """The branch-1 budget B, certified per image (Wilson 11-14, option 1: model/branch_budget).
     No finite B is NOT a refusal: the image is A2-UNCERTIFIED, and the message names the
     diagnostic (branch waits below proof_constants.branch_w_diag) when that is the cause."""
-    import branch_budget as BB
     blanes = sorted({ln for ln in I.lane_programs(img)
                      for _w, x in PC.lane_words(img, ln, I) if x["op"] in I.BRANCH_OPS})
     if not blanes:
         return "not applicable (no branch lane)"
-    r = BB.image_budget(img)
+    r, prem = a2_budget(img, win)
     if r["B"] is not None:
-        return "certified B = %d (branch lanes %s)" % (r["B"], ",".join(map(str, blanes)))
+        return "certified B = %d (branch lanes %s%s)" % (r["B"], ",".join(map(str, blanes)),
+                                                       _prem_note(win, prem))
     need = PC.branch_w_diag(len(blanes))
     short = sorted((I.branch_wait(x), ln) for ln in blanes for _w, x in PC.lane_words(img, ln, I)
                    if x["op"] in I.BRANCH_OPS and I.branch_wait(x) < need)
@@ -724,17 +743,18 @@ def branch_budget_line(img):
     return "A2-UNCERTIFIED: no finite branch-1 budget (%s); diagnostic: %s" % (r["reason"], diag)
 
 
-def a2_line(img):
+def a2_line(img, win=None):
     """A2's per-lane dispatch jitter from the certificate (Wilson / agent 1 11-14; model/branch_budget):
     each lane's J = 1 + its certified lateness (GapRun.head_late_gap; J = 1 exactly when no word of
     the lane is late, which j1_ok / OptRun.head_valid_nonbranch gives for a non-branch lane), with the
-    image's certified branch-1 budget B -- or A2-UNCERTIFIED with the certificate's reason."""
-    import branch_budget as BB
-    r = BB.image_budget(img)
+    image's certified branch-1 budget B -- or A2-UNCERTIFIED with the certificate's reason. With a
+    `within`: the window certificate's inputs, and the premise IDs used (or image-only)."""
+    r, prem = a2_budget(img, win)
     if r["B"] is None:
-        return "A2-UNCERTIFIED: %s" % r["reason"]
+        return "A2-UNCERTIFIED%s: %s" % (_prem_note(win, prem), r["reason"])
     lanes = ", ".join("lane %d J %d" % (l, 1 + v["max_late"]) for l, v in sorted(r["lanes"].items()))
-    return "certified: B = %d; %s (model/branch_budget, lane_j)" % (r["B"], lanes)
+    return "certified: B = %d; %s%s (model/branch_budget, lane_j)" % (r["B"], lanes,
+                                                                     _prem_note(win, prem))
 
 
 def compile_spec(text, seed=1, hz=None, require_cert=False, **win_opts):
@@ -783,9 +803,12 @@ def compile_spec(text, seed=1, hz=None, require_cert=False, **win_opts):
     return {"image": img, "lowered": (lanes, _hdr, _a, _kw), "words": used, "width": width,
             "checkset": cs, "log": log, "stamp": st, "route": route,
             "windows": win["windows"] if win else [],
+            # the window certificate's budget (the gate checks A2's line agrees with it)
+            "within_budget": win.get("budget") if win else None,
+            "within_inputs": (win.get("premise_gaps"), win.get("ready")) if win else None,
             "cert": {"usb_coresident": usb,
-                     "branch_budget": branch_budget_line(img),
-                     "A2": a2_line(img),
+                     "branch_budget": branch_budget_line(img, win),
+                     "A2": a2_line(img, win),
                      "bounds": "UNCERTIFIED (emulate, sniff, re-run the golden: not wired)",
                      "J_floor": CS.line(st),
                      "within": win["cert"] if win else "not applicable (no within)"}}

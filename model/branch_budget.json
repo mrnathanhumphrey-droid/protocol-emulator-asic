@@ -71,39 +71,39 @@
       "branch_lanes": [
         1
       ],
-      "B": 16,
-      "reason": "certified",
+      "B": 0,
+      "reason": "certified (EDF response bounds, RespEdfClose.wb_close_edf)",
       "cert": {
-        "status": "uncertified",
-        "reason": "1.6a queue check fails with the record's certified lane lateness in J: lane 0 r 41 > T 20; lane 1 r 41 > T 20 (J from the lane's certificate, program_a2.lane_j_obs; a split theorem for the late word would drop it -- Wilson 11-15)",
+        "status": "certified",
+        "reason": "pe_asm.compute_j",
         "d_min": 20,
         "J": 1
       },
       "lanes": {
         "0": {
-          "max_late": 22,
-          "max_late_pin": 22,
-          "R": 20
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 14
         },
         "1": {
-          "max_late": 22,
-          "max_late_pin": 22,
-          "R": 20
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 14
         },
         "2": {
           "max_late": 0,
           "max_late_pin": 0,
-          "R": 26
+          "R": 14
         },
         "3": {
           "max_late": 0,
           "max_late_pin": 0,
-          "R": 26
+          "R": 14
         },
         "4": {
           "max_late": 0,
           "max_late_pin": 0,
-          "R": 26
+          "R": 14
         }
       }
     },
@@ -2349,39 +2349,39 @@
       "branch_lanes": [
         1
       ],
-      "B": 16,
-      "reason": "certified",
+      "B": 0,
+      "reason": "certified (EDF response bounds, RespEdfClose.wb_close_edf)",
       "cert": {
-        "status": "uncertified",
-        "reason": "1.6a queue check fails with the record's certified lane lateness in J: lane 0 r 41 > T 20; lane 1 r 41 > T 20 (J from the lane's certificate, program_a2.lane_j_obs; a split theorem for the late word would drop it -- Wilson 11-15)",
+        "status": "certified",
+        "reason": "pe_asm.compute_j",
         "d_min": 20,
         "J": 1
       },
       "lanes": {
         "0": {
-          "max_late": 22,
-          "max_late_pin": 22,
-          "R": 20
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 14
         },
         "1": {
-          "max_late": 22,
-          "max_late_pin": 22,
-          "R": 20
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 14
         },
         "2": {
           "max_late": 0,
           "max_late_pin": 0,
-          "R": 26
+          "R": 14
         },
         "3": {
           "max_late": 0,
           "max_late_pin": 0,
-          "R": 26
+          "R": 14
         },
         "4": {
           "max_late": 0,
           "max_late_pin": 0,
-          "R": 26
+          "R": 14
         }
       }
     },

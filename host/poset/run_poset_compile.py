@@ -25,9 +25,15 @@
      must-fires, each refused BY NAME: too tight, a timeout over the 10-bit field and lo > 0
      without a datasheet bound ("needs window counter"), B on a wire we drive, A not ours, B
      not one edge; a window inside a LOOP body keeps every LOOP head on its action (UART TX)
+     `else continue` is UNCERTIFIED by name (Wilson 11-16): the 1.6a queue check with the
+     lateness in J -- FlushLate's PC+2 floor plus B accumulating on D*-spaced bit words; needs
+     1b -- each part generated from the certificate with the check off
   C11 the premise mechanism (Wilson 11-15 call 1, model/premises.py): a registered datasheet
-     whose SHA-256 matches puts its ID in the stamp and its gap in the certificate (the
-     certified lateness drops); a SHA mismatch or an unregistered part: image-only
+     whose SHA-256 matches puts its ID in the stamp, the window certificate and A2's line, its
+     gap in the certificate: certified at lane 0 lateness 0; a SHA mismatch or an unregistered
+     part: image-only, UNCERTIFIED by the 1.6a check (Wilson 11-16)
+  C10/C11 one input, one verdict (Wilson 11-16): every `within` compile's A2 line agrees with its
+     window certificate's budget (must-fire M_PC_A2_NOPREM: A2 without the premise gaps)
   C12 ArmRetire (JLane/ArmRetire.lean): the SPI-master `else abort` window at 5 cycles of
      spacing certifies at J 1 (must-fire M_PC_ARMRETIRE_OFF: the cap off -> red)
   C13 the drain (Wilson 11-15): generated per window (the least drain certifying J 1), equal to
@@ -76,6 +82,7 @@ SCRATCH_MUTANTS = {
     "M_PC_ARMRETIRE_OFF": "killed in-process by this gate (C12)",
     "M_PC_DRAIN_OFFBY1": "killed in-process by this gate (C13)",
     "M_PC_ARM3_PASS": "killed in-process by this gate (C14)",
+    "M_PC_A2_NOPREM": "killed in-process by this gate (C11: A2 and the window certificate disagree)",
     "M_ASM_MOD_ANY_OP": "pe_asm.MODS_MUT, killed in-process by this gate (C10)",
     "M_ASM_MOD_ANY_VALUE": "pe_asm.MODS_MUT, killed in-process by this gate (C10)",
 }
@@ -170,6 +177,79 @@ WIN_REFUSE = {
 }
 
 
+_SAID = set()
+
+
+def say(line):
+    """print a generated expected-result line once (the mutant passes re-run the same checks)"""
+    if line not in _SAID:
+        _SAID.add(line)
+        print(line)
+
+
+def a2_agrees(tag, r):
+    """one input, one verdict (Wilson 11-16): a compile's A2 line and its window certificate's
+    budget agree -- both certified at the same B and per-lane J, or both uncertified.
+    Must-fire: M_PC_A2_NOPREM (A2's line without the window's premise gaps)."""
+    wb = r.get("within_budget")
+    if wb is None:
+        return []
+    a2 = r["cert"]["A2"]
+    if wb["B"] is None:
+        return [] if a2.startswith("A2-UNCERTIFIED") else [
+            "%s: the window certificate is uncertified, A2 says %r" % (tag, a2[:90])]
+    want = "certified: B = %d; %s" % (wb["B"], ", ".join(
+        "lane %d J %d" % (l, 1 + v["max_late"]) for l, v in sorted(wb["lanes"].items())))
+    return [] if a2.startswith(want) else [
+        "%s: the window certificate says %r, A2 says %r" % (tag, want, a2[:90])]
+
+
+def counterfactual_budget(r):
+    """the window certificate's budget with the 1.6a check off (its inputs unchanged): the
+    lateness an uncertified image is refused for, generated for the expected reason"""
+    import branch_budget as BB
+    pg, rd = r["within_inputs"]
+    BB.QUEUE_MUT = True
+    try:
+        return C._budget(r["image"], pg, rd)
+    finally:
+        BB.QUEUE_MUT = False
+
+
+def c10_continue(tag, r):
+    """`else continue` (Wilson 11-16): UNCERTIFIED, named -- lateness past the proved release:
+    FlushLate's PC+2 floor plus B accumulating on D*-spaced bit words; needs 1b. Every part of
+    the reason is generated from the certificate with the 1.6a check off."""
+    import branch_budget as BB
+    import lane_cert as LC
+    probs = []
+    within = r["cert"]["within"]
+    if not within.startswith("UNCERTIFIED") or "1.6a queue check fails" not in within:
+        probs.append("%s: within %r, want UNCERTIFIED by the 1.6a queue check" % (tag, within[:120]))
+    cf = counterfactual_budget(r)
+    if cf["B"] is None:
+        return probs + ["%s: no certificate even with the 1.6a check off (%s)" % (tag, cf["reason"][:90])]
+    lanes = sorted({w["lane"] for w in r["windows"]})
+    for ln in lanes:
+        lat = cf["lanes"][ln]["lat"]
+        w0 = (C.I.read_header(r["image"], ln)["base"] - C.I.ACT_BASE) // C.I.ACT_BYTES
+        pc2 =[w0 + w["ARM_word"] + 2 for w in r["windows"] if w["lane"] == ln]
+        seed = min(lat.get(p, 0) for p in pc2)
+        top = cf["lanes"][ln]["max_late"]
+        if seed < LC.ft_flush_late(0):
+            probs.append("%s: lane %d PC+2 lateness %d < FlushLate's floor %d (not the seed)"
+                         % (tag, ln, seed, LC.ft_flush_late(0)))
+        if not (cf["B"] > 0 and top > seed):
+            probs.append("%s: lane %d B %d, max lateness %d -- nothing accumulates past the seed"
+                         % (tag, ln, cf["B"], top))
+        if BB.queue_refusal(r["image"], cf["B"], cf["lanes"]) is None:
+            probs.append("%s: the counterfactual certificate passes 1.6a" % tag)
+        say("  %s lane %d: UNCERTIFIED (expected) -- lateness past the proved release: "
+              "FlushLate's PC+2 floor (%d) plus B = %d accumulating on D*-spaced bit words "
+              "(lane J %d); needs 1b" % (tag, ln, seed, cf["B"], 1 + top))
+    return probs
+
+
 def c10():
     """`within` / `else` (Wilson 11-15): both lowerings read back FROM THE IMAGE, the arming
     and deadline inequalities on the certified lateness, and the static refusals."""
@@ -193,7 +273,10 @@ def c10():
         lanes, hdr, a_, kw = r["lowered"]
         if bytes(pe_asm.assemble(lanes, hdr, *a_, **kw)) != r["image"]:
             probs.append("%s: the recorded lanes do not re-assemble to the image" % tag)
-        if not r["cert"]["within"].startswith("certified"):
+        probs += a2_agrees(tag, r)
+        if kind == "continue":
+            probs += c10_continue(tag, r)
+        elif not r["cert"]["within"].startswith("certified"):
             probs.append("%s: within %r" % (tag, r["cert"]["within"]))
         if len(r["windows"]) != len(falls):
             probs.append("%s: %d windows, the lowering makes %d CS falls"
@@ -208,7 +291,8 @@ def c10():
                  if x["op"] != I.OP_ARM and x["pin"] < I.N_PINS}
         if pb is None or pb >= I.N_UIO or pb in named:
             probs.append("%s: B routed to pin %s (want a uio input no other word names)" % (tag, pb))
-        bb = BB.image_budget(img)
+        # the window certificate's own budget (one input: Wilson 11-16)
+        bb = r["within_budget"]
         for w in r["windows"]:
             w0 = (I.read_header(img, w["lane"])["base"] - I.ACT_BASE) // I.ACT_BYTES
             ws = words[w["lane"]]
@@ -227,6 +311,8 @@ def c10():
                 if not p2 or p2["op"] in (I.OP_SHIFT, I.OP_SHIFTIN, I.OP_SHIFTI):
                     probs.append("%s: PC+2 is %s (a FALLTHROUGH edge path cannot start a SHIFT)"
                                  % (tag, p2))
+                # uncertified (c10_continue): no certified lateness for the arming inequalities
+                continue
             # the image's own numbers: the lead = A's delay + the no-ops before the ARM
             pre = sum(ws[w0 + j]["delay"] for j in range(w["A_word"], w["ARM_word"]))
             lat = bb["lanes"][w["lane"]]["lat"] if bb["B"] is not None else {}
@@ -308,25 +394,34 @@ def c11():
     finally:
         PM.REGISTRY.clear(); PM.REGISTRY.update(saved[0])
         PM.DATASHEETS.clear(); PM.DATASHEETS.update(saved[1])
-    if with_p["stamp"].get("premises") != ["C11_DOC"] or "premises C11_DOC" not in with_p["cert"]["within"]:
-        probs.append("C11 a registered datasheet: stamp %s, within %r"
-                     % (with_p["stamp"].get("premises"), with_p["cert"]["within"][:90]))
+    # one input, one verdict (Wilson 11-16): A2's line reads the window certificate's inputs
+    for tag, r in (("registered", with_p), ("SHA mismatch", bad_sha), ("unregistered part", unreg)):
+        probs += a2_agrees("C11 %s" % tag, r)
+    # with the registered datasheet: certified, the premise ID in the stamp, the window
+    # certificate and A2's line -- lane 0 at lateness 0
+    wb = with_p["within_budget"]
+    if (with_p["stamp"].get("premises") != ["C11_DOC"]
+            or not with_p["cert"]["within"].startswith("certified")
+            or "premises C11_DOC" not in with_p["cert"]["within"]
+            or "premises C11_DOC" not in with_p["cert"]["A2"]
+            or wb["B"] is None or wb["lanes"][0]["max_late"] != 0):
+        probs.append("C11 a registered datasheet: stamp %s, within %r, A2 %r"
+                     % (with_p["stamp"].get("premises"), with_p["cert"]["within"][:90],
+                        with_p["cert"]["A2"][:90]))
+    # without it (SHA mismatch, unregistered): image-only -- the plain ARM's floor with no
+    # earliest-edge premise seeds the lateness, and 1.6a refuses it; J generated with the check off
     for tag, r in (("SHA mismatch", bad_sha), ("unregistered part", unreg)):
-        if "premises" in r["stamp"] or "image-only" not in r["cert"]["within"]:
-            probs.append("C11 %s: stamp %s, within %r" % (tag, r["stamp"].get("premises"),
-                                                          r["cert"]["within"][:90]))
-    # the premise must CHANGE the certificate (the early-armed SPI window: 62 vs 210 today)
-    import branch_budget as BB
-    def lane0_j(r):
-        _l, _r2, w = C.windows(C.S.parse(body(st))["poset"],
-                               C.lower(C.S.parse(body(st))["v1"], 7)[1],
-                               C.lower(C.S.parse(body(st))["v1"], 7)[2], HZ, arm="early", counterfactual=True,
-                               premise=r)
-        b = w["budget"]
-        return None if b["B"] is None else b["lanes"][0]["max_late"]
-    jp, j0 = lane0_j("spec"), lane0_j(None)
-    if jp is None or j0 is None or not jp < j0:
-        probs.append("C11 the premise gap did not lower the certified lateness (%s vs %s)" % (jp, j0))
+        cf = counterfactual_budget(r)
+        j0 = None if cf["B"] is None else 1 + cf["lanes"][0]["max_late"]
+        if ("premises" in r["stamp"] or not r["cert"]["within"].startswith("UNCERTIFIED")
+                or "1.6a queue check fails" not in r["cert"]["within"]
+                or "image-only" not in r["cert"]["A2"] or j0 is None or j0 <= 1):
+            probs.append("C11 %s: stamp %s, within %r, A2 %r, J with the check off %s"
+                         % (tag, r["stamp"].get("premises"), r["cert"]["within"][:90],
+                            r["cert"]["A2"][:90], j0))
+        say("  C11 %s: UNCERTIFIED (image-only), lane 0 J %s with the 1.6a check off; with the "
+              "registered datasheet: certified, lane 0 J %s" % (tag, j0, 1 + wb["lanes"][0]["max_late"]
+                                                              if wb["B"] is not None else None))
     return probs
 
 
