@@ -69,6 +69,11 @@ def _words(img, base):
 def _tuple(x):
     if x["op"] == I.OP_LOOP:
         return (x["op"], 0, 0, (x["count"] << I.PINB_W) | x["pinb"], x["q"])
+    if x["op"] in I.BRANCH_OPS:
+        # ⛔ a BRANCH's delay field is its TARGET (delay[6:0]); its spacing is the wait W
+        # (count:pinb, pe_isa.branch_wait) -- found 11-15: run_branch_check's braw images read
+        # "d_min = 6" (a target) and were stamped uncertified while A2 certified them
+        return (x["op"], x["pin"], x["level"], I.branch_wait(x), x["q"])
     return (x["op"], x["pin"], x["level"], x["delay"], x["q"])
 
 
