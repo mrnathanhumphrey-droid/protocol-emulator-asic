@@ -77,7 +77,10 @@ KEY = ("dstar", "dstar29", "dstar39", "dstar39_v2", "dstar39_st", "dstar39_hold"
        # Buf.lean (Wilson 11-16): the depth-2 buffer, always two fetches per ARM
        "two_fetch_scan", "two_fetch_direct", "buf_load", "buf_load_margin",
        "p1b2_margin_arm_scan", "p1b2_margin_arm_direct", "p1b2_margin_plain_scan",
-       "p1b2_margin_plain_direct", "p1b2_margin_timeout_scan", "p1b2_margin_timeout_direct")
+       "p1b2_margin_plain_direct", "p1b2_margin_timeout_scan", "p1b2_margin_timeout_direct",
+       # HeadS.lean (Wilson 11-16, carry-through C1): the head-valid chain on the slot run
+       "spareFill_stepS", "wf_runS", "owed_runS", "head_valid_of_countsS", "pending_boundS",
+       "head_valid_when_readyS")
 #: proof_constants.load() key -> the Lean expression that must evaluate to it (SPEC: the map)
 CONSTS = {
     "lemmaA_window": "LEMMA_A_WINDOW", "R_base": "R_BASE", "dispatch_cycles": "DISPATCH_CYCLES",
