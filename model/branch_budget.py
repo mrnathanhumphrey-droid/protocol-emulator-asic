@@ -61,6 +61,9 @@ SLOT_TIMEOUT_MUT = False
 #: must-fire switch (gate_lane_cert M_LC_SLOT_BRANCH_OFF): a branch PC+1's taken target marked
 #: ready at depth 2 (no theorem: the buffer fetches PC+2 only, Buf.p1b2_*)
 SLOT_BRANCH_MUT = False
+#: must-fire switch (gate_lane_cert M_LC_SLOT_PC3_OFF): a FALLTHROUGH ARM at PC+1 gives ARM A
+#: its PC+3 (ARM A fetches two words: no theorem)
+SLOT_PC3_MUT = False
 
 
 def slot_timeout_drop(g, I, ready, lat, k=None):
@@ -90,10 +93,20 @@ def slot_ready(g, I, depth, gaps, k=None):
                                      distance d (the certificate's rd) >= p1b2_plain_min_d
     PC+2 means the word at ARM + 2 only: a branch PC+1's taken target is never ready (Wilson
     11-17, rule (1) removed; no theorem covers it).
+    So a FALLTHROUGH ARM at PC+1 gives ARM A no PC+3 (Wilson 11-17, rule (2) removed: A fetches
+    two words); PC+3 can still be ready through that ARM's own FALLTHROUGH rule.
     `gaps`: lane_cert.build's writeback gaps (after any premise gaps), so d is the certificate's."""
+    out = set()
+    for words in slot_ready_by_arm(g, I, depth, gaps, k).values():
+        out |= words
+    return out
+
+
+def slot_ready_by_arm(g, I, depth, gaps, k=None):
+    """{ARM: {word}}: slot_ready per fetching ARM (which ARM's slot fetch makes each word ready)"""
     k = k or PC.load()
     dmin = k["p1b2_plain_min_d"]
-    out = set()
+    by = {}
     for a in g:
         x = g[a][0]
         if x["op"] != I.OP_ARM or x["mod"] & I.ARM_MOD_LEVEL2:
@@ -102,8 +115,9 @@ def slot_ready(g, I, depth, gaps, k=None):
             # PC+2 (edge, fetched first) and PC+1 (timeout, fetched second): the timeout word's
             # premise (p1b2_margin_timeout_scan) needs the ARM's lateness, so it is checked in
             # _image_budget's certificate loop (slot_timeout_drop)
-            out |= {w for w in g[a][1] if w in g}
+            by[a] = {w for w in g[a][1] if w in g}
             continue
+        out = by[a] = set()
         front = {w for w in g[a][1] if w in g}
         out |= front
         if depth < 2:
@@ -111,7 +125,7 @@ def slot_ready(g, I, depth, gaps, k=None):
         nxt = set()
         for s1 in front:
             for s2 in g[s1][1]:
-                if s2 not in g or (s2 != a + 2 and not SLOT_BRANCH_MUT):
+                if s2 not in g or (s2 != a + 2 and not (SLOT_BRANCH_MUT or SLOT_PC3_MUT)):
                     continue
                 d = gaps[s1][-1] + sum(gaps[s2][:-1])
                 if _plain_edge_arm(g[s1][0], I) or d >= dmin or SLOT_SPACING_MUT:
@@ -121,7 +135,7 @@ def slot_ready(g, I, depth, gaps, k=None):
         for _ in range(depth - 2):
             front = {s for w in front if w in g for s in g[w][1] if s in g}
             out |= front
-    return out
+    return by
 
 
 def arm_window_count(g, gaps, lat, W, I):

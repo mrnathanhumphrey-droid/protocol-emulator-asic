@@ -58,6 +58,9 @@ every must-fire must turn its check red, or the gate is not testing what it says
   check 11 a branch at a plain ARM's PC+1: its fall-through PC+2 is ready (d >= 4), its taken
            target is not -- the buffer fetches ARM + 2 only (Wilson 11-17, rule (1) removed)
   M_LC_SLOT_BRANCH_OFF  the taken target marked ready (check 11 red)
+  check 12 a FALLTHROUGH ARM B at plain ARM A's PC+1: A's slot gives PC+1, PC+2, never PC+3 (A
+           fetches two words; Wilson 11-17, rule (2) removed); B's own rule keeps its two words
+  M_LC_SLOT_PC3_OFF  A's PC+3 marked ready (check 12 red)
   M_LC_FT_UNSEEN    no ARM read as FALLTHROUGH                    -> check 3 red
   M_LC_FT_NOFLOOR   no lateness floor after the flush             -> check 3 red
 Static, < 2 s. Usage: python model/gate_lane_cert.py [dir holding usbdev.py]
@@ -234,6 +237,25 @@ def check_slot_branch(BB, PC, I):
     return ok, ("branch at PC+1 (d = %d): fall-through PC+2 %s, taken target %s"
                 % (dmin, "ready" if 2 in r else "NOT READY",
                    "not ready" if 4 not in r else "READY"))
+
+
+def check_slot_pc3(BB, PC, I):
+    """check 12: a FALLTHROUGH ARM B at plain ARM A's PC+1 -- A's slot makes PC+1 and PC+2 ready,
+    never PC+3 (A fetches two words; Wilson 11-17, rule (2) removed); B's own FALLTHROUGH rule
+    keeps its PC+1 / PC+2 (A's PC+2 / PC+3)"""
+    k = PC.load()
+    dmin = k["p1b2_plain_min_d"]
+    arm = {"op": I.OP_ARM, "mod": 0, "delay": 0}
+    ft = {"op": I.OP_ARM, "mod": I.ARM_MOD_FT, "delay": 40}
+    plain = {"op": I.OP_LEVEL, "mod": 0, "delay": 0}
+    g = {0: (arm, [1]), 1: (ft, [2, 3]), 2: (plain, [4]), 3: (plain, [4]), 4: (plain, [0])}
+    gaps = {0: [1], 1: [dmin], 2: [5], 3: [5], 4: [5]}
+    by = BB.slot_ready_by_arm(g, I, 2, gaps, k)
+    a, b = by.get(0, set()), by.get(1, set())
+    ok = 1 in a and 2 in a and 3 not in a and b == {2, 3}
+    return ok, ("FALLTHROUGH ARM at PC+1: ARM A's slot PC+1 %s, PC+2 %s, PC+3 %s; ARM B's own %s"
+                % ("ready" if 1 in a else "NOT READY", "ready" if 2 in a else "NOT READY",
+                   "not ready" if 3 not in a else "READY", sorted(b)))
 
 
 def _ft_slot_image(I, T, d1=80):
@@ -505,6 +527,16 @@ def main():
         BB.SLOT_BRANCH_MUT = False
     kills.append(("M_LC_SLOT_BRANCH_OFF", not k11,
                   "a branch PC+1's taken target ready: check 11 red"))
+    # check 12: no PC+3 for ARM A behind a FALLTHROUGH ARM at PC+1 (Wilson 11-17, rule (2))
+    ok12, msg12 = check_slot_pc3(BB, PC, I)
+    print("  check 12 %s  %s" % ("GREEN" if ok12 else "RED  ", msg12))
+    BB.SLOT_PC3_MUT = True
+    try:
+        k12, _m = check_slot_pc3(BB, PC, I)
+    finally:
+        BB.SLOT_PC3_MUT = False
+    kills.append(("M_LC_SLOT_PC3_OFF", not k12,
+                  "ARM A's PC+3 ready behind a FALLTHROUGH PC+1: check 12 red"))
     # M_LC_FT_UNSEEN / M_LC_FT_NOFLOOR
     orig_ft = PC.arm_is_ft
     PC.arm_is_ft = lambda x, I=None: False
@@ -574,7 +606,7 @@ def main():
         ok_txt = ("PASS (as required)" if name.endswith("_PASS") else "RED (killed)")
         print("  must-fire %-18s %s  %s" % (name, ok_txt if killed else "SURVIVED", what))
     teeth = all(k for _n, k, _w in kills)
-    green = ok1 and not fails and ok3 and ok4 and ok5 and ok6 and ok7 and ok8 and ok9 and ok10 and ok11
+    green = ok1 and not fails and ok3 and ok4 and ok5 and ok6 and ok7 and ok8 and ok9 and ok10 and ok11 and ok12
     verdict = "PASSED" if (green and teeth) else ("FAILED (must-fire survived)" if not teeth
                                                    else "FAILED")
     print("GATE lane-cert: %s" % verdict)
