@@ -87,6 +87,10 @@ def load(path=PATH):
     rel2 = 2 * (k["dispatch_cycles"] + k["arm_retire_gap"]) - 1
     k["p1b2_margin_arm_scan"] = rel2 - (1 + 2 * k["l_refill"])
     k["p1b2_margin_arm_direct"] = rel2 - (2 * k["l_refill"] - 1)
+    # Buf.p1b2_margin_plain_scan's premise (Wilson 11-17): a plain PC+1 released at
+    # c + dispatch + gap, PC+2 d later, against fetch 2's word at c + 1 + 2 l_refill -- the
+    # margin d - this is >= 0 only from this d up (4 today; branch_budget.slot_ready reads it)
+    k["p1b2_plain_min_d"] = (1 + 2 * k["l_refill"]) - (k["dispatch_cycles"] + k["arm_retire_gap"])
     if k["p1b2_margin_arm_scan"] < 0:
         raise ValueError("proof_constants: the second word through the scan has a negative "
                          "margin %d" % k["p1b2_margin_arm_scan"])

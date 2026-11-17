@@ -46,6 +46,10 @@ every must-fire must turn its check red, or the gate is not testing what it says
   M_LC_ARM_EDGE_PASS  n0: armed exactly at the deadline           -> must PASS
   M_LC_ARM_EDGE_FAIL  n0 + 1: one past it                          -> must be red
   M_LC_ARM_100        n = 100 (armed at EOP + 163 on today's program) -> must be red
+  check 9  branch_budget.slot_ready names its theorem's premise (Wilson 11-17): PC+2 after a plain
+           PC+1 is ready only at d >= p1b2_plain_min_d (Buf.p1b2_margin_plain_scan: 4);
+           not ready at d = 3, ready at d = 4, ready after an ARM PC+1 (m1 / m3) at d = 3
+  M_LC_SLOT_SPACING_OFF  the premise unchecked -> PC+2 ready at d = 3 (check 9 red)
   M_LC_FT_UNSEEN    no ARM read as FALLTHROUGH                    -> check 3 red
   M_LC_FT_NOFLOOR   no lateness floor after the flush             -> check 3 red
 Static, < 2 s. Usage: python model/gate_lane_cert.py [dir holding usbdev.py]
@@ -174,6 +178,37 @@ def check_coresident(PC, V, I):
                 "%d accepted %s" % (k.get("usb_other_R"), cur.get("usb_other_R"),
                                     "current" if fresh else "STALE", lim, lim - 1, refused, lim,
                                     accepted))
+
+
+def _slot_graph(I, d, pc1_arm=False):
+    """ARM w0 -> PC+1 w1 -> PC+2 w2 -> w3 -> w0, PC+1 -> PC+2 released d apart (rd = gaps[w1][-1]
+    + the held part of gaps[w2], here none)"""
+    arm = {"op": I.OP_ARM, "mod": 0, "delay": 0}
+    plain = {"op": I.OP_LEVEL, "mod": 0, "delay": 0}
+    g = {0: (arm, [1]), 1: (arm if pc1_arm else plain, [2]), 2: (plain, [3]), 3: (plain, [0])}
+    gaps = {0: [1], 1: [d], 2: [5], 3: [5]}
+    return g, gaps
+
+
+def check_slot_spacing(BB, PC, I):
+    """check 9: branch_budget.slot_ready marks PC+2 ready only under its theorem's premise --
+    Buf.p1b2_margin_plain_scan needs d >= p1b2_plain_min_d (4): at d = 3 PC+2 is NOT ready, at
+    d = 4 it is; PC+1 ready either way; PC+1 a plain edge ARM (p1b2_margin_arm_scan, m1 / m3, no
+    premise) keeps PC+2 ready at d = 3"""
+    k = PC.load()
+    dmin = k["p1b2_plain_min_d"]
+    g3, gp3 = _slot_graph(I, dmin - 1)
+    g4, gp4 = _slot_graph(I, dmin)
+    gm, gpm = _slot_graph(I, dmin - 1, pc1_arm=True)
+    lo = BB.slot_ready(g3, I, 2, gp3, k)
+    hi = BB.slot_ready(g4, I, 2, gp4, k)
+    m13 = BB.slot_ready(gm, I, 2, gpm, k)
+    # dmin == 4: the literal premise of Buf.p1b2_margin_plain_scan (`4 ≤ d`)
+    ok = dmin == 4 and 1 in lo and 2 not in lo and 2 in hi and 2 in m13
+    return ok, ("slot_ready PC+2: d = %d %s, d = %d %s, m1/m3 at d = %d %s (p1b2_plain_min_d %d)"
+                % (dmin - 1, "not ready" if 2 not in lo else "READY",
+                   dmin, "ready" if 2 in hi else "NOT READY",
+                   dmin - 1, "ready" if 2 in m13 else "NOT READY", dmin))
 
 
 def check_budget():
@@ -353,6 +388,15 @@ def main():
           % (len(edf), ", ".join(edf)))
     kills.append(("M_LC_EDF_OFF", bool(edf) and st == edf,
                   "EDF scheme off: %d / %d EDF-certified images stale" % (len(st), len(edf))))
+    # check 9: slot_ready names its theorem's premise (Wilson 11-17)
+    ok9, msg9 = check_slot_spacing(BB, PC, I)
+    print("  check 9 %s  %s" % ("GREEN" if ok9 else "RED  ", msg9))
+    BB.SLOT_SPACING_MUT = True
+    try:
+        k9, _m = check_slot_spacing(BB, PC, I)
+    finally:
+        BB.SLOT_SPACING_MUT = False
+    kills.append(("M_LC_SLOT_SPACING_OFF", not k9, "PC+2 ready below p1b2_plain_min_d: check 9 red"))
     # M_LC_FT_UNSEEN / M_LC_FT_NOFLOOR
     orig_ft = PC.arm_is_ft
     PC.arm_is_ft = lambda x, I=None: False
@@ -422,7 +466,7 @@ def main():
         ok_txt = ("PASS (as required)" if name.endswith("_PASS") else "RED (killed)")
         print("  must-fire %-18s %s  %s" % (name, ok_txt if killed else "SURVIVED", what))
     teeth = all(k for _n, k, _w in kills)
-    green = ok1 and not fails and ok3 and ok4 and ok5 and ok6 and ok7 and ok8
+    green = ok1 and not fails and ok3 and ok4 and ok5 and ok6 and ok7 and ok8 and ok9
     verdict = "PASSED" if (green and teeth) else ("FAILED (must-fire survived)" if not teeth
                                                    else "FAILED")
     print("GATE lane-cert: %s" % verdict)

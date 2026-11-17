@@ -48,8 +48,27 @@ SLOT_PER_ARM = None
 SLOT_SELF = False
 
 
-def slot_ready(g, I, depth):
-    """{word}: the words the guaranteed slot makes ready at release on one lane"""
+#: must-fire switch (gate_lane_cert M_LC_SLOT_SPACING_OFF): PC+2 marked ready without
+#: p1b2_margin_plain_scan's premise d >= p1b2_plain_min_d
+SLOT_SPACING_MUT = False
+
+
+def _plain_edge_arm(x, I):
+    """an ARM whose successor is released after its writeback (ArmRetire; lane_cert's `ret`)"""
+    return (x["op"] == I.OP_ARM and not x["mod"] & I.ARM_MOD_LEVEL2
+            and not x["mod"] & I.ARM_MOD_FT)
+
+
+def slot_ready(g, I, depth, gaps, k=None):
+    """{word}: the words the guaranteed slot makes ready at release on one lane. Each rule names
+    the theorem whose premise it checks (Wilson 11-17):
+      PC+1 of a plain ARM            Slot.p1b_margin_scan (no premise)
+      PC+2, PC+1 a plain edge ARM    Buf.p1b2_margin_arm_scan (m1 / m3; no premise)
+      PC+2, PC+1 any other word      Buf.p1b2_margin_plain_scan: ONLY when PC+1 -> PC+2's release
+                                     distance d (the certificate's rd) >= p1b2_plain_min_d
+    `gaps`: lane_cert.build's writeback gaps (after any premise gaps), so d is the certificate's."""
+    k = k or PC.load()
+    dmin = k["p1b2_plain_min_d"]
     out = set()
     for a in g:
         x = g[a][0]
@@ -58,10 +77,23 @@ def slot_ready(g, I, depth):
         if x["mod"] & I.ARM_MOD_FT:
             out |= {w for w in g[a][1] if w in g}         # PC+1 (timeout), PC+2 (edge)
             continue
-        front = set(g[a][1])
-        for _ in range(depth):
-            out |= {w for w in front if w in g}
-            front = {s for w in front if w in g for s in g[w][1]}
+        front = {w for w in g[a][1] if w in g}
+        out |= front
+        if depth < 2:
+            continue
+        nxt = set()
+        for s1 in front:
+            for s2 in g[s1][1]:
+                if s2 not in g:
+                    continue
+                d = gaps[s1][-1] + sum(gaps[s2][:-1])
+                if _plain_edge_arm(g[s1][0], I) or d >= dmin or SLOT_SPACING_MUT:
+                    nxt.add(s2)
+        out |= nxt
+        front = nxt
+        for _ in range(depth - 2):
+            front = {s for w in front if w in g for s in g[w][1] if s in g}
+            out |= front
     return out
 
 
@@ -284,12 +316,14 @@ def _image_budget(img, iters=80, premise_gaps=None, ready=None, scheme="window")
         return {"B": None, "reason": "not applied to a USB image (the USB lane's response is "
                 "PrioResp's; one closure theorem per image)", "lanes": {}}
     graphs = {l: LC.build(img, l, prem, I) for l in lanes}
-    if SLOT:
-        ready = {l: set(ready.get(l, ())) | slot_ready(graphs[l][0], I, SLOT) for l in lanes}
     for l, pg in premise_gaps.items():
         for w, gp in pg.items():
             if l in graphs and w in graphs[l][2]:
                 graphs[l][2][w] = [max(graphs[l][2][w][0], gp)] + graphs[l][2][w][1:]
+    if SLOT:
+        # after the premise gaps: slot_ready's d is the release distance the certificate uses
+        ready = {l: set(ready.get(l, ())) | slot_ready(graphs[l][0], I, SLOT, graphs[l][2], k)
+                 for l in lanes}
     usb_n, usb_rmax = 0, None
     if usb:
         with contextlib.redirect_stdout(io.StringIO()):
