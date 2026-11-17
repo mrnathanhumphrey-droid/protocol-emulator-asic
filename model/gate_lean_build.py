@@ -80,7 +80,12 @@ KEY = ("dstar", "dstar29", "dstar39", "dstar39_v2", "dstar39_st", "dstar39_hold"
        "p1b2_margin_plain_direct", "p1b2_margin_timeout_scan", "p1b2_margin_timeout_direct",
        # HeadS.lean (Wilson 11-16, carry-through C1): the head-valid chain on the slot run
        "spareFill_stepS", "wf_runS", "owed_runS", "head_valid_of_countsS", "pending_boundS",
-       "head_valid_when_readyS")
+       "head_valid_when_readyS",
+       # BufEng.lean (Wilson 11-17, carry-through C2): the buffer in the engine, cycle-exact
+       "wfB_run", "held_run", "head_valid_of_countsB", "port_wait_boundB", "pending_boundB",
+       "head_valid_when_readyB", "empty_cycle_after_ret", "empty_cycle_disp", "empty_cycle_load",
+       "mask_buf_next", "mask_flight_next", "ordB_run", "order_kept", "issue_index",
+       "nr_held_run", "slot_countB", "slot_count_two")
 #: proof_constants.load() key -> the Lean expression that must evaluate to it (SPEC: the map)
 CONSTS = {
     "lemmaA_window": "LEMMA_A_WINDOW", "R_base": "R_BASE", "dispatch_cycles": "DISPATCH_CYCLES",
