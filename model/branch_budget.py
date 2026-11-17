@@ -58,6 +58,11 @@ SLOT_SPACING_MUT = False
 SLOT_TIMEOUT_MUT = False
 
 
+#: must-fire switch (gate_lane_cert M_LC_SLOT_BRANCH_OFF): a branch PC+1's taken target marked
+#: ready at depth 2 (no theorem: the buffer fetches PC+2 only, Buf.p1b2_*)
+SLOT_BRANCH_MUT = False
+
+
 def slot_timeout_drop(g, I, ready, lat, k=None):
     """{word}: the FALLTHROUGH timeout words (PC+1, fetched second) in `ready` whose theorem's
     premise fails -- Buf.p1b2_margin_timeout_scan needs P1B2_FILL_SCAN + L <= T (T the ARM's
@@ -83,6 +88,8 @@ def slot_ready(g, I, depth, gaps, k=None):
       PC+2, PC+1 a plain edge ARM    Buf.p1b2_margin_arm_scan (m1 / m3; no premise)
       PC+2, PC+1 any other word      Buf.p1b2_margin_plain_scan: ONLY when PC+1 -> PC+2's release
                                      distance d (the certificate's rd) >= p1b2_plain_min_d
+    PC+2 means the word at ARM + 2 only: a branch PC+1's taken target is never ready (Wilson
+    11-17, rule (1) removed; no theorem covers it).
     `gaps`: lane_cert.build's writeback gaps (after any premise gaps), so d is the certificate's."""
     k = k or PC.load()
     dmin = k["p1b2_plain_min_d"]
@@ -104,7 +111,7 @@ def slot_ready(g, I, depth, gaps, k=None):
         nxt = set()
         for s1 in front:
             for s2 in g[s1][1]:
-                if s2 not in g:
+                if s2 not in g or (s2 != a + 2 and not SLOT_BRANCH_MUT):
                     continue
                 d = gaps[s1][-1] + sum(gaps[s2][:-1])
                 if _plain_edge_arm(g[s1][0], I) or d >= dmin or SLOT_SPACING_MUT:

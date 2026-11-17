@@ -55,6 +55,9 @@ every must-fire must turn its check red, or the gate is not testing what it says
            T = FILL + L - 1 drops it, T = FILL + L keeps it; standing arm: the same shape at
            spacing 40, T = 8, has no certificate under the rule and certifies with it off
   M_LC_SLOT_TIMEOUT_OFF  the premise unchecked -> ready at T = FILL + L - 1 (check 10 red)
+  check 11 a branch at a plain ARM's PC+1: its fall-through PC+2 is ready (d >= 4), its taken
+           target is not -- the buffer fetches ARM + 2 only (Wilson 11-17, rule (1) removed)
+  M_LC_SLOT_BRANCH_OFF  the taken target marked ready (check 11 red)
   M_LC_FT_UNSEEN    no ARM read as FALLTHROUGH                    -> check 3 red
   M_LC_FT_NOFLOOR   no lateness floor after the flush             -> check 3 red
 Static, < 2 s. Usage: python model/gate_lane_cert.py [dir holding usbdev.py]
@@ -214,6 +217,23 @@ def check_slot_spacing(BB, PC, I):
                 % (dmin - 1, "not ready" if 2 not in lo else "READY",
                    dmin, "ready" if 2 in hi else "NOT READY",
                    dmin - 1, "ready" if 2 in m13 else "NOT READY", dmin))
+
+
+def check_slot_branch(BB, PC, I):
+    """check 11: a branch at a plain ARM's PC+1 -- its fall-through PC+2 (ARM + 2) is ready at
+    d >= p1b2_plain_min_d, its taken target (word 4) is not (Wilson 11-17, rule (1) removed)"""
+    k = PC.load()
+    dmin = k["p1b2_plain_min_d"]
+    arm = {"op": I.OP_ARM, "mod": 0, "delay": 0}
+    br = {"op": min(I.BRANCH_OPS), "mod": 0, "delay": 0}
+    plain = {"op": I.OP_LEVEL, "mod": 0, "delay": 0}
+    g = {0: (arm, [1]), 1: (br, [2, 4]), 2: (plain, [3]), 3: (plain, [0]), 4: (plain, [0])}
+    gaps = {0: [1], 1: [dmin], 2: [5], 3: [5], 4: [5]}
+    r = BB.slot_ready(g, I, 2, gaps, k)
+    ok = 1 in r and 2 in r and 4 not in r
+    return ok, ("branch at PC+1 (d = %d): fall-through PC+2 %s, taken target %s"
+                % (dmin, "ready" if 2 in r else "NOT READY",
+                   "not ready" if 4 not in r else "READY"))
 
 
 def _ft_slot_image(I, T, d1=80):
@@ -475,6 +495,16 @@ def main():
         BB.SLOT_TIMEOUT_MUT = False
     kills.append(("M_LC_SLOT_TIMEOUT_OFF", not k10,
                   "timeout word ready at T = FILL + L - 1: check 10 red"))
+    # check 11: a branch PC+1's taken target is never ready (Wilson 11-17, rule (1))
+    ok11, msg11 = check_slot_branch(BB, PC, I)
+    print("  check 11 %s  %s" % ("GREEN" if ok11 else "RED  ", msg11))
+    BB.SLOT_BRANCH_MUT = True
+    try:
+        k11, _m = check_slot_branch(BB, PC, I)
+    finally:
+        BB.SLOT_BRANCH_MUT = False
+    kills.append(("M_LC_SLOT_BRANCH_OFF", not k11,
+                  "a branch PC+1's taken target ready: check 11 red"))
     # M_LC_FT_UNSEEN / M_LC_FT_NOFLOOR
     orig_ft = PC.arm_is_ft
     PC.arm_is_ft = lambda x, I=None: False
@@ -544,7 +574,7 @@ def main():
         ok_txt = ("PASS (as required)" if name.endswith("_PASS") else "RED (killed)")
         print("  must-fire %-18s %s  %s" % (name, ok_txt if killed else "SURVIVED", what))
     teeth = all(k for _n, k, _w in kills)
-    green = ok1 and not fails and ok3 and ok4 and ok5 and ok6 and ok7 and ok8 and ok9 and ok10
+    green = ok1 and not fails and ok3 and ok4 and ok5 and ok6 and ok7 and ok8 and ok9 and ok10 and ok11
     verdict = "PASSED" if (green and teeth) else ("FAILED (must-fire survived)" if not teeth
                                                    else "FAILED")
     print("GATE lane-cert: %s" % verdict)
