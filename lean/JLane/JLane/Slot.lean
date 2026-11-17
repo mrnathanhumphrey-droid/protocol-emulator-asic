@@ -25,6 +25,11 @@ Proved here:
 * `slot_waitS` -- **the slot's delay behind USB receive**: a slot request held from a cycle on
   is issued within `3 + L_REFILL · u` cycles, `u` the USB receive branch-1 issues meanwhile.
 
+P1b from the fill (later in this file): `p1b_capture` (raise at capture, issued at the next
+scan: the word valid at c + 5, margin `P1B_MARGIN_SCAN` = 0) and `p1b_direct` (issued at the
+capture itself, P_CAP -> P_REQ: valid at c + 4, margin `P1B_MARGIN_DIRECT` = 1), both for an ARM
+captured into its lane's empty head; the spare case needs the buffer word.
+
 Owed (next bricks, named): `slot_once` (between two slot issues for a lane, it retires: one
 fetch per ARM), the buffer at depth 2 (a third word per lane), and threading `stepS` through the
 head-valid theorems that read `chargeSum` (they take `hB` on the charge; with `chargeSumS` the
@@ -704,6 +709,394 @@ theorem usbSum_eq_cnt : ∀ (n : Nat) (e : Engine),
     rw [usbSum_eq_cnt n]
     unfold usbCharge UsbIssue
     split <;> simp [Nat.mul_add, SLOT_CHARGE]
+
+
+/-! ### P1b from the fill: the requester raises at capture (Wilson 11-16)
+
+The contract (`RaiseAtCapture`): when the port captures an ARM for lane `u` into `u`'s empty
+head, the requester names `u` at the very next cycle (the scan right after the capture). With
+priority below USB receive only, the slot issues there; nothing is in flight (the port has just
+captured), so the fetch takes exactly `REQ → WAIT → CAP`.
+
+`p1b_capture`, from the ARM's capture cycle `c`:
+* the ARM's writeback is no earlier than `c + 3` (it needs its head valid two cycles before);
+* the slot fills the ARM's spare by `c + 5`;
+* that word stays valid until a retiring writeback of `u` on that very slot (its own retirement).
+With ArmRetire (`arm_release_ge`: the successor is released at least 2 after the ARM's
+writeback), the successor's earliest release is `c + 5`: **its head is valid at its release, with
+zero slack**. The ARM captured into the spare (head already valid) needs the buffer word, the
+next brick. -/
+
+theorem stepS_st_wb (e : Engine) (h : (stepS P win usb sreq e).st = .wb) : e.st = .drive := by
+  rw [stepS_st] at h
+  change (dispNext win e).st = .wb at h
+  unfold dispNext at h
+  cases hs : e.st with
+  | drive => rfl
+  | wb => rw [hs] at h; simp at h
+  | idle =>
+    rw [hs] at h
+    dsimp only at h
+    cases hw : win e with
+    | none => rw [hw] at h; simp at h
+    | some w => rw [hw] at h; dsimp only at h; split at h <;> simp at h
+
+theorem stepS_cur_drive (e : Engine) (h : e.st = .drive) :
+    (stepS P win usb sreq e).cur = e.cur := by
+  rw [stepS_cur]
+  change (dispNext win e).cur = e.cur
+  unfold dispNext
+  rw [h]
+
+theorem stepS_st_drive (e : Engine) (h : (stepS P win usb sreq e).st = .drive) :
+    e.st = .idle ∧ e.headValid (stepS P win usb sreq e).cur = true := by
+  have hst := h
+  rw [stepS_st] at hst
+  change (dispNext win e).st = .drive at hst
+  rw [stepS_cur]
+  change e.st = .idle ∧ e.headValid (dispNext win e).cur = true
+  unfold dispNext at hst ⊢
+  cases hs : e.st with
+  | drive => rw [hs] at hst; simp at hst
+  | wb => rw [hs] at hst; simp at hst
+  | idle =>
+    rw [hs] at hst
+    dsimp only at hst ⊢
+    refine ⟨rfl, ?_⟩
+    cases hw : win e with
+    | none => rw [hw] at hst; simp at hst
+    | some w =>
+      rw [hw] at hst
+      dsimp only at hst ⊢
+      by_cases hv : e.headValid w = true
+      · rw [if_pos hv]; exact hv
+      · rw [if_neg hv] at hst; simp at hst
+
+/-- A valid slot stays valid unless a retiring writeback of its lane invalidates it. -/
+theorem keepSlotS (u : Lane) (s : Slot) (e : Engine)
+    (hr : ¬(e.st = .wb ∧ u = e.cur ∧ s = e.sel e.cur ∧ P.ret e.now e.cur = true))
+    (h : e.actv u s = true) : (stepS P win usb sreq e).actv u s = true := by
+  rw [stepS_actv]
+  show actvNext P e u s = true
+  unfold actvNext
+  rw [if_neg hr]
+  split
+  · rfl
+  · exact h
+
+/-- The requester raises at capture: an ARM captured into `u`'s empty head (`hArm`, the word's
+opcode, abstract like `fnpf`) makes the next cycle's request name `u`. -/
+def RaiseAtCapture (isArm : Engine → Bool) : Prop :=
+  ∀ e, e.pst = .cap → isArm e = true → e.headValid e.pl = false → e.pslot = e.sel e.pl →
+    sreq (stepS P win usb sreq e) = some e.pl
+
+theorem p1b_capture (isArm : Engine → Bool)
+    (hRaise : RaiseAtCapture P win usb sreq isArm) (u : Lane) (e : Engine) (hS : Struct e)
+    (hc : e.pst = .cap) (hl : e.pl = u) (hA : isArm e = true) (hh : e.headValid u = false)
+    (hps : e.pslot = e.sel u) (hu : usbFirst P usb (stepS P win usb sreq e) = false) :
+    (∀ t, t < 3 → ¬IsRet P u (runS P win usb sreq t e)) ∧
+    (runS P win usb sreq 5 e).actv u (!e.sel u) = true ∧
+    (∀ k, 5 ≤ k →
+      (∀ x, 5 ≤ x → x < k → ¬((runS P win usb sreq x e).st = .wb ∧
+        u = (runS P win usb sreq x e).cur ∧ (!e.sel u) = (runS P win usb sreq x e).sel u ∧
+        P.ret (runS P win usb sreq x e).now (runS P win usb sreq x e).cur = true)) →
+      (runS P win usb sreq k e).actv u (!e.sel u) = true) := by
+  have hdv := hS.2
+  -- (1) no retirement of u at c, c + 1, c + 2: its head is empty at c
+  have hnr0 : ¬IsRet P u e := by
+    rintro ⟨hw, hcu, _⟩
+    have := hdv (by rw [hw]; decide)
+    rw [hcu] at this
+    rw [this] at hh; cases hh
+  have hnr1 : ¬IsRet P u (runS P win usb sreq 1 e) := by
+    rintro ⟨hw, hcu, _⟩
+    have hd := stepS_st_wb P win usb sreq e hw
+    have hcc := stepS_cur_drive P win usb sreq e hd
+    have := hdv (by rw [hd]; decide)
+    rw [show runS P win usb sreq 1 e = stepS P win usb sreq e from rfl] at hcu
+    rw [hcc] at hcu
+    rw [hcu] at this
+    rw [this] at hh; cases hh
+  have hnr2 : ¬IsRet P u (runS P win usb sreq 2 e) := by
+    rintro ⟨hw, hcu, _⟩
+    rw [runS_succ'] at hw hcu
+    have hd := stepS_st_wb P win usb sreq _ hw
+    have hcc := stepS_cur_drive P win usb sreq _ hd
+    rw [hcc] at hcu
+    have hi := stepS_st_drive P win usb sreq e hd
+    rw [show runS P win usb sreq 1 e = stepS P win usb sreq e from rfl] at hcu
+    rw [hcu] at hi
+    rw [hi.2] at hh; cases hh
+  have hnr : ∀ t, t < 3 → ¬IsRet P u (runS P win usb sreq t e) := by
+    intro t ht
+    rcases (by omega : t = 0 ∨ t = 1 ∨ t = 2) with h | h | h
+    · subst h; exact hnr0
+    · subst h; exact hnr1
+    · subst h; exact hnr2
+  -- the head fills at c (the ARM), the select holds through c + 2
+  have e1 : runS P win usb sreq 1 e = stepS P win usb sreq e := rfl
+  have hsel1 : (runS P win usb sreq 1 e).sel u = e.sel u := by
+    rw [e1]; exact selS P win usb sreq u e hnr0
+  have hhv1 : (runS P win usb sreq 1 e).headValid u = true := by
+    unfold Engine.headValid
+    rw [hsel1, e1]
+    have := capFillS P win usb sreq u e hc hl hnr0
+    rwa [hps] at this
+  -- c + 1: the port is scanning (after CAP) and the slot issues for u
+  have hpst1 : (runS P win usb sreq 1 e).pst = .scan := by
+    rw [e1]
+    show (portNextS P usb sreq e).pst = .scan
+    rw [portNextS_of_ne P usb sreq e (by rw [hc]; decide)]
+    simp [portNext, hc]
+  have hq : sreq (runS P win usb sreq 1 e) = some u := by
+    rw [e1, ← hl]; exact hRaise e hc hA (by rw [hl]; exact hh) (by rw [hl]; exact hps)
+  have hu1 : usbFirst P usb (runS P win usb sreq 1 e) = false := by rw [e1]; exact hu
+  have hfs : (runS P win usb sreq 1 e).fetchSlot u = !e.sel u := by
+    unfold Engine.fetchSlot; rw [hhv1, hsel1]; rfl
+  have hp2 : portOf (runS P win usb sreq 2 e) = ⟨.req, u, (runS P win usb sreq 1 e).prr, true,
+      !e.sel u⟩ := by
+    rw [runS_succ', portOf_stepS, portNextS_slot P usb sreq _ hpst1 hu1 hq, hfs]
+  have hpst2 : (runS P win usb sreq 2 e).pst = .req := congrArg Port.pst hp2
+  have hpl2 : (runS P win usb sreq 2 e).pl = u := congrArg Port.pl hp2
+  have hps2 : (runS P win usb sreq 2 e).pslot = !e.sel u := congrArg Port.pslot hp2
+  have nxt : ∀ k, (runS P win usb sreq k e).pst ≠ .scan →
+      portOf (runS P win usb sreq (k + 1) e) = portNext P (runS P win usb sreq k e) := by
+    intro k hk
+    rw [runS_succ', portOf_stepS, portNextS_of_ne P usb sreq _ hk]
+  have hpst3 : (runS P win usb sreq 3 e).pst = .wait := by
+    show (portOf (runS P win usb sreq (2 + 1) e)).pst = .wait
+    rw [nxt 2 (by rw [hpst2]; decide)]; simp [portNext, hpst2]
+  have hk3 := portNext_keeps P (runS P win usb sreq 2 e) (by rw [hpst2]; decide)
+  have hpl3 : (runS P win usb sreq 3 e).pl = u := by
+    rw [show (runS P win usb sreq 3 e).pl = (portOf (runS P win usb sreq (2 + 1) e)).pl from rfl,
+      nxt 2 (by rw [hpst2]; decide), hk3.1, hpl2]
+  have hps3 : (runS P win usb sreq 3 e).pslot = !e.sel u := by
+    rw [show (runS P win usb sreq 3 e).pslot
+        = (portOf (runS P win usb sreq (2 + 1) e)).pslot from rfl,
+      nxt 2 (by rw [hpst2]; decide), hk3.2, hps2]
+  have hpst4 : (runS P win usb sreq 4 e).pst = .cap := by
+    show (portOf (runS P win usb sreq (3 + 1) e)).pst = .cap
+    rw [nxt 3 (by rw [hpst3]; decide)]; simp [portNext, hpst3]
+  have hk4 := portNext_keeps P (runS P win usb sreq 3 e) (by rw [hpst3]; decide)
+  have hpl4 : (runS P win usb sreq 4 e).pl = u := by
+    rw [show (runS P win usb sreq 4 e).pl = (portOf (runS P win usb sreq (3 + 1) e)).pl from rfl,
+      nxt 3 (by rw [hpst3]; decide), hk4.1, hpl3]
+  have hps4 : (runS P win usb sreq 4 e).pslot = !e.sel u := by
+    rw [show (runS P win usb sreq 4 e).pslot
+        = (portOf (runS P win usb sreq (3 + 1) e)).pslot from rfl,
+      nxt 3 (by rw [hpst3]; decide), hk4.2, hps3]
+  -- the select through c + 3
+  have hsel2 : (runS P win usb sreq 2 e).sel u = e.sel u := by
+    rw [runS_succ', selS P win usb sreq u _ hnr1, hsel1]
+  have hsel3 : (runS P win usb sreq 3 e).sel u = e.sel u := by
+    rw [runS_succ', selS P win usb sreq u _ hnr2, hsel2]
+  -- (2) the CAP at c + 4 fills !sel u: a retiring writeback of u at c + 4 has the select still
+  -- at sel u (c + 3 was its DRIVE, not a writeback), so it invalidates the ARM's slot, not this
+  have hfill : (runS P win usb sreq 5 e).actv u (!e.sel u) = true := by
+    rw [runS_succ', stepS_actv]
+    show actvNext P (runS P win usb sreq 4 e) u (!e.sel u) = true
+    unfold actvNext
+    rw [if_neg]
+    · rw [if_pos ⟨hpst4, hpl4.symm, hps4.symm⟩]
+    · rintro ⟨hw, hcu, hs, _⟩
+      rw [runS_succ'] at hw hcu hs
+      have hd := stepS_st_wb P win usb sreq _ hw
+      have hcc := stepS_cur_drive P win usb sreq _ hd
+      rw [hcc] at hcu hs
+      rw [← hcu] at hs
+      have hs4 := selS P win usb sreq u (runS P win usb sreq 3 e)
+        (fun hr => by have h0 := hr.1; rw [hd] at h0; cases h0)
+      rw [hs4, hsel3] at hs
+      cases hsu : e.sel u <;> rw [hsu] at hs <;> simp at hs
+  refine ⟨hnr, hfill, ?_⟩
+  -- (3) it stays valid until a retiring writeback of u on that slot
+  intro k hk hno
+  induction k with
+  | zero => omega
+  | succ k ih =>
+    by_cases h5 : k + 1 = 5
+    · rw [h5]; exact hfill
+    · have hk' : 5 ≤ k := by omega
+      have hv := ih hk' (fun x h1 h2 => hno x h1 (by omega))
+      rw [runS_succ']
+      apply keepSlotS P win usb sreq u _ _ _ hv
+      rintro ⟨hw, hcu, hs, hr⟩
+      exact hno k hk' (by omega) ⟨hw, hcu, by rw [hs, ← hcu], hr⟩
+
+
+/-! ### P1b, variant (1): issue AT capture (P_CAP → P_REQ, Wilson 11-16)
+
+The port, at the CAP that files an ARM into its lane's empty head, goes straight to REQ for that
+lane's spare instead of back to SCAN (the opcode and `paddr + ACT_BYTES` are both known at P_CAP,
+`pe_engine.v` l.3300–3315), unless USB receive's branch 1 is pending (`usbFirst`): then it yields
+and the scan runs. Elsewhere it is `portNextS`. -/
+
+/-- The port with issue-at-capture. -/
+def portNextC (P : Program) (usb : Option Lane) (sreq : Engine → Option Lane)
+    (isArm : Engine → Bool) (e : Engine) : Port :=
+  if e.pst = .cap ∧ isArm e = true ∧ e.headValid e.pl = false ∧ e.pslot = e.sel e.pl ∧
+      usbFirst P usb e = false then
+    ⟨.req, e.pl, (if e.pbr1 then e.prr else nextLane e.pl), true, !e.sel e.pl⟩
+  else portNextS P usb sreq e
+
+def stepC (P : Program) (win : Engine → Option Lane) (usb : Option Lane)
+    (sreq : Engine → Option Lane) (isArm : Engine → Bool) (e : Engine) : Engine :=
+  let p := portNextC P usb sreq isArm e
+  { stepS P win usb sreq e with
+    pst := p.pst, pl := p.pl, prr := p.prr, pbr1 := p.pbr1, pslot := p.pslot }
+
+def runC (P : Program) (win : Engine → Option Lane) (usb : Option Lane)
+    (sreq : Engine → Option Lane) (isArm : Engine → Bool) : Nat → Engine → Engine
+  | 0, e => e
+  | n + 1, e => runC P win usb sreq isArm n (stepC P win usb sreq isArm e)
+
+theorem runC_succ' (isArm : Engine → Bool) : ∀ (n : Nat) (e : Engine),
+    runC P win usb sreq isArm (n + 1) e
+      = stepC P win usb sreq isArm (runC P win usb sreq isArm n e)
+  | 0, _ => rfl
+  | n + 1, e => runC_succ' isArm n (stepC P win usb sreq isArm e)
+
+theorem stepC_disp (isArm : Engine → Bool) (e : Engine) :
+    (stepC P win usb sreq isArm e).st = (stepS P win usb sreq e).st ∧
+    (stepC P win usb sreq isArm e).cur = (stepS P win usb sreq e).cur ∧
+    (stepC P win usb sreq isArm e).actv = (stepS P win usb sreq e).actv ∧
+    (stepC P win usb sreq isArm e).sel = (stepS P win usb sreq e).sel :=
+  ⟨rfl, rfl, rfl, rfl⟩
+
+theorem p1b_direct (isArm : Engine → Bool) (u : Lane) (e : Engine) (hS : Struct e)
+    (hc : e.pst = .cap) (hl : e.pl = u) (hA : isArm e = true) (hh : e.headValid u = false)
+    (hps : e.pslot = e.sel u) (hu : usbFirst P usb e = false) :
+    (∀ t, t < 3 → ¬IsRet P u (runC P win usb sreq isArm t e)) ∧
+    (runC P win usb sreq isArm 4 e).actv u (!e.sel u) = true := by
+  have hdv := hS.2
+  have hd1 : ∀ e', (stepC P win usb sreq isArm e').st = .wb → e'.st = .drive := fun e' h =>
+    stepS_st_wb P win usb sreq e' ((stepC_disp P win usb sreq isArm e').1 ▸ h)
+  have hcd : ∀ e', e'.st = .drive → (stepC P win usb sreq isArm e').cur = e'.cur := fun e' h =>
+    ((stepC_disp P win usb sreq isArm e').2.1).trans (stepS_cur_drive P win usb sreq e' h)
+  have hdd : ∀ e', (stepC P win usb sreq isArm e').st = .drive →
+      e'.st = .idle ∧ e'.headValid (stepC P win usb sreq isArm e').cur = true := fun e' h => by
+    rw [(stepC_disp P win usb sreq isArm e').2.1]
+    exact stepS_st_drive P win usb sreq e' ((stepC_disp P win usb sreq isArm e').1 ▸ h)
+  have hselC : ∀ e', ¬IsRet P u e' → (stepC P win usb sreq isArm e').sel u = e'.sel u :=
+    fun e' hr => by rw [(stepC_disp P win usb sreq isArm e').2.2.2]; exact selS P win usb sreq u e' hr
+  have hnr0 : ¬IsRet P u e := by
+    rintro ⟨hw, hcu, _⟩
+    have := hdv (by rw [hw]; decide)
+    rw [hcu] at this; rw [this] at hh; cases hh
+  have e1 : runC P win usb sreq isArm 1 e = stepC P win usb sreq isArm e := rfl
+  have hnr1 : ¬IsRet P u (runC P win usb sreq isArm 1 e) := by
+    rintro ⟨hw, hcu, _⟩
+    rw [e1] at hw hcu
+    have hd := hd1 e hw
+    rw [hcd e hd] at hcu
+    have := hdv (by rw [hd]; decide)
+    rw [hcu] at this; rw [this] at hh; cases hh
+  have hnr2 : ¬IsRet P u (runC P win usb sreq isArm 2 e) := by
+    rintro ⟨hw, hcu, _⟩
+    rw [runC_succ'] at hw hcu
+    have hd := hd1 _ hw
+    rw [hcd _ hd] at hcu
+    rw [e1] at hd hcu
+    have hi := hdd e hd
+    rw [hcu] at hi
+    rw [hi.2] at hh; cases hh
+  refine ⟨fun t ht => ?_, ?_⟩
+  · rcases (by omega : t = 0 ∨ t = 1 ∨ t = 2) with h | h | h
+    · subst h; exact hnr0
+    · subst h; exact hnr1
+    · subst h; exact hnr2
+  -- c + 1: REQ for u's spare; c + 2 WAIT; c + 3 CAP
+  have hcond : e.pst = .cap ∧ isArm e = true ∧ e.headValid e.pl = false ∧
+      e.pslot = e.sel e.pl ∧ usbFirst P usb e = false :=
+    ⟨hc, hA, by rw [hl]; exact hh, by rw [hl]; exact hps, hu⟩
+  have hp1 : portOf (runC P win usb sreq isArm 1 e)
+      = ⟨.req, u, (if e.pbr1 then e.prr else nextLane e.pl), true, !e.sel u⟩ := by
+    show portNextC P usb sreq isArm e = _
+    unfold portNextC
+    rw [if_pos hcond, hl]
+  have hpst1 : (runC P win usb sreq isArm 1 e).pst = .req := congrArg Port.pst hp1
+  have hpl1 : (runC P win usb sreq isArm 1 e).pl = u := congrArg Port.pl hp1
+  have hps1 : (runC P win usb sreq isArm 1 e).pslot = !e.sel u := congrArg Port.pslot hp1
+  have nxtC : ∀ k, (runC P win usb sreq isArm k e).pst ≠ .scan →
+      (runC P win usb sreq isArm k e).pst ≠ .cap →
+      portOf (runC P win usb sreq isArm (k + 1) e) = portNext P (runC P win usb sreq isArm k e) := by
+    intro k hk hk2
+    rw [runC_succ']
+    show portNextC P usb sreq isArm _ = _
+    unfold portNextC
+    rw [if_neg (fun h => hk2 h.1), portNextS_of_ne P usb sreq _ hk]
+  have hpst2 : (runC P win usb sreq isArm 2 e).pst = .wait := by
+    show (portOf (runC P win usb sreq isArm (1 + 1) e)).pst = .wait
+    rw [nxtC 1 (by rw [hpst1]; decide) (by rw [hpst1]; decide)]; simp [portNext, hpst1]
+  have hk2 := portNext_keeps P (runC P win usb sreq isArm 1 e) (by rw [hpst1]; decide)
+  have hpl2 : (runC P win usb sreq isArm 2 e).pl = u := by
+    rw [show (runC P win usb sreq isArm 2 e).pl
+        = (portOf (runC P win usb sreq isArm (1 + 1) e)).pl from rfl,
+      nxtC 1 (by rw [hpst1]; decide) (by rw [hpst1]; decide), hk2.1, hpl1]
+  have hps2 : (runC P win usb sreq isArm 2 e).pslot = !e.sel u := by
+    rw [show (runC P win usb sreq isArm 2 e).pslot
+        = (portOf (runC P win usb sreq isArm (1 + 1) e)).pslot from rfl,
+      nxtC 1 (by rw [hpst1]; decide) (by rw [hpst1]; decide), hk2.2, hps1]
+  have hpst3 : (runC P win usb sreq isArm 3 e).pst = .cap := by
+    show (portOf (runC P win usb sreq isArm (2 + 1) e)).pst = .cap
+    rw [nxtC 2 (by rw [hpst2]; decide) (by rw [hpst2]; decide)]; simp [portNext, hpst2]
+  have hk3 := portNext_keeps P (runC P win usb sreq isArm 2 e) (by rw [hpst2]; decide)
+  have hpl3 : (runC P win usb sreq isArm 3 e).pl = u := by
+    rw [show (runC P win usb sreq isArm 3 e).pl
+        = (portOf (runC P win usb sreq isArm (2 + 1) e)).pl from rfl,
+      nxtC 2 (by rw [hpst2]; decide) (by rw [hpst2]; decide), hk3.1, hpl2]
+  have hps3 : (runC P win usb sreq isArm 3 e).pslot = !e.sel u := by
+    rw [show (runC P win usb sreq isArm 3 e).pslot
+        = (portOf (runC P win usb sreq isArm (2 + 1) e)).pslot from rfl,
+      nxtC 2 (by rw [hpst2]; decide) (by rw [hpst2]; decide), hk3.2, hps2]
+  -- the select holds through c + 3 (no retirement at c, c + 1, c + 2)
+  have hsel1 : (runC P win usb sreq isArm 1 e).sel u = e.sel u := by rw [e1]; exact hselC e hnr0
+  have hsel2 : (runC P win usb sreq isArm 2 e).sel u = e.sel u := by
+    rw [runC_succ', hselC _ hnr1, hsel1]
+  have hsel3 : (runC P win usb sreq isArm 3 e).sel u = e.sel u := by
+    rw [runC_succ', hselC _ hnr2, hsel2]
+  -- c + 3: CAP files !sel u; a retiring writeback of u there invalidates sel u, not this slot
+  rw [runC_succ', (stepC_disp P win usb sreq isArm _).2.2.1, stepS_actv]
+  show actvNext P (runC P win usb sreq isArm 3 e) u (!e.sel u) = true
+  unfold actvNext
+  rw [if_neg]
+  · rw [if_pos ⟨hpst3, hpl3.symm, hps3.symm⟩]
+  · rintro ⟨_, hcu, hs, _⟩
+    rw [← hcu, hsel3] at hs
+    cases hsu : e.sel u <;> rw [hsu] at hs <;> simp at hs
+
+/-! ### The two margins, generated (pinned: `proof_constants.p1b_margin_scan` / `_direct`)
+
+The successor's earliest release, from the ARM's capture `c`: its writeback at `c + 3` at the
+earliest (the first parts of `p1b_capture` / `p1b_direct`: `DISPATCH_CYCLES` after the head is
+valid at `c + 1`, less one) plus ArmRetire's `ARM_RETIRE_GAP` (`arm_release_ge`: `now + 2`). The
+word is valid at `c + 5` through the scan (`1 + L_REFILL`), at `c + 4` issued at capture
+(`L_REFILL`). -/
+
+/-- `arm_release_ge`'s `+ 2`: the successor of a plain ARM is released at least this far past
+the ARM's writeback (pinned: `proof_constants.arm_retire_gap`). -/
+abbrev ARM_RETIRE_GAP : Nat := 2
+abbrev P1B_FILL_SCAN : Nat := 1 + L_REFILL
+abbrev P1B_FILL_DIRECT : Nat := L_REFILL
+abbrev P1B_MARGIN_SCAN : Nat := DISPATCH_CYCLES + ARM_RETIRE_GAP - P1B_FILL_SCAN
+abbrev P1B_MARGIN_DIRECT : Nat := DISPATCH_CYCLES + ARM_RETIRE_GAP - P1B_FILL_DIRECT
+
+theorem p1b_margin_scan_val : P1B_MARGIN_SCAN = 0 := rfl
+theorem p1b_margin_direct_val : P1B_MARGIN_DIRECT = 1 := rfl
+
+/-- **The margin, variant (2) (raise at capture, through the scan): 0.** For an ARM retirement of
+`u` at `c + t` (`t ≥ 3` by `p1b_capture`), the word valid from `c + 5` is valid
+`P1B_MARGIN_SCAN` cycles before the successor's earliest release `c + t + ARM_RETIRE_GAP`. -/
+theorem p1b_margin_scan (t : Nat) (ht : ¬t < 3) :
+    P1B_FILL_SCAN + P1B_MARGIN_SCAN ≤ t + ARM_RETIRE_GAP := by
+  simp only [P1B_FILL_SCAN, P1B_MARGIN_SCAN, DISPATCH_CYCLES, ARM_RETIRE_GAP, L_REFILL] at *
+  omega
+
+/-- **The margin, variant (1) (issue at capture): 1.** -/
+theorem p1b_margin_direct (t : Nat) (ht : ¬t < 3) :
+    P1B_FILL_DIRECT + P1B_MARGIN_DIRECT ≤ t + ARM_RETIRE_GAP := by
+  simp only [P1B_FILL_DIRECT, P1B_MARGIN_DIRECT, DISPATCH_CYCLES, ARM_RETIRE_GAP, L_REFILL] at *
+  omega
 
 end
 

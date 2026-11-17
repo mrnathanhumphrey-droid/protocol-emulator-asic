@@ -73,6 +73,15 @@ def load(path=PATH):
     # chargeS_le -- a fetch for another lane costs a lane one refill (per victim)
     k["slot_wait_base"] = k["l_refill"] - 1
     k["slot_charge"] = k["l_refill"]
+    # Slot.lean P1b (Wilson 11-16): the slot-served word after an ARM captured into its lane's
+    # empty head is valid at c + fill; the successor's earliest release is the ARM's earliest
+    # writeback (c + dispatch_cycles) + arm_retire_gap (ArmRetire.arm_release_ge). The margin:
+    # through the scan (raise at capture) fill = 1 + l_refill; issued at capture fill = l_refill
+    k["p1b_margin_scan"] = k["dispatch_cycles"] + k["arm_retire_gap"] - (1 + k["l_refill"])
+    k["p1b_margin_direct"] = k["dispatch_cycles"] + k["arm_retire_gap"] - k["l_refill"]
+    if k["p1b_margin_scan"] < 0:
+        raise ValueError("proof_constants: P1b through the scan has a negative margin %d"
+                         % k["p1b_margin_scan"])
     # the A2 export at the RTL floor and the USB budget (OptRun.branch_j_interim: = the interim J)
     k["branch_j_wmin"] = 1 + max(k["R_base"] + k["head_slack"] + k["br1_budget"] - k["br_w_min"], 0)
     if k["coresident_usb"] < k["coresident_min_d"]:

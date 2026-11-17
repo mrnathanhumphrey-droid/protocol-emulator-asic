@@ -71,7 +71,9 @@ KEY = ("dstar", "dstar29", "dstar39", "dstar39_v2", "dstar39_st", "dstar39_hold"
        # Slot.lean (Wilson 11-16): the guaranteed slot below USB receive
        "struct_stepS", "chargeS_le", "chargeS_own", "port_wait_boundS", "slot_waitS",
        "slot_once", "usb_once_S", "cntS_once", "slot_count", "usb_count", "slot_wait_bound",
-       "usbSum_eq_cnt")
+       "usbSum_eq_cnt",
+       # P1b from the fill (Wilson 11-16): both requester variants and their margins
+       "p1b_capture", "p1b_direct", "p1b_margin_scan", "p1b_margin_direct")
 #: proof_constants.load() key -> the Lean expression that must evaluate to it (SPEC: the map)
 CONSTS = {
     "lemmaA_window": "LEMMA_A_WINDOW", "R_base": "R_BASE", "dispatch_cycles": "DISPATCH_CYCLES",
@@ -90,6 +92,8 @@ CONSTS = {
     "usb_other_R": "USB_OTHER_R",
     "branch_j_wmin": "BRANCH_J_WMIN",
     "slot_wait_base": "SLOT_WAIT_BASE", "slot_charge": "SLOT_CHARGE",
+    "arm_retire_gap": "ARM_RETIRE_GAP", "p1b_margin_scan": "P1B_MARGIN_SCAN",
+    "p1b_margin_direct": "P1B_MARGIN_DIRECT",
 }
 PLANT_THM = "planted_by_gate"
 #: gate_mutant_kills' scratch-mutant registry (ruling AC2): this gate is the killer
