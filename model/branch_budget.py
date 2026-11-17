@@ -39,8 +39,9 @@ LIMIT = 400          # B or a response this large: no fixpoint
 #: 23 + B window, summed over lanes) -- the term both schemes read. [assumed: the bound's Lean
 #: brick is owed; this is the certificate side, labelled]
 SLOT = None
-#: fetches charged per ARM (Wilson's term: one)
-SLOT_PER_ARM = 1
+#: fetches charged per ARM: None = proof_constants.slot_fetches_per_arm (Buf.lean, always two,
+#: Wilson 11-16); an int overrides it for a counterfactual
+SLOT_PER_ARM = None
 #: counterfactual switch: charge a lane's own ARM fetches to its own B too (the image-wide B).
 #: Off = the proofs' shape: Port.charge counts only refills for lanes OTHER than y, and every hB
 #: is per y, so the slot's term is per victim lane
@@ -370,7 +371,8 @@ def _image_budget(img, iters=80, premise_gaps=None, ready=None, scheme="window")
                     "would charge the USB lane: not covered)", "lanes": {}}
         SBn = {l: 0 for l in generic}
         if SLOT:
-            per = {l: SLOT_PER_ARM * arm_window_count(graphs[l][0], graphs[l][2], lat[l],
+            fpa = SLOT_PER_ARM if SLOT_PER_ARM is not None else k["slot_fetches_per_arm"]
+            per = {l: fpa * arm_window_count(graphs[l][0], graphs[l][2], lat[l],
                                                       23 + B + SB[l], I) for l in generic}
             if usb and any(per.values()):
                 return {"B": None, "reason": "guaranteed slot: a non-USB lane's ARM fetches "
@@ -379,7 +381,7 @@ def _image_budget(img, iters=80, premise_gaps=None, ready=None, scheme="window")
             if usb:
                 # the USB lane's ARMs fetch through the slot too (their cost is charged; no
                 # readiness is claimed for them: the USB lane's figures are full_report's)
-                per[I.USB_LANE] = SLOT_PER_ARM * arm_window_count(ug, ugaps, ulat, 23 + B, I)
+                per[I.USB_LANE] = fpa * arm_window_count(ug, ugaps, ulat, 23 + B, I)
             # Slot.chargeS_le: SLOT_CHARGE per fetch for another lane (proof_constants)
             SBn = {l: k["slot_charge"] * sum(n for z, n in per.items() if z != l or SLOT_SELF)
                    for l in generic}
