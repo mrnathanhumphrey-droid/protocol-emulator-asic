@@ -76,7 +76,7 @@ function integer v3_tab;
       32'hcb97bdee: case (field) 0: v3_tab = 1; 1: v3_tab = 6; 2: v3_tab = 16; 3: v3_tab = 16; 4: v3_tab = 16; 5: v3_tab = 16; 6: v3_tab = 60; 7: v3_tab = 240; 8: v3_tab = 240; 9: v3_tab = 240; 10: v3_tab = 240; endcase  // pinnone_image.hex
       32'h534a17d4: case (field) 0: v3_tab = 0; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // probe_cov_cemodes.hex [INTERNAL]
       32'h89b36759: case (field) 0: v3_tab = 0; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // probe_cov_ds20.hex
-      32'hbf83794d: case (field) 0: v3_tab = 0; 1: v3_tab = 9; 2: v3_tab = 12; 3: v3_tab = 6; 4: v3_tab = 17; 5: v3_tab = 15; 6: v3_tab = 90; 7: v3_tab = 120; 8: v3_tab = 69; 9: v3_tab = 210; 10: v3_tab = 150; endcase  // probe_cov_pindiv.hex [INTERNAL]
+      32'h7e3b3294: case (field) 0: v3_tab = 0; 1: v3_tab = 9; 2: v3_tab = 12; 3: v3_tab = 6; 4: v3_tab = 17; 5: v3_tab = 15; 6: v3_tab = 90; 7: v3_tab = 120; 8: v3_tab = 69; 9: v3_tab = 210; 10: v3_tab = 150; endcase  // probe_cov_pindiv.hex [INTERNAL]
       32'h6c03f252: case (field) 0: v3_tab = 0; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // probe_cov_sim40.hex
       32'hed15ded8: case (field) 0: v3_tab = 0; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // run_ckack: ckack.hex
       32'h2c1c0396: case (field) 0: v3_tab = 0; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // run_ckack: ckack_half.hex
@@ -201,7 +201,7 @@ task v3_tab_name;
       32'hcb97bdee: $display("  clocked_conform[V3] image: pinnone_image.hex (by its loaded bytes)");
       32'h534a17d4: $display("  clocked_conform[V3] image: probe_cov_cemodes.hex [INTERNAL] (by its loaded bytes)");
       32'h89b36759: $display("  clocked_conform[V3] image: probe_cov_ds20.hex (by its loaded bytes)");
-      32'hbf83794d: $display("  clocked_conform[V3] image: probe_cov_pindiv.hex [INTERNAL] (by its loaded bytes)");
+      32'h7e3b3294: $display("  clocked_conform[V3] image: probe_cov_pindiv.hex [INTERNAL] (by its loaded bytes)");
       32'h6c03f252: $display("  clocked_conform[V3] image: probe_cov_sim40.hex (by its loaded bytes)");
       32'hed15ded8: $display("  clocked_conform[V3] image: run_ckack: ckack.hex (by its loaded bytes)");
       32'h2c1c0396: $display("  clocked_conform[V3] image: run_ckack: ckack_half.hex (by its loaded bytes)");
@@ -270,7 +270,7 @@ function integer v3_allow;
     v3_allow = 0;
     if (h == 32'h33dc8ba2 && field == 4 && value == 1) v3_allow = 1;  // ckfive_image.hex: tb_csat measures dispatch spacing and pushes no host byte by
     if (h == 32'hdb08ab91 && field == 4 && value == 2) v3_allow = 1;  // run_cktx: cktx.hex: run_cktx's STARVE arm stops topping up the queues for a wind
-    if (h == 32'hbf83794d && field == 4 && value == 2) v3_allow = 1;  // probe_cov_pindiv.hex: run_cktx's STARVE arm on the pindiv image (same declared win
+    if (h == 32'h7e3b3294 && field == 4 && value == 2) v3_allow = 1;  // probe_cov_pindiv.hex: run_cktx's STARVE arm on the pindiv image (same declared win
     if (h == 32'ha0fbaea9 && field == 1) v3_allow = 1;  // run_wirefeed_mf: old WS2812 (REARM d=0): the refused delay-0 build has no lane set of its own, so it 
   end
 endfunction
