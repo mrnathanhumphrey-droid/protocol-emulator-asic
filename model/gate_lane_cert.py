@@ -52,7 +52,8 @@ every must-fire must turn its check red, or the gate is not testing what it says
   M_LC_SLOT_SPACING_OFF  the premise unchecked -> PC+2 ready at d = 3 (check 9 red)
   check 10 a FALLTHROUGH ARM's timeout word is ready only while P1B2_FILL_SCAN + L <= T
            (Buf.p1b2_margin_timeout_scan; L its ARM's certified lateness), through image_budget:
-           T = FILL + L - 1 drops it, T = FILL + L keeps it
+           T = FILL + L - 1 drops it, T = FILL + L keeps it; standing arm: the same shape at
+           spacing 40, T = 8, has no certificate under the rule and certifies with it off
   M_LC_SLOT_TIMEOUT_OFF  the premise unchecked -> ready at T = FILL + L - 1 (check 10 red)
   M_LC_FT_UNSEEN    no ARM read as FALLTHROUGH                    -> check 3 red
   M_LC_FT_NOFLOOR   no lateness floor after the flush             -> check 3 red
@@ -257,12 +258,25 @@ def check_slot_timeout(BB, PC, I):
             drops.clear()
             BB.image_budget(_ft_slot_image(I, T))
             res[T] = 1 in drops
+        # standing arm (Wilson 11-17): spacing 40, T = 8 -- no certificate under the rule, one
+        # with the rule off (the unchecked readiness was what certified it)
+        on40 = BB.image_budget(_ft_slot_image(I, 8, d1=40))["B"]
+        saved_mut = BB.SLOT_TIMEOUT_MUT
+        BB.SLOT_TIMEOUT_MUT = True
+        try:
+            off40 = BB.image_budget(_ft_slot_image(I, 8, d1=40))["B"]
+        finally:
+            BB.SLOT_TIMEOUT_MUT = saved_mut
     finally:
         BB.SLOT, BB.slot_timeout_drop = saved, orig
-    ok = fill == 9 and res[fill + L - 1] and not res[fill + L]
-    return ok, ("FALLTHROUGH timeout word (FILL %d, L %d): T = %d %s, T = %d %s"
+    ok = (fill == 9 and res[fill + L - 1] and not res[fill + L]
+          and on40 is None and off40 is not None)
+    return ok, ("FALLTHROUGH timeout word (FILL %d, L %d): T = %d %s, T = %d %s; "
+                "spacing 40, T = 8: rule %s, rule off %s"
                 % (fill, L, fill + L - 1, "not ready" if res[fill + L - 1] else "READY",
-                   fill + L, "ready" if not res[fill + L] else "NOT READY"))
+                   fill + L, "ready" if not res[fill + L] else "NOT READY",
+                   "no certificate" if on40 is None else "B %s" % on40,
+                   "B %s" % off40 if off40 is not None else "no certificate"))
 
 
 def check_budget():
