@@ -50,6 +50,10 @@ every must-fire must turn its check red, or the gate is not testing what it says
            PC+1 is ready only at d >= p1b2_plain_min_d (Buf.p1b2_margin_plain_scan: 4);
            not ready at d = 3, ready at d = 4, ready after an ARM PC+1 (m1 / m3) at d = 3
   M_LC_SLOT_SPACING_OFF  the premise unchecked -> PC+2 ready at d = 3 (check 9 red)
+  check 10 a FALLTHROUGH ARM's timeout word is ready only while P1B2_FILL_SCAN + L <= T
+           (Buf.p1b2_margin_timeout_scan; L its ARM's certified lateness), through image_budget:
+           T = FILL + L - 1 drops it, T = FILL + L keeps it
+  M_LC_SLOT_TIMEOUT_OFF  the premise unchecked -> ready at T = FILL + L - 1 (check 10 red)
   M_LC_FT_UNSEEN    no ARM read as FALLTHROUGH                    -> check 3 red
   M_LC_FT_NOFLOOR   no lateness floor after the flush             -> check 3 red
 Static, < 2 s. Usage: python model/gate_lane_cert.py [dir holding usbdev.py]
@@ -209,6 +213,56 @@ def check_slot_spacing(BB, PC, I):
                 % (dmin - 1, "not ready" if 2 not in lo else "READY",
                    dmin, "ready" if 2 in hi else "NOT READY",
                    dmin - 1, "ready" if 2 in m13 else "NOT READY", dmin))
+
+
+def _ft_slot_image(I, T, d1=80):
+    """lane 0: ARM(fall, timeout T, FALLTHROUGH) -> REARM (timeout path, PC+1) -> LEVEL 1 (edge
+    path, PC+2) -> LEVEL 0 -> REARM; the other lanes idle (run_arm2.ft_race_image's shape at
+    spacing d1, which certifies)"""
+    l0 = I.ACT_BASE
+    prog = [I.act_arm(1, 0, T, ft=True), I.act(I.OP_REARM, 0, 1, d1),
+            I.act(I.OP_LEVEL, I.UO0, 1, d1), I.act(I.OP_LEVEL, I.UO0, 0, d1),
+            I.act(I.OP_REARM, 0, 1, d1)]
+    lp = l0 + len(prog) * I.ACT_BYTES
+    prog.append(I.act(I.OP_REARM, 0, 0, 500))
+    headers = [I.hdr(I.UO0, I.UO0, 1, d1, 0, 2 * d1, 3 * d1, l0)]
+    for j in range(1, I.N_LANES):
+        headers.append(I.hdr(j + 1, j + 1, 0, 500, 0, 200, 240, lp))
+    return I.join_image(headers, prog)
+
+
+def check_slot_timeout(BB, PC, I):
+    """check 10: a FALLTHROUGH ARM's timeout word (PC+1, fetched second) is ready only while
+    Buf.p1b2_margin_timeout_scan's premise P1B2_FILL_SCAN + L <= T holds (L the ARM's certified
+    lateness), checked where image_budget runs (the wiring, not only the rule): with the slot on,
+    T = FILL + L - 1 drops it, T = FILL + L keeps it"""
+    k = PC.load()
+    fill = k["p1b2_fill_scan"]
+    drops = []
+    orig = BB.slot_timeout_drop
+
+    def spy(g, I_, ready, lat, kk=None):
+        r = orig(g, I_, ready, lat, kk)
+        drops.extend(r)
+        return r
+    saved = BB.SLOT
+    BB.SLOT, BB.slot_timeout_drop = 2, spy
+    try:
+        r0 = BB.image_budget(_ft_slot_image(I, fill))
+        L = ((r0["lanes"].get(0) or {}).get("lat") or {}).get(0)
+        if r0["B"] is None or L is None:
+            return False, "the check's image is uncertified at T = FILL (%s)" % r0["reason"]
+        res = {}
+        for T in (fill + L - 1, fill + L):
+            drops.clear()
+            BB.image_budget(_ft_slot_image(I, T))
+            res[T] = 1 in drops
+    finally:
+        BB.SLOT, BB.slot_timeout_drop = saved, orig
+    ok = fill == 9 and res[fill + L - 1] and not res[fill + L]
+    return ok, ("FALLTHROUGH timeout word (FILL %d, L %d): T = %d %s, T = %d %s"
+                % (fill, L, fill + L - 1, "not ready" if res[fill + L - 1] else "READY",
+                   fill + L, "ready" if not res[fill + L] else "NOT READY"))
 
 
 def check_budget():
@@ -397,6 +451,16 @@ def main():
     finally:
         BB.SLOT_SPACING_MUT = False
     kills.append(("M_LC_SLOT_SPACING_OFF", not k9, "PC+2 ready below p1b2_plain_min_d: check 9 red"))
+    # check 10: the FALLTHROUGH timeout word's premise (Wilson 11-17)
+    ok10, msg10 = check_slot_timeout(BB, PC, I)
+    print("  check 10 %s  %s" % ("GREEN" if ok10 else "RED  ", msg10))
+    BB.SLOT_TIMEOUT_MUT = True
+    try:
+        k10, _m = check_slot_timeout(BB, PC, I)
+    finally:
+        BB.SLOT_TIMEOUT_MUT = False
+    kills.append(("M_LC_SLOT_TIMEOUT_OFF", not k10,
+                  "timeout word ready at T = FILL + L - 1: check 10 red"))
     # M_LC_FT_UNSEEN / M_LC_FT_NOFLOOR
     orig_ft = PC.arm_is_ft
     PC.arm_is_ft = lambda x, I=None: False
@@ -466,7 +530,7 @@ def main():
         ok_txt = ("PASS (as required)" if name.endswith("_PASS") else "RED (killed)")
         print("  must-fire %-18s %s  %s" % (name, ok_txt if killed else "SURVIVED", what))
     teeth = all(k for _n, k, _w in kills)
-    green = ok1 and not fails and ok3 and ok4 and ok5 and ok6 and ok7 and ok8 and ok9
+    green = ok1 and not fails and ok3 and ok4 and ok5 and ok6 and ok7 and ok8 and ok9 and ok10
     verdict = "PASSED" if (green and teeth) else ("FAILED (must-fire survived)" if not teeth
                                                    else "FAILED")
     print("GATE lane-cert: %s" % verdict)

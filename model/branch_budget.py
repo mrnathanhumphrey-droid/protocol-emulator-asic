@@ -53,6 +53,23 @@ SLOT_SELF = False
 SLOT_SPACING_MUT = False
 
 
+#: must-fire switch (gate_lane_cert M_LC_SLOT_TIMEOUT_OFF): a FALLTHROUGH ARM's timeout word
+#: marked ready without p1b2_margin_timeout_scan's premise T >= FILL + L
+SLOT_TIMEOUT_MUT = False
+
+
+def slot_timeout_drop(g, I, ready, lat, k=None):
+    """{word}: the FALLTHROUGH timeout words (PC+1, fetched second) in `ready` whose theorem's
+    premise fails -- Buf.p1b2_margin_timeout_scan needs P1B2_FILL_SCAN + L <= T (T the ARM's
+    timeout, L its certified lateness `lat`). Wilson 11-17: ready only when T >= FILL + L."""
+    if SLOT_TIMEOUT_MUT:
+        return set()
+    k = k or PC.load()
+    fill = k["p1b2_fill_scan"]
+    return {c1 for a, (c1, _c2) in LC.ft_paths(g, I).items()
+            if c1 in ready and g[a][0]["delay"] < fill + lat.get(a, 0)}
+
+
 def _plain_edge_arm(x, I):
     """an ARM whose successor is released after its writeback (ArmRetire; lane_cert's `ret`)"""
     return (x["op"] == I.OP_ARM and not x["mod"] & I.ARM_MOD_LEVEL2
@@ -75,7 +92,10 @@ def slot_ready(g, I, depth, gaps, k=None):
         if x["op"] != I.OP_ARM or x["mod"] & I.ARM_MOD_LEVEL2:
             continue
         if x["mod"] & I.ARM_MOD_FT:
-            out |= {w for w in g[a][1] if w in g}         # PC+1 (timeout), PC+2 (edge)
+            # PC+2 (edge, fetched first) and PC+1 (timeout, fetched second): the timeout word's
+            # premise (p1b2_margin_timeout_scan) needs the ARM's lateness, so it is checked in
+            # _image_budget's certificate loop (slot_timeout_drop)
+            out |= {w for w in g[a][1] if w in g}
             continue
         front = {w for w in g[a][1] if w in g}
         out |= front
@@ -362,11 +382,18 @@ def _image_budget(img, iters=80, premise_gaps=None, ready=None, scheme="window")
             Bl = B + SB[l]
             floor = {c2: LC.ft_flush_late(Bl) for _c1, c2 in fts.values() if c2 in g}
             xr = {c1: 1 for c1, _c2 in fts.values() if c1 in g}
-            cert = LC.certificate(g, preds, gaps, k, Bl, 0, floor=floor, xr=xr, rbase=R[l],
-                                  ready=ready.get(l))
-            if cert is None:
-                return {"B": None, "reason": "lane %d: no lateness certificate at B = %d%s"
-                        % (l, Bl, " (slot charge %d)" % SB[l] if SB[l] else ""), "lanes": {}}
+            while True:
+                cert = LC.certificate(g, preds, gaps, k, Bl, 0, floor=floor, xr=xr, rbase=R[l],
+                                      ready=ready.get(l))
+                if cert is None:
+                    return {"B": None, "reason": "lane %d: no lateness certificate at B = %d%s"
+                            % (l, Bl, " (slot charge %d)" % SB[l] if SB[l] else ""), "lanes": {}}
+                # a FALLTHROUGH timeout word is ready only while T >= FILL + L (its ARM's
+                # certified lateness); dropping a ready word only raises lateness, so this ends
+                drop = slot_timeout_drop(g, I, ready.get(l, set()), cert[0], k) if SLOT else set()
+                if not drop:
+                    break
+                ready[l] = set(ready[l]) - drop
             lat[l] = cert[0]
             rmax[l] = max(cert[2].values())
         if usb:
