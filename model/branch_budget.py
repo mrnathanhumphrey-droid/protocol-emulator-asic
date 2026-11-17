@@ -84,29 +84,65 @@ def _plain_edge_arm(x, I):
             and not x["mod"] & I.ARM_MOD_FT)
 
 
+#: THE READINESS REGISTRY (Wilson 11-17): every rule that makes a word ready names the Lean
+#: theorem(s) it rests on. status "proved": every theorem is in gate_lean_build.KEY (the Lean
+#: gate) -- only these reach the certificate; "owed": a theorem still to prove (listed by the
+#: name it will carry); "counterfactual": no theorem, never in the certificate. gate_lane_cert
+#: check 13 turns red on a rule with no theorem, a proved rule whose theorem is not at the Lean
+#: gate, a rule slot_ready emits that is not registered, or an owed / counterfactual word that
+#: reaches slot_ready.
+READY_RULES = {
+    "pc1_plain": {"status": "proved", "theorems": ("Slot.p1b_margin_scan",),
+                  "what": "PC+1 of a plain ARM"},
+    "pc2_arm": {"status": "proved", "theorems": ("Buf.p1b2_margin_arm_scan",),
+                "what": "PC+2, PC+1 a plain edge ARM (m1 / m3)"},
+    "pc2_plain": {"status": "proved", "theorems": ("Buf.p1b2_margin_plain_scan",),
+                  "what": "PC+2, PC+1 any other word, d >= p1b2_plain_min_d"},
+    "ft_timeout": {"status": "proved", "theorems": ("Buf.p1b2_margin_timeout_scan",),
+                   "what": "FALLTHROUGH PC+1 (timeout, fetched second); T >= FILL + L "
+                           "checked in _image_budget (slot_timeout_drop)"},
+    "ft_edge": {"status": "owed", "theorems": ("Slot.p1b_margin_scan", "edge_survives_flush"),
+                "what": "FALLTHROUGH PC+2 (edge, fetched first): arrival proved; that the flush "
+                        "never clears it is owed (Lean theorem + agent 1's RTL contract)"},
+    "ft_edge_after_arm": {"status": "owed", "theorems": ("BufFifo.ft_merge_room",),
+                          "what": "FALLTHROUGH ARM B at another ARM's PC+1, B's edge word: needs "
+                                  "agent 1's merge + the buffer-room theorem (the compiler "
+                                  "refuses the shape, dae31dc)"},
+    "depth_gt2": {"status": "counterfactual", "theorems": (),
+                  "what": "words beyond depth 2 (SLOT > 2): no theorem"},
+}
+#: must-fire switch (gate_lane_cert M_LC_REG_LEAK): owed / counterfactual words reach slot_ready
+REG_LEAK_MUT = False
+
+
 def slot_ready(g, I, depth, gaps, k=None):
-    """{word}: the words the guaranteed slot makes ready at release on one lane. Each rule names
-    the theorem whose premise it checks (Wilson 11-17):
-      PC+1 of a plain ARM            Slot.p1b_margin_scan (no premise)
-      PC+2, PC+1 a plain edge ARM    Buf.p1b2_margin_arm_scan (m1 / m3; no premise)
-      PC+2, PC+1 any other word      Buf.p1b2_margin_plain_scan: ONLY when PC+1 -> PC+2's release
-                                     distance d (the certificate's rd) >= p1b2_plain_min_d
-    PC+2 means the word at ARM + 2 only: a branch PC+1's taken target is never ready (Wilson
-    11-17, rule (1) removed; no theorem covers it).
-    So a FALLTHROUGH ARM at PC+1 gives ARM A no PC+3 (Wilson 11-17, rule (2) removed: A fetches
-    two words); PC+3 can still be ready through that ARM's own FALLTHROUGH rule.
-    `gaps`: lane_cert.build's writeback gaps (after any premise gaps), so d is the certificate's."""
-    out = set()
-    for words in slot_ready_by_arm(g, I, depth, gaps, k).values():
-        out |= words
-    return out
+    """{word}: the words the guaranteed slot makes ready at release on one lane -- the words of
+    slot_ready_tagged whose rule is "proved" in READY_RULES (Wilson 11-17: owed and
+    counterfactual rules never reach the certificate). PC+2 means the word at ARM + 2 only
+    (rule (1) removed: no branch taken target; rule (2) removed: no PC+3 for ARM A behind a
+    FALLTHROUGH PC+1). `gaps`: lane_cert.build's writeback gaps (after any premise gaps), so d is
+    the certificate's."""
+    return {w for _a, w, r in slot_ready_tagged(g, I, depth, gaps, k)
+            if REG_LEAK_MUT or READY_RULES[r]["status"] == "proved"}
 
 
 def slot_ready_by_arm(g, I, depth, gaps, k=None):
-    """{ARM: {word}}: slot_ready per fetching ARM (which ARM's slot fetch makes each word ready)"""
+    """{ARM: {word}}: every word each ARM's slot fetch would make ready, any rule status"""
+    by = {}
+    for a, w, _r in slot_ready_tagged(g, I, depth, gaps, k):
+        by.setdefault(a, set()).add(w)
+    for a in g:
+        x = g[a][0]
+        if x["op"] == I.OP_ARM and not x["mod"] & I.ARM_MOD_LEVEL2:
+            by.setdefault(a, set())
+    return by
+
+
+def slot_ready_tagged(g, I, depth, gaps, k=None):
+    """[(ARM, word, rule id)]: every word the slot would make ready, with its READY_RULES rule"""
     k = k or PC.load()
     dmin = k["p1b2_plain_min_d"]
-    by = {}
+    out = []
     for a in g:
         x = g[a][0]
         if x["op"] != I.OP_ARM or x["mod"] & I.ARM_MOD_LEVEL2:
@@ -115,11 +151,18 @@ def slot_ready_by_arm(g, I, depth, gaps, k=None):
             # PC+2 (edge, fetched first) and PC+1 (timeout, fetched second): the timeout word's
             # premise (p1b2_margin_timeout_scan) needs the ARM's lateness, so it is checked in
             # _image_budget's certificate loop (slot_timeout_drop)
-            by[a] = {w for w in g[a][1] if w in g}
+            prev = g.get(a - 1)
+            after_arm = prev is not None and prev[0]["op"] == I.OP_ARM
+            for w in g[a][1]:
+                if w not in g:
+                    continue
+                if w == a + 1:
+                    out.append((a, w, "ft_timeout"))
+                else:
+                    out.append((a, w, "ft_edge_after_arm" if after_arm else "ft_edge"))
             continue
-        out = by[a] = set()
         front = {w for w in g[a][1] if w in g}
-        out |= front
+        out += [(a, w, "pc1_plain") for w in front]
         if depth < 2:
             continue
         nxt = set()
@@ -128,14 +171,17 @@ def slot_ready_by_arm(g, I, depth, gaps, k=None):
                 if s2 not in g or (s2 != a + 2 and not (SLOT_BRANCH_MUT or SLOT_PC3_MUT)):
                     continue
                 d = gaps[s1][-1] + sum(gaps[s2][:-1])
-                if _plain_edge_arm(g[s1][0], I) or d >= dmin or SLOT_SPACING_MUT:
+                if _plain_edge_arm(g[s1][0], I):
+                    out.append((a, s2, "pc2_arm"))
                     nxt.add(s2)
-        out |= nxt
+                elif d >= dmin or SLOT_SPACING_MUT:
+                    out.append((a, s2, "pc2_plain"))
+                    nxt.add(s2)
         front = nxt
         for _ in range(depth - 2):
             front = {s for w in front if w in g for s in g[w][1] if s in g}
-            out |= front
-    return by
+            out += [(a, w, "depth_gt2") for w in front]
+    return out
 
 
 def arm_window_count(g, gaps, lat, W, I):
@@ -391,6 +437,9 @@ def _image_budget(img, iters=80, premise_gaps=None, ready=None, scheme="window")
     B = k["l_refill"] * usb_n
     R = {l: k["R_base"] for l in generic}
     SB = {l: 0 for l in generic}          # the guaranteed slot's charge on lane l (per victim)
+    # the certificate's trace (Wilson 11-17, check 10 end to end): calls to the timeout rule
+    # (slot_timeout_drop) made inside the certificate loop
+    tcalls = 0
     for _ in range(iters):
         lat, rmax = {}, {}
         for l in generic:
@@ -411,7 +460,10 @@ def _image_budget(img, iters=80, premise_gaps=None, ready=None, scheme="window")
                             % (l, Bl, " (slot charge %d)" % SB[l] if SB[l] else ""), "lanes": {}}
                 # a FALLTHROUGH timeout word is ready only while T >= FILL + L (its ARM's
                 # certified lateness); dropping a ready word only raises lateness, so this ends
-                drop = slot_timeout_drop(g, I, ready.get(l, set()), cert[0], k) if SLOT else set()
+                drop = set()
+                if SLOT:
+                    tcalls += 1
+                    drop = slot_timeout_drop(g, I, ready.get(l, set()), cert[0], k)
                 if not drop:
                     break
                 ready[l] = set(ready[l]) - drop
@@ -508,7 +560,8 @@ def _image_budget(img, iters=80, premise_gaps=None, ready=None, scheme="window")
             if why:
                 return {"B": None, "reason": why, "lanes": {}}
             return {"B": B, "reason": "certified" if scheme == "window" else
-                    "certified (EDF response bounds, RespEdfClose.wb_close_edf)", "lanes": out}
+                    "certified (EDF response bounds, RespEdfClose.wb_close_edf)", "lanes": out,
+                    "timeout_rule_calls": tcalls}
         if Bn > LIMIT or any(v > LIMIT for v in Rn.values()):
             return {"B": None, "reason": "no finite B (B %d -> %d, max R %d)"
                     % (B, Bn, max(Rn.values())), "lanes": {}}

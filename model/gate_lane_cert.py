@@ -51,16 +51,25 @@ every must-fire must turn its check red, or the gate is not testing what it says
            not ready at d = 3, ready at d = 4, ready after an ARM PC+1 (m1 / m3) at d = 3
   M_LC_SLOT_SPACING_OFF  the premise unchecked -> PC+2 ready at d = 3 (check 9 red)
   check 10 a FALLTHROUGH ARM's timeout word is ready only while P1B2_FILL_SCAN + L <= T
-           (Buf.p1b2_margin_timeout_scan; L its ARM's certified lateness), through image_budget:
-           T = FILL + L - 1 drops it, T = FILL + L keeps it; standing arm: the same shape at
-           spacing 40, T = 8, has no certificate under the rule and certifies with it off
-  M_LC_SLOT_TIMEOUT_OFF  the premise unchecked -> ready at T = FILL + L - 1 (check 10 red)
+           (Buf.p1b2_margin_timeout_scan), tested directly (Wilson 11-17): L passed in, for
+           L = 0 and L = 5 the rule drops it at T = FILL + L - 1 and keeps it at FILL + L; end
+           to end, spacing 60 / T 35 certifies and the certificate loop called the rule
+           (image_budget timeout_rule_calls). Image header through pe_isa.d_fields
+  M_LC_SLOT_TIMEOUT_OFF  the rule off -> the word stays ready at T = FILL + L - 1 (check 10 red)
   check 11 a branch at a plain ARM's PC+1: its fall-through PC+2 is ready (d >= 4), its taken
            target is not -- the buffer fetches ARM + 2 only (Wilson 11-17, rule (1) removed)
   M_LC_SLOT_BRANCH_OFF  the taken target marked ready (check 11 red)
   check 12 a FALLTHROUGH ARM B at plain ARM A's PC+1: A's slot gives PC+1, PC+2, never PC+3 (A
            fetches two words; Wilson 11-17, rule (2) removed); B's own rule keeps its two words
   M_LC_SLOT_PC3_OFF  A's PC+3 marked ready (check 12 red)
+  check 13 the readiness registry (branch_budget.READY_RULES, Wilson 11-17): every rule names its
+           theorem(s); a proved rule's are at the Lean gate (gate_lean_build.KEY); every emitted
+           rule is registered and every registered rule exercised; owed / counterfactual words
+           never reach slot_ready (the certificate)
+  M_LC_REG_NOTHEOREM  a proved rule with no theorem          (check 13 red)
+  M_LC_REG_NOTLEAN    a theorem not at the Lean gate          (check 13 red)
+  M_LC_REG_UNREG      an emitted rule not registered          (check 13 red)
+  M_LC_REG_LEAK       owed / counterfactual words reach ready (check 13 red)
   M_LC_FT_UNSEEN    no ARM read as FALLTHROUGH                    -> check 3 red
   M_LC_FT_NOFLOOR   no lateness floor after the flush             -> check 3 red
 Static, < 2 s. Usage: python model/gate_lane_cert.py [dir holding usbdev.py]
@@ -258,67 +267,123 @@ def check_slot_pc3(BB, PC, I):
                    "not ready" if 3 not in a else "READY", sorted(b)))
 
 
+def check_registry(BB, PC, I, rules=None):
+    """check 13: the readiness registry (Wilson 11-17). Every rule in branch_budget.READY_RULES
+    names its theorem(s) (none only when counterfactual); a proved rule's theorems are all at the
+    Lean gate (gate_lean_build.KEY); every rule slot_ready_tagged emits on graphs exercising each
+    rule is registered, and each registered rule is exercised; no owed / counterfactual word
+    reaches slot_ready (the certificate's ready set)."""
+    import gate_lean_build as LB
+    rules = BB.READY_RULES if rules is None else rules
+    k = PC.load()
+    dmin = k["p1b2_plain_min_d"]
+    probs = []
+    for rid, r in sorted(rules.items()):
+        st, th = r.get("status"), tuple(r.get("theorems") or ())
+        if st not in ("proved", "owed", "counterfactual"):
+            probs.append("%s: status %r" % (rid, st))
+        if st != "counterfactual" and not th:
+            probs.append("%s: no theorem" % rid)
+        if st == "proved":
+            probs += ["%s: %s not at the Lean gate" % (rid, t) for t in th
+                      if t.split(".")[-1] not in LB.KEY]
+    arm = {"op": I.OP_ARM, "mod": 0, "delay": 0}
+    ft = {"op": I.OP_ARM, "mod": I.ARM_MOD_FT, "delay": 40}
+    plain = {"op": I.OP_LEVEL, "mod": 0, "delay": 0}
+    cases = [(_slot_graph(I, dmin), 2), (_slot_graph(I, dmin, pc1_arm=True), 2),
+             (_slot_graph(I, dmin), 3),
+             (({0: (ft, [1, 2]), 1: (plain, [3]), 2: (plain, [3]), 3: (plain, [0])},
+               {0: [1], 1: [5], 2: [5], 3: [5]}), 2),
+             (({0: (arm, [1]), 1: (ft, [2, 3]), 2: (plain, [4]), 3: (plain, [4]),
+                4: (plain, [0])}, {0: [1], 1: [dmin], 2: [5], 3: [5], 4: [5]}), 2)]
+    seen = set()
+    for (g, gaps), depth in cases:
+        tagged = BB.slot_ready_tagged(g, I, depth, gaps, k)
+        ready = BB.slot_ready(g, I, depth, gaps, k)
+        seen |= {r for _a, _w, r in tagged}
+        unreg = {r for _a, _w, r in tagged if r not in rules}
+        probs += ["rule %s emitted, not registered" % r for r in sorted(unreg)]
+        good = {w for _a, w, r in tagged if rules.get(r, {}).get("status") == "proved"}
+        leak = {w for _a, w, r in tagged if w in ready and w not in good}
+        probs += ["word %d ready through an unproved rule" % w for w in sorted(leak)]
+    probs += ["rule %s registered, never exercised" % r for r in sorted(set(rules) - seen)]
+    st = {}
+    for r in rules.values():
+        st[r.get("status")] = st.get(r.get("status"), 0) + 1
+    return not probs, (("; ".join(probs[:3])) if probs else
+                       "%d rules (%s), all exercised; unproved words kept out of ready"
+                       % (len(rules), ", ".join("%d %s" % (n, s) for s, n in sorted(st.items()))))
+
+
 def _ft_slot_image(I, T, d1=80):
     """lane 0: ARM(fall, timeout T, FALLTHROUGH) -> REARM (timeout path, PC+1) -> LEVEL 1 (edge
     path, PC+2) -> LEVEL 0 -> REARM; the other lanes idle (run_arm2.ft_race_image's shape at
-    spacing d1, which certifies)"""
+    spacing d1). The header goes through pe_isa.d_fields, the encoder the real images use
+    (Wilson 11-17: a check never tests a packing the images do not have)"""
     l0 = I.ACT_BASE
     prog = [I.act_arm(1, 0, T, ft=True), I.act(I.OP_REARM, 0, 1, d1),
             I.act(I.OP_LEVEL, I.UO0, 1, d1), I.act(I.OP_LEVEL, I.UO0, 0, d1),
             I.act(I.OP_REARM, 0, 1, d1)]
     lp = l0 + len(prog) * I.ACT_BYTES
     prog.append(I.act(I.OP_REARM, 0, 0, 500))
-    headers = [I.hdr(I.UO0, I.UO0, 1, d1, 0, 2 * d1, 3 * d1, l0)]
+    headers = [I.hdr(I.UO0, I.UO0, 1, d1, 0, *I.d_fields(d1), l0)]
     for j in range(1, I.N_LANES):
         headers.append(I.hdr(j + 1, j + 1, 0, 500, 0, 200, 240, lp))
     return I.join_image(headers, prog)
 
 
+#: check 10's end-to-end image (Wilson 11-17): certifies under proved rules only (sweep 11-17:
+#: spacing 60 / 80, T >= 35)
+TIMEOUT_E2E = (35, 60)
+
+
 def check_slot_timeout(BB, PC, I):
-    """check 10: a FALLTHROUGH ARM's timeout word (PC+1, fetched second) is ready only while
-    Buf.p1b2_margin_timeout_scan's premise P1B2_FILL_SCAN + L <= T holds (L the ARM's certified
-    lateness), checked where image_budget runs (the wiring, not only the rule): with the slot on,
-    T = FILL + L - 1 drops it, T = FILL + L keeps it"""
+    """check 10 (Wilson 11-17 ruling, direct readiness): a FALLTHROUGH ARM's timeout word (PC+1)
+    is ready only while Buf.p1b2_margin_timeout_scan's premise P1B2_FILL_SCAN + L <= T holds.
+    The rule is tested directly, L passed in: for L = 0 and L = 5 the word is in slot_ready and
+    the rule drops it at T = FILL + L - 1, keeps it at T = FILL + L (two Ls: the rule reads L,
+    not FILL alone). End to end: the image at spacing 60, T 35 certifies and the certificate
+    loop called the rule (image_budget's trace, timeout_rule_calls)"""
+    import lane_cert as LC
     k = PC.load()
     fill = k["p1b2_fill_scan"]
-    drops = []
-    orig = BB.slot_timeout_drop
-
-    def spy(g, I_, ready, lat, kk=None):
-        r = orig(g, I_, ready, lat, kk)
-        drops.extend(r)
-        return r
-    saved = BB.SLOT
-    BB.SLOT, BB.slot_timeout_drop = 2, spy
-    try:
-        r0 = BB.image_budget(_ft_slot_image(I, fill))
-        L = ((r0["lanes"].get(0) or {}).get("lat") or {}).get(0)
-        if r0["B"] is None or L is None:
-            return False, "the check's image is uncertified at T = FILL (%s)" % r0["reason"]
-        res = {}
+    prem = LC.premises(k)
+    res, bad = {}, []
+    for L in (0, 5):
         for T in (fill + L - 1, fill + L):
-            drops.clear()
-            BB.image_budget(_ft_slot_image(I, T))
-            res[T] = 1 in drops
-        # standing arm (Wilson 11-17): spacing 40, T = 8 -- no certificate under the rule, one
-        # with the rule off (the unchecked readiness was what certified it)
-        on40 = BB.image_budget(_ft_slot_image(I, 8, d1=40))["B"]
-        saved_mut = BB.SLOT_TIMEOUT_MUT
-        BB.SLOT_TIMEOUT_MUT = True
-        try:
-            off40 = BB.image_budget(_ft_slot_image(I, 8, d1=40))["B"]
-        finally:
-            BB.SLOT_TIMEOUT_MUT = saved_mut
+            g, _p, gaps = LC.build(_ft_slot_image(I, T, d1=60), 0, prem, I)
+            fts = LC.ft_paths(g, I)
+            if len(fts) != 1:
+                bad.append("T %d: %d FALLTHROUGH ARMs (want 1)" % (T, len(fts)))
+                continue
+            (a, (c1, _c2)), = fts.items()
+            ready = BB.slot_ready(g, I, 2, gaps, k)
+            if c1 not in ready:
+                bad.append("L %d T %d: timeout word %d not in slot_ready before the rule"
+                           % (L, T, c1))
+                continue
+            res[(L, T)] = c1 not in BB.slot_timeout_drop(g, I, ready, {a: L}, k)
+    saved = BB.SLOT
+    BB.SLOT = 2
+    try:
+        T, d1 = TIMEOUT_E2E
+        r = BB.image_budget(_ft_slot_image(I, T, d1=d1))
     finally:
-        BB.SLOT, BB.slot_timeout_drop = saved, orig
-    ok = (fill == 9 and res[fill + L - 1] and not res[fill + L]
-          and on40 is None and off40 is not None)
-    return ok, ("FALLTHROUGH timeout word (FILL %d, L %d): T = %d %s, T = %d %s; "
-                "spacing 40, T = 8: rule %s, rule off %s"
-                % (fill, L, fill + L - 1, "not ready" if res[fill + L - 1] else "READY",
-                   fill + L, "ready" if not res[fill + L] else "NOT READY",
-                   "no certificate" if on40 is None else "B %s" % on40,
-                   "B %s" % off40 if off40 is not None else "no certificate"))
+        BB.SLOT = saved
+    calls = r.get("timeout_rule_calls", 0)
+    ok = (fill == 9 and not bad and not res[(0, fill - 1)] and res[(0, fill)]
+          and not res[(5, fill + 4)] and res[(5, fill + 5)]
+          and r["B"] is not None and calls > 0)
+    if bad:
+        return False, "; ".join(bad[:3])
+    return ok, ("FALLTHROUGH timeout word (FILL %d): L 0: T %d %s, T %d %s; L 5: T %d %s, T %d %s; "
+                "end to end spacing %d T %d: %s, rule called %d time(s)"
+                % (fill, fill - 1, "dropped" if not res[(0, fill - 1)] else "READY",
+                   fill, "kept" if res[(0, fill)] else "DROPPED",
+                   fill + 4, "dropped" if not res[(5, fill + 4)] else "READY",
+                   fill + 5, "kept" if res[(5, fill + 5)] else "DROPPED",
+                   d1, T, "B %s" % r["B"] if r["B"] is not None else
+                   "NO CERTIFICATE (%s)" % r["reason"][:80], calls))
 
 
 def check_budget():
@@ -537,6 +602,25 @@ def main():
         BB.SLOT_PC3_MUT = False
     kills.append(("M_LC_SLOT_PC3_OFF", not k12,
                   "ARM A's PC+3 ready behind a FALLTHROUGH PC+1: check 12 red"))
+    # check 13: the readiness registry (Wilson 11-17)
+    ok13, msg13 = check_registry(BB, PC, I)
+    print("  check 13 %s  %s" % ("GREEN" if ok13 else "RED  ", msg13))
+    reg = BB.READY_RULES
+    m_noth = {**reg, "pc2_plain": {**reg["pc2_plain"], "theorems": ()}}
+    m_lean = {**reg, "pc2_plain": {**reg["pc2_plain"],
+                                   "theorems": ("Buf.p1b2_margin_plain_scan_unbuilt",)}}
+    m_unreg = {r: v for r, v in reg.items() if r != "ft_edge"}
+    for name, rules, what in (("M_LC_REG_NOTHEOREM", m_noth, "a proved rule with no theorem"),
+                              ("M_LC_REG_NOTLEAN", m_lean, "a theorem not at the Lean gate"),
+                              ("M_LC_REG_UNREG", m_unreg, "an emitted rule not registered")):
+        kr, _m = check_registry(BB, PC, I, rules)
+        kills.append((name, not kr, "%s: check 13 red" % what))
+    BB.REG_LEAK_MUT = True
+    try:
+        kr, _m = check_registry(BB, PC, I)
+    finally:
+        BB.REG_LEAK_MUT = False
+    kills.append(("M_LC_REG_LEAK", not kr, "owed / counterfactual words reach ready: check 13 red"))
     # M_LC_FT_UNSEEN / M_LC_FT_NOFLOOR
     orig_ft = PC.arm_is_ft
     PC.arm_is_ft = lambda x, I=None: False
@@ -606,7 +690,7 @@ def main():
         ok_txt = ("PASS (as required)" if name.endswith("_PASS") else "RED (killed)")
         print("  must-fire %-18s %s  %s" % (name, ok_txt if killed else "SURVIVED", what))
     teeth = all(k for _n, k, _w in kills)
-    green = ok1 and not fails and ok3 and ok4 and ok5 and ok6 and ok7 and ok8 and ok9 and ok10 and ok11 and ok12
+    green = ok1 and not fails and ok3 and ok4 and ok5 and ok6 and ok7 and ok8 and ok9 and ok10 and ok11 and ok12 and ok13
     verdict = "PASSED" if (green and teeth) else ("FAILED (must-fire survived)" if not teeth
                                                    else "FAILED")
     print("GATE lane-cert: %s" % verdict)

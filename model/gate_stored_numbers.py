@@ -607,6 +607,11 @@ SPEC_SYMBOLS = {
     # are the published ratings, restated as labels) and gap prose; staleness
     # is `published_problems` (a WITNESS claim must point at a witnessed image).
     ("model/gate_wire_feed.py", "PUBLISHED"),
+    # ⭐ the readiness registry (Wilson 11-17): rule ids, statuses and Lean
+    # theorem NAMES -- its "numbers" are digits inside names (p1b2_..., ft_merge)
+    # -- not results. Staleness is gate_lane_cert check 13 (a proved rule's
+    # theorems at the Lean gate, every emitted rule registered and exercised).
+    ("model/branch_budget.py", "READY_RULES"),
     # ⭐ WF2 round 2: V3's table generator. GENERATED names each runner's
     # on-the-fly image and calls the runner's OWN builder (its "numbers" are
     # builder arguments such as T_MIN 232, d = 60, d = 4 -- inputs, not
