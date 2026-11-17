@@ -85,7 +85,11 @@ KEY = ("dstar", "dstar29", "dstar39", "dstar39_v2", "dstar39_st", "dstar39_hold"
        "wfB_run", "held_run", "head_valid_of_countsB", "port_wait_boundB", "pending_boundB",
        "head_valid_when_readyB", "empty_cycle_after_ret", "empty_cycle_disp", "empty_cycle_load",
        "mask_buf_next", "mask_flight_next", "ordB_run", "order_kept", "issue_index",
-       "nr_held_run", "slot_countB", "slot_count_two")
+       "nr_held_run", "slot_countB", "slot_count_two",
+       # FlushKeep.lean (Wilson 11-17, K1): the edge word survives the flush
+       "edge_survives_flush", "flush_keeps_only_edge", "flush_buf_empty", "flush_drops_timeout",
+       "flush_empty_of_absent", "flush_keep_slot", "stepBK_other", "edge_capture_by_edge",
+       "edge_capture_by_edge_direct", "edge_valid_by_release")
 #: proof_constants.load() key -> the Lean expression that must evaluate to it (SPEC: the map)
 CONSTS = {
     "lemmaA_window": "LEMMA_A_WINDOW", "R_base": "R_BASE", "dispatch_cycles": "DISPATCH_CYCLES",
