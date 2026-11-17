@@ -416,6 +416,9 @@ GATES=(
   # chip) and an end-to-end result; must-fires include the chip's own refusals
   # on the board path (bad MAGIC, a v1-sized stream).
   fpga/sim/run_fpga_loader.py
+  # Wilson 11-15 meta-slow ruling (11-16): the loader runs on Verilator; iverilog stays as the
+  # second-simulator check here, in the full run only (not pre-push)
+  fpga/sim/run_fpga_loader_xsim.py
   fpga/sim/run_fpga_onewire.py
   fpga/sim/run_fpga_i2c.py
   # ⭐ F1.5 -- PREVENTION: no consumer of the store types its size (fpga/,

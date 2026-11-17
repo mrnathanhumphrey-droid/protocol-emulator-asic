@@ -88,7 +88,7 @@ def _key(top, srcs, overrides, v):
     return h.hexdigest()[:16]
 
 
-def vl_build(top, srcs, overrides, subs=()):
+def vl_build(top, srcs, overrides, subs=(), timeout=None):
     """Build `top` on Verilator with `overrides` {hierarchical name below the
     bench (`X` or `dut.X`): value text}; return the binary's path (as the
     runner's shell sees it).
@@ -124,18 +124,18 @@ def vl_build(top, srcs, overrides, subs=()):
           'mv -T "$B.p$$" "$B" 2>/dev/null || rm -rf "$B.p$$"; fi; echo "$B/vtb"') % (
         key, "\n".join(wrap), root, v, " ".join(VL_FLAGS), " ".join(srcs))
     r = subprocess.run(pre + ["bash", "-c", sh], capture_output=True, text=True,
-                       encoding="utf-8", errors="replace")
+                       encoding="utf-8", errors="replace", timeout=timeout)
     if r.returncode != 0:
         raise SystemExit("*** verilator build failed (%s)\n%s" % (top, (r.stdout + r.stderr)[-1500:]))
     return r.stdout.strip().splitlines()[-1]
 
 
-def vl_run(binary, images, log):
+def vl_run(binary, images, log, timeout=None):
     """Run a Verilator build from the repository root; its output -> `log`."""
     _v, pre, tr = _vl()
     cmd = (pre[:-1] + ["--cd", tr(ROOT), "--exec"] if pre else []) + [binary]
     r = subprocess.run(sim_run.argv(cmd, images), cwd=ROOT, capture_output=True,
-                       text=True, encoding="utf-8", errors="replace")
+                       text=True, encoding="utf-8", errors="replace", timeout=timeout)
     with open(log, "w", encoding="utf-8", newline="\n") as fh:
         fh.write(r.stdout + r.stderr)
     return r

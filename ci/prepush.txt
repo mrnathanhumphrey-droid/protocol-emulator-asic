@@ -66,6 +66,7 @@ ci-only test/run_hold_rule.py shard sim2: simulations + kill audit, ~610 s in CI
 ci-only model/gate_slang_lint.py RED-AT-ORIGIN (1eee995): ArithOpMismatch x4, pinned at 2; owner agent 1; clears: the W1 lint item (V2_MASTER_LIST)
 ci-only test/gate_fpga_synth.py three yosys synth_xilinx runs (CI's FPGA toolchain)
 ci-only fpga/sim/run_fpga_loader.py shard fpga: the three FPGA board simulations
+ci-only fpga/sim/run_fpga_loader_xsim.py shard fpga: the loader's second-simulator check (iverilog ~940 s), full run only (Wilson 11-15)
 ci-only fpga/sim/run_fpga_onewire.py shard fpga: the three FPGA board simulations
 ci-only fpga/sim/run_fpga_i2c.py shard fpga: the three FPGA board simulations
 prepush model/gate_store_size_literals.py

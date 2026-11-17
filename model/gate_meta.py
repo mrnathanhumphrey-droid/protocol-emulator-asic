@@ -317,6 +317,10 @@ NOT_STUBBABLE = {
                          "sigrok's decode; priced by its mut_short / mut_long / "
                          "mut_under / noalt / oldtx / nack arms",
     "model/gate_meta.py": "this gate",
+    "fpga/sim/run_fpga_loader_xsim.py": "its one judge (compare) is priced inline by its own "
+                                        "must-fires on planted transcripts (a changed, missing or "
+                                        "reordered line, a missing scenario), run first; a "
+                                        "seam would re-run iverilog's slow leg for nothing",
 }
 
 #: ⛔⛔ A GATE LEFT UNSTUBBED FOR A REASON THAT CAN BE FIXED IS A DEBT (Wilson
