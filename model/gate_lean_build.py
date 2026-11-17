@@ -73,7 +73,11 @@ KEY = ("dstar", "dstar29", "dstar39", "dstar39_v2", "dstar39_st", "dstar39_hold"
        "slot_once", "usb_once_S", "cntS_once", "slot_count", "usb_count", "slot_wait_bound",
        "usbSum_eq_cnt",
        # P1b from the fill (Wilson 11-16): both requester variants and their margins
-       "p1b_capture", "p1b_direct", "p1b_margin_scan", "p1b_margin_direct")
+       "p1b_capture", "p1b_direct", "p1b_margin_scan", "p1b_margin_direct",
+       # Buf.lean (Wilson 11-16): the depth-2 buffer, always two fetches per ARM
+       "two_fetch_scan", "two_fetch_direct", "buf_load", "buf_load_margin",
+       "p1b2_margin_arm_scan", "p1b2_margin_arm_direct", "p1b2_margin_plain_scan",
+       "p1b2_margin_plain_direct", "p1b2_margin_timeout_scan", "p1b2_margin_timeout_direct")
 #: proof_constants.load() key -> the Lean expression that must evaluate to it (SPEC: the map)
 CONSTS = {
     "lemmaA_window": "LEMMA_A_WINDOW", "R_base": "R_BASE", "dispatch_cycles": "DISPATCH_CYCLES",
@@ -94,6 +98,8 @@ CONSTS = {
     "slot_wait_base": "SLOT_WAIT_BASE", "slot_charge": "SLOT_CHARGE",
     "arm_retire_gap": "ARM_RETIRE_GAP", "p1b_margin_scan": "P1B_MARGIN_SCAN",
     "p1b_margin_direct": "P1B_MARGIN_DIRECT",
+    "slot_fetches_per_arm": "SLOT_FETCHES_PER_ARM",
+    "p1b2_margin_arm_scan": "P1B2_MARGIN_ARM_SCAN", "p1b2_margin_arm_direct": "P1B2_MARGIN_ARM_DIRECT",
 }
 PLANT_THM = "planted_by_gate"
 #: gate_mutant_kills' scratch-mutant registry (ruling AC2): this gate is the killer

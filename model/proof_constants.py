@@ -79,6 +79,17 @@ def load(path=PATH):
     # through the scan (raise at capture) fill = 1 + l_refill; issued at capture fill = l_refill
     k["p1b_margin_scan"] = k["dispatch_cycles"] + k["arm_retire_gap"] - (1 + k["l_refill"])
     k["p1b_margin_direct"] = k["dispatch_cycles"] + k["arm_retire_gap"] - k["l_refill"]
+    # Buf.lean (Wilson 11-16, always two): slot_depth words fetched per ARM, each a read charged
+    # to the other lanes; the second word's margin when PC+1 is itself an ARM (m1 / m3): its
+    # earliest release c + (dispatch + gap) + (dispatch - 1) + gap against fetch 2's word at
+    # c + 1 + 2 l_refill (scan) / c + 2 l_refill - 1 (at capture)
+    k["slot_fetches_per_arm"] = k["slot_depth"]
+    rel2 = 2 * (k["dispatch_cycles"] + k["arm_retire_gap"]) - 1
+    k["p1b2_margin_arm_scan"] = rel2 - (1 + 2 * k["l_refill"])
+    k["p1b2_margin_arm_direct"] = rel2 - (2 * k["l_refill"] - 1)
+    if k["p1b2_margin_arm_scan"] < 0:
+        raise ValueError("proof_constants: the second word through the scan has a negative "
+                         "margin %d" % k["p1b2_margin_arm_scan"])
     if k["p1b_margin_scan"] < 0:
         raise ValueError("proof_constants: P1b through the scan has a negative margin %d"
                          % k["p1b_margin_scan"])
