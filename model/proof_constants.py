@@ -67,6 +67,12 @@ def load(path=PATH):
     # FlushLate.flush_head_late: a flushed lane's head is valid by release + this + B (the port's
     # l_refill - 1 cycles back to clean, restart_hit's one-pass window 23 + B, less flush -> release)
     k["flush_refill_late"] = (k["l_refill"] - 1) + 23 - 1
+    # Slot.lean (Wilson 11-16, the guaranteed slot): slot_wait_bound -- a held slot request is
+    # issued within slot_wait_base + slot_charge x (USB receive issues meanwhile): the in-flight
+    # refill's remaining cycles (rem, SCAN -> REQ -> WAIT -> CAP) and one refill per USB issue;
+    # chargeS_le -- a fetch for another lane costs a lane one refill (per victim)
+    k["slot_wait_base"] = k["l_refill"] - 1
+    k["slot_charge"] = k["l_refill"]
     # the A2 export at the RTL floor and the USB budget (OptRun.branch_j_interim: = the interim J)
     k["branch_j_wmin"] = 1 + max(k["R_base"] + k["head_slack"] + k["br1_budget"] - k["br_w_min"], 0)
     if k["coresident_usb"] < k["coresident_min_d"]:

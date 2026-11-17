@@ -360,12 +360,9 @@ until `u` retires both slots stay valid, so `u` wants no fetch and the requester
 theorem slot_once (hok : SReqOK P sreq) (u : Lane) (e1 : Engine) (n : Nat)
     (ha : SlotIssue P usb sreq e1) (hu : sreq e1 = some u)
     (hb : sreq (runS P win usb sreq n e1) = some u)
-    (hbs : (runS P win usb sreq n e1).pst = .scan) (hn : 0 < n) :
-    ∃ x, x < n ∧ IsRet P u (runS P win usb sreq x e1) := by
-  apply Classical.byContradiction
-  intro hno
-  have hnr : ∀ x, x < n → ¬IsRet P u (runS P win usb sreq x e1) :=
-    fun x hx hr => hno ⟨x, hx, hr⟩
+    (hbs : (runS P win usb sreq n e1).pst = .scan) (_hn : 0 < n) :
+    ¬(∀ x, x < n → ¬IsRet P u (runS P win usb sreq x e1)) := by
+  intro hnr
   obtain ⟨hp, hu0, _⟩ := ha
   have hv0 : e1.headValid u = true := (hok e1 u hu).2.1
   have hfs : e1.fetchSlot u = !e1.sel u := by
@@ -432,6 +429,281 @@ theorem slot_once (hok : SReqOK P sreq) (u : Lane) (e1 : Engine) (n : Nat)
   unfold Engine.wantFetch Engine.headValid Engine.spareValid at hw
   rw [hs, hh, hsp hn4] at hw
   simp at hw
+
+
+/-! ### USB receive: one branch-1 refill per retirement under the slot -/
+
+theorem usbFirst_spec (v : Lane) (e : Engine) (h : usbFirst P (some v) e = true) :
+    br1 P e = some v := by
+  unfold usbFirst at h
+  cases hb : br1 P e with
+  | none => rw [hb] at h; simp at h
+  | some w => rw [hb] at h; simp at h; rw [h]
+
+/-- A USB receive branch-1 issue this cycle. -/
+def UsbIssue (e : Engine) : Prop := e.pst = .scan ∧ usbFirst P usb e = true
+
+instance (e : Engine) : Decidable (UsbIssue P usb e) :=
+  inferInstanceAs (Decidable (e.pst = .scan ∧ usbFirst P usb e = true))
+
+/-- **`usb_once_S`.** Under the slot, two USB receive issues have a retirement of the USB lane
+between them: the first fills its empty head, which stays valid until it retires, and branch 1
+needs an empty head. -/
+theorem usb_once_S (v : Lane) (hv : usb = some v) (e1 : Engine) (n : Nat)
+    (ha : UsbIssue P usb e1) (hb : UsbIssue P usb (runS P win usb sreq n e1)) (_hn : 0 < n) :
+    ¬(∀ x, x < n → ¬IsRet P v (runS P win usb sreq x e1)) := by
+  intro hnr
+  subst hv
+  obtain ⟨hp, hu0⟩ := ha
+  have hb1 := usbFirst_spec P v e1 hu0
+  have hp1 : portOf (runS P win (some v) sreq 1 e1) = ⟨.req, v, e1.prr, true, e1.sel v⟩ := by
+    show portNextS P (some v) sreq e1 = _
+    rw [portNextS_usb P (some v) sreq e1 hp hu0]
+    simp [portNext, hp, hb1]
+  have hpst1 : (runS P win (some v) sreq 1 e1).pst = .req := congrArg Port.pst hp1
+  have hpl1 : (runS P win (some v) sreq 1 e1).pl = v := congrArg Port.pl hp1
+  have hps1 : (runS P win (some v) sreq 1 e1).pslot = e1.sel v := congrArg Port.pslot hp1
+  have nxt : ∀ k, (runS P win (some v) sreq k e1).pst ≠ .scan →
+      portOf (runS P win (some v) sreq (k + 1) e1)
+        = portNext P (runS P win (some v) sreq k e1) := by
+    intro k hk
+    rw [runS_succ', portOf_stepS, portNextS_of_ne P (some v) sreq _ hk]
+  have hpst2 : (runS P win (some v) sreq 2 e1).pst = .wait := by
+    show (portOf (runS P win (some v) sreq (1 + 1) e1)).pst = .wait
+    rw [nxt 1 (by rw [hpst1]; decide)]; simp [portNext, hpst1]
+  have hk2 := portNext_keeps P (runS P win (some v) sreq 1 e1) (by rw [hpst1]; decide)
+  have hpl2 : (runS P win (some v) sreq 2 e1).pl = v := by
+    rw [show (runS P win (some v) sreq 2 e1).pl
+        = (portOf (runS P win (some v) sreq (1 + 1) e1)).pl from rfl,
+      nxt 1 (by rw [hpst1]; decide), hk2.1, hpl1]
+  have hps2 : (runS P win (some v) sreq 2 e1).pslot = e1.sel v := by
+    rw [show (runS P win (some v) sreq 2 e1).pslot
+        = (portOf (runS P win (some v) sreq (1 + 1) e1)).pslot from rfl,
+      nxt 1 (by rw [hpst1]; decide), hk2.2, hps1]
+  have hpst3 : (runS P win (some v) sreq 3 e1).pst = .cap := by
+    show (portOf (runS P win (some v) sreq (2 + 1) e1)).pst = .cap
+    rw [nxt 2 (by rw [hpst2]; decide)]; simp [portNext, hpst2]
+  have hk3 := portNext_keeps P (runS P win (some v) sreq 2 e1) (by rw [hpst2]; decide)
+  have hpl3 : (runS P win (some v) sreq 3 e1).pl = v := by
+    rw [show (runS P win (some v) sreq 3 e1).pl
+        = (portOf (runS P win (some v) sreq (2 + 1) e1)).pl from rfl,
+      nxt 2 (by rw [hpst2]; decide), hk3.1, hpl2]
+  have hps3 : (runS P win (some v) sreq 3 e1).pslot = e1.sel v := by
+    rw [show (runS P win (some v) sreq 3 e1).pslot
+        = (portOf (runS P win (some v) sreq (2 + 1) e1)).pslot from rfl,
+      nxt 2 (by rw [hpst2]; decide), hk3.2, hps2]
+  have hbs := hb.1
+  have hn4 : 4 ≤ n := by
+    rcases (by omega : n = 0 ∨ n = 1 ∨ n = 2 ∨ n = 3 ∨ 4 ≤ n) with h | h | h | h | h
+    · omega
+    · rw [h, hpst1] at hbs; cases hbs
+    · rw [h, hpst2] at hbs; cases hbs
+    · rw [h, hpst3] at hbs; cases hbs
+    · exact h
+  have inv : ∀ k, k ≤ n → (runS P win (some v) sreq k e1).sel v = e1.sel v ∧
+      (4 ≤ k → (runS P win (some v) sreq k e1).actv v (e1.sel v) = true) := by
+    intro k
+    induction k with
+    | zero => intro _; exact ⟨rfl, fun h => absurd h (by omega)⟩
+    | succ k ih =>
+      intro hk
+      obtain ⟨hs, hh⟩ := ih (by omega)
+      have hr := hnr k (by omega)
+      rw [runS_succ']
+      refine ⟨by rw [selS P win (some v) sreq v _ hr, hs], ?_⟩
+      intro h4
+      by_cases hk3 : k = 3
+      · subst hk3
+        have := capFillS P win (some v) sreq v _ hpst3 hpl3 hr
+        rwa [hps3] at this
+      · exact keepS P win (some v) sreq v _ _ hr (hh (by omega))
+  obtain ⟨hs, hh⟩ := inv n (Nat.le_refl n)
+  have hbr := usbFirst_spec P v _ hb.2
+  have hhv := (br1_spec P _ v hbr).2
+  unfold Engine.headValid at hhv
+  rw [hs, hh hn4] at hhv
+  cases hhv
+
+/-! ### Counting along a slot run: one issue per retirement, plus one -/
+
+/-- Cycles satisfying `Q` among the first `n` of the slot run. -/
+def cntS (Q : Engine → Prop) [DecidablePred Q] : Nat → Engine → Nat
+  | 0, _ => 0
+  | n + 1, e => (if Q e then 1 else 0) + cntS Q n (stepS P win usb sreq e)
+
+theorem cntS_add (Q : Engine → Prop) [DecidablePred Q] :
+    ∀ (a k : Nat) (e : Engine),
+      cntS P win usb sreq Q (a + k) e
+        = cntS P win usb sreq Q a e + cntS P win usb sreq Q k (runS P win usb sreq a e)
+  | 0, k, e => by
+    show cntS P win usb sreq Q (0 + k) e = 0 + cntS P win usb sreq Q k e
+    rw [Nat.zero_add, Nat.zero_add]
+  | a + 1, k, e => by
+    rw [Nat.add_right_comm]
+    show (if Q e then 1 else 0) + cntS P win usb sreq Q (a + k) (stepS P win usb sreq e)
+        = ((if Q e then 1 else 0) + cntS P win usb sreq Q a (stepS P win usb sreq e))
+          + cntS P win usb sreq Q k (runS P win usb sreq a (stepS P win usb sreq e))
+    rw [cntS_add Q a k (stepS P win usb sreq e)]
+    omega
+
+theorem cntS_reach (Q : Engine → Prop) [DecidablePred Q] :
+    ∀ (n : Nat) (e : Engine) (k : Nat), k < cntS P win usb sreq Q n e →
+      ∃ t, t < n ∧ cntS P win usb sreq Q t e = k ∧ Q (runS P win usb sreq t e)
+  | 0, e, k, h => by simp [cntS] at h
+  | n + 1, e, k, h => by
+    have e1 : cntS P win usb sreq Q (n + 1) e
+        = (if Q e then 1 else 0) + cntS P win usb sreq Q n (stepS P win usb sreq e) := rfl
+    by_cases hq : Q e
+    · rw [if_pos hq] at e1
+      cases k with
+      | zero => exact ⟨0, Nat.succ_pos n, rfl, hq⟩
+      | succ k =>
+        obtain ⟨t, ht, hc, hq'⟩ := cntS_reach Q n (stepS P win usb sreq e) k (by omega)
+        have e2 : cntS P win usb sreq Q (t + 1) e
+            = (if Q e then 1 else 0) + cntS P win usb sreq Q t (stepS P win usb sreq e) := rfl
+        rw [if_pos hq] at e2
+        exact ⟨t + 1, by omega, by omega, hq'⟩
+    · rw [if_neg hq] at e1
+      obtain ⟨t, ht, hc, hq'⟩ := cntS_reach Q n (stepS P win usb sreq e) k (by omega)
+      have e2 : cntS P win usb sreq Q (t + 1) e
+          = (if Q e then 1 else 0) + cntS P win usb sreq Q t (stepS P win usb sreq e) := rfl
+      rw [if_neg hq] at e2
+      exact ⟨t + 1, by omega, by omega, hq'⟩
+
+theorem cntS_pos_of (Q : Engine → Prop) [DecidablePred Q] (e : Engine) (s t : Nat)
+    (hst : s < t) (hq : Q (runS P win usb sreq s e)) : 1 ≤ cntS P win usb sreq Q t e := by
+  obtain ⟨j, rfl⟩ : ∃ j, t = s + (j + 1) := ⟨t - s - 1, by omega⟩
+  rw [cntS_add P win usb sreq Q s (j + 1) e]
+  have h1 : cntS P win usb sreq Q (j + 1) (runS P win usb sreq s e)
+      = (if Q (runS P win usb sreq s e) then 1 else 0)
+        + cntS P win usb sreq Q j (stepS P win usb sreq (runS P win usb sreq s e)) := rfl
+  rw [h1, if_pos hq]
+  omega
+
+/-- **One issue per retirement, plus one** -- for any issue predicate `I` whose two occurrences
+always have a retirement `R` between them (`slot_once`, `usb_once_S`). -/
+theorem cntS_once (I R : Engine → Prop) [DecidablePred I] [DecidablePred R] (e0 : Engine)
+    (hOnce : ∀ a n, 0 < n → I (runS P win usb sreq a e0) →
+      I (runS P win usb sreq (a + n) e0) →
+      ¬(∀ x, x < n → ¬R (runS P win usb sreq (a + x) e0))) :
+    ∀ m a, cntS P win usb sreq I m (runS P win usb sreq a e0)
+      ≤ cntS P win usb sreq R m (runS P win usb sreq a e0) + 1 := by
+  suffices H : ∀ N m a, m ≤ N → cntS P win usb sreq I m (runS P win usb sreq a e0)
+      ≤ cntS P win usb sreq R m (runS P win usb sreq a e0) + 1 from
+    fun m a => H m m a (Nat.le_refl m)
+  intro N
+  induction N with
+  | zero =>
+    intro m a hm
+    have : m = 0 := by omega
+    subst this
+    simp [cntS]
+  | succ N ih =>
+    intro m a hm
+    cases m with
+    | zero => simp [cntS]
+    | succ k =>
+      have step1 : ∀ (Q : Engine → Prop) [DecidablePred Q],
+          cntS P win usb sreq Q (k + 1) (runS P win usb sreq a e0)
+            = (if Q (runS P win usb sreq a e0) then 1 else 0)
+              + cntS P win usb sreq Q k (runS P win usb sreq (a + 1) e0) := by
+        intro Q _
+        rw [runS_succ']
+        rfl
+      rw [step1 I, step1 R]
+      by_cases hia : I (runS P win usb sreq a e0)
+      · rw [if_pos hia]
+        rcases Nat.eq_zero_or_pos (cntS P win usb sreq I k (runS P win usb sreq (a + 1) e0))
+          with h0 | hpos
+        · rw [h0]; split <;> omega
+        · obtain ⟨s0, hs0k, hc0, hq0⟩ :=
+            cntS_reach P win usb sreq I k (runS P win usb sreq (a + 1) e0) 0 hpos
+          rw [← runS_add, show a + 1 + s0 = a + (s0 + 1) by omega] at hq0
+          have hret : 1 ≤ cntS P win usb sreq R (s0 + 1) (runS P win usb sreq a e0) := by
+            rcases Nat.eq_zero_or_pos (cntS P win usb sreq R (s0 + 1) (runS P win usb sreq a e0))
+              with hz | hp
+            · exfalso
+              apply hOnce a (s0 + 1) (by omega) hia hq0
+              intro x hx hr
+              have := cntS_pos_of P win usb sreq R (runS P win usb sreq a e0) x (s0 + 1) hx
+                (by rw [← runS_add]; exact hr)
+              omega
+            · exact hp
+          have hsplitI := cntS_add P win usb sreq I s0 (k - s0) (runS P win usb sreq (a + 1) e0)
+          rw [show s0 + (k - s0) = k by omega, hc0, ← runS_add] at hsplitI
+          have hsplitR := cntS_add P win usb sreq R (s0 + 1) (k - s0) (runS P win usb sreq a e0)
+          rw [show s0 + 1 + (k - s0) = k + 1 by omega, ← runS_add,
+            show a + (s0 + 1) = a + 1 + s0 by omega] at hsplitR
+          have hih := ih (k - s0) (a + 1 + s0) (by omega)
+          have eR1 := step1 R
+          omega
+      · rw [if_neg hia]
+        have hih := ih k (a + 1) (by omega)
+        split <;> omega
+
+/-- A slot issue for lane `u`. -/
+def SlotFor (u : Lane) (e : Engine) : Prop :=
+  e.pst = .scan ∧ usbFirst P usb e = false ∧ sreq e = some u
+
+instance (u : Lane) (e : Engine) : Decidable (SlotFor P usb sreq u e) :=
+  inferInstanceAs (Decidable (e.pst = .scan ∧ usbFirst P usb e = false ∧ sreq e = some u))
+
+/-- **The per-window count, the slot.** Over any `m` cycles, lane `u`'s slot fetches are at
+most its retirements plus one: one fetch per ARM. -/
+theorem slot_count (hok : SReqOK P sreq) (u : Lane) (e0 : Engine) (m a : Nat) :
+    cntS P win usb sreq (SlotFor P usb sreq u) m (runS P win usb sreq a e0)
+      ≤ cntS P win usb sreq (IsRet P u) m (runS P win usb sreq a e0) + 1 :=
+  cntS_once P win usb sreq _ _ e0 (fun a n hn ha hb => by
+    rw [runS_add] at hb
+    have h := slot_once P win usb sreq hok u (runS P win usb sreq a e0) n
+      ⟨ha.1, ha.2.1, by rw [ha.2.2]; rfl⟩ ha.2.2 hb.2.2 hb.1 hn
+    intro hall
+    exact h (fun x hx hr => hall x hx (by rw [runS_add]; exact hr))) m a
+
+/-- **The per-window count, USB receive.** Over any `m` cycles, USB receive's branch-1 issues
+under the slot are at most the USB lane's retirements plus one -- the count the certificate
+evaluates per window (`lane_cert.br1_window_count`: one per late word). -/
+theorem usb_count (v : Lane) (hv : usb = some v) (e0 : Engine) (m a : Nat) :
+    cntS P win usb sreq (UsbIssue P usb) m (runS P win usb sreq a e0)
+      ≤ cntS P win usb sreq (IsRet P v) m (runS P win usb sreq a e0) + 1 :=
+  cntS_once P win usb sreq _ _ e0 (fun a n hn ha hb => by
+    rw [runS_add] at hb
+    have h := usb_once_S P win usb sreq v hv (runS P win usb sreq a e0) n ha hb hn
+    intro hall
+    exact h (fun x hx hr => hall x hx (by rw [runS_add]; exact hr))) m a
+
+/-! ### The bound's constants (pinned: `proof_constants.slot_wait_base` / `slot_charge`) -/
+
+/-- The slot's wait from any port state to its scan: the in-flight refill's remaining cycles. -/
+abbrev SLOT_WAIT_BASE : Nat := L_REFILL - 1
+/-- What one fetch for another lane costs a lane: one refill. -/
+abbrev SLOT_CHARGE : Nat := L_REFILL
+
+theorem slot_wait_base_val : SLOT_WAIT_BASE = 3 := rfl
+theorem slot_charge_val : SLOT_CHARGE = 4 := rfl
+
+/-- **The slot's wait, with its constants.** `n ≤ SLOT_WAIT_BASE + SLOT_CHARGE · (USB receive
+issues)` (`slot_waitS`; `usbSum_eq_cnt`). -/
+theorem slot_wait_bound (n : Nat) (e : Engine)
+    (hq : ∀ i, i < n → (sreq (runS P win usb sreq i e)).isSome = true)
+    (hni : ∀ i, i < n → ¬SlotIssue P usb sreq (runS P win usb sreq i e)) :
+    n ≤ SLOT_WAIT_BASE + usbSum P win usb sreq n e := by
+  have h := slot_waitS P win usb sreq n e hq hni
+  have h2 := rem_le e.pst
+  show n ≤ L_REFILL - 1 + _
+  simp only [L_REFILL]
+  omega
+
+theorem usbSum_eq_cnt : ∀ (n : Nat) (e : Engine),
+    usbSum P win usb sreq n e = SLOT_CHARGE * cntS P win usb sreq (UsbIssue P usb) n e
+  | 0, _ => by simp [usbSum, cntS]
+  | n + 1, e => by
+    show usbCharge P usb e + usbSum P win usb sreq n (stepS P win usb sreq e)
+      = SLOT_CHARGE * ((if UsbIssue P usb e then 1 else 0)
+          + cntS P win usb sreq (UsbIssue P usb) n (stepS P win usb sreq e))
+    rw [usbSum_eq_cnt n]
+    unfold usbCharge UsbIssue
+    split <;> simp [Nat.mul_add, SLOT_CHARGE]
 
 end
 

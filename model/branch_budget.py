@@ -380,7 +380,8 @@ def _image_budget(img, iters=80, premise_gaps=None, ready=None, scheme="window")
                 # the USB lane's ARMs fetch through the slot too (their cost is charged; no
                 # readiness is claimed for them: the USB lane's figures are full_report's)
                 per[I.USB_LANE] = SLOT_PER_ARM * arm_window_count(ug, ugaps, ulat, 23 + B, I)
-            SBn = {l: k["l_refill"] * sum(n for z, n in per.items() if z != l or SLOT_SELF)
+            # Slot.chargeS_le: SLOT_CHARGE per fetch for another lane (proof_constants)
+            SBn = {l: k["slot_charge"] * sum(n for z, n in per.items() if z != l or SLOT_SELF)
                    for l in generic}
         Bn = k["l_refill"] * (late + usb_n)
         if Bn == B and Rn == R and SBn == SB:

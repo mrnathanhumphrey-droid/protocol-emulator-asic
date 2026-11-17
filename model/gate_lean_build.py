@@ -67,7 +67,11 @@ KEY = ("dstar", "dstar29", "dstar39", "dstar39_v2", "dstar39_st", "dstar39_hold"
        "first_stable", "arm_release_bus", "arm_release_T_bus",
        "ord_wbDly", "ord_release", "ord_late_free",
        "cnt_mono_run", "wb_bound_edf", "cnt_le_sum5", "wb_close_edf",
-       "arm_release_ge", "arm_rd", "cap_zc", "cap_hn")
+       "arm_release_ge", "arm_rd", "cap_zc", "cap_hn",
+       # Slot.lean (Wilson 11-16): the guaranteed slot below USB receive
+       "struct_stepS", "chargeS_le", "chargeS_own", "port_wait_boundS", "slot_waitS",
+       "slot_once", "usb_once_S", "cntS_once", "slot_count", "usb_count", "slot_wait_bound",
+       "usbSum_eq_cnt")
 #: proof_constants.load() key -> the Lean expression that must evaluate to it (SPEC: the map)
 CONSTS = {
     "lemmaA_window": "LEMMA_A_WINDOW", "R_base": "R_BASE", "dispatch_cycles": "DISPATCH_CYCLES",
@@ -85,6 +89,7 @@ CONSTS = {
     "flush_refill_late": "FLUSH_REFILL_LATE",
     "usb_other_R": "USB_OTHER_R",
     "branch_j_wmin": "BRANCH_J_WMIN",
+    "slot_wait_base": "SLOT_WAIT_BASE", "slot_charge": "SLOT_CHARGE",
 }
 PLANT_THM = "planted_by_gate"
 #: gate_mutant_kills' scratch-mutant registry (ruling AC2): this gate is the killer
