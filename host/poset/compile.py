@@ -64,6 +64,7 @@ MUTANTS = ("M_PC_NO_CYCLE",      # cycles not refused
            "M_PC_ARMRETIRE_OFF",   # lane_cert.ARM_RETIRE off (ArmRetire's cap not applied)
            "M_PC_DRAIN_OFFBY1",    # the generated drain one past the search (the closed form disagrees)
            "M_PC_ARM3_PASS",       # three plain edge ARMs in a row not refused
+           "M_PC_FTPC1_PASS",      # a FALLTHROUGH ARM at another ARM's PC+1 not refused
            "M_PC_A2_NOPREM")       # A2's line ignores the window's premise gaps (two verdicts)
 MUT = os.environ.get("POSET_COMPILE_MUTANT", "")
 if MUT and MUT not in MUTANTS:
@@ -358,6 +359,22 @@ def plain_arm_run_problems(lanes):
     return [] if MUT == "M_PC_ARM3_PASS" else out
 
 
+def ft_after_arm_problems(lanes):
+    """[problem] for every FALLTHROUGH ARM at another ARM's PC+1 in a lowered lane (Wilson 11-17:
+    A's slot fetches B and PC+2 while B wants PC+3 then PC+2 -- a duplicate PC+2 and an
+    out-of-order PC+3 that BufFifo does not cover; no corpus image or lowering uses the shape, so
+    the compiler refuses it; a program needing both puts a word between them)"""
+    out = []
+    for ln, acts in sorted(lanes.items()):
+        for i in range(1, len(acts)):
+            a, b = acts[i - 1], acts[i]
+            bmod = b[6] if len(b) > 6 else 0
+            if a[0] == I.OP_ARM and b[0] == I.OP_ARM and bmod & I.ARM_MOD_FT:
+                out.append("lane %d action %d: a FALLTHROUGH ARM right after an ARM -- the slot's "
+                           "buffer has no theorem for it (put a word between them)" % (ln, i))
+    return [] if MUT == "M_PC_FTPC1_PASS" else out
+
+
 def windows(stmts, lowered, route, hz, arm="late", drain="auto", premise="datasheet", ready=False,
             counterfactual=False):
     """`within` lowered, with the DRAIN after every `else abort` window (Wilson 11-15):
@@ -395,7 +412,7 @@ def windows(stmts, lowered, route, hz, arm="late", drain="auto", premise="datash
     lanes, route2, w = _windows(stmts, lowered, route, hz, arm, chosen, premise, ready)
     if w is None:
         return lanes, route2, w
-    runs = plain_arm_run_problems(lanes)
+    runs = plain_arm_run_problems(lanes) + ft_after_arm_problems(lanes)
     if runs:
         raise Refused("within: %s" % "; ".join(runs))
     # the protocol check: the next event after B, bounded by the spec, must not be pushed past
@@ -779,6 +796,9 @@ def compile_spec(text, seed=1, hz=None, require_cert=False, **win_opts):
     log.append("P3 checkset: %d predicates (from the spec alone)" % len(cs))
     img, (lanes, _hdr, _a, _kw), route = lower(parsed["v1"], seed)
     lanes, route, win = windows(stmts, (lanes, _hdr, _a, _kw), route, hz, **win_opts)
+    ftb = ft_after_arm_problems(lanes)          # every lowering, with or without a window
+    if ftb:
+        raise Refused("P4 lower: %s" % "; ".join(ftb))
     if win is not None:
         import pe_asm
         img = bytes(pe_asm.assemble(lanes, _hdr, *_a, **_kw))
