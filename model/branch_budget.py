@@ -66,16 +66,56 @@ SLOT_BRANCH_MUT = False
 SLOT_PC3_MUT = False
 
 
-def slot_timeout_drop(g, I, ready, lat, k=None):
+def slot_timeout_drop(g, I, ready, lat, k=None, contend=0):
     """{word}: the FALLTHROUGH timeout words (PC+1, fetched second) in `ready` whose theorem's
     premise fails -- Buf.p1b2_margin_timeout_scan needs P1B2_FILL_SCAN + L <= T (T the ARM's
-    timeout, L its certified lateness `lat`). Wilson 11-17: ready only when T >= FILL + L."""
+    timeout, L its certified lateness `lat`). Wilson 11-17: ready only when T >= FILL + L; under
+    contention the fill moves by the port's wait (ContendB.contend_margin): T >= FILL + wait + L."""
     if SLOT_TIMEOUT_MUT:
         return set()
     k = k or PC.load()
-    fill = k["p1b2_fill_scan"]
+    fill = k["p1b2_fill_scan"] + contend
     return {c1 for a, (c1, _c2) in LC.ft_paths(g, I).items()
             if c1 in ready and g[a][0]["delay"] < fill + lat.get(a, 0)}
+
+
+#: must-fire switch (gate_lane_cert M_LC_CONTEND_OFF): the port's contention ignored
+CONTEND_MUT = False
+
+
+def slot_contenders(graphs, I, l):
+    """The other lanes that can hold a slot request older than one of lane `l`'s (ContendB,
+    FCFS by capture): every other lane with an ARM (each ARM's two words go through the slot);
+    each holds at most one pending request at a capture, so this bounds the older requesters."""
+    return sum(1 for z, gz in graphs.items()
+               if z != l and any(gz[0][w][0]["op"] == I.OP_ARM for w in gz[0]))
+
+
+def slot_wait(graphs, I, l, k=None):
+    """ContendB.slot_wait_fcfs_two's contention term for lane `l`: CONTEND_PER_LANE per older
+    requester (USB receive's term is 0 where a slot image certifies: _image_budget refuses a
+    slot ARM beside USB receive)"""
+    if CONTEND_MUT:
+        return 0
+    k = k or PC.load()
+    return k["contend_per_lane"] * slot_contenders(graphs, I, l)
+
+
+def slot_margin(g, I, gaps, a, w, rule, k=None):
+    """The free-port margin of `rule`'s word `w` (ARM `a`): the cycles its theorem leaves before
+    the successor's earliest release. None for the FALLTHROUGH timeout word (its premise is
+    checked in the certificate loop, slot_timeout_drop)."""
+    k = k or PC.load()
+    if rule == "pc1_plain":
+        return k["p1b_margin_scan"]
+    if rule == "pc2_arm":
+        return k["p1b2_margin_arm_scan"]
+    if rule == "pc2_plain":
+        ds = [gaps[s1][-1] + sum(gaps[w][:-1]) for s1 in g[a][1] if s1 in g and w in g[s1][1]]
+        return min(ds) - k["p1b2_plain_min_d"]
+    if rule == "ft_edge":
+        return k["ft_edge_margin_scan"]
+    return None if rule == "ft_timeout" else 0
 
 
 def _plain_edge_arm(x, I):
@@ -92,18 +132,23 @@ def _plain_edge_arm(x, I):
 #: gate, a rule slot_ready emits that is not registered, or an owed / counterfactual word that
 #: reaches slot_ready.
 READY_RULES = {
-    "pc1_plain": {"status": "proved", "theorems": ("Slot.p1b_margin_scan",),
+    "pc1_plain": {"status": "proved", "theorems": ("Slot.p1b_margin_scan",
+                                                   "ContendB.slot_wait_fcfs_two"),
                   "what": "PC+1 of a plain ARM"},
-    "pc2_arm": {"status": "proved", "theorems": ("Buf.p1b2_margin_arm_scan",),
+    "pc2_arm": {"status": "proved", "theorems": ("Buf.p1b2_margin_arm_scan",
+                                                 "ContendB.slot_wait_fcfs_two"),
                 "what": "PC+2, PC+1 a plain edge ARM (m1 / m3)"},
-    "pc2_plain": {"status": "proved", "theorems": ("Buf.p1b2_margin_plain_scan",),
+    "pc2_plain": {"status": "proved", "theorems": ("Buf.p1b2_margin_plain_scan",
+                                                   "ContendB.slot_wait_fcfs_two"),
                   "what": "PC+2, PC+1 any other word, d >= p1b2_plain_min_d"},
-    "ft_timeout": {"status": "proved", "theorems": ("Buf.p1b2_margin_timeout_scan",),
+    "ft_timeout": {"status": "proved", "theorems": ("Buf.p1b2_margin_timeout_scan",
+                                                     "ContendB.slot_wait_fcfs_two"),
                    "what": "FALLTHROUGH PC+1 (timeout, fetched second); T >= FILL + L "
                            "checked in _image_budget (slot_timeout_drop)"},
     "ft_edge": {"status": "proved",
                 "theorems": ("Slot.p1b_margin_scan", "FlushKeep.edge_survives_flush",
-                             "FlushKill.wfBK_run", "FlushHeld.ft_edge_at_release_armed"),
+                             "FlushKill.wfBK_run", "FlushHeld.ft_edge_at_release_armed",
+                             "ContendB.slot_wait_fcfs_two"),
                 "what": "FALLTHROUGH PC+2 (edge, fetched first): captured by the edge, held to "
                         "it on the armed lane, kept by the flush (K1-K5), the head at the "
                         "release. RTL contract: agent 1's K1-K5 + the scan fix (liveFl); a "
@@ -119,15 +164,25 @@ READY_RULES = {
 REG_LEAK_MUT = False
 
 
-def slot_ready(g, I, depth, gaps, k=None):
+def slot_ready(g, I, depth, gaps, k=None, contend=0):
     """{word}: the words the guaranteed slot makes ready at release on one lane -- the words of
     slot_ready_tagged whose rule is "proved" in READY_RULES (Wilson 11-17: owed and
     counterfactual rules never reach the certificate). PC+2 means the word at ARM + 2 only
     (rule (1) removed: no branch taken target; rule (2) removed: no PC+3 for ARM A behind a
     FALLTHROUGH PC+1). `gaps`: lane_cert.build's writeback gaps (after any premise gaps), so d is
-    the certificate's."""
-    return {w for _a, w, r in slot_ready_tagged(g, I, depth, gaps, k)
-            if REG_LEAK_MUT or READY_RULES[r]["status"] == "proved"}
+    the certificate's. `contend`: the port's wait behind older requesters (slot_wait,
+    ContendB): a word is ready only while its free-port margin covers it (contend_margin);
+    otherwise it is left to the refill analysis."""
+    out = set()
+    for a, w, r in slot_ready_tagged(g, I, depth, gaps, k):
+        if not (REG_LEAK_MUT or READY_RULES[r]["status"] == "proved"):
+            continue
+        # at a free port each rule's own premise (checked in slot_ready_tagged) is the theorem's;
+        # under a wait the margin must cover it
+        m = slot_margin(g, I, gaps, a, w, r, k) if contend else None
+        if m is None or m >= contend:
+            out.add(w)
+    return out
 
 
 def slot_ready_by_arm(g, I, depth, gaps, k=None):
@@ -411,9 +466,13 @@ def _image_budget(img, iters=80, premise_gaps=None, ready=None, scheme="window")
         for w, gp in pg.items():
             if l in graphs and w in graphs[l][2]:
                 graphs[l][2][w] = [max(graphs[l][2][w][0], gp)] + graphs[l][2][w][1:]
+    cw = {l: 0 for l in lanes}
     if SLOT:
-        # after the premise gaps: slot_ready's d is the release distance the certificate uses
-        ready = {l: set(ready.get(l, ())) | slot_ready(graphs[l][0], I, SLOT, graphs[l][2], k)
+        # after the premise gaps: slot_ready's d is the release distance the certificate uses;
+        # the port's wait behind older slot requesters (ContendB, FCFS by capture)
+        cw = {l: slot_wait(graphs, I, l, k) for l in lanes}
+        ready = {l: set(ready.get(l, ())) | slot_ready(graphs[l][0], I, SLOT, graphs[l][2], k,
+                                                       contend=cw[l])
                  for l in lanes}
     usb_n, usb_rmax = 0, None
     if usb:
@@ -467,7 +526,8 @@ def _image_budget(img, iters=80, premise_gaps=None, ready=None, scheme="window")
                 drop = set()
                 if SLOT:
                     tcalls += 1
-                    drop = slot_timeout_drop(g, I, ready.get(l, set()), cert[0], k)
+                    drop = slot_timeout_drop(g, I, ready.get(l, set()), cert[0], k,
+                                             contend=cw[l])
                 if not drop:
                     break
                 ready[l] = set(ready[l]) - drop

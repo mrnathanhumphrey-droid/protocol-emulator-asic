@@ -70,6 +70,11 @@ every must-fire must turn its check red, or the gate is not testing what it says
   M_LC_REG_NOTLEAN    a theorem not at the Lean gate          (check 13 red)
   M_LC_REG_UNREG      an emitted rule not registered          (check 13 red)
   M_LC_REG_LEAK       owed / counterfactual words reach ready (check 13 red)
+  check 14 the slot under contention (ContendB.slot_wait_fcfs_two, FCFS by capture): another
+           lane with an ARM is an older requester, wait contend_per_lane (8) each; a word is
+           ready only while its free-port margin covers the wait (PC+1 not at wait 8; PC+2 from
+           d = dmin + 8; the FALLTHROUGH timeout word from T = FILL + 8 + L); idle neighbours 0
+  M_LC_CONTEND_OFF    contention ignored, wait 0 (check 14 red)
   M_LC_FT_UNSEEN    no ARM read as FALLTHROUGH                    -> check 3 red
   M_LC_FT_NOFLOOR   no lateness floor after the flush             -> check 3 red
 Static, < 2 s. Usage: python model/gate_lane_cert.py [dir holding usbdev.py]
@@ -229,6 +234,54 @@ def check_slot_spacing(BB, PC, I):
                 % (dmin - 1, "not ready" if 2 not in lo else "READY",
                    dmin, "ready" if 2 in hi else "NOT READY",
                    dmin - 1, "ready" if 2 in m13 else "NOT READY", dmin))
+
+
+def check_slot_contend(BB, PC, I):
+    """check 14: the slot under contention (ContendB, FCFS by capture, Wilson 11-17) -- another
+    lane with an ARM is an older requester (slot_contenders 1, slot_wait = contend_per_lane);
+    a word is ready only while its free-port margin covers the wait: at wait 8, PC+1 (margin 0)
+    is not ready, PC+2 at d = dmin + 8 is and at dmin + 7 is not; the FALLTHROUGH timeout word
+    needs T >= FILL + wait + L; an image whose other lanes have no ARM waits 0"""
+    import lane_cert as LC
+    k = PC.load()
+    cpl = k["contend_per_lane"]
+    dmin = k["p1b2_plain_min_d"]
+    fill = k["p1b2_fill_scan"]
+    probs = []
+    gA, gpA = _slot_graph(I, dmin)
+    idle = {0: ({"op": I.OP_LEVEL, "mod": 0, "delay": 0}, [0])}
+    graphs = {0: (gA, None, gpA), 1: (gA, None, gpA), 2: (idle, None, {0: [5]})}
+    nc, wt = BB.slot_contenders(graphs, I, 0), BB.slot_wait(graphs, I, 0, k)
+    if nc != 1 or wt != cpl:
+        probs.append("contenders %d, wait %d (want 1, %d)" % (nc, wt, cpl))
+    free = BB.slot_ready(gA, I, 2, gpA, k, contend=0)
+    busy = BB.slot_ready(gA, I, 2, gpA, k, contend=cpl)
+    if not ({1, 2} <= free) or (busy & {1, 2}):
+        probs.append("free port %s, wait %d %s (want {1, 2} then none)"
+                     % (sorted(free), cpl, sorted(busy)))
+    g8, gp8 = _slot_graph(I, dmin + cpl)
+    g7, gp7 = _slot_graph(I, dmin + cpl - 1)
+    if 2 not in BB.slot_ready(g8, I, 2, gp8, k, contend=cpl) or \
+            2 in BB.slot_ready(g7, I, 2, gp7, k, contend=cpl):
+        probs.append("PC+2 at d = dmin + wait not ready, or at dmin + wait - 1 ready")
+    prem = LC.premises(k)
+    tres = {}
+    for T in (fill + cpl - 1, fill + cpl):
+        g, _p, gaps = LC.build(_ft_slot_image(I, T, d1=60), 0, prem, I)
+        (a, (c1, _c2)), = LC.ft_paths(g, I).items()
+        rdy = BB.slot_ready(g, I, 2, gaps, k, contend=cpl)
+        tres[T] = c1 in rdy and c1 not in BB.slot_timeout_drop(g, I, rdy, {a: 0}, k, contend=cpl)
+    if tres[fill + cpl - 1] or not tres[fill + cpl]:
+        probs.append("timeout word at wait %d: T %d %s, T %d %s"
+                     % (cpl, fill + cpl - 1, tres[fill + cpl - 1], fill + cpl, tres[fill + cpl]))
+    img = _ft_slot_image(I, TIMEOUT_E2E[0], d1=TIMEOUT_E2E[1])
+    g_img = {l: LC.build(img, l, prem, I) for l in I.lane_programs(img)}
+    if BB.slot_wait(g_img, I, 0, k) != 0:
+        probs.append("check 10's image (other lanes idle) waits %d" % BB.slot_wait(g_img, I, 0, k))
+    return not probs, ("; ".join(probs[:3]) if probs else
+                       "one older requester: wait %d; PC+1 / PC+2 ready free, not at wait %d; "
+                       "PC+2 ready from d = %d; timeout word from T = FILL + %d; idle neighbours "
+                       "wait 0" % (cpl, cpl, dmin + cpl, cpl))
 
 
 def check_slot_branch(BB, PC, I):
@@ -621,6 +674,15 @@ def main():
     finally:
         BB.REG_LEAK_MUT = False
     kills.append(("M_LC_REG_LEAK", not kr, "owed / counterfactual words reach ready: check 13 red"))
+    # check 14: the slot under contention (ContendB, Wilson 11-17)
+    ok14, msg14 = check_slot_contend(BB, PC, I)
+    print("  check 14 %s  %s" % ("GREEN" if ok14 else "RED  ", msg14))
+    BB.CONTEND_MUT = True
+    try:
+        k14, _m = check_slot_contend(BB, PC, I)
+    finally:
+        BB.CONTEND_MUT = False
+    kills.append(("M_LC_CONTEND_OFF", not k14, "contention ignored (wait 0): check 14 red"))
     # M_LC_FT_UNSEEN / M_LC_FT_NOFLOOR
     orig_ft = PC.arm_is_ft
     PC.arm_is_ft = lambda x, I=None: False
@@ -693,7 +755,8 @@ def main():
         ok_txt = ("PASS (as required)" if name.endswith("_PASS") else "RED (killed)")
         print("  must-fire %-18s %s  %s" % (name, ok_txt if killed else "SURVIVED", what))
     teeth = all(k for _n, k, _w in kills)
-    green = ok1 and not fails and ok3 and ok4 and ok5 and ok6 and ok7 and ok8 and ok9 and ok10 and ok11 and ok12 and ok13
+    green = (ok1 and not fails and ok3 and ok4 and ok5 and ok6 and ok7 and ok8 and ok9 and ok10
+             and ok11 and ok12 and ok13 and ok14)
     verdict = "PASSED" if (green and teeth) else ("FAILED (must-fire survived)" if not teeth
                                                    else "FAILED")
     print("GATE lane-cert: %s" % verdict)
