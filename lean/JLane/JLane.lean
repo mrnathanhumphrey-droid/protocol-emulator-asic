@@ -65,3 +65,4 @@ import JLane.BufEng
 import JLane.FlushKeep
 import JLane.FlushKill
 import JLane.FlushHeld
+import JLane.ContendB

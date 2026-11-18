@@ -96,7 +96,10 @@ KEY = ("dstar", "dstar29", "dstar39", "dstar39_v2", "dstar39_st", "dstar39_hold"
        "flushK_keeps_only_edge", "flushK_buf_empty", "kill_files_nothing",
        # FlushHeld.lean (Wilson 11-17, K2b): the buffered armed view; held at the edge
        "heldB_step", "armed_step", "armInvB_step", "flushOk_hit", "edge_held_at_edge",
-       "ft_edge_at_release", "edge_held_armed", "ft_edge_at_release_armed")
+       "ft_edge_at_release", "edge_held_armed", "ft_edge_at_release_armed",
+       # ContendB.lean (Wilson 11-17, C3): the slot under contention, FCFS by capture
+       "slot_wait_fcfs", "oldSum_split", "slot_wait_fcfs_two", "slot_wait_fcfs_ret",
+       "contend_margin", "contend_per_lane_val")
 #: proof_constants.load() key -> the Lean expression that must evaluate to it (SPEC: the map)
 CONSTS = {
     "lemmaA_window": "LEMMA_A_WINDOW", "R_base": "R_BASE", "dispatch_cycles": "DISPATCH_CYCLES",
@@ -120,6 +123,7 @@ CONSTS = {
     "slot_fetches_per_arm": "SLOT_FETCHES_PER_ARM",
     "p1b2_margin_arm_scan": "P1B2_MARGIN_ARM_SCAN", "p1b2_margin_arm_direct": "P1B2_MARGIN_ARM_DIRECT",
     "ft_edge_margin_scan": "FT_EDGE_MARGIN_SCAN", "ft_edge_margin_direct": "FT_EDGE_MARGIN_DIRECT",
+    "contend_per_lane": "CONTEND_PER_LANE",
 }
 PLANT_THM = "planted_by_gate"
 #: gate_mutant_kills' scratch-mutant registry (ruling AC2): this gate is the killer

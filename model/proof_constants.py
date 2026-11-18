@@ -84,6 +84,9 @@ def load(path=PATH):
     # the edge); through the scan fill = 1 + l_refill, issued at capture (the contract) l_refill
     k["ft_edge_margin_scan"] = k["dispatch_cycles"] + 1 + 1 - (1 + k["l_refill"])
     k["ft_edge_margin_direct"] = k["dispatch_cycles"] + 1 + 1 - k["l_refill"]
+    # ContendB.lean (Wilson 11-17): under FCFS by capture, each older slot requester delays a
+    # waiting lane by its two fetches' port time (slot_wait_fcfs_two)
+    k["contend_per_lane"] = k["slot_depth"] * k["slot_charge"]
     # Buf.lean (Wilson 11-16, always two): slot_depth words fetched per ARM, each a read charged
     # to the other lanes; the second word's margin when PC+1 is itself an ARM (m1 / m3): its
     # earliest release c + (dispatch + gap) + (dispatch - 1) + gap against fetch 2's word at
