@@ -333,7 +333,7 @@ def _ft_slot_image(I, T, d1=80):
 
 
 #: check 10's end-to-end image (Wilson 11-17): certifies under proved rules only (sweep 11-17:
-#: spacing 60 / 80, T >= 35)
+#: spacing 60 / 80, T >= 35 at B 4 before ft_edge was proved; B 0 since)
 TIMEOUT_E2E = (35, 60)
 
 

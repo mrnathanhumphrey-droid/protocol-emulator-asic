@@ -101,9 +101,13 @@ READY_RULES = {
     "ft_timeout": {"status": "proved", "theorems": ("Buf.p1b2_margin_timeout_scan",),
                    "what": "FALLTHROUGH PC+1 (timeout, fetched second); T >= FILL + L "
                            "checked in _image_budget (slot_timeout_drop)"},
-    "ft_edge": {"status": "owed", "theorems": ("Slot.p1b_margin_scan", "edge_survives_flush"),
-                "what": "FALLTHROUGH PC+2 (edge, fetched first): arrival proved; that the flush "
-                        "never clears it is owed (Lean theorem + agent 1's RTL contract)"},
+    "ft_edge": {"status": "proved",
+                "theorems": ("Slot.p1b_margin_scan", "FlushKeep.edge_survives_flush",
+                             "FlushKill.wfBK_run", "FlushHeld.ft_edge_at_release_armed"),
+                "what": "FALLTHROUGH PC+2 (edge, fetched first): captured by the edge, held to "
+                        "it on the armed lane, kept by the flush (K1-K5), the head at the "
+                        "release. RTL contract: agent 1's K1-K5 + the scan fix (liveFl); a "
+                        "buffered edge word moves to the head in the flush cycle (ruling (a))"},
     "ft_edge_after_arm": {"status": "owed", "theorems": ("BufFifo.ft_merge_room",),
                           "what": "FALLTHROUGH ARM B at another ARM's PC+1, B's edge word: needs "
                                   "agent 1's merge + the buffer-room theorem (the compiler "
