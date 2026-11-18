@@ -234,8 +234,9 @@ def span_min(g, gaps, m):
 #: Must-fire switch: gate_lane_cert M_LC_ARMRETIRE_OFF sets it False.
 ARM_RETIRE = True
 #: the cap: the ARM's successor is released at least this long after the ARM's writeback
-#: (ArmRetire.arm_release_ge: now + 2)
-ARM_RETIRE_GAP = 2
+#: (ArmRetire.arm_release_ge: now + 2) -- read from proof_constants, which gate_lean_build pins
+#: to Lean's ARM_RETIRE_GAP, so the checker never carries its own copy
+ARM_RETIRE_GAP = PC.load()["arm_retire_gap"]
 #: the rebase cycle: the word after an ARM opens a release gap one short of its delay
 #: (word_gaps' after_arm)
 REBASE = 1
