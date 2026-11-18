@@ -288,6 +288,29 @@ QUEUE_MUT = False
 #: the same ones
 RECORD_LANE_KEYS = ("max_late", "max_late_pin", "R", "max_late_rx", "arm_margin")
 
+#: the theorem each generic lane's response bound R rests on (Wilson 11-18: every R the
+#: certificate gives names its theorem; gate_lane_cert check 19). A lane with a FALLTHROUGH ARM
+#: is flushed at its own edges: the window bound for it is RespWinB.wb_bound_winBK_fl, from the
+#: release after its last flush. Under EDF no theorem covers a flushed lane yet: "edf_flushed"
+#: is owed and never reached by a certified image (the gate checks it).
+R_RULES = {
+    "window":         {"status": "proved", "theorems": ("RespWinN.wb_bound_win_n",
+                                                        "RespWinB.wb_bound_winBK")},
+    "window_flushed": {"status": "proved", "theorems": ("RespWinB.wb_bound_winBK_fl",)},
+    "edf":            {"status": "proved", "theorems": ("RespEdfClose.wb_close_edf",)},
+    "edf_flushed":    {"status": "owed", "theorems": ()},
+}
+#: must-fire switch (gate_lane_cert M_LC_RRULE_FLUSH_OFF): a flushed lane's R cited as unflushed
+RRULE_MUT = False
+
+
+def r_rule(g, I, scheme):
+    """the R_RULES entry a generic lane's R rests on: flushed at its own edges iff it holds a
+    FALLTHROUGH ARM (ArmFT: the edge flushes the ARM's own lane)"""
+    flushed = (not RRULE_MUT) and any(PC.arm_is_ft(g[w][0], I) for w in g)
+    base = "edf" if scheme == "edf" else "window"
+    return base + ("_flushed" if flushed else "")
+
 
 def queue_refusal(img, B, lanes):
     """None, or the reason A2 refuses: condition 1.6a (program_a2.queue_slot, r <= T on every
@@ -667,6 +690,16 @@ def _image_budget(img, iters=80, premise_gaps=None, ready=None, scheme="window")
                     out[l]["arm_margin"] = min(ag.values())
                 # per word (the poset compiler's arming check reads it; not in the record)
                 out[l]["lat"] = dict(lat[l])
+                # the theorem this lane's R rests on (R_RULES; not in the record)
+                out[l]["r_rule"] = r_rule(graphs[l][0], I, scheme)
+            # an R with no proved theorem (EDF on a lane flushed at its own edges) is not
+            # certified: the same rule as READY_RULES' owed words (Wilson 11-18)
+            owed = sorted((l, v["r_rule"]) for l, v in out.items()
+                          if R_RULES[v["r_rule"]]["status"] != "proved")
+            if owed:
+                return {"B": None, "reason": "lane %d: R rests on %s (owed: no proved response "
+                        "bound for a lane flushed at its own edges under this scheme)" % owed[0],
+                        "lanes": {}}
             # a UART-shaped lane whose ARM may be armed AFTER the next start edge can be seen
             # misses that frame: its certificate's premise (ArmSplit's hedge) fails, so the image
             # is not certified (found 11-15: a pre-ARM pad of 70 gave margin -3 and still J 1)

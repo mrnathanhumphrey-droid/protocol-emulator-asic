@@ -90,6 +90,12 @@ every must-fire must turn its check red, or the gate is not testing what it says
            stalls only, Wilson 11-18): usbdev_dev's lanes 1-4 are charged USB lane 0's one disarm
            per window, R 24 (23 without it), and a lane with no FALLTHROUGH neighbour gets S 0
   M_LC_DISARM_S_OFF   the disarms left out of S (check 18 red)
+  check 19 every generic lane's R names its theorem (branch_budget.R_RULES, Wilson 11-18): a lane
+           with a FALLTHROUGH ARM is flushed at its own edges and cites
+           RespWinB.wb_bound_winBK_fl (ft_race lane 0), an unflushed lane the window bound
+           (usbdev_dev lanes 1-4); every proved rule's theorems are at the Lean gate; EDF on a
+           flushed lane is owed and refused by the certificate
+  M_LC_RRULE_FLUSH_OFF  a flushed lane's R cited as unflushed (check 19 red)
   M_LC_FT_UNSEEN    no ARM read as FALLTHROUGH                    -> check 3 red
   M_LC_FT_NOFLOOR   no lateness floor after the flush             -> check 3 red
 Static, < 2 s. Usage: python model/gate_lane_cert.py [dir holding usbdev.py]
@@ -404,6 +410,29 @@ def check_disarm_s(BB, LC):
     return ok, ("%s lanes 1-4 R %s (want %d), J %s; plain image S %d"
                 % (DISARM_IMAGE, sorted(set(Rs.values()), key=str), DISARM_R,
                    sorted(set(js.values())), s0))
+
+
+def check_r_rules(BB, LC):
+    """check 19: the R registry -- ft_race's lane 0 (FALLTHROUGH, USB receive not live) rests on
+    window_flushed (edf_flushed under EDF, owed), usbdev_dev's certified lanes 1-4 on window; every
+    proved rule's theorems are at the Lean gate (gate_lean_build.KEY)"""
+    import gen_branch_budget as GB
+    import gate_lean_build as GL
+    import proof_constants as PC
+    I = LC._isa()
+    corp = dict(GB.corpus())
+    prem = LC.premises(PC.load())
+    g0 = LC.build(corp["ft_race.hex"], 0, prem, I)[0]
+    rw, re_ = BB.r_rule(g0, I, "window"), BB.r_rule(g0, I, "edf")
+    r = BB.image_budget(corp[DISARM_IMAGE])
+    rl = sorted({(r["lanes"].get(l) or {}).get("r_rule") for l in DISARM_LANES}, key=str)
+    missing = sorted(t for v in BB.R_RULES.values() if v["status"] == "proved"
+                     for t in v["theorems"] if t.split(".")[-1] not in GL.KEY)
+    owed_ok = BB.R_RULES[re_]["status"] == "owed" if re_ in BB.R_RULES else False
+    ok = rw == "window_flushed" and re_ == "edf_flushed" and owed_ok and rl == ["window"] \
+        and not missing
+    return ok, ("ft_race lane 0: %s / %s%s; %s lanes 1-4: %s; theorems not at the Lean gate: %s"
+                % (rw, re_, " (owed)" if owed_ok else "", DISARM_IMAGE, rl, missing or "none"))
 
 
 def check_slot_branch(BB, PC, I):
@@ -845,6 +874,16 @@ def main():
     finally:
         BB.DISARM_S_MUT = False
     kills.append(("M_LC_DISARM_S_OFF", not k18, "the disarms left out of S: check 18 red"))
+    # check 19: every generic lane's R names its theorem
+    ok19, msg19 = check_r_rules(BB, LC)
+    print("  check 19 %s  %s" % ("GREEN" if ok19 else "RED  ", msg19))
+    BB.RRULE_MUT = True
+    try:
+        k19, _m = check_r_rules(BB, LC)
+    finally:
+        BB.RRULE_MUT = False
+    kills.append(("M_LC_RRULE_FLUSH_OFF", not k19,
+                  "a flushed lane's R cited as unflushed: check 19 red"))
     # M_LC_FT_UNSEEN / M_LC_FT_NOFLOOR
     orig_ft = PC.arm_is_ft
     PC.arm_is_ft = lambda x, I=None: False
@@ -918,7 +957,7 @@ def main():
         print("  must-fire %-18s %s  %s" % (name, ok_txt if killed else "SURVIVED", what))
     teeth = all(k for _n, k, _w in kills)
     green = (ok1 and not fails and ok3 and ok4 and ok5 and ok6 and ok7 and ok8 and ok9 and ok10
-             and ok11 and ok12 and ok13 and ok14 and ok15 and ok16 and ok17 and ok18)
+             and ok11 and ok12 and ok13 and ok14 and ok15 and ok16 and ok17 and ok18 and ok19)
     verdict = "PASSED" if (green and teeth) else ("FAILED (must-fire survived)" if not teeth
                                                    else "FAILED")
     print("GATE lane-cert: %s" % verdict)
