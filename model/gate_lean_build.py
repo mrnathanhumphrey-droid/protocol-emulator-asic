@@ -89,7 +89,8 @@ KEY = ("dstar", "dstar29", "dstar39", "dstar39_v2", "dstar39_st", "dstar39_hold"
        # FlushKeep.lean (Wilson 11-17, K1): the edge word survives the flush
        "edge_survives_flush", "flush_keeps_only_edge", "flush_buf_empty", "flush_drops_timeout",
        "flush_empty_of_absent", "flush_keep_slot", "stepBK_other", "edge_capture_by_edge",
-       "edge_capture_by_edge_direct", "edge_valid_by_release")
+       "edge_capture_by_edge_direct", "edge_valid_by_release", "ft_edge_margin_scan",
+       "ft_edge_margin_direct", "ft_edge_cap_before_edge_direct")
 #: proof_constants.load() key -> the Lean expression that must evaluate to it (SPEC: the map)
 CONSTS = {
     "lemmaA_window": "LEMMA_A_WINDOW", "R_base": "R_BASE", "dispatch_cycles": "DISPATCH_CYCLES",
@@ -112,6 +113,7 @@ CONSTS = {
     "p1b_margin_direct": "P1B_MARGIN_DIRECT",
     "slot_fetches_per_arm": "SLOT_FETCHES_PER_ARM",
     "p1b2_margin_arm_scan": "P1B2_MARGIN_ARM_SCAN", "p1b2_margin_arm_direct": "P1B2_MARGIN_ARM_DIRECT",
+    "ft_edge_margin_scan": "FT_EDGE_MARGIN_SCAN", "ft_edge_margin_direct": "FT_EDGE_MARGIN_DIRECT",
 }
 PLANT_THM = "planted_by_gate"
 #: gate_mutant_kills' scratch-mutant registry (ruling AC2): this gate is the killer

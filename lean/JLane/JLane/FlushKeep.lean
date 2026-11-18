@@ -186,6 +186,40 @@ theorem edge_valid_by_release (c wb E : Nat) (hwb : c + 3 ≤ wb) (hE : wb < E) 
   simp only [P1B_FILL_SCAN, P1B_MARGIN_SCAN, DISPATCH_CYCLES, ARM_RETIRE_GAP, L_REFILL]
   omega
 
+/-! ### The edge word's margin, generated (pinned: `proof_constants.ft_edge_margin_*`)
+
+The edge path's earliest release from the ARM's capture `c`: writeback at `c + DISPATCH_CYCLES`
+at the earliest (`p1b_capture`), the edge one cycle after the writeback at the earliest
+(`arm_release_T_bus`: the edge is after `now`), the release one cycle after the edge (`tsF`). -/
+abbrev FT_EDGE_REL : Nat := DISPATCH_CYCLES + 1 + 1
+abbrev FT_EDGE_MARGIN_SCAN : Nat := FT_EDGE_REL - P1B_FILL_SCAN
+abbrev FT_EDGE_MARGIN_DIRECT : Nat := FT_EDGE_REL - P1B_FILL_DIRECT
+
+theorem ft_edge_margin_scan_val : FT_EDGE_MARGIN_SCAN = 0 := rfl
+theorem ft_edge_margin_direct_val : FT_EDGE_MARGIN_DIRECT = 1 := rfl
+
+/-- **Issue at capture (the contract): margin 1.** The edge word is valid at least one cycle
+before the edge path's release. -/
+theorem ft_edge_margin_direct (c wb E : Nat) (hwb : c + DISPATCH_CYCLES ≤ wb) (hE : wb < E) :
+    c + P1B_FILL_DIRECT + FT_EDGE_MARGIN_DIRECT ≤ E + 1 := by
+  simp only [P1B_FILL_DIRECT, FT_EDGE_MARGIN_DIRECT, FT_EDGE_REL, DISPATCH_CYCLES, L_REFILL] at *
+  omega
+
+/-- **Issue at capture: the capture is strictly before the edge**, so the edge word is never
+captured in the edge's own cycle (the K1 same-cycle case arises only through the scan). -/
+theorem ft_edge_cap_before_edge_direct (c wb E : Nat) (hwb : c + DISPATCH_CYCLES ≤ wb)
+    (hE : wb < E) : c + (P1B_FILL_DIRECT - 1) < E := by
+  simp only [P1B_FILL_DIRECT, DISPATCH_CYCLES, L_REFILL] at *
+  omega
+
+/-- Through the scan: margin 0 (the same as `edge_valid_by_release`). -/
+theorem ft_edge_margin_scan (c wb E : Nat) (hwb : c + DISPATCH_CYCLES ≤ wb) (hE : wb < E) :
+    c + P1B_FILL_SCAN + FT_EDGE_MARGIN_SCAN ≤ E + 1 := by
+  simp only [P1B_FILL_SCAN, FT_EDGE_MARGIN_SCAN, FT_EDGE_REL, DISPATCH_CYCLES, L_REFILL] at *
+  omega
+
+#print axioms ft_edge_margin_direct
+#print axioms ft_edge_cap_before_edge_direct
 #print axioms edge_survives_flush
 #print axioms flush_keeps_only_edge
 #print axioms flush_drops_timeout

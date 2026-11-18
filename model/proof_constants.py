@@ -79,6 +79,11 @@ def load(path=PATH):
     # through the scan (raise at capture) fill = 1 + l_refill; issued at capture fill = l_refill
     k["p1b_margin_scan"] = k["dispatch_cycles"] + k["arm_retire_gap"] - (1 + k["l_refill"])
     k["p1b_margin_direct"] = k["dispatch_cycles"] + k["arm_retire_gap"] - k["l_refill"]
+    # FlushKeep.lean (Wilson 11-17): a FALLTHROUGH ARM's edge word (fetched first) against the
+    # edge path's earliest release c + dispatch + 1 (edge after the writeback) + 1 (release after
+    # the edge); through the scan fill = 1 + l_refill, issued at capture (the contract) l_refill
+    k["ft_edge_margin_scan"] = k["dispatch_cycles"] + 1 + 1 - (1 + k["l_refill"])
+    k["ft_edge_margin_direct"] = k["dispatch_cycles"] + 1 + 1 - k["l_refill"]
     # Buf.lean (Wilson 11-16, always two): slot_depth words fetched per ARM, each a read charged
     # to the other lanes; the second word's margin when PC+1 is itself an ARM (m1 / m3): its
     # earliest release c + (dispatch + gap) + (dispatch - 1) + gap against fetch 2's word at
