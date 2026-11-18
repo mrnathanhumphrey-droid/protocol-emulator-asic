@@ -9,7 +9,9 @@ three proved bounds:
     with response Rr = L + R_lane;
   * each lane's response R_lane: RespWinN.wb_bound_win_n -- K = 3M + S + 3, R = K - 1, M the other
     lanes' decisions in a K-window (a lane with min span G(m) >= K + 1 + its worst response is
-    decided at most m times; lane_cert's other-lanes rule), S = 0 under (b');
+    decided at most m times; lane_cert's other-lanes rule), S the idle no-decision cycles: (b')
+    removes the stalls, not the FALLTHROUGH disarms (ArmFT.disarm_noDec), so S = the other
+    lanes' disarms in the window (_disarm_S, Wilson 11-18);
   * B = l_refill x (late words per 23 + B window, summed over lanes: lane_cert.br1_window_count).
 The USB lane (an image using the USB receive) keeps its priority response and its own premises:
 its figures come from lane_cert.full_report.
@@ -411,17 +413,56 @@ def _decisions(g, gaps, K, rmax, mmax=40):
     return None
 
 
+#: must-fire switch (gate_lane_cert M_LC_DISARM_S_OFF): the FALLTHROUGH disarms left out of S
+DISARM_S_MUT = False
+
+
+def _disarms(g, gaps, W, I):
+    """the most FALLTHROUGH disarms of one lane inside W cycles. A disarm is an idle cycle with
+    no decision (ArmFT.disarm_noDec: LemmaAN.noDecB counts it in the window bound's S), one per
+    arming, so this is the most FALLTHROUGH ARMs on any path segment whose release span is < W
+    (counted as _decisions counts decisions)"""
+    best = 0
+    for a in g:
+        if not PC.arm_is_ft(g[a][0], I):
+            continue
+        stack, seen = [(a, 0, 1)], set()
+        while stack:
+            w, d, n = stack.pop()
+            best = max(best, n)
+            if (w, d) in seen:
+                continue
+            seen.add((w, d))
+            step = sum(gaps[w])
+            for s in g[w][1]:
+                if s in g and d + step < W:
+                    stack.append((s, d + step, n + (1 if PC.arm_is_ft(g[s][0], I) else 0)))
+    return best
+
+
+def _disarm_S(y, lanes, graphs, rmax, K):
+    """S for lane y's response in a K-window (Wilson 11-18): (b') makes the stall count 0
+    (BPrime.cnt_stall_bprime), but every other lane's FALLTHROUGH disarm is still an idle cycle
+    with no decision -- each lane z's disarms in a window of K + 1 + its worst response"""
+    if DISARM_S_MUT:
+        return 0
+    I = LC._isa()
+    return sum(_disarms(graphs[z][0], graphs[z][2], K + 1 + (rmax.get(z) or 0), I)
+               for z in lanes if z != y and z in graphs)
+
+
 #: must-fire switch (gate_lane_cert M_LC_EDF_OFF): the EDF response scheme never tried
 EDF_MUT = False
 
 
 def _edf_R(y, lanes, graphs, rmax, lmax, ds, mmax=40):
     """RespEdfClose.wb_close_edf's per-lane bound: R y = 3 * sum_{z != y} m(y, z) + S + 2 with
-    S = 0 under (b'), m(y, z) the least m >= 1 whose span G_z(m) (lane_cert.span_min: the least
-    release advance over m consecutive writebacks, `hspan`) meets
+    S the other lanes' FALLTHROUGH disarms in the R + 1 window (_disarm_S; 0 stalls under (b')),
+    iterated to its fixpoint; m(y, z) the least m >= 1 whose span G_z(m) (lane_cert.span_min:
+    the least release advance over m consecutive writebacks, `hspan`) meets
         G_z(m) >= ds y - ds z + Q z - L y          (`hG`)
     Q z = z's response including its lateness (rmax), L y = y's largest lateness. None if no
-    m <= mmax meets it."""
+    m <= mmax meets it, or S does not settle."""
     M = 0
     for z in lanes:
         if z == y:
@@ -434,7 +475,14 @@ def _edf_R(y, lanes, graphs, rmax, lmax, ds, mmax=40):
             if m > mmax:
                 return None
         M += m
-    return 3 * M + 0 + 3 - 1
+    base = 3 * M + 3 - 1
+    R = base
+    for _ in range(60):
+        Rn = base + _disarm_S(y, lanes, graphs, rmax, R + 1)
+        if Rn == R:
+            return R
+        R = Rn
+    return None
 
 
 def image_budget(img, iters=80, premise_gaps=None, ready=None):
@@ -574,7 +622,7 @@ def _image_budget(img, iters=80, premise_gaps=None, ready=None, scheme="window")
                         return {"B": None, "reason": "lane %d: decided too often for any window "
                                 "(response of lane %d unbounded)" % (l, y), "lanes": {}}
                     M += m
-                Kn = 3 * M + 0 + 3
+                Kn = 3 * M + _disarm_S(y, lanes, graphs, rmax, K) + 3
                 if Kn == K:
                     break
                 K = Kn
