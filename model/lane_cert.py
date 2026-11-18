@@ -44,6 +44,20 @@ USB_TRSPIPD1_HALF_BITS = 13
 #: in that paragraph is the device's own timeout). Read from clock.usb_host_next_min_cycles.
 
 
+#: must-fire switch (gate_lane_cert M_LC_PPM_IGNORED): the device clock's own error left out of
+#: the host-interval premises
+PPM_MUT = False
+
+
+def slow_factor():
+    """The device clock's slow edge as a fraction of nominal: 1 - SOURCE_PPM / 1e6, the worse of
+    the declared targets (clock.SOURCE_PPM, Wilson 11-09 Q7; both provisional lock items). A
+    host interval counted in device cycles is shortest when the device clock runs slow."""
+    if PPM_MUT:
+        return Fraction(1)
+    return 1 - Fraction(max(clock.SOURCE_PPM.values()), 10 ** 6)
+
+
 def premises(k=None):
     k = k or PC.load()
     f = clock.hz()
@@ -51,7 +65,8 @@ def premises(k=None):
     # TLEOPR in cycles at the clock band's SLOW edge (the fewest cycles; agent 1's
     # clock.usb_se0q_bounds upper end), the conservative side for every use below
     tleopr = clock.usb_se0q_bounds()[1]
-    tipd_fast = math.floor(Fraction(clock.USB_TIPD_BITS * f, USB_TLDRATE_MAX))
+    # the host's fastest rate AND the device clock's slow edge: the fewest device cycles
+    tipd_fast = math.floor(Fraction(clock.USB_TIPD_BITS * f, USB_TLDRATE_MAX) * slow_factor())
     _p = {
         "bit": bit,
         # an ARM's release gap floor: release >= writeback + 2 (arm_release, edge >= wb + 1),
@@ -73,7 +88,9 @@ def premises(k=None):
         # the latest a legal responder's SOP starts after a token's EOP (TRSPIPD2, slowest rate)
         "resp_window": clock.usb_resp_window_cycles(),
         # the shortest packet a SOP starts: SYNC + PID = 16 bits, at the fastest host rate
-        "min_packet": math.floor(Fraction(16 * bit * 1_500_000, USB_TLDRATE_MAX)),
+        # (device cycles: the device clock's slow edge too)
+        "min_packet": math.floor(Fraction(16 * bit * 1_500_000, USB_TLDRATE_MAX)
+                                 * slow_factor()),
     }
     out = {**_p, **arm_premise_bounds(_p["tipd_fast"])}
     return out

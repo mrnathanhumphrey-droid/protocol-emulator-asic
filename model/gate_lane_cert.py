@@ -80,6 +80,9 @@ every must-fire must turn its check red, or the gate is not testing what it says
            prefetch columns, a `ready` set, counterfactual=True)
   M_LC_DEPTH_GT2     depth 3 certified (check 15 red)
   M_LC_STAMP_READS_CF a stamp source importing drain_table (check 15 red)
+  check 16 the host-interval premises (tipd_fast, min_packet) count device cycles at the device
+           clock's slow edge, clock.SOURCE_PPM: a stand-in 20000 ppm moves both below 0 ppm's
+  M_LC_PPM_IGNORED    SOURCE_PPM left out (check 16 red)
   M_LC_FT_UNSEEN    no ARM read as FALLTHROUGH                    -> check 3 red
   M_LC_FT_NOFLOOR   no lateness floor after the flush             -> check 3 red
 Static, < 2 s. Usage: python model/gate_lane_cert.py [dir holding usbdev.py]
@@ -327,6 +330,29 @@ def check_depth(BB, PC, I, texts=None):
                 % (dep + 1, "refused" if r3["B"] is None else "CERTIFIED B %s" % r3["B"],
                    dep, "B %s" % r2["B"] if r2["B"] is not None else "NO CERTIFICATE",
                    ", ".join("%s (%s)" % x for x in reads) if reads else "none"))
+
+
+def check_ppm(LC):
+    """check 16: the host-interval premises count device cycles at the device clock's slow edge
+    (clock.SOURCE_PPM): with a stand-in 20000 ppm, tipd_fast and min_packet both drop below
+    their values at 0 ppm; at the declared ppm they equal floor(nominal x (1 - ppm / 1e6))"""
+    import clock
+    saved = dict(clock.SOURCE_PPM)
+    try:
+        cur = LC.premises()
+        clock.SOURCE_PPM.clear()
+        clock.SOURCE_PPM.update({t: 0 for t in saved})
+        p0 = LC.premises()
+        clock.SOURCE_PPM.update({t: 20000 for t in saved})
+        p2 = LC.premises()
+    finally:
+        clock.SOURCE_PPM.clear()
+        clock.SOURCE_PPM.update(saved)
+    moved = p2["tipd_fast"] < p0["tipd_fast"] and p2["min_packet"] < p0["min_packet"]
+    return moved, ("tipd_fast %d / min_packet %d at the declared %d ppm; at 0 ppm %d / %d, at "
+                   "20000 ppm %d / %d" % (cur["tipd_fast"], cur["min_packet"],
+                                          max(saved.values()), p0["tipd_fast"],
+                                          p0["min_packet"], p2["tipd_fast"], p2["min_packet"]))
 
 
 def check_slot_branch(BB, PC, I):
@@ -740,6 +766,15 @@ def main():
     k15b, _m = check_depth(BB, PC, I, texts={"model/cert_stamp.py": "import drain_table as DT\n"})
     kills.append(("M_LC_STAMP_READS_CF", not k15b,
                   "a stamp source importing drain_table: check 15 red"))
+    # check 16: the device clock's own error in the host-interval premises
+    ok16, msg16 = check_ppm(LC)
+    print("  check 16 %s  %s" % ("GREEN" if ok16 else "RED  ", msg16))
+    LC.PPM_MUT = True
+    try:
+        k16, _m = check_ppm(LC)
+    finally:
+        LC.PPM_MUT = False
+    kills.append(("M_LC_PPM_IGNORED", not k16, "SOURCE_PPM left out of tipd_fast: check 16 red"))
     # M_LC_FT_UNSEEN / M_LC_FT_NOFLOOR
     orig_ft = PC.arm_is_ft
     PC.arm_is_ft = lambda x, I=None: False
@@ -813,7 +848,7 @@ def main():
         print("  must-fire %-18s %s  %s" % (name, ok_txt if killed else "SURVIVED", what))
     teeth = all(k for _n, k, _w in kills)
     green = (ok1 and not fails and ok3 and ok4 and ok5 and ok6 and ok7 and ok8 and ok9 and ok10
-             and ok11 and ok12 and ok13 and ok14 and ok15)
+             and ok11 and ok12 and ok13 and ok14 and ok15 and ok16)
     verdict = "PASSED" if (green and teeth) else ("FAILED (must-fire survived)" if not teeth
                                                    else "FAILED")
     print("GATE lane-cert: %s" % verdict)
