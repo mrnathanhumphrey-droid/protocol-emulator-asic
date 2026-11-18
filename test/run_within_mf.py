@@ -114,6 +114,8 @@ def frames(ev):
 
 
 def main() -> int:
+    from toolchain import banner
+    banner("iverilog", "vvp")          # V2 (gate_tool_pinning): say which binaries ran
     import compile as C
     import run_poset_compile as RPC
     hz = C.clock.hz()
