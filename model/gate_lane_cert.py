@@ -656,15 +656,18 @@ def main():
             break
     if target is not None:
         p2 = p[:target + 1] + [I.act(I.OP_LEVEL, I.PIN_NONE, 0, 40)] + p[target + 1:]
+        why = ""
         try:
             f, _o = run_cert(LC, V.image(prog=p2))
             hit = any(x[1].startswith("armed late") and x[1] not in {y[1] for y in fails}
                       for x in f)
-        except Exception as ex:                      # a shifted branch target may not assemble
-            hit, _o = False, str(ex)
+        except ValueError as ex:
+            # the encoder refuses the shifted image (pe_isa: a field / the store does not
+            # fit): the must-fire did not run -- recorded in its verdict line, never a pass
+            hit, why = False, " (image not built: %s)" % str(ex)[:80]
     else:
-        hit = False
-    kills.append(("M_LC_LATE_SOP", hit, "a 40-cycle nop before a handshake copy's arm_sop"))
+        hit, why = False, " (no handshake arm_sop found)"
+    kills.append(("M_LC_LATE_SOP", hit, "a 40-cycle nop before a handshake copy's arm_sop" + why))
     # M_LC_SHIFTI_FULL
     orig_sp = PC.spacing_of
     PC.spacing_of = lambda x, I=None: x["delay"]
