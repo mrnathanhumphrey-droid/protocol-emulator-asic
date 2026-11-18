@@ -63,3 +63,4 @@ import JLane.Buf
 import JLane.HeadS
 import JLane.BufEng
 import JLane.FlushKeep
+import JLane.FlushKill
