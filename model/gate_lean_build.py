@@ -102,7 +102,9 @@ KEY = ("dstar", "dstar29", "dstar39", "dstar39_v2", "dstar39_st", "dstar39_hold"
        "contend_margin", "contend_per_lane_val",
        # RespWinB.lean (Wilson 11-18, slot_on_composition part A): the window bound on the
        # buffered engine with flushes and kill; A2 for a lane flushed at its own edges
-       "stepBKK_ts_y", "ts_ge_startBK", "lemmaA_nBK", "wb_bound_winBK", "wb_bound_winBK_fl")
+       "stepBKK_ts_y", "ts_ge_startBK", "lemmaA_nBK", "wb_bound_winBK", "wb_bound_winBK_fl",
+       # NpfB.lean (Wilson 11-18, slot_on_composition step 1): the no-prefetch hold on runB
+       "held_le_one", "want_frozenB", "npf_holdB", "npf_unlockB")
 #: proof_constants.load() key -> the Lean expression that must evaluate to it (SPEC: the map)
 CONSTS = {
     "lemmaA_window": "LEMMA_A_WINDOW", "R_base": "R_BASE", "dispatch_cycles": "DISPATCH_CYCLES",
