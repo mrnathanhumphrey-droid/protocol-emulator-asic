@@ -83,6 +83,9 @@ every must-fire must turn its check red, or the gate is not testing what it says
   check 16 the host-interval premises (tipd_fast, min_packet) count device cycles at the device
            clock's slow edge, clock.SOURCE_PPM: a stand-in 20000 ppm moves both below 0 ppm's
   M_LC_PPM_IGNORED    SOURCE_PPM left out (check 16 red)
+  check 17 an edge-paced lane with no T_ext and a late lane: queue_refusal refuses by name
+           ("1.6a not checkable"), never raises out of the certificate
+  M_LC_EDGEPACED_CRASH  the catch removed (check 17 red)
   M_LC_FT_UNSEEN    no ARM read as FALLTHROUGH                    -> check 3 red
   M_LC_FT_NOFLOOR   no lateness floor after the flush             -> check 3 red
 Static, < 2 s. Usage: python model/gate_lane_cert.py [dir holding usbdev.py]
@@ -353,6 +356,21 @@ def check_ppm(LC):
                    "20000 ppm %d / %d" % (cur["tipd_fast"], cur["min_packet"],
                                           max(saved.values()), p0["tipd_fast"],
                                           p0["min_packet"], p2["tipd_fast"], p2["min_packet"]))
+
+
+def check_edge_paced(BB):
+    """check 17: an edge-paced lane (a peer-released SPI target, gate_a2_program's image) with no
+    T_ext registered for its image, and a late lane: queue_refusal refuses by name ("1.6a not
+    checkable ... EDGE-PACED") instead of raising out of the certificate"""
+    import pe_proto
+    tg = pe_proto.SPITarget(mode=0, sck=4, mosi_pin=5, nbytes=3)
+    img = pe_proto.image({0: tg.program()}, {0: tg.header()}, t_ext=tg.t_ext())
+    try:
+        why = BB.queue_refusal(img, 0, {0: {"max_late": 1}})
+    except ValueError as exc:      # EdgePacedNoTExt (a ValueError) escaping: the defect, red
+        return False, "queue_refusal raised %s: %s" % (type(exc).__name__, str(exc)[:70])
+    ok = bool(why) and "not checkable" in why and "EDGE-PACED" in why
+    return ok, "edge-paced lane, no T_ext, a late lane: %s" % ((why or "NOT REFUSED")[:90])
 
 
 def check_slot_branch(BB, PC, I):
@@ -775,6 +793,16 @@ def main():
     finally:
         LC.PPM_MUT = False
     kills.append(("M_LC_PPM_IGNORED", not k16, "SOURCE_PPM left out of tipd_fast: check 16 red"))
+    # check 17: an edge-paced lane with no T_ext is refused by name, not a crash
+    ok17, msg17 = check_edge_paced(BB)
+    print("  check 17 %s  %s" % ("GREEN" if ok17 else "RED  ", msg17))
+    BB.EDGEPACED_MUT = True
+    try:
+        k17, _m = check_edge_paced(BB)
+    finally:
+        BB.EDGEPACED_MUT = False
+    kills.append(("M_LC_EDGEPACED_CRASH", not k17,
+                  "queue_refusal lets EdgePacedNoTExt out: check 17 red"))
     # M_LC_FT_UNSEEN / M_LC_FT_NOFLOOR
     orig_ft = PC.arm_is_ft
     PC.arm_is_ft = lambda x, I=None: False
@@ -848,7 +876,7 @@ def main():
         print("  must-fire %-18s %s  %s" % (name, ok_txt if killed else "SURVIVED", what))
     teeth = all(k for _n, k, _w in kills)
     green = (ok1 and not fails and ok3 and ok4 and ok5 and ok6 and ok7 and ok8 and ok9 and ok10
-             and ok11 and ok12 and ok13 and ok14 and ok15 and ok16)
+             and ok11 and ok12 and ok13 and ok14 and ok15 and ok16 and ok17)
     verdict = "PASSED" if (green and teeth) else ("FAILED (must-fire survived)" if not teeth
                                                    else "FAILED")
     print("GATE lane-cert: %s" % verdict)

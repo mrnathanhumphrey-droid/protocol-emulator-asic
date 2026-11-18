@@ -81,8 +81,10 @@ def slot_timeout_drop(g, I, ready, lat, k=None, contend=0):
 
 #: must-fire switch (gate_lane_cert M_LC_CONTEND_OFF): the port's contention ignored
 CONTEND_MUT = False
-#: must-fire switch (gate_lane_cert M_LC_DEPTH_PASS): a slot depth above slot_depth certified
+#: must-fire switch (gate_lane_cert M_LC_DEPTH_GT2): a slot depth above slot_depth certified
 DEPTH_MUT = False
+#: must-fire switch (gate_lane_cert M_LC_EDGEPACED_CRASH): queue_refusal lets EdgePacedNoTExt out
+EDGEPACED_MUT = False
 
 
 def slot_contenders(graphs, I, l):
@@ -307,6 +309,13 @@ def queue_refusal(img, B, lanes):
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             json.dump({"images": {"live": ent}}, fh)
         q = P.queue_slot(img, lateness=True, budget_path=tmp)
+    except P.EdgePacedNoTExt as exc:
+        # an edge-paced lane with no declared T_ext: 1.6a cannot be evaluated, so the image is
+        # not certified -- refused by name, never a crash of the certificate (pe_asm and
+        # program_a2 refuse the same way)
+        if EDGEPACED_MUT:
+            raise
+        return "1.6a not checkable: %s" % str(exc)[:160]
     finally:
         os.remove(tmp)
     bad = sorted(((int(ln), v) for ln, v in q.items() if not v["ok"]), key=lambda kv: kv[0])
