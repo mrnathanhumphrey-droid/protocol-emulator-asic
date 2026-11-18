@@ -93,7 +93,10 @@ KEY = ("dstar", "dstar29", "dstar39", "dstar39_v2", "dstar39_st", "dstar39_hold"
        "ft_edge_margin_direct", "ft_edge_cap_before_edge_direct",
        # FlushKill.lean (Wilson 11-17, K2a): BufEng's invariant across the keep-flush, with K5
        "wfBK_step", "wfBK_run", "wfBK_init", "stepBKK_noflush", "edge_survives_flushK",
-       "flushK_keeps_only_edge", "flushK_buf_empty", "kill_files_nothing")
+       "flushK_keeps_only_edge", "flushK_buf_empty", "kill_files_nothing",
+       # FlushHeld.lean (Wilson 11-17, K2b): the buffered armed view; held at the edge
+       "heldB_step", "armed_step", "armInvB_step", "flushOk_hit", "edge_held_at_edge",
+       "ft_edge_at_release", "edge_held_armed", "ft_edge_at_release_armed")
 #: proof_constants.load() key -> the Lean expression that must evaluate to it (SPEC: the map)
 CONSTS = {
     "lemmaA_window": "LEMMA_A_WINDOW", "R_base": "R_BASE", "dispatch_cycles": "DISPATCH_CYCLES",
