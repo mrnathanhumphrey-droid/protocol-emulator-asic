@@ -81,6 +81,8 @@ def slot_timeout_drop(g, I, ready, lat, k=None, contend=0):
 
 #: must-fire switch (gate_lane_cert M_LC_CONTEND_OFF): the port's contention ignored
 CONTEND_MUT = False
+#: must-fire switch (gate_lane_cert M_LC_DEPTH_PASS): a slot depth above slot_depth certified
+DEPTH_MUT = False
 
 
 def slot_contenders(graphs, I, l):
@@ -461,6 +463,11 @@ def _image_budget(img, iters=80, premise_gaps=None, ready=None, scheme="window")
         # certified by the EDF scheme
         return {"B": None, "reason": "not applied to a USB image (the USB lane's response is "
                 "PrioResp's; one closure theorem per image)", "lanes": {}}
+    if SLOT and SLOT > k["slot_depth"] and not DEPTH_MUT:
+        # Wilson 11-17: depth above the buffer's has no theorem (READY_RULES depth_gt2,
+        # counterfactual); the certificate refuses it outright rather than drop its words
+        return {"B": None, "reason": "slot depth %d > slot_depth %d: no theorem (counterfactual "
+                "only, never certified)" % (SLOT, k["slot_depth"]), "lanes": {}}
     graphs = {l: LC.build(img, l, prem, I) for l in lanes}
     for l, pg in premise_gaps.items():
         for w, gp in pg.items():

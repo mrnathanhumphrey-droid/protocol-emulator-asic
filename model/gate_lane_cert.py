@@ -75,6 +75,11 @@ every must-fire must turn its check red, or the gate is not testing what it says
            ready only while its free-port margin covers the wait (PC+1 not at wait 8; PC+2 from
            d = dmin + 8; the FALLTHROUGH timeout word from T = FILL + 8 + L); idle neighbours 0
   M_LC_CONTEND_OFF    contention ignored, wait 0 (check 14 red)
+  check 15 slot depth above slot_depth (2) is refused by the certificate (no theorem; Wilson
+           11-17), and the record / stamp sources never read the counterfactual (drain_table's
+           prefetch columns, a `ready` set, counterfactual=True)
+  M_LC_DEPTH_GT2     depth 3 certified (check 15 red)
+  M_LC_STAMP_READS_CF a stamp source importing drain_table (check 15 red)
   M_LC_FT_UNSEEN    no ARM read as FALLTHROUGH                    -> check 3 red
   M_LC_FT_NOFLOOR   no lateness floor after the flush             -> check 3 red
 Static, < 2 s. Usage: python model/gate_lane_cert.py [dir holding usbdev.py]
@@ -282,6 +287,46 @@ def check_slot_contend(BB, PC, I):
                        "one older requester: wait %d; PC+1 / PC+2 ready free, not at wait %d; "
                        "PC+2 ready from d = %d; timeout word from T = FILL + %d; idle neighbours "
                        "wait 0" % (cpl, cpl, dmin + cpl, cpl))
+
+
+#: the sources that make the record and the stamp, and what they must never read (Wilson 11-17)
+CF_SOURCES = ("model/gen_branch_budget.py", "model/cert_stamp.py")
+CF_TOKENS = ("drain_table", "ready=", "counterfactual=True")
+
+
+def cf_reads(texts):
+    """[(source, token)]: a record / stamp source that reads the counterfactual"""
+    return [(src, t) for src, txt in texts.items() for t in CF_TOKENS if t in txt]
+
+
+def check_depth(BB, PC, I, texts=None):
+    """check 15: depth above the buffer's is refused (Wilson 11-17): with SLOT = slot_depth + 1
+    check 10's image has no certificate and the reason names the depth; at slot_depth it
+    certifies. And the record / stamp sources never read the counterfactual (the drain table's
+    prefetch columns, a `ready` set, `counterfactual=True`)."""
+    k = PC.load()
+    dep = k["slot_depth"]
+    img = _ft_slot_image(I, TIMEOUT_E2E[0], d1=TIMEOUT_E2E[1])
+    saved = BB.SLOT
+    try:
+        BB.SLOT = dep + 1
+        r3 = BB.image_budget(img)
+        BB.SLOT = dep
+        r2 = BB.image_budget(img)
+    finally:
+        BB.SLOT = saved
+    if texts is None:
+        texts = {}
+        for src in CF_SOURCES:
+            with open(os.path.join(ROOT, src), encoding="utf-8") as fh:
+                texts[src] = fh.read()
+    reads = cf_reads(texts)
+    ok = (r3["B"] is None and "slot depth" in (r3["reason"] or "") and r2["B"] is not None
+          and not reads)
+    return ok, ("SLOT %d: %s; SLOT %d: %s; record / stamp read the counterfactual: %s"
+                % (dep + 1, "refused" if r3["B"] is None else "CERTIFIED B %s" % r3["B"],
+                   dep, "B %s" % r2["B"] if r2["B"] is not None else "NO CERTIFICATE",
+                   ", ".join("%s (%s)" % x for x in reads) if reads else "none"))
 
 
 def check_slot_branch(BB, PC, I):
@@ -683,6 +728,18 @@ def main():
     finally:
         BB.CONTEND_MUT = False
     kills.append(("M_LC_CONTEND_OFF", not k14, "contention ignored (wait 0): check 14 red"))
+    # check 15: depth above the buffer's refused; the record / stamp never read the counterfactual
+    ok15, msg15 = check_depth(BB, PC, I)
+    print("  check 15 %s  %s" % ("GREEN" if ok15 else "RED  ", msg15))
+    BB.DEPTH_MUT = True
+    try:
+        k15, _m = check_depth(BB, PC, I)
+    finally:
+        BB.DEPTH_MUT = False
+    kills.append(("M_LC_DEPTH_GT2", not k15, "slot depth 3 certified: check 15 red"))
+    k15b, _m = check_depth(BB, PC, I, texts={"model/cert_stamp.py": "import drain_table as DT\n"})
+    kills.append(("M_LC_STAMP_READS_CF", not k15b,
+                  "a stamp source importing drain_table: check 15 red"))
     # M_LC_FT_UNSEEN / M_LC_FT_NOFLOOR
     orig_ft = PC.arm_is_ft
     PC.arm_is_ft = lambda x, I=None: False
@@ -756,7 +813,7 @@ def main():
         print("  must-fire %-18s %s  %s" % (name, ok_txt if killed else "SURVIVED", what))
     teeth = all(k for _n, k, _w in kills)
     green = (ok1 and not fails and ok3 and ok4 and ok5 and ok6 and ok7 and ok8 and ok9 and ok10
-             and ok11 and ok12 and ok13 and ok14)
+             and ok11 and ok12 and ok13 and ok14 and ok15)
     verdict = "PASSED" if (green and teeth) else ("FAILED (must-fire survived)" if not teeth
                                                    else "FAILED")
     print("GATE lane-cert: %s" % verdict)
