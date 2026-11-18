@@ -99,7 +99,10 @@ KEY = ("dstar", "dstar29", "dstar39", "dstar39_v2", "dstar39_st", "dstar39_hold"
        "ft_edge_at_release", "edge_held_armed", "ft_edge_at_release_armed",
        # ContendB.lean (Wilson 11-17, C3): the slot under contention, FCFS by capture
        "slot_wait_fcfs", "oldSum_split", "slot_wait_fcfs_two", "slot_wait_fcfs_ret",
-       "contend_margin", "contend_per_lane_val")
+       "contend_margin", "contend_per_lane_val",
+       # RespWinB.lean (Wilson 11-18, slot_on_composition part A): the window bound on the
+       # buffered engine with flushes and kill; A2 for a lane flushed at its own edges
+       "stepBKK_ts_y", "ts_ge_startBK", "lemmaA_nBK", "wb_bound_winBK", "wb_bound_winBK_fl")
 #: proof_constants.load() key -> the Lean expression that must evaluate to it (SPEC: the map)
 CONSTS = {
     "lemmaA_window": "LEMMA_A_WINDOW", "R_base": "R_BASE", "dispatch_cycles": "DISPATCH_CYCLES",
