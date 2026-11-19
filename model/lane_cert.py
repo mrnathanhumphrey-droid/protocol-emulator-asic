@@ -315,6 +315,30 @@ def certificate(g, preds, gaps, k, B, tail, iters=200, floor=None, xr=None, rbas
     return None
 
 
+def restart_margins(g, preds, gaps, k, B, cert):
+    """RestartB.restart_runBK -> GapRunT at a FALLTHROUGH edge (Wilson 11-18, step 3d): the lane
+    restarts 3 cycles after its flush holding only the edge word c2, released the cycle after the
+    flush, so the trajectory's start conditions read, with the start 3 past the flush:
+      hZS0: Z[c2] >= DSTAR + B - 1               (the word after c2: refill timed from the flush)
+      hHS0: lat[c3] + gp[c2] >= HEAD_SLACK + B - 1   (each successor c3 of c2)
+    [(a, c2, margin hZS0, margin hHS0 or None)] for every FALLTHROUGH ARM of `g` whose c2 is in
+    `g`; `cert` = certificate(...)'s (lat, Z, Rr). Nothing here certifies: it is what the gate's
+    check 20 asserts on every certified image."""
+    lat, Z, _Rr = cert
+    I = _isa()
+    D, HS = k["dstar"], k["head_slack"]
+    out = []
+    for a, (_c1, c2) in sorted(ft_paths(g, I).items()):
+        if c2 not in g:
+            continue
+        gp2 = gaps[c2][-1]
+        mz = Z[c2] - (D + B - 1)
+        mh = min([lat[c3] + gp2 - (HS + B - 1) for c3 in g[c2][1]] or [None]) \
+            if g[c2][1] else None
+        out.append((a, c2, mz, mh))
+    return out
+
+
 def br1_window_count(g, gaps, lat, W):
     """The most branch-1 refills the USB lane can take in any window of W cycles under (b'):
     one per late word (a refill goes only to a released lane with an empty head, and fills it),

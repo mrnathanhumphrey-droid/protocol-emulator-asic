@@ -99,7 +99,36 @@ KEY = ("dstar", "dstar29", "dstar39", "dstar39_v2", "dstar39_st", "dstar39_hold"
        "ft_edge_at_release", "edge_held_armed", "ft_edge_at_release_armed",
        # ContendB.lean (Wilson 11-17, C3): the slot under contention, FCFS by capture
        "slot_wait_fcfs", "oldSum_split", "slot_wait_fcfs_two", "slot_wait_fcfs_ret",
-       "contend_margin", "contend_per_lane_val")
+       "contend_margin", "contend_per_lane_val",
+       # RespWinB.lean (Wilson 11-18, slot_on_composition part A): the window bound on the
+       # buffered engine with flushes and kill; A2 for a lane flushed at its own edges
+       "stepBKK_ts_y", "ts_ge_startBK", "lemmaA_nBK", "wb_bound_winBK", "wb_bound_winBK_fl",
+       # NpfB.lean (Wilson 11-18, slot_on_composition step 1): the no-prefetch hold on runB
+       "held_le_one", "want_frozenB", "npf_holdB", "npf_unlockB",
+       # GapRunB.lean (Wilson 11-18, slot_on_composition step 2): GapRun on runB, hZC charging
+       "ts_monoB", "ts_gapB", "rdB_eq", "pb_defer_gB", "pending_bound_gapB", "head_late_gapB",
+       # TrajB.lean (Wilson 11-18, slot_on_composition step 3a): the buffered engine as lane y
+       # sees it, along any trajectory that agrees with stepB for y (the flush as a restart)
+       "now_T", "ts_monoT", "port_waitT", "window_leT", "window_le_19T", "held_runT",
+       "head_valid_of_countsT", "npf_holdT", "npf_unlockT",
+       # GapRunT.lean (Wilson 11-18, step 3b): GapRun along a trajectory from 2 words or from
+       # the restart's 1 (the start's refill timed from the start cycle); GapRunB's two
+       # theorems are its instances along runB (trajY_runB, cntT_runB, chargeSumT_runB)
+       "rdT_eq", "ts_gapT", "pb_defer_gT", "pending_startT", "pending_bound_gapT",
+       "head_late_gapT", "trajY_runB", "cntT_runB", "chargeSumT_runB",
+       # RestartB.lean (Wilson 11-18, step 3c): runBK between y's flushes is a trajectory
+       "agree_stepBKK", "trajY_runBK", "wfB_runBK",
+       # RestartB.lean (step 3c part 2): at f + 3 the flushed lane holds exactly its edge word
+       "frozen_stepBKK", "restart_three", "restart_runBK",
+       # RestartB.lean: a killed capture for y needs a flush of y one or two cycles before, so a
+       # stretch with y unflushed (from two cycles back) is a trajectory
+       "kill_prov", "kill_prov_runBK", "trajY_runBK_noflush",
+       # SlotReadyB.lean (step 4, R1): slot readiness on the buffered engine along a trajectory --
+       # the run-level link behind READY_RULES (counting core, port, FCFS wait, issue in the wait)
+       "held_of_head", "held_of_ret", "ready_of_capture_T", "slot_issue_cap_T", "slot_wait_T",
+       "slot_issue_within_T", "slot_ready_T",
+       # SlotReadyB.lean (R2): READY_RULES pc1_plain on the buffered engine (p1b_margin_scan cited)
+       "wb_after_empty_T", "ready_pc1_plain_T")
 #: proof_constants.load() key -> the Lean expression that must evaluate to it (SPEC: the map)
 CONSTS = {
     "lemmaA_window": "LEMMA_A_WINDOW", "R_base": "R_BASE", "dispatch_cycles": "DISPATCH_CYCLES",
