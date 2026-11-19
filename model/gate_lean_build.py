@@ -122,7 +122,11 @@ KEY = ("dstar", "dstar29", "dstar39", "dstar39_v2", "dstar39_st", "dstar39_hold"
        "frozen_stepBKK", "restart_three", "restart_runBK",
        # RestartB.lean: a killed capture for y needs a flush of y one or two cycles before, so a
        # stretch with y unflushed (from two cycles back) is a trajectory
-       "kill_prov", "kill_prov_runBK", "trajY_runBK_noflush")
+       "kill_prov", "kill_prov_runBK", "trajY_runBK_noflush",
+       # SlotReadyB.lean (step 4, R1): slot readiness on the buffered engine along a trajectory --
+       # the run-level link behind READY_RULES (counting core, port, FCFS wait, issue in the wait)
+       "held_of_head", "held_of_ret", "ready_of_capture_T", "slot_issue_cap_T", "slot_wait_T",
+       "slot_issue_within_T", "slot_ready_T")
 #: proof_constants.load() key -> the Lean expression that must evaluate to it (SPEC: the map)
 CONSTS = {
     "lemmaA_window": "LEMMA_A_WINDOW", "R_base": "R_BASE", "dispatch_cycles": "DISPATCH_CYCLES",
