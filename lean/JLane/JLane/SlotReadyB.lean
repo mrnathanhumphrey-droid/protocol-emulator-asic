@@ -164,14 +164,15 @@ theorem slot_wait_T (T : Nat) (hT : TrajY P win usb sreq y τ T) (u : Lane) (old
 
 /-- **The issue comes within the wait.** If over `[a, a + W]` the requester's contract holds up
 to `u`'s issue (a request pending, every pick `u` or an older lane), with at most `C` charged
-scans and `3 + L_REFILL · C ≤ W`, then `u`'s slot fetch is issued at some `j ≤ a + W`. -/
+scans and `rem + L_REFILL · C ≤ W` (`rem`: the port's cycles to its next scan at `a`), then `u`'s slot fetch is issued at some `j ≤ a + W`. -/
 theorem slot_issue_within_T (T : Nat) (hT : TrajY P win usb sreq y τ T) (u : Lane)
     (old : Lane → Bool) (a W C : Nat) (hn : a + W + 1 ≤ T)
     (hq : ∀ j, a ≤ j → j ≤ a + W → (∀ i, a ≤ i → i < j → ¬SlotForB P usb sreq u (τ i)) →
       (sreq (τ j)).isSome = true)
     (hold : ∀ j, a ≤ j → j ≤ a + W → (∀ i, a ≤ i → i < j → ¬SlotForB P usb sreq u (τ i)) →
       ∀ w, sreq (τ j) = some w → w = u ∨ old w = true)
-    (hC : cntFromT τ (OldIssB P usb sreq old) a (W + 1) ≤ C) (hW : 3 + L_REFILL * C ≤ W) :
+    (hC : cntFromT τ (OldIssB P usb sreq old) a (W + 1) ≤ C)
+    (hW : rem (τ a).e.pst + L_REFILL * C ≤ W) :
     ∃ j, a ≤ j ∧ j ≤ a + W ∧ SlotForB P usb sreq u (τ j) := by
   by_cases hex : ∃ m, m < W + 1 ∧ SlotForB P usb sreq u (τ (a + m))
   · obtain ⟨m, hm, hs⟩ := hex
@@ -192,7 +193,7 @@ theorem slot_issue_within_T (T : Nat) (hT : TrajY P win usb sreq y τ T) (u : La
   omega
 
 /-- **Slot readiness along the trajectory.** The requester's contract from `a` (the raise) with
-the wait `W = 3 + L_REFILL · C`; the word's release `t` at least `W + 4` after the raise (the
+the wait `W = rem + L_REFILL · C` (`rem`: the port's cycles to its next scan at the raise); the word's release `t` at least `W + 4` after the raise (the
 capture three cycles after the issue, valid the cycle after); `w2` the retirement before `t` with
 none of `y`'s in `(w2, t)`; and before `w2`, from the raise on, `y` holding a word and retiring
 only at `w2`. Then `y`'s head is valid at `t`. -/
@@ -202,7 +203,8 @@ theorem slot_ready_T (T : Nat) (hT : TrajY P win usb sreq y τ T) (hWf : ∀ n, 
       (sreq (τ j)).isSome = true)
     (hold : ∀ j, a ≤ j → j ≤ a + W → (∀ i, a ≤ i → i < j → ¬SlotForB P usb sreq y (τ i)) →
       ∀ w, sreq (τ j) = some w → w = y ∨ old w = true)
-    (hC : cntFromT τ (OldIssB P usb sreq old) a (W + 1) ≤ C) (hW : 3 + L_REFILL * C ≤ W)
+    (hC : cntFromT τ (OldIssB P usb sreq old) a (W + 1) ≤ C)
+    (hW : rem (τ a).e.pst + L_REFILL * C ≤ W)
     (hw2 : IsRet P y (τ w2).e)
     (hnr : cntT τ (fun z => IsRet P y z.e) (w2 + 1) = cntT τ (fun z => IsRet P y z.e) t)
     (hheld : ∀ q, a ≤ q → q < w2 → 1 ≤ (τ q).held y ∧
@@ -214,6 +216,159 @@ theorem slot_ready_T (T : Nat) (hT : TrajY P win usb sreq y τ T) (hWf : ∀ n, 
   exact ready_of_capture_T P win usb sreq y τ T hT hWf w2 (j + 3) t ht hw2t (by omega) hw2 hnr
     hhit (fun h => hheld (j + 3) (by omega) h)
 
+/-! ### `pc1_plain`: PC+1 of a plain ARM (`READY_RULES`, `Slot.p1b_margin_scan`)
+
+The ARM is captured at `c` into `y`'s empty head; the requester raises at the scan after
+(`c + 1`, `RaiseAtCapture`'s cycle); `w2` is `y`'s first retirement after `c` (the ARM's: it is
+the only word `y` holds); ArmRetire's gap (`hgap`, what the refinement supplies, as in
+`ArmRetire.arm_rd`) releases the successor at least `ARM_RETIRE_GAP` past the ARM's writeback.
+The ARM writes back no earlier than `c + 3` (its head is valid for the two dispatch cycles
+before), so the successor's release is at least `c + 3 + ARM_RETIRE_GAP`, and
+`p1b_margin_scan` puts the slot's fill `P1B_FILL_SCAN` plus the margin under it. Under the
+port's wait the word is ready while `L_REFILL · C ≤ P1B_MARGIN_SCAN` (`contend_margin`). -/
+
+theorem disp_wb_T (T : Nat) (hT : TrajY P win usb sreq y τ T) (n : Nat) (hn : n < T)
+    (h : (τ (n + 1)).e.st = .wb) :
+    (τ n).e.st = .drive ∧ (τ (n + 1)).e.cur = (τ n).e.cur := by
+  have hag := hT n hn
+  rw [hag.2.2.1, stepB_e_st] at h
+  rw [hag.2.2.2.1, stepB_e_cur]
+  unfold dispNext at h ⊢
+  cases hs : (τ n).e.st with
+  | drive => exact ⟨rfl, rfl⟩
+  | wb => rw [hs] at h; cases h
+  | idle =>
+    rw [hs] at h
+    dsimp only at h
+    cases hw : win (τ n).e with
+    | none => rw [hw] at h; cases h
+    | some w => rw [hw] at h; dsimp only at h; split at h <;> cases h
+
+theorem disp_drive_T (T : Nat) (hT : TrajY P win usb sreq y τ T) (n : Nat) (hn : n < T)
+    (h : (τ (n + 1)).e.st = .drive) (hc : (τ (n + 1)).e.cur = y) :
+    (τ n).e.headValid y = true := by
+  have hag := hT n hn
+  rw [hag.2.2.1, stepB_e_st] at h
+  rw [hag.2.2.2.1, stepB_e_cur] at hc
+  unfold dispNext at h hc
+  cases hs : (τ n).e.st with
+  | drive => rw [hs] at h; cases h
+  | wb => rw [hs] at h; cases h
+  | idle =>
+    rw [hs] at h hc
+    dsimp only at h hc
+    cases hw : win (τ n).e with
+    | none => rw [hw] at h; cases h
+    | some w =>
+      rw [hw] at h hc
+      dsimp only at h hc
+      by_cases hv : (τ n).e.headValid w = true
+      · rw [if_pos hv] at hc
+        rw [← hc]
+        exact hv
+      · rw [if_neg hv] at h; cases h
+
+/-- **A writeback reads a head valid for the two cycles before it**: if `y` writes back at `w`
+and its head is empty at `c < w`, then `c + 3 ≤ w`. -/
+theorem wb_after_empty_T (T : Nat) (hT : TrajY P win usb sreq y τ T)
+    (hWf : ∀ n, n ≤ T → WfB (τ n)) (c w : Nat) (hw : w ≤ T) (hcw : c < w)
+    (hwb : IsWB y (τ w).e) (hc : (τ c).e.headValid y = false) : c + 3 ≤ w := by
+  -- the head is valid at w (the dispatcher reads only a valid head)
+  have hvw : (τ w).e.headValid y = true := by
+    have := (hWf w hw).disp (by rw [hwb.1]; decide)
+    rw [hwb.2] at this
+    exact this
+  obtain ⟨w1, rfl⟩ : ∃ w1, w = w1 + 1 := ⟨w - 1, by omega⟩
+  obtain ⟨hd, hcur⟩ := disp_wb_T P win usb sreq y τ T hT w1 (by omega) hwb.1
+  have hcy : (τ w1).e.cur = y := by rw [← hcur]; exact hwb.2
+  have hv1 : (τ w1).e.headValid y = true := by
+    have := (hWf w1 (by omega)).disp (by rw [hd]; decide)
+    rw [hcy] at this
+    exact this
+  rcases Nat.lt_or_ge c w1 with hlt | hge
+  · obtain ⟨w0, rfl⟩ : ∃ w0, w1 = w0 + 1 := ⟨w1 - 1, by omega⟩
+    have hv0 := disp_drive_T P win usb sreq y τ T hT w0 (by omega) hd hcy
+    rcases Nat.lt_or_ge c w0 with hlt2 | hge2
+    · omega
+    · have : c = w0 := by omega
+      subst this
+      rw [hc] at hv0; cases hv0
+  · have : c = w1 := by omega
+    subst this
+    rw [hc] at hv1; cases hv1
+
+/-- An empty head holds nothing (HeadFirst; a buffered word sits behind a valid head). -/
+theorem held_zero_of_empty (x : EngB) (hW : WfB x) (h : x.e.headValid y = false) :
+    x.held y = 0 := by
+  have hs := hW.hf y h
+  have hb : x.buf y = false := by
+    cases hb : x.buf y
+    · rfl
+    · have := hW.bh y hb
+      rw [h] at this; cases this
+  unfold EngB.held nslots
+  unfold Engine.headValid at h
+  unfold Engine.spareValid at hs
+  rw [hb]
+  cases hsel : x.e.sel y
+  · rw [hsel] at h hs; simp at hs; rw [h, hs]; rfl
+  · rw [hsel] at h hs; simp at hs; rw [h, hs]; rfl
+
+/-- **`pc1_plain` on the buffered engine.** The ARM captured at `c` into `y`'s empty head; its
+retirement `w2`, `y`'s first after `c`; `t` with `y` released (`ts ≤ now`) and no retirement of
+`y` in `(w2, t)`; ArmRetire's gap at `w2`; the requester's contract from `c + 1` with `C`
+charged scans and `L_REFILL · C ≤ P1B_MARGIN_SCAN`. Then `y`'s head is valid at `t`. -/
+theorem ready_pc1_plain_T (T : Nat) (hT : TrajY P win usb sreq y τ T)
+    (hWf : ∀ n, n ≤ T → WfB (τ n)) (old : Lane → Bool) (c w2 t C : Nat) (ht : t ≤ T)
+    (hcap : Hit y (τ c).e) (hempty : (τ c).e.headValid y = false) (hcw : c < w2) (hw2t : w2 < t)
+    (hw2 : IsRet P y (τ w2).e)
+    (hfirst : cntT τ (fun z => IsRet P y z.e) c = cntT τ (fun z => IsRet P y z.e) w2)
+    (hnr : cntT τ (fun z => IsRet P y z.e) (w2 + 1) = cntT τ (fun z => IsRet P y z.e) t)
+    (hrel : (τ t).e.ts y ≤ (τ t).e.now)
+    (hgap : (τ w2).e.now + ARM_RETIRE_GAP ≤ (τ (w2 + 1)).e.ts y)
+    (hq : ∀ j, c + 1 ≤ j → j ≤ c + 1 + L_REFILL * C →
+      (∀ i, c + 1 ≤ i → i < j → ¬SlotForB P usb sreq y (τ i)) → (sreq (τ j)).isSome = true)
+    (hold : ∀ j, c + 1 ≤ j → j ≤ c + 1 + L_REFILL * C →
+      (∀ i, c + 1 ≤ i → i < j → ¬SlotForB P usb sreq y (τ i)) →
+      ∀ w, sreq (τ j) = some w → w = y ∨ old w = true)
+    (hC : cntFromT τ (OldIssB P usb sreq old) (c + 1) (L_REFILL * C + 1) ≤ C)
+    (hcm : L_REFILL * C ≤ P1B_MARGIN_SCAN) :
+    (τ t).e.headValid y = true := by
+  have hw3 := wb_after_empty_T P win usb sreq y τ T hT hWf c w2 (by omega) hcw
+    (isWB_of_ret P y _ hw2) hempty
+  -- the successor's release: t ≥ w2 + ARM_RETIRE_GAP
+  have hnow := now_T P win usb sreq y τ T hT
+  have hts := ts_monoT P win usb sreq y τ T hT (w2 + 1) (t - (w2 + 1)) (by omega)
+  rw [show w2 + 1 + (t - (w2 + 1)) = t by omega] at hts
+  have hnt := hnow t ht
+  have hnw := hnow w2 (by omega)
+  have hrt : w2 + ARM_RETIRE_GAP ≤ t := by omega
+  -- the margin (READY_RULES pc1_plain): fill + margin ≤ the ARM's writeback offset + the gap
+  have hm := p1b_margin_scan (w2 - c) (by omega)
+  have hscan : (τ (c + 1)).e.pst = .scan :=
+    hit_then_scanT P win usb sreq y τ T hT c (by omega) hcap
+  apply slot_ready_T P win usb sreq y τ T hT hWf old (c + 1) (L_REFILL * C) C w2 t ht
+    (by simp only [P1B_FILL_SCAN, P1B_MARGIN_SCAN, ARM_RETIRE_GAP, DISPATCH_CYCLES,
+          L_REFILL] at hm hrt hcm ⊢
+        omega)
+    hw2t hq hold hC (by rw [hscan]; simp [rem]) hw2 hnr
+  intro q hq1 hq2
+  -- y holds the ARM from c + 1 to its retirement
+  have hr0 := held_runT P win usb sreq y τ T hT hWf c (by omega)
+  have hrq := held_runT P win usb sreq y τ T hT hWf q (by omega)
+  have h0 := held_zero_of_empty y (τ c) (hWf c (by omega)) hempty
+  have hH : cntT τ (fun z => Hit y z.e) c + 1 ≤ cntT τ (fun z => Hit y z.e) q := by
+    have e : cntT τ (fun z => Hit y z.e) (c + 1) = cntT τ (fun z => Hit y z.e) c + 1 := by
+      rw [cntT_succ, if_pos hcap]
+    have := cntT_mono τ (fun z => Hit y z.e) (c + 1) q (by omega)
+    omega
+  have hR1 := cntT_mono τ (fun z => IsRet P y z.e) c q (by omega)
+  have hR2 := cntT_mono τ (fun z => IsRet P y z.e) q w2 (by omega)
+  have hRw : cntT τ (fun z => IsRet P y z.e) (w2 + 1) =
+      cntT τ (fun z => IsRet P y z.e) w2 + 1 := by
+    rw [cntT_succ, if_pos hw2]
+  exact ⟨by omega, by omega⟩
+
 end
 
 #print axioms held_of_head
@@ -223,5 +378,7 @@ end
 #print axioms slot_wait_T
 #print axioms slot_issue_within_T
 #print axioms slot_ready_T
+#print axioms wb_after_empty_T
+#print axioms ready_pc1_plain_T
 
 end JLane
