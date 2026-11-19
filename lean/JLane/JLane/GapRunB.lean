@@ -1,4 +1,4 @@
-import JLane.NpfB
+import JLane.GapRunT
 import JLane.GapRun
 /-!
 # Brick C3c — the per-retirement certificate on the buffered engine
@@ -126,7 +126,35 @@ theorem pb_defer_gB (hok : SReqB P sreq) (y : Lane) (x0 : EngB) (B T : Nat) (Rr 
   have hnow := now_runB P win usb sreq w2 x0
   omega
 
-/-! ### The pending bound -/
+/-! ### `runB` is a trajectory (`TrajB`): the conversions -/
+
+theorem agree_refl (y : Lane) (a : EngB) : AgreeY y a a :=
+  ⟨rfl, rfl, rfl, rfl, rfl, rfl, fun _ => rfl, fun _ => rfl, rfl⟩
+
+theorem trajY_runB (y : Lane) (x0 : EngB) (T : Nat) :
+    TrajY P win usb sreq y (fun n => runB P win usb sreq n x0) T := fun n _ => by
+  show AgreeY y (runB P win usb sreq (n + 1) x0) (stepB P win usb sreq (runB P win usb sreq n x0))
+  rw [runB_succ']
+  exact agree_refl y _
+
+theorem cntT_runB (x0 : EngB) (Q : EngB → Prop) [DecidablePred Q] :
+    ∀ n, cntT (fun n => runB P win usb sreq n x0) Q n = cntB P win usb sreq Q n x0
+  | 0 => rfl
+  | n + 1 => by
+    rw [cntT_succ, cntT_runB x0 Q n, cntB_succ_back]
+
+theorem chargeSumT_runB (y : Lane) (x0 : EngB) :
+    ∀ m a, chargeSumT P usb sreq y (fun n => runB P win usb sreq n x0) a m
+      = chargeSumB P win usb sreq y m (runB P win usb sreq a x0)
+  | 0, _ => rfl
+  | m + 1, a => by
+    show chargeB P usb sreq y (runB P win usb sreq a x0)
+        + chargeSumT P usb sreq y (fun n => runB P win usb sreq n x0) (a + 1) m
+      = chargeB P usb sreq y (runB P win usb sreq a x0)
+        + chargeSumB P win usb sreq y m (stepB P win usb sreq (runB P win usb sreq a x0))
+    rw [chargeSumT_runB y x0 m (a + 1), runB_succ']
+
+/-! ### The pending bound: `GapRunT.pending_bound_gapT` along `runB`, from both slots full -/
 
 /-- **The pending bound with per-retirement gaps, on the buffered engine.** Refill `#k` of lane
 `y`, owed from retirement `#k` at `w`, still pending at `t` after retirement `#(k+1)` at `w2`:
@@ -151,126 +179,20 @@ theorem pending_bound_gapB (hok : SReqB P sreq) (y : Lane) (x0 : EngB) (B T : Na
       (NpfAt y (runB P win usb sreq w2 x0).e ∧
         x0.e.now + t ≤ (runB P win usb sreq w2 x0).e.ts y + Rr w2 + PENDING_SLACK + B) ∨
       x0.e.now + t ≤ (runB P win usb sreq w x0).e.ts y + Z w + PENDING_SLACK + B := by
-  have hPS : PENDING_SLACK = 25 := pending_slack_val
-  have hD : DSTAR = 20 := dstar_val
-  -- the fresh case, shared by every k
-  have fresh : ∀ (k t w w2 : Nat), t ≤ T → w < w2 → w2 < t →
-      cntB P win usb sreq (fun z => IsRet P y z.e) w x0 = k →
-      IsRet P y (runB P win usb sreq w x0).e →
-      cntB P win usb sreq (fun z => IsRet P y z.e) w2 x0 = k + 1 →
-      IsRet P y (runB P win usb sreq w2 x0).e →
-      cntB P win usb sreq (fun z => Hit y z.e) t x0 ≤ k →
-      k ≤ cntB P win usb sreq (fun z => Hit y z.e) (w + 1) x0 →
-      (NpfAt y (runB P win usb sreq w2 x0).e ∧
-        x0.e.now + t ≤ (runB P win usb sreq w2 x0).e.ts y + Rr w2 + PENDING_SLACK + B) ∨
-      x0.e.now + t ≤ (runB P win usb sreq w x0).e.ts y + Z w + PENDING_SLACK + B := by
-    intro k t w w2 htT hww2 hw2t hwk hwb hw2k hw2b hh hfresh
-    have hm := cntB_mono P win usb sreq (fun z => Hit y z.e) x0 (w + 1) t (by omega)
-    have hr1 : cntB P win usb sreq (fun z => IsRet P y z.e) (w + 1) x0 = k + 1 := by
-      have := cntB_succ_back P win usb sreq (fun z => IsRet P y z.e) w x0
-      rw [if_pos hwb] at this
-      omega
-    have hheld := held_run P win usb sreq hok y (w + 1) x0 hW
-    obtain ⟨hb, ho⟩ := held_le_one _ (wfB_run P win usb sreq hok (w + 1) x0 hW) y
-      (by omega)
-    cases hwant : (runB P win usb sreq (w + 1) x0).e.wantFetch y with
-    | true =>
-      right
-      have hn := window_leB P win usb sreq hok y hy (runB P win usb sreq (w + 1) x0) B (t - (w + 1))
-        (wfB_run P win usb sreq hok (w + 1) x0 hW) hwant hb
-        (fun m hm hm' => hB (w + 1) m (by omega) hm')
-        (fun i hi => by
-          rw [← runB_add]
-          exact no_event_betweenB P win usb sreq (fun z => Hit y z.e) x0 (w + 1) t (w + 1 + i)
-            (by omega) (by omega) (by omega))
-      have hRw := hR w (by omega) hwb
-      have hz := hZ0 w (by omega) hwb
-      have hnow := now_runB P win usb sreq w x0
-      omega
-    | false =>
-      left
-      exact pb_defer_gB P win usb sreq hok y x0 B T Rr (w + 1) w2 t hy hW (hR w2 (by omega) hw2b)
-        hB (by omega) hw2t htT ho hwant hb hw2b (by omega) (by omega)
-  intro k
-  induction k with
-  | zero =>
-    intro t w w2 htT hww2 hw2t hwk hwb hw2k hw2b hh
-    exact fresh 0 t w w2 htT hww2 hw2t hwk hwb hw2k hw2b hh (Nat.zero_le _)
-  | succ k ih =>
-    intro t w w2 htT hww2 hw2t hwk hwb hw2k hw2b hh
-    by_cases hfresh : k + 1 ≤ cntB P win usb sreq (fun z => Hit y z.e) (w + 1) x0
-    · exact fresh (k + 1) t w w2 htT hww2 hw2t hwk hwb hw2k hw2b hh hfresh
-    · obtain ⟨w', hw'w, hw'k, hw'b⟩ :=
-        cntB_reach P win usb sreq (fun z => IsRet P y z.e) w x0 k (by omega)
-      have hgap := rdB_eq P win usb sreq y x0 w' w (Nat.le_of_lt hw'w)
-      have hzc := hZC w' w (by omega) ⟨hw'w, hw'b, hwb, by omega⟩
-      have hz0 := hZ0 w (by omega) hwb
-      have hzf : NpfAt y (runB P win usb sreq w x0).e → Rr w + DSTAR + B ≤ Z w :=
-        hZF w (by omega) hwb
-      have hr1 : cntB P win usb sreq (fun z => IsRet P y z.e) (w + 1) x0 = k + 2 := by
-        have := cntB_succ_back P win usb sreq (fun z => IsRet P y z.e) w x0
-        rw [if_pos hwb] at this
-        omega
-      by_cases hlate : cntB P win usb sreq (fun z => Hit y z.e) t x0 ≤ k
-      · right
-        rcases ih t w' w htT hw'w (by omega) hw'k hw'b hwk hwb hlate with ⟨-, h⟩ | h
-        · omega
-        · omega
-      · obtain ⟨c, hct, hck, hhit⟩ :=
-          cntB_reach P win usb sreq (fun z => Hit y z.e) t x0 k (by omega)
-        have hc1 : cntB P win usb sreq (fun z => Hit y z.e) (c + 1) x0 = k + 1 := by
-          have := cntB_succ_back P win usb sreq (fun z => Hit y z.e) c x0
-          rw [if_pos hhit] at this
-          omega
-        have hwc : w + 1 ≤ c := by
-          rcases Nat.lt_or_ge c (w + 1) with hlt | hge
-          · have := cntB_mono P win usb sreq (fun z => Hit y z.e) x0 (c + 1) (w + 1) hlt
-            omega
-          · exact hge
-        have hct1 := cntB_mono P win usb sreq (fun z => Hit y z.e) x0 (c + 1) t (by omega)
-        have hrc := cntB_mono P win usb sreq (fun z => IsRet P y z.e) x0 (w + 1) (c + 1) (by omega)
-        have hheld := held_run P win usb sreq hok y (c + 1) x0 hW
-        obtain ⟨hb, ho⟩ := held_le_one _ (wfB_run P win usb sreq hok (c + 1) x0 hW)
-          y (by omega)
-        have hic := ih c w' w (by omega) hw'w (by omega) hw'k hw'b hwk hwb (by omega)
-        cases hwant : (runB P win usb sreq (c + 1) x0).e.wantFetch y with
-        | true =>
-          right
-          have hscan : (runB P win usb sreq (c + 1) x0).e.pst = .scan := by
-            rw [runB_succ']
-            exact hit_then_scanB P win usb sreq y (runB P win usb sreq c x0) hhit
-          have hn := window_le_19B P win usb sreq hok y hy (runB P win usb sreq (c + 1) x0) B
-            (t - (c + 1)) (wfB_run P win usb sreq hok (c + 1) x0 hW) hwant hb (Or.inl hscan)
-            (fun m hm hm' => hB (c + 1) m (by omega) hm')
-            (fun i hi => by
-              rw [← runB_add]
-              exact no_event_betweenB P win usb sreq (fun z => Hit y z.e) x0 (c + 1) t (c + 1 + i)
-                (by omega) (by omega) (by omega))
-          rcases hic with ⟨hn', h⟩ | h
-          · have := hzf hn'
-            omega
-          · omega
-        | false =>
-          -- the no-prefetch hold keeps a valid head: the lane holds a word
-          have hge1 : 1 ≤ (runB P win usb sreq (c + 1) x0).held y := by
-            obtain ⟨hv, -, -⟩ := npf_state _ y ho hwant
-            rw [held_def]
-            unfold Engine.headValid at hv
-            cases hs : (runB P win usb sreq (c + 1) x0).e.sel y <;> rw [hs] at hv <;> simp [hv] <;>
-              omega
-          have hcw2 : c + 1 ≤ w2 := by
-            rcases Nat.lt_or_ge w2 (c + 1) with hlt | hge
-            · exfalso
-              have h2 := cntB_succ_back P win usb sreq (fun z => IsRet P y z.e) w2 x0
-              rw [if_pos hw2b] at h2
-              have h3 := cntB_mono P win usb sreq (fun z => IsRet P y z.e) x0 (w2 + 1) (c + 1) hlt
-              omega
-            · exact hge
-          have hrw2 := cntB_mono P win usb sreq (fun z => IsRet P y z.e) x0 (c + 1) w2 hcw2
-          exact Or.inl (pb_defer_gB P win usb sreq hok y x0 B T Rr (c + 1) w2 t hy hW
-            (hR w2 (by omega) hw2b) hB hcw2 hw2t htT ho hwant hb hw2b (by omega) (by omega))
+  intro k t w w2 htT hww2 hw2t hwk hwb hw2k hw2b hh
+  have hc := cntT_runB P win usb sreq x0 (fun z => IsRet P y z.e)
+  have hh' := cntT_runB P win usb sreq x0 (fun z => Hit y z.e)
+  exact pending_bound_gapT P win usb sreq y (fun n => runB P win usb sreq n x0) hok hy T
+    (trajY_runB P win usb sreq y x0 T) (fun n _ => wfB_run P win usb sreq hok n x0 hW) B Rr Z
+    (Or.inr h0) hR
+    (fun a m h1 h2 => by rw [chargeSumT_runB]; exact hB a m h1 h2) hZ0 hZF
+    (fun x x2 h hcs => hZC x x2 h ⟨hcs.1, hcs.2.1, hcs.2.2.1, by
+      have := hcs.2.2.2; rw [hc, hc] at this; exact this⟩)
+    (fun w0 _ _ _ h1 => by exfalso; have : x0.held y = 1 := h1; omega)
+    k t w w2 htT hww2 hw2t (by rw [hc]; exact hwk) hwb (by rw [hc]; exact hw2k) hw2b
+    (by rw [hh']; show _ + x0.held y ≤ _; omega)
 
-/-! ### The head -/
+/-! ### The head: `GapRunT.head_late_gapT` along `runB`, from both slots full -/
 
 /-- **Head valid, per-retirement gaps and lateness, on the buffered engine.** At `t ≤ T`, if
 the word released after the latest retirement `x` has waited its allowance `L x` past its
@@ -299,38 +221,19 @@ theorem head_late_gapB (hok : SReqB P sreq) (y : Lane) (x0 : EngB) (B T : Nat)
         = cntB P win usb sreq (fun z => IsRet P y z.e) t x0 →
       (runB P win usb sreq t x0).e.ts y + L x ≤ (runB P win usb sreq t x0).e.now) :
     (runB P win usb sreq t x0).e.headValid y = true := by
-  have hPS : PENDING_SLACK = 25 := pending_slack_val
-  have hHS : HEAD_SLACK = 26 := head_slack_val
-  apply head_valid_of_countsB P win usb sreq hok y t x0 hW h0
-  by_cases hc : cntB P win usb sreq (fun z => IsRet P y z.e) t x0
-      ≤ cntB P win usb sreq (fun z => Hit y z.e) t x0 + 1
-  · exact hc
-  · exfalso
-    have hnow := now_runB P win usb sreq t x0
-    obtain ⟨w, hwt, hwk, hwb⟩ := cntB_reach P win usb sreq (fun z => IsRet P y z.e) t x0
-      (cntB P win usb sreq (fun z => IsRet P y z.e) t x0 - 2) (by omega)
-    obtain ⟨w2, hw2t, hw2k, hw2b⟩ := cntB_reach P win usb sreq (fun z => IsRet P y z.e) t x0
-      (cntB P win usb sreq (fun z => IsRet P y z.e) t x0 - 1) (by omega)
-    have hww2 : w < w2 := by
-      rcases Nat.lt_or_ge w w2 with hlt | hge
-      · exact hlt
-      · have := cntB_mono P win usb sreq (fun z => IsRet P y z.e) x0 w2 w hge
-        omega
-    have h3 : cntB P win usb sreq (fun z => IsRet P y z.e) (w2 + 1) x0
-        = cntB P win usb sreq (fun z => IsRet P y z.e) t x0 := by
-      have := cntB_succ_back P win usb sreq (fun z => IsRet P y z.e) w2 x0
-      rw [if_pos hw2b] at this
-      omega
-    have hl := hlate w2 hw2t hw2b h3
-    have hs1 := rdB_eq P win usb sreq y x0 w w2 (Nat.le_of_lt hww2)
-    have hs2 := ts_gapB P win usb sreq y x0 w2 t (isWB_of_ret P y _ hw2b) hw2t
-    rcases pending_bound_gapB P win usb sreq hok y x0 B T Rr Z hy hW h0 hR hB hZ0 hZF hZC
-      (cntB P win usb sreq (fun z => IsRet P y z.e) t x0 - 2) t w w2 htT hww2 hw2t hwk hwb
-      (by omega) hw2b (by omega) with ⟨hn, h⟩ | h
-    · have := hHD w2 (by omega) hw2b hn
-      omega
-    · have := hHN w w2 (by omega) ⟨hww2, hwb, hw2b, by omega⟩
-      omega
+  have hc := cntT_runB P win usb sreq x0 (fun z => IsRet P y z.e)
+  have hconsec : ∀ x x2, ConsecT P y (fun n => runB P win usb sreq n x0) x x2 →
+      ConsecB P win usb sreq y x0 x x2 := fun x x2 hcs =>
+    ⟨hcs.1, hcs.2.1, hcs.2.2.1, by have := hcs.2.2.2; rw [hc, hc] at this; exact this⟩
+  exact head_late_gapT P win usb sreq y (fun n => runB P win usb sreq n x0) hok hy T
+    (trajY_runB P win usb sreq y x0 T) (fun n _ => wfB_run P win usb sreq hok n x0 hW) B Rr Z L
+    (Or.inr h0) hR
+    (fun a m h1 h2 => by rw [chargeSumT_runB]; exact hB a m h1 h2) hZ0 hZF
+    (fun x x2 h hcs => hZC x x2 h (hconsec x x2 hcs))
+    (fun w0 _ _ _ h1 => by exfalso; have : x0.held y = 1 := h1; omega)
+    hHD (fun x x2 h hcs => hHN x x2 h (hconsec x x2 hcs))
+    (fun w0 _ _ _ h1 => by exfalso; have : x0.held y = 1 := h1; omega)
+    t htT (fun x hx hr he => hlate x hx hr (by rw [hc, hc] at he; exact he))
 
 end
 

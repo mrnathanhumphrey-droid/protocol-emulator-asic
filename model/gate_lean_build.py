@@ -110,7 +110,12 @@ KEY = ("dstar", "dstar29", "dstar39", "dstar39_v2", "dstar39_st", "dstar39_hold"
        # TrajB.lean (Wilson 11-18, slot_on_composition step 3a): the buffered engine as lane y
        # sees it, along any trajectory that agrees with stepB for y (the flush as a restart)
        "now_T", "ts_monoT", "port_waitT", "window_leT", "window_le_19T", "held_runT",
-       "head_valid_of_countsT", "npf_holdT", "npf_unlockT")
+       "head_valid_of_countsT", "npf_holdT", "npf_unlockT",
+       # GapRunT.lean (Wilson 11-18, step 3b): GapRun along a trajectory from 2 words or from
+       # the restart's 1 (the start's refill timed from the start cycle); GapRunB's two
+       # theorems are its instances along runB (trajY_runB, cntT_runB, chargeSumT_runB)
+       "rdT_eq", "ts_gapT", "pb_defer_gT", "pending_startT", "pending_bound_gapT",
+       "head_late_gapT", "trajY_runB", "cntT_runB", "chargeSumT_runB")
 #: proof_constants.load() key -> the Lean expression that must evaluate to it (SPEC: the map)
 CONSTS = {
     "lemmaA_window": "LEMMA_A_WINDOW", "R_base": "R_BASE", "dispatch_cycles": "DISPATCH_CYCLES",
