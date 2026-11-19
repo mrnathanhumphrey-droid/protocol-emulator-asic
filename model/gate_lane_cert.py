@@ -108,6 +108,12 @@ every must-fire must turn its check red, or the gate is not testing what it says
            generic row with the edge word ready. The certificate does not enforce this itself:
            an edge late after its release certifies with hZS0 short (11-18: +100 -> -5)
   M_LC_RESTART_LATE_EDGE  every FALLTHROUGH edge 100 cycles after its release (check 20 red)
+  check 21 the run-level contract list (model/rtl_contracts.py, Wilson 11-19): every contract
+           premise of a run-level theorem (gate_lean_build.PREMISES) maps to an RTL contract,
+           every RTL contract it names is defined, and every RTL contract has a must-fire --
+           registered in gate_mutant_kills when "present", else listed "owed (RTL batch)"
+  M_RC_PREMISE_ORPHAN  a contract premise with no RTL contract    (check 21 red)
+  M_RC_CONTRACT_NO_MF  an RTL contract (K6) with no must-fire entry (check 21 red)
   M_LC_FT_UNSEEN    no ARM read as FALLTHROUGH                    -> check 3 red
   M_LC_FT_NOFLOOR   no lateness floor after the flush             -> check 3 red
 Static, < 2 s. Usage: python model/gate_lane_cert.py [dir holding usbdev.py]
@@ -670,6 +676,20 @@ def check_slot_timeout(BB, PC, I):
                    "NO CERTIFICATE (%s)" % r["reason"][:80], calls))
 
 
+def check_contracts():
+    """check 21: the run-level contract list (rtl_contracts, Wilson 11-19): theorem -> contract
+    premise -> RTL contract -> must-fire, with no link missing"""
+    import gate_lean_build as GL
+    import rtl_contracts as RC
+    probs = RC.problems(GL.PREMISES)
+    used, n, present, owed, unused = RC.summary(GL.PREMISES)
+    if probs:
+        return False, "; ".join(probs[:3])
+    return True, ("%d contract premises (%s) -> %d RTL contracts; must-fires %d present, %d %s%s"
+                  % (len(used), ", ".join(used), n, present, owed, RC.OWED,
+                     ("; used by no listed theorem yet: %s" % ", ".join(unused)) if unused else ""))
+
+
 def check_budget():
     import gen_branch_budget as GB
     cur = GB.current()
@@ -978,6 +998,20 @@ def main():
     k20, _m = check_restart(BB, LC, I, late_edge=100)
     kills.append(("M_LC_RESTART_LATE_EDGE", not k20,
                   "every FALLTHROUGH edge 100 cycles after its release: check 20 red"))
+    # check 21: the run-level contract list (theorem -> premise -> RTL contract -> must-fire)
+    ok21, msg21 = check_contracts()
+    print("  check 21 %s  %s" % ("GREEN" if ok21 else "RED  ", msg21))
+    import rtl_contracts as RC
+    for name, attr, what in (("M_RC_PREMISE_ORPHAN", "ORPHAN_MUT",
+                              "a contract premise with no RTL contract: check 21 red"),
+                             ("M_RC_CONTRACT_NO_MF", "NO_MF_MUT",
+                              "an RTL contract with no must-fire entry: check 21 red")):
+        setattr(RC, attr, True)
+        try:
+            k21, _m = check_contracts()
+        finally:
+            setattr(RC, attr, False)
+        kills.append((name, not k21, what))
     # M_LC_FT_UNSEEN / M_LC_FT_NOFLOOR
     orig_ft = PC.arm_is_ft
     PC.arm_is_ft = lambda x, I=None: False
@@ -1052,7 +1086,7 @@ def main():
     teeth = all(k for _n, k, _w in kills)
     green = (ok1 and not fails and ok3 and ok4 and ok5 and ok6 and ok7 and ok8 and ok9 and ok10
              and ok11 and ok12 and ok13 and ok14 and ok15 and ok16 and ok17 and ok18 and ok19
-             and ok20)
+             and ok20 and ok21)
     verdict = "PASSED" if (green and teeth) else ("FAILED (must-fire survived)" if not teeth
                                                    else "FAILED")
     print("GATE lane-cert: %s" % verdict)

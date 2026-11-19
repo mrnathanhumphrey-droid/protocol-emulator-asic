@@ -612,6 +612,12 @@ SPEC_SYMBOLS = {
     # -- not results. Staleness is gate_lane_cert check 13 (a proved rule's
     # theorems at the Lean gate, every emitted rule registered and exercised).
     ("model/branch_budget.py", "READY_RULES"),
+    # ⭐ the run-level contract list (Wilson 11-19): RTL contract ids (K1-K7),
+    # what each does in prose (depth-2, PC+1) and Lean theorem NAMES -- its
+    # "numbers" are digits inside names and prose, not results. Staleness is
+    # gate_lane_cert check 21 (every contract premise mapped, every contract
+    # with a registered or owed must-fire).
+    ("model/rtl_contracts.py", "RTL_CONTRACTS"),
     # ⭐ WF2 round 2: V3's table generator. GENERATED names each runner's
     # on-the-fly image and calls the runner's OWN builder (its "numbers" are
     # builder arguments such as T_MIN 232, d = 60, d = 4 -- inputs, not
