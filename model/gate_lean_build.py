@@ -145,7 +145,10 @@ KEY = ("dstar", "dstar29", "dstar39", "dstar39_v2", "dstar39_st", "dstar39_hold"
        "head_of_counts_T", "cnt_three_hits", "slot_two_fetch_T", "ready_pc2_plain_T",
        "disp_pick_T", "ready_pc2_arm_T",
        # SlotReadyB.lean (Wilson 11-19): the no-prefetch bridge behind READY_RULES pc1_not_npf
-       "npf_no_slot", "npf_no_issue_T")
+       "npf_no_slot", "npf_no_issue_T",
+       # ComposeB.lean (Wilson 11-19, composition L1): the run cut at y's last flush -- the
+       # restart window f+1 / f+2, and the stretch from f+3 as a well-formed trajectory
+       "last_true", "flush_cut", "restart_head_12", "restart_head_runBK", "stretch_after_flush")
 #: proof_constants.load() key -> the Lean expression that must evaluate to it (SPEC: the map)
 CONSTS = {
     "lemmaA_window": "LEMMA_A_WINDOW", "R_base": "R_BASE", "dispatch_cycles": "DISPATCH_CYCLES",
