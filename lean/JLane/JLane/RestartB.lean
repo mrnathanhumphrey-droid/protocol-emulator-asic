@@ -67,10 +67,321 @@ theorem wfB_runBK (hok : SReqB P sreq) (fl : Nat → Lane → Bool) (k : Nat →
     ∀ n, n ≤ T → WfB ((fun n => (runBK P win usb sreq fl k (s + n) X0).base) n) := fun n hn =>
   (wfBK_run P win usb sreq hok fl k (s + n) X0 hI (fun j hj => hF j (by omega))).wf
 
+/-! ### The restart (3c part 2): at `f + 3` the lane holds exactly its edge word
+
+A flush of `y` at cycle `f` with its edge word present (K1–K4, `hasEdge`) leaves `y` holding that
+one word in its head, buffer empty, released at `f + 1` (`edge_survives_flushK`). The next two
+cycles change nothing of `y`'s:
+* **no retirement** -- the flush condition keeps `y` out of the dispatcher at `f + 1`
+  (`FlushOk`), and the dispatcher needs DRIVE before WB, so `y`'s first writeback is at `f + 3`;
+* **no capture files a word** -- the port enters CAP only from WAIT and WAIT only from REQ, so a
+  capture for `y` at `f + 1` or `f + 2` is the fetch in flight at the flush, which the flush
+  killed (K5: `stepBKK`'s `pkill`), and a killed capture files nothing (`kill_files_nothing`);
+* **no load** -- the buffer is empty and only a capture writes it.
+So the trajectory restarts at `f + 3` with one word held and the release at `f + 1`: its start's
+virtual retirement (`now₀ - 3`) is the flush cycle, and `hZS0` / `hHS0` read as the refill timed
+from the flush. -/
+
+theorem base_held (X : EngBK) (l : Lane) : X.base.held l = X.x.held l := by
+  unfold EngB.held nslots
+  rw [base_e, base_buf]
+
+theorem base_sq (X : EngBK) : X.base.sq = X.x.sq := by
+  unfold EngBK.base; split <;> rfl
+
+/-- The port enters CAP only from WAIT, keeping the lane. -/
+theorem portNextB_cap_from (x : EngB) (h : (portNextB P usb sreq x).pst = .cap) :
+    x.e.pst = .wait ∧ (portNextB P usb sreq x).pl = x.e.pl := by
+  by_cases hs : x.e.pst = .scan
+  · have := scan_next_req P usb sreq x hs (by rw [h]; decide)
+    rw [h] at this
+    cases this
+  · rw [(portNextB_of_ne P usb sreq x hs).1] at h ⊢
+    cases hp : x.e.pst with
+    | scan => exact absurd hp hs
+    | req => simp [portNext, hp] at h
+    | wait => simp [portNext, hp]
+    | cap => simp [portNext, hp] at h
+
+/-- The port enters WAIT only from REQ, keeping the lane. -/
+theorem portNextB_wait_from (x : EngB) (h : (portNextB P usb sreq x).pst = .wait) :
+    x.e.pst = .req ∧ (portNextB P usb sreq x).pl = x.e.pl := by
+  by_cases hs : x.e.pst = .scan
+  · have := scan_next_req P usb sreq x hs (by rw [h]; decide)
+    rw [h] at this
+    cases this
+  · rw [(portNextB_of_ne P usb sreq x hs).1] at h ⊢
+    cases hp : x.e.pst with
+    | scan => exact absurd hp hs
+    | req => simp [portNext, hp]
+    | wait => simp [portNext, hp] at h
+    | cap => simp [portNext, hp] at h
+
+/-- The flush cycle: the flushed lane holds exactly one word. -/
+theorem held_flushK (fl : Lane → Bool) (k : Lane → Nat) (X : EngBK) (y : Lane)
+    (hf : fl y = true) (hk : X.base.hasEdge y (k y) = true) :
+    (stepBKK P win usb sreq fl k X).x.held y = 1 := by
+  unfold EngB.held nslots
+  rw [flushK_buf_empty P win usb sreq fl k X y hf, actvK, actvK]
+  simp only [hf, ↓reduceIte, hk, Bool.true_and]
+  generalize keepSlot X.base y (k y) = s
+  cases s <;> rfl
+
+/-- **A frozen cycle for `y`.** Not flushed, not retiring, buffer empty, and any capture for it
+killed: `y`'s slots, buffer, select and timestamp are unchanged, and so is the word in its head. -/
+theorem frozen_stepBKK (fl : Lane → Bool) (k : Lane → Nat) (X : EngBK) (y : Lane)
+    (hW : WfB X.base) (hf : fl y = false)
+    (hnw : ¬(X.x.e.st = .wb ∧ X.x.e.cur = y)) (hb : X.x.buf y = false)
+    (hcap : X.x.e.pst = .cap → X.x.e.pl = y → X.pkill = true) :
+    (∀ s, (stepBKK P win usb sreq fl k X).x.e.actv y s = X.x.e.actv y s) ∧
+    (stepBKK P win usb sreq fl k X).x.buf y = false ∧
+    (stepBKK P win usb sreq fl k X).x.e.sel y = X.x.e.sel y ∧
+    (stepBKK P win usb sreq fl k X).x.e.ts y = X.x.e.ts y ∧
+    (X.x.e.headValid y = true →
+      (stepBKK P win usb sreq fl k X).x.sq y (X.x.e.sel y) = X.x.sq y (X.x.e.sel y)) := by
+  have hbe := base_e X
+  have hbb := base_buf X
+  have hkill : X.x.e.pst = .cap → y = X.x.e.pl → (X.kc && decide (y = X.base.e.pl)) = true := by
+    intro hpc hpl
+    have hk := hcap hpc hpl.symm
+    unfold EngBK.kc
+    rw [hbe]
+    simp [hpc, hk, hpl]
+  have hcapK : ∀ s, capTo X.base y s = true → (X.kc && decide (y = X.base.e.pl)) = true := by
+    intro s hc
+    obtain ⟨hpc, hpl⟩ := capTo_cap X.base y s hc
+    rw [hbe] at hpc hpl
+    exact hkill hpc hpl
+  have hnr : ¬(X.base.e.st = .wb ∧ y = X.base.e.cur ∧ P.ret X.base.e.now X.base.e.cur = true) := by
+    rw [hbe]
+    exact fun h => hnw ⟨h.1, h.2.1.symm⟩
+  have hld : ∀ s, loadTo X.base y s = false := fun s =>
+    loadTo_off X.base y s (by rw [hbb]; exact hb)
+  refine ⟨fun s => ?_, ?_, ?_, ?_, fun hv => ?_⟩
+  · rw [actvK, hf]
+    simp only [Bool.false_eq_true, ↓reduceIte]
+    by_cases hK : (X.kc && decide (y = X.base.e.pl) && capTo X.base y s) = true
+    · rw [if_pos hK]
+      have hc : capTo X.base y s = true := by
+        simp only [Bool.and_eq_true] at hK
+        exact hK.2
+      have := fill_empty X.base hW y s (by rw [hc]; rfl)
+      rw [hbe] at this
+      exact this.symm
+    · rw [if_neg hK, stepB_e_actv, actvB_noret P X.base y s hnr]
+      have hc : capTo X.base y s = false := by
+        cases hc : capTo X.base y s
+        · rfl
+        · exfalso
+          apply hK
+          rw [hcapK s hc, hc]
+          rfl
+      rw [hc, hld s, hbe]
+      simp
+  · rw [bufK, hf]
+    simp only [Bool.false_eq_true, ↓reduceIte]
+    split
+    · rfl
+    · rename_i hK
+      rw [stepB_buf]
+      unfold bufB
+      have hcb : capBuf X.base y = false := by
+        cases hc : capBuf X.base y
+        · rfl
+        · exfalso
+          apply hK
+          obtain ⟨hpc, hpl, -, -⟩ := capBuf_spec X.base y hc
+          rw [hbe] at hpc hpl
+          exact hkill hpc hpl
+      rw [hcb, hbb, hb]
+      simp
+  · rw [selK, hf]
+    simp only [Bool.false_eq_true, ↓reduceIte]
+    rw [stepB_e_sel]
+    unfold selNext
+    rw [if_neg (fun h => hnr ⟨h.1, h.2.1, h.2.2⟩), hbe]
+  · rw [stepBKK_ts_y P win usb sreq fl k X y hf]
+    unfold tsNext
+    rw [if_neg (fun h => hnw ⟨h.1, h.2.symm⟩)]
+  · show (if fl y = true ∧ X.x.e.sel y = keepSlot X.base y (k y) then k y
+      else sqB X.base y (X.x.e.sel y)) = _
+    rw [if_neg (fun h => by rw [hf] at h; cases h.1)]
+    unfold sqB
+    have hc : capTo X.base y (X.x.e.sel y) = false := by
+      cases hc : capTo X.base y (X.x.e.sel y)
+      · rfl
+      · exfalso
+        have := fill_empty X.base hW y _ (by rw [hc]; rfl)
+        rw [hbe] at this
+        unfold Engine.headValid at hv
+        rw [this] at hv
+        cases hv
+    rw [hc, hld]
+    simp only [Bool.false_eq_true, ↓reduceIte]
+    rw [base_sq]
+
+/-- After the flush cycle, `y` is not the lane writing back. -/
+theorem no_wb_after_flush (fl : Lane → Bool) (k : Lane → Nat) (X : EngBK) (y : Lane)
+    (hF : FlushOk P win usb sreq fl X) (hf : fl y = true) :
+    ¬((stepBKK P win usb sreq fl k X).x.e.st = .wb ∧ (stepBKK P win usb sreq fl k X).x.e.cur = y)
+    := by
+  rintro ⟨hw, hc⟩
+  rw [stK] at hw
+  rw [curK] at hc
+  exact hF.1 y hf (by rw [hw]; decide) hc
+
+/-- Two cycles after the flush, `y` is not the lane writing back: it was not in the dispatcher
+the cycle after the flush, and WB follows DRIVE. -/
+theorem no_wb_after_flush2 (fl fl1 : Lane → Bool) (k k1 : Lane → Nat) (X : EngBK) (y : Lane)
+    (hF : FlushOk P win usb sreq fl X) (hf : fl y = true) :
+    ¬((stepBKK P win usb sreq fl1 k1 (stepBKK P win usb sreq fl k X)).x.e.st = .wb ∧
+      (stepBKK P win usb sreq fl1 k1 (stepBKK P win usb sreq fl k X)).x.e.cur = y) := by
+  rintro ⟨hw, hc⟩
+  rw [stepBKK_st] at hw
+  rw [stepBKK_cur] at hc
+  change (dispNext win (stepBKK P win usb sreq fl k X).x.e).st = .wb at hw
+  change (dispNext win (stepBKK P win usb sreq fl k X).x.e).cur = y at hc
+  have hd : (stepBKK P win usb sreq fl k X).x.e.st = .drive := by
+    revert hw
+    unfold dispNext
+    cases (stepBKK P win usb sreq fl k X).x.e.st with
+    | idle =>
+      dsimp only
+      cases win (stepBKK P win usb sreq fl k X).x.e with
+      | none => intro h; cases h
+      | some w =>
+        dsimp only
+        split <;> intro h <;> cases h
+    | drive => intro _; rfl
+    | wb => intro h; cases h
+  have hc' : (stepBKK P win usb sreq fl k X).x.e.cur = y := by
+    revert hc
+    unfold dispNext
+    rw [hd]
+    exact id
+  rw [stK] at hd
+  rw [curK] at hc'
+  exact hF.1 y hf (by rw [hd]; decide) hc'
+
+/-- **The restart, three cycles.** `y` flushed at `X` with its edge word present (K1–K4), the
+flush conditions at the flush and the cycle after, `y` not flushed again in the next two cycles.
+Then three cycles on, `y` holds exactly one word -- its edge word, in its head -- with the buffer
+empty, released at the cycle after the flush. The in-flight fetch's kill (K5) is `stepBKK`'s
+`pkill`: a capture for `y` in the two cycles is that fetch and files nothing. -/
+theorem restart_three (hok : SReqB P sreq) (fl0 fl1 fl2 : Lane → Bool) (k0 k1 k2 : Lane → Nat)
+    (X X1 X2 X3 : EngBK) (y : Lane)
+    (hX1 : X1 = stepBKK P win usb sreq fl0 k0 X) (hX2 : X2 = stepBKK P win usb sreq fl1 k1 X1)
+    (hX3 : X3 = stepBKK P win usb sreq fl2 k2 X2)
+    (hI : WfBK X) (hF0 : FlushOk P win usb sreq fl0 X) (hF1 : FlushOk P win usb sreq fl1 X1)
+    (hf0 : fl0 y = true) (hk : X.base.hasEdge y (k0 y) = true)
+    (hf1 : fl1 y = false) (hf2 : fl2 y = false) :
+    X3.base.held y = 1 ∧ X3.base.e.headValid y = true ∧ X3.x.sq y (X3.x.e.sel y) = k0 y ∧
+      X3.base.e.ts y = X.x.e.now + 1 ∧ X3.base.e.now = X.x.e.now + 3 := by
+  have hI1 : WfBK X1 := hX1 ▸ wfBK_step P win usb sreq fl0 k0 hok X hI hF0
+  have hI2 : WfBK X2 := hX2 ▸ wfBK_step P win usb sreq fl1 k1 hok X1 hI1 hF1
+  -- the flush cycle
+  have hn1 : X1.x.e.now = X.x.e.now + 1 := by rw [hX1]; exact stepBKK_now P win usb sreq fl0 k0 X
+  obtain ⟨hv1, hsq1, hts1⟩ := edge_survives_flushK P win usb sreq fl0 k0 X y hf0 hk
+  rw [← hX1] at hv1 hsq1 hts1
+  have hb1 : X1.x.buf y = false := by rw [hX1]; exact flushK_buf_empty P win usb sreq fl0 k0 X y hf0
+  have hh1 : X1.x.held y = 1 := by rw [hX1]; exact held_flushK P win usb sreq fl0 k0 X y hf0 hk
+  -- no retirement of y at f+1, f+2
+  have hnw1 : ¬(X1.x.e.st = .wb ∧ X1.x.e.cur = y) := by
+    rw [hX1]; exact no_wb_after_flush P win usb sreq fl0 k0 X y hF0 hf0
+  have hnw2 : ¬(X2.x.e.st = .wb ∧ X2.x.e.cur = y) := by
+    rw [hX2, hX1]; exact no_wb_after_flush2 P win usb sreq fl0 fl1 k0 k1 X y hF0 hf0
+  -- a capture for y at f+1 or f+2 is the killed in-flight fetch
+  have hcap1 : X1.x.e.pst = .cap → X1.x.e.pl = y → X1.pkill = true := by
+    intro hc hp
+    rw [hX1, pstK, stepB_pst] at hc
+    rw [hX1, plK, stepB_pl] at hp
+    obtain ⟨hwt, hpl⟩ := portNextB_cap_from P usb sreq X.base hc
+    rw [base_e] at hwt hpl
+    rw [hpl] at hp
+    rw [hX1, pkillK, if_neg (by rw [hwt]; decide)]
+    simp [hwt, hp, hf0]
+  have hcap2 : X2.x.e.pst = .cap → X2.x.e.pl = y → X2.pkill = true := by
+    intro hc hp
+    rw [hX2, pstK, stepB_pst] at hc
+    rw [hX2, plK, stepB_pl] at hp
+    obtain ⟨hwt, hpl⟩ := portNextB_cap_from P usb sreq X1.base hc
+    rw [base_e] at hwt hpl
+    rw [hpl] at hp
+    -- X1 is in WAIT for y: X was in REQ for y
+    have hwt' := hwt
+    rw [hX1, pstK, stepB_pst] at hwt'
+    have hp' := hp
+    rw [hX1, plK, stepB_pl] at hp'
+    obtain ⟨hrq, hpl0⟩ := portNextB_wait_from P usb sreq X.base hwt'
+    rw [base_e] at hrq hpl0
+    rw [hpl0] at hp'
+    have hk1 : X1.pkill = true := by
+      rw [hX1, pkillK, if_neg (by rw [hrq]; decide)]
+      simp [hrq, hp', hf0]
+    rw [hX2, pkillK, if_neg (by rw [hwt]; decide), hk1]
+    rfl
+  -- the two frozen cycles
+  obtain ⟨ha2, hb2, hs2, ht2, hq2⟩ :=
+    frozen_stepBKK P win usb sreq fl1 k1 X1 y hI1.wf hf1 hnw1 hb1 hcap1
+  rw [← hX2] at ha2 hb2 hs2 ht2 hq2
+  obtain ⟨ha3, hb3, hs3, ht3, hq3⟩ :=
+    frozen_stepBKK P win usb sreq fl2 k2 X2 y hI2.wf hf2 hnw2 hb2 hcap2
+  rw [← hX3] at ha3 hb3 hs3 ht3 hq3
+  have hv2 : X2.x.e.headValid y = true := by
+    unfold Engine.headValid at hv1 ⊢
+    rw [hs2, ha2]
+    exact hv1
+  refine ⟨?_, ?_, ?_, ?_, ?_⟩
+  · rw [base_held]
+    unfold EngB.held nslots at hh1 ⊢
+    rw [ha3, ha3, hb3, ha2, ha2]
+    rw [hb1] at hh1
+    exact hh1
+  · rw [base_e]
+    unfold Engine.headValid at hv2 ⊢
+    rw [hs3, ha3]
+    exact hv2
+  · rw [hs3, hq3 hv2, hs2, hq2 hv1]
+    exact hsq1
+  · rw [base_e, ht3, ht2, hts1, hn1]
+  · rw [base_e, hX3, stepBKK_now, hX2, stepBKK_now, hn1]
+
+/-- **The restart on a run.** `y` flushed at cycle `f` of `runBK` with its edge word present
+(K1–K4), the flush conditions on the cycles before `f + 2`, and `y` not flushed at `f + 1` or
+`f + 2`: at `f + 3`, `y` holds exactly its edge word in its head with the buffer empty, released
+at `f + 1`. -/
+theorem restart_runBK (hok : SReqB P sreq) (fl : Nat → Lane → Bool) (k : Nat → Lane → Nat)
+    (X0 : EngBK) (hI : WfBK X0) (f : Nat) (y : Lane)
+    (hF : ∀ j, j < f + 2 → FlushOk P win usb sreq (fl (runBK P win usb sreq fl k j X0).x.e.now)
+      (runBK P win usb sreq fl k j X0))
+    (hfl : fl (runBK P win usb sreq fl k f X0).x.e.now y = true)
+    (hedge : (runBK P win usb sreq fl k f X0).base.hasEdge y
+      (k (runBK P win usb sreq fl k f X0).x.e.now y) = true)
+    (h1 : fl (runBK P win usb sreq fl k (f + 1) X0).x.e.now y = false)
+    (h2 : fl (runBK P win usb sreq fl k (f + 2) X0).x.e.now y = false) :
+    (runBK P win usb sreq fl k (f + 3) X0).base.held y = 1 ∧
+    (runBK P win usb sreq fl k (f + 3) X0).base.e.headValid y = true ∧
+    (runBK P win usb sreq fl k (f + 3) X0).x.sq y ((runBK P win usb sreq fl k (f + 3) X0).x.e.sel y)
+      = k (runBK P win usb sreq fl k f X0).x.e.now y ∧
+    (runBK P win usb sreq fl k (f + 3) X0).base.e.ts y
+      = (runBK P win usb sreq fl k f X0).x.e.now + 1 ∧
+    (runBK P win usb sreq fl k (f + 3) X0).base.e.now
+      = (runBK P win usb sreq fl k f X0).x.e.now + 3 :=
+  restart_three P win usb sreq hok _ _ _ _ _ _ (runBK P win usb sreq fl k f X0)
+    (runBK P win usb sreq fl k (f + 1) X0) (runBK P win usb sreq fl k (f + 2) X0)
+    (runBK P win usb sreq fl k (f + 3) X0) y
+    (runBK_succ' P win usb sreq fl k f X0) (runBK_succ' P win usb sreq fl k (f + 1) X0)
+    (runBK_succ' P win usb sreq fl k (f + 2) X0)
+    (wfBK_run P win usb sreq hok fl k f X0 hI (fun j hj => hF j (by omega)))
+    (hF f (by omega)) (hF (f + 1) (by omega)) hfl hedge h1 h2
+
 end
 
 #print axioms agree_stepBKK
 #print axioms trajY_runBK
 #print axioms wfB_runBK
+#print axioms frozen_stepBKK
+#print axioms restart_three
+#print axioms restart_runBK
 
 end JLane
