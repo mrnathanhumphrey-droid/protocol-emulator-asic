@@ -46,6 +46,46 @@ every must-fire must turn its check red, or the gate is not testing what it says
   M_LC_ARM_EDGE_PASS  n0: armed exactly at the deadline           -> must PASS
   M_LC_ARM_EDGE_FAIL  n0 + 1: one past it                          -> must be red
   M_LC_ARM_100        n = 100 (armed at EOP + 163 on today's program) -> must be red
+  check 9  branch_budget.slot_ready names its theorem's premise (Wilson 11-17): PC+2 after a plain
+           PC+1 is ready only at d >= p1b2_plain_min_d (Buf.p1b2_margin_plain_scan: 4);
+           not ready at d = 3, ready at d = 4, ready after an ARM PC+1 (m1 / m3) at d = 3
+  M_LC_SLOT_SPACING_OFF  the premise unchecked -> PC+2 ready at d = 3 (check 9 red)
+  check 10 a FALLTHROUGH ARM's timeout word is ready only while P1B2_FILL_SCAN + L <= T
+           (Buf.p1b2_margin_timeout_scan), tested directly (Wilson 11-17): L passed in, for
+           L = 0 and L = 5 the rule drops it at T = FILL + L - 1 and keeps it at FILL + L; end
+           to end, spacing 60 / T 35 certifies and the certificate loop called the rule
+           (image_budget timeout_rule_calls). Image header through pe_isa.d_fields
+  M_LC_SLOT_TIMEOUT_OFF  the rule off -> the word stays ready at T = FILL + L - 1 (check 10 red)
+  check 11 a branch at a plain ARM's PC+1: its fall-through PC+2 is ready (d >= 4), its taken
+           target is not -- the buffer fetches ARM + 2 only (Wilson 11-17, rule (1) removed)
+  M_LC_SLOT_BRANCH_OFF  the taken target marked ready (check 11 red)
+  check 12 a FALLTHROUGH ARM B at plain ARM A's PC+1: A's slot gives PC+1, PC+2, never PC+3 (A
+           fetches two words; Wilson 11-17, rule (2) removed); B's own rule keeps its two words
+  M_LC_SLOT_PC3_OFF  A's PC+3 marked ready (check 12 red)
+  check 13 the readiness registry (branch_budget.READY_RULES, Wilson 11-17): every rule names its
+           theorem(s); a proved rule's are at the Lean gate (gate_lean_build.KEY); every emitted
+           rule is registered and every registered rule exercised; owed / counterfactual words
+           never reach slot_ready (the certificate)
+  M_LC_REG_NOTHEOREM  a proved rule with no theorem          (check 13 red)
+  M_LC_REG_NOTLEAN    a theorem not at the Lean gate          (check 13 red)
+  M_LC_REG_UNREG      an emitted rule not registered          (check 13 red)
+  M_LC_REG_LEAK       owed / counterfactual words reach ready (check 13 red)
+  check 14 the slot under contention (ContendB.slot_wait_fcfs_two, FCFS by capture): another
+           lane with an ARM is an older requester, wait contend_per_lane (8) each; a word is
+           ready only while its free-port margin covers the wait (PC+1 not at wait 8; PC+2 from
+           d = dmin + 8; the FALLTHROUGH timeout word from T = FILL + 8 + L); idle neighbours 0
+  M_LC_CONTEND_OFF    contention ignored, wait 0 (check 14 red)
+  check 15 slot depth above slot_depth (2) is refused by the certificate (no theorem; Wilson
+           11-17), and the record / stamp sources never read the counterfactual (drain_table's
+           prefetch columns, a `ready` set, counterfactual=True)
+  M_LC_DEPTH_GT2     depth 3 certified (check 15 red)
+  M_LC_STAMP_READS_CF a stamp source importing drain_table (check 15 red)
+  check 16 the host-interval premises (tipd_fast, min_packet) count device cycles at the device
+           clock's slow edge, clock.SOURCE_PPM: a stand-in 20000 ppm moves both below 0 ppm's
+  M_LC_PPM_IGNORED    SOURCE_PPM left out (check 16 red)
+  check 17 an edge-paced lane with no T_ext and a late lane: queue_refusal refuses by name
+           ("1.6a not checkable"), never raises out of the certificate
+  M_LC_EDGEPACED_CRASH  the catch removed (check 17 red)
   M_LC_FT_UNSEEN    no ARM read as FALLTHROUGH                    -> check 3 red
   M_LC_FT_NOFLOOR   no lateness floor after the flush             -> check 3 red
 Static, < 2 s. Usage: python model/gate_lane_cert.py [dir holding usbdev.py]
@@ -174,6 +214,318 @@ def check_coresident(PC, V, I):
                 "%d accepted %s" % (k.get("usb_other_R"), cur.get("usb_other_R"),
                                     "current" if fresh else "STALE", lim, lim - 1, refused, lim,
                                     accepted))
+
+
+def _slot_graph(I, d, pc1_arm=False):
+    """ARM w0 -> PC+1 w1 -> PC+2 w2 -> w3 -> w0, PC+1 -> PC+2 released d apart (rd = gaps[w1][-1]
+    + the held part of gaps[w2], here none)"""
+    arm = {"op": I.OP_ARM, "mod": 0, "delay": 0}
+    plain = {"op": I.OP_LEVEL, "mod": 0, "delay": 0}
+    g = {0: (arm, [1]), 1: (arm if pc1_arm else plain, [2]), 2: (plain, [3]), 3: (plain, [0])}
+    gaps = {0: [1], 1: [d], 2: [5], 3: [5]}
+    return g, gaps
+
+
+def check_slot_spacing(BB, PC, I):
+    """check 9: branch_budget.slot_ready marks PC+2 ready only under its theorem's premise --
+    Buf.p1b2_margin_plain_scan needs d >= p1b2_plain_min_d (4): at d = 3 PC+2 is NOT ready, at
+    d = 4 it is; PC+1 ready either way; PC+1 a plain edge ARM (p1b2_margin_arm_scan, m1 / m3, no
+    premise) keeps PC+2 ready at d = 3"""
+    k = PC.load()
+    dmin = k["p1b2_plain_min_d"]
+    g3, gp3 = _slot_graph(I, dmin - 1)
+    g4, gp4 = _slot_graph(I, dmin)
+    gm, gpm = _slot_graph(I, dmin - 1, pc1_arm=True)
+    lo = BB.slot_ready(g3, I, 2, gp3, k)
+    hi = BB.slot_ready(g4, I, 2, gp4, k)
+    m13 = BB.slot_ready(gm, I, 2, gpm, k)
+    # dmin == 4: the literal premise of Buf.p1b2_margin_plain_scan (`4 ≤ d`)
+    ok = dmin == 4 and 1 in lo and 2 not in lo and 2 in hi and 2 in m13
+    return ok, ("slot_ready PC+2: d = %d %s, d = %d %s, m1/m3 at d = %d %s (p1b2_plain_min_d %d)"
+                % (dmin - 1, "not ready" if 2 not in lo else "READY",
+                   dmin, "ready" if 2 in hi else "NOT READY",
+                   dmin - 1, "ready" if 2 in m13 else "NOT READY", dmin))
+
+
+def check_slot_contend(BB, PC, I):
+    """check 14: the slot under contention (ContendB, FCFS by capture, Wilson 11-17) -- another
+    lane with an ARM is an older requester (slot_contenders 1, slot_wait = contend_per_lane);
+    a word is ready only while its free-port margin covers the wait: at wait 8, PC+1 (margin 0)
+    is not ready, PC+2 at d = dmin + 8 is and at dmin + 7 is not; the FALLTHROUGH timeout word
+    needs T >= FILL + wait + L; an image whose other lanes have no ARM waits 0"""
+    import lane_cert as LC
+    k = PC.load()
+    cpl = k["contend_per_lane"]
+    dmin = k["p1b2_plain_min_d"]
+    fill = k["p1b2_fill_scan"]
+    probs = []
+    gA, gpA = _slot_graph(I, dmin)
+    idle = {0: ({"op": I.OP_LEVEL, "mod": 0, "delay": 0}, [0])}
+    graphs = {0: (gA, None, gpA), 1: (gA, None, gpA), 2: (idle, None, {0: [5]})}
+    nc, wt = BB.slot_contenders(graphs, I, 0), BB.slot_wait(graphs, I, 0, k)
+    if nc != 1 or wt != cpl:
+        probs.append("contenders %d, wait %d (want 1, %d)" % (nc, wt, cpl))
+    free = BB.slot_ready(gA, I, 2, gpA, k, contend=0)
+    busy = BB.slot_ready(gA, I, 2, gpA, k, contend=cpl)
+    if not ({1, 2} <= free) or (busy & {1, 2}):
+        probs.append("free port %s, wait %d %s (want {1, 2} then none)"
+                     % (sorted(free), cpl, sorted(busy)))
+    g8, gp8 = _slot_graph(I, dmin + cpl)
+    g7, gp7 = _slot_graph(I, dmin + cpl - 1)
+    if 2 not in BB.slot_ready(g8, I, 2, gp8, k, contend=cpl) or \
+            2 in BB.slot_ready(g7, I, 2, gp7, k, contend=cpl):
+        probs.append("PC+2 at d = dmin + wait not ready, or at dmin + wait - 1 ready")
+    prem = LC.premises(k)
+    tres = {}
+    for T in (fill + cpl - 1, fill + cpl):
+        g, _p, gaps = LC.build(_ft_slot_image(I, T, d1=60), 0, prem, I)
+        (a, (c1, _c2)), = LC.ft_paths(g, I).items()
+        rdy = BB.slot_ready(g, I, 2, gaps, k, contend=cpl)
+        tres[T] = c1 in rdy and c1 not in BB.slot_timeout_drop(g, I, rdy, {a: 0}, k, contend=cpl)
+    if tres[fill + cpl - 1] or not tres[fill + cpl]:
+        probs.append("timeout word at wait %d: T %d %s, T %d %s"
+                     % (cpl, fill + cpl - 1, tres[fill + cpl - 1], fill + cpl, tres[fill + cpl]))
+    img = _ft_slot_image(I, TIMEOUT_E2E[0], d1=TIMEOUT_E2E[1])
+    g_img = {l: LC.build(img, l, prem, I) for l in I.lane_programs(img)}
+    if BB.slot_wait(g_img, I, 0, k) != 0:
+        probs.append("check 10's image (other lanes idle) waits %d" % BB.slot_wait(g_img, I, 0, k))
+    return not probs, ("; ".join(probs[:3]) if probs else
+                       "one older requester: wait %d; PC+1 / PC+2 ready free, not at wait %d; "
+                       "PC+2 ready from d = %d; timeout word from T = FILL + %d; idle neighbours "
+                       "wait 0" % (cpl, cpl, dmin + cpl, cpl))
+
+
+#: the sources that make the record and the stamp, and what they must never read (Wilson 11-17)
+CF_SOURCES = ("model/gen_branch_budget.py", "model/cert_stamp.py")
+CF_TOKENS = ("drain_table", "ready=", "counterfactual=True")
+
+
+def cf_reads(texts):
+    """[(source, token)]: a record / stamp source that reads the counterfactual"""
+    return [(src, t) for src, txt in texts.items() for t in CF_TOKENS if t in txt]
+
+
+def check_depth(BB, PC, I, texts=None):
+    """check 15: depth above the buffer's is refused (Wilson 11-17): with SLOT = slot_depth + 1
+    check 10's image has no certificate and the reason names the depth; at slot_depth it
+    certifies. And the record / stamp sources never read the counterfactual (the drain table's
+    prefetch columns, a `ready` set, `counterfactual=True`)."""
+    k = PC.load()
+    dep = k["slot_depth"]
+    img = _ft_slot_image(I, TIMEOUT_E2E[0], d1=TIMEOUT_E2E[1])
+    saved = BB.SLOT
+    try:
+        BB.SLOT = dep + 1
+        r3 = BB.image_budget(img)
+        BB.SLOT = dep
+        r2 = BB.image_budget(img)
+    finally:
+        BB.SLOT = saved
+    if texts is None:
+        texts = {}
+        for src in CF_SOURCES:
+            with open(os.path.join(ROOT, src), encoding="utf-8") as fh:
+                texts[src] = fh.read()
+    reads = cf_reads(texts)
+    ok = (r3["B"] is None and "slot depth" in (r3["reason"] or "") and r2["B"] is not None
+          and not reads)
+    return ok, ("SLOT %d: %s; SLOT %d: %s; record / stamp read the counterfactual: %s"
+                % (dep + 1, "refused" if r3["B"] is None else "CERTIFIED B %s" % r3["B"],
+                   dep, "B %s" % r2["B"] if r2["B"] is not None else "NO CERTIFICATE",
+                   ", ".join("%s (%s)" % x for x in reads) if reads else "none"))
+
+
+def check_ppm(LC):
+    """check 16: the host-interval premises count device cycles at the device clock's slow edge
+    (clock.SOURCE_PPM): with a stand-in 20000 ppm, tipd_fast and min_packet both drop below
+    their values at 0 ppm; at the declared ppm they equal floor(nominal x (1 - ppm / 1e6))"""
+    import clock
+    saved = dict(clock.SOURCE_PPM)
+    try:
+        cur = LC.premises()
+        clock.SOURCE_PPM.clear()
+        clock.SOURCE_PPM.update({t: 0 for t in saved})
+        p0 = LC.premises()
+        clock.SOURCE_PPM.update({t: 20000 for t in saved})
+        p2 = LC.premises()
+    finally:
+        clock.SOURCE_PPM.clear()
+        clock.SOURCE_PPM.update(saved)
+    moved = p2["tipd_fast"] < p0["tipd_fast"] and p2["min_packet"] < p0["min_packet"]
+    return moved, ("tipd_fast %d / min_packet %d at the declared %d ppm; at 0 ppm %d / %d, at "
+                   "20000 ppm %d / %d" % (cur["tipd_fast"], cur["min_packet"],
+                                          max(saved.values()), p0["tipd_fast"],
+                                          p0["min_packet"], p2["tipd_fast"], p2["min_packet"]))
+
+
+def check_edge_paced(BB):
+    """check 17: an edge-paced lane (a peer-released SPI target, gate_a2_program's image) with no
+    T_ext registered for its image, and a late lane: queue_refusal refuses by name ("1.6a not
+    checkable ... EDGE-PACED") instead of raising out of the certificate"""
+    import pe_proto
+    tg = pe_proto.SPITarget(mode=0, sck=4, mosi_pin=5, nbytes=3)
+    img = pe_proto.image({0: tg.program()}, {0: tg.header()}, t_ext=tg.t_ext())
+    try:
+        why = BB.queue_refusal(img, 0, {0: {"max_late": 1}})
+    except ValueError as exc:      # EdgePacedNoTExt (a ValueError) escaping: the defect, red
+        return False, "queue_refusal raised %s: %s" % (type(exc).__name__, str(exc)[:70])
+    ok = bool(why) and "not checkable" in why and "EDGE-PACED" in why
+    return ok, "edge-paced lane, no T_ext, a late lane: %s" % ((why or "NOT REFUSED")[:90])
+
+
+def check_slot_branch(BB, PC, I):
+    """check 11: a branch at a plain ARM's PC+1 -- its fall-through PC+2 (ARM + 2) is ready at
+    d >= p1b2_plain_min_d, its taken target (word 4) is not (Wilson 11-17, rule (1) removed)"""
+    k = PC.load()
+    dmin = k["p1b2_plain_min_d"]
+    arm = {"op": I.OP_ARM, "mod": 0, "delay": 0}
+    br = {"op": min(I.BRANCH_OPS), "mod": 0, "delay": 0}
+    plain = {"op": I.OP_LEVEL, "mod": 0, "delay": 0}
+    g = {0: (arm, [1]), 1: (br, [2, 4]), 2: (plain, [3]), 3: (plain, [0]), 4: (plain, [0])}
+    gaps = {0: [1], 1: [dmin], 2: [5], 3: [5], 4: [5]}
+    r = BB.slot_ready(g, I, 2, gaps, k)
+    ok = 1 in r and 2 in r and 4 not in r
+    return ok, ("branch at PC+1 (d = %d): fall-through PC+2 %s, taken target %s"
+                % (dmin, "ready" if 2 in r else "NOT READY",
+                   "not ready" if 4 not in r else "READY"))
+
+
+def check_slot_pc3(BB, PC, I):
+    """check 12: a FALLTHROUGH ARM B at plain ARM A's PC+1 -- A's slot makes PC+1 and PC+2 ready,
+    never PC+3 (A fetches two words; Wilson 11-17, rule (2) removed); B's own FALLTHROUGH rule
+    keeps its PC+1 / PC+2 (A's PC+2 / PC+3)"""
+    k = PC.load()
+    dmin = k["p1b2_plain_min_d"]
+    arm = {"op": I.OP_ARM, "mod": 0, "delay": 0}
+    ft = {"op": I.OP_ARM, "mod": I.ARM_MOD_FT, "delay": 40}
+    plain = {"op": I.OP_LEVEL, "mod": 0, "delay": 0}
+    g = {0: (arm, [1]), 1: (ft, [2, 3]), 2: (plain, [4]), 3: (plain, [4]), 4: (plain, [0])}
+    gaps = {0: [1], 1: [dmin], 2: [5], 3: [5], 4: [5]}
+    by = BB.slot_ready_by_arm(g, I, 2, gaps, k)
+    a, b = by.get(0, set()), by.get(1, set())
+    ok = 1 in a and 2 in a and 3 not in a and b == {2, 3}
+    return ok, ("FALLTHROUGH ARM at PC+1: ARM A's slot PC+1 %s, PC+2 %s, PC+3 %s; ARM B's own %s"
+                % ("ready" if 1 in a else "NOT READY", "ready" if 2 in a else "NOT READY",
+                   "not ready" if 3 not in a else "READY", sorted(b)))
+
+
+def check_registry(BB, PC, I, rules=None):
+    """check 13: the readiness registry (Wilson 11-17). Every rule in branch_budget.READY_RULES
+    names its theorem(s) (none only when counterfactual); a proved rule's theorems are all at the
+    Lean gate (gate_lean_build.KEY); every rule slot_ready_tagged emits on graphs exercising each
+    rule is registered, and each registered rule is exercised; no owed / counterfactual word
+    reaches slot_ready (the certificate's ready set)."""
+    import gate_lean_build as LB
+    rules = BB.READY_RULES if rules is None else rules
+    k = PC.load()
+    dmin = k["p1b2_plain_min_d"]
+    probs = []
+    for rid, r in sorted(rules.items()):
+        st, th = r.get("status"), tuple(r.get("theorems") or ())
+        if st not in ("proved", "owed", "counterfactual"):
+            probs.append("%s: status %r" % (rid, st))
+        if st != "counterfactual" and not th:
+            probs.append("%s: no theorem" % rid)
+        if st == "proved":
+            probs += ["%s: %s not at the Lean gate" % (rid, t) for t in th
+                      if t.split(".")[-1] not in LB.KEY]
+    arm = {"op": I.OP_ARM, "mod": 0, "delay": 0}
+    ft = {"op": I.OP_ARM, "mod": I.ARM_MOD_FT, "delay": 40}
+    plain = {"op": I.OP_LEVEL, "mod": 0, "delay": 0}
+    cases = [(_slot_graph(I, dmin), 2), (_slot_graph(I, dmin, pc1_arm=True), 2),
+             (_slot_graph(I, dmin), 3),
+             (({0: (ft, [1, 2]), 1: (plain, [3]), 2: (plain, [3]), 3: (plain, [0])},
+               {0: [1], 1: [5], 2: [5], 3: [5]}), 2),
+             (({0: (arm, [1]), 1: (ft, [2, 3]), 2: (plain, [4]), 3: (plain, [4]),
+                4: (plain, [0])}, {0: [1], 1: [dmin], 2: [5], 3: [5], 4: [5]}), 2)]
+    seen = set()
+    for (g, gaps), depth in cases:
+        tagged = BB.slot_ready_tagged(g, I, depth, gaps, k)
+        ready = BB.slot_ready(g, I, depth, gaps, k)
+        seen |= {r for _a, _w, r in tagged}
+        unreg = {r for _a, _w, r in tagged if r not in rules}
+        probs += ["rule %s emitted, not registered" % r for r in sorted(unreg)]
+        good = {w for _a, w, r in tagged if rules.get(r, {}).get("status") == "proved"}
+        leak = {w for _a, w, r in tagged if w in ready and w not in good}
+        probs += ["word %d ready through an unproved rule" % w for w in sorted(leak)]
+    probs += ["rule %s registered, never exercised" % r for r in sorted(set(rules) - seen)]
+    st = {}
+    for r in rules.values():
+        st[r.get("status")] = st.get(r.get("status"), 0) + 1
+    return not probs, (("; ".join(probs[:3])) if probs else
+                       "%d rules (%s), all exercised; unproved words kept out of ready"
+                       % (len(rules), ", ".join("%d %s" % (n, s) for s, n in sorted(st.items()))))
+
+
+def _ft_slot_image(I, T, d1=80):
+    """lane 0: ARM(fall, timeout T, FALLTHROUGH) -> REARM (timeout path, PC+1) -> LEVEL 1 (edge
+    path, PC+2) -> LEVEL 0 -> REARM; the other lanes idle (run_arm2.ft_race_image's shape at
+    spacing d1). The header goes through pe_isa.d_fields, the encoder the real images use
+    (Wilson 11-17: a check never tests a packing the images do not have)"""
+    l0 = I.ACT_BASE
+    prog = [I.act_arm(1, 0, T, ft=True), I.act(I.OP_REARM, 0, 1, d1),
+            I.act(I.OP_LEVEL, I.UO0, 1, d1), I.act(I.OP_LEVEL, I.UO0, 0, d1),
+            I.act(I.OP_REARM, 0, 1, d1)]
+    lp = l0 + len(prog) * I.ACT_BYTES
+    prog.append(I.act(I.OP_REARM, 0, 0, 500))
+    headers = [I.hdr(I.UO0, I.UO0, 1, d1, 0, *I.d_fields(d1), l0)]
+    for j in range(1, I.N_LANES):
+        headers.append(I.hdr(j + 1, j + 1, 0, 500, 0, 200, 240, lp))
+    return I.join_image(headers, prog)
+
+
+#: check 10's end-to-end image (Wilson 11-17): certifies under proved rules only (sweep 11-17:
+#: spacing 60 / 80, T >= 35 at B 4 before ft_edge was proved; B 0 since)
+TIMEOUT_E2E = (35, 60)
+
+
+def check_slot_timeout(BB, PC, I):
+    """check 10 (Wilson 11-17 ruling, direct readiness): a FALLTHROUGH ARM's timeout word (PC+1)
+    is ready only while Buf.p1b2_margin_timeout_scan's premise P1B2_FILL_SCAN + L <= T holds.
+    The rule is tested directly, L passed in: for L = 0 and L = 5 the word is in slot_ready and
+    the rule drops it at T = FILL + L - 1, keeps it at T = FILL + L (two Ls: the rule reads L,
+    not FILL alone). End to end: the image at spacing 60, T 35 certifies and the certificate
+    loop called the rule (image_budget's trace, timeout_rule_calls)"""
+    import lane_cert as LC
+    k = PC.load()
+    fill = k["p1b2_fill_scan"]
+    prem = LC.premises(k)
+    res, bad = {}, []
+    for L in (0, 5):
+        for T in (fill + L - 1, fill + L):
+            g, _p, gaps = LC.build(_ft_slot_image(I, T, d1=60), 0, prem, I)
+            fts = LC.ft_paths(g, I)
+            if len(fts) != 1:
+                bad.append("T %d: %d FALLTHROUGH ARMs (want 1)" % (T, len(fts)))
+                continue
+            (a, (c1, _c2)), = fts.items()
+            ready = BB.slot_ready(g, I, 2, gaps, k)
+            if c1 not in ready:
+                bad.append("L %d T %d: timeout word %d not in slot_ready before the rule"
+                           % (L, T, c1))
+                continue
+            res[(L, T)] = c1 not in BB.slot_timeout_drop(g, I, ready, {a: L}, k)
+    saved = BB.SLOT
+    BB.SLOT = 2
+    try:
+        T, d1 = TIMEOUT_E2E
+        r = BB.image_budget(_ft_slot_image(I, T, d1=d1))
+    finally:
+        BB.SLOT = saved
+    calls = r.get("timeout_rule_calls", 0)
+    ok = (fill == 9 and not bad and not res[(0, fill - 1)] and res[(0, fill)]
+          and not res[(5, fill + 4)] and res[(5, fill + 5)]
+          and r["B"] is not None and calls > 0)
+    if bad:
+        return False, "; ".join(bad[:3])
+    return ok, ("FALLTHROUGH timeout word (FILL %d): L 0: T %d %s, T %d %s; L 5: T %d %s, T %d %s; "
+                "end to end spacing %d T %d: %s, rule called %d time(s)"
+                % (fill, fill - 1, "dropped" if not res[(0, fill - 1)] else "READY",
+                   fill, "kept" if res[(0, fill)] else "DROPPED",
+                   fill + 4, "dropped" if not res[(5, fill + 4)] else "READY",
+                   fill + 5, "kept" if res[(5, fill + 5)] else "DROPPED",
+                   d1, T, "B %s" % r["B"] if r["B"] is not None else
+                   "NO CERTIFICATE (%s)" % r["reason"][:80], calls))
 
 
 def check_budget():
@@ -353,6 +705,104 @@ def main():
           % (len(edf), ", ".join(edf)))
     kills.append(("M_LC_EDF_OFF", bool(edf) and st == edf,
                   "EDF scheme off: %d / %d EDF-certified images stale" % (len(st), len(edf))))
+    # check 9: slot_ready names its theorem's premise (Wilson 11-17)
+    ok9, msg9 = check_slot_spacing(BB, PC, I)
+    print("  check 9 %s  %s" % ("GREEN" if ok9 else "RED  ", msg9))
+    BB.SLOT_SPACING_MUT = True
+    try:
+        k9, _m = check_slot_spacing(BB, PC, I)
+    finally:
+        BB.SLOT_SPACING_MUT = False
+    kills.append(("M_LC_SLOT_SPACING_OFF", not k9, "PC+2 ready below p1b2_plain_min_d: check 9 red"))
+    # check 10: the FALLTHROUGH timeout word's premise (Wilson 11-17)
+    ok10, msg10 = check_slot_timeout(BB, PC, I)
+    print("  check 10 %s  %s" % ("GREEN" if ok10 else "RED  ", msg10))
+    BB.SLOT_TIMEOUT_MUT = True
+    try:
+        k10, _m = check_slot_timeout(BB, PC, I)
+    finally:
+        BB.SLOT_TIMEOUT_MUT = False
+    kills.append(("M_LC_SLOT_TIMEOUT_OFF", not k10,
+                  "timeout word ready at T = FILL + L - 1: check 10 red"))
+    # check 11: a branch PC+1's taken target is never ready (Wilson 11-17, rule (1))
+    ok11, msg11 = check_slot_branch(BB, PC, I)
+    print("  check 11 %s  %s" % ("GREEN" if ok11 else "RED  ", msg11))
+    BB.SLOT_BRANCH_MUT = True
+    try:
+        k11, _m = check_slot_branch(BB, PC, I)
+    finally:
+        BB.SLOT_BRANCH_MUT = False
+    kills.append(("M_LC_SLOT_BRANCH_OFF", not k11,
+                  "a branch PC+1's taken target ready: check 11 red"))
+    # check 12: no PC+3 for ARM A behind a FALLTHROUGH ARM at PC+1 (Wilson 11-17, rule (2))
+    ok12, msg12 = check_slot_pc3(BB, PC, I)
+    print("  check 12 %s  %s" % ("GREEN" if ok12 else "RED  ", msg12))
+    BB.SLOT_PC3_MUT = True
+    try:
+        k12, _m = check_slot_pc3(BB, PC, I)
+    finally:
+        BB.SLOT_PC3_MUT = False
+    kills.append(("M_LC_SLOT_PC3_OFF", not k12,
+                  "ARM A's PC+3 ready behind a FALLTHROUGH PC+1: check 12 red"))
+    # check 13: the readiness registry (Wilson 11-17)
+    ok13, msg13 = check_registry(BB, PC, I)
+    print("  check 13 %s  %s" % ("GREEN" if ok13 else "RED  ", msg13))
+    reg = BB.READY_RULES
+    m_noth = {**reg, "pc2_plain": {**reg["pc2_plain"], "theorems": ()}}
+    m_lean = {**reg, "pc2_plain": {**reg["pc2_plain"],
+                                   "theorems": ("Buf.p1b2_margin_plain_scan_unbuilt",)}}
+    m_unreg = {r: v for r, v in reg.items() if r != "ft_edge"}
+    for name, rules, what in (("M_LC_REG_NOTHEOREM", m_noth, "a proved rule with no theorem"),
+                              ("M_LC_REG_NOTLEAN", m_lean, "a theorem not at the Lean gate"),
+                              ("M_LC_REG_UNREG", m_unreg, "an emitted rule not registered")):
+        kr, _m = check_registry(BB, PC, I, rules)
+        kills.append((name, not kr, "%s: check 13 red" % what))
+    BB.REG_LEAK_MUT = True
+    try:
+        kr, _m = check_registry(BB, PC, I)
+    finally:
+        BB.REG_LEAK_MUT = False
+    kills.append(("M_LC_REG_LEAK", not kr, "owed / counterfactual words reach ready: check 13 red"))
+    # check 14: the slot under contention (ContendB, Wilson 11-17)
+    ok14, msg14 = check_slot_contend(BB, PC, I)
+    print("  check 14 %s  %s" % ("GREEN" if ok14 else "RED  ", msg14))
+    BB.CONTEND_MUT = True
+    try:
+        k14, _m = check_slot_contend(BB, PC, I)
+    finally:
+        BB.CONTEND_MUT = False
+    kills.append(("M_LC_CONTEND_OFF", not k14, "contention ignored (wait 0): check 14 red"))
+    # check 15: depth above the buffer's refused; the record / stamp never read the counterfactual
+    ok15, msg15 = check_depth(BB, PC, I)
+    print("  check 15 %s  %s" % ("GREEN" if ok15 else "RED  ", msg15))
+    BB.DEPTH_MUT = True
+    try:
+        k15, _m = check_depth(BB, PC, I)
+    finally:
+        BB.DEPTH_MUT = False
+    kills.append(("M_LC_DEPTH_GT2", not k15, "slot depth 3 certified: check 15 red"))
+    k15b, _m = check_depth(BB, PC, I, texts={"model/cert_stamp.py": "import drain_table as DT\n"})
+    kills.append(("M_LC_STAMP_READS_CF", not k15b,
+                  "a stamp source importing drain_table: check 15 red"))
+    # check 16: the device clock's own error in the host-interval premises
+    ok16, msg16 = check_ppm(LC)
+    print("  check 16 %s  %s" % ("GREEN" if ok16 else "RED  ", msg16))
+    LC.PPM_MUT = True
+    try:
+        k16, _m = check_ppm(LC)
+    finally:
+        LC.PPM_MUT = False
+    kills.append(("M_LC_PPM_IGNORED", not k16, "SOURCE_PPM left out of tipd_fast: check 16 red"))
+    # check 17: an edge-paced lane with no T_ext is refused by name, not a crash
+    ok17, msg17 = check_edge_paced(BB)
+    print("  check 17 %s  %s" % ("GREEN" if ok17 else "RED  ", msg17))
+    BB.EDGEPACED_MUT = True
+    try:
+        k17, _m = check_edge_paced(BB)
+    finally:
+        BB.EDGEPACED_MUT = False
+    kills.append(("M_LC_EDGEPACED_CRASH", not k17,
+                  "queue_refusal lets EdgePacedNoTExt out: check 17 red"))
     # M_LC_FT_UNSEEN / M_LC_FT_NOFLOOR
     orig_ft = PC.arm_is_ft
     PC.arm_is_ft = lambda x, I=None: False
@@ -388,15 +838,18 @@ def main():
             break
     if target is not None:
         p2 = p[:target + 1] + [I.act(I.OP_LEVEL, I.PIN_NONE, 0, 40)] + p[target + 1:]
+        why = ""
         try:
             f, _o = run_cert(LC, V.image(prog=p2))
             hit = any(x[1].startswith("armed late") and x[1] not in {y[1] for y in fails}
                       for x in f)
-        except Exception as ex:                      # a shifted branch target may not assemble
-            hit, _o = False, str(ex)
+        except ValueError as ex:
+            # the encoder refuses the shifted image (pe_isa: a field / the store does not
+            # fit): the must-fire did not run -- recorded in its verdict line, never a pass
+            hit, why = False, " (image not built: %s)" % str(ex)[:80]
     else:
-        hit = False
-    kills.append(("M_LC_LATE_SOP", hit, "a 40-cycle nop before a handshake copy's arm_sop"))
+        hit, why = False, " (no handshake arm_sop found)"
+    kills.append(("M_LC_LATE_SOP", hit, "a 40-cycle nop before a handshake copy's arm_sop" + why))
     # M_LC_SHIFTI_FULL
     orig_sp = PC.spacing_of
     PC.spacing_of = lambda x, I=None: x["delay"]
@@ -422,7 +875,8 @@ def main():
         ok_txt = ("PASS (as required)" if name.endswith("_PASS") else "RED (killed)")
         print("  must-fire %-18s %s  %s" % (name, ok_txt if killed else "SURVIVED", what))
     teeth = all(k for _n, k, _w in kills)
-    green = ok1 and not fails and ok3 and ok4 and ok5 and ok6 and ok7 and ok8
+    green = (ok1 and not fails and ok3 and ok4 and ok5 and ok6 and ok7 and ok8 and ok9 and ok10
+             and ok11 and ok12 and ok13 and ok14 and ok15 and ok16 and ok17)
     verdict = "PASSED" if (green and teeth) else ("FAILED (must-fire survived)" if not teeth
                                                    else "FAILED")
     print("GATE lane-cert: %s" % verdict)

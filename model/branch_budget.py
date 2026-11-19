@@ -30,6 +30,245 @@ import proof_constants as PC  # noqa: E402
 
 LIMIT = 400          # B or a response this large: no fixpoint
 
+#: THE GUARANTEED SLOT (Wilson 11-16: one requester, one buffer, 1b at depth 2 and F1's PC+2).
+#: None = off (the record; nothing moves). An int = the buffer depth: every ARM's next words are
+#: fetched while the ARM is the head, through a reserved slot, so they are READY at release
+#: (lane_cert.certificate's `ready`) -- a plain ARM's successors to that depth (not the two-pin
+#: LEVEL ARM, which P1b excludes), a FALLTHROUGH ARM's PC+1 and PC+2. The cost: each ARM's
+#: fetch takes the port from the other lanes' refills, charged in B (l_refill per fetch, per
+#: 23 + B window, summed over lanes) -- the term both schemes read. [assumed: the bound's Lean
+#: brick is owed; this is the certificate side, labelled]
+SLOT = None
+#: fetches charged per ARM: None = proof_constants.slot_fetches_per_arm (Buf.lean, always two,
+#: Wilson 11-16); an int overrides it for a counterfactual
+SLOT_PER_ARM = None
+#: counterfactual switch: charge a lane's own ARM fetches to its own B too (the image-wide B).
+#: Off = the proofs' shape: Port.charge counts only refills for lanes OTHER than y, and every hB
+#: is per y, so the slot's term is per victim lane
+SLOT_SELF = False
+
+
+#: must-fire switch (gate_lane_cert M_LC_SLOT_SPACING_OFF): PC+2 marked ready without
+#: p1b2_margin_plain_scan's premise d >= p1b2_plain_min_d
+SLOT_SPACING_MUT = False
+
+
+#: must-fire switch (gate_lane_cert M_LC_SLOT_TIMEOUT_OFF): a FALLTHROUGH ARM's timeout word
+#: marked ready without p1b2_margin_timeout_scan's premise T >= FILL + L
+SLOT_TIMEOUT_MUT = False
+
+
+#: must-fire switch (gate_lane_cert M_LC_SLOT_BRANCH_OFF): a branch PC+1's taken target marked
+#: ready at depth 2 (no theorem: the buffer fetches PC+2 only, Buf.p1b2_*)
+SLOT_BRANCH_MUT = False
+#: must-fire switch (gate_lane_cert M_LC_SLOT_PC3_OFF): a FALLTHROUGH ARM at PC+1 gives ARM A
+#: its PC+3 (ARM A fetches two words: no theorem)
+SLOT_PC3_MUT = False
+
+
+def slot_timeout_drop(g, I, ready, lat, k=None, contend=0):
+    """{word}: the FALLTHROUGH timeout words (PC+1, fetched second) in `ready` whose theorem's
+    premise fails -- Buf.p1b2_margin_timeout_scan needs P1B2_FILL_SCAN + L <= T (T the ARM's
+    timeout, L its certified lateness `lat`). Wilson 11-17: ready only when T >= FILL + L; under
+    contention the fill moves by the port's wait (ContendB.contend_margin): T >= FILL + wait + L."""
+    if SLOT_TIMEOUT_MUT:
+        return set()
+    k = k or PC.load()
+    fill = k["p1b2_fill_scan"] + contend
+    return {c1 for a, (c1, _c2) in LC.ft_paths(g, I).items()
+            if c1 in ready and g[a][0]["delay"] < fill + lat.get(a, 0)}
+
+
+#: must-fire switch (gate_lane_cert M_LC_CONTEND_OFF): the port's contention ignored
+CONTEND_MUT = False
+#: must-fire switch (gate_lane_cert M_LC_DEPTH_GT2): a slot depth above slot_depth certified
+DEPTH_MUT = False
+#: must-fire switch (gate_lane_cert M_LC_EDGEPACED_CRASH): queue_refusal lets EdgePacedNoTExt out
+EDGEPACED_MUT = False
+
+
+def slot_contenders(graphs, I, l):
+    """The other lanes that can hold a slot request older than one of lane `l`'s (ContendB,
+    FCFS by capture): every other lane with an ARM (each ARM's two words go through the slot);
+    each holds at most one pending request at a capture, so this bounds the older requesters."""
+    return sum(1 for z, gz in graphs.items()
+               if z != l and any(gz[0][w][0]["op"] == I.OP_ARM for w in gz[0]))
+
+
+def slot_wait(graphs, I, l, k=None):
+    """ContendB.slot_wait_fcfs_two's contention term for lane `l`: CONTEND_PER_LANE per older
+    requester (USB receive's term is 0 where a slot image certifies: _image_budget refuses a
+    slot ARM beside USB receive)"""
+    if CONTEND_MUT:
+        return 0
+    k = k or PC.load()
+    return k["contend_per_lane"] * slot_contenders(graphs, I, l)
+
+
+def slot_margin(g, I, gaps, a, w, rule, k=None):
+    """The free-port margin of `rule`'s word `w` (ARM `a`): the cycles its theorem leaves before
+    the successor's earliest release. None for the FALLTHROUGH timeout word (its premise is
+    checked in the certificate loop, slot_timeout_drop)."""
+    k = k or PC.load()
+    if rule == "pc1_plain":
+        return k["p1b_margin_scan"]
+    if rule == "pc2_arm":
+        return k["p1b2_margin_arm_scan"]
+    if rule == "pc2_plain":
+        ds = [gaps[s1][-1] + sum(gaps[w][:-1]) for s1 in g[a][1] if s1 in g and w in g[s1][1]]
+        return min(ds) - k["p1b2_plain_min_d"]
+    if rule == "ft_edge":
+        return k["ft_edge_margin_scan"]
+    return None if rule == "ft_timeout" else 0
+
+
+def _plain_edge_arm(x, I):
+    """an ARM whose successor is released after its writeback (ArmRetire; lane_cert's `ret`)"""
+    return (x["op"] == I.OP_ARM and not x["mod"] & I.ARM_MOD_LEVEL2
+            and not x["mod"] & I.ARM_MOD_FT)
+
+
+#: THE READINESS REGISTRY (Wilson 11-17): every rule that makes a word ready names the Lean
+#: theorem(s) it rests on. status "proved": every theorem is in gate_lean_build.KEY (the Lean
+#: gate) -- only these reach the certificate; "owed": a theorem still to prove (listed by the
+#: name it will carry); "counterfactual": no theorem, never in the certificate. gate_lane_cert
+#: check 13 turns red on a rule with no theorem, a proved rule whose theorem is not at the Lean
+#: gate, a rule slot_ready emits that is not registered, or an owed / counterfactual word that
+#: reaches slot_ready.
+READY_RULES = {
+    "pc1_plain": {"status": "proved", "theorems": ("Slot.p1b_margin_scan",
+                                                   "ContendB.slot_wait_fcfs_two"),
+                  "what": "PC+1 of a plain ARM"},
+    "pc2_arm": {"status": "proved", "theorems": ("Buf.p1b2_margin_arm_scan",
+                                                 "ContendB.slot_wait_fcfs_two"),
+                "what": "PC+2, PC+1 a plain edge ARM (m1 / m3)"},
+    "pc2_plain": {"status": "proved", "theorems": ("Buf.p1b2_margin_plain_scan",
+                                                   "ContendB.slot_wait_fcfs_two"),
+                  "what": "PC+2, PC+1 any other word, d >= p1b2_plain_min_d"},
+    "ft_timeout": {"status": "proved", "theorems": ("Buf.p1b2_margin_timeout_scan",
+                                                     "ContendB.slot_wait_fcfs_two"),
+                   "what": "FALLTHROUGH PC+1 (timeout, fetched second); T >= FILL + L "
+                           "checked in _image_budget (slot_timeout_drop)"},
+    "ft_edge": {"status": "proved",
+                "theorems": ("Slot.p1b_margin_scan", "FlushKeep.edge_survives_flush",
+                             "FlushKill.wfBK_run", "FlushHeld.ft_edge_at_release_armed",
+                             "ContendB.slot_wait_fcfs_two"),
+                "what": "FALLTHROUGH PC+2 (edge, fetched first): captured by the edge, held to "
+                        "it on the armed lane, kept by the flush (K1-K5), the head at the "
+                        "release. RTL contract: agent 1's K1-K5 + the scan fix (liveFl); a "
+                        "buffered edge word moves to the head in the flush cycle (ruling (a))"},
+    "ft_edge_after_arm": {"status": "owed", "theorems": ("BufFifo.ft_merge_room",),
+                          "what": "FALLTHROUGH ARM B at another ARM's PC+1, B's edge word: needs "
+                                  "agent 1's merge + the buffer-room theorem (the compiler "
+                                  "refuses the shape, dae31dc)"},
+    "depth_gt2": {"status": "counterfactual", "theorems": (),
+                  "what": "words beyond depth 2 (SLOT > 2): no theorem"},
+}
+#: must-fire switch (gate_lane_cert M_LC_REG_LEAK): owed / counterfactual words reach slot_ready
+REG_LEAK_MUT = False
+
+
+def slot_ready(g, I, depth, gaps, k=None, contend=0):
+    """{word}: the words the guaranteed slot makes ready at release on one lane -- the words of
+    slot_ready_tagged whose rule is "proved" in READY_RULES (Wilson 11-17: owed and
+    counterfactual rules never reach the certificate). PC+2 means the word at ARM + 2 only
+    (rule (1) removed: no branch taken target; rule (2) removed: no PC+3 for ARM A behind a
+    FALLTHROUGH PC+1). `gaps`: lane_cert.build's writeback gaps (after any premise gaps), so d is
+    the certificate's. `contend`: the port's wait behind older requesters (slot_wait,
+    ContendB): a word is ready only while its free-port margin covers it (contend_margin);
+    otherwise it is left to the refill analysis."""
+    out = set()
+    for a, w, r in slot_ready_tagged(g, I, depth, gaps, k):
+        if not (REG_LEAK_MUT or READY_RULES[r]["status"] == "proved"):
+            continue
+        # at a free port each rule's own premise (checked in slot_ready_tagged) is the theorem's;
+        # under a wait the margin must cover it
+        m = slot_margin(g, I, gaps, a, w, r, k) if contend else None
+        if m is None or m >= contend:
+            out.add(w)
+    return out
+
+
+def slot_ready_by_arm(g, I, depth, gaps, k=None):
+    """{ARM: {word}}: every word each ARM's slot fetch would make ready, any rule status"""
+    by = {}
+    for a, w, _r in slot_ready_tagged(g, I, depth, gaps, k):
+        by.setdefault(a, set()).add(w)
+    for a in g:
+        x = g[a][0]
+        if x["op"] == I.OP_ARM and not x["mod"] & I.ARM_MOD_LEVEL2:
+            by.setdefault(a, set())
+    return by
+
+
+def slot_ready_tagged(g, I, depth, gaps, k=None):
+    """[(ARM, word, rule id)]: every word the slot would make ready, with its READY_RULES rule"""
+    k = k or PC.load()
+    dmin = k["p1b2_plain_min_d"]
+    out = []
+    for a in g:
+        x = g[a][0]
+        if x["op"] != I.OP_ARM or x["mod"] & I.ARM_MOD_LEVEL2:
+            continue
+        if x["mod"] & I.ARM_MOD_FT:
+            # PC+2 (edge, fetched first) and PC+1 (timeout, fetched second): the timeout word's
+            # premise (p1b2_margin_timeout_scan) needs the ARM's lateness, so it is checked in
+            # _image_budget's certificate loop (slot_timeout_drop)
+            prev = g.get(a - 1)
+            after_arm = prev is not None and prev[0]["op"] == I.OP_ARM
+            for w in g[a][1]:
+                if w not in g:
+                    continue
+                if w == a + 1:
+                    out.append((a, w, "ft_timeout"))
+                else:
+                    out.append((a, w, "ft_edge_after_arm" if after_arm else "ft_edge"))
+            continue
+        front = {w for w in g[a][1] if w in g}
+        out += [(a, w, "pc1_plain") for w in front]
+        if depth < 2:
+            continue
+        nxt = set()
+        for s1 in front:
+            for s2 in g[s1][1]:
+                if s2 not in g or (s2 != a + 2 and not (SLOT_BRANCH_MUT or SLOT_PC3_MUT)):
+                    continue
+                d = gaps[s1][-1] + sum(gaps[s2][:-1])
+                if _plain_edge_arm(g[s1][0], I):
+                    out.append((a, s2, "pc2_arm"))
+                    nxt.add(s2)
+                elif d >= dmin or SLOT_SPACING_MUT:
+                    out.append((a, s2, "pc2_plain"))
+                    nxt.add(s2)
+        front = nxt
+        for _ in range(depth - 2):
+            front = {s for w in front if w in g for s in g[w][1] if s in g}
+            out += [(a, w, "depth_gt2") for w in front]
+    return out
+
+
+def arm_window_count(g, gaps, lat, W, I):
+    """The most ARM words on one path whose releases fit a W-cycle window (each ARM's slot fetch
+    happens while it is the head: by its release plus its lateness) -- lane_cert.br1_window_count's
+    walk, counting ARMs."""
+    arms = {w for w in g if g[w][0]["op"] == I.OP_ARM}
+    best = 0
+    for s in arms:
+        budget = W - 1 + lat[s]
+        stack, seen = [(s, 0, 1)], set()
+        while stack:
+            w, dist, n = stack.pop()
+            best = max(best, n)
+            if (w, dist) in seen:
+                continue
+            seen.add((w, dist))
+            step = sum(gaps[w])
+            for nx in g[w][1]:
+                d2 = dist + step
+                if d2 <= budget:
+                    stack.append((nx, d2, n + (1 if nx in arms else 0)))
+    return best
+
 #: must-fire switch (gate_lane_cert M_LC_NOPIN_ALL): count every word as touching a pin
 NOPIN_MUT = False
 #: must-fire switches (gate_lane_cert): M_LC_ARMGATE_OFF -- no generic-lane ARM gated;
@@ -70,6 +309,13 @@ def queue_refusal(img, B, lanes):
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             json.dump({"images": {"live": ent}}, fh)
         q = P.queue_slot(img, lateness=True, budget_path=tmp)
+    except P.EdgePacedNoTExt as exc:
+        # an edge-paced lane with no declared T_ext: 1.6a cannot be evaluated, so the image is
+        # not certified -- refused by name, never a crash of the certificate (pe_asm and
+        # program_a2 refuse the same way)
+        if EDGEPACED_MUT:
+            raise
+        return "1.6a not checkable: %s" % str(exc)[:160]
     finally:
         os.remove(tmp)
     bad = sorted(((int(ln), v) for ln, v in q.items() if not v["ok"]), key=lambda kv: kv[0])
@@ -226,11 +472,24 @@ def _image_budget(img, iters=80, premise_gaps=None, ready=None, scheme="window")
         # certified by the EDF scheme
         return {"B": None, "reason": "not applied to a USB image (the USB lane's response is "
                 "PrioResp's; one closure theorem per image)", "lanes": {}}
+    if SLOT and SLOT > k["slot_depth"] and not DEPTH_MUT:
+        # Wilson 11-17: depth above the buffer's has no theorem (READY_RULES depth_gt2,
+        # counterfactual); the certificate refuses it outright rather than drop its words
+        return {"B": None, "reason": "slot depth %d > slot_depth %d: no theorem (counterfactual "
+                "only, never certified)" % (SLOT, k["slot_depth"]), "lanes": {}}
     graphs = {l: LC.build(img, l, prem, I) for l in lanes}
     for l, pg in premise_gaps.items():
         for w, gp in pg.items():
             if l in graphs and w in graphs[l][2]:
                 graphs[l][2][w] = [max(graphs[l][2][w][0], gp)] + graphs[l][2][w][1:]
+    cw = {l: 0 for l in lanes}
+    if SLOT:
+        # after the premise gaps: slot_ready's d is the release distance the certificate uses;
+        # the port's wait behind older slot requesters (ContendB, FCFS by capture)
+        cw = {l: slot_wait(graphs, I, l, k) for l in lanes}
+        ready = {l: set(ready.get(l, ())) | slot_ready(graphs[l][0], I, SLOT, graphs[l][2], k,
+                                                       contend=cw[l])
+                 for l in lanes}
     usb_n, usb_rmax = 0, None
     if usb:
         with contextlib.redirect_stdout(io.StringIO()):
@@ -256,6 +515,10 @@ def _image_budget(img, iters=80, premise_gaps=None, ready=None, scheme="window")
     generic = [l for l in lanes if not (usb and l == I.USB_LANE)]
     B = k["l_refill"] * usb_n
     R = {l: k["R_base"] for l in generic}
+    SB = {l: 0 for l in generic}          # the guaranteed slot's charge on lane l (per victim)
+    # the certificate's trace (Wilson 11-17, check 10 end to end): calls to the timeout rule
+    # (slot_timeout_drop) made inside the certificate loop
+    tcalls = 0
     for _ in range(iters):
         lat, rmax = {}, {}
         for l in generic:
@@ -265,13 +528,25 @@ def _image_budget(img, iters=80, premise_gaps=None, ready=None, scheme="window")
             # valid by its release + flush_refill_late + B (FlushLate.flush_head_late); the
             # timeout's decision only disarms, so PC+1 waits one more decision (disarm_noDec)
             fts = LC.ft_paths(g, I)
-            floor = {c2: LC.ft_flush_late(B) for _c1, c2 in fts.values() if c2 in g}
+            Bl = B + SB[l]
+            floor = {c2: LC.ft_flush_late(Bl) for _c1, c2 in fts.values() if c2 in g}
             xr = {c1: 1 for c1, _c2 in fts.values() if c1 in g}
-            cert = LC.certificate(g, preds, gaps, k, B, 0, floor=floor, xr=xr, rbase=R[l],
-                                  ready=ready.get(l))
-            if cert is None:
-                return {"B": None, "reason": "lane %d: no lateness certificate at B = %d" % (l, B),
-                        "lanes": {}}
+            while True:
+                cert = LC.certificate(g, preds, gaps, k, Bl, 0, floor=floor, xr=xr, rbase=R[l],
+                                      ready=ready.get(l))
+                if cert is None:
+                    return {"B": None, "reason": "lane %d: no lateness certificate at B = %d%s"
+                            % (l, Bl, " (slot charge %d)" % SB[l] if SB[l] else ""), "lanes": {}}
+                # a FALLTHROUGH timeout word is ready only while T >= FILL + L (its ARM's
+                # certified lateness); dropping a ready word only raises lateness, so this ends
+                drop = set()
+                if SLOT:
+                    tcalls += 1
+                    drop = slot_timeout_drop(g, I, ready.get(l, set()), cert[0], k,
+                                             contend=cw[l])
+                if not drop:
+                    break
+                ready[l] = set(ready[l]) - drop
             lat[l] = cert[0]
             rmax[l] = max(cert[2].values())
         if usb:
@@ -308,8 +583,24 @@ def _image_budget(img, iters=80, premise_gaps=None, ready=None, scheme="window")
         if usb and late:
             return {"B": None, "reason": "a non-USB lane is late beside the USB receive (its refills "
                     "would charge the USB lane: not covered)", "lanes": {}}
+        SBn = {l: 0 for l in generic}
+        if SLOT:
+            fpa = SLOT_PER_ARM if SLOT_PER_ARM is not None else k["slot_fetches_per_arm"]
+            per = {l: fpa * arm_window_count(graphs[l][0], graphs[l][2], lat[l],
+                                                      23 + B + SB[l], I) for l in generic}
+            if usb and any(per.values()):
+                return {"B": None, "reason": "guaranteed slot: a non-USB lane's ARM fetches "
+                        "beside the USB receive (they would charge the USB lane: not covered)",
+                        "lanes": {}}
+            if usb:
+                # the USB lane's ARMs fetch through the slot too (their cost is charged; no
+                # readiness is claimed for them: the USB lane's figures are full_report's)
+                per[I.USB_LANE] = fpa * arm_window_count(ug, ugaps, ulat, 23 + B, I)
+            # Slot.chargeS_le: SLOT_CHARGE per fetch for another lane (proof_constants)
+            SBn = {l: k["slot_charge"] * sum(n for z, n in per.items() if z != l or SLOT_SELF)
+                   for l in generic}
         Bn = k["l_refill"] * (late + usb_n)
-        if Bn == B and Rn == R:
+        if Bn == B and Rn == R and SBn == SB:
             out = {}
             for l in generic:
                 ag = arm_gate(img, l, graphs[l], lat[l], I)
@@ -322,6 +613,8 @@ def _image_budget(img, iters=80, premise_gaps=None, ready=None, scheme="window")
                           "max_late_pin": max([v for w, v in lat[l].items()
                                                if not no_pin(graphs[l][0][w][0], I)
                                                and w not in gated] or [0])}
+                if SLOT:
+                    out[l]["slot_B"] = SB[l]
                 if ag:
                     out[l]["arm_margin"] = min(ag.values())
                 # per word (the poset compiler's arming check reads it; not in the record)
@@ -347,11 +640,12 @@ def _image_budget(img, iters=80, premise_gaps=None, ready=None, scheme="window")
             if why:
                 return {"B": None, "reason": why, "lanes": {}}
             return {"B": B, "reason": "certified" if scheme == "window" else
-                    "certified (EDF response bounds, RespEdfClose.wb_close_edf)", "lanes": out}
+                    "certified (EDF response bounds, RespEdfClose.wb_close_edf)", "lanes": out,
+                    "timeout_rule_calls": tcalls}
         if Bn > LIMIT or any(v > LIMIT for v in Rn.values()):
             return {"B": None, "reason": "no finite B (B %d -> %d, max R %d)"
                     % (B, Bn, max(Rn.values())), "lanes": {}}
-        B, R = Bn, Rn
+        B, R, SB = Bn, Rn, SBn
     return {"B": None, "reason": "no fixpoint in %d rounds (B %d)" % (iters, B), "lanes": {}}
 
 

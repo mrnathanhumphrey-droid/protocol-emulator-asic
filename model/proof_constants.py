@@ -67,6 +67,47 @@ def load(path=PATH):
     # FlushLate.flush_head_late: a flushed lane's head is valid by release + this + B (the port's
     # l_refill - 1 cycles back to clean, restart_hit's one-pass window 23 + B, less flush -> release)
     k["flush_refill_late"] = (k["l_refill"] - 1) + 23 - 1
+    # Slot.lean (Wilson 11-16, the guaranteed slot): slot_wait_bound -- a held slot request is
+    # issued within slot_wait_base + slot_charge x (USB receive issues meanwhile): the in-flight
+    # refill's remaining cycles (rem, SCAN -> REQ -> WAIT -> CAP) and one refill per USB issue;
+    # chargeS_le -- a fetch for another lane costs a lane one refill (per victim)
+    k["slot_wait_base"] = k["l_refill"] - 1
+    k["slot_charge"] = k["l_refill"]
+    # Slot.lean P1b (Wilson 11-16): the slot-served word after an ARM captured into its lane's
+    # empty head is valid at c + fill; the successor's earliest release is the ARM's earliest
+    # writeback (c + dispatch_cycles) + arm_retire_gap (ArmRetire.arm_release_ge). The margin:
+    # through the scan (raise at capture) fill = 1 + l_refill; issued at capture fill = l_refill
+    k["p1b_margin_scan"] = k["dispatch_cycles"] + k["arm_retire_gap"] - (1 + k["l_refill"])
+    k["p1b_margin_direct"] = k["dispatch_cycles"] + k["arm_retire_gap"] - k["l_refill"]
+    # FlushKeep.lean (Wilson 11-17): a FALLTHROUGH ARM's edge word (fetched first) against the
+    # edge path's earliest release c + dispatch + 1 (edge after the writeback) + 1 (release after
+    # the edge); through the scan fill = 1 + l_refill, issued at capture (the contract) l_refill
+    k["ft_edge_margin_scan"] = k["dispatch_cycles"] + 1 + 1 - (1 + k["l_refill"])
+    k["ft_edge_margin_direct"] = k["dispatch_cycles"] + 1 + 1 - k["l_refill"]
+    # ContendB.lean (Wilson 11-17): under FCFS by capture, each older slot requester delays a
+    # waiting lane by its two fetches' port time (slot_wait_fcfs_two)
+    k["contend_per_lane"] = k["slot_depth"] * k["slot_charge"]
+    # Buf.lean (Wilson 11-16, always two): slot_depth words fetched per ARM, each a read charged
+    # to the other lanes; the second word's margin when PC+1 is itself an ARM (m1 / m3): its
+    # earliest release c + (dispatch + gap) + (dispatch - 1) + gap against fetch 2's word at
+    # c + 1 + 2 l_refill (scan) / c + 2 l_refill - 1 (at capture)
+    k["slot_fetches_per_arm"] = k["slot_depth"]
+    rel2 = 2 * (k["dispatch_cycles"] + k["arm_retire_gap"]) - 1
+    k["p1b2_margin_arm_scan"] = rel2 - (1 + 2 * k["l_refill"])
+    k["p1b2_margin_arm_direct"] = rel2 - (2 * k["l_refill"] - 1)
+    # Buf.p1b2_margin_plain_scan's premise (Wilson 11-17): a plain PC+1 released at
+    # c + dispatch + gap, PC+2 d later, against fetch 2's word at c + 1 + 2 l_refill -- the
+    # margin d - this is >= 0 only from this d up (4 today; branch_budget.slot_ready reads it)
+    k["p1b2_plain_min_d"] = (1 + 2 * k["l_refill"]) - (k["dispatch_cycles"] + k["arm_retire_gap"])
+    # Buf.P1B2_FILL_SCAN: fetch 2's word valid at c + 1 + 2 l_refill (through the scan); the
+    # FALLTHROUGH timeout word's premise (p1b2_margin_timeout_scan) is FILL + L <= T
+    k["p1b2_fill_scan"] = 1 + 2 * k["l_refill"]
+    if k["p1b2_margin_arm_scan"] < 0:
+        raise ValueError("proof_constants: the second word through the scan has a negative "
+                         "margin %d" % k["p1b2_margin_arm_scan"])
+    if k["p1b_margin_scan"] < 0:
+        raise ValueError("proof_constants: P1b through the scan has a negative margin %d"
+                         % k["p1b_margin_scan"])
     # the A2 export at the RTL floor and the USB budget (OptRun.branch_j_interim: = the interim J)
     k["branch_j_wmin"] = 1 + max(k["R_base"] + k["head_slack"] + k["br1_budget"] - k["br_w_min"], 0)
     if k["coresident_usb"] < k["coresident_min_d"]:

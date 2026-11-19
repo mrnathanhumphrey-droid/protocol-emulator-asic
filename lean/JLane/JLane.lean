@@ -58,3 +58,11 @@ import JLane.NopSplit
 import JLane.RespEdf
 import JLane.RespEdfClose
 import JLane.ArmRetire
+import JLane.Slot
+import JLane.Buf
+import JLane.HeadS
+import JLane.BufEng
+import JLane.FlushKeep
+import JLane.FlushKill
+import JLane.FlushHeld
+import JLane.ContendB

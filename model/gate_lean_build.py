@@ -67,7 +67,39 @@ KEY = ("dstar", "dstar29", "dstar39", "dstar39_v2", "dstar39_st", "dstar39_hold"
        "first_stable", "arm_release_bus", "arm_release_T_bus",
        "ord_wbDly", "ord_release", "ord_late_free",
        "cnt_mono_run", "wb_bound_edf", "cnt_le_sum5", "wb_close_edf",
-       "arm_release_ge", "arm_rd", "cap_zc", "cap_hn")
+       "arm_release_ge", "arm_rd", "cap_zc", "cap_hn",
+       # Slot.lean (Wilson 11-16): the guaranteed slot below USB receive
+       "struct_stepS", "chargeS_le", "chargeS_own", "port_wait_boundS", "slot_waitS",
+       "slot_once", "usb_once_S", "cntS_once", "slot_count", "usb_count", "slot_wait_bound",
+       "usbSum_eq_cnt",
+       # P1b from the fill (Wilson 11-16): both requester variants and their margins
+       "p1b_capture", "p1b_direct", "p1b_margin_scan", "p1b_margin_direct",
+       # Buf.lean (Wilson 11-16): the depth-2 buffer, always two fetches per ARM
+       "two_fetch_scan", "two_fetch_direct", "buf_load", "buf_load_margin",
+       "p1b2_margin_arm_scan", "p1b2_margin_arm_direct", "p1b2_margin_plain_scan",
+       "p1b2_margin_plain_direct", "p1b2_margin_timeout_scan", "p1b2_margin_timeout_direct",
+       # HeadS.lean (Wilson 11-16, carry-through C1): the head-valid chain on the slot run
+       "spareFill_stepS", "wf_runS", "owed_runS", "head_valid_of_countsS", "pending_boundS",
+       "head_valid_when_readyS",
+       # BufEng.lean (Wilson 11-17, carry-through C2): the buffer in the engine, cycle-exact
+       "wfB_run", "held_run", "head_valid_of_countsB", "port_wait_boundB", "pending_boundB",
+       "head_valid_when_readyB", "empty_cycle_after_ret", "empty_cycle_disp", "empty_cycle_load",
+       "mask_buf_next", "mask_flight_next", "ordB_run", "order_kept", "issue_index",
+       "nr_held_run", "slot_countB", "slot_count_two",
+       # FlushKeep.lean (Wilson 11-17, K1): the edge word survives the flush
+       "edge_survives_flush", "flush_keeps_only_edge", "flush_buf_empty", "flush_drops_timeout",
+       "flush_empty_of_absent", "flush_keep_slot", "stepBK_other", "edge_capture_by_edge",
+       "edge_capture_by_edge_direct", "edge_valid_by_release", "ft_edge_margin_scan",
+       "ft_edge_margin_direct", "ft_edge_cap_before_edge_direct",
+       # FlushKill.lean (Wilson 11-17, K2a): BufEng's invariant across the keep-flush, with K5
+       "wfBK_step", "wfBK_run", "wfBK_init", "stepBKK_noflush", "edge_survives_flushK",
+       "flushK_keeps_only_edge", "flushK_buf_empty", "kill_files_nothing",
+       # FlushHeld.lean (Wilson 11-17, K2b): the buffered armed view; held at the edge
+       "heldB_step", "armed_step", "armInvB_step", "flushOk_hit", "edge_held_at_edge",
+       "ft_edge_at_release", "edge_held_armed", "ft_edge_at_release_armed",
+       # ContendB.lean (Wilson 11-17, C3): the slot under contention, FCFS by capture
+       "slot_wait_fcfs", "oldSum_split", "slot_wait_fcfs_two", "slot_wait_fcfs_ret",
+       "contend_margin", "contend_per_lane_val")
 #: proof_constants.load() key -> the Lean expression that must evaluate to it (SPEC: the map)
 CONSTS = {
     "lemmaA_window": "LEMMA_A_WINDOW", "R_base": "R_BASE", "dispatch_cycles": "DISPATCH_CYCLES",
@@ -85,6 +117,13 @@ CONSTS = {
     "flush_refill_late": "FLUSH_REFILL_LATE",
     "usb_other_R": "USB_OTHER_R",
     "branch_j_wmin": "BRANCH_J_WMIN",
+    "slot_wait_base": "SLOT_WAIT_BASE", "slot_charge": "SLOT_CHARGE",
+    "arm_retire_gap": "ARM_RETIRE_GAP", "p1b_margin_scan": "P1B_MARGIN_SCAN",
+    "p1b_margin_direct": "P1B_MARGIN_DIRECT",
+    "slot_fetches_per_arm": "SLOT_FETCHES_PER_ARM",
+    "p1b2_margin_arm_scan": "P1B2_MARGIN_ARM_SCAN", "p1b2_margin_arm_direct": "P1B2_MARGIN_ARM_DIRECT",
+    "ft_edge_margin_scan": "FT_EDGE_MARGIN_SCAN", "ft_edge_margin_direct": "FT_EDGE_MARGIN_DIRECT",
+    "contend_per_lane": "CONTEND_PER_LANE",
 }
 PLANT_THM = "planted_by_gate"
 #: gate_mutant_kills' scratch-mutant registry (ruling AC2): this gate is the killer

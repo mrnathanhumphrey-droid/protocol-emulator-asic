@@ -31,6 +31,7 @@ for _p in (HERE, os.path.join(ROOT, "model"), os.path.join(ROOT, "host", "poset"
     if _p not in sys.path:
         sys.path.insert(0, _p)
 import psutil  # noqa: E402
+from toolchain import banner  # noqa: E402  ruling V2
 
 CAP_MB, CAP_S = 4096, 900
 BENCH, TOP = "test/tb_within.v", "tb_within"
@@ -114,8 +115,7 @@ def frames(ev):
 
 
 def main() -> int:
-    from toolchain import banner
-    banner("iverilog", "vvp")          # V2 (gate_tool_pinning): say which binaries ran
+    banner("iverilog", "vvp")   # ruling V2: the log names the binary that ran
     import compile as C
     import run_poset_compile as RPC
     hz = C.clock.hz()

@@ -134,3 +134,11 @@ fpga/sim/run_fpga_i2c.py            ^\s*FPGA-I2C: PASSED\s*$
 model/gate_store_size_literals.py   ^\s*GATE store-size-literals: PASSED\s*$
 model/gate_host_contract.py         ^\s*GATE host-contract: PASSED\s*$
 model/area_line.py                  ^\s*GATE area-line: PASSED\s*$
+model/gate_cert_stamp.py            ^\s*GATE cert_stamp: PASSED\s*$
+host/poset/run_poset_compile.py     ^\s*GATE poset_compile: PASSED\b
+model/gate_lane_cert.py             ^\s*GATE lane-cert: PASSED\s*$
+model/gate_live_price.py            ^\s*GATE live_price: PASSED\s*$
+model/gate_uart_spacing.py          ^\s*GATE uart_spacing: PASSED\s*$
+model/gate_spi_premise.py           ^\s*GATE spi_premise: PASSED\s*$
+model/gate_lean_anchors.py          ^\s*GATE lean-anchors: PASSED\s*$
+model/b6_slack.py                   ^\s*GATE b6_slack: PASSED\s*$

@@ -45,6 +45,9 @@
   C14 arm='early' refused as withdrawn (the drain table alone uses it, counterfactual=True); more
      than MAX_PLAIN_ARM_RUN = 2 plain edge ARMs in a row refused (item 1b two deep; an FT ARM
      is outside the run) (must-fire M_PC_ARM3_PASS)
+  C15 a FALLTHROUGH ARM at another ARM's PC+1 refused (plain, two-pin or FALLTHROUGH A; Wilson
+     11-17: BufFifo has no theorem for it); one word between them compiles (must-fire
+     M_PC_FTPC1_PASS)
 Must-fires added 11-15: M_PC_WITHIN_LO_PASS (lo > 0 without a datasheet compiles), and pe_asm's
 M_ASM_MOD_ANY_OP / M_ASM_MOD_ANY_VALUE (the mod field's two refusals), each killed by C10
 Must-fires: every compile.MUTANTS entry, run IN-PROCESS through the same judge, turns this gate red.
@@ -83,6 +86,7 @@ SCRATCH_MUTANTS = {
     "M_PC_ARMRETIRE_OFF": "killed in-process by this gate (C12)",
     "M_PC_DRAIN_OFFBY1": "killed in-process by this gate (C13)",
     "M_PC_ARM3_PASS": "killed in-process by this gate (C14)",
+    "M_PC_FTPC1_PASS": "killed in-process by this gate (C15)",
     "M_PC_A2_NOPREM": "killed in-process by this gate (C11: A2 and the window certificate disagree)",
     "M_ASM_MOD_ANY_OP": "pe_asm.MODS_MUT, killed in-process by this gate (C10)",
     "M_ASM_MOD_ANY_VALUE": "pe_asm.MODS_MUT, killed in-process by this gate (C10)",
@@ -506,6 +510,24 @@ def c14():
     return probs
 
 
+def c15():
+    """Wilson 11-17: a FALLTHROUGH ARM at another ARM's PC+1 is refused (plain, two-pin or
+    FALLTHROUGH A); one word between them compiles"""
+    probs = []
+    I = C.I
+    arm = (I.OP_ARM, 4, 0, 0, 0, 0)
+    ft = arm + (I.ARM_MOD_FT,)
+    two = arm + (I.ARM_MOD_LEVEL2,)
+    sh = (I.OP_SHIFT, 7, 0, 20, 0, 7)
+    rearm = (I.OP_REARM, 0, 1, 20, 0)
+    for name, a in (("plain", arm), ("two-pin", two), ("FALLTHROUGH", ft)):
+        if not C.ft_after_arm_problems({0: [a, ft, sh, rearm]}):
+            probs.append("C15 a FALLTHROUGH ARM after a %s ARM not refused" % name)
+    if C.ft_after_arm_problems({0: [arm, sh, ft, sh, rearm]}):
+        probs.append("C15 a FALLTHROUGH ARM one word after an ARM refused")
+    return probs
+
+
 def judge():
     probs = []
     # C1
@@ -565,6 +587,7 @@ def judge():
     probs += c12()
     probs += c13()
     probs += c14()
+    probs += c15()
     # C8: POSET_SPEC.md's generated passages match the constants file
     import gen_spec_doc
     probs += ["C8 %s" % p for p in gen_spec_doc.stale()]
@@ -676,7 +699,7 @@ def main() -> int:
     if probs:
         print("GATE poset_compile: FAILED (%d)" % len(probs))
         return 1
-    print("GATE poset_compile: PASSED (C1-C14; %d / %d mutants killed)" % (len(C.MUTANTS) + len(ASM_MUTANTS), len(C.MUTANTS) + len(ASM_MUTANTS)))
+    print("GATE poset_compile: PASSED (C1-C15; %d / %d mutants killed)" % (len(C.MUTANTS) + len(ASM_MUTANTS), len(C.MUTANTS) + len(ASM_MUTANTS)))
     return 0
 
 
