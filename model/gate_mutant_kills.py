@@ -296,6 +296,9 @@ SCRATCH = {
     "M_LEAN_SORRY": "model/gate_lean_build.py",
     "M_LEAN_AXIOM": "model/gate_lean_build.py",
     "M_LEAN_CONST": "model/gate_lean_build.py",
+    # the premise lists (Wilson 11-19): an extra hypothesis planted in a run-level theorem's
+    # signature -- gate lean-build check 6 reds on the unlisted premise (CI, lean shard)
+    "M_LEAN_PREMISE_UNLISTED": "model/gate_lean_build.py",
     # the USB sweep (Wilson 11-13 condition 4; a2 02bf147): the deadline margin at 1
     # -- gate usb_sweep's J <= 2 reds (CI, sim2)
     "M_USB_MARGIN1": "model/gate_usb_sweep.py",
