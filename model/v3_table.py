@@ -348,7 +348,11 @@ def rows():
     with open(RESP, encoding="utf-8") as fh:
         resp = json.load(fh)
     out, seen = [], {}
-    for name, img in sorted(imgs.items()):
+    # ⭐ ALIASES AFTER THEIR TARGETS (Wilson 11-19, one program, one set of facts): a
+    # row is labelled by the first name that reaches it, and 'L0_edge' sorts before
+    # 'edge_to200' -- so the bench would print the alias's name for its target's image
+    import nonadmissible as _NA
+    for name, img in sorted(imgs.items(), key=lambda kv: (kv[0] in _NA.ALIASES, kv[0])):
         h = fnv(img)
         rb, dt = [-1] * N_LANES, [-1] * N_LANES
         rec = resp.get(name)

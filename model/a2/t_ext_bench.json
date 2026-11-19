@@ -1,0 +1,77 @@
+{
+ "20b3e4b2dda1a01c3cd980888fd027d9ccffa4833635a2844655dc7dd2d33a5e": {
+  "image": "probe_cov_arm2/L2_seq.hex",
+  "label": "read (bench)",
+  "lanes": {
+   "2": 80
+  },
+  "source": [
+   "test/run_arm2.py:385",
+   "test/tb_arm2.v:138",
+   "test/tb_arm2.v:142",
+   "test/tb_arm2.v:141"
+  ],
+  "unit": "cycles",
+  "why": "the testbench is the peer: releases at arming + max(PHA 20, PHB 20) and arming + PHA2 100, 80 cycles apart"
+ },
+ "3a323f738467acd018d7dcaa2945efc553a91b2713c77602c8a049bc3faaa78e": {
+  "image": "probe_cov_arm2/L4_seq.hex",
+  "label": "read (bench)",
+  "lanes": {
+   "4": 80
+  },
+  "source": [
+   "test/run_arm2.py:385",
+   "test/tb_arm2.v:138",
+   "test/tb_arm2.v:142",
+   "test/tb_arm2.v:141"
+  ],
+  "unit": "cycles",
+  "why": "the testbench is the peer: releases at arming + max(PHA 20, PHB 20) and arming + PHA2 100, 80 cycles apart"
+ },
+ "6bbf7fde2a39158b697c3930ec24e47b563c9ec3c9999c5ced635c7de0fd14ff": {
+  "image": "probe_cov_arm2/L0_seq.hex",
+  "label": "read (bench)",
+  "lanes": {
+   "0": 80
+  },
+  "source": [
+   "test/run_arm2.py:385",
+   "test/tb_arm2.v:138",
+   "test/tb_arm2.v:142",
+   "test/tb_arm2.v:141"
+  ],
+  "unit": "cycles",
+  "why": "the testbench is the peer: releases at arming + max(PHA 20, PHB 20) and arming + PHA2 100, 80 cycles apart"
+ },
+ "9d084a9a9630efdb7a8770e42aa3bfc52de676fb8a8e05e15d0a345358cbc386": {
+  "image": "probe_cov_arm2/L3_seq.hex",
+  "label": "read (bench)",
+  "lanes": {
+   "3": 80
+  },
+  "source": [
+   "test/run_arm2.py:385",
+   "test/tb_arm2.v:138",
+   "test/tb_arm2.v:142",
+   "test/tb_arm2.v:141"
+  ],
+  "unit": "cycles",
+  "why": "the testbench is the peer: releases at arming + max(PHA 20, PHB 20) and arming + PHA2 100, 80 cycles apart"
+ },
+ "d22e528c11e267088dec7b5d27714b855b60075c472b9cf225e39e934e01965f": {
+  "image": "probe_cov_arm2/L1_seq.hex",
+  "label": "read (bench)",
+  "lanes": {
+   "1": 80
+  },
+  "source": [
+   "test/run_arm2.py:385",
+   "test/tb_arm2.v:138",
+   "test/tb_arm2.v:142",
+   "test/tb_arm2.v:141"
+  ],
+  "unit": "cycles",
+  "why": "the testbench is the peer: releases at arming + max(PHA 20, PHB 20) and arming + PHA2 100, 80 cycles apart"
+ }
+}

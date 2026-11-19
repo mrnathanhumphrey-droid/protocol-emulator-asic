@@ -769,6 +769,12 @@ SPEC_SYMBOLS = {
     # LANE_CASES (Wilson 11-14, the ARM batch): the lane-dependent refusals and
     # their controls -- chosen programs (lane, words, refused?), not readings
     ("test/run_arm2.py", "LANE_CASES"),
+    # A5 (Wilson 11-18 / 11-19, the ARM features on every lane): LANE_PINS is the
+    # chosen peer pin pair per lane, LANE_SCEN the chosen drive phases, timeouts and
+    # record lengths per scenario -- design. The RESULTS are tb_arm2's recorded
+    # cycles, judged live by A5 (symmetry with lane 0) and A5-FT (the K..K+1 bound).
+    ("test/run_arm2.py", "LANE_PINS"),
+    ("test/run_arm2.py", "LANE_SCEN"),
     # ⭐ v2 primitive 3 bundle 2 (pair / SHIFTI / self-timed byte): FEED is the
     # TX payload STIMULUS (the four bytes tb_pair feeds queue 0, host_feed.vh);
     # BAD the encodings pe_isa must refuse -- chosen field values. The results

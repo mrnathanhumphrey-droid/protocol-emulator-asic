@@ -30,6 +30,7 @@ POSITIVE TOKEN: `GATE arm2: PASSED`.
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import subprocess
@@ -421,6 +422,67 @@ def lane_scen_image(prog_name, lane):
     return lane_image(lane_progs(pa, pb)[prog_name], lane)
 
 
+# ⭐⭐ T_EXT FOR THE `seq` IMAGES, GENERATED FROM THE BENCH (Wilson 11-19). Each
+# L{lane}_seq.hex lane is EDGE-PACED (three delay-0 ARMs), so program_a2 needs its
+# peer's period -- and the peer is THIS testbench. The claim is READ from what it
+# drives, never typed: tb_arm2 flips pin A at arming + PHA and pin B at arming + PHB
+# (both falls release the ARM2), then pin A again at arming + PHA2 (the HALF rise),
+# so the spacing between the two RELEASES is PHA2 - max(PHA, PHB) cycles. The A and
+# B falls are one release, and arming is not a peer edge. IN CYCLES, NOT Hz: the
+# bench drives simulation cycles, which do not move with the target clock.
+# Written to T_EXT_BENCH by `python test/run_arm2.py --write-t-ext`; program_a2 reads
+# it, and gate_admissible_images re-derives it here and reds any mismatch -- so a
+# bench phase changed without regenerating is caught.
+T_EXT_BENCH = os.path.join(ROOT, "model", "a2", "t_ext_bench.json")
+
+
+def _cite(rel, needle):
+    """'path:line' of the first line of `rel` holding `needle` -- read, not typed."""
+    with open(os.path.join(ROOT, rel), encoding="utf-8") as fh:
+        for i, ln in enumerate(fh, 1):
+            if needle in ln:
+                return "%s:%d" % (rel, i)
+    raise RuntimeError("bench_t_ext: %r is not in %s -- the citation moved" % (needle, rel))
+
+
+def bench_t_ext(scen=None):
+    """{sha of each L{lane}_seq image: its T_ext entry}, from `scen` (LANE_SCEN, the
+    tuples main() passes to the bench)."""
+    import hashlib
+    scen = LANE_SCEN if scen is None else scen
+    rows = [s for s in scen if s[1] == "seq"]
+    if len(rows) != 1:
+        raise RuntimeError("bench_t_ext: %d `seq` scenarios, want 1" % len(rows))
+    name, pn, _idle, pha, phb, pha2, _ncyc, _kind = rows[0]
+    t = pha2 - max(pha, phb)
+    if min(pha, phb, pha2) < 0 or t <= 0:
+        raise RuntimeError("bench_t_ext: %s's phases (%d, %d, %d) give no release spacing"
+                           % (name, pha, phb, pha2))
+    src = [_cite("test/run_arm2.py", '("%s",' % name),
+           _cite("test/tb_arm2.v", "cyc == t_armed + pha)"),
+           _cite("test/tb_arm2.v", "cyc == t_armed + phb)"),
+           _cite("test/tb_arm2.v", "cyc == t_armed + pha2)")]
+    out = {}
+    for lane in range(I.N_LANES):
+        img = I.full_store(bytes(lane_scen_image(pn, lane)))
+        out[hashlib.sha256(img).hexdigest()] = {
+            "image": "%s/L%d_%s.hex" % (COV_DIR, lane, pn),
+            "lanes": {str(lane): t},
+            "unit": "cycles",
+            "label": "read (bench)",
+            "why": "the testbench is the peer: releases at arming + max(PHA %d, PHB %d) "
+                   "and arming + PHA2 %d, %d cycles apart" % (pha, phb, pha2, t),
+            "source": src,
+        }
+    return out
+
+
+def write_bench_t_ext(path=T_EXT_BENCH):
+    with open(path, "w", encoding="utf-8", newline="\n") as fh:
+        json.dump(bench_t_ext(), fh, indent=1, sort_keys=True)
+        fh.write("\n")
+
+
 def lane_plusargs(lane, idle, pha, phb, pha2, ncyc, kind):
     pa, pb = LANE_PINS[lane]
     return (["+IDLE=%d" % idle, "+PHA=%d" % pha, "+PHB=%d" % phb, "+PHA2=%d" % pha2,
@@ -708,4 +770,8 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    if sys.argv[1:] == ["--write-t-ext"]:
+        write_bench_t_ext()
+        print("run_arm2: wrote %s" % os.path.relpath(T_EXT_BENCH, ROOT))
+        sys.exit(0)
     sys.exit(main())

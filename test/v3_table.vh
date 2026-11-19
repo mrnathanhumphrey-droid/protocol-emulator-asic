@@ -13,6 +13,38 @@ function integer v3_tab;
   begin
     v3_tab = -2;
     case (h)
+      32'he8d122d4: case (field) 0: v3_tab = 1; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // L0_half.hex
+      32'h67e4df7e: case (field) 0: v3_tab = 1; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // L0_lvl0.hex
+      32'h5827561a: case (field) 0: v3_tab = 1; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // L0_lvl1.hex
+      32'h32e5c775: case (field) 0: v3_tab = 1; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // L0_seq.hex
+      32'h42292adb: case (field) 0: v3_tab = 1; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // L1_edge.hex
+      32'ha583e67f: case (field) 0: v3_tab = 1; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // L1_ft.hex
+      32'h6b963ee0: case (field) 0: v3_tab = 1; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // L1_guard.hex
+      32'hedfcf662: case (field) 0: v3_tab = 1; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // L1_half.hex
+      32'h3ce7d81c: case (field) 0: v3_tab = 1; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // L1_lvl0.hex
+      32'h3ac06688: case (field) 0: v3_tab = 1; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // L1_lvl1.hex
+      32'h44a3a6cf: case (field) 0: v3_tab = 1; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // L1_seq.hex
+      32'h5bcfd9e6: case (field) 0: v3_tab = 1; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // L2_edge.hex
+      32'h0d6db9fa: case (field) 0: v3_tab = 1; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // L2_ft.hex
+      32'h372f8491: case (field) 0: v3_tab = 1; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // L2_guard.hex
+      32'hd0791d1f: case (field) 0: v3_tab = 1; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // L2_half.hex
+      32'h281a82c5: case (field) 0: v3_tab = 1; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // L2_lvl0.hex
+      32'h3b60aa69: case (field) 0: v3_tab = 1; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // L2_lvl1.hex
+      32'h929c3666: case (field) 0: v3_tab = 1; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // L2_seq.hex
+      32'hf3c5d80a: case (field) 0: v3_tab = 1; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // L3_edge.hex
+      32'h0c9624ce: case (field) 0: v3_tab = 1; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // L3_ft.hex
+      32'h6f229915: case (field) 0: v3_tab = 1; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // L3_guard.hex
+      32'hdcee67c3: case (field) 0: v3_tab = 1; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // L3_half.hex
+      32'h631e0401: case (field) 0: v3_tab = 1; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // L3_lvl0.hex
+      32'hfc56e2ed: case (field) 0: v3_tab = 1; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // L3_lvl1.hex
+      32'hccf7932a: case (field) 0: v3_tab = 1; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // L3_seq.hex
+      32'h129a90db: case (field) 0: v3_tab = 1; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // L4_edge.hex
+      32'h479ff0ef: case (field) 0: v3_tab = 1; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // L4_ft.hex
+      32'h3c07a4e0: case (field) 0: v3_tab = 1; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // L4_guard.hex
+      32'hbe6e5c62: case (field) 0: v3_tab = 1; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // L4_half.hex
+      32'h0d593e1c: case (field) 0: v3_tab = 1; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // L4_lvl0.hex
+      32'h0b31cc88: case (field) 0: v3_tab = 1; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // L4_lvl1.hex
+      32'h58722d3f: case (field) 0: v3_tab = 1; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // L4_seq.hex
       32'h7c4436e3: case (field) 0: v3_tab = 1; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // armnone_image.hex
       32'h1b0d66cd: case (field) 0: v3_tab = 0; 1: v3_tab = 6; 2: v3_tab = 9; 3: v3_tab = 13; 4: v3_tab = 16; 5: v3_tab = 16; 6: v3_tab = 17; 7: v3_tab = 75; 8: v3_tab = 210; 9: v3_tab = 255; 10: v3_tab = 255; endcase  // b3b_a3_image.hex [WITNESS (sim)]
       32'hbdb01279: case (field) 0: v3_tab = 0; 1: v3_tab = 6; 2: v3_tab = 9; 3: v3_tab = 13; 4: v3_tab = 16; 5: v3_tab = 16; 6: v3_tab = 17; 7: v3_tab = 75; 8: v3_tab = 210; 9: v3_tab = 255; 10: v3_tab = 255; endcase  // b3b_a_image.hex [WITNESS (sim)]
@@ -138,6 +170,38 @@ task v3_tab_name;
   input [31:0] h;
   begin
     case (h)
+      32'he8d122d4: $display("  clocked_conform[V3] image: L0_half.hex (by its loaded bytes)");
+      32'h67e4df7e: $display("  clocked_conform[V3] image: L0_lvl0.hex (by its loaded bytes)");
+      32'h5827561a: $display("  clocked_conform[V3] image: L0_lvl1.hex (by its loaded bytes)");
+      32'h32e5c775: $display("  clocked_conform[V3] image: L0_seq.hex (by its loaded bytes)");
+      32'h42292adb: $display("  clocked_conform[V3] image: L1_edge.hex (by its loaded bytes)");
+      32'ha583e67f: $display("  clocked_conform[V3] image: L1_ft.hex (by its loaded bytes)");
+      32'h6b963ee0: $display("  clocked_conform[V3] image: L1_guard.hex (by its loaded bytes)");
+      32'hedfcf662: $display("  clocked_conform[V3] image: L1_half.hex (by its loaded bytes)");
+      32'h3ce7d81c: $display("  clocked_conform[V3] image: L1_lvl0.hex (by its loaded bytes)");
+      32'h3ac06688: $display("  clocked_conform[V3] image: L1_lvl1.hex (by its loaded bytes)");
+      32'h44a3a6cf: $display("  clocked_conform[V3] image: L1_seq.hex (by its loaded bytes)");
+      32'h5bcfd9e6: $display("  clocked_conform[V3] image: L2_edge.hex (by its loaded bytes)");
+      32'h0d6db9fa: $display("  clocked_conform[V3] image: L2_ft.hex (by its loaded bytes)");
+      32'h372f8491: $display("  clocked_conform[V3] image: L2_guard.hex (by its loaded bytes)");
+      32'hd0791d1f: $display("  clocked_conform[V3] image: L2_half.hex (by its loaded bytes)");
+      32'h281a82c5: $display("  clocked_conform[V3] image: L2_lvl0.hex (by its loaded bytes)");
+      32'h3b60aa69: $display("  clocked_conform[V3] image: L2_lvl1.hex (by its loaded bytes)");
+      32'h929c3666: $display("  clocked_conform[V3] image: L2_seq.hex (by its loaded bytes)");
+      32'hf3c5d80a: $display("  clocked_conform[V3] image: L3_edge.hex (by its loaded bytes)");
+      32'h0c9624ce: $display("  clocked_conform[V3] image: L3_ft.hex (by its loaded bytes)");
+      32'h6f229915: $display("  clocked_conform[V3] image: L3_guard.hex (by its loaded bytes)");
+      32'hdcee67c3: $display("  clocked_conform[V3] image: L3_half.hex (by its loaded bytes)");
+      32'h631e0401: $display("  clocked_conform[V3] image: L3_lvl0.hex (by its loaded bytes)");
+      32'hfc56e2ed: $display("  clocked_conform[V3] image: L3_lvl1.hex (by its loaded bytes)");
+      32'hccf7932a: $display("  clocked_conform[V3] image: L3_seq.hex (by its loaded bytes)");
+      32'h129a90db: $display("  clocked_conform[V3] image: L4_edge.hex (by its loaded bytes)");
+      32'h479ff0ef: $display("  clocked_conform[V3] image: L4_ft.hex (by its loaded bytes)");
+      32'h3c07a4e0: $display("  clocked_conform[V3] image: L4_guard.hex (by its loaded bytes)");
+      32'hbe6e5c62: $display("  clocked_conform[V3] image: L4_half.hex (by its loaded bytes)");
+      32'h0d593e1c: $display("  clocked_conform[V3] image: L4_lvl0.hex (by its loaded bytes)");
+      32'h0b31cc88: $display("  clocked_conform[V3] image: L4_lvl1.hex (by its loaded bytes)");
+      32'h58722d3f: $display("  clocked_conform[V3] image: L4_seq.hex (by its loaded bytes)");
       32'h7c4436e3: $display("  clocked_conform[V3] image: armnone_image.hex (by its loaded bytes)");
       32'h1b0d66cd: $display("  clocked_conform[V3] image: b3b_a3_image.hex [WITNESS (sim)] (by its loaded bytes)");
       32'hbdb01279: $display("  clocked_conform[V3] image: b3b_a_image.hex [WITNESS (sim)] (by its loaded bytes)");

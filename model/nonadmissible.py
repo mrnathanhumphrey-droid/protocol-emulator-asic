@@ -141,6 +141,41 @@ NON_ADMISSIBLE = {
         "beside lanes at d = 12 (below D*)."),
 }
 
+# ⭐ THE A5 IMAGES (Wilson 11-19, ruling (3) put where the gates read it): run_arm2's
+# lane scenarios on every lane, `probe_cov_arm2/L{lane}_{prog}.hex`, written by
+# `coverage_arms` since bc1c994 -- which declared none of them, so v3_table met
+# `L0_edge.hex` (undeclared) byte-identical to `edge_to200.hex` (declared) and stopped.
+# Each is an UNCERTIFIED IMAGE, HARDWARE-PATH TEST: the ARM features on one lane beside
+# lanes at d = 12, below D*. Reach-only; run_arm2 A5 is the judge.
+# ⚠ The program list is run_arm2.lane_progs's, restated here: a new program is red
+# here ("violates PORT and does not declare it"), a dropped one is red ("declared but
+# no such image exists") -- fail-closed both ways.
+A5_PROGS = ("edge", "ft", "guard", "half", "lvl0", "lvl1", "seq")
+# (`seq` is edge-paced: judgeable only with its bench-read T_ext, program_a2.T_EXT_BENCH)
+
+#: ⛔⛔ ONE PROGRAM, ONE SET OF FACTS (Wilson 11-19). An A5 image byte-identical to an
+#: image already declared is an ALIAS: it carries its target's declaration (the same
+#: object, so the two cannot drift), never an entry of its own. gate_admissible_images
+#: holds that each alias IS still byte-identical to its target (`alias_problems`).
+ALIASES = {
+    "L0_edge.hex": "edge_to200.hex",
+    "L0_ft.hex": "ft_race.hex",
+    "L0_guard.hex": "guard_noto.hex",
+}
+
+for _lane in range(5):
+    for _pn in A5_PROGS:
+        _n = "L%d_%s.hex" % (_lane, _pn)
+        if _n in ALIASES:
+            continue
+        NON_ADMISSIBLE[_n] = ({PORT},
+            "uncertified image, hardware-path test (Wilson 11-19): run_arm2 A5's "
+            "'%s' program on lane %d, beside lanes at d = 12 (below D*). Reach-only; "
+            "A5 is the judge." % (_pn, _lane))
+for _a, _t in ALIASES.items():
+    NON_ADMISSIBLE[_a] = NON_ADMISSIBLE[_t]
+del _lane, _pn, _n, _a, _t
+
 #: ⛔⛔ TRACKED DEBT, NOT A DECLARATION (Wilson 11-15, the UART blocker ruling, item 2).
 #: Images of record (wire-feed entries) on which 1.6a fails ONLY with the record's
 #: certified lane lateness in J. QUEUE is not an acceptable final state for an image of

@@ -32,3 +32,5 @@
 *.cert.json            text eol=lf
 test/artefacts.sha256  text eol=lf
 test/pinmap.vh         text eol=lf
+# the bench-peer T_ext (Wilson 11-19), written LF by `run_arm2.py --write-t-ext`
+model/a2/t_ext_bench.json text eol=lf

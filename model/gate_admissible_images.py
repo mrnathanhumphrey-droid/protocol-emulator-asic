@@ -173,7 +173,13 @@ def audit(images, declared, pad_declared, deliberate, debt=None):
             continue
         except pa.EdgePacedNoTExt as exc:
             if not unc:
-                raise
+                # ⛔ A NAMED RED, NOT A CRASH (Wilson 11-19): an edge-paced lane with
+                # no peer clock has no condition to judge -- fail-closed, by name, so
+                # the run reports every other image too (the A5 `seq` images crashed
+                # the gate before it read a single declaration)
+                probs.append("%s is EDGE-PACED with no T_ext (program_a2.T_EXT_HZ) -- "
+                             "its conditions cannot be judged: %s" % (name, exc))
+                continue
             UNCERTIFIED[name] = unc
             continue
         if unc:
@@ -208,6 +214,60 @@ def audit(images, declared, pad_declared, deliberate, debt=None):
     return probs, rows
 
 
+def alias_problems(images, aliases):
+    """Problems for nonadmissible.ALIASES (Wilson 11-19, one program, one set of facts):
+    each alias and its target exist, and are STILL the same bytes. Pure, for the
+    must-fire."""
+    have = dict(images)
+    probs = []
+    for a, t in sorted(aliases.items()):
+        if a not in have or t not in have:
+            probs.append("%s is an alias of %s but %s is not in the image universe"
+                         % (a, t, a if a not in have else t))
+        elif bytes(have[a]) != bytes(have[t]):
+            probs.append("%s is an alias of %s but the bytes differ -- it needs a "
+                         "declaration of its own" % (a, t))
+    return probs
+
+
+def bench_t_ext_problems(derived, stored, shas):
+    """Problems for program_a2's bench-peer T_ext (Wilson 11-19): the stored file must
+    be EXACTLY what run_arm2 derives from the phases it drives the bench with, and
+    every stored entry must name an image in the universe. Pure, for the must-fire."""
+    probs = []
+    for sha in sorted(set(derived) | set(stored)):
+        d, s = derived.get(sha), stored.get(sha)
+        img = (d or s)["image"]
+        if s is None:
+            probs.append("%s: no bench T_ext entry -- run `python test/run_arm2.py "
+                         "--write-t-ext`" % img)
+        elif d is None:
+            probs.append("%s: a bench T_ext entry the bench no longer derives (stale) "
+                         "-- regenerate" % img)
+        elif d["lanes"] != s["lanes"]:
+            probs.append("%s: bench T_ext %s, but the bench's phases give %s -- a bench "
+                         "phase changed without regenerating" % (img, s["lanes"], d["lanes"]))
+        elif d != s:
+            probs.append("%s: bench T_ext citation or label moved (%s -> %s) -- regenerate"
+                         % (img, s.get("source"), d.get("source")))
+        if s is not None and sha not in shas:
+            probs.append("%s: a bench T_ext entry for an image not in the universe" % img)
+    return probs
+
+
+def with_path(p, names):
+    """`p` with its image's universe path appended (Wilson 11-19: a red names the
+    path), when it starts with an image name."""
+    import image_universe
+    head = p.split(" ", 1)[0]
+    if head in names:
+        try:
+            return "%s  [%s]" % (p, image_universe._rel(image_universe.resolve(head)))
+        except (FileNotFoundError, AttributeError):
+            pass
+    return p
+
+
 def images():
     """The shared image universe (`model/image_universe.py`, Wilson 10-18):
     this scanned test/*.hex only, missing fpga/images/ and the bench arms."""
@@ -226,6 +286,18 @@ def main() -> int:
     import nonadmissible as _NA
     probs, rows = audit(imgs, NON_ADMISSIBLE, corpus.PAD_COLLISION,
                         dgf.DELIBERATE, _NA.SPLIT_DEBT)
+    probs += alias_problems(imgs, _NA.ALIASES)
+    import run_arm2 as _ra0
+    _shas = {pa.image_sha(I.full_store(bytes(b))) for _n, b in imgs}
+    _bt = bench_t_ext_problems(_ra0.bench_t_ext(), pa.bench_t_ext(), _shas)
+    for p in _bt:
+        print("  *** %s" % p)
+    probs += _bt
+    print("  bench-peer T_ext (program_a2.T_EXT_BENCH): %d entr%s, %s"
+          % (len(pa.bench_t_ext()), "y" if len(pa.bench_t_ext()) == 1 else "ies",
+             "each the bench's derivation" if not _bt else "*** SEE ABOVE"))
+    _names = {n for n, _ in imgs}
+    probs = [with_path(p, _names) for p in probs]
     print("  QUEUE (1.6a) reads OUR recurrence here (no pyRTA in CI) -- intended "
           "for a refusal threshold:")
     print("  ours >= pyRTA on every admissible lane (gate_a2_program §1b), so "
@@ -381,7 +453,44 @@ def main() -> int:
     hit3 = any("QUEUE" in x for x in p3)
     print("    an undeclared 1.6a (QUEUE) image is reported  %s"
           % ("ok" if hit3 else "*** MISSED"))
-    if not (hit and hit2 and hit3 and hd3 and hd4 and hd5):
+    # Wilson 11-19: an edge-paced image with no T_ext is a NAMED red, not a crash
+    # (the A5 `seq` program, built here, so the plant does not depend on the universe)
+    import run_arm2 as _ra
+    seq = bytes(_ra.lane_scen_image("seq", 0))
+    try:
+        p4, _ = audit([("undeclared_edgepaced.hex", seq)], {}, {}, {})
+        hit4 = any("EDGE-PACED with no T_ext" in x for x in p4)
+    except pa.EdgePacedNoTExt:
+        hit4 = False
+    print("    an edge-paced image with no T_ext is a named red %s"
+          % ("ok" if hit4 else "*** MISSED"))
+    # Wilson 11-19: one program, one set of facts -- an alias whose bytes moved off
+    # its target, and an alias whose target is gone, are red
+    e0 = next(img for n, img in imgs if n == "edge_to200.hex")
+    moved = bytearray(e0)
+    moved[-1] ^= 0x01
+    p5 = alias_problems([("L0_edge.hex", bytes(moved)), ("edge_to200.hex", e0)],
+                        {"L0_edge.hex": "edge_to200.hex"})
+    hit5 = any("bytes differ" in x for x in p5)
+    print("    an alias no longer byte-identical is reported  %s"
+          % ("ok" if hit5 else "*** MISSED"))
+    p6 = alias_problems([("L0_edge.hex", e0)], {"L0_edge.hex": "edge_to200.hex"})
+    hit6 = any("not in the image universe" in x for x in p6)
+    print("    an alias whose target is gone is reported      %s"
+          % ("ok" if hit6 else "*** MISSED"))
+    # Wilson 11-19: a bench phase changed without regenerating the T_ext entries is red,
+    # and so is a stored entry for an image that is gone
+    scen2 = [s if s[1] != "seq" else s[:5] + (s[5] + 1,) + s[6:] for s in _ra.LANE_SCEN]
+    p7 = bench_t_ext_problems(_ra.bench_t_ext(scen2), _ra.bench_t_ext(), _shas)
+    hit7 = any("without regenerating" in x for x in p7)
+    print("    a bench phase moved, T_ext not regenerated: red %s"
+          % ("ok" if hit7 else "*** MISSED"))
+    p8 = bench_t_ext_problems({}, _ra.bench_t_ext(), set())
+    hit8 = any("not in the universe" in x for x in p8)
+    print("    a bench T_ext entry with no image is reported  %s"
+          % ("ok" if hit8 else "*** MISSED"))
+    if not (hit and hit2 and hit3 and hit4 and hit5 and hit6 and hit7 and hit8
+            and hd3 and hd4 and hd5):
         rc = 1
 
     # ---- SP2/P4: THE TIMING-EXEMPTION REGISTRY (Wilson) ------------------
