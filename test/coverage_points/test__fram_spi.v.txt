@@ -1,0 +1,23 @@
+# uncovered toggle points of test/fram_spi.v: 18 -- the list behind its TOGGLE_CEILING
+# data: D:/ProtocolEmulator/wt_s12c/probe_cov/merged.dat
+# tool: Verilator 5.053 devel rev v5.052-258-ga419e9157 (mod)
+# lines -> modules from: this checkout
+# format: <count> <module> <signal[bit]:edge>; written by gate_coverage.py --write-points
+1 fram_spi addr[10]:0->1
+1 fram_spi addr[10]:1->0
+1 fram_spi addr[11]:0->1
+1 fram_spi addr[11]:1->0
+1 fram_spi addr[12]:0->1
+1 fram_spi addr[12]:1->0
+1 fram_spi addr[3]:0->1
+1 fram_spi addr[3]:1->0
+1 fram_spi addr[4]:0->1
+1 fram_spi addr[4]:1->0
+1 fram_spi addr[5]:1->0
+1 fram_spi addr[6]:0->1
+1 fram_spi addr[6]:1->0
+1 fram_spi addr[7]:0->1
+1 fram_spi addr[7]:1->0
+1 fram_spi addr[8]:1->0
+1 fram_spi addr[9]:0->1
+1 fram_spi addr[9]:1->0

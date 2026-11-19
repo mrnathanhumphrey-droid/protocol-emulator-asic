@@ -105,9 +105,12 @@ def pindiv_image(path=None):
                           act(OP_REARM, 0, 1, 30)]),
         1: (1, 2, 1, 40, [act_shiftin_clocked(3, 40, nbits=8),
                           act(OP_REARM, 0, 1, 40)]),
-        2: (5, PIN_NONE, 1, 23, [act(OP_LEVEL, 3, 1, 23),
-                                 act(OP_LEVEL, 3, 0, 23),
-                                 act(OP_REARM, 0, 1, 23)]),
+        # lane 2 at d = 24, not 23 (Wilson 11-16): under the 1b slot every lane needs spacing
+        # >= D* + its slot charge (4); at 23 it had 3 cycles of slack and would stay
+        # uncertified under the slot. Lanes 1 and 3 sample its pin, so their data moved too.
+        2: (5, PIN_NONE, 1, 24, [act(OP_LEVEL, 3, 1, 24),
+                                 act(OP_LEVEL, 3, 0, 24),
+                                 act(OP_REARM, 0, 1, 24)]),
         3: (4, 5, 0, 70, [act(OP_ARM, 3, 1, 70),
                           act(OP_READBIT, 3, 0, 70),
                           act(OP_SHIFTIN, 3, 0, 70, count=1),

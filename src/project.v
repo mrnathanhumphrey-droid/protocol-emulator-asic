@@ -3678,6 +3678,56 @@ endmodule
 // Bit-exact golden: pit/pit_capture_golden.py (internal), checked by
 // test/run_pit_capture.py. Off every engine path: its inputs are uio_q1 and
 // its own registers; its output is the store's byte write port.
+//
+// ⛔ A NEW SNIFF RUN STARTS FRESH WITHOUT A RESET (Wilson 11-17; spec and
+// docs/HOST_INTERFACE.md: PROG up + reload = a clean run). The 11-17 audit found
+// st_done (= cap_done) carried across `!run`: re-set only at the new run's
+// cycle 0, the cycle stage 0 samples `start`, so run 2 decoded run 1's record
+// count over the reloaded store (empty table at cycle 49). It is now cleared
+// on `!run` (must-fire M_PIT_STALE_DONE). Every other register of the PIT is
+// cleared on `!run` or RE-INITIALISED BEFORE ITS FIRST READER, and is NOT
+// cleared defensively (Wilson 11-17: a clear no must-fire can catch is
+// untestable logic). That rests on the timing below; an edit that moves a
+// reader earlier or an init later breaks it, and gate pit-clk's two-run checks
+// (same stimulus; a different stimulus vs a fresh reset) catch it.
+//   register(s)                        made fresh by           first reader
+//   -- pe_pit (this module) --
+//   active, we, s_on, ck_done          cleared on !run         this block; the store port; s0 (ck_done)
+//   st_done (cap_done)                 cleared on !run         s0 P_IDLE `start`
+//   n (cap_n), cap_lv0                 cycle 0 (!active)       s0's decoder at its first walk_go, after `start`
+//   stopped, why_ovr, why_bud          cycle 0                 this block, cycle 1 on (stopped: no design reader)
+//   prev, tcnt, acc, acc_n, total,     cycle 0                 this block, cycle 1 on
+//     sum, k, wr_idx, st_phase, bud_cnt
+//   waddr, wdata                       written with every `we` the store port, only while we = 1
+//   s_open, s_pv, s_nbit, s_byte,      ck_arm (2nd capture)    the s_on branch; ck_wp / ck_nmsg: s12 stage 3
+//     ck_wp, ck_nmsg, bud_cnt                                    at ck_fin, after ck_done (cleared on !run)
+//   s_pend / s_la, s_mlen              with s_pv / with s_openv  under s_pv / under s_open
+//   bud_init                           every cycle (copies bud_cfg)  cycle 0 and ck_arm
+//   -- pe_pit_s0 (stage 0) --
+//   ph, done, tbl_done, refused,       cleared on !run         P_IDLE; s12 `go`; the table write
+//     nrank, walk_go, we0, ck_arm,
+//     ck_fin, ck_ok, ck_used, role/part/clvl/rank
+//   ds, rec_v, walk_done, dre          cleared on !run         the decoder
+//   t, lv, r, fs, fc, ba (decoder)     walk_go (D_IDLE)        the walk's first record
+//   p1_*, p2_v, wdone_p*, last_t,      drain from rec_v = 0;   guarded by has_c / pend_f, cleared at walk_go
+//     pend_x, p_aux                    no !run branch
+//   cnt, nlv*, near*, pcnt, in*, nd,   walk_go                 the fold of that walk
+//     nc, has_c, idle_ok, frame_ok, all_high, pend_*, ev_*, sig_bad, starts, g_*,
+//     ck_hi, ck_dr, ck_df, ck_sn*, ck_v*, ck_cn, ck_ch
+//   wk, wc, wd, psel, regular, ci, di,  set by the phase that   that phase's successor
+//     ar, m_*, med*, wbyte, refuse_w     starts them (P_IDLE: wk, ci)
+//   k_seen, ck_why, ck_i2c/c/d/f/act/   stage-3 entry (P_K*)    P_KSEL on; pe_pit after ck_arm
+//     edge, ck_pass, k_maybe
+//   -- pe_pit_s12 (stages 1-3) --
+//   st, done, dv_busy, x_v, hold,      cleared on !run         S_IDLE `go`; stage 0's decoder (hold)
+//     walk_go, we, re, wend, a_ph
+//   cls, why, cond, wh, f_span, a_L,   S_WIRE (per wire)       that wire's passes
+//     bq, rival, s1ok, bh, p16, a_idle, n, n1, acc, wb
+//   has_prev, last_l                   walk_go                 the wire's next interval
+//   t3, s3_found, s3_fbs, s3_nmsg,     stage-3 entry (S_S3)    stage 3
+//     s3_why, g_try, g_skip
+//   err, m_r, hit, m16                 every cycle (divider)   readers wait on !dv_busy
+//   dv_q/r/d/n, al, al_lt, p_dm        written before use      the divide / the ALU step
 // =========================================================================
 module pe_pit #(parameter integer AW = 9) (
     input  wire          clk,
@@ -3882,6 +3932,9 @@ module pe_pit #(parameter integer AW = 9) (
       active <= 1'b0;
       we <= 1'b0;
       s_on <= 1'b0; ck_done <= 1'b0;
+`ifndef M_PIT_STALE_DONE
+      st_done <= 1'b0;
+`endif
     end else if (!active) begin
       // the PIT's cycle 0: take the levels, start the interval
       active <= 1'b1; prev <= uio; tcnt <= 16'd1; n <= 16'd0; acc <= 64'd0;

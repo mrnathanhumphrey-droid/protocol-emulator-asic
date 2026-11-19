@@ -214,6 +214,8 @@ EXPECT = {
     "M_PIT_NO_OVERRUN":   (3, "`room` is a two-line expression; the mutant keeps only its full test"),
     "M_PIT_WHY_DROP":     (2, None),
     "M_PIT_NO_SAT":       (2, None),
+    # a second SNIFF run (Wilson 11-17): the `!run` clear of st_done deleted
+    "M_PIT_STALE_DONE":   (1, None),
     # the budget stop and the starting levels (Wilson 10-29)
     "M_PIT_NO_BUDGET":    (2, None),
     "M_PIT_LV0_INV":      (4, "two lines per arm, declared: the byte-39 write AND cap_lv0, the copy stage 0 reads -- the inverted start level must reach the role table (Wilson 10-29)"),

@@ -78,9 +78,9 @@ NON_ADMISSIBLE = {
     # branch_cmp_mask / branch_cmp_order: QUEUE withdrawn 11-15 -- agent 2's RespEdf
     # (9180440) gives them a finite B and EDF response bounds; 1.6a passes, and the gate read
     # the declarations stale. Their wire-feed entries (retired a875e02) are restored.
-    "branch_cmp_lo_image.hex": ({QUEUE},
-        "the honest branch J (at least branch_j(16, 40) = 17) exceeds the 1.6a "
-        "queue check; J = 1 used to hide this."),
+    # branch_cmp_lo: QUEUE withdrawn 11-16 -- agent 2's 5c65b11 (A2's verdict includes 1.6a
+    # with the lateness in J, Wilson Q2) certifies it at EDF B 0; the gate read the
+    # declaration stale. Its wire-feed entry (retired a875e02) is restored.
     # nousb.hex: QUEUE withdrawn (11-15) -- certified lane-0 lateness was on no-pin words only;
     # with J from lane_j_pin (agent 2's NopSplit, 6d24aa9) 1.6a passes.
     "ft_race.hex": ({PORT},

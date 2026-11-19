@@ -65,6 +65,13 @@ ROWS = {
                        "pair waveform (D+/D-, SHIFTI, self-timed bytes) cycle for cycle; its "
                        "one receive case is functional, and the unclocked sample's sub-cycle "
                        "phase is walked by tb_uartrx and tb_usbrx (IN_SUITE)"),
+    "test/tb_within.v": ("CHIP_DRIVEN", "the `within` / `else` must-fires (Wilson 11-15, "
+                         "agent 2): the peer only REACTS to the chip's own CS fall, pulling B "
+                         "low a whole number of cycles (+DLY) after it and releasing it with "
+                         "CS, so there is no independent peer phase to walk; the claim is "
+                         "which path the window takes (abort / continue, the timeout sticky), "
+                         "and B's sub-cycle phase through the uio synchroniser is walked by "
+                         "tb_uartrx (IN_SUITE)"),
     "test/tb_arm2.v": ("NOT_TIMING", "v2 primitive 3 bundle 1: the claim is the two-pin "
                        "ARM's CYCLE latency from a synchronised input (fire 2 cycles after "
                        "the later pin); the pins are placed on clock edges by design, and "

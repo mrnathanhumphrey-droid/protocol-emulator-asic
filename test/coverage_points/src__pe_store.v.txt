@@ -1,0 +1,26 @@
+# uncovered toggle points of src/pe_store.v: 21 -- the list behind its TOGGLE_CEILING
+# data: D:/ProtocolEmulator/wt_s12c/probe_cov/merged.dat
+# tool: Verilator 5.053 devel rev v5.052-258-ga419e9157 (mod)
+# lines -> modules from: this checkout
+# format: <count> <module> <signal[bit]:edge>; written by gate_coverage.py --write-points
+1 pe_store g_mem.fw_q:0->1
+1 pe_store g_mem.fw_q:1->0
+1 pe_store g_mem.pa[7]:0->1
+1 pe_store g_mem.pa[7]:1->0
+1 pe_store g_mem.rst_seen:1->0
+1 pe_store wraddr_bk[0]:0->1
+1 pe_store wraddr_bk[0]:1->0
+1 pe_store wraddr_bk[10]:0->1
+1 pe_store wraddr_bk[10]:1->0
+1 pe_store wraddr_bk[18]:0->1
+1 pe_store wraddr_bk[18]:1->0
+1 pe_store wraddr_bk[19]:0->1
+1 pe_store wraddr_bk[19]:1->0
+1 pe_store wraddr_bk[1]:0->1
+1 pe_store wraddr_bk[1]:1->0
+1 pe_store wraddr_bk[27]:0->1
+1 pe_store wraddr_bk[27]:1->0
+1 pe_store wraddr_bk[28]:0->1
+1 pe_store wraddr_bk[28]:1->0
+1 pe_store wraddr_bk[9]:0->1
+1 pe_store wraddr_bk[9]:1->0

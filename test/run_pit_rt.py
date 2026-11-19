@@ -21,7 +21,10 @@ Per case:
      the spec left UNKNOWN must not come back confident. Phase and the
      evidence counts are not claimed and not compared.
 A claim the emulator cannot drive is NOT EMULABLE (D4): counted apart, never
-a pass, and red only for a ruled case.
+a pass, and red only for a ruled case. D4, data phase (Wilson 11-17): data
+changing late in the sample edge's own level (dirty_rise / dirty_fall) --
+the self-clocked shifter fixes MOSI's change point; pinned by DATA_PHASE_NE,
+and back to the round trip if the data-phase fabric candidate is adopted.
                                                     token: GATE pit-rt: PASSED
 """
 from __future__ import annotations
@@ -96,6 +99,27 @@ class Refused(Exception):
 #: SPI mode at each CPOL
 MUTANT_CASES = ("s3_modbus", "spi_m0", "i2c_pec")
 CPOL_CASES = ("spi_m0", "spi_m3")
+
+#: ⛔ D4, DATA PHASE (Wilson 11-17): a spec whose SPI mode AGREES with its sample edge but
+#: whose data CHANGE LEVEL differs from that mode's natural one (data moving late in the
+#: sample edge's own level: pit-clk's dirty_rise / dirty_fall) is NOT EMULABLE -- the
+#: self-clocked shifter fixes MOSI's change point relative to SCK, and a bit-banged master
+#: does not fit the store. PINNED: exactly these cases raise it (one outside the set is
+#: red; a listed one that does not is red). They return to the round trip if the
+#: data-phase option on the self-clocked shifter (V2_MASTER_LIST fabric candidate, costed
+#: with the slot buffer in POSET_FABRIC_NOTE.md) is adopted.
+#: ⛔ A spec whose mode CONTRADICTS its own sample edge (the CPOL must-fire) is emulated as
+#: before and must FAIL -- checked below: the CPOL must-fires must come back FAIL, never
+#: NOT EMULABLE, so loosening this rule to catch them turns the gate red.
+DATA_PHASE_NE = {"dirty_rise", "dirty_fall"}
+DATA_PHASE_WHY = ("data phase fixed by the self-clocked shifter; no data-phase option -- returns "
+                  "to the round trip if the V2_MASTER_LIST data-phase candidate is adopted")
+# mode -> its sample edge, from the descriptor decode's own table (pit_emit.SPI_MODE:
+# (CPOL, sample-on-rise) -> mode), so there is one source for it
+SPI_EDGE = {m: ("rise" if rise else "fall") for (_cpol, rise), m in E.SPI_MODE.items()}
+# mode -> the clock level data changes in: the change edge is the other one, and data
+# then sits in the level that edge leads into (a rise -> 1)
+SPI_CHG = {m: (1 if e == "fall" else 0) for m, e in SPI_EDGE.items()}
 
 
 def emit_wrong_cpol(results):
@@ -195,6 +219,10 @@ def clocked_emulation(cl, rng, nbytes=3000):
     if bus and bus["kind"] == "i2c":
         fr = []
     mode = bus["mode"] if bus and bus["mode"] is not None else (0 if chg == 0 else 1)
+    # D4, data phase (DATA_PHASE_NE above): the mode agrees with the sample edge, the
+    # claimed change level is not the mode's -- the shifter cannot drive it
+    if fr and bus and bus["mode"] is not None and bus["edge"] == SPI_EDGE[mode] and chg != SPI_CHG[mode]:
+        raise NotEmulable(DATA_PHASE_WHY)
     cs_hi = bool(bus and bus["cs"] == "high")
     c = cl["crc"] if cl["crc"] is not None and cl["crc"]["wire"] == d else None
     if c is not None and c["init"] is None:
@@ -528,7 +556,11 @@ def main() -> int:
             print("  %-16s NOT EMULABLE: %s" % (name, e))
             if name in RULED:
                 probs.append("%s: NOT EMULABLE, but a ruled case: %s" % (name, e))
-            return
+            if not label and (str(e) == DATA_PHASE_WHY) != (name in DATA_PHASE_NE):
+                probs.append("%s: data-phase D4 pin broken -- %s" % (
+                    name, "raised outside DATA_PHASE_NE" if name not in DATA_PHASE_NE
+                    else "listed in DATA_PHASE_NE but NOT EMULABLE for another reason: %s" % e))
+            return "NOT EMULABLE"
         except Refused as e:
             # D3: a refused bus emulates nothing; the spec must claim nothing
             # beyond the refusal (no CRC; the refusal's reason on its line)
@@ -538,7 +570,7 @@ def main() -> int:
                 name, "PASS" if ok else "FAIL", time.time() - t0, e))
             if not ok:
                 probs.append("%s: %s" % (name, e))
-            return
+            return "REFUSED"
         mem, st, h = sim(vr, tmp, name, simg, eimg, feed, route, R0.NCYC_MAX * 40, warm, ack)
         regen = results_of(mem)
         bad, notes = [], []
@@ -585,12 +617,19 @@ def main() -> int:
             for ln in E.emit(regen).splitlines()[2:-1]:
                 print("        " + ln)
         probs.extend("%s: %s" % (name, b) for b in bad)
+        return verdict
 
     ORIG = {}
     for name, kind, case in originals():
         if only and name not in only:
             continue
-        one(name, kind, case)
+        got = one(name, kind, case)
+        # the D4 data-phase pin, its other half: a listed case must come back NOT EMULABLE
+        if name in DATA_PHASE_NE and got != "NOT EMULABLE":
+            probs.append("%s: listed in DATA_PHASE_NE but came back %s, not NOT EMULABLE" % (name, got))
+    missing_dp = sorted(DATA_PHASE_NE - seen) if not only else []
+    if missing_dp:
+        probs.append("DATA_PHASE_NE names cases the gate no longer has: %s" % missing_dp)
     print("  round trips: %d PASS, %d FAIL, %d NOT EMULABLE" % (counts["PASS"], counts["FAIL"], counts["NOT EMULABLE"]))
     # ⛔ THE MUST-FIRE (Wilson 11-06): an emitter that writes a WRONG CRC INIT
     # must fail the round trip -- one UART, one SPI, one I2C case
@@ -601,8 +640,14 @@ def main() -> int:
         for n, emit, lab in [(n, emit_wrong_init, "wrong init") for n in MUTANT_CASES] + \
                 [(n, emit_wrong_cpol, "CPOL flipped") for n in CPOL_CASES]:
             before = len(probs)
-            one(n, cs[n][0], cs[n][1], emit=emit, label=" [mutant: %s]" % lab)
+            got = one(n, cs[n][0], cs[n][1], emit=emit, label=" [mutant: %s]" % lab)
             red = len(probs) > before
+            # ⛔ the CPOL must-fires must FAIL BY COMPARISON (Wilson 11-17): NOT EMULABLE
+            # here would mean the D4 data-phase rule swallowed a mode that contradicts its
+            # own sample edge (spi_m0 is RULED, so a swallowed one would still read red)
+            if lab == "CPOL flipped" and got != "FAIL":
+                keep[0].append("must-fire: CPOL flipped on %s came back %s, not FAIL "
+                               "(the data-phase D4 rule must not catch it)" % (n, got))
             why = probs[before:]
             del probs[before:]
             print("    %-16s %-13s %s%s" % (n, lab, "red (fires)" if red else "*** stayed GREEN",

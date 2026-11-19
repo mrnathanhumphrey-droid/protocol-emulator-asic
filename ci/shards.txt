@@ -128,6 +128,7 @@ fast test/run_pit_emit.py
 
 # fpga -- F1.5 (11-09): the three board sims, measured locally (see below)
 fpga fpga/sim/run_fpga_loader.py
+fpga fpga/sim/run_fpga_loader_xsim.py
 fpga fpga/sim/run_fpga_onewire.py
 fpga fpga/sim/run_fpga_i2c.py
 fast model/gate_halt_reset.py
@@ -161,6 +162,7 @@ fast model/gate_lean_anchors.py
 fast model/gate_live_price.py
 fast model/gate_uart_spacing.py
 fast model/gate_spi_premise.py
+fast model/b6_slack.py
 
 # lean -- the Lean proofs (lake build + #print axioms); its leg installs elan
 lean model/gate_lean_build.py

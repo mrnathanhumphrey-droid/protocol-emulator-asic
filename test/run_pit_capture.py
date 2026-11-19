@@ -292,7 +292,7 @@ def simcmd(args, images):
     plus = []
     for a in args[1:]:
         k, eq, v = a.partition("=")
-        plus.append(k + eq + (wsl_path(v) if k in ("+IMG", "+STIM", "+OUT", "+MEM") else v))
+        plus.append(k + eq + (wsl_path(v) if k in ("+IMG", "+STIM", "+STIM2", "+OUT", "+MEM") else v))
     if XINIT:
         plus += ["+verilator+rand+reset+2", "+verilator+seed+%d" % int(XINIT)]
     # the arm's identity for the monitor judge: the marker file's name (the

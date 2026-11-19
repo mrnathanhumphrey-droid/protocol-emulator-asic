@@ -128,6 +128,13 @@ def main():
     off = int(sys.argv[3]) if len(sys.argv) > 3 and sys.argv[3] != "-" else None
     var = sys.argv[4] if len(sys.argv) > 4 else "ok"
     img = build(T, off, var)
+    # ⭐ WILSON 11-15 CALL 1 (agent 2's model/uart_spacing, 8994ced): the UART pre-ARM
+    # spacing is GENERATED per receive lane -- the least pad that certifies, applied here
+    # after assembling; past the back-to-back limit it raises uart_spacing.Refused and
+    # nothing is written. This program's ARM is its lane's first word, so the plan is 0
+    # today (bytes unchanged); the call is what keeps a changed program honest.
+    import uart_spacing
+    img, _plan = uart_spacing.space(img)
     if board:
         # ⛔ WILSON 11-15 (item 7): the board image is an image of record -- written
         # through cert_stamp.write with require_cert=True (stamp sidecar beside it); an

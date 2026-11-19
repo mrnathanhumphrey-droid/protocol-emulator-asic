@@ -1286,6 +1286,23 @@ def build_noop(timeout: int, half: int, d1: int = 12, arm_pin: int = 0,
     return join_image(headers, prog)
 
 
+def _spi_premise_gate(img, label):
+    """⭐ WILSON 11-15 CALL 4 (agent 2's model/spi_premise, ac9547d): an image with an
+    SPI-target lane is checked against its master's SCK premise (PICO_SPI_SCK). While the
+    premise is `assumed` the margins are REPORTED and nothing is refused; once the Pico's
+    capture makes it measured, a negative margin is a problem and the image is not written.
+    Returns True when the image may be written."""
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                    "..", "model"))
+    import spi_premise
+    probs, info = spi_premise.check(img, pid="PICO_SPI_SCK")
+    for ln, v in sorted((info.get("lanes") or {}).items()):
+        print("  spi_premise %s lane %s: %s" % (label, ln, v))
+    for pr in probs:
+        print("*** spi_premise %s: %s" % (label, pr))
+    return not probs
+
+
 def build_b3b(arm: str):
     """B3b, THE CONTENTION ARM -- the SPI target beside the shipped lanes.
 
@@ -1837,6 +1854,8 @@ def main() -> int:
                              t_ext=tg.t_ext(500_000 if mosi else 1_000_000))
         name = ("sptgt_mosi_image.hex" if mosi
                 else "sptgt_m%d_image.hex" % mode)
+        if not _spi_premise_gate(img, name):
+            return 1
         out = os.path.join(here, name)
         write_image(out, img)
         print("SPI-target image, mode %d%s, %d bytes -> %s"
@@ -1845,6 +1864,14 @@ def main() -> int:
     if "--b3b" in sys.argv:
         arm = sys.argv[sys.argv.index("--b3b") + 1]
         img = build_b3b(arm)
+        # ⭐ WILSON 11-15 CALL 1: the UART pre-ARM spacing, generated (agent 2's
+        # uart_spacing). ready=None until item 1b exists: b3b does not certify under any
+        # spacing today, so the plan applies 0 (bytes unchanged). Once 1b lands, pass
+        # ready = {0: the SPI ARMs' successors} (agent 2, 11-15).
+        import uart_spacing
+        img, _plan = uart_spacing.space(img, ready=None)
+        if not _spi_premise_gate(img, "b3b_%s" % arm):
+            return 1
         out = os.path.join(here, "b3b_%s_image.hex" % arm)
         write_image(out, img)
         print("B3b image, arm %s, %d bytes -> %s" % (arm, len(img), out))

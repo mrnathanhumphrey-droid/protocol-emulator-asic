@@ -89,6 +89,7 @@ SEAMS = (
     ("model/gate_live_price.py", "gate_live_price.l2", "fast", "E0"),
     ("model/gate_uart_spacing.py", "gate_uart_spacing.judge", "fast", "E0"),
     ("model/gate_spi_premise.py", "gate_spi_premise.judge", "fast", "E0"),
+    ("model/b6_slack.py", "b6_slack.problems", "fast", "E"),
     ("model/gate_lane_cert.py", "gate_lane_cert.check_spacing", "fast", "PRE"),
     ("model/gate_lane_cert.py", "gate_lane_cert.check_ft", "fast", "PRE"),
     ("model/gate_lane_cert.py", "gate_lane_cert.check_coresident", "fast", "PRE"),
@@ -168,6 +169,7 @@ SEAMS = (
     ("test/gate_coverage.py", "gate_coverage.reason_problems", "fast", "REASON"),
     ("test/gate_coverage.py", "gate_coverage.check_pinned_tool_quiet", "fast", "Z"),
     ("test/gate_coverage.py", "gate_coverage.false_gaps", "fast", "E"),
+    ("test/gate_coverage.py", "gate_coverage.point_list_problems", "fast", "E"),
     ("model/pe_asm.py", "pe_asm.check_queue_ownership", "fast", "NORAISE"),
     ("model/pe_asm.py", "pe_asm.check_receive_pin", "fast", "NORAISE"),
     ("model/pe_asm.py", "pe_asm.check_clocked_hold_delay", "fast", "NORAISE"),
@@ -316,6 +318,10 @@ NOT_STUBBABLE = {
                          "sigrok's decode; priced by its mut_short / mut_long / "
                          "mut_under / noalt / oldtx / nack arms",
     "model/gate_meta.py": "this gate",
+    "fpga/sim/run_fpga_loader_xsim.py": "its one judge (compare) is priced inline by its own "
+                                        "must-fires on planted transcripts (a changed, missing or "
+                                        "reordered line, a missing scenario), run first; a "
+                                        "seam would re-run iverilog's slow leg for nothing",
 }
 
 #: ⛔⛔ A GATE LEFT UNSTUBBED FOR A REASON THAT CAN BE FIXED IS A DEBT (Wilson

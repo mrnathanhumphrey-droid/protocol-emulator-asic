@@ -315,7 +315,10 @@ CONFIG = {
         # ⭐ 11-13: plus run_pit_s12's own 17 cases run on to stages 1-2's end
         # (+S0WAIT=2) -- the fixed arms below stop at stage 0, so pe_pit_s12's
         # period / phase / score paths had no arm (267 of CI's 450 unclassified)
-        "pygen": ("run_pit_s12", "coverage_arms"),
+        # ⭐ 11-17 (Wilson's toggle ruling (b), Nate go): plus run_pit_clk's 12 cases, the
+        # only inputs that hand stage 3 a CLOCKED bus (pe_pit's ck_* / s_* sampler, the
+        # descriptor) -- ~580 toggle points and gate_coverage's clocked-bus OWED entries
+        "pygen": [("run_pit_s12", "coverage_arms"), ("run_pit_clk", "coverage_arms")],
         # ⭐ chunk 2: the arms that STOP run on to stage 0's end (+S0WAIT=1), so
         # pe_pit_s0 is reached; NCYC is the ceiling, not the run length
         "arms": [("spi0", ["+IMG=test/pit_mask00_image.hex", "+NBYTES=512",
@@ -1238,18 +1241,27 @@ def plan():
             # bench whose stimulus a fixed arm list does not express); with a
             # fixed list as well (tb_pit), the generated arms are APPENDED
             fixed = [] if arms == "FROM_PYGEN" else list(arms)
-            mod, fn = cfg["pygen"]
-            try:
-                if HERE not in sys.path:
-                    sys.path.insert(0, HERE)
-                arms = getattr(__import__(mod), fn)()
-            except Exception as exc:
-                probs.append("%s: %s.%s() failed: %s" % (top, mod, fn, exc))
+            # one (module, function) or a list of them (tb_pit: stages 1-2 AND the
+            # clocked bus, 11-17); each must generate arms, or the bench is red
+            gens = cfg["pygen"] if isinstance(cfg["pygen"], list) else [cfg["pygen"]]
+            got, bad = [], False
+            for mod, fn in gens:
+                try:
+                    if HERE not in sys.path:
+                        sys.path.insert(0, HERE)
+                    g = getattr(__import__(mod), fn)()
+                except Exception as exc:
+                    probs.append("%s: %s.%s() failed: %s" % (top, mod, fn, exc))
+                    bad = True
+                    break
+                if not g:
+                    probs.append("%s: %s.%s() generated NO arms" % (top, mod, fn))
+                    bad = True
+                    break
+                got += list(g)
+            if bad:
                 continue
-            if not arms:
-                probs.append("%s: %s.%s() generated NO arms" % (top, mod, fn))
-                continue
-            arms = fixed + list(arms)
+            arms = fixed + got
         srcs = [os.path.join("test", top + ".v")] + cfg["srcs"] + ENGINE
         missing_src = [s for s in srcs
                        if not os.path.isfile(os.path.join(ROOT, s))]

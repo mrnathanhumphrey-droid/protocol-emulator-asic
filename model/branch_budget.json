@@ -1430,14 +1430,14 @@
       }
     },
     "probe_cov_pindiv.hex": {
-      "sha": "2cb9a4cb28222bdf28493e79255775c0139afc661da8142573f0ce61f693f4b9",
+      "sha": "195885cc80811aad0747e5243f20dfb4d5ba52659f1967c93ab621f638bc6ebd",
       "branch_lanes": [],
       "B": 0,
       "reason": "certified (EDF response bounds, RespEdfClose.wb_close_edf)",
       "cert": {
         "status": "certified",
         "reason": "pe_asm.compute_j",
-        "d_min": 23,
+        "d_min": 24,
         "J": 1
       },
       "lanes": {
@@ -1449,7 +1449,7 @@
         "1": {
           "max_late": 0,
           "max_late_pin": 0,
-          "R": 23
+          "R": 20
         },
         "2": {
           "max_late": 0,
@@ -1459,12 +1459,12 @@
         "3": {
           "max_late": 0,
           "max_late_pin": 0,
-          "R": 44
+          "R": 41
         },
         "4": {
           "max_late": 0,
           "max_late_pin": 0,
-          "R": 26
+          "R": 23
         }
       }
     },

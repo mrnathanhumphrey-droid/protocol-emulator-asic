@@ -491,78 +491,9 @@ CLASSIFIED[('src/pe_store.v', 484, 'v_branch', 'if')] = (
     UNREACHABLE, 'the SRAM write-buffer overflow check (simulation only): a write while the one-entry buffer is full and the port is reading. A passing run never reaches it ($finish); its must-fire is M_SRAM_WBUF_OVF, killed by test/run_pit_s3.py (s3_crc32_full).')
 CLASSIFIED[('src/pe_store.v', 498, 'v_branch', 'if')] = (
     OWED, "the bench-visible `peek` of a byte whose row's write is still in the write buffer (merged from pd / pbm). Benches peek after the run, when the buffer has drained; owed to a peek taken mid-run during a write burst (e.g. a tb_pit snapshot while the PIT is still writing).")
-CLASSIFIED[('src/project.v', 1725, 'v_branch', 'if')] = (
-    OWED, "OWED to the sweep: the stage-3 CLOCKED-bus path is driven only by test/run_pit_clk.py (gate pit-clk, CI on Verilator: spi_m0..m3, spi_mid, spi_ragged, spi_quiet, i2c_pec, i2c_sr, no_cs, no_clean_edge, both_levels), and tb_pit's swept arms never hand stage 3 a clocked bus. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN, as ac3443d did for tb_usbrx); a point still uncovered then gets its own entry. This point: the pass-1 fold `ck_pass`, run on every W_PAIR record of the second walk once P_KC1 accepts a bus (every ok case).")
-CLASSIFIED[('src/project.v', 1726, 'v_branch', 'else')] = (
-    OWED, "OWED to the sweep: the stage-3 CLOCKED-bus path is driven only by test/run_pit_clk.py (gate pit-clk, CI on Verilator: spi_m0..m3, spi_mid, spi_ragged, spi_quiet, i2c_pec, i2c_sr, no_cs, no_clean_edge, both_levels), and tb_pit's swept arms never hand stage 3 a clocked bus. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN, as ac3443d did for tb_usbrx); a point still uncovered then gets its own entry. This point: a COUNTED data edge within one cycle of a clock rise marks the rise dirty (if: no_clean_edge / both_levels; else: the clean cases).")
-CLASSIFIED[('src/project.v', 1726, 'v_branch', 'if')] = (
-    OWED, "OWED to the sweep: the stage-3 CLOCKED-bus path is driven only by test/run_pit_clk.py (gate pit-clk, CI on Verilator: spi_m0..m3, spi_mid, spi_ragged, spi_quiet, i2c_pec, i2c_sr, no_cs, no_clean_edge, both_levels), and tb_pit's swept arms never hand stage 3 a clocked bus. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN, as ac3443d did for tb_usbrx); a point still uncovered then gets its own entry. This point: a COUNTED data edge within one cycle of a clock rise marks the rise dirty (if: no_clean_edge / both_levels; else: the clean cases).")
-CLASSIFIED[('src/project.v', 1727, 'v_branch', 'else')] = (
-    OWED, "OWED to the sweep: the stage-3 CLOCKED-bus path is driven only by test/run_pit_clk.py (gate pit-clk, CI on Verilator: spi_m0..m3, spi_mid, spi_ragged, spi_quiet, i2c_pec, i2c_sr, no_cs, no_clean_edge, both_levels), and tb_pit's swept arms never hand stage 3 a clocked bus. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN, as ac3443d did for tb_usbrx); a point still uncovered then gets its own entry. This point: a counted data edge within one cycle of a clock fall marks the fall dirty (if: no_clean_edge / both_levels; else: the clean cases).")
-CLASSIFIED[('src/project.v', 1727, 'v_branch', 'if')] = (
-    OWED, "OWED to the sweep: the stage-3 CLOCKED-bus path is driven only by test/run_pit_clk.py (gate pit-clk, CI on Verilator: spi_m0..m3, spi_mid, spi_ragged, spi_quiet, i2c_pec, i2c_sr, no_cs, no_clean_edge, both_levels), and tb_pit's swept arms never hand stage 3 a clocked bus. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN, as ac3443d did for tb_usbrx); a point still uncovered then gets its own entry. This point: a counted data edge within one cycle of a clock fall marks the fall dirty (if: no_clean_edge / both_levels; else: the clean cases).")
-CLASSIFIED[('src/project.v', 1728, 'v_branch', 'else')] = (
-    OWED, "OWED to the sweep: the stage-3 CLOCKED-bus path is driven only by test/run_pit_clk.py (gate pit-clk, CI on Verilator: spi_m0..m3, spi_mid, spi_ragged, spi_quiet, i2c_pec, i2c_sr, no_cs, no_clean_edge, both_levels), and tb_pit's swept arms never hand stage 3 a clocked bus. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN, as ac3443d did for tb_usbrx); a point still uncovered then gets its own entry. This point: a clock rise within one cycle of a counted data edge marks the rise dirty -- the mirror of 1726 (if: data just before the rise; else: clean).")
-CLASSIFIED[('src/project.v', 1728, 'v_branch', 'if')] = (
-    OWED, "OWED to the sweep: the stage-3 CLOCKED-bus path is driven only by test/run_pit_clk.py (gate pit-clk, CI on Verilator: spi_m0..m3, spi_mid, spi_ragged, spi_quiet, i2c_pec, i2c_sr, no_cs, no_clean_edge, both_levels), and tb_pit's swept arms never hand stage 3 a clocked bus. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN, as ac3443d did for tb_usbrx); a point still uncovered then gets its own entry. This point: a clock rise within one cycle of a counted data edge marks the rise dirty -- the mirror of 1726 (if: data just before the rise; else: clean).")
-CLASSIFIED[('src/project.v', 1729, 'v_branch', 'else')] = (
-    OWED, "OWED to the sweep: the stage-3 CLOCKED-bus path is driven only by test/run_pit_clk.py (gate pit-clk, CI on Verilator: spi_m0..m3, spi_mid, spi_ragged, spi_quiet, i2c_pec, i2c_sr, no_cs, no_clean_edge, both_levels), and tb_pit's swept arms never hand stage 3 a clocked bus. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN, as ac3443d did for tb_usbrx); a point still uncovered then gets its own entry. This point: a clock fall within one cycle of a counted data edge marks the fall dirty -- the mirror of 1727 (if: data just before the fall; else: clean).")
-CLASSIFIED[('src/project.v', 1729, 'v_branch', 'if')] = (
-    OWED, "OWED to the sweep: the stage-3 CLOCKED-bus path is driven only by test/run_pit_clk.py (gate pit-clk, CI on Verilator: spi_m0..m3, spi_mid, spi_ragged, spi_quiet, i2c_pec, i2c_sr, no_cs, no_clean_edge, both_levels), and tb_pit's swept arms never hand stage 3 a clocked bus. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN, as ac3443d did for tb_usbrx); a point still uncovered then gets its own entry. This point: a clock fall within one cycle of a counted data edge marks the fall dirty -- the mirror of 1727 (if: data just before the fall; else: clean).")
-CLASSIFIED[('src/project.v', 1730, 'v_branch', 'else')] = (
-    OWED, "OWED to the sweep: the stage-3 CLOCKED-bus path is driven only by test/run_pit_clk.py (gate pit-clk, CI on Verilator: spi_m0..m3, spi_mid, spi_ragged, spi_quiet, i2c_pec, i2c_sr, no_cs, no_clean_edge, both_levels), and tb_pit's swept arms never hand stage 3 a clocked bus. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN, as ac3443d did for tb_usbrx); a point still uncovered then gets its own entry. This point: a counted data edge, recorded by the clock level it lands in (ck_sn1 / ck_sn0); else: the uncounted records (I2C START / STOP, SPI with CS inactive).")
-CLASSIFIED[('src/project.v', 1730, 'v_branch', 'if')] = (
-    OWED, "OWED to the sweep: the stage-3 CLOCKED-bus path is driven only by test/run_pit_clk.py (gate pit-clk, CI on Verilator: spi_m0..m3, spi_mid, spi_ragged, spi_quiet, i2c_pec, i2c_sr, no_cs, no_clean_edge, both_levels), and tb_pit's swept arms never hand stage 3 a clocked bus. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN, as ac3443d did for tb_usbrx); a point still uncovered then gets its own entry. This point: a counted data edge, recorded by the clock level it lands in (ck_sn1 / ck_sn0); else: the uncounted records (I2C START / STOP, SPI with CS inactive).")
-CLASSIFIED[('src/project.v', 1731, 'v_branch', 'else')] = (
-    OWED, "OWED to the sweep: the stage-3 CLOCKED-bus path is driven only by test/run_pit_clk.py (gate pit-clk, CI on Verilator: spi_m0..m3, spi_mid, spi_ragged, spi_quiet, i2c_pec, i2c_sr, no_cs, no_clean_edge, both_levels), and tb_pit's swept arms never hand stage 3 a clocked bus. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN, as ac3443d did for tb_usbrx); a point still uncovered then gets its own entry. This point: a frame wire entering its active level counts a CS-active record (ck_cn), the descriptor's CPOL input (SPI cases); else: I2C and inactive edges.")
-CLASSIFIED[('src/project.v', 1731, 'v_branch', 'if')] = (
-    OWED, "OWED to the sweep: the stage-3 CLOCKED-bus path is driven only by test/run_pit_clk.py (gate pit-clk, CI on Verilator: spi_m0..m3, spi_mid, spi_ragged, spi_quiet, i2c_pec, i2c_sr, no_cs, no_clean_edge, both_levels), and tb_pit's swept arms never hand stage 3 a clocked bus. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN, as ac3443d did for tb_usbrx); a point still uncovered then gets its own entry. This point: a frame wire entering its active level counts a CS-active record (ck_cn), the descriptor's CPOL input (SPI cases); else: I2C and inactive edges.")
-CLASSIFIED[('src/project.v', 1733, 'v_branch', 'else')] = (
-    OWED, "OWED to the sweep: the stage-3 CLOCKED-bus path is driven only by test/run_pit_clk.py (gate pit-clk, CI on Verilator: spi_m0..m3, spi_mid, spi_ragged, spi_quiet, i2c_pec, i2c_sr, no_cs, no_clean_edge, both_levels), and tb_pit's swept arms never hand stage 3 a clocked bus. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN, as ac3443d did for tb_usbrx); a point still uncovered then gets its own entry. This point: of those CS-active records, the ones with the clock HIGH before the record (ck_ch: CPOL 1, spi_m2 / spi_m3; else CPOL 0, spi_m0 / spi_m1).")
-CLASSIFIED[('src/project.v', 1733, 'v_branch', 'if')] = (
-    OWED, "OWED to the sweep: the stage-3 CLOCKED-bus path is driven only by test/run_pit_clk.py (gate pit-clk, CI on Verilator: spi_m0..m3, spi_mid, spi_ragged, spi_quiet, i2c_pec, i2c_sr, no_cs, no_clean_edge, both_levels), and tb_pit's swept arms never hand stage 3 a clocked bus. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN, as ac3443d did for tb_usbrx); a point still uncovered then gets its own entry. This point: of those CS-active records, the ones with the clock HIGH before the record (ck_ch: CPOL 1, spi_m2 / spi_m3; else CPOL 0, spi_m0 / spi_m1).")
-CLASSIFIED[('src/project.v', 2046, 'v_branch', 'cond_then')] = (
-    OWED, "OWED to the sweep: the stage-3 CLOCKED-bus path is driven only by test/run_pit_clk.py (gate pit-clk, CI on Verilator: spi_m0..m3, spi_mid, spi_ragged, spi_quiet, i2c_pec, i2c_sr, no_cs, no_clean_edge, both_levels), and tb_pit's swept arms never hand stage 3 a clocked bus. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN, as ac3443d did for tb_usbrx); a point still uncovered then gets its own entry. This point: P_KSEL exhausting the 8 wires having SEEN a data wire but no frame markers -> ck_why 7 (case no_cs).")
-CLASSIFIED[('src/project.v', 2050, 'v_line', 'else')] = (
-    OWED, "OWED to the sweep: the stage-3 CLOCKED-bus path is driven only by test/run_pit_clk.py (gate pit-clk, CI on Verilator: spi_m0..m3, spi_mid, spi_ragged, spi_quiet, i2c_pec, i2c_sr, no_cs, no_clean_edge, both_levels), and tb_pit's swept arms never hand stage 3 a clocked bus. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN, as ac3443d did for tb_usbrx); a point still uncovered then gets its own entry. This point: P_KSEL stepping past a wire that is not SYNC_DATA (di + 1) -- any clocked case whose data wire is not the first scanned.")
-CLASSIFIED[('src/project.v', 2059, 'v_branch', 'else')] = (
-    OWED, "OWED to the sweep: the stage-3 CLOCKED-bus path is driven only by test/run_pit_clk.py (gate pit-clk, CI on Verilator: spi_m0..m3, spi_mid, spi_ragged, spi_quiet, i2c_pec, i2c_sr, no_cs, no_clean_edge, both_levels), and tb_pit's swept arms never hand stage 3 a clocked bus. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN, as ac3443d did for tb_usbrx); a point still uncovered then gets its own entry. This point: P_KC1 itself, and its branch: a data wire with neither the I2C tag nor a CS that FAILS the I2C signature -> next wire (if: no_cs) vs accepted (else: every ok case).")
-CLASSIFIED[('src/project.v', 2059, 'v_branch', 'if')] = (
-    OWED, "OWED to the sweep: the stage-3 CLOCKED-bus path is driven only by test/run_pit_clk.py (gate pit-clk, CI on Verilator: spi_m0..m3, spi_mid, spi_ragged, spi_quiet, i2c_pec, i2c_sr, no_cs, no_clean_edge, both_levels), and tb_pit's swept arms never hand stage 3 a clocked bus. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN, as ac3443d did for tb_usbrx); a point still uncovered then gets its own entry. This point: P_KC1 itself, and its branch: a data wire with neither the I2C tag nor a CS that FAILS the I2C signature -> next wire (if: no_cs) vs accepted (else: every ok case).")
-CLASSIFIED[('src/project.v', 2059, 'v_line', 'case')] = (
-    OWED, "OWED to the sweep: the stage-3 CLOCKED-bus path is driven only by test/run_pit_clk.py (gate pit-clk, CI on Verilator: spi_m0..m3, spi_mid, spi_ragged, spi_quiet, i2c_pec, i2c_sr, no_cs, no_clean_edge, both_levels), and tb_pit's swept arms never hand stage 3 a clocked bus. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN, as ac3443d did for tb_usbrx); a point still uncovered then gets its own entry. This point: P_KC1 itself, and its branch: a data wire with neither the I2C tag nor a CS that FAILS the I2C signature -> next wire (if: no_cs) vs accepted (else: every ok case).")
-CLASSIFIED[('src/project.v', 2062, 'v_line', 'elsif')] = (
-    OWED, "OWED to the sweep: the stage-3 CLOCKED-bus path is driven only by test/run_pit_clk.py (gate pit-clk, CI on Verilator: spi_m0..m3, spi_mid, spi_ragged, spi_quiet, i2c_pec, i2c_sr, no_cs, no_clean_edge, both_levels), and tb_pit's swept arms never hand stage 3 a clocked bus. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN, as ac3443d did for tb_usbrx); a point still uncovered then gets its own entry. This point: the CS active level decided HIGH: CS high at >= 7/8 of the clock's edges (ck_act 1) on an SPI bus.")
-CLASSIFIED[('src/project.v', 2063, 'v_branch', 'else')] = (
-    OWED, "OWED to the sweep: the stage-3 CLOCKED-bus path is driven only by test/run_pit_clk.py (gate pit-clk, CI on Verilator: spi_m0..m3, spi_mid, spi_ragged, spi_quiet, i2c_pec, i2c_sr, no_cs, no_clean_edge, both_levels), and tb_pit's swept arms never hand stage 3 a clocked bus. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN, as ac3443d did for tb_usbrx); a point still uncovered then gets its own entry. This point: the CS active level decided LOW: CS low at >= 7/8 of the clock's edges (ck_act 0); else: neither (the 2064 refusal).")
-CLASSIFIED[('src/project.v', 2063, 'v_branch', 'if')] = (
-    OWED, "OWED to the sweep: the stage-3 CLOCKED-bus path is driven only by test/run_pit_clk.py (gate pit-clk, CI on Verilator: spi_m0..m3, spi_mid, spi_ragged, spi_quiet, i2c_pec, i2c_sr, no_cs, no_clean_edge, both_levels), and tb_pit's swept arms never hand stage 3 a clocked bus. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN, as ac3443d did for tb_usbrx); a point still uncovered then gets its own entry. This point: the CS active level decided LOW: CS low at >= 7/8 of the clock's edges (ck_act 0); else: neither (the 2064 refusal).")
-CLASSIFIED[('src/project.v', 2064, 'v_branch', 'else')] = (
-    OWED, "OWED -- AND NOT ONLY TO THE SWEEP: `CS level unclear` (neither CS level holds at 7/8 of the clock edges) -> ck_why 8. test/run_pit_clk.py's docstring names this refusal but its case list has NO case for it (no_cs, no_clean_edge, both_levels are the three refusals it runs). Owed to a new run_pit_clk case: an SPI bus whose CS changes level inside frames so neither level reaches 7/8; the else arm is every accepted SPI case.")
-CLASSIFIED[('src/project.v', 2064, 'v_branch', 'if')] = (
-    OWED, "OWED -- AND NOT ONLY TO THE SWEEP: `CS level unclear` (neither CS level holds at 7/8 of the clock edges) -> ck_why 8. test/run_pit_clk.py's docstring names this refusal but its case list has NO case for it (no_cs, no_clean_edge, both_levels are the three refusals it runs). Owed to a new run_pit_clk case: an SPI bus whose CS changes level inside frames so neither level reaches 7/8; the else arm is every accepted SPI case.")
-CLASSIFIED[('src/project.v', 2070, 'v_line', 'case')] = (
-    OWED, "OWED to the sweep: the stage-3 CLOCKED-bus path is driven only by test/run_pit_clk.py (gate pit-clk, CI on Verilator: spi_m0..m3, spi_mid, spi_ragged, spi_quiet, i2c_pec, i2c_sr, no_cs, no_clean_edge, both_levels), and tb_pit's swept arms never hand stage 3 a clocked bus. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN, as ac3443d did for tb_usbrx); a point still uncovered then gets its own entry. This point: P_KC2, the sample-edge choice, entered by every case P_KC1 accepts.")
-CLASSIFIED[('src/project.v', 2072, 'v_line', 'elsif')] = (
-    OWED, "OWED to the sweep: the stage-3 CLOCKED-bus path is driven only by test/run_pit_clk.py (gate pit-clk, CI on Verilator: spi_m0..m3, spi_mid, spi_ragged, spi_quiet, i2c_pec, i2c_sr, no_cs, no_clean_edge, both_levels), and tb_pit's swept arms never hand stage 3 a clocked bus. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN, as ac3443d did for tb_usbrx); a point still uncovered then gets its own entry. This point: only the RISE clean -> sample on the rise (the modes whose data changes on the fall).")
-CLASSIFIED[('src/project.v', 2073, 'v_line', 'elsif')] = (
-    OWED, "OWED to the sweep: the stage-3 CLOCKED-bus path is driven only by test/run_pit_clk.py (gate pit-clk, CI on Verilator: spi_m0..m3, spi_mid, spi_ragged, spi_quiet, i2c_pec, i2c_sr, no_cs, no_clean_edge, both_levels), and tb_pit's swept arms never hand stage 3 a clocked bus. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN, as ac3443d did for tb_usbrx); a point still uncovered then gets its own entry. This point: only the FALL clean -> sample on the fall (the modes whose data changes on the rise).")
-CLASSIFIED[('src/project.v', 2077, 'v_line', 'else')] = (
-    OWED, "OWED to the sweep: the stage-3 CLOCKED-bus path is driven only by test/run_pit_clk.py (gate pit-clk, CI on Verilator: spi_m0..m3, spi_mid, spi_ragged, spi_quiet, i2c_pec, i2c_sr, no_cs, no_clean_edge, both_levels), and tb_pit's swept arms never hand stage 3 a clocked bus. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN, as ac3443d did for tb_usbrx); a point still uncovered then gets its own entry. This point: both edges clean and counted data seen in ONE clock level only -> the edge ending the data's level (if); else the no-clean-edge refusal (no_clean_edge, both_levels).")
-CLASSIFIED[('src/project.v', 2077, 'v_line', 'if')] = (
-    OWED, "OWED to the sweep: the stage-3 CLOCKED-bus path is driven only by test/run_pit_clk.py (gate pit-clk, CI on Verilator: spi_m0..m3, spi_mid, spi_ragged, spi_quiet, i2c_pec, i2c_sr, no_cs, no_clean_edge, both_levels), and tb_pit's swept arms never hand stage 3 a clocked bus. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN, as ac3443d did for tb_usbrx); a point still uncovered then gets its own entry. This point: both edges clean and counted data seen in ONE clock level only -> the edge ending the data's level (if); else the no-clean-edge refusal (no_clean_edge, both_levels).")
-CLASSIFIED[('src/project.v', 2080, 'v_branch', 'cond_else')] = (
-    OWED, "OWED to the sweep: the stage-3 CLOCKED-bus path is driven only by test/run_pit_clk.py (gate pit-clk, CI on Verilator: spi_m0..m3, spi_mid, spi_ragged, spi_quiet, i2c_pec, i2c_sr, no_cs, no_clean_edge, both_levels), and tb_pit's swept arms never hand stage 3 a clocked bus. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN, as ac3443d did for tb_usbrx); a point still uncovered then gets its own entry. This point: the refusal code: both edges clean but data in both levels -> 10 (both_levels) vs an edge dirty -> 9 (no_clean_edge).")
-CLASSIFIED[('src/project.v', 2080, 'v_branch', 'cond_then')] = (
-    OWED, "OWED to the sweep: the stage-3 CLOCKED-bus path is driven only by test/run_pit_clk.py (gate pit-clk, CI on Verilator: spi_m0..m3, spi_mid, spi_ragged, spi_quiet, i2c_pec, i2c_sr, no_cs, no_clean_edge, both_levels), and tb_pit's swept arms never hand stage 3 a clocked bus. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN, as ac3443d did for tb_usbrx); a point still uncovered then gets its own entry. This point: the refusal code: both edges clean but data in both levels -> 10 (both_levels) vs an edge dirty -> 9 (no_clean_edge).")
-CLASSIFIED[('src/project.v', 2084, 'v_branch', 'else')] = (
-    OWED, "OWED to the sweep: the stage-3 CLOCKED-bus path is driven only by test/run_pit_clk.py (gate pit-clk, CI on Verilator: spi_m0..m3, spi_mid, spi_ragged, spi_quiet, i2c_pec, i2c_sr, no_cs, no_clean_edge, both_levels), and tb_pit's swept arms never hand stage 3 a clocked bus. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN, as ac3443d did for tb_usbrx); a point still uncovered then gets its own entry. This point: P_KCAP waiting on the second capture: if = it finished (ck_done, every ok case); else = still capturing; the case arm itself.")
-CLASSIFIED[('src/project.v', 2084, 'v_branch', 'if')] = (
-    OWED, "OWED to the sweep: the stage-3 CLOCKED-bus path is driven only by test/run_pit_clk.py (gate pit-clk, CI on Verilator: spi_m0..m3, spi_mid, spi_ragged, spi_quiet, i2c_pec, i2c_sr, no_cs, no_clean_edge, both_levels), and tb_pit's swept arms never hand stage 3 a clocked bus. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN, as ac3443d did for tb_usbrx); a point still uncovered then gets its own entry. This point: P_KCAP waiting on the second capture: if = it finished (ck_done, every ok case); else = still capturing; the case arm itself.")
-CLASSIFIED[('src/project.v', 2084, 'v_line', 'case')] = (
-    OWED, "OWED to the sweep: the stage-3 CLOCKED-bus path is driven only by test/run_pit_clk.py (gate pit-clk, CI on Verilator: spi_m0..m3, spi_mid, spi_ragged, spi_quiet, i2c_pec, i2c_sr, no_cs, no_clean_edge, both_levels), and tb_pit's swept arms never hand stage 3 a clocked bus. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN, as ac3443d did for tb_usbrx); a point still uncovered then gets its own entry. This point: P_KCAP waiting on the second capture: if = it finished (ck_done, every ok case); else = still capturing; the case arm itself.")
-CLASSIFIED[('src/project.v', 2088, 'v_branch', 'if')] = (
-    OWED, "OWED to the sweep: the stage-3 CLOCKED-bus path is driven only by test/run_pit_clk.py (gate pit-clk, CI on Verilator: spi_m0..m3, spi_mid, spi_ragged, spi_quiet, i2c_pec, i2c_sr, no_cs, no_clean_edge, both_levels), and tb_pit's swept arms never hand stage 3 a clocked bus. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN, as ac3443d did for tb_usbrx); a point still uncovered then gets its own entry. This point: the clocked-bus descriptor write to byte 3 once the capture is in (ck_ok, every ok case).")
+# PAID 11-18 (Wilson 11-18 ruling, removed): project.v 1728 / 1729 (dirty-rise / dirty-fall data
+# edge), 2062 (CS active high), 2064 (CS level unclear). Pinned 5.053, three-mode sweeps: count 0
+# at fdb3074, 144 / 151 / 2 / 2 with the st_done batch's run_pit_clk cases.
 CLASSIFIED[('src/project.v', 2794, 'v_branch', 'else')] = (
     OWED, "OWED: a stage 1-2 corner that none of run_pit_s12's 17 cases (swept since ac3443d, +S0WAIT=2) drives at reset +0. Owed to a run_pit_s12 case whose capture makes this true: an OVF interval (an edge gap longer than the interval counter) in the PRE pass, which skips it for n / n1 / IVMAX.")
 CLASSIFIED[('src/project.v', 2801, 'v_line', 'elsif')] = (
@@ -599,8 +530,6 @@ CLASSIFIED[('src/project.v', 3127, 'v_branch', 'else')] = (
     OWED, "OWED to the sweep: stage 3's ASYNC decode / GCD record path past what tb_pit's swept arms reach; test/run_pit_s3.py (gate pit-s3) runs stage 3 but is not in the sweep. Retired by a run_pit_s3.coverage_arms(), or -- if no pit-s3 case reaches it -- a case that drives: T_END with no message open: the decode ends between messages.")
 CLASSIFIED[('src/project.v', 3129, 'v_branch', 'else')] = (
     OWED, "OWED to the sweep: stage 3's ASYNC decode / GCD record path past what tb_pit's swept arms reach; test/run_pit_s3.py (gate pit-s3) runs stage 3 but is not in the sweep. Retired by a run_pit_s3.coverage_arms(), or -- if no pit-s3 case reaches it -- a case that drives: T_END closing a message with the count saturated at 255.")
-CLASSIFIED[('src/project.v', 3138, 'v_branch', 'if')] = (
-    OWED, "OWED to the sweep: the stage-3 CLOCKED-bus path is driven only by test/run_pit_clk.py (gate pit-clk, CI on Verilator: spi_m0..m3, spi_mid, spi_ragged, spi_quiet, i2c_pec, i2c_sr, no_cs, no_clean_edge, both_levels), and tb_pit's swept arms never hand stage 3 a clocked bus. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN, as ac3443d did for tb_usbrx); a point still uncovered then gets its own entry. This point: T_CK taking the clocked capture's messages into stage 3 (ck_ok: s3_found, w, write pointer, message count).")
 CLASSIFIED[('src/project.v', 3294, 'v_branch', 'cond_then')] = (
     OWED, "OWED to the sweep: stage 3's ASYNC decode / GCD record path past what tb_pit's swept arms reach; test/run_pit_s3.py (gate pit-s3) runs stage 3 but is not in the sweep. Retired by a run_pit_s3.coverage_arms(), or -- if no pit-s3 case reaches it -- a case that drives: the GCD record says no polynomial and stage 3 found frames, with the GCD skipped and not tried -> s3_why 2 (else 3).")
 CLASSIFIED[('src/project.v', 3314, 'v_branch', 'if')] = (
@@ -617,67 +546,13 @@ CLASSIFIED[('src/project.v', 3466, 'v_branch', 'if')] = (
     UNREACHABLE, 'proof s12-4 as a simulation assertion: the tree compare lt33 equals P_A < P_B in stage 3. A failure $finishes the run, so a passing run never reaches it; a tripwire, not a path.')
 CLASSIFIED[('src/project.v', 3471, 'v_branch', 'if')] = (
     UNREACHABLE, "the initial check that pe_s3_opsel's operation codes equal this module's (proof section 3): both sides are localparams of the same values, so it is false at elaboration unless one copy is edited -- a tripwire on the copies, not a path.")
-CLASSIFIED[('src/project.v', 3835, 'v_branch', 'cond_then')] = (
-    OWED, "OWED to the sweep: pe_pit's SECOND (clocked) capture -- armed by stage 0's clocked-bus descriptor -- runs only under test/run_pit_clk.py (gate pit-clk), which is not in the sweep; tb_pit's swept arms never arm it. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN); a point still uncovered then gets its own entry. This point: s_close for I2C (a START / STOP event closes the message; i2c_pec, i2c_sr).")
-CLASSIFIED[('src/project.v', 3836, 'v_branch', 'cond_then')] = (
-    OWED, "OWED to the sweep: pe_pit's SECOND (clocked) capture -- armed by stage 0's clocked-bus descriptor -- runs only under test/run_pit_clk.py (gate pit-clk), which is not in the sweep; tb_pit's swept arms never arm it. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN); a point still uncovered then gets its own entry. This point: s_openv for I2C (a START: SDA falls with SCL high).")
-CLASSIFIED[('src/project.v', 3843, 'v_branch', 'cond_then')] = (
-    OWED, "OWED to the sweep: pe_pit's SECOND (clocked) capture -- armed by stage 0's clocked-bus descriptor -- runs only under test/run_pit_clk.py (gate pit-clk), which is not in the sweep; tb_pit's swept arms never arm it. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN); a point still uncovered then gets its own entry. This point: s_bit for I2C (a clock change that is not START / STOP, with a pending sample).")
-CLASSIFIED[('src/project.v', 3845, 'v_branch', 'cond_then')] = (
-    OWED, "OWED to the sweep: pe_pit's SECOND (clocked) capture -- armed by stage 0's clocked-bus descriptor -- runs only under test/run_pit_clk.py (gate pit-clk), which is not in the sweep; tb_pit's swept arms never arm it. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN); a point still uncovered then gets its own entry. This point: s_bv for I2C (the pending SDA sample is the bit).")
-CLASSIFIED[('src/project.v', 3850, 'v_branch', 'cond_then')] = (
-    OWED, "OWED to the sweep: pe_pit's SECOND (clocked) capture -- armed by stage 0's clocked-bus descriptor -- runs only under test/run_pit_clk.py (gate pit-clk), which is not in the sweep; tb_pit's swept arms never arm it. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN); a point still uncovered then gets its own entry. This point: s_unit 9 for I2C (8 data bits + the ACK slot per byte).")
-CLASSIFIED[('src/project.v', 3855, 'v_branch', 'cond_else')] = (
-    OWED, "OWED to the sweep: pe_pit's SECOND (clocked) capture -- armed by stage 0's clocked-bus descriptor -- runs only under test/run_pit_clk.py (gate pit-clk), which is not in the sweep; tb_pit's swept arms never arm it. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN); a point still uncovered then gets its own entry. This point: a bit past the eighth (I2C's ACK slot) not shifted into the byte.")
-CLASSIFIED[('src/project.v', 3953, 'v_line', 'elsif')] = (
-    OWED, "OWED to the sweep: pe_pit's SECOND (clocked) capture -- armed by stage 0's clocked-bus descriptor -- runs only under test/run_pit_clk.py (gate pit-clk), which is not in the sweep; tb_pit's swept arms never arm it. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN); a point still uncovered then gets its own entry. This point: ck_arm, the capture's cycle 0 (every accepted case).")
-CLASSIFIED[('src/project.v', 3957, 'v_branch', 'if')] = (
-    OWED, "OWED to the sweep: pe_pit's SECOND (clocked) capture -- armed by stage 0's clocked-bus descriptor -- runs only under test/run_pit_clk.py (gate pit-clk), which is not in the sweep; tb_pit's swept arms never arm it. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN); a point still uncovered then gets its own entry. This point: s_on, the capture running.")
-CLASSIFIED[('src/project.v', 3958, 'v_branch', 'else')] = (
-    OWED, "OWED to the sweep: pe_pit's SECOND (clocked) capture -- armed by stage 0's clocked-bus descriptor -- runs only under test/run_pit_clk.py (gate pit-clk), which is not in the sweep; tb_pit's swept arms never arm it. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN); a point still uncovered then gets its own entry. This point: the capture ending on the budget (edges at 2^b unseen: spi_quiet) or a full slot store (if) vs running on (else).")
-CLASSIFIED[('src/project.v', 3958, 'v_branch', 'if')] = (
-    OWED, "OWED to the sweep: pe_pit's SECOND (clocked) capture -- armed by stage 0's clocked-bus descriptor -- runs only under test/run_pit_clk.py (gate pit-clk), which is not in the sweep; tb_pit's swept arms never arm it. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN); a point still uncovered then gets its own entry. This point: the capture ending on the budget (edges at 2^b unseen: spi_quiet) or a full slot store (if) vs running on (else).")
-CLASSIFIED[('src/project.v', 3961, 'v_branch', 'else')] = (
-    OWED, "OWED to the sweep: pe_pit's SECOND (clocked) capture -- armed by stage 0's clocked-bus descriptor -- runs only under test/run_pit_clk.py (gate pit-clk), which is not in the sweep; tb_pit's swept arms never arm it. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN); a point still uncovered then gets its own entry. This point: the I2C sampler (if) vs the SPI sampler (else).")
-CLASSIFIED[('src/project.v', 3961, 'v_branch', 'if')] = (
-    OWED, "OWED to the sweep: pe_pit's SECOND (clocked) capture -- armed by stage 0's clocked-bus descriptor -- runs only under test/run_pit_clk.py (gate pit-clk), which is not in the sweep; tb_pit's swept arms never arm it. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN); a point still uncovered then gets its own entry. This point: the I2C sampler (if) vs the SPI sampler (else).")
-CLASSIFIED[('src/project.v', 3962, 'v_line', 'elsif')] = (
-    OWED, "OWED to the sweep: pe_pit's SECOND (clocked) capture -- armed by stage 0's clocked-bus descriptor -- runs only under test/run_pit_clk.py (gate pit-clk), which is not in the sweep; tb_pit's swept arms never arm it. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN); a point still uncovered then gets its own entry. This point: an I2C START / STOP clearing the pending bit.")
-CLASSIFIED[('src/project.v', 3963, 'v_line', 'elsif')] = (
-    OWED, "OWED to the sweep: pe_pit's SECOND (clocked) capture -- armed by stage 0's clocked-bus descriptor -- runs only under test/run_pit_clk.py (gate pit-clk), which is not in the sweep; tb_pit's swept arms never arm it. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN); a point still uncovered then gets its own entry. This point: an I2C clock change with the message open latching SDA as the pending bit.")
-CLASSIFIED[('src/project.v', 3964, 'v_branch', 'else')] = (
-    OWED, "OWED to the sweep: pe_pit's SECOND (clocked) capture -- armed by stage 0's clocked-bus descriptor -- runs only under test/run_pit_clk.py (gate pit-clk), which is not in the sweep; tb_pit's swept arms never arm it. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN); a point still uncovered then gets its own entry. This point: a consumed I2C bit clearing the pending flag (if) vs no bit this cycle (else).")
-CLASSIFIED[('src/project.v', 3964, 'v_branch', 'if')] = (
-    OWED, "OWED to the sweep: pe_pit's SECOND (clocked) capture -- armed by stage 0's clocked-bus descriptor -- runs only under test/run_pit_clk.py (gate pit-clk), which is not in the sweep; tb_pit's swept arms never arm it. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN); a point still uncovered then gets its own entry. This point: a consumed I2C bit clearing the pending flag (if) vs no bit this cycle (else).")
-CLASSIFIED[('src/project.v', 3966, 'v_branch', 'else')] = (
-    OWED, "OWED to the sweep: pe_pit's SECOND (clocked) capture -- armed by stage 0's clocked-bus descriptor -- runs only under test/run_pit_clk.py (gate pit-clk), which is not in the sweep; tb_pit's swept arms never arm it. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN); a point still uncovered then gets its own entry. This point: a sampled bit shifting into the byte (if) vs no bit (else).")
-CLASSIFIED[('src/project.v', 3966, 'v_branch', 'if')] = (
-    OWED, "OWED to the sweep: pe_pit's SECOND (clocked) capture -- armed by stage 0's clocked-bus descriptor -- runs only under test/run_pit_clk.py (gate pit-clk), which is not in the sweep; tb_pit's swept arms never arm it. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN); a point still uncovered then gets its own entry. This point: a sampled bit shifting into the byte (if) vs no bit (else).")
-CLASSIFIED[('src/project.v', 3967, 'v_branch', 'else')] = (
-    OWED, "OWED to the sweep: pe_pit's SECOND (clocked) capture -- armed by stage 0's clocked-bus descriptor -- runs only under test/run_pit_clk.py (gate pit-clk), which is not in the sweep; tb_pit's swept arms never arm it. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN); a point still uncovered then gets its own entry. This point: a whole byte (8 bits SPI, 9 I2C) going to its slot (if) vs a partial byte (else).")
-CLASSIFIED[('src/project.v', 3967, 'v_branch', 'if')] = (
-    OWED, "OWED to the sweep: pe_pit's SECOND (clocked) capture -- armed by stage 0's clocked-bus descriptor -- runs only under test/run_pit_clk.py (gate pit-clk), which is not in the sweep; tb_pit's swept arms never arm it. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN); a point still uncovered then gets its own entry. This point: a whole byte (8 bits SPI, 9 I2C) going to its slot (if) vs a partial byte (else).")
-CLASSIFIED[('src/project.v', 3971, 'v_branch', 'else')] = (
-    OWED, "OWED to the sweep: pe_pit's SECOND (clocked) capture -- armed by stage 0's clocked-bus descriptor -- runs only under test/run_pit_clk.py (gate pit-clk), which is not in the sweep; tb_pit's swept arms never arm it. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN); a point still uncovered then gets its own entry. This point: a frame closing (CS inactive / STOP) (if) vs no close (else).")
-CLASSIFIED[('src/project.v', 3971, 'v_branch', 'if')] = (
-    OWED, "OWED to the sweep: pe_pit's SECOND (clocked) capture -- armed by stage 0's clocked-bus descriptor -- runs only under test/run_pit_clk.py (gate pit-clk), which is not in the sweep; tb_pit's swept arms never arm it. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN); a point still uncovered then gets its own entry. This point: a frame closing (CS inactive / STOP) (if) vs no close (else).")
-CLASSIFIED[('src/project.v', 3973, 'v_branch', 'else')] = (
-    OWED, "OWED to the sweep: pe_pit's SECOND (clocked) capture -- armed by stage 0's clocked-bus descriptor -- runs only under test/run_pit_clk.py (gate pit-clk), which is not in the sweep; tb_pit's swept arms never arm it. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN); a point still uncovered then gets its own entry. This point: a kept message's length written into its frame slot (if) vs a dropped empty one (else).")
-CLASSIFIED[('src/project.v', 3973, 'v_branch', 'if')] = (
-    OWED, "OWED to the sweep: pe_pit's SECOND (clocked) capture -- armed by stage 0's clocked-bus descriptor -- runs only under test/run_pit_clk.py (gate pit-clk), which is not in the sweep; tb_pit's swept arms never arm it. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN); a point still uncovered then gets its own entry. This point: a kept message's length written into its frame slot (if) vs a dropped empty one (else).")
-CLASSIFIED[('src/project.v', 3976, 'v_branch', 'else')] = (
-    OWED, "OWED to the sweep: pe_pit's SECOND (clocked) capture -- armed by stage 0's clocked-bus descriptor -- runs only under test/run_pit_clk.py (gate pit-clk), which is not in the sweep; tb_pit's swept arms never arm it. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN); a point still uncovered then gets its own entry. This point: the message count incrementing (if) vs saturated at 255 (else: more than 255 messages before the store fills -- if the NFR = 400 cases do not reach it, it is owed a longer-bus case).")
-CLASSIFIED[('src/project.v', 3976, 'v_branch', 'if')] = (
-    OWED, "OWED to the sweep: pe_pit's SECOND (clocked) capture -- armed by stage 0's clocked-bus descriptor -- runs only under test/run_pit_clk.py (gate pit-clk), which is not in the sweep; tb_pit's swept arms never arm it. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN); a point still uncovered then gets its own entry. This point: the message count incrementing (if) vs saturated at 255 (else: more than 255 messages before the store fills -- if the NFR = 400 cases do not reach it, it is owed a longer-bus case).")
-CLASSIFIED[('src/project.v', 3979, 'v_branch', 'else')] = (
-    OWED, "OWED to the sweep: pe_pit's SECOND (clocked) capture -- armed by stage 0's clocked-bus descriptor -- runs only under test/run_pit_clk.py (gate pit-clk), which is not in the sweep; tb_pit's swept arms never arm it. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN); a point still uncovered then gets its own entry. This point: a frame opening (CS active / START) (if) vs none (else).")
-CLASSIFIED[('src/project.v', 3979, 'v_branch', 'if')] = (
-    OWED, "OWED to the sweep: pe_pit's SECOND (clocked) capture -- armed by stage 0's clocked-bus descriptor -- runs only under test/run_pit_clk.py (gate pit-clk), which is not in the sweep; tb_pit's swept arms never arm it. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN); a point still uncovered then gets its own entry. This point: a frame opening (CS active / START) (if) vs none (else).")
-CLASSIFIED[('src/project.v', 3980, 'v_branch', 'cond_else')] = (
-    OWED, "OWED to the sweep: pe_pit's SECOND (clocked) capture -- armed by stage 0's clocked-bus descriptor -- runs only under test/run_pit_clk.py (gate pit-clk), which is not in the sweep; tb_pit's swept arms never arm it. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN); a point still uncovered then gets its own entry. This point: the new message's length-slot address: after a kept message (s_end) vs the first (ck_wp).")
-CLASSIFIED[('src/project.v', 3980, 'v_branch', 'cond_then')] = (
-    OWED, "OWED to the sweep: pe_pit's SECOND (clocked) capture -- armed by stage 0's clocked-bus descriptor -- runs only under test/run_pit_clk.py (gate pit-clk), which is not in the sweep; tb_pit's swept arms never arm it. Retired by a run_pit_clk.coverage_arms() (FROM_PYGEN); a point still uncovered then gets its own entry. This point: the new message's length-slot address: after a kept message (s_end) vs the first (ck_wp).")
+CLASSIFIED[('src/project.v', 4029, 'v_branch', 'else')] = (
+    UNREACHABLE, 'the saturation arm of `ck_nmsg` (messages kept, sat 255). ck_nmsg is cleared at each clocked-capture start (line 4008), and a message is counted only when kept (`s_keep`: s_mlen != 0), so each takes >= 2 bytes ([len][>= 1 byte]) of the capture region CAP_BASE 128 .. S_END 384 (s_full stops the capture at 384): at most 128 messages per capture, never 255. THE BOUND DEPENDS ON THREE CONSTANTS in pe_pit\'s clocked capture: (1) the MINIMUM MESSAGE SIZE, 2 bytes = the one length byte at s_la (`s_end = s_la + 1 + s_mlen`) plus the >= 1 data byte `s_keep` demands (`s_mlen != 8\'d0`); (2) `CAP_BASE = 128` (localparam integer, next to CAP_BITS); (3) `S_END = 10\'d384` (localparam, enforced by `s_full`). Max messages = (S_END - CAP_BASE) / min size = 256 / 2 = 128. The arm needs a 256th kept message, i.e. (S_END - CAP_BASE) / min size reaching the 256 the 8-bit count saturates below: the region growing to ~512 bytes, or s_keep admitting a 0-data-byte message (min size 1, 256 / 1 -- then this entry is wrong and must be re-measured). Re-check this entry whenever s_keep, CAP_BASE or S_END changes.')
 
+#: ⭐ 11-18 (Wilson): EACH CEILING HAS ITS POINT LIST in test/coverage_points/ (see
+#: point_list_problems). pe_engine.v's list is the 11-04 sweep's (cc6166d), the
+#: one 960 was set from; project.v has NO list yet -- 1725 has no surviving
+#: sweep behind it, so it is re-based after the 11-18 arms (RED-AT-ORIGIN).
 #: ⚠ TOGGLE CEILINGS -- uncovered toggle points per file, which may only FALL.
 #: ⛔ Measured, not chosen: these are the values of the sweep that shipped with
 #: this gate. A ratchet seeded from a guess is a ratchet that permits a
@@ -773,7 +648,14 @@ TOGGLE_CEILING = {
     # falling edge -- the SIMULATION-ONLY flag (`ifndef SYNTHESIS`, e93e8b5)
     # that arms the contract checks once reset has been seen: it rises once and
     # by design never falls. The 111 above are unchanged, point for point.
-    "src/pe_store.v": 112,        # primitive 2's CMP arms: -4; PIT c2 stage 0 -8; latch store +32 (seed_r, sim-only); shared tree +61 (c0..c3); chk_armed +1 (sim-only)
+    # ⚠ 112 -> 21 (-91), MEASURED (local probe, 11-17: the 336 mode-0 sweep
+    # files + the 12 run_pit_clk arms, read name by name; Wilson accepted
+    # 11-17): total 1144, uncovered 21. The latch-store and shared-tree points
+    # above are gone from the build. The 21 left: wraddr_bk bits 0,1,9,10,18,
+    # 19,27,28, both edges (16); g_mem.fw_q both edges (2, the write-buffer
+    # forwarding OWED at L455); g_mem.pa[7] both edges (2, the peek of a
+    # buffered row OWED at L498); g_mem.rst_seen 1->0 (1, sim-only, rises once).
+    "src/pe_store.v": 21,         # 11-17 measured: wraddr_bk 16; fw_q 2 (OWED L455); pa[7] 2 (OWED L498); rst_seen 1 (sim-only)
     # ⚠ 186 -> 187: e_wraddr_bk's same 16 dark points (bits 0,1 of each
     # bank's copy, +12 over e_wraddr's 4); the old ceiling sat ~11 above
     # its measured count, so the rise reads as +1.
@@ -933,27 +815,6 @@ ANCHOR_TEXT.update({
     ('src/pe_store.v', 477): "always @(posedge clk) if (rst_seen && rst_n === 1'b1 && wre === 1'b1 && (wr === 1'b1 || re === 1'b1 || (pw === 1'b1 && pa[AWW-1] !== 1'b1))) begin",
     ('src/pe_store.v', 484): "always @(posedge clk) if (rst_seen && rst_n === 1'b1 && (wr === 1'b1 || bwe === 1'b1) && pw === 1'b1 && rd_now === 1'b1) begin",
     ('src/pe_store.v', 498): "if (pw && pa == {{(AWW-(AW-WB_W)){1'b0}}, a[AW-1:WB_W]}) wd = (wd & ~pbm) | (pd & pbm);",
-    ('src/project.v', 1725): 'if (ck_pass) begin',
-    ('src/project.v', 1726): "if (k_cnt && (k_nr || k_rise)) ck_dr <= 1'b1;",
-    ('src/project.v', 1727): "if (k_cnt && (k_nf || k_fall)) ck_df <= 1'b1;",
-    ('src/project.v', 1728): "if (k_rise && k_nd) ck_dr <= 1'b1;",
-    ('src/project.v', 1729): "if (k_fall && k_nd) ck_df <= 1'b1;",
-    ('src/project.v', 1730): "if (k_cnt) begin if (cl) ck_sn1 <= 1'b1; else ck_sn0 <= 1'b1; end",
-    ('src/project.v', 1731): 'if (k_fe && k_fl == ck_act) begin',
-    ('src/project.v', 1733): 'if (cl ^ ce) ck_ch <= ck_ch + ONE;',
-    ('src/project.v', 2046): "ck_why <= k_seen ? 4'd7 : 4'd6;                   // no frame markers / no data wire",
-    ('src/project.v', 2050): "else if (!k_dsync) di <= di + 4'd1;",
-    ('src/project.v', 2059): "P_KC1:  if (k_maybe && !sig_ok) begin di <= di + 4'd1; ph <= P_KSEL; end",
-    ('src/project.v', 2062): "if (!ck_i2c && k_hi8 >= k_nc7) ck_act <= 1'b1;",
-    ('src/project.v', 2063): "else if (!ck_i2c && k_lo8 >= k_nc7) ck_act <= 1'b0;",
-    ('src/project.v', 2064): 'if (!ck_i2c && k_hi8 < k_nc7 && k_lo8 < k_nc7) begin    // CS level unclear',
-    ('src/project.v', 2070): 'P_KC2:  begin',
-    ('src/project.v', 2072): "if (k_cr && !k_cf) ck_edge <= 1'b1;",
-    ('src/project.v', 2073): "else if (k_cf && !k_cr) ck_edge <= 1'b0;",
-    ('src/project.v', 2077): 'else if (k_cr && k_cf && (ck_sn0 ^ ck_sn1)) ck_edge <= ck_sn0;',
-    ('src/project.v', 2080): "ck_why <= (k_cr && k_cf) ? 4'd10 : 4'd9;",
-    ('src/project.v', 2084): "P_KCAP: if (ck_done) begin ck_ok <= 1'b1; ph <= P_KFIN; end",
-    ('src/project.v', 2088): "if (ck_ok) begin we0 <= 1'b1; waddr0 <= 9'd3; wdata0 <= k_desc; end",
     ('src/project.v', 2794): 'if (x_iv != OVF) begin',
     ('src/project.v', 2801): "if (x_iv == OVF && div_ip) begin x_v <= 1'b0; hold <= 1'b0; end     // stage 1: data excludes OVF",
     ('src/project.v', 2802): "else if (x_iv == OVF && st == S_REF2) begin x_v <= 1'b0; hold <= 1'b0; end",
@@ -972,7 +833,6 @@ ANCHOR_TEXT.update({
     ('src/project.v', 3123): "T_XE:  begin `S3_X <= al[25] ? {25{1'b1}} : al[24:0]; `S3_MBYTE <= 1'b0; `T3((T_LQ1)); end",
     ('src/project.v', 3127): 'if (`S3_OPEN) begin',
     ('src/project.v', 3129): "if (s3_nmsg != 8'hFF) s3_nmsg <= s3_nmsg + 8'd1;",
-    ('src/project.v', 3138): "if (ck_ok) begin s3_found <= 1'b1; w <= ck_w; `S3_WP <= ck_wp; s3_nmsg <= ck_nmsg; end",
     ('src/project.v', 3294): "if (s3_found && !s3_fbs) s3_why <= (g_skip && !g_try) ? 4'd2 : 4'd3;",
     ('src/project.v', 3314): 'if (`P_LC <= p_nb) `T3((P_E0));                       // no data bits: not a length',
     ('src/project.v', 3381): "P_V2:   if (`P_A != 33'd0) begin `T3((P_F)); s3_why <= 4'd5; end",
@@ -981,26 +841,7 @@ ANCHOR_TEXT.update({
     ('src/project.v', 3460): "if (s12_rst_seen && rst_n === 1'b1 && run && st == S_S3 && f3[F_DV] && p_lt_div !== ((p_ri ^ p_d) < p_ri)) begin",
     ('src/project.v', 3466): "if (s12_rst_seen && rst_n === 1'b1 && run && st == S_S3 && p_lt_s0 !== (`P_A < `P_B)) begin",
     ('src/project.v', 3471): 'if (u_ops_a.PA_SHX != PA_SHX || u_ops_a.PA_SH != PA_SH || u_ops_a.PA_XB != PA_XB ||',
-    ('src/project.v', 3835): 'wire        s_close = ck_i2c ? s_ev : (s_fch & (uio[ck_f] != s_actv));',
-    ('src/project.v', 3836): 'wire        s_openv = ck_i2c ? (s_ev & ~uio[ck_d]) : (s_fch & (uio[ck_f] == s_actv));',
-    ('src/project.v', 3843): 'wire        s_bit  = ck_i2c ? (~s_ev & s_cch & ~s_cn & s_pv)',
-    ('src/project.v', 3845): 'wire        s_bv   = ck_i2c ? s_pend : prev[ck_d];',
-    ('src/project.v', 3850): "wire [3:0]  s_unit = ck_i2c ? 4'd9 : 4'd8;",
-    ('src/project.v', 3855): "wire [7:0]  s_by_n = (s_nbit < 4'd8) ? {s_byte[6:0], s_bv} : s_byte;",
-    ('src/project.v', 3953): 'if (ck_arm) begin                                  // its cycle 0: prev <= uio above',
-    ('src/project.v', 3957): 'end else if (s_on) begin',
-    ('src/project.v', 3958): 'if (bud_hit || s_full) begin                     // the budget (edges at 2^b unseen) or full',
-    ('src/project.v', 3961): 'if (ck_i2c) begin',
-    ('src/project.v', 3962): "if (s_ev) s_pv <= 1'b0;",
-    ('src/project.v', 3963): "else if (s_cch && s_cn && s_open) begin s_pv <= 1'b1; s_pend <= prev[ck_d]; end",
-    ('src/project.v', 3964): "else if (s_bit) s_pv <= 1'b0;",
-    ('src/project.v', 3966): 'if (s_bit) begin s_nbit <= s_nb_n; s_byte <= s_by_n; end',
-    ('src/project.v', 3967): 'if (s_whole) begin                             // a whole byte -> its slot',
-    ('src/project.v', 3971): 'if (s_close) begin',
-    ('src/project.v', 3973): "if (s_keep) begin                            // the length, into the frame's slot",
-    ('src/project.v', 3976): "if (ck_nmsg != 8'hFF) ck_nmsg <= ck_nmsg + 8'd1;",
-    ('src/project.v', 3979): 'if (s_openv) begin',
-    ('src/project.v', 3980): "s_open <= 1'b1; s_la <= s_keep ? s_end : ck_wp;",
+    ('src/project.v', 4029): "if (ck_nmsg != 8'hFF) ck_nmsg <= ck_nmsg + 8'd1;",
 })
 
 #: ⛔⛔ EVERY COVERAGE FIGURE IS LABELLED WITH THE TOOL THAT MEASURED IT
@@ -1510,8 +1351,92 @@ def check_pinned_tool(label) -> int:
     return 0
 
 
+# ---------------------------------------------------------------------------
+# ⭐⭐ THE POINT LIST BEHIND EACH LIMIT (Wilson 11-18). A limit is a COUNT, and a
+# count cannot say WHICH points it allows: re-basing pe_engine.v's 960 on 11-18
+# meant finding the 11-04 sweep on disk and diffing it name by name. So every
+# limit is now stored WITH its point list, test/coverage_points/<file>.txt, and
+# the gate diffs the measured uncovered points against it:
+#   NEW    uncovered now, not in the list   -> red, named (a regression or
+#          untested new logic -- the list says which)
+#   PAID   in the list, covered (or gone)   -> red, named: remove it, the list
+#          and the limit are set to the MEASURED value (Wilson 11-18), never
+#          left with slack
+#   COUNT  the list's size != the limit     -> red: the two are one record
+# A point is `module signal[bit]:edge`, keyed by NAME, not line: a comment
+# added above a register must not read as a regression. A name occurring more
+# than once (generate copies) is matched by multiplicity.
+# ⇒ Re-base: `python test/gate_coverage.py --write-points <file>` writes the
+#   list from the current data; `--src-root DIR` maps lines to modules with
+#   another checkout's source (the data's own tree).
+# ---------------------------------------------------------------------------
+POINTS_DIR = os.path.join(ROOT, "test", "coverage_points")
+
+
+def points_path(fn):
+    return os.path.join(POINTS_DIR, fn.replace("/", "__") + ".txt")
+
+
+def _module_of_line(src_path):
+    """[module name per line] (index 0 = line 1), from the `module X` lines."""
+    mods, cur = [], "?"
+    with open(src_path, encoding="utf-8", errors="replace") as fh:
+        for ln in fh:
+            m = re.match(r"\s*module\s+(\w+)", ln)
+            if m:
+                cur = m.group(1)
+            mods.append(cur)
+    return mods
+
+
+def uncovered_points(agg, fn, src_root=None):
+    """Counter of 'module point' for the uncovered toggle points of `fn`."""
+    mods = _module_of_line(os.path.join(src_root or ROOT, fn))
+    out = collections.Counter()
+    for key, c in agg.items():
+        if key[0] != fn or key[2] != "v_toggle" or c != 0:
+            continue
+        md = mods[key[1] - 1] if 0 < key[1] <= len(mods) else "?"
+        out["%s %s" % (md, key[3])] += 1
+    return out
+
+
+def read_points(path):
+    """Counter, or None when the file is absent. Lines: `<n> <module> <point>`."""
+    if not os.path.isfile(path):
+        return None
+    out = collections.Counter()
+    with open(path, encoding="utf-8") as fh:
+        for ln in fh:
+            ln = ln.strip()
+            if not ln or ln.startswith("#"):
+                continue
+            n, rest = ln.split(" ", 1)
+            out[rest] += int(n)
+    return out
+
+
+def write_points(path, cnt, header):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8", newline="\n") as fh:
+        for h in header:
+            fh.write("# %s\n" % h)
+        for k in sorted(cnt):
+            fh.write("%d %s\n" % (cnt[k], k))
+
+
+def point_list_problems(measured, stored, limit):
+    """[(kind, point, n)]: NEW / PAID point by point, COUNT if list != limit."""
+    probs = [("NEW", k, n) for k, n in sorted((measured - stored).items())]
+    probs += [("PAID", k, n) for k, n in sorted((stored - measured).items())]
+    if sum(stored.values()) != limit:
+        probs.append(("COUNT", "list %d vs limit %d" % (sum(stored.values()), limit), 0))
+    return probs
+
+
 def check_toggle(agg) -> int:
-    """Toggle coverage is ratcheted per file: the ceiling may only fall."""
+    """Toggle coverage per file: the count against its limit, and the uncovered
+    points against the limit's stored point list (Wilson 11-18)."""
     rc = 0
     print()
     print("  --- toggle, against the declared ceiling ---")
@@ -1547,6 +1472,31 @@ def check_toggle(agg) -> int:
         print("        A ceiling for a file the sweep does not cover is a")
         print("        number that can never be checked.")
         rc = 1
+    print()
+    print("  --- toggle, against each limit's stored point list (Wilson 11-18) ---")
+    for fn in sorted(TOGGLE_CEILING):
+        if fn not in tot:
+            continue
+        stored = read_points(points_path(fn))
+        if stored is None:
+            print("    %-20s *** NO POINT LIST STORED (%s)"
+                  % (fn, os.path.relpath(points_path(fn), ROOT)))
+            print("        A limit without its list cannot say which points it allows.")
+            rc = 1
+            continue
+        probs = point_list_problems(uncovered_points(agg, fn), stored, TOGGLE_CEILING[fn])
+        if not probs:
+            print("    %-20s ok (%d points, list == measured)" % (fn, sum(stored.values())))
+            continue
+        rc = 1
+        kinds = collections.Counter(k for k, _p, _n in probs)
+        print("    %-20s *** %s" % (fn, ", ".join("%s %d" % kv for kv in sorted(kinds.items()))))
+        for kind in ("NEW", "PAID", "COUNT"):
+            rows = [(p, n) for k, p, n in probs if k == kind]
+            for p, n in rows[:25]:
+                print("        %-5s %s%s" % (kind, p, " x%d" % n if n > 1 else ""))
+            if len(rows) > 25:
+                print("        ... and %d more %s" % (len(rows) - 25, kind))
     return rc
 
 
@@ -1906,6 +1856,22 @@ def selftest(agg) -> int:
     for i, got, want in bad:
         print("        %s -> %s, wanted %s" % (i, got, want))
         rc = 1
+    # (2f) ⛔ THE POINT LIST (Wilson 11-18): each of its three failures, planted
+    base = collections.Counter({"m a[0]:0->1": 1, "m a[0]:1->0": 1, "m g[1].b:1->0": 2})
+    for what, meas, lim, want in (
+            ("a newly uncovered point is named NEW",
+             base + collections.Counter({"m c[3]:0->1": 1}), 4, {"NEW"}),
+            ("a list point now covered is named PAID",
+             base - collections.Counter({"m a[0]:0->1": 1}), 4, {"PAID"}),
+            ("one generate copy lost of two is PAID",
+             base - collections.Counter({"m g[1].b:1->0": 1}), 4, {"PAID"}),
+            ("a list whose size is not the limit is COUNT", base, 5, {"COUNT"}),
+            ("control: list == measured == limit", base, 4, set())):
+        got = {k for k, _p, _n in point_list_problems(meas, base, lim)}
+        ok = got == want
+        print("    %-52s %s" % (what, "ok" if ok else "*** got %s" % sorted(got)))
+        if not ok:
+            rc = 1
     # (3) a short reason
     # ⛔ HOLLOW UNTIL 10-22 (must-fire audit): this checked len("because.") < 60
     # inline. It now runs the gate's own rule set on the probe.
@@ -1952,7 +1918,37 @@ def selftest(agg) -> int:
     return rc
 
 
+def write_points_main(argv) -> int:
+    """--write-points <file> [--src-root DIR]: the list for <file> from DAT."""
+    fn = argv[argv.index("--write-points") + 1]
+    src_root = argv[argv.index("--src-root") + 1] if "--src-root" in argv else None
+    agg, _n = parse(DAT)
+    if agg is None:
+        print("*** no coverage data at %s" % DAT)
+        return 1
+    if not any(k[0] == fn and k[2] == "v_toggle" for k in agg):
+        print("*** %s has no toggle points in %s" % (fn, DAT))
+        return 1
+    cnt = uncovered_points(agg, fn, src_root)
+    env = os.path.join(os.path.dirname(DAT), "sweep_env.txt")
+    tool = "unrecorded"
+    if os.path.isfile(env):
+        with open(env, encoding="utf-8", errors="replace") as fh:
+            tool = next((t.strip() for t in fh if t.strip().startswith("Verilator ")), tool)
+    write_points(points_path(fn), cnt, [
+        "uncovered toggle points of %s: %d -- the list behind its TOGGLE_CEILING" % (fn, sum(cnt.values())),
+        "data: %s" % DAT.replace("\\", "/"),
+        "tool: %s" % tool,
+        "lines -> modules from: %s" % (src_root or "this checkout").replace("\\", "/"),
+        "format: <count> <module> <signal[bit]:edge>; written by gate_coverage.py --write-points"])
+    print("wrote %s: %d points (%d distinct)" % (os.path.relpath(points_path(fn), ROOT),
+                                                sum(cnt.values()), len(cnt)))
+    return 0
+
+
 def main() -> int:
+    if "--write-points" in sys.argv:
+        return write_points_main(sys.argv)
     print()
     print("=" * 78)
     print("COVERAGE GATE -- no uncovered RTL point outside a written reason")

@@ -24,6 +24,20 @@ The ok arm also asserts the boot load EXACTLY: PE_STORE_BYTES written, and the
 chip's verdict store_full=1, bad_magic=0, short=0, CONFIG_ERR=0.
 POSITIVE TOKEN: `FPGA-LOADER: PASSED` only on the success path.
 Usage: python fpga/sim/run_fpga_loader.py
+
+⭐ THE ENGINE IS VERILATOR (Wilson 11-15 meta-slow ruling, done 11-16). The identity check
+(11-16): the four scenarios' transcripts identical on iverilog and Verilator 5.053, line for
+line; Verilator runs each in ~26 s against ~940 s on iverilog. PE_SIM still overrides
+(PE_SIM=iverilog runs the old engine). iverilog stays as the SECOND-SIMULATOR check in the
+full gate run: fpga/sim/run_fpga_loader_xsim.py (CI's fpga shard; not pre-push), which runs
+all four on both and is red on any difference.
+
+TIMEOUTS, from the 11-16 measurement (four scenarios in parallel; R:/claude_scratch/s12c):
+  Verilator  build <= 17.1 s (peak 330 MB), run <= 25.8 s  -> VL_BUILD_S 300, VL_RUN_S 300
+                                                              (margin >= 11x on each)
+  iverilog   run <= 941 s (4 in parallel, 48 MB)           -> IV_RUN_S 1800 (margin 1.9x)
+A timeout raises and the gate is red. (Through WSL a killed wsl.exe may leave its Linux
+child running; the gate still goes red.)
 """
 import concurrent.futures as cf
 import os
@@ -38,8 +52,11 @@ from toolchain import banner, tool          # noqa: E402
 import sim_run                               # noqa: E402
 import pe_isa                                # noqa: E402  STORE_BYTES, HDR_REGION (F1.5)
 sys.path.insert(0, HERE)
+os.environ.setdefault("PE_SIM", "verilator")   # the engine of record (11-16); PE_SIM overrides
 import fpga_engine                           # noqa: E402  PE_SIM=verilator (Wilson 11-10)
 
+#: per-step timeouts, seconds, from the 11-16 measurement (see the docstring)
+VL_BUILD_S, VL_RUN_S, IV_RUN_S = 300, 300, 1800
 #: this runner's scratch-image generator id (test/sim_run.py SCRATCH_GENERATORS)
 GEN = "run_fpga_loader"
 
@@ -64,9 +81,9 @@ def rel(p):
     return os.path.relpath(p, ROOT).replace(os.sep, "/")
 
 
-def run(cmd):
+def run(cmd, timeout=None):
     return subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True,
-                          encoding="utf-8", errors="replace")
+                          encoding="utf-8", errors="replace", timeout=timeout)
 
 
 def sim(name, extra_images=(), **params):
@@ -84,9 +101,10 @@ def sim(name, extra_images=(), **params):
             subs.append(("fpga/sim/tb_fpga_loader.v", '.IMG("%s")' % LOADER_IMGS[0],
                          ".IMG(%s)" % prm.pop("IMG")))
         b = fpga_engine.vl_build("tb_fpga_loader", SRCS,
-                                 {"dut." + k: v for k, v in prm.items()}, subs)
+                                 {"dut." + k: v for k, v in prm.items()}, subs,
+                                 timeout=VL_BUILD_S)
         log = os.path.join(TMP, "vl_%s.log" % name)
-        fpga_engine.vl_run(b, images, log)
+        fpga_engine.vl_run(b, images, log, timeout=VL_RUN_S)
         return open(log, encoding="utf-8", errors="replace").read()
     vvp = os.path.join(TMP, "tb_%s.vvp" % name)
     extra, roots = [], ["-s", "tb_fpga_loader"]
@@ -102,7 +120,7 @@ def sim(name, extra_images=(), **params):
     if b.returncode:
         raise SystemExit("*** build failed (%s)\n%s%s"
                          % (name, b.stdout, b.stderr))
-    r = run(sim_run.vvp([rel(vvp)], images=images))
+    r = run(sim_run.vvp([rel(vvp)], images=images), timeout=IV_RUN_S)
     return r.stdout + r.stderr
 
 
@@ -119,13 +137,10 @@ def verdict(txt):
     return ok, fails
 
 
-def main():
-    print("FPGA PC-UART loader -- simulation (tb_fpga_loader)")
-    banner("iverilog", "vvp")
-    fpga_engine.banner_line()
+def run_scenarios():
+    """{scenario: transcript} -- the four scenarios on the engine in force (fpga_engine.SIM),
+    in parallel. Shared with run_fpga_loader_xsim.py, which calls it once per engine."""
     os.makedirs(TMP, exist_ok=True)
-    rc = 0
-
     # ⛔ F1.5 (Wilson 11-09): THE CHIP'S OWN LOAD CHECKS, ON THE BOARD PATH --
     # the magic must-fire's image (byte HDR_REGION flipped), written first
     bad = os.path.join(TMP, "ldmf_badmagic.hex")
@@ -144,6 +159,17 @@ def main():
     with cf.ThreadPoolExecutor(max_workers=len(runs)) as ex:
         fut = {n: ex.submit(sim, n, extra_images=e, **p) for n, (e, p) in runs.items()}
         out = {n: f.result() for n, f in fut.items()}
+    return out
+
+
+def main():
+    print("FPGA PC-UART loader -- simulation (tb_fpga_loader)")
+    banner("iverilog", "vvp")
+    fpga_engine.banner_line()
+    os.makedirs(TMP, exist_ok=True)
+    rc = 0
+
+    out = run_scenarios()
 
     txt = out["ok"]
     ok, fails = verdict(txt)

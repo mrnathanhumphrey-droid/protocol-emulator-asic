@@ -90,6 +90,9 @@ KILLERS = {
     "M_CK_NO_REFUSE": "test/run_pit_clk.py",
     "M_CK_WHY_SWAP": "test/run_pit_clk.py",
     "M_CK_CPOL_INV": "test/run_pit_clk.py",
+    # a second SNIFF run without a reset (Wilson 11-17): st_done left set across
+    # !run -- killed by pit-clk's two-run checks (store and table cycle)
+    "M_PIT_STALE_DONE": "test/run_pit_clk.py",
     "M_PIT_K_OFF1": "test/run_pit_capture.py", "M_PIT_MASK_DROP": "test/run_pit_capture.py",
     "M_PIT_NO_OVERRUN": "test/run_pit_capture.py", "M_PIT_WHY_DROP": "test/run_pit_capture.py",
     "M_PIT_NO_SAT": "test/run_pit_capture.py",

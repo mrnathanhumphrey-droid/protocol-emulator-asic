@@ -33,6 +33,7 @@ prepush model/gate_lane_cert.py
 prepush model/gate_live_price.py
 prepush model/gate_uart_spacing.py
 prepush model/gate_spi_premise.py
+prepush model/b6_slack.py
 prepush model/gate_lean_anchors.py
 prepush model/gen_op_reads.py
 prepush model/gate_sim_runs.py
@@ -62,9 +63,10 @@ ci-only test/run_ckack.py shard sim2: simulations + kill audit, ~610 s in CI
 ci-only test/run_i2c.py shard sim2: simulations + kill audit, ~610 s in CI
 ci-only test/run_recert.py shard sim2: simulations + kill audit, ~610 s in CI
 ci-only test/run_hold_rule.py shard sim2: simulations + kill audit, ~610 s in CI
-ci-only model/gate_slang_lint.py RED-AT-ORIGIN (1eee995): ArithOpMismatch x4, pinned at 2; owner agent 1
+ci-only model/gate_slang_lint.py RED-AT-ORIGIN (1eee995): ArithOpMismatch x4, pinned at 2; owner agent 1; clears: the W1 lint item (V2_MASTER_LIST)
 ci-only test/gate_fpga_synth.py three yosys synth_xilinx runs (CI's FPGA toolchain)
 ci-only fpga/sim/run_fpga_loader.py shard fpga: the three FPGA board simulations
+ci-only fpga/sim/run_fpga_loader_xsim.py shard fpga: the loader's second-simulator check (iverilog ~940 s), full run only (Wilson 11-15)
 ci-only fpga/sim/run_fpga_onewire.py shard fpga: the three FPGA board simulations
 ci-only fpga/sim/run_fpga_i2c.py shard fpga: the three FPGA board simulations
 prepush model/gate_store_size_literals.py
@@ -77,7 +79,7 @@ ci-only test/run_wirefeed_mf.py shard uart: UART simulations, ~1060 s in CI
 ci-only test/run_uarttx.py shard uart: UART simulations, ~1060 s in CI
 ci-only test/run_reload.py shard uart: UART simulations, ~1060 s in CI
 ci-only model/gate_halt_reset.py needs the yosys netlist (PE_NETLIST_JSON), built by CI's netlist step
-ci-only model/gate_runner_registry.py RED-AT-ORIGIN (1eee995): bench runners with undeclared resources/registry (run_usbaddr wsl; now run_fpga_usb); owner agent 1
+ci-only model/gate_runner_registry.py RED-AT-ORIGIN (1eee995): bench runners with undeclared resources/registry (run_usbaddr wsl; now run_fpga_usb); owner agent 1; clears: declaring run_usbaddr / run_fpga_usb resources in the runner registry
 ci-only test/run_v2window.py shard uart: UART simulations, ~1060 s in CI
 ci-only model/gate_v2_equiv.py shard sim2: simulations + kill audit, ~610 s in CI
 ci-only test/run_pit_capture.py shard sim2: simulations + kill audit, ~610 s in CI
@@ -105,7 +107,7 @@ prepush model/gate_count_ranges.py
 prepush model/gate_ce5_freeze.py
 prepush model/gate_harden_record.py
 prepush model/gate_phase_coverage.py
-ci-only model/gate_ln1_record.py RED-AT-ORIGIN (1eee995): LN1 record inputs changed -- re-dispatch the 200k run (CI workflow_dispatch); owner agent 1
+ci-only model/gate_ln1_record.py RED-AT-ORIGIN (1eee995): LN1 record inputs changed -- re-dispatch the 200k run (CI workflow_dispatch); owner agent 1; clears: the LN1 200k re-dispatch once GitHub is restored
 prepush model/gate_a2_record.py
 ci-only test/run_onewire.py shard sim1: simulations, ~820 s in CI
 ci-only test/run_mutants.py shard sim2: simulations + kill audit, ~610 s in CI
@@ -127,11 +129,11 @@ prepush model/gate_pin_matrix.py
 prepush model/gate_i2c_order.py
 ci-only model/gate_store_full.py shard cov: the coverage sweep + CI-built measurements (coverage/phases/refill/a2/store), ~1790 s in CI
 prepush model/gate_program_index.py
-ci-only model/part1_param_contract.py RED-AT-ORIGIN (1eee995): protocol constants in the RTL -- the part1-params item; owner agent 1
+ci-only model/part1_param_contract.py RED-AT-ORIGIN (1eee995): protocol constants in the RTL -- the part1-params item; owner agent 1; clears: the part1-params item (V2_MASTER_LIST)
 prepush test/gl_harness_check.py
 prepush test/check_vectors.py
 prepush test/benchset.py
-ci-only test/gate_coverage.py shard cov: the coverage sweep + CI-built measurements (coverage/phases/refill/a2/store), ~1790 s in CI
+ci-only test/gate_coverage.py RED-AT-ORIGIN (fdb3074): toggle limits behind logic added since 11-04; classification in progress (Wilson 11-18; measured on the pinned 5.053 sweep: pe_engine.v 1154 / 960, project.v 1833 / 1725); shard cov, ~1790 s in CI; owner agent 1; clears: the 11-18 toggle classification and the re-based limits for pe_engine.v and project.v
 prepush model/pe_asm.py
 ci-only model/gate_lean_build.py shard lean: the Lean proofs (lake build, elan in CI's leg)
 ci-only model/gate_meta.py shard cov: the coverage sweep + CI-built measurements (coverage/phases/refill/a2/store), ~1790 s in CI

@@ -1,4 +1,15 @@
-"""SELECT COPIES: the per-group select copies survive LibreLane's own synthesis (Wilson 11-12, option b).
+"""SELECT COPIES: b6's measured slack, and the per-group select copies REPORTED (Wilson 11-12, option b;
+re-based 11-15 / 11-16 on b6's measured slack, option (b) of the select-copies ruling).
+
+⭐ THE PASS CONDITION (Wilson 11-16): b6's slow-corner slack, measured in the post-route STA of the
+configuration of record, is at least model/b6_slack.THRESHOLD_NS (1.5 ns) on every run of the
+spread that reached STA -- model/b6_slack.json, generated from the runs' reports and TIED to the
+configuration it was measured on (any config key moved / added -> STALE, red). The merged count
+below is a REPORTED number: "merged = 0" was established on DELAY 4 and CI measures 2 under
+AREA 0, and the copies existed only to protect b6. The nokeep arm still has to merge (the walk is
+real), and every structural judge failure (groups not found, start net missing) stays red.
+
+(The history, kept:)
 
 ⛔⛔ WHY. The s12 swap step drives three register groups -- A = acc,
 B = dv_r / dv_q, D = dv_d -- from one compare. b6's slow-corner path ran
@@ -55,8 +66,6 @@ ROOT = os.path.dirname(HERE)
 
 START = "u_s0.u_s12.acc[13]"
 DEPTH = 6
-#: the configuration merged = 0 was ESTABLISHED under (model/config_tie.py; Wilson 11-15)
-ESTABLISHED_UNDER = {"SYNTH_STRATEGY": "DELAY 4"}
 GROUPS = (("A", r"u_s0\.u_s12\.acc\["), ("B", r"u_s0\.u_s12\.dv_[rq]\["), ("D", r"u_s0\.u_s12\.dv_d\["))
 #: group flops found 11-12: A 75, B 53, D 23. Floors well under, so an RTL
 #: change that renames or drops a group reads red rather than vacuously green.
@@ -371,15 +380,24 @@ def main():
         rc |= 0 if red else 1
     print("  control:   %-40s %s" % ("one select net per group", "green ok" if control else "*** RED"))
     rc |= 0 if control else 1
-    # ⛔ THE CONFIG TIE (Wilson 11-15, model/config_tie.py): merged = 0 was ESTABLISHED on
-    # SYNTH_STRATEGY "DELAY 4"; the configuration of record is "AREA 0" since 9c0df0c, where
-    # CI measures merged = 2. STALE (red) until the expectation is re-established on the
-    # configuration of record -- the ruling re-bases it on b6's measured slack (item 1).
+    # ⭐ THE PASS CONDITION (Wilson 11-16, option (b)): b6's MEASURED slack on the configuration
+    # of record, from the generated record, tied to that configuration (da001d8's mechanism)
     import config_tie as CT
+    import b6_slack as B6
     for label, ok_ in CT.self_test():
         print("  must-fire: config tie -- %-27s %s" % (label, "ok" if ok_ else "*** MISSED"))
         rc |= 0 if ok_ else 1
-    for p in CT.tie_problems(ESTABLISHED_UNDER):
+    for label, ok_ in B6.self_test():
+        print("  must-fire: b6 slack -- %-28s %s" % (label, "ok" if ok_ else "*** MISSED"))
+        rc |= 0 if ok_ else 1
+    rec = B6.load()
+    print("  --- b6 slack (slow corner, >= %.1f ns; model/b6_slack.json, measured at %s) ---"
+          % (B6.THRESHOLD_NS, rec.get("commit")))
+    for name, r in sorted((rec.get("runs") or {}).items()):
+        print("  %-22s coef %-6s %s" % (name, r.get("coef"), "  ".join(
+            "%s %s%+.3f" % (n.split(".")[-1], ">= " if v[1] == "ge" else "", v[0])
+            for n, v in sorted((r.get("slack_ns") or {}).items()) if v and v[0] is not None)))
+    for p in B6.problems(rec):
         print("  *** %s" % p)
         rc = 1
     text = open(os.path.join(ROOT, "src", "project.v"), encoding="utf-8").read()
@@ -404,8 +422,10 @@ def main():
             continue
         probs, info = judge(nl, top)
         merged = len(info.get("merged", []))
+        # the merged count is REPORTED (Wilson 11-16); only a structural failure is red
+        structural = [p for p in probs if "reach all of A, B, D" not in p]
         if expect == "PASS":
-            ok = not probs
+            ok = not structural
         else:   # red for its OWN reason: the walk is real and the copies merged
             ok = merged > 0 and stripped == len(KEPT)
         print("  %-7s %-4s groups A %d / B %d / D %d, cone %d, merged %d, keep_hierarchy stripped %d  [%s]  %s"
@@ -413,7 +433,7 @@ def main():
                  info.get("groups", {}).get("D", 0), info.get("cone", 0), merged, stripped, note,
                  "ok" if ok else "***"))
         for p in probs[:3]:
-            print("      %s %s" % ("***" if expect == "PASS" else "|", p))
+            print("      %s %s" % ("***" if (expect == "PASS" and p in structural) else "|", p))
         rc |= 0 if ok else 1
     print("\n  GATE select-copies: %s" % ("PASSED" if rc == 0 else "FAILED"))
     return rc
