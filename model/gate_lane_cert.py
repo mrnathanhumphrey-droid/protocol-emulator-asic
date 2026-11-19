@@ -54,11 +54,15 @@ every must-fire must turn its check red, or the gate is not testing what it says
            (Buf.p1b2_margin_timeout_scan), tested directly (Wilson 11-17): L passed in, for
            L = 0 and L = 5 the rule drops it at T = FILL + L - 1 and keeps it at FILL + L; end
            to end, spacing 60 / T 35 certifies and the certificate loop called the rule
-           (image_budget timeout_rule_calls). Image header through pe_isa.d_fields
+           (image_budget timeout_rule_calls). Image header through pe_isa.d_fields. The rule is
+           tested as it will apply once ft_timeout is proved; while it is owed (Wilson 11-19, the
+           K6 order theorem) the word is never in the certificate's ready set
   M_LC_SLOT_TIMEOUT_OFF  the rule off -> the word stays ready at T = FILL + L - 1 (check 10 red)
-  check 11 a branch at a plain ARM's PC+1: its fall-through PC+2 is ready (d >= 4), its taken
-           target is not -- the buffer fetches ARM + 2 only (Wilson 11-17, rule (1) removed)
+  check 11 a branch at a plain ARM's PC+1: neither its fall-through PC+2 (the requester never
+           fetches behind a held no-prefetch word, BufEng.SReqB, Wilson 11-19) nor its taken
+           target (Wilson 11-17, rule (1) removed) is ready; PC+1 is
   M_LC_SLOT_BRANCH_OFF  the taken target marked ready (check 11 red)
+  M_LC_SLOT_BRPC1_OFF   PC+2 marked ready behind the branch PC+1 (check 11 red)
   check 12 a FALLTHROUGH ARM B at plain ARM A's PC+1: A's slot gives PC+1, PC+2, never PC+3 (A
            fetches two words; Wilson 11-17, rule (2) removed); B's own rule keeps its two words
   M_LC_SLOT_PC3_OFF  A's PC+3 marked ready (check 12 red)
@@ -298,7 +302,7 @@ def check_slot_contend(BB, PC, I):
     for T in (fill + cpl - 1, fill + cpl):
         g, _p, gaps = LC.build(_ft_slot_image(I, T, d1=60), 0, prem, I)
         (a, (c1, _c2)), = LC.ft_paths(g, I).items()
-        rdy = BB.slot_ready(g, I, 2, gaps, k, contend=cpl)
+        rdy = BB.slot_ready(g, I, 2, gaps, k, contend=cpl, statuses=("proved", "owed"))
         tres[T] = c1 in rdy and c1 not in BB.slot_timeout_drop(g, I, rdy, {a: 0}, k, contend=cpl)
     if tres[fill + cpl - 1] or not tres[fill + cpl]:
         probs.append("timeout word at wait %d: T %d %s, T %d %s"
@@ -501,8 +505,10 @@ def check_restart(BB, LC, I, late_edge=0):
 
 
 def check_slot_branch(BB, PC, I):
-    """check 11: a branch at a plain ARM's PC+1 -- its fall-through PC+2 (ARM + 2) is ready at
-    d >= p1b2_plain_min_d, its taken target (word 4) is not (Wilson 11-17, rule (1) removed)"""
+    """check 11: a branch at a plain ARM's PC+1 -- neither its fall-through PC+2 (ARM + 2, even at
+    d >= p1b2_plain_min_d: the requester never fetches behind a held no-prefetch word,
+    BufEng.SReqB, Wilson 11-19) nor its taken target (word 4; Wilson 11-17, rule (1) removed) is
+    ready; PC+1 itself is (pc1_plain)"""
     k = PC.load()
     dmin = k["p1b2_plain_min_d"]
     arm = {"op": I.OP_ARM, "mod": 0, "delay": 0}
@@ -511,9 +517,10 @@ def check_slot_branch(BB, PC, I):
     g = {0: (arm, [1]), 1: (br, [2, 4]), 2: (plain, [3]), 3: (plain, [0]), 4: (plain, [0])}
     gaps = {0: [1], 1: [dmin], 2: [5], 3: [5], 4: [5]}
     r = BB.slot_ready(g, I, 2, gaps, k)
-    ok = 1 in r and 2 in r and 4 not in r
-    return ok, ("branch at PC+1 (d = %d): fall-through PC+2 %s, taken target %s"
-                % (dmin, "ready" if 2 in r else "NOT READY",
+    ok = 1 in r and 2 not in r and 4 not in r
+    return ok, ("branch at PC+1 (d = %d): PC+1 %s, fall-through PC+2 %s, taken target %s"
+                % (dmin, "ready" if 1 in r else "NOT READY",
+                   "not ready" if 2 not in r else "READY",
                    "not ready" if 4 not in r else "READY"))
 
 
@@ -626,12 +633,20 @@ def check_slot_timeout(BB, PC, I):
                 bad.append("T %d: %d FALLTHROUGH ARMs (want 1)" % (T, len(fts)))
                 continue
             (a, (c1, _c2)), = fts.items()
-            ready = BB.slot_ready(g, I, 2, gaps, k)
+            # the premise rule as it will apply once ft_timeout is proved (owed let through)
+            ready = BB.slot_ready(g, I, 2, gaps, k, statuses=("proved", "owed"))
             if c1 not in ready:
                 bad.append("L %d T %d: timeout word %d not in slot_ready before the rule"
                            % (L, T, c1))
                 continue
             res[(L, T)] = c1 not in BB.slot_timeout_drop(g, I, ready, {a: L}, k)
+            # the certificate's ready set holds it only while ft_timeout is proved (Wilson
+            # 11-19: owed until the K6 order theorem)
+            cert_ready = BB.slot_ready(g, I, 2, gaps, k)
+            if (c1 in cert_ready) != (BB.READY_RULES["ft_timeout"]["status"] == "proved"):
+                bad.append("L %d T %d: timeout word %s the certificate's ready set with "
+                           "ft_timeout %s" % (L, T, "in" if c1 in cert_ready else "not in",
+                                              BB.READY_RULES["ft_timeout"]["status"]))
     saved = BB.SLOT
     BB.SLOT = 2
     try:
@@ -861,6 +876,14 @@ def main():
         BB.SLOT_BRANCH_MUT = False
     kills.append(("M_LC_SLOT_BRANCH_OFF", not k11,
                   "a branch PC+1's taken target ready: check 11 red"))
+    BB.SLOT_BRPC1_MUT = True
+    try:
+        k11b, _m = check_slot_branch(BB, PC, I)
+    finally:
+        BB.SLOT_BRPC1_MUT = False
+    kills.append(("M_LC_SLOT_BRPC1_OFF", not k11b,
+                  "PC+2 ready behind a branch PC+1 (a slot fetch past a held branch): "
+                  "check 11 red"))
     # check 12: no PC+3 for ARM A behind a FALLTHROUGH ARM at PC+1 (Wilson 11-17, rule (2))
     ok12, msg12 = check_slot_pc3(BB, PC, I)
     print("  check 12 %s  %s" % ("GREEN" if ok12 else "RED  ", msg12))

@@ -66,6 +66,9 @@ SLOT_BRANCH_MUT = False
 #: must-fire switch (gate_lane_cert M_LC_SLOT_PC3_OFF): a FALLTHROUGH ARM at PC+1 gives ARM A
 #: its PC+3 (ARM A fetches two words: no theorem)
 SLOT_PC3_MUT = False
+#: must-fire switch (gate_lane_cert M_LC_SLOT_BRPC1_OFF): PC+2 marked ready behind a no-prefetch
+#: (branch) PC+1 -- the requester never fetches while one is held (BufEng.SReqB; Wilson 11-19)
+SLOT_BRPC1_MUT = False
 
 
 def slot_timeout_drop(g, I, ready, lat, k=None, contend=0):
@@ -146,11 +149,16 @@ READY_RULES = {
                 "what": "PC+2, PC+1 a plain edge ARM (m1 / m3)"},
     "pc2_plain": {"status": "proved", "theorems": ("Buf.p1b2_margin_plain_scan",
                                                    "ContendB.slot_wait_fcfs_two"),
-                  "what": "PC+2, PC+1 any other word, d >= p1b2_plain_min_d"},
-    "ft_timeout": {"status": "proved", "theorems": ("Buf.p1b2_margin_timeout_scan",
-                                                     "ContendB.slot_wait_fcfs_two"),
+                  "what": "PC+2, PC+1 any other word that is not no-prefetch (a branch PC+1 "
+                          "blocks the second fetch: BufEng.SReqB, Wilson 11-19), "
+                          "d >= p1b2_plain_min_d"},
+    "ft_timeout": {"status": "owed", "theorems": ("OrderB.ft_timeout_order",
+                                                   "Buf.p1b2_margin_timeout_scan",
+                                                   "ContendB.slot_wait_fcfs_two"),
                    "what": "FALLTHROUGH PC+1 (timeout, fetched second); T >= FILL + L "
-                           "checked in _image_budget (slot_timeout_drop)"},
+                           "checked in _image_budget (slot_timeout_drop). Owed (Wilson 11-19): "
+                           "fetched behind the edge word, it is not the head on the timeout "
+                           "path until the K6 swap and its order theorem"},
     "ft_edge": {"status": "proved",
                 "theorems": ("Slot.p1b_margin_scan", "FlushKeep.edge_survives_flush",
                              "FlushKill.wfBK_run", "FlushHeld.ft_edge_at_release_armed",
@@ -170,7 +178,7 @@ READY_RULES = {
 REG_LEAK_MUT = False
 
 
-def slot_ready(g, I, depth, gaps, k=None, contend=0):
+def slot_ready(g, I, depth, gaps, k=None, contend=0, statuses=("proved",)):
     """{word}: the words the guaranteed slot makes ready at release on one lane -- the words of
     slot_ready_tagged whose rule is "proved" in READY_RULES (Wilson 11-17: owed and
     counterfactual rules never reach the certificate). PC+2 means the word at ARM + 2 only
@@ -178,10 +186,12 @@ def slot_ready(g, I, depth, gaps, k=None, contend=0):
     FALLTHROUGH PC+1). `gaps`: lane_cert.build's writeback gaps (after any premise gaps), so d is
     the certificate's. `contend`: the port's wait behind older requesters (slot_wait,
     ContendB): a word is ready only while its free-port margin covers it (contend_margin);
-    otherwise it is left to the refill analysis."""
+    otherwise it is left to the refill analysis. `statuses`: the rule statuses let through --
+    ("proved",) for the certificate; a check may add "owed" to test an owed rule's premise as it
+    will apply once proved (gate_lane_cert checks 10 / 14), never for a certificate."""
     out = set()
     for a, w, r in slot_ready_tagged(g, I, depth, gaps, k):
-        if not (REG_LEAK_MUT or READY_RULES[r]["status"] == "proved"):
+        if not (REG_LEAK_MUT or READY_RULES[r]["status"] in statuses):
             continue
         # at a free port each rule's own premise (checked in slot_ready_tagged) is the theorem's;
         # under a wait the margin must cover it
@@ -234,6 +244,12 @@ def slot_ready_tagged(g, I, depth, gaps, k=None):
         for s1 in front:
             for s2 in g[s1][1]:
                 if s2 not in g or (s2 != a + 2 and not (SLOT_BRANCH_MUT or SLOT_PC3_MUT)):
+                    continue
+                # no second fetch behind a no-prefetch (branch) PC+1: BufEng.SReqB never requests
+                # while one is held, and a taken branch would leave PC+2 a wrong-path word
+                # (Wilson 11-19)
+                if (g[s1][0]["op"] in I.BRANCH_OPS
+                        and not (SLOT_BRPC1_MUT or SLOT_BRANCH_MUT)):
                     continue
                 d = gaps[s1][-1] + sum(gaps[s2][:-1])
                 if _plain_edge_arm(g[s1][0], I):
