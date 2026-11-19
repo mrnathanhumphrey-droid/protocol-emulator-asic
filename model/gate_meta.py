@@ -169,6 +169,7 @@ SEAMS = (
     ("test/gate_coverage.py", "gate_coverage.reason_problems", "fast", "REASON"),
     ("test/gate_coverage.py", "gate_coverage.check_pinned_tool_quiet", "fast", "Z"),
     ("test/gate_coverage.py", "gate_coverage.false_gaps", "fast", "E"),
+    ("test/gate_coverage.py", "gate_coverage.point_list_problems", "fast", "E"),
     ("model/pe_asm.py", "pe_asm.check_queue_ownership", "fast", "NORAISE"),
     ("model/pe_asm.py", "pe_asm.check_receive_pin", "fast", "NORAISE"),
     ("model/pe_asm.py", "pe_asm.check_clocked_hold_delay", "fast", "NORAISE"),

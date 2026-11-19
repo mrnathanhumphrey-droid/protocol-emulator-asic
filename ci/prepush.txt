@@ -133,7 +133,7 @@ ci-only model/part1_param_contract.py RED-AT-ORIGIN (1eee995): protocol constant
 prepush test/gl_harness_check.py
 prepush test/check_vectors.py
 prepush test/benchset.py
-ci-only test/gate_coverage.py shard cov: the coverage sweep + CI-built measurements (coverage/phases/refill/a2/store), ~1790 s in CI
+ci-only test/gate_coverage.py RED-AT-ORIGIN (fdb3074): toggle limits behind logic added since 11-04; classification in progress (Wilson 11-18; measured on the pinned 5.053 sweep: pe_engine.v 1154 / 960, project.v 1833 / 1725); shard cov, ~1790 s in CI; owner agent 1; clears: the 11-18 toggle classification and the re-based limits for pe_engine.v and project.v
 prepush model/pe_asm.py
 ci-only model/gate_lean_build.py shard lean: the Lean proofs (lake build, elan in CI's leg)
 ci-only model/gate_meta.py shard cov: the coverage sweep + CI-built measurements (coverage/phases/refill/a2/store), ~1790 s in CI
