@@ -34,3 +34,7 @@ test/artefacts.sha256  text eol=lf
 test/pinmap.vh         text eol=lf
 # the bench-peer T_ext (Wilson 11-19), written LF by `run_arm2.py --write-t-ext`
 model/a2/t_ext_bench.json text eol=lf
+# the certified-budget record and the V3 table, both regenerated LF (gen_branch_budget.py,
+# v3_table.py) -- unpinned, every regeneration showed a line-ending-only diff (11-19)
+model/branch_budget.json  text eol=lf
+test/v3_table.vh          text eol=lf
