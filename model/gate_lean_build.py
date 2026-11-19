@@ -115,7 +115,9 @@ KEY = ("dstar", "dstar29", "dstar39", "dstar39_v2", "dstar39_st", "dstar39_hold"
        # the restart's 1 (the start's refill timed from the start cycle); GapRunB's two
        # theorems are its instances along runB (trajY_runB, cntT_runB, chargeSumT_runB)
        "rdT_eq", "ts_gapT", "pb_defer_gT", "pending_startT", "pending_bound_gapT",
-       "head_late_gapT", "trajY_runB", "cntT_runB", "chargeSumT_runB")
+       "head_late_gapT", "trajY_runB", "cntT_runB", "chargeSumT_runB",
+       # RestartB.lean (Wilson 11-18, step 3c): runBK between y's flushes is a trajectory
+       "agree_stepBKK", "trajY_runBK", "wfB_runBK")
 #: proof_constants.load() key -> the Lean expression that must evaluate to it (SPEC: the map)
 CONSTS = {
     "lemmaA_window": "LEMMA_A_WINDOW", "R_base": "R_BASE", "dispatch_cycles": "DISPATCH_CYCLES",
