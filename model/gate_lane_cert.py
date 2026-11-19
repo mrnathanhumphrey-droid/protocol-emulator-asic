@@ -96,6 +96,14 @@ every must-fire must turn its check red, or the gate is not testing what it says
            (usbdev_dev lanes 1-4); every proved rule's theorems are at the Lean gate; EDF on a
            flushed lane is owed and refused by the certificate
   M_LC_RRULE_FLUSH_OFF  a flushed lane's R cited as unflushed (check 19 red)
+  check 20 the restart's start conditions (RestartB.restart_runBK -> GapRunT, step 3d): at every
+           FALLTHROUGH ARM of every certified image -- the image universe slot off and at slot 2,
+           and check 10's image at slot 2 (edge word ready) -- Z[c2] >= DSTAR + B - 1 and
+           lat[c3] + gp[c2] >= HEAD_SLACK + B - 1 (lane_cert.restart_margins: the word after the
+           edge word covers a refill timed from the flush); at least one USB-lane row and one
+           generic row with the edge word ready. The certificate does not enforce this itself:
+           an edge late after its release certifies with hZS0 short (11-18: +100 -> -5)
+  M_LC_RESTART_LATE_EDGE  every FALLTHROUGH edge 100 cycles after its release (check 20 red)
   M_LC_FT_UNSEEN    no ARM read as FALLTHROUGH                    -> check 3 red
   M_LC_FT_NOFLOOR   no lateness floor after the flush             -> check 3 red
 Static, < 2 s. Usage: python model/gate_lane_cert.py [dir holding usbdev.py]
@@ -433,6 +441,63 @@ def check_r_rules(BB, LC):
         and not missing
     return ok, ("ft_race lane 0: %s / %s%s; %s lanes 1-4: %s; theorems not at the Lean gate: %s"
                 % (rw, re_, " (owed)" if owed_ok else "", DISARM_IMAGE, rl, missing or "none"))
+
+
+def check_restart(BB, LC, I, late_edge=0):
+    """check 20 (step 3d, 11-18): the restart's start conditions hold at every FALLTHROUGH ARM of
+    every certified image (lane_cert.restart_margins: hZS0, hHS0 >= 0) -- the record's image
+    universe with the slot off and at slot 2, and check 10's generic-lane image at slot 2 (its
+    edge word ready). Non-vacuous: at least one USB-lane row (rbase 2) and one generic-lane row
+    with the edge word ready. `late_edge` (the must-fire): every FALLTHROUGH ARM's edge that many
+    cycles after its release."""
+    import gen_branch_budget as GB
+    orig = LC.certificate
+    rows = []
+
+    def spy(g, preds, gaps, k, B, tail, iters=200, floor=None, xr=None, rbase=2, ready=None):
+        if late_edge:
+            fts = LC.ft_paths(g, I)
+            gaps = {w: (v[:-1] + [v[-1] + late_edge] if w in fts else v) for w, v in gaps.items()}
+        r = orig(g, preds, gaps, k, B, tail, iters=iters, floor=floor, xr=xr, rbase=rbase,
+                 ready=ready)
+        if r is not None:
+            for a, c2, mz, mh in LC.restart_margins(g, preds, gaps, k, B, r):
+                rows.append({"ctx": CTX[0], "rbase": rbase, "a": a, "ready": bool(ready and c2 in
+                             ready), "mz": mz, "mh": mh})
+        return r
+    CTX = [None]
+    saved = BB.SLOT
+    keep = []
+    LC.certificate = spy
+    try:
+        T, d1 = TIMEOUT_E2E
+        cases = [("%s (slot %s)" % (n, s), s, img) for s in (None, 2) for n, img in GB.corpus()]
+        cases.append(("check 10's image (slot 2)", 2, _ft_slot_image(I, T, d1=d1)))
+        for name, slot, img in cases:
+            BB.SLOT = slot
+            CTX[0] = name
+            n0 = len(rows)
+            if BB._image_budget(img)["B"] is not None:
+                keep.extend(rows[n0:])
+    finally:
+        LC.certificate = orig
+        BB.SLOT = saved
+    # the last fixpoint per (image, lane, ARM) is the certified one
+    last = {}
+    for r in keep:
+        last[(r["ctx"], r["rbase"], r["a"])] = r
+    rs = list(last.values())
+    bad = ["%s a %d: hZS0 %+d hHS0 %s" % (r["ctx"], r["a"], r["mz"], r["mh"]) for r in rs
+           if r["mz"] < 0 or (r["mh"] is not None and r["mh"] < 0)]
+    usb = [r for r in rs if r["rbase"] == 2]
+    gen = [r for r in rs if r["rbase"] != 2 and r["ready"]]
+    mz = min([r["mz"] for r in rs] or [None])
+    mh = min([r["mh"] for r in rs if r["mh"] is not None] or [None])
+    ok = bool(usb) and bool(gen) and not bad
+    return ok, ("%d FALLTHROUGH ARM(s) on certified images (%d USB lane, %d generic with the edge "
+                "word ready): least margin hZS0 %s, hHS0 %s%s"
+                % (len(rs), len(usb), len(gen), mz, mh,
+                   "" if not bad else "; SHORT: " + "; ".join(bad[:3])))
 
 
 def check_slot_branch(BB, PC, I):
@@ -884,6 +949,12 @@ def main():
         BB.RRULE_MUT = False
     kills.append(("M_LC_RRULE_FLUSH_OFF", not k19,
                   "a flushed lane's R cited as unflushed: check 19 red"))
+    # check 20: the restart's start conditions at every certified FALLTHROUGH edge
+    ok20, msg20 = check_restart(BB, LC, I)
+    print("  check 20 %s  %s" % ("GREEN" if ok20 else "RED  ", msg20))
+    k20, _m = check_restart(BB, LC, I, late_edge=100)
+    kills.append(("M_LC_RESTART_LATE_EDGE", not k20,
+                  "every FALLTHROUGH edge 100 cycles after its release: check 20 red"))
     # M_LC_FT_UNSEEN / M_LC_FT_NOFLOOR
     orig_ft = PC.arm_is_ft
     PC.arm_is_ft = lambda x, I=None: False
@@ -957,7 +1028,8 @@ def main():
         print("  must-fire %-18s %s  %s" % (name, ok_txt if killed else "SURVIVED", what))
     teeth = all(k for _n, k, _w in kills)
     green = (ok1 and not fails and ok3 and ok4 and ok5 and ok6 and ok7 and ok8 and ok9 and ok10
-             and ok11 and ok12 and ok13 and ok14 and ok15 and ok16 and ok17 and ok18 and ok19)
+             and ok11 and ok12 and ok13 and ok14 and ok15 and ok16 and ok17 and ok18 and ok19
+             and ok20)
     verdict = "PASSED" if (green and teeth) else ("FAILED (must-fire survived)" if not teeth
                                                    else "FAILED")
     print("GATE lane-cert: %s" % verdict)
