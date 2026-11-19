@@ -24,3 +24,11 @@
 # gate refuse to run on CI only. The checks now normalise CRLF -> LF; this pins
 # the checkout too, so both platforms hold the same bytes.
 *.py text eol=lf
+
+# Generated sidecars, the same rule as *.hex (Wilson 11-18). benchset rewrites the
+# image certificates, the artefact hash list and the pin map byte-identical to
+# HEAD, in LF; core.autocrlf had checked them out CRLF, so every gate run left
+# five "modified" files with an empty diff.
+*.cert.json            text eol=lf
+test/artefacts.sha256  text eol=lf
+test/pinmap.vh         text eol=lf
