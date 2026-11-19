@@ -275,7 +275,81 @@ def run_case(vvp, tmp, case, tag=None):
     return bad, out, arm, st
 
 
-#: (define, what, the cases it must turn red)
+#: ⭐ THE TWO-RUN CHECKS (Wilson 11-17). A SNIFF re-run without a reset (PROG up, image
+#: reloaded: docs/HOST_INTERFACE.md) must start fresh. 11-17: pe_pit's st_done carried
+#: across `!run`, so run 2's stage 0 decoded run 1's record count over the reloaded
+#: store (empty table at cycle 49). Two checks, on tb_pit +RUNS=2:
+#:   SAME stimulus twice: run 2's store == run 1's (a fresh-reset run), byte for byte,
+#:     and its role table lands at the same PIT cycle;
+#:   a DIFFERENT stimulus for run 2 (+STIM2): run 2's store == a fresh-reset run of that
+#:     stimulus, byte for byte -- stale state that happens to equal the fresh value
+#:     under the same stimulus shows here.
+#: SPI then I2C: run 1 leaves the most state run 2 must not see (roles, CS, the
+#: second capture's config). Must-fire: M_PIT_STALE_DONE.
+RERUN = ("spi_m0", "i2c_pec")
+
+
+def _rerun_sim(vvp, tmp, tag, stims, runs):
+    """-> ({addr: byte}, [R rows]) of one tb_pit run over `stims` (1 or 2 stimuli)"""
+    ip = os.path.join(tmp, "pitcap_rerun_%s.hex" % tag)
+    I.write_image(ip, RP.sniff_image(0x00, BUDGET_B))
+    sim_run.scratch_image(RP.GEN, ip)
+    sps = []
+    for j, waves in enumerate(stims):
+        sp = os.path.join(tmp, "rerun_%s_%d.stim" % (tag, j))
+        with open(sp, "w", encoding="ascii", newline="\n") as fh:
+            for t, v in RP.waves_to_stim(waves, pre=True):
+                fh.write("%d %02x\n" % (t, v))
+        sps.append(sp)
+    op = os.path.join(tmp, "rerun_%s.out" % tag)
+    args = [vvp, "+IMG=%s" % ip, "+NBYTES=%d" % I.STORE_BYTES, "+STIM=%s" % sps[0],
+            "+OUT=%s" % op, "+NCYC=%d" % (R0.NCYC_MAX * 40), "+S0WAIT=2", "+RUNS=%d" % runs]
+    if len(sps) > 1:
+        args.append("+STIM2=%s" % sps[1])
+    RP.run(RP.simcmd(args, images=[ip]))
+    mem, rows = {}, []
+    with open(op, encoding="ascii") as fh:
+        for ln in fh:
+            t = ln.split()
+            if t and t[0] == "M":
+                mem[int(t[1])] = t[2]
+            elif t and t[0] == "R":
+                rows.append([int(x) for x in t[1:]])
+    return mem, rows
+
+
+def _store_diff(a, b):
+    bad = sorted(k for k in set(a) | set(b) if a.get(k) != b.get(k))
+    return "" if not bad else "%d bytes differ (first at %d: %s vs %s)" % (
+        len(bad), bad[0], a.get(bad[0]), b.get(bad[0]))
+
+
+def rerun_checks(vvp, tmp, tag="clean"):
+    """-> [problems] of the two-run checks, and one printed line per check"""
+    cases = {c[0]: c for c in case_list()}
+    s, d = (cases[n][1] for n in RERUN)
+    probs = []
+    ref_s, _ = _rerun_sim(vvp, tmp, tag + "_rs", [s], 1)
+    two_s, rows_s = _rerun_sim(vvp, tmp, tag + "_ss", [s, s], 2)
+    ref_d, _ = _rerun_sim(vvp, tmp, tag + "_rd", [d], 1)
+    two_d, rows_d = _rerun_sim(vvp, tmp, tag + "_sd", [s, d], 2)
+    if len(rows_s) != 2 or len(rows_d) != 2:
+        return ["two-run: expected 2 R rows, got %d / %d" % (len(rows_s), len(rows_d))]
+    m1 = _store_diff(two_s, ref_s)
+    t1, t2 = rows_s[0][2], rows_s[1][2]
+    m2 = _store_diff(two_d, ref_d)
+    print("  two-run %-4s %s twice: store %s, table at %d / %d;  %s then %s: store %s" % (
+        tag, RERUN[0], m1 or "equal", t1, t2, RERUN[0], RERUN[1], m2 or "equal"), flush=True)
+    if m1:
+        probs.append("two-run, same stimulus: run 2's store vs run 1's: " + m1)
+    if t1 != t2 or t1 < 0:
+        probs.append("two-run, same stimulus: role table at cycle %d in run 1, %d in run 2" % (t1, t2))
+    if m2:
+        probs.append("two-run, %s then %s: run 2's store vs a fresh-reset run: %s" % (RERUN[0], RERUN[1], m2))
+    return probs
+
+
+#: (define, what, the cases it must turn red; ["rerun"] = the two-run checks)
 MUTANTS = [
     ("M_CK_ACK_KEEP", "the I2C ACK bit kept", ["i2c_pec"]),
     ("M_CK_EDGE_INV", "the sampler on the other edge", ["spi_m1"]),   # CPHA 0: either edge reads the same bit
@@ -287,6 +361,8 @@ MUTANTS = [
     ("M_CK_WHY_SWAP", "reason codes 6 / 7 swapped", ["no_cs"]),
     # the descriptor (11-06): CPOL flipped -- mode 2 read as mode 1
     ("M_CK_CPOL_INV", "the descriptor's CPOL flipped", ["spi_m2"]),
+    # a second SNIFF run (Wilson 11-17): st_done not cleared on !run
+    ("M_PIT_STALE_DONE", "st_done left set across !run", ["rerun"]),
 ]
 
 
@@ -313,6 +389,8 @@ def main() -> int:
             name, arm, (st or {}).get("pc"), time.time() - t0, (out or {}).get("status"), len(msgs),
             "bit-exact" if not bad else "*** " + "; ".join(bad)), flush=True)
         probs += ["%s: %s" % (name, b) for b in bad]
+    if not only or "rerun" in only:
+        probs += rerun_checks(vvp, tmp)
     if not only and os.environ.get("PE_CLK_MUTANTS", "1") == "1":
         print("  must-fires (each mutant must turn its case red):")
         cases = {c[0]: c for c in case_list()}
@@ -321,6 +399,9 @@ def main() -> int:
             RP.build(mv, [define])
             red = []
             for n in names:
+                if n == "rerun":
+                    red.append(bool(rerun_checks(mv, tmp, define)))
+                    continue
                 bad, _o, _a, _s = run_case(mv, tmp, cases[n], "%s_%s" % (define, n))
                 red.append(bool(bad))
             ok = all(red)

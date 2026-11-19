@@ -45,6 +45,18 @@ module tb_pit;
   );
 
   // the edge log, from the bench's own view of the synchronised bus
+  // +RUNS=n (default 1; 11-17): run the PIT n times WITHOUT A RESET, PROG raised
+  // and the image reloaded between runs (the host's re-run, docs/HOST_INTERFACE.md),
+  // so (a) one-shot flags set in run 1 are seen to FALL (coverage) and (b) gate
+  // pit-clk's two-run checks see stale state (Wilson 11-17: st_done). +STIM2=<f>:
+  // runs 2.. play that stimulus instead (a different one: stale state that happens
+  // to equal the fresh value shows). Only run 1 is logged (E / L / K lines); with
+  // RUNS > 1 each run adds "R <run> <last cycle> <table cycle> <capture-done cycle>
+  // <records> <edges> <store writes>"; the store is dumped after the last run.
+  // RUNS=1 is the old bench, line for line.
+  integer    runs, run_i = 0, n_edge = 0, n_wr = 0, cap_at = -1, cap_n = -1, tbl_at = -1;
+  reg [8*256-1:0] stimfile2;
+  reg        have_stim2 = 1'b0;
   always @(posedge clk) if (rst_n === 1'b1 && !done) begin
     if (dut.pit_run === 1'b1) begin
       mk = (dut.pit_mask == 8'h00) ? 8'hFF : dut.pit_mask;
@@ -52,15 +64,19 @@ module tb_pit;
         pc = 0;
         prevq = dut.uio_q1;
         // the starting levels the capture must write to byte 39 (Wilson 10-29)
-        $fdisplay(fd, "L %h", dut.uio_q1 & mk);
+        if (run_i == 0) $fdisplay(fd, "L %h", dut.uio_q1 & mk);
       end else begin
         pc = pc + 1;
-        if (((dut.uio_q1 ^ prevq) & mk) != 8'h00)
+        if (((dut.uio_q1 ^ prevq) & mk) != 8'h00) n_edge = n_edge + 1;
+        if (dut.pit_we === 1'b1 || dut.s0_we === 1'b1) n_wr = n_wr + 1;
+        if (dut.pit_cap_done === 1'b1 && cap_at < 0) begin cap_at = pc; cap_n = dut.pit_cap_n; end
+        if (dut.u_s0.tbl_done === 1'b1 && tbl_at < 0) tbl_at = pc;
+        if (run_i == 0 && ((dut.uio_q1 ^ prevq) & mk) != 8'h00)
           $fdisplay(fd, "E %0d %h", pc, (dut.uio_q1 ^ prevq) & mk);
         prevq = dut.uio_q1;
         // the clocked bus's second capture (Wilson 11-06): its cycle 0 -- an E at
         // a later cycle t is its edge t - K (gate pit-clk)
-        if (dut.ck_arm === 1'b1) $fdisplay(fd, "K %0d", pc);
+        if (run_i == 0 && dut.ck_arm === 1'b1) $fdisplay(fd, "K %0d", pc);
       end
     end
   end
@@ -73,12 +89,22 @@ module tb_pit;
     if (!$value$plusargs("NCYC=%d", ncyc)) ncyc = 200000;
     // +S0WAIT=1: end as soon as stage 0 (chunk 2) has written its table
     if (!$value$plusargs("S0WAIT=%d", s0wait)) s0wait = 0;
+    if (!$value$plusargs("RUNS=%d", runs)) runs = 1;
+    if ($value$plusargs("STIM2=%s", stimfile2)) have_stim2 = 1'b1;
     $readmemh(imgfile, img);
     `PE_REQUIRE_IMG_LOADED(imgfile)
     fd = $fopen(outfile, "w");
     repeat (4) @(negedge clk);
     rst_n = 1;
     @(negedge clk);
+    for (run_i = 0; run_i < runs; run_i = run_i + 1) begin
+    if (run_i > 0) begin
+      // between runs: PROG up, wait for the PIT to stop, then the next run's
+      // cycle count starts again from its first cycle
+      ui_in[PIN_PROG] = 1'b1;
+      while (dut.pit_run !== 1'b0) @(negedge clk);
+      pc = -1; n_edge = 0; n_wr = 0; cap_at = -1; cap_n = -1; tbl_at = -1;
+    end
     ui_in[PIN_PROG] = 1'b1;
     repeat (3) @(negedge clk); ui_in[PIN_PTR] = 1'b1; repeat (3) @(negedge clk);
     ui_in[PIN_PTR] = 1'b0; repeat (3) @(negedge clk);
@@ -92,7 +118,9 @@ module tb_pit;
     end
     // a first line at a NEGATIVE cycle is the bus's level BEFORE the PIT
     // starts (the start-levels byte, coverage 10-29); otherwise the bus is 0
-    sfd = $fopen(stimfile, "r");
+    if (run_i > 0 && have_stim2) sfd = $fopen(stimfile2, "r");
+    else                         sfd = $fopen(stimfile, "r");
+    if (sfd == 0) begin $display("tb_pit: FATAL -- run %0d: stimulus file did not open", run_i + 1); $finish; end
     st_cyc = 0;
     r = $fscanf(sfd, "%d %h\n", st_cyc, st_val);
     uio_drv = (r == 2 && st_cyc < 0) ? st_val[7:0] : 8'h00;
@@ -121,6 +149,8 @@ module tb_pit;
     while (pc < ncyc && !(s0wait == 1 && dut.u_s0.tbl_done === 1'b1)
                      && !(s0wait == 2 && dut.u_s0.done === 1'b1)
                      && !(s0wait == 0 && dut.u_pit.st_done === 1'b1)) @(negedge clk);
+    if (runs > 1) $fdisplay(fd, "R %0d %0d %0d %0d %0d %0d %0d", run_i + 1, pc, tbl_at, cap_at, cap_n, n_edge, n_wr);
+    end  // runs
     done = 1'b1;
     // the store settles before the dump: the LATCH store makes a write visible
     // one cycle later than flops (staged, then the next low half-cycle), so a
