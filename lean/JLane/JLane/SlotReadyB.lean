@@ -601,8 +601,45 @@ theorem ready_pc2_arm_T (T : Nat) (hT : TrajY P win usb sreq y τ T)
       cntT τ (fun z => IsRet P y z.e) w2 + 1 := by rw [cntT_succ, if_pos hw2]
   exact head_of_counts_T P win usb sreq y τ T hT hWf c t (by omega) ht (by omega)
 
+/-- **The no-prefetch bridge, pointwise (Wilson 11-19).** Under the requester's contract
+`SReqB`, a lane holding a no-prefetch word -- in its head, or in a valid spare -- is never
+named by the requester, so the slot does not serve it this cycle. -/
+theorem npf_no_slot (hok : SReqB P sreq) (x : EngB)
+    (h : x.e.npf y (x.e.sel y) = true ∨
+      (x.e.spareValid y = true ∧ x.e.npf y (!x.e.sel y) = true)) :
+    ¬SlotForB P usb sreq y x := by
+  rintro ⟨-, -, hs⟩
+  obtain ⟨-, -, -, h1, h2⟩ := hok x y hs
+  rcases h with h | ⟨hv, h⟩
+  · rw [h1] at h; cases h
+  · rw [h2 hv] at h; cases h
+
+/-- **The no-prefetch bridge (Wilson 11-19): READY_RULES `pc1_not_npf`.** Under `SReqB`, if `y`
+holds a no-prefetch word (head, or valid spare) on every cycle of a wait window `[a, a + W]`,
+the requester premises of that wait -- `hq`, `hold`, `hC` with `hW` (the form `hq2 / hold2 /
+hC2 / hW2` take in `ready_pc2_plain_T` / `ready_pc2_arm_T` for each start `a2`) -- cannot all
+hold: they would give a slot for `y` inside the window (`slot_issue_within_T`). So behind a held
+branch PC+1 the second fetch's premises are never met, and the certificate's exclusion of
+`pc2_plain` there rests on this theorem. -/
+theorem npf_no_issue_T (T : Nat) (hT : TrajY P win usb sreq y τ T) (hok : SReqB P sreq)
+    (old : Lane → Bool) (a W C : Nat) (hn : a + W + 1 ≤ T)
+    (hnpf : ∀ j, a ≤ j → j ≤ a + W →
+      (τ j).e.npf y ((τ j).e.sel y) = true ∨
+        ((τ j).e.spareValid y = true ∧ (τ j).e.npf y (!(τ j).e.sel y) = true))
+    (hq : ∀ j, a ≤ j → j ≤ a + W → (∀ i, a ≤ i → i < j → ¬SlotForB P usb sreq y (τ i)) →
+      (sreq (τ j)).isSome = true)
+    (hold : ∀ j, a ≤ j → j ≤ a + W → (∀ i, a ≤ i → i < j → ¬SlotForB P usb sreq y (τ i)) →
+      ∀ w, sreq (τ j) = some w → w = y ∨ old w = true)
+    (hC : cntFromT τ (OldIssB P usb sreq old) a (W + 1) ≤ C)
+    (hW : rem (τ a).e.pst + L_REFILL * C ≤ W) : False := by
+  obtain ⟨j, h1, h2, hs⟩ :=
+    slot_issue_within_T P win usb sreq y τ T hT y old a W C hn hq hold hC hW
+  exact npf_no_slot P usb sreq y hok (τ j) (hnpf j h1 h2) hs
+
 end
 
+#print axioms npf_no_slot
+#print axioms npf_no_issue_T
 #print axioms head_of_counts_T
 #print axioms cnt_three_hits
 #print axioms slot_two_fetch_T
