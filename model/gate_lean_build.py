@@ -104,7 +104,9 @@ KEY = ("dstar", "dstar29", "dstar39", "dstar39_v2", "dstar39_st", "dstar39_hold"
        # buffered engine with flushes and kill; A2 for a lane flushed at its own edges
        "stepBKK_ts_y", "ts_ge_startBK", "lemmaA_nBK", "wb_bound_winBK", "wb_bound_winBK_fl",
        # NpfB.lean (Wilson 11-18, slot_on_composition step 1): the no-prefetch hold on runB
-       "held_le_one", "want_frozenB", "npf_holdB", "npf_unlockB")
+       "held_le_one", "want_frozenB", "npf_holdB", "npf_unlockB",
+       # GapRunB.lean (Wilson 11-18, slot_on_composition step 2): GapRun on runB, hZC charging
+       "ts_monoB", "ts_gapB", "rdB_eq", "pb_defer_gB", "pending_bound_gapB", "head_late_gapB")
 #: proof_constants.load() key -> the Lean expression that must evaluate to it (SPEC: the map)
 CONSTS = {
     "lemmaA_window": "LEMMA_A_WINDOW", "R_base": "R_BASE", "dispatch_cycles": "DISPATCH_CYCLES",
