@@ -69,11 +69,18 @@ every must-fire must turn its check red, or the gate is not testing what it says
   check 13 the readiness registry (branch_budget.READY_RULES, Wilson 11-17): every rule names its
            theorem(s); a proved rule's are at the Lean gate (gate_lean_build.KEY); every emitted
            rule is registered and every registered rule exercised; owed / counterfactual words
-           never reach slot_ready (the certificate)
+           never reach slot_ready (the certificate). Step 3 (Wilson 11-19): every proved rule
+           names its run theorem (branch_budget.RUN_THM), at the Lean gate, its premise classes
+           (gate_lean_build.PREMISES applies) equal to the rule's conditions both ways; each
+           condition is tested (broken: refused; its COND_OFF switch set: ready); bridges
+           (pc1_not_npf -> npf_no_issue_T) at the Lean gate. A spare-possible ARM's words are
+           spare_capture (owed): refused until the spare-capture theorem
   M_LC_REG_NOTHEOREM  a proved rule with no theorem          (check 13 red)
   M_LC_REG_NOTLEAN    a theorem not at the Lean gate          (check 13 red)
   M_LC_REG_UNREG      an emitted rule not registered          (check 13 red)
   M_LC_REG_LEAK       owed / counterfactual words reach ready (check 13 red)
+  M_LC_REG_PREMISE_DROP  a premise class dropped from a rule's conditions (check 13 red)
+  M_LC_SPARE_READY    a spare-possible ARM's words ready      (check 13 red)
   check 14 the slot under contention (ContendB.slot_wait_fcfs_two, FCFS by capture): another
            lane with an ARM is an older requester, wait contend_per_lane (8) each; a word is
            ready only while its free-port margin covers the wait (PC+1 not at wait 8; PC+2 from
@@ -246,10 +253,12 @@ def check_coresident(PC, V, I):
 
 def _slot_graph(I, d, pc1_arm=False):
     """ARM w0 -> PC+1 w1 -> PC+2 w2 -> w3 -> w0, PC+1 -> PC+2 released d apart (rd = gaps[w1][-1]
-    + the held part of gaps[w2], here none)"""
+    + the held part of gaps[w2], here none). w3 is a LOOP (no-prefetch): w0 is captured into an
+    empty head (arm_capture_empty, Wilson 11-19)"""
     arm = {"op": I.OP_ARM, "mod": 0, "delay": 0}
     plain = {"op": I.OP_LEVEL, "mod": 0, "delay": 0}
-    g = {0: (arm, [1]), 1: (arm if pc1_arm else plain, [2]), 2: (plain, [3]), 3: (plain, [0])}
+    loop = {"op": I.OP_LOOP, "mod": 0, "delay": 0}
+    g = {0: (arm, [1]), 1: (arm if pc1_arm else plain, [2]), 2: (plain, [3]), 3: (loop, [0])}
     gaps = {0: [1], 1: [d], 2: [5], 3: [5]}
     return g, gaps
 
@@ -520,7 +529,9 @@ def check_slot_branch(BB, PC, I):
     arm = {"op": I.OP_ARM, "mod": 0, "delay": 0}
     br = {"op": min(I.BRANCH_OPS), "mod": 0, "delay": 0}
     plain = {"op": I.OP_LEVEL, "mod": 0, "delay": 0}
-    g = {0: (arm, [1]), 1: (br, [2, 4]), 2: (plain, [3]), 3: (plain, [0]), 4: (plain, [0])}
+    loop = {"op": I.OP_LOOP, "mod": 0, "delay": 0}
+    # w3 / w4 loop back (no-prefetch): ARM w0 is captured into an empty head
+    g = {0: (arm, [1]), 1: (br, [2, 4]), 2: (plain, [3]), 3: (loop, [0]), 4: (loop, [0])}
     gaps = {0: [1], 1: [dmin], 2: [5], 3: [5], 4: [5]}
     r = BB.slot_ready(g, I, 2, gaps, k)
     ok = 1 in r and 2 not in r and 4 not in r
@@ -549,7 +560,7 @@ def check_slot_pc3(BB, PC, I):
                    "not ready" if 3 not in a else "READY", sorted(b)))
 
 
-def check_registry(BB, PC, I, rules=None):
+def check_registry(BB, PC, I, rules=None, run=None):
     """check 13: the readiness registry (Wilson 11-17). Every rule in branch_budget.READY_RULES
     names its theorem(s) (none only when counterfactual); a proved rule's theorems are all at the
     Lean gate (gate_lean_build.KEY); every rule slot_ready_tagged emits on graphs exercising each
@@ -577,7 +588,9 @@ def check_registry(BB, PC, I, rules=None):
              (({0: (ft, [1, 2]), 1: (plain, [3]), 2: (plain, [3]), 3: (plain, [0])},
                {0: [1], 1: [5], 2: [5], 3: [5]}), 2),
              (({0: (arm, [1]), 1: (ft, [2, 3]), 2: (plain, [4]), 3: (plain, [4]),
-                4: (plain, [0])}, {0: [1], 1: [dmin], 2: [5], 3: [5], 4: [5]}), 2)]
+                4: (plain, [0])}, {0: [1], 1: [dmin], 2: [5], 3: [5], 4: [5]}), 2),
+             # a spare-possible ARM (w3 plain): its words go to spare_capture (owed)
+             (_cond_case(BB, I, k, "pc2_plain", "arm_capture_empty")[:2], 2)]
     seen = set()
     for (g, gaps), depth in cases:
         tagged = BB.slot_ready_tagged(g, I, depth, gaps, k)
@@ -589,12 +602,93 @@ def check_registry(BB, PC, I, rules=None):
         leak = {w for _a, w, r in tagged if w in ready and w not in good}
         probs += ["word %d ready through an unproved rule" % w for w in sorted(leak)]
     probs += ["rule %s registered, never exercised" % r for r in sorted(set(rules) - seen)]
+    rp, nconds = _run_thm_problems(BB, PC, I, rules, run if run is not None else BB.RUN_THM)
+    probs += rp
     st = {}
     for r in rules.values():
         st[r.get("status")] = st.get(r.get("status"), 0) + 1
     return not probs, (("; ".join(probs[:3])) if probs else
-                       "%d rules (%s), all exercised; unproved words kept out of ready"
-                       % (len(rules), ", ".join("%d %s" % (n, s) for s, n in sorted(st.items()))))
+                       "%d rules (%s), all exercised; unproved words kept out of ready; "
+                       "run theorems: %d conditions each tested by its switch, matched both ways "
+                       "to gate_lean_build.PREMISES; bridge %s"
+                       % (len(rules), ", ".join("%d %s" % (n, s) for s, n in sorted(st.items())),
+                          nconds, ", ".join("%s -> %s" % kv for kv in sorted(BB.BRIDGES.items()))))
+
+
+def _cond_case(BB, I, k, rule, cond):
+    """(g, gaps, contend, word): `rule`'s word on _slot_graph with every condition met except
+    `cond` (None: all met)"""
+    dmin = k["p1b2_plain_min_d"]
+    g, gaps = _slot_graph(I, dmin - 1 if rule == "pc2_arm" else dmin, pc1_arm=rule == "pc2_arm")
+    w = 1 if rule == "pc1_plain" else 2
+    contend = 0
+    if cond == "arm_capture_empty":
+        g[3] = ({"op": I.OP_LEVEL, "mod": 0, "delay": 0}, g[3][1])
+    elif cond == "plain_edge_arm":
+        g[0] = (dict(g[0][0], mod=I.ARM_MOD_LEVEL2), g[0][1])
+    elif cond == "pc1_plain_edge_arm":
+        g[1] = (dict(g[1][0], mod=I.ARM_MOD_LEVEL2), g[1][1])
+    elif cond == "pc1_not_npf":
+        g[1] = ({"op": I.OP_LOOP, "mod": 0, "delay": 0}, g[1][1])
+    elif cond == "d_ge_min":
+        gaps[1] = [dmin - 1]
+    elif cond == "wait_in_margin":
+        contend = max(1, BB.slot_margin(g, I, gaps, 0, w, rule, k) + 1)
+    return g, gaps, contend, w
+
+
+def _run_thm_problems(BB, PC, I, rules, run):
+    """check 13 (step 3, Wilson 11-19): each proved rule names its run-level theorem; the run
+    theorem is at the Lean gate and its PREMISES applies-classes equal the rule's conditions,
+    both ways; each condition is tested in slot_ready -- with it broken the word is not ready,
+    with its COND_OFF switch also set it is (an IMPLIED pair is met by another condition); each
+    bridge lemma is at the Lean gate."""
+    import gate_lean_build as LB
+    k = PC.load()
+    probs, n = [], 0
+    for rid, r in sorted(rules.items()):
+        rt = run.get(rid)
+        if r.get("status") == "proved" and rt is None:
+            probs.append("%s: proved, no run theorem" % rid)
+        if rt is None or rt.get("run_status") != "proved":
+            continue
+        thm = rt["run_thm"]
+        if thm not in LB.KEY or thm not in LB.PREMISES:
+            probs.append("%s: run theorem %s not at the Lean gate" % (rid, thm))
+            continue
+        lean = set(LB.PREMISES[thm]["applies"])
+        mine = set(rt["applies"])
+        probs += ["%s: %s premise class %s not tested in slot_ready" % (rid, thm, c)
+                  for c in sorted(lean - mine)]
+        probs += ["%s: condition %s is no premise class of %s" % (rid, c, thm)
+                  for c in sorted(mine - lean)]
+        saved = set(BB.COND_OFF)
+        try:
+            g, gaps, cw, w = _cond_case(BB, I, k, rid, None)
+            if (0, w, rid) not in BB.slot_ready_tagged(g, I, 2, gaps, k) or \
+                    w not in BB.slot_ready(g, I, 2, gaps, k, contend=cw):
+                probs.append("%s: word %d not ready with every condition met" % (rid, w))
+            for c in sorted(mine):
+                n += 1
+                if (rid, c) in BB.IMPLIED:
+                    if I.OP_ARM in I.BRANCH_OPS:
+                        probs.append("%s: %s not implied (OP_ARM is no-prefetch)" % (rid, c))
+                    continue
+                g, gaps, cw, w = _cond_case(BB, I, k, rid, c)
+                broken = w in BB.slot_ready(g, I, 2, gaps, k, contend=cw)
+                BB.COND_OFF = saved | {c}
+                off = w in BB.slot_ready(g, I, 2, gaps, k, contend=cw)
+                BB.COND_OFF = set(saved)
+                if broken or not off:
+                    probs.append("%s: condition %s not enforced (broken %s, switch off %s)"
+                                 % (rid, c, "READY" if broken else "refused",
+                                    "ready" if off else "REFUSED"))
+        finally:
+            BB.COND_OFF = saved
+    for c, lem in sorted(BB.BRIDGES.items()):
+        if lem not in LB.KEY:
+            probs.append("bridge %s -> %s not at the Lean gate" % (c, lem))
+    return probs, n
 
 
 def _ft_slot_image(I, T, d1=80):
@@ -933,6 +1027,18 @@ def main():
     finally:
         BB.REG_LEAK_MUT = False
     kills.append(("M_LC_REG_LEAK", not kr, "owed / counterfactual words reach ready: check 13 red"))
+    m_drop = {**BB.RUN_THM, "pc2_plain": {**BB.RUN_THM["pc2_plain"], "applies": tuple(
+        c for c in BB.RUN_THM["pc2_plain"]["applies"] if c != "d_ge_min")}}
+    kr, _m = check_registry(BB, PC, I, run=m_drop)
+    kills.append(("M_LC_REG_PREMISE_DROP", not kr,
+                  "pc2_plain's d_ge_min dropped from its conditions: check 13 red"))
+    BB.COND_OFF = {"arm_capture_empty"}
+    try:
+        kr, _m = check_registry(BB, PC, I)
+    finally:
+        BB.COND_OFF = set()
+    kills.append(("M_LC_SPARE_READY", not kr,
+                  "a spare-possible ARM's words ready (hempty not tested): check 13 red"))
     # check 14: the slot under contention (ContendB, Wilson 11-17)
     ok14, msg14 = check_slot_contend(BB, PC, I)
     print("  check 14 %s  %s" % ("GREEN" if ok14 else "RED  ", msg14))
