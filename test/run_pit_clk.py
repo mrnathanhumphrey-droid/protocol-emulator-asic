@@ -86,66 +86,75 @@ class Bus:
         return R0.edges_to_waves(self.ev, self.init, t_end)
 
 
-def spi_bus(msgs, mode=0, H=20, skew=1, gap=600, bits=None, cs=True, t=100, extra=None):
+def spi_bus(msgs, mode=0, H=20, skew=1, gap=600, bits=None, cs=True, t=100, extra=None,
+            w=None, cs_act=0, cs_skip=0):
     """bits: per-frame bit counts (None = whole bytes). extra = (k, at): every
     k-th bit the data also changes `at` cycles after the SAMPLE edge (0 = on it:
     no clean edge; H // 2 = mid-level: both clean, data in both levels).
-    k >= 12 keeps those changes under stage 0's 1/8, so the wire stays SYNC_DATA."""
+    k >= 12 keeps those changes under stage 0's 1/8, so the wire stays SYNC_DATA.
+    w = (clock, data, CS) wires (default CK, DA, CS = uio 0..2); cs_act = CS's ACTIVE level;
+    cs_skip = k: every k-th frame is clocked with CS left INACTIVE (k = 3: CS active at ~2/3 of
+    the clock edges, under the 7/8 rule, so "CS active level unclear"). k must be small: stage 0's
+    first capture holds only ~4 frames (205 records, 160 clock edges), and k = 5 skipped frame 4,
+    past its end, so CS read 100% active (probe 11-17) (coverage, 11-17)."""
+    ck_w, da_w, cs_w = w or (CK, DA, CS)
     cpol, cpha = mode >> 1, mode & 1
-    bus = Bus({CK: cpol, DA: 0, CS: 1} if cs else {CK: cpol, DA: 0})
+    bus = Bus({ck_w: cpol, da_w: 0, cs_w: 1 - cs_act} if cs else {ck_w: cpol, da_w: 0})
     nb = [0]
     for k, m in enumerate(msgs):
         bl = [(b >> (7 - i)) & 1 for b in m for i in range(8)]
         if bits:
             bl = bl[:bits[k % len(bits)]]
-        if cs:
-            bus.set(t, CS, 0)
+        on = cs and not (cs_skip and k % cs_skip == cs_skip - 1)
+        if on:
+            bus.set(t, cs_w, cs_act)
         t += H
         for i, b in enumerate(bl):
             nb[0] += 1
             xtra = extra is not None and nb[0] % extra[0] == 0
             if cpha == 0:
-                bus.set(t - H // 2 if skew == "mid" else (t - H + skew if i else t - H + 1), DA, b)
-                bus.set(t, CK, 1 - cpol)
+                bus.set(t - H // 2 if skew == "mid" else (t - H + skew if i else t - H + 1), da_w, b)
+                bus.set(t, ck_w, 1 - cpol)
                 if xtra:
-                    bus.set(t + extra[1], DA, 1 - b)
-                bus.set(t + H, CK, cpol)
+                    bus.set(t + extra[1], da_w, 1 - b)
+                bus.set(t + H, ck_w, cpol)
             else:
-                bus.set(t, CK, 1 - cpol)
-                bus.set(t + (H // 2 if skew == "mid" else skew), DA, b)
-                bus.set(t + H, CK, cpol)
+                bus.set(t, ck_w, 1 - cpol)
+                bus.set(t + (H // 2 if skew == "mid" else skew), da_w, b)
+                bus.set(t + H, ck_w, cpol)
                 if xtra:
-                    bus.set(t + H + extra[1], DA, 1 - b)
+                    bus.set(t + H + extra[1], da_w, 1 - b)
             t += 2 * H
         t += H
-        if cs:
-            bus.set(t, CS, 1)
+        if on:
+            bus.set(t, cs_w, 1 - cs_act)
         t += gap
     return bus, t
 
 
-def i2c_bus(msgs, H=20, skew=1, gap=600, sr_every=0, t=100):
-    """sr_every = k: every k-th frame ends in a repeated START, not a STOP"""
-    bus = Bus({CK: 1, DA: 1})
+def i2c_bus(msgs, H=20, skew=1, gap=600, sr_every=0, t=100, w=None):
+    """sr_every = k: every k-th frame ends in a repeated START, not a STOP; w = (clock, data)"""
+    ck_w, da_w = w or (CK, DA)
+    bus = Bus({ck_w: 1, da_w: 1})
     k = 0
     while k < len(msgs):
-        bus.set(t, DA, 0)
+        bus.set(t, da_w, 0)
         t += H                                          # START
         while True:
             for b in msgs[k]:
                 for bit in [(b >> (7 - i)) & 1 for i in range(8)] + [0]:
-                    bus.set(t, CK, 0)
-                    bus.set(t + (H // 2 if skew == "mid" else skew), DA, bit)
-                    bus.set(t + H, CK, 1)
+                    bus.set(t, ck_w, 0)
+                    bus.set(t + (H // 2 if skew == "mid" else skew), da_w, bit)
+                    bus.set(t + H, ck_w, 1)
                     t += 2 * H
             k += 1
             if sr_every and k % sr_every and k < len(msgs):   # repeated START
-                bus.set(t, CK, 0); bus.set(t + H // 2, DA, 1); bus.set(t + H, CK, 1)
-                bus.set(t + 2 * H, DA, 0)
+                bus.set(t, ck_w, 0); bus.set(t + H // 2, da_w, 1); bus.set(t + H, ck_w, 1)
+                bus.set(t + 2 * H, da_w, 0)
                 t += 3 * H
                 continue
             break
-        bus.set(t, CK, 0); bus.set(t + H // 2, DA, 0); bus.set(t + H, CK, 1); bus.set(t + 2 * H, DA, 1)
+        bus.set(t, ck_w, 0); bus.set(t + H // 2, da_w, 0); bus.set(t + H, ck_w, 1); bus.set(t + 2 * H, da_w, 1)
         t += 3 * H + gap                                # STOP
     return bus, t
 
@@ -177,6 +186,24 @@ def case_list():
         "no clean sample edge (data changes on both clock edges)")
     add("both_levels", spi_bus(frames(62, NFR // 8, (1, 2), XMODEM), skew="mid", extra=(32, 10)), 0,
         "no clean sample edge (data changes in both clock levels)")
+    # coverage cases (11-17, Wilson's toggle ruling (b)): shapes the sweep never handed stage 3
+    add("spi_cs_high", spi_bus(frames(70, NFR, (1, 2), CCITT), mode=1, cs_act=1), 0, "ok")
+    # spi_m3's bus, moved to wires 5 / 3 / 6, at 2 x NFR frames: with the data wire's index below
+    # the clock's, stage 0's P_CNEXT pair loop evaluates extra clock candidates (~79 extra probe
+    # walks), so the arm comes at 788,028, not ~455,700, and 400 frames (bus over at 704,100) leave
+    # the second capture nothing (11-17). 800 frames: OK.
+    add("spi_wires", spi_bus(frames(13, 2 * NFR, (1, 2), CCITT), mode=3, w=(5, 3, 6)), 0, "ok")
+    # ⚠ PINS that latency (open with Wilson 11-17: document a bound / a cheaper pre-filter / order
+    # candidates by edge count): the same bus at 400 frames must stay UNKNOWN. When stage 0 gets
+    # faster this case turns red -- re-point it to "ok" then, and drop the note above.
+    add("spi_wires_late", spi_bus(frames(13, 400, (1, 2), CCITT), mode=3, w=(5, 3, 6)), 0,
+        "no difference GCD of a supported width")
+    add("i2c_wires", i2c_bus(frames(72, NFR, (1, 2), SMBUS), w=(6, 7)), 0, "ok")
+    # data one cycle before the sample edge: that edge is dirty, the other is clean
+    add("dirty_rise", spi_bus(frames(73, NFR, (1, 2), XMODEM), mode=0, skew=19), 0, "ok")
+    add("dirty_fall", spi_bus(frames(74, NFR, (1, 2), XMODEM), mode=2, skew=19), 0, "ok")
+    add("cs_unclear", spi_bus(frames(75, NFR // 8, (1, 2), XMODEM), cs_skip=3), 0,
+        "CS active level unclear")
     return out
 
 
@@ -216,6 +243,43 @@ def sim(vvp, tmp, tag, img, stim, ncyc):
             elif t[0] == "S":
                 st = dict(kv.split("=") for kv in t[1:])
     return log, mem, pre, lv0, st, arm
+
+
+#: the coverage sweep's inputs for these cases (test/benchset.py's tb_pit), under a probe_ name
+COV_DIR = "probe_cov_clk"
+
+
+def coverage_arms():
+    """[(label, plusargs)] for test/benchset.py's tb_pit: every case above, with the image,
+    stimulus and run length run_case uses (+S0WAIT=2: on through stage 3's clocked-bus path,
+    which tb_pit's fixed arms and run_pit_s12's never reach -- gate_coverage's OWED entries
+    for the clocked bus name this function as their remedy). The sweep measures REACH;
+    bit-exactness stays with this gate (pit-clk)."""
+    os.makedirs(os.path.join(ROOT, COV_DIR), exist_ok=True)
+    arms = []
+    for name, waves, b0, _want in case_list():
+        stim = RP.waves_to_stim(waves, pre=True)
+        ip, sp = "%s/%s.hex" % (COV_DIR, name), "%s/%s.stim" % (COV_DIR, name)
+        I.write_image(os.path.join(ROOT, ip), RP.sniff_image(0x00, b0 or BUDGET_B))
+        with open(os.path.join(ROOT, sp), "w", encoding="ascii", newline="\n") as fh:
+            for t, v in stim:
+                fh.write("%d %02x\n" % (t, v))
+        arms.append(("clk_" + name, ["+IMG=" + ip, "+NBYTES=%d" % I.STORE_BYTES, "+STIM=" + sp,
+                                     "+OUT=%s/%s.out" % (COV_DIR, name),
+                                     "+NCYC=%d" % (R0.NCYC_MAX * 40), "+S0WAIT=2",
+                                     # two PIT runs (tb_pit +RUNS, 11-17): the one-shot flags
+                                     # set in run 1 fall when run 2 starts (toggle coverage)
+                                     "+RUNS=2"]))
+    # the different-stimulus re-run (rerun_checks' second check, Wilson 11-17): run 1
+    # plays RERUN[0], run 2 plays RERUN[1] (+STIM2) -- the arm that DECLARES +STIM2 to
+    # the image universe (benchset: a plusarg the bench reads must be supplied by an arm)
+    s1, s2 = RERUN
+    arms.append(("clk_rerun_d", ["+IMG=%s/%s.hex" % (COV_DIR, s1), "+NBYTES=%d" % I.STORE_BYTES,
+                                 "+STIM=%s/%s.stim" % (COV_DIR, s1),
+                                 "+STIM2=%s/%s.stim" % (COV_DIR, s2),
+                                 "+OUT=%s/rerun_d.out" % COV_DIR,
+                                 "+NCYC=%d" % (R0.NCYC_MAX * 40), "+S0WAIT=2", "+RUNS=2"]))
+    return arms
 
 
 def expect(log, lv0, b, arm, pc_end):
