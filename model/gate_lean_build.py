@@ -128,7 +128,11 @@ KEY = ("dstar", "dstar29", "dstar39", "dstar39_v2", "dstar39_st", "dstar39_hold"
        "held_of_head", "held_of_ret", "ready_of_capture_T", "slot_issue_cap_T", "slot_wait_T",
        "slot_issue_within_T", "slot_ready_T",
        # SlotReadyB.lean (R2): READY_RULES pc1_plain on the buffered engine (p1b_margin_scan cited)
-       "wb_after_empty_T", "ready_pc1_plain_T")
+       "wb_after_empty_T", "ready_pc1_plain_T",
+       # SlotReadyB.lean (R2b): the second fetch, READY_RULES pc2_plain / pc2_arm
+       # (p1b2_margin_plain_scan / p1b2_margin_arm_scan cited)
+       "head_of_counts_T", "cnt_three_hits", "slot_two_fetch_T", "ready_pc2_plain_T",
+       "disp_pick_T", "ready_pc2_arm_T")
 #: proof_constants.load() key -> the Lean expression that must evaluate to it (SPEC: the map)
 CONSTS = {
     "lemmaA_window": "LEMMA_A_WINDOW", "R_base": "R_BASE", "dispatch_cycles": "DISPATCH_CYCLES",
