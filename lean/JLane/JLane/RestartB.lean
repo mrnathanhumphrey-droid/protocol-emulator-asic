@@ -375,6 +375,82 @@ theorem restart_runBK (hok : SReqB P sreq) (fl : Nat → Lane → Bool) (k : Nat
     (wfBK_run P win usb sreq hok fl k f X0 hI (fun j hj => hF j (by omega)))
     (hF f (by omega)) (hF (f + 1) (by omega)) hfl hedge h1 h2
 
+/-! ### Kill provenance: a killed capture for `y` needs a flush of `y` one or two cycles before
+
+A killed capture is in CAP, so the port was in WAIT for the same lane the cycle before and in
+REQ the cycle before that. The kill register at the capture was set by a flush of that lane in
+WAIT, or was already pending in WAIT -- and then set by a flush in REQ: it cannot have been
+pending in REQ, since a pending kill sits only in WAIT or CAP (`WfBK.ki`). So `trajY_runBK`'s
+second condition follows from "`y` is not flushed", two cycles back. -/
+
+theorem kill_prov (fl0 fl1 : Lane → Bool) (k0 k1 : Lane → Nat) (X X1 X2 : EngBK) (y : Lane)
+    (hX1 : X1 = stepBKK P win usb sreq fl0 k0 X) (hX2 : X2 = stepBKK P win usb sreq fl1 k1 X1)
+    (hki : X.pkill = true → X.x.e.pst = .wait ∨ X.x.e.pst = .cap)
+    (hkc : X2.kc = true) (hp : X2.x.e.pl = y) : fl1 y = true ∨ fl0 y = true := by
+  obtain ⟨hc, hk2⟩ := kc_spec X2 hkc
+  rw [hX2, pstK, stepB_pst] at hc
+  have hp2 := hp
+  rw [hX2, plK, stepB_pl] at hp2
+  obtain ⟨hwt, hpl⟩ := portNextB_cap_from P usb sreq X1.base hc
+  rw [base_e] at hwt hpl
+  rw [hpl] at hp2
+  -- X1 in WAIT for y: X in REQ for y
+  have hwt' := hwt
+  rw [hX1, pstK, stepB_pst] at hwt'
+  have hp1 := hp2
+  rw [hX1, plK, stepB_pl] at hp1
+  obtain ⟨hrq, hpl0⟩ := portNextB_wait_from P usb sreq X.base hwt'
+  rw [base_e] at hrq hpl0
+  rw [hpl0] at hp1
+  rw [hX2, pkillK, if_neg (by rw [hwt]; decide)] at hk2
+  cases hf1 : fl1 y
+  · right
+    have hk1 : X1.pkill = true := by
+      rw [hp2, hf1] at hk2
+      simpa using hk2
+    rw [hX1, pkillK, if_neg (by rw [hrq]; decide)] at hk1
+    cases hk0 : X.pkill
+    · rw [hk0, hp1] at hk1
+      simpa [hrq] using hk1
+    · rcases hki hk0 with h | h <;> rw [hrq] at h <;> cases h
+  · left; rfl
+
+/-- **Kill provenance on a run**: a killed capture for `y` at cycle `m + 2` needs a flush of `y`
+at `m` or `m + 1`. -/
+theorem kill_prov_runBK (hok : SReqB P sreq) (fl : Nat → Lane → Bool) (k : Nat → Lane → Nat)
+    (X0 : EngBK) (hI : WfBK X0) (m : Nat) (y : Lane)
+    (hF : ∀ j, j < m → FlushOk P win usb sreq (fl (runBK P win usb sreq fl k j X0).x.e.now)
+      (runBK P win usb sreq fl k j X0))
+    (hkc : (runBK P win usb sreq fl k (m + 2) X0).kc = true)
+    (hp : (runBK P win usb sreq fl k (m + 2) X0).x.e.pl = y) :
+    fl (runBK P win usb sreq fl k (m + 1) X0).x.e.now y = true ∨
+      fl (runBK P win usb sreq fl k m X0).x.e.now y = true :=
+  kill_prov P win usb sreq _ _ _ _ (runBK P win usb sreq fl k m X0)
+    (runBK P win usb sreq fl k (m + 1) X0) (runBK P win usb sreq fl k (m + 2) X0) y
+    (runBK_succ' P win usb sreq fl k m X0) (runBK_succ' P win usb sreq fl k (m + 1) X0)
+    (wfBK_run P win usb sreq hok fl k m X0 hI hF).ki hkc hp
+
+/-- **A stretch of `runBK` with `y` unflushed is a trajectory.** From cycle `s ≥ 2`, if `y` is
+not flushed on any cycle from `s - 2` to `s + T - 1`, the stretch is a `TrajY` trajectory: no
+killed capture can land on `y` in it (`kill_prov_runBK`). After a flush at `f`, `s = f + 3` is
+the restart (`restart_runBK`). -/
+theorem trajY_runBK_noflush (hok : SReqB P sreq) (fl : Nat → Lane → Bool) (k : Nat → Lane → Nat)
+    (X0 : EngBK) (hI : WfBK X0) (y : Lane) (s T : Nat) (hs : 2 ≤ s)
+    (hF : ∀ j, j < s + T → FlushOk P win usb sreq (fl (runBK P win usb sreq fl k j X0).x.e.now)
+      (runBK P win usb sreq fl k j X0))
+    (hnf : ∀ j, s ≤ j + 2 → j < s + T → fl (runBK P win usb sreq fl k j X0).x.e.now y = false) :
+    TrajY P win usb sreq y (fun n => (runBK P win usb sreq fl k (s + n) X0).base) T := by
+  apply trajY_runBK P win usb sreq fl k X0 y s T
+  intro n hn
+  refine ⟨hnf (s + n) (by omega) (by omega), ?_⟩
+  rintro ⟨hkc, hp⟩
+  obtain ⟨m, hm⟩ : ∃ m, s + n = m + 2 := ⟨s + n - 2, by omega⟩
+  rw [hm] at hkc hp
+  rcases kill_prov_runBK P win usb sreq hok fl k X0 hI m y
+      (fun j hj => hF j (by omega)) hkc hp with h | h
+  · rw [hnf (m + 1) (by omega) (by omega)] at h; cases h
+  · rw [hnf m (by omega) (by omega)] at h; cases h
+
 end
 
 #print axioms agree_stepBKK
@@ -383,5 +459,8 @@ end
 #print axioms frozen_stepBKK
 #print axioms restart_three
 #print axioms restart_runBK
+#print axioms kill_prov
+#print axioms kill_prov_runBK
+#print axioms trajY_runBK_noflush
 
 end JLane

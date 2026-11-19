@@ -119,7 +119,10 @@ KEY = ("dstar", "dstar29", "dstar39", "dstar39_v2", "dstar39_st", "dstar39_hold"
        # RestartB.lean (Wilson 11-18, step 3c): runBK between y's flushes is a trajectory
        "agree_stepBKK", "trajY_runBK", "wfB_runBK",
        # RestartB.lean (step 3c part 2): at f + 3 the flushed lane holds exactly its edge word
-       "frozen_stepBKK", "restart_three", "restart_runBK")
+       "frozen_stepBKK", "restart_three", "restart_runBK",
+       # RestartB.lean: a killed capture for y needs a flush of y one or two cycles before, so a
+       # stretch with y unflushed (from two cycles back) is a trajectory
+       "kill_prov", "kill_prov_runBK", "trajY_runBK_noflush")
 #: proof_constants.load() key -> the Lean expression that must evaluate to it (SPEC: the map)
 CONSTS = {
     "lemmaA_window": "LEMMA_A_WINDOW", "R_base": "R_BASE", "dispatch_cycles": "DISPATCH_CYCLES",
