@@ -66,6 +66,9 @@ SLOT_BRANCH_MUT = False
 #: must-fire switch (gate_lane_cert M_LC_SLOT_PC3_OFF): a FALLTHROUGH ARM at PC+1 gives ARM A
 #: its PC+3 (ARM A fetches two words: no theorem)
 SLOT_PC3_MUT = False
+#: must-fire switch (gate_lane_cert M_LC_SLOT_BRPC1_OFF): PC+2 marked ready behind a no-prefetch
+#: (branch) PC+1 -- the requester never fetches while one is held (BufEng.SReqB; Wilson 11-19)
+SLOT_BRPC1_MUT = False
 
 
 def slot_timeout_drop(g, I, ready, lat, k=None, contend=0):
@@ -146,11 +149,16 @@ READY_RULES = {
                 "what": "PC+2, PC+1 a plain edge ARM (m1 / m3)"},
     "pc2_plain": {"status": "proved", "theorems": ("Buf.p1b2_margin_plain_scan",
                                                    "ContendB.slot_wait_fcfs_two"),
-                  "what": "PC+2, PC+1 any other word, d >= p1b2_plain_min_d"},
-    "ft_timeout": {"status": "proved", "theorems": ("Buf.p1b2_margin_timeout_scan",
-                                                     "ContendB.slot_wait_fcfs_two"),
+                  "what": "PC+2, PC+1 any other word that is not no-prefetch (a branch PC+1 "
+                          "blocks the second fetch: BufEng.SReqB, Wilson 11-19), "
+                          "d >= p1b2_plain_min_d"},
+    "ft_timeout": {"status": "owed", "theorems": ("OrderB.ft_timeout_order",
+                                                   "Buf.p1b2_margin_timeout_scan",
+                                                   "ContendB.slot_wait_fcfs_two"),
                    "what": "FALLTHROUGH PC+1 (timeout, fetched second); T >= FILL + L "
-                           "checked in _image_budget (slot_timeout_drop)"},
+                           "checked in _image_budget (slot_timeout_drop). Owed (Wilson 11-19): "
+                           "fetched behind the edge word, it is not the head on the timeout "
+                           "path until the K6 swap and its order theorem"},
     "ft_edge": {"status": "proved",
                 "theorems": ("Slot.p1b_margin_scan", "FlushKeep.edge_survives_flush",
                              "FlushKill.wfBK_run", "FlushHeld.ft_edge_at_release_armed",
@@ -165,12 +173,56 @@ READY_RULES = {
                                   "refuses the shape, dae31dc)"},
     "depth_gt2": {"status": "counterfactual", "theorems": (),
                   "what": "words beyond depth 2 (SLOT > 2): no theorem"},
+    "spare_capture": {"status": "owed", "theorems": ("SlotReadyB.ready_spare_capture_T",),
+                      "what": "PC+1 / PC+2 of a plain ARM that may be captured into the spare "
+                              "(a predecessor is not no-prefetch): ready_*_T take hempty. Owed "
+                              "(Wilson 11-19): the spare-capture readiness theorem (FIFO buffer "
+                              "(b), issue at capture, the 11-17 spare margins), composition "
+                              "step 3"},
 }
+#: the run-level theorem behind each rule (Wilson 11-19, step 3) and the conditions slot_ready
+#: tests for it -- each a premise class of gate_lean_build.PREMISES[run_thm]["applies"], both
+#: ways (gate_lane_cert check 13). run_status "owed (...)": the run theorem is not yet one
+#: theorem; its rule's component theorems stand as listed above.
+RUN_THM = {
+    "pc1_plain": {"run_thm": "ready_pc1_plain_T", "run_status": "proved",
+                  "applies": ("arm_capture_empty", "plain_edge_arm", "wait_in_margin")},
+    "pc2_plain": {"run_thm": "ready_pc2_plain_T", "run_status": "proved",
+                  "applies": ("arm_capture_empty", "plain_edge_arm", "pc1_not_npf", "d_ge_min",
+                              "wait_in_margin")},
+    "pc2_arm": {"run_thm": "ready_pc2_arm_T", "run_status": "proved",
+                "applies": ("arm_capture_empty", "plain_edge_arm", "pc1_plain_edge_arm",
+                            "pc1_not_npf", "wait_in_margin")},
+    "ft_edge": {"run_thm": "ready_ft_edge_T", "run_status": "owed (composition)", "applies": ()},
+}
+#: a condition whose Lean premise is reached through a bridge lemma: pc1_not_npf (Python: PC+1
+#: not in I.BRANCH_OPS) discharges hq2 / hold2 only through npf_no_issue_T (Wilson 11-19)
+BRIDGES = {"pc1_not_npf": "npf_no_issue_T"}
+#: (rule, condition) met by another tested condition: a plain edge ARM at PC+1 is an OP_ARM,
+#: never a no-prefetch word (check 13 confirms OP_ARM is not in I.BRANCH_OPS)
+IMPLIED = {("pc2_arm", "pc1_not_npf"): "pc1_plain_edge_arm"}
+#: the label on slot-on figures while spare_capture is owed (Wilson 11-19)
+SPARE_LABEL = "refusal in force: spare-capture readiness owed"
+#: must-fire switches (gate_lane_cert check 13): conditions slot_ready stops testing
+#: (M_LC_SPARE_READY: {"arm_capture_empty"}); check 13 also sets each one in turn
+COND_OFF = set()
 #: must-fire switch (gate_lane_cert M_LC_REG_LEAK): owed / counterfactual words reach slot_ready
 REG_LEAK_MUT = False
+#: the plain rules whose theorems take hempty (an ARM captured into an empty head)
+_HEMPTY_RULES = ("pc1_plain", "pc2_plain", "pc2_arm")
 
 
-def slot_ready(g, I, depth, gaps, k=None, contend=0):
+def arm_capture_empty(g, a, I):
+    """hempty (Wilson 11-19): ARM `a` is captured into an EMPTY head. Guaranteed only when every
+    predecessor in its lane graph is a no-prefetch word (I.BRANCH_OPS: State.lean wantFetch never
+    prefetches past one) or it has none (lane entry); otherwise the base refill may have
+    prefetched it into the spare ("spare-possible")"""
+    if "arm_capture_empty" in COND_OFF:
+        return True
+    return all(g[p][0]["op"] in I.BRANCH_OPS for p in g if a in g[p][1])
+
+
+def slot_ready(g, I, depth, gaps, k=None, contend=0, statuses=("proved",)):
     """{word}: the words the guaranteed slot makes ready at release on one lane -- the words of
     slot_ready_tagged whose rule is "proved" in READY_RULES (Wilson 11-17: owed and
     counterfactual rules never reach the certificate). PC+2 means the word at ARM + 2 only
@@ -178,15 +230,17 @@ def slot_ready(g, I, depth, gaps, k=None, contend=0):
     FALLTHROUGH PC+1). `gaps`: lane_cert.build's writeback gaps (after any premise gaps), so d is
     the certificate's. `contend`: the port's wait behind older requesters (slot_wait,
     ContendB): a word is ready only while its free-port margin covers it (contend_margin);
-    otherwise it is left to the refill analysis."""
+    otherwise it is left to the refill analysis. `statuses`: the rule statuses let through --
+    ("proved",) for the certificate; a check may add "owed" to test an owed rule's premise as it
+    will apply once proved (gate_lane_cert checks 10 / 14), never for a certificate."""
     out = set()
     for a, w, r in slot_ready_tagged(g, I, depth, gaps, k):
-        if not (REG_LEAK_MUT or READY_RULES[r]["status"] == "proved"):
+        if not (REG_LEAK_MUT or READY_RULES[r]["status"] in statuses):
             continue
         # at a free port each rule's own premise (checked in slot_ready_tagged) is the theorem's;
         # under a wait the margin must cover it
         m = slot_margin(g, I, gaps, a, w, r, k) if contend else None
-        if m is None or m >= contend:
+        if m is None or m >= contend or "wait_in_margin" in COND_OFF:
             out.add(w)
     return out
 
@@ -204,13 +258,25 @@ def slot_ready_by_arm(g, I, depth, gaps, k=None):
 
 
 def slot_ready_tagged(g, I, depth, gaps, k=None):
-    """[(ARM, word, rule id)]: every word the slot would make ready, with its READY_RULES rule"""
+    """[(ARM, word, rule id)]: every word the slot would make ready, with its READY_RULES rule.
+    A plain ARM that may be captured into the spare (not arm_capture_empty) has its words under
+    spare_capture (owed, Wilson 11-19), not under the rules whose theorems take hempty."""
+    out = []
+    for a, w, r in _slot_ready_tagged(g, I, depth, gaps, k):
+        if r in _HEMPTY_RULES and not arm_capture_empty(g, a, I):
+            r = "spare_capture"
+        out.append((a, w, r))
+    return out
+
+
+def _slot_ready_tagged(g, I, depth, gaps, k=None):
     k = k or PC.load()
     dmin = k["p1b2_plain_min_d"]
     out = []
     for a in g:
         x = g[a][0]
-        if x["op"] != I.OP_ARM or x["mod"] & I.ARM_MOD_LEVEL2:
+        if x["op"] != I.OP_ARM or (x["mod"] & I.ARM_MOD_LEVEL2
+                                   and "plain_edge_arm" not in COND_OFF):
             continue
         if x["mod"] & I.ARM_MOD_FT:
             # PC+2 (edge, fetched first) and PC+1 (timeout, fetched second): the timeout word's
@@ -235,11 +301,17 @@ def slot_ready_tagged(g, I, depth, gaps, k=None):
             for s2 in g[s1][1]:
                 if s2 not in g or (s2 != a + 2 and not (SLOT_BRANCH_MUT or SLOT_PC3_MUT)):
                     continue
+                # no second fetch behind a no-prefetch (branch) PC+1: BufEng.SReqB never requests
+                # while one is held, and a taken branch would leave PC+2 a wrong-path word
+                # (Wilson 11-19)
+                if (g[s1][0]["op"] in I.BRANCH_OPS
+                        and not (SLOT_BRPC1_MUT or SLOT_BRANCH_MUT or "pc1_not_npf" in COND_OFF)):
+                    continue
                 d = gaps[s1][-1] + sum(gaps[s2][:-1])
-                if _plain_edge_arm(g[s1][0], I):
+                if _plain_edge_arm(g[s1][0], I) or "pc1_plain_edge_arm" in COND_OFF:
                     out.append((a, s2, "pc2_arm"))
                     nxt.add(s2)
-                elif d >= dmin or SLOT_SPACING_MUT:
+                elif d >= dmin or SLOT_SPACING_MUT or "d_ge_min" in COND_OFF:
                     out.append((a, s2, "pc2_plain"))
                     nxt.add(s2)
         front = nxt
@@ -554,7 +626,13 @@ def _image_budget(img, iters=80, premise_gaps=None, ready=None, scheme="window")
             if l in graphs and w in graphs[l][2]:
                 graphs[l][2][w] = [max(graphs[l][2][w][0], gp)] + graphs[l][2][w][1:]
     cw = {l: 0 for l in lanes}
+    labels = []
     if SLOT:
+        # Wilson 11-19: a spare-possible ARM's words are refused (spare_capture owed); a figure
+        # where the refusal acted carries the label
+        if any(r == "spare_capture" for l in lanes
+               for _a, _w, r in slot_ready_tagged(graphs[l][0], I, SLOT, graphs[l][2], k)):
+            labels.append(SPARE_LABEL)
         # after the premise gaps: slot_ready's d is the release distance the certificate uses;
         # the port's wait behind older slot requesters (ContendB, FCFS by capture)
         cw = {l: slot_wait(graphs, I, l, k) for l in lanes}
@@ -722,7 +800,7 @@ def _image_budget(img, iters=80, premise_gaps=None, ready=None, scheme="window")
                 return {"B": None, "reason": why, "lanes": {}}
             return {"B": B, "reason": "certified" if scheme == "window" else
                     "certified (EDF response bounds, RespEdfClose.wb_close_edf)", "lanes": out,
-                    "timeout_rule_calls": tcalls}
+                    "timeout_rule_calls": tcalls, "labels": labels}
         if Bn > LIMIT or any(v > LIMIT for v in Rn.values()):
             return {"B": None, "reason": "no finite B (B %d -> %d, max R %d)"
                     % (B, Bn, max(Rn.values())), "lanes": {}}

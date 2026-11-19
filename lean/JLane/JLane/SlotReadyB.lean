@@ -369,8 +369,283 @@ theorem ready_pc1_plain_T (T : Nat) (hT : TrajY P win usb sreq y τ T)
     rw [cntT_succ, if_pos hw2]
   exact ⟨by omega, by omega⟩
 
+/-! ### R2b — the second fetch: `pc2_plain`, `pc2_arm` (`READY_RULES`, `Buf.p1b2_margin_*`)
+
+The ARM captured at `c` into `y`'s empty head; the requester raises at the scan after (`c + 1`)
+and again at the scan after fetch 1's capture. Fetch 2's word is held at PC+2's release `t`
+when `y` has captured three words since `c` (the ARM, PC+1, PC+2) and retired two (the ARM at
+`w1`, PC+1 at `w2`): conservation leaves one held, HeadFirst puts it in the head. The release is
+far enough out by the margins: `p1b2_margin_plain_scan` (PC+1 plain, spacing `d`) and
+`p1b2_margin_arm_scan` (PC+1 a plain edge ARM, retired after its own ArmRetire gap). -/
+
+/-- **Head from counts.** If at `t` the retirements of `y` since `c` are fewer than `y`'s holding
+at `c` plus its captures since `c`, `y`'s head is valid at `t`. -/
+theorem head_of_counts_T (T : Nat) (hT : TrajY P win usb sreq y τ T)
+    (hWf : ∀ n, n ≤ T → WfB (τ n)) (c t : Nat) (hct : c ≤ t) (ht : t ≤ T)
+    (h : cntT τ (fun z => IsRet P y z.e) t + 1 + cntT τ (fun z => Hit y z.e) c ≤
+      cntT τ (fun z => IsRet P y z.e) c + (τ c).held y + cntT τ (fun z => Hit y z.e) t) :
+    (τ t).e.headValid y = true := by
+  have hrt := held_runT P win usb sreq y τ T hT hWf t ht
+  have hrc := held_runT P win usb sreq y τ T hT hWf c (by omega)
+  apply head_of_held _ (hWf t ht) y
+  omega
+
+/-- Three captures for `y` at `c < q1 < q2 < t`. -/
+theorem cnt_three_hits (c q1 q2 t : Nat) (h1 : c < q1) (h2 : q1 < q2) (h3 : q2 < t)
+    (hc : Hit y (τ c).e) (hq1 : Hit y (τ q1).e) (hq2 : Hit y (τ q2).e) :
+    cntT τ (fun z => Hit y z.e) c + 3 ≤ cntT τ (fun z => Hit y z.e) t := by
+  have e0 : cntT τ (fun z => Hit y z.e) (c + 1) = cntT τ (fun z => Hit y z.e) c + 1 := by
+    rw [cntT_succ, if_pos hc]
+  have e1 : cntT τ (fun z => Hit y z.e) (q1 + 1) = cntT τ (fun z => Hit y z.e) q1 + 1 := by
+    rw [cntT_succ, if_pos hq1]
+  have e2 : cntT τ (fun z => Hit y z.e) (q2 + 1) = cntT τ (fun z => Hit y z.e) q2 + 1 := by
+    rw [cntT_succ, if_pos hq2]
+  have m0 := cntT_mono τ (fun z => Hit y z.e) (c + 1) q1 (by omega)
+  have m1 := cntT_mono τ (fun z => Hit y z.e) (q1 + 1) q2 (by omega)
+  have m2 := cntT_mono τ (fun z => Hit y z.e) (q2 + 1) t (by omega)
+  omega
+
+/-- **Two fetches along the trajectory.** From `y`'s capture at `c`: the requester's contract
+from the raise at `c + 1` over the wait `W1` (`L_REFILL · C1 ≤ W1`, `C1` charged scans), and
+from the raise after fetch 1's capture (any `a2` in `[c + 5, c + 5 + W1]`) over `W2`. Then
+fetch 1 is captured at `q1 ≥ c + 4`, fetch 2 at `q2 ≥ q1 + 4`, and `q2 ≤ c + 8 + W1 + W2`
+(free port: `c + 8`, `Buf.two_fetch_scan`). -/
+theorem slot_two_fetch_T (T : Nat) (hT : TrajY P win usb sreq y τ T) (old : Lane → Bool)
+    (c W1 W2 C1 C2 : Nat) (hn : c + 9 + W1 + W2 ≤ T) (hcap : Hit y (τ c).e)
+    (hq1 : ∀ j, c + 1 ≤ j → j ≤ c + 1 + W1 →
+      (∀ i, c + 1 ≤ i → i < j → ¬SlotForB P usb sreq y (τ i)) → (sreq (τ j)).isSome = true)
+    (hold1 : ∀ j, c + 1 ≤ j → j ≤ c + 1 + W1 →
+      (∀ i, c + 1 ≤ i → i < j → ¬SlotForB P usb sreq y (τ i)) →
+      ∀ w, sreq (τ j) = some w → w = y ∨ old w = true)
+    (hC1 : cntFromT τ (OldIssB P usb sreq old) (c + 1) (W1 + 1) ≤ C1)
+    (hW1 : L_REFILL * C1 ≤ W1)
+    (hq2 : ∀ a2, c + 5 ≤ a2 → a2 ≤ c + 5 + W1 → ∀ j, a2 ≤ j → j ≤ a2 + W2 →
+      (∀ i, a2 ≤ i → i < j → ¬SlotForB P usb sreq y (τ i)) → (sreq (τ j)).isSome = true)
+    (hold2 : ∀ a2, c + 5 ≤ a2 → a2 ≤ c + 5 + W1 → ∀ j, a2 ≤ j → j ≤ a2 + W2 →
+      (∀ i, a2 ≤ i → i < j → ¬SlotForB P usb sreq y (τ i)) →
+      ∀ w, sreq (τ j) = some w → w = y ∨ old w = true)
+    (hC2 : ∀ a2, c + 5 ≤ a2 → a2 ≤ c + 5 + W1 →
+      cntFromT τ (OldIssB P usb sreq old) a2 (W2 + 1) ≤ C2)
+    (hW2 : L_REFILL * C2 ≤ W2) :
+    ∃ q1 q2, c + 4 ≤ q1 ∧ q1 + 4 ≤ q2 ∧ q2 ≤ c + 8 + W1 + W2 ∧
+      Hit y (τ q1).e ∧ Hit y (τ q2).e := by
+  have hs1 : (τ (c + 1)).e.pst = .scan := hit_then_scanT P win usb sreq y τ T hT c (by omega) hcap
+  obtain ⟨j1, hj1a, hj1b, hs⟩ := slot_issue_within_T P win usb sreq y τ T hT y old (c + 1) W1 C1
+    (by omega) hq1 hold1 hC1 (by rw [hs1]; simp only [rem]; omega)
+  have hh1 := slot_issue_cap_T P win usb sreq y τ T hT j1 (by omega) hs.1 hs.2.1 hs.2.2
+  have hs2 : (τ (j1 + 4)).e.pst = .scan :=
+    hit_then_scanT P win usb sreq y τ T hT (j1 + 3) (by omega) hh1
+  obtain ⟨j2, hj2a, hj2b, hs'⟩ := slot_issue_within_T P win usb sreq y τ T hT y old (j1 + 4) W2 C2
+    (by omega) (hq2 (j1 + 4) (by omega) (by omega)) (hold2 (j1 + 4) (by omega) (by omega))
+    (hC2 (j1 + 4) (by omega) (by omega)) (by rw [hs2]; simp only [rem]; omega)
+  have hh2 := slot_issue_cap_T P win usb sreq y τ T hT j2 (by omega) hs'.1 hs'.2.1 hs'.2.2
+  exact ⟨j1 + 3, j2 + 3, by omega, by omega, by omega, hh1, hh2⟩
+
+/-- **`pc2_plain` on the buffered engine.** The ARM captured at `c` into `y`'s empty head,
+retired at `w1` (ArmRetire's gap there, `hgap`); PC+1 (any word) retired at `w2`, the only
+retirements of `y` in `[c, t)`; PC+2 released at `t` (`ts ≤ now`), `d` past PC+1's release
+(`hd`: the certificate's spacing, `d ≥ p1b2_plain_min_d` = 4); the two waits inside the margin
+`d - 4`. Then `y`'s head is valid at `t`. -/
+theorem ready_pc2_plain_T (T : Nat) (hT : TrajY P win usb sreq y τ T)
+    (hWf : ∀ n, n ≤ T → WfB (τ n)) (old : Lane → Bool) (c w1 w2 t d W1 W2 C1 C2 : Nat)
+    (ht : t ≤ T) (hcap : Hit y (τ c).e) (hempty : (τ c).e.headValid y = false)
+    (hcw : c < w1) (hw12 : w1 < w2) (hw2t : w2 < t)
+    (hw1 : IsRet P y (τ w1).e) (hw2 : IsRet P y (τ w2).e)
+    (hfirst : cntT τ (fun z => IsRet P y z.e) c = cntT τ (fun z => IsRet P y z.e) w1)
+    (hmid : cntT τ (fun z => IsRet P y z.e) (w1 + 1) = cntT τ (fun z => IsRet P y z.e) w2)
+    (hnr : cntT τ (fun z => IsRet P y z.e) (w2 + 1) = cntT τ (fun z => IsRet P y z.e) t)
+    (hrel : (τ t).e.ts y ≤ (τ t).e.now)
+    (hgap : (τ w1).e.now + ARM_RETIRE_GAP ≤ (τ (w1 + 1)).e.ts y)
+    (hd : (τ (w1 + 1)).e.ts y + d ≤ (τ (w2 + 1)).e.ts y) (hd4 : 4 ≤ d)
+    (hq1 : ∀ j, c + 1 ≤ j → j ≤ c + 1 + W1 →
+      (∀ i, c + 1 ≤ i → i < j → ¬SlotForB P usb sreq y (τ i)) → (sreq (τ j)).isSome = true)
+    (hold1 : ∀ j, c + 1 ≤ j → j ≤ c + 1 + W1 →
+      (∀ i, c + 1 ≤ i → i < j → ¬SlotForB P usb sreq y (τ i)) →
+      ∀ w, sreq (τ j) = some w → w = y ∨ old w = true)
+    (hC1 : cntFromT τ (OldIssB P usb sreq old) (c + 1) (W1 + 1) ≤ C1)
+    (hW1 : L_REFILL * C1 ≤ W1)
+    (hq2 : ∀ a2, c + 5 ≤ a2 → a2 ≤ c + 5 + W1 → ∀ j, a2 ≤ j → j ≤ a2 + W2 →
+      (∀ i, a2 ≤ i → i < j → ¬SlotForB P usb sreq y (τ i)) → (sreq (τ j)).isSome = true)
+    (hold2 : ∀ a2, c + 5 ≤ a2 → a2 ≤ c + 5 + W1 → ∀ j, a2 ≤ j → j ≤ a2 + W2 →
+      (∀ i, a2 ≤ i → i < j → ¬SlotForB P usb sreq y (τ i)) →
+      ∀ w, sreq (τ j) = some w → w = y ∨ old w = true)
+    (hC2 : ∀ a2, c + 5 ≤ a2 → a2 ≤ c + 5 + W1 →
+      cntFromT τ (OldIssB P usb sreq old) a2 (W2 + 1) ≤ C2)
+    (hW2 : L_REFILL * C2 ≤ W2) (hcm : W1 + W2 ≤ d - 4) :
+    (τ t).e.headValid y = true := by
+  have hw3 := wb_after_empty_T P win usb sreq y τ T hT hWf c w1 (by omega) hcw
+    (isWB_of_ret P y _ hw1) hempty
+  have hnow := now_T P win usb sreq y τ T hT
+  have hts := ts_monoT P win usb sreq y τ T hT (w2 + 1) (t - (w2 + 1)) (by omega)
+  rw [show w2 + 1 + (t - (w2 + 1)) = t by omega] at hts
+  have hnt := hnow t ht
+  have hnw := hnow w1 (by omega)
+  -- PC+2's release: t ≥ w1 + ARM_RETIRE_GAP + d
+  have hrt : w1 + ARM_RETIRE_GAP + d ≤ t := by omega
+  -- the margin (READY_RULES pc2_plain): fill 9 + (d - 4) ≤ (DISPATCH_CYCLES + gap) + d
+  have hm := p1b2_margin_plain_scan d hd4
+  simp only [P1B2_FILL_SCAN, DISPATCH_CYCLES, ARM_RETIRE_GAP, L_REFILL] at hm hrt
+  obtain ⟨q1, q2, hq1a, hq12, hq2b, hh1, hh2⟩ := slot_two_fetch_T P win usb sreq y τ T hT old
+    c W1 W2 C1 C2 (by omega) hcap hq1 hold1 hC1 hW1 hq2 hold2 hC2 hW2
+  have h3 := cnt_three_hits y τ c q1 q2 t (by omega) (by omega) (by omega) hcap hh1 hh2
+  have h0 := held_zero_of_empty y (τ c) (hWf c (by omega)) hempty
+  have hR1 : cntT τ (fun z => IsRet P y z.e) (w1 + 1) =
+      cntT τ (fun z => IsRet P y z.e) w1 + 1 := by rw [cntT_succ, if_pos hw1]
+  have hR2 : cntT τ (fun z => IsRet P y z.e) (w2 + 1) =
+      cntT τ (fun z => IsRet P y z.e) w2 + 1 := by rw [cntT_succ, if_pos hw2]
+  exact head_of_counts_T P win usb sreq y τ T hT hWf c t (by omega) ht (by omega)
+
+/-- The dispatcher's pick: `y` driving at `n + 1` was picked by `win` from idle at `n`. -/
+theorem disp_pick_T (T : Nat) (hT : TrajY P win usb sreq y τ T) (n : Nat) (hn : n < T)
+    (h : (τ (n + 1)).e.st = .drive) (hc : (τ (n + 1)).e.cur = y) :
+    (τ n).e.st = .idle ∧ win (τ n).e = some y := by
+  have hag := hT n hn
+  rw [hag.2.2.1, stepB_e_st] at h
+  rw [hag.2.2.2.1, stepB_e_cur] at hc
+  unfold dispNext at h hc
+  cases hs : (τ n).e.st with
+  | drive => rw [hs] at h; cases h
+  | wb => rw [hs] at h; cases h
+  | idle =>
+    rw [hs] at h hc
+    dsimp only at h hc
+    cases hw : win (τ n).e with
+    | none => rw [hw] at h; cases h
+    | some w =>
+      rw [hw] at h hc
+      dsimp only at h hc
+      by_cases hv : (τ n).e.headValid w = true
+      · rw [if_pos hv] at hc
+        exact ⟨rfl, congrArg some hc⟩
+      · rw [if_neg hv] at h; cases h
+
+/-- **`pc2_arm` on the buffered engine.** As `pc2_plain`, with PC+1 a plain edge ARM: it is
+picked only once released (`hwin`, the shipped dispatcher's rule), so it writes back at least
+`ARM_RETIRE_GAP + (DISPATCH_CYCLES - 1)` past the first ARM's writeback, and PC+2 is released
+ArmRetire's gap after that (`hgap2`): `P1B2_REL_ARM` = 9 past `c`. The two waits inside the
+margin `P1B2_MARGIN_ARM_SCAN` (= 0). Then `y`'s head is valid at `t`. -/
+theorem ready_pc2_arm_T (T : Nat) (hT : TrajY P win usb sreq y τ T)
+    (hWf : ∀ n, n ≤ T → WfB (τ n))
+    (hwin : ∀ e w, win e = some w → P.live w = true ∧ e.ts w ≤ e.now)
+    (old : Lane → Bool) (c w1 w2 t W1 W2 C1 C2 : Nat)
+    (ht : t ≤ T) (hcap : Hit y (τ c).e) (hempty : (τ c).e.headValid y = false)
+    (hcw : c < w1) (hw12 : w1 < w2) (hw2t : w2 < t)
+    (hw1 : IsRet P y (τ w1).e) (hw2 : IsRet P y (τ w2).e)
+    (hfirst : cntT τ (fun z => IsRet P y z.e) c = cntT τ (fun z => IsRet P y z.e) w1)
+    (hmid : cntT τ (fun z => IsRet P y z.e) (w1 + 1) = cntT τ (fun z => IsRet P y z.e) w2)
+    (hnr : cntT τ (fun z => IsRet P y z.e) (w2 + 1) = cntT τ (fun z => IsRet P y z.e) t)
+    (hrel : (τ t).e.ts y ≤ (τ t).e.now)
+    (hgap1 : (τ w1).e.now + ARM_RETIRE_GAP ≤ (τ (w1 + 1)).e.ts y)
+    (hgap2 : (τ w2).e.now + ARM_RETIRE_GAP ≤ (τ (w2 + 1)).e.ts y)
+    (hq1 : ∀ j, c + 1 ≤ j → j ≤ c + 1 + W1 →
+      (∀ i, c + 1 ≤ i → i < j → ¬SlotForB P usb sreq y (τ i)) → (sreq (τ j)).isSome = true)
+    (hold1 : ∀ j, c + 1 ≤ j → j ≤ c + 1 + W1 →
+      (∀ i, c + 1 ≤ i → i < j → ¬SlotForB P usb sreq y (τ i)) →
+      ∀ w, sreq (τ j) = some w → w = y ∨ old w = true)
+    (hC1 : cntFromT τ (OldIssB P usb sreq old) (c + 1) (W1 + 1) ≤ C1)
+    (hW1 : L_REFILL * C1 ≤ W1)
+    (hq2 : ∀ a2, c + 5 ≤ a2 → a2 ≤ c + 5 + W1 → ∀ j, a2 ≤ j → j ≤ a2 + W2 →
+      (∀ i, a2 ≤ i → i < j → ¬SlotForB P usb sreq y (τ i)) → (sreq (τ j)).isSome = true)
+    (hold2 : ∀ a2, c + 5 ≤ a2 → a2 ≤ c + 5 + W1 → ∀ j, a2 ≤ j → j ≤ a2 + W2 →
+      (∀ i, a2 ≤ i → i < j → ¬SlotForB P usb sreq y (τ i)) →
+      ∀ w, sreq (τ j) = some w → w = y ∨ old w = true)
+    (hC2 : ∀ a2, c + 5 ≤ a2 → a2 ≤ c + 5 + W1 →
+      cntFromT τ (OldIssB P usb sreq old) a2 (W2 + 1) ≤ C2)
+    (hW2 : L_REFILL * C2 ≤ W2) (hcm : W1 + W2 ≤ P1B2_MARGIN_ARM_SCAN) :
+    (τ t).e.headValid y = true := by
+  have hw3 := wb_after_empty_T P win usb sreq y τ T hT hWf c w1 (by omega) hcw
+    (isWB_of_ret P y _ hw1) hempty
+  -- PC+1 (the second ARM) was picked at p = w2 - 2, from idle, once released
+  have hwb2 := isWB_of_ret P y _ hw2
+  obtain ⟨m, hm⟩ : ∃ m, w2 = m + 1 := ⟨w2 - 1, by omega⟩
+  rw [hm] at hwb2
+  obtain ⟨hdr, hcur⟩ := disp_wb_T P win usb sreq y τ T hT m (by omega) hwb2.1
+  have hcy : (τ m).e.cur = y := by rw [← hcur]; exact hwb2.2
+  obtain ⟨p, hp⟩ : ∃ p, m = p + 1 := ⟨m - 1, by omega⟩
+  rw [hp] at hdr hcy
+  obtain ⟨hidle, hwp⟩ := disp_pick_T P win usb sreq y τ T hT p (by omega) hdr hcy
+  have hrp := (hwin _ _ hwp).2
+  have hpw : w1 + 1 ≤ p := by
+    rcases Nat.lt_or_ge p (w1 + 1) with hlt | hge
+    · exfalso
+      rcases Nat.lt_or_ge p w1 with hlt2 | hge2
+      · have e : p + 1 = w1 := by omega
+        rw [e, hw1.1] at hdr; cases hdr
+      · have e : p = w1 := by omega
+        rw [e, hw1.1] at hidle; cases hidle
+    · exact hge
+  have hnow := now_T P win usb sreq y τ T hT
+  have hts1 := ts_monoT P win usb sreq y τ T hT (w1 + 1) (p - (w1 + 1)) (by omega)
+  rw [show w1 + 1 + (p - (w1 + 1)) = p by omega] at hts1
+  have hts2 := ts_monoT P win usb sreq y τ T hT (w2 + 1) (t - (w2 + 1)) (by omega)
+  rw [show w2 + 1 + (t - (w2 + 1)) = t by omega] at hts2
+  have hnt := hnow t ht
+  have hnw1 := hnow w1 (by omega)
+  have hnw2 := hnow w2 (by omega)
+  have hnp := hnow p (by omega)
+  -- PC+2's release: t ≥ c + P1B2_REL_ARM
+  have hrt : c + P1B2_REL_ARM ≤ t := by
+    simp only [P1B2_REL_ARM, DISPATCH_CYCLES, ARM_RETIRE_GAP] at hgap1 hgap2 ⊢
+    omega
+  -- the margin (READY_RULES pc2_arm): fill 9 + 0 ≤ P1B2_REL_ARM
+  have hm2 := p1b2_margin_arm_scan
+  simp only [P1B2_FILL_SCAN, P1B2_MARGIN_ARM_SCAN, P1B2_REL_ARM, DISPATCH_CYCLES, ARM_RETIRE_GAP,
+    L_REFILL] at hm2 hrt hcm
+  obtain ⟨q1, q2, hq1a, hq12, hq2b, hh1, hh2⟩ := slot_two_fetch_T P win usb sreq y τ T hT old
+    c W1 W2 C1 C2 (by omega) hcap hq1 hold1 hC1 hW1 hq2 hold2 hC2 hW2
+  have h3 := cnt_three_hits y τ c q1 q2 t (by omega) (by omega) (by omega) hcap hh1 hh2
+  have h0 := held_zero_of_empty y (τ c) (hWf c (by omega)) hempty
+  have hR1 : cntT τ (fun z => IsRet P y z.e) (w1 + 1) =
+      cntT τ (fun z => IsRet P y z.e) w1 + 1 := by rw [cntT_succ, if_pos hw1]
+  have hR2 : cntT τ (fun z => IsRet P y z.e) (w2 + 1) =
+      cntT τ (fun z => IsRet P y z.e) w2 + 1 := by rw [cntT_succ, if_pos hw2]
+  exact head_of_counts_T P win usb sreq y τ T hT hWf c t (by omega) ht (by omega)
+
+/-- **The no-prefetch bridge, pointwise (Wilson 11-19).** Under the requester's contract
+`SReqB`, a lane holding a no-prefetch word -- in its head, or in a valid spare -- is never
+named by the requester, so the slot does not serve it this cycle. -/
+theorem npf_no_slot (hok : SReqB P sreq) (x : EngB)
+    (h : x.e.npf y (x.e.sel y) = true ∨
+      (x.e.spareValid y = true ∧ x.e.npf y (!x.e.sel y) = true)) :
+    ¬SlotForB P usb sreq y x := by
+  rintro ⟨-, -, hs⟩
+  obtain ⟨-, -, -, h1, h2⟩ := hok x y hs
+  rcases h with h | ⟨hv, h⟩
+  · rw [h1] at h; cases h
+  · rw [h2 hv] at h; cases h
+
+/-- **The no-prefetch bridge (Wilson 11-19): READY_RULES `pc1_not_npf`.** Under `SReqB`, if `y`
+holds a no-prefetch word (head, or valid spare) on every cycle of a wait window `[a, a + W]`,
+the requester premises of that wait -- `hq`, `hold`, `hC` with `hW` (the form `hq2 / hold2 /
+hC2 / hW2` take in `ready_pc2_plain_T` / `ready_pc2_arm_T` for each start `a2`) -- cannot all
+hold: they would give a slot for `y` inside the window (`slot_issue_within_T`). So behind a held
+branch PC+1 the second fetch's premises are never met, and the certificate's exclusion of
+`pc2_plain` there rests on this theorem. -/
+theorem npf_no_issue_T (T : Nat) (hT : TrajY P win usb sreq y τ T) (hok : SReqB P sreq)
+    (old : Lane → Bool) (a W C : Nat) (hn : a + W + 1 ≤ T)
+    (hnpf : ∀ j, a ≤ j → j ≤ a + W →
+      (τ j).e.npf y ((τ j).e.sel y) = true ∨
+        ((τ j).e.spareValid y = true ∧ (τ j).e.npf y (!(τ j).e.sel y) = true))
+    (hq : ∀ j, a ≤ j → j ≤ a + W → (∀ i, a ≤ i → i < j → ¬SlotForB P usb sreq y (τ i)) →
+      (sreq (τ j)).isSome = true)
+    (hold : ∀ j, a ≤ j → j ≤ a + W → (∀ i, a ≤ i → i < j → ¬SlotForB P usb sreq y (τ i)) →
+      ∀ w, sreq (τ j) = some w → w = y ∨ old w = true)
+    (hC : cntFromT τ (OldIssB P usb sreq old) a (W + 1) ≤ C)
+    (hW : rem (τ a).e.pst + L_REFILL * C ≤ W) : False := by
+  obtain ⟨j, h1, h2, hs⟩ :=
+    slot_issue_within_T P win usb sreq y τ T hT y old a W C hn hq hold hC hW
+  exact npf_no_slot P usb sreq y hok (τ j) (hnpf j h1 h2) hs
+
 end
 
+#print axioms npf_no_slot
+#print axioms npf_no_issue_T
+#print axioms head_of_counts_T
+#print axioms cnt_three_hits
+#print axioms slot_two_fetch_T
+#print axioms ready_pc2_plain_T
+#print axioms disp_pick_T
+#print axioms ready_pc2_arm_T
 #print axioms held_of_head
 #print axioms held_of_ret
 #print axioms ready_of_capture_T
