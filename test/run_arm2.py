@@ -20,6 +20,10 @@ Bench: test/tb_arm2.v, one scenario per run. Images built here from pe_isa.
   A1  the scenarios, baseline: every recorded cycle equals the golden's.
   A2  pe_isa refuses the bad encodings (mod[1], edge pinb, uo bank, same pin).
   A3  the must-fires: ONEPIN / EDGE / POL / UNGUARDED each turn A1 red.
+  A5  the ARM features on lanes 0-4: golden per lane + symmetry with lane 0
+      (the FT edge path's out by the K..K+1 bound, Wilson 11-19).
+  A5-FT  the FT edge path swept over every prr phase on every lane; must-fires:
+      a planted K+2 and a flattened (vacuous) lane each turn it red.
 
 POSITIVE TOKEN: `GATE arm2: PASSED`.
 """
@@ -128,6 +132,13 @@ def coverage_arms():
                                        "+PHA=%d" % pha, "+PHB=-1", "+NCYC=300",
                                        "+PHA_ABS=-1"])
              for pha in (1, 2, 3)]
+    # ⭐ A5 (11-18): every lane scenario on every lane; A5 is the judge
+    for lane in range(I.N_LANES):
+        for pn in lane_progs(*LANE_PINS[lane]):
+            I.write_image(os.path.join(ROOT, COV_DIR, "L%d_%s.hex" % (lane, pn)), lane_scen_image(pn, lane))
+        for name, pn, idle, pha, phb, pha2, ncyc, kind in LANE_SCEN:
+            arms.append(("%s_l%d" % (name, lane), ["+IMG=%s/L%d_%s.hex" % (COV_DIR, lane, pn)]
+                         + lane_plusargs(lane, idle, pha, phb, pha2, ncyc, kind)))
     return arms
 
 
@@ -319,6 +330,230 @@ LANE_CASES = {
                         I.act(I.OP_ARM, PIN_A, 1, 0), _LOOP], False),
 }
 
+# ---------------------------------------------------------------------------
+# ⭐ A5 (11-18, Wilson's toggle ruling, E1-E4): THE ARM FEATURES ON EVERY LANE.
+# The 11-14 modifiers and the two-pin level ARM were swept on lane 0 only, so
+# their per-lane state on lanes 1-4 (l_arm2, l_armpinb, l_armhalf, l_armft,
+# arm_half, ft_flush, g_arm[n].*) read uncovered. Each scenario runs the SAME
+# program on each lane (lane_image: that lane live, the rest parked), on that
+# lane's own peer pins, and is judged two ways:
+#   GOLDEN (edge / level kinds): A1's golden on that lane -- fire = max(armed,
+#     drives + L), out = fire + K, K from THAT lane's own edge control -- so an
+#     all-lane fault (the A3 mutants) turns lanes 1-4 red as well as lane 0;
+#   SYMMETRY (every kind, HALF / FT / the sequence included): each field
+#     relative to arming equals lane 0's -- a fault on one lane shows here.
+# ---------------------------------------------------------------------------
+#: (pin, pinb) per live lane: lane_image parks lane n on uio n+1, so the peer pins
+#: avoid the parked lanes' pins -- the live lane's own n+1, and uio 7 as pinb (7 sets
+#: pinb's bits 0-2; lane 0's pinb >= 4 was never swept)
+LANE_PINS = {0: (0, 7), 1: (2, 7), 2: (3, 7), 3: (4, 7), 4: (5, 7)}
+_LV1, _LV0 = I.act(I.OP_LEVEL, I.UO0, 1, D1), I.act(I.OP_LEVEL, I.UO0, 0, D1)
+
+
+def lane_progs(pa, pb):
+    """name -> the lane program (lane_image appends the parked tail)"""
+    t = lambda arm: [arm, _LV1, _LV0, _LOOP]
+    return {
+        "edge": t(I.act(I.OP_ARM, pa, 0, 200)),
+        "lvl0": t(I.act_arm2(pa, pb, 0, 200)),
+        "lvl1": t(I.act_arm2(pa, pb, 1, 0)),
+        # A1's guard on this lane: pinb on the tied-low uo bank never fires (pe_isa
+        # refuses it; the silicon's arm2_real guard is what is tested)
+        "guard": t(I.act(I.OP_ARM, pa, 0, 0, pinb=UO_PIN, mod=I.ARM_MOD_LEVEL2)),
+        "half": t(I.act_arm(pa, 0, 200, half=True)),
+        # FT: timeout -> PC+1 (loops back to the ARM), edge -> PC+2 (the LEVELs)
+        "ft": [I.act_arm(pa, 0, 200, ft=True), _LOOP, _LV1, _LV0, _LOOP],
+        # the ARM SEQUENCE: each modifier's per-lane flops loaded AND replaced in one
+        # run -- two-pin (fires on PHA + PHB) -> HALF rise (fires on PHA2) -> FT fall
+        # (times out, falls through) -> a plain ARM on pinb's rise that never comes
+        "seq": [I.act_arm2(pa, pb, 0, 0), _LV1, _LV0, I.act_arm(pa, 1, 0, half=True), _LV1, _LV0,
+                I.act_arm(pa, 0, 60, ft=True), I.act(I.OP_ARM, pb, 1, 0), _LOOP],
+    }
+
+
+#: name, program, IDLE, PHA, PHB, PHA2, NCYC, kind (A1's kinds; "rel" = symmetry only)
+LANE_SCEN = [
+    ("L_edge", "edge", 1, 50, -1, -1, 300, "edge"),
+    ("L_lvl0", "lvl0", 1, 50, 57, -1, 300, "fire"),
+    ("L_lvl1", "lvl1", 0, 30, 45, -1, 300, "fire"),
+    ("L_lvl0_to", "lvl0", 1, 30, -1, -1, 700, "timeout"),
+    ("L_guard", "guard", 1, 30, -1, -1, 600, "none"),
+    ("L_half", "half", 1, 50, -1, -1, 300, "rel"),
+    ("L_ft_edge", "ft", 1, 50, -1, -1, 300, "rel"),
+    ("L_ft_to", "ft", 1, -1, -1, -1, 700, "rel"),
+    ("L_seq", "seq", 1, 20, 20, 100, 500, "rel"),
+]
+_REL = ("ta", "tb", "fire", "out")
+
+# ⭐ THE FT EDGE PATH IS JUDGED BY A BOUND, NOT BY SYMMETRY (Wilson 11-18 / 11-19).
+# After the FT edge flushes both slots the HEAD refills first (the EDF-first branch),
+# then the SPARE waits for the round-robin pointer `prr`, which restarts at 0 and
+# steps one lane per idle cycle; when (lane - prr phase at the edge) mod 5 falls in a
+# two-lane window the spare lands after the next dispatch would have gone, and that
+# dispatch waits ONE cycle. Traced 11-18: every lane takes the +1 at some phase,
+# period 5, two adjacent lanes at a time; the plain-edge control is K everywhere.
+# So out - fire on the FT edge path is K or K + 1 -- `FT_LATE` -- on any lane, and
+# exact symmetry with lane 0 is the check for every OTHER field and scenario.
+# Why not an exact golden modelling prr (ruling (a)): the buffer RTL issues at
+# capture, so the scan should not be involved after an FT flush at all.
+# ⛔ THE PREDICTION FOR THE BUFFER RTL (an exact golden, the RTL batch's checks):
+#    out - fire = K on EVERY lane at EVERY phase -- FT_LATE goes to 0 there.
+FT_LATE = 1
+#: the A5-FT sweep's edge drives (cycles after arming): six consecutive phases, so
+#: each lane meets every prr phase (period 5) at least once -- 30 runs
+FT_SWEEP_PHA = range(50, 56)
+
+
+def ft_out_problem(tag, rec, k):
+    """'' or the problem: K <= out - fire <= K + FT_LATE on the FT edge path"""
+    if k is None:
+        return "%s: no K -- the lane's edge control did not fire" % tag
+    if rec["fire"] < 0 or rec["out"] < 0:
+        return "%s: fire %d out %d -- the FT edge path did not run" % (tag, rec["fire"], rec["out"])
+    d = rec["out"] - rec["fire"]
+    if not k <= d <= k + FT_LATE:
+        return "%s: out - fire = %d, outside K..K+%d = %d..%d" % (tag, d, FT_LATE, k, k + FT_LATE)
+    return ""
+
+
+def lane_scen_image(prog_name, lane):
+    pa, pb = LANE_PINS[lane]
+    return lane_image(lane_progs(pa, pb)[prog_name], lane)
+
+
+def lane_plusargs(lane, idle, pha, phb, pha2, ncyc, kind):
+    pa, pb = LANE_PINS[lane]
+    return (["+IDLE=%d" % idle, "+PHA=%d" % pha, "+PHB=%d" % phb, "+PHA2=%d" % pha2,
+             "+NCYC=%d" % ncyc, "+LANE=%d" % lane, "+PINA=%d" % pa, "+PINB=%d" % pb,
+             "+PHA_ABS=-1"] + (["+QUIESCENT"] if kind in ("none", "timeout") else []))
+
+
+def lane_records(vvp, tmp, tag=""):
+    """-> {(scenario, lane): record or None}, on one build"""
+    recs = {}
+    for lane in range(I.N_LANES):
+        for name, pn, idle, pha, phb, pha2, ncyc, kind in LANE_SCEN:
+            p = os.path.join(tmp, "arm2_L%s_%s_%d.hex" % (tag, pn, lane))
+            if not os.path.isfile(p):
+                I.write_image(p, lane_scen_image(pn, lane))
+                sim_run.scratch_image(GEN, p)
+            r = run(sim_run.vvp([vvp, "+IMG=%s" % p]
+                                + lane_plusargs(lane, idle, pha, phb, pha2, ncyc, kind), images=[p]))
+            m = re.search(r"^ARM2 (.*)$", r.stdout + r.stderr, re.M)
+            recs[(name, lane)] = ({k: int(v) for k, v in (kv.split("=") for kv in m.group(1).split())}
+                                  if m else None)
+    return recs
+
+
+def lane_problems(recs):
+    """[problem]: A1's golden per lane (K from that lane's edge control) and the
+    symmetry of every scenario against lane 0 -- the judge A5's verdicts go through."""
+    out = []
+    for lane in range(I.N_LANES):
+        e = recs.get(("L_edge", lane))
+        k = (e["out"] - e["fire"]) if e and e["fire"] >= 0 and e["out"] >= 0 else None
+        for name, _pn, _i, _a, _b, _a2, _n, kind in LANE_SCEN:
+            rec = recs.get((name, lane))
+            tag = "%s@lane%d" % (name, lane)
+            if rec is None:
+                out.append("%s: no ARM2 line" % tag)
+                continue
+            if kind != "rel":
+                if k is None and kind != "edge":
+                    out.append("%s: no K -- lane %d's edge control did not fire" % (tag, lane))
+                else:
+                    out += scenario_problems(tag, kind, rec, k)
+            ft = name == "L_ft_edge"
+            if ft:
+                x = ft_out_problem(tag, rec, k)
+                if x:
+                    out.append(x)
+            ref = recs.get((name, 0))
+            if lane and ref:
+                rel = lambda r, f: r[f] - r["armed"] if r[f] >= 0 and r["armed"] >= 0 else r[f]
+                for f in _REL:
+                    if ft and f == "out":
+                        continue          # the FT edge's out: the bound above, not symmetry
+                    if rel(rec, f) != rel(ref, f):
+                        out.append("%s: %s - armed = %d, lane 0 gives %d" % (tag, f, rel(rec, f), rel(ref, f)))
+                for f in ("live", "to", "oe", "x"):
+                    if rec[f] != ref[f]:
+                        out.append("%s: %s = %d, lane 0 gives %d" % (tag, f, rec[f], ref[f]))
+            if kind == "rel" and rec["oe"] + rec["x"]:
+                out.append("%s: the engine drove uio or the bus went X" % tag)
+    return out
+
+
+def ft_sweep(vvp, tmp):
+    """-> {(pha, lane): record or None}: A5's FT edge scenario at every FT_SWEEP_PHA"""
+    recs = {}
+    for lane in range(I.N_LANES):
+        p = os.path.join(tmp, "arm2_L_ft_%d.hex" % lane)
+        if not os.path.isfile(p):
+            I.write_image(p, lane_scen_image("ft", lane))
+            sim_run.scratch_image(GEN, p)
+        for pha in FT_SWEEP_PHA:
+            r = run(sim_run.vvp([vvp, "+IMG=%s" % p]
+                                + lane_plusargs(lane, 1, pha, -1, -1, 300, "rel"), images=[p]))
+            m = re.search(r"^ARM2 (.*)$", r.stdout + r.stderr, re.M)
+            recs[(pha, lane)] = ({k: int(v) for k, v in (kv.split("=") for kv in m.group(1).split())}
+                                 if m else None)
+    return recs
+
+
+def ft_sweep_problems(sweep, ks):
+    """[problem]: every cell inside the bound, the fire on the golden (drive + L), and
+    NOT VACUOUS -- each lane reaches both K and K + FT_LATE somewhere in the sweep"""
+    out = []
+    for lane in range(I.N_LANES):
+        seen = set()
+        for pha in FT_SWEEP_PHA:
+            tag = "A5-FT pha %d@lane%d" % (pha, lane)
+            rec = sweep.get((pha, lane))
+            if rec is None:
+                out.append("%s: no ARM2 line" % tag)
+                continue
+            if rec["ta"] < 0 or rec["fire"] != rec["ta"] + L:
+                out.append("%s: fire %d, the golden gives drive %d + %d" % (tag, rec["fire"], rec["ta"], L))
+            x = ft_out_problem(tag, rec, ks.get(lane))
+            if x:
+                out.append(x)
+            elif ks.get(lane) is not None:
+                seen.add(rec["out"] - rec["fire"] - ks[lane])
+            if rec["oe"] + rec["x"]:
+                out.append("%s: the engine drove uio or the bus went X" % tag)
+        for late in range(FT_LATE + 1):
+            if late not in seen:
+                out.append("A5-FT lane %d: out - fire = K+%d never seen in the sweep -- the bound "
+                           "is not exercised (vacuous)" % (lane, late))
+    return out
+
+
+def ft_sweep_plants(sweep, ks):
+    """the sweep judge's must-fires, on the measured records: per lane, (1) one cell
+    planted at K + 2 must turn THAT lane red; (2) every K+1 cell flattened to K must
+    turn the non-vacuity check red on that lane. -> [(plant, lane, red?)]"""
+    res = []
+    for lane in range(I.N_LANES):
+        cells = [pha for pha in FT_SWEEP_PHA if sweep.get((pha, lane))]
+        if not cells or ks.get(lane) is None:
+            res.append(("+2", lane, False))
+            res.append(("flat", lane, False))
+            continue
+        s = dict(sweep)
+        r = dict(s[(cells[0], lane)])
+        r["out"] = r["fire"] + ks[lane] + FT_LATE + 1
+        s[(cells[0], lane)] = r
+        res.append(("+2", lane, any(("@lane%d:" % lane) in x for x in ft_sweep_problems(s, ks))))
+        s = dict(sweep)
+        for pha in cells:
+            r = dict(s[(pha, lane)])
+            r["out"] = r["fire"] + ks[lane]
+            s[(pha, lane)] = r
+        res.append(("flat", lane, any(x.startswith("A5-FT lane %d:" % lane) for x in ft_sweep_problems(s, ks))))
+    return res
+
+
 #: mutant -> (what it breaks, the scenario that must go red)
 MUTANTS = [
     ("M_ARM2_ONEPIN", "pinb ignored: fires on one pin", "one_pin_long"),
@@ -350,6 +585,56 @@ def main() -> int:
     for x in p:
         print("    *** %s" % x)
     probs += p
+
+    print("\n  A5 the ARM features on every lane (golden per lane + symmetry with lane 0)")
+    for lane in range(I.N_LANES):
+        for pn in lane_progs(*LANE_PINS[lane]):
+            img = lane_scen_image(pn, lane)
+            pr = I.arm_problems(img) + I.arm_lane_problems(img)
+            if bool(pr) != (pn == "guard"):
+                probs.append("A5 image %s on lane %d: pe_isa %s" % (
+                    pn, lane, pr if pr else "ACCEPTED the uo-bank guard"))
+    lrecs = lane_records(vvp, tmp)
+    print("    %-12s %s" % ("scenario", "  ".join("lane%d armed/fire/out" % n for n in range(I.N_LANES))))
+    for name, *_ in LANE_SCEN:
+        cells = []
+        for lane in range(I.N_LANES):
+            r = lrecs.get((name, lane)) or {}
+            cells.append("%5s/%5s/%5s" % (r.get("armed"), r.get("fire"), r.get("out")))
+        print("    %-12s %s" % (name, "  ".join(cells)))
+    lp = lane_problems(lrecs)
+    for x in lp:
+        print("    *** %s" % x)
+    print("    A5: %s" % ("every lane on the golden and symmetric with lane 0" if not lp else "%d problem(s)" % len(lp)))
+    probs += lp
+
+    # A5-FT: the FT edge path across every prr phase on every lane (Wilson 11-19)
+    print("\n  A5-FT the FT edge path, edge swept %d..%d on every lane: out - fire (K = the lane's edge control)"
+          % (FT_SWEEP_PHA[0], FT_SWEEP_PHA[-1]))
+    ks = {}
+    for lane in range(I.N_LANES):
+        e = lrecs.get(("L_edge", lane))
+        ks[lane] = (e["out"] - e["fire"]) if e and e["fire"] >= 0 and e["out"] >= 0 else None
+    sweep = ft_sweep(vvp, tmp)
+    print("    %-4s %s" % ("PHA", "  ".join("lane%d" % n for n in range(I.N_LANES))))
+    for pha in FT_SWEEP_PHA:
+        cells = []
+        for lane in range(I.N_LANES):
+            r = sweep.get((pha, lane))
+            cells.append("%5s" % ((r["out"] - r["fire"]) if r and r["fire"] >= 0 and r["out"] >= 0 else "-"))
+        print("    %-4d %s" % (pha, "  ".join(cells)))
+    print("    K     %s" % "  ".join("%5s" % ks[n] for n in range(I.N_LANES)))
+    fp = ft_sweep_problems(sweep, ks)
+    for x in fp:
+        print("    *** %s" % x)
+    print("    A5-FT: %s" % ("every cell in K..K+%d, every lane reaches both" % FT_LATE if not fp
+                              else "%d problem(s)" % len(fp)))
+    probs += fp
+    for plant, lane, red in ft_sweep_plants(sweep, ks):
+        what = "a cell at K+2" if plant == "+2" else "every K+1 flattened to K (non-vacuity)"
+        print("    must-fire %-4s lane %d  %-40s %s" % (plant, lane, what, "RED (killed)" if red else "*** SURVIVED"))
+        if not red:
+            probs.append("A5-FT plant %s on lane %d survived the judge" % (plant, lane))
 
     print("\n  A2 pe_isa refusals")
     good = [n for n in IMAGES if n != "guard_noto"]
@@ -406,6 +691,13 @@ def main() -> int:
         print("    %-18s %-46s %s" % (d, what, ("RED on %s" % scen) if hit else "*** SURVIVED on %s" % scen))
         if not hit:
             probs.append("%s survived (%s)" % (d, scen))
+        # A5's judge must see an all-lane fault on lanes 1-4 too (the per-lane golden)
+        lhit = sorted({x.split(":")[0] for x in lane_problems(lane_records(mv, tmp, d))
+                       if "@lane0" not in x.split(":")[0]})
+        print("    %-18s %-46s %s" % ("", "... A5 on lanes 1-4", ("RED on %d scenario-lanes" % len(lhit))
+                                      if lhit else "*** SURVIVED on lanes 1-4"))
+        if not lhit:
+            probs.append("%s survived A5 on lanes 1-4" % d)
 
     print()
     if probs:

@@ -13,6 +13,11 @@
  *   +PHA=<n>     cycles after ARMING at which uio[0] flips to ~IDLE (-1 never)
  *   +PHB=<n>     the same for uio[1]
  *   +NCYC=<n>    cycles to record after arming
+ *   +LANE=<n>    the lane whose arming / fire / live / timeout are recorded (default 0;
+ *                11-18, Wilson's toggle ruling: the ARM features on lanes 1-4)
+ *   +PINA=<n> +PINB=<n>  the uio pins the bench drives as the peer (default 0 / 1)
+ *   +PHA2=<n>    a SECOND flip of uio[PINA], cycles after arming (-1 never): the
+ *                ARM-sequence image's later edge ARM
  *
  * Prints one line: ARM2 armed=<c> ta=<c> tb=<c> fire=<c> out=<c> oe=<n> x=<n>
  *                  live=<0|1> to=<0|1>
@@ -51,7 +56,7 @@ module tb_arm2;
   localparam integer PIN_PTR  = 5;
   localparam integer PIN_WR   = 6;
 
-  integer i, cyc, idle, pha, phb, ncyc;
+  integer i, cyc, idle, pha, phb, ncyc, lane, pina, pinb, pha2;
   integer t_armed, t_a, t_b, t_fire, t_out, oe_viol, x_viol, pha_abs;
   reg     prev_uo0;
 
@@ -76,9 +81,9 @@ module tb_arm2;
         @(negedge clk); ui_in[PIN_WR] = 1'b0;
         @(posedge clk);
       end
-      // RUN: the bench keeps driving uio[1:0] as the peer, at IDLE
+      // RUN: the bench keeps driving uio[PINA] / uio[PINB] as the peer, at IDLE
       @(negedge clk); ui_in[PIN_PROG] = 1'b0;
-      uio_oe_tb = 8'h03;
+      uio_oe_tb = (8'h01 << pina) | (8'h01 << pinb);
       uio_drv   = idle ? 8'hFF : 8'h00;
     end
   endtask
@@ -94,6 +99,10 @@ module tb_arm2;
     // so the pin must move before the bench has seen l_armed (2-flop synchroniser)
     if (!$value$plusargs("PHA_ABS=%d", pha_abs)) pha_abs = -1;
     if (!$value$plusargs("NCYC=%d", ncyc)) ncyc = 400;
+    if (!$value$plusargs("LANE=%d", lane)) lane = 0;
+    if (!$value$plusargs("PINA=%d", pina)) pina = 0;
+    if (!$value$plusargs("PINB=%d", pinb)) pinb = 1;
+    if (!$value$plusargs("PHA2=%d", pha2)) pha2 = -1;
     $readmemh(imgfile, img);
     `PE_REQUIRE_IMG_LOADED(imgfile)
     img_bytes = 0;
@@ -110,9 +119,9 @@ module tb_arm2;
     for (i = 0; i < 2000 && t_armed < 0; i = i + 1) begin
       @(posedge clk); cyc = cyc + 1;
       @(negedge clk);
-      if (pha_abs >= 0 && cyc == pha_abs) begin uio_drv[0] = ~uio_drv[0]; t_a = cyc; end
-      if (dut.u_eng.l_armed[0] === 1'b1) t_armed = cyc;
-      if (dut.u_eng.arm_hit[0] === 1'b1 && t_fire < 0) t_fire = cyc;
+      if (pha_abs >= 0 && cyc == pha_abs) begin uio_drv[pina] = ~uio_drv[pina]; t_a = cyc; end
+      if (dut.u_eng.l_armed[lane] === 1'b1) t_armed = cyc;
+      if (dut.u_eng.arm_hit[lane] === 1'b1 && t_fire < 0) t_fire = cyc;
     end
     // RECORD: drives land on falling edges, after that edge's sample
     for (i = 0; i < ncyc; i = i + 1) begin
@@ -122,20 +131,21 @@ module tb_arm2;
       if (uio_oe !== 8'h00) oe_viol = oe_viol + 1;
       if (^uio_in === 1'bx) x_viol = x_viol + 1;
       @(negedge clk);
-      if (dut.u_eng.arm_hit[0] === 1'b1 && t_fire < 0) t_fire = cyc;
+      if (dut.u_eng.arm_hit[lane] === 1'b1 && t_fire < 0) t_fire = cyc;
       if (pha_abs >= 0 && cyc == pha_abs) begin
-        uio_drv[0] = ~uio_drv[0]; t_a = cyc;
+        uio_drv[pina] = ~uio_drv[pina]; t_a = cyc;
       end
       if (t_armed >= 0 && pha >= 0 && cyc == t_armed + pha) begin
-        uio_drv[0] = ~uio_drv[0]; t_a = cyc;
+        uio_drv[pina] = ~uio_drv[pina]; t_a = cyc;
       end
+      if (t_armed >= 0 && pha2 >= 0 && cyc == t_armed + pha2) uio_drv[pina] = ~uio_drv[pina];
       if (t_armed >= 0 && phb >= 0 && cyc == t_armed + phb) begin
-        uio_drv[1] = ~uio_drv[1]; t_b = cyc;
+        uio_drv[pinb] = ~uio_drv[pinb]; t_b = cyc;
       end
     end
     $display("ARM2 armed=%0d ta=%0d tb=%0d fire=%0d out=%0d oe=%0d x=%0d live=%0d to=%0d",
              t_armed, t_a, t_b, t_fire, t_out, oe_viol, x_viol,
-             dut.u_eng.l_live[0], dut.u_eng.l_timeout_m[0] | dut.u_eng.l_timeout_k[0]);
+             dut.u_eng.l_live[lane], dut.u_eng.l_timeout_m[lane] | dut.u_eng.l_timeout_k[lane]);
     $finish;
   end
 
