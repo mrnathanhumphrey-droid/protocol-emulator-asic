@@ -171,7 +171,9 @@ KEY = ("dstar", "dstar29", "dstar39", "dstar39_v2", "dstar39_st", "dstar39_hold"
        # Count.lean (Wilson 11-19 flag ruling): at most one writeback (so one POST) per cycle
        "wb_unique",
        # OrderK.lean (K6 step 1): fetch order on the flushed run, under the keep premise KeepOk
-       "ordBK_init", "ordBK_step", "ordBK_run")
+       "ordBK_init", "ordBK_step", "ordBK_run",
+       # OrderK.lean (K6 step 2): the edge word at the edge from the order (no hidx), hord derived
+       "hasEdge_of_head", "nr_le_runBK", "hord_runBK", "ready_ft_edge_K")
 #: proof_constants.load() key -> the Lean expression that must evaluate to it (SPEC: the map)
 CONSTS = {
     "lemmaA_window": "LEMMA_A_WINDOW", "R_base": "R_BASE", "dispatch_cycles": "DISPATCH_CYCLES",

@@ -1,4 +1,4 @@
-import JLane.FlushHeld
+import JLane.ComposeB
 /-!
 # Brick K6a — fetch order on the flushed run (Wilson's K6, the order-invariant build, step 1)
 
@@ -297,8 +297,129 @@ theorem ordBK_run (hok : SReqB P sreq) (flt : Nat → Lane → Bool) (kt : Nat �
 
 end
 
+/-! ### Step 2: the edge word at the edge, and `hord`, from the order
+
+With `OrdBK` on the run, the head's index is `nr`. So at an edge where the kept index is the
+lane's retirement count (`hkeep`: K3(a)), a valid head IS the edge word: `ComposeB`'s `hidx`
+(which slot fetch brings it) is not needed, and neither is the persistence argument behind
+`hord`. `hord` itself also follows: a retirement at an earlier cycle consumes the head, whose
+index is the retirement count then, strictly below the count at the edge. -/
+
+/-- A valid head with index `kk = nr` means the lane holds the edge word `kk`. -/
+theorem hasEdge_of_head (X : EngBK) (hO : OrdBK X) (y : Lane) (kk : Nat)
+    (hv : X.x.e.headValid y = true) (hk : kk = X.x.nr y) : X.base.hasEdge y kk = true := by
+  have h1 := hO.o1 y hv
+  have hv' : X.x.e.actv y (X.x.e.sel y) = true := hv
+  have hs : X.base.inSlot y kk (X.base.e.sel y) = true := by
+    unfold EngB.inSlot
+    rw [base_e, base_sq, h1, ← hk, hv']
+    simp
+  unfold EngB.hasEdge
+  cases hsel : X.base.e.sel y
+  · rw [hsel] at hs
+    simp [hs]
+  · rw [hsel] at hs
+    simp [hs]
+
+theorem nrB_ge (P : Program) (x : EngB) (l : Lane) : x.nr l ≤ nrB P x l := by
+  unfold nrB
+  split <;> omega
+
+section
+variable (P : Program) (win : Engine → Option Lane) (usb : Option Lane)
+  (sreq : EngB → Option Lane)
+
+theorem nr_runBK_succ (fl : Nat → Lane → Bool) (k : Nat → Lane → Nat) (X0 : EngBK) (m : Nat) :
+    (runBK P win usb sreq fl k (m + 1) X0).x.nr = nrB P (runBK P win usb sreq fl k m X0).base := by
+  rw [runBK_succ']
+  rfl
+
+/-- The retirement count never decreases along the run. -/
+theorem nr_le_runBK (fl : Nat → Lane → Bool) (k : Nat → Lane → Nat) (X0 : EngBK) (y : Lane) :
+    ∀ d i, (runBK P win usb sreq fl k i X0).x.nr y ≤ (runBK P win usb sreq fl k (i + d) X0).x.nr y
+  | 0, _ => Nat.le_refl _
+  | d + 1, i => by
+    have ih := nr_le_runBK fl k X0 y d i
+    have hs := nrB_ge P (runBK P win usb sreq fl k (i + d) X0).x y
+    rw [show i + (d + 1) = (i + d) + 1 by omega, nr_runBK_succ, nrB_base]
+    omega
+
+/-- **`hord` from the order** (the premise of `ComposeB.ready_ft_edge_T`): a retirement of `y`
+at a cycle `i` before the edge `f` never consumes the edge word `k = nr` (at `f`). -/
+theorem hord_runBK (hok : SReqB P sreq) (fl : Nat → Lane → Bool) (k : Nat → Lane → Nat)
+    (X0 : EngBK) (hI : WfBK X0) (hO : OrdBK X0) (y : Lane) (i f : Nat) (hif : i < f)
+    (hF : ∀ j, j < f → FlushOk P win usb sreq (fl (runBK P win usb sreq fl k j X0).x.e.now)
+      (runBK P win usb sreq fl k j X0))
+    (hK : ∀ j, j < f → KeepOk P (fl (runBK P win usb sreq fl k j X0).x.e.now)
+      (k (runBK P win usb sreq fl k j X0).x.e.now) (runBK P win usb sreq fl k j X0))
+    (hkeep : k (runBK P win usb sreq fl k f X0).x.e.now y
+      = (runBK P win usb sreq fl k f X0).x.nr y) :
+    (runBK P win usb sreq fl k i X0).base.e.st = .wb →
+      y = (runBK P win usb sreq fl k i X0).base.e.cur →
+      P.ret (runBK P win usb sreq fl k i X0).base.e.now
+        (runBK P win usb sreq fl k i X0).base.e.cur = true →
+      (runBK P win usb sreq fl k i X0).base.inSlot y
+        (k (runBK P win usb sreq fl k f X0).x.e.now y)
+        ((runBK P win usb sreq fl k i X0).base.e.sel y) = false := by
+  intro hst hy hret
+  have hWi := wfBK_run P win usb sreq hok fl k i X0 hI (fun j hj => hF j (by omega))
+  have hOi := ordBK_run P win usb sreq hok fl k i X0 hI hO (fun j hj => hF j (by omega))
+    (fun j hj => hK j (by omega))
+  have hvb := hWi.wf.disp (by rw [hst]; decide)
+  have hbe := base_e (runBK P win usb sreq fl k i X0)
+  rw [← hy, hbe] at hvb
+  rw [hbe] at hst hy hret
+  have hR : IsRet P y (runBK P win usb sreq fl k i X0).x.e :=
+    ⟨hst, hy.symm, by rw [hy]; exact hret⟩
+  have h1 : (runBK P win usb sreq fl k (i + 1) X0).x.nr y
+      = (runBK P win usb sreq fl k i X0).x.nr y + 1 := by
+    rw [nr_runBK_succ, nrB_base, nrB_eq, if_pos hR]
+  have h2 := nr_le_runBK P win usb sreq fl k X0 y (f - (i + 1)) (i + 1)
+  rw [show i + 1 + (f - (i + 1)) = f by omega] at h2
+  have hne : (runBK P win usb sreq fl k i X0).x.nr y
+      ≠ k (runBK P win usb sreq fl k f X0).x.e.now y := by omega
+  unfold EngB.inSlot
+  rw [hbe, base_sq, hOi.o1 y hvb]
+  simp [hne]
+
+/-- **`ready_ft_edge_T` from the order** (K6 step 2). On a run with fetch order (`OrdBK`, kept
+by `KeepOk` at every earlier cycle), at a flush `f` of `y` whose kept index is `y`'s retirement
+count (`hkeep`, K3(a)), a valid head at `f` (`ComposeB.head_valid_runBK`, L3) is the edge word:
+the edge word is present, and the cycle after the edge it is `y`'s valid head, released that
+cycle. No slot-wait premises, no `hidx`, no `hord`. -/
+theorem ready_ft_edge_K (hok : SReqB P sreq) (fl : Nat → Lane → Bool) (k : Nat → Lane → Nat)
+    (X0 : EngBK) (hI : WfBK X0) (hO : OrdBK X0) (y : Lane) (f : Nat)
+    (hF : ∀ j, j < f → FlushOk P win usb sreq (fl (runBK P win usb sreq fl k j X0).x.e.now)
+      (runBK P win usb sreq fl k j X0))
+    (hK : ∀ j, j < f → KeepOk P (fl (runBK P win usb sreq fl k j X0).x.e.now)
+      (k (runBK P win usb sreq fl k j X0).x.e.now) (runBK P win usb sreq fl k j X0))
+    (hfl : fl (runBK P win usb sreq fl k f X0).x.e.now y = true)
+    (hkeep : k (runBK P win usb sreq fl k f X0).x.e.now y
+      = (runBK P win usb sreq fl k f X0).x.nr y)
+    (hv : (runBK P win usb sreq fl k f X0).x.e.headValid y = true) :
+    (runBK P win usb sreq fl k f X0).base.hasEdge y
+      (k (runBK P win usb sreq fl k f X0).x.e.now y) = true ∧
+    (runBK P win usb sreq fl k (f + 1) X0).x.e.headValid y = true ∧
+    (runBK P win usb sreq fl k (f + 1) X0).x.sq y
+      ((runBK P win usb sreq fl k (f + 1) X0).x.e.sel y)
+      = k (runBK P win usb sreq fl k f X0).x.e.now y ∧
+    (runBK P win usb sreq fl k (f + 1) X0).x.e.ts y
+      = (runBK P win usb sreq fl k (f + 1) X0).x.e.now := by
+  have hOf := ordBK_run P win usb sreq hok fl k f X0 hI hO hF hK
+  have hE := hasEdge_of_head _ hOf y _ hv hkeep
+  refine ⟨hE, ?_⟩
+  have := edge_survives_flushK P win usb sreq _ _ (runBK P win usb sreq fl k f X0) y hfl hE
+  rw [← runBK_succ'] at this
+  exact this
+
+end
+
 #print axioms ordBK_step
 #print axioms ordBK_run
 #print axioms ordBK_init
+#print axioms hasEdge_of_head
+#print axioms nr_le_runBK
+#print axioms hord_runBK
+#print axioms ready_ft_edge_K
 
 end JLane
