@@ -66,7 +66,8 @@ RTL_CONTRACTS = {
     "K7": {
         "what": "one fetch pointer per lane, shared by the slot fetches and the base refill; the "
                 "replay compares fetch indices (Wilson 11-19)",
-        "lean": "BufEng fetch indices (issue_index, order_kept)",
+        "lean": "BufEng fetch indices (issue_index, order_kept); on the flushed run "
+                "OrderK.ordBK_run",
         "must_fire": {"status": OWED, "name": None}},
     "issue_at_capture": {
         "what": "an ARM's slot request is raised at its capture and held, cycle by cycle, until "
@@ -138,12 +139,14 @@ CONTRACT_PREMISES = {
                "second flush within 2 cycles could break (composition L1, d03bf22)"},
     "fetch_order": {
         "rtl": ("K7",),
-        "why": "ComposeB.ready_ft_edge_T's hidx / hord: the first slot fetch after an FT ARM's "
-               "capture fetches its edge word, and the edge word sits behind the ARM (never the "
-               "head a retirement consumes before the edge). The engine tracks fetch order, not "
-               "addresses, and its ghost index restarts at nr + held after a flush, so this is "
-               "K7 (one fetch pointer per lane) + the edge-first order in K6's entry; the K6 "
-               "order-invariant build would prove it (Nate 11-19, option 1)"},
+        "why": "OrderK's keep premise (K6 build, Nate 11-20): KeepOk at every flush and hkeep at "
+               "the edge -- the kept word's fetch index is the lane's retirement count, i.e. the "
+               "edge word is the lane's oldest unretired word and the lane does not retire in "
+               "the edge cycle (agent 1's 'K3(a): the edge word heads the lane at f+1'). Under "
+               "it the order holds on the flushed run (OrderK.ordBK_run), hord is proved "
+               "(hord_runBK) and hidx is not needed (ready_ft_edge_K). This is K7 (one fetch "
+               "pointer per lane) + the edge-first order; a proof from the arming chain (the "
+               "armed lane is not dispatched) is owed"},
 }
 
 #: THE MILESTONE (Wilson 11-18 / 11-19): slot_on_composition -- GapRun on the buffered engine with
@@ -184,11 +187,13 @@ COMPOSITION = {
              "theorems": ("armed_origin", "hedge_runBK", "hedge_runBK_armed")},
             {"step": "hword: the edge word in time", "status": "proved",
              "theorems": ("slot_cap_index", "held_persist_runBK")},
-            {"step": "fetch-order premises hidx / hord", "status": "owed",
-             "what": "ready_ft_edge_T's premises: the first slot fetch after an FT ARM's "
-                     "capture fetches its edge word (hidx), and the edge word is never the head a "
-                     "retirement consumes before the edge (hord) -- K7 + the edge-first order "
-                     "(CONTRACT_PREMISES fetch_order); a proof is the K6 order-invariant build"},
+            {"step": "fetch order on the flushed run (K6 steps 1-2)", "status": "proved",
+             "theorems": ("ordBK_run", "hord_runBK", "ready_ft_edge_K")},
+            {"step": "keep premise KeepOk / hkeep", "status": "owed",
+             "what": "at every flush the kept word's index is the lane's retirement count (the "
+                     "edge word is the oldest unretired word; no retirement in the edge cycle) -- "
+                     "CONTRACT_PREMISES fetch_order (K7 + the edge-first order); a proof from the "
+                     "arming chain is owed"},
             {"step": "contracts for hedge-timing and ScanOk", "status": "owed",
              "what": "flush_spacing_runBA / flushOk_runBA take 'edge >= arming writeback + 1' and "
                      "agent 1's scan fix (ScanOk); neither is in CONTRACT_PREMISES yet -- RTL "
