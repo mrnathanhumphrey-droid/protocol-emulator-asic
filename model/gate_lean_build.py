@@ -148,7 +148,9 @@ KEY = ("dstar", "dstar29", "dstar39", "dstar39_v2", "dstar39_st", "dstar39_hold"
        "npf_no_slot", "npf_no_issue_T",
        # ComposeB.lean (Wilson 11-19, composition L1): the run cut at y's last flush -- the
        # restart window f+1 / f+2, and the stretch from f+3 as a well-formed trajectory
-       "last_true", "flush_cut", "restart_head_12", "restart_head_runBK", "stretch_after_flush")
+       "last_true", "flush_cut", "restart_head_12", "restart_head_runBK", "stretch_after_flush",
+       # ComposeB.lean (composition L2): the first stretch, from a start with no kill pending
+       "no_kill_one", "stretch_first")
 #: proof_constants.load() key -> the Lean expression that must evaluate to it (SPEC: the map)
 CONSTS = {
     "lemmaA_window": "LEMMA_A_WINDOW", "R_base": "R_BASE", "dispatch_cycles": "DISPATCH_CYCLES",

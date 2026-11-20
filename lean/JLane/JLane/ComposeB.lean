@@ -125,6 +125,63 @@ theorem stretch_after_flush (hok : SReqB P sreq) (fl : Nat → Lane → Bool) (k
   · exact wfB_runBK P win usb sreq hok fl k X0 hI (f + 3) (t - (f + 3))
       (fun j hj => hF j (by omega))
 
+/-! ### L2: the first stretch (no flush of `y` yet)
+
+`trajY_runBK_noflush` starts at `s ≥ 2`: a killed capture at `m + 2` is traced back to a flush at
+`m` or `m + 1`. Cycles 0 and 1 have no two cycles behind them inside the run; they are covered by
+the start having no kill pending (`X0.pkill = false`): at cycle 0 nothing is killed, and a killed
+capture for `y` at cycle 1 would need the kill set at cycle 0 by a flush of `y`. -/
+
+/-- **No killed capture for `y` at cycle 1**: the start has no kill pending and `y` is not flushed
+at cycle 0. -/
+theorem no_kill_one (fl0 : Lane → Bool) (k0 : Lane → Nat) (X : EngBK) (y : Lane)
+    (hpk : X.pkill = false) (hf0 : fl0 y = false) :
+    ¬((stepBKK P win usb sreq fl0 k0 X).kc = true ∧ (stepBKK P win usb sreq fl0 k0 X).x.e.pl = y)
+    := by
+  rintro ⟨hkc, hp⟩
+  obtain ⟨hc, hk1⟩ := kc_spec _ hkc
+  rw [pstK, stepB_pst] at hc
+  rw [plK, stepB_pl] at hp
+  obtain ⟨hwt, hpl⟩ := portNextB_cap_from P usb sreq X.base hc
+  rw [base_e] at hwt hpl
+  rw [hpl] at hp
+  rw [pkillK, if_neg (by rw [hwt]; decide), hpk, hp, hf0] at hk1
+  cases hk1
+
+/-- **The first stretch.** From a start with no kill pending, well formed, over `T` cycles in which
+`y` is never flushed: `runBK` from cycle 0 is a `TrajY` trajectory for `y`, well formed. With
+both slots full at the start it is `GapRunT`'s `H0 = 2` start. -/
+theorem stretch_first (hok : SReqB P sreq) (fl : Nat → Lane → Bool) (k : Nat → Lane → Nat)
+    (X0 : EngBK) (hI : WfBK X0) (hpk : X0.pkill = false) (y : Lane) (T : Nat)
+    (hF : ∀ j, j < T → FlushOk P win usb sreq (fl (runBK P win usb sreq fl k j X0).x.e.now)
+      (runBK P win usb sreq fl k j X0))
+    (hnf : ∀ j, j < T → fl (runBK P win usb sreq fl k j X0).x.e.now y = false) :
+    TrajY P win usb sreq y (fun n => (runBK P win usb sreq fl k (0 + n) X0).base) T ∧
+    (∀ n, n ≤ T → WfB ((fun n => (runBK P win usb sreq fl k (0 + n) X0).base) n)) := by
+  refine ⟨?_, wfB_runBK P win usb sreq hok fl k X0 hI 0 T (fun j hj => hF j (by omega))⟩
+  apply trajY_runBK P win usb sreq fl k X0 y 0 T
+  intro n hn
+  refine ⟨hnf (0 + n) (by omega), ?_⟩
+  match n, hn with
+  | 0, _ =>
+    rintro ⟨hkc, -⟩
+    have h0 : runBK P win usb sreq fl k (0 + 0) X0 = X0 := rfl
+    rw [h0] at hkc
+    rw [(kc_spec X0 hkc).2] at hpk
+    cases hpk
+  | 1, _ =>
+    have h1 : runBK P win usb sreq fl k (0 + 1) X0
+        = stepBKK P win usb sreq (fl X0.x.e.now) (k X0.x.e.now) X0 := rfl
+    rw [h1]
+    exact no_kill_one P win usb sreq _ _ X0 y hpk (hnf 0 (by omega))
+  | m + 2, hm =>
+    rintro ⟨hkc, hp⟩
+    rw [show 0 + (m + 2) = m + 2 by omega] at hkc hp
+    rcases kill_prov_runBK P win usb sreq hok fl k X0 hI m y
+        (fun j hj => hF j (by omega)) hkc hp with h | h
+    · rw [hnf (m + 1) (by omega)] at h; cases h
+    · rw [hnf m (by omega)] at h; cases h
+
 end
 
 #print axioms last_true
@@ -132,5 +189,7 @@ end
 #print axioms restart_head_12
 #print axioms restart_head_runBK
 #print axioms stretch_after_flush
+#print axioms no_kill_one
+#print axioms stretch_first
 
 end JLane
