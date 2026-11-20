@@ -29,7 +29,8 @@ PRESENT = "present"
 #:            {"status": OWED, "name": None}
 RTL_CONTRACTS = {
     "bufeng_cycle": {
-        "what": "the lane's fetch path is BufEng cycle for cycle: depth-2 buffer, first fetch to "
+        "what": "the lane's fetch path is BufEng cycle for cycle: a one-word buffer per lane "
+                "(Wilson 11-20 depth ruling; 'depth 2' = two fetches per ARM), first fetch to "
                 "the latched slot, a second into capSlot (head, spare, buffer), filed in capture "
                 "order (HeadFirst); the replay compares the RTL's run against stepB",
         "lean": "BufEng.stepB / WfB (wfB_run)",
