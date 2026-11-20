@@ -978,6 +978,7 @@ def assemble(lanes, headers, park_pins=None, timing_checks=True,
             # --require-cert fails on it. A 1.6a failure WITHOUT the lateness is
             # still refused here: that program is invalid.
             check_queue_slot(img, t_ext, lateness=False)
+            check_symgen_seam(img, t_ext)
         except program_a2.EdgePacedNoTExt as exc:
             raise Reject(str(exc))
     check_i2c_order(img)
@@ -990,6 +991,50 @@ def assemble(lanes, headers, park_pins=None, timing_checks=True,
     # so the USB track keeps moving; the certificate writers are what refuse.
     assemble.a2_status = a2_status(img)
     return img
+
+
+def seam_problems(lat, b, j):
+    """[problem] for the symbol generator's SEAM BOUND (Wilson 11-17): the
+    generator starts LAT cycles after its first byte and must find each next byte
+    in its holding register at the byte boundary, so with the owner lane's
+    dispatch jitter J: LAT >= J + 1 and the byte time B >= 2J + 2. Both numbers are
+    named in the refusal."""
+    p = []
+    if lat < j + 1:
+        p.append("symbol generator: SYMDEF LAT = %d < J + 1 = %d (the owner lane's J = %d)"
+                 % (lat, j + 1, j))
+    if b < 2 * j + 2:
+        p.append("symbol generator: SER byte time B = %d < 2J + 2 = %d (the owner lane's "
+                 "J = %d): a byte can miss its seam" % (b, 2 * j + 2, j))
+    return p
+
+
+def check_symgen_seam(img, t_ext=None):
+    """Refuse an image whose owner lane breaks the seam bound against ITS J -- the
+    lane's J from the program's own lane set (`program_a2.lane_set`)."""
+    lp = pe_isa.lane_programs(img)
+    owner = [ln for ln, (h, _a) in lp.items() if h["flags"] & pe_isa.FLAG_SYMGEN]
+    if not owner:
+        return
+    ln = owner[0]
+    acts = lp[ln][1]
+    lat = None
+    for a in acts:
+        if a["op"] == pe_isa.OP_SYMDEF and a["mod"] == 0:
+            w = pe_isa._unpack(pe_isa.SYMDEF_FIELDS, pe_isa._pack(
+                pe_isa.ACT_FIELDS, [a[f] for f, _w in pe_isa.ACT_FIELDS], pe_isa.ACT_BYTES),
+                pe_isa.ACT_BYTES)
+            lat = (w["payload"] >> 4) & ((1 << pe_isa.SG_LAT_W) - 1)
+    bs = [a["delay"] for a in acts if a["op"] == pe_isa.OP_SER]
+    if lat is None or not bs:
+        return
+    ls, _d, _k, _jp = program_a2.lane_set(img, t_ext)
+    j = next((e["blane"].J for e in ls if e["lane"] == ln), None)
+    if j is None:
+        return
+    probs = seam_problems(lat, min(bs), j)
+    if probs:
+        raise Reject("; ".join(probs))
 
 
 def a2_status(img):
@@ -1711,6 +1756,19 @@ def main(argv=None) -> int:
         rc = 1
     except ValueError:
         print("    hdr() with a reserved bit             refused at the encoder")
+
+    # ---- MUST-FIRE: the symbol generator's seam bound (Wilson 11-17) -------
+    # the case the 11-17 model found: J = 24, B = 48 < 2J + 2 = 50 is refused with
+    # both numbers; the control J = 23 (2J + 2 = 48) passes at LAT = J + 1
+    sp = seam_problems(25, 48, 24)
+    ok = any("B = 48" in p and "2J + 2 = 50" in p for p in sp)
+    print("    %-36s %s" % ("seam: J = 24, B = 48", "REFUSED (both numbers)" if ok
+                            else "*** NOT REFUSED: %s" % sp))
+    rc |= 0 if ok else 1
+    ok = not seam_problems(24, 48, 23)
+    print("    %-36s %s" % ("seam control: J = 23, B = 48, LAT 24", "accepted" if ok
+                            else "*** REFUSED"))
+    rc |= 0 if ok else 1
 
     # ---- MUST-FIRE: 1.6s, an open-drain lane's pins are `uio` (CE5) -------
     # ⭐ BOTH SIDES: the clockless open-drain lane CE5 first wrote (PIN_NONE

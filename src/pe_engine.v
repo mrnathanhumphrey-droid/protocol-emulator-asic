@@ -2966,13 +2966,13 @@ module pe_engine #(
   reg                   sg_cfg_we;    // SYMDEF's config write: which word, its payload
   reg [1:0]             sg_cfg_idx;
   reg [ACT_W-OP_W-MOD_W-1:0] sg_cfg_data;   // the payload: the bits between op and mod
-  wire                  sg_pa, sg_pb, sg_busy;
+  wire                  sg_pa, sg_pb, sg_busy, sg_ovr;
   wire                  sg_mine = sg_own_v & (sg_own == cur);   // the dispatching lane owns it
   pe_symgen u_symgen (
     .clk(clk), .rst_n(rst_n),
     .cfg_we(sg_cfg_we), .cfg_idx(sg_cfg_idx), .cfg_data(sg_cfg_data),
     .ld(sg_ld), .ld_byte(sg_byte), .ld_nbits_m1(sg_nb), .msb(l_order[sg_own]),
-    .pa(sg_pa), .pb(sg_pb), .busy(sg_busy));
+    .pa(sg_pa), .pb(sg_pb), .busy(sg_busy), .ovr(sg_ovr));
   // (`winner_q` / `winner_v_q`, TF3's registered winner, are declared ahead,
   // before the block that writes them)
   reg                   pslot;        // which slot this refill is filling
@@ -4427,6 +4427,8 @@ module pe_engine #(
       // drives (from the owner's first SER on). The owner lane's drive mode
       // applies, open-drain exactly as a LEVEL does; `< N_PINS` guards both
       // program-controlled indices (PIN_NONE: that pin is not driven).
+      // the generator's overrun: a byte lost -- the shared sticky fault (status bit 3)
+      if (sg_ovr) sticky_ovr_m <= 1'b1;
       if (sg_drv) begin
         if (sg_pin_a < N_PINS[PINW-1:0]) begin
           if (l_mode[sg_own]) begin
@@ -4756,7 +4758,8 @@ module pe_symgen (
   input  wire        msb,
   output reg         pa,
   output reg         pb,
-  output wire        busy
+  output wire        busy,
+  output wire        ovr         // a load while the holding register's byte is unconsumed
 );
   reg [1:0]  k_m1;
   reg        idle_a, idle_b;
@@ -4806,6 +4809,11 @@ module pe_symgen (
   wire last_cyc  = (cnt == len_cur - 6'd1);
   wire last_slot = (slot == k_m1);
   wire last_bit  = (bit_i == nb_q);
+  // ⛔ OVERRUN: a SER's byte arriving while the holding register still holds one
+  // that this cycle does not consume (a byte boundary, or the start) -- the held
+  // byte is lost, so the engine raises its sticky fault bit
+  wire consume   = (running & last_cyc & last_slot & last_bit) | (waiting & (wcnt == 8'd0));
+  assign ovr     = ld & hv & ~consume;
 
   always @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin

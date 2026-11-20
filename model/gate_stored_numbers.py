@@ -787,6 +787,9 @@ SPEC_SYMBOLS = {
     # stimulus. The RESULT is the waveform, judged live against the model.
     ("test/run_symgen.py", "CFGS"),
     ("test/run_symgen.py", "FEED"),
+    # its refusal / fault arms: each arm's expected (config_err, overrun) flags --
+    # the specification of the refusal, judged live in the same run
+    ("test/run_symgen.py", "FAULTS"),
     # ⭐ v2 primitive 3 bundle 2 (pair / SHIFTI / self-timed byte): FEED is the
     # TX payload STIMULUS (the four bytes tb_pair feeds queue 0, host_feed.vh);
     # BAD the encodings pe_isa must refuse -- chosen field values. The results

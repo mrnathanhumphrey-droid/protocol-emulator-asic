@@ -124,6 +124,8 @@ module tb_pair;
         if (cyc == rxt + 9 * rxd) uio_drv[2] = 1'b1;
       end
     end
+    // the engine's two fault flags at the end (run_symgen's refusal arms read them)
+    $display("FLT cfg=%0d ovr=%0d", dut.u_eng.config_err_m, dut.u_eng.sticky_ovr_m);
     $display("END");
     $finish;
   end

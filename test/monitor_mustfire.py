@@ -185,6 +185,14 @@ MUST_FIRE: dict = {
         'expect': '^\\s*\\*\\*\\* (?:FAIL\\ branch_check)',
         'why': 'the M_CMP_INV build: red on purpose',
     },
+    'run_symgen:symgen:symgen_f_nonowner:FEED=1,NCYC=3000': {
+        'runner': 'test/run_symgen.py',
+        'build': 'symgen.vvp',
+        'plusargs': ['+FEED=1', '+NCYC=3000'],
+        'image': 'symgen_f_nonowner.hex',
+        'expect': '^\\s*\\*\\*\\* (?:FAIL\\ progress\\.vh)',
+        'why': "the symbol generator's non-owner refusal arm: lane 1's SER is the first dispatch, config_err halts the engine, so nothing retires",
+    },
     'run_branch_check:brchk:brchk_w_below_min:BRCHECK=1,BRDBG=1': {
         'runner': 'test/run_branch_check.py',
         'build': 'brchk.vvp',
@@ -1068,6 +1076,7 @@ MUST_FIRE: dict = {
 #: image's clean arm.
 CLEAN_BUILD_EXCEPTIONS: dict = {
     'gate_corpus_trace:tr:spim_d4:RX_PLANT_HANG=20000': 'APPROVED Wilson 11-14 (a clean-build must-fire): +RX_PLANT_HANG=20000 plants a receive hang so rx_e2e DL1 must fire; the unplanted spim_d4 arm is the clean control',
+    'run_symgen:symgen:symgen_f_nonowner:FEED=1,NCYC=3000': "the symbol generator's non-owner refusal arm (a clean-build must-fire): config_err halts the engine, so nothing retires; the five configurations are the clean controls",
     'run_branch_check:brchk:brchk_w_below_min:BRCHECK=1,BRDBG=1': 'a B3 runtime refusal arm: the image is packed past the encoder, config_err halts the branching lane, so nothing retires',
     'run_branch_check:brchk:brchk_tgt_past_store:BRCHECK=1,BRDBG=1': 'a B3 runtime refusal arm: the image is packed past the encoder, config_err halts the branching lane, so nothing retires',
     'run_mutants:mut_ck_base:corpus_spim:FEEDN=17': 'APPROVED Wilson 11-14 (a clean-build must-fire beyond the four): +FEEDN=17 -- a 17-byte feed past the 16-byte host buffer must be refused FATAL, so the engine never starts (runstart / progress vacuity); +FEEDN=16 is the clean control',

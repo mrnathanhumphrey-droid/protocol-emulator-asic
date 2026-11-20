@@ -63,7 +63,7 @@ def cfg_with_lat(c):
     return c
 
 
-def image(c):
+def image(c, second_owner=False):
     l0 = I.ACT_BASE
     prog = I.act_symdef(c.lens, c.code_a, c.code_b, c.idle_a, c.idle_b, c.lat)
     b = c.byte_cycles
@@ -74,7 +74,8 @@ def image(c):
     hdrs = [I.hdr(PA, I.PIN_NONE, 1, T_SYMDEF, I.FLAG_SYMGEN, 2 * T_SYMDEF, 3 * T_SYMDEF,
                   l0, order=order)]
     for n in range(1, I.N_LANES):
-        hdrs.append(I.hdr(n + 2, n + 2, 0, 500, 0, 200, 240, lp))
+        fl = I.FLAG_SYMGEN if (second_owner and n == 1) else 0
+        hdrs.append(I.hdr(n + 2, n + 2, 0, 500, fl, 200, 240, lp))
     return I.join_image(hdrs, prog)
 
 
@@ -90,11 +91,58 @@ def build(out, defines=()):
         raise RuntimeError("build %s failed: %s" % (out, (r.stdout + r.stderr)[-400:]))
 
 
+#: the refusal / fault arms: name -> (what, expected (config_err, overrun))
+FAULTS = {
+    # a refusal sets config_err AND the sticky fault, as every refusal does
+    "nonowner": ("SER on lane 1, which does not own the generator", (1, 1)),
+    "busy": ("SYMDEF while the generator holds a byte", (1, 1)),
+    "overrun": ("three SERs 50 cycles apart against a 608-cycle byte", (0, 1)),
+}
+
+
+def fault_image(kind):
+    """ws2812's config on owner lane 0, then the fault: a non-owner SER (lane 1),
+    a SYMDEF right after a SER, or SERs faster than the byte time."""
+    c = cfg_with_lat(M.ws2812(19))
+    l0 = I.ACT_BASE
+    prog = I.act_symdef(c.lens, c.code_a, c.code_b, c.idle_a, c.idle_b, c.lat)
+    if kind == "busy":
+        prog += [I.act_ser(PA, PB, 8, c.byte_cycles)] + I.act_symdef(
+            c.lens, c.code_a, c.code_b, c.idle_a, c.idle_b, c.lat)[:1]
+    elif kind == "overrun":
+        prog += [I.act_ser(PA, PB, 8, 50) for _ in range(3)]
+    lp = l0 + len(prog) * I.ACT_BYTES
+    prog.append(I.act(I.OP_REARM, 0, 0, 500))
+    l1 = lp + I.ACT_BYTES
+    if kind == "nonowner":
+        prog += [I.act_ser(PA, PB, 8, c.byte_cycles), I.act(I.OP_REARM, 0, 0, 500)]
+    hdrs = [I.hdr(PA, I.PIN_NONE, 1, T_SYMDEF, I.FLAG_SYMGEN, 2 * T_SYMDEF, 3 * T_SYMDEF,
+                  l0, order=I.ORDER_MSB)]
+    for n in range(1, I.N_LANES):
+        base = l1 if (kind == "nonowner" and n == 1) else lp
+        hdrs.append(I.hdr(n + 2, n + 2, 1 if base == l1 else 0, 500, 0, 200, 240, base))
+    return I.join_image(hdrs, prog)
+
+
+def two_owner_image():
+    """manch's image with lane 1 ALSO flagged FLAG_SYMGEN, built by the encoder"""
+    return image(cfg_with_lat(M.manchester()), second_owner=True)
+
+
+def faults(vvp, img, ncyc=3000):
+    r = run(sim_run.vvp([vvp, "+IMG=%s" % img, "+FEED=1", "+NCYC=%d" % ncyc], images=[img]))
+    m = re.search(r"^FLT cfg=(\d) ovr=(\d)$", r.stdout + r.stderr, re.M)
+    return (int(m.group(1)), int(m.group(2))) if m else None
+
+
 def rtl_wave(vvp, img, ncyc):
     """per-cycle (a, b) of uio[0] / uio[1] from tb_pair's change events, and
     whether both pins were driven at every change after the first SER."""
     r = run(sim_run.vvp([vvp, "+IMG=%s" % img, "+FEED=1", "+NCYC=%d" % ncyc], images=[img]))
     out = r.stdout + r.stderr
+    m = re.search(r"^FLT cfg=(\d) ovr=(\d)$", out, re.M)
+    if m and (m.group(1), m.group(2)) != ("0", "0"):
+        return [], True, "a clean configuration raised a fault: " + m.group(0)
     ev = [(int(c), oe, o) for c, oe, o in re.findall(r"^EV (\d+) (\d\d) (\d\d)$", out, re.M)]
     cur, j, w = ("00", "00"), 0, []
     for c in range(ncyc):
@@ -149,6 +197,10 @@ def run_all(vvp, tmp, tag=""):
             sim_run.scratch_image(GEN, p)
         ncyc = 400 + c.lat + len(FEED) * c.byte_cycles + 8 * c.bit_cycles
         w, ended, tail = rtl_wave(vvp, p, ncyc)
+        if ended and not w:
+            probs.append("%s: %s" % (name, tail))
+            rep[name] = [tail]
+            continue
         if not ended:
             probs.append("%s: the bench did not finish: %s" % (name, tail))
             continue
@@ -175,6 +227,33 @@ def main() -> int:
             print("    %-11s %s" % (name, "matches the model" if r == [] else
                                     ("*** %s" % r[0]) if r else "*** not judged"))
         probs += p
+        print("\n  the faults (RTL) and the refusals (pe_isa)")
+        for kind, (what, want) in FAULTS.items():
+            fp = os.path.join(tmp, "symgen_f_%s.hex" % kind)
+            img = fault_image(kind)
+            I.write_image(fp, img)
+            sim_run.scratch_image(GEN, fp)
+            got = faults(vvp, fp)
+            ok = got == want
+            print("    %-9s %-52s (cfg_err, overrun) = %s %s"
+                  % (kind, what, got, "ok" if ok else "*** want %s" % (want,)))
+            if not ok:
+                probs.append("fault arm %s: got %s, want %s" % (kind, got, want))
+            if kind == "nonowner":
+                sp = I.symgen_problems(img)
+                print("    %-9s %-52s %s" % ("", "pe_isa on the same image",
+                                           "refused" if sp else "*** ACCEPTED"))
+                if not sp:
+                    probs.append("pe_isa accepted SER on a non-owner lane")
+        sp2 = I.symgen_problems(two_owner_image())
+        print("    %-9s %-52s %s" % ("2owners", "FLAG_SYMGEN on two lanes (pe_isa)",
+                                   "refused" if sp2 else "*** ACCEPTED"))
+        if not sp2:
+            probs.append("pe_isa accepted two FLAG_SYMGEN owners")
+        for name, c0 in CFGS.items():
+            sp3 = I.symgen_problems(image(cfg_with_lat(c0)))
+            if sp3:
+                probs.append("pe_isa refused the valid %s image: %s" % (name, sp3))
         print("\n  must-fires")
         for d, what, arms in MUTANTS:
             mv = os.path.join(tmp, "symgen_%s.vvp" % d)

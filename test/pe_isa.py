@@ -1359,7 +1359,8 @@ def flag_problems(img, d_star):
     (ruling HDR, CE1, CE2). ONE implementation, called by `pe_asm` on the
     image it assembles and by the image audit on every tracked image.
 
-      * a RESERVED bit (2-3) set -- they are kept for the 60 MHz branch;
+      * a RESERVED bit (3) set -- kept for the 60 MHz branch (bit 2 is
+        FLAG_SYMGEN since 11-19: `symgen_problems`, called from here);
       * CLK_INV on an open-drain lane (an I2C clock is released, not driven:
         there is no level to invert), on a lane with no distinct real clock,
         or on a `uio` clock (the XOR would land after the last flop -- F2);
@@ -1394,6 +1395,29 @@ def flag_problems(img, d_star):
                                  "gap" % (ln, x["delay"], x["delay"] // 2,
                                           d_star))
                     break
+    probs += symgen_problems(img)
+    return probs
+
+
+def symgen_problems(img):
+    """[problem]: the symbol generator's ownership (Wilson 11-17). ONE owner lane
+    (header FLAG_SYMGEN) per image, and SER / SYMDEF only on that lane -- the RTL
+    raises config_err on either, the USB_LANE precedent; this refuses them first."""
+    probs = []
+    lp = lane_programs(img)
+    owners = [ln for ln, (h, _a) in sorted(lp.items()) if h["flags"] & FLAG_SYMGEN]
+    if len(owners) > 1:
+        probs.append("FLAG_SYMGEN on lanes %s -- the symbol generator has ONE owner"
+                     % owners)
+    for ln, (h, acts) in sorted(lp.items()):
+        if h["flags"] & FLAG_SYMGEN:
+            continue
+        for x in acts:
+            if x["op"] in (OP_SER, OP_SYMDEF):
+                probs.append("lane %d: %s on a lane without FLAG_SYMGEN -- only the "
+                             "owner lane drives the symbol generator"
+                             % (ln, "SER" if x["op"] == OP_SER else "SYMDEF"))
+                break
     return probs
 
 

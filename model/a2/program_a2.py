@@ -82,6 +82,11 @@ def lanes_of(img):
         # control matches the branch image lane for lane (R2c).
         if a["op"] in I.BRANCH_OPS:
             a = dict(a, delay=I.branch_wait(a))
+        # ⭐ the symbol generator's SYMDEF (Wilson 11-17): its delay field is config
+        # payload; the RTL advances the lane by the header period `t` (`a_dly_sg`),
+        # so A2 prices it as an ordinary action at delay t -- never payload as delay
+        elif a["op"] == I.OP_SYMDEF:
+            a = dict(a, delay=h["t"])
         by.setdefault(ln, (h, []))[1].append(a)
     return [(ln, h, acts) for ln, (h, acts) in sorted(by.items())]
 
