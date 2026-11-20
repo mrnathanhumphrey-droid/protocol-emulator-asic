@@ -27,6 +27,12 @@ instance (P : Program) (y : Lane) (e : Engine) : Decidable (IsRet P y e) :=
 theorem isWB_of_ret (P : Program) (y : Lane) (e : Engine) (h : IsRet P y e) : IsWB y e :=
   ⟨h.1, h.2.1⟩
 
+/-- **At most one writeback per cycle** (Wilson 11-19, the flag ruling): the dispatcher holds
+one `cur`, so two lanes writing back in the same cycle are the same lane. With POST counted only
+at a writeback (RTL contract `post_at_wb`), at most one POST per cycle. -/
+theorem wb_unique (e : Engine) (y z : Lane) (hy : IsWB y e) (hz : IsWB z e) : y = z :=
+  hy.2.symm.trans hz.2
+
 /-! ### One slot, one cycle -/
 
 /-- Per slot: emptiness after + (a hit fills it) = emptiness before + (a retirement frees it). -/
