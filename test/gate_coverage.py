@@ -1737,12 +1737,17 @@ def check_whv_ready(text=None) -> int:
                   errors="replace") as fh:
             text = fh.read()
     # the shipped (non-mutant) branch of the `ready` assign: after the M_GLOBAL_STALL `else
-    m = re.search(r"`ifdef\s+M_GLOBAL_STALL\s+assign ready\[gi\]\s*=\s*rdy_rel\[gi\];\s*"
-                  r"`else\s+assign ready\[gi\]\s*=\s*(.+?);\s*`endif", text, re.S)
+    # (11-19: the head-valid readiness is `ready_hd`; `ready` = ready_hd & the event-flag
+    # ENABLE, which can only NARROW it, so a winner's head is still valid)
+    m = re.search(r"`ifdef\s+M_GLOBAL_STALL\s+assign ready_hd\[gi\]\s*=\s*rdy_rel\[gi\];\s*"
+                  r"`else\s+assign ready_hd\[gi\]\s*=\s*(.+?);\s*`endif", text, re.S)
     facts = [
-        ("ready = rdy_rel & l_actv[hix] (shipped build)",
+        ("ready_hd = rdy_rel & l_actv[hix] (shipped build)",
          m is not None and re.fullmatch(r"rdy_rel\[gi\]\s*&\s*l_actv\[hix\[gi\]\]",
                                          m.group(1).strip()) is not None),
+        ("ready = ready_hd & fl_ok (shipped build)",
+         re.search(r"`else\s+assign ready\[gi\]\s*=\s*ready_hd\[gi\]\s*&\s*fl_ok\[gi\];", text)
+         is not None),
         ("hv = l_actv[hix]",
          re.search(r"assign hv\[gi\]\s*=\s*l_actv\[hix\[gi\]\];", text) is not None),
         ("w_hv = OR(winner_oh & hv)",
@@ -1999,8 +2004,8 @@ def main() -> int:
     # must-fire: a planted `ready` without the head-valid term is caught
     with open(os.path.join(ROOT, "src", "pe_engine.v"), encoding="utf-8", errors="replace") as fh:
         _src = fh.read()
-    _bad = _src.replace("assign ready[gi] = rdy_rel[gi] & l_actv[hix[gi]];",
-                        "assign ready[gi] = rdy_rel[gi];")
+    _bad = _src.replace("assign ready_hd[gi] = rdy_rel[gi] & l_actv[hix[gi]];",
+                        "assign ready_hd[gi] = rdy_rel[gi];")
     _red = _bad != _src and check_whv_ready(_bad) != 0
     print("    must-fire: `ready` without the head-valid term is caught   %s"
           % ("red  ok" if _red else "*** MISSED"))

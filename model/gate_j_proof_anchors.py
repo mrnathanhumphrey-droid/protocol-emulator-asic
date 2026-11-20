@@ -75,8 +75,12 @@ PREMISES = [
     # an empty head -- the only way a lane is late for its own word
     ("S", "the stall counter: a lane released with an empty head ((b'))",
      "jitter_cnt <= jitter_cnt + 1'b1;"),
+    # (11-19: readiness is `ready_hd` -- released with a valid head -- and then the
+    # event-flag ENABLE, `ready = ready_hd & fl_ok`; the head-valid term is unchanged)
     ("Sb", "(b'): dispatch readiness includes the lane's own head-valid",
-     "assign ready[gi] = rdy_rel[gi] & l_actv[hix[gi]];"),
+     "assign ready_hd[gi] = rdy_rel[gi] & l_actv[hix[gi]];"),
+    ("Sc", "(b'): readiness is the head-valid readiness, gated only by the flag ENABLE",
+     "assign ready[gi] = ready_hd[gi] & fl_ok[gi];"),
     # ---- Theorem 3 (D*), now the load-bearing claim --------------------
     # ⛔⛔ P8 IS THE ONE THAT CARRIES THE PUBLISHED GUARANTEE. If the
     # timestamp advance ever became RELATIVE (from completion rather than

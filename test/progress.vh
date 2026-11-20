@@ -251,7 +251,9 @@ end
 // empty (agent 2, 729111f): a word arriving late after a branch held up the
 // USB lane's samples too. (b') picks only lanes whose head is valid, so while
 // the schedule runs, an idle engine with no armed winner and SOME released
-// lane holding a valid head MUST dispatch that cycle. A cycle where it does
+// lane holding a valid head MUST dispatch that cycle -- unless that head is an
+// event-flag WAIT with no count available (`fl_ok`, the ENABLE, Wilson 11-19),
+// which is waiting for ANOTHER lane's POST by design. A cycle where it does
 // not is the global stall back -- `M_GLOBAL_STALL` is this layer's must-fire.
 integer pg_sblk;
 initial pg_sblk = 0;
@@ -261,7 +263,7 @@ initial pg_sblk = 0;
 `ifndef PE_EQUIV_PRE
 always @(posedge dut.clk) if (dut.rst_n === 1'b1) begin
   if (dut.u_eng.now_inc === 1'b1 && dut.u_eng.st === 2'd0 && dut.u_eng.config_err !== 1'b1
-      && dut.u_eng.w_armed !== 1'b1 && (|(dut.u_eng.rdy_rel & dut.u_eng.hv))
+      && dut.u_eng.w_armed !== 1'b1 && (|(dut.u_eng.rdy_rel & dut.u_eng.hv & dut.u_eng.fl_ok))
       && dut.u_eng.cur_ld !== 1'b1) begin
     if (pg_sblk == 0) begin
       $display("*** FAIL progress.vh[S]: a released lane with a VALID head waited while the engine idled -- another lane's empty head is holding the dispatcher (the global stall (b') removed)");

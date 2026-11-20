@@ -189,6 +189,10 @@
       sg_cfg_we  <= 1'b0; \
       sg_cfg_idx <= 2'd0; \
       sg_cfg_data <= {(ACT_W-OP_W-MOD_W){1'b0}}; \
+      for (i = 0; i < N_FLAGS; i = i + 1) begin \
+        fl_post[i] <= {FCW{1'b0}}; \
+        fl_cons[i] <= {FCW{1'b0}}; \
+      end \
       for (i = 0; i < N_LANES; i = i + 1) begin \
         l_pin[i]       <= {PINW{1'b0}}; \
         l_clkpin[i]    <= {PINW{1'b0}}; \
@@ -680,6 +684,18 @@ module pe_engine #(
   // refused the same way: the config never changes under a waveform.
   localparam [OP_W-1:0] OP_SER        = 13;
   localparam [OP_W-1:0] OP_SYMDEF     = 22;
+  // ⭐ INTER-LANE EVENT FLAGS (Wilson 11-19, the 11-09 semantics): the poset
+  // primitives on chip. Per flag a POSTED and a CONSUMED count, mod 8 (the
+  // compiler proves posted - consumed < 8; no saturation logic). POST (16) adds
+  // one at its writeback; WAIT (17) is an ENABLE -- a lane whose head is a WAIT
+  // on flag f is not eligible while posted == consumed, and still releases at
+  // its own timestamp -- and consumes one when it is picked. Flag index =
+  // pinb[2:0]. ⭐ ONE DISPATCH AT A TIME: the engine has one writeback and one
+  // pick per cycle and they are different states, so no two POSTs, and no POST
+  // and pick, ever land in one cycle -- each count moves by at most one.
+  localparam [OP_W-1:0] OP_FLAG_SET   = 16;   // POST
+  localparam [OP_W-1:0] OP_FLAG_WAIT  = 17;   // WAIT
+  localparam integer    N_FLAGS = 8, FLW = 3, FCW = 3;
 
   // ---- image layout, all derived -------------------------------------
   // ⛔⛔ `base` IS A THIRD FIELD THE S2 FREEZE DID NOT HAVE. Without it every
@@ -1658,6 +1674,18 @@ module pe_engine #(
   // READY + EDF SELECT. ⛔ Both comparisons are wrap-safe.
   // =====================================================================
   wire [N_LANES-1:0] ready;
+  wire [N_LANES-1:0] ready_hd;  // released with a valid head, before the flag ENABLE
+  wire [N_LANES-1:0] fl_ok;     // the flag ENABLE: no head WAIT, or its flag has a count
+  // ⭐ the event flags' counts and the per-flag "a count is available" bit
+  reg  [FCW-1:0]     fl_post [0:N_FLAGS-1];
+  reg  [FCW-1:0]     fl_cons [0:N_FLAGS-1];
+  wire [N_FLAGS-1:0] fl_av;
+  genvar gf;
+  generate
+    for (gf = 0; gf < N_FLAGS; gf = gf + 1) begin : g_flav
+      assign fl_av[gf] = (fl_post[gf] != fl_cons[gf]);
+    end
+  endgenerate
   wire [N_LANES-1:0] rdy_rel;   // released (the old `ready`): (b')'s prefetch input
   wire [N_LANES-1:0] rel_due;
   wire [TS_W-1:0]    edf_key_off [0:N_LANES-1];
@@ -1783,9 +1811,19 @@ module pe_engine #(
       // what bounds that lane's own lateness. `M_GLOBAL_STALL` restores the
       // old readiness (the global stall's must-fire).
 `ifdef M_GLOBAL_STALL
-      assign ready[gi] = rdy_rel[gi];
+      assign ready_hd[gi] = rdy_rel[gi];
 `else
-      assign ready[gi] = rdy_rel[gi] & l_actv[hix[gi]];
+      assign ready_hd[gi] = rdy_rel[gi] & l_actv[hix[gi]];
+`endif
+      // ⭐ THE FLAG ENABLE: a head WAIT on flag f holds the lane while no count
+      // is available. M_FLAG_NOGATE drops it (run_flags: the waiter runs early).
+      wire           fl_hw = (l_act[hix[gi]][ACT_W-1 -: OP_W] == OP_FLAG_WAIT);
+      wire [FLW-1:0] fl_hi = l_act[hix[gi]][MOD_W +: FLW];
+      assign fl_ok[gi] = ~fl_hw | fl_av[fl_hi];   // also read by progress.vh[S]
+`ifdef M_FLAG_NOGATE
+      assign ready[gi] = ready_hd[gi];
+`else
+      assign ready[gi] = ready_hd[gi] & fl_ok[gi];
 `endif
       // ⭐ deadline as an OFFSET FROM NOW, so a wrapped key still orders
       //   correctly. 1.6b is what bounds the spread that makes this sound.
@@ -3485,6 +3523,13 @@ module pe_engine #(
                    // above) are exactly `l_actv[hix[winner]]`,
                    // `l_act[hix[winner]]` and `l_armed[winner]`.
                    if (w_hv) begin
+                     // ⭐ a WAIT consumes its count WHEN PICKED, so a second waiter
+                     // on the same flag sees it gone at its own pick (picks are
+                     // >= 3 cycles apart). M_FLAG_NOCONSUME: it never consumes.
+`ifndef M_FLAG_NOCONSUME
+                     if (w_act[ACT_W-1 -: OP_W] == OP_FLAG_WAIT)
+                       fl_cons[w_act[MOD_W +: FLW]] <= fl_cons[w_act[MOD_W +: FLW]] + {{(FCW-1){1'b0}}, 1'b1};
+`endif
                      cur     <= winner;
                      cur_act <= w_act;
                      cur_cls <= w_cls;   // == pre_cls(w_act)
@@ -3884,6 +3929,8 @@ module pe_engine #(
             OP_ARM, OP_REARM: ;                 // no pin movement
             // the generator's words act at writeback; its pins are driven below
             OP_SER, OP_SYMDEF: ;
+            // the event flags move no pin (POST counts at writeback, WAIT at its pick)
+            OP_FLAG_SET, OP_FLAG_WAIT: ;
             // BRANCH_BIT moves no pin; a target outside the store is refused
             OP_BRANCH_BIT, OP_CMP_BRANCH, OP_LOOP: if (br_bad) begin
               config_err_m <= 1'b1;
@@ -4195,6 +4242,9 @@ module pe_engine #(
                 lane_underrun_m[cur] <= 1'b1;
               end
             end
+            // ⭐ POST: one more count on flag pinb[2:0]
+            OP_FLAG_SET: fl_post[a_pinb[FLW-1:0]] <= fl_post[a_pinb[FLW-1:0]] + {{(FCW-1){1'b0}}, 1'b1};
+            OP_FLAG_WAIT: ;                     // consumed at its pick (ST_IDLE)
             // SYMDEF's payload (`sg_payload`): every field between the opcode and `mod`
             OP_SYMDEF: if (!sg_mine || sg_busy) begin
               config_err_m <= 1'b1;

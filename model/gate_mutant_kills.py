@@ -138,6 +138,8 @@ KILLERS = {
     "M_FT_SCAN_RACE": "test/run_arm2.py",        # A4 the FT edge on the selecting cycle
     "M_FT_REFLUSH": "test/run_arm2.py",          # A4-K8 a second flush at f + 1 (K8's check)
     "M_SG_NOSPARE": "test/run_symgen.py",        # the spare codes read as HOLD: nrzi, biphase
+    "M_FLAG_NOGATE": "test/run_flags.py",        # WAIT does not hold the lane
+    "M_FLAG_NOCONSUME": "test/run_flags.py",     # WAIT never consumes its count
     "M_PRIME_NEWPRIO": "test/gate_batch_equiv.py",  # the one-cycle earlier start
     # -- bundle 3: the USB receive -- NRZI, unstuffing, re-anchoring (tb_usbrx)
     "M_NO_REANCHOR": "test/run_usbrx.py", "M_UNSTUFF_KEEP": "test/run_usbrx.py",

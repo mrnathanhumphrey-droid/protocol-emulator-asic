@@ -292,6 +292,8 @@ EXPECT = {
     # (the flush delayed one cycle), that flush ORed into `flush_ev`, and the flush's
     # four effects applied again (PC, fetch PC, both slots' valid bits)
     "M_SG_NOSPARE":       (3, None),   # the generator's spare codes 5-7 read as HOLD
+    "M_FLAG_NOGATE":      (2, None),   # the event-flag WAIT does not hold its lane
+    "M_FLAG_NOCONSUME":   (2, None),   # the event-flag WAIT never consumes its count
     "M_FT_REFLUSH":       (12, "K8's planted second flush: its own register, flush_ev, the four flush effects again"),
     "M_RX_CAPGATE_EARLY": (2, None),
     "M_RX_CAPGATE_LATE":  (2, None),

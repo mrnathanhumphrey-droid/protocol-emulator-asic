@@ -67,7 +67,7 @@ OUT = os.path.join(ROOT, "test", "op_reads.json")
 FIELDS = ("pin", "level", "delay", "count", "q", "pinb", "mod")
 FULL = {"pin": 0xF, "level": 0x1, "delay": 0x3FF, "count": 0xF, "q": 0x3, "pinb": 0xF, "mod": 0x3}
 OPS = ("LEVEL", "SHIFT", "SHIFTIN", "READBIT", "START", "STOP", "ARM", "REARM",
-       "BRANCH_BIT", "CMP_BRANCH", "LOOP", "SHIFTI", "SER", "SYMDEF")
+       "BRANCH_BIT", "CMP_BRANCH", "LOOP", "SHIFTI", "SER", "SYMDEF", "FLAG_SET", "FLAG_WAIT")
 ALL = OPS
 
 #: base decode tokens -> (field, mask). A bit-select `a_cnt[0]` reads only that bit.
@@ -148,6 +148,10 @@ SITES = [
     ("assign host_q    = a_q;", C_SHIFT + ("CMP_BRANCH", "SER"),
      "host_q -> project.v q_sel -> tx_valid/tx_head/do_popq, consumed only on SHIFT/SHIFTI "
      "and SER (the generator's byte: host_valid, host_pop); CMP_BRANCH reads a_q itself"),
+    ("wire           fl_hw = (l_act[hix[gi]][ACT_W-1 -: OP_W] == OP_FLAG_WAIT);", ("FLAG_WAIT",),
+     "the event-flag ENABLE: is the head a WAIT (its opcode)"),
+    ("wire [FLW-1:0] fl_hi = l_act[hix[gi]][MOD_W +: FLW];", ("FLAG_WAIT",),
+     "the event-flag ENABLE: the head WAIT's flag index, pinb[2:0]"),
     ("wire [ACT_W-OP_W-MOD_W-1:0] sg_payload = {a_pin, a_lvl, a_dly, a_cnt, a_q, a_pinb};", "DEF",
      "SYMDEF's payload: every field between the opcode and mod"),
     ("wire pin_real = (a_pin < N_PINS", "DEF", "pin index guard"),
@@ -389,6 +393,9 @@ def _head_fields(raw):
         out["delay"] = FULL["delay"]
     if "w[1]" in raw:
         out["mod"] = out.get("mod", 0) | 0x2
+    # the event-flag index: pinb[2:0] (the slice just above mod), Wilson 11-19
+    if "[MOD_W +: FLW]" in raw:
+        out["pinb"] = out.get("pinb", 0) | 0x7
     return out
 
 

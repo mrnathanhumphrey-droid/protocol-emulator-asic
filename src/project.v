@@ -464,7 +464,7 @@ module tt_um_protocol_emulator #(
   // It was `N_BUILT_OPS = 12` ("below this is built"); the batch builds 13 and 22
   // with 12, 14 and 18..21 still reserved, so the refusal tests membership.
   localparam integer OP_W_T      = 5;
-  localparam [(1 << OP_W_T)-1:0] BUILT_OPS = 32'h0040_2fff;   // 0..11, SER 13, SYMDEF 22
+  localparam [(1 << OP_W_T)-1:0] BUILT_OPS = 32'h0043_2fff;   // 0..11, SER 13, POST 16, WAIT 17, SYMDEF 22
   localparam integer ACT_BASE_T  = MAGIC_AT + 2;
   localparam [AW-1:0] ACT_BASE_A = ACT_BASE_T[AW-1:0];
   localparam [AW-1:0] ACT_MASK_A = ACT_BYTES_T[AW-1:0] - {{(AW-1){1'b0}}, 1'b1};

@@ -156,6 +156,14 @@ def uncertified_reason(img, path=None):
     """None if A2 may certify `img`; else WHY it is A2-UNCERTIFIED. An image
     with no branch lane is never held here."""
     import proof_constants as PC
+    # ⭐ an event-flag WAIT (Wilson 11-19): the waiting lane's release depends on
+    # ANOTHER lane's POST, so its lateness is not bounded by its own program --
+    # A2 does not certify it until the ENABLE lemma and the lag bound are in
+    wl = sorted({ln for ln, _h, a in dgf.walk(img) if a["op"] == I.OP_FLAG_WAIT})
+    if wl:
+        return ("event-flag WAIT on lane(s) %s: release waits on another lane's POST "
+                "(the ENABLE lemma and the lag bound owed, Wilson 11-19)"
+                % ",".join(map(str, wl)))
     bl = branch_lanes(img)
     if not bl:
         return None

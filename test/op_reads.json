@@ -77,6 +77,24 @@
    "pinb": 15,
    "q": 3
   },
+  "FLAG_SET": {
+   "count": 0,
+   "delay": 1023,
+   "level": 0,
+   "mod": 0,
+   "pin": 0,
+   "pinb": 15,
+   "q": 0
+  },
+  "FLAG_WAIT": {
+   "count": 0,
+   "delay": 1023,
+   "level": 0,
+   "mod": 0,
+   "pin": 0,
+   "pinb": 7,
+   "q": 0
+  },
   "LEVEL": {
    "count": 0,
    "delay": 1023,

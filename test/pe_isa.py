@@ -84,6 +84,13 @@ OP_SHIFTI = 11
 #: opcode and `mod`. See src/pe_engine.v `pe_symgen`.
 OP_SER = 13
 OP_SYMDEF = 22
+#: inter-lane event flags (Wilson 11-19, the 11-09 semantics): POST adds one count
+#: to flag pinb[2:0] at its writeback; WAIT holds its lane (an ENABLE) until a count
+#: is available and consumes one when picked. 8 flags, counts mod 8; pinb[3] must be 0.
+OP_FLAG_SET = 16          # POST
+OP_FLAG_WAIT = 17         # WAIT
+N_FLAGS = 8
+FLAG_OPS = (OP_FLAG_SET, OP_FLAG_WAIT)
 BRANCH_OPS = (OP_BRANCH_BIT, OP_CMP_BRANCH, OP_LOOP)
 BRANCH_NAMES = {OP_BRANCH_BIT: "BRANCH_BIT", OP_CMP_BRANCH: "CMP_BRANCH", OP_LOOP: "LOOP"}
 #: CMP_BRANCH's mask modes (mod[1:0]), in the byte's natural order
@@ -111,7 +118,7 @@ OPCODES = {
 #: limit would un-refuse those; the loader now tests membership.
 #: 0..11 (SHIFTI, 11, was the last built in order); SER 13 and SYMDEF 22, the
 #: symbol generator (Wilson 11-17)
-BUILT_OPS = frozenset(range(12)) | {13, 22}
+BUILT_OPS = frozenset(range(12)) | {13, 16, 17, 22}   # + POST 16, WAIT 17 (event flags)
 BUILT_MASK = sum(1 << _o for _o in BUILT_OPS)
 #: the opcode the refusal must-fires inject: the LOWEST one not built
 OP_UNBUILT = min(set(range(1 << OP_W)) - BUILT_OPS)
@@ -120,8 +127,6 @@ RESERVED_OPCODES = {
     12: ("DRIVE_SAMPLE", "pin = driven, pinb = sampled, level = drive value, delay"),
     14: ("FRAC_TX", "pin, delay = integer bit time, {count, mod} = fraction"),
     15: ("CRC_RX", "count = CRC kind, q = which accumulator"),
-    16: ("FLAG_SET", "pinb[1:0] = flag index, level = value"),
-    17: ("FLAG_WAIT", "pinb[1:0] = flag index, level = awaited value, delay = timeout"),
     18: ("RESP", "q = response buffer, count = length"),
     19: ("WAITQ", "q = the TX queue awaited, delay = timeout"),
     20: ("NIBBLE_LOAD", "q = queue, count = nibble lane"),
@@ -288,6 +293,35 @@ SG_LOW, SG_HIGH, SG_D, SG_ND, SG_HOLD, SG_TOG, SG_TOG_D, SG_TOG_ND = range(8)
 SG_KMAX, SG_LEN_W, SG_CODE_W, SG_LAT_W = 4, 6, 3, 8
 #: SYMDEF's word: the opcode, the 25-bit payload, `mod` (which config word)
 SYMDEF_FIELDS = (("op", OP_W), ("payload", ACT_W - OP_W - MOD_W), ("mod", MOD_W))
+
+
+def act_post(flag, delay) -> bytes:
+    """POST: one more count on event flag `flag` (0..7), at this word's writeback;
+    `delay` is the word's own (an ordinary word otherwise)."""
+    if not 0 <= int(flag) < N_FLAGS:
+        raise ValueError("POST flag %d: 0..%d" % (int(flag), N_FLAGS - 1))
+    return act(OP_FLAG_SET, 0, 0, delay, pinb=int(flag))
+
+
+def act_wait(flag, delay) -> bytes:
+    """WAIT: the lane is not eligible until flag `flag` (0..7) has a count, and
+    consumes one when picked -- an ENABLE, not a timeout: no fall-through."""
+    if not 0 <= int(flag) < N_FLAGS:
+        raise ValueError("WAIT flag %d: 0..%d" % (int(flag), N_FLAGS - 1))
+    return act(OP_FLAG_WAIT, 0, 0, delay, pinb=int(flag))
+
+
+def flag_word_problems(img):
+    """[problem]: an event-flag word with pinb[3] set -- the index is pinb[2:0]
+    (8 flags); pinb[3] is reserved and must be 0."""
+    out = []
+    for ln, (_h, acts) in sorted(lane_programs(img).items()):
+        for i, x in enumerate(acts):
+            if x["op"] in FLAG_OPS and x["pinb"] >= N_FLAGS:
+                out.append("lane %d word %d: %s flag index pinb = %d -- pinb[3] must be 0 "
+                           "(8 flags)" % (ln, i, "POST" if x["op"] == OP_FLAG_SET else "WAIT",
+                                          x["pinb"]))
+    return out
 
 
 def act_ser(pin_a, pin_b, nbits, byte_time, q=0) -> bytes:
@@ -1396,6 +1430,7 @@ def flag_problems(img, d_star):
                                           d_star))
                     break
     probs += symgen_problems(img)
+    probs += flag_word_problems(img)
     return probs
 
 

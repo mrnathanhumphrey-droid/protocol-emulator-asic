@@ -155,6 +155,13 @@ SCRATCH_GENERATORS: dict = {
                " images, judged cycle for cycle against run_pair's golden"
                " waveform on tb_pair, not by the A2 gap",
         "v3": {"no_v3_layer": "test/tb_pair.v"}},
+    "run_flags": {
+        "script": "test/run_flags.py", "pattern": "flags_*.hex",
+        "clocked": True,
+        "why": "the inter-lane event flags (Wilson 11-19): POST / WAIT images,"
+               " judged by the waiter's edges against the poster's on tb_pair,"
+               " not by the A2 gap",
+        "v3": {"no_v3_layer": "test/tb_pair.v"}},
     "run_symgen": {
         "script": "test/run_symgen.py", "pattern": "symgen_*.hex",
         "clocked": True,
