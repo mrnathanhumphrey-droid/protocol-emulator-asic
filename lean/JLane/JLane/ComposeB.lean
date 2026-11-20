@@ -402,6 +402,127 @@ theorem flush_spacing_runBA (hedge : ∀ t l, t + 1 ≤ edge t l) (kt : Nat → 
 
 end
 
+/-! ### The bridge: the armed engine IS a `runBK` run
+
+`runBA` steps `stepBKK` with the dispatcher `winA win armed` (armed lanes masked) and the flushes
+`hit`, both read off the arm registers that cycle. `step` reads its dispatcher only on the current
+engine (`dispNext`, `winqNext`), whose clock is `now₀ + n` at cycle `n`. So one fixed dispatcher
+`winS` -- `winA win` with the arm registers of the cycle the engine's clock names -- and one
+flush input `flS` by time make `runBA`'s engine exactly `runBK P winS usb sreq flS kt`
+(`runBA_proj`). L1-L4 are stated for any `win` / `fl`, so they hold on the armed run with these;
+`FlushOk` there comes from `flushOk_hit` (`flushOk_runBA`), and K8 from
+`flush_spacing_runBA` (`flush_spacing_runBK`). -/
+
+/-- `step` reads its dispatcher only on the engine it steps. -/
+theorem step_win_eq (P : Program) (w1 w2 : Engine → Option Lane) (e : Engine)
+    (h : w1 e = w2 e) : step P w1 e = step P w2 e := by
+  rw [step_win_congr P w1 e, step_win_congr P w2 e, h]
+
+section
+variable (P : Program) (usb : Option Lane) (sreq : EngB → Option Lane)
+
+theorem stepB_win_congr (w1 w2 : Engine → Option Lane) (x : EngB) (h : w1 x.e = w2 x.e) :
+    stepB P w1 usb sreq x = stepB P w2 usb sreq x := by
+  have hs := step_win_eq P w1 w2 x.e h
+  simp only [stepB, hs]
+
+theorem stepBKK_win_congr (w1 w2 : Engine → Option Lane) (fl : Lane → Bool) (k : Lane → Nat)
+    (X : EngBK) (h : w1 X.x.e = w2 X.x.e) :
+    stepBKK P w1 usb sreq fl k X = stepBKK P w2 usb sreq fl k X := by
+  have hb := stepB_win_congr P usb sreq w1 w2 X.base (by rw [base_e]; exact h)
+  simp only [stepBKK, hb]
+
+theorem flushOk_win_congr (w1 w2 : Engine → Option Lane) (fl : Lane → Bool) (X : EngBK)
+    (h : w1 X.x.e = w2 X.x.e) (hF : FlushOk P w2 usb sreq fl X) : FlushOk P w1 usb sreq fl X := by
+  have hb := stepB_win_congr P usb sreq w1 w2 X.base (by rw [base_e]; exact h)
+  unfold FlushOk at hF ⊢
+  rw [hb]
+  exact hF
+
+end
+
+section
+variable (P : Program) (win : Engine → Option Lane) (usb : Option Lane)
+  (sreq : EngB → Option Lane) (isArm : EngB → Bool) (edge : Nat → Lane → Nat)
+  (kt : Nat → Lane → Nat) (A0 : EngBA)
+
+/-- The armed run's dispatcher, as one function of the engine: `winA win` with the arm registers
+of the cycle the engine's clock names. -/
+def winS : Engine → Option Lane := fun e =>
+  winA win (runBA P win usb sreq isArm edge kt (e.now - A0.X.x.e.now) A0).armed e
+
+/-- The armed run's flushes by time: the hits of that cycle. -/
+def flS : Nat → Lane → Bool := fun t l =>
+  (runBA P win usb sreq isArm edge kt (t - A0.X.x.e.now) A0).hit l
+
+theorem now_runBA : ∀ n,
+    (runBA P win usb sreq isArm edge kt n A0).X.x.e.now = A0.X.x.e.now + n
+  | 0 => rfl
+  | n + 1 => by
+    show (stepBA P win usb sreq isArm edge _ (runBA P win usb sreq isArm edge kt n A0)).X.x.e.now
+      = _
+    rw [stepBA_now, now_runBA n]
+    omega
+
+/-- **The bridge**: the armed run's engine is `runBK` with `winS` / `flS`. -/
+theorem runBA_proj : ∀ n, (runBA P win usb sreq isArm edge kt n A0).X =
+    runBK P (winS P win usb sreq isArm edge kt A0) usb sreq (flS P win usb sreq isArm edge kt A0)
+      kt n A0.X
+  | 0 => rfl
+  | n + 1 => by
+    rw [runBK_succ', ← runBA_proj n]
+    have hn := now_runBA P win usb sreq isArm edge kt A0 n
+    have hfl : flS P win usb sreq isArm edge kt A0 (runBA P win usb sreq isArm edge kt n A0).X.x.e.now
+        = (runBA P win usb sreq isArm edge kt n A0).hit := by
+      funext l
+      simp only [flS, hn, Nat.add_sub_cancel_left]
+    have hw : winS P win usb sreq isArm edge kt A0 (runBA P win usb sreq isArm edge kt n A0).X.x.e
+        = winA win (runBA P win usb sreq isArm edge kt n A0).armed
+          (runBA P win usb sreq isArm edge kt n A0).X.x.e := by
+      simp only [winS, hn, Nat.add_sub_cancel_left]
+    rw [hfl, stepBKK_win_congr P usb sreq _ _ _ _ _ hw]
+    rfl
+
+/-- **`FlushOk` on the bridged run**, from the armed invariant and the scan fix. -/
+theorem flushOk_runBA (hedge : ∀ t l, t + 1 ≤ edge t l) (hA : ArmInvB A0) (n : Nat)
+    (hscan : ScanOk P win usb sreq (runBA P win usb sreq isArm edge kt n A0)) :
+    FlushOk P (winS P win usb sreq isArm edge kt A0) usb sreq
+      (flS P win usb sreq isArm edge kt A0
+        (runBK P (winS P win usb sreq isArm edge kt A0) usb sreq
+          (flS P win usb sreq isArm edge kt A0) kt n A0.X).x.e.now)
+      (runBK P (winS P win usb sreq isArm edge kt A0) usb sreq
+        (flS P win usb sreq isArm edge kt A0) kt n A0.X) := by
+  rw [← runBA_proj P win usb sreq isArm edge kt A0 n]
+  have hn := now_runBA P win usb sreq isArm edge kt A0 n
+  have hfl : flS P win usb sreq isArm edge kt A0 (runBA P win usb sreq isArm edge kt n A0).X.x.e.now
+      = (runBA P win usb sreq isArm edge kt n A0).hit := by
+    funext l
+    simp only [flS, hn, Nat.add_sub_cancel_left]
+  rw [hfl]
+  apply flushOk_win_congr P usb sreq _ (winA win (runBA P win usb sreq isArm edge kt n A0).armed)
+  · simp only [winS, hn, Nat.add_sub_cancel_left]
+  · exact flushOk_hit P win usb sreq _ (armInvB_runBA P win usb sreq isArm edge hedge kt A0 hA n)
+      hscan
+
+/-- **K8 on the bridged run** (proof (b) reaching the composition): `y` flushed at cycle `f` of
+`runBK P winS usb sreq flS kt` is not flushed at `f + 1` or `f + 2`. -/
+theorem flush_spacing_runBK (hedge : ∀ t l, t + 1 ≤ edge t l) (hA : ArmInvB A0) (y : Lane)
+    (f : Nat) (hscan : ScanOk P win usb sreq (runBA P win usb sreq isArm edge kt f A0))
+    (hfl : flS P win usb sreq isArm edge kt A0
+      (runBK P (winS P win usb sreq isArm edge kt A0) usb sreq
+        (flS P win usb sreq isArm edge kt A0) kt f A0.X).x.e.now y = true) :
+    flS P win usb sreq isArm edge kt A0
+      (runBK P (winS P win usb sreq isArm edge kt A0) usb sreq
+        (flS P win usb sreq isArm edge kt A0) kt (f + 1) A0.X).x.e.now y = false ∧
+    flS P win usb sreq isArm edge kt A0
+      (runBK P (winS P win usb sreq isArm edge kt A0) usb sreq
+        (flS P win usb sreq isArm edge kt A0) kt (f + 2) A0.X).x.e.now y = false := by
+  simp only [← runBA_proj P win usb sreq isArm edge kt A0, flS,
+    now_runBA P win usb sreq isArm edge kt A0, Nat.add_sub_cancel_left] at hfl ⊢
+  exact flush_spacing_runBA P win usb sreq isArm edge hedge kt A0 hA y f hscan hfl
+
+end
+
 #print axioms last_true
 #print axioms flush_cut
 #print axioms restart_head_12
@@ -416,5 +537,13 @@ end
 #print axioms no_rehit_two
 #print axioms armInvB_runBA
 #print axioms flush_spacing_runBA
+#print axioms step_win_eq
+#print axioms stepB_win_congr
+#print axioms stepBKK_win_congr
+#print axioms flushOk_win_congr
+#print axioms now_runBA
+#print axioms runBA_proj
+#print axioms flushOk_runBA
+#print axioms flush_spacing_runBK
 
 end JLane

@@ -122,8 +122,9 @@ CONTRACT_PREMISES = {
         "why": "hwin: win picks only live, released lanes (pc2_arm's PC+1 ARM picked at release)"},
     "flush_spacing": {
         "rtl": ("K8",),
-        "proof": "contract K8, proof (b) owed: from FALLTHROUGH arming (a second flush needs a "
-                 "new FT ARM captured and armed after the first)",
+        "proof": "contract K8; proof (b) proved on the armed run (ComposeB.flush_spacing_runBA, "
+                 "carried to runBK by runBA_proj: flush_spacing_runBK) under hedge-timing and "
+                 "ScanOk; K8 stays as the RTL check (Wilson 11-19)",
         "why": "the composition restarts from y's LAST flush (ComposeB.flush_cut), so "
                "restart_runBK's 'no flush at f+1, f+2' holds by construction; the spacing enters "
                "through hedge -- y's edge word present at every flush restarted from -- which a "
@@ -160,8 +161,18 @@ COMPOSITION = {
             {"step": "L4 window budgets hM / hS", "status": "owed",
              "what": "the window chain (Wilson 11-18 'hR on runB'): M other-lane decisions and "
                      "S idle cycles per K-window, counted along runBK"},
-            {"step": "flush spacing (K8)", "status": "owed",
-             "what": "contract K8, proof (b) owed (CONTRACT_PREMISES flush_spacing)"},
+            {"step": "bridge: the armed run is a runBK run", "status": "proved",
+             "theorems": ("runBA_proj", "flushOk_runBA")},
+            {"step": "flush spacing (K8), proof (b)", "status": "proved",
+             "theorems": ("flush_spacing_runBA", "flush_spacing_runBK")},
+            {"step": "hedge on the bridged run", "status": "owed",
+             "what": "the edge word present at each flush of the armed run (FlushHeld "
+                     "edge_held_at_edge / ft_edge_at_release_armed) carried through runBA_proj "
+                     "to ComposeB's hedge"},
+            {"step": "contracts for hedge-timing and ScanOk", "status": "owed",
+             "what": "flush_spacing_runBA / flushOk_runBA take 'edge >= arming writeback + 1' and "
+                     "agent 1's scan fix (ScanOk); neither is in CONTRACT_PREMISES yet -- RTL "
+                     "contract wording is Wilson's"},
             {"step": "ready_spare_capture_T", "status": "owed",
              "what": "spare-captured ARM readiness (READY_RULES spare_capture); waits on agent "
                      "1's buffer variant"},

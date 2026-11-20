@@ -156,7 +156,10 @@ KEY = ("dstar", "dstar29", "dstar39", "dstar39_v2", "dstar39_st", "dstar39_hold"
        # ComposeB.lean (composition L4): hR on a stretch from wb_bound_winBK_fl
        "hR_stretch", "hstart_after_flush",
        # ComposeB.lean (K8 proof (b) on the armed engine runBA): no re-flush at f+1 / f+2
-       "no_rehit_two", "armInvB_runBA", "flush_spacing_runBA")
+       "no_rehit_two", "armInvB_runBA", "flush_spacing_runBA",
+       # ComposeB.lean (the bridge): the armed run IS runBK with winS / flS; FlushOk and K8 on it
+       "step_win_eq", "stepB_win_congr", "stepBKK_win_congr", "flushOk_win_congr", "now_runBA",
+       "runBA_proj", "flushOk_runBA", "flush_spacing_runBK")
 #: proof_constants.load() key -> the Lean expression that must evaluate to it (SPEC: the map)
 CONSTS = {
     "lemmaA_window": "LEMMA_A_WINDOW", "R_base": "R_BASE", "dispatch_cycles": "DISPATCH_CYCLES",
