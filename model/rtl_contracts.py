@@ -98,6 +98,13 @@ RTL_CONTRACTS = {
                 "within the window, plus a planted case it catches",
         "lean": "ComposeB (flush_spacing behind hedge); proof (b) from FALLTHROUGH arming owed",
         "must_fire": {"status": OWED, "name": None}},
+    "post_at_wb": {
+        "what": "an event-flag POST counts only at a lane's writeback, so (one writeback per "
+                "cycle) at most one POST per cycle (Wilson 11-19 flag ruling). RTL side: agent "
+                "1's 93ddd43, sim assertion FLAG1, planted M_FLAG_POST2 -- present once "
+                "registered in gate_mutant_kills on the merged tree",
+        "lean": "Count.wb_unique",
+        "must_fire": {"status": OWED, "name": None}},
 }
 
 #: contract premise (the names in gate_lean_build.PREMISES[thm]["contract"]) -> the RTL
