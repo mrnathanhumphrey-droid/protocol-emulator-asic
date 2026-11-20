@@ -2,7 +2,8 @@ import JLane.Slot
 /-!
 # Brick S2 — the depth-2 buffer, always two fetches per ARM (Wilson 11-16)
 
-The requester fetches the ARM's next two words; the buffer (one per lane, two words deep) holds
+The requester fetches the ARM's next two words ("depth 2" = two fetches per ARM); the buffer
+(one word per lane -- with the head and spare, three words per lane; `BufEng.EngB.buf`) holds
 what has no free slot yet and loads into the slot a retirement frees. Order by ARM type: a plain
 ARM fetches PC+1 then PC+2; a FALLTHROUGH ARM fetches PC+2 (the edge word) then PC+1 (the
 timeout word). The port does not care where a captured word is filed (slot or buffer): it runs
