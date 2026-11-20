@@ -176,7 +176,11 @@ KEY = ("dstar", "dstar29", "dstar39", "dstar39_v2", "dstar39_st", "dstar39_hold"
        "hasEdge_of_head", "nr_le_runBK", "hord_runBK", "ready_ft_edge_K",
        # OrderK.lean (K6 option 1): the keep premise from the arming chain, per-arming hidxA left
        "nrB_armed", "nrB_arms", "nr_frozen", "keep_at_hit", "keepOk_runBK", "hkeep_runBK",
-       "ready_ft_edge_armed")
+       "ready_ft_edge_armed",
+       # SpareB.lean (Wilson 11-20, spare_capture): ready_*_T with hempty replaced by the held
+       # words retiring first
+       "wb_after_wb_T", "arm_wb_spare_T", "cnt_two_hits", "ready_pc1_spare_T",
+       "ready_pc2_plain_spare_T", "ready_pc2_arm_spare_T")
 #: proof_constants.load() key -> the Lean expression that must evaluate to it (SPEC: the map)
 CONSTS = {
     "lemmaA_window": "LEMMA_A_WINDOW", "R_base": "R_BASE", "dispatch_cycles": "DISPATCH_CYCLES",
