@@ -558,7 +558,10 @@ theorem armed_origin (h0 : ∀ l, A0.armed l = false) (y : Lane) : ∀ n,
     (runBA P win usb sreq isArm edge kt n A0).armed y = true →
     ∃ t0, t0 < n ∧ (runBA P win usb sreq isArm edge kt t0 A0).arms P isArm y = true ∧
       (runBA P win usb sreq isArm edge kt n A0).armE y =
-        edge (runBA P win usb sreq isArm edge kt t0 A0).X.x.e.now y
+        edge (runBA P win usb sreq isArm edge kt t0 A0).X.x.e.now y ∧
+      ∀ i, t0 < i → i ≤ n → (runBA P win usb sreq isArm edge kt i A0).armed y = true ∧
+        (runBA P win usb sreq isArm edge kt i A0).armE y =
+          edge (runBA P win usb sreq isArm edge kt t0 A0).X.x.e.now y
   | 0, ha => by
     have : A0.armed y = true := ha
     rw [h0 y] at this
@@ -567,22 +570,25 @@ theorem armed_origin (h0 : ∀ l, A0.armed l = false) (y : Lane) : ∀ n,
     have ha' : (if (runBA P win usb sreq isArm edge kt n A0).hit y = true then false
         else if (runBA P win usb sreq isArm edge kt n A0).arms P isArm y = true then true
         else (runBA P win usb sreq isArm edge kt n A0).armed y) = true := ha
+    have hE : (runBA P win usb sreq isArm edge kt (n + 1) A0).armE y =
+        (if (runBA P win usb sreq isArm edge kt n A0).arms P isArm y = true
+          then edge (runBA P win usb sreq isArm edge kt n A0).X.x.e.now y
+          else (runBA P win usb sreq isArm edge kt n A0).armE y) := rfl
     by_cases hh : (runBA P win usb sreq isArm edge kt n A0).hit y = true
     · rw [if_pos hh] at ha'; cases ha'
     · rw [if_neg hh] at ha'
       by_cases har : (runBA P win usb sreq isArm edge kt n A0).arms P isArm y = true
-      · refine ⟨n, by omega, har, ?_⟩
-        show (if (runBA P win usb sreq isArm edge kt n A0).arms P isArm y = true
-          then edge (runBA P win usb sreq isArm edge kt n A0).X.x.e.now y
-          else (runBA P win usb sreq isArm edge kt n A0).armE y) = _
-        rw [if_pos har]
-      · rw [if_neg har] at ha'
-        obtain ⟨t0, ht, hat, hae⟩ := armed_origin h0 y n ha'
-        refine ⟨t0, by omega, hat, ?_⟩
-        show (if (runBA P win usb sreq isArm edge kt n A0).arms P isArm y = true
-          then edge (runBA P win usb sreq isArm edge kt n A0).X.x.e.now y
-          else (runBA P win usb sreq isArm edge kt n A0).armE y) = _
-        rw [if_neg har, hae]
+      · rw [if_pos har] at hE
+        refine ⟨n, by omega, har, hE, fun i h1 h2 => ?_⟩
+        rw [show i = n + 1 by omega]
+        exact ⟨ha, hE⟩
+      · rw [if_neg har] at ha' hE
+        obtain ⟨t0, ht, hat, hae, hall⟩ := armed_origin h0 y n ha'
+        refine ⟨t0, by omega, hat, hE.trans hae, fun i h1 h2 => ?_⟩
+        rcases Nat.lt_or_ge i (n + 1) with hlt | hge
+        · exact hall i h1 (by omega)
+        · rw [show i = n + 1 by omega]
+          exact ⟨ha, hE.trans hae⟩
 
 /-- **`hedge` on the bridged run.** From an unarmed, well-formed start, under the scan fix and
 the edge timing: at every flush of `y` on `runBK P winS usb sreq flS kt`, `y` holds its edge word
@@ -617,7 +623,7 @@ theorem hedge_runBK (hok : SReqB P sreq) (hedge : ∀ t l, t + 1 ≤ edge t l) (
   unfold EngBA.hit at hfl'
   simp only [Bool.and_eq_true, decide_eq_true_eq] at hfl'
   obtain ⟨ha, hnow⟩ := hfl'
-  obtain ⟨t0, ht0, harm, hae⟩ := armed_origin P win usb sreq isArm edge kt A0 h0 y f ha
+  obtain ⟨t0, ht0, harm, hae, -⟩ := armed_origin P win usb sreq isArm edge kt A0 h0 y f ha
   have hn0 := now_runBA P win usb sreq isArm edge kt A0 t0
   have hef : edge (runBA P win usb sreq isArm edge kt t0 A0).X.x.e.now y = A0.X.x.e.now + f := by
     rw [← hae, ← hnow, hn]
@@ -633,6 +639,59 @@ theorem hedge_runBK (hok : SReqB P sreq) (hedge : ∀ t l, t + 1 ≤ edge t l) (
     (armInvB_runBA P win usb sreq isArm edge hedge kt A0 hA t0) harm hh hnh hscan' (f - t0)
     (by omega) (by rw [hef, hn0]; omega)
   rw [← runBA_add, show t0 + (f - t0) = f by omega, hef] at hheld
+  rw [hn]
+  exact holds_hasEdge _ y _ hheld
+
+/-- **`hedge` on the bridged run, armed arrival** (`FlushHeld.edge_held_armed`): as
+`hedge_runBK`, with the per-arming premise weakened -- the edge word need only be held, or arrive
+by an unkilled capture, at some cycle `a` after the arming writeback and before the edge (through
+the scan the edge word is captured at `c + 4`, after the writeback at `c + 3`). -/
+theorem hedge_runBK_armed (hok : SReqB P sreq) (hedge : ∀ t l, t + 1 ≤ edge t l)
+    (hI : WfBK A0.X) (hA : ArmInvB A0) (h0 : ∀ l, A0.armed l = false)
+    (hscan : ∀ n, ScanOk P win usb sreq (runBA P win usb sreq isArm edge kt n A0)) (y : Lane)
+    (hword : ∀ t0, (runBA P win usb sreq isArm edge kt t0 A0).arms P isArm y = true →
+      ∃ a, t0 < a ∧ (runBA P win usb sreq isArm edge kt a A0).X.x.e.now <
+          edge (runBA P win usb sreq isArm edge kt t0 A0).X.x.e.now y ∧
+        ((runBA P win usb sreq isArm edge kt a A0).X.base.holds y
+            (kt (edge (runBA P win usb sreq isArm edge kt t0 A0).X.x.e.now y) y) = true ∨
+          ((runBA P win usb sreq isArm edge kt a A0).X.base.inCap y
+              (kt (edge (runBA P win usb sreq isArm edge kt t0 A0).X.x.e.now y) y) = true ∧
+            (runBA P win usb sreq isArm edge kt a A0).X.pkill = false)))
+    (f : Nat)
+    (hfl : flS P win usb sreq isArm edge kt A0
+      (runBK P (winS P win usb sreq isArm edge kt A0) usb sreq
+        (flS P win usb sreq isArm edge kt A0) kt f A0.X).x.e.now y = true) :
+    (runBK P (winS P win usb sreq isArm edge kt A0) usb sreq
+        (flS P win usb sreq isArm edge kt A0) kt f A0.X).base.hasEdge y
+      (kt (runBK P (winS P win usb sreq isArm edge kt A0) usb sreq
+        (flS P win usb sreq isArm edge kt A0) kt f A0.X).x.e.now y) = true := by
+  have hp := runBA_proj P win usb sreq isArm edge kt A0 f
+  have hn := now_runBA P win usb sreq isArm edge kt A0 f
+  rw [← hp]
+  rw [← hp] at hfl
+  simp only [flS, hn, Nat.add_sub_cancel_left] at hfl
+  have hfl' := hfl
+  unfold EngBA.hit at hfl'
+  simp only [Bool.and_eq_true, decide_eq_true_eq] at hfl'
+  obtain ⟨ha, hnow⟩ := hfl'
+  obtain ⟨t0, ht0, harm, hae, hall⟩ := armed_origin P win usb sreq isArm edge kt A0 h0 y f ha
+  have hef : edge (runBA P win usb sreq isArm edge kt t0 A0).X.x.e.now y = A0.X.x.e.now + f := by
+    rw [← hae, ← hnow, hn]
+  obtain ⟨a, hta, hlt, hh⟩ := hword t0 harm
+  have hna := now_runBA P win usb sreq isArm edge kt A0 a
+  have haf : a < f := by rw [hna, hef] at hlt; omega
+  obtain ⟨haa, haE⟩ := hall a hta (by omega)
+  have hscan' : ∀ n, ScanOk P win usb sreq
+      (runBA P win usb sreq isArm edge kt n (runBA P win usb sreq isArm edge kt a A0)) := by
+    intro n
+    rw [← runBA_add]
+    exact hscan (a + n)
+  obtain ⟨-, -, hheld, -⟩ := edge_held_armed P win usb sreq isArm edge hok hedge kt
+    (runBA P win usb sreq isArm edge kt a A0) y _
+    (wfBK_runBA P win usb sreq isArm edge kt A0 hok hedge hI hA hscan a)
+    (armInvB_runBA P win usb sreq isArm edge hedge kt A0 hA a) haa
+    (by rw [haE]; exact hlt) hh hscan' (f - a) (by omega) (by rw [haE, hef, hna]; omega)
+  rw [← runBA_add, show a + (f - a) = f by omega, hef] at hheld
   rw [hn]
   exact holds_hasEdge _ y _ hheld
 
@@ -664,5 +723,6 @@ end
 #print axioms wfBK_runBA
 #print axioms armed_origin
 #print axioms hedge_runBK
+#print axioms hedge_runBK_armed
 
 end JLane

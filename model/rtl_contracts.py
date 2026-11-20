@@ -166,11 +166,12 @@ COMPOSITION = {
             {"step": "flush spacing (K8), proof (b)", "status": "proved",
              "theorems": ("flush_spacing_runBA", "flush_spacing_runBK")},
             {"step": "hedge on the bridged run", "status": "proved",
-             "theorems": ("armed_origin", "hedge_runBK")},
+             "theorems": ("armed_origin", "hedge_runBK", "hedge_runBK_armed")},
             {"step": "hword: the edge word in time at each arming", "status": "owed",
-             "what": "hedge_runBK's per-arming premise: at the arming writeback the word with "
-                     "the edge's fetch index is held or arriving unkilled and is not the ARM "
-                     "(K1's content; FlushHeld's capture timing, per image)"},
+             "what": "hedge_runBK_armed's per-arming premise: the word with the edge's fetch "
+                     "index held or arriving unkilled at some armed cycle before the edge -- the "
+                     "capture half of ready_ft_edge_T (slot issue within the wait, the index of "
+                     "the first slot fetch, ft_edge_margin_scan)"},
             {"step": "contracts for hedge-timing and ScanOk", "status": "owed",
              "what": "flush_spacing_runBA / flushOk_runBA take 'edge >= arming writeback + 1' and "
                      "agent 1's scan fix (ScanOk); neither is in CONTRACT_PREMISES yet -- RTL "
