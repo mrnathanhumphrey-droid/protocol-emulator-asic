@@ -391,6 +391,7 @@ CONFIG = {
     "tb_usbdev": {"srcs": [], "arms": "FROM_PYGEN", "pygen": ("run_usbaddr", "coverage_arms")},
     "tb_usbbuf": {"srcs": [], "arms": "FROM_PYGEN", "pygen": ("run_usbbuf", "coverage_arms")},
     "tb_pair": {"srcs": [], "arms": "FROM_PYGEN", "pygen": ("run_pair", "coverage_arms")},
+    "tb_ds": {"srcs": [], "arms": "FROM_PYGEN", "pygen": ("run_drive_sample", "coverage_arms")},
     "tb_arm2": {"srcs": [], "arms": "FROM_PYGEN", "pygen": ("run_arm2", "coverage_arms")},
     "tb_gcd": {
         "srcs": [],

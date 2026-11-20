@@ -75,6 +75,9 @@ function integer v3_tab;
       32'hcb2e659c: case (field) 0: v3_tab = 0; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // corpus_spim25.hex [WITNESS (sim)]
       32'hbc31ea2b: case (field) 0: v3_tab = 1; 1: v3_tab = 16; 2: v3_tab = 38; 3: v3_tab = 38; 4: v3_tab = 38; 5: v3_tab = 38; 6: v3_tab = 18; 7: v3_tab = 240; 8: v3_tab = 240; 9: v3_tab = 240; 10: v3_tab = 240; endcase  // corpus_sptgt.hex
       32'h0d069668: case (field) 0: v3_tab = 1; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // corpus_uartrx.hex
+      32'hdd88db26: case (field) 0: v3_tab = 0; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // ds_age.hex
+      32'h0160f1e5: case (field) 0: v3_tab = 0; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // ds_od.hex
+      32'h2c64ee2e: case (field) 0: v3_tab = 0; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // ds_spi.hex
       32'h270e9329: case (field) 0: v3_tab = 1; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // edge_image.hex
       32'hfcc27895: case (field) 0: v3_tab = 1; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // edge_image_noto.hex
       32'hf2527155: case (field) 0: v3_tab = 1; 1: v3_tab = -1; 2: v3_tab = -1; 3: v3_tab = -1; 4: v3_tab = -1; 5: v3_tab = -1; 6: v3_tab = -1; 7: v3_tab = -1; 8: v3_tab = -1; 9: v3_tab = -1; 10: v3_tab = -1; endcase  // edge_image_rise.hex
@@ -232,6 +235,9 @@ task v3_tab_name;
       32'hcb2e659c: $display("  clocked_conform[V3] image: corpus_spim25.hex [WITNESS (sim)] (by its loaded bytes)");
       32'hbc31ea2b: $display("  clocked_conform[V3] image: corpus_sptgt.hex (by its loaded bytes)");
       32'h0d069668: $display("  clocked_conform[V3] image: corpus_uartrx.hex (by its loaded bytes)");
+      32'hdd88db26: $display("  clocked_conform[V3] image: ds_age.hex (by its loaded bytes)");
+      32'h0160f1e5: $display("  clocked_conform[V3] image: ds_od.hex (by its loaded bytes)");
+      32'h2c64ee2e: $display("  clocked_conform[V3] image: ds_spi.hex (by its loaded bytes)");
       32'h270e9329: $display("  clocked_conform[V3] image: edge_image.hex (by its loaded bytes)");
       32'hfcc27895: $display("  clocked_conform[V3] image: edge_image_noto.hex (by its loaded bytes)");
       32'hf2527155: $display("  clocked_conform[V3] image: edge_image_rise.hex (by its loaded bytes)");

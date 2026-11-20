@@ -98,6 +98,7 @@ ci-only test/gate_batch_equiv.py shard sim2: simulations + kill audit, ~610 s in
 ci-only test/run_pair.py shard sim2: simulations + kill audit, ~610 s in CI
 ci-only test/run_symgen.py shard sim2: simulations + kill audit, ~610 s in CI
 ci-only test/run_flags.py shard sim2: simulations + kill audit, ~610 s in CI
+ci-only test/run_drive_sample.py shard sim2: simulations + kill audit, ~610 s in CI
 ci-only test/run_usbrx.py shard sim2: simulations + kill audit, ~610 s in CI
 ci-only model/gate_usb_sweep.py shard sim2: simulations + kill audit, ~610 s in CI
 ci-only test/run_usbcrc.py shard sim2: simulations + kill audit, ~610 s in CI

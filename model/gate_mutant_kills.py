@@ -142,6 +142,8 @@ KILLERS = {
     "M_FLAG_NOCONSUME": "test/run_flags.py",     # WAIT never consumes its count
     "M_FLAG_POST2": "test/run_flags.py",         # a POST counts two flags: the FLAG1 assertion
     "M_OBSERVE_CONSUMES": "test/run_flags.py",   # OBSERVE consumes: the second look sees 1
+    "M_DS_SAMPLE_AFTER": "test/run_drive_sample.py",  # the round trip: RX gets our own byte
+    "M_DS_NO_TXADV": "test/run_drive_sample.py",      # the round trip: the target gets 0x01
     "M_PRIME_NEWPRIO": "test/gate_batch_equiv.py",  # the one-cycle earlier start
     # -- bundle 3: the USB receive -- NRZI, unstuffing, re-anchoring (tb_usbrx)
     "M_NO_REANCHOR": "test/run_usbrx.py", "M_UNSTUFF_KEEP": "test/run_usbrx.py",

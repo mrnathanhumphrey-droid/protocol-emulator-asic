@@ -345,6 +345,26 @@ def usb_osc_allowed(f=None):
 FW_HOLD_CYCLES = 5
 FW_SETUP_CYCLES = 1
 
+# ---------------------------------------------------------------------------
+# ⭐ DRIVE_SAMPLE'S SAMPLE AGE (Wilson 11-20: a named constant, protocol timing
+# depends on it). READ from the RTL: the sample is `pin_in[pinb]` = project.v
+# `uio_q1`, read at the action's writeback, the cycle after the DRIVE cycle whose
+# closing edge E loads `pin_out`. `uio_q1` then holds what `uio_q0` latched at
+# edge E - 1. A `uio` pin's output is `pin_out` itself (no further flop), so the
+# drive reaches the pad at E:
+#     the sampled bit = the pad of `pinb` as latched at edge E - DS_SAMPLE_AGE,
+#     where E is the edge this action's drive reaches the pad.
+# A far-end change landing on the pad before edge E - DS_SAMPLE_AGE is in the
+# sample, one after it is not (a change inside that edge's setup window may
+# resolve either way: lane_cert.SYNC_MIN / SYNC_MAX). This action's own drive is
+# never in its sample. A `uo_out` drive pin goes through `uo_q`, one flop more,
+# so its pad changes one edge later: DS_SAMPLE_AGE_UO. MEASURED by
+# test/run_drive_sample.py (a per-cycle pseudo-random line on pinb, the offset
+# found by search, must equal this; held there, red on a mismatch).
+# ---------------------------------------------------------------------------
+DS_SAMPLE_AGE = 1
+DS_SAMPLE_AGE_UO = DS_SAMPLE_AGE + 1
+
 
 def slow_edge_hz(f=None):
     """The slowest clock the band covers: f / BAND (57.142857 MHz at 60)."""

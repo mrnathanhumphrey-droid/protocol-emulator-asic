@@ -92,6 +92,19 @@ RTL_CONTRACTS = {
                 "(ts <= now)",
         "lean": "hwin (SlotReadyB.ready_pc2_arm_T, disp_pick_T)",
         "must_fire": {"status": OWED, "name": None}},
+    # DRIVE_SAMPLE (Wilson 11-20, option (A); entries added by agent 1 with the RTL, per the
+    # ruling -- agent 2's file, theirs to reword)
+    "ds_sample_before_drive": {
+        "what": "DRIVE_SAMPLE's sampled bit is pinb's pad as latched clock.DS_SAMPLE_AGE edges "
+                "before the edge its own drive reaches the pad -- the sample comes before the "
+                "drive, never its own bit (measured by test/run_drive_sample.py)",
+        "lean": "the order lemma (agent 2, owed); DRIVE_SAMPLE an ordinary word of the fragment",
+        "must_fire": {"status": PRESENT, "name": "M_DS_SAMPLE_AFTER"}},
+    "ds_tx_advance": {
+        "what": "DRIVE_SAMPLE with mod[1] drives the TX register's next bit and advances it as "
+                "SHIFT does (byte load, underrun, tx_bitp): a full-duplex byte goes out bit for bit",
+        "lean": "none (a writeback effect of an ordinary word)",
+        "must_fire": {"status": PRESENT, "name": "M_DS_NO_TXADV"}},
 }
 
 #: contract premise (the names in gate_lean_build.PREMISES[thm]["contract"]) -> the RTL

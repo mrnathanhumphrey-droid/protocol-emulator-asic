@@ -155,15 +155,16 @@ The chip **refuses** an image (the engine never runs, CONFIG_ERR) when:
   tests each opcode against the BUILT set (`BUILT_OPS`, a set since the v2 final
   batch, not a limit).
 
-### The v2 final batch's opcodes (11-19)
+### The v2 final batch's opcodes (11-19, 11-20)
 
 | op | name | fields | |
 |---|---|---|---|
+| 12 | `DRIVE_SAMPLE` | pin = driven, pinb = sampled, level, mod[1] = source, q, count = bits − 1, delay | built (11-20): drives `pin` (mod[1] 0 = `level`, 1 = the TX register, SHIFT's byte load) and samples `pinb` into RX at the drive instant, the byte pushed after `count` + 1 bits. The sample is the pad `DS_SAMPLE_AGE` = 1 edge before the edge the drive reaches it (`model/clock.py`). Refused: pin or pinb not real, pin = pinb, a clocked lane |
 | 13 | `SER` | pin = A, pinb = B, q = TX queue, count = bits − 1, delay = the byte time | built: the symbol generator's byte, owner lane only |
 | 16 | `POST` (was `FLAG_SET`) | pinb[2:0] = flag, delay | built: one more count on the flag |
 | 17 | `WAIT` (was `FLAG_WAIT`) | pinb[2:0] = flag, delay | built: holds the lane until the flag has a count, consumes one |
 | 22 | `SYMDEF` | mod = config word 0..2, the 25 bits between the opcode and mod = its payload | built: the generator's config, owner lane only, refused while it runs |
-| 23 | `OBSERVE` | pinb[2:0] = flag | **reserved, not built**: reads the flag's available count (posted − consumed, under the compiler's lag bound); its destination is owed (Wilson). Refused at load until built. |
+| 23 | `OBSERVE` | pinb[2:0] = flag, delay | built (11-19): the flag's available count (posted − consumed, under the compiler's lag bound) into the lane's RX register, in CMP_BRANCH's order; consumes nothing. The compiler refuses one that would overwrite a received byte still to be read |
 
 `pe_isa.py` is the definition (`BUILT_OPS`, `RESERVED_OPCODES`, the encoders).
 

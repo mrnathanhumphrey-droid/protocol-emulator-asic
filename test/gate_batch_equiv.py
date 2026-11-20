@@ -86,6 +86,24 @@ def git_blob(path):
     return r.stdout
 
 
+def pre_built():
+    """the opcodes the pre-batch RTL builds, READ from PRE_COMMIT's pe_isa (`N_BUILT_OPS`:
+    the loader's limit then -- every opcode below it)"""
+    m = re.search(r"^N_BUILT_OPS = (\d+)", git_blob("test/pe_isa.py").decode("utf-8"), re.M)
+    if not m:
+        raise RuntimeError("%s test/pe_isa.py: no N_BUILT_OPS" % PRE_COMMIT)
+    return frozenset(range(int(m.group(1))))
+
+
+def image_ops(path):
+    """{opcode} of every action word in a hex image (the loader's view: the top OP_W bits
+    of each word's first byte)"""
+    import pe_isa as I
+    data = bytes(int(t, 16) for t in open(path).read().split() if not t.startswith("@"))
+    return {data[a] >> (8 - I.OP_W)
+            for a in range(I.ACT_BASE, min(len(data), I.STORE_BYTES) - I.ACT_BYTES + 1, I.ACT_BYTES)}
+
+
 def pre_problems(blobs, pins=None):
     """[problem] for the pre sources against their pinned SHA-256."""
     pins = PRE_SHA256 if pins is None else pins
@@ -142,14 +160,34 @@ def run(vvp, path, peer, tr):
     return rows, host, int(m.group(1)) if m else None, "FATAL" in log, mon
 
 
-def compare(images, pre_vvp, post_vvp, tmp, stop_at_first=False):
-    """{name: problem-or-None}, primed cycles seen."""
-    out, primed = {}, set()
+def compare(images, pre_vvp, post_vvp, tmp, stop_at_first=False, built=None):
+    """{name: problem-or-None}, primed cycles seen, {name: the new opcodes} for the images
+    that are NOT existing programs.
+    ⭐ A NEW PROGRAM (v2 final batch, 11-20): an image holding an opcode the pre-batch RTL
+    does not build (DRIVE_SAMPLE's coverage images) is not an existing program, so it has
+    no pre-batch behaviour to keep. It is held to the one thing that is defined: the
+    pre-batch loader REFUSES it (the engine never primes) and the current RTL RUNS it. Either way round is
+    red -- the rule is by opcode, never a list of names."""
+    out, primed, new = {}, set(), {}
+    built = pre_built() if built is None else built
     for name, path, peer in images:
         a = run(pre_vvp, path, peer, os.path.join(tmp, "pre_%s.txt" % name))
         b = run(post_vvp, path, peer, os.path.join(tmp, "post_%s.txt" % name))
-        primed |= {a[2], b[2]}
+        nops = sorted(image_ops(path) - built)
         prob = None
+        if nops:
+            new[name] = nops
+            # refused at load = the engine never primes (EQUIV_PRIMED -1)
+            pre_ref = a[2] in (None, -1)
+            post_run = b[2] not in (None, -1) and not b[3]
+            if not (pre_ref and post_run):
+                prob = ("new program (opcode(s) %s): want pre refused, post running; got "
+                        "primed pre %s, post %s (FATAL post %s)" % (nops, a[2], b[2], b[3]))
+            out[name] = prob
+            if stop_at_first and prob:
+                break
+            continue
+        primed |= {a[2], b[2]}
         if a[3] or b[3]:
             prob = "FATAL (pre %s, post %s)" % (a[3], b[3])
         elif a[2] != b[2]:
@@ -166,7 +204,7 @@ def compare(images, pre_vvp, post_vvp, tmp, stop_at_first=False):
         out[name] = prob
         if stop_at_first and prob:
             break
-    return out, primed
+    return out, primed, new
 
 
 def main(argv) -> int:
@@ -193,12 +231,16 @@ def main(argv) -> int:
         build(pre_vvp, pre_src, defines=("PE_EQUIV_PRE",))
         build(post_vvp, ROOT)
         images = shipped()
-        res, primed = compare(images, pre_vvp, post_vvp, tmp)
+        res, primed, new = compare(images, pre_vvp, post_vvp, tmp)
         bad = {n: p for n, p in res.items() if p}
         for n, p in sorted(res.items()):
-            print("    %-30s %s" % (n, "identical" if not p else "*** " + p))
-        print("  %d image(s); %d bit-identical; primed cycle(s) seen %s"
-              % (len(res), len(res) - len(bad), sorted(x for x in primed if x is not None)))
+            print("    %-30s %s" % (n, ("*** " + p) if p else
+                                    "new program (opcode(s) %s): pre refused, post runs" % new[n]
+                                    if n in new else "identical"))
+        print("  %d image(s); %d bit-identical; %d new program(s) refused pre / run post; "
+              "primed cycle(s) seen %s"
+              % (len(res), len(res) - len(bad) - len(new), len(new),
+                 sorted(x for x in primed if x is not None)))
         if bad:
             probs.append("%d image(s) differ from the pre-batch build" % len(bad))
         if None in primed:
@@ -206,12 +248,21 @@ def main(argv) -> int:
         # must-fire: the new prefetch target during priming
         mut_vvp = os.path.join(tmp, "mut.vvp")
         build(mut_vvp, ROOT, defines=("M_PRIME_NEWPRIO",))
-        mres, _ = compare(images, pre_vvp, mut_vvp, tmp, stop_at_first=True)
+        mres, _p, _n = compare(images, pre_vvp, mut_vvp, tmp, stop_at_first=True)
         hit = [n for n, p in mres.items() if p]
         print("    must-fire: M_PRIME_NEWPRIO (new target while priming)  %s"
               % ("red  ok (%s: %s)" % (hit[0], mres[hit[0]][:60]) if hit else "*** STAYED GREEN"))
         if not hit:
             probs.append("must-fire M_PRIME_NEWPRIO stayed green")
+        # must-fire: a new program the CURRENT RTL also refuses (the pre build stands in
+        # for post) is red -- the new-program rule is not a pass-through
+        if new:
+            nn = sorted(new)[0]
+            nres, _p, _n = compare([x for x in images if x[0] == nn], pre_vvp, pre_vvp, tmp)
+            print("    must-fire: a new program refused by both builds        %s"
+                  % ("red  ok (%s)" % nn if nres.get(nn) else "*** STAYED GREEN"))
+            if not nres.get(nn):
+                probs.append("must-fire new-program rule stayed green")
         # must-fire: a pin pinned to a wrong SHA
         mp = pre_problems(blobs, {p: "0" * 64 for p in blobs})
         print("    must-fire: a pre-batch source off its pinned SHA       %s"

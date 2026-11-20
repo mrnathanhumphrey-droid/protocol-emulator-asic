@@ -68,7 +68,7 @@ FIELDS = ("pin", "level", "delay", "count", "q", "pinb", "mod")
 FULL = {"pin": 0xF, "level": 0x1, "delay": 0x3FF, "count": 0xF, "q": 0x3, "pinb": 0xF, "mod": 0x3}
 OPS = ("LEVEL", "SHIFT", "SHIFTIN", "READBIT", "START", "STOP", "ARM", "REARM",
        "BRANCH_BIT", "CMP_BRANCH", "LOOP", "SHIFTI", "SER", "SYMDEF", "FLAG_SET", "FLAG_WAIT",
-       "OBSERVE")
+       "OBSERVE", "DRIVE_SAMPLE")
 ALL = OPS
 
 #: base decode tokens -> (field, mask). A bit-select `a_cnt[0]` reads only that bit.
@@ -102,6 +102,12 @@ DERIVED = {
     # OBSERVE's value (Wilson 11-19): flag pinb[2:0]'s available count, and its reverse
     "obs_cnt": {"pinb": ("OBSERVE",)},
     "obs_rev": {"pinb": ("OBSERVE",)},
+    # DRIVE_SAMPLE (Wilson 11-20): mod[1] picks the driven bit (level, or the TX
+    # register through tx_bit -- its queue `q`); pinb is the sampled pin
+    "ds_bit": {"level": ("DRIVE_SAMPLE",), "q": ("DRIVE_SAMPLE",)},
+    "ds_refuse": {"pin": ("DRIVE_SAMPLE",), "pinb": ("DRIVE_SAMPLE",)},
+    "ds_rx": {"pinb": ("DRIVE_SAMPLE",)},
+    "ds_asm": {"pinb": ("DRIVE_SAMPLE",)}, "ds_asm_rev": {"pinb": ("DRIVE_SAMPLE",)},
     "br_cmp_take": {f: ("CMP_BRANCH",) for f in ("pin", "delay", "level", "q", "mod")},
     "lp_n": {"pin": ("LOOP",), "delay": ("LOOP",), "level": ("LOOP",)},
     "usb_send": {"q": ("SHIFT",)}, "uc_hold": {"level": ("SHIFT", "SHIFTI")},
@@ -149,7 +155,7 @@ SITES = [
     ("wire [MOD_W-1:0] a_mod  = cur_act[", "DEF", "decode slice"),
     ("wire [PINB_W-1:0] a_pinb = cur_act[", "DEF", "decode slice"),
     ("wire [BQW-1:0]   a_q;", "DEF", "declaration"),
-    ("assign host_q    = a_q;", C_SHIFT + ("CMP_BRANCH", "SER"),
+    ("assign host_q    = a_q;", C_SHIFT + ("CMP_BRANCH", "SER", "DRIVE_SAMPLE"),
      "host_q -> project.v q_sel -> tx_valid/tx_head/do_popq, consumed only on SHIFT/SHIFTI "
      "and SER (the generator's byte: host_valid, host_pop); CMP_BRANCH reads a_q itself"),
     ("wire           fl_hw = (l_act[hix[gi]][ACT_W-1 -: OP_W] == OP_FLAG_WAIT);", ("FLAG_WAIT",),
@@ -165,6 +171,17 @@ SITES = [
     ("wire [ACT_W-OP_W-MOD_W-1:0] sg_payload = {a_pin, a_lvl, a_dly, a_cnt, a_q, a_pinb};", "DEF",
      "SYMDEF's payload: every field between the opcode and mod"),
     ("wire pin_real = (a_pin < N_PINS", "DEF", "pin index guard"),
+    ("wire       ds_bit     = a_mod[1] ? tx_bit : a_lvl;", "DEF", "DRIVE_SAMPLE: the driven bit"),
+    ("wire       ds_refuse  = ~pin_real | ~pinb_real | (a_pin == a_pinb) | (clk_real & (ck_pin != l_pin[cur]));", "DEF",
+     "DRIVE_SAMPLE's refusals"),
+    ("wire       ds_rx      = ds_bit;", "DEF", "mutant"),
+    ("wire       ds_rx      = pinb_real ? pin_in[a_pinb] : 1'b0;", "DEF", "DRIVE_SAMPLE: the sample"),
+    ("wire [7:0] ds_asm     = {ds_rx, l_rx[cur][7:1]};", "DEF", "DRIVE_SAMPLE: the RX shift"),
+    ("wire [7:0] ds_asm_rev = {ds_asm[0], ds_asm[1], ds_asm[2], ds_asm[3],", "DEF",
+     "DRIVE_SAMPLE: the RX shift, reversed"),
+    ("ds_asm[4], ds_asm[5], ds_asm[6], ds_asm[7]};", "DEF", "DRIVE_SAMPLE: reversed (continued)"),
+    ("if ((a_op == OP_DRIVE_SAMPLE) && a_mod[1] && !ds_refuse && tx_bitp[cur] == a_cnt) begin",
+     ("DRIVE_SAMPLE",), "DRIVE_SAMPLE's TX byte end at bit `count`"),
     ("wire pin_real = 1'b1;", "DEF", "mutant"),
     ("wire pinb_real = (a_pinb < N_PINS", "DEF", "pinb index guard"),
     ("wire ck_shift   = clk_real & a_lvl & cur_cls[C_SHIFT];", "DEF", "clocked SHIFT"),

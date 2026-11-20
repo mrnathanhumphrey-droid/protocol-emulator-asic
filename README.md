@@ -90,7 +90,7 @@ pins, drive mode, bit spacing, scheduling deadline and program address.
 
 | | opcodes |
 |---|---|
-| drive and sample | `LEVEL` `SHIFT` `SHIFTI` `SHIFTIN` `READBIT` `START` `STOP` |
+| drive and sample | `LEVEL` `SHIFT` `SHIFTI` `SHIFTIN` `READBIT` `START` `STOP` · `DRIVE_SAMPLE` (drive one pin, sample another, one action) |
 | time | `ARM` (wait for an edge, with timeout) · `REARM` (periodic release) |
 | decide | `BRANCH_BIT` · `CMP_BRANCH` (byte vs immediate, under a mask) · `LOOP` (per-lane counter) |
 

@@ -674,6 +674,7 @@ module pe_engine #(
   // a_op[4:2] = 010; `pre_cls` excludes it there, the only decode of that
   // pattern, so the opcode range stays contiguous (N_BUILT_OPS 11 -> 12).
   localparam [OP_W-1:0] OP_SHIFTI     = 11;
+  localparam [OP_W-1:0] OP_DRIVE_SAMPLE = 12;   // drive pin, sample pinb (Wilson 11-20)
   // ⭐ THE SYMBOL GENERATOR (Wilson 11-17, option (c) K = 4; see `pe_symgen` at the
   // end of this file). SER hands the generator ONE BYTE from the TX queue (`q`):
   // pin = A, pinb = B, count = bits - 1, delay = the byte time; an ordinary word
@@ -2809,6 +2810,33 @@ module pe_engine #(
   wire [7:0] rx_asm     = {rx_bit_sel, l_rx[cur][7:1]};
   wire [7:0] rx_asm_rev = {rx_asm[0], rx_asm[1], rx_asm[2], rx_asm[3],
                            rx_asm[4], rx_asm[5], rx_asm[6], rx_asm[7]};
+  // =====================================================================
+  // ⭐ DRIVE_SAMPLE (opcode 12, Wilson 11-20, option (A)): ONE action drives
+  // `pin` and samples `pinb` AT THE DRIVE INSTANT -- sample the bus, then change
+  // the output (SPI / JTAG full duplex). No new state, no new timed path.
+  //   * the driven bit: mod[1] = 0 the `level` immediate, 1 the TX register
+  //     (SHIFT's `tx_bit`: its byte load, underrun and `tx_bitp`);
+  //   * the sample: the SYNCHRONISED `pin_in[pinb]`, read at this action's
+  //     writeback -- the pad as it stood `DS_SAMPLE_AGE` cycles before the
+  //     edge that puts this action's drive on the pad (model/clock.py, read
+  //     from here and measured by test/run_drive_sample.py), shifted into RX
+  //     with SHIFTIN's byte-complete push; `count` = bits - 1 for BOTH
+  //     pointers (SHIFT's convention);
+  //   * REFUSED (config_err, the lane halts, nothing driven): pin or pinb not a
+  //     real pin, pin == pinb, or a CLOCKED lane -- a real clock pin distinct
+  //     from the lane's own pin (pe_isa's `clocked`; an unclocked open-drain lane
+  //     names its own pin, the load rule wants a `uio` clock there) -- clocked
+  //     lanes keep SHIFT / SHIFTIN in this first cut.
+  wire       ds_bit     = a_mod[1] ? tx_bit : a_lvl;
+  wire       ds_refuse  = ~pin_real | ~pinb_real | (a_pin == a_pinb) | (clk_real & (ck_pin != l_pin[cur]));
+`ifdef M_DS_SAMPLE_AFTER
+  wire       ds_rx      = ds_bit;   // the mutant: the line read AFTER this drive (its own bit)
+`else
+  wire       ds_rx      = pinb_real ? pin_in[a_pinb] : 1'b0;
+`endif
+  wire [7:0] ds_asm     = {ds_rx, l_rx[cur][7:1]};
+  wire [7:0] ds_asm_rev = {ds_asm[0], ds_asm[1], ds_asm[2], ds_asm[3],
+                           ds_asm[4], ds_asm[5], ds_asm[6], ds_asm[7]};
 
   // =====================================================================
   // HEADER LOAD -- on entering run, pull N_LANES headers out of the image.
@@ -3954,6 +3982,21 @@ module pe_engine #(
             end
             // ⭐ OP_ARM moves no pin -- it RELEASES the lane on a peer edge.
             // Its state goes in at writeback, below.
+            // DRIVE_SAMPLE: LEVEL's drive rule with `ds_bit` (an open-drain lane
+            // never drives a 1); the sample is the writeback's (see `ds_rx`)
+            OP_DRIVE_SAMPLE: if (ds_refuse) begin
+              config_err_m <= 1'b1;
+              sticky_ovr_m <= 1'b1;
+              live_n[cur]  = 1'b0;
+            end else if (pin_real) begin
+              if (l_mode[cur]) begin
+                pin_out[a_pin] <= ds_bit & pin_pp[a_pin];
+                pin_oe[a_pin]  <= 1'b1;
+              end else begin
+                pin_out[a_pin] <= 1'b0;         // open-drain: NEVER drives 1
+                pin_oe[a_pin]  <= ~ds_bit;
+              end
+            end
             OP_ARM, OP_REARM: ;                 // no pin movement
             // the generator's words act at writeback; its pins are driven below
             OP_SER, OP_SYMDEF: ;
@@ -4249,6 +4292,33 @@ module pe_engine #(
             // pointer -- it is the single-bit sample (an I2C ACK, a UART stop
             // bit), so there is no byte to complete.
             OP_READBIT: l_rx[cur] <= {rx_bit, l_rx[cur][7:1]};
+            // DRIVE_SAMPLE's writeback: the TX advance (mod[1], SHIFT's), the
+            // sample into RX and the byte push at bit `count` (SHIFTIN's)
+            OP_DRIVE_SAMPLE: if (!ds_refuse) begin
+              if (a_mod[1]) begin
+                if (l_txv[cur]) begin
+`ifndef M_DS_NO_TXADV
+                  l_tx[cur] <= {1'b0, l_tx[cur][7:1]};
+`endif
+                end else if (host_valid) begin
+                  l_tx[cur] <= {1'b0, host_ord[7:1]};
+                  host_pop  <= 1'b1;
+                end else begin
+                  l_tx[cur] <= 8'h00;
+                  lane_underrun_m[cur] <= 1'b1;
+                end
+                l_txv[cur]   <= 1'b1;
+                tx_bitp[cur] <= tx_bitp[cur] + {{(BPW-1){1'b0}}, 1'b1};
+              end
+              l_rx[cur]    <= ds_asm;
+              rx_bitp[cur] <= rx_bitp[cur] + {{(BPW-1){1'b0}}, 1'b1};
+              if (rx_bitp[cur] == a_cnt) begin
+                rx_data <= l_order[cur] ? ds_asm_rev : ds_asm;
+                rx_lane <= cur;
+                rx_push <= 1'b1;
+                rx_bitp[cur] <= {BPW{1'b0}};
+              end
+            end
             // ⭐ the generator's two words: the owner lane only (else config_err,
             // the lane halts); SER pops one byte from its TX queue into the
             // generator's holding register (empty queue: the lane's underrun
@@ -4506,6 +4576,11 @@ module pe_engine #(
           end
           // ⭐ bundle 5: a buffer send's last bit leaves the lane byte-ALIGNED
           // whatever the length, so the next SHIFT / SHIFTI starts a fresh byte
+          // DRIVE_SAMPLE's TX byte end (mod[1]): SHIFT's, at bit `count`
+          if ((a_op == OP_DRIVE_SAMPLE) && a_mod[1] && !ds_refuse && tx_bitp[cur] == a_cnt) begin
+            l_txv[cur]   <= 1'b0;
+            tx_bitp[cur] <= {BPW{1'b0}};
+          end
           if (usb_send && act_retire) begin
             tx_bitp[cur] <= {BPW{1'b0}};
             l_txv[cur]   <= 1'b0;

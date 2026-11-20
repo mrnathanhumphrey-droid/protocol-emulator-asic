@@ -83,6 +83,14 @@ OP_SHIFTI = 11
 #: time); SYMDEF writes config word `mod` (0..2) from the 25 bits between the
 #: opcode and `mod`. See src/pe_engine.v `pe_symgen`.
 OP_SER = 13
+#: DRIVE_SAMPLE (Wilson 11-20, option (A)): drive `pin`, sample `pinb` AT THE DRIVE
+#: INSTANT (the pad DS_SAMPLE_AGE cycles before this drive reaches it, model/clock.py)
+#: into RX with SHIFTIN's byte push. mod[1]: the driven bit -- 0 `level`, 1 the TX
+#: register (SHIFT's byte load / underrun, queue `q`). count = bits - 1 for both
+#: pointers. Refused: pin or pinb not a real pin, pin == pinb, a lane with a real
+#: clock pin distinct from its own pin (`drive_sample_problems`; the RTL raises config_err on each).
+OP_DRIVE_SAMPLE = 12
+MOD_DS_TX = 0x2
 OP_SYMDEF = 22
 #: inter-lane event flags (Wilson 11-19, the 11-09 semantics): POST adds one count
 #: to flag pinb[2:0] at its writeback; WAIT holds its lane (an ENABLE) until a count
@@ -101,6 +109,7 @@ OPCODES = {
     "READBIT": OP_READBIT, "START": OP_START, "STOP": OP_STOP,
     "ARM": OP_ARM, "REARM": OP_REARM, "BRANCH_BIT": OP_BRANCH_BIT,
     "CMP_BRANCH": OP_CMP_BRANCH, "LOOP": OP_LOOP, "SHIFTI": OP_SHIFTI,
+    "DRIVE_SAMPLE": OP_DRIVE_SAMPLE,
 }
 # ⭐ RESERVED WITH THE FORMAT (frozen once, Wilson): one opcode per master-list
 # primitive, each with the field map it will use, shown here to fit ONE 32-bit
@@ -118,13 +127,12 @@ OPCODES = {
 #: limit would un-refuse those; the loader now tests membership.
 #: 0..11 (SHIFTI, 11, was the last built in order); SER 13 and SYMDEF 22, the
 #: symbol generator (Wilson 11-17)
-BUILT_OPS = frozenset(range(12)) | {13, 16, 17, 22, 23}   # + POST 16, WAIT 17, OBSERVE 23
+BUILT_OPS = frozenset(range(12)) | {12, 13, 16, 17, 22, 23}   # + DRIVE_SAMPLE 12, POST 16, WAIT 17, OBSERVE 23
 BUILT_MASK = sum(1 << _o for _o in BUILT_OPS)
 #: the opcode the refusal must-fires inject: the LOWEST one not built
 OP_UNBUILT = min(set(range(1 << OP_W)) - BUILT_OPS)
 RESERVED_OPCODES = {
     # 11 was ARM2: built instead as ARM's mod[0] (primitive 3 bundle 1); 11 is SHIFTI
-    12: ("DRIVE_SAMPLE", "pin = driven, pinb = sampled, level = drive value, delay"),
     14: ("FRAC_TX", "pin, delay = integer bit time, {count, mod} = fraction"),
     15: ("CRC_RX", "count = CRC kind, q = which accumulator"),
     18: ("RESP", "q = response buffer, count = length"),
@@ -322,6 +330,40 @@ def act_observe(flag, delay) -> bytes:
     if not 0 <= int(flag) < N_FLAGS:
         raise ValueError("OBSERVE flag %d: 0..%d" % (int(flag), N_FLAGS - 1))
     return act(OP_OBSERVE, 0, 0, delay, pinb=int(flag))
+
+
+def act_drive_sample(pin, pinb, delay, level=0, tx=False, nbits=8, q=0) -> bytes:
+    """DRIVE_SAMPLE: drive `pin` (`level`, or the TX register's next bit when `tx`)
+    and sample `pinb` into RX at the drive instant; the byte pushes after `nbits`."""
+    if not 1 <= int(nbits) <= 8:
+        raise ValueError("nbits %r outside 1..8" % (nbits,))
+    if tx and level:
+        raise ValueError("DRIVE_SAMPLE from the TX register reads no level")
+    return act(OP_DRIVE_SAMPLE, pin, level, delay, count=int(nbits) - 1,
+               q=q if tx else 0, pinb=pinb, mod=MOD_DS_TX if tx else 0)
+
+
+def drive_sample_problems(img):
+    """[problem]: DRIVE_SAMPLE's refusals (Wilson 11-20), each the RTL's `ds_refuse`:
+    pin or pinb not a real pin, pin == pinb, or a CLOCKED lane -- a real clock pin
+    distinct from the lane's own pin (`flag_problems`' `clocked`; an unclocked
+    open-drain lane names its own pin) -- clocked lanes keep SHIFT / SHIFTIN."""
+    probs = []
+    for ln, (h, acts) in sorted(lane_programs(img).items()):
+        for i, x in enumerate(acts):
+            if x["op"] != OP_DRIVE_SAMPLE:
+                continue
+            if x["pin"] >= N_PINS or x["pinb"] >= N_PINS:
+                probs.append("lane %d word %d: DRIVE_SAMPLE pin %d / pinb %d -- both must "
+                             "be real pins" % (ln, i, x["pin"], x["pinb"]))
+            elif x["pin"] == x["pinb"]:
+                probs.append("lane %d word %d: DRIVE_SAMPLE drives and samples the same "
+                             "pin %d" % (ln, i, x["pin"]))
+            if h["clkpin"] < N_PINS and h["clkpin"] != h["pin"]:
+                probs.append("lane %d word %d: DRIVE_SAMPLE on a clocked lane (clock pin "
+                             "%d) -- refused in the first cut; use SHIFT / SHIFTIN"
+                             % (ln, i, h["clkpin"]))
+    return probs
 
 
 def observe_rx_problems(img):
@@ -1500,6 +1542,7 @@ def flag_problems(img, d_star):
     probs += symgen_problems(img)
     probs += flag_word_problems(img)
     probs += observe_rx_problems(img)
+    probs += drive_sample_problems(img)
     return probs
 
 

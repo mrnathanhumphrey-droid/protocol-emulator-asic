@@ -61,6 +61,11 @@ ROWS = {
                          "packets (bit for bit) and its turnaround after the host's EOP; "
                          "the host's receive-side sub-cycle phase is walked by tb_usbrx "
                          "(IN_SUITE), whose receive path this bench reuses unchanged"),
+    "test/tb_ds.v": ("CHIP_DRIVEN", "DRIVE_SAMPLE (Wilson 11-20): the SPI target only REACTS to "
+                     "the chip's own SCK edges; the age arm places one bit per cycle at "
+                     "the negedge BY DESIGN (the age is a whole-cycle claim, measured as "
+                     "an offset in edges); the synchroniser's sub-cycle phase is walked "
+                     "by tb_uartrx and tb_usbrx (IN_SUITE), the same pin_in path"),
     "test/tb_pair.v": ("CHIP_DRIVEN", "v2 primitive 3 bundle 2: the claim is the chip's OWN "
                        "pair waveform (D+/D-, SHIFTI, self-timed bytes) cycle for cycle; its "
                        "one receive case is functional, and the unclocked sample's sub-cycle "

@@ -162,6 +162,13 @@ SCRATCH_GENERATORS: dict = {
                " judged by the waiter's edges against the poster's on tb_pair,"
                " not by the A2 gap",
         "v3": {"no_v3_layer": "test/tb_pair.v"}},
+    "run_drive_sample": {
+        "script": "test/run_drive_sample.py", "pattern": "ds_*.hex",
+        "clocked": True,
+        "why": "DRIVE_SAMPLE (Wilson 11-20): the full-duplex round trip vs tb_ds's"
+               " SPI target, the sample-age measurement and the refusals, judged"
+               " on tb_ds, not by the A2 gap",
+        "v3": {"no_v3_layer": "test/tb_ds.v"}},
     "run_symgen": {
         "script": "test/run_symgen.py", "pattern": "symgen_*.hex",
         "clocked": True,

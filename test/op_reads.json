@@ -28,6 +28,7 @@
   "index_ops": [
    "ARM",
    "BRANCH_BIT",
+   "DRIVE_SAMPLE",
    "LEVEL",
    "READBIT",
    "SER",
@@ -39,6 +40,7 @@
   ],
   "refused": [
    "ARM",
+   "DRIVE_SAMPLE",
    "READBIT",
    "SER",
    "SHIFT",
@@ -73,6 +75,15 @@
    "delay": 1023,
    "level": 1,
    "mod": 3,
+   "pin": 15,
+   "pinb": 15,
+   "q": 3
+  },
+  "DRIVE_SAMPLE": {
+   "count": 15,
+   "delay": 1023,
+   "level": 1,
+   "mod": 2,
    "pin": 15,
    "pinb": 15,
    "q": 3

@@ -296,6 +296,8 @@ EXPECT = {
     "M_FLAG_NOCONSUME":   (2, None),   # the event-flag WAIT never consumes its count
     "M_FLAG_POST2":       (1, None),   # a POST also counts its neighbour (the FLAG1 assertion)
     "M_OBSERVE_CONSUMES": (1, None),   # OBSERVE also consumes a count
+    "M_DS_SAMPLE_AFTER":  (2, None),   # DRIVE_SAMPLE's sample taken after its drive (its own bit)
+    "M_DS_NO_TXADV":      (1, None),   # DRIVE_SAMPLE's TX register never shifts
     "M_FT_REFLUSH":       (12, "K8's planted second flush: its own register, flush_ev, the four flush effects again"),
     "M_RX_CAPGATE_EARLY": (2, None),
     "M_RX_CAPGATE_LATE":  (2, None),
