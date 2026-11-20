@@ -173,7 +173,10 @@ KEY = ("dstar", "dstar29", "dstar39", "dstar39_v2", "dstar39_st", "dstar39_hold"
        # OrderK.lean (K6 step 1): fetch order on the flushed run, under the keep premise KeepOk
        "ordBK_init", "ordBK_step", "ordBK_run",
        # OrderK.lean (K6 step 2): the edge word at the edge from the order (no hidx), hord derived
-       "hasEdge_of_head", "nr_le_runBK", "hord_runBK", "ready_ft_edge_K")
+       "hasEdge_of_head", "nr_le_runBK", "hord_runBK", "ready_ft_edge_K",
+       # OrderK.lean (K6 option 1): the keep premise from the arming chain, per-arming hidxA left
+       "nrB_armed", "nrB_arms", "nr_frozen", "keep_at_hit", "keepOk_runBK", "hkeep_runBK",
+       "ready_ft_edge_armed")
 #: proof_constants.load() key -> the Lean expression that must evaluate to it (SPEC: the map)
 CONSTS = {
     "lemmaA_window": "LEMMA_A_WINDOW", "R_base": "R_BASE", "dispatch_cycles": "DISPATCH_CYCLES",

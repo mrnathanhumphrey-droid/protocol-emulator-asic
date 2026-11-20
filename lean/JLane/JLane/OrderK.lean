@@ -414,8 +414,178 @@ theorem ready_ft_edge_K (hok : SReqB P sreq) (fl : Nat → Lane → Bool) (k : N
 
 end
 
+/-! ### The keep premise from the arming chain (K6 build, option 1)
+
+`kt` (the edge word's index by time) is an input of the run, so "the kept index is the lane's
+retirement count" is not a fact of the engine alone. It reduces to one local premise at each
+arming (`hidxA`): the edge word is the next word in fetch order after the ARM (index = the ARM's
+index + 1, the edge-first order of K7). The arming chain carries it to the edge: the ARM retires
+at its arming writeback (`nrB_arms`), and an armed lane is never dispatched (`ArmInvB`), so it
+retires nothing until its edge, the edge cycle included (`nrB_armed`, `nr_frozen`). -/
+
+section
+variable (P : Program) (win : Engine → Option Lane) (usb : Option Lane)
+  (sreq : EngB → Option Lane) (isArm : EngB → Bool) (edge : Nat → Lane → Nat)
+  (kt : Nat → Lane → Nat) (A0 : EngBA)
+
+/-- An armed lane does not retire this cycle (it is not dispatched). -/
+theorem nrB_armed (A : EngBA) (hA : ArmInvB A) (y : Lane) (ha : A.armed y = true) :
+    nrB P A.X.x y = A.X.x.nr y := by
+  have hc : ¬(A.X.x.e.st = .wb ∧ y = A.X.x.e.cur ∧ P.ret A.X.x.e.now A.X.x.e.cur = true) := by
+    rintro ⟨hst, hy, -⟩
+    exact hA.1 y ha ⟨by rw [hst]; decide, hy.symm⟩
+  unfold nrB
+  rw [if_neg hc]
+
+/-- The arming writeback retires the ARM. -/
+theorem nrB_arms (A : EngBA) (y : Lane) (har : A.arms P isArm y = true) :
+    nrB P A.X.x y = A.X.x.nr y + 1 := by
+  unfold EngBA.arms at har
+  simp only [Bool.and_eq_true, decide_eq_true_eq] at har
+  unfold nrB
+  rw [if_pos ⟨har.1.1.1, har.1.1.2, har.1.2⟩]
+
+theorem nr_runBA_succ (n : Nat) :
+    (runBA P win usb sreq isArm edge kt (n + 1) A0).X.x.nr
+      = nrB P (runBA P win usb sreq isArm edge kt n A0).X.base := rfl
+
+/-- While armed, the lane's retirement count is frozen. -/
+theorem nr_frozen (hedge : ∀ t l, t + 1 ≤ edge t l) (hA : ArmInvB A0) (y : Lane) (t0 : Nat) :
+    ∀ d, (∀ i, t0 < i → i ≤ t0 + 1 + d → (runBA P win usb sreq isArm edge kt i A0).armed y = true) →
+      (runBA P win usb sreq isArm edge kt (t0 + 1 + d) A0).X.x.nr y
+        = (runBA P win usb sreq isArm edge kt (t0 + 1) A0).X.x.nr y
+  | 0, _ => rfl
+  | d + 1, ha => by
+    have ih := nr_frozen hedge hA y t0 d (fun i h1 h2 => ha i h1 (by omega))
+    rw [show t0 + 1 + (d + 1) = (t0 + 1 + d) + 1 by omega, nr_runBA_succ, nrB_base,
+      nrB_armed P _ (armInvB_runBA P win usb sreq isArm edge hedge kt A0 hA _) y
+        (ha _ (by omega) (by omega)), ih]
+
+/-- **At a hit, the edge word's index is the lane's retirement count**, and the lane does not
+retire in the edge cycle -- given `hidxA` at each arming. -/
+theorem keep_at_hit (hedge : ∀ t l, t + 1 ≤ edge t l) (hA : ArmInvB A0)
+    (h0 : ∀ l, A0.armed l = false)
+    (hidxA : ∀ t0 y, (runBA P win usb sreq isArm edge kt t0 A0).arms P isArm y = true →
+      kt (edge (runBA P win usb sreq isArm edge kt t0 A0).X.x.e.now y) y
+        = (runBA P win usb sreq isArm edge kt t0 A0).X.x.nr y + 1)
+    (n : Nat) (y : Lane) (hh : (runBA P win usb sreq isArm edge kt n A0).hit y = true) :
+    kt (runBA P win usb sreq isArm edge kt n A0).X.x.e.now y
+        = (runBA P win usb sreq isArm edge kt n A0).X.x.nr y ∧
+      nrB P (runBA P win usb sreq isArm edge kt n A0).X.x y
+        = (runBA P win usb sreq isArm edge kt n A0).X.x.nr y := by
+  have hh' := hh
+  unfold EngBA.hit at hh'
+  simp only [Bool.and_eq_true, decide_eq_true_eq] at hh'
+  obtain ⟨ha, hnow⟩ := hh'
+  obtain ⟨t0, ht0, harm, hae, hall⟩ := armed_origin P win usb sreq isArm edge kt A0 h0 y n ha
+  have hAn := armInvB_runBA P win usb sreq isArm edge hedge kt A0 hA n
+  refine ⟨?_, nrB_armed P _ hAn y ha⟩
+  have h1 : (runBA P win usb sreq isArm edge kt (t0 + 1) A0).X.x.nr y
+      = (runBA P win usb sreq isArm edge kt t0 A0).X.x.nr y + 1 := by
+    rw [nr_runBA_succ, nrB_base, nrB_arms P isArm _ y harm]
+  have h2 := nr_frozen P win usb sreq isArm edge kt A0 hedge hA y t0 (n - (t0 + 1))
+    (fun i h1 h2 => (hall i h1 (by omega)).1)
+  rw [show t0 + 1 + (n - (t0 + 1)) = n by omega] at h2
+  rw [hnow, hae, hidxA t0 y harm, h2, h1]
+
+/-- **`KeepOk` at every cycle of the armed run.** -/
+theorem keepOk_runBA (hedge : ∀ t l, t + 1 ≤ edge t l) (hA : ArmInvB A0)
+    (h0 : ∀ l, A0.armed l = false)
+    (hidxA : ∀ t0 y, (runBA P win usb sreq isArm edge kt t0 A0).arms P isArm y = true →
+      kt (edge (runBA P win usb sreq isArm edge kt t0 A0).X.x.e.now y) y
+        = (runBA P win usb sreq isArm edge kt t0 A0).X.x.nr y + 1)
+    (n : Nat) :
+    KeepOk P (runBA P win usb sreq isArm edge kt n A0).hit
+      (kt (runBA P win usb sreq isArm edge kt n A0).X.x.e.now)
+      (runBA P win usb sreq isArm edge kt n A0).X := fun y hh => by
+  obtain ⟨hk, hn⟩ := keep_at_hit P win usb sreq isArm edge kt A0 hedge hA h0 hidxA n y hh
+  rw [hn]
+  exact hk
+
+/-- **`KeepOk` on the bridged run** (`runBK P winS usb sreq flS kt`). -/
+theorem keepOk_runBK (hedge : ∀ t l, t + 1 ≤ edge t l) (hA : ArmInvB A0)
+    (h0 : ∀ l, A0.armed l = false)
+    (hidxA : ∀ t0 y, (runBA P win usb sreq isArm edge kt t0 A0).arms P isArm y = true →
+      kt (edge (runBA P win usb sreq isArm edge kt t0 A0).X.x.e.now y) y
+        = (runBA P win usb sreq isArm edge kt t0 A0).X.x.nr y + 1)
+    (n : Nat) :
+    KeepOk P (flS P win usb sreq isArm edge kt A0
+        (runBK P (winS P win usb sreq isArm edge kt A0) usb sreq
+          (flS P win usb sreq isArm edge kt A0) kt n A0.X).x.e.now)
+      (kt (runBK P (winS P win usb sreq isArm edge kt A0) usb sreq
+          (flS P win usb sreq isArm edge kt A0) kt n A0.X).x.e.now)
+      (runBK P (winS P win usb sreq isArm edge kt A0) usb sreq
+          (flS P win usb sreq isArm edge kt A0) kt n A0.X) := by
+  rw [← runBA_proj P win usb sreq isArm edge kt A0 n]
+  have hn := now_runBA P win usb sreq isArm edge kt A0 n
+  have hfl : flS P win usb sreq isArm edge kt A0
+      (runBA P win usb sreq isArm edge kt n A0).X.x.e.now
+      = (runBA P win usb sreq isArm edge kt n A0).hit := by
+    funext l
+    simp only [flS, hn, Nat.add_sub_cancel_left]
+  rw [hfl]
+  exact keepOk_runBA P win usb sreq isArm edge kt A0 hedge hA h0 hidxA n
+
+/-- **`hkeep` at a flush of the bridged run.** -/
+theorem hkeep_runBK (hedge : ∀ t l, t + 1 ≤ edge t l) (hA : ArmInvB A0)
+    (h0 : ∀ l, A0.armed l = false)
+    (hidxA : ∀ t0 y, (runBA P win usb sreq isArm edge kt t0 A0).arms P isArm y = true →
+      kt (edge (runBA P win usb sreq isArm edge kt t0 A0).X.x.e.now y) y
+        = (runBA P win usb sreq isArm edge kt t0 A0).X.x.nr y + 1)
+    (f : Nat) (y : Lane)
+    (hfl : flS P win usb sreq isArm edge kt A0
+      (runBK P (winS P win usb sreq isArm edge kt A0) usb sreq
+        (flS P win usb sreq isArm edge kt A0) kt f A0.X).x.e.now y = true) :
+    kt (runBK P (winS P win usb sreq isArm edge kt A0) usb sreq
+        (flS P win usb sreq isArm edge kt A0) kt f A0.X).x.e.now y
+      = (runBK P (winS P win usb sreq isArm edge kt A0) usb sreq
+        (flS P win usb sreq isArm edge kt A0) kt f A0.X).x.nr y := by
+  rw [← runBA_proj P win usb sreq isArm edge kt A0 f] at hfl ⊢
+  have hn := now_runBA P win usb sreq isArm edge kt A0 f
+  simp only [flS, hn, Nat.add_sub_cancel_left] at hfl
+  exact (keep_at_hit P win usb sreq isArm edge kt A0 hedge hA h0 hidxA f y hfl).1
+
+/-- **`ready_ft_edge_K` on the armed run.** The FT edge path's head at release, with the keep
+premise discharged by the arming chain: what remains is `hidxA` (per arming, K7 + edge-first),
+the scan fix, the edge timing, an ordered unarmed start, and L3's head at the edge. -/
+theorem ready_ft_edge_armed (hok : SReqB P sreq) (hedge : ∀ t l, t + 1 ≤ edge t l)
+    (hI : WfBK A0.X) (hO : OrdBK A0.X) (hA : ArmInvB A0) (h0 : ∀ l, A0.armed l = false)
+    (hscan : ∀ n, ScanOk P win usb sreq (runBA P win usb sreq isArm edge kt n A0))
+    (hidxA : ∀ t0 y, (runBA P win usb sreq isArm edge kt t0 A0).arms P isArm y = true →
+      kt (edge (runBA P win usb sreq isArm edge kt t0 A0).X.x.e.now y) y
+        = (runBA P win usb sreq isArm edge kt t0 A0).X.x.nr y + 1)
+    (y : Lane) (f : Nat)
+    (hfl : flS P win usb sreq isArm edge kt A0
+      (runBK P (winS P win usb sreq isArm edge kt A0) usb sreq
+        (flS P win usb sreq isArm edge kt A0) kt f A0.X).x.e.now y = true)
+    (hv : (runBK P (winS P win usb sreq isArm edge kt A0) usb sreq
+        (flS P win usb sreq isArm edge kt A0) kt f A0.X).x.e.headValid y = true) :
+    (runBK P (winS P win usb sreq isArm edge kt A0) usb sreq
+        (flS P win usb sreq isArm edge kt A0) kt (f + 1) A0.X).x.e.headValid y = true ∧
+    (runBK P (winS P win usb sreq isArm edge kt A0) usb sreq
+        (flS P win usb sreq isArm edge kt A0) kt (f + 1) A0.X).x.sq y
+      ((runBK P (winS P win usb sreq isArm edge kt A0) usb sreq
+        (flS P win usb sreq isArm edge kt A0) kt (f + 1) A0.X).x.e.sel y)
+      = kt (runBK P (winS P win usb sreq isArm edge kt A0) usb sreq
+        (flS P win usb sreq isArm edge kt A0) kt f A0.X).x.e.now y ∧
+    (runBK P (winS P win usb sreq isArm edge kt A0) usb sreq
+        (flS P win usb sreq isArm edge kt A0) kt (f + 1) A0.X).x.e.ts y
+      = (runBK P (winS P win usb sreq isArm edge kt A0) usb sreq
+        (flS P win usb sreq isArm edge kt A0) kt (f + 1) A0.X).x.e.now :=
+  (ready_ft_edge_K P (winS P win usb sreq isArm edge kt A0) usb sreq hok
+    (flS P win usb sreq isArm edge kt A0) kt A0.X hI hO y f
+    (fun j _ => flushOk_runBA P win usb sreq isArm edge kt A0 hedge hA j (hscan j))
+    (fun j _ => keepOk_runBK P win usb sreq isArm edge kt A0 hedge hA h0 hidxA j)
+    hfl (hkeep_runBK P win usb sreq isArm edge kt A0 hedge hA h0 hidxA f y hfl) hv).2
+
+end
+
 #print axioms ordBK_step
 #print axioms ordBK_run
+#print axioms keep_at_hit
+#print axioms keepOk_runBK
+#print axioms hkeep_runBK
+#print axioms ready_ft_edge_armed
 #print axioms ordBK_init
 #print axioms hasEdge_of_head
 #print axioms nr_le_runBK
