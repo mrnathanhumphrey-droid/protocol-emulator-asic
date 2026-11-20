@@ -211,11 +211,11 @@ RUN_THM = {
     "pc2_arm": {"run_thm": "ready_pc2_arm_T", "run_status": "proved",
                 "applies": ("arm_capture_empty", "plain_edge_arm", "pc1_plain_edge_arm",
                             "pc1_not_npf", "wait_in_margin")},
-    # ready_ft_edge_K (OrderK, Nate 11-20 option 1; replaces ComposeB.ready_ft_edge_T here) is
-    # proved on the keep premise (CONTRACT_PREMISES fetch_order) and L3's head at the edge; its
-    # premise list (gate_lean_build.PREMISES) waits on an RTL contract for the scan fix (ScanOk),
-    # so it is not yet run_status "proved" (check 13 would compare it both ways)
-    "ft_edge": {"run_thm": "ready_ft_edge_K",
+    # ready_ft_edge_armed (OrderK, Nate 11-20; was ready_ft_edge_K) is ready_ft_edge_K with the
+    # keep premise taken from the arming chain down to the per-arming hidxA (CONTRACT_PREMISES
+    # fetch_order); its premise list (gate_lean_build.PREMISES) waits on an RTL contract for the
+    # scan fix (ScanOk), so it is not yet run_status "proved" (check 13 would compare it both ways)
+    "ft_edge": {"run_thm": "ready_ft_edge_armed",
                 "run_status": "owed (registration: ScanOk contract wording)", "applies": ()},
     "pc1_spare": {"run_thm": "ready_pc1_spare_T", "run_status": "proved",
                   "applies": ("plain_edge_arm", "wait_in_margin")},
