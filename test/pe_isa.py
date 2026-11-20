@@ -347,7 +347,8 @@ def drive_sample_problems(img):
     """[problem]: DRIVE_SAMPLE's refusals (Wilson 11-20), each the RTL's `ds_refuse`:
     pin or pinb not a real pin, pin == pinb, or a CLOCKED lane -- a real clock pin
     distinct from the lane's own pin (`flag_problems`' `clocked`; an unclocked
-    open-drain lane names its own pin) -- clocked lanes keep SHIFT / SHIFTIN."""
+    open-drain lane names its own pin) -- clocked lanes keep SHIFT / SHIFTIN. And
+    (compiler only, Wilson 11-20) pinb on an output-only `uo_out` pin (>= N_UIO)."""
     probs = []
     for ln, (h, acts) in sorted(lane_programs(img).items()):
         for i, x in enumerate(acts):
@@ -359,6 +360,10 @@ def drive_sample_problems(img):
             elif x["pin"] == x["pinb"]:
                 probs.append("lane %d word %d: DRIVE_SAMPLE drives and samples the same "
                              "pin %d" % (ln, i, x["pin"]))
+            elif x["pinb"] >= N_UIO:
+                # Wilson 11-20: a `uo_out` pin (8-11) has no input -- it always samples 0
+                probs.append("lane %d word %d: DRIVE_SAMPLE samples pinb %d, an output-only "
+                             "uo_out pin (no input; it always reads 0)" % (ln, i, x["pinb"]))
             if h["clkpin"] < N_PINS and h["clkpin"] != h["pin"]:
                 probs.append("lane %d word %d: DRIVE_SAMPLE on a clocked lane (clock pin "
                              "%d) -- refused in the first cut; use SHIFT / SHIFTIN"

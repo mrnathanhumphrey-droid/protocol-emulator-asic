@@ -159,7 +159,7 @@ The chip **refuses** an image (the engine never runs, CONFIG_ERR) when:
 
 | op | name | fields | |
 |---|---|---|---|
-| 12 | `DRIVE_SAMPLE` | pin = driven, pinb = sampled, level, mod[1] = source, q, count = bits − 1, delay | built (11-20): drives `pin` (mod[1] 0 = `level`, 1 = the TX register, SHIFT's byte load) and samples `pinb` into RX at the drive instant, the byte pushed after `count` + 1 bits. The sample is the pad `DS_SAMPLE_AGE` = 1 edge before the edge the drive reaches it (`model/clock.py`). Refused: pin or pinb not real, pin = pinb, a clocked lane |
+| 12 | `DRIVE_SAMPLE` | pin = driven, pinb = sampled, level, mod[1] = source, q, count = bits − 1, delay | built (11-20): drives `pin` (mod[1] 0 = `level`, 1 = the TX register, SHIFT's byte load) and samples `pinb` into RX at the drive instant, the byte pushed after `count` + 1 bits. The sample is the pad `DS_SAMPLE_AGE` = 1 edge before the edge the drive reaches it (`model/clock.py`). Refused: pin or pinb not real, pin = pinb, a clocked lane; the compiler also refuses a pinb on an output-only `uo_out` pin (8–11, no input: it always reads 0; Wilson 11-20) |
 | 13 | `SER` | pin = A, pinb = B, q = TX queue, count = bits − 1, delay = the byte time | built: the symbol generator's byte, owner lane only |
 | 16 | `POST` (was `FLAG_SET`) | pinb[2:0] = flag, delay | built: one more count on the flag |
 | 17 | `WAIT` (was `FLAG_WAIT`) | pinb[2:0] = flag, delay | built: holds the lane until the flag has a count, consumes one |

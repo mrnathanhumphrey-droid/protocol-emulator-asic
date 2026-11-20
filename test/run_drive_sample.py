@@ -13,7 +13,8 @@ one action drives `pin` and samples `pinb` at the drive instant.
      model/clock.py DS_SAMPLE_AGE (read from the RTL).
   3. OPEN-DRAIN: on an open-drain lane DRIVE_SAMPLE never drives a 1 (LEVEL's rule).
   4. REFUSALS: pin == pinb on the RTL (config_err, nothing driven); pe_isa refuses
-     pin == pinb and a clocked lane, and accepts the clean images.
+     pin == pinb, a clocked lane and a pinb on an output-only uo_out pin (planted
+     pinb = 8, Wilson 11-20), and accepts the clean images.
 Must-fires: M_DS_SAMPLE_AFTER (the sample taken after the drive: RX gets our own
 byte) and M_DS_NO_TXADV (the TX register never shifts: the target gets 0x01).
 """
@@ -63,11 +64,12 @@ def _hdrs(l0, park, mode=1, clkpin=I.PIN_NONE):
     return hdrs
 
 
-def spi_image(same_pin=False, clocked=False):
+def spi_image(same_pin=False, clocked=False, uo_pinb=False):
     """lane 0: SCK low, then per bit DRIVE_SAMPLE(MOSI <- TX, sample MISO), SCK high,
     SCK low; parked. `same_pin`: the first DRIVE_SAMPLE samples its own pin (raw word,
     pe_isa's builder is bypassed so the RTL refusal can be run). `clocked`: the lane
-    names a clock pin (pe_isa only)."""
+    names a clock pin (pe_isa only). `uo_pinb`: the first DRIVE_SAMPLE samples
+    uo_out pin 8, which has no input (pe_isa only, Wilson 11-20)."""
     l0 = I.ACT_BASE
     p = [I.act(I.OP_LEVEL, SCK, 0, D)]
     for _b in range(8):
@@ -77,6 +79,8 @@ def spi_image(same_pin=False, clocked=False):
     p.append(I.act(I.OP_REARM, 0, 0, 900))
     if same_pin:
         p[1] = I.act(I.OP_DRIVE_SAMPLE, MOSI, 0, D, count=7, pinb=MOSI, mod=I.MOD_DS_TX)
+    if uo_pinb:
+        p[1] = I.act(I.OP_DRIVE_SAMPLE, MOSI, 0, D, count=7, pinb=I.UO0, mod=I.MOD_DS_TX)
     park = l0 + (len(p) - 1) * I.ACT_BYTES
     return I.join_image(_hdrs(l0, park, clkpin=5 if clocked else I.PIN_NONE), p)
 
@@ -255,7 +259,8 @@ def main() -> int:
         if not rok:
             probs.append("the RTL did not refuse %s (%s)" % (what, rres["flt"]))
     for what, img in (("pin == pinb", spi_image(same_pin=True)),
-                      ("a clocked lane", spi_image(clocked=True))):
+                      ("a clocked lane", spi_image(clocked=True)),
+                      ("pinb on uo_out (planted pinb = 8)", spi_image(uo_pinb=True))):
         q = I.drive_sample_problems(img)
         print("    pe_isa, %s: %s" % (what, ("refused (%s)" % q[0]) if q else "*** ACCEPTED"))
         if not q:
