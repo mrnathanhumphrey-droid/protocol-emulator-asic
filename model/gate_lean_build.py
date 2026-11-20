@@ -152,7 +152,9 @@ KEY = ("dstar", "dstar29", "dstar39", "dstar39_v2", "dstar39_st", "dstar39_hold"
        # ComposeB.lean (composition L2): the first stretch, from a start with no kill pending
        "no_kill_one", "stretch_first",
        # ComposeB.lean (composition L3): the head over a whole run with flushes
-       "head_of_cert", "head_valid_runBK")
+       "head_of_cert", "head_valid_runBK",
+       # ComposeB.lean (composition L4): hR on a stretch from wb_bound_winBK_fl
+       "hR_stretch", "hstart_after_flush")
 #: proof_constants.load() key -> the Lean expression that must evaluate to it (SPEC: the map)
 CONSTS = {
     "lemmaA_window": "LEMMA_A_WINDOW", "R_base": "R_BASE", "dispatch_cycles": "DISPATCH_CYCLES",

@@ -151,8 +151,12 @@ COMPOSITION = {
              "theorems": ("stretch_first",)},
             {"step": "L3 head_valid_runBK", "status": "proved",
              "theorems": ("head_of_cert", "head_valid_runBK")},
-            {"step": "L4 hR on a stretch", "status": "owed",
-             "what": "from RespWinB.wb_bound_winBK_fl, Rr = K - 1"},
+            {"step": "L4 hR on a stretch", "status": "proved",
+             "theorems": ("hR_stretch", "hstart_after_flush")},
+            {"step": "L4 hfree", "status": "owed",
+             "what": "wb_bound_winBK_fl's hfree along runBK: a retirement's release is after the "
+                     "lane's earlier writebacks (a lateness condition of the certificate, not a "
+                     "stretch fact)"},
             {"step": "L4 window budgets hM / hS", "status": "owed",
              "what": "the window chain (Wilson 11-18 'hR on runB'): M other-lane decisions and "
                      "S idle cycles per K-window, counted along runBK"},

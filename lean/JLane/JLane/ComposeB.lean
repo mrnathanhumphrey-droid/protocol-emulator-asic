@@ -275,6 +275,65 @@ theorem head_valid_runBK (hok : SReqB P sreq) (fl : Nat → Lane → Bool) (k : 
       simp only [e, base_e] at h
       exact h
 
+/-! ### L4: `hR` on a stretch
+
+`CertT.hR` (a retirement within `Rr + 2` of its release) from `RespWinB.wb_bound_winBK_fl` with
+`Rr = K - 1`. Its "not flushed at or after the current release" is the stretch's: the release at
+the stretch's start is at most 2 before its first cycle (`hstart`; the restart's release is
+`f + 1` = `s - 2`, `hstart_after_flush`) and only moves forward along the trajectory, and `y` is
+unflushed from `s - 2` on. What stays a premise: `hfree` (the release after the lane's earlier
+writebacks -- a lateness condition, not a stretch fact) and the window budgets `hM` / `hS`
+(owed: the window chain, `rtl_contracts.COMPOSITION`). -/
+
+/-- **`hR` on a stretch from `s`.** -/
+theorem hR_stretch (fl : Nat → Lane → Bool) (k : Nat → Lane → Nat) (X0 : EngBK)
+    (h0 : X0.x.e.st = .idle) (h0ts : ∀ l, X0.x.e.now ≤ X0.x.e.ts l) (y : Lane)
+    (hy : P.live y = true) (M S K : Nat) (hK : 3 * M + S + 3 ≤ K) (s T : Nat)
+    (hT : TrajY P win usb sreq y (fun n => (runBK P win usb sreq fl k (s + n) X0).base) T)
+    (hlastS : ∀ j, s ≤ j + 2 → j < s + T → fl (runBK P win usb sreq fl k j X0).x.e.now y = false)
+    (hstart : X0.x.e.now + s ≤ (runBK P win usb sreq fl k s X0).x.e.ts y + 2)
+    (hfree : ∀ t, s ≤ t → t < s + T → IsWB y (runBK P win usb sreq fl k t X0).x.e →
+      ∀ w, w + 2 < t → IsWB y (runBK P win usb sreq fl k w X0).x.e →
+      (runBK P win usb sreq fl k w X0).x.e.now < (runBK P win usb sreq fl k t X0).x.e.ts y)
+    (hM : ∀ c, c + K + 2 ≤ s + T →
+      cntBK P win usb sreq fl k (fun e => decOther win y e = true) K
+        (runBK P win usb sreq fl k c X0) ≤ M)
+    (hS : ∀ c, c + K + 2 ≤ s + T →
+      cntBK P win usb sreq fl k (fun e => noDecB win e = true) K
+        (runBK P win usb sreq fl k c X0) ≤ S) :
+    ∀ x, x < T → IsRet P y ((fun n => (runBK P win usb sreq fl k (s + n) X0).base) x).e →
+      ((fun n => (runBK P win usb sreq fl k (s + n) X0).base) x).e.now ≤
+        ((fun n => (runBK P win usb sreq fl k (s + n) X0).base) x).e.ts y + (K - 1) + 2 := by
+  intro x hx hret
+  simp only [base_e] at hret ⊢
+  have hm := ts_monoT P win usb sreq y _ T hT 0 x (by omega)
+  simp only [base_e, Nat.add_zero, Nat.zero_add] at hm
+  have hb := wb_bound_winBK_fl P win usb sreq fl k X0 h0 h0ts y hy M S K hK (s + x)
+    (isWB_of_ret P y _ hret)
+    (fun n hn hle => hlastS n (by
+      have hn2 := now_runBK P win usb sreq fl k n X0
+      omega) (by omega))
+    (fun w hw hwb => hfree (s + x) (by omega) (by omega) (isWB_of_ret P y _ hret) w hw hwb)
+    (fun c hc => hM c (by omega)) (fun c hc => hS c (by omega))
+  omega
+
+/-- **The restart's release meets `hstart`**: after a flush at `f`, the stretch from `f + 3`
+starts with its release at `f + 1` (`restart_runBK`). -/
+theorem hstart_after_flush (hok : SReqB P sreq) (fl : Nat → Lane → Bool) (k : Nat → Lane → Nat)
+    (X0 : EngBK) (hI : WfBK X0) (f : Nat) (y : Lane)
+    (hF : ∀ j, j < f + 2 → FlushOk P win usb sreq (fl (runBK P win usb sreq fl k j X0).x.e.now)
+      (runBK P win usb sreq fl k j X0))
+    (hfl : fl (runBK P win usb sreq fl k f X0).x.e.now y = true)
+    (hedge : (runBK P win usb sreq fl k f X0).base.hasEdge y
+      (k (runBK P win usb sreq fl k f X0).x.e.now y) = true)
+    (h1 : fl (runBK P win usb sreq fl k (f + 1) X0).x.e.now y = false)
+    (h2 : fl (runBK P win usb sreq fl k (f + 2) X0).x.e.now y = false) :
+    X0.x.e.now + (f + 3) ≤ (runBK P win usb sreq fl k (f + 3) X0).x.e.ts y + 2 := by
+  obtain ⟨-, -, -, hts, -⟩ := restart_runBK P win usb sreq hok fl k X0 hI f y hF hfl hedge h1 h2
+  rw [base_e] at hts
+  have hn := now_runBK P win usb sreq fl k f X0
+  omega
+
 end
 
 #print axioms last_true
@@ -286,5 +345,7 @@ end
 #print axioms stretch_first
 #print axioms head_of_cert
 #print axioms head_valid_runBK
+#print axioms hR_stretch
+#print axioms hstart_after_flush
 
 end JLane
