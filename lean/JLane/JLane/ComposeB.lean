@@ -1,5 +1,6 @@
 import JLane.RestartB
 import JLane.FlushHeld
+import JLane.SlotReadyB
 /-!
 # Brick C3g — cutting a run at the lane's last flush (`slot_on_composition`, L1, Wilson 11-19)
 
@@ -697,6 +698,58 @@ theorem hedge_runBK_armed (hok : SReqB P sreq) (hedge : ∀ t l, t + 1 ≤ edge 
 
 end
 
+/-! ### `ready_ft_edge_T` step 2: the slot's capture for `y` on a stretch, unkilled
+
+On a stretch of `runBK` (`τ n` = the engine at `s + n`, a `TrajY` trajectory, `y` unflushed
+from `s - 2`), the slot's request for `y`, held through the wait (`hq` / `hold`, the
+`slot_requester` contract, as in `SlotReadyB.slot_ready_T`), is issued within `W` of `a`
+(`slot_issue_within_T`) and captured three cycles later (`slot_issue_cap_T`). That capture is not
+killed: a killed capture for `y` needs a flush of `y` one or two cycles before
+(`kill_prov_runBK`), and there is none in the stretch. -/
+
+section
+variable (P : Program) (win : Engine → Option Lane) (usb : Option Lane)
+  (sreq : EngB → Option Lane)
+
+theorem slot_cap_stretch (hok : SReqB P sreq) (fl : Nat → Lane → Bool) (k : Nat → Lane → Nat)
+    (X0 : EngBK) (hI : WfBK X0) (y : Lane) (s T : Nat) (τ : Nat → EngB)
+    (hτ : ∀ n, τ n = (runBK P win usb sreq fl k (s + n) X0).base)
+    (hT : TrajY P win usb sreq y τ T)
+    (hF : ∀ j, j < s + T → FlushOk P win usb sreq (fl (runBK P win usb sreq fl k j X0).x.e.now)
+      (runBK P win usb sreq fl k j X0))
+    (hnf : ∀ j, s ≤ j + 2 → j < s + T → fl (runBK P win usb sreq fl k j X0).x.e.now y = false)
+    (old : Lane → Bool) (a W C : Nat) (hn : a + W + 3 ≤ T)
+    (hq : ∀ j, a ≤ j → j ≤ a + W → (∀ i, a ≤ i → i < j → ¬SlotForB P usb sreq y (τ i)) →
+      (sreq (τ j)).isSome = true)
+    (hold : ∀ j, a ≤ j → j ≤ a + W → (∀ i, a ≤ i → i < j → ¬SlotForB P usb sreq y (τ i)) →
+      ∀ w, sreq (τ j) = some w → w = y ∨ old w = true)
+    (hC : cntFromT τ (OldIssB P usb sreq old) a (W + 1) ≤ C)
+    (hW : rem (τ a).e.pst + L_REFILL * C ≤ W) :
+    ∃ j, a ≤ j ∧ j ≤ a + W ∧ Hit y (runBK P win usb sreq fl k (s + (j + 3)) X0).x.e ∧
+      (runBK P win usb sreq fl k (s + (j + 3)) X0).pkill = false := by
+  obtain ⟨j, h1, h2, hsl⟩ := slot_issue_within_T P win usb sreq y τ T hT y old a W C (by omega)
+    hq hold hC hW
+  have hhit := slot_issue_cap_T P win usb sreq y τ T hT j (by omega) hsl.1 hsl.2.1 hsl.2.2
+  rw [hτ, base_e] at hhit
+  refine ⟨j, h1, h2, hhit, ?_⟩
+  cases hpk : (runBK P win usb sreq fl k (s + (j + 3)) X0).pkill
+  · rfl
+  · exfalso
+    have hkc : (runBK P win usb sreq fl k ((s + j + 1) + 2) X0).kc = true := by
+      rw [show s + j + 1 + 2 = s + (j + 3) by omega]
+      unfold EngBK.kc
+      rw [hhit.1, hpk]
+      rfl
+    have hp : (runBK P win usb sreq fl k ((s + j + 1) + 2) X0).x.e.pl = y := by
+      rw [show s + j + 1 + 2 = s + (j + 3) by omega]
+      exact hhit.2
+    rcases kill_prov_runBK P win usb sreq hok fl k X0 hI (s + j + 1) y
+        (fun i hi => hF i (by omega)) hkc hp with h | h
+    · rw [hnf (s + j + 1 + 1) (by omega) (by omega)] at h; cases h
+    · rw [hnf (s + j + 1) (by omega) (by omega)] at h; cases h
+
+end
+
 #print axioms last_true
 #print axioms flush_cut
 #print axioms restart_head_12
@@ -724,5 +777,6 @@ end
 #print axioms armed_origin
 #print axioms hedge_runBK
 #print axioms hedge_runBK_armed
+#print axioms slot_cap_stretch
 
 end JLane
