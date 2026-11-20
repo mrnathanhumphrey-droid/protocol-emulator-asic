@@ -695,6 +695,10 @@ module pe_engine #(
   // and pick, ever land in one cycle -- each count moves by at most one.
   localparam [OP_W-1:0] OP_FLAG_SET   = 16;   // POST
   localparam [OP_W-1:0] OP_FLAG_WAIT  = 17;   // WAIT
+  // OBSERVE (Wilson 11-19): the NON-BLOCKING look -- writes flag pinb[2:0]'s
+  // available count (posted - consumed, mod 8, true under the compiler's lag bound)
+  // into the lane's RX register for CMP_BRANCH; consumes NOTHING (WAIT's job).
+  localparam [OP_W-1:0] OP_OBSERVE    = 23;
   localparam integer    N_FLAGS = 8, FLW = 3, FCW = 3;
 
   // ---- image layout, all derived -------------------------------------
@@ -2703,6 +2707,11 @@ module pe_engine #(
   // SYNC (no valid PID is 0x00: its high nibble complements its low one), and
   // 0x00 off the live USB lane.
   wire [7:0]    usb_pidc = (usb_l0 & usb_sok) ? usb_pid : 8'h00;
+  // OBSERVE's value: flag pinb[2:0]'s available count, zero-extended, and its
+  // bit-reverse for an MSB-first lane (whose RX CMP_BRANCH compares reversed)
+  wire [7:0]    obs_cnt  = {{(8-FCW){1'b0}}, fl_post[a_pinb[FLW-1:0]] - fl_cons[a_pinb[FLW-1:0]]};
+  wire [7:0]    obs_rev  = {obs_cnt[0], obs_cnt[1], obs_cnt[2], obs_cnt[3],
+                            obs_cnt[4], obs_cnt[5], obs_cnt[6], obs_cnt[7]};
   wire [7:0]    cmp_src  = a_q[1] ? usb_pidc : cmp_rx;
   // the immediate: {pin, delay[9:7], level}, in the byte's natural order
 `ifdef M_CMP_IMM_OFF1
@@ -3949,7 +3958,7 @@ module pe_engine #(
             // the generator's words act at writeback; its pins are driven below
             OP_SER, OP_SYMDEF: ;
             // the event flags move no pin (POST counts at writeback, WAIT at its pick)
-            OP_FLAG_SET, OP_FLAG_WAIT: ;
+            OP_FLAG_SET, OP_FLAG_WAIT, OP_OBSERVE: ;
             // BRANCH_BIT moves no pin; a target outside the store is refused
             OP_BRANCH_BIT, OP_CMP_BRANCH, OP_LOOP: if (br_bad) begin
               config_err_m <= 1'b1;
@@ -4271,6 +4280,16 @@ module pe_engine #(
 `endif
             end
             OP_FLAG_WAIT: ;                     // consumed at its pick (ST_IDLE)
+            // ⭐ OBSERVE: the count into RX, in the order CMP_BRANCH reads it (an
+            // MSB-first lane's RX is compared reversed, so it is written reversed):
+            // CMP_BRANCH with byte = the count matches on any lane.
+            // M_OBSERVE_CONSUMES: it also consumes one (run_flags' must-fire).
+            OP_OBSERVE: begin
+              l_rx[cur] <= l_order[cur] ? obs_rev : obs_cnt;
+`ifdef M_OBSERVE_CONSUMES
+              fl_cons[a_pinb[FLW-1:0]] <= fl_cons[a_pinb[FLW-1:0]] + {{(FCW-1){1'b0}}, 1'b1};
+`endif
+            end
             // SYMDEF's payload (`sg_payload`): every field between the opcode and `mod`
             OP_SYMDEF: if (!sg_mine || sg_busy) begin
               config_err_m <= 1'b1;

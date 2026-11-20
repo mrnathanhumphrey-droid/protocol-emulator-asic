@@ -118,7 +118,7 @@ OPCODES = {
 #: limit would un-refuse those; the loader now tests membership.
 #: 0..11 (SHIFTI, 11, was the last built in order); SER 13 and SYMDEF 22, the
 #: symbol generator (Wilson 11-17)
-BUILT_OPS = frozenset(range(12)) | {13, 16, 17, 22}   # + POST 16, WAIT 17 (event flags)
+BUILT_OPS = frozenset(range(12)) | {13, 16, 17, 22, 23}   # + POST 16, WAIT 17, OBSERVE 23
 BUILT_MASK = sum(1 << _o for _o in BUILT_OPS)
 #: the opcode the refusal must-fires inject: the LOWEST one not built
 OP_UNBUILT = min(set(range(1 << OP_W)) - BUILT_OPS)
@@ -131,11 +131,11 @@ RESERVED_OPCODES = {
     19: ("WAITQ", "q = the TX queue awaited, delay = timeout"),
     20: ("NIBBLE_LOAD", "q = queue, count = nibble lane"),
     21: ("RX_STATUS", "mod = status kind"),
-    # Wilson 11-19: OBSERVE takes a FREE opcode (23), not one reserved for another
-    # primitive. Encoding only: its result's destination is owed; refused at load.
-    23: ("OBSERVE", "pinb[2:0] = flag: reads posted - consumed (under the compiler's "
-                    "lag bound); destination owed"),
 }
+#: OBSERVE (Wilson 11-19, a FREE opcode, 23): the non-blocking look -- flag
+#: pinb[2:0]'s available count (posted - consumed, mod 8) into the lane's RX
+#: register, for CMP_BRANCH; consumes nothing. Built; `observe_rx_problems` refuses
+#: one that would clobber a received byte the program still reads.
 OP_OBSERVE = 23
 N_OPCODES = 1 << OP_W                     # 32; 24..31 unassigned (22 SYMDEF, 23 OBSERVE)
 MOD_TIMEOUT_FALLTHROUGH, MOD_UNDERRUN_FILL1 = 0x1, 0x2   # reserved modifiers
@@ -316,16 +316,77 @@ def act_wait(flag, delay) -> bytes:
     return act(OP_FLAG_WAIT, 0, 0, delay, pinb=int(flag))
 
 
+def act_observe(flag, delay) -> bytes:
+    """OBSERVE: flag `flag` (0..7)'s available count into the lane's RX register, in
+    the order CMP_BRANCH compares (`act_cmp_branch(count, ...)` matches); no consume."""
+    if not 0 <= int(flag) < N_FLAGS:
+        raise ValueError("OBSERVE flag %d: 0..%d" % (int(flag), N_FLAGS - 1))
+    return act(OP_OBSERVE, 0, 0, delay, pinb=int(flag))
+
+
+def observe_rx_problems(img):
+    """[problem]: RX LIVENESS for OBSERVE (Wilson 11-19). OBSERVE overwrites the lane's
+    RX register, so it is refused (naming the instructions) where RX holds a value the
+    program still reads:
+      * a receive IN PROGRESS (a partial byte): the next receive continues it;
+      * a received byte not yet read, followed (through the OBSERVE) by a CMP_BRANCH
+        on RX -- the CMP that would have read that byte reads the count instead.
+    Conservative by construction: a program that means the CMP for the count puts
+    the OBSERVE before the receive, or reads the received byte first."""
+    out = []
+    nwords = (STORE_BYTES - ACT_BASE) // ACT_BYTES
+    for ln in range(N_LANES):
+        h = read_header(img, ln)
+        b0 = (h["base"] - ACT_BASE) // ACT_BYTES
+        seen, said = set(), set()
+        todo = [(b0, None, None, None)]          # (word, bits mod 8, unread rx word, obs word)
+        while todo:
+            w, st, rxw, obw = todo.pop()
+            if (w, st, rxw, obw) in seen or not 0 <= w < nwords:
+                continue
+            seen.add((w, st, rxw, obw))
+            a = ACT_BASE + w * ACT_BYTES
+            x = _unpack(ACT_FIELDS, img[a:a + ACT_BYTES], ACT_BYTES)
+            n = _rx_bits(h, x)
+            if x["op"] == OP_OBSERVE:
+                if st is not None and st % 8 and ("p", w) not in said:
+                    said.add(("p", w))
+                    out.append("lane %d word %d: OBSERVE during a receive (%d bit(s) of a byte "
+                               "in RX) -- it would clobber the byte being received"
+                               % (ln, w, st % 8))
+                nst, rxw2, obw2 = 0, rxw, w
+            elif x["op"] == OP_CMP_BRANCH and not x["q"] >> 1:
+                if rxw is not None and obw is not None and ("c", rxw, obw, w) not in said:
+                    said.add(("c", rxw, obw, w))
+                    out.append("lane %d: OBSERVE at word %d overwrites the byte received at "
+                               "word %d before CMP_BRANCH at word %d reads it (RX liveness)"
+                               % (ln, obw, rxw, w))
+                nst, rxw2, obw2 = st, None, None
+            elif n:
+                nst = 0 if n >= 8 else ((0 if st is None else st) + n) % 8
+                rxw2, obw2 = (w if nst == 0 else rxw), None
+            else:
+                nst, rxw2, obw2 = st, rxw, obw
+            if x["op"] == OP_REARM:
+                if x["level"]:
+                    todo.append((b0, nst, rxw2, obw2))
+                continue
+            todo.append((w + 1, nst, rxw2, obw2))
+            if x["op"] in BRANCH_OPS:
+                todo.append((branch_target(x), nst, rxw2, obw2))
+    return out
+
+
 def flag_word_problems(img):
     """[problem]: an event-flag word with pinb[3] set -- the index is pinb[2:0]
     (8 flags); pinb[3] is reserved and must be 0."""
     out = []
     for ln, (_h, acts) in sorted(lane_programs(img).items()):
         for i, x in enumerate(acts):
-            if x["op"] in FLAG_OPS and x["pinb"] >= N_FLAGS:
+            if x["op"] in FLAG_OPS + (OP_OBSERVE,) and x["pinb"] >= N_FLAGS:
                 out.append("lane %d word %d: %s flag index pinb = %d -- pinb[3] must be 0 "
-                           "(8 flags)" % (ln, i, "POST" if x["op"] == OP_FLAG_SET else "WAIT",
-                                          x["pinb"]))
+                           "(8 flags)" % (ln, i, {OP_FLAG_SET: "POST", OP_FLAG_WAIT: "WAIT",
+                                                  OP_OBSERVE: "OBSERVE"}[x["op"]], x["pinb"]))
     return out
 
 
@@ -1362,6 +1423,8 @@ def cmp_byte_problems(img):
             # exactly that byte, whatever partial bits came before (bundle 5's
             # READBIT pair release, for one) -- the register is realigned
             nst = st if n == 0 else (0 if n >= 8 else ((0 if st is None else st) + n) % 8)
+            if x["op"] == OP_OBSERVE:
+                nst = 0          # OBSERVE writes a whole byte (the count) into RX
             if x["op"] == OP_REARM:
                 if x["level"]:
                     todo.append((b0, nst))
@@ -1436,6 +1499,7 @@ def flag_problems(img, d_star):
                     break
     probs += symgen_problems(img)
     probs += flag_word_problems(img)
+    probs += observe_rx_problems(img)
     return probs
 
 

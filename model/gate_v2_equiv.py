@@ -699,11 +699,11 @@ def main() -> int:
         # the store, so the loader's check is shown to cover the whole store
         first_w = I.ACT_BASE
         last_w = I.STORE_BYTES - I.ACT_BYTES
-        # + OBSERVE (23, Wilson 11-19): its encoding is assigned and it is NOT built,
-        # so its decode is the load refusal -- its must-fire until it is built
+        # + the TOP opcode (31): the BUILT_OPS mask covers the whole 5-bit space, not
+        # just the lowest gap (OBSERVE, 23, was this arm until it was built, 11-19)
         for op, where, at in ((I.OP_UNBUILT, "the first", first_w),
                               (I.OP_UNBUILT, "the last", last_w),
-                              (I.OP_OBSERVE, "the first", first_w)):
+                              ((1 << I.OP_W) - 1, "the first", first_w)):
             ro = bytearray(img2)
             ro[at] = (op << (8 - I.OP_W)) | (ro[at] & ((1 << (8 - I.OP_W)) - 1))
             pro = write_hex(os.path.join(tmp, "v2eq_resop_%d_%d.hex" % (op, at)), bytes(ro),

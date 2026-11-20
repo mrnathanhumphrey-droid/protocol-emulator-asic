@@ -113,6 +113,15 @@
    "pinb": 15,
    "q": 0
   },
+  "OBSERVE": {
+   "count": 0,
+   "delay": 1023,
+   "level": 0,
+   "mod": 0,
+   "pin": 0,
+   "pinb": 15,
+   "q": 0
+  },
   "READBIT": {
    "count": 0,
    "delay": 1023,

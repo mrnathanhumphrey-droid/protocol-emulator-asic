@@ -67,6 +67,33 @@ def image(bad_index=False):
     return I.join_image(hdrs, prog)
 
 
+F_OBS = 3                     # the flag OBSERVE reads
+
+
+def observe_image(rx_clobber=False):
+    """OBSERVE (Wilson 11-19): lane 1 POSTs flag 3 twice; lane 0 waits, OBSERVEs it
+    TWICE (no consume: still 2), CMP_BRANCH on 2 -> taken drives uio[0] high, not
+    taken drives uio[1] high. `rx_clobber`: a self-timed receive, then the OBSERVE,
+    then the CMP -- the RX-liveness refusal's planted case (pe_isa only, not run)."""
+    l0 = I.ACT_BASE
+    taken = 6
+    p0 = [I.act(I.OP_LEVEL, I.PIN_NONE, 0, 400),
+          I.act_observe(F_OBS, D), I.act_observe(F_OBS, D),
+          I.act_cmp_branch(2, taken, I.BR_W_MIN),
+          I.act(I.OP_LEVEL, PB, 1, D), I.act(I.OP_REARM, 0, 0, 500),
+          I.act(I.OP_LEVEL, PA, 1, D), I.act(I.OP_REARM, 0, 0, 500)]
+    if rx_clobber:
+        p0[0] = I.act_shiftin_timed(PB, D, 8)
+    l1 = l0 + len(p0) * I.ACT_BYTES
+    p1 = [I.act_post(F_OBS, D), I.act_post(F_OBS, D), I.act(I.OP_REARM, 0, 0, 500)]
+    park = l0 + 5 * I.ACT_BYTES
+    hdrs = [I.hdr(PA, I.PIN_NONE, 1, D, 0, 2 * D, 3 * D, l0),
+            I.hdr(I.PIN_NONE, I.PIN_NONE, 1, D, 0, 2 * D, 3 * D, l1)]
+    for n in range(2, I.N_LANES):
+        hdrs.append(I.hdr(n + 2, n + 2, 0, 500, 0, 200, 240, park))
+    return I.join_image(hdrs, p0 + p1)
+
+
 def run(cmd):
     return subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True,
                           encoding="utf-8", errors="replace")
@@ -144,6 +171,33 @@ def main() -> int:
              "accepted" if not I.flag_word_problems(img) else "*** REFUSED"))
     if not ok:
         probs.append("pe_isa's flag index refusal")
+    print("\n  OBSERVE (Wilson 11-19): two POSTs, two OBSERVEs, CMP_BRANCH on 2")
+    po = os.path.join(tmp, "flags_obs.hex")
+    oimg = observe_image()
+    I.write_image(po, oimg)
+    sim_run.scratch_image(GEN, po)
+    ofirst, oflt, _oe = edges(vvp, po)
+    ook = (PA, 1) in ofirst and (PB, 1) not in ofirst and oflt == "FLT cfg=0 ovr=0"
+    print("    %s  (edges %s, %s)" % ("taken: the count is 2 after two looks" if ook
+                                     else "*** NOT TAKEN", sorted(ofirst), oflt))
+    if not ook:
+        probs.append("OBSERVE: CMP_BRANCH on 2 not taken after two POSTs and two OBSERVEs")
+    mv = os.path.join(tmp, "flags_M_OBSERVE_CONSUMES.vvp")
+    build(mv, ["M_OBSERVE_CONSUMES"])
+    mfirst, _f, _e = edges(mv, po)
+    mred = (PA, 1) not in mfirst
+    print("    must-fire M_OBSERVE_CONSUMES (OBSERVE consumes): %s"
+          % ("RED (not taken: the second look saw 1)" if mred else "*** SURVIVED"))
+    if not mred:
+        probs.append("M_OBSERVE_CONSUMES survived")
+    rp = I.observe_rx_problems(observe_image(rx_clobber=True))
+    cp = I.observe_rx_problems(oimg)
+    print("    RX liveness: an OBSERVE between a receive and its CMP %s; the clean image %s"
+          % (("refused (%s)" % rp[0]) if rp else "*** ACCEPTED",
+             "accepted" if not cp else "*** REFUSED: %s" % cp))
+    if not rp or cp:
+        probs.append("pe_isa's OBSERVE RX-liveness refusal")
+
     print("\n  the one-POST-per-cycle assertion (Wilson 11-19)")
     av = os.path.join(tmp, "flags_M_FLAG_POST2.vvp")
     build(av, ["M_FLAG_POST2"])

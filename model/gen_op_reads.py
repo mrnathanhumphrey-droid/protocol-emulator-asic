@@ -67,7 +67,8 @@ OUT = os.path.join(ROOT, "test", "op_reads.json")
 FIELDS = ("pin", "level", "delay", "count", "q", "pinb", "mod")
 FULL = {"pin": 0xF, "level": 0x1, "delay": 0x3FF, "count": 0xF, "q": 0x3, "pinb": 0xF, "mod": 0x3}
 OPS = ("LEVEL", "SHIFT", "SHIFTIN", "READBIT", "START", "STOP", "ARM", "REARM",
-       "BRANCH_BIT", "CMP_BRANCH", "LOOP", "SHIFTI", "SER", "SYMDEF", "FLAG_SET", "FLAG_WAIT")
+       "BRANCH_BIT", "CMP_BRANCH", "LOOP", "SHIFTI", "SER", "SYMDEF", "FLAG_SET", "FLAG_WAIT",
+       "OBSERVE")
 ALL = OPS
 
 #: base decode tokens -> (field, mask). A bit-select `a_cnt[0]` reads only that bit.
@@ -98,6 +99,9 @@ DERIVED = {
     # the symbol generator's config payload (Wilson 11-17): SYMDEF reads every field
     # between the opcode and mod as DATA -- an immediate, never a pin index
     "sg_payload": {f: ("SYMDEF",) for f in ("pin", "level", "delay", "count", "q", "pinb")},
+    # OBSERVE's value (Wilson 11-19): flag pinb[2:0]'s available count, and its reverse
+    "obs_cnt": {"pinb": ("OBSERVE",)},
+    "obs_rev": {"pinb": ("OBSERVE",)},
     "br_cmp_take": {f: ("CMP_BRANCH",) for f in ("pin", "delay", "level", "q", "mod")},
     "lp_n": {"pin": ("LOOP",), "delay": ("LOOP",), "level": ("LOOP",)},
     "usb_send": {"q": ("SHIFT",)}, "uc_hold": {"level": ("SHIFT", "SHIFTI")},
@@ -152,6 +156,12 @@ SITES = [
      "the event-flag ENABLE: is the head a WAIT (its opcode)"),
     ("wire [FLW-1:0] fl_hi = l_act[hix[gi]][MOD_W +: FLW];", ("FLAG_WAIT",),
      "the event-flag ENABLE: the head WAIT's flag index, pinb[2:0]"),
+    ("wire [7:0]    obs_cnt  = {{(8-FCW){1'b0}}, fl_post[a_pinb[FLW-1:0]] - fl_cons[a_pinb[FLW-1:0]]};",
+     "DEF", "OBSERVE's value: the flag's available count"),
+    ("wire [7:0]    obs_rev  = {obs_cnt[0], obs_cnt[1], obs_cnt[2], obs_cnt[3],", "DEF",
+     "OBSERVE's value, reversed for an MSB-first lane"),
+    ("obs_cnt[4], obs_cnt[5], obs_cnt[6], obs_cnt[7]};", "DEF",
+     "OBSERVE's value, reversed (continued)"),
     ("wire [ACT_W-OP_W-MOD_W-1:0] sg_payload = {a_pin, a_lvl, a_dly, a_cnt, a_q, a_pinb};", "DEF",
      "SYMDEF's payload: every field between the opcode and mod"),
     ("wire pin_real = (a_pin < N_PINS", "DEF", "pin index guard"),
