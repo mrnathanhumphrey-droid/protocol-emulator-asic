@@ -182,6 +182,99 @@ theorem stretch_first (hok : SReqB P sreq) (fl : Nat → Lane → Bool) (k : Nat
     · rw [hnf (m + 1) (by omega)] at h; cases h
     · rw [hnf m (by omega)] at h; cases h
 
+/-! ### L3: the head over a whole run
+
+`CertT` bundles `GapRunT.head_late_gapT`'s certificate conditions along one stretch `τ` of horizon
+`T` (the lateness condition `hlate` at the stretch's end `T`). `head_valid_runBK` cuts the run at
+`y`'s last flush before `t` (`flush_cut`) and reads the head at `t` from the place `t` falls in:
+the first stretch (`stretch_first`, `H0` given at the start), the restart window (`f + 1`: the
+edge word, K1; `f + 2`: frozen), or the stretch from `f + 3` (`stretch_after_flush`, `H0 = 1`).
+The certificate is asked only of the stretch that holds `t`; `Rr`, `Z`, `L` are whole-run
+functions, read from the stretch's start. The edge word at each flush (`hedge`) is where the
+flush-spacing contract K8 enters (`rtl_contracts.CONTRACT_PREMISES` flush_spacing). -/
+
+/-- `head_late_gapT`'s certificate along `τ` up to `T`. -/
+structure CertT (P : Program) (win : Engine → Option Lane) (usb : Option Lane)
+    (sreq : EngB → Option Lane) (y : Lane) (τ : Nat → EngB) (T B : Nat) (Rr Z L : Nat → Nat) :
+    Prop where
+  hR : ∀ x, x < T → IsRet P y (τ x).e → (τ x).e.now ≤ (τ x).e.ts y + Rr x + 2
+  hB : ∀ a m, a + m ≤ T → m ≤ 23 + B → chargeSumT P usb sreq y τ a m ≤ B
+  hZ0 : ∀ x, x < T → IsRet P y (τ x).e → Rr x ≤ Z x
+  hZF : ∀ x, x < T → IsRet P y (τ x).e → NpfAt y (τ x).e → Rr x + DSTAR + B ≤ Z x
+  hZC : ∀ x x2, x2 < T → ConsecT P y τ x x2 → Z x + DSTAR + B ≤ rdT y τ x x2 + Z x2
+  hZS0 : ∀ w0, w0 < T → IsRet P y (τ w0).e → cntT τ (fun z => IsRet P y z.e) w0 = 0 →
+    (τ 0).held y = 1 → (τ 0).e.now + DSTAR + B ≤ (τ w0).e.ts y + Z w0 + 3
+  hHD : ∀ x, x < T → IsRet P y (τ x).e → NpfAt y (τ x).e →
+    Rr x + HEAD_SLACK + B ≤ gpT P y τ x + L x
+  hHN : ∀ x x2, x2 < T → ConsecT P y τ x x2 →
+    Z x + HEAD_SLACK + B ≤ rdT y τ x x2 + gpT P y τ x2 + L x2
+  hHS0 : ∀ w0, w0 < T → IsRet P y (τ w0).e → cntT τ (fun z => IsRet P y z.e) w0 = 0 →
+    (τ 0).held y = 1 → (τ 0).e.now + HEAD_SLACK + B ≤ (τ w0).e.ts y + gpT P y τ w0 + L w0 + 3
+  hlate : ∀ x, x < T → IsRet P y (τ x).e →
+    cntT τ (fun z => IsRet P y z.e) (x + 1) = cntT τ (fun z => IsRet P y z.e) T →
+    (τ T).e.ts y + L x ≤ (τ T).e.now
+
+/-- **The head at the end of a certified stretch** (`head_late_gapT` at `t = T`). -/
+theorem head_of_cert (hok : SReqB P sreq) (y : Lane) (hy : P.live y = true) (τ : Nat → EngB)
+    (T B : Nat) (Rr Z L : Nat → Nat) (hT : TrajY P win usb sreq y τ T)
+    (hWf : ∀ n, n ≤ T → WfB (τ n)) (hH0 : (τ 0).held y = 1 ∨ (τ 0).held y = 2)
+    (hC : CertT P win usb sreq y τ T B Rr Z L) : (τ T).e.headValid y = true :=
+  head_late_gapT P win usb sreq y τ hok hy T hT hWf B Rr Z L hH0 hC.hR hC.hB hC.hZ0 hC.hZF
+    hC.hZC hC.hZS0 hC.hHD hC.hHN hC.hHS0 T (Nat.le_refl T) hC.hlate
+
+/-- **L3: the head over a whole run with flushes.** At any cycle `t` of `runBK`, `y`'s head is
+valid, given the flush conditions before `t`, the edge word at each flush of `y` (K1; K8 behind
+it), the start's words (`H0`), and the certificate on the stretch that holds `t`: from 0 when `y`
+was never flushed before `t` (`hC0`), from `f + 3` when `f` is its last flush and `t ≥ f + 3`
+(`hCf`). In the restart window `f + 1`, `f + 2` the head is the edge word, no certificate asked. -/
+theorem head_valid_runBK (hok : SReqB P sreq) (fl : Nat → Lane → Bool) (k : Nat → Lane → Nat)
+    (X0 : EngBK) (hI : WfBK X0) (hpk : X0.pkill = false) (y : Lane) (hy : P.live y = true)
+    (t B : Nat) (Rr Z L : Nat → Nat)
+    (hF : ∀ j, j < t → FlushOk P win usb sreq (fl (runBK P win usb sreq fl k j X0).x.e.now)
+      (runBK P win usb sreq fl k j X0))
+    (hedge : ∀ f, f < t → fl (runBK P win usb sreq fl k f X0).x.e.now y = true →
+      (runBK P win usb sreq fl k f X0).base.hasEdge y
+        (k (runBK P win usb sreq fl k f X0).x.e.now y) = true)
+    (hH0 : (runBK P win usb sreq fl k 0 X0).base.held y = 1 ∨
+      (runBK P win usb sreq fl k 0 X0).base.held y = 2)
+    (hC0 : (∀ j, j < t → fl (runBK P win usb sreq fl k j X0).x.e.now y = false) →
+      CertT P win usb sreq y (fun n => (runBK P win usb sreq fl k (0 + n) X0).base) t B
+        Rr Z L)
+    (hCf : ∀ f, f + 3 ≤ t → fl (runBK P win usb sreq fl k f X0).x.e.now y = true →
+      (∀ j, f < j → j < t → fl (runBK P win usb sreq fl k j X0).x.e.now y = false) →
+      CertT P win usb sreq y (fun n => (runBK P win usb sreq fl k (f + 3 + n) X0).base)
+        (t - (f + 3)) B (fun n => Rr (f + 3 + n)) (fun n => Z (f + 3 + n))
+        (fun n => L (f + 3 + n))) :
+    (runBK P win usb sreq fl k t X0).x.e.headValid y = true := by
+  rcases flush_cut P win usb sreq fl k X0 y t with hnone | ⟨f, hft, hfl, hlast⟩
+  · -- the first stretch
+    obtain ⟨hT, hW⟩ := stretch_first P win usb sreq hok fl k X0 hI hpk y t hF hnone
+    have h := head_of_cert P win usb sreq hok y hy _ t B Rr Z L hT hW hH0 (hC0 hnone)
+    have e : (runBK P win usb sreq fl k (0 + t) X0) = runBK P win usb sreq fl k t X0 := by
+      rw [Nat.zero_add]
+    simp only [e, base_e] at h
+    exact h
+  · by_cases hw : t ≤ f + 2
+    · -- the restart window
+      have he := hedge f hft hfl
+      rcases (show t = f + 1 ∨ t = f + 2 by omega) with rfl | rfl
+      · obtain ⟨hv, -, -⟩ := edge_survives_flushK P win usb sreq _ _
+          (runBK P win usb sreq fl k f X0) y hfl he
+        rw [← runBK_succ' P win usb sreq fl k f X0] at hv
+        exact hv
+      · exact (restart_head_runBK P win usb sreq hok fl k X0 hI f y
+          (fun j hj => hF j (by omega)) hfl he (hlast (f + 1) (by omega) (by omega))).2
+    · -- the stretch from f + 3
+      obtain ⟨hT, hW, hh, -⟩ := stretch_after_flush P win usb sreq hok fl k X0 hI f t y
+        (by omega) hF hfl (hedge f hft hfl) hlast
+      have h := head_of_cert P win usb sreq hok y hy _ (t - (f + 3)) B _ _ _ hT hW
+        (Or.inl hh) (hCf f (by omega) hfl hlast)
+      have e : (runBK P win usb sreq fl k (f + 3 + (t - (f + 3))) X0)
+          = runBK P win usb sreq fl k t X0 := by
+        rw [show f + 3 + (t - (f + 3)) = t by omega]
+      simp only [e, base_e] at h
+      exact h
+
 end
 
 #print axioms last_true
@@ -191,5 +284,7 @@ end
 #print axioms stretch_after_flush
 #print axioms no_kill_one
 #print axioms stretch_first
+#print axioms head_of_cert
+#print axioms head_valid_runBK
 
 end JLane
