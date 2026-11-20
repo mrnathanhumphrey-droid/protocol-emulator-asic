@@ -78,6 +78,12 @@ OP_LOOP = 10
 # immediate (wire order, bit 0 first), always self-timed. Not a branch: the
 # RTL's pre-decode excludes 11 from op[4:2] = 0b010.
 OP_SHIFTI = 11
+#: the symbol generator (Wilson 11-17, option (c) K = 4): SER hands it one byte
+#: (pin = A, pinb = B, q = the TX queue, count = bits - 1, delay = the byte
+#: time); SYMDEF writes config word `mod` (0..2) from the 25 bits between the
+#: opcode and `mod`. See src/pe_engine.v `pe_symgen`.
+OP_SER = 13
+OP_SYMDEF = 22
 BRANCH_OPS = (OP_BRANCH_BIT, OP_CMP_BRANCH, OP_LOOP)
 BRANCH_NAMES = {OP_BRANCH_BIT: "BRANCH_BIT", OP_CMP_BRANCH: "CMP_BRANCH", OP_LOOP: "LOOP"}
 #: CMP_BRANCH's mask modes (mod[1:0]), in the byte's natural order
@@ -103,14 +109,15 @@ OPCODES = {
 #: this is built", which held while primitives landed in opcode order. The batch
 #: builds SER (13) and SYMDEF (22) with 12, 14 and 18..21 still reserved, so a
 #: limit would un-refuse those; the loader now tests membership.
-BUILT_OPS = frozenset(range(12))     # 0..11: SHIFTI (11) was the last built in order
+#: 0..11 (SHIFTI, 11, was the last built in order); SER 13 and SYMDEF 22, the
+#: symbol generator (Wilson 11-17)
+BUILT_OPS = frozenset(range(12)) | {13, 22}
 BUILT_MASK = sum(1 << _o for _o in BUILT_OPS)
 #: the opcode the refusal must-fires inject: the LOWEST one not built
 OP_UNBUILT = min(set(range(1 << OP_W)) - BUILT_OPS)
 RESERVED_OPCODES = {
     # 11 was ARM2: built instead as ARM's mod[0] (primitive 3 bundle 1); 11 is SHIFTI
     12: ("DRIVE_SAMPLE", "pin = driven, pinb = sampled, level = drive value, delay"),
-    13: ("SER", "pin, delay = bit time, count = bits (per-lane serializer)"),
     14: ("FRAC_TX", "pin, delay = integer bit time, {count, mod} = fraction"),
     15: ("CRC_RX", "count = CRC kind, q = which accumulator"),
     16: ("FLAG_SET", "pinb[1:0] = flag index, level = value"),
@@ -166,7 +173,11 @@ ORDER_LSB, ORDER_MSB = 0, 1
 # (the builders' old `c = 2` would now have meant CLK_INV -- they were updated,
 # and the lockstep proves nothing moved).
 FLAG_HALF_HIGH, FLAG_CLK_INV = 0x1, 0x2
-FLAG_RESERVED = 0xC
+#: bit2 FLAG_SYMGEN (Wilson 11-17): this lane owns the symbol generator (SER /
+#: SYMDEF). ONE owner per image: a second is refused here (`symgen_problems`) and
+#: by the RTL (config_err).
+FLAG_SYMGEN = 0x4
+FLAG_RESERVED = 0x8
 ACT_FIELDS =(("op", OP_W), ("pin", PINW), ("level", 1), ("delay", DLY_W),
               ("count", CNT_W), ("q", BQW), ("pinb", PINB_W), ("mod", MOD_W))
 
@@ -218,9 +229,9 @@ def hdr(pin, clkpin, mode, t, flags, dsched, dtol, base,
     existed, so every image written without it is bit-identical to one written
     with `order = ORDER_LSB` -- the same property the `q` field has.
     """
-    if int(flags) & ~(FLAG_HALF_HIGH | FLAG_CLK_INV):
+    if int(flags) & ~(FLAG_HALF_HIGH | FLAG_CLK_INV | FLAG_SYMGEN):
         raise ValueError("header flags 0x%X set a RESERVED bit (only "
-                         "HALF_HIGH = 1 and CLK_INV = 2 exist)" % int(flags))
+                         "HALF_HIGH = 1, CLK_INV = 2 and SYMGEN = 4 exist)" % int(flags))
     return _pack(HDR_FIELDS,
                  (pin, clkpin, mode, t, flags, dsched, dtol, base_word(base), order),
                  HDR_BYTES)
@@ -269,6 +280,49 @@ def act(op, pin, level, delay, count=0, q=0, pinb=0, mod=0) -> bytes:
         raise ValueError("opcode %d is RESERVED (%s), not built"
                          % (int(op), RESERVED_OPCODES.get(int(op), ("unassigned",))[0]))
     return _pack(ACT_FIELDS, (op, pin, level, delay, count, q, pinb, mod), ACT_BYTES)
+
+
+# ---- the symbol generator's two words (Wilson 11-17) --------------------------
+#: slot codes, per pin per slot (3 bits): the spare codes 5-7 are in (Wilson 11-19)
+SG_LOW, SG_HIGH, SG_D, SG_ND, SG_HOLD, SG_TOG, SG_TOG_D, SG_TOG_ND = range(8)
+SG_KMAX, SG_LEN_W, SG_CODE_W, SG_LAT_W = 4, 6, 3, 8
+#: SYMDEF's word: the opcode, the 25-bit payload, `mod` (which config word)
+SYMDEF_FIELDS = (("op", OP_W), ("payload", ACT_W - OP_W - MOD_W), ("mod", MOD_W))
+
+
+def act_ser(pin_a, pin_b, nbits, byte_time, q=0) -> bytes:
+    """SER: hand the generator one byte from TX queue `q`; `nbits` bits of it go
+    out (1..8); `byte_time` is the word's delay, the lane's own cadence (the
+    compiler's seam bound: B >= 2J + 2). `pin_b` = PIN_NONE for a single pin."""
+    if not 1 <= int(nbits) <= 8:
+        raise ValueError("SER nbits %d: 1..8" % int(nbits))
+    return act(OP_SER, pin_a, 0, byte_time, count=int(nbits) - 1, q=q, pinb=pin_b)
+
+
+def act_symdef(lens, code_a, code_b, idle_a=0, idle_b=0, lat=1) -> list:
+    """SYMDEF: the generator's config as its THREE words (mod 0, 1, 2).
+    `lens`: K = 1..4 slot lengths, 1..63 cycles; `code_a` / `code_b`: K codes
+    (SG_*); `lat`: the start latency, cycles (>= 1; the compiler sets J + 1)."""
+    k = len(lens)
+    if not 1 <= k <= SG_KMAX or len(code_a) != k or len(code_b) != k:
+        raise ValueError("SYMDEF: K = %d slots with %d / %d codes (K 1..%d, one code "
+                         "per slot per pin)" % (k, len(code_a), len(code_b), SG_KMAX))
+    if not all(1 <= int(n) < (1 << SG_LEN_W) for n in lens):
+        raise ValueError("SYMDEF slot lengths %s: 1..%d" % (list(lens), (1 << SG_LEN_W) - 1))
+    if not all(0 <= int(c) < (1 << SG_CODE_W) for c in list(code_a) + list(code_b)):
+        raise ValueError("SYMDEF codes: 0..%d" % ((1 << SG_CODE_W) - 1))
+    if not 1 <= int(lat) < (1 << SG_LAT_W):
+        raise ValueError("SYMDEF LAT %d: 1..%d" % (int(lat), (1 << SG_LAT_W) - 1))
+    pad = SG_KMAX - k                       # unused slots: length 1, code HOLD (never reached)
+    lens = list(lens) + [1] * pad
+    code_a = list(code_a) + [SG_HOLD] * pad
+    code_b = list(code_b) + [SG_HOLD] * pad
+    w0 = (k - 1) | (int(idle_a) << 2) | (int(idle_b) << 3) | (int(lat) << 4)
+    w1 = sum(int(n) << (SG_LEN_W * j) for j, n in enumerate(lens))
+    w2 = (sum(int(c) << (SG_CODE_W * j) for j, c in enumerate(code_a))
+          | sum(int(c) << (SG_CODE_W * (SG_KMAX + j)) for j, c in enumerate(code_b)))
+    return [_pack(SYMDEF_FIELDS, (OP_SYMDEF, w, idx), ACT_BYTES)
+            for idx, w in enumerate((w0, w1, w2))]
 
 
 # ---------------------------------------------------------------------------

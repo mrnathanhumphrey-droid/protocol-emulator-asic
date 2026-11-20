@@ -155,6 +155,13 @@ SCRATCH_GENERATORS: dict = {
                " images, judged cycle for cycle against run_pair's golden"
                " waveform on tb_pair, not by the A2 gap",
         "v3": {"no_v3_layer": "test/tb_pair.v"}},
+    "run_symgen": {
+        "script": "test/run_symgen.py", "pattern": "symgen_*.hex",
+        "clocked": True,
+        "why": "the symbol generator (Wilson 11-17): its config / SER images,"
+               " judged cycle for cycle against test/symgen_model.py on tb_pair,"
+               " not by the A2 gap",
+        "v3": {"no_v3_layer": "test/tb_pair.v"}},
     "run_usbbuf": {
         "script": "test/run_usbbuf.py", "pattern": "usbbuf_*.hex",
         "clocked": True,

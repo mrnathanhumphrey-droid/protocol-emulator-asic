@@ -178,6 +178,17 @@
       usb_tep    <= 1'b0; \
       usb_tok    <= 1'b0; \
       usb_acmt   <= 1'b0; \
+      sg_own_v   <= 1'b0; \
+      sg_own     <= {LW{1'b0}}; \
+      sg_drv     <= 1'b0; \
+      sg_pin_a   <= {PINW{1'b0}}; \
+      sg_pin_b   <= {PINB_W{1'b0}}; \
+      sg_ld      <= 1'b0; \
+      sg_byte    <= 8'h00; \
+      sg_nb      <= 3'd7; \
+      sg_cfg_we  <= 1'b0; \
+      sg_cfg_idx <= 2'd0; \
+      sg_cfg_data <= {(ACT_W-OP_W-MOD_W){1'b0}}; \
       for (i = 0; i < N_LANES; i = i + 1) begin \
         l_pin[i]       <= {PINW{1'b0}}; \
         l_clkpin[i]    <= {PINW{1'b0}}; \
@@ -659,6 +670,16 @@ module pe_engine #(
   // a_op[4:2] = 010; `pre_cls` excludes it there, the only decode of that
   // pattern, so the opcode range stays contiguous (N_BUILT_OPS 11 -> 12).
   localparam [OP_W-1:0] OP_SHIFTI     = 11;
+  // ⭐ THE SYMBOL GENERATOR (Wilson 11-17, option (c) K = 4; see `pe_symgen` at the
+  // end of this file). SER hands the generator ONE BYTE from the TX queue (`q`):
+  // pin = A, pinb = B, count = bits - 1, delay = the byte time; an ordinary word
+  // otherwise (no class bit: one dispatch, one retirement). SYMDEF writes one of
+  // the three config words (mod = which), its 27 payload bits below the opcode.
+  // Both are the OWNER lane's only (header FLAG_SYMGEN); from any other lane,
+  // config_err, the USB_LANE precedent. A SYMDEF while the generator is busy is
+  // refused the same way: the config never changes under a waveform.
+  localparam [OP_W-1:0] OP_SER        = 13;
+  localparam [OP_W-1:0] OP_SYMDEF     = 22;
 
   // ---- image layout, all derived -------------------------------------
   // ⛔⛔ `base` IS A THIRD FIELD THE S2 FREEZE DID NOT HAVE. Without it every
@@ -2089,6 +2110,9 @@ module pe_engine #(
   assign           a_q     = cur_act[LOWX +: BQW];
   // BRANCH_BIT's WAIT W: count is its high nibble, pinb its low
   wire [BPW+PINB_W-1:0] br_wait = {a_cnt, cur_act[MOD_W +: PINB_W]};
+  // the symbol generator's SYMDEF payload: the word's 25 bits between the opcode
+  // and `mod`, in word order, named by the decode slices (DATA, not a pin index)
+  wire [ACT_W-OP_W-MOD_W-1:0] sg_payload = {a_pin, a_lvl, a_dly, a_cnt, a_q, a_pinb};
   wire [MOD_W-1:0] a_mod  = cur_act[MOD_W-1:0];
   wire [PINB_W-1:0] a_pinb = cur_act[MOD_W +: PINB_W];   // ARM's second pin
   // a timed branch (BRANCH_BIT / CMP_BRANCH / LOOP): the PRE-DECODED bit
@@ -2185,8 +2209,12 @@ module pe_engine #(
 `else
   wire [DLY_W-1:0] a_dly_wb = a_is_br ? {{(DLY_W-BPW-PINB_W){1'b0}}, br_wait} : a_dly;
 `endif
+  // ⭐ SYMDEF (the symbol generator's config word) is TIMED by the lane's header
+  // period `t`: its delay field is config payload, so like a branch it adds a
+  // defined value instead -- never config bits read as a delay.
+  wire [DLY_W-1:0] a_dly_sg = (a_op == OP_SYMDEF) ? l_t[cur_rel] : a_dly_wb;
   wire [DLY_W-1:0] wb_dly = (ck_act & (l_ckph[cur_rel] == CK_HIGH) & half_v[cur_rel])
-                            ? (a_dly >> 1) : a_dly_wb;
+                            ? (a_dly >> 1) : a_dly_sg;
   // ⚠ THE TWO OPCODES COUNT BITS DIFFERENTLY, and this is pre-existing ISA
   // semantics preserved rather than tidied: `OP_SHIFT` compares the
   // PRE-increment pointer against `a_cnt` (so a_cnt = 7 is eight bits, and it
@@ -2926,6 +2954,25 @@ module pe_engine #(
   reg [LW-1:0]          prr;
   reg                   pbr1;         // the in-flight refill came from branch 1
   reg                   pkill;        // FT edge: drop the in-flight refill
+  // ---- the symbol generator's engine side (Wilson 11-17; `pe_symgen` below) ----
+  reg                   sg_own_v;     // a lane owns the generator (header FLAG_SYMGEN)
+  reg [LW-1:0]          sg_own;       // ... which
+  reg                   sg_drv;       // the generator drives its pins (from the first SER)
+  reg [PINW-1:0]        sg_pin_a;     // the last SER's pin / pinb
+  reg [PINB_W-1:0]      sg_pin_b;
+  reg                   sg_ld;        // SER's load strobe, its byte and bits - 1
+  reg [7:0]             sg_byte;
+  reg [2:0]             sg_nb;
+  reg                   sg_cfg_we;    // SYMDEF's config write: which word, its payload
+  reg [1:0]             sg_cfg_idx;
+  reg [ACT_W-OP_W-MOD_W-1:0] sg_cfg_data;   // the payload: the bits between op and mod
+  wire                  sg_pa, sg_pb, sg_busy;
+  wire                  sg_mine = sg_own_v & (sg_own == cur);   // the dispatching lane owns it
+  pe_symgen u_symgen (
+    .clk(clk), .rst_n(rst_n),
+    .cfg_we(sg_cfg_we), .cfg_idx(sg_cfg_idx), .cfg_data(sg_cfg_data),
+    .ld(sg_ld), .ld_byte(sg_byte), .ld_nbits_m1(sg_nb), .msb(l_order[sg_own]),
+    .pa(sg_pa), .pb(sg_pb), .busy(sg_busy));
   // (`winner_q` / `winner_v_q`, TF3's registered winner, are declared ahead,
   // before the block that writes them)
   reg                   pslot;        // which slot this refill is filling
@@ -3150,6 +3197,8 @@ module pe_engine #(
     end else begin
       rx_push <= 1'b0;
         host_pop <= 1'b0;   // one-cycle pulse; the consume site re-asserts
+      sg_ld     <= 1'b0;    // the generator's load / config strobes: one cycle
+      sg_cfg_we <= 1'b0;
       // bundle 6: the commit is a one-cycle pulse; a bus reset ends the last
       // token's verdict and the PID copy (Default state, step 7a §2)
       usb_acmt <= 1'b0;
@@ -3245,6 +3294,14 @@ module pe_engine #(
                     // ⭐ RULING HDR: the old `c` field's low two bits.
                     l_half[hl]   <= hsh_n[HDR_BYTES*8-2-2*PINW-DLY_W-CW+1];
                     l_clkinv[hl] <= hsh_n[HDR_BYTES*8-2-2*PINW-DLY_W-CW+2];
+                    // ⭐ FLAG_SYMGEN (flags bit 2, Wilson 11-17): this lane owns the
+                    // symbol generator. ONE owner: a second is config_err (pe_isa
+                    // refuses it too).
+                    if (hsh_n[HDR_BYTES*8-2-2*PINW-DLY_W-CW+3]) begin
+                      if (sg_own_v) config_err_m <= 1'b1;
+                      sg_own_v <= 1'b1;
+                      sg_own   <= hl;
+                    end
                     // ⛔ CE2: only a PUSH-PULL lane whose clock is a `uo_out`
                     // pin (8..11) is inverted. `uo_out` is re-registered in
                     // the top, so the XOR lands BEFORE a flop and F2 (every
@@ -3825,6 +3882,8 @@ module pe_engine #(
             // ⭐ OP_ARM moves no pin -- it RELEASES the lane on a peer edge.
             // Its state goes in at writeback, below.
             OP_ARM, OP_REARM: ;                 // no pin movement
+            // the generator's words act at writeback; its pins are driven below
+            OP_SER, OP_SYMDEF: ;
             // BRANCH_BIT moves no pin; a target outside the store is refused
             OP_BRANCH_BIT, OP_CMP_BRANCH, OP_LOOP: if (br_bad) begin
               config_err_m <= 1'b1;
@@ -4115,6 +4174,37 @@ module pe_engine #(
             // pointer -- it is the single-bit sample (an I2C ACK, a UART stop
             // bit), so there is no byte to complete.
             OP_READBIT: l_rx[cur] <= {rx_bit, l_rx[cur][7:1]};
+            // ⭐ the generator's two words: the owner lane only (else config_err,
+            // the lane halts); SER pops one byte from its TX queue into the
+            // generator's holding register (empty queue: the lane's underrun
+            // flag, nothing loaded); SYMDEF is refused while the generator is busy
+            OP_SER: if (!sg_mine) begin
+              config_err_m <= 1'b1;
+              sticky_ovr_m <= 1'b1;
+              live_n[cur]  = 1'b0;
+            end else begin
+              sg_pin_a <= a_pin;
+              sg_pin_b <= a_pinb;
+              sg_drv   <= 1'b1;
+              if (host_valid) begin
+                sg_ld    <= 1'b1;
+                sg_byte  <= host_data;
+                sg_nb    <= a_cnt[2:0];
+                host_pop <= 1'b1;
+              end else begin
+                lane_underrun_m[cur] <= 1'b1;
+              end
+            end
+            // SYMDEF's payload (`sg_payload`): every field between the opcode and `mod`
+            OP_SYMDEF: if (!sg_mine || sg_busy) begin
+              config_err_m <= 1'b1;
+              sticky_ovr_m <= 1'b1;
+              live_n[cur]  = 1'b0;
+            end else begin
+              sg_cfg_we   <= 1'b1;
+              sg_cfg_idx  <= a_mod;
+              sg_cfg_data <= sg_payload;
+            end
             default: ;
           endcase
 
@@ -4331,6 +4421,32 @@ module pe_engine #(
 
         default: st <= ST_IDLE;
       endcase
+
+      // ⭐ THE SYMBOL GENERATOR'S PINS (Wilson 11-17): one more source on the pin
+      // registers, written here after dispatch so it is the last write while it
+      // drives (from the owner's first SER on). The owner lane's drive mode
+      // applies, open-drain exactly as a LEVEL does; `< N_PINS` guards both
+      // program-controlled indices (PIN_NONE: that pin is not driven).
+      if (sg_drv) begin
+        if (sg_pin_a < N_PINS[PINW-1:0]) begin
+          if (l_mode[sg_own]) begin
+            pin_out[sg_pin_a] <= sg_pa & pin_pp[sg_pin_a];
+            pin_oe[sg_pin_a]  <= 1'b1;
+          end else begin
+            pin_out[sg_pin_a] <= 1'b0;
+            pin_oe[sg_pin_a]  <= ~sg_pa;
+          end
+        end
+        if (sg_pin_b < N_PINS[PINB_W-1:0]) begin
+          if (l_mode[sg_own]) begin
+            pin_out[sg_pin_b] <= sg_pb & pin_pp[sg_pin_b];
+            pin_oe[sg_pin_b]  <= 1'b1;
+          end else begin
+            pin_out[sg_pin_b] <= 1'b0;
+            pin_oe[sg_pin_b]  <= ~sg_pb;
+          end
+        end
+      end
 
       // ⭐⭐ THE STALL COUNTER, REDEFINED BY (b') (Wilson 11-14): the run of
       // cycles in which SOME lane is RELEASED with an EMPTY head -- the only
@@ -4602,3 +4718,142 @@ module pe_engine #(
 
 endmodule
 
+
+// =====================================================================
+// pe_symgen -- THE SYMBOL GENERATOR (Wilson 11-17, option (c), K = 4, one
+// shared generator; spare codes 5-7 in, Wilson 11-19). Built from the 11-17
+// prototype (R:\claude_scratch\s12c\symgen\symgen.v, bit for bit against
+// symgen.py on 25 runs) with its config registers (the sizing wrapper).
+// â­ ONE DISPATCH PER BYTE: a SER hands the generator one byte; a hardware
+// counter times every edge, so no edge carries dispatch jitter and every SER
+// word is an ordinary word in the proved fragment (its delay = the byte time B).
+// Each bit is K slots; slot j lasts len[j] cycles and drives pin A and pin B
+// with a 3-bit code each: 0 LOW, 1 HIGH, 2 D, 3 ~D, 4 HOLD, 5 TOGGLE,
+// 6 TOGGLE-if-D, 7 TOGGLE-if-~D. A one-byte holding register decouples the
+// dispatch from the waveform: the generator starts LAT cycles after the first
+// load and runs bytes back to back; a byte boundary with the holding register
+// empty is an UNDERRUN -- it stops, both pins go to their idle levels, and the
+// next load restarts it (+LAT). Not a fault: it is how a frame ends.
+// SYMDEF loads the config, three payloads (the word's 25 bits between the opcode
+// and `mod`), selected by `cfg_idx` (= the word's `mod`):
+//   0: [1:0] K-1, [2] idle A, [3] idle B, [11:4] LAT
+//   1: [23:0] four 6-bit slot lengths, slot 0 lowest
+//   2: [11:0] four 3-bit codes for A, [23:12] four for B
+// â›” `busy` (running, waiting to start, or holding a byte): the engine refuses
+// a SYMDEF then (config_err) -- the config never changes under a waveform.
+// =====================================================================
+module pe_symgen (
+  input  wire        clk,
+  input  wire        rst_n,
+  input  wire        cfg_we,
+  input  wire [1:0]  cfg_idx,
+  input  wire [24:0] cfg_data,
+  input  wire        ld,
+  input  wire [7:0]  ld_byte,
+  input  wire [2:0]  ld_nbits_m1,
+  input  wire        msb,
+  output reg         pa,
+  output reg         pb,
+  output wire        busy
+);
+  reg [1:0]  k_m1;
+  reg        idle_a, idle_b;
+  reg [7:0]  lat;
+  reg [23:0] lens;
+  reg [11:0] code_a, code_b;
+  reg [2:0]  nb_q;
+  reg        hv;
+  reg [7:0]  hb;
+  reg [7:0]  sr;
+  reg [2:0]  bit_i;
+  reg [1:0]  slot;
+  reg [5:0]  cnt;
+  reg        running, waiting;
+  reg [7:0]  wcnt;
+  assign busy = running | waiting | hv;
+
+  function lvl(input [2:0] c, input d, input cur);
+    case (c)
+      3'd0: lvl = 1'b0;
+      3'd1: lvl = 1'b1;
+      3'd2: lvl = d;
+      3'd3: lvl = ~d;
+      // M_SG_NOSPARE: the spare codes 5-7 read as HOLD (run_symgen: nrzi, biphase)
+`ifndef M_SG_NOSPARE
+      3'd5: lvl = ~cur;
+      3'd6: lvl = cur ^ d;
+      3'd7: lvl = cur ^ ~d;
+`endif
+      default: lvl = cur;
+    endcase
+  endfunction
+  function [5:0] len_of(input [1:0] j); len_of = lens[j*6 +: 6]; endfunction
+  function [2:0] ca(input [1:0] j);     ca = code_a[j*3 +: 3];   endfunction
+  function [2:0] cb(input [1:0] j);     cb = code_b[j*3 +: 3];   endfunction
+  function bitof(input [7:0] v, input [2:0] i);
+    bitof = msb ? v[nb_q - i] : v[i];
+  endfunction
+
+  // ⛔⛔ AN INDEX, NOT `len_of(slot)`: a function call in a continuous assign is
+  // sensitive only to its ARGUMENTS, and `len_of` reads `lens` -- so after a
+  // SYMDEF wrote `lens`, iverilog kept the reset length until `slot` moved, and
+  // the first slot of the first byte lasted 1 cycle (run_symgen, measured: every
+  // configuration). The engine's priming comment records the same trap. The
+  // functions are fine inside the clocked block, where they are called at the edge.
+  wire [5:0] len_cur = lens[slot*6 +: 6];
+  wire last_cyc  = (cnt == len_cur - 6'd1);
+  wire last_slot = (slot == k_m1);
+  wire last_bit  = (bit_i == nb_q);
+
+  always @(posedge clk or negedge rst_n) begin
+    if (!rst_n) begin
+      k_m1 <= 2'd0; idle_a <= 1'b0; idle_b <= 1'b0; lat <= 8'd1;
+      lens <= {4{6'd1}}; code_a <= 12'd0; code_b <= 12'd0; nb_q <= 3'd7;
+      pa <= 1'b0; pb <= 1'b0; running <= 1'b0; waiting <= 1'b0; wcnt <= 8'd0;
+      hv <= 1'b0; hb <= 8'd0; sr <= 8'd0; bit_i <= 3'd0; slot <= 2'd0; cnt <= 6'd0;
+    end else begin
+      if (cfg_we) case (cfg_idx)
+        2'd0: begin k_m1 <= cfg_data[1:0]; idle_a <= cfg_data[2]; idle_b <= cfg_data[3];
+                    lat <= cfg_data[11:4]; end
+        2'd1: lens <= cfg_data[23:0];
+        2'd2: begin code_a <= cfg_data[11:0]; code_b <= cfg_data[23:12]; end
+        default: ;
+      endcase
+      if (!running && !waiting) begin pa <= idle_a; pb <= idle_b; end
+      if (running) begin
+        if (last_cyc) begin
+          if (last_slot) begin
+            if (last_bit) begin
+              if (hv) begin
+                sr <= hb; hv <= 1'b0; bit_i <= 3'd0; slot <= 2'd0; cnt <= 6'd0;
+                pa <= lvl(ca(2'd0), bitof(hb, 3'd0), pa);
+                pb <= lvl(cb(2'd0), bitof(hb, 3'd0), pb);
+              end else begin
+                running <= 1'b0; pa <= idle_a; pb <= idle_b;     // underrun: frame end
+              end
+            end else begin
+              bit_i <= bit_i + 3'd1; slot <= 2'd0; cnt <= 6'd0;
+              pa <= lvl(ca(2'd0), bitof(sr, bit_i + 3'd1), pa);
+              pb <= lvl(cb(2'd0), bitof(sr, bit_i + 3'd1), pb);
+            end
+          end else begin
+            slot <= slot + 2'd1; cnt <= 6'd0;
+            pa <= lvl(ca(slot + 2'd1), bitof(sr, bit_i), pa);
+            pb <= lvl(cb(slot + 2'd1), bitof(sr, bit_i), pb);
+          end
+        end else cnt <= cnt + 6'd1;
+      end else if (waiting) begin
+        if (wcnt == 8'd0) begin
+          running <= 1'b1; waiting <= 1'b0; sr <= hb; hv <= 1'b0;
+          bit_i <= 3'd0; slot <= 2'd0; cnt <= 6'd0;
+          pa <= lvl(ca(2'd0), bitof(hb, 3'd0), pa);
+          pb <= lvl(cb(2'd0), bitof(hb, 3'd0), pb);
+        end else wcnt <= wcnt - 8'd1;
+      end
+      if (ld) begin
+        hv <= 1'b1; hb <= ld_byte; nb_q <= ld_nbits_m1;
+        if (!running && !waiting) begin waiting <= 1'b1; wcnt <= lat - 8'd1; end
+      end
+    end
+  end
+endmodule

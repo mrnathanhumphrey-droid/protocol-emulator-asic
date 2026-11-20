@@ -781,6 +781,12 @@ SPEC_SYMBOLS = {
     # cycles, judged live by A5 (symmetry with lane 0) and A5-FT (the K..K+1 bound).
     ("test/run_arm2.py", "LANE_PINS"),
     ("test/run_arm2.py", "LANE_SCEN"),
+    # the symbol generator (Wilson 11-17): CFGS are the chosen table instances
+    # (WS2812, Manchester, NRZI, biphase, the SPI data phase) from
+    # test/symgen_model.py, FEED the four bytes tb_pair feeds queue 0 -- design and
+    # stimulus. The RESULT is the waveform, judged live against the model.
+    ("test/run_symgen.py", "CFGS"),
+    ("test/run_symgen.py", "FEED"),
     # ⭐ v2 primitive 3 bundle 2 (pair / SHIFTI / self-timed byte): FEED is the
     # TX payload STIMULUS (the four bytes tb_pair feeds queue 0, host_feed.vh);
     # BAD the encodings pe_isa must refuse -- chosen field values. The results

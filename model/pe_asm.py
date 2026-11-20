@@ -1698,14 +1698,15 @@ def main(argv=None) -> int:
     # a RESERVED bit cannot be written through `hdr()` (it refuses), so it is
     # PLANTED in an image the way a corrupt load would carry it
     img = bytearray(_one(_clocked(10, 25), (10, 9, 1, 25, 50, 75, 0)))
-    img[2] |= 0x08                         # flags bit 2 of lane 0's header
+    img[2] |= 0x10                         # flags bit 3 of lane 0's header (bit 2 is
+                                           # FLAG_SYMGEN since 11-19; bit 3 is reserved)
     rp = flag_problems(bytes(img), _jp.D_STAR)
     ok = any("RESERVED" in p and "lane 0" in p for p in rp)
     print("    %-36s %s" % ("a planted RESERVED flag bit",
                             "REFUSED" if ok else "*** NOT REFUSED"))
     rc |= 0 if ok else 1
     try:
-        hdr(10, 9, 1, 25, 0x4, 50, 75, ACT_BASE)
+        hdr(10, 9, 1, 25, 0x8, 50, 75, ACT_BASE)
         print("    hdr() with a reserved bit             *** ACCEPTED")
         rc = 1
     except ValueError:

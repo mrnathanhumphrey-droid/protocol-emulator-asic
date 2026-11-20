@@ -67,7 +67,7 @@ OUT = os.path.join(ROOT, "test", "op_reads.json")
 FIELDS = ("pin", "level", "delay", "count", "q", "pinb", "mod")
 FULL = {"pin": 0xF, "level": 0x1, "delay": 0x3FF, "count": 0xF, "q": 0x3, "pinb": 0xF, "mod": 0x3}
 OPS = ("LEVEL", "SHIFT", "SHIFTIN", "READBIT", "START", "STOP", "ARM", "REARM",
-       "BRANCH_BIT", "CMP_BRANCH", "LOOP", "SHIFTI")
+       "BRANCH_BIT", "CMP_BRANCH", "LOOP", "SHIFTI", "SER", "SYMDEF")
 ALL = OPS
 
 #: base decode tokens -> (field, mask). A bit-select `a_cnt[0]` reads only that bit.
@@ -87,6 +87,7 @@ DERIVED = {
     "ck_nbits": {"count": ("SHIFT", "SHIFTI", "SHIFTIN"), "level": ("SHIFT", "SHIFTI", "SHIFTIN")},
     "st_lastix": {"count": ("SHIFT", "SHIFTI", "SHIFTIN")},
     "a_dly_wb": {"delay": None, "count": _BR, "pinb": _BR},
+    "a_dly_sg": {"delay": None, "count": _BR, "pinb": _BR},
     "shi_imm": {"count": ("SHIFTI",), "q": ("SHIFTI",), "delay": ("SHIFTI",)},
     "br_wait": {"count": _BR, "pinb": _BR},
     "br_tgt_w": {"delay": _BR}, "br_tdly": {"delay": _BR},
@@ -94,6 +95,9 @@ DERIVED = {
     "cmp_src": {"q": ("CMP_BRANCH",)},
     "cmp_imm": {"pin": ("CMP_BRANCH",), "delay": ("CMP_BRANCH",), "level": ("CMP_BRANCH",)},
     "cmp_mask": {"mod": ("CMP_BRANCH",)},
+    # the symbol generator's config payload (Wilson 11-17): SYMDEF reads every field
+    # between the opcode and mod as DATA -- an immediate, never a pin index
+    "sg_payload": {f: ("SYMDEF",) for f in ("pin", "level", "delay", "count", "q", "pinb")},
     "br_cmp_take": {f: ("CMP_BRANCH",) for f in ("pin", "delay", "level", "q", "mod")},
     "lp_n": {"pin": ("LOOP",), "delay": ("LOOP",), "level": ("LOOP",)},
     "usb_send": {"q": ("SHIFT",)}, "uc_hold": {"level": ("SHIFT", "SHIFTI")},
@@ -101,7 +105,7 @@ DERIVED = {
 }
 
 #: derived wires through which `pin` is an IMMEDIATE (a number), never a pin index
-IMMEDIATE_WIRES = ("cmp_imm", "lp_n", "br_cmp_take")
+IMMEDIATE_WIRES = ("cmp_imm", "lp_n", "br_cmp_take", "sg_payload")
 
 #: ⛔⛔ THE DEFINED MEANINGS OF PIN_NONE (Wilson 11-14), each with the RTL it rests
 #: on: every anchor must match exactly one engine line, or the table is not
@@ -141,9 +145,11 @@ SITES = [
     ("wire [MOD_W-1:0] a_mod  = cur_act[", "DEF", "decode slice"),
     ("wire [PINB_W-1:0] a_pinb = cur_act[", "DEF", "decode slice"),
     ("wire [BQW-1:0]   a_q;", "DEF", "declaration"),
-    ("assign host_q    = a_q;", C_SHIFT + ("CMP_BRANCH",),
+    ("assign host_q    = a_q;", C_SHIFT + ("CMP_BRANCH", "SER"),
      "host_q -> project.v q_sel -> tx_valid/tx_head/do_popq, consumed only on SHIFT/SHIFTI "
-     "(host_valid l.4006/4260, host_pop); CMP_BRANCH reads a_q itself"),
+     "and SER (the generator's byte: host_valid, host_pop); CMP_BRANCH reads a_q itself"),
+    ("wire [ACT_W-OP_W-MOD_W-1:0] sg_payload = {a_pin, a_lvl, a_dly, a_cnt, a_q, a_pinb};", "DEF",
+     "SYMDEF's payload: every field between the opcode and mod"),
     ("wire pin_real = (a_pin < N_PINS", "DEF", "pin index guard"),
     ("wire pin_real = 1'b1;", "DEF", "mutant"),
     ("wire pinb_real = (a_pinb < N_PINS", "DEF", "pinb index guard"),
@@ -151,7 +157,9 @@ SITES = [
     ("wire ck_shiftin = clk_real & a_lvl & cur_cls[C_SHIFTIN];", "DEF", "clocked SHIFTIN"),
     ("wire [DLY_W-1:0] a_dly_wb = a_is_br ? {DLY_W{1'b0}} : a_dly;", "DEF", "mutant arm"),
     ("wire [DLY_W-1:0] a_dly_wb = a_is_br ? {{(DLY_W-BPW-PINB_W){1'b0}}, br_wait} : a_dly;", "DEF", "writeback delay"),
-    ("? (a_dly >> 1) : a_dly_wb;", ALL, "the writeback timestamp advance: every op's delay (branch: its wait)"),
+    ("wire [DLY_W-1:0] a_dly_sg = (a_op == OP_SYMDEF) ? l_t[cur_rel] : a_dly_wb;", "DEF",
+     "writeback delay (SYMDEF: the lane's header period, its delay bits are payload)"),
+    ("? (a_dly >> 1) : a_dly_sg;", ALL, "the writeback timestamp advance: every op's delay (branch: its wait)"),
     ("wire [BPW-1:0] ck_nbits = ck_shift ? (a_cnt", "DEF", "clocked bit count"),
     (": a_cnt;", ("SHIFT", "SHIFTI", "SHIFTIN"), "ck_nbits, read by the clocked shift path"),
     ("wire [BPW-1:0] st_lastix = cur_cls[C_SHIFT] ? a_cnt", "DEF", "self-timed last bit"),
