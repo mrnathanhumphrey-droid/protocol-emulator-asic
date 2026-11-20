@@ -92,6 +92,12 @@ RTL_CONTRACTS = {
                 "(ts <= now)",
         "lean": "hwin (SlotReadyB.ready_pc2_arm_T, disp_pick_T)",
         "must_fire": {"status": OWED, "name": None}},
+    "K8": {
+        "what": "a lane is never flushed again within 2 cycles of its last flush (Wilson 11-19). "
+                "Must-fire (agent 1): a simulation assertion firing on any lane flushed twice "
+                "within the window, plus a planted case it catches",
+        "lean": "ComposeB (flush_spacing behind hedge); proof (b) from FALLTHROUGH arming owed",
+        "must_fire": {"status": OWED, "name": None}},
 }
 
 #: contract premise (the names in gate_lean_build.PREMISES[thm]["contract"]) -> the RTL
@@ -114,11 +120,86 @@ CONTRACT_PREMISES = {
     "disp_released_only": {
         "rtl": ("disp_released_only",),
         "why": "hwin: win picks only live, released lanes (pc2_arm's PC+1 ARM picked at release)"},
+    "flush_spacing": {
+        "rtl": ("K8",),
+        "proof": "contract K8, proof (b) owed: from FALLTHROUGH arming (a second flush needs a "
+                 "new FT ARM captured and armed after the first)",
+        "why": "the composition restarts from y's LAST flush (ComposeB.flush_cut), so "
+               "restart_runBK's 'no flush at f+1, f+2' holds by construction; the spacing enters "
+               "through hedge -- y's edge word present at every flush restarted from -- which a "
+               "second flush within 2 cycles could break (composition L1, d03bf22)"},
 }
 
-#: must-fire switches (gate_lane_cert M_RC_PREMISE_ORPHAN / M_RC_CONTRACT_NO_MF)
+#: THE MILESTONE (Wilson 11-18 / 11-19): slot_on_composition -- GapRun on the buffered engine with
+#: flushes, one certificate over a whole run. status "proved" only when every step is; a proved
+#: step names its theorems (each at the Lean gate, gate_lean_build.KEY); an owed step says what it
+#: owes. gate_lane_cert check 21 turns red on a proved milestone with an owed step, a proved step
+#: with a theorem not at the Lean gate or none, or an owed step with no "what".
+COMPOSITION = {
+    "slot_on_composition": {
+        "status": "owed",
+        "steps": [
+            {"step": "trajectory between flushes (3a-3c)", "status": "proved",
+             "theorems": ("trajY_runBK", "trajY_runBK_noflush", "kill_prov_runBK")},
+            {"step": "the restart (3c part 2)", "status": "proved",
+             "theorems": ("restart_runBK",)},
+            {"step": "certificate from either start (3b)", "status": "proved",
+             "theorems": ("head_late_gapT", "pending_bound_gapT")},
+            {"step": "L1 cut at the last flush", "status": "proved",
+             "theorems": ("flush_cut", "restart_head_runBK", "stretch_after_flush")},
+            {"step": "L2 the first stretch", "status": "proved",
+             "theorems": ("stretch_first",)},
+            {"step": "L3 head_valid_runBK", "status": "owed",
+             "what": "head_late_gapT on each stretch, its premises over whole-run cycles"},
+            {"step": "L4 hR on a stretch", "status": "owed",
+             "what": "from RespWinB.wb_bound_winBK_fl, Rr = K - 1"},
+            {"step": "L4 window budgets hM / hS", "status": "owed",
+             "what": "the window chain (Wilson 11-18 'hR on runB'): M other-lane decisions and "
+                     "S idle cycles per K-window, counted along runBK"},
+            {"step": "flush spacing (K8)", "status": "owed",
+             "what": "contract K8, proof (b) owed (CONTRACT_PREMISES flush_spacing)"},
+            {"step": "ready_spare_capture_T", "status": "owed",
+             "what": "spare-captured ARM readiness (READY_RULES spare_capture); waits on agent "
+                     "1's buffer variant"},
+            {"step": "ready_ft_edge_T", "status": "owed",
+             "what": "READY_RULES ft_edge as one run theorem (RUN_THM, owed (composition))"},
+            {"step": "hRdy", "status": "owed",
+             "what": "the ready_*_T lifted onto runBK through the stretches"},
+            {"step": "hZS", "status": "owed",
+             "what": "step 5: hZS0 established, not only gate-checked (lane-cert check 20)"},
+        ]},
+}
+
+#: must-fire switches (gate_lane_cert M_RC_PREMISE_ORPHAN / M_RC_CONTRACT_NO_MF /
+#: M_RC_COMP_EARLY: the milestone marked proved with steps owed)
 ORPHAN_MUT = False
 NO_MF_MUT = False
+COMP_EARLY_MUT = False
+
+
+def composition_problems(key, comp=None):
+    """check 21 (Wilson 11-19): [problem] in COMPOSITION. `key`: gate_lean_build.KEY."""
+    comp = COMPOSITION if comp is None else comp
+    probs = []
+    for m, v in sorted(comp.items()):
+        st = "proved" if COMP_EARLY_MUT else v.get("status")
+        owed = [s["step"] for s in v["steps"] if s.get("status") != "proved"]
+        if st == "proved" and owed:
+            probs.append("%s marked proved with %d step(s) owed (%s)"
+                         % (m, len(owed), "; ".join(owed[:2])))
+        for s in v["steps"]:
+            if s.get("status") == "proved":
+                th = tuple(s.get("theorems") or ())
+                if not th:
+                    probs.append("%s / %s: proved, no theorem" % (m, s["step"]))
+                probs += ["%s / %s: %s not at the Lean gate" % (m, s["step"], t)
+                          for t in th if t not in key]
+            elif s.get("status") == "owed":
+                if not s.get("what"):
+                    probs.append("%s / %s: owed, says nothing owed" % (m, s["step"]))
+            else:
+                probs.append("%s / %s: status %r" % (m, s["step"], s.get("status")))
+    return probs
 
 
 def _registered():

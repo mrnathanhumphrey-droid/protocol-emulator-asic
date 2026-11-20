@@ -118,9 +118,12 @@ every must-fire must turn its check red, or the gate is not testing what it says
   check 21 the run-level contract list (model/rtl_contracts.py, Wilson 11-19): every contract
            premise of a run-level theorem (gate_lean_build.PREMISES) maps to an RTL contract,
            every RTL contract it names is defined, and every RTL contract has a must-fire --
-           registered in gate_mutant_kills when "present", else listed "owed (RTL batch)"
+           registered in gate_mutant_kills when "present", else listed "owed (RTL batch)".
+           And the milestone (rtl_contracts.COMPOSITION, slot_on_composition): proved only when
+           every step is; a proved step's theorems at the Lean gate; an owed step says what
   M_RC_PREMISE_ORPHAN  a contract premise with no RTL contract    (check 21 red)
   M_RC_CONTRACT_NO_MF  an RTL contract (K6) with no must-fire entry (check 21 red)
+  M_RC_COMP_EARLY      slot_on_composition proved with steps owed (check 21 red)
   M_LC_FT_UNSEEN    no ARM read as FALLTHROUGH                    -> check 3 red
   M_LC_FT_NOFLOOR   no lateness floor after the flush             -> check 3 red
 Static, < 2 s. Usage: python model/gate_lane_cert.py [dir holding usbdev.py]
@@ -775,13 +778,18 @@ def check_contracts():
     premise -> RTL contract -> must-fire, with no link missing"""
     import gate_lean_build as GL
     import rtl_contracts as RC
-    probs = RC.problems(GL.PREMISES)
+    probs = RC.problems(GL.PREMISES) + RC.composition_problems(GL.KEY)
     used, n, present, owed, unused = RC.summary(GL.PREMISES)
     if probs:
         return False, "; ".join(probs[:3])
-    return True, ("%d contract premises (%s) -> %d RTL contracts; must-fires %d present, %d %s%s"
+    comp = ["%s %s (%d/%d steps proved)"
+            % (m, v["status"], sum(s["status"] == "proved" for s in v["steps"]), len(v["steps"]))
+            for m, v in sorted(RC.COMPOSITION.items())]
+    return True, ("%d contract premises (%s) -> %d RTL contracts; must-fires %d present, %d %s%s; "
+                  "%s"
                   % (len(used), ", ".join(used), n, present, owed, RC.OWED,
-                     ("; used by no listed theorem yet: %s" % ", ".join(unused)) if unused else ""))
+                     ("; used by no listed theorem yet: %s" % ", ".join(unused)) if unused else "",
+                     "; ".join(comp)))
 
 
 def check_budget():
@@ -1111,7 +1119,9 @@ def main():
     for name, attr, what in (("M_RC_PREMISE_ORPHAN", "ORPHAN_MUT",
                               "a contract premise with no RTL contract: check 21 red"),
                              ("M_RC_CONTRACT_NO_MF", "NO_MF_MUT",
-                              "an RTL contract with no must-fire entry: check 21 red")):
+                              "an RTL contract with no must-fire entry: check 21 red"),
+                             ("M_RC_COMP_EARLY", "COMP_EARLY_MUT",
+                              "slot_on_composition marked proved with steps owed: check 21 red")):
         setattr(RC, attr, True)
         try:
             k21, _m = check_contracts()

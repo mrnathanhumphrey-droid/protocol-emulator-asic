@@ -618,6 +618,12 @@ SPEC_SYMBOLS = {
     # gate_lane_cert check 21 (every contract premise mapped, every contract
     # with a registered or owed must-fire).
     ("model/rtl_contracts.py", "RTL_CONTRACTS"),
+    # The same file's premise map and milestone registry (Wilson 11-19, K8 and
+    # slot_on_composition): digits in step labels and prose ("f+1", "L1",
+    # "2 cycles"), not results. Staleness is check 21 (composition_problems:
+    # proved steps' theorems at the Lean gate, the milestone not proved early).
+    ("model/rtl_contracts.py", "CONTRACT_PREMISES"),
+    ("model/rtl_contracts.py", "COMPOSITION"),
     # ⭐ WF2 round 2: V3's table generator. GENERATED names each runner's
     # on-the-fly image and calls the runner's OWN builder (its "numbers" are
     # builder arguments such as T_MIN 232, d = 60, d = 4 -- inputs, not
