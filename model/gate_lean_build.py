@@ -223,6 +223,8 @@ CONSTS = {
 #: discharged.
 _TRAJ_CONTRACT = {"engine_model": ("hT",), "engine_wf": ("hWf",)}
 _PC2_SHAPE = ("ht", "hcap", "hcw", "hw12", "hw2t", "hw1", "hw2", "hfirst", "hmid", "hnr", "hrel")
+_PC2_SPARE_SHAPE = ("ht", "hcap", "hk", "hcw0", "hw01", "hw12", "hw2t", "hw0", "hw1", "hw2",
+                    "hfirst", "hmid", "hnr", "hrel")
 PREMISES = {
     "ready_pc1_plain_T": {
         "applies": {"arm_capture_empty": ("hempty",), "plain_edge_arm": ("hgap",),
@@ -244,6 +246,29 @@ PREMISES = {
         "contract": dict(_TRAJ_CONTRACT, slot_requester=("hq1", "hold1", "hq2", "hold2"),
                          disp_released_only=("hwin",)),
         "shape": _PC2_SHAPE,
+    },
+    # SpareB (Wilson 11-20): hempty replaced by k held words retiring first -- shape, not a
+    # condition (the lane retires in order: the held words, then the ARM)
+    "ready_pc1_spare_T": {
+        "applies": {"plain_edge_arm": ("hgap",), "wait_in_margin": ("hC", "hcm")},
+        "contract": dict(_TRAJ_CONTRACT, slot_requester=("hq", "hold")),
+        "shape": ("ht", "hcap", "hk", "hcw0", "hw02", "hw2t", "hw0", "hw2", "hfirst", "hnr",
+                  "hrel"),
+    },
+    "ready_pc2_plain_spare_T": {
+        "applies": {"plain_edge_arm": ("hgap",), "pc1_not_npf": ("hq2", "hold2"),
+                    "d_ge_min": ("hd", "hd4"),
+                    "wait_in_margin": ("hC1", "hW1", "hC2", "hW2", "hcm")},
+        "contract": dict(_TRAJ_CONTRACT, slot_requester=("hq1", "hold1", "hq2", "hold2")),
+        "shape": _PC2_SPARE_SHAPE,
+    },
+    "ready_pc2_arm_spare_T": {
+        "applies": {"plain_edge_arm": ("hgap1",), "pc1_plain_edge_arm": ("hgap2",),
+                    "pc1_not_npf": ("hq2", "hold2"),
+                    "wait_in_margin": ("hC1", "hW1", "hC2", "hW2", "hcm")},
+        "contract": dict(_TRAJ_CONTRACT, slot_requester=("hq1", "hold1", "hq2", "hold2"),
+                         disp_released_only=("hwin",)),
+        "shape": _PC2_SPARE_SHAPE,
     },
 }
 #: the M_LEAN_PREMISE_UNLISTED plant: (file, theorem, the signature text it extends, the binder)

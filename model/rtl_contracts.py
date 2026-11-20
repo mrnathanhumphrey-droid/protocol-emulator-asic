@@ -208,9 +208,9 @@ COMPOSITION = {
              "what": "flush_spacing_runBA / flushOk_runBA take 'edge >= arming writeback + 1' and "
                      "agent 1's scan fix (ScanOk); neither is in CONTRACT_PREMISES yet -- RTL "
                      "contract wording is Wilson's"},
-            {"step": "ready_spare_capture_T", "status": "owed",
-             "what": "spare-captured ARM readiness (READY_RULES spare_capture) on BufEng's "
-                     "one-word buffer (Wilson 11-20 depth ruling: one word per lane)"},
+            {"step": "spare-capture readiness (ready_*_spare_T)", "status": "proved",
+             "theorems": ("ready_pc1_spare_T", "ready_pc2_plain_spare_T",
+                          "ready_pc2_arm_spare_T")},
             {"step": "ready_ft_edge_T", "status": "proved",
              "theorems": ("ready_ft_edge_T",)},
             {"step": "hRdy", "status": "owed",

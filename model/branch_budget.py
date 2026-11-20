@@ -115,6 +115,7 @@ def slot_margin(g, I, gaps, a, w, rule, k=None):
     the successor's earliest release. None for the FALLTHROUGH timeout word (its premise is
     checked in the certificate loop, slot_timeout_drop)."""
     k = k or PC.load()
+    rule = SPARE_BASE.get(rule, rule)       # a spare-capture rule keeps its base rule's margin
     if rule == "pc1_plain":
         return k["p1b_margin_scan"]
     if rule == "pc2_arm":
@@ -174,14 +175,29 @@ READY_RULES = {
                                   "shape, dae31dc)"},
     "depth_gt2": {"status": "counterfactual", "theorems": (),
                   "what": "words beyond depth 2 (SLOT > 2): no theorem"},
-    "spare_capture": {"status": "owed", "theorems": ("SlotReadyB.ready_spare_capture_T",),
-                      "what": "PC+1 / PC+2 of a plain ARM that may be captured into the spare "
-                              "(a predecessor is not no-prefetch): ready_*_T take hempty. Owed "
-                              "(Wilson 11-19): the spare-capture readiness theorem on BufEng's "
-                              "one-word buffer (Wilson 11-20 depth ruling), issue at capture, "
-                              "the 11-17 spare margins (m1 / m3 through the scan: "
-                              "Buf.p1b2_margin_arm_scan = 0), composition step 3"},
+    # spare capture (Wilson 11-19 / 11-20): a plain ARM that may be captured into the spare (a
+    # predecessor is not no-prefetch) -- ready_*_T take hempty; SpareB's ready_*_spare_T replace it
+    # by the held words retiring first (one-word buffer, issue path (A), wait at capture 1). Each
+    # rule keeps its base rule's margin and conditions, less arm_capture_empty
+    "pc1_spare": {"status": "proved", "theorems": ("SpareB.ready_pc1_spare_T",
+                                                   "Slot.p1b_margin_scan",
+                                                   "ContendB.slot_wait_fcfs_two"),
+                  "what": "PC+1 of a plain ARM captured behind held words (spare capture)"},
+    "pc2_plain_spare": {"status": "proved", "theorems": ("SpareB.ready_pc2_plain_spare_T",
+                                                         "Buf.p1b2_margin_plain_scan",
+                                                         "ContendB.slot_wait_fcfs_two"),
+                        "what": "PC+2 behind a plain PC+1, the ARM captured behind held words, "
+                                "d >= p1b2_plain_min_d"},
+    "pc2_arm_spare": {"status": "proved", "theorems": ("SpareB.ready_pc2_arm_spare_T",
+                                                       "Buf.p1b2_margin_arm_scan",
+                                                       "ContendB.slot_wait_fcfs_two"),
+                      "what": "PC+2, PC+1 a plain edge ARM (m1 / m3), the ARM captured behind "
+                              "held words"},
 }
+#: hempty rule -> its spare-capture rule (slot_ready_tagged retags a spare-possible ARM's words)
+SPARE_OF = {"pc1_plain": "pc1_spare", "pc2_plain": "pc2_plain_spare", "pc2_arm": "pc2_arm_spare"}
+#: spare-capture rule -> the hempty rule whose margin and conditions it keeps
+SPARE_BASE = {v: k for k, v in SPARE_OF.items()}
 #: the run-level theorem behind each rule (Wilson 11-19, step 3) and the conditions slot_ready
 #: tests for it -- each a premise class of gate_lean_build.PREMISES[run_thm]["applies"], both
 #: ways (gate_lane_cert check 13). run_status "owed (...)": the run theorem is not yet one
@@ -201,14 +217,23 @@ RUN_THM = {
     # so it is not yet run_status "proved" (check 13 would compare it both ways)
     "ft_edge": {"run_thm": "ready_ft_edge_K",
                 "run_status": "owed (registration: ScanOk contract wording)", "applies": ()},
+    "pc1_spare": {"run_thm": "ready_pc1_spare_T", "run_status": "proved",
+                  "applies": ("plain_edge_arm", "wait_in_margin")},
+    "pc2_plain_spare": {"run_thm": "ready_pc2_plain_spare_T", "run_status": "proved",
+                        "applies": ("plain_edge_arm", "pc1_not_npf", "d_ge_min",
+                                    "wait_in_margin")},
+    "pc2_arm_spare": {"run_thm": "ready_pc2_arm_spare_T", "run_status": "proved",
+                      "applies": ("plain_edge_arm", "pc1_plain_edge_arm", "pc1_not_npf",
+                                  "wait_in_margin")},
 }
 #: a condition whose Lean premise is reached through a bridge lemma: pc1_not_npf (Python: PC+1
 #: not in I.BRANCH_OPS) discharges hq2 / hold2 only through npf_no_issue_T (Wilson 11-19)
 BRIDGES = {"pc1_not_npf": "npf_no_issue_T"}
 #: (rule, condition) met by another tested condition: a plain edge ARM at PC+1 is an OP_ARM,
 #: never a no-prefetch word (check 13 confirms OP_ARM is not in I.BRANCH_OPS)
-IMPLIED = {("pc2_arm", "pc1_not_npf"): "pc1_plain_edge_arm"}
-#: the label on slot-on figures while spare_capture is owed (Wilson 11-19)
+IMPLIED = {("pc2_arm", "pc1_not_npf"): "pc1_plain_edge_arm",
+           ("pc2_arm_spare", "pc1_not_npf"): "pc1_plain_edge_arm"}
+#: the label on slot-on figures while a spare-capture rule is not proved (Wilson 11-19)
 SPARE_LABEL = "refusal in force: spare-capture readiness owed"
 #: must-fire switches (gate_lane_cert check 13): conditions slot_ready stops testing
 #: (M_LC_SPARE_READY: {"arm_capture_empty"}); check 13 also sets each one in turn
@@ -267,11 +292,12 @@ def slot_ready_by_arm(g, I, depth, gaps, k=None):
 def slot_ready_tagged(g, I, depth, gaps, k=None):
     """[(ARM, word, rule id)]: every word the slot would make ready, with its READY_RULES rule.
     A plain ARM that may be captured into the spare (not arm_capture_empty) has its words under
-    spare_capture (owed, Wilson 11-19), not under the rules whose theorems take hempty."""
+    the spare-capture rules (SPARE_OF; SpareB, Wilson 11-20), not under the rules whose theorems
+    take hempty."""
     out = []
     for a, w, r in _slot_ready_tagged(g, I, depth, gaps, k):
         if r in _HEMPTY_RULES and not arm_capture_empty(g, a, I):
-            r = "spare_capture"
+            r = SPARE_OF[r]
         out.append((a, w, r))
     return out
 
@@ -635,9 +661,9 @@ def _image_budget(img, iters=80, premise_gaps=None, ready=None, scheme="window")
     cw = {l: 0 for l in lanes}
     labels = []
     if SLOT:
-        # Wilson 11-19: a spare-possible ARM's words are refused (spare_capture owed); a figure
-        # where the refusal acted carries the label
-        if any(r == "spare_capture" for l in lanes
+        # Wilson 11-19: a spare-possible ARM's words are refused while their spare-capture rule
+        # is not proved; a figure where the refusal acted carries the label
+        if any(r in SPARE_BASE and READY_RULES[r]["status"] != "proved" for l in lanes
                for _a, _w, r in slot_ready_tagged(graphs[l][0], I, SLOT, graphs[l][2], k)):
             labels.append(SPARE_LABEL)
         # after the premise gaps: slot_ready's d is the release distance the certificate uses;

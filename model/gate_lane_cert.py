@@ -73,14 +73,16 @@ every must-fire must turn its check red, or the gate is not testing what it says
            names its run theorem (branch_budget.RUN_THM), at the Lean gate, its premise classes
            (gate_lean_build.PREMISES applies) equal to the rule's conditions both ways; each
            condition is tested (broken: refused; its COND_OFF switch set: ready); bridges
-           (pc1_not_npf -> npf_no_issue_T) at the Lean gate. A spare-possible ARM's words are
-           spare_capture (owed): refused until the spare-capture theorem
+           (pc1_not_npf -> npf_no_issue_T) at the Lean gate. A spare-possible ARM's words go
+           to the spare-capture rules (pc1_spare / pc2_plain_spare / pc2_arm_spare, SpareB,
+           Wilson 11-20), never to the rules whose theorems take hempty
   M_LC_REG_NOTHEOREM  a proved rule with no theorem          (check 13 red)
   M_LC_REG_NOTLEAN    a theorem not at the Lean gate          (check 13 red)
   M_LC_REG_UNREG      an emitted rule not registered          (check 13 red)
   M_LC_REG_LEAK       owed / counterfactual words reach ready (check 13 red)
   M_LC_REG_PREMISE_DROP  a premise class dropped from a rule's conditions (check 13 red)
-  M_LC_SPARE_READY    a spare-possible ARM's words ready      (check 13 red)
+  M_LC_SPARE_READY    hempty untested: a spare-possible ARM's words under the hempty rules
+                      (check 13 red)
   check 14 the slot under contention (ContendB.slot_wait_fcfs_two, FCFS by capture): another
            lane with an ARM is an older requester, wait contend_per_lane (8) each; a word is
            ready only while its free-port margin covers the wait (PC+1 not at wait 8; PC+2 from
@@ -592,8 +594,9 @@ def check_registry(BB, PC, I, rules=None, run=None):
                {0: [1], 1: [5], 2: [5], 3: [5]}), 2),
              (({0: (arm, [1]), 1: (ft, [2, 3]), 2: (plain, [4]), 3: (plain, [4]),
                 4: (plain, [0])}, {0: [1], 1: [dmin], 2: [5], 3: [5], 4: [5]}), 2),
-             # a spare-possible ARM (w3 plain): its words go to spare_capture (owed)
-             (_cond_case(BB, I, k, "pc2_plain", "arm_capture_empty")[:2], 2)]
+             # a spare-possible ARM (w3 plain): its words go to the spare-capture rules (SpareB)
+             (_cond_case(BB, I, k, "pc2_plain", "arm_capture_empty")[:2], 2),
+             (_cond_case(BB, I, k, "pc2_arm", "arm_capture_empty")[:2], 2)]
     seen = set()
     for (g, gaps), depth in cases:
         tagged = BB.slot_ready_tagged(g, I, depth, gaps, k)
@@ -620,11 +623,16 @@ def check_registry(BB, PC, I, rules=None, run=None):
 
 def _cond_case(BB, I, k, rule, cond):
     """(g, gaps, contend, word): `rule`'s word on _slot_graph with every condition met except
-    `cond` (None: all met)"""
+    `cond` (None: all met). A spare-capture rule (BB.SPARE_BASE) is its base rule's case with the
+    ARM spare-possible (w3 plain)."""
     dmin = k["p1b2_plain_min_d"]
+    spare = rule in BB.SPARE_BASE
+    rule = BB.SPARE_BASE.get(rule, rule)
     g, gaps = _slot_graph(I, dmin - 1 if rule == "pc2_arm" else dmin, pc1_arm=rule == "pc2_arm")
     w = 1 if rule == "pc1_plain" else 2
     contend = 0
+    if spare:
+        g[3] = ({"op": I.OP_LEVEL, "mod": 0, "delay": 0}, g[3][1])
     if cond == "arm_capture_empty":
         g[3] = ({"op": I.OP_LEVEL, "mod": 0, "delay": 0}, g[3][1])
     elif cond == "plain_edge_arm":
@@ -678,9 +686,14 @@ def _run_thm_problems(BB, PC, I, rules, run):
                         probs.append("%s: %s not implied (OP_ARM is no-prefetch)" % (rid, c))
                     continue
                 g, gaps, cw, w = _cond_case(BB, I, k, rid, c)
-                broken = w in BB.slot_ready(g, I, 2, gaps, k, contend=cw)
+                # ready UNDER THIS RULE: a spare-possible word may be ready through its
+                # spare-capture rule, which is not this rule's condition holding
+                def _ready_by(rule_id):
+                    return ((0, w, rule_id) in BB.slot_ready_tagged(g, I, 2, gaps, k)
+                            and w in BB.slot_ready(g, I, 2, gaps, k, contend=cw))
+                broken = _ready_by(rid)
                 BB.COND_OFF = saved | {c}
-                off = w in BB.slot_ready(g, I, 2, gaps, k, contend=cw)
+                off = _ready_by(rid)
                 BB.COND_OFF = set(saved)
                 if broken or not off:
                     probs.append("%s: condition %s not enforced (broken %s, switch off %s)"
@@ -1046,7 +1059,8 @@ def main():
     finally:
         BB.COND_OFF = set()
     kills.append(("M_LC_SPARE_READY", not kr,
-                  "a spare-possible ARM's words ready (hempty not tested): check 13 red"))
+                  "hempty not tested: a spare-possible ARM's words under the hempty rules: "
+                  "check 13 red"))
     # check 14: the slot under contention (ContendB, Wilson 11-17)
     ok14, msg14 = check_slot_contend(BB, PC, I)
     print("  check 14 %s  %s" % ("GREEN" if ok14 else "RED  ", msg14))
