@@ -1,4 +1,5 @@
 import JLane.RestartB
+import JLane.FlushHeld
 /-!
 # Brick C3g — cutting a run at the lane's last flush (`slot_on_composition`, L1, Wilson 11-19)
 
@@ -336,6 +337,71 @@ theorem hstart_after_flush (hok : SReqB P sreq) (fl : Nat → Lane → Bool) (k 
 
 end
 
+/-! ### K8 proof (b), on the armed engine: no second flush within two cycles
+
+On `FlushHeld.runBA` a flush is a hit (`armed ∧ now = armE`). The hit clears `armed` in its own
+step, and a lane is armed again only at an ARM's retiring writeback -- which `y` cannot have the
+cycle after its flush (`no_wb_after_flush`: an armed lane is not dispatched, `flushOk_hit`). So
+`y` is unarmed at `f + 1` and `f + 2`, and cannot hit there. Premises: the armed invariant
+(`ArmInvB`, kept by `armInvB_step` given `hedge`: an edge at least one cycle after its arming
+writeback) and the scan fix (`ScanOk`). Not yet carried to `runBK` (the composition): `runBA`'s
+dispatcher masks armed lanes, `runBK`'s is fixed (`rtl_contracts.COMPOSITION`). -/
+
+section
+variable (P : Program) (win : Engine → Option Lane) (usb : Option Lane)
+  (sreq : EngB → Option Lane) (isArm : EngB → Bool) (edge : Nat → Lane → Nat)
+
+/-- **Two cycles after a hit, no hit.** -/
+theorem no_rehit_two (k0 k1 : Lane → Nat) (A : EngBA) (y : Lane) (hA : ArmInvB A)
+    (hscan : ScanOk P win usb sreq A) (hh : A.hit y = true) :
+    (stepBA P win usb sreq isArm edge k0 A).hit y = false ∧
+    (stepBA P win usb sreq isArm edge k1 (stepBA P win usb sreq isArm edge k0 A)).hit y = false
+    := by
+  have ha1 : (stepBA P win usb sreq isArm edge k0 A).armed y = false := by
+    show (if A.hit y = true then false
+      else if A.arms P isArm y = true then true else A.armed y) = false
+    rw [if_pos hh]
+  have hh1 : (stepBA P win usb sreq isArm edge k0 A).hit y = false := by
+    unfold EngBA.hit; rw [ha1]; rfl
+  refine ⟨hh1, ?_⟩
+  -- no arming writeback of y the cycle after its flush
+  have hF := flushOk_hit P win usb sreq A hA hscan
+  have hnw := no_wb_after_flush P (winA win A.armed) usb sreq A.hit k0 A.X y hF hh
+  have har : (stepBA P win usb sreq isArm edge k0 A).arms P isArm y = false := by
+    unfold EngBA.arms
+    cases hw : decide ((stepBA P win usb sreq isArm edge k0 A).X.x.e.st = .wb)
+    · rfl
+    · cases hc : decide (y = (stepBA P win usb sreq isArm edge k0 A).X.x.e.cur)
+      · simp
+      · simp only [decide_eq_true_eq] at hw hc
+        exact absurd ⟨hw, hc.symm⟩ hnw
+  have ha2 : (stepBA P win usb sreq isArm edge k1
+      (stepBA P win usb sreq isArm edge k0 A)).armed y = false := by
+    show (if (stepBA P win usb sreq isArm edge k0 A).hit y = true then false
+      else if (stepBA P win usb sreq isArm edge k0 A).arms P isArm y = true then true
+      else (stepBA P win usb sreq isArm edge k0 A).armed y) = false
+    rw [hh1, har, ha1]; rfl
+  unfold EngBA.hit; rw [ha2]; rfl
+
+/-- The armed invariant along a run (`armInvB_step`). -/
+theorem armInvB_runBA (hedge : ∀ t l, t + 1 ≤ edge t l) (kt : Nat → Lane → Nat) (A0 : EngBA)
+    (hA : ArmInvB A0) : ∀ n, ArmInvB (runBA P win usb sreq isArm edge kt n A0)
+  | 0 => hA
+  | n + 1 => armInvB_step P win usb sreq isArm edge _ hedge _ (armInvB_runBA hedge kt A0 hA n)
+
+/-- **K8 on the armed engine** (proof (b), Wilson 11-19): a lane flushed (hit) at cycle `n` of
+`runBA` is not flushed at `n + 1` or `n + 2`. -/
+theorem flush_spacing_runBA (hedge : ∀ t l, t + 1 ≤ edge t l) (kt : Nat → Lane → Nat)
+    (A0 : EngBA) (hA : ArmInvB A0) (y : Lane) (n : Nat)
+    (hscan : ScanOk P win usb sreq (runBA P win usb sreq isArm edge kt n A0))
+    (hh : (runBA P win usb sreq isArm edge kt n A0).hit y = true) :
+    (runBA P win usb sreq isArm edge kt (n + 1) A0).hit y = false ∧
+    (runBA P win usb sreq isArm edge kt (n + 2) A0).hit y = false :=
+  no_rehit_two P win usb sreq isArm edge _ _ (runBA P win usb sreq isArm edge kt n A0) y
+    (armInvB_runBA P win usb sreq isArm edge hedge kt A0 hA n) hscan hh
+
+end
+
 #print axioms last_true
 #print axioms flush_cut
 #print axioms restart_head_12
@@ -347,5 +413,8 @@ end
 #print axioms head_valid_runBK
 #print axioms hR_stretch
 #print axioms hstart_after_flush
+#print axioms no_rehit_two
+#print axioms armInvB_runBA
+#print axioms flush_spacing_runBA
 
 end JLane
