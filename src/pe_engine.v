@@ -1905,6 +1905,54 @@ module pe_engine #(
 `endif
     end
   endgenerate
+  // ---- ⭐ K8 (Wilson 11-19): A LANE IS NEVER FLUSHED AGAIN WITHIN 2 CYCLES OF
+  // ITS LAST FLUSH -- no flush at f + 1 or f + 2 after a flush at f (agent 2's
+  // ComposeB: the composition restarts from each flush through the edge-word
+  // premise `hedge`, and that restart needs the two quiet cycles). Lean takes K8
+  // as a PREMISE; the proof from FALLTHROUGH arming is owed. This is the RTL side.
+  // `ft_edge_flush` is the FT edge's flush, the condition of the flush block
+  // below (`arm_hit` and `l_armft` and `ft_skip_on`). It is NOT `ft_flush`:
+  // that is the scan guard, which `M_FT_SCAN_RACE` zeroes while the flush
+  // itself still happens. `flush_ev` is EVERY path that flushes a lane (empties
+  // its slots and moves its PC); a new flush path ORs into it, or K8 is blind
+  // to it.
+  wire [N_LANES-1:0] ft_edge_flush;
+  generate
+    for (gi = 0; gi < N_LANES; gi = gi + 1) begin : g_ftedge
+      assign ft_edge_flush[gi] = arm_hit[gi] & l_armft[gi] & ft_skip_on;
+    end
+  endgenerate
+  // ⛔ THE PLANTED CASE (K8's must-fire), `M_FT_REFLUSH`: the FT edge's flush is
+  // applied AGAIN the next cycle -- PC+2 becomes PC+3 and the refetched slots are
+  // emptied twice. The K8 check must report it (`run_arm2.py` A4-K8).
+`ifdef M_FT_REFLUSH
+  reg  [N_LANES-1:0] reflush_q;
+  always @(posedge clk or negedge rst_n)
+    if (!rst_n) reflush_q <= {N_LANES{1'b0}};
+    else        reflush_q <= ft_edge_flush;
+  wire [N_LANES-1:0] flush_ev = ft_edge_flush | reflush_q;
+`else
+  wire [N_LANES-1:0] flush_ev = ft_edge_flush;
+`endif
+`ifndef SYNTHESIS
+  // The check: sim only, and every simulation runs it. Its `*** ASSERT` line is
+  // read by `sim_run.py judge` on every bench, so it is red in any gate unless
+  // declared in `test/monitor_mustfire.py` (only the planted case is).
+  reg [N_LANES-1:0] k8_f1, k8_f2;          // a flush 1 / 2 cycles ago
+  integer k8_i;
+  always @(posedge clk or negedge rst_n)
+    if (!rst_n) begin
+      k8_f1 <= {N_LANES{1'b0}};
+      k8_f2 <= {N_LANES{1'b0}};
+    end else begin
+      for (k8_i = 0; k8_i < N_LANES; k8_i = k8_i + 1)
+        if (flush_ev[k8_i] && (k8_f1[k8_i] || k8_f2[k8_i]))
+          $display("*** ASSERT pe_engine K8: lane %0d flushed again %0d cycle(s) after its last flush, at %0t",
+                   k8_i, k8_f1[k8_i] ? 1 : 2, $time);
+      k8_f1 <= flush_ev;
+      k8_f2 <= k8_f1;
+    end
+`endif
   wire [N_LANES-1:0] pf_cand;
 `ifdef M_PRIME_NEWPRIO
   assign pf_cand = pf_rdy;
@@ -4478,6 +4526,15 @@ module pe_engine #(
         end
         // bundle 3: the re-anchor (exclusive with `arm_hit`: it needs ~l_armed)
         if (i == USB_LANE && rean_hit) l_timestamp[i] <= rean_ts;
+        // M_FT_REFLUSH, the planted second flush (see `flush_ev`): the FT edge's effects again
+`ifdef M_FT_REFLUSH
+        if (reflush_q[i]) begin
+          l_pc[i]          <= l_pc[i] + ACT_BYTES[AW-1:0];
+          l_fpc[i]         <= l_pc[i] + ACT_BYTES[AW-1:0];
+          l_actv[hix[i]]   <= 1'b0;
+          l_actv[six[i]]   <= 1'b0;
+        end
+`endif
       end
 
       // ---- ⭐ TF2-R3: the one write of the live/armed/no-timeout registers,

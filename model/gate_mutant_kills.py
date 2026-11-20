@@ -136,6 +136,7 @@ KILLERS = {
     "M_FT_HALTS": "test/run_usbaddr.py",         # A7 pending
     "M_FT_NOSKIP": "test/run_usbaddr.py",        # A13b OUT to 7
     "M_FT_SCAN_RACE": "test/run_arm2.py",        # A4 the FT edge on the selecting cycle
+    "M_FT_REFLUSH": "test/run_arm2.py",          # A4-K8 a second flush at f + 1 (K8's check)
     "M_PRIME_NEWPRIO": "test/gate_batch_equiv.py",  # the one-cycle earlier start
     # -- bundle 3: the USB receive -- NRZI, unstuffing, re-anchoring (tb_usbrx)
     "M_NO_REANCHOR": "test/run_usbrx.py", "M_UNSTUFF_KEEP": "test/run_usbrx.py",

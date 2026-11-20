@@ -49,6 +49,14 @@ MUST_FIRE: dict = {
         'expect': '^\\s*\\*\\*\\* (?:FAIL\\ clocked_conform\\[H\\])',
         'why': 'the M_SHIFTIN_UC_UNHELD build: red on purpose',
     },
+    'run_arm2:arm2_M_FT_REFLUSH:arm2_ft_race': {
+        'runner': 'test/run_arm2.py',
+        'build': 'arm2_M_FT_REFLUSH.vvp',
+        'define': 'M_FT_REFLUSH',
+        'image': 'arm2_ft_race.hex',
+        'expect': '^\\s*\\*\\*\\* ASSERT pe_engine K8:',
+        'why': "K8's planted case (Wilson 11-19): the FT edge's flush applied again at f + 1; the K8 check must report it",
+    },
     'run_arm2:arm2_M_ARM2_EDGE:arm2_lvl0_to200': {
         'runner': 'test/run_arm2.py',
         'build': 'arm2_M_ARM2_EDGE.vvp',

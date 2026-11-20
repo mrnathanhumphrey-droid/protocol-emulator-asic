@@ -288,6 +288,10 @@ EXPECT = {
     "M_FT_SCAN_RACE":     (2, None),   # the scan may select a lane its FT edge flushes
     "M_PRIME_NEWPRIO":    (2, None),   # the (b') prefetch target during priming too
     "M_FT_NOSKIP":        (2, None),   # FT's edge does not move PC to PC+2
+    # K8's planted case (Wilson 11-19): a SECOND flush needs its own register
+    # (the flush delayed one cycle), that flush ORed into `flush_ev`, and the flush's
+    # four effects applied again (PC, fetch PC, both slots' valid bits)
+    "M_FT_REFLUSH":       (12, "K8's planted second flush: its own register, flush_ev, the four flush effects again"),
     "M_RX_CAPGATE_EARLY": (2, None),
     "M_RX_CAPGATE_LATE":  (2, None),
     # ruling CS1: silicon fix #6 undone -- the MISO enable's D unqualified

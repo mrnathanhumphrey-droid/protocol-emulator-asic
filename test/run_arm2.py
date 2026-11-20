@@ -740,6 +740,25 @@ def main() -> int:
     if not mbad:
         probs.append("M_FT_SCAN_RACE survived the swept FT edge")
 
+    # A4-K8: the flush-spacing check (Wilson 11-19, contract K8). The check itself
+    # is pe_engine's `*** ASSERT pe_engine K8` (sim only), judged on EVERY run by
+    # sim_run; the fixed RTL's A4 / A5-FT sweeps above flush every lane and must
+    # print none. Here the planted case: M_FT_REFLUSH applies the FT edge's flush
+    # again the next cycle, and the check must report it.
+    print("\n  A4-K8 flush spacing: no lane flushed again at f + 1 or f + 2")
+    k8v = os.path.join(tmp, "arm2_M_FT_REFLUSH.vvp")
+    build(k8v, ["M_FT_REFLUSH"])
+    k8b, _e = sim(vvp, frp, 1, -1, -1, 300)
+    k8t0 = k8b["armed"] if k8b else 0
+    r = run(sim_run.vvp([k8v, "+IMG=%s" % frp, "+IDLE=1", "+PHA=-1", "+PHB=-1", "+NCYC=300",
+                         "+PHA_ABS=%d" % (k8t0 + 30)], images=[frp]))
+    k8_lines = [ln.strip() for ln in (r.stdout + r.stderr).splitlines()
+                if ln.strip().startswith("*** ASSERT pe_engine K8:")]
+    print("    must-fire M_FT_REFLUSH (a second flush at f + 1): %s"
+          % (("RED: %s" % k8_lines[0]) if k8_lines else "*** SURVIVED"))
+    if not k8_lines:
+        probs.append("M_FT_REFLUSH survived: the K8 check did not report a lane flushed twice")
+
     print("\n  A3 must-fires")
     for d, what, scen in MUTANTS:
         mv = os.path.join(tmp, "arm2_%s.vvp" % d)
