@@ -875,6 +875,112 @@ theorem slot_cap_index (hok : SReqB P sreq) (fl : Nat → Lane → Bool) (k : Na
       · rw [hnf (s + a + m + 1 + 1) (by omega) (by omega)] at h; cases h
       · rw [hnf (s + a + m + 1) (by omega) (by omega)] at h; cases h
 
+/-! ### `ready_ft_edge_T` step 4 (Nate 11-19: option 1)
+
+The edge word, captured unkilled by the slot's first fetch for `y` in the wait (step 3), is held
+cycle by cycle (`FlushHeld.heldB_step`) up to the edge -- `y` is not flushed inside the stretch,
+and (premise `hord`) the edge word is never the head a retirement of `y` consumes: it sits behind
+the ARM. At the edge (the flush ending the stretch) it is held, so the keep-flush keeps it and it
+is the head at the edge path's release (`edge_survives_flushK`). Two order premises, both K7 +
+the edge-first order, both what the K6 order-invariant build would prove: `hidx` (the first slot
+fetch after the FT ARM's capture fetches its edge word) and `hord`. -/
+
+/-- **Persistence along `runBK`**: a word held, or captured unkilled, at `b` is held at
+`b + d + 1` if `y` is not flushed on `b … b + d` and the word is never the head a retirement
+consumes there. -/
+theorem held_persist_runBK (hok : SReqB P sreq) (fl : Nat → Lane → Bool)
+    (k : Nat → Lane → Nat) (X0 : EngBK) (hI : WfBK X0) (y : Lane) (kk b : Nat)
+    (hh : (runBK P win usb sreq fl k b X0).base.holds y kk = true ∨
+      ((runBK P win usb sreq fl k b X0).base.inCap y kk = true ∧
+        (runBK P win usb sreq fl k b X0).pkill = false)) : ∀ d,
+    (∀ i, b ≤ i → i ≤ b + d → fl (runBK P win usb sreq fl k i X0).x.e.now y = false ∧
+      ((runBK P win usb sreq fl k i X0).base.e.st = .wb →
+        y = (runBK P win usb sreq fl k i X0).base.e.cur →
+        P.ret (runBK P win usb sreq fl k i X0).base.e.now
+          (runBK P win usb sreq fl k i X0).base.e.cur = true →
+        (runBK P win usb sreq fl k i X0).base.inSlot y kk
+          ((runBK P win usb sreq fl k i X0).base.e.sel y) = false)) →
+    (∀ j, j ≤ b + d → FlushOk P win usb sreq (fl (runBK P win usb sreq fl k j X0).x.e.now)
+      (runBK P win usb sreq fl k j X0)) →
+    (runBK P win usb sreq fl k (b + (d + 1)) X0).x.holds y kk = true
+  | 0, hc, hF => by
+    rw [show b + (0 + 1) = b + 1 by omega, runBK_succ']
+    exact heldB_step P win usb sreq _ _ _
+      (wfBK_run P win usb sreq hok fl k b X0 hI (fun j hj => hF j (by omega))).wf y kk
+      (hc b (Nat.le_refl _) (by omega)).1 hh (hc b (Nat.le_refl _) (by omega)).2
+  | d + 1, hc, hF => by
+    have ih := held_persist_runBK hok fl k X0 hI y kk b hh d
+      (fun i h1 h2 => hc i h1 (by omega)) (fun j hj => hF j (by omega))
+    rw [show b + (d + 1 + 1) = (b + (d + 1)) + 1 by omega, runBK_succ']
+    exact heldB_step P win usb sreq _ _ _
+      (wfBK_run P win usb sreq hok fl k (b + (d + 1)) X0 hI (fun j hj => hF j (by omega))).wf
+      y kk (hc _ (by omega) (by omega)).1 (Or.inl (by rw [holds_base]; exact ih))
+      (hc _ (by omega) (by omega)).2
+
+/-- **`ready_ft_edge_T`** (`READY_RULES` ft_edge's run theorem). A stretch `s … s + T` of
+`runBK` ends at a flush of `y` at `s + T` (the FT edge). If the slot serves `y` within its wait
+(`hq` / `hold` / `hC` / `hW`, as `ready_*_T`), the first slot fetch in that wait fetches the edge
+word (`hidx`) and the edge word is never the head a retirement consumes before the edge
+(`hord`), then the edge word is present at the edge (ComposeB's `hedge`), and the cycle after
+the edge it is `y`'s valid head, released that cycle. -/
+theorem ready_ft_edge_T (hok : SReqB P sreq) (fl : Nat → Lane → Bool) (k : Nat → Lane → Nat)
+    (X0 : EngBK) (hI : WfBK X0) (y : Lane) (s T : Nat) (τ : Nat → EngB)
+    (hτ : ∀ n, τ n = (runBK P win usb sreq fl k (s + n) X0).base)
+    (hT : TrajY P win usb sreq y τ T)
+    (hF : ∀ j, j ≤ s + T → FlushOk P win usb sreq (fl (runBK P win usb sreq fl k j X0).x.e.now)
+      (runBK P win usb sreq fl k j X0))
+    (hnf : ∀ j, s ≤ j + 2 → j < s + T → fl (runBK P win usb sreq fl k j X0).x.e.now y = false)
+    (hfl : fl (runBK P win usb sreq fl k (s + T) X0).x.e.now y = true)
+    (old : Lane → Bool) (a W C : Nat) (hn : a + W + 3 ≤ T)
+    (hq : ∀ j, a ≤ j → j ≤ a + W → (∀ i, a ≤ i → i < j → ¬SlotForB P usb sreq y (τ i)) →
+      (sreq (τ j)).isSome = true)
+    (hold : ∀ j, a ≤ j → j ≤ a + W → (∀ i, a ≤ i → i < j → ¬SlotForB P usb sreq y (τ i)) →
+      ∀ w, sreq (τ j) = some w → w = y ∨ old w = true)
+    (hC : cntFromT τ (OldIssB P usb sreq old) a (W + 1) ≤ C)
+    (hW : rem (τ a).e.pst + L_REFILL * C ≤ W)
+    (hidx : ∀ j, a ≤ j → j ≤ a + W → SlotForB P usb sreq y (τ j) →
+      (∀ i, a ≤ i → i < j → ¬SlotForB P usb sreq y (τ i)) →
+      (τ j).nr y + (τ j).held y = k (runBK P win usb sreq fl k (s + T) X0).x.e.now y)
+    (hord : ∀ i, s ≤ i → i < s + T → (runBK P win usb sreq fl k i X0).base.e.st = .wb →
+      y = (runBK P win usb sreq fl k i X0).base.e.cur →
+      P.ret (runBK P win usb sreq fl k i X0).base.e.now
+        (runBK P win usb sreq fl k i X0).base.e.cur = true →
+      (runBK P win usb sreq fl k i X0).base.inSlot y
+        (k (runBK P win usb sreq fl k (s + T) X0).x.e.now y)
+        ((runBK P win usb sreq fl k i X0).base.e.sel y) = false) :
+    (runBK P win usb sreq fl k (s + T) X0).base.hasEdge y
+      (k (runBK P win usb sreq fl k (s + T) X0).x.e.now y) = true ∧
+    (runBK P win usb sreq fl k (s + T + 1) X0).x.e.headValid y = true ∧
+    (runBK P win usb sreq fl k (s + T + 1) X0).x.sq y
+      ((runBK P win usb sreq fl k (s + T + 1) X0).x.e.sel y)
+      = k (runBK P win usb sreq fl k (s + T) X0).x.e.now y ∧
+    (runBK P win usb sreq fl k (s + T + 1) X0).x.e.ts y
+      = (runBK P win usb sreq fl k (s + T + 1) X0).x.e.now := by
+  obtain ⟨j, h1, h2, hsl, hmin, hcap, hpk⟩ := slot_cap_index P win usb sreq hok fl k X0 hI y s T
+    τ hτ hT (fun j hj => hF j (by omega)) hnf old a W C hn hq hold hC hW
+  rw [hidx j h1 h2 hsl hmin] at hcap
+  -- the edge word at the edge
+  have hE : (runBK P win usb sreq fl k (s + T) X0).base.hasEdge y
+      (k (runBK P win usb sreq fl k (s + T) X0).x.e.now y) = true := by
+    rcases Nat.lt_or_ge (s + (j + 3)) (s + T) with hlt | hge
+    · have hp := held_persist_runBK P win usb sreq hok fl k X0 hI y _ (s + (j + 3))
+        (Or.inr ⟨hcap, hpk⟩) (s + T - (s + (j + 3)) - 1)
+        (fun i hi1 hi2 => ⟨hnf i (by omega) (by omega), hord i (by omega) (by omega)⟩)
+        (fun j' hj' => hF j' (by omega))
+      rw [show s + (j + 3) + (s + T - (s + (j + 3)) - 1 + 1) = s + T by omega] at hp
+      rw [← holds_base] at hp
+      exact holds_hasEdge _ y _ hp
+    · rw [show s + T = s + (j + 3) by omega]
+      rw [show s + (j + 3) = s + T by omega] at hcap
+      rw [show s + T = s + (j + 3) by omega] at hcap
+      unfold EngB.hasEdge
+      rw [hcap]
+      simp
+  refine ⟨hE, ?_⟩
+  have := edge_survives_flushK P win usb sreq _ _ (runBK P win usb sreq fl k (s + T) X0) y hfl hE
+  rw [← runBK_succ'] at this
+  exact this
+
 end
 
 #print axioms last_true
@@ -911,5 +1017,7 @@ end
 #print axioms psqB_keep
 #print axioms psq_runBK
 #print axioms slot_cap_index
+#print axioms held_persist_runBK
+#print axioms ready_ft_edge_T
 
 end JLane

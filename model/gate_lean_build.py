@@ -165,7 +165,9 @@ KEY = ("dstar", "dstar29", "dstar39", "dstar39_v2", "dstar39_st", "dstar39_hold"
        # ComposeB.lean (ready_ft_edge_T step 2): the slot's capture for y on a stretch, unkilled
        "slot_cap_stretch",
        # ComposeB.lean (ready_ft_edge_T step 3): the first slot capture's fetch index
-       "least_or", "least_le", "base_psq", "psqB_keep", "psq_runBK", "slot_cap_index")
+       "least_or", "least_le", "base_psq", "psqB_keep", "psq_runBK", "slot_cap_index",
+       # ComposeB.lean (ready_ft_edge_T step 4): persistence to the edge, the run theorem
+       "held_persist_runBK", "ready_ft_edge_T")
 #: proof_constants.load() key -> the Lean expression that must evaluate to it (SPEC: the map)
 CONSTS = {
     "lemmaA_window": "LEMMA_A_WINDOW", "R_base": "R_BASE", "dispatch_cycles": "DISPATCH_CYCLES",

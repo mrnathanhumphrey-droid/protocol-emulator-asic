@@ -129,6 +129,14 @@ CONTRACT_PREMISES = {
                "restart_runBK's 'no flush at f+1, f+2' holds by construction; the spacing enters "
                "through hedge -- y's edge word present at every flush restarted from -- which a "
                "second flush within 2 cycles could break (composition L1, d03bf22)"},
+    "fetch_order": {
+        "rtl": ("K7",),
+        "why": "ComposeB.ready_ft_edge_T's hidx / hord: the first slot fetch after an FT ARM's "
+               "capture fetches its edge word, and the edge word sits behind the ARM (never the "
+               "head a retirement consumes before the edge). The engine tracks fetch order, not "
+               "addresses, and its ghost index restarts at nr + held after a flush, so this is "
+               "K7 (one fetch pointer per lane) + the edge-first order in K6's entry; the K6 "
+               "order-invariant build would prove it (Nate 11-19, option 1)"},
 }
 
 #: THE MILESTONE (Wilson 11-18 / 11-19): slot_on_composition -- GapRun on the buffered engine with
@@ -167,11 +175,13 @@ COMPOSITION = {
              "theorems": ("flush_spacing_runBA", "flush_spacing_runBK")},
             {"step": "hedge on the bridged run", "status": "proved",
              "theorems": ("armed_origin", "hedge_runBK", "hedge_runBK_armed")},
-            {"step": "hword: the edge word in time at each arming", "status": "owed",
-             "what": "hedge_runBK_armed's per-arming premise: the word with the edge's fetch "
-                     "index held or arriving unkilled at some armed cycle before the edge -- the "
-                     "capture half of ready_ft_edge_T (slot issue within the wait, the index of "
-                     "the first slot fetch, ft_edge_margin_scan)"},
+            {"step": "hword: the edge word in time", "status": "proved",
+             "theorems": ("slot_cap_index", "held_persist_runBK")},
+            {"step": "fetch-order premises hidx / hord", "status": "owed",
+             "what": "ready_ft_edge_T's premises: the first slot fetch after an FT ARM's "
+                     "capture fetches its edge word (hidx), and the edge word is never the head a "
+                     "retirement consumes before the edge (hord) -- K7 + the edge-first order "
+                     "(CONTRACT_PREMISES fetch_order); a proof is the K6 order-invariant build"},
             {"step": "contracts for hedge-timing and ScanOk", "status": "owed",
              "what": "flush_spacing_runBA / flushOk_runBA take 'edge >= arming writeback + 1' and "
                      "agent 1's scan fix (ScanOk); neither is in CONTRACT_PREMISES yet -- RTL "
@@ -179,8 +189,8 @@ COMPOSITION = {
             {"step": "ready_spare_capture_T", "status": "owed",
              "what": "spare-captured ARM readiness (READY_RULES spare_capture); waits on agent "
                      "1's buffer variant"},
-            {"step": "ready_ft_edge_T", "status": "owed",
-             "what": "READY_RULES ft_edge as one run theorem (RUN_THM, owed (composition))"},
+            {"step": "ready_ft_edge_T", "status": "proved",
+             "theorems": ("ready_ft_edge_T",)},
             {"step": "hRdy", "status": "owed",
              "what": "the ready_*_T lifted onto runBK through the stretches"},
             {"step": "hZS", "status": "owed",

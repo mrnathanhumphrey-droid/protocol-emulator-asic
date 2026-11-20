@@ -193,7 +193,11 @@ RUN_THM = {
     "pc2_arm": {"run_thm": "ready_pc2_arm_T", "run_status": "proved",
                 "applies": ("arm_capture_empty", "plain_edge_arm", "pc1_plain_edge_arm",
                             "pc1_not_npf", "wait_in_margin")},
-    "ft_edge": {"run_thm": "ready_ft_edge_T", "run_status": "owed (composition)", "applies": ()},
+    # ready_ft_edge_T is proved (ComposeB, Nate 11-19 option 1) on fetch-order premises; its
+    # premise list (gate_lean_build.PREMISES) waits on an RTL contract for the scan fix (ScanOk),
+    # so it is not yet run_status "proved" (check 13 would compare it both ways)
+    "ft_edge": {"run_thm": "ready_ft_edge_T",
+                "run_status": "owed (registration: ScanOk contract wording)", "applies": ()},
 }
 #: a condition whose Lean premise is reached through a bridge lemma: pc1_not_npf (Python: PC+1
 #: not in I.BRANCH_OPS) discharges hq2 / hold2 only through npf_no_issue_T (Wilson 11-19)
