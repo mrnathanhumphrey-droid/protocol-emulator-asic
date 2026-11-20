@@ -750,6 +750,133 @@ theorem slot_cap_stretch (hok : SReqB P sreq) (fl : Nat → Lane → Bool) (k : 
 
 end
 
+/-! ### `ready_ft_edge_T` step 3: the capture's fetch index (Nate 11-19: option 1)
+
+The first slot issue for `y` in the wait window hands out the index `nr y + held y` of that
+cycle (`BufEng.issue_index`); the port holds it through REQ / WAIT (`psqB` moves only at a scan
+that issues), so the capture three cycles later carries it (`inCap`). That this index is the
+edge word's (`kt`'s) is NOT proved here: the engine tracks fetch order, not addresses, and after a
+flush its ghost index restarts from `nr + held` (the K6 order-invariant build). It is the premise
+of step 4: the first slot fetch after an FT ARM's capture fetches its edge word (K7 + the
+edge-first order). -/
+
+/-- Below `n`: `p` never holds, or it has a least witness (decided index by index, no choice). -/
+theorem least_or (p : Nat → Prop) [DecidablePred p] : ∀ n,
+    (∀ i, i < n → ¬p i) ∨ ∃ m, m < n ∧ p m ∧ ∀ i, i < m → ¬p i
+  | 0 => Or.inl (fun i h => absurd h (Nat.not_lt_zero i))
+  | n + 1 => by
+    rcases least_or p n with hall | ⟨m, hm, hpm, hmin⟩
+    · by_cases hp : p n
+      · exact Or.inr ⟨n, by omega, hp, hall⟩
+      · refine Or.inl (fun i hi => ?_)
+        rcases Nat.lt_or_ge i n with hlt | hge
+        · exact hall i hlt
+        · rw [show i = n by omega]; exact hp
+    · exact Or.inr ⟨m, by omega, hpm, hmin⟩
+
+/-- The least element below a witness. -/
+theorem least_le (p : Nat → Prop) [DecidablePred p] (n : Nat) (h : ∃ i, i ≤ n ∧ p i) :
+    ∃ m, m ≤ n ∧ p m ∧ ∀ i, i < m → ¬p i := by
+  obtain ⟨i, hi, hp⟩ := h
+  rcases least_or p (n + 1) with hall | ⟨m, hm, hpm, hmin⟩
+  · exact absurd hp (hall i (by omega))
+  · exact ⟨m, by omega, hpm, hmin⟩
+
+theorem base_psq (X : EngBK) : X.base.psq = X.x.psq := by
+  unfold EngBK.base; split <;> rfl
+
+theorem psqB_keep (P : Program) (usb : Option Lane) (sreq : EngB → Option Lane) (x : EngB)
+    (h : x.e.pst ≠ .scan) : psqB P usb sreq x = x.psq := by
+  unfold psqB
+  rw [if_neg (fun h' => h h'.1)]
+
+section
+variable (P : Program) (win : Engine → Option Lane) (usb : Option Lane)
+  (sreq : EngB → Option Lane)
+
+theorem psq_runBK (fl : Nat → Lane → Bool) (k : Nat → Lane → Nat) (X0 : EngBK) (m : Nat) :
+    (runBK P win usb sreq fl k (m + 1) X0).x.psq
+      = psqB P usb sreq (runBK P win usb sreq fl k m X0).base := by
+  rw [runBK_succ']
+  rfl
+
+/-- **The slot's first capture for `y` in the window, with its index.** As `slot_cap_stretch`,
+for the FIRST slot issue `j` for `y` at or after `a`: the capture at `j + 3` is unkilled and
+carries the index `nr y + held y` of cycle `j`. -/
+theorem slot_cap_index (hok : SReqB P sreq) (fl : Nat → Lane → Bool) (k : Nat → Lane → Nat)
+    (X0 : EngBK) (hI : WfBK X0) (y : Lane) (s T : Nat) (τ : Nat → EngB)
+    (hτ : ∀ n, τ n = (runBK P win usb sreq fl k (s + n) X0).base)
+    (hT : TrajY P win usb sreq y τ T)
+    (hF : ∀ j, j < s + T → FlushOk P win usb sreq (fl (runBK P win usb sreq fl k j X0).x.e.now)
+      (runBK P win usb sreq fl k j X0))
+    (hnf : ∀ j, s ≤ j + 2 → j < s + T → fl (runBK P win usb sreq fl k j X0).x.e.now y = false)
+    (old : Lane → Bool) (a W C : Nat) (hn : a + W + 3 ≤ T)
+    (hq : ∀ j, a ≤ j → j ≤ a + W → (∀ i, a ≤ i → i < j → ¬SlotForB P usb sreq y (τ i)) →
+      (sreq (τ j)).isSome = true)
+    (hold : ∀ j, a ≤ j → j ≤ a + W → (∀ i, a ≤ i → i < j → ¬SlotForB P usb sreq y (τ i)) →
+      ∀ w, sreq (τ j) = some w → w = y ∨ old w = true)
+    (hC : cntFromT τ (OldIssB P usb sreq old) a (W + 1) ≤ C)
+    (hW : rem (τ a).e.pst + L_REFILL * C ≤ W) :
+    ∃ j, a ≤ j ∧ j ≤ a + W ∧ SlotForB P usb sreq y (τ j) ∧
+      (∀ i, a ≤ i → i < j → ¬SlotForB P usb sreq y (τ i)) ∧
+      (runBK P win usb sreq fl k (s + (j + 3)) X0).base.inCap y
+        ((τ j).nr y + (τ j).held y) = true ∧
+      (runBK P win usb sreq fl k (s + (j + 3)) X0).pkill = false := by
+  obtain ⟨j0, h01, h02, hs0⟩ := slot_issue_within_T P win usb sreq y τ T hT y old a W C
+    (by omega) hq hold hC hW
+  obtain ⟨m, hm, hsm, hmin⟩ := least_le (fun m => SlotForB P usb sreq y (τ (a + m))) (j0 - a)
+    ⟨j0 - a, Nat.le_refl _, by
+      show SlotForB P usb sreq y (τ (a + (j0 - a)))
+      rw [show a + (j0 - a) = j0 by omega]; exact hs0⟩
+  have hsl : SlotForB P usb sreq y (τ (a + m)) := hsm
+  refine ⟨a + m, by omega, by omega, hsl, fun i h1 h2 hsi => ?_, ?_⟩
+  · exact hmin (i - a) (by omega) (by rw [show a + (i - a) = i by omega]; exact hsi)
+  -- the capture and its index
+  have hhit := slot_issue_cap_T P win usb sreq y τ T hT (a + m) (by omega) hsl.1 hsl.2.1 hsl.2.2
+  have hp1 : (τ (a + m + 1)).e.pst = .req := by
+    rw [agree_pst y (hT (a + m) (by omega))]
+    exact stepB_pst_scan_slot P win usb sreq (τ (a + m)) hsl.1 hsl.2.1 hsl.2.2
+  have hp2 : (τ (a + m + 2)).e.pst = .wait := by
+    rw [agree_pst y (hT (a + m + 1) (by omega))]
+    exact stepB_req_wait P win usb sreq (τ (a + m + 1)) hp1
+  have hi1 : (runBK P win usb sreq fl k (s + (a + m) + 1) X0).x.psq
+      = (τ (a + m)).nr y + (τ (a + m)).held y := by
+    rw [psq_runBK, ← hτ]
+    have hps := (portNextB_slot P usb sreq (τ (a + m)) hsl.1 hsl.2.1 hsl.2.2).1
+    unfold psqB
+    rw [if_pos ⟨hsl.1, by rw [hps]⟩, hps]
+  have hi2 : (runBK P win usb sreq fl k (s + (a + m) + 2) X0).x.psq
+      = (runBK P win usb sreq fl k (s + (a + m) + 1) X0).x.psq := by
+    rw [psq_runBK, psqB_keep P usb sreq _ (by
+      rw [show s + (a + m) + 1 = s + (a + m + 1) by omega, ← hτ, hp1]; decide), base_psq]
+  have hi3 : (runBK P win usb sreq fl k (s + (a + m) + 3) X0).x.psq
+      = (runBK P win usb sreq fl k (s + (a + m) + 2) X0).x.psq := by
+    rw [psq_runBK, psqB_keep P usb sreq _ (by
+      rw [show s + (a + m) + 2 = s + (a + m + 2) by omega, ← hτ, hp2]; decide), base_psq]
+  rw [hτ, base_e] at hhit
+  refine ⟨?_, ?_⟩
+  · unfold EngB.inCap
+    rw [base_e, base_psq, show s + (a + m + 3) = s + (a + m) + 3 by omega, hi3, hi2, hi1]
+    rw [show s + (a + m) + 3 = s + (a + m + 3) by omega, hhit.1, hhit.2]
+    simp
+  · cases hpk : (runBK P win usb sreq fl k (s + (a + m + 3)) X0).pkill
+    · rfl
+    · exfalso
+      have hkc : (runBK P win usb sreq fl k ((s + a + m + 1) + 2) X0).kc = true := by
+        rw [show s + a + m + 1 + 2 = s + (a + m + 3) by omega]
+        unfold EngBK.kc
+        rw [hhit.1, hpk]
+        rfl
+      have hp : (runBK P win usb sreq fl k ((s + a + m + 1) + 2) X0).x.e.pl = y := by
+        rw [show s + a + m + 1 + 2 = s + (a + m + 3) by omega]
+        exact hhit.2
+      rcases kill_prov_runBK P win usb sreq hok fl k X0 hI (s + a + m + 1) y
+          (fun i hi => hF i (by omega)) hkc hp with h | h
+      · rw [hnf (s + a + m + 1 + 1) (by omega) (by omega)] at h; cases h
+      · rw [hnf (s + a + m + 1) (by omega) (by omega)] at h; cases h
+
+end
+
 #print axioms last_true
 #print axioms flush_cut
 #print axioms restart_head_12
@@ -778,5 +905,11 @@ end
 #print axioms hedge_runBK
 #print axioms hedge_runBK_armed
 #print axioms slot_cap_stretch
+#print axioms least_or
+#print axioms least_le
+#print axioms base_psq
+#print axioms psqB_keep
+#print axioms psq_runBK
+#print axioms slot_cap_index
 
 end JLane
