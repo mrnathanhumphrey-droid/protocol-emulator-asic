@@ -94,12 +94,19 @@ OPCODES = {
 # word (no multi-word actions -- Wilson Q2). RESERVED means NOT DECODED: the
 # assembler refuses them and the RTL gives them no behaviour until a primitive
 # step builds one (branches vs prefetch is that tier's problem, Wilson pt 1).
-#: ⭐ v2 (Wilson 10-26): opcodes BELOW this are built; the loader refuses an
-#: image holding any other (src/project.v `bad_op`, CONFIG_ERR), and `act()`
-#: refuses to encode one. ONE constant: the RTL's copy (`N_BUILT_OPS` in
-#: project.v) is held to it by model/gate_one_encoder.py, and each primitive
-#: that lands raises it by one IN THE COMMIT THAT BUILDS IT.
-N_BUILT_OPS = 12                     # 11 -> 12: SHIFTI built (primitive 3, bundle 2)
+#: ⭐ v2 (Wilson 10-26): the BUILT opcodes; the loader refuses an image holding
+#: any other (src/project.v `bad_op`, CONFIG_ERR), and `act()` refuses to encode
+#: one. ONE definition: the RTL's copy (project.v `BUILT_OPS`, a mask over the
+#: 2**OP_W opcodes) is held to `BUILT_MASK` by model/gate_one_encoder.py, and each
+#: primitive that lands adds its opcode IN THE COMMIT THAT BUILDS IT.
+#: ⭐ A SET, NOT A LIMIT (v2 final batch, 11-19): it was `N_BUILT_OPS`, "below
+#: this is built", which held while primitives landed in opcode order. The batch
+#: builds SER (13) and SYMDEF (22) with 12, 14 and 18..21 still reserved, so a
+#: limit would un-refuse those; the loader now tests membership.
+BUILT_OPS = frozenset(range(12))     # 0..11: SHIFTI (11) was the last built in order
+BUILT_MASK = sum(1 << _o for _o in BUILT_OPS)
+#: the opcode the refusal must-fires inject: the LOWEST one not built
+OP_UNBUILT = min(set(range(1 << OP_W)) - BUILT_OPS)
 RESERVED_OPCODES = {
     # 11 was ARM2: built instead as ARM's mod[0] (primitive 3 bundle 1); 11 is SHIFTI
     12: ("DRIVE_SAMPLE", "pin = driven, pinb = sampled, level = drive value, delay"),
@@ -258,7 +265,7 @@ def act(op, pin, level, delay, count=0, q=0, pinb=0, mod=0) -> bytes:
     ⛔ A RESERVED opcode (8..31) is refused here until its primitive is built
     -- reserving is not decoding (Wilson, step 2).
     """
-    if int(op) >= N_BUILT_OPS:
+    if int(op) not in BUILT_OPS:
         raise ValueError("opcode %d is RESERVED (%s), not built"
                          % (int(op), RESERVED_OPCODES.get(int(op), ("unassigned",))[0]))
     return _pack(ACT_FIELDS, (op, pin, level, delay, count, q, pinb, mod), ACT_BYTES)
@@ -1351,9 +1358,9 @@ def filler_vh() -> str:
             "localparam integer PE_ACT_BYTES = %d;\n"
             "// v2: the store size, so no bench types 256 (or 512)\n"
             "localparam integer PE_STORE_BYTES = %d;\n"
-            "// v2 (Wilson 10-26): the built-opcode limit the loader refuses\n"
-            "// beyond, and the opcode's width (tb_trace's +RESOP_AT arm)\n"
-            "localparam integer PE_N_BUILT_OPS = %d;\n"
+            "// v2 (Wilson 10-26): an opcode the loader refuses (the lowest not\n"
+            "// built), and the opcode's width (tb_trace's +RESOP_AT arm)\n"
+            "localparam integer PE_OP_UNBUILT = %d;\n"
             "localparam integer PE_OP_W = %d;\n"
             "// v2: the action region's first byte (BRANCH_BIT targets, branch_check)\n"
             "localparam integer PE_ACT_BASE = %d;\n"
@@ -1363,7 +1370,7 @@ def filler_vh() -> str:
             "localparam integer PE_OP_LOOP = %d;\n"
             "`endif\n"
             % (ACT_W - 1, ACT_W, (ACT_W + 3) // 4, word, ACT_W, ACT_BYTES,
-               STORE_BYTES, N_BUILT_OPS, OP_W, ACT_BASE, OP_BRANCH_BIT, OP_CMP_BRANCH, OP_LOOP))
+               STORE_BYTES, OP_UNBUILT, OP_W, ACT_BASE, OP_BRANCH_BIT, OP_CMP_BRANCH, OP_LOOP))
 
 
 # ---------------------------------------------------------------------------

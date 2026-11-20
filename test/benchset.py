@@ -823,7 +823,7 @@ def corpus_arms():
                  "+NCYC=4000", "+SEED=1", "+ASYNC=0",
                  "+STAYLOAD=0", "+SCLHOLD=0", "+EXPECT_REFUSED=1"]))
     # ⭐ v2 (Wilson 10-26): THE RESERVED-OPCODE REFUSAL, in the coverage sweep.
-    # The smoke image with opcode N_BUILT_OPS written into its first action
+    # The smoke image with opcode OP_UNBUILT written into its first action
     # word AS IT LOADS (+RESOP_AT, the byte at ACT_BASE) -- so the loader's
     # refusal branch (project.v `bad_op`) is reached here, not only by
     # gate_v2_equiv's iverilog must-fires.

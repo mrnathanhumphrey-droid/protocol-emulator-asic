@@ -555,11 +555,11 @@ module tb_trace;
     for (i = 0; i < img_bytes; i = i + 1) begin
       ld_val = img[i];
       // ⭐ v2 (Wilson 10-26): +RESOP_AT=<byte> writes a RESERVED opcode
-      // (PE_N_BUILT_OPS) into that byte's opcode bits AS IT LOADS -- the raw
+      // (PE_OP_UNBUILT) into that byte's opcode bits AS IT LOADS -- the raw
       // image the loader must refuse, made from a tracked image rather than
       // a new one (the shortload arm's `+NBYTES=51` pattern)
       if (i == resop_at)
-        ld_val = {PE_N_BUILT_OPS[PE_OP_W-1:0], img[i][7-PE_OP_W:0]};
+        ld_val = {PE_OP_UNBUILT[PE_OP_W-1:0], img[i][7-PE_OP_W:0]};
       @(negedge clk); @(negedge clk);
       ui_in[PIN_WR] = 1'b1;
       @(negedge clk); @(negedge clk); @(negedge clk);

@@ -180,13 +180,13 @@ CLASSIFIED = {
         UNREACHABLE,
         "The opcode `case`'s `default`. ⭐ v2 (Wilson 10-26): the opcode is 5 "
         "bits and the EIGHT BUILT opcodes are named in arms (OP_LEVEL .. "
-        "OP_REARM); opcodes N_BUILT_OPS..31 are REFUSED AT LOAD -- "
+        "OP_REARM); every opcode outside BUILT_OPS is REFUSED AT LOAD -- "
         "src/project.v `bad_op` tests each action word's opcode as it "
         "streams in and an image holding one sets CONFIG_ERR and never starts "
         "the engine -- so no value that can reach dispatch reaches the "
         "default. Must-fires: gate_v2_equiv's opcode 8 in the first and in the "
         "last action word, both refused. ⭐ Checked by `check_full_case`'s "
-        "third mechanism: the arms must be exactly 0..N_BUILT_OPS-1 and the "
+        "third mechanism: the arms must be exactly the BUILT_OPS set and the "
         "loader check present, so a primitive built without its arm, or a "
         "limit raised without the loader, makes this waiver false."),
     # ⭐ RETIRED (ruling (a) item 1): the host underrun path at 1627 is now
@@ -1533,16 +1533,20 @@ def _encodings(src):
 
 
 def _load_guard():
-    """(N_BUILT_OPS from project.v, the loader's refusal present?) -- the
-    third mechanism's evidence, read from the RTL (Wilson 10-26)."""
+    """(the BUILT_OPS set from project.v's mask, the loader's refusal present?)
+    -- the third mechanism's evidence, read from the RTL (Wilson 10-26; a set,
+    not a limit, since the v2 final batch, 11-19)."""
     with open(os.path.join(ROOT, "src", "project.v"), encoding="utf-8",
               errors="replace") as fh:
         pv = fh.read()
-    m = re.search(r"localparam\s+integer\s+N_BUILT_OPS\s*=\s*(\d+)\s*;", pv)
-    present = ("uio_q1[7 -: OP_W_T] >= N_BUILT_OPS[OP_W_T-1:0]" in pv
+    m = re.search(r"localparam\s+\[[^\]]+\]\s+BUILT_OPS\s*=\s*\d+'h([0-9a-fA-F_]+)\s*;", pv)
+    present = ("~BUILT_OPS[uio_q1[7 -: OP_W_T]]" in pv
                and re.search(r"\bcfg_err_any\s*=.*\bbad_op\b", pv) is not None
                and re.search(r"\beng_run\s*=.*~bad_op\b", pv) is not None)
-    return (int(m.group(1)) if m else None), present
+    if not m:
+        return None, present
+    mask = int(m.group(1).replace("_", ""), 16)
+    return {k for k in range(mask.bit_length()) if mask >> k & 1}, present
 
 
 def _case_arms(lines, default_line):
@@ -1662,15 +1666,15 @@ def check_full_case() -> int:
         # only the BUILT opcodes have arms -- the rest cannot reach the
         # default because the LOADER refuses any image holding one (project.v
         # `bad_op`: CONFIG_ERR, the engine never starts). It holds only if the
-        # named arms are EXACTLY 0..N_BUILT_OPS-1, project.v's N_BUILT_OPS is
+        # named arms are EXACTLY the BUILT_OPS set, project.v's BUILT_OPS is
         # pe_isa's, and the refusal is really in the RTL; its must-fires
         # (opcode 8 in the first and the last word) live in gate_v2_equiv.
         guarded = False
         if not (full or closed) and sel == "a_op":
             import pe_isa
             nb, present = _load_guard()
-            guarded = (present and nb == pe_isa.N_BUILT_OPS
-                       and vals == set(range(nb)))
+            guarded = (present and nb == set(pe_isa.BUILT_OPS)
+                       and vals == nb)
         ok = full or closed or guarded
         how = ("every encoding named" if full
                else "every assignment writes a named arm" if closed

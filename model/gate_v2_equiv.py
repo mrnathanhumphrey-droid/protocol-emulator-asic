@@ -609,13 +609,13 @@ def main() -> int:
         last_w = I.STORE_BYTES - I.ACT_BYTES
         for where, at in (("the first", first_w), ("the last", last_w)):
             ro = bytearray(img2)
-            ro[at] = (I.N_BUILT_OPS << (8 - I.OP_W)) | (ro[at] & ((1 << (8 - I.OP_W)) - 1))
+            ro[at] = (I.OP_UNBUILT << (8 - I.OP_W)) | (ro[at] & ((1 << (8 - I.OP_W)) - 1))
             pro = write_hex(os.path.join(tmp, "v2eq_resop_%d.hex" % at), bytes(ro),
                             register=True)
             r = sim(vv2, pro, I.STORE_BYTES, ncyc=NCYC_MF)
             say(r["started"] == 0 and r["cfg_err"] == 1,
                 "opcode %d in %s action word (byte %d) is REFUSED at load: "
-                "cfg_err=%s, started=%s" % (I.N_BUILT_OPS, where, at,
+                "cfg_err=%s, started=%s" % (I.OP_UNBUILT, where, at,
                                            r["cfg_err"], r["started"]))
         r = sim(vv2, sm[3], len(img2) // 2, ncyc=NCYC_MF)
         say(r["started"] == 0, "a %d-byte load never starts the engine (R3): started=%s"
