@@ -288,6 +288,7 @@ EXPECT = {
     "M_FT_SCAN_RACE":     (2, None),   # the scan may select a lane its FT edge flushes
     "M_PRIME_NEWPRIO":    (2, None),   # the (b') prefetch target during priming too
     "M_FT_NOSKIP":        (2, None),   # FT's edge does not move PC to PC+2
+    "M_FT_NO_PKILL":      (1, None),   # K5: the FT edge does not kill the in-flight refill
     # K8's planted case (Wilson 11-19): a SECOND flush needs its own register
     # (the flush delayed one cycle), that flush ORed into `flush_ev`, and the flush's
     # four effects applied again (PC, fetch PC, both slots' valid bits)

@@ -136,6 +136,7 @@ KILLERS = {
     "M_FT_HALTS": "test/run_usbaddr.py",         # A7 pending
     "M_FT_NOSKIP": "test/run_usbaddr.py",        # A13b OUT to 7
     "M_FT_SCAN_RACE": "test/run_arm2.py",        # A4 the FT edge on the selecting cycle
+    "M_FT_NO_PKILL": "test/run_arm2.py",         # A4-K5 the stale refill filed after the flush
     "M_FT_REFLUSH": "test/run_arm2.py",          # A4-K8 a second flush at f + 1 (K8's check)
     "M_SG_NOSPARE": "test/run_symgen.py",        # the spare codes read as HOLD: nrzi, biphase
     "M_FLAG_NOGATE": "test/run_flags.py",        # WAIT does not hold the lane

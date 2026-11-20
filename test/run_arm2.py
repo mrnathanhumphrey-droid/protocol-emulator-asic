@@ -24,6 +24,9 @@ Bench: test/tb_arm2.v, one scenario per run. Images built here from pe_isa.
       (the FT edge path's out by the K..K+1 bound, Wilson 11-19).
   A5-FT  the FT edge path swept over every prr phase on every lane; must-fires:
       a planted K+2 and a flattened (vacuous) lane each turn it red.
+  A4  the FT edge swept against the lane's refills; must-fires M_FT_SCAN_RACE (the
+      scan selects a flushing lane) and M_FT_NO_PKILL (K5: the in-flight refill is
+      not killed) each turn it red.
 
 POSITIVE TOKEN: `GATE arm2: PASSED`.
 """
@@ -739,6 +742,18 @@ def main() -> int:
           % ("RED at phase(s) %s" % mbad if mbad else "*** SURVIVED"))
     if not mbad:
         probs.append("M_FT_SCAN_RACE survived the swept FT edge")
+    # A4-K5 (Wilson 11-17, contract K5): a refill for the flushed lane in flight at the
+    # edge (P_REQ / P_WAIT) is killed (`pkill`) and files nothing. Its must-fire:
+    # M_FT_NO_PKILL drops the kill, so the timeout path's in-flight successor (the
+    # ARM, the loop base) is filed after the flush and the LEVEL at PC+2 waits for
+    # the re-armed timeout [measured 11-20: out 341 against 143 at d = 4, 5]
+    kv = os.path.join(tmp, "arm2_M_FT_NO_PKILL.vvp")
+    build(kv, ["M_FT_NO_PKILL"])
+    kbad = ft_race(kv, frp)
+    print("    must-fire M_FT_NO_PKILL (K5: the in-flight refill not killed): %s"
+          % ("RED at phase(s) %s" % kbad if kbad else "*** SURVIVED"))
+    if not kbad:
+        probs.append("M_FT_NO_PKILL survived the swept FT edge (K5's kill unguarded)")
 
     # A4-K8: the flush-spacing check (Wilson 11-19, contract K8). The check itself
     # is pe_engine's `*** ASSERT pe_engine K8` (sim only), judged on EVERY run by

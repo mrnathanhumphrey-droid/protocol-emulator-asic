@@ -4793,7 +4793,14 @@ module pe_engine #(
             l_fpc[i]         <= l_pc[i] + ACT_BYTES[AW-1:0];
             l_actv[hix[i]]   <= 1'b0;
             l_actv[six[i]]   <= 1'b0;
+            // ⭐ K5 (Wilson 11-17): every in-flight state of the refill FSM is
+            // covered -- P_REQ / P_WAIT here; a word at P_CAP in the edge cycle
+            // is overwritten by the two clears above (later in this block), and
+            // the scan cannot select the lane (`ft_flush`). `M_FT_NO_PKILL`
+            // drops the kill: the stale refill is filed after the flush.
+`ifndef M_FT_NO_PKILL
             if ((pst == P_REQ || pst == P_WAIT) && pl == i[LW-1:0]) pkill <= 1'b1;
+`endif
           end
           armed_n[i] = 1'b0;                    // capture DISARMS: a second
                                                 // edge must not re-rebase and
