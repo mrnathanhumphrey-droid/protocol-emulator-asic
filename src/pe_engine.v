@@ -4527,12 +4527,14 @@ module pe_engine #(
         end
       end
 
-      // ---- sticky ovr: a lane was still ready when its own next release
-      //      arrived, i.e. the queue-depth-one assumption (1.6a) was violated.
-      for (i = 0; i < N_LANES; i = i + 1) begin
-        if (l_live[i] && ready[i] && busy && (i[LW-1:0] != cur))
-          sticky_ovr_m <= sticky_ovr_m;         // observed, not an error here
-      end
+      // ---- sticky ovr: "a lane still ready when its own next release arrived"
+      //      (the 1.6a queue-depth-one assumption) is OBSERVED, not an error here.
+      // ⛔⛔ THE HOLD THAT STOOD HERE IS GONE (11-19): `sticky_ovr_m <= sticky_ovr_m`
+      //   under that condition was a no-op in intent and a LAST WRITE in fact --
+      //   it came after every setter in this block, so in any cycle where another
+      //   lane was ready while the engine was busy it discarded a sticky set that
+      //   same cycle (a ck_refuse, the clock-alias refusal, a non-owner SER).
+      //   MEASURED: run_symgen's non-owner SER ended config_err = 1, sticky = 0.
 
       // ---- ⭐⭐ EDGE CAPTURE AND REBASE (Ruling 1) ---------------------
       // ⛔⛔ IT LIVES IN *THIS* BLOCK, and that is not a style choice. This is
