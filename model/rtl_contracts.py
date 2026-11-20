@@ -54,8 +54,11 @@ RTL_CONTRACTS = {
         "lean": "FlushKeep (K4), RestartB.restart_runBK",
         "must_fire": {"status": OWED, "name": None}},
     "K5": {
-        "what": "a fetch for the flushed lane in flight at the edge (REQ / WAIT) is killed and "
-                "files nothing (the RTL's pkill)",
+        "what": "a fetch for the flushed lane in flight at the edge is killed and files nothing "
+                "(the RTL's pkill); in flight under issue path (A) (Wilson 11-20): the held slot "
+                "request plus REQ / WAIT -- the refill mask's and the kill's must-fires cover "
+                "exactly that list",
+        "issue_path": "(A) scan issue (Wilson 11-20)",
         "lean": "FlushKill.kill_files_nothing, RestartB.kill_prov_runBK",
         "must_fire": {"status": OWED, "name": None}},
     "K6": {
@@ -70,9 +73,16 @@ RTL_CONTRACTS = {
                 "OrderK.ordBK_run",
         "must_fire": {"status": OWED, "name": None}},
     "issue_at_capture": {
-        "what": "an ARM's slot request is raised at its capture and held, cycle by cycle, until "
-                "the slot issues for it",
-        "lean": "SlotReadyB.slot_issue_cap_T / slot_issue_within_T (sreq requests y)",
+        "what": "an ARM's slot request is raised in the CAP cycle of the ARM's own fetch, held as "
+                "a flag, cycle by cycle, and issued by the next scan (Wilson 11-20 ruling: the "
+                "wait at capture is rem .cap = 1, the 1 in P1B_FILL_SCAN; SLOT_WAIT_BASE = 3 "
+                "bounds only requests raised outside the CAP cycle, which this design never "
+                "raises). Must-fire (agent 1): a raise delayed by one cycle is caught -- the "
+                "cycle-exact check measures the raise cycle, not only the arrival",
+        "issue_path": "(A) scan issue (Wilson 11-20); in flight under (A): the held request "
+                      "plus REQ / WAIT",
+        "lean": "Slot.RaiseAtCapture / p1b_capture (from pst = .cap); "
+                "SlotReadyB.slot_issue_cap_T / slot_issue_within_T (sreq requests y)",
         "must_fire": {"status": OWED, "name": None}},
     "slot_fcfs_capture": {
         "what": "the slot serves requesters first come, first served by capture: only lanes "
