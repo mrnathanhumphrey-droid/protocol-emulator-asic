@@ -12,6 +12,9 @@ pick / dispatch), then uio[1] falls, then uio[0] falls the same lag after that.
 Must-fires: M_FLAG_NOGATE (WAIT does not hold the lane: uio[0] rises first) and
 M_FLAG_NOCONSUME (WAIT never consumes: the second WAIT passes on the first count,
 uio[0] falls before uio[1]). pe_isa refuses a flag word with pinb[3] set.
+The lag bound (pe_isa.flag_lag_problems): the compiler proves posted - consumed <= 7
+on every flag or refuses the image -- ping-pong and a burst of 7 accepted, a burst of
+8 and a free-running poster refused; must-fire LAG_NO_CYCLE_MUT.
 """
 from __future__ import annotations
 
@@ -92,6 +95,67 @@ def observe_image(rx_clobber=False):
     for n in range(2, I.N_LANES):
         hdrs.append(I.hdr(n + 2, n + 2, 0, 500, 0, 200, 240, park))
     return I.join_image(hdrs, p0 + p1)
+
+
+F_ACK = 2                     # the acknowledgement flag of the lag-bound images
+
+
+def lag_image(kind, n=1):
+    """the lag bound's planted images (pe_isa only, not run), lanes 0 / 1 both LOOPING:
+      "pingpong"  lane 1 POSTs F then WAITs F_ACK; lane 0 WAITs F then POSTs F_ACK (lag 1)
+      "burst"     lane 1 POSTs F `n` times, then WAITs F_ACK; lane 0 WAITs F `n` times,
+                  then POSTs F_ACK (lag n)
+      "free"      lane 1 POSTs F every pass with no acknowledgement (no bound)"""
+    l0 = I.ACT_BASE
+    loop = I.act(I.OP_REARM, 0, 1, D)                # looping: back to the base
+    nw = n if kind == "burst" else 1
+    p0 = [I.act_wait(F, D) for _ in range(nw)] + [I.act_post(F_ACK, D), loop]
+    l1 = l0 + len(p0) * I.ACT_BYTES
+    if kind == "free":
+        p1 = [I.act_post(F, D), I.act(I.OP_LEVEL, PB, 1, D), loop]
+    else:
+        p1 = [I.act_post(F, D) for _ in range(1 if kind == "pingpong" else n)]
+        p1 += [I.act_wait(F_ACK, D), loop]
+    park = l1 + len(p1) * I.ACT_BYTES
+    hdrs = [I.hdr(PA, I.PIN_NONE, 1, D, 0, 2 * D, 3 * D, l0),
+            I.hdr(PB, I.PIN_NONE, 1, D, 0, 2 * D, 3 * D, l1)]
+    for k in range(2, I.N_LANES):
+        hdrs.append(I.hdr(k + 2, k + 2, 0, 500, 0, 200, 240, park))
+    return I.join_image(hdrs, p0 + p1 + [I.act(I.OP_REARM, 0, 0, 500)])
+
+
+def lag_checks():
+    """[problem]: the compiler's lag bound (Wilson 11-19: posted - consumed < 8 proved,
+    else refused). Accepted with their bounds: this gate's two run images, the ping-pong
+    (1) and a burst of FLAG_LAG_MAX (7). Refused: a burst of 8 (the boundary) and the
+    free-running poster. Must-fire: LAG_NO_CYCLE_MUT (the positive-cycle check off)
+    accepts the free-running poster."""
+    out = []
+    cases = [("the POST / WAIT image", image(), True),
+             ("the OBSERVE image", observe_image(), True),
+             ("ping-pong (lag 1)", lag_image("pingpong"), True),
+             ("burst of %d" % I.FLAG_LAG_MAX, lag_image("burst", I.FLAG_LAG_MAX), True),
+             ("burst of %d" % (I.FLAG_LAG_MAX + 1), lag_image("burst", I.FLAG_LAG_MAX + 1), False),
+             ("free-running poster", lag_image("free"), False)]
+    for what, img, want in cases:
+        q = I.flag_lag_problems(img)
+        b, how = I.flag_lag_bound(img, F)
+        ok = (not q) == want
+        print("    %-24s %-9s flag %d bound %s (%s)%s"
+              % (what, "accepted" if not q else "refused", F, b, how or "-",
+                 "" if ok else "  *** WRONG"))
+        if not ok:
+            out.append("lag bound: %s %s" % (what, "refused: %s" % q if q else "accepted"))
+    I.LAG_NO_CYCLE_MUT = True
+    try:
+        mq = I.flag_lag_problems(lag_image("free"))
+    finally:
+        I.LAG_NO_CYCLE_MUT = False
+    print("    must-fire LAG_NO_CYCLE_MUT (the positive-cycle check off): %s"
+          % ("RED (the free-running poster accepted)" if not mq else "*** SURVIVED"))
+    if mq:
+        out.append("LAG_NO_CYCLE_MUT survived: the free-running poster still refused")
+    return out
 
 
 def run(cmd):
@@ -197,6 +261,10 @@ def main() -> int:
              "accepted" if not cp else "*** REFUSED: %s" % cp))
     if not rp or cp:
         probs.append("pe_isa's OBSERVE RX-liveness refusal")
+
+    print("\n  the lag bound: posted - consumed <= %d proved, else refused (Wilson 11-19)"
+          % I.FLAG_LAG_MAX)
+    probs += lag_checks()
 
     print("\n  the one-POST-per-cycle assertion (Wilson 11-19)")
     av = os.path.join(tmp, "flags_M_FLAG_POST2.vvp")

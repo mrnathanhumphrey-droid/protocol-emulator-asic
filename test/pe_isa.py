@@ -437,6 +437,144 @@ def flag_word_problems(img):
     return out
 
 
+#: the lag bound (Wilson 11-19, the 11-09 semantics): the counts are mod 8 with no
+#: saturation, so the compiler must PROVE posted - consumed <= FLAG_LAG_MAX on every
+#: flag at every instant, and refuses an image where it cannot (`flag_lag_problems`).
+FLAG_LAG_MAX = 7
+#: must-fire switch (run_flags): the positive-cycle check off -- a POST inside a loop
+#: then reads as a finite count, and the free-running poster is accepted
+LAG_NO_CYCLE_MUT = False
+
+
+def _lane_cfg(img, ln):
+    """{word: (action, [successors])}: every word reachable from lane `ln`'s base
+    (absolute word indices). Over-approximates control flow: a branch, a LOOP and a
+    FALLTHROUGH ARM take both ways; a looping REARM returns to the base, a chaining
+    REARM repeats itself (it posts nothing)."""
+    h = read_header(img, ln)
+    base = (h["base"] - ACT_BASE) // ACT_BYTES
+    nwords = (STORE_BYTES - ACT_BASE) // ACT_BYTES
+    g, todo = {}, [base]
+    while todo:
+        w = todo.pop()
+        a = ACT_BASE + w * ACT_BYTES
+        if w in g or not 0 <= w < nwords or a + ACT_BYTES > len(img):
+            continue
+        x = _unpack(ACT_FIELDS, img[a:a + ACT_BYTES], ACT_BYTES)
+        if x["op"] == OP_REARM:
+            succ = [base] if x["level"] else [w]
+        else:
+            succ = [w + 1]
+            if x["op"] == OP_ARM and x["mod"] & ARM_MOD_FT:
+                succ.append(w + 2)
+            if x["op"] in BRANCH_OPS:
+                succ.append(branch_target(x))
+        g[w] = (x, succ)
+        todo.extend(succ)
+    for w in g:
+        g[w] = (g[w][0], [v for v in g[w][1] if v in g])
+    return base, g
+
+
+def _max_prefix(base, g, weight):
+    """the largest sum of `weight(word)` over any executed prefix of the lane (the
+    empty prefix counts: >= 0), or None when a positive-weight cycle is reachable
+    (the count has no bound). Longest path by Bellman-Ford from the base."""
+    if not g:
+        return 0
+    dist = {base: weight(g[base][0])}
+    for it in range(len(g) + 1):
+        changed = False
+        for u in list(dist):
+            for v in g[u][1]:
+                d = dist[u] + weight(g[v][0])
+                if d > dist.get(v, -10 ** 9):
+                    dist[v] = d
+                    changed = True
+        if not changed:
+            break
+        if it == len(g) and not LAG_NO_CYCLE_MUT:
+            return None                          # still growing: a positive cycle
+    return max(0, max(dist.values()))
+
+
+def flag_lag_bound(img, f):
+    """-> (bound or None, how): the best proved bound on posted(f) - consumed(f).
+    Sound at every instant: each lane's executed words are a path prefix of its CFG
+    (POST counts at its writeback, WAIT consumes at its pick, one word after another),
+    and consumed(x) <= posted(x) for every flag.
+      R1  posted(f) <= the sum over posting lanes of their most POSTs(f) on a prefix;
+      R2  one posting lane P, an ack flag g posted by ONE lane W, weights a, b >= 1:
+          a*posted(f) <= b*consumedP(g) + k1,  k1 = max prefix of P (+a POST f, -b WAIT g);
+          b*posted(g) <= a*consumedW(f) + k2,  k2 = max prefix of W (+b POST g, -a WAIT f);
+          consumedP(g) <= posted(g) and consumedW(f) <= consumed(f), so
+          a*(posted(f) - consumed(f)) <= k1 + k2: the lag <= (k1 + k2) // a.
+          g = f (P consumes its own flag, a = b): the lag <= k1 // a."""
+    cfgs = {ln: _lane_cfg(img, ln) for ln in range(N_LANES)}
+
+    def has(ln, op, fl):
+        return any(x["op"] == op and x["pinb"] == fl for x, _s in cfgs[ln][1].values())
+
+    def wt(pairs):
+        """weight of a word: the sum of w over (op, flag, w) it matches"""
+        return lambda x: sum(w for op, fl, w in pairs if x["op"] == op and x["pinb"] == fl)
+
+    posters = [ln for ln in range(N_LANES) if has(ln, OP_FLAG_SET, f)]
+    if not posters:
+        return 0, "never posted"
+    best, how = None, ""
+    tot = 0
+    for ln in posters:
+        k = _max_prefix(*cfgs[ln], wt([(OP_FLAG_SET, f, 1)]))
+        tot = None if (k is None or tot is None) else tot + k
+    if tot is not None:
+        best, how = tot, "R1: at most %d POSTs in all" % tot
+    if len(posters) == 1:
+        P = posters[0]
+        wts = range(1, FLAG_LAG_MAX + 2)
+        for gf in range(N_FLAGS):
+            if gf == f:
+                for a in wts:
+                    k1 = _max_prefix(*cfgs[P], wt([(OP_FLAG_SET, f, a), (OP_FLAG_WAIT, f, -a)]))
+                    if k1 is not None and (best is None or k1 // a < best):
+                        best, how = k1 // a, "R2: lane %d consumes its own flag, k1 = %d" % (P, k1)
+                continue
+            gposters = [ln for ln in range(N_LANES) if has(ln, OP_FLAG_SET, gf)]
+            if len(gposters) != 1 or not has(P, OP_FLAG_WAIT, gf):
+                continue
+            W = gposters[0]
+            for a in wts:
+                for b in wts:
+                    k1 = _max_prefix(*cfgs[P], wt([(OP_FLAG_SET, f, a), (OP_FLAG_WAIT, gf, -b)]))
+                    if k1 is None:
+                        continue
+                    k2 = _max_prefix(*cfgs[W], wt([(OP_FLAG_SET, gf, b), (OP_FLAG_WAIT, f, -a)]))
+                    if k2 is None:
+                        continue
+                    bd = (k1 + k2) // a
+                    if best is None or bd < best:
+                        best, how = bd, ("R2: lane %d acks through flag %d (lane %d), a %d b %d, "
+                                         "k1 %d + k2 %d" % (P, gf, W, a, b, k1, k2))
+    return best, how
+
+
+def flag_lag_problems(img):
+    """[problem]: a flag whose lag (posted - consumed) the compiler cannot prove
+    <= FLAG_LAG_MAX: the mod-8 counts would wrap and a WAIT would block on a full
+    flag (Wilson 11-19: no saturation; the compiler refuses what it cannot prove)."""
+    out = []
+    for f in range(N_FLAGS):
+        b, how = flag_lag_bound(img, f)
+        if b is None:
+            out.append("flag %d: no bound on posted - consumed (a POST in a loop with no "
+                       "acknowledgement the analysis can use) -- the mod-8 count could "
+                       "wrap" % f)
+        elif b > FLAG_LAG_MAX:
+            out.append("flag %d: posted - consumed can reach %d (%s) -- over %d, the mod-8 "
+                       "count would wrap" % (f, b, how, FLAG_LAG_MAX))
+    return out
+
+
 def act_ser(pin_a, pin_b, nbits, byte_time, q=0) -> bytes:
     """SER: hand the generator one byte from TX queue `q`; `nbits` bits of it go
     out (1..8); `byte_time` is the word's delay, the lane's own cadence (the
@@ -1546,6 +1684,7 @@ def flag_problems(img, d_star):
                     break
     probs += symgen_problems(img)
     probs += flag_word_problems(img)
+    probs += flag_lag_problems(img)
     probs += observe_rx_problems(img)
     probs += drive_sample_problems(img)
     return probs
