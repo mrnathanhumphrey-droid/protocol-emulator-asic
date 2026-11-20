@@ -159,7 +159,9 @@ KEY = ("dstar", "dstar29", "dstar39", "dstar39_v2", "dstar39_st", "dstar39_hold"
        "no_rehit_two", "armInvB_runBA", "flush_spacing_runBA",
        # ComposeB.lean (the bridge): the armed run IS runBK with winS / flS; FlushOk and K8 on it
        "step_win_eq", "stepB_win_congr", "stepBKK_win_congr", "flushOk_win_congr", "now_runBA",
-       "runBA_proj", "flushOk_runBA", "flush_spacing_runBK")
+       "runBA_proj", "flushOk_runBA", "flush_spacing_runBK",
+       # ComposeB.lean: hedge (the edge word at every flush) on the bridged run
+       "runBA_add", "wfBK_runBA", "armed_origin", "hedge_runBK")
 #: proof_constants.load() key -> the Lean expression that must evaluate to it (SPEC: the map)
 CONSTS = {
     "lemmaA_window": "LEMMA_A_WINDOW", "R_base": "R_BASE", "dispatch_cycles": "DISPATCH_CYCLES",
