@@ -205,6 +205,45 @@ def first_diff(a, b):
     return ""
 
 
+#: ⛔ THE ONE DECLARED DIFFERENCE (Wilson 11-19, 6206743): v1 -- and v2 before that
+#: commit -- carried `sticky_ovr_m <= sticky_ovr_m` as the LAST write of the engine's
+#: block, which discarded the sticky set by a refusal in the same cycle. v2 now
+#: reports it. These five refusal images, BY NAME, may differ from v1 in the sticky
+#: bit of the status byte ONLY (uo_out bit 4: 6f -> 7f), and each MUST show it set
+#: (the fix has to hold, not just be tolerated). Any other bit or byte differing on
+#: them, or any other image differing, stays red. v1's erratum: V1_ERRATA.
+STICKY_ERRATUM = ("ckdegen_image.hex", "ckdegen2_image.hex", "ckhold_at_image.hex",
+                  "ckhold_under_image.hex", "tx_badclk_image.hex")
+STICKY_BIT = 0x10                      # uo_out[4], the host status' sticky fault
+
+
+def sticky_only(a, b):
+    """(True, n) when v2 run `b` equals v1 run `a` except that P records' uo_out
+    byte has STICKY_BIT set in v2 and clear in v1 (n such records, n >= 1);
+    (False, why) otherwise."""
+    if a["start"] is None or a["start"] != b["start"] or a["fails"] != b["fails"]:
+        return False, "start / monitor lines differ: %s" % first_diff(a, b)
+    ra, rb = after(a, b["start"]), after(b, b["start"])
+    if len(ra) != len(rb):
+        return False, "record counts differ (%d / %d)" % (len(ra), len(rb))
+    n = 0
+    for x, y in zip(ra, rb):
+        if x == y:
+            continue
+        if x[0] != "P" or y[0] != "P" or x[1] != y[1]:
+            return False, "a non-status record differs: v1 %s | v2 %s" % (x, y)
+        tx, ty = x[2].split(), y[2].split()
+        if tx[1:] != ty[1:]:
+            return False, "a pin byte differs: v1 %s | v2 %s" % (x, y)
+        u1, u2 = int(tx[0], 16), int(ty[0], 16)
+        if u1 ^ u2 != STICKY_BIT or not u2 & STICKY_BIT:
+            return False, "uo_out differs beyond the sticky bit: v1 %s | v2 %s" % (x, y)
+        n += 1
+    if n == 0:
+        return False, "the sticky bit is NOT set in v2 -- 6206743's fix does not hold"
+    return True, n
+
+
 def judge(n, a, b):
     """(verdict, detail, problem or None) for one image's pair of runs. THE ONE
     JUDGE: section 1 and its must-fire both call it."""
@@ -213,6 +252,13 @@ def judge(n, a, b):
     if base in NA.NON_ADMISSIBLE:
         return (("IDENTICAL (non-admissible, not judged)" if ok else
                  "DIFFER -- " + OUTSIDE), "" if ok else first_diff(a, b), None)
+    if base in STICKY_ERRATUM:
+        good, why = sticky_only(a, b)
+        if good:
+            return ("IDENTICAL but the sticky bit (6206743, declared; %d status "
+                    "record(s) with it set)" % why), "", None
+        return ("*** DIFFER", why, "%s: the declared sticky-bit difference does not "
+                "hold -- %s" % (n, why))
     if ok:
         return "IDENTICAL", "", None
     return ("*** DIFFER", first_diff(a, b),
@@ -431,10 +477,56 @@ def main() -> int:
         adm = [n for n in runs if n.split()[0] not in NA.NON_ADMISSIBLE]
         print("    %d of %d ADMISSIBLE images identical (judged); %d non-admissible "
               "run and reported, %d of them differing (%s); %d started and recorded"
-              % (sum(1 for n in adm if judge(n, *runs[n])[0] == "IDENTICAL"), len(adm),
+              % (sum(1 for n in adm if judge(n, *runs[n])[0].startswith("IDENTICAL")), len(adm),
                  len(runs) - len(adm),
                  sum(1 for n in runs if n not in adm and judge(n, *runs[n])[0] !=
                      "IDENTICAL (non-admissible, not judged)"), OUTSIDE, len(live)))
+
+        # ---- 1a. must-fires: the declared sticky-bit difference is SCOPED ----
+        # (Wilson 11-19) on the recorded runs: (i) another uo_out bit also moved on
+        # an erratum image, (ii) the sticky bit NOT set in v2 (the fix not holding),
+        # (iii) the same sticky-only difference on an image NOT on the list.
+        import copy
+        e0 = next((n for n in STICKY_ERRATUM if n in runs), None)
+        if e0 is None:
+            probs.append("must-fire: no sticky-erratum image ran")
+        else:
+            a0, b0 = runs[e0]
+            # the plant goes on the FIRST differing record AFTER the start (the judge
+            # compares from the start; a pre-start record proves nothing)
+            ra0, rb0 = after(a0, b0["start"]), after(b0, b0["start"])
+            d0 = next((y for x, y in zip(ra0, rb0) if x != y), None)
+            k = b0["recs"].index(d0) if d0 is not None else None
+            mfs = []
+            if k is not None:
+                bi = copy.deepcopy(b0)
+                kind, cyc, rest = bi["recs"][k]
+                t = rest.split()
+                t[0] = "%02x" % (int(t[0], 16) ^ 0x01)
+                bi["recs"][k] = (kind, cyc, " ".join(t))
+                mfs.append(("another uo_out bit moved on %s" % e0, judge(e0, a0, bi)[2]))
+            bii = copy.deepcopy(b0)
+            bii["recs"] = list(a0["recs"])
+            mfs.append(("the sticky bit not set in v2 on %s" % e0, judge(e0, a0, bii)[2]))
+            if PLANT_IMAGE in runs:
+                a3, b3 = runs[PLANT_IMAGE]
+                b3c = copy.deepcopy(b3)
+                j = next((i for i, x in enumerate(b3c["recs"]) if x[0] == "P"
+                          and x[1] >= (b3c["start"] or 0)), None)
+                if j is not None:
+                    kind, cyc, rest = b3c["recs"][j]
+                    t = rest.split()
+                    t[0] = "%02x" % (int(t[0], 16) ^ STICKY_BIT)
+                    b3c["recs"][j] = (kind, cyc, " ".join(t))
+                    mfs.append(("a sticky-only difference on %s (not listed)" % PLANT_IMAGE,
+                                judge(PLANT_IMAGE, a3, b3c)[2]))
+            if len(mfs) != 3:
+                probs.append("must-fire: the sticky-scope plants could not all be made "
+                             "(%d of 3)" % len(mfs))
+            for what, prob in mfs:
+                print("    must-fire: %-56s %s" % (what, "red" if prob else "*** ACCEPTED"))
+                if not prob:
+                    probs.append("must-fire survived: " + what)
 
         # ---- 1b. must-fire: a planted difference on an ADMISSIBLE image ----
         # (Wilson 11-14) PINNED to smoke_image (stable, admissible, so the
@@ -607,15 +699,19 @@ def main() -> int:
         # the store, so the loader's check is shown to cover the whole store
         first_w = I.ACT_BASE
         last_w = I.STORE_BYTES - I.ACT_BYTES
-        for where, at in (("the first", first_w), ("the last", last_w)):
+        # + OBSERVE (23, Wilson 11-19): its encoding is assigned and it is NOT built,
+        # so its decode is the load refusal -- its must-fire until it is built
+        for op, where, at in ((I.OP_UNBUILT, "the first", first_w),
+                              (I.OP_UNBUILT, "the last", last_w),
+                              (I.OP_OBSERVE, "the first", first_w)):
             ro = bytearray(img2)
-            ro[at] = (I.OP_UNBUILT << (8 - I.OP_W)) | (ro[at] & ((1 << (8 - I.OP_W)) - 1))
-            pro = write_hex(os.path.join(tmp, "v2eq_resop_%d.hex" % at), bytes(ro),
+            ro[at] = (op << (8 - I.OP_W)) | (ro[at] & ((1 << (8 - I.OP_W)) - 1))
+            pro = write_hex(os.path.join(tmp, "v2eq_resop_%d_%d.hex" % (op, at)), bytes(ro),
                             register=True)
             r = sim(vv2, pro, I.STORE_BYTES, ncyc=NCYC_MF)
             say(r["started"] == 0 and r["cfg_err"] == 1,
                 "opcode %d in %s action word (byte %d) is REFUSED at load: "
-                "cfg_err=%s, started=%s" % (I.OP_UNBUILT, where, at,
+                "cfg_err=%s, started=%s" % (op, where, at,
                                            r["cfg_err"], r["started"]))
         r = sim(vv2, sm[3], len(img2) // 2, ncyc=NCYC_MF)
         say(r["started"] == 0, "a %d-byte load never starts the engine (R3): started=%s"

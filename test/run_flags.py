@@ -144,6 +144,16 @@ def main() -> int:
              "accepted" if not I.flag_word_problems(img) else "*** REFUSED"))
     if not ok:
         probs.append("pe_isa's flag index refusal")
+    print("\n  the one-POST-per-cycle assertion (Wilson 11-19)")
+    av = os.path.join(tmp, "flags_M_FLAG_POST2.vvp")
+    build(av, ["M_FLAG_POST2"])
+    r = run(sim_run.vvp([av, "+IMG=%s" % p, "+NCYC=%d" % NCYC], images=[p]))
+    hit = [ln.strip() for ln in (r.stdout + r.stderr).splitlines()
+           if ln.strip().startswith("*** ASSERT pe_engine FLAG1:")]
+    print("    must-fire M_FLAG_POST2 (a POST counts two flags): %s"
+          % (("RED: %s" % hit[0]) if hit else "*** SURVIVED"))
+    if not hit:
+        probs.append("M_FLAG_POST2 survived: the one-POST assertion did not fire")
     print("\n  must-fires")
     for d, what in MUTANTS:
         mv = os.path.join(tmp, "flags_%s.vvp" % d)

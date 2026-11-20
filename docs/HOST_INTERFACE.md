@@ -151,7 +151,21 @@ The chip **refuses** an image (the engine never runs, CONFIG_ERR) when:
   consecutive writes landed (below).
 * **its MAGIC is wrong.** Bytes 30–31 are checked as they stream in, at no run
   cost. A SNIFF image carries `S` `N` there instead and is not refused.
-* **it holds a reserved opcode** in any action word's first byte.
+* **it holds a reserved opcode** in any action word's first byte. The loader
+  tests each opcode against the BUILT set (`BUILT_OPS`, a set since the v2 final
+  batch, not a limit).
+
+### The v2 final batch's opcodes (11-19)
+
+| op | name | fields | |
+|---|---|---|---|
+| 13 | `SER` | pin = A, pinb = B, q = TX queue, count = bits − 1, delay = the byte time | built: the symbol generator's byte, owner lane only |
+| 16 | `POST` (was `FLAG_SET`) | pinb[2:0] = flag, delay | built: one more count on the flag |
+| 17 | `WAIT` (was `FLAG_WAIT`) | pinb[2:0] = flag, delay | built: holds the lane until the flag has a count, consumes one |
+| 22 | `SYMDEF` | mod = config word 0..2, the 25 bits between the opcode and mod = its payload | built: the generator's config, owner lane only, refused while it runs |
+| 23 | `OBSERVE` | pinb[2:0] = flag | **reserved, not built**: reads the flag's available count (posted − consumed, under the compiler's lag bound); its destination is owed (Wilson). Refused at load until built. |
+
+`pe_isa.py` is the definition (`BUILT_OPS`, `RESERVED_OPCODES`, the encoders).
 
 Build images with `pe_asm` / `pe_isa.write_image` and the MAGIC, the filler and
 the full size are already right; a hand-built image is where all three go wrong.
@@ -883,8 +897,9 @@ bit with a full 7-cycle low phase failed.
 ## Lane mode bits (header bits 0–1: `HALF_HIGH`, `CLK_INV`)
 
 The header's 4-bit field that used to hold a stale `C` value is now per-lane
-mode bits. Bits 2–3 are reserved and must be 0; `pe_asm` and the image audit
-refuse an image that sets them. Every image built before the change writes 0,
+mode bits. Bit 2 is `FLAG_SYMGEN` (11-19: this lane owns the symbol generator;
+one owner per image). Bit 3 is reserved and must be 0; `pe_asm` and the image
+audit refuse an image that sets it. Every image built before the change writes 0,
 so it runs exactly as before.
 
 ### `HALF_HIGH` (bit 0): I²C Fm up to ~394 kHz

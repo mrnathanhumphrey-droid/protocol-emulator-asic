@@ -1686,6 +1686,25 @@ module pe_engine #(
       assign fl_av[gf] = (fl_post[gf] != fl_cons[gf]);
     end
   endgenerate
+`ifndef SYNTHESIS
+  // ⭐ ONE POST PER CYCLE, CHECKED (Wilson 11-19): the engine has one writeback per
+  // cycle, so at most one flag's posted count moves, by one. Every simulation runs
+  // this; `M_FLAG_POST2` (a POST that also counts its neighbour) is its planted case
+  // (run_flags). It replaces the withdrawn "two simultaneous POSTs" must-fire.
+  reg  [FCW-1:0] fl_post_q [0:N_FLAGS-1];
+  integer fl_k, fl_n;
+  always @(posedge clk) begin
+    fl_n = 0;
+    for (fl_k = 0; fl_k < N_FLAGS; fl_k = fl_k + 1) begin
+      if (rst_n && fl_post[fl_k] !== fl_post_q[fl_k] && ^fl_post_q[fl_k] !== 1'bx)
+        fl_n = fl_n + ((fl_post[fl_k] - fl_post_q[fl_k]) & {FCW{1'b1}});
+      fl_post_q[fl_k] <= fl_post[fl_k];
+    end
+    if (fl_n > 1)
+      $display("*** ASSERT pe_engine FLAG1: %0d POST counts in one cycle (at most 1), at %0t",
+               fl_n, $time);
+  end
+`endif
   wire [N_LANES-1:0] rdy_rel;   // released (the old `ready`): (b')'s prefetch input
   wire [N_LANES-1:0] rel_due;
   wire [TS_W-1:0]    edf_key_off [0:N_LANES-1];
@@ -4243,7 +4262,14 @@ module pe_engine #(
               end
             end
             // ⭐ POST: one more count on flag pinb[2:0]
-            OP_FLAG_SET: fl_post[a_pinb[FLW-1:0]] <= fl_post[a_pinb[FLW-1:0]] + {{(FCW-1){1'b0}}, 1'b1};
+            // M_FLAG_POST2 (the assertion's planted case): a POST also counts the
+            // neighbouring flag -- two POSTs in one cycle
+            OP_FLAG_SET: begin
+              fl_post[a_pinb[FLW-1:0]] <= fl_post[a_pinb[FLW-1:0]] + {{(FCW-1){1'b0}}, 1'b1};
+`ifdef M_FLAG_POST2
+              fl_post[a_pinb[FLW-1:0] ^ {{(FLW-1){1'b0}}, 1'b1}] <= fl_post[a_pinb[FLW-1:0] ^ {{(FLW-1){1'b0}}, 1'b1}] + {{(FCW-1){1'b0}}, 1'b1};
+`endif
+            end
             OP_FLAG_WAIT: ;                     // consumed at its pick (ST_IDLE)
             // SYMDEF's payload (`sg_payload`): every field between the opcode and `mod`
             OP_SYMDEF: if (!sg_mine || sg_busy) begin

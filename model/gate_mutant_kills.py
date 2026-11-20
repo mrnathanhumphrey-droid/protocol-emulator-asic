@@ -140,6 +140,7 @@ KILLERS = {
     "M_SG_NOSPARE": "test/run_symgen.py",        # the spare codes read as HOLD: nrzi, biphase
     "M_FLAG_NOGATE": "test/run_flags.py",        # WAIT does not hold the lane
     "M_FLAG_NOCONSUME": "test/run_flags.py",     # WAIT never consumes its count
+    "M_FLAG_POST2": "test/run_flags.py",         # a POST counts two flags: the FLAG1 assertion
     "M_PRIME_NEWPRIO": "test/gate_batch_equiv.py",  # the one-cycle earlier start
     # -- bundle 3: the USB receive -- NRZI, unstuffing, re-anchoring (tb_usbrx)
     "M_NO_REANCHOR": "test/run_usbrx.py", "M_UNSTUFF_KEEP": "test/run_usbrx.py",

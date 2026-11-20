@@ -131,8 +131,13 @@ RESERVED_OPCODES = {
     19: ("WAITQ", "q = the TX queue awaited, delay = timeout"),
     20: ("NIBBLE_LOAD", "q = queue, count = nibble lane"),
     21: ("RX_STATUS", "mod = status kind"),
+    # Wilson 11-19: OBSERVE takes a FREE opcode (23), not one reserved for another
+    # primitive. Encoding only: its result's destination is owed; refused at load.
+    23: ("OBSERVE", "pinb[2:0] = flag: reads posted - consumed (under the compiler's "
+                    "lag bound); destination owed"),
 }
-N_OPCODES = 1 << OP_W                     # 32; 22..31 unassigned
+OP_OBSERVE = 23
+N_OPCODES = 1 << OP_W                     # 32; 24..31 unassigned (22 SYMDEF, 23 OBSERVE)
 MOD_TIMEOUT_FALLTHROUGH, MOD_UNDERRUN_FILL1 = 0x1, 0x2   # reserved modifiers
 
 # pin indices: 0..7 = uio, 8..11 = uo_out[0..3]

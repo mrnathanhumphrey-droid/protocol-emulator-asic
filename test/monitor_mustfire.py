@@ -185,6 +185,15 @@ MUST_FIRE: dict = {
         'expect': '^\\s*\\*\\*\\* (?:FAIL\\ branch_check)',
         'why': 'the M_CMP_INV build: red on purpose',
     },
+    'run_flags:flags_M_FLAG_POST2:flags_pw:NCYC=2000': {
+        'runner': 'test/run_flags.py',
+        'build': 'flags_M_FLAG_POST2.vvp',
+        'define': 'M_FLAG_POST2',
+        'plusargs': ['+NCYC=2000'],
+        'image': 'flags_pw.hex',
+        'expect': '^\\s*\\*\\*\\* ASSERT pe_engine FLAG1:',
+        'why': "the one-POST-per-cycle assertion's planted case (Wilson 11-19): a POST that also counts its neighbour",
+    },
     'run_symgen:symgen:symgen_f_nonowner:FEED=1,NCYC=3000': {
         'runner': 'test/run_symgen.py',
         'build': 'symgen.vvp',

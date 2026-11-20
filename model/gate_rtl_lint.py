@@ -45,6 +45,10 @@ from toolchain import banner, tool_or_none, PINNED_WSL_VERILATOR  # noqa: E402
 
 ERRORS = ("BLKSEQ", "COMBDLY")
 TEMPS = {
+    ("pe_engine.v", "fl_n"):
+        "the one-POST-per-cycle assertion's loop accumulator (Wilson's flag ruling, sim "
+        "only, `ifndef SYNTHESIS`): the POST counts moved this cycle, summed and "
+        "compared inside that one `always @(posedge clk)`.",
     ("pe_engine.v", "prime_unp"):
         "the priming block's loop accumulator: written and read only inside "
         "that `always @(posedge clk)`; see the comment above it for why it is "
@@ -179,6 +183,49 @@ def planted(name, fn, old, new):
     return d
 
 
+#: ⛔⛔ RL2 (Wilson 11-19): A SELF-ASSIGNMENT `x <= x;` IN THE RTL IS RED unless named
+#: here. Placed after conditional sets of `x` in the same clocked block it is a LAST
+#: write that silently discards them -- 6206743: `sticky_ovr_m <= sticky_ovr_m`
+#: swallowed every refusal's sticky fault (docs/V1_ERRATA.md E1). A textual scan,
+#: macros included; each allowed one is classified with its reason.
+SELF_HOLDS = {
+    ("project.v", "tx_cnt[ti]"):
+        "HARMLESS: the first arm of the exclusive push / pop chain ('one in, one "
+        "out'), the only write in its arm -- there is no earlier set in the cycle to "
+        "discard; the reload flush after it overrides by design (documented there).",
+}
+#: ⭐ THE PLANTED-MUTANT CLASS, by rule: a self-assignment inside a `` `define PE_MUT_* ``
+#: macro (the halt mutants M_NO_RELOAD_RESET, M_HALT_KEEP_CKBIT, M_HALT_KEEP_HOLD,
+#: M_NO_HALT_IDLE) is the SAME last-write pattern used ON PURPOSE -- it undoes the
+#: halt's reset so the must-fire can show the halt matters. Never in the shipped build.
+MUTANT_MACRO = re.compile(r"^\s*`define\s+PE_MUT_\w+")
+_SELF = re.compile(r"([A-Za-z_]\w*(?:\[[^\]]*\])*)\s*<=\s*([A-Za-z_]\w*(?:\[[^\]]*\])*)\s*;")
+
+
+def self_holds(src_dir, mutants=False):
+    """[(file, line, lhs)] for every `x <= x;` in src_dir/*.v (comments stripped);
+    those inside a `define PE_MUT_* macro only when `mutants`"""
+    out = []
+    for fn in sorted(os.listdir(src_dir)):
+        if not fn.endswith(".v"):
+            continue
+        with open(os.path.join(src_dir, fn), encoding="utf-8", errors="replace") as fh:
+            for i, ln in enumerate(fh.read().split("\n")):
+                code = ln.split("//", 1)[0]
+                if bool(MUTANT_MACRO.match(code)) != mutants:
+                    continue
+                for m in _SELF.finditer(code):
+                    if m.group(1).replace(" ", "") == m.group(2).replace(" ", ""):
+                        out.append((fn, i + 1, m.group(1).replace(" ", "")))
+    return out
+
+
+def self_hold_problems(src_dir):
+    return ["RL2 a self-assignment `%s <= %s;` at %s:%d is not a classified SELF_HOLDS "
+            "entry -- after an earlier set in the same block it discards it (6206743)"
+            % (v, v, fn, n) for fn, n, v in self_holds(src_dir) if (fn, v) not in SELF_HOLDS]
+
+
 def main() -> int:
     banner("verilator")
     print()
@@ -201,6 +248,16 @@ def main() -> int:
         rc = 1
     if not probs:
         print("  no BLKSEQ or COMBDLY outside a checked block-local temporary")
+    sh = self_hold_problems(os.path.join(ROOT, "src"))
+    print("  RL2 self-assignments in src/: %d in shipped code, all classified (%s); %d in "
+          "planted-mutant macros (PE_MUT_*)"
+          % (len(self_holds(os.path.join(ROOT, "src"))),
+             ", ".join("%s:%s" % k for k in sorted(SELF_HOLDS)),
+             len(self_holds(os.path.join(ROOT, "src"), mutants=True)))
+          if not sh else "  RL2 self-assignments: %d unclassified" % len(sh))
+    for p in sh:
+        print("  *** %s" % p)
+        rc = 1
 
     # ---- the BOUND store (Wilson 11-03): PE_IHP_CELLS on the PDK's models --
     print()
@@ -246,7 +303,14 @@ def main() -> int:
     hit2 = any(p.startswith("COMBDLY") for p in p2)
     print("    a `<=` in a combinational block              %s"
           % ("ok" if hit2 else "*** MISSED"))
-    if not (hit1 and hit2):
+    # RL2: 6206743's hold, planted back -- a self-assignment after the sets is red
+    d3 = planted("selfhold", "pe_engine.v",
+                 "      if (sg_ovr) sticky_ovr_m <= 1'b1;",
+                 "      if (sg_ovr) sticky_ovr_m <= 1'b1;\n      sticky_ovr_m <= sticky_ovr_m;")
+    hit3 = any("sticky_ovr_m" in p for p in self_hold_problems(d3))
+    print("    RL2: `sticky_ovr_m <= sticky_ovr_m;` planted back  %s"
+          % ("ok" if hit3 else "*** MISSED"))
+    if not (hit1 and hit2 and hit3):
         rc = 1
 
     print()
