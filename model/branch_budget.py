@@ -167,18 +167,20 @@ READY_RULES = {
                         "it on the armed lane, kept by the flush (K1-K5), the head at the "
                         "release. RTL contract: agent 1's K1-K5 + the scan fix (liveFl); a "
                         "buffered edge word moves to the head in the flush cycle (ruling (a))"},
-    "ft_edge_after_arm": {"status": "owed", "theorems": ("BufFifo.ft_merge_room",),
+    "ft_edge_after_arm": {"status": "owed", "theorems": ("BufEng.ft_merge_room",),
                           "what": "FALLTHROUGH ARM B at another ARM's PC+1, B's edge word: needs "
-                                  "agent 1's merge + the buffer-room theorem (the compiler "
-                                  "refuses the shape, dae31dc)"},
+                                  "agent 1's merge + the buffer-room theorem on the one-word "
+                                  "buffer (Wilson 11-20 depth ruling; the compiler refuses the "
+                                  "shape, dae31dc)"},
     "depth_gt2": {"status": "counterfactual", "theorems": (),
                   "what": "words beyond depth 2 (SLOT > 2): no theorem"},
     "spare_capture": {"status": "owed", "theorems": ("SlotReadyB.ready_spare_capture_T",),
                       "what": "PC+1 / PC+2 of a plain ARM that may be captured into the spare "
                               "(a predecessor is not no-prefetch): ready_*_T take hempty. Owed "
-                              "(Wilson 11-19): the spare-capture readiness theorem (FIFO buffer "
-                              "(b), issue at capture, the 11-17 spare margins), composition "
-                              "step 3"},
+                              "(Wilson 11-19): the spare-capture readiness theorem on BufEng's "
+                              "one-word buffer (Wilson 11-20 depth ruling), issue at capture, "
+                              "the 11-17 spare margins (m1 / m3 through the scan: "
+                              "Buf.p1b2_margin_arm_scan = 0), composition step 3"},
 }
 #: the run-level theorem behind each rule (Wilson 11-19, step 3) and the conditions slot_ready
 #: tests for it -- each a premise class of gate_lean_build.PREMISES[run_thm]["applies"], both

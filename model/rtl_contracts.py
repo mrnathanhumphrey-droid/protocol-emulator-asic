@@ -199,8 +199,8 @@ COMPOSITION = {
                      "agent 1's scan fix (ScanOk); neither is in CONTRACT_PREMISES yet -- RTL "
                      "contract wording is Wilson's"},
             {"step": "ready_spare_capture_T", "status": "owed",
-             "what": "spare-captured ARM readiness (READY_RULES spare_capture); waits on agent "
-                     "1's buffer variant"},
+             "what": "spare-captured ARM readiness (READY_RULES spare_capture) on BufEng's "
+                     "one-word buffer (Wilson 11-20 depth ruling: one word per lane)"},
             {"step": "ready_ft_edge_T", "status": "proved",
              "theorems": ("ready_ft_edge_T",)},
             {"step": "hRdy", "status": "owed",
