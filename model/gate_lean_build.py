@@ -194,7 +194,11 @@ KEY = ("dstar", "dstar29", "dstar39", "dstar39_v2", "dstar39_st", "dstar39_hold"
        # HfreeB.lean (L4 hfree step 3b): an ARM writeback is its stretch's last on the bridged run
        "runBA_succ", "stepBA_armed", "armed_after_arm", "arm_no_dec", "flS_runBK", "hrel_bridged",
        # HfreeB.lean (composition part 2, Wilson 11-21): decision spacing on the bridged run
-       "ts_wb_bridged", "ts_mono_bridged", "hsep_bridged")
+       "ts_wb_bridged", "ts_mono_bridged", "hsep_bridged",
+       # SchedK11.lean (composition L4 hS, Wilson 11-21 ruling (b)): under K11 the masked
+       # dispatcher chooses as win while an unarmed lane is ready
+       "winA_eq_of_K11", "winA_ne_none_of_K11", "winA_unarmed", "winA_some", "winA_bprime",
+       "winA_released", "winS_eq_of_K11")
 #: proof_constants.load() key -> the Lean expression that must evaluate to it (SPEC: the map)
 CONSTS = {
     "lemmaA_window": "LEMMA_A_WINDOW", "R_base": "R_BASE", "dispatch_cycles": "DISPATCH_CYCLES",

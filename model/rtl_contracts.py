@@ -146,6 +146,15 @@ RTL_CONTRACTS = {
         "lean": "hedge (ComposeB.flushOk_runBA / flush_spacing_runBA / armInvB_runBA, "
                 "OrderH.ready_ft_edge_head)",
         "must_fire": {"status": OWED, "name": None}},
+    "K11": {
+        "what": "the scheduler never chooses an armed lane while an unarmed lane is ready "
+                "(Wilson 11-21 ruling, hS option (b)). The RTL meets it by construction: it masks "
+                "before choosing (rdy_rel = ... & ~armed); agent 1 confirms that line is the "
+                "whole story in RTL. Must-fire (agent 1): a planted chooser that can pick an "
+                "armed lane while another is ready, caught. The keep-flush replay referees it: "
+                "every chosen lane checked against the model's",
+        "lean": "SchedK11.K11At; premise of SchedK11.winA_eq_of_K11 / winS_eq_of_K11",
+        "must_fire": {"status": OWED, "name": None}},
 }
 
 #: contract premise (the names in gate_lean_build.PREMISES[thm]["contract"]) -> the RTL
@@ -168,6 +177,11 @@ CONTRACT_PREMISES = {
     "disp_released_only": {
         "rtl": ("disp_released_only",),
         "why": "hwin: win picks only live, released lanes (pc2_arm's PC+1 ARM picked at release)"},
+    "sched_k11": {
+        "rtl": ("K11",),
+        "why": "hK: K11At at every cycle of the armed run, so winA win armed chooses as win "
+               "whenever an unarmed lane is ready (SchedK11.winS_eq_of_K11): the window bound's "
+               "no-decision count S has no masked-pick stall (composition L4 hS)"},
     "flush_spacing": {
         "rtl": ("K8",),
         "proof": "contract K8; proof (b) proved on the armed run (ComposeB.flush_spacing_runBA, "
@@ -248,11 +262,10 @@ COMPOSITION = {
             {"step": "L4 hM part 2: decision spacing on the bridged run (hsepBK)",
              "status": "proved",
              "theorems": ("ts_wb_bridged", "ts_mono_bridged", "hsep_bridged")},
-            {"step": "L4 hS: the K11 scheduler lemma", "status": "owed",
-             "what": "under K11 (the scheduler never chooses an armed lane while an unarmed one "
-                     "is ready; RTL rdy_rel & ~armed) winA win armed chooses as among unarmed "
-                     "ready lanes, so hS is the ruled scheduler's S (0) plus the FALLTHROUGH "
-                     "disarms (check 18); K11 + agent 1's must-fire in RTL_CONTRACTS"},
+            {"step": "L4 hS: the K11 scheduler lemma (contract K11, must-fire owed by agent 1)",
+             "status": "proved",
+             "theorems": ("winA_eq_of_K11", "winA_ne_none_of_K11", "winA_bprime",
+                          "winA_released", "winS_eq_of_K11")},
             {"step": "L4 hM / hS closure: wb_closeBK (parts 1 and 3)", "status": "owed",
              "what": "RespClose.wb_close's induction over time, all lanes, on the bridged run: "
                      "cut at each lane's last flush, wb_bound_winBK_fl with hfree from "
