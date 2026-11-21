@@ -91,14 +91,14 @@ REFETCH_MUT = False
 
 
 def refetch_drop(g, I):
-    """{word}: K6 as ruled 11-20 -- the timeout swap drops PC+2, refetched if the path reaches it.
-    A FALLTHROUGH ARM whose PC+1 continues to PC+2 reaches PC+2 on the timeout path after the
-    drop, so PC+2 is not ready there; the certificate's readiness is per word, so PC+2 leaves
-    the ready set (its edge-path readiness with it -- conservative) and its lateness is the
-    refill analysis's"""
+    """{PC+2: its FALLTHROUGH ARM}: K6 as ruled 11-20 -- the timeout swap drops PC+2, refetched
+    if the path reaches it. Where PC+1 continues to PC+2, PC+2 is entered two ways: by the edge
+    flush (from the ARM: ready, ft_edge) and from PC+1 on the timeout path (refetched). The
+    certificate takes PC+2 as ready on the ARM's entry only (lane_cert.certificate's
+    ready_entry); the PC+1 entry is charged by the refill analysis"""
     if REFETCH_MUT:
-        return set()
-    return {c2 for _a, (c1, c2) in LC.ft_paths(g, I).items()
+        return {}
+    return {c2: a for a, (c1, c2) in LC.ft_paths(g, I).items()
             if c1 in g and c2 in g and c2 in g[c1][1]}
 #: must-fire switch (gate_lane_cert M_LC_DEPTH_GT2): a slot depth above slot_depth certified
 DEPTH_MUT = False
@@ -678,6 +678,7 @@ def _image_budget(img, iters=80, premise_gaps=None, ready=None, scheme="window")
             if l in graphs and w in graphs[l][2]:
                 graphs[l][2][w] = [max(graphs[l][2][w][0], gp)] + graphs[l][2][w][1:]
     cw = {l: 0 for l in lanes}
+    rentry = {}
     labels = []
     if SLOT:
         # Wilson 11-19: a spare-possible ARM's words are refused while their spare-capture rule
@@ -688,10 +689,13 @@ def _image_budget(img, iters=80, premise_gaps=None, ready=None, scheme="window")
         # after the premise gaps: slot_ready's d is the release distance the certificate uses;
         # the port's wait behind older slot requesters (ContendB, FCFS by capture)
         cw = {l: slot_wait(graphs, I, l, k) for l in lanes}
-        ready = {l: (set(ready.get(l, ())) | slot_ready(graphs[l][0], I, SLOT, graphs[l][2], k,
-                                                        contend=cw[l]))
-                 - refetch_drop(graphs[l][0], I)
-                 for l in lanes}
+        pre = {l: set(ready.get(l, ())) | slot_ready(graphs[l][0], I, SLOT, graphs[l][2], k,
+                                                     contend=cw[l])
+               for l in lanes}
+        rf = {l: refetch_drop(graphs[l][0], I) for l in lanes}
+        # K6 (Wilson 11-20): PC+2 ready on its edge entry only, where the timeout path reaches it
+        rentry = {l: {c2: {a} for c2, a in rf[l].items() if c2 in pre[l]} for l in lanes}
+        ready = {l: pre[l] - set(rf[l]) for l in lanes}
     usb_n, usb_rmax = 0, None
     if usb:
         with contextlib.redirect_stdout(io.StringIO()):
@@ -735,7 +739,7 @@ def _image_budget(img, iters=80, premise_gaps=None, ready=None, scheme="window")
             xr = {c1: 1 for c1, _c2 in fts.values() if c1 in g}
             while True:
                 cert = LC.certificate(g, preds, gaps, k, Bl, 0, floor=floor, xr=xr, rbase=R[l],
-                                      ready=ready.get(l))
+                                      ready=ready.get(l), ready_entry=rentry.get(l))
                 if cert is None:
                     return {"B": None, "reason": "lane %d: no lateness certificate at B = %d%s"
                             % (l, Bl, " (slot charge %d)" % SB[l] if SB[l] else ""), "lanes": {}}

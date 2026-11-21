@@ -259,7 +259,8 @@ ARM_RETIRE_GAP = PC.load()["arm_retire_gap"]
 REBASE = 1
 
 
-def certificate(g, preds, gaps, k, B, tail, iters=200, floor=None, xr=None, rbase=2, ready=None):
+def certificate(g, preds, gaps, k, B, tail, iters=200, floor=None, xr=None, rbase=2, ready=None,
+                ready_entry=None):
     """GapRun's certificate on the word graph with Rr = L + 2 (+ tail): returns (lat, Z, Rr) or
     None when the values keep growing (no fixpoint: no certificate exists for this image).
     `floor`: a lateness floor per word (a FALLTHROUGH ARM's PC+2, refilled after its flush);
@@ -267,10 +268,16 @@ def certificate(g, preds, gaps, k, B, tail, iters=200, floor=None, xr=None, rbas
     `rbase`: the response past the head's lateness -- 2 for the USB lane (prio_resp: it wins its
     decisions); a lane's window bound R for any other lane (RespWinN.wb_bound_win_n).
     `ready`: words whose head is valid AT their release -- the COUNTERFACTUAL of an RTL that
-    prefetches them (Wilson 11-15, agent 1's prefetch note); never used for a record."""
+    prefetches them (Wilson 11-15, agent 1's prefetch note); never used for a record.
+    `ready_entry` {word: {pred}}: the word is ready when entered from those predecessors only
+    (K6, Wilson 11-20: a FALLTHROUGH PC+2 is ready entered by its edge flush -- the ARM -- and
+    refetched entered from PC+1 on the timeout path). Those entries contribute nothing, the
+    word's flush floor included (it is the edge entry's); every other entry is charged as
+    usual. Default none: unchanged."""
     floor = floor or {}
     xr = xr or {}
     ready = ready or ()
+    ready_entry = ready_entry or {}
     I = _isa()
     D, HS = k["dstar"], k["head_slack"]
     npf = {w: g[w][0]["op"] in I.BRANCH_OPS for w in g}
@@ -300,8 +307,11 @@ def certificate(g, preds, gaps, k, B, tail, iters=200, floor=None, xr=None, rbas
             Zn[w] = z
         ln = {}
         for c in g:
-            v = floor.get(c, 0)
+            skip = ready_entry.get(c, ())
+            v = 0 if skip else floor.get(c, 0)
             for b in preds[c]:
+                if b in skip:
+                    continue
                 if npf[b]:
                     v = max(v, Rr[b] + HS + B - gp[b])
                 for a in preds[b]:

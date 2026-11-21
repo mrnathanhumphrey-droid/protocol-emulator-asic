@@ -478,12 +478,13 @@ def check_restart(BB, LC, I, late_edge=0):
     orig = LC.certificate
     rows = []
 
-    def spy(g, preds, gaps, k, B, tail, iters=200, floor=None, xr=None, rbase=2, ready=None):
+    def spy(g, preds, gaps, k, B, tail, iters=200, floor=None, xr=None, rbase=2, ready=None,
+            ready_entry=None):
         if late_edge:
             fts = LC.ft_paths(g, I)
             gaps = {w: (v[:-1] + [v[-1] + late_edge] if w in fts else v) for w, v in gaps.items()}
         r = orig(g, preds, gaps, k, B, tail, iters=iters, floor=floor, xr=xr, rbase=rbase,
-                 ready=ready)
+                 ready=ready, ready_entry=ready_entry)
         if r is not None:
             for a, c2, mz, mh in LC.restart_margins(g, preds, gaps, k, B, r):
                 rows.append({"ctx": CTX[0], "rbase": rbase, "a": a, "ready": bool(ready and c2 in
