@@ -78,3 +78,4 @@ import JLane.OrderK
 import JLane.SpareB
 import JLane.OrderH
 import JLane.OrderT
+import JLane.HfreeB

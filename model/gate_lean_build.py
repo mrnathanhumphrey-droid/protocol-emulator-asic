@@ -187,7 +187,10 @@ KEY = ("dstar", "dstar29", "dstar39", "dstar39_v2", "dstar39_st", "dstar39_hold"
        "ready_ft_edge_head", "keep_at_hit_edge", "hidxA_at",
        # OrderT.lean (Wilson 11-20 rulings 1a / 1b): the K6 timeout swap as the keep-flush that
        # keeps PC+1; PC+1 captured by the deadline proved, not assumed
-       "ft_timeout_captured_T", "ready_ft_timeout_T")
+       "ft_timeout_captured_T", "ready_ft_timeout_T",
+       # HfreeB.lean (composition L4 hfree, 11-21): hfree discharged on a stretch by strong
+       # induction -- the gap condition inside, the restart's release before
+       "hpre_after_flush", "hR_stretch_gap", "hR_stretch_nofree")
 #: proof_constants.load() key -> the Lean expression that must evaluate to it (SPEC: the map)
 CONSTS = {
     "lemmaA_window": "LEMMA_A_WINDOW", "R_base": "R_BASE", "dispatch_cycles": "DISPATCH_CYCLES",
