@@ -213,11 +213,9 @@ RUN_THM = {
                             "pc1_not_npf", "wait_in_margin")},
     # ready_ft_edge_head (OrderH, Nate 11-20; was ready_ft_edge_armed / _K) takes the keep premise
     # from the arming chain down to hidxH -- the flush keeps the word fetched right after the ARM
-    # (CONTRACT_PREMISES fetch_order); its premise list (gate_lean_build.PREMISES) waits on an RTL
-    # contract for the scan fix (ScanOk), so it is not yet run_status "proved" (check 13 would
-    # compare it both ways)
-    "ft_edge": {"run_thm": "ready_ft_edge_head",
-                "run_status": "owed (registration: ScanOk contract wording)", "applies": ()},
+    # (CONTRACT_PREMISES fetch_order); ScanOk and hedge are contracts K9 / K10 (Wilson 11-20).
+    # No per-image condition: every premise is a contract or the run's shape
+    "ft_edge": {"run_thm": "ready_ft_edge_head", "run_status": "proved", "applies": ()},
     "pc1_spare": {"run_thm": "ready_pc1_spare_T", "run_status": "proved",
                   "applies": ("plain_edge_arm", "wait_in_margin")},
     "pc2_plain_spare": {"run_thm": "ready_pc2_plain_spare_T", "run_status": "proved",

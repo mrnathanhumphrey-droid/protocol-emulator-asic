@@ -117,6 +117,30 @@ RTL_CONTRACTS = {
                 "registered in gate_mutant_kills on the merged tree",
         "lean": "Count.wb_unique",
         "must_fire": {"status": OWED, "name": None}},
+    "K9": {
+        "what": "ScanOk (Wilson 11-20 ruling 2: the RTL text is the Lean premise transcribed). "
+                "LEAN (FlushHeld.ScanOk, verbatim): `def ScanOk (A : EngBA) : Prop := "
+                "forall l, A.hit l = true -> A.X.x.e.pst = .scan -> "
+                "(stepB P (winA win A.armed) usb sreq A.X.base).e.pst != .scan -> "
+                "(stepB P (winA win A.armed) usb sreq A.X.base).e.pl != l` -- in a cycle where "
+                "lane l is flushed (its edge hits) and the port is at its scan, if the scan "
+                "issues a fetch, that fetch is not for l. RTL MEANING (agent 1, to write and "
+                "confirm): the 11-14 scan fix -- the scan never selects a lane whose slots are "
+                "being flushed. Must-fire (agent 1): a planted scan selection of a flushed lane, "
+                "caught",
+        "lean": "FlushHeld.ScanOk; premise of ComposeB.flushOk_runBA / flush_spacing_runBA, "
+                "OrderH.ready_ft_edge_head",
+        "must_fire": {"status": OWED, "name": None}},
+    "K10": {
+        "what": "edge timing (Wilson 11-20 ruling 3): a lane's edge detector fires only when its "
+                "armed flag was set in an earlier cycle, so the earliest edge a lane can act on "
+                "is its arming writeback + 1 (Lean: hedge, forall t l, t + 1 <= edge t l). A "
+                "hardware property, separate from the peer-side 'armed before the earliest SOP' "
+                "premise. Must-fire (agent 1): a planted edge recognised in the arming writeback "
+                "cycle itself, caught",
+        "lean": "hedge (ComposeB.flushOk_runBA / flush_spacing_runBA / armInvB_runBA, "
+                "OrderH.ready_ft_edge_head)",
+        "must_fire": {"status": OWED, "name": None}},
 }
 
 #: contract premise (the names in gate_lean_build.PREMISES[thm]["contract"]) -> the RTL
@@ -148,6 +172,15 @@ CONTRACT_PREMISES = {
                "restart_runBK's 'no flush at f+1, f+2' holds by construction; the spacing enters "
                "through hedge -- y's edge word present at every flush restarted from -- which a "
                "second flush within 2 cycles could break (composition L1, d03bf22)"},
+    "scan_ok": {
+        "rtl": ("K9",),
+        "why": "hscan: the scan never issues for a lane in the cycle its edge flushes it "
+               "(FlushHeld.ScanOk), so the flush's FlushOk holds on the armed run "
+               "(flushOk_runBA) and no flush comes within 2 cycles of another (flush_spacing)"},
+    "edge_timing": {
+        "rtl": ("K10",),
+        "why": "hedge: an arming's edge is at least one cycle after its writeback, so the armed "
+               "invariant holds (armInvB_runBA) and the ARM has retired before its edge"},
     "fetch_order": {
         "rtl": ("K1", "K7"),
         "why": "OrderK's keep premise (K6 build, Nate 11-20): KeepOk at every flush and hkeep at "
@@ -210,10 +243,9 @@ COMPOSITION = {
              "theorems": ("keep_at_hit", "keepOk_runBK", "hkeep_runBK", "ready_ft_edge_armed")},
             {"step": "hidxA: the edge word is the ARM's next fetch", "status": "proved",
              "theorems": ("hidxA_of_head", "hidxA_runBA", "ready_ft_edge_head")},
-            {"step": "contracts for hedge-timing and ScanOk", "status": "owed",
-             "what": "flush_spacing_runBA / flushOk_runBA take 'edge >= arming writeback + 1' and "
-                     "agent 1's scan fix (ScanOk); neither is in CONTRACT_PREMISES yet -- RTL "
-                     "contract wording is Wilson's"},
+            {"step": "contracts for hedge-timing and ScanOk (K10, K9; Wilson 11-20)",
+             "status": "proved",
+             "theorems": ("flushOk_runBA", "flush_spacing_runBA", "ready_ft_edge_head")},
             {"step": "spare-capture readiness (ready_*_spare_T)", "status": "proved",
              "theorems": ("ready_pc1_spare_T", "ready_pc2_plain_spare_T",
                           "ready_pc2_arm_spare_T")},

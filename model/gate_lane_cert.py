@@ -626,6 +626,13 @@ def _cond_case(BB, I, k, rule, cond):
     `cond` (None: all met). A spare-capture rule (BB.SPARE_BASE) is its base rule's case with the
     ARM spare-possible (w3 plain)."""
     dmin = k["p1b2_plain_min_d"]
+    if rule == "ft_edge":
+        # check 13's FALLTHROUGH case: ARM (FT, T 40) -> PC+1 (timeout) / PC+2 (edge, word 2);
+        # the run theorem (OrderH.ready_ft_edge_head) has no per-image condition
+        ft = {"op": I.OP_ARM, "mod": I.ARM_MOD_FT, "delay": 40}
+        plain = {"op": I.OP_LEVEL, "mod": 0, "delay": 0}
+        return ({0: (ft, [1, 2]), 1: (plain, [3]), 2: (plain, [3]), 3: (plain, [0])},
+                {0: [1], 1: [5], 2: [5], 3: [5]}, 0, 2)
     spare = rule in BB.SPARE_BASE
     rule = BB.SPARE_BASE.get(rule, rule)
     g, gaps = _slot_graph(I, dmin - 1 if rule == "pc2_arm" else dmin, pc1_arm=rule == "pc2_arm")

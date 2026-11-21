@@ -274,6 +274,16 @@ PREMISES = {
                          disp_released_only=("hwin",)),
         "shape": _PC2_SPARE_SHAPE,
     },
+    # OrderH (Wilson 11-20, K9 / K10): the FT edge word on the armed run. Every premise is a
+    # contract or the run's shape (its start from reset -- order, nothing armed -- the flush at
+    # f, and L3's valid head there, ComposeB.head_valid_runBK); no per-image condition
+    "ready_ft_edge_head": {
+        "applies": {},
+        "contract": {"engine_wf": ("hI",), "slot_requester": ("hok",),
+                     "edge_timing": ("hedge",), "scan_ok": ("hscan",),
+                     "fetch_order": ("hidxH",)},
+        "shape": ("hO", "hA", "h0", "hfl", "hv"),
+    },
 }
 #: the M_LEAN_PREMISE_UNLISTED plant: (file, theorem, the signature text it extends, the binder)
 PREMISE_PLANT = ("SlotReadyB.lean", "ready_pc1_plain_T",
