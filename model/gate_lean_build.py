@@ -204,7 +204,10 @@ KEY = ("dstar", "dstar29", "dstar39", "dstar39_v2", "dstar39_st", "dstar39_hold"
        "cntBK_sparse_g", "cntBK_decOther_split",
        # HfreeR.lean (closure step 3): hnf on every runBK; hfree in run coordinates
        "ts_flush_stepBK", "ts_after_flushBK", "hnf_runBK", "flush_or_clearBK", "hfree_runBK",
-       "hrelR_bridged")
+       "hrelR_bridged",
+       # CloseBK.lean (closure step 4b): wb_closeBK; hS = 0 under K11 + (b′) on the bridged run
+       "cntBK_decAny_split", "cntBK_zero_of", "wb_closeBK", "armed_persist", "unarmed_in_window",
+       "noDec_zero_K11", "wb_closeBK_K11")
 #: proof_constants.load() key -> the Lean expression that must evaluate to it (SPEC: the map)
 CONSTS = {
     "lemmaA_window": "LEMMA_A_WINDOW", "R_base": "R_BASE", "dispatch_cycles": "DISPATCH_CYCLES",

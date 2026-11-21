@@ -266,11 +266,14 @@ COMPOSITION = {
              "status": "proved",
              "theorems": ("winA_eq_of_K11", "winA_ne_none_of_K11", "winA_bprime",
                           "winA_released", "winS_eq_of_K11")},
-            {"step": "L4 hM / hS closure: wb_closeBK (parts 1 and 3)", "status": "owed",
-             "what": "RespClose.wb_close's induction over time, all lanes, on the bridged run: "
-                     "cut at each lane's last flush, wb_bound_winBK_fl with hfree from "
-                     "hrel_bridged + hpre_after_flush, hM from hsep_bridged + cnt_sparse_g + "
-                     "hmul / hK"},
+            # closure 11-21: counting on runBK (CountBK), hnf / hfree in run coordinates
+            # (HfreeR), hS handed the decision + no-flush (4a), the closure + hS = 0 (CloseBK)
+            {"step": "L4 hM / hS closure: wb_closeBK (parts 1 and 3); hS = 0 under K11 + (b')",
+             "status": "proved",
+             "theorems": ("cntBK_add", "cntBK_sparse_g", "cntBK_decOther_split",
+                          "cntBK_decAny_split", "hnf_runBK", "hfree_runBK", "hrelR_bridged",
+                          "wb_closeBK", "unarmed_in_window", "noDec_zero_K11",
+                          "wb_closeBK_K11")},
             {"step": "bridge: the armed run is a runBK run", "status": "proved",
              "theorems": ("runBA_proj", "flushOk_runBA")},
             {"step": "flush spacing (K8), proof (b)", "status": "proved",
