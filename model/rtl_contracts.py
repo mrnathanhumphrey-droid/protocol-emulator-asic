@@ -207,7 +207,9 @@ CONTRACT_PREMISES = {
                "EDGE THE FLUSH KEEPS THE WORD FETCHED IMMEDIATELY AFTER THE ARM (kept index = "
                "the ARM's fetch index + 1) -- K1 made exact, with K7 (one fetch pointer per "
                "lane, consecutive indices) and the edge-first order (the requester fetches the "
-               "edge word first)"},
+               "edge word first). ready_ft_edge_head asks hidxH only at the arming whose edge "
+               "it is, so other armings may end in a K6 timeout swap (fetch order holds across "
+               "both, OrderK.ordBK_run)"},
 }
 
 #: THE MILESTONE (Wilson 11-18 / 11-19): slot_on_composition -- GapRun on the buffered engine with

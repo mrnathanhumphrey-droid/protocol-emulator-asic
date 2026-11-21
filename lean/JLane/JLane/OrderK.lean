@@ -392,8 +392,6 @@ theorem ready_ft_edge_K (hok : SReqB P sreq) (fl : Nat → Lane → Bool) (k : N
     (X0 : EngBK) (hI : WfBK X0) (hO : OrdBK X0) (y : Lane) (f : Nat)
     (hF : ∀ j, j < f → FlushOk P win usb sreq (fl (runBK P win usb sreq fl k j X0).x.e.now)
       (runBK P win usb sreq fl k j X0))
-    (hK : ∀ j, j < f → KeepOk P (fl (runBK P win usb sreq fl k j X0).x.e.now)
-      (k (runBK P win usb sreq fl k j X0).x.e.now) (runBK P win usb sreq fl k j X0))
     (hfl : fl (runBK P win usb sreq fl k f X0).x.e.now y = true)
     (hkeep : k (runBK P win usb sreq fl k f X0).x.e.now y
       = (runBK P win usb sreq fl k f X0).x.nr y)
@@ -576,7 +574,6 @@ theorem ready_ft_edge_armed (hok : SReqB P sreq) (hedge : ∀ t l, t + 1 ≤ edg
   (ready_ft_edge_K P (winS P win usb sreq isArm edge kt A0) usb sreq hok
     (flS P win usb sreq isArm edge kt A0) kt A0.X hI hO y f
     (fun j _ => flushOk_runBA P win usb sreq isArm edge kt A0 hedge hA j (hscan j))
-    (fun j _ => keepOk_runBK P win usb sreq isArm edge kt A0 hedge hA h0 hidxA j)
     hfl (hkeep_runBK P win usb sreq isArm edge kt A0 hedge hA h0 hidxA f y hfl) hv).2
 
 end
