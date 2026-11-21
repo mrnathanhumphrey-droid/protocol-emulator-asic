@@ -242,9 +242,10 @@ COMPOSITION = {
              "theorems": ("hpre_after_flush", "hrel_of_gap", "hR_stretch_gap",
                           "hR_stretch_nofree")},
             {"step": "L4 hfree: ARM writebacks on runBK", "status": "owed",
-             "what": "HfreeB.HrelS for an ARM's writeback on the bridged run (runBA_proj): its gap "
-                     "is ext3 = edge + 1 - ts with the edge after the writeback -- "
-                     "ArmClose.wb_gap_words' ARM case, carried to runBK"},
+             "what": "HfreeB.HrelS for an ARM's writeback on the bridged run (runBA_proj): it "
+                     "holds vacuously -- after an ARM's retiring writeback y is armed (arms), "
+                     "winA never picks it, and its edge is a hit = a flush of y (flS), which ends "
+                     "the stretch; so no later writeback of y in the stretch (step 3b)"},
             {"step": "L4 window budgets hM / hS", "status": "owed",
              "what": "the window chain (Wilson 11-18 'hR on runB'): M other-lane decisions and "
                      "S idle cycles per K-window, counted along runBK"},
