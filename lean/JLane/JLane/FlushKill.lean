@@ -74,7 +74,7 @@ def stepBKK (P : Program) (win : Engine → Option Lane) (usb : Option Lane)
         ts := fun l => if fl l = true then b.e.now + 1 else y.e.ts l }
       buf := fun l => if fl l = true then false
         else if (X.kc && decide (l = b.e.pl)) = true then false else y.buf l
-      sq := fun l s => if fl l = true ∧ s = keepSlot b l (k l) then k l else y.sq l s }
+      sq := fun l s => if fl l = true ∧ s = keepSlot b l (k l) then y.nr l else y.sq l s }
     pkill := if X.x.e.pst = .cap then false
       else X.pkill || (fl X.x.e.pl && (decide (X.x.e.pst = .req) || decide (X.x.e.pst = .wait))) }
 
@@ -422,7 +422,8 @@ end
 theorem edge_survives_flushK (X : EngBK) (l : Lane) (hf : fl l = true)
     (hk : X.base.hasEdge l (k l) = true) :
     (stepBKK P win usb sreq fl k X).x.e.headValid l = true ∧
-    (stepBKK P win usb sreq fl k X).x.sq l ((stepBKK P win usb sreq fl k X).x.e.sel l) = k l ∧
+    (stepBKK P win usb sreq fl k X).x.sq l ((stepBKK P win usb sreq fl k X).x.e.sel l)
+      = (stepBKK P win usb sreq fl k X).x.nr l ∧
     (stepBKK P win usb sreq fl k X).x.e.ts l = (stepBKK P win usb sreq fl k X).x.e.now := by
   have hn : (stepBKK P win usb sreq fl k X).x.e.now = X.base.e.now + 1 :=
     stepB_e_now P win usb sreq X.base
@@ -430,7 +431,8 @@ theorem edge_survives_flushK (X : EngBK) (l : Lane) (hf : fl l = true)
   · unfold Engine.headValid
     rw [selK, actvK]
     simp [hf, hk]
-  · show (if fl l = true ∧ _ = keepSlot X.base l (k l) then k l else _) = k l
+  · show (if fl l = true ∧ _ = keepSlot X.base l (k l)
+        then (stepB P win usb sreq X.base).nr l else _) = (stepB P win usb sreq X.base).nr l
     rw [selK]
     simp [hf]
   · rw [hn]
@@ -440,13 +442,14 @@ theorem edge_survives_flushK (X : EngBK) (l : Lane) (hf : fl l = true)
 theorem flushK_keeps_only_edge (X : EngBK) (l : Lane) (hf : fl l = true) (s : Slot)
     (h : (stepBKK P win usb sreq fl k X).x.e.actv l s = true) :
     s = (stepBKK P win usb sreq fl k X).x.e.sel l ∧
-      (stepBKK P win usb sreq fl k X).x.sq l s = k l := by
+      (stepBKK P win usb sreq fl k X).x.sq l s = (stepBKK P win usb sreq fl k X).x.nr l := by
   rw [actvK] at h
   simp only [hf, ↓reduceIte, Bool.and_eq_true, decide_eq_true_eq] at h
   refine ⟨?_, ?_⟩
   · rw [selK]
     simp [hf, h.2]
-  · show (if fl l = true ∧ s = keepSlot X.base l (k l) then k l else _) = k l
+  · show (if fl l = true ∧ s = keepSlot X.base l (k l)
+        then (stepB P win usb sreq X.base).nr l else _) = (stepB P win usb sreq X.base).nr l
     simp [hf, h.2]
 
 theorem flushK_buf_empty (X : EngBK) (l : Lane) (hf : fl l = true) :
@@ -496,7 +499,8 @@ theorem stepBKK_noflush (X : EngBK) (hfl : ∀ l, fl l = false) (hk : X.pkill = 
         buf := fun l => if fl l = true then false
           else if (X.kc && decide (l = X.base.e.pl)) = true then false
           else (stepB P win usb sreq X.base).buf l
-        sq := fun l s => if fl l = true ∧ s = keepSlot X.base l (k l) then k l
+        sq := fun l s => if fl l = true ∧ s = keepSlot X.base l (k l)
+          then (stepB P win usb sreq X.base).nr l
           else (stepB P win usb sreq X.base).sq l s } : EngB) = stepB P win usb sreq X.x
     simp only [hfl, hkc, Bool.false_eq_true, ↓reduceIte, Bool.false_and, false_and]
     rw [hb]

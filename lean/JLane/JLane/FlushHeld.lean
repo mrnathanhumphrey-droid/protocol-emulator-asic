@@ -32,7 +32,7 @@ variable (P : Program) (win : Engine → Option Lane) (usb : Option Lane)
 
 theorem sqK (X : EngBK) (l : Lane) (s : Slot) :
     (stepBKK P win usb sreq fl k X).x.sq l s =
-      (if fl l = true ∧ s = keepSlot X.base l (k l) then k l
+      (if fl l = true ∧ s = keepSlot X.base l (k l) then nrB P X.base l
        else sqB X.base l s) := rfl
 
 theorem bsqK (X : EngBK) (l : Lane) :
@@ -532,7 +532,8 @@ theorem ft_edge_at_release_armed (hok : SReqB P sreq) (hedge : ∀ t l, t + 1 �
     (runBA P win usb sreq isArm edge kt j A0).hit l = true ∧
     (runBA P win usb sreq isArm edge kt (j + 1) A0).X.x.e.headValid l = true ∧
     (runBA P win usb sreq isArm edge kt (j + 1) A0).X.x.sq l
-      ((runBA P win usb sreq isArm edge kt (j + 1) A0).X.x.e.sel l) = kk ∧
+      ((runBA P win usb sreq isArm edge kt (j + 1) A0).X.x.e.sel l)
+      = (runBA P win usb sreq isArm edge kt (j + 1) A0).X.x.nr l ∧
     (runBA P win usb sreq isArm edge kt (j + 1) A0).X.x.e.ts l =
       (runBA P win usb sreq isArm edge kt (j + 1) A0).X.x.e.now := by
   intro j
@@ -554,7 +555,6 @@ theorem ft_edge_at_release_armed (hok : SReqB P sreq) (hedge : ∀ t l, t + 1 �
     (kt (runBA P win usb sreq isArm edge kt j A0).X.x.e.now)
     (runBA P win usb sreq isArm edge kt j A0).X l hhit
     (by rw [hkj]; exact holds_hasEdge _ l kk hho)
-  rw [hkj] at this
   exact this
 
 /-- **The edge word is held at the edge.** At an ARM's retiring writeback on `l` (cycle `t₀`),
@@ -689,7 +689,8 @@ theorem ft_edge_at_release (hok : SReqB P sreq) (hedge : ∀ t l, t + 1 ≤ edge
     Aj.hit l = true ∧
     (runBA P win usb sreq isArm edge kt (j + 1) A0).X.x.e.headValid l = true ∧
     (runBA P win usb sreq isArm edge kt (j + 1) A0).X.x.sq l
-      ((runBA P win usb sreq isArm edge kt (j + 1) A0).X.x.e.sel l) = kk ∧
+      ((runBA P win usb sreq isArm edge kt (j + 1) A0).X.x.e.sel l)
+      = (runBA P win usb sreq isArm edge kt (j + 1) A0).X.x.nr l ∧
     (runBA P win usb sreq isArm edge kt (j + 1) A0).X.x.e.ts l =
       (runBA P win usb sreq isArm edge kt (j + 1) A0).X.x.e.now := by
   intro j Aj
@@ -711,7 +712,6 @@ theorem ft_edge_at_release (hok : SReqB P sreq) (hedge : ∀ t l, t + 1 ≤ edge
   have := edge_survives_flushK P (winA win Aj.armed) usb sreq Aj.hit
     (kt (runBA P win usb sreq isArm edge kt j A0).X.x.e.now) Aj.X l hhit
     (by rw [hkj]; exact holds_hasEdge _ l kk hho)
-  rw [hkj] at this
   exact this
 
 end

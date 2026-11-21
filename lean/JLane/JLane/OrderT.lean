@@ -119,7 +119,7 @@ theorem ready_ft_timeout_T (hok : SReqB P sreq) (fl : Nat → Lane → Bool) (k 
     (runBK P win usb sreq fl k (s + T + 1) X0).x.e.headValid y = true ∧
     (runBK P win usb sreq fl k (s + T + 1) X0).x.sq y
       ((runBK P win usb sreq fl k (s + T + 1) X0).x.e.sel y)
-      = k (runBK P win usb sreq fl k (s + T) X0).x.e.now y ∧
+      = (runBK P win usb sreq fl k (s + T + 1) X0).x.nr y ∧
     (runBK P win usb sreq fl k (s + T + 1) X0).x.e.ts y
       = (runBK P win usb sreq fl k (s + T + 1) X0).x.e.now := by
   obtain ⟨j1, j2, h11, h12, hs1, hmin1, h21, h22, hlt, hs2, hmin2, hcap, hpk⟩ :=

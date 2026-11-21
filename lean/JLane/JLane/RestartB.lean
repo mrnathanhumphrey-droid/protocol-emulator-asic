@@ -203,7 +203,7 @@ theorem frozen_stepBKK (fl : Lane → Bool) (k : Lane → Nat) (X : EngBK) (y : 
   · rw [stepBKK_ts_y P win usb sreq fl k X y hf]
     unfold tsNext
     rw [if_neg (fun h => hnw ⟨h.1, h.2.symm⟩)]
-  · show (if fl y = true ∧ X.x.e.sel y = keepSlot X.base y (k y) then k y
+  · show (if fl y = true ∧ X.x.e.sel y = keepSlot X.base y (k y) then nrB P X.base y
       else sqB X.base y (X.x.e.sel y)) = _
     rw [if_neg (fun h => by rw [hf] at h; cases h.1)]
     unfold sqB
@@ -275,7 +275,7 @@ theorem restart_three (hok : SReqB P sreq) (fl0 fl1 fl2 : Lane → Bool) (k0 k1 
     (hI : WfBK X) (hF0 : FlushOk P win usb sreq fl0 X) (hF1 : FlushOk P win usb sreq fl1 X1)
     (hf0 : fl0 y = true) (hk : X.base.hasEdge y (k0 y) = true)
     (hf1 : fl1 y = false) (hf2 : fl2 y = false) :
-    X3.base.held y = 1 ∧ X3.base.e.headValid y = true ∧ X3.x.sq y (X3.x.e.sel y) = k0 y ∧
+    X3.base.held y = 1 ∧ X3.base.e.headValid y = true ∧ X3.x.sq y (X3.x.e.sel y) = X1.x.nr y ∧
       X3.base.e.ts y = X.x.e.now + 1 ∧ X3.base.e.now = X.x.e.now + 3 := by
   have hI1 : WfBK X1 := hX1 ▸ wfBK_step P win usb sreq fl0 k0 hok X hI hF0
   have hI2 : WfBK X2 := hX2 ▸ wfBK_step P win usb sreq fl1 k1 hok X1 hI1 hF1
@@ -362,7 +362,7 @@ theorem restart_runBK (hok : SReqB P sreq) (fl : Nat → Lane → Bool) (k : Nat
     (runBK P win usb sreq fl k (f + 3) X0).base.held y = 1 ∧
     (runBK P win usb sreq fl k (f + 3) X0).base.e.headValid y = true ∧
     (runBK P win usb sreq fl k (f + 3) X0).x.sq y ((runBK P win usb sreq fl k (f + 3) X0).x.e.sel y)
-      = k (runBK P win usb sreq fl k f X0).x.e.now y ∧
+      = (runBK P win usb sreq fl k (f + 1) X0).x.nr y ∧
     (runBK P win usb sreq fl k (f + 3) X0).base.e.ts y
       = (runBK P win usb sreq fl k f X0).x.e.now + 1 ∧
     (runBK P win usb sreq fl k (f + 3) X0).base.e.now

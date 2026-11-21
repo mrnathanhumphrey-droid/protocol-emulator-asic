@@ -10,12 +10,11 @@ fetched immediately after the ARM (K7: one fetch pointer per lane, consecutive i
 edge-first order: the edge word is that word). This is the hardware's part: the flush keeps the
 word fetched right after the ARM.
 
-The circularity: the head's index is `nr` by fetch order (`OrdBK.o1`), and fetch order along the
-run (`ordBK_run`) needs the keep premise at every earlier cycle, which needs `hidxA` at every
-earlier arming. So the two are proved together, by strong induction on the arming time
-(`hidxA_of_head`): at an arming `t₀`, the keep premise holds at every cycle `j < t₀`
-(`keepOk_runBK_lt`, from `hidxA` at armings before `j`), so fetch order holds at `t₀`, so the
-ARM's head index is `nr`, so `hidxH` gives `hidxA` at `t₀`.
+The head's index is `nr` by fetch order (`OrdBK.o1`), so at an arming `t₀` the ARM's head index
+is `nr` and `hidxH` gives `hidxA`. (First built as a strong induction because fetch order once
+needed the keep premise at every earlier cycle; since the flush writes the kept word's index as
+the lane's next position (FlushKill, Wilson 11-20 K6), `ordBK_run` needs only `FlushOk`, and the
+induction in `hidxA_of_head` no longer uses its hypothesis.)
 
 Proved:
 * `keep_at_hit_lt` / `keepOk_runBK_lt` -- `keep_at_hit` / `keepOk_runBK` with `hidxA` asked only
@@ -106,9 +105,6 @@ theorem hidxA_of_head (hok : SReqB P sreq) (hedge : ∀ t l, t + 1 ≤ edge t l)
         exact ordBK_run P (winS P win usb sreq isArm edge kt A0) usb sreq hok
           (flS P win usb sreq isArm edge kt A0) kt t0 A0.X hI hO
           (fun j _ => flushOk_runBA P win usb sreq isArm edge kt A0 hedge hA j (hscan j))
-          (fun j hj => keepOk_runBK_lt P win usb sreq isArm edge kt A0 hedge hA h0 j
-            (fun t1 y1 h1 ha1 => hidxA_of_head hok hedge hI hO hA h0 hscan hidxH n t1 y1
-              (by omega) ha1))
       -- the arming writeback dispatches the ARM: y's head is valid, its index is nr
       have hW := wfBK_runBA P win usb sreq isArm edge kt A0 hok hedge hI hA hscan t0
       have harm' := harm
@@ -153,8 +149,8 @@ theorem ready_ft_edge_head (hok : SReqB P sreq) (hedge : ∀ t l, t + 1 ≤ edge
         (flS P win usb sreq isArm edge kt A0) kt (f + 1) A0.X).x.sq y
       ((runBK P (winS P win usb sreq isArm edge kt A0) usb sreq
         (flS P win usb sreq isArm edge kt A0) kt (f + 1) A0.X).x.e.sel y)
-      = kt (runBK P (winS P win usb sreq isArm edge kt A0) usb sreq
-        (flS P win usb sreq isArm edge kt A0) kt f A0.X).x.e.now y ∧
+      = (runBK P (winS P win usb sreq isArm edge kt A0) usb sreq
+        (flS P win usb sreq isArm edge kt A0) kt (f + 1) A0.X).x.nr y ∧
     (runBK P (winS P win usb sreq isArm edge kt A0) usb sreq
         (flS P win usb sreq isArm edge kt A0) kt (f + 1) A0.X).x.e.ts y
       = (runBK P (winS P win usb sreq isArm edge kt A0) usb sreq

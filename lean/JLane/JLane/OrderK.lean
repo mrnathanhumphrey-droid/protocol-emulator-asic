@@ -6,17 +6,20 @@ BufEng's order invariant `OrdB` (head = `nr`, spare = `nr + 1`, buffer = `nr + n
 word in flight = `nr + nslots` of its lane) is preserved by every buffered cycle
 (`BufEng.ordB_step`). On the flushed run (`FlushKill.stepBKK`) it breaks in two places only:
 
-* **the flush**: the lane keeps one word, with fetch index `k l`, in its head. The head rule
-  survives exactly when `k l` is the lane's next retirement index after the cycle (`KeepOk`):
-  the kept word is the lane's oldest unretired word. In the edge-first order this is K3(a): the
-  ARM has retired before it is armed, and nothing after the edge word retires before the edge.
+* **the flush**: the lane keeps one word, selected by its fetch index `k l`, in its head, and the
+  flush writes its index as the lane's next retirement position after the cycle (FlushKill,
+  Wilson 11-20 K6). So the head rule survives every flush, edge or timeout, with no premise. At
+  an edge the kept word is the lane's oldest unretired word anyway (`KeepOk`, K3(a)), so the
+  write changes nothing there; at a timeout swap the kept PC+1 takes the dropped PC+2's
+  position. `KeepOk` remains what identifies the kept word as the edge word
+  (`hasEdge_of_head`, `ready_ft_edge_K`).
 * **the kill**: a killed in-flight fetch keeps its stale index after the flush shrank the lane.
   So `OrdBK` asks the in-flight rule only while no kill is pending. The killed capture files
   nothing (`FlushKill.kill_files_nothing`), so nothing reads its index.
 
 Proved:
-* `ordBK_step` -- `OrdBK` survives a cycle, given `WfBK`, `FlushOk` and `KeepOk`;
-* `ordBK_run` -- along a run, given `FlushOk` and `KeepOk` at every cycle;
+* `ordBK_step` -- `OrdBK` survives a cycle, given `WfBK` and `FlushOk`;
+* `ordBK_run` -- along a run, given `FlushOk` at every cycle (edge and timeout flushes alike);
 * `ordBK_init` -- a run starts from BufEng's `OrdB` with no kill pending.
 
 Method: where the kill is pending, the cycle's slot and buffer writes that survive are not the
@@ -154,7 +157,7 @@ theorem capBuf_okK (X : EngBK) (hO : OrdBK X) (l : Lane) (hfl : fl l = false)
     rw [bufK, hfl] at hb
     simp [hcond] at hb
 
-theorem ordK_o1 (X : EngBK) (hI : WfBK X) (hO : OrdBK X) (hK : KeepOk P fl k X) (l : Lane)
+theorem ordK_o1 (X : EngBK) (hI : WfBK X) (hO : OrdBK X) (l : Lane)
     (hv : (stepBKK P win usb sreq fl k X).x.e.headValid l = true) :
     (stepBKK P win usb sreq fl k X).x.sq l ((stepBKK P win usb sreq fl k X).x.e.sel l)
       = (stepBKK P win usb sreq fl k X).x.nr l := by
@@ -176,8 +179,9 @@ theorem ordK_o1 (X : EngBK) (hI : WfBK X) (hO : OrdBK X) (hK : KeepOk P fl k X) 
     exact ordB_o1 P (fixB X.base) (wfB_fixB _ hI.wf) (ordB_fixK X hO) l hv'
   · have hsel : (stepBKK P win usb sreq fl k X).x.e.sel l = keepSlot X.base l (k l) := by
       rw [selK, if_pos hfl]
-    rw [hsel, sqK, if_pos ⟨hfl, rfl⟩, nrB_base]
-    exact hK l hfl
+    -- the flush writes the kept word's index as the lane's count after the cycle (FlushKill,
+    -- Wilson 11-20 K6): the head rule holds at every flush, edge or timeout, without KeepOk
+    rw [hsel, sqK, if_pos ⟨hfl, rfl⟩]
 
 theorem ordK_o2 (X : EngBK) (hI : WfBK X) (hO : OrdBK X) (l : Lane)
     (hv : (stepBKK P win usb sreq fl k X).x.e.spareValid l = true) :
@@ -268,32 +272,30 @@ theorem ordK_o4 (hok : SReqB P sreq) (X : EngBK) (hI : WfBK X) (hO : OrdBK X)
   rw [hns]
   exact ordB_o4 P win usb sreq hok X.base hI.wf hOb hne'
 
-/-- **Fetch order survives a flushed cycle**, given the flush conditions and the keep premise. -/
+/-- **Fetch order survives a flushed cycle**, given the flush conditions -- any flush, edge or
+timeout: the kept word takes the lane's next retirement position (Wilson 11-20 K6). -/
 theorem ordBK_step (hok : SReqB P sreq) (X : EngBK) (hI : WfBK X) (hO : OrdBK X)
-    (hF : FlushOk P win usb sreq fl X) (hK : KeepOk P fl k X) :
+    (hF : FlushOk P win usb sreq fl X) :
     OrdBK (stepBKK P win usb sreq fl k X) :=
-  ⟨fun l hv => ordK_o1 P win usb sreq fl k X hI hO hK l hv,
+  ⟨fun l hv => ordK_o1 P win usb sreq fl k X hI hO l hv,
    fun l hv => ordK_o2 P win usb sreq fl k X hI hO l hv,
    fun l hb => ordK_o3 P win usb sreq fl k X hI hO l hb,
    fun hk0 hne => ordK_o4 P win usb sreq fl k hok X hI hO hF hk0 hne⟩
 
-/-- **Fetch order along a flushed run**, given the flush conditions and the keep premise at
-every cycle of it. -/
+/-- **Fetch order along a flushed run**, given the flush conditions at every cycle of it --
+edge and timeout flushes alike (Wilson 11-20 K6). -/
 theorem ordBK_run (hok : SReqB P sreq) (flt : Nat → Lane → Bool) (kt : Nat → Lane → Nat) :
     ∀ (n : Nat) (X : EngBK), WfBK X → OrdBK X →
       (∀ j, j < n → FlushOk P win usb sreq (flt (runBK P win usb sreq flt kt j X).x.e.now)
         (runBK P win usb sreq flt kt j X)) →
-      (∀ j, j < n → KeepOk P (flt (runBK P win usb sreq flt kt j X).x.e.now)
-        (kt (runBK P win usb sreq flt kt j X).x.e.now) (runBK P win usb sreq flt kt j X)) →
       OrdBK (runBK P win usb sreq flt kt n X)
-  | 0, _, _, h, _, _ => h
-  | n + 1, X, hI, hO, hF, hK => by
+  | 0, _, _, h, _ => h
+  | n + 1, X, hI, hO, hF => by
     have h1 := wfBK_step P win usb sreq (flt X.x.e.now) (kt X.x.e.now) hok X hI
       (hF 0 (Nat.succ_pos n))
     have h2 := ordBK_step P win usb sreq (flt X.x.e.now) (kt X.x.e.now) hok X hI hO
-      (hF 0 (Nat.succ_pos n)) (hK 0 (Nat.succ_pos n))
+      (hF 0 (Nat.succ_pos n))
     exact ordBK_run hok flt kt n _ h1 h2 (fun j hj => hF (j + 1) (Nat.succ_lt_succ hj))
-      (fun j hj => hK (j + 1) (Nat.succ_lt_succ hj))
 
 end
 
@@ -364,7 +366,6 @@ theorem hord_runBK (hok : SReqB P sreq) (fl : Nat → Lane → Bool) (k : Nat �
   intro hst hy hret
   have hWi := wfBK_run P win usb sreq hok fl k i X0 hI (fun j hj => hF j (by omega))
   have hOi := ordBK_run P win usb sreq hok fl k i X0 hI hO (fun j hj => hF j (by omega))
-    (fun j hj => hK j (by omega))
   have hvb := hWi.wf.disp (by rw [hst]; decide)
   have hbe := base_e (runBK P win usb sreq fl k i X0)
   rw [← hy, hbe] at hvb
@@ -402,10 +403,10 @@ theorem ready_ft_edge_K (hok : SReqB P sreq) (fl : Nat → Lane → Bool) (k : N
     (runBK P win usb sreq fl k (f + 1) X0).x.e.headValid y = true ∧
     (runBK P win usb sreq fl k (f + 1) X0).x.sq y
       ((runBK P win usb sreq fl k (f + 1) X0).x.e.sel y)
-      = k (runBK P win usb sreq fl k f X0).x.e.now y ∧
+      = (runBK P win usb sreq fl k (f + 1) X0).x.nr y ∧
     (runBK P win usb sreq fl k (f + 1) X0).x.e.ts y
       = (runBK P win usb sreq fl k (f + 1) X0).x.e.now := by
-  have hOf := ordBK_run P win usb sreq hok fl k f X0 hI hO hF hK
+  have hOf := ordBK_run P win usb sreq hok fl k f X0 hI hO hF
   have hE := hasEdge_of_head _ hOf y _ hv hkeep
   refine ⟨hE, ?_⟩
   have := edge_survives_flushK P win usb sreq _ _ (runBK P win usb sreq fl k f X0) y hfl hE
@@ -566,8 +567,8 @@ theorem ready_ft_edge_armed (hok : SReqB P sreq) (hedge : ∀ t l, t + 1 ≤ edg
         (flS P win usb sreq isArm edge kt A0) kt (f + 1) A0.X).x.sq y
       ((runBK P (winS P win usb sreq isArm edge kt A0) usb sreq
         (flS P win usb sreq isArm edge kt A0) kt (f + 1) A0.X).x.e.sel y)
-      = kt (runBK P (winS P win usb sreq isArm edge kt A0) usb sreq
-        (flS P win usb sreq isArm edge kt A0) kt f A0.X).x.e.now y ∧
+      = (runBK P (winS P win usb sreq isArm edge kt A0) usb sreq
+        (flS P win usb sreq isArm edge kt A0) kt (f + 1) A0.X).x.nr y ∧
     (runBK P (winS P win usb sreq isArm edge kt A0) usb sreq
         (flS P win usb sreq isArm edge kt A0) kt (f + 1) A0.X).x.e.ts y
       = (runBK P (winS P win usb sreq isArm edge kt A0) usb sreq
