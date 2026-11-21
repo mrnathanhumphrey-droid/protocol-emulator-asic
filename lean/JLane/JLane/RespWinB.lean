@@ -397,7 +397,8 @@ theorem lemA_run_winBK (fl : Nat → Lane → Bool) (k : Nat → Lane → Nat) (
 /-- **The response bound for a lane flushed at its own edges** (`slot_on_composition` part A2):
 `wb_bound_winBK` with "never flushed" replaced by "not flushed at or after its current release,
 before this writeback" (`hnf`). The window argument restarts from the release after the lane's
-last flush, with the same `K`. -/
+last flush, with the same `K`. `hS` (11-21) is asked only of a window in which `y` is ready and
+undecided throughout -- the one window the argument uses. -/
 theorem wb_bound_winBK_fl (fl : Nat → Lane → Bool) (k : Nat → Lane → Nat)
     (X0 : EngBK) (h0 : X0.x.e.st = .idle) (h0ts : ∀ l, X0.x.e.now ≤ X0.x.e.ts l) (y : Lane)
     (hy : P.live y = true)
@@ -411,6 +412,8 @@ theorem wb_bound_winBK_fl (fl : Nat → Lane → Bool) (k : Nat → Lane → Nat
       cntBK P win usb sreq fl k (fun e => decOther win y e = true) K
         (runBK P win usb sreq fl k c X0) ≤ M)
     (hS : ∀ c, c + K + 2 ≤ t →
+      (∀ i, i < K → Ready P y (runBK P win usb sreq fl k (c + i) X0).x.e ∧
+        ¬Dec win y (runBK P win usb sreq fl k (c + i) X0).x.e) →
       cntBK P win usb sreq fl k (fun e => noDecB win e = true) K
         (runBK P win usb sreq fl k c X0) ≤ S) :
     (runBK P win usb sreq fl k t X0).x.e.now ≤ (runBK P win usb sreq fl k t X0).x.e.ts y + K + 1 := by
@@ -492,7 +495,21 @@ theorem wb_bound_winBK_fl (fl : Nat → Lane → Bool) (k : Nat → Lane → Nat
       hfw' hnd
     have h2 := ph_le (runBK P win usb sreq fl k c X0).x.e.st
     have hm := hM c (by omega)
-    have hs := hS c (by omega)
+    -- hS is needed only on this window, where y is ready throughout and not decided (11-21:
+    -- an idle cycle with no ready lane is a noDecB cycle, so a bound over every window fails)
+    have hs := hS c (by omega) (fun i hi => by
+      refine ⟨⟨hy, ?_⟩, ?_⟩
+      · have hm1 := ts_mono_winBK P win usb sreq fl k y X0 (c + i) (K - i)
+          (fun s2 hs2 => by
+            rw [show c + i + s2 = c + (i + s2) by omega]
+            exact hfw (i + s2) (by omega))
+        rw [show c + i + (K - i) = c + K by omega] at hm1
+        have hn1 := now_runBK P win usb sreq fl k (c + i) X0
+        omega
+      · intro hd
+        apply hnd i hi
+        rw [← runBK_add]
+        exact hd)
     omega
 
 end

@@ -301,6 +301,8 @@ theorem hR_stretch (fl : Nat → Lane → Bool) (k : Nat → Lane → Nat) (X0 :
       cntBK P win usb sreq fl k (fun e => decOther win y e = true) K
         (runBK P win usb sreq fl k c X0) ≤ M)
     (hS : ∀ c, c + K + 2 ≤ s + T →
+      (∀ i, i < K → Ready P y (runBK P win usb sreq fl k (c + i) X0).x.e ∧
+        ¬Dec win y (runBK P win usb sreq fl k (c + i) X0).x.e) →
       cntBK P win usb sreq fl k (fun e => noDecB win e = true) K
         (runBK P win usb sreq fl k c X0) ≤ S) :
     ∀ x, x < T → IsRet P y ((fun n => (runBK P win usb sreq fl k (s + n) X0).base) x).e →
@@ -316,7 +318,7 @@ theorem hR_stretch (fl : Nat → Lane → Bool) (k : Nat → Lane → Nat) (X0 :
       have hn2 := now_runBK P win usb sreq fl k n X0
       omega) (by omega))
     (fun w hw hwb => hfree (s + x) (by omega) (by omega) (isWB_of_ret P y _ hret) w hw hwb)
-    (fun c hc => hM c (by omega)) (fun c hc => hS c (by omega))
+    (fun c hc => hM c (by omega)) (fun c hc hw => hS c (by omega) hw)
   omega
 
 /-- **The restart's release meets `hstart`**: after a flush at `f`, the stretch from `f + 3`
