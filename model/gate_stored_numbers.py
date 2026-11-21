@@ -986,6 +986,10 @@ SPEC_SYMBOLS = {
     ("model/gate_uart_spacing.py", "BUSY"),
     # (cert_stamp.IMAGES_OF_RECORD_PENDING's exclusion retired 11-15: its dated
     # uart_rx_board entry moved to IMAGES_OF_RECORD, the rest carries no digits)
+    # the split-equivalence launcher's ssh options (11-21): ConnectTimeout 15 s,
+    # ServerAliveInterval 15 s, ServerAliveCountMax 6 -- connection settings the
+    # launcher passes to ssh/scp, inputs to a tool, not an observation of the design
+    ("model/eqsplit/launch_eq.py", "OPTS"),
 }
 
 
