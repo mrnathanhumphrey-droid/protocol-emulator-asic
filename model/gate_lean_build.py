@@ -184,7 +184,10 @@ KEY = ("dstar", "dstar29", "dstar39", "dstar39_v2", "dstar39_st", "dstar39_hold"
        # OrderH.lean (Nate 11-20 option 1): hidxA from the head premise hidxH, order and keep
        # proved together by strong induction on the arming time
        "keep_at_hit_lt", "keepOk_runBK_lt", "hidxA_of_head", "hidxA_runBA",
-       "ready_ft_edge_head")
+       "ready_ft_edge_head",
+       # OrderT.lean (Wilson 11-20 rulings 1a / 1b): the K6 timeout swap as the keep-flush that
+       # keeps PC+1; PC+1 captured by the deadline proved, not assumed
+       "ft_timeout_captured_T", "ready_ft_timeout_T")
 #: proof_constants.load() key -> the Lean expression that must evaluate to it (SPEC: the map)
 CONSTS = {
     "lemmaA_window": "LEMMA_A_WINDOW", "R_base": "R_BASE", "dispatch_cycles": "DISPATCH_CYCLES",
