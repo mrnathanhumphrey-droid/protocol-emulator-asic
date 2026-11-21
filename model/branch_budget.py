@@ -86,6 +86,20 @@ def slot_timeout_drop(g, I, ready, lat, k=None, contend=0):
 
 #: must-fire switch (gate_lane_cert M_LC_CONTEND_OFF): the port's contention ignored
 CONTEND_MUT = False
+#: switch: the K6 refetch charge off (PC+2 kept ready on a timeout path that reaches it)
+REFETCH_MUT = False
+
+
+def refetch_drop(g, I):
+    """{word}: K6 as ruled 11-20 -- the timeout swap drops PC+2, refetched if the path reaches it.
+    A FALLTHROUGH ARM whose PC+1 continues to PC+2 reaches PC+2 on the timeout path after the
+    drop, so PC+2 is not ready there; the certificate's readiness is per word, so PC+2 leaves
+    the ready set (its edge-path readiness with it -- conservative) and its lateness is the
+    refill analysis's"""
+    if REFETCH_MUT:
+        return set()
+    return {c2 for _a, (c1, c2) in LC.ft_paths(g, I).items()
+            if c1 in g and c2 in g and c2 in g[c1][1]}
 #: must-fire switch (gate_lane_cert M_LC_DEPTH_GT2): a slot depth above slot_depth certified
 DEPTH_MUT = False
 #: must-fire switch (gate_lane_cert M_LC_EDGEPACED_CRASH): queue_refusal lets EdgePacedNoTExt out
@@ -674,8 +688,9 @@ def _image_budget(img, iters=80, premise_gaps=None, ready=None, scheme="window")
         # after the premise gaps: slot_ready's d is the release distance the certificate uses;
         # the port's wait behind older slot requesters (ContendB, FCFS by capture)
         cw = {l: slot_wait(graphs, I, l, k) for l in lanes}
-        ready = {l: set(ready.get(l, ())) | slot_ready(graphs[l][0], I, SLOT, graphs[l][2], k,
-                                                       contend=cw[l])
+        ready = {l: (set(ready.get(l, ())) | slot_ready(graphs[l][0], I, SLOT, graphs[l][2], k,
+                                                        contend=cw[l]))
+                 - refetch_drop(graphs[l][0], I)
                  for l in lanes}
     usb_n, usb_rmax = 0, None
     if usb:
