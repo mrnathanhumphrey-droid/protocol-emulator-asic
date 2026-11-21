@@ -9,8 +9,10 @@ discharged on a stretch, by strong induction over the stretch's writebacks:
 
 * **inside the stretch** the release is drift-free: a writeback at `x` moves `y`'s release by its
   gap (`GapRunT.ts_gapT`, `gpT = dly + ext`), and the induction's own bound puts that writeback
-  at most `K + 1` past its release -- so a gap of at least `K + 2` (the checker's
-  `gap >= Rr + 3`, `Rr = K - 1`; `gate_lane_cert`) puts it before every later release;
+  at most `K + 1` past its release; `HrelS` (ArmClose's `hrel` form) then puts it before the
+  release it opens, and so before every later one. `HrelS` holds by a gap of at least `K + 2`
+  (`hrel_of_gap`; the checker's `gap >= Rr + 3`, `Rr = K - 1`, lane-cert check 22) or, for an
+  ARM, by its edge (`ext3 = edge + 1 - ts`, the edge after the writeback; on `runBK`: owed);
 * **before the stretch** (`hpre`): the first stretch has nothing before it; after a flush at `f`
   the lane writes nothing back at `f + 1`, `f + 2` (`RestartB.no_wb_after_flush(2)`) and the
   restart's release is `now f + 1` (`restart_runBK`), so every earlier writeback is before it
@@ -55,10 +57,35 @@ theorem hpre_after_flush (fl : Nat → Lane → Bool) (k : Nat → Lane → Nat)
       exact h2 hwb
   · omega
 
+/-- **`hrel` on a stretch** (`ArmClose.hrel_words`' form, on `runBK`): a writeback of `y` that
+meets its bound (`K + 1` past its release) lands before the release it opens. Two ways it holds:
+a gap of at least `K + 2` (`hrel_of_gap`: every non-ARM word the checker passes, lane-cert check
+22), or an ARM's gap `ext3 = edge + 1 - ts` with the edge after the writeback
+(`Armed.ext3`, `hedge`; on `runBK`: owed). -/
+def HrelS (fl : Nat → Lane → Bool) (k : Nat → Lane → Nat) (X0 : EngBK) (y : Lane)
+    (K s T : Nat) : Prop :=
+  ∀ x, x < T → IsWB y (runBK P win usb sreq fl k (s + x) X0).x.e →
+    (runBK P win usb sreq fl k (s + x) X0).x.e.now
+      ≤ (runBK P win usb sreq fl k (s + x) X0).x.e.ts y + K + 1 →
+    (runBK P win usb sreq fl k (s + x) X0).x.e.now
+      < (runBK P win usb sreq fl k (s + x) X0).x.e.ts y
+        + gpT P y (fun n => (runBK P win usb sreq fl k (s + n) X0).base) x
+
+/-- **`hrel` from the gap**: every writeback's gap at least `K + 2` (`gap >= Rr + 3`). -/
+theorem hrel_of_gap (fl : Nat → Lane → Bool) (k : Nat → Lane → Nat) (X0 : EngBK) (y : Lane)
+    (K s T : Nat)
+    (hgap : ∀ x, x < T → IsWB y (runBK P win usb sreq fl k (s + x) X0).x.e →
+      K + 2 ≤ gpT P y (fun n => (runBK P win usb sreq fl k (s + n) X0).base) x) :
+    HrelS P win usb sreq fl k X0 y K s T := by
+  intro x hx hwb hb
+  have := hgap x hx hwb
+  omega
+
 /-- **`hR` on a stretch, `hfree` discharged** (L4 hfree). `hR_stretch`'s premises less `hfree`,
 plus `hpre` (writebacks before the stretch are before its release: `hpre_after_flush`, or vacuous
-for the first stretch) and the gap condition `hgap` (every writeback's gap at least `K + 2`). Every
-writeback of the stretch lands within `K + 1` of its release. -/
+for the first stretch) and `hrel` (a writeback within its bound lands before the release it opens:
+`hrel_of_gap` for gaps of at least `K + 2`; an ARM by its edge). Every writeback of the stretch
+lands within `K + 1` of its release. -/
 theorem hR_stretch_gap (fl : Nat → Lane → Bool) (k : Nat → Lane → Nat) (X0 : EngBK)
     (h0 : X0.x.e.st = .idle) (h0ts : ∀ l, X0.x.e.now ≤ X0.x.e.ts l) (y : Lane)
     (hy : P.live y = true) (M S K : Nat) (hK : 3 * M + S + 3 ≤ K) (s T : Nat)
@@ -67,8 +94,7 @@ theorem hR_stretch_gap (fl : Nat → Lane → Bool) (k : Nat → Lane → Nat) (
     (hstart : X0.x.e.now + s ≤ (runBK P win usb sreq fl k s X0).x.e.ts y + 2)
     (hpre : ∀ w, w < s → IsWB y (runBK P win usb sreq fl k w X0).x.e →
       (runBK P win usb sreq fl k w X0).x.e.now < (runBK P win usb sreq fl k s X0).x.e.ts y)
-    (hgap : ∀ x, x < T → IsWB y (runBK P win usb sreq fl k (s + x) X0).x.e →
-      K + 2 ≤ gpT P y (fun n => (runBK P win usb sreq fl k (s + n) X0).base) x)
+    (hrel : HrelS P win usb sreq fl k X0 y K s T)
     (hM : ∀ c, c + K + 2 ≤ s + T →
       cntBK P win usb sreq fl k (fun e => decOther win y e = true) K
         (runBK P win usb sreq fl k c X0) ≤ M)
@@ -94,7 +120,7 @@ theorem hR_stretch_gap (fl : Nat → Lane → Bool) (k : Nat → Lane → Nat) (
         omega
       · obtain ⟨x', rfl⟩ : ∃ x', w = s + x' := ⟨w - s, by omega⟩
         have hb := ih x' (by omega) (by omega) hwbw
-        have hg := hgap x' (by omega) hwbw
+        have hg := hrel x' (by omega) hwbw hb
         have hgt := ts_gapT P win usb sreq y
           (fun n => (runBK P win usb sreq fl k (s + n) X0).base) T hT x' x
           (by simp only [base_e]; exact hwbw) (by omega) (by omega)
@@ -112,8 +138,7 @@ theorem hR_stretch_nofree (fl : Nat → Lane → Bool) (k : Nat → Lane → Nat
     (hstart : X0.x.e.now + s ≤ (runBK P win usb sreq fl k s X0).x.e.ts y + 2)
     (hpre : ∀ w, w < s → IsWB y (runBK P win usb sreq fl k w X0).x.e →
       (runBK P win usb sreq fl k w X0).x.e.now < (runBK P win usb sreq fl k s X0).x.e.ts y)
-    (hgap : ∀ x, x < T → IsWB y (runBK P win usb sreq fl k (s + x) X0).x.e →
-      K + 2 ≤ gpT P y (fun n => (runBK P win usb sreq fl k (s + n) X0).base) x)
+    (hrel : HrelS P win usb sreq fl k X0 y K s T)
     (hM : ∀ c, c + K + 2 ≤ s + T →
       cntBK P win usb sreq fl k (fun e => decOther win y e = true) K
         (runBK P win usb sreq fl k c X0) ≤ M)
@@ -126,7 +151,7 @@ theorem hR_stretch_nofree (fl : Nat → Lane → Bool) (k : Nat → Lane → Nat
   intro x hx hret
   simp only [base_e] at hret ⊢
   have := hR_stretch_gap P win usb sreq fl k X0 h0 h0ts y hy M S K hK s T hT hlastS hstart hpre
-    hgap hM hS x hx (isWB_of_ret P y _ hret)
+    hrel hM hS x hx (isWB_of_ret P y _ hret)
   omega
 
 end
