@@ -287,6 +287,15 @@ PREMISES = {
                      "fetch_order": ("hidxH",)},
         "shape": ("hO", "hA", "h0", "hfl", "hv"),
     },
+    # OrderT (Wilson 11-20, K6 rulings 1a / 1b): the timeout word on the timeout path. Its one
+    # per-image condition is the timeout's room (the waits and the fill under T)
+    "ready_ft_timeout_T": {
+        "applies": {"timeout_room": ("hn", "hC1", "hW1", "hC2", "hW2")},
+        "contract": {"engine_wf": ("hI",), "engine_model": ("hT",),
+                     "slot_requester": ("hok", "hq1", "hold1", "hq2", "hold2"),
+                     "scan_ok": ("hF",), "timeout_order": ("hidx2", "hord")},
+        "shape": ("hτ", "hnf", "hfl"),
+    },
 }
 #: the M_LEAN_PREMISE_UNLISTED plant: (file, theorem, the signature text it extends, the binder)
 PREMISE_PLANT = ("SlotReadyB.lean", "ready_pc1_plain_T",

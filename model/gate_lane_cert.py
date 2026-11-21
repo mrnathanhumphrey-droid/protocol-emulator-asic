@@ -626,13 +626,14 @@ def _cond_case(BB, I, k, rule, cond):
     `cond` (None: all met). A spare-capture rule (BB.SPARE_BASE) is its base rule's case with the
     ARM spare-possible (w3 plain)."""
     dmin = k["p1b2_plain_min_d"]
-    if rule == "ft_edge":
-        # check 13's FALLTHROUGH case: ARM (FT, T 40) -> PC+1 (timeout) / PC+2 (edge, word 2);
-        # the run theorem (OrderH.ready_ft_edge_head) has no per-image condition
+    if rule in ("ft_edge", "ft_timeout"):
+        # check 13's FALLTHROUGH case: ARM (FT, T 40) -> PC+1 (timeout, word 1) / PC+2 (edge,
+        # word 2). ft_edge (OrderH.ready_ft_edge_head) has no per-image condition; ft_timeout's
+        # one (timeout_room) is tested in _run_thm_problems through slot_timeout_drop
         ft = {"op": I.OP_ARM, "mod": I.ARM_MOD_FT, "delay": 40}
         plain = {"op": I.OP_LEVEL, "mod": 0, "delay": 0}
         return ({0: (ft, [1, 2]), 1: (plain, [3]), 2: (plain, [3]), 3: (plain, [0])},
-                {0: [1], 1: [5], 2: [5], 3: [5]}, 0, 2)
+                {0: [1], 1: [5], 2: [5], 3: [5]}, 0, 2 if rule == "ft_edge" else 1)
     spare = rule in BB.SPARE_BASE
     rule = BB.SPARE_BASE.get(rule, rule)
     g, gaps = _slot_graph(I, dmin - 1 if rule == "pc2_arm" else dmin, pc1_arm=rule == "pc2_arm")
@@ -688,6 +689,22 @@ def _run_thm_problems(BB, PC, I, rules, run):
                 probs.append("%s: word %d not ready with every condition met" % (rid, w))
             for c in sorted(mine):
                 n += 1
+                if c == "timeout_room":
+                    # the timeout's room is checked in the certificate loop (slot_timeout_drop),
+                    # not slot_ready: at T = FILL - 1 (L 0, free port) the word is dropped; with
+                    # the condition's switch set it is kept
+                    gT, _gp, _cw, wT = _cond_case(BB, I, k, rid, None)
+                    gT = dict(gT)
+                    gT[0] = (dict(gT[0][0], delay=k["p1b2_fill_scan"] - 1), gT[0][1])
+                    broken = wT not in BB.slot_timeout_drop(gT, I, {wT}, {0: 0}, k)
+                    BB.COND_OFF = saved | {c}
+                    off = wT not in BB.slot_timeout_drop(gT, I, {wT}, {0: 0}, k)
+                    BB.COND_OFF = set(saved)
+                    if broken or not off:
+                        probs.append("%s: condition %s not enforced (broken %s, switch off %s)"
+                                     % (rid, c, "KEPT" if broken else "dropped",
+                                        "kept" if off else "DROPPED"))
+                    continue
                 if (rid, c) in BB.IMPLIED:
                     if I.OP_ARM in I.BRANCH_OPS:
                         probs.append("%s: %s not implied (OP_ARM is no-prefetch)" % (rid, c))

@@ -69,7 +69,8 @@ RTL_CONTRACTS = {
                 "ruling 1a, correcting the 11-19 'PC+2 the next word'). PC+1 captured by the "
                 "deadline is a lemma (from T >= FILL + L, ruling 1b), so no late PC+1 exists to "
                 "kill. Must-fire (agent 1): PC+2 left valid after the swap, caught",
-        "lean": "OrderB.ft_timeout_order (owed; READY_RULES ft_timeout)",
+        "lean": "OrderT.ready_ft_timeout_T / ft_timeout_captured_T (READY_RULES ft_timeout): "
+                "the swap is the keep-flush keeping PC+1",
         "must_fire": {"status": OWED, "name": None}},
     "K7": {
         "what": "one fetch pointer per lane, shared by the slot fetches and the base refill; the "
@@ -185,6 +186,12 @@ CONTRACT_PREMISES = {
         "rtl": ("K10",),
         "why": "hedge: an arming's edge is at least one cycle after its writeback, so the armed "
                "invariant holds (armInvB_runBA) and the ARM has retired before its edge"},
+    "timeout_order": {
+        "rtl": ("K6", "K7"),
+        "why": "OrderT.ready_ft_timeout_T's hidx2 / hord: the K6 swap keeps the word fetched "
+               "SECOND after the ARM (PC+1; kept index = the second slot fetch's) and no "
+               "retirement consumes it before the deadline (the armed lane is not dispatched; "
+               "on the armed run as hord_runBK does for the edge). K6 as ruled 11-20 + K7"},
     "fetch_order": {
         "rtl": ("K1", "K7"),
         "why": "OrderK's keep premise (K6 build, Nate 11-20): KeepOk at every flush and hkeep at "

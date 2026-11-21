@@ -76,7 +76,7 @@ def slot_timeout_drop(g, I, ready, lat, k=None, contend=0):
     premise fails -- Buf.p1b2_margin_timeout_scan needs P1B2_FILL_SCAN + L <= T (T the ARM's
     timeout, L its certified lateness `lat`). Wilson 11-17: ready only when T >= FILL + L; under
     contention the fill moves by the port's wait (ContendB.contend_margin): T >= FILL + wait + L."""
-    if SLOT_TIMEOUT_MUT:
+    if SLOT_TIMEOUT_MUT or "timeout_room" in COND_OFF:
         return set()
     k = k or PC.load()
     fill = k["p1b2_fill_scan"] + contend
@@ -153,13 +153,15 @@ READY_RULES = {
                   "what": "PC+2, PC+1 any other word that is not no-prefetch (a branch PC+1 "
                           "blocks the second fetch: BufEng.SReqB, Wilson 11-19), "
                           "d >= p1b2_plain_min_d"},
-    "ft_timeout": {"status": "owed", "theorems": ("OrderB.ft_timeout_order",
-                                                   "Buf.p1b2_margin_timeout_scan",
-                                                   "ContendB.slot_wait_fcfs_two"),
-                   "what": "FALLTHROUGH PC+1 (timeout, fetched second); T >= FILL + L "
-                           "checked in _image_budget (slot_timeout_drop). Owed (Wilson 11-19): "
-                           "fetched behind the edge word, it is not the head on the timeout "
-                           "path until the K6 swap and its order theorem"},
+    "ft_timeout": {"status": "proved", "theorems": ("OrderT.ready_ft_timeout_T",
+                                                     "OrderT.ft_timeout_captured_T",
+                                                     "Buf.p1b2_margin_timeout_scan",
+                                                     "ContendB.slot_wait_fcfs_two"),
+                   "what": "FALLTHROUGH PC+1 (timeout, fetched second); T >= FILL + wait + L "
+                           "checked in _image_budget (slot_timeout_drop). K6 as ruled 11-20: "
+                           "at the timeout the head select moves to PC+1 and PC+2 is dropped "
+                           "(the keep-flush keeping PC+1); PC+1 captured by the deadline is "
+                           "proved (ft_timeout_captured_T)"},
     "ft_edge": {"status": "proved",
                 "theorems": ("Slot.p1b_margin_scan", "FlushKeep.edge_survives_flush",
                              "FlushKill.wfBK_run", "FlushHeld.ft_edge_at_release_armed",
@@ -216,6 +218,10 @@ RUN_THM = {
     # (CONTRACT_PREMISES fetch_order); ScanOk and hedge are contracts K9 / K10 (Wilson 11-20).
     # No per-image condition: every premise is a contract or the run's shape
     "ft_edge": {"run_thm": "ready_ft_edge_head", "run_status": "proved", "applies": ()},
+    # ready_ft_timeout_T (OrderT, Wilson 11-20): its one per-image condition is the timeout's
+    # room, T >= FILL + wait + L (slot_timeout_drop, tested by check 13 with its switch)
+    "ft_timeout": {"run_thm": "ready_ft_timeout_T", "run_status": "proved",
+                   "applies": ("timeout_room",)},
     "pc1_spare": {"run_thm": "ready_pc1_spare_T", "run_status": "proved",
                   "applies": ("plain_edge_arm", "wait_in_margin")},
     "pc2_plain_spare": {"run_thm": "ready_pc2_plain_spare_T", "run_status": "proved",
