@@ -1390,6 +1390,86 @@
       },
       "lanes": {}
     },
+    "flags_obs.hex": {
+      "sha": "7226ec9dc2a7785840a517969d1bd48a8e3cc0af580fbd41f1de5ff148ea460a",
+      "branch_lanes": [
+        0
+      ],
+      "B": 4,
+      "reason": "certified",
+      "cert": {
+        "status": "certified",
+        "reason": "pe_asm.compute_j",
+        "d_min": 33,
+        "J": 1
+      },
+      "lanes": {
+        "0": {
+          "max_late": 11,
+          "max_late_pin": 11,
+          "R": 14
+        },
+        "1": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 17
+        },
+        "2": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 17
+        },
+        "3": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 17
+        },
+        "4": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 17
+        }
+      }
+    },
+    "flags_pw.hex": {
+      "sha": "33c8dbc4c626e9db89e66afe40b3eb695e7da4889ee54ef9678e0204b68d479b",
+      "branch_lanes": [],
+      "B": 0,
+      "reason": "certified",
+      "cert": {
+        "status": "certified",
+        "reason": "pe_asm.compute_j",
+        "d_min": 40,
+        "J": 1
+      },
+      "lanes": {
+        "0": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 14
+        },
+        "1": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 14
+        },
+        "2": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 14
+        },
+        "3": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 14
+        },
+        "4": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 14
+        }
+      }
+    },
     "ft_race.hex": {
       "sha": "a6542d25fd3ce185353d6cde474b8fe15e7502da33b0527baaac61cc82357d6e",
       "branch_lanes": [],
@@ -2258,6 +2338,318 @@
           "max_late": 0,
           "max_late_pin": 0,
           "R": 20
+        }
+      }
+    },
+    "symgen_biphase.hex": {
+      "sha": "8046ebc4474aa8c4185bfca23b300a154554562151a4bde07a52e37a1b9eef1a",
+      "branch_lanes": [],
+      "B": 0,
+      "reason": "certified",
+      "cert": {
+        "status": "certified",
+        "reason": "pe_asm.compute_j",
+        "d_min": 40,
+        "J": 1
+      },
+      "lanes": {
+        "0": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 14
+        },
+        "1": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 17
+        },
+        "2": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 17
+        },
+        "3": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 17
+        },
+        "4": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 17
+        }
+      }
+    },
+    "symgen_f_busy.hex": {
+      "sha": "2e059b424058f9ef883263bccd2b6e1913ac3066e88e25cef0a3343e3cccedac",
+      "branch_lanes": [],
+      "B": 0,
+      "reason": "certified",
+      "cert": {
+        "status": "certified",
+        "reason": "pe_asm.compute_j",
+        "d_min": 40,
+        "J": 1
+      },
+      "lanes": {
+        "0": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 14
+        },
+        "1": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 17
+        },
+        "2": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 17
+        },
+        "3": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 17
+        },
+        "4": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 17
+        }
+      }
+    },
+    "symgen_f_nonowner.hex": {
+      "sha": "fe0d218dca1233aa16bfeb2d041f2e30a65cd5391be59354fd8c5845c30e8d5c",
+      "branch_lanes": [],
+      "B": 0,
+      "reason": "certified",
+      "cert": {
+        "status": "certified",
+        "reason": "pe_asm.compute_j",
+        "d_min": 40,
+        "J": 1
+      },
+      "lanes": {
+        "0": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 14
+        },
+        "1": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 17
+        },
+        "2": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 17
+        },
+        "3": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 17
+        },
+        "4": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 17
+        }
+      }
+    },
+    "symgen_f_overrun.hex": {
+      "sha": "22ceaab1da34f105eb8480f83af58a3dafd9205d5a5d544b9a3fd24a17e842a7",
+      "branch_lanes": [],
+      "B": 0,
+      "reason": "certified",
+      "cert": {
+        "status": "certified",
+        "reason": "pe_asm.compute_j",
+        "d_min": 40,
+        "J": 1
+      },
+      "lanes": {
+        "0": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 14
+        },
+        "1": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 17
+        },
+        "2": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 17
+        },
+        "3": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 17
+        },
+        "4": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 17
+        }
+      }
+    },
+    "symgen_manch.hex": {
+      "sha": "0cc179b641ed3426ba8b02835ee86106e02824d341aca90afd7be3aea4ba4f81",
+      "branch_lanes": [],
+      "B": 0,
+      "reason": "certified",
+      "cert": {
+        "status": "certified",
+        "reason": "pe_asm.compute_j",
+        "d_min": 40,
+        "J": 1
+      },
+      "lanes": {
+        "0": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 14
+        },
+        "1": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 17
+        },
+        "2": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 17
+        },
+        "3": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 17
+        },
+        "4": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 17
+        }
+      }
+    },
+    "symgen_nrzi.hex": {
+      "sha": "2a5ce3e5d135159afeb7f1cc0914851f09c8e4c0a425e9f10e76417b6ecaea15",
+      "branch_lanes": [],
+      "B": 0,
+      "reason": "certified",
+      "cert": {
+        "status": "certified",
+        "reason": "pe_asm.compute_j",
+        "d_min": 40,
+        "J": 1
+      },
+      "lanes": {
+        "0": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 14
+        },
+        "1": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 17
+        },
+        "2": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 17
+        },
+        "3": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 17
+        },
+        "4": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 17
+        }
+      }
+    },
+    "symgen_spi_dirty1.hex": {
+      "sha": "e3112d78abacf3a63b9df936ccdcb26f648e313639c9b432625ff81092bf6869",
+      "branch_lanes": [],
+      "B": 0,
+      "reason": "certified",
+      "cert": {
+        "status": "certified",
+        "reason": "pe_asm.compute_j",
+        "d_min": 40,
+        "J": 1
+      },
+      "lanes": {
+        "0": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 14
+        },
+        "1": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 17
+        },
+        "2": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 17
+        },
+        "3": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 17
+        },
+        "4": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 17
+        }
+      }
+    },
+    "symgen_ws2812.hex": {
+      "sha": "2106d04edc52d2310c550c7c8ab834adc61e36aa266953826d7642a4ec57406c",
+      "branch_lanes": [],
+      "B": 0,
+      "reason": "certified",
+      "cert": {
+        "status": "certified",
+        "reason": "pe_asm.compute_j",
+        "d_min": 40,
+        "J": 1
+      },
+      "lanes": {
+        "0": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 14
+        },
+        "1": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 17
+        },
+        "2": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 17
+        },
+        "3": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 17
+        },
+        "4": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 17
         }
       }
     },

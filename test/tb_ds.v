@@ -33,6 +33,7 @@
 `timescale 1ns / 1ps
 
 `include "test/imgload.vh"
+`include "test/imgpatch.vh"
 module tb_ds;
 
   reg        clk = 0, rst_n = 0, ena = 1;
@@ -106,6 +107,7 @@ module tb_ds;
     if (!$value$plusargs("PTX=%d", ptx)) ptx = 0;
     $readmemh(imgfile, img);
     `PE_REQUIRE_IMG_LOADED(imgfile)
+    `PE_APPLY_IMG_PATCHES(img)
     img_bytes = 0;
     for (i = 0; i < IMG_MAX; i = i + 1)
       if (^img[i] !== 1'bx) img_bytes = i + 1;

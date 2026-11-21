@@ -158,6 +158,24 @@ def lag_checks():
     return out
 
 
+#: THE COVERAGE SWEEP'S flag ARMS (11-20): this gate's two run images on tb_pair --
+#: POST / WAIT and OBSERVE -- so the flag lines are reached in the sweep. The sweep
+#: measures REACH; the edge order and the OBSERVE branch stay judged by this runner.
+COV_DIR = "probe_cov_flags"
+
+
+def coverage_arms():
+    """[(label, plusargs)] for test/benchset.py's tb_pair; images under COV_DIR,
+    "flags_"-prefixed (the image universe keys images by name)."""
+    os.makedirs(os.path.join(ROOT, COV_DIR), exist_ok=True)
+    out = []
+    for k, img in (("pw", image()), ("obs", observe_image())):
+        f = "%s/flags_%s.hex" % (COV_DIR, k)
+        I.write_image(os.path.join(ROOT, f), img)
+        out.append(("fl_" + k, ["+IMG=" + f, "+NCYC=%d" % NCYC]))
+    return out
+
+
 def run(cmd):
     return subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True,
                           encoding="utf-8", errors="replace")

@@ -390,7 +390,11 @@ CONFIG = {
     "tb_usbrx": {"srcs": [], "arms": "FROM_PYGEN", "pygen": ("run_usbrx", "coverage_arms")},
     "tb_usbdev": {"srcs": [], "arms": "FROM_PYGEN", "pygen": ("run_usbaddr", "coverage_arms")},
     "tb_usbbuf": {"srcs": [], "arms": "FROM_PYGEN", "pygen": ("run_usbbuf", "coverage_arms")},
-    "tb_pair": {"srcs": [], "arms": "FROM_PYGEN", "pygen": ("run_pair", "coverage_arms")},
+    # 11-20: the symbol generator's and the event flags' gates run on tb_pair too, and
+    # their lines read uncovered (gate_coverage: 41 + 5 points) until their cases joined
+    "tb_pair": {"srcs": [], "arms": "FROM_PYGEN",
+                "pygen": [("run_pair", "coverage_arms"), ("run_symgen", "coverage_arms"),
+                          ("run_flags", "coverage_arms")]},
     "tb_ds": {"srcs": [], "arms": "FROM_PYGEN", "pygen": ("run_drive_sample", "coverage_arms")},
     "tb_arm2": {"srcs": [], "arms": "FROM_PYGEN", "pygen": ("run_arm2", "coverage_arms")},
     "tb_gcd": {

@@ -100,9 +100,11 @@ FAULTS = {
 }
 
 
-def fault_image(kind):
+def fault_image(kind, clean=False):
     """ws2812's config on owner lane 0, then the fault: a non-owner SER (lane 1),
-    a SYMDEF right after a SER, or SERs faster than the byte time."""
+    a SYMDEF right after a SER, or SERs faster than the byte time. `clean`
+    (nonowner only): lane 1's SER is a LEVEL on PIN_NONE instead -- the admissible
+    twin the coverage sweep loads, the SER planted at load (test/imgpatch.vh)."""
     c = cfg_with_lat(M.ws2812(19))
     l0 = I.ACT_BASE
     prog = I.act_symdef(c.lens, c.code_a, c.code_b, c.idle_a, c.idle_b, c.lat)
@@ -115,7 +117,9 @@ def fault_image(kind):
     prog.append(I.act(I.OP_REARM, 0, 0, 500))
     l1 = lp + I.ACT_BYTES
     if kind == "nonowner":
-        prog += [I.act_ser(PA, PB, 8, c.byte_cycles), I.act(I.OP_REARM, 0, 0, 500)]
+        w1 = (I.act(I.OP_LEVEL, I.PIN_NONE, 0, c.byte_cycles) if clean
+              else I.act_ser(PA, PB, 8, c.byte_cycles))
+        prog += [w1, I.act(I.OP_REARM, 0, 0, 500)]
     hdrs = [I.hdr(PA, I.PIN_NONE, 1, T_SYMDEF, I.FLAG_SYMGEN, 2 * T_SYMDEF, 3 * T_SYMDEF,
                   l0, order=I.ORDER_MSB)]
     for n in range(1, I.N_LANES):
@@ -185,6 +189,37 @@ def judge(name, c, w):
     if ovr:
         return ["%s: the model overran (the test's loads are too fast)" % name]
     return []
+
+
+#: THE COVERAGE SWEEP'S symbol-generator ARMS (11-20): this gate's own cases on tb_pair --
+#: the five configs and the three fault images -- so the generator's lines are reached
+#: in the sweep and not only here. The sweep measures REACH; the waveforms and the
+#: (config_err, overrun) verdicts stay judged by this runner.
+COV_DIR = "probe_cov_symgen"
+
+
+def coverage_arms():
+    """[(label, plusargs)] for test/benchset.py's tb_pair; images under COV_DIR,
+    "symgen_"-prefixed (the image universe keys images by name)."""
+    os.makedirs(os.path.join(ROOT, COV_DIR), exist_ok=True)
+    out = []
+    for name, c0 in CFGS.items():
+        c = cfg_with_lat(c0)
+        f = "%s/symgen_%s.hex" % (COV_DIR, name)
+        I.write_image(os.path.join(ROOT, f), image(c))
+        ncyc = 400 + c.lat + len(FEED) * c.byte_cycles + 8 * c.bit_cycles
+        out.append(("sg_" + name, ["+IMG=" + f, "+FEED=1", "+NCYC=%d" % ncyc]))
+    for kind in FAULTS:
+        f = "%s/symgen_f_%s.hex" % (COV_DIR, kind)
+        # the non-owner refusal: its CLEAN twin on disk, the SER planted as tb_pair
+        # loads it (a refused image cannot be a sweep arm's +IMG: gate_admissible_
+        # images' HDR check); it retires nothing (config_err first): QUIESCENT
+        nonown = kind == "nonowner"
+        I.write_image(os.path.join(ROOT, f), fault_image(kind, clean=nonown))
+        q = (I.patch_plusargs(fault_image(kind, clean=True), fault_image(kind))
+             + ["+QUIESCENT"]) if nonown else []
+        out.append(("sg_f_" + kind, ["+IMG=" + f, "+FEED=1", "+NCYC=3000"] + q))
+    return out
 
 
 def run_all(vvp, tmp, tag=""):

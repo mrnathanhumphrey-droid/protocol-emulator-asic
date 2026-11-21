@@ -105,7 +105,15 @@ def coverage_arms():
     os.makedirs(os.path.join(ROOT, COV_DIR), exist_ok=True)
     for k, img in (("spi", spi_image()), ("age", age_image()), ("od", age_image(mode=0))):
         I.write_image(os.path.join(ROOT, COV_DIR, "ds_%s.hex" % k), img)
-    return [("spi", ["+IMG=%s/ds_spi.hex" % COV_DIR, "+NCYC=%d" % NCYC, "+FEED=1", "+PEER=1",
+    # 11-20: check 4's two RTL refusals join the sweep (the refusal branch read
+    # uncovered). The image on disk is the CLEAN SPI image; the refused byte is planted
+    # as tb_ds loads it (test/imgpatch.vh), because a refused image cannot be a sweep
+    # arm's +IMG (gate_admissible_images' HDR check, not declarable)
+    spi_plus = ["+IMG=%s/ds_spi.hex" % COV_DIR, "+NCYC=%d" % NCYC, "+FEED=1", "+PEER=1",
+                "+PTX=%d" % PEER_BYTE]
+    return [("samepin", spi_plus + I.patch_plusargs(spi_image(), spi_image(same_pin=True))),
+            ("clocked", spi_plus + I.patch_plusargs(spi_image(), spi_image(clocked=True))),
+            ("spi", ["+IMG=%s/ds_spi.hex" % COV_DIR, "+NCYC=%d" % NCYC, "+FEED=1", "+PEER=1",
                      "+PTX=%d" % PEER_BYTE]),
             ("age", ["+IMG=%s/ds_age.hex" % COV_DIR, "+NCYC=%d" % NCYC, "+PEER=2"]),
             ("od", ["+IMG=%s/ds_od.hex" % COV_DIR, "+NCYC=%d" % NCYC, "+PEER=2"])]

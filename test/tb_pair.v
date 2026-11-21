@@ -22,6 +22,7 @@
 `timescale 1ns / 1ps
 
 `include "test/imgload.vh"
+`include "test/imgpatch.vh"
 module tb_pair;
 
   reg        clk = 0, rst_n = 0, ena = 1;
@@ -57,6 +58,12 @@ module tb_pair;
   // below assigns `hf_en`, and the pinned iverilog rejects a use before its
   // declaration. `progress.vh` first: `host_feed.vh` drives its `pg_pushing`.
 `include "test/progress.vh"
+
+  // QUIESCENT BY DECLARATION (the coverage sweep, 11-20): run_symgen's non-owner SER
+  // arm is a refusal -- config_err before any action retires -- so progress.vh's
+  // vacuity rule would read it as "nothing to check". The runner declares it with
+  // +QUIESCENT, the same pattern as tb_arm2 / tb_equiv / tb_status / tb_reload.
+  initial if ($test$plusargs("QUIESCENT")) pg_quiescent_ok = 1'b1;
 `include "test/host_feed.vh"
 
   task load_and_run;
@@ -95,6 +102,7 @@ module tb_pair;
     if (!$value$plusargs("RXD=%d", rxd)) rxd = 40;
     $readmemh(imgfile, img);
     `PE_REQUIRE_IMG_LOADED(imgfile)
+    `PE_APPLY_IMG_PATCHES(img)
     img_bytes = 0;
     for (i = 0; i < IMG_MAX; i = i + 1)
       if (^img[i] !== 1'bx) img_bytes = i + 1;

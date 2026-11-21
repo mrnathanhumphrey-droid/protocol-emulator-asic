@@ -1712,6 +1712,24 @@ def symgen_problems(img):
     return probs
 
 
+#: test/imgpatch.vh's patch slots (+PATCH0..3)
+N_PATCH = 4
+
+
+def patch_plusargs(clean, refused):
+    """["+PATCHk=(addr << 8) | byte"] that turn the CLEAN twin's full store into the
+    REFUSED one as the bench loads it (test/imgpatch.vh, 11-20): the image on disk
+    stays admissible, the refused word is planted at load. Refuses more than
+    N_PATCH differing bytes or a store-size mismatch."""
+    a, b = full_store(bytes(clean)), full_store(bytes(refused))
+    if len(a) != len(b):
+        raise ValueError("patch_plusargs: store sizes differ (%d, %d)" % (len(a), len(b)))
+    d = [(i, b[i]) for i in range(len(a)) if a[i] != b[i]]
+    if not d or len(d) > N_PATCH:
+        raise ValueError("patch_plusargs: %d differing bytes (1..%d allowed)" % (len(d), N_PATCH))
+    return ["+PATCH%d=%d" % (k, (i << 8) | v) for k, (i, v) in enumerate(d)]
+
+
 def filler_vh() -> str:
     """The filler word for the bench, GENERATED so it is never typed twice."""
     word = int.from_bytes(STORE_FILLER, "big") >> (ACT_BYTES * 8 - ACT_W)
