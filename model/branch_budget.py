@@ -632,6 +632,48 @@ def _edf_R(y, lanes, graphs, rmax, lmax, ds, mmax=40):
     return None
 
 
+def _graphs(img, lanes, premise_gaps, prem, I):
+    """{lane: lane_cert.build(...)} with the named peer premises' gaps applied to their ARMs"""
+    graphs = {l: LC.build(img, l, prem, I) for l in lanes}
+    for l, pg in (premise_gaps or {}).items():
+        for w, gp in pg.items():
+            if l in graphs and w in graphs[l][2]:
+                graphs[l][2][w] = [max(graphs[l][2][w][0], gp)] + graphs[l][2][w][1:]
+    return graphs
+
+
+def _slot_sets(graphs, I, k, ready):
+    """the guaranteed slot's readiness (SLOT set) -> (cw, pre, rf, rentry, ready): the port's
+    wait per lane, the slot-ready words (+ the counterfactual `ready`), the K6 refetch drops,
+    the per-entry readiness for the certificate, and the words ready on every entry"""
+    lanes = sorted(graphs)
+    # after the premise gaps: slot_ready's d is the release distance the certificate uses;
+    # the port's wait behind older slot requesters (ContendB, FCFS by capture)
+    cw = {l: slot_wait(graphs, I, l, k) for l in lanes}
+    pre = {l: set(ready.get(l, ())) | slot_ready(graphs[l][0], I, SLOT, graphs[l][2], k,
+                                                 contend=cw[l])
+           for l in lanes}
+    rf = {l: refetch_drop(graphs[l][0], I) for l in lanes}
+    # K6 (Wilson 11-20): PC+2 ready on its edge entry only, where the timeout path reaches it
+    rentry = {l: {c2: {a} for c2, a in rf[l].items() if c2 in pre[l]} for l in lanes}
+    return cw, pre, rf, rentry, {l: pre[l] - set(rf[l]) for l in lanes}
+
+
+def ft_edge_inputs(img, premise_gaps=None, ready=None):
+    """{lane: {FALLTHROUGH ARM word: {"edge_ready", "arm_gap"}}} -- the certificate's own inputs
+    for the `else continue` drain's closed form (poset compile.drain_closed_form_ft): whether
+    PC+2 is ready on its edge entry (the slot's, as _image_budget computes it; never without a
+    slot) and the ARM's retiring gap after the premise gaps. Same helpers as _image_budget."""
+    I = LC._isa()
+    k = PC.load()
+    lanes = sorted(I.lane_programs(img))
+    graphs = _graphs(img, lanes, premise_gaps, LC.premises(k), I)
+    pre = _slot_sets(graphs, I, k, ready or {})[1] if SLOT else {l: set() for l in lanes}
+    return {l: {a: {"edge_ready": c2 in pre[l], "arm_gap": graphs[l][2][a][-1]}
+                for a, (_c1, c2) in LC.ft_paths(graphs[l][0], I).items()}
+            for l in lanes}
+
+
 def image_budget(img, iters=80, premise_gaps=None, ready=None):
     """The certificate with the window response bound (RespWinN.wb_bound_win_n), and, when that
     finds none, with the EDF response bounds (RespEdfClose.wb_close_edf, Wilson 11-15): one
@@ -672,11 +714,7 @@ def _image_budget(img, iters=80, premise_gaps=None, ready=None, scheme="window")
         # counterfactual); the certificate refuses it outright rather than drop its words
         return {"B": None, "reason": "slot depth %d > slot_depth %d: no theorem (counterfactual "
                 "only, never certified)" % (SLOT, k["slot_depth"]), "lanes": {}}
-    graphs = {l: LC.build(img, l, prem, I) for l in lanes}
-    for l, pg in premise_gaps.items():
-        for w, gp in pg.items():
-            if l in graphs and w in graphs[l][2]:
-                graphs[l][2][w] = [max(graphs[l][2][w][0], gp)] + graphs[l][2][w][1:]
+    graphs = _graphs(img, lanes, premise_gaps, prem, I)
     cw = {l: 0 for l in lanes}
     rentry = {}
     labels = []
@@ -686,16 +724,7 @@ def _image_budget(img, iters=80, premise_gaps=None, ready=None, scheme="window")
         if any(r in SPARE_BASE and READY_RULES[r]["status"] != "proved" for l in lanes
                for _a, _w, r in slot_ready_tagged(graphs[l][0], I, SLOT, graphs[l][2], k)):
             labels.append(SPARE_LABEL)
-        # after the premise gaps: slot_ready's d is the release distance the certificate uses;
-        # the port's wait behind older slot requesters (ContendB, FCFS by capture)
-        cw = {l: slot_wait(graphs, I, l, k) for l in lanes}
-        pre = {l: set(ready.get(l, ())) | slot_ready(graphs[l][0], I, SLOT, graphs[l][2], k,
-                                                     contend=cw[l])
-               for l in lanes}
-        rf = {l: refetch_drop(graphs[l][0], I) for l in lanes}
-        # K6 (Wilson 11-20): PC+2 ready on its edge entry only, where the timeout path reaches it
-        rentry = {l: {c2: {a} for c2, a in rf[l].items() if c2 in pre[l]} for l in lanes}
-        ready = {l: pre[l] - set(rf[l]) for l in lanes}
+        cw, pre, rf, rentry, ready = _slot_sets(graphs, I, k, ready)
     usb_n, usb_rmax = 0, None
     if usb:
         with contextlib.redirect_stdout(io.StringIO()):

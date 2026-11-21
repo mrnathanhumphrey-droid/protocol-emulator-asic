@@ -337,6 +337,32 @@ def drain_closed_form(next_delay, k=None):
     return max(0, k["head_slack"] - LC.ARM_RETIRE_GAP - (next_delay - LC.REBASE))
 
 
+def drain_closed_form_ft(pc1_delay, pc2_delay, edge_ready, arm_gap, k=None):
+    """the `else continue` drain (Wilson 11-20; K6 as ruled 11-20): the least drain, added to
+    PC+1's and PC+2's delays, that leaves no word after a FALLTHROUGH ARM late, at J 1 (every
+    lateness 0, B 0). None when PC+2 is not ready on its edge entry: the flush's refill floor
+    (FlushLate, flush_refill_late + B) then sits on PC+2 at any spacing, so no drain certifies.
+    Otherwise the ARM is not retire-capped (ArmRetire covers plain ARMs), so its Z is its own
+    response R_base, and a = R_base - its retiring gap. The certificate's three terms:
+      t   PC+2 refetched, entered from PC+1 (the timeout path):  a + HS + REBASE - pc1_delay
+      e   PC+3 after PC+2 entered by the edge:                    a + HS + REBASE - pc2_delay
+      t3  PC+3 after PC+2 entered from PC+1, both gaps drained:   (Z1 + HS + 2 REBASE
+          - pc1_delay - pc2_delay) / 2, Z1 = max(R_base + 1 (the disarm cycle), a + D*)
+    -- every term read (proof_constants, lane_cert), the ARM's gap from the certificate's
+    graph (branch_budget.ft_edge_inputs)"""
+    import lane_cert as LC
+    if not edge_ready:
+        return None
+    k = k or PC.load()
+    hs, rb = k["head_slack"], LC.REBASE
+    a = k["R_base"] - arm_gap
+    t = a + hs + rb - pc1_delay
+    e = a + hs + rb - pc2_delay
+    z1 = max(k["R_base"] + 1, a + k["dstar"])
+    t3 = z1 + hs + 2 * rb - pc1_delay - pc2_delay
+    return max(0, t, e, -(-t3 // 2))
+
+
 #: item 1b (Wilson 11-15): the plain-ARM successor prefetch is TWO words deep; the universe's
 #: longest run of plain edge ARMs is 2 (sptgt m1 / m3, b3b_a3); the USB lane's 3-run is an FT /
 #: SE0 / QUAL chain, outside 1b. A lowering may not make a longer run.
@@ -381,10 +407,11 @@ def windows(stmts, lowered, route, hz, arm="late", drain="auto", premise="datash
       drain="auto"  the default: per statement, the least drain (0..drain_max()) at which the
                     certificate gives the windowed lanes J 1 -- generated, never typed. A
                     statement with `nodrain` gets 0 and the result says so (the stamp is
-                    UNCERTIFIED with the reason, compile_spec). `else continue`: 0.
+                    UNCERTIFIED with the reason, compile_spec). `else continue` too (Wilson
+                    11-20): its drain spaces PC+1 and PC+2.
       drain=int     that drain on every window (the drain table's sweep)
-    Every window also carries the closed form (drain_closed_form); the gate checks the search
-    and the closed form agree. The protocol check: a `during` / `within` bound on the event
+    Every window also carries the closed form (drain_closed_form, or drain_closed_form_ft for
+    `else continue`); the gate checks the search and the closed form agree. The protocol check: a `during` / `within` bound on the event
     after B shorter than the drain is refused by name."""
     # Wilson 11-15: early arming is WITHDRAWN from the compiler (its search and closed form
     # disagree: 5 vs none up to drain_max); the drain table keeps it as a labelled counterfactual
@@ -625,6 +652,8 @@ def _windows(stmts, lowered, route, hz, arm="late", drain=0, premise="datasheet"
                 # `else continue` (FT): the timeout path enters PC+2 from PC+1 and, K6 as ruled
                 # 11-20, refetches it there (the swap drops it) -- PC+1's gap before PC+2 gets
                 # the same drain, so the refetched word's lateness can drain on that path too
+                if out[iarm_][6:7] == (I.ARM_MOD_FT,) and iarm_ + 1 < len(out):
+                    p_.setdefault("pc1_delay", {})[s_] = out[iarm_ + 1][3]   # before the drain
                 if dp and out[iarm_][6:7] == (I.ARM_MOD_FT,) and iarm_ + 1 < len(out):
                     t_ = out[iarm_ + 1]
                     if t_[3] + dp > T_MAX:
@@ -648,7 +677,15 @@ def _windows(stmts, lowered, route, hz, arm="late", drain=0, premise="datasheet"
         LC.ARM_RETIRE = MUT != "M_PC_ARMRETIRE_OFF"
         bb = _budget(img, pg, rd)
         LC.ARM_RETIRE = True
-        info = _win(where)
+        fti = BB.ft_edge_inputs(img, pg, rd)
+        # the closed forms assume the lane certifies at J 1 apart from its windows: read from
+        # the plain lowering's own certificate (same switches, cached)
+        b0 = _budget(bytes(pe_asm.assemble(lanes0, hdr, *a_, **kw)), {}, {})
+        plain_j1 = {ln: b0["B"] is not None and ln in b0["lanes"]
+                    and b0["lanes"][ln]["max_late"] == 0 for ln in lanes}
+        info = _win(where, {s_: fti[s_[0]].get(
+            (I.read_header(img, s_[0])["base"] - I.ACT_BASE) // I.ACT_BYTES + v[1])
+            for s_, v in where.items()}, plain_j1, b0["reason"])
         info["premises"] = sorted(used)
         info["budget"] = bb
         # the certificate's inputs: A2's line reads the same (Wilson 11-16: one input, one verdict)
@@ -680,15 +717,30 @@ def _windows(stmts, lowered, route, hz, arm="late", drain=0, premise="datasheet"
     return lanes, route, dict(info, cert="UNCERTIFIED: the arming lead did not settle in 8 rounds")
 
 
-def _win(where):
+def _win(where, fti=None, plain_j1=None, plain_reason=""):
+    """`fti` {(lane, word): branch_budget.ft_edge_inputs' entry for that window's ARM};
+    `plain_j1` {lane: the plain lowering's certificate gives the lane J 1} -- where it does not,
+    no drain can certify the window and both closed forms say None, with the reason"""
     out = []
     for (ln, i), (ia, iarm, pre, T, p) in sorted(where.items()):
         nd = p.get("next_delay", {}).get((ln, i))
+        d1 = p.get("pc1_delay", {}).get((ln, i))
+        f = (fti or {}).get((ln, i))
+        why = None
+        if plain_j1 is not None and not plain_j1.get(ln):
+            why = "the plain lowering's lane %d is not J 1 (%s)" % (ln, plain_reason[:120])
+            cf = None
+        elif p["else"] == "abort":
+            cf = drain_closed_form(nd) if nd is not None else None
+        elif nd is not None and d1 is not None and f:
+            cf = drain_closed_form_ft(d1, nd, f["edge_ready"], f["arm_gap"])
+        else:
+            cf = None
         out.append({"lane": ln, "A_word": ia, "ARM_word": iarm, "pre": pre, "T": T,
                     "B_pin": p["B_pin"], "else": p["else"], "stmt": p["stmt"], "sid": p["sid"],
-                    "next_delay": nd,
-                    "drain_cf": drain_closed_form(nd) if nd is not None and p["else"] == "abort"
-                    else None})
+                    "next_delay": nd, "pc1_delay": d1,
+                    "edge_ready": f["edge_ready"] if f else None, "drain_cf": cf,
+                    "cf_none_why": why})
     return {"windows": out}
 
 

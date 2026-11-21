@@ -41,7 +41,9 @@
      the closed form on every window; the default certifies; `nodrain` stamps UNCERTIFIED; a
      next action bounded tighter than the drain is refused; no `within` -> byte-identical
      (must-fire M_PC_DRAIN_OFFBY1: the drain one past the search -> the closed form disagrees).
-     The agreement is checked on the DEFAULT path (arm late) only: early arming is withdrawn
+     The agreement is checked on the DEFAULT path (arm late) only: early arming is withdrawn.
+     Wilson 11-20: also on every `else abort` / `else continue` window of the SPI-master and
+     UART-TX lowerings, slot off and on (drain_closed_form_ft: the timeout path's refetched PC+2)
   C14 arm='early' refused as withdrawn (the drain table alone uses it, counterfactual=True); more
      than MAX_PLAIN_ARM_RUN = 2 plain edge ARMs in a row refused (item 1b two deep; an FT ARM
      is outside the run) (must-fire M_PC_ARM3_PASS)
@@ -480,6 +482,58 @@ def c13():
     p0 = C.S.parse(body())
     if plain["image"] != C.lower(p0["v1"], 7)[0]:
         probs.append("C13 an image with no `within` is not byte-identical to the plain lowering")
+    return probs + c13_agree()
+
+
+def uart_window_text(kind):
+    """the UART-TX lowering (uart_crc) with one window from its TX pin to a free wire"""
+    import pit_emit as PE
+    import run_pit_emit as V1
+    base = PE.emit(bytes(V1.IMAGES["uart_crc"]()), HZ).rstrip("\n").splitlines()
+    _i, _low0, route = C.lower(C.S.parse("\n".join(base) + "\n")["v1"], 7)
+    tx = [w for w in range(8) if C._route_pin(route, w) is not None][0]
+    free = [w for w in range(8) if C._route_pin(route, w) is None][0]
+    st = ("pattern Fall(uio%d) -> Fall(uio%d) within (2000 ns, 10000 ns) else %s "
+          "source datasheet \"X\";" % (tx, free, kind))
+    return "\n".join(base[:-1] + ["  " + st] + [base[-1]]) + "\n"
+
+
+#: the mutant passes that re-run c13_agree (the ones that move the drain or its terms); every
+#: other pass skips it -- the main pass runs it in full (Nate 11-21, gate time)
+AGREE_MUTANTS = ("M_PC_DRAIN_OFFBY1", "M_PC_ARMRETIRE_OFF")
+
+
+def c13_agree():
+    """Wilson 11-20 step 2: the search and the closed form agree on EVERY window -- `else
+    abort` (drain_closed_form) and `else continue` (drain_closed_form_ft) -- on the SPI-master
+    and UART-TX lowerings, slot off and slot on (SLOT = 2, where a FALLTHROUGH PC+2 is ready on
+    its edge entry). None on both sides where nothing certifies (PC+2 not edge-ready: the flush's
+    refill floor; or the plain lowering's lane not J 1). Red on any disagreement."""
+    import branch_budget as BB
+    if C.MUT and C.MUT not in AGREE_MUTANTS:
+        return []
+    probs = []
+    saved = BB.SLOT
+    try:
+        for slot in (None, 2):
+            BB.SLOT = slot
+            for name, mk in (("SPI", lambda kd: body(WIN % kd)), ("UART-TX", uart_window_text)):
+                for kind in ("abort", "continue"):
+                    parsed = C.S.parse(mk(kind))
+                    _i, low, route = C.lower(parsed["v1"], 7)
+                    _l, _r, w = C.windows(parsed["poset"], low, route, HZ)
+                    # the drain the compiler chose (None where the search found none)
+                    got = sorted({(x["drain"] if x["drain_found"] is not None else None,
+                                   x["drain_cf"]) for x in w["windows"]}, key=repr)
+                    tag = "C13 agree slot %s %s else %s" % (slot, name, kind)
+                    for x in w["windows"]:
+                        d = x["drain"] if x["drain_found"] is not None else None
+                        if d != x["drain_cf"]:
+                            probs.append("%s: lane %d ARM %d search %s, closed form %s"
+                                         % (tag, x["lane"], x["ARM_word"], d, x["drain_cf"]))
+                    say("  %s: %d windows, (search, closed form) %s" % (tag, len(w["windows"]), got))
+    finally:
+        BB.SLOT = saved
     return probs
 
 
