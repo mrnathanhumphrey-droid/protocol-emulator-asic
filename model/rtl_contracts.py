@@ -244,9 +244,20 @@ COMPOSITION = {
             {"step": "L4 hfree: ARM writebacks on runBK (vacuous: armed until the edge, which "
                      "flushes y)", "status": "proved",
              "theorems": ("armed_after_arm", "arm_no_dec", "flS_runBK", "hrel_bridged")},
-            {"step": "L4 window budgets hM / hS", "status": "owed",
-             "what": "the window chain (Wilson 11-18 'hR on runB'): M other-lane decisions and "
-                     "S idle cycles per K-window, counted along runBK"},
+            # L4 hM / hS split 11-21 (Wilson ruling: wb_closeBK in four parts; part 4 by K11)
+            {"step": "L4 hM part 2: decision spacing on the bridged run (hsepBK)",
+             "status": "proved",
+             "theorems": ("ts_wb_bridged", "ts_mono_bridged", "hsep_bridged")},
+            {"step": "L4 hS: the K11 scheduler lemma", "status": "owed",
+             "what": "under K11 (the scheduler never chooses an armed lane while an unarmed one "
+                     "is ready; RTL rdy_rel & ~armed) winA win armed chooses as among unarmed "
+                     "ready lanes, so hS is the ruled scheduler's S (0) plus the FALLTHROUGH "
+                     "disarms (check 18); K11 + agent 1's must-fire in RTL_CONTRACTS"},
+            {"step": "L4 hM / hS closure: wb_closeBK (parts 1 and 3)", "status": "owed",
+             "what": "RespClose.wb_close's induction over time, all lanes, on the bridged run: "
+                     "cut at each lane's last flush, wb_bound_winBK_fl with hfree from "
+                     "hrel_bridged + hpre_after_flush, hM from hsep_bridged + cnt_sparse_g + "
+                     "hmul / hK"},
             {"step": "bridge: the armed run is a runBK run", "status": "proved",
              "theorems": ("runBA_proj", "flushOk_runBA")},
             {"step": "flush spacing (K8), proof (b)", "status": "proved",

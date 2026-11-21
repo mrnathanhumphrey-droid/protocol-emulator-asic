@@ -286,6 +286,176 @@ theorem hrel_bridged (hedge : ∀ t l, t + 1 ≤ edge t l) (hA : ArmInvB A0)
     rw [show s + x + 1 + (D - (s + x + 1)) = D by omega] at ha
     exact arm_no_dec P win usb sreq isArm edge kt A0 D y ha hdec
 
+/-! ### Composition part 2: decision spacing on the bridged run (`hsepBK`, Wilson 11-21)
+
+`RespClose.wb_close`'s `hsep` on the bridged run: two decisions of lane `z` at `a < b` are at least
+`σ` apart, given the first one's writeback met its bound. Three cases:
+* the writeback at `a + 2` arms `z`: armed at `a + 3`, so `b ≥ a + 4` (`σ ≤ 4`, ArmClose's ARM case);
+* no flush of `z` in `[a + 2, b)`: the gap -- the release after `a + 2` is `ts + gap`, monotone to
+  `b`, and `z` is released at `b` (`hwin`); with the bound at `a + 2`, `σ + R ≤ gap` gives it;
+* a flush of `z` at `f` in `[a + 2, b)`: `z` was armed at a writeback `t0 < f` (`armed_origin`) --
+  not at or before `a + 2` (unarmed while writing back there, not arming there), so after it, and
+  `t0`'s own decision lies strictly between `a` and `b`: the induction. -/
+
+/-- The release after an unflushed writeback is the old release plus the gap. -/
+theorem ts_wb_bridged (x : Nat) (z : Lane)
+    (hwb : IsWB z (runBK P (winS P win usb sreq isArm edge kt A0) usb sreq
+      (flS P win usb sreq isArm edge kt A0) kt x A0.X).x.e)
+    (hf : flS P win usb sreq isArm edge kt A0
+      (runBK P (winS P win usb sreq isArm edge kt A0) usb sreq
+        (flS P win usb sreq isArm edge kt A0) kt x A0.X).x.e.now z = false) :
+    (runBK P (winS P win usb sreq isArm edge kt A0) usb sreq
+        (flS P win usb sreq isArm edge kt A0) kt (x + 1) A0.X).x.e.ts z
+      = (runBK P (winS P win usb sreq isArm edge kt A0) usb sreq
+          (flS P win usb sreq isArm edge kt A0) kt x A0.X).x.e.ts z + P.dly z
+        + P.ext (runBK P (winS P win usb sreq isArm edge kt A0) usb sreq
+          (flS P win usb sreq isArm edge kt A0) kt x A0.X).x.e.now z := by
+  rw [runBK_succ', stepBKK_ts_y P (winS P win usb sreq isArm edge kt A0) usb sreq _ _ _ z hf]
+  unfold tsNext
+  rw [if_pos ⟨hwb.1, hwb.2.symm⟩]
+
+/-- An unflushed lane's release only moves forward. -/
+theorem ts_mono_bridged (z : Lane) (m : Nat) : ∀ d,
+    (∀ j, m ≤ j → j < m + d → flS P win usb sreq isArm edge kt A0
+      (runBK P (winS P win usb sreq isArm edge kt A0) usb sreq
+        (flS P win usb sreq isArm edge kt A0) kt j A0.X).x.e.now z = false) →
+    (runBK P (winS P win usb sreq isArm edge kt A0) usb sreq
+        (flS P win usb sreq isArm edge kt A0) kt m A0.X).x.e.ts z
+      ≤ (runBK P (winS P win usb sreq isArm edge kt A0) usb sreq
+        (flS P win usb sreq isArm edge kt A0) kt (m + d) A0.X).x.e.ts z
+  | 0, _ => Nat.le_refl _
+  | d + 1, h => by
+    rw [← Nat.add_assoc, runBK_succ',
+      stepBKK_ts_y P (winS P win usb sreq isArm edge kt A0) usb sreq _ _ _ z
+        (h (m + d) (by omega) (by omega))]
+    exact Nat.le_trans (ts_mono_bridged z m d (fun j h1 h2 => h j h1 (by omega)))
+      (tsNext_ge P _ z)
+
+/-- **Decision spacing on the bridged run** (composition part 2, `hsepBK`). -/
+theorem hsep_bridged (hedge : ∀ t l, t + 1 ≤ edge t l) (hA : ArmInvB A0)
+    (h0 : A0.X.x.e.st = .idle) (h0a : ∀ l, A0.armed l = false)
+    (hwin : ∀ e w, win e = some w → e.ts w ≤ e.now) (z : Lane) (σ R : Nat) (hσ4 : σ ≤ 4)
+    (hgap : ∀ x, IsWB z (runBK P (winS P win usb sreq isArm edge kt A0) usb sreq
+        (flS P win usb sreq isArm edge kt A0) kt x A0.X).x.e →
+      (runBA P win usb sreq isArm edge kt x A0).arms P isArm z = false →
+      σ + R ≤ P.dly z + P.ext (runBK P (winS P win usb sreq isArm edge kt A0) usb sreq
+        (flS P win usb sreq isArm edge kt A0) kt x A0.X).x.e.now z) :
+    ∀ b a, a < b →
+      Dec (winS P win usb sreq isArm edge kt A0) z (runBK P (winS P win usb sreq isArm edge kt A0)
+        usb sreq (flS P win usb sreq isArm edge kt A0) kt a A0.X).x.e →
+      Dec (winS P win usb sreq isArm edge kt A0) z (runBK P (winS P win usb sreq isArm edge kt A0)
+        usb sreq (flS P win usb sreq isArm edge kt A0) kt b A0.X).x.e →
+      (runBK P (winS P win usb sreq isArm edge kt A0) usb sreq
+          (flS P win usb sreq isArm edge kt A0) kt (a + 2) A0.X).x.e.now ≤
+        (runBK P (winS P win usb sreq isArm edge kt A0) usb sreq
+          (flS P win usb sreq isArm edge kt A0) kt (a + 2) A0.X).x.e.ts z + R + 2 →
+      a + σ ≤ b := by
+  intro b
+  induction b using Nat.strongRecOn with
+  | _ b ih =>
+  intro a hab hda hdb hR
+  have hwb := dec_wbBK P (winS P win usb sreq isArm edge kt A0) usb sreq
+    (flS P win usb sreq isArm edge kt A0) kt A0.X a z hda
+  have hdr : (runBK P (winS P win usb sreq isArm edge kt A0) usb sreq
+      (flS P win usb sreq isArm edge kt A0) kt (a + 1) A0.X).x.e.st = .drive := by
+    rw [runBK_succ', stepBKK_st]
+    exact (step_of_dec P (winS P win usb sreq isArm edge kt A0) _ z hda).1
+  have hb3 : a + 3 ≤ b := by
+    rcases (show b = a + 1 ∨ b = a + 2 ∨ a + 3 ≤ b by omega) with h | h | h
+    · rw [h] at hdb
+      have h1 := hdb.1
+      rw [hdr] at h1
+      cases h1
+    · rw [h] at hdb
+      have h1 := hdb.1
+      rw [hwb.1] at h1
+      cases h1
+    · exact h
+  have hnA := now_runBK P (winS P win usb sreq isArm edge kt A0) usb sreq
+    (flS P win usb sreq isArm edge kt A0) kt (a + 2) A0.X
+  have hnB := now_runBK P (winS P win usb sreq isArm edge kt A0) usb sreq
+    (flS P win usb sreq isArm edge kt A0) kt b A0.X
+  -- z is not armed at its own writeback
+  have hI2 := armInvB_runBA P win usb sreq isArm edge hedge kt A0 hA (a + 2)
+  have hwbA : IsWB z (runBA P win usb sreq isArm edge kt (a + 2) A0).X.x.e := by
+    rw [runBA_proj P win usb sreq isArm edge kt A0 (a + 2)]
+    exact hwb
+  have hna2 : (runBA P win usb sreq isArm edge kt (a + 2) A0).armed z = false := by
+    cases h : (runBA P win usb sreq isArm edge kt (a + 2) A0).armed z with
+    | false => rfl
+    | true =>
+      exfalso
+      exact hI2.1 z h ⟨by rw [hwbA.1]; decide, hwbA.2⟩
+  cases harm : (runBA P win usb sreq isArm edge kt (a + 2) A0).arms P isArm z with
+  | true =>
+    have ha3 := armed_after_arm P win usb sreq isArm edge kt A0 hedge hA z (a + 2) harm 0
+      (fun j hj => absurd hj (Nat.not_lt_zero j))
+    rcases Nat.lt_or_ge b (a + 4) with hlt | hge
+    · exfalso
+      rw [show b = a + 2 + 1 + 0 by omega] at hdb
+      exact arm_no_dec P win usb sreq isArm edge kt A0 _ z ha3 hdb
+    · omega
+  | false =>
+    -- z is released at b
+    have hrelb : (runBK P (winS P win usb sreq isArm edge kt A0) usb sreq
+        (flS P win usb sreq isArm edge kt A0) kt b A0.X).x.e.ts z ≤
+        (runBK P (winS P win usb sreq isArm edge kt A0) usb sreq
+          (flS P win usb sreq isArm edge kt A0) kt b A0.X).x.e.now := by
+      have hw := hdb.2.1
+      unfold winS winA at hw
+      split at hw
+      · rename_i v hv
+        split at hw
+        · cases hw
+        · cases hw
+          exact hwin _ _ hv
+      · cases hw
+    -- the gap case: no flush of z in [a + 2, b)
+    have gapcase : (∀ j, a + 2 ≤ j → j < b → flS P win usb sreq isArm edge kt A0
+        (runBK P (winS P win usb sreq isArm edge kt A0) usb sreq
+          (flS P win usb sreq isArm edge kt A0) kt j A0.X).x.e.now z = false) → a + σ ≤ b := by
+      intro hnf
+      have h1 := ts_wb_bridged P win usb sreq isArm edge kt A0 (a + 2) z hwb
+        (hnf (a + 2) (Nat.le_refl _) (by omega))
+      have h2 := ts_mono_bridged P win usb sreq isArm edge kt A0 z (a + 2 + 1) (b - (a + 2 + 1))
+        (fun j h1 h2 => hnf j (by omega) (by omega))
+      rw [show a + 2 + 1 + (b - (a + 2 + 1)) = b by omega] at h2
+      have hg := hgap (a + 2) hwb harm
+      omega
+    rcases last_true (fun j => flS P win usb sreq isArm edge kt A0
+        (runBK P (winS P win usb sreq isArm edge kt A0) usb sreq
+          (flS P win usb sreq isArm edge kt A0) kt j A0.X).x.e.now z) b with
+      hnf | ⟨f, hfb, hff, hlast⟩
+    · exact gapcase (fun j _ hj => hnf j hj)
+    · rcases Nat.lt_or_ge f (a + 2) with hfa | hfa
+      · exact gapcase (fun j hj hjb => hlast j (by omega) hjb)
+      · -- a flush of z at f >= a + 2: z was armed at a writeback t0 < f
+        have hff' : flS P win usb sreq isArm edge kt A0
+            (runBK P (winS P win usb sreq isArm edge kt A0) usb sreq
+              (flS P win usb sreq isArm edge kt A0) kt f A0.X).x.e.now z = true := hff
+        rw [flS_runBK] at hff'
+        unfold EngBA.hit at hff'
+        simp only [Bool.and_eq_true, decide_eq_true_eq] at hff'
+        obtain ⟨t0, ht0, harm0, -, hall⟩ :=
+          armed_origin P win usb sreq isArm edge kt A0 h0a z f hff'.1
+        rcases Nat.lt_trichotomy t0 (a + 2) with h | h | h
+        · have h1 := (hall (a + 2) h hfa).1
+          rw [hna2] at h1
+          cases h1
+        · rw [h] at harm0
+          rw [harm0] at harm
+          cases harm
+        · simp only [EngBA.arms, Bool.and_eq_true, decide_eq_true_eq] at harm0
+          obtain ⟨⟨⟨hst, hcur⟩, -⟩, -⟩ := harm0
+          have hwb0 : IsWB z (runBK P (winS P win usb sreq isArm edge kt A0) usb sreq
+              (flS P win usb sreq isArm edge kt A0) kt t0 A0.X).x.e := by
+            rw [← runBA_proj P win usb sreq isArm edge kt A0 t0]
+            exact ⟨hst, hcur.symm⟩
+          obtain ⟨c, hc, hdc⟩ := wb_backBK P (winS P win usb sreq isArm edge kt A0) usb sreq
+            (flS P win usb sreq isArm edge kt A0) kt A0.X h0 t0 z hwb0
+          have := ih c (by omega) a (by omega) hda hdc hR
+          omega
+
 end
 
 end JLane
