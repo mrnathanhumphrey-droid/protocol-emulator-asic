@@ -180,7 +180,11 @@ KEY = ("dstar", "dstar29", "dstar39", "dstar39_v2", "dstar39_st", "dstar39_hold"
        # SpareB.lean (Wilson 11-20, spare_capture): ready_*_T with hempty replaced by the held
        # words retiring first
        "wb_after_wb_T", "arm_wb_spare_T", "cnt_two_hits", "ready_pc1_spare_T",
-       "ready_pc2_plain_spare_T", "ready_pc2_arm_spare_T")
+       "ready_pc2_plain_spare_T", "ready_pc2_arm_spare_T",
+       # OrderH.lean (Nate 11-20 option 1): hidxA from the head premise hidxH, order and keep
+       # proved together by strong induction on the arming time
+       "keep_at_hit_lt", "keepOk_runBK_lt", "hidxA_of_head", "hidxA_runBA",
+       "ready_ft_edge_head")
 #: proof_constants.load() key -> the Lean expression that must evaluate to it (SPEC: the map)
 CONSTS = {
     "lemmaA_window": "LEMMA_A_WINDOW", "R_base": "R_BASE", "dispatch_cycles": "DISPATCH_CYCLES",
