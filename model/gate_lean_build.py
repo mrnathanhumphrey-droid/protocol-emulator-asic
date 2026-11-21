@@ -201,7 +201,10 @@ KEY = ("dstar", "dstar29", "dstar39", "dstar39_v2", "dstar39_st", "dstar39_hold"
        "winA_released", "winS_eq_of_K11",
        # CountBK.lean (closure step 2): the counting lemmas along runBK
        "cntBK_succ_back", "cntBK_add", "cntBK_mono", "cntBK_reach", "cntBK_le_one_sep",
-       "cntBK_sparse_g", "cntBK_decOther_split")
+       "cntBK_sparse_g", "cntBK_decOther_split",
+       # HfreeR.lean (closure step 3): hnf on every runBK; hfree in run coordinates
+       "ts_flush_stepBK", "ts_after_flushBK", "hnf_runBK", "flush_or_clearBK", "hfree_runBK",
+       "hrelR_bridged")
 #: proof_constants.load() key -> the Lean expression that must evaluate to it (SPEC: the map)
 CONSTS = {
     "lemmaA_window": "LEMMA_A_WINDOW", "R_base": "R_BASE", "dispatch_cycles": "DISPATCH_CYCLES",
