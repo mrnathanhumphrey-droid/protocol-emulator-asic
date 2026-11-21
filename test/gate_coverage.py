@@ -126,7 +126,7 @@ CLASSIFIED = {
     # formal/argmin_equiv.sby); the loop survives only in the generate branch
     # for other lane counts, which is not elaborated, so the point no longer
     # exists to classify.
-    ("src/pe_engine.v", 3039, "v_branch", "if"): (
+    ("src/pe_engine.v", 3228, "v_branch", "if"): (
         TOOL_DIVERGENT,
         "`if (hdr_done && !prime_unp) primed_q <= 1'b1;` -- the prime scan's "
         "COMPLETION test, which sits AFTER the `for` over lanes, not inside "
@@ -146,7 +146,7 @@ CLASSIFIED = {
         "number out of the artefact; do not reconstruct it from memory."),
 
     # ---- src/pe_engine.v --------------------------------------------------
-    ("src/pe_engine.v", 3133, "v_branch", "else"): (
+    ("src/pe_engine.v", 3324, "v_branch", "else"): (
         UNREACHABLE,
         "H_IDLE (line 1134) with `hdr_done` ALREADY SET. Every assignment that puts the "
         "header FSM into H_IDLE clears `hdr_done` in the same non-blocking "
@@ -156,7 +156,7 @@ CLASSIFIED = {
         "the arm of a condition that is true on every entry. ⭐ Checked "
         "structurally by `check_h_idle_clears` below rather than asserted, "
         "because the claim is about two specific lines and would rot."),
-    ("src/pe_engine.v", 3382, "v_branch", "else"): (
+    ("src/pe_engine.v", 3581, "v_branch", "else"): (
         UNREACHABLE,
         "ST_IDLE's `if (w_hv)` with no else: a dispatch winner whose HEAD is EMPTY. Since "
         "(b') (9c0df0c; agent 2 729111f) `ready[g] = rdy_rel[g] & l_actv[hix[g]]` -- the "
@@ -168,7 +168,7 @@ CLASSIFIED = {
         "its must-fire build), which the coverage sweep does not build. ⭐ Checked "
         "structurally by `check_whv_ready` below, because the claim rests on three lines "
         "that a refactor could separate."),
-    ("src/pe_engine.v", 3322, "v_line", "case"): (
+    ("src/pe_engine.v", 3521, "v_line", "case"): (
         UNREACHABLE,
         "The prefetch FSM's defensive `default`. `pst` is declared `[2:0]` and "
         "its four encodings P_SCAN/P_REQ/P_WAIT/P_CAP are 3'd0..3'd3, all "
@@ -176,7 +176,7 @@ CLASSIFIED = {
         "⭐ Verified mechanically by `check_full_case` below, which reads the "
         "encodings out of the source -- a hand-counted enumeration is the sort "
         "of claim that survives the addition of a fifth state."),
-    ("src/pe_engine.v", 3785, "v_line", "case"): (
+    ("src/pe_engine.v", 4010, "v_line", "case"): (
         UNREACHABLE,
         "The opcode `case`'s `default`. ⭐ v2 (Wilson 10-26): the opcode is 5 "
         "bits and the EIGHT BUILT opcodes are named in arms (OP_LEVEL .. "
@@ -195,7 +195,7 @@ CLASSIFIED = {
     # other lane, with the lane still LIVE -- the flag must report, never
     # stall. The entry is removed rather than kept, because a stale OWED claim
     # says something is untested when it is tested.
-    ("src/pe_engine.v", 4284, "v_line", "case"): (
+    ("src/pe_engine.v", 4592, "v_line", "case"): (
         UNREACHABLE,
         "The dispatch FSM's defensive `default`. `st` is declared `[1:0]` with "
         "three encodings ST_IDLE/ST_DRIVE/ST_WB = 2'd0..2'd2 at line 666; "
@@ -206,7 +206,7 @@ CLASSIFIED = {
 
     # ---- src/project.v ----------------------------------------------------
     # ⭐ PIT chunk 2, stage 0 (Wilson 10-29, both proofs accepted)
-    ("src/project.v", 1908, "v_branch", "if"): (
+    ("src/project.v", 1911, "v_branch", "if"): (
         UNREACHABLE,
         "stage 0's clock_like guard: each level needs >= 4 intervals. P_CLVL "
         "is entered only from P_CNEXT, which requires cnt[ci] >= "
@@ -214,7 +214,7 @@ CLASSIFIED = {
         "ALTERNATE level (each edge toggles it), so 16 edges give 15 "
         "intervals split 8 / 7 between the two levels: nlv0, nlv1 >= 7 > 4. "
         "The guard mirrors the frozen model's own check and stays."),
-    ("src/project.v", 2091, "v_line", "case"): (
+    ("src/project.v", 2094, "v_line", "case"): (
         UNREACHABLE,
         "stage 0's sequencer `default`. `ph` is [4:0] with 19 named states "
         "P_IDLE .. P_DONE = 5'd0 .. 5'd18; every `ph <=` writes a named P_* "
@@ -280,7 +280,7 @@ CLASSIFIED = {
     # `case (st)`, so none of the dispatch arm's own guards dominate it --
     # which is why it carries its own, and why `gate_program_index` classifies
     # both writes as members of the program-indexed family.
-    ("src/pe_engine.v", 4357, "v_branch", "else"): (
+    ("src/pe_engine.v", 4693, "v_branch", "else"): (
         OWED,
         "The `l_pin[i] < N_PINS` guard on the hold expiry. Its `else` is "
         "REACHABLE, not unreachable: a lane may legally name the RESERVED data "
@@ -300,7 +300,7 @@ CLASSIFIED = {
     # no input path, so the observed rise never came), and THAT is what covered
     # this branch on every sweep. With the fix it went dark -- which is the fix
     # working, and also a branch nothing legitimate is known to reach.
-    ("src/pe_engine.v", 4031, "v_branch", "if"): (
+    ("src/pe_engine.v", 4256, "v_branch", "if"): (
         OWED,
         "`ck_consume & ~l_ckgot`: a clocked SHIFTIN consumes a bit that was "
         "never captured, and reports it (`clk_stretch_err`). Covered before "
@@ -318,7 +318,7 @@ CLASSIFIED = {
     # clocked twin IS covered -- every clocked open-drain image runs at d = 9,
     # so the clamp sends them all down the direct path -- and the asymmetry is
     # the whole reason this one is debt rather than a waiver.
-    ("src/pe_engine.v", 3618, "v_branch", "else"): (
+    ("src/pe_engine.v", 3824, "v_branch", "else"): (
         OWED,
         "The `if (l_mode[cur])` inside the UNCLOCKED SHIFT's direct-drive arm, "
         "open-drain side. Reaching it needs an unclocked open-drain SHIFT whose "
@@ -332,7 +332,7 @@ CLASSIFIED = {
         "⚠ NOT waived as unreachable: it is reachable, by exactly the class "
         "of program the clamp was written for, and leaving the clamp's own "
         "fallback untested is how a safety path rots."),
-    ("src/pe_engine.v", 3489, "v_branch", "else"): (
+    ("src/pe_engine.v", 3695, "v_branch", "else"): (
         UNREACHABLE,
         "The local `if (pin_real)` inside the SELF-CLOCKED SHIFT's LOW phase. "
         "Its `else` cannot be taken: the enclosing case label is "
@@ -342,7 +342,7 @@ CLASSIFIED = {
         "at the enclosing arm -- and widening that window is refused, since the "
         "gate's own docstring records a `clk_real` 30 lines away falsely "
         "guarding a deliberately unguarded mutant arm."),
-    ("src/pe_engine.v", 3522, "v_branch", "else"): (
+    ("src/pe_engine.v", 3728, "v_branch", "else"): (
         UNREACHABLE,
         "The `if (clk_real)` around the LOW phase's CLOCK write. Unreachable "
         "`else`: this block runs only under `ck_shift`, which is DEFINED as "
@@ -350,14 +350,14 @@ CLASSIFIED = {
         "conjunct of the condition that got us here. ⚠ It is still written, "
         "because the guard must be visible at the indexed write rather than "
         "inferred through a wire's definition."),
-    ("src/pe_engine.v", 3542, "v_branch", "else"): (
+    ("src/pe_engine.v", 3748, "v_branch", "else"): (
         UNREACHABLE,
         "The same `if (clk_real)` around the HIGH phase's clock write, "
         "unreachable for the identical reason -- `ck_shift` carries "
         "`clk_real`. Both phases guard separately because a guard shared "
         "across two write groups is how the 1.6x refusal first failed: it "
         "suppressed the data write and let the clock write run anyway."),
-    ("src/pe_engine.v", 3612, "v_branch", "else"): (
+    ("src/pe_engine.v", 3818, "v_branch", "else"): (
         UNREACHABLE,
         "The local `if (pin_real)` inside the UNCLOCKED SHIFT body. Same "
         "structure as the clocked one at 1621 and unreachable for the same "
@@ -365,7 +365,7 @@ CLASSIFIED = {
         "CODE: inserting the clocked arm pushed the case label's own guard "
         "more than 60 lines away from five writes that were fine the day "
         "before, which is exactly the drift that window exists to detect."),
-    ("src/pe_engine.v", 3752, "v_branch", "if"): (
+    ("src/pe_engine.v", 3958, "v_branch", "if"): (
         UNREACHABLE,
         "`if (ck_shiftin & ack_drv[1]) pin_out[a_pin] <= ack_drv[0];` -- the "
         "TRUE arm cannot be taken in a clean build, because `ack_drv` is "
@@ -494,59 +494,59 @@ CLASSIFIED[('src/pe_store.v', 498, 'v_branch', 'if')] = (
 # PAID 11-18 (Wilson 11-18 ruling, removed): project.v 1728 / 1729 (dirty-rise / dirty-fall data
 # edge), 2062 (CS active high), 2064 (CS level unclear). Pinned 5.053, three-mode sweeps: count 0
 # at fdb3074, 144 / 151 / 2 / 2 with the st_done batch's run_pit_clk cases.
-CLASSIFIED[('src/project.v', 2794, 'v_branch', 'else')] = (
+CLASSIFIED[('src/project.v', 2797, 'v_branch', 'else')] = (
     OWED, "OWED: a stage 1-2 corner that none of run_pit_s12's 17 cases (swept since ac3443d, +S0WAIT=2) drives at reset +0. Owed to a run_pit_s12 case whose capture makes this true: an OVF interval (an edge gap longer than the interval counter) in the PRE pass, which skips it for n / n1 / IVMAX.")
-CLASSIFIED[('src/project.v', 2801, 'v_line', 'elsif')] = (
+CLASSIFIED[('src/project.v', 2804, 'v_line', 'elsif')] = (
     OWED, "OWED: a stage 1-2 corner that none of run_pit_s12's 17 cases (swept since ac3443d, +S0WAIT=2) drives at reset +0. Owed to a run_pit_s12 case whose capture makes this true: an OVF interval reaching the stage-1 division pass (div_ip), which drops it -- a long idle gap inside the capture.")
-CLASSIFIED[('src/project.v', 2802, 'v_line', 'elsif')] = (
+CLASSIFIED[('src/project.v', 2805, 'v_line', 'elsif')] = (
     OWED, "OWED: a stage 1-2 corner that none of run_pit_s12's 17 cases (swept since ac3443d, +S0WAIT=2) drives at reset +0. Owed to a run_pit_s12 case whose capture makes this true: an OVF interval reaching refine 2 (S_REF2), which drops it -- a long idle gap inside the capture.")
-CLASSIFIED[('src/project.v', 2805, 'v_line', 'if')] = (
+CLASSIFIED[('src/project.v', 2808, 'v_line', 'if')] = (
     OWED, "OWED: a stage 1-2 corner that none of run_pit_s12's 17 cases (swept since ac3443d, +S0WAIT=2) drives at reset +0. Owed to a run_pit_s12 case whose capture makes this true: an OVF interval in stage 2 outside the phase walk: an idle run, which takes no divide.")
-CLASSIFIED[('src/project.v', 2845, 'v_branch', 'cond_then')] = (
+CLASSIFIED[('src/project.v', 2848, 'v_branch', 'cond_then')] = (
     OWED, "OWED: a stage 1-2 corner that none of run_pit_s12's 17 cases (swept since ac3443d, +S0WAIT=2) drives at reset +0. Owed to a run_pit_s12 case whose capture makes this true: S_ASYNC's run length of an OVF interval (saturated at 16) -- a long idle gap in an async capture.")
-CLASSIFIED[('src/project.v', 2919, 'v_line', 'if')] = (
+CLASSIFIED[('src/project.v', 2922, 'v_line', 'if')] = (
     OWED, "OWED: a stage 1-2 corner that none of run_pit_s12's 17 cases (swept since ac3443d, +S0WAIT=2) drives at reset +0. Owed to a run_pit_s12 case whose capture makes this true: S_HARM reaching the end of the period walk with every rival harmonic (p_end): the best period accepted after the harmonic check.")
-CLASSIFIED[('src/project.v', 2933, 'v_branch', 'else')] = (
+CLASSIFIED[('src/project.v', 2936, 'v_branch', 'else')] = (
     OWED, "OWED: a stage 1-2 corner that none of run_pit_s12's 17 cases (swept since ac3443d, +S0WAIT=2) drives at reset +0. Owed to a run_pit_s12 case whose capture makes this true: refine 2 with NO hit at refine 1's P_hat (acc[74:52] == 0): no divide is started.")
-CLASSIFIED[('src/project.v', 2941, 'v_branch', 'else')] = (
+CLASSIFIED[('src/project.v', 2944, 'v_branch', 'else')] = (
     OWED, "OWED: a stage 1-2 corner that none of run_pit_s12's 17 cases (swept since ac3443d, +S0WAIT=2) drives at reset +0. Owed to a run_pit_s12 case whose capture makes this true: refine 2's result not taken because it had no hit (acc[74:52] == 0) -- the same capture as 2933.")
-CLASSIFIED[('src/project.v', 2973, 'v_branch', 'else')] = (
+CLASSIFIED[('src/project.v', 2976, 'v_branch', 'else')] = (
     OWED, "OWED: a stage 1-2 corner that none of run_pit_s12's 17 cases (swept since ac3443d, +S0WAIT=2) drives at reset +0. Owed to a run_pit_s12 case whose capture makes this true: S_SPAN with the walk ending on a span close (no open span to count, acc[21:9] == 0).")
-CLASSIFIED[('src/project.v', 2975, 'v_branch', 'if')] = (
+CLASSIFIED[('src/project.v', 2978, 'v_branch', 'if')] = (
     OWED, "OWED: a stage 1-2 corner that none of run_pit_s12's 17 cases (swept since ac3443d, +S0WAIT=2) drives at reset +0. Owed to a run_pit_s12 case whose capture makes this true: S_SPAN's final OPEN span being the longest span of the walk (acc[21:9] > acc[34:22]).")
-CLASSIFIED[('src/project.v', 3059, 'v_branch', 'if')] = (
+CLASSIFIED[('src/project.v', 3062, 'v_branch', 'if')] = (
     OWED, "OWED to the sweep: stage 3's ASYNC decode / GCD record path past what tb_pit's swept arms reach; test/run_pit_s3.py (gate pit-s3) runs stage 3 but is not in the sweep. Retired by a run_pit_s3.coverage_arms(), or -- if no pit-s3 case reaches it -- a case that drives: a frame bound below S3_MIN_FB: the refusal s3_why 1, straight to the GCD init.")
-CLASSIFIED[('src/project.v', 3070, 'v_branch', 'if')] = (
+CLASSIFIED[('src/project.v', 3073, 'v_branch', 'if')] = (
     OWED, "OWED to the sweep: stage 3's ASYNC decode / GCD record path past what tb_pit's swept arms reach; test/run_pit_s3.py (gate pit-s3) runs stage 3 but is not in the sweep. Retired by a run_pit_s3.coverage_arms(), or -- if no pit-s3 case reaches it -- a case that drives: the fl = fb * p16 shift-add overflowing (acc[29] or hi5[4]): the sticky high flag S3_HLE.")
-CLASSIFIED[('src/project.v', 3073, 'v_branch', 'cond_then')] = (
+CLASSIFIED[('src/project.v', 3076, 'v_branch', 'cond_then')] = (
     OWED, "OWED to the sweep: stage 3's ASYNC decode / GCD record path past what tb_pit's swept arms reach; test/run_pit_s3.py (gate pit-s3) runs stage 3 but is not in the sweep. Retired by a run_pit_s3.coverage_arms(), or -- if no pit-s3 case reaches it -- a case that drives: fl saturated (all ones) after an overflow -- the same capture as 3070.")
-CLASSIFIED[('src/project.v', 3092, 'v_branch', 'if')] = (
+CLASSIFIED[('src/project.v', 3095, 'v_branch', 'if')] = (
     OWED, "OWED to the sweep: stage 3's ASYNC decode / GCD record path past what tb_pit's swept arms reach; test/run_pit_s3.py (gate pit-s3) runs stage 3 but is not in the sweep. Retired by a run_pit_s3.coverage_arms(), or -- if no pit-s3 case reaches it -- a case that drives: T_LOC outside a message advancing on a valid interval (x_v) before the scan is exhausted.")
-CLASSIFIED[('src/project.v', 3104, 'v_branch', 'else')] = (
+CLASSIFIED[('src/project.v', 3107, 'v_branch', 'else')] = (
     OWED, "OWED to the sweep: stage 3's ASYNC decode / GCD record path past what tb_pit's swept arms reach; test/run_pit_s3.py (gate pit-s3) runs stage 3 but is not in the sweep. Retired by a run_pit_s3.coverage_arms(), or -- if no pit-s3 case reaches it -- a case that drives: T_SPL closing a message with the message count already saturated at 255.")
-CLASSIFIED[('src/project.v', 3123, 'v_branch', 'cond_then')] = (
+CLASSIFIED[('src/project.v', 3126, 'v_branch', 'cond_then')] = (
     OWED, "OWED to the sweep: stage 3's ASYNC decode / GCD record path past what tb_pit's swept arms reach; test/run_pit_s3.py (gate pit-s3) runs stage 3 but is not in the sweep. Retired by a run_pit_s3.coverage_arms(), or -- if no pit-s3 case reaches it -- a case that drives: T_XE's position saturating (al[25]) -- a sum past 2^25.")
-CLASSIFIED[('src/project.v', 3127, 'v_branch', 'else')] = (
+CLASSIFIED[('src/project.v', 3130, 'v_branch', 'else')] = (
     OWED, "OWED to the sweep: stage 3's ASYNC decode / GCD record path past what tb_pit's swept arms reach; test/run_pit_s3.py (gate pit-s3) runs stage 3 but is not in the sweep. Retired by a run_pit_s3.coverage_arms(), or -- if no pit-s3 case reaches it -- a case that drives: T_END with no message open: the decode ends between messages.")
-CLASSIFIED[('src/project.v', 3129, 'v_branch', 'else')] = (
+CLASSIFIED[('src/project.v', 3132, 'v_branch', 'else')] = (
     OWED, "OWED to the sweep: stage 3's ASYNC decode / GCD record path past what tb_pit's swept arms reach; test/run_pit_s3.py (gate pit-s3) runs stage 3 but is not in the sweep. Retired by a run_pit_s3.coverage_arms(), or -- if no pit-s3 case reaches it -- a case that drives: T_END closing a message with the count saturated at 255.")
-CLASSIFIED[('src/project.v', 3294, 'v_branch', 'cond_then')] = (
+CLASSIFIED[('src/project.v', 3297, 'v_branch', 'cond_then')] = (
     OWED, "OWED to the sweep: stage 3's ASYNC decode / GCD record path past what tb_pit's swept arms reach; test/run_pit_s3.py (gate pit-s3) runs stage 3 but is not in the sweep. Retired by a run_pit_s3.coverage_arms(), or -- if no pit-s3 case reaches it -- a case that drives: the GCD record says no polynomial and stage 3 found frames, with the GCD skipped and not tried -> s3_why 2 (else 3).")
-CLASSIFIED[('src/project.v', 3314, 'v_branch', 'if')] = (
+CLASSIFIED[('src/project.v', 3317, 'v_branch', 'if')] = (
     OWED, "OWED to the sweep: stage 3's ASYNC decode / GCD record path past what tb_pit's swept arms reach; test/run_pit_s3.py (gate pit-s3) runs stage 3 but is not in the sweep. Retired by a run_pit_s3.coverage_arms(), or -- if no pit-s3 case reaches it -- a case that drives: P_E3: the length count no greater than the data-bit count -- `no data bits: not a length`.")
-CLASSIFIED[('src/project.v', 3381, 'v_branch', 'if')] = (
+CLASSIFIED[('src/project.v', 3384, 'v_branch', 'if')] = (
     OWED, "OWED to the sweep: stage 3's ASYNC decode / GCD record path past what tb_pit's swept arms reach; test/run_pit_s3.py (gate pit-s3) runs stage 3 but is not in the sweep. Retired by a run_pit_s3.coverage_arms(), or -- if no pit-s3 case reaches it -- a case that drives: P_V2: the verification remainder non-zero (P_A != 0) -> the refusal s3_why 5.")
-CLASSIFIED[('src/project.v', 3433, 'v_line', 'case')] = (
+CLASSIFIED[('src/project.v', 3436, 'v_line', 'case')] = (
     UNREACHABLE, "pe_pit_s12's sequencer `default`. `st` is [4:0] with 18 named states S_IDLE .. S_S3 = 5'd0 .. 5'd17, every one with its own case arm, and every `st <=` in the module writes a named S_* state, so 5'd18 .. 5'd31 is reachable only by corruption of a reset-bearing flop. A defensive return to S_IDLE.")
-CLASSIFIED[('src/project.v', 3455, 'v_branch', 'if')] = (
+CLASSIFIED[('src/project.v', 3458, 'v_branch', 'if')] = (
     UNREACHABLE, "the s12 note's proof s12-1 as an every-cycle simulation assertion: the flags f3 are the decode of the CURRENT t3 by construction, so a passing run never reaches it -- it $finishes the run. run_pit_gcd builds with PE_S12_NOASSERT only for its record mutant.")
-CLASSIFIED[('src/project.v', 3460, 'v_branch', 'if')] = (
+CLASSIFIED[('src/project.v', 3463, 'v_branch', 'if')] = (
     UNREACHABLE, 'proof s12-2 as a simulation assertion: on a division step the mask test equals the (r ^ d) < r compare it replaced. A failure $finishes the run, so a passing run never reaches it; a tripwire, not a path.')
-CLASSIFIED[('src/project.v', 3466, 'v_branch', 'if')] = (
+CLASSIFIED[('src/project.v', 3469, 'v_branch', 'if')] = (
     UNREACHABLE, 'proof s12-4 as a simulation assertion: the tree compare lt33 equals P_A < P_B in stage 3. A failure $finishes the run, so a passing run never reaches it; a tripwire, not a path.')
-CLASSIFIED[('src/project.v', 3471, 'v_branch', 'if')] = (
+CLASSIFIED[('src/project.v', 3474, 'v_branch', 'if')] = (
     UNREACHABLE, "the initial check that pe_s3_opsel's operation codes equal this module's (proof section 3): both sides are localparams of the same values, so it is false at elaboration unless one copy is edited -- a tripwire on the copies, not a path.")
-CLASSIFIED[('src/project.v', 4029, 'v_branch', 'else')] = (
+CLASSIFIED[('src/project.v', 4032, 'v_branch', 'else')] = (
     UNREACHABLE, 'the saturation arm of `ck_nmsg` (messages kept, sat 255). ck_nmsg is cleared at each clocked-capture start (line 4008), and a message is counted only when kept (`s_keep`: s_mlen != 0), so each takes >= 2 bytes ([len][>= 1 byte]) of the capture region CAP_BASE 128 .. S_END 384 (s_full stops the capture at 384): at most 128 messages per capture, never 255. THE BOUND DEPENDS ON THREE CONSTANTS in pe_pit\'s clocked capture: (1) the MINIMUM MESSAGE SIZE, 2 bytes = the one length byte at s_la (`s_end = s_la + 1 + s_mlen`) plus the >= 1 data byte `s_keep` demands (`s_mlen != 8\'d0`); (2) `CAP_BASE = 128` (localparam integer, next to CAP_BITS); (3) `S_END = 10\'d384` (localparam, enforced by `s_full`). Max messages = (S_END - CAP_BASE) / min size = 256 / 2 = 128. The arm needs a 256th kept message, i.e. (S_END - CAP_BASE) / min size reaching the 256 the 8-bit count saturates below: the region growing to ~512 bytes, or s_keep admitting a 0-data-byte message (min size 1, 256 / 1 -- then this entry is wrong and must be re-measured). Re-check this entry whenever s_keep, CAP_BASE or S_END changes.')
 
 #: ⭐ 11-18 (Wilson): EACH CEILING HAS ITS POINT LIST in test/coverage_points/ (see
@@ -744,51 +744,51 @@ ANCHOR_TEXT = {
     # `if (clk_real) begin` in their original order. The serial-select entry
     # (old 1021) is RETIRED: TF2 replaced that loop with a tree for
     # N_LANES = 5, so the branch is no longer elaborated (see CLASSIFIED).
-    ("src/pe_engine.v", 3039):
+    ("src/pe_engine.v", 3228):
         "if (hdr_done && !prime_unp) primed_q <= 1'b1;",
     # the self-clocked arms' redundant-by-construction guards. ⭐ TWO PAIRS
     # SHARE THEIR TEXT (`if (pin_real) begin` at 1621/1694, `if (clk_real)
     # begin` at 1630/1641), which is exactly why the anchor is keyed on the
     # LINE and the text is the drift check rather than the identifier.
-    ("src/pe_engine.v", 3489):
+    ("src/pe_engine.v", 3695):
         "if (pin_real) begin",
     # ⛔ THE TWO RULING-H ENTRIES NEED ANCHORS LIKE EVERY OTHER, and the
     # first version of them did not have any -- so `reanchor.py` could not move
     # them when the hold's own edits shifted the file, and the gate failed on a
     # classification that had slid off its line. The gate already demands this
     # ("Add it to ANCHOR_TEXT"); I had simply not met it.
-    ("src/pe_engine.v", 3618):
+    ("src/pe_engine.v", 3824):
         "if (l_mode[cur]) begin",
-    ("src/pe_engine.v", 4357):
+    ("src/pe_engine.v", 4693):
         "if (l_pin[i] < N_PINS[PINW-1:0]) begin",
-    ("src/pe_engine.v", 3522):
+    ("src/pe_engine.v", 3728):
         "if (clk_real) begin",
-    ("src/pe_engine.v", 3542):
+    ("src/pe_engine.v", 3748):
         "if (clk_real) begin",
-    ("src/pe_engine.v", 3612):
+    ("src/pe_engine.v", 3818):
         "if (pin_real) begin",
-    ("src/pe_engine.v", 3752):
+    ("src/pe_engine.v", 3958):
         "if (ck_shiftin & ack_drv[1]) pin_out[a_pin] <= ack_drv[0];",
-    ("src/pe_engine.v", 3133):
+    ("src/pe_engine.v", 3324):
         "H_IDLE: if (!hdr_done) begin",
-    ("src/pe_engine.v", 3382):
+    ("src/pe_engine.v", 3581):
         "if (w_hv) begin",
-    ("src/pe_engine.v", 4031):
+    ("src/pe_engine.v", 4256):
         "if (ck_consume & ~l_ckgot[cur]) begin",
-    ("src/pe_engine.v", 3322):
+    ("src/pe_engine.v", 3521):
         "default: pst <= P_SCAN;",
-    ("src/pe_engine.v", 3785):
+    ("src/pe_engine.v", 4010):
         "default: ;",
-    ("src/pe_engine.v", 4284):
+    ("src/pe_engine.v", 4592):
         "default: st <= ST_IDLE;",
     # `src/project.v` 557 -- `if (RX_SERIAL != 0) begin` -- is gone with the
     # parameter. ⭐ THE ANCHOR IS WHAT MADE THAT SAFE TO DO: the source text
     # was recorded beside the line number, so the deletion had to account for
     # the anchor instead of leaving a live number pointing at whatever moved
     # into line 557.
-    ("src/project.v", 1908):
+    ("src/project.v", 1911):
         "P_CLVL: if (nlv0 < 9'd4 || nlv1 < 9'd4) begin regular <= 1'b0; ph <= P_CHALF; end",
-    ("src/project.v", 2091):
+    ("src/project.v", 2094):
         "default: ph <= P_IDLE;",
     ("test/fram_i2c.v", 281):
         "P_WDATA: begin",
@@ -815,33 +815,33 @@ ANCHOR_TEXT.update({
     ('src/pe_store.v', 477): "always @(posedge clk) if (rst_seen && rst_n === 1'b1 && wre === 1'b1 && (wr === 1'b1 || re === 1'b1 || (pw === 1'b1 && pa[AWW-1] !== 1'b1))) begin",
     ('src/pe_store.v', 484): "always @(posedge clk) if (rst_seen && rst_n === 1'b1 && (wr === 1'b1 || bwe === 1'b1) && pw === 1'b1 && rd_now === 1'b1) begin",
     ('src/pe_store.v', 498): "if (pw && pa == {{(AWW-(AW-WB_W)){1'b0}}, a[AW-1:WB_W]}) wd = (wd & ~pbm) | (pd & pbm);",
-    ('src/project.v', 2794): 'if (x_iv != OVF) begin',
-    ('src/project.v', 2801): "if (x_iv == OVF && div_ip) begin x_v <= 1'b0; hold <= 1'b0; end     // stage 1: data excludes OVF",
-    ('src/project.v', 2802): "else if (x_iv == OVF && st == S_REF2) begin x_v <= 1'b0; hold <= 1'b0; end",
-    ('src/project.v', 2805): 'else if (x_iv == OVF) begin                                         // stage 2: an idle run',
-    ('src/project.v', 2845): "acc[19:15] <= (x_iv == OVF) ? 5'd16 : m16;                       // RUN",
-    ('src/project.v', 2919): "end else if (p_end) begin p <= bp; s1ok <= 1'b1; walk_go <= 1'b1; st <= S_RB; end",
-    ('src/project.v', 2933): "if (acc[74:52] != 23'd0) begin",
-    ('src/project.v', 2941): "if (acc[74:52] != 23'd0) p16 <= dv_q[18:0];",
-    ('src/project.v', 2973): "if (acc[21:9] != 13'd0) begin",
-    ('src/project.v', 2975): 'if (acc[21:9] > acc[34:22]) acc[34:22] <= acc[21:9];',
-    ('src/project.v', 3059): 'if ({acc[62:58], rdata} < S3_MIN_FB) begin',
-    ('src/project.v', 3070): "if (acc[29] | hi5[4]) `S3_HLE <= 1'b1;",
-    ('src/project.v', 3073): "`S3_FL <= (`S3_HLE | acc[29] | hi5[4] | hi5[3]) ? {25{1'b1}} : {hi5[2:0], al[25:4]};",
-    ('src/project.v', 3092): 'if (x_v) `T3((T_ADV)); else if (exh) `T3((T_END));',
-    ('src/project.v', 3104): "if (s3_nmsg != 8'hFF) s3_nmsg <= s3_nmsg + 8'd1;",
-    ('src/project.v', 3123): "T_XE:  begin `S3_X <= al[25] ? {25{1'b1}} : al[24:0]; `S3_MBYTE <= 1'b0; `T3((T_LQ1)); end",
-    ('src/project.v', 3127): 'if (`S3_OPEN) begin',
-    ('src/project.v', 3129): "if (s3_nmsg != 8'hFF) s3_nmsg <= s3_nmsg + 8'd1;",
-    ('src/project.v', 3294): "if (s3_found && !s3_fbs) s3_why <= (g_skip && !g_try) ? 4'd2 : 4'd3;",
-    ('src/project.v', 3314): 'if (`P_LC <= p_nb) `T3((P_E0));                       // no data bits: not a length',
-    ('src/project.v', 3381): "P_V2:   if (`P_A != 33'd0) begin `T3((P_F)); s3_why <= 4'd5; end",
-    ('src/project.v', 3433): 'default: st <= S_IDLE;',
-    ('src/project.v', 3455): "if (s12_rst_seen && rst_n === 1'b1 && f3 !== t3fl(t3)) begin",
-    ('src/project.v', 3460): "if (s12_rst_seen && rst_n === 1'b1 && run && st == S_S3 && f3[F_DV] && p_lt_div !== ((p_ri ^ p_d) < p_ri)) begin",
-    ('src/project.v', 3466): "if (s12_rst_seen && rst_n === 1'b1 && run && st == S_S3 && p_lt_s0 !== (`P_A < `P_B)) begin",
-    ('src/project.v', 3471): 'if (u_ops_a.PA_SHX != PA_SHX || u_ops_a.PA_SH != PA_SH || u_ops_a.PA_XB != PA_XB ||',
-    ('src/project.v', 4029): "if (ck_nmsg != 8'hFF) ck_nmsg <= ck_nmsg + 8'd1;",
+    ('src/project.v', 2797): 'if (x_iv != OVF) begin',
+    ('src/project.v', 2804): "if (x_iv == OVF && div_ip) begin x_v <= 1'b0; hold <= 1'b0; end     // stage 1: data excludes OVF",
+    ('src/project.v', 2805): "else if (x_iv == OVF && st == S_REF2) begin x_v <= 1'b0; hold <= 1'b0; end",
+    ('src/project.v', 2808): 'else if (x_iv == OVF) begin                                         // stage 2: an idle run',
+    ('src/project.v', 2848): "acc[19:15] <= (x_iv == OVF) ? 5'd16 : m16;                       // RUN",
+    ('src/project.v', 2922): "end else if (p_end) begin p <= bp; s1ok <= 1'b1; walk_go <= 1'b1; st <= S_RB; end",
+    ('src/project.v', 2936): "if (acc[74:52] != 23'd0) begin",
+    ('src/project.v', 2944): "if (acc[74:52] != 23'd0) p16 <= dv_q[18:0];",
+    ('src/project.v', 2976): "if (acc[21:9] != 13'd0) begin",
+    ('src/project.v', 2978): 'if (acc[21:9] > acc[34:22]) acc[34:22] <= acc[21:9];',
+    ('src/project.v', 3062): 'if ({acc[62:58], rdata} < S3_MIN_FB) begin',
+    ('src/project.v', 3073): "if (acc[29] | hi5[4]) `S3_HLE <= 1'b1;",
+    ('src/project.v', 3076): "`S3_FL <= (`S3_HLE | acc[29] | hi5[4] | hi5[3]) ? {25{1'b1}} : {hi5[2:0], al[25:4]};",
+    ('src/project.v', 3095): 'if (x_v) `T3((T_ADV)); else if (exh) `T3((T_END));',
+    ('src/project.v', 3107): "if (s3_nmsg != 8'hFF) s3_nmsg <= s3_nmsg + 8'd1;",
+    ('src/project.v', 3126): "T_XE:  begin `S3_X <= al[25] ? {25{1'b1}} : al[24:0]; `S3_MBYTE <= 1'b0; `T3((T_LQ1)); end",
+    ('src/project.v', 3130): 'if (`S3_OPEN) begin',
+    ('src/project.v', 3132): "if (s3_nmsg != 8'hFF) s3_nmsg <= s3_nmsg + 8'd1;",
+    ('src/project.v', 3297): "if (s3_found && !s3_fbs) s3_why <= (g_skip && !g_try) ? 4'd2 : 4'd3;",
+    ('src/project.v', 3317): 'if (`P_LC <= p_nb) `T3((P_E0));                       // no data bits: not a length',
+    ('src/project.v', 3384): "P_V2:   if (`P_A != 33'd0) begin `T3((P_F)); s3_why <= 4'd5; end",
+    ('src/project.v', 3436): 'default: st <= S_IDLE;',
+    ('src/project.v', 3458): "if (s12_rst_seen && rst_n === 1'b1 && f3 !== t3fl(t3)) begin",
+    ('src/project.v', 3463): "if (s12_rst_seen && rst_n === 1'b1 && run && st == S_S3 && f3[F_DV] && p_lt_div !== ((p_ri ^ p_d) < p_ri)) begin",
+    ('src/project.v', 3469): "if (s12_rst_seen && rst_n === 1'b1 && run && st == S_S3 && p_lt_s0 !== (`P_A < `P_B)) begin",
+    ('src/project.v', 3474): 'if (u_ops_a.PA_SHX != PA_SHX || u_ops_a.PA_SH != PA_SH || u_ops_a.PA_XB != PA_XB ||',
+    ('src/project.v', 4032): "if (ck_nmsg != 8'hFF) ck_nmsg <= ck_nmsg + 8'd1;",
 })
 
 #: ⛔⛔ EVERY COVERAGE FIGURE IS LABELLED WITH THE TOOL THAT MEASURED IT
@@ -1620,7 +1620,9 @@ def check_full_case() -> int:
     # TF2-R again: 1971 -> 2033, 2410 -> 2475, 2793 -> 2858.
     # v2 step 2 (10-26): 2452 -> 2481, 2896 -> 2925, 3311 -> 3340 -- the same
     # +29 text match as ANCHOR_TEXT (each line read back: the `default:` arm)
-    for line in (3322, 3785, 4284):
+    # 11-20: 3322 -> 3521, 3785 -> 4010, 4284 -> 4592 -- the git diff 747598d -> HEAD's
+    # line map (the same re-key as every key above; each read back: `default`)
+    for line in (3521, 4010, 4592):
         sel, arms = _case_arms(lines, line)
         if sel is None:
             print("    line %-5d *** no enclosing `case` found -- the waiver's"
