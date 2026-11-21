@@ -620,6 +620,15 @@ def _windows(stmts, lowered, route, hz, arm="late", drain=0, premise="datasheet"
                             raise Refused("within: drain %d makes lane %d word %d's delay %d > %d"
                                           % (dp, ln, j, w_[3] + dp, T_MAX))
                         out[j] = w_[:3] + (w_[3] + dp,) + w_[4:]
+                # `else continue` (FT): the timeout path enters PC+2 from PC+1 and, K6 as ruled
+                # 11-20, refetches it there (the swap drops it) -- PC+1's gap before PC+2 gets
+                # the same drain, so the refetched word's lateness can drain on that path too
+                if dp and out[iarm_][6:7] == (I.ARM_MOD_FT,) and iarm_ + 1 < len(out):
+                    t_ = out[iarm_ + 1]
+                    if t_[3] + dp > T_MAX:
+                        raise Refused("within: drain %d makes lane %d word %d's delay %d > %d"
+                                      % (dp, ln, iarm_ + 1, t_[3] + dp, T_MAX))
+                    out[iarm_ + 1] = t_[:3] + (t_[3] + dp,) + t_[4:]
             lanes[ln] = out
         try:
             img = bytes(pe_asm.assemble(lanes, hdr, *a_, **kw))
