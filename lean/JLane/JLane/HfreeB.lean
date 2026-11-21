@@ -104,6 +104,8 @@ theorem hR_stretch_gap (fl : Nat → Lane → Bool) (k : Nat → Lane → Nat) (
     (hS : ∀ c, c + K + 2 ≤ s + T →
       (∀ i, i < K → Ready P y (runBK P win usb sreq fl k (c + i) X0).x.e ∧
         ¬Dec win y (runBK P win usb sreq fl k (c + i) X0).x.e) →
+      Dec win y (runBK P win usb sreq fl k (c + K) X0).x.e →
+      (∀ i, i ≤ K → fl (runBK P win usb sreq fl k (c + i) X0).x.e.now y = false) →
       cntBK P win usb sreq fl k (fun e => noDecB win e = true) K
         (runBK P win usb sreq fl k c X0) ≤ S) :
     ∀ x, x < T → IsWB y (runBK P win usb sreq fl k (s + x) X0).x.e →
@@ -131,7 +133,7 @@ theorem hR_stretch_gap (fl : Nat → Lane → Bool) (k : Nat → Lane → Nat) (
           (by simp only [base_e]; exact hwbw) (by omega) (by omega)
         simp only [base_e] at hgt
         omega)
-    (fun c hc => hM c (by omega)) (fun c hc hw => hS c (by omega) hw)
+    (fun c hc => hM c (by omega)) (fun c hc hw hd hf => hS c (by omega) hw hd hf)
 
 /-- **`hR_stretch` without `hfree`** (L4): `CertT.hR`'s form (`Rr = K - 1`) on every retirement
 of the stretch, from `hR_stretch_gap`. -/
@@ -150,6 +152,8 @@ theorem hR_stretch_nofree (fl : Nat → Lane → Bool) (k : Nat → Lane → Nat
     (hS : ∀ c, c + K + 2 ≤ s + T →
       (∀ i, i < K → Ready P y (runBK P win usb sreq fl k (c + i) X0).x.e ∧
         ¬Dec win y (runBK P win usb sreq fl k (c + i) X0).x.e) →
+      Dec win y (runBK P win usb sreq fl k (c + K) X0).x.e →
+      (∀ i, i ≤ K → fl (runBK P win usb sreq fl k (c + i) X0).x.e.now y = false) →
       cntBK P win usb sreq fl k (fun e => noDecB win e = true) K
         (runBK P win usb sreq fl k c X0) ≤ S) :
     ∀ x, x < T → IsRet P y ((fun n => (runBK P win usb sreq fl k (s + n) X0).base) x).e →

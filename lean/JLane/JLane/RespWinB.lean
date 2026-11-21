@@ -398,7 +398,9 @@ theorem lemA_run_winBK (fl : Nat → Lane → Bool) (k : Nat → Lane → Nat) (
 `wb_bound_winBK` with "never flushed" replaced by "not flushed at or after its current release,
 before this writeback" (`hnf`). The window argument restarts from the release after the lane's
 last flush, with the same `K`. `hS` (11-21) is asked only of a window in which `y` is ready and
-undecided throughout -- the one window the argument uses. -/
+undecided throughout -- the one window the argument uses -- and is handed `y`'s decision at the
+window's end and `y` unflushed through it (closure step 4a: what K11's `hS` needs to show `y`
+unarmed there). -/
 theorem wb_bound_winBK_fl (fl : Nat → Lane → Bool) (k : Nat → Lane → Nat)
     (X0 : EngBK) (h0 : X0.x.e.st = .idle) (h0ts : ∀ l, X0.x.e.now ≤ X0.x.e.ts l) (y : Lane)
     (hy : P.live y = true)
@@ -414,6 +416,8 @@ theorem wb_bound_winBK_fl (fl : Nat → Lane → Bool) (k : Nat → Lane → Nat
     (hS : ∀ c, c + K + 2 ≤ t →
       (∀ i, i < K → Ready P y (runBK P win usb sreq fl k (c + i) X0).x.e ∧
         ¬Dec win y (runBK P win usb sreq fl k (c + i) X0).x.e) →
+      Dec win y (runBK P win usb sreq fl k (c + K) X0).x.e →
+      (∀ i, i ≤ K → fl (runBK P win usb sreq fl k (c + i) X0).x.e.now y = false) →
       cntBK P win usb sreq fl k (fun e => noDecB win e = true) K
         (runBK P win usb sreq fl k c X0) ≤ S) :
     (runBK P win usb sreq fl k t X0).x.e.now ≤ (runBK P win usb sreq fl k t X0).x.e.ts y + K + 1 := by
@@ -509,7 +513,10 @@ theorem wb_bound_winBK_fl (fl : Nat → Lane → Bool) (k : Nat → Lane → Nat
       · intro hd
         apply hnd i hi
         rw [← runBK_add]
-        exact hd)
+        exact hd) hdec (fun i hi => by
+      rcases Nat.lt_or_ge i K with hlt | hge
+      · exact hfw i hlt
+      · rw [show c + i = c + K by omega]; exact f0)
     omega
 
 end
