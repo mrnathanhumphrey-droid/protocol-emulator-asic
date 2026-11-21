@@ -53,18 +53,18 @@ MUTANTS = [("M_DS_SAMPLE_AFTER", "the sample is taken after the drive"),
            ("M_DS_NO_TXADV", "the TX register never shifts")]
 
 
-def _hdrs(l0, park, mode=1, clkpin=I.PIN_NONE):
+def _hdrs(l0, park, mode=1, clkpin=I.PIN_NONE, order=I.ORDER_LSB):
     # an unclocked open-drain lane names its own pin as the clock (the load rule
     # wants a `uio` clock pin on an open-drain lane; equal to the pin = no clock)
     if mode == 0 and clkpin == I.PIN_NONE:
         clkpin = MOSI
-    hdrs = [I.hdr(MOSI, clkpin, mode, D, 0, 2 * D, 3 * D, l0)]
+    hdrs = [I.hdr(MOSI, clkpin, mode, D, 0, 2 * D, 3 * D, l0, order=order)]
     for n in range(1, I.N_LANES):
         hdrs.append(I.hdr(n + 2, n + 2, 0, 500, 0, 200, 240, park))
     return hdrs
 
 
-def spi_image(same_pin=False, clocked=False, uo_pinb=False):
+def spi_image(same_pin=False, clocked=False, uo_pinb=False, order=I.ORDER_LSB):
     """lane 0: SCK low, then per bit DRIVE_SAMPLE(MOSI <- TX, sample MISO), SCK high,
     SCK low; parked. `same_pin`: the first DRIVE_SAMPLE samples its own pin (raw word,
     pe_isa's builder is bypassed so the RTL refusal can be run). `clocked`: the lane
@@ -82,7 +82,8 @@ def spi_image(same_pin=False, clocked=False, uo_pinb=False):
     if uo_pinb:
         p[1] = I.act(I.OP_DRIVE_SAMPLE, MOSI, 0, D, count=7, pinb=I.UO0, mod=I.MOD_DS_TX)
     park = l0 + (len(p) - 1) * I.ACT_BYTES
-    return I.join_image(_hdrs(l0, park, clkpin=5 if clocked else I.PIN_NONE), p)
+    return I.join_image(_hdrs(l0, park, clkpin=5 if clocked else I.PIN_NONE,
+                              order=order), p)
 
 
 def age_image(mode=1):
@@ -103,7 +104,8 @@ def coverage_arms():
     """[(label, plusargs)] for test/benchset.py's tb_ds; images under COV_DIR ("ds_"-prefixed:
     the image universe keys images by name)."""
     os.makedirs(os.path.join(ROOT, COV_DIR), exist_ok=True)
-    for k, img in (("spi", spi_image()), ("age", age_image()), ("od", age_image(mode=0))):
+    for k, img in (("spi", spi_image()), ("age", age_image()), ("od", age_image(mode=0)),
+                   ("msb", spi_image(order=I.ORDER_MSB))):
         I.write_image(os.path.join(ROOT, COV_DIR, "ds_%s.hex" % k), img)
     # 11-20: check 4's two RTL refusals join the sweep (the refusal branch read
     # uncovered). The image on disk is the CLEAN SPI image; the refused byte is planted
@@ -116,7 +118,14 @@ def coverage_arms():
             ("spi", ["+IMG=%s/ds_spi.hex" % COV_DIR, "+NCYC=%d" % NCYC, "+FEED=1", "+PEER=1",
                      "+PTX=%d" % PEER_BYTE]),
             ("age", ["+IMG=%s/ds_age.hex" % COV_DIR, "+NCYC=%d" % NCYC, "+PEER=2"]),
-            ("od", ["+IMG=%s/ds_od.hex" % COV_DIR, "+NCYC=%d" % NCYC, "+PEER=2"])]
+            ("od", ["+IMG=%s/ds_od.hex" % COV_DIR, "+NCYC=%d" % NCYC, "+PEER=2"]),
+            # 11-20 (gate_coverage 4303 / 4316): TX with no host byte queued (the
+            # underrun arm: no +FEED), and an MSB-first lane (the received byte
+            # handed over bit-reversed)
+            ("nofeed", ["+IMG=%s/ds_spi.hex" % COV_DIR, "+NCYC=%d" % NCYC, "+PEER=1",
+                        "+PTX=%d" % PEER_BYTE]),
+            ("msb", ["+IMG=%s/ds_msb.hex" % COV_DIR, "+NCYC=%d" % NCYC, "+FEED=1", "+PEER=1",
+                     "+PTX=%d" % PEER_BYTE])]
 
 
 def run(cmd):

@@ -73,7 +73,7 @@ def image(bad_index=False):
 F_OBS = 3                     # the flag OBSERVE reads
 
 
-def observe_image(rx_clobber=False):
+def observe_image(rx_clobber=False, order=I.ORDER_LSB):
     """OBSERVE (Wilson 11-19): lane 1 POSTs flag 3 twice; lane 0 waits, OBSERVEs it
     TWICE (no consume: still 2), CMP_BRANCH on 2 -> taken drives uio[0] high, not
     taken drives uio[1] high. `rx_clobber`: a self-timed receive, then the OBSERVE,
@@ -90,7 +90,7 @@ def observe_image(rx_clobber=False):
     l1 = l0 + len(p0) * I.ACT_BYTES
     p1 = [I.act_post(F_OBS, D), I.act_post(F_OBS, D), I.act(I.OP_REARM, 0, 0, 500)]
     park = l0 + 5 * I.ACT_BYTES
-    hdrs = [I.hdr(PA, I.PIN_NONE, 1, D, 0, 2 * D, 3 * D, l0),
+    hdrs = [I.hdr(PA, I.PIN_NONE, 1, D, 0, 2 * D, 3 * D, l0, order=order),
             I.hdr(I.PIN_NONE, I.PIN_NONE, 1, D, 0, 2 * D, 3 * D, l1)]
     for n in range(2, I.N_LANES):
         hdrs.append(I.hdr(n + 2, n + 2, 0, 500, 0, 200, 240, park))
@@ -169,7 +169,10 @@ def coverage_arms():
     "flags_"-prefixed (the image universe keys images by name)."""
     os.makedirs(os.path.join(ROOT, COV_DIR), exist_ok=True)
     out = []
-    for k, img in (("pw", image()), ("obs", observe_image())):
+    # 11-20 (gate_coverage 4358): obs_msb, OBSERVE on an MSB-first lane (the count
+    # lands bit-reversed, so the CMP takes the other arm; reach only)
+    for k, img in (("pw", image()), ("obs", observe_image()),
+                   ("obs_msb", observe_image(order=I.ORDER_MSB))):
         f = "%s/flags_%s.hex" % (COV_DIR, k)
         I.write_image(os.path.join(ROOT, f), img)
         out.append(("fl_" + k, ["+IMG=" + f, "+NCYC=%d" % NCYC]))

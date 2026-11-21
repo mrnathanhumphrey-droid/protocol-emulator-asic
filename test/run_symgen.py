@@ -63,16 +63,22 @@ def cfg_with_lat(c):
     return c
 
 
-def image(c, second_owner=False):
+def image(c, second_owner=False, mode=1, nopin=False, extra=()):
+    """`mode`: the owner lane's drive class (0 = open-drain: it names its own pin as
+    the clock, the unclocked load rule). `nopin`: the FIRST SER names PIN_NONE for both
+    pins (pe_isa's PIN_NONE table refuses it: the coverage sweep plants it at load).
+    `extra`: words after the three SYMDEF words (the coverage sweep's mod-3 arm)."""
     l0 = I.ACT_BASE
-    prog = I.act_symdef(c.lens, c.code_a, c.code_b, c.idle_a, c.idle_b, c.lat)
+    prog = I.act_symdef(c.lens, c.code_a, c.code_b, c.idle_a, c.idle_b, c.lat) + list(extra)
     b = c.byte_cycles
     prog += [I.act_ser(PA, PB, c.nbits, b) for _ in FEED]
+    if nopin:
+        prog[len(prog) - len(FEED)] = I.act_ser(I.PIN_NONE, I.PIN_NONE, c.nbits, b)
     lp = l0 + len(prog) * I.ACT_BYTES
     prog.append(I.act(I.OP_REARM, 0, 0, 500))
     order = I.ORDER_MSB if c.msb else I.ORDER_LSB
-    hdrs = [I.hdr(PA, I.PIN_NONE, 1, T_SYMDEF, I.FLAG_SYMGEN, 2 * T_SYMDEF, 3 * T_SYMDEF,
-                  l0, order=order)]
+    hdrs = [I.hdr(PA, PA if mode == 0 else I.PIN_NONE, mode, T_SYMDEF, I.FLAG_SYMGEN,
+                  2 * T_SYMDEF, 3 * T_SYMDEF, l0, order=order)]
     for n in range(1, I.N_LANES):
         fl = I.FLAG_SYMGEN if (second_owner and n == 1) else 0
         hdrs.append(I.hdr(n + 2, n + 2, 0, 500, fl, 200, 240, lp))
@@ -219,6 +225,25 @@ def coverage_arms():
         q = (I.patch_plusargs(fault_image(kind, clean=True), fault_image(kind))
              + ["+QUIESCENT"]) if nonown else []
         out.append(("sg_f_" + kind, ["+IMG=" + f, "+FEED=1", "+NCYC=3000"] + q))
+    # 11-20 (gate_coverage 3395, 4334, 4603/4604/4612/4613, 5007), all on ws2812's
+    # config: SERs with no host byte queued (no +FEED: the underrun), an open-drain
+    # owner lane, a SYMDEF word with mod 3 (no config word: the config case's
+    # `default`), and two refusals planted at load on the clean image (imgpatch.vh;
+    # a refused image cannot be in the universe): a SER on PIN_NONE (pe_isa's
+    # PIN_NONE table; the generator drives no pin) and a second owner lane
+    c = cfg_with_lat(M.ws2812(19))
+    ncyc = 400 + c.lat + len(FEED) * c.byte_cycles + 8 * c.bit_cycles
+    ws = "%s/symgen_ws2812.hex" % COV_DIR
+    out.append(("sg_nofeed", ["+IMG=" + ws, "+NCYC=%d" % ncyc]))
+    mod3 = I._pack(I.SYMDEF_FIELDS, (I.OP_SYMDEF, 0, 3), I.ACT_BYTES)
+    for k, img in (("od", image(c, mode=0)), ("mod3", image(c, extra=[mod3]))):
+        f = "%s/symgen_x_%s.hex" % (COV_DIR, k)
+        I.write_image(os.path.join(ROOT, f), img)
+        out.append(("sg_" + k, ["+IMG=" + f, "+FEED=1", "+NCYC=%d" % ncyc]))
+    out.append(("sg_nopin", ["+IMG=" + ws, "+FEED=1", "+NCYC=%d" % ncyc]
+                + I.patch_plusargs(image(c), image(c, nopin=True))))
+    out.append(("sg_f_owner2", ["+IMG=" + ws, "+FEED=1", "+NCYC=3000", "+QUIESCENT"]
+                + I.patch_plusargs(image(c), image(c, second_owner=True))))
     return out
 
 
