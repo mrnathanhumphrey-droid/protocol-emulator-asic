@@ -63,8 +63,12 @@ RTL_CONTRACTS = {
         "lean": "FlushKill.kill_files_nothing, RestartB.kill_prov_runBK",
         "must_fire": {"status": OWED, "name": None}},
     "K6": {
-        "what": "on the FALLTHROUGH timeout path the head select swaps to the timeout word "
-                "(PC+1), fetched second behind the edge word (Wilson 11-19)",
+        "what": "at a FALLTHROUGH timeout the head select moves to the timeout word (PC+1, "
+                "fetched second behind the edge word) and the edge word (PC+2) is dropped -- K2 "
+                "mirrored; if the path reaches PC+2 it is refetched normally (Wilson 11-20 "
+                "ruling 1a, correcting the 11-19 'PC+2 the next word'). PC+1 captured by the "
+                "deadline is a lemma (from T >= FILL + L, ruling 1b), so no late PC+1 exists to "
+                "kill. Must-fire (agent 1): PC+2 left valid after the swap, caught",
         "lean": "OrderB.ft_timeout_order (owed; READY_RULES ft_timeout)",
         "must_fire": {"status": OWED, "name": None}},
     "K7": {
