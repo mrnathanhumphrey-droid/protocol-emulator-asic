@@ -387,6 +387,17 @@ def br1_budget_fixpoint(g, gaps, lat, k):
     return None, None
 
 
+def hfree_short(g, gaps, Rr, I=None):
+    """HfreeB.hrel_of_gap's premise per lane (L4 hfree, 11-21): every non-ARM writeback's gap at
+    least Rr + 3 (K + 2 with Rr = K - 1), so a writeback within its bound lands before the
+    release it opens. ARMs meet HfreeB.HrelS by their edge (ext3), not by the gap. -> [(word,
+    writeback index, gap, Rr)] for every writeback that misses it; [] when the lane meets it.
+    `Rr`: the certificate's response per word (certificate(...)[2])."""
+    I = I or _isa()
+    return [(w, i, gp, Rr[w]) for w in sorted(g) if g[w][0]["op"] != I.OP_ARM
+            for i, gp in enumerate(gaps[w]) if gp < Rr[w] + 3]
+
+
 def ft_flush_late(B):
     """FlushRestart.flush_head_refill: after a flush at f the lane's head is captured from a CAP
     state within the 3 cycles to Wf plus the 23 + B window (the last such state f + 3 + (23 + B)

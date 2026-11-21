@@ -126,6 +126,11 @@ every must-fire must turn its check red, or the gate is not testing what it says
   M_RC_PREMISE_ORPHAN  a contract premise with no RTL contract    (check 21 red)
   M_RC_CONTRACT_NO_MF  an RTL contract (K6) with no must-fire entry (check 21 red)
   M_RC_COMP_EARLY      slot_on_composition proved with steps owed (check 21 red)
+  check 22 L4 hfree's gap premise (HfreeB.hrel_of_gap, 11-21): gap >= Rr + 3 on every non-ARM
+           writeback of every window-certified image, slot off and 2 (ARMs meet HrelS by their
+           edge; that case on runBK is owed, rtl_contracts.COMPOSITION)
+  M_LC_HFREE_EDF    the check over the EDF-certified images (pair_busy, uart_tx_busy short)
+                    -> check 22 red
   M_LC_FT_UNSEEN    no ARM read as FALLTHROUGH                    -> check 3 red
   M_LC_FT_NOFLOOR   no lateness floor after the flush             -> check 3 red
 Static, < 2 s. Usage: python model/gate_lane_cert.py [dir holding usbdev.py]
@@ -465,6 +470,49 @@ def check_r_rules(BB, LC):
         and not missing
     return ok, ("ft_race lane 0: %s / %s%s; %s lanes 1-4: %s; theorems not at the Lean gate: %s"
                 % (rw, re_, " (owed)" if owed_ok else "", DISARM_IMAGE, rl, missing or "none"))
+
+
+def check_hfree(BB, LC, I, scheme="window"):
+    """check 22 (L4 hfree, 11-21): HfreeB.hrel_of_gap's premise -- gap >= Rr + 3 on every non-ARM
+    writeback (lane_cert.hfree_short) of every lane of every image the WINDOW scheme certifies
+    (the composition's response bound, RespWinB.wb_bound_winBK_fl), the image universe slot off
+    and at slot 2, read from each lane's certified fixpoint. `scheme="edf"` (must-fire
+    M_LC_HFREE_EDF): the same check over the EDF-certified images, where pair_busy and
+    uart_tx_busy are short (their EDF hfree is owed separately, rtl_contracts.COMPOSITION)."""
+    import gen_branch_budget as GB
+    orig = LC.certificate
+    per = {}
+
+    def spy(g, preds, gaps, k, B, tail, *a, **kw):
+        r = orig(g, preds, gaps, k, B, tail, *a, **kw)
+        if r is not None:
+            per[min(g)] = (g, gaps, r[2])
+        return r
+    saved = BB.SLOT
+    rows, nimg, nwb = [], 0, 0
+    LC.certificate = spy
+    try:
+        for slot in (None, 2):
+            BB.SLOT = slot
+            for name, img in GB.corpus():
+                per.clear()
+                if BB._image_budget(img, scheme=scheme)["B"] is None:
+                    continue
+                nimg += 1
+                for base, (g, gaps, Rr) in sorted(per.items()):
+                    nwb += sum(len(gaps[w]) for w in g if g[w][0]["op"] != I.OP_ARM)
+                    for w, i, gp, rr in LC.hfree_short(g, gaps, Rr, I):
+                        rows.append("%s (slot %s) w%d wb %d gap %d < Rr %d + 3"
+                                    % (name, slot, w, i, gp, rr))
+    finally:
+        LC.certificate = orig
+        BB.SLOT = saved
+    if nimg == 0:
+        return False, "no %s-certified image: the check is vacuous" % scheme
+    if rows:
+        return False, "%d writeback(s) short of hrel_of_gap: %s" % (len(rows), "; ".join(rows[:3]))
+    return True, ("gap >= Rr + 3 on all %d non-ARM writebacks of %d %s-certified image runs "
+                  "(slot off and 2): HfreeB.hrel_of_gap's premise" % (nwb, nimg, scheme))
 
 
 def check_restart(BB, LC, I, late_edge=0):
@@ -1167,6 +1215,13 @@ def main():
         finally:
             setattr(RC, attr, False)
         kills.append((name, not k21, what))
+    # check 22: L4 hfree's gap premise (HfreeB.hrel_of_gap) on every window-certified image
+    ok22, msg22 = check_hfree(BB, LC, I)
+    print("  check 22 %s  %s" % ("GREEN" if ok22 else "RED  ", msg22))
+    k22, m22 = check_hfree(BB, LC, I, scheme="edf")
+    kills.append(("M_LC_HFREE_EDF", not k22,
+                  "the gap check over the EDF-certified images (pair_busy, uart_tx_busy short): "
+                  "check 22 red"))
     # M_LC_FT_UNSEEN / M_LC_FT_NOFLOOR
     orig_ft = PC.arm_is_ft
     PC.arm_is_ft = lambda x, I=None: False
@@ -1241,7 +1296,7 @@ def main():
     teeth = all(k for _n, k, _w in kills)
     green = (ok1 and not fails and ok3 and ok4 and ok5 and ok6 and ok7 and ok8 and ok9 and ok10
              and ok11 and ok12 and ok13 and ok14 and ok15 and ok16 and ok17 and ok18 and ok19
-             and ok20 and ok21)
+             and ok20 and ok21 and ok22)
     verdict = "PASSED" if (green and teeth) else ("FAILED (must-fire survived)" if not teeth
                                                    else "FAILED")
     print("GATE lane-cert: %s" % verdict)

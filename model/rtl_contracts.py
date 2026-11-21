@@ -235,10 +235,16 @@ COMPOSITION = {
              "theorems": ("head_of_cert", "head_valid_runBK")},
             {"step": "L4 hR on a stretch", "status": "proved",
              "theorems": ("hR_stretch", "hstart_after_flush")},
-            {"step": "L4 hfree", "status": "owed",
-             "what": "wb_bound_winBK_fl's hfree along runBK: a retirement's release is after the "
-                     "lane's earlier writebacks (a lateness condition of the certificate, not a "
-                     "stretch fact)"},
+            # L4 hfree split 11-21: the induction and the gap case proved; HrelS for an ARM
+            # writeback (by its edge, not its gap) on runBK owed
+            {"step": "L4 hfree: the stretch induction and non-ARM writebacks (gap >= Rr + 3, "
+                     "lane-cert check 22)", "status": "proved",
+             "theorems": ("hpre_after_flush", "hrel_of_gap", "hR_stretch_gap",
+                          "hR_stretch_nofree")},
+            {"step": "L4 hfree: ARM writebacks on runBK", "status": "owed",
+             "what": "HfreeB.HrelS for an ARM's writeback on the bridged run (runBA_proj): its gap "
+                     "is ext3 = edge + 1 - ts with the edge after the writeback -- "
+                     "ArmClose.wb_gap_words' ARM case, carried to runBK"},
             {"step": "L4 window budgets hM / hS", "status": "owed",
              "what": "the window chain (Wilson 11-18 'hR on runB'): M other-lane decisions and "
                      "S idle cycles per K-window, counted along runBK"},
@@ -268,6 +274,17 @@ COMPOSITION = {
              "what": "the ready_*_T lifted onto runBK through the stretches"},
             {"step": "hZS", "status": "owed",
              "what": "step 5: hZS0 established, not only gate-checked (lane-cert check 20)"},
+        ]},
+    # 11-21 (hfree_measure, RTL traces): the EDF theorems (EdfB, RespEdf) carry their own hfree;
+    # the gap route does not give it on two EDF-certified images although the RTL meets it
+    "edf_hfree": {
+        "status": "owed",
+        "steps": [
+            {"step": "hfree under the EDF response bounds", "status": "owed",
+             "what": "EdfB / RespEdf's hfree on EDF-certified images: pair_busy lane 0 (gap 40, "
+                     "EDF R 38: one cycle short of gap >= Rr + 3; RTL edges on the grid, load "
+                     "delays the start 29) and uart_tx_busy lane 0 (REARM gap 20, EDF R 158; RTL "
+                     "worst response 14, V3-T) -- a tighter bound or another route"},
         ]},
 }
 
