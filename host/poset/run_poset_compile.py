@@ -43,7 +43,9 @@
      (must-fire M_PC_DRAIN_OFFBY1: the drain one past the search -> the closed form disagrees).
      The agreement is checked on the DEFAULT path (arm late) only: early arming is withdrawn.
      Wilson 11-20: also on every `else abort` / `else continue` window of the SPI-master and
-     UART-TX lowerings, slot off and on (drain_closed_form_ft: the timeout path's refetched PC+2)
+     UART-TX lowerings, slot off and on (drain_closed_form_ft: the timeout path's refetched PC+2);
+     `else continue` slot on: the default certifies J 1, `nodrain` stamps UNCERTIFIED, a tighter
+     next action is refused (must-fire M_PC_FT_EDGEONLY: the drain on the edge path only)
   C14 arm='early' refused as withdrawn (the drain table alone uses it, counterfactual=True); more
      than MAX_PLAIN_ARM_RUN = 2 plain edge ARMs in a row refused (item 1b two deep; an FT ARM
      is outside the run) (must-fire M_PC_ARM3_PASS)
@@ -90,6 +92,7 @@ SCRATCH_MUTANTS = {
     "M_PC_ARM3_PASS": "killed in-process by this gate (C14)",
     "M_PC_FTPC1_PASS": "killed in-process by this gate (C15)",
     "M_PC_A2_NOPREM": "killed in-process by this gate (C11: A2 and the window certificate disagree)",
+    "M_PC_FT_EDGEONLY": "killed in-process by this gate (C13: else continue does not certify)",
     "M_ASM_MOD_ANY_OP": "pe_asm.MODS_MUT, killed in-process by this gate (C10)",
     "M_ASM_MOD_ANY_VALUE": "pe_asm.MODS_MUT, killed in-process by this gate (C10)",
 }
@@ -482,7 +485,58 @@ def c13():
     p0 = C.S.parse(body())
     if plain["image"] != C.lower(p0["v1"], 7)[0]:
         probs.append("C13 an image with no `within` is not byte-identical to the plain lowering")
-    return probs + c13_agree()
+    return probs + c13_agree() + c13_continue()
+
+
+#: the mutant passes that re-run c13_continue (the rest skip it; the main pass runs it in full)
+CONTINUE_MUTANTS = ("M_PC_FT_EDGEONLY",)
+
+
+def c13_continue():
+    """Wilson 11-20 step 3: `else continue` on the same rules as `else abort`, slot on (SLOT = 2:
+    PC+2 ready on its edge entry -- slot off nothing certifies, c13_agree): the default drains
+    PC+1 and PC+2 and certifies J 1 at the closed form's drain; `nodrain` stamps UNCERTIFIED; a
+    next action bounded tighter than the drain is refused. Must-fire M_PC_FT_EDGEONLY: the
+    drain on the edge path only (PC+1 at D*) -> the timeout path's refetched PC+2 stays late."""
+    import branch_budget as BB
+    if C.MUT and C.MUT not in CONTINUE_MUTANTS:
+        return []
+    probs = []
+    saved = BB.SLOT
+    BB.SLOT = 2
+    try:
+        r = C.compile_spec(body(WIN % "continue"), seed=7)
+        wb = r["within_budget"]
+        lanes = sorted({x["lane"] for x in r["windows"]})
+        if not r["windows"]:
+            probs.append("C13 continue: no window compiled")
+        if wb is None or wb["B"] is None or any(wb["lanes"][ln]["max_late"] for ln in lanes):
+            probs.append("C13 continue: the default drain does not certify J 1 (%s)"
+                         % ((wb or {}).get("reason", "no budget")[:100]))
+        if r["stamp"]["status"] != "certified":
+            probs.append("C13 continue: stamp %s" % r["stamp"])
+        for x in r["windows"]:
+            if x["drain_found"] is None or x["drain"] != x["drain_cf"]:
+                probs.append("C13 continue lane %d ARM %d: drain %s (found %s), closed form %s"
+                             % (x["lane"], x["ARM_word"], x["drain"], x["drain_found"],
+                                x["drain_cf"]))
+        say("  C13 continue (slot 2): %d windows, drain %s, stamp %s"
+            % (len(r["windows"]), sorted({x["drain"] for x in r["windows"]}),
+               r["stamp"]["status"]))
+        nd = C.compile_spec(body(WIN % "continue nodrain"), seed=7)
+        if nd["stamp"]["status"] != "uncertified" or "nodrain" not in nd["stamp"]["reason"]:
+            probs.append("C13 continue nodrain: stamp %s" % nd["stamp"])
+        if any(x.get("drain") for x in nd["windows"]):
+            probs.append("C13 continue nodrain: a drain was added")
+        tight = body(WIN % "continue",
+                     "pattern Fall(uio5) -> Rise(uio1) during (0 ns, 50 ns) observed 3;")
+        ok, msg = refused_with(tight, "would push the next action past")
+        if not ok:
+            probs.append("C13 continue: a next action bounded tighter than the drain: %s"
+                         % msg[:120])
+    finally:
+        BB.SLOT = saved
+    return probs
 
 
 def uart_window_text(kind):

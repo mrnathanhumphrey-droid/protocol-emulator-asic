@@ -65,7 +65,8 @@ MUTANTS = ("M_PC_NO_CYCLE",      # cycles not refused
            "M_PC_DRAIN_OFFBY1",    # the generated drain one past the search (the closed form disagrees)
            "M_PC_ARM3_PASS",       # three plain edge ARMs in a row not refused
            "M_PC_FTPC1_PASS",      # a FALLTHROUGH ARM at another ARM's PC+1 not refused
-           "M_PC_A2_NOPREM")       # A2's line ignores the window's premise gaps (two verdicts)
+           "M_PC_A2_NOPREM",       # A2's line ignores the window's premise gaps (two verdicts)
+           "M_PC_FT_EDGEONLY")     # `else continue`: the drain on the edge path only (PC+1 left at D*)
 MUT = os.environ.get("POSET_COMPILE_MUTANT", "")
 if MUT and MUT not in MUTANTS:
     raise SystemExit("poset compile: unknown mutant %r" % MUT)
@@ -654,7 +655,8 @@ def _windows(stmts, lowered, route, hz, arm="late", drain=0, premise="datasheet"
                 # the same drain, so the refetched word's lateness can drain on that path too
                 if out[iarm_][6:7] == (I.ARM_MOD_FT,) and iarm_ + 1 < len(out):
                     p_.setdefault("pc1_delay", {})[s_] = out[iarm_ + 1][3]   # before the drain
-                if dp and out[iarm_][6:7] == (I.ARM_MOD_FT,) and iarm_ + 1 < len(out):
+                if (dp and out[iarm_][6:7] == (I.ARM_MOD_FT,) and iarm_ + 1 < len(out)
+                        and MUT != "M_PC_FT_EDGEONLY"):
                     t_ = out[iarm_ + 1]
                     if t_[3] + dp > T_MAX:
                         raise Refused("within: drain %d makes lane %d word %d's delay %d > %d"
