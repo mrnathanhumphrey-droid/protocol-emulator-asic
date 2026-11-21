@@ -198,7 +198,10 @@ KEY = ("dstar", "dstar29", "dstar39", "dstar39_v2", "dstar39_st", "dstar39_hold"
        # SchedK11.lean (composition L4 hS, Wilson 11-21 ruling (b)): under K11 the masked
        # dispatcher chooses as win while an unarmed lane is ready
        "winA_eq_of_K11", "winA_ne_none_of_K11", "winA_unarmed", "winA_some", "winA_bprime",
-       "winA_released", "winS_eq_of_K11")
+       "winA_released", "winS_eq_of_K11",
+       # CountBK.lean (closure step 2): the counting lemmas along runBK
+       "cntBK_succ_back", "cntBK_add", "cntBK_mono", "cntBK_reach", "cntBK_le_one_sep",
+       "cntBK_sparse_g", "cntBK_decOther_split")
 #: proof_constants.load() key -> the Lean expression that must evaluate to it (SPEC: the map)
 CONSTS = {
     "lemmaA_window": "LEMMA_A_WINDOW", "R_base": "R_BASE", "dispatch_cycles": "DISPATCH_CYCLES",
