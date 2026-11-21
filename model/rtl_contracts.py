@@ -149,7 +149,7 @@ CONTRACT_PREMISES = {
                "through hedge -- y's edge word present at every flush restarted from -- which a "
                "second flush within 2 cycles could break (composition L1, d03bf22)"},
     "fetch_order": {
-        "rtl": ("K7",),
+        "rtl": ("K1", "K7"),
         "why": "OrderK's keep premise (K6 build, Nate 11-20): KeepOk at every flush and hkeep at "
                "the edge -- the kept word's fetch index is the lane's retirement count, i.e. the "
                "edge word is the lane's oldest unretired word and the lane does not retire in "
@@ -158,9 +158,12 @@ CONTRACT_PREMISES = {
                "(hord_runBK) and hidx is not needed (ready_ft_edge_K). Proved from the arming "
                "chain (Nate 11-20 option 1, OrderK keep_at_hit / keepOk_runBK / hkeep_runBK: the "
                "ARM retires at its arming and the armed lane is frozen) down to one premise per "
-               "arming, hidxA: the edge word's fetch index is the lane's next fetch after the "
-               "ARM's arming (kt (edge t0) y = nr at t0 + 1) -- K7 (one fetch pointer per lane) "
-               "+ the edge-first order (the requester fetches the edge word first)"},
+               "arming, hidxA, itself proved (OrderH.hidxA_of_head: order and keep together, by "
+               "strong induction on the arming time) from the hardware's part, hidxH: AT AN FT "
+               "EDGE THE FLUSH KEEPS THE WORD FETCHED IMMEDIATELY AFTER THE ARM (kept index = "
+               "the ARM's fetch index + 1) -- K1 made exact, with K7 (one fetch pointer per "
+               "lane, consecutive indices) and the edge-first order (the requester fetches the "
+               "edge word first)"},
 }
 
 #: THE MILESTONE (Wilson 11-18 / 11-19): slot_on_composition -- GapRun on the buffered engine with
@@ -205,11 +208,8 @@ COMPOSITION = {
              "theorems": ("ordBK_run", "hord_runBK", "ready_ft_edge_K")},
             {"step": "keep premise KeepOk / hkeep", "status": "proved",
              "theorems": ("keep_at_hit", "keepOk_runBK", "hkeep_runBK", "ready_ft_edge_armed")},
-            {"step": "hidxA: the edge word is the ARM's next fetch", "status": "owed",
-             "what": "per arming, kt (edge t0) y = nr at t0 + 1: the edge word's fetch index is "
-                     "the lane's next fetch after the ARM's arming -- CONTRACT_PREMISES "
-                     "fetch_order (K7 + the edge-first order); the premise keep_at_hit reduces "
-                     "the keep premise to"},
+            {"step": "hidxA: the edge word is the ARM's next fetch", "status": "proved",
+             "theorems": ("hidxA_of_head", "hidxA_runBA", "ready_ft_edge_head")},
             {"step": "contracts for hedge-timing and ScanOk", "status": "owed",
              "what": "flush_spacing_runBA / flushOk_runBA take 'edge >= arming writeback + 1' and "
                      "agent 1's scan fix (ScanOk); neither is in CONTRACT_PREMISES yet -- RTL "
