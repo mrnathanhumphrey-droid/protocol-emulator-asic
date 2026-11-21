@@ -23,6 +23,10 @@ Checks (static, seconds):
   S5 the response bounds (Wilson 11-15): every image of record's unclocked SHIFT lanes have a
      certified R in model/branch_budget.json, and the stamp needs it -- with that R removed
      the stamp is uncertified, so a --require-cert build fails (must-fire M_CS_R_MISSING).
+  S7 SYMDEF is priced at the lane's header period (its delay field is config payload), as A2
+     prices it (program_a2.lanes_of, 08fdf55): run_symgen's ws2812 image stamps certified and
+     agrees with A2's lanes_of (must-fire M_CS_SYMDEF_PAYLOAD: the payload read as the delay
+     -> "zero release spacing", uncertified).
 Must-fires (in-process, on scratch copies): a stale sidecar (S3), an image of record with no
 sidecar (S4), and require() passing an uncertified stamp (S1b) each turn the gate red.
 """
@@ -206,6 +210,25 @@ def s6():
     return probs, n
 
 
+def symdef_image():
+    """run_symgen's ws2812 image: lane 0 opens with SYMDEF, whose delay field is payload"""
+    import run_symgen as RS
+    import symgen_model as SM
+    return bytes(RS.image(RS.cfg_with_lat(SM.ws2812(19))))
+
+
+def s7():
+    """[problem]: the SYMDEF image stamps certified, at d_min = the header period"""
+    img = symdef_image()
+    st = CS.stamp(img)
+    t = CS.I.read_header(img, 0)["t"]
+    if st["status"] != "certified":
+        return ["S7 the SYMDEF image stamped %s: %s" % (st["status"], st.get("reason"))]
+    if st.get("d_min") != t:
+        return ["S7 the SYMDEF image's d_min %s, want the header period %d" % (st.get("d_min"), t)]
+    return []
+
+
 def main():
     import image_universe as U
     paths = U.default().paths
@@ -217,7 +240,8 @@ def main():
     p4 = s4()
     p5 = s5()
     p6, n6 = s6()
-    probs = p1 + p2 + p3 + p4 + p5 + p6
+    p7 = s7()
+    probs = p1 + p2 + p3 + p4 + p5 + p6 + p7
     print("S1 must-fire entries a-d (command line vs compiler): %s" % ("ok" if not p1 else "FAIL"))
     print("S2 decode round-trip on %d assembled programs: %s" % (n2, "ok" if not p2 else "FAIL"))
     print("S3 %d sidecars current: %s" % (n3, "ok" if not p3 else "FAIL"))
@@ -226,6 +250,7 @@ def main():
     print("S5 response bounds R on the images of record's unclocked SHIFT lanes: %s"
           % ("ok" if not p5 else "FAIL"))
     print("S6 stamp and A2 agree on %d record images: %s" % (n6, "ok" if not p6 else "FAIL"))
+    print("S7 SYMDEF priced at the header period (as A2): %s" % ("ok" if not p7 else "FAIL"))
     for name, why in CS.IMAGES_OF_RECORD_PENDING:
         print("   pending: %s -- %s" % (name, why))
     for p in probs:
@@ -262,6 +287,11 @@ def main():
     mf.append(("M_CS_ARM_LATE", ctl and arm_stamp(-1) == "uncertified"))
     with tempfile.TemporaryDirectory() as tmp:
         mf.append(("M_CS_REQUIRE_PASSES", bool(s1(tmp, require_fn=lambda st: st))))
+    CS.SYMDEF_MUT = True
+    try:
+        mf.append(("M_CS_SYMDEF_PAYLOAD", bool(s7())))
+    finally:
+        CS.SYMDEF_MUT = False
     CS.A2_MUT = True
     try:
         mf.append(("M_CS_A2_IGNORED", bool(s6()[0])))

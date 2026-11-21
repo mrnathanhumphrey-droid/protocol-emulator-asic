@@ -57,6 +57,8 @@ IMAGES_OF_RECORD_PENDING = (
 
 #: must-fire switch (gate_cert_stamp M_CS_A2_IGNORED): the stamp ignores A2's verdict
 A2_MUT = False
+#: must-fire switch (gate_cert_stamp M_CS_SYMDEF_PAYLOAD): SYMDEF's payload read as its delay
+SYMDEF_MUT = False
 
 
 class Uncertified(Exception):
@@ -70,7 +72,13 @@ def _words(img, base):
         a += I.ACT_BYTES
 
 
-def _tuple(x):
+def _tuple(x, t=None):
+    if x["op"] == I.OP_SYMDEF and t is not None and not SYMDEF_MUT:
+        # ⛔ SYMDEF's delay field is CONFIG PAYLOAD; the RTL advances the lane by the header
+        # period `t` (`a_dly_sg`), and A2 prices it so (program_a2.lanes_of, 08fdf55) -- found
+        # 11-20: the coverage sweep's symbol-generator images read "delay 0, a zero release
+        # spacing" here and were stamped uncertified while A2 certified them (B 0)
+        return (x["op"], x["pin"], x["level"], t, x["q"])
     if x["op"] == I.OP_LOOP:
         return (x["op"], 0, 0, (x["count"] << I.PINB_W) | x["pinb"], x["q"])
     if x["op"] in I.BRANCH_OPS:
@@ -97,7 +105,7 @@ def image_lanes(img):
         first = next(_words(img, b), (None, None))[1]
         if len(sharers) > 1 and first is not None and first["op"] == I.OP_REARM:
             parked.add(b)
-    return {ln: [_tuple(x) for _w, x in PC.lane_words(img, ln, I)]
+    return {ln: [_tuple(x, I.read_header(img, ln)["t"]) for _w, x in PC.lane_words(img, ln, I)]
             for ln in range(I.N_LANES) if heads[ln] not in parked}
 
 
