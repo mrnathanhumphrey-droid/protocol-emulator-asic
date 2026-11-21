@@ -4969,15 +4969,15 @@ module pe_symgen (
       default: lvl = cur;
     endcase
   endfunction
-  function [5:0] len_of(input [1:0] j); len_of = lens[j*6 +: 6]; endfunction
   function [2:0] ca(input [1:0] j);     ca = code_a[j*3 +: 3];   endfunction
   function [2:0] cb(input [1:0] j);     cb = code_b[j*3 +: 3];   endfunction
   function bitof(input [7:0] v, input [2:0] i);
     bitof = msb ? v[nb_q - i] : v[i];
   endfunction
 
-  // ⛔⛔ AN INDEX, NOT `len_of(slot)`: a function call in a continuous assign is
-  // sensitive only to its ARGUMENTS, and `len_of` reads `lens` -- so after a
+  // ⛔⛔ AN INDEX, NOT A FUNCTION (the uncalled `len_of` was deleted 11-20, Wilson):
+  // a function call in a continuous assign is sensitive only to its ARGUMENTS, and
+  // a length function reads `lens` -- so after a
   // SYMDEF wrote `lens`, iverilog kept the reset length until `slot` moved, and
   // the first slot of the first byte lasted 1 cycle (run_symgen, measured: every
   // configuration). The engine's priming comment records the same trap. The

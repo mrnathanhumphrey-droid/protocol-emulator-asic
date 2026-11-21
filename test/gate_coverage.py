@@ -550,15 +550,13 @@ CLASSIFIED[('src/project.v', 4032, 'v_branch', 'else')] = (
     UNREACHABLE, 'the saturation arm of `ck_nmsg` (messages kept, sat 255). ck_nmsg is cleared at each clocked-capture start (line 4008), and a message is counted only when kept (`s_keep`: s_mlen != 0), so each takes >= 2 bytes ([len][>= 1 byte]) of the capture region CAP_BASE 128 .. S_END 384 (s_full stops the capture at 384): at most 128 messages per capture, never 255. THE BOUND DEPENDS ON THREE CONSTANTS in pe_pit\'s clocked capture: (1) the MINIMUM MESSAGE SIZE, 2 bytes = the one length byte at s_la (`s_end = s_la + 1 + s_mlen`) plus the >= 1 data byte `s_keep` demands (`s_mlen != 8\'d0`); (2) `CAP_BASE = 128` (localparam integer, next to CAP_BITS); (3) `S_END = 10\'d384` (localparam, enforced by `s_full`). Max messages = (S_END - CAP_BASE) / min size = 256 / 2 = 128. The arm needs a 256th kept message, i.e. (S_END - CAP_BASE) / min size reaching the 256 the 8-bit count saturates below: the region growing to ~512 bytes, or s_keep admitting a 0-data-byte message (min size 1, 256 / 1 -- then this entry is wrong and must be re-measured). Re-check this entry whenever s_keep, CAP_BASE or S_END changes.')
 
 # 11-20: the second sweep batch's written reasons (assertion fire arms, a
-# structurally empty else, a never-called function)
+# structurally empty else; the never-called `len_of` was deleted 11-20, Wilson)
 CLASSIFIED[('src/pe_engine.v', 1708, 'v_branch', 'if')] = (
     UNREACHABLE, "the FLAG1 assertion's fire arm (Wilson 11-19: at most ONE flag's posted count moves per cycle). The engine has one writeback per cycle and OP_FLAG_SET is the only writer of `fl_post`, adding 1 to the one flag its word names, so `fl_n` (the summed posted-count deltas this cycle) is 0 or 1 and `fl_n > 1` is false in every shipped build. It fires only under `M_FLAG_POST2` (a POST that also counts its neighbour), its planted case, run by run_flags and monitor_mustfire, which the coverage sweep does not build. A tripwire, not a path; re-check if a second POST writer or a second writeback port is ever added.")
 CLASSIFIED[('src/pe_engine.v', 2032, 'v_branch', 'if')] = (
     UNREACHABLE, "the K8 assertion's fire arm (Wilson 11-19: a lane is never flushed again within 2 cycles of its last flush; Lean takes K8 as a premise). In the shipped build every flush path ORs into `flush_ev` and none re-fires inside the two quiet cycles, so `flush_ev[k] && (k8_f1[k] || k8_f2[k])` is false. It fires only under `M_FT_REFLUSH` (the FT edge's flush applied twice), K8's must-fire, run by run_arm2 A4-K8 and monitor_mustfire, which the coverage sweep does not build. A tripwire, not a path; a new flush path must OR into `flush_ev` or K8 is blind.")
 CLASSIFIED[('src/pe_engine.v', 3991, 'v_branch', 'else')] = (
     UNREACHABLE, "DRIVE_SAMPLE's dispatch: `if (ds_refuse) ... else if (pin_real) ...` with no final else. `ds_refuse` (line 2831) is `~pin_real | ~pinb_real | (a_pin == a_pinb) | (clk_real & ...)`, so the `else if` is reached only with ds_refuse = 0, which forces pin_real = 1: the condition is true on every entry and its else arm is structurally empty. Under `M_NOOP_DRIVES` pin_real is the constant 1, so no build reaches it either. Re-check if `~pin_real` ever leaves `ds_refuse`.")
-CLASSIFIED[('src/pe_engine.v', 4972, 'v_line', 'block')] = (
-    UNREACHABLE, "pe_symgen's `len_of` function is DEFINED AND NEVER CALLED: the slot length is read as the index `len_cur = lens[slot*6 +: 6]` (line 4985) because a function call in a continuous assign is sensitive only to its arguments, so iverilog kept the reset length after a SYMDEF wrote `lens` (run_symgen measured it; the comment at 4979 records the trap). No caller, so no execution. Deleting the function is an RTL edit for Wilson to rule on; until then this point is dead text, not a gap.")
 
 #: ⭐ 11-18 (Wilson): EACH CEILING HAS ITS POINT LIST in test/coverage_points/ (see
 #: point_list_problems). pe_engine.v's list is the 11-04 sweep's (cc6166d), the
@@ -856,7 +854,6 @@ ANCHOR_TEXT.update({
     ('src/pe_engine.v', 1708): 'if (fl_n > 1)',
     ('src/pe_engine.v', 2032): 'if (flush_ev[k8_i] && (k8_f1[k8_i] || k8_f2[k8_i]))',
     ('src/pe_engine.v', 3991): 'end else if (pin_real) begin',
-    ('src/pe_engine.v', 4972): 'function [5:0] len_of(input [1:0] j); len_of = lens[j*6 +: 6]; endfunction',
 })
 
 #: ⛔⛔ EVERY COVERAGE FIGURE IS LABELLED WITH THE TOOL THAT MEASURED IT
