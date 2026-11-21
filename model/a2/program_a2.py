@@ -473,14 +473,18 @@ def lane_set(img, t_ext=None, j=None, budget_path=None, lateness=True):
                 jb = (PC.branch_j(B, I.branch_wait(a2)) if B is not None
                       else PC.load()["j_interim_head_late_optA"])
                 br_j[ln2] = max(br_j.get(ln2, 0), jb)
-        if lateness and rec is not None and rec.get("B") is not None:
+        import branch_budget as BB
+        # ⛔ Wilson 11-21: an image refused BY 1.6a with its lateness in J keeps the
+        # numbers that refusal read (queue_B / queue_lanes); 1.6a here reads the SAME
+        # J, so the gate and the record cannot disagree (the gate used to judge it at J = 1)
+        qrec = BB.queue_entry(rec)
+        if lateness and qrec is not None:
             # certified B: EVERY lane's J is its own certificate's, 1 + its max
             # certified lateness (branch_budget.lane_j) -- replaces the branch_j
             # floor wherever the record carries the lane (Wilson 11-14: j_lane
             # from the image's own certificate, no hand-shifted formula)
-            import branch_budget as BB
             for ln2 in {r[0] for r in rows}:
-                jl = lane_j_obs(rec, ln2)
+                jl = lane_j_obs(qrec, ln2)
                 if jl is not None:
                     br_j[ln2] = jl
     out = []

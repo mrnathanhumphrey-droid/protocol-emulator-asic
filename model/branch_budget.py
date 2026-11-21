@@ -359,6 +359,27 @@ QUEUE_MUT = False
 #: the record fields 1.6a's J reads (program_a2.lane_set -> lane_j); gen_branch_budget writes
 #: the same ones
 RECORD_LANE_KEYS = ("max_late", "max_late_pin", "R", "max_late_rx", "arm_margin")
+#: the reason queue_refusal gives when 1.6a fails with the lateness in J
+QUEUE_FAIL = "1.6a queue check fails with the certified lane lateness in J"
+
+
+def record_lanes(lanes):
+    """{lane str: the RECORD_LANE_KEYS fields}: a lane dict as the record stores it"""
+    return {str(l): {k: v[k] for k in RECORD_LANE_KEYS if k in v} for l, v in lanes.items()}
+
+
+def queue_entry(entry):
+    """The entry 1.6a's J is read from (Wilson 11-21: the gate's QUEUE check uses the record's
+    certified J for every image): a certified entry itself; for an image refused BY 1.6a with
+    the lateness in J, the B and lanes that refusal was priced on (`queue_B` / `queue_lanes`);
+    else None (no certified J exists)."""
+    if entry is None:
+        return None
+    if entry.get("B") is not None:
+        return entry
+    if entry.get("queue_lanes") is not None and entry.get("queue_B") is not None:
+        return {"sha": entry.get("sha"), "B": entry["queue_B"], "lanes": entry["queue_lanes"]}
+    return None
 
 #: the theorem each generic lane's response bound R rests on (Wilson 11-18: every R the
 #: certificate gives names its theorem; gate_lane_cert check 19). A lane with a FALLTHROUGH ARM
@@ -398,9 +419,7 @@ def queue_refusal(img, B, lanes):
     if os.path.join(HERE, "a2") not in sys.path:
         sys.path.append(os.path.join(HERE, "a2"))
     import program_a2 as P
-    ent = {"sha": P.image_sha(img), "B": B,
-           "lanes": {str(l): {k: v[k] for k in RECORD_LANE_KEYS if k in v}
-                     for l, v in lanes.items()}}
+    ent = {"sha": P.image_sha(img), "B": B, "lanes": record_lanes(lanes)}
     fd, tmp = tempfile.mkstemp(suffix=".json", prefix="a2_q16a_")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
@@ -418,7 +437,7 @@ def queue_refusal(img, B, lanes):
     bad = sorted(((int(ln), v) for ln, v in q.items() if not v["ok"]), key=lambda kv: kv[0])
     if not bad:
         return None
-    return ("1.6a queue check fails with the certified lane lateness in J: %s (J = 1 + max_late, "
+    return (QUEUE_FAIL + ": %s (J = 1 + max_late, "
             "lane_j; Wilson 11-15 UART ruling item 1)"
             % "; ".join("lane %d r %s > T %s (J %d)" % (ln, v["r"], v["T"], 1 + lanes[ln]["max_late"])
                       for ln, v in bad))
@@ -797,6 +816,12 @@ def _image_budget(img, iters=80, premise_gaps=None, ready=None, scheme="window")
             # 1.6a with the certified lateness in J (Wilson 11-15): one verdict with the stamp
             why = queue_refusal(img, B, out)
             if why:
+                # ⛔ THE NUMBERS THAT PRICED THE REFUSAL ARE KEPT (Wilson 11-21): B and the
+                # lanes 1.6a read, so the admissibility gate reads the SAME J (queue_entry)
+                # instead of judging at J = 1. B stays null: the image is not certified.
+                if why.startswith(QUEUE_FAIL):
+                    return {"B": None, "reason": why, "lanes": {}, "queue_B": B,
+                            "queue_lanes": record_lanes(out)}
                 return {"B": None, "reason": why, "lanes": {}}
             return {"B": B, "reason": "certified" if scheme == "window" else
                     "certified (EDF response bounds, RespEdfClose.wb_close_edf)", "lanes": out,

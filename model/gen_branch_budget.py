@@ -46,9 +46,12 @@ def current():
                      "reason": r["reason"],
                      # the image's certification stamp (Wilson 11-15): the field A2 reads
                      "cert": CS.stamp(img, budget=r),
-                     "lanes": {str(l): {k2: v[k2] for k2 in ("max_late", "max_late_pin", "R", "max_late_rx",
-                                                              "arm_margin") if k2 in v}
-                               for l, v in r["lanes"].items()}}
+                     "lanes": BB.record_lanes(r["lanes"])}
+        if "queue_lanes" in r:
+            # Wilson 11-21: refused by 1.6a with the lateness in J -- the B and lanes that
+            # refusal read, so the admissibility gate judges at the same J
+            out[name]["queue_B"] = r["queue_B"]
+            out[name]["queue_lanes"] = r["queue_lanes"]
     return out
 
 
@@ -64,8 +67,10 @@ def stale(rec, cur):
         r = rec.get("images", {}).get(name)
         if r is None:
             out.append("%s: no record" % name)
-        elif (r.get("sha"), r.get("B"), r.get("reason"), r.get("lanes"), r.get("cert")) != (
-                v["sha"], v["B"], v["reason"], v["lanes"], v["cert"]):
+        elif (r.get("sha"), r.get("B"), r.get("reason"), r.get("lanes"), r.get("cert"),
+              r.get("queue_B"), r.get("queue_lanes")) != (
+                v["sha"], v["B"], v["reason"], v["lanes"], v["cert"],
+                v.get("queue_B"), v.get("queue_lanes")):
             out.append("%s: recorded B %s (%s) stamp %s, certificate now B %s (%s) stamp %s"
                        % (name, r.get("B"), r.get("reason"), (r.get("cert") or {}).get("status"),
                           v["B"], v["reason"], v["cert"]["status"]))

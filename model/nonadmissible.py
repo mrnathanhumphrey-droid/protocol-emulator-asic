@@ -139,6 +139,13 @@ NON_ADMISSIBLE = {
     "lvl1_noto.hex": ({PORT},
         "deliberate stress image for ARM2: the both-high level ARM, no timeout, "
         "beside lanes at d = 12 (below D*)."),
+    # ⛔ Wilson 11-20 / 11-21: seen by this gate only once its 1.6a reads the record's
+    # certified J (branch_budget queue_lanes); at J = 1 it passed (lane 0 r 6).
+    "symgen_x_mod3.hex": ({QUEUE},
+        "uncertified image, hardware-path test: run_symgen's coverage arm (a SYMDEF "
+        "word with mod 3, the generator's config `default`). Fails the 1.6a queue "
+        "check at its certified J (lane 0: J 45, r 50 > T 40). Reach-only; "
+        "run_symgen judges the generator."),
 }
 
 # ⭐ THE A5 IMAGES (Wilson 11-19, ruling (3) put where the gates read it): run_arm2's

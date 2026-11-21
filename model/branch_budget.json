@@ -2744,7 +2744,35 @@
         "d_min": 40,
         "J": 1
       },
-      "lanes": {}
+      "lanes": {},
+      "queue_B": 4,
+      "queue_lanes": {
+        "0": {
+          "max_late": 44,
+          "max_late_pin": 44,
+          "R": 14
+        },
+        "1": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 20
+        },
+        "2": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 20
+        },
+        "3": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 20
+        },
+        "4": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 20
+        }
+      }
     },
     "symgen_x_od.hex": {
       "sha": "8ac01c37dea0712c4cb70c2ef08e18435646fd24085ef153c5d395bb06a3e72e",

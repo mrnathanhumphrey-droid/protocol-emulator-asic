@@ -114,8 +114,9 @@ def refill_dmin(img):
     return best
 
 
-def conditions(name, img):
-    ls, _d, k, _j = pa.lane_set(img)
+def conditions(name, img, budget_path=None):
+    """`budget_path`: a planted record for the must-fires (default: model/branch_budget.json)."""
+    ls, _d, k, _j = pa.lane_set(img, budget_path=budget_path)
     out = set()
     if pa.utilisation(ls) > 1.0:
         out.add(OVERLOAD)
@@ -128,7 +129,12 @@ def conditions(name, img):
     # pyRTA on every admissible lane (DT-F), so this can only be STRICTER
     # than the published number -- the safe side for a refusal.
     if OVERLOAD not in out:
-        q = pa.queue_slot(img)
+        # ⛔⛔ AT THE RECORD'S CERTIFIED J (Wilson 11-21): queue_slot reads each lane's J
+        # from the image's certificate -- a certified entry, or the B and lanes an image's
+        # 1.6a refusal was priced on (branch_budget.queue_entry) -- the SAME J the record's
+        # own check used. Judged at J = 1 this gate passed symgen_x_mod3 (lane 0 r 6) while
+        # the record refused it (r 50 > T 40 at J 45): two checks of one property disagreeing.
+        q = pa.queue_slot(img, budget_path=budget_path)
         # ⛔ A LANE WITH NO BOUND BREAKS 1.6a TOO (WF2 round 2): `r is not
         # None and ...` used to skip it, so an image whose lanes had no
         # response bound read as ADMISSIBLE. Overload is declared above; any
@@ -144,7 +150,7 @@ UNCERTIFIED = {}
 DEBT = {}
 
 
-def audit(images, declared, pad_declared, deliberate, debt=None):
+def audit(images, declared, pad_declared, deliberate, debt=None, budget_path=None):
     """Problems for this set of (name, img). Pure, so the must-fire can price it.
     `debt` ({name: (gate, reason)}, nonadmissible.SPLIT_DEBT): tracked lateness debt
     (Wilson 11-15) -- the failing set must equal it exactly, see SPLIT_DEBT."""
@@ -166,7 +172,7 @@ def audit(images, declared, pad_declared, deliberate, debt=None):
         # ⭐ 11-14: the reason comes from program_a2 (certified B per image)
         unc = pa.uncertified_reason(img) if pa.branch_lanes(img) else None
         try:
-            got, dm, u = conditions(name, img)
+            got, dm, u = conditions(name, img, budget_path)
         except zs.ZeroSpacingError as exc:
             probs.append("%s has a ZERO release spacing and cannot be "
                          "declared: %s" % (name, exc))
@@ -189,7 +195,8 @@ def audit(images, declared, pad_declared, deliberate, debt=None):
             if QUEUE not in got:
                 probs.append("%s carries a lateness debt (%s) but no longer fails 1.6a "
                              "-- stale debt" % (name, debt[name][0][:40] + "..."))
-            elif any(not v["ok"] for v in pa.queue_slot(img, lateness=False).values()):
+            elif any(not v["ok"] for v in pa.queue_slot(img, lateness=False,
+                                                         budget_path=budget_path).values()):
                 probs.append("%s fails 1.6a ALSO without the record's lateness in J -- "
                              "the program is wrong, a lateness debt cannot cover it"
                              % name)
@@ -273,6 +280,50 @@ def images():
     this scanned test/*.hex only, missing fpga/images/ and the bench arms."""
     import image_universe
     return image_universe.images()
+
+
+def queue_j_mustfire(out=print):
+    """Wilson 11-21: 1.6a here is judged at the record's CERTIFIED J. A planted image (run_symgen's
+    mod 3 arm, built here so the plant does not depend on the universe) under a name nothing
+    declares, with a planted one-image record giving lane 0 a certified lateness of 44 (J 45):
+      * certified (B 4, lanes)                       -> QUEUE reported
+      * refused by 1.6a (B null, queue_B/queue_lanes) -> QUEUE reported
+      * the same record, lateness 0 (J 1)            -> no QUEUE: the J is what moved the verdict
+    True iff all three are as wanted."""
+    import json
+    import tempfile
+    import run_symgen as _sg
+    c = _sg.cfg_with_lat(_sg.M.ws2812(19))
+    m3 = I._pack(I.SYMDEF_FIELDS, (I.OP_SYMDEF, 0, 3), I.ACT_BYTES)
+    img = I.full_store(bytes(_sg.image(c, extra=[m3])))
+    sha = pa.image_sha(img)
+
+    def lanes(late0):
+        return {str(l): {"max_late": late0 if l == 0 else 0,
+                         "max_late_pin": late0 if l == 0 else 0, "R": 14 if l == 0 else 20}
+                for l, _h, _a in pa.lanes_of(img)}
+
+    cases = (("certified at J 45",
+              {"sha": sha, "B": 4, "lanes": lanes(44)}, True),
+             ("refused by 1.6a, queue_lanes at J 45",
+              {"sha": sha, "B": None, "lanes": {}, "queue_B": 4, "queue_lanes": lanes(44)}, True),
+             ("control: the same record at J 1",
+              {"sha": sha, "B": None, "lanes": {}, "queue_B": 4, "queue_lanes": lanes(0)}, False))
+    ok = True
+    for what, ent, want in cases:
+        fd, tmp = tempfile.mkstemp(suffix=".json", prefix="adm_qj_")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                json.dump({"images": {"planted": ent}}, fh)
+            p, _ = audit([("undeclared_qj.hex", img)], {}, {}, {}, budget_path=tmp)
+        finally:
+            os.remove(tmp)
+        got = any("violates QUEUE" in x for x in p)
+        good = got == want
+        ok &= good
+        out("    1.6a at the record's J -- %-38s QUEUE %-3s %s"
+            % (what, "yes" if got else "no", "ok" if good else "*** MISSED"))
+    return ok
 
 
 def main() -> int:
@@ -489,8 +540,9 @@ def main() -> int:
     hit8 = any("not in the universe" in x for x in p8)
     print("    a bench T_ext entry with no image is reported  %s"
           % ("ok" if hit8 else "*** MISSED"))
+    hq = queue_j_mustfire()
     if not (hit and hit2 and hit3 and hit4 and hit5 and hit6 and hit7 and hit8
-            and hd3 and hd4 and hd5):
+            and hd3 and hd4 and hd5 and hq):
         rc = 1
 
     # ---- SP2/P4: THE TIMING-EXEMPTION REGISTRY (Wilson) ------------------
