@@ -176,12 +176,9 @@ def parse_statement(s):
                 raise SpecError("else takes %s (the closed set, Wilson 11-15), got %r -- a "
                                 "general handler is not in v2" % (" or ".join(ELSE_ACTIONS), act))
             st["else"] = p.take()
-            # Wilson 11-15: `else abort nodrain` -- no generated drain after the window; the
-            # image is stamped UNCERTIFIED with the reason
+            # Wilson 11-15 / 11-20: `else abort nodrain` / `else continue nodrain` -- no
+            # generated drain after the window; the image is stamped UNCERTIFIED with the reason
             if p.peek() == "nodrain":
-                if st["else"] != "abort":
-                    raise SpecError("nodrain applies to `else abort` (the drain is added after "
-                                    "an abort window only)")
                 p.take()
                 st["nodrain"] = True
     while p.peek() is not None:
@@ -192,7 +189,7 @@ def parse_statement(s):
         if c == "else":
             raise SpecError("`else` needs `within (lo, hi)` before it")
         if c == "nodrain":
-            raise SpecError("`nodrain` follows `else abort`")
+            raise SpecError("`nodrain` follows `else abort` or `else continue`")
         if c == "observed":
             n = p.take()
             if not n.isdigit():

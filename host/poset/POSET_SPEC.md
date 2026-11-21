@@ -44,7 +44,7 @@ KIND        ::= 'Rise' | 'Fall' | 'Edge'           -- raw pin events
 WIRE        ::= 'uio' DIGIT                        -- v1's wire names
 
 timing      ::= 'during' '(' TIME ',' TIME ')'     -- vol5 Timing macro, as v1 already parses
-obligation  ::= 'within' '(' TIME ',' TIME ')' 'else' ( 'abort' [ 'nodrain' ] | 'continue' )
+obligation  ::= 'within' '(' TIME ',' TIME ')' 'else' ( 'abort' | 'continue' ) [ 'nodrain' ]
                                                    -- a PROGRAM obligation (Wilson 11-15): its own
                                                    -- keyword, never `during` + else; one timing per statement
 TIME        ::= NUMBER 'ns'
@@ -93,7 +93,7 @@ Instances of one kind are numbered in time order: the 1st, 2nd, … instance.
 **The lower bound.** The chip has no window counter, so an ARM armed after A cannot tell a B that came before `lo` from one that never came. The program therefore does **not** detect an early B. `lo > 0` is accepted only as the **peer's** guarantee, written with `source datasheet "<part>"`. Without that clause, catching an early B would be the program's job, and the compiler refuses the statement with "unsupported: needs window counter". The window counter is on `V2_MASTER_LIST`, to be built when a target protocol needs early arrival detected. Either way, the bound `[lo, hi]` is also a WINDOW predicate in the check-set, so the validator checks an early B on the bus.
 
 **How it lowers, onto the existing ISA (no new hardware).** After each A word, A's spacing becomes the ARM's lead `pre`, with timed no-ops (LEVEL on `PIN_NONE`) past D*. Then comes an ARM on B's pin and edge, with timeout T:
-- **`else continue`**: a FALLTHROUGH ARM (`mod[1]`). An edge goes to PC+2; a timeout goes to PC+1, a no-op that runs into PC+2. PC+2 is the original next word, behind a join no-op when that word is a SHIFT, because a FALLTHROUGH edge path cannot start with one: it is refilled after the flush.
+- **`else continue`**: a FALLTHROUGH ARM (`mod[1]`). An edge goes to PC+2; a timeout goes to PC+1, a no-op that runs into PC+2. PC+2 is the original next word, behind a join no-op when that word is a SHIFT, because a FALLTHROUGH edge path cannot start with one: it is refilled after the flush. It gets the generated **drain** on the same rules as `else abort` (Wilson 11-20): the drain goes on PC+2's delay (the edge path) and on PC+1's (the timeout path, where K6's swap drops PC+2 and it is refetched); `else continue nodrain` adds none and stamps UNCERTIFIED.
 - **`else abort`**: a plain timed ARM. An edge releases the next word, after the **drain**: cycles the compiler adds to that word's delay so the lateness after the reactive release drains (Wilson 11-15). The drain is generated per window, never typed: the least value at which the certificate gives the lane J 1, cross-checked against its closed form (generated block below). `else abort nodrain` adds none and the image is stamped UNCERTIFIED with the reason. A `during` or `within` bound on the event after B that is shorter than the drain is refused: "the drain (N cycles) would push the next action past <bound>". A timeout **halts the lane**, and the hardware state afterwards is:
   - that lane's `live` and `armed` are cleared; the other lanes keep running;
   - the per-lane `l_timeout` sticky is set; the host has no readout for it;

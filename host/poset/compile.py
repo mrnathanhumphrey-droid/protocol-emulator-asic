@@ -398,7 +398,9 @@ def windows(stmts, lowered, route, hz, arm="late", drain="auto", premise="datash
     chosen = {i: 0 for i in sids}
     found = {}
     for i in sids:
-        if ws[i]["else"] != "abort" or ws[i].get("nodrain"):
+        # Wilson 11-20: `else continue` joins the search on the same rules (its drain also
+        # spaces the timeout path's PC+1); `nodrain` is the explicit opt-out for either
+        if ws[i].get("nodrain"):
             continue
         for d in range(drain_max() + 1):
             trial = {**chosen, i: d}
@@ -821,7 +823,7 @@ def compile_spec(text, seed=1, hz=None, require_cert=False, **win_opts):
     if win and win.get("nodrain"):
         need = win.get("nodrain_need") or {}
         st = dict(st, status="uncertified",
-                  reason="within ... else abort nodrain: no drain after the window (%s); the "
+                  reason="within ... else abort|continue nodrain: no drain after the window (%s); the "
                          "generated drain would be %s cycles"
                   % ("; ".join(win["nodrain"]),
                      ", ".join(str(v) for _k, v in sorted(need.items())) or "none found"))
