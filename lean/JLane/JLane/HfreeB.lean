@@ -159,4 +159,133 @@ theorem hR_stretch_nofree (fl : Nat → Lane → Bool) (k : Nat → Lane → Nat
 
 end
 
+/-! ### Step 3b: an ARM writeback on the bridged run
+
+On the armed run (`runBA`, bridged to `runBK P winS usb sreq flS kt` by `runBA_proj`) an ARM's
+retiring writeback arms `y` (`EngBA.arms`); `y` stays armed until a hit; a hit is a flush of `y`
+(`flS`), which a stretch excludes; and `winA` never picks an armed lane, while a later writeback
+needs a decision two cycles before it (`wb_backBK`). So an ARM writeback has no later writeback of
+`y` in its stretch, and `HrelS` holds there vacuously; every other writeback takes the gap. -/
+
+section
+variable (P : Program) (win : Engine → Option Lane) (usb : Option Lane)
+  (sreq : EngB → Option Lane) (isArm : EngB → Bool) (edge : Nat → Lane → Nat)
+  (kt : Nat → Lane → Nat) (A0 : EngBA)
+
+theorem runBA_succ (n : Nat) : runBA P win usb sreq isArm edge kt (n + 1) A0
+    = stepBA P win usb sreq isArm edge (kt (runBA P win usb sreq isArm edge kt n A0).X.x.e.now)
+        (runBA P win usb sreq isArm edge kt n A0) := rfl
+
+theorem stepBA_armed (k : Lane → Nat) (A : EngBA) (l : Lane) :
+    (stepBA P win usb sreq isArm edge k A).armed l
+      = if A.hit l = true then false else if A.arms P isArm l = true then true else A.armed l :=
+  rfl
+
+/-- **Armed from an ARM's retiring writeback until a hit.** -/
+theorem armed_after_arm (hedge : ∀ t l, t + 1 ≤ edge t l) (hA : ArmInvB A0) (y : Lane) (m : Nat)
+    (harm : (runBA P win usb sreq isArm edge kt m A0).arms P isArm y = true) :
+    ∀ i, (∀ j, j < i → (runBA P win usb sreq isArm edge kt (m + 1 + j) A0).hit y = false) →
+      (runBA P win usb sreq isArm edge kt (m + 1 + i) A0).armed y = true
+  | 0, _ => by
+    have hI := armInvB_runBA P win usb sreq isArm edge hedge kt A0 hA m
+    have harm' := harm
+    simp only [EngBA.arms, Bool.and_eq_true, decide_eq_true_eq] at harm'
+    obtain ⟨⟨⟨hst, hcur⟩, -⟩, -⟩ := harm'
+    have hna : (runBA P win usb sreq isArm edge kt m A0).armed y = false := by
+      cases h : (runBA P win usb sreq isArm edge kt m A0).armed y with
+      | false => rfl
+      | true =>
+        exfalso
+        exact hI.1 y h ⟨by rw [hst]; decide, hcur.symm⟩
+    have hnh : (runBA P win usb sreq isArm edge kt m A0).hit y = false := by
+      simp [EngBA.hit, hna]
+    rw [show m + 1 + 0 = m + 1 from rfl, runBA_succ, stepBA_armed, hnh, harm]
+    rfl
+  | i + 1, h => by
+    have ih := armed_after_arm hedge hA y m harm i (fun j hj => h j (by omega))
+    have hh := h i (by omega)
+    rw [show m + 1 + (i + 1) = (m + 1 + i) + 1 from rfl, runBA_succ, stepBA_armed, hh]
+    simp only [Bool.false_eq_true, if_false, ih]
+    split <;> rfl
+
+/-- **No decision for an armed lane**: armed at `D`, `winS` does not pick `y` there. -/
+theorem arm_no_dec (D : Nat) (y : Lane)
+    (ha : (runBA P win usb sreq isArm edge kt D A0).armed y = true)
+    (hdec : Dec (winS P win usb sreq isArm edge kt A0) y
+      (runBK P (winS P win usb sreq isArm edge kt A0) usb sreq
+        (flS P win usb sreq isArm edge kt A0) kt D A0.X).x.e) : False := by
+  have hw := hdec.2.1
+  rw [← runBA_proj P win usb sreq isArm edge kt A0 D] at hw
+  simp only [winS, now_runBA P win usb sreq isArm edge kt A0 D, Nat.add_sub_cancel_left] at hw
+  unfold winA at hw
+  split at hw
+  · rename_i v _
+    split at hw
+    · cases hw
+    · rename_i hv
+      cases hw
+      exact hv ha
+  · cases hw
+
+/-- The bridged run's flush of `y` at cycle `j` is the armed run's hit there. -/
+theorem flS_runBK (j : Nat) (y : Lane) :
+    flS P win usb sreq isArm edge kt A0
+      (runBK P (winS P win usb sreq isArm edge kt A0) usb sreq
+        (flS P win usb sreq isArm edge kt A0) kt j A0.X).x.e.now y
+      = (runBA P win usb sreq isArm edge kt j A0).hit y := by
+  rw [← runBA_proj P win usb sreq isArm edge kt A0 j]
+  simp only [flS, now_runBA P win usb sreq isArm edge kt A0 j, Nat.add_sub_cancel_left]
+
+/-- **`HrelS` on the bridged run** (L4 hfree, step 3b): an ARM's retiring writeback has no later
+writeback of `y` in its stretch, so it meets `HrelS` vacuously; every other writeback by its gap
+(`hgap`: non-ARM words, lane-cert check 22). -/
+theorem hrel_bridged (hedge : ∀ t l, t + 1 ≤ edge t l) (hA : ArmInvB A0)
+    (h0 : A0.X.x.e.st = .idle) (y : Lane) (K s T : Nat)
+    (hlastS : ∀ j, s ≤ j + 2 → j < s + T →
+      flS P win usb sreq isArm edge kt A0
+        (runBK P (winS P win usb sreq isArm edge kt A0) usb sreq
+          (flS P win usb sreq isArm edge kt A0) kt j A0.X).x.e.now y = false)
+    (hgap : ∀ x, x < T →
+      IsWB y (runBK P (winS P win usb sreq isArm edge kt A0) usb sreq
+        (flS P win usb sreq isArm edge kt A0) kt (s + x) A0.X).x.e →
+      (runBA P win usb sreq isArm edge kt (s + x) A0).arms P isArm y = false →
+      K + 2 ≤ gpT P y (fun n => (runBK P (winS P win usb sreq isArm edge kt A0) usb sreq
+        (flS P win usb sreq isArm edge kt A0) kt (s + n) A0.X).base) x) :
+    HrelS P (winS P win usb sreq isArm edge kt A0) usb sreq (flS P win usb sreq isArm edge kt A0)
+      kt A0.X y K s T := by
+  intro x x2 hxx hx2 hwb hwb2 hb
+  cases harm : (runBA P win usb sreq isArm edge kt (s + x) A0).arms P isArm y with
+  | false =>
+    have := hgap x (by omega) hwb harm
+    omega
+  | true =>
+    exfalso
+    obtain ⟨D, hD, hdec⟩ := wb_backBK P (winS P win usb sreq isArm edge kt A0) usb sreq
+      (flS P win usb sreq isArm edge kt A0) kt A0.X h0 (s + x2) y hwb2
+    -- the decision is after the ARM's writeback: not at it (idle vs wb), not the cycle before
+    -- (that decision drives at s + x, not a writeback)
+    have hD1 : s + x + 1 ≤ D := by
+      rcases Nat.lt_or_ge D (s + x + 1) with hlt | hge
+      · exfalso
+        rcases (show D = s + x ∨ D + 1 = s + x by omega) with hEq | hEq
+        · rw [hEq] at hdec
+          have h1 := hdec.1
+          rw [hwb.1] at h1
+          cases h1
+        · have hdr : (runBK P (winS P win usb sreq isArm edge kt A0) usb sreq
+              (flS P win usb sreq isArm edge kt A0) kt (D + 1) A0.X).x.e.st = .drive := by
+            rw [runBK_succ', stepBKK_st]
+            exact (step_of_dec P (winS P win usb sreq isArm edge kt A0) _ y hdec).1
+          rw [hEq, hwb.1] at hdr
+          cases hdr
+      · exact hge
+    have ha := armed_after_arm P win usb sreq isArm edge kt A0 hedge hA y (s + x) harm
+      (D - (s + x + 1)) (fun j hj => by
+        rw [← flS_runBK P win usb sreq isArm edge kt A0]
+        exact hlastS (s + x + 1 + j) (by omega) (by omega))
+    rw [show s + x + 1 + (D - (s + x + 1)) = D by omega] at ha
+    exact arm_no_dec P win usb sreq isArm edge kt A0 D y ha hdec
+
+end
+
 end JLane

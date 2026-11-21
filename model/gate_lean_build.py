@@ -190,7 +190,9 @@ KEY = ("dstar", "dstar29", "dstar39", "dstar39_v2", "dstar39_st", "dstar39_hold"
        "ft_timeout_captured_T", "ready_ft_timeout_T",
        # HfreeB.lean (composition L4 hfree, 11-21): hfree discharged on a stretch by strong
        # induction -- the gap condition inside, the restart's release before
-       "hpre_after_flush", "hrel_of_gap", "hR_stretch_gap", "hR_stretch_nofree")
+       "hpre_after_flush", "hrel_of_gap", "hR_stretch_gap", "hR_stretch_nofree",
+       # HfreeB.lean (L4 hfree step 3b): an ARM writeback is its stretch's last on the bridged run
+       "runBA_succ", "stepBA_armed", "armed_after_arm", "arm_no_dec", "flS_runBK", "hrel_bridged")
 #: proof_constants.load() key -> the Lean expression that must evaluate to it (SPEC: the map)
 CONSTS = {
     "lemmaA_window": "LEMMA_A_WINDOW", "R_base": "R_BASE", "dispatch_cycles": "DISPATCH_CYCLES",
