@@ -110,9 +110,16 @@ def main():
         with open(os.path.join(gate, f), "w", encoding="utf-8", newline="\n") as fh:
             fh.write(cur)
 
+    # ⛔ 11-20: EXACTLY test/local_netlist.sh's reads, `-sv` on pe_store.v included.
+    # Without it yosys stopped at pe_store's `always_latch` (pe_icg) and this
+    # witness printed "equiv_status NEVER RAN" on every base since that latch
+    # landed; no gate runs this tool, so nothing went red.
+    SV = {"pe_store.v"}
+
     def reads(d):
-        return "\n".join("read_verilog %s" % wsl_path(os.path.join(d, f))
-                         if os.name == "nt" else "read_verilog %s" % os.path.join(d, f)
+        return "\n".join("read_verilog %s%s" % ("-sv " if f in SV else "",
+                                                 wsl_path(os.path.join(d, f))
+                                                 if os.name == "nt" else os.path.join(d, f))
                          for f in FILES)
     ys = os.path.join(out, "equiv.ys")
     with open(ys, "w", encoding="utf-8", newline="\n") as fh:
