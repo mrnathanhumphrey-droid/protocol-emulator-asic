@@ -1248,8 +1248,18 @@ def write_image(path, img) -> bytes:
     Returns the bytes written.
     """
     full = full_store(img)
+    text = "".join("%02x\n" % b for b in full)
+    # an identical file is left untouched: parallel gate lanes rebuild the same generated
+    # images, and a rewrite of the same bytes would only open a window where another lane
+    # reads a half-written file (the content -- the only thing a reader judges -- is equal)
+    try:
+        with open(path, encoding="ascii", newline="") as fh:
+            if fh.read() == text:
+                return full
+    except (OSError, UnicodeDecodeError):
+        pass
     with open(path, "w", encoding="ascii", newline="\n") as fh:
-        fh.write("".join("%02x\n" % b for b in full))
+        fh.write(text)
     return full
 
 

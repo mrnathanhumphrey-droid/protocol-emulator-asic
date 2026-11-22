@@ -75,6 +75,7 @@ import fnmatch as _fn
 import hashlib as _hl
 import json as _js
 import tempfile as _tf
+import time as _time
 
 #: ⛔⛔ THE SCRATCH-IMAGE REGISTRY, per GENERATOR (Wilson 10-19). Only a
 #: generator listed here may produce a CLOCKED image that runs without an A2
@@ -483,17 +484,76 @@ def scratch_image(generator, path, meta=None):
                          "tree" % path)
     a = os.path.abspath(path)
     mf = os.path.join(os.path.dirname(a), MANIFEST)
-    try:
-        with open(mf, encoding="utf-8") as fh:
-            m = _js.load(fh)
-    except (OSError, ValueError):
-        m = {}
-    m[os.path.normcase(a)] = dict({"generator": generator, "sha": _sha(a),
-                                   "token": run_token()},
-                                  **({"meta": dict(meta)} if meta else {}))
-    with open(mf, "w", encoding="utf-8") as fh:
-        _js.dump(m, fh, indent=1, sort_keys=True)
+    # ⛔ parallel gate lanes share this manifest: the read-modify-write holds a lock, and
+    # the new manifest replaces the old atomically (a reader never sees half a file)
+    with _ManifestLock(mf):
+        try:
+            with open(mf, encoding="utf-8") as fh:
+                m = _js.load(fh)
+        except (OSError, ValueError):
+            m = {}
+        m[os.path.normcase(a)] = dict({"generator": generator, "sha": _sha(a),
+                                       "token": run_token()},
+                                      **({"meta": dict(meta)} if meta else {}))
+        tmp = "%s.%d.tmp" % (mf, os.getpid())
+        with open(tmp, "w", encoding="utf-8") as fh:
+            _js.dump(m, fh, indent=1, sort_keys=True)
+        _replace(tmp, mf)
     return a
+
+
+class _ManifestLock:
+    """An exclusive lock on `<manifest>.lock` (msvcrt on Windows, fcntl elsewhere),
+    held across one read-modify-write of the manifest."""
+
+    def __init__(self, mf):
+        self.path = mf + ".lock"
+
+    def __enter__(self):
+        self.fh = open(self.path, "a+")
+        if os.name == "nt":
+            import msvcrt
+            t0 = _time.time()
+            while True:
+                try:
+                    self.fh.seek(0)
+                    msvcrt.locking(self.fh.fileno(), msvcrt.LK_NBLCK, 1)
+                    break
+                except OSError:
+                    if _time.time() - t0 > 60:
+                        raise SimRefused("sim_run: could not lock %s in 60 s" % self.path)
+                    _time.sleep(0.02)
+        else:
+            import fcntl
+            fcntl.flock(self.fh.fileno(), fcntl.LOCK_EX)
+        return self
+
+    def __exit__(self, *exc):
+        try:
+            if os.name == "nt":
+                import msvcrt
+                self.fh.seek(0)
+                msvcrt.locking(self.fh.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(self.fh.fileno(), fcntl.LOCK_UN)
+        finally:
+            self.fh.close()
+        return False
+
+
+def _replace(tmp, dst):
+    """os.replace, retried while a reader holds `dst` open (Windows refuses the
+    replace then); a replace that never succeeds raises."""
+    t0 = _time.time()
+    while True:
+        try:
+            os.replace(tmp, dst)
+            return
+        except PermissionError:
+            if _time.time() - t0 > 30:
+                raise
+            _time.sleep(0.02)
 
 
 def provenance(path):
