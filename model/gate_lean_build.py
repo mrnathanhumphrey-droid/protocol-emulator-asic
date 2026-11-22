@@ -586,6 +586,12 @@ def _mutant_tree(kind):
 
 
 def main() -> int:
+    # Lean's build output carries non-cp1252 characters (✔): a survived must-fire prints one, and
+    # under a cp1252 console that print crashed the gate instead of reporting it (found 11-22)
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:                                   # noqa: BLE001
+        pass
     print("Lean build audit: lean/JLane, %d published theorems, axioms within {%s}"
           % (len(KEY), ", ".join(sorted(ALLOWED))))
     probs, got = judge(LEAN)
