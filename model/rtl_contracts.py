@@ -288,12 +288,19 @@ COMPOSITION = {
                           "winA_released", "winS_eq_of_K11")},
             # closure 11-21: counting on runBK (CountBK), hnf / hfree in run coordinates
             # (HfreeR), hS handed the decision + no-flush (4a), the closure + hS = 0 (CloseBK)
+            # Wilson 11-21 (span ruling): proved in sigma form only; the certificate counts
+            # other-lane decisions by the span rule (branch_budget._decisions: span_min(m) >=
+            # K + 1 + R_z = RespSpan.wb_close_span's hspan), so wb_closeBK_K11 does not back the
+            # stamped K. Owed until the span form lands on the bridged run.
             {"step": "L4 hM / hS closure: wb_closeBK (parts 1 and 3); hS = 0 under K11 + (b')",
-             "status": "proved",
-             "theorems": ("cntBK_add", "cntBK_sparse_g", "cntBK_decOther_split",
-                          "cntBK_decAny_split", "hnf_runBK", "hfree_runBK", "hrelR_bridged",
-                          "wb_closeBK", "unarmed_in_window", "noDec_zero_K11",
-                          "wb_closeBK_K11")},
+             "status": "owed",
+             "what": "proved in sigma form (cntBK_add, cntBK_sparse_g, cntBK_decOther_split, "
+                     "cntBK_decAny_split, hnf_runBK, hfree_runBK, hrelR_bridged, wb_closeBK, "
+                     "unarmed_in_window, noDec_zero_K11, wb_closeBK_K11); the certificate's "
+                     "span form on the bridged run is owed (wb_closeBK_span, after "
+                     "RespSpan.wb_close_span). Unestablished meanwhile: the sigma + R <= gap part "
+                     "of nonarm_gap (wb_closeBK_K11's hgap; no checker computes sigma or hmul) -- "
+                     "wb_closeBK_span replaces the need for it"},
             {"step": "bridge: the armed run is a runBK run", "status": "proved",
              "theorems": ("runBA_proj", "flushOk_runBA")},
             {"step": "flush spacing (K8), proof (b)", "status": "proved",
