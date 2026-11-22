@@ -131,6 +131,12 @@ every must-fire must turn its check red, or the gate is not testing what it says
            edge; that case on runBK is owed, rtl_contracts.COMPOSITION)
   M_LC_HFREE_EDF    the check over the EDF-certified images (pair_busy, uart_tx_busy short)
                     -> check 22 red
+  check 23 ONE PRICE PER WORD (Wilson 11-22, closing the class): every pricing path -- the stamp
+           (cert_stamp._tuple), A2 (program_a2.lanes_of), lane_cert (_price) and spacing_of --
+           equals pe_isa.dispatch_delay (the RTL's wb_dly) on every word of every image. A
+           disagreement is red unless it is named in PRICE_DEBT; a PRICE_DEBT entry no longer
+           seen is red too (remove it): fail-closed both ways
+  M_LC_PRICE_BYPASS lane_cert prices from the raw delay field, not dispatch_delay -> check 23 red
   M_LC_SYMDEF_PAYLOAD SYMDEF's payload read as its delay (it is priced at the header period t,
                     Wilson 11-22, as cert_stamp and A2 price it) -> check 22 red on the
                     symbol-generator images; n/a on an ISA without OP_SYMDEF
@@ -516,6 +522,78 @@ def check_hfree(BB, LC, I, scheme="window"):
         return False, "%d writeback(s) short of hrel_of_gap: %s" % (len(rows), "; ".join(rows[:3]))
     return True, ("gap >= Rr + 3 on all %d non-ARM writebacks of %d %s-certified image runs "
                   "(slot off and 2): HfreeB.hrel_of_gap's premise" % (nwb, nimg, scheme))
+
+
+#: ⛔ TRACKED DEBT, NOT AN EXEMPTION (check 23): pricing disagreements known and owed, each
+#: (path, image, lane, opcode name) -> who owes it. Exact both ways: an unlisted disagreement is
+#: red, and an entry whose disagreement is gone is red (remove it in the commit that fixes it).
+PRICE_DEBT = {
+    # program_a2.lanes_of reads SHIFTI's whole field (296 / 552 / 808: the immediate's bits + 40);
+    # the RTL's a_dly is the low 8 bits (40). Agent 1 routes lanes_of through dispatch_delay
+    # after the a2/q16a merge (11-22), with every consumer's before / after figures.
+    **{("program_a2", n, 0, "OP_SHIFTI"): "agent 1: route lanes_of (11-22)"
+       for n in ("pair_busy.hex", "pair_tx.hex", "usbbuf_usb.hex", "usbdev_dev.hex",
+                 "usbdev_fpga.hex")},
+}
+
+
+def check_pricing(LC, I):
+    """check 23 (Wilson 11-22): every pricing path equals pe_isa.dispatch_delay on every word of
+    every image (the record's corpus). -> (ok, message)."""
+    import gen_branch_budget as GB
+    import proof_constants as PC
+    import cert_stamp as CS
+    import gate_degenerate_fields as dgf
+    a2dir = os.path.join(HERE, "a2")
+    if a2dir not in sys.path:
+        sys.path.append(a2dir)
+    import program_a2 as A2
+    name = {v: k for k, v in vars(I).items() if k.startswith("OP_") and isinstance(v, int)}
+    seen, nwords, nimg = {}, 0, 0
+    for img_name, img in GB.corpus():
+        nimg += 1
+        hdrs = {ln: I.read_header(img, ln) for ln in range(I.N_LANES)}
+        for ln in range(I.N_LANES):
+            ws = list(PC.lane_words(img, ln, I))
+            if not ws:
+                continue
+            g = LC.lane_graph(img, ln, I)
+            for w, x in ws:
+                nwords += 1
+                want = I.dispatch_delay(x, hdrs[ln])
+                got = {"cert_stamp": CS._tuple(x, hdrs[ln]["t"])[3],
+                       "spacing_of": PC.spacing_of(x, I, hdrs[ln]),
+                       "lane_cert": LC._price(g[w][0], I) if w in g else want}
+                for path, v in got.items():
+                    if v != want:
+                        seen.setdefault((path, img_name, ln, name.get(x["op"], x["op"])), (w, v, want))
+        # A2 prices the walk's actions, in the walk's order (dgf.walk), each lane's header in hand
+        raw = {}
+        for ln, h, a in dgf.walk(img):
+            raw.setdefault(ln, []).append((h, a))
+        try:
+            priced = A2.lanes_of(img)
+        except Exception as e:                                  # noqa: BLE001
+            seen[("program_a2", img_name, -1, "lanes_of raised")] = (None, repr(e)[:60], None)
+            continue
+        for ln, _h, acts in priced:
+            for (h, a), b in zip(raw.get(ln, []), acts):
+                want = I.dispatch_delay(a, h)
+                if b["delay"] != want:
+                    seen.setdefault(("program_a2", img_name, ln, name.get(a["op"], a["op"])),
+                                    (None, b["delay"], want))
+    new = sorted(k for k in seen if k not in PRICE_DEBT)
+    gone = sorted(k for k in PRICE_DEBT if k not in seen)
+    if new or gone:
+        return False, ("%s%s" % ("; ".join("%s prices %s lane %d %s at %s, dispatch_delay %s"
+                                            % (k[0], k[1], k[2], k[3], seen[k][1], seen[k][2])
+                                            for k in new[:3]),
+                                 ("; PRICE_DEBT entry no longer seen (remove it): %s" % gone)
+                                 if gone else ""))
+    return True, ("4 pricing paths equal dispatch_delay on all %d words of %d images; tracked "
+                  "debt %d: %s" % (nwords, nimg, len(PRICE_DEBT),
+                                   "; ".join("%s %s lane %d %s (%s)" % (k + (v,))
+                                             for k, v in sorted(PRICE_DEBT.items()))))
 
 
 def check_restart(BB, LC, I, late_edge=0):
@@ -1225,6 +1303,17 @@ def main():
     kills.append(("M_LC_HFREE_EDF", not k22,
                   "the gap check over the EDF-certified images (pair_busy, uart_tx_busy short): "
                   "check 22 red"))
+    # check 23: one price per word (Wilson 11-22)
+    ok23, msg23 = check_pricing(LC, I)
+    print("  check 23 %s  %s" % ("GREEN" if ok23 else "RED  ", msg23))
+    raw_price = LC._price
+    LC._price = lambda x, I: x["delay"]
+    try:
+        k23, _m = check_pricing(LC, I)
+    finally:
+        LC._price = raw_price
+    kills.append(("M_LC_PRICE_BYPASS", not k23,
+                  "lane_cert prices from the raw delay field: check 23 red"))
     # M_LC_SYMDEF_PAYLOAD (Wilson 11-22): SYMDEF's payload read as its delay turns check 22 red
     # on the symbol-generator images. Only on an ISA that has SYMDEF; there, fail-closed (no
     # SYMDEF image in the universe -> the mutant survives -> red)
@@ -1312,7 +1401,7 @@ def main():
     teeth = all(k for _n, k, _w in kills)
     green = (ok1 and not fails and ok3 and ok4 and ok5 and ok6 and ok7 and ok8 and ok9 and ok10
              and ok11 and ok12 and ok13 and ok14 and ok15 and ok16 and ok17 and ok18 and ok19
-             and ok20 and ok21 and ok22)
+             and ok20 and ok21 and ok22 and ok23)
     verdict = "PASSED" if (green and teeth) else ("FAILED (must-fire survived)" if not teeth
                                                    else "FAILED")
     print("GATE lane-cert: %s" % verdict)
