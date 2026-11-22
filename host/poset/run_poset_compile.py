@@ -636,125 +636,178 @@ def c15():
     return probs
 
 
-def judge():
-    probs = []
-    # C1
-    b, leads = RG.spi(1)
-    ev = G.extract(*b.trace())
-    recs = G.infer(ev, [(key("Fall", 3), "|>", key("Rise", 1))], HZ)
-    res = bytes(V1T.IMAGES["spi"]())
-    text = E2.emit2(res, recs, HZ)
-    try:
-        r = C.compile_spec(text, seed=7)
-    except C.Refused as e:
-        probs.append("C1 refused: %s" % e)
-        r = None
-    if r:
-        import run_pit_rt as RT
-        ref = bytes(RT.emulation(pit_emit.parse(pit_emit.emit(res, HZ)), random.Random(7))[0])
-        if r["image"] != ref:
-            probs.append("C1 image differs from run_pit_rt.emulation's (a second lowering?)")
-        if r["width"] != 1:
-            probs.append("C1 width %d, expected 1" % r["width"])
-        if not 0 < r["words"] <= C.N_WORDS:
-            probs.append("C1 words used %d, outside 1..%d" % (r["words"], C.N_WORDS))
-        win = [p for p in r["checkset"] if p["pred"] == "WINDOW"]
-        if len(win) != 1 or (win[0]["lo_cycles"], win[0]["hi_cycles"]) != (min(leads), max(leads)):
-            probs.append("C1 window %s, the golden bus drew %d..%d cycles"
-                         % ([(p["lo_cycles"], p["hi_cycles"]) for p in win], min(leads), max(leads)))
-        # the certified fields must BE the certificate (recomputed here from model/branch_budget);
-        # every other field claims nothing (OWED / UNCERTIFIED / not applicable)
-        import compile as CC
-        if r["cert"].get("A2") != CC.a2_line(r["image"]):
-            probs.append("C1 cert A2 is not the certificate's: %r" % r["cert"].get("A2"))
-        if r["cert"].get("branch_budget") != CC.branch_budget_line(r["image"]):
-            probs.append("C1 cert branch_budget is not the certificate's: %r"
-                         % r["cert"].get("branch_budget"))
-        # J floor: the recorded lanes must re-assemble to the image, and J_floor must be
-        # compute_j on ALL of them (recomputed here, unmutated)
-        import pe_asm
-        lanes, hdr, a, kw = r["lowered"]
-        if bytes(pe_asm.assemble(lanes, hdr, *a, **kw)) != r["image"]:
-            probs.append("C1 the recorded lowered lanes do not re-assemble to the image")
-        import cert_stamp as CS
-        st_img, st_lanes = CS.stamp(r["image"]), CS.stamp_lanes(lanes)
-        if st_img != st_lanes:
-            probs.append("C1 the image's stamp %s differs from compute_j on the lowered lanes %s"
-                         % (st_img, st_lanes))
-        if r["stamp"] != st_img or r["cert"].get("J_floor") != CS.line(st_img):
-            probs.append("C1 cert J_floor %r / stamp %s, the image's stamp is %s"
-                         % (r["cert"].get("J_floor"), r["stamp"], st_img))
-        rest = {a: v for a, v in r["cert"].items()
-                if a not in ("usb_coresident", "A2", "branch_budget", "J_floor")}
-        if not all(v.startswith(("OWED", "UNCERTIFIED", "not applicable")) for v in rest.values()):
-            probs.append("C1 cert claims more than the skeleton does: %s" % r["cert"])
-        if r["cert"].get("usb_coresident") != "not applicable (no USB receive)":
-            probs.append("C1 SPI image: usb_coresident %r" % r["cert"].get("usb_coresident"))
-    probs += c10()
-    probs += c11()
-    probs += c12()
-    probs += c13()
-    probs += c14()
-    probs += c15()
-    # C8: POSET_SPEC.md's generated passages match the constants file
-    import gen_spec_doc
-    probs += ["C8 %s" % p for p in gen_spec_doc.stale()]
-    # C7: the USB co-resident threshold (Wilson 11-12, option (i)), on images built by pe_isa
-    k = C.PC.load()
-    lim = k["coresident_usb"]
-    if k["coresident_min_d"] > lim:
-        probs.append("C7 coresident_usb %d no longer implies coresident_min_d %d"
-                     % (lim, k["coresident_min_d"]))
-    for usb, d, want in ((True, lim - 1, "refused"), (True, lim, "checked"), (False, lim - 1, "n/a")):
+#: the must-fire runs' section order (judge(first_red=True)): the static checks first, the
+#: slot-off/on C13 windows last (11-22: ~140 s of each ~150 s judge)
+FAST_FIRST = ("C2", "C3", "C4", "C5", "C6", "C8", "C7", "C9", "C1", "C12", "C14", "C15",
+              "C10", "C11", "C13")
+
+
+def judge(first_red=False):
+    """(problems, C1's compile result). `first_red` (the must-fire runs, 11-22): the
+    sections cheapest first, stopping at the first red one -- a mutant is killed by any red
+    section, and one that survives still runs every section. The gate's own run
+    (first_red=False) runs every section in the order it always has."""
+    c1_out = {"r": None}
+
+    def s_c1():
+        probs = []
+        # C1
+        b, leads = RG.spi(1)
+        ev = G.extract(*b.trace())
+        recs = G.infer(ev, [(key("Fall", 3), "|>", key("Rise", 1))], HZ)
+        res = bytes(V1T.IMAGES["spi"]())
+        text = E2.emit2(res, recs, HZ)
         try:
-            _u, line = C.target_check(usb_image(d, usb))
-            got = "checked" if line.startswith("checked") and str(lim) in line else \
-                  "n/a" if line.startswith("not applicable") else line
+            r = C.compile_spec(text, seed=7)
         except C.Refused as e:
-            m = str(e)
-            got = "refused" if (re.search(r"lane 1 word \d+: spacing %d < %d" % (d, lim), m)
-                                and "cannot share an image" in m) else "refused otherwise: %s" % m
-        if got != want:
-            probs.append("C7 %s image, co-resident lane at d=%d: %s, expected %s"
-                         % ("USB" if usb else "non-USB", d, got, want))
-    # C9: a co-resident lane whose fast section is reached only by a branch, past its first REARM
-    img, fast_word = multisection_image(lim)
-    first_rearm = [i for i, x in enumerate(C.I.lane_programs(img)[1][1])][-1]
-    if fast_word <= C.I.read_header(img, 1)["base_word"] + first_rearm:
-        probs.append("C9 the fast word is not past lane 1's first REARM (the case is void)")
-    try:
-        C.target_check(img)
-        probs.append("C9 multi-section image accepted: lane 1 word %d (spacing %d) not checked"
-                     % (fast_word, lim - 1))
-    except C.Refused as e:
-        if ("lane 1 word %d: spacing %d < %d" % (fast_word, lim - 1, lim)) not in str(e):
-            probs.append("C9 multi-section image refused, but not for lane 1 word %d: %s"
-                         % (fast_word, e))
-    # C2
-    ok, msg = refused_with(body("pattern Rise(uio1) -> Rise(uio2);", "pattern Rise(uio2) -> Rise(uio1);"),
-                           "cycle")
-    if not ok:
-        probs.append("C2 cycle not refused by name: %s" % msg)
-    # C3
-    six = ["pattern Rise(uio%d) -> Fall(uio%d);" % (w, w) for w in range(6)]
-    ok, msg = refused_with(body(*six), "Dilworth width 6 > 5")
-    if not ok:
-        probs.append("C3 width 6 not refused by name: %s" % msg)
-    # C4
-    nodes, edges = ["A", "B", "C", "D", "E"], {("A", "B"), ("D", "B"), ("B", "C"), ("B", "E")}
-    w = C.dilworth_width(nodes, edges)
-    if w != 2:
-        probs.append("C4 Dilworth width %d on A,D < B < C,E; expected 2" % w)
-    # C5
-    ok, msg = refused_with(body("pattern Rise(uio1) or Fall(uio1);"), "not in the compiler skeleton")
-    if not ok:
-        probs.append("C5 compound pattern not refused by name: %s" % msg)
-    # C6
-    t = pit_emit.emit(bytes(V1T.IMAGES["refused"]()), HZ)
-    ok, msg = refused_with(t, "lowering (run_pit_rt.emulation)")
-    if not ok:
-        probs.append("C6 non-emulable v1 spec not refused through the lowering: %s" % msg)
-    return probs, r
+            probs.append("C1 refused: %s" % e)
+            r = None
+        if r:
+            import run_pit_rt as RT
+            ref = bytes(RT.emulation(pit_emit.parse(pit_emit.emit(res, HZ)), random.Random(7))[0])
+            if r["image"] != ref:
+                probs.append("C1 image differs from run_pit_rt.emulation's (a second lowering?)")
+            if r["width"] != 1:
+                probs.append("C1 width %d, expected 1" % r["width"])
+            if not 0 < r["words"] <= C.N_WORDS:
+                probs.append("C1 words used %d, outside 1..%d" % (r["words"], C.N_WORDS))
+            win = [p for p in r["checkset"] if p["pred"] == "WINDOW"]
+            if len(win) != 1 or (win[0]["lo_cycles"], win[0]["hi_cycles"]) != (min(leads), max(leads)):
+                probs.append("C1 window %s, the golden bus drew %d..%d cycles"
+                             % ([(p["lo_cycles"], p["hi_cycles"]) for p in win], min(leads), max(leads)))
+            # the certified fields must BE the certificate (recomputed here from model/branch_budget);
+            # every other field claims nothing (OWED / UNCERTIFIED / not applicable)
+            import compile as CC
+            if r["cert"].get("A2") != CC.a2_line(r["image"]):
+                probs.append("C1 cert A2 is not the certificate's: %r" % r["cert"].get("A2"))
+            if r["cert"].get("branch_budget") != CC.branch_budget_line(r["image"]):
+                probs.append("C1 cert branch_budget is not the certificate's: %r"
+                             % r["cert"].get("branch_budget"))
+            # J floor: the recorded lanes must re-assemble to the image, and J_floor must be
+            # compute_j on ALL of them (recomputed here, unmutated)
+            import pe_asm
+            lanes, hdr, a, kw = r["lowered"]
+            if bytes(pe_asm.assemble(lanes, hdr, *a, **kw)) != r["image"]:
+                probs.append("C1 the recorded lowered lanes do not re-assemble to the image")
+            import cert_stamp as CS
+            st_img, st_lanes = CS.stamp(r["image"]), CS.stamp_lanes(lanes)
+            if st_img != st_lanes:
+                probs.append("C1 the image's stamp %s differs from compute_j on the lowered lanes %s"
+                             % (st_img, st_lanes))
+            if r["stamp"] != st_img or r["cert"].get("J_floor") != CS.line(st_img):
+                probs.append("C1 cert J_floor %r / stamp %s, the image's stamp is %s"
+                             % (r["cert"].get("J_floor"), r["stamp"], st_img))
+            rest = {a: v for a, v in r["cert"].items()
+                    if a not in ("usb_coresident", "A2", "branch_budget", "J_floor")}
+            if not all(v.startswith(("OWED", "UNCERTIFIED", "not applicable")) for v in rest.values()):
+                probs.append("C1 cert claims more than the skeleton does: %s" % r["cert"])
+            if r["cert"].get("usb_coresident") != "not applicable (no USB receive)":
+                probs.append("C1 SPI image: usb_coresident %r" % r["cert"].get("usb_coresident"))
+        c1_out["r"] = r
+        return probs
+
+    def s_c8():
+        probs = []
+        # C8: POSET_SPEC.md's generated passages match the constants file
+        import gen_spec_doc
+        probs += ["C8 %s" % p for p in gen_spec_doc.stale()]
+        return probs
+
+    def s_c7():
+        probs = []
+        k = C.PC.load()
+        lim = k["coresident_usb"]
+        # C7: the USB co-resident threshold (Wilson 11-12, option (i)), on images built by pe_isa
+        if k["coresident_min_d"] > lim:
+            probs.append("C7 coresident_usb %d no longer implies coresident_min_d %d"
+                         % (lim, k["coresident_min_d"]))
+        for usb, d, want in ((True, lim - 1, "refused"), (True, lim, "checked"), (False, lim - 1, "n/a")):
+            try:
+                _u, line = C.target_check(usb_image(d, usb))
+                got = "checked" if line.startswith("checked") and str(lim) in line else \
+                      "n/a" if line.startswith("not applicable") else line
+            except C.Refused as e:
+                m = str(e)
+                got = "refused" if (re.search(r"lane 1 word \d+: spacing %d < %d" % (d, lim), m)
+                                    and "cannot share an image" in m) else "refused otherwise: %s" % m
+            if got != want:
+                probs.append("C7 %s image, co-resident lane at d=%d: %s, expected %s"
+                             % ("USB" if usb else "non-USB", d, got, want))
+        return probs
+
+    def s_c9():
+        probs = []
+        lim = C.PC.load()["coresident_usb"]
+        # C9: a co-resident lane whose fast section is reached only by a branch, past its first REARM
+        img, fast_word = multisection_image(lim)
+        first_rearm = [i for i, x in enumerate(C.I.lane_programs(img)[1][1])][-1]
+        if fast_word <= C.I.read_header(img, 1)["base_word"] + first_rearm:
+            probs.append("C9 the fast word is not past lane 1's first REARM (the case is void)")
+        try:
+            C.target_check(img)
+            probs.append("C9 multi-section image accepted: lane 1 word %d (spacing %d) not checked"
+                         % (fast_word, lim - 1))
+        except C.Refused as e:
+            if ("lane 1 word %d: spacing %d < %d" % (fast_word, lim - 1, lim)) not in str(e):
+                probs.append("C9 multi-section image refused, but not for lane 1 word %d: %s"
+                             % (fast_word, e))
+        return probs
+
+    def s_c2():
+        probs = []
+        # C2
+        ok, msg = refused_with(body("pattern Rise(uio1) -> Rise(uio2);", "pattern Rise(uio2) -> Rise(uio1);"),
+                               "cycle")
+        if not ok:
+            probs.append("C2 cycle not refused by name: %s" % msg)
+        return probs
+
+    def s_c3():
+        probs = []
+        # C3
+        six = ["pattern Rise(uio%d) -> Fall(uio%d);" % (w, w) for w in range(6)]
+        ok, msg = refused_with(body(*six), "Dilworth width 6 > 5")
+        if not ok:
+            probs.append("C3 width 6 not refused by name: %s" % msg)
+        return probs
+
+    def s_c4():
+        probs = []
+        # C4
+        nodes, edges = ["A", "B", "C", "D", "E"], {("A", "B"), ("D", "B"), ("B", "C"), ("B", "E")}
+        w = C.dilworth_width(nodes, edges)
+        if w != 2:
+            probs.append("C4 Dilworth width %d on A,D < B < C,E; expected 2" % w)
+        return probs
+
+    def s_c5():
+        probs = []
+        # C5
+        ok, msg = refused_with(body("pattern Rise(uio1) or Fall(uio1);"), "not in the compiler skeleton")
+        if not ok:
+            probs.append("C5 compound pattern not refused by name: %s" % msg)
+        return probs
+
+    def s_c6():
+        probs = []
+        # C6
+        t = pit_emit.emit(bytes(V1T.IMAGES["refused"]()), HZ)
+        ok, msg = refused_with(t, "lowering (run_pit_rt.emulation)")
+        if not ok:
+            probs.append("C6 non-emulable v1 spec not refused through the lowering: %s" % msg)
+        return probs
+
+    sections = [("C1", s_c1), ("C10", c10), ("C11", c11), ("C12", c12), ("C13", c13),
+                ("C14", c14), ("C15", c15), ("C8", s_c8), ("C7", s_c7), ("C9", s_c9),
+                ("C2", s_c2), ("C3", s_c3), ("C4", s_c4), ("C5", s_c5), ("C6", s_c6)]
+    if first_red:
+        sections.sort(key=lambda s: FAST_FIRST.index(s[0]))
+    probs = []
+    for _name, f in sections:
+        probs += f()
+        if first_red and probs:
+            break
+    return probs, c1_out["r"]
 
 
 def main() -> int:
@@ -781,7 +834,7 @@ def main() -> int:
         # IN-PROCESS, through the same `judge` (gate_meta's stub hides the mutants too)
         C.MUT = m
         try:
-            mp, _ = judge()
+            mp, _ = judge(first_red=True)
         except Exception as e:
             mp = ["crash: %r" % e]
         finally:
