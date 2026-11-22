@@ -342,8 +342,10 @@ COMPOSITION = {
     # Wilson 11-21 (usbdev ruling, top priority): the two shipped images have a FALLTHROUGH ARM
     # on the USB lane, so their slot-off run is run3T -> runF (flushes, disarm cycles), not run;
     # wb_close_span does not reach them
+    # proved 11-21 (Nate's go): backs the slot-off stamps; a slot-on figure for these images
+    # rests on slot_on_composition's runBK flush lemma (owed) -- agent 1 to confirm which run ships
     "usbdev_flush_stamps": {
-        "status": "owed",
+        "status": "proved",
         "steps": [
             {"step": "usbdev_dev.hex / usbdev_fpga.hex: hM from the span rule on the flush run",
              "status": "proved",
