@@ -137,6 +137,8 @@ every must-fire must turn its check red, or the gate is not testing what it says
            disagreement is red unless it is named in PRICE_DEBT; a PRICE_DEBT entry no longer
            seen is red too (remove it): fail-closed both ways
   M_LC_PRICE_BYPASS lane_cert prices from the raw delay field, not dispatch_delay -> check 23 red
+  M_LC_PRICE_DEBT_STALE a PRICE_DEBT entry nothing disagrees with (a fixed path left listed)
+                    -> check 23 red
   M_LC_SYMDEF_PAYLOAD SYMDEF's payload read as its delay (it is priced at the header period t,
                     Wilson 11-22, as cert_stamp and A2 price it) -> check 22 red on the
                     symbol-generator images; n/a on an ISA without OP_SYMDEF
@@ -1314,6 +1316,14 @@ def main():
         LC._price = raw_price
     kills.append(("M_LC_PRICE_BYPASS", not k23,
                   "lane_cert prices from the raw delay field: check 23 red"))
+    planted = ("lane_cert", "planted_by_gate.hex", 0, "OP_LEVEL")
+    PRICE_DEBT[planted] = "must-fire: a debt entry nothing disagrees with"
+    try:
+        k23s, _m = check_pricing(LC, I)
+    finally:
+        del PRICE_DEBT[planted]
+    kills.append(("M_LC_PRICE_DEBT_STALE", not k23s,
+                  "a PRICE_DEBT entry no longer seen: check 23 red"))
     # M_LC_SYMDEF_PAYLOAD (Wilson 11-22): SYMDEF's payload read as its delay turns check 22 red
     # on the symbol-generator images. Only on an ISA that has SYMDEF; there, fail-closed (no
     # SYMDEF image in the universe -> the mutant survives -> red)
