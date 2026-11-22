@@ -350,9 +350,8 @@ COMPOSITION = {
              "theorems": ("relT_le_fl", "ts_monoF_fl", "ts_constF", "idle3F", "prio_respF",
                           "prio_respT")},
             {"step": "hpri on run3T (prio_respT's: the USB lane wins when ready, head valid)",
-             "status": "owed",
-             "what": "derived from (b') + EDF only on run (EdfB.prio_resp_edf); on the flush run "
-                     "it is a premise -- prio_resp_edf on runF, lifted to run3T, owed"},
+             "status": "proved",
+             "theorems": ("dec_tsF1", "hpri_bF", "prio_resp_edfF", "prio_resp_edfT")},
             {"step": "the flush lemma for hspan on runF (shared with slot_on_composition's)",
              "status": "owed",
              "what": "span_min => hspan under flushes. On runF the view's release never drops "
