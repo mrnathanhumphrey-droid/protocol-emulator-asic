@@ -226,7 +226,9 @@ KEY = ("dstar", "dstar29", "dstar39", "dstar39_v2", "dstar39_st", "dstar39_hold"
        # UsbOn.lean (K13, Wilson 11-22): the slot yields to lane 0 only once usb_on is set
        "usbFirst_off", "runBU_on", "runBU_off", "wfBU_run", "ordBU_run", "heldBU_step",
        # ReadyBK.lean (hRdy, 11-22): the ready theorems on the flush run, stretch by stretch
-       "stretch_lift", "ready_pc1_plain_BK", "ready_pc2_plain_BK", "ready_pc2_arm_BK", "ready_pc1_spare_BK", "ready_pc2_plain_spare_BK", "ready_pc2_arm_spare_BK")
+       "stretch_lift", "ready_pc1_plain_BK", "ready_pc2_plain_BK", "ready_pc2_arm_BK", "ready_pc1_spare_BK", "ready_pc2_plain_spare_BK", "ready_pc2_arm_spare_BK",
+       # RestartZS.lean (hZS, 11-22): the restart's start conditions derived from check 20's margins
+       "start_rel_runBK", "hZS0_runBK", "hHS0_runBK")
 #: proof_constants.load() key -> the Lean expression that must evaluate to it (SPEC: the map)
 CONSTS = {
     "lemmaA_window": "LEMMA_A_WINDOW", "R_base": "R_BASE", "dispatch_cycles": "DISPATCH_CYCLES",
@@ -394,6 +396,28 @@ PREMISES = {
         "shape": ("hA", "h0a", "hwa"),
     },
 }
+#: RestartZS (hZS, 11-22): the stretch after y's last flush (hft, hfl, hedge, hlast: shape) and
+#: check 20's margins at its first retirement (applies restart_margin); conclusions Pi-shaped
+PREMISES.update({
+    "start_rel_runBK": {
+        "applies": {},
+        "contract": {"slot_requester": ("hok",), "engine_wf": ("hI",), "scan_ok": ("hF",)},
+        "shape": ("hft", "hfl", "hedge", "hlast"),
+        "anon": 1,
+    },
+    "hZS0_runBK": {
+        "applies": {"restart_margin": ("hzm",)},
+        "contract": {"slot_requester": ("hok",), "engine_wf": ("hI",), "scan_ok": ("hF",)},
+        "shape": ("hft", "hfl", "hedge", "hlast"),
+        "anon": 4,
+    },
+    "hHS0_runBK": {
+        "applies": {"restart_margin": ("hhm",)},
+        "contract": {"slot_requester": ("hok",), "engine_wf": ("hI",), "scan_ok": ("hF",)},
+        "shape": ("hft", "hfl", "hedge", "hlast"),
+        "anon": 4,
+    },
+})
 #: the M_LEAN_PREMISE_UNLISTED plant: (file, theorem, the signature text it extends, the binder)
 #: ⚠ planted in a theorem NOTHING calls: a planted premise in a theorem with a caller breaks the
 #: caller's build, so check 6 never runs (moved 11-22 from ready_pc1_plain_T, which ReadyBK now

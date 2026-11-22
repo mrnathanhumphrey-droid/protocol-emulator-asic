@@ -350,8 +350,12 @@ COMPOSITION = {
              "theorems": ("stretch_lift", "ready_pc1_plain_BK", "ready_pc2_plain_BK",
                           "ready_pc2_arm_BK", "ready_pc1_spare_BK", "ready_pc2_plain_spare_BK",
                           "ready_pc2_arm_spare_BK")},
-            {"step": "hZS", "status": "owed",
-             "what": "step 5: hZS0 established, not only gate-checked (lane-cert check 20)"},
+            # proved 11-22 (RestartZS, Nate's go): hZS0 / hHS0 derived on the flush run from
+            # check 20's margins at the stretch's first retirement (the margins stay the
+            # checker's, applies restart_margin): the release after the flush is never below the
+            # stretch start less 2 (restart_runBK + ts_monoT)
+            {"step": "hZS", "status": "proved",
+             "theorems": ("start_rel_runBK", "hZS0_runBK", "hHS0_runBK")},
         ]},
     # Wilson 11-21 (usbdev ruling, top priority): the two shipped images have a FALLTHROUGH ARM
     # on the USB lane, so their slot-off run is run3T -> runF (flushes, disarm cycles), not run;
