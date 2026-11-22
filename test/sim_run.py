@@ -176,6 +176,13 @@ SCRATCH_GENERATORS: dict = {
                " judged by the waiter's edges against the poster's on tb_pair,"
                " not by the A2 gap",
         "v3": {"no_v3_layer": "test/tb_pair.v"}},
+    "run_slotbuf": {
+        "script": "test/run_slotbuf.py", "pattern": "slotbuf_*.hex",
+        "clocked": True,
+        "why": "the slot buffer, piece 2 (Wilson 11-21): contention images for the"
+               " slot requester's contracts on tb_pair, judged by pe_engine's SLOT"
+               " assertions and their must-fires, not by the A2 gap",
+        "v3": {"no_v3_layer": "test/tb_pair.v"}},
     "run_drive_sample": {
         "script": "test/run_drive_sample.py", "pattern": "ds_*.hex",
         "clocked": True,

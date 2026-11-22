@@ -30,6 +30,21 @@ PENDING = {
     # (retired 11-14: Step.br1's branch-1 anchor now quotes the batch's pf_q line -- item 3)
 }
 
+#: Wilson 11-22 (slot buffer piece 2, ruling 2): the port lines Step.lean quotes are rewritten
+#: by the slot buffer; agent 2 re-anchors them to `portNextB` at piece 5. While these -- and ONLY
+#: these -- are missing, the gate reads STALE (model/stale_records.py), not PASSED.
+STALE_ANCHORS = (
+    "if (pf_v_q && l_live[pf_q] && !l_actv[hix[pf_q]] && !ft_flush[pf_q]) begin",
+    "end else if (l_live[prr] && want_fetch(prr) && !ft_flush[prr]) begin",
+)
+GATE = "model/gate_lean_anchors.py"
+
+
+def _stale_records():
+    sys.path.insert(0, HERE)
+    import stale_records
+    return stale_records
+
 
 def _norm(t):
     return re.sub(r"\s+", " ", t).strip()
@@ -83,6 +98,30 @@ def main():
     for name, killed, what in kills:
         print("  must-fire %-14s %s  %s" % (name, "RED (killed)" if killed else "SURVIVED", what))
     teeth = all(k for _n2, k, _w in kills)
+    # the STALE scope: only the declared anchors are excused, never a planted one
+    SR = _stale_records()
+    raw = sorted(set(_norm(m.split(" ", 1)[1]) for m in missing))
+    st_list = [_norm(a) for a in STALE_ANCHORS]
+    sc_ok, _l = SR.anchor_stale(GATE, "lean-anchors", st_list + ["planted 0xDEAD"], st_list)
+    kills = [("M_LA_STALE_SCOPE", not sc_ok, "a missing anchor off the stale list is excused")]
+    for name, killed, what in kills:
+        print("  must-fire %-14s %s  %s" % (name, "RED (killed)" if killed else "SURVIVED", what))
+    teeth = teeth and not sc_ok
+    stale_line = None
+    if missing and not bad_pending and teeth:
+        st_ok, why = SR.anchor_stale(GATE, "lean-anchors", raw, st_list)
+        if st_ok:
+            stale_line = why
+        else:
+            print("  *** %s" % why)
+    elif not missing:
+        back = [a for a in st_list if a in _norm(rtl)]
+        if back:
+            print("  *** STALE_ANCHORS entry back in the RTL (retire it): %s" % back[0])
+            ok = False
+    if stale_line:
+        print(stale_line)
+        return 0
     verdict = "PASSED" if ok and teeth else ("FAILED (must-fire survived)" if not teeth else "FAILED")
     print("GATE lean-anchors: %s" % verdict)
     return 0 if verdict == "PASSED" else 1

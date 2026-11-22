@@ -332,6 +332,14 @@ integer p4_shadow [0:15];   // l_actv as of the previous edge
 integer p4_wb, p4_lane, p4_pcap, p4_inflight;
 integer p4_fails, p4_checks, p4_worst, p4_fl_max, p4_k, p4_j;
 integer p4_fell, p4_rose, p4_nslot, p4_cyc, p4_retire;
+// P1 RESTATED (Wilson 11-22, ruling 3: the slot buffer) -- two clauses:
+//   a BASE REFILL episode fills exactly one slot (head or spare), as before;
+//   a SLOT FETCH fills exactly one PLACE (the spare or the lane's buffer).
+// A buffered word moving into its empty spare (the load) is a move, not a
+// fill: it is netted out of the slots that rose. The pre-batch engine
+// (PE_EQUIV_PRE) has no buffer and no slot fetch: all three stay 0 there.
+integer p4_brose, p4_nload, p4_slotf, p4_slots, p4_sfetch, p4_sbuf;
+reg [15:0] p4_bprev;
 
 /* ⭐⭐ R5 -- WHERE THE REFILL-BEARING DISPATCHES ACTUALLY ARE.
  *
@@ -383,6 +391,7 @@ initial begin
   p4_wb = 0;  p4_lane = 0;  p4_pcap = 0;  p4_inflight = 0;
   p4_fails = 0;  p4_checks = 0;  p4_worst = 0;  p4_fl_max = 0;
   p4_cyc = 0;  p4_retire = 0;
+  p4_brose = 0;  p4_nload = 0;  p4_slotf = 0;  p4_bprev = 16'd0;  p4_sfetch = 0;  p4_sbuf = 0;
   p5_last = -1;  p5_min = 1000000;  p5_n = 0;  p5_mid = 0;  p5_lat_max = 0;
   p5_spec = 0;  p5_lmin = 1000000;
   for (p4_k = 0; p4_k < 8; p4_k = p4_k + 1) p5_llast[p4_k] = -1;
@@ -393,6 +402,7 @@ always @(posedge dut.clk) begin
   if (dut.rst_n !== 1'b1) begin
     for (p4_k = 0; p4_k < 16; p4_k = p4_k + 1) p4_shadow[p4_k] = 0;
     p4_wb = 0;  p4_pcap = 0;  p4_inflight = 0;
+    p4_nload = 0;  p4_slotf = 0;  p4_bprev = 16'd0;
   end else begin
     p4_nslot = dut.u_eng.NSLOT;
     // ---- what changed at the PREVIOUS edge -----------------------------
@@ -403,6 +413,14 @@ always @(posedge dut.clk) begin
       if (p4_shadow[p4_j] === 0 && dut.u_eng.l_actv[p4_j] === 1'b1)
         p4_rose = p4_rose + 1;
     end
+
+    p4_brose = 0;
+`ifndef PE_EQUIV_PRE
+    for (p4_j = 0; p4_j < 16; p4_j = p4_j + 1)
+      if (p4_j < dut.u_eng.N_LANES && p4_bprev[p4_j] == 1'b0 && dut.u_eng.l_bufv[p4_j] === 1'b1)
+        p4_brose = p4_brose + 1;
+`endif
+    p4_slots = p4_rose - p4_nload;      // slots the PORT filled (loads netted out)
 
     // ---- P10: a dispatch leaves AT MOST ONE slot to be refilled --------
     if (p4_wb) begin
@@ -471,13 +489,22 @@ always @(posedge dut.clk) begin
     end
 
     // ---- P1: one refill in flight, and one slot filled per episode -----
-    if (p4_pcap) begin
-      if (p4_rose !== 1) begin
-        $display("*** FAIL clocked_conform[R4b]: a refill episode completed and filled %0d slot(s), not exactly 1. Theorem 3's P1 says \"One prefetch FSM, one refill in flight engine-wide. A single `pst`/`pl` pair; there is no per-lane fetch engine\" -- an episode satisfying two slots is a second fetch engine inside one FSM, and L_REFILL = 4 per slot stops being the cost", p4_rose);
+    if (p4_pcap && p4_slotf) begin
+      // clause 2: a slot fetch fills exactly one place, spare or buffer
+      p4_sfetch = p4_sfetch + 1;
+      if (p4_brose > 0) p4_sbuf = p4_sbuf + 1;
+      if (p4_slots + p4_brose !== 1) begin
+        $display("*** FAIL clocked_conform[R4b]: a slot fetch completed and filled %0d place(s) (%0d slot, %0d buffer), not exactly 1. P1's second clause (Wilson 11-22): a slot fetch fills exactly one place, the spare or the lane's buffer, by capture order -- a fetch filing twice is a second fetch engine, one filing nothing is a lost word", p4_slots + p4_brose, p4_slots, p4_brose);
         p4_fails = p4_fails + 1;
       end
-    end else if (p4_rose > 0) begin
-      $display("*** FAIL clocked_conform[R4b]: %0d slot(s) became valid with no refill episode completing. Every fill must come from the one prefetch FSM (P1); a fill from anywhere else is port work D* never charged for", p4_rose);
+    end else if (p4_pcap) begin
+      // clause 1: a base refill fills exactly one slot, and never the buffer
+      if (p4_slots !== 1 || p4_brose !== 0) begin
+        $display("*** FAIL clocked_conform[R4b]: a refill episode completed and filled %0d slot(s) (and %0d buffer), not exactly 1 slot. Theorem 3's P1 says \"One prefetch FSM, one refill in flight engine-wide. A single `pst`/`pl` pair; there is no per-lane fetch engine\" -- an episode satisfying two slots is a second fetch engine inside one FSM, and L_REFILL = 4 per slot stops being the cost", p4_slots, p4_brose);
+        p4_fails = p4_fails + 1;
+      end
+    end else if (p4_slots > 0 || p4_brose > 0) begin
+      $display("*** FAIL clocked_conform[R4b]: %0d slot(s) and %0d buffer(s) became valid with no refill episode completing (loads netted out). Every fill must come from the one prefetch FSM (P1); a fill from anywhere else is port work D* never charged for", p4_slots, p4_brose);
       p4_fails = p4_fails + 1;
     end
     if (p4_inflight > p4_fl_max) p4_fl_max = p4_inflight;
@@ -487,6 +514,15 @@ always @(posedge dut.clk) begin
     end
 
     // ---- sample for the next edge --------------------------------------
+`ifndef PE_EQUIV_PRE
+    p4_bprev = 16'd0;  p4_nload = 0;
+    for (p4_j = 0; p4_j < 16; p4_j = p4_j + 1)
+      if (p4_j < dut.u_eng.N_LANES) begin
+        p4_bprev[p4_j] = (dut.u_eng.l_bufv[p4_j] === 1'b1);
+        if (dut.u_eng.ck_ldv[p4_j] === 1'b1) p4_nload = p4_nload + 1;
+      end
+    p4_slotf = (dut.u_eng.pst === 3'd3 && dut.u_eng.ck_slotf === 1'b1) ? 1 : 0;
+`endif
     for (p4_j = 0; p4_j < p4_nslot; p4_j = p4_j + 1)
       p4_shadow[p4_j] = (dut.u_eng.l_actv[p4_j] === 1'b1) ? 1 : 0;
     // a dispatch is a WRITEBACK: that is where a slot is consumed and freed
@@ -1993,7 +2029,7 @@ final begin
       if (p4_fails != 0)
         $display("*** FAIL clocked_conform[R4]: %0d premise violation(s) over %0d dispatch(es)", p4_fails, p4_checks);
       else
-        $display("  clocked_conform[R4]: ok -- %0d dispatch(es), worst %0d slot(s) left to refill, max %0d refill(s) in flight", p4_checks, p4_worst, p4_fl_max);
+        $display("  clocked_conform[R4]: ok -- %0d dispatch(es), worst %0d slot(s) left to refill, max %0d refill(s) in flight, %0d slot fetch(es) (%0d into a buffer)", p4_checks, p4_worst, p4_fl_max, p4_sfetch, p4_sbuf);
       if (p5_mid != 0)
         $display("*** FAIL clocked_conform[R5]: %0d non-retiring clocked dispatch(es) were refill-bearing", p5_mid);
       // ⭐ R5 IS A MEASUREMENT, REPORTED WITHOUT A VERDICT on the spacing:

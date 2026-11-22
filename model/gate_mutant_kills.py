@@ -138,6 +138,12 @@ KILLERS = {
     "M_FT_SCAN_RACE": "test/run_arm2.py",        # A4 the FT edge on the selecting cycle
     "M_FT_NO_PKILL": "test/run_arm2.py",         # A4-K5 the stale refill filed after the flush
     "M_FT_REFLUSH": "test/run_arm2.py",          # A4-K8 a second flush at f + 1 (K8's check)
+    # the slot buffer, piece 2 (Wilson 11-21): pe_engine's SLOT assertions
+    "M_SLOT_RAISE_LATE": "test/run_slotbuf.py", "M_SLOT_LIFO": "test/run_slotbuf.py",
+    "M_SLOT_OVER_USB": "test/run_slotbuf.py", "M_SLOT_BELOW_BR1": "test/run_slotbuf.py",
+    "M_SLOT_YIELD_UNGATED": "test/run_slotbuf.py", "M_SLOT_BEFORE_PRIME": "test/run_slotbuf.py",
+    "M_SLOT_FILE_NONE": "test/run_slotbuf.py",
+    "M_SLOT_PAST_NPF": "test/run_slotbuf.py", "M_SLOT_NOMASK": "test/run_slotbuf.py",
     "M_SG_NOSPARE": "test/run_symgen.py",        # the spare codes read as HOLD: nrzi, biphase
     "M_FLAG_NOGATE": "test/run_flags.py",        # WAIT does not hold the lane
     "M_FLAG_NOCONSUME": "test/run_flags.py",     # WAIT never consumes its count

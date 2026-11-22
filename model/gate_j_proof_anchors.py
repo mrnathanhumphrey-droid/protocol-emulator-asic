@@ -141,6 +141,15 @@ BOUND_T1 = 2 * L_REFILL + J_WINNER_REG          # 9
 BOUND_T2 = N_LANES * L_REFILL + J_WINNER_REG    # 21
 
 
+#: Wilson 11-22 (slot buffer piece 2, ruling 2): P3 and P4's port lines are rewritten by the
+#: slot buffer; agent 2 re-anchors them to `portNextB` at piece 5. While these -- and ONLY these
+#: -- are missing, the gate reads STALE (model/stale_records.py), not PASSED.
+STALE_ANCHORS = (
+    "if (pf_v_q && l_live[pf_q] && !l_actv[hix[pf_q]] && !ft_flush[pf_q]) begin",
+    "end else if (l_live[prr] && want_fetch(prr) && !ft_flush[prr]) begin",
+)
+GATE = "model/gate_j_proof_anchors.py"
+
 PORT_SPEC = os.path.join(ROOT, "docs", "PORT_SPEC.md")
 
 
@@ -202,8 +211,11 @@ def selftest(rtl):
     print("    %-44s %s" % (bogus[1], "rejected" if rejected else "*** ACCEPTED"))
     if not rejected:
         rc = 1
-    accepted = not check([PREMISES[3]], rtl)[0]
-    print("    %-44s %s" % ("the real winner-first premise",
+    # (11-22: P3 is a declared STALE anchor while the slot buffer is built, so the control is
+    # the first premise NOT on STALE_ANCHORS -- still a real, present premise)
+    ctl = next(p for p in PREMISES if p[2] not in STALE_ANCHORS)
+    accepted = not check([ctl], rtl)[0]
+    print("    %-44s %s" % ("a real premise (%s)" % ctl[0],
                             "accepted" if accepted else "*** REJECTED"))
     if not accepted:
         rc = 1
@@ -224,7 +236,14 @@ def main() -> int:
     for tag, what, _n in PREMISES:
         if not any(t == tag for t, _w, _n2 in bad):
             print("    %-4s ok    %s" % (tag, what))
+    stale_missing = []
     for tag, what, needle in bad:
+        if needle in STALE_ANCHORS:
+            print("    %-4s STALE (declared): %s" % (tag, what))
+            print("         the anchor %r is rewritten by the slot buffer;" % needle)
+            print("         re-anchored to portNextB at piece 5 (Wilson 11-22).")
+            stale_missing.append(needle)
+            continue
         print("    %-4s *** GONE: %s" % (tag, what))
         print("         the anchor %r is no longer in src/pe_engine.v." % needle)
         print("         Theorem 1 (wait <= %d) rests on it; re-derive before"
@@ -304,8 +323,32 @@ def main() -> int:
     print()
     if selftest(rtl):
         rc = 1
+    # the STALE scope: only the declared anchors are excused, never a planted one
+    sys.path.insert(0, HERE)
+    import stale_records as SR
+    st = list(STALE_ANCHORS)
+    sc_ok, _l = SR.anchor_stale(GATE, "j-proof-anchors", st + ["NO_SUCH_SIGNAL_xyz"], st)
+    print("    %-44s %s" % ("a missing premise off the stale list",
+                            "not excused" if not sc_ok else "*** EXCUSED (the STALE scope leaks)"))
+    if sc_ok:
+        rc = 1
+    stale_line = None
+    if rc == 0:
+        if stale_missing:
+            st_ok, why = SR.anchor_stale(GATE, "j-proof-anchors", stale_missing, st)
+            if st_ok:
+                stale_line = why
+            else:
+                print("  *** %s" % why)
+                rc = 1
+        elif any(a in rtl for a in st):
+            print("  *** STALE_ANCHORS entry back in the RTL: retire it")
+            rc = 1
     print()
     print("=" * 78)
+    if stale_line:
+        print(stale_line)
+        return 0
     print("  GATE j-proof-anchors: %s" % ("PASSED" if rc == 0 else "FAILED"))
     print("    ⚠ IT CHECKS THE PREMISES, NOT THE REASONING. The inference from")
     print("      P1-P7 to the two theorems is prose and a gate cannot verify")

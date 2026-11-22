@@ -254,6 +254,18 @@ SITES = [
      "USB re-anchor: half the head receive's delay"),
     ("else if (l_cls[hix[ln]][C_REARM] && hact[ACT_W-1-OP_W-PINW])", ("REARM",), "want_fetch: REARM level"),
     ("else if (l_cls[hix[ln]][C_REARM] && !hact[ACT_W-1-OP_W-PINW])", ("REARM",), "want_fetch: REARM level"),
+    # the slot buffer (piece 2, 11-22): a chaining REARM is a no-prefetch word, and a looping
+    # one's successor is the loop base -- the slot request reads REARM's level, as want_fetch does
+    ("(l_cls[hix[gi]][C_REARM] & ~l_act[hix[gi]][ACT_W-1-OP_W-PINW]);", ("REARM",),
+     "slot request: the head's no-prefetch REARM"),
+    ("(l_cls[six[gi]][C_REARM] & ~l_act[six[gi]][ACT_W-1-OP_W-PINW]);", ("REARM",),
+     "slot request: the spare's no-prefetch REARM"),
+    ("assign sq_addr[gi] = (l_cls[lx][C_REARM] && l_act[lx][ACT_W-1-OP_W-PINW])", ("REARM",),
+     "slot request: a looping REARM's successor is the loop base"),
+    ("wire ck_hrl = l_cls[hix[gi]][C_REARM] && !l_act[hix[gi]][ACT_W-1-OP_W-PINW];", ("REARM",),
+     "sim-only checker: the head's no-prefetch REARM"),
+    ("wire ck_srl = l_cls[six[gi]][C_REARM] && !l_act[six[gi]][ACT_W-1-OP_W-PINW];", ("REARM",),
+     "sim-only checker: the spare's no-prefetch REARM"),
     # derived-wire uses, attributed by the class that gates each (pre_cls: C_SHIFT =
     # SHIFT|SHIFTI, C_SHIFTIN, C_ST = self-timed SHIFT|SHIFTIN|SHIFTI, C_BR = branches)
     ("wire ck_act     = ck_shift | ck_shiftin;", "DEF", "clocked action"),
@@ -290,7 +302,7 @@ SITES = [
 IGNORE = ("l_act[i]  <= {ACT_W{1'b0}};", "reg [ACT_W-1:0] l_act ", "reg [CLS_W-1:0] l_cls ",
           "assign hw[gi] = l_act[hix[gi]];", "reg [ACT_W-1:0] w_act;",
           "wire [ACT_W-1:0] u_head  = l_act[hix[USB_LANE]];", "hact   = l_act [hix[ln]];",
-          "l_act [fix] <= s_wrdata[")
+          "l_act [cix] <= s_wrdata[", "l_act [six[i]] <= l_buf[i];")
 
 TOKEN = re.compile(r"\b(%s)\b(\[(\d+)\])?" % "|".join(list(BASE) + list(DERIVED)))
 HEAD = re.compile(r"\b(cur_act|l_act|u_head|hact)\s*\[|\bw\[")

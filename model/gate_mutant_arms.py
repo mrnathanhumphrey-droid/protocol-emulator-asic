@@ -289,6 +289,16 @@ EXPECT = {
     "M_PRIME_NEWPRIO":    (2, None),   # the (b') prefetch target during priming too
     "M_FT_NOSKIP":        (2, None),   # FT's edge does not move PC to PC+2
     "M_FT_NO_PKILL":      (1, None),   # K5: the FT edge does not kill the in-flight refill
+    # the slot buffer, piece 2 (Wilson 11-21): each a one-line term but the raise
+    "M_SLOT_PAST_NPF":    (2, None),   # the requester ignores a held no-prefetch word
+    "M_SLOT_LIFO":        (2, None),   # the youngest issuable request served first
+    "M_SLOT_OVER_USB":    (2, None),   # the slot ahead of USB receive's branch 1
+    "M_SLOT_BELOW_BR1":   (2, None),   # every lane's branch 1 ahead of the slot
+    "M_SLOT_YIELD_UNGATED": (2, None), # K13: the yield to lane 0 without usb_on
+    "M_SLOT_BEFORE_PRIME": (2, None),  # K12: slot issue before primed
+    "M_SLOT_FILE_NONE":   (2, None),   # P1 clause 2: a slot fetch filing nothing
+    "M_SLOT_NOMASK":      (2, None),   # the round robin refills a buffered lane
+    "M_SLOT_RAISE_LATE":  (7, "a raise one cycle late needs its own register: the flag and lane latched at CAP (4: declaration and its always block), the CAP-cycle raise replaced by a hold (2), and the latched raise applied the next cycle (1)"),
     # K8's planted case (Wilson 11-19): a SECOND flush needs its own register
     # (the flush delayed one cycle), that flush ORed into `flush_ev`, and the flush's
     # four effects applied again (PC, fetch PC, both slots' valid bits)

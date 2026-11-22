@@ -113,6 +113,13 @@ DECLARED = {
         "SCOPE.md says the board evidence is v1's (Wilson 10-25). The v2 bitstream "
         "it re-witnesses on must be built with the REGENERATED uart_rx_board.hex "
         "(the unused-field zero-fill, Wilson 11-14)",
+    # Wilson 11-22 (slot buffer, piece 2, ruling 2): the two port lines the J proof's
+    # P3/P4 and Step.lean quote are rewritten by the slot buffer. Each gate excuses
+    # ONLY those two anchors (its STALE_ANCHORS), and only while they are missing
+    "model/gate_j_proof_anchors.py":
+        "port changing under the slot buffer; re-anchored to `portNextB` at piece 5",
+    "model/gate_lean_anchors.py":
+        "port changing under the slot buffer; re-anchored to `portNextB` at piece 5",
 }
 
 #: gate -> (the item that owns turning it green, the point it must be green
@@ -145,7 +152,31 @@ DEBT = {
     "model/gate_slang_lint.py": ("the W1 lint fix in pe_pit_s12 with a formal "
                                  "equivalence proof (Wilson 11-13)",
                                  "after the s12 routed decision; at the latest " + _V2_LOCK),
+    "model/gate_j_proof_anchors.py": ("agent 2's re-anchor of P3/P4 to portNextB "
+                                      "(Wilson 11-22)", "slot buffer piece 5"),
+    "model/gate_lean_anchors.py": ("agent 2's re-anchor of Step.lean to portNextB "
+                                   "(Wilson 11-22)", "slot buffer piece 5"),
 }
+
+
+def anchor_stale(gate, name, missing, stale_anchors):
+    """For an anchor gate whose ONLY failure is missing anchors. -> (ok, line).
+    ok only when every missing anchor is on `stale_anchors`, every entry there is
+    really missing (the list must not outlive it), and the gate is DECLARED; the
+    line is the gate's STALE token. Anything else -> (False, why)."""
+    extra = [a for a in missing if a not in stale_anchors]
+    if extra:
+        return False, "missing anchor(s) NOT on the declared stale list: %s" % extra[:2]
+    back = [a for a in stale_anchors if a not in missing]
+    if back:
+        return False, "STALE_ANCHORS entry no longer missing (retire it): %s" % back[:2]
+    if gate not in DECLARED:
+        return False, "%s is not DECLARED stale" % gate
+    if os.environ.get("PE_TAG") == "1" or "--tag" in sys.argv:
+        return False, "STALE blocks at the tag (PE_TAG=1)"
+    owner, by = DEBT.get(gate, ("NO OWNER", "-"))
+    return True, "  GATE %s: STALE (declared: %s [owner: %s; green by: %s])" % (
+        name, DECLARED[gate], owner, by)
 
 
 #: ⛔ Wilson 11-14: gates whose moved inputs the gate itself GENERATES from its

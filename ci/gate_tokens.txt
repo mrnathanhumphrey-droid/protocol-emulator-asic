@@ -50,6 +50,7 @@ test/gate_batch_equiv.py            ^\s*GATE batch-equiv: PASSED\s*$
 test/run_pair.py                    ^\s*GATE pair: PASSED\s*$
 test/run_symgen.py                  ^\s*GATE symgen: PASSED\s*$
 test/run_flags.py                   ^\s*GATE flags: PASSED\s*$
+test/run_slotbuf.py                 ^\s*GATE slotbuf: PASSED\s*$
 test/run_drive_sample.py            ^\s*GATE drive-sample: PASSED\s*$
 test/run_usbrx.py                   ^\s*GATE usbrx: PASSED\s*$
 model/gate_usb_sweep.py             ^\s*GATE usb_sweep: PASSED\s*$

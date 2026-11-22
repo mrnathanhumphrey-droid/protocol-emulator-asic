@@ -87,6 +87,23 @@ RTL_CONTRACTS = {
                 "is BufEng.SReqB (Wilson 11-19)",
         "lean": "BufEng.SReqB (hq2 / hold2 dischargeable only for a non-npf PC+1)",
         "must_fire": {"status": OWED, "name": None}},
+    # K12 (Wilson 11-22; entry added by agent 1 with the RTL, the DRIVE_SAMPLE precedent --
+    # agent 2's file, theirs to reword)
+    "K12": {
+        "what": "no slot issue before the engine is primed: a request raised at a capture "
+                "during start-up is held, so start-up is the slot-less engine's bit for bit "
+                "(measured by test/run_slotbuf.py on slotbuf_fcfs)",
+        "lean": "BufEng port holds slot issue until primed (agent 2, owed for piece 5's replay)",
+        "must_fire": {"status": PRESENT, "name": "M_SLOT_BEFORE_PRIME"}},
+    # K13 (Wilson 11-22; entry added by agent 1 with the RTL, the DRIVE_SAMPLE precedent --
+    # agent 2's file, theirs to reword)
+    "K13": {
+        "what": "the slot yields to lane 0's branch-1 refill only while usb_on is set: off at "
+                "reset, set when lane 0's first USB receive executes, never cleared; before it "
+                "(and on every non-USB image) the slot outranks lane 0's branch 1 "
+                "(measured by test/run_slotbuf.py on slotbuf_fcfs and slotbuf_usb)",
+        "lean": "BufEng port with usb_on as state (agent 2, owed for piece 5's replay)",
+        "must_fire": {"status": PRESENT, "name": "M_SLOT_YIELD_UNGATED"}},
     "disp_released_only": {
         "what": "the dispatcher picks only a live lane whose release time has passed "
                 "(ts <= now)",

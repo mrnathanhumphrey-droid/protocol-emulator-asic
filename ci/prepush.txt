@@ -131,6 +131,7 @@ ci-only test/run_rxbw.py shard rxbw: rx-bandwidth simulations, ~1400 s in CI
 prepush model/gate_pin_matrix.py
 prepush model/gate_i2c_order.py
 prepush model/gate_store_full.py
+prepush test/run_slotbuf.py
 prepush model/gate_program_index.py
 ci-only model/part1_param_contract.py RED-AT-ORIGIN (1eee995): protocol constants in the RTL -- the part1-params item; owner agent 1; clears: the part1-params item (V2_MASTER_LIST)
 prepush test/gl_harness_check.py

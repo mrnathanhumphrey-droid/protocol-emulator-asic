@@ -142,7 +142,8 @@
       prr        <= {LW{1'b0}}; \
       pbr1       <= 1'b0; \
       pkill      <= 1'b0; \
-      hz_q       <= {N_LANES{1'b1}}; \
+      pb         <= 1'b0; \
+      hz_q      <= {N_LANES{1'b1}}; \
       hl_v       <= 1'b0; \
       hl_l       <= {LW{1'b0}}; \
       paddr      <= {AW{1'b0}}; \
@@ -234,7 +235,11 @@
         l_armhalf[i]   <= 1'b0; \
         l_armqual[i]   <= 1'b0; \
         l_armft[i]     <= 1'b0; \
+        l_buf[i]       <= {ACT_W{1'b0}}; \
+        sq_n[i]        <= 2'd0; \
       end \
+      l_bufv     <= {N_LANES{1'b0}}; \
+      sq_old     <= {(N_LANES*N_LANES){1'b0}}; \
       for (i = 0; i < NSLOT; i = i + 1) begin \
         l_act[i]  <= {ACT_W{1'b0}}; \
         l_actv[i] <= 1'b0; \
@@ -3078,6 +3083,276 @@ module pe_engine #(
   // was issued, not in whatever is the head by the time it completes.
   wire [SIW-1:0]        fix = pl * SPL + (((SPL > 1) && pslot) ? 1 : 0);
 
+  // =====================================================================
+  // ⭐⭐ THE SLOT AND THE BUFFER (Wilson 11-21, piece 2): agent 2's
+  // `BufEng.stepB`, transcribed. Names follow the model.
+  // =====================================================================
+  // * `l_buf` / `l_bufv`: ONE word per lane behind the head and the spare
+  //   (Wilson 11-20 depth ruling). Its class is recomputed when it loads.
+  // * `pb`: the in-flight fetch is a SECOND fetch (issued with the spare
+  //   full). Its place is chosen at its capture -- head, then spare, then the
+  //   buffer (`capSlot`). A first fetch lands where the scan latched it.
+  // * the load (`loadTo`): a buffered word moves into its lane's EMPTY spare,
+  //   which is the cycle after a retirement freed it.
+  // * the mask (`wantM`): the round robin does not refill a lane whose buffer
+  //   holds a word. A lane with a second fetch in flight needs no mask: the
+  //   port is busy.
+  // * the requester (`SReqB`, issue path (A), Wilson 11-20): an ARM's capture
+  //   RAISES its lane's request in the CAP cycle (`sq_n` := 2, the ARM's next
+  //   two words); the request is held and the next scan issues it. Every
+  //   capture for the lane after that counts one word off, whoever fetched
+  //   it, so a lane is never owed more than its ARM's two.
+  //   Issuable (`sq_ok`): live, head valid, buffer empty, and nothing held
+  //   that may not be fetched past (a branch, a chaining re-arm: Option A,
+  //   `no_fetch_past_branch`). FCFS by capture (`sq_old`), below USB
+  //   receive's branch-1 refill only (`slot_below_usb_rx`).
+  // ⚠ PIECE 2 RAISES FOR A PLAIN ARM ONLY. A FALLTHROUGH ARM's order (edge
+  //   word first) and its flush rules are piece 3; until then its lane runs
+  //   today's path, and the FT edge's flush clears the buffer and the request.
+  // ⚠ "USB receive" is USB_LANE's branch-1 refill ONLY WHILE `usb_on` is set
+  //   (K13, Wilson 11-22): the flag the 11-09 choice 3 already gates the bus
+  //   reset and the buffer on -- off at reset, set when lane 0's first USB
+  //   receive executes, never cleared. Before it (and on every non-USB image)
+  //   lane 0's branch-1 refill is ordinary and the slot outranks it.
+  reg                   pb;
+  reg [ACT_W-1:0]       l_buf  [0:N_LANES-1];
+  reg [N_LANES-1:0]     l_bufv;
+  reg [1:0]             sq_n   [0:N_LANES-1];
+  reg [N_LANES*N_LANES-1:0] sq_old;     // [a*N+b]: a's request is older than b's
+  wire [N_LANES-1:0]    sq_ok;
+  wire [AW-1:0]         sq_addr [0:N_LANES-1];
+  // K12 (Wilson 11-22): no slot issue before priming. A request raised at a
+  // capture during start-up is held, not issued, so start-up (the refill
+  // round robin priming every lane) is bit-identical to the slot-less engine.
+`ifdef M_SLOT_BEFORE_PRIME
+  wire sq_pr = 1'b1;
+`else
+  wire sq_pr = primed;
+`endif
+  generate
+    for (gi = 0; gi < N_LANES; gi = gi + 1) begin : g_sreq
+      wire hv_q = l_actv[hix[gi]];
+      wire sv_q = l_actv[six[gi]];
+      // the last held word: the spare if valid, else the head
+      wire [SIW-1:0] lx = sv_q ? six[gi] : hix[gi];
+      wire h_npf = l_cls[hix[gi]][C_BR] |
+                   (l_cls[hix[gi]][C_REARM] & ~l_act[hix[gi]][ACT_W-1-OP_W-PINW]);
+      wire s_npf = l_cls[six[gi]][C_BR] |
+                   (l_cls[six[gi]][C_REARM] & ~l_act[six[gi]][ACT_W-1-OP_W-PINW]);
+`ifdef M_SLOT_PAST_NPF
+      wire npf_hold = 1'b0;
+`else
+      wire npf_hold = h_npf | (sv_q & s_npf);
+`endif
+      assign sq_ok[gi] = (SPL > 1) && sq_pr && (sq_n[gi] != 2'd0) && l_live[gi] && hv_q &&
+                         !l_bufv[gi] && !npf_hold && !ft_flush[gi];
+      // the successor of the last held word: a looping re-arm's is the loop
+      // base (as `fetch_addr` reads it for the head), anything else's `l_fpc`
+      assign sq_addr[gi] = (l_cls[lx][C_REARM] && l_act[lx][ACT_W-1-OP_W-PINW])
+                           ? l_base[gi] : l_fpc[gi];
+    end
+  endgenerate
+  // FCFS by capture: the oldest issuable request
+  reg               sq_v;
+  reg [LW-1:0]      sq_w;
+  reg               sq_first;
+  integer           sqa, sqb;
+  always @* begin
+    sq_v = 1'b0;
+    sq_w = {LW{1'b0}};
+    for (sqa = 0; sqa < N_LANES; sqa = sqa + 1) begin
+      sq_first = sq_ok[sqa];
+      for (sqb = 0; sqb < N_LANES; sqb = sqb + 1)
+`ifdef M_SLOT_LIFO
+        if (sq_ok[sqb] && sq_old[sqa*N_LANES+sqb]) sq_first = 1'b0;
+`else
+        if (sq_ok[sqb] && sq_old[sqb*N_LANES+sqa]) sq_first = 1'b0;
+`endif
+      if (sq_first && !sq_v) begin
+        sq_v = 1'b1;
+        sq_w = sqa[LW-1:0];
+      end
+    end
+  end
+  // the lanes whose branch-1 refill goes ahead of the slot: USB receive's
+  // only, and only once the USB lane is live (K13)
+`ifdef M_SLOT_OVER_USB
+  wire [N_LANES-1:0] sq_yield = {N_LANES{1'b0}};
+`elsif M_SLOT_BELOW_BR1
+  wire [N_LANES-1:0] sq_yield = {N_LANES{1'b1}};
+`elsif M_SLOT_YIELD_UNGATED
+  wire [N_LANES-1:0] sq_yield = {{(N_LANES-1){1'b0}}, 1'b1} << USB_LANE;
+`else
+  wire [N_LANES-1:0] sq_yield = {{(N_LANES-1){1'b0}}, usb_on} << USB_LANE;
+`endif
+  // the mask: the round robin skips a lane holding a buffered word
+`ifdef M_SLOT_NOMASK
+  wire [N_LANES-1:0] rr_mask = {N_LANES{1'b0}};
+`else
+  wire [N_LANES-1:0] rr_mask = l_bufv;
+`endif
+  // the captured word (P_CAP) and where a second fetch files it (`capSlot`)
+  wire [ACT_W-1:0]      cap_word  = s_wrdata[ACT_BYTES*8-1 -: ACT_W];
+  wire                  cap_arm   = (cap_word[ACT_W-1 -: OP_W] == OP_ARM) && !cap_word[1];
+  wire                  cap_hv    = l_actv[hix[pl]];
+  wire                  cap_sv    = l_actv[six[pl]];
+  wire                  cap_tobuf = pb & cap_hv & cap_sv;
+  wire [SIW-1:0]        cix       = !pb ? fix : (cap_hv ? six[pl] : hix[pl]);
+  // `M_SLOT_RAISE_LATE` (issue_at_capture's must-fire): the raise lands one
+  // cycle after the CAP cycle
+`ifdef M_SLOT_RAISE_LATE
+  reg rl_v; reg [LW-1:0] rl_l;
+  always @(posedge clk or negedge rst_n)
+    if (!rst_n) begin rl_v <= 1'b0; rl_l <= {LW{1'b0}}; end
+    else begin rl_v <= hdr_done && (pst == P_CAP) && !pkill && cap_arm; rl_l <= pl; end
+`endif
+`ifndef SYNTHESIS
+  // ---- piece 2's checks: sim only, and every simulation runs them. Each
+  // `*** ASSERT pe_engine SLOT...` line is read by `sim_run.py judge` on every
+  // bench, so it is red in any gate unless declared in
+  // `test/monitor_mustfire.py` (only the planted cases are). They recompute
+  // the contracts from the lane state, not from the requester's own wires:
+  //   SLOTRAISE  issue_at_capture: a plain ARM's capture has raised its lane's
+  //              request (two words owed) by the very next cycle
+  //   SLOTNPF    no_fetch_past_branch: a slot issue's lane is live, its head
+  //              valid, its buffer empty, nothing held that bars a prefetch
+  //   SLOTUSB    slot_below_usb_rx: no slot issue while USB receive's branch 1
+  //              wants the port, and nothing else issues while a slot request
+  //              is issuable (USB receive's branch 1 excepted); "USB receive"
+  //              = lane 0 with `usb_on` set (K13): before it, and on a
+  //              non-USB image, lane 0 taking the port from the slot is red
+  //   SLOTFCFS   slot_fcfs_capture: no issuable request raised earlier than the
+  //              one served
+  //   SLOTMASK   the mask: the round robin never fetches for a lane whose
+  //              buffer holds a word
+  //   SLOTPRIME  K12: no slot issue before `primed` (start-up stays the
+  //              slot-less engine's, bit for bit)
+  //   SLOTORD    order: every valid head holds the word at its lane's PC (a
+  //              shadow address per slot and buffer, filed as the words are)
+  reg              ck_arm_q;
+  reg [LW-1:0]     ck_arm_l;
+  reg              ck_scan;
+  reg [N_LANES-1:0] ck_hv, ck_ok, ck_sq, ck_bv;
+  reg              ck_usbp;
+  reg              ck_pr;
+  // for the bench's P1 monitor (clocked_conform R4b, Wilson 11-22 ruling 3):
+  // the fetch in flight is a SLOT fetch (set at its issue, held to its
+  // capture), and the lanes whose buffered word loads this cycle
+  reg              ck_slotf = 1'b0;
+  wire [N_LANES-1:0] ck_ldv;
+  // the checker's own no-prefetch reading of each lane's held words (written
+  // apart from g_sreq's, so the RTL's copy is checked, not reused), and the
+  // per-lane +SLOTSTAT conditions, counted by $countones below
+  wire [N_LANES-1:0] ck_npfv, st_prv, st_npfv, st_rrv;
+  for (gi = 0; gi < N_LANES; gi = gi + 1) begin : g_ckld
+    assign ck_ldv[gi] = (SPL > 1) && l_bufv[gi] && !l_actv[six[gi]];
+    wire ck_hrl = l_cls[hix[gi]][C_REARM] && !l_act[hix[gi]][ACT_W-1-OP_W-PINW];
+    wire ck_srl = l_cls[six[gi]][C_REARM] && !l_act[six[gi]][ACT_W-1-OP_W-PINW];
+    assign ck_npfv[gi] = l_cls[hix[gi]][C_BR] || ck_hrl ||
+                         (l_actv[six[gi]] && (l_cls[six[gi]][C_BR] || ck_srl));
+    assign st_prv[gi]  = !primed && sq_n[gi] != 2'd0 && l_live[gi];
+    assign st_npfv[gi] = sq_n[gi] != 2'd0 && l_live[gi] && l_actv[hix[gi]] && !l_bufv[gi] &&
+                         ck_npfv[gi];
+    assign st_rrv[gi]  = l_bufv[gi] && !l_actv[six[gi]] && l_live[gi];
+  end
+  integer          ck_t [0:N_LANES-1];
+  integer          ck_cyc, ck_k;
+  reg [AW-1:0]     sh_a [0:NSLOT-1];
+  reg [AW-1:0]     sh_b [0:N_LANES-1];
+  // +SLOTSTAT: one summary line at the end (runners that ask for it only)
+  integer st_raise = 0, st_slot = 0, st_slot2 = 0, st_tobuf = 0, st_load = 0,
+          st_multi = 0, st_usbc = 0, st_l0c = 0, st_br1c = 0, st_npfb = 0, st_rrb = 0, st_preq = 0;
+  final if ($test$plusargs("SLOTSTAT"))
+    $display("SLOTSTAT raise=%0d slot=%0d second=%0d tobuf=%0d load=%0d multi=%0d usbc=%0d l0c=%0d br1c=%0d npfblock=%0d rrbuf=%0d prereq=%0d",
+             st_raise, st_slot, st_slot2, st_tobuf, st_load, st_multi, st_usbc, st_l0c, st_br1c, st_npfb, st_rrb, st_preq);
+  // (non-blocking: the counters are read by the `final` above, another process)
+  always @(posedge clk) if (rst_n && hdr_done) begin
+    if (pst == P_CAP && !pkill && cap_arm) st_raise <= st_raise + 1;
+    if (pst == P_CAP && !pkill && cap_tobuf) st_tobuf <= st_tobuf + 1;
+    if (pst == P_REQ && pbr1 && l_actv[hix[pl]] && ck_scan) begin
+      st_slot <= st_slot + 1;
+      if (pb) st_slot2 <= st_slot2 + 1;
+    end
+    st_load <= st_load + $countones(ck_ldv);
+    if (pst == P_SCAN) begin
+      if ($countones(sq_ok) > 1) st_multi <= st_multi + 1;
+      // a request raised during start-up, held for priming (K12's situation)
+      if (|st_prv) st_preq <= st_preq + 1;
+      if (|sq_ok && pf_v_q && l_live[pf_q] && !l_actv[hix[pf_q]]) begin
+        if (pf_q == USB_LANE[LW-1:0] && usb_on) st_usbc <= st_usbc + 1;
+        else if (pf_q == USB_LANE[LW-1:0]) st_l0c <= st_l0c + 1;
+        else st_br1c <= st_br1c + 1;
+      end
+      st_npfb <= st_npfb + $countones(st_npfv);
+      st_rrb  <= st_rrb + $countones(st_rrv);
+    end
+  end
+  always @(posedge clk) begin
+    if (!rst_n) begin
+      ck_arm_q <= 1'b0;
+      ck_scan  <= 1'b0;
+      ck_cyc   <= 0;
+    end else begin
+      ck_cyc   <= ck_cyc + 1;
+      // SLOTRAISE
+      if (ck_arm_q && sq_n[ck_arm_l] != 2'd2)
+        $display("*** ASSERT pe_engine SLOTRAISE: lane %0d's ARM captured last cycle, its slot request not raised (owed %0d), at %0t",
+                 ck_arm_l, sq_n[ck_arm_l], $time);
+      ck_arm_q <= hdr_done && (pst == P_CAP) && !pkill && cap_arm && !ft_edge_flush[pl];
+      ck_arm_l <= pl;
+      // (a raise stamps at P_CAP and FCFS is judged at P_REQ: never the same
+      // cycle, so the non-blocking stamp is read only after it lands)
+      if (hdr_done && (pst == P_CAP) && !pkill && cap_arm) ck_t[pl] <= ck_cyc;
+      // the scan's decision, judged the cycle after it
+      if (ck_scan && pst == P_REQ && pbr1 && ck_hv[pl]) begin
+        if (!ck_ok[pl])
+          $display("*** ASSERT pe_engine SLOTNPF: slot issue for lane %0d past a no-prefetch word / full buffer / invalid head, at %0t",
+                   pl, $time);
+        if (!ck_pr)
+          $display("*** ASSERT pe_engine SLOTPRIME: slot issue for lane %0d before the engine is primed, at %0t",
+                   pl, $time);
+        if (ck_usbp)
+          $display("*** ASSERT pe_engine SLOTUSB: slot issue for lane %0d ahead of USB receive's branch-1 refill, at %0t",
+                   pl, $time);
+        for (ck_k = 0; ck_k < N_LANES; ck_k = ck_k + 1)
+          if (ck_sq[ck_k] && ck_k != pl && ck_t[ck_k] < ck_t[pl])
+            $display("*** ASSERT pe_engine SLOTFCFS: slot served lane %0d (raised %0d) ahead of lane %0d (raised %0d), at %0t",
+                     pl, ck_t[pl], ck_k, ck_t[ck_k], $time);
+      end else if (ck_scan && |ck_sq && !(ck_usbp && pst == P_REQ && pl == USB_LANE[LW-1:0])) begin
+        $display("*** ASSERT pe_engine SLOTUSB: a slot request issuable at the scan, the port gave it to %0s, at %0t",
+                 (pst == P_REQ) ? "another fetch" : "nothing", $time);
+      end
+      if (ck_scan && pst == P_REQ && !pbr1 && ck_bv[pl])
+        $display("*** ASSERT pe_engine SLOTMASK: round-robin refill for lane %0d while its buffer holds a word, at %0t",
+                 pl, $time);
+      ck_scan <= hdr_done && (pst == P_SCAN);
+      ck_pr   <= primed;
+      if (ck_scan && pst == P_REQ) ck_slotf <= pbr1 && ck_hv[pl];
+      ck_usbp <= pf_v_q && l_live[pf_q] && !l_actv[hix[pf_q]] && !ft_flush[pf_q] &&
+                 (pf_q == USB_LANE[LW-1:0]) && usb_on;
+      for (ck_k = 0; ck_k < N_LANES; ck_k = ck_k + 1) begin
+        ck_hv[ck_k] <= l_actv[hix[ck_k]];
+        ck_bv[ck_k] <= l_bufv[ck_k];
+        ck_ok[ck_k] <= l_live[ck_k] && l_actv[hix[ck_k]] && !l_bufv[ck_k] && !ck_npfv[ck_k] &&
+                       !ft_flush[ck_k];
+        ck_sq[ck_k] <= l_live[ck_k] && l_actv[hix[ck_k]] && !l_bufv[ck_k] && !ck_npfv[ck_k] &&
+                       !ft_flush[ck_k] && (sq_n[ck_k] != 2'd0) && primed;
+      end
+      // SLOTORD: the shadow addresses, filed as the words are
+      if (hdr_done && pst == P_CAP && !pkill) begin
+        if (cap_tobuf) sh_b[pl] <= paddr;
+        else           sh_a[cix] <= paddr;
+      end
+      for (ck_k = 0; ck_k < N_LANES; ck_k = ck_k + 1) begin
+        if ((SPL > 1) && l_bufv[ck_k] && !l_actv[six[ck_k]]) sh_a[six[ck_k]] <= sh_b[ck_k];
+        if (l_live[ck_k] && l_actv[hix[ck_k]] && sh_a[hix[ck_k]] !== l_pc[ck_k])
+          $display("*** ASSERT pe_engine SLOTORD: lane %0d's head holds the word of %0d, its PC is %0d, at %0t",
+                   ck_k, sh_a[hix[ck_k]], l_pc[ck_k], $time);
+      end
+    end
+  end
+`endif
+
   integer i;
 
   // =====================================================================
@@ -3434,6 +3709,21 @@ module pe_engine #(
       // ⛔ Only refills a lane whose prefetch is INVALID. The invalidation on
       //    PC advance is in the writeback below, and removing it is
       //    M-PREFETCH-STALE.
+      // ⭐ piece 2, THE LOAD (`loadTo`): a buffered word moves into its lane's
+      // empty spare -- the slot a retirement freed last cycle. Before the
+      // port FSM (a capture never targets that spare: a lane holding a
+      // buffered word gets no first fetch) and before the FT flush below,
+      // which clears both slots and the buffer after it.
+      for (i = 0; i < N_LANES; i = i + 1)
+        if ((SPL > 1) && l_bufv[i] && !l_actv[six[i]]) begin
+          l_act [six[i]] <= l_buf[i];
+          l_actv[six[i]] <= 1'b1;
+          l_cls [six[i]] <= pre_cls(l_buf[i]);
+          l_bufv[i]      <= 1'b0;
+        end
+`ifdef M_SLOT_RAISE_LATE
+      if (rl_v) sq_n[rl_l] <= 2'd2;
+`endif
       if (hdr_done) begin
         case (pst)
           P_SCAN: begin
@@ -3453,22 +3743,36 @@ module pe_engine #(
             // (b'): the target is the earliest RELEASED lane with an EMPTY head
             // (`pf_q`), not the dispatch winner -- which, under (b'), never has
             // an empty head and would leave the late lane to the round robin.
+            // ⭐ THE SLOT (piece 2): branch 1 goes first only for USB receive's
+            // lane (`sq_yield`); otherwise a held slot request is next.
+            pb <= 1'b0;
 `ifdef M_PF_LIVE_WINNER
-            if (pf_v && l_live[pf_w] && !l_actv[hix[pf_w]] && !ft_flush[pf_w]) begin
+            if (pf_v && l_live[pf_w] && !l_actv[hix[pf_w]] && !ft_flush[pf_w] && (!sq_v || sq_yield[pf_w])) begin
               pl    <= pf_w;
               pbr1  <= 1'b1;
               pslot <= l_sel[pf_w];
               paddr <= l_pc[pf_w];
               pst   <= P_REQ;
 `else
-            if (pf_v_q && l_live[pf_q] && !l_actv[hix[pf_q]] && !ft_flush[pf_q]) begin
+            if (pf_v_q && l_live[pf_q] && !l_actv[hix[pf_q]] && !ft_flush[pf_q] && (!sq_v || sq_yield[pf_q])) begin
               pl    <= pf_q;
               pbr1  <= 1'b1;
               pslot <= l_sel[pf_q];      // the head: it is what is late
               paddr <= l_pc[pf_q];
               pst   <= P_REQ;
 `endif
-            end else if (l_live[prr] && want_fetch(prr) && !ft_flush[prr]) begin
+            end else if (sq_v) begin
+              // the slot: the oldest requester's next word. Like branch 1 it
+              // does not move the round robin. With the head valid the scan's
+              // slot is the spare (`fetchSlot`); a full spare makes it a
+              // second fetch, filed at its capture.
+              pl    <= sq_w;
+              pbr1  <= 1'b1;
+              pslot <= !l_sel[sq_w];
+              paddr <= sq_addr[sq_w];
+              pb    <= l_actv[six[sq_w]];
+              pst   <= P_REQ;
+            end else if (l_live[prr] && want_fetch(prr) && !rr_mask[prr] && !ft_flush[prr]) begin
               // fill the head if empty, otherwise the spare
               pl    <= prr;
               pbr1  <= 1'b0;
@@ -3501,16 +3805,43 @@ module pe_engine #(
             // flight carries the OLD successor: it is dropped, not filed
             if (!pkill) begin
             // MSB-aligned: byte0 = {opcode, pin, level}, 2 spare at the bottom
-            l_act [fix] <= s_wrdata[ACT_BYTES*8-1 -: ACT_W];
-            l_actv[fix] <= 1'b1;
-`ifndef M_PREDECODE_STALE
-            l_cls [fix] <= pre_cls(s_wrdata[ACT_BYTES*8-1 -: ACT_W]);
+            // ⭐ piece 2: a second fetch with head and spare full files into
+            // the buffer; otherwise into `cix` (the latched slot for a first
+            // fetch, `capSlot` for a second).
+            if (cap_tobuf) begin
+            l_buf [pl]  <= cap_word;
+            // M_SLOT_FILE_NONE (ruling 3's must-fire): the slot fetch files nothing
+`ifdef M_SLOT_FILE_NONE
+            l_bufv[pl]  <= 1'b0;
+`else
+            l_bufv[pl]  <= 1'b1;
 `endif
+            end else begin
+            l_act [cix] <= s_wrdata[ACT_BYTES*8-1 -: ACT_W];
+            l_actv[cix] <= 1'b1;
+`ifndef M_PREDECODE_STALE
+            l_cls [cix] <= pre_cls(s_wrdata[ACT_BYTES*8-1 -: ACT_W]);
+`endif
+            end
             // ⭐ THE SUCCESSOR POINTER ADVANCES FROM THE ADDRESS JUST FETCHED,
             // which is what makes the loop case need no special handling here:
             // after a `l_base` fetch, `l_fpc` becomes `l_base + ACT_BYTES`,
             // exactly the successor of the action now resident.
             l_fpc[pl] <= paddr + ACT_BYTES[AW-1:0];
+            // ⭐ THE RAISE, in the ARM's own CAP cycle (`issue_at_capture`):
+            // the lane is owed its ARM's next two words, and this request is
+            // the youngest. Any other capture counts one owed word off.
+`ifdef M_SLOT_RAISE_LATE
+            if (cap_arm) begin end
+`else
+            if (cap_arm) sq_n[pl] <= 2'd2;
+`endif
+            else if (sq_n[pl] != 2'd0) sq_n[pl] <= sq_n[pl] - 2'd1;
+            if (cap_arm)
+              for (i = 0; i < N_LANES; i = i + 1) begin
+                sq_old[i*N_LANES + pl] <= (sq_n[i] != 2'd0) && (i != pl);
+                sq_old[pl*N_LANES + i] <= 1'b0;
+              end
             end
             pkill     <= 1'b0;
             pst       <= P_SCAN;
@@ -4793,6 +5124,10 @@ module pe_engine #(
             l_fpc[i]         <= l_pc[i] + ACT_BYTES[AW-1:0];
             l_actv[hix[i]]   <= 1'b0;
             l_actv[six[i]]   <= 1'b0;
+            // piece 2: the buffer and the slot request go with the slots
+            // (today's FT path; K1's kept edge word is piece 3)
+            l_bufv[i]        <= 1'b0;
+            sq_n[i]          <= 2'd0;
             // ⭐ K5 (Wilson 11-17): every in-flight state of the refill FSM is
             // covered -- P_REQ / P_WAIT here; a word at P_CAP in the edge cycle
             // is overwritten by the two clears above (later in this block), and
