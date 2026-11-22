@@ -84,3 +84,4 @@ import JLane.CountBK
 import JLane.HfreeR
 import JLane.CloseBK
 import JLane.CloseBKSpan
+import JLane.CloseFSpan
