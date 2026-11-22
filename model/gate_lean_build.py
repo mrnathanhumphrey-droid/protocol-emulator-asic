@@ -31,7 +31,8 @@ MUST-FIRES, on a temporary copy of the tree:
                  signature (the proof still builds)                         -> check 6 red
 All four are judged by the same `judge` as the clean arm (gate_meta's stub on it turns the gate
 red). The other direction (a listed binder the signature lacks) is shown red on the clean
-build's binders with a stale name added to a copy of PREMISES (no rebuild).
+build's binders with a stale name added to a copy of PREMISES (no rebuild); likewise every
+declared `anon` count moved by one must be caught (11-22).
 
 POSITIVE TOKEN: `GATE lean-build: PASSED`.
 """
@@ -589,6 +590,18 @@ def main() -> int:
           % ("RED (caught)" if red else "*** NOT CAUGHT", (sp[0] if sp else "")[:100]))
     if not red:
         probs.append("a stale premise-list name was not caught")
+    # the unnamed-binder count (11-22), on the clean build's binders: every theorem with an
+    # `anon` count declared one too many -- each must be caught
+    anon_thms = sorted(t for t, v in PREMISES.items() if v.get("anon"))
+    off = {t: dict(v, anon=v.get("anon", 0) + 1) if t in anon_thms else v
+           for t, v in PREMISES.items()}
+    sp = premise_problems(binders, True, off)
+    red = bool(anon_thms) and all(any(p.startswith("%s has " % t) and "unnamed binder" in p
+                                      for p in sp) for t in anon_thms)
+    print("  premise list, unnamed-binder count off by one: %s  %s"
+          % ("RED (caught)" if red else "*** NOT CAUGHT", ", ".join(anon_thms) or "no anon spec"))
+    if not red:
+        probs.append("a wrong unnamed-binder count was not caught")
     if probs:
         print("GATE lean-build: FAILED (%d)" % len(probs))
         return 1
