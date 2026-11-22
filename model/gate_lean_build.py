@@ -218,7 +218,9 @@ KEY = ("dstar", "dstar29", "dstar39", "dstar39_v2", "dstar39_st", "dstar39_hold"
        # EdfBF.lean (usbdev hpri): the USB lane's priority derived on the flush run
        "dec_tsF1", "hpri_bF", "prio_resp_edfF", "prio_resp_edfT",
        # FlushChain.lean (hspan flush lemma, runF half): the release chain across flushes
-       "ts_chainF_ge", "ts_chainT_ge")
+       "ts_chainF_ge", "ts_chainT_ge",
+       # ChainBK.lean (hspan flush lemma, runBK half): the chain with an ARM's gap counted as the checker's
+       "gsumBA_skip", "tsBA_hit", "tsBA_nohit", "ts_chainBA_ge", "ts_chainBK_ge")
 #: proof_constants.load() key -> the Lean expression that must evaluate to it (SPEC: the map)
 CONSTS = {
     "lemmaA_window": "LEMMA_A_WINDOW", "R_base": "R_BASE", "dispatch_cycles": "DISPATCH_CYCLES",
