@@ -322,10 +322,29 @@ COMPOSITION = {
                           "ready_pc2_arm_spare_T")},
             {"step": "ready_ft_edge_T", "status": "proved",
              "theorems": ("ready_ft_edge_T",)},
+            # Wilson 11-21 (hspan ruling): on run hspan stays the span checker's premise; on runBK a
+            # flush can lower a timestamp (FT deadline D, then edge + 1 < D), so span_min =>
+            # hspan there is its own lemma, owed
+            {"step": "span_min => hspan on runBK (the flush lemma)", "status": "owed",
+             "what": "each flush raises z's release by at least the ARM's checked span gap "
+                     "(hedge / edge_timing + the writeback anchor of wb_closeBK_span's hspan), so "
+                     "lane_cert.span_min establishes hspan on runBK as it does on run"},
             {"step": "hRdy", "status": "owed",
              "what": "the ready_*_T lifted onto runBK through the stretches"},
             {"step": "hZS", "status": "owed",
              "what": "step 5: hZS0 established, not only gate-checked (lane-cert check 20)"},
+        ]},
+    # Wilson 11-21 (usbdev ruling, top priority): the two shipped images have a FALLTHROUGH ARM
+    # on the USB lane, so their slot-off run is run3T -> runF (flushes, disarm cycles), not run;
+    # wb_close_span does not reach them
+    "usbdev_flush_stamps": {
+        "status": "owed",
+        "steps": [
+            {"step": "usbdev_dev.hex / usbdev_fpga.hex: hM from the span rule on the flush run",
+             "status": "owed",
+             "what": "stamp backed by ArmFTClose.wb_bound_T, whose hM is a premise; hM from the "
+                     "span rule on the flush run (runF / run3T) owed -- wb_close_spanF on runF, "
+                     "lifted to run3T (CloseBKSpan's template)"},
         ]},
     # 11-21 (hfree_measure, RTL traces): the EDF theorems (EdfB, RespEdf) carry their own hfree;
     # the gap route does not give it on two EDF-certified images although the RTL meets it
