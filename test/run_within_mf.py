@@ -81,6 +81,8 @@ def sim(vvp, tmp, tag, img, cs, sck, b, dly):
     from toolchain import tool
     ip = os.path.join(tmp, "%s.hex" % tag)
     I.write_image(ip, img)
+    import sim_run
+    sim_run.scratch_image("run_within_mf", ip)
     fp = os.path.join(tmp, "%s.feed" % tag)
     with open(fp, "w", encoding="ascii", newline="\n") as fh:
         fh.write("5a\n" * 256)

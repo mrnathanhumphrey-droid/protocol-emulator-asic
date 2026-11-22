@@ -253,6 +253,34 @@ SCRATCH_GENERATORS: dict = {
         "v3": {"no_v3_layer": "test/tb_rt.v"}},
 }
 
+#: ruling M3's sentinel (test/store_run.sh): the shipped images padded with the store filler
+#: and the falloff must-fire (unclocked, outside the universe) -- registered 11-21 when the
+#: provenance rule reached unclocked images and refused falloff.hex (a ci-only gate)
+SCRATCH_GENERATORS["store_probe"] = {
+    "script": "test/store_probe.py", "pattern": ("falloff.hex", "pad_*.hex"),
+    "clocked": False,
+    "why": "ruling M3's store sentinel: shipped images written whole with the store filler "
+           "(Layer M must stay quiet) and the falloff must-fire (a lane with no terminating "
+           "REARM, named at the first filler address) -- judged by Layer M, not the A2 gap"}
+
+#: the ci-only runners whose UNCLOCKED scratch images the provenance rule reached (11-21):
+#: each was refused on its first simulated image until registered here
+for _g, _s, _p, _w in (
+        ("run_onewire", "test/run_onewire.py", "ow_*.hex",
+         "the 1-Wire master's images (onewire.build), judged against the 1-Wire model"),
+        ("run_v2window", "test/run_v2window.py", "v2win.hex",
+         "the v2 window image, judged by its UART windows on the bench"),
+        ("run_w_sweep", "test/run_w_sweep.py", "w_*.hex",
+         "W1's five-lane families (make_smoke_image.build_five), judged by the sweep's kill audit"),
+        ("run_within_mf", "test/run_within_mf.py",
+         ("abort_inside.hex", "abort_late.hex", "continue_inside.hex", "continue_late.hex"),
+         "the poset compiler's WITHIN arms, judged by their frames and the lane's final status"),
+        ("gate_sda_hold", "model/gate_sda_hold.py", "i2cframe_d*.hex",
+         "build_i2cframe(d) at each SDA-hold delay, judged by the hold gate")):
+    SCRATCH_GENERATORS[_g] = {"script": _s, "pattern": _p, "clocked": False,
+                              "why": _w + " -- not by the A2 gap"}
+del _g, _s, _p, _w
+
 #: ⛔⛔ THE GENERATED SWEEP-ARM IMAGES (Wilson 11-21): each `coverage_arms` writer records
 #: provenance on the probe_cov file it writes, so a stale file from an earlier run cannot
 #: pass as current. One entry per writer, LOCKED TO ITS DIRECTORY (`dir`): any image name

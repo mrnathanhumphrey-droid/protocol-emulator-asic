@@ -573,11 +573,39 @@ def moved(inputs, base=BASELINE):
     return sorted(set(l for l in (out + out2).splitlines() if l.strip()))
 
 
-def stale_verdict(gate, moved_inputs, tag=None, declared=None, change_set=None):
+#: ⛔⛔ REVIEWED EDITS (Wilson 11-21): a file outside CHANGE_SET whose ONE reviewed edit is
+#: admitted -- by the git blob of the file AS REVIEWED, so the entry covers that edit and not
+#: the file forever: any further edit changes the blob and the input is outside again (FAIL).
+#: path -> (blob sha of the reviewed content, the reason and the ruling)
+REVIEWED_EDITS = {
+    "test/run_w_sweep.py": ("a6e13226bbe6019a0dcaaa4b985187dd77829dd4",
+                            "its scratch generator registered (provenance ruling, 11-21): "
+                            "one sim_run.scratch_image line after five_image's write"),
+}
+
+
+def blob(path):
+    """the git blob sha of `path`'s CURRENT content (an uncommitted edit included)."""
+    rc, out = _git(["hash-object", "--", path])
+    return out.strip() if rc == 0 and out.strip() else None
+
+
+def _inside(p, change_set, reviewed, blob_of):
+    if p in change_set:
+        return True
+    e = reviewed.get(p)
+    return e is not None and blob_of(p) == e[0]
+
+
+def stale_verdict(gate, moved_inputs, tag=None, declared=None, change_set=None,
+                  reviewed=None, blob_of=None):
     """-> ("PASS" | "STALE" | "FAIL", why). The gates and the must-fires both
-    call this. `tag` defaults to PE_TAG=1 or `--tag` on the command line."""
+    call this. `tag` defaults to PE_TAG=1 or `--tag` on the command line.
+    `reviewed` / `blob_of` (REVIEWED_EDITS / blob) are for the must-fires."""
     declared = DECLARED if declared is None else declared
     change_set = CHANGE_SET if change_set is None else change_set
+    reviewed = REVIEWED_EDITS if reviewed is None else reviewed
+    blob_of = blob if blob_of is None else blob_of
     if tag is None:
         tag = os.environ.get("PE_TAG") == "1" or "--tag" in sys.argv
     if not moved_inputs:
@@ -585,7 +613,7 @@ def stale_verdict(gate, moved_inputs, tag=None, declared=None, change_set=None):
     if gate not in declared:
         return "FAIL", "inputs moved (%s) and %s is not a DECLARED stale record" % (
             ", ".join(moved_inputs[:4]), gate)
-    outside = [p for p in moved_inputs if p not in change_set]
+    outside = [p for p in moved_inputs if not _inside(p, change_set, reviewed, blob_of)]
     if outside:
         return "FAIL", ("input(s) OUTSIDE step 2's declared change set moved: %s "
                         "-- a real change, not the declared staleness"
@@ -615,6 +643,20 @@ def self_test():
     got = stale_verdict("g.py", ["src/pe_engine.v"], tag=True, declared=d, change_set=cs)[0]
     print("    %-40s %s" % ("--tag turns STALE into a block", "ok (FAIL)" if got == "FAIL" else "*** " + got))
     ok = ok and got == "FAIL"
+    # Wilson 11-21: a REVIEWED EDIT covers that edit, not the file forever
+    rv = {"test/r.py": ("b" * 40, "reviewed")}
+    for what, bl, want in (("the reviewed edit itself (blob as reviewed)", "b" * 40, "STALE"),
+                           ("a SECOND, unreviewed edit (blob moved on)", "c" * 40, "FAIL")):
+        got = stale_verdict("g.py", ["test/r.py"], tag=False, declared=d, change_set=cs,
+                            reviewed=rv, blob_of=lambda p, bl=bl: bl)[0]
+        print("    %-40s %s" % (what, "ok (%s)" % got if got == want else "*** got %s" % got))
+        ok = ok and got == want
+    # and the real entry still matches the file on disk (a stale entry admits nothing)
+    for p, (sha, _why) in sorted(REVIEWED_EDITS.items()):
+        cur = blob(p)
+        print("    %-40s %s" % ("reviewed edit %s" % p, "ok (blob %s)" % sha[:12] if cur == sha
+                                 else "*** file is %s, reviewed %s" % ((cur or "?")[:12], sha[:12])))
+        ok = ok and cur == sha
     # Wilson 11-14: a hand-written file list in a generated gate's debt -> red
     g = "model/gate_phase_coverage.py"
     red = listed_problems({g: DECLARED[g] + "; moved: src/pe_engine.v, test/progress.vh"},

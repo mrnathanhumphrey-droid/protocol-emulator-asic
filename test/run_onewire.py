@@ -131,6 +131,7 @@ def build_vvp(rise_ns, ph=0, ps=None):
 def sim(name, variant, txn, rise_ns, extra=(), ph=0):
     img = os.path.join(TMP, "ow_%s.hex" % name)
     onewire.write_hex(img, onewire.build(variant))
+    sim_run.scratch_image("run_onewire", img)
     lines, rxmap = onewire.engine(variant).feed_file(txn)
     pidx = next((i for i, r in enumerate(rxmap) if r[0] == "poll"), len(rxmap))
     fpath = os.path.join(TMP, "ow_%s_feed.hex" % name)

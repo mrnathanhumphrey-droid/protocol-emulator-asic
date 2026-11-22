@@ -78,11 +78,16 @@ pad_smoke_image|clean|pad_smoke_image|$NB
 falloff|clean|falloff|$NB
 short51|clean|pad_corpus_i2c|51
 mut_short51|nofull|pad_corpus_i2c|51"
+nran=0
 while IFS='|' read -r base build imgb nb; do
   img="$OUT/$imgb.hex"
+  nran=$((nran + 1))
+  # ⛔ 11-21: the sim gets NO stdin. The arm list is this loop's stdin (the heredoc
+  # below); a process in the sim step read it, so the loop ended after the 5th arm --
+  # short51 / mut_short51 never ran and the script still printed PASSED.
   ( cd "$OUT/build_$build" && sim_exec "$img" ./store.sim +IMG="$img" +NBYTES="$nb" +PEER=none \
         +NCYC=60000 +SCLHOLD=0 +OUT="$OUT/trace_$base.txt" \
-        --x-initial unique +verilator+rand+reset+2 ) > "$OUT/run_$base.log" 2>&1
+        --x-initial unique +verilator+rand+reset+2 < /dev/null ) > "$OUT/run_$base.log" 2>&1
   if ! trace_completed "$OUT/run_$base.log" 60000 "$base"; then rc=1; continue; fi
   verdict="$(grep 'clocked_conform\[M\]' "$OUT/run_$base.log" | tail -1)"
   m5="$(grep 'clocked_conform\[M5\]' "$OUT/run_$base.log" | tail -1)"
@@ -136,6 +141,11 @@ while IFS='|' read -r base build imgb nb; do
 done <<RUNSEOF
 $RUNS
 RUNSEOF
+# ⛔ every planned arm was reached -- a loop that ends early is red, never PASSED
+nplan="$(printf '%s\n' "$RUNS" | grep -c '|')"
+if [ "$nran" != "$nplan" ]; then
+  echo "  *** only $nran of $nplan arms were reached -- the arm loop ended early"; rc=1
+fi
 printf '{"first_filler_addr": %s, "runs": {%s\n}}\n' "$want" "$rows" > "$JSON"
 echo
 echo "  ⇒ measurement written to $JSON"

@@ -136,6 +136,7 @@ def five_image(name, delays):
     os.makedirs(SCRATCH, exist_ok=True)
     path = os.path.join(SCRATCH, "w_%s.hex" % name)
     write_image(path, m.build_five(list(delays)))
+    sim_run.scratch_image("run_w_sweep", path)
     return path
 
 

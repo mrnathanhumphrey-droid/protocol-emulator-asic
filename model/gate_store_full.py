@@ -126,6 +126,47 @@ def filler_checks():
     return probs
 
 
+#: the pinned Verilator inside WSL -- the same default ci/run_gates.sh's store step uses
+WSL_VERILATOR = "${PE_VERILATOR_WSL:-/opt/oss-cad-suite-2026-09-30/bin/verilator}"
+
+
+def _wsl_path(p):
+    d, rest = os.path.splitdrive(os.path.abspath(p))
+    return "/mnt/%s%s" % (d[0].lower(), rest.replace("\\", "/"))
+
+
+def measure():
+    """The sentinel run HERE, when no PE_STORE_JSON was handed in (the pre-push set, Wilson
+    11-20: the gate joins the commit set -- 83 s, ~1.5 GB, measured 11-21). Runs
+    `test/store_run.sh` into probe_store/ -- directly where bash and the pinned Verilator
+    are (ci/tools.sh resolves PE_VERILATOR), or delegated to WSL on Windows the way
+    ci/run_gates.sh's store step does. -> the measurement's path, or None (and the gate is
+    RED: sim_check refuses a missing measurement, never skips it)."""
+    import subprocess
+    out = os.path.join(ROOT, "probe_store")
+    js = os.path.join(out, "store.json")
+    if os.path.isfile(js):
+        os.remove(js)                       # a stale measurement must never pass for this run
+    if os.name == "nt":
+        wrap = os.path.join(ROOT, "probe_ci_store.sh")
+        with open(wrap, "w", encoding="ascii", newline="\n") as fh:
+            fh.write("#!/bin/bash\ncd \"$(dirname \"$0\")\" || exit 1\n"
+                     "export PE_VERILATOR=\"%s\"\n"
+                     "bash test/store_run.sh \"$PWD/probe_store\"\n" % WSL_VERILATOR)
+        cmd = ["wsl.exe", "-e", "bash", _wsl_path(wrap)]
+    else:
+        cmd = ["bash", os.path.join(ROOT, "test", "store_run.sh"), out]
+    print("    no PE_STORE_JSON: measuring here -- %s" % " ".join(cmd))
+    r = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True, encoding="utf-8",
+                       errors="replace")
+    for ln in (r.stdout + r.stderr).strip().splitlines()[-4:]:
+        print("      | " + ln)
+    if r.returncode != 0 or not os.path.isfile(js):
+        print("    *** the sentinel run failed (rc %d)" % r.returncode)
+        return None
+    return js
+
+
 def sim_check(path):
     """Judge `test/store_run.sh`'s JSON. Returns 1 on any problem."""
     import json
@@ -254,7 +295,7 @@ def main() -> int:
     # `falloff` arm of `test/store_run.sh` is what shows it CAN say otherwise.
     print()
     print("  --- the bench sentinel, measured (test/store_run.sh) ---")
-    if sim_check(os.environ.get("PE_STORE_JSON")):
+    if sim_check(os.environ.get("PE_STORE_JSON") or measure()):
         rc = 1
 
     print()

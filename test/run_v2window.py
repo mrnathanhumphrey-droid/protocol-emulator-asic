@@ -61,6 +61,7 @@ def image(path):
     hdrs = [I.hdr(mosi, sck, 1, d, 0, *I.d_fields(d), I.ACT_BASE)]
     hdrs += [I.hdr(p, p, 0, 500, 0, 200, 240, park) for p in (0, 3, 4, 5)]
     I.write_image(path, I.join_image(hdrs, prog))
+    sim_run.scratch_image("run_v2window", path)
     return path
 
 

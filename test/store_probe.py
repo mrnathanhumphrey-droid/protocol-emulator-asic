@@ -60,12 +60,18 @@ def main() -> int:
     if len(sys.argv) > 1:
         OUT = os.path.abspath(sys.argv[1])
     os.makedirs(OUT, exist_ok=True)
+    # ⛔ Wilson 11-21: an image simulated outside the universe needs this run's provenance,
+    # clocked or not -- store_run.sh runs these through sim_run, under the run token
+    # ci/tools.sh exports for the whole script
+    import sim_run
     for name in SHIPPED:
         img = load(os.path.join(HERE, name))
         save(os.path.join(OUT, "pad_" + name), I.full_store(img))
+        sim_run.scratch_image("store_probe", os.path.join(OUT, "pad_" + name))
         print("  pad_%-22s %3d -> %d bytes" % (name, len(img), I.STORE_BYTES))
     img, first_filler = build_falloff()
     save(os.path.join(OUT, "falloff.hex"), I.full_store(img))
+    sim_run.scratch_image("store_probe", os.path.join(OUT, "falloff.hex"))
     print("  falloff.hex                %3d -> %d bytes; first filler word at %d"
           % (len(img), I.STORE_BYTES, first_filler))
     with open(os.path.join(OUT, "falloff_addr.txt"), "w") as fh:

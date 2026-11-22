@@ -229,6 +229,7 @@ def frame_image(d):
     import pe_isa
     p = os.path.join(OUT, "i2cframe_d%d.hex" % d)
     pe_isa.write_image(p, msi.build_i2cframe(d))
+    sim_run.scratch_image("gate_sda_hold", p)
     return os.path.relpath(p, ROOT).replace("\\", "/")
 
 
