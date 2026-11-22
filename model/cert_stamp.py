@@ -57,6 +57,8 @@ IMAGES_OF_RECORD_PENDING = (
 
 #: must-fire switch (gate_cert_stamp M_CS_A2_IGNORED): the stamp ignores A2's verdict
 A2_MUT = False
+#: must-fire switch (gate_cert_stamp M_CS_SYMDEF_PAYLOAD): SYMDEF's payload read as its delay
+SYMDEF_MUT = False
 
 
 class Uncertified(Exception):
@@ -70,15 +72,18 @@ def _words(img, base):
         a += I.ACT_BYTES
 
 
-def _tuple(x):
+def _tuple(x, t=None):
+    """(op, pin, level, delay, q) as compute_j reads it, the delay being the word's ONE price,
+    pe_isa.dispatch_delay (Wilson 11-22, closing the class): a branch's wait W, SYMDEF's header
+    period `t` (870cc3f), SHIFTI's low 8 bits -- never a target, payload or immediate read as
+    a delay. `t`: the lane header's period (image_lanes passes it)."""
+    if x["op"] == getattr(I, "OP_SYMDEF", None) and SYMDEF_MUT:
+        d = x["delay"]                                  # the must-fire: payload as delay
+    else:
+        d = I.dispatch_delay(x, {"t": t})
     if x["op"] == I.OP_LOOP:
-        return (x["op"], 0, 0, (x["count"] << I.PINB_W) | x["pinb"], x["q"])
-    if x["op"] in I.BRANCH_OPS:
-        # ⛔ a BRANCH's delay field is its TARGET (delay[6:0]); its spacing is the wait W
-        # (count:pinb, pe_isa.branch_wait) -- found 11-15: run_branch_check's braw images read
-        # "d_min = 6" (a target) and were stamped uncertified while A2 certified them
-        return (x["op"], x["pin"], x["level"], I.branch_wait(x), x["q"])
-    return (x["op"], x["pin"], x["level"], x["delay"], x["q"])
+        return (x["op"], 0, 0, d, x["q"])
+    return (x["op"], x["pin"], x["level"], d, x["q"])
 
 
 def image_lanes(img):
@@ -97,7 +102,7 @@ def image_lanes(img):
         first = next(_words(img, b), (None, None))[1]
         if len(sharers) > 1 and first is not None and first["op"] == I.OP_REARM:
             parked.add(b)
-    return {ln: [_tuple(x) for _w, x in PC.lane_words(img, ln, I)]
+    return {ln: [_tuple(x, I.read_header(img, ln)["t"]) for _w, x in PC.lane_words(img, ln, I)]
             for ln in range(I.N_LANES) if heads[ln] not in parked}
 
 

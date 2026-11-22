@@ -169,14 +169,16 @@ def lane_graph(img, lane, I=None):
     base = min(ws)
     g = {}
     sym = getattr(I, "OP_SYMDEF", None)
+    t = I.read_header(img, lane)["t"]
     for w, x in ws.items():
+        x = dict(x, lane_t=t)                           # _price reads the lane's header period
         if sym is not None and x["op"] == sym and not SYMDEF_MUT:
             # ⛔ SYMDEF's delay field is CONFIG PAYLOAD (Wilson 11-22): the RTL advances the lane
             # by the header period (`a_dly_sg = (a_op == OP_SYMDEF) ? l_t[cur_rel] : a_dly_wb`),
             # as cert_stamp (870cc3f) and A2 (program_a2.lanes_of) price it. Priced here, where
             # the lane is known, so word_gaps, upper_gaps and every caller read the same delay;
             # the payload is kept under its own key
-            x = dict(x, delay=I.read_header(img, lane)["t"], sym_payload=x["delay"])
+            x = dict(x, delay=_price(x, I), sym_payload=x["delay"])
         if x["op"] == I.OP_REARM:
             succ = [base] if x["level"] else [w]       # looping: the base; chaining: itself
         elif x["op"] in I.BRANCH_OPS:
@@ -189,29 +191,37 @@ def lane_graph(img, lane, I=None):
     return g
 
 
+def _price(x, I):
+    """the word's ONE price, pe_isa.dispatch_delay (Wilson 11-22, closing the class), at its
+    lane's header period (`lane_t`, set by lane_graph). SYMDEF_MUT (the must-fire): SYMDEF's
+    payload read as its delay."""
+    if SYMDEF_MUT and x["op"] == getattr(I, "OP_SYMDEF", None):
+        return x.get("sym_payload", x["delay"])
+    return I.dispatch_delay(x, {"t": x.get("lane_t")})
+
+
 def word_gaps(x, after_arm, after_se0, prem, I, half_t=0):
     """the release gaps of the word's writebacks, in order (the last one is its retirement).
     `half_t`: HALF's extra release beyond a plain ARM, max(1, l_t // 2) - 1 (ArmHalf)."""
     op = x["op"]
     if op in I.BRANCH_OPS:
-        return [I.branch_wait(x)]
+        return [_price(x, I)]
     if op == I.OP_ARM:
         g = prem["arm_j"] if (arm_kind(x, I) == "edge" and after_se0) else prem["arm_floor"]
         g += half_t if arm_half(x, I) else 0
         if PC.arm_is_ft(x, I):
             # ArmFT.arm_release_T: released at min(edge + 1, D), D = ts + a_dly (less the
             # rebase's cycle after an ARM): the gap is at least the smaller
-            g = min(g, x["delay"] - (1 if after_arm else 0))
+            g = min(g, _price(x, I) - (1 if after_arm else 0))
         return [g]
     st = (op in (I.OP_SHIFT, I.OP_SHIFTIN) and x["mod"] & I.MOD_SELF_TIMED) or op == I.OP_SHIFTI
     if op == I.OP_SHIFTI:
-        d = x["delay"] & 0xFF
-        return [d] * 8
+        return [_price(x, I)] * 8
     if st and op == I.OP_SHIFTIN:
-        return [min(x["delay"], prem["rean_floor"])] * max(1, x["count"])
+        return [min(_price(x, I), prem["rean_floor"])] * max(1, x["count"])
     if st:
-        return [x["delay"]] * 8
-    d = x["delay"] - (REBASE if after_arm else 0)
+        return [_price(x, I)] * 8
+    d = _price(x, I) - (REBASE if after_arm else 0)
     return [max(d, 0)]
 
 
@@ -428,16 +438,16 @@ def upper_gaps(x, I):
     None where no upper bound holds (an ARM, a USB receive: their releases are the bus's)"""
     op = x["op"]
     if op in I.BRANCH_OPS:
-        return I.branch_wait(x)
+        return _price(x, I)
     if PC.arm_is_ft(x, I):
-        return x["delay"]                             # min(edge + 1, D) <= D (arm_release_T)
+        return _price(x, I)                           # min(edge + 1, D) <= D (arm_release_T)
     if op == I.OP_ARM or (op == I.OP_SHIFTIN and x["mod"] & I.MOD_SELF_TIMED):
         return None
     if op == I.OP_SHIFTI:
-        return 8 * (x["delay"] & 0xFF)
+        return 8 * _price(x, I)
     if op in (I.OP_SHIFT, I.OP_SHIFTIN) and x["mod"] & I.MOD_SELF_TIMED:
         return None                                   # a buffer send: its length is the data's
-    return x["delay"]
+    return _price(x, I)
 
 
 def is_our_j(x, I):
@@ -455,7 +465,7 @@ def chains_into(g, preds, s, I, prem, depth=24, half_t=0):
         for p in preds[w]:
             x = g[p][0]
             if PC.arm_is_ft(x, I) and w == p + 1:
-                out.append(("FT timeout", acc + x["delay"]))   # correction A's path
+                out.append(("FT timeout", acc + _price(x, I)))   # correction A's path
                 continue
             if arm_kind(x, I) == "edge" and preds[p] and all(
                     arm_kind(g[q][0], I) == "se0" for q in preds[p]):
@@ -471,7 +481,7 @@ def chains_into(g, preds, s, I, prem, depth=24, half_t=0):
                 # a receive word: its packet's EOP ends >= its last bit's release (mid-bit,
                 # +/- drift) + half a bit + the SE0 (TLEOPR); the next word is released a bit
                 # after that last bit
-                dd = x["delay"]
+                dd = _price(x, I)
                 out.append(("packet EOP", dd - dd // 2 - prem["tleopr"] + prem["rean_drift"]
                             + acc))
                 continue
@@ -528,7 +538,7 @@ def full_report(img, name="image"):
         if offs and not any(kd is None for kd, _o in ch):
             ftoff[a] = max(offs)
             egap[a] = max(prem["arm_floor"], prem["tipd_fast"] + SYNC_MIN + 1 - max(offs))
-            gaps[a] = [min(egap[a], g[a][0]["delay"])]
+            gaps[a] = [min(egap[a], _price(g[a][0], I))]
         c2 = a + 2
         if c2 in g and arm_kind(g[c2][0], I) == "se0":
             # PREMISE (FT edge path): PC+2 is released at the reply's SOP edge + 1; the reply's
@@ -743,7 +753,7 @@ def full_report(img, name="image"):
             if not okp:
                 probs.append("PC+2 w%d armed late on the edge path" % c2)
         print("  ARM w%d: timeout -> w%d released <= ts + %d, + 1 disarm cycle; edge -> flush, "
-              "w%d head valid <= release + %s %s" % (a, c1, g[a][0]["delay"], c2,
+              "w%d head valid <= release + %s %s" % (a, c1, _price(g[a][0], I), c2,
                                                     "-" if lt is None else lt,
                                                     "OK" if not probs else "REFUSED: " +
                                                     "; ".join(probs)))
@@ -762,8 +772,8 @@ def full_report(img, name="image"):
             print("== correction A: ARM w%d has a timeout but an unanchored chain" % a)
             fails.append(("A", "w%d unanchored" % a))
             continue
-        t_lo = min(offs) + g[a][0]["delay"]                 # earliest timeout after our EOP
-        t_hi = max(offs) + g[a][0]["delay"]                 # latest
+        t_lo = min(offs) + _price(g[a][0], I)                 # earliest timeout after our EOP
+        t_hi = max(offs) + _price(g[a][0], I)                 # latest
         ok1 = t_lo >= prem["resp_window"]
         worst = None
         stack = [(n, t_hi) for n in g[a][1] if n == a + 1]  # PC+1: the timeout continuation

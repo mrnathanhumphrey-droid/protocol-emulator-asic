@@ -140,16 +140,15 @@ def usb_receive_live(progs, I=None):
         for x in progs[I.USB_LANE][1])
 
 
-def spacing_of(x, I=None):
-    """an action's dispatch spacing: a branch's wait W, else its delay (0 = none, skipped)"""
+def spacing_of(x, I=None, hdr=None):
+    """an action's dispatch spacing: the word's ONE price, pe_isa.dispatch_delay (Wilson 11-22:
+    a branch's wait W, SYMDEF's header period, SHIFTI's low 8 bits; 0 = none, skipped). `hdr`:
+    the lane's header -- required for SYMDEF, whose delay field is config payload."""
     I = I or _isa()
-    if x["op"] in I.BRANCH_OPS:
-        return I.branch_wait(x)
-    if x["op"] == I.OP_SHIFTI:
-        # SHIFTI's delay field carries immediate bits above its low 8: the RTL reads only those
-        # (a_dly = cur_act[LOWX+BQW+BPW +: 8] for C_SHI, pe_engine.v l.1892; pe_isa.act_shifti)
-        return x["delay"] & 0xFF
-    return x["delay"]
+    if x["op"] == getattr(I, "OP_SYMDEF", None) and hdr is None:
+        raise ValueError("spacing_of: a SYMDEF word is priced at its lane header's period; "
+                         "pass hdr")
+    return I.dispatch_delay(x, hdr or {"t": None})
 
 
 # ---- A2 exports (agent 1, 11-14), under (b'): functions, never typed numbers ------------------
@@ -256,8 +255,9 @@ def usb_coresident_problems(img, k=None):
     for ln in range(I.N_LANES):
         if ln == I.USB_LANE:
             continue
+        hdr = I.read_header(img, ln)
         for w, x in lane_words(img, ln, I):
-            s = spacing_of(x, I)
+            s = spacing_of(x, I, hdr)
             if 0 < s < lim:
                 out.append("lane %d word %d: spacing %d < %d -- in an image using the USB "
                            "receive, every other lane's per-action spacing must be >= R + "
