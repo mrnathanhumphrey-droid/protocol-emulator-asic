@@ -320,6 +320,30 @@ def branch_wait(x):
     return (x["count"] << PINB_W) | x["pinb"]
 
 
+def dispatch_delay(x, hdr, half_phase=False):
+    """⭐⭐ THE ONE PRICE OF A WORD (Wilson 11-22, closing the class): the cycles its
+    writeback adds to the lane's timestamp -- the RTL's `wb_dly` (src/pe_engine.v,
+    `a_dly_wb` / `a_dly_sg` / `wb_dly`). Every tool that prices a word calls this; the
+    stamp, A2 and lane_cert each decided it on their own, and two of the three read
+    SYMDEF's payload as a delay at different times. `x`: an unpacked word; `hdr`: its
+    lane's header (read_header). The delay field is the delay EXCEPT:
+      * SYMDEF: config payload -> the header period `t` (`a_dly_sg`);
+      * a branch (BRANCH_OPS): its target -> the wait W (`a_dly_wb`, branch_wait);
+      * SHIFTI: the immediate rides above the low 8 bits -> those 8 (`a_dly` for C_SHI);
+      * `half_phase`: the HIGH phase of a HALF_HIGH lane's clocked action -> the delay
+        halved (`a_dly >> 1`; the caller knows the phase, the word does not).
+    SER, DRIVE_SAMPLE, POST, WAIT and OBSERVE carry their real delay in the field (WAIT's
+    hold on a flag gates its readiness, not its delay)."""
+    op = x["op"]
+    sym = globals().get("OP_SYMDEF")
+    if sym is not None and op == sym:
+        return hdr["t"]
+    if op in BRANCH_OPS:
+        return branch_wait(x)
+    d = x["delay"] & 0xFF if op == OP_SHIFTI else x["delay"]
+    return d >> 1 if half_phase else d
+
+
 def act_branch_bit(pin, level, target, wait) -> bytes:
     """BRANCH_BIT (opcode 8, primitive 1): sample `pin` (READBIT's sample) at
     the branch's writeback; if it equals `level`, continue at word `target`,
