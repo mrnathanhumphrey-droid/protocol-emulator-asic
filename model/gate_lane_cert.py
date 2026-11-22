@@ -131,6 +131,9 @@ every must-fire must turn its check red, or the gate is not testing what it says
            edge; that case on runBK is owed, rtl_contracts.COMPOSITION)
   M_LC_HFREE_EDF    the check over the EDF-certified images (pair_busy, uart_tx_busy short)
                     -> check 22 red
+  M_LC_SYMDEF_PAYLOAD SYMDEF's payload read as its delay (it is priced at the header period t,
+                    Wilson 11-22, as cert_stamp and A2 price it) -> check 22 red on the
+                    symbol-generator images; n/a on an ISA without OP_SYMDEF
   M_LC_FT_UNSEEN    no ARM read as FALLTHROUGH                    -> check 3 red
   M_LC_FT_NOFLOOR   no lateness floor after the flush             -> check 3 red
 Static, < 2 s. Usage: python model/gate_lane_cert.py [dir holding usbdev.py]
@@ -1222,6 +1225,19 @@ def main():
     kills.append(("M_LC_HFREE_EDF", not k22,
                   "the gap check over the EDF-certified images (pair_busy, uart_tx_busy short): "
                   "check 22 red"))
+    # M_LC_SYMDEF_PAYLOAD (Wilson 11-22): SYMDEF's payload read as its delay turns check 22 red
+    # on the symbol-generator images. Only on an ISA that has SYMDEF; there, fail-closed (no
+    # SYMDEF image in the universe -> the mutant survives -> red)
+    if hasattr(I, "OP_SYMDEF"):
+        LC.SYMDEF_MUT = True
+        try:
+            ks, _m = check_hfree(BB, LC, I)
+        finally:
+            LC.SYMDEF_MUT = False
+        kills.append(("M_LC_SYMDEF_PAYLOAD", not ks,
+                      "SYMDEF's payload read as its delay: check 22 red"))
+    else:
+        print("  must-fire M_LC_SYMDEF_PAYLOAD n/a  (this ISA has no OP_SYMDEF)")
     # M_LC_FT_UNSEEN / M_LC_FT_NOFLOOR
     orig_ft = PC.arm_is_ft
     PC.arm_is_ft = lambda x, I=None: False

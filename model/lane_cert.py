@@ -48,6 +48,10 @@ USB_TRSPIPD1_HALF_BITS = 13
 #: the host-interval premises
 PPM_MUT = False
 
+#: must-fire switch (gate_lane_cert M_LC_SYMDEF_PAYLOAD): SYMDEF's delay field (config payload)
+#: read as its dispatch delay -- the bug cert_stamp had until 870cc3f
+SYMDEF_MUT = False
+
 
 def slow_factor():
     """The device clock's slow edge as a fraction of nominal: 1 - SOURCE_PPM / 1e6, the worse of
@@ -164,7 +168,15 @@ def lane_graph(img, lane, I=None):
     ws = dict(PC.lane_words(img, lane, I))
     base = min(ws)
     g = {}
+    sym = getattr(I, "OP_SYMDEF", None)
     for w, x in ws.items():
+        if sym is not None and x["op"] == sym and not SYMDEF_MUT:
+            # ⛔ SYMDEF's delay field is CONFIG PAYLOAD (Wilson 11-22): the RTL advances the lane
+            # by the header period (`a_dly_sg = (a_op == OP_SYMDEF) ? l_t[cur_rel] : a_dly_wb`),
+            # as cert_stamp (870cc3f) and A2 (program_a2.lanes_of) price it. Priced here, where
+            # the lane is known, so word_gaps, upper_gaps and every caller read the same delay;
+            # the payload is kept under its own key
+            x = dict(x, delay=I.read_header(img, lane)["t"], sym_payload=x["delay"])
         if x["op"] == I.OP_REARM:
             succ = [base] if x["level"] else [w]       # looping: the base; chaining: itself
         elif x["op"] in I.BRANCH_OPS:
