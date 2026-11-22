@@ -216,7 +216,9 @@ KEY = ("dstar", "dstar29", "dstar39", "dstar39_v2", "dstar39_st", "dstar39_hold"
        # PrioRespF.lean (Wilson 11-21 usbdev ruling): the USB lane's own bound on the flush run (hRz)
        "relT_le_fl", "ts_monoF_fl", "ts_flushF", "ts_constF", "idle3F", "prio_respF", "prio_respT",
        # EdfBF.lean (usbdev hpri): the USB lane's priority derived on the flush run
-       "dec_tsF1", "hpri_bF", "prio_resp_edfF", "prio_resp_edfT")
+       "dec_tsF1", "hpri_bF", "prio_resp_edfF", "prio_resp_edfT",
+       # FlushChain.lean (hspan flush lemma, runF half): the release chain across flushes
+       "ts_chainF_ge", "ts_chainT_ge")
 #: proof_constants.load() key -> the Lean expression that must evaluate to it (SPEC: the map)
 CONSTS = {
     "lemmaA_window": "LEMMA_A_WINDOW", "R_base": "R_BASE", "dispatch_cycles": "DISPATCH_CYCLES",
