@@ -29,7 +29,10 @@ MUST-FIRES, on a temporary copy of the tree:
   M_LEAN_CONST   proof_constants.json's pending_slack moved by one          -> check 5 red
   M_LEAN_PREMISE_UNLISTED  an extra hypothesis `hplant` planted in ready_pc1_plain_BK's
                  signature (the proof still builds)                         -> check 6 red
-All four are judged by the same `judge` as the clean arm (gate_meta's stub on it turns the gate
+  M_LEAN_EDGE_BUFFERED  BufEng's buffered word never loads and the buffer never clears: the edge
+                 word left in the buffer (Wilson 11-22, K3's buffer clause; EdgeBuf rests on
+                 WfB.bh and OrdB.o3, which no longer build)                 -> check 1 red
+All five are judged by the same `judge` as the clean arm (gate_meta's stub on it turns the gate
 red). The other direction (a listed binder the signature lacks) is shown red on the clean
 build's binders with a stale name added to a copy of PREMISES (no rebuild); likewise every
 declared `anon` count moved by one must be caught (11-22).
@@ -228,7 +231,9 @@ KEY = ("dstar", "dstar29", "dstar39", "dstar39_v2", "dstar39_st", "dstar39_hold"
        # ReadyBK.lean (hRdy, 11-22): the ready theorems on the flush run, stretch by stretch
        "stretch_lift", "ready_pc1_plain_BK", "ready_pc2_plain_BK", "ready_pc2_arm_BK", "ready_pc1_spare_BK", "ready_pc2_plain_spare_BK", "ready_pc2_arm_spare_BK",
        # RestartZS.lean (hZS, 11-22): the restart's start conditions derived from check 20's margins
-       "start_rel_runBK", "hZS0_runBK", "hHS0_runBK")
+       "start_rel_runBK", "hZS0_runBK", "hHS0_runBK",
+       # EdgeBuf.lean (K3's buffer clause, Wilson 11-22): the edge word never in the buffer
+       "oldest_not_buffered", "edge_word_not_buffered_runBK", "edge_word_held_runBK")
 #: proof_constants.load() key -> the Lean expression that must evaluate to it (SPEC: the map)
 CONSTS = {
     "lemmaA_window": "LEMMA_A_WINDOW", "R_base": "R_BASE", "dispatch_cycles": "DISPATCH_CYCLES",
@@ -418,6 +423,28 @@ PREMISES.update({
         "anon": 4,
     },
 })
+#: EdgeBuf (K3's buffer clause, 11-22): the run from a primed start (hI, hO: shape), the flushes'
+#: FlushOk (scan_ok), K3(a)'s keep (hkeep: fetch_order, as OrderK's) and the edge word present (hE)
+PREMISES.update({
+    "edge_word_not_buffered_runBK": {
+        "applies": {},
+        "contract": {"slot_requester": ("hok",), "scan_ok": ("hF",), "fetch_order": ("hkeep",)},
+        "shape": ("hI", "hO"),
+    },
+    "edge_word_held_runBK": {
+        "applies": {},
+        "contract": {"slot_requester": ("hok",), "scan_ok": ("hF",), "fetch_order": ("hkeep",)},
+        "shape": ("hI", "hO", "hE"),
+    },
+})
+#: the M_LEAN_EDGE_BUFFERED plant (Wilson 11-22): BufEng's buffered word never loads and the buffer
+#: never clears -- the edge word stays in the buffer. (file, [(text, replacement)])
+EDGEBUF_PLANT = ("BufEng.lean", [
+    ("def loadTo (x : EngB) (l : Lane) (s : Slot) : Bool :=\n  x.buf l && decide (s = !x.e.sel l) && !x.e.actv l s",
+     "def loadTo (x : EngB) (l : Lane) (s : Slot) : Bool :=\n  false && (x.buf l && decide (s = !x.e.sel l) && !x.e.actv l s)"),
+    ("  else if (x.buf l && !x.e.spareValid l) = true then false\n",
+     "  else if (x.buf l && !x.e.spareValid l) = true then x.buf l\n"),
+])
 #: the M_LEAN_PREMISE_UNLISTED plant: (file, theorem, the signature text it extends, the binder)
 #: ⚠ planted in a theorem NOTHING calls: a planted premise in a theorem with a caller breaks the
 #: caller's build, so check 6 never runs (moved 11-22 from ready_pc1_plain_T, which ReadyBK now
@@ -432,6 +459,8 @@ SCRATCH_MUTANTS = {
     "M_LEAN_CONST": "proof_constants.json's pending_slack moved by one, in a temp copy of the tree",
     "M_LEAN_PREMISE_UNLISTED": "an extra hypothesis planted in ready_pc1_plain_BK's signature, "
                                "in a temp copy of the tree",
+    "M_LEAN_EDGE_BUFFERED": "BufEng's buffered word never loads and the buffer never clears (the "
+                            "edge word left in the buffer), in a temp copy of the tree",
 }
 
 
@@ -589,6 +618,16 @@ def _mutant_tree(kind):
         with open(jp, "w", encoding="utf-8") as fh:
             json.dump(k, fh, indent=2)
         return tmp, dst
+    if kind == "edgebuf":
+        f, reps = EDGEBUF_PLANT
+        p = os.path.join(dst, "JLane", f)
+        src = open(p, encoding="utf-8").read().replace("\r\n", "\n")
+        for a, b in reps:
+            assert src.count(a) == 1, a
+            src = src.replace(a, b)
+        with open(p, "w", encoding="utf-8") as fh:
+            fh.write(src)
+        return tmp, dst
     if kind == "premise":
         f, _thm, sig, plant = PREMISE_PLANT
         p = os.path.join(dst, "JLane", f)
@@ -631,7 +670,7 @@ def main() -> int:
                  ", ".join(sorted(spec["contract"])), len(spec["shape"])))
     for p in probs:
         print("  ***", p)
-    for kind in ("sorry", "axiom", "const", "premise"):
+    for kind in ("sorry", "axiom", "const", "premise", "edgebuf"):
         tmp, tree = _mutant_tree(kind)
         try:
             mp, _ = judge(tree, KEY + ((PLANT_THM,) if kind in ("sorry", "axiom") else ()))
@@ -641,8 +680,11 @@ def main() -> int:
         # (not merely by the source grep for `axiom`), the constants comparison, and the
         # premise list (the planted binder named as unlisted)
         want = {"sorry": "`sorry` in", "axiom": "outside {", "const": "in proof_constants",
-                "premise": "premise hplant of %s is unlisted" % PREMISE_PLANT[1]}[kind]
-        name = "PREMISE_UNLISTED" if kind == "premise" else kind.upper()
+                "premise": "premise hplant of %s is unlisted" % PREMISE_PLANT[1],
+                # the planted step breaks the invariants the lemma rests on: the tree no longer
+                # builds (BufEng's WfB / OrdB proofs, EdgeBuf downstream)
+                "edgebuf": "lake build failed"}[kind]
+        name = {"premise": "PREMISE_UNLISTED", "edgebuf": "EDGE_BUFFERED"}.get(kind, kind.upper())
         hit = [p for p in mp if want in p]
         red = bool(hit)
         print("  must-fire M_LEAN_%-6s %s  %s" % (name, "RED (killed)" if red else "*** SURVIVED",

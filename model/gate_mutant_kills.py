@@ -299,6 +299,9 @@ SCRATCH = {
     # the premise lists (Wilson 11-19): an extra hypothesis planted in a run-level theorem's
     # signature -- gate lean-build check 6 reds on the unlisted premise (CI, lean shard)
     "M_LEAN_PREMISE_UNLISTED": "model/gate_lean_build.py",
+    # K3's buffer clause (Wilson 11-22): a planted step leaving the edge word in the buffer --
+    # the invariants EdgeBuf rests on no longer build, gate lean-build reds (CI, lean shard)
+    "M_LEAN_EDGE_BUFFERED": "model/gate_lean_build.py",
     # the USB sweep (Wilson 11-13 condition 4; a2 02bf147): the deadline margin at 1
     # -- gate usb_sweep's J <= 2 reds (CI, sim2)
     "M_USB_MARGIN1": "model/gate_usb_sweep.py",
