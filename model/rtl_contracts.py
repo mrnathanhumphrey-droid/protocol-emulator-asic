@@ -252,8 +252,11 @@ CONTRACT_PREMISES = {
 #: owes. gate_lane_cert check 21 turns red on a proved milestone with an owed step, a proved step
 #: with a theorem not at the Lean gate or none, or an owed step with no "what".
 COMPOSITION = {
+    # proved 11-22 (Nate's go): all 25 steps proved at the Lean gate. The Lean side only: the RTL
+    # contracts it rests on (RTL_CONTRACTS) still have their must-fires owed (RTL batch, agent 1),
+    # and the buffer's configuration of record also waits on the harden at 3 coefficients
     "slot_on_composition": {
-        "status": "owed",
+        "status": "proved",
         "steps": [
             {"step": "trajectory between flushes (3a-3c)", "status": "proved",
              "theorems": ("trajY_runBK", "trajY_runBK_noflush", "kill_prov_runBK")},
