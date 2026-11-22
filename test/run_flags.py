@@ -124,6 +124,73 @@ def lag_image(kind, n=1):
     return I.join_image(hdrs, p0 + p1 + [I.act(I.OP_REARM, 0, 0, 500)])
 
 
+F_WRAP_ACK = 0                # the wrap arm's acknowledgement flag
+WRAP_N = I.FLAG_LAG_MAX       # POSTs (and WAITs) per data flag per pass: the lag bound
+WRAP_PASSES = 9               # flag 0 counts once per pass: 8 to wrap, one more to see it
+WRAP_NCYC = 30000
+
+
+def wrap_image():
+    """THE FLAG ARM (Wilson 11-20): every flag's posted AND consumed count runs 0 -> 7 and
+    wraps mod 8, under a lag the compiler proves. Both lanes LOOP:
+      lane 1  POST flags 1..7, WRAP_N times each; uio[1] high; WAIT flag 0; uio[1] low
+      lane 0  a 400-cycle start (lane 1 runs WRAP_N POSTs ahead on flag 1: the lag reaches
+              the bound), WAIT flags 1..7 WRAP_N times each; uio[0] high; POST flag 0;
+              uio[0] low
+    pe_isa's R2: data flags lag <= 7 (a 1, b 7: k1 7 + k2 0), flag 0 lag <= 1. The data
+    counts wrap on pass 2; flag 0 (one count a pass) after 8 passes."""
+    l0 = I.ACT_BASE
+    loop = I.act(I.OP_REARM, 0, 1, D)
+    p0 = [I.act(I.OP_LEVEL, I.PIN_NONE, 0, 400)]
+    p0 += [I.act_wait(f, D) for f in range(1, I.N_FLAGS) for _ in range(WRAP_N)]
+    p0 += [I.act(I.OP_LEVEL, PA, 1, D), I.act_post(F_WRAP_ACK, D), I.act(I.OP_LEVEL, PA, 0, D), loop]
+    l1 = l0 + len(p0) * I.ACT_BYTES
+    p1 = [I.act_post(f, D) for f in range(1, I.N_FLAGS) for _ in range(WRAP_N)]
+    p1 += [I.act(I.OP_LEVEL, PB, 1, D), I.act_wait(F_WRAP_ACK, D), I.act(I.OP_LEVEL, PB, 0, D), loop]
+    park = l1 + len(p1) * I.ACT_BYTES
+    hdrs = [I.hdr(PA, I.PIN_NONE, 1, D, 0, 2 * D, 3 * D, l0),
+            I.hdr(PB, I.PIN_NONE, 1, D, 0, 2 * D, 3 * D, l1)]
+    for k in range(2, I.N_LANES):
+        hdrs.append(I.hdr(k + 2, k + 2, 0, 500, 0, 200, 240, park))
+    return I.join_image(hdrs, p0 + p1 + [I.act(I.OP_REARM, 0, 0, 500)])
+
+
+def wrap_checks(vvp, tmp):
+    """[problem]: the flag arm proved and run. pe_isa accepts it with every flag's bound
+    <= FLAG_LAG_MAX (data flags exactly 7: the arm is AT the bound); on the RTL both lanes
+    complete >= WRAP_PASSES passes (uio[0] and uio[1] each rise that often), so every
+    flag's posted and consumed counts have wrapped."""
+    out = []
+    img = wrap_image()
+    q = I.flag_lag_problems(img)
+    bds = [I.flag_lag_bound(img, f)[0] for f in range(I.N_FLAGS)]
+    print("    lag proof: %s; bounds by flag %s" % ("accepted" if not q else "*** REFUSED %s" % q, bds))
+    if q:
+        out.append("flag arm refused by the lag proof: %s" % q)
+    if bds[1:] != [WRAP_N] * (I.N_FLAGS - 1) or bds[F_WRAP_ACK] is None or bds[F_WRAP_ACK] > 1:
+        out.append("flag arm bounds %s: want 7 on flags 1-7 and <= 1 on flag 0" % bds)
+    p = os.path.join(tmp, "flags_wrap.hex")
+    I.write_image(p, img)
+    sim_run.scratch_image(GEN, p)
+    r = run(sim_run.vvp([vvp, "+IMG=%s" % p, "+NCYC=%d" % WRAP_NCYC], images=[p]))
+    txt = r.stdout + r.stderr
+    ev = [(oe, o) for _c, oe, o in re.findall(r"^EV (\d+) (\d\d) (\d\d)$", txt, re.M)]
+    rises = {0: 0, 1: 0}
+    prev = {0: "0", 1: "0"}
+    for oe, o in ev:
+        for pin, ix in ((0, 1), (1, 0)):          # EV prints uio[1] uio[0]
+            v = o[ix] if oe[ix] == "1" else prev[pin]
+            if v == "1" and prev[pin] == "0":
+                rises[pin] += 1
+            prev[pin] = v
+    flt = re.findall(r"^FLT .*$", txt, re.M)
+    print("    RTL: %d / %d passes (uio[0] / uio[1] rises; want >= %d each) in %d cycles%s"
+          % (rises[0], rises[1], WRAP_PASSES, WRAP_NCYC, (" " + flt[-1]) if flt else ""))
+    if min(rises.values()) < WRAP_PASSES:
+        out.append("flag arm: %s passes, want >= %d (a count did not wrap)" % (rises, WRAP_PASSES))
+    return out
+
+
 def lag_checks():
     """[problem]: the compiler's lag bound (Wilson 11-19: posted - consumed < 8 proved,
     else refused). Accepted with their bounds: this gate's two run images, the ping-pong
@@ -171,12 +238,14 @@ def coverage_arms():
     out = []
     # 11-20 (gate_coverage 4358): obs_msb, OBSERVE on an MSB-first lane (the count
     # lands bit-reversed, so the CMP takes the other arm; reach only)
-    for k, img in (("pw", image()), ("obs", observe_image()),
-                   ("obs_msb", observe_image(order=I.ORDER_MSB))):
+    # 11-21 (Wilson 11-20, the flag arm): every flag's counts 0 -> 7 and the mod-8 wrap
+    for k, img, nc in (("pw", image(), NCYC), ("obs", observe_image(), NCYC),
+                       ("obs_msb", observe_image(order=I.ORDER_MSB), NCYC),
+                       ("wrap", wrap_image(), WRAP_NCYC)):
         f = "%s/flags_%s.hex" % (COV_DIR, k)
         I.write_image(os.path.join(ROOT, f), img)
         sim_run.cov_image("run_flags", os.path.join(ROOT, f))
-        out.append(("fl_" + k, ["+IMG=" + f, "+NCYC=%d" % NCYC]))
+        out.append(("fl_" + k, ["+IMG=" + f, "+NCYC=%d" % nc]))
     return out
 
 
@@ -287,6 +356,10 @@ def main() -> int:
     print("\n  the lag bound: posted - consumed <= %d proved, else refused (Wilson 11-19)"
           % I.FLAG_LAG_MAX)
     probs += lag_checks()
+
+    print("\n  the flag arm (Wilson 11-20): every flag's counts 0 -> 7 and the mod-8 wrap, "
+          "at the lag bound")
+    probs += wrap_checks(vvp, tmp)
 
     print("\n  the one-POST-per-cycle assertion (Wilson 11-19)")
     av = os.path.join(tmp, "flags_M_FLAG_POST2.vvp")
