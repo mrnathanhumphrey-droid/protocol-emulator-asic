@@ -10,8 +10,11 @@ idle cycle where `win` named an armed lane while an unarmed one was ready. Wilso
 ready -- and this lemma: under K11, `winA win armed` makes the same choice as `win` whenever an
 unarmed lane is ready (so as choosing among unarmed ready lanes), and keeps the ruled scheduler's
 properties (`BPrimeWin`: the winner's head valid; `hwin`: only live, released lanes). So the
-window bound's no-decision count `S` is the ruled scheduler's -- 0 -- plus the FALLTHROUGH
-disarms (lane-cert check 18), with no masked-pick stall. No change to `runBA_proj` or the bridge.
+window bound's no-decision count `S` in the window where `y` waits is the ruled scheduler's: 0
+(`CloseBK.noDec_zero_K11`). The FALLTHROUGH disarm cycle (`ArmFT.disarm_noDec`, the scheduler
+naming an armed lane) is the masked-pick stall K11 excludes while `y` is ready and unarmed; the
+checker still charges it (`branch_budget._disarm_S`, Wilson 11-18). No change to `runBA_proj`
+or the bridge.
 -/
 namespace JLane
 
