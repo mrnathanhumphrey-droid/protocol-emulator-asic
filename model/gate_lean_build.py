@@ -207,7 +207,9 @@ KEY = ("dstar", "dstar29", "dstar39", "dstar39_v2", "dstar39_st", "dstar39_hold"
        "hrelR_bridged",
        # CloseBK.lean (closure step 4b): wb_closeBK; hS = 0 under K11 + (b′) on the bridged run
        "cntBK_decAny_split", "cntBK_zero_of", "wb_closeBK", "armed_persist", "unarmed_in_window",
-       "noDec_zero_K11", "wb_closeBK_K11")
+       "noDec_zero_K11", "wb_closeBK_K11",
+       # CloseBKSpan.lean (Wilson 11-21 span ruling): the closure in the certificate's span form
+       "dec_sepBK", "wb_iff_decBK", "cntBK_wb_shift", "wb_closeBK_span", "wb_closeBK_span_K11")
 #: proof_constants.load() key -> the Lean expression that must evaluate to it (SPEC: the map)
 CONSTS = {
     "lemmaA_window": "LEMMA_A_WINDOW", "R_base": "R_BASE", "dispatch_cycles": "DISPATCH_CYCLES",
