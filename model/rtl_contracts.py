@@ -155,6 +155,19 @@ RTL_CONTRACTS = {
                 "every chosen lane checked against the model's",
         "lean": "SchedK11.K11At; premise of SchedK11.winA_eq_of_K11 / winS_eq_of_K11",
         "must_fire": {"status": OWED, "name": None}},
+    # Wilson 11-21 (closure ruling, ask 1): the two scheduler premises wb_closeBK_K11 rests on
+    "sched_bprime": {
+        "what": "(b') the dispatcher's winner always has a valid head -- the (b') readiness fix in "
+                "RTL since 9c0df0c. Must-fire (agent 1): a planted dispatcher that can pick a "
+                "lane with an empty head, caught",
+        "lean": "BPrime.BPrimeWin; premise hb of CloseBK.noDec_zero_K11 / wb_closeBK_K11 "
+                "(through the mask: SchedK11.winA_bprime)",
+        "must_fire": {"status": OWED, "name": None}},
+    "sched_names_ready": {
+        "what": "in an idle cycle with some lane ready, the dispatcher names a lane. Must-fire "
+                "(agent 1): a planted idle cycle with a ready lane and no decision, caught",
+        "lean": "premise hws of CloseBK.noDec_zero_K11 / wb_closeBK_K11 (LemmaA's hws)",
+        "must_fire": {"status": OWED, "name": None}},
 }
 
 #: contract premise (the names in gate_lean_build.PREMISES[thm]["contract"]) -> the RTL
@@ -182,6 +195,13 @@ CONTRACT_PREMISES = {
         "why": "hK: K11At at every cycle of the armed run, so winA win armed chooses as win "
                "whenever an unarmed lane is ready (SchedK11.winS_eq_of_K11): the window bound's "
                "no-decision count S has no masked-pick stall (composition L4 hS)"},
+    "sched_bprime": {
+        "rtl": ("sched_bprime",),
+        "why": "hb: the winner's head is valid (BPrimeWin), so with an unarmed ready lane no idle "
+               "cycle goes undecided (CloseBK.noDec_zero_K11: hS = 0)"},
+    "sched_names_ready": {
+        "rtl": ("sched_names_ready",),
+        "why": "hws: an idle cycle with a ready lane names one (CloseBK.noDec_zero_K11: hS = 0)"},
     "flush_spacing": {
         "rtl": ("K8",),
         "proof": "contract K8; proof (b) proved on the armed run (ComposeB.flush_spacing_runBA, "
