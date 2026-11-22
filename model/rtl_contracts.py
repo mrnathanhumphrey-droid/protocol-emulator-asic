@@ -345,15 +345,20 @@ COMPOSITION = {
              "theorems": ("cntF_reach", "cntF_wb_shift", "dec_sepF", "wb_close_spanF",
                           "wb_close_spanT")},
             # 11-21 (hRz check): the USB lane's own R is PrioResp.prio_resp's, stated on run only;
-            # on usbdev the USB lane is the flushed lane, so wb_close_spanT's hRz is unbacked
-            {"step": "USB-lane bound on the flush run (wb_close_spanT's hRz)", "status": "owed",
-             "what": "PrioResp.prio_resp (and EdfB.prio_resp_edf) are stated on run; the checker's "
-                     "usb_R rests on it, but on usbdev the USB lane is flushed at its FALLTHROUGH "
-                     "edge (ts := now + 1) -- prio_resp on runF, lifted to run3T, owed"},
+            # on usbdev the USB lane is the flushed lane -- re-derived with flushes (PrioRespF)
+            {"step": "USB-lane bound on the flush run (wb_close_spanT's hRz)", "status": "proved",
+             "theorems": ("relT_le_fl", "ts_monoF_fl", "ts_constF", "idle3F", "prio_respF",
+                          "prio_respT")},
+            {"step": "hpri on run3T (prio_respT's: the USB lane wins when ready, head valid)",
+             "status": "owed",
+             "what": "derived from (b') + EDF only on run (EdfB.prio_resp_edf); on the flush run "
+                     "it is a premise -- prio_resp_edf on runF, lifted to run3T, owed"},
             {"step": "the flush lemma for hspan on runF (shared with slot_on_composition's)",
              "status": "owed",
-             "what": "span_min => hspan under flushes: the USB lane is a z lane in every other "
-                     "lane's window, and its flush can lower its timestamp"},
+             "what": "span_min => hspan under flushes. On runF the view's release never drops "
+                     "(relT_le_fl, ts_monoF_fl: proved), so the FT deadline dip is runBK's only; "
+                     "owed on runF: each writeback's / flush's advance >= the checker's per-word "
+                     "span gap"},
         ]},
     # 11-21 (hfree_measure, RTL traces): the EDF theorems (EdfB, RespEdf) carry their own hfree;
     # the gap route does not give it on two EDF-certified images although the RTL meets it
