@@ -329,11 +329,15 @@ COMPOSITION = {
             # no view: an arming writeback sets ts + dly + ext (ts_wb_bridged), and the edge's
             # flush sets now + 1 (ts_flush_stepBK) -- an FT ARM whose edge precedes its deadline
             # D drops the release from D to edge + 1. "Flushes only add" does not hold there.
-            {"step": "span_min => hspan on runBK (the flush lemma)", "status": "owed",
-             "what": "the release chain on runBK with an arming writeback's gap counted to its "
-                     "edge's flush (edge + 1 - release >= the checker's ARM gap by hedge / "
-                     "edge_timing; armed_origin ties each flush to its ARM): the release drops at "
-                     "an FT edge before its deadline, so runF's ts_chainF_ge does not carry over"},
+            # proved 11-22 (ChainBK, Nate's go): the release chain on the bridged run with an
+            # arming writeback counted as the checker's ARM gap gA, not dly + ext: hgw (gA <=
+            # dly + ext, the timeout path) is the checker's per-word gap fact, the standing the
+            # per-word gaps have on run; hge (release + gA <= edge + 1, the edge path) is the
+            # edge-timing contract. armed_origin ties each flush to its ARM; the chain is anchored
+            # at a writeback of the lane, so it never starts inside an armed stretch.
+            {"step": "span_min => hspan on runBK (the flush lemma)", "status": "proved",
+             "theorems": ("gsumBA_skip", "tsBA_hit", "tsBA_nohit", "ts_chainBA_ge",
+                          "ts_chainBK_ge")},
             {"step": "hRdy", "status": "owed",
              "what": "the ready_*_T lifted onto runBK through the stretches"},
             {"step": "hZS", "status": "owed",
