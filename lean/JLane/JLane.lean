@@ -89,3 +89,4 @@ import JLane.PrioRespF
 import JLane.EdfBF
 import JLane.FlushChain
 import JLane.ChainBK
+import JLane.UsbOn
