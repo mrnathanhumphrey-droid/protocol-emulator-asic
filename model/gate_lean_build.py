@@ -27,7 +27,7 @@ MUST-FIRES, on a temporary copy of the tree:
   M_LEAN_SORRY   a theorem proved by `sorry` appended to SelfTimed.lean   -> check 2 red
   M_LEAN_AXIOM   an axiom, and a KEY-listed theorem that uses it           -> checks 3 and 4 red
   M_LEAN_CONST   proof_constants.json's pending_slack moved by one          -> check 5 red
-  M_LEAN_PREMISE_UNLISTED  an extra hypothesis `hplant` planted in ready_pc1_plain_T's
+  M_LEAN_PREMISE_UNLISTED  an extra hypothesis `hplant` planted in ready_pc1_plain_BK's
                  signature (the proof still builds)                         -> check 6 red
 All four are judged by the same `judge` as the clean arm (gate_meta's stub on it turns the gate
 red). The other direction (a listed binder the signature lacks) is shown red on the clean
@@ -224,7 +224,9 @@ KEY = ("dstar", "dstar29", "dstar39", "dstar39_v2", "dstar39_st", "dstar39_hold"
        # ChainBK.lean (hspan flush lemma, runBK half): the chain with an ARM's gap counted as the checker's
        "gsumBA_skip", "tsBA_hit", "tsBA_nohit", "ts_chainBA_ge", "ts_chainBK_ge",
        # UsbOn.lean (K13, Wilson 11-22): the slot yields to lane 0 only once usb_on is set
-       "usbFirst_off", "runBU_on", "runBU_off", "wfBU_run", "ordBU_run", "heldBU_step")
+       "usbFirst_off", "runBU_on", "runBU_off", "wfBU_run", "ordBU_run", "heldBU_step",
+       # ReadyBK.lean (hRdy, 11-22): the ready theorems on the flush run, stretch by stretch
+       "stretch_lift", "ready_pc1_plain_BK", "ready_pc2_plain_BK", "ready_pc2_arm_BK", "ready_pc1_spare_BK", "ready_pc2_plain_spare_BK", "ready_pc2_arm_spare_BK")
 #: proof_constants.load() key -> the Lean expression that must evaluate to it (SPEC: the map)
 CONSTS = {
     "lemmaA_window": "LEMMA_A_WINDOW", "R_base": "R_BASE", "dispatch_cycles": "DISPATCH_CYCLES",
@@ -348,6 +350,39 @@ PREMISES = {
         # the conclusion's antecedents: t < T, P.live y, IsWB y (unnamed arrows)
         "anon": 3,
     },
+    # ReadyBK (hRdy, 11-22): the six ready_*_T on the flush run. Their per-image premises are the
+    # _T theorem's own (inside Rdy*, listed under the _T entry above); here the lift's: the
+    # requester, the start's well-formedness, the flushes' FlushOk, and the stretch t lies in
+    "ready_pc1_plain_BK": {
+        "applies": {},
+        "contract": {"slot_requester": ("hok",), "engine_wf": ("hI",), "scan_ok": ("hF",)},
+        "shape": ("hstr",),
+    },
+    "ready_pc2_plain_BK": {
+        "applies": {},
+        "contract": {"slot_requester": ("hok",), "engine_wf": ("hI",), "scan_ok": ("hF",)},
+        "shape": ("hstr",),
+    },
+    "ready_pc2_arm_BK": {
+        "applies": {},
+        "contract": {"slot_requester": ("hok",), "engine_wf": ("hI",), "scan_ok": ("hF",)},
+        "shape": ("hstr",),
+    },
+    "ready_pc1_spare_BK": {
+        "applies": {},
+        "contract": {"slot_requester": ("hok",), "engine_wf": ("hI",), "scan_ok": ("hF",)},
+        "shape": ("hstr",),
+    },
+    "ready_pc2_plain_spare_BK": {
+        "applies": {},
+        "contract": {"slot_requester": ("hok",), "engine_wf": ("hI",), "scan_ok": ("hF",)},
+        "shape": ("hstr",),
+    },
+    "ready_pc2_arm_spare_BK": {
+        "applies": {},
+        "contract": {"slot_requester": ("hok",), "engine_wf": ("hI",), "scan_ok": ("hF",)},
+        "shape": ("hstr",),
+    },
     # ChainBK (11-22, the runBK flush lemma): the release chain with an arming writeback counted
     # as the checker's ARM gap gA. hgw (gA <= dly + ext, the timeout path) and hge (release + gA
     # <= edge + 1, the edge path) are the ARM gap's per-image facts -- the earliest edge after a
@@ -360,15 +395,18 @@ PREMISES = {
     },
 }
 #: the M_LEAN_PREMISE_UNLISTED plant: (file, theorem, the signature text it extends, the binder)
-PREMISE_PLANT = ("SlotReadyB.lean", "ready_pc1_plain_T",
-                 "theorem ready_pc1_plain_T (T : Nat)", "(hplant : (0 : Nat) = 0)")
+#: ⚠ planted in a theorem NOTHING calls: a planted premise in a theorem with a caller breaks the
+#: caller's build, so check 6 never runs (moved 11-22 from ready_pc1_plain_T, which ReadyBK now
+#: calls)
+PREMISE_PLANT = ("ReadyBK.lean", "ready_pc1_plain_BK",
+                 "theorem ready_pc1_plain_BK (hok : SReqB P sreq)", "(hplant : (0 : Nat) = 0)")
 PLANT_THM = "planted_by_gate"
 #: gate_mutant_kills' scratch-mutant registry (ruling AC2): this gate is the killer
 SCRATCH_MUTANTS = {
     "M_LEAN_SORRY": "a theorem proved by `sorry`, planted in a temp copy of the tree",
     "M_LEAN_AXIOM": "an axiom and a theorem using it, planted in a temp copy of the tree",
     "M_LEAN_CONST": "proof_constants.json's pending_slack moved by one, in a temp copy of the tree",
-    "M_LEAN_PREMISE_UNLISTED": "an extra hypothesis planted in ready_pc1_plain_T's signature, "
+    "M_LEAN_PREMISE_UNLISTED": "an extra hypothesis planted in ready_pc1_plain_BK's signature, "
                                "in a temp copy of the tree",
 }
 

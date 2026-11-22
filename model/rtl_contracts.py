@@ -342,8 +342,14 @@ COMPOSITION = {
             {"step": "span_min => hspan on runBK (the flush lemma)", "status": "proved",
              "theorems": ("gsumBA_skip", "tsBA_hit", "tsBA_nohit", "ts_chainBA_ge",
                           "ts_chainBK_ge")},
-            {"step": "hRdy", "status": "owed",
-             "what": "the ready_*_T lifted onto runBK through the stretches"},
+            # proved 11-22 (ReadyBK, Nate's go): each ready_*_T on y's stretch of the flush run
+            # (from the start, or from f + 3 after the last flush with the edge word present;
+            # the restart window is the kept edge word, K1); a capture before the stretch is
+            # not covered (a flush clears the slots but the edge word)
+            {"step": "hRdy", "status": "proved",
+             "theorems": ("stretch_lift", "ready_pc1_plain_BK", "ready_pc2_plain_BK",
+                          "ready_pc2_arm_BK", "ready_pc1_spare_BK", "ready_pc2_plain_spare_BK",
+                          "ready_pc2_arm_spare_BK")},
             {"step": "hZS", "status": "owed",
              "what": "step 5: hZS0 established, not only gate-checked (lane-cert check 20)"},
         ]},
