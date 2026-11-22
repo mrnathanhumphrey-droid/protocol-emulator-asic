@@ -1,6 +1,7 @@
 /* tb_fpga_usb.v -- the USB build's glue, simulated before any Vivado run (Wilson 11-14).
  *
- * The whole FPGA core (USB = 1) boots usbdev_fpga.hex (the certified device program). The
+ * The whole FPGA core (USB = 1) boots usbdev_fpga.hex (the certified device program; its
+ * certificate: span closure on the flush run owed -- Wilson 11-21, until wb_close_spanF lands). The
  * bench is the board's pads plus the host's 15k pull-downs (weak 0 on D+ and D-); it checks
  * the glue's three promises (comms/USB_PIN_DELTA.md):
  *   A. RELEASED UNLESS RUNNING: while the glue's run_ok is low (reset, the boot load), D+, D-

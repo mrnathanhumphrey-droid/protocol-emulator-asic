@@ -89,6 +89,7 @@ if {$ow} {
 } elseif {$usb} {
   # THE USB BUILD (Wilson 11-14, comms/USB_PIN_DELTA.md): the device program usbdev.py writes,
   # byte-identical to the certified usbdev_dev.hex (fpga/sim/gen_usbdev_fpga.py)
+  # (its certificate: span closure on the flush run owed -- Wilson 11-21, until wb_close_spanF lands)
   read_xdc [file join $root fpga pa100t pa100t_j11_usb.xdc]
   file copy -force [file join $root fpga images usbdev_fpga.hex] [file join $out usbdev_fpga.hex]
   set gen [list "IMG=\"usbdev_fpga.hex\"" CLK_HZ=$clk_hz]

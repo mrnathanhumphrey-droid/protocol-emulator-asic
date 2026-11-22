@@ -1,6 +1,7 @@
 """FPGA USB build (USB = 1), SIMULATION -- the glue, before any Vivado run (Wilson 11-14).
 
-tb_fpga_usb boots the certified device program (fpga/images/usbdev_fpga.hex, written by
+tb_fpga_usb boots the certified device program (fpga/images/usbdev_fpga.hex -- its certificate:
+span closure on the flush run owed, Wilson 11-21, until wb_close_spanF lands -- written by
 fpga/sim/gen_usbdev_fpga.py) and checks the glue's promises (comms/USB_PIN_DELTA.md): D+, D-
 and the soft-attach pin released unless the program runs, the pull-up = run_ok, and the D+/D-
 mapping both ways (raw pads into uio_in; uio_out/oe bits 3/2 out).
