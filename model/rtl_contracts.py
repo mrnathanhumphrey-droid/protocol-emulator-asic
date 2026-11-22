@@ -325,10 +325,15 @@ COMPOSITION = {
             # Wilson 11-21 (hspan ruling): on run hspan stays the span checker's premise; on runBK a
             # flush can lower a timestamp (FT deadline D, then edge + 1 < D), so span_min =>
             # hspan there is its own lemma, owed
+            # 11-21 (flush lemma): on runF flushes only add (FlushChain, proved). On runBK there is
+            # no view: an arming writeback sets ts + dly + ext (ts_wb_bridged), and the edge's
+            # flush sets now + 1 (ts_flush_stepBK) -- an FT ARM whose edge precedes its deadline
+            # D drops the release from D to edge + 1. "Flushes only add" does not hold there.
             {"step": "span_min => hspan on runBK (the flush lemma)", "status": "owed",
-             "what": "each flush raises z's release by at least the ARM's checked span gap "
-                     "(hedge / edge_timing + the writeback anchor of wb_closeBK_span's hspan), so "
-                     "lane_cert.span_min establishes hspan on runBK as it does on run"},
+             "what": "the release chain on runBK with an arming writeback's gap counted to its "
+                     "edge's flush (edge + 1 - release >= the checker's ARM gap by hedge / "
+                     "edge_timing; armed_origin ties each flush to its ARM): the release drops at "
+                     "an FT edge before its deadline, so runF's ts_chainF_ge does not carry over"},
             {"step": "hRdy", "status": "owed",
              "what": "the ready_*_T lifted onto runBK through the stretches"},
             {"step": "hZS", "status": "owed",
@@ -352,12 +357,12 @@ COMPOSITION = {
             {"step": "hpri on run3T (prio_respT's: the USB lane wins when ready, head valid)",
              "status": "proved",
              "theorems": ("dec_tsF1", "hpri_bF", "prio_resp_edfF", "prio_resp_edfT")},
-            {"step": "the flush lemma for hspan on runF (shared with slot_on_composition's)",
-             "status": "owed",
-             "what": "span_min => hspan under flushes. On runF the view's release never drops "
-                     "(relT_le_fl, ts_monoF_fl: proved), so the FT deadline dip is runBK's only; "
-                     "owed on runF: each writeback's / flush's advance >= the checker's per-word "
-                     "span gap"},
+            # the flush lemma, runF half (Wilson 11-21 hspan ruling): flushes only add, so on the
+            # flush run span_min => hspan stands as on run (the release chain vs the checker's
+            # per-word gaps)
+            {"step": "the flush lemma for hspan on runF: the release chain across flushes",
+             "status": "proved",
+             "theorems": ("relT_le_fl", "ts_flushF", "ts_chainF_ge", "ts_chainT_ge")},
         ]},
     # 11-21 (hfree_measure, RTL traces): the EDF theorems (EdfB, RespEdf) carry their own hfree;
     # the gap route does not give it on two EDF-certified images although the RTL meets it
