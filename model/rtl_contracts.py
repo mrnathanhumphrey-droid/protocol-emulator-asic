@@ -333,7 +333,11 @@ COMPOSITION = {
             # arming writeback counted as the checker's ARM gap gA, not dly + ext: hgw (gA <=
             # dly + ext, the timeout path) is the checker's per-word gap fact, the standing the
             # per-word gaps have on run; hge (release + gA <= edge + 1, the edge path) is the
-            # edge-timing contract. armed_origin ties each flush to its ARM; the chain is anchored
+            # same gap's other half: the earliest edge after a release, the peer premise lane_cert
+            # prices (arm_floor / arm_j) -- a per-image fact, NOT contract K10 (corrected 11-22:
+            # edge_timing is hedge, the edge after the ARM's writeback; gate_lean_build.PREMISES
+            # ts_chainBK_ge lists hgw / hge as applies arm_gap). armed_origin ties each flush to
+            # its ARM; the chain is anchored
             # at a writeback of the lane, so it never starts inside an armed stretch.
             {"step": "span_min => hspan on runBK (the flush lemma)", "status": "proved",
              "theorems": ("gsumBA_skip", "tsBA_hit", "tsBA_nohit", "ts_chainBA_ge",
