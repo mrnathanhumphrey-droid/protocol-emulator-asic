@@ -261,6 +261,7 @@ def coverage_arms():
         stim = RP.waves_to_stim(waves, pre=True)
         ip, sp = "%s/%s.hex" % (COV_DIR, name), "%s/%s.stim" % (COV_DIR, name)
         I.write_image(os.path.join(ROOT, ip), RP.sniff_image(0x00, b0 or BUDGET_B))
+        sim_run.cov_image("run_pit_clk", os.path.join(ROOT, ip))
         with open(os.path.join(ROOT, sp), "w", encoding="ascii", newline="\n") as fh:
             for t, v in stim:
                 fh.write("%d %02x\n" % (t, v))

@@ -139,6 +139,20 @@ def write_hex(path, img, register=False):
     return path
 
 
+GEN_V1 = "gate_v2_equiv_v1"   # the v1 side's registered generator (sim_run; Wilson 11-21)
+
+
+def write_v1(path, img, source):
+    """A v1-lock image for the v1 engine, written WITH provenance (Wilson 11-21: every image
+    outside the universe, clocked or not): the commit V1REV resolves to now and `source`."""
+    write_hex(path, img)
+    c = sim_run.pin_commit(V1REV)
+    if c is None:
+        raise RuntimeError("cannot resolve %s to a commit" % V1REV)
+    sim_run.scratch_image(GEN_V1, path, meta={"commit": c, "source": source})
+    return path
+
+
 def sim(vvp, img, nbytes, progdly=0, ncyc=NCYC, lookup=None, quiescent=False):
     """-> {start, cfg_err, started, recs [(kind, cyc, rest)], fails, cpb}.
     `lookup`: the images the A2 lookup is asked about (a v1 run names its v2
@@ -440,7 +454,8 @@ def main() -> int:
                 with open(pt, encoding="ascii") as fh:
                     if bytes(int(w, 16) for w in fh.read().split()) != T.translate(img1):
                         rederived.append(n)
-            cases.append((n, img1, write_hex(os.path.join(tmp, "v1_" + n), img1),
+            cases.append((n, img1, write_v1(os.path.join(tmp, "v1_" + n), img1,
+                                            "git show %s:test/%s" % (V1REV, n)),
                           p2, p2))
         print("  %d of %d tracked v2 images still equal translate(v1); %d re-derived "
               "for 60 MHz (reported, not judged -- the manifest pins them): %s"
@@ -450,7 +465,9 @@ def main() -> int:
         f2 = write_hex(os.path.join(tmp, "v2eq_falloff.hex"), T.translate(f1),
                        register=True)
         cases.append(("falloff.hex (store_probe)", f1,
-                      write_hex(os.path.join(tmp, "v1_falloff.hex"), f1), f2, f2))
+                      write_v1(os.path.join(tmp, "v1_falloff.hex"), f1,
+                               "store_probe.py + pe_isa.py at %s (v1's own encoder)" % V1REV),
+                      f2, f2))
 
         # ---- 1. EQUIVALENCE at the derived offset --------------------------
         print()

@@ -225,6 +225,7 @@ def coverage_arms():
     imgs = {"dev": V.image(), "nousb": V.image_nousb()}
     for k, im in imgs.items():
         write_dev(os.path.join(d, IMAGE_FILES[k]), k, im)
+        sim_run.cov_image("run_usbaddr", os.path.join(d, IMAGE_FILES[k]))
     rows = [("addr_" + n.split()[0], h, l, nc, (0, 0), "dev") for n, (h, l, _e, nc) in SCEN.items()]
     rows += [("rst_" + n.split()[0], h, l, nc, win or (0, 0), RS.IMAGE_OF.get(n, "dev"))
              for n, (h, l, _e, nc, win, _lng) in RS.SCEN.items()]

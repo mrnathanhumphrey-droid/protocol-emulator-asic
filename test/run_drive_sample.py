@@ -107,6 +107,7 @@ def coverage_arms():
     for k, img in (("spi", spi_image()), ("age", age_image()), ("od", age_image(mode=0)),
                    ("msb", spi_image(order=I.ORDER_MSB))):
         I.write_image(os.path.join(ROOT, COV_DIR, "ds_%s.hex" % k), img)
+        sim_run.cov_image("run_drive_sample", os.path.join(ROOT, COV_DIR, "ds_%s.hex" % k))
     # 11-20: check 4's two RTL refusals join the sweep (the refusal branch read
     # uncovered). The image on disk is the CLEAN SPI image; the refused byte is planted
     # as tb_ds loads it (test/imgpatch.vh), because a refused image cannot be a sweep

@@ -316,6 +316,7 @@ def coverage_arms():
         run_len = ncyc if (not b and name in RP.NCYC_FOR) else R0.NCYC_MAX * 40
         ip, sp = "%s/%s.hex" % (COV_DIR, name), "%s/%s.stim" % (COV_DIR, name)
         I.write_image(os.path.join(ROOT, ip), RP.sniff_image(mask, b))
+        sim_run.cov_image("run_pit_s12", os.path.join(ROOT, ip))
         with open(os.path.join(ROOT, sp), "w", encoding="ascii", newline="\n") as fh:
             for t, v in stim:
                 fh.write("%d %02x\n" % (t, v))

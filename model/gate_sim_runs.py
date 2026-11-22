@@ -242,6 +242,7 @@ def main() -> int:
             for g in S.SCRATCH_GENERATORS.values()),
         "every registered generator names its script, pattern and reason")
     _provenance_mustfires(S, say)
+    _index_reconcile(S, say)
     _scratch_git_checks(S, say)
     _classifier_mustfire(S, say)
     _hidden_load_crosscheck(S, say)
@@ -523,6 +524,53 @@ def _refused(S, imgs):
         return str(exc)
 
 
+def _index_reconcile(S, say):
+    """⛔⛔ THE INDEX COUNTS WHAT IS THERE (Wilson 11-21): the built universe (its generators
+    run HERE, so each coverage_arms writer records this run's provenance) == sim_run's index
+    (the static scan + the generated images with this run's provenance); a mismatch is red.
+    Must-fires: a stale probe_cov file (an earlier run's token) refused; a universe image
+    missing from the index caught."""
+    import json
+    sys.path.insert(0, os.path.join(ROOT, "model"))
+    import image_universe as U
+    items = U.default().items()
+    ns, ng, probs = S.index_problems(items)
+    for p in probs:
+        print("    *** %s" % p)
+    say(not probs and ns + ng == len(items),
+        "index == universe: %d static + %d generated (this run's provenance) = %d of %d"
+        % (ns, ng, ns + ng, len(items)))
+    # MF a STALE probe_cov file: the manifest entry carries an EARLIER run's token
+    gen = [p for _n, p in items if S.is_cov_path(p)]
+    say(bool(gen), "the universe has generated probe_cov images to price (%d)" % len(gen))
+    if not gen:
+        return
+    victim = gen[0]
+    mf = os.path.join(os.path.dirname(os.path.abspath(victim)), S.MANIFEST)
+    with open(mf, encoding="utf-8") as fh:
+        saved = fh.read()
+    try:
+        m = json.loads(saved)
+        m[os.path.normcase(os.path.abspath(victim))]["token"] = "an-earlier-run"
+        with open(mf, "w", encoding="utf-8") as fh:
+            json.dump(m, fh, indent=1, sort_keys=True)
+        why = _refused(S, [victim])
+        say(bool(why) and "probe_cov" in why and os.path.abspath(victim) in why,
+            "MF stale probe_cov file (an earlier run's provenance) -> refused, naming it")
+        _ns, _ng, p2 = S.index_problems(items)
+        say(any(os.path.basename(victim) in x for x in p2),
+            "MF the same stale file -> the index no longer covers the universe: red")
+    finally:
+        with open(mf, "w", encoding="utf-8") as fh:
+            fh.write(saved)
+    # MF a universe image missing from the index: a static image dropped from it
+    static = set(S._universe_index()[0])
+    drop = next(p for _n, p in items if os.path.normcase(os.path.abspath(p)) in static)
+    _a, _b, p3 = S.index_problems(items, static - {os.path.normcase(os.path.abspath(drop))})
+    say(any(os.path.basename(drop) in x for x in p3),
+        "MF a universe image missing from the index -> caught (%s)" % os.path.basename(drop))
+
+
 def _provenance_mustfires(S, say):
     import shutil
     import tempfile
@@ -578,6 +626,40 @@ def _provenance_mustfires(S, say):
         S.scratch_image("run_ckack", ok)
         say(_refused(S, [ok]) is None,
             "control: registered generator, scratch, this run -> passes")
+        # ⛔ Wilson 11-21: provenance for EVERY image outside the universe, clocked or not.
+        # P1 a planted UNCLOCKED image (a v1-lock image: tb_equiv's v1 side), outside the
+        # universe, no provenance -> refused, naming the image and the caller
+        v1b = S._git("show", "v1-lock:test/corpus_i2c.hex")
+        unc = os.path.join(tmp, "v1_planted.hex")
+        with open(unc, "w", encoding="ascii", newline="\n") as fh:
+            fh.write(v1b.stdout)
+        import benchset
+        unclocked = not S._classify(benchset, unc)
+        why8 = _refused(S, [unc])
+        say(unclocked and bool(why8) and unc in why8 and "caller" in why8
+            and "unclocked" in why8,
+            "P1 unclocked image outside the universe, no provenance -> refused, "
+            "naming image + caller")
+        # control: the same bytes, recorded by the pinned v1 generator with the commit the
+        # pin resolves to now -> passes
+        c = S.pin_commit("v1-lock")
+        S.scratch_image("gate_v2_equiv_v1", unc,
+                        meta={"commit": c, "source": "git show v1-lock:test/corpus_i2c.hex"})
+        st8 = None if _refused(S, [unc]) else S.check([unc])
+        say(st8 is not None and ("@" + c[:12]) in st8,
+            "control: the same image with this run's pinned provenance -> passes (%s)"
+            % (st8 or "").split(" bound=")[-1][:60])
+        # P2 the pinned generator's record names another commit (the pin moved) -> refused
+        S.scratch_image("gate_v2_equiv_v1", unc,
+                        meta={"commit": "0" * 40, "source": "git show v1-lock:test/corpus_i2c.hex"})
+        say(bool(_refused(S, [unc])), "P2 pinned generator, recorded commit != its pin now -> refused")
+        # P3 a pinned generator cannot record without the commit and source
+        try:
+            S.scratch_image("gate_v2_equiv_v1", unc)
+            p3 = False
+        except S.SimRefused:
+            p3 = True
+        say(p3, "P3 pinned generator, no commit/source recorded -> cannot record")
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
         shutil.rmtree(tree, ignore_errors=True)

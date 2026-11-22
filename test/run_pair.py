@@ -220,6 +220,7 @@ def coverage_arms():
     # walking the generated arms, Wilson 11-13 2e)
     for k in ("tx", "rx", "busy"):
         I.write_image(os.path.join(ROOT, COV_DIR, "pair_%s.hex" % k), image(k))
+        sim_run.cov_image("run_pair", os.path.join(ROOT, COV_DIR, "pair_%s.hex" % k))
     return [("tx", ["+IMG=%s/pair_tx.hex" % COV_DIR, "+NCYC=2600", "+FEED=1"]),
             ("rx", ["+IMG=%s/pair_rx.hex" % COV_DIR, "+NCYC=900", "+RXB=%d" % RX_BYTE,
                     "+RXT=%d" % RX_T, "+RXD=%d" % D]),

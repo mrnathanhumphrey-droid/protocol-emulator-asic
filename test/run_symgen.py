@@ -213,6 +213,7 @@ def coverage_arms():
         c = cfg_with_lat(c0)
         f = "%s/symgen_%s.hex" % (COV_DIR, name)
         I.write_image(os.path.join(ROOT, f), image(c))
+        sim_run.cov_image("run_symgen", os.path.join(ROOT, f))
         ncyc = 400 + c.lat + len(FEED) * c.byte_cycles + 8 * c.bit_cycles
         out.append(("sg_" + name, ["+IMG=" + f, "+FEED=1", "+NCYC=%d" % ncyc]))
     for kind in FAULTS:
@@ -222,6 +223,7 @@ def coverage_arms():
         # images' HDR check); it retires nothing (config_err first): QUIESCENT
         nonown = kind == "nonowner"
         I.write_image(os.path.join(ROOT, f), fault_image(kind, clean=nonown))
+        sim_run.cov_image("run_symgen", os.path.join(ROOT, f))
         q = (I.patch_plusargs(fault_image(kind, clean=True), fault_image(kind))
              + ["+QUIESCENT"]) if nonown else []
         out.append(("sg_f_" + kind, ["+IMG=" + f, "+FEED=1", "+NCYC=3000"] + q))
@@ -239,6 +241,7 @@ def coverage_arms():
     for k, img in (("od", image(c, mode=0)), ("mod3", image(c, extra=[mod3]))):
         f = "%s/symgen_x_%s.hex" % (COV_DIR, k)
         I.write_image(os.path.join(ROOT, f), img)
+        sim_run.cov_image("run_symgen", os.path.join(ROOT, f))
         out.append(("sg_" + k, ["+IMG=" + f, "+FEED=1", "+NCYC=%d" % ncyc]))
     out.append(("sg_nopin", ["+IMG=" + ws, "+FEED=1", "+NCYC=%d" % ncyc]
                 + I.patch_plusargs(image(c), image(c, nopin=True))))

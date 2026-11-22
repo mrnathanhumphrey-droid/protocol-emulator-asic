@@ -117,7 +117,7 @@ def coverage_arms():
     """[(label, plusargs)] for test/benchset.py's tb_arm2; images under COV_DIR."""
     os.makedirs(os.path.join(ROOT, COV_DIR), exist_ok=True)
     for k, f in IMAGES.items():
-        I.write_image(os.path.join(ROOT, COV_DIR, "%s.hex" % k), f())
+        _cov_write(os.path.join(ROOT, COV_DIR, "%s.hex" % k), f())
     # the `none` / `timeout` scenarios retire nothing by design: declared quiescent
     # +PHA_ABS=-1: the absolute flip (run_arm2 A4's race sweep) is OFF here, stated
     arms = [(name, ["+IMG=%s/%s.hex" % (COV_DIR, im), "+IDLE=%d" % idle, "+PHA=%d" % pha,
@@ -131,7 +131,7 @@ def coverage_arms():
     # placed RELATIVE to the arming cycle (+PHA), no stored run cycle: PHA 1 measured to
     # set pkill and drop at P_CAP (iverilog probe, 11-15); 2-3 keep the window if a
     # cycle moves. Reach only -- A4 is the judge.
-    I.write_image(os.path.join(ROOT, COV_DIR, "ft_race.hex"), ft_race_image())
+    _cov_write(os.path.join(ROOT, COV_DIR, "ft_race.hex"), ft_race_image())
     arms += [("ft_pkill_pha%d" % pha, ["+IMG=%s/ft_race.hex" % COV_DIR, "+IDLE=1",
                                        "+PHA=%d" % pha, "+PHB=-1", "+NCYC=300",
                                        "+PHA_ABS=-1"])
@@ -139,7 +139,7 @@ def coverage_arms():
     # ⭐ A5 (11-18): every lane scenario on every lane; A5 is the judge
     for lane in range(I.N_LANES):
         for pn in lane_progs(*LANE_PINS[lane]):
-            I.write_image(os.path.join(ROOT, COV_DIR, "L%d_%s.hex" % (lane, pn)), lane_scen_image(pn, lane))
+            _cov_write(os.path.join(ROOT, COV_DIR, "L%d_%s.hex" % (lane, pn)), lane_scen_image(pn, lane))
         for name, pn, idle, pha, phb, pha2, ncyc, kind in LANE_SCEN:
             arms.append(("%s_l%d" % (name, lane), ["+IMG=%s/L%d_%s.hex" % (COV_DIR, lane, pn)]
                          + lane_plusargs(lane, idle, pha, phb, pha2, ncyc, kind)))
@@ -801,6 +801,14 @@ def main() -> int:
         return 1
     print("  GATE arm2: PASSED")
     return 0
+
+
+def _cov_write(path, img):
+    """coverage_arms' write WITH its provenance (Wilson 11-21: a probe_cov image without this
+    run's provenance is refused). Defined down here so no line above moves: t_ext_bench.json
+    cites this file by line."""
+    I.write_image(path, img)
+    sim_run.cov_image("run_arm2", path)
 
 
 if __name__ == "__main__":

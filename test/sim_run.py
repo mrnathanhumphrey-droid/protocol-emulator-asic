@@ -132,6 +132,19 @@ SCRATCH_GENERATORS: dict = {
                " judged by v1 == v2 on tb_equiv's decoded dispatch + pin"
                " stream, not by the A2 gap",
         "v3": {"no_v3_layer": "test/tb_equiv.v"}},
+    # ⛔ Wilson 11-21 (provenance for every image outside the universe): the v1 side of the
+    # same gate -- simulated on the v1-lock engine, unregistered until then (its unclocked
+    # images were never asked for provenance). `pin_rev`: the record names the commit the
+    # tag resolved to when the file was written, and its source; provenance() resolves the
+    # tag AGAIN and refuses on any difference, so a moved pin shows.
+    "gate_v2_equiv_v1": {
+        "script": "model/gate_v2_equiv.py", "pattern": "v1_*.hex",
+        "clocked": True, "pin_rev": "v1-lock",
+        "why": "v2 step 2's equivalence gate, v1 side: the v1-lock images as committed"
+               " at the pinned commit (git show v1-lock:test/<n>) and falloff as"
+               " v1's own store_probe / pe_isa build it, run on the v1-lock engine --"
+               " judged by v1 == v2 on tb_equiv, not by the A2 gap",
+        "v3": {"no_v3_layer": "test/tb_equiv.v"}},
     "run_branch_check": {
         "script": "test/run_branch_check.py", "pattern": "brchk_*.hex",
         "clocked": True,
@@ -238,6 +251,42 @@ SCRATCH_GENERATORS: dict = {
                " claims, not by the A2 gap",
         "v3": {"no_v3_layer": "test/tb_rt.v"}},
 }
+
+#: ⛔⛔ THE GENERATED SWEEP-ARM IMAGES (Wilson 11-21): each `coverage_arms` writer records
+#: provenance on the probe_cov file it writes, so a stale file from an earlier run cannot
+#: pass as current. One entry per writer, LOCKED TO ITS DIRECTORY (`dir`): any image name
+#: in it, no other directory. module -> (its probe_cov dir, the bench that runs its arms)
+COV_WRITERS = {
+    "run_arm2": ("probe_cov_arm2", "test/tb_arm2.v"),
+    "run_symgen": ("probe_cov_symgen", "test/tb_pair.v"),
+    "run_drive_sample": ("probe_cov_ds", "test/tb_ds.v"),
+    "run_pair": ("probe_cov_pair", "test/tb_pair.v"),
+    "run_flags": ("probe_cov_flags", "test/tb_pair.v"),
+    "run_usbbuf": ("probe_cov_usbbuf", "test/tb_usbbuf.v"),
+    "run_usbaddr": ("probe_cov_usbdev", "test/tb_usbdev.v"),
+    "run_usbrx": ("probe_cov_usbrx", "test/tb_usbrx.v"),
+    "run_pit_s12": ("probe_cov_s12", "test/tb_pit.v"),
+    "run_pit_clk": ("probe_cov_clk", "test/tb_pit.v"),
+}
+COV_SUFFIX = ".coverage_arms"
+for _m, (_d, _b) in COV_WRITERS.items():
+    SCRATCH_GENERATORS[_m + COV_SUFFIX] = {
+        "script": "test/%s.py" % _m, "pattern": "*.hex", "dir": _d, "clocked": True,
+        "why": "the coverage sweep's generated arm images (benchset pygen), written by "
+               "%s.coverage_arms under %s -- the sweep measures reach; the runner "
+               "judges" % (_m, _d),
+        "v3": {"no_v3_layer": _b}}
+del _m, _d, _b
+
+
+def cov_image(module, path):
+    """A `coverage_arms` writer's provenance on the probe_cov image it just wrote."""
+    return scratch_image(module + COV_SUFFIX, path)
+
+
+def _dir_ok(path, g):
+    """a generator with a `dir` writes only there (its probe_cov directory)"""
+    return not g.get("dir") or os.path.basename(os.path.dirname(os.path.abspath(path))) == g["dir"]
 # ⛔⛔ `v3` IS REQUIRED ON EVERY CLOCKED ENTRY (S1g, 10-22): the GENERATED
 # names in model/v3_table.py that register this generator's images, or the
 # bench that loads them and has no V3 layer (its include closure carries no
@@ -365,25 +414,69 @@ def _universe_index():
     return _UIDX[0]
 
 
+def is_cov_path(path):
+    """True if `path` is in a coverage writer's probe_cov directory (COV_WRITERS)."""
+    d = os.path.basename(os.path.dirname(os.path.abspath(path)))
+    return d in {v[0] for v in COV_WRITERS.values()}
+
+
+def index_problems(universe_items, static_paths=None):
+    """⛔⛔ THE INDEX COUNTS WHAT IS THERE (Wilson 11-21). `universe_items`: [(name, path)] of
+    the BUILT universe (image_universe.default()). Every one must be in sim_run's index:
+    the static scan (by path), or a generated image with provenance from this run by its
+    coverage_arms writer. -> (n static, n generated, [problem]). `static_paths` is for the
+    must-fire (default: the real static index)."""
+    if static_paths is None:
+        static_paths = set(_universe_index()[0])
+    ns = ng = 0
+    probs = []
+    for n, p in universe_items:
+        a = os.path.normcase(os.path.abspath(p))
+        if a in static_paths:
+            ns += 1
+            continue
+        pe = provenance_entry(p)
+        if pe is not None and pe["generator"].endswith(COV_SUFFIX):
+            ng += 1
+            continue
+        probs.append("universe image %s [%s] is not in sim_run's index: not in the static "
+                     "scan, and no provenance from this run by a coverage_arms writer"
+                     % (n, _rel(p)))
+    return ns, ng, probs
+
+
 def _pattern_ok(name, g):
     """a generator's `pattern` is one basename glob, or a tuple of them"""
     pats = g["pattern"] if isinstance(g["pattern"], tuple) else (g["pattern"],)
     return any(_fn.fnmatch(name, p) for p in pats)
 
 
-def scratch_image(generator, path):
+def pin_commit(rev):
+    """The commit `rev` resolves to now, or None if git cannot say."""
+    r = _git("rev-parse", "--verify", "%s^{commit}" % rev)
+    return None if r is None or r.returncode else r.stdout.strip()
+
+
+def scratch_image(generator, path, meta=None):
     """Record that registered `generator` created scratch image `path` THIS
     RUN. Called by the generator right after it writes the file. Raises if the
     generator is not registered, the name is not its pattern, or the path is
-    not scratch."""
+    not scratch. `meta` (a generator with a `pin_rev`: required) -- {"commit":
+    the sha its pin resolved to, "source": what the bytes were built from}."""
     g = SCRATCH_GENERATORS.get(generator)
     if g is None:
         raise SimRefused("sim_run: %s is not a registered scratch-image "
                          "generator (SCRATCH_GENERATORS)" % generator)
+    if g.get("pin_rev") and not (meta and meta.get("commit") and meta.get("source")):
+        raise SimRefused("sim_run: generator %s is pinned to %s -- its images record the "
+                         "commit and the source (meta)" % (generator, g["pin_rev"]))
     name = os.path.basename(path)
     if not _pattern_ok(name, g):
         raise SimRefused("sim_run: %s does not match generator %s's pattern "
                          "%s" % (name, generator, g["pattern"]))
+    if not _dir_ok(path, g):
+        raise SimRefused("sim_run: %s is not under generator %s's directory %s"
+                         % (path, generator, g["dir"]))
     if not is_scratch(path):
         raise SimRefused("sim_run: %s is not under scratch -- a registered "
                          "generator's output may not live in the committed "
@@ -395,8 +488,9 @@ def scratch_image(generator, path):
             m = _js.load(fh)
     except (OSError, ValueError):
         m = {}
-    m[os.path.normcase(a)] = {"generator": generator, "sha": _sha(a),
-                              "token": run_token()}
+    m[os.path.normcase(a)] = dict({"generator": generator, "sha": _sha(a),
+                                   "token": run_token()},
+                                  **({"meta": dict(meta)} if meta else {}))
     with open(mf, "w", encoding="utf-8") as fh:
         _js.dump(m, fh, indent=1, sort_keys=True)
     return a
@@ -405,6 +499,13 @@ def scratch_image(generator, path):
 def provenance(path):
     """The registered generator that created `path` THIS RUN, under scratch,
     with its CURRENT content -- or None."""
+    e = provenance_entry(path)
+    return None if e is None else e["generator"]
+
+
+def provenance_entry(path):
+    """`provenance`'s manifest entry ({generator, sha, token[, meta]}), or None. A pinned
+    generator's entry also needs its recorded commit == its pin resolved NOW."""
     a = os.path.abspath(path)
     if not is_scratch(a):
         return None
@@ -417,11 +518,16 @@ def provenance(path):
     if not e or e.get("token") != os.environ.get(TOKEN_ENV):
         return None
     g = SCRATCH_GENERATORS.get(e.get("generator"))
-    if g is None or not _pattern_ok(os.path.basename(a), g):
+    if g is None or not _pattern_ok(os.path.basename(a), g) or not _dir_ok(a, g):
         return None
     if e.get("sha") != _sha(a):
         return None
-    return e["generator"]
+    if g.get("pin_rev"):
+        mt = e.get("meta") or {}
+        now = pin_commit(g["pin_rev"])
+        if not mt.get("source") or now is None or mt.get("commit") != now:
+            return None
+    return e
 
 
 def _classify(benchset, path):
@@ -473,16 +579,33 @@ def lookup(images):
                 target = twin
                 notes.append("%s=copy-of:%s" % (name, os.path.basename(twin)))
             else:                                    # a scratch image
-                if not _classify(benchset, a):
-                    continue
-                gen = provenance(a)
-                if gen is None:
+                # ⛔⛔ CLOCKED OR NOT (Wilson 11-21): provenance is what proves a
+                # simulated image came from today's generator and today's sources.
+                # An unclocked image used to pass here unasked -- 283 images / 658
+                # runs in the gate set (run_arm2, gate_v2_equiv's v1 side,
+                # run_drive_sample). The classifier still runs (it refuses an image
+                # it cannot classify) and labels the note.
+                clk = _classify(benchset, a)
+                pe = provenance_entry(a)
+                if pe is None and is_cov_path(a):
                     raise SimRefused(
-                        "sim_run REFUSED: %s has a clocked open-drain lane, is "
-                        "not a universe image or a copy of one, and was not "
-                        "created this run under scratch by a registered "
-                        "generator (sim_run.SCRATCH_GENERATORS)" % a)
-                notes.append("%s=scratch:%s" % (name, gen))
+                        "sim_run REFUSED: %s (caller %s) is a generated sweep-arm image "
+                        "(probe_cov) with no provenance from this run -- stale from an "
+                        "earlier run, or not written by its coverage_arms writer "
+                        "(sim_run.COV_WRITERS)" % (a, _caller()))
+                if pe is None:
+                    raise SimRefused(
+                        "sim_run REFUSED: %s (caller %s, %s) is not a universe image "
+                        "or a copy of one, and has no provenance from this run "
+                        "(created under scratch by a registered generator, this "
+                        "run's token, current content; a pinned generator's commit "
+                        "== its pin now) -- sim_run.SCRATCH_GENERATORS"
+                        % (a, _caller(), "clocked" if clk else "unclocked"))
+                pin = (pe.get("meta") or {}).get("commit")
+                kind = "generated" if pe["generator"].endswith(COV_SUFFIX) else "scratch"
+                notes.append("%s=%s:%s%s%s" % (name, kind, pe["generator"],
+                                                    ("@" + pin[:12]) if pin else "",
+                                                    "" if clk else ",unclocked"))
                 continue
         try:
             arg = benchset.a2_slack_arg(_rel(target))

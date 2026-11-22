@@ -175,6 +175,7 @@ def coverage_arms():
                    ("obs_msb", observe_image(order=I.ORDER_MSB))):
         f = "%s/flags_%s.hex" % (COV_DIR, k)
         I.write_image(os.path.join(ROOT, f), img)
+        sim_run.cov_image("run_flags", os.path.join(ROOT, f))
         out.append(("fl_" + k, ["+IMG=" + f, "+NCYC=%d" % NCYC]))
     return out
 

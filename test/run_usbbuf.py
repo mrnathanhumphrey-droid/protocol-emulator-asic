@@ -243,6 +243,8 @@ def coverage_arms():
     os.makedirs(d, exist_ok=True)
     I.write_image(os.path.join(d, IMAGE_FILES["usb"]), image_usb())
     I.write_image(os.path.join(d, IMAGE_FILES["queue"]), image_queue())
+    for _k in ("usb", "queue"):
+        sim_run.cov_image("run_usbbuf", os.path.join(d, IMAGE_FILES[_k]))
     rel = lambda p: COV_DIR + "/" + os.path.basename(p)
     arms = []
     for name, sc in SCEN.items():

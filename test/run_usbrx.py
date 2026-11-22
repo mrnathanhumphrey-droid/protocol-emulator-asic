@@ -523,6 +523,7 @@ def coverage_arms():
     imgs = {"main": image(), "busy": image(busy=(30, 30 + I.usb_deadline_margin()))}
     for k, im in imgs.items():
         I.write_image(os.path.join(ROOT, COV_DIR, IMAGE_FILES[k]), im)
+        sim_run.cov_image("run_usbrx", os.path.join(ROOT, COV_DIR, IMAGE_FILES[k]))
     arms = []
     for n, (name, packets, e, E, seed, _exp) in enumerate(cases()):
         tr, t_end = line(packets, e, E, seed)
