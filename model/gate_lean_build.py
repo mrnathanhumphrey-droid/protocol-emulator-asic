@@ -16,7 +16,8 @@
      theorem in PREMISES, the Prop binders of its REAL signature (read in the same generated
      file by a MetaM walk of the constant's type, no parsing of source text) must be exactly
      the binders PREMISES lists for it -- an unlisted premise and a listed binder the signature
-     lacks both turn this red. gate_lane_cert check 13 compares each READY_RULES rule's
+     lacks both turn this red. A Pi-shaped conclusion's unnamed arrows are counted, not named:
+     each spec declares `anon` and the count must match exactly (11-22). gate_lane_cert check 13 compares each READY_RULES rule's
      `applies` against its theorem's "applies" names here; the "contract" names form the
      run-level contract list, each to be mapped to its RTL contract and must-fire (next step).
 ALLOWED = {propext, Quot.sound}. Classical.choice is NOT allowed: the build does not depend on
@@ -331,6 +332,31 @@ PREMISES = {
                      "scan_ok": ("hF",), "timeout_order": ("hidx2", "hord")},
         "shape": ("hτ", "hnf", "hfl"),
     },
+    # CloseBKSpan (Wilson 11-21, span ruling; PREMISES widening): the per-lane bound closed on
+    # the bridged run in span form -- the composition's L4 closure. Per-image: the non-arming
+    # writebacks' R + 3 gap (lane-cert check 22), the span checker's premise and the
+    # certificate's fixpoint (branch_budget._decisions, lane_cert.span_min); hS = 0 rests on
+    # the three scheduler contracts
+    "wb_closeBK_span_K11": {
+        "applies": {"nonarm_gap": ("hgap",), "span_min": ("hm1", "hspan"),
+                    "span_fixpoint": ("hG", "hK")},
+        "contract": {"edge_timing": ("hedge",), "disp_released_only": ("hwin",),
+                     "sched_bprime": ("hb",), "sched_names_ready": ("hws",),
+                     "sched_k11": ("hK11",)},
+        "shape": ("hA", "h0", "h0ts"),
+        # the conclusion's antecedents: t < T, P.live y, IsWB y (unnamed arrows)
+        "anon": 3,
+    },
+    # ChainBK (11-22, the runBK flush lemma): the release chain with an arming writeback counted
+    # as the checker's ARM gap gA. hgw (gA <= dly + ext, the timeout path) and hge (release + gA
+    # <= edge + 1, the edge path) are the ARM gap's per-image facts -- the earliest edge after a
+    # release is the peer premise lane_cert prices (premises: arm_floor / arm_j), NOT contract
+    # K10 (edge_timing is hedge: the edge after the ARM's writeback)
+    "ts_chainBK_ge": {
+        "applies": {"arm_gap": ("hgw", "hge")},
+        "contract": {"edge_timing": ("hedge",)},
+        "shape": ("hA", "h0a", "hwa"),
+    },
 }
 #: the M_LEAN_PREMISE_UNLISTED plant: (file, theorem, the signature text it extends, the binder)
 PREMISE_PLANT = ("SlotReadyB.lean", "ready_pc1_plain_T",
@@ -400,7 +426,14 @@ def premise_problems(binders, done, premises=None):
         for kind in ("applies", "contract"):
             for bs in spec[kind].values():
                 listed |= set(bs)
-        real = binders[thm]
+        # ⚠ the walk's telescope runs on into a Pi-shaped CONCLUSION (`∀ t, t < T → ...`): those
+        # arrows are unnamed (hygienic). Each spec declares how many it has (`anon`) and the
+        # count must match exactly -- an unnamed premise added to a signature changes it (red)
+        real = [b for b in binders[thm] if "_hyg" not in b]
+        anon = len(binders[thm]) - len(real)
+        if anon != spec.get("anon", 0):
+            probs.append("%s has %d unnamed binder(s), its premise list declares %d"
+                         % (thm, anon, spec.get("anon", 0)))
         for b in real:
             if b not in listed:
                 probs.append("premise %s of %s is unlisted (not applies / contract / shape)"
