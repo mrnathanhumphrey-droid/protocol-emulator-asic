@@ -341,10 +341,19 @@ COMPOSITION = {
         "status": "owed",
         "steps": [
             {"step": "usbdev_dev.hex / usbdev_fpga.hex: hM from the span rule on the flush run",
+             "status": "proved",
+             "theorems": ("cntF_reach", "cntF_wb_shift", "dec_sepF", "wb_close_spanF",
+                          "wb_close_spanT")},
+            # 11-21 (hRz check): the USB lane's own R is PrioResp.prio_resp's, stated on run only;
+            # on usbdev the USB lane is the flushed lane, so wb_close_spanT's hRz is unbacked
+            {"step": "USB-lane bound on the flush run (wb_close_spanT's hRz)", "status": "owed",
+             "what": "PrioResp.prio_resp (and EdfB.prio_resp_edf) are stated on run; the checker's "
+                     "usb_R rests on it, but on usbdev the USB lane is flushed at its FALLTHROUGH "
+                     "edge (ts := now + 1) -- prio_resp on runF, lifted to run3T, owed"},
+            {"step": "the flush lemma for hspan on runF (shared with slot_on_composition's)",
              "status": "owed",
-             "what": "stamp backed by ArmFTClose.wb_bound_T, whose hM is a premise; hM from the "
-                     "span rule on the flush run (runF / run3T) owed -- wb_close_spanF on runF, "
-                     "lifted to run3T (CloseBKSpan's template)"},
+             "what": "span_min => hspan under flushes: the USB lane is a z lane in every other "
+                     "lane's window, and its flush can lower its timestamp"},
         ]},
     # 11-21 (hfree_measure, RTL traces): the EDF theorems (EdfB, RespEdf) carry their own hfree;
     # the gap route does not give it on two EDF-certified images although the RTL meets it
