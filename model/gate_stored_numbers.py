@@ -340,6 +340,13 @@ SITES = [
          "entry is the `pslot` alias by the concatenation identity "
          "fix = {pl, pslot}; `pslot` does NOT survive into the mapped "
          "netlist as a name, so a check spelling it would pass vacuously"),
+    Site("model/gate_lane_cert.py", "PRICE_DEBT", LIVE,
+         "check 23's tracked pricing debt: (path, image, lane, opcode) -> owner",
+         "model/gate_lane_cert.py", "n/a -- check 23 reprices every word every run",
+         "⛔ DEBT, NOT AN EXEMPTION: owed to agent 1's lanes_of fix (route through "
+         "dispatch_delay, 11-22). Exact both ways -- an unlisted disagreement is red, and "
+         "an entry no longer seen is red (must-fire M_LC_PRICE_DEBT_STALE), so the table "
+         "empties in the commit that fixes lanes_of"),
 ]
 
 # ⛔ Collections that carry numbers but are SPECIFICATIONS, not measurements:

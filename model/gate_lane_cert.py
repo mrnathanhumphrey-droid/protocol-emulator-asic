@@ -573,12 +573,10 @@ def check_pricing(LC, I):
         raw = {}
         for ln, h, a in dgf.walk(img):
             raw.setdefault(ln, []).append((h, a))
-        try:
-            priced = A2.lanes_of(img)
-        except Exception as e:                                  # noqa: BLE001
-            seen[("program_a2", img_name, -1, "lanes_of raised")] = (None, repr(e)[:60], None)
-            continue
-        for ln, _h, acts in priced:
+        # no handler (ruling E): lanes_of raises nothing of its own -- it is dgf.walk, run
+        # unguarded just above on the same image, plus BRANCH_OPS' branch_wait; measured 11-23,
+        # nothing raised on any of the 89 corpus images. A raise here fails the gate loudly.
+        for ln, _h, acts in A2.lanes_of(img):
             for (h, a), b in zip(raw.get(ln, []), acts):
                 want = I.dispatch_delay(a, h)
                 if b["delay"] != want:
