@@ -567,11 +567,13 @@ def step_btr(P, A, ext):
     ext2["win"] = win_a(_g(ext, "win"), A["armed"])
     X2 = step_bkkr(P, A["X"], ext2, fl, k)
     tm = [tmo_a(A, l, _g(ext, "win")) for l in range(K)]
-    if any(tm):                                   # ArmT.EngBK.keepTs
+    if any(tm):                                   # ArmT.EngBK.keepTs (ts and reb)
         ts0 = A["X"]["x"]["ts"]
+        reb0 = A["X"].get("reb", [False] * K)
         X2 = dict(X2)
         X2["x"] = dict(X2["x"])
         X2["x"]["ts"] = [ts0[l] if tm[l] else X2["x"]["ts"][l] for l in range(K)]
+        X2["reb"] = [bool(reb0[l]) if tm[l] else X2["reb"][l] for l in range(K)]
     armed = [False if fl[l] else (True if ar[l] else A["armed"][l]) for l in range(K)]
     armE = [edge[l] if ar[l] else A["armE"][l] for l in range(K)]
     return {"X": X2, "armed": armed, "armE": armE}

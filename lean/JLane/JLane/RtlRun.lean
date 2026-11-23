@@ -11,7 +11,7 @@ flush set the arming ends `ends = hit || tmo` (the timeout at the pick, ruling 1
 
 `simT_step`: one cycle of `stepBTR` on the renamed state is one cycle of `stepBT` renamed (the
 no-swap lanes added, the lanes whose arming ends removed) -- `SwapRenK.simA_step`'s argument with
-`ends` for `hit`; a timeout's end keeps `ts` on both sides (`EngBK.keepTs`).
+`ends` for `hit`; a timeout's end keeps `ts` and `reb` on both sides (`EngBK.keepTs`).
 `model/step_b.py`'s `step_btr` transcribes `stepBTR` definition by definition.
 -/
 namespace JLane
@@ -22,7 +22,7 @@ variable (P : Program) (win : Engine → Option Lane) (usb : Option Lane)
 
 /-- **One cycle of the RTL-side armed run, both FT paths.** -/
 def stepBTR (nw : Lane → Bool) (k : Lane → Nat) (A : EngBA) : EngBA :=
-  { X := EngBK.keepTs (A.tmo win) A.X.x.e.ts
+  { X := EngBK.keepTs (A.tmo win) A.X
       (stepBKKR P (winA win A.armed) usb sreq nw (A.ends win) k A.X)
     armed := fun l => if A.ends win l = true then false
       else if A.arms P isArm l = true then true else A.armed l
@@ -51,8 +51,8 @@ theorem renA_ends (ns : Lane → Bool) (A : EngBA) (hw : win (renE ns A.X.x.e) =
   rw [renA_tmo win ns A hw]
   rfl
 
-theorem renK_keepTs (ns keep : Lane → Bool) (ts0 : Lane → Nat) (X : EngBK) :
-    renK ns (EngBK.keepTs keep ts0 X) = EngBK.keepTs keep ts0 (renK ns X) := rfl
+theorem renK_keepTs (ns keep : Lane → Bool) (X0 X : EngBK) :
+    renK ns (EngBK.keepTs keep X0 X) = EngBK.keepTs keep X0 (renK ns X) := rfl
 
 /-- **The RTL-side step with both paths is the model's, renamed.** -/
 theorem simT_step (ns nw : Lane → Bool) (k : Lane → Nat) (A : EngBA) (hW : WfBK A.X)
@@ -84,9 +84,9 @@ theorem simT_step (ns nw : Lane → Bool) (k : Lane → Nat) (A : EngBA) (hW : W
     hwinq hsr hsrn (winA_ren win A.armed ns _ hwin)
     (fun l h => winA_not_armed win A.armed _ l (hns_armed l h)) hpick hfnpf hkeep
   apply EngBA.ext'
-  · show EngBK.keepTs (A.tmo win) A.X.x.e.ts
+  · show EngBK.keepTs (A.tmo win) A.X
         (stepBKKR P (winA win A.armed) usb sreq nw (A.ends win) k (renK ns A.X))
-      = renK (fun l => (ns l || nw l) && !A.ends win l) (EngBK.keepTs (A.tmo win) A.X.x.e.ts
+      = renK (fun l => (ns l || nw l) && !A.ends win l) (EngBK.keepTs (A.tmo win) A.X
           (stepBKK P (winA win A.armed) usb sreq (A.ends win) k A.X))
     rw [hK, renK_keepTs]
   · funext l

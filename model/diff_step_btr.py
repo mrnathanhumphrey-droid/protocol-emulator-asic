@@ -17,6 +17,9 @@ cleared at the lane's writeback only when dly + ext > 0 -- rendered; dly 0 on ~1
 1000 cases, 0 mismatches (53 with a flush, 23 hits, 3 zero-delay writebacks of a rebased lane);
 planted ts = now + 1 at a flush caught (23/1000, every hit), reb cleared at every writeback caught
 (3/1000, every zero-delay case), reb never set caught (35/1000).
+Re-signed 11-23 for a timeout keeping reb (ArmT.EngBK.keepTs keeps ts and reb): 1000 cases, 0
+mismatches (30 with a timeout, 20 of them on a lane whose reb was clear); planted reb set at a
+timeout caught (20/1000, every such case).
 Usage: python model/diff_step_btr.py [N] [SEED]   (defaults 1000, 7); rc 0 = no mismatch.
 Needs the Lean library built (lake build). Memory: ~1.7 GB peak at N = 1000.
 """
