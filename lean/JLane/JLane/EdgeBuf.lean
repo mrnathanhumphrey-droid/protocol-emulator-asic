@@ -21,6 +21,15 @@ slot fetch (`Buf.lean`), so it is the oldest unretired word at the edge. K12's o
 word first, then the edge word, and the RTL's no-swap / filing / load rules) is NOT this model: it
 is owed as its own step (11-22).
 
+**Measured, not proved (agent 1, 11-22).** The two cases outside the proof -- pre-prime captures
+and K12's timeout-first order -- were measured on the RTL: 2,461 runs (a 1,570-run sweep over 10
+images, idle / busy ports, two FT lanes; and an 891-run start-up probe over 11 images, the FT ARM
+captured before priming, the edge swept from first arming -40 to +40). The edge word was in the
+buffer at the edge 0 times and absent 0 times (kept in a slot 1,326, arriving in the edge's own
+capture 18). Under the start-up order the edge word WAS buffered first (330 tag moves) and always
+loaded into the spare before the lane armed, so before any edge. That is evidence for those cases,
+not this lemma: their proof waits on the K12 model.
+
 Must-fire `M_LEAN_EDGE_BUFFERED` (gate_lean_build): a planted step that leaves the edge word in the
 buffer (the load never happens, the buffer never clears) -- the invariants this lemma rests on no
 longer build, so the Lean gate goes red.
