@@ -6,6 +6,10 @@ rendered canonically, and compared line by line with the Python step_btr on the 
 Signed off 11-22: 1000 cases, 0 mismatches; a planted spare-first load caught (26/50).
 K13's usb_on (UsbOn): the Lean call takes usb := usbOf on and the flag's next value on || rx, as
 UsbOn.stepBU; the Python carries x["usb_on"] and ext["usb_rx"].
+Re-signed 11-22 for ruling 1b (the timeout ends at the pick: armed, deadline reached, dispatcher
+idle, the unmasked scheduler naming the lane, no edge): 1000 cases, 0 mismatches, 33 with a
+timeout pick; planted old deadline-only timeout caught (516/1000), planted pick without the idle
+condition caught (62/1000).
 Usage: python model/diff_step_btr.py [N] [SEED]   (defaults 1000, 7); rc 0 = no mismatch.
 Needs the Lean library built (lake build). Memory: ~1.7 GB peak at N = 1000.
 """

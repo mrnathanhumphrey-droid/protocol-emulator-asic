@@ -356,8 +356,10 @@ def run_b(P, x, exts):
 #   step_bkkr SwapRenK.stepBKKR -- the K1-K5 keep-flush of the lanes in `fl`, kept index `k`, and
 #                                  the kill (pkill)
 #   step_btr  RtlRun.stepBTR    -- the armed registers; the flush set is the arming's end
-#                                  (ArmT.ends = hit || tmo: the edge, or the deadline reached
-#                                  with no edge -- the edge wins a tie)
+#                                  (ArmT.ends = hit || tmo: the edge, or the timeout at the
+#                                  pick -- deadline reached, dispatcher idle, the unmasked
+#                                  scheduler naming the lane, no edge; the edge wins a tie;
+#                                  ruling 1b, 11-22)
 # State A = {"X": {"x": <EngB dict>, "pkill": bool}, "armed": [bool]*K, "armE": [int]*K}.
 # ext per cycle, beyond step_b's (win sreq ret xd fnpf pick usb_rx):
 #   nw     [bool]*K  the no-swap decision on each lane this cycle (ft_k6)
@@ -519,15 +521,17 @@ def hit_a(A, l):
     return A["armed"][l] and A["X"]["x"]["now"] == A["armE"][l]
 
 
-def tmo_a(A, l):
-    """ArmT.EngBA.tmo: armed, the deadline (release) reached, no edge this cycle"""
+def tmo_a(A, l, win):
+    """ArmT.EngBA.tmo (ruling 1b: at the pick): armed, the deadline (release) reached, the
+    dispatcher idle, the scheduler (unmasked, `win`) naming the lane, no edge this cycle"""
     x = A["X"]["x"]
-    return A["armed"][l] and x["ts"][l] <= x["now"] and not hit_a(A, l)
+    return (A["armed"][l] and x["ts"][l] <= x["now"] and x["st"] == "idle" and win == l
+            and not hit_a(A, l))
 
 
-def ends_a(A, l):
+def ends_a(A, l, win):
     """ArmT.EngBA.ends"""
-    return hit_a(A, l) or tmo_a(A, l)
+    return hit_a(A, l) or tmo_a(A, l, win)
 
 
 def arms_a(A, l, ret, is_arm):
@@ -547,7 +551,7 @@ def step_btr(P, A, ext):
     is_arm = bool(_g(ext, "is_arm", False))
     edge = _g(ext, "edge", [0] * K)
     k = _g(ext, "k", [0] * K)
-    fl = [ends_a(A, l) for l in range(K)]
+    fl = [ends_a(A, l, _g(ext, "win")) for l in range(K)]
     ar = [arms_a(A, l, ret, is_arm) for l in range(K)]
     ext2 = dict(ext)
     ext2["win"] = win_a(_g(ext, "win"), A["armed"])

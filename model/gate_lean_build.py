@@ -246,7 +246,7 @@ KEY = ("dstar", "dstar29", "dstar39", "dstar39_v2", "dstar39_st", "dstar39_hold"
        "K11At_of_unreleased", "edgeFirst_step", "edgeFirst_runBA", "armed_unreleased_runBA",
        "K11At_runBA",
        # ArmT.lean (Wilson 11-22: one armed run for both FT paths)
-       "hit_tmo_excl", "released_armed_ends", "K11At_unless_ending", "stepBT_eq_stepBA",
+       "hit_tmo_excl", "picked_armed_ends", "K11At_unless_ending", "stepBT_eq_stepBA",
        "armInvT_step", "armInvT_runBT", "arming_cover", "ends_at_edge",
        # RtlRun.lean (piece 5's reference, 11-22): the RTL-side armed run, both FT paths
        "renA_ends", "simT_step")

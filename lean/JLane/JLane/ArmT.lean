@@ -6,9 +6,11 @@ Ruling (11-22): the buffered machine is the final hardware, so its timeout path 
 armed model behind it as the edge path. **Each arming ends at whichever comes first, its edge or
 its deadline:**
 * at the edge: the keep-flush as now (K1–K5), keeping the edge word (`hit`);
-* at the deadline: PC+1 stays as the head and PC+2 is dropped (K6 as ruled), as the keep-flush
-  with the kept index PC+1's -- `OrderT`'s model of the timeout path, now driven by the armed run
-  (`tmo`: armed, the release -- the deadline the ARM's writeback set -- reached, no edge this cycle);
+* at the pick (Wilson 11-22, ruling 1b): PC+1 stays as the head and PC+2 is dropped (K6 as
+  ruled), as the keep-flush with the kept index PC+1's -- `OrderT`'s model of the timeout path, now
+  driven by the armed run (`tmo`: armed, the release -- the deadline the ARM's writeback set --
+  reached, the dispatcher idle, the scheduler naming the lane, no edge this cycle). This is the
+  RTL's timeout decision: the first idle cycle at or after the deadline that the lane wins;
 * a tie (the edge on the deadline cycle): the edge wins (`tmo` excludes a `hit` cycle), as the RTL
   and the slot-off FT engine.
 
@@ -19,46 +21,51 @@ applies; on a cycle with no timeout it IS `stepBA` (`stepBT_eq_stepBA`).
 * `hit_tmo_excl`, `arming_cover` -- **no cycle uncovered**: an armed lane, on each cycle, is in
   exactly one of continuing armed, its edge flush, its timeout; and it ends no later than its edge
   cycle (`now ≤ armE` is kept, `armInvT_step` / `armInvT_runBT`);
-* `released_armed_ends`, `K11At_unless_ending` -- **K11 with its exception**: K11 holds at every cycle
-  where no arming ends; an armed lane is released only on the cycle its arming ends -- the timeout
-  cycles (and the edge-on-deadline tie), which is what `branch_budget._disarm_S` charges.
+* `picked_armed_ends`, `K11At_unless_ending` -- **K11 with its exception**: K11 holds at every
+  idle cycle where no arming ends; the scheduler names an armed lane only on the cycle its arming
+  ends -- the timeout picks (and the edge-on-pick tie), which is what `branch_budget._disarm_S`
+  charges. Only idle cycles are K11's concern (`noDec_zero_K11` counts idle cycles).
 
-The RTL's timeout decision is the first idle cycle at or after the deadline that the lane wins; the
-ruling places it AT the deadline. Recorded with the report (11-22).
+Before ruling 1b (11-22) the timeout ended AT the deadline (`tmo` without the idle and pick
+conditions); the ruling moved it to the pick, as the RTL.
 -/
 namespace JLane
 
-/-- The timeout: armed, the release (deadline) reached, and no edge this cycle (the edge wins a
-tie). -/
-def EngBA.tmo (A : EngBA) (l : Lane) : Bool :=
-  A.armed l && decide (A.X.x.e.ts l ≤ A.X.x.e.now) && !A.hit l
+/-- The timeout, at the pick (ruling 1b): armed, the release (deadline) reached, the dispatcher
+idle, the scheduler (unmasked) naming the lane, and no edge this cycle (the edge wins a tie). -/
+def EngBA.tmo (A : EngBA) (win : Engine → Option Lane) (l : Lane) : Bool :=
+  A.armed l && decide (A.X.x.e.ts l ≤ A.X.x.e.now) && decide (A.X.x.e.st = .idle) &&
+    decide (win A.X.x.e = some l) && !A.hit l
 
 /-- The arming ends this cycle: its edge or its timeout. -/
-def EngBA.ends (A : EngBA) (l : Lane) : Bool := A.hit l || A.tmo l
+def EngBA.ends (A : EngBA) (win : Engine → Option Lane) (l : Lane) : Bool :=
+  A.hit l || A.tmo win l
 
 /-- **The edge wins a tie**: an edge cycle is never a timeout cycle. -/
-theorem hit_tmo_excl (A : EngBA) (l : Lane) (h : A.hit l = true) : A.tmo l = false := by
+theorem hit_tmo_excl (A : EngBA) (win : Engine → Option Lane) (l : Lane) (h : A.hit l = true) :
+    A.tmo win l = false := by
   unfold EngBA.tmo; rw [h]; simp
 
-/-- An armed lane whose release has arrived ends its arming this cycle. -/
-theorem released_armed_ends (A : EngBA) (l : Lane) (ha : A.armed l = true)
-    (hr : A.X.x.e.ts l ≤ A.X.x.e.now) : A.ends l = true := by
+/-- An armed lane the scheduler names on an idle cycle, its release arrived, ends its arming this
+cycle. -/
+theorem picked_armed_ends (A : EngBA) (win : Engine → Option Lane) (l : Lane)
+    (ha : A.armed l = true) (hr : A.X.x.e.ts l ≤ A.X.x.e.now) (hi : A.X.x.e.st = .idle)
+    (hw : win A.X.x.e = some l) : A.ends win l = true := by
   unfold EngBA.ends EngBA.tmo
   cases hh : A.hit l
-  · simp [ha, hr]
+  · simp [ha, hr, hi, hw]
   · rfl
 
-/-- **K11 with its exception**: at a cycle where no arming ends, the scheduler (naming only
+/-- **K11 with its exception**: at an idle cycle where no arming ends, the scheduler (naming only
 released lanes) never names an armed lane. -/
 theorem K11At_unless_ending (P : Program) (win : Engine → Option Lane) (A : EngBA)
     (hwin : ∀ e w, win e = some w → P.live w = true ∧ e.ts w ≤ e.now)
-    (hno : ∀ l, A.armed l = true → A.ends l = false) : K11At P win A.armed A.X.x.e :=
-  K11At_of_unreleased P win _ _ hwin (fun l ha => by
-    by_cases hr : A.X.x.e.ts l ≤ A.X.x.e.now
-    · have h := hno l ha
-      rw [released_armed_ends A l ha hr] at h
-      cases h
-    · omega)
+    (hidle : A.X.x.e.st = .idle)
+    (hno : ∀ l, A.armed l = true → A.ends win l = false) : K11At P win A.armed A.X.x.e := by
+  intro v hv ha
+  have h := hno v ha
+  rw [picked_armed_ends A win v ha (hwin _ v hv).2 hidle hv] at h
+  cases h
 
 section
 variable (P : Program) (win : Engine → Option Lane) (usb : Option Lane)
@@ -66,8 +73,8 @@ variable (P : Program) (win : Engine → Option Lane) (usb : Option Lane)
 
 /-- **One cycle of the armed run with both paths**: `stepBA` with the flush set `ends`. -/
 def stepBT (k : Lane → Nat) (A : EngBA) : EngBA :=
-  { X := stepBKK P (winA win A.armed) usb sreq A.ends k A.X
-    armed := fun l => if A.ends l = true then false
+  { X := stepBKK P (winA win A.armed) usb sreq (A.ends win) k A.X
+    armed := fun l => if A.ends win l = true then false
       else if A.arms P isArm l = true then true else A.armed l
     armE := fun l => if A.arms P isArm l = true then edge A.X.x.e.now l else A.armE l }
 
@@ -81,9 +88,9 @@ theorem runBT_succ (kt : Nat → Lane → Nat) (A0 : EngBA) (n : Nat) :
           (runBT P win usb sreq isArm edge kt n A0) := rfl
 
 /-- **On a cycle with no timeout the step is `stepBA`.** -/
-theorem stepBT_eq_stepBA (k : Lane → Nat) (A : EngBA) (h : ∀ l, A.tmo l = false) :
+theorem stepBT_eq_stepBA (k : Lane → Nat) (A : EngBA) (h : ∀ l, A.tmo win l = false) :
     stepBT P win usb sreq isArm edge k A = stepBA P win usb sreq isArm edge k A := by
-  have he : A.ends = A.hit := by
+  have he : A.ends win = A.hit := by
     funext l; unfold EngBA.ends; rw [h l]; simp
   unfold stepBT stepBA
   rw [he]
@@ -102,9 +109,9 @@ theorem armInvT_step (k : Lane → Nat) (hedge : ∀ t l, t + 1 ≤ edge t l) (A
   · intro l ha
     show ¬((stepB P (winA win A.armed) usb sreq A.X.base).e.st ≠ .idle ∧
       (stepB P (winA win A.armed) usb sreq A.X.base).e.cur = l)
-    change (if A.ends l = true then false
+    change (if A.ends win l = true then false
       else if A.arms P isArm l = true then true else A.armed l) = true at ha
-    by_cases hh : A.ends l = true
+    by_cases hh : A.ends win l = true
     · rw [if_pos hh] at ha
       cases ha
     · rw [if_neg hh] at ha
@@ -121,10 +128,10 @@ theorem armInvT_step (k : Lane → Nat) (hedge : ∀ t l, t + 1 ≤ edge t l) (A
         exact fun ⟨hne, hc⟩ => next_disp_ne P win usb sreq A hA l ha hne hc
   · intro l ha
     rw [hn]
-    change (if A.ends l = true then false
+    change (if A.ends win l = true then false
       else if A.arms P isArm l = true then true else A.armed l) = true at ha
     show A.X.x.e.now + 1 ≤ (if A.arms P isArm l = true then edge A.X.x.e.now l else A.armE l)
-    by_cases hh : A.ends l = true
+    by_cases hh : A.ends win l = true
     · rw [if_pos hh] at ha
       cases ha
     · rw [if_neg hh] at ha
@@ -153,24 +160,24 @@ theorem arming_cover (hedge : ∀ t l, t + 1 ≤ edge t l) (kt : Nat → Lane �
     (hA : ArmInvB A0) (n : Nat) (l : Lane)
     (ha : (runBT P win usb sreq isArm edge kt n A0).armed l = true) :
     ((runBT P win usb sreq isArm edge kt n A0).hit l = true ∧
-        (runBT P win usb sreq isArm edge kt n A0).tmo l = false) ∨
-      ((runBT P win usb sreq isArm edge kt n A0).tmo l = true ∧
+        (runBT P win usb sreq isArm edge kt n A0).tmo win l = false) ∨
+      ((runBT P win usb sreq isArm edge kt n A0).tmo win l = true ∧
         (runBT P win usb sreq isArm edge kt n A0).hit l = false) ∨
       ((runBT P win usb sreq isArm edge kt n A0).hit l = false ∧
-        (runBT P win usb sreq isArm edge kt n A0).tmo l = false) ∧
+        (runBT P win usb sreq isArm edge kt n A0).tmo win l = false) ∧
     (runBT P win usb sreq isArm edge kt n A0).X.x.e.now
       ≤ (runBT P win usb sreq isArm edge kt n A0).armE l := by
   have hI := (armInvT_runBT P win usb sreq isArm edge hedge kt A0 hA n).2 l ha
   cases hh : (runBT P win usb sreq isArm edge kt n A0).hit l with
-  | true => exact Or.inl ⟨rfl, hit_tmo_excl _ l hh⟩
+  | true => exact Or.inl ⟨rfl, hit_tmo_excl _ win l hh⟩
   | false =>
-    cases ht : (runBT P win usb sreq isArm edge kt n A0).tmo l with
+    cases ht : (runBT P win usb sreq isArm edge kt n A0).tmo win l with
     | true => exact Or.inr (Or.inl ⟨rfl, rfl⟩)
     | false => exact Or.inr (Or.inr ⟨⟨rfl, rfl⟩, hI⟩)
 
 /-- On its edge cycle an armed lane's arming ends: the edge (the tie included). -/
 theorem ends_at_edge (A : EngBA) (l : Lane) (ha : A.armed l = true)
-    (he : A.X.x.e.now = A.armE l) : A.ends l = true := by
+    (he : A.X.x.e.now = A.armE l) : A.ends win l = true := by
   unfold EngBA.ends EngBA.hit
   rw [ha, he]
   simp
