@@ -21,10 +21,9 @@ deadline); (P2) the requester never picks an `ns` lane; (P3) an `ns` lane's head
 prefetch past it (the edge word is not a no-prefetch word); (P4) the dispatcher, the pick, the
 requester and `fnpf` do not read the select; plus: `ns` lanes are not dispatched (armed); a no-swap
 writeback `nw` is a retiring writeback of a lane not yet in `ns`; BufEng's well-formedness (`WfB`);
-and every `ns` lane's BufEng head valid (`hhead`: the edge word captured).
-
-`hhead` leaves one real case out: the edge word still IN FLIGHT at the ARM's writeback (both slots
-empty; it then lands in the RTL's spare = BufEng's head, the same physical slot). Owed.
+and every `ns` lane's BufEng head valid (the edge word captured) OR the edge word the port's
+in-flight first fetch for it (`hhead`: the port busy with the lane, not a second fetch) -- the
+word lands where the scan latched it, the RTL's spare = BufEng's head, the same physical slot.
 
 Must-fire `M_LEAN_SWAP_ALWAYS` (gate_lean_build): the RTL step flips the select at every retiring
 writeback (the no-swap ignored) -- `sim_step`'s select no longer matches, the tree does not build.
@@ -221,7 +220,8 @@ theorem ren_portNextM (ns : Lane → Bool) (x : EngB) (hp : x.e.pst = .scan)
 
 /-- **The port's next state is the same on the RTL state** (P1, P2, P3, P4). -/
 theorem ren_portNextB (ns : Lane → Bool) (x : EngB)
-    (hhead : ∀ l, ns l = true → x.e.headValid l = true)
+    (hhead' : ∀ l, ns l = true → x.e.headValid l = true ∨
+      (x.e.pst ≠ .scan ∧ x.e.pl = l ∧ x.pb = false))
     (hnpf : ∀ l, ns l = true → x.e.npf l (x.e.sel l) = false)
     (hwinq : ∀ l, ns l = true → x.e.winq ≠ some l)
     (hsr : sreq (ren ns x) = sreq x) (hsrn : ∀ l, ns l = true → sreq x ≠ some l) :
@@ -229,6 +229,9 @@ theorem ren_portNextB (ns : Lane → Bool) (x : EngB)
       pbNext P usb sreq (ren ns x) = pbNext P usb sreq x := by
   cases hp : x.e.pst with
   | scan =>
+    -- on a scan the port is not busy, so no renamed lane is in flight: its head is valid
+    have hhead : ∀ l, ns l = true → x.e.headValid l = true := fun l h =>
+      (hhead' l h).resolve_right (fun hh => hh.1 hp)
     have hp' : (ren ns x).e.pst = .scan := by rw [ren_e, renE_pst]; exact hp
     have hu' : usbFirst P usb (ren ns x).e = usbFirst P usb x.e := by
       rw [ren_e]; exact ren_usbFirst P usb ns x.e hwinq
@@ -326,29 +329,44 @@ section
 variable (P : Program) (win : Engine → Option Lane) (usb : Option Lane)
   (sreq : EngB → Option Lane)
 
-/-- A capture lands in the same physical place on the RTL state. -/
+/-- A capture lands in the same physical place on the RTL state (a first fetch where the scan
+latched it; a second fetch behind a renamed lane's valid head). -/
 theorem ren_capTo (ns : Lane → Bool) (x : EngB) (l : Lane) (s : Slot)
-    (hhead : ∀ l, ns l = true → x.e.headValid l = true) :
+    (hhead : ∀ l, ns l = true → x.e.headValid l = true ∨
+      (x.e.pst ≠ .scan ∧ x.e.pl = l ∧ x.pb = false)) :
     capTo (ren ns x) l s = capTo x l s := by
   unfold capTo
   rw [ren_e, renE_pst, renE_pl, renE_pslot]
   show (decide (x.e.pst = .cap) && decide (l = x.e.pl) &&
       (if x.pb = true then decide (capSlot (renE ns x.e) l = some s) else decide (s = x.e.pslot)))
     = _
-  cases hns : ns l with
-  | false => rw [ren_capSlot_off ns x.e l hns]
-  | true => rw [ren_capSlot_on ns x.e l hns (hhead l hns)]
+  cases hpb : x.pb with
+  | false => rfl
+  | true =>
+    cases hns : ns l with
+    | false => rw [ren_capSlot_off ns x.e l hns]
+    | true =>
+      rcases hhead l hns with hv | ⟨-, -, hf⟩
+      · rw [ren_capSlot_on ns x.e l hns hv]
+      · rw [hpb] at hf; cases hf
 
 theorem ren_capBuf (ns : Lane → Bool) (x : EngB) (l : Lane)
-    (hhead : ∀ l, ns l = true → x.e.headValid l = true) :
+    (hhead : ∀ l, ns l = true → x.e.headValid l = true ∨
+      (x.e.pst ≠ .scan ∧ x.e.pl = l ∧ x.pb = false)) :
     capBuf (ren ns x) l = capBuf x l := by
   unfold capBuf
   rw [ren_e, renE_pst, renE_pl]
   show (decide (x.e.pst = .cap) && decide (l = x.e.pl) && x.pb &&
       decide (capSlot (renE ns x.e) l = none)) = _
-  cases hns : ns l with
-  | false => rw [ren_capSlot_off ns x.e l hns]
-  | true => rw [ren_capSlot_on ns x.e l hns (hhead l hns)]
+  cases hpb : x.pb with
+  | false => simp
+  | true =>
+    cases hns : ns l with
+    | false => rw [ren_capSlot_off ns x.e l hns]
+    | true =>
+      rcases hhead l hns with hv | ⟨-, -, hf⟩
+      · rw [ren_capSlot_on ns x.e l hns hv]
+      · rw [hpb] at hf; cases hf
 
 /-- The RTL's head-first load is BufEng's spare load, renamed. -/
 theorem ren_loadToR (ns : Lane → Bool) (x : EngB) (hW : WfB x) (l : Lane) (s : Slot) :
@@ -380,7 +398,8 @@ theorem ren_loadToR (ns : Lane → Bool) (x : EngB) (hW : WfB x) (l : Lane) (s :
 /-- **The simulation, one cycle.** The RTL's step on the renamed state is BufEng's step, renamed
 with the no-swap lanes added. -/
 theorem sim_step (ns nw : Lane → Bool) (M : EngB) (hW : WfB M)
-    (hhead : ∀ l, ns l = true → M.e.headValid l = true)
+    (hhead : ∀ l, ns l = true → M.e.headValid l = true ∨
+      (M.e.pst ≠ .scan ∧ M.e.pl = l ∧ M.pb = false))
     (hdisp : ∀ l, ns l = true → ¬(M.e.st ≠ .idle ∧ M.e.cur = l))
     (hnw : ∀ l, nw l = true → M.e.st = .wb ∧ l = M.e.cur ∧ P.ret M.e.now M.e.cur = true ∧ ns l = false)
     (hnpf : ∀ l, ns l = true → M.e.npf l (M.e.sel l) = false)
