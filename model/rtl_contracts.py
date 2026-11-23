@@ -205,9 +205,12 @@ CONTRACT_PREMISES = {
     # contract from another angle (a timed ARM chosen before its deadline).
     "sched_k11": {
         "rtl": ("disp_released_only",),
-        "derived": "ArmRel.K11At_runBA (edgeFirst_runBA, armed_unreleased_runBA, "
-                   "K11At_of_unreleased) + disp_released_only; scope: each arming's edge before "
-                   "its deadline (hfirst)",
+        "derived": "on the armed run with both FT paths (ArmT, Wilson 11-22): "
+                   "ArmT.K11At_unless_ending -- K11 holds at every cycle where no arming ends; an "
+                   "armed lane is released only on the cycle its arming ends "
+                   "(released_armed_ends): the timeout cycles (and the edge-on-deadline tie), "
+                   "the cycles branch_budget._disarm_S charges. On edge-first armings, "
+                   "ArmRel.K11At_runBA (every cycle). Both from disp_released_only",
         "why": "hK: K11At at every cycle of the armed run, so winA win armed chooses as win "
                "whenever an unarmed lane is ready (SchedK11.winS_eq_of_K11): the window bound's "
                "no-decision count S has no masked-pick stall (composition L4 hS). Derived: an "

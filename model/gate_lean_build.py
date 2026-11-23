@@ -244,7 +244,10 @@ KEY = ("dstar", "dstar29", "dstar39", "dstar39_v2", "dstar39_st", "dstar39_hold"
        "renK_base", "ren_keepSlot", "simK_step", "winA_not_armed", "renA_arms", "simA_step",
        # ArmRel.lean (K11 derived, Wilson 11-22): an armed lane is not released before its edge
        "K11At_of_unreleased", "edgeFirst_step", "edgeFirst_runBA", "armed_unreleased_runBA",
-       "K11At_runBA")
+       "K11At_runBA",
+       # ArmT.lean (Wilson 11-22: one armed run for both FT paths)
+       "hit_tmo_excl", "released_armed_ends", "K11At_unless_ending", "stepBT_eq_stepBA",
+       "armInvT_step", "armInvT_runBT", "arming_cover", "ends_at_edge")
 #: proof_constants.load() key -> the Lean expression that must evaluate to it (SPEC: the map)
 CONSTS = {
     "lemmaA_window": "LEMMA_A_WINDOW", "R_base": "R_BASE", "dispatch_cycles": "DISPATCH_CYCLES",
