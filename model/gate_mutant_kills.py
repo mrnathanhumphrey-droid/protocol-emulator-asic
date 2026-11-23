@@ -302,6 +302,9 @@ SCRATCH = {
     # K3's buffer clause (Wilson 11-22): a planted step leaving the edge word in the buffer --
     # the invariants EdgeBuf rests on no longer build, gate lean-build reds (CI, lean shard)
     "M_LEAN_EDGE_BUFFERED": "model/gate_lean_build.py",
+    # K12 Part A (11-22): the RTL step swapping at every writeback -- SwapRen.sim_step no longer
+    # builds, gate lean-build reds (CI, lean shard)
+    "M_LEAN_SWAP_ALWAYS": "model/gate_lean_build.py",
     # the USB sweep (Wilson 11-13 condition 4; a2 02bf147): the deadline margin at 1
     # -- gate usb_sweep's J <= 2 reds (CI, sim2)
     "M_USB_MARGIN1": "model/gate_usb_sweep.py",

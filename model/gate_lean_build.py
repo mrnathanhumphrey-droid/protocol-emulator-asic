@@ -32,7 +32,9 @@ MUST-FIRES, on a temporary copy of the tree:
   M_LEAN_EDGE_BUFFERED  BufEng's buffered word never loads and the buffer never clears: the edge
                  word left in the buffer (Wilson 11-22, K3's buffer clause; EdgeBuf rests on
                  WfB.bh and OrdB.o3, which no longer build)                 -> check 1 red
-All five are judged by the same `judge` as the clean arm (gate_meta's stub on it turns the gate
+  M_LEAN_SWAP_ALWAYS  SwapRen's RTL step flips the select at every retiring writeback (the
+                 no-swap ignored): sim_step no longer builds              -> check 1 red
+All six are judged by the same `judge` as the clean arm (gate_meta's stub on it turns the gate
 red). The other direction (a listed binder the signature lacks) is shown red on the clean
 build's binders with a stale name added to a copy of PREMISES (no rebuild); likewise every
 declared `anon` count moved by one must be caught (11-22).
@@ -235,7 +237,9 @@ KEY = ("dstar", "dstar29", "dstar39", "dstar39_v2", "dstar39_st", "dstar39_hold"
        # EdgeBuf.lean (K3's buffer clause, Wilson 11-22): the edge word never in the buffer
        "oldest_not_buffered", "edge_word_not_buffered_runBK", "edge_word_held_runBK",
        # SecondB.lean (K12 model premise 5, 11-22): a second fetch never lands on an empty lane
-       "secB_step", "secB_run", "second_head_valid", "capSlot_second")
+       "secB_step", "secB_run", "second_head_valid", "capSlot_second",
+       # SwapRen.lean (K12 Part A, 11-22): the RTL no-swap writeback is BufEng up to a renaming
+       "ren_portNextB", "ren_capTo", "ren_capBuf", "ren_loadToR", "sim_step")
 #: proof_constants.load() key -> the Lean expression that must evaluate to it (SPEC: the map)
 CONSTS = {
     "lemmaA_window": "LEMMA_A_WINDOW", "R_base": "R_BASE", "dispatch_cycles": "DISPATCH_CYCLES",
@@ -447,6 +451,12 @@ EDGEBUF_PLANT = ("BufEng.lean", [
     ("  else if (x.buf l && !x.e.spareValid l) = true then false\n",
      "  else if (x.buf l && !x.e.spareValid l) = true then x.buf l\n"),
 ])
+#: the M_LEAN_SWAP_ALWAYS plant (K12 Part A): the RTL step flips the select at every retiring
+#: writeback, the no-swap ignored. (file, [(text, replacement)])
+SWAP_PLANT = ("SwapRen.lean", [
+    ("  if nw l = true then x.e.sel l else selNext P x.e l\n",
+     "  selNext P x.e l\n"),
+])
 #: the M_LEAN_PREMISE_UNLISTED plant: (file, theorem, the signature text it extends, the binder)
 #: ⚠ planted in a theorem NOTHING calls: a planted premise in a theorem with a caller breaks the
 #: caller's build, so check 6 never runs (moved 11-22 from ready_pc1_plain_T, which ReadyBK now
@@ -461,6 +471,8 @@ SCRATCH_MUTANTS = {
     "M_LEAN_CONST": "proof_constants.json's pending_slack moved by one, in a temp copy of the tree",
     "M_LEAN_PREMISE_UNLISTED": "an extra hypothesis planted in ready_pc1_plain_BK's signature, "
                                "in a temp copy of the tree",
+    "M_LEAN_SWAP_ALWAYS": "SwapRen's RTL step flips the select at every retiring writeback (the "
+                          "no-swap ignored), in a temp copy of the tree",
     "M_LEAN_EDGE_BUFFERED": "BufEng's buffered word never loads and the buffer never clears (the "
                             "edge word left in the buffer), in a temp copy of the tree",
 }
@@ -620,8 +632,8 @@ def _mutant_tree(kind):
         with open(jp, "w", encoding="utf-8") as fh:
             json.dump(k, fh, indent=2)
         return tmp, dst
-    if kind == "edgebuf":
-        f, reps = EDGEBUF_PLANT
+    if kind in ("edgebuf", "swap"):
+        f, reps = EDGEBUF_PLANT if kind == "edgebuf" else SWAP_PLANT
         p = os.path.join(dst, "JLane", f)
         src = open(p, encoding="utf-8").read().replace("\r\n", "\n")
         for a, b in reps:
@@ -672,7 +684,7 @@ def main() -> int:
                  ", ".join(sorted(spec["contract"])), len(spec["shape"])))
     for p in probs:
         print("  ***", p)
-    for kind in ("sorry", "axiom", "const", "premise", "edgebuf"):
+    for kind in ("sorry", "axiom", "const", "premise", "edgebuf", "swap"):
         tmp, tree = _mutant_tree(kind)
         try:
             mp, _ = judge(tree, KEY + ((PLANT_THM,) if kind in ("sorry", "axiom") else ()))
@@ -685,8 +697,11 @@ def main() -> int:
                 "premise": "premise hplant of %s is unlisted" % PREMISE_PLANT[1],
                 # the planted step breaks the invariants the lemma rests on: the tree no longer
                 # builds (BufEng's WfB / OrdB proofs, EdgeBuf downstream)
-                "edgebuf": "lake build failed"}[kind]
-        name = {"premise": "PREMISE_UNLISTED", "edgebuf": "EDGE_BUFFERED"}.get(kind, kind.upper())
+                "edgebuf": "lake build failed",
+                # sim_step's select no longer matches: the tree does not build
+                "swap": "lake build failed"}[kind]
+        name = {"premise": "PREMISE_UNLISTED", "edgebuf": "EDGE_BUFFERED",
+                "swap": "SWAP_ALWAYS"}.get(kind, kind.upper())
         hit = [p for p in mp if want in p]
         red = bool(hit)
         print("  must-fire M_LEAN_%-6s %s  %s" % (name, "RED (killed)" if red else "*** SURVIVED",
