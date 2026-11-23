@@ -347,6 +347,244 @@ def run_b(P, x, exts):
     return x
 
 
+# ================================================================ the RTL-side armed run
+# piece 5's reference (Wilson 11-22: one armed run for both FT paths), transcribing
+# lean/JLane/JLane/{SwapRen,SwapRenK,ArmT,RtlRun}.lean definition by definition:
+#   step_br   SwapRen.stepBR    -- no swap at a no-swap FT ARM writeback (ext['nw'], the RTL's
+#                                  ft_k6), a buffered word loads HEAD-first, the buffer clears
+#                                  exactly when it loads
+#   step_bkkr SwapRenK.stepBKKR -- the K1-K5 keep-flush of the lanes in `fl`, kept index `k`, and
+#                                  the kill (pkill)
+#   step_btr  RtlRun.stepBTR    -- the armed registers; the flush set is the arming's end
+#                                  (ArmT.ends = hit || tmo: the edge, or the deadline reached
+#                                  with no edge -- the edge wins a tie)
+# State A = {"X": {"x": <EngB dict>, "pkill": bool}, "armed": [bool]*K, "armE": [int]*K}.
+# ext per cycle, beyond step_b's (win sreq ret xd fnpf pick usb_rx):
+#   nw     [bool]*K  the no-swap decision on each lane this cycle (ft_k6)
+#   k      [int]*K   the kept index on each lane (the edge word's at an edge, PC+1's at a timeout)
+#   edge   [int]*K   the edge cycle an arming this cycle records (Lean `edge now l`)
+#   is_arm bool      the head being written back is an ARM (Lean `isArm` on the base)
+
+def load_to_r(x, l, s):
+    """SwapRen.loadToR: into an empty head first, else the spare"""
+    if not (x["buf"][l] and not x["actv"][l][int(s)]):
+        return False
+    return s == (not x["sel"][l]) if head_valid(x, l) else s == x["sel"][l]
+
+
+def actv_r(x, l, s, ret):
+    """SwapRen.actvR"""
+    if x["st"] == "wb" and l == x["cur"] and s == x["sel"][x["cur"]] and ret:
+        return False
+    if cap_to(x, l, s) or load_to_r(x, l, s):
+        return True
+    return x["actv"][l][int(s)]
+
+
+def npf_r(x, l, s, fnpf):
+    """SwapRen.npfR"""
+    if cap_to(x, l, s):
+        return bool(fnpf)
+    if load_to_r(x, l, s):
+        return x["bnpf"][l]
+    return x["npf"][l][int(s)]
+
+
+def buf_r(x, l):
+    """SwapRen.bufR: the buffer clears exactly when its word loads"""
+    if cap_buf(x, l):
+        return True
+    if load_to_r(x, l, True) or load_to_r(x, l, False):
+        return False
+    return x["buf"][l]
+
+
+def sq_r(x, l, s):
+    """SwapRen.sqR"""
+    if cap_to(x, l, s):
+        return x["psq"]
+    if load_to_r(x, l, s):
+        return x["bsq"][l]
+    return x["sq"][l][int(s)]
+
+
+def sel_r(x, l, ret, nw):
+    """SwapRen.selR: no flip on a no-swap writeback"""
+    return x["sel"][l] if nw[l] else sel_next(x, l, ret)
+
+
+def step_br(P, x, ext):
+    """SwapRen.stepBR: the RTL's buffered step."""
+    win = _g(ext, "win")
+    sreq = _g(ext, "sreq")
+    ret = bool(_g(ext, "ret", True))
+    xd = int(_g(ext, "xd", 0))
+    fnpf = bool(_g(ext, "fnpf", False))
+    nw = _g(ext, "nw", [False] * K)
+    usb = usb_of(P, x)
+    S = (False, True)
+    pst, pl, prr, pbr1, pslot = port_next_b(P, usb, sreq, x)
+    st, cur = disp_next(win, x)
+    y = {
+        "now": x["now"] + 1,
+        "actv": [[actv_r(x, l, s, ret) for s in S] for l in range(K)],
+        "sel": [sel_r(x, l, ret, nw) for l in range(K)],
+        "ts": [ts_next(P, x, l, xd) for l in range(K)],
+        "pst": pst, "pl": pl, "prr": prr, "pbr1": pbr1, "pslot": pslot,
+        "winq": winq_next(P, win, _g(ext, "pick"), x),
+        "st": st, "cur": cur,
+        "npf": [[npf_r(x, l, s, fnpf) for s in S] for l in range(K)],
+        "buf": [buf_r(x, l) for l in range(K)],
+        "bnpf": [bnpf_b(x, l, fnpf) for l in range(K)],
+        "pb": pb_next(P, usb, sreq, x),
+        "sq": [[sq_r(x, l, s) for s in S] for l in range(K)],
+        "bsq": [bsq_b(x, l) for l in range(K)],
+        "psq": psq_b(P, usb, sreq, x),
+        "nr": [nr_b(x, l, ret) for l in range(K)],
+    }
+    if "usb_on" in x:
+        y["usb_on"] = bool(x["usb_on"] or _g(ext, "usb_rx", False))
+    return y
+
+
+def base_k(X):
+    """FlushKill.EngBK.base: while a kill is pending, the in-flight fetch is a second fetch"""
+    if X["pkill"]:
+        b = dict(X["x"])
+        b["pb"] = True
+        return b
+    return X["x"]
+
+
+def kc_k(X):
+    """FlushKill.EngBK.kc: this cycle is a killed capture"""
+    return X["x"]["pst"] == "cap" and X["pkill"]
+
+
+def in_slot(x, l, k, s):
+    """FlushKeep.EngB.inSlot"""
+    return x["actv"][l][int(s)] and x["sq"][l][int(s)] == k
+
+
+def in_buf(x, l, k):
+    """FlushKeep.EngB.inBuf"""
+    return x["buf"][l] and x["bsq"][l] == k
+
+
+def in_cap(x, l, k):
+    """FlushKeep.EngB.inCap"""
+    return x["pst"] == "cap" and l == x["pl"] and x["psq"] == k
+
+
+def has_edge(x, l, k):
+    """FlushKeep.EngB.hasEdge"""
+    return in_slot(x, l, k, True) or in_slot(x, l, k, False) or in_buf(x, l, k) or in_cap(x, l, k)
+
+
+def keep_slot(x, l, k):
+    """FlushKeep.keepSlot (K3): the slot holding it, else the current head slot"""
+    if in_slot(x, l, k, True):
+        return True
+    if in_slot(x, l, k, False):
+        return False
+    return x["sel"][l]
+
+
+def step_bkkr(P, X, ext, fl, k):
+    """SwapRenK.stepBKKR: the RTL's flush step (keep-flush of `fl`, kept index `k`, the kill)."""
+    b = base_k(X)
+    y = step_br(P, b, ext)
+    kc = kc_k(X)
+    S = (False, True)
+    x2 = dict(y)
+    x2["actv"] = [[(has_edge(b, l, k[l]) and s == keep_slot(b, l, k[l])) if fl[l]
+                   else (False if (kc and l == b["pl"] and cap_to(b, l, s)) else y["actv"][l][int(s)])
+                   for s in S] for l in range(K)]
+    x2["sel"] = [keep_slot(b, l, k[l]) if fl[l] else y["sel"][l] for l in range(K)]
+    x2["ts"] = [b["now"] + 1 if fl[l] else y["ts"][l] for l in range(K)]
+    x2["buf"] = [False if fl[l] else (False if (kc and l == b["pl"]) else y["buf"][l])
+                 for l in range(K)]
+    x2["sq"] = [[y["nr"][l] if (fl[l] and s == keep_slot(b, l, k[l])) else y["sq"][l][int(s)]
+                 for s in S] for l in range(K)]
+    xx = X["x"]
+    if xx["pst"] == "cap":
+        pk = False
+    else:
+        pk = bool(X["pkill"] or (fl[xx["pl"]] and xx["pst"] in ("req", "wait")))
+    return {"x": x2, "pkill": pk}
+
+
+def hit_a(A, l):
+    """FlushHeld.EngBA.hit: armed and the edge is this cycle"""
+    return A["armed"][l] and A["X"]["x"]["now"] == A["armE"][l]
+
+
+def tmo_a(A, l):
+    """ArmT.EngBA.tmo: armed, the deadline (release) reached, no edge this cycle"""
+    x = A["X"]["x"]
+    return A["armed"][l] and x["ts"][l] <= x["now"] and not hit_a(A, l)
+
+
+def ends_a(A, l):
+    """ArmT.EngBA.ends"""
+    return hit_a(A, l) or tmo_a(A, l)
+
+
+def arms_a(A, l, ret, is_arm):
+    """FlushHeld.EngBA.arms: a retiring writeback of an ARM"""
+    x = A["X"]["x"]
+    return x["st"] == "wb" and l == x["cur"] and bool(ret) and bool(is_arm)
+
+
+def win_a(win, armed):
+    """FlushHeld.winA: the dispatcher never picks an armed lane"""
+    return None if (win is not None and armed[win]) else win
+
+
+def step_btr(P, A, ext):
+    """RtlRun.stepBTR: one cycle of the RTL-side armed run, both FT paths."""
+    ret = bool(_g(ext, "ret", True))
+    is_arm = bool(_g(ext, "is_arm", False))
+    edge = _g(ext, "edge", [0] * K)
+    k = _g(ext, "k", [0] * K)
+    fl = [ends_a(A, l) for l in range(K)]
+    ar = [arms_a(A, l, ret, is_arm) for l in range(K)]
+    ext2 = dict(ext)
+    ext2["win"] = win_a(_g(ext, "win"), A["armed"])
+    X2 = step_bkkr(P, A["X"], ext2, fl, k)
+    armed = [False if fl[l] else (True if ar[l] else A["armed"][l]) for l in range(K)]
+    armE = [edge[l] if ar[l] else A["armE"][l] for l in range(K)]
+    return {"X": X2, "armed": armed, "armE": armE}
+
+
+def self_test_rtl(seeds=10, cycles=5000):
+    """With no no-swap writeback, the RTL's buffered step IS BufEng's on well-formed states (the
+    head-first load meets the spare load: a buffered word sits behind a valid head, WfB.bh)."""
+    for seed in range(seeds):
+        rng = random.Random(1000 + seed)
+        P = {"live": [rng.random() < 0.85 for _ in range(K)],
+             "dly": [rng.randint(3, 40) for _ in range(K)], "pick": seed % 2 == 1}
+        x = empty_state(usb_on=False)
+        for _ in range(cycles):
+            rel = [l for l in range(K) if P["live"][l] and x["ts"][l] <= x["now"]]
+            win = rng.choice(rel) if rel and rng.random() < 0.8 else None
+            cand = [l for l in range(K) if sreq_ok(P, x, l)]
+            sreq = rng.choice(cand) if cand and rng.random() < 0.5 else None
+            ext = {"win": win, "sreq": sreq, "ret": rng.random() < 0.9, "xd": rng.randint(0, 5),
+                   "fnpf": rng.random() < 0.2,
+                   "pick": rng.randrange(K) if rng.random() < 0.8 else None,
+                   "usb_rx": rng.random() < 0.001, "nw": [False] * K}
+            a, b = step_b(P, x, ext), step_br(P, x, ext)
+            if a != b:
+                print("FAIL rtl seed %d now %d: step_br differs from step_b on %s"
+                      % (seed, x["now"], diff(a, b, ghosts=True)))
+                return 1
+            x = a
+    print("step_br self-test: %d seeds x %d cycles: with no no-swap writeback step_br == step_b"
+          % (seeds, cycles))
+    return 0
+
+
 GHOSTS = ("sq", "bsq", "psq", "nr")
 
 
@@ -457,4 +695,4 @@ def self_test(seeds=20, cycles=20000):
 
 
 if __name__ == "__main__":
-    sys.exit(self_test())
+    sys.exit(self_test() or self_test_rtl())
