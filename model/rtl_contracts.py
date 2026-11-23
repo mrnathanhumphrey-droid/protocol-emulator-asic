@@ -147,12 +147,18 @@ RTL_CONTRACTS = {
                 "OrderH.ready_ft_edge_head)",
         "must_fire": {"status": OWED, "name": None}},
     "K11": {
-        "what": "the scheduler never chooses an armed lane while an unarmed lane is ready "
-                "(Wilson 11-21 ruling, hS option (b)). The RTL meets it by construction: it masks "
-                "before choosing (rdy_rel = ... & ~armed); agent 1 confirms that line is the "
-                "whole story in RTL. Must-fire (agent 1): a planted chooser that can pick an "
-                "armed lane while another is ready, caught. The keep-flush replay referees it: "
-                "every chosen lane checked against the model's",
+        "what": "the scheduler never chooses an armed lane before its deadline (Wilson 11-22 "
+                "ruling (b), rewording 11-21's 'while an unarmed lane is ready'). RTL: the "
+                "registered release rel_q (TF2-R3), masked ~(armed & notmo): an untimed ARM is "
+                "never a candidate; a timed ARM's timestamp is set by its writeback to its "
+                "deadline, so it is not released before then; at the deadline it competes in EDF "
+                "and that pick is the timeout -- one ST_IDLE cycle, armed cleared, no drive, no "
+                "writeback (agent 1 11-22, read from the code; sim confirmation offered), charged "
+                "once as an idle cycle by branch_budget._disarm_S. The armed run (runBA) covers "
+                "edges before the deadline, where SchedK11.K11At follows (owed: the armed-release "
+                "invariant). Must-fire (agent 1, piece 4): a release that ignores the deadline "
+                "for an armed lane. The keep-flush replay referees it: every chosen lane checked "
+                "against the model's",
         "lean": "SchedK11.K11At; premise of SchedK11.winA_eq_of_K11 / winS_eq_of_K11",
         "must_fire": {"status": OWED, "name": None}},
     # Wilson 11-21 (closure ruling, ask 1): the two scheduler premises wb_closeBK_K11 rests on
