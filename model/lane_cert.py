@@ -772,11 +772,22 @@ def full_report(img, name="image"):
             print("== correction A: ARM w%d has a timeout but an unanchored chain" % a)
             fails.append(("A", "w%d unanchored" % a))
             continue
-        t_lo = min(offs) + _price(g[a][0], I)                 # earliest timeout after our EOP
+        t_lo = min(offs) + _price(g[a][0], I)                 # earliest deadline after our EOP
         t_hi = max(offs) + _price(g[a][0], I)                 # latest
+        # Wilson 11-22 ruling (1b): the timeout ends at the PICK -- the first cycle the scheduler
+        # names the lane at or after its deadline (the RTL's FT disarm). The deadline still
+        # bounds it below (ok1); above, the USB lane's decision bound (PrioRespF / prio_resp:
+        # decided within L + 2 of its release, L its certified lateness) bounds the pick
+        if cb is None or not cb[0]:
+            print("== correction A: ARM w%d -- no USB-lane certificate to bound the timeout pick"
+                  % a)
+            fails.append(("A", "w%d pick unbounded" % a))
+            continue
+        pick = max(cb[0].values()) + 2
         ok1 = t_lo >= prem["resp_window"]
         worst = None
-        stack = [(n, t_hi) for n in g[a][1] if n == a + 1]  # PC+1: the timeout continuation
+        # PC+1: the timeout continuation, from the latest pick
+        stack = [(n, t_hi + pick) for n in g[a][1] if n == a + 1]
         seen = set()
         while stack:
             w, acc = stack.pop()
@@ -796,9 +807,9 @@ def full_report(img, name="image"):
             for n in g[w][1]:
                 stack.append((n, acc + up))
         ok2 = worst is not None and worst[0] <= worst[1]
-        print("== correction A: ARM w%d times out at EOP + %d..%d (window_end %d) %s; TOP arm_sop "
-              "retired <= EOP + %s (next-token deadline %s) %s"
-              % (a, t_lo, t_hi, prem["resp_window"], "OK" if ok1 else "EARLY",
+        print("== correction A: ARM w%d times out at EOP + %d..%d + pick <= %d (window_end %d) %s; "
+              "TOP arm_sop retired <= EOP + %s (next-token deadline %s) %s"
+              % (a, t_lo, t_hi, pick, prem["resp_window"], "OK" if ok1 else "EARLY",
                  worst[0] if worst else "-", worst[1] if worst else "-", "OK" if ok2 else "LATE"))
         if not ok1:
             fails.append(("A", "w%d early timeout" % a))
