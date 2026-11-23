@@ -21,14 +21,19 @@ slot fetch (`Buf.lean`), so it is the oldest unretired word at the edge. K12's o
 word first, then the edge word, and the RTL's no-swap / filing / load rules) is NOT this model: it
 is owed as its own step (11-22).
 
-**Measured, not proved (agent 1, 11-22).** The two cases outside the proof -- pre-prime captures
-and K12's timeout-first order -- were measured on the RTL: 2,461 runs (a 1,570-run sweep over 10
-images, idle / busy ports, two FT lanes; and an 891-run start-up probe over 11 images, the FT ARM
-captured before priming, the edge swept from first arming -40 to +40). The edge word was in the
-buffer at the edge 0 times and absent 0 times (kept in a slot 1,326, arriving in the edge's own
-capture 18). Under the start-up order the edge word WAS buffered first (330 tag moves) and always
-loaded into the spare before the lane armed, so before any edge. That is evidence for those cases,
-not this lemma: their proof waits on the K12 model.
+**Measured, not proved (agent 1, 11-22; corrected the same day).** The "never in the buffer" form
+holds for BufEng's edge-first order only, as proved here. Under K12's timeout-first order (the FT
+ARM captured at start-up, the timeout word primed first) the edge word CAN be in the buffer at the
+edge: with 1-4 other lanes winning the first dispatches, lane 0's ARM writes back late, the edge
+word is captured 2-23 cycles before the writeback with both slots full, and an edge at wb + 1 meets
+it buffered -- 24 of 24 images, 792 runs; the RTL's flush keeps it from the buffer as the head
+(K1 / K3), no assertion fired. Without the delayed writeback the edge word is captured at exactly
+wb + 1 into the spare (729 of 729 timeout-first armings) -- a one-cycle margin, not a proved gap.
+"Absent at the edge": 0 in 3,253 runs (the refetch branch never hit); here it is a premise (`hE`).
+(An earlier note cited 330 tag moves as the start-up order buffering the edge word: those were
+edge-first loop iterations after priming, not start-up armings.) The timeout-first clause awaits
+Wilson's choice of option (a), "never absent; if buffered, kept from the buffer as the head", and
+its proof the K12 model.
 
 Must-fire `M_LEAN_EDGE_BUFFERED` (gate_lean_build): a planted step that leaves the edge word in the
 buffer (the load never happens, the buffer never clears) -- the invariants this lemma rests on no
