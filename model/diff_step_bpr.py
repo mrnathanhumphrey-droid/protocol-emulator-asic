@@ -9,6 +9,12 @@ FALLTHROUGH edge; 19 plain timeouts, 19 FALLTHROUGH timeouts; 5 timeouts a no-ti
 suppresses; 552 with a halted lane; 100 arming). Planted, each caught: a plain edge flushes
 (170/1000), the offset ignored (89), the rebase bit set for off > 0 (89), no halt at a plain
 timeout (15), no-timeout ignored (5), a halted lane still live (28), still dispatchable (70).
+Re-signed 11-23 for the clocked park (Wilson's ruling: the park clears FALLTHROUGH; latches
+nt, off = hdly) and the watchdog halt (ext park / hd_w / wd): 1000 cases, 0 mismatches (102
+parks, 59 of them on a lane whose ft was set; 237 with a watchdog firing; 159 plain edges, 103
+with off > 0; 10 plain timeouts). Planted, each caught: the park keeps a stale ft (59/1000),
+ignores hdly (86), keeps nt (77), does not arm (41); the watchdog does not halt (207), leaves the
+lane armed (110); step 1's seven re-caught (158, 103, 103, 8, 6, 26, 56).
 Usage: python model/diff_step_bpr.py [N] [SEED]   (defaults 1000, 7); rc 0 = no mismatch.
 Needs the Lean library built (lake build).
 """
@@ -47,6 +53,9 @@ def rand_case(rng):
     ext["is_ft"] = rb(0.5)
     ext["off_w"] = offs()
     ext["nt_w"] = rb(0.2)
+    ext["park"] = rb(0.3)
+    ext["hd_w"] = offs()
+    ext["wd"] = [rb(0.05) for _ in range(K)]
     if rb(0.3):
         # a third of the cases on an edge cycle of an armed lane (a fully random state meets
         # now == armE about once in 80 per lane)
@@ -80,11 +89,11 @@ def lean_case(i, B, P, ext):
             "true" if ext["fnpf"] else "false"))
     tf = lambda v: "true" if v else "false"
     call = ("stepBPR (%s : Program) (fun _ => %s) (usbOf %s) (fun _ => %s) (fun _ => %s) "
-            "(fun _ l => tn1 %s l) (fun _ => %s) (fun _ => %d) (fun _ => %s) (tb1 %s) (tn1 %s) "
-            "(%s : EngBP)"
+            "(fun _ l => tn1 %s l) (fun _ => %s) (fun _ => %d) (fun _ => %s) (fun _ => %s) "
+            "(fun _ => %d) (tb1 %s) (tb1 %s) (tn1 %s) (%s : EngBP)"
             % (p, lopt(ext["win"]), tf(x["usb_on"]), lopt(ext["sreq"]), tf(ext["is_arm"]),
                ln(ext["edge"]), tf(ext["is_ft"]), ext["off_w"], tf(ext["nt_w"]),
-               lb(ext["nw"]), ln(ext["k"]), bp))
+               tf(ext["park"]), ext["hd_w"], lb(ext["wd"]), lb(ext["nw"]), ln(ext["k"]), bp))
     flag = "rb (%s || %s)" % (tf(x["usb_on"]), tf(ext["usb_rx"]))
     return ('#eval IO.println ("CASE %d " ++ renderB (%s) ++ "|" ++ %s)\n' % (i, call, flag))
 

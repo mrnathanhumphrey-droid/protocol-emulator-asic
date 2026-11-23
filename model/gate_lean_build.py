@@ -260,7 +260,9 @@ KEY = ("dstar", "dstar29", "dstar39", "dstar39_v2", "dstar39_st", "dstar39_hold"
        # ArmP.lean (agent 1's replay 11-23): the plain ARM end, HALF, the plain timeout's halt
        "rebase_none", "haltP_none", "pe_not_fl", "stepBPR_nt_no_tmo", "winA_halt",
        "stepBPR_A_eq", "stepBPR_pe_ts", "stepBPR_pe_reb", "stepBPR_pe_rel", "stepBPR_ph_halt",
-       "stepBPR_halt_mono", "stepBPR_now")
+       "stepBPR_halt_mono", "stepBPR_now",
+       # ArmP.lean, the clocked park (Wilson's ruling 11-23: it clears FALLTHROUGH) + watchdog
+       "fl_of_not_ft", "stepBPR_park", "stepBPR_wd_halt")
 #: proof_constants.load() key -> the Lean expression that must evaluate to it (SPEC: the map)
 CONSTS = {
     "lemmaA_window": "LEMMA_A_WINDOW", "R_base": "R_BASE", "dispatch_cycles": "DISPATCH_CYCLES",

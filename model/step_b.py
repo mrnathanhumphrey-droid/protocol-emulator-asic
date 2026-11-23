@@ -590,7 +590,9 @@ def step_bpr(P, B, ext):
     offset `off`, no-timeout `nt`) and the halted lanes. Only a FALLTHROUGH end flushes; a plain
     edge rebases ts to now + off (reb only when off = 0) without a flush; a plain timeout halts.
     State B = {"A": <step_btr state>, "ft", "off", "nt", "halt": [..]*K}; the ARM's word fields
-    are ext["is_ft"], ext["off_w"], ext["nt_w"]."""
+    are ext["is_ft"], ext["off_w"], ext["nt_w"]. The clocked park (Wilson 11-23: it clears
+    FALLTHROUGH): ext["park"] arms the writeback lane with ft False, nt True, off ext["hd_w"];
+    ext["wd"][l] is the watchdog (CK_STRETCH_TO) firing on lane l: halt and disarm."""
     A = B["A"]
     x = A["X"]["x"]
     ret = bool(_g(ext, "ret", True))
@@ -606,6 +608,8 @@ def step_bpr(P, B, ext):
     ph = [tm[l] and not B["ft"][l] for l in L]
     mask = [A["armed"][l] or B["halt"][l] for l in L]
     ar = [arms_a(A, l, ret, is_arm) for l in L]
+    pk = [x["st"] == "wb" and l == x["cur"] and bool(_g(ext, "park", False)) for l in L]
+    wd = _g(ext, "wd", [False] * K)
     P2 = dict(P)
     P2["live"] = [P["live"][l] and not B["halt"][l] for l in L]      # Program.haltP
     ext2 = dict(ext)
@@ -618,13 +622,17 @@ def step_bpr(P, B, ext):
     reb = [bool(reb0[l]) if tm[l] else X2["reb"][l] for l in L]
     X2["x"]["ts"] = [x["now"] + B["off"][l] if pe[l] else ts[l] for l in L]   # EngBK.rebase
     X2["reb"] = [(B["off"][l] == 0) if pe[l] else reb[l] for l in L]
-    armed = [False if en[l] else (True if ar[l] else A["armed"][l]) for l in L]
-    armE = [edge[l] if ar[l] else A["armE"][l] for l in L]
+    armed = [False if (en[l] or wd[l]) else (True if (ar[l] or pk[l]) else A["armed"][l])
+             for l in L]
+    armE = [edge[l] if (ar[l] or pk[l]) else A["armE"][l] for l in L]
     return {"A": {"X": X2, "armed": armed, "armE": armE},
-            "ft": [bool(_g(ext, "is_ft", True)) if ar[l] else B["ft"][l] for l in L],
-            "off": [int(_g(ext, "off_w", 0)) if ar[l] else B["off"][l] for l in L],
-            "nt": [bool(_g(ext, "nt_w", False)) if ar[l] else B["nt"][l] for l in L],
-            "halt": [B["halt"][l] or ph[l] for l in L]}
+            "ft": [False if pk[l] else (bool(_g(ext, "is_ft", True)) if ar[l] else B["ft"][l])
+                   for l in L],
+            "off": [int(_g(ext, "hd_w", 0)) if pk[l] else
+                    (int(_g(ext, "off_w", 0)) if ar[l] else B["off"][l]) for l in L],
+            "nt": [True if pk[l] else (bool(_g(ext, "nt_w", False)) if ar[l] else B["nt"][l])
+                   for l in L],
+            "halt": [B["halt"][l] or ph[l] or bool(wd[l]) for l in L]}
 
 def self_test_rtl(seeds=10, cycles=5000):
     """With no no-swap writeback, the RTL's buffered step IS BufEng's on well-formed states (the

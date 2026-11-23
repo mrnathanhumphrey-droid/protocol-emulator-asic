@@ -20,7 +20,8 @@ rebase to the edge cycle releases the cycle after, as `rel_q` was decided while 
 still armed; a rebase to `now + off`, `off ≥ 1`, releases at `ts`); a plain timeout halts (the
 lane leaves `P.live` and the dispatcher's choice from the next cycle).
 
-* `stepBPR_A_eq` -- with every latch FALLTHROUGH, no no-timeout ARM and no halt, the step IS
+* `stepBPR_A_eq` -- with every latch FALLTHROUGH, no no-timeout ARM, no halt, no park and no
+  watchdog, the step IS
   `stepBTR`: every earlier replay result stands;
 * `stepBPR_pe_ts`, `stepBPR_pe_reb`, `stepBPR_pe_rel` -- **a plain edge releases at
   `now + max 1 off`** (HALF's `edge + l_t/2`, `ArmHalf.arm_release_half`'s release on the
@@ -28,9 +29,14 @@ lane leaves `P.live` and the dispatcher's choice from the next cycle).
 * `stepBPR_ph_halt`, `stepBPR_halt_mono`, `winA_halt` -- **a plain timeout halts**, for good,
   and a halted lane is never dispatched; `stepBPR_nt_no_tmo` -- a no-timeout ARM never times out.
 
-The clocked park (an arming with no ARM, released at `now + hdly`) is not in this step: its
-FALLTHROUGH latch is a question to agent 1 (the park leaves `l_armft` as the lane's last ARM
-set it).
+**The clocked park** (Wilson's ruling 11-23: the park clears `l_armft`, `l_armqual`, `l_arm2`):
+an arming with no ARM, at the HIGH phase's writeback of a held clocked action on an open-drain
+lane (`EngBP.parks`, `isPark`). It latches not-FALLTHROUGH, no-timeout and the offset `hdly`
+(`hdW`: the held action's HIGH length, `ck_hdly`), so its rise is a plain edge released at
+`now + max 1 hdly` (`stepBPR_park`, `fl_of_not_ft`, `stepBPR_pe_rel`). The watchdog
+(`CK_STRETCH_TO`) is a free input `wd` (the RTL's `l_ckpark & l_ckwdog >= CK_STRETCH_TO`, read
+off the trace): it halts and disarms the lane (`stepBPR_wd_halt`). QUAL is not modelled, so
+clearing `l_armqual` has no model counterpart yet.
 -/
 namespace JLane
 
@@ -64,6 +70,19 @@ def EngBP.ph (B : EngBP) (win : Engine → Option Lane) (l : Lane) : Bool :=
 
 /-- The dispatcher's mask: armed or halted. -/
 def EngBP.mask (B : EngBP) (l : Lane) : Bool := B.A.armed l || B.halt l
+
+/-- A clocked park arms the lane (pe_engine.v, `ck_act & ck_is_high & ~l_mode`): at the HIGH
+phase's writeback -- a held action, retiring nothing -- of the lane dispatched; `isPark` reads the
+engine as `isArm`. -/
+def EngBP.parks (B : EngBP) (isPark : EngB → Bool) (l : Lane) : Bool :=
+  decide (B.A.X.x.e.st = .wb) && decide (l = B.A.X.x.e.cur) && isPark B.A.X.base
+
+/-- A lane not latched FALLTHROUGH never flushes (a park's rise among them). -/
+theorem fl_of_not_ft (B : EngBP) (win : Engine → Option Lane) (l : Lane) (h : B.ft l = false) :
+    B.fl win l = false := by
+  unfold EngBP.fl
+  rw [h]
+  simp
 
 /-- The program with the halted lanes no longer live (`live_n := 0`). -/
 def Program.haltP (P : Program) (halt : Lane → Bool) : Program :=
@@ -130,32 +149,39 @@ section
 variable (P : Program) (win : Engine → Option Lane) (usb : Option Lane)
   (sreq : EngB → Option Lane) (isArm : EngB → Bool) (edge : Nat → Lane → Nat)
   (isFT : EngB → Bool) (offW : EngB → Nat) (ntW : EngB → Bool)
+  (isPark : EngB → Bool) (hdW : EngB → Nat)
 
 /-- **One cycle of the RTL-side armed run with the plain end.** -/
-def stepBPR (nw : Lane → Bool) (k : Lane → Nat) (B : EngBP) : EngBP where
+def stepBPR (wd nw : Lane → Bool) (k : Lane → Nat) (B : EngBP) : EngBP where
   A :=
     { X := EngBK.rebase B.pe B.A.X.x.e.now B.off
         (EngBK.keepTs (B.tmo win) B.A.X
           (stepBKKR (P.haltP B.halt) (winA win B.mask) usb sreq nw (B.fl win) k B.A.X))
-      armed := fun l => if B.ends win l = true then false
-        else if B.A.arms P isArm l = true then true else B.A.armed l
-      armE := fun l => if B.A.arms P isArm l = true then edge B.A.X.x.e.now l else B.A.armE l }
-  ft := fun l => if B.A.arms P isArm l = true then isFT B.A.X.base else B.ft l
-  off := fun l => if B.A.arms P isArm l = true then offW B.A.X.base else B.off l
-  nt := fun l => if B.A.arms P isArm l = true then ntW B.A.X.base else B.nt l
-  halt := fun l => B.halt l || B.ph win l
+      armed := fun l => if (B.ends win l || wd l) = true then false
+        else if (B.A.arms P isArm l || B.parks isPark l) = true then true else B.A.armed l
+      armE := fun l => if (B.A.arms P isArm l || B.parks isPark l) = true
+        then edge B.A.X.x.e.now l else B.A.armE l }
+  ft := fun l => if B.parks isPark l = true then false
+    else if B.A.arms P isArm l = true then isFT B.A.X.base else B.ft l
+  off := fun l => if B.parks isPark l = true then hdW B.A.X.base
+    else if B.A.arms P isArm l = true then offW B.A.X.base else B.off l
+  nt := fun l => if B.parks isPark l = true then true
+    else if B.A.arms P isArm l = true then ntW B.A.X.base else B.nt l
+  halt := fun l => B.halt l || B.ph win l || wd l
 
 /-- `n` cycles; the no-swap decisions and the kept indices read by time. -/
-def runBPR (nwt : Nat → Lane → Bool) (kt : Nat → Lane → Nat) : Nat → EngBP → EngBP
+def runBPR (wdt nwt : Nat → Lane → Bool) (kt : Nat → Lane → Nat) : Nat → EngBP → EngBP
   | 0, B => B
-  | n + 1, B => stepBPR P win usb sreq isArm edge isFT offW ntW
-      (nwt (runBPR nwt kt n B).A.X.x.e.now) (kt (runBPR nwt kt n B).A.X.x.e.now)
-      (runBPR nwt kt n B)
+  | n + 1, B => stepBPR P win usb sreq isArm edge isFT offW ntW isPark hdW
+      (wdt (runBPR wdt nwt kt n B).A.X.x.e.now) (nwt (runBPR wdt nwt kt n B).A.X.x.e.now)
+      (kt (runBPR wdt nwt kt n B).A.X.x.e.now) (runBPR wdt nwt kt n B)
 
-/-- **With every latch FALLTHROUGH, no no-timeout ARM and no halt, the step is `stepBTR`.** -/
-theorem stepBPR_A_eq (nw : Lane → Bool) (k : Lane → Nat) (B : EngBP)
-    (hft : ∀ l, B.ft l = true) (hnt : ∀ l, B.nt l = false) (hh : ∀ l, B.halt l = false) :
-    (stepBPR P win usb sreq isArm edge isFT offW ntW nw k B).A
+/-- **With every latch FALLTHROUGH, no no-timeout ARM, no halt, no park and no watchdog, the step
+is `stepBTR`.** -/
+theorem stepBPR_A_eq (wd nw : Lane → Bool) (k : Lane → Nat) (B : EngBP)
+    (hft : ∀ l, B.ft l = true) (hnt : ∀ l, B.nt l = false) (hh : ∀ l, B.halt l = false)
+    (hpk : isPark B.A.X.base = false) (hwd : ∀ l, wd l = false) :
+    (stepBPR P win usb sreq isArm edge isFT offW ntW isPark hdW wd nw k B).A
       = stepBTR P win usb sreq isArm edge nw k B.A := by
   have htmo : B.tmo win = B.A.tmo win := by
     funext l; unfold EngBP.tmo; rw [hnt l]; simp
@@ -168,67 +194,104 @@ theorem stepBPR_A_eq (nw : Lane → Bool) (k : Lane → Nat) (B : EngBP)
   have hpe : ∀ l, B.pe l = false := by
     intro l; unfold EngBP.pe; rw [hft l]; simp
   have hP : P.haltP B.halt = P := haltP_none P B.halt hh
+  have hpk' : ∀ l, B.parks isPark l = false := by
+    intro l; unfold EngBP.parks; rw [hpk]; simp
   unfold stepBPR stepBTR
   dsimp only
+  simp only [hpk', hwd, Bool.or_false]
   rw [rebase_none _ _ _ _ hpe, htmo, hends, hfl, hmask, hP]
 
 /-- **A plain edge rebases `ts` to `now + off`.** -/
-theorem stepBPR_pe_ts (nw : Lane → Bool) (k : Lane → Nat) (B : EngBP) (l : Lane)
+theorem stepBPR_pe_ts (wd nw : Lane → Bool) (k : Lane → Nat) (B : EngBP) (l : Lane)
     (h : B.pe l = true) :
-    (stepBPR P win usb sreq isArm edge isFT offW ntW nw k B).A.X.x.e.ts l
+    (stepBPR P win usb sreq isArm edge isFT offW ntW isPark hdW wd nw k B).A.X.x.e.ts l
       = B.A.X.x.e.now + B.off l := by
   show (if B.pe l = true then B.A.X.x.e.now + B.off l else _) = _
   rw [if_pos h]
 
 /-- A plain edge sets the rebase bit exactly when `off = 0`. -/
-theorem stepBPR_pe_reb (nw : Lane → Bool) (k : Lane → Nat) (B : EngBP) (l : Lane)
+theorem stepBPR_pe_reb (wd nw : Lane → Bool) (k : Lane → Nat) (B : EngBP) (l : Lane)
     (h : B.pe l = true) :
-    (stepBPR P win usb sreq isArm edge isFT offW ntW nw k B).A.X.reb l = decide (B.off l = 0) := by
+    (stepBPR P win usb sreq isArm edge isFT offW ntW isPark hdW wd nw k B).A.X.reb l = decide (B.off l = 0) := by
   show (if B.pe l = true then decide (B.off l = 0) else _) = _
   rw [if_pos h]
 
 /-- **A plain edge releases at `now + max 1 off`**: the cycle after for a plain ARM, the edge
 plus half a period for HALF (`l_t/2 ≥ 1`). -/
-theorem stepBPR_pe_rel (nw : Lane → Bool) (k : Lane → Nat) (B : EngBP) (l : Lane)
+theorem stepBPR_pe_rel (wd nw : Lane → Bool) (k : Lane → Nat) (B : EngBP) (l : Lane)
     (h : B.pe l = true) :
-    (stepBPR P win usb sreq isArm edge isFT offW ntW nw k B).A.X.rel l
+    (stepBPR P win usb sreq isArm edge isFT offW ntW isPark hdW wd nw k B).A.X.rel l
       = B.A.X.x.e.now + max 1 (B.off l) := by
   unfold EngBK.rel
-  rw [stepBPR_pe_ts P win usb sreq isArm edge isFT offW ntW nw k B l h,
-    stepBPR_pe_reb P win usb sreq isArm edge isFT offW ntW nw k B l h]
+  rw [stepBPR_pe_ts P win usb sreq isArm edge isFT offW ntW isPark hdW wd nw k B l h,
+    stepBPR_pe_reb P win usb sreq isArm edge isFT offW ntW isPark hdW wd nw k B l h]
   by_cases h0 : B.off l = 0
   · simp [h0]
   · simp [h0]
     omega
 
 /-- **A plain timeout halts the lane and disarms it.** -/
-theorem stepBPR_ph_halt (nw : Lane → Bool) (k : Lane → Nat) (B : EngBP) (l : Lane)
+theorem stepBPR_ph_halt (wd nw : Lane → Bool) (k : Lane → Nat) (B : EngBP) (l : Lane)
     (h : B.ph win l = true) :
-    (stepBPR P win usb sreq isArm edge isFT offW ntW nw k B).halt l = true ∧
-      (stepBPR P win usb sreq isArm edge isFT offW ntW nw k B).A.armed l = false := by
-  have he : B.ends win l = true := by
+    (stepBPR P win usb sreq isArm edge isFT offW ntW isPark hdW wd nw k B).halt l = true ∧
+      (stepBPR P win usb sreq isArm edge isFT offW ntW isPark hdW wd nw k B).A.armed l = false := by
+  have he : (B.ends win l || wd l) = true := by
     unfold EngBP.ph at h
     unfold EngBP.ends
     simp only [Bool.and_eq_true] at h
     rw [h.1]
     simp
   constructor
-  · show (B.halt l || B.ph win l) = true
+  · show (B.halt l || B.ph win l || wd l) = true
     rw [h]
     simp
-  · show (if B.ends win l = true then false else _) = false
+  · show (if (B.ends win l || wd l) = true then false else _) = false
     rw [if_pos he]
 
 /-- A halted lane stays halted. -/
-theorem stepBPR_halt_mono (nw : Lane → Bool) (k : Lane → Nat) (B : EngBP) (l : Lane)
+theorem stepBPR_halt_mono (wd nw : Lane → Bool) (k : Lane → Nat) (B : EngBP) (l : Lane)
     (h : B.halt l = true) :
-    (stepBPR P win usb sreq isArm edge isFT offW ntW nw k B).halt l = true := by
-  show (B.halt l || B.ph win l) = true
+    (stepBPR P win usb sreq isArm edge isFT offW ntW isPark hdW wd nw k B).halt l = true := by
+  show (B.halt l || B.ph win l || wd l) = true
   rw [h]
   simp
 
-theorem stepBPR_now (nw : Lane → Bool) (k : Lane → Nat) (B : EngBP) :
-    (stepBPR P win usb sreq isArm edge isFT offW ntW nw k B).A.X.x.e.now
+/-- **The watchdog halts the lane and disarms it** (`CK_STRETCH_TO`, `clk_stretch_err`). -/
+theorem stepBPR_wd_halt (wd nw : Lane → Bool) (k : Lane → Nat) (B : EngBP) (l : Lane)
+    (h : wd l = true) :
+    (stepBPR P win usb sreq isArm edge isFT offW ntW isPark hdW wd nw k B).halt l = true ∧
+      (stepBPR P win usb sreq isArm edge isFT offW ntW isPark hdW wd nw k B).A.armed l = false := by
+  constructor
+  · show (B.halt l || B.ph win l || wd l) = true
+    rw [h]
+    simp
+  · show (if (B.ends win l || wd l) = true then false else _) = false
+    rw [if_pos (by rw [h]; simp)]
+
+/-- **A park latches the ruling's flags** (Wilson 11-23: the park clears FALLTHROUGH): not
+FALLTHROUGH, no timeout, the release offset its held action's HIGH length `hdly`; the lane is
+armed unless it is halted the same cycle. -/
+theorem stepBPR_park (wd nw : Lane → Bool) (k : Lane → Nat) (B : EngBP) (l : Lane)
+    (h : B.parks isPark l = true) (hn : (B.ends win l || wd l) = false) :
+    (stepBPR P win usb sreq isArm edge isFT offW ntW isPark hdW wd nw k B).ft l = false ∧
+      (stepBPR P win usb sreq isArm edge isFT offW ntW isPark hdW wd nw k B).nt l = true ∧
+      (stepBPR P win usb sreq isArm edge isFT offW ntW isPark hdW wd nw k B).off l
+        = hdW B.A.X.base ∧
+      (stepBPR P win usb sreq isArm edge isFT offW ntW isPark hdW wd nw k B).A.armed l = true := by
+  refine ⟨?_, ?_, ?_, ?_⟩
+  · show (if B.parks isPark l = true then false else _) = false
+    rw [if_pos h]
+  · show (if B.parks isPark l = true then true else _) = true
+    rw [if_pos h]
+  · show (if B.parks isPark l = true then hdW B.A.X.base else _) = _
+    rw [if_pos h]
+  · show (if (B.ends win l || wd l) = true then false
+      else if (B.A.arms P isArm l || B.parks isPark l) = true then true else B.A.armed l) = true
+    rw [hn, h]
+    simp
+
+theorem stepBPR_now (wd nw : Lane → Bool) (k : Lane → Nat) (B : EngBP) :
+    (stepBPR P win usb sreq isArm edge isFT offW ntW isPark hdW wd nw k B).A.X.x.e.now
       = B.A.X.x.e.now + 1 := by
   show (stepBR (P.haltP B.halt) (winA win B.mask) usb sreq nw B.A.X.base).e.now = _
   have hn : (stepBR (P.haltP B.halt) (winA win B.mask) usb sreq nw B.A.X.base).e.now
