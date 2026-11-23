@@ -241,7 +241,10 @@ KEY = ("dstar", "dstar29", "dstar39", "dstar39_v2", "dstar39_st", "dstar39_hold"
        # SwapRen.lean (K12 Part A, 11-22): the RTL no-swap writeback is BufEng up to a renaming
        "ren_portNextB", "ren_capTo", "ren_capBuf", "ren_loadToR", "sim_step",
        # SwapRenK.lean (Part A lift L1 + L2, 11-22): through the flush and the armed step
-       "renK_base", "ren_keepSlot", "simK_step", "winA_not_armed", "renA_arms", "simA_step")
+       "renK_base", "ren_keepSlot", "simK_step", "winA_not_armed", "renA_arms", "simA_step",
+       # ArmRel.lean (K11 derived, Wilson 11-22): an armed lane is not released before its edge
+       "K11At_of_unreleased", "edgeFirst_step", "edgeFirst_runBA", "armed_unreleased_runBA",
+       "K11At_runBA")
 #: proof_constants.load() key -> the Lean expression that must evaluate to it (SPEC: the map)
 CONSTS = {
     "lemmaA_window": "LEMMA_A_WINDOW", "R_base": "R_BASE", "dispatch_cycles": "DISPATCH_CYCLES",

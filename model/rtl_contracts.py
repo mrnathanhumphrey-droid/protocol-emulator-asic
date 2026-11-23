@@ -159,7 +159,9 @@ RTL_CONTRACTS = {
                 "invariant). Must-fire (agent 1, piece 4): a release that ignores the deadline "
                 "for an armed lane. The keep-flush replay referees it: every chosen lane checked "
                 "against the model's",
-        "lean": "SchedK11.K11At; premise of SchedK11.winA_eq_of_K11 / winS_eq_of_K11",
+        "lean": "SchedK11.K11At, DERIVED (11-22): ArmRel.K11At_runBA from the armed-release "
+                "invariant and disp_released_only; premise of SchedK11.winA_eq_of_K11 / "
+                "winS_eq_of_K11",
         "must_fire": {"status": OWED, "name": None}},
     # Wilson 11-21 (closure ruling, ask 1): the two scheduler premises wb_closeBK_K11 rests on
     "sched_bprime": {
@@ -196,11 +198,20 @@ CONTRACT_PREMISES = {
     "disp_released_only": {
         "rtl": ("disp_released_only",),
         "why": "hwin: win picks only live, released lanes (pc2_arm's PC+1 ARM picked at release)"},
+    # DERIVED (Wilson 11-22, K11's three checks, item 2): K11At follows from the armed run's
+    # scope (an armed lane's edge before its deadline, EdgeFirst) and disp_released_only (the
+    # scheduler names only released lanes) -- ArmRel.K11At_runBA. No longer an RTL contract of its
+    # own: the premise maps to disp_released_only; K11's RTL must-fire stays and checks that
+    # contract from another angle (a timed ARM chosen before its deadline).
     "sched_k11": {
-        "rtl": ("K11",),
+        "rtl": ("disp_released_only",),
+        "derived": "ArmRel.K11At_runBA (edgeFirst_runBA, armed_unreleased_runBA, "
+                   "K11At_of_unreleased) + disp_released_only; scope: each arming's edge before "
+                   "its deadline (hfirst)",
         "why": "hK: K11At at every cycle of the armed run, so winA win armed chooses as win "
                "whenever an unarmed lane is ready (SchedK11.winS_eq_of_K11): the window bound's "
-               "no-decision count S has no masked-pick stall (composition L4 hS)"},
+               "no-decision count S has no masked-pick stall (composition L4 hS). Derived: an "
+               "armed lane is unreleased (now <= armE < ts), and win names only released lanes"},
     "sched_bprime": {
         "rtl": ("sched_bprime",),
         "why": "hb: the winner's head is valid (BPrimeWin), so with an unarmed ready lane no idle "
