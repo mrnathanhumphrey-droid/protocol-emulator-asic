@@ -28,6 +28,17 @@ of it is here:
   `n` cycles earlier (and `now ≤ ts + W + 1`). With `W = K + 1` from the response bound
   (`RespWinB.wb_bound_winBK_fl`, on `runBK`; its transfer to `runBPR` is item 2) every cycle up
   to a lane's next writeback is inside the window.
+
+Item 2, the response bound on this run (re-proved, not transferred):
+* `wb_bound_winBPR` -- `RespWinB.wb_bound_winBK`'s window argument on any run `R` of `stepBPR`
+  (`IsRunBPR`; `isRun_runBPR`), each cycle with its own masked winner `winA win (R n).mask`
+  (Lemma A per cycle: `runR_lemA`). A lane unarmed since the start writes back within `K + 1`
+  of its `ts`, under the window budget counted along `R` (`cntW`: `M` other-lane decisions, `S`
+  undecided idle cycles, `K ≥ 3M + S + 3`). No `Ready` / `NotMid` premise: Lemma A's per-cycle
+  identity needs only "not decided";
+* `behind_winBPR` (with `runR_ts_flat`) -- so at every cycle of the quiet stretch before that
+  writeback, `now + (t - c) ≤ ts + K + 1`.
+Open: a live, unarmed lane with **no** later writeback (the bound is conditional on one).
 -/
 namespace JLane
 
@@ -321,6 +332,210 @@ theorem runBPR_behind_back_ts (wdt nwt : Nat → Lane → Bool) (kt : Nat → La
   have hr : (runBPR P win usb sreq isArm edge isFT offW ntW isPark hdW wdt nwt kt c B0).A.X.rel l
       ≤ (runBPR P win usb sreq isArm edge isFT offW ntW isPark hdW wdt nwt kt c B0).A.X.x.e.ts l + 1 := by
     unfold EngBK.rel; have := rbit_le ((runBPR P win usb sreq isArm edge isFT offW ntW isPark hdW wdt nwt kt c B0).A.X.reb l); omega
+  omega
+
+/-! ### The side behind `now`, item 2: the response bound on the RTL-side run
+
+`RespWinB.wb_bound_winBK`'s window argument, re-proved on any trajectory `R` of `stepBPR` (every
+`R (n + 1)` one `stepBPR` of `R n`, whatever its watchdog, no-swap and kept-index inputs). Each
+cycle dispatches with **that cycle's** masked winner `winA win (R n).mask` (armed and halted
+lanes out), so Lemma A's per-cycle identity (`LemmaAN.lemA_step_n`) is applied with it, cycle by
+cycle; the window counts are taken along `R` with the same per-cycle winner. The lane `y` is
+unarmed through the stretch (its `ts` moves only at its own writebacks); nothing else is asked
+of it -- a lane that is never served has no writeback and the bound says nothing about it. -/
+
+/-- `R` is a run of `stepBPR`. -/
+def IsRunBPR (R : Nat → EngBP) : Prop :=
+  ∀ n, ∃ wd nw k, R (n + 1) = stepBPR P win usb sreq isArm edge isFT offW ntW isPark hdW wd nw k (R n)
+
+/-- `y` is decided this cycle, by the cycle's masked winner. -/
+def DecP (y : Lane) (B : EngBP) : Prop := Dec (winA win B.mask) y B.A.X.x.e
+
+/-- The count of cycles `c, …, c + n - 1` of `R` satisfying `Q`. -/
+def cntW (Q : EngBP → Bool) (R : Nat → EngBP) (c : Nat) : Nat → Nat
+  | 0 => 0
+  | n + 1 => cntW Q R c n + (if Q (R (c + n)) = true then 1 else 0)
+
+/-- The dispatch FSM after a `stepBPR` is `step`'s, with the masked winner. -/
+theorem stepBPR_st_step (wd nw : Lane → Bool) (k : Lane → Nat) (B : EngBP) :
+    (stepBPR P win usb sreq isArm edge isFT offW ntW isPark hdW wd nw k B).A.X.x.e.st
+        = (step P (winA win B.mask) B.A.X.x.e).st ∧
+      (stepBPR P win usb sreq isArm edge isFT offW ntW isPark hdW wd nw k B).A.X.x.e.cur
+        = (step P (winA win B.mask) B.A.X.x.e).cur :=
+  stepBPR_disp P win usb sreq isArm edge isFT offW ntW isPark hdW wd nw k B
+
+section run
+variable (R : Nat → EngBP) (hR : IsRunBPR P win usb sreq isArm edge isFT offW ntW isPark hdW R)
+include hR
+
+theorem runR_st (n : Nat) :
+    (R (n + 1)).A.X.x.e.st = (step P (winA win (R n).mask) (R n).A.X.x.e).st ∧
+      (R (n + 1)).A.X.x.e.cur = (step P (winA win (R n).mask) (R n).A.X.x.e).cur := by
+  obtain ⟨wd, nw, k, h⟩ := hR n
+  rw [h]
+  exact stepBPR_st_step P win usb sreq isArm edge isFT offW ntW isPark hdW wd nw k (R n)
+
+theorem runR_now : ∀ n, (R n).A.X.x.e.now = (R 0).A.X.x.e.now + n
+  | 0 => rfl
+  | n + 1 => by
+    obtain ⟨wd, nw, k, h⟩ := hR n
+    rw [h, stepBPR_now, runR_now n]
+    omega
+
+/-- An unarmed lane's `ts` never decreases, and is flat off its writeback. -/
+theorem runR_ts_step (y : Lane) (n : Nat) (ha : (R n).A.armed y = false) :
+    (R n).A.X.x.e.ts y ≤ (R (n + 1)).A.X.x.e.ts y ∧
+      (¬IsWB y (R n).A.X.x.e → (R (n + 1)).A.X.x.e.ts y = (R n).A.X.x.e.ts y) := by
+  obtain ⟨wd, nw, k, h⟩ := hR n
+  rw [h]
+  obtain ⟨hpe, htm, hfl⟩ := unarmed_quiet win (R n) y ha
+  constructor
+  · rw [stepBPR_ts, hpe, htm, hfl]
+    simp only [Bool.false_eq_true, if_false]
+    exact tsNext_ge _ _ _
+  · intro hw
+    exact stepBPR_ts_quiet P win usb sreq isArm edge isFT offW ntW isPark hdW wd nw k (R n) y
+      (quiet_of_unarmed win (R n) y ha (fun h' => hw ⟨h'.1, h'.2.symm⟩))
+
+theorem runR_ts_mono (y : Lane) :
+    ∀ j, (∀ n, n < j → (R n).A.armed y = false) → (R 0).A.X.x.e.ts y ≤ (R j).A.X.x.e.ts y
+  | 0, _ => Nat.le_refl _
+  | j + 1, ha => Nat.le_trans (runR_ts_mono y j (fun n hn => ha n (by omega)))
+      (runR_ts_step P win usb sreq isArm edge isFT offW ntW isPark hdW R hR y j (ha j (by omega))).1
+
+theorem runR_dec_wb (y : Lane) (a : Nat) (h : DecP win y (R a)) :
+    (R (a + 1)).A.X.x.e.st = .drive ∧ IsWB y (R (a + 2)).A.X.x.e := by
+  obtain ⟨h1, h2⟩ := step_of_dec P (winA win (R a).mask) (R a).A.X.x.e y h
+  obtain ⟨s1, c1⟩ := runR_st P win usb sreq isArm edge isFT offW ntW isPark hdW R hR a
+  have hd : (R (a + 1)).A.X.x.e.st = .drive := s1.trans h1
+  obtain ⟨h3, h4⟩ := step_drive P (winA win (R (a + 1)).mask) (R (a + 1)).A.X.x.e hd
+  obtain ⟨s2, c2⟩ := runR_st P win usb sreq isArm edge isFT offW ntW isPark hdW R hR (a + 1)
+  exact ⟨hd, s2.trans h3, (c2.trans h4).trans (c1.trans h2)⟩
+
+theorem runR_wb_back (h0 : (R 0).A.X.x.e.st = .idle) (t : Nat) (y : Lane)
+    (hwb : IsWB y (R t).A.X.x.e) : ∃ s, t = s + 2 ∧ DecP win y (R s) := by
+  obtain ⟨hst, hcur⟩ := hwb
+  cases t with
+  | zero => rw [h0] at hst; cases hst
+  | succ t =>
+    obtain ⟨s1, c1⟩ := runR_st P win usb sreq isArm edge isFT offW ntW isPark hdW R hR t
+    rw [s1] at hst
+    obtain ⟨hd, hc⟩ := back_wb P _ _ hst
+    cases t with
+    | zero => rw [h0] at hd; cases hd
+    | succ s =>
+      obtain ⟨s2, c2⟩ := runR_st P win usb sreq isArm edge isFT offW ntW isPark hdW R hR s
+      rw [s2] at hd
+      have hdec := back_drive P _ _ hd
+      refine ⟨s, rfl, ?_⟩
+      have : (step P (winA win (R s).mask) (R s).A.X.x.e).cur = y := by
+        rw [← c2, ← hc, ← c1]; exact hcur
+      unfold DecP
+      rw [← this]
+      exact hdec
+
+/-- **Lemma A along `R`**, each cycle with its own masked winner. -/
+theorem runR_lemA (y : Lane) (c : Nat) :
+    ∀ n, (∀ s, s < n → ¬DecP win y (R (c + s))) →
+      3 * cntW (fun B => decOther (winA win B.mask) y B.A.X.x.e) R c n
+        + cntW (fun B => noDecB (winA win B.mask) B.A.X.x.e) R c n + ph (R c).A.X.x.e.st
+        = n + ph (R (c + n)).A.X.x.e.st
+  | 0, _ => by simp [cntW]
+  | n + 1, hnd => by
+    have ih := runR_lemA y c n (fun s hs => hnd s (by omega))
+    have h1 := lemA_step_n P (winA win (R (c + n)).mask) y (R (c + n)).A.X.x.e (hnd n (by omega))
+    rw [← (runR_st P win usb sreq isArm edge isFT offW ntW isPark hdW R hR (c + n)).1] at h1
+    show 3 * (cntW _ R c n + (if decOther (winA win (R (c + n)).mask) y (R (c + n)).A.X.x.e = true
+        then 1 else 0))
+      + (cntW _ R c n + (if noDecB (winA win (R (c + n)).mask) (R (c + n)).A.X.x.e = true
+        then 1 else 0)) + ph (R c).A.X.x.e.st = n + 1 + ph (R (c + n + 1)).A.X.x.e.st
+    omega
+
+/-- **The response bound on the RTL-side run**: every writeback of a lane unarmed since the
+start lands within `K + 1` of its timestamp, given the window budget counted along the run (`M`
+other-lane decisions, `S` idle cycles with no decision, in every `K ≥ 3M + S + 3` window), with
+each cycle's masked winner. -/
+theorem wb_bound_winBPR (h0 : (R 0).A.X.x.e.st = .idle) (y : Lane)
+    (h0ts : (R 0).A.X.x.e.now ≤ (R 0).A.X.x.e.ts y)
+    (M S K : Nat) (hK : 3 * M + S + 3 ≤ K)
+    (t : Nat) (hwb : IsWB y (R t).A.X.x.e)
+    (hun : ∀ n, n < t → (R n).A.armed y = false)
+    (hfree : ∀ w, w + 2 < t → IsWB y (R w).A.X.x.e → (R w).A.X.x.e.now < (R t).A.X.x.e.ts y)
+    (hM : ∀ c, c + K + 2 ≤ t →
+      cntW (fun B => decOther (winA win B.mask) y B.A.X.x.e) R c K ≤ M)
+    (hS : ∀ c, c + K + 2 ≤ t →
+      cntW (fun B => noDecB (winA win B.mask) B.A.X.x.e) R c K ≤ S) :
+    (R t).A.X.x.e.now ≤ (R t).A.X.x.e.ts y + K + 1 := by
+  obtain ⟨D, rfl, hdec⟩ := runR_wb_back P win usb sreq isArm edge isFT offW ntW isPark hdW R hR h0 t y hwb
+  have hidle : (R D).A.X.x.e.st = .idle := hdec.1
+  have hdrive := (runR_dec_wb P win usb sreq isArm edge isFT offW ntW isPark hdW R hR y D hdec).1
+  have t1 := (runR_ts_step P win usb sreq isArm edge isFT offW ntW isPark hdW R hR y D
+    (hun D (by omega))).2 (not_wb_of_st y _ (by rw [hidle]; decide))
+  have t2 := (runR_ts_step P win usb sreq isArm edge isFT offW ntW isPark hdW R hR y (D + 1)
+    (hun (D + 1) (by omega))).2 (not_wb_of_st y _ (by rw [hdrive]; decide))
+  have hts2 : (R (D + 2)).A.X.x.e.ts y = (R D).A.X.x.e.ts y := t2.trans t1
+  have hnow := runR_now P win usb sreq isArm edge isFT offW ntW isPark hdW R hR
+  rw [hts2, hnow (D + 2)]
+  rw [hts2] at hfree
+  by_cases hfit : (R 0).A.X.x.e.now + D + 1 ≤ (R D).A.X.x.e.ts y + K
+  · omega
+  · exfalso
+    have hts0 := runR_ts_mono P win usb sreq isArm edge isFT offW ntW isPark hdW R hR y D
+      (fun n hn => hun n (by omega))
+    obtain ⟨c, rfl⟩ : ∃ c, D = c + K := ⟨D - K, by omega⟩
+    have noWB : ∀ w, c ≤ w → w < c + K → ¬IsWB y (R w).A.X.x.e := by
+      intro w hcw hwD hw
+      have h1 := hfree w (by omega) hw
+      have h2 := hnow w
+      omega
+    have hnd : ∀ s, s < K → ¬DecP win y (R (c + s)) := by
+      intro s hs hds
+      obtain ⟨hd1, hw2⟩ := runR_dec_wb P win usb sreq isArm edge isFT offW ntW isPark hdW R hR y
+        (c + s) hds
+      rcases Nat.lt_or_ge (c + s + 2) (c + K) with hlt | hge
+      · exact noWB (c + s + 2) (by omega) hlt hw2
+      · have : c + K = c + s + 1 ∨ c + K = c + s + 2 := by omega
+        rcases this with h | h
+        · rw [h, hd1] at hidle; cases hidle
+        · rw [h, hw2.1] at hidle; cases hidle
+    have hA := runR_lemA P win usb sreq isArm edge isFT offW ntW isPark hdW R hR y c K hnd
+    have hm := hM c (by omega)
+    have hs := hS c (by omega)
+    have h2 := ph_le (R c).A.X.x.e.st
+    omega
+
+end run
+
+/-- `runBPR` is a run of `stepBPR`. -/
+theorem isRun_runBPR (wdt nwt : Nat → Lane → Bool) (kt : Nat → Lane → Nat) (B0 : EngBP) :
+    IsRunBPR P win usb sreq isArm edge isFT offW ntW isPark hdW
+      (fun n => runBPR P win usb sreq isArm edge isFT offW ntW isPark hdW wdt nwt kt n B0) :=
+  fun n => ⟨_, _, _, rfl⟩
+
+/-- An unarmed lane off its writebacks keeps its `ts` along `R`. -/
+theorem runR_ts_flat (R : Nat → EngBP)
+    (hR : IsRunBPR P win usb sreq isArm edge isFT offW ntW isPark hdW R) (y : Lane) (c : Nat) :
+    ∀ n, (∀ i, i < n → (R (c + i)).A.armed y = false ∧ ¬IsWB y (R (c + i)).A.X.x.e) →
+      (R (c + n)).A.X.x.e.ts y = (R c).A.X.x.e.ts y
+  | 0, _ => rfl
+  | n + 1, h => by
+    have ih := runR_ts_flat R hR y c n (fun i hi => h i (by omega))
+    have hs := (runR_ts_step P win usb sreq isArm edge isFT offW ntW isPark hdW R hR y (c + n)
+      (h n (by omega)).1).2 (h n (by omega)).2
+    show (R (c + n + 1)).A.X.x.e.ts y = _
+    rw [hs, ih]
+
+/-- **The side behind `now`, every cycle up to a writeback**: if `y`'s writeback at `t` is
+within `K + 1` of its timestamp (`wb_bound_winBPR`) and `y` is unarmed and not written back on
+`[c, t)`, then at every such cycle `now + (t - c) ≤ ts + K + 1`. -/
+theorem behind_winBPR (R : Nat → EngBP)
+    (hR : IsRunBPR P win usb sreq isArm edge isFT offW ntW isPark hdW R) (y : Lane) (c n K : Nat)
+    (hq : ∀ i, i < n → (R (c + i)).A.armed y = false ∧ ¬IsWB y (R (c + i)).A.X.x.e)
+    (hW : (R (c + n)).A.X.x.e.now ≤ (R (c + n)).A.X.x.e.ts y + K + 1) :
+    (R c).A.X.x.e.now + n ≤ (R c).A.X.x.e.ts y + K + 1 := by
+  rw [runR_ts_flat P win usb sreq isArm edge isFT offW ntW isPark hdW R hR y c n hq,
+    runR_now P win usb sreq isArm edge isFT offW ntW isPark hdW R hR (c + n)] at hW
+  rw [runR_now P win usb sreq isArm edge isFT offW ntW isPark hdW R hR c]
   omega
 
 end
