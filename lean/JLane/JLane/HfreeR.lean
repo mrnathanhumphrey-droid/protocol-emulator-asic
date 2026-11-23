@@ -4,10 +4,12 @@ import JLane.HfreeB
 
 `RespWinB.wb_bound_winBK_fl` takes, at a writeback `t` of `y`:
 
-* `hnf` — `y` is not flushed at a cycle `n < t` at or past `t`'s release. This holds on every
-  `runBK`, with no premise: a flush at `n` sets `y`'s release to `now n + 1` (`ts_flush_stepBK`),
-  and from there it never drops below that -- a later flush sets it later still, an unflushed
-  cycle only moves it forward (`ts_after_flushBK`). So `ts t ≥ now n + 1` (`hnf_runBK`).
+* `hnf` — `y` is not flushed at a cycle `n < t` at or past `t`'s release (`EngBK.rel`: `ts`,
+  plus one while the K4 rebase bit is set). This holds on every `runBK`, with no premise: a flush
+  at `n` sets `ts` to the edge cycle `now n` (`ts_flush_stepBK`) with the rebase bit, so the
+  release is `now n + 1` (`rel_flush_runBK`), and from there it never drops below that -- a later
+  flush sets it later still, an unflushed cycle only moves it forward, the bit cleared only by a
+  writeback that moves `ts` (`rel_after_flushBK`). So `rel t ≥ now n + 1` (`hnf_runBK`).
 * `hfree` — every writeback `w` of `y` with `w + 2 < t` came before `t`'s release. In
   `HfreeB.hR_stretch_gap` this was proved on a stretch; here it is in run coordinates, the form
   `wb_closeBK`'s strong induction over time needs (`hfree_runBK`): a flush of `y` in `[w, t)` puts
@@ -17,7 +19,8 @@ import JLane.HfreeB
 
 `HrelR` on the bridged run (`hrelR_bridged`): an ARM's writeback has no later writeback of `y`
 before a flush (armed until a hit, a hit is a flush, `winA` never picks an armed lane), so it holds
-vacuously there; every other writeback by its gap (`K + 2 ≤ dly + ext`, lane-cert check 22).
+vacuously there; every other writeback by its gap (`K + 2 ≤ dly + ext`, one more after a
+rebase: lane-cert check 22 on `price - REBASE`).
 -/
 namespace JLane
 
@@ -25,58 +28,65 @@ section
 variable (P : Program) (win : Engine → Option Lane) (usb : Option Lane)
   (sreq : EngB → Option Lane)
 
-/-- A flush of `y` sets its release to the next cycle. -/
+/-- A flush of `y` sets its `ts` to the edge cycle (K4, the RTL's rebase). -/
 theorem ts_flush_stepBK (fl : Nat → Lane → Bool) (k : Nat → Lane → Nat) (X : EngBK) (n : Nat)
     (y : Lane) (hf : fl (runBK P win usb sreq fl k n X).x.e.now y = true) :
-    (runBK P win usb sreq fl k (n + 1) X).x.e.ts y = (runBK P win usb sreq fl k n X).x.e.now + 1 := by
+    (runBK P win usb sreq fl k (n + 1) X).x.e.ts y = (runBK P win usb sreq fl k n X).x.e.now := by
   rw [runBK_succ']
   show (if fl (runBK P win usb sreq fl k n X).x.e.now y = true
-      then (runBK P win usb sreq fl k n X).base.e.now + 1
+      then (runBK P win usb sreq fl k n X).base.e.now
       else (stepB P win usb sreq (runBK P win usb sreq fl k n X).base).e.ts y) = _
   rw [if_pos hf, base_e]
 
+/-- A flush of `y` releases it the next cycle. -/
+theorem rel_flush_runBK (fl : Nat → Lane → Bool) (k : Nat → Lane → Nat) (X : EngBK) (n : Nat)
+    (y : Lane) (hf : fl (runBK P win usb sreq fl k n X).x.e.now y = true) :
+    (runBK P win usb sreq fl k (n + 1) X).rel y = (runBK P win usb sreq fl k n X).x.e.now + 1 := by
+  rw [runBK_succ']
+  exact rel_flush_stepBK P win usb sreq _ _ _ y hf
+
 /-- **After a flush, the release stays past it**, whatever follows. -/
-theorem ts_after_flushBK (fl : Nat → Lane → Bool) (k : Nat → Lane → Nat) (X : EngBK) (n : Nat)
+theorem rel_after_flushBK (fl : Nat → Lane → Bool) (k : Nat → Lane → Nat) (X : EngBK) (n : Nat)
     (y : Lane) (hf : fl (runBK P win usb sreq fl k n X).x.e.now y = true) :
     ∀ d, (runBK P win usb sreq fl k n X).x.e.now + 1
-      ≤ (runBK P win usb sreq fl k (n + 1 + d) X).x.e.ts y
+      ≤ (runBK P win usb sreq fl k (n + 1 + d) X).rel y
   | 0 => by
-    have := ts_flush_stepBK P win usb sreq fl k X n y hf
-    show _ ≤ (runBK P win usb sreq fl k (n + 1) X).x.e.ts y
+    have := rel_flush_runBK P win usb sreq fl k X n y hf
+    show _ ≤ (runBK P win usb sreq fl k (n + 1) X).rel y
     omega
   | d + 1 => by
-    have ih := ts_after_flushBK fl k X n y hf d
+    have ih := rel_after_flushBK fl k X n y hf d
     have hn := now_runBK P win usb sreq fl k n X
     have hn2 := now_runBK P win usb sreq fl k (n + 1 + d) X
     rw [show n + 1 + (d + 1) = n + 1 + d + 1 by omega]
     cases hf2 : fl (runBK P win usb sreq fl k (n + 1 + d) X).x.e.now y with
     | false =>
       rw [runBK_succ']
-      exact Nat.le_trans ih (ts_step_leBK P win usb sreq _ _ _ y hf2)
+      exact Nat.le_trans ih (rel_step_leBK P win usb sreq _ _ _ y hf2)
     | true =>
-      have := ts_flush_stepBK P win usb sreq fl k X (n + 1 + d) y hf2
+      have := rel_flush_runBK P win usb sreq fl k X (n + 1 + d) y hf2
       omega
 
 /-- **`hnf` on every `runBK`**: no flush of `y` before `t` at or past `t`'s release. -/
 theorem hnf_runBK (fl : Nat → Lane → Bool) (k : Nat → Lane → Nat) (X0 : EngBK) (y : Lane)
     (t : Nat) :
-    ∀ n, n < t → (runBK P win usb sreq fl k t X0).x.e.ts y ≤ (runBK P win usb sreq fl k n X0).x.e.now →
+    ∀ n, n < t → (runBK P win usb sreq fl k t X0).rel y ≤ (runBK P win usb sreq fl k n X0).x.e.now →
       fl (runBK P win usb sreq fl k n X0).x.e.now y = false := by
   intro n hn hle
   cases hf : fl (runBK P win usb sreq fl k n X0).x.e.now y with
   | false => rfl
   | true =>
     exfalso
-    have := ts_after_flushBK P win usb sreq fl k X0 n y hf (t - n - 1)
+    have := rel_after_flushBK P win usb sreq fl k X0 n y hf (t - n - 1)
     rw [show n + 1 + (t - n - 1) = t by omega] at this
     omega
 
 /-- Over a span from `w`: either `y` is unflushed throughout, or its release at the end is past
-`now w` (a flush in the span, and `ts_after_flushBK`). Constructive, by induction on the span. -/
+`now w` (a flush in the span, and `rel_after_flushBK`). Constructive, by induction on the span. -/
 theorem flush_or_clearBK (fl : Nat → Lane → Bool) (k : Nat → Lane → Nat) (X0 : EngBK) (y : Lane)
     (w : Nat) : ∀ d,
     (∀ j, w ≤ j → j < w + d → fl (runBK P win usb sreq fl k j X0).x.e.now y = false) ∨
-      (runBK P win usb sreq fl k w X0).x.e.now + 1 ≤ (runBK P win usb sreq fl k (w + d) X0).x.e.ts y
+      (runBK P win usb sreq fl k w X0).x.e.now + 1 ≤ (runBK P win usb sreq fl k (w + d) X0).rel y
   | 0 => Or.inl (fun j h1 h2 => absurd h2 (by omega))
   | d + 1 => by
     have hnw := now_runBK P win usb sreq fl k w X0
@@ -92,15 +102,15 @@ theorem flush_or_clearBK (fl : Nat → Lane → Bool) (k : Nat → Lane → Nat)
         · rw [show j = w + d by omega]; exact hf
       | true =>
         right
-        have := ts_flush_stepBK P win usb sreq fl k X0 (w + d) y hf
+        have := rel_flush_runBK P win usb sreq fl k X0 (w + d) y hf
         omega
     · right
       cases hf : fl (runBK P win usb sreq fl k (w + d) X0).x.e.now y with
       | false =>
         rw [runBK_succ']
-        exact Nat.le_trans hp (ts_step_leBK P win usb sreq _ _ _ y hf)
+        exact Nat.le_trans hp (rel_step_leBK P win usb sreq _ _ _ y hf)
       | true =>
-        have := ts_flush_stepBK P win usb sreq fl k X0 (w + d) y hf
+        have := rel_flush_runBK P win usb sreq fl k X0 (w + d) y hf
         omega
 
 /-- **`hrel` in run coordinates**: a writeback of `y` within its bound, with a later writeback of
@@ -110,8 +120,8 @@ def HrelR (fl : Nat → Lane → Bool) (k : Nat → Lane → Nat) (X0 : EngBK) (
   ∀ x x2, x < x2 → IsWB y (runBK P win usb sreq fl k x X0).x.e →
     IsWB y (runBK P win usb sreq fl k x2 X0).x.e →
     (∀ j, x ≤ j → j < x2 → fl (runBK P win usb sreq fl k j X0).x.e.now y = false) →
-    (runBK P win usb sreq fl k x X0).x.e.now ≤ (runBK P win usb sreq fl k x X0).x.e.ts y + K + 1 →
-    (runBK P win usb sreq fl k x X0).x.e.now < (runBK P win usb sreq fl k (x + 1) X0).x.e.ts y
+    (runBK P win usb sreq fl k x X0).x.e.now ≤ (runBK P win usb sreq fl k x X0).rel y + K + 1 →
+    (runBK P win usb sreq fl k x X0).x.e.now < (runBK P win usb sreq fl k (x + 1) X0).rel y
 
 /-- **`hfree` in run coordinates**: given the bound on every earlier writeback of `y` (the
 closure's induction) and `HrelR`, every writeback of `y` two or more cycles before writeback `t`
@@ -120,16 +130,16 @@ theorem hfree_runBK (fl : Nat → Lane → Bool) (k : Nat → Lane → Nat) (X0 
     (K t : Nat) (hwb : IsWB y (runBK P win usb sreq fl k t X0).x.e)
     (hrel : HrelR P win usb sreq fl k X0 y K)
     (hb : ∀ w, w < t → IsWB y (runBK P win usb sreq fl k w X0).x.e →
-      (runBK P win usb sreq fl k w X0).x.e.now ≤ (runBK P win usb sreq fl k w X0).x.e.ts y + K + 1) :
+      (runBK P win usb sreq fl k w X0).x.e.now ≤ (runBK P win usb sreq fl k w X0).rel y + K + 1) :
     ∀ w, w + 2 < t → IsWB y (runBK P win usb sreq fl k w X0).x.e →
-      (runBK P win usb sreq fl k w X0).x.e.now < (runBK P win usb sreq fl k t X0).x.e.ts y := by
+      (runBK P win usb sreq fl k w X0).x.e.now < (runBK P win usb sreq fl k t X0).rel y := by
   intro w hw hwbw
   have hnw := now_runBK P win usb sreq fl k w X0
   rcases flush_or_clearBK P win usb sreq fl k X0 y w (t - w) with hnf | hpast
   · have hnf' : ∀ j, w ≤ j → j < t → fl (runBK P win usb sreq fl k j X0).x.e.now y = false :=
       fun j h1 h2 => hnf j h1 (by omega)
     have h1 := hrel w t (by omega) hwbw hwb hnf' (hb w (by omega) hwbw)
-    have h2 := ts_mono_winBK P win usb sreq fl k y X0 (w + 1) (t - (w + 1))
+    have h2 := rel_mono_winBK P win usb sreq fl k y X0 (w + 1) (t - (w + 1))
       (fun s hs => hnf' (w + 1 + s) (by omega) (by omega))
     rw [show w + 1 + (t - (w + 1)) = t by omega] at h2
     omega
@@ -152,7 +162,9 @@ theorem hrelR_bridged (hedge : ∀ t l, t + 1 ≤ edge t l) (hA : ArmInvB A0)
       IsWB y (runBK P (winS P win usb sreq isArm edge kt A0) usb sreq
         (flS P win usb sreq isArm edge kt A0) kt x A0.X).x.e →
       (runBA P win usb sreq isArm edge kt x A0).arms P isArm y = false →
-      K + 2 ≤ P.dly y + P.ext (runBK P (winS P win usb sreq isArm edge kt A0) usb sreq
+      K + 2 + (if (runBK P (winS P win usb sreq isArm edge kt A0) usb sreq
+          (flS P win usb sreq isArm edge kt A0) kt x A0.X).reb y = true then 1 else 0)
+        ≤ P.dly y + P.ext (runBK P (winS P win usb sreq isArm edge kt A0) usb sreq
         (flS P win usb sreq isArm edge kt A0) kt x A0.X).x.e.now y) :
     HrelR P (winS P win usb sreq isArm edge kt A0) usb sreq (flS P win usb sreq isArm edge kt A0)
       kt A0.X y K := by
@@ -160,7 +172,16 @@ theorem hrelR_bridged (hedge : ∀ t l, t + 1 ≤ edge t l) (hA : ArmInvB A0)
   cases harm : (runBA P win usb sreq isArm edge kt x A0).arms P isArm y with
   | false =>
     have hg := hgap x hwb harm
-    have ht := ts_wb_bridged P win usb sreq isArm edge kt A0 x y hwb (hnf x (Nat.le_refl x) hxx)
+    have ht := rel_wb_stepBK P (winS P win usb sreq isArm edge kt A0) usb sreq
+      (flS P win usb sreq isArm edge kt A0 (runBK P (winS P win usb sreq isArm edge kt A0) usb sreq
+        (flS P win usb sreq isArm edge kt A0) kt x A0.X).x.e.now)
+      (kt (runBK P (winS P win usb sreq isArm edge kt A0) usb sreq
+        (flS P win usb sreq isArm edge kt A0) kt x A0.X).x.e.now)
+      (runBK P (winS P win usb sreq isArm edge kt A0) usb sreq
+        (flS P win usb sreq isArm edge kt A0) kt x A0.X) y
+      (hnf x (Nat.le_refl x) hxx) ⟨hwb.1, hwb.2.symm⟩
+    rw [← runBK_succ' P (winS P win usb sreq isArm edge kt A0) usb sreq
+      (flS P win usb sreq isArm edge kt A0) kt x A0.X] at ht
     omega
   | true =>
     exfalso

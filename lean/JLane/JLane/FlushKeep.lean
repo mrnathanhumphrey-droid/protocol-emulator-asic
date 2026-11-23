@@ -16,7 +16,10 @@ FALLTHROUGH edge on lane `l`, with `k l` the fetch index of the ARM's edge word:
   buffer is emptied;
 * (K3) a word already in a slot stays in that slot (only the head select moves); a word from the
   buffer or the port is filed into the lane's current head slot;
-* (K4) the lane is released the cycle after the edge (`FlushStep.tsF`, unchanged);
+* (K4) the lane's `ts` is the edge cycle, so it is released the cycle after the edge (the RTL's
+  rebase writes `ts` = the edge cycle and its release compare is registered -- agent 1, 11-22;
+  before 11-22 the model wrote `now + 1`, the same release but an EDF key `ts + D` one higher
+  than the RTL's argmin tree);
 * other lanes are untouched (`stepBK` is `BufEng.stepB` on them).
 
 The case the shipped RTL gets wrong for this purpose: an edge in the CAP cycle of the edge
@@ -27,8 +30,8 @@ a corner: through the scan the edge word is captured at `c + 4` and the earliest
 
 Proved:
 * `edge_survives_flush` -- (K1, K4): the head is valid after the edge cycle, holds fetch index
-  `k l`, and the lane is released that same cycle: the edge path's head is valid **at** its
-  release (lateness 0 from the flush, against `FLUSH_REFILL_LATE + B` without the keep);
+  `k l`, and `ts` is the edge cycle, so the lane is released from that cycle on: the edge
+  path's head is valid **at** its release (lateness 0 from the flush, against `FLUSH_REFILL_LATE + B` without the keep);
 * `flush_keeps_only_edge`, `flush_buf_empty` -- (K2): the only word the lane holds after the
   edge is the edge word; the timeout word never survives (`flush_drops_timeout`);
 * `flush_empty_of_absent` -- with no edge word held or arriving, the lane is empty: the refill
@@ -80,7 +83,7 @@ def stepBK (P : Program) (win : Engine → Option Lane) (usb : Option Lane)
       actv := fun l s => if fl l = true
         then x.hasEdge l (k l) && decide (s = keepSlot x l (k l)) else y.e.actv l s
       sel := fun l => if fl l = true then keepSlot x l (k l) else y.e.sel l
-      ts := fun l => if fl l = true then x.e.now + 1 else y.e.ts l }
+      ts := fun l => if fl l = true then x.e.now else y.e.ts l }
     buf := fun l => if fl l = true then false else y.buf l
     sq := fun l s => if fl l = true ∧ s = keepSlot x l (k l) then k l else y.sq l s }
 
@@ -92,13 +95,13 @@ theorem stepBK_now (x : EngB) : (stepBK P win usb sreq fl k x).e.now = x.e.now +
   stepB_e_now P win usb sreq x
 
 /-- **`edge_survives_flush`** (K1, K4). At a FALLTHROUGH edge on `l` whose edge word is held or
-arriving, after the cycle the head is valid, it is the edge word, and the lane is released that
-same cycle: the edge path's head is valid at its release. -/
+arriving, after the cycle the head is valid, it is the edge word, and its `ts` is the edge cycle
+(K4), so it is released from that cycle on: the edge path's head is valid at its release. -/
 theorem edge_survives_flush (x : EngB) (l : Lane) (hf : fl l = true)
     (hk : x.hasEdge l (k l) = true) :
     (stepBK P win usb sreq fl k x).e.headValid l = true ∧
     (stepBK P win usb sreq fl k x).sq l ((stepBK P win usb sreq fl k x).e.sel l) = k l ∧
-    (stepBK P win usb sreq fl k x).e.ts l = (stepBK P win usb sreq fl k x).e.now := by
+    (stepBK P win usb sreq fl k x).e.ts l + 1 = (stepBK P win usb sreq fl k x).e.now := by
   refine ⟨?_, ?_, ?_⟩
   · simp [stepBK, Engine.headValid, hf, hk]
   · simp [stepBK, hf]

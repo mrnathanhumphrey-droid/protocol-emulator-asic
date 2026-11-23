@@ -35,6 +35,11 @@ namespace JLane
 structure EngBK where
   x     : EngB
   pkill : Bool
+  /-- ghost (K4, agent 1 11-22): the lane's `ts` is an edge's rebase (`ts` = the edge cycle), so
+  its release is `ts + 1` (`EngBK.rel`) -- set at a flush, cleared at the lane's next writeback
+  that moves `ts` (one with `dly + ext > 0`; a zero-delay writeback leaves the release at
+  `ts + 1`), as `ArmFT.EngineT.reb` on the slot-off path -/
+  reb   : Lane → Bool := fun _ => false
 
 /-- The engine the cycle runs on: while a kill is pending, the in-flight fetch is a second fetch
 (its capture is dropped, so where it would land is never used). -/
@@ -71,12 +76,19 @@ def stepBKK (P : Program) (win : Engine → Option Lane) (usb : Option Lane)
           else if (X.kc && decide (l = b.e.pl) && capTo b l s) = true then false
           else y.e.actv l s
         sel := fun l => if fl l = true then keepSlot b l (k l) else y.e.sel l
-        ts := fun l => if fl l = true then b.e.now + 1 else y.e.ts l }
+        ts := fun l => if fl l = true then b.e.now else y.e.ts l }
       buf := fun l => if fl l = true then false
         else if (X.kc && decide (l = b.e.pl)) = true then false else y.buf l
       sq := fun l s => if fl l = true ∧ s = keepSlot b l (k l) then y.nr l else y.sq l s }
     pkill := if X.x.e.pst = .cap then false
-      else X.pkill || (fl X.x.e.pl && (decide (X.x.e.pst = .req) || decide (X.x.e.pst = .wait))) }
+      else X.pkill || (fl X.x.e.pl && (decide (X.x.e.pst = .req) || decide (X.x.e.pst = .wait)))
+    reb := fun l => if fl l = true then true
+      else if X.x.e.st = .wb ∧ l = X.x.e.cur ∧ 0 < P.dly l + P.ext X.x.e.now l then false
+      else X.reb l }
+
+/-- The release: one past a rebased `ts` (the RTL's registered release after its rebase), else
+`ts`. The window bounds are anchored here; the EDF key reads `ts`. -/
+def EngBK.rel (X : EngBK) (l : Lane) : Nat := X.x.e.ts l + (if X.reb l = true then 1 else 0)
 
 /-- The invariant: BufEng's on the engine the cycle runs on, and a kill pending only in WAIT or
 CAP. -/
@@ -424,7 +436,7 @@ theorem edge_survives_flushK (X : EngBK) (l : Lane) (hf : fl l = true)
     (stepBKK P win usb sreq fl k X).x.e.headValid l = true ∧
     (stepBKK P win usb sreq fl k X).x.sq l ((stepBKK P win usb sreq fl k X).x.e.sel l)
       = (stepBKK P win usb sreq fl k X).x.nr l ∧
-    (stepBKK P win usb sreq fl k X).x.e.ts l = (stepBKK P win usb sreq fl k X).x.e.now := by
+    (stepBKK P win usb sreq fl k X).x.e.ts l + 1 = (stepBKK P win usb sreq fl k X).x.e.now := by
   have hn : (stepBKK P win usb sreq fl k X).x.e.now = X.base.e.now + 1 :=
     stepB_e_now P win usb sreq X.base
   refine ⟨?_, ?_, ?_⟩
@@ -436,7 +448,7 @@ theorem edge_survives_flushK (X : EngBK) (l : Lane) (hf : fl l = true)
     rw [selK]
     simp [hf]
   · rw [hn]
-    show (if fl l = true then X.base.e.now + 1 else _) = _
+    show (if fl l = true then X.base.e.now else _) + 1 = _
     simp [hf]
 
 theorem flushK_keeps_only_edge (X : EngBK) (l : Lane) (hf : fl l = true) (s : Slot)
@@ -494,7 +506,7 @@ theorem stepBKK_noflush (X : EngBK) (hfl : ∀ l, fl l = false) (hk : X.pkill = 
             else (stepB P win usb sreq X.base).e.actv l s
           sel := fun l => if fl l = true then keepSlot X.base l (k l)
             else (stepB P win usb sreq X.base).e.sel l
-          ts := fun l => if fl l = true then X.base.e.now + 1
+          ts := fun l => if fl l = true then X.base.e.now
             else (stepB P win usb sreq X.base).e.ts l }
         buf := fun l => if fl l = true then false
           else if (X.kc && decide (l = X.base.e.pl)) = true then false
@@ -529,7 +541,7 @@ theorem wfBK_run (hok : SReqB P sreq) (flt : Nat → Lane → Bool) (kt : Nat �
     exact wfBK_run hok flt kt n _ h1 (fun j hj => hF (j + 1) (Nat.succ_lt_succ hj))
 
 /-- A run starts from BufEng's invariant with no kill pending. -/
-theorem wfBK_init (x : EngB) (hW : WfB x) : WfBK ⟨x, false⟩ :=
+theorem wfBK_init (x : EngB) (hW : WfB x) : WfBK { x := x, pkill := false } :=
   ⟨by rw [base_nokill _ rfl]; exact hW, fun h => by cases h⟩
 
 end

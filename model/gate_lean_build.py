@@ -121,6 +121,10 @@ KEY = ("dstar", "dstar29", "dstar39", "dstar39_v2", "dstar39_st", "dstar39_hold"
        # RespWinB.lean (Wilson 11-18, slot_on_composition part A): the window bound on the
        # buffered engine with flushes and kill; A2 for a lane flushed at its own edges
        "stepBKK_ts_y", "ts_ge_startBK", "lemmaA_nBK", "wb_bound_winBK", "wb_bound_winBK_fl",
+       # RespWinB.lean (K4, agent 1 11-22): ts = the edge cycle at a flush; the release EngBK.rel
+       # (ts + 1 while the ghost reb is set, sticky through zero-delay writebacks) and its laws
+       "stepBKK_reb_y", "rel_flush_stepBK", "rel_step_leBK", "rel_wb_stepBK", "rel_flat_stepBK",
+       "rel_mono_winBK", "reb_lt_stepBK", "reb_lt_runBK", "rel_le_now",
        # NpfB.lean (Wilson 11-18, slot_on_composition step 1): the no-prefetch hold on runB
        "held_le_one", "want_frozenB", "npf_holdB", "npf_unlockB",
        # GapRunB.lean (Wilson 11-18, slot_on_composition step 2): GapRun on runB, hZC charging
@@ -137,7 +141,7 @@ KEY = ("dstar", "dstar29", "dstar39", "dstar39_v2", "dstar39_st", "dstar39_hold"
        # RestartB.lean (Wilson 11-18, step 3c): runBK between y's flushes is a trajectory
        "agree_stepBKK", "trajY_runBK", "wfB_runBK",
        # RestartB.lean (step 3c part 2): at f + 3 the flushed lane holds exactly its edge word
-       "frozen_stepBKK", "restart_three", "restart_runBK",
+       "frozen_stepBKK", "restart_three", "restart_runBK", "restart_rel_runBK",
        # RestartB.lean: a killed capture for y needs a flush of y one or two cycles before, so a
        # stretch with y unflushed (from two cycles back) is a trajectory
        "kill_prov", "kill_prov_runBK", "trajY_runBK_noflush",
@@ -210,7 +214,8 @@ KEY = ("dstar", "dstar29", "dstar39", "dstar39_v2", "dstar39_st", "dstar39_hold"
        "cntBK_succ_back", "cntBK_add", "cntBK_mono", "cntBK_reach", "cntBK_le_one_sep",
        "cntBK_sparse_g", "cntBK_decOther_split",
        # HfreeR.lean (closure step 3): hnf on every runBK; hfree in run coordinates
-       "ts_flush_stepBK", "ts_after_flushBK", "hnf_runBK", "flush_or_clearBK", "hfree_runBK",
+       "ts_flush_stepBK", "rel_flush_runBK", "rel_after_flushBK", "hnf_runBK", "flush_or_clearBK",
+       "hfree_runBK",
        "hrelR_bridged",
        # CloseBK.lean (closure step 4b): wb_closeBK; hS = 0 under K11 + (b′) on the bridged run
        "cntBK_decAny_split", "cntBK_zero_of", "wb_closeBK", "armed_persist", "unarmed_in_window",
@@ -227,7 +232,8 @@ KEY = ("dstar", "dstar29", "dstar39", "dstar39_v2", "dstar39_st", "dstar39_hold"
        # FlushChain.lean (hspan flush lemma, runF half): the release chain across flushes
        "ts_chainF_ge", "ts_chainT_ge",
        # ChainBK.lean (hspan flush lemma, runBK half): the chain with an ARM's gap counted as the checker's
-       "gsumBA_skip", "tsBA_hit", "tsBA_nohit", "ts_chainBA_ge", "ts_chainBK_ge",
+       "gsumBA_skip", "tsBA_hit", "tsBA_nohit", "relBA_hit", "relBA_le", "relBA_wb", "relBA_flat",
+       "rel_chainBA_ge", "rel_chainBK_ge",
        # UsbOn.lean (K13, Wilson 11-22): the slot yields to lane 0 only once usb_on is set
        "usbFirst_off", "runBU_on", "runBU_off", "wfBU_run", "ordBU_run", "heldBU_step",
        # ReadyBK.lean (hRdy, 11-22): the ready theorems on the flush run, stretch by stretch
@@ -370,7 +376,7 @@ PREMISES = {
         "contract": {"edge_timing": ("hedge",), "disp_released_only": ("hwin",),
                      "sched_bprime": ("hb",), "sched_names_ready": ("hws",),
                      "sched_k11": ("hK11",)},
-        "shape": ("hA", "h0", "h0ts"),
+        "shape": ("hA", "h0", "h0ts", "h0reb"),
         # the conclusion's antecedents: t < T, P.live y, IsWB y (unnamed arrows)
         "anon": 3,
     },
@@ -407,12 +413,13 @@ PREMISES = {
         "contract": {"slot_requester": ("hok",), "engine_wf": ("hI",), "scan_ok": ("hF",)},
         "shape": ("hstr",),
     },
-    # ChainBK (11-22, the runBK flush lemma): the release chain with an arming writeback counted
-    # as the checker's ARM gap gA. hgw (gA <= dly + ext, the timeout path) and hge (release + gA
-    # <= edge + 1, the edge path) are the ARM gap's per-image facts -- the earliest edge after a
+    # ChainBK (11-22, the runBK flush lemma; on EngBK.rel since K4): the release chain with an
+    # arming writeback counted as the checker's ARM gap gA. hgw (gA <= dly + ext, less the rebase's
+    # cycle; the timeout path) and hge (release + gA <= edge + 1, the edge path) are the ARM gap's
+    # per-image facts -- the earliest edge after a
     # release is the peer premise lane_cert prices (premises: arm_floor / arm_j), NOT contract
     # K10 (edge_timing is hedge: the edge after the ARM's writeback)
-    "ts_chainBK_ge": {
+    "rel_chainBK_ge": {
         "applies": {"arm_gap": ("hgw", "hge")},
         "contract": {"edge_timing": ("hedge",)},
         "shape": ("hA", "h0a", "hwa"),

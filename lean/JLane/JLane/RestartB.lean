@@ -31,7 +31,7 @@ theorem agree_stepBKK (fl : Lane → Bool) (k : Lane → Nat) (X : EngBK) (y : L
   unfold AgreeY
   rw [base_e (stepBKK P win usb sreq fl k X), base_buf (stepBKK P win usb sreq fl k X)]
   refine ⟨rfl, rfl, rfl, rfl, ?_, ?_, ?_, fun _ => rfl, ?_⟩
-  · show (if fl y = true then X.base.e.now + 1 else (stepB P win usb sreq X.base).e.ts y) = _
+  · show (if fl y = true then X.base.e.now else (stepB P win usb sreq X.base).e.ts y) = _
     rw [if_neg (by simp [hf])]
   · rw [selK]; simp [hf]
   · intro s
@@ -276,7 +276,7 @@ theorem restart_three (hok : SReqB P sreq) (fl0 fl1 fl2 : Lane → Bool) (k0 k1 
     (hf0 : fl0 y = true) (hk : X.base.hasEdge y (k0 y) = true)
     (hf1 : fl1 y = false) (hf2 : fl2 y = false) :
     X3.base.held y = 1 ∧ X3.base.e.headValid y = true ∧ X3.x.sq y (X3.x.e.sel y) = X1.x.nr y ∧
-      X3.base.e.ts y = X.x.e.now + 1 ∧ X3.base.e.now = X.x.e.now + 3 := by
+      X3.base.e.ts y = X.x.e.now ∧ X3.base.e.now = X.x.e.now + 3 := by
   have hI1 : WfBK X1 := hX1 ▸ wfBK_step P win usb sreq fl0 k0 hok X hI hF0
   have hI2 : WfBK X2 := hX2 ▸ wfBK_step P win usb sreq fl1 k1 hok X1 hI1 hF1
   -- the flush cycle
@@ -343,7 +343,7 @@ theorem restart_three (hok : SReqB P sreq) (fl0 fl1 fl2 : Lane → Bool) (k0 k1 
     exact hv2
   · rw [hs3, hq3 hv2, hs2, hq2 hv1]
     exact hsq1
-  · rw [base_e, ht3, ht2, hts1, hn1]
+  · rw [base_e, ht3, ht2]; omega
   · rw [base_e, hX3, stepBKK_now, hX2, stepBKK_now, hn1]
 
 /-- **The restart on a run.** `y` flushed at cycle `f` of `runBK` with its edge word present
@@ -364,7 +364,7 @@ theorem restart_runBK (hok : SReqB P sreq) (fl : Nat → Lane → Bool) (k : Nat
     (runBK P win usb sreq fl k (f + 3) X0).x.sq y ((runBK P win usb sreq fl k (f + 3) X0).x.e.sel y)
       = (runBK P win usb sreq fl k (f + 1) X0).x.nr y ∧
     (runBK P win usb sreq fl k (f + 3) X0).base.e.ts y
-      = (runBK P win usb sreq fl k f X0).x.e.now + 1 ∧
+      = (runBK P win usb sreq fl k f X0).x.e.now ∧
     (runBK P win usb sreq fl k (f + 3) X0).base.e.now
       = (runBK P win usb sreq fl k f X0).x.e.now + 3 :=
   restart_three P win usb sreq hok _ _ _ _ _ _ (runBK P win usb sreq fl k f X0)
@@ -374,6 +374,32 @@ theorem restart_runBK (hok : SReqB P sreq) (fl : Nat → Lane → Bool) (k : Nat
     (runBK_succ' P win usb sreq fl k (f + 2) X0)
     (wfBK_run P win usb sreq hok fl k f X0 hI (fun j hj => hF j (by omega)))
     (hF f (by omega)) (hF (f + 1) (by omega)) hfl hedge h1 h2
+
+
+/-- **The restart's release** (K4): after a flush of `y` at `f`, unflushed at `f + 1`, `f + 2`,
+`y`'s release at `f + 3` is `now f + 1` -- `ts` is the edge cycle and `reb` is still set (no
+writeback of `y` at `f + 1`, `f + 2`). -/
+theorem restart_rel_runBK (fl : Nat → Lane → Bool) (k : Nat → Lane → Nat) (X0 : EngBK) (f : Nat)
+    (y : Lane)
+    (hF0 : FlushOk P win usb sreq (fl (runBK P win usb sreq fl k f X0).x.e.now)
+      (runBK P win usb sreq fl k f X0))
+    (hfl : fl (runBK P win usb sreq fl k f X0).x.e.now y = true)
+    (h1 : fl (runBK P win usb sreq fl k (f + 1) X0).x.e.now y = false)
+    (h2 : fl (runBK P win usb sreq fl k (f + 2) X0).x.e.now y = false) :
+    (runBK P win usb sreq fl k (f + 3) X0).rel y = (runBK P win usb sreq fl k f X0).x.e.now + 1 := by
+  have e1 := runBK_succ' P win usb sreq fl k f X0
+  have e2 := runBK_succ' P win usb sreq fl k (f + 1) X0
+  have e3 := runBK_succ' P win usb sreq fl k (f + 2) X0
+  have nw1 := no_wb_after_flush P win usb sreq _ (k (runBK P win usb sreq fl k f X0).x.e.now)
+    (runBK P win usb sreq fl k f X0) y hF0 hfl
+  rw [← e1] at nw1
+  have nw2 := no_wb_after_flush2 P win usb sreq (fl (runBK P win usb sreq fl k f X0).x.e.now)
+    (fl (runBK P win usb sreq fl k (f + 1) X0).x.e.now) (k (runBK P win usb sreq fl k f X0).x.e.now)
+    (k (runBK P win usb sreq fl k (f + 1) X0).x.e.now) (runBK P win usb sreq fl k f X0) y hF0 hfl
+  rw [← e1, ← e2] at nw2
+  rw [show f + 3 = f + 2 + 1 from rfl, e3, rel_flat_stepBK P win usb sreq _ _ _ y h2 nw2,
+    show f + 2 = f + 1 + 1 from rfl, e2, rel_flat_stepBK P win usb sreq _ _ _ y h1 nw1, e1,
+    rel_flush_stepBK P win usb sreq _ _ _ y hfl]
 
 /-! ### Kill provenance: a killed capture for `y` needs a flush of `y` one or two cycles before
 

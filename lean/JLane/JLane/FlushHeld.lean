@@ -534,7 +534,7 @@ theorem ft_edge_at_release_armed (hok : SReqB P sreq) (hedge : ∀ t l, t + 1 �
     (runBA P win usb sreq isArm edge kt (j + 1) A0).X.x.sq l
       ((runBA P win usb sreq isArm edge kt (j + 1) A0).X.x.e.sel l)
       = (runBA P win usb sreq isArm edge kt (j + 1) A0).X.x.nr l ∧
-    (runBA P win usb sreq isArm edge kt (j + 1) A0).X.x.e.ts l =
+    (runBA P win usb sreq isArm edge kt (j + 1) A0).X.x.e.ts l + 1 =
       (runBA P win usb sreq isArm edge kt (j + 1) A0).X.x.e.now := by
   intro j
   obtain ⟨ha, hae, hho, -, -, hn⟩ :=
@@ -691,7 +691,7 @@ theorem ft_edge_at_release (hok : SReqB P sreq) (hedge : ∀ t l, t + 1 ≤ edge
     (runBA P win usb sreq isArm edge kt (j + 1) A0).X.x.sq l
       ((runBA P win usb sreq isArm edge kt (j + 1) A0).X.x.e.sel l)
       = (runBA P win usb sreq isArm edge kt (j + 1) A0).X.x.nr l ∧
-    (runBA P win usb sreq isArm edge kt (j + 1) A0).X.x.e.ts l =
+    (runBA P win usb sreq isArm edge kt (j + 1) A0).X.x.e.ts l + 1 =
       (runBA P win usb sreq isArm edge kt (j + 1) A0).X.x.e.now := by
   intro j Aj
   have hE := hedge A0.X.x.e.now l

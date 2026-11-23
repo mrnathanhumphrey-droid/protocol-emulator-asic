@@ -9,7 +9,10 @@ least `m` with `span_min(m) ≥ K + 1 + R_z` -- `RespSpan.wb_close_span`'s `hspa
 flushes (Wilson 11-21, span ruling):
 
 * `hspan` — any `m z` consecutive writebacks of `z`, **counted from a writeback of `z`**, advance
-  its release by at least `G z`, given they met their response bounds. The anchor is the one
+  its release (`EngBK.rel`, K4: one past `ts` after a rebase -- the certificate's gaps after an
+  ARM are `price - REBASE`) by at least `G z`, given they met their response bounds; a decided
+  lane is released by `rel` (`rel_le_now`, from the ghost invariant `reb_lt_runBK`: a set rebase
+  bit means `ts` is in the past, `h0reb` at the start). The anchor is the one
   change from `RespSpan`: there `x1` is any cycle; `wb_close_span` uses it only at a writeback,
   and on `runBK` a flush can move a timestamp down (a FALLTHROUGH ARM's deadline `D`, then its
   edge's `now + 1 < D`), so the premise is asked only where it is used;
@@ -90,6 +93,7 @@ spacing `σ` / `hsep` / `hmul` replaced by the span `hspan` (anchored at a write
 theorem wb_closeBK_span (fl : Nat → Lane → Bool) (k : Nat → Lane → Nat) (X0 : EngBK) (T S : Nat)
     (R m G : Lane → Nat)
     (h0 : X0.x.e.st = .idle) (h0ts : ∀ l, X0.x.e.now ≤ X0.x.e.ts l)
+    (h0reb : ∀ l, X0.reb l = true → X0.x.e.ts l < X0.x.e.now)
     (hwin : ∀ e w, win e = some w → P.live w = true ∧ e.ts w ≤ e.now)
     (hm1 : ∀ z, 1 ≤ m z)
     (hS : ∀ y c, P.live y = true → c + (R y + 1) + 2 ≤ T →
@@ -103,19 +107,19 @@ theorem wb_closeBK_span (fl : Nat → Lane → Bool) (k : Nat → Lane → Nat) 
       cntBK P win usb sreq fl k (IsWB z) n (runBK P win usb sreq fl k x1 X0) = m z →
       (∀ x, x1 ≤ x → x < x1 + n → IsWB z (runBK P win usb sreq fl k x X0).x.e →
         (runBK P win usb sreq fl k x X0).x.e.now
-          ≤ (runBK P win usb sreq fl k x X0).x.e.ts z + R z + 2) →
-      (runBK P win usb sreq fl k x1 X0).x.e.ts z + G z
-        ≤ (runBK P win usb sreq fl k (x1 + n) X0).x.e.ts z)
+          ≤ (runBK P win usb sreq fl k x X0).rel z + R z + 2) →
+      (runBK P win usb sreq fl k x1 X0).rel z + G z
+        ≤ (runBK P win usb sreq fl k (x1 + n) X0).rel z)
     (hrel : ∀ y, HrelR P win usb sreq fl k X0 y (R y + 1))
     (hG : ∀ y z, z ≠ y → R y + 1 + R z ≤ G z)
     (hK : ∀ y, 3 * (m L0 + m L1 + m L2 + m L3 + m L4 - m y) + S + 3 ≤ R y + 1) :
     ∀ t, t < T → ∀ y, P.live y = true → IsWB y (runBK P win usb sreq fl k t X0).x.e →
       (runBK P win usb sreq fl k t X0).x.e.now
-        ≤ (runBK P win usb sreq fl k t X0).x.e.ts y + R y + 2 := by
+        ≤ (runBK P win usb sreq fl k t X0).rel y + R y + 2 := by
   have key : ∀ n, ∀ t, t < n → t < T → ∀ y, P.live y = true →
       IsWB y (runBK P win usb sreq fl k t X0).x.e →
       (runBK P win usb sreq fl k t X0).x.e.now
-        ≤ (runBK P win usb sreq fl k t X0).x.e.ts y + R y + 2 := by
+        ≤ (runBK P win usb sreq fl k t X0).rel y + R y + 2 := by
     intro n
     induction n with
     | zero => intro t ht; exact absurd ht (Nat.not_lt_zero t)
@@ -126,7 +130,7 @@ theorem wb_closeBK_span (fl : Nat → Lane → Bool) (k : Nat → Lane → Nat) 
       · have IH : ∀ t', t' < t → ∀ z, P.live z = true →
             IsWB z (runBK P win usb sreq fl k t' X0).x.e →
             (runBK P win usb sreq fl k t' X0).x.e.now
-              ≤ (runBK P win usb sreq fl k t' X0).x.e.ts z + R z + 2 :=
+              ≤ (runBK P win usb sreq fl k t' X0).rel z + R z + 2 :=
           fun t' h' => ih t' (by omega) (by omega)
         have hw := wb_bound_winBK_fl P win usb sreq fl k X0 h0 h0ts y hy
           (m L0 + m L1 + m L2 + m L3 + m L4 - m y) S (R y + 1) (hK y) t hwb
@@ -178,7 +182,8 @@ theorem wb_closeBK_span (fl : Nat → Lane → Bool) (k : Nat → Lane → Nat) 
                   (fun x hx1 hx2 hxw => IH x (by omega) z hlz hxw)
                 rw [show c + i + 2 + (j - i - 2) = c + j by omega] at hsp
                 have hr := IH (c + i + 2) (by omega) z hlz hwbi
-                have hrdy := (hwin _ z hdj.2.1).2
+                have hrdy := rel_le_now _ z
+                  (reb_lt_runBK P win usb sreq fl k X0 z (h0reb z) (c + j)) (hwin _ z hdj.2.1).2
                 have hni := now_runBK P win usb sreq fl k (c + i + 2) X0
                 have hnj := now_runBK P win usb sreq fl k (c + j) X0
                 have hg := hG y z hzy
@@ -217,6 +222,7 @@ certificate's (`branch_budget._decisions`, `lane_cert.span_min`). -/
 theorem wb_closeBK_span_K11 (hedge : ∀ t l, t + 1 ≤ edge t l) (hA : ArmInvB A0)
     (h0 : A0.X.x.e.st = .idle)
     (h0ts : ∀ l, A0.X.x.e.now ≤ A0.X.x.e.ts l)
+    (h0reb : ∀ l, A0.X.reb l = true → A0.X.x.e.ts l < A0.X.x.e.now)
     (hwin : ∀ e w, win e = some w → P.live w = true ∧ e.ts w ≤ e.now)
     (hb : BPrimeWin win) (hws : ∀ y e, e.st = .idle → Ready P y e → win e ≠ none)
     (hK11 : ∀ n, K11At P win (runBA P win usb sreq isArm edge kt n A0).armed
@@ -225,7 +231,9 @@ theorem wb_closeBK_span_K11 (hedge : ∀ t l, t + 1 ≤ edge t l) (hA : ArmInvB 
     (hgap : ∀ z x, IsWB z (runBK P (winS P win usb sreq isArm edge kt A0) usb sreq
         (flS P win usb sreq isArm edge kt A0) kt x A0.X).x.e →
       (runBA P win usb sreq isArm edge kt x A0).arms P isArm z = false →
-      R z + 3 ≤ P.dly z + P.ext (runBK P (winS P win usb sreq isArm edge kt A0) usb sreq
+      R z + 3 + (if (runBK P (winS P win usb sreq isArm edge kt A0) usb sreq
+          (flS P win usb sreq isArm edge kt A0) kt x A0.X).reb z = true then 1 else 0)
+        ≤ P.dly z + P.ext (runBK P (winS P win usb sreq isArm edge kt A0) usb sreq
           (flS P win usb sreq isArm edge kt A0) kt x A0.X).x.e.now z)
     (hspan : ∀ z x1 n, IsWB z (runBK P (winS P win usb sreq isArm edge kt A0) usb sreq
         (flS P win usb sreq isArm edge kt A0) kt x1 A0.X).x.e →
@@ -237,11 +245,11 @@ theorem wb_closeBK_span_K11 (hedge : ∀ t l, t + 1 ≤ edge t l) (hA : ArmInvB 
         (runBK P (winS P win usb sreq isArm edge kt A0) usb sreq
             (flS P win usb sreq isArm edge kt A0) kt x A0.X).x.e.now
           ≤ (runBK P (winS P win usb sreq isArm edge kt A0) usb sreq
-            (flS P win usb sreq isArm edge kt A0) kt x A0.X).x.e.ts z + R z + 2) →
+            (flS P win usb sreq isArm edge kt A0) kt x A0.X).rel z + R z + 2) →
       (runBK P (winS P win usb sreq isArm edge kt A0) usb sreq
-          (flS P win usb sreq isArm edge kt A0) kt x1 A0.X).x.e.ts z + G z
+          (flS P win usb sreq isArm edge kt A0) kt x1 A0.X).rel z + G z
         ≤ (runBK P (winS P win usb sreq isArm edge kt A0) usb sreq
-          (flS P win usb sreq isArm edge kt A0) kt (x1 + n) A0.X).x.e.ts z)
+          (flS P win usb sreq isArm edge kt A0) kt (x1 + n) A0.X).rel z)
     (hG : ∀ y z, z ≠ y → R y + 1 + R z ≤ G z)
     (hK : ∀ y, 3 * (m L0 + m L1 + m L2 + m L3 + m L4 - m y) + 0 + 3 ≤ R y + 1) :
     ∀ t, t < T → ∀ y, P.live y = true →
@@ -250,9 +258,9 @@ theorem wb_closeBK_span_K11 (hedge : ∀ t l, t + 1 ≤ edge t l) (hA : ArmInvB 
       (runBK P (winS P win usb sreq isArm edge kt A0) usb sreq
           (flS P win usb sreq isArm edge kt A0) kt t A0.X).x.e.now
         ≤ (runBK P (winS P win usb sreq isArm edge kt A0) usb sreq
-          (flS P win usb sreq isArm edge kt A0) kt t A0.X).x.e.ts y + R y + 2 :=
+          (flS P win usb sreq isArm edge kt A0) kt t A0.X).rel y + R y + 2 :=
   wb_closeBK_span P (winS P win usb sreq isArm edge kt A0) usb sreq
-    (flS P win usb sreq isArm edge kt A0) kt A0.X T 0 R m G h0 h0ts
+    (flS P win usb sreq isArm edge kt A0) kt A0.X T 0 R m G h0 h0ts h0reb
     (fun e w h => hwin e w (winA_some win _ e w h)) hm1
     (fun y c _ _ hrd hd hf => Nat.le_of_eq
       (noDec_zero_K11 P win usb sreq isArm edge kt A0 hb hws hK11 y c (R y + 1) hrd hd hf))

@@ -64,14 +64,18 @@ def stepBKKR (P : Program) (win : Engine → Option Lane) (usb : Option Lane)
           else if (X.kc && decide (l = b.e.pl) && capTo b l s) = true then false
           else y.e.actv l s
         sel := fun l => if fl l = true then keepSlot b l (k l) else y.e.sel l
-        ts := fun l => if fl l = true then b.e.now + 1 else y.e.ts l }
+        ts := fun l => if fl l = true then b.e.now else y.e.ts l }
       buf := fun l => if fl l = true then false
         else if (X.kc && decide (l = b.e.pl)) = true then false else y.buf l
       sq := fun l s => if fl l = true ∧ s = keepSlot b l (k l) then y.nr l else y.sq l s }
     pkill := if X.x.e.pst = .cap then false
-      else X.pkill || (fl X.x.e.pl && (decide (X.x.e.pst = .req) || decide (X.x.e.pst = .wait))) }
+      else X.pkill || (fl X.x.e.pl && (decide (X.x.e.pst = .req) || decide (X.x.e.pst = .wait)))
+    reb := fun l => if fl l = true then true
+      else if X.x.e.st = .wb ∧ l = X.x.e.cur ∧ 0 < P.dly l + P.ext X.x.e.now l then false
+      else X.reb l }
 
-theorem EngBK.ext' (a b : EngBK) (hx : a.x = b.x) (hk : a.pkill = b.pkill) : a = b := by
+theorem EngBK.ext' (a b : EngBK) (hx : a.x = b.x) (hk : a.pkill = b.pkill) (hr : a.reb = b.reb) :
+    a = b := by
   cases a; cases b; simp_all
 
 section
@@ -162,6 +166,7 @@ theorem simK_step (ns nw fl : Lane → Bool) (k : Lane → Nat) (X : EngBK) (hW 
     · rfl
     · rfl
     · rfl
+  · rfl
   · rfl
 
 end

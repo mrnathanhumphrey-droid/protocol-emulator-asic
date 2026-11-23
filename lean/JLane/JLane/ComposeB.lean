@@ -293,10 +293,10 @@ theorem hR_stretch (fl : Nat → Lane → Bool) (k : Nat → Lane → Nat) (X0 :
     (hy : P.live y = true) (M S K : Nat) (hK : 3 * M + S + 3 ≤ K) (s T : Nat)
     (hT : TrajY P win usb sreq y (fun n => (runBK P win usb sreq fl k (s + n) X0).base) T)
     (hlastS : ∀ j, s ≤ j + 2 → j < s + T → fl (runBK P win usb sreq fl k j X0).x.e.now y = false)
-    (hstart : X0.x.e.now + s ≤ (runBK P win usb sreq fl k s X0).x.e.ts y + 2)
+    (hstart : X0.x.e.now + s ≤ (runBK P win usb sreq fl k s X0).rel y + 2)
     (hfree : ∀ t, s ≤ t → t < s + T → IsWB y (runBK P win usb sreq fl k t X0).x.e →
       ∀ w, w + 2 < t → IsWB y (runBK P win usb sreq fl k w X0).x.e →
-      (runBK P win usb sreq fl k w X0).x.e.now < (runBK P win usb sreq fl k t X0).x.e.ts y)
+      (runBK P win usb sreq fl k w X0).x.e.now < (runBK P win usb sreq fl k t X0).rel y)
     (hM : ∀ c, c + K + 2 ≤ s + T →
       cntBK P win usb sreq fl k (fun e => decOther win y e = true) K
         (runBK P win usb sreq fl k c X0) ≤ M)
@@ -309,11 +309,12 @@ theorem hR_stretch (fl : Nat → Lane → Bool) (k : Nat → Lane → Nat) (X0 :
         (runBK P win usb sreq fl k c X0) ≤ S) :
     ∀ x, x < T → IsRet P y ((fun n => (runBK P win usb sreq fl k (s + n) X0).base) x).e →
       ((fun n => (runBK P win usb sreq fl k (s + n) X0).base) x).e.now ≤
-        ((fun n => (runBK P win usb sreq fl k (s + n) X0).base) x).e.ts y + (K - 1) + 2 := by
+        ((fun n => (runBK P win usb sreq fl k (s + n) X0).base) x).e.ts y
+          + (K - 1 + (if (runBK P win usb sreq fl k (s + x) X0).reb y = true then 1 else 0)) + 2 := by
   intro x hx hret
   simp only [base_e] at hret ⊢
-  have hm := ts_monoT P win usb sreq y _ T hT 0 x (by omega)
-  simp only [base_e, Nat.add_zero, Nat.zero_add] at hm
+  have hm := rel_mono_winBK P win usb sreq fl k y X0 s x
+    (fun j hj => hlastS (s + j) (by omega) (by omega))
   have hb := wb_bound_winBK_fl P win usb sreq fl k X0 h0 h0ts y hy M S K hK (s + x)
     (isWB_of_ret P y _ hret)
     (fun n hn hle => hlastS n (by
@@ -321,6 +322,7 @@ theorem hR_stretch (fl : Nat → Lane → Bool) (k : Nat → Lane → Nat) (X0 :
       omega) (by omega))
     (fun w hw hwb => hfree (s + x) (by omega) (by omega) (isWB_of_ret P y _ hret) w hw hwb)
     (fun c hc => hM c (by omega)) (fun c hc hw hd hf => hS c (by omega) hw hd hf)
+  unfold EngBK.rel at hb
   omega
 
 /-- **The restart's release meets `hstart`**: after a flush at `f`, the stretch from `f + 3`
@@ -334,9 +336,8 @@ theorem hstart_after_flush (hok : SReqB P sreq) (fl : Nat → Lane → Bool) (k 
       (k (runBK P win usb sreq fl k f X0).x.e.now y) = true)
     (h1 : fl (runBK P win usb sreq fl k (f + 1) X0).x.e.now y = false)
     (h2 : fl (runBK P win usb sreq fl k (f + 2) X0).x.e.now y = false) :
-    X0.x.e.now + (f + 3) ≤ (runBK P win usb sreq fl k (f + 3) X0).x.e.ts y + 2 := by
-  obtain ⟨-, -, -, hts, -⟩ := restart_runBK P win usb sreq hok fl k X0 hI f y hF hfl hedge h1 h2
-  rw [base_e] at hts
+    X0.x.e.now + (f + 3) ≤ (runBK P win usb sreq fl k (f + 3) X0).rel y + 2 := by
+  have hr := restart_rel_runBK P win usb sreq fl k X0 f y (hF f (by omega)) hfl h1 h2
   have hn := now_runBK P win usb sreq fl k f X0
   omega
 
@@ -958,7 +959,7 @@ theorem ready_ft_edge_T (hok : SReqB P sreq) (fl : Nat → Lane → Bool) (k : N
     (runBK P win usb sreq fl k (s + T + 1) X0).x.sq y
       ((runBK P win usb sreq fl k (s + T + 1) X0).x.e.sel y)
       = (runBK P win usb sreq fl k (s + T + 1) X0).x.nr y ∧
-    (runBK P win usb sreq fl k (s + T + 1) X0).x.e.ts y
+    (runBK P win usb sreq fl k (s + T + 1) X0).x.e.ts y + 1
       = (runBK P win usb sreq fl k (s + T + 1) X0).x.e.now := by
   obtain ⟨j, h1, h2, hsl, hmin, hcap, hpk⟩ := slot_cap_index P win usb sreq hok fl k X0 hI y s T
     τ hτ hT (fun j hj => hF j (by omega)) hnf old a W C hn hq hold hC hW

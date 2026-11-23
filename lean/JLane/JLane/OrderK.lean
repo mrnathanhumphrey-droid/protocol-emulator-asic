@@ -75,7 +75,7 @@ next retirement index after the cycle -- the kept word is the lane's oldest unre
 def KeepOk (P : Program) (fl : Lane → Bool) (k : Lane → Nat) (X : EngBK) : Prop :=
   ∀ l, fl l = true → k l = nrB P X.x l
 
-theorem ordBK_init (x : EngB) (hO : OrdB x) : OrdBK ⟨x, false⟩ :=
+theorem ordBK_init (x : EngB) (hO : OrdB x) : OrdBK { x := x, pkill := false } :=
   ⟨hO.o1, hO.o2, hO.o3, fun _ => hO.o4⟩
 
 theorem ordBK_ordB (X : EngBK) (hO : OrdBK X) (hk : X.pkill = false) : OrdB X.x :=
@@ -402,7 +402,7 @@ theorem ready_ft_edge_K (hok : SReqB P sreq) (fl : Nat → Lane → Bool) (k : N
     (runBK P win usb sreq fl k (f + 1) X0).x.sq y
       ((runBK P win usb sreq fl k (f + 1) X0).x.e.sel y)
       = (runBK P win usb sreq fl k (f + 1) X0).x.nr y ∧
-    (runBK P win usb sreq fl k (f + 1) X0).x.e.ts y
+    (runBK P win usb sreq fl k (f + 1) X0).x.e.ts y + 1
       = (runBK P win usb sreq fl k (f + 1) X0).x.e.now := by
   have hOf := ordBK_run P win usb sreq hok fl k f X0 hI hO hF
   have hE := hasEdge_of_head _ hOf y _ hv hkeep
@@ -568,7 +568,7 @@ theorem ready_ft_edge_armed (hok : SReqB P sreq) (hedge : ∀ t l, t + 1 ≤ edg
       = (runBK P (winS P win usb sreq isArm edge kt A0) usb sreq
         (flS P win usb sreq isArm edge kt A0) kt (f + 1) A0.X).x.nr y ∧
     (runBK P (winS P win usb sreq isArm edge kt A0) usb sreq
-        (flS P win usb sreq isArm edge kt A0) kt (f + 1) A0.X).x.e.ts y
+        (flS P win usb sreq isArm edge kt A0) kt (f + 1) A0.X).x.e.ts y + 1
       = (runBK P (winS P win usb sreq isArm edge kt A0) usb sreq
         (flS P win usb sreq isArm edge kt A0) kt (f + 1) A0.X).x.e.now :=
   (ready_ft_edge_K P (winS P win usb sreq isArm edge kt A0) usb sreq hok

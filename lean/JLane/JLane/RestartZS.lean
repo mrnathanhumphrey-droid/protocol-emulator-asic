@@ -11,10 +11,14 @@ Until now they were gate-checked only (lane-cert check 20, `lane_cert.restart_ma
 run from those margins:
 
 * `start_rel_runBK` -- on the stretch from `f + 3` after `y`'s last flush `f` (edge word present),
-  `y`'s release is never below `now₀ - 2`: the flush released `y` at `now_f + 1` and the stretch
-  starts at `now_f + 3` (`restart_runBK`), and releases never fall along a trajectory (`ts_monoT`);
+  `y`'s release (`EngBK.rel`) is never below `now₀ - 2`: the flush released `y` at `now_f + 1`
+  (K4: `ts` = the edge cycle `now_f`, the rebase bit set; `restart_rel_runBK`) and the stretch
+  starts at `now_f + 3` (`restart_runBK`), and releases never fall on an unflushed run
+  (`rel_mono_winBK`);
 * `hZS0_runBK` / `hHS0_runBK` -- the two start conditions, from check 20's margins at the first
-  retirement: `D* + B ≤ Z w₀ + 1` and `HEAD_SLACK + B ≤ gp w₀ + L w₀ + 1`.
+  retirement: `D* + B ≤ Z w₀ + 1` and `HEAD_SLACK + B ≤ gp w₀ + L w₀ + 1`, each one more when the
+  first retirement's `ts` is a rebase (`CertT` is `ts`-anchored, `lane_cert` release-anchored:
+  there the certificate's `Z`, `L` are `lane_cert`'s plus one).
 -/
 namespace JLane
 
@@ -22,8 +26,9 @@ section
 variable (P : Program) (win : Engine → Option Lane) (usb : Option Lane)
   (sreq : EngB → Option Lane)
 
-/-- **The release at the restart**: on `y`'s stretch from `f + 3`, its release is at least the
-stretch's start less 2 (released at `now_f + 1`, the stretch starting at `now_f + 3`). -/
+/-- **The release at the restart**: on `y`'s stretch from `f + 3`, its release (`EngBK.rel`)
+is at least the stretch's start less 2 (released at `now_f + 1`, the stretch starting at
+`now_f + 3`). -/
 theorem start_rel_runBK (hok : SReqB P sreq) (fl : Nat → Lane → Bool) (k : Nat → Lane → Nat)
     (X0 : EngBK) (hI : WfBK X0) (f t : Nat) (y : Lane) (hft : f + 3 ≤ t)
     (hF : ∀ j, j < t → FlushOk P win usb sreq (fl (runBK P win usb sreq fl k j X0).x.e.now)
@@ -34,17 +39,15 @@ theorem start_rel_runBK (hok : SReqB P sreq) (fl : Nat → Lane → Bool) (k : N
     (hlast : ∀ j, f < j → j < t → fl (runBK P win usb sreq fl k j X0).x.e.now y = false) :
     ∀ w, w ≤ t - (f + 3) →
       (runBK P win usb sreq fl k (f + 3) X0).base.e.now
-        ≤ (runBK P win usb sreq fl k (f + 3 + w) X0).base.e.ts y + 2 := by
+        ≤ (runBK P win usb sreq fl k (f + 3 + w) X0).rel y + 2 := by
   intro w hw
-  obtain ⟨hT, -, -, -⟩ := stretch_after_flush P win usb sreq hok fl k X0 hI f t y hft hF hfl
-    hedge hlast
-  obtain ⟨-, -, -, hts, hnow⟩ := restart_runBK P win usb sreq hok fl k X0 hI f y
+  obtain ⟨-, -, -, -, hnow⟩ := restart_runBK P win usb sreq hok fl k X0 hI f y
     (fun j hj => hF j (by omega)) hfl hedge (hlast (f + 1) (by omega) (by omega))
     (hlast (f + 2) (by omega) (by omega))
-  have hm := ts_monoT P win usb sreq y
-    (fun n => (runBK P win usb sreq fl k (f + 3 + n) X0).base) (t - (f + 3)) hT 0 w (by omega)
-  simp only [Nat.add_zero, Nat.zero_add] at hm
-  rw [hts] at hm
+  have hr := restart_rel_runBK P win usb sreq fl k X0 f y (hF f (by omega)) hfl
+    (hlast (f + 1) (by omega) (by omega)) (hlast (f + 2) (by omega) (by omega))
+  have hm := rel_mono_winBK P win usb sreq fl k y X0 (f + 3) w
+    (fun j hj => hlast (f + 3 + j) (by omega) (by omega))
   rw [hnow]
   omega
 
@@ -63,7 +66,7 @@ theorem hZS0_runBK (hok : SReqB P sreq) (fl : Nat → Lane → Bool) (k : Nat �
       IsRet P y ((fun n => (runBK P win usb sreq fl k (f + 3 + n) X0).base) w0).e →
       cntT (fun n => (runBK P win usb sreq fl k (f + 3 + n) X0).base)
         (fun z => IsRet P y z.e) w0 = 0 →
-      DSTAR + B ≤ Z w0 + 1) :
+      DSTAR + B + (if (runBK P win usb sreq fl k (f + 3 + w0) X0).reb y = true then 1 else 0) ≤ Z w0 + 1) :
     ∀ w0, w0 < t - (f + 3) →
       IsRet P y ((fun n => (runBK P win usb sreq fl k (f + 3 + n) X0).base) w0).e →
       cntT (fun n => (runBK P win usb sreq fl k (f + 3 + n) X0).base)
@@ -78,6 +81,8 @@ theorem hZS0_runBK (hok : SReqB P sreq) (fl : Nat → Lane → Bool) (k : Nat �
   show (runBK P win usb sreq fl k (f + 3 + 0) X0).base.e.now + DSTAR + B
     ≤ (runBK P win usb sreq fl k (f + 3 + w0) X0).base.e.ts y + Z w0 + 3
   rw [Nat.add_zero]
+  unfold EngBK.rel at hr
+  simp only [base_e] at hr ⊢
   omega
 
 /-- **`hHS0` on the flush run**, from check 20's margin `HEAD_SLACK + B ≤ gp w₀ + L w₀ + 1` at
@@ -95,7 +100,7 @@ theorem hHS0_runBK (hok : SReqB P sreq) (fl : Nat → Lane → Bool) (k : Nat �
       IsRet P y ((fun n => (runBK P win usb sreq fl k (f + 3 + n) X0).base) w0).e →
       cntT (fun n => (runBK P win usb sreq fl k (f + 3 + n) X0).base)
         (fun z => IsRet P y z.e) w0 = 0 →
-      HEAD_SLACK + B
+      HEAD_SLACK + B + (if (runBK P win usb sreq fl k (f + 3 + w0) X0).reb y = true then 1 else 0)
         ≤ gpT P y (fun n => (runBK P win usb sreq fl k (f + 3 + n) X0).base) w0 + L w0 + 1) :
     ∀ w0, w0 < t - (f + 3) →
       IsRet P y ((fun n => (runBK P win usb sreq fl k (f + 3 + n) X0).base) w0).e →
@@ -113,6 +118,8 @@ theorem hHS0_runBK (hok : SReqB P sreq) (fl : Nat → Lane → Bool) (k : Nat �
     ≤ (runBK P win usb sreq fl k (f + 3 + w0) X0).base.e.ts y
       + gpT P y (fun n => (runBK P win usb sreq fl k (f + 3 + n) X0).base) w0 + L w0 + 3
   rw [Nat.add_zero]
+  unfold EngBK.rel at hr
+  simp only [base_e] at hr ⊢
   omega
 
 end

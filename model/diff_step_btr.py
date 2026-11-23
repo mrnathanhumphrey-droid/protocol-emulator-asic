@@ -12,6 +12,11 @@ timeout pick; planted old deadline-only timeout caught (516/1000), planted pick 
 condition caught (62/1000).
 Re-signed 11-22 for option (a) (a timeout's end keeps ts; agent 1's replay): 1000 cases, 0
 mismatches; planted now + 1 at a timeout caught (33/1000, every timeout pick).
+Re-signed 11-23 for K4 (a flush writes ts = the edge cycle; the ghost reb -- set at a flush,
+cleared at the lane's writeback only when dly + ext > 0 -- rendered; dly 0 on ~15% of lanes):
+1000 cases, 0 mismatches (53 with a flush, 23 hits, 3 zero-delay writebacks of a rebased lane);
+planted ts = now + 1 at a flush caught (23/1000, every hit), reb cleared at every writeback caught
+(3/1000, every zero-delay case), reb never set caught (35/1000).
 Usage: python model/diff_step_btr.py [N] [SEED]   (defaults 1000, 7); rc 0 = no mismatch.
 Needs the Lean library built (lake build). Memory: ~1.7 GB peak at N = 1000.
 """
@@ -50,6 +55,7 @@ def render(A):
         str(x["psq"]),
         ",".join(str(x["nr"][l]) for l in L),
         b(A["X"]["pkill"]),
+        ",".join(b(v) for v in A["X"].get("reb", [False] * K)),
         ",".join(b(A["armed"][l]) for l in L),
         ",".join(str(A["armE"][l]) for l in L),
         b(x.get("usb_on", False)),
@@ -79,9 +85,12 @@ def rand_case(rng):
         "nr": [rng.randint(0, 9) for _ in range(K)],
         "usb_on": rb(),
     }
-    A = {"X": {"x": x, "pkill": rb(0.3)}, "armed": [rb(0.4) for _ in range(K)],
+    A = {"X": {"x": x, "pkill": rb(0.3), "reb": [rb(0.3) for _ in range(K)]},
+         "armed": [rb(0.4) for _ in range(K)],
          "armE": [rng.randint(0, 80) for _ in range(K)]}
-    P = {"live": [rb(0.8) for _ in range(K)], "dly": [rng.randint(1, 40) for _ in range(K)],
+    # dly 0 on some lanes: a zero-delay writeback leaves K4's reb set (FlushKill.stepBKK)
+    P = {"live": [rb(0.8) for _ in range(K)],
+         "dly": [0 if rb(0.15) else rng.randint(1, 40) for _ in range(K)],
          "pick": False, "usb": None}
     ext = {"win": None if rb(0.3) else rng.randrange(K),
            "sreq": None if rb(0.5) else rng.randrange(K),
@@ -125,8 +134,9 @@ def lean_case(i, A, P, ext):
           "psq := %d, nr := tn1 %s }"
           % (e, lb(x["buf"]), lb(x["bnpf"]), "true" if x["pb"] else "false",
              ", ".join(ln(r) for r in x["sq"]), ln(x["bsq"]), x["psq"], ln(x["nr"])))
-    a = ("{ X := { x := %s, pkill := %s }, armed := tb1 %s, armE := tn1 %s }"
-         % (eb, "true" if A["X"]["pkill"] else "false", lb(A["armed"]), ln(A["armE"])))
+    a = ("{ X := { x := %s, pkill := %s, reb := tb1 %s }, armed := tb1 %s, armE := tn1 %s }"
+         % (eb, "true" if A["X"]["pkill"] else "false", lb(A["X"]["reb"]), lb(A["armed"]),
+            ln(A["armE"])))
     p = ("{ live := tb1 %s, dly := tn1 %s, ext := fun _ _ => %d, ret := fun _ _ => %s, "
          "fnpf := fun _ => %s }"
          % (lb(P["live"]), ln(P["dly"]), ext["xd"], "true" if ext["ret"] else "false",
@@ -179,6 +189,7 @@ def renderA (A : EngBA) : String :=
     toString x.psq,
     csv (lanes.map fun l => toString (x.nr l)),
     rb A.X.pkill,
+    csv (lanes.map fun l => rb (A.X.reb l)),
     csv (lanes.map fun l => rb (A.armed l)),
     csv (lanes.map fun l => toString (A.armE l))]
 

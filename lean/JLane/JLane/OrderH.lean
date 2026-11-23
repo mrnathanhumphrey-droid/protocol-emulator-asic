@@ -204,7 +204,7 @@ theorem ready_ft_edge_head (hok : SReqB P sreq) (hedge : ∀ t l, t + 1 ≤ edge
       = (runBK P (winS P win usb sreq isArm edge kt A0) usb sreq
         (flS P win usb sreq isArm edge kt A0) kt (f + 1) A0.X).x.nr y ∧
     (runBK P (winS P win usb sreq isArm edge kt A0) usb sreq
-        (flS P win usb sreq isArm edge kt A0) kt (f + 1) A0.X).x.e.ts y
+        (flS P win usb sreq isArm edge kt A0) kt (f + 1) A0.X).x.e.ts y + 1
       = (runBK P (winS P win usb sreq isArm edge kt A0) usb sreq
         (flS P win usb sreq isArm edge kt A0) kt (f + 1) A0.X).x.e.now := by
   have hkeep : kt (runBK P (winS P win usb sreq isArm edge kt A0) usb sreq

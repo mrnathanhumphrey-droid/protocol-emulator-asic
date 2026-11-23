@@ -47,9 +47,84 @@ theorem stepBKK_now (fl : Lane → Bool) (k : Lane → Nat) (X : EngBK) :
 /-- An unflushed lane's timestamp moves as `step` moves it. -/
 theorem stepBKK_ts_y (fl : Lane → Bool) (k : Lane → Nat) (X : EngBK) (y : Lane)
     (h : fl y = false) : (stepBKK P win usb sreq fl k X).x.e.ts y = tsNext P X.x.e y := by
-  show (if fl y = true then X.base.e.now + 1 else (stepB P win usb sreq X.base).e.ts y) = _
+  show (if fl y = true then X.base.e.now else (stepB P win usb sreq X.base).e.ts y) = _
   rw [if_neg (by simp [h]), stepB_e_ts, base_e]
   rfl
+
+/-- `reb y` on an unflushed cycle: cleared at `y`'s writeback when it moves `ts` (K4); a
+writeback that adds no delay leaves the release where the rebase put it. -/
+theorem stepBKK_reb_y (fl : Lane → Bool) (k : Lane → Nat) (X : EngBK) (y : Lane)
+    (h : fl y = false) : (stepBKK P win usb sreq fl k X).reb y
+      = if X.x.e.st = .wb ∧ y = X.x.e.cur ∧ 0 < P.dly y + P.ext X.x.e.now y then false
+        else X.reb y := by
+  show (if fl y = true then true else _) = _
+  rw [if_neg (by simp [h])]
+
+theorem EngBK.ts_le_rel (X : EngBK) (l : Lane) : X.x.e.ts l ≤ X.rel l := by
+  unfold EngBK.rel; omega
+
+theorem rbit_le (b : Bool) : (if b = true then 1 else 0) ≤ 1 := by cases b <;> simp
+
+/-- A flush of `y` releases it the cycle after (K4: `ts` = the edge cycle, `reb` set). -/
+theorem rel_flush_stepBK (fl : Lane → Bool) (k : Lane → Nat) (X : EngBK) (y : Lane)
+    (h : fl y = true) : (stepBKK P win usb sreq fl k X).rel y = X.x.e.now + 1 := by
+  unfold EngBK.rel
+  show (if fl y = true then X.base.e.now else _)
+      + (if (if fl y = true then true else _) = true then 1 else 0) = _
+  rw [if_pos h, if_pos h, base_e]
+  all_goals rfl
+
+/-- An unflushed lane's release does not go down. -/
+theorem rel_step_leBK (fl : Lane → Bool) (k : Lane → Nat) (X : EngBK) (y : Lane)
+    (h : fl y = false) : X.rel y ≤ (stepBKK P win usb sreq fl k X).rel y := by
+  have hb := rbit_le (X.reb y)
+  unfold EngBK.rel
+  rw [stepBKK_ts_y P win usb sreq fl k X y h, stepBKK_reb_y P win usb sreq fl k X y h]
+  unfold tsNext
+  by_cases hw : X.x.e.st = .wb ∧ y = X.x.e.cur
+  · rw [if_pos hw]
+    by_cases hp : 0 < P.dly y + P.ext X.x.e.now y
+    · have hc : X.x.e.st = .wb ∧ y = X.x.e.cur ∧ 0 < P.dly y + P.ext X.x.e.now y := ⟨hw.1, hw.2, hp⟩
+      rw [if_pos hc]
+      simp only [Bool.false_eq_true, ↓reduceIte]
+      omega
+    · have hc : ¬(X.x.e.st = .wb ∧ y = X.x.e.cur ∧ 0 < P.dly y + P.ext X.x.e.now y) := fun h' => hp h'.2.2
+      rw [if_neg hc]
+      omega
+  · have hc : ¬(X.x.e.st = .wb ∧ y = X.x.e.cur ∧ 0 < P.dly y + P.ext X.x.e.now y) := fun h' => hw ⟨h'.1, h'.2.1⟩
+    rw [if_neg hw, if_neg hc]
+    all_goals omega
+
+/-- At an unflushed writeback of `y` the release moves by the word's gap, less the rebase's
+cycle when `reb` was set (`lane_cert`'s `price - REBASE`). -/
+theorem rel_wb_stepBK (fl : Lane → Bool) (k : Lane → Nat) (X : EngBK) (y : Lane)
+    (h : fl y = false) (hw : X.x.e.st = .wb ∧ y = X.x.e.cur) :
+    X.rel y + (P.dly y + P.ext X.x.e.now y)
+      ≤ (stepBKK P win usb sreq fl k X).rel y + (if X.reb y = true then 1 else 0) := by
+  unfold EngBK.rel
+  rw [stepBKK_ts_y P win usb sreq fl k X y h, stepBKK_reb_y P win usb sreq fl k X y h]
+  unfold tsNext
+  rw [if_pos hw]
+  by_cases hp : 0 < P.dly y + P.ext X.x.e.now y
+  · have hc : X.x.e.st = .wb ∧ y = X.x.e.cur ∧ 0 < P.dly y + P.ext X.x.e.now y := ⟨hw.1, hw.2, hp⟩
+    rw [if_pos hc]
+    simp only [Bool.false_eq_true, ↓reduceIte]
+    omega
+  · have hc : ¬(X.x.e.st = .wb ∧ y = X.x.e.cur ∧ 0 < P.dly y + P.ext X.x.e.now y) := fun h' => hp h'.2.2
+    rw [if_neg hc]
+    omega
+
+/-- An unflushed cycle that is not `y`'s writeback leaves `y`'s release alone. -/
+theorem rel_flat_stepBK (fl : Lane → Bool) (k : Lane → Nat) (X : EngBK) (y : Lane)
+    (h : fl y = false) (hw : ¬(X.x.e.st = .wb ∧ X.x.e.cur = y)) :
+    (stepBKK P win usb sreq fl k X).rel y = X.rel y := by
+  unfold EngBK.rel
+  rw [stepBKK_ts_y P win usb sreq fl k X y h, stepBKK_reb_y P win usb sreq fl k X y h]
+  unfold tsNext
+  have h1 : ¬(X.x.e.st = .wb ∧ y = X.x.e.cur) := fun h' => hw ⟨h'.1, h'.2.symm⟩
+  have h2 : ¬(X.x.e.st = .wb ∧ y = X.x.e.cur ∧ 0 < P.dly y + P.ext X.x.e.now y) :=
+    fun h' => hw ⟨h'.1, h'.2.1.symm⟩
+  rw [if_neg h1, if_neg h2]
 
 /-! ### Runs -/
 
@@ -308,7 +383,8 @@ theorem wb_bound_winBK (fl : Nat → Lane → Bool) (k : Nat → Lane → Nat)
 
 /-! ### Part A2: a lane flushed at its own edges
 
-A FALLTHROUGH edge flushes its own lane: `ts` jumps to the cycle after the edge (a new release),
+A FALLTHROUGH edge flushes its own lane: `ts` jumps to the edge cycle and the lane is released the
+cycle after (K4: `EngBK.rel`, `ts + 1` while the rebase bit is set; the bound is anchored there),
 possibly below the timeout release it had. The window argument only needs `y` unflushed from its
 current release to its writeback -- a flushed lane is armed (`ArmFTClose.invF_run3T`), and a
 released lane is not armed before it is dispatched -- and every timestamp at or after the run's
@@ -334,7 +410,7 @@ theorem ts_ge_startBK (fl : Nat → Lane → Bool) (k : Nat → Lane → Nat) (X
       exact Nat.le_trans ih (ts_step_leBK P win usb sreq _ _ _ l hf)
     | true =>
       show X0.x.e.now ≤ (if fl (runBK P win usb sreq fl k n X0).x.e.now l = true
-        then (runBK P win usb sreq fl k n X0).base.e.now + 1
+        then (runBK P win usb sreq fl k n X0).base.e.now
         else (stepB P win usb sreq (runBK P win usb sreq fl k n X0).base).e.ts l)
       rw [if_pos hf, base_e]
       omega
@@ -348,6 +424,69 @@ theorem ts_mono_winBK (fl : Nat → Lane → Bool) (k : Nat → Lane → Nat) (y
     have ih := ts_mono_winBK fl k y X m j (fun s hs => hf s (by omega))
     rw [← Nat.add_assoc, runBK_succ']
     exact Nat.le_trans ih (ts_step_leBK P win usb sreq _ _ _ y (hf j (by omega)))
+
+/-- Over `j` cycles from `m` with `y` unflushed in each, `y`'s release does not go down. -/
+theorem rel_mono_winBK (fl : Nat → Lane → Bool) (k : Nat → Lane → Nat) (y : Lane) (X : EngBK)
+    (m : Nat) : ∀ j, (∀ s, s < j → fl (runBK P win usb sreq fl k (m + s) X).x.e.now y = false) →
+      (runBK P win usb sreq fl k m X).rel y ≤ (runBK P win usb sreq fl k (m + j) X).rel y
+  | 0, _ => Nat.le_refl _
+  | j + 1, hf => by
+    have ih := rel_mono_winBK fl k y X m j (fun s hs => hf s (by omega))
+    rw [← Nat.add_assoc, runBK_succ']
+    exact Nat.le_trans ih (rel_step_leBK P win usb sreq _ _ _ y (hf j (by omega)))
+
+/-- The ghost invariant: while the rebase bit is set, `ts` (the edge cycle) is in the past. -/
+theorem reb_lt_stepBK (fl : Lane → Bool) (k : Lane → Nat) (X : EngBK) (y : Lane)
+    (h : X.reb y = true → X.x.e.ts y < X.x.e.now) :
+    (stepBKK P win usb sreq fl k X).reb y = true →
+      (stepBKK P win usb sreq fl k X).x.e.ts y < (stepBKK P win usb sreq fl k X).x.e.now := by
+  intro hr
+  rw [stepBKK_now]
+  cases hf : fl y with
+  | true =>
+    show (if fl y = true then X.base.e.now else _) < _
+    rw [if_pos hf, base_e]
+    omega
+  | false =>
+    rw [stepBKK_reb_y P win usb sreq fl k X y hf] at hr
+    rw [stepBKK_ts_y P win usb sreq fl k X y hf]
+    unfold tsNext
+    by_cases hc : X.x.e.st = .wb ∧ y = X.x.e.cur ∧ 0 < P.dly y + P.ext X.x.e.now y
+    · rw [if_pos hc] at hr
+      cases hr
+    · rw [if_neg hc] at hr
+      have hlt := h hr
+      by_cases hw : X.x.e.st = .wb ∧ y = X.x.e.cur
+      · rw [if_pos hw]
+        have hz : P.dly y + P.ext X.x.e.now y = 0 := by
+          rcases Nat.eq_zero_or_pos (P.dly y + P.ext X.x.e.now y) with h0 | h0
+          · exact h0
+          · exact (hc ⟨hw.1, hw.2, h0⟩).elim
+        omega
+      · rw [if_neg hw]
+        omega
+
+theorem reb_lt_runBK (fl : Nat → Lane → Bool) (k : Nat → Lane → Nat) (X0 : EngBK) (y : Lane)
+    (h0 : X0.reb y = true → X0.x.e.ts y < X0.x.e.now) :
+    ∀ n, (runBK P win usb sreq fl k n X0).reb y = true →
+      (runBK P win usb sreq fl k n X0).x.e.ts y < (runBK P win usb sreq fl k n X0).x.e.now
+  | 0 => h0
+  | n + 1 => by
+    rw [runBK_succ']
+    exact reb_lt_stepBK P win usb sreq _ _ _ y (reb_lt_runBK fl k X0 y h0 n)
+
+/-- Released by `ts` and the invariant: released by `rel`. -/
+theorem rel_le_now (X : EngBK) (y : Lane) (h : X.reb y = true → X.x.e.ts y < X.x.e.now)
+    (hr : X.x.e.ts y ≤ X.x.e.now) : X.rel y ≤ X.x.e.now := by
+  unfold EngBK.rel
+  cases hb : X.reb y with
+  | false =>
+    rw [if_neg (by decide)]
+    omega
+  | true =>
+    have := h hb
+    rw [if_pos rfl]
+    omega
 
 /-- One cycle with `y` unflushed and not written back: `ts y` is unchanged. -/
 theorem ts_flat1BK (fl : Nat → Lane → Bool) (k : Nat → Lane → Nat) (y : Lane) (X : EngBK) (n : Nat)
@@ -406,10 +545,10 @@ theorem wb_bound_winBK_fl (fl : Nat → Lane → Bool) (k : Nat → Lane → Nat
     (hy : P.live y = true)
     (M S K : Nat) (hK : 3 * M + S + 3 ≤ K)
     (t : Nat) (hwb : IsWB y (runBK P win usb sreq fl k t X0).x.e)
-    (hnf : ∀ n, n < t → (runBK P win usb sreq fl k t X0).x.e.ts y ≤ (runBK P win usb sreq fl k n X0).x.e.now →
+    (hnf : ∀ n, n < t → (runBK P win usb sreq fl k t X0).rel y ≤ (runBK P win usb sreq fl k n X0).x.e.now →
       fl (runBK P win usb sreq fl k n X0).x.e.now y = false)
     (hfree : ∀ w, w + 2 < t → IsWB y (runBK P win usb sreq fl k w X0).x.e →
-      (runBK P win usb sreq fl k w X0).x.e.now < (runBK P win usb sreq fl k t X0).x.e.ts y)
+      (runBK P win usb sreq fl k w X0).x.e.now < (runBK P win usb sreq fl k t X0).rel y)
     (hM : ∀ c, c + K + 2 ≤ t →
       cntBK P win usb sreq fl k (fun e => decOther win y e = true) K
         (runBK P win usb sreq fl k c X0) ≤ M)
@@ -420,10 +559,11 @@ theorem wb_bound_winBK_fl (fl : Nat → Lane → Bool) (k : Nat → Lane → Nat
       (∀ i, i ≤ K → fl (runBK P win usb sreq fl k (c + i) X0).x.e.now y = false) →
       cntBK P win usb sreq fl k (fun e => noDecB win e = true) K
         (runBK P win usb sreq fl k c X0) ≤ S) :
-    (runBK P win usb sreq fl k t X0).x.e.now ≤ (runBK P win usb sreq fl k t X0).x.e.ts y + K + 1 := by
+    (runBK P win usb sreq fl k t X0).x.e.now ≤ (runBK P win usb sreq fl k t X0).rel y + K + 1 := by
   obtain ⟨D, rfl, hdec⟩ := wb_backBK P win usb sreq fl k X0 h0 t y hwb
+  have hrel := EngBK.ts_le_rel (runBK P win usb sreq fl k (D + 2) X0) y
   by_cases hfit : (runBK P win usb sreq fl k (D + 2) X0).x.e.now
-      ≤ (runBK P win usb sreq fl k (D + 2) X0).x.e.ts y + K + 1
+      ≤ (runBK P win usb sreq fl k (D + 2) X0).rel y + K + 1
   · exact hfit
   · exfalso
     have hnD := now_runBK P win usb sreq fl k D X0

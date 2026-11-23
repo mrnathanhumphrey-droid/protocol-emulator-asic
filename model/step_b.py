@@ -362,7 +362,9 @@ def run_b(P, x, exts):
 #                                  ruling 1b, 11-22); a timeout's end keeps ts (the RTL
 #                                  leaves it at the deadline; only an edge flush writes
 #                                  now + 1 -- agent 1's replay 11-22, option (a))
-# State A = {"X": {"x": <EngB dict>, "pkill": bool}, "armed": [bool]*K, "armE": [int]*K}.
+# State A = {"X": {"x": <EngB dict>, "pkill": bool, "reb": [bool]*K}, "armed": [bool]*K,
+# "armE": [int]*K}. `reb` is FlushKill.EngBK.reb, the K4 ghost (release = ts + 1 while set);
+# absent means all False.
 # ext per cycle, beyond step_b's (win sreq ret xd fnpf pick usb_rx):
 #   nw     [bool]*K  the no-swap decision on each lane this cycle (ft_k6)
 #   k      [int]*K   the kept index on each lane (the edge word's at an edge, PC+1's at a timeout)
@@ -505,7 +507,7 @@ def step_bkkr(P, X, ext, fl, k):
                    else (False if (kc and l == b["pl"] and cap_to(b, l, s)) else y["actv"][l][int(s)])
                    for s in S] for l in range(K)]
     x2["sel"] = [keep_slot(b, l, k[l]) if fl[l] else y["sel"][l] for l in range(K)]
-    x2["ts"] = [b["now"] + 1 if fl[l] else y["ts"][l] for l in range(K)]
+    x2["ts"] = [b["now"] if fl[l] else y["ts"][l] for l in range(K)]   # K4: ts = the edge cycle
     x2["buf"] = [False if fl[l] else (False if (kc and l == b["pl"]) else y["buf"][l])
                  for l in range(K)]
     x2["sq"] = [[y["nr"][l] if (fl[l] and s == keep_slot(b, l, k[l])) else y["sq"][l][int(s)]
@@ -515,7 +517,13 @@ def step_bkkr(P, X, ext, fl, k):
         pk = False
     else:
         pk = bool(X["pkill"] or (fl[xx["pl"]] and xx["pst"] in ("req", "wait")))
-    return {"x": x2, "pkill": pk}
+    # ghost (K4): set at a flush, cleared at the lane's writeback when it moves ts (dly + ext > 0)
+    xd = int(_g(ext, "xd", 0))
+    reb0 = X.get("reb", [False] * K)
+    reb = [True if fl[l] else (False if (xx["st"] == "wb" and l == xx["cur"]
+                                         and P["dly"][l] + xd > 0) else bool(reb0[l]))
+           for l in range(K)]
+    return {"x": x2, "pkill": pk, "reb": reb}
 
 
 def hit_a(A, l):

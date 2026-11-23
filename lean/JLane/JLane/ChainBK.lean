@@ -4,10 +4,12 @@ import JLane.ComposeB
 # Brick C3g — the release chain on the bridged run (the flush lemma for `hspan`, `runBK` half)
 
 On the flush run a flush never lowers the view's release (`FlushChain.ts_chainF_ge`). On `runBK`
-there is no view: an arming writeback sets `ts + dly + ext` (for a FALLTHROUGH ARM, its deadline
-`D`), and the edge's flush sets `now + 1` -- an edge before `D` lowers the release. So the chain
+the release is `EngBK.rel` (`ts`, one more while the K4 rebase bit is set): an arming writeback
+sets `ts + dly + ext` (for a FALLTHROUGH ARM, its deadline `D`), and the edge's flush sets `ts` to
+the edge cycle and releases at `now + 1` -- an edge before `D` lowers the release. So the chain
 counts an arming writeback's gap as the checker does, `gA` (the ARM's span gap: the earliest
-edge after its release, or its timeout), not as `dly + ext`:
+edge after its release, or its timeout), not as `dly + ext`, and a writeback after a rebase as
+`dly + ext - 1` (`lane_cert`'s `price - REBASE`):
 
 * the timeout path (no flush before the next writeback): the writeback opened `dly + ext ≥ gA`
   (`hgw`);
@@ -18,7 +20,7 @@ edge after its release, or its timeout), not as `dly + ext`:
   never starts while the lane is armed -- the dip from `D` to `edge + 1` is never counted from
   inside.
 
-`ts_chainBK_ge` states it on `runBK` (`runBA_proj`).
+`rel_chainBK_ge` states it on `runBK` (`runBA_proj`).
 -/
 namespace JLane
 
@@ -28,11 +30,13 @@ variable (P : Program) (win : Engine → Option Lane) (usb : Option Lane)
   (kt : Nat → Lane → Nat) (A0 : EngBA)
 
 /-- What lane `y`'s writeback at `x` contributes to the chain: an ARM's span gap `gA x` at an
-arming writeback, `dly + ext` at any other, nothing off a writeback. -/
+arming writeback, `dly + ext` at any other (less the rebase's cycle after a flush), nothing off a
+writeback. -/
 def cBA (y : Lane) (gA : Nat → Nat) (x : Nat) : Nat :=
   if IsWB y (runBA P win usb sreq isArm edge kt x A0).X.x.e then
     (if (runBA P win usb sreq isArm edge kt x A0).arms P isArm y = true then gA x
-     else P.dly y + P.ext (runBA P win usb sreq isArm edge kt x A0).X.x.e.now y)
+     else P.dly y + P.ext (runBA P win usb sreq isArm edge kt x A0).X.x.e.now y
+       - (if (runBA P win usb sreq isArm edge kt x A0).X.reb y = true then 1 else 0))
   else 0
 
 /-- The contributions over `[a, a + n)`. -/
@@ -51,17 +55,57 @@ theorem gsumBA_skip (y : Lane) (gA : Nat → Nat) (a m : Nat) :
         + cBA P win usb sreq isArm edge kt A0 y gA (a + (m + d)) = _
     rw [ih, show a + (m + d) = a + m + d by omega, h d (by omega), Nat.add_zero]
 
-/-- A hit releases the lane one past now. -/
+/-- A hit sets `ts` to the edge cycle (K4). -/
 theorem tsBA_hit (n : Nat) (y : Lane)
     (h : (runBA P win usb sreq isArm edge kt n A0).hit y = true) :
     (runBA P win usb sreq isArm edge kt (n + 1) A0).X.x.e.ts y
-      = (runBA P win usb sreq isArm edge kt n A0).X.x.e.now + 1 := by
+      = (runBA P win usb sreq isArm edge kt n A0).X.x.e.now := by
   rw [runBA_succ]
   show (if (runBA P win usb sreq isArm edge kt n A0).hit y = true
-      then (runBA P win usb sreq isArm edge kt n A0).X.base.e.now + 1
+      then (runBA P win usb sreq isArm edge kt n A0).X.base.e.now
       else (stepB P (winA win (runBA P win usb sreq isArm edge kt n A0).armed) usb sreq
         (runBA P win usb sreq isArm edge kt n A0).X.base).e.ts y) = _
   rw [if_pos h, base_e]
+
+/-- A hit releases the lane one past now. -/
+theorem relBA_hit (n : Nat) (y : Lane)
+    (h : (runBA P win usb sreq isArm edge kt n A0).hit y = true) :
+    (runBA P win usb sreq isArm edge kt (n + 1) A0).X.rel y
+      = (runBA P win usb sreq isArm edge kt n A0).X.x.e.now + 1 := by
+  rw [runBA_succ]
+  exact rel_flush_stepBK P (winA win (runBA P win usb sreq isArm edge kt n A0).armed) usb sreq
+    _ _ _ y h
+
+/-- No hit: the release does not go down. -/
+theorem relBA_le (n : Nat) (y : Lane)
+    (h : (runBA P win usb sreq isArm edge kt n A0).hit y = false) :
+    (runBA P win usb sreq isArm edge kt n A0).X.rel y
+      ≤ (runBA P win usb sreq isArm edge kt (n + 1) A0).X.rel y := by
+  rw [runBA_succ]
+  exact rel_step_leBK P (winA win (runBA P win usb sreq isArm edge kt n A0).armed) usb sreq
+    _ _ _ y h
+
+/-- No hit, at a writeback of `y`: the release moves by the gap, less the rebase's cycle. -/
+theorem relBA_wb (n : Nat) (y : Lane)
+    (h : (runBA P win usb sreq isArm edge kt n A0).hit y = false)
+    (hw : IsWB y (runBA P win usb sreq isArm edge kt n A0).X.x.e) :
+    (runBA P win usb sreq isArm edge kt n A0).X.rel y
+        + (P.dly y + P.ext (runBA P win usb sreq isArm edge kt n A0).X.x.e.now y)
+      ≤ (runBA P win usb sreq isArm edge kt (n + 1) A0).X.rel y
+        + (if (runBA P win usb sreq isArm edge kt n A0).X.reb y = true then 1 else 0) := by
+  rw [runBA_succ]
+  exact rel_wb_stepBK P (winA win (runBA P win usb sreq isArm edge kt n A0).armed) usb sreq
+    _ _ _ y h ⟨hw.1, hw.2.symm⟩
+
+/-- No hit, off a writeback of `y`: the release stays. -/
+theorem relBA_flat (n : Nat) (y : Lane)
+    (h : (runBA P win usb sreq isArm edge kt n A0).hit y = false)
+    (hw : ¬IsWB y (runBA P win usb sreq isArm edge kt n A0).X.x.e) :
+    (runBA P win usb sreq isArm edge kt (n + 1) A0).X.rel y
+      = (runBA P win usb sreq isArm edge kt n A0).X.rel y := by
+  rw [runBA_succ]
+  exact rel_flat_stepBK P (winA win (runBA P win usb sreq isArm edge kt n A0).armed) usb sreq
+    _ _ _ y h hw
 
 /-- No hit: the release moves only by the writeback rule. -/
 theorem tsBA_nohit (n : Nat) (y : Lane)
@@ -73,27 +117,28 @@ theorem tsBA_nohit (n : Nat) (y : Lane)
 
 /-- **The release chain on the armed run**: from a writeback of `y`, the release after `n` cycles
 is at least the release then plus each writeback's contribution, an ARM's counted as its span
-gap `gA` -- given `gA` within the writeback's own opening (`hgw`) and its edge no earlier than
-`gA` past its release, less one (`hge`). -/
-theorem ts_chainBA_ge (hedge : ∀ t l, t + 1 ≤ edge t l) (hA : ArmInvB A0)
+gap `gA` -- given `gA` within the writeback's own opening, less the rebase's cycle (`hgw`), and its
+edge no earlier than `gA` past its release, less one (`hge`). -/
+theorem rel_chainBA_ge (hedge : ∀ t l, t + 1 ≤ edge t l) (hA : ArmInvB A0)
     (h0a : ∀ l, A0.armed l = false) (y : Lane) (gA : Nat → Nat) (a : Nat)
     (hwa : IsWB y (runBA P win usb sreq isArm edge kt a A0).X.x.e)
     (hgw : ∀ x, IsWB y (runBA P win usb sreq isArm edge kt x A0).X.x.e →
       (runBA P win usb sreq isArm edge kt x A0).arms P isArm y = true →
-      gA x ≤ P.dly y + P.ext (runBA P win usb sreq isArm edge kt x A0).X.x.e.now y)
+      gA x + (if (runBA P win usb sreq isArm edge kt x A0).X.reb y = true then 1 else 0)
+        ≤ P.dly y + P.ext (runBA P win usb sreq isArm edge kt x A0).X.x.e.now y)
     (hge : ∀ x, (runBA P win usb sreq isArm edge kt x A0).arms P isArm y = true →
-      (runBA P win usb sreq isArm edge kt x A0).X.x.e.ts y + gA x
+      (runBA P win usb sreq isArm edge kt x A0).X.rel y + gA x
         ≤ edge (runBA P win usb sreq isArm edge kt x A0).X.x.e.now y + 1) :
-    ∀ n, (runBA P win usb sreq isArm edge kt a A0).X.x.e.ts y
+    ∀ n, (runBA P win usb sreq isArm edge kt a A0).X.rel y
         + gsumBA P win usb sreq isArm edge kt A0 y gA a n
-      ≤ (runBA P win usb sreq isArm edge kt (a + n) A0).X.x.e.ts y := by
+      ≤ (runBA P win usb sreq isArm edge kt (a + n) A0).X.rel y := by
   have hI := fun i => armInvB_runBA P win usb sreq isArm edge hedge kt A0 hA i
   have noWBa : ∀ i, (runBA P win usb sreq isArm edge kt i A0).armed y = true →
       ¬IsWB y (runBA P win usb sreq isArm edge kt i A0).X.x.e := fun i ha hw =>
     (hI i).1 y ha ⟨by rw [hw.1]; decide, hw.2⟩
-  have key : ∀ N, ∀ n, n < N → (runBA P win usb sreq isArm edge kt a A0).X.x.e.ts y
+  have key : ∀ N, ∀ n, n < N → (runBA P win usb sreq isArm edge kt a A0).X.rel y
         + gsumBA P win usb sreq isArm edge kt A0 y gA a n
-      ≤ (runBA P win usb sreq isArm edge kt (a + n) A0).X.x.e.ts y := by
+      ≤ (runBA P win usb sreq isArm edge kt (a + n) A0).X.rel y := by
     intro N
     induction N with
     | zero => intro n hn; exact absurd hn (Nat.not_lt_zero n)
@@ -104,7 +149,7 @@ theorem ts_chainBA_ge (hedge : ∀ t l, t + 1 ≤ edge t l) (hA : ArmInvB A0)
       · cases n with
         | zero => simp [gsumBA]
         | succ k =>
-          show _ ≤ (runBA P win usb sreq isArm edge kt (a + k + 1) A0).X.x.e.ts y
+          show _ ≤ (runBA P win usb sreq isArm edge kt (a + k + 1) A0).X.rel y
           have hstep : gsumBA P win usb sreq isArm edge kt A0 y gA a (k + 1)
               = gsumBA P win usb sreq isArm edge kt A0 y gA a k
                 + cBA P win usb sreq isArm edge kt A0 y gA (a + k) := rfl
@@ -142,54 +187,48 @@ theorem ts_chainBA_ge (hedge : ∀ t l, t + 1 ≤ edge t l) (hA : ArmInvB A0)
             have hih := ih (t0 - a) (by omega)
             rw [show a + (t0 - a) = t0 by omega] at hih
             have hg := hge t0 harm0
-            have hts := tsBA_hit P win usb sreq isArm edge kt A0 (a + k) y hh
+            have hts := relBA_hit P win usb sreq isArm edge kt A0 (a + k) y hh
             omega
           | false =>
             have hik := ih k (by omega)
-            have hts := tsBA_nohit P win usb sreq isArm edge kt A0 (a + k) y hh
             by_cases hw : IsWB y (runBA P win usb sreq isArm edge kt (a + k) A0).X.x.e
             · have hc : cBA P win usb sreq isArm edge kt A0 y gA (a + k)
-                  ≤ P.dly y + P.ext (runBA P win usb sreq isArm edge kt (a + k) A0).X.x.e.now y := by
+                  ≤ P.dly y + P.ext (runBA P win usb sreq isArm edge kt (a + k) A0).X.x.e.now y
+                    - (if (runBA P win usb sreq isArm edge kt (a + k) A0).X.reb y = true then 1 else 0) := by
                 unfold cBA
                 rw [if_pos hw]
                 split
                 · rename_i harm
-                  exact hgw (a + k) hw harm
+                  have := hgw (a + k) hw harm
+                  omega
                 · exact Nat.le_refl _
-              have hts' : (runBA P win usb sreq isArm edge kt (a + k + 1) A0).X.x.e.ts y
-                  = (runBA P win usb sreq isArm edge kt (a + k) A0).X.x.e.ts y + P.dly y
-                    + P.ext (runBA P win usb sreq isArm edge kt (a + k) A0).X.x.e.now y := by
-                rw [hts]
-                unfold tsNext
-                rw [if_pos ⟨hw.1, hw.2.symm⟩]
+              have h1 := relBA_wb P win usb sreq isArm edge kt A0 (a + k) y hh hw
+              have h2 := relBA_le P win usb sreq isArm edge kt A0 (a + k) y hh
               omega
             · have hc : cBA P win usb sreq isArm edge kt A0 y gA (a + k) = 0 := by
                 unfold cBA
                 rw [if_neg hw]
-              have hts' : (runBA P win usb sreq isArm edge kt (a + k + 1) A0).X.x.e.ts y
-                  = (runBA P win usb sreq isArm edge kt (a + k) A0).X.x.e.ts y := by
-                rw [hts]
-                unfold tsNext
-                rw [if_neg (fun h' => hw ⟨h'.1, h'.2.symm⟩)]
+              have h1 := relBA_flat P win usb sreq isArm edge kt A0 (a + k) y hh hw
               omega
   intro n
   exact key (n + 1) n (by omega)
 
-/-- **The release chain on `runBK`** (the bridged run): `ts_chainBA_ge` through `runBA_proj`. -/
-theorem ts_chainBK_ge (hedge : ∀ t l, t + 1 ≤ edge t l) (hA : ArmInvB A0)
+/-- **The release chain on `runBK`** (the bridged run): `rel_chainBA_ge` through `runBA_proj`. -/
+theorem rel_chainBK_ge (hedge : ∀ t l, t + 1 ≤ edge t l) (hA : ArmInvB A0)
     (h0a : ∀ l, A0.armed l = false) (y : Lane) (gA : Nat → Nat) (a : Nat)
     (hwa : IsWB y (runBA P win usb sreq isArm edge kt a A0).X.x.e)
     (hgw : ∀ x, IsWB y (runBA P win usb sreq isArm edge kt x A0).X.x.e →
       (runBA P win usb sreq isArm edge kt x A0).arms P isArm y = true →
-      gA x ≤ P.dly y + P.ext (runBA P win usb sreq isArm edge kt x A0).X.x.e.now y)
+      gA x + (if (runBA P win usb sreq isArm edge kt x A0).X.reb y = true then 1 else 0)
+        ≤ P.dly y + P.ext (runBA P win usb sreq isArm edge kt x A0).X.x.e.now y)
     (hge : ∀ x, (runBA P win usb sreq isArm edge kt x A0).arms P isArm y = true →
-      (runBA P win usb sreq isArm edge kt x A0).X.x.e.ts y + gA x
+      (runBA P win usb sreq isArm edge kt x A0).X.rel y + gA x
         ≤ edge (runBA P win usb sreq isArm edge kt x A0).X.x.e.now y + 1) (n : Nat) :
     (runBK P (winS P win usb sreq isArm edge kt A0) usb sreq (flS P win usb sreq isArm edge kt A0)
-        kt a A0.X).x.e.ts y + gsumBA P win usb sreq isArm edge kt A0 y gA a n
+        kt a A0.X).rel y + gsumBA P win usb sreq isArm edge kt A0 y gA a n
       ≤ (runBK P (winS P win usb sreq isArm edge kt A0) usb sreq
-          (flS P win usb sreq isArm edge kt A0) kt (a + n) A0.X).x.e.ts y := by
-  have h := ts_chainBA_ge P win usb sreq isArm edge kt A0 hedge hA h0a y gA a hwa hgw hge n
+          (flS P win usb sreq isArm edge kt A0) kt (a + n) A0.X).rel y := by
+  have h := rel_chainBA_ge P win usb sreq isArm edge kt A0 hedge hA h0a y gA a hwa hgw hge n
   rw [runBA_proj P win usb sreq isArm edge kt A0, runBA_proj P win usb sreq isArm edge kt A0] at h
   exact h
 

@@ -351,8 +351,9 @@ COMPOSITION = {
             # hspan there is its own lemma, owed
             # 11-21 (flush lemma): on runF flushes only add (FlushChain, proved). On runBK there is
             # no view: an arming writeback sets ts + dly + ext (ts_wb_bridged), and the edge's
-            # flush sets now + 1 (ts_flush_stepBK) -- an FT ARM whose edge precedes its deadline
-            # D drops the release from D to edge + 1. "Flushes only add" does not hold there.
+            # flush sets ts to the edge cycle and releases at now + 1 (K4: ts_flush_stepBK,
+            # rel_flush_runBK) -- an FT ARM whose edge precedes its deadline D drops the release
+            # from D to edge + 1. "Flushes only add" does not hold there.
             # proved 11-22 (ChainBK, Nate's go): the release chain on the bridged run with an
             # arming writeback counted as the checker's ARM gap gA, not dly + ext: hgw (gA <=
             # dly + ext, the timeout path) is the checker's per-word gap fact, the standing the
@@ -360,12 +361,12 @@ COMPOSITION = {
             # same gap's other half: the earliest edge after a release, the peer premise lane_cert
             # prices (arm_floor / arm_j) -- a per-image fact, NOT contract K10 (corrected 11-22:
             # edge_timing is hedge, the edge after the ARM's writeback; gate_lean_build.PREMISES
-            # ts_chainBK_ge lists hgw / hge as applies arm_gap). armed_origin ties each flush to
+            # rel_chainBK_ge lists hgw / hge as applies arm_gap). armed_origin ties each flush to
             # its ARM; the chain is anchored
             # at a writeback of the lane, so it never starts inside an armed stretch.
             {"step": "span_min => hspan on runBK (the flush lemma)", "status": "proved",
-             "theorems": ("gsumBA_skip", "tsBA_hit", "tsBA_nohit", "ts_chainBA_ge",
-                          "ts_chainBK_ge")},
+             "theorems": ("gsumBA_skip", "relBA_hit", "relBA_le", "relBA_wb", "relBA_flat",
+                          "rel_chainBA_ge", "rel_chainBK_ge")},
             # proved 11-22 (ReadyBK, Nate's go): each ready_*_T on y's stretch of the flush run
             # (from the start, or from f + 3 after the last flush with the edge word present;
             # the restart window is the kept edge word, K1); a capture before the stretch is
