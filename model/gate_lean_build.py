@@ -264,7 +264,10 @@ KEY = ("dstar", "dstar29", "dstar39", "dstar39_v2", "dstar39_st", "dstar39_hold"
        # ArmP.lean, the clocked park (Wilson's ruling 11-23: it clears FALLTHROUGH) + watchdog
        "fl_of_not_ft", "stepBPR_park", "stepBPR_wd_halt",
        # the half-range bound, ahead side (11-23, agent 1's time-wrap question)
-       "stepBPR_ts", "stepBPR_disp", "stepBPR_halfAhead", "runBPR_halfAhead", "runBPR_ts_ahead")
+       "stepBPR_ts", "stepBPR_disp", "stepBPR_halfAhead", "runBPR_halfAhead", "runBPR_ts_ahead",
+       # ... behind side item 1: ts / reb / release flat between writebacks
+       "stepBPR_ts_quiet", "stepBPR_reb_quiet", "runBPR_now", "runBPR_rel_flat",
+       "runBPR_behind_back", "runBPR_behind_back_ts")
 #: proof_constants.load() key -> the Lean expression that must evaluate to it (SPEC: the map)
 CONSTS = {
     "lemmaA_window": "LEMMA_A_WINDOW", "R_base": "R_BASE", "dispatch_cycles": "DISPATCH_CYCLES",

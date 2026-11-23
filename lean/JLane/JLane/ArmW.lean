@@ -18,8 +18,16 @@ included):
 * `runBPR_ts_ahead` -- **`ts ≤ now + D`**, so `ts - now ≤ 32767` whenever `D ≤ 32767`.
 
 The side behind `now` needs the response bound (a released lane is served within the window
-`K`), so it excludes the lanes nothing serves: armed no-timeout, parked and halted lanes. It is
-not in this file.
+`K`), so it excludes the lanes nothing serves: armed no-timeout, parked and halted lanes. Item 1
+of it is here:
+* `stepBPR_ts_quiet`, `stepBPR_reb_quiet`, `runBPR_rel_flat` -- a quiet lane (`EngBP.quiet`: not
+  written back, no plain edge, no timeout, no flush; every unarmed lane off its writeback,
+  `quiet_of_unarmed`) keeps its `ts`, its rebase bit and so its release;
+* `runBPR_behind_back`, `runBPR_behind_back_ts` -- **a gap bound at a writeback holds all
+  through the quiet stretch before it**: `now ≤ rel + W` at the end gives `now + n ≤ rel + W`
+  `n` cycles earlier (and `now ≤ ts + W + 1`). With `W = K + 1` from the response bound
+  (`RespWinB.wb_bound_winBK_fl`, on `runBK`; its transfer to `runBPR` is item 2) every cycle up
+  to a lane's next writeback is inside the window.
 -/
 namespace JLane
 
@@ -209,6 +217,111 @@ theorem halfAhead_idle (D : Nat) (B : EngBP) (hs : B.A.X.x.e.st = .idle)
     (hts : ∀ l, B.A.X.x.e.ts l ≤ B.A.X.x.e.now + D) (hoff : ∀ l, B.off l ≤ D) :
     HalfAhead D B :=
   ⟨hts, hoff, fun h => absurd hs h⟩
+
+/-! ### The side behind `now`, item 1: `ts` and the rebase bit are flat between writebacks -/
+
+/-- Lane `l` is quiet this cycle: not written back, no plain edge, no timeout, no flush. -/
+def EngBP.quiet (B : EngBP) (win : Engine → Option Lane) (l : Lane) : Prop :=
+  ¬(B.A.X.x.e.st = .wb ∧ l = B.A.X.x.e.cur) ∧ B.pe l = false ∧ B.tmo win l = false ∧
+    B.fl win l = false
+
+/-- An unarmed lane not at its writeback is quiet. -/
+theorem quiet_of_unarmed (B : EngBP) (l : Lane) (ha : B.A.armed l = false)
+    (hw : ¬(B.A.X.x.e.st = .wb ∧ l = B.A.X.x.e.cur)) : B.quiet win l :=
+  let h := unarmed_quiet win B l ha
+  ⟨hw, h.1, h.2.1, h.2.2⟩
+
+/-- **A quiet cycle leaves `ts` as it was.** -/
+theorem stepBPR_ts_quiet (wd nw : Lane → Bool) (k : Lane → Nat) (B : EngBP) (l : Lane)
+    (hq : B.quiet win l) :
+    (stepBPR P win usb sreq isArm edge isFT offW ntW isPark hdW wd nw k B).A.X.x.e.ts l
+      = B.A.X.x.e.ts l := by
+  obtain ⟨hw, hpe, htm, hfl⟩ := hq
+  rw [stepBPR_ts, hpe, htm, hfl]
+  simp only [Bool.false_eq_true, if_false]
+  unfold tsNext
+  rw [if_neg hw]
+
+/-- **... and the rebase bit.** -/
+theorem stepBPR_reb_quiet (wd nw : Lane → Bool) (k : Lane → Nat) (B : EngBP) (l : Lane)
+    (hq : B.quiet win l) :
+    (stepBPR P win usb sreq isArm edge isFT offW ntW isPark hdW wd nw k B).A.X.reb l
+      = B.A.X.reb l := by
+  obtain ⟨hw, hpe, htm, hfl⟩ := hq
+  have h1 : (stepBPR P win usb sreq isArm edge isFT offW ntW isPark hdW wd nw k B).A.X.reb l =
+      if B.pe l = true then decide (B.off l = 0)
+      else if B.tmo win l = true then B.A.X.reb l
+      else if B.fl win l = true then true
+      else if B.A.X.x.e.st = .wb ∧ l = B.A.X.x.e.cur ∧
+          0 < (P.haltP B.halt).dly l + (P.haltP B.halt).ext B.A.X.x.e.now l then false
+      else B.A.X.reb l := rfl
+  rw [h1, hpe, htm, hfl]
+  simp only [Bool.false_eq_true, if_false]
+  rw [if_neg (fun h => hw ⟨h.1, h.2.1⟩)]
+
+theorem stepBPR_rel_quiet (wd nw : Lane → Bool) (k : Lane → Nat) (B : EngBP) (l : Lane)
+    (hq : B.quiet win l) :
+    (stepBPR P win usb sreq isArm edge isFT offW ntW isPark hdW wd nw k B).A.X.rel l
+      = B.A.X.rel l := by
+  unfold EngBK.rel
+  rw [stepBPR_ts_quiet P win usb sreq isArm edge isFT offW ntW isPark hdW wd nw k B l hq,
+    stepBPR_reb_quiet P win usb sreq isArm edge isFT offW ntW isPark hdW wd nw k B l hq]
+
+theorem runBPR_now (wdt nwt : Nat → Lane → Bool) (kt : Nat → Lane → Nat) (B0 : EngBP) :
+    ∀ n, (runBPR P win usb sreq isArm edge isFT offW ntW isPark hdW wdt nwt kt n B0).A.X.x.e.now
+      = B0.A.X.x.e.now + n
+  | 0 => rfl
+  | n + 1 => by
+    show (stepBPR P win usb sreq isArm edge isFT offW ntW isPark hdW _ _ _
+      (runBPR P win usb sreq isArm edge isFT offW ntW isPark hdW wdt nwt kt n B0)).A.X.x.e.now = _
+    rw [stepBPR_now, runBPR_now wdt nwt kt B0 n]
+    omega
+
+/-- **The release is flat across a quiet stretch.** -/
+theorem runBPR_rel_flat (wdt nwt : Nat → Lane → Bool) (kt : Nat → Lane → Nat) (B0 : EngBP)
+    (l : Lane) (c : Nat) :
+    ∀ n, (∀ i, i < n →
+        (runBPR P win usb sreq isArm edge isFT offW ntW isPark hdW wdt nwt kt (c + i) B0).quiet win l) →
+      (runBPR P win usb sreq isArm edge isFT offW ntW isPark hdW wdt nwt kt (c + n) B0).A.X.rel l
+        = (runBPR P win usb sreq isArm edge isFT offW ntW isPark hdW wdt nwt kt c B0).A.X.rel l
+  | 0, _ => rfl
+  | n + 1, hq => by
+    show (stepBPR P win usb sreq isArm edge isFT offW ntW isPark hdW _ _ _
+      (runBPR P win usb sreq isArm edge isFT offW ntW isPark hdW wdt nwt kt (c + n) B0)).A.X.rel l = _
+    rw [stepBPR_rel_quiet P win usb sreq isArm edge isFT offW ntW isPark hdW _ _ _ _ l (hq n (by omega))]
+    exact runBPR_rel_flat wdt nwt kt B0 l c n (fun i hi => hq i (by omega))
+
+/-- **A gap bound at the end of a quiet stretch holds all through it**: if `now ≤ rel + W` at
+cycle `c + n` (the response bound at `l`'s writeback) and `l` is quiet on `[c, c + n)`, then
+`now ≤ rel + W` at every cycle `c` before it -- the release does not move and `now` only
+grows. -/
+theorem runBPR_behind_back (wdt nwt : Nat → Lane → Bool) (kt : Nat → Lane → Nat) (B0 : EngBP)
+    (l : Lane) (c n W : Nat)
+    (hq : ∀ i, i < n →
+      (runBPR P win usb sreq isArm edge isFT offW ntW isPark hdW wdt nwt kt (c + i) B0).quiet win l)
+    (hW : (runBPR P win usb sreq isArm edge isFT offW ntW isPark hdW wdt nwt kt (c + n) B0).A.X.x.e.now
+      ≤ (runBPR P win usb sreq isArm edge isFT offW ntW isPark hdW wdt nwt kt (c + n) B0).A.X.rel l + W) :
+    (runBPR P win usb sreq isArm edge isFT offW ntW isPark hdW wdt nwt kt c B0).A.X.x.e.now + n
+      ≤ (runBPR P win usb sreq isArm edge isFT offW ntW isPark hdW wdt nwt kt c B0).A.X.rel l + W := by
+  rw [runBPR_rel_flat P win usb sreq isArm edge isFT offW ntW isPark hdW wdt nwt kt B0 l c n hq,
+    runBPR_now P win usb sreq isArm edge isFT offW ntW isPark hdW wdt nwt kt B0 (c + n)] at hW
+  rw [runBPR_now P win usb sreq isArm edge isFT offW ntW isPark hdW wdt nwt kt B0 c]
+  omega
+
+/-- In `ts` terms (`ts ≤ rel`): `now ≤ ts + W + 1` all through the stretch. -/
+theorem runBPR_behind_back_ts (wdt nwt : Nat → Lane → Bool) (kt : Nat → Lane → Nat) (B0 : EngBP)
+    (l : Lane) (c n W : Nat)
+    (hq : ∀ i, i < n →
+      (runBPR P win usb sreq isArm edge isFT offW ntW isPark hdW wdt nwt kt (c + i) B0).quiet win l)
+    (hW : (runBPR P win usb sreq isArm edge isFT offW ntW isPark hdW wdt nwt kt (c + n) B0).A.X.x.e.now
+      ≤ (runBPR P win usb sreq isArm edge isFT offW ntW isPark hdW wdt nwt kt (c + n) B0).A.X.rel l + W) :
+    (runBPR P win usb sreq isArm edge isFT offW ntW isPark hdW wdt nwt kt c B0).A.X.x.e.now
+      ≤ (runBPR P win usb sreq isArm edge isFT offW ntW isPark hdW wdt nwt kt c B0).A.X.x.e.ts l + W + 1 := by
+  have h := runBPR_behind_back P win usb sreq isArm edge isFT offW ntW isPark hdW wdt nwt kt B0 l c n W hq hW
+  have hr : (runBPR P win usb sreq isArm edge isFT offW ntW isPark hdW wdt nwt kt c B0).A.X.rel l
+      ≤ (runBPR P win usb sreq isArm edge isFT offW ntW isPark hdW wdt nwt kt c B0).A.X.x.e.ts l + 1 := by
+    unfold EngBK.rel; have := rbit_le ((runBPR P win usb sreq isArm edge isFT offW ntW isPark hdW wdt nwt kt c B0).A.X.reb l); omega
+  omega
 
 end
 
