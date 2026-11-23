@@ -4,6 +4,8 @@ Random states and inputs (every field random, reachable or not); each case is wr
 definitions, stepBTR is evaluated by Lean (`lake env lean`, a temp file outside the library),
 rendered canonically, and compared line by line with the Python step_btr on the same case.
 Signed off 11-22: 1000 cases, 0 mismatches; a planted spare-first load caught (26/50).
+K13's usb_on (UsbOn): the Lean call takes usb := usbOf on and the flag's next value on || rx, as
+UsbOn.stepBU; the Python carries x["usb_on"] and ext["usb_rx"].
 Usage: python model/diff_step_btr.py [N] [SEED]   (defaults 1000, 7); rc 0 = no mismatch.
 Needs the Lean library built (lake build). Memory: ~1.7 GB peak at N = 1000.
 """
@@ -44,6 +46,7 @@ def render(A):
         b(A["X"]["pkill"]),
         ",".join(b(A["armed"][l]) for l in L),
         ",".join(str(A["armE"][l]) for l in L),
+        b(x.get("usb_on", False)),
     ]
     return "|".join(parts)
 
@@ -68,6 +71,7 @@ def rand_case(rng):
         "bsq": [rng.randint(0, 9) for _ in range(K)],
         "psq": rng.randint(0, 9),
         "nr": [rng.randint(0, 9) for _ in range(K)],
+        "usb_on": rb(),
     }
     A = {"X": {"x": x, "pkill": rb(0.3)}, "armed": [rb(0.4) for _ in range(K)],
          "armE": [rng.randint(0, 80) for _ in range(K)]}
@@ -78,7 +82,17 @@ def rand_case(rng):
            "ret": rb(0.8), "xd": rng.randint(0, 5), "fnpf": rb(0.2), "pick": None,
            "is_arm": rb(0.4), "nw": [rb(0.2) for _ in range(K)],
            "k": [rng.randint(0, 9) for _ in range(K)],
-           "edge": [rng.randint(0, 90) for _ in range(K)]}
+           "edge": [rng.randint(0, 90) for _ in range(K)],
+           "usb_rx": rb(0.2)}
+    if rb(0.25):
+        # a quarter of the cases at the slot's USB yield (K13): a scan, branch 1 at lane 0 (live,
+        # head empty), a slot request pending -- usb_on decides between the USB refill and the
+        # slot (a fully random state meets this about once in 300 cases)
+        x["pst"] = "scan"
+        x["winq"] = 0
+        P["live"][0] = True
+        x["actv"][0][int(x["sel"][0])] = False
+        ext["sreq"] = rng.randrange(1, K)
     return A, P, ext
 
 
@@ -111,11 +125,15 @@ def lean_case(i, A, P, ext):
          "fnpf := fun _ => %s }"
          % (lb(P["live"]), ln(P["dly"]), ext["xd"], "true" if ext["ret"] else "false",
             "true" if ext["fnpf"] else "false"))
-    call = ("stepBTR (%s : Program) (fun _ => %s) none (fun _ => %s) (fun _ => %s) "
+    call = ("stepBTR (%s : Program) (fun _ => %s) (usbOf %s) (fun _ => %s) (fun _ => %s) "
             "(fun _ l => tn1 %s l) (tb1 %s) (tn1 %s) (%s : EngBA)"
-            % (p, lopt(ext["win"]), lopt(ext["sreq"]), "true" if ext["is_arm"] else "false",
+            % (p, lopt(ext["win"]), "true" if x["usb_on"] else "false", lopt(ext["sreq"]),
+               "true" if ext["is_arm"] else "false",
                ln(ext["edge"]), lb(ext["nw"]), ln(ext["k"]), a))
-    return '#eval IO.println ("CASE %d " ++ renderA (%s))\n' % (i, call)
+    on_next = "true" if (x["usb_on"] or ext["usb_rx"]) else "false"
+    flag = "rb (%s || %s)" % ("true" if x["usb_on"] else "false",
+                              "true" if ext["usb_rx"] else "false")
+    return '#eval IO.println ("CASE %d " ++ renderA (%s) ++ "|" ++ %s)\n' % (i, call, flag)
 
 
 HEADER = r'''import JLane
