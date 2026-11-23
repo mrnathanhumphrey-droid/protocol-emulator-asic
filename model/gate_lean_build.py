@@ -239,7 +239,9 @@ KEY = ("dstar", "dstar29", "dstar39", "dstar39_v2", "dstar39_st", "dstar39_hold"
        # SecondB.lean (K12 model premise 5, 11-22): a second fetch never lands on an empty lane
        "secB_step", "secB_run", "second_head_valid", "capSlot_second",
        # SwapRen.lean (K12 Part A, 11-22): the RTL no-swap writeback is BufEng up to a renaming
-       "ren_portNextB", "ren_capTo", "ren_capBuf", "ren_loadToR", "sim_step")
+       "ren_portNextB", "ren_capTo", "ren_capBuf", "ren_loadToR", "sim_step",
+       # SwapRenK.lean (Part A lift L1 + L2, 11-22): through the flush and the armed step
+       "renK_base", "ren_keepSlot", "simK_step", "winA_not_armed", "renA_arms", "simA_step")
 #: proof_constants.load() key -> the Lean expression that must evaluate to it (SPEC: the map)
 CONSTS = {
     "lemmaA_window": "LEMMA_A_WINDOW", "R_base": "R_BASE", "dispatch_cycles": "DISPATCH_CYCLES",
