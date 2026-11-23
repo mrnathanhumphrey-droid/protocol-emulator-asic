@@ -10,6 +10,8 @@ Re-signed 11-22 for ruling 1b (the timeout ends at the pick: armed, deadline rea
 idle, the unmasked scheduler naming the lane, no edge): 1000 cases, 0 mismatches, 33 with a
 timeout pick; planted old deadline-only timeout caught (516/1000), planted pick without the idle
 condition caught (62/1000).
+Re-signed 11-22 for option (a) (a timeout's end keeps ts; agent 1's replay): 1000 cases, 0
+mismatches; planted now + 1 at a timeout caught (33/1000, every timeout pick).
 Usage: python model/diff_step_btr.py [N] [SEED]   (defaults 1000, 7); rc 0 = no mismatch.
 Needs the Lean library built (lake build). Memory: ~1.7 GB peak at N = 1000.
 """

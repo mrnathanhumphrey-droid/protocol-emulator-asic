@@ -359,7 +359,9 @@ def run_b(P, x, exts):
 #                                  (ArmT.ends = hit || tmo: the edge, or the timeout at the
 #                                  pick -- deadline reached, dispatcher idle, the unmasked
 #                                  scheduler naming the lane, no edge; the edge wins a tie;
-#                                  ruling 1b, 11-22)
+#                                  ruling 1b, 11-22); a timeout's end keeps ts (the RTL
+#                                  leaves it at the deadline; only an edge flush writes
+#                                  now + 1 -- agent 1's replay 11-22, option (a))
 # State A = {"X": {"x": <EngB dict>, "pkill": bool}, "armed": [bool]*K, "armE": [int]*K}.
 # ext per cycle, beyond step_b's (win sreq ret xd fnpf pick usb_rx):
 #   nw     [bool]*K  the no-swap decision on each lane this cycle (ft_k6)
@@ -556,6 +558,12 @@ def step_btr(P, A, ext):
     ext2 = dict(ext)
     ext2["win"] = win_a(_g(ext, "win"), A["armed"])
     X2 = step_bkkr(P, A["X"], ext2, fl, k)
+    tm = [tmo_a(A, l, _g(ext, "win")) for l in range(K)]
+    if any(tm):                                   # ArmT.EngBK.keepTs
+        ts0 = A["X"]["x"]["ts"]
+        X2 = dict(X2)
+        X2["x"] = dict(X2["x"])
+        X2["x"]["ts"] = [ts0[l] if tm[l] else X2["x"]["ts"][l] for l in range(K)]
     armed = [False if fl[l] else (True if ar[l] else A["armed"][l]) for l in range(K)]
     armE = [edge[l] if ar[l] else A["armE"][l] for l in range(K)]
     return {"X": X2, "armed": armed, "armE": armE}

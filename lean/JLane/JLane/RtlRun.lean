@@ -11,7 +11,8 @@ flush set the arming ends `ends = hit || tmo` (the timeout at the pick, ruling 1
 
 `simT_step`: one cycle of `stepBTR` on the renamed state is one cycle of `stepBT` renamed (the
 no-swap lanes added, the lanes whose arming ends removed) -- `SwapRenK.simA_step`'s argument with
-`ends` for `hit`. `model/step_b.py`'s `step_bt` transcribes `stepBTR` definition by definition.
+`ends` for `hit`; a timeout's end keeps `ts` on both sides (`EngBK.keepTs`).
+`model/step_b.py`'s `step_btr` transcribes `stepBTR` definition by definition.
 -/
 namespace JLane
 
@@ -21,7 +22,8 @@ variable (P : Program) (win : Engine → Option Lane) (usb : Option Lane)
 
 /-- **One cycle of the RTL-side armed run, both FT paths.** -/
 def stepBTR (nw : Lane → Bool) (k : Lane → Nat) (A : EngBA) : EngBA :=
-  { X := stepBKKR P (winA win A.armed) usb sreq nw (A.ends win) k A.X
+  { X := EngBK.keepTs (A.tmo win) A.X.x.e.ts
+      (stepBKKR P (winA win A.armed) usb sreq nw (A.ends win) k A.X)
     armed := fun l => if A.ends win l = true then false
       else if A.arms P isArm l = true then true else A.armed l
     armE := fun l => if A.arms P isArm l = true then edge A.X.x.e.now l else A.armE l }
@@ -32,14 +34,25 @@ def runBTR (nwt : Nat → Lane → Bool) (kt : Nat → Lane → Nat) : Nat → E
   | n + 1, A => stepBTR P win usb sreq isArm edge (nwt (runBTR nwt kt n A).X.x.e.now)
       (kt (runBTR nwt kt n A).X.x.e.now) (runBTR nwt kt n A)
 
+/-- The renaming leaves the timeouts unchanged when the scheduler ignores the select. -/
+theorem renA_tmo (ns : Lane → Bool) (A : EngBA) (hw : win (renE ns A.X.x.e) = win A.X.x.e) :
+    (renA ns A).tmo win = A.tmo win := by
+  funext l
+  have he : (renA ns A).X.x.e = renE ns A.X.x.e := rfl
+  unfold EngBA.tmo EngBA.hit
+  rw [he, hw]
+  rfl
+
 /-- The renaming leaves the arming ends unchanged when the scheduler ignores the select. -/
 theorem renA_ends (ns : Lane → Bool) (A : EngBA) (hw : win (renE ns A.X.x.e) = win A.X.x.e) :
     (renA ns A).ends win = A.ends win := by
   funext l
-  have he : (renA ns A).X.x.e = renE ns A.X.x.e := rfl
-  unfold EngBA.ends EngBA.tmo EngBA.hit
-  rw [he, hw]
+  unfold EngBA.ends
+  rw [renA_tmo win ns A hw]
   rfl
+
+theorem renK_keepTs (ns keep : Lane → Bool) (ts0 : Lane → Nat) (X : EngBK) :
+    renK ns (EngBK.keepTs keep ts0 X) = EngBK.keepTs keep ts0 (renK ns X) := rfl
 
 /-- **The RTL-side step with both paths is the model's, renamed.** -/
 theorem simT_step (ns nw : Lane → Bool) (k : Lane → Nat) (A : EngBA) (hW : WfBK A.X)
@@ -62,18 +75,20 @@ theorem simT_step (ns nw : Lane → Bool) (k : Lane → Nat) (A : EngBA) (hW : W
       A.X.base.inSlot l (k l) true = true ∨ A.X.base.inSlot l (k l) false = true) :
     stepBTR P win usb sreq isArm edge nw k (renA ns A)
       = renA (fun l => (ns l || nw l) && !A.ends win l) (stepBT P win usb sreq isArm edge k A) := by
-  have hE : (renA ns A).ends win = A.ends win :=
-    renA_ends win ns A (by rw [← base_e]; exact hwin)
+  have hw' : win (renE ns A.X.x.e) = win A.X.x.e := by rw [← base_e]; exact hwin
+  have hE : (renA ns A).ends win = A.ends win := renA_ends win ns A hw'
+  have hT : (renA ns A).tmo win = A.tmo win := renA_tmo win ns A hw'
   unfold stepBTR
-  rw [hE]
+  rw [hE, hT]
   have hK := simK_step P (winA win A.armed) usb sreq ns nw (A.ends win) k A.X hW hhead hdisp hnw hnpf
     hwinq hsr hsrn (winA_ren win A.armed ns _ hwin)
     (fun l h => winA_not_armed win A.armed _ l (hns_armed l h)) hpick hfnpf hkeep
   apply EngBA.ext'
-  · show stepBKKR P (winA win A.armed) usb sreq nw (A.ends win) k (renK ns A.X)
-      = renK (fun l => (ns l || nw l) && !A.ends win l)
-          (stepBKK P (winA win A.armed) usb sreq (A.ends win) k A.X)
-    exact hK
+  · show EngBK.keepTs (A.tmo win) A.X.x.e.ts
+        (stepBKKR P (winA win A.armed) usb sreq nw (A.ends win) k (renK ns A.X))
+      = renK (fun l => (ns l || nw l) && !A.ends win l) (EngBK.keepTs (A.tmo win) A.X.x.e.ts
+          (stepBKK P (winA win A.armed) usb sreq (A.ends win) k A.X))
+    rw [hK, renK_keepTs]
   · funext l
     show (if A.ends win l = true then false
         else if (renA ns A).arms P isArm l = true then true else A.armed l)

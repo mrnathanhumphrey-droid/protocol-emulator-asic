@@ -15,8 +15,13 @@ its deadline:**
   and the slot-off FT engine.
 
 `stepBT` is `FlushHeld.stepBA` with the flush set `ends = hit || tmo` in place of `hit`. Its state
-part is `stepBKK` with `fl := ends`, so the run is a `runBK` run and every theorem proved there
-applies; on a cycle with no timeout it IS `stepBA` (`stepBT_eq_stepBA`).
+part is `stepBKK` with `fl := ends`, except that **a timeout's end keeps the lane's `ts`**
+(`EngBK.keepTs`, `stepBT_tmo_ts`): at a timeout the lane is already released (`ts <= now`), and the
+RTL leaves `ts` at the deadline; only an edge flush writes `now + 1` (K4). Found by agent 1's
+replay (11-22, first divergence at a timeout end); option (a), Nate's go. On a cycle with no
+timeout the step IS `stepBA` (`stepBT_eq_stepBA`), so on such cycles every `runBK` theorem applies;
+the general flush lemmas that state `ts = now + 1` for every flushed lane (FlushLate, HfreeR,
+FlushKill) apply on the timeout path to edge-flushed lanes only.
 
 * `hit_tmo_excl`, `arming_cover` -- **no cycle uncovered**: an armed lane, on each cycle, is in
   exactly one of continuing armed, its edge flush, its timeout; and it ends no later than its edge
@@ -67,13 +72,27 @@ theorem K11At_unless_ending (P : Program) (win : Engine → Option Lane) (A : En
   rw [picked_armed_ends A win v ha (hwin _ v hv).2 hidle hv] at h
   cases h
 
+/-- The lanes in `keep` keep their `ts` (`ts0`) through the step: a timeout's end. -/
+def EngBK.keepTs (keep : Lane → Bool) (ts0 : Lane → Nat) (X : EngBK) : EngBK :=
+  { X with x := { X.x with e := { X.x.e with
+      ts := fun l => if keep l = true then ts0 l else X.x.e.ts l } } }
+
+theorem keepTs_none (keep : Lane → Bool) (ts0 : Lane → Nat) (X : EngBK)
+    (h : ∀ l, keep l = false) : EngBK.keepTs keep ts0 X = X := by
+  have hf : (fun l => if keep l = true then ts0 l else X.x.e.ts l) = X.x.e.ts := by
+    funext l; simp [h l]
+  unfold EngBK.keepTs
+  rw [hf]
+
 section
 variable (P : Program) (win : Engine → Option Lane) (usb : Option Lane)
   (sreq : EngB → Option Lane) (isArm : EngB → Bool) (edge : Nat → Lane → Nat)
 
-/-- **One cycle of the armed run with both paths**: `stepBA` with the flush set `ends`. -/
+/-- **One cycle of the armed run with both paths**: `stepBA` with the flush set `ends`; a
+timeout's end keeps `ts`. -/
 def stepBT (k : Lane → Nat) (A : EngBA) : EngBA :=
-  { X := stepBKK P (winA win A.armed) usb sreq (A.ends win) k A.X
+  { X := EngBK.keepTs (A.tmo win) A.X.x.e.ts
+      (stepBKK P (winA win A.armed) usb sreq (A.ends win) k A.X)
     armed := fun l => if A.ends win l = true then false
       else if A.arms P isArm l = true then true else A.armed l
     armE := fun l => if A.arms P isArm l = true then edge A.X.x.e.now l else A.armE l }
@@ -93,7 +112,12 @@ theorem stepBT_eq_stepBA (k : Lane → Nat) (A : EngBA) (h : ∀ l, A.tmo win l 
   have he : A.ends win = A.hit := by
     funext l; unfold EngBA.ends; rw [h l]; simp
   unfold stepBT stepBA
-  rw [he]
+  rw [keepTs_none (A.tmo win) _ _ h, he]
+
+/-- **A timeout's end keeps `ts`** (the RTL leaves it at the deadline). -/
+theorem stepBT_tmo_ts (k : Lane → Nat) (A : EngBA) (l : Lane) (h : A.tmo win l = true) :
+    (stepBT P win usb sreq isArm edge k A).X.x.e.ts l = A.X.x.e.ts l := by
+  simp [stepBT, EngBK.keepTs, h]
 
 theorem stepBT_now (k : Lane → Nat) (A : EngBA) :
     (stepBT P win usb sreq isArm edge k A).X.x.e.now = A.X.x.e.now + 1 := by

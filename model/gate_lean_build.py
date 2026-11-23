@@ -248,8 +248,9 @@ KEY = ("dstar", "dstar29", "dstar39", "dstar39_v2", "dstar39_st", "dstar39_hold"
        # ArmT.lean (Wilson 11-22: one armed run for both FT paths)
        "hit_tmo_excl", "picked_armed_ends", "K11At_unless_ending", "stepBT_eq_stepBA",
        "armInvT_step", "armInvT_runBT", "arming_cover", "ends_at_edge",
+       "keepTs_none", "stepBT_tmo_ts",
        # RtlRun.lean (piece 5's reference, 11-22): the RTL-side armed run, both FT paths
-       "renA_ends", "simT_step")
+       "renA_tmo", "renA_ends", "renK_keepTs", "simT_step")
 #: proof_constants.load() key -> the Lean expression that must evaluate to it (SPEC: the map)
 CONSTS = {
     "lemmaA_window": "LEMMA_A_WINDOW", "R_base": "R_BASE", "dispatch_cycles": "DISPATCH_CYCLES",
