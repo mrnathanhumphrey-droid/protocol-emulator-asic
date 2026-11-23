@@ -256,7 +256,11 @@ KEY = ("dstar", "dstar29", "dstar39", "dstar39_v2", "dstar39_st", "dstar39_hold"
        "armInvT_step", "armInvT_runBT", "arming_cover", "ends_at_edge",
        "keepTs_none", "stepBT_tmo_ts", "stepBT_tmo_reb",
        # RtlRun.lean (piece 5's reference, 11-22): the RTL-side armed run, both FT paths
-       "renA_tmo", "renA_ends", "renK_keepTs", "simT_step")
+       "renA_tmo", "renA_ends", "renK_keepTs", "simT_step",
+       # ArmP.lean (agent 1's replay 11-23): the plain ARM end, HALF, the plain timeout's halt
+       "rebase_none", "haltP_none", "pe_not_fl", "stepBPR_nt_no_tmo", "winA_halt",
+       "stepBPR_A_eq", "stepBPR_pe_ts", "stepBPR_pe_reb", "stepBPR_pe_rel", "stepBPR_ph_halt",
+       "stepBPR_halt_mono", "stepBPR_now")
 #: proof_constants.load() key -> the Lean expression that must evaluate to it (SPEC: the map)
 CONSTS = {
     "lemmaA_window": "LEMMA_A_WINDOW", "R_base": "R_BASE", "dispatch_cycles": "DISPATCH_CYCLES",

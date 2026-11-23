@@ -579,6 +579,53 @@ def step_btr(P, A, ext):
     return {"X": X2, "armed": armed, "armE": armE}
 
 
+
+def tmo_p(B, l, win):
+    """ArmP.EngBP.tmo: ArmT's timeout, never for a no-timeout ARM"""
+    return tmo_a(B["A"], l, win) and not B["nt"][l]
+
+
+def step_bpr(P, B, ext):
+    """ArmP.stepBPR: the RTL-side armed run with the ARM's latches (FALLTHROUGH `ft`, release
+    offset `off`, no-timeout `nt`) and the halted lanes. Only a FALLTHROUGH end flushes; a plain
+    edge rebases ts to now + off (reb only when off = 0) without a flush; a plain timeout halts.
+    State B = {"A": <step_btr state>, "ft", "off", "nt", "halt": [..]*K}; the ARM's word fields
+    are ext["is_ft"], ext["off_w"], ext["nt_w"]."""
+    A = B["A"]
+    x = A["X"]["x"]
+    ret = bool(_g(ext, "ret", True))
+    is_arm = bool(_g(ext, "is_arm", False))
+    edge = _g(ext, "edge", [0] * K)
+    k = _g(ext, "k", [0] * K)
+    win = _g(ext, "win")
+    L = range(K)
+    tm = [tmo_p(B, l, win) for l in L]
+    en = [hit_a(A, l) or tm[l] for l in L]
+    fl = [en[l] and B["ft"][l] for l in L]
+    pe = [hit_a(A, l) and not B["ft"][l] for l in L]
+    ph = [tm[l] and not B["ft"][l] for l in L]
+    mask = [A["armed"][l] or B["halt"][l] for l in L]
+    ar = [arms_a(A, l, ret, is_arm) for l in L]
+    P2 = dict(P)
+    P2["live"] = [P["live"][l] and not B["halt"][l] for l in L]      # Program.haltP
+    ext2 = dict(ext)
+    ext2["win"] = win_a(win, mask)
+    X2 = dict(step_bkkr(P2, A["X"], ext2, fl, k))
+    X2["x"] = dict(X2["x"])
+    ts0 = x["ts"]
+    reb0 = A["X"].get("reb", [False] * K)
+    ts = [ts0[l] if tm[l] else X2["x"]["ts"][l] for l in L]           # EngBK.keepTs
+    reb = [bool(reb0[l]) if tm[l] else X2["reb"][l] for l in L]
+    X2["x"]["ts"] = [x["now"] + B["off"][l] if pe[l] else ts[l] for l in L]   # EngBK.rebase
+    X2["reb"] = [(B["off"][l] == 0) if pe[l] else reb[l] for l in L]
+    armed = [False if en[l] else (True if ar[l] else A["armed"][l]) for l in L]
+    armE = [edge[l] if ar[l] else A["armE"][l] for l in L]
+    return {"A": {"X": X2, "armed": armed, "armE": armE},
+            "ft": [bool(_g(ext, "is_ft", True)) if ar[l] else B["ft"][l] for l in L],
+            "off": [int(_g(ext, "off_w", 0)) if ar[l] else B["off"][l] for l in L],
+            "nt": [bool(_g(ext, "nt_w", False)) if ar[l] else B["nt"][l] for l in L],
+            "halt": [B["halt"][l] or ph[l] for l in L]}
+
 def self_test_rtl(seeds=10, cycles=5000):
     """With no no-swap writeback, the RTL's buffered step IS BufEng's on well-formed states (the
     head-first load meets the spare load: a buffered word sits behind a valid head, WfB.bh)."""
