@@ -233,7 +233,9 @@ KEY = ("dstar", "dstar29", "dstar39", "dstar39_v2", "dstar39_st", "dstar39_hold"
        # RestartZS.lean (hZS, 11-22): the restart's start conditions derived from check 20's margins
        "start_rel_runBK", "hZS0_runBK", "hHS0_runBK",
        # EdgeBuf.lean (K3's buffer clause, Wilson 11-22): the edge word never in the buffer
-       "oldest_not_buffered", "edge_word_not_buffered_runBK", "edge_word_held_runBK")
+       "oldest_not_buffered", "edge_word_not_buffered_runBK", "edge_word_held_runBK",
+       # SecondB.lean (K12 model premise 5, 11-22): a second fetch never lands on an empty lane
+       "secB_step", "secB_run", "second_head_valid", "capSlot_second")
 #: proof_constants.load() key -> the Lean expression that must evaluate to it (SPEC: the map)
 CONSTS = {
     "lemmaA_window": "LEMMA_A_WINDOW", "R_base": "R_BASE", "dispatch_cycles": "DISPATCH_CYCLES",
