@@ -1,6 +1,17 @@
 name: test
 on:
   push:
+    # ⛔⛔ THE CI BUDGET (Nate 11-23, after the 11-15 account suspension): a push
+    # runs `test` on the INTEGRATION branches only, and never for a docs-only
+    # change. Every other branch is gated locally by the pre-push hook
+    # (.githooks/pre-push -> ci/prepush.py) and runs nothing here. A branch that
+    # needs CI is added to this list in the same commit that makes it one.
+    branches:
+      - work/v2-final
+      - a2/q16a
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
   # ⭐ A MANUAL DISPATCH IS THE FULL LN1 RUN (200k rows per arm); a push runs
   # 20k. A `schedule` would only ever fire on the default branch (cmos5l), i.e.
   # test the locked tree rather than dev, so the full run is dispatched by hand.
@@ -9,6 +20,12 @@ on:
       ln1_rows:
         description: "LN1 rows per arm (200000 = the full run)"
         default: "200000"
+# ⭐ A NEWER PUSH TO THE SAME BRANCH CANCELS THE OLDER RUN (Nate 11-23): one
+# result per branch head, never a queue of superseded runs. A dispatch has its
+# own group, so the full LN1 run is never cancelled by a push.
+concurrency:
+  group: test-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   # ⛔⛔ LN1 -- THE LEAN REPLAY GATE (Wilson; spec from the Lean agent): the Lean
   # model's `step` replayed against traces EXPORTED HERE from the commit under
