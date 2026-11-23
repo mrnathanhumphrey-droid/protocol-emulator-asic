@@ -240,6 +240,11 @@
       end \
       l_bufv     <= {N_LANES{1'b0}}; \
       sq_old     <= {(N_LANES*N_LANES){1'b0}}; \
+      tg_s       <= {NSLOT{1'b0}}; \
+      tg_b       <= {N_LANES{1'b0}}; \
+      ft_ne      <= {N_LANES{1'b0}}; \
+      ft_nt      <= {N_LANES{1'b0}}; \
+      pedge      <= 1'b0; \
       for (i = 0; i < NSLOT; i = i + 1) begin \
         l_act[i]  <= {ACT_W{1'b0}}; \
         l_actv[i] <= 1'b0; \
@@ -3106,9 +3111,16 @@ module pe_engine #(
   //   that may not be fetched past (a branch, a chaining re-arm: Option A,
   //   `no_fetch_past_branch`). FCFS by capture (`sq_old`), below USB
   //   receive's branch-1 refill only (`slot_below_usb_rx`).
-  // ⚠ PIECE 2 RAISES FOR A PLAIN ARM ONLY. A FALLTHROUGH ARM's order (edge
-  //   word first) and its flush rules are piece 3; until then its lane runs
-  //   today's path, and the FT edge's flush clears the buffer and the request.
+  // ⭐ PIECE 3 (Wilson 11-22): a FALLTHROUGH ARM raises too, and fetches its
+  //   EDGE word (PC+2) first, its TIMEOUT word (PC+1) second (`ft_ne` /
+  //   `ft_nt`: still owed). The edge word carries the EDGE TAG (`tg_s` per slot,
+  //   `tg_b` per buffer), the RTL form of the model's kept index (hidxA: the
+  //   ARM's index + 1), moved with the word. At the ARM's writeback the timeout
+  //   word takes the head and the edge word is held as the spare (K6); at a
+  //   timeout the held PC+2 is dropped, every time (K6); at the edge the tagged
+  //   word is kept as the head and everything else is cleared (K1-K5).
+  //   While an FT ARM's words are owed, a further ARM captured for the lane
+  //   (an ARM at PC+1 or PC+2) does not raise: its successors come by refill.
   // ⚠ "USB receive" is USB_LANE's branch-1 refill ONLY WHILE `usb_on` is set
   //   (K13, Wilson 11-22): the flag the 11-09 choice 3 already gates the bus
   //   reset and the buffer on -- off at reset, set when lane 0's first USB
@@ -3119,6 +3131,12 @@ module pe_engine #(
   reg [N_LANES-1:0]     l_bufv;
   reg [1:0]             sq_n   [0:N_LANES-1];
   reg [N_LANES*N_LANES-1:0] sq_old;     // [a*N+b]: a's request is older than b's
+  reg [NSLOT-1:0]       tg_s;         // the edge tag, per slot
+  reg [N_LANES-1:0]     tg_b;         // the edge tag, per buffer
+  reg [N_LANES-1:0]     ft_ne, ft_nt; // an FT ARM's edge / timeout word still owed
+  reg                   pedge;        // the in-flight fetch is an FT ARM's edge word
+  wire [AW-1:0]         ft_ea [0:N_LANES-1];   // that edge word's address
+  wire [3:0]            ft_kv [0:N_LANES-1];   // where it is: {capture, buffer, spare, head}
   wire [N_LANES-1:0]    sq_ok;
   wire [AW-1:0]         sq_addr [0:N_LANES-1];
   // K12 (Wilson 11-22): no slot issue before priming. A request raised at a
@@ -3144,12 +3162,31 @@ module pe_engine #(
 `else
       wire npf_hold = h_npf | (sv_q & s_npf);
 `endif
+      // piece 3: an FT ARM's timeout word (PC+1), owed after its edge word, is
+      // the ARM's own successor -- not past the held edge word, whatever it is
+      wire ft_t2 = ft_nt[gi] & ~ft_ne[gi];
       assign sq_ok[gi] = (SPL > 1) && sq_pr && (sq_n[gi] != 2'd0) && l_live[gi] && hv_q &&
-                         !l_bufv[gi] && !npf_hold && !ft_flush[gi];
+                         !l_bufv[gi] && (!npf_hold || ft_t2) && !ft_flush[gi];
       // the successor of the last held word: a looping re-arm's is the loop
       // base (as `fetch_addr` reads it for the head), anything else's `l_fpc`
-      assign sq_addr[gi] = (l_cls[lx][C_REARM] && l_act[lx][ACT_W-1-OP_W-PINW])
-                           ? l_base[gi] : l_fpc[gi];
+      wire [AW-1:0] sq_a0 = (l_cls[lx][C_REARM] && l_act[lx][ACT_W-1-OP_W-PINW])
+                            ? l_base[gi] : l_fpc[gi];
+      // piece 3: an FT ARM's words, edge first. While both are owed the pointer
+      // still reads PC+1 (the edge fetch does not advance it), so PC+2 is one on
+      assign ft_ea[gi]   = ft_nt[gi] ? l_fpc[gi] + ACT_BYTES[AW-1:0] : l_fpc[gi];
+      // piece 3 (K1): where the lane's edge word is, for its FT edge -- head
+      // slot, spare slot, buffer, or arriving in this cycle's capture
+`ifdef M_FT_CAP_LOST
+      wire ft_kc = 1'b0;
+`else
+      wire ft_kc = (pst == P_CAP) && (pl == gi) && pedge && !pkill;
+`endif
+`ifdef M_FT_DROP_EDGE
+      assign ft_kv[gi] = 4'b0000;
+`else
+      assign ft_kv[gi] = {ft_kc, tg_b[gi] & l_bufv[gi], sv_q & tg_s[six[gi]], hv_q & tg_s[hix[gi]]};
+`endif
+      assign sq_addr[gi] = ft_ne[gi] ? ft_ea[gi] : ft_nt[gi] ? l_fpc[gi] : sq_a0;
     end
   endgenerate
   // FCFS by capture: the oldest issuable request
@@ -3193,18 +3230,34 @@ module pe_engine #(
 `endif
   // the captured word (P_CAP) and where a second fetch files it (`capSlot`)
   wire [ACT_W-1:0]      cap_word  = s_wrdata[ACT_BYTES*8-1 -: ACT_W];
-  wire                  cap_arm   = (cap_word[ACT_W-1 -: OP_W] == OP_ARM) && !cap_word[1];
+  // an ARM's capture raises -- plain or (piece 3) FALLTHROUGH, mod[1] -- unless
+  // the lane's FT ARM still owes words (an ARM at its PC+1 / PC+2: no nested raise)
+  wire                  cap_isarm = (cap_word[ACT_W-1 -: OP_W] == OP_ARM) && !ft_ne[pl] && !ft_nt[pl];
+  wire                  cap_arm   = cap_isarm && !cap_word[1];
+  wire                  cap_armft = cap_isarm && cap_word[1];
+  wire                  cap_raise = cap_arm | cap_armft;
+  // K6: the retiring word is an FT ARM, and its spare neither holds nor is being
+  // filed with the timeout word (an untagged word, or a first fetch in flight into
+  // the spare that is not the edge word) -- then it does NOT swap: the freed slot
+  // stays the head and takes the timeout word; the edge word, held or arriving,
+  // stays behind it. (An edge word in flight to the spare at the writeback is why
+  // "held and tagged" alone is not the test: measured 11-22 under port contention.)
+  wire                  ft_sinf   = (pst != P_SCAN) && (pl == cur) && !pb && (pslot != l_sel[cur]);
+  wire                  ft_spt    = (l_actv[six[cur]] && !tg_s[six[cur]]) || (ft_sinf && !pedge && !pkill);
+  wire                  ft_k6     = (a_op == OP_ARM) && a_mod[1] && !ft_spt;
   wire                  cap_hv    = l_actv[hix[pl]];
   wire                  cap_sv    = l_actv[six[pl]];
-  wire                  cap_tobuf = pb & cap_hv & cap_sv;
-  wire [SIW-1:0]        cix       = !pb ? fix : (cap_hv ? six[pl] : hix[pl]);
+  // (piece 3, `hord`: an FT ARM's edge word is never filed into the head -- it
+  // waits behind the timeout word, in the spare or else the buffer)
+  wire                  cap_tobuf = pb & cap_sv & (cap_hv | pedge);
+  wire [SIW-1:0]        cix       = !pb ? fix : ((cap_hv | pedge) ? six[pl] : hix[pl]);
   // `M_SLOT_RAISE_LATE` (issue_at_capture's must-fire): the raise lands one
   // cycle after the CAP cycle
 `ifdef M_SLOT_RAISE_LATE
   reg rl_v; reg [LW-1:0] rl_l;
   always @(posedge clk or negedge rst_n)
     if (!rst_n) begin rl_v <= 1'b0; rl_l <= {LW{1'b0}}; end
-    else begin rl_v <= hdr_done && (pst == P_CAP) && !pkill && cap_arm; rl_l <= pl; end
+    else begin rl_v <= hdr_done && (pst == P_CAP) && !pkill && cap_raise; rl_l <= pl; end
 `endif
 `ifndef SYNTHESIS
   // ---- piece 2's checks: sim only, and every simulation runs them. Each
@@ -3259,15 +3312,47 @@ module pe_engine #(
   integer          ck_cyc, ck_k;
   reg [AW-1:0]     sh_a [0:NSLOT-1];
   reg [AW-1:0]     sh_b [0:N_LANES-1];
+  // piece 3, the FT flush checks (K1-K4, K6), judged from the SHADOW ADDRESSES,
+  // not the tags: the edge word is the word at PC+2 (the lane's PC is PC+1 once
+  // its FT ARM has retired), held in a slot or the buffer or arriving at CAP
+  reg [N_LANES-1:0] ck_fe = {N_LANES{1'b0}}, ck_fh, ck_fpk;
+  reg [TS_W-1:0]    ck_fnow;
+  reg               ck_tv = 1'b0;
+  reg [LW-1:0]      ck_tl;
+  reg [AW-1:0]      ck_ta;
+  wire              ck_tmo = (st == ST_IDLE) && primed && !config_err && winner_v && w_armed &&
+                             ft_fall_on && l_armft[winner] && !ft_edge_flush[winner];
+  wire [N_LANES-1:0] ck_ehv, st_fks, st_fkb, st_fkc, st_fkn, st_tgm;
+  for (gi = 0; gi < N_LANES; gi = gi + 1) begin : g_ckft
+    wire [AW-1:0] ck_ea = l_pc[gi] + ACT_BYTES[AW-1:0];
+    assign ck_ehv[gi] = (l_actv[hix[gi]] && sh_a[hix[gi]] == ck_ea) ||
+                        (l_actv[six[gi]] && sh_a[six[gi]] == ck_ea) ||
+                        (l_bufv[gi] && sh_b[gi] == ck_ea) ||
+                        (pst == P_CAP && pl == gi && !pkill && paddr == ck_ea);
+    assign st_fks[gi] = ft_edge_flush[gi] && (ft_kv[gi][1] || ft_kv[gi][0]);
+    assign st_fkb[gi] = ft_edge_flush[gi] && !ft_kv[gi][1] && !ft_kv[gi][0] && ft_kv[gi][2];
+    assign st_fkc[gi] = ft_edge_flush[gi] && ft_kv[gi][3];
+    assign st_fkn[gi] = ft_edge_flush[gi] && (ft_kv[gi] == 4'b0000);
+    assign st_tgm[gi] = (SPL > 1) && l_bufv[gi] && tg_b[gi] && l_actv[hix[gi]] && !l_actv[six[gi]];
+  end
   // +SLOTSTAT: one summary line at the end (runners that ask for it only)
   integer st_raise = 0, st_slot = 0, st_slot2 = 0, st_tobuf = 0, st_load = 0,
-          st_multi = 0, st_usbc = 0, st_l0c = 0, st_br1c = 0, st_npfb = 0, st_rrb = 0, st_preq = 0;
+          st_multi = 0, st_usbc = 0, st_l0c = 0, st_br1c = 0, st_npfb = 0, st_rrb = 0, st_preq = 0,
+          st_ftr = 0, st_ks = 0, st_kb = 0, st_kc = 0, st_kn = 0, st_tmo = 0, st_tmv = 0;
   final if ($test$plusargs("SLOTSTAT"))
-    $display("SLOTSTAT raise=%0d slot=%0d second=%0d tobuf=%0d load=%0d multi=%0d usbc=%0d l0c=%0d br1c=%0d npfblock=%0d rrbuf=%0d prereq=%0d",
-             st_raise, st_slot, st_slot2, st_tobuf, st_load, st_multi, st_usbc, st_l0c, st_br1c, st_npfb, st_rrb, st_preq);
+    $display("SLOTSTAT raise=%0d slot=%0d second=%0d tobuf=%0d load=%0d multi=%0d usbc=%0d l0c=%0d br1c=%0d npfblock=%0d rrbuf=%0d prereq=%0d ftraise=%0d keepslot=%0d keepbuf=%0d keepcap=%0d keepnone=%0d fttmo=%0d tagmove=%0d",
+             st_raise, st_slot, st_slot2, st_tobuf, st_load, st_multi, st_usbc, st_l0c, st_br1c, st_npfb, st_rrb, st_preq,
+             st_ftr, st_ks, st_kb, st_kc, st_kn, st_tmo, st_tmv);
   // (non-blocking: the counters are read by the `final` above, another process)
   always @(posedge clk) if (rst_n && hdr_done) begin
-    if (pst == P_CAP && !pkill && cap_arm) st_raise <= st_raise + 1;
+    if (pst == P_CAP && !pkill && cap_raise) st_raise <= st_raise + 1;
+    if (pst == P_CAP && !pkill && cap_armft) st_ftr <= st_ftr + 1;
+    st_ks  <= st_ks + $countones(st_fks);
+    st_kb  <= st_kb + $countones(st_fkb);
+    st_kc  <= st_kc + $countones(st_fkc);
+    st_kn  <= st_kn + $countones(st_fkn);
+    st_tmv <= st_tmv + $countones(st_tgm);
+    if (ck_tmo) st_tmo <= st_tmo + 1;
     if (pst == P_CAP && !pkill && cap_tobuf) st_tobuf <= st_tobuf + 1;
     if (pst == P_REQ && pbr1 && l_actv[hix[pl]] && ck_scan) begin
       st_slot <= st_slot + 1;
@@ -3292,17 +3377,19 @@ module pe_engine #(
       ck_arm_q <= 1'b0;
       ck_scan  <= 1'b0;
       ck_cyc   <= 0;
+      ck_fe    <= {N_LANES{1'b0}};
+      ck_tv    <= 1'b0;
     end else begin
       ck_cyc   <= ck_cyc + 1;
       // SLOTRAISE
       if (ck_arm_q && sq_n[ck_arm_l] != 2'd2)
         $display("*** ASSERT pe_engine SLOTRAISE: lane %0d's ARM captured last cycle, its slot request not raised (owed %0d), at %0t",
                  ck_arm_l, sq_n[ck_arm_l], $time);
-      ck_arm_q <= hdr_done && (pst == P_CAP) && !pkill && cap_arm && !ft_edge_flush[pl];
+      ck_arm_q <= hdr_done && (pst == P_CAP) && !pkill && cap_raise && !ft_edge_flush[pl];
       ck_arm_l <= pl;
       // (a raise stamps at P_CAP and FCFS is judged at P_REQ: never the same
       // cycle, so the non-blocking stamp is read only after it lands)
-      if (hdr_done && (pst == P_CAP) && !pkill && cap_arm) ck_t[pl] <= ck_cyc;
+      if (hdr_done && (pst == P_CAP) && !pkill && cap_raise) ck_t[pl] <= ck_cyc;
       // the scan's decision, judged the cycle after it
       if (ck_scan && pst == P_REQ && pbr1 && ck_hv[pl]) begin
         if (!ck_ok[pl])
@@ -3333,9 +3420,12 @@ module pe_engine #(
       for (ck_k = 0; ck_k < N_LANES; ck_k = ck_k + 1) begin
         ck_hv[ck_k] <= l_actv[hix[ck_k]];
         ck_bv[ck_k] <= l_bufv[ck_k];
-        ck_ok[ck_k] <= l_live[ck_k] && l_actv[hix[ck_k]] && !l_bufv[ck_k] && !ck_npfv[ck_k] &&
-                       !ft_flush[ck_k];
-        ck_sq[ck_k] <= l_live[ck_k] && l_actv[hix[ck_k]] && !l_bufv[ck_k] && !ck_npfv[ck_k] &&
+        // (piece 3: an FT ARM's timeout word, owed after its edge word, is the
+        // ARM's own successor, not a fetch past the held edge word)
+        ck_ok[ck_k] <= l_live[ck_k] && l_actv[hix[ck_k]] && !l_bufv[ck_k] &&
+                       (!ck_npfv[ck_k] || (ft_nt[ck_k] && !ft_ne[ck_k])) && !ft_flush[ck_k];
+        ck_sq[ck_k] <= l_live[ck_k] && l_actv[hix[ck_k]] && !l_bufv[ck_k] &&
+                       (!ck_npfv[ck_k] || (ft_nt[ck_k] && !ft_ne[ck_k])) &&
                        !ft_flush[ck_k] && (sq_n[ck_k] != 2'd0) && primed;
       end
       // SLOTORD: the shadow addresses, filed as the words are
@@ -3344,11 +3434,41 @@ module pe_engine #(
         else           sh_a[cix] <= paddr;
       end
       for (ck_k = 0; ck_k < N_LANES; ck_k = ck_k + 1) begin
-        if ((SPL > 1) && l_bufv[ck_k] && !l_actv[six[ck_k]]) sh_a[six[ck_k]] <= sh_b[ck_k];
+        // the load: into an empty head first (piece 3, K6), else the spare
+        if ((SPL > 1) && l_bufv[ck_k] && !l_actv[hix[ck_k]]) sh_a[hix[ck_k]] <= sh_b[ck_k];
+        else if ((SPL > 1) && l_bufv[ck_k] && !l_actv[six[ck_k]]) sh_a[six[ck_k]] <= sh_b[ck_k];
+        // the FT edge: a kept word from the buffer or the port goes into the head slot
+        if (ft_edge_flush[ck_k] && !ft_kv[ck_k][1] && !ft_kv[ck_k][0] && (ft_kv[ck_k][3] || ft_kv[ck_k][2]))
+          sh_a[hix[ck_k]] <= ft_kv[ck_k][3] ? paddr : sh_b[ck_k];
         if (l_live[ck_k] && l_actv[hix[ck_k]] && sh_a[hix[ck_k]] !== l_pc[ck_k])
           $display("*** ASSERT pe_engine SLOTORD: lane %0d's head holds the word of %0d, its PC is %0d, at %0t",
                    ck_k, sh_a[hix[ck_k]], l_pc[ck_k], $time);
+        // piece 3, the cycle after an FT edge (K1-K4)
+        if (ck_fe[ck_k]) begin
+          if (ck_fh[ck_k] && !l_actv[hix[ck_k]])
+            $display("*** ASSERT pe_engine FTKEEP: lane %0d's edge word was held or arriving at its FT edge and is not its head after the flush, at %0t",
+                     ck_k, $time);
+          if (l_actv[six[ck_k]] || l_bufv[ck_k])
+            $display("*** ASSERT pe_engine FTDROP: lane %0d holds a word besides its edge word after its FT flush, at %0t",
+                     ck_k, $time);
+          if (!ck_fpk[ck_k] && l_timestamp[ck_k] !== ck_fnow)
+            $display("*** ASSERT pe_engine FTREL: lane %0d not released the cycle after its FT edge (timestamp %0d, edge at %0d), at %0t",
+                     ck_k, l_timestamp[ck_k], ck_fnow, $time);
+        end
+        ck_fpk[ck_k] <= l_ckpark[ck_k];
       end
+      ck_fe   <= ft_edge_flush & {N_LANES{hdr_done}};
+      ck_fh   <= ck_ehv;
+      ck_fnow <= now;
+      // piece 3, K6: the cycle after an FT timeout, the lane holds no PC+2
+      if (ck_tv && ((l_actv[hix[ck_tl]] && sh_a[hix[ck_tl]] == ck_ta) ||
+                    (l_actv[six[ck_tl]] && sh_a[six[ck_tl]] == ck_ta) ||
+                    (l_bufv[ck_tl] && sh_b[ck_tl] == ck_ta)))
+        $display("*** ASSERT pe_engine FTTMO: lane %0d still holds its PC+2 (%0d) after its FALLTHROUGH timeout, at %0t",
+                 ck_tl, ck_ta, $time);
+      ck_tv <= ck_tmo;
+      ck_tl <= winner;
+      ck_ta <= l_pc[winner] + ACT_BYTES[AW-1:0];
     end
   end
 `endif
@@ -3714,11 +3834,25 @@ module pe_engine #(
       // port FSM (a capture never targets that spare: a lane holding a
       // buffered word gets no first fetch) and before the FT flush below,
       // which clears both slots and the buffer after it.
+      // ⭐ piece 3 (K6): after an FT ARM's writeback the freed slot is the HEAD
+      // (no swap), so a buffered timeout word loads THERE; otherwise the spare.
+      // The edge tag moves with the word (`M_FT_TAG_LOST` drops it).
       for (i = 0; i < N_LANES; i = i + 1)
-        if ((SPL > 1) && l_bufv[i] && !l_actv[six[i]]) begin
+        if ((SPL > 1) && l_bufv[i] && !l_actv[hix[i]]) begin
+          l_act [hix[i]] <= l_buf[i];
+          l_actv[hix[i]] <= 1'b1;
+          l_cls [hix[i]] <= pre_cls(l_buf[i]);
+          tg_s  [hix[i]] <= tg_b[i];
+          l_bufv[i]      <= 1'b0;
+        end else if ((SPL > 1) && l_bufv[i] && !l_actv[six[i]]) begin
           l_act [six[i]] <= l_buf[i];
           l_actv[six[i]] <= 1'b1;
           l_cls [six[i]] <= pre_cls(l_buf[i]);
+`ifdef M_FT_TAG_LOST
+          tg_s  [six[i]] <= 1'b0;
+`else
+          tg_s  [six[i]] <= tg_b[i];
+`endif
           l_bufv[i]      <= 1'b0;
         end
 `ifdef M_SLOT_RAISE_LATE
@@ -3746,6 +3880,9 @@ module pe_engine #(
             // ⭐ THE SLOT (piece 2): branch 1 goes first only for USB receive's
             // lane (`sq_yield`); otherwise a held slot request is next.
             pb <= 1'b0;
+            // piece 3: is the fetch issued here an FT ARM's edge word? (never
+            // branch 1's: a lane owing FT words holds its ARM or is armed)
+            pedge <= 1'b0;
 `ifdef M_PF_LIVE_WINNER
             if (pf_v && l_live[pf_w] && !l_actv[hix[pf_w]] && !ft_flush[pf_w] && (!sq_v || sq_yield[pf_w])) begin
               pl    <= pf_w;
@@ -3771,6 +3908,7 @@ module pe_engine #(
               pslot <= !l_sel[sq_w];
               paddr <= sq_addr[sq_w];
               pb    <= l_actv[six[sq_w]];
+              pedge <= ft_ne[sq_w];
               pst   <= P_REQ;
             end else if (l_live[prr] && want_fetch(prr) && !rr_mask[prr] && !ft_flush[prr]) begin
               // fill the head if empty, otherwise the spare
@@ -3779,6 +3917,7 @@ module pe_engine #(
               pslot <= l_actv[hix[prr]] ? (!l_sel[prr])
                                                           : l_sel[prr];
               paddr <= fetch_addr(prr);
+              pedge <= ft_ne[prr] && (fetch_addr(prr) == ft_ea[prr]);
               pst   <= P_REQ;
             end else begin
               prr <= (prr == LANE_LAST) ? {LW{1'b0}} : prr + 1'b1;
@@ -3816,28 +3955,40 @@ module pe_engine #(
 `else
             l_bufv[pl]  <= 1'b1;
 `endif
+            tg_b[pl]    <= pedge;       // piece 3: the edge tag rides with the word
             end else begin
             l_act [cix] <= s_wrdata[ACT_BYTES*8-1 -: ACT_W];
             l_actv[cix] <= 1'b1;
 `ifndef M_PREDECODE_STALE
             l_cls [cix] <= pre_cls(s_wrdata[ACT_BYTES*8-1 -: ACT_W]);
 `endif
+            tg_s[cix]   <= pedge;
             end
             // ⭐ THE SUCCESSOR POINTER ADVANCES FROM THE ADDRESS JUST FETCHED,
             // which is what makes the loop case need no special handling here:
             // after a `l_base` fetch, `l_fpc` becomes `l_base + ACT_BYTES`,
             // exactly the successor of the action now resident.
-            l_fpc[pl] <= paddr + ACT_BYTES[AW-1:0];
+            // ⭐ piece 3: an FT ARM's edge word, fetched FIRST, leaves the pointer
+            // at PC+1 (its timeout word, owed next); the timeout word fetched after
+            // it moves the pointer past the edge word, to PC+3.
+            if (!(pedge && ft_nt[pl]))
+              l_fpc[pl] <= paddr + ((!pedge && ft_nt[pl] && !ft_ne[pl]) ? 2 * ACT_BYTES[AW-1:0]
+                                                                         : ACT_BYTES[AW-1:0]);
+            if (cap_armft) begin
+              ft_ne[pl] <= 1'b1;
+              ft_nt[pl] <= 1'b1;
+            end else if (pedge) ft_ne[pl] <= 1'b0;
+            else if (ft_nt[pl]) ft_nt[pl] <= 1'b0;
             // ⭐ THE RAISE, in the ARM's own CAP cycle (`issue_at_capture`):
             // the lane is owed its ARM's next two words, and this request is
             // the youngest. Any other capture counts one owed word off.
 `ifdef M_SLOT_RAISE_LATE
-            if (cap_arm) begin end
+            if (cap_raise) begin end
 `else
-            if (cap_arm) sq_n[pl] <= 2'd2;
+            if (cap_raise) sq_n[pl] <= 2'd2;
 `endif
             else if (sq_n[pl] != 2'd0) sq_n[pl] <= sq_n[pl] - 2'd1;
-            if (cap_arm)
+            if (cap_raise)
               for (i = 0; i < N_LANES; i = i + 1) begin
                 sq_old[i*N_LANES + pl] <= (sq_n[i] != 2'd0) && (i != pl);
                 sq_old[pl*N_LANES + i] <= 1'b0;
@@ -3894,6 +4045,33 @@ module pe_engine #(
                    // not a fault. `M_FT_HALTS` keeps the halt (A7's must-fire).
                    if (w_armed && ft_fall_on && l_armft[winner]) begin
                      armed_n[winner]   = 1'b0;       // fall through to PC+1
+                     // ⭐ K6 (Wilson 11-22, the 11-20 ruling 1a (b)): the held PC+2
+                     // is dropped at EVERY timeout -- in a slot, in the buffer, or
+                     // in flight -- and refetched after PC+1 (the certificate
+                     // charges that refetch); the FT order and the request end.
+                     // ⛔ NOT when the lane's FT edge fires in this same cycle: the
+                     // edge wins its own cycle (ArmFT), and its flush keeps the edge
+                     // word this drop would remove (measured 11-22, edge on the
+                     // deadline cycle).
+                     if (!ft_edge_flush[winner]) begin
+`ifndef M_FT_TMO_KEEP
+                     if (tg_s[hix[winner]]) l_actv[hix[winner]] <= 1'b0;
+                     if (tg_s[six[winner]]) l_actv[six[winner]] <= 1'b0;
+                     if (tg_b[winner]) l_bufv[winner] <= 1'b0;
+`endif
+                     if ((pl == winner) && pedge && (pst == P_REQ || pst == P_WAIT)) pkill <= 1'b1;
+                     if ((pl == winner) && pedge && (pst == P_CAP) && !pkill) begin
+                       if (cap_tobuf) l_bufv[winner] <= 1'b0;
+                       else l_actv[cix] <= 1'b0;
+                     end
+                     tg_s[hix[winner]] <= 1'b0;
+                     tg_s[six[winner]] <= 1'b0;
+                     tg_b[winner]      <= 1'b0;
+                     ft_ne[winner]     <= 1'b0;
+                     ft_nt[winner]     <= 1'b0;
+                     sq_n[winner]      <= 2'd0;
+                     l_fpc[winner]     <= l_pc[winner] + ACT_BYTES[AW-1:0];
+                     end
                    end else
 `ifndef M_TIMEOUT_PROCEED
                    if (w_armed) begin
@@ -4825,8 +5003,11 @@ module pe_engine #(
           // else -- the same rule that caught the 1.6s config guard landing
           // in an `M_NO_PRIME` arm, where a fix that is inside a mutant arm
           // is not in the design.
+          // ⭐ piece 3 (K6, Wilson 11-22): an FT ARM whose edge word is held
+          // (tagged) in the spare does NOT swap -- the freed slot stays the head
+          // and takes the timeout word (PC+1); the edge word stays behind it.
 `ifndef M_BUF_SWAP
-            if (SPL > 1) l_sel[cur] <= !l_sel[cur];
+            if ((SPL > 1) && !ft_k6) l_sel[cur] <= !l_sel[cur];
 `endif
           end else if (a_lvl) begin
             l_pc[cur]   <= l_base[cur];         // loop back to the start
@@ -5121,13 +5302,51 @@ module pe_engine #(
           // (correction B). `M_FT_NOSKIP` leaves the PC at PC+1.
           if (l_armft[i] && ft_skip_on) begin
             l_pc[i]          <= l_pc[i] + ACT_BYTES[AW-1:0];
-            l_fpc[i]         <= l_pc[i] + ACT_BYTES[AW-1:0];
-            l_actv[hix[i]]   <= 1'b0;
-            l_actv[six[i]]   <= 1'b0;
-            // piece 2: the buffer and the slot request go with the slots
-            // (today's FT path; K1's kept edge word is piece 3)
+            // ⭐⭐ piece 3, K1-K3 (Wilson 11-22, agent 2's FlushKeep.stepBK): the
+            // EDGE WORD -- the tagged word, in a slot, in the buffer, or arriving
+            // in this very cycle's capture (the tight case) -- is KEPT and is the
+            // head after the cycle; everything else is cleared. A word already in
+            // a slot stays in it (only the select moves, K3); from the buffer or
+            // the port it goes into the current head slot. With no edge word held
+            // or arriving, both slots empty and PC+2 is refetched (11-14's path,
+            // `flush_empty_of_absent`).
+            if (ft_kv[i][1]) begin
+              l_sel[i]       <= !l_sel[i];
+`ifndef M_FT_KEEP_TMO
+              l_actv[hix[i]] <= 1'b0;
+`endif
+            end else if (ft_kv[i][0]) begin
+              l_actv[six[i]] <= 1'b0;
+`ifdef M_FT_LOAD_LATE
+            end else if (ft_kv[i][3]) begin
+`else
+            end else if (ft_kv[i][3] | ft_kv[i][2]) begin
+`endif
+              l_act [hix[i]] <= ft_kv[i][3] ? cap_word : l_buf[i];
+              l_actv[hix[i]] <= 1'b1;
+              l_cls [hix[i]] <= pre_cls(ft_kv[i][3] ? cap_word : l_buf[i]);
+              l_actv[six[i]] <= 1'b0;
+            end else begin
+              l_actv[hix[i]] <= 1'b0;
+              l_actv[six[i]] <= 1'b0;
+            end
+            // the pointer: past the kept edge word (PC+3), else at PC+2 to refetch it
+            l_fpc[i]         <= l_pc[i] + ((|ft_kv[i]) ? 2 * ACT_BYTES[AW-1:0] : ACT_BYTES[AW-1:0]);
+            // K2: the buffer empties, the request and the FT order end, no tags
+`ifdef M_FT_LOAD_LATE
+            l_bufv[i]        <= ft_kv[i][2] & ~ft_kv[i][3];
+`else
             l_bufv[i]        <= 1'b0;
+`endif
             sq_n[i]          <= 2'd0;
+            ft_ne[i]         <= 1'b0;
+            ft_nt[i]         <= 1'b0;
+            tg_s[hix[i]]     <= 1'b0;
+            tg_s[six[i]]     <= 1'b0;
+            tg_b[i]          <= 1'b0;
+`ifdef M_FT_CAP_FILES
+            if ((pst == P_CAP) && (pl == i[LW-1:0]) && !pkill && !pedge && !cap_tobuf) l_actv[cix] <= 1'b1;
+`endif
             // ⭐ K5 (Wilson 11-17): every in-flight state of the refill FSM is
             // covered -- P_REQ / P_WAIT here; a word at P_CAP in the edge cycle
             // is overwritten by the two clears above (later in this block), and
@@ -5146,6 +5365,10 @@ module pe_engine #(
           // declaration for why, which is a measured compliance failure.
 `ifndef M_NO_REBASE
           l_timestamp[i] <= ck_rebase[i];
+`endif
+          // K4's must-fire: the FT edge path released a cycle late
+`ifdef M_FT_REL_LATE
+          if (l_armft[i] && ft_skip_on) l_timestamp[i] <= ck_rebase[i] + {{(TS_W-1){1'b0}}, 1'b1};
 `endif
           // bundle 3: an EDGE ARM on the USB lane starts a packet
           if (i == USB_LANE && !l_arm2[i]) begin

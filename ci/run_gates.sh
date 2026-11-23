@@ -536,6 +536,9 @@ GATES=(
   # the slot buffer, piece 2 (Wilson 11-21): BufEng.stepB's fetch path -- pe_engine's
   # SLOT assertions on contention images, and each contract's must-fire.
   test/run_slotbuf.py
+  # the slot buffer, piece 3 (Wilson 11-22): the FALLTHROUGH flush (K1-K6) -- the edge word
+  # kept by its tag, swept over every edge timing; each contract's must-fire.
+  test/run_ftflush.py
   # ⭐ DRIVE_SAMPLE (Wilson 11-20): the full-duplex round trip vs tb_ds's SPI
   # target, the sample age measured against clock.DS_SAMPLE_AGE, open-drain, the
   # refusals; M_DS_SAMPLE_AFTER / M_DS_NO_TXADV's killer.
@@ -810,7 +813,7 @@ can_run() {
       { command -v "$VL" >/dev/null 2>&1 || [ -n "${PE_VERILATOR:-}" ] \
         || command -v wsl.exe >/dev/null 2>&1; } \
         || { echo "no verilator and no wsl.exe to reach one"; return 1; } ;;
-    model/gate_one_encoder.py|model/gate_v2_equiv.py|test/run_pit_capture.py|test/run_pit_s0.py|test/gate_store_latch.py|test/run_branch_check.py|test/run_arm2.py|test/gate_batch_equiv.py|test/run_pair.py|test/run_symgen.py|test/run_flags.py|test/run_slotbuf.py|test/run_drive_sample.py|test/run_usbrx.py|model/gate_usb_sweep.py|test/run_usbcrc.py|test/run_usbbuf.py|test/run_usbaddr.py|test/run_usbrst.py|test/gl_harness_check.py|test/gate_tb_elaborates.py|test/run_mutants.py|model/gate_sda_hold.py|test/run_w_sweep.py|test/run_cktx.py|test/run_spidelay.py|test/run_spim_witness.py|test/run_spitgt.py|test/run_rxbw.py)
+    model/gate_one_encoder.py|model/gate_v2_equiv.py|test/run_pit_capture.py|test/run_pit_s0.py|test/gate_store_latch.py|test/run_branch_check.py|test/run_arm2.py|test/gate_batch_equiv.py|test/run_pair.py|test/run_symgen.py|test/run_flags.py|test/run_slotbuf.py|test/run_ftflush.py|test/run_drive_sample.py|test/run_usbrx.py|model/gate_usb_sweep.py|test/run_usbcrc.py|test/run_usbbuf.py|test/run_usbaddr.py|test/run_usbrst.py|test/gl_harness_check.py|test/gate_tb_elaborates.py|test/run_mutants.py|model/gate_sda_hold.py|test/run_w_sweep.py|test/run_cktx.py|test/run_spidelay.py|test/run_spim_witness.py|test/run_spitgt.py|test/run_rxbw.py)
       command -v "$IV" >/dev/null 2>&1 || { echo "iverilog not found (PE_IVERILOG unset and not on PATH)"; return 1; } ;;
     model/gate_reset_audit.py|model/gate_share_coupling.py)
       [ -n "${PE_NETLIST_JSON:-}" ] && [ -f "${PE_NETLIST_JSON:-}" ] \

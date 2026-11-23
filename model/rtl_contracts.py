@@ -34,35 +34,42 @@ RTL_CONTRACTS = {
                 "order (HeadFirst); the replay compares the RTL's run against stepB",
         "lean": "BufEng.stepB / WfB (wfB_run)",
         "must_fire": {"status": OWED, "name": None}},
+    # K1-K6: must-fires PRESENT with the slot buffer's piece 3 (Wilson 11-22; entries updated by
+    # agent 1 with the RTL, the DRIVE_SAMPLE precedent -- agent 2's file, theirs to reword).
+    # ⭐ THE EDGE TAG IS THE RTL FORM OF hidxA's KEPT INDEX (the ARM's index + 1): one bit per
+    # head / spare / buffer place (pe_engine `tg_s`, `tg_b`), set when the edge word (PC+2) is
+    # filed and moved with it; the flush keeps the tagged word. Its own must-fire is
+    # M_FT_TAG_LOST (the tag dropped on a buffer -> spare load), killed by test/run_ftflush.py.
     "K1": {
-        "what": "at a FALLTHROUGH edge the edge word (its fetch index) is kept, in a slot, the "
-                "buffer, or being captured",
+        "what": "at a FALLTHROUGH edge the edge word (its fetch index; in the RTL its edge tag) "
+                "is kept, in a slot, the buffer, or being captured",
         "lean": "FlushKeep.edge_survives_flush, FlushKill.edge_survives_flushK",
-        "must_fire": {"status": OWED, "name": None}},
+        "must_fire": {"status": PRESENT, "name": "M_FT_DROP_EDGE"}},
     "K2": {
         "what": "every other word of the flushed lane (the timeout word and behind it) is cleared; "
                 "the buffer is empty after the flush cycle",
         "lean": "FlushKeep.flush_keeps_only_edge / flush_drops_timeout / flush_buf_empty",
-        "must_fire": {"status": OWED, "name": None}},
+        "must_fire": {"status": PRESENT, "name": "M_FT_KEEP_TMO"}},
     "K3": {
         "what": "a word already in a slot stays in that slot (only the head select moves); a "
-                "buffered edge word moves to the head in the flush cycle",
+                "buffered edge word moves to the head in the flush cycle (reachable: an FT ARM "
+                "captured during start-up whose writeback is delayed, Wilson 11-22)",
         "lean": "FlushKeep.flush_keep_slot",
-        "must_fire": {"status": OWED, "name": None}},
+        "must_fire": {"status": PRESENT, "name": "M_FT_LOAD_LATE"}},
     "K4": {
         "what": "the flushed lane is released the cycle after the edge (FlushStep.tsF)",
         "lean": "FlushKeep (K4), RestartB.restart_runBK",
-        "must_fire": {"status": OWED, "name": None}},
+        "must_fire": {"status": PRESENT, "name": "M_FT_REL_LATE"}},
     "K5": {
         "what": "a fetch for the flushed lane in flight at the edge (REQ / WAIT) is killed and "
                 "files nothing (the RTL's pkill)",
         "lean": "FlushKill.kill_files_nothing, RestartB.kill_prov_runBK",
-        "must_fire": {"status": OWED, "name": None}},
+        "must_fire": {"status": PRESENT, "name": "M_FT_NO_PKILL"}},
     "K6": {
-        "what": "on the FALLTHROUGH timeout path the head select swaps to the timeout word "
-                "(PC+1), fetched second behind the edge word (Wilson 11-19)",
+        "what": "at an FT ARM's writeback the timeout word takes the head and the edge word is "
+                "held as the spare; at a timeout, the held PC+2 is invalidated (Wilson 11-22)",
         "lean": "OrderB.ft_timeout_order (owed; READY_RULES ft_timeout)",
-        "must_fire": {"status": OWED, "name": None}},
+        "must_fire": {"status": PRESENT, "name": "M_FT_TMO_KEEP"}},
     "K7": {
         "what": "one fetch pointer per lane, shared by the slot fetches and the base refill; the "
                 "replay compares fetch indices (Wilson 11-19)",

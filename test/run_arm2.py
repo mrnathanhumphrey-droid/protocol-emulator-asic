@@ -24,9 +24,9 @@ Bench: test/tb_arm2.v, one scenario per run. Images built here from pe_isa.
       (the FT edge path's out by the K..K+1 bound, Wilson 11-19).
   A5-FT  the FT edge path swept over every prr phase on every lane; must-fires:
       a planted K+2 and a flattened (vacuous) lane each turn it red.
-  A4  the FT edge swept against the lane's refills; must-fires M_FT_SCAN_RACE (the
-      scan selects a flushing lane) and M_FT_NO_PKILL (K5: the in-flight refill is
-      not killed) each turn it red.
+  A4  the FT edge swept against the lane's refills (clean: PC+2 runs at every phase);
+      its must-fires M_FT_SCAN_RACE / M_FT_NO_PKILL moved to test/run_ftflush.py with
+      slot buffer piece 3 (11-22); M_FT_REFLUSH (K8) stays here.
 
 POSITIVE TOKEN: `GATE arm2: PASSED`.
 """
@@ -402,7 +402,10 @@ _REL = ("ta", "tb", "fire", "out")
 # capture, so the scan should not be involved after an FT flush at all.
 # ⛔ THE PREDICTION FOR THE BUFFER RTL (an exact golden, the RTL batch's checks):
 #    out - fire = K on EVERY lane at EVERY phase -- FT_LATE goes to 0 there.
-FT_LATE = 1
+# ⭐ MET (slot buffer piece 3, 11-22): the FT edge keeps its edge word (K1-K3), so no
+#    spare waits on `prr` after the flush; measured out - fire = K at every cell of the
+#    sweep, every lane (stamped prediction 8d248c55 B8). FT_LATE is 0 from piece 3 on.
+FT_LATE = 0
 #: the A5-FT sweep's edge drives (cycles after arming): six consecutive phases, so
 #: each lane meets every prr phase (period 5) at least once -- 30 runs
 FT_SWEEP_PHA = range(50, 56)
@@ -610,6 +613,8 @@ def ft_sweep_plants(sweep, ks):
         r["out"] = r["fire"] + ks[lane] + FT_LATE + 1
         s[(cells[0], lane)] = r
         res.append(("+2", lane, any(("@lane%d:" % lane) in x for x in ft_sweep_problems(s, ks))))
+        if FT_LATE == 0:
+            continue                         # no K+1 cell to flatten: the bound is exact
         s = dict(sweep)
         for pha in cells:
             r = dict(s[(pha, lane)])
@@ -735,25 +740,12 @@ def main() -> int:
     print("    fixed RTL: PC+2 ran at every phase %s" % ("ok" if not bad else "*** NOT at %s" % bad))
     if bad:
         probs.append("FT edge path skipped its PC+2 word at phase(s) %s" % bad)
-    mv = os.path.join(tmp, "arm2_M_FT_SCAN_RACE.vvp")
-    build(mv, ["M_FT_SCAN_RACE"])
-    mbad = ft_race(mv, frp)
-    print("    must-fire M_FT_SCAN_RACE (the old scan): %s"
-          % ("RED at phase(s) %s" % mbad if mbad else "*** SURVIVED"))
-    if not mbad:
-        probs.append("M_FT_SCAN_RACE survived the swept FT edge")
-    # A4-K5 (Wilson 11-17, contract K5): a refill for the flushed lane in flight at the
-    # edge (P_REQ / P_WAIT) is killed (`pkill`) and files nothing. Its must-fire:
-    # M_FT_NO_PKILL drops the kill, so the timeout path's in-flight successor (the
-    # ARM, the loop base) is filed after the flush and the LEVEL at PC+2 waits for
-    # the re-armed timeout [measured 11-20: out 341 against 143 at d = 4, 5]
-    kv = os.path.join(tmp, "arm2_M_FT_NO_PKILL.vvp")
-    build(kv, ["M_FT_NO_PKILL"])
-    kbad = ft_race(kv, frp)
-    print("    must-fire M_FT_NO_PKILL (K5: the in-flight refill not killed): %s"
-          % ("RED at phase(s) %s" % kbad if kbad else "*** SURVIVED"))
-    if not kbad:
-        probs.append("M_FT_NO_PKILL survived the swept FT edge (K5's kill unguarded)")
+    # ⭐ MOVED (slot buffer piece 3, 11-22): M_FT_SCAN_RACE and M_FT_NO_PKILL are killed by
+    # test/run_ftflush.py. With the edge word fetched FIRST and kept at the edge (K1-K3),
+    # this image's edge no longer meets a refetch of PC+2, so both survived here (measured);
+    # run_ftflush's busy-port sweep puts a fetch in flight / a scan on the lane at the edge
+    # and the address checks (SLOTORD, FTDROP, FTKEEP) catch both.
+    print("    must-fires M_FT_SCAN_RACE / M_FT_NO_PKILL: killed by test/run_ftflush.py (piece 3)")
 
     # A4-K8: the flush-spacing check (Wilson 11-19, contract K8). The check itself
     # is pe_engine's `*** ASSERT pe_engine K8` (sim only), judged on EVERY run by

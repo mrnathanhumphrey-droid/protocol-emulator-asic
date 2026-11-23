@@ -183,6 +183,13 @@ SCRATCH_GENERATORS: dict = {
                " slot requester's contracts on tb_pair, judged by pe_engine's SLOT"
                " assertions and their must-fires, not by the A2 gap",
         "v3": {"no_v3_layer": "test/tb_pair.v"}},
+    "run_ftflush": {
+        "script": "test/run_ftflush.py", "pattern": "ftflush_*.hex",
+        "clocked": True,
+        "why": "the slot buffer, piece 3 (Wilson 11-22): FALLTHROUGH ARM images with"
+               " the edge swept cycle by cycle on tb_arm2, judged by pe_engine's FT"
+               " flush assertions (K1-K6) and their must-fires, not by the A2 gap",
+        "v3": {"no_v3_layer": "test/tb_arm2.v"}},
     "run_drive_sample": {
         "script": "test/run_drive_sample.py", "pattern": "ds_*.hex",
         "clocked": True,

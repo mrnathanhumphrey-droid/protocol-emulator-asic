@@ -135,8 +135,15 @@ KILLERS = {
     "M_QUAL_IGNORED": "test/run_usbaddr.py",     # Q1 glitch
     "M_FT_HALTS": "test/run_usbaddr.py",         # A7 pending
     "M_FT_NOSKIP": "test/run_usbaddr.py",        # A13b OUT to 7
-    "M_FT_SCAN_RACE": "test/run_arm2.py",        # A4 the FT edge on the selecting cycle
-    "M_FT_NO_PKILL": "test/run_arm2.py",         # A4-K5 the stale refill filed after the flush
+    # (moved from run_arm2 A4 with slot buffer piece 3, 11-22: the kept edge word left
+    # that image no refetch to race; run_ftflush's busy-port sweep reaches both)
+    "M_FT_SCAN_RACE": "test/run_ftflush.py",     # the scan selects a flushing lane
+    "M_FT_NO_PKILL": "test/run_ftflush.py",      # K5 the in-flight fetch filed after the flush
+    # the slot buffer, piece 3 (Wilson 11-22): the FALLTHROUGH flush, K1-K6 + the edge tag
+    "M_FT_DROP_EDGE": "test/run_ftflush.py", "M_FT_CAP_LOST": "test/run_ftflush.py",
+    "M_FT_KEEP_TMO": "test/run_ftflush.py", "M_FT_LOAD_LATE": "test/run_ftflush.py",
+    "M_FT_REL_LATE": "test/run_ftflush.py", "M_FT_CAP_FILES": "test/run_ftflush.py",
+    "M_FT_TMO_KEEP": "test/run_ftflush.py", "M_FT_TAG_LOST": "test/run_ftflush.py",
     "M_FT_REFLUSH": "test/run_arm2.py",          # A4-K8 a second flush at f + 1 (K8's check)
     # the slot buffer, piece 2 (Wilson 11-21): pe_engine's SLOT assertions
     "M_SLOT_RAISE_LATE": "test/run_slotbuf.py", "M_SLOT_LIFO": "test/run_slotbuf.py",

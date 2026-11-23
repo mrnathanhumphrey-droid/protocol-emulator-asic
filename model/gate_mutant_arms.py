@@ -289,6 +289,15 @@ EXPECT = {
     "M_PRIME_NEWPRIO":    (2, None),   # the (b') prefetch target during priming too
     "M_FT_NOSKIP":        (2, None),   # FT's edge does not move PC to PC+2
     "M_FT_NO_PKILL":      (1, None),   # K5: the FT edge does not kill the in-flight refill
+    # the slot buffer, piece 3 (Wilson 11-22): the FALLTHROUGH flush's must-fires
+    "M_FT_DROP_EDGE":     (2, None),   # K1: the edge word not kept (keep vector zero)
+    "M_FT_CAP_LOST":      (2, None),   # K1: the edge cycle's own capture not kept
+    "M_FT_KEEP_TMO":      (1, None),   # K2: the other slot not cleared at the edge
+    "M_FT_LOAD_LATE":     (4, "K3: two arms -- the buffer case left out of the keep, the buffer left to load next cycle"),
+    "M_FT_REL_LATE":      (1, None),   # K4: the FT edge path released a cycle late
+    "M_FT_CAP_FILES":     (1, None),   # K5: the edge cycle's other capture filed
+    "M_FT_TMO_KEEP":      (3, None),   # K6: the held PC+2 left valid after a timeout
+    "M_FT_TAG_LOST":      (2, None),   # the edge tag dropped on a buffer -> spare load
     # the slot buffer, piece 2 (Wilson 11-21): each a one-line term but the raise
     "M_SLOT_PAST_NPF":    (2, None),   # the requester ignores a held no-prefetch word
     "M_SLOT_LIFO":        (2, None),   # the youngest issuable request served first

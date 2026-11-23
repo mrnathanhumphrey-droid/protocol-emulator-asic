@@ -54,17 +54,28 @@ MUST_FIRE: dict = {
         'build': 'arm2_M_FT_REFLUSH.vvp',
         'define': 'M_FT_REFLUSH',
         'image': 'arm2_ft_race.hex',
-        'expect': '^\\s*\\*\\*\\* ASSERT pe_engine K8:',
-        'why': "K8's planted case (Wilson 11-19): the FT edge's flush applied again at f + 1; the K8 check must report it",
+        'expect': '^\\s*\\*\\*\\* ASSERT pe_engine (?:K8|SLOTORD|FTKEEP|FTDROP|FTREL|FTTMO):',
+        'why': "K8's planted case (Wilson 11-19): the FT edge's flush applied again at f + 1; the K8 check must report it (piece 3: the second flush also breaks the kept edge word, so the address checks report it too)",
     },
-    'run_arm2:arm2_M_FT_NO_PKILL:arm2_ft_race': {
-        'runner': 'test/run_arm2.py',
-        'build': 'arm2_M_FT_NO_PKILL.vvp',
-        'define': 'M_FT_NO_PKILL',
-        'image': 'arm2_ft_race.hex',
-        'expect': '^\\s*\\*\\*\\* ASSERT pe_engine SLOTORD:',
-        'why': "K5's planted case seen by the slot buffer's order check (piece 2, 11-22): the unkilled in-flight refill files the timeout path's word after the flush, so the head holds a word that is not its lane's PC",
-    },
+    # the slot buffer, piece 3 (Wilson 11-22): the FALLTHROUGH flush's must-fires, each run
+    # over run_ftflush's image sweep until red; every line must be one of the FT / order checks
+    **{'run_ftflush:ftflush_%s' % _m: {
+        'runner': 'test/run_ftflush.py',
+        'build': 'ftflush_%s.vvp' % _m,
+        'define': _m,
+        'expect': '^\\s*\\*\\*\\* ASSERT pe_engine (?:FTKEEP|FTDROP|FTREL|FTTMO|SLOTORD):',
+        'why': "piece 3's planted case for %s (Wilson 11-22): the FT flush checks must report it" % _w,
+    } for _m, _w in (
+        ('M_FT_DROP_EDGE', 'K1, the edge word not kept'),
+        ('M_FT_KEEP_TMO', 'K2, the timeout word kept past the edge'),
+        ('M_FT_CAP_LOST', "K1, the edge cycle's own capture not kept"),
+        ('M_FT_LOAD_LATE', 'K3, a buffered edge word loaded a cycle late'),
+        ('M_FT_REL_LATE', 'K4, released a cycle late'),
+        ('M_FT_NO_PKILL', 'K5, the in-flight fetch not killed'),
+        ('M_FT_CAP_FILES', "K5, the edge cycle's other capture filed"),
+        ('M_FT_TMO_KEEP', 'K6, the held PC+2 left valid after a timeout'),
+        ('M_FT_TAG_LOST', 'the edge tag lost when its word moves'),
+        ('M_FT_SCAN_RACE', 'the scan selecting a flushing lane (11-14)'))},
     'run_slotbuf:slotbuf_M_SLOT_RAISE_LATE:slotbuf_fcfs': {
         'runner': 'test/run_slotbuf.py',
         'build': 'slotbuf_M_SLOT_RAISE_LATE.vvp',

@@ -260,8 +260,11 @@ SITES = [
      "slot request: the head's no-prefetch REARM"),
     ("(l_cls[six[gi]][C_REARM] & ~l_act[six[gi]][ACT_W-1-OP_W-PINW]);", ("REARM",),
      "slot request: the spare's no-prefetch REARM"),
-    ("assign sq_addr[gi] = (l_cls[lx][C_REARM] && l_act[lx][ACT_W-1-OP_W-PINW])", ("REARM",),
+    ("wire [AW-1:0] sq_a0 = (l_cls[lx][C_REARM] && l_act[lx][ACT_W-1-OP_W-PINW])", ("REARM",),
      "slot request: a looping REARM's successor is the loop base"),
+    # piece 3 (K6, Wilson 11-22): an FT ARM's writeback does not swap -- ARM's mod[1]
+    ("wire                  ft_k6     = (a_op == OP_ARM) && a_mod[1] && !ft_spt;", ("ARM",),
+     "K6: the retiring FT ARM keeps its head slot (no swap)"),
     ("wire ck_hrl = l_cls[hix[gi]][C_REARM] && !l_act[hix[gi]][ACT_W-1-OP_W-PINW];", ("REARM",),
      "sim-only checker: the head's no-prefetch REARM"),
     ("wire ck_srl = l_cls[six[gi]][C_REARM] && !l_act[six[gi]][ACT_W-1-OP_W-PINW];", ("REARM",),
@@ -302,7 +305,8 @@ SITES = [
 IGNORE = ("l_act[i]  <= {ACT_W{1'b0}};", "reg [ACT_W-1:0] l_act ", "reg [CLS_W-1:0] l_cls ",
           "assign hw[gi] = l_act[hix[gi]];", "reg [ACT_W-1:0] w_act;",
           "wire [ACT_W-1:0] u_head  = l_act[hix[USB_LANE]];", "hact   = l_act [hix[ln]];",
-          "l_act [cix] <= s_wrdata[", "l_act [six[i]] <= l_buf[i];")
+          "l_act [cix] <= s_wrdata[", "l_act [six[i]] <= l_buf[i];", "l_act [hix[i]] <= l_buf[i];",
+          "l_act [hix[i]] <= ft_kv[i][3] ? cap_word : l_buf[i];")
 
 TOKEN = re.compile(r"\b(%s)\b(\[(\d+)\])?" % "|".join(list(BASE) + list(DERIVED)))
 HEAD = re.compile(r"\b(cur_act|l_act|u_head|hact)\s*\[|\bw\[")
