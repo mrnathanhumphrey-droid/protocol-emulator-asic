@@ -1612,7 +1612,15 @@ module pe_engine #(
 `else
       wire arm_q_ok = ~l_armqual[gi] | ((gi == USB_LANE) & usb_qual_ok);
 `endif
-      assign arm_hit[gi] = l_armed[gi] &
+      // K10 (Wilson 11-20 ruling 3): the edge acts only from the arming writeback + 1 --
+      // `l_armed` is REGISTERED from that writeback. `M_K10_EARLY` also accepts the edge
+      // in the writeback cycle itself (the ARM word in ST_WB for this lane).
+`ifdef M_K10_EARLY
+      wire arm_on = l_armed[gi] | ((st == ST_WB) && (cur == gi) && (cur_act[ACT_W-1 -: OP_W] == OP_ARM));
+`else
+      wire arm_on = l_armed[gi];
+`endif
+      assign arm_hit[gi] = arm_on &
                            (l_arm2[gi] ? (arm2_a & arm2_b)
                                        : arm_real ? (l_armedge[gi] ? pin_rise[l_armpin[gi]]
                                                                    : pin_fall[l_armpin[gi]]) & arm_q_ok
@@ -1884,6 +1892,14 @@ module pe_engine #(
   reg [LW-1:0]   winner;
   reg            winner_v;
   reg [N_LANES-1:0] winner_oh;   // one-hot winner, all zero when !winner_v
+  // the decision's "a lane is named" -- `winner_v`. sched_names_ready (piece 4): an idle
+  // cycle with a ready lane always names one. `M_SCHED_SKIP` drops it every eighth cycle
+  // (outside the argmin markers, which formal/argmin_equiv.sby extracts and proves).
+`ifdef M_SCHED_SKIP
+  wire dec_v = winner_v & (now[2:0] != 3'd0);
+`else
+  wire dec_v = winner_v;
+`endif
   generate if (N_LANES == 5) begin : g_argmin_tree
   // ---- BEGIN ARGMIN TREE ----
     // ⛔⛔ RULING TM2 -- EVERY COMPARE IS ONE COMPARATOR DEEP. The tree used to
@@ -3323,6 +3339,17 @@ module pe_engine #(
   wire              ck_tmo = (st == ST_IDLE) && primed && !config_err && winner_v && w_armed &&
                              ft_fall_on && l_armft[winner] && !ft_edge_flush[winner];
   wire [N_LANES-1:0] ck_ehv, st_fks, st_fkb, st_fkc, st_fkn, st_tgm;
+  // piece 4 (Wilson 11-20 / 11-22): the scheduler contracts, each judged independently of
+  // what its must-fire changes. K9 ScanOk: a flushed lane's scan issues no fetch for it.
+  reg               ck_k9v = 1'b0;
+  reg [N_LANES-1:0] ck_k9f;
+  // a decision cycle as the dispatcher reads it, and readiness recomputed from the release
+  // term, the head and the flag enable (sched_names_ready's "some lane ready")
+  wire              ck_dec = (st == ST_IDLE) && primed && !config_err;
+  wire [N_LANES-1:0] ck_rdy;
+  for (gi = 0; gi < N_LANES; gi = gi + 1) begin : g_ckrdy
+    assign ck_rdy[gi] = rdy_rel[gi] && l_actv[hix[gi]] && fl_ok[gi];
+  end
   for (gi = 0; gi < N_LANES; gi = gi + 1) begin : g_ckft
     wire [AW-1:0] ck_ea = l_pc[gi] + ACT_BYTES[AW-1:0];
     assign ck_ehv[gi] = (l_actv[hix[gi]] && sh_a[hix[gi]] == ck_ea) ||
@@ -3379,6 +3406,7 @@ module pe_engine #(
       ck_cyc   <= 0;
       ck_fe    <= {N_LANES{1'b0}};
       ck_tv    <= 1'b0;
+      ck_k9v   <= 1'b0;
     end else begin
       ck_cyc   <= ck_cyc + 1;
       // SLOTRAISE
@@ -3466,9 +3494,39 @@ module pe_engine #(
                     (l_bufv[ck_tl] && sh_b[ck_tl] == ck_ta)))
         $display("*** ASSERT pe_engine FTTMO: lane %0d still holds its PC+2 (%0d) after its FALLTHROUGH timeout, at %0t",
                  ck_tl, ck_ta, $time);
+      // the FT timeout pick is ONE ST_IDLE cycle with no dispatch (agent 2's question, 11-22)
+      if (ck_tv && st != ST_IDLE)
+        $display("*** ASSERT pe_engine TMOPICK: lane %0d's FT timeout pick dispatched (st %0d), at %0t",
+                 ck_tl, st, $time);
       ck_tv <= ck_tmo;
       ck_tl <= winner;
       ck_ta <= l_pc[winner] + ACT_BYTES[AW-1:0];
+      // ---- piece 4: the scheduler contracts ----
+      // K9 (ScanOk): the scan of a cycle in which lane l is flushed issues no fetch for l
+      if (ck_k9v && pst != P_SCAN && ck_k9f[pl])
+        $display("*** ASSERT pe_engine K9: the scan issued a fetch for lane %0d in the cycle its FT edge flushed it, at %0t",
+                 pl, $time);
+      ck_k9v <= hdr_done && (pst == P_SCAN);
+      ck_k9f <= ft_edge_flush;
+      for (ck_k = 0; ck_k < N_LANES; ck_k = ck_k + 1)
+        // K10: an edge acts only from the arming writeback + 1
+        if (arm_hit[ck_k] && st == ST_WB && cur == ck_k && cur_act[ACT_W-1 -: OP_W] == OP_ARM)
+          $display("*** ASSERT pe_engine K10: lane %0d's edge acted in its arming writeback cycle, at %0t",
+                   ck_k, $time);
+      if (ck_dec && dec_v) begin
+        // K11 (Wilson 11-22 (b)): never an armed lane before its deadline, never an untimed ARM
+        if (l_armed[winner] && (l_notmo[winner] || tf_diff(now, l_timestamp[winner])))
+          $display("*** ASSERT pe_engine K11: armed lane %0d chosen before its deadline (ts %0d, now %0d), at %0t",
+                   winner, l_timestamp[winner], now, $time);
+        // sched_bprime: the winner has a valid head
+        if (!l_actv[hix[winner]])
+          $display("*** ASSERT pe_engine BPRIME: the dispatcher chose lane %0d with an empty head, at %0t",
+                   winner, $time);
+      end
+      // sched_names_ready: an idle decision cycle with a ready lane names one
+      if (ck_dec && |ck_rdy && !dec_v)
+        $display("*** ASSERT pe_engine NAMES: a decision cycle with lane(s) %b ready named none, at %0t",
+                 ck_rdy, $time);
     end
   end
 `endif
@@ -4024,7 +4082,7 @@ module pe_engine #(
 `else
                      primed
 `endif
-                     && !config_err && winner_v) begin
+                     && !config_err && dec_v) begin
                    // ⛔⛔ RULING 2: ARRIVING READY WHILE STILL ARMED IS A
                    // TIMEOUT, AND A TIMEOUT IS AN ERROR. The lane armed, its
                    // deadline passed, and no edge of the requested polarity ever
@@ -5414,6 +5472,12 @@ module pe_engine #(
                      live_n[i]
 `endif
                      ) & ~tf_diff(now_n, ts_n[i]) & ~(armed_n[i] & notmo_n[i]);
+`endif
+        // K11 (Wilson 11-22 (b)): an armed lane is released only at its deadline -- its
+        // timestamp, set by its ARM's writeback; an untimed ARM never. `M_K11_EARLY`
+        // releases a timed armed lane at once, ignoring the deadline.
+`ifdef M_K11_EARLY
+        if (armed_n[i] & ~notmo_n[i]) rel_q[i] <= live_n[i];
 `endif
       end
     end

@@ -262,6 +262,11 @@ SITES = [
      "slot request: the spare's no-prefetch REARM"),
     ("wire [AW-1:0] sq_a0 = (l_cls[lx][C_REARM] && l_act[lx][ACT_W-1-OP_W-PINW])", ("REARM",),
      "slot request: a looping REARM's successor is the loop base"),
+    # piece 4 (K10): the ARM word in its writeback -- the K10 check, and M_K10_EARLY's arm
+    ("wire arm_on = l_armed[gi] | ((st == ST_WB) && (cur == gi) && (cur_act[ACT_W-1 -: OP_W] == OP_ARM));",
+     "DEF", "mutant"),
+    ("if (arm_hit[ck_k] && st == ST_WB && cur == ck_k && cur_act[ACT_W-1 -: OP_W] == OP_ARM)", "DEF",
+     "sim-only check: the ARM word's own writeback cycle (K10)"),
     # piece 3 (K6, Wilson 11-22): an FT ARM's writeback does not swap -- ARM's mod[1]
     ("wire                  ft_k6     = (a_op == OP_ARM) && a_mod[1] && !ft_spt;", ("ARM",),
      "K6: the retiring FT ARM keeps its head slot (no swap)"),

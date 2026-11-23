@@ -46,8 +46,14 @@ Must-fires (each RED somewhere in its image's sweep, by its assertion):
   M_FT_CAP_FILES   K5  the edge cycle's other capture filed            FTDROP / SLOTORD
   M_FT_TMO_KEEP    K6  the held PC+2 left valid after a timeout        FTTMO / SLOTORD
   M_FT_TAG_LOST        the edge tag lost when its word moves           FTKEEP
-  M_FT_SCAN_RACE       the scan selects a flushing lane (11-14)        SLOTORD / FTDROP / FTKEEP
-K8 (M_FT_REFLUSH) stays in run_arm2.
+  M_FT_SCAN_RACE   K9  the scan selects a flushing lane (11-14)        K9 (ScanOk)
+Piece 4 (Wilson 11-20 / 11-22), the scheduler contracts, on the same images:
+  M_K10_EARLY      K10 an edge acting in its arming writeback cycle   K10
+  M_K11_EARLY      K11 an armed lane released before its deadline     K11 (reworded 11-22 (b))
+  M_SCHED_SKIP         a ready decision cycle naming no lane          NAMES (sched_names_ready)
+sched_bprime's must-fire is M_GLOBAL_STALL (readiness without the head-valid term), killed by
+run_mutants; its own check BPRIME now reports it too. TMOPICK holds the FT timeout pick to one
+ST_IDLE cycle with no dispatch. K8 (M_FT_REFLUSH) stays in run_arm2.
 
 POSITIVE TOKEN: `GATE ftflush: PASSED`.
 """
@@ -101,8 +107,12 @@ MUTANTS = [
      ("FTDROP", "SLOTORD")),
     ("M_FT_TMO_KEEP", "K6", "PC+2 left valid after a timeout", ("loop", "fall"), ("FTTMO", "SLOTORD")),
     ("M_FT_TAG_LOST", "tag", "the edge tag lost on a move", ("spare", "quick"), ("FTKEEP",)),
-    ("M_FT_SCAN_RACE", "11-14", "the scan selects a flushing lane", ("quick_b7", "quick"),
-     ("SLOTORD", "FTDROP", "FTKEEP")),
+    ("M_FT_SCAN_RACE", "K9", "the scan selects a flushing lane", ("quick_b7", "quick"),
+     ("K9",)),
+    # piece 4 (Wilson 11-20 / 11-22): the scheduler contracts
+    ("M_K10_EARLY", "K10", "an edge acting in its arming writeback", ("fall", "quick"), ("K10",)),
+    ("M_K11_EARLY", "K11", "an armed lane released before its deadline", ("fall", "loop"), ("K11",)),
+    ("M_SCHED_SKIP", "names", "a ready decision cycle naming no lane", ("fall", "quick"), ("NAMES",)),
 ]
 
 

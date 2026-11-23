@@ -827,11 +827,6 @@ SPEC_SYMBOLS = {
     ("test/run_usbaddr.py", "COMMIT5"),
     ("test/run_usbaddr.py", "SCEN"),
     ("test/run_usbaddr.py", "MUTANTS"),
-    # the slot buffer, piece 3 (Wilson 11-22): MUTANTS is the inventory -- each mutant, its
-    # contract label ("K1".."K6", "11-14" the scan-race ruling's date), the images it is tried
-    # on and the assertion tags that must report it. Labels, not readings: the verdicts are the
-    # live sweep's.
-    ("test/run_ftflush.py", "MUTANTS"),
     # SIG_EXTRA (Wilson 11-14, row 3's sigrok cross-check): the S1 scenario's
     # host packet times and run length -- stimulus, like SCEN; the expected
     # packets are judged live by sigrok's usb_packet decode on every run.

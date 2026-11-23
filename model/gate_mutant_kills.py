@@ -144,6 +144,9 @@ KILLERS = {
     "M_FT_KEEP_TMO": "test/run_ftflush.py", "M_FT_LOAD_LATE": "test/run_ftflush.py",
     "M_FT_REL_LATE": "test/run_ftflush.py", "M_FT_CAP_FILES": "test/run_ftflush.py",
     "M_FT_TMO_KEEP": "test/run_ftflush.py", "M_FT_TAG_LOST": "test/run_ftflush.py",
+    # piece 4 (Wilson 11-20 / 11-22): the scheduler contracts' must-fires
+    "M_K10_EARLY": "test/run_ftflush.py", "M_K11_EARLY": "test/run_ftflush.py",
+    "M_SCHED_SKIP": "test/run_ftflush.py",
     "M_FT_REFLUSH": "test/run_arm2.py",          # A4-K8 a second flush at f + 1 (K8's check)
     # the slot buffer, piece 2 (Wilson 11-21): pe_engine's SLOT assertions
     "M_SLOT_RAISE_LATE": "test/run_slotbuf.py", "M_SLOT_LIFO": "test/run_slotbuf.py",

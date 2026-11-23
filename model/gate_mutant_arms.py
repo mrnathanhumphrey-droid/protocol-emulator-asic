@@ -298,6 +298,10 @@ EXPECT = {
     "M_FT_CAP_FILES":     (1, None),   # K5: the edge cycle's other capture filed
     "M_FT_TMO_KEEP":      (3, None),   # K6: the held PC+2 left valid after a timeout
     "M_FT_TAG_LOST":      (2, None),   # the edge tag dropped on a buffer -> spare load
+    # the slot buffer, piece 4 (Wilson 11-20 / 11-22): the scheduler contracts
+    "M_K10_EARLY":        (2, None),   # K10: the edge accepted in the arming writeback cycle
+    "M_K11_EARLY":        (1, None),   # K11: a timed armed lane released before its deadline
+    "M_SCHED_SKIP":       (2, None),   # sched_names_ready: the decision drops every 8th cycle
     # the slot buffer, piece 2 (Wilson 11-21): each a one-line term but the raise
     "M_SLOT_PAST_NPF":    (2, None),   # the requester ignores a held no-prefetch word
     "M_SLOT_LIFO":        (2, None),   # the youngest issuable request served first
