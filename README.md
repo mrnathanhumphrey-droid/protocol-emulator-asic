@@ -35,10 +35,10 @@ Pre-submission, for the March 2027 `sg13cmos5l` shuttle.
 |---|---|---|
 | **Die** | 6×4 tiles, 50 MHz | 8×4 tiles, 60 MHz |
 | **Program store** | flops | IHP SRAM macro (256 × 32) |
-| **Instruction set** | 8 opcodes | 12 opcodes, 32-bit action word |
+| **Instruction set** | 8 opcodes | 18 opcodes, 32-bit action word |
 | **Protocols** | UART, SPI master + target, I²C, 1-Wire | + USB low-speed device reflexes, + protocol inference (PIT) |
 | **Timing** | **closed**: harden of record, slow-corner setup +2.676 ns, hold +0.105 ns, 0 violations at every corner; precheck and gate-level cocotb green | **open**: last signed-off reading −1.882 ns slow-corner setup at 60 MHz, the worst path in PIT's GCD step; the fixes are in the RTL and the routed result is being measured; the bar is +2.4 ns; the v2 harden of record follows |
-| **Verification** | every gate green at the tag | the same suite, grown to 117 gates; records that depend on the final layout are declared stale until the v2 lock |
+| **Verification** | every gate green at the tag | the same suite, grown to 138 gates; records that depend on the final layout are declared stale until the v2 lock |
 
 **v2, by how far each piece is verified.** The evidence behind every line is in
 [`docs/V2_STATUS.md`](docs/V2_STATUS.md).
@@ -46,11 +46,15 @@ Pre-submission, for the March 2027 `sg13cmos5l` shuttle.
 1. **Built and verified:** the Protocol Inference Tile, from capture through
    CRC recovery, the clocked-bus path included; the two-chip round trip, 16 / 16;
    the spec emitter; the SRAM program store; clock-domain crossing, proved; the
-   Lean scheduler proofs; the v2 instruction set.
+   Lean scheduler proofs, now including the buffered fetch engine; the v2
+   instruction set; the per-lane slot buffer and the FALLTHROUGH `ARM`, with
+   the scheduler contracts checked on every simulation; inter-lane event
+   flags; the symbol generator; `DRIVE_SAMPLE`.
 2. **Built and simulated, hardware pending:** USB low-speed device reflexes,
    never yet run against a real host; 60 MHz, with timing not yet closed.
-3. **In progress:** the poset language and its compiler, on-chip poset
-   primitives, the validator, the USB keyboard demo.
+3. **In progress:** the cycle-by-cycle replay of the RTL against the Lean
+   engine model; the poset language and its compiler; the validator; the USB
+   keyboard demo.
 
 v1 is the fallback and stays locked. v2 replaces it only when it closes to the
 same bar: a harden of record, the full gate suite, and bench witnesses.
@@ -91,8 +95,10 @@ pins, drive mode, bit spacing, scheduling deadline and program address.
 | | opcodes |
 |---|---|
 | drive and sample | `LEVEL` `SHIFT` `SHIFTI` `SHIFTIN` `READBIT` `START` `STOP` · `DRIVE_SAMPLE` (drive one pin, sample another, one action) |
-| time | `ARM` (wait for an edge, with timeout) · `REARM` (periodic release) |
+| time | `ARM` (wait for an edge, with timeout; FALLTHROUGH: on timeout, go on instead of halting) · `REARM` (periodic release) |
 | decide | `BRANCH_BIT` · `CMP_BRANCH` (byte vs immediate, under a mask) · `LOOP` (per-lane counter) |
+| coordinate | `POST` · `WAIT` (eight counted inter-lane event flags) · `OBSERVE` (read a flag's count without taking it) |
+| generate | `SER` · `SYMDEF` (a shared symbol generator: hardware-timed line codes such as NRZI, Manchester, biphase) |
 
 Two choices carry most of the weight:
 
@@ -127,6 +133,33 @@ Pin map, load protocol, serial framing and readback:
 what it receives — an address, a PID, a status bit — without a round trip to the
 host. A two-pin `ARM` releases when both of its lines sit at one level — USB's
 SE0.
+
+**Wait for an edge, else go on.** A FALLTHROUGH `ARM` waits for an edge within
+a window and, if none comes, continues at its next action instead of halting
+the lane; if the edge comes, the lane jumps one action further. Both next
+actions are already on chip when the decision is made: each lane holds its
+head, a spare and one buffered word, and a FALLTHROUGH `ARM` fetches its edge
+word first. The scheduler's side of this is held to three contracts on every
+simulation — the edge's own fetch never races the flush, an edge acts only
+from the cycle after the arming, and an armed lane is never chosen before its
+deadline — each with a planted defect that must turn it red (13 in
+`test/run_ftflush.py`). The fetch engine with this buffer is modelled
+cycle-exact in Lean, and its window and restart bounds are proved there.
+
+**Lanes that coordinate.** Eight counted event flags: `POST` adds one, `WAIT`
+holds a lane until a count is available and takes it, `OBSERVE` reads the count
+without taking it. The counts are 3-bit with no saturation logic, so the
+assembler proves that no flag can ever run 8 ahead — over every path of every
+posting lane's control flow — or refuses the program, naming the flag.
+
+**A symbol generator.** One shared generator, owned by one lane, turns a byte
+into line-coded edges — NRZI, differential Manchester, biphase — with a
+hardware counter timing every edge, so no edge carries the scheduler's
+dispatch jitter. One `SER` dispatch per byte; `SYMDEF` configures the code.
+
+**Full duplex in one action.** `DRIVE_SAMPLE` drives one pin and samples
+another at the same instant — SPI or JTAG style — with no new state and no new
+timed path.
 
 **USB low-speed device reflexes** on one lane: NRZI receive, bit unstuffing and
 re-anchoring on edges, CRC16 checked on chip and exposed as a virtual pin, a
@@ -270,8 +303,9 @@ the duplication removed as the must-fire.
 
 | | |
 |---|---|
-| `ci/run_gates.sh` — every push, 10 parallel shards | **117 gates** |
-| `model/gate_mutant_kills.py` — injected defects | **138** with a named killer; **5** declared survivors, each with the reason no check should see it |
+| `ci/run_gates.sh` — CI on the integration branches, 11 parallel shards | **138 gates** |
+| `.githooks/pre-push` — before anything leaves the machine | **66** of them, locally; a red gate refuses the push |
+| `model/gate_mutant_kills.py` — injected defects | **184** planted; **178** with a named killer; **6** declared survivors, each with the reason no check should see it |
 | `model/gate_meta.py` — every check stubbed to pass | the gate must still go red |
 | `model/gate_formal_miters.py` — SymbiYosys | **2** equivalence proofs; **4** mutants refuted |
 | `model/gate_cdc_qual.py` — yosys induction | no flop changes on a raw pin outside its strobe |

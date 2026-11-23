@@ -2,8 +2,10 @@
 
 What the v2 chip can do today, sorted by **how far each piece has been verified**.
 An item moves up a tier only when the evidence on its line exists. "CI" means
-the gate runs on every push (`ci/run_gates.sh`); every gate named here has a
-deliberate defect that must turn it red.
+the gate runs in CI on every push to the integration branches
+(`ci/run_gates.sh`), and most also run locally before every push
+(`.githooks/pre-push`); every gate named here has a deliberate defect that must
+turn it red.
 
 v1 is tagged `v1-lock` and closed at 50 MHz on 6×4 tiles. It is the fallback,
 and its own record is unchanged.
@@ -20,7 +22,10 @@ and its own record is unchanged.
 | **The SRAM program store** | The program lives in the IHP `RM_IHPSG13_1P_256x32` macro. No raw input pin reaches any of its input bits. | **CI:** `gate_macro_inputs` (every macro input bit driven only through registers, with a planted raw path that must be found). Gate-level simulation of the SRAM build, 16 / 16 cocotb tests on the hardened netlist (ttihp27a flow, run locally 11-10). |
 | **Clock-domain crossing** | Every host input synchronised; the data nibble sampled only on the synchronised write edge. | **CI:** `gate_cdc_qual`, a yosys induction proof (11,640 of 11,641 flop bits; the remaining one is the declared synchroniser). |
 | **The scheduler proofs** | Non-preemptive EDF over five lanes; refill spacing `d_min ≥ D* = 20 → J = 1`. | **CI:** the Lean theorems `dstar`, `dstar29`, `dstar39`, checked to rest only on Lean's standard axioms, with the model tied to the RTL by trace replay. Zero refill stalls measured on v1 at d = 20–60. On v2 the sweep reads zero at every point from d = 20 to 60, but its below-D* control also reads zero (v1: 29). Until the control shows the instrument can see a stall on v2, the v2 zeros are not counted as a measurement. |
-| **The v2 instruction set** | 12 opcodes in a 32-bit action word, including `BRANCH_BIT`, `CMP_BRANCH` and `LOOP`; a two-pin `ARM`. | **CI:** `run_branch_check`, `run_arm2`, `gate_v2_equiv` (every v1 program runs identically on v2). |
+| **The v2 instruction set** | 18 opcodes in a 32-bit action word, including `BRANCH_BIT`, `CMP_BRANCH` and `LOOP`; a two-pin `ARM`; `DRIVE_SAMPLE` (drive one pin, sample another in the same action). | **CI:** `run_branch_check`, `run_arm2`, `run_drive_sample`, `gate_v2_equiv` (every v1 program runs identically on v2). |
+| **The slot buffer and the FALLTHROUGH `ARM`** | Each lane holds a head, a spare and one buffered word. A FALLTHROUGH `ARM` waits for an edge within a window and otherwise continues instead of halting; it fetches its edge word first and keeps it through the edge. | **CI:** `run_slotbuf`; `run_ftflush` (the flush, keep and drop rules, and the scheduler contracts K9–K11: the edge's fetch never races its flush, an edge acts only from the cycle after arming, an armed lane is never chosen before its deadline), **13 planted faults**. The buffered engine is modelled cycle-exact in Lean (`BufEng`, `RespWinB`, `RestartB`). |
+| **Inter-lane event flags** | Eight counted flags: `POST`, `WAIT` (holds the lane until a count is available, then takes it), `OBSERVE` (reads the count, takes nothing). | **CI:** `run_flags`, **4 planted faults**. The assembler proves no flag can run 8 ahead on any path of any posting lane, or refuses the program by name. |
+| **The symbol generator** | One shared generator, owned by one lane: `SER` sends a byte as line-coded edges (NRZI, differential Manchester, biphase), every edge timed by a hardware counter rather than by dispatch; `SYMDEF` sets the code. | **CI:** `run_symgen`, with its refusals (wrong lane, busy generator) and the overrun case. |
 
 ## 2. Built and simulated, hardware pending
 
@@ -34,7 +39,8 @@ and its own record is unchanged.
 | | what | state |
 |---|---|---|
 | **The poset language and its compiler** | One spec → chip program + host encoder + checker. | Not built. The emitter (tier 1) is its first piece. |
-| **On-chip poset primitives** | Order-and-bounds checking in silicon. | Not built. |
+| **On-chip poset primitives** | Order-and-bounds checking in silicon. | First piece built: the inter-lane event flags (tier 1). |
+| **The RTL against the Lean engine model, cycle by cycle** | Every cycle of a simulation stepped through the Lean-mirrored model of the buffered engine and compared field by field. | Running. The FALLTHROUGH and USB benches match cycle for cycle so far; the full bench set is being replayed, and the paths the model does not yet cover are counted separately, not passed. |
 | **The validator** | Checks a program against its spec before it loads. | Not built. |
 | **The USB keyboard demo** | The chip enumerating as a keyboard on a laptop and typing, through the FPGA prototype. | Not yet. Needs tier 2's USB on real hardware first. |
 
