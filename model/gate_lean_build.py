@@ -271,7 +271,10 @@ KEY = ("dstar", "dstar29", "dstar39", "dstar39_v2", "dstar39_st", "dstar39_hold"
        # ... behind side item 2: the response bound re-proved on runBPR (per-cycle masked winner)
        "stepBPR_st_step", "runR_st", "runR_now", "runR_ts_step", "runR_ts_mono", "runR_dec_wb",
        "runR_wb_back", "runR_lemA", "wb_bound_winBPR", "isRun_runBPR", "runR_ts_flat",
-       "behind_winBPR")
+       "behind_winBPR",
+       # ... item 3: the closure, progress, both sides on runBPR
+       "runR_ts_mono2", "runR_wb_prev", "runR_wb_dec", "runR_noWB", "runR_ts_wb", "least_or_none",
+       "wb_close_BPR", "behind_all_BPR", "halfRange_BPR")
 #: proof_constants.load() key -> the Lean expression that must evaluate to it (SPEC: the map)
 CONSTS = {
     "lemmaA_window": "LEMMA_A_WINDOW", "R_base": "R_BASE", "dispatch_cycles": "DISPATCH_CYCLES",
