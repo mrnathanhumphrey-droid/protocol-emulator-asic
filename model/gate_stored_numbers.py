@@ -781,6 +781,12 @@ SPEC_SYMBOLS = {
     # cycles, judged live by A5 (symmetry with lane 0) and A5-FT (the K..K+1 bound).
     ("test/run_arm2.py", "LANE_PINS"),
     ("test/run_arm2.py", "LANE_SCEN"),
+    # the FT flush gate (V2E1, 11-24): RACE is the chosen start-up-order shape of each
+    # race witness (lanes, deadline step, word length, timeout) and WINDOW each image's
+    # chosen flip span around its first arming -- design. The RESULTS are tb_arm2's
+    # assertions, judged live (clean: none; M_FT_TMO_LOADRACE: FTTMO).
+    ("test/run_ftflush.py", "RACE"),
+    ("test/run_ftflush.py", "WINDOW"),
     # the symbol generator (Wilson 11-17): CFGS are the chosen table instances
     # (WS2812, Manchester, NRZI, biphase, the SPI data phase) from
     # test/symgen_model.py, FEED the four bytes tb_pair feeds queue 0 -- design and

@@ -3275,6 +3275,29 @@ module pe_engine #(
     if (!rst_n) begin rl_v <= 1'b0; rl_l <= {LW{1'b0}}; end
     else begin rl_v <= hdr_done && (pst == P_CAP) && !pkill && cap_raise; rl_l <= pl; end
 `endif
+  // ⭐ V2E1 (11-24, docs/V2_DEFECTS.md): the K6 drop fires this cycle -- the dispatch's own
+  // condition, term for term. A tagged buffered word must NOT load into a slot in that
+  // cycle: the drop reads the old slot tags, so a word moved by the load escapes it (and
+  // the drop's tag clear then strips its tag). Held in the buffer, the drop's
+  // `l_bufv <= 0` removes it. Only the winner, only with its buffer tagged: no other
+  // load moves. `M_FT_TMO_LOADRACE` removes the block (FTTMO, SLOTORD).
+  wire              tmo_drop = (st == ST_IDLE) &&
+`ifdef M_NO_PRIME
+                               hdr_done
+`else
+                               primed
+`endif
+                               && !config_err && dec_v && w_armed && ft_fall_on &&
+                               l_armft[winner] && !ft_edge_flush[winner];
+  wire [N_LANES-1:0] tmo_ldblk;
+  genvar gtl;
+  generate for (gtl = 0; gtl < N_LANES; gtl = gtl + 1) begin : g_tmo_ldblk
+`ifdef M_FT_TMO_LOADRACE
+    assign tmo_ldblk[gtl] = 1'b0;
+`else
+    assign tmo_ldblk[gtl] = tmo_drop && (winner == gtl) && tg_b[gtl];
+`endif
+  end endgenerate
 `ifndef SYNTHESIS
   // ---- piece 2's checks: sim only, and every simulation runs them. Each
   // `*** ASSERT pe_engine SLOT...` line is read by `sim_run.py judge` on every
@@ -3925,8 +3948,10 @@ module pe_engine #(
       // ⭐ piece 3 (K6): after an FT ARM's writeback the freed slot is the HEAD
       // (no swap), so a buffered timeout word loads THERE; otherwise the spare.
       // The edge tag moves with the word (`M_FT_TAG_LOST` drops it).
+      // ⭐ V2E1 (11-24): not in the cycle the K6 drop removes this lane's tagged
+      // buffered word (`tmo_ldblk`, above) -- the drop then takes it from the buffer.
       for (i = 0; i < N_LANES; i = i + 1)
-        if ((SPL > 1) && l_bufv[i] && !l_actv[hix[i]]) begin
+        if ((SPL > 1) && l_bufv[i] && !tmo_ldblk[i] && !l_actv[hix[i]]) begin
           l_act [hix[i]] <= l_buf[i];
           l_actv[hix[i]] <= 1'b1;
           l_cls [hix[i]] <= pre_cls(l_buf[i]);
@@ -3935,7 +3960,7 @@ module pe_engine #(
 `ifndef M_TAG_STALE
           tg_b  [i]      <= 1'b0;      // (11-24) the tag leaves with the word
 `endif
-        end else if ((SPL > 1) && l_bufv[i] && !l_actv[six[i]]) begin
+        end else if ((SPL > 1) && l_bufv[i] && !tmo_ldblk[i] && !l_actv[six[i]]) begin
           l_act [six[i]] <= l_buf[i];
           l_actv[six[i]] <= 1'b1;
           l_cls [six[i]] <= pre_cls(l_buf[i]);

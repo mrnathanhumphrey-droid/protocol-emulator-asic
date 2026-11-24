@@ -76,7 +76,7 @@ EXPECT = {
     "M_BUF_NOINVAL":     (2, None),
     "M_BUF_SWAP":        (2, None),
     "M_COMB_OUT":        (4, None),
-    "M_NO_PRIME":        (6, "4 + 2 (arm B, 10-29): the `cur_rel` replica's enable repeats the dispatch condition so the replica loads exactly when `cur` does under this mutant too"),
+    "M_NO_PRIME":        (8, "4 + 2 (arm B, 10-29): the `cur_rel` replica's enable repeats the dispatch condition so the replica loads exactly when `cur` does under this mutant too; + 2 (V2E1, 11-24): `tmo_drop` repeats it too, so the buffer-load block fires exactly when the K6 drop does under this mutant"),
     "M_BUF_CHAINFLIP":   (3, None),
     # ⭐ TWO LINES, WHICH IS ONE SUBSTITUTION: `assign host_q = a_q;` becomes
     # `assign host_q = 2'd0;`, so the diff is one line removed and one added --
@@ -297,6 +297,7 @@ EXPECT = {
     "M_FT_REL_LATE":      (1, None),   # K4: the FT edge path released a cycle late
     "M_FT_CAP_FILES":     (1, None),   # K5: the edge cycle's other capture filed
     "M_FT_TMO_KEEP":      (3, None),   # K6: the held PC+2 left valid after a timeout
+    "M_FT_TMO_LOADRACE":  (2, None),   # V2E1 (11-24): the load block removed, the drop misses the word
     "M_FT_TAG_LOST":      (2, None),   # the edge tag dropped on a buffer -> spare load
     # the slot buffer, piece 4 (Wilson 11-20 / 11-22): the scheduler contracts
     "M_K10_EARLY":        (2, None),   # K10: the edge accepted in the arming writeback cycle

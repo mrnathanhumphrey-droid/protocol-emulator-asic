@@ -45,6 +45,7 @@ Must-fires (each RED somewhere in its image's sweep, by its assertion):
   M_FT_NO_PKILL    K5  the in-flight fetch not killed                  SLOTORD / FTDROP / FTKEEP
   M_FT_CAP_FILES   K5  the edge cycle's other capture filed            FTDROP / SLOTORD
   M_FT_TMO_KEEP    K6  the held PC+2 left valid after a timeout        FTTMO / SLOTORD
+  M_FT_TMO_LOADRACE K6 the buffer loads the word the drop removes      FTTMO (V2E1, on dwrace)
   M_FT_TAG_LOST        the edge tag lost when its word moves           FTKEEP
   M_FT_SCAN_RACE   K9  the scan selects a flushing lane (11-14)        K9 (ScanOk)
 Piece 4 (Wilson 11-20 / 11-22), the scheduler contracts, on the same images:
@@ -85,9 +86,14 @@ FLIP_LO, FLIP_HI = -6, 150   # the flip, relative to the image's first arming (o
 #: the gate's images (thinned 11-22 from a 12-image, 35-minute exploration -- R:\claude_scratch
 #: is where the full sweeps live): each case the counts require, and each must-fire, is reached
 #: on at least one of these. `dw1` is the standing buffered-edge-word case (K3's buffer clause).
-IMAGES = ("dw1", "fall", "loop", "spare", "quick", "quick_b7", "parkft", "parkqual")
+#: `dwrace` / `dwrace2` (11-24, V2E1 in docs/V2_DEFECTS.md): the start-up order with a SHORT
+#: timeout -- the edge word waits in the buffer while the spare empties, and the buffer would load
+#: it in the K6 drop's own cycle (FTTMO, then SLOTORD on dwrace; FTTMO alone on dwrace2)
+IMAGES = ("dw1", "fall", "loop", "spare", "quick", "quick_b7", "parkft", "parkqual", "dwrace", "dwrace2")
 #: the flip window per image, relative to its first arming (the buffered case sits at wb + 1)
-WINDOW = {"dw1": (-6, 21)}
+WINDOW = {"dw1": (-6, 21), "dwrace": (-6, 21), "dwrace2": (-6, 21)}
+#: the V2E1 witnesses: dw_image(n, ds, wd) at their own timeout (found 11-24, 76 of 320 images)
+RACE = {"dwrace": (1, 2, 8, 2), "dwrace2": (2, 6, 4, 16)}
 STATS = ("ftraise", "keepslot", "keepbuf", "keepcap", "keepnone", "fttmo", "tagmove")
 #: counted but NOT required: the edge word ABSENT at an FT edge (the refetch branch) -- 0 over
 #: 3,253 runs; agent 2's "never absent" lemma decides it (Wilson 11-22), so it is reported, not
@@ -121,6 +127,9 @@ MUTANTS = [
     # the stale edge tag (Wilson 11-24): a tag left on a slot / buffer that holds no word
     ("M_TAG_STALE", "tag", "the edge tag left on an emptied place", ("spare", "quick", "dw1"),
      ("TAGSTALE",)),
+    # V2E1 (11-24): the buffer loads the tagged word in the K6 drop's cycle, so it escapes the drop
+    ("M_FT_TMO_LOADRACE", "K6", "the buffer loads the word the drop removes", ("dwrace", "dwrace2"),
+     ("FTTMO",)),
 ]
 
 #: THE PARK WITNESS (Wilson 11-23, item 2): lane 0 an open-drain clocked lane that WRITES, idles
@@ -137,6 +146,9 @@ def image(name):
     before the edge, buffered and loaded); `<kind>_b<d>` keeps them BUSY with pinless
     loops of words of d.. cycles, so the one fetch port is contended at a phase set by d
     and lane 0's FT words can still be in flight -- or not yet fetched -- at its edge."""
+    if name in RACE:
+        n, ds, wd, tmo = RACE[name]
+        return dw_image(n, ds, wd, tmo)
     if name.startswith("dw"):
         return dw_image(int(name[2:]))
     if name.startswith("park"):
@@ -182,14 +194,15 @@ def image(name):
     return I.join_image(headers, prog)
 
 
-def dw_image(n, ds=4, wd=6):
+def dw_image(n, ds=4, wd=6, tmo=None):
     """THE BUFFERED EDGE WORD (Wilson 11-22, K3's buffer clause, a standing case): lane 0's FT ARM
     is word 0, captured during start-up, so the round robin primes PC+1 first and the edge word
     comes second; lanes 1..n get EARLIER deadlines and win the first dispatches after priming, so
     lane 0's ARM writes back late, its edge word is captured before that writeback and BUFFERED
     (head and spare full), and an edge at writeback + 1 meets it in the buffer -- the flush keeps it
-    from there as the head (measured 11-22: 24 of 24 images, edge word 2-23 cycles ahead)."""
-    arm = I.act_arm(A.PIN_A, 0, TMO, ft=True)
+    from there as the head (measured 11-22: 24 of 24 images, edge word 2-23 cycles ahead).
+    `tmo` overrides the module TMO (the V2E1 witnesses, RACE)."""
+    arm = I.act_arm(A.PIN_A, 0, TMO if tmo is None else tmo, ft=True)
     lvl = lambda v: I.act(I.OP_LEVEL, I.UO0, v, D1)
     prog = [arm, lvl(0), lvl(1), lvl(0), I.act(I.OP_REARM, 0, 1, D1)]
     l0 = I.ACT_BASE
