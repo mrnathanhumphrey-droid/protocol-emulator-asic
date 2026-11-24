@@ -50,8 +50,19 @@ Item 3, the closure and progress:
 * `halfRange_BPR` -- both sides on `runBPR`: `ts ≤ now + D` and `now ≤ ts + K + 1`, for a lane
   unarmed and unhalted to `T`. With `D ≤ 32767` and `K + 1 ≤ 32768` the RTL's signed `tf_diff`
   reads every such lane correctly.
-Scope: a lane unarmed from an idle start. An arming episode (armed no-timeout and parked lanes
-are excluded while armed) restarts the run at the episode's end; that restart is not here.
+Scope of item 3: a lane unarmed from an idle start.
+
+Item 4, the restart (every arming episode's end):
+* the chain anchored at the release `rel = ts + reb` (`runR_rel_step`, `wb_bound_rel`,
+  `wb_close_rel`, `behind_rel`), started from any cycle where the lane is not in its own dispatch
+  and `now ≤ rel`; the gap premise is the bridged one, `K + 2 + reb ≤ dly + ext`;
+* `restart_at_edge` -- the cycle after any edge of the lane (plain, HALF, a park's rise,
+  FALLTHROUGH) meets that start: unarmed, not in its own dispatch (it was armed, so masked), and
+  `rel = edge + max 1 off` (or `edge + 1` after the flush);
+* `halfRange_episode` -- **from the cycle after an edge, while the lane stays unarmed and
+  unhalted: `ts ≤ now + D` and `now ≤ ts + K + 2`** (one more than item 3: the rebase bit).
+Not covered: the cycles after a FALLTHROUGH *timeout* (it keeps `ts`, already at or below `now`;
+no release-at-`now` start), and the lanes excluded by design while armed / halted.
 -/
 namespace JLane
 
@@ -789,6 +800,406 @@ theorem halfRange_BPR (D : Nat)
       (fun n => runBPR P win usb sreq isArm edge isFT offW ntW isPark hdW wdt nwt kt n B0)
       (isRun_runBPR P win usb sreq isArm edge isFT offW ntW isPark hdW wdt nwt kt B0)
       h0 y h0ts M S K hK T hun hnh hgap hM hS n hn⟩
+
+/-! ### Item 4: the restart -- the bound anchored at the release, from any cycle
+
+After an arming ends at its edge, the lane's `ts` is the edge cycle (a FALLTHROUGH flush, or a
+plain edge with `off = 0`) with the rebase bit set, so `ts` sits one below `now` while the
+release `rel = ts + reb` does not. The chain below is items 2-3 anchored at `rel` (as
+`RespWinB.wb_bound_winBK_fl`), started from any cycle where the lane is not in its own dispatch
+(`NotMid`, in place of an idle engine) and released no earlier than `now`. -/
+
+/-- The rebase bit after one cycle. -/
+theorem stepBPR_reb (wd nw : Lane → Bool) (k : Lane → Nat) (B : EngBP) (l : Lane) :
+    (stepBPR P win usb sreq isArm edge isFT offW ntW isPark hdW wd nw k B).A.X.reb l =
+      if B.pe l = true then decide (B.off l = 0)
+      else if B.tmo win l = true then B.A.X.reb l
+      else if B.fl win l = true then true
+      else if B.A.X.x.e.st = .wb ∧ l = B.A.X.x.e.cur ∧
+          0 < (P.haltP B.halt).dly l + (P.haltP B.halt).ext B.A.X.x.e.now l then false
+      else B.A.X.reb l := rfl
+
+theorem rel_eq (X : EngBK) (l : Lane) : X.rel l = X.x.e.ts l + (if X.reb l = true then 1 else 0) :=
+  rfl
+
+section run2
+variable (R : Nat → EngBP) (hR : IsRunBPR P win usb sreq isArm edge isFT offW ntW isPark hdW R)
+include hR
+
+/-- An unarmed lane's release: never decreases, flat off its writeback, and at a writeback with
+`dly + ext > 0` it is the old `ts` plus `dly + ext` (the rebase bit cleared). -/
+theorem runR_rel_step (y : Lane) (n : Nat) (ha : (R n).A.armed y = false) :
+    (R n).A.X.rel y ≤ (R (n + 1)).A.X.rel y ∧
+      (¬IsWB y (R n).A.X.x.e → (R (n + 1)).A.X.rel y = (R n).A.X.rel y) ∧
+      (IsWB y (R n).A.X.x.e → 0 < P.dly y + P.ext (R n).A.X.x.e.now y →
+        (R (n + 1)).A.X.rel y = (R n).A.X.x.e.ts y + P.dly y + P.ext (R n).A.X.x.e.now y) := by
+  obtain ⟨wd, nw, k, h⟩ := hR n
+  rw [h]
+  obtain ⟨hpe, htm, hfl⟩ := unarmed_quiet win (R n) y ha
+  have hts := stepBPR_ts P win usb sreq isArm edge isFT offW ntW isPark hdW wd nw k (R n) y
+  have hrb := stepBPR_reb P win usb sreq isArm edge isFT offW ntW isPark hdW wd nw k (R n) y
+  rw [hpe, htm, hfl] at hts hrb
+  simp only [Bool.false_eq_true, if_false] at hts hrb
+  have e1 : (P.haltP (R n).halt).dly = P.dly := rfl
+  have e2 : (P.haltP (R n).halt).ext = P.ext := rfl
+  rw [e1, e2] at hrb
+  unfold tsNext at hts
+  rw [e1, e2] at hts
+  generalize stepBPR P win usb sreq isArm edge isFT offW ntW isPark hdW wd nw k (R n) = B' at hts hrb ⊢
+  have hr0 := rel_eq (R n).A.X y
+  have hr1 := rel_eq B'.A.X y
+  by_cases hw : (R n).A.X.x.e.st = .wb ∧ y = (R n).A.X.x.e.cur
+  · have hw' : IsWB y (R n).A.X.x.e := ⟨hw.1, hw.2.symm⟩
+    have hts' : B'.A.X.x.e.ts y
+        = (R n).A.X.x.e.ts y + P.dly y + P.ext (R n).A.X.x.e.now y := by rw [hts, if_pos hw]
+    by_cases hd : 0 < P.dly y + P.ext (R n).A.X.x.e.now y
+    · have hrb' : B'.A.X.reb y = false := by rw [hrb, if_pos ⟨hw.1, hw.2, hd⟩]
+      rw [hrb'] at hr1
+      have hb := rbit_le ((R n).A.X.reb y)
+      refine ⟨?_, fun h' => absurd hw' h', fun _ _ => ?_⟩
+      · simp only [Bool.false_eq_true, if_false] at hr1; omega
+      · simp only [Bool.false_eq_true, if_false] at hr1; omega
+    · have hrb' : B'.A.X.reb y = (R n).A.X.reb y := by
+        rw [hrb, if_neg (fun h' => hd h'.2.2)]
+      rw [hrb'] at hr1
+      refine ⟨by omega, fun h' => absurd hw' h', fun _ h' => absurd h' hd⟩
+  · have hts' : B'.A.X.x.e.ts y = (R n).A.X.x.e.ts y := by rw [hts, if_neg hw]
+    have hrb' : B'.A.X.reb y = (R n).A.X.reb y := by
+      rw [hrb, if_neg (fun h' => hw ⟨h'.1, h'.2.1⟩)]
+    rw [hrb'] at hr1
+    exact ⟨by omega, fun _ => by omega, fun h' => absurd ⟨h'.1, h'.2.symm⟩ hw⟩
+
+theorem runR_rel_mono2 (y : Lane) (a : Nat) :
+    ∀ j, (∀ n, n < j → (R (a + n)).A.armed y = false) →
+      (R a).A.X.rel y ≤ (R (a + j)).A.X.rel y
+  | 0, _ => Nat.le_refl _
+  | j + 1, ha => Nat.le_trans (runR_rel_mono2 y a j (fun n hn => ha n (by omega)))
+      (runR_rel_step P win usb sreq isArm edge isFT offW ntW isPark hdW R hR y (a + j)
+        (ha j (by omega))).1
+
+theorem runR_rel_flat2 (y : Lane) (c : Nat) :
+    ∀ n, (∀ i, i < n → (R (c + i)).A.armed y = false ∧ ¬IsWB y (R (c + i)).A.X.x.e) →
+      (R (c + n)).A.X.rel y = (R c).A.X.rel y
+  | 0, _ => rfl
+  | n + 1, h => by
+    have ih := runR_rel_flat2 y c n (fun i hi => h i (by omega))
+    have hs := (runR_rel_step P win usb sreq isArm edge isFT offW ntW isPark hdW R hR y (c + n)
+      (h n (by omega)).1).2.1 (h n (by omega)).2
+    show (R (c + n + 1)).A.X.rel y = _
+    rw [hs, ih]
+
+/-- A writeback of `y` at `t`, from a start where `y` is not in its own dispatch, is two cycles
+after `y`'s decision. -/
+theorem runR_wb_back2 (h0m : ¬((R 0).A.X.x.e.st ≠ .idle ∧ (R 0).A.X.x.e.cur = y)) (t : Nat)
+    (hwb : IsWB y (R t).A.X.x.e) : ∃ s, t = s + 2 ∧ DecP win y (R s) := by
+  match t, hwb with
+  | 0, hwb => exact absurd ⟨by rw [hwb.1]; decide, hwb.2⟩ h0m
+  | 1, hwb =>
+    obtain ⟨hd, hc⟩ := runR_wb_prev P win usb sreq isArm edge isFT offW ntW isPark hdW R hR y 0 hwb
+    exact absurd ⟨by rw [hd]; decide, hc⟩ h0m
+  | s + 2, hwb => exact ⟨s, rfl, runR_wb_dec P win usb sreq isArm edge isFT offW ntW isPark hdW R hR y s hwb⟩
+
+/-- `y` waits, released by the RTL's release. -/
+def WaitR (y : Lane) (B : EngBP) : Prop :=
+  B.A.armed y = false ∧ B.halt y = false ∧ B.A.X.rel y ≤ B.A.X.x.e.now ∧ ¬DecP win y B
+
+/-- **The response bound, anchored at the release, from any start** where `y` is not in its own
+dispatch and released no earlier than `now`. -/
+theorem wb_bound_rel (y : Lane) (h0m : ¬((R 0).A.X.x.e.st ≠ .idle ∧ (R 0).A.X.x.e.cur = y))
+    (h0rel : (R 0).A.X.x.e.now ≤ (R 0).A.X.rel y)
+    (M S K : Nat) (hK : 3 * M + S + 3 ≤ K)
+    (t : Nat) (hwb : IsWB y (R t).A.X.x.e)
+    (hun : ∀ n, n < t → (R n).A.armed y = false)
+    (hnh : ∀ n, n < t → (R n).halt y = false)
+    (hfree : ∀ w, w + 2 < t → IsWB y (R w).A.X.x.e → (R w).A.X.x.e.now < (R t).A.X.rel y)
+    (hM : ∀ c, c + K + 2 ≤ t →
+      cntW (fun B => decOther (winA win B.mask) y B.A.X.x.e) R c K ≤ M)
+    (hS : ∀ c, c + K + 2 ≤ t → (∀ i, i < K → WaitR win y (R (c + i))) →
+      cntW (fun B => noDecB (winA win B.mask) B.A.X.x.e) R c K ≤ S) :
+    (R t).A.X.x.e.now ≤ (R t).A.X.rel y + K + 1 := by
+  obtain ⟨D, rfl, hdec⟩ := runR_wb_back2 P win usb sreq isArm edge isFT offW ntW isPark hdW R hR h0m t hwb
+  have hidle : (R D).A.X.x.e.st = .idle := hdec.1
+  have hdrive := (runR_dec_wb P win usb sreq isArm edge isFT offW ntW isPark hdW R hR y D hdec).1
+  have t1 := (runR_rel_step P win usb sreq isArm edge isFT offW ntW isPark hdW R hR y D
+    (hun D (by omega))).2.1 (not_wb_of_st y _ (by rw [hidle]; decide))
+  have t2 := (runR_rel_step P win usb sreq isArm edge isFT offW ntW isPark hdW R hR y (D + 1)
+    (hun (D + 1) (by omega))).2.1 (not_wb_of_st y _ (by rw [hdrive]; decide))
+  have hrel2 : (R (D + 2)).A.X.rel y = (R D).A.X.rel y := t2.trans t1
+  have hnow := runR_now P win usb sreq isArm edge isFT offW ntW isPark hdW R hR
+  rw [hrel2, hnow (D + 2)]
+  rw [hrel2] at hfree
+  by_cases hfit : (R 0).A.X.x.e.now + D + 1 ≤ (R D).A.X.rel y + K
+  · omega
+  · exfalso
+    have hr0 := runR_rel_mono2 P win usb sreq isArm edge isFT offW ntW isPark hdW R hR y 0 D
+      (fun n hn => hun _ (by omega))
+    rw [Nat.zero_add] at hr0
+    obtain ⟨c, rfl⟩ : ∃ c, D = c + K := ⟨D - K, by omega⟩
+    have noWB : ∀ w, c ≤ w → w < c + K → ¬IsWB y (R w).A.X.x.e := by
+      intro w hcw hwD hw
+      have h1 := hfree w (by omega) hw
+      have h2 := hnow w
+      omega
+    have hnd : ∀ s, s < K → ¬DecP win y (R (c + s)) := by
+      intro s hs hds
+      obtain ⟨hd1, hw2⟩ := runR_dec_wb P win usb sreq isArm edge isFT offW ntW isPark hdW R hR y
+        (c + s) hds
+      rcases Nat.lt_or_ge (c + s + 2) (c + K) with hlt | hge
+      · exact noWB (c + s + 2) (by omega) hlt hw2
+      · have : c + K = c + s + 1 ∨ c + K = c + s + 2 := by omega
+        rcases this with h | h
+        · rw [h, hd1] at hidle; cases hidle
+        · rw [h, hw2.1] at hidle; cases hidle
+    have hA := runR_lemA P win usb sreq isArm edge isFT offW ntW isPark hdW R hR y c K hnd
+    have hm := hM c (by omega)
+    have hs := hS c (by omega) (fun i hi => by
+      refine ⟨hun _ (by omega), hnh _ (by omega), ?_, hnd i hi⟩
+      have hmo := runR_rel_mono2 P win usb sreq isArm edge isFT offW ntW isPark hdW R hR y (c + i)
+        (K - i) (fun n hn => hun _ (by omega))
+      have e : c + i + (K - i) = c + K := by omega
+      rw [e] at hmo
+      have := hnow (c + i)
+      omega)
+    have h2 := ph_le (R c).A.X.x.e.st
+    omega
+
+/-- **The closure, anchored at the release**: the gap premise is the bridged one
+(`HfreeR.hrelR_bridged`'s `hgap`): `K + 2` plus the rebase bit, at most `dly + ext`. -/
+theorem wb_close_rel (y : Lane) (h0m : ¬((R 0).A.X.x.e.st ≠ .idle ∧ (R 0).A.X.x.e.cur = y))
+    (h0rel : (R 0).A.X.x.e.now ≤ (R 0).A.X.rel y)
+    (M S K : Nat) (hK : 3 * M + S + 3 ≤ K) (T : Nat)
+    (hun : ∀ n, n < T → (R n).A.armed y = false)
+    (hnh : ∀ n, n < T → (R n).halt y = false)
+    (hgap : ∀ n, n < T → IsWB y (R n).A.X.x.e →
+      K + 2 + (if (R n).A.X.reb y = true then 1 else 0) ≤ P.dly y + P.ext (R n).A.X.x.e.now y)
+    (hM : ∀ c, c + K + 2 ≤ T →
+      cntW (fun B => decOther (winA win B.mask) y B.A.X.x.e) R c K ≤ M)
+    (hS : ∀ c, c + K + 2 ≤ T → (∀ i, i < K → WaitR win y (R (c + i))) →
+      cntW (fun B => noDecB (winA win B.mask) B.A.X.x.e) R c K ≤ S) :
+    ∀ t, t < T → IsWB y (R t).A.X.x.e → (R t).A.X.x.e.now ≤ (R t).A.X.rel y + K + 1 := by
+  have key : ∀ N, ∀ t, t < N → t < T → IsWB y (R t).A.X.x.e →
+      (R t).A.X.x.e.now ≤ (R t).A.X.rel y + K + 1 := by
+    intro N
+    induction N with
+    | zero => intro t ht; exact absurd ht (Nat.not_lt_zero t)
+    | succ N ih =>
+    intro t htN htT hwb
+    refine wb_bound_rel P win usb sreq isArm edge isFT offW ntW isPark hdW R hR y h0m h0rel M S K
+      hK t hwb (fun n hn => hun n (by omega)) (fun n hn => hnh n (by omega)) ?_
+      (fun c hc => hM c (by omega)) (fun c hc hw => hS c (by omega) hw)
+    intro w hw hwbw
+    have hb := ih w (by omega) (by omega) hwbw
+    have hg := hgap w (by omega) hwbw
+    have h1 := (runR_rel_step P win usb sreq isArm edge isFT offW ntW isPark hdW R hR y w
+      (hun w (by omega))).2.2 hwbw (by omega)
+    have hr := rel_eq (R w).A.X y
+    have hmo := runR_rel_mono2 P win usb sreq isArm edge isFT offW ntW isPark hdW R hR y (w + 1)
+      (t - (w + 1)) (fun n hn => hun _ (by omega))
+    have e : w + 1 + (t - (w + 1)) = t := by omega
+    rw [e] at hmo
+    omega
+  intro t ht
+  exact key (t + 1) t (Nat.lt_succ_self t) ht
+
+/-- **Behind `now`, every cycle, anchored at the release**: `now ≤ rel + K + 1` at every cycle
+`n` with `n + K + 2 ≤ T` (so `now ≤ ts + K + 2`). -/
+theorem behind_rel (y : Lane) (h0m : ¬((R 0).A.X.x.e.st ≠ .idle ∧ (R 0).A.X.x.e.cur = y))
+    (h0rel : (R 0).A.X.x.e.now ≤ (R 0).A.X.rel y)
+    (M S K : Nat) (hK : 3 * M + S + 3 ≤ K) (T : Nat)
+    (hun : ∀ n, n < T → (R n).A.armed y = false)
+    (hnh : ∀ n, n < T → (R n).halt y = false)
+    (hgap : ∀ n, n < T → IsWB y (R n).A.X.x.e →
+      K + 2 + (if (R n).A.X.reb y = true then 1 else 0) ≤ P.dly y + P.ext (R n).A.X.x.e.now y)
+    (hM : ∀ c, c + K + 2 ≤ T →
+      cntW (fun B => decOther (winA win B.mask) y B.A.X.x.e) R c K ≤ M)
+    (hS : ∀ c, c + K + 2 ≤ T → (∀ i, i < K → WaitR win y (R (c + i))) →
+      cntW (fun B => noDecB (winA win B.mask) B.A.X.x.e) R c K ≤ S)
+    (n : Nat) (hn : n + K + 2 ≤ T) :
+    (R n).A.X.x.e.now ≤ (R n).A.X.rel y + K + 1 := by
+  have hclose := wb_close_rel P win usb sreq isArm edge isFT offW ntW isPark hdW R hR y h0m h0rel
+    M S K hK T hun hnh hgap hM hS
+  have hnow := runR_now P win usb sreq isArm edge isFT offW ntW isPark hdW R hR
+  by_cases hr : (R n).A.X.x.e.now ≤ (R n).A.X.rel y
+  · omega
+  · by_cases hwb : IsWB y (R n).A.X.x.e
+    · exact hclose n (by omega) hwb
+    · by_cases hdr : (R n).A.X.x.e.st = .drive ∧ (R n).A.X.x.e.cur = y
+      · obtain ⟨s1, c1⟩ := runR_st P win usb sreq isArm edge isFT offW ntW isPark hdW R hR n
+        obtain ⟨h3, h4⟩ := step_drive P (winA win (R n).mask) (R n).A.X.x.e hdr.1
+        have hw1 : IsWB y (R (n + 1)).A.X.x.e := ⟨s1.trans h3, (c1.trans h4).trans hdr.2⟩
+        have hb := hclose (n + 1) (by omega) hw1
+        have hf := (runR_rel_step P win usb sreq isArm edge isFT offW ntW isPark hdW R hR y n
+          (hun n (by omega))).2.1 hwb
+        have := hnow (n + 1)
+        have := hnow n
+        omega
+      · have hm : ¬((R n).A.X.x.e.st ≠ .idle ∧ (R n).A.X.x.e.cur = y) := by
+          rintro ⟨hne, hc⟩
+          cases hs : (R n).A.X.x.e.st with
+          | idle => exact hne hs
+          | drive => exact hdr ⟨hs, hc⟩
+          | wb => exact hwb ⟨hs, hc⟩
+        rcases least_or_none (fun s => DecP win y (R (n + s))) K with ⟨s0, hsK, hdec, hmin⟩ | hnd
+        rotate_left
+        · exfalso
+          have noW := runR_noWB P win usb sreq isArm edge isFT offW ntW isPark hdW R hR y n K hm hnd
+          have hA := runR_lemA P win usb sreq isArm edge isFT offW ntW isPark hdW R hR y n K hnd
+          have hmM := hM n (by omega)
+          have hsS := hS n (by omega) (fun i hi => by
+            refine ⟨hun _ (by omega), hnh _ (by omega), ?_, hnd i hi⟩
+            have hf := runR_rel_flat2 P win usb sreq isArm edge isFT offW ntW isPark hdW R hR y n i
+              (fun j hj => ⟨hun _ (by omega), noW j (by omega)⟩)
+            have := hnow (n + i)
+            have := hnow n
+            omega)
+          have h2 := ph_le (R n).A.X.x.e.st
+          omega
+        have noW := runR_noWB P win usb sreq isArm edge isFT offW ntW isPark hdW R hR y n s0 hm hmin
+        have hw2 := (runR_dec_wb P win usb sreq isArm edge isFT offW ntW isPark hdW R hR y
+          (n + s0) hdec).2
+        have e : n + s0 + 2 = n + (s0 + 2) := by omega
+        rw [e] at hw2
+        have hb := hclose (n + (s0 + 2)) (by omega) hw2
+        have hf := runR_rel_flat2 P win usb sreq isArm edge isFT offW ntW isPark hdW R hR y n
+          (s0 + 2) (fun j hj => ⟨hun _ (by omega), noW j hj⟩)
+        have := hnow (n + (s0 + 2))
+        have := hnow n
+        omega
+
+end run2
+
+/-- An armed or halted lane is never the masked winner. -/
+theorem winA_mask (win : Engine → Option Lane) (B : EngBP) (l : Lane) (h : B.mask l = true)
+    (e : Engine) : winA win B.mask e ≠ some l := by
+  unfold winA
+  cases hw : win e with
+  | none => simp
+  | some v =>
+    simp only
+    by_cases hv : v = l
+    · subst hv; rw [if_pos h]; simp
+    · split
+      · simp
+      · intro hc; exact hv (Option.some.inj hc)
+
+/-- **The restart**: the cycle after an edge of `y` (a plain edge, HALF, a park's rise, or a
+FALLTHROUGH edge) meets the release-anchored chain's start: `y` unarmed, not in its own
+dispatch, and released no earlier than `now` (`rel = edge + max 1 off`, or `edge + 1` for the
+flush). `hH`: the ahead invariant at the edge (`runBPR_halfAhead`). -/
+theorem restart_at_edge (D : Nat) (wd nw : Lane → Bool) (k : Lane → Nat) (B : EngBP) (y : Lane)
+    (hH : HalfAhead D B) (hhit : B.A.hit y = true) :
+    let B' := stepBPR P win usb sreq isArm edge isFT offW ntW isPark hdW wd nw k B
+    B'.A.armed y = false ∧
+      ¬(B'.A.X.x.e.st ≠ .idle ∧ B'.A.X.x.e.cur = y) ∧
+      B'.A.X.x.e.now ≤ B'.A.X.rel y := by
+  intro B'
+  have harm : B.A.armed y = true := by
+    unfold EngBA.hit at hhit; simp only [Bool.and_eq_true] at hhit; exact hhit.1
+  have hnow := stepBPR_now P win usb sreq isArm edge isFT offW ntW isPark hdW wd nw k B
+  refine ⟨?_, ?_, ?_⟩
+  · show (if (B.ends win y || wd y) = true then false else _) = false
+    rw [if_pos (by unfold EngBP.ends; rw [hhit]; simp)]
+  · -- not mid at the edge (armed), not decided there (masked): not mid after
+    have hm : NotMid y B.A.X.x.e := by
+      rintro ⟨hne, hc⟩
+      have := (hH.cur hne).2
+      rw [hc, harm] at this
+      cases this
+    have hnd : ¬Dec (winA win B.mask) y B.A.X.x.e := fun hd =>
+      winA_mask win B y (by unfold EngBP.mask; rw [harm]; simp) B.A.X.x.e hd.2.1
+    have h := notMid_step P (winA win B.mask) y B.A.X.x.e hm hnd
+    obtain ⟨s1, c1⟩ := stepBPR_st_step P win usb sreq isArm edge isFT offW ntW isPark hdW wd nw k B
+    unfold NotMid at h
+    show ¬(B'.A.X.x.e.st ≠ .idle ∧ B'.A.X.x.e.cur = y)
+    rw [show B'.A.X.x.e.st = _ from s1, show B'.A.X.x.e.cur = _ from c1]
+    exact h
+  · show B'.A.X.x.e.now ≤ B'.A.X.rel y
+    rw [show B'.A.X.x.e.now = _ from hnow]
+    cases hft : B.ft y with
+    | false =>
+      have hpe : B.pe y = true := by unfold EngBP.pe; rw [hhit, hft]; rfl
+      rw [show B'.A.X.rel y = _ from
+        stepBPR_pe_rel P win usb sreq isArm edge isFT offW ntW isPark hdW wd nw k B y hpe]
+      omega
+    | true =>
+      have hpe : B.pe y = false := by unfold EngBP.pe; rw [hft]; simp
+      have htm : B.tmo win y = false := by
+        unfold EngBP.tmo; rw [hit_tmo_excl B.A win y hhit]; simp
+      have hfl : B.fl win y = true := by
+        unfold EngBP.fl EngBP.ends; rw [hhit, hft]; simp
+      have hts := stepBPR_ts P win usb sreq isArm edge isFT offW ntW isPark hdW wd nw k B y
+      have hrb := stepBPR_reb P win usb sreq isArm edge isFT offW ntW isPark hdW wd nw k B y
+      rw [hpe, htm, hfl] at hts hrb
+      simp only [Bool.false_eq_true, if_false, if_true] at hts hrb
+      show B.A.X.x.e.now + 1 ≤ B'.A.X.x.e.ts y + (if B'.A.X.reb y = true then 1 else 0)
+      rw [show B'.A.X.x.e.ts y = _ from hts, show B'.A.X.reb y = _ from hrb]
+      simp
+
+/-- A shifted run is a run. -/
+theorem isRun_shift (R : Nat → EngBP)
+    (hR : IsRunBPR P win usb sreq isArm edge isFT offW ntW isPark hdW R) (a : Nat) :
+    IsRunBPR P win usb sreq isArm edge isFT offW ntW isPark hdW (fun m => R (a + m)) :=
+  fun m => hR (a + m)
+
+/-- **The half range after an arming episode** (the restart): on `runBPR`, from the cycle after
+an edge of `y` at `e`, while `y` stays unarmed and unhalted to `e + 1 + T`, every cycle
+`e + 1 + n` with `n + K + 2 ≤ T` has `ts ≤ now + D` and `now ≤ ts + K + 2`. The premises are
+those of `halfRange_BPR`, read on the episode (`R m = runBPR (e + 1 + m)`), with the gap's
+rebase bit (`K + 2 + reb ≤ dly + ext`, the bridged form). -/
+theorem halfRange_episode (D : Nat)
+    (hwin : ∀ e w, win e = some w → P.live w = true ∧ e.ts w ≤ e.now)
+    (hD : ∀ n l, P.dly l + P.ext n l ≤ D) (hoW : ∀ b, offW b ≤ D) (hhW : ∀ b, hdW b ≤ D)
+    (wdt nwt : Nat → Lane → Bool) (kt : Nat → Lane → Nat) (B0 : EngBP) (hA0 : HalfAhead D B0)
+    (y : Lane) (e : Nat)
+    (hhit : (runBPR P win usb sreq isArm edge isFT offW ntW isPark hdW wdt nwt kt e B0).A.hit y = true)
+    (M S K : Nat) (hK : 3 * M + S + 3 ≤ K) (T : Nat)
+    (hun : ∀ n, n < T →
+      (runBPR P win usb sreq isArm edge isFT offW ntW isPark hdW wdt nwt kt (e + 1 + n) B0).A.armed y
+        = false)
+    (hnh : ∀ n, n < T →
+      (runBPR P win usb sreq isArm edge isFT offW ntW isPark hdW wdt nwt kt (e + 1 + n) B0).halt y
+        = false)
+    (hgap : ∀ n, n < T →
+      IsWB y (runBPR P win usb sreq isArm edge isFT offW ntW isPark hdW wdt nwt kt (e + 1 + n) B0).A.X.x.e →
+      K + 2 + (if (runBPR P win usb sreq isArm edge isFT offW ntW isPark hdW wdt nwt kt (e + 1 + n)
+          B0).A.X.reb y = true then 1 else 0)
+        ≤ P.dly y + P.ext
+          (runBPR P win usb sreq isArm edge isFT offW ntW isPark hdW wdt nwt kt (e + 1 + n) B0).A.X.x.e.now y)
+    (hM : ∀ c, c + K + 2 ≤ T →
+      cntW (fun B => decOther (winA win B.mask) y B.A.X.x.e)
+        (fun m => runBPR P win usb sreq isArm edge isFT offW ntW isPark hdW wdt nwt kt (e + 1 + m) B0)
+        c K ≤ M)
+    (hS : ∀ c, c + K + 2 ≤ T → (∀ i, i < K →
+        WaitR win y (runBPR P win usb sreq isArm edge isFT offW ntW isPark hdW wdt nwt kt
+          (e + 1 + (c + i)) B0)) →
+      cntW (fun B => noDecB (winA win B.mask) B.A.X.x.e)
+        (fun m => runBPR P win usb sreq isArm edge isFT offW ntW isPark hdW wdt nwt kt (e + 1 + m) B0)
+        c K ≤ S)
+    (n : Nat) (hn : n + K + 2 ≤ T) :
+    (runBPR P win usb sreq isArm edge isFT offW ntW isPark hdW wdt nwt kt (e + 1 + n) B0).A.X.x.e.ts y
+        ≤ (runBPR P win usb sreq isArm edge isFT offW ntW isPark hdW wdt nwt kt (e + 1 + n) B0).A.X.x.e.now
+          + D ∧
+      (runBPR P win usb sreq isArm edge isFT offW ntW isPark hdW wdt nwt kt (e + 1 + n) B0).A.X.x.e.now
+        ≤ (runBPR P win usb sreq isArm edge isFT offW ntW isPark hdW wdt nwt kt (e + 1 + n) B0).A.X.x.e.ts y
+          + K + 2 := by
+  have hHe := runBPR_halfAhead P win usb sreq isArm edge isFT offW ntW isPark hdW D hwin hD hoW hhW
+    wdt nwt kt B0 hA0 e
+  obtain ⟨_, h0m, h0rel⟩ := restart_at_edge P win usb sreq isArm edge isFT offW ntW isPark hdW D
+    _ _ _ _ y hHe hhit
+  have hRun := isRun_shift P win usb sreq isArm edge isFT offW ntW isPark hdW
+    (fun n => runBPR P win usb sreq isArm edge isFT offW ntW isPark hdW wdt nwt kt n B0)
+    (isRun_runBPR P win usb sreq isArm edge isFT offW ntW isPark hdW wdt nwt kt B0) (e + 1)
+  have hb := behind_rel P win usb sreq isArm edge isFT offW ntW isPark hdW
+    (fun m => runBPR P win usb sreq isArm edge isFT offW ntW isPark hdW wdt nwt kt (e + 1 + m) B0)
+    hRun y (by simpa using h0m) (by simpa using h0rel) M S K hK T hun hnh hgap hM hS n hn
+  have hr := rel_eq
+    (runBPR P win usb sreq isArm edge isFT offW ntW isPark hdW wdt nwt kt (e + 1 + n) B0).A.X y
+  have hrb := rbit_le
+    ((runBPR P win usb sreq isArm edge isFT offW ntW isPark hdW wdt nwt kt (e + 1 + n) B0).A.X.reb y)
+  refine ⟨runBPR_ts_ahead P win usb sreq isArm edge isFT offW ntW isPark hdW D hwin hD hoW hhW
+    wdt nwt kt B0 hA0 (e + 1 + n) y, ?_⟩
+  simp only at hb
+  omega
 
 end
 

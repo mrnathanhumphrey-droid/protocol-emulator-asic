@@ -274,7 +274,11 @@ KEY = ("dstar", "dstar29", "dstar39", "dstar39_v2", "dstar39_st", "dstar39_hold"
        "behind_winBPR",
        # ... item 3: the closure, progress, both sides on runBPR
        "runR_ts_mono2", "runR_wb_prev", "runR_wb_dec", "runR_noWB", "runR_ts_wb", "least_or_none",
-       "wb_close_BPR", "behind_all_BPR", "halfRange_BPR")
+       "wb_close_BPR", "behind_all_BPR", "halfRange_BPR",
+       # ... item 4: the restart at every arming end, anchored at the release
+       "stepBPR_reb", "rel_eq", "runR_rel_step", "runR_rel_mono2", "runR_rel_flat2", "runR_wb_back2",
+       "wb_bound_rel", "wb_close_rel", "behind_rel", "winA_mask", "restart_at_edge", "isRun_shift",
+       "halfRange_episode")
 #: proof_constants.load() key -> the Lean expression that must evaluate to it (SPEC: the map)
 CONSTS = {
     "lemmaA_window": "LEMMA_A_WINDOW", "R_base": "R_BASE", "dispatch_cycles": "DISPATCH_CYCLES",
