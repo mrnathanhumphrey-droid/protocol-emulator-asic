@@ -59,6 +59,9 @@ with and without the 11-24 stale-tag clears.
 
 **v1.** Not present: `v1-lock` has no slot buffer and no FALLTHROUGH.
 
-**Fix.** Pending (the next commit): the drop must cover a word that leaves the buffer
-in the same cycle. It ships with a planted mutant that removes the guard, and a
-must-fire image from the start-up-order family in `run_ftflush` that kills it.
+**Fix.** 07a1150: `tmo_drop` is the dispatch's own drop condition, term for term, and
+`tmo_ldblk` stops both buffer loads for the timeout winner whose buffer is tagged, in
+that cycle only. The word stays in the buffer, where the drop's `l_bufv <= 0` removes it.
+The 894 runs above give 0 asserts on the fixed RTL. `M_FT_TMO_LOADRACE` removes the
+block; `run_ftflush`'s `dwrace` (`dw_image(1, 2, 8)`, timeout 2) kills it, and
+`dwrace2` (`dw_image(2, 6, 4)`, timeout 16) is the second witness. Both run clean.
