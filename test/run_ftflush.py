@@ -85,7 +85,7 @@ FLIP_LO, FLIP_HI = -6, 150   # the flip, relative to the image's first arming (o
 #: the gate's images (thinned 11-22 from a 12-image, 35-minute exploration -- R:\claude_scratch
 #: is where the full sweeps live): each case the counts require, and each must-fire, is reached
 #: on at least one of these. `dw1` is the standing buffered-edge-word case (K3's buffer clause).
-IMAGES = ("dw1", "fall", "loop", "spare", "quick", "quick_b7")
+IMAGES = ("dw1", "fall", "loop", "spare", "quick", "quick_b7", "parkft", "parkqual")
 #: the flip window per image, relative to its first arming (the buffered case sits at wb + 1)
 WINDOW = {"dw1": (-6, 21)}
 STATS = ("ftraise", "keepslot", "keepbuf", "keepcap", "keepnone", "fttmo", "tagmove")
@@ -113,7 +113,20 @@ MUTANTS = [
     ("M_K10_EARLY", "K10", "an edge acting in its arming writeback", ("fall", "quick"), ("K10",)),
     ("M_K11_EARLY", "K11", "an armed lane released before its deadline", ("fall", "loop"), ("K11",)),
     ("M_SCHED_SKIP", "names", "a ready decision cycle naming no lane", ("fall", "quick"), ("NAMES",)),
+    # what a clocked park leaves behind (Wilson 11-23): items 1 and 2
+    ("M_PARK_KEEPS_FT", "park1", "the park leaves l_armft set", ("parkft",), ("PARKFLAGS",)),
+    ("M_PARK_KEEPS_QUAL", "park1", "the park leaves l_armqual set", ("parkqual",), ("PARKFLAGS",)),
+    ("M_PARK_STUCK", "park2", "the park not ended at its own rise", ("parkft", "parkqual"),
+     ("PARKEND",)),
 ]
+
+#: THE PARK WITNESS (Wilson 11-23, item 2): lane 0 an open-drain clocked lane that WRITES, idles
+#: past the stretch bound, then waits on a plain ARM -- at CK_PRE = 4, so the shipped tick bound
+#: (CK_STRETCH_TO) is ~500 cycles. Clean: no fault, the ARM releases at its edge. M_PARK_STUCK:
+#: the false stretch halt (erratum E2) must show -- it halts the lane inside the idle, so the
+#: parked-ARM effect (PARKARM) is shown instead by parkft's loop back to its ARM.
+WIT_PRE, WIT_IDLE, WIT_FLIP, WIT_NCYC = 4, 900, 1400, 2200
+WIT_WANT = ("STRETCHFALSE",)
 
 
 def image(name):
@@ -123,6 +136,8 @@ def image(name):
     and lane 0's FT words can still be in flight -- or not yet fetched -- at its edge."""
     if name.startswith("dw"):
         return dw_image(int(name[2:]))
+    if name.startswith("park"):
+        return park_image(name)
     kind, _s, b = name.partition("_b")
     busy_d = int(b) if b else None
     arm = I.act_arm(A.PIN_A, 0, TMO, ft=True)
@@ -191,6 +206,60 @@ def dw_image(n, ds=4, wd=6):
                 base += I.ACT_BYTES
             headers.append(I.hdr(k + 1, k + 1, 0, 500, 0, 200, 240, park))
     return I.join_image(headers, prog)
+
+
+#: the park lane: open-drain, data uio[2], clock uio[3] (both pulled up on tb_arm2, so a released
+#: clock rises at once and every park's rise comes)
+PK_PIN, PK_CLK = 2, 3
+#: the park lane's spacing: the I2C images' 70 (a 12-cycle clocked bit breaks the SDA hold rule and
+#: is refused -- config_err, the lane halts, no park: measured 11-23)
+PK_D = 70
+
+
+def park_image(name):
+    """WHAT A CLOCKED PARK LEAVES BEHIND (Wilson 11-23). `parkft`: lane 0's FALLTHROUGH ARM, then a
+    clocked write on BOTH of its paths (PC+1 on the timeout, PC+2 at the edge), so every flip
+    parks with the ARM's flags in place; `parkqual`: the same ARM with QUAL too (a QUAL ARM can
+    reach a park only through its FALLTHROUGH timeout); `parkwit`: the witness -- a clocked write,
+    an idle word past the stretch bound, then a plain ARM (no timeout) on the bench's pin."""
+    sh = I.act_shift_clocked(PK_PIN, PK_D, nbits=2)
+    rel = I.act(I.OP_LEVEL, PK_PIN, 1, PK_D)          # open-drain: release the data line
+    if name in ("parkft", "parkqual"):
+        prog = [I.act_arm(A.PIN_A, 0, TMO, ft=True, qual=(name == "parkqual")),
+                sh, sh, rel, I.act(I.OP_REARM, 0, 1, PK_D)]
+    elif name == "parkwit":
+        prog = [I.act_shift_clocked(PK_PIN, PK_D, nbits=8), rel,
+                I.act(I.OP_LEVEL, I.PIN_NONE, 0, WIT_IDLE),
+                I.act_arm(A.PIN_A, 0, 0), rel, I.act(I.OP_REARM, 0, 0, 500)]
+    else:
+        raise ValueError(name)
+    l0 = I.ACT_BASE
+    headers = [I.hdr(PK_PIN, PK_CLK, 0, PK_D, 0, *I.d_fields(PK_D), l0)]
+    base = l0 + len(prog) * I.ACT_BYTES
+    prog.append(I.act(I.OP_REARM, 0, 0, 500))
+    for k in range(1, I.N_LANES):
+        headers.append(I.hdr(k + 3, k + 3, 0, 500, 0, 200, 240, base))
+    return I.join_image(headers, prog)
+
+
+def build_pre(out, defines=(), pre=WIT_PRE):
+    """tb_arm2 with the stretch prescaler shortened (the witness)"""
+    r = A.run([A.tool("iverilog"), "-g2012", "-I", ROOT, "-o", out, "-s", "tb_arm2",
+               "-Ptb_arm2.CK_PRE=%d" % pre] + ["-D%s" % d for d in defines] + [A.BENCH] + A.RTL)
+    if r.returncode != 0:
+        raise RuntimeError("build %s failed: %s" % (out, (r.stdout + r.stderr)[-400:]))
+
+
+def witness(vvp, img):
+    """(assertion tag -> count, ended) for the park witness"""
+    args = [vvp, "+IMG=%s" % img, "+IDLE=1", "+PHA=-1", "+PHB=-1", "+NCYC=%d" % WIT_NCYC,
+            "+PHA_ABS=%d" % WIT_FLIP, "+QUIESCENT"]
+    r = A.run(sim_run.vvp(args, images=[img]))
+    out = r.stdout + r.stderr
+    tags = {}
+    for m in re.finditer(r"^\s*\*\*\* ASSERT pe_engine (\w+):", out, re.M):
+        tags[m.group(1)] = tags.get(m.group(1), 0) + 1
+    return tags, ("ARM2 " in out)
 
 
 def armed_at(vvp, img):
@@ -281,6 +350,26 @@ def main() -> int:
                                            if hit else "*** SURVIVED on %s" % "/".join(ks)))
         if not hit:
             probs.append("%s (%s) survived on %s (no %s)" % (d, kk, "/".join(ks), "/".join(want)))
+    # ---- the park witness (Wilson 11-23, item 2), at CK_PRE = WIT_PRE
+    print("\n  park witness: a clocked write, %d idle cycles past the stretch bound (CK_PRE %d), "
+          "then a plain ARM released at cycle %d" % (WIT_IDLE, WIT_PRE, WIT_FLIP))
+    wp = os.path.join(tmp, "ftflush_parkwit.hex")
+    I.write_image(wp, image("parkwit"))
+    sim_run.scratch_image(GEN, wp)
+    for d, want in ((None, ()), ("M_PARK_STUCK", WIT_WANT)):
+        wv = os.path.join(tmp, "ftflush_wit_%s.vvp" % (d or "clean"))
+        build_pre(wv, [d] if d else [])
+        tags, ended = witness(wv, wp)
+        if d is None:
+            ok = not tags and ended
+            print("    clean            %s" % ("no fault, no asserts, ended" if ok else "*** %s (ended %s)" % (tags, ended)))
+            if not ok:
+                probs.append("park witness, clean build: %s (ended %s)" % (tags or "no asserts", ended))
+        else:
+            ok = all(tags.get(t, 0) for t in want)
+            print("    %-16s %s" % (d, ("RED: %s" % tags) if ok else "*** SURVIVED: %s" % tags))
+            if not ok:
+                probs.append("%s on the park witness: wanted %s, saw %s" % (d, "/".join(want), tags))
     print()
     for x in probs:
         print("  *** %s" % x)

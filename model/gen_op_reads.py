@@ -267,6 +267,9 @@ SITES = [
      "DEF", "mutant"),
     ("if (arm_hit[ck_k] && st == ST_WB && cur == ck_k && cur_act[ACT_W-1 -: OP_W] == OP_ARM)", "DEF",
      "sim-only check: the ARM word's own writeback cycle (K10)"),
+    # the park (Wilson 11-23, item 2): an ARM's writeback on a lane still marked parked
+    ("if (st == ST_WB && cur_act[ACT_W-1 -: OP_W] == OP_ARM && l_ckpark[cur])", "DEF",
+     "sim-only check: an ARM writing back on a parked lane (PARKARM)"),
     # piece 3 (K6, Wilson 11-22): an FT ARM's writeback does not swap -- ARM's mod[1]
     ("wire                  ft_k6     = (a_op == OP_ARM) && a_mod[1] && !ft_spt;", ("ARM",),
      "K6: the retiring FT ARM keeps its head slot (no swap)"),

@@ -302,6 +302,10 @@ EXPECT = {
     "M_K10_EARLY":        (2, None),   # K10: the edge accepted in the arming writeback cycle
     "M_K11_EARLY":        (1, None),   # K11: a timed armed lane released before its deadline
     "M_SCHED_SKIP":       (2, None),   # sched_names_ready: the decision drops every 8th cycle
+    # what a clocked park leaves behind (Wilson 11-23)
+    "M_PARK_KEEPS_FT":    (1, None),   # item 1: the park leaves l_armft set
+    "M_PARK_KEEPS_QUAL":  (1, None),   # item 1: the park leaves l_armqual set
+    "M_PARK_STUCK":       (1, None),   # item 2: the park not ended at its own rise
     # the slot buffer, piece 2 (Wilson 11-21): each a one-line term but the raise
     "M_SLOT_PAST_NPF":    (2, None),   # the requester ignores a held no-prefetch word
     "M_SLOT_LIFO":        (2, None),   # the youngest issuable request served first

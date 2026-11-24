@@ -63,8 +63,8 @@ MUST_FIRE: dict = {
         'runner': 'test/run_ftflush.py',
         'build': 'ftflush_%s.vvp' % _m,
         'define': _m,
-        'expect': '^\\s*\\*\\*\\* ASSERT pe_engine (?:FTKEEP|FTDROP|FTREL|FTTMO|SLOTORD|K9|K10|K11|NAMES|BPRIME|TMOPICK):',
-        'why': "piece 3 / 4's planted case for %s (Wilson 11-22): the FT flush / scheduler checks must report it" % _w,
+        'expect': '^\\s*\\*\\*\\* ASSERT pe_engine (?:FTKEEP|FTDROP|FTREL|FTTMO|SLOTORD|K9|K10|K11|NAMES|BPRIME|TMOPICK|PARKFLAGS|PARKEND|PARKARM|STRETCHFALSE):',
+        'why': "piece 3 / 4's planted case for %s (Wilson 11-22 / 11-23): the FT flush / scheduler / park checks must report it" % _w,
     } for _m, _w in (
         ('M_FT_DROP_EDGE', 'K1, the edge word not kept'),
         ('M_FT_KEEP_TMO', 'K2, the timeout word kept past the edge'),
@@ -78,7 +78,18 @@ MUST_FIRE: dict = {
         ('M_FT_SCAN_RACE', 'K9 ScanOk, the scan selecting a flushing lane (11-14)'),
         ('M_K10_EARLY', 'K10, an edge acting in its arming writeback cycle'),
         ('M_K11_EARLY', 'K11, an armed lane released before its deadline'),
-        ('M_SCHED_SKIP', 'sched_names_ready, a decision cycle with a ready lane naming none'))},
+        ('M_SCHED_SKIP', 'sched_names_ready, a decision cycle with a ready lane naming none'),
+        ('M_PARK_KEEPS_FT', "park item 1, the park leaving l_armft set"),
+        ('M_PARK_KEEPS_QUAL', "park item 1, the park leaving l_armqual set"),
+        ('M_PARK_STUCK', "park item 2, the park not ended at its own rise"))},
+    # the park witness (Wilson 11-23, item 2): M_PARK_STUCK at CK_PRE = 4 -- the false stretch halt
+    'run_ftflush:ftflush_wit_M_PARK_STUCK': {
+        'runner': 'test/run_ftflush.py',
+        'build': 'ftflush_wit_M_PARK_STUCK.vvp',
+        'define': 'M_PARK_STUCK',
+        'expect': '^\\s*\\*\\*\\* ASSERT pe_engine (?:STRETCHFALSE|PARKEND|PARKARM):',
+        'why': "the park witness's planted case (Wilson 11-23): a write's park left set past the stretch bound must show the false halt",
+    },
     'run_slotbuf:slotbuf_M_SLOT_RAISE_LATE:slotbuf_fcfs': {
         'runner': 'test/run_slotbuf.py',
         'build': 'slotbuf_M_SLOT_RAISE_LATE.vvp',

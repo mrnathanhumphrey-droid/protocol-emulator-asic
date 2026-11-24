@@ -3332,6 +3332,7 @@ module pe_engine #(
   // not the tags: the edge word is the word at PC+2 (the lane's PC is PC+1 once
   // its FT ARM has retired), held in a slot or the buffer or arriving at CAP
   reg [N_LANES-1:0] ck_fe = {N_LANES{1'b0}}, ck_fh, ck_fpk;
+  reg [N_LANES-1:0] ck_pe = {N_LANES{1'b0}};   // a park's rise, last cycle (PARKEND)
   reg [TS_W-1:0]    ck_fnow;
   reg               ck_tv = 1'b0;
   reg [LW-1:0]      ck_tl;
@@ -3527,6 +3528,26 @@ module pe_engine #(
       if (ck_dec && |ck_rdy && !dec_v)
         $display("*** ASSERT pe_engine NAMES: a decision cycle with lane(s) %b ready named none, at %0t",
                  ck_rdy, $time);
+      // ---- what a clocked park leaves behind (Wilson 11-23) ----
+      for (ck_k = 0; ck_k < N_LANES; ck_k = ck_k + 1) begin
+        // item 1: a lane armed by its park carries no FALLTHROUGH / QUAL flag
+        if (l_ckpark[ck_k] && l_armed[ck_k] && (l_armft[ck_k] || l_armqual[ck_k]))
+          $display("*** ASSERT pe_engine PARKFLAGS: lane %0d parked with ARM flags ft=%0d qual=%0d left set, at %0t",
+                   ck_k, l_armft[ck_k], l_armqual[ck_k], $time);
+        // item 2: the cycle after a park's rise the lane is no longer parked
+        if (ck_pe[ck_k] && l_ckpark[ck_k])
+          $display("*** ASSERT pe_engine PARKEND: lane %0d still parked the cycle after its park's rise, at %0t",
+                   ck_k, $time);
+        // ... so the stretch watchdog never halts a lane whose rise already came
+        if (l_ckpark[ck_k] && !l_armed[ck_k] && (l_ckwdog[ck_k] >= CK_STRETCH_TO[CKW-1:0]))
+          $display("*** ASSERT pe_engine STRETCHFALSE: the stretch watchdog halts lane %0d after its park's rise came, at %0t",
+                   ck_k, $time);
+      end
+      // ... and a plain ARM never arms a lane still marked parked (its edge would rebase to now + hdly)
+      if (st == ST_WB && cur_act[ACT_W-1 -: OP_W] == OP_ARM && l_ckpark[cur])
+        $display("*** ASSERT pe_engine PARKARM: lane %0d's ARM writes back while the lane is still marked parked, at %0t",
+                 cur, $time);
+      ck_pe <= arm_hit & ck_parked;
     end
   end
 `endif
@@ -4767,6 +4788,18 @@ module pe_engine #(
               l_armpin[cur]  <= ck_pin;
               l_armedge[cur] <= 1'b1;        // a RISE
               l_arm2[cur]    <= 1'b0;        // an EDGE park, never the level ARM
+              // ⛔⛔ THE PARK CLEARS EVERY ARM FLAG IT DOES NOT OWN (Wilson 11-23, item 1).
+              // It was written when `l_arm2` was the only one; FALLTHROUGH and QUAL
+              // (11-14) left `l_armft` / `l_armqual` set from the lane's last ARM, so a
+              // park after an FT ARM took the FT edge path at its rise (PC+2, both slots
+              // emptied, mid-shift), and after a QUAL ARM off the USB lane its rise was
+              // never seen. Each has its mutant; PARKFLAGS judges it on every run.
+`ifndef M_PARK_KEEPS_FT
+              l_armft[cur]   <= 1'b0;
+`endif
+`ifndef M_PARK_KEEPS_QUAL
+              l_armqual[cur] <= 1'b0;
+`endif
               notmo_n[cur]   = 1'b1;         // unbounded: a slow peer is legal
               l_ckpark[cur]  <= 1'b1;
             end
@@ -5347,6 +5380,18 @@ module pe_engine #(
           l_ckwait[i] <= 1'b0;
           l_ckpark[i] <= 1'b0;
         end
+        // ⛔⛔ THE PARK ENDS AT ITS OWN RISE (Wilson 11-23, item 2). `ck_hit` clears
+        // the park only for a clocked SHIFTIN (it needs `l_ckwait`); after a clocked
+        // SHIFT's park the rise disarmed the lane but left `l_ckpark` set until the
+        // lane's next clocked read, so the stretch watchdog kept counting and halted
+        // a lane whose peer had answered (35 ms after a write-only burst: measured on
+        // v1-lock and here, the i2c_fram_fpga board image among them -- erratum E2),
+        // and a later plain ARM rebased to now + hdly. `ck_rebase` reads the
+        // registered flag, so this rise's own rebase is unchanged. PARKEND /
+        // PARKARM / STRETCHFALSE judge it; `M_PARK_STUCK` is its must-fire.
+`ifndef M_PARK_STUCK
+        if (arm_hit[i]) l_ckpark[i] <= 1'b0;
+`endif
         if (arm_hit[i]) begin
           // ⭐⭐ FALLTHROUGH'S EDGE PATH IS PC+2 (Wilson 11-14), TAKEN HERE, AT
           // THE EDGE. The lane's PC already reads PC+1 (the ARM retired at its
