@@ -3547,6 +3547,15 @@ module pe_engine #(
       if (st == ST_WB && cur_act[ACT_W-1 -: OP_W] == OP_ARM && l_ckpark[cur])
         $display("*** ASSERT pe_engine PARKARM: lane %0d's ARM writes back while the lane is still marked parked, at %0t",
                  cur, $time);
+      // the edge tag lives only on a valid place (11-24): no tag on an empty slot or buffer
+      for (ck_k = 0; ck_k < NSLOT; ck_k = ck_k + 1)
+        if (tg_s[ck_k] && !l_actv[ck_k])
+          $display("*** ASSERT pe_engine TAGSTALE: slot %0d carries the edge tag and holds no word, at %0t",
+                   ck_k, $time);
+      for (ck_k = 0; ck_k < N_LANES; ck_k = ck_k + 1)
+        if (tg_b[ck_k] && !l_bufv[ck_k])
+          $display("*** ASSERT pe_engine TAGSTALE: lane %0d's buffer carries the edge tag and holds no word, at %0t",
+                   ck_k, $time);
       ck_pe <= arm_hit & ck_parked;
     end
   end
@@ -3923,6 +3932,9 @@ module pe_engine #(
           l_cls [hix[i]] <= pre_cls(l_buf[i]);
           tg_s  [hix[i]] <= tg_b[i];
           l_bufv[i]      <= 1'b0;
+`ifndef M_TAG_STALE
+          tg_b  [i]      <= 1'b0;      // (11-24) the tag leaves with the word
+`endif
         end else if ((SPL > 1) && l_bufv[i] && !l_actv[six[i]]) begin
           l_act [six[i]] <= l_buf[i];
           l_actv[six[i]] <= 1'b1;
@@ -3933,6 +3945,9 @@ module pe_engine #(
           tg_s  [six[i]] <= tg_b[i];
 `endif
           l_bufv[i]      <= 1'b0;
+`ifndef M_TAG_STALE
+          tg_b  [i]      <= 1'b0;
+`endif
         end
 `ifdef M_SLOT_RAISE_LATE
       if (rl_v) sq_n[rl_l] <= 2'd2;
@@ -5074,11 +5089,17 @@ module pe_engine #(
             // action does (invalidate the head, swap), to the target or on
             l_pc[cur]   <= br_taken ? br_tgt : l_pc[cur] + ACT_BYTES[AW-1:0];
             l_actv[hix[cur]] <= 1'b0;
+`ifndef M_TAG_STALE
+            tg_s[hix[cur]]   <= 1'b0;   // (11-24) a retired slot carries no edge tag
+`endif
             if (SPL > 1) l_sel[cur] <= !l_sel[cur];
           end else if (a_op != OP_REARM) begin
             l_pc[cur]   <= l_pc[cur] + ACT_BYTES[AW-1:0];
 `ifndef M_BUF_NOINVAL
             l_actv[hix[cur]] <= 1'b0;   // ⛔ INVALIDATION
+`endif
+`ifndef M_TAG_STALE
+            tg_s[hix[cur]]   <= 1'b0;
 `endif
 `ifdef M_PFETCH_BOTH_INVAL
             l_actv[six[cur]] <= 1'b0;
@@ -5104,6 +5125,9 @@ module pe_engine #(
             l_pc[cur]   <= l_base[cur];         // loop back to the start
 `ifndef M_BUF_NOINVAL
             l_actv[hix[cur]] <= 1'b0;
+`endif
+`ifndef M_TAG_STALE
+            tg_s[hix[cur]]   <= 1'b0;
 `endif
 `ifndef M_BUF_SWAP
             if (SPL > 1) l_sel[cur] <= !l_sel[cur];

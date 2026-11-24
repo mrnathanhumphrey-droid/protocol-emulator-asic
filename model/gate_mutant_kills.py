@@ -149,7 +149,7 @@ KILLERS = {
     "M_SCHED_SKIP": "test/run_ftflush.py",
     # what a clocked park leaves behind (Wilson 11-23)
     "M_PARK_KEEPS_FT": "test/run_ftflush.py", "M_PARK_KEEPS_QUAL": "test/run_ftflush.py",
-    "M_PARK_STUCK": "test/run_ftflush.py",
+    "M_PARK_STUCK": "test/run_ftflush.py", "M_TAG_STALE": "test/run_ftflush.py",
     "M_FT_REFLUSH": "test/run_arm2.py",          # A4-K8 a second flush at f + 1 (K8's check)
     # the slot buffer, piece 2 (Wilson 11-21): pe_engine's SLOT assertions
     "M_SLOT_RAISE_LATE": "test/run_slotbuf.py", "M_SLOT_LIFO": "test/run_slotbuf.py",

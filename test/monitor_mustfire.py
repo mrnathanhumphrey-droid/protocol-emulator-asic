@@ -63,7 +63,7 @@ MUST_FIRE: dict = {
         'runner': 'test/run_ftflush.py',
         'build': 'ftflush_%s.vvp' % _m,
         'define': _m,
-        'expect': '^\\s*\\*\\*\\* ASSERT pe_engine (?:FTKEEP|FTDROP|FTREL|FTTMO|SLOTORD|K9|K10|K11|NAMES|BPRIME|TMOPICK|PARKFLAGS|PARKEND|PARKARM|STRETCHFALSE):',
+        'expect': '^\\s*\\*\\*\\* ASSERT pe_engine (?:FTKEEP|FTDROP|FTREL|FTTMO|SLOTORD|K9|K10|K11|NAMES|BPRIME|TMOPICK|PARKFLAGS|PARKEND|PARKARM|STRETCHFALSE|TAGSTALE):',
         'why': "piece 3 / 4's planted case for %s (Wilson 11-22 / 11-23): the FT flush / scheduler / park checks must report it" % _w,
     } for _m, _w in (
         ('M_FT_DROP_EDGE', 'K1, the edge word not kept'),
@@ -81,7 +81,8 @@ MUST_FIRE: dict = {
         ('M_SCHED_SKIP', 'sched_names_ready, a decision cycle with a ready lane naming none'),
         ('M_PARK_KEEPS_FT', "park item 1, the park leaving l_armft set"),
         ('M_PARK_KEEPS_QUAL', "park item 1, the park leaving l_armqual set"),
-        ('M_PARK_STUCK', "park item 2, the park not ended at its own rise"))},
+        ('M_PARK_STUCK', "park item 2, the park not ended at its own rise"),
+        ('M_TAG_STALE', "the edge tag left on an emptied slot / buffer (11-24)"))},
     # the park witness (Wilson 11-23, item 2): M_PARK_STUCK at CK_PRE = 4 -- the false stretch halt
     'run_ftflush:ftflush_wit_M_PARK_STUCK': {
         'runner': 'test/run_ftflush.py',

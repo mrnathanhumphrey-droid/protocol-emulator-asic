@@ -306,6 +306,7 @@ EXPECT = {
     "M_PARK_KEEPS_FT":    (1, None),   # item 1: the park leaves l_armft set
     "M_PARK_KEEPS_QUAL":  (1, None),   # item 1: the park leaves l_armqual set
     "M_PARK_STUCK":       (1, None),   # item 2: the park not ended at its own rise
+    "M_TAG_STALE":        (5, "one clear per invalidation site (Wilson 11-24, the edge tag lives only on a valid place): the two buffer loads (tg_b) and the three head retires (tg_s) -- branch, action, LEVEL loop-back; each arm removes its one clear"),
     # the slot buffer, piece 2 (Wilson 11-21): each a one-line term but the raise
     "M_SLOT_PAST_NPF":    (2, None),   # the requester ignores a held no-prefetch word
     "M_SLOT_LIFO":        (2, None),   # the youngest issuable request served first

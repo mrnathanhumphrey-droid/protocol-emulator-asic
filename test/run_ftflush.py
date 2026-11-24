@@ -118,6 +118,9 @@ MUTANTS = [
     ("M_PARK_KEEPS_QUAL", "park1", "the park leaves l_armqual set", ("parkqual",), ("PARKFLAGS",)),
     ("M_PARK_STUCK", "park2", "the park not ended at its own rise", ("parkft", "parkqual"),
      ("PARKEND",)),
+    # the stale edge tag (Wilson 11-24): a tag left on a slot / buffer that holds no word
+    ("M_TAG_STALE", "tag", "the edge tag left on an emptied place", ("spare", "quick", "dw1"),
+     ("TAGSTALE",)),
 ]
 
 #: THE PARK WITNESS (Wilson 11-23, item 2): lane 0 an open-drain clocked lane that WRITES, idles
