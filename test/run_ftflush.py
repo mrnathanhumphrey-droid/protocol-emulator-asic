@@ -46,6 +46,8 @@ Must-fires (each RED somewhere in its image's sweep, by its assertion):
   M_FT_CAP_FILES   K5  the edge cycle's other capture filed            FTDROP / SLOTORD
   M_FT_TMO_KEEP    K6  the held PC+2 left valid after a timeout        FTTMO / SLOTORD
   M_FT_TMO_LOADRACE K6 the buffer loads the word the drop removes      FTTMO (V2E1, on dwrace)
+  M_TMOPICK_DISPATCH  the timeout pick dispatches PC+1 in its cycle    TMOPICK (Wilson 11-24)
+  M_PARKARM_MARK      the park mark set on a phase that does not park PARKARM (Wilson 11-24, parkpp)
   M_FT_TAG_LOST        the edge tag lost when its word moves           FTKEEP
   M_FT_SCAN_RACE   K9  the scan selects a flushing lane (11-14)        K9 (ScanOk)
 Piece 4 (Wilson 11-20 / 11-22), the scheduler contracts, on the same images:
@@ -89,9 +91,11 @@ FLIP_LO, FLIP_HI = -6, 150   # the flip, relative to the image's first arming (o
 #: `dwrace` / `dwrace2` (11-24, V2E1 in docs/V2_DEFECTS.md): the start-up order with a SHORT
 #: timeout -- the edge word waits in the buffer while the spare empties, and the buffer would load
 #: it in the K6 drop's own cycle (FTTMO, then SLOTORD on dwrace; FTTMO alone on dwrace2)
-IMAGES = ("dw1", "fall", "loop", "spare", "quick", "quick_b7", "parkft", "parkqual", "dwrace", "dwrace2")
+#: `parkpp` (Wilson 11-24, PARKARM's must-fire): a PUSH-PULL clocked write (no park) then a plain ARM
+IMAGES = ("dw1", "fall", "loop", "spare", "quick", "quick_b7", "parkft", "parkqual", "dwrace", "dwrace2",
+          "parkpp")
 #: the flip window per image, relative to its first arming (the buffered case sits at wb + 1)
-WINDOW = {"dw1": (-6, 21), "dwrace": (-6, 21), "dwrace2": (-6, 21)}
+WINDOW = {"dw1": (-6, 21), "dwrace": (-6, 21), "dwrace2": (-6, 21), "parkpp": (-6, 21)}
 #: the V2E1 witnesses: dw_image(n, ds, wd) at their own timeout (found 11-24, 76 of 320 images)
 RACE = {"dwrace": (1, 2, 8, 2), "dwrace2": (2, 6, 4, 16)}
 STATS = ("ftraise", "keepslot", "keepbuf", "keepcap", "keepnone", "fttmo", "tagmove")
@@ -130,6 +134,12 @@ MUTANTS = [
     # V2E1 (11-24): the buffer loads the tagged word in the K6 drop's cycle, so it escapes the drop
     ("M_FT_TMO_LOADRACE", "K6", "the buffer loads the word the drop removes", ("dwrace", "dwrace2"),
      ("FTTMO",)),
+    # TMOPICK (agent 2's 11-22 question, its must-fire per Wilson 11-24): the pick dispatches
+    ("M_TMOPICK_DISPATCH", "pick", "the timeout pick dispatches PC+1 in its cycle", ("fall", "loop"),
+     ("TMOPICK",)),
+    # PARKARM (its must-fire per Wilson 11-24): a mark with no park, so no rise ever clears it
+    ("M_PARKARM_MARK", "park3", "the park mark set on a phase that does not park", ("parkpp",),
+     ("PARKARM",)),
 ]
 
 #: THE PARK WITNESS (Wilson 11-23, item 2): lane 0 an open-drain clocked lane that WRITES, idles
@@ -237,12 +247,15 @@ def park_image(name):
     clocked write on BOTH of its paths (PC+1 on the timeout, PC+2 at the edge), so every flip
     parks with the ARM's flags in place; `parkqual`: the same ARM with QUAL too (a QUAL ARM can
     reach a park only through its FALLTHROUGH timeout); `parkwit`: the witness -- a clocked write,
-    an idle word past the stretch bound, then a plain ARM (no timeout) on the bench's pin."""
+    an idle word past the stretch bound, then a plain ARM (no timeout) on the bench's pin; `parkpp`:
+    the same clocked write on a PUSH-PULL lane, which never parks, then a plain ARM (PARKARM)."""
     sh = I.act_shift_clocked(PK_PIN, PK_D, nbits=2)
     rel = I.act(I.OP_LEVEL, PK_PIN, 1, PK_D)          # open-drain: release the data line
     if name in ("parkft", "parkqual"):
         prog = [I.act_arm(A.PIN_A, 0, TMO, ft=True, qual=(name == "parkqual")),
                 sh, sh, rel, I.act(I.OP_REARM, 0, 1, PK_D)]
+    elif name == "parkpp":
+        prog = [sh, I.act_arm(A.PIN_A, 0, 0), I.act(I.OP_REARM, 0, 1, PK_D)]
     elif name == "parkwit":
         prog = [I.act_shift_clocked(PK_PIN, PK_D, nbits=8), rel,
                 I.act(I.OP_LEVEL, I.PIN_NONE, 0, WIT_IDLE),
@@ -250,7 +263,7 @@ def park_image(name):
     else:
         raise ValueError(name)
     l0 = I.ACT_BASE
-    headers = [I.hdr(PK_PIN, PK_CLK, 0, PK_D, 0, *I.d_fields(PK_D), l0)]
+    headers = [I.hdr(PK_PIN, PK_CLK, 1 if name == "parkpp" else 0, PK_D, 0, *I.d_fields(PK_D), l0)]
     base = l0 + len(prog) * I.ACT_BYTES
     prog.append(I.act(I.OP_REARM, 0, 0, 500))
     for k in range(1, I.N_LANES):

@@ -83,7 +83,9 @@ MUST_FIRE: dict = {
         ('M_PARK_KEEPS_QUAL', "park item 1, the park leaving l_armqual set"),
         ('M_PARK_STUCK', "park item 2, the park not ended at its own rise"),
         ('M_TAG_STALE', "the edge tag left on an emptied slot / buffer (11-24)"),
-        ('M_FT_TMO_LOADRACE', "K6, the buffer loads the word the timeout drop removes (V2E1, 11-24)"))},
+        ('M_FT_TMO_LOADRACE', "K6, the buffer loads the word the timeout drop removes (V2E1, 11-24)"),
+        ('M_TMOPICK_DISPATCH', "TMOPICK, the timeout pick dispatching PC+1 in its own cycle (Wilson 11-24)"),
+        ('M_PARKARM_MARK', "PARKARM, the park mark set on a push-pull clocked phase that never parks (Wilson 11-24)"))},
     # the park witness (Wilson 11-23, item 2): M_PARK_STUCK at CK_PRE = 4 -- the false stretch halt
     'run_ftflush:ftflush_wit_M_PARK_STUCK': {
         'runner': 'test/run_ftflush.py',

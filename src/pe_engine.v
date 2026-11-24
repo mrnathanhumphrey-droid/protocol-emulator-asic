@@ -4164,6 +4164,11 @@ module pe_engine #(
                    // not a fault. `M_FT_HALTS` keeps the halt (A7's must-fire).
                    if (w_armed && ft_fall_on && l_armft[winner]) begin
                      armed_n[winner]   = 1'b0;       // fall through to PC+1
+                     // ⛔ the pick is ONE ST_IDLE cycle with no dispatch (TMOPICK);
+                     // `M_TMOPICK_DISPATCH` dispatches the head (PC+1) in it.
+`ifdef M_TMOPICK_DISPATCH
+                     if (w_hv) begin cur <= winner; cur_act <= w_act; cur_cls <= w_cls; cur_ck <= w_ck; cur_ckr <= w_ckr; st <= ST_DRIVE; end
+`endif
                      // ⭐ K6 (Wilson 11-22, the 11-20 ruling 1a (b)): the held PC+2
                      // is dropped at EVERY timeout -- in a slot, in the buffer, or
                      // in flight -- and refetched after PC+1 (the certificate
@@ -4843,6 +4848,12 @@ module pe_engine #(
               notmo_n[cur]   = 1'b1;         // unbounded: a slow peer is legal
               l_ckpark[cur]  <= 1'b1;
             end
+            // ⛔ the park mark belongs to a PARK only (open-drain); PARKARM judges a
+            // plain ARM writing back marked. `M_PARKARM_MARK` marks a push-pull
+            // clocked high phase, which never parks, so no rise ever clears it.
+`ifdef M_PARKARM_MARK
+            if (ck_act & ck_is_high & l_mode[cur]) l_ckpark[cur] <= 1'b1;
+`endif
             if (ck_shiftin & ck_is_high) begin
               l_ckwait[cur] <= 1'b1;
               l_ckgot[cur]  <= 1'b0;
