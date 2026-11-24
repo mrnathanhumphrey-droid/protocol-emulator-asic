@@ -86,7 +86,10 @@ def toEngine (r : Row) : Engine :=
     pslot := r.pslot == 1
     winq := if r.winqv == 1 then some (toLane r.winq) else none
     st := decSt r.st
-    cur := toLane r.cur }
+    cur := toLane r.cur
+    -- the trace carries no no-prefetch column: every word allows prefetch past it, as
+    -- `Program.fnpf`'s default (015df45 added the field; the replay's program is fnpf = false)
+    npf := fun _ _ => false }
 
 /-- `a ≥ b` as the RTL's signed 16-bit difference. -/
 def ge16 (a b : Nat) : Bool := (a % 65536 + 65536 - b % 65536) % 65536 < 32768
