@@ -33,3 +33,45 @@ v2 to show the bit set on each, and stays red for any other difference.
 
 **If v1 ships.** Delete the hold (one line); the same five images then report the
 sticky bit, matching v2.
+
+## E2 — a clocked write leaves its park set; a false clock-stretch fault ~35 ms later (found 2026-11-23)
+
+**What.** On an open-drain lane with a clock pin, every clocked action parks at
+its high phase (`l_ckpark <= 1`) and waits for the peer to release the clock.
+`l_ckpark` is cleared in only two places: `ck_hit`, which needs `l_ckwait` — set
+only by a clocked `SHIFTIN` — and the stretch watchdog's halt. After a clocked
+`SHIFT`, the rise is seen (the lane disarms and runs on), but `l_ckpark` stays 1
+until the lane's next clocked `SHIFTIN`. While it is set, the stretch watchdog
+keeps counting (one tick per `CK_STRETCH_PRE` = 16,384 cycles).
+
+**Effect on v1.** A lane whose last clocked action is a write, and which runs no
+clocked read for `CK_STRETCH_TO` ticks (35 ms), is **halted with the sticky
+clock-stretch fault** (status bit 7, `clk_stretch_err`) although every clock rise
+came. Data already sent is correct; the lane stops, and the host sees a bus fault
+that did not happen. A plain `ARM` on such a lane also rebases to `now + hdly`
+instead of `now`.
+
+**Seen on** (simulation of `v1-lock`, scratch bench):
+
+| image | lane | false halt |
+|---|---|---|
+| `fpga/images/i2c_fram_fpga.hex` (the board image) | 0 — its last write is followed by the final `REARM`, with no clocked read | cycle 1,784,212 = **35.7 ms** after reset, ~35 ms after the transfer completed |
+| a write-only I²C controller (START, three clocked writes, STOP, repeating) | 0 | cycle 1,754,901 = **35.1 ms**, while still writing |
+
+By static analysis the same holds for every lane that writes and never reads on
+a clock: 12 lanes in `ckdense_image.hex`, `ckod_image.hex`, `ckheavy_image.hex`
+and `ckhold_over_image.hex`. Their benches stop well before 35 ms, which is why no
+gate saw it. Every other clocked lane of record reads within ~2,200 cycles of
+each write and never reaches the limit.
+
+**v2.** The same mechanism (measured on 074e477: the board image at 35.9 ms, the
+write-only lane at 35.3 ms). Fixed in 8dbad16 (Wilson 11-23): the park's own
+rise clears `l_ckpark`. `test/run_ftflush.py` judges it on every run (PARKEND,
+STRETCHFALSE, PARKARM), plants `M_PARK_STUCK`, and runs the witness: a clocked
+write, 900 idle cycles past the stretch bound at a shortened prescaler, then a
+plain `ARM` — no fault on the fix, the false halt under the mutant.
+
+**If v1 ships.** The same fix is one line at the edge capture. Without it, a
+program avoids the fault by ending every clocked-write burst with a clocked read
+(an I²C write's ACK slot is one), or the host ignores status bit 7 after a
+write-only burst.
