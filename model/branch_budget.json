@@ -1602,6 +1602,123 @@
       },
       "lanes": {}
     },
+    "ftf_dw1.hex": {
+      "sha": "558f267122d407a29e2b93f56dccdad821c766a6d9052c1625d594e3eb70a824",
+      "branch_lanes": [],
+      "B": null,
+      "reason": "lane 0: no lateness certificate at B = 0; EDF response bounds: lane 0: no lateness certificate at B = 0",
+      "cert": {
+        "status": "uncertified",
+        "reason": "compute_j refuses: d_min = 6 is below D* = 20: with 5 lanes a refill occupies the single fetch port for 4 cycles, so 5 lanes consuming one action every 6 cycles saturate it. LANE 1 carries the tightest spacing. The timing guarantee is SCOPED to d_min >= D*; below it the steady-state jitter is measured at 8..12 and no bound is published.",
+        "d_min": null,
+        "J": null
+      },
+      "lanes": {}
+    },
+    "ftf_dwrace.hex": {
+      "sha": "e168da483a1252643fb3e8c03c64b3f4014234dda5bb421c0555e2c77070f7d0",
+      "branch_lanes": [],
+      "B": null,
+      "reason": "lane 0: no lateness certificate at B = 0; EDF response bounds: lane 0: no lateness certificate at B = 0",
+      "cert": {
+        "status": "uncertified",
+        "reason": "compute_j refuses: d_min = 2 is below D* = 20: with 5 lanes a refill occupies the single fetch port for 4 cycles, so 5 lanes consuming one action every 2 cycles saturate it. LANE 0 carries the tightest spacing. The timing guarantee is SCOPED to d_min >= D*; below it the steady-state jitter is measured at 8..12 and no bound is published.",
+        "d_min": null,
+        "J": null
+      },
+      "lanes": {}
+    },
+    "ftf_dwrace2.hex": {
+      "sha": "e00f18af7c179043c712be9426091c1d593a41c47a560fa35b7c7e872b93bc45",
+      "branch_lanes": [],
+      "B": null,
+      "reason": "lane 0: no lateness certificate at B = 0; EDF response bounds: lane 0: no lateness certificate at B = 0",
+      "cert": {
+        "status": "uncertified",
+        "reason": "compute_j refuses: d_min = 4 is below D* = 20: with 5 lanes a refill occupies the single fetch port for 4 cycles, so 5 lanes consuming one action every 4 cycles saturate it. LANE 1 carries the tightest spacing. The timing guarantee is SCOPED to d_min >= D*; below it the steady-state jitter is measured at 8..12 and no bound is published.",
+        "d_min": null,
+        "J": null
+      },
+      "lanes": {}
+    },
+    "ftf_fall.hex": {
+      "sha": "6261683de942b7143bb25fd1df07f3cd49fa81be1413a5c53522ec5350187696",
+      "branch_lanes": [],
+      "B": null,
+      "reason": "lane 0: no lateness certificate at B = 0; EDF response bounds: lane 0: no lateness certificate at B = 0",
+      "cert": {
+        "status": "uncertified",
+        "reason": "compute_j refuses: d_min = 12 is below D* = 20: with 5 lanes a refill occupies the single fetch port for 4 cycles, so 5 lanes consuming one action every 12 cycles saturate it. LANE 0 carries the tightest spacing. The timing guarantee is SCOPED to d_min >= D*; below it the steady-state jitter is measured at 8..12 and no bound is published.",
+        "d_min": null,
+        "J": null
+      },
+      "lanes": {}
+    },
+    "ftf_fall_b2_t1.hex": {
+      "sha": "d8bf2d4716d3ed89624dce979b73e11fdfc496788ebee2da7c7bae6b55e1c82e",
+      "branch_lanes": [],
+      "B": null,
+      "reason": "lane 0: no lateness certificate at B = 0; EDF response bounds: lane 0: no lateness certificate at B = 0",
+      "cert": {
+        "status": "uncertified",
+        "reason": "compute_j refuses: d_min = 1 is below D* = 20: with 5 lanes a refill occupies the single fetch port for 4 cycles, so 5 lanes consuming one action every 1 cycles saturate it. LANE 0 carries the tightest spacing. The timing guarantee is SCOPED to d_min >= D*; below it the steady-state jitter is measured at 8..12 and no bound is published.",
+        "d_min": null,
+        "J": null
+      },
+      "lanes": {}
+    },
+    "ftf_parkpp.hex": {
+      "sha": "3d325f5d6f129bab76e50470d3ee372f0853ddd4f10085011edde086a81f48a7",
+      "branch_lanes": [],
+      "B": 0,
+      "reason": "certified",
+      "cert": {
+        "status": "certified",
+        "reason": "pe_asm.compute_j",
+        "d_min": 70,
+        "J": 1
+      },
+      "lanes": {
+        "0": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 14
+        },
+        "1": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 17
+        },
+        "2": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 17
+        },
+        "3": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 17
+        },
+        "4": {
+          "max_late": 0,
+          "max_late_pin": 0,
+          "R": 17
+        }
+      }
+    },
+    "ftf_quick.hex": {
+      "sha": "ad636deae4cee81ce21adddbae7229cc2cd05d6b3c0831a3143d2674319849c7",
+      "branch_lanes": [],
+      "B": null,
+      "reason": "lane 0: no lateness certificate at B = 0; EDF response bounds: lane 0: no lateness certificate at B = 0",
+      "cert": {
+        "status": "uncertified",
+        "reason": "compute_j refuses: d_min = 2 is below D* = 20: with 5 lanes a refill occupies the single fetch port for 4 cycles, so 5 lanes consuming one action every 2 cycles saturate it. LANE 0 carries the tightest spacing. The timing guarantee is SCOPED to d_min >= D*; below it the steady-state jitter is measured at 8..12 and no bound is published.",
+        "d_min": null,
+        "J": null
+      },
+      "lanes": {}
+    },
     "guard_noto.hex": {
       "sha": "0b25edf8ff25431ec0ec7c7836a0439007f62a8719e280079ee9c672ccf50ff1",
       "branch_lanes": [],
@@ -2316,6 +2433,62 @@
           "R": 17
         }
       }
+    },
+    "sb_fcfs.hex": {
+      "sha": "5dfd0d6d70eb93596e69f92c24b6ffbadcca9383a828b9edfc651764d61112f0",
+      "branch_lanes": [],
+      "B": null,
+      "reason": "lane 0: no lateness certificate at B = 0; EDF response bounds: lane 0: no lateness certificate at B = 0",
+      "cert": {
+        "status": "uncertified",
+        "reason": "compute_j refuses: d_min = 1 is below D* = 20: with 5 lanes a refill occupies the single fetch port for 4 cycles, so 5 lanes consuming one action every 1 cycles saturate it. LANE 0 carries the tightest spacing. The timing guarantee is SCOPED to d_min >= D*; below it the steady-state jitter is measured at 8..12 and no bound is published.",
+        "d_min": null,
+        "J": null
+      },
+      "lanes": {}
+    },
+    "sb_mask.hex": {
+      "sha": "3f2f66a9b6c9e31400f840f927282548ab8f47dca3fab4d4042a4859d9c36d2c",
+      "branch_lanes": [],
+      "B": null,
+      "reason": "lane 2: no lateness certificate at B = 0; EDF response bounds: lane 2: no lateness certificate at B = 0",
+      "cert": {
+        "status": "uncertified",
+        "reason": "compute_j refuses: d_min = 9 is below D* = 20: with 5 lanes a refill occupies the single fetch port for 4 cycles, so 5 lanes consuming one action every 9 cycles saturate it. LANE 2 carries the tightest spacing. The timing guarantee is SCOPED to d_min >= D*; below it the steady-state jitter is measured at 8..12 and no bound is published.",
+        "d_min": null,
+        "J": null
+      },
+      "lanes": {}
+    },
+    "sb_npf.hex": {
+      "sha": "e20b7e323e93391615017fc2b8639f9ef0bc506a67ffcd741e126159fe142b59",
+      "branch_lanes": [
+        2
+      ],
+      "B": null,
+      "reason": "lane 2: no lateness certificate at B = 0; EDF response bounds: lane 2: no lateness certificate at B = 0",
+      "cert": {
+        "status": "uncertified",
+        "reason": "compute_j refuses: d_min = 8 is below D* = 20: with 5 lanes a refill occupies the single fetch port for 4 cycles, so 5 lanes consuming one action every 8 cycles saturate it. LANE 2 carries the tightest spacing. The timing guarantee is SCOPED to d_min >= D*; below it the steady-state jitter is measured at 8..12 and no bound is published.",
+        "d_min": null,
+        "J": null
+      },
+      "lanes": {}
+    },
+    "sb_usb.hex": {
+      "sha": "7843a408bdbf79d0eebb58d1696736a93bd2e7819e7699700fb48a0cc230c912",
+      "branch_lanes": [
+        0
+      ],
+      "B": null,
+      "reason": "USB lane: lane_cert report fails: certificate (b'); certificate (shipped); EDF response bounds: not applied to a USB image (the USB lane's response is PrioResp's; one closure theorem per image)",
+      "cert": {
+        "status": "uncertified",
+        "reason": "compute_j refuses: d_min = 1 is below D* = 20: with 5 lanes a refill occupies the single fetch port for 4 cycles, so 5 lanes consuming one action every 1 cycles saturate it. LANE 0 carries the tightest spacing. The timing guarantee is SCOPED to d_min >= D*; below it the steady-state jitter is measured at 8..12 and no bound is published.",
+        "d_min": null,
+        "J": null
+      },
+      "lanes": {}
     },
     "smoke_image.hex": {
       "sha": "165a307dff0df12df9b721415c2490165d8d61669dc883cb0c8e7392334ad6d9",

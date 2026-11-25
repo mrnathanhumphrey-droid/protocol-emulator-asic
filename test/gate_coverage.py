@@ -126,7 +126,7 @@ CLASSIFIED = {
     # formal/argmin_equiv.sby); the loop survives only in the generate branch
     # for other lane counts, which is not elaborated, so the point no longer
     # exists to classify.
-    ("src/pe_engine.v", 3228, "v_branch", "if"): (
+    ("src/pe_engine.v", 3734, "v_branch", "if"): (
         TOOL_DIVERGENT,
         "`if (hdr_done && !prime_unp) primed_q <= 1'b1;` -- the prime scan's "
         "COMPLETION test, which sits AFTER the `for` over lanes, not inside "
@@ -146,7 +146,7 @@ CLASSIFIED = {
         "number out of the artefact; do not reconstruct it from memory."),
 
     # ---- src/pe_engine.v --------------------------------------------------
-    ("src/pe_engine.v", 3324, "v_branch", "else"): (
+    ("src/pe_engine.v", 3830, "v_branch", "else"): (
         UNREACHABLE,
         "H_IDLE (line 1134) with `hdr_done` ALREADY SET. Every assignment that puts the "
         "header FSM into H_IDLE clears `hdr_done` in the same non-blocking "
@@ -156,19 +156,20 @@ CLASSIFIED = {
         "the arm of a condition that is true on every entry. ⭐ Checked "
         "structurally by `check_h_idle_clears` below rather than asserted, "
         "because the claim is about two specific lines and would rot."),
-    ("src/pe_engine.v", 3581, "v_branch", "else"): (
+    ("src/pe_engine.v", 4218, "v_branch", "else"): (
         UNREACHABLE,
         "ST_IDLE's `if (w_hv)` with no else: a dispatch winner whose HEAD is EMPTY. Since "
-        "(b') (9c0df0c; agent 2 729111f) `ready[g] = rdy_rel[g] & l_actv[hix[g]]` -- the "
-        "dispatcher never picks a lane with an empty head -- and `hv[g]` is that same "
+        "(b') (9c0df0c; agent 2 729111f) the dispatcher never picks a lane with an empty head: "
+        "`ready_hd[g] = rdy_rel[g] & l_actv[hix[g]]` and, since the event flags (11-19), "
+        "`ready[g] = ready_hd[g] & fl_ok[g]` -- and `hv[g]` is that same "
         "`l_actv[hix[g]]`. `winner` / `winner_oh` are COMBINATIONAL from this cycle's `ready` "
         "(both the argmin tree and the serial scan), and `w_hv = OR(winner_oh[k] & hv[k])`, "
         "so in ST_IDLE with `winner_v` the one-hot names a ready lane and `w_hv` is 1. "
-        "Reachable ONLY under `M_GLOBAL_STALL` (`ready = rdy_rel`, the old global stall -- "
+        "Reachable ONLY under `M_GLOBAL_STALL` (`ready_hd = rdy_rel`, the old global stall -- "
         "its must-fire build), which the coverage sweep does not build. ⭐ Checked "
         "structurally by `check_whv_ready` below, because the claim rests on three lines "
         "that a refactor could separate."),
-    ("src/pe_engine.v", 3521, "v_line", "case"): (
+    ("src/pe_engine.v", 4122, "v_line", "case"): (
         UNREACHABLE,
         "The prefetch FSM's defensive `default`. `pst` is declared `[2:0]` and "
         "its four encodings P_SCAN/P_REQ/P_WAIT/P_CAP are 3'd0..3'd3, all "
@@ -176,7 +177,7 @@ CLASSIFIED = {
         "⭐ Verified mechanically by `check_full_case` below, which reads the "
         "encodings out of the source -- a hand-counted enumeration is the sort "
         "of claim that survives the addition of a fifth state."),
-    ("src/pe_engine.v", 4010, "v_line", "case"): (
+    ("src/pe_engine.v", 4647, "v_line", "case"): (
         UNREACHABLE,
         "The opcode `case`'s `default`. ⭐ v2 (Wilson 10-26): the opcode is 5 "
         "bits and the EIGHT BUILT opcodes are named in arms (OP_LEVEL .. "
@@ -195,7 +196,7 @@ CLASSIFIED = {
     # other lane, with the lane still LIVE -- the flag must report, never
     # stall. The entry is removed rather than kept, because a stale OWED claim
     # says something is untested when it is tested.
-    ("src/pe_engine.v", 4592, "v_line", "case"): (
+    ("src/pe_engine.v", 5259, "v_line", "case"): (
         UNREACHABLE,
         "The dispatch FSM's defensive `default`. `st` is declared `[1:0]` with "
         "three encodings ST_IDLE/ST_DRIVE/ST_WB = 2'd0..2'd2 at line 666; "
@@ -280,7 +281,7 @@ CLASSIFIED = {
     # `case (st)`, so none of the dispatch arm's own guards dominate it --
     # which is why it carries its own, and why `gate_program_index` classifies
     # both writes as members of the program-indexed family.
-    ("src/pe_engine.v", 4693, "v_branch", "else"): (
+    ("src/pe_engine.v", 5360, "v_branch", "else"): (
         OWED,
         "The `l_pin[i] < N_PINS` guard on the hold expiry. Its `else` is "
         "REACHABLE, not unreachable: a lane may legally name the RESERVED data "
@@ -300,7 +301,7 @@ CLASSIFIED = {
     # no input path, so the observed rise never came), and THAT is what covered
     # this branch on every sweep. With the fix it went dark -- which is the fix
     # working, and also a branch nothing legitimate is known to reach.
-    ("src/pe_engine.v", 4256, "v_branch", "if"): (
+    ("src/pe_engine.v", 4911, "v_branch", "if"): (
         OWED,
         "`ck_consume & ~l_ckgot`: a clocked SHIFTIN consumes a bit that was "
         "never captured, and reports it (`clk_stretch_err`). Covered before "
@@ -318,7 +319,7 @@ CLASSIFIED = {
     # clocked twin IS covered -- every clocked open-drain image runs at d = 9,
     # so the clamp sends them all down the direct path -- and the asymmetry is
     # the whole reason this one is debt rather than a waiver.
-    ("src/pe_engine.v", 3824, "v_branch", "else"): (
+    ("src/pe_engine.v", 4461, "v_branch", "else"): (
         OWED,
         "The `if (l_mode[cur])` inside the UNCLOCKED SHIFT's direct-drive arm, "
         "open-drain side. Reaching it needs an unclocked open-drain SHIFT whose "
@@ -332,7 +333,7 @@ CLASSIFIED = {
         "⚠ NOT waived as unreachable: it is reachable, by exactly the class "
         "of program the clamp was written for, and leaving the clamp's own "
         "fallback untested is how a safety path rots."),
-    ("src/pe_engine.v", 3695, "v_branch", "else"): (
+    ("src/pe_engine.v", 4332, "v_branch", "else"): (
         UNREACHABLE,
         "The local `if (pin_real)` inside the SELF-CLOCKED SHIFT's LOW phase. "
         "Its `else` cannot be taken: the enclosing case label is "
@@ -342,7 +343,7 @@ CLASSIFIED = {
         "at the enclosing arm -- and widening that window is refused, since the "
         "gate's own docstring records a `clk_real` 30 lines away falsely "
         "guarding a deliberately unguarded mutant arm."),
-    ("src/pe_engine.v", 3728, "v_branch", "else"): (
+    ("src/pe_engine.v", 4365, "v_branch", "else"): (
         UNREACHABLE,
         "The `if (clk_real)` around the LOW phase's CLOCK write. Unreachable "
         "`else`: this block runs only under `ck_shift`, which is DEFINED as "
@@ -350,14 +351,14 @@ CLASSIFIED = {
         "conjunct of the condition that got us here. ⚠ It is still written, "
         "because the guard must be visible at the indexed write rather than "
         "inferred through a wire's definition."),
-    ("src/pe_engine.v", 3748, "v_branch", "else"): (
+    ("src/pe_engine.v", 4385, "v_branch", "else"): (
         UNREACHABLE,
         "The same `if (clk_real)` around the HIGH phase's clock write, "
         "unreachable for the identical reason -- `ck_shift` carries "
         "`clk_real`. Both phases guard separately because a guard shared "
         "across two write groups is how the 1.6x refusal first failed: it "
         "suppressed the data write and let the clock write run anyway."),
-    ("src/pe_engine.v", 3818, "v_branch", "else"): (
+    ("src/pe_engine.v", 4455, "v_branch", "else"): (
         UNREACHABLE,
         "The local `if (pin_real)` inside the UNCLOCKED SHIFT body. Same "
         "structure as the clocked one at 1621 and unreachable for the same "
@@ -365,7 +366,7 @@ CLASSIFIED = {
         "CODE: inserting the clocked arm pushed the case label's own guard "
         "more than 60 lines away from five writes that were fine the day "
         "before, which is exactly the drift that window exists to detect."),
-    ("src/pe_engine.v", 3958, "v_branch", "if"): (
+    ("src/pe_engine.v", 4595, "v_branch", "if"): (
         UNREACHABLE,
         "`if (ck_shiftin & ack_drv[1]) pin_out[a_pin] <= ack_drv[0];` -- the "
         "TRUE arm cannot be taken in a clean build, because `ack_drv` is "
@@ -551,12 +552,76 @@ CLASSIFIED[('src/project.v', 4032, 'v_branch', 'else')] = (
 
 # 11-20: the second sweep batch's written reasons (assertion fire arms, a
 # structurally empty else; the never-called `len_of` was deleted 11-20, Wilson)
-CLASSIFIED[('src/pe_engine.v', 1708, 'v_branch', 'if')] = (
+CLASSIFIED[('src/pe_engine.v', 1726, 'v_branch', 'if')] = (
     UNREACHABLE, "the FLAG1 assertion's fire arm (Wilson 11-19: at most ONE flag's posted count moves per cycle). The engine has one writeback per cycle and OP_FLAG_SET is the only writer of `fl_post`, adding 1 to the one flag its word names, so `fl_n` (the summed posted-count deltas this cycle) is 0 or 1 and `fl_n > 1` is false in every shipped build. It fires only under `M_FLAG_POST2` (a POST that also counts its neighbour), its planted case, run by run_flags and monitor_mustfire, which the coverage sweep does not build. A tripwire, not a path; re-check if a second POST writer or a second writeback port is ever added.")
-CLASSIFIED[('src/pe_engine.v', 2032, 'v_branch', 'if')] = (
+CLASSIFIED[('src/pe_engine.v', 2058, 'v_branch', 'if')] = (
     UNREACHABLE, "the K8 assertion's fire arm (Wilson 11-19: a lane is never flushed again within 2 cycles of its last flush; Lean takes K8 as a premise). In the shipped build every flush path ORs into `flush_ev` and none re-fires inside the two quiet cycles, so `flush_ev[k] && (k8_f1[k] || k8_f2[k])` is false. It fires only under `M_FT_REFLUSH` (the FT edge's flush applied twice), K8's must-fire, run by run_arm2 A4-K8 and monitor_mustfire, which the coverage sweep does not build. A tripwire, not a path; a new flush path must OR into `flush_ev` or K8 is blind.")
-CLASSIFIED[('src/pe_engine.v', 3991, 'v_branch', 'else')] = (
+CLASSIFIED[('src/pe_engine.v', 4628, 'v_branch', 'else')] = (
     UNREACHABLE, "DRIVE_SAMPLE's dispatch: `if (ds_refuse) ... else if (pin_real) ...` with no final else. `ds_refuse` (line 2831) is `~pin_real | ~pinb_real | (a_pin == a_pinb) | (clk_real & ...)`, so the `else if` is reached only with ds_refuse = 0, which forces pin_real = 1: the condition is true on every entry and its else arm is structurally empty. Under `M_NOOP_DRIVES` pin_real is the constant 1, so no build reaches it either. Re-check if `~pin_real` ever leaves `ds_refuse`.")
+
+# ---- the slot buffer's points (Wilson 11-24: every assertion gets a must-fire; a point a
+# lemma proves is UNREACHABLE citing it; the rest OWED). Lines measured 11-24 against ab4d2fc's
+# uncovered list (probe_cov_1124b) and mapped to this tree; each fire arm's mutant was RUN and seen
+# to print THIS line's message (R:/claude_scratch/s12c/park1/assertmap.out -- scratch evidence; the
+# gated kill is the runner named).
+CLASSIFIED[('src/pe_engine.v', 3437, 'v_branch', 'if')] = (
+    UNREACHABLE, "the SLOTRAISE assertion's fire arm (issue at capture: an ARM captured last cycle has its slot request raised). A passing run never reaches it. It fires under `M_SLOT_RAISE_LATE`, measured 11-24 on slotbuf_fcfs, killed by test/run_slotbuf.py and listed in monitor_mustfire; the coverage sweep does not build mutants. A tripwire, not a path.")
+CLASSIFIED[('src/pe_engine.v', 3447, 'v_branch', 'if')] = (
+    UNREACHABLE, "the SLOTNPF assertion's fire arm (no slot issue past a no-prefetch word, a full buffer or an empty head). A passing run never reaches it. It fires under `M_SLOT_PAST_NPF`, measured 11-24 on slotbuf_npf, killed by test/run_slotbuf.py and listed in monitor_mustfire; the coverage sweep does not build mutants. A tripwire, not a path.")
+CLASSIFIED[('src/pe_engine.v', 3450, 'v_branch', 'if')] = (
+    UNREACHABLE, "the SLOTPRIME assertion's fire arm (no slot issue before `primed` (K12)). A passing run never reaches it. It fires under `M_SLOT_BEFORE_PRIME`, measured 11-24 on slotbuf_fcfs, killed by test/run_slotbuf.py and listed in monitor_mustfire; the coverage sweep does not build mutants. A tripwire, not a path.")
+CLASSIFIED[('src/pe_engine.v', 3453, 'v_branch', 'if')] = (
+    UNREACHABLE, "the SLOTUSB assertion's fire arm (the slot issue never ahead of USB receive's branch-1 refill (its first clause)). A passing run never reaches it. It fires under `M_SLOT_OVER_USB`, measured 11-24 on slotbuf_usb, killed by test/run_slotbuf.py and listed in monitor_mustfire; the coverage sweep does not build mutants. A tripwire, not a path.")
+CLASSIFIED[('src/pe_engine.v', 3457, 'v_branch', 'if')] = (
+    UNREACHABLE, "the SLOTFCFS assertion's fire arm (slot requests served first-come-first-served). A passing run never reaches it. It fires under `M_SLOT_LIFO`, measured 11-24 on slotbuf_usb, killed by test/run_slotbuf.py and listed in monitor_mustfire; the coverage sweep does not build mutants. A tripwire, not a path.")
+CLASSIFIED[('src/pe_engine.v', 3460, 'v_branch', 'if')] = (
+    UNREACHABLE, "the SLOTUSB assertion's fire arm (a slot request issuable at the scan is issued (its second clause, `else if`)). A passing run never reaches it. It fires under `M_SLOT_YIELD_UNGATED and M_SLOT_BELOW_BR1`, measured 11-24 on slotbuf_fcfs, killed by test/run_slotbuf.py and listed in monitor_mustfire; the coverage sweep does not build mutants. A tripwire, not a path.")
+CLASSIFIED[('src/pe_engine.v', 3464, 'v_branch', 'if')] = (
+    UNREACHABLE, "the SLOTMASK assertion's fire arm (no round-robin refill for a lane whose buffer holds a word). A passing run never reaches it. It fires under `M_SLOT_NOMASK`, measured 11-24 on slotbuf_mask, killed by test/run_slotbuf.py and listed in monitor_mustfire; the coverage sweep does not build mutants. A tripwire, not a path.")
+CLASSIFIED[('src/pe_engine.v', 3495, 'v_branch', 'if')] = (
+    UNREACHABLE, "the SLOTORD assertion's fire arm (the head holds the word of the lane's PC (shadow addresses)). A passing run never reaches it. It fires under `M_FT_NO_PKILL (and nine others)`, measured 11-24 on ftflush quick, flip 123, killed by test/run_ftflush.py and listed in monitor_mustfire; the coverage sweep does not build mutants. A tripwire, not a path.")
+CLASSIFIED[('src/pe_engine.v', 3500, 'v_branch', 'if')] = (
+    UNREACHABLE, "the FTKEEP assertion's fire arm (K1: the edge word, held or arriving, is the head after the FT flush). A passing run never reaches it. It fires under `M_FT_DROP_EDGE`, measured 11-24 on ftflush fall, flip 120, killed by test/run_ftflush.py and listed in monitor_mustfire; the coverage sweep does not build mutants. A tripwire, not a path.")
+CLASSIFIED[('src/pe_engine.v', 3503, 'v_branch', 'if')] = (
+    UNREACHABLE, "the FTDROP assertion's fire arm (K2: nothing but the edge word survives the FT flush). A passing run never reaches it. It fires under `M_FT_KEEP_TMO`, measured 11-24 on ftflush fall, flip 121, killed by test/run_ftflush.py and listed in monitor_mustfire; the coverage sweep does not build mutants. A tripwire, not a path.")
+CLASSIFIED[('src/pe_engine.v', 3506, 'v_branch', 'if')] = (
+    UNREACHABLE, "the FTREL assertion's fire arm (K4: the lane is released the cycle after its FT edge). A passing run never reaches it. It fires under `M_FT_REL_LATE`, measured 11-24 on ftflush fall, flip 120, killed by test/run_ftflush.py and listed in monitor_mustfire; the coverage sweep does not build mutants. A tripwire, not a path.")
+CLASSIFIED[('src/pe_engine.v', 3516, 'v_branch', 'if')] = (
+    UNREACHABLE, "the FTTMO assertion's fire arm (K6: no PC+2 held the cycle after a FALLTHROUGH timeout). A passing run never reaches it. It fires under `M_FT_TMO_KEEP`, measured 11-24 on ftflush loop, no edge, killed by test/run_ftflush.py and listed in monitor_mustfire; the coverage sweep does not build mutants. A tripwire, not a path.")
+CLASSIFIED[('src/pe_engine.v', 3522, 'v_branch', 'if')] = (
+    UNREACHABLE, "the TMOPICK assertion's fire arm (the FT timeout pick is one ST_IDLE cycle with no dispatch). A passing run never reaches it. It fires under `M_TMOPICK_DISPATCH`, measured 11-24 on ftflush fall, no edge, killed by test/run_ftflush.py and listed in monitor_mustfire; the coverage sweep does not build mutants. A tripwire, not a path.")
+CLASSIFIED[('src/pe_engine.v', 3530, 'v_branch', 'if')] = (
+    UNREACHABLE, "the K9 assertion's fire arm (ScanOk: no fetch for a lane in the cycle its FT edge flushes it). A passing run never reaches it. It fires under `M_FT_SCAN_RACE`, measured 11-24 on ftflush quick_b7, flip 268, killed by test/run_ftflush.py and listed in monitor_mustfire; the coverage sweep does not build mutants. A tripwire, not a path.")
+CLASSIFIED[('src/pe_engine.v', 3537, 'v_branch', 'if')] = (
+    UNREACHABLE, "the K10 assertion's fire arm (an edge acts only from the arming writeback + 1). A passing run never reaches it. It fires under `M_K10_EARLY`, measured 11-24 on ftflush fall, flip 119, killed by test/run_ftflush.py and listed in monitor_mustfire; the coverage sweep does not build mutants. A tripwire, not a path.")
+CLASSIFIED[('src/pe_engine.v', 3542, 'v_branch', 'if')] = (
+    UNREACHABLE, "the K11 assertion's fire arm (never an armed lane chosen before its deadline). A passing run never reaches it. It fires under `M_K11_EARLY`, measured 11-24 on ftflush fall, no edge, killed by test/run_ftflush.py and listed in monitor_mustfire; the coverage sweep does not build mutants. A tripwire, not a path.")
+CLASSIFIED[('src/pe_engine.v', 3546, 'v_branch', 'if')] = (
+    UNREACHABLE, "the BPRIME assertion's fire arm (sched_bprime: the dispatcher's winner has a valid head). A passing run never reaches it. It fires under `M_GLOBAL_STALL`, measured 11-24 on slotbuf_fcfs, killed ON THIS LINE by test/run_slotbuf.py (slotbuf_fcfs, BPRIME 2240) and by test/run_mutants.py (corpus_all5, progress.vh), and listed in monitor_mustfire; the coverage sweep does not build mutants. A tripwire, not a path.")
+CLASSIFIED[('src/pe_engine.v', 3551, 'v_branch', 'if')] = (
+    UNREACHABLE, "the NAMES assertion's fire arm (sched_names_ready: a decision cycle with a ready lane names one). A passing run never reaches it. It fires under `M_SCHED_SKIP`, measured 11-24 on ftflush fall, no edge, killed by test/run_ftflush.py and listed in monitor_mustfire; the coverage sweep does not build mutants. A tripwire, not a path.")
+CLASSIFIED[('src/pe_engine.v', 3557, 'v_branch', 'if')] = (
+    UNREACHABLE, "the PARKFLAGS assertion's fire arm (park item 1: a lane armed by its park carries no FT / QUAL flag). A passing run never reaches it. It fires under `M_PARK_KEEPS_FT and M_PARK_KEEPS_QUAL`, measured 11-24 on ftflush parkft / parkqual, killed by test/run_ftflush.py and listed in monitor_mustfire; the coverage sweep does not build mutants. A tripwire, not a path.")
+CLASSIFIED[('src/pe_engine.v', 3561, 'v_branch', 'if')] = (
+    UNREACHABLE, "the PARKEND assertion's fire arm (park item 2: the lane is unparked the cycle after its park's rise). A passing run never reaches it. It fires under `M_PARK_STUCK`, measured 11-24 on ftflush parkft and the park witness, killed by test/run_ftflush.py and listed in monitor_mustfire; the coverage sweep does not build mutants. A tripwire, not a path.")
+CLASSIFIED[('src/pe_engine.v', 3565, 'v_branch', 'if')] = (
+    UNREACHABLE, "the STRETCHFALSE assertion's fire arm (the stretch watchdog never halts a lane whose rise came). A passing run never reaches it. It fires under `M_PARK_STUCK`, measured 11-24 on the park witness (CK_PRE 4), killed by test/run_ftflush.py and listed in monitor_mustfire; the coverage sweep does not build mutants. A tripwire, not a path.")
+CLASSIFIED[('src/pe_engine.v', 3570, 'v_branch', 'if')] = (
+    UNREACHABLE, "the PARKARM assertion's fire arm (a plain ARM never writes back on a lane still marked parked). A passing run never reaches it. It fires under `M_PARKARM_MARK`, measured 11-24 on ftflush parkpp, killed by test/run_ftflush.py and listed in monitor_mustfire; the coverage sweep does not build mutants. A tripwire, not a path.")
+CLASSIFIED[('src/pe_engine.v', 3575, 'v_branch', 'if')] = (
+    UNREACHABLE, "the TAGSTALE assertion's fire arm (the edge tag only on a valid slot (its slot clause)). A passing run never reaches it. It fires under `M_TMO_TAG_KEEP`, measured 11-24 on ftflush loop, no edge (41 hits); M_TAG_STALE never reaches this clause (780 edge runs, 0), killed by test/run_ftflush.py and listed in monitor_mustfire; the coverage sweep does not build mutants. A tripwire, not a path.")
+CLASSIFIED[('src/pe_engine.v', 3579, 'v_branch', 'if')] = (
+    UNREACHABLE, "the TAGSTALE assertion's fire arm (the edge tag only on a full buffer (its buffer clause)). A passing run never reaches it. It fires under `M_TAG_STALE`, measured 11-24 on ftflush spare / quick / dw1, no edge, killed by test/run_ftflush.py and listed in monitor_mustfire; the coverage sweep does not build mutants. A tripwire, not a path.")
+CLASSIFIED[('src/pe_engine.v', 4182, 'v_branch', 'if')] = (
+    OWED, "`tg_s[hix[winner]]` at an FT timeout: the edge word in the HEAD while the lane is FT-armed. Agent 2's lemma (a) (Wilson 11-24, the K6 placement ruling) says it never is: the RTL never files the edge word into the head while armed (`cix = pedge ? six : ...`). 0 hits over the 11-24 probes (740 images, ~10,360 runs) and the 8,448 offset-1 runs. OWED until lemma (a) lands; then UNREACHABLE citing it.")
+CLASSIFIED[('src/pe_engine.v', 5485, 'v_line', 'elsif')] = (
+    OWED, "the FT edge's keep from the HEAD (`ft_kv[i][0]`): the edge word in the head at the edge. Same claim as the timeout's head clause -- agent 2's lemma (a) (Wilson 11-24). 0 hits over the 11-24 probes and the 8,448 offset-1 runs. OWED until lemma (a) lands; then UNREACHABLE citing it.")
+CLASSIFIED[('src/pe_engine.v', 5490, 'v_line', 'else')] = (
+    OWED, 'the FT edge with NO edge word anywhere (`keepnone`, the refetch branch): 0 over the run_ftflush sweeps (3,253 runs at 11-22, 1,463 at 11-24) and the 11-24 probes. Agent 2\'s "never absent" lemma decides it (Wilson 11-22); run_ftflush reports it as PENDING. OWED until the lemma lands or a case reaches it.')
+CLASSIFIED[('src/pe_engine.v', 4186, 'v_branch', 'if')] = (
+    OWED, "the K6 drop killing the winner's own in-flight edge-word fetch (P_REQ / P_WAIT with `pedge`) at its FT timeout. No image reaches it: the 11-24 probes (740 images, start-up order with timeouts 2..40) gave 0. ft_tmo_drop (agent 2, FtDrop.lean) proves the drop CORRECT if reached, not that it is unreachable. OWED to an image that times out with the edge word's fetch still in flight, or a lemma that it cannot be.")
+CLASSIFIED[('src/pe_engine.v', 4188, 'v_branch', 'if')] = (
+    OWED, "the K6 drop of the winner's own capture when it lands in the BUFFER (`cap_tobuf`) in the timeout's cycle. The slot arm is reached (run_ftflush fall_b2_t1, killed by M_FT_TMO_CAPKEEP); the buffer arm is not -- 0 over the 11-24 probes. OWED to an image whose timeout lands on a buffered edge-word capture, or a lemma that it cannot.")
 
 #: ⭐ 11-18 (Wilson): EACH CEILING HAS ITS POINT LIST in test/coverage_points/ (see
 #: point_list_problems). pe_engine.v's list is the 11-04 sweep's (cc6166d), the
@@ -753,42 +818,42 @@ ANCHOR_TEXT = {
     # `if (clk_real) begin` in their original order. The serial-select entry
     # (old 1021) is RETIRED: TF2 replaced that loop with a tree for
     # N_LANES = 5, so the branch is no longer elaborated (see CLASSIFIED).
-    ("src/pe_engine.v", 3228):
+    ("src/pe_engine.v", 3734):
         "if (hdr_done && !prime_unp) primed_q <= 1'b1;",
     # the self-clocked arms' redundant-by-construction guards. ⭐ TWO PAIRS
     # SHARE THEIR TEXT (`if (pin_real) begin` at 1621/1694, `if (clk_real)
     # begin` at 1630/1641), which is exactly why the anchor is keyed on the
     # LINE and the text is the drift check rather than the identifier.
-    ("src/pe_engine.v", 3695):
+    ("src/pe_engine.v", 4332):
         "if (pin_real) begin",
     # ⛔ THE TWO RULING-H ENTRIES NEED ANCHORS LIKE EVERY OTHER, and the
     # first version of them did not have any -- so `reanchor.py` could not move
     # them when the hold's own edits shifted the file, and the gate failed on a
     # classification that had slid off its line. The gate already demands this
     # ("Add it to ANCHOR_TEXT"); I had simply not met it.
-    ("src/pe_engine.v", 3824):
+    ("src/pe_engine.v", 4461):
         "if (l_mode[cur]) begin",
-    ("src/pe_engine.v", 4693):
+    ("src/pe_engine.v", 5360):
         "if (l_pin[i] < N_PINS[PINW-1:0]) begin",
-    ("src/pe_engine.v", 3728):
+    ("src/pe_engine.v", 4365):
         "if (clk_real) begin",
-    ("src/pe_engine.v", 3748):
+    ("src/pe_engine.v", 4385):
         "if (clk_real) begin",
-    ("src/pe_engine.v", 3818):
+    ("src/pe_engine.v", 4455):
         "if (pin_real) begin",
-    ("src/pe_engine.v", 3958):
+    ("src/pe_engine.v", 4595):
         "if (ck_shiftin & ack_drv[1]) pin_out[a_pin] <= ack_drv[0];",
-    ("src/pe_engine.v", 3324):
+    ("src/pe_engine.v", 3830):
         "H_IDLE: if (!hdr_done) begin",
-    ("src/pe_engine.v", 3581):
+    ("src/pe_engine.v", 4218):
         "if (w_hv) begin",
-    ("src/pe_engine.v", 4256):
+    ("src/pe_engine.v", 4911):
         "if (ck_consume & ~l_ckgot[cur]) begin",
-    ("src/pe_engine.v", 3521):
+    ("src/pe_engine.v", 4122):
         "default: pst <= P_SCAN;",
-    ("src/pe_engine.v", 4010):
+    ("src/pe_engine.v", 4647):
         "default: ;",
-    ("src/pe_engine.v", 4592):
+    ("src/pe_engine.v", 5259):
         "default: st <= ST_IDLE;",
     # `src/project.v` 557 -- `if (RX_SERIAL != 0) begin` -- is gone with the
     # parameter. ⭐ THE ANCHOR IS WHAT MADE THAT SAFE TO DO: the source text
@@ -851,9 +916,42 @@ ANCHOR_TEXT.update({
     ('src/project.v', 3469): "if (s12_rst_seen && rst_n === 1'b1 && run && st == S_S3 && p_lt_s0 !== (`P_A < `P_B)) begin",
     ('src/project.v', 3474): 'if (u_ops_a.PA_SHX != PA_SHX || u_ops_a.PA_SH != PA_SH || u_ops_a.PA_XB != PA_XB ||',
     ('src/project.v', 4032): "if (ck_nmsg != 8'hFF) ck_nmsg <= ck_nmsg + 8'd1;",
-    ('src/pe_engine.v', 1708): 'if (fl_n > 1)',
-    ('src/pe_engine.v', 2032): 'if (flush_ev[k8_i] && (k8_f1[k8_i] || k8_f2[k8_i]))',
-    ('src/pe_engine.v', 3991): 'end else if (pin_real) begin',
+    ('src/pe_engine.v', 1726): 'if (fl_n > 1)',
+    ('src/pe_engine.v', 2058): 'if (flush_ev[k8_i] && (k8_f1[k8_i] || k8_f2[k8_i]))',
+    ('src/pe_engine.v', 4628): 'end else if (pin_real) begin',
+})
+
+# the slot buffer's points (Wilson 11-24), keyed to this tree
+ANCHOR_TEXT.update({
+    ('src/pe_engine.v', 3437): "if (ck_arm_q && sq_n[ck_arm_l] != 2'd2)",
+    ('src/pe_engine.v', 3447): 'if (!ck_ok[pl])',
+    ('src/pe_engine.v', 3450): 'if (!ck_pr)',
+    ('src/pe_engine.v', 3453): 'if (ck_usbp)',
+    ('src/pe_engine.v', 3457): 'if (ck_sq[ck_k] && ck_k != pl && ck_t[ck_k] < ck_t[pl])',
+    ('src/pe_engine.v', 3460): 'end else if (ck_scan && |ck_sq && !(ck_usbp && pst == P_REQ && pl == USB_LANE[LW-1:0])) begin',
+    ('src/pe_engine.v', 3464): 'if (ck_scan && pst == P_REQ && !pbr1 && ck_bv[pl])',
+    ('src/pe_engine.v', 3495): 'if (l_live[ck_k] && l_actv[hix[ck_k]] && sh_a[hix[ck_k]] !== l_pc[ck_k])',
+    ('src/pe_engine.v', 3500): 'if (ck_fh[ck_k] && !l_actv[hix[ck_k]])',
+    ('src/pe_engine.v', 3503): 'if (l_actv[six[ck_k]] || l_bufv[ck_k])',
+    ('src/pe_engine.v', 3506): 'if (!ck_fpk[ck_k] && l_timestamp[ck_k] !== ck_fnow)',
+    ('src/pe_engine.v', 3516): 'if (ck_tv && ((l_actv[hix[ck_tl]] && sh_a[hix[ck_tl]] == ck_ta) ||',
+    ('src/pe_engine.v', 3522): 'if (ck_tv && st != ST_IDLE)',
+    ('src/pe_engine.v', 3530): 'if (ck_k9v && pst != P_SCAN && ck_k9f[pl])',
+    ('src/pe_engine.v', 3537): 'if (arm_hit[ck_k] && st == ST_WB && cur == ck_k && cur_act[ACT_W-1 -: OP_W] == OP_ARM)',
+    ('src/pe_engine.v', 3542): 'if (l_armed[winner] && (l_notmo[winner] || tf_diff(now, l_timestamp[winner])))',
+    ('src/pe_engine.v', 3546): 'if (!l_actv[hix[winner]])',
+    ('src/pe_engine.v', 3551): 'if (ck_dec && |ck_rdy && !dec_v)',
+    ('src/pe_engine.v', 3557): 'if (l_ckpark[ck_k] && l_armed[ck_k] && (l_armft[ck_k] || l_armqual[ck_k]))',
+    ('src/pe_engine.v', 3561): 'if (ck_pe[ck_k] && l_ckpark[ck_k])',
+    ('src/pe_engine.v', 3565): 'if (l_ckpark[ck_k] && !l_armed[ck_k] && (l_ckwdog[ck_k] >= CK_STRETCH_TO[CKW-1:0]))',
+    ('src/pe_engine.v', 3570): 'if (st == ST_WB && cur_act[ACT_W-1 -: OP_W] == OP_ARM && l_ckpark[cur])',
+    ('src/pe_engine.v', 3575): 'if (tg_s[ck_k] && !l_actv[ck_k])',
+    ('src/pe_engine.v', 3579): 'if (tg_b[ck_k] && !l_bufv[ck_k])',
+    ('src/pe_engine.v', 4182): "if (tg_s[hix[winner]]) l_actv[hix[winner]] <= 1'b0;",
+    ('src/pe_engine.v', 4186): "if ((pl == winner) && pedge && (pst == P_REQ || pst == P_WAIT)) pkill <= 1'b1;",
+    ('src/pe_engine.v', 4188): "if (cap_tobuf) l_bufv[winner] <= 1'b0;",
+    ('src/pe_engine.v', 5485): 'end else if (ft_kv[i][0]) begin',
+    ('src/pe_engine.v', 5490): 'end else if (ft_kv[i][3] | ft_kv[i][2]) begin',
 })
 
 #: ⛔⛔ EVERY COVERAGE FIGURE IS LABELLED WITH THE TOOL THAT MEASURED IT
@@ -1634,7 +1732,12 @@ def check_full_case() -> int:
     # +29 text match as ANCHOR_TEXT (each line read back: the `default:` arm)
     # 11-20: 3322 -> 3521, 3785 -> 4010, 4284 -> 4592 -- the git diff 747598d -> HEAD's
     # line map (the same re-key as every key above; each read back: `default`)
-    for line in (3521, 4010, 4592):
+    # 11-24: 3521 -> 4082, 4010 -> 4598, 4592 -> 5195 -- the ce706a6 -> HEAD line map
+    # (slot buffer pieces 2-4 + the park fix), the same re-key as every key above
+    # 11-24 (the stale-tag clears): 4082 -> 4097, 4598 -> 4613, 5195 -> 5219, HEAD -> tree map
+    # 11-24 (V2E1, 07a1150): 4097 -> 4122, 4613 -> 4638, 5219 -> 5244; then 87e5d08 + the
+    # 11-24 CAPKEEP / TMO_TAG_KEEP arms (9df5157 -> tree map)
+    for line in (4122, 4647, 5259):
         sel, arms = _case_arms(lines, line)
         if sel is None:
             print("    line %-5d *** no enclosing `case` found -- the waiver's"
@@ -1741,11 +1844,11 @@ def check_h_idle_clears() -> int:
 
 
 def check_whv_ready(text=None) -> int:
-    """The 3382 waiver's mechanism (11-15): a dispatch winner always has a valid head.
+    """The `if (w_hv)` waiver's mechanism (11-15; CLASSIFIED's ST_IDLE else entry): a dispatch winner always has a valid head.
     Three facts, read from the source: `ready` carries the head-valid term, `hv` is the same
     term, and `w_hv` is the winner's one-hot AND `hv`. `text`: a planted source (must-fire)."""
     print()
-    print("  --- the 3382 waiver's mechanism (a winner's head is valid) ---")
+    print("  --- the `if (w_hv)` waiver's mechanism (a winner's head is valid) ---")
     if text is None:
         with open(os.path.join(ROOT, "src", "pe_engine.v"), encoding="utf-8",
                   errors="replace") as fh:

@@ -183,6 +183,40 @@ for _a, _t in ALIASES.items():
     NON_ADMISSIBLE[_a] = NON_ADMISSIBLE[_t]
 del _lane, _pn, _n, _a, _t
 
+# ⭐ THE SLOT-BUFFER COVERAGE IMAGES (Wilson 11-24, the unreached slot-buffer points):
+# `run_ftflush.coverage_arms` (probe_cov_ftflush/ftf_*) and `run_slotbuf.coverage_arms`
+# (probe_cov_slotbuf/sb_*), seen by this gate once the sweep walked them. Each is an
+# UNCERTIFIED IMAGE, HARDWARE-PATH TEST: the runner's own stress shape -- FT edges and
+# timeouts against in-flight fetches, start-up order, a full slot buffer -- built below D*
+# on purpose. Reach-only; run_ftflush / run_slotbuf are the judges. (`ftf_parkpp` breaks
+# none of the four conditions and is not listed.)
+COV_SLOTBUF = {
+    "ftf_quick.hex": ({OVERLOAD, PORT}, "run_ftflush `quick`: the FT edge against the lane's "
+                      "own in-flight fetch (edge pkill, the P_CAP drop)"),
+    "ftf_dw1.hex": ({PORT, QUEUE}, "run_ftflush `dw1`: the edge word in the buffer at the FT "
+                    "edge (kept from the buffer)"),
+    "ftf_fall.hex": ({PORT}, "run_ftflush `fall`: the edge word in the edge cycle's capture, "
+                     "and the edge on the timeout's own cycle"),
+    "ftf_fall_b2_t1.hex": ({OVERLOAD, PORT}, "run_ftflush `fall_b2` at timeout 1: the timeout "
+                           "on the winner's own capture into a slot (the K6 drop's P_CAP clear)"),
+    "ftf_dwrace.hex": ({OVERLOAD, PORT}, "run_ftflush `dwrace`, V2E1's witness "
+                       "(dw_image(1, 2, 8), timeout 2)"),
+    "ftf_dwrace2.hex": ({OVERLOAD, PORT}, "run_ftflush `dwrace2`, V2E1's second witness "
+                        "(dw_image(2, 6, 4), timeout 16)"),
+    "sb_fcfs.hex": ({OVERLOAD, PORT}, "run_slotbuf `fcfs`: two ARM lanes unblocked on one edge "
+                    "beside a late lane 0 (two slot requests issuable at one scan)"),
+    "sb_usb.hex": ({OVERLOAD, PORT}, "run_slotbuf `usb`: `fcfs` with a USB receive on lane 0 "
+                   "(the slot below USB receive's branch 1, K13)"),
+    "sb_npf.hex": ({PORT, QUEUE}, "run_slotbuf `npf`: an ARM whose next word is a branch "
+                   "(no fetch past it)"),
+    "sb_mask.hex": ({PORT, QUEUE}, "run_slotbuf `mask`: a quiet port, the round robin landing on "
+                    "a lane as its buffered word loads (the refill mask)"),
+}
+for _n, (_c, _w) in COV_SLOTBUF.items():
+    NON_ADMISSIBLE[_n] = (_c, "uncertified image, hardware-path test (Wilson 11-24): %s. "
+                          "Reach-only; the runner is the judge." % _w)
+del _n, _c, _w
+
 #: ⛔⛔ TRACKED DEBT, NOT A DECLARATION (Wilson 11-15, the UART blocker ruling, item 2).
 #: Images of record (wire-feed entries) on which 1.6a fails ONLY with the record's
 #: certified lane lateness in J. QUEUE is not an acceptable final state for an image of

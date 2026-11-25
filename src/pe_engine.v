@@ -4186,10 +4186,14 @@ module pe_engine #(
                      if ((pl == winner) && pedge && (pst == P_REQ || pst == P_WAIT)) pkill <= 1'b1;
                      if ((pl == winner) && pedge && (pst == P_CAP) && !pkill) begin
                        if (cap_tobuf) l_bufv[winner] <= 1'b0;
+`ifndef M_FT_TMO_CAPKEEP
                        else l_actv[cix] <= 1'b0;
+`endif
                      end
+`ifndef M_TMO_TAG_KEEP
                      tg_s[hix[winner]] <= 1'b0;
                      tg_s[six[winner]] <= 1'b0;
+`endif
                      tg_b[winner]      <= 1'b0;
                      ft_ne[winner]     <= 1'b0;
                      ft_nt[winner]     <= 1'b0;

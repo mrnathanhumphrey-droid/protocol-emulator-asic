@@ -660,6 +660,25 @@ def _provenance_mustfires(S, say):
         except S.SimRefused:
             p3 = True
         say(p3, "P3 pinned generator, no commit/source recorded -> cannot record")
+        # ⛔ 11-24: the scan's SNIFF images (tb_pit's coverage arms) run by PATH, no bound;
+        # the 11-21 rule had refused all 42 tb_pit sweep runs. Nothing else rides on it.
+        sn = sorted(S._sniff_index())
+        say(bool(sn), "S0 the scan holds SNIFF images (%d) -- tb_pit's arms load them" % len(sn))
+        if sn:
+            st9 = None if _refused(S, [sn[0]]) else S.check([sn[0]])
+            say(st9 is not None and (os.path.basename(sn[0]) + "=sniff") in st9,
+                "S1 the scan's SNIFF image %s -> runs, unbounded" % os.path.basename(sn[0]))
+            # S2 a byte-identical copy OUTSIDE the scan, same name, no provenance -> refused
+            sc = os.path.join(tmp, os.path.basename(sn[0]))
+            shutil.copyfile(sn[0], sc)
+            why9 = _refused(S, [sc])
+            say(bool(why9) and sc in why9,
+                "S2 identical SNIFF copy outside the scan, same name -> refused (path, not content)")
+            # S3 the same copy in the committed tree -> refused
+            os.makedirs(tree, exist_ok=True)
+            st3 = os.path.join(tree, os.path.basename(sn[0]))
+            shutil.copyfile(sn[0], st3)
+            say(bool(_refused(S, [st3])), "S3 SNIFF copy in the committed tree -> refused")
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
         shutil.rmtree(tree, ignore_errors=True)

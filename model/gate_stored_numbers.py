@@ -590,6 +590,11 @@ SPEC_SYMBOLS = {
     # longer holds, both derived from the image itself.
     # ⭐ SP2/P4: MOVED, unchanged, to the one registry `model/nonadmissible.py`.
     ("model/nonadmissible.py", "NON_ADMISSIBLE"),
+    # the slot-buffer coverage images' N1 declarations (Wilson 11-24), merged into
+    # NON_ADMISSIBLE: the same kind -- its numbers are the runner shapes quoted in
+    # the prose (dw_image arguments, timeouts), and N1's audit holds each declared
+    # condition against the image itself.
+    ("model/nonadmissible.py", "COV_SLOTBUF"),
     # ⭐ SP2/P4's TIMING-EXEMPTION REGISTRY, the same kind: image, the switch
     # it may take, why. Its numbers are the delays quoted in the prose (d = 7,
     # 25) and "HS + 2". Staleness is caught where it means something:
@@ -787,6 +792,11 @@ SPEC_SYMBOLS = {
     # assertions, judged live (clean: none; M_FT_TMO_LOADRACE: FTTMO).
     ("test/run_ftflush.py", "RACE"),
     ("test/run_ftflush.py", "WINDOW"),
+    # COV_FLIPS (Wilson 11-24, the unreached slot-buffer points): the chosen FT-edge flip
+    # cycle of each coverage arm, the centre of a +-2 span -- design (where the 11-24
+    # probes reached the point). Reach only: the RESULT is the coverage record, and
+    # run_ftflush judges the images.
+    ("test/run_ftflush.py", "COV_FLIPS"),
     # the symbol generator (Wilson 11-17): CFGS are the chosen table instances
     # (WS2812, Manchester, NRZI, biphase, the SPI data phase) from
     # test/symgen_model.py, FEED the four bytes tb_pair feeds queue 0 -- design and

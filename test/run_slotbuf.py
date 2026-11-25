@@ -44,6 +44,8 @@ Must-fires (each RED on its image, by its assertion):
                      SLOTORD: the word after next overtakes the next)
   M_SLOT_BEFORE_PRIME  a slot issue before `primed`              SLOTPRIME (K12: lane 0's first
                      word is an ARM, captured during start-up)
+  M_GLOBAL_STALL     readiness without the head-valid term       BPRIME (sched_bprime; 11-24: its
+                     gated kill was run_mutants' progress.vh only, never the BPRIME line)
 """
 from __future__ import annotations
 
@@ -84,6 +86,7 @@ MUTANTS = [
     ("M_SLOT_PAST_NPF", "a slot fetch past a branch", "npf", "SLOTNPF"),
     ("M_SLOT_NOMASK", "the refill mask removed", "mask", "SLOTMASK"),
     ("M_SLOT_BEFORE_PRIME", "a slot issue during start-up", "fcfs", "SLOTPRIME"),
+    ("M_GLOBAL_STALL", "a winner chosen with an empty head", "fcfs", "BPRIME"),
 ]
 #: the clean build's +SLOTSTAT counts each image must show (> 0): the situation it is for
 #: (usbc / l0c: lane 0's branch 1 met an issuable slot request with `usb_on` set / clear)
@@ -269,6 +272,28 @@ def main() -> int:
     print("=" * 78)
     print("  GATE slotbuf: %s" % ("PASSED" if not probs else "FAILED"))
     return 0 if not probs else 1
+
+
+
+#: ⭐ THE COVERAGE SWEEP'S slotbuf ARMS (Wilson 11-24): the four images at the gate's own
+#: length, so the slot buffer's issue / file / load / mask / USB-yield points are reached by
+#: the sweep (they were reached by this gate only). Reach only -- this runner is the judge.
+COV_DIR = "probe_cov_slotbuf"
+#: the images' name prefix: the universe is keyed by image NAME (image_universe NameCollision),
+#: and this runner's names (usb, mask, fcfs) are generic
+COV_PREFIX = "sb_"
+
+
+def coverage_arms():
+    """[(label, plusargs)] for test/benchset.py's tb_pair; images under COV_DIR."""
+    os.makedirs(os.path.join(ROOT, COV_DIR), exist_ok=True)
+    arms = []
+    for k in VACUITY:
+        p = os.path.join(ROOT, COV_DIR, "%s%s.hex" % (COV_PREFIX, k))
+        I.write_image(p, image(k))
+        sim_run.cov_image("run_slotbuf", p)
+        arms.append(("slotbuf_%s" % k, ["+IMG=%s/%s%s.hex" % (COV_DIR, COV_PREFIX, k), "+NCYC=%d" % NCYC, "+SLOTSTAT"]))
+    return arms
 
 
 if __name__ == "__main__":

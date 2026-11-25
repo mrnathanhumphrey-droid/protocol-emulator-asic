@@ -405,6 +405,12 @@ REGISTRY = {
     "probe_cov_cemodes.hex": (INTERNAL, {
         "checked_by": "test/gate_coverage.py",
         "how": "the coverage sweep's CE-modes arm; V2 on its clocked bits"}),
+    # the slot-buffer coverage sweep (Wilson 11-24): run_ftflush's `parkpp`, PARKARM's
+    # must-fire stage (the ftflush arms' other images are N1-declared, so exempt here)
+    "ftf_parkpp.hex": (INTERNAL, {
+        "checked_by": "test/run_ftflush.py",
+        "how": "a push-pull clocked write then a plain ARM: pe_engine's FT/park assertions "
+               "clean on the clean build, M_PARKARM_MARK red on it (PARKARM)"}),
 }
 
 

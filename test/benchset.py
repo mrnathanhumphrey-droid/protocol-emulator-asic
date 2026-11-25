@@ -394,9 +394,10 @@ CONFIG = {
     # their lines read uncovered (gate_coverage: 41 + 5 points) until their cases joined
     "tb_pair": {"srcs": [], "arms": "FROM_PYGEN",
                 "pygen": [("run_pair", "coverage_arms"), ("run_symgen", "coverage_arms"),
-                          ("run_flags", "coverage_arms")]},
+                          ("run_flags", "coverage_arms"), ("run_slotbuf", "coverage_arms")]},
     "tb_ds": {"srcs": [], "arms": "FROM_PYGEN", "pygen": ("run_drive_sample", "coverage_arms")},
-    "tb_arm2": {"srcs": [], "arms": "FROM_PYGEN", "pygen": ("run_arm2", "coverage_arms")},
+    "tb_arm2": {"srcs": [], "arms": "FROM_PYGEN",
+                "pygen": [("run_arm2", "coverage_arms"), ("run_ftflush", "coverage_arms")]},
     "tb_gcd": {
         "srcs": [],
         "arms": "FROM_PYGEN",

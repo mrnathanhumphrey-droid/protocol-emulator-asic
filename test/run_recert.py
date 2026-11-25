@@ -110,6 +110,10 @@ NOT_CERTIFIABLE = {
                        "deadline; each lane's wire checked by run_spitgt",
     "b3b_bnoi2c_image.hex": "contention subject (B3b), b3b_b without I2C; "
                             "each lane's wire checked by run_spitgt",
+    # the slot-buffer coverage sweep (Wilson 11-24): run_ftflush's parkpp
+    "ftf_parkpp.hex": "mechanism subject: PARKARM's must-fire stage (a push-pull clocked "
+                      "write then a plain ARM), no START/STOP framing; judged by "
+                      "run_ftflush's assertions",
 }
 
 

@@ -85,7 +85,9 @@ MUST_FIRE: dict = {
         ('M_TAG_STALE', "the edge tag left on an emptied slot / buffer (11-24)"),
         ('M_FT_TMO_LOADRACE', "K6, the buffer loads the word the timeout drop removes (V2E1, 11-24)"),
         ('M_TMOPICK_DISPATCH', "TMOPICK, the timeout pick dispatching PC+1 in its own cycle (Wilson 11-24)"),
-        ('M_PARKARM_MARK', "PARKARM, the park mark set on a push-pull clocked phase that never parks (Wilson 11-24)"))},
+        ('M_PARKARM_MARK', "PARKARM, the park mark set on a push-pull clocked phase that never parks (Wilson 11-24)"),
+        ('M_FT_TMO_CAPKEEP', "K6, the timeout's own slot capture left filed (4142, Wilson 11-24)"),
+        ('M_TMO_TAG_KEEP', "TAGSTALE's slot clause, the K6 drop emptying a slot that keeps its tag (11-24)"))},
     # the park witness (Wilson 11-23, item 2): M_PARK_STUCK at CK_PRE = 4 -- the false stretch halt
     'run_ftflush:ftflush_wit_M_PARK_STUCK': {
         'runner': 'test/run_ftflush.py',
@@ -173,6 +175,14 @@ MUST_FIRE: dict = {
         'image': 'slotbuf_fcfs.hex',
         'expect': '^\\s*\\*\\*\\* ASSERT pe_engine (?:SLOTPRIME|SLOTUSB):',
         'why': "K12's planted case (Wilson 11-22): an ARM captured during start-up issues its slot fetch before the engine is primed (the issue also takes the port from the priming refill: SLOTUSB)",
+    },
+    'run_slotbuf:slotbuf_M_GLOBAL_STALL:slotbuf_fcfs': {
+        'runner': 'test/run_slotbuf.py',
+        'build': 'slotbuf_M_GLOBAL_STALL.vvp',
+        'define': 'M_GLOBAL_STALL',
+        'image': 'slotbuf_fcfs.hex',
+        'expect': '^\\s*\\*\\*\\* (?:ASSERT\\ pe_engine\\ BPRIME:|FAIL\\ progress\\.vh\\[S\\]|FAIL\\ progress\\.vh\\[A\\])',
+        'why': "sched_bprime's planted case on its own line (11-24; progress.vh S/A report the same stall, as on run_mutants' corpus_all5): readiness without the head-valid term, so the dispatcher picks a lane whose head is empty",
     },
     'run_arm2:arm2_M_ARM2_EDGE:arm2_lvl0_to200': {
         'runner': 'test/run_arm2.py',

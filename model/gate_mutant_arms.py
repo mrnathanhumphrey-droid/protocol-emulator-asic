@@ -300,6 +300,8 @@ EXPECT = {
     "M_FT_TMO_LOADRACE":  (2, None),   # V2E1 (11-24): the load block removed, the drop misses the word
     "M_TMOPICK_DISPATCH": (1, None),   # TMOPICK (Wilson 11-24): the pick dispatches the head
     "M_PARKARM_MARK":     (1, None),   # PARKARM (Wilson 11-24): a mark with no park
+    "M_FT_TMO_CAPKEEP":   (1, None),   # K6 (Wilson 11-24, 4142): the timeout's own slot capture left filed
+    "M_TMO_TAG_KEEP":     (2, None),   # TAGSTALE slot (11-24): the K6 drop's slot tag clears removed
     "M_FT_TAG_LOST":      (2, None),   # the edge tag dropped on a buffer -> spare load
     # the slot buffer, piece 4 (Wilson 11-20 / 11-22): the scheduler contracts
     "M_K10_EARLY":        (2, None),   # K10: the edge accepted in the arming writeback cycle

@@ -310,6 +310,9 @@ COV_WRITERS = {
     "run_usbrx": ("probe_cov_usbrx", "test/tb_usbrx.v"),
     "run_pit_s12": ("probe_cov_s12", "test/tb_pit.v"),
     "run_pit_clk": ("probe_cov_clk", "test/tb_pit.v"),
+    # the slot buffer's points (Wilson 11-24): reach only, each runner judges
+    "run_ftflush": ("probe_cov_ftflush", "test/tb_arm2.v"),
+    "run_slotbuf": ("probe_cov_slotbuf", "test/tb_pair.v"),
 }
 COV_SUFFIX = ".coverage_arms"
 for _m, (_d, _b) in COV_WRITERS.items():
@@ -454,7 +457,22 @@ def _universe_index():
             if s:
                 by_sha.setdefault(s, os.path.abspath(p))
         _UIDX.append((by_path, by_sha))
+        _SIDX.update(os.path.normcase(os.path.abspath(p)) for p in u.sniff.values())
     return _UIDX[0]
+
+
+#: ⛔ THE SNIFF IMAGES (11-24): the scan's own held-out set (image_universe: bytes 30-31 are
+#: the SNIFF magic -- not programs, LISTED by its report), by path. tb_pit's coverage arms
+#: load them; the 11-21 provenance rule refused all 42 of those runs (14 arms x 3 modes)
+#: because the index held programs only. Accepted by PATH in the scan, never by content or
+#: name: a copy elsewhere still needs its generator's provenance (gate_sim_runs S2/S3).
+_SIDX = set()
+
+
+def _sniff_index():
+    """{abs path} of the universe scan's SNIFF images."""
+    _universe_index()
+    return _SIDX
 
 
 def is_cov_path(path):
@@ -675,6 +693,9 @@ def lookup(images):
         name = os.path.basename(a)
         if os.path.normcase(a) in by_path:
             target = a                               # a universe image
+        elif os.path.normcase(a) in _sniff_index():  # the scan's SNIFF image: no bound
+            notes.append("%s=sniff" % name)
+            continue
         else:
             twin = by_sha.get(_sha(a))
             if twin is not None:                     # a copy: ITS bound

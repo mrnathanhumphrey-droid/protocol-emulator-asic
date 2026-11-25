@@ -48,6 +48,8 @@ Must-fires (each RED somewhere in its image's sweep, by its assertion):
   M_FT_TMO_LOADRACE K6 the buffer loads the word the drop removes      FTTMO (V2E1, on dwrace)
   M_TMOPICK_DISPATCH  the timeout pick dispatches PC+1 in its cycle    TMOPICK (Wilson 11-24)
   M_PARKARM_MARK      the park mark set on a phase that does not park PARKARM (Wilson 11-24, parkpp)
+  M_FT_TMO_CAPKEEP K6 the timeout's own slot capture left filed     FTTMO (Wilson 11-24, fall_b2_t1)
+  M_TMO_TAG_KEEP   tag the K6 drop empties a slot, keeps its tag    TAGSTALE (slot; 11-24, loop)
   M_FT_TAG_LOST        the edge tag lost when its word moves           FTKEEP
   M_FT_SCAN_RACE   K9  the scan selects a flushing lane (11-14)        K9 (ScanOk)
 Piece 4 (Wilson 11-20 / 11-22), the scheduler contracts, on the same images:
@@ -92,12 +94,17 @@ FLIP_LO, FLIP_HI = -6, 150   # the flip, relative to the image's first arming (o
 #: timeout -- the edge word waits in the buffer while the spare empties, and the buffer would load
 #: it in the K6 drop's own cycle (FTTMO, then SLOTORD on dwrace; FTTMO alone on dwrace2)
 #: `parkpp` (Wilson 11-24, PARKARM's must-fire): a PUSH-PULL clocked write (no park) then a plain ARM
+#: `fall_b2_t1` (Wilson 11-24, 4142's must-fire): fall_b2 at timeout 1 -- the timeout lands on the
+#: winner's own capture into a slot, which the K6 drop removes
 IMAGES = ("dw1", "fall", "loop", "spare", "quick", "quick_b7", "parkft", "parkqual", "dwrace", "dwrace2",
-          "parkpp")
+          "parkpp", "fall_b2_t1")
 #: the flip window per image, relative to its first arming (the buffered case sits at wb + 1)
-WINDOW = {"dw1": (-6, 21), "dwrace": (-6, 21), "dwrace2": (-6, 21), "parkpp": (-6, 21)}
+WINDOW = {"dw1": (-6, 21), "dwrace": (-6, 21), "dwrace2": (-6, 21), "parkpp": (-6, 21),
+          "fall_b2_t1": (-6, 21)}
 #: the V2E1 witnesses: dw_image(n, ds, wd) at their own timeout (found 11-24, 76 of 320 images)
 RACE = {"dwrace": (1, 2, 8, 2), "dwrace2": (2, 6, 4, 16)}
+#: an image at its own timeout: name -> (the image it is, the timeout)
+TMOS = {"fall_b2_t1": ("fall_b2", 1)}
 STATS = ("ftraise", "keepslot", "keepbuf", "keepcap", "keepnone", "fttmo", "tagmove")
 #: counted but NOT required: the edge word ABSENT at an FT edge (the refetch branch) -- 0 over
 #: 3,253 runs; agent 2's "never absent" lemma decides it (Wilson 11-22), so it is reported, not
@@ -140,6 +147,15 @@ MUTANTS = [
     # PARKARM (its must-fire per Wilson 11-24): a mark with no park, so no rise ever clears it
     ("M_PARKARM_MARK", "park3", "the park mark set on a phase that does not park", ("parkpp",),
      ("PARKARM",)),
+    # the timeout's own capture (4142, its must-fire per Wilson 11-24): the PC+2 word landing
+    # in a slot in the timeout's cycle left filed
+    ("M_FT_TMO_CAPKEEP", "K6", "the timeout's own slot capture left filed", ("fall_b2_t1",),
+     ("FTTMO",)),
+    # TAGSTALE's slot clause (Wilson 11-24: every assertion gets a must-fire): M_TAG_STALE reaches
+    # only the buffer clause (780 edge runs, 0 slot hits) -- the K6 drop's tag clear is the one
+    # that keeps a dropped slot untagged
+    ("M_TMO_TAG_KEEP", "tag", "the K6 drop empties a slot and keeps its tag", ("loop", "fall"),
+     ("TAGSTALE",)),
 ]
 
 #: THE PARK WITNESS (Wilson 11-23, item 2): lane 0 an open-drain clocked lane that WRITES, idles
@@ -156,6 +172,14 @@ def image(name):
     before the edge, buffered and loaded); `<kind>_b<d>` keeps them BUSY with pinless
     loops of words of d.. cycles, so the one fetch port is contended at a phase set by d
     and lane 0's FT words can still be in flight -- or not yet fetched -- at its edge."""
+    if name in TMOS:
+        global TMO
+        base, old = TMOS[name][0], TMO
+        TMO = TMOS[name][1]
+        try:
+            return image(base)
+        finally:
+            TMO = old
     if name in RACE:
         n, ds, wd, tmo = RACE[name]
         return dw_image(n, ds, wd, tmo)
@@ -405,6 +429,50 @@ def main() -> int:
     print("=" * 78)
     print("  GATE ftflush: %s" % ("PASSED" if not probs else "FAILED"))
     return 0 if not probs else 1
+
+
+
+#: ⭐ THE COVERAGE SWEEP'S ftflush ARMS (Wilson 11-24, the unreached slot-buffer points): the
+#: shapes that reached the FT flush / timeout points in the 11-24 probes, each flip +-2 so a
+#: moved cycle keeps the window. Reach only -- this runner is the judge. tb_arm2, PHA_ABS flips.
+#:   quick@123  the edge against the lane's own in-flight fetch (edge pkill, P_CAP drop)
+#:   dw1@127    the edge word in the buffer at the edge (keep from the buffer)
+#:   fall@120   the edge word arriving in the edge cycle's capture (keep from the capture)
+#:   fall@157   the edge on the timeout's own cycle (the edge wins: no K6 drop)
+#:   fall_b2 at timeout 1, no edge: the timeout lands on the winner's own capture into a slot
+#:             (the K6 drop's P_CAP clear, 4142; 462 runs in the 11-24 probe)
+#:   dwrace / dwrace2 / parkpp, no edge: V2E1's two witnesses and the push-pull clocked lane
+COV_DIR = "probe_cov_ftflush"
+#: the images' name prefix: the universe is keyed by image NAME (image_universe NameCollision),
+#: and this runner's names (fall, quick, dw1) are generic
+COV_PREFIX = "ftf_"
+COV_FLIPS = (("quick", 123), ("dw1", 127), ("fall", 120), ("fall", 157))
+COV_ONE = ("fall_b2_t1", "dwrace", "dwrace2", "parkpp")
+
+
+def coverage_arms():
+    """[(label, plusargs)] for test/benchset.py's tb_arm2; images under COV_DIR."""
+    os.makedirs(os.path.join(ROOT, COV_DIR), exist_ok=True)
+    arms, done = [], set()
+
+    def put(stem, img):
+        if stem not in done:
+            p = os.path.join(ROOT, COV_DIR, "%s%s.hex" % (COV_PREFIX, stem))
+            I.write_image(p, img)
+            sim_run.cov_image("run_ftflush", p)
+            done.add(stem)
+
+    def arm(label, stem, flip):
+        arms.append((label, ["+IMG=%s/%s%s.hex" % (COV_DIR, COV_PREFIX, stem), "+IDLE=1", "+PHA=-1", "+PHB=-1",
+                             "+NCYC=%d" % NCYC, "+PHA_ABS=%d" % flip, "+SLOTSTAT", "+QUIESCENT"]))
+    for name, f0 in COV_FLIPS:
+        put(name, image(name))
+        for f in range(f0 - 2, f0 + 3):
+            arm("ftf_%s_f%d" % (name, f), name, f)
+    for stem in COV_ONE:
+        put(stem, image(stem))
+        arm("ftf_%s" % stem, stem, -1)
+    return arms
 
 
 if __name__ == "__main__":
