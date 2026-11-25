@@ -690,7 +690,20 @@ TOGGLE_CEILING = {
     # is dark on lanes 1-4 (8 points: no clocked program stretches there).
     # Net -1 from lane 0's `l_t[0]`: the real-time programs load different
     # delays, so 6 of its bit edges went dark and 7 other points were paid.
-    "src/pe_engine.v": 960,       # primitive 2's CMP arms: -97; pre-decode +12; 60 MHz l_ckwdog +8, stimulus -1
+    # ⚠ 960 -> 1637 (+677) RE-RECORDED 11-24 (Wilson 11-24, the slot-buffer coverage ruling: re-record
+    # the toggle limits), MEASURED name by name: the step-6 sweep (probe_cov_1125, f04d66b, 1359
+    # arms) against the 11-04 sweep the 960 was set from (wt_all7_a, cc6166d). 858 new dark points,
+    # 181 paid. 847 of the 858 are points that did not exist on 11-04 -- design growth since, mostly
+    # wide words no swept program fills: the slot buffer (l_buf 178, sq_old 40, sq_addr 23, g_sreq
+    # 46, ft_ea 23, ft_kv 10, sq_yield 9, tmo_ldblk 8; pieces 2-4 and V2E1), its SIM-ONLY shadow
+    # checks (sh_a 48, sh_b 35, st_fk* 26, ck_*), the symbol generator (pe_symgen 128: lens, code_a /
+    # code_b, lat, cfg_data, wcnt), the pre-decode's wider class (l_cls 48, hc 24) and USB / flag /
+    # ARM-modifier state (usb_* ~45, obs_* 20, l_armqual 8, l_hwait 18). 11 were COVERED on 11-04
+    # and are dark now: l_ckwdog bits 1-3 on lanes 1-2 (10 -- consistent with the 11-23 park change,
+    # 8dbad16, which ends a park at its own rise so the watchdog counts less; not traced) and
+    # l_act[9][11] 0->1 (1 -- slot 9's bit 11 as loaded; stimulus, not traced). The list is
+    # test/coverage_points/src__pe_engine.v.txt, rewritten from the same sweep.
+    "src/pe_engine.v": 1637,      # primitive 2's CMP arms: -97; pre-decode +12; 60 MHz l_ckwdog +8, stimulus -1; 11-24 re-record +677
     # ⚠ 6 -> 28 (+22) for v2: the wide read's reserved bits (16), the row
     # index's top bits (4: v1 images fit rows 0..31) and wraddr bits 0-1 (4:
     # the engine writes whole words) -- same field-by-field check, 0 lost.
@@ -767,7 +780,13 @@ TOGGLE_CEILING = {
     # register, 10-30) adds 72 points; the 2 dark ones are bud_init[35] both
     # ways -- STRUCTURAL: bsel is clamped to BMAX = 35, so the largest reload
     # value is 2^35 - 1 and bit 35 is never set.
-    "src/project.v": 1725,     # primitive 1's arms -10, primitive 2's -4, PIT c1 +670, c2a +80, c2 +815, bud_init +2, lever 1 + item 1 -15
+    # ⚠ 1725 -> 1833 (+108) RE-RECORDED 11-24 with its FIRST point list (Wilson 11-18: each limit has
+    # its list; project.v had none -- the 1725 had no surviving sweep behind it). Measured name by
+    # name against the 11-04 sweep (1701 uncovered there): 387 new dark points, every one a point
+    # that did not exist on 11-04 (largest: kmask 113, v_raw 80, unary 66, v_esc 64, v_rec 48, v_all 48, acc_d 48), 0 covered
+    # points went dark, 255 paid. The list is test/coverage_points/src__project.v.txt, from
+    # probe_cov_1125 (f04d66b).
+    "src/project.v": 1833,     # primitive 1's arms -10, primitive 2's -4, PIT c1 +670, c2a +80, c2 +815, bud_init +2, lever 1 + item 1 -15; 11-24 first list +108
     # ⭐ RATCHETED DOWN BY THE SELF-CLOCKED CORPUS, and the cause is worth
     # recording: the rewritten corpus drives WHOLE BYTES through the peer
     # models instead of two bits per clock, so `fram_spi` went 54 -> 30

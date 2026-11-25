@@ -65,6 +65,9 @@ that cycle only. The word stays in the buffer, where the drop's `l_bufv <= 0` re
 The 894 runs above give 0 asserts on the fixed RTL. `M_FT_TMO_LOADRACE` removes the
 block; `run_ftflush`'s `dwrace` (`dw_image(1, 2, 8)`, timeout 2) kills it, and
 `dwrace2` (`dw_image(2, 6, 4)`, timeout 16) is the second witness. Both run clean.
+Agent 2's `ft_tmo_drop` (FtDrop.lean, `a2/q16a` aebf1f1, local) is the model side: the drop
+wins over the load, as the fixed RTL does; `model/mf_v2e1.py` is its witness. The coverage
+record (Wilson 11-24) cites it for the drop's correctness, not for reachability.
 
 ## V2E2 — an FT ARM at another FT ARM's PC+1 or PC+2 breaks the lane's word order (found 2026-11-24)
 
