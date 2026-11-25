@@ -1,0 +1,56 @@
+name: harden-setup
+description: "harden.yml: the pinned flow (tt-support-tools 9d13ff3, LibreLane 3.1.0.dev4, PDK from ci/pdk.sha, cached) and the merged config for one design directory"
+inputs:
+  wd:
+    description: "design directory (. = the chip, ci/harden/smoke = the smoke design)"
+    required: true
+  coef:
+    description: "PL_WIRE_LENGTH_COEF for the chip (ignored for the smoke design)"
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: tt-support-tools at the pinned SHA
+      uses: actions/checkout@v6
+      with:
+        repository: TinyTapeout/tt-support-tools
+        ref: 9d13ff3e3e6202090740110438c6a10c1d62ca0f
+        path: ${{ inputs.wd }}/tt
+
+    - uses: actions/setup-python@v6
+      with:
+        python-version: '3.11'
+        cache: pip
+
+    - name: Python packages (tt tools + LibreLane, pinned)
+      shell: bash
+      run: pip install -q -r "${{ inputs.wd }}/tt/requirements.txt" "librelane==3.1.0.dev4"
+
+    # ⭐ CACHED, NOT DOWNLOADED EVERY RUN (Wilson 11-25 load controls): the PDK store keyed by its pinned hash.
+    - name: PDK cache
+      id: pdkc
+      uses: actions/cache@v4
+      with:
+        path: /home/runner/pdk
+        key: pdk-ihp-sg13-${{ hashFiles('ci/pdk.sha') }}
+
+    - name: PDK fetch (cache miss only)
+      if: steps.pdkc.outputs.cache-hit != 'true'
+      shell: bash
+      run: ciel fetch --pdk-root /home/runner/pdk --pdk-family ihp-sg13 "$(tr -d '[:space:]' < ci/pdk.sha)"
+
+    - name: Merged config
+      shell: bash
+      working-directory: ${{ inputs.wd }}
+      run: |
+        set -euo pipefail
+        if [ "${{ inputs.wd }}" = "." ]; then
+          python3 - "${{ inputs.coef }}" <<'PY'
+        import json, sys
+        p = "src/config.json"; c = json.load(open(p)); c["PL_WIRE_LENGTH_COEF"] = float(sys.argv[1])
+        json.dump(c, open(p, "w"), indent=2)
+        print("PL_WIRE_LENGTH_COEF", c["PL_WIRE_LENGTH_COEF"])
+        PY
+          python3 ci/flow_pins.py --py "$(command -v python)" --tt tt --pdk-root /home/runner/pdk
+        fi
+        ./tt/tt_tool.py --create-user-config --pdk ihp-sg13cmos5l

@@ -1,0 +1,27 @@
+{
+  "_doc": "harden.yml stage gates (Wilson ruling 11-25, agent 1). Every threshold is set from measured local runs on the shipping flow (LibreLane 3.1.0.dev4, PDK 89d42ee6); the evidence is in _provenance. A gate that fails stops the run at that stage and says why.",
+  "J1": {
+    "util_max_pct": 58.0,
+    "typ_setup_wns_min_ns": 0.0,
+    "_why": "design__instance__utilization at the post-CTS STA step: routed runs went up to 57.1 % (canary-b4, hold-a, h10r-a), so utilisation alone does not predict a routing failure; 58 % stops only a jump past every routed run. Typical-corner setup is the one corner readable before routing (e72e47f +7.62, 9c0df0c +7.69 at this step); slow/fast before routing are artefacts (9c0df0c read -38 ns slow here and +4.42 at sign-off) and are reported, not gated."
+  },
+  "J2": {
+    "grt_usage_max_pct": 67.0,
+    "_why": "global-route resource usage is what separated the runs that routed from the one that did not: every routed run on this flow read <= 66.19 % (kh27a_c025rc), today's e72e47f read 73.47 % and reached 82k DRT violations after 4 passes. Total overflow alone does not separate them (kh27a_a0_027rh routed at overflow 9,712; e72e47f failed at 8,007), so it is reported, not gated."
+  },
+  "J3": {
+    "drt_pass_max": {"0": 45000, "3": 5000},
+    "_why": "detailed-routing violations at the end of pass 0 were 15k-38k on every routed run and 90,229 on e72e47f; at pass 3 the routed runs were <= 4,020 (rec_025m5h25) and e72e47f 83,554. A count above the line at that pass stops the job instead of grinding through 64 passes."
+  },
+  "J4": {
+    "setup_wns_min_ns": 0.0,
+    "hold_wns_min_ns": 0.0,
+    "hold_warn_below_ns": 0.05,
+    "route_drc_max": 0,
+    "antenna_max": 0,
+    "_why": "sign-off: no negative setup or hold at any corner, routed DRC 0, antenna 0; hold under +0.05 ns is flagged (the line every earlier v2 run sat near). LVS, the TT precheck and gate-level sim are their own pass/fail."
+  },
+  "silent_log_limit_s": 2700,
+  "_silent_why": "a stage whose run directory and log have not changed for 45 min is killed. The longest silent stretch in a run that routed is well under that; the 11-24 failure sat silent 2 h 20 min inside DRT pass 4.",
+  "_provenance": "R:/claude_scratch/s12c/hpipe (11-25 table of every local run's GRT usage/overflow, utilisation and DRT per pass)"
+}

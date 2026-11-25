@@ -34,6 +34,9 @@ jobs:
   # must stay out of scope at row 0 -- plus `#print axioms` on dstar, dstar29
   # and dstar39 == exactly [propext, Quot.sound]. Divergence = red.
   ln1:
+    # 11-25 option 1: part of the dispatched full suite, after the meta-seams (no push run, no parallel lane)
+    needs: [meta-slow]
+    if: always() && github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -135,10 +138,12 @@ jobs:
   # here: a seam added to the table is in CI with no workflow edit, and none
   # can drop out of CI silently.
   meta-seams:
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     outputs:
       seams: ${{ steps.list.outputs.seams }}
+      parts: ${{ steps.list.outputs.parts }}
     steps:
       - name: Checkout repo
         uses: actions/checkout@v6
@@ -155,18 +160,22 @@ jobs:
           echo "slow seams: $s"
           [ "$s" != "[]" ] || { echo "*** no slow seams listed: RED"; exit 1; }
           echo "seams=$s" >> "$GITHUB_OUTPUT"
+          # 11-25 option 1: the seams as ci_chunks.json's meta_parts SEQUENTIAL parts (round-robin), not one job each
+          python3 -c "import json,sys; s=json.loads(sys.argv[1]); n=json.load(open('ci/ci_chunks.json'))['meta_parts']; print('parts=' + json.dumps([{'name': 'meta-%d' % (i + 1), 'seams': ' '.join(s[i::n])} for i in range(n)]))" "$s" >> "$GITHUB_OUTPUT"
 
   meta-slow:
-    needs: meta-seams
+    # ⛔⛔ 11-25 option 1: NOT one job per seam (47 jobs per push was the spike). The seams run in sequential
+    # parts after the shards, one runner at a time; gate_meta's own per-seam limit (30 min) still applies inside.
+    needs: [meta-seams, test]
+    if: always() && github.event_name == 'workflow_dispatch' && needs.meta-seams.result == 'success'
+    name: meta-slow (${{ matrix.part.name }})
     runs-on: ubuntu-24.04
-    timeout-minutes: 45            # gate_meta's own per-seam limit is 30 min
+    timeout-minutes: 330
     strategy:
       fail-fast: false
-      # ⚠ the account runs ~20 jobs at once across ALL repos (Wilson 10-25):
-      # 8 gate shards (F1.5 added `fpga`) + ln1 + cocotb + the list jobs + 8 seams: ~20, AT the limit
-      max-parallel: 8
+      max-parallel: 1
       matrix:
-        seam: ${{ fromJSON(needs.meta-seams.outputs.seams) }}
+        part: ${{ fromJSON(needs.meta-seams.outputs.parts) }}
     steps:
       - name: Checkout repo
         uses: actions/checkout@v6
@@ -221,25 +230,25 @@ jobs:
       # toolchain cached on `lean-toolchain`, the build tree on lean-toolchain
       # + lake-manifest.json -- the same keys as the ln1 job's
       - name: "lean: cache elan and the Lean toolchain"
-        if: matrix.seam == 'gate_lean_build.judge'
+        if: contains(format(' {0} ', matrix.part.seams), ' gate_lean_build.judge ')
         id: elan_m
         uses: actions/cache@v4
         with:
           path: ~/.elan
           key: elan-${{ runner.os }}-${{ hashFiles('lean/JLane/lean-toolchain') }}
       - name: "lean: install elan"
-        if: matrix.seam == 'gate_lean_build.judge' && steps.elan_m.outputs.cache-hit != 'true'
+        if: contains(format(' {0} ', matrix.part.seams), ' gate_lean_build.judge ') && steps.elan_m.outputs.cache-hit != 'true'
         shell: bash
         run: |
           set -euo pipefail
           curl -sSfL https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh \
             | sh -s -- -y --default-toolchain none
       - name: "lean: put elan on PATH"
-        if: matrix.seam == 'gate_lean_build.judge'
+        if: contains(format(' {0} ', matrix.part.seams), ' gate_lean_build.judge ')
         shell: bash
         run: echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
       - name: "lean: cache the Lean build tree"
-        if: matrix.seam == 'gate_lean_build.judge'
+        if: contains(format(' {0} ', matrix.part.seams), ' gate_lean_build.judge ')
         uses: actions/cache@v4
         with:
           path: lean/JLane/.lake
@@ -268,7 +277,7 @@ jobs:
           git checkout -q FETCH_HEAD
           ls -l ihp-sg13cmos5l/libs.ref/sg13cmos5l_stdcell/verilog/
 
-      - name: Meta-test seam ${{ matrix.seam }}
+      - name: Meta-test seams (${{ matrix.part.name }})
         shell: bash
         env:
           PE_VERILATOR: /opt/oss-cad-suite/bin/verilator
@@ -280,13 +289,18 @@ jobs:
           # and stopped the gate before compare (11-13 CI: calls=0)
           PE_IVERILOG_CELLS: /opt/oss-cad-suite/bin/iverilog
           PE_VVP_CELLS: /opt/oss-cad-suite/bin/vvp
-        run: python model/gate_meta.py --seam "${{ matrix.seam }}"
+        run: |
+          rc=0
+          for seam in ${{ matrix.part.seams }}; do
+            echo "::group::seam $seam"; python model/gate_meta.py --seam "$seam" || { echo "*** seam $seam: RED"; rc=1; }; echo "::endgroup::"
+          done
+          exit $rc
 
   # ⛔⛔ A MATRIX IS GREEN ONLY IF EVERY EXPECTED LEG RAN GREEN (Wilson 10-25,
   # S1g at the CI layer): a leg that never started must not read as a pass.
   meta-complete:
     needs: [meta-seams, meta-slow]
-    if: always()
+    if: always() && github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -305,6 +319,7 @@ jobs:
     timeout-minutes: 10
     outputs:
       shards: ${{ steps.list.outputs.shards }}
+      chunks: ${{ steps.list.outputs.chunks }}
     steps:
       - name: Checkout repo
         uses: actions/checkout@v6
@@ -312,31 +327,48 @@ jobs:
         uses: actions/setup-python@v6
         with:
           python-version: '3.11'
+      # ⭐ THE JOB SHAPE (11-25, option 1): ci/ci_chunks.json. A push runs the `push` chunk only (its shards
+      # are the ones gates-complete then requires); a dispatch runs the full chunks, which must cover
+      # ci/shards.py's list EXACTLY -- none missing, none twice -- or this job is red.
       - name: Check and list the shards
         id: list
         shell: bash
+        env:
+          EVENT: ${{ github.event_name }}
         run: |
           set -euo pipefail
           python ci/shards.py check
           # Wilson 11-15 item 5: the pre-push list names every gate (judge only; the hook runs it)
           python ci/prepush.py check
-          s="$(python ci/shards.py list)"
-          echo "shards: $s"
-          echo "shards=$s" >> "$GITHUB_OUTPUT"
+          all="$(python ci/shards.py list)"
+          python3 - "$all" "$EVENT" <<'PY2' >> "$GITHUB_OUTPUT"
+          import json, sys
+          allsh = json.loads(sys.argv[1]); ev = sys.argv[2]
+          c = json.load(open("ci/ci_chunks.json"))
+          full = [x for ch in c["dispatch"] for x in ch["shards"].split()]
+          if sorted(full) != sorted(allsh):
+              sys.stderr.write(f"*** ci_chunks.json dispatch chunks {sorted(full)} != shards {sorted(allsh)}" + chr(10)); sys.exit(1)
+          chunks = c["push"] if ev == "push" else c["dispatch"]
+          run = [x for ch in chunks for x in ch["shards"].split()]
+          assert set(run) <= set(allsh), f"push chunk names an unknown shard: {set(run) - set(allsh)}"
+          print("shards=" + json.dumps(run))
+          print("chunks=" + json.dumps(chunks))
+          PY2
+          grep -E "^(shards|chunks)=" "$GITHUB_OUTPUT" | tail -2
 
   test:
     needs: shards
-    name: test (${{ matrix.shard }})
+    name: test (${{ matrix.chunk.name }})
     runs-on: ubuntu-24.04
-    # ⛔ TIMEOUTS (Wilson 11-02): a hang or a slow shard fails in this many
-    # minutes and says so, not after GitHub's 6 hours. Sized from the LAST
-    # measured CI run (41293526842, the latch store before its sim fix -- an
-    # upper bound): cov 173 min, the rest <= 77. Tighten after the post-fix run.
-    timeout-minutes: ${{ matrix.shard == 'cov' && 240 || 120 }}
+    # ⛔⛔ NO FAN-OUT (Wilson + Nate 11-25, option 1): the 11-15 suspension was 11 shards + 47 seams running at
+    # once, ~12 runner-hours per push. Now a push is ONE job (the fast shards, in sequence); the full suite is a
+    # manual dispatch of sequential chunks, max-parallel 1, each under the 6 h job limit (ci/ci_chunks.json).
+    timeout-minutes: ${{ github.event_name == 'push' && 120 || 330 }}
     strategy:
       fail-fast: false
+      max-parallel: 1
       matrix:
-        shard: ${{ fromJSON(needs.shards.outputs.shards) }}
+        chunk: ${{ fromJSON(needs.shards.outputs.chunks) }}
     steps:
       - name: Checkout repo
         uses: actions/checkout@v6
@@ -372,32 +404,32 @@ jobs:
       # toolchain cached on `lean-toolchain`, the build tree on lean-toolchain
       # + lake-manifest.json -- the same keys as the ln1 job's
       - name: "lean: cache elan and the Lean toolchain"
-        if: matrix.shard == 'lean'
+        if: contains(format(' {0} ', matrix.chunk.shards), ' lean ')
         id: elan_t
         uses: actions/cache@v4
         with:
           path: ~/.elan
           key: elan-${{ runner.os }}-${{ hashFiles('lean/JLane/lean-toolchain') }}
       - name: "lean: install elan"
-        if: matrix.shard == 'lean' && steps.elan_t.outputs.cache-hit != 'true'
+        if: contains(format(' {0} ', matrix.chunk.shards), ' lean ') && steps.elan_t.outputs.cache-hit != 'true'
         shell: bash
         run: |
           set -euo pipefail
           curl -sSfL https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh \
             | sh -s -- -y --default-toolchain none
       - name: "lean: put elan on PATH"
-        if: matrix.shard == 'lean'
+        if: contains(format(' {0} ', matrix.chunk.shards), ' lean ')
         shell: bash
         run: echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
       - name: "lean: cache the Lean build tree"
-        if: matrix.shard == 'lean'
+        if: contains(format(' {0} ', matrix.chunk.shards), ' lean ')
         uses: actions/cache@v4
         with:
           path: lean/JLane/.lake
           key: lake-${{ runner.os }}-${{ hashFiles('lean/JLane/lean-toolchain', 'lean/JLane/lake-manifest.json') }}
 
       - name: "sim2: sigrok-cli (pinned: 0.7.2 / libsigrokdecode 0.5.3)"
-        if: matrix.shard == 'sim2'
+        if: contains(format(' {0} ', matrix.chunk.shards), ' sim2 ')
         shell: bash
         run: |
           set -euo pipefail
@@ -537,32 +569,32 @@ jobs:
       # ⚠ tt/ is cloned OUTSIDE the checkout and PDK_ROOT is NOT exported: the
       # other fast gates must see neither (the lints read PDK_ROOT).
       - name: "llsyn: free runner disk for the LibreLane image"
-        if: matrix.shard == 'fast'
+        if: contains(format(' {0} ', matrix.chunk.shards), ' fast ')
         shell: bash
         run: |
           df -h / | tail -1
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
           df -h / | tail -1
       - name: "llsyn: the pinned PDK commit (ci/pdk.sha)"
-        if: matrix.shard == 'fast'
+        if: contains(format(' {0} ', matrix.chunk.shards), ' fast ')
         shell: bash
         run: echo "PDK_SHA=$(tr -d '[:space:]' < ci/pdk.sha)" >> "$GITHUB_ENV"
       - name: "llsyn: restore the pinned IHP PDK"
         id: llpdk
-        if: matrix.shard == 'fast'
+        if: contains(format(' {0} ', matrix.chunk.shards), ' fast ')
         uses: actions/cache/restore@v4
         with:
           path: /home/runner/pdk
           key: ihp-open-pdk-${{ env.PDK_SHA }}
       - name: "llsyn: restore the LibreLane image"
         id: llimg
-        if: matrix.shard == 'fast'
+        if: contains(format(' {0} ', matrix.chunk.shards), ' fast ')
         uses: actions/cache/restore@v4
         with:
           path: /home/runner/llimg
           key: librelane-image-3.1.0.dev4
       - name: "llsyn: tt-support-tools, LibreLane and its image (pinned)"
-        if: matrix.shard == 'fast'
+        if: contains(format(' {0} ', matrix.chunk.shards), ' fast ')
         shell: bash
         env:
           TT_REF: 9d13ff3e3e6202090740110438c6a10c1d62ca0f
@@ -613,13 +645,18 @@ jobs:
           PE_VVP_CELLS: /opt/oss-cad-suite/bin/vvp
         run: |
           set -o pipefail
-          bash ci/run_gates.sh --shard "${{ matrix.shard }}" 2>&1 | tee gates.log
-          mkdir -p shard_out
-          grep -E "^  GATES: " gates.log > "shard_out/${{ matrix.shard }}.txt"
+          mkdir -p shard_out; rc=0
+          for sh in ${{ matrix.chunk.shards }}; do
+            echo "::group::shard $sh"
+            bash ci/run_gates.sh --shard "$sh" 2>&1 | tee "gates_$sh.log" || rc=1
+            grep -E "^  GATES: " "gates_$sh.log" > "shard_out/$sh.txt" || true
+            echo "::endgroup::"; echo "shard $sh: $(cat "shard_out/$sh.txt" 2>/dev/null)"
+          done
+          exit $rc
 
       # llsyn: the netlist the gate judged came from the PDK of record
       - name: "llsyn: the PDK Ciel installed is ci/pdk.sha"
-        if: always() && matrix.shard == 'fast'
+        if: always() && contains(format(' {0} ', matrix.chunk.shards), ' fast ')
         shell: bash
         run: |
           set -euo pipefail
@@ -631,13 +668,13 @@ jobs:
       # a key that exists cannot be overwritten. The image tarball exists only on
       # a miss (a hit deletes it after loading).
       - name: "llsyn: save the LibreLane image"
-        if: always() && matrix.shard == 'fast' && steps.llimg.outputs.cache-hit != 'true'
+        if: always() && contains(format(' {0} ', matrix.chunk.shards), ' fast ') && steps.llimg.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: /home/runner/llimg
           key: librelane-image-3.1.0.dev4
       - name: "llsyn: save the pinned IHP PDK"
-        if: always() && matrix.shard == 'fast' && steps.llpdk.outputs.cache-hit != 'true'
+        if: always() && contains(format(' {0} ', matrix.chunk.shards), ' fast ') && steps.llpdk.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: /home/runner/pdk
@@ -647,8 +684,8 @@ jobs:
       - name: Upload the shard verdict
         uses: actions/upload-artifact@v7
         with:
-          name: shard-${{ matrix.shard }}
-          path: shard_out/${{ matrix.shard }}.txt
+          name: shard-${{ matrix.chunk.name }}
+          path: shard_out/*.txt
 
   # ⛔⛔ THE SUITE IS GREEN ONLY IF EVERY SHARD RAN GREEN (Wilson 10-25; S1g at
   # the CI layer). `needs` alone is not enough: each shard's OWN verdict line is
@@ -679,9 +716,8 @@ jobs:
           # first absent shard -- red for a crash, not for its named reason, and
           # every later shard left unchecked. Existence is tested, never `ls`ed.
           for s in $(echo "${SHARDS:-[]}" | tr -d '[]",' ); do
-            f="verdicts/shard-$s/$s.txt"
             line=""
-            [ -f "$f" ] && line="$(cat "$f")"
+            for f in verdicts/*/"$s".txt; do [ -f "$f" ] && line="$(cat "$f")"; done
             if printf '%s' "$line" | grep -qE "GATES: ([0-9]+) of \1 passed"; then
               echo "  ok   $s: $line"
             else
@@ -694,6 +730,9 @@ jobs:
 
   # the cocotb suite (test/Makefile), its own job now the gates are sharded
   cocotb:
+    # 11-25 option 1: full-suite dispatch only, last in the chain
+    needs: [ln1]
+    if: always() && github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:

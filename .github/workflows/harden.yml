@@ -1,0 +1,283 @@
+name: harden
+
+# ⭐ THE HARDENING PIPELINE (Wilson ruling 11-25, canon per Nate: "We will harden in the future on GitHub").
+# MANUAL TRIGGER ONLY -- no push, no pull_request: a harden is a decision, not a side effect of a commit.
+# The harden is split into four jobs, each well under GitHub's 6 h job limit, passing the run directories
+# on as artifacts. Each job has a hard timeout-minutes, a silent-log watchdog (ci/harden/stage.sh) and a
+# gate (ci/harden/gates.json) that stops the run at the first stage that cannot succeed, with the reason.
+#   J1 synth -> floorplan -> place -> CTS        gate: utilisation, typical-corner setup
+#   J2 global routing                             gate: global-route usage (the congestion gate)
+#   J3 detailed routing (threads = runner cores)  gate: violations at pass 0 and pass 3
+#   J4 sign-off (RCX, all-corner STA, streamout, LVS), then TT precheck and gate-level sim
+# The run's summary page carries the result; GitHub's own email is the notification. Nobody polls.
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: "commit to harden (full SHA or branch)"
+        required: true
+      coef:
+        description: "PL_WIRE_LENGTH_COEF (chip only)"
+        required: true
+        default: "0.025"
+      design:
+        description: "chip = the ASIC; smoke = the tiny template design that tests this pipeline"
+        type: choice
+        options: [chip, smoke]
+        default: chip
+      kill_tests:
+        description: "smoke only: also prove a short timeout-minutes and the silent-log watchdog kill a job"
+        type: boolean
+        default: false
+
+# ⭐ ONE HARDEN AT A TIME on this repo. A second dispatch waits; any further pending one is cancelled by GitHub.
+concurrency:
+  group: harden
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  WD: ${{ inputs.design == 'smoke' && 'ci/harden/smoke' || '.' }}
+  NOGATES: ${{ inputs.design == 'smoke' && '--no-gates' || '' }}
+  PDK_ROOT: /home/runner/pdk
+  LL: python -m librelane --pdk-root /home/runner/pdk --docker-no-tty --dockerized --pdk ihp-sg13cmos5l --hide-progress-bar
+  CI: "1"
+
+jobs:
+  j1:
+    name: J1 synth-place-CTS
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v6
+        with: {ref: "${{ inputs.sha }}", submodules: recursive}
+      - uses: ./.github/actions/harden-setup
+        with: {wd: "${{ env.WD }}", coef: "${{ inputs.coef }}"}
+      - name: J1 flow
+        working-directory: ${{ env.WD }}
+        run: |
+          bash "$GITHUB_WORKSPACE/ci/harden/stage.sh" J1 runs/j1 j1.log -- \
+            $LL --run-tag j1 --force-run-dir runs/j1 --to OpenROAD.STAMidPNR-2 src/config_merged.json
+      - name: J1 gate
+        if: success() || failure()
+        working-directory: ${{ env.WD }}
+        run: python "$GITHUB_WORKSPACE/ci/harden/metrics.py" stage J1 runs/j1 $NOGATES
+      - uses: actions/upload-artifact@v7
+        if: success() || failure()
+        with: {name: stage-J1, path: "${{ env.WD }}/stage_J1.json", retention-days: 3}
+      - uses: actions/upload-artifact@v7
+        with: {name: runs-j1, path: "${{ env.WD }}/runs/j1", retention-days: 3, compression-level: 6}
+
+  j2:
+    name: J2 global route (congestion gate)
+    needs: j1
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v6
+        with: {ref: "${{ inputs.sha }}", submodules: recursive}
+      - uses: ./.github/actions/harden-setup
+        with: {wd: "${{ env.WD }}", coef: "${{ inputs.coef }}"}
+      - uses: actions/download-artifact@v7
+        with: {name: runs-j1, path: "${{ env.WD }}/runs/j1"}
+      - name: J2 flow
+        working-directory: ${{ env.WD }}
+        run: |
+          S=$(python "$GITHUB_WORKSPACE/ci/harden/metrics.py" last-state runs/j1)
+          bash "$GITHUB_WORKSPACE/ci/harden/stage.sh" J2 runs/j2 j2.log -- \
+            $LL --run-tag j2 --force-run-dir runs/j2 --with-initial-state "$S" \
+                --from OpenROAD.GlobalRouting --to OpenROAD.STAMidPNR-3 src/config_merged.json
+      - name: J2 congestion gate
+        if: success() || failure()
+        working-directory: ${{ env.WD }}
+        run: python "$GITHUB_WORKSPACE/ci/harden/metrics.py" stage J2 runs/j2 $NOGATES
+      - name: congestion report (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with: {name: congestion-report, path: "${{ env.WD }}/runs/j2/*-openroad-globalrouting", retention-days: 3}
+      - uses: actions/upload-artifact@v7
+        if: success() || failure()
+        with: {name: stage-J2, path: "${{ env.WD }}/stage_J2.json", retention-days: 3}
+      - uses: actions/upload-artifact@v7
+        with: {name: runs-j2, path: "${{ env.WD }}/runs/j2", retention-days: 3, compression-level: 6}
+
+  j3:
+    name: J3 detailed route (progress gate)
+    needs: j2
+    runs-on: ubuntu-24.04
+    timeout-minutes: 330
+    steps:
+      - uses: actions/checkout@v6
+        with: {ref: "${{ inputs.sha }}", submodules: recursive}
+      - uses: ./.github/actions/harden-setup
+        with: {wd: "${{ env.WD }}", coef: "${{ inputs.coef }}"}
+      - uses: actions/download-artifact@v7
+        with: {name: runs-j1, path: "${{ env.WD }}/runs/j1"}
+      - uses: actions/download-artifact@v7
+        with: {name: runs-j2, path: "${{ env.WD }}/runs/j2"}
+      - name: J3 flow
+        working-directory: ${{ env.WD }}
+        run: |
+          S=$(python "$GITHUB_WORKSPACE/ci/harden/metrics.py" last-state runs/j2)
+          if [ -z "$NOGATES" ]; then
+            export DRT_GATE=$(python3 -c "import json;g=json.load(open('$GITHUB_WORKSPACE/ci/harden/gates.json'))['J3']['drt_pass_max'];print(','.join(f'{k}:{v}' for k,v in g.items()))")
+          fi
+          bash "$GITHUB_WORKSPACE/ci/harden/stage.sh" J3 runs/j3 j3.log -- \
+            $LL --run-tag j3 --force-run-dir runs/j3 --with-initial-state "$S" -c ROUTING_CORES=$(nproc) -c DRT_SAVE_DRC_REPORT_ITERS=1 \
+                --from OpenROAD.DetailedRouting --to Checker.WireLength src/config_merged.json
+      - name: J3 gate
+        if: success() || failure()
+        working-directory: ${{ env.WD }}
+        run: python "$GITHUB_WORKSPACE/ci/harden/metrics.py" stage J3 runs/j3 $NOGATES
+      - uses: actions/upload-artifact@v7
+        if: success() || failure()
+        with: {name: stage-J3, path: "${{ env.WD }}/stage_J3.json", retention-days: 3}
+      - uses: actions/upload-artifact@v7
+        with: {name: runs-j3, path: "${{ env.WD }}/runs/j3", retention-days: 3, compression-level: 6}
+
+  j4:
+    name: J4 sign-off
+    needs: j3
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v6
+        with: {ref: "${{ inputs.sha }}", submodules: recursive}
+      - uses: ./.github/actions/harden-setup
+        with: {wd: "${{ env.WD }}", coef: "${{ inputs.coef }}"}
+      - uses: actions/download-artifact@v7
+        with: {name: runs-j1, path: "${{ env.WD }}/runs/j1"}
+      - uses: actions/download-artifact@v7
+        with: {name: runs-j2, path: "${{ env.WD }}/runs/j2"}
+      - uses: actions/download-artifact@v7
+        with: {name: runs-j3, path: "${{ env.WD }}/runs/j3"}
+      - name: J4 flow (fill, RCX, all-corner STA, streamout, LVS -- to the end of the flow)
+        working-directory: ${{ env.WD }}
+        run: |
+          S=$(python "$GITHUB_WORKSPACE/ci/harden/metrics.py" last-state runs/j3)
+          bash "$GITHUB_WORKSPACE/ci/harden/stage.sh" J4 runs/wokwi j4.log -- \
+            $LL --run-tag wokwi --force-run-dir runs/wokwi --with-initial-state "$S" \
+                --from OpenROAD.FillInsertion src/config_merged.json
+      - name: J4 gate
+        if: success() || failure()
+        working-directory: ${{ env.WD }}
+        run: python "$GITHUB_WORKSPACE/ci/harden/metrics.py" stage J4 runs/wokwi $NOGATES
+      - uses: actions/upload-artifact@v7
+        if: success() || failure()
+        with: {name: stage-J4, path: "${{ env.WD }}/stage_J4.json", retention-days: 3}
+      # what tt_tool --harden writes after the flow, so --create-tt-submission and the precheck see a normal harden
+      - name: TT submission
+        working-directory: ${{ env.WD }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, subprocess
+          tt = subprocess.run(["git", "-C", "tt", "describe", "--tags", "--always"], capture_output=True, text=True).stdout.strip()
+          json.dump({"app": f"Tiny Tapeout {tt}", "repo": f"https://github.com/{os.environ['GITHUB_REPOSITORY']}",
+                     "commit": subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip(),
+                     "workflow_url": f"https://github.com/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{os.environ['GITHUB_RUN_ID']}"},
+                    open("runs/wokwi/final/commit_id.json", "w"), indent=2)
+          r = json.load(open("runs/wokwi/resolved.json"))
+          json.dump({"FLOW_NAME": "LibreLane", "FLOW_VERSION": r["meta"]["librelane_version"], "PDK": r["PDK"],
+                     "PDK_SOURCE": "ciel", "PDK_VERSION": open(os.path.join(os.environ["GITHUB_WORKSPACE"], "ci/pdk.sha")).read().strip()},
+                    open("runs/wokwi/pdk.json", "w"), indent=2)
+          PY
+          ./tt/tt_tool.py --print-stats --pdk ihp-sg13cmos5l >> "$GITHUB_STEP_SUMMARY" || true
+          ./tt/tt_tool.py --create-tt-submission --pdk ihp-sg13cmos5l
+      - uses: actions/upload-artifact@v7
+        with:
+          name: tt_submission
+          retention-days: 3
+          path: |
+            ${{ env.WD }}/src/*
+            ${{ env.WD }}/docs/*
+            ${{ env.WD }}/tt_submission/*
+            ${{ env.WD }}/info.yaml
+            ${{ env.WD }}/LICENSE
+
+  precheck:
+    needs: j4
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: TinyTapeout/tt-gds-action/precheck@e7a50f8f46f9f8df4b2c9935bfeb1cbc6b6ae4f6
+        with:
+          tools-ref: 9d13ff3e3e6202090740110438c6a10c1d62ca0f
+
+  gl_test:
+    needs: j4
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v6
+        with: {ref: "${{ inputs.sha }}", submodules: recursive}
+      - uses: TinyTapeout/tt-gds-action/gl_test@e7a50f8f46f9f8df4b2c9935bfeb1cbc6b6ae4f6
+        with:
+          test-dir: ${{ env.WD == '.' && 'test' || format('{0}/test', env.WD) }}
+      # ⛔ ZERO TESTS IS NOT A PASS (Wilson 11-10): the chip's every declared test must be in results.xml
+      - name: GL test ran every declared test
+        if: always() && inputs.design == 'chip'
+        run: python test/gate_gl_count.py test/results.xml
+
+  # ---- smoke only: prove the kill paths ----
+  kill_timeout:
+    name: smoke - timeout-minutes kills a job
+    if: inputs.design == 'smoke' && inputs.kill_tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 1
+    continue-on-error: true
+    steps:
+      - run: echo "sleeping past timeout-minutes 1"; sleep 300
+
+  kill_watchdog:
+    name: smoke - silent-log watchdog kills a stage
+    if: inputs.design == 'smoke' && inputs.kill_tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+        with: {ref: "${{ inputs.sha }}"}
+      - name: a stage that goes silent must be killed with WATCHDOG (exit 124)
+        run: |
+          set +e
+          SILENT_S=60 bash ci/harden/stage.sh WD_TEST /tmp/wdrun /tmp/wd.log -- bash -c 'echo start; sleep 600' > out.txt 2>&1
+          rc=$?; cat out.txt
+          if [ $rc -eq 124 ] && grep -q "END: WATCHDOG" out.txt; then echo "watchdog fired as designed"; else echo "watchdog did NOT fire (rc $rc)"; exit 1; fi
+
+  summary:
+    name: summary
+    if: always()
+    needs: [j1, j2, j3, j4, precheck, gl_test, kill_timeout, kill_watchdog]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+        with: {ref: "${{ inputs.sha }}"}
+      - uses: actions/download-artifact@v7
+        with: {pattern: "stage-*", path: results}
+      - name: Harden result
+        env:
+          GH_TOKEN: ${{ github.token }}
+          JOBS: >-
+            {"j1": "${{ needs.j1.result }}", "j2": "${{ needs.j2.result }}", "j3": "${{ needs.j3.result }}",
+             "j4": "${{ needs.j4.result }}", "precheck": "${{ needs.precheck.result }}", "gl_test": "${{ needs.gl_test.result }}",
+             "kill_watchdog": "${{ needs.kill_watchdog.result }}"}
+        run: |
+          {
+            echo "harden of \`${{ inputs.sha }}\` -- design ${{ inputs.design }}, coef ${{ inputs.coef }}"
+            echo
+          } >> "$GITHUB_STEP_SUMMARY"
+          set +e
+          python ci/harden/metrics.py summary results --jobs "$JOBS"; rc=$?
+          if [ "${{ inputs.design }}" = "smoke" ] && [ "${{ inputs.kill_tests }}" = "true" ]; then
+            c=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs" --jq '.jobs[] | select(.name | startswith("smoke - timeout")) | .conclusion')
+            if [ "$c" = "success" ] || [ -z "$c" ]; then
+              echo "kill test: timeout-minutes did NOT stop the job (conclusion '$c')" | tee -a "$GITHUB_STEP_SUMMARY"; rc=1
+            else
+              echo "kill test: timeout-minutes 1 stopped the sleeping job (conclusion $c)" | tee -a "$GITHUB_STEP_SUMMARY"
+            fi
+          fi
+          exit $rc
