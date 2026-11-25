@@ -54,6 +54,7 @@ prepush test/gate_gl_count.py
 prepush model/gate_shell_rc.py
 prepush model/gate_except.py
 prepush model/gate_tool_pinning.py
+prepush model/gate_ci_budget.py
 ci-only model/gate_f2_local.py needs the M_COMB_OUT netlist (PE_NETLIST_COMB_JSON), built by CI's netlist step
 ci-only model/gate_cdc.py needs the M_CDC_RAW netlist (PE_NETLIST_CDCRAW_JSON), built by CI's netlist step
 ci-only model/gate_cdc_qual.py shard cdcq: CDC simulations

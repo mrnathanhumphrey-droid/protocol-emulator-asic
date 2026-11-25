@@ -368,6 +368,10 @@ GATES=(
   # anywhere in ci/ test/ model/, and a tool-driven script with no banner.
   # Must-fire: verilator_trace.sh as it stood at f8f952c.
   model/gate_tool_pinning.py
+  # ⛔⛔ B -- THE CI BUDGET (Nathan + Wilson 11-25): no push fans out on GitHub; a harden never runs on a
+  # push; test.yaml plans each push through ci/push_plan.py. Must-fire: the 11-15 shape (a push-fired
+  # 11-way matrix) and a push-started harden.
+  model/gate_ci_budget.py
   # ⭐ MU -- F2 face 3 on the real design, priced by building M_COMB_OUT. That
   # mutant was killed only by hand until now.
   model/gate_f2_local.py

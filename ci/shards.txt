@@ -113,6 +113,7 @@ fast test/gate_gl_count.py
 fast model/gate_shell_rc.py
 fast model/gate_except.py
 fast model/gate_tool_pinning.py
+fast model/gate_ci_budget.py
 fast model/gate_f2_local.py
 fast model/gate_cdc.py
 cdcq model/gate_cdc_qual.py

@@ -77,6 +77,7 @@ test/gate_gl_count.py               ^\s*GATE gl-count: PASSED\s*$
 model/gate_shell_rc.py              ^\s*GATE shell-rc: PASSED\s*$
 model/gate_except.py                ^\s*GATE except: PASSED\s*$
 model/gate_tool_pinning.py          ^\s*GATE tool-pinning: PASSED\s*$
+model/gate_ci_budget.py             ^\s*GATE ci-budget: PASSED\s*$
 model/gate_f2_local.py              ^\s*GATE f2-local: PASSED\s*$
 model/gate_cdc.py                   ^\s*GATE cdc: PASSED\s*$
 model/gate_cdc_qual.py              ^\s*GATE cdc-qual: PASSED\s*$

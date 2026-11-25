@@ -1,9 +1,28 @@
 {
-  "_doc": "test.yaml job shape (Wilson + Nate 11-25, option 1: no fan-out). push = ONE job, the fast shards in sequence. dispatch = the full suite as sequential chunks (max-parallel 1), each under the 6 h job limit, sized from CI runs 45274153446 / 45299564569 (11-23/24): cov 101-103 min, sim2 55-58, sim1 27-39, fpga 32-35, uart 25-29, rxbw 25-28, fast 27, trace 19-23, gcd 12-15, cdcq 11-12, lean 6-8. The shards job checks that the dispatch chunks cover ci/shards.py's list exactly. The 47 slow meta-seams (327-408 min summed) run as meta_parts sequential parts after the shards.",
-  "push": [{"name": "push", "shards": "fast lean cdcq gcd"}],
-  "dispatch": [
-    {"name": "full-1", "shards": "cov sim1 trace gcd cdcq lean"},
-    {"name": "full-2", "shards": "sim2 fpga uart rxbw fast"}
-  ],
-  "meta_parts": 2
+ "_doc": "test.yaml job shape (Wilson + Nate 11-25, option 1: no fan-out). push = ONE job, the fast shards in sequence. dispatch = the full suite as sequential chunks (max-parallel 1), each under the 6 h job limit, sized from CI runs 45274153446 / 45299564569 (11-23/24): cov 101-103 min, sim2 55-58, sim1 27-39, fpga 32-35, uart 25-29, rxbw 25-28, fast 27, trace 19-23, gcd 12-15, cdcq 11-12, lean 6-8. The shards job checks that the dispatch chunks cover ci/shards.py's list exactly. The 47 slow meta-seams (327-408 min summed) run as meta_parts sequential parts after the shards. A push runs the shards ci/push_plan.py picks from the changed files (minutes below, measured 11-23/24 + ~5 min setup), split into consecutive jobs under job_budget_min.",
+ "dispatch": [
+  {
+   "name": "full-1",
+   "shards": "cov sim1 trace gcd cdcq lean"
+  },
+  {
+   "name": "full-2",
+   "shards": "sim2 fpga uart rxbw fast"
+  }
+ ],
+ "meta_parts": 2,
+ "minutes": {
+  "cov": 108,
+  "sim2": 63,
+  "sim1": 44,
+  "fpga": 40,
+  "uart": 34,
+  "rxbw": 33,
+  "fast": 32,
+  "trace": 28,
+  "gcd": 20,
+  "cdcq": 17,
+  "lean": 13
+ },
+ "job_budget_min": 300
 }
