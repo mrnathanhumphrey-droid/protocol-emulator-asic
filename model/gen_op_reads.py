@@ -228,7 +228,7 @@ SITES = [
     ("l_armpinb[cur] <= a_pinb;", ("ARM",), "ARM latch"),
     ("l_armhalf[cur] <= a_cnt[0];", ("ARM",), "ARM latch: HALF = count[0]"),
     ("l_armqual[cur] <= a_cnt[1];", ("ARM",), "ARM latch: QUAL = count[1]"),
-    ("l_armft[cur]   <= a_mod[1];", ("ARM",), "ARM latch: FALLTHROUGH = mod[1]"),
+    ("l_armft[cur]   <= a_mod[1] && (EN_SLOTBUF != 0);", ("ARM",), "ARM latch: FALLTHROUGH = mod[1] (0 when the slot buffer is switched off)"),
     ("notmo_n[cur]   = (a_dly == {DLY_W{1'b0}});", ("ARM",), "ARM latch: no timeout"),
     ("if (cur == USB_LANE[LW-1:0] && !a_lvl &&", ("ARM", "LEVEL"), "USB pair latch"),
     ("((a_op == OP_ARM && a_mod[0]) || (a_op == OP_LEVEL && a_mod == 2'b11)) &&", ("ARM", "LEVEL"), "USB pair latch"),
@@ -271,8 +271,11 @@ SITES = [
     ("if (st == ST_WB && cur_act[ACT_W-1 -: OP_W] == OP_ARM && l_ckpark[cur])", "DEF",
      "sim-only check: an ARM writing back on a parked lane (PARKARM)"),
     # piece 3 (K6, Wilson 11-22): an FT ARM's writeback does not swap -- ARM's mod[1]
-    ("wire                  ft_k6     = (a_op == OP_ARM) && a_mod[1] && !ft_spt;", ("ARM",),
+    ("wire                  ft_k6     = (EN_SLOTBUF != 0) && (a_op == OP_ARM) && a_mod[1] && !ft_spt;", ("ARM",),
      "K6: the retiring FT ARM keeps its head slot (no swap)"),
+    # the fallback ladder (11-24): with the slot buffer switched off, an FT ARM is refused at dispatch
+    ("if ((EN_SLOTBUF == 0) && (a_op == OP_ARM) && a_mod[1]) begin", ("ARM",),
+     "fallback ladder: an FT ARM refused (config_err) when EN_SLOTBUF = 0"),
     ("wire ck_hrl = l_cls[hix[gi]][C_REARM] && !l_act[hix[gi]][ACT_W-1-OP_W-PINW];", ("REARM",),
      "sim-only checker: the head's no-prefetch REARM"),
     ("wire ck_srl = l_cls[six[gi]][C_REARM] && !l_act[six[gi]][ACT_W-1-OP_W-PINW];", ("REARM",),
