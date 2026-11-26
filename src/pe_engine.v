@@ -2208,11 +2208,11 @@ module pe_engine #(
   assign           a_q     = cur_act[LOWX +: BQW];
   // BRANCH_BIT's WAIT W: count is its high nibble, pinb its low
   wire [BPW+PINB_W-1:0] br_wait = {a_cnt, cur_act[MOD_W +: PINB_W]};
+  wire [PINB_W-1:0] a_pinb = cur_act[MOD_W +: PINB_W];   // ARM's second pin
   // the symbol generator's SYMDEF payload: the word's 25 bits between the opcode
   // and `mod`, in word order, named by the decode slices (DATA, not a pin index)
   wire [ACT_W-OP_W-MOD_W-1:0] sg_payload = {a_pin, a_lvl, a_dly, a_cnt, a_q, a_pinb};
   wire [MOD_W-1:0] a_mod  = cur_act[MOD_W-1:0];
-  wire [PINB_W-1:0] a_pinb = cur_act[MOD_W +: PINB_W];   // ARM's second pin
   // a timed branch (BRANCH_BIT / CMP_BRANCH / LOOP): the PRE-DECODED bit
   wire             a_is_br = cur_cls[C_BR];
 
