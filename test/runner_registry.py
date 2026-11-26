@@ -38,6 +38,10 @@ BENCH_NAME = re.compile(r"\btb_[a-z0-9_]+")
 DECLARED = {
     "ci/ln1_replay.py": ("workflow", ".github/workflows/test.yaml",
                          "the LN1 Lean replay job (JLane.step vs the RTL)"),
+    "ci/run_gates.sh": ("workflow", ".github/workflows/test.yaml",
+                        "the CI gate runner itself: its GATES array IS the ci kind; it names "
+                        "simulators and benches only in its tool checks and comments, and "
+                        "drives the declared WSL helpers (a2_run, coverage_sweep, ...)"),
     "test/monitor_mustfire.py": ("helper", "test/sim_run.py",
                                  "the monitor judge's must-fire declarations "
                                  "(Wilson's must-fire ruling): it NAMES arms (compiled benches, "
@@ -156,6 +160,15 @@ RESOURCES = {
     "test/run_pit_s3.py": _W,
     "test/run_recert.py": _W,
     "test/toolchain.py": _W,
+    # 11-26 (CI run 45752936005): sigrok's USB decode runs in WSL off-Linux
+    # (usbdev.sigrok_usb), and run_usbaddr calls it; gate_store_full runs its wrap in WSL
+    "ci/run_gates.sh": _W,
+    # visible only once ci_list read fpga/sim: its Verilator leg (fpga_engine.SIM = "verilator",
+    # run_fpga_loader.run_scenarios) runs through WSL off-Linux
+    "fpga/sim/run_fpga_loader_xsim.py": _W,
+    "model/gate_store_full.py": _W,
+    "test/run_usbaddr.py": _W,
+    "test/usbdev.py": _W,
 }
 #: a detected hit that is NOT a use, each with why (measured: the 11-14
 #: inventory ledger shows every one of these runs on the Windows side)
@@ -176,6 +189,13 @@ RESOURCE_NOT_USED = {
     "test/run_spifram.py": "imports run_recert's helpers; runs on iverilog",
     "test/run_spim_witness.py": "imports run_recert's helpers; runs on iverilog "
                                 "(the record-mode inventory ledger: none through WSL)",
+    # 11-26: imports read, call sites checked
+    "test/run_usbrst.py": "imports usbdev for the program, image and golden; never calls "
+                          "usbdev.sigrok_usb (only run_usbaddr does)",
+    "model/gate_lane_cert.py": "imports usbdev only for D, DM, device_program and image -- "
+                               "static, no simulation, no decode",
+    "test/run_slotbuf.py": "imports gate_corpus_trace only for feed_args(), the host-feed "
+                           "plusargs; its benches run on Windows iverilog",
 }
 
 #: what counts as a use, on comment-stripped code: a WSL call or a `wsl` /
@@ -259,7 +279,10 @@ def ci_list(text=None):
     if not m:
         return set()
     body = re.sub(r"#[^\n]*", "", m.group(1))
-    return set(re.findall(r"(?:test|model|ci)/[A-Za-z0-9_/]+\.py", body))
+    # ⛔ fpga/sim TOO (11-26): the walk (SCAN_TOPS) reached fpga/sim since 10-17, this parse did
+    # not -- run_fpga_loader_xsim sat in GATES yet read as unregistered, and the other fpga/sim
+    # gates passed only because the A2 table lists them as well
+    return set(re.findall(r"(?:test|model|ci|fpga/sim)/[A-Za-z0-9_/]+\.py", body))
 
 
 def a2_list(text=None):

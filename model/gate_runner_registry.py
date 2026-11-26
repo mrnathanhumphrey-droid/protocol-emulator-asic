@@ -95,6 +95,19 @@ def main():
                                   for q in check(inv, reg3, RR.DECLARED))
     print("  must-fire  %s un-registered       %s"
           % (victim3, "red" if red3 else "*** NOT RED"))
+    # ⛔ THE CI LIST PARSE READS fpga/sim (11-26): run_fpga_loader_xsim is registered by
+    # run_gates.sh's GATES alone (not the A2 table) -> deleting it there must turn red
+    victim4 = "fpga/sim/run_fpga_loader_xsim.py"
+    cut4 = gates.replace("  " + victim4 + "\n", "", 1)
+    reg4 = {p: "ci" for p in RR.ci_list(cut4)}
+    reg4.update({p: "a2" for p in a2})
+    for p, (k, _o, _w) in RR.DECLARED.items():
+        reg4.setdefault(p, k)
+    red5 = cut4 != gates and victim4 in inv and any(victim4 in q
+                                                    for q in check(inv, reg4, RR.DECLARED))
+    print("  must-fire  %s deleted from the CI list %s"
+          % (victim4, "red" if red5 else "*** NOT RED%s" % (
+              "" if cut4 != gates else " (the deletion did not apply)")))
     # ⛔ RESOURCES (Wilson 11-14): every runner that uses WSL / Vivado declares
     # it, so a scheduler reads a declaration instead of grepping file text
     rp = RR.resource_problems(reg)
@@ -110,7 +123,7 @@ def main():
                for q in RR.resource_problems(reg, resources=res4))
     print("  must-fire  run_pit_gcd's WSL declaration removed      %s"
           % ("red" if red4 else "*** NOT RED"))
-    ok = red1 and red2 and red3 and red4
+    ok = red1 and red2 and red3 and red4 and red5
 
     if not probs and ok:
         print("RUNNER REGISTRY: PASSED")
