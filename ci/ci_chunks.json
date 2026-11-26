@@ -3,26 +3,31 @@
  "dispatch": [
   {
    "name": "full-1",
-   "shards": "cov sim1 trace gcd cdcq lean"
+   "shards": "cov fpga"
   },
   {
    "name": "full-2",
-   "shards": "sim2 fpga uart rxbw fast"
+   "shards": "sim2 sim1 gcd cdcq lean"
+  },
+  {
+   "name": "full-3",
+   "shards": "uart rxbw fast trace"
   }
  ],
  "meta_parts": 2,
  "minutes": {
-  "cov": 108,
-  "sim2": 63,
-  "sim1": 44,
-  "fpga": 40,
-  "uart": 34,
-  "rxbw": 33,
+  "cov": 200,
+  "sim2": 135,
+  "sim1": 88,
+  "fpga": 80,
+  "uart": 68,
+  "rxbw": 66,
   "fast": 32,
   "trace": 28,
   "gcd": 20,
-  "cdcq": 17,
+  "cdcq": 25,
   "lean": 13
  },
- "job_budget_min": 300
+ "job_budget_min": 300,
+ "_minutes_src": "11-26 re-measure (Nate: 'make the fixes so we can get this done'): CI run 45752936005 on 5492ffd ran each shard in sequence on one runner -- cov 195 min (table had 108), sim2 129 (63), fast 20, trace 23, gcd 9; values = measured + ~5 min setup, never below the old row. sim1 / fpga / uart / rxbw did not run to their end there (cut, or red before their sims), so they are the 11-23/24 rows x2 [ESTIMATED -- the two measured sim shards grew ~2x with the RTL]; cdcq = cdc_qual 8.5 + gate_macro_inputs under its CI cap. Re-measure from the next full run and replace every [ESTIMATED] row."
 }

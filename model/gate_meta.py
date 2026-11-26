@@ -277,6 +277,9 @@ SEAMS = (
     # push timeout survives (B5)
     ("model/gate_ci_budget.py", "gate_ci_budget.audit", "fast", "E"),
     ("model/gate_ci_budget.py", "gate_ci_budget.timeout_check", "fast", "E"),
+    # B4 dispatch (with the re-measured minutes): `dispatch_problems` always clean -> the old two
+    # full-suite chunks, each past the job budget, survive
+    ("model/gate_ci_budget.py", "gate_ci_budget.dispatch_problems", "fast", "E"),
     # the batch runners (registered 11-26, found by CI run 45752936005): the clean verdict and
     # every mutant arm go through ONE check, so its always-pass stub lets every arm survive
     ("test/run_flags.py", "run_flags.problems", "slow", "E"),

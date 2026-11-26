@@ -14,7 +14,7 @@ looked reasonable; nothing totalled it. This gate totals it, before every push.
       dispatch do not count). A matrix job counts once here; B2 already holds it to one leg at a time.
 ⇒ B4  test.yaml plans its push through ci/push_plan.py (the shards a change calls for, run in sequence), and
       the plan itself behaves: a docs-only change runs nothing, an RTL change runs every shard, and every
-      planned chunk fits one job's budget.
+      planned chunk fits one job's budget -- and so does every fixed DISPATCH chunk (ci_chunks.json).
 ⇒ B5  Every leg of test.yaml's `test` job may run as long as a planned chunk needs: its timeout-minutes (the
       smallest number in it, when it is an expression) is at least job_budget_min + SETUP_MARGIN_MIN. 3f18e0e
       planned push chunks up to 300 min under a 120-min push timeout; run 45715643365's push-1 (~270 min
@@ -96,8 +96,22 @@ def plan_checks(root):
         tot = sum(c["minutes"].get(s, 60) for s in ch["shards"].split())
         if tot > c["job_budget_min"] and len(ch["shards"].split()) > 1:
             out.append("B4 push_plan: chunk %s is %d min (> %d)" % (ch["name"], tot, c["job_budget_min"]))
+    out += dispatch_problems(c)
     if os.path.exists(t):
         out += timeout_check(open(t, encoding="utf-8").read(), c["job_budget_min"])
+    return out
+
+
+def dispatch_problems(c):
+    """B4 for the DISPATCH chunks (11-26): ci_chunks.json's fixed full-suite chunks are summed with the
+    same measured minutes as a push's -- at the re-measured minutes the old two chunks were ~374 and
+    ~381 min, past the 330-min job timeout, and nothing summed them."""
+    out = []
+    for ch in c.get("dispatch", []):
+        sh = ch["shards"].split()
+        tot = sum(c["minutes"].get(s, 60) for s in sh)
+        if tot > c["job_budget_min"] and len(sh) > 1:
+            out.append("B4 dispatch: chunk %s is %d min (> %d)" % (ch["name"], tot, c["job_budget_min"]))
     return out
 
 
@@ -133,6 +147,8 @@ jobs:
     steps: [{run: echo}]
 """
 PLANT_MANY = "on: [push]\njobs:\n" + "".join("  j%d: {runs-on: ubuntu-24.04, steps: [{run: echo}]}\n" % i for i in range(8))
+PLANT_DISPATCH = {"job_budget_min": 300, "minutes": {"cov": 200, "sim1": 88, "trace": 28, "gcd": 20},
+                  "dispatch": [{"name": "full-1", "shards": "cov sim1 trace gcd"}]}
 PLANT_TMO = """on: [push]
 jobs:
   test:
@@ -180,6 +196,7 @@ def main() -> int:
         ("the 11-15 shape: a push-fired 11-way matrix", any(p.startswith("B2") for p in audit("test.yaml", PLANT_FANOUT))),
         ("8 jobs started by one push", any(p.startswith("B3") for p in audit("x.yaml", PLANT_MANY))),
         ("the 3f18e0e shape: a 120-min push timeout under 300-min chunks", any(p.startswith("B5") for p in timeout_check(PLANT_TMO, 300))),
+        ("the 11-26 shape: dispatch chunks summing past the budget", any(p.startswith("B4 dispatch") for p in dispatch_problems(PLANT_DISPATCH))),
         ("a harden started by a push", any(p.startswith("B1") for p in audit("harden.yml", PLANT_HARDEN))),
         ("a 1-at-a-time push matrix + dispatch-only fan-out is accepted", not audit("x.yaml", PLANT_OK)),
     ]

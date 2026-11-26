@@ -854,6 +854,9 @@ SPEC_SYMBOLS = {
     # D12 (agent 2's cert_stamp gate): a planted d = 12 program, below D*, that
     # the stamp must call UNCERTIFIED -- a must-fire fixture, not a result.
     ("model/gate_cert_stamp.py", "D12"),
+    # PLANT_DISPATCH (11-26, gate_ci_budget B4): a planted full-suite chunk whose minutes sum past the
+    # job budget, which dispatch_problems must call -- a must-fire fixture, not a result.
+    ("model/gate_ci_budget.py", "PLANT_DISPATCH"),
     ("test/run_usbrst.py", "GETDESC"),
     ("test/run_usbrst.py", "SCEN"),
     # ⭐ GATE CONFIGURATION (Wilson 11-12 ruling D: RULES is configuration, not a
