@@ -272,6 +272,16 @@ SEAMS = (
     ("test/gate_fpga_synth.py", "gate_fpga_synth.run_yosys", "slow", "Z0"),
     # the Lean proofs: `judge` always clean -> M_LEAN_SORRY / AXIOM / CONST survive
     ("model/gate_lean_build.py", "gate_lean_build.judge", "slow", "E0"),
+    # the CI budget (11-25): `audit` always clean -> the 11-15 fan-out, 8 jobs per push and
+    # a push-started harden survive; `timeout_check` always clean -> the 3f18e0e 120-min
+    # push timeout survives (B5)
+    ("model/gate_ci_budget.py", "gate_ci_budget.audit", "fast", "E"),
+    ("model/gate_ci_budget.py", "gate_ci_budget.timeout_check", "fast", "E"),
+    # the batch runners (registered 11-26, found by CI run 45752936005): the clean verdict and
+    # every mutant arm go through ONE check, so its always-pass stub lets every arm survive
+    ("test/run_flags.py", "run_flags.problems", "slow", "E"),
+    ("test/run_drive_sample.py", "run_drive_sample.round_trip", "slow", "E"),
+    ("test/run_symgen.py", "run_symgen.judge", "slow", "E"),
 )
 
 #: Gates with NO stubbable check, each with why -- every gate in
@@ -318,6 +328,12 @@ NOT_STUBBABLE = {
                          "sigrok's decode; priced by its mut_short / mut_long / "
                          "mut_under / noalt / oldtx / nack arms",
     "model/gate_meta.py": "this gate",
+    "test/run_ftflush.py": "verdict made inline in main() from the bench's ASSERT tags per "
+                           "image and flip; priced by its MUTANTS arms, each of which must "
+                           "fire its named tag",
+    "test/run_slotbuf.py": "verdict made inline in main() from the bench's ASSERT tags and "
+                           "clocked_conform's R4b line; priced by its MUTANTS arms and "
+                           "M_SLOT_FILE_NONE",
     "fpga/sim/run_fpga_loader_xsim.py": "its one judge (compare) is priced inline by its own "
                                         "must-fires on planted transcripts (a changed, missing or "
                                         "reordered line, a missing scenario), run first; a "
