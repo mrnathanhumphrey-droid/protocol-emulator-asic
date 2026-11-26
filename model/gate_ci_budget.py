@@ -15,12 +15,17 @@ looked reasonable; nothing totalled it. This gate totals it, before every push.
 ⇒ B4  test.yaml plans its push through ci/push_plan.py (the shards a change calls for, run in sequence), and
       the plan itself behaves: a docs-only change runs nothing, an RTL change runs every shard, and every
       planned chunk fits one job's budget.
+⇒ B5  Every leg of test.yaml's `test` job may run as long as a planned chunk needs: its timeout-minutes (the
+      smallest number in it, when it is an expression) is at least job_budget_min + SETUP_MARGIN_MIN. 3f18e0e
+      planned push chunks up to 300 min under a 120-min push timeout; run 45715643365's push-1 (~270 min
+      planned) was cancelled at 2h00m, mid Model gates -- no test went red, the verdict was just lost.
 """
 from __future__ import annotations
 
 import glob
 import importlib.util
 import os
+import re
 import sys
 
 import yaml
@@ -28,6 +33,7 @@ import yaml
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MAX_PUSH_JOBS = 6
 PUSHY = ("push", "pull_request", "pull_request_target")
+SETUP_MARGIN_MIN = 15
 
 
 def triggers(doc):
@@ -90,7 +96,26 @@ def plan_checks(root):
         tot = sum(c["minutes"].get(s, 60) for s in ch["shards"].split())
         if tot > c["job_budget_min"] and len(ch["shards"].split()) > 1:
             out.append("B4 push_plan: chunk %s is %d min (> %d)" % (ch["name"], tot, c["job_budget_min"]))
+    if os.path.exists(t):
+        out += timeout_check(open(t, encoding="utf-8").read(), c["job_budget_min"])
     return out
+
+
+def timeout_check(text, budget):
+    """B5: the `test` job's timeout covers a full planned chunk (budget min) plus setup."""
+    doc = yaml.safe_load(text) or {}
+    job = (doc.get("jobs", {}) or {}).get("test")
+    if not job:
+        return ["B5 test.yaml: no `test` job"]
+    tm = job.get("timeout-minutes")
+    nums = [int(n) for n in re.findall(r"\d+", str(tm))] if tm is not None else []
+    if not nums:
+        return ["B5 test.yaml: job `test` has no timeout-minutes (GitHub's default is 360; set it)"]
+    need = budget + SETUP_MARGIN_MIN
+    if min(nums) < need:
+        return ["B5 test.yaml: job `test` can time out at %d min, under a planned chunk's %d + %d setup"
+                % (min(nums), budget, SETUP_MARGIN_MIN)]
+    return []
 
 
 PLANT_FANOUT = """on:
@@ -108,6 +133,13 @@ jobs:
     steps: [{run: echo}]
 """
 PLANT_MANY = "on: [push]\njobs:\n" + "".join("  j%d: {runs-on: ubuntu-24.04, steps: [{run: echo}]}\n" % i for i in range(8))
+PLANT_TMO = """on: [push]
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: ${{ github.event_name == 'push' && 120 || 330 }}
+    steps: [{run: echo}]
+"""
 PLANT_HARDEN = "on:\n  push: {branches: [x]}\n  workflow_dispatch: {}\njobs:\n  j1: {runs-on: ubuntu-24.04, steps: [{run: echo}]}\n"
 PLANT_OK = """on:
   push: {branches: [x]}
@@ -147,6 +179,7 @@ def main() -> int:
     cases = [
         ("the 11-15 shape: a push-fired 11-way matrix", any(p.startswith("B2") for p in audit("test.yaml", PLANT_FANOUT))),
         ("8 jobs started by one push", any(p.startswith("B3") for p in audit("x.yaml", PLANT_MANY))),
+        ("the 3f18e0e shape: a 120-min push timeout under 300-min chunks", any(p.startswith("B5") for p in timeout_check(PLANT_TMO, 300))),
         ("a harden started by a push", any(p.startswith("B1") for p in audit("harden.yml", PLANT_HARDEN))),
         ("a 1-at-a-time push matrix + dispatch-only fan-out is accepted", not audit("x.yaml", PLANT_OK)),
     ]

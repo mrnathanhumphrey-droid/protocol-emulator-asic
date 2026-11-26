@@ -376,7 +376,9 @@ jobs:
     # ⛔⛔ NO FAN-OUT (Wilson + Nate 11-25): the 11-15 suspension was 11 shards + 47 seams running at once,
     # ~12 runner-hours per push. Now a push runs the shards its changes call for (ci/push_plan.py), in
     # sequence, one runner at a time; the full suite is a manual dispatch of sequential chunks (ci/ci_chunks.json).
-    timeout-minutes: ${{ github.event_name == 'push' && 120 || 330 }}
+    # One limit for push and dispatch: a push chunk is planned up to job_budget_min (300) like a dispatch
+    # chunk; 120 here cut run 45715643365's push-1 at 2h00m (gate_ci_budget B5).
+    timeout-minutes: 330
     strategy:
       fail-fast: false
       max-parallel: 1
