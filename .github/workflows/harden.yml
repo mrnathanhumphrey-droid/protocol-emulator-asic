@@ -25,6 +25,19 @@ on:
         type: choice
         options: [chip, smoke]
         default: chip
+      cfg:
+        description: "chip only: JSON object of src/config.json overrides, e.g. {\"PL_TARGET_DENSITY_PCT\": 65}"
+        required: false
+        default: "{}"
+      en:
+        description: "chip only: fallback-ladder switches off, e.g. EN_SYMGEN=0 (default: all on)"
+        required: false
+        default: ""
+      stop_after:
+        description: "j2 = the congestion gate only (J1 + J2, no detailed route or sign-off); j4 = the full harden"
+        type: choice
+        options: [j4, j2]
+        default: j4
       kill_tests:
         description: "smoke only: also prove a short timeout-minutes and the silent-log watchdog kill a job"
         type: boolean
@@ -55,7 +68,7 @@ jobs:
       - uses: actions/checkout@v6
         with: {ref: "${{ inputs.sha }}", submodules: recursive}
       - uses: ./.github/actions/harden-setup
-        with: {wd: "${{ env.WD }}", coef: "${{ inputs.coef }}"}
+        with: {wd: "${{ env.WD }}", coef: "${{ inputs.coef }}", cfg: "${{ inputs.cfg }}", en: "${{ inputs.en }}"}
       - name: J1 flow
         working-directory: ${{ env.WD }}
         run: |
@@ -80,7 +93,7 @@ jobs:
       - uses: actions/checkout@v6
         with: {ref: "${{ inputs.sha }}", submodules: recursive}
       - uses: ./.github/actions/harden-setup
-        with: {wd: "${{ env.WD }}", coef: "${{ inputs.coef }}"}
+        with: {wd: "${{ env.WD }}", coef: "${{ inputs.coef }}", cfg: "${{ inputs.cfg }}", en: "${{ inputs.en }}"}
       - uses: actions/download-artifact@v7
         with: {name: runs-j1, path: "${{ env.WD }}/runs/j1"}
       - name: J2 flow
@@ -107,13 +120,15 @@ jobs:
   j3:
     name: J3 detailed route (progress gate)
     needs: j2
+    # stop_after j2: a congestion-gate run (Wilson 11-25 step 1) -- J3, J4, precheck and gl_test are skipped
+    if: inputs.stop_after != 'j2'
     runs-on: ubuntu-24.04
     timeout-minutes: 330
     steps:
       - uses: actions/checkout@v6
         with: {ref: "${{ inputs.sha }}", submodules: recursive}
       - uses: ./.github/actions/harden-setup
-        with: {wd: "${{ env.WD }}", coef: "${{ inputs.coef }}"}
+        with: {wd: "${{ env.WD }}", coef: "${{ inputs.coef }}", cfg: "${{ inputs.cfg }}", en: "${{ inputs.en }}"}
       - uses: actions/download-artifact@v7
         with: {name: runs-j1, path: "${{ env.WD }}/runs/j1"}
       - uses: actions/download-artifact@v7
@@ -147,7 +162,7 @@ jobs:
       - uses: actions/checkout@v6
         with: {ref: "${{ inputs.sha }}", submodules: recursive}
       - uses: ./.github/actions/harden-setup
-        with: {wd: "${{ env.WD }}", coef: "${{ inputs.coef }}"}
+        with: {wd: "${{ env.WD }}", coef: "${{ inputs.coef }}", cfg: "${{ inputs.cfg }}", en: "${{ inputs.en }}"}
       - uses: actions/download-artifact@v7
         with: {name: runs-j1, path: "${{ env.WD }}/runs/j1"}
       - uses: actions/download-artifact@v7
@@ -267,6 +282,8 @@ jobs:
       - name: Harden result
         env:
           GH_TOKEN: ${{ github.token }}
+          IN_CFG: ${{ inputs.cfg }}
+          IN_EN: ${{ inputs.en }}
           JOBS: >-
             {"j1": "${{ needs.j1.result }}", "j2": "${{ needs.j2.result }}", "j3": "${{ needs.j3.result }}",
              "j4": "${{ needs.j4.result }}", "precheck": "${{ needs.precheck.result }}", "gl_test": "${{ needs.gl_test.result }}",
@@ -274,6 +291,7 @@ jobs:
         run: |
           {
             echo "harden of \`${{ inputs.sha }}\` -- design ${{ inputs.design }}, coef ${{ inputs.coef }}"
+            echo "variant: cfg \`$IN_CFG\`, en \`$IN_EN\`, stop after ${{ inputs.stop_after }}"
             echo
           } >> "$GITHUB_STEP_SUMMARY"
           set +e

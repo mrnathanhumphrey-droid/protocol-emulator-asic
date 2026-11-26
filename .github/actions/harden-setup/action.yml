@@ -7,6 +7,14 @@ inputs:
   coef:
     description: "PL_WIRE_LENGTH_COEF for the chip (ignored for the smoke design)"
     required: true
+  cfg:
+    description: "chip only: JSON object of src/config.json overrides for a variant (default none)"
+    required: false
+    default: "{}"
+  en:
+    description: "chip only: fallback-ladder defaults for src/project.v, e.g. EN_SYMGEN=0,EN_FLAGS=0 (default none = all 1)"
+    required: false
+    default: ""
 runs:
   using: composite
   steps:
@@ -42,14 +50,34 @@ runs:
     - name: Merged config
       shell: bash
       working-directory: ${{ inputs.wd }}
+      env: {IN_COEF: "${{ inputs.coef }}", IN_CFG: "${{ inputs.cfg }}", IN_EN: "${{ inputs.en }}"}
       run: |
         set -euo pipefail
         if [ "${{ inputs.wd }}" = "." ]; then
-          python3 - "${{ inputs.coef }}" <<'PY'
-        import json, sys
-        p = "src/config.json"; c = json.load(open(p)); c["PL_WIRE_LENGTH_COEF"] = float(sys.argv[1])
-        json.dump(c, open(p, "w"), indent=2)
+          python3 - <<'PY'
+        import json, os, re, sys
+        p = "src/config.json"; c = json.load(open(p)); c["PL_WIRE_LENGTH_COEF"] = float(os.environ["IN_COEF"])
         print("PL_WIRE_LENGTH_COEF", c["PL_WIRE_LENGTH_COEF"])
+        # a variant's config overrides (Wilson 11-25 step 1): printed, so the run log names what ran
+        over = json.loads(os.environ.get("IN_CFG") or "{}")
+        if not isinstance(over, dict):
+            sys.exit("cfg must be a JSON object, got %r" % over)
+        for k, v in over.items():
+            print("override %s: %r -> %r" % (k, c.get(k), v)); c[k] = v
+        json.dump(c, open(p, "w"), indent=2)
+        # the fallback ladder (src/project.v EN_* defaults): each named switch must exist, 0 or 1
+        en = [x.strip() for x in (os.environ.get("IN_EN") or "").split(",") if x.strip()]
+        if en:
+            v = open("src/project.v", encoding="utf-8").read()
+            for item in en:
+                m = re.fullmatch(r"(EN_SLOTBUF|EN_SYMGEN|EN_FLAGS|EN_DS)=([01])", item)
+                if not m:
+                    sys.exit("en: bad item %r (EN_SLOTBUF|EN_SYMGEN|EN_FLAGS|EN_DS = 0|1)" % item)
+                v, n = re.subn(r"(parameter integer %s\s*=\s*)[01]" % m.group(1), r"\g<1>" + m.group(2), v)
+                if n != 1:
+                    sys.exit("en: %s found %d times in src/project.v (need 1)" % (m.group(1), n))
+                print("fallback ladder: %s = %s" % (m.group(1), m.group(2)))
+            open("src/project.v", "w", encoding="utf-8").write(v)
         PY
           python3 ci/flow_pins.py --py "$(command -v python)" --tt tt --pdk-root /home/runner/pdk
         fi
