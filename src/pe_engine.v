@@ -483,17 +483,7 @@ module pe_engine #(
     parameter integer CK_STRETCH_TO  =          // ticks before a bus fault
         (CK_STRETCH_NS + (CK_STRETCH_PRE * CLK_PERIOD_PS) / 1000 - 1)
         / ((CK_STRETCH_PRE * CLK_PERIOD_PS) / 1000),
-    parameter integer SPL     = 2,
-    // ⭐ THE FALLBACK LADDER (Wilson 11-24 scope ruling, step 2): 1 = built (the shipped chip),
-    // 0 = the feature is absent. Every 0-setting ties its logic off so synthesis removes it,
-    // and the words it would run are REFUSED (config_err, the lane halts) -- never a silent
-    // no-op. The top's BUILT_OPS drops the same opcodes at load. EN_SLOTBUF = 0 keeps the
-    // double buffer (SPL) and drops the slot buffer (pieces 2-4): no slot request, no buffer,
-    // no edge tag, and a FALLTHROUGH ARM is refused (it needs the slot buffer).
-    parameter integer EN_SLOTBUF = 1,
-    parameter integer EN_SYMGEN  = 1,
-    parameter integer EN_FLAGS   = 1,
-    parameter integer EN_DS      = 1
+    parameter integer SPL     = 2
 ) (
     input  wire                 clk,
     // ⭐ CANARY (reset-network halt, Wilson): `rst_n` is now POWER-ON OR HALT
@@ -1871,7 +1861,7 @@ module pe_engine #(
       // is available. M_FLAG_NOGATE drops it (run_flags: the waiter runs early).
       wire           fl_hw = (l_act[hix[gi]][ACT_W-1 -: OP_W] == OP_FLAG_WAIT);
       wire [FLW-1:0] fl_hi = l_act[hix[gi]][MOD_W +: FLW];
-      assign fl_ok[gi] = (EN_FLAGS == 0) | ~fl_hw | fl_av[fl_hi];   // also read by progress.vh[S]
+      assign fl_ok[gi] = ~fl_hw | fl_av[fl_hi];   // also read by progress.vh[S]
 `ifdef M_FLAG_NOGATE
       assign ready[gi] = ready_hd[gi];
 `else
@@ -3098,17 +3088,11 @@ module pe_engine #(
   reg [ACT_W-OP_W-MOD_W-1:0] sg_cfg_data;   // the payload: the bits between op and mod
   wire                  sg_pa, sg_pb, sg_busy, sg_ovr;
   wire                  sg_mine = sg_own_v & (sg_own == cur);   // the dispatching lane owns it
-  // the fallback ladder (EN_SYMGEN = 0): the instance stays, its outputs are gated to 0, so
-  // synthesis removes the whole generator -- and at the default the instance and its state keep
-  // their names, which the default-equivalence proof of the switches pairs them by
-  wire                  sg_pa_g, sg_pb_g, sg_busy_g, sg_ovr_g;
   pe_symgen u_symgen (
     .clk(clk), .rst_n(rst_n),
     .cfg_we(sg_cfg_we), .cfg_idx(sg_cfg_idx), .cfg_data(sg_cfg_data),
     .ld(sg_ld), .ld_byte(sg_byte), .ld_nbits_m1(sg_nb), .msb(l_order[sg_own]),
-    .pa(sg_pa_g), .pb(sg_pb_g), .busy(sg_busy_g), .ovr(sg_ovr_g));
-  assign {sg_pa, sg_pb, sg_busy, sg_ovr} = (EN_SYMGEN != 0) ? {sg_pa_g, sg_pb_g, sg_busy_g, sg_ovr_g}
-                                                          : 4'b0000;
+    .pa(sg_pa), .pb(sg_pb), .busy(sg_busy), .ovr(sg_ovr));
   // (`winner_q` / `winner_v_q`, TF3's registered winner, are declared ahead,
   // before the block that writes them)
   reg                   pslot;        // which slot this refill is filling
@@ -3197,7 +3181,7 @@ module pe_engine #(
       // piece 3: an FT ARM's timeout word (PC+1), owed after its edge word, is
       // the ARM's own successor -- not past the held edge word, whatever it is
       wire ft_t2 = ft_nt[gi] & ~ft_ne[gi];
-      assign sq_ok[gi] = (EN_SLOTBUF != 0) && (SPL > 1) && sq_pr && (sq_n[gi] != 2'd0) && l_live[gi] && hv_q &&
+      assign sq_ok[gi] = (SPL > 1) && sq_pr && (sq_n[gi] != 2'd0) && l_live[gi] && hv_q &&
                          !l_bufv[gi] && (!npf_hold || ft_t2) && !ft_flush[gi];
       // the successor of the last held word: a looping re-arm's is the loop
       // base (as `fetch_addr` reads it for the head), anything else's `l_fpc`
@@ -3264,7 +3248,7 @@ module pe_engine #(
   wire [ACT_W-1:0]      cap_word  = s_wrdata[ACT_BYTES*8-1 -: ACT_W];
   // an ARM's capture raises -- plain or (piece 3) FALLTHROUGH, mod[1] -- unless
   // the lane's FT ARM still owes words (an ARM at its PC+1 / PC+2: no nested raise)
-  wire                  cap_isarm = (EN_SLOTBUF != 0) && (cap_word[ACT_W-1 -: OP_W] == OP_ARM) && !ft_ne[pl] && !ft_nt[pl];
+  wire                  cap_isarm = (cap_word[ACT_W-1 -: OP_W] == OP_ARM) && !ft_ne[pl] && !ft_nt[pl];
   wire                  cap_arm   = cap_isarm && !cap_word[1];
   wire                  cap_armft = cap_isarm && cap_word[1];
   wire                  cap_raise = cap_arm | cap_armft;
@@ -3276,7 +3260,7 @@ module pe_engine #(
   // "held and tagged" alone is not the test: measured 11-22 under port contention.)
   wire                  ft_sinf   = (pst != P_SCAN) && (pl == cur) && !pb && (pslot != l_sel[cur]);
   wire                  ft_spt    = (l_actv[six[cur]] && !tg_s[six[cur]]) || (ft_sinf && !pedge && !pkill);
-  wire                  ft_k6     = (EN_SLOTBUF != 0) && (a_op == OP_ARM) && a_mod[1] && !ft_spt;
+  wire                  ft_k6     = (a_op == OP_ARM) && a_mod[1] && !ft_spt;
   wire                  cap_hv    = l_actv[hix[pl]];
   wire                  cap_sv    = l_actv[six[pl]];
   // (piece 3, `hord`: an FT ARM's edge word is never filed into the head -- it
@@ -3914,8 +3898,8 @@ module pe_engine #(
                     // symbol generator. ONE owner: a second is config_err (pe_isa
                     // refuses it too).
                     if (hsh_n[HDR_BYTES*8-2-2*PINW-DLY_W-CW+3]) begin
-                      if (sg_own_v || (EN_SYMGEN == 0)) config_err_m <= 1'b1;
-                      sg_own_v <= (EN_SYMGEN != 0);
+                      if (sg_own_v) config_err_m <= 1'b1;
+                      sg_own_v <= 1'b1;
                       sg_own   <= hl;
                     end
                     // ⛔ CE2: only a PUSH-PULL lane whose clock is a `uo_out`
@@ -4236,7 +4220,7 @@ module pe_engine #(
                      // on the same flag sees it gone at its own pick (picks are
                      // >= 3 cycles apart). M_FLAG_NOCONSUME: it never consumes.
 `ifndef M_FLAG_NOCONSUME
-                     if ((EN_FLAGS != 0) && (w_act[ACT_W-1 -: OP_W] == OP_FLAG_WAIT))
+                     if (w_act[ACT_W-1 -: OP_W] == OP_FLAG_WAIT)
                        fl_cons[w_act[MOD_W +: FLW]] <= fl_cons[w_act[MOD_W +: FLW]] + {{(FCW-1){1'b0}}, 1'b1};
 `endif
                      cur     <= winner;
@@ -4637,7 +4621,7 @@ module pe_engine #(
             // Its state goes in at writeback, below.
             // DRIVE_SAMPLE: LEVEL's drive rule with `ds_bit` (an open-drain lane
             // never drives a 1); the sample is the writeback's (see `ds_rx`)
-            OP_DRIVE_SAMPLE: if (ds_refuse || (EN_DS == 0)) begin
+            OP_DRIVE_SAMPLE: if (ds_refuse) begin
               config_err_m <= 1'b1;
               sticky_ovr_m <= 1'b1;
               live_n[cur]  = 1'b0;
@@ -4662,13 +4646,6 @@ module pe_engine #(
             end
             default: ;
           endcase
-          // the fallback ladder (EN_SLOTBUF = 0): a FALLTHROUGH ARM needs the slot buffer -- refused
-          // here, OUTSIDE the case, so the case's `OP_ARM, OP_REARM: ; // no pin movement` stays
-          // verbatim (pe_asm's anchor K5 reads it to prove parked-header overlaps release-only)
-          if ((EN_SLOTBUF == 0) && (a_op == OP_ARM) && a_mod[1]) begin
-            config_err_m <= 1'b1;
-            live_n[cur]  = 1'b0;
-          end
           br_take_q <= a_op[1] ? br_loop_take : a_op[0] ? br_cmp_take : br_bit_take;
           st <= ST_WB;
         end
@@ -4697,7 +4674,7 @@ module pe_engine #(
             l_armpinb[cur] <= a_pinb;
             l_armhalf[cur] <= a_cnt[0];          // HALF: count[0]
             l_armqual[cur] <= a_cnt[1];          // QUAL: count[1]
-            l_armft[cur]   <= a_mod[1] && (EN_SLOTBUF != 0);   // FALLTHROUGH: mod[1]
+            l_armft[cur]   <= a_mod[1];          // FALLTHROUGH: mod[1]
             notmo_n[cur]   = (a_dly == {DLY_W{1'b0}});
           end
 
@@ -4972,7 +4949,7 @@ module pe_engine #(
             OP_READBIT: l_rx[cur] <= {rx_bit, l_rx[cur][7:1]};
             // DRIVE_SAMPLE's writeback: the TX advance (mod[1], SHIFT's), the
             // sample into RX and the byte push at bit `count` (SHIFTIN's)
-            OP_DRIVE_SAMPLE: if (!ds_refuse && (EN_DS != 0)) begin
+            OP_DRIVE_SAMPLE: if (!ds_refuse) begin
               if (a_mod[1]) begin
                 if (l_txv[cur]) begin
 `ifndef M_DS_NO_TXADV
@@ -5021,27 +4998,18 @@ module pe_engine #(
             // ⭐ POST: one more count on flag pinb[2:0]
             // M_FLAG_POST2 (the assertion's planted case): a POST also counts the
             // neighbouring flag -- two POSTs in one cycle
-            OP_FLAG_SET: if (EN_FLAGS == 0) begin
-              config_err_m <= 1'b1;
-              live_n[cur]  = 1'b0;
-            end else begin
+            OP_FLAG_SET: begin
               fl_post[a_pinb[FLW-1:0]] <= fl_post[a_pinb[FLW-1:0]] + {{(FCW-1){1'b0}}, 1'b1};
 `ifdef M_FLAG_POST2
               fl_post[a_pinb[FLW-1:0] ^ {{(FLW-1){1'b0}}, 1'b1}] <= fl_post[a_pinb[FLW-1:0] ^ {{(FLW-1){1'b0}}, 1'b1}] + {{(FCW-1){1'b0}}, 1'b1};
 `endif
             end
-            OP_FLAG_WAIT: if (EN_FLAGS == 0) begin   // consumed at its pick (ST_IDLE)
-              config_err_m <= 1'b1;
-              live_n[cur]  = 1'b0;
-            end
+            OP_FLAG_WAIT: ;                     // consumed at its pick (ST_IDLE)
             // ⭐ OBSERVE: the count into RX, in the order CMP_BRANCH reads it (an
             // MSB-first lane's RX is compared reversed, so it is written reversed):
             // CMP_BRANCH with byte = the count matches on any lane.
             // M_OBSERVE_CONSUMES: it also consumes one (run_flags' must-fire).
-            OP_OBSERVE: if (EN_FLAGS == 0) begin
-              config_err_m <= 1'b1;
-              live_n[cur]  = 1'b0;
-            end else begin
+            OP_OBSERVE: begin
               l_rx[cur] <= l_order[cur] ? obs_rev : obs_cnt;
 `ifdef M_OBSERVE_CONSUMES
               fl_cons[a_pinb[FLW-1:0]] <= fl_cons[a_pinb[FLW-1:0]] + {{(FCW-1){1'b0}}, 1'b1};

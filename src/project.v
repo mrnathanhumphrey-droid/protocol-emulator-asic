@@ -146,14 +146,7 @@ module tt_um_protocol_emulator #(
     // be measured; the stored `SWEEP_SINGLE` sweep described a configuration
     // that no command could produce. Passed through here so a bench can
     // elaborate either depth without editing the engine.
-    parameter integer SPL      = 2,
-    // ⭐ THE FALLBACK LADDER (Wilson 11-24, step 2): 1 = built, 0 = absent (pe_engine says what
-    // each 0 removes). Defaults are the shipped chip; a 0 also drops the feature's opcodes from
-    // BUILT_OPS below, so an image using them is refused at load.
-    parameter integer EN_SLOTBUF = 1,
-    parameter integer EN_SYMGEN  = 1,
-    parameter integer EN_FLAGS   = 1,
-    parameter integer EN_DS      = 1
+    parameter integer SPL      = 2
 ) (
     input  wire [7:0] ui_in,
     output wire [7:0] uo_out,
@@ -471,10 +464,7 @@ module tt_um_protocol_emulator #(
   // It was `N_BUILT_OPS = 12` ("below this is built"); the batch builds 13 and 22
   // with 12, 14 and 18..21 still reserved, so the refusal tests membership.
   localparam integer OP_W_T      = 5;
-  localparam [(1 << OP_W_T)-1:0] BUILT_OPS = 32'h00c3_3fff   // 0..11, DRIVE_SAMPLE 12, SER 13, POST 16, WAIT 17, SYMDEF 22, OBSERVE 23
-      & ~((EN_DS     != 0) ? 32'h0 : 32'h0000_1000)           // the fallback ladder: DRIVE_SAMPLE
-      & ~((EN_SYMGEN != 0) ? 32'h0 : 32'h0040_2000)           //   SER, SYMDEF
-      & ~((EN_FLAGS  != 0) ? 32'h0 : 32'h0083_0000);          //   POST, WAIT, OBSERVE
+  localparam [(1 << OP_W_T)-1:0] BUILT_OPS = 32'h00c3_3fff;   // 0..11, DRIVE_SAMPLE 12, SER 13, POST 16, WAIT 17, SYMDEF 22, OBSERVE 23
   localparam integer ACT_BASE_T  = MAGIC_AT + 2;
   localparam [AW-1:0] ACT_BASE_A = ACT_BASE_T[AW-1:0];
   localparam [AW-1:0] ACT_MASK_A = ACT_BYTES_T[AW-1:0] - {{(AW-1){1'b0}}, 1'b1};
@@ -1008,7 +998,6 @@ module tt_um_protocol_emulator #(
   pe_engine #(
       .N_LANES(N_LANES), .AW(AW), .N_PINS(N_PINS), .N_UIO(8),
       .TS_W(TS_W), .DLY_W(DLY_W), .D_W(D_W), .SPL(SPL),
-      .EN_SLOTBUF(EN_SLOTBUF), .EN_SYMGEN(EN_SYMGEN), .EN_FLAGS(EN_FLAGS), .EN_DS(EN_DS),
       // ⭐ PASSED THROUGH so a bench can shorten the prescaler and reach the
       // bus-fault bound in hundreds of cycles instead of 1.75 million.
       .CK_STRETCH_PRE(CK_STRETCH_PRE), .CK_STRETCH_TO(CK_STRETCH_TO),
