@@ -30,6 +30,7 @@ prepush model/gate_image_bounds.py
 prepush model/gate_cert_stamp.py
 prepush host/poset/run_poset_compile.py
 prepush model/gate_lane_cert.py
+prepush test/run_within_mf.py
 prepush model/gate_live_price.py
 prepush model/gate_uart_spacing.py
 prepush model/gate_spi_premise.py
@@ -70,6 +71,7 @@ ci-only fpga/sim/run_fpga_loader.py shard fpga: the three FPGA board simulations
 ci-only fpga/sim/run_fpga_loader_xsim.py shard fpga: the loader's second-simulator check (iverilog ~940 s), full run only (Wilson 11-15)
 ci-only fpga/sim/run_fpga_onewire.py shard fpga: the three FPGA board simulations
 ci-only fpga/sim/run_fpga_i2c.py shard fpga: the three FPGA board simulations
+ci-only fpga/sim/run_fpga_usb.py shard fpga: the FPGA USB build's glue simulation (Wilson 11-14), ~1 s locally
 prepush model/gate_store_size_literals.py
 prepush model/gate_host_contract.py
 prepush model/area_line.py

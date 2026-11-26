@@ -137,6 +137,7 @@ fpga fpga/sim/run_fpga_loader.py
 fpga fpga/sim/run_fpga_loader_xsim.py
 fpga fpga/sim/run_fpga_onewire.py
 fpga fpga/sim/run_fpga_i2c.py
+fpga fpga/sim/run_fpga_usb.py
 fast model/gate_halt_reset.py
 fast model/gate_runner_registry.py
 fast model/gate_sp2_frontend.py
@@ -164,6 +165,7 @@ fast model/pe_asm.py
 fast model/gate_cert_stamp.py
 fast host/poset/run_poset_compile.py
 fast model/gate_lane_cert.py
+fast test/run_within_mf.py
 fast model/gate_lean_anchors.py
 fast model/gate_live_price.py
 fast model/gate_uart_spacing.py

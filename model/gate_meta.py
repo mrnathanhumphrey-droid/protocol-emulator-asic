@@ -331,6 +331,10 @@ NOT_STUBBABLE = {
     "test/run_ftflush.py": "verdict made inline in main() from the bench's ASSERT tags per "
                            "image and flip; priced by its MUTANTS arms, each of which must "
                            "fire its named tag",
+    "test/run_within_mf.py": "verdict made inline in main() per scenario (the abort, the timeout, "
+                             "the timeout path): its scenarios ARE the must-fires",
+    "fpga/sim/run_fpga_usb.py": "verdict made inline in main() (the glue's promises GREEN and the "
+                                "USB-off build killed); priced by that USB-off arm",
     "test/run_slotbuf.py": "verdict made inline in main() from the bench's ASSERT tags and "
                            "clocked_conform's R4b line; priced by its MUTANTS arms and "
                            "M_SLOT_FILE_NONE",

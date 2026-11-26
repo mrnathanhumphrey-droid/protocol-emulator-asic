@@ -194,6 +194,8 @@ RESOURCE_NOT_USED = {
                           "usbdev.sigrok_usb (only run_usbaddr does)",
     "model/gate_lane_cert.py": "imports usbdev only for D, DM, device_program and image -- "
                                "static, no simulation, no decode",
+    "test/run_within_mf.py": "imports run_pit_capture only for RTL, the source list; its "
+                             "bench build runs on Windows iverilog",
     "test/run_slotbuf.py": "imports gate_corpus_trace only for feed_args(), the host-feed "
                            "plusargs; its benches run on Windows iverilog",
 }

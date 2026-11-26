@@ -278,6 +278,9 @@ GATES=(
   # ⭐ agent 2's lane certificate (gate_lane_cert: spacing, FT, co-resident USB,
   # the budget record current) and the Lean library's RTL anchors (static, < 1 s).
   model/gate_lane_cert.py
+  # agent 2's `within` / `else` simulation must-fires (Wilson 11-15): ran in no suite until 11-26
+  # (runner registry, CI run 45752936005) -- ~12 s
+  test/run_within_mf.py
   # agent 2 (1953127, Wilson 11-15 item 5): programs assembled at run time priced live
   model/gate_live_price.py
   # agent 2 (8994ced / ac9547d, Wilson 11-15 calls 1 and 4): the UART pre-ARM spacing, least and
@@ -425,6 +428,8 @@ GATES=(
   fpga/sim/run_fpga_loader_xsim.py
   fpga/sim/run_fpga_onewire.py
   fpga/sim/run_fpga_i2c.py
+  # the FPGA USB build's glue (Wilson 11-14): ran in no suite until 11-26 (runner registry)
+  fpga/sim/run_fpga_usb.py
   # ⭐ F1.5 -- PREVENTION: no consumer of the store types its size (fpga/,
   # test/), and docs/HOST_INTERFACE.md's load contract == pe_isa + the RTL.
   model/gate_store_size_literals.py
