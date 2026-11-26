@@ -96,15 +96,18 @@ FLIP_LO, FLIP_HI = -6, 150   # the flip, relative to the image's first arming (o
 #: `parkpp` (Wilson 11-24, PARKARM's must-fire): a PUSH-PULL clocked write (no park) then a plain ARM
 #: `fall_b2_t1` (Wilson 11-24, 4142's must-fire): fall_b2 at timeout 1 -- the timeout lands on the
 #: winner's own capture into a slot, which the K6 drop removes
+#: `plain1` / `plain2` (+ `_t2`) (Wilson 11-25, V2E2's narrowing): a PLAIN ARM at the FT ARM's PC+1 /
+#: PC+2 -- the usbdev / L*_seq placement the loader keeps legal -- loads and runs with SLOTORD / FTTMO /
+#: FTKEEP silent (the clean build below demands no asserts); timeout 40 and 2
 IMAGES = ("dw1", "fall", "loop", "spare", "quick", "quick_b7", "parkft", "parkqual", "dwrace", "dwrace2",
-          "parkpp", "fall_b2_t1")
+          "parkpp", "fall_b2_t1", "plain1", "plain2", "plain1_t2", "plain2_t2")
 #: the flip window per image, relative to its first arming (the buffered case sits at wb + 1)
 WINDOW = {"dw1": (-6, 21), "dwrace": (-6, 21), "dwrace2": (-6, 21), "parkpp": (-6, 21),
           "fall_b2_t1": (-6, 21)}
 #: the V2E1 witnesses: dw_image(n, ds, wd) at their own timeout (found 11-24, 76 of 320 images)
 RACE = {"dwrace": (1, 2, 8, 2), "dwrace2": (2, 6, 4, 16)}
 #: an image at its own timeout: name -> (the image it is, the timeout)
-TMOS = {"fall_b2_t1": ("fall_b2", 1)}
+TMOS = {"fall_b2_t1": ("fall_b2", 1), "plain1_t2": ("plain1", 2), "plain2_t2": ("plain2", 2)}
 STATS = ("ftraise", "keepslot", "keepbuf", "keepcap", "keepnone", "fttmo", "tagmove")
 #: counted but NOT required: the edge word ABSENT at an FT edge (the refetch branch) -- 0 over
 #: 3,253 runs; agent 2's "never absent" lemma decides it (Wilson 11-22), so it is reported, not
@@ -198,6 +201,10 @@ def image(name):
         prog = [I.act(I.OP_LEVEL, I.PIN_NONE, 0, 2), arm, lvl(0), lvl(1), lvl(0), loop]
     elif kind == "loop":
         prog = [arm, loop, lvl(1), lvl(0), loop]
+    elif kind == "plain1":            # V2E2's narrowing: a PLAIN ARM at the FT ARM's PC+1
+        prog = [arm, I.act_arm(A.PIN_A, 0, TMO), lvl(0), lvl(1), lvl(0), loop]
+    elif kind == "plain2":            # ... and at its PC+2 (usbdev's placement)
+        prog = [arm, lvl(0), I.act_arm(A.PIN_A, 0, TMO), lvl(1), lvl(0), loop]
     elif kind == "spare":
         prog = [I.act(I.OP_LEVEL, I.PIN_NONE, 0, 30), arm, lvl(0), lvl(1), lvl(0), loop]
     else:

@@ -185,6 +185,12 @@ jobs:
                      "PDK_SOURCE": "ciel", "PDK_VERSION": open(os.path.join(os.environ["GITHUB_WORKSPACE"], "ci/pdk.sha")).read().strip()},
                     open("runs/wokwi/pdk.json", "w"), indent=2)
           PY
+          # ⛔ tt_tool reads EVERY step from runs/wokwi (e.g. `*yosys-synthesis` for the submission's
+          # stats); the staged flow left J1-J3's steps in runs/j1..j3. Link them in, prefixed so no
+          # name can collide with J4's own steps (smoke 45726878973, 11-25: ValueError, no synthesis dir).
+          for s in j1 j2 j3; do
+            for d in runs/$s/[0-9]*-*/; do ln -s "../$s/$(basename "$d")" "runs/wokwi/$s-$(basename "$d")"; done
+          done
           ./tt/tt_tool.py --print-stats --pdk ihp-sg13cmos5l >> "$GITHUB_STEP_SUMMARY" || true
           ./tt/tt_tool.py --create-tt-submission --pdk ihp-sg13cmos5l
       - uses: actions/upload-artifact@v7

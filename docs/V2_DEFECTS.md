@@ -123,5 +123,26 @@ shows nothing.
 
 **v1.** Not present: `v1-lock` has no slot buffer and no FALLTHROUGH.
 
-**Fix.** Pending a ruling: refuse the nesting at load (`pe_isa`), or give a nested FT ARM
-its own request and tags in the RTL.
+**Fix (Wilson 11-25): refused at load, FT-at-FT only.** `pe_isa.arm_lane_problems` refuses a
+FALLTHROUGH ARM at another FT ARM's PC+1 or PC+2 ("V2E2"); all 36 witness images behind the
+2,448 runs above are refused, for that reason. `run_arm2`'s lane cases `ft_at_ft_pc1` /
+`ft_at_ft_pc2` must be refused naming V2E2; `plain_at_ft_pc1` and `ft_edge_arm` (plain at PC+2)
+must be accepted.
+
+**A PLAIN ARM at an FT ARM's PC+1 / PC+2 stays legal** (the usbdev_dev = usbdev_fpga and L*_seq
+placement). Structural, from `src/pe_engine.v` at 3f18e0e:
+- `ft_k6 = (a_op == OP_ARM) && a_mod[1] && !ft_spt` (L3263): K6's no-swap writeback needs `mod[1]`,
+  the FALLTHROUGH bit, so a plain ARM always swaps (`if ((SPL > 1) && !ft_k6) l_sel[cur] <= ...`,
+  L5162) and never takes the no-swap path that leaves the second copy of PC+1 (SLOTORD);
+- `l_armft[cur] <= a_mod[1]` (L4677), and both the fall-through at timeout (L4165) and the K6 drop
+  (`tmo_drop`, L3284-3291) need `l_armft`: a plain ARM's timeout halts the lane and keeps no PC+2,
+  so the FTTMO half cannot arise;
+- what the two kinds share -- an ARM captured while the outer FT ARM owes words raises no request
+  (`cap_isarm`, L3251) -- is not enough alone: the fault needs the FT-only writeback or timeout.
+Measured (11-25): a plain ARM at PC+1 / PC+2, the same family as above (36 images, timeouts
+2/8/40, idle + 5 busy loads, flips -1 and armed-6..+60), **0 / 2,448** asserting runs, with the
+control live (the same harness with the inner ARM FT fires SLOTORD at once); usbdev's device image
+across all 19 `run_usbaddr` scenarios with the host shifted 0-59 cycles, **0 / 1,140**.
+Locked by `run_ftflush`'s `plain1` / `plain2` (+ `_t2`) images, which the clean build must run with
+no assert. The plain placement pairs (plain at FT PC+1, plain at FT PC+2) are COVERED by this
+probe; they go into the placement-pair audit (Wilson item 7, not yet built) as covered, citing it.

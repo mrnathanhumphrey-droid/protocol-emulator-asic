@@ -1533,6 +1533,19 @@ def arm_lane_problems(img):
                 elif words[i + 2]["op"] in (OP_SHIFT, OP_SHIFTIN, OP_SHIFTI):
                     out.append("word %d (lane %d): FALLTHROUGH ARM's edge path starts "
                                "with a SHIFT/SHIFTIN -- PC+2 is not prefetched" % (i, ln))
+                # ⛔ V2E2 (docs/V2_DEFECTS.md, Wilson 11-25): a FALLTHROUGH ARM at another FT ARM's
+                # PC+1 or PC+2 raises no slot request (cap_isarm: no nested raise) yet its writeback
+                # still takes K6's no-swap (ft_k6 tests mod[1], not whether the ARM raised): a second
+                # copy of its PC+1 (SLOTORD) and an untagged PC+2 the K6 drop cannot see (FTTMO).
+                # A PLAIN ARM there is legal: ft_k6 and the FT timeout path both need mod[1]
+                # (0 / 2,448 synthetic runs, 0 / 1,140 on usbdev, the FT control live).
+                for k in (1, 2):
+                    j = i + k
+                    if (a + k * ACT_BYTES < hi and j < len(words) and words[j]["op"] == OP_ARM
+                            and words[j]["mod"] & ARM_MOD_FT):
+                        out.append("word %d (lane %d): FALLTHROUGH ARM at the PC+%d of the FALLTHROUGH "
+                                   "ARM at word %d -- a nested FT ARM breaks the lane's word order "
+                                   "(V2E2); a plain ARM there is legal" % (j, ln, k, i))
     return out
 
 

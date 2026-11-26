@@ -722,7 +722,7 @@ def main() -> int:
     for n, (lane, prog, want) in LANE_CASES.items():
         img = lane_image(prog, lane)
         pr = I.arm_problems(img) + I.arm_lane_problems(img)
-        ok = bool(pr) == want
+        ok = bool(pr) == want and (n not in V2E2_CASES or any("V2E2" in x for x in pr))
         print("    %-18s %s%s" % (n, "refused" if pr else "accepted",
                                   "" if ok else "  *** WRONG"))
         if not ok:
@@ -801,6 +801,22 @@ def _cov_write(path, img):
     cites this file by line."""
     I.write_image(path, img)
     sim_run.cov_image("run_arm2", path)
+
+
+# ⭐ V2E2 (Wilson 11-25), kept at the END of the file so no line cited elsewhere moves (program_a2's
+# T_EXT_BENCH cites this file by line): a FALLTHROUGH ARM at an FT ARM's PC+1 / PC+2 is refused, for
+# THAT reason (main checks the refusal names V2E2); a PLAIN ARM at PC+1 is legal (ft_edge_arm is plain
+# at PC+2)
+LANE_CASES.update({
+    "ft_at_ft_pc1": (0, [I.act_arm(PIN_A, 0, 100, ft=True), I.act_arm(PIN_A, 0, 100, ft=True),
+                         _LOOP, _LOOP, _LOOP], True),
+    "ft_at_ft_pc2": (0, [I.act_arm(PIN_A, 0, 100, ft=True), _LOOP,
+                         I.act_arm(PIN_A, 0, 100, ft=True), _LOOP, _LOOP], True),
+    "plain_at_ft_pc1": (0, [I.act_arm(PIN_A, 0, 100, ft=True), I.act_arm(PIN_A, 0, 100),
+                            _LOOP, _LOOP], False),
+})
+#: the cases refused for V2E2 specifically: their refusal must name it, not another rule
+V2E2_CASES = ("ft_at_ft_pc1", "ft_at_ft_pc2")
 
 
 if __name__ == "__main__":

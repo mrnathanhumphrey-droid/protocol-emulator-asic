@@ -797,6 +797,10 @@ SPEC_SYMBOLS = {
     # probes reached the point). Reach only: the RESULT is the coverage record, and
     # run_ftflush judges the images.
     ("test/run_ftflush.py", "COV_FLIPS"),
+    # TMOS (11-24 / 11-25): the chosen timeout of each image run at its own timeout (fall_b2_t1:
+    # 4142's must-fire; plain1_t2 / plain2_t2: V2E2's narrowing at the short timeout) -- design.
+    # The RESULTS are tb_arm2's assertions, judged live (the clean build: none).
+    ("test/run_ftflush.py", "TMOS"),
     # the symbol generator (Wilson 11-17): CFGS are the chosen table instances
     # (WS2812, Manchester, NRZI, biphase, the SPI data phase) from
     # test/symgen_model.py, FEED the four bytes tb_pair feeds queue 0 -- design and
