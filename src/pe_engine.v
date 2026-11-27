@@ -1716,7 +1716,7 @@ module pe_engine #(
   genvar gf;
   generate
     for (gf = 0; gf < N_FLAGS; gf = gf + 1) begin : g_flav
-      assign fl_av[gf] = (fl_post[gf] != fl_cons[gf]);
+      assign fl_av[gf] = |(fl_post[gf] ^ fl_cons[gf]);
     end
   endgenerate
 `ifndef SYNTHESIS
