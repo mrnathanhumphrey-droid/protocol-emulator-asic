@@ -1328,6 +1328,19 @@ if [ $? -ne 0 ]; then
   echo "  *** the pass-token judge failed its own self-test -- no verdict possible"
   exit 1
 fi
+# ⛔⛔ A HANG IS A RED, NOT A LOST JOB (11-26). CI run 45752936005: gate_macro_inputs (52 s on the
+# local box) ran 4 h 20 min on the runner with no output, until the JOB's 330-min limit killed the
+# job -- and with it every gate after it in the shard, and the shard's verdict. Every gate now runs
+# under its own cap; at the cap it is killed (with its children: `timeout` signals the whole process
+# group) and reported "TIMED OUT", and the shard goes on. The default sits above the longest single
+# gate measured (gate_coverage, ~3 h in CI); a gate with a measured short run gets its own cap.
+# PE_GATE_CAP_S overrides every cap in SECONDS -- for proving the cap fires, never for a real run.
+gate_cap_min() {
+  case "$1" in
+    model/gate_macro_inputs.py) echo 20 ;;   # 52 s locally (11-26 triage); hung 260 min in CI
+    *) echo 240 ;;
+  esac
+}
 TOKLOG="$(mktemp)"
 for g in "${GATES[@]}"; do
   # ⛔ A MISSING PREREQUISITE IS A FAILURE, NOT A SKIP, and it is named as
@@ -1347,13 +1360,18 @@ for g in "${GATES[@]}"; do
   # and the gate is judged on them below (test/sim_run.py, MONITOR_MUST_FIRE)
   export SIM_RUN_SCOPE="gate$$-$(basename "$g" .py)-$RANDOM"
   export SIM_RUN_RUNNER="$g"      # the gate: its must-fire entries, and STALE ones
-  "$PY" "$g" > "$TOKLOG" 2>&1
+  cap_s=$(( $(gate_cap_min "$g") * 60 ))
+  [ -n "${PE_GATE_CAP_S:-}" ] && cap_s="$PE_GATE_CAP_S"
+  timeout --kill-after=60 "$cap_s" "$PY" "$g" > "$TOKLOG" 2>&1
   rc=$?
   cat "$TOKLOG"
   "$PY" test/sim_run.py verdict "$SIM_RUN_SCOPE"
   mrc=$?
   unset SIM_RUN_SCOPE SIM_RUN_RUNNER
-  if [ $rc -eq 0 ] && [ $mrc -ne 0 ]; then
+  if [ $rc -eq 124 ] || [ $rc -eq 137 ]; then
+    echo "  *** $g TIMED OUT at its ${cap_s}-s cap (killed, rc $rc)"
+    FAILED+=("$g (TIMED OUT at its ${cap_s}-s cap)")
+  elif [ $rc -eq 0 ] && [ $mrc -ne 0 ]; then
     FAILED+=("$g (an undeclared monitor FAIL in its simulations)")
   elif [ $rc -ne 0 ]; then
     FAILED+=("$g (exit $rc)")
