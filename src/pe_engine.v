@@ -2394,7 +2394,7 @@ module pe_engine #(
 `ifdef M_CRC_ALWAYS_OK
   wire usb_crc_ok = 1'b1;                    // the mutant: every packet passes
 `else
-  wire usb_crc_ok = ~|(usb_crc ^ USB_CRC_RESIDUAL);
+  wire usb_crc_ok = (usb_crc == USB_CRC_RESIDUAL);
 `endif
   wire usb_act   = st_act & cur_cls[C_USB] & (cur == USB_LANE[LW-1:0]);
   wire usb_wrong = st_act & cur_cls[C_USB] & (cur != USB_LANE[LW-1:0]);
@@ -3107,8 +3107,7 @@ module pe_engine #(
     .cfg_we(sg_cfg_we), .cfg_idx(sg_cfg_idx), .cfg_data(sg_cfg_data),
     .ld(sg_ld), .ld_byte(sg_byte), .ld_nbits_m1(sg_nb), .msb(l_order[sg_own]),
     .pa(sg_pa_g), .pb(sg_pb_g), .busy(sg_busy_g), .ovr(sg_ovr_g));
-  assign {sg_pa, sg_pb, sg_busy, sg_ovr} = (EN_SYMGEN != 0) ? {sg_pa_g, sg_pb_g, sg_busy_g, sg_ovr_g}
-                                                          : 4'b0000;
+  assign {sg_pa, sg_pb, sg_busy, sg_ovr} = {4{EN_SYMGEN != 0}} & {sg_pa_g, sg_pb_g, sg_busy_g, sg_ovr_g};
   // (`winner_q` / `winner_v_q`, TF3's registered winner, are declared ahead,
   // before the block that writes them)
   reg                   pslot;        // which slot this refill is filling
