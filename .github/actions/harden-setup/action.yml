@@ -58,6 +58,11 @@ runs:
         import json, os, re, sys
         p = "src/config.json"; c = json.load(open(p)); c["PL_WIRE_LENGTH_COEF"] = float(os.environ["IN_COEF"])
         print("PL_WIRE_LENGTH_COEF", c["PL_WIRE_LENGTH_COEF"])
+        # ⭐ OPENROAD_THREADS PINNED (Wilson 11-26): placement's results can depend on the thread count, and
+        # box 2 (the 67 % line's calibration runs) used 3; unset, a GitHub runner uses all 4. One value for
+        # every run, so the line, the controls and sign-off share one flow. A variant may still override it.
+        c["OPENROAD_THREADS"] = 3
+        print("OPENROAD_THREADS", c["OPENROAD_THREADS"], "(pinned)")
         # a variant's config overrides (Wilson 11-25 step 1): printed, so the run log names what ran
         over = json.loads(os.environ.get("IN_CFG") or "{}")
         if not isinstance(over, dict):

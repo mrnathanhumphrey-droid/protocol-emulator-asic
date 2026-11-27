@@ -74,6 +74,19 @@ jobs:
         run: |
           bash "$GITHUB_WORKSPACE/ci/harden/stage.sh" J1 runs/j1 j1.log -- \
             $LL --run-tag j1 --force-run-dir runs/j1 --to OpenROAD.STAMidPNR-2 src/config_merged.json
+      # ⛔ A CANCELLED OR FAILED STAGE KEEPS ITS EVIDENCE (11-26: V0's J2 timed out and its log and
+      # run dir were lost -- the normal uploads run on success only)
+      - name: J1 partial (failure or cancel)
+        if: cancelled() || failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: partial-j1
+          retention-days: 3
+          compression-level: 6
+          if-no-files-found: warn
+          path: |
+            ${{ env.WD }}/j1.log
+            ${{ env.WD }}/runs/j1
       - name: J1 gate
         if: success() || failure()
         working-directory: ${{ env.WD }}
@@ -88,7 +101,7 @@ jobs:
     name: J2 global route (congestion gate)
     needs: j1
     runs-on: ubuntu-24.04
-    timeout-minutes: 90
+    timeout-minutes: 240   # 90 cut V0's J2 mid-flow (run 45759683241, 11-26)
     steps:
       - uses: actions/checkout@v6
         with: {ref: "${{ inputs.sha }}", submodules: recursive}
@@ -102,7 +115,20 @@ jobs:
           S=$(python "$GITHUB_WORKSPACE/ci/harden/metrics.py" last-state runs/j1)
           bash "$GITHUB_WORKSPACE/ci/harden/stage.sh" J2 runs/j2 j2.log -- \
             $LL --run-tag j2 --force-run-dir runs/j2 --with-initial-state "$S" \
-                --from OpenROAD.GlobalRouting --to OpenROAD.STAMidPNR-3 src/config_merged.json
+                --from OpenROAD.GlobalRouting --to ${{ inputs.stop_after == 'j2' && 'OpenROAD.GlobalRouting' || 'OpenROAD.STAMidPNR-3' }} src/config_merged.json
+      # ⛔ A CANCELLED OR FAILED STAGE KEEPS ITS EVIDENCE (11-26: V0's J2 timed out and its log and
+      # run dir were lost -- the normal uploads run on success only)
+      - name: J2 partial (failure or cancel)
+        if: cancelled() || failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: partial-j2
+          retention-days: 3
+          compression-level: 6
+          if-no-files-found: warn
+          path: |
+            ${{ env.WD }}/j2.log
+            ${{ env.WD }}/runs/j2
       - name: J2 congestion gate
         if: success() || failure()
         working-directory: ${{ env.WD }}
@@ -143,6 +169,19 @@ jobs:
           bash "$GITHUB_WORKSPACE/ci/harden/stage.sh" J3 runs/j3 j3.log -- \
             $LL --run-tag j3 --force-run-dir runs/j3 --with-initial-state "$S" -c ROUTING_CORES=$(nproc) -c DRT_SAVE_DRC_REPORT_ITERS=1 \
                 --from OpenROAD.DetailedRouting --to Checker.WireLength src/config_merged.json
+      # ⛔ A CANCELLED OR FAILED STAGE KEEPS ITS EVIDENCE (11-26: V0's J2 timed out and its log and
+      # run dir were lost -- the normal uploads run on success only)
+      - name: J3 partial (failure or cancel)
+        if: cancelled() || failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: partial-j3
+          retention-days: 3
+          compression-level: 6
+          if-no-files-found: warn
+          path: |
+            ${{ env.WD }}/j3.log
+            ${{ env.WD }}/runs/j3
       - name: J3 gate
         if: success() || failure()
         working-directory: ${{ env.WD }}
@@ -176,6 +215,19 @@ jobs:
           bash "$GITHUB_WORKSPACE/ci/harden/stage.sh" J4 runs/wokwi j4.log -- \
             $LL --run-tag wokwi --force-run-dir runs/wokwi --with-initial-state "$S" \
                 --from OpenROAD.FillInsertion src/config_merged.json
+      # ⛔ A CANCELLED OR FAILED STAGE KEEPS ITS EVIDENCE (11-26: V0's J2 timed out and its log and
+      # run dir were lost -- the normal uploads run on success only)
+      - name: J4 partial (failure or cancel)
+        if: cancelled() || failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: partial-j4
+          retention-days: 3
+          compression-level: 6
+          if-no-files-found: warn
+          path: |
+            ${{ env.WD }}/j4.log
+            ${{ env.WD }}/runs/wokwi
       - name: J4 gate
         if: success() || failure()
         working-directory: ${{ env.WD }}
@@ -252,6 +304,13 @@ jobs:
     continue-on-error: true
     steps:
       - run: echo "sleeping past timeout-minutes 1"; sleep 300
+      # proves the stage jobs' `cancelled()` uploads run after a timeout kill (11-26)
+      - name: upload after the timeout kill
+        if: cancelled()
+        run: echo "cancelled() step ran after the timeout kill" > cancel_proof.txt
+      - if: cancelled()
+        uses: actions/upload-artifact@v7
+        with: {name: kill-timeout-cancel-proof, path: cancel_proof.txt, retention-days: 3}
 
   kill_watchdog:
     name: smoke - silent-log watchdog kills a stage
