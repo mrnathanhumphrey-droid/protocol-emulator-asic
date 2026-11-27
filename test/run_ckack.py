@@ -109,7 +109,7 @@ def commanded_rise_subs():
     # mode; the old one-line assign survives only under M_CKRX_PP_OBSERVED,
     # where this landmark matched once and changed nothing -- see
     # `toolchain.scratch_sub`)
-    return [("                          : (ckp_real & pin_rise[l_clkpin[gi]]));",
+    return [("                          : (ckp_real & lp_rise[l_clkpin[gi]]));",
              "                          : (ckp_real));  "
              "// S_CK_COMMANDED_RISE")]
 

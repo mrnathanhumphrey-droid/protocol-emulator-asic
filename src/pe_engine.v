@@ -546,6 +546,11 @@ module pe_engine #(
     // FALL, I2C on the SCL RISE.
     input  wire [N_PINS-1:0]    pin_rise,
     input  wire [N_PINS-1:0]    pin_fall,
+    // a1 (Wilson 11-26): each lane's OWN copy of the sync stage, lane gi at [gi*N_PINS +: N_PINS]
+    // (lane 0's slice is the shared stage itself); read only by that lane's g_arm detectors
+    input  wire [N_LANES*N_PINS-1:0] pin_in_l,
+    input  wire [N_LANES*N_PINS-1:0] pin_rise_l,
+    input  wire [N_LANES*N_PINS-1:0] pin_fall_l,
 
     // host data channel (F1): payload enters here, never through the program
     input  wire [7:0]           host_data,
@@ -1564,6 +1569,9 @@ module pe_engine #(
   endgenerate
   generate
     for (gi = 0; gi < N_LANES; gi = gi + 1) begin : g_arm
+      // a1: this lane's copy of the synced pins (same values as pin_in / pin_rise / pin_fall)
+      wire [N_PINS-1:0] lp_in = pin_in_l[gi*N_PINS +: N_PINS], lp_rise = pin_rise_l[gi*N_PINS +: N_PINS],
+                        lp_fall = pin_fall_l[gi*N_PINS +: N_PINS];
       // ⛔⛔⛔ RANGE-GUARDED, AND THIS WAS A LIVE THIRD INSTANCE OF THE CLASS.
       // `l_armpin` is `[PINW-1:0]` -- 4 bits, 0..15 -- and `pin_rise`/
       // `pin_fall` are `[N_PINS-1:0]` = [11:0], so an ARM naming 12..15 reads
@@ -1608,14 +1616,14 @@ module pe_engine #(
       wire arm2_pol = l_armedge[gi];
 `endif
 `ifdef M_ARM2_EDGE
-      wire arm2_a = arm2_real ? (arm2_pol ? pin_rise[l_armpin[gi]] : pin_fall[l_armpin[gi]]) : 1'b0;  // an edge: misses a present SE0
+      wire arm2_a = arm2_real ? (arm2_pol ? lp_rise[l_armpin[gi]] : lp_fall[l_armpin[gi]]) : 1'b0;  // an edge: misses a present SE0
 `else
-      wire arm2_a = arm2_real ? (pin_in[l_armpin[gi]] == arm2_pol) : 1'b0;
+      wire arm2_a = arm2_real ? (lp_in[l_armpin[gi]] == arm2_pol) : 1'b0;
 `endif
 `ifdef M_ARM2_ONEPIN
       wire arm2_b = 1'b1;                   // the mutant: pinb ignored
 `else
-      wire arm2_b = arm2_real ? (pin_in[l_armpinb[gi]] == arm2_pol) : 1'b0;
+      wire arm2_b = arm2_real ? (lp_in[l_armpinb[gi]] == arm2_pol) : 1'b0;
 `endif
 `ifdef M_QUAL_IGNORED
       wire arm_q_ok = 1'b1;                 // the mutant: the SE0 qualifier ignored
@@ -1632,8 +1640,8 @@ module pe_engine #(
 `endif
       assign arm_hit[gi] = arm_on &
                            (l_arm2[gi] ? (arm2_a & arm2_b)
-                                       : arm_real ? (l_armedge[gi] ? pin_rise[l_armpin[gi]]
-                                                                   : pin_fall[l_armpin[gi]]) & arm_q_ok
+                                       : arm_real ? (l_armedge[gi] ? lp_rise[l_armpin[gi]]
+                                                                   : lp_fall[l_armpin[gi]]) & arm_q_ok
                                                   : 1'b0);
 
       // ⭐⭐ THE CLOCKED SHIFTIN'S SAMPLE, TAKEN ON THE OBSERVED CLOCK RISE.
@@ -1671,11 +1679,11 @@ module pe_engine #(
       // clock fires from the capture slot, at the engine's own rise.
       // `M_CKRX_PP_OBSERVED` restores the observed rise for both.
 `ifdef M_CKRX_PP_OBSERVED
-      assign ck_hit[gi] = l_ckwait[gi] & ckp_real & pin_rise[l_clkpin[gi]];
+      assign ck_hit[gi] = l_ckwait[gi] & ckp_real & lp_rise[l_clkpin[gi]];
 `else
       assign ck_hit[gi] = l_ckwait[gi] & (l_mode[gi]
                           ? (ppc_v & (ppc_l == gi) & (ppc_n == 2'd0))
-                          : (ckp_real & pin_rise[l_clkpin[gi]]));
+                          : (ckp_real & lp_rise[l_clkpin[gi]]));
 `endif
       assign ck_parked[gi] = l_ckpark[gi];
       // ⛔ THE SAMPLED PIN IS GUARDED SEPARATELY from the clock pin: a lane
@@ -1683,7 +1691,7 @@ module pe_engine #(
       // `pin_in[15]` would put X into the accumulator and from there into the
       // serial readback -- the defect `pinnone_image.hex` exists to catch on
       // the unclocked path, guarded here at birth instead.
-      assign ck_bit[gi] = ckd_real ? pin_in[ck_rpin] : 1'b0;
+      assign ck_bit[gi] = ckd_real ? lp_in[ck_rpin] : 1'b0;
       // the delay field of the action this lane is currently clocking
       assign ck_dly[gi] = l_act[hix[gi]][LOWX+BQW+BPW +: DLY_W];
       // ⭐ CE1: the parked lane's HIGH length after the observed rise --

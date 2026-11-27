@@ -335,6 +335,38 @@ module tt_um_protocol_emulator #(
   wire [N_PINS-1:0] pin_rise = {{(N_PINS-8){1'b0}}, uio_rise};
   wire [N_PINS-1:0] pin_fall = {{(N_PINS-8){1'b0}}, uio_fall};
 
+  // ⭐ a1 (Wilson 11-26): A COPY OF THE SYNC STAGE PER LANE. The 8 q1 flops above fan out to every
+  // lane's ARM / clock / sample detectors -- a 45k um^2 cone piled on the pin corner. Lanes 1..4 each
+  // get their own q1 / q2 pair (pe_dup_ff), loaded exactly as the shared one (same uio_q0, same reset),
+  // so every copy equals uio_q1 / uio_q2 on every cycle: NO added cycle, no change in what any lane
+  // sees. Lane 0 (the USB lane, beside the shared readers) keeps the shared stage. Only g_arm reads
+  // the copies; rx / DRIVE_SAMPLE / USB stay on pin_in. Each copy bit is a pe_dup_ff: `keep` on a reg
+  // does NOT stop opt_merge folding identical flops (measured 10-27, and again 11-26 for a1: the
+  // first build's 64 kept regs synthesized back to the shared 8+8).
+  wire [7:0] uio_q1_l [1:N_LANES-1];
+  wire [7:0] uio_q2_l [1:N_LANES-1];
+  genvar lq, lb;
+  generate
+    for (lq = 1; lq < N_LANES; lq = lq + 1) begin : g_q1l
+      for (lb = 0; lb < 8; lb = lb + 1) begin : g_b
+        pe_dup_ff u_q1 (.clk(clk), .rst_n(rst_n), .d(uio_q0[lb]),       .q(uio_q1_l[lq][lb]));
+        pe_dup_ff u_q2 (.clk(clk), .rst_n(rst_n), .d(uio_q1_l[lq][lb]), .q(uio_q2_l[lq][lb]));
+      end
+    end
+  endgenerate
+  wire [N_LANES*N_PINS-1:0] pin_in_l, pin_rise_l, pin_fall_l;
+  assign pin_in_l  [0 +: N_PINS] = pin_in;
+  assign pin_rise_l[0 +: N_PINS] = pin_rise;
+  assign pin_fall_l[0 +: N_PINS] = pin_fall;
+  genvar lg;
+  generate
+    for (lg = 1; lg < N_LANES; lg = lg + 1) begin : g_pinl
+      assign pin_in_l  [lg*N_PINS +: N_PINS] = {{(N_PINS-8){1'b0}}, uio_q1_l[lg]};
+      assign pin_rise_l[lg*N_PINS +: N_PINS] = {{(N_PINS-8){1'b0}}, uio_q1_l[lg] & ~uio_q2_l[lg]};
+      assign pin_fall_l[lg*N_PINS +: N_PINS] = {{(N_PINS-8){1'b0}}, ~uio_q1_l[lg] & uio_q2_l[lg]};
+    end
+  endgenerate
+
   // =====================================================================
   // PROGRAM LOADER -- the address bus is deleted by AUTO-INCREMENT, and the
   // byte port is `uio` reused, because loading and running are mutually
@@ -1025,6 +1057,7 @@ module tt_um_protocol_emulator #(
       .pin_isck(e_pin_isck),
       .pin_in(pin_in),
       .pin_rise(pin_rise), .pin_fall(pin_fall),
+      .pin_in_l(pin_in_l), .pin_rise_l(pin_rise_l), .pin_fall_l(pin_fall_l),
       .host_data(tx_head), .host_valid(tx_valid), .host_pop(e_host_pop),
         .host_lane(e_host_lane), .host_q(e_host_q),
       .lane_underrun(e_under), .lane_overflow(e_ovf), .sticky_ovr(e_ovr),

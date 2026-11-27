@@ -139,7 +139,10 @@ CLASSIFIED = {
         "clk_real",
         "The clock pin's drive class, read inside the clock write to mask an "
         "open-drain 1. Guarded by `clk_real` with the write it feeds."),
-    ("src/pe_engine.v", "pin_rise", "l_armpin[*]"): (
+    # a1 (11-26): g_arm's reads moved to the lane's own copy of the synced pins (lp_in / lp_rise /
+    # lp_fall = pin_in_l / pin_rise_l / pin_fall_l[gi*N_PINS +: N_PINS], the same [N_PINS-1:0] width),
+    # so the guards and reasons below are unchanged; only the array names moved.
+    ("src/pe_engine.v", "lp_rise", "l_armpin[*]"): (
         "arm_real",
         "THE EDGE SELECT -- the third instance, and the one this gate's sweep "
         "found. `l_armpin[cur] <= a_pin` is written straight from the action's "
@@ -151,13 +154,13 @@ CLASSIFIED = {
         "at a flop's input surviving on which terms happen to mask it is not a "
         "property to rely on. Priced by `M_UNGUARDED_ARMPIN`: 0 X guarded, "
         "198 without."),
-    ("src/pe_engine.v", "pin_fall", "l_armpin[*]"): (
+    ("src/pe_engine.v", "lp_fall", "l_armpin[*]"): (
         "arm_real",
         "The falling-edge half of the same select, in the same conditional "
         "expression and under the same guard. Both arms of the `?:` index the "
         "same program field, so guarding one would leave the other open -- "
         "which is the asymmetry that made D2 a defect."),
-    ("src/pe_engine.v", "pin_in", "l_armpin[*]"): (
+    ("src/pe_engine.v", "lp_in", "l_armpin[*]"): (
         "arm2_real",
         "THE FIFTH INSTANCE (v2 primitive 3 bundle 1, Wilson 11-08): the two-pin "
         "LEVEL ARM reads `pin_in` at the ARM's pin. `pin_in` is [11:0] and ties "
@@ -165,7 +168,7 @@ CLASSIFIED = {
         "BOTH pins must be uio inputs (< N_UIO), or a both-low ARM on a uo pin "
         "would fire at once -- the unsafe direction. Priced by "
         "`M_ARM2_UNGUARDED` (run_arm2's uo_guard scenario fires)."),
-    ("src/pe_engine.v", "pin_in", "l_armpinb[*]"): (
+    ("src/pe_engine.v", "lp_in", "l_armpinb[*]"): (
         "arm2_real",
         "The second pin of the same two-pin ARM, `pinb` straight from the "
         "action word; the same `< N_UIO` guard covers both reads."),
@@ -186,7 +189,7 @@ CLASSIFIED = {
         "pin (>= 8), because only those are re-registered in the top and so "
         "keep F2; a uio or reserved clock index skips rather than refuses, "
         "and pe_asm and the image audit refuse it upstream."),
-    ("src/pe_engine.v", "pin_rise", "l_clkpin[*]"): (
+    ("src/pe_engine.v", "lp_rise", "l_clkpin[*]"): (
         "< N_PINS",
         "THE FOURTH INSTANCE OF THE CLASS, arriving with the self-clocked "
         "SHIFTIN. `ck_hit` watches the lane's CLOCK pin for the rise that says "
@@ -197,7 +200,7 @@ CLASSIFIED = {
         "`< N_PINS` on `ckp_real`, and `ck_hit = 0` is the RIGHT meaning rather "
         "than merely the safe one: a self-clocked shift is impossible without a "
         "real clock pin, so this capture can never legitimately fire on one."),
-    ("src/pe_engine.v", "pin_in", "ck_rpin"): (
+    ("src/pe_engine.v", "lp_in", "ck_rpin"): (
         "< N_PINS",
         "THE SAMPLED DATA PIN -- the ACTION's pin since silicon fix #3a (it "
         "was the header's `l_pin`), guarded by `ckd_real`, SEPARATELY from the clock pin above, and "
