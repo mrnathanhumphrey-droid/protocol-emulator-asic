@@ -273,6 +273,15 @@
 `define PE_RST_REAN   rean_q <= 1'b0; rean_tq <= {TS_W{1'b0}};
 // v2 primitive 3 bundle 6: the bus-reset SE0 counter and its pulse
 `define PE_RST_USBRST usb_se0c <= 8'd0; usb_brst <= 1'b0;
+// 11-26 (gate_halt_reset, CI run 45752936005): the two reset branches that still assigned directly --
+// K8's sim-only flush monitor and the symbol generator -- reset through the list like every other block.
+// Text only: each macro expands to exactly the assignments it replaces (netlist unchanged).
+`define PE_RST_K8     k8_f1 <= {N_LANES{1'b0}}; k8_f2 <= {N_LANES{1'b0}};
+`define PE_RST_SYMGEN \
+      k_m1 <= 2'd0; idle_a <= 1'b0; idle_b <= 1'b0; lat <= 8'd1; \
+      lens <= {4{6'd1}}; code_a <= 12'd0; code_b <= 12'd0; nb_q <= 3'd7; \
+      pa <= 1'b0; pb <= 1'b0; running <= 1'b0; waiting <= 1'b0; wcnt <= 8'd0; \
+      hv <= 1'b0; hb <= 8'd0; sr <= 8'd0; bit_i <= 3'd0; slot <= 2'd0; cnt <= 6'd0;
 `define PE_RST_PORT \
       s_re      <= 1'b0; \
       s_raddr   <= {AW{1'b0}}; \
@@ -2069,8 +2078,7 @@ module pe_engine #(
   integer k8_i;
   always @(posedge clk or negedge rst_n)
     if (!rst_n) begin
-      k8_f1 <= {N_LANES{1'b0}};
-      k8_f2 <= {N_LANES{1'b0}};
+      `PE_RST_K8
     end else begin
       for (k8_i = 0; k8_i < N_LANES; k8_i = k8_i + 1)
         if (flush_ev[k8_i] && (k8_f1[k8_i] || k8_f2[k8_i]))
@@ -5765,10 +5773,7 @@ module pe_symgen (
 
   always @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
-      k_m1 <= 2'd0; idle_a <= 1'b0; idle_b <= 1'b0; lat <= 8'd1;
-      lens <= {4{6'd1}}; code_a <= 12'd0; code_b <= 12'd0; nb_q <= 3'd7;
-      pa <= 1'b0; pb <= 1'b0; running <= 1'b0; waiting <= 1'b0; wcnt <= 8'd0;
-      hv <= 1'b0; hb <= 8'd0; sr <= 8'd0; bit_i <= 3'd0; slot <= 2'd0; cnt <= 6'd0;
+      `PE_RST_SYMGEN
     end else begin
       if (cfg_we) case (cfg_idx)
         2'd0: begin k_m1 <= cfg_data[1:0]; idle_a <= cfg_data[2]; idle_b <= cfg_data[3];
