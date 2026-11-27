@@ -1716,7 +1716,7 @@ module pe_engine #(
   genvar gf;
   generate
     for (gf = 0; gf < N_FLAGS; gf = gf + 1) begin : g_flav
-      assign fl_av[gf] = |(fl_post[gf] ^ fl_cons[gf]);
+      assign fl_av[gf] = (fl_post[gf] != fl_cons[gf]);
     end
   endgenerate
 `ifndef SYNTHESIS
@@ -2240,7 +2240,7 @@ module pe_engine #(
   // around after the EOP). `mod = 11` on LEVEL ONLY drives BOTH LOW: SE0, the
   // one deliberate both-same state; on SHIFT / SHIFTI `mod[1]` is the
   // self-timed byte, never SE0. `pinb` is program-controlled: guarded.
-  wire pinb_real = (a_pinb < N_PINS[PINB_W-1:0]);
+  wire pinb_real = ~(a_pinb >= N_PINS[PINB_W-1:0]);
 `ifdef M_PAIR_COPY
   wire pair_inv = 1'b0;           // the mutant: pinb a plain COPY of the data pin
 `else
